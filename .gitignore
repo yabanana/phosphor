@@ -1,0 +1,30 @@
+build/
+*.spv
+*.o
+*.d
+.cache/
+compile_commands.json
+phosphor_pipeline_cache.bin
+CMakeUserPresets.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# Assets (download separately)
+assets/*.glb
+assets/*.gltf
+assets/*.hdr
+!assets/README.md
+!assets/environments/.gitkeep
+
+# Third-party SDKs
+third_party/aftermath/lib/
+third_party/aftermath/include/
+!third_party/aftermath/README.md
+
+# OS
+.DS_Store
+Thumbs.db

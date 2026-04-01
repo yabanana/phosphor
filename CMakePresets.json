@@ -1,0 +1,51 @@
+{
+    "version": 6,
+    "configurePresets": [
+        {
+            "name": "debug",
+            "displayName": "Debug",
+            "binaryDir": "${sourceDir}/build/debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "PHOSPHOR_ENABLE_VALIDATION": "ON",
+                "PHOSPHOR_ENABLE_TRACY": "OFF"
+            }
+        },
+        {
+            "name": "release",
+            "displayName": "Release",
+            "binaryDir": "${sourceDir}/build/release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "PHOSPHOR_ENABLE_VALIDATION": "OFF",
+                "PHOSPHOR_ENABLE_TRACY": "OFF"
+            }
+        },
+        {
+            "name": "profile",
+            "displayName": "Profile (RelWithDebInfo + Tracy)",
+            "binaryDir": "${sourceDir}/build/profile",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "PHOSPHOR_ENABLE_VALIDATION": "OFF",
+                "PHOSPHOR_ENABLE_TRACY": "ON"
+            }
+        },
+        {
+            "name": "sanitize",
+            "displayName": "Debug + AddressSanitizer + UBSan",
+            "binaryDir": "${sourceDir}/build/sanitize",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "PHOSPHOR_ENABLE_VALIDATION": "ON",
+                "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer"
+            }
+        }
+    ],
+    "buildPresets": [
+        { "name": "debug",    "configurePreset": "debug" },
+        { "name": "release",  "configurePreset": "release" },
+        { "name": "profile",  "configurePreset": "profile" },
+        { "name": "sanitize", "configurePreset": "sanitize" }
+    ]
+}
