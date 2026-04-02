@@ -256,7 +256,10 @@ void TonemapPass::apply(VkCommandBuffer cmd, VkImageView hdrInput, float exposur
     }
 
     // --- Update descriptors ---
-    updateDescriptorSet(hdrInput);
+    if (!descriptorsWritten_) {
+        updateDescriptorSet(hdrInput);
+        descriptorsWritten_ = true;
+    }
 
     // --- Bind pipeline and descriptors ---
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);

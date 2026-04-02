@@ -58,6 +58,7 @@ private:
     VkPipelineLayout      passPlLayout_ = VK_NULL_HANDLE;
 
     bool initialized_ = false;
+    bool descriptorsWritten_ = false;
 };
 
 } // namespace phosphor

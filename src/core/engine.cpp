@@ -372,7 +372,10 @@ void Engine::render() {
     }
 
     // 2. Wait for this frame's GPU work + begin command buffer
-    sync_->waitForFrame(currentFrame_);
+    if (!sync_->waitForFrame(currentFrame_)) {
+        running_ = false; // device lost — stop gracefully
+        return;
+    }
     commands_->resetPools(currentFrame_);
 
     VkCommandBuffer cmd = commands_->getCommandBuffer(currentFrame_);

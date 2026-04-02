@@ -62,6 +62,7 @@ private:
     VkDescriptorPool        passPool_        = VK_NULL_HANDLE;
     VkDescriptorSet         passSet_         = VK_NULL_HANDLE;
     VkPipelineLayout        passPlLayout_    = VK_NULL_HANDLE;
+    bool                    descriptorsWritten_ = false;
 
     bool initialized_ = false;
 };

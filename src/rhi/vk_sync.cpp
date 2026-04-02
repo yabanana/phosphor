@@ -55,17 +55,18 @@ SyncManager::~SyncManager() {
     }
 }
 
-void SyncManager::waitForFrame(u32 frameIndex) {
+bool SyncManager::waitForFrame(u32 frameIndex) {
     VkDevice dev = device_.getDevice();
     VkFence  fence = frameSyncs_[frameIndex].inFlight;
 
     VkResult r = vkWaitForFences(dev, 1, &fence, VK_TRUE, UINT64_MAX);
     if (r == VK_ERROR_DEVICE_LOST) {
         LOG_WARN("Device lost during fence wait (likely shutdown)");
-        return;
+        return false;
     }
     VK_CHECK(r);
     VK_CHECK(vkResetFences(dev, 1, &fence));
+    return true;
 }
 
 FrameSync& SyncManager::getFrameSync(u32 frameIndex) {

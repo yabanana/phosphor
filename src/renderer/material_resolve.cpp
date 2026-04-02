@@ -308,8 +308,11 @@ void MaterialResolve::resolve(VkCommandBuffer cmd, const VisibilityBuffer& visBu
         vkCmdPipelineBarrier2(cmd, &dep);
     }
 
-    // --- Update per-pass descriptors ---
-    updateDescriptorSet(visBuf);
+    // --- Update per-pass descriptors (only once, on first call or after resize) ---
+    if (!descriptorsWritten_) {
+        updateDescriptorSet(visBuf);
+        descriptorsWritten_ = true;
+    }
 
     // --- Bind pipeline and descriptor sets ---
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, resolvePipeline_);

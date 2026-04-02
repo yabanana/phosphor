@@ -26,7 +26,7 @@ public:
     SyncManager(SyncManager&&)                 = delete;
     SyncManager& operator=(SyncManager&&)      = delete;
 
-    void       waitForFrame(u32 frameIndex);
+    bool       waitForFrame(u32 frameIndex); // returns false on device lost
     FrameSync& getFrameSync(u32 frameIndex);
     void       advanceTimeline(u32 frameIndex);
 
