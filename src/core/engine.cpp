@@ -3,6 +3,11 @@
 #include "core/window.h"
 #include "core/input.h"
 #include "core/timer.h"
+#include <csignal>
+#include <atomic>
+
+namespace { std::atomic<bool> g_signalQuit{false}; }
+static void signalHandler(int) { g_signalQuit.store(true, std::memory_order_relaxed); }
 
 #include "rhi/vk_device.h"
 #include "rhi/vk_allocator.h"
@@ -94,7 +99,7 @@ void Engine::initSystems() {
     visBuffer_       = std::make_unique<VisibilityBuffer>(*device_, *allocator_, extent);
     meshPass_        = std::make_unique<MeshPass>(*device_, *pipelines_, *descriptors_);
     materialResolve_ = std::make_unique<MaterialResolve>(*device_, *allocator_, *pipelines_, *descriptors_, extent);
-    tonemapPass_     = std::make_unique<TonemapPass>(*device_, *allocator_, *pipelines_, extent);
+    tonemapPass_     = std::make_unique<TonemapPass>(*device_, *allocator_, *pipelines_, *descriptors_, extent);
     compositePass_   = std::make_unique<CompositePass>(*device_, *pipelines_);
 
     // ---- Diagnostics ----
@@ -161,9 +166,11 @@ void Engine::shutdownSystems() {
 // ---------------------------------------------------------------------------
 
 void Engine::run() {
+    std::signal(SIGTERM, signalHandler);
+    std::signal(SIGINT, signalHandler);
     LOG_INFO("Entering main loop.");
 
-    while (running_ && !window_->shouldClose()) {
+    while (running_ && !window_->shouldClose() && !g_signalQuit.load(std::memory_order_relaxed)) {
         window_->pollEvents();
         timer_->tick();
 
@@ -404,25 +411,7 @@ void Engine::render() {
         profiler_->endPass(cmd, "Tonemap");
     }
 
-    // 7. Transition swapchain image to COLOR_ATTACHMENT_OPTIMAL for ImGui + composite
-    {
-        VkImageMemoryBarrier2 toRender{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
-        toRender.srcStageMask  = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
-        toRender.srcAccessMask = 0;
-        toRender.dstStageMask  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-        toRender.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-        toRender.oldLayout     = VK_IMAGE_LAYOUT_UNDEFINED;
-        toRender.newLayout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        toRender.image         = swapchain_->getImage(imageIndex);
-        toRender.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-        VkDependencyInfo dep{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
-        dep.imageMemoryBarrierCount = 1;
-        dep.pImageMemoryBarriers    = &toRender;
-        vkCmdPipelineBarrier2(cmd, &dep);
-    }
-
-    // 8. Record composite (LDR -> swapchain)
+    // 7. Record composite (LDR -> swapchain, handles its own barriers)
     {
         profiler_->beginPass(cmd, "Composite");
         compositePass_->record(cmd,
@@ -433,26 +422,7 @@ void Engine::render() {
         profiler_->endPass(cmd, "Composite");
     }
 
-    // 9. Transition swapchain back to COLOR_ATTACHMENT_OPTIMAL for ImGui
-    //    (composite may have left it in TRANSFER_DST; ensure it is writable)
-    {
-        VkImageMemoryBarrier2 toAttach{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
-        toAttach.srcStageMask  = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-        toAttach.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-        toAttach.dstStageMask  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-        toAttach.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-        toAttach.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        toAttach.newLayout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        toAttach.image         = swapchain_->getImage(imageIndex);
-        toAttach.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-        VkDependencyInfo dep{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
-        dep.imageMemoryBarrierCount = 1;
-        dep.pImageMemoryBarriers    = &toAttach;
-        vkCmdPipelineBarrier2(cmd, &dep);
-    }
-
-    // 10. ImGui pass
+    // 8. ImGui pass (swapchain is in COLOR_ATTACHMENT_OPTIMAL from composite)
     {
         profiler_->beginPass(cmd, "ImGui");
         imgui_->newFrame();

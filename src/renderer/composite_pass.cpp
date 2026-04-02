@@ -46,7 +46,7 @@ void CompositePass::record(VkCommandBuffer cmd,
         barriers[1].srcAccessMask = 0;
         barriers[1].dstStageMask  = VK_PIPELINE_STAGE_2_BLIT_BIT;
         barriers[1].dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-        barriers[1].oldLayout     = VK_IMAGE_LAYOUT_UNDEFINED;
+        barriers[1].oldLayout     = VK_IMAGE_LAYOUT_UNDEFINED; // discard previous content — valid per spec
         barriers[1].newLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         barriers[1].image         = swapchainImage;
         barriers[1].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
@@ -96,7 +96,7 @@ void CompositePass::record(VkCommandBuffer cmd,
         barrier.dstStageMask  = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
         barrier.dstAccessMask = 0;
         barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        barrier.newLayout     = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        barrier.newLayout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // ready for ImGui
         barrier.image         = swapchainImage;
         barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 

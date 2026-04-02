@@ -94,8 +94,12 @@ void CommandManager::immediateSubmit(std::function<void(VkCommandBuffer)> fn) {
     submitInfo.pCommandBuffers    = &cmd;
 
     VkQueue graphicsQueue = device_.getQueues().graphics;
-    VK_CHECK(vkQueueSubmit(graphicsQueue, 1, &submitInfo, immediateFence_));
-    VK_CHECK(vkWaitForFences(dev, 1, &immediateFence_, VK_TRUE, UINT64_MAX));
+    VkResult sr = vkQueueSubmit(graphicsQueue, 1, &submitInfo, immediateFence_);
+    if (sr == VK_ERROR_DEVICE_LOST) { LOG_WARN("Device lost in immediateSubmit (queue submit)"); return; }
+    VK_CHECK(sr);
+    VkResult wr = vkWaitForFences(dev, 1, &immediateFence_, VK_TRUE, UINT64_MAX);
+    if (wr == VK_ERROR_DEVICE_LOST) { LOG_WARN("Device lost in immediateSubmit"); return; }
+    VK_CHECK(wr);
 
     // Reset fence and pool for next immediate submit.
     VK_CHECK(vkResetFences(dev, 1, &immediateFence_));

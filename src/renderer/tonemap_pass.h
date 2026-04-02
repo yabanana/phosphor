@@ -9,6 +9,7 @@ namespace phosphor {
 class VulkanDevice;
 class GpuAllocator;
 class PipelineManager;
+class BindlessDescriptorManager;
 
 // ---------------------------------------------------------------------------
 // TonemapPass — compute pass that applies ACES tonemapping to an HDR
@@ -18,7 +19,8 @@ class PipelineManager;
 class TonemapPass {
 public:
     TonemapPass(VulkanDevice& device, GpuAllocator& allocator,
-                PipelineManager& pipelines, VkExtent2D extent);
+                PipelineManager& pipelines, BindlessDescriptorManager& descriptors,
+                VkExtent2D extent);
     ~TonemapPass();
 
     TonemapPass(const TonemapPass&) = delete;
@@ -43,6 +45,7 @@ private:
     VulkanDevice&   device_;
     GpuAllocator&   allocator_;
     PipelineManager& pipelines_;
+    BindlessDescriptorManager& descriptors_;
     VkExtent2D      extent_;
 
     AllocatedImage ldrImage_{};  // RGBA8_UNORM

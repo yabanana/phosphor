@@ -554,7 +554,10 @@ u32 VulkanDevice::findMemoryType(u32 typeFilter,
 }
 
 void VulkanDevice::waitIdle() const {
-    VK_CHECK(vkDeviceWaitIdle(device_));
+    VkResult r = vkDeviceWaitIdle(device_);
+    if (r != VK_SUCCESS && r != VK_ERROR_DEVICE_LOST) {
+        LOG_ERROR("vkDeviceWaitIdle failed with %d", (int)r);
+    }
 }
 
 } // namespace phosphor

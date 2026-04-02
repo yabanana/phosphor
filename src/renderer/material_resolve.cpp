@@ -111,7 +111,7 @@ void MaterialResolve::ensurePipelineCreated() {
     bindings[0].stageFlags      = VK_SHADER_STAGE_COMPUTE_BIT;
 
     bindings[1].binding         = 1;
-    bindings[1].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[1].descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
     bindings[1].descriptorCount = 1;
     bindings[1].stageFlags      = VK_SHADER_STAGE_COMPUTE_BIT;
 
@@ -128,7 +128,7 @@ void MaterialResolve::ensurePipelineCreated() {
     // --- Descriptor pool ---
     std::array<VkDescriptorPoolSize, 2> poolSizes{};
     poolSizes[0] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2};
-    poolSizes[1] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
+    poolSizes[1] = {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1};
 
     VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     poolInfo.maxSets       = 1;
@@ -230,17 +230,12 @@ void MaterialResolve::updateDescriptorSet(const VisibilityBuffer& visBuf) {
     writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     writes[0].pImageInfo      = &visInfo;
 
-    // binding 1: depth (combined image sampler, nearest)
-    // We need a sampler for depth — create a trivial VK_NULL_HANDLE will not work.
-    // Instead set imageLayout and rely on texelFetch (no sampler needed in shader).
-    // Use COMBINED_IMAGE_SAMPLER with the built-in nearest sampler from bindless set
-    // or pass VK_NULL_HANDLE (the shader will use texelFetch which ignores the sampler).
-    depthInfo.sampler = VK_NULL_HANDLE;  // Shader uses texelFetch, sampler not needed
+    // binding 1: depth (sampled image, shader uses texelFetch — no sampler needed)
     writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[1].dstSet          = passSet_;
     writes[1].dstBinding      = 1;
     writes[1].descriptorCount = 1;
-    writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
     writes[1].pImageInfo      = &depthInfo;
 
     // binding 2: HDR output (storage image)

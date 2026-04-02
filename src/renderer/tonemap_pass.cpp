@@ -1,6 +1,8 @@
 #include "renderer/tonemap_pass.h"
+#include "renderer/push_constants.h"
 #include "rhi/vk_device.h"
 #include "rhi/vk_pipeline.h"
+#include "rhi/vk_descriptors.h"
 #include "diagnostics/debug_utils.h"
 #include "core/log.h"
 
@@ -27,8 +29,9 @@ static_assert(sizeof(TonemapPushConstants) == 16);
 // ---------------------------------------------------------------------------
 
 TonemapPass::TonemapPass(VulkanDevice& device, GpuAllocator& allocator,
-                         PipelineManager& pipelines, VkExtent2D extent)
-    : device_(device), allocator_(allocator), pipelines_(pipelines), extent_(extent) {
+                         PipelineManager& pipelines, BindlessDescriptorManager& descriptors,
+                         VkExtent2D extent)
+    : device_(device), allocator_(allocator), pipelines_(pipelines), descriptors_(descriptors), extent_(extent) {
     createResources();
     LOG_INFO("TonemapPass created (%ux%u)", extent_.width, extent_.height);
 }
@@ -133,15 +136,16 @@ void TonemapPass::ensurePipelineCreated() {
     allocInfo.pSetLayouts        = &passLayout_;
     VK_CHECK(vkAllocateDescriptorSets(dev, &allocInfo, &passSet_));
 
-    // --- Pipeline layout: set 0 = per-pass, push constants ---
+    // --- Pipeline layout: set 0 = bindless global, set 1 = per-pass, 128-byte push constants ---
     VkPushConstantRange pushRange{};
-    pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    pushRange.stageFlags = VK_SHADER_STAGE_ALL;
     pushRange.offset     = 0;
-    pushRange.size       = sizeof(TonemapPushConstants);
+    pushRange.size       = 128; // match types.glsl PushConstants
 
+    VkDescriptorSetLayout setLayouts[2] = {descriptors_.getLayout(), passLayout_};
     VkPipelineLayoutCreateInfo plInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-    plInfo.setLayoutCount         = 1;
-    plInfo.pSetLayouts            = &passLayout_;
+    plInfo.setLayoutCount         = 2;
+    plInfo.pSetLayouts            = setLayouts;
     plInfo.pushConstantRangeCount = 1;
     plInfo.pPushConstantRanges    = &pushRange;
     VK_CHECK(vkCreatePipelineLayout(dev, &plInfo, nullptr, &passPlLayout_));
@@ -256,19 +260,21 @@ void TonemapPass::apply(VkCommandBuffer cmd, VkImageView hdrInput, float exposur
 
     // --- Bind pipeline and descriptors ---
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            passPlLayout_, 0, 1, &passSet_, 0, nullptr);
 
-    // --- Push constants ---
-    TonemapPushConstants pc{};
-    pc.exposure = exposure;
-    pc.width    = extent_.width;
-    pc.height   = extent_.height;
-    pc.pad      = 0;
+    // Set 0 = bindless global, set 1 = per-pass (tonemap storage images)
+    VkDescriptorSet sets[2] = {descriptors_.getDescriptorSet(), passSet_};
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                            passPlLayout_, 0, 2, sets, 0, nullptr);
+
+    // --- Push constants (full 128 bytes to match shader's types.glsl) ---
+    PushConstants pc{};
+    pc.exposure    = exposure;
+    pc.resolution[0] = extent_.width;
+    pc.resolution[1] = extent_.height;
 
     vkCmdPushConstants(cmd, passPlLayout_,
-                       VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                       sizeof(TonemapPushConstants), &pc);
+                       VK_SHADER_STAGE_ALL, 0,
+                       sizeof(PushConstants), &pc);
 
     // --- Dispatch: 8x8 workgroups ---
     u32 groupsX = (extent_.width  + 7) / 8;
