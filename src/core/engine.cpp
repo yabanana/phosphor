@@ -28,6 +28,8 @@ static void signalHandler(int) { g_signalQuit.store(true, std::memory_order_rela
 #include "renderer/tonemap_pass.h"
 #include "renderer/composite_pass.h"
 #include "renderer/push_constants.h"
+#include "renderer/simple_pass.h"
+#include "scene/procedural.h"
 
 #include "diagnostics/gpu_profiler.h"
 #include "diagnostics/frame_stats.h"
@@ -102,6 +104,14 @@ void Engine::initSystems() {
     tonemapPass_     = std::make_unique<TonemapPass>(*device_, *allocator_, *pipelines_, *descriptors_, extent);
     compositePass_   = std::make_unique<CompositePass>(*device_, *pipelines_);
 
+    // ---- Simple fallback pass ----
+    simplePass_ = std::make_unique<SimplePass>(*device_, *allocator_, *pipelines_, *commands_);
+    {
+        // Generate a torus for the simple pass to draw directly
+        auto torusMesh = ProceduralMeshes::generateTorus(1.5f, 0.5f, 64, 32);
+        simplePass_->uploadMesh(torusMesh.positions, torusMesh.normals, torusMesh.indices);
+    }
+
     // ---- Diagnostics ----
     profiler_        = std::make_unique<GpuProfiler>(*device_);
     frameStats_      = std::make_unique<FrameStats>();
@@ -139,6 +149,7 @@ void Engine::shutdownSystems() {
     frameStats_.reset();
     profiler_.reset();
 
+    simplePass_.reset();
     compositePass_.reset();
     tonemapPass_.reset();
     materialResolve_.reset();
@@ -368,6 +379,7 @@ void Engine::render() {
         visBuffer_->recreate(newExtent);
         materialResolve_->recreate(newExtent);
         tonemapPass_->recreate(newExtent);
+        simplePass_->recreateDepth(newExtent);
         return;
     }
 
@@ -391,18 +403,7 @@ void Engine::render() {
 
     VkExtent2D extent = swapchain_->getExtent();
 
-    // 4. Record mesh pass (task/mesh shaders -> visibility buffer)
-    {
-        profiler_->beginPass(cmd, "MeshPass");
-        meshPass_->recordPass(cmd, *gpuScene_, *visBuffer_, *camera_,
-                              currentFrame_, exposure_);
-        profiler_->endPass(cmd, "MeshPass");
-    }
-
-    // 5-6. Skip material resolve and tonemap for now — blit clear color to swapchain
-    // The HDR and LDR images stay black, which is fine for pipeline testing
-
-    // 7. Transition swapchain: UNDEFINED -> COLOR_ATTACHMENT for ImGui direct render
+    // 4. Transition swapchain: UNDEFINED -> COLOR_ATTACHMENT_OPTIMAL for simple pass
     {
         VkImageMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
         barrier.srcStageMask  = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
@@ -418,6 +419,16 @@ void Engine::render() {
         dep.imageMemoryBarrierCount = 1;
         dep.pImageMemoryBarriers    = &barrier;
         vkCmdPipelineBarrier2(cmd, &dep);
+    }
+
+    // 5. Simple pass: draw torus directly to swapchain with Phong shading
+    {
+        profiler_->beginPass(cmd, "SimplePass");
+        glm::mat4 mvp = camera_->getViewProjection();
+        glm::vec3 camPos = camera_->getPosition();
+        simplePass_->recordPass(cmd, swapchain_->getImageView(imageIndex),
+                                extent, swapchain_->getFormat(), mvp, camPos);
+        profiler_->endPass(cmd, "SimplePass");
     }
 
     // 8. ImGui pass (swapchain is in COLOR_ATTACHMENT_OPTIMAL from composite)
@@ -495,6 +506,7 @@ void Engine::render() {
         visBuffer_->recreate(newExtent);
         materialResolve_->recreate(newExtent);
         tonemapPass_->recreate(newExtent);
+        simplePass_->recreateDepth(newExtent);
     }
 
     profiler_->resolveQueries(currentFrame_);

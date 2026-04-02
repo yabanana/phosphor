@@ -3,6 +3,7 @@
 #include "core/types.h"
 #include "diagnostics/debug_overlay.h"
 #include "renderer/aa_pass.h"
+#include "renderer/simple_pass.h"
 #include "testbench/testbench.h"
 #include <memory>
 
@@ -28,6 +29,7 @@ class MeshPass;
 class MaterialResolve;
 class TonemapPass;
 class CompositePass;
+class SimplePass;
 class GpuProfiler;
 class FrameStats;
 class RenderDocCapture;
@@ -95,6 +97,7 @@ private:
     std::unique_ptr<MaterialResolve>  materialResolve_;
     std::unique_ptr<TonemapPass>      tonemapPass_;
     std::unique_ptr<CompositePass>    compositePass_;
+    std::unique_ptr<SimplePass>       simplePass_;
     // HiZ, shadows, ReSTIR, AA, DDGI can be added incrementally
 
     // ---- Diagnostics ----
