@@ -370,11 +370,25 @@ void VulkanDevice::createLogicalDevice(bool enableValidation) {
 
     // Build feature pNext chain (bottom to top — last linked is first in chain)
 
+    // Vulkan 1.2 features (hostQueryReset, 8-bit storage)
+    VkPhysicalDeviceVulkan12Features vulkan12Features{};
+    vulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    vulkan12Features.hostQueryReset = VK_TRUE;
+    vulkan12Features.storageBuffer8BitAccess = VK_TRUE;
+    vulkan12Features.shaderInt8 = VK_TRUE;
+
+    // Vulkan 1.3 features (maintenance4)
+    VkPhysicalDeviceVulkan13Features vulkan13Features{};
+    vulkan13Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    vulkan13Features.maintenance4 = VK_TRUE;
+    vulkan13Features.pNext = &vulkan12Features;
+
     // Timeline semaphores
     VkPhysicalDeviceTimelineSemaphoreFeatures timelineSemaphoreFeatures{};
     timelineSemaphoreFeatures.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
     timelineSemaphoreFeatures.timelineSemaphore = VK_TRUE;
+    timelineSemaphoreFeatures.pNext = &vulkan13Features;
 
     // Synchronization2
     VkPhysicalDeviceSynchronization2Features sync2Features{};
@@ -443,6 +457,7 @@ void VulkanDevice::createLogicalDevice(bool enableValidation) {
     features2.features.wideLines           = VK_TRUE;
     features2.features.multiDrawIndirect   = VK_TRUE;
     features2.features.shaderInt64         = VK_TRUE;
+    features2.features.geometryShader      = VK_TRUE;
 
     // Create the device
     VkDeviceCreateInfo createInfo{};

@@ -67,11 +67,11 @@ BindlessDescriptorManager::BindlessDescriptorManager(VulkanDevice& device) : dev
     // Binding 1 (samplers) is fixed/immutable
     std::array<VkDescriptorBindingFlags, 3> bindingFlags{};
     bindingFlags[0] = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT
-                    | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
-                    | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
+                    | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT;
     bindingFlags[1] = 0; // immutable samplers, no special flags
     bindingFlags[2] = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT
-                    | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT;
+                    | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
+                    | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
 
     VkDescriptorSetLayoutBindingFlagsCreateInfo flagsInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO};
     flagsInfo.bindingCount = static_cast<u32>(bindingFlags.size());
@@ -100,7 +100,7 @@ BindlessDescriptorManager::BindlessDescriptorManager(VulkanDevice& device) : dev
     VK_CHECK(vkCreateDescriptorPool(dev, &poolInfo, nullptr, &pool_));
 
     // Allocate the single global descriptor set
-    u32 variableCount = MAX_BINDLESS_TEXTURES;
+    u32 variableCount = MAX_BINDLESS_BUFFERS; // variable count for last binding (storage buffers)
     VkDescriptorSetVariableDescriptorCountAllocateInfo variableInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO};
     variableInfo.descriptorSetCount = 1;
     variableInfo.pDescriptorCounts = &variableCount;
