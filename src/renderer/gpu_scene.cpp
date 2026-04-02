@@ -31,6 +31,7 @@ GpuScene::~GpuScene() {
     destroyBufferIfValid(instanceBuffer_);
     destroyBufferIfValid(materialBuffer_);
     destroyBufferIfValid(lightBuffer_);
+    destroyBufferIfValid(sceneGlobalsBuffer_);
 
     LOG_INFO("GpuScene destroyed");
 }
@@ -300,6 +301,18 @@ SceneGlobals GpuScene::getSceneGlobals() {
     g.meshletTotalCount      = meshletTotalCount_;
     g.pad                    = 0;
     return g;
+}
+
+// ---------------------------------------------------------------------------
+// Upload SceneGlobals to GPU and return BDA
+// ---------------------------------------------------------------------------
+
+VkDeviceAddress GpuScene::uploadSceneGlobalsBuffer() {
+    SceneGlobals g = getSceneGlobals();
+
+    const VkDeviceSize size = sizeof(SceneGlobals);
+    growAndUpload(sceneGlobalsBuffer_, &g, size);
+    return sceneGlobalsBuffer_.deviceAddress;
 }
 
 // ---------------------------------------------------------------------------

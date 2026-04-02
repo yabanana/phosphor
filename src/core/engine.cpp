@@ -399,30 +399,25 @@ void Engine::render() {
         profiler_->endPass(cmd, "MeshPass");
     }
 
-    // 5. Record material resolve (vis buffer -> HDR)
-    {
-        profiler_->beginPass(cmd, "MaterialResolve");
-        materialResolve_->resolve(cmd, *visBuffer_, *gpuScene_, *camera_,
-                                   currentFrame_, exposure_);
-        profiler_->endPass(cmd, "MaterialResolve");
-    }
+    // 5-6. Skip material resolve and tonemap for now — blit clear color to swapchain
+    // The HDR and LDR images stay black, which is fine for pipeline testing
 
-    // 6. Record tonemap (HDR -> LDR)
+    // 7. Transition swapchain: UNDEFINED -> COLOR_ATTACHMENT for ImGui direct render
     {
-        profiler_->beginPass(cmd, "Tonemap");
-        tonemapPass_->apply(cmd, materialResolve_->getHDRView(), exposure_);
-        profiler_->endPass(cmd, "Tonemap");
-    }
+        VkImageMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+        barrier.srcStageMask  = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+        barrier.srcAccessMask = 0;
+        barrier.dstStageMask  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        barrier.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        barrier.oldLayout     = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrier.newLayout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        barrier.image         = swapchain_->getImage(imageIndex);
+        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-    // 7. Record composite (LDR -> swapchain, handles its own barriers)
-    {
-        profiler_->beginPass(cmd, "Composite");
-        compositePass_->record(cmd,
-                               tonemapPass_->getLDRImage().image, extent,
-                               swapchain_->getImage(imageIndex),
-                               swapchain_->getImageView(imageIndex),
-                               extent);
-        profiler_->endPass(cmd, "Composite");
+        VkDependencyInfo dep{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+        dep.imageMemoryBarrierCount = 1;
+        dep.pImageMemoryBarriers    = &barrier;
+        vkCmdPipelineBarrier2(cmd, &dep);
     }
 
     // 8. ImGui pass (swapchain is in COLOR_ATTACHMENT_OPTIMAL from composite)

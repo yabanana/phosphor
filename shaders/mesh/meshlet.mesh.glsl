@@ -42,70 +42,23 @@ void main() {
     uint tid = gl_LocalInvocationIndex;
     uint payloadIdx = gl_WorkGroupID.x;
 
-    // Safety: don't process beyond the compacted count
-    if (payloadIdx >= payload.count) {
-        SetMeshOutputsEXT(0, 0);
-        return;
+    // DEBUG: emit a hardcoded triangle — no BDA access at all
+    SetMeshOutputsEXT(3, 1);
+
+    if (tid < 3) {
+        vec2 positions[3] = vec2[](
+            vec2(-0.5, -0.5),
+            vec2( 0.5, -0.5),
+            vec2( 0.0,  0.5)
+        );
+        gl_MeshVerticesEXT[tid].gl_Position = vec4(positions[tid], 0.0, 1.0);
+        outUV[tid] = vec2(0.0);
+        outWorldPos[tid] = vec3(0.0);
+        outWorldNormal[tid] = vec3(0.0, 0.0, 1.0);
+        outWorldTangent[tid] = vec4(1.0, 0.0, 0.0, 1.0);
     }
-
-    uint meshletIdx  = payload.meshletIndices[payloadIdx];
-    uint instanceIdx = payload.instanceIndices[payloadIdx];
-
-    // Load scene globals
-    SceneGlobalsBuffer globals = SceneGlobalsBuffer(pc.sceneGlobalsAddress);
-
-    // Load meshlet descriptor
-    Meshlet meshlet = loadMeshlet(globals.meshletAddr, meshletIdx);
-
-    // Load instance transform
-    GPUInstance instance = loadInstance(globals.instanceAddr, instanceIdx);
-
-    mat4 mvp = pc.viewProjection * instance.modelMatrix;
-    mat3 normalMatrix = transpose(inverse(mat3(instance.modelMatrix)));
-
-    // Declare output counts
-    SetMeshOutputsEXT(meshlet.vertexCount, meshlet.triangleCount);
-
-    // -----------------------------------------------------------------------
-    // Emit vertices: each thread processes ceil(vertexCount / 32) vertices
-    // -----------------------------------------------------------------------
-    MeshletVertexBuffer meshletVerts = MeshletVertexBuffer(globals.meshletVertexAddr);
-
-    for (uint i = tid; i < meshlet.vertexCount; i += 32) {
-        // Meshlet vertex buffer stores global vertex indices
-        uint globalVertexIdx = meshletVerts.indices[meshlet.vertexOffset + i];
-
-        // Load vertex data via BDA
-        GPUVertex vtx = loadVertex(globals.vertexAddr, globalVertexIdx);
-
-        vec3 localPos = vec3(vtx.px, vtx.py, vtx.pz);
-        vec4 worldPos = instance.modelMatrix * vec4(localPos, 1.0);
-        vec3 worldNormal = normalize(normalMatrix * vec3(vtx.nx, vtx.ny, vtx.nz));
-        vec3 worldTangent = normalize(normalMatrix * vec3(vtx.tx, vtx.ty, vtx.tz));
-
-        gl_MeshVerticesEXT[i].gl_Position = mvp * vec4(localPos, 1.0);
-
-        outUV[i]           = vec2(vtx.u, vtx.v);
-        outWorldPos[i]     = worldPos.xyz;
-        outWorldNormal[i]  = worldNormal;
-        outWorldTangent[i] = vec4(worldTangent, vtx.tw);
-    }
-
-    // -----------------------------------------------------------------------
-    // Emit triangle indices: each thread processes ceil(triangleCount / 32)
-    // Triangle indices are stored as uint8_t triplets in the meshlet triangle buffer.
-    // -----------------------------------------------------------------------
-    MeshletTriangleBuffer meshletTris = MeshletTriangleBuffer(globals.meshletTriangleAddr);
-
-    for (uint i = tid; i < meshlet.triangleCount; i += 32) {
-        uint triBase = meshlet.triangleOffset + i * 3;
-        uint idx0 = uint(meshletTris.indices[triBase + 0]);
-        uint idx1 = uint(meshletTris.indices[triBase + 1]);
-        uint idx2 = uint(meshletTris.indices[triBase + 2]);
-
-        gl_PrimitiveTriangleIndicesEXT[i] = uvec3(idx0, idx1, idx2);
-
-        // Per-primitive: store instance ID for the visibility buffer
-        outInstanceID[i] = instanceIdx;
+    if (tid == 0) {
+        gl_PrimitiveTriangleIndicesEXT[0] = uvec3(0, 1, 2);
+        outInstanceID[0] = 0;
     }
 }

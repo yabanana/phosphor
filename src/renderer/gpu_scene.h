@@ -122,6 +122,11 @@ public:
     /// Get SceneGlobals for push constants / UBO.
     SceneGlobals getSceneGlobals();
 
+    /// Upload SceneGlobals to a GPU buffer and return its BDA.
+    /// Must be called after getSceneGlobals() and any per-frame updates
+    /// so that all buffer addresses are valid.
+    VkDeviceAddress uploadSceneGlobalsBuffer();
+
     u32 getMeshletTotalCount() const { return meshletTotalCount_; }
     u32 getMeshCount() const { return static_cast<u32>(meshInfos_.size()); }
 
@@ -156,6 +161,7 @@ private:
     AllocatedBuffer instanceBuffer_{};
     AllocatedBuffer materialBuffer_{};
     AllocatedBuffer lightBuffer_{};
+    AllocatedBuffer sceneGlobalsBuffer_{};
 
     u32 meshletTotalCount_ = 0;
     u32 instanceCount_     = 0;

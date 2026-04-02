@@ -136,9 +136,11 @@ void MeshPass::recordPass(VkCommandBuffer cmd, GpuScene& scene,
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipeline_);
     descriptors_.bindToCommandBuffer(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS);
 
-    // --- Fill push constants ---
+    // --- Upload SceneGlobals to a GPU buffer so shaders can read via BDA ---
+    VkDeviceAddress sceneGlobalsAddr = scene.uploadSceneGlobalsBuffer();
     SceneGlobals globals = scene.getSceneGlobals();
 
+    // --- Fill push constants ---
     PushConstants pc{};
     std::memcpy(pc.viewProjection, glm::value_ptr(camera.getViewProjection()),
                 sizeof(pc.viewProjection));
@@ -149,7 +151,7 @@ void MeshPass::recordPass(VkCommandBuffer cmd, GpuScene& scene,
     pc.cameraPosition[2] = camPos.z;
     pc.cameraPosition[3] = 0.0f;  // w = time (unused for now)
 
-    pc.sceneGlobalsAddress  = globals.vertexBufferAddress;   // scene globals are accessed via BDA chain
+    pc.sceneGlobalsAddress  = sceneGlobalsAddr;              // BDA to the SceneGlobals GPU buffer
     pc.vertexBufferAddress  = globals.vertexBufferAddress;
     pc.meshletBufferAddress = globals.meshletBufferAddress;
     pc.resolution[0]        = extent.width;
@@ -163,13 +165,15 @@ void MeshPass::recordPass(VkCommandBuffer cmd, GpuScene& scene,
                        VK_SHADER_STAGE_ALL, 0, sizeof(PushConstants), &pc);
 
     // --- Draw all meshlets via mesh shader ---
+    // The task shader uses local_size_x = 32, so each workgroup handles 32
+    // meshlet candidates.  We need ceil(meshletCount / 32) task workgroups.
     u32 meshletCount = scene.getMeshletTotalCount();
     if (meshletCount > 0) {
-        // Load the function pointer for mesh shader dispatch
         static auto vkCmdDrawMeshTasksEXT_ =
             reinterpret_cast<PFN_vkCmdDrawMeshTasksEXT>(
                 vkGetDeviceProcAddr(device_.getDevice(), "vkCmdDrawMeshTasksEXT"));
-        vkCmdDrawMeshTasksEXT_(cmd, meshletCount, 1, 1);
+        u32 taskGroupCount = (meshletCount + 31) / 32;
+        vkCmdDrawMeshTasksEXT_(cmd, taskGroupCount, 1, 1);
     }
 
     vkCmdEndRendering(cmd);
