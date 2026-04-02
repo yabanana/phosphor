@@ -37,6 +37,7 @@ layout(location = 3) out vec4 outWorldTangent[];
 
 // Per-primitive outputs (flat, not interpolated)
 layout(location = 4) perprimitiveEXT flat out uint outInstanceID[];
+layout(location = 5) perprimitiveEXT flat out uint outMeshletID[];
 
 void main() {
     uint tid = gl_LocalInvocationIndex;
@@ -93,5 +94,6 @@ void main() {
         uint i2 = uint(triBuf.indices[triBase + 2]);
         gl_PrimitiveTriangleIndicesEXT[t] = uvec3(i0, i1, i2);
         outInstanceID[t] = instanceIdx;
+        outMeshletID[t]  = meshletIdx;
     }
 }

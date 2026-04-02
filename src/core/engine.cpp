@@ -407,34 +407,58 @@ void Engine::render() {
 
     VkExtent2D extent = swapchain_->getExtent();
 
-    // 4. Render scene via SimplePass (direct vertex/fragment pipeline)
-    //    Mesh shader pipeline will be re-enabled after Step 2 (vis buffer encoding fix)
+    // 4. MeshPass — fill visibility buffer + depth
     {
-        // Transition swapchain: UNDEFINED -> COLOR_ATTACHMENT_OPTIMAL
-        VkImageMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
-        barrier.srcStageMask  = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
-        barrier.srcAccessMask = 0;
-        barrier.dstStageMask  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-        barrier.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-        barrier.oldLayout     = VK_IMAGE_LAYOUT_UNDEFINED;
-        barrier.newLayout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        barrier.image         = swapchain_->getImage(imageIndex);
-        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        profiler_->beginPass(cmd, "MeshPass");
+        meshPass_->recordPass(cmd, *gpuScene_, *visBuffer_, *camera_,
+                              currentFrame_, exposure_);
+        profiler_->endPass(cmd, "MeshPass");
+    }
+
+    // 5. MaterialResolve — compute PBR from visibility buffer (O(1) per pixel)
+    {
+        profiler_->beginPass(cmd, "MaterialResolve");
+        materialResolve_->resolve(cmd, *visBuffer_, *gpuScene_, *camera_,
+                                  currentFrame_, exposure_);
+        profiler_->endPass(cmd, "MaterialResolve");
+    }
+
+    // 6. Tonemap — ACES, HDR -> LDR
+    //    Barrier: HDR image GENERAL (compute write) -> GENERAL (compute read)
+    {
+        VkImageMemoryBarrier2 hdrBarrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+        hdrBarrier.srcStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        hdrBarrier.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+        hdrBarrier.dstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        hdrBarrier.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
+        hdrBarrier.oldLayout     = VK_IMAGE_LAYOUT_GENERAL;
+        hdrBarrier.newLayout     = VK_IMAGE_LAYOUT_GENERAL;
+        hdrBarrier.image         = materialResolve_->getHDRImage();
+        hdrBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
         VkDependencyInfo dep{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
         dep.imageMemoryBarrierCount = 1;
-        dep.pImageMemoryBarriers    = &barrier;
+        dep.pImageMemoryBarriers    = &hdrBarrier;
         vkCmdPipelineBarrier2(cmd, &dep);
 
-        profiler_->beginPass(cmd, "SimplePass");
-        simplePass_->recordPass(cmd, swapchain_->getImageView(imageIndex),
-                                extent, swapchain_->getFormat(),
-                                camera_->getViewProjection(),
-                                camera_->getPosition());
-        profiler_->endPass(cmd, "SimplePass");
+        profiler_->beginPass(cmd, "Tonemap");
+        tonemapPass_->apply(cmd, materialResolve_->getHDRView(), exposure_);
+        profiler_->endPass(cmd, "Tonemap");
     }
 
-    // 9. ImGui pass (swapchain is in COLOR_ATTACHMENT_OPTIMAL from composite)
+    // 7. Composite — blit LDR result to swapchain
+    {
+        profiler_->beginPass(cmd, "Composite");
+        compositePass_->record(cmd,
+                               tonemapPass_->getLDRImage().image, extent,
+                               swapchain_->getImage(imageIndex),
+                               swapchain_->getImageView(imageIndex),
+                               extent);
+        profiler_->endPass(cmd, "Composite");
+        // CompositePass leaves swapchain in COLOR_ATTACHMENT_OPTIMAL for ImGui
+    }
+
+    // 8. ImGui pass (swapchain is in COLOR_ATTACHMENT_OPTIMAL from composite)
     {
         profiler_->beginPass(cmd, "ImGui");
         imgui_->newFrame();
@@ -456,7 +480,7 @@ void Engine::render() {
         profiler_->endPass(cmd, "ImGui");
     }
 
-    // 11. Transition swapchain to PRESENT_SRC_KHR
+    // 9. Transition swapchain to PRESENT_SRC_KHR
     {
         VkImageMemoryBarrier2 toPresent{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
         toPresent.srcStageMask  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;

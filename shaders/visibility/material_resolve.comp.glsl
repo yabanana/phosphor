@@ -33,8 +33,8 @@ layout(set = 1, binding = 1)        uniform sampler2D depthBuffer;
 layout(set = 1, binding = 2, rgba16f) uniform writeonly image2D hdrOutput;
 
 // ---------------------------------------------------------------------------
-// Reconstruct the 3 clip-space positions of a triangle, then compute
-// screen-space barycentrics for the current pixel.
+// Reconstruct the 3 vertices of a triangle via O(1) meshlet lookup, then
+// compute screen-space barycentrics for the current pixel.
 // ---------------------------------------------------------------------------
 
 struct TriangleData {
@@ -53,54 +53,22 @@ vec2 worldToScreen(vec3 worldPos, mat4 vp, vec2 resolution) {
 bool fetchTriangleAndBarycentrics(
     SceneGlobalsBuffer globals,
     uint instanceIdx,
-    uint triangleIdx,
+    uint meshletIdx,
+    uint localTriIdx,
     vec2 pixelPos,
     mat4 modelMatrix,
     out TriangleData tri
 ) {
-    // Find which meshlet this triangle belongs to by searching the instance's meshlets.
-    // The triangleIdx is the gl_PrimitiveID from the mesh shader, which is the
-    // primitive index within the mesh shader output. Since each mesh shader workgroup
-    // processes one meshlet and primitives are numbered per-workgroup starting at 0,
-    // we need a way to find the meshlet + local triangle.
-    //
-    // Approach: store the meshlet index in the upper bits of instanceID? No.
-    // The gl_PrimitiveID in the mesh shader is global across the entire draw.
-    // We iterate over the instance's meshlets to find which one contains this triangle.
+    // O(1) direct meshlet lookup — meshletIdx and localTriIdx are encoded
+    // in the visibility buffer by the mesh/fragment shader pair.
 
-    GPUInstance instance = loadInstance(globals.instanceAddr, instanceIdx);
-    MeshInfoBuffer meshInfo = MeshInfoBuffer(globals.meshInfoAddr + uint64_t(instance.meshIndex) * 32);
+    // Load the meshlet directly by its global index
+    Meshlet meshlet = loadMeshlet(globals.meshletAddr, meshletIdx);
 
-    // Walk meshlets belonging to this instance's mesh to find the triangle
-    uint remainingTriangles = triangleIdx;
-    uint foundMeshletIdx = 0;
-    uint localTriIdx = 0;
-    bool found = false;
-
-    uint meshletCount = meshInfo.meshletCount;
-    // Safety: clamp to a sane maximum to prevent GPU hang on corrupt data
-    meshletCount = min(meshletCount, 4096u);
-
-    for (uint m = 0; m < meshletCount; m++) {
-        uint globalMeshletIdx = meshInfo.meshletOffset + m;
-        Meshlet meshlet = loadMeshlet(globals.meshletAddr, globalMeshletIdx);
-
-        if (remainingTriangles < meshlet.triangleCount) {
-            foundMeshletIdx = globalMeshletIdx;
-            localTriIdx = remainingTriangles;
-            found = true;
-            break;
-        }
-        remainingTriangles -= meshlet.triangleCount;
-    }
-
-    // If we didn't find the triangle (corrupt data), bail out
-    if (!found) {
+    // Safety: bail if localTriIdx is out of range (corrupt data)
+    if (localTriIdx >= meshlet.triangleCount) {
         return false;
     }
-
-    // Load the meshlet
-    Meshlet meshlet = loadMeshlet(globals.meshletAddr, foundMeshletIdx);
 
     // Read triangle vertex indices from the meshlet triangle buffer
     MeshletTriangleBuffer triBuffer = MeshletTriangleBuffer(globals.meshletTriangleAddr);
@@ -225,10 +193,11 @@ void main() {
         return;
     }
 
-    // Decode visibility
-    uvec2 vis = decodeVisibility(visEncoded);
-    uint instanceIdx = vis.x;
-    uint triangleIdx = vis.y;
+    // Decode visibility — O(1) meshlet lookup via new encoding
+    VisData vis = decodeVisibility(visEncoded);
+    uint instanceIdx = vis.instanceID;
+    uint meshletIdx  = vis.meshletID;
+    uint localTriIdx = vis.localTriID;
 
     // Load scene
     SceneGlobalsBuffer globals = SceneGlobalsBuffer(pc.sceneGlobalsAddress);
@@ -241,10 +210,10 @@ void main() {
 
     GPUInstance instance = loadInstance(globals.instanceAddr, instanceIdx);
 
-    // Fetch triangle vertices and compute barycentrics
+    // Fetch triangle vertices and compute barycentrics (O(1) direct lookup)
     TriangleData tri;
     bool triOk = fetchTriangleAndBarycentrics(
-        globals, instanceIdx, triangleIdx,
+        globals, instanceIdx, meshletIdx, localTriIdx,
         vec2(pixelCoord), instance.modelMatrix, tri
     );
     if (!triOk) {

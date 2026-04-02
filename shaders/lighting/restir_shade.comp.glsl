@@ -72,33 +72,14 @@ vec2 worldToScreen(vec3 worldPos, mat4 vp, vec2 resolution) {
 ShadingSurface reconstructSurface(ivec2 pixelCoord, uint visEncoded) {
     ShadingSurface surf;
 
-    // Decode visibility
-    uvec2 vis = decodeVisibility(visEncoded);
-    uint instanceIdx = vis.x;
-    uint triangleIdx = vis.y;
+    // Decode visibility — O(1) direct meshlet lookup
+    VisData vis = decodeVisibility(visEncoded);
+    uint instanceIdx = vis.instanceID;
+    uint foundMeshletIdx = vis.meshletID;
+    uint localTriIdx = vis.localTriID;
 
     SceneGlobalsBuffer globals = SceneGlobalsBuffer(pc.sceneGlobalsAddress);
     GPUInstance instance = loadInstance(globals.instanceAddr, instanceIdx);
-
-    MeshInfoBuffer meshInfo = MeshInfoBuffer(
-        globals.meshInfoAddr + uint64_t(instance.meshIndex) * 32);
-
-    // Walk meshlets to find the triangle
-    uint remainingTriangles = triangleIdx;
-    uint foundMeshletIdx = 0;
-    uint localTriIdx = 0;
-
-    for (uint m = 0; m < meshInfo.meshletCount; m++) {
-        uint globalMeshletIdx = meshInfo.meshletOffset + m;
-        Meshlet meshlet = loadMeshlet(globals.meshletAddr, globalMeshletIdx);
-
-        if (remainingTriangles < meshlet.triangleCount) {
-            foundMeshletIdx = globalMeshletIdx;
-            localTriIdx = remainingTriangles;
-            break;
-        }
-        remainingTriangles -= meshlet.triangleCount;
-    }
 
     Meshlet meshlet = loadMeshlet(globals.meshletAddr, foundMeshletIdx);
 

@@ -71,31 +71,13 @@ vec4 debugNormals() {
         return vec4(0.0, 0.0, 0.0, 1.0);
     }
 
-    uvec2 vis = decodeVisibility(visEncoded);
-    uint instanceIdx = vis.x;
-    uint triangleIdx = vis.y;
+    VisData vis = decodeVisibility(visEncoded);
+    uint instanceIdx = vis.instanceID;
+    uint foundMeshletIdx = vis.meshletID;
+    uint localTriIdx = vis.localTriID;
 
     SceneGlobalsBuffer globals = SceneGlobalsBuffer(pc.sceneGlobalsAddress);
     GPUInstance instance = loadInstance(globals.instanceAddr, instanceIdx);
-
-    // Find the triangle's meshlet and vertices
-    MeshInfoBuffer meshInfo = MeshInfoBuffer(globals.meshInfoAddr + uint64_t(instance.meshIndex) * 32);
-
-    uint remainingTriangles = triangleIdx;
-    uint foundMeshletIdx = 0;
-    uint localTriIdx = 0;
-
-    for (uint m = 0; m < meshInfo.meshletCount; m++) {
-        uint globalMeshletIdx = meshInfo.meshletOffset + m;
-        Meshlet meshlet = loadMeshlet(globals.meshletAddr, globalMeshletIdx);
-
-        if (remainingTriangles < meshlet.triangleCount) {
-            foundMeshletIdx = globalMeshletIdx;
-            localTriIdx = remainingTriangles;
-            break;
-        }
-        remainingTriangles -= meshlet.triangleCount;
-    }
 
     Meshlet meshlet = loadMeshlet(globals.meshletAddr, foundMeshletIdx);
 
