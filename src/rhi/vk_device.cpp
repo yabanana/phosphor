@@ -368,70 +368,51 @@ void VulkanDevice::createLogicalDevice(bool enableValidation) {
         queueCreateInfos.push_back(qci);
     }
 
-    // Build feature pNext chain (bottom to top — last linked is first in chain)
+    // Build feature pNext chain.
+    // Vulkan 1.2/1.3 promoted features MUST use VkPhysicalDeviceVulkan1XFeatures
+    // and NOT the old per-extension structs (they conflict in the pNext chain).
 
-    // Vulkan 1.2 features (hostQueryReset, 8-bit storage)
+    // Vulkan 1.2 consolidated features (replaces DescriptorIndexing, BDA, Timeline, 8bit, etc.)
     VkPhysicalDeviceVulkan12Features vulkan12Features{};
     vulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-    vulkan12Features.hostQueryReset = VK_TRUE;
-    vulkan12Features.storageBuffer8BitAccess = VK_TRUE;
-    vulkan12Features.shaderInt8 = VK_TRUE;
+    // Descriptor indexing (bindless)
+    vulkan12Features.descriptorIndexing                                 = VK_TRUE;
+    vulkan12Features.shaderSampledImageArrayNonUniformIndexing          = VK_TRUE;
+    vulkan12Features.shaderStorageBufferArrayNonUniformIndexing         = VK_TRUE;
+    vulkan12Features.shaderStorageImageArrayNonUniformIndexing          = VK_TRUE;
+    vulkan12Features.descriptorBindingSampledImageUpdateAfterBind       = VK_TRUE;
+    vulkan12Features.descriptorBindingStorageBufferUpdateAfterBind      = VK_TRUE;
+    vulkan12Features.descriptorBindingStorageImageUpdateAfterBind       = VK_TRUE;
+    vulkan12Features.descriptorBindingPartiallyBound                    = VK_TRUE;
+    vulkan12Features.descriptorBindingVariableDescriptorCount           = VK_TRUE;
+    vulkan12Features.runtimeDescriptorArray                             = VK_TRUE;
+    // Buffer device address
+    vulkan12Features.bufferDeviceAddress                                = VK_TRUE;
+    // Timeline semaphores
+    vulkan12Features.timelineSemaphore                                  = VK_TRUE;
+    // Host query reset
+    vulkan12Features.hostQueryReset                                     = VK_TRUE;
+    // 8-bit storage + scalar block layout
+    vulkan12Features.storageBuffer8BitAccess                            = VK_TRUE;
+    vulkan12Features.shaderInt8                                         = VK_TRUE;
+    vulkan12Features.scalarBlockLayout                                  = VK_TRUE;
 
-    // Vulkan 1.3 features (maintenance4)
+    // Vulkan 1.3 consolidated features (replaces Sync2, DynamicRendering, Maintenance4)
     VkPhysicalDeviceVulkan13Features vulkan13Features{};
     vulkan13Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
-    vulkan13Features.maintenance4 = VK_TRUE;
+    vulkan13Features.synchronization2  = VK_TRUE;
+    vulkan13Features.dynamicRendering  = VK_TRUE;
+    vulkan13Features.maintenance4      = VK_TRUE;
     vulkan13Features.pNext = &vulkan12Features;
 
-    // Timeline semaphores
-    VkPhysicalDeviceTimelineSemaphoreFeatures timelineSemaphoreFeatures{};
-    timelineSemaphoreFeatures.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
-    timelineSemaphoreFeatures.timelineSemaphore = VK_TRUE;
-    timelineSemaphoreFeatures.pNext = &vulkan13Features;
-
-    // Synchronization2
-    VkPhysicalDeviceSynchronization2Features sync2Features{};
-    sync2Features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
-    sync2Features.synchronization2 = VK_TRUE;
-    sync2Features.pNext = &timelineSemaphoreFeatures;
-
-    // Dynamic rendering
-    VkPhysicalDeviceDynamicRenderingFeatures dynamicRenderingFeatures{};
-    dynamicRenderingFeatures.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
-    dynamicRenderingFeatures.dynamicRendering = VK_TRUE;
-    dynamicRenderingFeatures.pNext = &sync2Features;
-
-    // Buffer device address
-    VkPhysicalDeviceBufferDeviceAddressFeatures bdaFeatures{};
-    bdaFeatures.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
-    bdaFeatures.bufferDeviceAddress = VK_TRUE;
-    bdaFeatures.pNext = &dynamicRenderingFeatures;
-
-    // Descriptor indexing (bindless)
-    VkPhysicalDeviceDescriptorIndexingFeatures indexingFeatures{};
-    indexingFeatures.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
-    indexingFeatures.shaderSampledImageArrayNonUniformIndexing          = VK_TRUE;
-    indexingFeatures.shaderStorageBufferArrayNonUniformIndexing         = VK_TRUE;
-    indexingFeatures.shaderStorageImageArrayNonUniformIndexing          = VK_TRUE;
-    indexingFeatures.descriptorBindingSampledImageUpdateAfterBind       = VK_TRUE;
-    indexingFeatures.descriptorBindingStorageBufferUpdateAfterBind      = VK_TRUE;
-    indexingFeatures.descriptorBindingStorageImageUpdateAfterBind       = VK_TRUE;
-    indexingFeatures.descriptorBindingPartiallyBound                    = VK_TRUE;
-    indexingFeatures.descriptorBindingVariableDescriptorCount           = VK_TRUE;
-    indexingFeatures.runtimeDescriptorArray                             = VK_TRUE;
-    indexingFeatures.pNext = &bdaFeatures;
+    // Extension features (NOT promoted — keep individual structs)
 
     // Acceleration structure
     VkPhysicalDeviceAccelerationStructureFeaturesKHR accelFeatures{};
     accelFeatures.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
     accelFeatures.accelerationStructure = VK_TRUE;
-    accelFeatures.pNext = &indexingFeatures;
+    accelFeatures.pNext = &vulkan13Features;
 
     // Ray tracing pipeline
     VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtFeatures{};
