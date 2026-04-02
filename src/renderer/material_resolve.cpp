@@ -334,7 +334,7 @@ void MaterialResolve::resolve(VkCommandBuffer cmd, const VisibilityBuffer& visBu
     pc.cameraPosition[2] = camPos.z;
     pc.cameraPosition[3] = 0.0f;
 
-    pc.sceneGlobalsAddress  = globals.vertexBufferAddress;
+    pc.sceneGlobalsAddress  = scene.uploadSceneGlobalsBuffer();
     pc.vertexBufferAddress  = globals.vertexBufferAddress;
     pc.meshletBufferAddress = globals.meshletBufferAddress;
     pc.resolution[0]        = ext.width;

@@ -42,23 +42,56 @@ void main() {
     uint tid = gl_LocalInvocationIndex;
     uint payloadIdx = gl_WorkGroupID.x;
 
-    // DEBUG: emit a hardcoded triangle — no BDA access at all
-    SetMeshOutputsEXT(3, 1);
-
-    if (tid < 3) {
-        vec2 positions[3] = vec2[](
-            vec2(-0.5, -0.5),
-            vec2( 0.5, -0.5),
-            vec2( 0.0,  0.5)
-        );
-        gl_MeshVerticesEXT[tid].gl_Position = vec4(positions[tid], 0.0, 1.0);
-        outUV[tid] = vec2(0.0);
-        outWorldPos[tid] = vec3(0.0);
-        outWorldNormal[tid] = vec3(0.0, 0.0, 1.0);
-        outWorldTangent[tid] = vec4(1.0, 0.0, 0.0, 1.0);
+    // Bail if this workgroup is beyond the payload count
+    if (payloadIdx >= payload.count) {
+        SetMeshOutputsEXT(0, 0);
+        return;
     }
-    if (tid == 0) {
-        gl_PrimitiveTriangleIndicesEXT[0] = uvec3(0, 1, 2);
-        outInstanceID[0] = 0;
+
+    uint meshletIdx  = payload.meshletIndices[payloadIdx];
+    uint instanceIdx = payload.instanceIndices[payloadIdx];
+
+    // Load scene globals
+    SceneGlobalsBuffer globals = SceneGlobalsBuffer(pc.sceneGlobalsAddress);
+
+    // Load instance and meshlet
+    GPUInstance instance = loadInstance(globals.instanceAddr, instanceIdx);
+    Meshlet meshlet = loadMeshlet(globals.meshletAddr, meshletIdx);
+
+    uint vertexCount   = meshlet.vertexCount;
+    uint triangleCount = meshlet.triangleCount;
+
+    SetMeshOutputsEXT(vertexCount, triangleCount);
+
+    // --- Emit vertices (loop: each invocation handles multiple vertices) ---
+    mat4 model = instance.modelMatrix;
+    mat4 mvp   = pc.viewProjection * model;
+    mat3 normalMatrix = transpose(inverse(mat3(model)));
+
+    MeshletVertexBuffer meshletVerts = MeshletVertexBuffer(globals.meshletVertexAddr);
+
+    for (uint v = tid; v < vertexCount; v += 32) {
+        uint globalVertexIdx = meshletVerts.indices[meshlet.vertexOffset + v];
+        GPUVertex vtx = loadVertex(globals.vertexAddr, globalVertexIdx);
+
+        vec4 localPos = vec4(vtx.px, vtx.py, vtx.pz, 1.0);
+        gl_MeshVerticesEXT[v].gl_Position = mvp * localPos;
+
+        outWorldPos[v]     = (model * localPos).xyz;
+        outWorldNormal[v]  = normalize(normalMatrix * vec3(vtx.nx, vtx.ny, vtx.nz));
+        outWorldTangent[v] = vec4(normalize(normalMatrix * vec3(vtx.tx, vtx.ty, vtx.tz)), vtx.tw);
+        outUV[v]           = vec2(vtx.u, vtx.v);
+    }
+
+    // --- Emit triangle indices + per-primitive instanceID ---
+    MeshletTriangleBuffer triBuf = MeshletTriangleBuffer(globals.meshletTriangleAddr);
+
+    for (uint t = tid; t < triangleCount; t += 32) {
+        uint triBase = meshlet.triangleOffset + t * 3;
+        uint i0 = uint(triBuf.indices[triBase + 0]);
+        uint i1 = uint(triBuf.indices[triBase + 1]);
+        uint i2 = uint(triBuf.indices[triBase + 2]);
+        gl_PrimitiveTriangleIndicesEXT[t] = uvec3(i0, i1, i2);
+        outInstanceID[t] = instanceIdx;
     }
 }

@@ -277,7 +277,8 @@ GPUInstance loadInstance(uint64_t instanceAddr, uint index) {
 // ---------------------------------------------------------------------------
 
 GPUMaterial loadMaterial(uint64_t materialAddr, uint index) {
-    MaterialBuffer mbuf = MaterialBuffer(materialAddr + uint64_t(index) * 80);
+    // GPUMaterial is 68 bytes (scalar layout: 4+4+4+4+4+4+4+4+4+4+4+4+4+4+4+4+4 floats/uints)
+    MaterialBuffer mbuf = MaterialBuffer(materialAddr + uint64_t(index) * 68);
     GPUMaterial mat;
     mat.baseColor          = mbuf.baseColor;
     mat.metallic           = mbuf.metallic;
@@ -299,8 +300,8 @@ GPUMaterial loadMaterial(uint64_t materialAddr, uint index) {
 // ---------------------------------------------------------------------------
 
 GPULight loadLight(uint64_t lightAddr, uint index) {
-    // GPULight is 17 floats + 2 uints = 76 bytes, but align to 80
-    LightBuffer lbuf = LightBuffer(lightAddr + uint64_t(index) * 80);
+    // GPULight is 60 bytes (scalar layout: 1 uint + 3+3+3 vec3s + 4 floats + 1 uint)
+    LightBuffer lbuf = LightBuffer(lightAddr + uint64_t(index) * 60);
     GPULight light;
     light.type           = lbuf.type;
     light.position       = lbuf.position;

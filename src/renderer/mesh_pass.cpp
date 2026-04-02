@@ -101,7 +101,10 @@ void MeshPass::recordPass(VkCommandBuffer cmd, GpuScene& scene,
     colorAttach.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     colorAttach.loadOp      = VK_ATTACHMENT_LOAD_OP_CLEAR;
     colorAttach.storeOp     = VK_ATTACHMENT_STORE_OP_STORE;
-    colorAttach.clearValue.color = {{0, 0, 0, 0}};  // 0 = "no triangle"
+    colorAttach.clearValue.color.uint32[0] = 0xFFFFFFFF;  // must match VISIBILITY_CLEAR
+    colorAttach.clearValue.color.uint32[1] = 0;
+    colorAttach.clearValue.color.uint32[2] = 0;
+    colorAttach.clearValue.color.uint32[3] = 0;
 
     VkRenderingAttachmentInfo depthAttach{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
     depthAttach.imageView   = visBuf.getDepthView();

@@ -50,15 +50,14 @@ vec2 worldToScreen(vec3 worldPos, mat4 vp, vec2 resolution) {
     return (ndc * 0.5 + 0.5) * resolution;
 }
 
-TriangleData fetchTriangleAndBarycentrics(
+bool fetchTriangleAndBarycentrics(
     SceneGlobalsBuffer globals,
     uint instanceIdx,
     uint triangleIdx,
     vec2 pixelPos,
-    mat4 modelMatrix
+    mat4 modelMatrix,
+    out TriangleData tri
 ) {
-    TriangleData tri;
-
     // Find which meshlet this triangle belongs to by searching the instance's meshlets.
     // The triangleIdx is the gl_PrimitiveID from the mesh shader, which is the
     // primitive index within the mesh shader output. Since each mesh shader workgroup
@@ -76,17 +75,28 @@ TriangleData fetchTriangleAndBarycentrics(
     uint remainingTriangles = triangleIdx;
     uint foundMeshletIdx = 0;
     uint localTriIdx = 0;
+    bool found = false;
 
-    for (uint m = 0; m < meshInfo.meshletCount; m++) {
+    uint meshletCount = meshInfo.meshletCount;
+    // Safety: clamp to a sane maximum to prevent GPU hang on corrupt data
+    meshletCount = min(meshletCount, 4096u);
+
+    for (uint m = 0; m < meshletCount; m++) {
         uint globalMeshletIdx = meshInfo.meshletOffset + m;
         Meshlet meshlet = loadMeshlet(globals.meshletAddr, globalMeshletIdx);
 
         if (remainingTriangles < meshlet.triangleCount) {
             foundMeshletIdx = globalMeshletIdx;
             localTriIdx = remainingTriangles;
+            found = true;
             break;
         }
         remainingTriangles -= meshlet.triangleCount;
+    }
+
+    // If we didn't find the triangle (corrupt data), bail out
+    if (!found) {
+        return false;
     }
 
     // Load the meshlet
@@ -123,7 +133,7 @@ TriangleData fetchTriangleAndBarycentrics(
     // Compute barycentrics at this pixel
     tri.barycentrics = computeBarycentrics(pixelPos + 0.5, sp0, sp1, sp2);
 
-    return tri;
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -222,13 +232,25 @@ void main() {
 
     // Load scene
     SceneGlobalsBuffer globals = SceneGlobalsBuffer(pc.sceneGlobalsAddress);
+
+    // Bounds check: make sure instanceIdx is within range
+    if (instanceIdx >= globals.instanceCount) {
+        imageStore(hdrOutput, pixelCoord, vec4(1.0, 0.0, 1.0, 1.0)); // magenta = error
+        return;
+    }
+
     GPUInstance instance = loadInstance(globals.instanceAddr, instanceIdx);
 
     // Fetch triangle vertices and compute barycentrics
-    TriangleData tri = fetchTriangleAndBarycentrics(
+    TriangleData tri;
+    bool triOk = fetchTriangleAndBarycentrics(
         globals, instanceIdx, triangleIdx,
-        vec2(pixelCoord), instance.modelMatrix
+        vec2(pixelCoord), instance.modelMatrix, tri
     );
+    if (!triOk) {
+        imageStore(hdrOutput, pixelCoord, vec4(1.0, 0.0, 1.0, 1.0)); // magenta = error
+        return;
+    }
 
     // Interpolate surface attributes
     SurfaceAttributes surf = interpolateAttributes(tri, instance.modelMatrix);

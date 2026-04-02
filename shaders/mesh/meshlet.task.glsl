@@ -106,20 +106,6 @@ void main() {
     uint tid = gl_LocalInvocationIndex;
     uint gid = gl_WorkGroupID.x * 32 + tid;
 
-    // DEBUG: emit ONE mesh workgroup with meshlet 0, instance 0
-    if (tid == 0) {
-        payload.count = 1;
-        payload.meshletIndices[0] = 0;
-        payload.instanceIndices[0] = 0;
-    }
-    barrier();
-    if (gl_WorkGroupID.x == 0) {
-        EmitMeshTasksEXT(1, 1, 1);
-    } else {
-        EmitMeshTasksEXT(0, 1, 1);
-    }
-    return;
-
     SceneGlobalsBuffer globals = SceneGlobalsBuffer(pc.sceneGlobalsAddress);
 
     // Bounds check: each workgroup processes 32 meshlets

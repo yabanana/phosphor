@@ -403,16 +403,32 @@ void Engine::render() {
 
     VkExtent2D extent = swapchain_->getExtent();
 
-    // 4. Transition swapchain: UNDEFINED -> COLOR_ATTACHMENT_OPTIMAL for simple pass
+    // 4. Mesh pass: visibility buffer fill via task/mesh shaders
+    {
+        profiler_->beginPass(cmd, "MeshPass");
+        meshPass_->recordPass(cmd, *gpuScene_, *visBuffer_, *camera_,
+                              currentFrame_, exposure_);
+        profiler_->endPass(cmd, "MeshPass");
+    }
+
+    // 5. Material resolve: read vis buffer, do PBR shading, write HDR
+    {
+        profiler_->beginPass(cmd, "MaterialResolve");
+        materialResolve_->resolve(cmd, *visBuffer_, *gpuScene_, *camera_,
+                                  currentFrame_, exposure_);
+        profiler_->endPass(cmd, "MaterialResolve");
+    }
+
+    // 6. HDR -> GENERAL barrier for tonemap input
     {
         VkImageMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
-        barrier.srcStageMask  = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
-        barrier.srcAccessMask = 0;
-        barrier.dstStageMask  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-        barrier.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-        barrier.oldLayout     = VK_IMAGE_LAYOUT_UNDEFINED;
-        barrier.newLayout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        barrier.image         = swapchain_->getImage(imageIndex);
+        barrier.srcStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        barrier.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+        barrier.dstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        barrier.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
+        barrier.oldLayout     = VK_IMAGE_LAYOUT_GENERAL;
+        barrier.newLayout     = VK_IMAGE_LAYOUT_GENERAL;
+        barrier.image         = materialResolve_->getHDRImage();
         barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
         VkDependencyInfo dep{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
@@ -421,17 +437,23 @@ void Engine::render() {
         vkCmdPipelineBarrier2(cmd, &dep);
     }
 
-    // 5. Simple pass: draw torus directly to swapchain with Phong shading
+    // 7. Tonemap: HDR -> LDR with ACES curve
     {
-        profiler_->beginPass(cmd, "SimplePass");
-        glm::mat4 mvp = camera_->getViewProjection();
-        glm::vec3 camPos = camera_->getPosition();
-        simplePass_->recordPass(cmd, swapchain_->getImageView(imageIndex),
-                                extent, swapchain_->getFormat(), mvp, camPos);
-        profiler_->endPass(cmd, "SimplePass");
+        profiler_->beginPass(cmd, "Tonemap");
+        tonemapPass_->apply(cmd, materialResolve_->getHDRView(), exposure_);
+        profiler_->endPass(cmd, "Tonemap");
     }
 
-    // 8. ImGui pass (swapchain is in COLOR_ATTACHMENT_OPTIMAL from composite)
+    // 8. Composite: blit LDR to swapchain
+    {
+        profiler_->beginPass(cmd, "Composite");
+        compositePass_->record(cmd, tonemapPass_->getLDRImage().image, extent,
+                               swapchain_->getImage(imageIndex),
+                               swapchain_->getImageView(imageIndex), extent);
+        profiler_->endPass(cmd, "Composite");
+    }
+
+    // 9. ImGui pass (swapchain is in COLOR_ATTACHMENT_OPTIMAL from composite)
     {
         profiler_->beginPass(cmd, "ImGui");
         imgui_->newFrame();
