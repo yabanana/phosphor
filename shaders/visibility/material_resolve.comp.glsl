@@ -220,7 +220,7 @@ void main() {
     if (visEncoded == VISIBILITY_CLEAR) {
         // Simple sky gradient
         vec2 uv = (vec2(pixelCoord) + 0.5) / vec2(pc.resolution);
-        vec3 skyColor = mix(vec3(0.1, 0.1, 0.15), vec3(0.3, 0.5, 0.8), uv.y);
+        vec3 skyColor = mix(vec3(0.02, 0.02, 0.04), vec3(0.05, 0.08, 0.15), uv.y);
         imageStore(hdrOutput, pixelCoord, vec4(skyColor, 1.0));
         return;
     }
@@ -356,8 +356,10 @@ void main() {
         Lo += evaluatePBR(N, V, L, baseColor.rgb, metallic, roughness, lightColor * attenuation);
     }
 
-    // Ambient (very simple, will be replaced by DDGI)
-    vec3 ambient = vec3(0.03) * baseColor.rgb * occlusion;
+    // Ambient (simple hemisphere — will be replaced by DDGI)
+    float NdotUp = N.y * 0.5 + 0.5;
+    vec3 skyAmbient = mix(vec3(0.02, 0.02, 0.03), vec3(0.08, 0.10, 0.15), NdotUp);
+    vec3 ambient = skyAmbient * baseColor.rgb * occlusion;
 
     vec3 color = ambient + Lo + emissive;
 

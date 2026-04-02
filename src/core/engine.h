@@ -120,6 +120,7 @@ private:
     AAMode      aaMode_      = AAMode::None;
     bool  ddgiEnabled_   = false;
     bool  restirEnabled_ = true;
+    bool  orbitMode_     = false;
     bool  running_       = true;
 };
 

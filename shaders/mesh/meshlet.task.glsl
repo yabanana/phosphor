@@ -167,7 +167,7 @@ void main() {
         // Backface cone test
         bool culledByCone = coneCull(worldConeApex, worldConeAxis, bounds.coneCutoff, pc.cameraPosition.xyz);
 
-        visible = !culledByFrustum && !culledByCone;
+        visible = !culledByFrustum; // cone cull disabled — may be too aggressive
     }
 
     // Compact surviving meshlets using subgroup ballot

@@ -92,7 +92,7 @@ void TorusDemo::setup(ECS& ecs, GpuScene& gpuScene, TextureManager& textures) {
     LightComponent dirLight{};
     dirLight.type      = LightType::Directional;
     dirLight.color     = glm::vec3(1.0f, 0.95f, 0.9f);
-    dirLight.intensity = 5.0f;
+    dirLight.intensity = 3.0f;
     ecs.addComponent(lightEntity, std::move(dirLight));
 
     rotationAngle_ = 0.0f;
@@ -117,9 +117,9 @@ void TorusDemo::teardown(ECS& ecs, [[maybe_unused]] GpuScene& gpuScene) {
 
 CameraSetup TorusDemo::getDefaultCamera() const {
     CameraSetup cam{};
-    cam.position = glm::vec3(0.0f, 3.0f, 6.0f);
-    cam.target   = glm::vec3(0.0f, 1.0f, 0.0f);
-    cam.distance = 5.0f;
+    cam.position = glm::vec3(3.0f, 2.5f, 4.0f);
+    cam.target   = glm::vec3(0.0f, 0.0f, 0.0f);
+    cam.distance = 5.5f;
     cam.orbit    = true;
     return cam;
 }
