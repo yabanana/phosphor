@@ -47,6 +47,7 @@ struct MaterialComponent {
     u32   emissiveTexIndex        = ~0u;
     glm::vec3 emissiveFactor{0.0f};
     float alphaCutoff             = 0.5f;
+    bool  doubleSided             = false; // glTF doubleSided: no back-face culling, two-sided lighting
 };
 
 enum class LightType : u32 {

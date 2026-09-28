@@ -27,6 +27,7 @@ GPUMaterial toGPUMaterial(const MaterialComponent& mat) {
     gm.emissive[1]          = mat.emissiveFactor.y;
     gm.emissive[2]          = mat.emissiveFactor.z;
     gm.alphaCutoff          = mat.alphaCutoff;
+    gm.flags                = mat.doubleSided ? MATERIAL_FLAG_DOUBLE_SIDED : 0u;
     return gm;
 }
 
@@ -80,13 +81,22 @@ void extractFrameScene(ECS& ecs, const GpuScene& scene, FrameScene& out) {
         if (gi.materialIndex >= materialCount) gi.materialIndex = 0;
     }
 
+    auto cullClassOf = [&](const GPUInstance& gi) {
+        if (out.materials[gi.materialIndex].flags & MATERIAL_FLAG_DOUBLE_SIDED) return CullClass::None;
+        return (gi.flags & INSTANCE_FLAG_MIRRORED) ? CullClass::BackMirrored : CullClass::Back;
+    };
+
     std::stable_sort(out.instances.begin(), out.instances.end(),
-                     [](const GPUInstance& a, const GPUInstance& b) { return a.meshIndex < b.meshIndex; });
+                     [&](const GPUInstance& a, const GPUInstance& b) {
+                         if (a.meshIndex != b.meshIndex) return a.meshIndex < b.meshIndex;
+                         return static_cast<u8>(cullClassOf(a)) < static_cast<u8>(cullClassOf(b));
+                     });
 
     for (u32 i = 0; i < out.instances.size(); ++i) {
         const u32 mesh = out.instances[i].meshIndex;
-        if (out.batches.empty() || out.batches.back().meshIndex != mesh) {
-            out.batches.push_back({mesh, i, 0});
+        const CullClass cull = cullClassOf(out.instances[i]);
+        if (out.batches.empty() || out.batches.back().meshIndex != mesh || out.batches.back().cull != cull) {
+            out.batches.push_back({mesh, i, 0, cull});
         }
         ++out.batches.back().instanceCount;
     }
