@@ -72,7 +72,12 @@ extend it; port algorithms from it.
   per-category accounting, deferred release), write per-frame data into
   `context.frameUploads()` and loading-time data through `stagingAllocate` /
   `enqueueUpload` / `flushUploads`. Never call `device->newBuffer/newTexture`
-  elsewhere. Insert explicit stage-to-stage barriers (no hazard tracking).
+  elsewhere. Frame-lifetime intermediates go in `TransientHeap` at offsets
+  chosen by the render graph (aliasing: first use after another resource
+  needs a barrier with `VisibilityOptionResourceAlias`). Insert explicit
+  stage-to-stage barriers (no hazard tracking).
+- Benchmark mode (`--frames`) ignores keyboard/mouse input: the window takes
+  focus at launch; `tools/visual_check.sh` injects input to prove it.
 - Benchmarks report `GPU allocations` during the measured frames: it must be
   0 (rule O7).
 - Builds are signed with `get-task-allow` (`PHOSPHOR_DEBUGGABLE`), so the

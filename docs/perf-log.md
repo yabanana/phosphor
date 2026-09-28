@@ -154,3 +154,44 @@ Nessuna regressione: le differenze stanno nel rumore tra esecuzioni.
 - **Budget** (M5 Max): working set interrogato 107,5 GiB, budget engine
   80,6 GiB; tier rilevato "T2 Max + T3 Neural". Lo Stress Test usa fino a
   18 MiB di upload per frame (48,6 dei 64 MiB dell'anello in volo).
+
+### F1 — chiusura definitiva (audit severo dei residui)
+
+**2026-09-28 (notte)** · `phase/f1` · alimentazione di rete · Release,
+`--no-vsync --no-ui`, 3×600 frame. L'ambiente è tornato non limitato
+(come la baseline F0 del mattino), quindi questa tabella è confrontabile con
+quella della baseline.
+
+| # | Bench | Resolution | FPS | Frame ms (p99) | CPU ms (p99) | GPU ms (p99) | Wait ms (p99) |
+|---|---|---|---|---|---|---|---|
+| 1 | Torus Demo | 3200x1800 | 461 | 2.168 (16.191) | 0.098 (0.168) | 0.878 (1.609) | 2.071 (16.065) |
+| 2 | PBR Material Grid | 3200x1800 | 470 | 2.129 (15.394) | 0.113 (0.185) | 0.8 (0.989) | 2.015 (15.18) |
+| 3 | Stress Test (100K) | 3200x1800 | 266 | 3.758 (18.072) | 2.853 (3.119) | 2.181 (3.031) | 0.881 (15.245) |
+| 4 | Scene Viewer (glTF) | 3200x1800 | 478 | 2.094 (14.15) | 0.085 (0.198) | 0.873 (1.327) | 2.008 (13.962) |
+| 5 | Many Lights (1024) | 3200x1800 | 18 | 54.625 (116.693) | 0.102 (0.209) | 101.323 (160.207) | 54.515 (116.515) |
+| 6 | Cornell Box (GI) | 3200x1800 | 478 | 2.09 (16.731) | 0.095 (0.162) | 0.625 (0.777) | 1.993 (16.583) |
+| 7 | Culling Visualization | 3200x1800 | 417 | 2.4 (16.766) | 0.889 (1.161) | 1.235 (2.278) | 1.51 (15.653) |
+
+Rispetto alla baseline F0 (a batteria): nessuna regressione; Stress Test
+CPU 2,85 ms (F0: 2,99), GPU 2,18 ms (F0: 3,04).
+
+Residui trovati dall'audit e chiusi:
+- **F1.1 heap transitorio** (la casella era stata spuntata con l'heap
+  rimandato a F2.2): `TransientHeap` + `--transient-test` → buffer e
+  texture sovrapposti con barriera `ResourceAlias` letti correttamente,
+  sovrapposizione reale della memoria verificata. PASS, validazione a zero.
+- **Dimensioni dei pool dal budget** (erano costanti "per tier in F1.4"):
+  su M5 Max anello frame 128 MiB, staging 256 MiB, pagine heap 128 MiB;
+  16 MiB sulle macchine piccole (test in `test_memory_budget.cpp`).
+- **Heap di riserva purgeable** (previsto dal piano per F1.5): lo heap vuoto
+  tenuto dopo un trim è `Volatile`, torna `NonVolatile` prima del riuso.
+- **Fallimenti intermittenti del visual check**: benchmark e catture
+  reagivano a tastiera/mouse (la finestra prende il focus all'avvio):
+  riprodotto con `--inject-input` (filtro spento → PSNR 9–11 dB), risolto
+  ignorando l'input in modalità benchmark; `visual_check.sh` ora inietta
+  sempre input. 5 visual check consecutivi puliti.
+- **Heap CPU**: +3.200…+3.600 blocchi indipendentemente da 600 o 6.000 frame
+  e dall'input iniettato: fluttuazione limitata, nessuna crescita per frame.
+- Instruments: la traccia Allocations si registra senza `sudo` ma non è
+  esportabile da riga di comando; il criterio è verificato con
+  `malloc_history` (−3 allocazioni vive nel frame loop, vedi sopra).

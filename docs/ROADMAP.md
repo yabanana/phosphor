@@ -231,7 +231,7 @@ prime misure di velocità reali.
 
 **Obiettivo**: controllo totale della memoria GPU, zero allocazioni nel frame (O7).
 
-- [x] F1.1 Heap `MTLHeapTypePlacement` per risorse transitorie; sub-allocatore TLSF per buffer persistenti (heap placement + TLSF per tutte le risorse private; l'heap transitorio arriva con F2.2)
+- [x] F1.1 Heap `MTLHeapTypePlacement` per risorse transitorie; sub-allocatore TLSF per buffer persistenti (heap placement + TLSF per tutte le risorse private; `TransientHeap` con aliasing verificato da `--transient-test`, usato dal grafo in F2.2)
 - [x] F1.2 Anelli di upload per frame con suballocazione lineare (sostituiscono `UploadBuffer` di F0)
 - [x] F1.3 Residency: set statico + set per-streaming, aggiornamento incrementale e batch di `commit()`
 - [x] F1.4 Budget di memoria per tier, statistiche live (per heap, per categoria) in ImGui

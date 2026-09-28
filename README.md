@@ -86,6 +86,8 @@ validation.
 | `--switch-every N` | Cycle to the next bench every N frames (same path as the 1–7 keys) |
 | `--memory-stress N` | Create/destroy N GPU resources and check memory returns to baseline (exit 1 on failure) |
 | `--simulate-pressure` | Inject memory-pressure warning/critical events |
+| `--transient-test` | Aliasing self-test of the transient heap (exit 1 on failure) |
+| `--inject-input` | Push synthetic key/mouse events every frame (benchmarks must ignore them) |
 
 Baseline numbers live in [`docs/perf-log.md`](docs/perf-log.md); measure them
 on a Release build without validation:

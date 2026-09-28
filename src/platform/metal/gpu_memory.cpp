@@ -48,8 +48,12 @@ GpuMemory::~GpuMemory() {
 bool GpuMemory::place(u64 size, u64 align, ResidencyClass cls, Placement& out) {
     for (u32 i = 0; i < heaps_.size(); ++i) {
         if (!heaps_[i].heap || heaps_[i].cls != cls) continue;
+        const bool wasEmpty = heaps_[i].tlsf.stats().allocationCount == 0;
         const TlsfAllocator::Allocation a = heaps_[i].tlsf.allocate(size, align);
         if (a.valid()) {
+            // A spare heap may have been left volatile by trimEmptyHeaps():
+            // take it back before placing anything in it.
+            if (wasEmpty) heaps_[i].heap->setPurgeableState(MTL::PurgeableStateNonVolatile);
             out = {i, a.handle, a.offset};
             return true;
         }
@@ -251,6 +255,9 @@ u64 GpuMemory::trimEmptyHeaps(bool keepSpare) {
         if (h.tlsf.stats().allocationCount != 0) continue;
         if (keepSpare && !spare) { // keep one empty heap per class for the next level
             spare = true;
+            // Empty and cheap to lose: let the OS reclaim it under memory
+            // pressure (F1.5); place() makes it non-volatile before reuse.
+            h.heap->setPurgeableState(MTL::PurgeableStateVolatile);
             continue;
         }
         freed += h.heap->size();
