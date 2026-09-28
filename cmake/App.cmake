@@ -25,6 +25,22 @@ target_compile_definitions(imgui PUBLIC IMGUI_IMPL_METAL_CPP)
 target_link_libraries(imgui PUBLIC SDL3::SDL3 metal_cpp)
 # imgui_impl_metal.mm (v1.91) uses manual retain/release: compile without ARC.
 
+# --- Metal toolchain check ---
+# Since Xcode 26 the Metal compiler ships as a separate component; fail at
+# configure time with the fix instead of halfway through the build.
+execute_process(
+    COMMAND xcrun -sdk macosx metal --version
+    RESULT_VARIABLE _metal_rc
+    OUTPUT_QUIET ERROR_QUIET
+)
+if(NOT _metal_rc EQUAL 0)
+    message(FATAL_ERROR
+        "The Metal Toolchain is not installed, so shaders cannot be compiled.\n"
+        "Install it with:\n"
+        "    xcodebuild -downloadComponent MetalToolchain\n"
+        "then re-run CMake.")
+endif()
+
 # --- Shaders: .metal -> .air -> phosphor.metallib ---
 file(GLOB PHOSPHOR_METAL_SHADERS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*.metal)
 set(PHOSPHOR_SHADER_OUT ${CMAKE_BINARY_DIR}/shaders)
