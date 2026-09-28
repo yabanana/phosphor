@@ -264,8 +264,29 @@ void Engine::switchTestBench(TestBenchType type) {
 
     textures_->flushUploads();
     renderer_->syncGeometry(*gpuScene_);
+    // The previous bench's resources are unused now: free their heap ranges
+    // and give back heaps that became empty.
+    context_->collectGarbage();
+    context_->memory().trimEmptyHeaps();
+    logMemory();
     aimCamera(activeBench_->getDefaultCamera());
     pool->release();
+}
+
+void Engine::logMemory() const {
+    const GpuMemory& memory = context_->memory();
+    u64 heapBytes = 0, heapUsed = 0;
+    float fragmentation = 0.0f;
+    const auto heaps = memory.heapStats();
+    for (const auto& h : heaps) {
+        heapBytes += h.size;
+        heapUsed += h.tlsf.usedBytes;
+        fragmentation = std::max(fragmentation, h.tlsf.fragmentation());
+    }
+    LOG_INFO("GPU memory: %.1f MiB in use; %zu placement heaps, %.1f of %.1f MiB used, max fragmentation %.2f",
+             static_cast<double>(memory.totalBytes()) / (1 << 20), heaps.size(),
+             static_cast<double>(heapUsed) / (1 << 20), static_cast<double>(heapBytes) / (1 << 20),
+             fragmentation);
 }
 
 void Engine::aimCamera(const CameraSetup& setup) {

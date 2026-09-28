@@ -68,6 +68,8 @@ public:
     [[nodiscard]] bool                isApple9OrLater() const { return apple9_; }
     /// GPU time of the most recently completed frame command buffer.
     [[nodiscard]] float               lastGpuMs() const { return lastGpuMs_.load(std::memory_order_relaxed); }
+    /// Index of the frame being recorded, or of the next one between frames.
+    [[nodiscard]] u64                 frameIndex() const { return frameIndex_; }
 
     [[nodiscard]] GpuMemory&  memory()       { return *memory_; }
     [[nodiscard]] UploadRing& frameUploads() { return *frameUploads_; }
@@ -118,6 +120,10 @@ public:
 
     /// Block until every submitted frame has completed.
     void waitIdle();
+
+    /// waitIdle() and release every deferred object now.  Only between frames
+    /// (nothing recorded yet may reference them), e.g. on a bench switch.
+    void collectGarbage();
 
 private:
     void flushResidency();

@@ -155,6 +155,7 @@ void MetalContext::releaseCompleted(u64 completedFrame) {
         p.object->release();
     }
     pendingReleases_.resize(kept);
+    if (memory_) memory_->releaseCompleted(completedFrame);
 }
 
 void MetalContext::flushResidency() {
@@ -300,6 +301,11 @@ void MetalContext::submitAndWait(const std::function<void(MTL4::ComputeCommandEn
     if (!uploadEvent_->waitUntilSignaledValue(uploadValue_, kWaitTimeoutMs)) {
         LOG_ERROR("GPU timeout waiting for upload");
     }
+}
+
+void MetalContext::collectGarbage() {
+    waitIdle();
+    releaseCompleted(~u64{0});
 }
 
 void MetalContext::waitIdle() {

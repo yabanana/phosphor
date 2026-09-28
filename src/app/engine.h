@@ -48,6 +48,7 @@ private:
     void handleShortcuts();
     void switchTestBench(TestBenchType type);
     void aimCamera(const CameraSetup& setup);
+    void logMemory() const;
     /// Simulate and render one frame; false if nothing was presented.
     bool frame(float dt);
     void recordBenchmarkFrame(float dt, float cpuMs, float waitMs);
