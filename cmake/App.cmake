@@ -23,8 +23,7 @@ target_include_directories(imgui SYSTEM PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURC
 # Expose the metal-cpp overloads of the Metal backend (MTL::Device* etc.).
 target_compile_definitions(imgui PUBLIC IMGUI_IMPL_METAL_CPP)
 target_link_libraries(imgui PUBLIC SDL3::SDL3 metal_cpp)
-set_source_files_properties(${imgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
-    PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+# imgui_impl_metal.mm (v1.91) uses manual retain/release: compile without ARC.
 
 # --- Shaders: .metal -> .air -> phosphor.metallib ---
 file(GLOB PHOSPHOR_METAL_SHADERS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*.metal)
