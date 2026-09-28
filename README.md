@@ -28,7 +28,11 @@ The original Vulkan renderer is archived in [`legacy/vulkan/`](legacy/vulkan/REA
 
 The full implementation plan — 38 phases in seven eras, each with tasks, exit
 criteria and a cross-cutting ultra-optimisation track — is in
-[`docs/ROADMAP.md`](docs/ROADMAP.md) (Italian).
+[`docs/ROADMAP.md`](docs/ROADMAP.md) (Italian). After every era, dedicated
+**OPT phases** (OPT-0…OPT-15) do nothing but optimise, using research
+([`docs/RESEARCH_REFERENCES.md`](docs/RESEARCH_REFERENCES.md)) and a
+component-by-component guide to squeezing Apple silicon
+([`docs/APPLE_SOC_PLAYBOOK.md`](docs/APPLE_SOC_PLAYBOOK.md)).
 
 | Era | Phases | Content |
 |---|---|---|

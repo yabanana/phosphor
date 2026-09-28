@@ -6,6 +6,11 @@ Implementation plan (phases F0–F38, tasks, exit criteria, optimisation rules
 O1–O12): `docs/ROADMAP.md` — cite task IDs (e.g. `F7.3`) in commits, tick a
 task only once it is verified on the device, and log measurements in
 `docs/perf-log.md`. The report's older "F1–F5" numbering is superseded by it.
+After each era come OPT phases (OPT-0…OPT-15): optimisation only, driven by
+research (`docs/RESEARCH_REFERENCES.md`, keys `[Rn]`) and by the SoC playbook
+(`docs/APPLE_SOC_PLAYBOOK.md`, item IDs like `S-TBDR-3`, benchmarks `B-xx`).
+Record every OPT spike, successful or not, in `docs/opt-log.md`. Never state
+an undocumented hardware number as fact: measure it with `bench/`.
 The Vulkan renderer in `legacy/vulkan/` is reference only — never build or
 extend it; port algorithms from it.
 

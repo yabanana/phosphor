@@ -6,6 +6,8 @@ all'ultimo byte di banda**, pensato per giochi che girano solo su piattaforme Ap
 
 Riferimenti:
 - motivazioni tecniche → [`reports/Engine AAA nativo per Apple Silicon.md`](../reports/Engine%20AAA%20nativo%20per%20Apple%20Silicon.md) e `research_notes/`
+- come spremere ogni componente del SoC → [`APPLE_SOC_PLAYBOOK.md`](APPLE_SOC_PLAYBOOK.md)
+- bibliografia delle fasi OPT (`[Rn]`) → [`RESEARCH_REFERENCES.md`](RESEARCH_REFERENCES.md)
 - regole per le sessioni AI → [`CLAUDE.md`](../CLAUDE.md)
 
 ---
@@ -25,6 +27,10 @@ Riferimenti:
    funzione ha un percorso T0 misurato su hardware reale.
 6. **Spike di ricerca espliciti.** Le idee non provate diventano un prototipo
    a tempo con criterio "adotta / rimanda / scarta", mai un ramo infinito.
+7. **Spremere il SoC fino alla noia.** Dopo ogni era, fasi OPT dedicate solo
+   all'ottimizzazione: ricerca scientifica applicata e verifica sistematica di
+   ogni componente del chip (ALU, registri, tile memory, cache, texture, RT,
+   Neural Accelerator, CPU, ANE, I/O, energia), misurato e non assunto.
 
 ---
 
@@ -36,6 +42,7 @@ Riferimenti:
   - **[CORE]** indispensabile per avere un engine funzionante
   - **[AAA]** necessaria per qualità da gioco AAA
   - **[EDGE]** bleeding edge / ricerca: alto rischio, alto ritorno, sempre con fallback
+  - **[OPT]** fase di sola ottimizzazione: ricerca + spremitura del SoC su ciò che l'era ha costruito (vedi "Fasi OPT: metodo comune")
 - Ogni task ha un ID (`F7.3`) da citare in commit e PR; la casella si spunta
   solo quando il task è **verificato sul dispositivo**, non solo scritto.
 - **Definizione di "fase chiusa"**: criteri di uscita misurati e annotati in
@@ -91,6 +98,32 @@ Non è una fase: sono regole che **ogni** fase deve rispettare e verificare.
 
 ---
 
+## Fasi OPT: metodo comune
+
+Dopo ogni era ci sono una o più fasi **OPT** [OPT]. Il loro **unico
+obiettivo** è rendere più veloce, più leggero e più efficiente ciò che
+l'era ha appena costruito, con soluzioni prese dalla ricerca (paper, talk di
+produzione) e con la **spremitura sistematica del SoC** descritta in
+[`APPLE_SOC_PLAYBOOK.md`](APPLE_SOC_PLAYBOOK.md). Una fase OPT non aggiunge
+funzionalità visibili: aggiunge millisecondi, byte e watt risparmiati.
+
+**Protocollo di ogni fase OPT**
+
+1. **Baseline**: misure di fine era su T0 e T2 (`--bench`, contatori, `powermetrics`) in `docs/perf-log.md`.
+2. **Diagnosi**: modello roofline per pass ([R4], dati di `bench/`): limitato da ALU, banda, latenza, occupancy o sincronizzazione? Per ogni shader caldo: occupancy target e causa di throttling (S-OCC-2).
+3. **Letture**: i riferimenti `[Rn]` della fase in [`RESEARCH_REFERENCES.md`](RESEARCH_REFERENCES.md) e le voci del playbook citate. Claude può riassumerli e proporre come adattarli ad Apple.
+4. **Spike a tempo** (massimo 1–2 settimane ciascuno) su branch `opt/<id>`, dietro un flag attivabile a runtime.
+5. **Criterio di adozione**: almeno −10% sul pass o −3% sul frame **su T0**, nessuna regressione su T2, qualità invariata (FLIP [R84] sotto soglia sui testbench), energia non peggiorata.
+6. **Registro**: ogni spike, riuscito o fallito, in `docs/opt-log.md` (ipotesi, misure, decisione). I fallimenti valgono quanto i successi: evitano di ripetere strade morte.
+7. **Spremitura del SoC**: ogni fase OPT chiude **tutte** le voci "Spremitura del SoC" elencate, anche quando le direzioni di ricerca non portano guadagni.
+
+Le percentuali obiettivo delle fasi OPT sono **ipotesi di partenza**, da
+ricalibrare con le misure di OPT-0. Le direzioni marcate **(idea Phosphor)**
+sono combinazioni nostre non trovate in letteratura: vanno trattate come
+ipotesi da validare con uno spike, non come tecniche già provate.
+
+---
+
 ## Panoramica
 
 | # | Fase | Tag | Era |
@@ -100,16 +133,23 @@ Non è una fase: sono regole che **ogni** fase deve rispettare e verificare.
 | F2 | Render graph e sincronizzazione automatica | CORE | I |
 | F3 | Pipeline: compilazione asincrona e archivi AOT | CORE | I |
 | F4 | Osservabilità: profiler, contatori, cattura, perf log | CORE | I |
+| OPT-0 | Caratterizzazione del SoC (`bench/`, modello di costo) | OPT | I |
+| OPT-1 | Memoria, grafo e banda come problema di ottimizzazione | OPT | I |
+| OPT-2 | Shader, pipeline e occupancy | OPT | I |
 | F5 | GPU scene persistente e submission guidata dalla GPU | CORE | II · Geometria |
 | F6 | Mesh shader e culling a due fasi | CORE | II |
 | F7 | Visibility buffer e shading ibrido TBDR | CORE | II |
 | F8 | HDR, EDR, esposizione e MetalFX temporal | CORE | II |
+| OPT-3 | Geometria, culling e dati di vertice | OPT | II |
+| OPT-4 | Shading, banda e ricostruzione | OPT | II |
 | F9 | Infrastruttura ray tracing | CORE | III · Luce |
 | F10 | Ombre ibride (CSM, RT, contact) | AAA | III |
 | F11 | Migliaia di luci: ReSTIR DI, luci ad area ed emissive | AAA | III |
 | F12 | Illuminazione globale: DDGI → radiance cache | AAA | III |
 | F13 | Riflessioni, AO e denoiser MetalFX | AAA | III |
 | F14 | Cielo, atmosfera, nuvole volumetriche, meteo | AAA | III |
+| OPT-5 | Budget di raggi e campionamento | OPT | III |
+| OPT-6 | Illuminazione globale, cache e ammortamento | OPT | III |
 | F15 | Materiali avanzati e generazione delle varianti shader | AAA | IV · Mondo |
 | F16 | Trasparenze on-tile, particelle GPU, VFX | AAA | IV |
 | F17 | Post-processing cinematografico | AAA | IV |
@@ -118,11 +158,15 @@ Non è una fase: sono regole che **ogni** fase deve rispettare e verificare.
 | F20 | Acqua, oceano e fluidi | EDGE | IV |
 | F21 | Asset pipeline e cooker | CORE | IV |
 | F22 | Streaming: MTLIO, sparse, virtual texturing | CORE | IV |
+| OPT-7 | Geometria virtualizzata e mondo | OPT | IV |
+| OPT-8 | Streaming, texture e materiali | OPT | IV |
 | F23 | CPU ultra-ottimizzata: job system, QoS, NEON, SME | CORE | V · Simulazione (parallela) |
 | F24 | Fisica, cloth e distruzione (Jolt + GPU) | AAA | V (parallela) |
 | F25 | Animazione, skinning GPU, capelli a filamenti | AAA | V (parallela) |
 | F26 | Audio spaziale e acustica in ray tracing | EDGE | V (parallela) |
 | F27 | Runtime di gioco: ECS, input, scripting, rete | CORE | V (parallela) |
+| OPT-9 | CPU, thread e memoria unificata | OPT | V |
+| OPT-10 | Simulazione | OPT | V |
 | — | *Checkpoint WWDC 2027* | — | — |
 | F28 | Scalabilità: preset, DRS, rate map, frame interpolation, termica | CORE | VI · Frontiera |
 | F29 | Autotuning per dispositivo | EDGE | VI |
@@ -130,28 +174,37 @@ Non è una fase: sono regole che **ogni** fase deve rispettare e verificare.
 | F31 | Rendering neurale II: reti addestrate in casa con MLX | EDGE | VI |
 | F32 | Path tracing in tempo reale e riferimento | EDGE | VI |
 | F33 | Gaussian splatting ibrido | EDGE | VI |
+| OPT-11 | Rendering neurale | OPT | VI |
+| OPT-12 | Autotuning, path tracing, splatting | OPT | VI |
+| OPT-13 | Scalabilità ed energia | OPT | VI |
 | F34 | Editor e strumenti di contenuto | CORE | VII · Prodotto |
 | F35 | QA automatizzata: test visivi, perf bot, replay | CORE | VII |
 | F36 | Piattaforme: iPad, iPhone Pro, visionOS | AAA | VII |
 | F37 | Vertical slice | CORE | VII |
 | F38 | Distribuzione e live ops | CORE | VII |
+| OPT-14 | QA delle prestazioni e ottimizzazione continua | OPT | VII |
+| OPT-15 | Avvio, dimensioni e distribuzione | OPT | VII |
 
 ### Calendario indicativo e percorso critico
 
 | Periodo | Linea principale (rendering) | Linea parallela (runtime/strumenti) |
 |---|---|---|
 | ott–nov 2026 | F1, F2, F3, F4 | — |
-| dic 2026 – feb 2027 | F5, F6, F7, F8 | F21 (cooker minimo) |
-| mar – mag 2027 | F9, F10, F11, F12, F13 | F23, F27 |
-| giu 2027 | **Checkpoint WWDC 2027** | F24 |
-| giu – set 2027 | F14, F15, F16, F17, F18, F22 | F25, F34 |
-| ott – dic 2027 | F28, F30, F32 (T3), F37 | F35 |
-| 2028 | F19, F20, F26, F29, F31, F33, F36, F38 | — |
+| dic 2026 | **OPT-0, OPT-1, OPT-2** | F21 (cooker minimo) |
+| gen–feb 2027 | F5, F6, F7, F8 | F21 |
+| mar 2027 | **OPT-3, OPT-4** | F23 |
+| apr–giu 2027 | F9, F10, F11, F12, F13 + **checkpoint WWDC 2027** | F27, F24 |
+| lug 2027 | F14, **OPT-5, OPT-6** | **OPT-9** |
+| ago–ott 2027 | F15, F16, F17, F18, F22 | F25, F34 |
+| nov 2027 | **OPT-7, OPT-8** | **OPT-10** |
+| dic 2027 | F28, F30, F32 (T3), F37 (prima versione) | F35 |
+| 2028 | F19, F20, F26, F29, F31, F33, F36, F38, **OPT-11 … OPT-15** | — |
 
 **Percorso critico per "SOTA entro fine 2027"**: F1→F8 (fondamenta e
 geometria GPU-driven), F9→F13 (luce in ray tracing con radiance cache e
 MetalFX), F18 + F22 (geometria virtualizzata in streaming), F28 (scalabilità),
-F30 + F32 (neurale e path tracing sui T3), F37 (vertical slice).
+F30 + F32 (neurale e path tracing sui T3), F37 (vertical slice), **più le
+fasi OPT-0…OPT-8**: senza di loro i budget del tier T0 non si raggiungono.
 Le fasi [EDGE] fuori dal percorso critico sono il vantaggio competitivo del
 2028: si iniziano come spike appena i prerequisiti esistono.
 
@@ -231,6 +284,69 @@ prime misure di velocità reali.
 
 ---
 
+## OPT-0 — Caratterizzazione del SoC [OPT]
+
+**Obiettivo**: conoscere i chip su cui giriamo meglio di qualunque documento
+pubblico. Senza questi numeri tutte le fasi OPT successive tirano a indovinare.
+
+**Spremitura del SoC**
+- [ ] OPT-0.1 Suite `bench/` con i microbenchmark B-01…B-28 del playbook, eseguibile da CLI, risultati in `bench/results/<chip>-<os>.json`
+- [ ] OPT-0.2 Esecuzione su M5 Max e su almeno un T0 (M3/M4 base); poi su ogni Mac disponibile
+- [ ] OPT-0.3 **Modello di costo** Phosphor: tabella per chip con throughput ALU FP16/FP32, banda per livello, dimensione stimata di SLC, costo di barriere, dispatch, load/store, raggi/s, GEMM per tile
+- [ ] OPT-0.4 Grafici roofline per chip (tetto di banda e di calcolo) su cui collocare ogni pass
+- [ ] OPT-0.5 Verifica delle voci **(ipotesi)** del playbook: correggere il playbook con i dati misurati
+- [ ] OPT-0.6 Soglie critiche misurate: partial render (B-12), punto di thrashing dei registri (B-04), dimensione massima dell'imageblock (B-15)
+
+**Uscita**: modello di costo pubblicato in `docs/soc-model.md` e usato come
+input da render graph (OPT-1) e autotuning (F29).
+
+## OPT-1 — Memoria, grafo e banda come problema di ottimizzazione [OPT]
+
+**Obiettivo (ipotesi)**: −25% di byte DRAM per frame e −20% di memoria di
+picco rispetto alla fine di F4, su T0 e T2.
+
+**Letture**: [R1] [R2] [R3] [R4]; playbook S-TBDR-*, S-MEM-*, S-SYNC-*.
+
+**Direzioni di ricerca**
+- [ ] OPT-1.1 **Render graph risolto come problema di ottimizzazione**: ordinamento dei pass, aliasing e fusione dei pass TBDR formulati come programma lineare intero misto (MILP), risolto offline per ogni preset di qualità; a runtime si carica il piano ottimo invece di usare euristiche greedy [R1][R2]. Stesso approccio che Checkmate usa per i tensori [R3] e che [R12] usa per le triangle strip
+- [ ] OPT-1.2 **Rematerializzazione TBDR** (idea Phosphor, ispirata a [R3]): per ogni risorsa il grafo sceglie se scriverla in DRAM o **ricalcolarla nella tile** quando serve, minimizzando i byte (O1). Il visibility buffer è un caso particolare di questa idea: generalizzarla a tutti i segnali economici
+- [ ] OPT-1.3 Aliasing ottimo con colorazione di grafi degli intervalli di vita, vincolata ai formati che preservano la compressione lossless (S-TEX-2)
+- [ ] OPT-1.4 Barriere minime: raggruppamento, scelta intra-encoder vs coda sulla base dei costi misurati (B-18) come pesi del solver di OPT-1.1
+
+**Spremitura del SoC**
+- [ ] OPT-1.5 Mappa dei byte DRAM per pass (contatori) e verifica del budget per tier (S-MEM-1)
+- [ ] OPT-1.6 Ogni intermedio candidato a `memoryless` verificato; ogni `.store` giustificato (S-TBDR-4)
+- [ ] OPT-1.7 Working set dei pass compute dimensionati per restare nella SLC misurata (S-MEM-2)
+- [ ] OPT-1.8 Sovrapposizione tra pass misurata e massimizzata riordinando geometria e fragment (S-TBDR-6)
+- [ ] OPT-1.9 Seconda coda MTL4 per compute asincrono dove B-19 mostra guadagno (S-SYNC-2)
+- [ ] OPT-1.10 Anelli di upload in `shared` write-combined; tutti i dati letti spesso in `private` (S-MEM-3)
+
+**Uscita**: obiettivo di banda raggiunto o scostamento spiegato in `docs/opt-log.md`.
+
+## OPT-2 — Shader, pipeline e occupancy [OPT]
+
+**Obiettivo (ipotesi)**: occupancy target ≥ 90% per tutti gli shader caldi,
+−15% di tempo GPU totale a parità di immagine.
+
+**Letture**: [R5] [R6] [R7]; playbook S-ALU-*, S-OCC-*, S-SIMD-*.
+
+**Direzioni di ricerca**
+- [ ] OPT-2.1 **Shader LOD automatico**: varianti semplificate degli shader generate con tecniche di semplificazione automatica [R5][R6] e usate dove l'errore non si vede (oggetti lontani, riflessioni, GI, tier bassi)
+- [ ] OPT-2.2 **Specializzazione guidata dal profilo**: registrare durante i test quali combinazioni di feature compaiono davvero e generare varianti (function constant) solo per quelle (O11)
+- [ ] OPT-2.3 **Roofline automatica**: strumento che da counter heap e contatori calcola intensità aritmetica e collo di bottiglia per pass e lo mostra in ImGui [R4]
+- [ ] OPT-2.4 Riscrittura ILP-friendly dei kernel più caldi (più catene indipendenti, niente `float4` che maschera dipendenze) [R7]
+
+**Spremitura del SoC**
+- [ ] OPT-2.5 Censimento dei registri vivi per riga (Xcode 26.4+) per ogni shader caldo; riduzione dei picchi (S-OCC-1)
+- [ ] OPT-2.6 Tabella occupancy target + causa di throttling per shader, con correzione mirata (S-OCC-2)
+- [ ] OPT-2.7 Conversione sistematica a `half` con suffisso `h`, verificata dai test visivi (S-ALU-3)
+- [ ] OPT-2.8 Strength reduction: niente div/mod interi nei cicli caldi, trascendentali `half`/`fast::` dove accettabile (S-ALU-4)
+- [ ] OPT-2.9 Sweep delle dimensioni di threadgroup per ogni kernel e per chip, risultati salvati per l'autotuning (S-OCC-3)
+- [ ] OPT-2.10 Compattazioni e riduzioni riscritte con intrinsics SIMD-group (S-SIMD-1)
+- [ ] OPT-2.11 Tempo di compilazione e numero di varianti misurati; pruning delle varianti mai usate
+
+---
+
 # Era II — Geometria GPU-driven
 
 ## F5 — GPU scene persistente e submission guidata dalla GPU [CORE]
@@ -281,6 +397,53 @@ prime misure di velocità reali.
 - [ ] F8.5 Sharpening adattivo e mip bias corretto per la risoluzione di render
 
 **Uscita**: stabilità temporale senza ghosting visibile sui testbench in movimento; misure base per ricalibrare i budget.
+
+---
+
+## OPT-3 — Geometria, culling e dati di vertice [OPT]
+
+**Obiettivo (ipotesi)**: −30% di tempo nel culling + raster del visibility
+buffer e −40% di byte di geometria letti per frame rispetto alla fine di F8.
+
+**Letture**: [R9] [R10] [R11] [R12] [R13] [R14] [R22]; playbook S-GEO-*, S-TBDR-3.
+
+**Direzioni di ricerca**
+- [ ] OPT-3.1 **Meshlet compressi decompressi nel mesh shader**: triangle strip generalizzate ottime [R12] e formato denso stile DGF [R13], confrontati con il codec di meshoptimizer; meno byte per triangolo letti dalla DRAM
+- [ ] OPT-3.2 **Quantizzazione aggressiva**: posizioni a 16 bit relative al cluster, normali e tangenti ottaedriche [R14], UV `half`; attributi letti solo nel resolve
+- [ ] OPT-3.3 **Occlusion culling ibrido CPU+GPU su memoria unificata** (idea Phosphor): rasterizzazione software degli occluder sui P-core liberi con NEON [R10], risultato letto dalla GPU senza copie per scartare istanze prima del Hi-Z
+- [ ] OPT-3.4 Strategie di generazione dei meshlet confrontate sul nostro hardware [R11]; coni di normali più stretti
+- [ ] OPT-3.5 **Tessellation adattiva in compute** [R22] per superfici lisce invece di geometria densa precalcolata
+- [ ] OPT-3.6 Culling incrementale: su camera ferma o quasi ferma, riuso della lista visibile e test solo dei cluster cambiati [R9]
+
+**Spremitura del SoC**
+- [ ] OPT-3.7 Dimensione dei meshlet e massimi dichiarati calibrati per chip con B-16 (S-GEO-1)
+- [ ] OPT-3.8 Soglia del parameter buffer (B-12) mai superata nei testbench; attributi nel pass di raster ridotti al minimo (S-TBDR-3)
+- [ ] OPT-3.9 Percorso Apple10: Hi-Z con riduzione min/max nel sampler, ICB estesi, valori per-vertex non interpolati (S-GEO-4, S-GEO-5)
+- [ ] OPT-3.10 Soglie di LOD diverse per M3/M4 e M5 (geometria 2x su M5, S-GEO-2)
+- [ ] OPT-3.11 Compattazione dei meshlet visibili con prefix sum SIMD-group, nessun atomico globale per thread (S-SIMD-1, S-SIMD-4)
+
+## OPT-4 — Shading, banda e ricostruzione [OPT]
+
+**Obiettivo (ipotesi)**: −25% di tempo nel material resolve e nel post, a
+qualità percepita invariata.
+
+**Letture**: [R15] [R16] [R17] [R18] [R19] [R20] [R21]; playbook S-TEX-*, S-TBDR-*, S-SIMD-2.
+
+**Direzioni di ricerca**
+- [ ] OPT-4.1 **Shading disaccoppiato / texel shading** [R16][R17] per superfici costose: ombreggiare in spazio texture a frequenza ridotta e riusare tra frame
+- [ ] OPT-4.2 **Variable rate shading software sul visibility buffer** [R18], con la frequenza decisa da un predittore dell'errore visivo appreso [R21]; su Apple anche con rasterization rate map per i pass raster
+- [ ] OPT-4.3 **Catene di mip in un solo dispatch** (stile SPD [R20]) per Hi-Z, bloom, esposizione: meno pass, meno banda
+- [ ] OPT-4.4 Resolve per tile classificate con uno shader specializzato per classe di materiale e salto dei rami con `simd_all/any` [R15]
+- [ ] OPT-4.5 **Spike deferred on-tile vs V-buffer** ripetuto con i dati di OPT-0: per ogni tier scegliere la combinazione migliore (anche ibrida: V-buffer per la geometria, lighting on-tile)
+- [ ] OPT-4.6 Ricostruzione temporale: rapporto qualità/costo della risoluzione interna con MetalFX per ogni tier [R19]
+
+**Spremitura del SoC**
+- [ ] OPT-4.7 Formati intermedi ridotti (R11G11B10F, RGB9E5, `half`) dove i test visivi lo consentono (S-TEX-1)
+- [ ] OPT-4.8 Output compute scritti a blocchi interi per la compressione universale di M5; contatore "write inefficiency" a zero (S-TEX-2)
+- [ ] OPT-4.9 Compressione disattivata sulle texture ad accesso sparso dopo misura del Compression Ratio (S-TEX-2)
+- [ ] OPT-4.10 Mip bias corretto per MetalFX; mip più bassi per effetti a bassa frequenza (S-TEX-3)
+- [ ] OPT-4.11 MSAA 4x memoryless valutato per UI e vegetazione in alpha-to-coverage (S-TBDR-8)
+- [ ] OPT-4.12 Uscita EDR con headroom interrogato e tonemapping adattato al display (S-DISP-2)
 
 ---
 
@@ -340,6 +503,52 @@ prime misure di velocità reali.
 - [ ] F14.3 **Nuvole volumetriche** raymarched (approccio stile Nubis) con ricostruzione temporale a bassa risoluzione
 - [ ] F14.4 Ciclo giorno/notte, luna e stelle
 - [ ] F14.5 **[EDGE]** Meteo dinamico: pioggia (particelle + superfici bagnate), neve con accumulo, fulmini come luci ReSTIR
+
+---
+
+## OPT-5 — Budget di raggi e campionamento [OPT]
+
+**Obiettivo (ipotesi)**: stessa qualità dopo il denoiser con −40% di raggi
+per frame rispetto alla fine di F14.
+
+**Letture**: [R23]–[R36] [R42] [R43]; playbook S-RT-*, S-NA-4.
+
+**Direzioni di ricerca**
+- [ ] OPT-5.1 **ReSTIR architettato per la produzione** [R23]: reservoir compatti in `half`, accessi coerenti; scelta dei vicini guidata dalla compatibilità [R28]; mappe di shift GRIS [R24] e ReSTIR condizionale [R25]
+- [ ] OPT-5.2 **Reservoir splatting** [R27] e Area ReSTIR [R26] per un riuso temporale più robusto a costo minore (anche antialiasing e depth of field "gratis")
+- [ ] OPT-5.3 **Variable Rate Ray Tracing** [R32]: raggi per pixel decisi dinamicamente da varianza, disocclusione e contenuto
+- [ ] OPT-5.4 **Campionamento delle luci più intelligente**: albero di luci con Spherical Gaussian [R29], adaptive tree splitting [R30], stochastic lightcuts [R31]: candidati migliori, meno raggi d'ombra
+- [ ] OPT-5.5 **Coerenza senza SER**: ordinamento software dei raggi per direzione/origine prima del trace [R33], misurato contro il reorder hardware di M3+
+- [ ] OPT-5.6 **Qualità della TLAS**: re-braiding [R34] e unione offline delle istanze statiche piccole; BVH compatte a nodi fusi [R35] per le strutture software (proxy, audio, splat); tecniche per geometria animata massiva [R36]
+- [ ] OPT-5.7 **Rumore adattato al filtro**: blue noise spazio-temporale [R42] e FAST [R43] per tutte le decisioni stocastiche; stesso numero di campioni, meno rumore residuo
+
+**Spremitura del SoC**
+- [ ] OPT-5.8 `intersector` in tutti i kernel caldi, zero `intersection_query`; payload minimi; intersection function brevi (S-RT-1)
+- [ ] OPT-5.9 Percorso M5: molte istanze piccole (istanze HW, allineamento 1 KB); percorso M3/M4: BLAS unite (S-RT-2)
+- [ ] OPT-5.10 Build/refit/compaction ammortizzati su più frame secondo B-21 (S-RT-4)
+- [ ] OPT-5.11 Raggi/s coerenti e incoerenti per chip nel modello di costo; budget di raggi per tier derivato dai numeri (S-RT-3)
+
+## OPT-6 — Illuminazione globale, cache e ammortamento [OPT]
+
+**Obiettivo (ipotesi)**: GI + riflessioni + atmosfera −35% di tempo a qualità
+invariata; frame time piatto (nessun picco da aggiornamenti ammortizzati).
+
+**Letture**: [R37]–[R41] [R44]–[R48]; playbook S-MEM-2, S-SYNC-2, S-ALU-3.
+
+**Direzioni di ricerca**
+- [ ] OPT-6.1 **Cache di radianza a due livelli** [R37] e hash spaziale jittered [R38], confrontate con cache sulle superfici [R48]
+- [ ] OPT-6.2 **Spike Radiance Cascades / Split Radiance Cascades** [R39]: costo costante indipendente dalla complessità della scena, probe sparse in hashmap
+- [ ] OPT-6.3 **Cache ORCA** [R40] per accelerare il path tracing (T3) senza dipendere dalla storia temporale
+- [ ] OPT-6.4 DDGI di produzione [R41]: classificazione e riallocazione delle sonde, aggiornamento guidato dalla varianza invece che a rotazione fissa
+- [ ] OPT-6.5 **Scheduler dei lavori ammortizzati** (idea Phosphor): GI, ombre statiche, LUT di atmosfera, BVH, streaming aggiornati a frequenze diverse da uno scheduler che riempie il budget residuo di ogni frame, per un frame time piatto
+- [ ] OPT-6.6 Volumetrici, nuvole ed effetti a bassa risoluzione con ricostruzione temporale [R45][R46][R47]
+- [ ] OPT-6.7 Denoiser: SVGF [R44] e varianti per T0, confronto con il denoiser MetalFX su costo e qualità
+
+**Spremitura del SoC**
+- [ ] OPT-6.8 Atlanti di sonde, cache e reservoir in `half` o formati compatti; dimensioni tarate per restare nella SLC (S-ALU-3, S-MEM-2)
+- [ ] OPT-6.9 GI e build di BVH sulla seconda coda compute, sovrapposti al raster (S-SYNC-2)
+- [ ] OPT-6.10 Depth bounds test su M5 per volumi di luce e nebbia (S-GEO-5)
+- [ ] OPT-6.11 Compressione disattivata sugli atlanti ad accesso sparso se il Compression Ratio lo indica (S-TEX-2)
 
 ---
 
@@ -416,6 +625,50 @@ prime misure di velocità reali.
 
 ---
 
+## OPT-7 — Geometria virtualizzata e mondo [OPT]
+
+**Obiettivo (ipotesi)**: −30% di tempo per la geometria virtualizzata e il
+terreno, −30% di memoria residente dei cluster.
+
+**Letture**: [R49]–[R58]; playbook S-GEO-*, S-SIMD-4, S-TBDR-3, S-TBDR-7.
+
+**Direzioni di ricerca**
+- [ ] OPT-7.1 **Soglia raster software/hardware** misurata per chip [R51][R52]; raster software dedicato per fili e capelli [R53]
+- [ ] OPT-7.2 DAG di cluster con **errore percettivo** (non solo geometrico) e build parallelo veloce [R50]; streaming ordinato per errore [R49]
+- [ ] OPT-7.3 **Terreno con concurrent binary tree** usato come pool di memoria [R54] e tessellation adattiva invece di clipmap fisse
+- [ ] OPT-7.4 **Vegetazione massiva in ray tracing** con le tecniche di [R55]; impostor per la distanza
+- [ ] OPT-7.5 **Acqua con Water Surface Wavelets** [R56] dove serve interazione locale, FFT solo per l'oceano aperto
+- [ ] OPT-7.6 **Trasparenze nella tile**: MLAB con raster order group [R57] per il vetro, OIT a momenti [R58] per le particelle
+
+**Spremitura del SoC**
+- [ ] OPT-7.7 Raster software con `atomic_max` a 64 bit (Apple9) e atomici gerarchici; contesa misurata con B-07 (S-SIMD-4)
+- [ ] OPT-7.8 Raster software solo dove non rompe l'HSR del TBDR (misura B-13) (S-TBDR-2)
+- [ ] OPT-7.9 OIT e decal interamente in tile memory con ROG, nessun atomico in device memory (S-TBDR-7)
+- [ ] OPT-7.10 Soglie di LOD per generazione (M5 con geometria 2x) (S-GEO-2)
+
+## OPT-8 — Streaming, texture e materiali [OPT]
+
+**Obiettivo (ipotesi)**: −40% di dimensione su disco, −30% di I/O per
+secondo di gioco, zero hitch da streaming su T0 con 16 GB.
+
+**Letture**: [R59]–[R63]; playbook S-IO-*, S-TEX-*, S-MEM-*.
+
+**Direzioni di ricerca**
+- [ ] OPT-8.1 **Texture supercompresse decodificate dalla GPU** [R59] e compressione neurale a blocchi [R60]: meno disco e I/O senza cambiare gli shader
+- [ ] OPT-8.2 **Virtual texture adattiva** [R61] con feedback a bassa risoluzione e decompressione in compute con SIMD-group
+- [ ] OPT-8.3 **Prefiltraggio delle normali e specular antialiasing** [R62]: meno aliasing speculare → meno bisogno di supersampling e di risoluzione interna alta
+- [ ] OPT-8.4 **Rappresentazioni per dispositivo generate offline** (come SLIM [R63]): il cooker produce varianti di asset per T0…T3, non un solo asset scalato a runtime
+- [ ] OPT-8.5 **Streaming predittivo** (idea Phosphor): previsione della traiettoria della camera (modello piccolo su ANE) per anticipare le richieste
+
+**Spremitura del SoC**
+- [ ] OPT-8.6 Codec MTLIO scelto per tipo di dato in base a B-25; richieste grandi e allineate (S-IO-2)
+- [ ] OPT-8.7 Budget di streaming per tier e per velocità del disco rilevata (S-IO-1)
+- [ ] OPT-8.8 Pagine sparse da 16 o 64 KB scelte per tipo di risorsa; costo di mapping misurato (S-TEX-4)
+- [ ] OPT-8.9 Residency set aggiornati in modo incrementale e in batch (S-MEM-5)
+- [ ] OPT-8.10 Streaming in QoS utility sugli E-core, senza disturbare render e simulazione (S-CPU-1)
+
+---
+
 # Era V — Simulazione e runtime (linea parallela)
 
 ## F23 — CPU ultra-ottimizzata [CORE]
@@ -456,6 +709,45 @@ prime misure di velocità reali.
 - [ ] F27.4 Serializzazione di scene e salvataggi, iCloud opzionale
 - [ ] F27.5 Rete (GameNetworkingSockets) per multiplayer, opzionale
 - [ ] F27.6 Determinismo della simulazione (prerequisito per replay e test in F35)
+
+---
+
+## OPT-9 — CPU, thread e memoria unificata [OPT]
+
+**Obiettivo (ipotesi)**: tempo CPU del frame −30%, latenza input→fotoni −20%.
+
+**Letture**: [R64] [R74]; playbook S-CPU-*, S-ANE-*, S-MEM-4, S-SYNC-4.
+
+**Direzioni di ricerca**
+- [ ] OPT-9.1 Job system a fiber [R64] confrontato con enkiTS sulla topologia reale (super/performance/efficiency core)
+- [ ] OPT-9.2 **Bilanciamento adattivo CPU↔GPU** (idea Phosphor): lavori leggeri (culling di luci, selezione LOD, animazione) spostati a runtime tra CPU e GPU in base al carico misurato, grazie alla memoria unificata senza copie
+- [ ] OPT-9.3 **Neural Engine per le reti fuori dal frame** (animazione appresa, audio, IA, previsione dello streaming) per lasciare liberi GPU e CPU
+- [ ] OPT-9.4 **Extrapolazione del frame** [R74] come alternativa a bassa latenza all'interpolazione MetalFX
+
+**Spremitura del SoC**
+- [ ] OPT-9.5 Classi QoS verificate con Instruments per ogni thread; nessuno spin-wait (S-CPU-1, S-PWR-3)
+- [ ] OPT-9.6 Cicli caldi in NEON (SoA); operazioni su matrici in batch via Accelerate/SME (S-CPU-2, S-CPU-3)
+- [ ] OPT-9.7 Contesa di banda CPU/GPU misurata (B-09) e job CPU pesanti pianificati fuori dalle finestre critiche della GPU (S-MEM-4)
+- [ ] OPT-9.8 Frame in volo scelti dalla latenza misurata (B-28) (S-SYNC-4)
+
+## OPT-10 — Simulazione [OPT]
+
+**Obiettivo (ipotesi)**: stessa qualità di simulazione con −40% di tempo, o
+10x oggetti simulati a parità di tempo.
+
+**Letture**: [R65]–[R68]; playbook S-SIMD-*, S-NA-*, S-ANE-*.
+
+**Direzioni di ricerca**
+- [ ] OPT-10.1 **Vertex Block Descent** [R65] come solver GPU unico per cloth, corpi morbidi e particelle: più parallelo di XPBD e stabile con poche iterazioni
+- [ ] OPT-10.2 **Small steps** [R66]: più substep con meno iterazioni
+- [ ] OPT-10.3 **Learned motion matching** [R67] compresso per ANE o per i Neural Accelerator
+- [ ] OPT-10.4 **Acustica ibrida**: codifica parametrica precomputata [R68] + ray tracing a runtime solo per le parti dinamiche
+- [ ] OPT-10.5 Animazione di folle con decompressione in compute e skinning nel mesh shader
+
+**Spremitura del SoC**
+- [ ] OPT-10.6 Solver GPU con riduzioni SIMD-group e partizionamento in threadgroup memory (S-SIMD-*)
+- [ ] OPT-10.7 Reti di animazione dimensionate per le tile ≥ 32×32 dei Neural Accelerator o spostate su ANE secondo B-22/B-23 (S-NA-1, S-ANE-1)
+- [ ] OPT-10.8 Simulazione pianificata sui P-core con dati SoA e NEON (S-CPU-2)
 
 ---
 
@@ -525,6 +817,66 @@ prime misure di velocità reali.
 
 ---
 
+## OPT-11 — Rendering neurale [OPT]
+
+**Obiettivo (ipotesi)**: ogni rete nel frame sopra il 50% di utilizzo dei
+Neural Accelerator e sotto il suo budget in ms; qualità pari o superiore al
+fallback non neurale.
+
+**Letture**: [R69]–[R73] [R75] [R76]; playbook S-NA-*, S-ANE-*.
+
+**Direzioni di ricerca**
+- [ ] OPT-11.1 **MLP fully fused** in threadgroup memory con cooperative tensor, ispirati a [R69][R70]: strati consecutivi senza passare dalla DRAM
+- [ ] OPT-11.2 **Quantizzazione** INT8/FP8 (quando l'OS lo consente) per tutte le reti del frame, con fallback FP16
+- [ ] OPT-11.3 **Upscaler ibrido rete + soluzioni in forma chiusa**, sulla linea del PSSR 2026 [R75]: la rete fa solo ciò che le regole analitiche non sanno fare
+- [ ] OPT-11.4 Compressione neurale delle texture ad accesso casuale [R71] vs a blocchi [R60]; materiali neurali [R72]
+- [ ] OPT-11.5 **Supersampling neurale proprietario** [R73] addestrato con MLX sui dati di Phosphor (F31)
+
+**Spremitura del SoC**
+- [ ] OPT-11.6 Tile di GEMM ≥ 32×32, traversal Morton/Hilbert dei threadgroup, barriere ogni poche iterazioni K (S-NA-1, S-NA-3)
+- [ ] OPT-11.7 Utilizzo dei Neural Accelerator letto in Metal System Trace per ogni rete (S-NA-1)
+- [ ] OPT-11.8 Tipi di dato per versione di OS (BF16, INT8/INT4, FP8) con fallback (S-NA-2)
+- [ ] OPT-11.9 Budget ML dentro il budget GPU del frame; ciò che non ci sta va su ANE (S-NA-4, S-ANE-1)
+
+## OPT-12 — Autotuning, path tracing, splatting [OPT]
+
+**Obiettivo (ipotesi)**: −15% di tempo del frame su ogni chip grazie ai
+parametri trovati dall'autotuning; path tracing T3 a 30 fps con metà dei
+campioni.
+
+**Letture**: [R77]–[R83] [R40] [R27]; playbook sezione 16 (differenze per generazione).
+
+**Direzioni di ricerca**
+- [ ] OPT-12.1 **Autotuning come ricerca**: esplorazione dello spazio dei parametri (tile, threadgroup, meshlet, raggi, varianti) con tecniche da compilatori [R77][R78] e ottimizzazione bayesiana [R79], risultati per chip e per versione di OS
+- [ ] OPT-12.2 **Path guiding in tempo reale** [R80] per il path tracing: meno campioni a parità di rumore
+- [ ] OPT-12.3 Path tracing con ORCA [R40] e reservoir splatting [R27]
+- [ ] OPT-12.4 **Splatting senza ordinamento** [R81], adatto a TBDR e iPad; ordinamento stabile [R82] per la qualità; splat nel ray tracing [R83]
+
+**Spremitura del SoC**
+- [ ] OPT-12.5 L'autotuning parte dal modello di costo di OPT-0 per ridurre lo spazio di ricerca
+- [ ] OPT-12.6 Parametri separati per famiglia (percorsi di codice) e per chip misurato (valori numerici) (sezione 16)
+- [ ] OPT-12.7 Splat blending nella tile con imageblock (S-TBDR-1, S-TBDR-7)
+
+## OPT-13 — Scalabilità ed energia [OPT]
+
+**Obiettivo (ipotesi)**: +25% di autonomia in modalità batteria a qualità
+"media"; nessun throttling percepibile dopo 30 minuti su MacBook Air.
+
+**Letture**: playbook S-PWR-*, S-DISP-*.
+
+**Direzioni di ricerca**
+- [ ] OPT-13.1 **Race-to-idle vs frequenza costante**: quale strategia consuma meno per frame a 60 fps su ciascun chip
+- [ ] OPT-13.2 **Qualità guidata dall'energia** (idea Phosphor): il preset si adatta ai watt disponibili, non solo ai millisecondi
+- [ ] OPT-13.3 Frame cap intelligente: fps adattati al contenuto (menu, scene statiche) e al display (ProMotion)
+
+**Spremitura del SoC**
+- [ ] OPT-13.4 Misure `powermetrics` per ogni preset e ogni chip disponibile (B-27) (S-PWR-1)
+- [ ] OPT-13.5 Preset basati sul regime termico, non sui primi secondi (S-PWR-2)
+- [ ] OPT-13.6 Frame pacing a 2 bucket con `CAMetalDisplayLink` (S-DISP-1)
+- [ ] OPT-13.7 Video in gioco tramite media engine senza copie (S-DISP-3), da verificare
+
+---
+
 # Era VII — Prodotto
 
 ## F34 — Editor e strumenti [CORE]
@@ -560,6 +912,42 @@ prime misure di velocità reali.
 - [ ] F38.2 Build Steam e Mac App Store (sandbox)
 - [ ] F38.3 Telemetria opzionale (prestazioni per modello, crash), aggiornamenti incrementali dei contenuti
 - [ ] F38.4 Documentazione dell'engine per chi crea contenuti
+
+---
+
+## OPT-14 — QA delle prestazioni e ottimizzazione continua [OPT]
+
+**Obiettivo**: nessuna regressione di prestazioni o qualità arriva su `main`
+senza essere vista; l'ottimizzazione diventa un processo continuo.
+
+**Letture**: [R84] [R85].
+
+**Direzioni di ricerca**
+- [ ] OPT-14.1 **FLIP** [R84] come metrica unica di qualità per ogni ottimizzazione, con soglie per tier
+- [ ] OPT-14.2 **Rilevamento statistico delle regressioni** (change point detection [R85]) sui dati dei perf bot invece di soglie fisse
+- [ ] OPT-14.3 **Perf engineer automatico**: ciclo con Claude Code in locale (cattura → contatori → ipotesi → patch → misura → PR) sui pass che superano il budget
+- [ ] OPT-14.4 Telemetria opzionale delle prestazioni per modello di Mac per aggiornare preset e autotuning
+
+**Spremitura del SoC**
+- [ ] OPT-14.5 Suite `bench/` rieseguita automaticamente a ogni nuova versione di macOS e su ogni nuovo chip
+- [ ] OPT-14.6 Playbook aggiornato a ogni WWDC e a ogni nuovo chip (M6?)
+
+## OPT-15 — Avvio, dimensioni e distribuzione [OPT]
+
+**Obiettivo (ipotesi)**: avvio a freddo sotto 5 s fino al menu, patch di
+contenuto −60% rispetto al download completo dei pacchetti cambiati.
+
+**Letture**: [R86]; playbook S-IO-*, S-MEM-*.
+
+**Direzioni di ricerca**
+- [ ] OPT-15.1 **Patch minime** con chunking basato sul contenuto [R86]
+- [ ] OPT-15.2 **Prefetch registrato**: la traccia di accesso ai file dei primi minuti di gioco guida l'ordine dei dati nei pacchetti e il prefetch all'avvio
+- [ ] OPT-15.3 Archivi di pipeline per famiglia GPU e versione di OS, scaricati con gli aggiornamenti
+- [ ] OPT-15.4 Valutazione di un target a 8 GB con streaming più aggressivo e asset T0 dedicati
+
+**Spremitura del SoC**
+- [ ] OPT-15.5 Pacchetti mappati in memoria e allineati alle pagine (S-IO-2)
+- [ ] OPT-15.6 Decompressione all'avvio distribuita su tutti i core con QoS corrette (S-CPU-1)
 
 ---
 
