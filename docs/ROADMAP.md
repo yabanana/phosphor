@@ -128,7 +128,7 @@ ipotesi da validare con uno spike, non come tecniche già provate.
 
 | # | Fase | Tag | Era |
 |---|---|---|---|
-| F0 | Fondamenta Metal 4 ✅ | CORE | I · Fondamenta |
+| F0 | Fondamenta Metal 4 ✅ (manca F0.8 su T0) | CORE | I · Fondamenta |
 | F1 | Memoria, heap e residency | CORE | I |
 | F2 | Render graph e sincronizzazione automatica | CORE | I |
 | F3 | Pipeline: compilazione asincrona e archivi AOT | CORE | I |
@@ -216,16 +216,16 @@ prime misure di velocità reali.
 
 # Era I — Fondamenta
 
-## F0 — Fondamenta Metal 4 ✅ [CORE]
+## F0 — Fondamenta Metal 4 ✅ (manca solo la misura F0.8 su un dispositivo T0) [CORE]
 
 - [x] F0.1 Codice Vulkan archiviato in `legacy/vulkan/`
 - [x] F0.2 `phosphor_core` portabile + test doctest
 - [x] F0.3 `MetalContext`: coda MTL4, 3 frame in volo, `MTLSharedEvent`, residency set, rilascio differito
 - [x] F0.4 Texture bindless (tabella di `MTLResourceID`), mipmap via blit
-- [x] F0.5 Pass forward PBR, depth memoryless, ImGui (coda Metal 3)
+- [x] F0.5 Pass forward PBR, depth memoryless, ImGui (coda Metal 3; da F0.7 renderer MTL4 nello stesso pass della scena)
 - [x] F0.6 CI Linux (test + `metal_syntax_check`) e macOS (app + shader)
-- [ ] F0.7 Zero errori con `MTL_DEBUG_LAYER=1` sui testbench 1–7
-- [ ] F0.8 Baseline FPS/GPU ms di ogni testbench su M5 Max (e T0) in `docs/perf-log.md`
+- [x] F0.7 Zero errori con `MTL_DEBUG_LAYER=1` sui testbench 1–7 (API + shader validation, anche con cambio bench `--switch-every`; verificato il 2026-09-28)
+- [ ] F0.8 Baseline FPS/GPU ms di ogni testbench su M5 Max (e T0) in `docs/perf-log.md` — M5 Max misurato il 2026-09-28 (anche su alimentazione di rete, tabella di riferimento in `perf-log.md`); **T0 da misurare: serve un Mac M3/M4/M5 base, non disponibile**
 
 ## F1 — Memoria, heap e residency [CORE]
 

@@ -29,6 +29,9 @@ extend it; port algorithms from it.
   catch runtime errors, and **MSL shaders are only compiled on macOS** (CI job
   `app-macos`), so be extra careful with `.metal` edits and say so when they are
   unverified.
+- Visual/validation check on macOS: `MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1
+  MTL_DEBUG_LAYER_WARNING_MODE=nslog ./build/phosphor --bench N --frames 60
+  --capture out.png` (exits by itself; the PNG can be inspected).
 - Before calling a Metal API, check its exact signature in the fetched
   metal-cpp headers (`build/linux/_deps/metal_cpp-src/Metal/MTL4*.hpp`); Metal 4
   names differ from Metal 3 (e.g. no `setVertexBytes`, draws take GPU addresses,
@@ -44,8 +47,14 @@ extend it; port algorithms from it.
   with `MetalContext::makeResident`, release in-flight objects with
   `deferRelease`, and insert explicit stage-to-stage barriers (no automatic
   hazard tracking).
-- Frame pacing: one `MTLSharedEvent`; values `2n+1` scene done, `2n+2` frame done.
-  ImGui still renders through a Metal 3 queue ordered after the scene.
+- Frame pacing: one MTL4 command buffer per frame (scene + ImGui overlay in
+  the same render pass) and one `MTLSharedEvent`; value `n+1` = frame n done.
+  `makeResident` allocations are committed right before each commit, so they
+  can be used by the frame being recorded.
+- Engine conventions follow glTF: counter-clockwise front faces (set
+  explicitly: Metal defaults to clockwise), UV origin top-left, bitangent =
+  `cross(N, T) * w` towards decreasing V. Mirrored instances carry
+  `INSTANCE_FLAG_MIRRORED`. `tests/test_procedural.cpp` enforces the meshes.
 - Reverse-Z infinite projection (clear depth 0, compare Greater), NDC y up.
 - Hardware floor is Apple9 (M3); anything needing Apple10 (M5) must have a
   fallback or be an explicitly higher tier.

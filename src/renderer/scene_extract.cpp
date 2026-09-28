@@ -55,10 +55,12 @@ void extractFrameScene(ECS& ecs, const GpuScene& scene, FrameScene& out) {
         if (!transforms.has(entity)) continue;
         if (inst.meshHandle >= meshCount) continue;
 
+        const glm::mat4& world = transforms.get(entity).worldMatrix;
         GPUInstance gi{};
-        std::memcpy(gi.modelMatrix, &transforms.get(entity).worldMatrix[0][0], sizeof(gi.modelMatrix));
+        std::memcpy(gi.modelMatrix, &world[0][0], sizeof(gi.modelMatrix));
         gi.meshIndex = inst.meshHandle;
         gi.flags     = inst.flags;
+        if (glm::determinant(glm::mat3(world)) < 0.0f) gi.flags |= INSTANCE_FLAG_MIRRORED;
 
         if (materials.has(entity)) {
             gi.materialIndex = static_cast<u32>(out.materials.size());

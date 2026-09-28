@@ -44,13 +44,6 @@ component-by-component guide to squeezing Apple silicon
 | VI · Frontier | F28–F33 | Scalability, per-device autotuning, neural rendering (incl. in-house MLX-trained networks), path tracing, Gaussian splatting |
 | VII · Product | F34–F38 | Editor, automated QA, iPad/iPhone/visionOS, vertical slice, distribution |
 
----|---|---|
-| **F0 — Foundations** | Portable core, Metal 4 context and frame loop, bindless textures, forward PBR pass, ImGui, CI | **in progress** |
-| F1 — RHI and render graph | Heaps, transient aliasing, stage-to-stage barriers, async pipeline compilation | planned |
-| F2 — GPU-driven geometry | Object/mesh shaders, two-phase Hi-Z culling, visibility buffer, MetalFX temporal | planned |
-| F3 — Ray tracing | BLAS/TLAS, RT shadows, ReSTIR DI, DDGI in compute, MetalFX denoiser | planned |
-| F4 — Content scale | Cluster LOD (meshoptimizer `clusterlod`), MTLIO streaming, pipeline archives | planned |
-| F5 — High tiers | Frame interpolation, radiance cache + ReSTIR GI, neural features on M5 | planned |
 
 ---
 
@@ -77,6 +70,27 @@ For GPU captures and shader debugging, generate an Xcode project instead:
 `cmake -S . -B build-xcode -G Xcode`.  Debug builds enable the Metal API
 validation layer automatically; set `MTL_SHADER_VALIDATION=1` for shader
 validation.
+
+### Command line and benchmarks
+
+| Option | Effect |
+|---|---|
+| `--bench N` | Start on test bench N (1–7) |
+| `--frames N` | Benchmark mode: measure N frames, print a `BENCH` summary line, exit |
+| `--warmup N` | Frames skipped before measuring (default 120) |
+| `--no-vsync` | Uncapped frame rate |
+| `--no-ui` | Hide the ImGui overlay |
+| `--capture FILE` | Write a PNG of the last measured frame (first frame when interactive) |
+| `--report FILE` | Write the benchmark summary as JSON |
+
+Baseline numbers live in [`docs/perf-log.md`](docs/perf-log.md); measure them
+on a Release build without validation:
+
+```bash
+cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build/release
+tools/bench_all.sh build/release   # all benches, Markdown rows for the perf log
+```
 
 ### Building on Linux (no GPU)
 
@@ -133,11 +147,11 @@ src/
                scene extraction, gpu_types.h (shared with MSL)
   testbench/   the seven benches
   platform/metal/  Metal 4 backend: context/frame loop, textures, forward pass
-  app/         Engine (SDL3 window + Metal layer, main loop, UI)
-  imgui/       debug panels
+  app/         Engine (SDL3 window + Metal layer, main loop, benchmark mode)
+  imgui/       debug panels and the Metal 4 ImGui renderer
 shaders/       MSL (compiled to build/shaders/phosphor.metallib)
 tests/         doctest unit tests for the portable core
-tools/         apple-sdk-stubs for Linux syntax checks
+tools/         apple-sdk-stubs for Linux syntax checks, bench_all.sh
 legacy/vulkan/ archived Vulkan renderer (reference only)
 reports/, research_notes/   design research (Italian / English)
 ```

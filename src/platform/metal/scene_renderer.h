@@ -5,7 +5,6 @@
 #include "renderer/gpu_types.h"
 
 #include <array>
-#include <string>
 
 namespace phosphor {
 
@@ -20,11 +19,14 @@ struct FrameScene;
 // materials, lights) is written into a shared buffer owned by the frame slot,
 // so the CPU never touches memory the GPU may still be reading.  Depth is a
 // memoryless attachment: on a TBDR GPU it never leaves tile memory.
+//
+// render() leaves the pass open so the overlay (ImGui) is drawn into the same
+// pass: the drawable stays in tile memory instead of a store + reload.
 // ---------------------------------------------------------------------------
 
 class SceneRenderer {
 public:
-    SceneRenderer(MetalContext& context, const std::string& libraryPath);
+    explicit SceneRenderer(MetalContext& context);
     ~SceneRenderer();
 
     SceneRenderer(const SceneRenderer&) = delete;
@@ -33,12 +35,14 @@ public:
     /// Upload vertex/index data if the scene geometry changed (blocking).
     void syncGeometry(const GpuScene& scene);
 
-    /// Encode the forward pass into the frame's command buffer, rendering to
-    /// the frame's drawable.
-    void render(MetalContext::Frame& frame, const GpuScene& scene, const FrameScene& frameScene,
+    /// Begin the forward pass on the frame's drawable and encode the scene.
+    /// Returns the still-open encoder; the caller appends the overlay and
+    /// calls endEncoding().
+    [[nodiscard]] MTL4::RenderCommandEncoder* render(MetalContext::Frame& frame, const GpuScene& scene, const FrameScene& frameScene,
                 const FrameConstants& constants, MTL::GPUAddress textureTable);
 
     [[nodiscard]] u32 lastTriangleCount() const { return lastTriangles_; }
+    [[nodiscard]] static MTL::PixelFormat depthFormat() { return MTL::PixelFormatDepth32Float; }
 
 private:
     struct UploadBuffer {
@@ -53,7 +57,6 @@ private:
 
     MetalContext& context_;
 
-    MTL::Library*             library_    = nullptr;
     MTL::RenderPipelineState* pipeline_   = nullptr;
     MTL::DepthStencilState*   depthState_ = nullptr;
     MTL4::ArgumentTable*      arguments_  = nullptr;

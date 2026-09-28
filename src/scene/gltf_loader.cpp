@@ -394,7 +394,8 @@ u32 GltfLoader::processMaterial(const tinygltf::Model& model,
     if (material.emissiveTexture.index >= 0) {
         mc.emissiveTexIndex = processTexture(model, material.emissiveTexture.index, true);
     } else {
-        mc.emissiveTexIndex = textures_.getDefaultBlack();
+        // glTF: emissive = factor * texture, with a missing texture meaning 1.
+        mc.emissiveTexIndex = textures_.getDefaultWhite();
     }
     mc.emissiveFactor = glm::vec3{
         static_cast<float>(material.emissiveFactor[0]),

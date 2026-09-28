@@ -4,6 +4,8 @@
 #include "core/log.h"
 #include "core/timer.h"
 #include "diagnostics/frame_stats.h"
+#include "imgui/imgui_renderer.h"
+#include "platform/metal/frame_capture.h"
 #include "platform/metal/metal_context.h"
 #include "platform/metal/metal_texture_manager.h"
 #include "platform/metal/scene_renderer.h"
@@ -15,15 +17,15 @@
 #include <SDL3/SDL_metal.h>
 
 #include <imgui.h>
-#include <imgui_impl_metal.h>
 #include <imgui_impl_sdl3.h>
 
 #include <glm/glm.hpp>
 
 #include <algorithm>
 #include <cmath>
-#include <cstdlib>
+#include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 
@@ -36,21 +38,21 @@ std::string shaderLibraryPath() {
     return std::string(base ? base : "") + "shaders/phosphor.metallib";
 }
 
-std::optional<TestBenchType> benchFromArgs(int argc, char* argv[]) {
-    for (int i = 1; i + 1 < argc; ++i) {
-        if (std::strcmp(argv[i], "--bench") == 0) {
-            const int index = std::atoi(argv[i + 1]) - 1; // 1-based like the hotkeys
-            if (index >= 0 && index < testBenchCount()) {
-                return static_cast<TestBenchType>(index);
-            }
-        }
-    }
-    return std::nullopt;
+using Clock = std::chrono::steady_clock;
+
+float toMs(Clock::duration d) {
+    return std::chrono::duration<float, std::milli>(d).count();
 }
 
 } // namespace
 
 Engine::Engine(int argc, char* argv[]) {
+    std::string error;
+    if (!parseLaunchOptions(argc, argv, testBenchCount(), options_, error)) {
+        throw std::runtime_error("Invalid arguments: " + error);
+    }
+    settings_.vsync = options_.vsync;
+
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
         throw std::runtime_error(std::string("SDL_Init failed: ") + SDL_GetError());
     }
@@ -66,12 +68,12 @@ Engine::Engine(int argc, char* argv[]) {
         throw std::runtime_error("Failed to obtain CAMetalLayer from SDL");
     }
 
-    context_ = std::make_unique<MetalContext>(layer);
+    context_ = std::make_unique<MetalContext>(layer, shaderLibraryPath());
     int w = 0, h = 0;
     SDL_GetWindowSizeInPixels(window_, &w, &h);
     context_->resize(static_cast<u32>(w), static_cast<u32>(h));
 
-    renderer_ = std::make_unique<SceneRenderer>(*context_, shaderLibraryPath());
+    renderer_ = std::make_unique<SceneRenderer>(*context_);
 
     ecs_        = std::make_unique<ECS>();
     gpuScene_   = std::make_unique<GpuScene>();
@@ -85,9 +87,12 @@ Engine::Engine(int argc, char* argv[]) {
     ImGui::GetIO().IniFilename = nullptr; // keep the repo free of imgui.ini
     ImGui::StyleColorsDark();
     ImGui_ImplSDL3_InitForMetal(window_);
-    ImGui_ImplMetal_Init(context_->device());
+    imguiRenderer_ = std::make_unique<ImGuiRenderer>(*context_);
+    if (!options_.capturePath.empty()) {
+        capture_ = std::make_unique<FrameCapture>(*context_);
+    }
 
-    switchTestBench(benchFromArgs(argc, argv).value_or(TestBenchType::TorusDemo));
+    switchTestBench(options_.bench ? static_cast<TestBenchType>(*options_.bench) : TestBenchType::TorusDemo);
 }
 
 Engine::~Engine() {
@@ -98,7 +103,8 @@ Engine::~Engine() {
         activeBench_.reset();
     }
 
-    ImGui_ImplMetal_Shutdown();
+    capture_.reset();
+    imguiRenderer_.reset();
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
 
@@ -113,7 +119,13 @@ Engine::~Engine() {
 
 void Engine::run() {
     LOG_INFO("Entering main loop");
+    if (options_.benchmark()) {
+        LOG_INFO("Benchmark: %u warm-up + %u measured frames, vsync %s, UI %s", options_.warmup, options_.frames,
+                 options_.vsync ? "on" : "off", options_.ui ? "on" : "off");
+        if (options_.warmup == 0) context_->beginGpuTimeCapture(options_.frames);
+    }
     while (running_) {
+        const Clock::time_point start = Clock::now();
         processEvents();
         if (!running_) break;
 
@@ -123,10 +135,62 @@ void Engine::run() {
         }
 
         timer_->tick();
-        frame(timer_->getDeltaTime());
+        // Fixed step: deterministic animation for captures; timings stay real.
+        const float simDt = options_.fixedTimestep ? 1.0f / 60.0f : timer_->getDeltaTime();
+        const bool presented = frame(simDt);
         input_->resetFrameState();
+        if (presented && options_.switchEvery > 0 && ++framesOnBench_ >= options_.switchEvery && !pendingBench_) {
+            // Same path as the 1-7 hotkeys.
+            pendingBench_ = static_cast<TestBenchType>((static_cast<int>(currentBench_) + 1) % testBenchCount());
+        }
+        if (presented && options_.benchmark()) {
+            recordBenchmarkFrame(timer_->getDeltaTime(), toMs(Clock::now() - start - frameWait_), toMs(frameWait_));
+        }
     }
     context_->waitIdle();
+    if (options_.benchmark()) {
+        finishBenchmark();
+    }
+    if (capture_) {
+        capture_->writePng(options_.capturePath);
+    }
+}
+
+void Engine::recordBenchmarkFrame(float dt, float cpuMs, float waitMs) {
+    ++presentedFrames_;
+    if (presentedFrames_ == options_.warmup) {
+        // GPU times are recorded from the next submitted frame on.
+        context_->beginGpuTimeCapture(options_.frames);
+        samples_.reserve(options_.frames);
+    } else if (presentedFrames_ > options_.warmup) {
+        samples_.push_back({dt * 1000.0f, cpuMs, 0.0f, waitMs});
+        if (samples_.size() == options_.frames) running_ = false;
+    }
+}
+
+void Engine::finishBenchmark() {
+    const std::vector<float> gpu = context_->endGpuTimeCapture();
+    for (size_t i = 0; i < samples_.size() && i < gpu.size(); ++i) {
+        samples_[i].gpuMs = gpu[i];
+    }
+
+    BenchReport report;
+    report.bench  = activeBench_ ? activeBench_->getName() : "";
+    report.device = context_->gpuName();
+    report.width  = context_->width();
+    report.height = context_->height();
+    report.vsync  = settings_.vsync;
+    report.ui     = options_.ui;
+    summarizeSamples(samples_, report);
+
+    // stdout, not the log: scripts collect this line.
+    std::printf("BENCH %s\n", formatReportLine(report).c_str());
+    std::fflush(stdout);
+    if (!options_.reportPath.empty()) {
+        std::ofstream out(options_.reportPath);
+        out << reportToJson(report);
+        if (!out) LOG_ERROR("Failed to write %s", options_.reportPath.c_str());
+    }
 }
 
 void Engine::processEvents() {
@@ -187,6 +251,7 @@ void Engine::switchTestBench(TestBenchType type) {
     textures_ = std::make_unique<MetalTextureManager>(*context_);
 
     currentBench_ = type;
+    framesOnBench_ = 0;
     activeBench_ = createTestBench(type);
     LOG_INFO("Switching to test bench: %s", activeBench_->getName());
     activeBench_->setup(*ecs_, *gpuScene_, *textures_);
@@ -212,7 +277,7 @@ void Engine::aimCamera(const CameraSetup& setup) {
     }
 }
 
-void Engine::frame(float dt) {
+bool Engine::frame(float dt) {
     NS::AutoreleasePool* pool = NS::AutoreleasePool::alloc()->init();
 
     // --- Simulation -----------------------------------------------------------
@@ -232,9 +297,12 @@ void Engine::frame(float dt) {
 
     // --- Render ------------------------------------------------------------
     MetalContext::Frame frame;
-    if (!context_->beginFrame(frame)) {
+    const Clock::time_point waitStart = Clock::now();
+    const bool acquired = context_->beginFrame(frame);
+    frameWait_ = Clock::now() - waitStart;
+    if (!acquired) {
         pool->release();
-        return;
+        return false;
     }
 
     FrameConstants constants{};
@@ -250,48 +318,48 @@ void Engine::frame(float dt) {
     constants.exposure   = settings_.exposure;
     constants.frameIndex = static_cast<u32>(frame.index);
 
-    renderer_->render(frame, *gpuScene_, frameScene_, constants, textures_->tableAddress());
+    MTL4::RenderCommandEncoder* pass =
+        renderer_->render(frame, *gpuScene_, frameScene_, constants, textures_->tableAddress());
 
-    MTL::CommandBuffer* overlay = context_->submitScene(frame);
+    // --- ImGui overlay, appended to the scene pass --------------------------
+    if (options_.ui) {
+        ImGui_ImplSDL3_NewFrame();
+        ImGui::NewFrame();
 
-    // --- ImGui overlay (Metal 3 queue, ordered after the scene) -----------
-    MTL::RenderPassDescriptor* uiPass = MTL::RenderPassDescriptor::renderPassDescriptor();
-    MTL::RenderPassColorAttachmentDescriptor* color = uiPass->colorAttachments()->object(0);
-    color->setTexture(frame.drawable->texture());
-    color->setLoadAction(MTL::LoadActionLoad);
-    color->setStoreAction(MTL::StoreActionStore);
+        int bench = static_cast<int>(currentBench_);
+        bool changed = false;
+        UIPanels::drawTestBenchSelector(bench, changed);
+        if (changed) pendingBench_ = static_cast<TestBenchType>(bench);
 
-    ImGui_ImplMetal_NewFrame(uiPass);
-    ImGui_ImplSDL3_NewFrame();
-    ImGui::NewFrame();
+        RendererInfo info;
+        info.gpuName     = context_->gpuName();
+        info.apple9      = context_->isApple9OrLater();
+        info.width       = context_->width();
+        info.height      = context_->height();
+        info.instances   = static_cast<u32>(frameScene_.instances.size());
+        info.drawBatches = static_cast<u32>(frameScene_.batches.size());
+        info.triangles   = renderer_->lastTriangleCount();
+        info.meshlets    = gpuScene_->getMeshletTotalCount();
+        info.textures    = textures_->textureCount();
+        info.gpuMs       = context_->lastGpuMs();
+        UIPanels::drawPerformancePanel(*frameStats_, info);
+        UIPanels::drawRenderPanel(settings_);
 
-    int bench = static_cast<int>(currentBench_);
-    bool changed = false;
-    UIPanels::drawTestBenchSelector(bench, changed);
-    if (changed) pendingBench_ = static_cast<TestBenchType>(bench);
+        ImGui::Render();
+        imguiRenderer_->render(frame, pass, ImGui::GetDrawData());
+    }
+    pass->endEncoding();
 
-    RendererInfo info;
-    info.gpuName     = context_->gpuName();
-    info.apple9      = context_->isApple9OrLater();
-    info.width       = context_->width();
-    info.height      = context_->height();
-    info.instances   = static_cast<u32>(frameScene_.instances.size());
-    info.drawBatches = static_cast<u32>(frameScene_.batches.size());
-    info.triangles   = renderer_->lastTriangleCount();
-    info.meshlets    = gpuScene_->getMeshletTotalCount();
-    info.textures    = textures_->textureCount();
-    info.gpuMs       = context_->lastGpuMs();
-    UIPanels::drawPerformancePanel(*frameStats_, info);
-    UIPanels::drawRenderPanel(settings_);
+    // Capture the last frame of a run (or the first frame when interactive).
+    const bool lastFrame = !options_.benchmark() || presentedFrames_ + 1 == options_.warmup + options_.frames;
+    if (capture_ && lastFrame && !captured_) {
+        capture_->encode(frame);
+        captured_ = true;
+    }
 
-    ImGui::Render();
-    MTL::RenderCommandEncoder* uiEncoder = overlay->renderCommandEncoder(uiPass);
-    uiEncoder->setLabel(NS::String::string("ImGui", NS::UTF8StringEncoding));
-    ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(), overlay, uiEncoder);
-    uiEncoder->endEncoding();
-
-    context_->presentFrame(frame, overlay);
+    context_->submitFrame(frame);
     pool->release();
+    return true;
 }
 
 } // namespace phosphor

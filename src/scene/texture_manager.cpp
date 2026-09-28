@@ -58,7 +58,9 @@ void TextureManager::createDefaultTextures() {
     const u8 white[]  = {255, 255, 255, 255};
     const u8 normal[] = {128, 128, 255, 255};
     const u8 black[]  = {0, 0, 0, 255};
-    const u8 mr[]     = {0, 128, 0, 255};
+    // glTF multiplies the metallic/roughness factors by the texture (G = roughness,
+    // B = metallic): the neutral default is white so the factors pass through.
+    const u8 mr[]     = {255, 255, 255, 255};
     defaultWhite_  = createTexture(white, 1, 1, true);
     defaultNormal_ = createTexture(normal, 1, 1, false);
     defaultBlack_  = createTexture(black, 1, 1, true);

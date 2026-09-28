@@ -14,6 +14,10 @@ struct MeshData {
     std::vector<u32>       indices;
 };
 
+// Every generator follows the glTF conventions the whole engine uses:
+// counter-clockwise triangles about the outward normal (front face = CCW),
+// UV origin at the image's top-left, bitangent = cross(N, T) * w pointing
+// towards decreasing V.
 namespace ProceduralMeshes {
 
     // Torus lying in the XZ plane, major circle along XZ, tube revolves around it.

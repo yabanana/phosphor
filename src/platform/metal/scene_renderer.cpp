@@ -32,15 +32,8 @@ enum Binding : NS::UInteger {
 
 } // namespace
 
-SceneRenderer::SceneRenderer(MetalContext& context, const std::string& libraryPath)
+SceneRenderer::SceneRenderer(MetalContext& context)
     : context_(context) {
-    NS::Error* error = nullptr;
-    library_ = context_.device()->newLibrary(str(libraryPath.c_str()), &error);
-    if (!library_) {
-        const char* reason = error ? error->localizedDescription()->utf8String() : "unknown error";
-        throw std::runtime_error(std::string("Failed to load shader library ") + libraryPath + ": " + reason);
-    }
-
     buildPipeline();
 
     MTL::DepthStencilDescriptor* dsDesc = MTL::DepthStencilDescriptor::alloc()->init();
@@ -49,6 +42,7 @@ SceneRenderer::SceneRenderer(MetalContext& context, const std::string& libraryPa
     depthState_ = context_.device()->newDepthStencilState(dsDesc);
     dsDesc->release();
 
+    NS::Error* error = nullptr;
     MTL4::ArgumentTableDescriptor* atDesc = MTL4::ArgumentTableDescriptor::alloc()->init();
     atDesc->setMaxBufferBindCount(BindCount);
     atDesc->setLabel(str("Forward arguments"));
@@ -72,15 +66,14 @@ SceneRenderer::~SceneRenderer() {
     arguments_->release();
     depthState_->release();
     pipeline_->release();
-    library_->release();
 }
 
 void SceneRenderer::buildPipeline() {
     MTL4::LibraryFunctionDescriptor* vs = MTL4::LibraryFunctionDescriptor::alloc()->init();
-    vs->setLibrary(library_);
+    vs->setLibrary(context_.library());
     vs->setName(str("forward_vs"));
     MTL4::LibraryFunctionDescriptor* fs = MTL4::LibraryFunctionDescriptor::alloc()->init();
-    fs->setLibrary(library_);
+    fs->setLibrary(context_.library());
     fs->setName(str("forward_fs"));
 
     MTL4::RenderPipelineDescriptor* desc = MTL4::RenderPipelineDescriptor::alloc()->init();
@@ -88,6 +81,7 @@ void SceneRenderer::buildPipeline() {
     desc->setVertexFunctionDescriptor(vs);
     desc->setFragmentFunctionDescriptor(fs);
     desc->colorAttachments()->object(0)->setPixelFormat(context_.colorFormat());
+    // MTL4 render pipelines take no depth format: it is inferred from the pass.
 
     NS::Error* error = nullptr;
     pipeline_ = context_.compiler()->newRenderPipelineState(desc, nullptr, &error);
@@ -149,7 +143,7 @@ void SceneRenderer::ensureDepthTarget(u32 width, u32 height) {
     if (depth_) context_.deferRelease(depth_);
 
     MTL::TextureDescriptor* desc = MTL::TextureDescriptor::texture2DDescriptor(
-        MTL::PixelFormatDepth32Float, width, height, false);
+        depthFormat(), width, height, false);
     desc->setUsage(MTL::TextureUsageRenderTarget);
     // Depth is consumed within the pass: keep it in tile memory only.
     desc->setStorageMode(MTL::StorageModeMemoryless);
@@ -157,7 +151,7 @@ void SceneRenderer::ensureDepthTarget(u32 width, u32 height) {
     depth_->setLabel(str("Depth (memoryless)"));
 }
 
-void SceneRenderer::render(MetalContext::Frame& frame, const GpuScene& scene, const FrameScene& fs,
+MTL4::RenderCommandEncoder* SceneRenderer::render(MetalContext::Frame& frame, const GpuScene& scene, const FrameScene& fs,
                            const FrameConstants& constants, MTL::GPUAddress textureTable) {
     MTL::Texture* target = frame.drawable->texture();
     const u32 width  = static_cast<u32>(target->width());
@@ -225,7 +219,12 @@ void SceneRenderer::render(MetalContext::Frame& frame, const GpuScene& scene, co
         enc->setRenderPipelineState(pipeline_);
         enc->setDepthStencilState(depthState_);
         enc->setArgumentTable(arguments_, MTL::RenderStageVertex | MTL::RenderStageFragment);
-        // Two-sided until winding is validated for every asset path (F1).
+        // glTF convention: counter-clockwise front faces (Metal defaults to
+        // clockwise).  The shader flips N on back faces, so this decides lighting
+        // even without culling.
+        enc->setFrontFacingWinding(MTL::WindingCounterClockwise);
+        // Two-sided until winding is validated for every asset path (F2.7).
+        // The ImGui overlay appended to this pass also relies on CullModeNone.
         enc->setCullMode(MTL::CullModeNone);
         enc->setViewport(MTL::Viewport{0.0, 0.0, static_cast<double>(width), static_cast<double>(height), 0.0, 1.0});
 
@@ -241,7 +240,7 @@ void SceneRenderer::render(MetalContext::Frame& frame, const GpuScene& scene, co
             lastTriangles_ += info.indexCount / 3 * batch.instanceCount;
         }
     }
-    enc->endEncoding();
+    return enc;
 }
 
 } // namespace phosphor

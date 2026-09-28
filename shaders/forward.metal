@@ -28,6 +28,7 @@ struct VertexOut {
     float4 tangent;
     float2 uv;
     uint   materialIndex [[flat]];
+    uint   mirrored [[flat]]; // 1 if INSTANCE_FLAG_MIRRORED
 };
 
 static float4x4 loadMatrix(const device float* m) {
@@ -68,6 +69,7 @@ vertex VertexOut forward_vs(uint vertexId                          [[vertex_id]]
     out.tangent       = float4(normalMatrix * float3(v.tx, v.ty, v.tz), v.tw);
     out.uv            = float2(v.u, v.v);
     out.materialIndex = gi.materialIndex;
+    out.mirrored      = (gi.flags & INSTANCE_FLAG_MIRRORED) != 0 ? 1u : 0u;
     return out;
 }
 
@@ -126,6 +128,25 @@ static float distanceAttenuation(float dist, float range) {
     return window * window / max(dist * dist, 1e-4);
 }
 
+// Karis, "Physically Based Shading on Mobile" (2014): analytic fit of the
+// split-sum environment BRDF, so ambient light keeps a specular term (and
+// metals stay metallic) without an irradiance/prefiltered-environment map.
+static float3 envBRDFApprox(float3 f0, float roughness, float NdotV) {
+    const float4 c0 = float4(-1.0, -0.0275, -0.572, 0.022);
+    const float4 c1 = float4(1.0, 0.0425, 1.04, -0.04);
+    const float4 r = roughness * c0 + c1;
+    const float a004 = min(r.x * r.x, exp2(-9.28 * NdotV)) * r.x + r.y;
+    const float2 ab = float2(-1.04, 1.04) * a004 + r.zw;
+    return f0 * ab.x + ab.y;
+}
+
+// Hemispheric sky/ground gradient, the only ambient light until the GI of F12.
+static float3 hemisphere(float3 dir) {
+    const float3 sky = float3(0.30, 0.36, 0.45);
+    const float3 ground = float3(0.10, 0.09, 0.08);
+    return mix(ground, sky, dir.y * 0.5 + 0.5);
+}
+
 // Filmic tonemap (Narkowicz ACES fit); the swapchain format is sRGB so the
 // hardware applies the transfer function on write.
 static float3 tonemapACES(float3 x) {
@@ -158,7 +179,10 @@ fragment half4 forward_fs(VertexOut in                              [[stage_in]]
     const float metallic  = saturate(m.metallic * float(mrTex.b));
     const float occlusion = mix(1.0, float(aoTex.r), m.occlusionStrength);
 
-    float3 N = normalize(frontFacing ? in.normal : -in.normal);
+    // Two-sided lighting.  A mirrored model matrix reverses the winding, so
+    // the rasteriser's facing is inverted for those instances.
+    const bool front = frontFacing != (in.mirrored != 0);
+    float3 N = normalize(front ? in.normal : -in.normal);
     const float3 T = in.tangent.xyz - N * dot(N, in.tangent.xyz);
     if (dot(T, T) > 1e-8) {
         const float3 Tn = normalize(T);
@@ -194,11 +218,14 @@ fragment half4 forward_fs(VertexOut in                              [[stage_in]]
         color += evaluateLight(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, roughness);
     }
 
-    // Hemispheric ambient until DDGI / radiance caching lands (F3).
-    const float3 sky = float3(0.30, 0.36, 0.45);
-    const float3 ground = float3(0.10, 0.09, 0.08);
-    const float3 ambient = mix(ground, sky, N.y * 0.5 + 0.5);
-    color += ambient * baseColor.rgb * (1.0 - 0.5 * metallic) * occlusion;
+    // Ambient: diffuse for dielectrics only, specular from the hemisphere in
+    // the reflected direction, widened towards N as the lobe gets rougher.
+    const float NdotV = max(dot(N, V), 1e-4);
+    const float3 f0 = mix(float3(0.04), baseColor.rgb, metallic);
+    const float3 specularDir = normalize(mix(reflect(-V, N), N, roughness * roughness));
+    const float3 ambientDiffuse = hemisphere(N) * baseColor.rgb * (1.0 - metallic);
+    const float3 ambientSpecular = hemisphere(specularDir) * envBRDFApprox(f0, roughness, NdotV);
+    color += (ambientDiffuse + ambientSpecular) * occlusion;
 
     color += float3(m.emissive[0], m.emissive[1], m.emissive[2]) * float3(emTex.rgb);
 
