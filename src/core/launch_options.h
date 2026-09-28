@@ -17,6 +17,8 @@ namespace phosphor {
 //   --no-ui            do not draw the ImGui overlay
 //   --fixed-timestep   advance the simulation by 1/60 s per frame regardless
 //                      of real time (deterministic captures)
+//   --switch-every N   switch to the next test bench every N frames, through
+//                      the same path as the 1-7 hotkeys (switching tests)
 //   --capture FILE     write a frame to FILE (PNG): the last measured frame in
 //                      benchmark mode, otherwise the first frame
 //   --report FILE      write the benchmark summary to FILE (JSON)
@@ -32,6 +34,7 @@ struct LaunchOptions {
     bool        vsync  = true;
     bool        ui     = true;
     bool        fixedTimestep = false;
+    u32         switchEvery   = 0; // 0 = never
     std::string capturePath;
     std::string reportPath;
 

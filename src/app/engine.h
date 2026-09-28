@@ -76,6 +76,7 @@ private:
     LaunchOptions  options_;
     // Benchmark mode (--frames): presented frames so far and measured samples.
     u32                      presentedFrames_ = 0;
+    u32                      framesOnBench_   = 0; // for --switch-every
     std::vector<FrameSample> samples_;
     // CPU time spent blocked in beginFrame() (slot + drawable waits).
     std::chrono::steady_clock::duration frameWait_{};

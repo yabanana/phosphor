@@ -139,6 +139,10 @@ void Engine::run() {
         const float simDt = options_.fixedTimestep ? 1.0f / 60.0f : timer_->getDeltaTime();
         const bool presented = frame(simDt);
         input_->resetFrameState();
+        if (presented && options_.switchEvery > 0 && ++framesOnBench_ >= options_.switchEvery && !pendingBench_) {
+            // Same path as the 1-7 hotkeys.
+            pendingBench_ = static_cast<TestBenchType>((static_cast<int>(currentBench_) + 1) % testBenchCount());
+        }
         if (presented && options_.benchmark()) {
             recordBenchmarkFrame(timer_->getDeltaTime(), toMs(Clock::now() - start - frameWait_), toMs(frameWait_));
         }
@@ -247,6 +251,7 @@ void Engine::switchTestBench(TestBenchType type) {
     textures_ = std::make_unique<MetalTextureManager>(*context_);
 
     currentBench_ = type;
+    framesOnBench_ = 0;
     activeBench_ = createTestBench(type);
     LOG_INFO("Switching to test bench: %s", activeBench_->getName());
     activeBench_->setup(*ecs_, *gpuScene_, *textures_);
