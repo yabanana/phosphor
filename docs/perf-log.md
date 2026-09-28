@@ -49,6 +49,27 @@ Power** · Release, `--no-vsync --no-ui`, 3×600 frame.
 **T0 (M3/M4/M5 base)**: da misurare, nessun dispositivo T0 disponibile in
 questa sessione (regola O12). Stesso comando su T0 e nuova tabella qui sotto.
 
+### Ripetizione su alimentazione di rete (F0.8)
+
+**2026-09-28 (notte)** · stesso codice `phase/f0-close` · **alimentazione di
+rete**, powermode High Power · ambiente non limitato · Release,
+`--no-vsync --no-ui`, 3×600 frame.
+
+| # | Bench | Resolution | FPS | Frame ms (p99) | CPU ms (p99) | GPU ms (p99) | Wait ms (p99) |
+|---|---|---|---|---|---|---|---|
+| 1 | Torus Demo | 3200x1800 | 415 | 2.41 (17.845) | 0.097 (0.177) | 0.942 (1.558) | 2.312 (17.679) |
+| 2 | PBR Material Grid | 3200x1800 | 469 | 2.13 (16.021) | 0.106 (0.183) | 0.756 (1.114) | 2.023 (15.885) |
+| 3 | Stress Test (100K) | 3200x1800 | 281 | 3.562 (17.148) | 2.757 (3.031) | 2.152 (2.883) | 0.785 (14.355) |
+| 4 | Scene Viewer (glTF) | 3200x1800 | 474 | 2.11 (16.314) | 0.093 (0.175) | 0.872 (1.361) | 2.017 (16.116) |
+| 5 | Many Lights (1024) | 3200x1800 | 19 | 51.319 (108.206) | 0.101 (0.205) | 91.543 (147.554) | 51.21 (108.102) |
+| 6 | Cornell Box (GI) | 3200x1800 | 471 | 2.123 (17.261) | 0.093 (0.161) | 0.651 (0.92) | 2.033 (17.099) |
+| 7 | Culling Visualization | 3200x1800 | 423 | 2.362 (14.523) | 0.861 (1.143) | 1.245 (1.944) | 1.502 (13.638) |
+
+Rispetto alla misura a batteria: CPU ms quasi uguali, GPU ms più bassi
+sullo Stress Test (2,15 contro 3,04 ms); le altre differenze stanno nella
+variabilità di presentazione descritta sotto. **Questa è la baseline M5 Max
+di riferimento per F0.**
+
 ### Osservazioni
 
 - **Scene leggere (1, 2, 4, 6, 7) limitate dalla presentazione, non dall'engine.**
