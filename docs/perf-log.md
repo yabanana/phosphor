@@ -124,10 +124,23 @@ Nessuna regressione: le differenze stanno nel rumore tra esecuzioni.
   È una fluttuazione limitata di cache di sistema/driver, non una perdita
   per frame. L'unica allocazione per frame nota è `MTL4CommitOptions` (un
   oggetto riusato smette di consegnare il feedback: misurato 0 su 600 frame).
-- **Instruments Allocations**: non registrato: `xctrace` non riesce ad
-  agganciarsi al processo da questa sessione (serve l'accesso "Developer
-  Tools" per il terminale). Da fare a mano: `xcrun xctrace record --template
-  Allocations --launch -- ./build/release/phosphor --bench 3 --frames 3000`.
+- **Allocazioni CPU nel frame (strumenti Apple)**. Serve un binario
+  debuggable: le build ora sono firmate ad hoc con `get-task-allow`
+  (`PHOSPHOR_DEBUGGABLE`, predefinito ON); prima `xctrace`/`leaks` non
+  potevano agganciarsi e una traccia Allocations lanciata con `sudo` era
+  vuota (12 KB di dati).
+  - `malloc_history -allByCount` a 20 s e 80 s di Stress Test (Release,
+    ~4.800 frame nel mezzo), differenza per stack: **frame loop
+    (`Engine::frame`) −3 allocazioni vive**, processo intero −165. I ±45
+    tra `beginFrame` e `submitFrame` sono oggetti dei frame in volo.
+  - `leaks --atExit` dopo 1.200 frame: **0 leak**.
+  - Una prima misura con `heap` aveva mostrato +26.548 blocchi in 45 s:
+    erano CoreSVG/CoreUI, le icone del menu Finestra caricate in modo
+    lazy da AppKit dopo `makeKeyAndOrderFront` (costo di sistema una
+    tantum, stack verificati con `malloc_history`), non codice Phosphor.
+  - Traccia Instruments Allocations completa (30 s, 126 MB) registrata
+    senza `sudo`; `xctrace export` non espone la tabella delle
+    allocazioni, quindi si ispeziona aprendo il file in Instruments.
 - **F1.6 stress**: `--memory-stress 10000` e `30000` con validazione API:
   la memoria del device torna esattamente alla baseline (192,81 MiB) e i
   contatori per categoria sono ripristinati; picco di 9 heap e 704,81 MiB

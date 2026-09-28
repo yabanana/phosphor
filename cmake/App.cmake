@@ -98,6 +98,19 @@ if(PHOSPHOR_METAL_VALIDATION)
     target_compile_definitions(phosphor PRIVATE $<$<CONFIG:Debug>:PHOSPHOR_METAL_VALIDATION=1>)
 endif()
 
+# Development builds are signed ad hoc with get-task-allow so profiling tools
+# (Instruments, leaks, heap, malloc_history) can attach without root.  Turn
+# off for anything distributed.
+option(PHOSPHOR_DEBUGGABLE "Sign the app with the get-task-allow entitlement" ON)
+if(PHOSPHOR_DEBUGGABLE)
+    add_custom_command(TARGET phosphor POST_BUILD
+        COMMAND codesign --force --sign - --entitlements ${CMAKE_SOURCE_DIR}/cmake/debuggable.entitlements
+                $<TARGET_FILE:phosphor>
+        COMMENT "Signing phosphor with get-task-allow (profiling)"
+        VERBATIM
+    )
+endif()
+
 # Test assets are looked up relative to the working directory.
 if(NOT EXISTS ${CMAKE_BINARY_DIR}/assets)
     file(CREATE_LINK ${CMAKE_SOURCE_DIR}/assets ${CMAKE_BINARY_DIR}/assets SYMBOLIC)

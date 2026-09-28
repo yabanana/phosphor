@@ -53,6 +53,11 @@ extend it; port algorithms from it.
   elsewhere. Insert explicit stage-to-stage barriers (no hazard tracking).
 - Benchmarks report `GPU allocations` during the measured frames: it must be
   0 (rule O7).
+- Builds are signed with `get-task-allow` (`PHOSPHOR_DEBUGGABLE`), so the
+  agent can profile without root: `leaks --atExit -- ./build/release/phosphor
+  ...`, `heap <pid>`, `MallocStackLogging=lite` + `malloc_history <pid>
+  -allByCount` (diff two snapshots per stack), `xcrun xctrace record
+  --template Allocations --launch -- ...`.
 - Frame pacing: one MTL4 command buffer per frame (scene + ImGui overlay in
   the same render pass) and one `MTLSharedEvent`; value `n+1` = frame n done.
   `makeResident` allocations are committed right before each commit, so they
