@@ -133,6 +133,11 @@ Nessuna regressione: le differenze stanno nel rumore tra esecuzioni.
   contatori per categoria sono ripristinati; picco di 9 heap e 704,81 MiB
   con heap trattenuti **identici** a 10k e 30k cicli (il pool è limitato dal
   picco di dati vivi, non dal numero di operazioni).
+- **F1.5 pressione di memoria reale**: con l'app in esecuzione (Stress Test),
+  `sudo memory_pressure -S -l warn|critical|normal` → l'app riceve ogni
+  livello e reagisce tra due frame ("warning" → "back to normal",
+  "critical" → "back to normal"). Trim di 0 MiB perché l'unico heap del bench
+  è in uso; il rilascio effettivo degli heap vuoti è coperto da `--memory-stress`.
 - **Budget** (M5 Max): working set interrogato 107,5 GiB, budget engine
   80,6 GiB; tier rilevato "T2 Max + T3 Neural". Lo Stress Test usa fino a
   18 MiB di upload per frame (48,6 dei 64 MiB dell'anello in volo).

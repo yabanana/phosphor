@@ -235,7 +235,7 @@ prime misure di velocità reali.
 - [x] F1.2 Anelli di upload per frame con suballocazione lineare (sostituiscono `UploadBuffer` di F0)
 - [x] F1.3 Residency: set statico + set per-streaming, aggiornamento incrementale e batch di `commit()`
 - [x] F1.4 Budget di memoria per tier, statistiche live (per heap, per categoria) in ImGui
-- [ ] F1.5 Gestione della pressione di memoria di sistema (notifiche macOS → eviction) — risposta verificata con `--simulate-pressure`; manca la prova con la notifica reale (`sudo memory_pressure -S -l warn`)
+- [x] F1.5 Gestione della pressione di memoria di sistema (notifiche macOS → eviction) — notifiche reali warn/critical/normal ricevute (`sudo memory_pressure -S`, 2026-09-28)
 - [x] F1.6 Test di stress: 10.000 creazioni/distruzioni di risorse senza crescita di memoria (`--memory-stress`)
 
 **Uscita**: Instruments Allocations piatto in gameplay; nessuna allocazione Metal nel frame.
