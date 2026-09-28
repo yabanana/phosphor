@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-linux:
+    name: Core + tests + Metal syntax (Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y ninja-build clang
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-linux-${{ hashFiles('cmake/Dependencies.cmake', 'tests/CMakeLists.txt') }}
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+
+      - name: Build core and tests
+        run: cmake --build build
+
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Metal host code syntax check (metal-cpp + SDK stubs)
+        run: cmake --build build --target metal_syntax_check
+
+  app-macos:
+    name: Metal 4 app (macOS, compile only)
+    # Hosted macOS runners expose a paravirtual Apple GPU without Metal 4 runtime
+    # support, so this job builds the app and compiles the shaders but does not
+    # run it.  Runtime testing happens on a physical Apple silicon Mac.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: brew install ninja
+
+      - name: Metal toolchain
+        # Since Xcode 26 the Metal compiler is a separate component.
+        run: |
+          xcodebuild -version
+          xcrun -sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
+          xcrun -sdk macosx metal --version
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-macos-${{ hashFiles('cmake/Dependencies.cmake', 'tests/CMakeLists.txt') }}
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build app, shaders and tests
+        run: cmake --build build
+
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure

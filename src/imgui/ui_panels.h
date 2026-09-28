@@ -1,41 +1,47 @@
 #pragma once
 
 #include "core/types.h"
-#include "diagnostics/debug_overlay.h"
-#include "renderer/aa_pass.h"
 
 namespace phosphor {
 
 class FrameStats;
-class GpuProfiler;
-class ResourceTracker;
-class RenderDocCapture;
+
+/// Renderer settings exposed in the debug UI.
+struct RenderSettings {
+    int   debugMode = 0;     // 0 = lit, 1 = normals, 2 = base color
+    float exposure  = 1.0f;
+    bool  vsync     = true;
+};
+
+/// Read-only information shown in the stats panel.
+struct RendererInfo {
+    const char* gpuName     = "";
+    bool        apple9      = false;
+    u32         width       = 0;
+    u32         height      = 0;
+    u32         instances   = 0;
+    u32         drawBatches = 0;
+    u32         triangles   = 0;
+    u32         meshlets    = 0;
+    u32         textures    = 0;
+    float       gpuMs       = 0.0f;
+};
 
 // ---------------------------------------------------------------------------
-// UIPanels -- static helper class that draws all ImGui diagnostic panels.
-// Each method is a self-contained ImGui window.  Callers choose which
-// panels to show each frame.
+// UIPanels -- stateless helpers that draw the ImGui diagnostic windows.
 // ---------------------------------------------------------------------------
 
 class UIPanels {
 public:
-    /// Combo box listing the available test benches.
-    /// Sets @p changed to true if the user picked a different bench.
+    /// Combo box listing the test benches. Sets `changed` if the user picked
+    /// a different bench.
     static void drawTestBenchSelector(int& currentBench, bool& changed);
 
-    /// FPS / CPU ms / GPU ms graphs and per-pass GPU timings.
-    static void drawPerformancePanel(const FrameStats& stats, const GpuProfiler& profiler);
+    /// FPS / CPU / GPU timings and frame-time graphs.
+    static void drawPerformancePanel(const FrameStats& stats, const RendererInfo& info);
 
-    /// Live GPU resource allocation counts and memory usage.
-    static void drawResourcePanel(const ResourceTracker& tracker);
-
-    /// Debug visualization overlay selector and renderer tweaks.
-    static void drawDebugPanel(OverlayMode& overlayMode, AAMode& aaMode,
-                               float& exposure, bool& ddgiEnabled,
-                               bool& restirEnabled);
-
-    /// RenderDoc capture controls.
-    static void drawRenderDocPanel(RenderDocCapture& renderdoc);
+    /// Debug view selection and renderer tweaks.
+    static void drawRenderPanel(RenderSettings& settings);
 };
 
 } // namespace phosphor

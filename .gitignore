@@ -1,5 +1,8 @@
 build/
+build-*/
 *.spv
+*.air
+*.metallib
 *.o
 *.d
 .cache/
@@ -20,10 +23,7 @@ assets/*.hdr
 !assets/README.md
 !assets/environments/.gitkeep
 
-# Third-party SDKs
-third_party/aftermath/lib/
-third_party/aftermath/include/
-!third_party/aftermath/README.md
+imgui.ini
 
 # OS
 .DS_Store

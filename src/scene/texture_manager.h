@@ -1,46 +1,38 @@
 #pragma once
 
 #include "core/types.h"
-#include "rhi/vk_common.h"
-#include "rhi/vk_allocator.h"
 #include <string>
 #include <unordered_map>
-#include <vector>
 
 namespace phosphor {
 
-class VulkanDevice;
-class GpuAllocator;
-class BindlessDescriptorManager;
-class CommandManager;
+// ---------------------------------------------------------------------------
+// TextureManager -- API-agnostic front end for bindless textures.
+//
+// Decoding, RGBA expansion, path de-duplication and the default textures live
+// here; a graphics backend derives from it and implements createTexture(),
+// which uploads tightly packed RGBA8 pixels and returns the bindless index.
+// ---------------------------------------------------------------------------
 
 class TextureManager {
 public:
-    TextureManager(VulkanDevice& device, GpuAllocator& allocator,
-                   BindlessDescriptorManager& descriptors, CommandManager& commands);
-    ~TextureManager();
+    virtual ~TextureManager() = default;
 
     TextureManager(const TextureManager&) = delete;
     TextureManager& operator=(const TextureManager&) = delete;
 
-    /// Load a texture from disk. Returns a bindless descriptor index.
-    /// Deduplicates by path: loading the same path twice returns the cached index.
+    /// Load a texture from disk. Returns a bindless index.
+    /// Loading the same path twice returns the cached index.
     u32 loadTexture(const std::string& path, bool sRGB = true);
 
-    /// Load a texture from raw pixel data already in memory.
-    /// @param data       Pointer to tightly packed RGBA/RGB/RG/R pixel data
-    /// @param width      Image width in pixels
-    /// @param height     Image height in pixels
-    /// @param components Number of components per pixel (1-4)
-    /// @param sRGB       Whether to use sRGB format
-    /// @return Bindless descriptor index
+    /// Load a texture from pixel data already in memory (1-4 components).
     u32 loadTextureFromMemory(const u8* data, u32 width, u32 height, u32 components, bool sRGB = true);
 
-    /// Create the four default 1x1 textures used as fallbacks.
-    ///   - white:  (255, 255, 255, 255) for base color
-    ///   - normal: (128, 128, 255, 255) for flat tangent-space normal
-    ///   - black:  (0, 0, 0, 255) for emissive / occlusion
-    ///   - MR:     (0, 128, 0, 255) for metallic=0.0, roughness=0.5
+    /// Create the four default 1x1 textures used as fallbacks (idempotent).
+    ///   - white:  (255, 255, 255, 255) for base color / occlusion
+    ///   - normal: (128, 128, 255, 255) for a flat tangent-space normal
+    ///   - black:  (0, 0, 0, 255) for emissive
+    ///   - MR:     (0, 128, 0, 255) for metallic = 0, roughness = 0.5
     void createDefaultTextures();
 
     u32 getDefaultWhite()  const { return defaultWhite_; }
@@ -48,20 +40,18 @@ public:
     u32 getDefaultBlack()  const { return defaultBlack_; }
     u32 getDefaultMR()     const { return defaultMR_; }
 
+    /// Number of textures created so far.
+    [[nodiscard]] virtual u32 textureCount() const = 0;
+
+protected:
+    TextureManager() = default;
+
+    /// Upload width * height RGBA8 pixels; return the bindless index.
+    virtual u32 createTexture(const u8* rgba, u32 width, u32 height, bool sRGB) = 0;
+
 private:
-    u32 uploadTexture(const u8* pixels, u32 width, u32 height, u32 components, bool sRGB);
-    void generateMipmaps(VkCommandBuffer cmd, VkImage image, VkFormat format,
-                         u32 width, u32 height, u32 mipLevels);
-
-    VulkanDevice&              device_;
-    GpuAllocator&              allocator_;
-    BindlessDescriptorManager& descriptors_;
-    CommandManager&            commands_;
-
-    std::vector<AllocatedImage> textures_;
-    std::vector<VkImageView>    views_;
-    std::unordered_map<std::string, u32> loadedPaths_; // path -> bindless index (dedup)
-
+    std::unordered_map<std::string, u32> loadedPaths_;
+    bool defaultsCreated_ = false;
     u32 defaultWhite_  = 0;
     u32 defaultNormal_ = 0;
     u32 defaultBlack_  = 0;

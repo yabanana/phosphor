@@ -1,0 +1,213 @@
+// forward.metal -- F0 forward pass: indexed draws, PBR (GGX), direct lights.
+//
+// Bindings (Metal 4 argument table, buffers by GPU address):
+//   buffer(0)  FrameConstants
+//   buffer(1)  GPUVertex[]      (global vertex buffer)
+//   buffer(2)  GPUInstance[]    (per-frame, sorted by mesh)
+//   buffer(3)  GPUMaterial[]
+//   buffer(4)  GPULight[]
+//   buffer(5)  TextureHandle[]  (bindless texture table of resource IDs)
+//
+// The visibility-buffer / mesh-shader pipeline replaces this pass in F2; the
+// forward pass stays as the reference path and for debugging.
+
+#include <metal_stdlib>
+#include "renderer/gpu_types.h"
+
+using namespace metal;
+using namespace phosphor;
+
+struct TextureHandle {
+    texture2d<float> tex;
+};
+
+struct VertexOut {
+    float4 position [[position]];
+    float3 worldPos;
+    float3 normal;
+    float4 tangent;
+    float2 uv;
+    uint   materialIndex [[flat]];
+};
+
+static float4x4 loadMatrix(const device float* m) {
+    return float4x4(float4(m[0],  m[1],  m[2],  m[3]),
+                    float4(m[4],  m[5],  m[6],  m[7]),
+                    float4(m[8],  m[9],  m[10], m[11]),
+                    float4(m[12], m[13], m[14], m[15]));
+}
+
+static float4x4 loadMatrix(constant float* m) {
+    return float4x4(float4(m[0],  m[1],  m[2],  m[3]),
+                    float4(m[4],  m[5],  m[6],  m[7]),
+                    float4(m[8],  m[9],  m[10], m[11]),
+                    float4(m[12], m[13], m[14], m[15]));
+}
+
+vertex VertexOut forward_vs(uint vertexId                          [[vertex_id]],
+                            uint instanceId                        [[instance_id]],
+                            constant FrameConstants& frame         [[buffer(0)]],
+                            const device GPUVertex* vertices       [[buffer(1)]],
+                            const device GPUInstance* instances    [[buffer(2)]])
+{
+    // vertex_id includes the draw's base vertex and instance_id includes the
+    // base instance, so both index the global arrays directly.
+    const device GPUVertex& v    = vertices[vertexId];
+    const device GPUInstance& gi = instances[instanceId];
+
+    const float4x4 model = loadMatrix(gi.modelMatrix);
+    const float3x3 normalMatrix = float3x3(model[0].xyz, model[1].xyz, model[2].xyz);
+
+    const float4 world = model * float4(v.px, v.py, v.pz, 1.0);
+
+    VertexOut out;
+    out.position      = loadMatrix(frame.viewProjection) * world;
+    out.worldPos      = world.xyz;
+    // Non-uniform scale is rare in the test benches; renormalise in the FS.
+    out.normal        = normalMatrix * float3(v.nx, v.ny, v.nz);
+    out.tangent       = float4(normalMatrix * float3(v.tx, v.ty, v.tz), v.tw);
+    out.uv            = float2(v.u, v.v);
+    out.materialIndex = gi.materialIndex;
+    return out;
+}
+
+// --- BRDF --------------------------------------------------------------------
+
+constexpr sampler kMaterialSampler(filter::linear, mip_filter::linear,
+                                   address::repeat, max_anisotropy(8));
+
+static half4 sampleOr(const device TextureHandle* table, uint index, float2 uv, half4 fallback) {
+    if (index == INVALID_TEXTURE_INDEX) {
+        return fallback;
+    }
+    return half4(table[index].tex.sample(kMaterialSampler, uv));
+}
+
+static float D_GGX(float NdotH, float a) {
+    const float a2 = a * a;
+    const float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
+    return a2 / (M_PI_F * d * d);
+}
+
+static float V_SmithGGXCorrelated(float NdotV, float NdotL, float a) {
+    const float a2 = a * a;
+    const float gv = NdotL * sqrt(NdotV * NdotV * (1.0 - a2) + a2);
+    const float gl = NdotV * sqrt(NdotL * NdotL * (1.0 - a2) + a2);
+    return 0.5 / max(gv + gl, 1e-5);
+}
+
+static float3 F_Schlick(float3 f0, float VdotH) {
+    return f0 + (1.0 - f0) * pow(1.0 - VdotH, 5.0);
+}
+
+static float3 evaluateLight(float3 N, float3 V, float3 L, float3 radiance,
+                            float3 albedo, float metallic, float roughness) {
+    const float3 H = normalize(V + L);
+    const float NdotL = saturate(dot(N, L));
+    const float NdotV = max(dot(N, V), 1e-4);
+    const float NdotH = saturate(dot(N, H));
+    const float VdotH = saturate(dot(V, H));
+    if (NdotL <= 0.0) {
+        return float3(0.0);
+    }
+
+    const float a = max(roughness * roughness, 0.002);
+    const float3 f0 = mix(float3(0.04), albedo, metallic);
+    const float3 F = F_Schlick(f0, VdotH);
+    const float3 specular = D_GGX(NdotH, a) * V_SmithGGXCorrelated(NdotV, NdotL, a) * F;
+    const float3 diffuse = (1.0 - F) * (1.0 - metallic) * albedo / M_PI_F;
+    return (diffuse + specular) * radiance * NdotL;
+}
+
+static float distanceAttenuation(float dist, float range) {
+    // Inverse square with a smooth window to zero at `range`.
+    const float r = dist / max(range, 1e-3);
+    const float window = saturate(1.0 - r * r * r * r);
+    return window * window / max(dist * dist, 1e-4);
+}
+
+// Filmic tonemap (Narkowicz ACES fit); the swapchain format is sRGB so the
+// hardware applies the transfer function on write.
+static float3 tonemapACES(float3 x) {
+    const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+    return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
+}
+
+fragment half4 forward_fs(VertexOut in                              [[stage_in]],
+                          bool frontFacing                          [[front_facing]],
+                          constant FrameConstants& frame            [[buffer(0)]],
+                          const device GPUMaterial* materials       [[buffer(3)]],
+                          const device GPULight* lights             [[buffer(4)]],
+                          const device TextureHandle* textures      [[buffer(5)]])
+{
+    const device GPUMaterial& m = materials[in.materialIndex];
+
+    const half4 baseTex = sampleOr(textures, m.baseColorTex, in.uv, half4(1.0h));
+    const half4 mrTex   = sampleOr(textures, m.metallicRoughnessTex, in.uv, half4(1.0h));
+    const half4 aoTex   = sampleOr(textures, m.occlusionTex, in.uv, half4(1.0h));
+    const half4 emTex   = sampleOr(textures, m.emissiveTex, in.uv, half4(1.0h));
+    const half4 nTex    = sampleOr(textures, m.normalTex, in.uv, half4(0.5h, 0.5h, 1.0h, 1.0h));
+
+    const float4 baseColor = float4(m.baseColor[0], m.baseColor[1], m.baseColor[2], m.baseColor[3]) * float4(baseTex);
+    if (baseColor.a < m.alphaCutoff) {
+        discard_fragment();
+    }
+
+    // glTF: G = roughness, B = metallic.
+    const float roughness = clamp(m.roughness * float(mrTex.g), 0.04, 1.0);
+    const float metallic  = saturate(m.metallic * float(mrTex.b));
+    const float occlusion = mix(1.0, float(aoTex.r), m.occlusionStrength);
+
+    float3 N = normalize(frontFacing ? in.normal : -in.normal);
+    const float3 T = in.tangent.xyz - N * dot(N, in.tangent.xyz);
+    if (dot(T, T) > 1e-8) {
+        const float3 Tn = normalize(T);
+        const float3 B = cross(N, Tn) * in.tangent.w;
+        float3 tn = float3(nTex.xyz) * 2.0 - 1.0;
+        tn.xy *= m.normalScale;
+        N = normalize(Tn * tn.x + B * tn.y + N * tn.z);
+    }
+
+    const float3 camPos = float3(frame.cameraPosition[0], frame.cameraPosition[1], frame.cameraPosition[2]);
+    const float3 V = normalize(camPos - in.worldPos);
+
+    float3 color = float3(0.0);
+    for (uint i = 0; i < frame.lightCount; ++i) {
+        const device GPULight& light = lights[i];
+        const float3 lightColor = float3(light.color[0], light.color[1], light.color[2]) * light.intensity;
+        float3 L;
+        float attenuation = 1.0;
+        if (light.type == LIGHT_DIRECTIONAL) {
+            L = -normalize(float3(light.direction[0], light.direction[1], light.direction[2]));
+        } else {
+            const float3 toLight = float3(light.position[0], light.position[1], light.position[2]) - in.worldPos;
+            const float dist = length(toLight);
+            L = toLight / max(dist, 1e-4);
+            attenuation = distanceAttenuation(dist, light.range);
+            if (light.type == LIGHT_SPOT) {
+                const float3 spotDir = normalize(float3(light.direction[0], light.direction[1], light.direction[2]));
+                const float cosOuter = cos(light.outerCone);
+                const float cosInner = cos(light.innerCone);
+                attenuation *= smoothstep(cosOuter, cosInner, dot(-L, spotDir));
+            }
+        }
+        color += evaluateLight(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, roughness);
+    }
+
+    // Hemispheric ambient until DDGI / radiance caching lands (F3).
+    const float3 sky = float3(0.30, 0.36, 0.45);
+    const float3 ground = float3(0.10, 0.09, 0.08);
+    const float3 ambient = mix(ground, sky, N.y * 0.5 + 0.5);
+    color += ambient * baseColor.rgb * (1.0 - 0.5 * metallic) * occlusion;
+
+    color += float3(m.emissive[0], m.emissive[1], m.emissive[2]) * float3(emTex.rgb);
+
+    if (frame.debugMode == 1) {
+        return half4(half3(N * 0.5 + 0.5), 1.0h);
+    }
+    if (frame.debugMode == 2) {
+        return half4(half3(baseColor.rgb), 1.0h);
+    }
+
+    return half4(half3(tonemapACES(color * frame.exposure)), 1.0h);
+}

@@ -1,8 +1,9 @@
 // tinygltf implementation: define these before including the header.
-// stb_image is already implemented in texture_manager.cpp, so we skip it here.
+// This translation unit also provides the stb_image implementation used by
+// TextureManager, and lets tinygltf decode embedded images with it.
 #define TINYGLTF_IMPLEMENTATION
+#define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
-#define TINYGLTF_NO_STB_IMAGE       // provided by texture_manager.cpp
 #include <tiny_gltf.h>
 
 #include "scene/gltf_loader.h"
@@ -117,6 +118,9 @@ bool GltfLoader::loadFromFile(const std::string& path) {
         LOG_ERROR("Failed to load glTF: %s (%s)", path.c_str(), err.c_str());
         return false;
     }
+
+    const size_t slash = path.find_last_of("/\\");
+    baseDir_ = slash == std::string::npos ? std::string{} : path.substr(0, slash + 1);
 
     // Clear per-file caches
     meshCache_.clear();
@@ -421,14 +425,8 @@ u32 GltfLoader::processMaterial(const tinygltf::Model& model,
     gpu.emissive[2]  = mc.emissiveFactor.b;
     gpu.alphaCutoff  = mc.alphaCutoff;
 
-    // Material index is based on the order we submit them
-    u32 materialIndex = static_cast<u32>(materialCache_.size());
+    const u32 materialIndex = gpuScene_.addMaterial(gpu);
     materialCache_[matIdx] = materialIndex;
-
-    // Upload as a single-element batch.  The caller should batch-upload all
-    // materials after loading is complete; for now we store the index.
-    std::vector<GPUMaterial> batch = { gpu };
-    gpuScene_.updateMaterials(batch);
 
     return materialIndex;
 }
@@ -465,8 +463,8 @@ u32 GltfLoader::processTexture(const tinygltf::Model& model, int textureIndex,
             static_cast<u32>(image.component),
             sRGB);
     } else if (!image.uri.empty()) {
-        // External file reference
-        bindlessIndex = textures_.loadTexture(image.uri, sRGB);
+        // External file reference, relative to the glTF file
+        bindlessIndex = textures_.loadTexture(baseDir_ + image.uri, sRGB);
     } else {
         bindlessIndex = textures_.getDefaultWhite();
     }

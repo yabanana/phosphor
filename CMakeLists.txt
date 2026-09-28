@@ -1,93 +1,98 @@
 cmake_minimum_required(VERSION 3.25)
-project(phosphor LANGUAGES CXX)
+
+# Metal 4 requires macOS 26 on Apple silicon.  Must be set before project().
+if(APPLE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "26.0" CACHE STRING "Minimum macOS version")
+    set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "Target architecture")
+endif()
+
+project(phosphor LANGUAGES C CXX)
+
+if(APPLE)
+    # Objective-C++ (ImGui's Metal backend) must be enabled before any
+    # subdirectory is added, or CMake cannot generate its rules.
+    enable_language(OBJC OBJCXX)
+endif()
+
+# ---------------------------------------------------------------------------
+# Phosphor -- native Metal 4 renderer for Apple Silicon.
+#
+# Two layers:
+#   phosphor_core  API-agnostic C++20 (scene, ECS, meshlets, test benches).
+#                  Builds everywhere; this is what runs in Linux CI.
+#   phosphor       The macOS app: Metal 4 backend (metal-cpp) + SDL3 + ImGui.
+# ---------------------------------------------------------------------------
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# --- Options ---
-option(PHOSPHOR_ENABLE_TRACY      "Enable Tracy profiler integration" OFF)
-option(PHOSPHOR_ENABLE_AFTERMATH  "Enable NVIDIA Aftermath crash diagnostics" OFF)
-option(PHOSPHOR_ENABLE_VALIDATION "Enable Vulkan validation layers" ON)
+if(APPLE)
+    set(PHOSPHOR_APP_DEFAULT ON)
+else()
+    set(PHOSPHOR_APP_DEFAULT OFF)
+endif()
 
-# --- Find system packages ---
-find_package(Vulkan REQUIRED)
-find_package(SDL3 REQUIRED)
-find_package(glm REQUIRED)
+option(PHOSPHOR_BUILD_APP     "Build the macOS Metal application" ${PHOSPHOR_APP_DEFAULT})
+option(PHOSPHOR_BUILD_TESTS   "Build unit tests for phosphor_core" ON)
+option(PHOSPHOR_METAL_VALIDATION "Enable Metal API/shader validation hooks in the app" ON)
 
-# --- Fetch dependencies ---
-include(cmake/FetchDependencies.cmake)
+include(cmake/Dependencies.cmake)
 
-# --- Shader compilation ---
-include(cmake/CompileShaders.cmake)
+set(PHOSPHOR_WARNINGS -Wall -Wextra -Wpedantic -Wno-unused-parameter)
 
-# --- Collect sources ---
-file(GLOB_RECURSE PHOSPHOR_SOURCES CONFIGURE_DEPENDS
-    src/*.cpp
+# --- Portable core ---------------------------------------------------------
+add_library(phosphor_core STATIC
+    src/core/input.cpp
+    src/core/timer.cpp
+    src/diagnostics/frame_stats.cpp
+    src/renderer/gpu_scene.cpp
+    src/renderer/meshlet_builder.cpp
+    src/renderer/scene_extract.cpp
+    src/scene/camera.cpp
+    src/scene/ecs.cpp
+    src/scene/gltf_loader.cpp
+    src/scene/procedural.cpp
+    src/scene/texture_manager.cpp
+    src/testbench/cornell_box.cpp
+    src/testbench/culling_viz.cpp
+    src/testbench/many_lights.cpp
+    src/testbench/pbr_grid.cpp
+    src/testbench/scene_viewer.cpp
+    src/testbench/stress_test.cpp
+    src/testbench/testbench.cpp
+    src/testbench/torus_demo.cpp
 )
-
-# --- Executable ---
-add_executable(phosphor ${PHOSPHOR_SOURCES})
-
-target_include_directories(phosphor PRIVATE
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/third_party
-)
-
-target_link_libraries(phosphor PRIVATE
-    Vulkan::Vulkan
-    SDL3::SDL3
-    glm::glm
-    VulkanMemoryAllocator
-    meshoptimizer
-    tinygltf
-    imgui
-    ${CMAKE_DL_LIBS}  # dlopen for RenderDoc
-    pthread
-)
-
-# --- Compile definitions ---
-target_compile_definitions(phosphor PRIVATE
+target_include_directories(phosphor_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(phosphor_core PUBLIC glm::glm SDL3::SDL3 meshoptimizer tinygltf)
+target_compile_definitions(phosphor_core PUBLIC
     GLM_FORCE_DEPTH_ZERO_TO_ONE
     GLM_FORCE_RADIANS
     GLM_ENABLE_EXPERIMENTAL
 )
+target_compile_options(phosphor_core PRIVATE ${PHOSPHOR_WARNINGS})
+# Third-party single-header implementations compiled in gltf_loader.cpp.
+set_source_files_properties(src/scene/gltf_loader.cpp PROPERTIES COMPILE_OPTIONS "-w")
 
-if(PHOSPHOR_ENABLE_VALIDATION)
-    target_compile_definitions(phosphor PRIVATE PHOSPHOR_ENABLE_VALIDATION=1)
-endif()
-
-if(PHOSPHOR_ENABLE_TRACY)
-    target_compile_definitions(phosphor PRIVATE TRACY_ENABLE=1)
-    target_link_libraries(phosphor PRIVATE TracyClient)
-endif()
-
-if(PHOSPHOR_ENABLE_AFTERMATH)
-    include(cmake/FindAftermathSDK.cmake)
-    if(AFTERMATH_FOUND)
-        target_compile_definitions(phosphor PRIVATE PHOSPHOR_ENABLE_AFTERMATH=1)
-        target_include_directories(phosphor PRIVATE ${AFTERMATH_INCLUDE_DIR})
-        target_link_libraries(phosphor PRIVATE ${AFTERMATH_LIBRARY})
-    else()
-        message(WARNING "Aftermath SDK not found in third_party/aftermath/")
+# --- macOS app ---------------------------------------------------------------
+if(PHOSPHOR_BUILD_APP)
+    if(NOT APPLE)
+        message(FATAL_ERROR "PHOSPHOR_BUILD_APP requires macOS (Metal 4).")
     endif()
+    include(cmake/App.cmake)
 endif()
 
-# --- Warnings ---
-target_compile_options(phosphor PRIVATE
-    -Wall -Wextra -Wpedantic -Wno-unused-parameter
-    $<$<CONFIG:Debug>:-g -O0>
-    $<$<CONFIG:Release>:-O3 -DNDEBUG>
-    $<$<CONFIG:RelWithDebInfo>:-O2 -g -DNDEBUG>
-)
+# --- Metal syntax check (Linux) ---------------------------------------------
+# Type-checks the Metal backend against the real metal-cpp headers using the
+# minimal SDK stubs in tools/apple-sdk-stubs.  Nothing is linked or run; this
+# exists so changes made on a Linux machine are at least compile-clean.
+if(PHOSPHOR_METAL_SYNTAX_CHECK AND NOT APPLE)
+    include(cmake/MetalSyntaxCheck.cmake)
+endif()
 
-# --- Shader compilation ---
-phosphor_compile_shaders(
-    TARGET phosphor
-    SHADERS_DIR ${CMAKE_SOURCE_DIR}/shaders
-    OUTPUT_DIR ${CMAKE_BINARY_DIR}/shaders
-)
-
-# --- Copy assets reference ---
-file(CREATE_LINK ${CMAKE_SOURCE_DIR}/assets ${CMAKE_BINARY_DIR}/assets SYMBOLIC)
+# --- Tests -------------------------------------------------------------------
+if(PHOSPHOR_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
