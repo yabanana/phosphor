@@ -2,6 +2,10 @@
 
 Native **Metal 4** renderer for Apple silicon (C++20 + metal-cpp, MSL shaders).
 Design rationale: `reports/Engine AAA nativo per Apple Silicon.md`.
+Implementation plan (phases F0–F38, tasks, exit criteria, optimisation rules
+O1–O12): `docs/ROADMAP.md` — cite task IDs (e.g. `F7.3`) in commits, tick a
+task only once it is verified on the device, and log measurements in
+`docs/perf-log.md`. The report's older "F1–F5" numbering is superseded by it.
 The Vulkan renderer in `legacy/vulkan/` is reference only — never build or
 extend it; port algorithms from it.
 

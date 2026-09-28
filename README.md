@@ -26,8 +26,21 @@ The original Vulkan renderer is archived in [`legacy/vulkan/`](legacy/vulkan/REA
 
 ## Status and roadmap
 
-| Phase | Content | State |
+The full implementation plan — 38 phases in seven eras, each with tasks, exit
+criteria and a cross-cutting ultra-optimisation track — is in
+[`docs/ROADMAP.md`](docs/ROADMAP.md) (Italian).
+
+| Era | Phases | Content |
 |---|---|---|
+| I · Foundations | F0 ✅, F1–F4 | Metal 4 context, memory/heaps, render graph with automatic barriers, async/AOT pipelines, profiling |
+| II · GPU-driven geometry | F5–F8 | Persistent GPU scene, GPU-built ICBs, mesh shaders + two-phase culling, visibility buffer, HDR/EDR, MetalFX |
+| III · Light | F9–F14 | Ray tracing infrastructure, hybrid shadows, ReSTIR DI, radiance-cache GI, reflections, atmosphere and clouds |
+| IV · World | F15–F22 | Advanced materials, on-tile OIT, particles, post, virtualised geometry, terrain, water, cooker, streaming |
+| V · Simulation (parallel) | F23–F27 | Job system and CPU optimisation, physics, animation, ray-traced acoustics, gameplay runtime |
+| VI · Frontier | F28–F33 | Scalability, per-device autotuning, neural rendering (incl. in-house MLX-trained networks), path tracing, Gaussian splatting |
+| VII · Product | F34–F38 | Editor, automated QA, iPad/iPhone/visionOS, vertical slice, distribution |
+
+---|---|---|
 | **F0 — Foundations** | Portable core, Metal 4 context and frame loop, bindless textures, forward PBR pass, ImGui, CI | **in progress** |
 | F1 — RHI and render graph | Heaps, transient aliasing, stage-to-stage barriers, async pipeline compilation | planned |
 | F2 — GPU-driven geometry | Object/mesh shaders, two-phase Hi-Z culling, visibility buffer, MetalFX temporal | planned |
