@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/types.h"
+#include "platform/metal/residency_manager.h"
 #include "platform/metal/upload_ring.h"
 
 #include <Foundation/Foundation.hpp>
@@ -72,13 +73,14 @@ public:
     [[nodiscard]] u64                 frameIndex() const { return frameIndex_; }
 
     [[nodiscard]] GpuMemory&  memory()       { return *memory_; }
+    [[nodiscard]] const ResidencyManager& residency() const { return *residency_; }
     [[nodiscard]] UploadRing& frameUploads() { return *frameUploads_; }
     [[nodiscard]] const UploadRing& frameUploads() const { return *frameUploads_; }
     [[nodiscard]] const UploadRing& staging() const { return *staging_; }
 
     /// Register a long-lived allocation for residency; committed before the
     /// next command buffer commit, so it may be used by the frame being recorded.
-    void makeResident(const MTL::Allocation* allocation);
+    void makeResident(const MTL::Allocation* allocation, ResidencyClass cls = ResidencyClass::Static);
     /// Remove an allocation from the residency set (committed lazily).
     void evict(const MTL::Allocation* allocation);
     /// Release an object once all frames currently in flight have finished
@@ -134,7 +136,6 @@ private:
     MTL4::CommandQueue*    queue_       = nullptr;
     MTL4::Compiler*        compiler_    = nullptr;
     MTL::Library*          library_     = nullptr;
-    MTL::ResidencySet*     residency_   = nullptr;
     MTL::SharedEvent*      frameEvent_  = nullptr;
     MTL::SharedEvent*      uploadEvent_ = nullptr;
     MTL4::CommandBuffer*   uploadCommandBuffer_ = nullptr;
@@ -154,6 +155,7 @@ private:
     /// Release every entry whose frame is <= `completedFrame` (all if ~0).
     void releaseCompleted(u64 completedFrame);
 
+    std::unique_ptr<ResidencyManager> residency_;
     std::unique_ptr<GpuMemory>  memory_;
     std::unique_ptr<UploadRing> frameUploads_;
     std::unique_ptr<UploadRing> staging_;
@@ -168,7 +170,6 @@ private:
     std::vector<float>      gpuTimes_;
     u64                     gpuTimesFirst_    = 0;
     u32                     gpuTimesReceived_ = 0;
-    bool residencyDirty_ = false;
     bool apple9_         = false;
     u64  frameIndex_     = 0;
     u64  uploadValue_    = 0;

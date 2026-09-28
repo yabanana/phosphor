@@ -287,6 +287,12 @@ void Engine::logMemory() const {
              static_cast<double>(memory.totalBytes()) / (1 << 20), heaps.size(),
              static_cast<double>(heapUsed) / (1 << 20), static_cast<double>(heapBytes) / (1 << 20),
              fragmentation);
+    for (const ResidencyClass cls : {ResidencyClass::Static, ResidencyClass::Streaming}) {
+        const ResidencyManager::Stats r = context_->residency().stats(cls);
+        LOG_INFO("Residency %s: %u allocations, %.1f MiB, %u commits",
+                 cls == ResidencyClass::Static ? "static" : "streaming", r.allocations,
+                 static_cast<double>(r.bytes) / (1 << 20), r.commits);
+    }
 }
 
 void Engine::aimCamera(const CameraSetup& setup) {

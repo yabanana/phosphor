@@ -3,6 +3,7 @@
 #include "core/memory/memory_budget.h"
 #include "core/memory/tlsf_allocator.h"
 #include "core/types.h"
+#include "platform/metal/residency_manager.h"
 
 #include <Metal/Metal.hpp>
 
@@ -24,6 +25,10 @@ class MetalContext;
 // one per resource, and creating a resource costs no kernel allocation once
 // a heap has room.  Shared and memoryless resources are standalone.
 //
+// Level content (Geometry, Textures) and engine-lifetime data use separate
+// heaps and residency sets (ResidencyClass), so a level change empties and
+// trims whole heaps without touching the rest.
+//
 // Every allocation is labelled, made resident (except memoryless textures)
 // and accounted per MemoryCategory.  allocationCount() is monotonic: the
 // engine samples it around a benchmark run to prove that no GPU allocation
@@ -41,9 +46,13 @@ public:
     };
 
     struct HeapStats {
-        u64 size = 0;
+        u64            size = 0;
+        ResidencyClass cls  = ResidencyClass::Static;
         TlsfAllocator::Stats tlsf;
     };
+
+    /// Residency class of a category's allocations.
+    [[nodiscard]] static ResidencyClass residencyClass(MemoryCategory category);
 
     explicit GpuMemory(MetalContext& context);
     ~GpuMemory();
@@ -82,8 +91,9 @@ private:
         u64                   offset = 0;
     };
     struct Heap {
-        MTL::Heap*    heap = nullptr;
-        TlsfAllocator tlsf;
+        MTL::Heap*     heap = nullptr;
+        TlsfAllocator  tlsf;
+        ResidencyClass cls = ResidencyClass::Static;
     };
     struct Pending {
         MTL::Resource* resource   = nullptr;
@@ -91,7 +101,7 @@ private:
     };
 
     /// Reserve `size` bytes aligned to `align` in a heap, creating one if none fits.
-    bool place(u64 size, u64 align, Placement& out);
+    bool place(u64 size, u64 align, ResidencyClass cls, Placement& out);
     void account(MTL::Resource* resource, MemoryCategory category);
     void unaccount(MTL::Resource* resource, MemoryCategory category);
     void destroy(MTL::Resource* resource);

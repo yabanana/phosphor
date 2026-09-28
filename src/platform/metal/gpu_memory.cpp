@@ -31,6 +31,11 @@ constexpr MTL::ResourceOptions kStorageModeMask = 0xF0;
 
 GpuMemory::GpuMemory(MetalContext& context) : context_(context) {}
 
+ResidencyClass GpuMemory::residencyClass(MemoryCategory category) {
+    return category == MemoryCategory::Geometry || category == MemoryCategory::Textures ? ResidencyClass::Streaming
+                                                                                        : ResidencyClass::Static;
+}
+
 GpuMemory::~GpuMemory() {
     releaseCompleted(~u64{0});
     for (u32 c = 0; c < MEMORY_CATEGORY_COUNT; ++c) {
@@ -45,9 +50,9 @@ GpuMemory::~GpuMemory() {
     }
 }
 
-bool GpuMemory::place(u64 size, u64 align, Placement& out) {
+bool GpuMemory::place(u64 size, u64 align, ResidencyClass cls, Placement& out) {
     for (u32 i = 0; i < heaps_.size(); ++i) {
-        if (!heaps_[i].heap) continue;
+        if (!heaps_[i].heap || heaps_[i].cls != cls) continue;
         const TlsfAllocator::Allocation a = heaps_[i].tlsf.allocate(size, align);
         if (a.valid()) {
             out = {i, a.handle, a.offset};
@@ -68,7 +73,7 @@ bool GpuMemory::place(u64 size, u64 align, Placement& out) {
         return false;
     }
     heap->setLabel(str("Placement heap"));
-    context_.makeResident(heap); // one residency entry for everything placed in it
+    context_.makeResident(heap, cls); // one residency entry for everything placed in it
     ++allocationCount_;
 
     // Reuse a slot left by a trimmed heap so indices stay small.
@@ -79,7 +84,7 @@ bool GpuMemory::place(u64 size, u64 align, Placement& out) {
             break;
         }
     }
-    Heap entry{heap, TlsfAllocator(heap->size())};
+    Heap entry{heap, TlsfAllocator(heap->size()), cls};
     if (index == heaps_.size()) {
         heaps_.push_back(std::move(entry));
     } else {
@@ -111,7 +116,7 @@ MTL::Buffer* GpuMemory::newBuffer(u64 length, MTL::ResourceOptions options, Memo
     if (isPrivate) {
         const MTL::SizeAndAlign sa = context_.device()->heapBufferSizeAndAlign(length, options);
         Placement p;
-        if (place(sa.size, sa.align, p)) {
+        if (place(sa.size, sa.align, residencyClass(category), p)) {
             buffer = heaps_[p.heap].heap->newBuffer(length, options, p.offset);
             if (buffer) {
                 placements_[buffer] = p;
@@ -127,7 +132,7 @@ MTL::Buffer* GpuMemory::newBuffer(u64 length, MTL::ResourceOptions options, Memo
                       static_cast<unsigned long long>(length), label);
             return nullptr;
         }
-        context_.makeResident(buffer);
+        context_.makeResident(buffer, residencyClass(category));
     }
     buffer->setLabel(str(label));
     account(buffer, category);
@@ -140,7 +145,7 @@ MTL::Texture* GpuMemory::newTexture(const MTL::TextureDescriptor* descriptor, Me
     if (descriptor->storageMode() == MTL::StorageModePrivate) {
         const MTL::SizeAndAlign sa = context_.device()->heapTextureSizeAndAlign(descriptor);
         Placement p;
-        if (place(sa.size, sa.align, p)) {
+        if (place(sa.size, sa.align, residencyClass(category), p)) {
             texture = heaps_[p.heap].heap->newTexture(descriptor, p.offset);
             if (texture) {
                 placements_[texture] = p;
@@ -158,7 +163,7 @@ MTL::Texture* GpuMemory::newTexture(const MTL::TextureDescriptor* descriptor, Me
             return nullptr;
         }
         // Memoryless textures live in tile memory only: nothing to make resident.
-        if (!isMemoryless(texture)) context_.makeResident(texture);
+        if (!isMemoryless(texture)) context_.makeResident(texture, residencyClass(category));
     }
     texture->setLabel(str(label));
     account(texture, category);
@@ -200,11 +205,13 @@ void GpuMemory::releaseCompleted(u64 completedFrame) {
 
 u64 GpuMemory::trimEmptyHeaps() {
     u64 freed = 0;
-    bool keptOne = false;
+    std::array<bool, static_cast<size_t>(ResidencyClass::COUNT)> keptSpare{};
     for (Heap& h : heaps_) {
         if (!h.heap) continue;
-        if (h.tlsf.stats().allocationCount != 0 || !keptOne) {
-            keptOne = true;
+        bool& spare = keptSpare[static_cast<size_t>(h.cls)];
+        if (h.tlsf.stats().allocationCount != 0) continue;
+        if (!spare) { // keep one empty heap per class for the next level
+            spare = true;
             continue;
         }
         freed += h.heap->size();
@@ -228,7 +235,7 @@ u64 GpuMemory::totalBytes() const {
 std::vector<GpuMemory::HeapStats> GpuMemory::heapStats() const {
     std::vector<HeapStats> out;
     for (const Heap& h : heaps_) {
-        if (h.heap) out.push_back({h.heap->size(), h.tlsf.stats()});
+        if (h.heap) out.push_back({h.heap->size(), h.cls, h.tlsf.stats()});
     }
     return out;
 }

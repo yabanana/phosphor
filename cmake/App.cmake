@@ -84,6 +84,7 @@ add_executable(phosphor
     src/platform/metal/metal_context.cpp
     src/platform/metal/metal_impl.cpp
     src/platform/metal/metal_texture_manager.cpp
+    src/platform/metal/residency_manager.cpp
     src/platform/metal/scene_renderer.cpp
     src/platform/metal/upload_ring.cpp
 )

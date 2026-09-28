@@ -1,5 +1,6 @@
 #include "platform/metal/metal_context.h"
 #include "platform/metal/gpu_memory.h"
+#include "platform/metal/residency_manager.h"
 #include "core/log.h"
 
 #include <chrono>
@@ -63,15 +64,7 @@ MetalContext::MetalContext(CA::MetalLayer* layer, const std::string& libraryPath
         throw std::runtime_error(std::string("Failed to load shader library ") + libraryPath + ": " + reason);
     }
 
-    MTL::ResidencySetDescriptor* rsDesc = MTL::ResidencySetDescriptor::alloc()->init();
-    rsDesc->setLabel(str("Phosphor static residency"));
-    rsDesc->setInitialCapacity(256);
-    residency_ = device_->newResidencySet(rsDesc, &error);
-    rsDesc->release();
-    if (!residency_) {
-        throw std::runtime_error("Failed to create residency set");
-    }
-    queue_->addResidencySet(residency_);
+    residency_ = std::make_unique<ResidencyManager>(device_, queue_);
 
     for (u32 i = 0; i < METAL_FRAMES_IN_FLIGHT; ++i) {
         allocators_[i]     = device_->newCommandAllocator();
@@ -110,7 +103,7 @@ MetalContext::~MetalContext() {
     uploadAllocator_->release();
     uploadEvent_->release();
     frameEvent_->release();
-    residency_->release();
+    residency_.reset();
     library_->release();
     compiler_->release();
     queue_->release();
@@ -121,16 +114,13 @@ const char* MetalContext::gpuName() const {
     return device_->name()->utf8String();
 }
 
-void MetalContext::makeResident(const MTL::Allocation* allocation) {
-    if (!allocation) return;
-    residency_->addAllocation(allocation);
-    residencyDirty_ = true;
+void MetalContext::makeResident(const MTL::Allocation* allocation, ResidencyClass cls) {
+    residency_->add(allocation, cls);
 }
 
 void MetalContext::evict(const MTL::Allocation* allocation) {
     if (!allocation) return;
-    residency_->removeAllocation(allocation);
-    residencyDirty_ = true;
+    residency_->remove(allocation);
 }
 
 void MetalContext::deferRelease(NS::Object* object) {
@@ -159,10 +149,7 @@ void MetalContext::releaseCompleted(u64 completedFrame) {
 }
 
 void MetalContext::flushResidency() {
-    if (residencyDirty_) {
-        residency_->commit();
-        residencyDirty_ = false;
-    }
+    residency_->commit();
 }
 
 void MetalContext::resize(u32 width, u32 height) {
