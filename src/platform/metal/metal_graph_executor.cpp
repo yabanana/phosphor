@@ -140,6 +140,29 @@ MetalGraphExecutor::MetalGraphExecutor(MetalContext& context) : context_(context
 MetalGraphExecutor::~MetalGraphExecutor() {
     context_.waitIdle();
     releaseResources();
+    workers_.reset();
+    for (ExtraCommandBuffer& e : extra_) {
+        for (u32 slot = 0; slot < METAL_FRAMES_IN_FLIGHT; ++slot) {
+            e.buffers[slot]->release();
+            e.allocators[slot]->release();
+        }
+    }
+}
+
+void MetalGraphExecutor::ensureParallelResources(u32 maxChunks) {
+    if (maxChunks <= 1) return;
+    // Worst case: every chunk and the tail of every split group (bounded by
+    // the frame's extra command buffer slots).
+    while (extra_.size() < MetalContext::MAX_FRAME_COMMAND_BUFFERS - 1) {
+        ExtraCommandBuffer& e = extra_.emplace_back();
+        for (u32 slot = 0; slot < METAL_FRAMES_IN_FLIGHT; ++slot) {
+            e.allocators[slot] = context_.device()->newCommandAllocator();
+            e.buffers[slot]    = context_.device()->newCommandBuffer();
+        }
+    }
+    if (!workers_ || workers_->workerCount() < maxChunks - 1) {
+        workers_ = std::make_unique<WorkerPool>(maxChunks - 1);
+    }
 }
 
 void MetalGraphExecutor::releaseResources() {
@@ -206,6 +229,34 @@ bool MetalGraphExecutor::compile(const rg::RenderGraph& graph, const rg::Compile
         return false;
     }
     buildPassDescriptors();
+
+    // F2.5: raster passes to encode on several threads (one per group).
+    splitPosition_.assign(compiled_.renderGroups.size(), kNone);
+    u32 maxChunks = 1, extraNeeded = 0;
+    for (u32 g = 0; g < compiled_.renderGroups.size(); ++g) {
+        const rg::RenderGroup& group = compiled_.renderGroups[g];
+        for (u32 pos = group.firstPosition; pos <= group.lastPosition; ++pos) {
+            const u32 chunks = graph.passes()[compiled_.order[pos]].parallelChunks;
+            if (chunks <= 1) continue;
+            if (splitPosition_[g] != kNone) {
+                LOG_WARN("Render graph: one split pass per render pass; '%s' is encoded on one thread",
+                         graph.passes()[compiled_.order[pos]].name.c_str());
+                continue;
+            }
+            splitPosition_[g] = pos;
+            maxChunks = std::max(maxChunks, chunks);
+            LOG_INFO("Render graph: '%s' encoded by %u threads (render pass suspended/resumed across %u command "
+                     "buffers)", graph.passes()[compiled_.order[pos]].name.c_str(), chunks, chunks + 2);
+            extraNeeded += chunks + 2; // chunks + tail + continuation
+        }
+    }
+    if (extraNeeded > MetalContext::MAX_FRAME_COMMAND_BUFFERS - 1) {
+        LOG_ERROR("Render graph: parallel encoding needs %u extra command buffers (max %u)", extraNeeded,
+                  MetalContext::MAX_FRAME_COMMAND_BUFFERS - 1);
+        graph_ = nullptr;
+        return false;
+    }
+    ensureParallelResources(maxChunks);
 
     barrierIndex_.assign(compiled_.order.size(), kNone);
     for (u32 i = 0; i < compiled_.barriers.size(); ++i) barrierIndex_[compiled_.barriers[i].position] = i;
@@ -340,59 +391,129 @@ void MetalGraphExecutor::encodeBarriers(MTL4::CommandEncoder* encoder, u32 posit
     }
 }
 
-void MetalGraphExecutor::runPass(MTL4::CommandEncoder* encoder, u32 position, const MetalContext::Frame& frame) const {
+void MetalGraphExecutor::runPass(MTL4::CommandEncoder* encoder, u32 position, const MetalContext::Frame& frame,
+                                 u32 chunk, u32 chunks) const {
     const u32 pass = compiled_.order[position];
     const rg::PassNode& node = graph_->passes()[pass];
     encoder->pushDebugGroup(passLabels_[pass]);
     if (node.execute) {
-        Context ctx(*this, encoder, frame.index, 0, 1);
+        Context ctx(*this, encoder, frame.index, chunk, chunks);
         node.execute(ctx);
     }
     encoder->popDebugGroup();
 }
 
+void MetalGraphExecutor::setImportedAttachments(u32 group, bool bind) {
+    const auto& resources = graph_->resources();
+    MTL4::RenderPassDescriptor* desc = passDescriptors_[group];
+    for (const rg::AttachmentPlan& a : compiled_.renderGroups[group].attachments) {
+        if (!resources[a.resource].imported) continue;
+        MTL::Texture* texture = bind ? textures_[a.resource] : nullptr;
+        if (a.depth) {
+            desc->depthAttachment()->setTexture(texture);
+        } else {
+            desc->colorAttachments()->object(a.slot)->setTexture(texture);
+        }
+    }
+}
+
+MTL4::CommandBuffer* MetalGraphExecutor::beginExtraCommandBuffer(MetalContext::Frame& frame, u32 index) {
+    ExtraCommandBuffer& e = extra_[index];
+    e.allocators[frame.slot]->reset();
+    MTL4::CommandBuffer* cmd = e.buffers[frame.slot];
+    cmd->beginCommandBuffer(e.allocators[frame.slot]);
+    frame.buffers[frame.bufferCount++] = cmd;
+    return cmd;
+}
+
+void MetalGraphExecutor::encodeChunkJob(void* user, u32 chunk) {
+    const ChunkJob& job = *static_cast<const ChunkJob*>(user);
+    job.executor->runPass(job.encoders[chunk], job.position, *job.frame, chunk, job.chunks);
+    job.encoders[chunk]->endEncoding();
+}
+
+MTL4::CommandBuffer* MetalGraphExecutor::encodeSplitGroup(MetalContext::Frame& frame, MTL4::CommandBuffer* cmd,
+                                                          u32 group, u32 splitPosition) {
+    const rg::RenderGroup& plan = compiled_.renderGroups[group];
+    MTL4::RenderPassDescriptor* desc = passDescriptors_[group];
+    const u32 chunks = graph_->passes()[compiled_.order[splitPosition]].parallelChunks;
+
+    // Every piece of the render pass is created here, on this thread, from
+    // the same descriptor; only the recording of the chunks is parallel.
+    setImportedAttachments(group, true);
+    MTL4::RenderCommandEncoder* head = cmd->renderCommandEncoder(desc, MTL4::RenderEncoderOptionSuspending);
+    chunkJob_.executor = this;
+    chunkJob_.frame    = &frame;
+    chunkJob_.position = splitPosition;
+    chunkJob_.chunks   = chunks;
+    for (u32 c = 0; c < chunks; ++c) {
+        MTL4::CommandBuffer* chunkCmd = beginExtraCommandBuffer(frame, frame.bufferCount - 1);
+        chunkJob_.encoders[c] = chunkCmd->renderCommandEncoder(
+            desc, MTL4::RenderEncoderOptionResuming | MTL4::RenderEncoderOptionSuspending);
+        chunkJob_.encoders[c]->setLabel(passLabels_[compiled_.order[splitPosition]]);
+    }
+    MTL4::CommandBuffer* tailCmd = beginExtraCommandBuffer(frame, frame.bufferCount - 1);
+    MTL4::RenderCommandEncoder* tail = tailCmd->renderCommandEncoder(desc, MTL4::RenderEncoderOptionResuming);
+    setImportedAttachments(group, false);
+
+    head->setLabel(groupLabels_[group]);
+    encodeBarriers(head, plan.firstPosition);
+    for (u32 pos = plan.firstPosition; pos < splitPosition; ++pos) runPass(head, pos, frame);
+    head->endEncoding();
+    if (cmd != frame.commandBuffer) cmd->endCommandBuffer(); // tail of an earlier split
+
+    workers_->run(chunks, &MetalGraphExecutor::encodeChunkJob, &chunkJob_);
+    for (u32 c = 0; c < chunks; ++c) {
+        frame.buffers[frame.bufferCount - chunks - 1 + c]->endCommandBuffer();
+    }
+
+    tail->setLabel(groupLabels_[group]);
+    for (u32 pos = splitPosition + 1; pos <= plan.lastPosition; ++pos) runPass(tail, pos, frame);
+    tail->endEncoding();
+    // Measured: another encoder after the resumed pass in the same command
+    // buffer makes the whole commit fail (MTL4CommandQueueErrorDomain 1), so
+    // later encoders go into a fresh command buffer.
+    tailCmd->endCommandBuffer();
+    return beginExtraCommandBuffer(frame, frame.bufferCount - 1);
+}
+
 void MetalGraphExecutor::execute(MetalContext::Frame& frame) {
     if (!valid()) return;
-    const auto& resources = graph_->resources();
+    MTL4::CommandBuffer* cmd = frame.commandBuffer;
     for (size_t e = 0; e < compiled_.encoders.size(); ++e) {
         const rg::EncoderPlan& plan = compiled_.encoders[e];
         if (plan.type == rg::PassType::Raster) {
-            const rg::RenderGroup& group = compiled_.renderGroups[plan.renderGroup];
-            MTL4::RenderPassDescriptor* desc = passDescriptors_[plan.renderGroup];
-            // Imported attachments change every frame (drawable).
-            for (const rg::AttachmentPlan& a : group.attachments) {
-                if (!resources[a.resource].imported) continue;
-                if (a.depth) {
-                    desc->depthAttachment()->setTexture(textures_[a.resource]);
-                } else {
-                    desc->colorAttachments()->object(a.slot)->setTexture(textures_[a.resource]);
-                }
+            const u32 groupIndex = plan.renderGroup;
+            if (splitPosition_[groupIndex] != kNone) {
+                cmd = encodeSplitGroup(frame, cmd, groupIndex, splitPosition_[groupIndex]);
+                continue;
             }
-            MTL4::RenderCommandEncoder* enc = frame.commandBuffer->renderCommandEncoder(desc);
-            // The encoder copied the descriptor: do not keep the drawable alive.
-            for (const rg::AttachmentPlan& a : group.attachments) {
-                if (!resources[a.resource].imported) continue;
-                if (a.depth) {
-                    desc->depthAttachment()->setTexture(nullptr);
-                } else {
-                    desc->colorAttachments()->object(a.slot)->setTexture(nullptr);
-                }
-            }
-            enc->setLabel(groupLabels_[plan.renderGroup]);
+            const rg::RenderGroup& group = compiled_.renderGroups[groupIndex];
+            // Imported attachments change every frame (drawable); the encoder
+            // copies the descriptor, which then drops them again so that it
+            // does not keep the drawable alive.
+            setImportedAttachments(groupIndex, true);
+            MTL4::RenderCommandEncoder* enc = cmd->renderCommandEncoder(passDescriptors_[groupIndex]);
+            setImportedAttachments(groupIndex, false);
+            enc->setLabel(groupLabels_[groupIndex]);
             // Barriers of every member were hoisted to the group start.
             encodeBarriers(enc, group.firstPosition);
             for (u32 pos = plan.firstPosition; pos <= plan.lastPosition; ++pos) runPass(enc, pos, frame);
             enc->endEncoding();
         } else {
-            MTL4::ComputeCommandEncoder* enc = frame.commandBuffer->computeCommandEncoder();
+            MTL4::ComputeCommandEncoder* enc = cmd->computeCommandEncoder();
             enc->setLabel(encoderLabels_[e]);
             for (u32 pos = plan.firstPosition; pos <= plan.lastPosition; ++pos) {
                 encodeBarriers(enc, pos);
-                runPass(enc, pos, frame);
+                // Non-raster passes with chunks run them in sequence.
+                const u32 chunks = graph_->passes()[compiled_.order[pos]].parallelChunks;
+                for (u32 c = 0; c < chunks; ++c) runPass(enc, pos, frame, c, chunks);
             }
             enc->endEncoding();
         }
     }
+    // The frame's own command buffer is ended by MetalContext::submitFrame.
+    if (cmd != frame.commandBuffer) cmd->endCommandBuffer();
 }
 
 } // namespace phosphor

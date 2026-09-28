@@ -109,6 +109,8 @@ private:
         u32  height  = 0;
         bool ui      = false;
         bool capture = false;
+        bool splitEncoding = false;
+        bool asyncCompute  = false;
         bool operator==(const GraphKey&) const = default;
     };
     rg::RenderGraph frameGraph_;

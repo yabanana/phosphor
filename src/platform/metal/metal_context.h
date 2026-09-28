@@ -45,11 +45,36 @@ constexpr u32 METAL_FRAMES_IN_FLIGHT = 3;
 
 class MetalContext {
 public:
+    static constexpr u32 MAX_FRAME_COMMAND_BUFFERS = 12;
+    static constexpr u32 MAX_FRAME_SUBMISSIONS     = 8;
+
+    enum class SubmitQueue : u8 { Graphics, Async };
+
+    /// One commit of the frame (F2.5/F2.6).  Metal 4 synchronises queues only
+    /// between commits, so a frame whose graph crosses queues is several
+    /// submissions, each waiting on / signalling the graph event.
+    struct Submission {
+        SubmitQueue queue       = SubmitQueue::Graphics;
+        u32         firstBuffer = 0; // range in Frame::buffers
+        u32         bufferCount = 0;
+        u64         waitValue   = 0; // wait graphEvent() >= value before the commit (0: none)
+        u64         signalValue = 0; // signal graphEvent() = value after the commit (0: none)
+        u64         waitFrame   = 0; // wait frameEvent() >= value before the commit (0: none)
+    };
+
     struct Frame {
-        MTL4::CommandBuffer* commandBuffer = nullptr;
+        MTL4::CommandBuffer* commandBuffer = nullptr; // begun by beginFrame, ended by submitFrame
         CA::MetalDrawable*   drawable      = nullptr;
         u32                  slot          = 0;
         u64                  index         = 0;
+        /// Every command buffer of the frame in commit order; [0] is
+        /// commandBuffer.  The others are recorded (possibly on other
+        /// threads) and ended by their owner before submitFrame().
+        std::array<MTL4::CommandBuffer*, MAX_FRAME_COMMAND_BUFFERS> buffers{};
+        u32                  bufferCount     = 1;
+        /// Commits in order.  None: one graphics commit of all buffers.
+        std::array<Submission, MAX_FRAME_SUBMISSIONS> submissions{};
+        u32                  submissionCount = 0;
     };
 
     /// `libraryPath` is the compiled phosphor.metallib shared by every pass.
@@ -61,6 +86,10 @@ public:
 
     [[nodiscard]] MTL::Device*        device()       const { return device_; }
     [[nodiscard]] MTL4::CommandQueue* queue()        const { return queue_; }
+    /// Second queue for async compute (F2.6); shares the residency sets.
+    [[nodiscard]] MTL4::CommandQueue* asyncQueue()   const { return asyncQueue_; }
+    /// Cross-queue timeline of the render graph (F2.6), monotonic over frames.
+    [[nodiscard]] MTL::SharedEvent*   graphEvent()   const { return graphEvent_; }
     [[nodiscard]] MTL4::Compiler*     compiler()     const { return compiler_; }
     [[nodiscard]] MTL::Library*       library()      const { return library_; }
     [[nodiscard]] CA::MetalLayer*     layer()        const { return layer_; }
@@ -102,8 +131,10 @@ public:
     /// Returns false if no drawable is available (e.g. minimised window).
     bool beginFrame(Frame& frame);
 
-    /// End and commit the frame's command buffer, present its drawable and
-    /// signal "frame done".
+    /// End the frame's command buffer, commit every submission in order (the
+    /// drawable is waited for before the first graphics commit and signalled
+    /// after the last one), present and signal "frame done" on the graphics
+    /// queue.
     void submitFrame(Frame& frame);
 
     /// Record the GPU time of the next `frames` frames (benchmark mode).
@@ -146,6 +177,8 @@ private:
     CA::MetalLayer*        layer_       = nullptr;
     MTL::Device*           device_      = nullptr;
     MTL4::CommandQueue*    queue_       = nullptr;
+    MTL4::CommandQueue*    asyncQueue_  = nullptr;
+    MTL::SharedEvent*      graphEvent_  = nullptr;
     MTL4::Compiler*        compiler_    = nullptr;
     MTL::Library*          library_     = nullptr;
     MTL::SharedEvent*      frameEvent_  = nullptr;

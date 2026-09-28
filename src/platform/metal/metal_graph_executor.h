@@ -1,10 +1,13 @@
 #pragma once
 
 #include "core/types.h"
+#include "core/worker_pool.h"
 #include "platform/metal/metal_context.h"
 #include "platform/metal/transient_heap.h"
 #include "rendergraph/render_graph.h"
 
+#include <array>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -24,6 +27,14 @@ namespace phosphor {
 // load/store actions.  execute() is the per-frame path and allocates
 // nothing (O7): it opens one encoder per EncoderPlan, encodes the planned
 // barriers and calls every pass's execute callback.
+//
+// F2.5: a raster pass with parallelChunks > 1 is encoded by several threads
+// (WorkerPool).  Its render group becomes one render pass split across
+// command buffers: the part before the pass in the frame's command buffer
+// (encoder Suspending), one command buffer per chunk (Resuming|Suspending),
+// and a tail command buffer (Resuming) with the rest of the group and every
+// later encoder.  Each extra command buffer has its own allocator per frame
+// slot; all are committed together, in order, by MetalContext::submitFrame.
 //
 // Imported resources (drawable, readback buffers) are bound every frame
 // with bindTexture()/bindBuffer().  Imported attachments are removed from
@@ -66,7 +77,17 @@ private:
     bool createResources();
     void buildPassDescriptors();
     void encodeBarriers(MTL4::CommandEncoder* encoder, u32 position) const;
-    void runPass(MTL4::CommandEncoder* encoder, u32 position, const MetalContext::Frame& frame) const;
+    void runPass(MTL4::CommandEncoder* encoder, u32 position, const MetalContext::Frame& frame, u32 chunk = 0,
+                 u32 chunks = 1) const;
+    void setImportedAttachments(u32 group, bool bind);
+    /// Encode a render group whose pass at `splitPosition` is split in chunks;
+    /// returns the command buffer that later encoders must use.
+    MTL4::CommandBuffer* encodeSplitGroup(MetalContext::Frame& frame, MTL4::CommandBuffer* cmd, u32 group,
+                                          u32 splitPosition);
+    /// Begin extra command buffer `index` of the frame (F2.5).
+    MTL4::CommandBuffer* beginExtraCommandBuffer(MetalContext::Frame& frame, u32 index);
+    void ensureParallelResources(u32 maxChunks);
+    static void encodeChunkJob(void* user, u32 chunk);
 
     MetalContext&            context_;
     TransientHeap            heap_;
@@ -83,6 +104,25 @@ private:
     std::vector<NS::String*>   passLabels_;    // per pass
     std::vector<NS::String*>   encoderLabels_; // per compute encoder (null for raster)
     std::vector<u32>           barrierIndex_;  // per position: index into compiled_.barriers or ~0u
+    std::vector<u32>           splitPosition_; // per render group: position of its split pass or ~0u
+
+    // F2.5 parallel encoding: extra command buffers [index][slot] with their
+    // allocators, and the threads that encode the chunks.
+    struct ExtraCommandBuffer {
+        std::array<MTL4::CommandAllocator*, METAL_FRAMES_IN_FLIGHT> allocators{};
+        std::array<MTL4::CommandBuffer*, METAL_FRAMES_IN_FLIGHT>    buffers{};
+    };
+    std::vector<ExtraCommandBuffer> extra_;
+    std::unique_ptr<WorkerPool>     workers_;
+    // Per-frame state of the chunk jobs (no allocation per frame).
+    struct ChunkJob {
+        const MetalGraphExecutor*    executor = nullptr;
+        const MetalContext::Frame*   frame    = nullptr;
+        u32                          position = 0;
+        u32                          chunks   = 1;
+        std::array<MTL4::RenderCommandEncoder*, MetalContext::MAX_FRAME_COMMAND_BUFFERS> encoders{};
+    };
+    ChunkJob chunkJob_;
 };
 
 } // namespace phosphor

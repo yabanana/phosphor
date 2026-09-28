@@ -35,7 +35,8 @@ public:
         u32 commits     = 0;
     };
 
-    ResidencyManager(MTL::Device* device, MTL4::CommandQueue* queue);
+    /// The sets are attached to `queue` and, if given, to `asyncQueue` (F2.6).
+    ResidencyManager(MTL::Device* device, MTL4::CommandQueue* queue, MTL4::CommandQueue* asyncQueue = nullptr);
     ~ResidencyManager();
 
     ResidencyManager(const ResidencyManager&) = delete;
@@ -52,7 +53,8 @@ public:
 private:
     static constexpr u32 COUNT = static_cast<u32>(ResidencyClass::COUNT);
 
-    MTL4::CommandQueue* queue_ = nullptr;
+    MTL4::CommandQueue* queue_      = nullptr;
+    MTL4::CommandQueue* asyncQueue_ = nullptr;
     std::array<MTL::ResidencySet*, COUNT> sets_{};
     std::array<bool, COUNT> dirty_{};
     std::array<u32, COUNT> commits_{};

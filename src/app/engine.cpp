@@ -509,7 +509,8 @@ bool Engine::frame(float dt) {
     const bool lastFrame = !options_.benchmark() || presentedFrames_ + 1 == options_.warmup + options_.frames;
     captureThisFrame_ = capture_ && lastFrame && !captured_;
 
-    const GraphKey key{width, height, options_.ui, capture_ != nullptr};
+    const GraphKey key{width, height, options_.ui, capture_ != nullptr, options_.debugSplitEncoding,
+                       options_.debugAsyncCompute};
     if (!(key == graphKey_) || !graphExecutor_->valid()) {
         graphKey_ = key;
         buildFrameGraph(width, height);
@@ -578,6 +579,9 @@ void Engine::buildFrameGraph(u32 width, u32 height) {
             color = b.writeColor(color, 0, LoadIntent::Clear, clear);
             b.writeDepth(depth, LoadIntent::Clear, clear);
             b.setHints(HintGeometryHeavy);
+            // F2.5 check: the draws are recorded by 4 threads into a render
+            // pass suspended/resumed across command buffers.
+            if (options_.debugSplitEncoding) b.setParallelChunks(4);
         },
         [this](PassContext& ctx) {
             renderer_->encode(static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder()), ctx.chunk(), ctx.chunkCount());
