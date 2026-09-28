@@ -3,6 +3,7 @@
 #include "core/launch_options.h"
 #include "core/types.h"
 #include "diagnostics/bench_report.h"
+#include "platform/metal/gpu_memory.h"
 #include "imgui/ui_panels.h"
 #include "renderer/scene_extract.h"
 #include "testbench/testbench.h"
@@ -49,6 +50,7 @@ private:
     void switchTestBench(TestBenchType type);
     void aimCamera(const CameraSetup& setup);
     void logMemory() const;
+    void fillMemoryInfo();
     /// Simulate and render one frame; false if nothing was presented.
     bool frame(float dt);
     void recordBenchmarkFrame(float dt, float cpuMs, float waitMs);
@@ -83,7 +85,9 @@ private:
     // CPU time spent blocked in beginFrame() (slot + drawable waits).
     std::chrono::steady_clock::duration frameWait_{};
 
-    FrameScene     frameScene_;
+    FrameScene      frameScene_;
+    MemoryPanelInfo memoryInfo_; // reused every frame (keeps vector capacity)
+    std::vector<GpuMemory::HeapStats> heapStatsScratch_;
     RenderSettings settings_;
     bool           captured_  = false;
     bool           orbitMode_ = false;

@@ -277,7 +277,8 @@ void Engine::logMemory() const {
     const GpuMemory& memory = context_->memory();
     u64 heapBytes = 0, heapUsed = 0;
     float fragmentation = 0.0f;
-    const auto heaps = memory.heapStats();
+    std::vector<GpuMemory::HeapStats> heaps;
+    memory.heapStats(heaps);
     for (const auto& h : heaps) {
         heapBytes += h.size;
         heapUsed += h.tlsf.usedBytes;
@@ -293,6 +294,38 @@ void Engine::logMemory() const {
                  cls == ResidencyClass::Static ? "static" : "streaming", r.allocations,
                  static_cast<double>(r.bytes) / (1 << 20), r.commits);
     }
+}
+
+void Engine::fillMemoryInfo() {
+    const GpuMemory& memory = context_->memory();
+    const MemoryBudget& budget = context_->budget();
+    MemoryPanelInfo& m = memoryInfo_;
+    m.tier            = tierName(budget.tier());
+    m.workingSet      = budget.workingSet();
+    m.engineLimit     = budget.engineLimit();
+    m.deviceAllocated = context_->device()->currentAllocatedSize();
+    m.gpuAllocations  = memory.allocationCount();
+    for (u32 c = 0; c < MEMORY_CATEGORY_COUNT; ++c) {
+        const auto category = static_cast<MemoryCategory>(c);
+        const GpuMemory::CategoryStats& s = memory.stats(category);
+        m.categories[c] = {s.bytes, s.count, budget.limit(category), budget.level(category, s.bytes)};
+    }
+    memory.heapStats(heapStatsScratch_);
+    m.heaps.clear();
+    for (const auto& h : heapStatsScratch_) {
+        m.heaps.push_back({h.size, h.tlsf.usedBytes, h.tlsf.allocationCount, h.tlsf.fragmentation(),
+                           h.cls == ResidencyClass::Streaming});
+    }
+    const auto ring = [](const char* name, const UploadRing& r) {
+        const LinearRing::Stats s = r.stats();
+        return MemoryPanelInfo::Ring{name, s.capacity, s.inFlightBytes, s.peakFrameBytes, s.overflows};
+    };
+    m.rings = {ring("Frame uploads", context_->frameUploads()), ring("Staging", context_->staging())};
+    const auto set = [&](const char* name, ResidencyClass cls) {
+        const ResidencyManager::Stats s = context_->residency().stats(cls);
+        return MemoryPanelInfo::ResidencySet{name, s.allocations, s.bytes, s.commits};
+    };
+    m.residency = {set("static", ResidencyClass::Static), set("streaming", ResidencyClass::Streaming)};
 }
 
 void Engine::aimCamera(const CameraSetup& setup) {
@@ -377,6 +410,8 @@ bool Engine::frame(float dt) {
         info.gpuMs       = context_->lastGpuMs();
         UIPanels::drawPerformancePanel(*frameStats_, info);
         UIPanels::drawRenderPanel(settings_);
+        fillMemoryInfo();
+        UIPanels::drawMemoryPanel(memoryInfo_);
 
         ImGui::Render();
         imguiRenderer_->render(pass, ImGui::GetDrawData());

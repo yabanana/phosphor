@@ -97,16 +97,29 @@ bool GpuMemory::place(u64 size, u64 align, ResidencyClass cls, Placement& out) {
 }
 
 void GpuMemory::account(MTL::Resource* resource, MemoryCategory category) {
-    CategoryStats& s = stats_[static_cast<u32>(category)];
+    const u32 c = static_cast<u32>(category);
+    CategoryStats& s = stats_[c];
     s.bytes += resource->allocatedSize();
     ++s.count;
     ++allocationCount_;
+
+    // Log when a category crosses into Warning or Over (once per crossing).
+    const MemoryBudget::Level level = context_.budget().level(category, s.bytes);
+    if (level > reportedLevel_[c]) {
+        LOG_WARN("GPU memory budget: %s at %.1f of %.1f MiB (%s)", memoryCategoryName(category),
+                 static_cast<double>(s.bytes) / (1 << 20),
+                 static_cast<double>(context_.budget().limit(category)) / (1 << 20),
+                 level == MemoryBudget::Level::Over ? "over budget" : "warning");
+    }
+    reportedLevel_[c] = level;
 }
 
 void GpuMemory::unaccount(MTL::Resource* resource, MemoryCategory category) {
-    CategoryStats& s = stats_[static_cast<u32>(category)];
+    const u32 c = static_cast<u32>(category);
+    CategoryStats& s = stats_[c];
     s.bytes -= resource->allocatedSize();
     --s.count;
+    reportedLevel_[c] = std::min(reportedLevel_[c], context_.budget().level(category, s.bytes));
 }
 
 MTL::Buffer* GpuMemory::newBuffer(u64 length, MTL::ResourceOptions options, MemoryCategory category,
@@ -232,12 +245,11 @@ u64 GpuMemory::totalBytes() const {
     return total;
 }
 
-std::vector<GpuMemory::HeapStats> GpuMemory::heapStats() const {
-    std::vector<HeapStats> out;
+void GpuMemory::heapStats(std::vector<HeapStats>& out) const {
+    out.clear();
     for (const Heap& h : heaps_) {
         if (h.heap) out.push_back({h.heap->size(), h.cls, h.tlsf.stats()});
     }
-    return out;
 }
 
 } // namespace phosphor

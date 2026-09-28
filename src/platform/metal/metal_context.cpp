@@ -34,8 +34,13 @@ MetalContext::MetalContext(CA::MetalLayer* layer, const std::string& libraryPath
     if (!device_->supportsFamily(MTL::GPUFamilyApple7) || !device_->supportsFamily(MTL::GPUFamilyMetal4)) {
         throw std::runtime_error("Phosphor requires a Metal 4 capable Apple GPU (Apple7+, macOS 26+)");
     }
-    apple9_ = device_->supportsFamily(MTL::GPUFamilyApple9);
-    LOG_INFO("Metal device: %s (Apple9+: %s)", gpuName(), apple9_ ? "yes" : "no");
+    apple9_  = device_->supportsFamily(MTL::GPUFamilyApple9);
+    apple10_ = device_->supportsFamily(MTL::GPUFamilyApple10);
+    budget_  = MemoryBudget(device_->recommendedMaxWorkingSetSize(), detectTier(gpuName(), apple10_));
+    LOG_INFO("Metal device: %s (Apple9+: %s, Apple10+: %s), tier %s, working set %.1f GiB, engine budget %.1f GiB",
+             gpuName(), apple9_ ? "yes" : "no", apple10_ ? "yes" : "no", tierName(budget_.tier()),
+             static_cast<double>(budget_.workingSet()) / (1ull << 30),
+             static_cast<double>(budget_.engineLimit()) / (1ull << 30));
     if (!apple9_) {
         LOG_WARN("Below the Apple9 (M3) baseline: ray tracing and mesh-shader ICBs will be unavailable");
     }

@@ -82,7 +82,8 @@ public:
         return stats_[static_cast<u32>(category)];
     }
     [[nodiscard]] u64 totalBytes() const;
-    [[nodiscard]] std::vector<HeapStats> heapStats() const;
+    /// Fill `out` (cleared first; reuse it to avoid per-frame allocations).
+    void heapStats(std::vector<HeapStats>& out) const;
 
 private:
     struct Placement {
@@ -108,6 +109,7 @@ private:
 
     MetalContext& context_;
     std::array<CategoryStats, MEMORY_CATEGORY_COUNT> stats_{};
+    std::array<MemoryBudget::Level, MEMORY_CATEGORY_COUNT> reportedLevel_{}; // last level logged
     u64 allocationCount_ = 0;
     std::vector<Heap> heaps_; // released heaps leave a null entry (indices stay stable)
     std::unordered_map<const MTL::Resource*, Placement> placements_;

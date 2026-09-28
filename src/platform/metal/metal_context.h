@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/memory/memory_budget.h"
 #include "core/types.h"
 #include "platform/metal/residency_manager.h"
 #include "platform/metal/upload_ring.h"
@@ -67,6 +68,8 @@ public:
     [[nodiscard]] MTL::PixelFormat    colorFormat()  const { return MTL::PixelFormatBGRA8Unorm_sRGB; }
     [[nodiscard]] const char*         gpuName()      const;
     [[nodiscard]] bool                isApple9OrLater() const { return apple9_; }
+    [[nodiscard]] bool                isApple10OrLater() const { return apple10_; }
+    [[nodiscard]] const MemoryBudget& budget() const { return budget_; }
     /// GPU time of the most recently completed frame command buffer.
     [[nodiscard]] float               lastGpuMs() const { return lastGpuMs_.load(std::memory_order_relaxed); }
     /// Index of the frame being recorded, or of the next one between frames.
@@ -173,6 +176,8 @@ private:
     u64                     gpuTimesFirst_    = 0;
     u32                     gpuTimesReceived_ = 0;
     bool apple9_         = false;
+    bool apple10_        = false;
+    MemoryBudget budget_;
     u64  frameIndex_     = 0;
     u64  uploadValue_    = 0;
     u32  width_          = 0;
