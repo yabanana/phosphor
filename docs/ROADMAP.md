@@ -222,10 +222,10 @@ prime misure di velocità reali.
 - [x] F0.2 `phosphor_core` portabile + test doctest
 - [x] F0.3 `MetalContext`: coda MTL4, 3 frame in volo, `MTLSharedEvent`, residency set, rilascio differito
 - [x] F0.4 Texture bindless (tabella di `MTLResourceID`), mipmap via blit
-- [x] F0.5 Pass forward PBR, depth memoryless, ImGui (coda Metal 3)
+- [x] F0.5 Pass forward PBR, depth memoryless, ImGui (coda Metal 3; da F0.7 renderer MTL4 nello stesso pass della scena)
 - [x] F0.6 CI Linux (test + `metal_syntax_check`) e macOS (app + shader)
 - [ ] F0.7 Zero errori con `MTL_DEBUG_LAYER=1` sui testbench 1–7
-- [ ] F0.8 Baseline FPS/GPU ms di ogni testbench su M5 Max (e T0) in `docs/perf-log.md`
+- [ ] F0.8 Baseline FPS/GPU ms di ogni testbench su M5 Max (e T0) in `docs/perf-log.md` — M5 Max misurato il 2026-09-28 (a batteria, da ripetere in rete); T0 da misurare
 
 ## F1 — Memoria, heap e residency [CORE]
 
