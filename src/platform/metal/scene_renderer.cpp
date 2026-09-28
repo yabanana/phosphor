@@ -1,0 +1,247 @@
+#include "platform/metal/scene_renderer.h"
+#include "renderer/gpu_scene.h"
+#include "renderer/scene_extract.h"
+#include "core/log.h"
+
+#include <algorithm>
+#include <cstring>
+#include <stdexcept>
+
+namespace phosphor {
+
+namespace {
+
+NS::String* str(const char* s) {
+    return NS::String::string(s, NS::UTF8StringEncoding);
+}
+
+constexpr size_t kAlign = 256;
+
+size_t alignUp(size_t v) { return (v + kAlign - 1) & ~(kAlign - 1); }
+
+// Argument table slots; must match shaders/forward.metal.
+enum Binding : NS::UInteger {
+    BindFrame     = 0,
+    BindVertices  = 1,
+    BindInstances = 2,
+    BindMaterials = 3,
+    BindLights    = 4,
+    BindTextures  = 5,
+    BindCount     = 6,
+};
+
+} // namespace
+
+SceneRenderer::SceneRenderer(MetalContext& context, const std::string& libraryPath)
+    : context_(context) {
+    NS::Error* error = nullptr;
+    library_ = context_.device()->newLibrary(str(libraryPath.c_str()), &error);
+    if (!library_) {
+        const char* reason = error ? error->localizedDescription()->utf8String() : "unknown error";
+        throw std::runtime_error(std::string("Failed to load shader library ") + libraryPath + ": " + reason);
+    }
+
+    buildPipeline();
+
+    MTL::DepthStencilDescriptor* dsDesc = MTL::DepthStencilDescriptor::alloc()->init();
+    dsDesc->setDepthCompareFunction(MTL::CompareFunctionGreater); // reverse-Z
+    dsDesc->setDepthWriteEnabled(true);
+    depthState_ = context_.device()->newDepthStencilState(dsDesc);
+    dsDesc->release();
+
+    MTL4::ArgumentTableDescriptor* atDesc = MTL4::ArgumentTableDescriptor::alloc()->init();
+    atDesc->setMaxBufferBindCount(BindCount);
+    atDesc->setLabel(str("Forward arguments"));
+    arguments_ = context_.device()->newArgumentTable(atDesc, &error);
+    atDesc->release();
+    if (!arguments_) {
+        throw std::runtime_error("Failed to create argument table");
+    }
+}
+
+SceneRenderer::~SceneRenderer() {
+    context_.waitIdle();
+    releaseGeometry();
+    for (UploadBuffer& u : uploads_) {
+        if (u.buffer) {
+            context_.evict(u.buffer);
+            u.buffer->release();
+        }
+    }
+    if (depth_) depth_->release();
+    arguments_->release();
+    depthState_->release();
+    pipeline_->release();
+    library_->release();
+}
+
+void SceneRenderer::buildPipeline() {
+    MTL4::LibraryFunctionDescriptor* vs = MTL4::LibraryFunctionDescriptor::alloc()->init();
+    vs->setLibrary(library_);
+    vs->setName(str("forward_vs"));
+    MTL4::LibraryFunctionDescriptor* fs = MTL4::LibraryFunctionDescriptor::alloc()->init();
+    fs->setLibrary(library_);
+    fs->setName(str("forward_fs"));
+
+    MTL4::RenderPipelineDescriptor* desc = MTL4::RenderPipelineDescriptor::alloc()->init();
+    desc->setLabel(str("Forward"));
+    desc->setVertexFunctionDescriptor(vs);
+    desc->setFragmentFunctionDescriptor(fs);
+    desc->colorAttachments()->object(0)->setPixelFormat(context_.colorFormat());
+
+    NS::Error* error = nullptr;
+    pipeline_ = context_.compiler()->newRenderPipelineState(desc, nullptr, &error);
+    desc->release();
+    fs->release();
+    vs->release();
+    if (!pipeline_) {
+        const char* reason = error ? error->localizedDescription()->utf8String() : "unknown error";
+        throw std::runtime_error(std::string("Failed to build forward pipeline: ") + reason);
+    }
+}
+
+MTL::Buffer* SceneRenderer::createPrivateBuffer(const void* data, size_t size, const char* label) {
+    MTL::Device* device = context_.device();
+    MTL::Buffer* staging = device->newBuffer(size, MTL::ResourceStorageModeShared);
+    std::memcpy(staging->contents(), data, size);
+    MTL::Buffer* buffer = device->newBuffer(size, MTL::ResourceStorageModePrivate);
+    buffer->setLabel(str(label));
+
+    context_.makeResident(staging);
+    context_.makeResident(buffer);
+    context_.submitAndWait([&](MTL4::ComputeCommandEncoder* enc) {
+        enc->copyFromBuffer(staging, 0, buffer, 0, size);
+    });
+    context_.evict(staging);
+    staging->release();
+    return buffer;
+}
+
+void SceneRenderer::releaseGeometry() {
+    for (MTL::Buffer** b : {&vertexBuffer_, &indexBuffer_}) {
+        if (*b) {
+            context_.evict(*b);
+            (*b)->release();
+            *b = nullptr;
+        }
+    }
+}
+
+void SceneRenderer::syncGeometry(const GpuScene& scene) {
+    if (scene.geometryVersion() == geometryVersion_) return;
+    geometryVersion_ = scene.geometryVersion();
+
+    // Geometry changes only on bench switches, so a full idle is acceptable.
+    context_.waitIdle();
+    releaseGeometry();
+    if (scene.vertices().empty() || scene.indices().empty()) return;
+
+    vertexBuffer_ = createPrivateBuffer(scene.vertices().data(),
+                                        scene.vertices().size() * sizeof(GPUVertex), "Vertices");
+    indexBuffer_  = createPrivateBuffer(scene.indices().data(),
+                                        scene.indices().size() * sizeof(u32), "Indices");
+    LOG_INFO("Geometry uploaded: %zu vertices, %zu indices",
+             scene.vertices().size(), scene.indices().size());
+}
+
+void SceneRenderer::ensureDepthTarget(u32 width, u32 height) {
+    if (depth_ && depth_->width() == width && depth_->height() == height) return;
+    if (depth_) context_.deferRelease(depth_);
+
+    MTL::TextureDescriptor* desc = MTL::TextureDescriptor::texture2DDescriptor(
+        MTL::PixelFormatDepth32Float, width, height, false);
+    desc->setUsage(MTL::TextureUsageRenderTarget);
+    // Depth is consumed within the pass: keep it in tile memory only.
+    desc->setStorageMode(MTL::StorageModeMemoryless);
+    depth_ = context_.device()->newTexture(desc);
+    depth_->setLabel(str("Depth (memoryless)"));
+}
+
+void SceneRenderer::render(MetalContext::Frame& frame, const GpuScene& scene, const FrameScene& fs,
+                           const FrameConstants& constants, MTL::GPUAddress textureTable) {
+    MTL::Texture* target = frame.drawable->texture();
+    const u32 width  = static_cast<u32>(target->width());
+    const u32 height = static_cast<u32>(target->height());
+    ensureDepthTarget(width, height);
+
+    // --- Per-frame upload -------------------------------------------------
+    const size_t constantsOffset = 0;
+    const size_t instancesOffset = alignUp(sizeof(FrameConstants));
+    const size_t materialsOffset = instancesOffset + alignUp(fs.instances.size() * sizeof(GPUInstance));
+    const size_t lightsOffset    = materialsOffset + alignUp(fs.materials.size() * sizeof(GPUMaterial));
+    const size_t totalSize       = lightsOffset + alignUp(std::max<size_t>(fs.lights.size(), 1) * sizeof(GPULight));
+
+    UploadBuffer& upload = uploads_[frame.slot];
+    if (upload.capacity < totalSize) {
+        // The previous frame using this slot has completed (beginFrame waited),
+        // so the old buffer can go immediately.
+        if (upload.buffer) {
+            context_.evict(upload.buffer);
+            upload.buffer->release();
+        }
+        upload.capacity = totalSize + totalSize / 2;
+        upload.buffer = context_.device()->newBuffer(
+            upload.capacity, MTL::ResourceStorageModeShared | MTL::ResourceCPUCacheModeWriteCombined);
+        upload.buffer->setLabel(str("Frame upload"));
+        context_.makeResident(upload.buffer);
+    }
+
+    auto* base = static_cast<u8*>(upload.buffer->contents());
+    std::memcpy(base + constantsOffset, &constants, sizeof(constants));
+    if (!fs.instances.empty())
+        std::memcpy(base + instancesOffset, fs.instances.data(), fs.instances.size() * sizeof(GPUInstance));
+    if (!fs.materials.empty())
+        std::memcpy(base + materialsOffset, fs.materials.data(), fs.materials.size() * sizeof(GPUMaterial));
+    if (!fs.lights.empty())
+        std::memcpy(base + lightsOffset, fs.lights.data(), fs.lights.size() * sizeof(GPULight));
+
+    // --- Render pass ------------------------------------------------------
+    MTL4::RenderPassDescriptor* pass = MTL4::RenderPassDescriptor::alloc()->init();
+    MTL::RenderPassColorAttachmentDescriptor* color = pass->colorAttachments()->object(0);
+    color->setTexture(target);
+    color->setLoadAction(MTL::LoadActionClear);
+    color->setStoreAction(MTL::StoreActionStore);
+    color->setClearColor(MTL::ClearColor::Make(0.02, 0.025, 0.035, 1.0));
+    MTL::RenderPassDepthAttachmentDescriptor* depth = pass->depthAttachment();
+    depth->setTexture(depth_);
+    depth->setLoadAction(MTL::LoadActionClear);
+    depth->setStoreAction(MTL::StoreActionDontCare);
+    depth->setClearDepth(0.0); // reverse-Z: far = 0
+
+    MTL4::RenderCommandEncoder* enc = frame.commandBuffer->renderCommandEncoder(pass);
+    pass->release();
+    enc->setLabel(str("Forward"));
+
+    lastTriangles_ = 0;
+    if (vertexBuffer_ && indexBuffer_ && !fs.batches.empty()) {
+        const MTL::GPUAddress frameBase = upload.buffer->gpuAddress();
+        arguments_->setAddress(frameBase + constantsOffset, BindFrame);
+        arguments_->setAddress(vertexBuffer_->gpuAddress(), BindVertices);
+        arguments_->setAddress(frameBase + instancesOffset, BindInstances);
+        arguments_->setAddress(frameBase + materialsOffset, BindMaterials);
+        arguments_->setAddress(frameBase + lightsOffset, BindLights);
+        arguments_->setAddress(textureTable, BindTextures);
+
+        enc->setRenderPipelineState(pipeline_);
+        enc->setDepthStencilState(depthState_);
+        enc->setArgumentTable(arguments_, MTL::RenderStageVertex | MTL::RenderStageFragment);
+        // Two-sided until winding is validated for every asset path (F1).
+        enc->setCullMode(MTL::CullModeNone);
+        enc->setViewport(MTL::Viewport{0.0, 0.0, static_cast<double>(width), static_cast<double>(height), 0.0, 1.0});
+
+        const MTL::GPUAddress indexBase = indexBuffer_->gpuAddress();
+        const auto& infos = scene.meshInfos();
+        for (const DrawBatch& batch : fs.batches) {
+            const GPUMeshInfo& info = infos[batch.meshIndex];
+            if (info.indexCount == 0) continue;
+            enc->drawIndexedPrimitives(MTL::PrimitiveTypeTriangle, info.indexCount, MTL::IndexTypeUInt32,
+                                       indexBase + static_cast<MTL::GPUAddress>(info.indexOffset) * sizeof(u32),
+                                       static_cast<NS::UInteger>(info.indexCount) * sizeof(u32),
+                                       batch.instanceCount, info.vertexOffset, batch.firstInstance);
+            lastTriangles_ += info.indexCount / 3 * batch.instanceCount;
+        }
+    }
+    enc->endEncoding();
+}
+
+} // namespace phosphor

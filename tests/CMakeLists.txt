@@ -1,0 +1,17 @@
+FetchContent_Declare(doctest
+    GIT_REPOSITORY https://github.com/doctest/doctest.git
+    GIT_TAG        v2.5.3
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(doctest)
+
+add_executable(phosphor_tests
+    test_main.cpp
+    test_gpu_scene.cpp
+    test_scene_extract.cpp
+    test_texture_manager.cpp
+    test_testbenches.cpp
+)
+target_link_libraries(phosphor_tests PRIVATE phosphor_core doctest::doctest)
+target_compile_options(phosphor_tests PRIVATE ${PHOSPHOR_WARNINGS})
+add_test(NAME phosphor_tests COMMAND phosphor_tests)

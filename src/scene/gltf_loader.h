@@ -42,6 +42,7 @@ private:
     GpuScene&       gpuScene_;
     TextureManager& textures_;
     ECS&            ecs_;
+    std::string     baseDir_; // directory of the file being loaded, with trailing slash
 
     // Caches to avoid reprocessing the same glTF object twice within a single file
     std::unordered_map<int, MeshHandle> meshCache_;

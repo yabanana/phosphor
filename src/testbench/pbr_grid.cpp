@@ -101,11 +101,7 @@ void PBRGrid::update(float dt, ECS& ecs) {
 
     for (EntityID e : sphereEntities_) {
         auto& xform = ecs.getComponent<TransformComponent>(e);
-        // Rotate around the center of the grid
-        glm::vec3 origPos = xform.position;
-        float cosA = std::cos(rotationAngle_);
-        float sinA = std::sin(rotationAngle_);
-        // Rotate around Y axis relative to grid center (0, *, 0)
+        // Spin each sphere in place so the highlights sweep across it
         xform.rotation = glm::angleAxis(rotationAngle_, glm::vec3(0.0f, 1.0f, 0.0f));
         xform.updateMatrix();
     }

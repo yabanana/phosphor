@@ -1,222 +1,76 @@
 #include "imgui/ui_panels.h"
 #include "diagnostics/frame_stats.h"
-#include "diagnostics/gpu_profiler.h"
-#include "diagnostics/resource_tracker.h"
-#include "diagnostics/renderdoc_capture.h"
-#include "diagnostics/debug_overlay.h"
+#include "testbench/testbench.h"
 
 #include <imgui.h>
-#include <cstdio>
+
 #include <algorithm>
+#include <cstdio>
 
 namespace phosphor {
-
-// ---------------------------------------------------------------------------
-// Forward-declare testBenchName from testbench.h to avoid a circular header.
-// The linker resolves this from testbench.cpp.
-// ---------------------------------------------------------------------------
-extern const char* testBenchName(int index);
-extern int testBenchCount();
-
-// ---------------------------------------------------------------------------
-// TestBench Selector
-// ---------------------------------------------------------------------------
 
 void UIPanels::drawTestBenchSelector(int& currentBench, bool& changed) {
     changed = false;
     ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(280, 0), ImGuiCond_FirstUseEver);
 
     if (ImGui::Begin("Test Bench", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        const int count = testBenchCount();
-        const char* currentName = testBenchName(currentBench);
-
-        if (ImGui::BeginCombo("Scene", currentName)) {
-            for (int i = 0; i < count; ++i) {
-                bool selected = (i == currentBench);
-                if (ImGui::Selectable(testBenchName(i), selected)) {
-                    if (i != currentBench) {
-                        currentBench = i;
-                        changed = true;
-                    }
+        if (ImGui::BeginCombo("Scene", testBenchName(currentBench))) {
+            for (int i = 0; i < testBenchCount(); ++i) {
+                const bool selected = (i == currentBench);
+                if (ImGui::Selectable(testBenchName(i), selected) && !selected) {
+                    currentBench = i;
+                    changed = true;
                 }
                 if (selected) ImGui::SetItemDefaultFocus();
             }
             ImGui::EndCombo();
         }
-
         ImGui::TextDisabled("Press 1-7 to switch quickly");
     }
     ImGui::End();
 }
 
-// ---------------------------------------------------------------------------
-// Performance Panel
-// ---------------------------------------------------------------------------
-
-void UIPanels::drawPerformancePanel(const FrameStats& stats, const GpuProfiler& profiler) {
-    ImGui::SetNextWindowPos(ImVec2(10, 80), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(320, 0), ImGuiCond_FirstUseEver);
+void UIPanels::drawPerformancePanel(const FrameStats& stats, const RendererInfo& info) {
+    ImGui::SetNextWindowPos(ImVec2(10, 90), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(330, 0), ImGuiCond_FirstUseEver);
 
     if (ImGui::Begin("Performance")) {
-        // --- Headline numbers ---
-        ImGui::Text("FPS: %.1f", stats.getFPS());
-        ImGui::Text("CPU: %.2f ms", stats.getCpuMs());
-        ImGui::Text("GPU: %.2f ms", stats.getGpuMs());
+        ImGui::Text("%s%s", info.gpuName, info.apple9 ? "" : "  (below Apple9 baseline)");
+        ImGui::Text("%u x %u", info.width, info.height);
         ImGui::Separator();
 
-        // --- FPS graph ---
-        {
-            const auto& hist = stats.getFpsHistory();
-            u32 count = stats.getSampleCount();
-            if (count > 0) {
-                float maxFps = *std::max_element(hist.begin(),
-                    hist.begin() + std::min(count, static_cast<u32>(hist.size())));
-                char overlay[32];
-                std::snprintf(overlay, sizeof(overlay), "%.0f fps", stats.getFPS());
-                ImGui::PlotLines("##fps", hist.data(), static_cast<int>(count),
-                                 0, overlay, 0.0f, maxFps * 1.2f, ImVec2(0, 50));
-            }
-        }
+        ImGui::Text("FPS %.1f   CPU %.2f ms   GPU %.2f ms", stats.getFPS(), stats.getCpuMs(), info.gpuMs);
 
-        // --- CPU / GPU time graphs ---
-        {
-            const auto& cpuHist = stats.getCpuHistory();
-            const auto& gpuHist = stats.getGpuHistory();
-            u32 count = stats.getSampleCount();
-            if (count > 0) {
-                char cpuOverlay[32];
-                std::snprintf(cpuOverlay, sizeof(cpuOverlay), "CPU %.2f ms", stats.getCpuMs());
-                ImGui::PlotLines("##cpu", cpuHist.data(), static_cast<int>(count),
-                                 0, cpuOverlay, 0.0f, 33.3f, ImVec2(0, 35));
-
-                char gpuOverlay[32];
-                std::snprintf(gpuOverlay, sizeof(gpuOverlay), "GPU %.2f ms", stats.getGpuMs());
-                ImGui::PlotLines("##gpu", gpuHist.data(), static_cast<int>(count),
-                                 0, gpuOverlay, 0.0f, 33.3f, ImVec2(0, 35));
-            }
+        const u32 count = std::min(stats.getSampleCount(), FrameStats::HISTORY_SIZE);
+        if (count > 0) {
+            char overlay[32];
+            std::snprintf(overlay, sizeof(overlay), "CPU %.2f ms", stats.getCpuMs());
+            ImGui::PlotLines("##cpu", stats.getCpuHistory().data(), static_cast<int>(count),
+                             0, overlay, 0.0f, 33.3f, ImVec2(0, 40));
+            std::snprintf(overlay, sizeof(overlay), "GPU %.2f ms", info.gpuMs);
+            ImGui::PlotLines("##gpu", stats.getGpuHistory().data(), static_cast<int>(count),
+                             0, overlay, 0.0f, 33.3f, ImVec2(0, 40));
         }
 
         ImGui::Separator();
-
-        // --- Per-pass GPU timings ---
-        if (ImGui::TreeNodeEx("Pass Timings", ImGuiTreeNodeFlags_DefaultOpen)) {
-            const auto& timings = profiler.getPassTimings();
-            for (const auto& [name, timing] : timings) {
-                ImGui::Text("%-20s %6.2f ms (avg %6.2f, max %6.2f)",
-                            name.c_str(), timing.gpuMs, timing.avgMs, timing.maxMs);
-            }
-            ImGui::Text("%-20s %6.2f ms", "TOTAL", profiler.getTotalGpuMs());
-            ImGui::TreePop();
-        }
+        ImGui::Text("Instances  %u", info.instances);
+        ImGui::Text("Draws      %u", info.drawBatches);
+        ImGui::Text("Triangles  %u", info.triangles);
+        ImGui::Text("Meshlets   %u", info.meshlets);
+        ImGui::Text("Textures   %u", info.textures);
     }
     ImGui::End();
 }
 
-// ---------------------------------------------------------------------------
-// Resource Panel
-// ---------------------------------------------------------------------------
+void UIPanels::drawRenderPanel(RenderSettings& settings) {
+    ImGui::SetNextWindowPos(ImVec2(10, 380), ImGuiCond_FirstUseEver);
 
-void UIPanels::drawResourcePanel(const ResourceTracker& tracker) {
-    ImGui::SetNextWindowPos(ImVec2(10, 400), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(300, 0), ImGuiCond_FirstUseEver);
-
-    if (ImGui::Begin("GPU Resources")) {
-        ImGui::Text("Total: %u resources, %.1f MB",
-                     tracker.getResourceCount(), tracker.getTotalAllocatedMB());
-        ImGui::Separator();
-
-        for (u32 i = 0; i < static_cast<u32>(TrackedResourceType::COUNT); ++i) {
-            auto type = static_cast<TrackedResourceType>(i);
-            u32 count = tracker.getCountByType(type);
-            if (count > 0) {
-                ImGui::Text("  %-18s %u", ResourceTracker::typeName(type), count);
-            }
-        }
-    }
-    ImGui::End();
-}
-
-// ---------------------------------------------------------------------------
-// Debug Panel
-// ---------------------------------------------------------------------------
-
-void UIPanels::drawDebugPanel(OverlayMode& overlayMode, AAMode& aaMode,
-                               float& exposure, bool& ddgiEnabled,
-                               bool& restirEnabled) {
-    ImGui::SetNextWindowPos(ImVec2(10, 560), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(300, 0), ImGuiCond_FirstUseEver);
-
-    if (ImGui::Begin("Debug & Rendering")) {
-        // --- Overlay mode ---
-        if (ImGui::TreeNodeEx("Debug Overlays", ImGuiTreeNodeFlags_DefaultOpen)) {
-            int current = static_cast<int>(overlayMode);
-            for (int i = 0; i < static_cast<int>(OverlayMode::COUNT); ++i) {
-                if (ImGui::RadioButton(overlayModeName(static_cast<OverlayMode>(i)), current == i)) {
-                    current = i;
-                }
-                if (i % 3 != 2 && i < static_cast<int>(OverlayMode::COUNT) - 1) {
-                    ImGui::SameLine();
-                }
-            }
-            overlayMode = static_cast<OverlayMode>(current);
-            ImGui::TreePop();
-        }
-
-        ImGui::Separator();
-
-        // --- Anti-aliasing ---
-        if (ImGui::TreeNodeEx("Anti-Aliasing", ImGuiTreeNodeFlags_DefaultOpen)) {
-            int aaInt = static_cast<int>(aaMode);
-            ImGui::RadioButton("None", &aaInt, 0); ImGui::SameLine();
-            ImGui::RadioButton("FXAA", &aaInt, 1); ImGui::SameLine();
-            ImGui::RadioButton("TAA",  &aaInt, 2);
-            aaMode = static_cast<AAMode>(aaInt);
-            ImGui::TreePop();
-        }
-
-        ImGui::Separator();
-
-        // --- Tone mapping ---
-        if (ImGui::TreeNodeEx("Tone Mapping", ImGuiTreeNodeFlags_DefaultOpen)) {
-            ImGui::SliderFloat("Exposure", &exposure, 0.1f, 10.0f, "%.2f");
-            if (ImGui::Button("Reset##exposure")) exposure = 1.0f;
-            ImGui::TreePop();
-        }
-
-        ImGui::Separator();
-
-        // --- Lighting features ---
-        if (ImGui::TreeNodeEx("Lighting", ImGuiTreeNodeFlags_DefaultOpen)) {
-            ImGui::Checkbox("ReSTIR Direct", &restirEnabled);
-            ImGui::Checkbox("DDGI Global Illumination", &ddgiEnabled);
-            ImGui::TreePop();
-        }
-    }
-    ImGui::End();
-}
-
-// ---------------------------------------------------------------------------
-// RenderDoc Panel
-// ---------------------------------------------------------------------------
-
-void UIPanels::drawRenderDocPanel(RenderDocCapture& renderdoc) {
-    ImGui::SetNextWindowPos(ImVec2(10, 750), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(250, 0), ImGuiCond_FirstUseEver);
-
-    if (ImGui::Begin("RenderDoc")) {
-        if (renderdoc.isAvailable()) {
-            if (ImGui::Button("Capture Frame (F12)")) {
-                renderdoc.triggerCapture();
-            }
-            ImGui::Text("Captures taken: %u", renderdoc.getCaptureCount());
-            if (renderdoc.isCapturing()) {
-                ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.2f, 1.0f), "CAPTURING...");
-            }
-        } else {
-            ImGui::TextDisabled("RenderDoc not attached.");
-            ImGui::TextDisabled("Launch from RenderDoc to enable.");
-        }
+    if (ImGui::Begin("Rendering", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        static const char* kModes[] = {"Lit", "Normals", "Base color"};
+        ImGui::Combo("View", &settings.debugMode, kModes, IM_ARRAYSIZE(kModes));
+        ImGui::SliderFloat("Exposure", &settings.exposure, 0.1f, 8.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
+        ImGui::Checkbox("VSync", &settings.vsync);
+        ImGui::TextDisabled("F1-F3: view modes");
     }
     ImGui::End();
 }

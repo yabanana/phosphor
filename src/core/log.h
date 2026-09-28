@@ -19,16 +19,16 @@
             std::strftime(ts_, sizeof(ts_), "%Y-%m-%d %H:%M:%S",              \
                           std::localtime(&t_));                                \
             std::fprintf(stderr, "[%s] [%s] %s:%d: " fmt "\n",               \
-                         level_tag, ts_, __FILE__, __LINE__, ##__VA_ARGS__);   \
+                         level_tag, ts_, __FILE__, __LINE__ __VA_OPT__(,) __VA_ARGS__);   \
         }                                                                      \
     } while (0)
 
 #if PHOSPHOR_LOG_LEVEL <= 0
-  #define LOG_DEBUG(fmt, ...) PHOSPHOR_LOG_("DEBUG", 0, fmt, ##__VA_ARGS__)
+  #define LOG_DEBUG(fmt, ...) PHOSPHOR_LOG_("DEBUG", 0, fmt __VA_OPT__(,) __VA_ARGS__)
 #else
   #define LOG_DEBUG(fmt, ...) ((void)0)
 #endif
 
-#define LOG_INFO(fmt, ...)  PHOSPHOR_LOG_("INFO",  1, fmt, ##__VA_ARGS__)
-#define LOG_WARN(fmt, ...)  PHOSPHOR_LOG_("WARN",  2, fmt, ##__VA_ARGS__)
-#define LOG_ERROR(fmt, ...) PHOSPHOR_LOG_("ERROR", 3, fmt, ##__VA_ARGS__)
+#define LOG_INFO(fmt, ...)  PHOSPHOR_LOG_("INFO",  1, fmt __VA_OPT__(,) __VA_ARGS__)
+#define LOG_WARN(fmt, ...)  PHOSPHOR_LOG_("WARN",  2, fmt __VA_OPT__(,) __VA_ARGS__)
+#define LOG_ERROR(fmt, ...) PHOSPHOR_LOG_("ERROR", 3, fmt __VA_OPT__(,) __VA_ARGS__)
