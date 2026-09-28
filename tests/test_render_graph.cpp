@@ -583,3 +583,55 @@ TEST_CASE("render graph: TextureDesc::estimatedBytes and format helpers") {
     CHECK_FALSE(isDepthFormat(Format::RGBA8Unorm));
     CHECK_FALSE(isDepthFormat(Format::R32Float));
 }
+
+TEST_CASE("render graph: full compile of the engine frame (forward + overlay + capture)") {
+    // The frame built by Engine::buildFrameGraph (F2.7).
+    RenderGraph g;
+    TextureRef color = g.importTexture("Drawable", {Format::BGRA8Srgb, 1920, 1080}, ImportOutput);
+    const BufferRef readback = g.importBuffer("Capture readback", {1920ull * 1080 * 4}, ImportOutput);
+    g.addPass("Forward", PassType::Raster, [&](PassBuilder& b) {
+        const TextureRef depth = b.createTexture("Depth", {Format::Depth32Float, 1920, 1080});
+        color = b.writeColor(color, 0, LoadIntent::Clear);
+        b.writeDepth(depth, LoadIntent::Clear);
+    }, {});
+    g.addPass("ImGui overlay", PassType::Raster,
+              [&](PassBuilder& b) { color = b.writeColor(color, 0, LoadIntent::Preserve); }, {});
+    g.addPass("Frame capture", PassType::Blit, [&](PassBuilder& b) {
+        b.read(color, Usage::CopySrc, StageBlit);
+        b.write(readback, Usage::CopyDst, StageBlit);
+        b.setSideEffect();
+    }, {});
+
+    const CompiledGraph c = compile(g);
+    REQUIRE(c.ok);
+    CHECK(c.order == std::vector<u32>{0, 1, 2});
+    // Forward and overlay fused: the drawable never leaves tile memory
+    // between them, depth is memoryless and never stored.
+    REQUIRE(c.renderGroups.size() == 1);
+    CHECK(c.renderGroups[0].firstPosition == 0);
+    CHECK(c.renderGroups[0].lastPosition == 1);
+    REQUIRE(c.encoders.size() == 2);
+    CHECK(c.encoders[0].type == PassType::Raster);
+    CHECK(c.encoders[1].type == PassType::Compute);
+    for (const AttachmentPlan& a : c.renderGroups[0].attachments) {
+        if (a.depth) {
+            CHECK(a.load == LoadAction::Clear);
+            CHECK(a.store == StoreAction::DontCare);
+            CHECK(c.memoryless[a.resource]);
+        } else {
+            CHECK(a.load == LoadAction::Clear);
+            CHECK(a.store == StoreAction::Store);
+        }
+    }
+    // One barrier: the copy waits for the fragment work on the drawable.
+    REQUIRE(c.barriers.size() == 1);
+    CHECK(c.barriers[0].position == 2);
+    REQUIRE(c.barriers[0].barriers.size() == 1);
+    const Barrier& b = c.barriers[0].barriers[0];
+    CHECK(b.scope == BarrierScope::Queue);
+    CHECK(b.afterStages == StageFragment);
+    CHECK(b.beforeStages == StageBlit);
+    CHECK_FALSE(b.aliasing);
+    CHECK(c.queueSyncs.empty());
+    CHECK(c.aliasing.placements.empty()); // no sizer: no heap plan
+}

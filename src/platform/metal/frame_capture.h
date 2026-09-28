@@ -9,8 +9,12 @@ namespace phosphor {
 
 // ---------------------------------------------------------------------------
 // FrameCapture -- copies a frame's drawable into a shared buffer and writes
-// it as a PNG (--capture).  Used for visual checks of the test benches; not
-// meant for per-frame use.
+// it as a PNG (--capture).  Used for visual checks of the test benches.
+//
+// The copy is a blit pass of the render graph with a side effect (F2.7): the
+// graph orders it after every pass that renders to the drawable and emits
+// the barrier.  The readback buffer is created with the graph (resize), not
+// in the frame.
 // ---------------------------------------------------------------------------
 
 class FrameCapture {
@@ -21,8 +25,13 @@ public:
     FrameCapture(const FrameCapture&) = delete;
     FrameCapture& operator=(const FrameCapture&) = delete;
 
-    /// Encode the copy of the drawable after every pass that renders to it.
-    void encode(MetalContext::Frame& frame);
+    /// Create (or resize) the readback buffer for a width x height drawable.
+    void prepare(u32 width, u32 height);
+    [[nodiscard]] MTL::Buffer* readback() const { return readback_; }
+    [[nodiscard]] u64 readbackSize() const { return static_cast<u64>(width_) * height_ * 4; }
+
+    /// Encode the copy of `source` (the drawable) into the readback buffer.
+    void encode(MTL4::ComputeCommandEncoder* encoder, MTL::Texture* source);
 
     /// Write the captured frame to `path`; the frame must have completed
     /// (call MetalContext::waitIdle() first).  Returns false on failure.

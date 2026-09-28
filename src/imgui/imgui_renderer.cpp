@@ -146,9 +146,9 @@ void ImGuiRenderer::setupRenderState(MTL4::RenderCommandEncoder* encoder, MTL::G
     encoder->setRenderPipelineState(pipeline_);
     encoder->setDepthStencilState(depthState_);
     encoder->setArgumentTable(arguments_, MTL::RenderStageVertex | MTL::RenderStageFragment);
-    // Viewport (full target) and CullModeNone are inherited from the scene
-    // pass, and are also Metal's defaults; setting them again is flagged as
-    // redundant by the validation layer.
+    // Viewport (full target) and CullModeNone are Metal's defaults, and the
+    // scene pass fused before this one leaves them so (render graph, F2.7);
+    // setting them again is flagged as redundant by the validation layer.
 }
 
 void ImGuiRenderer::render(MTL4::RenderCommandEncoder* encoder, const ImDrawData* drawData) {

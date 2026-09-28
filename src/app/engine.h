@@ -5,6 +5,7 @@
 #include "diagnostics/bench_report.h"
 #include "platform/metal/gpu_memory.h"
 #include "imgui/ui_panels.h"
+#include "rendergraph/render_graph.h"
 #include "renderer/scene_extract.h"
 #include "testbench/testbench.h"
 
@@ -25,6 +26,7 @@ class GpuScene;
 class ImGuiRenderer;
 class Input;
 class MetalContext;
+class MetalGraphExecutor;
 class MemoryPressureMonitor;
 class MetalTextureManager;
 class SceneRenderer;
@@ -59,6 +61,10 @@ private:
     void handleMemoryPressure();
     /// Simulate and render one frame; false if nothing was presented.
     bool frame(float dt);
+    /// Describe the frame as a render graph and compile it; only when the
+    /// graph key changes (resize, UI or capture toggled).
+    void buildFrameGraph(u32 width, u32 height);
+    void drawUi();
     void recordBenchmarkFrame(float dt, float cpuMs, float waitMs);
     void finishBenchmark();
 
@@ -70,6 +76,7 @@ private:
     std::unique_ptr<MetalTextureManager> textures_;
     std::unique_ptr<ImGuiRenderer>       imguiRenderer_;
     std::unique_ptr<FrameCapture>        capture_;
+    std::unique_ptr<MetalGraphExecutor>  graphExecutor_;
     std::unique_ptr<MemoryPressureMonitor> pressure_;
 
     std::unique_ptr<ECS>        ecs_;
@@ -95,6 +102,20 @@ private:
     u64                      heapBytesAtStart_   = 0;
     // CPU time spent blocked in beginFrame() (slot + drawable waits).
     std::chrono::steady_clock::duration frameWait_{};
+
+    // Render graph of the frame (F2), rebuilt only when its key changes.
+    struct GraphKey {
+        u32  width   = 0;
+        u32  height  = 0;
+        bool ui      = false;
+        bool capture = false;
+        bool operator==(const GraphKey&) const = default;
+    };
+    rg::RenderGraph frameGraph_;
+    GraphKey        graphKey_;
+    rg::TextureRef  drawableRef_;
+    rg::BufferRef   captureRef_;
+    bool            captureThisFrame_ = false;
 
     FrameScene      frameScene_;
     MemoryPanelInfo memoryInfo_; // reused every frame (keeps vector capacity)

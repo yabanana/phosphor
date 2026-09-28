@@ -67,17 +67,17 @@ void CornellBox::setup(ECS& ecs, GpuScene& gpuScene, TextureManager& textures) {
             {0.73f, 0.73f, 0.73f, 1.0f});
 
     // Back wall (white, facing +Z)
-    glm::quat backRot = glm::angleAxis(glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+    glm::quat backRot = glm::angleAxis(glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
     addWall({0.0f, S, -S}, backRot, 0,
             {0.73f, 0.73f, 0.73f, 1.0f});
 
     // Left wall (red, facing +X)
-    glm::quat leftRot = glm::angleAxis(glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    glm::quat leftRot = glm::angleAxis(glm::radians(-90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
     addWall({-S, S, 0.0f}, leftRot, 1,
             {0.65f, 0.05f, 0.05f, 1.0f});
 
     // Right wall (green, facing -X)
-    glm::quat rightRot = glm::angleAxis(glm::radians(-90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    glm::quat rightRot = glm::angleAxis(glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
     addWall({S, S, 0.0f}, rightRot, 2,
             {0.12f, 0.45f, 0.15f, 1.0f});
 

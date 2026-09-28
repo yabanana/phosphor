@@ -10,9 +10,11 @@
 #include "platform/metal/memory_pressure.h"
 #include "platform/metal/memory_stress.h"
 #include "platform/metal/metal_context.h"
+#include "platform/metal/metal_graph_executor.h"
 #include "platform/metal/metal_texture_manager.h"
 #include "platform/metal/scene_renderer.h"
 #include "renderer/gpu_scene.h"
+#include "rendergraph/pass_context.h"
 #include "scene/camera.h"
 #include "scene/ecs.h"
 
@@ -85,7 +87,8 @@ Engine::Engine(int argc, char* argv[]) {
     SDL_GetWindowSizeInPixels(window_, &w, &h);
     context_->resize(static_cast<u32>(w), static_cast<u32>(h));
 
-    renderer_ = std::make_unique<SceneRenderer>(*context_);
+    renderer_      = std::make_unique<SceneRenderer>(*context_);
+    graphExecutor_ = std::make_unique<MetalGraphExecutor>(*context_);
 
     ecs_        = std::make_unique<ECS>();
     gpuScene_   = std::make_unique<GpuScene>();
@@ -117,6 +120,7 @@ Engine::~Engine() {
     }
 
     pressure_.reset();
+    graphExecutor_.reset();
     capture_.reset();
     imguiRenderer_.reset();
     ImGui_ImplSDL3_Shutdown();
@@ -200,7 +204,11 @@ void Engine::run() {
         finishBenchmark();
     }
     if (capture_) {
-        capture_->writePng(options_.capturePath);
+        if (captured_) {
+            capture_->writePng(options_.capturePath);
+        } else {
+            LOG_ERROR("No frame captured");
+        }
     }
 }
 
@@ -492,50 +500,119 @@ bool Engine::frame(float dt) {
     constants.exposure   = settings_.exposure;
     constants.frameIndex = static_cast<u32>(frame.index);
 
-    MTL4::RenderCommandEncoder* pass =
-        renderer_->render(frame, *gpuScene_, frameScene_, constants, textures_->tableAddress());
-
-    // --- ImGui overlay, appended to the scene pass --------------------------
-    if (options_.ui) {
-        ImGui_ImplSDL3_NewFrame();
-        ImGui::NewFrame();
-
-        int bench = static_cast<int>(currentBench_);
-        bool changed = false;
-        UIPanels::drawTestBenchSelector(bench, changed);
-        if (changed) pendingBench_ = static_cast<TestBenchType>(bench);
-
-        RendererInfo info;
-        info.gpuName     = context_->gpuName();
-        info.apple9      = context_->isApple9OrLater();
-        info.width       = context_->width();
-        info.height      = context_->height();
-        info.instances   = static_cast<u32>(frameScene_.instances.size());
-        info.drawBatches = static_cast<u32>(frameScene_.batches.size());
-        info.triangles   = renderer_->lastTriangleCount();
-        info.meshlets    = gpuScene_->getMeshletTotalCount();
-        info.textures    = textures_->textureCount();
-        info.gpuMs       = context_->lastGpuMs();
-        UIPanels::drawPerformancePanel(*frameStats_, info);
-        UIPanels::drawRenderPanel(settings_);
-        fillMemoryInfo();
-        UIPanels::drawMemoryPanel(memoryInfo_);
-
-        ImGui::Render();
-        imguiRenderer_->render(pass, ImGui::GetDrawData());
-    }
-    pass->endEncoding();
+    MTL::Texture* target = frame.drawable->texture();
+    const u32 width  = static_cast<u32>(target->width());
+    const u32 height = static_cast<u32>(target->height());
 
     // Capture the last frame of a run (or the first frame when interactive).
     const bool lastFrame = !options_.benchmark() || presentedFrames_ + 1 == options_.warmup + options_.frames;
-    if (capture_ && lastFrame && !captured_) {
-        capture_->encode(frame);
-        captured_ = true;
+    captureThisFrame_ = capture_ && lastFrame && !captured_;
+
+    const GraphKey key{width, height, options_.ui, capture_ != nullptr};
+    if (!(key == graphKey_) || !graphExecutor_->valid()) {
+        graphKey_ = key;
+        buildFrameGraph(width, height);
     }
+
+    renderer_->prepareFrame(*gpuScene_, frameScene_, constants, textures_->tableAddress(), width, height);
+    if (options_.ui) drawUi();
+
+    graphExecutor_->bindTexture(drawableRef_, target);
+    if (capture_) graphExecutor_->bindBuffer(captureRef_, capture_->readback());
+    graphExecutor_->execute(frame);
+    if (captureThisFrame_) captured_ = true;
 
     context_->submitFrame(frame);
     pool->release();
     return true;
+}
+
+void Engine::drawUi() {
+    ImGui_ImplSDL3_NewFrame();
+    ImGui::NewFrame();
+
+    int bench = static_cast<int>(currentBench_);
+    bool changed = false;
+    UIPanels::drawTestBenchSelector(bench, changed);
+    if (changed) pendingBench_ = static_cast<TestBenchType>(bench);
+
+    RendererInfo info;
+    info.gpuName     = context_->gpuName();
+    info.apple9      = context_->isApple9OrLater();
+    info.width       = context_->width();
+    info.height      = context_->height();
+    info.instances   = static_cast<u32>(frameScene_.instances.size());
+    info.drawBatches = static_cast<u32>(frameScene_.batches.size());
+    info.triangles   = renderer_->lastTriangleCount();
+    info.meshlets    = gpuScene_->getMeshletTotalCount();
+    info.textures    = textures_->textureCount();
+    info.gpuMs       = context_->lastGpuMs();
+    UIPanels::drawPerformancePanel(*frameStats_, info);
+    UIPanels::drawRenderPanel(settings_);
+    fillMemoryInfo();
+    UIPanels::drawMemoryPanel(memoryInfo_);
+
+    ImGui::Render();
+}
+
+void Engine::buildFrameGraph(u32 width, u32 height) {
+    using namespace rg;
+    frameGraph_.reset();
+
+    const TextureDesc screen{Format::BGRA8Srgb, width, height};
+    // The drawable: undefined at frame start, presented after the graph.
+    drawableRef_ = frameGraph_.importTexture("Drawable", screen, ImportOutput);
+    TextureRef color = drawableRef_;
+
+    frameGraph_.addPass(
+        "Forward", PassType::Raster,
+        [&](PassBuilder& b) {
+            ClearValue clear;
+            clear.color[0] = 0.02f;
+            clear.color[1] = 0.025f;
+            clear.color[2] = 0.035f;
+            clear.color[3] = 1.0f;
+            clear.depth    = 0.0f; // reverse-Z: far = 0
+            TextureRef depth = b.createTexture("Depth", {Format::Depth32Float, width, height});
+            color = b.writeColor(color, 0, LoadIntent::Clear, clear);
+            b.writeDepth(depth, LoadIntent::Clear, clear);
+            b.setHints(HintGeometryHeavy);
+        },
+        [this](PassContext& ctx) {
+            renderer_->encode(static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder()), ctx.chunk(), ctx.chunkCount());
+        });
+
+    if (options_.ui) {
+        frameGraph_.addPass(
+            "ImGui overlay", PassType::Raster,
+            [&](PassBuilder& b) { color = b.writeColor(color, 0, LoadIntent::Preserve); },
+            [this](PassContext& ctx) {
+                imguiRenderer_->render(static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder()), ImGui::GetDrawData());
+            });
+    }
+
+    if (capture_) {
+        capture_->prepare(width, height);
+        captureRef_ = frameGraph_.importBuffer("Capture readback", {capture_->readbackSize()}, ImportOutput);
+        frameGraph_.addPass(
+            "Frame capture", PassType::Blit,
+            [&](PassBuilder& b) {
+                b.read(color, Usage::CopySrc, StageBlit);
+                b.write(captureRef_, Usage::CopyDst, StageBlit);
+                b.setSideEffect();
+            },
+            [this](PassContext& ctx) {
+                // In the graph for the whole run (no recompilation on the
+                // capture frame); copies only on the frame being captured.
+                if (!captureThisFrame_) return;
+                capture_->encode(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),
+                                 static_cast<MTL::Texture*>(ctx.texture(drawableRef_)));
+            });
+    }
+
+    if (!graphExecutor_->compile(frameGraph_)) {
+        throw std::runtime_error("Failed to compile the frame graph");
+    }
 }
 
 } // namespace phosphor

@@ -43,17 +43,6 @@ SceneRenderer::SceneRenderer(MetalContext& context)
     depthState_ = context_.device()->newDepthStencilState(dsDesc);
     dsDesc->release();
 
-    passDesc_ = MTL4::RenderPassDescriptor::alloc()->init();
-    MTL::RenderPassColorAttachmentDescriptor* color = passDesc_->colorAttachments()->object(0);
-    color->setLoadAction(MTL::LoadActionClear);
-    color->setStoreAction(MTL::StoreActionStore);
-    color->setClearColor(MTL::ClearColor::Make(0.02, 0.025, 0.035, 1.0));
-    MTL::RenderPassDepthAttachmentDescriptor* depth = passDesc_->depthAttachment();
-    depth->setLoadAction(MTL::LoadActionClear);
-    depth->setStoreAction(MTL::StoreActionDontCare);
-    depth->setClearDepth(0.0); // reverse-Z: far = 0
-    passLabel_ = str("Forward")->retain();
-
     NS::Error* error = nullptr;
     MTL4::ArgumentTableDescriptor* atDesc = MTL4::ArgumentTableDescriptor::alloc()->init();
     atDesc->setMaxBufferBindCount(BindCount);
@@ -68,9 +57,6 @@ SceneRenderer::SceneRenderer(MetalContext& context)
 SceneRenderer::~SceneRenderer() {
     context_.waitIdle();
     releaseGeometry();
-    context_.memory().release(depth_, MemoryCategory::RenderTargets);
-    passLabel_->release();
-    passDesc_->release();
     arguments_->release();
     depthState_->release();
     pipeline_->release();
@@ -138,26 +124,13 @@ void SceneRenderer::syncGeometry(const GpuScene& scene) {
              scene.vertices().size(), scene.indices().size());
 }
 
-void SceneRenderer::ensureDepthTarget(u32 width, u32 height) {
-    if (depth_ && depth_->width() == width && depth_->height() == height) return;
-    context_.memory().release(depth_, MemoryCategory::RenderTargets);
+void SceneRenderer::prepareFrame(const GpuScene& scene, const FrameScene& fs, const FrameConstants& constants,
+                                 MTL::GPUAddress textureTable, u32 width, u32 height) {
+    scene_      = &scene;
+    frameScene_ = &fs;
+    width_      = width;
+    height_     = height;
 
-    MTL::TextureDescriptor* desc = MTL::TextureDescriptor::texture2DDescriptor(
-        depthFormat(), width, height, false);
-    desc->setUsage(MTL::TextureUsageRenderTarget);
-    // Depth is consumed within the pass: keep it in tile memory only.
-    desc->setStorageMode(MTL::StorageModeMemoryless);
-    depth_ = context_.memory().newTexture(desc, MemoryCategory::RenderTargets, "Depth (memoryless)");
-}
-
-MTL4::RenderCommandEncoder* SceneRenderer::render(MetalContext::Frame& frame, const GpuScene& scene, const FrameScene& fs,
-                           const FrameConstants& constants, MTL::GPUAddress textureTable) {
-    MTL::Texture* target = frame.drawable->texture();
-    const u32 width  = static_cast<u32>(target->width());
-    const u32 height = static_cast<u32>(target->height());
-    ensureDepthTarget(width, height);
-
-    // --- Per-frame upload -------------------------------------------------
     const size_t constantsOffset = 0;
     const size_t instancesOffset = alignUp(sizeof(FrameConstants));
     const size_t materialsOffset = instancesOffset + alignUp(fs.instances.size() * sizeof(GPUInstance));
@@ -174,52 +147,67 @@ MTL4::RenderCommandEncoder* SceneRenderer::render(MetalContext::Frame& frame, co
     if (!fs.lights.empty())
         std::memcpy(base + lightsOffset, fs.lights.data(), fs.lights.size() * sizeof(GPULight));
 
-    // --- Render pass ------------------------------------------------------
-    // The descriptor is reused (O7): only the per-frame textures change.
-    passDesc_->colorAttachments()->object(0)->setTexture(target);
-    passDesc_->depthAttachment()->setTexture(depth_);
-
-    MTL4::RenderCommandEncoder* enc = frame.commandBuffer->renderCommandEncoder(passDesc_);
-    // The encoder has copied the descriptor: drop its reference to the
-    // drawable so the layer can recycle it as soon as it is presented.
-    passDesc_->colorAttachments()->object(0)->setTexture(nullptr);
-    enc->setLabel(passLabel_);
+    const MTL::GPUAddress frameBase = upload.gpu;
+    arguments_->setAddress(frameBase + constantsOffset, BindFrame);
+    if (vertexBuffer_) arguments_->setAddress(vertexBuffer_->gpuAddress(), BindVertices);
+    arguments_->setAddress(frameBase + instancesOffset, BindInstances);
+    arguments_->setAddress(frameBase + materialsOffset, BindMaterials);
+    arguments_->setAddress(frameBase + lightsOffset, BindLights);
+    arguments_->setAddress(textureTable, BindTextures);
 
     lastTriangles_ = 0;
-    if (vertexBuffer_ && indexBuffer_ && !fs.batches.empty()) {
-        const MTL::GPUAddress frameBase = upload.gpu;
-        arguments_->setAddress(frameBase + constantsOffset, BindFrame);
-        arguments_->setAddress(vertexBuffer_->gpuAddress(), BindVertices);
-        arguments_->setAddress(frameBase + instancesOffset, BindInstances);
-        arguments_->setAddress(frameBase + materialsOffset, BindMaterials);
-        arguments_->setAddress(frameBase + lightsOffset, BindLights);
-        arguments_->setAddress(textureTable, BindTextures);
-
-        enc->setRenderPipelineState(pipeline_);
-        enc->setDepthStencilState(depthState_);
-        enc->setArgumentTable(arguments_, MTL::RenderStageVertex | MTL::RenderStageFragment);
-        // glTF convention: counter-clockwise front faces (Metal defaults to
-        // clockwise).  The shader flips N on back faces, so this decides lighting
-        // even without culling.
-        enc->setFrontFacingWinding(MTL::WindingCounterClockwise);
-        // Two-sided until winding is validated for every asset path (F2.7).
-        // The ImGui overlay appended to this pass also relies on CullModeNone.
-        enc->setCullMode(MTL::CullModeNone);
-        enc->setViewport(MTL::Viewport{0.0, 0.0, static_cast<double>(width), static_cast<double>(height), 0.0, 1.0});
-
-        const MTL::GPUAddress indexBase = indexBuffer_->gpuAddress();
-        const auto& infos = scene.meshInfos();
-        for (const DrawBatch& batch : fs.batches) {
-            const GPUMeshInfo& info = infos[batch.meshIndex];
-            if (info.indexCount == 0) continue;
-            enc->drawIndexedPrimitives(MTL::PrimitiveTypeTriangle, info.indexCount, MTL::IndexTypeUInt32,
-                                       indexBase + static_cast<MTL::GPUAddress>(info.indexOffset) * sizeof(u32),
-                                       static_cast<NS::UInteger>(info.indexCount) * sizeof(u32),
-                                       batch.instanceCount, info.vertexOffset, batch.firstInstance);
-            lastTriangles_ += info.indexCount / 3 * batch.instanceCount;
-        }
+    const auto& infos = scene.meshInfos();
+    for (const DrawBatch& batch : fs.batches) {
+        lastTriangles_ += infos[batch.meshIndex].indexCount / 3 * batch.instanceCount;
     }
-    return enc;
+}
+
+void SceneRenderer::encode(MTL4::RenderCommandEncoder* enc, u32 chunk, u32 chunks) const {
+    if (!scene_ || !frameScene_ || !vertexBuffer_ || !indexBuffer_ || frameScene_->batches.empty()) return;
+
+    enc->setRenderPipelineState(pipeline_);
+    enc->setDepthStencilState(depthState_);
+    enc->setArgumentTable(arguments_, MTL::RenderStageVertex | MTL::RenderStageFragment);
+    enc->setViewport(MTL::Viewport{0.0, 0.0, static_cast<double>(width_), static_cast<double>(height_), 0.0, 1.0});
+
+    const auto& batches = frameScene_->batches;
+    const size_t count = batches.size();
+    const size_t first = count * chunk / chunks;
+    const size_t last  = count * (chunk + 1) / chunks;
+
+    const MTL::GPUAddress indexBase = indexBuffer_->gpuAddress();
+    const auto& infos = scene_->meshInfos();
+    // glTF convention: counter-clockwise front faces (Metal defaults to
+    // clockwise).  A mirrored model matrix reverses the on-screen winding, so
+    // mirrored batches cull FRONT faces instead: the same triangles as
+    // flipping the winding, while [[front_facing]] keeps the meaning the
+    // shader expects (it inverts it itself for INSTANCE_FLAG_MIRRORED).
+    // Double-sided materials are not culled (the shader lights their back
+    // faces).  State is tracked from Metal's defaults (clockwise, no culling)
+    // because the validation layer rejects redundant state changes.
+    MTL::Winding  winding = MTL::WindingClockwise;
+    MTL::CullMode cull    = MTL::CullModeNone;
+    const auto setState = [&](MTL::Winding w, MTL::CullMode c) {
+        if (w != winding) enc->setFrontFacingWinding(winding = w);
+        if (c != cull) enc->setCullMode(cull = c);
+    };
+    for (size_t i = first; i < last; ++i) {
+        const DrawBatch& batch = batches[i];
+        const GPUMeshInfo& info = infos[batch.meshIndex];
+        if (info.indexCount == 0) continue;
+        switch (batch.cull) {
+        case CullClass::Back:         setState(MTL::WindingCounterClockwise, MTL::CullModeBack); break;
+        case CullClass::BackMirrored: setState(MTL::WindingCounterClockwise, MTL::CullModeFront); break;
+        case CullClass::None:         setState(MTL::WindingCounterClockwise, MTL::CullModeNone); break;
+        }
+        enc->drawIndexedPrimitives(MTL::PrimitiveTypeTriangle, info.indexCount, MTL::IndexTypeUInt32,
+                                   indexBase + static_cast<MTL::GPUAddress>(info.indexOffset) * sizeof(u32),
+                                   static_cast<NS::UInteger>(info.indexCount) * sizeof(u32),
+                                   batch.instanceCount, info.vertexOffset, batch.firstInstance);
+    }
+    // Later passes fused into this render encoder (the ImGui overlay) start
+    // from the default state.
+    setState(MTL::WindingClockwise, MTL::CullModeNone);
 }
 
 } // namespace phosphor

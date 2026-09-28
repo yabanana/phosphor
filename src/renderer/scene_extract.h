@@ -14,7 +14,8 @@ struct MaterialComponent;
 /// Culling class of a batch (see DrawBatch::cull).
 enum class CullClass : u8 {
     Back,         // cull back faces, front faces counter-clockwise
-    BackMirrored, // cull back faces, front faces clockwise (mirrored instances)
+    BackMirrored, // mirrored instance: its winding is reversed on screen, so the
+                  // back faces are the counter-clockwise ones (renderer: cull front)
     None          // double-sided material: no culling
 };
 
