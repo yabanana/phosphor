@@ -19,6 +19,8 @@ namespace phosphor {
 //                      of real time (deterministic captures)
 //   --switch-every N   switch to the next test bench every N frames, through
 //                      the same path as the 1-7 hotkeys (switching tests)
+//   --simulate-pressure  inject a memory-pressure warning at frame 10 and a
+//                      critical notification at frame 20 (F1.5 tests)
 //   --capture FILE     write a frame to FILE (PNG): the last measured frame in
 //                      benchmark mode, otherwise the first frame
 //   --report FILE      write the benchmark summary to FILE (JSON)
@@ -35,6 +37,7 @@ struct LaunchOptions {
     bool        ui     = true;
     bool        fixedTimestep = false;
     u32         switchEvery   = 0; // 0 = never
+    bool        simulatePressure = false;
     std::string capturePath;
     std::string reportPath;
 

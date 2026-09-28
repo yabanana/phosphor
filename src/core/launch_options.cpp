@@ -59,6 +59,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.ui = false;
         } else if (arg == "--fixed-timestep") {
             out.fixedTimestep = true;
+        } else if (arg == "--simulate-pressure") {
+            out.simulatePressure = true;
         } else if (arg == "--switch-every") {
             if (!needCount(out.switchEvery)) return false;
         } else if (arg == "--capture") {

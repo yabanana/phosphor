@@ -25,6 +25,7 @@ class GpuScene;
 class ImGuiRenderer;
 class Input;
 class MetalContext;
+class MemoryPressureMonitor;
 class MetalTextureManager;
 class SceneRenderer;
 class Timer;
@@ -51,6 +52,7 @@ private:
     void aimCamera(const CameraSetup& setup);
     void logMemory() const;
     void fillMemoryInfo();
+    void handleMemoryPressure();
     /// Simulate and render one frame; false if nothing was presented.
     bool frame(float dt);
     void recordBenchmarkFrame(float dt, float cpuMs, float waitMs);
@@ -64,6 +66,7 @@ private:
     std::unique_ptr<MetalTextureManager> textures_;
     std::unique_ptr<ImGuiRenderer>       imguiRenderer_;
     std::unique_ptr<FrameCapture>        capture_;
+    std::unique_ptr<MemoryPressureMonitor> pressure_;
 
     std::unique_ptr<ECS>        ecs_;
     std::unique_ptr<GpuScene>   gpuScene_;
@@ -80,6 +83,7 @@ private:
     // Benchmark mode (--frames): presented frames so far and measured samples.
     u32                      presentedFrames_ = 0;
     u32                      framesOnBench_   = 0; // for --switch-every
+    u32                      simulatedFrames_ = 0; // for --simulate-pressure
     std::vector<FrameSample> samples_;
     u64                      allocationsAtStart_ = 0;
     // CPU time spent blocked in beginFrame() (slot + drawable waits).

@@ -216,14 +216,14 @@ void GpuMemory::releaseCompleted(u64 completedFrame) {
     pending_.resize(kept);
 }
 
-u64 GpuMemory::trimEmptyHeaps() {
+u64 GpuMemory::trimEmptyHeaps(bool keepSpare) {
     u64 freed = 0;
     std::array<bool, static_cast<size_t>(ResidencyClass::COUNT)> keptSpare{};
     for (Heap& h : heaps_) {
         if (!h.heap) continue;
         bool& spare = keptSpare[static_cast<size_t>(h.cls)];
         if (h.tlsf.stats().allocationCount != 0) continue;
-        if (!spare) { // keep one empty heap per class for the next level
+        if (keepSpare && !spare) { // keep one empty heap per class for the next level
             spare = true;
             continue;
         }

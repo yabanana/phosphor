@@ -7,6 +7,7 @@
 #include "imgui/imgui_renderer.h"
 #include "platform/metal/frame_capture.h"
 #include "platform/metal/gpu_memory.h"
+#include "platform/metal/memory_pressure.h"
 #include "platform/metal/metal_context.h"
 #include "platform/metal/metal_texture_manager.h"
 #include "platform/metal/scene_renderer.h"
@@ -89,6 +90,7 @@ Engine::Engine(int argc, char* argv[]) {
     ImGui::StyleColorsDark();
     ImGui_ImplSDL3_InitForMetal(window_);
     imguiRenderer_ = std::make_unique<ImGuiRenderer>(*context_);
+    pressure_      = std::make_unique<MemoryPressureMonitor>();
     if (!options_.capturePath.empty()) {
         capture_ = std::make_unique<FrameCapture>(*context_);
     }
@@ -104,6 +106,7 @@ Engine::~Engine() {
         activeBench_.reset();
     }
 
+    pressure_.reset();
     capture_.reset();
     imguiRenderer_.reset();
     ImGui_ImplSDL3_Shutdown();
@@ -137,12 +140,18 @@ void Engine::run() {
             switchTestBench(*pendingBench_);
             pendingBench_.reset();
         }
+        handleMemoryPressure();
 
         timer_->tick();
         // Fixed step: deterministic animation for captures; timings stay real.
         const float simDt = options_.fixedTimestep ? 1.0f / 60.0f : timer_->getDeltaTime();
         const bool presented = frame(simDt);
         input_->resetFrameState();
+        if (presented && options_.simulatePressure) {
+            ++simulatedFrames_;
+            if (simulatedFrames_ == 10) pressure_->simulate(MemoryPressureMonitor::Level::Warning);
+            if (simulatedFrames_ == 20) pressure_->simulate(MemoryPressureMonitor::Level::Critical);
+        }
         if (presented && options_.switchEvery > 0 && ++framesOnBench_ >= options_.switchEvery && !pendingBench_) {
             // Same path as the 1-7 hotkeys.
             pendingBench_ = static_cast<TestBenchType>((static_cast<int>(currentBench_) + 1) % testBenchCount());
@@ -296,6 +305,25 @@ void Engine::logMemory() const {
     }
 }
 
+void Engine::handleMemoryPressure() {
+    MemoryPressureMonitor::Level level;
+    if (!pressure_->poll(level)) return;
+    if (level == MemoryPressureMonitor::Level::Normal) {
+        LOG_INFO("Memory pressure back to normal");
+        return;
+    }
+    // Between frames: nothing recorded references pending releases.  A full
+    // GPU wait is acceptable here; the system is short of memory.
+    const u64 before = context_->device()->currentAllocatedSize();
+    context_->collectGarbage();
+    const bool critical = level == MemoryPressureMonitor::Level::Critical;
+    const u64 trimmed = context_->memory().trimEmptyHeaps(/*keepSpare*/ !critical);
+    const u64 after = context_->device()->currentAllocatedSize();
+    LOG_WARN("Memory pressure %s: trimmed %.1f MiB of heaps, device allocation %.1f -> %.1f MiB",
+             MemoryPressureMonitor::name(level), static_cast<double>(trimmed) / (1 << 20),
+             static_cast<double>(before) / (1 << 20), static_cast<double>(after) / (1 << 20));
+}
+
 void Engine::fillMemoryInfo() {
     const GpuMemory& memory = context_->memory();
     const MemoryBudget& budget = context_->budget();
@@ -326,6 +354,8 @@ void Engine::fillMemoryInfo() {
         return MemoryPanelInfo::ResidencySet{name, s.allocations, s.bytes, s.commits};
     };
     m.residency = {set("static", ResidencyClass::Static), set("streaming", ResidencyClass::Streaming)};
+    m.pressure       = MemoryPressureMonitor::name(pressure_->level());
+    m.pressureEvents = pressure_->eventCount();
 }
 
 void Engine::aimCamera(const CameraSetup& setup) {

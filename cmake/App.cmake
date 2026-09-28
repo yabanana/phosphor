@@ -83,6 +83,7 @@ add_executable(phosphor
     src/platform/metal/gpu_memory.cpp
     src/platform/metal/metal_context.cpp
     src/platform/metal/metal_impl.cpp
+    src/platform/metal/memory_pressure.cpp
     src/platform/metal/metal_texture_manager.cpp
     src/platform/metal/residency_manager.cpp
     src/platform/metal/scene_renderer.cpp

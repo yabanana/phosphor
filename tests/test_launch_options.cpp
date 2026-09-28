@@ -32,7 +32,8 @@ TEST_CASE("launch options: benchmark switches") {
     LaunchOptions o;
     std::string err;
     REQUIRE(parse({"--bench", "3", "--frames", "600", "--warmup", "10", "--no-vsync", "--no-ui",
-                   "--fixed-timestep", "--switch-every", "20", "--capture", "out.png", "--report", "r.json"},
+                   "--fixed-timestep", "--switch-every", "20", "--simulate-pressure", "--capture", "out.png",
+                   "--report", "r.json"},
                   o, err));
     CHECK(o.bench == 2); // 1-based on the command line
     CHECK(o.frames == 600);
@@ -42,6 +43,7 @@ TEST_CASE("launch options: benchmark switches") {
     CHECK_FALSE(o.ui);
     CHECK(o.fixedTimestep);
     CHECK(o.switchEvery == 20);
+    CHECK(o.simulatePressure);
     CHECK(o.capturePath == "out.png");
     CHECK(o.reportPath == "r.json");
 }

@@ -72,9 +72,10 @@ public:
     /// GPU (~0 = everything, at shutdown).
     void releaseCompleted(u64 completedFrame);
 
-    /// Release placement heaps that hold no resources (keeps one spare).
-    /// GPU must be idle.  Returns the bytes given back.
-    u64 trimEmptyHeaps();
+    /// Release placement heaps that hold no resources, keeping one empty
+    /// spare per residency class unless `keepSpare` is false.  GPU must be
+    /// idle.  Returns the bytes given back.
+    u64 trimEmptyHeaps(bool keepSpare = true);
 
     /// Allocations made since the GpuMemory was created (monotonic).
     [[nodiscard]] u64 allocationCount() const { return allocationCount_; }
