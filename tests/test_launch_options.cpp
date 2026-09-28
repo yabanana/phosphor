@@ -51,6 +51,16 @@ TEST_CASE("launch options: benchmark switches") {
     CHECK(o.debugAsyncCompute);
 }
 
+TEST_CASE("launch options: --debug-graph-transients") {
+    LaunchOptions o;
+    std::string err;
+    REQUIRE(parse({}, o, err));
+    CHECK_FALSE(o.debugGraphTransients);
+    REQUIRE(parse({"--bench", "1", "--frames", "300", "--debug-graph-transients"}, o, err));
+    CHECK(o.debugGraphTransients);
+    CHECK(o.frames == 300);
+}
+
 TEST_CASE("launch options: memory stress") {
     LaunchOptions o;
     std::string err;

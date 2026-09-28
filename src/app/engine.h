@@ -23,6 +23,7 @@ class ECS;
 class FrameCapture;
 class FrameStats;
 class GpuScene;
+class GraphDebugPasses;
 class ImGuiRenderer;
 class Input;
 class MetalContext;
@@ -77,6 +78,7 @@ private:
     std::unique_ptr<ImGuiRenderer>       imguiRenderer_;
     std::unique_ptr<FrameCapture>        capture_;
     std::unique_ptr<MetalGraphExecutor>  graphExecutor_;
+    std::unique_ptr<GraphDebugPasses>    graphDebug_; // --debug-graph-transients
     std::unique_ptr<MemoryPressureMonitor> pressure_;
 
     std::unique_ptr<ECS>        ecs_;

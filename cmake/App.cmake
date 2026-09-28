@@ -81,6 +81,7 @@ add_executable(phosphor
     src/imgui/ui_panels.cpp
     src/platform/metal/frame_capture.cpp
     src/platform/metal/gpu_memory.cpp
+    src/platform/metal/graph_debug_passes.cpp
     src/platform/metal/metal_context.cpp
     src/platform/metal/metal_graph_executor.cpp
     src/platform/metal/metal_impl.cpp

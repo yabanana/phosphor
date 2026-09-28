@@ -25,6 +25,11 @@ namespace phosphor {
 //   --memory-stress N  create/destroy N GPU resources, check that device
 //                      memory does not grow, exit (F1.6); exit code 1 on failure
 //   --transient-test   aliasing self-test of the transient heap, exit (F1.1)
+//   --debug-graph-transients  add a synthetic chain of compute/raster passes on
+//                      transient resources (F2.2) whose result is read back and
+//                      checked exactly on the CPU; prints a GRAPH-TRANSIENTS line
+//                      and exits with code 1 on any mismatch or if nothing was
+//                      aliased.  The drawable is untouched.
 //   --inject-input     push synthetic key/mouse events every frame (tests
 //                      that benchmark mode is immune to user input)
 //   --capture FILE     write a frame to FILE (PNG): the last measured frame in
@@ -52,6 +57,7 @@ struct LaunchOptions {
     bool        simulatePressure = false;
     u32         memoryStress  = 0; // cycles; 0 = off
     bool        transientTest = false;
+    bool        debugGraphTransients = false; // F2.2 aliasing self-test on the GPU
     bool        injectInput   = false; // test: synthetic keys/mouse every frame
     std::string capturePath;
     std::string reportPath;

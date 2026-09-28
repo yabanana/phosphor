@@ -7,6 +7,7 @@
 #include "imgui/imgui_renderer.h"
 #include "platform/metal/frame_capture.h"
 #include "platform/metal/gpu_memory.h"
+#include "platform/metal/graph_debug_passes.h"
 #include "platform/metal/memory_pressure.h"
 #include "platform/metal/memory_stress.h"
 #include "platform/metal/metal_context.h"
@@ -90,6 +91,7 @@ Engine::Engine(int argc, char* argv[]) {
 
     renderer_      = std::make_unique<SceneRenderer>(*context_);
     graphExecutor_ = std::make_unique<MetalGraphExecutor>(*context_);
+    if (options_.debugGraphTransients) graphDebug_ = std::make_unique<GraphDebugPasses>(*context_);
 
     ecs_        = std::make_unique<ECS>();
     gpuScene_   = std::make_unique<GpuScene>();
@@ -122,6 +124,7 @@ Engine::~Engine() {
 
     pressure_.reset();
     graphExecutor_.reset();
+    graphDebug_.reset();
     capture_.reset();
     imguiRenderer_.reset();
     ImGui_ImplSDL3_Shutdown();
@@ -204,6 +207,7 @@ void Engine::run() {
     if (options_.benchmark()) {
         finishBenchmark();
     }
+    if (graphDebug_ && !graphDebug_->finish()) exitCode_ = 1;
     if (capture_) {
         if (captured_) {
             capture_->writePng(options_.capturePath);
@@ -516,12 +520,15 @@ bool Engine::frame(float dt) {
         buildFrameGraph(width, height);
     }
 
+    if (graphDebug_) graphDebug_->beginFrame(frame.slot);
     renderer_->prepareFrame(*gpuScene_, frameScene_, constants, textures_->tableAddress(), width, height);
     if (options_.ui) drawUi();
 
     graphExecutor_->bindTexture(drawableRef_, target);
     if (capture_) graphExecutor_->bindBuffer(captureRef_, capture_->readback());
+    if (graphDebug_) graphDebug_->bind(*graphExecutor_, frame.slot);
     graphExecutor_->execute(frame);
+    if (graphDebug_) graphDebug_->frameEncoded(frame.slot, frame.index);
     if (captureThisFrame_) captured_ = true;
 
     context_->submitFrame(frame);
@@ -596,6 +603,8 @@ void Engine::buildFrameGraph(u32 width, u32 height) {
             });
     }
 
+    if (graphDebug_) graphDebug_->addToGraph(frameGraph_);
+
     if (capture_) {
         capture_->prepare(width, height);
         captureRef_ = frameGraph_.importBuffer("Capture readback", {capture_->readbackSize()}, ImportOutput);
@@ -618,6 +627,7 @@ void Engine::buildFrameGraph(u32 width, u32 height) {
     if (!graphExecutor_->compile(frameGraph_)) {
         throw std::runtime_error("Failed to compile the frame graph");
     }
+    if (graphDebug_) graphDebug_->onCompiled(frameGraph_, graphExecutor_->compiled());
     const BandwidthReport traffic = estimateBandwidth(frameGraph_, graphExecutor_->compiled());
     LOG_INFO("Render graph %ux%u: estimated DRAM traffic %.2f MiB/frame (read %.2f, write %.2f)", width, height,
              static_cast<double>(traffic.totalBytes()) / (1 << 20),

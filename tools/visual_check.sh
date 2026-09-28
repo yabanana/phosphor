@@ -5,6 +5,8 @@
 #
 #   tools/visual_check.sh [build-dir] [reference-dir] [--update]
 #
+# EXTRA_ARGS (environment) is appended to every run, e.g.
+# EXTRA_ARGS=--debug-graph-transients (its GRAPH-TRANSIENTS line is expected).
 # Defaults: build (Debug), build/reference.  --update (re)creates the
 # references instead of comparing.  Captures use --fixed-timestep and the
 # same frame count, so animated benches are deterministic; --inject-input
@@ -29,10 +31,10 @@ for bench in 1 2 3 4 5 6 7; do
     status=0
     MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 MTL_DEBUG_LAYER_WARNING_MODE=nslog \
         "$app" --bench "$bench" --warmup "$warmup" --frames 1 --no-ui --fixed-timestep --inject-input \
-        --capture "$capture" >"$log" 2>&1 || status=$?
+        ${EXTRA_ARGS:-} --capture "$capture" >"$log" 2>&1 || status=$?
     # Anything besides our INFO lines, the BENCH summary and the two
     # "Validation Enabled" banners is a problem.
-    messages=$(grep -Ev '^\[INFO\]|^BENCH|Validation Enabled' "$log" | grep -c . || true)
+    messages=$(grep -Ev '^\[INFO\]|^BENCH|^GRAPH-TRANSIENTS|Validation Enabled' "$log" | grep -c . || true)
 
     if [[ "$update" == "--update" ]]; then
         cp "$capture" "$ref_dir/bench$bench.png"

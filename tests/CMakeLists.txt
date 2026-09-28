@@ -10,6 +10,7 @@ add_executable(phosphor_tests
     test_aliasing.cpp
     test_barrier_plan.cpp
     test_gltf_loader.cpp
+    test_graph_debug_reference.cpp
     test_graph_dump.cpp
     test_gpu_scene.cpp
     test_launch_options.cpp
