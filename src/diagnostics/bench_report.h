@@ -45,6 +45,7 @@ struct BenchReport {
     bool          ui     = true;
     u32           frames = 0;
     float         fps    = 0.0f; // 1000 / mean frame time
+    u64           gpuAllocations = 0; // GPU buffers/textures created while measuring (O7: must be 0)
     TimingSummary frameMs;
     TimingSummary cpuMs;
     TimingSummary gpuMs;

@@ -98,6 +98,7 @@ TEST_CASE("bench report: samples, fps and JSON") {
 
     const std::string json = reportToJson(r);
     CHECK(json.find("\"fps\": 125.00") != std::string::npos);
+    CHECK(json.find("\"gpu_allocations\": 0") != std::string::npos);
     CHECK(json.find("Torus \\\"Demo\\\"") != std::string::npos);
     CHECK(json.find("\"gpu_ms\": {\"mean\": 5.0000") != std::string::npos);
     CHECK(json.find("\"wait_ms\": {\"mean\": 1.0000") != std::string::npos);

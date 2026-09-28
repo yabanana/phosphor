@@ -80,10 +80,12 @@ add_executable(phosphor
     src/imgui/imgui_renderer.cpp
     src/imgui/ui_panels.cpp
     src/platform/metal/frame_capture.cpp
+    src/platform/metal/gpu_memory.cpp
     src/platform/metal/metal_context.cpp
     src/platform/metal/metal_impl.cpp
     src/platform/metal/metal_texture_manager.cpp
     src/platform/metal/scene_renderer.cpp
+    src/platform/metal/upload_ring.cpp
 )
 target_link_libraries(phosphor PRIVATE phosphor_core imgui metal_cpp)
 target_compile_options(phosphor PRIVATE ${PHOSPHOR_WARNINGS})

@@ -6,6 +6,7 @@
 #include "diagnostics/frame_stats.h"
 #include "imgui/imgui_renderer.h"
 #include "platform/metal/frame_capture.h"
+#include "platform/metal/gpu_memory.h"
 #include "platform/metal/metal_context.h"
 #include "platform/metal/metal_texture_manager.h"
 #include "platform/metal/scene_renderer.h"
@@ -122,7 +123,10 @@ void Engine::run() {
     if (options_.benchmark()) {
         LOG_INFO("Benchmark: %u warm-up + %u measured frames, vsync %s, UI %s", options_.warmup, options_.frames,
                  options_.vsync ? "on" : "off", options_.ui ? "on" : "off");
-        if (options_.warmup == 0) context_->beginGpuTimeCapture(options_.frames);
+        if (options_.warmup == 0) {
+            context_->beginGpuTimeCapture(options_.frames);
+            allocationsAtStart_ = context_->memory().allocationCount();
+        }
     }
     while (running_) {
         const Clock::time_point start = Clock::now();
@@ -162,6 +166,7 @@ void Engine::recordBenchmarkFrame(float dt, float cpuMs, float waitMs) {
         // GPU times are recorded from the next submitted frame on.
         context_->beginGpuTimeCapture(options_.frames);
         samples_.reserve(options_.frames);
+        allocationsAtStart_ = context_->memory().allocationCount();
     } else if (presentedFrames_ > options_.warmup) {
         samples_.push_back({dt * 1000.0f, cpuMs, 0.0f, waitMs});
         if (samples_.size() == options_.frames) running_ = false;
@@ -181,6 +186,7 @@ void Engine::finishBenchmark() {
     report.height = context_->height();
     report.vsync  = settings_.vsync;
     report.ui     = options_.ui;
+    report.gpuAllocations = context_->memory().allocationCount() - allocationsAtStart_;
     summarizeSamples(samples_, report);
 
     // stdout, not the log: scripts collect this line.
@@ -346,7 +352,7 @@ bool Engine::frame(float dt) {
         UIPanels::drawRenderPanel(settings_);
 
         ImGui::Render();
-        imguiRenderer_->render(frame, pass, ImGui::GetDrawData());
+        imguiRenderer_->render(pass, ImGui::GetDrawData());
     }
     pass->endEncoding();
 

@@ -1,4 +1,5 @@
 #include "platform/metal/frame_capture.h"
+#include "platform/metal/gpu_memory.h"
 #include "core/log.h"
 
 #include <stb_image_write.h>
@@ -8,11 +9,7 @@
 namespace phosphor {
 
 FrameCapture::~FrameCapture() {
-    if (readback_) {
-        context_.waitIdle();
-        context_.evict(readback_);
-        readback_->release();
-    }
+    context_.memory().release(readback_, MemoryCategory::Other);
 }
 
 void FrameCapture::encode(MetalContext::Frame& frame) {
@@ -21,12 +18,9 @@ void FrameCapture::encode(MetalContext::Frame& frame) {
     height_ = static_cast<u32>(target->height());
     const size_t rowBytes = static_cast<size_t>(width_) * 4;
 
-    if (readback_) {
-        context_.deferRelease(readback_);
-    }
-    readback_ = context_.device()->newBuffer(rowBytes * height_, MTL::ResourceStorageModeShared);
-    readback_->setLabel(NS::String::string("Frame capture", NS::UTF8StringEncoding));
-    context_.makeResident(readback_);
+    context_.memory().release(readback_, MemoryCategory::Other);
+    readback_ = context_.memory().newBuffer(rowBytes * height_, MTL::ResourceStorageModeShared,
+                                            MemoryCategory::Other, "Frame capture");
 
     MTL4::ComputeCommandEncoder* enc = frame.commandBuffer->computeCommandEncoder();
     enc->setLabel(NS::String::string("Frame capture", NS::UTF8StringEncoding));

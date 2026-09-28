@@ -1,4 +1,5 @@
 #include "imgui/imgui_renderer.h"
+#include "platform/metal/gpu_memory.h"
 #include "core/log.h"
 
 #include <imgui.h>
@@ -67,17 +68,7 @@ ImGuiRenderer::ImGuiRenderer(MetalContext& context) : context_(context) {
 }
 
 ImGuiRenderer::~ImGuiRenderer() {
-    context_.waitIdle();
-    for (UploadBuffer& u : uploads_) {
-        if (u.buffer) {
-            context_.evict(u.buffer);
-            u.buffer->release();
-        }
-    }
-    if (fontTexture_) {
-        context_.evict(fontTexture_);
-        fontTexture_->release();
-    }
+    context_.memory().release(fontTexture_, MemoryCategory::Textures);
     arguments_->release();
     depthState_->release();
     pipeline_->release();
@@ -131,23 +122,19 @@ void ImGuiRenderer::createFontTexture() {
         MTL::PixelFormatRGBA8Unorm, static_cast<NS::UInteger>(width), static_cast<NS::UInteger>(height), false);
     desc->setUsage(MTL::TextureUsageShaderRead);
     desc->setStorageMode(MTL::StorageModePrivate);
-    fontTexture_ = context_.device()->newTexture(desc);
-    fontTexture_->setLabel(str("ImGui font atlas"));
+    fontTexture_ = context_.memory().newTexture(desc, MemoryCategory::Textures, "ImGui font atlas");
 
     const size_t rowBytes = static_cast<size_t>(width) * 4;
-    MTL::Buffer* staging = context_.device()->newBuffer(rowBytes * static_cast<size_t>(height),
-                                                        MTL::ResourceStorageModeShared);
-    std::memcpy(staging->contents(), pixels, staging->length());
-    context_.makeResident(staging);
-    context_.makeResident(fontTexture_);
+    const UploadRing::Slice staging = context_.stagingAllocate(rowBytes * static_cast<size_t>(height));
+    std::memcpy(staging.cpu, pixels, rowBytes * static_cast<size_t>(height));
     // Blit upload keeps the private texture eligible for lossless compression (O6).
-    context_.submitAndWait([&](MTL4::ComputeCommandEncoder* enc) {
-        enc->copyFromBuffer(staging, 0, rowBytes, 0,
+    MTL::Texture* font = fontTexture_;
+    context_.enqueueUpload([staging, rowBytes, width, height, font](MTL4::ComputeCommandEncoder* enc) {
+        enc->copyFromBuffer(staging.buffer, staging.offset, rowBytes, 0,
                             MTL::Size::Make(static_cast<NS::UInteger>(width), static_cast<NS::UInteger>(height), 1),
-                            fontTexture_, 0, 0, MTL::Origin::Make(0, 0, 0));
+                            font, 0, 0, MTL::Origin::Make(0, 0, 0));
     });
-    context_.evict(staging);
-    staging->release();
+    context_.flushUploads();
 
     io.Fonts->SetTexID(static_cast<ImTextureID>(fontTexture_->gpuResourceID()._impl));
 }
@@ -164,8 +151,7 @@ void ImGuiRenderer::setupRenderState(MTL4::RenderCommandEncoder* encoder, MTL::G
     // redundant by the validation layer.
 }
 
-void ImGuiRenderer::render(const MetalContext::Frame& frame, MTL4::RenderCommandEncoder* encoder,
-                           const ImDrawData* drawData) {
+void ImGuiRenderer::render(MTL4::RenderCommandEncoder* encoder, const ImDrawData* drawData) {
     if (!drawData || drawData->CmdListsCount == 0 || drawData->TotalVtxCount == 0) return;
 
     const float fbWidth  = drawData->DisplaySize.x * drawData->FramebufferScale.x;
@@ -179,21 +165,8 @@ void ImGuiRenderer::render(const MetalContext::Frame& frame, MTL4::RenderCommand
     const size_t indicesOffset  = verticesOffset + alignUp(vertexBytes);
     const size_t totalSize      = indicesOffset + alignUp(indexBytes);
 
-    UploadBuffer& upload = uploads_[frame.slot];
-    if (upload.capacity < totalSize) {
-        // beginFrame() waited for the frame that last used this slot.
-        if (upload.buffer) {
-            context_.evict(upload.buffer);
-            upload.buffer->release();
-        }
-        upload.capacity = totalSize + totalSize / 2;
-        upload.buffer = context_.device()->newBuffer(
-            upload.capacity, MTL::ResourceStorageModeShared | MTL::ResourceCPUCacheModeWriteCombined);
-        upload.buffer->setLabel(str("ImGui upload"));
-        context_.makeResident(upload.buffer);
-    }
-
-    auto* base = static_cast<u8*>(upload.buffer->contents());
+    const UploadRing::Slice upload = context_.frameUploads().allocate(totalSize);
+    u8* base = upload.cpu;
 
     // Orthographic projection from ImGui's top-left origin to NDC (y up), z = 0.
     const float l = drawData->DisplayPos.x;
@@ -220,7 +193,7 @@ void ImGuiRenderer::render(const MetalContext::Frame& frame, MTL4::RenderCommand
     }
 
     // --- Draws -------------------------------------------------------------
-    const MTL::GPUAddress bufferBase = upload.buffer->gpuAddress();
+    const MTL::GPUAddress bufferBase = upload.gpu;
     const MTL::GPUAddress vertices   = bufferBase + verticesOffset;
     const MTL::GPUAddress indices    = bufferBase + indicesOffset;
     setupRenderState(encoder, vertices, bufferBase);

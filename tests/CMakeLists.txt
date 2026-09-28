@@ -9,6 +9,7 @@ add_executable(phosphor_tests
     test_main.cpp
     test_gpu_scene.cpp
     test_launch_options.cpp
+    test_linear_ring.cpp
     test_procedural.cpp
     test_scene_extract.cpp
     test_texture_manager.cpp

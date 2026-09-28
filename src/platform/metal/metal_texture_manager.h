@@ -15,8 +15,10 @@ class MetalContext;
 // Every texture is private (GPU-optimal layout, lossless compression on
 // Apple GPUs) and gets a slot in a shared "texture table" buffer holding its
 // MTLResourceID; shaders index that table (argument buffers tier 2).
-// Uploads are batched: createTexture() stages pixels, flushUploads() copies
-// them and generates mipmaps in one command buffer.
+// Uploads are batched: createTexture() copies pixels into the context's
+// staging ring and queues the blit; flushUploads() generates the mipmaps and
+// runs everything in one command buffer.  A full staging ring flushes the
+// copies early; mip generation always follows at flushUploads().
 // ---------------------------------------------------------------------------
 
 class MetalTextureManager final : public TextureManager {
@@ -38,17 +40,10 @@ protected:
     u32 createTexture(const u8* rgba, u32 width, u32 height, bool sRGB) override;
 
 private:
-    struct PendingUpload {
-        MTL::Texture* texture;
-        MTL::Buffer*  staging;
-        u32 width;
-        u32 height;
-    };
-
     MetalContext&              context_;
     MTL::Buffer*               table_ = nullptr;
     std::vector<MTL::Texture*> textures_;
-    std::vector<PendingUpload> pending_;
+    std::vector<MTL::Texture*> pendingMips_; // copied (or queued), mips not generated yet
 };
 
 } // namespace phosphor

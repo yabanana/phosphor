@@ -78,6 +78,7 @@ private:
     u32                      presentedFrames_ = 0;
     u32                      framesOnBench_   = 0; // for --switch-every
     std::vector<FrameSample> samples_;
+    u64                      allocationsAtStart_ = 0;
     // CPU time spent blocked in beginFrame() (slot + drawable waits).
     std::chrono::steady_clock::duration frameWait_{};
 

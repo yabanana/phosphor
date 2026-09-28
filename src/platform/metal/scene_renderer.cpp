@@ -1,4 +1,5 @@
 #include "platform/metal/scene_renderer.h"
+#include "platform/metal/gpu_memory.h"
 #include "renderer/gpu_scene.h"
 #include "renderer/scene_extract.h"
 #include "core/log.h"
@@ -56,13 +57,7 @@ SceneRenderer::SceneRenderer(MetalContext& context)
 SceneRenderer::~SceneRenderer() {
     context_.waitIdle();
     releaseGeometry();
-    for (UploadBuffer& u : uploads_) {
-        if (u.buffer) {
-            context_.evict(u.buffer);
-            u.buffer->release();
-        }
-    }
-    if (depth_) depth_->release();
+    context_.memory().release(depth_, MemoryCategory::RenderTargets);
     arguments_->release();
     depthState_->release();
     pipeline_->release();
@@ -95,29 +90,20 @@ void SceneRenderer::buildPipeline() {
 }
 
 MTL::Buffer* SceneRenderer::createPrivateBuffer(const void* data, size_t size, const char* label) {
-    MTL::Device* device = context_.device();
-    MTL::Buffer* staging = device->newBuffer(size, MTL::ResourceStorageModeShared);
-    std::memcpy(staging->contents(), data, size);
-    MTL::Buffer* buffer = device->newBuffer(size, MTL::ResourceStorageModePrivate);
-    buffer->setLabel(str(label));
-
-    context_.makeResident(staging);
-    context_.makeResident(buffer);
-    context_.submitAndWait([&](MTL4::ComputeCommandEncoder* enc) {
-        enc->copyFromBuffer(staging, 0, buffer, 0, size);
+    MTL::Buffer* buffer =
+        context_.memory().newBuffer(size, MTL::ResourceStorageModePrivate, MemoryCategory::Geometry, label);
+    const UploadRing::Slice staging = context_.stagingAllocate(size);
+    std::memcpy(staging.cpu, data, size);
+    context_.enqueueUpload([staging, buffer, size](MTL4::ComputeCommandEncoder* enc) {
+        enc->copyFromBuffer(staging.buffer, staging.offset, buffer, 0, size);
     });
-    context_.evict(staging);
-    staging->release();
     return buffer;
 }
 
 void SceneRenderer::releaseGeometry() {
     for (MTL::Buffer** b : {&vertexBuffer_, &indexBuffer_}) {
-        if (*b) {
-            context_.evict(*b);
-            (*b)->release();
-            *b = nullptr;
-        }
+        context_.memory().release(*b, MemoryCategory::Geometry);
+        *b = nullptr;
     }
 }
 
@@ -134,21 +120,21 @@ void SceneRenderer::syncGeometry(const GpuScene& scene) {
                                         scene.vertices().size() * sizeof(GPUVertex), "Vertices");
     indexBuffer_  = createPrivateBuffer(scene.indices().data(),
                                         scene.indices().size() * sizeof(u32), "Indices");
+    context_.flushUploads();
     LOG_INFO("Geometry uploaded: %zu vertices, %zu indices",
              scene.vertices().size(), scene.indices().size());
 }
 
 void SceneRenderer::ensureDepthTarget(u32 width, u32 height) {
     if (depth_ && depth_->width() == width && depth_->height() == height) return;
-    if (depth_) context_.deferRelease(depth_);
+    context_.memory().release(depth_, MemoryCategory::RenderTargets);
 
     MTL::TextureDescriptor* desc = MTL::TextureDescriptor::texture2DDescriptor(
         depthFormat(), width, height, false);
     desc->setUsage(MTL::TextureUsageRenderTarget);
     // Depth is consumed within the pass: keep it in tile memory only.
     desc->setStorageMode(MTL::StorageModeMemoryless);
-    depth_ = context_.device()->newTexture(desc);
-    depth_->setLabel(str("Depth (memoryless)"));
+    depth_ = context_.memory().newTexture(desc, MemoryCategory::RenderTargets, "Depth (memoryless)");
 }
 
 MTL4::RenderCommandEncoder* SceneRenderer::render(MetalContext::Frame& frame, const GpuScene& scene, const FrameScene& fs,
@@ -165,22 +151,8 @@ MTL4::RenderCommandEncoder* SceneRenderer::render(MetalContext::Frame& frame, co
     const size_t lightsOffset    = materialsOffset + alignUp(fs.materials.size() * sizeof(GPUMaterial));
     const size_t totalSize       = lightsOffset + alignUp(std::max<size_t>(fs.lights.size(), 1) * sizeof(GPULight));
 
-    UploadBuffer& upload = uploads_[frame.slot];
-    if (upload.capacity < totalSize) {
-        // The previous frame using this slot has completed (beginFrame waited),
-        // so the old buffer can go immediately.
-        if (upload.buffer) {
-            context_.evict(upload.buffer);
-            upload.buffer->release();
-        }
-        upload.capacity = totalSize + totalSize / 2;
-        upload.buffer = context_.device()->newBuffer(
-            upload.capacity, MTL::ResourceStorageModeShared | MTL::ResourceCPUCacheModeWriteCombined);
-        upload.buffer->setLabel(str("Frame upload"));
-        context_.makeResident(upload.buffer);
-    }
-
-    auto* base = static_cast<u8*>(upload.buffer->contents());
+    const UploadRing::Slice upload = context_.frameUploads().allocate(totalSize);
+    u8* base = upload.cpu;
     std::memcpy(base + constantsOffset, &constants, sizeof(constants));
     if (!fs.instances.empty())
         std::memcpy(base + instancesOffset, fs.instances.data(), fs.instances.size() * sizeof(GPUInstance));
@@ -208,7 +180,7 @@ MTL4::RenderCommandEncoder* SceneRenderer::render(MetalContext::Frame& frame, co
 
     lastTriangles_ = 0;
     if (vertexBuffer_ && indexBuffer_ && !fs.batches.empty()) {
-        const MTL::GPUAddress frameBase = upload.buffer->gpuAddress();
+        const MTL::GPUAddress frameBase = upload.gpu;
         arguments_->setAddress(frameBase + constantsOffset, BindFrame);
         arguments_->setAddress(vertexBuffer_->gpuAddress(), BindVertices);
         arguments_->setAddress(frameBase + instancesOffset, BindInstances);

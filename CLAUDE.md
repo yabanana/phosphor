@@ -43,10 +43,14 @@ extend it; port algorithms from it.
   free of Metal/Apple headers so it builds and is unit-tested on Linux.
 - GPU struct layouts live once in `src/renderer/gpu_types.h`, shared with MSL:
   scalars only (MSL `float3` is 16-byte aligned), keep the `static_assert`s.
-- Metal 4 does not retain or make resources resident: add long-lived allocations
-  with `MetalContext::makeResident`, release in-flight objects with
-  `deferRelease`, and insert explicit stage-to-stage barriers (no automatic
-  hazard tracking).
+- Metal 4 does not retain or make resources resident: create every GPU buffer
+  or texture through `context.memory()` (`GpuMemory`: labels, residency,
+  per-category accounting, deferred release), write per-frame data into
+  `context.frameUploads()` and loading-time data through `stagingAllocate` /
+  `enqueueUpload` / `flushUploads`. Never call `device->newBuffer/newTexture`
+  elsewhere. Insert explicit stage-to-stage barriers (no hazard tracking).
+- Benchmarks report `GPU allocations` during the measured frames: it must be
+  0 (rule O7).
 - Frame pacing: one MTL4 command buffer per frame (scene + ImGui overlay in
   the same render pass) and one `MTLSharedEvent`; value `n+1` = frame n done.
   `makeResident` allocations are committed right before each commit, so they

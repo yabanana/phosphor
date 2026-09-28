@@ -69,14 +69,15 @@ void summarizeSamples(const std::vector<FrameSample>& samples, BenchReport& repo
 }
 
 std::string formatReportLine(const BenchReport& r) {
-    char buf[320];
+    char buf[352];
     std::snprintf(buf, sizeof(buf),
                   "%s | %ux%u vsync=%s ui=%s | %u frames | %.1f fps | "
                   "frame %.3f ms (p99 %.3f) | CPU %.3f ms (p99 %.3f) | GPU %.3f ms (p99 %.3f) | "
-                  "wait %.3f ms (p99 %.3f)",
+                  "wait %.3f ms (p99 %.3f) | GPU allocations %llu",
                   r.bench.c_str(), r.width, r.height, r.vsync ? "on" : "off", r.ui ? "on" : "off",
                   r.frames, r.fps, r.frameMs.mean, r.frameMs.p99, r.cpuMs.mean, r.cpuMs.p99,
-                  r.gpuMs.mean, r.gpuMs.p99, r.waitMs.mean, r.waitMs.p99);
+                  r.gpuMs.mean, r.gpuMs.p99, r.waitMs.mean, r.waitMs.p99,
+                  static_cast<unsigned long long>(r.gpuAllocations));
     return buf;
 }
 
@@ -84,9 +85,11 @@ std::string reportToJson(const BenchReport& r) {
     char head[512];
     std::snprintf(head, sizeof(head),
                   "{\n  \"bench\": \"%s\",\n  \"device\": \"%s\",\n  \"width\": %u,\n  \"height\": %u,\n"
-                  "  \"vsync\": %s,\n  \"ui\": %s,\n  \"frames\": %u,\n  \"fps\": %.2f,\n",
+                  "  \"vsync\": %s,\n  \"ui\": %s,\n  \"frames\": %u,\n  \"fps\": %.2f,\n"
+                  "  \"gpu_allocations\": %llu,\n",
                   jsonEscape(r.bench).c_str(), jsonEscape(r.device).c_str(), r.width, r.height,
-                  r.vsync ? "true" : "false", r.ui ? "true" : "false", r.frames, r.fps);
+                  r.vsync ? "true" : "false", r.ui ? "true" : "false", r.frames, r.fps,
+                  static_cast<unsigned long long>(r.gpuAllocations));
     return std::string(head) +
            "  \"frame_ms\": " + summaryToJson(r.frameMs) + ",\n" +
            "  \"cpu_ms\": " + summaryToJson(r.cpuMs) + ",\n" +
