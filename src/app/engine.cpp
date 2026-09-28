@@ -135,7 +135,9 @@ void Engine::run() {
         }
 
         timer_->tick();
-        const bool presented = frame(timer_->getDeltaTime());
+        // Fixed step: deterministic animation for captures; timings stay real.
+        const float simDt = options_.fixedTimestep ? 1.0f / 60.0f : timer_->getDeltaTime();
+        const bool presented = frame(simDt);
         input_->resetFrameState();
         if (presented && options_.benchmark()) {
             recordBenchmarkFrame(timer_->getDeltaTime(), toMs(Clock::now() - start - frameWait_), toMs(frameWait_));

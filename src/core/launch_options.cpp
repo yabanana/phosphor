@@ -57,6 +57,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.vsync = false;
         } else if (arg == "--no-ui") {
             out.ui = false;
+        } else if (arg == "--fixed-timestep") {
+            out.fixedTimestep = true;
         } else if (arg == "--capture") {
             const auto value = needValue();
             if (!value) return false;

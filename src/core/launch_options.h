@@ -15,6 +15,8 @@ namespace phosphor {
 //   --warmup N         frames skipped before measuring (default 120)
 //   --no-vsync         disable display sync (uncapped frame rate)
 //   --no-ui            do not draw the ImGui overlay
+//   --fixed-timestep   advance the simulation by 1/60 s per frame regardless
+//                      of real time (deterministic captures)
 //   --capture FILE     write a frame to FILE (PNG): the last measured frame in
 //                      benchmark mode, otherwise the first frame
 //   --report FILE      write the benchmark summary to FILE (JSON)
@@ -29,6 +31,7 @@ struct LaunchOptions {
     u32         warmup = 120;
     bool        vsync  = true;
     bool        ui     = true;
+    bool        fixedTimestep = false;
     std::string capturePath;
     std::string reportPath;
 

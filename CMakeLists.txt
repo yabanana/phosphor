@@ -77,6 +77,12 @@ target_compile_options(phosphor_core PRIVATE ${PHOSPHOR_WARNINGS})
 # Third-party single-header implementations compiled in gltf_loader.cpp.
 set_source_files_properties(src/scene/gltf_loader.cpp PROPERTIES COMPILE_OPTIONS "-w")
 
+# --- Tools -------------------------------------------------------------------
+# Pixel comparison for visual regression checks of --capture images.
+add_executable(image_diff tools/image_diff/image_diff.cpp)
+target_link_libraries(image_diff PRIVATE tinygltf) # stb_image / stb_image_write
+set_source_files_properties(tools/image_diff/image_diff.cpp PROPERTIES COMPILE_OPTIONS "-w")
+
 # --- macOS app ---------------------------------------------------------------
 if(PHOSPHOR_BUILD_APP)
     if(NOT APPLE)
