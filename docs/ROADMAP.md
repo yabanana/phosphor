@@ -231,12 +231,12 @@ prime misure di velocità reali.
 
 **Obiettivo**: controllo totale della memoria GPU, zero allocazioni nel frame (O7).
 
-- [ ] F1.1 Heap `MTLHeapTypePlacement` per risorse transitorie; sub-allocatore TLSF per buffer persistenti
-- [ ] F1.2 Anelli di upload per frame con suballocazione lineare (sostituiscono `UploadBuffer` di F0)
-- [ ] F1.3 Residency: set statico + set per-streaming, aggiornamento incrementale e batch di `commit()`
-- [ ] F1.4 Budget di memoria per tier, statistiche live (per heap, per categoria) in ImGui
-- [ ] F1.5 Gestione della pressione di memoria di sistema (notifiche macOS → eviction)
-- [ ] F1.6 Test di stress: 10.000 creazioni/distruzioni di risorse senza crescita di memoria
+- [x] F1.1 Heap `MTLHeapTypePlacement` per risorse transitorie; sub-allocatore TLSF per buffer persistenti (heap placement + TLSF per tutte le risorse private; l'heap transitorio arriva con F2.2)
+- [x] F1.2 Anelli di upload per frame con suballocazione lineare (sostituiscono `UploadBuffer` di F0)
+- [x] F1.3 Residency: set statico + set per-streaming, aggiornamento incrementale e batch di `commit()`
+- [x] F1.4 Budget di memoria per tier, statistiche live (per heap, per categoria) in ImGui
+- [ ] F1.5 Gestione della pressione di memoria di sistema (notifiche macOS → eviction) — risposta verificata con `--simulate-pressure`; manca la prova con la notifica reale (`sudo memory_pressure -S -l warn`)
+- [x] F1.6 Test di stress: 10.000 creazioni/distruzioni di risorse senza crescita di memoria (`--memory-stress`)
 
 **Uscita**: Instruments Allocations piatto in gameplay; nessuna allocazione Metal nel frame.
 

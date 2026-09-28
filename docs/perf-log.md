@@ -87,3 +87,52 @@ questa sessione (regola O12). Stesso comando su T0 e nuova tabella qui sotto.
 - Build Debug (`-O0`, che attiva da sola la validazione API): lo Stress Test
   passa da 2,9 a 32,9 ms di CPU per frame (30 fps invece di 239). Per il perf
   log usare sempre Release.
+
+---
+
+## F1 — memoria, heap e residency
+
+**2026-09-28 (sera)** · branch `phase/f1` · stessa macchina · **alimentazione
+di rete** · Release, `--no-vsync --no-ui`, 3×600 frame.
+
+**Attenzione: l'ambiente è cambiato rispetto alla baseline F0.** Nel
+pomeriggio il sistema ha iniziato a limitare la presentazione senza vsync a
+~80 fps (12,5 ms per frame), con CPU/GPU ms più alti a parità di codice
+(probabile riduzione delle frequenze). Il codice di F0 ricompilato e misurato
+subito prima di F1 dà gli stessi numeri: **il confronto valido è quello
+consecutivo qui sotto, non con la tabella della baseline.**
+
+| # | Bench | F0 CPU ms (p99) | F1 CPU ms (p99) | F0 GPU ms (p99) | F1 GPU ms (p99) |
+|---|---|---|---|---|---|
+| 1 | Torus Demo | 0.25 (0.356) | 0.243 (0.351) | 1.141 (1.617) | 1.142 (1.717) |
+| 2 | PBR Material Grid | 0.269 (0.377) | 0.277 (0.377) | 0.816 (1.575) | 0.815 (1.277) |
+| 3 | Stress Test (100K) | 4.362 (4.66) | 4.297 (4.652) | 5.979 (8.311) | 5.585 (8.4) |
+| 4 | Scene Viewer (glTF) | 0.245 (0.347) | 0.247 (0.357) | 0.876 (1.018) | 0.877 (1.139) |
+| 5 | Many Lights (1024) | 0.107 (0.203) | 0.115 (0.238) | 103.454 (164.216) | 102.711 (160.943) |
+| 6 | Cornell Box (GI) | 0.241 (0.356) | 0.244 (0.353) | 0.654 (0.748) | 0.649 (0.723) |
+| 7 | Culling Visualization | 1.17 (1.359) | 1.152 (1.334) | 3.516 (6.057) | 3.553 (6.056) |
+
+Nessuna regressione: le differenze stanno nel rumore tra esecuzioni.
+
+### Criteri di uscita di F1
+
+- **Allocazioni GPU nel frame**: 0 su tutti i 7 bench (1.200 frame misurati;
+  contatore di `GpuMemory`, colonna `gpu_allocations` dei JSON).
+- **Heap CPU**: `malloc_zone_statistics` (tutte le zone) tra inizio e fine
+  della misura: +1.000…+2.100 blocchi (~50–120 KB) **indipendentemente dal
+  numero di frame** (600 → 4.800 frame: stessa crescita), con e senza UI.
+  È una fluttuazione limitata di cache di sistema/driver, non una perdita
+  per frame. L'unica allocazione per frame nota è `MTL4CommitOptions` (un
+  oggetto riusato smette di consegnare il feedback: misurato 0 su 600 frame).
+- **Instruments Allocations**: non registrato: `xctrace` non riesce ad
+  agganciarsi al processo da questa sessione (serve l'accesso "Developer
+  Tools" per il terminale). Da fare a mano: `xcrun xctrace record --template
+  Allocations --launch -- ./build/release/phosphor --bench 3 --frames 3000`.
+- **F1.6 stress**: `--memory-stress 10000` e `30000` con validazione API:
+  la memoria del device torna esattamente alla baseline (192,81 MiB) e i
+  contatori per categoria sono ripristinati; picco di 9 heap e 704,81 MiB
+  con heap trattenuti **identici** a 10k e 30k cicli (il pool è limitato dal
+  picco di dati vivi, non dal numero di operazioni).
+- **Budget** (M5 Max): working set interrogato 107,5 GiB, budget engine
+  80,6 GiB; tier rilevato "T2 Max + T3 Neural". Lo Stress Test usa fino a
+  18 MiB di upload per frame (48,6 dei 64 MiB dell'anello in volo).

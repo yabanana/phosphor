@@ -89,6 +89,8 @@ private:
     u32                      simulatedFrames_ = 0; // for --simulate-pressure
     std::vector<FrameSample> samples_;
     u64                      allocationsAtStart_ = 0;
+    u64                      heapBlocksAtStart_  = 0;
+    u64                      heapBytesAtStart_   = 0;
     // CPU time spent blocked in beginFrame() (slot + drawable waits).
     std::chrono::steady_clock::duration frameWait_{};
 

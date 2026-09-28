@@ -17,6 +17,7 @@
 #include "scene/ecs.h"
 
 #include <SDL3/SDL.h>
+#include <malloc/malloc.h>
 #include <SDL3/SDL_metal.h>
 
 #include <imgui.h>
@@ -42,6 +43,14 @@ std::string shaderLibraryPath() {
 }
 
 using Clock = std::chrono::steady_clock;
+
+// Live blocks and bytes over every malloc zone (CPU heap flatness, O7).
+void heapUsage(u64& blocks, u64& bytes) {
+    malloc_statistics_t stats{};
+    malloc_zone_statistics(nullptr, &stats);
+    blocks = stats.blocks_in_use;
+    bytes  = stats.size_in_use;
+}
 
 float toMs(Clock::duration d) {
     return std::chrono::duration<float, std::milli>(d).count();
@@ -143,6 +152,7 @@ void Engine::run() {
         if (options_.warmup == 0) {
             context_->beginGpuTimeCapture(options_.frames);
             allocationsAtStart_ = context_->memory().allocationCount();
+            heapUsage(heapBlocksAtStart_, heapBytesAtStart_);
         }
     }
     while (running_) {
@@ -190,6 +200,7 @@ void Engine::recordBenchmarkFrame(float dt, float cpuMs, float waitMs) {
         context_->beginGpuTimeCapture(options_.frames);
         samples_.reserve(options_.frames);
         allocationsAtStart_ = context_->memory().allocationCount();
+        heapUsage(heapBlocksAtStart_, heapBytesAtStart_);
     } else if (presentedFrames_ > options_.warmup) {
         samples_.push_back({dt * 1000.0f, cpuMs, 0.0f, waitMs});
         if (samples_.size() == options_.frames) running_ = false;
@@ -197,6 +208,9 @@ void Engine::recordBenchmarkFrame(float dt, float cpuMs, float waitMs) {
 }
 
 void Engine::finishBenchmark() {
+    // Sample the CPU heap before the report's own allocations.
+    u64 heapBlocks = 0, heapBytes = 0;
+    heapUsage(heapBlocks, heapBytes);
     const std::vector<float> gpu = context_->endGpuTimeCapture();
     for (size_t i = 0; i < samples_.size() && i < gpu.size(); ++i) {
         samples_[i].gpuMs = gpu[i];
@@ -210,6 +224,8 @@ void Engine::finishBenchmark() {
     report.vsync  = settings_.vsync;
     report.ui     = options_.ui;
     report.gpuAllocations = context_->memory().allocationCount() - allocationsAtStart_;
+    report.cpuHeapBlocksDelta = static_cast<i64>(heapBlocks) - static_cast<i64>(heapBlocksAtStart_);
+    report.cpuHeapBytesDelta  = static_cast<i64>(heapBytes) - static_cast<i64>(heapBytesAtStart_);
     summarizeSamples(samples_, report);
 
     // stdout, not the log: scripts collect this line.
