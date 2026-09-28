@@ -109,7 +109,7 @@ std::string esc(const std::string& s) {
     return out;
 }
 
-std::string megabytes(u64 bytes) {
+std::string mebibytes(u64 bytes) {
     char buf[64];
     std::snprintf(buf, sizeof(buf), "%.3f", static_cast<double>(bytes) / (1024.0 * 1024.0));
     return buf;
@@ -226,9 +226,9 @@ std::string dumpGraphviz(const RenderGraph& graph, const CompiledGraph& compiled
     std::string out;
     out += "digraph RenderGraph {\n";
     out += "  rankdir=LR;\n";
-    out += "  label=\"DRAM per frame: " + megabytes(bw.totalReadBytes) + " MB read, " +
-           megabytes(bw.totalWriteBytes) + " MB write\\ntransient heap: " + megabytes(compiled.aliasing.heapSize) +
-           " MB aliased, " + megabytes(compiled.aliasing.unaliasedSize) + " MB unaliased\";\n";
+    out += "  label=\"DRAM per frame: " + mebibytes(bw.totalReadBytes) + " MiB read, " +
+           mebibytes(bw.totalWriteBytes) + " MiB write\\ntransient heap: " + mebibytes(compiled.aliasing.heapSize) +
+           " MiB aliased, " + mebibytes(compiled.aliasing.unaliasedSize) + " MiB unaliased\";\n";
     out += "  labelloc=t;\n";
     out += "  node [fontname=\"Helvetica\"];\n";
     out += "  edge [fontname=\"Helvetica\", fontsize=10];\n";
@@ -300,7 +300,7 @@ std::string dumpGraphviz(const RenderGraph& graph, const CompiledGraph& compiled
             label += "buffer " + std::to_string(res.buffer.size) + " B";
         } else {
             label += std::string(formatName(res.texture.format)) + " " + std::to_string(res.texture.width) + "x" +
-                     std::to_string(res.texture.height) + ", " + megabytes(res.texture.estimatedBytes()) + " MB";
+                     std::to_string(res.texture.height) + ", " + mebibytes(res.texture.estimatedBytes()) + " MiB";
         }
         std::string flags;
         if (res.imported) {
@@ -317,8 +317,8 @@ std::string dumpGraphviz(const RenderGraph& graph, const CompiledGraph& compiled
         }
         if (r < bw.resources.size() && v + 1 == res.versions &&
             (bw.resources[r].readBytes || bw.resources[r].writeBytes)) {
-            label += "\\nDRAM R " + megabytes(bw.resources[r].readBytes) + " / W " +
-                     megabytes(bw.resources[r].writeBytes) + " MB";
+            label += "\\nDRAM R " + mebibytes(bw.resources[r].readBytes) + " / W " +
+                     mebibytes(bw.resources[r].writeBytes) + " MiB";
         }
         out += "  r" + std::to_string(r) + "_v" + std::to_string(v) + " [shape=ellipse, label=\"" + label + "\"];\n";
     }

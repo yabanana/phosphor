@@ -30,6 +30,12 @@ namespace phosphor {
 //   --capture FILE     write a frame to FILE (PNG): the last measured frame in
 //                      benchmark mode, otherwise the first frame
 //   --report FILE      write the benchmark summary to FILE (JSON)
+//   --dump-graph FILE  write the frame's render graph (Graphviz dot, with the
+//                      estimated DRAM bytes per resource) whenever it is compiled
+//   --debug-split-encoding  encode the forward pass on several threads, in
+//                      render passes suspended/resumed across command buffers (F2.5)
+//   --debug-async-compute   add a synthetic compute pass on the second queue,
+//                      synchronised with events (F2.6)
 //
 // Arguments not starting with "--" are ignored: macOS may add its own
 // (e.g. -NSDocumentRevisionsDebugMode when launched from Xcode).
@@ -49,6 +55,9 @@ struct LaunchOptions {
     bool        injectInput   = false; // test: synthetic keys/mouse every frame
     std::string capturePath;
     std::string reportPath;
+    std::string dumpGraphPath;
+    bool        debugSplitEncoding = false;
+    bool        debugAsyncCompute  = false;
 
     /// True when the app runs a fixed number of frames and then exits.
     [[nodiscard]] bool benchmark() const { return frames > 0; }

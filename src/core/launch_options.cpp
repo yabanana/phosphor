@@ -77,6 +77,14 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             const auto value = needValue();
             if (!value) return false;
             out.reportPath = *value;
+        } else if (arg == "--dump-graph") {
+            const auto value = needValue();
+            if (!value) return false;
+            out.dumpGraphPath = *value;
+        } else if (arg == "--debug-split-encoding") {
+            out.debugSplitEncoding = true;
+        } else if (arg == "--debug-async-compute") {
+            out.debugAsyncCompute = true;
         } else {
             error = "unknown option " + std::string(arg);
             return false;

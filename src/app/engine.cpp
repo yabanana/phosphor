@@ -14,6 +14,7 @@
 #include "platform/metal/metal_texture_manager.h"
 #include "platform/metal/scene_renderer.h"
 #include "renderer/gpu_scene.h"
+#include "rendergraph/graph_dump.h"
 #include "rendergraph/pass_context.h"
 #include "scene/camera.h"
 #include "scene/ecs.h"
@@ -612,6 +613,20 @@ void Engine::buildFrameGraph(u32 width, u32 height) {
 
     if (!graphExecutor_->compile(frameGraph_)) {
         throw std::runtime_error("Failed to compile the frame graph");
+    }
+    const BandwidthReport traffic = estimateBandwidth(frameGraph_, graphExecutor_->compiled());
+    LOG_INFO("Render graph %ux%u: estimated DRAM traffic %.2f MiB/frame (read %.2f, write %.2f)", width, height,
+             static_cast<double>(traffic.totalBytes()) / (1 << 20),
+             static_cast<double>(traffic.totalReadBytes) / (1 << 20),
+             static_cast<double>(traffic.totalWriteBytes) / (1 << 20));
+    if (!options_.dumpGraphPath.empty()) {
+        std::ofstream out(options_.dumpGraphPath);
+        out << dumpGraphviz(frameGraph_, graphExecutor_->compiled());
+        if (!out) {
+            LOG_ERROR("Failed to write %s", options_.dumpGraphPath.c_str());
+        } else {
+            LOG_INFO("Render graph written to %s", options_.dumpGraphPath.c_str());
+        }
     }
 }
 

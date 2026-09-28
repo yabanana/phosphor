@@ -206,9 +206,9 @@ TEST_CASE("dump: graphviz of the engine frame has clusters, flags and totals") {
     CHECK(contains(dot, "BGRA8Unorm"));
     CHECK(contains(dot, "load=Clear store=Store"));
     CHECK(contains(dot, "barrier queue fragment->vertex alias"));
-    CHECK(contains(dot, "3.516 MB write"));   // 1280*720*4 bytes
-    CHECK(contains(dot, "1.000 MB aliased"));
-    CHECK(contains(dot, "2.000 MB unaliased"));
+    CHECK(contains(dot, "3.516 MiB write"));   // 1280*720*4 bytes
+    CHECK(contains(dot, "1.000 MiB aliased"));
+    CHECK(contains(dot, "2.000 MiB unaliased"));
     CHECK(count(dot, '{') == count(dot, '}'));
     CHECK(dot == dumpGraphviz(f.graph, c)); // deterministic
 }
