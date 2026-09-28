@@ -32,7 +32,8 @@ TEST_CASE("launch options: benchmark switches") {
     LaunchOptions o;
     std::string err;
     REQUIRE(parse({"--bench", "3", "--frames", "600", "--warmup", "10", "--no-vsync", "--no-ui",
-                   "--fixed-timestep", "--switch-every", "20", "--capture", "out.png", "--report", "r.json"},
+                   "--fixed-timestep", "--switch-every", "20", "--simulate-pressure", "--capture", "out.png",
+                   "--report", "r.json"},
                   o, err));
     CHECK(o.bench == 2); // 1-based on the command line
     CHECK(o.frames == 600);
@@ -42,8 +43,19 @@ TEST_CASE("launch options: benchmark switches") {
     CHECK_FALSE(o.ui);
     CHECK(o.fixedTimestep);
     CHECK(o.switchEvery == 20);
+    CHECK(o.simulatePressure);
     CHECK(o.capturePath == "out.png");
     CHECK(o.reportPath == "r.json");
+}
+
+TEST_CASE("launch options: memory stress") {
+    LaunchOptions o;
+    std::string err;
+    REQUIRE(parse({"--memory-stress", "10000", "--transient-test", "--inject-input"}, o, err));
+    CHECK(o.injectInput);
+    CHECK(o.memoryStress == 10000);
+    CHECK(o.transientTest);
+    CHECK_FALSE(o.benchmark());
 }
 
 TEST_CASE("launch options: errors") {
@@ -98,6 +110,7 @@ TEST_CASE("bench report: samples, fps and JSON") {
 
     const std::string json = reportToJson(r);
     CHECK(json.find("\"fps\": 125.00") != std::string::npos);
+    CHECK(json.find("\"gpu_allocations\": 0") != std::string::npos);
     CHECK(json.find("Torus \\\"Demo\\\"") != std::string::npos);
     CHECK(json.find("\"gpu_ms\": {\"mean\": 5.0000") != std::string::npos);
     CHECK(json.find("\"wait_ms\": {\"mean\": 1.0000") != std::string::npos);

@@ -62,6 +62,76 @@ void UIPanels::drawPerformancePanel(const FrameStats& stats, const RendererInfo&
     ImGui::End();
 }
 
+namespace {
+
+double mib(u64 bytes) { return static_cast<double>(bytes) / (1 << 20); }
+
+ImVec4 levelColor(MemoryBudget::Level level) {
+    switch (level) {
+    case MemoryBudget::Level::Ok:      return ImVec4(0.55f, 0.85f, 0.55f, 1.0f);
+    case MemoryBudget::Level::Warning: return ImVec4(0.95f, 0.75f, 0.30f, 1.0f);
+    case MemoryBudget::Level::Over:    return ImVec4(0.95f, 0.35f, 0.30f, 1.0f);
+    }
+    return ImVec4(1, 1, 1, 1);
+}
+
+} // namespace
+
+void UIPanels::drawMemoryPanel(const MemoryPanelInfo& info) {
+    ImGui::SetNextWindowPos(ImVec2(350, 10), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(480, 0), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowCollapsed(true, ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("Memory")) {
+        ImGui::Text("%s  working set %.1f GiB  engine budget %.1f GiB", info.tier, mib(info.workingSet) / 1024.0,
+                    mib(info.engineLimit) / 1024.0);
+        ImGui::Text("Device allocated %.1f MiB   GPU allocations %llu", mib(info.deviceAllocated),
+                    static_cast<unsigned long long>(info.gpuAllocations));
+        ImGui::Text("Memory pressure: %s (%u events)", info.pressure, info.pressureEvents);
+
+        if (ImGui::BeginTable("categories", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+            ImGui::TableSetupColumn("Category");
+            ImGui::TableSetupColumn("MiB");
+            ImGui::TableSetupColumn("Count");
+            ImGui::TableSetupColumn("Budget");
+            ImGui::TableHeadersRow();
+            for (u32 c = 0; c < MEMORY_CATEGORY_COUNT; ++c) {
+                const auto& cat = info.categories[c];
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::TextUnformatted(memoryCategoryName(static_cast<MemoryCategory>(c)));
+                ImGui::TableNextColumn();
+                ImGui::TextColored(levelColor(cat.level), "%.2f", mib(cat.bytes));
+                ImGui::TableNextColumn();
+                ImGui::Text("%u", cat.count);
+                ImGui::TableNextColumn();
+                ImGui::ProgressBar(cat.limit ? static_cast<float>(static_cast<double>(cat.bytes) / cat.limit) : 0.0f,
+                                   ImVec2(-1, 0), nullptr);
+            }
+            ImGui::EndTable();
+        }
+
+        ImGui::SeparatorText("Placement heaps");
+        for (const auto& h : info.heaps) {
+            ImGui::Text("%-9s %6.1f / %6.1f MiB  %4u res  frag %.2f", h.streaming ? "streaming" : "static",
+                        mib(h.used), mib(h.size), h.allocations, h.fragmentation);
+        }
+
+        ImGui::SeparatorText("Upload rings");
+        for (const auto& r : info.rings) {
+            ImGui::Text("%-13s %6.1f MiB  in flight %6.2f  peak frame %6.2f  overflows %u", r.name,
+                        mib(r.capacity), mib(r.inFlight), mib(r.peakFrame), r.overflows);
+        }
+
+        ImGui::SeparatorText("Residency sets");
+        for (const auto& r : info.residency) {
+            ImGui::Text("%-9s %4u allocations  %7.1f MiB  %u commits", r.name, r.allocations, mib(r.bytes),
+                        r.commits);
+        }
+    }
+    ImGui::End();
+}
+
 void UIPanels::drawRenderPanel(RenderSettings& settings) {
     ImGui::SetNextWindowPos(ImVec2(10, 380), ImGuiCond_FirstUseEver);
 

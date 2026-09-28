@@ -108,3 +108,111 @@ di riferimento per F0.**
 - Build Debug (`-O0`, che attiva da sola la validazione API): lo Stress Test
   passa da 2,9 a 32,9 ms di CPU per frame (30 fps invece di 239). Per il perf
   log usare sempre Release.
+
+---
+
+## F1 — memoria, heap e residency
+
+**2026-09-28 (sera)** · branch `phase/f1` · stessa macchina · **alimentazione
+di rete** · Release, `--no-vsync --no-ui`, 3×600 frame.
+
+**Attenzione: l'ambiente è cambiato rispetto alla baseline F0.** Nel
+pomeriggio il sistema ha iniziato a limitare la presentazione senza vsync a
+~80 fps (12,5 ms per frame), con CPU/GPU ms più alti a parità di codice
+(probabile riduzione delle frequenze). Il codice di F0 ricompilato e misurato
+subito prima di F1 dà gli stessi numeri: **il confronto valido è quello
+consecutivo qui sotto, non con la tabella della baseline.**
+
+| # | Bench | F0 CPU ms (p99) | F1 CPU ms (p99) | F0 GPU ms (p99) | F1 GPU ms (p99) |
+|---|---|---|---|---|---|
+| 1 | Torus Demo | 0.25 (0.356) | 0.243 (0.351) | 1.141 (1.617) | 1.142 (1.717) |
+| 2 | PBR Material Grid | 0.269 (0.377) | 0.277 (0.377) | 0.816 (1.575) | 0.815 (1.277) |
+| 3 | Stress Test (100K) | 4.362 (4.66) | 4.297 (4.652) | 5.979 (8.311) | 5.585 (8.4) |
+| 4 | Scene Viewer (glTF) | 0.245 (0.347) | 0.247 (0.357) | 0.876 (1.018) | 0.877 (1.139) |
+| 5 | Many Lights (1024) | 0.107 (0.203) | 0.115 (0.238) | 103.454 (164.216) | 102.711 (160.943) |
+| 6 | Cornell Box (GI) | 0.241 (0.356) | 0.244 (0.353) | 0.654 (0.748) | 0.649 (0.723) |
+| 7 | Culling Visualization | 1.17 (1.359) | 1.152 (1.334) | 3.516 (6.057) | 3.553 (6.056) |
+
+Nessuna regressione: le differenze stanno nel rumore tra esecuzioni.
+
+### Criteri di uscita di F1
+
+- **Allocazioni GPU nel frame**: 0 su tutti i 7 bench (1.200 frame misurati;
+  contatore di `GpuMemory`, colonna `gpu_allocations` dei JSON).
+- **Heap CPU**: `malloc_zone_statistics` (tutte le zone) tra inizio e fine
+  della misura: +1.000…+2.100 blocchi (~50–120 KB) **indipendentemente dal
+  numero di frame** (600 → 4.800 frame: stessa crescita), con e senza UI.
+  È una fluttuazione limitata di cache di sistema/driver, non una perdita
+  per frame. L'unica allocazione per frame nota è `MTL4CommitOptions` (un
+  oggetto riusato smette di consegnare il feedback: misurato 0 su 600 frame).
+- **Allocazioni CPU nel frame (strumenti Apple)**. Serve un binario
+  debuggable: le build ora sono firmate ad hoc con `get-task-allow`
+  (`PHOSPHOR_DEBUGGABLE`, predefinito ON); prima `xctrace`/`leaks` non
+  potevano agganciarsi e una traccia Allocations lanciata con `sudo` era
+  vuota (12 KB di dati).
+  - `malloc_history -allByCount` a 20 s e 80 s di Stress Test (Release,
+    ~4.800 frame nel mezzo), differenza per stack: **frame loop
+    (`Engine::frame`) −3 allocazioni vive**, processo intero −165. I ±45
+    tra `beginFrame` e `submitFrame` sono oggetti dei frame in volo.
+  - `leaks --atExit` dopo 1.200 frame: **0 leak**.
+  - Una prima misura con `heap` aveva mostrato +26.548 blocchi in 45 s:
+    erano CoreSVG/CoreUI, le icone del menu Finestra caricate in modo
+    lazy da AppKit dopo `makeKeyAndOrderFront` (costo di sistema una
+    tantum, stack verificati con `malloc_history`), non codice Phosphor.
+  - Traccia Instruments Allocations completa (30 s, 126 MB) registrata
+    senza `sudo`; `xctrace export` non espone la tabella delle
+    allocazioni, quindi si ispeziona aprendo il file in Instruments.
+- **F1.6 stress**: `--memory-stress 10000` e `30000` con validazione API:
+  la memoria del device torna esattamente alla baseline (192,81 MiB) e i
+  contatori per categoria sono ripristinati; picco di 9 heap e 704,81 MiB
+  con heap trattenuti **identici** a 10k e 30k cicli (il pool è limitato dal
+  picco di dati vivi, non dal numero di operazioni).
+- **F1.5 pressione di memoria reale**: con l'app in esecuzione (Stress Test),
+  `sudo memory_pressure -S -l warn|critical|normal` → l'app riceve ogni
+  livello e reagisce tra due frame ("warning" → "back to normal",
+  "critical" → "back to normal"). Trim di 0 MiB perché l'unico heap del bench
+  è in uso; il rilascio effettivo degli heap vuoti è coperto da `--memory-stress`.
+- **Budget** (M5 Max): working set interrogato 107,5 GiB, budget engine
+  80,6 GiB; tier rilevato "T2 Max + T3 Neural". Lo Stress Test usa fino a
+  18 MiB di upload per frame (48,6 dei 64 MiB dell'anello in volo).
+
+### F1 — chiusura definitiva (audit severo dei residui)
+
+**2026-09-28 (notte)** · `phase/f1` · alimentazione di rete · Release,
+`--no-vsync --no-ui`, 3×600 frame. L'ambiente è tornato non limitato
+(come la baseline F0 del mattino), quindi questa tabella è confrontabile con
+quella della baseline.
+
+| # | Bench | Resolution | FPS | Frame ms (p99) | CPU ms (p99) | GPU ms (p99) | Wait ms (p99) |
+|---|---|---|---|---|---|---|---|
+| 1 | Torus Demo | 3200x1800 | 461 | 2.168 (16.191) | 0.098 (0.168) | 0.878 (1.609) | 2.071 (16.065) |
+| 2 | PBR Material Grid | 3200x1800 | 470 | 2.129 (15.394) | 0.113 (0.185) | 0.8 (0.989) | 2.015 (15.18) |
+| 3 | Stress Test (100K) | 3200x1800 | 266 | 3.758 (18.072) | 2.853 (3.119) | 2.181 (3.031) | 0.881 (15.245) |
+| 4 | Scene Viewer (glTF) | 3200x1800 | 478 | 2.094 (14.15) | 0.085 (0.198) | 0.873 (1.327) | 2.008 (13.962) |
+| 5 | Many Lights (1024) | 3200x1800 | 18 | 54.625 (116.693) | 0.102 (0.209) | 101.323 (160.207) | 54.515 (116.515) |
+| 6 | Cornell Box (GI) | 3200x1800 | 478 | 2.09 (16.731) | 0.095 (0.162) | 0.625 (0.777) | 1.993 (16.583) |
+| 7 | Culling Visualization | 3200x1800 | 417 | 2.4 (16.766) | 0.889 (1.161) | 1.235 (2.278) | 1.51 (15.653) |
+
+Rispetto alla baseline F0 (a batteria): nessuna regressione; Stress Test
+CPU 2,85 ms (F0: 2,99), GPU 2,18 ms (F0: 3,04).
+
+Residui trovati dall'audit e chiusi:
+- **F1.1 heap transitorio** (la casella era stata spuntata con l'heap
+  rimandato a F2.2): `TransientHeap` + `--transient-test` → buffer e
+  texture sovrapposti con barriera `ResourceAlias` letti correttamente,
+  sovrapposizione reale della memoria verificata. PASS, validazione a zero.
+- **Dimensioni dei pool dal budget** (erano costanti "per tier in F1.4"):
+  su M5 Max anello frame 128 MiB, staging 256 MiB, pagine heap 128 MiB;
+  16 MiB sulle macchine piccole (test in `test_memory_budget.cpp`).
+- **Heap di riserva purgeable** (previsto dal piano per F1.5): lo heap vuoto
+  tenuto dopo un trim è `Volatile`, torna `NonVolatile` prima del riuso.
+- **Fallimenti intermittenti del visual check**: benchmark e catture
+  reagivano a tastiera/mouse (la finestra prende il focus all'avvio):
+  riprodotto con `--inject-input` (filtro spento → PSNR 9–11 dB), risolto
+  ignorando l'input in modalità benchmark; `visual_check.sh` ora inietta
+  sempre input. 5 visual check consecutivi puliti.
+- **Heap CPU**: +3.200…+3.600 blocchi indipendentemente da 600 o 6.000 frame
+  e dall'input iniettato: fluttuazione limitata, nessuna crescita per frame.
+- Instruments: la traccia Allocations si registra senza `sudo` ma non è
+  esportabile da riga di comando; il criterio è verificato con
+  `malloc_history` (−3 allocazioni vive nel frame loop, vedi sopra).

@@ -14,6 +14,28 @@ an undocumented hardware number as fact: measure it with `bench/`.
 The Vulkan renderer in `legacy/vulkan/` is reference only — never build or
 extend it; port algorithms from it.
 
+## Non-negotiable working rules (set by the project owner)
+
+1. **Severe residue audit before declaring a phase done.** Before saying an
+   `Fxx` or `OPT-xx` phase is finished, re-read every task line of that phase
+   in `docs/ROADMAP.md` literally, the approved plan, the exit criteria and
+   every "later"/"arrives with Fx" note or TODO left in code and docs, and
+   check each against evidence (tests, validation runs, measurements).
+   Anything partial is reported as partial and either completed or left
+   explicitly unticked. Intermittent failures are never "passes": reproduce
+   and explain them first.
+2. **Autonomy: do not hand actions to the owner.** Do the work yourself,
+   including verification. When a step seems to need the owner's
+   interaction or `sudo`, find another non-privileged method (e.g. sign dev
+   builds with `get-task-allow` so profiling tools attach without root, use
+   in-process measurements, simulate events). Never try to bypass the
+   harness permission system; if no alternative exists, say so explicitly.
+3. **Chat in Italian.** Code, comments and commit messages stay in English.
+4. **Detailed handoff at the end of every phase**: what was done (per task
+   ID), how it was verified (commands and numbers), bugs found, deviations
+   from the plan, what is still open and why, risks, and the exact next
+   steps. Put it in the PR description and in the final chat message.
+
 ## Build / verify
 
 - macOS (real target): `cmake -S . -B build -G Ninja && cmake --build build && ./build/phosphor`
@@ -29,9 +51,11 @@ extend it; port algorithms from it.
   catch runtime errors, and **MSL shaders are only compiled on macOS** (CI job
   `app-macos`), so be extra careful with `.metal` edits and say so when they are
   unverified.
-- Visual/validation check on macOS: `MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1
-  MTL_DEBUG_LAYER_WARNING_MODE=nslog ./build/phosphor --bench N --frames 60
-  --capture out.png` (exits by itself; the PNG can be inspected).
+- Visual/validation check on macOS: `tools/visual_check.sh build build/reference`
+  (all benches under API + shader validation, pixel diff against references
+  taken with `--update` before a change). Bench switching:
+  `./build/phosphor --frames 300 --warmup 0 --switch-every 20` with the same
+  environment variables.
 - Before calling a Metal API, check its exact signature in the fetched
   metal-cpp headers (`build/linux/_deps/metal_cpp-src/Metal/MTL4*.hpp`); Metal 4
   names differ from Metal 3 (e.g. no `setVertexBytes`, draws take GPU addresses,
@@ -43,10 +67,24 @@ extend it; port algorithms from it.
   free of Metal/Apple headers so it builds and is unit-tested on Linux.
 - GPU struct layouts live once in `src/renderer/gpu_types.h`, shared with MSL:
   scalars only (MSL `float3` is 16-byte aligned), keep the `static_assert`s.
-- Metal 4 does not retain or make resources resident: add long-lived allocations
-  with `MetalContext::makeResident`, release in-flight objects with
-  `deferRelease`, and insert explicit stage-to-stage barriers (no automatic
-  hazard tracking).
+- Metal 4 does not retain or make resources resident: create every GPU buffer
+  or texture through `context.memory()` (`GpuMemory`: labels, residency,
+  per-category accounting, deferred release), write per-frame data into
+  `context.frameUploads()` and loading-time data through `stagingAllocate` /
+  `enqueueUpload` / `flushUploads`. Never call `device->newBuffer/newTexture`
+  elsewhere. Frame-lifetime intermediates go in `TransientHeap` at offsets
+  chosen by the render graph (aliasing: first use after another resource
+  needs a barrier with `VisibilityOptionResourceAlias`). Insert explicit
+  stage-to-stage barriers (no hazard tracking).
+- Benchmark mode (`--frames`) ignores keyboard/mouse input: the window takes
+  focus at launch; `tools/visual_check.sh` injects input to prove it.
+- Benchmarks report `GPU allocations` during the measured frames: it must be
+  0 (rule O7).
+- Builds are signed with `get-task-allow` (`PHOSPHOR_DEBUGGABLE`), so the
+  agent can profile without root: `leaks --atExit -- ./build/release/phosphor
+  ...`, `heap <pid>`, `MallocStackLogging=lite` + `malloc_history <pid>
+  -allByCount` (diff two snapshots per stack), `xcrun xctrace record
+  --template Allocations --launch -- ...`.
 - Frame pacing: one MTL4 command buffer per frame (scene + ImGui overlay in
   the same render pass) and one `MTLSharedEvent`; value `n+1` = frame n done.
   `makeResident` allocations are committed right before each commit, so they

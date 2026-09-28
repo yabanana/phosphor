@@ -45,6 +45,11 @@ struct BenchReport {
     bool          ui     = true;
     u32           frames = 0;
     float         fps    = 0.0f; // 1000 / mean frame time
+    u64           gpuAllocations = 0; // GPU buffers/textures created while measuring (O7: must be 0)
+    // CPU heap growth over the measured frames (all malloc zones): live
+    // blocks and bytes at the end minus at the start.  ~0 = flat (O7).
+    i64           cpuHeapBlocksDelta = 0;
+    i64           cpuHeapBytesDelta  = 0;
     TimingSummary frameMs;
     TimingSummary cpuMs;
     TimingSummary gpuMs;

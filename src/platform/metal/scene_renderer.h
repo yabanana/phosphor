@@ -4,7 +4,6 @@
 #include "platform/metal/metal_context.h"
 #include "renderer/gpu_types.h"
 
-#include <array>
 
 namespace phosphor {
 
@@ -16,8 +15,8 @@ struct FrameScene;
 //
 // Static geometry lives in private buffers rebuilt when the GpuScene's
 // geometry version changes.  Per-frame data (constants, instances,
-// materials, lights) is written into a shared buffer owned by the frame slot,
-// so the CPU never touches memory the GPU may still be reading.  Depth is a
+// materials, lights) is written into the context's frame upload ring, so the
+// CPU never touches memory the GPU may still be reading.  Depth is a
 // memoryless attachment: on a TBDR GPU it never leaves tile memory.
 //
 // render() leaves the pass open so the overlay (ImGui) is drawn into the same
@@ -45,11 +44,6 @@ public:
     [[nodiscard]] static MTL::PixelFormat depthFormat() { return MTL::PixelFormatDepth32Float; }
 
 private:
-    struct UploadBuffer {
-        MTL::Buffer* buffer = nullptr;
-        size_t       capacity = 0;
-    };
-
     void buildPipeline();
     void ensureDepthTarget(u32 width, u32 height);
     MTL::Buffer* createPrivateBuffer(const void* data, size_t size, const char* label);
@@ -60,13 +54,14 @@ private:
     MTL::RenderPipelineState* pipeline_   = nullptr;
     MTL::DepthStencilState*   depthState_ = nullptr;
     MTL4::ArgumentTable*      arguments_  = nullptr;
+    MTL4::RenderPassDescriptor* passDesc_ = nullptr;
+    NS::String*               passLabel_  = nullptr;
     MTL::Texture*             depth_      = nullptr;
 
     MTL::Buffer* vertexBuffer_ = nullptr;
     MTL::Buffer* indexBuffer_  = nullptr;
     u64          geometryVersion_ = ~u64{0};
 
-    std::array<UploadBuffer, METAL_FRAMES_IN_FLIGHT> uploads_{};
     u32 lastTriangles_ = 0;
 };
 

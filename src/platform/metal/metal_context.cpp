@@ -1,4 +1,6 @@
 #include "platform/metal/metal_context.h"
+#include "platform/metal/gpu_memory.h"
+#include "platform/metal/residency_manager.h"
 #include "core/log.h"
 
 #include <chrono>
@@ -14,6 +16,7 @@ NS::String* str(const char* s) {
 
 constexpr u64 kWaitTimeoutMs = 5000;
 
+
 u64 frameDoneValue(u64 frameIndex) { return frameIndex + 1; }
 
 } // namespace
@@ -27,8 +30,13 @@ MetalContext::MetalContext(CA::MetalLayer* layer, const std::string& libraryPath
     if (!device_->supportsFamily(MTL::GPUFamilyApple7) || !device_->supportsFamily(MTL::GPUFamilyMetal4)) {
         throw std::runtime_error("Phosphor requires a Metal 4 capable Apple GPU (Apple7+, macOS 26+)");
     }
-    apple9_ = device_->supportsFamily(MTL::GPUFamilyApple9);
-    LOG_INFO("Metal device: %s (Apple9+: %s)", gpuName(), apple9_ ? "yes" : "no");
+    apple9_  = device_->supportsFamily(MTL::GPUFamilyApple9);
+    apple10_ = device_->supportsFamily(MTL::GPUFamilyApple10);
+    budget_  = MemoryBudget(device_->recommendedMaxWorkingSetSize(), detectTier(gpuName(), apple10_));
+    LOG_INFO("Metal device: %s (Apple9+: %s, Apple10+: %s), tier %s, working set %.1f GiB, engine budget %.1f GiB",
+             gpuName(), apple9_ ? "yes" : "no", apple10_ ? "yes" : "no", tierName(budget_.tier()),
+             static_cast<double>(budget_.workingSet()) / (1ull << 30),
+             static_cast<double>(budget_.engineLimit()) / (1ull << 30));
     if (!apple9_) {
         LOG_WARN("Below the Apple9 (M3) baseline: ray tracing and mesh-shader ICBs will be unavailable");
     }
@@ -57,19 +65,12 @@ MetalContext::MetalContext(CA::MetalLayer* layer, const std::string& libraryPath
         throw std::runtime_error(std::string("Failed to load shader library ") + libraryPath + ": " + reason);
     }
 
-    MTL::ResidencySetDescriptor* rsDesc = MTL::ResidencySetDescriptor::alloc()->init();
-    rsDesc->setLabel(str("Phosphor static residency"));
-    rsDesc->setInitialCapacity(256);
-    residency_ = device_->newResidencySet(rsDesc, &error);
-    rsDesc->release();
-    if (!residency_) {
-        throw std::runtime_error("Failed to create residency set");
-    }
-    queue_->addResidencySet(residency_);
+    residency_ = std::make_unique<ResidencyManager>(device_, queue_);
 
     for (u32 i = 0; i < METAL_FRAMES_IN_FLIGHT; ++i) {
         allocators_[i]     = device_->newCommandAllocator();
         commandBuffers_[i] = device_->newCommandBuffer();
+        commandBuffers_[i]->setLabel(str("Frame"));
     }
     uploadAllocator_     = device_->newCommandAllocator();
     uploadCommandBuffer_ = device_->newCommandBuffer();
@@ -83,14 +84,25 @@ MetalContext::MetalContext(CA::MetalLayer* layer, const std::string& libraryPath
     layer_->setMaximumDrawableCount(3);
     // Drawables must be resident for the MTL4 queue; the layer owns this set.
     queue_->addResidencySet(layer_->residencySet());
+
+    memory_       = std::make_unique<GpuMemory>(*this);
+    // Ring sizes come from the budget; the frame ring still grows after an
+    // overflow and the staging ring flushes when full.
+    frameUploads_ = std::make_unique<UploadRing>(*memory_, budget_.frameUploadRingSize(), METAL_FRAMES_IN_FLIGHT,
+                                                 "Frame uploads");
+    staging_      = std::make_unique<UploadRing>(*memory_, budget_.stagingRingSize(), 1, "Staging");
+    LOG_INFO("Memory pools: frame ring %llu MiB, staging %llu MiB, heap pages %llu MiB",
+             static_cast<unsigned long long>(budget_.frameUploadRingSize() >> 20),
+             static_cast<unsigned long long>(budget_.stagingRingSize() >> 20),
+             static_cast<unsigned long long>(budget_.heapPageSize() >> 20));
 }
 
 MetalContext::~MetalContext() {
     waitIdle();
-    for (auto& list : pendingReleases_) {
-        for (NS::Object* obj : list) obj->release();
-        list.clear();
-    }
+    staging_.reset();
+    frameUploads_.reset();
+    releaseCompleted(~u64{0});
+    memory_.reset();
     for (u32 i = 0; i < METAL_FRAMES_IN_FLIGHT; ++i) {
         commandBuffers_[i]->release();
         allocators_[i]->release();
@@ -99,7 +111,7 @@ MetalContext::~MetalContext() {
     uploadAllocator_->release();
     uploadEvent_->release();
     frameEvent_->release();
-    residency_->release();
+    residency_.reset();
     library_->release();
     compiler_->release();
     queue_->release();
@@ -110,28 +122,47 @@ const char* MetalContext::gpuName() const {
     return device_->name()->utf8String();
 }
 
-void MetalContext::makeResident(const MTL::Allocation* allocation) {
-    if (!allocation) return;
-    residency_->addAllocation(allocation);
-    residencyDirty_ = true;
+void MetalContext::makeResident(const MTL::Allocation* allocation, ResidencyClass cls) {
+    residency_->add(allocation, cls);
 }
 
 void MetalContext::evict(const MTL::Allocation* allocation) {
     if (!allocation) return;
-    residency_->removeAllocation(allocation);
-    residencyDirty_ = true;
+    residency_->remove(allocation);
 }
 
 void MetalContext::deferRelease(NS::Object* object) {
     if (!object) return;
-    pendingReleases_[frameIndex_ % METAL_FRAMES_IN_FLIGHT].push_back(object);
+    pendingReleases_.push_back({object, nullptr, frameIndex_});
+}
+
+void MetalContext::deferRelease(MTL::Resource* resource, bool evict) {
+    if (!resource) return;
+    pendingReleases_.push_back({resource, evict ? resource : nullptr, frameIndex_});
+}
+
+void MetalContext::deferRelease(NS::Object* object, const MTL::Allocation* evict) {
+    if (!object) return;
+    pendingReleases_.push_back({object, evict, frameIndex_});
+}
+
+void MetalContext::releaseCompleted(u64 completedFrame) {
+    size_t kept = 0;
+    for (size_t i = 0; i < pendingReleases_.size(); ++i) {
+        const PendingRelease& p = pendingReleases_[i];
+        if (completedFrame != ~u64{0} && p.afterFrame > completedFrame) {
+            pendingReleases_[kept++] = p;
+            continue;
+        }
+        if (p.evict) evict(p.evict);
+        p.object->release();
+    }
+    pendingReleases_.resize(kept);
+    if (memory_) memory_->releaseCompleted(completedFrame);
 }
 
 void MetalContext::flushResidency() {
-    if (residencyDirty_) {
-        residency_->commit();
-        residencyDirty_ = false;
-    }
+    residency_->commit();
 }
 
 void MetalContext::resize(u32 width, u32 height) {
@@ -155,21 +186,21 @@ bool MetalContext::beginFrame(Frame& frame) {
 
     if (index >= METAL_FRAMES_IN_FLIGHT) {
         waitForValue(frameDoneValue(index - METAL_FRAMES_IN_FLIGHT));
+        // Frames up to index - N have finished: recycle what they could use.
+        releaseCompleted(index - METAL_FRAMES_IN_FLIGHT);
     }
-
-    // The frame that last used this slot has finished: recycle its memory.
-    for (NS::Object* obj : pendingReleases_[slot]) obj->release();
-    pendingReleases_[slot].clear();
 
     CA::MetalDrawable* drawable = layer_->nextDrawable();
     if (!drawable) {
+        LOG_WARN("No drawable available for frame %llu (window hidden or occluded?)",
+                 static_cast<unsigned long long>(index));
         return false;
     }
+    frameUploads_->beginFrame(index);
 
     allocators_[slot]->reset();
     MTL4::CommandBuffer* cmd = commandBuffers_[slot];
     cmd->beginCommandBuffer(allocators_[slot]);
-    cmd->setLabel(str("Scene"));
 
     frame.commandBuffer = cmd;
     frame.drawable      = drawable;
@@ -180,6 +211,7 @@ bool MetalContext::beginFrame(Frame& frame) {
 
 void MetalContext::submitFrame(Frame& frame) {
     frame.commandBuffer->endCommandBuffer();
+    frameUploads_->endFrame();
     // Allocations registered while recording this frame (grown upload
     // buffers, capture readback) must be resident before the commit.
     flushResidency();
@@ -188,25 +220,32 @@ void MetalContext::submitFrame(Frame& frame) {
     // signalled after the work that renders to it, before present().
     queue_->wait(frame.drawable);
     const MTL4::CommandBuffer* buffers[] = {frame.commandBuffer};
+    // A fresh options object per commit: a reused MTL4CommitOptions stops
+    // delivering feedback after its first commit (measured: 0 of 600 frames).
+    // This small per-frame allocation is the one accepted exception to O7.
     MTL4::CommitOptions* options = MTL4::CommitOptions::alloc()->init();
-    const u64 index = frame.index;
-    options->addFeedbackHandler([this, index](MTL4::CommitFeedback* feedback) {
-        if (feedback->error()) return;
-        const float ms = static_cast<float>((feedback->GPUEndTime() - feedback->GPUStartTime()) * 1000.0);
-        lastGpuMs_.store(ms, std::memory_order_relaxed);
-        std::lock_guard lock(gpuTimesMutex_);
-        if (index >= gpuTimesFirst_ && index - gpuTimesFirst_ < gpuTimes_.size()) {
-            gpuTimes_[index - gpuTimesFirst_] = ms;
-            ++gpuTimesReceived_;
-            gpuTimesCv_.notify_all();
-        }
-    });
+    options->addFeedbackHandler([this](MTL4::CommitFeedback* feedback) { onFrameFeedback(feedback); });
     queue_->commit(buffers, 1, options);
     options->release();
     queue_->signalDrawable(frame.drawable);
     frame.drawable->present();
     queue_->signalEvent(frameEvent_, frameDoneValue(frame.index));
     ++frameIndex_;
+}
+
+void MetalContext::onFrameFeedback(MTL4::CommitFeedback* feedback) {
+    // Only frame commits register this handler, and feedback for one queue
+    // arrives in commit order, so the n-th feedback belongs to frame n.
+    const u64 index = feedbackCount_.fetch_add(1, std::memory_order_relaxed);
+    if (feedback->error()) return;
+    const float ms = static_cast<float>((feedback->GPUEndTime() - feedback->GPUStartTime()) * 1000.0);
+    lastGpuMs_.store(ms, std::memory_order_relaxed);
+    std::lock_guard lock(gpuTimesMutex_);
+    if (index >= gpuTimesFirst_ && index - gpuTimesFirst_ < gpuTimes_.size()) {
+        gpuTimes_[index - gpuTimesFirst_] = ms;
+        ++gpuTimesReceived_;
+        gpuTimesCv_.notify_all();
+    }
 }
 
 void MetalContext::beginGpuTimeCapture(u32 frames) {
@@ -229,6 +268,29 @@ std::vector<float> MetalContext::endGpuTimeCapture() {
     return times;
 }
 
+UploadRing::Slice MetalContext::stagingAllocate(u64 size, u64 alignment) {
+    if (UploadRing::Slice slice = staging_->tryAllocate(size, alignment)) return slice;
+    flushUploads(); // frees the whole staging ring
+    if (UploadRing::Slice slice = staging_->tryAllocate(size, alignment)) return slice;
+    return staging_->allocate(size, alignment); // larger than the ring: one-off buffer
+}
+
+void MetalContext::enqueueUpload(std::function<void(MTL4::ComputeCommandEncoder*)> record) {
+    queuedUploads_.push_back(std::move(record));
+}
+
+void MetalContext::flushUploads() {
+    if (queuedUploads_.empty()) {
+        staging_->reset();
+        return;
+    }
+    submitAndWait([this](MTL4::ComputeCommandEncoder* enc) {
+        for (const auto& record : queuedUploads_) record(enc);
+    });
+    queuedUploads_.clear();
+    staging_->reset();
+}
+
 void MetalContext::submitAndWait(const std::function<void(MTL4::ComputeCommandEncoder*)>& record) {
     flushResidency();
 
@@ -247,6 +309,12 @@ void MetalContext::submitAndWait(const std::function<void(MTL4::ComputeCommandEn
     if (!uploadEvent_->waitUntilSignaledValue(uploadValue_, kWaitTimeoutMs)) {
         LOG_ERROR("GPU timeout waiting for upload");
     }
+}
+
+void MetalContext::collectGarbage() {
+    waitIdle();
+    releaseCompleted(~u64{0});
+    flushResidency();
 }
 
 void MetalContext::waitIdle() {

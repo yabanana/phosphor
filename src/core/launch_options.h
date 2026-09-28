@@ -11,7 +11,8 @@ namespace phosphor {
 // LaunchOptions -- command-line switches of the app.
 //
 //   --bench N          start on test bench N (1-based, like the hotkeys)
-//   --frames N         benchmark mode: measure N frames, print a summary, exit
+//   --frames N         benchmark mode: measure N frames, print a summary, exit;
+//                      keyboard and mouse input is ignored (reproducible runs)
 //   --warmup N         frames skipped before measuring (default 120)
 //   --no-vsync         disable display sync (uncapped frame rate)
 //   --no-ui            do not draw the ImGui overlay
@@ -19,6 +20,13 @@ namespace phosphor {
 //                      of real time (deterministic captures)
 //   --switch-every N   switch to the next test bench every N frames, through
 //                      the same path as the 1-7 hotkeys (switching tests)
+//   --simulate-pressure  inject a memory-pressure warning at frame 10 and a
+//                      critical notification at frame 20 (F1.5 tests)
+//   --memory-stress N  create/destroy N GPU resources, check that device
+//                      memory does not grow, exit (F1.6); exit code 1 on failure
+//   --transient-test   aliasing self-test of the transient heap, exit (F1.1)
+//   --inject-input     push synthetic key/mouse events every frame (tests
+//                      that benchmark mode is immune to user input)
 //   --capture FILE     write a frame to FILE (PNG): the last measured frame in
 //                      benchmark mode, otherwise the first frame
 //   --report FILE      write the benchmark summary to FILE (JSON)
@@ -35,6 +43,10 @@ struct LaunchOptions {
     bool        ui     = true;
     bool        fixedTimestep = false;
     u32         switchEvery   = 0; // 0 = never
+    bool        simulatePressure = false;
+    u32         memoryStress  = 0; // cycles; 0 = off
+    bool        transientTest = false;
+    bool        injectInput   = false; // test: synthetic keys/mouse every frame
     std::string capturePath;
     std::string reportPath;
 

@@ -82,6 +82,12 @@ validation.
 | `--no-ui` | Hide the ImGui overlay |
 | `--capture FILE` | Write a PNG of the last measured frame (first frame when interactive) |
 | `--report FILE` | Write the benchmark summary as JSON |
+| `--fixed-timestep` | Simulate 1/60 s per frame (deterministic captures) |
+| `--switch-every N` | Cycle to the next bench every N frames (same path as the 1–7 keys) |
+| `--memory-stress N` | Create/destroy N GPU resources and check memory returns to baseline (exit 1 on failure) |
+| `--simulate-pressure` | Inject memory-pressure warning/critical events |
+| `--transient-test` | Aliasing self-test of the transient heap (exit 1 on failure) |
+| `--inject-input` | Push synthetic key/mouse events every frame (benchmarks must ignore them) |
 
 Baseline numbers live in [`docs/perf-log.md`](docs/perf-log.md); measure them
 on a Release build without validation:
@@ -90,6 +96,13 @@ on a Release build without validation:
 cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build/release
 tools/bench_all.sh build/release   # all benches, Markdown rows for the perf log
+```
+
+Visual regression and validation check of every bench (capture references
+with `--update` before a change):
+
+```bash
+tools/visual_check.sh build build/reference [--update]
 ```
 
 ### Building on Linux (no GPU)

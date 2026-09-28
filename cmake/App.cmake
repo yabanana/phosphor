@@ -80,10 +80,16 @@ add_executable(phosphor
     src/imgui/imgui_renderer.cpp
     src/imgui/ui_panels.cpp
     src/platform/metal/frame_capture.cpp
+    src/platform/metal/gpu_memory.cpp
     src/platform/metal/metal_context.cpp
     src/platform/metal/metal_impl.cpp
+    src/platform/metal/memory_pressure.cpp
+    src/platform/metal/memory_stress.cpp
     src/platform/metal/metal_texture_manager.cpp
+    src/platform/metal/residency_manager.cpp
     src/platform/metal/scene_renderer.cpp
+    src/platform/metal/transient_heap.cpp
+    src/platform/metal/upload_ring.cpp
 )
 target_link_libraries(phosphor PRIVATE phosphor_core imgui metal_cpp)
 target_compile_options(phosphor PRIVATE ${PHOSPHOR_WARNINGS})
@@ -91,6 +97,19 @@ add_dependencies(phosphor phosphor_shaders)
 if(PHOSPHOR_METAL_VALIDATION)
     # main() enables the Metal API validation layer in Debug builds.
     target_compile_definitions(phosphor PRIVATE $<$<CONFIG:Debug>:PHOSPHOR_METAL_VALIDATION=1>)
+endif()
+
+# Development builds are signed ad hoc with get-task-allow so profiling tools
+# (Instruments, leaks, heap, malloc_history) can attach without root.  Turn
+# off for anything distributed.
+option(PHOSPHOR_DEBUGGABLE "Sign the app with the get-task-allow entitlement" ON)
+if(PHOSPHOR_DEBUGGABLE)
+    add_custom_command(TARGET phosphor POST_BUILD
+        COMMAND codesign --force --sign - --entitlements ${CMAKE_SOURCE_DIR}/cmake/debuggable.entitlements
+                $<TARGET_FILE:phosphor>
+        COMMENT "Signing phosphor with get-task-allow (profiling)"
+        VERBATIM
+    )
 endif()
 
 # Test assets are looked up relative to the working directory.

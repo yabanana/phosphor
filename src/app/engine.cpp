@@ -6,6 +6,9 @@
 #include "diagnostics/frame_stats.h"
 #include "imgui/imgui_renderer.h"
 #include "platform/metal/frame_capture.h"
+#include "platform/metal/gpu_memory.h"
+#include "platform/metal/memory_pressure.h"
+#include "platform/metal/memory_stress.h"
 #include "platform/metal/metal_context.h"
 #include "platform/metal/metal_texture_manager.h"
 #include "platform/metal/scene_renderer.h"
@@ -14,6 +17,7 @@
 #include "scene/ecs.h"
 
 #include <SDL3/SDL.h>
+#include <malloc/malloc.h>
 #include <SDL3/SDL_metal.h>
 
 #include <imgui.h>
@@ -39,6 +43,14 @@ std::string shaderLibraryPath() {
 }
 
 using Clock = std::chrono::steady_clock;
+
+// Live blocks and bytes over every malloc zone (CPU heap flatness, O7).
+void heapUsage(u64& blocks, u64& bytes) {
+    malloc_statistics_t stats{};
+    malloc_zone_statistics(nullptr, &stats);
+    blocks = stats.blocks_in_use;
+    bytes  = stats.size_in_use;
+}
 
 float toMs(Clock::duration d) {
     return std::chrono::duration<float, std::milli>(d).count();
@@ -88,6 +100,7 @@ Engine::Engine(int argc, char* argv[]) {
     ImGui::StyleColorsDark();
     ImGui_ImplSDL3_InitForMetal(window_);
     imguiRenderer_ = std::make_unique<ImGuiRenderer>(*context_);
+    pressure_      = std::make_unique<MemoryPressureMonitor>();
     if (!options_.capturePath.empty()) {
         capture_ = std::make_unique<FrameCapture>(*context_);
     }
@@ -103,6 +116,7 @@ Engine::~Engine() {
         activeBench_.reset();
     }
 
+    pressure_.reset();
     capture_.reset();
     imguiRenderer_.reset();
     ImGui_ImplSDL3_Shutdown();
@@ -118,11 +132,39 @@ Engine::~Engine() {
 }
 
 void Engine::run() {
+    if (options_.transientTest) {
+        const TransientAliasResult r = runTransientAliasTest(*context_);
+        std::printf("TRANSIENT heap %.2f MiB, textures at +%llu | aliased buffers %s | aliased textures %s | "
+                    "memory shared %s | %s\n",
+                    static_cast<double>(r.heapSize) / (1 << 20), static_cast<unsigned long long>(r.textureOffset),
+                    r.buffersOk ? "ok" : "WRONG", r.texturesOk ? "ok" : "WRONG", r.memoryShared ? "yes" : "NO",
+                    r.passed ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        exitCode_ = r.passed ? 0 : 1;
+        return;
+    }
+    if (options_.memoryStress > 0) {
+        const u32 warmup = std::min(1000u, options_.memoryStress / 2);
+        const MemoryStressResult r = runMemoryStress(*context_, options_.memoryStress, warmup);
+        const auto mib = [](u64 b) { return static_cast<double>(b) / (1 << 20); };
+        std::printf("STRESS %u cycles | device MiB: baseline %.2f, after warm-up %.2f, final %.2f, "
+                    "after trim %.2f | peak heaps %u | counts %s | %s\n",
+                    options_.memoryStress, mib(r.baselineBytes), mib(r.warmBytes), mib(r.finalBytes),
+                    mib(r.trimmedBytes), r.heapsPeak, r.countsRestored ? "restored" : "LEAKED",
+                    r.passed ? "PASS (back to baseline)" : "FAIL (memory not returned)");
+        std::fflush(stdout);
+        exitCode_ = r.passed ? 0 : 1;
+        return;
+    }
     LOG_INFO("Entering main loop");
     if (options_.benchmark()) {
         LOG_INFO("Benchmark: %u warm-up + %u measured frames, vsync %s, UI %s", options_.warmup, options_.frames,
                  options_.vsync ? "on" : "off", options_.ui ? "on" : "off");
-        if (options_.warmup == 0) context_->beginGpuTimeCapture(options_.frames);
+        if (options_.warmup == 0) {
+            context_->beginGpuTimeCapture(options_.frames);
+            allocationsAtStart_ = context_->memory().allocationCount();
+            heapUsage(heapBlocksAtStart_, heapBytesAtStart_);
+        }
     }
     while (running_) {
         const Clock::time_point start = Clock::now();
@@ -133,12 +175,18 @@ void Engine::run() {
             switchTestBench(*pendingBench_);
             pendingBench_.reset();
         }
+        handleMemoryPressure();
 
         timer_->tick();
         // Fixed step: deterministic animation for captures; timings stay real.
         const float simDt = options_.fixedTimestep ? 1.0f / 60.0f : timer_->getDeltaTime();
         const bool presented = frame(simDt);
         input_->resetFrameState();
+        if (presented && options_.simulatePressure) {
+            ++simulatedFrames_;
+            if (simulatedFrames_ == 10) pressure_->simulate(MemoryPressureMonitor::Level::Warning);
+            if (simulatedFrames_ == 20) pressure_->simulate(MemoryPressureMonitor::Level::Critical);
+        }
         if (presented && options_.switchEvery > 0 && ++framesOnBench_ >= options_.switchEvery && !pendingBench_) {
             // Same path as the 1-7 hotkeys.
             pendingBench_ = static_cast<TestBenchType>((static_cast<int>(currentBench_) + 1) % testBenchCount());
@@ -162,6 +210,8 @@ void Engine::recordBenchmarkFrame(float dt, float cpuMs, float waitMs) {
         // GPU times are recorded from the next submitted frame on.
         context_->beginGpuTimeCapture(options_.frames);
         samples_.reserve(options_.frames);
+        allocationsAtStart_ = context_->memory().allocationCount();
+        heapUsage(heapBlocksAtStart_, heapBytesAtStart_);
     } else if (presentedFrames_ > options_.warmup) {
         samples_.push_back({dt * 1000.0f, cpuMs, 0.0f, waitMs});
         if (samples_.size() == options_.frames) running_ = false;
@@ -169,6 +219,9 @@ void Engine::recordBenchmarkFrame(float dt, float cpuMs, float waitMs) {
 }
 
 void Engine::finishBenchmark() {
+    // Sample the CPU heap before the report's own allocations.
+    u64 heapBlocks = 0, heapBytes = 0;
+    heapUsage(heapBlocks, heapBytes);
     const std::vector<float> gpu = context_->endGpuTimeCapture();
     for (size_t i = 0; i < samples_.size() && i < gpu.size(); ++i) {
         samples_[i].gpuMs = gpu[i];
@@ -181,8 +234,14 @@ void Engine::finishBenchmark() {
     report.height = context_->height();
     report.vsync  = settings_.vsync;
     report.ui     = options_.ui;
+    report.gpuAllocations = context_->memory().allocationCount() - allocationsAtStart_;
+    report.cpuHeapBlocksDelta = static_cast<i64>(heapBlocks) - static_cast<i64>(heapBlocksAtStart_);
+    report.cpuHeapBytesDelta  = static_cast<i64>(heapBytes) - static_cast<i64>(heapBytesAtStart_);
     summarizeSamples(samples_, report);
 
+    if (ignoredInputEvents_ > 0) {
+        LOG_INFO("Benchmark: ignored %u keyboard/mouse events", ignoredInputEvents_);
+    }
     // stdout, not the log: scripts collect this line.
     std::printf("BENCH %s\n", formatReportLine(report).c_str());
     std::fflush(stdout);
@@ -193,10 +252,45 @@ void Engine::finishBenchmark() {
     }
 }
 
+void Engine::injectSyntheticInput() {
+    // As if someone typed W/D and dragged the mouse over the focused window.
+    for (const SDL_Scancode key : {SDL_SCANCODE_W, SDL_SCANCODE_D}) {
+        SDL_Event e{};
+        e.type = SDL_EVENT_KEY_DOWN;
+        e.key.windowID = SDL_GetWindowID(window_);
+        e.key.scancode = key;
+        e.key.down = true;
+        SDL_PushEvent(&e);
+    }
+    SDL_Event motion{};
+    motion.type = SDL_EVENT_MOUSE_MOTION;
+    motion.motion.windowID = SDL_GetWindowID(window_);
+    motion.motion.state = SDL_BUTTON_LMASK | SDL_BUTTON_RMASK;
+    motion.motion.xrel = 12.0f;
+    motion.motion.yrel = 4.0f;
+    SDL_PushEvent(&motion);
+    SDL_Event wheel{};
+    wheel.type = SDL_EVENT_MOUSE_WHEEL;
+    wheel.wheel.windowID = SDL_GetWindowID(window_);
+    wheel.wheel.y = 1.0f;
+    SDL_PushEvent(&wheel);
+}
+
 void Engine::processEvents() {
+    if (options_.injectInput) injectSyntheticInput();
     const ImGuiIO& io = ImGui::GetIO();
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+        const bool keyboardEvent = event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP ||
+                                   event.type == SDL_EVENT_TEXT_INPUT;
+        const bool mouseEvent = event.type == SDL_EVENT_MOUSE_MOTION || event.type == SDL_EVENT_MOUSE_WHEEL ||
+                                event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP;
+        // Benchmarks and captures must not depend on whoever types or moves
+        // the mouse while the window has focus (it takes focus at launch).
+        if (options_.benchmark() && (keyboardEvent || mouseEvent)) {
+            ++ignoredInputEvents_;
+            continue;
+        }
         ImGui_ImplSDL3_ProcessEvent(&event);
 
         switch (event.type) {
@@ -211,9 +305,6 @@ void Engine::processEvents() {
             break;
         }
 
-        const bool keyboardEvent = event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP;
-        const bool mouseEvent = event.type == SDL_EVENT_MOUSE_MOTION || event.type == SDL_EVENT_MOUSE_WHEEL ||
-                                event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP;
         if ((keyboardEvent && io.WantCaptureKeyboard) || (mouseEvent && io.WantCaptureMouse)) {
             continue;
         }
@@ -258,8 +349,91 @@ void Engine::switchTestBench(TestBenchType type) {
 
     textures_->flushUploads();
     renderer_->syncGeometry(*gpuScene_);
+    // The previous bench's resources are unused now: free their heap ranges
+    // and give back heaps that became empty.
+    context_->collectGarbage();
+    context_->memory().trimEmptyHeaps();
+    context_->commitResidency();
+    logMemory();
     aimCamera(activeBench_->getDefaultCamera());
     pool->release();
+}
+
+void Engine::logMemory() const {
+    const GpuMemory& memory = context_->memory();
+    u64 heapBytes = 0, heapUsed = 0;
+    float fragmentation = 0.0f;
+    std::vector<GpuMemory::HeapStats> heaps;
+    memory.heapStats(heaps);
+    for (const auto& h : heaps) {
+        heapBytes += h.size;
+        heapUsed += h.tlsf.usedBytes;
+        fragmentation = std::max(fragmentation, h.tlsf.fragmentation());
+    }
+    LOG_INFO("GPU memory: %.1f MiB in use; %zu placement heaps, %.1f of %.1f MiB used, max fragmentation %.2f",
+             static_cast<double>(memory.totalBytes()) / (1 << 20), heaps.size(),
+             static_cast<double>(heapUsed) / (1 << 20), static_cast<double>(heapBytes) / (1 << 20),
+             fragmentation);
+    for (const ResidencyClass cls : {ResidencyClass::Static, ResidencyClass::Streaming}) {
+        const ResidencyManager::Stats r = context_->residency().stats(cls);
+        LOG_INFO("Residency %s: %u allocations, %.1f MiB, %u commits",
+                 cls == ResidencyClass::Static ? "static" : "streaming", r.allocations,
+                 static_cast<double>(r.bytes) / (1 << 20), r.commits);
+    }
+}
+
+void Engine::handleMemoryPressure() {
+    MemoryPressureMonitor::Level level;
+    if (!pressure_->poll(level)) return;
+    if (level == MemoryPressureMonitor::Level::Normal) {
+        LOG_INFO("Memory pressure back to normal");
+        return;
+    }
+    // Between frames: nothing recorded references pending releases.  A full
+    // GPU wait is acceptable here; the system is short of memory.
+    const u64 before = context_->device()->currentAllocatedSize();
+    context_->collectGarbage();
+    const bool critical = level == MemoryPressureMonitor::Level::Critical;
+    const u64 trimmed = context_->memory().trimEmptyHeaps(/*keepSpare*/ !critical);
+    context_->commitResidency(); // give the memory back now, not at the next frame
+    const u64 after = context_->device()->currentAllocatedSize();
+    LOG_WARN("Memory pressure %s: trimmed %.1f MiB of heaps, device allocation %.1f -> %.1f MiB",
+             MemoryPressureMonitor::name(level), static_cast<double>(trimmed) / (1 << 20),
+             static_cast<double>(before) / (1 << 20), static_cast<double>(after) / (1 << 20));
+}
+
+void Engine::fillMemoryInfo() {
+    const GpuMemory& memory = context_->memory();
+    const MemoryBudget& budget = context_->budget();
+    MemoryPanelInfo& m = memoryInfo_;
+    m.tier            = tierName(budget.tier());
+    m.workingSet      = budget.workingSet();
+    m.engineLimit     = budget.engineLimit();
+    m.deviceAllocated = context_->device()->currentAllocatedSize();
+    m.gpuAllocations  = memory.allocationCount();
+    for (u32 c = 0; c < MEMORY_CATEGORY_COUNT; ++c) {
+        const auto category = static_cast<MemoryCategory>(c);
+        const GpuMemory::CategoryStats& s = memory.stats(category);
+        m.categories[c] = {s.bytes, s.count, budget.limit(category), budget.level(category, s.bytes)};
+    }
+    memory.heapStats(heapStatsScratch_);
+    m.heaps.clear();
+    for (const auto& h : heapStatsScratch_) {
+        m.heaps.push_back({h.size, h.tlsf.usedBytes, h.tlsf.allocationCount, h.tlsf.fragmentation(),
+                           h.cls == ResidencyClass::Streaming});
+    }
+    const auto ring = [](const char* name, const UploadRing& r) {
+        const LinearRing::Stats s = r.stats();
+        return MemoryPanelInfo::Ring{name, s.capacity, s.inFlightBytes, s.peakFrameBytes, s.overflows};
+    };
+    m.rings = {ring("Frame uploads", context_->frameUploads()), ring("Staging", context_->staging())};
+    const auto set = [&](const char* name, ResidencyClass cls) {
+        const ResidencyManager::Stats s = context_->residency().stats(cls);
+        return MemoryPanelInfo::ResidencySet{name, s.allocations, s.bytes, s.commits};
+    };
+    m.residency = {set("static", ResidencyClass::Static), set("streaming", ResidencyClass::Streaming)};
+    m.pressure       = MemoryPressureMonitor::name(pressure_->level());
+    m.pressureEvents = pressure_->eventCount();
 }
 
 void Engine::aimCamera(const CameraSetup& setup) {
@@ -344,9 +518,11 @@ bool Engine::frame(float dt) {
         info.gpuMs       = context_->lastGpuMs();
         UIPanels::drawPerformancePanel(*frameStats_, info);
         UIPanels::drawRenderPanel(settings_);
+        fillMemoryInfo();
+        UIPanels::drawMemoryPanel(memoryInfo_);
 
         ImGui::Render();
-        imguiRenderer_->render(frame, pass, ImGui::GetDrawData());
+        imguiRenderer_->render(pass, ImGui::GetDrawData());
     }
     pass->endEncoding();
 

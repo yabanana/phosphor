@@ -46,6 +46,9 @@ set(PHOSPHOR_WARNINGS -Wall -Wextra -Wpedantic -Wno-unused-parameter)
 add_library(phosphor_core STATIC
     src/core/input.cpp
     src/core/launch_options.cpp
+    src/core/memory/linear_ring.cpp
+    src/core/memory/memory_budget.cpp
+    src/core/memory/tlsf_allocator.cpp
     src/core/timer.cpp
     src/diagnostics/bench_report.cpp
     src/diagnostics/frame_stats.cpp
