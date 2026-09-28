@@ -21,6 +21,8 @@ namespace phosphor {
 //                      the same path as the 1-7 hotkeys (switching tests)
 //   --simulate-pressure  inject a memory-pressure warning at frame 10 and a
 //                      critical notification at frame 20 (F1.5 tests)
+//   --memory-stress N  create/destroy N GPU resources, check that device
+//                      memory does not grow, exit (F1.6); exit code 1 on failure
 //   --capture FILE     write a frame to FILE (PNG): the last measured frame in
 //                      benchmark mode, otherwise the first frame
 //   --report FILE      write the benchmark summary to FILE (JSON)
@@ -38,6 +40,7 @@ struct LaunchOptions {
     bool        fixedTimestep = false;
     u32         switchEvery   = 0; // 0 = never
     bool        simulatePressure = false;
+    u32         memoryStress  = 0; // cycles; 0 = off
     std::string capturePath;
     std::string reportPath;
 

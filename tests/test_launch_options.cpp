@@ -48,6 +48,14 @@ TEST_CASE("launch options: benchmark switches") {
     CHECK(o.reportPath == "r.json");
 }
 
+TEST_CASE("launch options: memory stress") {
+    LaunchOptions o;
+    std::string err;
+    REQUIRE(parse({"--memory-stress", "10000"}, o, err));
+    CHECK(o.memoryStress == 10000);
+    CHECK_FALSE(o.benchmark());
+}
+
 TEST_CASE("launch options: errors") {
     LaunchOptions o;
     std::string err;

@@ -305,6 +305,7 @@ void MetalContext::submitAndWait(const std::function<void(MTL4::ComputeCommandEn
 void MetalContext::collectGarbage() {
     waitIdle();
     releaseCompleted(~u64{0});
+    flushResidency();
 }
 
 void MetalContext::waitIdle() {

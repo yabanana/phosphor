@@ -45,6 +45,9 @@ public:
 
     void run();
 
+    /// Process exit code: non-zero when a self-test (--memory-stress) failed.
+    [[nodiscard]] int exitCode() const { return exitCode_; }
+
 private:
     void processEvents();
     void handleShortcuts();
@@ -96,6 +99,7 @@ private:
     bool           captured_  = false;
     bool           orbitMode_ = false;
     bool           running_   = true;
+    int            exitCode_  = 0;
 };
 
 } // namespace phosphor

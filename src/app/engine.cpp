@@ -8,6 +8,7 @@
 #include "platform/metal/frame_capture.h"
 #include "platform/metal/gpu_memory.h"
 #include "platform/metal/memory_pressure.h"
+#include "platform/metal/memory_stress.h"
 #include "platform/metal/metal_context.h"
 #include "platform/metal/metal_texture_manager.h"
 #include "platform/metal/scene_renderer.h"
@@ -122,6 +123,19 @@ Engine::~Engine() {
 }
 
 void Engine::run() {
+    if (options_.memoryStress > 0) {
+        const u32 warmup = std::min(1000u, options_.memoryStress / 2);
+        const MemoryStressResult r = runMemoryStress(*context_, options_.memoryStress, warmup);
+        const auto mib = [](u64 b) { return static_cast<double>(b) / (1 << 20); };
+        std::printf("STRESS %u cycles | device MiB: baseline %.2f, after warm-up %.2f, final %.2f, "
+                    "after trim %.2f | peak heaps %u | counts %s | %s\n",
+                    options_.memoryStress, mib(r.baselineBytes), mib(r.warmBytes), mib(r.finalBytes),
+                    mib(r.trimmedBytes), r.heapsPeak, r.countsRestored ? "restored" : "LEAKED",
+                    r.passed ? "PASS (back to baseline)" : "FAIL (memory not returned)");
+        std::fflush(stdout);
+        exitCode_ = r.passed ? 0 : 1;
+        return;
+    }
     LOG_INFO("Entering main loop");
     if (options_.benchmark()) {
         LOG_INFO("Benchmark: %u warm-up + %u measured frames, vsync %s, UI %s", options_.warmup, options_.frames,
@@ -277,6 +291,7 @@ void Engine::switchTestBench(TestBenchType type) {
     // and give back heaps that became empty.
     context_->collectGarbage();
     context_->memory().trimEmptyHeaps();
+    context_->commitResidency();
     logMemory();
     aimCamera(activeBench_->getDefaultCamera());
     pool->release();
@@ -318,6 +333,7 @@ void Engine::handleMemoryPressure() {
     context_->collectGarbage();
     const bool critical = level == MemoryPressureMonitor::Level::Critical;
     const u64 trimmed = context_->memory().trimEmptyHeaps(/*keepSpare*/ !critical);
+    context_->commitResidency(); // give the memory back now, not at the next frame
     const u64 after = context_->device()->currentAllocatedSize();
     LOG_WARN("Memory pressure %s: trimmed %.1f MiB of heaps, device allocation %.1f -> %.1f MiB",
              MemoryPressureMonitor::name(level), static_cast<double>(trimmed) / (1 << 20),

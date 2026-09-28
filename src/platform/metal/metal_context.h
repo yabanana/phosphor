@@ -126,9 +126,15 @@ public:
     /// Block until every submitted frame has completed.
     void waitIdle();
 
-    /// waitIdle() and release every deferred object now.  Only between frames
+    /// waitIdle() and release every deferred object now, then commit the
+    /// residency sets so the memory is actually returned.  Only between frames
     /// (nothing recorded yet may reference them), e.g. on a bench switch.
     void collectGarbage();
+
+    /// Commit pending residency changes now (they are otherwise committed
+    /// with the next command buffer).  Residency sets keep removed
+    /// allocations alive until this commit.
+    void commitResidency() { flushResidency(); }
 
 private:
     void flushResidency();

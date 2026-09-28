@@ -19,6 +19,7 @@ int main(int argc, char* argv[]) {
     try {
         phosphor::Engine engine(argc, argv);
         engine.run();
+        result = engine.exitCode();
     } catch (const std::exception& e) {
         LOG_ERROR("Fatal: %s", e.what());
         result = EXIT_FAILURE;
