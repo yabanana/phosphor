@@ -383,12 +383,14 @@ struct SizeAlign {
 };
 
 // Heap footprint of transient resources; the Metal backend answers with
-// heapTextureSizeAndAlign / heapBufferSizeAndAlign, tests with a fake.
+// heapTextureSizeAndAlign / heapBufferSizeAndAlign, tests with a fake.  The
+// resource index lets the backend derive the usage flags from the graph's
+// accesses (they change the footprint, e.g. lossless compression).
 class ResourceSizer {
 public:
     virtual ~ResourceSizer() = default;
-    [[nodiscard]] virtual SizeAlign textureSize(const TextureDesc& desc) const = 0;
-    [[nodiscard]] virtual SizeAlign bufferSize(const BufferDesc& desc) const = 0;
+    [[nodiscard]] virtual SizeAlign textureSize(u32 resource, const TextureDesc& desc) const = 0;
+    [[nodiscard]] virtual SizeAlign bufferSize(u32 resource, const BufferDesc& desc) const = 0;
 };
 
 struct Placement {

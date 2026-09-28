@@ -47,8 +47,8 @@ AliasingPlan planAliasing(const RenderGraph& graph, const CompiledGraph& compile
         if (r >= compiled.lifetimes.size() || !compiled.lifetimes[r].used()) continue;
         if (r < compiled.memoryless.size() && compiled.memoryless[r]) continue;
 
-        const SizeAlign sa = node.kind == ResourceKind::Texture ? sizer.textureSize(node.texture)
-                                                                : sizer.bufferSize(node.buffer);
+        const SizeAlign sa = node.kind == ResourceKind::Texture ? sizer.textureSize(r, node.texture)
+                                                                : sizer.bufferSize(r, node.buffer);
         Candidate c;
         c.resource = r;
         c.size     = sa.size;

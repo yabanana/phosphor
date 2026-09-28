@@ -17,10 +17,10 @@ u64 roundUp(u64 v, u64 a) { return (v + a - 1) / a * a; }
 struct FakeSizer final : ResourceSizer {
     u64 texAlign = 4096;
     u64 bufAlign = 4096;
-    SizeAlign textureSize(const TextureDesc& d) const override {
+    SizeAlign textureSize(u32, const TextureDesc& d) const override {
         return {roundUp(d.estimatedBytes(), texAlign), texAlign};
     }
-    SizeAlign bufferSize(const BufferDesc& d) const override { return {roundUp(d.size, bufAlign), bufAlign}; }
+    SizeAlign bufferSize(u32, const BufferDesc& d) const override { return {roundUp(d.size, bufAlign), bufAlign}; }
 };
 
 const Placement* find(const AliasingPlan& plan, u32 resource) {
