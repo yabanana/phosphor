@@ -113,6 +113,14 @@ if(PHOSPHOR_DEBUGGABLE)
     )
 endif()
 
+# --- F2.3 barrier legality spike (measurement tool, not engine code) ---
+# Self-contained offscreen Metal 4 tool; see bench/barrier_spike/README.md.
+add_executable(barrier_spike
+    bench/barrier_spike/barrier_spike.cpp
+)
+target_link_libraries(barrier_spike PRIVATE metal_cpp)
+target_compile_features(barrier_spike PRIVATE cxx_std_20)
+
 # Test assets are looked up relative to the working directory.
 if(NOT EXISTS ${CMAKE_BINARY_DIR}/assets)
     file(CREATE_LINK ${CMAKE_SOURCE_DIR}/assets ${CMAKE_BINARY_DIR}/assets SYMBOLIC)
