@@ -58,6 +58,7 @@ add_library(phosphor_core STATIC
     src/scene/camera.cpp
     src/scene/ecs.cpp
     src/scene/gltf_loader.cpp
+    src/scene/mesh_processing.cpp
     src/scene/procedural.cpp
     src/scene/texture_manager.cpp
     src/testbench/cornell_box.cpp
@@ -70,7 +71,7 @@ add_library(phosphor_core STATIC
     src/testbench/torus_demo.cpp
 )
 target_include_directories(phosphor_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(phosphor_core PUBLIC glm::glm SDL3::SDL3 meshoptimizer tinygltf)
+target_link_libraries(phosphor_core PUBLIC glm::glm SDL3::SDL3 meshoptimizer tinygltf mikktspace)
 target_compile_definitions(phosphor_core PUBLIC
     GLM_FORCE_DEPTH_ZERO_TO_ONE
     GLM_FORCE_RADIANS
