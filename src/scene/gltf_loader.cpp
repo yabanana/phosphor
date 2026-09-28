@@ -7,6 +7,7 @@
 #include <tiny_gltf.h>
 
 #include "scene/gltf_loader.h"
+#include "scene/mesh_processing.h"
 #include "scene/texture_manager.h"
 #include "scene/ecs.h"
 #include "scene/components.h"
@@ -233,7 +234,10 @@ MeshHandle GltfLoader::processMesh(const tinygltf::Model& model,
             continue;
         }
 
-        u32 vertexBase = static_cast<u32>(positions.size());
+        // Read the primitive into local streams (indices local to it), fill
+        // what glTF allows to omit, then append to the mesh.
+        GeometryStreams geom;
+        bool hasNormals = false, hasTangents = false, hasUVs = false;
 
         // Positions (required)
         {
@@ -243,53 +247,35 @@ MeshHandle GltfLoader::processMesh(const tinygltf::Model& model,
                          mesh.name.c_str());
                 continue;
             }
-            auto pos = readAccessor<glm::vec3>(model, posIt->second);
-            positions.insert(positions.end(), pos.begin(), pos.end());
+            geom.positions = readAccessor<glm::vec3>(model, posIt->second);
         }
+        const u32 vertexCount = static_cast<u32>(geom.positions.size());
 
-        u32 vertexCount = static_cast<u32>(positions.size()) - vertexBase;
-
-        // Normals (optional, generate flat if missing)
-        {
-            auto nrmIt = prim.attributes.find("NORMAL");
-            if (nrmIt != prim.attributes.end()) {
-                auto nrm = readAccessor<glm::vec3>(model, nrmIt->second);
-                normals.insert(normals.end(), nrm.begin(), nrm.end());
-            } else {
-                // Placeholder normals pointing up
-                normals.resize(normals.size() + vertexCount, glm::vec3{0.0f, 1.0f, 0.0f});
-            }
+        // Normals (optional: flat normals are generated, as the spec requires)
+        if (auto it = prim.attributes.find("NORMAL"); it != prim.attributes.end()) {
+            geom.normals = readAccessor<glm::vec3>(model, it->second);
+            hasNormals = geom.normals.size() == vertexCount;
         }
-
-        // Tangents (optional)
-        {
-            auto tanIt = prim.attributes.find("TANGENT");
-            if (tanIt != prim.attributes.end()) {
-                auto tan = readAccessor<glm::vec4>(model, tanIt->second);
-                tangents.insert(tangents.end(), tan.begin(), tan.end());
-            } else {
-                tangents.resize(tangents.size() + vertexCount, glm::vec4{1.0f, 0.0f, 0.0f, 1.0f});
-            }
+        // Tangents (optional: MikkTSpace, as the spec recommends)
+        if (auto it = prim.attributes.find("TANGENT"); it != prim.attributes.end()) {
+            geom.tangents = readAccessor<glm::vec4>(model, it->second);
+            hasTangents = geom.tangents.size() == vertexCount;
         }
-
         // UVs (optional)
-        {
-            auto uvIt = prim.attributes.find("TEXCOORD_0");
-            if (uvIt != prim.attributes.end()) {
-                auto uv = readAccessor<glm::vec2>(model, uvIt->second);
-                uvs.insert(uvs.end(), uv.begin(), uv.end());
-            } else {
-                uvs.resize(uvs.size() + vertexCount, glm::vec2{0.0f, 0.0f});
-            }
+        if (auto it = prim.attributes.find("TEXCOORD_0"); it != prim.attributes.end()) {
+            geom.uvs = readAccessor<glm::vec2>(model, it->second);
+            hasUVs = geom.uvs.size() == vertexCount;
         }
+        if (!hasUVs) geom.uvs.assign(vertexCount, glm::vec2{0.0f});
 
-        // Indices (required for indexed draw; generate sequential if absent)
+        // Indices (generate sequential ones for non-indexed primitives)
         if (prim.indices >= 0) {
             const auto& accessor = model.accessors[static_cast<size_t>(prim.indices)];
             const auto& bufView  = model.bufferViews[accessor.bufferView];
             const auto& buf      = model.buffers[bufView.buffer];
             const u8* base       = buf.data.data() + bufView.byteOffset + accessor.byteOffset;
 
+            geom.indices.reserve(accessor.count);
             for (size_t i = 0; i < accessor.count; ++i) {
                 u32 idx = 0;
                 switch (accessor.componentType) {
@@ -312,14 +298,25 @@ MeshHandle GltfLoader::processMesh(const tinygltf::Model& model,
                         idx = 0;
                         break;
                 }
-                indices.push_back(vertexBase + idx);
+                geom.indices.push_back(idx < vertexCount ? idx : 0);
             }
         } else {
-            // Non-indexed: generate sequential indices
-            for (u32 i = 0; i < vertexCount; ++i) {
-                indices.push_back(vertexBase + i);
-            }
+            for (u32 i = 0; i < vertexCount; ++i) geom.indices.push_back(i);
         }
+
+        if (!hasNormals || !hasTangents) {
+            completeGeometry(geom, hasNormals, hasTangents, hasUVs);
+            LOG_INFO("Mesh '%s': generated%s%s (%zu vertices)", mesh.name.c_str(),
+                     hasNormals ? "" : " flat normals", hasTangents ? "" : " MikkTSpace tangents",
+                     geom.positions.size());
+        }
+
+        const u32 vertexBase = static_cast<u32>(positions.size());
+        positions.insert(positions.end(), geom.positions.begin(), geom.positions.end());
+        normals.insert(normals.end(), geom.normals.begin(), geom.normals.end());
+        tangents.insert(tangents.end(), geom.tangents.begin(), geom.tangents.end());
+        uvs.insert(uvs.end(), geom.uvs.begin(), geom.uvs.end());
+        for (const u32 idx : geom.indices) indices.push_back(vertexBase + idx);
     }
 
     if (positions.empty()) {

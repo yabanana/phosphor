@@ -54,7 +54,7 @@ component-by-component guide to squeezing Apple silicon
   (`xcodebuild -downloadComponent MetalToolchain` if `xcrun metal` is missing).
 - CMake 3.25+ and Ninja (`brew install cmake ninja`).
 
-All other dependencies (SDL3, glm, meshoptimizer, tinygltf, Dear ImGui,
+All other dependencies (SDL3, glm, meshoptimizer, tinygltf, MikkTSpace, Dear ImGui,
 metal-cpp, doctest) are fetched and pinned by CMake.
 
 ## Build and run

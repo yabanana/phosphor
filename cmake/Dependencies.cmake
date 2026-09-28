@@ -55,6 +55,19 @@ FetchContent_MakeAvailable(tinygltf)
 add_library(tinygltf INTERFACE)
 target_include_directories(tinygltf SYSTEM INTERFACE ${tinygltf_SOURCE_DIR})
 
+# --- MikkTSpace (reference tangent generator required by glTF, zlib) ---
+# Pinned by commit: the repository has no releases.
+FetchContent_Declare(mikktspace
+    GIT_REPOSITORY https://github.com/mmikk/MikkTSpace.git
+    GIT_TAG        3e895b49d05ea07e4c2133156cfa94369e19e409
+    SOURCE_SUBDIR  do-not-build   # built below as a plain C library
+)
+FetchContent_MakeAvailable(mikktspace)
+add_library(mikktspace STATIC ${mikktspace_SOURCE_DIR}/mikktspace.c)
+target_include_directories(mikktspace SYSTEM PUBLIC ${mikktspace_SOURCE_DIR})
+set_target_properties(mikktspace PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_compile_options(mikktspace PRIVATE -w)
+
 # --- Apple-side sources: metal-cpp and Dear ImGui ---
 # Needed by the macOS app; also fetched on Linux so the Metal host code can be
 # type-checked there (see the metal_syntax_check target and
