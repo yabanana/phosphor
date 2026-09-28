@@ -51,8 +51,10 @@ TEST_CASE("launch options: benchmark switches") {
 TEST_CASE("launch options: memory stress") {
     LaunchOptions o;
     std::string err;
-    REQUIRE(parse({"--memory-stress", "10000"}, o, err));
+    REQUIRE(parse({"--memory-stress", "10000", "--transient-test", "--inject-input"}, o, err));
+    CHECK(o.injectInput);
     CHECK(o.memoryStress == 10000);
+    CHECK(o.transientTest);
     CHECK_FALSE(o.benchmark());
 }
 

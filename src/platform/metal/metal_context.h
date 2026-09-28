@@ -90,6 +90,8 @@ public:
     /// (and, if `evict`, remove it from the residency set at that point).
     void deferRelease(NS::Object* object);
     void deferRelease(MTL::Resource* resource, bool evict);
+    /// Same, removing `evict` (e.g. a heap) from the residency set first.
+    void deferRelease(NS::Object* object, const MTL::Allocation* evict);
 
     /// Resize the drawable to match the window's pixel size.
     void resize(u32 width, u32 height);

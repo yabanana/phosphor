@@ -72,6 +72,17 @@ public:
 
     [[nodiscard]] Level level(MemoryCategory category, u64 bytes) const;
 
+    // Sizes of the backend's memory pools, derived from the budget (so a T0
+    // gets smaller pools than an M5 Max).  Hypotheses like the shares.
+    /// Frame upload ring: a quarter of the Upload budget, 16-128 MiB.
+    [[nodiscard]] u64 frameUploadRingSize() const;
+    /// Staging ring for loading-time copies: a quarter of Upload, 16-256 MiB.
+    [[nodiscard]] u64 stagingRingSize() const;
+    /// Size of a placement-heap page: engine budget / 512, rounded down to a
+    /// power of two, 16-128 MiB.  Larger pages mean fewer heaps and residency
+    /// entries; smaller ones waste less on small machines.
+    [[nodiscard]] u64 heapPageSize() const;
+
     /// Share of the engine budget of each category (sums to 1).
     [[nodiscard]] static float share(MemoryCategory category);
 

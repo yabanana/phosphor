@@ -7,7 +7,8 @@
 #
 # Defaults: build (Debug), build/reference.  --update (re)creates the
 # references instead of comparing.  Captures use --fixed-timestep and the
-# same frame count, so animated benches are deterministic.
+# same frame count, so animated benches are deterministic; --inject-input
+# proves that keyboard/mouse input cannot change a capture.
 set -euo pipefail
 
 build_dir=${1:-build}
@@ -27,7 +28,7 @@ for bench in 1 2 3 4 5 6 7; do
     log="$out_dir/bench$bench.log"
     status=0
     MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 MTL_DEBUG_LAYER_WARNING_MODE=nslog \
-        "$app" --bench "$bench" --warmup "$warmup" --frames 1 --no-ui --fixed-timestep \
+        "$app" --bench "$bench" --warmup "$warmup" --frames 1 --no-ui --fixed-timestep --inject-input \
         --capture "$capture" >"$log" 2>&1 || status=$?
     # Anything besides our INFO lines, the BENCH summary and the two
     # "Validation Enabled" banners is a problem.

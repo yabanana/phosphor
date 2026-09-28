@@ -132,6 +132,17 @@ Engine::~Engine() {
 }
 
 void Engine::run() {
+    if (options_.transientTest) {
+        const TransientAliasResult r = runTransientAliasTest(*context_);
+        std::printf("TRANSIENT heap %.2f MiB, textures at +%llu | aliased buffers %s | aliased textures %s | "
+                    "memory shared %s | %s\n",
+                    static_cast<double>(r.heapSize) / (1 << 20), static_cast<unsigned long long>(r.textureOffset),
+                    r.buffersOk ? "ok" : "WRONG", r.texturesOk ? "ok" : "WRONG", r.memoryShared ? "yes" : "NO",
+                    r.passed ? "PASS" : "FAIL");
+        std::fflush(stdout);
+        exitCode_ = r.passed ? 0 : 1;
+        return;
+    }
     if (options_.memoryStress > 0) {
         const u32 warmup = std::min(1000u, options_.memoryStress / 2);
         const MemoryStressResult r = runMemoryStress(*context_, options_.memoryStress, warmup);
@@ -228,6 +239,9 @@ void Engine::finishBenchmark() {
     report.cpuHeapBytesDelta  = static_cast<i64>(heapBytes) - static_cast<i64>(heapBytesAtStart_);
     summarizeSamples(samples_, report);
 
+    if (ignoredInputEvents_ > 0) {
+        LOG_INFO("Benchmark: ignored %u keyboard/mouse events", ignoredInputEvents_);
+    }
     // stdout, not the log: scripts collect this line.
     std::printf("BENCH %s\n", formatReportLine(report).c_str());
     std::fflush(stdout);
@@ -238,10 +252,45 @@ void Engine::finishBenchmark() {
     }
 }
 
+void Engine::injectSyntheticInput() {
+    // As if someone typed W/D and dragged the mouse over the focused window.
+    for (const SDL_Scancode key : {SDL_SCANCODE_W, SDL_SCANCODE_D}) {
+        SDL_Event e{};
+        e.type = SDL_EVENT_KEY_DOWN;
+        e.key.windowID = SDL_GetWindowID(window_);
+        e.key.scancode = key;
+        e.key.down = true;
+        SDL_PushEvent(&e);
+    }
+    SDL_Event motion{};
+    motion.type = SDL_EVENT_MOUSE_MOTION;
+    motion.motion.windowID = SDL_GetWindowID(window_);
+    motion.motion.state = SDL_BUTTON_LMASK | SDL_BUTTON_RMASK;
+    motion.motion.xrel = 12.0f;
+    motion.motion.yrel = 4.0f;
+    SDL_PushEvent(&motion);
+    SDL_Event wheel{};
+    wheel.type = SDL_EVENT_MOUSE_WHEEL;
+    wheel.wheel.windowID = SDL_GetWindowID(window_);
+    wheel.wheel.y = 1.0f;
+    SDL_PushEvent(&wheel);
+}
+
 void Engine::processEvents() {
+    if (options_.injectInput) injectSyntheticInput();
     const ImGuiIO& io = ImGui::GetIO();
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+        const bool keyboardEvent = event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP ||
+                                   event.type == SDL_EVENT_TEXT_INPUT;
+        const bool mouseEvent = event.type == SDL_EVENT_MOUSE_MOTION || event.type == SDL_EVENT_MOUSE_WHEEL ||
+                                event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP;
+        // Benchmarks and captures must not depend on whoever types or moves
+        // the mouse while the window has focus (it takes focus at launch).
+        if (options_.benchmark() && (keyboardEvent || mouseEvent)) {
+            ++ignoredInputEvents_;
+            continue;
+        }
         ImGui_ImplSDL3_ProcessEvent(&event);
 
         switch (event.type) {
@@ -256,9 +305,6 @@ void Engine::processEvents() {
             break;
         }
 
-        const bool keyboardEvent = event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP;
-        const bool mouseEvent = event.type == SDL_EVENT_MOUSE_MOTION || event.type == SDL_EVENT_MOUSE_WHEEL ||
-                                event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP;
         if ((keyboardEvent && io.WantCaptureKeyboard) || (mouseEvent && io.WantCaptureMouse)) {
             continue;
         }

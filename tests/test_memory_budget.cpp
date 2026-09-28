@@ -46,6 +46,32 @@ TEST_CASE("memory budget: limits scale with the working set") {
     CHECK(sum <= large.engineLimit());
 }
 
+TEST_CASE("memory budget: pool sizes follow the working set") {
+    const u64 mib = 1ull << 20, gib = 1ull << 30;
+    const MemoryBudget t0(10 * gib, detectTier("Apple M3", false));       // ~16 GB machine
+    const MemoryBudget t2(107 * gib, detectTier("Apple M5 Max", true));   // 128 GB machine
+    const MemoryBudget tiny(64 * mib, TierInfo{});
+
+    // Clamped ranges, whole MiB, never smaller on the bigger machine.
+    for (const MemoryBudget* b : {&t0, &t2, &tiny}) {
+        CHECK(b->frameUploadRingSize() >= 16 * mib);
+        CHECK(b->frameUploadRingSize() <= 128 * mib);
+        CHECK(b->frameUploadRingSize() % mib == 0);
+        CHECK(b->stagingRingSize() >= 16 * mib);
+        CHECK(b->stagingRingSize() <= 256 * mib);
+        const u64 page = b->heapPageSize();
+        CHECK(page >= 16 * mib);
+        CHECK(page <= 128 * mib);
+        CHECK((page & (page - 1)) == 0);
+    }
+    CHECK(t2.frameUploadRingSize() >= t0.frameUploadRingSize());
+    CHECK(t2.heapPageSize() >= t0.heapPageSize());
+    CHECK(t2.frameUploadRingSize() == 128 * mib);
+    CHECK(t2.heapPageSize() == 128 * mib);
+    CHECK(tiny.frameUploadRingSize() == 16 * mib);
+    CHECK(tiny.heapPageSize() == 16 * mib);
+}
+
 TEST_CASE("memory budget: levels") {
     const MemoryBudget b(1000 * 1000, TierInfo{});
     const u64 lim = b.limit(MemoryCategory::Geometry);

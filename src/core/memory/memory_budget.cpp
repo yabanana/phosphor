@@ -1,5 +1,7 @@
 #include "core/memory/memory_budget.h"
 
+#include <algorithm>
+
 namespace phosphor {
 
 const char* memoryCategoryName(MemoryCategory category) {
@@ -73,6 +75,34 @@ MemoryBudget::MemoryBudget(u64 workingSetBytes, TierInfo tier)
     for (u32 c = 0; c < MEMORY_CATEGORY_COUNT; ++c) {
         limits_[c] = static_cast<u64>(static_cast<double>(engineLimit_) * share(static_cast<MemoryCategory>(c)));
     }
+}
+
+namespace {
+
+constexpr u64 MiB = 1ull << 20;
+
+u64 clampSize(u64 v, u64 lo, u64 hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+u64 roundDownMiB(u64 v) { return v / MiB * MiB; }
+
+u64 floorPowerOfTwo(u64 v) {
+    u64 p = 1;
+    while (p <= v / 2) p <<= 1;
+    return p;
+}
+
+} // namespace
+
+u64 MemoryBudget::frameUploadRingSize() const {
+    return roundDownMiB(clampSize(limit(MemoryCategory::Upload) / 4, 16 * MiB, 128 * MiB));
+}
+
+u64 MemoryBudget::stagingRingSize() const {
+    return roundDownMiB(clampSize(limit(MemoryCategory::Upload) / 4, 16 * MiB, 256 * MiB));
+}
+
+u64 MemoryBudget::heapPageSize() const {
+    return clampSize(floorPowerOfTwo(std::max<u64>(engineLimit_ / 512, 1)), 16 * MiB, 128 * MiB);
 }
 
 MemoryBudget::Level MemoryBudget::level(MemoryCategory category, u64 bytes) const {

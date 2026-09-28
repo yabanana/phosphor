@@ -16,10 +16,6 @@ NS::String* str(const char* s) {
 
 constexpr u64 kWaitTimeoutMs = 5000;
 
-// Initial ring sizes; UploadRing grows the frame ring after an overflow and
-// the staging ring flushes when full.  Per-tier values arrive with F1.4.
-constexpr u64 kFrameUploadCapacity = 64ull << 20;
-constexpr u64 kStagingCapacity     = 64ull << 20;
 
 u64 frameDoneValue(u64 frameIndex) { return frameIndex + 1; }
 
@@ -90,9 +86,15 @@ MetalContext::MetalContext(CA::MetalLayer* layer, const std::string& libraryPath
     queue_->addResidencySet(layer_->residencySet());
 
     memory_       = std::make_unique<GpuMemory>(*this);
-    frameUploads_ = std::make_unique<UploadRing>(*memory_, kFrameUploadCapacity, METAL_FRAMES_IN_FLIGHT,
+    // Ring sizes come from the budget; the frame ring still grows after an
+    // overflow and the staging ring flushes when full.
+    frameUploads_ = std::make_unique<UploadRing>(*memory_, budget_.frameUploadRingSize(), METAL_FRAMES_IN_FLIGHT,
                                                  "Frame uploads");
-    staging_      = std::make_unique<UploadRing>(*memory_, kStagingCapacity, 1, "Staging");
+    staging_      = std::make_unique<UploadRing>(*memory_, budget_.stagingRingSize(), 1, "Staging");
+    LOG_INFO("Memory pools: frame ring %llu MiB, staging %llu MiB, heap pages %llu MiB",
+             static_cast<unsigned long long>(budget_.frameUploadRingSize() >> 20),
+             static_cast<unsigned long long>(budget_.stagingRingSize() >> 20),
+             static_cast<unsigned long long>(budget_.heapPageSize() >> 20));
 }
 
 MetalContext::~MetalContext() {
@@ -137,6 +139,11 @@ void MetalContext::deferRelease(NS::Object* object) {
 void MetalContext::deferRelease(MTL::Resource* resource, bool evict) {
     if (!resource) return;
     pendingReleases_.push_back({resource, evict ? resource : nullptr, frameIndex_});
+}
+
+void MetalContext::deferRelease(NS::Object* object, const MTL::Allocation* evict) {
+    if (!object) return;
+    pendingReleases_.push_back({object, evict, frameIndex_});
 }
 
 void MetalContext::releaseCompleted(u64 completedFrame) {
@@ -185,6 +192,8 @@ bool MetalContext::beginFrame(Frame& frame) {
 
     CA::MetalDrawable* drawable = layer_->nextDrawable();
     if (!drawable) {
+        LOG_WARN("No drawable available for frame %llu (window hidden or occluded?)",
+                 static_cast<unsigned long long>(index));
         return false;
     }
     frameUploads_->beginFrame(index);

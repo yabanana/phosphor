@@ -14,6 +14,28 @@ an undocumented hardware number as fact: measure it with `bench/`.
 The Vulkan renderer in `legacy/vulkan/` is reference only — never build or
 extend it; port algorithms from it.
 
+## Non-negotiable working rules (set by the project owner)
+
+1. **Severe residue audit before declaring a phase done.** Before saying an
+   `Fxx` or `OPT-xx` phase is finished, re-read every task line of that phase
+   in `docs/ROADMAP.md` literally, the approved plan, the exit criteria and
+   every "later"/"arrives with Fx" note or TODO left in code and docs, and
+   check each against evidence (tests, validation runs, measurements).
+   Anything partial is reported as partial and either completed or left
+   explicitly unticked. Intermittent failures are never "passes": reproduce
+   and explain them first.
+2. **Autonomy: do not hand actions to the owner.** Do the work yourself,
+   including verification. When a step seems to need the owner's
+   interaction or `sudo`, find another non-privileged method (e.g. sign dev
+   builds with `get-task-allow` so profiling tools attach without root, use
+   in-process measurements, simulate events). Never try to bypass the
+   harness permission system; if no alternative exists, say so explicitly.
+3. **Chat in Italian.** Code, comments and commit messages stay in English.
+4. **Detailed handoff at the end of every phase**: what was done (per task
+   ID), how it was verified (commands and numbers), bugs found, deviations
+   from the plan, what is still open and why, risks, and the exact next
+   steps. Put it in the PR description and in the final chat message.
+
 ## Build / verify
 
 - macOS (real target): `cmake -S . -B build -G Ninja && cmake --build build && ./build/phosphor`

@@ -16,11 +16,6 @@ bool isMemoryless(const MTL::Resource* resource) {
     return resource->storageMode() == MTL::StorageModeMemoryless;
 }
 
-// Size of a new placement heap.  A design choice, not a hardware number:
-// large enough that loading a bench creates few heaps, small enough to trim.
-// Per-tier values arrive with F1.4.
-constexpr u64 kHeapSize = 64ull << 20;
-
 u64 alignUp(u64 v, u64 alignment) { return (v + alignment - 1) & ~(alignment - 1); }
 
 // Storage mode bits of MTLResourceOptions (MTLResourceStorageModeShift = 4);
@@ -64,7 +59,8 @@ bool GpuMemory::place(u64 size, u64 align, ResidencyClass cls, Placement& out) {
     desc->setType(MTL::HeapTypePlacement);
     desc->setStorageMode(MTL::StorageModePrivate);
     desc->setHazardTrackingMode(MTL::HazardTrackingModeUntracked);
-    desc->setSize(std::max(kHeapSize, alignUp(size, align)));
+    // Page size from the budget (MemoryBudget::heapPageSize); larger resources get their own heap.
+    desc->setSize(std::max(context_.budget().heapPageSize(), alignUp(size, align)));
     MTL::Heap* heap = context_.device()->newHeap(desc);
     desc->release();
     if (!heap) {
@@ -187,6 +183,36 @@ void GpuMemory::release(MTL::Resource* resource, MemoryCategory category) {
     if (!resource) return;
     unaccount(resource, category);
     pending_.push_back({resource, context_.frameIndex()});
+}
+
+MTL::Heap* GpuMemory::newPlacementHeap(u64 size, MemoryCategory category, const char* label) {
+    MTL::HeapDescriptor* desc = MTL::HeapDescriptor::alloc()->init();
+    desc->setType(MTL::HeapTypePlacement);
+    desc->setStorageMode(MTL::StorageModePrivate);
+    desc->setHazardTrackingMode(MTL::HazardTrackingModeUntracked);
+    desc->setSize(size);
+    MTL::Heap* heap = context_.device()->newHeap(desc);
+    desc->release();
+    if (!heap) {
+        LOG_ERROR("GpuMemory: failed to create a %llu-byte placement heap '%s'",
+                  static_cast<unsigned long long>(size), label);
+        return nullptr;
+    }
+    heap->setLabel(str(label));
+    context_.makeResident(heap, residencyClass(category));
+    CategoryStats& s = stats_[static_cast<u32>(category)];
+    s.bytes += heap->size();
+    ++s.count;
+    ++allocationCount_;
+    return heap;
+}
+
+void GpuMemory::releaseHeap(MTL::Heap* heap, MemoryCategory category) {
+    if (!heap) return;
+    CategoryStats& s = stats_[static_cast<u32>(category)];
+    s.bytes -= heap->size();
+    --s.count;
+    context_.deferRelease(heap, heap);
 }
 
 void GpuMemory::destroy(MTL::Resource* resource) {

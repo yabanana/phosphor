@@ -88,6 +88,7 @@ add_executable(phosphor
     src/platform/metal/metal_texture_manager.cpp
     src/platform/metal/residency_manager.cpp
     src/platform/metal/scene_renderer.cpp
+    src/platform/metal/transient_heap.cpp
     src/platform/metal/upload_ring.cpp
 )
 target_link_libraries(phosphor PRIVATE phosphor_core imgui metal_cpp)

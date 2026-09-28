@@ -59,6 +59,10 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.ui = false;
         } else if (arg == "--fixed-timestep") {
             out.fixedTimestep = true;
+        } else if (arg == "--inject-input") {
+            out.injectInput = true;
+        } else if (arg == "--transient-test") {
+            out.transientTest = true;
         } else if (arg == "--memory-stress") {
             if (!needCount(out.memoryStress)) return false;
         } else if (arg == "--simulate-pressure") {

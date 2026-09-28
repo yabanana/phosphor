@@ -50,6 +50,7 @@ public:
 
 private:
     void processEvents();
+    void injectSyntheticInput();
     void handleShortcuts();
     void switchTestBench(TestBenchType type);
     void aimCamera(const CameraSetup& setup);
@@ -87,6 +88,7 @@ private:
     u32                      presentedFrames_ = 0;
     u32                      framesOnBench_   = 0; // for --switch-every
     u32                      simulatedFrames_ = 0; // for --simulate-pressure
+    u32                      ignoredInputEvents_ = 0; // benchmark mode ignores input
     std::vector<FrameSample> samples_;
     u64                      allocationsAtStart_ = 0;
     u64                      heapBlocksAtStart_  = 0;

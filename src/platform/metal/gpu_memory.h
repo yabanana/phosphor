@@ -68,6 +68,13 @@ public:
     /// Release after the frames currently in flight complete.  Null is ignored.
     void release(MTL::Resource* resource, MemoryCategory category);
 
+    /// A private placement heap owned by the caller (e.g. TransientHeap, which
+    /// places aliasing resources at offsets it chooses).  Made resident as one
+    /// allocation and accounted under `category` with its full size.
+    [[nodiscard]] MTL::Heap* newPlacementHeap(u64 size, MemoryCategory category, const char* label);
+    /// Deferred release of a heap from newPlacementHeap().
+    void releaseHeap(MTL::Heap* heap, MemoryCategory category);
+
     /// Called by MetalContext once frame `completedFrame` has finished on the
     /// GPU (~0 = everything, at shutdown).
     void releaseCompleted(u64 completedFrame);
