@@ -1,6 +1,7 @@
 #include "platform/metal/metal_context.h"
 #include "core/log.h"
 
+#include <chrono>
 #include <stdexcept>
 
 namespace phosphor {
@@ -13,12 +14,11 @@ NS::String* str(const char* s) {
 
 constexpr u64 kWaitTimeoutMs = 5000;
 
-u64 sceneDoneValue(u64 frameIndex) { return 2 * frameIndex + 1; }
-u64 frameDoneValue(u64 frameIndex) { return 2 * frameIndex + 2; }
+u64 frameDoneValue(u64 frameIndex) { return frameIndex + 1; }
 
 } // namespace
 
-MetalContext::MetalContext(CA::MetalLayer* layer) : layer_(layer) {
+MetalContext::MetalContext(CA::MetalLayer* layer, const std::string& libraryPath) : layer_(layer) {
     device_ = MTL::CreateSystemDefaultDevice();
     if (!device_) {
         throw std::runtime_error("No Metal device available");
@@ -42,8 +42,6 @@ MetalContext::MetalContext(CA::MetalLayer* layer) : layer_(layer) {
     if (!queue_) {
         throw std::runtime_error("Failed to create MTL4CommandQueue");
     }
-    legacyQueue_ = device_->newCommandQueue();
-    legacyQueue_->setLabel(str("Phosphor overlay queue"));
 
     MTL4::CompilerDescriptor* compilerDesc = MTL4::CompilerDescriptor::alloc()->init();
     compilerDesc->setLabel(str("Phosphor compiler"));
@@ -51,6 +49,12 @@ MetalContext::MetalContext(CA::MetalLayer* layer) : layer_(layer) {
     compilerDesc->release();
     if (!compiler_) {
         throw std::runtime_error("Failed to create MTL4Compiler");
+    }
+
+    library_ = device_->newLibrary(str(libraryPath.c_str()), &error);
+    if (!library_) {
+        const char* reason = error ? error->localizedDescription()->utf8String() : "unknown error";
+        throw std::runtime_error(std::string("Failed to load shader library ") + libraryPath + ": " + reason);
     }
 
     MTL::ResidencySetDescriptor* rsDesc = MTL::ResidencySetDescriptor::alloc()->init();
@@ -75,7 +79,7 @@ MetalContext::MetalContext(CA::MetalLayer* layer) : layer_(layer) {
 
     layer_->setDevice(device_);
     layer_->setPixelFormat(colorFormat());
-    layer_->setFramebufferOnly(false); // the overlay pass loads the scene result
+    layer_->setFramebufferOnly(false); // --capture copies the drawable into a buffer
     layer_->setMaximumDrawableCount(3);
     // Drawables must be resident for the MTL4 queue; the layer owns this set.
     queue_->addResidencySet(layer_->residencySet());
@@ -96,8 +100,8 @@ MetalContext::~MetalContext() {
     uploadEvent_->release();
     frameEvent_->release();
     residency_->release();
+    library_->release();
     compiler_->release();
-    legacyQueue_->release();
     queue_->release();
     device_->release();
 }
@@ -162,8 +166,6 @@ bool MetalContext::beginFrame(Frame& frame) {
         return false;
     }
 
-    flushResidency();
-
     allocators_[slot]->reset();
     MTL4::CommandBuffer* cmd = commandBuffers_[slot];
     cmd->beginCommandBuffer(allocators_[slot]);
@@ -176,34 +178,55 @@ bool MetalContext::beginFrame(Frame& frame) {
     return true;
 }
 
-MTL::CommandBuffer* MetalContext::submitScene(Frame& frame) {
+void MetalContext::submitFrame(Frame& frame) {
     frame.commandBuffer->endCommandBuffer();
+    // Allocations registered while recording this frame (grown upload
+    // buffers, capture readback) must be resident before the commit.
+    flushResidency();
 
-    // A drawable must be waited on before the MTL4 queue renders to it.
+    // A drawable must be waited on before the MTL4 queue renders to it, and
+    // signalled after the work that renders to it, before present().
     queue_->wait(frame.drawable);
     const MTL4::CommandBuffer* buffers[] = {frame.commandBuffer};
     MTL4::CommitOptions* options = MTL4::CommitOptions::alloc()->init();
-    options->addFeedbackHandler([this](MTL4::CommitFeedback* feedback) {
-        if (!feedback->error()) {
-            const double ms = (feedback->GPUEndTime() - feedback->GPUStartTime()) * 1000.0;
-            lastGpuMs_.store(static_cast<float>(ms), std::memory_order_relaxed);
+    const u64 index = frame.index;
+    options->addFeedbackHandler([this, index](MTL4::CommitFeedback* feedback) {
+        if (feedback->error()) return;
+        const float ms = static_cast<float>((feedback->GPUEndTime() - feedback->GPUStartTime()) * 1000.0);
+        lastGpuMs_.store(ms, std::memory_order_relaxed);
+        std::lock_guard lock(gpuTimesMutex_);
+        if (index >= gpuTimesFirst_ && index - gpuTimesFirst_ < gpuTimes_.size()) {
+            gpuTimes_[index - gpuTimesFirst_] = ms;
+            ++gpuTimesReceived_;
+            gpuTimesCv_.notify_all();
         }
     });
     queue_->commit(buffers, 1, options);
     options->release();
-    queue_->signalEvent(frameEvent_, sceneDoneValue(frame.index));
-
-    MTL::CommandBuffer* overlay = legacyQueue_->commandBuffer();
-    overlay->setLabel(str("Overlay"));
-    overlay->encodeWait(frameEvent_, sceneDoneValue(frame.index));
-    return overlay;
+    queue_->signalDrawable(frame.drawable);
+    frame.drawable->present();
+    queue_->signalEvent(frameEvent_, frameDoneValue(frame.index));
+    ++frameIndex_;
 }
 
-void MetalContext::presentFrame(Frame& frame, MTL::CommandBuffer* overlay) {
-    overlay->presentDrawable(frame.drawable);
-    overlay->encodeSignalEvent(frameEvent_, frameDoneValue(frame.index));
-    overlay->commit();
-    ++frameIndex_;
+void MetalContext::beginGpuTimeCapture(u32 frames) {
+    std::lock_guard lock(gpuTimesMutex_);
+    gpuTimes_.assign(frames, 0.0f);
+    gpuTimesFirst_    = frameIndex_;
+    gpuTimesReceived_ = 0;
+}
+
+std::vector<float> MetalContext::endGpuTimeCapture() {
+    waitIdle();
+    std::unique_lock lock(gpuTimesMutex_);
+    const size_t expected = gpuTimes_.size();
+    if (!gpuTimesCv_.wait_for(lock, std::chrono::milliseconds(kWaitTimeoutMs),
+                              [&] { return gpuTimesReceived_ >= expected; })) {
+        LOG_WARN("GPU timing feedback missing for %zu of %zu frames", expected - gpuTimesReceived_, expected);
+    }
+    std::vector<float> times = std::move(gpuTimes_);
+    gpuTimes_.clear();
+    return times;
 }
 
 void MetalContext::submitAndWait(const std::function<void(MTL4::ComputeCommandEncoder*)>& record) {

@@ -14,6 +14,8 @@ TEST_CASE("default textures are created once") {
     CHECK(tm.uploads[tm.getDefaultNormal()].rgba == std::vector<u8>{128, 128, 255, 255});
     CHECK(tm.uploads[tm.getDefaultWhite()].sRGB);
     CHECK_FALSE(tm.uploads[tm.getDefaultMR()].sRGB);
+    // Neutral for glTF factor multiplication: roughness (G) and metallic (B) = 1.
+    CHECK(tm.uploads[tm.getDefaultMR()].rgba == std::vector<u8>{255, 255, 255, 255});
 }
 
 TEST_CASE("pixel data is expanded to RGBA") {

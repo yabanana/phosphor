@@ -1,0 +1,274 @@
+#include "imgui/imgui_renderer.h"
+#include "core/log.h"
+
+#include <imgui.h>
+
+#include <algorithm>
+#include <cstring>
+#include <stdexcept>
+#include <string>
+
+namespace phosphor {
+
+namespace {
+
+NS::String* str(const char* s) {
+    return NS::String::string(s, NS::UTF8StringEncoding);
+}
+
+constexpr size_t kAlign = 256;
+
+size_t alignUp(size_t v) { return (v + kAlign - 1) & ~(kAlign - 1); }
+
+// Argument table slots; must match shaders/imgui.metal.
+enum Binding : NS::UInteger {
+    BindVertices = 0,
+    BindUniforms = 1,
+    BindCount    = 2,
+    BindImage    = 0, // texture slot
+};
+
+struct ImGuiUniforms {
+    float projection[16]; // column-major
+};
+
+static_assert(sizeof(ImDrawVert) == 20, "ImGuiVertex in imgui.metal mirrors ImDrawVert");
+static_assert(sizeof(ImTextureID) == sizeof(MTL::ResourceID), "texture IDs carry MTL::ResourceID");
+
+} // namespace
+
+ImGuiRenderer::ImGuiRenderer(MetalContext& context) : context_(context) {
+    ImGuiIO& io = ImGui::GetIO();
+    io.BackendRendererName = "phosphor_mtl4";
+    io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
+
+    buildPipeline();
+
+    // The overlay shares the scene pass, whose depth attachment is bound:
+    // draw on top without testing or writing depth.
+    MTL::DepthStencilDescriptor* dsDesc = MTL::DepthStencilDescriptor::alloc()->init();
+    dsDesc->setDepthCompareFunction(MTL::CompareFunctionAlways);
+    dsDesc->setDepthWriteEnabled(false);
+    depthState_ = context_.device()->newDepthStencilState(dsDesc);
+    dsDesc->release();
+
+    NS::Error* error = nullptr;
+    MTL4::ArgumentTableDescriptor* atDesc = MTL4::ArgumentTableDescriptor::alloc()->init();
+    atDesc->setMaxBufferBindCount(BindCount);
+    atDesc->setMaxTextureBindCount(1);
+    atDesc->setLabel(str("ImGui arguments"));
+    arguments_ = context_.device()->newArgumentTable(atDesc, &error);
+    atDesc->release();
+    if (!arguments_) {
+        throw std::runtime_error("Failed to create ImGui argument table");
+    }
+
+    createFontTexture();
+}
+
+ImGuiRenderer::~ImGuiRenderer() {
+    context_.waitIdle();
+    for (UploadBuffer& u : uploads_) {
+        if (u.buffer) {
+            context_.evict(u.buffer);
+            u.buffer->release();
+        }
+    }
+    if (fontTexture_) {
+        context_.evict(fontTexture_);
+        fontTexture_->release();
+    }
+    arguments_->release();
+    depthState_->release();
+    pipeline_->release();
+
+    ImGuiIO& io = ImGui::GetIO();
+    io.Fonts->SetTexID(ImTextureID{});
+    io.BackendRendererName = nullptr;
+    io.BackendFlags &= ~ImGuiBackendFlags_RendererHasVtxOffset;
+}
+
+void ImGuiRenderer::buildPipeline() {
+    MTL4::LibraryFunctionDescriptor* vs = MTL4::LibraryFunctionDescriptor::alloc()->init();
+    vs->setLibrary(context_.library());
+    vs->setName(str("imgui_vs"));
+    MTL4::LibraryFunctionDescriptor* fs = MTL4::LibraryFunctionDescriptor::alloc()->init();
+    fs->setLibrary(context_.library());
+    fs->setName(str("imgui_fs"));
+
+    MTL4::RenderPipelineDescriptor* desc = MTL4::RenderPipelineDescriptor::alloc()->init();
+    desc->setLabel(str("ImGui"));
+    desc->setVertexFunctionDescriptor(vs);
+    desc->setFragmentFunctionDescriptor(fs);
+    MTL4::RenderPipelineColorAttachmentDescriptor* color = desc->colorAttachments()->object(0);
+    color->setPixelFormat(context_.colorFormat());
+    color->setBlendingState(MTL4::BlendStateEnabled);
+    color->setRgbBlendOperation(MTL::BlendOperationAdd);
+    color->setAlphaBlendOperation(MTL::BlendOperationAdd);
+    color->setSourceRGBBlendFactor(MTL::BlendFactorSourceAlpha);
+    color->setDestinationRGBBlendFactor(MTL::BlendFactorOneMinusSourceAlpha);
+    color->setSourceAlphaBlendFactor(MTL::BlendFactorOne);
+    color->setDestinationAlphaBlendFactor(MTL::BlendFactorOneMinusSourceAlpha);
+
+    NS::Error* error = nullptr;
+    pipeline_ = context_.compiler()->newRenderPipelineState(desc, nullptr, &error);
+    desc->release();
+    fs->release();
+    vs->release();
+    if (!pipeline_) {
+        const char* reason = error ? error->localizedDescription()->utf8String() : "unknown error";
+        throw std::runtime_error(std::string("Failed to build ImGui pipeline: ") + reason);
+    }
+}
+
+void ImGuiRenderer::createFontTexture() {
+    ImGuiIO& io = ImGui::GetIO();
+    unsigned char* pixels = nullptr;
+    int width = 0, height = 0;
+    io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+
+    MTL::TextureDescriptor* desc = MTL::TextureDescriptor::texture2DDescriptor(
+        MTL::PixelFormatRGBA8Unorm, static_cast<NS::UInteger>(width), static_cast<NS::UInteger>(height), false);
+    desc->setUsage(MTL::TextureUsageShaderRead);
+    desc->setStorageMode(MTL::StorageModePrivate);
+    fontTexture_ = context_.device()->newTexture(desc);
+    fontTexture_->setLabel(str("ImGui font atlas"));
+
+    const size_t rowBytes = static_cast<size_t>(width) * 4;
+    MTL::Buffer* staging = context_.device()->newBuffer(rowBytes * static_cast<size_t>(height),
+                                                        MTL::ResourceStorageModeShared);
+    std::memcpy(staging->contents(), pixels, staging->length());
+    context_.makeResident(staging);
+    context_.makeResident(fontTexture_);
+    // Blit upload keeps the private texture eligible for lossless compression (O6).
+    context_.submitAndWait([&](MTL4::ComputeCommandEncoder* enc) {
+        enc->copyFromBuffer(staging, 0, rowBytes, 0,
+                            MTL::Size::Make(static_cast<NS::UInteger>(width), static_cast<NS::UInteger>(height), 1),
+                            fontTexture_, 0, 0, MTL::Origin::Make(0, 0, 0));
+    });
+    context_.evict(staging);
+    staging->release();
+
+    io.Fonts->SetTexID(static_cast<ImTextureID>(fontTexture_->gpuResourceID()._impl));
+}
+
+void ImGuiRenderer::setupRenderState(MTL4::RenderCommandEncoder* encoder, MTL::GPUAddress vertices, MTL::GPUAddress uniforms) {
+    arguments_->setAddress(vertices, BindVertices);
+    arguments_->setAddress(uniforms, BindUniforms);
+
+    encoder->setRenderPipelineState(pipeline_);
+    encoder->setDepthStencilState(depthState_);
+    encoder->setArgumentTable(arguments_, MTL::RenderStageVertex | MTL::RenderStageFragment);
+    // Viewport (full target) and CullModeNone are inherited from the scene
+    // pass, and are also Metal's defaults; setting them again is flagged as
+    // redundant by the validation layer.
+}
+
+void ImGuiRenderer::render(const MetalContext::Frame& frame, MTL4::RenderCommandEncoder* encoder,
+                           const ImDrawData* drawData) {
+    if (!drawData || drawData->CmdListsCount == 0 || drawData->TotalVtxCount == 0) return;
+
+    const float fbWidth  = drawData->DisplaySize.x * drawData->FramebufferScale.x;
+    const float fbHeight = drawData->DisplaySize.y * drawData->FramebufferScale.y;
+    if (fbWidth <= 0.0f || fbHeight <= 0.0f) return;
+
+    // --- Per-frame upload: projection, vertices, indices --------------------
+    const size_t vertexBytes    = static_cast<size_t>(drawData->TotalVtxCount) * sizeof(ImDrawVert);
+    const size_t indexBytes     = static_cast<size_t>(drawData->TotalIdxCount) * sizeof(ImDrawIdx);
+    const size_t verticesOffset = alignUp(sizeof(ImGuiUniforms));
+    const size_t indicesOffset  = verticesOffset + alignUp(vertexBytes);
+    const size_t totalSize      = indicesOffset + alignUp(indexBytes);
+
+    UploadBuffer& upload = uploads_[frame.slot];
+    if (upload.capacity < totalSize) {
+        // beginFrame() waited for the frame that last used this slot.
+        if (upload.buffer) {
+            context_.evict(upload.buffer);
+            upload.buffer->release();
+        }
+        upload.capacity = totalSize + totalSize / 2;
+        upload.buffer = context_.device()->newBuffer(
+            upload.capacity, MTL::ResourceStorageModeShared | MTL::ResourceCPUCacheModeWriteCombined);
+        upload.buffer->setLabel(str("ImGui upload"));
+        context_.makeResident(upload.buffer);
+    }
+
+    auto* base = static_cast<u8*>(upload.buffer->contents());
+
+    // Orthographic projection from ImGui's top-left origin to NDC (y up), z = 0.
+    const float l = drawData->DisplayPos.x;
+    const float r = drawData->DisplayPos.x + drawData->DisplaySize.x;
+    const float t = drawData->DisplayPos.y;
+    const float b = drawData->DisplayPos.y + drawData->DisplaySize.y;
+    const ImGuiUniforms uniforms{{
+        2.0f / (r - l),    0.0f,              0.0f, 0.0f,
+        0.0f,              2.0f / (t - b),    0.0f, 0.0f,
+        0.0f,              0.0f,              1.0f, 0.0f,
+        (r + l) / (l - r), (t + b) / (b - t), 0.0f, 1.0f,
+    }};
+    std::memcpy(base, &uniforms, sizeof(uniforms));
+
+    size_t vtxCursor = 0;
+    size_t idxCursor = 0;
+    for (const ImDrawList* list : drawData->CmdLists) {
+        std::memcpy(base + verticesOffset + vtxCursor * sizeof(ImDrawVert), list->VtxBuffer.Data,
+                    static_cast<size_t>(list->VtxBuffer.Size) * sizeof(ImDrawVert));
+        std::memcpy(base + indicesOffset + idxCursor * sizeof(ImDrawIdx), list->IdxBuffer.Data,
+                    static_cast<size_t>(list->IdxBuffer.Size) * sizeof(ImDrawIdx));
+        vtxCursor += static_cast<size_t>(list->VtxBuffer.Size);
+        idxCursor += static_cast<size_t>(list->IdxBuffer.Size);
+    }
+
+    // --- Draws -------------------------------------------------------------
+    const MTL::GPUAddress bufferBase = upload.buffer->gpuAddress();
+    const MTL::GPUAddress vertices   = bufferBase + verticesOffset;
+    const MTL::GPUAddress indices    = bufferBase + indicesOffset;
+    setupRenderState(encoder, vertices, bufferBase);
+
+    const ImVec2 clipOffset = drawData->DisplayPos;
+    const ImVec2 clipScale  = drawData->FramebufferScale;
+    ImTextureID boundTexture{};
+    vtxCursor = 0;
+    idxCursor = 0;
+    for (const ImDrawList* list : drawData->CmdLists) {
+        for (const ImDrawCmd& cmd : list->CmdBuffer) {
+            if (cmd.UserCallback) {
+                if (cmd.UserCallback == ImDrawCallback_ResetRenderState) {
+                    setupRenderState(encoder, vertices, bufferBase);
+                    boundTexture = ImTextureID{};
+                } else {
+                    cmd.UserCallback(list, &cmd);
+                }
+                continue;
+            }
+
+            // Clip rectangle in framebuffer pixels, clamped: scissors must lie inside the target.
+            const float x0 = std::max((cmd.ClipRect.x - clipOffset.x) * clipScale.x, 0.0f);
+            const float y0 = std::max((cmd.ClipRect.y - clipOffset.y) * clipScale.y, 0.0f);
+            const float x1 = std::min((cmd.ClipRect.z - clipOffset.x) * clipScale.x, fbWidth);
+            const float y1 = std::min((cmd.ClipRect.w - clipOffset.y) * clipScale.y, fbHeight);
+            if (x1 <= x0 || y1 <= y0 || cmd.ElemCount == 0) continue;
+
+            encoder->setScissorRect(MTL::ScissorRect{static_cast<NS::UInteger>(x0), static_cast<NS::UInteger>(y0),
+                                                     static_cast<NS::UInteger>(x1 - x0),
+                                                     static_cast<NS::UInteger>(y1 - y0)});
+
+            const ImTextureID texture = cmd.GetTexID();
+            if (texture != boundTexture) {
+                arguments_->setTexture(MTL::ResourceID{static_cast<uint64_t>(texture)}, BindImage);
+                boundTexture = texture;
+            }
+
+            const size_t firstIndex = idxCursor + cmd.IdxOffset;
+            encoder->drawIndexedPrimitives(
+                MTL::PrimitiveTypeTriangle, cmd.ElemCount,
+                sizeof(ImDrawIdx) == 2 ? MTL::IndexTypeUInt16 : MTL::IndexTypeUInt32,
+                indices + firstIndex * sizeof(ImDrawIdx), static_cast<NS::UInteger>(cmd.ElemCount) * sizeof(ImDrawIdx),
+                1, static_cast<NS::Integer>(vtxCursor + cmd.VtxOffset), 0);
+        }
+        vtxCursor += static_cast<size_t>(list->VtxBuffer.Size);
+        idxCursor += static_cast<size_t>(list->IdxBuffer.Size);
+    }
+}
+
+} // namespace phosphor

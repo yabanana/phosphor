@@ -42,6 +42,12 @@ struct GPUInstance {
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUInstance) == 80, "GPUInstance layout");
 
+// GPUInstance::flags: bits 0-2 mirror MeshInstanceComponent (visible, casts
+// shadows, static); the renderer adds the bits below.
+// Mirrored: the model matrix has a negative determinant, which reverses the
+// triangle winding on screen, so front_facing must be inverted.
+PHOSPHOR_GPU_CONSTANT u32 INSTANCE_FLAG_MIRRORED = 1u << 3;
+
 PHOSPHOR_GPU_CONSTANT u32 INVALID_TEXTURE_INDEX = 0xFFFFFFFFu;
 
 struct GPUMaterial {

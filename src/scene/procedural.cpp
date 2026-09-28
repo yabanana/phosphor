@@ -74,13 +74,14 @@ MeshData generateTorus(float majorRadius, float minorRadius,
             u32 c = a + 1;
             u32 d = b + 1;
 
+            // Counter-clockwise about the outward normal (engine convention).
             mesh.indices.push_back(a);
-            mesh.indices.push_back(b);
             mesh.indices.push_back(c);
+            mesh.indices.push_back(b);
 
             mesh.indices.push_back(c);
-            mesh.indices.push_back(b);
             mesh.indices.push_back(d);
+            mesh.indices.push_back(b);
         }
     }
 
@@ -124,8 +125,10 @@ MeshData generateSphere(float radius, u32 slices, u32 stacks) {
 
             // Tangent: dP/dphi normalized (along longitude).
             // dP/dphi = (-sinTheta*sinPhi, 0, sinTheta*cosPhi) -> normalize
+            // V grows towards the south pole, so the bitangent (towards -V,
+            // glTF convention) is north: cross(N, T) points south, hence w = -1.
             glm::vec3 tangent(-sinPhi, 0.0f, cosPhi);
-            mesh.tangents.emplace_back(tangent, 1.0f);
+            mesh.tangents.emplace_back(tangent, -1.0f);
 
             float u = static_cast<float>(slice) / static_cast<float>(slices);
             float v = static_cast<float>(stack) / static_cast<float>(stacks);
@@ -141,13 +144,14 @@ MeshData generateSphere(float radius, u32 slices, u32 stacks) {
             u32 c = a + 1;
             u32 d = b + 1;
 
+            // Counter-clockwise about the outward normal (engine convention).
             mesh.indices.push_back(a);
-            mesh.indices.push_back(b);
             mesh.indices.push_back(c);
+            mesh.indices.push_back(b);
 
             mesh.indices.push_back(c);
-            mesh.indices.push_back(b);
             mesh.indices.push_back(d);
+            mesh.indices.push_back(b);
         }
     }
 
@@ -168,7 +172,8 @@ MeshData generateCube(float halfExtent) {
     float h = halfExtent;
 
     // Face data: normal, tangent, and 4 corner positions.
-    // UV layout: (0,0) bottom-left, (1,0) bottom-right, (1,1) top-right, (0,1) top-left
+    // UV layout follows glTF (origin at the image's top-left):
+    // (0,1) bottom-left, (1,1) bottom-right, (1,0) top-right, (0,0) top-left
     struct Face {
         glm::vec3 normal;
         glm::vec3 tangent;
@@ -181,9 +186,9 @@ MeshData generateCube(float halfExtent) {
         // -X face
         { {-1, 0, 0}, { 0, 0, 1}, {{-h,-h,-h}, {-h,-h, h}, {-h, h, h}, {-h, h,-h}} },
         // +Y face (top)
-        { { 0, 1, 0}, { 1, 0, 0}, {{-h, h,-h}, { h, h,-h}, { h, h, h}, {-h, h, h}} },
+        { { 0, 1, 0}, { 1, 0, 0}, {{-h, h, h}, { h, h, h}, { h, h,-h}, {-h, h,-h}} },
         // -Y face (bottom)
-        { { 0,-1, 0}, { 1, 0, 0}, {{-h,-h, h}, { h,-h, h}, { h,-h,-h}, {-h,-h,-h}} },
+        { { 0,-1, 0}, { 1, 0, 0}, {{-h,-h,-h}, { h,-h,-h}, { h,-h, h}, {-h,-h, h}} },
         // +Z face
         { { 0, 0, 1}, { 1, 0, 0}, {{-h,-h, h}, { h,-h, h}, { h, h, h}, {-h, h, h}} },
         // -Z face
@@ -191,7 +196,7 @@ MeshData generateCube(float halfExtent) {
     };
 
     glm::vec2 faceUVs[4] = {
-        {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}
+        {0.0f, 1.0f}, {1.0f, 1.0f}, {1.0f, 0.0f}, {0.0f, 0.0f}
     };
 
     for (u32 f = 0; f < 6; ++f) {
@@ -203,7 +208,7 @@ MeshData generateCube(float halfExtent) {
             mesh.uvs.push_back(faceUVs[v]);
         }
 
-        // Two triangles per face (CCW winding)
+        // Two triangles per face, counter-clockwise about the face normal
         mesh.indices.push_back(base + 0);
         mesh.indices.push_back(base + 1);
         mesh.indices.push_back(base + 2);

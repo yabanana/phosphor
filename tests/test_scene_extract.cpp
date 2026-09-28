@@ -123,3 +123,26 @@ TEST_CASE("lights take position and forward direction from their transform") {
     CHECK(frame.lights[0].direction[2] == doctest::Approx(-1.0f));
     CHECK(frame.lights[0].intensity == doctest::Approx(5.0f));
 }
+
+TEST_CASE("instances with a negative-determinant transform are flagged as mirrored") {
+    GpuScene scene;
+    const MeshData plane = ProceduralMeshes::generatePlane(1.0f, 1.0f, 1, 1);
+    const MeshHandle mesh = scene.uploadMesh(plane.positions, plane.normals, plane.tangents, plane.uvs, plane.indices);
+
+    ECS ecs;
+    addInstance(ecs, mesh, 0, false);
+    const EntityID mirrored = addInstance(ecs, mesh, 0, false);
+    auto& xf = ecs.getComponent<TransformComponent>(mirrored);
+    xf.scale = glm::vec3(1.0f, -1.0f, 1.0f); // e.g. a ceiling made from a floor plane
+    xf.updateMatrix();
+
+    FrameScene fs;
+    extractFrameScene(ecs, scene, fs);
+    REQUIRE(fs.instances.size() == 2);
+    u32 mirroredCount = 0;
+    for (const GPUInstance& gi : fs.instances) {
+        CHECK((gi.flags & 1u) != 0); // component flags (visible) are preserved
+        if (gi.flags & INSTANCE_FLAG_MIRRORED) ++mirroredCount;
+    }
+    CHECK(mirroredCount == 1);
+}

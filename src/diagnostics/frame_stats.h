@@ -19,7 +19,7 @@ class FrameStats {
 public:
     static constexpr u32 HISTORY_SIZE = 300; // ~5 seconds at 60 fps
 
-    /// Primary update path: feed CPU time from Timer and GPU time from profiler.
+    /// Primary update path: frame time (the Timer delta, shown as "Frame") and GPU time.
     void update(const Timer& timer, float gpuMs) {
         cpuMs_ = timer.getDeltaTime() * 1000.0f;
         gpuMs_ = gpuMs;

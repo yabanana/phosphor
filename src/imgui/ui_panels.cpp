@@ -39,12 +39,12 @@ void UIPanels::drawPerformancePanel(const FrameStats& stats, const RendererInfo&
         ImGui::Text("%u x %u", info.width, info.height);
         ImGui::Separator();
 
-        ImGui::Text("FPS %.1f   CPU %.2f ms   GPU %.2f ms", stats.getFPS(), stats.getCpuMs(), info.gpuMs);
+        ImGui::Text("FPS %.1f   Frame %.2f ms   GPU %.2f ms", stats.getFPS(), stats.getCpuMs(), info.gpuMs);
 
         const u32 count = std::min(stats.getSampleCount(), FrameStats::HISTORY_SIZE);
         if (count > 0) {
             char overlay[32];
-            std::snprintf(overlay, sizeof(overlay), "CPU %.2f ms", stats.getCpuMs());
+            std::snprintf(overlay, sizeof(overlay), "Frame %.2f ms", stats.getCpuMs());
             ImGui::PlotLines("##cpu", stats.getCpuHistory().data(), static_cast<int>(count),
                              0, overlay, 0.0f, 33.3f, ImVec2(0, 40));
             std::snprintf(overlay, sizeof(overlay), "GPU %.2f ms", info.gpuMs);

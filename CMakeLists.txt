@@ -45,7 +45,9 @@ set(PHOSPHOR_WARNINGS -Wall -Wextra -Wpedantic -Wno-unused-parameter)
 # --- Portable core ---------------------------------------------------------
 add_library(phosphor_core STATIC
     src/core/input.cpp
+    src/core/launch_options.cpp
     src/core/timer.cpp
+    src/diagnostics/bench_report.cpp
     src/diagnostics/frame_stats.cpp
     src/renderer/gpu_scene.cpp
     src/renderer/meshlet_builder.cpp

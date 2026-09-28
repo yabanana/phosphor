@@ -9,7 +9,8 @@ target_link_libraries(metal_cpp INTERFACE
     "-framework QuartzCore"
 )
 
-# --- Dear ImGui with the SDL3 platform and Metal renderer backends ---
+# --- Dear ImGui with the SDL3 platform backend ---
+# The renderer backend is Phosphor's own (src/imgui/imgui_renderer.cpp, Metal 4).
 add_library(imgui STATIC
     ${imgui_SOURCE_DIR}/imgui.cpp
     ${imgui_SOURCE_DIR}/imgui_draw.cpp
@@ -17,13 +18,9 @@ add_library(imgui STATIC
     ${imgui_SOURCE_DIR}/imgui_widgets.cpp
     ${imgui_SOURCE_DIR}/imgui_demo.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
-    ${imgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
 )
 target_include_directories(imgui SYSTEM PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
-# Expose the metal-cpp overloads of the Metal backend (MTL::Device* etc.).
-target_compile_definitions(imgui PUBLIC IMGUI_IMPL_METAL_CPP)
-target_link_libraries(imgui PUBLIC SDL3::SDL3 metal_cpp)
-# imgui_impl_metal.mm (v1.91) uses manual retain/release: compile without ARC.
+target_link_libraries(imgui PUBLIC SDL3::SDL3)
 
 # --- Metal toolchain check ---
 # Since Xcode 26 the Metal compiler ships as a separate component; fail at
@@ -80,7 +77,9 @@ add_custom_target(phosphor_shaders DEPENDS ${PHOSPHOR_METALLIB})
 add_executable(phosphor
     src/main.cpp
     src/app/engine.cpp
+    src/imgui/imgui_renderer.cpp
     src/imgui/ui_panels.cpp
+    src/platform/metal/frame_capture.cpp
     src/platform/metal/metal_context.cpp
     src/platform/metal/metal_impl.cpp
     src/platform/metal/metal_texture_manager.cpp

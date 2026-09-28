@@ -16,12 +16,13 @@ file(GLOB PHOSPHOR_METAL_HOST_SOURCES CONFIGURE_DEPENDS
 set(_flags
     -std=c++20 -fsyntax-only -fblocks -Wall -Wextra -Wno-unused-parameter
     -DGLM_FORCE_DEPTH_ZERO_TO_ONE -DGLM_FORCE_RADIANS -DGLM_ENABLE_EXPERIMENTAL
-    -DIMGUI_IMPL_METAL_CPP -DPHOSPHOR_METAL_SYNTAX_CHECK
+    -DPHOSPHOR_METAL_SYNTAX_CHECK
     -isystem ${CMAKE_SOURCE_DIR}/tools/apple-sdk-stubs
     -isystem ${metal_cpp_SOURCE_DIR}
     -isystem ${glm_SOURCE_DIR}
     -isystem ${imgui_SOURCE_DIR}
     -isystem ${imgui_SOURCE_DIR}/backends
+    -isystem ${tinygltf_SOURCE_DIR}
     -I ${CMAKE_SOURCE_DIR}/src
 )
 if(DEFINED sdl3_SOURCE_DIR)

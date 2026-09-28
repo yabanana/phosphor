@@ -1,12 +1,16 @@
 #pragma once
 
+#include "core/launch_options.h"
 #include "core/types.h"
+#include "diagnostics/bench_report.h"
 #include "imgui/ui_panels.h"
 #include "renderer/scene_extract.h"
 #include "testbench/testbench.h"
 
+#include <chrono>
 #include <memory>
 #include <optional>
+#include <vector>
 
 struct SDL_Window;
 
@@ -14,8 +18,10 @@ namespace phosphor {
 
 class Camera;
 class ECS;
+class FrameCapture;
 class FrameStats;
 class GpuScene;
+class ImGuiRenderer;
 class Input;
 class MetalContext;
 class MetalTextureManager;
@@ -42,7 +48,10 @@ private:
     void handleShortcuts();
     void switchTestBench(TestBenchType type);
     void aimCamera(const CameraSetup& setup);
-    void frame(float dt);
+    /// Simulate and render one frame; false if nothing was presented.
+    bool frame(float dt);
+    void recordBenchmarkFrame(float dt, float cpuMs, float waitMs);
+    void finishBenchmark();
 
     SDL_Window* window_    = nullptr;
     void*       metalView_ = nullptr; // SDL_MetalView
@@ -50,6 +59,8 @@ private:
     std::unique_ptr<MetalContext>        context_;
     std::unique_ptr<SceneRenderer>       renderer_;
     std::unique_ptr<MetalTextureManager> textures_;
+    std::unique_ptr<ImGuiRenderer>       imguiRenderer_;
+    std::unique_ptr<FrameCapture>        capture_;
 
     std::unique_ptr<ECS>        ecs_;
     std::unique_ptr<GpuScene>   gpuScene_;
@@ -62,8 +73,16 @@ private:
     TestBenchType              currentBench_ = TestBenchType::TorusDemo;
     std::optional<TestBenchType> pendingBench_;
 
+    LaunchOptions  options_;
+    // Benchmark mode (--frames): presented frames so far and measured samples.
+    u32                      presentedFrames_ = 0;
+    std::vector<FrameSample> samples_;
+    // CPU time spent blocked in beginFrame() (slot + drawable waits).
+    std::chrono::steady_clock::duration frameWait_{};
+
     FrameScene     frameScene_;
     RenderSettings settings_;
+    bool           captured_  = false;
     bool           orbitMode_ = false;
     bool           running_   = true;
 };
