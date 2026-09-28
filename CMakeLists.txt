@@ -50,6 +50,7 @@ add_library(phosphor_core STATIC
     src/core/memory/memory_budget.cpp
     src/core/memory/tlsf_allocator.cpp
     src/core/timer.cpp
+    src/core/worker_pool.cpp
     src/diagnostics/bench_report.cpp
     src/diagnostics/frame_stats.cpp
     src/renderer/gpu_scene.cpp
@@ -76,7 +77,8 @@ add_library(phosphor_core STATIC
     src/testbench/torus_demo.cpp
 )
 target_include_directories(phosphor_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(phosphor_core PUBLIC glm::glm SDL3::SDL3 meshoptimizer tinygltf mikktspace)
+find_package(Threads REQUIRED)
+target_link_libraries(phosphor_core PUBLIC Threads::Threads glm::glm SDL3::SDL3 meshoptimizer tinygltf mikktspace)
 target_compile_definitions(phosphor_core PUBLIC
     GLM_FORCE_DEPTH_ZERO_TO_ONE
     GLM_FORCE_RADIANS

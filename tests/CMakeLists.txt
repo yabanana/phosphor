@@ -23,6 +23,7 @@ add_executable(phosphor_tests
     test_texture_manager.cpp
     test_testbenches.cpp
     test_tlsf.cpp
+    test_worker_pool.cpp
 )
 target_link_libraries(phosphor_tests PRIVATE phosphor_core doctest::doctest)
 target_compile_options(phosphor_tests PRIVATE ${PHOSPHOR_WARNINGS})
