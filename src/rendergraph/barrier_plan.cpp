@@ -53,14 +53,24 @@ void legalise(Stages& before, const BarrierRules& rules) {
     }
 }
 
+void legaliseAfter(Stages& after, const BarrierRules& rules) {
+    if (after & rules.unsupportedAfter) {
+        after &= ~rules.unsupportedAfter;
+        after |= rules.afterPromoteTo;
+    }
+}
+
 } // namespace
 
 BarrierRules defaultBarrierRules() {
-    // Provisional until the F2.3 spike.
+    // Measured by the F2.3 spike (table in barrier_plan.h).
     BarrierRules rules;
-    rules.rasterUnsupportedBefore     = StageFragment | StageTile;
+    rules.rasterUnsupportedBefore     = StageTile;
     rules.rasterPromoteTo             = StageGeometry;
+    rules.unsupportedAfter            = StageTile;
+    rules.afterPromoteTo              = StageFragment;
     rules.rasterForbiddenEncoderAfter = StageFragment | StageTile;
+    rules.computeEncoderStages        = StageDispatch | StageBlit | StageAccelerationStructure;
     return rules;
 }
 
@@ -106,6 +116,7 @@ void buildBarrierPlan(const RenderGraph& graph, CompiledGraph& compiled, const B
         const bool raster = isRasterAt(cp);
 
         if (raster) legalise(before, rules);
+        legaliseAfter(after, rules);
 
         if (sameEncoder) {
             if (raster && (after & rules.rasterForbiddenEncoderAfter)) {
@@ -113,6 +124,14 @@ void buildBarrierPlan(const RenderGraph& graph, CompiledGraph& compiled, const B
                                           "' on resource " + std::to_string(d.resource) +
                                           ": encoder-scope barrier inside a render encoder after stages " +
                                           stagesName(after & rules.rasterForbiddenEncoderAfter));
+                compiled.ok = false;
+                continue;
+            }
+            if (!raster && ((after | before) & ~rules.computeEncoderStages)) {
+                compiled.errors.push_back("barrier '" + producer.name + "' -> '" + consumer.name +
+                                          "' on resource " + std::to_string(d.resource) +
+                                          ": encoder-scope barrier inside a compute encoder with stages " +
+                                          stagesName((after | before) & ~rules.computeEncoderStages));
                 compiled.ok = false;
                 continue;
             }
@@ -153,6 +172,7 @@ void buildBarrierPlan(const RenderGraph& graph, CompiledGraph& compiled, const B
         }
 
         if (isRasterAt(firstPos)) legalise(before, rules);
+        legaliseAfter(afterQueue, rules);
         out.add(queuePosition(firstPos), BarrierScope::Queue, p.aliased, afterQueue, before, p.resource);
         if (encoderBarrier) out.add(firstPos, BarrierScope::Encoder, p.aliased, afterEncoder, before, p.resource);
     }

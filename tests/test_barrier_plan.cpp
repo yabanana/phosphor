@@ -80,9 +80,14 @@ TEST_CASE("barriers: stagesName") {
 
 TEST_CASE("barriers: default rules") {
     const BarrierRules r = defaultBarrierRules();
-    CHECK(r.rasterUnsupportedBefore == (StageFragment | StageTile));
+    // Measured by the F2.3 spike: Fragment synchronises on the consumer side,
+    // Tile is accepted but synchronises nothing.
+    CHECK(r.rasterUnsupportedBefore == StageTile);
     CHECK(r.rasterPromoteTo == StageGeometry);
+    CHECK(r.unsupportedAfter == StageTile);
+    CHECK(r.afterPromoteTo == StageFragment);
     CHECK(r.rasterForbiddenEncoderAfter == (StageFragment | StageTile));
+    CHECK(r.computeEncoderStages == (StageDispatch | StageBlit | StageAccelerationStructure));
 }
 
 TEST_CASE("barriers: compute to compute in one encoder is an encoder-scope barrier") {
@@ -108,7 +113,7 @@ TEST_CASE("barriers: compute to compute in one encoder is an encoder-scope barri
     CHECK(b.resources == std::vector<u32>{0});
 }
 
-TEST_CASE("barriers: compute to raster fragment read is promoted at group start") {
+TEST_CASE("barriers: compute to raster fragment read waits in fragment at group start") {
     RenderGraph g;
     TextureRef tex;
     TextureRef target = g.importTexture("target", colorDesc(), ImportOutput);
@@ -125,7 +130,7 @@ TEST_CASE("barriers: compute to raster fragment read is promoted at group start"
     const Barrier& b = c.barriers[0].barriers[0];
     CHECK(b.scope == BarrierScope::Queue);
     CHECK(b.afterStages == StageDispatch);
-    CHECK(b.beforeStages == kGeometry);
+    CHECK(b.beforeStages == StageFragment);
 }
 
 TEST_CASE("barriers: raster to compute waits after fragment") {
@@ -164,7 +169,7 @@ TEST_CASE("barriers: render to render shadow map sampled in fragment") {
     const Barrier& b = c.barriers[0].barriers[0];
     CHECK(b.scope == BarrierScope::Queue);
     CHECK(b.afterStages == StageFragment);
-    CHECK(b.beforeStages == kGeometry);
+    CHECK(b.beforeStages == StageFragment);
     CHECK(c.ok);
 }
 
@@ -202,7 +207,7 @@ TEST_CASE("barriers: blit upload then fragment sampling") {
     const Barrier& b = c.barriers[0].barriers[0];
     CHECK(b.scope == BarrierScope::Queue);
     CHECK(b.afterStages == StageBlit);
-    CHECK(b.beforeStages == kGeometry);
+    CHECK(b.beforeStages == StageFragment);
 }
 
 TEST_CASE("barriers: WAR uses the reader's stages on the after side") {
@@ -303,7 +308,7 @@ TEST_CASE("barriers: consumers inside a group are hoisted to its start and merge
     REQUIRE(c.barriers.size() == 1);
     CHECK(c.barriers[0].position == 1);
     REQUIRE(c.barriers[0].barriers.size() == 1);
-    CHECK(c.barriers[0].barriers[0].beforeStages == kGeometry);
+    CHECK(c.barriers[0].barriers[0].beforeStages == (StageVertex | StageFragment));
     CHECK(c.barriers[0].barriers[0].resources == std::vector<u32>{1, 2}); // target = 0
 }
 
@@ -338,7 +343,7 @@ TEST_CASE("barriers: aliased first use gets an aliasing barrier with the union o
     CHECK(b.scope == BarrierScope::Queue);
     CHECK(b.aliasing);
     CHECK(b.afterStages == (StageDispatch | StageFragment));
-    CHECK(b.beforeStages == kGeometry);
+    CHECK(b.beforeStages == StageFragment);
     CHECK(b.resources == std::vector<u32>{2});
 
     // Position 0: t1's own first use, not aliased.
@@ -372,7 +377,7 @@ TEST_CASE("barriers: non-aliased transient first use still gets a queue barrier"
     CHECK(b.scope == BarrierScope::Queue);
     CHECK_FALSE(b.aliasing);
     CHECK(b.afterStages == (StageFragment | StageDispatch)); // previous frame's use of the same memory
-    CHECK(b.beforeStages == kGeometry);
+    CHECK(b.beforeStages == StageFragment);
     CHECK(b.resources == std::vector<u32>{0});
     // Plus the dependency barrier at position 1.
     REQUIRE(at(c, 1));
@@ -508,4 +513,42 @@ TEST_CASE("barriers: same-queue dependencies produce no queue sync") {
     CompiledGraph c = plan(g, {{PassType::Compute, 0, 1}});
     buildQueueSyncs(g, c);
     CHECK(c.queueSyncs.empty());
+}
+
+TEST_CASE("barriers: tile stages are promoted (accepted by Metal but ineffective)") {
+    RenderGraph g;
+    TextureRef tex;
+    TextureRef target = g.importTexture("target", colorDesc(), ImportOutput);
+    g.addPass("gen", PassType::Raster, [&](PassBuilder& b) {
+        tex = b.createTexture("tex", colorDesc());
+        tex = b.write(tex, Usage::ShaderWrite, StageTile); // e.g. a tile shader store
+        b.writeColor(b.createTexture("scratch", colorDesc()), 0, LoadIntent::Clear);
+    }, {});
+    g.addPass("use", PassType::Raster, [&](PassBuilder& b) {
+        b.read(tex, Usage::ShaderRead, StageTile);
+        b.writeColor(target, 0, LoadIntent::Clear);
+    }, {});
+    const CompiledGraph c = plan(g, {{PassType::Raster, 0, 0}, {PassType::Raster, 1, 1}});
+    REQUIRE(c.ok);
+    REQUIRE(c.barriers.size() == 1);
+    const Barrier& b = c.barriers[0].barriers[0];
+    CHECK(b.scope == BarrierScope::Queue);
+    CHECK(b.afterStages == StageFragment);  // Tile -> Fragment
+    CHECK(b.beforeStages == kGeometry);     // Tile -> Vertex|Object|Mesh
+}
+
+TEST_CASE("barriers: encoder-scope barrier with raster stages inside a compute encoder is an error") {
+    RenderGraph g;
+    BufferRef buf;
+    g.addPass("a", PassType::Compute, [&](PassBuilder& b) {
+        buf = b.write(b.createBuffer("buf", {1024}), Usage::ShaderWrite, StageDispatch);
+    }, {});
+    g.addPass("b", PassType::Compute, [&](PassBuilder& b) {
+        b.read(buf, Usage::ShaderRead, StageFragment); // nonsensical for a compute pass
+        b.setSideEffect();
+    }, {});
+    const CompiledGraph c = plan(g, {{PassType::Compute, 0, 1}});
+    CHECK_FALSE(c.ok);
+    REQUIRE_FALSE(c.errors.empty());
+    CHECK(c.errors.back().find("compute encoder") != std::string::npos);
 }
