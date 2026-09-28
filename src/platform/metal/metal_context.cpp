@@ -69,6 +69,7 @@ MetalContext::MetalContext(CA::MetalLayer* layer, const std::string& libraryPath
     for (u32 i = 0; i < METAL_FRAMES_IN_FLIGHT; ++i) {
         allocators_[i]     = device_->newCommandAllocator();
         commandBuffers_[i] = device_->newCommandBuffer();
+        commandBuffers_[i]->setLabel(str("Frame"));
     }
     uploadAllocator_     = device_->newCommandAllocator();
     uploadCommandBuffer_ = device_->newCommandBuffer();
@@ -186,7 +187,6 @@ bool MetalContext::beginFrame(Frame& frame) {
     allocators_[slot]->reset();
     MTL4::CommandBuffer* cmd = commandBuffers_[slot];
     cmd->beginCommandBuffer(allocators_[slot]);
-    cmd->setLabel(str("Scene"));
 
     frame.commandBuffer = cmd;
     frame.drawable      = drawable;
@@ -206,25 +206,32 @@ void MetalContext::submitFrame(Frame& frame) {
     // signalled after the work that renders to it, before present().
     queue_->wait(frame.drawable);
     const MTL4::CommandBuffer* buffers[] = {frame.commandBuffer};
+    // A fresh options object per commit: a reused MTL4CommitOptions stops
+    // delivering feedback after its first commit (measured: 0 of 600 frames).
+    // This small per-frame allocation is the one accepted exception to O7.
     MTL4::CommitOptions* options = MTL4::CommitOptions::alloc()->init();
-    const u64 index = frame.index;
-    options->addFeedbackHandler([this, index](MTL4::CommitFeedback* feedback) {
-        if (feedback->error()) return;
-        const float ms = static_cast<float>((feedback->GPUEndTime() - feedback->GPUStartTime()) * 1000.0);
-        lastGpuMs_.store(ms, std::memory_order_relaxed);
-        std::lock_guard lock(gpuTimesMutex_);
-        if (index >= gpuTimesFirst_ && index - gpuTimesFirst_ < gpuTimes_.size()) {
-            gpuTimes_[index - gpuTimesFirst_] = ms;
-            ++gpuTimesReceived_;
-            gpuTimesCv_.notify_all();
-        }
-    });
+    options->addFeedbackHandler([this](MTL4::CommitFeedback* feedback) { onFrameFeedback(feedback); });
     queue_->commit(buffers, 1, options);
     options->release();
     queue_->signalDrawable(frame.drawable);
     frame.drawable->present();
     queue_->signalEvent(frameEvent_, frameDoneValue(frame.index));
     ++frameIndex_;
+}
+
+void MetalContext::onFrameFeedback(MTL4::CommitFeedback* feedback) {
+    // Only frame commits register this handler, and feedback for one queue
+    // arrives in commit order, so the n-th feedback belongs to frame n.
+    const u64 index = feedbackCount_.fetch_add(1, std::memory_order_relaxed);
+    if (feedback->error()) return;
+    const float ms = static_cast<float>((feedback->GPUEndTime() - feedback->GPUStartTime()) * 1000.0);
+    lastGpuMs_.store(ms, std::memory_order_relaxed);
+    std::lock_guard lock(gpuTimesMutex_);
+    if (index >= gpuTimesFirst_ && index - gpuTimesFirst_ < gpuTimes_.size()) {
+        gpuTimes_[index - gpuTimesFirst_] = ms;
+        ++gpuTimesReceived_;
+        gpuTimesCv_.notify_all();
+    }
 }
 
 void MetalContext::beginGpuTimeCapture(u32 frames) {

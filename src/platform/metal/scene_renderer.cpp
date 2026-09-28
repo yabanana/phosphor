@@ -43,6 +43,17 @@ SceneRenderer::SceneRenderer(MetalContext& context)
     depthState_ = context_.device()->newDepthStencilState(dsDesc);
     dsDesc->release();
 
+    passDesc_ = MTL4::RenderPassDescriptor::alloc()->init();
+    MTL::RenderPassColorAttachmentDescriptor* color = passDesc_->colorAttachments()->object(0);
+    color->setLoadAction(MTL::LoadActionClear);
+    color->setStoreAction(MTL::StoreActionStore);
+    color->setClearColor(MTL::ClearColor::Make(0.02, 0.025, 0.035, 1.0));
+    MTL::RenderPassDepthAttachmentDescriptor* depth = passDesc_->depthAttachment();
+    depth->setLoadAction(MTL::LoadActionClear);
+    depth->setStoreAction(MTL::StoreActionDontCare);
+    depth->setClearDepth(0.0); // reverse-Z: far = 0
+    passLabel_ = str("Forward")->retain();
+
     NS::Error* error = nullptr;
     MTL4::ArgumentTableDescriptor* atDesc = MTL4::ArgumentTableDescriptor::alloc()->init();
     atDesc->setMaxBufferBindCount(BindCount);
@@ -58,6 +69,8 @@ SceneRenderer::~SceneRenderer() {
     context_.waitIdle();
     releaseGeometry();
     context_.memory().release(depth_, MemoryCategory::RenderTargets);
+    passLabel_->release();
+    passDesc_->release();
     arguments_->release();
     depthState_->release();
     pipeline_->release();
@@ -162,21 +175,15 @@ MTL4::RenderCommandEncoder* SceneRenderer::render(MetalContext::Frame& frame, co
         std::memcpy(base + lightsOffset, fs.lights.data(), fs.lights.size() * sizeof(GPULight));
 
     // --- Render pass ------------------------------------------------------
-    MTL4::RenderPassDescriptor* pass = MTL4::RenderPassDescriptor::alloc()->init();
-    MTL::RenderPassColorAttachmentDescriptor* color = pass->colorAttachments()->object(0);
-    color->setTexture(target);
-    color->setLoadAction(MTL::LoadActionClear);
-    color->setStoreAction(MTL::StoreActionStore);
-    color->setClearColor(MTL::ClearColor::Make(0.02, 0.025, 0.035, 1.0));
-    MTL::RenderPassDepthAttachmentDescriptor* depth = pass->depthAttachment();
-    depth->setTexture(depth_);
-    depth->setLoadAction(MTL::LoadActionClear);
-    depth->setStoreAction(MTL::StoreActionDontCare);
-    depth->setClearDepth(0.0); // reverse-Z: far = 0
+    // The descriptor is reused (O7): only the per-frame textures change.
+    passDesc_->colorAttachments()->object(0)->setTexture(target);
+    passDesc_->depthAttachment()->setTexture(depth_);
 
-    MTL4::RenderCommandEncoder* enc = frame.commandBuffer->renderCommandEncoder(pass);
-    pass->release();
-    enc->setLabel(str("Forward"));
+    MTL4::RenderCommandEncoder* enc = frame.commandBuffer->renderCommandEncoder(passDesc_);
+    // The encoder has copied the descriptor: drop its reference to the
+    // drawable so the layer can recycle it as soon as it is presented.
+    passDesc_->colorAttachments()->object(0)->setTexture(nullptr);
+    enc->setLabel(passLabel_);
 
     lastTriangles_ = 0;
     if (vertexBuffer_ && indexBuffer_ && !fs.batches.empty()) {

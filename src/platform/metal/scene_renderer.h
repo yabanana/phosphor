@@ -54,6 +54,8 @@ private:
     MTL::RenderPipelineState* pipeline_   = nullptr;
     MTL::DepthStencilState*   depthState_ = nullptr;
     MTL4::ArgumentTable*      arguments_  = nullptr;
+    MTL4::RenderPassDescriptor* passDesc_ = nullptr;
+    NS::String*               passLabel_  = nullptr;
     MTL::Texture*             depth_      = nullptr;
 
     MTL::Buffer* vertexBuffer_ = nullptr;

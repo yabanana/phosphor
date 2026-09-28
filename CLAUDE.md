@@ -29,9 +29,11 @@ extend it; port algorithms from it.
   catch runtime errors, and **MSL shaders are only compiled on macOS** (CI job
   `app-macos`), so be extra careful with `.metal` edits and say so when they are
   unverified.
-- Visual/validation check on macOS: `MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1
-  MTL_DEBUG_LAYER_WARNING_MODE=nslog ./build/phosphor --bench N --frames 60
-  --capture out.png` (exits by itself; the PNG can be inspected).
+- Visual/validation check on macOS: `tools/visual_check.sh build build/reference`
+  (all benches under API + shader validation, pixel diff against references
+  taken with `--update` before a change). Bench switching:
+  `./build/phosphor --frames 300 --warmup 0 --switch-every 20` with the same
+  environment variables.
 - Before calling a Metal API, check its exact signature in the fetched
   metal-cpp headers (`build/linux/_deps/metal_cpp-src/Metal/MTL4*.hpp`); Metal 4
   names differ from Metal 3 (e.g. no `setVertexBytes`, draws take GPU addresses,

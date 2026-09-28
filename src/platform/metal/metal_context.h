@@ -129,6 +129,7 @@ public:
 
 private:
     void flushResidency();
+    void onFrameFeedback(MTL4::CommitFeedback* feedback);
     void waitForValue(u64 value);
 
     CA::MetalLayer*        layer_       = nullptr;
@@ -161,7 +162,8 @@ private:
     std::unique_ptr<UploadRing> staging_;
     std::vector<std::function<void(MTL4::ComputeCommandEncoder*)>> queuedUploads_;
 
-    std::atomic<float> lastGpuMs_{0.0f};
+    std::atomic<u64>     feedbackCount_{0};
+    std::atomic<float>   lastGpuMs_{0.0f};
     // Benchmark capture: frame index -> GPU ms, filled by commit feedback
     // handlers on a Metal thread.  Feedback can arrive after the frame event,
     // so the reader waits on the received count, not on waitIdle().
