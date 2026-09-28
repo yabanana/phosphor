@@ -1,7 +1,5 @@
 # App.cmake -- the macOS Metal 4 application (included only on Apple hosts).
 
-enable_language(OBJCXX)
-
 # --- metal-cpp (header-only) ---
 add_library(metal_cpp INTERFACE)
 target_include_directories(metal_cpp SYSTEM INTERFACE ${metal_cpp_SOURCE_DIR})

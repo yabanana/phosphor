@@ -8,6 +8,12 @@ endif()
 
 project(phosphor LANGUAGES C CXX)
 
+if(APPLE)
+    # Objective-C++ (ImGui's Metal backend) must be enabled before any
+    # subdirectory is added, or CMake cannot generate its rules.
+    enable_language(OBJC OBJCXX)
+endif()
+
 # ---------------------------------------------------------------------------
 # Phosphor -- native Metal 4 renderer for Apple Silicon.
 #
