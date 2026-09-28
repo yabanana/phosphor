@@ -55,6 +55,11 @@ add_library(phosphor_core STATIC
     src/renderer/gpu_scene.cpp
     src/renderer/meshlet_builder.cpp
     src/renderer/scene_extract.cpp
+    src/rendergraph/aliasing.cpp
+    src/rendergraph/barrier_plan.cpp
+    src/rendergraph/graph_dump.cpp
+    src/rendergraph/render_graph.cpp
+    src/rendergraph/tbdr_passes.cpp
     src/scene/camera.cpp
     src/scene/ecs.cpp
     src/scene/gltf_loader.cpp
