@@ -102,6 +102,12 @@ target_compile_definitions(phosphor_core PUBLIC
     GLM_ENABLE_EXPERIMENTAL
 )
 target_compile_options(phosphor_core PRIVATE ${PHOSPHOR_WARNINGS})
+if(PHOSPHOR_TRACY)
+    # PUBLIC: PHOSPHOR_TRACY selects the real macros of core/profile.h in the
+    # app and the tests as well.
+    target_link_libraries(phosphor_core PUBLIC TracyClient)
+    target_compile_definitions(phosphor_core PUBLIC PHOSPHOR_TRACY)
+endif()
 # Third-party single-header implementations compiled in gltf_loader.cpp.
 set_source_files_properties(src/scene/gltf_loader.cpp PROPERTIES COMPILE_OPTIONS "-w")
 

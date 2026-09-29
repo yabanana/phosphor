@@ -1,6 +1,7 @@
 #include "platform/metal/pipeline_cache.h"
 
 #include "core/log.h"
+#include "core/profile.h"
 #include "platform/metal/metal_context.h"
 #include "platform/metal/metal_graph_executor.h"
 
@@ -305,6 +306,7 @@ void PipelineCache::submit(pipe::PipelineHandle handle, const pipe::PipelineDesc
                            MTL::Library* library, bool allowFallback) {
     queue_->submit(pipe::CompilePriority::Urgent, generation,
                    [this, handle, desc, generation, library, allowFallback, ref = retainLibrary(library)] {
+                       PH_ZONE("Pipeline resolve");
                        resolve(handle, desc, generation, library, allowFallback);
                    });
 }
@@ -343,7 +345,11 @@ void PipelineCache::resolve(pipe::PipelineHandle handle, const pipe::PipelineDes
             MTL4::PipelineDescriptor* d = buildDescriptor(generic, library);
             NS::Error* error = nullptr;
             const Clock::time_point start = Clock::now();
-            MTL::RenderPipelineState* fallback = compiler_->newRenderPipelineStateBySpecialization(d, base, &error);
+            MTL::RenderPipelineState* fallback = nullptr;
+            {
+                PH_ZONE("Pipeline fallback specialise");
+                fallback = compiler_->newRenderPipelineStateBySpecialization(d, base, &error);
+            }
             ms += msSince(start);
             ++calls;
             d->release();
@@ -393,6 +399,8 @@ void PipelineCache::resolve(pipe::PipelineHandle handle, const pipe::PipelineDes
 }
 
 NS::Object* PipelineCache::compileFinal(const pipe::PipelineDesc& desc, MTL::Library* library, NS::Error** error) {
+    PH_ZONE("Pipeline compile");
+    PH_ZONE_TEXT(desc.label.c_str(), desc.label.size());
     MTL4::PipelineDescriptor* d = buildDescriptor(desc, library);
     NS::Object* object = nullptr;
     if (desc.kind == pipe::PipelineKind::Compute) {

@@ -1,4 +1,5 @@
 #include "core/worker_pool.h"
+#include "core/profile.h"
 
 #include <cstdio>
 
@@ -19,10 +20,12 @@ void configureCurrentThread(u32 id) {
     std::snprintf(name, sizeof(name), "phosphor-worker-%u", id);
     pthread_setname_np(name);
     pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+    PH_THREAD_NAME(name);
 #elif defined(__linux__)
     // Linux limits thread names to 15 characters: "phosphor-worker-" would not fit.
     std::snprintf(name, sizeof(name), "phos-worker-%u", id % 1000);
     pthread_setname_np(pthread_self(), name);
+    PH_THREAD_NAME(name);
 #else
     (void)name;
     (void)id;
@@ -56,7 +59,10 @@ u32 WorkerPool::participate(u32 gen, u32 count, Job job, void* user) {
         if (index >= count) break;
         if (cursor_.compare_exchange_weak(cur, cur + 1, std::memory_order_acq_rel,
                                           std::memory_order_acquire)) {
-            job(user, index);
+            {
+                PH_ZONE("Worker job");
+                job(user, index);
+            }
             ++ran;
             cur = cursor_.load(std::memory_order_acquire);
         }

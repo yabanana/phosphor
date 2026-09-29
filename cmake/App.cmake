@@ -138,6 +138,12 @@ add_executable(phosphor
     src/platform/metal/upload_ring.cpp
 )
 target_link_libraries(phosphor PRIVATE phosphor_core imgui metal_cpp)
+if(PHOSPHOR_TRACY)
+    # Global operator new/delete replacement: part of the executable (not of
+    # phosphor_core) so it is always linked and the unit tests, which count
+    # allocations with their own operators, are unaffected.
+    target_sources(phosphor PRIVATE src/core/tracy_memory.cpp)
+endif()
 target_compile_options(phosphor PRIVATE ${PHOSPHOR_WARNINGS})
 add_dependencies(phosphor phosphor_shaders phosphor_probe_shaders)
 # F3.6 hot reload rebuilds the metallib with exactly these flags ('|'-joined:

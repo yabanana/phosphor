@@ -1,4 +1,5 @@
 #include "platform/metal/scene_renderer.h"
+#include "core/profile.h"
 #include "platform/metal/gpu_memory.h"
 #include "platform/metal/pipeline_cache.h"
 #include "pipeline/forward_variants.h"
@@ -117,6 +118,7 @@ void SceneRenderer::syncGeometry(const GpuScene& scene) {
 
 void SceneRenderer::prepareFrame(const GpuScene& scene, const FrameScene& fs, const FrameConstants& constants,
                                  MTL::GPUAddress textureTable, u32 width, u32 height) {
+    PH_ZONE("Scene prepare");
     scene_      = &scene;
     frameScene_ = &fs;
     width_      = width;
@@ -169,6 +171,7 @@ void SceneRenderer::prepareFrame(const GpuScene& scene, const FrameScene& fs, co
 }
 
 void SceneRenderer::encode(MTL4::RenderCommandEncoder* enc, u32 chunk, u32 chunks) const {
+    PH_ZONE("Forward encode");
     if (!scene_ || !frameScene_ || !vertexBuffer_ || !indexBuffer_ || frameScene_->batches.empty() || !pipeline_) return;
 
     enc->setRenderPipelineState(pipeline_);

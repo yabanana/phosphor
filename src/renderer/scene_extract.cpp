@@ -1,4 +1,5 @@
 #include "renderer/scene_extract.h"
+#include "core/profile.h"
 #include "renderer/gpu_scene.h"
 #include "scene/components.h"
 #include "scene/ecs.h"
@@ -32,6 +33,7 @@ GPUMaterial toGPUMaterial(const MaterialComponent& mat) {
 }
 
 void extractFrameScene(ECS& ecs, const GpuScene& scene, FrameScene& out) {
+    PH_ZONE("Scene extract");
     out.instances.clear();
     out.materials.clear();
     out.lights.clear();
