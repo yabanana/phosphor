@@ -239,3 +239,28 @@ TEST_CASE("dump: names are escaped and culled passes are dashed") {
     CHECK(contains(dot, "culled"));
     CHECK(count(dot, '{') == count(dot, '}'));
 }
+
+TEST_CASE("dump: cross-queue syncs are drawn as event edges") {
+    RenderGraph g;
+    BufferRef s, r;
+    const BufferRef out = g.importBuffer("out", {256}, ImportOutput | ImportPerFrame);
+    g.addPass("seed", PassType::Compute, [&](PassBuilder& b) {
+        s = b.write(b.createBuffer("S", {4096}), Usage::ShaderWrite, StageDispatch);
+    }, nullptr);
+    g.addPass("reduce", PassType::Compute, Queue::AsyncCompute, [&](PassBuilder& b) {
+        b.read(s, Usage::ShaderRead, StageDispatch);
+        r = b.write(b.createBuffer("R", {256}), Usage::ShaderWrite, StageDispatch);
+    }, nullptr);
+    g.addPass("consume", PassType::Compute, [&](PassBuilder& b) {
+        b.read(r, Usage::ShaderRead, StageDispatch);
+        b.write(out, Usage::ShaderWrite, StageDispatch);
+    }, nullptr);
+    const CompiledGraph c = compile(g);
+    REQUIRE(c.ok);
+    REQUIRE(c.queueSyncs.size() == 2);
+    const std::string dot = dumpGraphviz(g, c);
+    CHECK(dot.find("p0 -> p1 [label=\"event 1\"") != std::string::npos);
+    CHECK(dot.find("p1 -> p2 [label=\"event 2\"") != std::string::npos);
+    CHECK(dot.find("async") != std::string::npos);
+    CHECK(dot.find("[imported, per-frame]") != std::string::npos);
+}

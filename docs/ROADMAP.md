@@ -129,8 +129,8 @@ ipotesi da validare con uno spike, non come tecniche già provate.
 | # | Fase | Tag | Era |
 |---|---|---|---|
 | F0 | Fondamenta Metal 4 ✅ (manca F0.8 su T0) | CORE | I · Fondamenta |
-| F1 | Memoria, heap e residency | CORE | I |
-| F2 | Render graph e sincronizzazione automatica | CORE | I |
+| F1 | Memoria, heap e residency ✅ | CORE | I |
+| F2 | Render graph e sincronizzazione automatica ✅ | CORE | I |
 | F3 | Pipeline: compilazione asincrona e archivi AOT | CORE | I |
 | F4 | Osservabilità: profiler, contatori, cattura, perf log | CORE | I |
 | OPT-0 | Caratterizzazione del SoC (`bench/`, modello di costo) | OPT | I |
@@ -227,7 +227,7 @@ prime misure di velocità reali.
 - [x] F0.7 Zero errori con `MTL_DEBUG_LAYER=1` sui testbench 1–7 (API + shader validation, anche con cambio bench `--switch-every`; verificato il 2026-09-28)
 - [ ] F0.8 Baseline FPS/GPU ms di ogni testbench su M5 Max (e T0) in `docs/perf-log.md` — M5 Max misurato il 2026-09-28 (anche su alimentazione di rete, tabella di riferimento in `perf-log.md`); **T0 da misurare: serve un Mac M3/M4/M5 base, non disponibile**
 
-## F1 — Memoria, heap e residency [CORE]
+## F1 — Memoria, heap e residency ✅ [CORE]
 
 **Obiettivo**: controllo totale della memoria GPU, zero allocazioni nel frame (O7).
 

@@ -522,7 +522,9 @@ void MetalGraphExecutor::execute(MetalContext::Frame& frame) {
     MTL4::CommandBuffer* asyncCmd = nullptr;
     bool graphicsClosed = false, asyncClosed = true, firstAsync = true;
     if (segmented_) {
-        graphicsSub_ = openSubmission(frame, SubmitQueue::Graphics, 0, 0);
+        // Graphics frame N may reuse what async frame N-1 still uses (an async
+        // pass need not feed a later graphics pass): wait for its end.
+        graphicsSub_ = openSubmission(frame, SubmitQueue::Graphics, context_.lastAsyncDoneValue(), 0);
         frame.submissions[graphicsSub_].firstBuffer = 0; // frame.commandBuffer
         frame.submissions[graphicsSub_].bufferCount = 1;
         asyncSub_ = ~0u;

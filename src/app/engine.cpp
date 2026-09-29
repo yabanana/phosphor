@@ -582,8 +582,9 @@ void Engine::buildFrameGraph(u32 width, u32 height) {
     frameGraph_.reset();
 
     const TextureDesc screen{Format::BGRA8Srgb, width, height};
-    // The drawable: undefined at frame start, presented after the graph.
-    drawableRef_ = frameGraph_.importTexture("Drawable", screen, ImportOutput);
+    // The drawable: undefined at frame start, presented after the graph; a
+    // different texture every frame (the drawable wait orders its reuse).
+    drawableRef_ = frameGraph_.importTexture("Drawable", screen, ImportOutput | ImportPerFrame);
     TextureRef color = drawableRef_;
 
     // F2.6: seed -> reduce (async queue) -> consume, declared before Forward so

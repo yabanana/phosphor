@@ -27,10 +27,13 @@ constexpr u32 METAL_FRAMES_IN_FLIGHT = 3;
 // ---------------------------------------------------------------------------
 // MetalContext -- owns the Metal 4 device-level objects and the frame loop.
 //
-// Frame protocol (one MTLSharedEvent as the timeline): every frame is a single
-// MTL4 command buffer (scene + overlay) and the queue signals value n+1 once
-// frame n has finished.  The CPU waits for frame n - METAL_FRAMES_IN_FLIGHT
-// before reusing that slot's command allocator, upload memory and deferred
+// Frame protocol: the render graph records the frame into commandBuffer
+// (normally the only one), plus extra command buffers when a render pass is
+// split across threads (F2.5) and several submissions on two queues when the
+// graph uses async compute (F2.6, per-queue timeline events).  The graphics
+// queue signals frameEvent() = n+1 once frame n has finished; the CPU waits
+// for frame n - METAL_FRAMES_IN_FLIGHT (and for its async work) before
+// reusing that slot's command allocators, upload memory and deferred
 // releases.
 //
 // Metal 4 command buffers neither retain resources nor make them resident:
@@ -97,6 +100,9 @@ public:
     [[nodiscard]] MTL4::CommandQueue* asyncQueue()   const { return asyncQueue_; }
     /// First timeline value of frame `index` (F2.6).
     [[nodiscard]] static u64 timelineBase(u64 index) { return (index + 1) * TIMELINE_STRIDE; }
+    /// Async timeline value at which the last submitted frame's async work is
+    /// done (0 if it had none).
+    [[nodiscard]] u64 lastAsyncDoneValue() const { return lastAsyncDone_; }
     [[nodiscard]] MTL4::Compiler*     compiler()     const { return compiler_; }
     [[nodiscard]] MTL::Library*       library()      const { return library_; }
     [[nodiscard]] CA::MetalLayer*     layer()        const { return layer_; }

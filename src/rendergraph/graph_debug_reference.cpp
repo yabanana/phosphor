@@ -30,7 +30,7 @@ u64 countMismatches(u32 frame, const u32* data) {
 
 void addDebugChain(RenderGraph& graph, DebugChainRefs& refs, const DebugChainExec& exec) {
     const TextureDesc image{Format::R32Uint, kDebugSize, kDebugSize};
-    refs.readback = graph.importBuffer("Debug readback", {kDebugReadbackSize}, ImportOutput);
+    refs.readback = graph.importBuffer("Debug readback", {kDebugReadbackSize}, ImportOutput | ImportPerFrame);
 
     graph.addPass(
         "Debug fill A", PassType::Compute,

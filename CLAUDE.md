@@ -92,7 +92,10 @@ extend it; port algorithms from it.
   capture, debug flags). Barrier rules come from the F2.3 spike
   (`barrier_plan.h`): Fragment is fine on the consumer side of a queue
   barrier, Tile synchronises nothing, no fragment/tile producer inside a
-  render encoder. Passes fused in one render encoder share its state: leave
+  render encoder. Import resources that change every frame (drawable,
+  per-slot buffers) with `ImportPerFrame`; any other import written by the
+  graph is treated as persistent and its first access waits for the previous
+  frame. Passes fused in one render encoder share its state: leave
   Metal's defaults (cull none, clockwise winding) when you change them, the
   validation layer rejects redundant state.
 - Frame pacing: normally one MTL4 command buffer per frame (scene + ImGui

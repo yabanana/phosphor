@@ -280,3 +280,26 @@ sonda ricalcola ogni frame sulla CPU il riferimento esatto (64K elementi ×
 128 iterazioni, build Debug); con più submission per frame il GPU ms misura
 solo l'ultima submission grafica. Il guadagno reale di F2.5/F2.6 si misura
 in F5/F8, come previsto dal piano.
+
+### F2 — residui chiusi dopo il merge (audit, 2026-09-29)
+
+Branch `phase/f2-residues`. Correzioni di sincronizzazione tra frame
+(`ImportPerFrame` e barriera di primo uso per le risorse importate
+persistenti; il frame grafico N attende il lavoro async del frame N-1), queue
+sync nel dump, documentazione. Il frame normale non cambia: 0 punti di
+barriera (1 con `--capture`, invariato), quindi le tabelle sopra restano
+valide. Verifiche nuove:
+
+- **O7 lato CPU** (Release, bench 1): heap +3.608 blocchi dopo 600 frame e
+  +3.651 dopo 6.000; con `--debug-graph-transients --debug-split-encoding`
+  +2.083 / +2.265; con `--debug-async-compute` −200 / −633. Nessuna crescita
+  per frame; allocazioni GPU 0 in tutti i casi.
+- `leaks --atExit` con tutti i flag, `--switch-every 30 --resize-every 40`:
+  **0 leak**.
+- `--debug-split-encoding`: i 4 chunk di ogni frame girano sul main thread e
+  sui 3 worker `phosphor-worker-0…2` (strumentazione temporanea, rimossa).
+- Frame con UI + split + async ispezionato: overlay corretto nel command
+  buffer di coda.
+- Con `--debug-async-compute` la verifica esatta della sonda costa 27,6 ms di
+  CPU per frame in Release (72 ms in Debug): costo della verifica, non del
+  frame; PASS su 3.120 frame.

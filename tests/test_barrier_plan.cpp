@@ -116,7 +116,7 @@ TEST_CASE("barriers: compute to compute in one encoder is an encoder-scope barri
 TEST_CASE("barriers: compute to raster fragment read waits in fragment at group start") {
     RenderGraph g;
     TextureRef tex;
-    TextureRef target = g.importTexture("target", colorDesc(), ImportOutput);
+    TextureRef target = g.importTexture("target", colorDesc(), ImportOutput | ImportPerFrame);
     g.addPass("gen", PassType::Compute, [&](PassBuilder& b) {
         tex = b.write(b.createTexture("tex", colorDesc()), Usage::ShaderWrite, StageDispatch);
     }, {});
@@ -155,7 +155,7 @@ TEST_CASE("barriers: raster to compute waits after fragment") {
 TEST_CASE("barriers: render to render shadow map sampled in fragment") {
     RenderGraph g;
     TextureRef shadow;
-    TextureRef target = g.importTexture("target", colorDesc(), ImportOutput);
+    TextureRef target = g.importTexture("target", colorDesc(), ImportOutput | ImportPerFrame);
     g.addPass("shadow", PassType::Raster, [&](PassBuilder& b) {
         shadow = b.writeDepth(b.createTexture("shadow", depthDesc()), LoadIntent::Clear);
     }, {});
@@ -176,7 +176,7 @@ TEST_CASE("barriers: render to render shadow map sampled in fragment") {
 TEST_CASE("barriers: custom rules keep the consumer stages") {
     RenderGraph g;
     TextureRef shadow;
-    TextureRef target = g.importTexture("target", colorDesc(), ImportOutput);
+    TextureRef target = g.importTexture("target", colorDesc(), ImportOutput | ImportPerFrame);
     g.addPass("shadow", PassType::Raster, [&](PassBuilder& b) {
         shadow = b.writeDepth(b.createTexture("shadow", depthDesc()), LoadIntent::Clear);
     }, {});
@@ -194,7 +194,7 @@ TEST_CASE("barriers: custom rules keep the consumer stages") {
 TEST_CASE("barriers: blit upload then fragment sampling") {
     RenderGraph g;
     TextureRef tex;
-    TextureRef target = g.importTexture("target", colorDesc(), ImportOutput);
+    TextureRef target = g.importTexture("target", colorDesc(), ImportOutput | ImportPerFrame);
     g.addPass("upload", PassType::Blit, [&](PassBuilder& b) {
         tex = b.write(b.createTexture("tex", colorDesc()), Usage::CopyDst, StageBlit);
     }, {});
@@ -212,7 +212,7 @@ TEST_CASE("barriers: blit upload then fragment sampling") {
 
 TEST_CASE("barriers: WAR uses the reader's stages on the after side") {
     RenderGraph g;
-    BufferRef buf = g.importBuffer("buf", bufDesc(), ImportContentsDefined);
+    BufferRef buf = g.importBuffer("buf", bufDesc(), ImportContentsDefined | ImportPerFrame);
     g.addPass("reader", PassType::Raster, [&](PassBuilder& b) {
         b.read(buf, Usage::ShaderRead, StageVertex);
         b.setSideEffect();
@@ -252,7 +252,7 @@ TEST_CASE("barriers: WAW uses the writer's stages") {
 TEST_CASE("barriers: passes fused in one render group need no barrier") {
     RenderGraph g;
     TextureRef tex;
-    TextureRef target = g.importTexture("target", colorDesc(), ImportOutput);
+    TextureRef target = g.importTexture("target", colorDesc(), ImportOutput | ImportPerFrame);
     g.addPass("gbuf", PassType::Raster, [&](PassBuilder& b) {
         tex = b.writeColor(b.createTexture("tex", colorDesc()), 0, LoadIntent::Clear);
     }, {});
@@ -291,7 +291,7 @@ TEST_CASE("barriers: dependencies at one position merge into one barrier") {
 TEST_CASE("barriers: consumers inside a group are hoisted to its start and merged") {
     RenderGraph g;
     BufferRef x, y;
-    TextureRef target = g.importTexture("target", colorDesc(), ImportOutput);
+    TextureRef target = g.importTexture("target", colorDesc(), ImportOutput | ImportPerFrame);
     g.addPass("a", PassType::Compute, [&](PassBuilder& b) {
         x = b.write(b.createBuffer("x", bufDesc()), Usage::ShaderWrite, StageDispatch);
         y = b.write(b.createBuffer("y", bufDesc()), Usage::ShaderWrite, StageDispatch);
@@ -316,7 +316,7 @@ TEST_CASE("barriers: aliased first use gets an aliasing barrier with the union o
     RenderGraph g;
     BufferRef t1;
     TextureRef t2;
-    BufferRef out = g.importBuffer("out", bufDesc(), ImportOutput);
+    BufferRef out = g.importBuffer("out", bufDesc(), ImportOutput | ImportPerFrame);
     g.addPass("a", PassType::Compute, [&](PassBuilder& b) {
         t1 = b.write(b.createBuffer("t1", bufDesc()), Usage::ShaderWrite, StageDispatch);
     }, {});
@@ -387,7 +387,7 @@ TEST_CASE("barriers: non-aliased transient first use still gets a queue barrier"
 TEST_CASE("barriers: aliasing inside a compute encoder adds an encoder-scope barrier first") {
     RenderGraph g;
     BufferRef t1, t3;
-    BufferRef out = g.importBuffer("out", bufDesc(), ImportOutput);
+    BufferRef out = g.importBuffer("out", bufDesc(), ImportOutput | ImportPerFrame);
     g.addPass("a", PassType::Compute, [&](PassBuilder& b) {
         t1 = b.write(b.createBuffer("t1", bufDesc()), Usage::ShaderWrite, StageDispatch);
     }, {});
@@ -421,7 +421,7 @@ TEST_CASE("barriers: aliasing inside a compute encoder adds an encoder-scope bar
 TEST_CASE("barriers: encoder-scope barrier after fragment inside a render encoder is an error") {
     RenderGraph g;
     TextureRef tex;
-    TextureRef target = g.importTexture("target", colorDesc(), ImportOutput);
+    TextureRef target = g.importTexture("target", colorDesc(), ImportOutput | ImportPerFrame);
     g.addPass("gbuf", PassType::Raster, [&](PassBuilder& b) {
         tex = b.writeColor(b.createTexture("tex", colorDesc()), 0, LoadIntent::Clear);
     }, {});
@@ -518,7 +518,7 @@ TEST_CASE("barriers: same-queue dependencies produce no queue sync") {
 TEST_CASE("barriers: tile stages are promoted (accepted by Metal but ineffective)") {
     RenderGraph g;
     TextureRef tex;
-    TextureRef target = g.importTexture("target", colorDesc(), ImportOutput);
+    TextureRef target = g.importTexture("target", colorDesc(), ImportOutput | ImportPerFrame);
     g.addPass("gen", PassType::Raster, [&](PassBuilder& b) {
         tex = b.createTexture("tex", colorDesc());
         tex = b.write(tex, Usage::ShaderWrite, StageTile); // e.g. a tile shader store
@@ -608,4 +608,45 @@ TEST_CASE("barriers: splitEncodersAtQueueSyncs cuts before waits and after signa
     CHECK(c.encoders[2].firstPosition == 3);
     CHECK(c.encoders[2].lastPosition == 4);
     CHECK(c.encoderOfPosition == std::vector<u32>{0, 0, 1, 2, 2});
+}
+
+TEST_CASE("barriers: a persistent import written every frame waits for the previous frame") {
+    // update: compute writes the persistent buffer; draw reads it in vertex.
+    // Frame N+1's update must wait for frame N's draw (WAR) and update (WAW).
+    RenderGraph g;
+    BufferRef persistent = g.importBuffer("persistent", bufDesc(), ImportContentsDefined | ImportOutput);
+    TextureRef target = g.importTexture("target", colorDesc(), ImportOutput | ImportPerFrame);
+    g.addPass("update", PassType::Compute, [&](PassBuilder& b) {
+        b.read(persistent, Usage::ShaderRead, StageDispatch);
+        persistent = b.write(persistent, Usage::ShaderWrite, StageDispatch);
+    }, {});
+    g.addPass("draw", PassType::Raster, [&](PassBuilder& b) {
+        b.read(persistent, Usage::ShaderRead, StageVertex);
+        b.writeColor(target, 0, LoadIntent::Clear);
+    }, {});
+    const CompiledGraph c = plan(g, {{PassType::Compute, 0, 0}, {PassType::Raster, 1, 1}});
+    REQUIRE(c.barriers.size() == 2);
+    // Position 0: previous frame's accesses (dispatch write, vertex read).
+    CHECK(c.barriers[0].position == 0);
+    REQUIRE(c.barriers[0].barriers.size() == 1);
+    CHECK(c.barriers[0].barriers[0].scope == BarrierScope::Queue);
+    CHECK(c.barriers[0].barriers[0].afterStages == (StageDispatch | StageVertex));
+    CHECK(c.barriers[0].barriers[0].beforeStages == StageDispatch);
+    CHECK(c.barriers[0].barriers[0].resources == std::vector<u32>{0});
+    // Position 1: the ordinary RAW dependency.
+    CHECK(c.barriers[1].position == 1);
+    CHECK(c.barriers[1].barriers[0].afterStages == StageDispatch);
+    CHECK(c.barriers[1].barriers[0].beforeStages == StageVertex);
+}
+
+TEST_CASE("barriers: per-frame and read-only imports need no barrier between frames") {
+    RenderGraph g;
+    BufferRef perFrame = g.importBuffer("per-frame", bufDesc(), ImportOutput | ImportPerFrame);
+    BufferRef readOnly = g.importBuffer("read-only", bufDesc(), ImportContentsDefined);
+    g.addPass("pass", PassType::Compute, [&](PassBuilder& b) {
+        b.read(readOnly, Usage::ShaderRead, StageDispatch);
+        b.write(perFrame, Usage::ShaderWrite, StageDispatch);
+    }, {});
+    const CompiledGraph c = plan(g, {{PassType::Compute, 0, 0}});
+    CHECK(c.barriers.empty());
 }

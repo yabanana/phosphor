@@ -156,6 +156,12 @@ enum ImportFlags : u32 {
     /// The final version is consumed after the graph (present, readback,
     /// next frame): its writers are never culled and attachments store it.
     ImportOutput = 1u << 1,
+    /// A different physical resource is bound every frame and reused only
+    /// once the frame that used it has completed (drawable, per-slot
+    /// readback buffers).  Without it, an imported resource written by the
+    /// graph is the same memory in consecutive frames, and its first access
+    /// in a frame waits for the previous frame's accesses (barrier plan).
+    ImportPerFrame = 1u << 2,
 };
 
 struct Access {
