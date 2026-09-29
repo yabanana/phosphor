@@ -1,0 +1,6 @@
+date,commit,bench,vsync,unit,queue,fused,gpu_mean,gpu_sd,gpu_p99,gpu_max,dram_bytes
+2026-09-29T10:00:00Z,aaaaaaa,1,1,Depth prepass + GBuffer,graphics,1,0.430,0.008,0.53,0.58,33554432
+2026-09-29T10:00:00Z,aaaaaaa,1,1,Lighting,graphics,0,0.950,0.010,1.10,1.15,52428800
+2026-09-30T10:00:00Z,bbbbbbb,1,1,Depth prepass + GBuffer,graphics,1,0.412,0.007,0.52,0.56,33554432
+2026-09-30T10:00:00Z,bbbbbbb,1,1,Lighting,graphics,0,0.905,0.009,1.05,1.12,52428800
+2026-09-30T10:00:00Z,bbbbbbb,1,1,Cluster build,async,0,0.101,0.002,0.14,0.15,1048576
