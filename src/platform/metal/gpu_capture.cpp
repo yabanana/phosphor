@@ -1,6 +1,7 @@
 #include "platform/metal/gpu_capture.h"
 #include "core/log.h"
 
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 

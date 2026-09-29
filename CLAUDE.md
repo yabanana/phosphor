@@ -63,6 +63,15 @@ extend it; port algorithms from it.
   generic pipeline, pixels), `tools/harvest_pipelines.sh` (regenerate
   `shaders/pipelines.mtl4-json` when pipeline descriptors change; the
   `pipelines script` unit test fails when it is stale).
+- F4 observability (macOS): the report JSON (`--report`, schema v2) has GPU
+  time per timed unit (`passes`) with `--frames`; `tools/bench_all.sh
+  [--stats] [--passes] [--vsync]`, `tools/perf_record.sh` (appends to
+  `docs/perf-history*.csv`), `tools/perf_table.py latest|compare|passes`,
+  `tools/tracy_check.sh build/tracy` (build with `-DPHOSPHOR_TRACY=ON`),
+  `tools/gpu_trace.sh` (headless Metal System Trace per pass; no hardware
+  counters exist headless), `--gpu-capture*` (.gputrace).  Compare per-pass
+  times at saturated clocks (`--no-vsync --gpu-timing-serial`): with vsync
+  the GPU lowers its clocks (DVFS) and times do not scale with work.
 - Before calling a Metal API, check its exact signature in the fetched
   metal-cpp headers (`build/linux/_deps/metal_cpp-src/Metal/MTL4*.hpp`); Metal 4
   names differ from Metal 3 (e.g. no `setVertexBytes`, draws take GPU addresses,
@@ -131,7 +140,19 @@ extend it; port algorithms from it.
 - Debug self-checks (all must stay green in `tools/visual_check.sh` with
   `EXTRA_ARGS=...`): `--debug-graph-transients`, `--debug-split-encoding`,
   `--debug-async-compute`; `--resize-every N` exercises recompilation;
-  `--dump-graph FILE` writes the Graphviz dump with DRAM estimates.
+  `--dump-graph FILE` writes the Graphviz dump with DRAM estimates;
+  `--debug-gpu-cost N` (known-cost pass, negative control of the pass
+  timings), `--gpu-timing-unfused`, `--gpu-timing-serial`, `--no-gpu-timing`.
+- GPU timing (F4.1, `GpuTimestamps` via `MetalGraphExecutor`): only END
+  timestamps (encoder-start ones are written late) plus a command-buffer
+  timestamp at every commit start; a fused render group is one timed unit
+  (the GPU runs its passes per tile together; at most 4 timestamps are
+  written per render encoder); a unit's time is its exclusive contribution
+  to the queue timeline, so passes that overlap on the GPU share it.  Never
+  call `invalidateCounterRange` on a range while frames are in flight (it
+  wipes later writes).  GPU captures need the capture layer before
+  `SDL_Init`, the graphics MTL4 queue as capture object and no
+  `MTL4Archive` (all measured).
 - Engine conventions follow glTF: counter-clockwise front faces (set
   explicitly: Metal defaults to clockwise), UV origin top-left, bitangent =
   `cross(N, T) * w` towards decreasing V. Mirrored instances carry
