@@ -3,6 +3,8 @@
 
 #include <doctest/doctest.h>
 
+#include <cctype>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -209,4 +211,187 @@ TEST_CASE("bench report: samples, fps and JSON") {
     CHECK(json.find("\"gpu_ms\": {\"mean\": 5.0000") != std::string::npos);
     CHECK(json.find("\"wait_ms\": {\"mean\": 1.0000") != std::string::npos);
     CHECK(formatReportLine(r).find("125.0 fps") != std::string::npos);
+}
+
+namespace {
+
+// Minimal strict JSON syntax checker (objects, arrays, strings with escapes,
+// numbers, true/false/null) -- enough to prove reportToJson stays parseable
+// by jq.
+struct JsonChecker {
+    const std::string& s;
+    size_t             i = 0;
+
+    void ws() {
+        while (i < s.size() && (s[i] == ' ' || s[i] == '\n' || s[i] == '\t' || s[i] == '\r')) ++i;
+    }
+    bool lit(const char* word) {
+        const std::string w = word;
+        if (s.compare(i, w.size(), w) != 0) return false;
+        i += w.size();
+        return true;
+    }
+    bool str() {
+        if (i >= s.size() || s[i] != '"') return false;
+        ++i;
+        while (i < s.size() && s[i] != '"') {
+            if (static_cast<unsigned char>(s[i]) < 0x20) return false;
+            if (s[i] == '\\') {
+                ++i;
+                if (i >= s.size()) return false;
+                if (s[i] == 'u') {
+                    for (int k = 0; k < 4; ++k) {
+                        ++i;
+                        if (i >= s.size() || !std::isxdigit(static_cast<unsigned char>(s[i]))) return false;
+                    }
+                } else if (std::string("\"\\/bfnrt").find(s[i]) == std::string::npos) {
+                    return false;
+                }
+            }
+            ++i;
+        }
+        if (i >= s.size()) return false;
+        ++i;
+        return true;
+    }
+    bool num() {
+        const size_t b = i;
+        if (i < s.size() && s[i] == '-') ++i;
+        while (i < s.size() && (std::isdigit(static_cast<unsigned char>(s[i])) || s[i] == '.' || s[i] == 'e' ||
+                                s[i] == 'E' || s[i] == '+' || s[i] == '-')) {
+            ++i;
+        }
+        return i > b;
+    }
+    bool value() {
+        ws();
+        if (i >= s.size()) return false;
+        if (s[i] == '{') {
+            ++i;
+            ws();
+            if (i < s.size() && s[i] == '}') { ++i; return true; }
+            for (;;) {
+                ws();
+                if (!str()) return false;
+                ws();
+                if (i >= s.size() || s[i++] != ':') return false;
+                if (!value()) return false;
+                ws();
+                if (i < s.size() && s[i] == ',') { ++i; continue; }
+                if (i < s.size() && s[i] == '}') { ++i; return true; }
+                return false;
+            }
+        }
+        if (s[i] == '[') {
+            ++i;
+            ws();
+            if (i < s.size() && s[i] == ']') { ++i; return true; }
+            for (;;) {
+                if (!value()) return false;
+                ws();
+                if (i < s.size() && s[i] == ',') { ++i; continue; }
+                if (i < s.size() && s[i] == ']') { ++i; return true; }
+                return false;
+            }
+        }
+        if (s[i] == '"') return str();
+        if (s[i] == 't') return lit("true");
+        if (s[i] == 'f') return lit("false");
+        if (s[i] == 'n') return lit("null");
+        return num();
+    }
+    bool document() {
+        if (!value()) return false;
+        ws();
+        return i == s.size();
+    }
+};
+
+bool validJson(const std::string& s) { return JsonChecker{s}.document(); }
+
+BenchReport timedReport() {
+    BenchReport r;
+    r.bench            = "Forward \"PBR\"\n\tscene\\";
+    r.device           = "Apple M5 Max";
+    r.width            = 1920;
+    r.height           = 1080;
+    r.frames           = 300;
+    r.fps              = 120.0f;
+    r.gpuTiming        = true;
+    r.gpuTimingUnfused = true;
+    PassReport a;
+    a.name      = "Forward + Overlay";
+    a.queue     = "graphics";
+    a.fused     = true;
+    a.passes    = {"Forward", "Overlay"};
+    a.shaders   = {"fwd_v", "fwd_f"};
+    a.dramBytes = 123456;
+    a.gpuMs     = {1.5f, 1.0f, 1.4f, 2.0f, 2.5f};
+    PassReport b;
+    b.name  = "Async \"reduce\"";
+    b.queue = "async";
+    r.passes          = {a, b};
+    r.gpuPassSumMs    = {2.0f, 1.0f, 2.0f, 3.0f, 3.5f};
+    r.gpuFrameSpanMs  = {2.5f, 1.5f, 2.5f, 3.5f, 4.0f};
+    return r;
+}
+
+} // namespace
+
+TEST_CASE("bench report: schema v2 without GPU timing keeps v1 fields and stays valid JSON") {
+    BenchReport r;
+    r.bench  = "Torus";
+    r.device = "GPU";
+    r.pipelinesJson = "{\"hits\": 3}";
+    const std::string json = reportToJson(r);
+    CHECK_MESSAGE(validJson(json), json);
+    CHECK(json.find("\"schema_version\": 2") != std::string::npos);
+    CHECK(json.find("\"gpu_timing\": false") != std::string::npos);
+    CHECK(json.find("\"gpu_timing_unfused\": false") != std::string::npos);
+    CHECK(json.find("\"passes\"") == std::string::npos);
+    CHECK(json.find("\"gpu_pass_sum_ms\"") == std::string::npos);
+    for (const char* key : {"\"bench\"", "\"device\"", "\"width\"", "\"height\"", "\"vsync\"", "\"ui\"", "\"frames\"",
+                            "\"fps\"", "\"gpu_allocations\"", "\"cpu_heap_blocks_delta\"", "\"cpu_heap_bytes_delta\"",
+                            "\"frame_ms\"", "\"cpu_ms\"", "\"gpu_ms\"", "\"wait_ms\"", "\"pipelines\": {\"hits\": 3}"}) {
+        CHECK_MESSAGE(json.find(key) != std::string::npos, key);
+    }
+    CHECK(formatReportLine(r).find("GPU passes") == std::string::npos);
+}
+
+TEST_CASE("bench report: schema v2 with GPU timing") {
+    const BenchReport r = timedReport();
+    const std::string json = reportToJson(r);
+    CHECK_MESSAGE(validJson(json), json);
+    CHECK(json.find("\"schema_version\": 2") != std::string::npos);
+    CHECK(json.find("\"gpu_timing\": true") != std::string::npos);
+    CHECK(json.find("\"gpu_timing_unfused\": true") != std::string::npos);
+    CHECK(json.find("\"passes\": [") != std::string::npos);
+    CHECK(json.find("\"name\": \"Forward + Overlay\"") != std::string::npos);
+    CHECK(json.find("\"queue\": \"async\"") != std::string::npos);
+    CHECK(json.find("\"fused\": true") != std::string::npos);
+    CHECK(json.find("\"passes\": [\"Forward\", \"Overlay\"]") != std::string::npos);
+    CHECK(json.find("\"shaders\": [\"fwd_v\", \"fwd_f\"]") != std::string::npos);
+    CHECK(json.find("\"dram_bytes\": 123456") != std::string::npos);
+    CHECK(json.find("\"gpu_ms\": {\"mean\": 1.5000") != std::string::npos);
+    CHECK(json.find("\"gpu_pass_sum_ms\": {\"mean\": 2.0000") != std::string::npos);
+    CHECK(json.find("\"gpu_frame_span_ms\": {\"mean\": 2.5000") != std::string::npos);
+    // Strings are escaped: quote, backslash, newline, tab.
+    CHECK(json.find("Forward \\\"PBR\\\"\\n\\tscene\\\\") != std::string::npos);
+    CHECK(json.find("Async \\\"reduce\\\"") != std::string::npos);
+
+    const std::string line   = formatReportLine(r);
+    const std::string suffix = " | GPU passes 2.000 ms (p99 3.000)";
+    REQUIRE(line.size() >= suffix.size());
+    CHECK(line.substr(line.size() - suffix.size()) == suffix);
+}
+
+TEST_CASE("bench report: timing enabled with no passes and long names stay valid JSON") {
+    BenchReport r;
+    r.gpuTiming = true;
+    r.bench     = std::string(2000, 'x'); // longer than any fixed formatting buffer
+    r.device    = std::string(700, 'd');
+    CHECK(validJson(reportToJson(r)));
+    CHECK(reportToJson(r).find("\"passes\": []") != std::string::npos);
+    r.gpuPassSumMs.mean = std::nanf("");
+    CHECK(validJson(reportToJson(r))); // non-finite numbers never reach the JSON
 }

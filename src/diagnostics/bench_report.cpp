@@ -12,19 +12,48 @@ namespace {
 std::string jsonEscape(const std::string& s) {
     std::string out;
     out.reserve(s.size());
-    for (char c : s) {
-        if (c == '"' || c == '\\') out.push_back('\\');
-        out.push_back(c);
+    for (const char c : s) {
+        switch (c) {
+        case '"':  out += "\\\""; break;
+        case '\\': out += "\\\\"; break;
+        case '\n': out += "\\n";  break;
+        case '\r': out += "\\r";  break;
+        case '\t': out += "\\t";  break;
+        default:
+            if (static_cast<unsigned char>(c) < 0x20) {
+                char esc[8];
+                std::snprintf(esc, sizeof(esc), "\\u%04x", static_cast<unsigned>(static_cast<unsigned char>(c)));
+                out += esc;
+            } else {
+                out.push_back(c);
+            }
+        }
     }
     return out;
 }
+
+float finiteOrZero(float v) { return std::isfinite(v) ? v : 0.0f; }
 
 std::string summaryToJson(const TimingSummary& t) {
     char buf[160];
     std::snprintf(buf, sizeof(buf),
                   "{\"mean\": %.4f, \"min\": %.4f, \"p50\": %.4f, \"p99\": %.4f, \"max\": %.4f}",
-                  t.mean, t.min, t.p50, t.p99, t.max);
+                  finiteOrZero(t.mean), finiteOrZero(t.min), finiteOrZero(t.p50), finiteOrZero(t.p99),
+                  finiteOrZero(t.max));
     return buf;
+}
+
+std::string passToJson(const PassReport& p) {
+    auto list = [](const std::vector<std::string>& v) {
+        std::string out = "[";
+        for (size_t i = 0; i < v.size(); ++i) out += (i ? ", \"" : "\"") + jsonEscape(v[i]) + "\"";
+        return out + "]";
+    };
+    return "    {\"name\": \"" + jsonEscape(p.name) + "\", \"queue\": \"" + jsonEscape(p.queue) +
+           "\", \"fused\": " + (p.fused ? "true" : "false") + ", \"passes\": " + list(p.passes) +
+           ", \"shaders\": " + list(p.shaders) + ", \"dram_bytes\": " +
+           std::to_string(static_cast<unsigned long long>(p.dramBytes)) + ", \"gpu_ms\": " +
+           summaryToJson(p.gpuMs) + "}";
 }
 
 } // namespace
@@ -69,7 +98,7 @@ void summarizeSamples(const std::vector<FrameSample>& samples, BenchReport& repo
 }
 
 std::string formatReportLine(const BenchReport& r) {
-    char buf[416];
+    char buf[512];
     std::snprintf(buf, sizeof(buf),
                   "%s | %ux%u vsync=%s ui=%s | %u frames | %.1f fps | "
                   "frame %.3f ms (p99 %.3f) | CPU %.3f ms (p99 %.3f) | GPU %.3f ms (p99 %.3f) | "
@@ -79,26 +108,51 @@ std::string formatReportLine(const BenchReport& r) {
                   r.gpuMs.mean, r.gpuMs.p99, r.waitMs.mean, r.waitMs.p99,
                   static_cast<unsigned long long>(r.gpuAllocations), static_cast<long long>(r.cpuHeapBlocksDelta),
                   static_cast<long long>(r.cpuHeapBytesDelta));
-    return buf;
+    std::string line = buf;
+    if (r.gpuTiming) {
+        char extra[96];
+        std::snprintf(extra, sizeof(extra), " | GPU passes %.3f ms (p99 %.3f)", r.gpuPassSumMs.mean,
+                      r.gpuPassSumMs.p99);
+        line += extra;
+    }
+    return line;
 }
 
 std::string reportToJson(const BenchReport& r) {
-    char head[512];
-    std::snprintf(head, sizeof(head),
-                  "{\n  \"bench\": \"%s\",\n  \"device\": \"%s\",\n  \"width\": %u,\n  \"height\": %u,\n"
+    const std::string bench  = jsonEscape(r.bench);
+    const std::string device = jsonEscape(r.device);
+    static constexpr char headFormat[] =
+                  "{\n  \"schema_version\": %u,\n  \"bench\": \"%s\",\n  \"device\": \"%s\",\n  \"width\": %u,\n  \"height\": %u,\n"
                   "  \"vsync\": %s,\n  \"ui\": %s,\n  \"frames\": %u,\n  \"fps\": %.2f,\n"
                   "  \"gpu_allocations\": %llu,\n  \"cpu_heap_blocks_delta\": %lld,\n"
-                  "  \"cpu_heap_bytes_delta\": %lld,\n",
-                  jsonEscape(r.bench).c_str(), jsonEscape(r.device).c_str(), r.width, r.height,
-                  r.vsync ? "true" : "false", r.ui ? "true" : "false", r.frames, r.fps,
-                  static_cast<unsigned long long>(r.gpuAllocations), static_cast<long long>(r.cpuHeapBlocksDelta),
-                  static_cast<long long>(r.cpuHeapBytesDelta));
-    return std::string(head) +
+                  "  \"cpu_heap_bytes_delta\": %lld,\n";
+    auto formatHead = [&](char* dst, size_t size) {
+        return std::snprintf(dst, size, headFormat, BENCH_REPORT_SCHEMA_VERSION, bench.c_str(), device.c_str(),
+                             r.width, r.height, r.vsync ? "true" : "false", r.ui ? "true" : "false", r.frames,
+                             r.fps, static_cast<unsigned long long>(r.gpuAllocations),
+                             static_cast<long long>(r.cpuHeapBlocksDelta),
+                             static_cast<long long>(r.cpuHeapBytesDelta));
+    };
+    // Sized to fit: a truncated head would make the JSON invalid.
+    std::string head(static_cast<size_t>(std::max(formatHead(nullptr, 0), 0)) + 1, '\0');
+    formatHead(head.data(), head.size());
+    head.pop_back();
+    std::string timing = std::string("  \"gpu_timing\": ") + (r.gpuTiming ? "true" : "false") +
+                         ",\n  \"gpu_timing_unfused\": " + (r.gpuTimingUnfused ? "true" : "false");
+    if (r.gpuTiming) {
+        timing += ",\n  \"passes\": [";
+        for (size_t i = 0; i < r.passes.size(); ++i) timing += (i ? ",\n" : "\n") + passToJson(r.passes[i]);
+        timing += r.passes.empty() ? "]" : "\n  ]";
+        timing += ",\n  \"gpu_pass_sum_ms\": " + summaryToJson(r.gpuPassSumMs) +
+                  ",\n  \"gpu_frame_span_ms\": " + summaryToJson(r.gpuFrameSpanMs);
+    }
+    return head +
            "  \"frame_ms\": " + summaryToJson(r.frameMs) + ",\n" +
            "  \"cpu_ms\": " + summaryToJson(r.cpuMs) + ",\n" +
            "  \"gpu_ms\": " + summaryToJson(r.gpuMs) + ",\n" +
            "  \"wait_ms\": " + summaryToJson(r.waitMs) +
-           (r.pipelinesJson.empty() ? std::string() : ",\n  \"pipelines\": " + r.pipelinesJson) + "\n}\n";
+           (r.pipelinesJson.empty() ? std::string() : ",\n  \"pipelines\": " + r.pipelinesJson) + ",\n" + timing +
+           "\n}\n";
 }
 
 } // namespace phosphor
