@@ -21,7 +21,10 @@ namespace phosphor {
 //     loading cost and is reported separately, not as a hitch;
 //   * "steady" frames: not flagged and not within `window` frames after a
 //     switch or a resize;
-//   * threshold = max(p99Factor * steady CPU p99, steady CPU p99 + marginMs);
+//   * threshold = max(p99Factor * steady CPU p99, steady CPU p99 + marginMs),
+//     computed per bench (FrameRecord::bench) since benches differ ~20x in CPU
+//     ms; a window frame is compared with the threshold of its own bench, and a
+//     bench without steady frames falls back to the global threshold;
 //   * a switch is a PIPELINE HITCH if the render thread compiled anything
 //     for it (renderThreadCompileMs > 0) or any of the `window` frames after
 //     it has CPU ms above the threshold.
@@ -92,6 +95,7 @@ struct HitchReport {
     u32   hitchSwitches  = 0;   // switches classified as pipeline hitches
     u32   framesOverThreshold = 0; // post-switch window frames above threshold
     float worstPostSwitchCpuMs = 0.0f;
+    float worstPostSwitchRatio = 0.0f; // max over window frames of cpuMs / its bench threshold
     float renderThreadCompileMs = 0.0f; // sum over switches
     // Switch phases: mean and max over switches (ms).
     float totalMean = 0.0f, totalMax = 0.0f;
@@ -106,7 +110,7 @@ struct HitchReport {
 
 /// "SWITCH n=15 hitches 0 | load ms mean/max: total a/b, waitIdle ..., setup ...,
 ///  upload ..., gc ..., pipelines ... | render-thread compile 0.00 ms |
-///  post-switch frames over X ms: 0 (worst Y ms, steady p99 Z ms)"
+///  post-switch frames over X ms: 0 (worst Y ms, steady p99 Z ms, worst ratio R)"
 [[nodiscard]] std::string formatHitchReport(const HitchReport& report);
 
 /// CSV with a header; one row per frame, then one row per switch (column

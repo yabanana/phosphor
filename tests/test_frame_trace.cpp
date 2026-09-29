@@ -221,3 +221,30 @@ TEST_CASE("addFrame within reserved capacity does not reallocate") {
     for (u32 i = 1; i < 8; ++i) t.addFrame(frame(i, 1.0f));
     CHECK(t.frames().data() == p);
 }
+
+TEST_CASE("threshold is per bench: a hitch on a light bench a global threshold would miss") {
+    std::vector<FrameRecord> fr;
+    for (u32 i = 0; i < 40; ++i) { fr.push_back(frame(i, 2.0f)); fr.back().bench = 0; }
+    for (u32 i = 40; i < 80; ++i) { fr.push_back(frame(i, 0.1f)); fr.back().bench = 1; }
+    fr.push_back(frame(80, 30.0f, FrameBenchSwitch)); fr.back().bench = 1;
+    for (u32 i = 81; i < 91; ++i) { fr.push_back(frame(i, 0.1f)); fr.back().bench = 1; }
+    fr[83 + 0].cpuMs = 0.1f;
+    fr[84].cpuMs = 1.0f; // 1 ms: far below the global threshold (3 ms), above bench 1's (0.6 ms)
+    const HitchReport r = analyzeHitches(build(fr, {sw(80)}));
+    CHECK(r.thresholdMs == doctest::Approx(3.0f)); // global stays in the report
+    CHECK(r.hitchSwitches == 1);
+    CHECK(r.framesOverThreshold == 1);
+    CHECK(r.worstPostSwitchRatio == doctest::Approx(1.0f / 0.6f));
+    CHECK(formatHitchReport(r).find("worst ratio 1.67") != std::string::npos);
+}
+
+TEST_CASE("bench without steady frames falls back to the global threshold") {
+    std::vector<FrameRecord> fr = steadyFrames(60); // bench 0, threshold 1.5
+    fr.push_back(frame(60, 20.0f, FrameBenchSwitch));
+    fr.back().bench = 3;
+    for (u32 i = 61; i < 66; ++i) { fr.push_back(frame(i, 1.0f)); fr.back().bench = 3; }
+    fr[63].cpuMs = 3.0f;
+    const HitchReport r = analyzeHitches(build(fr, {sw(60)}));
+    CHECK(r.hitchSwitches == 1);
+    CHECK(r.worstPostSwitchRatio == doctest::Approx(2.0f));
+}

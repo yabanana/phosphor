@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,10 @@ namespace {
 // excluding it would hide exactly the hitches we look for.
 constexpr u32 kNonSteadyFlags = FrameBenchSwitch | FrameResize | FrameGraphCompile;
 
+float thresholdFor(float p99, const HitchConfig& config) {
+    return std::max(config.p99Factor * p99, p99 + config.marginMs);
+}
+
 struct Acc {
     double sum = 0.0;
     float  max = 0.0f;
@@ -45,6 +50,7 @@ struct Acc {
 // Outcomes for degenerate inputs:
 //   * no frames: frame statistics stay 0, switches are still summarised and a
 //     switch is a hitch only through renderThreadCompileMs;
+//   * a bench without steady frames is checked against the global threshold;
 //   * no steady frames: steadyCpuP99 = threshold = 0 and the frame-based
 //     check is skipped (nothing to compare against), so only
 //     renderThreadCompileMs can flag a hitch;
@@ -59,6 +65,7 @@ HitchReport analyzeHitches(const FrameTrace& trace, const HitchConfig& config) {
     // Steady set: no non-steady flag, and not among the `window` frames that
     // follow a bench-switch or resize frame.
     std::vector<float> steady;
+    std::map<u32, std::vector<float>> steadyByBench;
     steady.reserve(frames.size());
     u32 excludeLeft = 0;
     for (const FrameRecord& f : frames) {
@@ -72,13 +79,22 @@ HitchReport analyzeHitches(const FrameTrace& trace, const HitchConfig& config) {
         }
         if (f.flags & kNonSteadyFlags) continue;
         steady.push_back(f.cpuMs);
+        steadyByBench[f.bench].push_back(f.cpuMs);
     }
     r.steadyFrames = static_cast<u32>(steady.size());
     const bool haveSteady = !steady.empty();
     if (haveSteady) {
         r.steadyCpuP99 = summarize(steady).p99;
-        r.thresholdMs = std::max(config.p99Factor * r.steadyCpuP99, r.steadyCpuP99 + config.marginMs);
+        r.thresholdMs = thresholdFor(r.steadyCpuP99, config);
     }
+    // Per-bench thresholds; a bench without steady frames uses the global one.
+    std::map<u32, float> benchThreshold;
+    for (const auto& [bench, values] : steadyByBench)
+        benchThreshold[bench] = thresholdFor(summarize(values).p99, config);
+    auto thresholdOf = [&](u32 bench) {
+        const auto it = benchThreshold.find(bench);
+        return it != benchThreshold.end() ? it->second : r.thresholdMs;
+    };
 
     Acc total, waitIdle, setup, upload, gc, pipe;
     for (const SwitchRecord& sw : switches) {
@@ -111,7 +127,9 @@ HitchReport analyzeHitches(const FrameTrace& trace, const HitchConfig& config) {
                 const FrameRecord& f = frames[i];
                 if ((hasNext && f.index >= nextSwitch) || (f.flags & FrameBenchSwitch)) break;
                 r.worstPostSwitchCpuMs = std::max(r.worstPostSwitchCpuMs, f.cpuMs);
-                if (f.cpuMs > r.thresholdMs) {
+                const float limit = thresholdOf(f.bench);
+                if (limit > 0.0f) r.worstPostSwitchRatio = std::max(r.worstPostSwitchRatio, f.cpuMs / limit);
+                if (f.cpuMs > limit) {
                     ++r.framesOverThreshold;
                     hitch = true;
                 }
@@ -136,11 +154,11 @@ std::string formatHitchReport(const HitchReport& r) {
                   "SWITCH n=%u hitches %u | load ms mean/max: total %.2f/%.2f, waitIdle %.2f/%.2f, "
                   "setup %.2f/%.2f, upload %.2f/%.2f, gc %.2f/%.2f, pipelines %.2f/%.2f | "
                   "render-thread compile %.2f ms | post-switch frames over %.2f ms: %u "
-                  "(worst %.2f ms, steady p99 %.2f ms)",
+                  "(worst %.2f ms, steady p99 %.2f ms, worst ratio %.2f)",
                   r.switches, r.hitchSwitches, r.totalMean, r.totalMax, r.waitIdleMean, r.waitIdleMax,
                   r.setupMean, r.setupMax, r.uploadMean, r.uploadMax, r.gcMean, r.gcMax,
                   r.pipelineMean, r.pipelineMax, r.renderThreadCompileMs, r.thresholdMs,
-                  r.framesOverThreshold, r.worstPostSwitchCpuMs, r.steadyCpuP99);
+                  r.framesOverThreshold, r.worstPostSwitchCpuMs, r.steadyCpuP99, r.worstPostSwitchRatio);
     return buf;
 }
 
