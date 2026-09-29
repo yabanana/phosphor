@@ -216,7 +216,7 @@ rg::TextureRef DebugOverlays::addToGraph(rg::RenderGraph& graph, rg::TextureRef 
             impl_->compositeArgs->setAddress(impl_->constants, kBindConstants);
             impl_->compositeArgs->setTexture(textureId(ctx, valueTexture), 0);
             enc->setRenderPipelineState(impl_->pipelines.render(impl_->composite));
-            enc->setArgumentTable(impl_->compositeArgs, MTL::RenderStageVertex | MTL::RenderStageFragment);
+            enc->setArgumentTable(impl_->compositeArgs, MTL::RenderStageFragment);
             enc->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0), NS::UInteger(3));
         });
     return color;

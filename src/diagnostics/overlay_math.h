@@ -8,8 +8,8 @@
 //
 // The scales are fixed and declared here (the UI legend prints them):
 //   Overdraw   linear, 0 .. OVERDRAW_MAX fragments per pixel.
-//   LightCount logarithmic, 0 .. LIGHTS_MAX lights: Many Lights has up to 1024
-//              lights of which a few tens reach a given surface point.
+//   LightCount logarithmic, 0 .. LIGHTS_MAX lights (the largest bench, Many Lights, has 1024; a surface point there is
+//              reached by roughly 40-250 of them).
 //   TileCost   logarithmic, 0 .. TILECOST_MAX: the average over the tile's
 //              pixels of overdraw x (1 + lights).
 // Values above the maximum saturate at the hottest colour.
@@ -36,8 +36,8 @@ PHOSPHOR_GPU_CONSTANT u32 KIND_TILE_COST = 3;
 PHOSPHOR_GPU_CONSTANT u32 TILE_SIZE = 32;
 
 PHOSPHOR_GPU_CONSTANT float OVERDRAW_MAX = 8.0f;
-PHOSPHOR_GPU_CONSTANT float LIGHTS_MAX   = 64.0f;
-PHOSPHOR_GPU_CONSTANT float TILECOST_MAX = 128.0f;
+PHOSPHOR_GPU_CONSTANT float LIGHTS_MAX   = 1024.0f;
+PHOSPHOR_GPU_CONSTANT float TILECOST_MAX = 1024.0f;
 
 /// Opacity of the heatmap over the scene (the legend strip is opaque).
 PHOSPHOR_GPU_CONSTANT float OVERLAY_ALPHA = 0.7f;
