@@ -5,7 +5,10 @@
 #include "core/timer.h"
 #include "diagnostics/frame_stats.h"
 #include "imgui/imgui_renderer.h"
+#include "core/profile.h"
 #include "platform/metal/frame_capture.h"
+#include "platform/metal/gpu_capture.h"
+#include "platform/metal/known_cost_pass.h"
 #include "platform/metal/gpu_memory.h"
 #include "platform/metal/async_compute_probe.h"
 #include "platform/metal/graph_debug_passes.h"
@@ -24,6 +27,7 @@
 #include "scene/ecs.h"
 
 #include <SDL3/SDL.h>
+#include <mach/mach_time.h>
 #include <malloc/malloc.h>
 #include <SDL3/SDL_metal.h>
 
@@ -96,6 +100,8 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         throw std::runtime_error("Failed to obtain CAMetalLayer from SDL");
     }
 
+    // F4.3: the capture layer exists only if requested before the device.
+    if (options_.gpuCapture) GpuCapture::enableLayer();
     context_ = std::make_unique<MetalContext>(layer, shaderLibraryPath());
     int w = 0, h = 0;
     SDL_GetWindowSizeInPixels(window_, &w, &h);
@@ -114,6 +120,16 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     graphExecutor_ = std::make_unique<MetalGraphExecutor>(*context_);
     if (options_.debugGraphTransients) graphDebug_ = std::make_unique<GraphDebugPasses>(*context_, *pipelines_);
     if (options_.debugAsyncCompute) asyncProbe_ = std::make_unique<AsyncComputeProbe>(*context_, *pipelines_);
+    if (options_.debugGpuCost > 0) {
+        knownCost_ = std::make_unique<KnownCostPass>(*context_, *pipelines_, options_.debugGpuCost);
+    }
+    if (options_.gpuTiming) {
+        timestamps_ = std::make_unique<GpuTimestamps>(*context_);
+        graphExecutor_->setTimestamps(timestamps_.get());
+    }
+    if (options_.gpuCapture) {
+        gpuCapture_ = std::make_unique<GpuCapture>(*context_, options_.gpuCaptureDir, options_.gpuCaptureMax);
+    }
 
     ecs_        = std::make_unique<ECS>();
     gpuScene_   = std::make_unique<GpuScene>();
@@ -183,8 +199,11 @@ Engine::~Engine() {
     reloader_.reset();
     pressure_.reset();
     graphExecutor_.reset();
+    timestamps_.reset();
+    gpuCapture_.reset();
     graphDebug_.reset();
     asyncProbe_.reset();
+    knownCost_.reset();
     capture_.reset();
     imguiRenderer_.reset();
     ImGui_ImplSDL3_Shutdown();
@@ -230,6 +249,8 @@ void Engine::run() {
         LOG_INFO("Benchmark: %u warm-up + %u measured frames, vsync %s, UI %s", options_.warmup, options_.frames,
                  options_.vsync ? "on" : "off", options_.ui ? "on" : "off");
         if (options_.warmup == 0) {
+            measureFirstFrame_ = context_->frameIndex();
+            measureLastFrame_  = measureFirstFrame_ + options_.frames - 1;
             context_->beginGpuTimeCapture(options_.frames);
             allocationsAtStart_ = context_->memory().allocationCount();
             heapUsage(heapBlocksAtStart_, heapBytesAtStart_);
@@ -249,6 +270,7 @@ void Engine::run() {
             // pool per iteration they pile up for the whole run (measured
             // with malloc_history: +4.3k live blocks in 4 minutes).
             NS::AutoreleasePool* eventPool = NS::AutoreleasePool::alloc()->init();
+            PH_ZONE("Events");
             processEvents();
             eventPool->release();
         }
@@ -379,6 +401,8 @@ void Engine::recordBenchmarkFrame(float dt, float cpuMs, float waitMs) {
     ++presentedFrames_;
     if (presentedFrames_ == options_.warmup) {
         // GPU times are recorded from the next submitted frame on.
+        measureFirstFrame_ = context_->frameIndex();
+        measureLastFrame_  = measureFirstFrame_ + options_.frames - 1;
         context_->beginGpuTimeCapture(options_.frames);
         samples_.reserve(options_.frames);
         trace_.reserve(options_.frames, options_.frames / std::max(options_.switchEvery, 1u) + 2);
@@ -411,6 +435,20 @@ void Engine::finishBenchmark() {
     // Sample the CPU heap before the report's own allocations.
     u64 heapBlocks = 0, heapBytes = 0;
     heapUsage(heapBlocks, heapBytes);
+    // F4.1: the last frames' timestamps (the GPU is idle): resolve the slots
+    // in frame order.
+    if (timestamps_) {
+        for (;;) {
+            u32 next = ~0u;
+            for (u32 s = 0; s < METAL_FRAMES_IN_FLIGHT; ++s) {
+                const u64 f = timestamps_->pendingFrame(s);
+                if (f != ~0ull && (next == ~0u || f < timestamps_->pendingFrame(next))) next = s;
+            }
+            if (next == ~0u) break;
+            onFrameTimes(timestamps_->drain(next));
+        }
+        if (passMeasureStarted_) passTimings_.endMeasure();
+    }
     const std::vector<float> gpu = context_->endGpuTimeCapture();
     for (size_t i = 0; i < samples_.size() && i < gpu.size(); ++i) {
         samples_[i].gpuMs = gpu[i];
@@ -429,6 +467,9 @@ void Engine::finishBenchmark() {
     report.cpuHeapBytesDelta  = static_cast<i64>(heapBytes) - static_cast<i64>(heapBytesAtStart_);
     summarizeSamples(samples_, report);
     report.pipelinesJson = pipe::pipelineStatsJson(pipelines_->stats());
+    report.gpuTiming        = timestamps_ != nullptr && timestamps_->enabled();
+    report.gpuTimingUnfused = options_.gpuTimingUnfused;
+    if (report.gpuTiming) passTimings_.summarize(report.passes, report.gpuPassSumMs, report.gpuFrameSpanMs);
 
     if (ignoredInputEvents_ > 0) {
         LOG_INFO("Benchmark: ignored %u keyboard/mouse events", ignoredInputEvents_);
@@ -525,6 +566,13 @@ void Engine::handleShortcuts() {
     if (input_->isKeyPressed(SDL_SCANCODE_F1)) settings_.debugMode = 0;
     if (input_->isKeyPressed(SDL_SCANCODE_F2)) settings_.debugMode = 1;
     if (input_->isKeyPressed(SDL_SCANCODE_F3)) settings_.debugMode = 2;
+    if (input_->isKeyPressed(SDL_SCANCODE_F12)) {
+        if (gpuCapture_) {
+            gpuCapture_->request("key");
+        } else {
+            LOG_WARN("F12: GPU capture needs --gpu-capture (the capture layer is inserted at launch)");
+        }
+    }
 }
 
 void Engine::switchTestBench(TestBenchType type) {
@@ -682,6 +730,7 @@ bool Engine::frame(float dt) {
     if (pipelines_->beginFrame() > 0) frameFlags_ |= FramePipelineSwap;
 
     // --- Simulation -----------------------------------------------------------
+    PH_ZONE("Frame");
     if (orbitMode_) {
         camera_->updateOrbit(*input_, dt);
     } else {
@@ -740,22 +789,43 @@ bool Engine::frame(float dt) {
     // pipelines (fallbacks: --debug-pipeline-fallback, --debug-flexible-pipelines).
     if (captureThisFrame_ && !options_.debugFlexiblePipelines) pipelines_->waitAllFinal();
 
+    // F4.1: the slot's previous frame has completed: its GPU times.
+    if (timestamps_) onFrameTimes(timestamps_->beginFrame(frame.slot, frame.index));
+    // F4.3: captures cover whole frames, from before the encoding to the commit.
+    if (gpuCapture_) {
+        if (options_.gpuCaptureFrame && presentedFrames_ == *options_.gpuCaptureFrame) gpuCapture_->request("frame");
+        gpuCapture_->beginFrame(frame.index);
+    }
+
     if (graphDebug_) graphDebug_->beginFrame(frame.slot);
     if (asyncProbe_) asyncProbe_->beginFrame(frame.slot);
     renderer_->prepareFrame(*gpuScene_, frameScene_, constants, textures_->tableAddress(), width, height);
     if (renderer_->usingFallback()) frameFlags_ |= FrameFallbackDraw;
-    if (options_.ui) drawUi();
+    if (options_.ui) {
+        PH_ZONE("UI");
+        drawUi();
+    }
 
     graphExecutor_->bindTexture(drawableRef_, target);
     if (capture_) graphExecutor_->bindBuffer(captureRef_, capture_->readback());
     if (graphDebug_) graphDebug_->bind(*graphExecutor_, frame.slot);
     if (asyncProbe_) asyncProbe_->bind(*graphExecutor_, frame.slot);
-    graphExecutor_->execute(frame);
+    {
+        PH_ZONE("Graph execute");
+        graphExecutor_->execute(frame);
+    }
     if (graphDebug_) graphDebug_->frameEncoded(frame.slot, frame.index);
     if (asyncProbe_) asyncProbe_->frameEncoded(frame.slot, frame.index);
     if (captureThisFrame_) captured_ = true;
 
-    context_->submitFrame(frame);
+    {
+        PH_ZONE("Submit");
+        context_->submitFrame(frame);
+    }
+    if (gpuCapture_) gpuCapture_->endFrame();
+    // F4.1: no overlap between consecutive frames on the GPU.
+    if (options_.gpuTimingSerial) context_->waitIdle();
+    PH_FRAME_MARK;
     if (!firstFrameLogged_) {
         firstFrameLogged_ = true;
         // stdout: startup measurements (F3 cold start with/without archive).
@@ -766,6 +836,28 @@ bool Engine::frame(float dt) {
     }
     pool->release();
     return true;
+}
+
+void Engine::onFrameTimes(const GpuTimestamps::Resolved& r) {
+    if (!r.valid) return;
+    tracyGpu_.emitFrame(r.startTicks, r.endTicks, r.units);
+    // Benchmark: only the measured frames enter the report; the window and
+    // Tracy see every frame.
+    const bool measured = measureFirstFrame_ != ~0ull && r.frame >= measureFirstFrame_ && r.frame <= measureLastFrame_;
+    if (measured && !passMeasureStarted_) {
+        passTimings_.beginMeasure(options_.frames);
+        passMeasureStarted_ = true;
+    }
+    passTimings_.addFrame(r.frame, r.ms, r.unitValid, r.spanMs);
+    if (passMeasureStarted_ && r.frame == measureLastFrame_) passTimings_.endMeasure();
+    if (gpuCapture_ && options_.gpuCaptureOverMs > 0.0f && r.sumMs > options_.gpuCaptureOverMs &&
+        !gpuCapture_->armed()) {
+        // The slow frame is 3 frames old: the capture takes the next frame.
+        LOG_INFO("GPU capture: frame %llu took %.3f ms of GPU (> %.3f): capturing the next frame",
+                 static_cast<unsigned long long>(r.frame), static_cast<double>(r.sumMs),
+                 static_cast<double>(options_.gpuCaptureOverMs));
+        gpuCapture_->request("over");
+    }
 }
 
 void Engine::drawUi() {
@@ -799,6 +891,8 @@ void Engine::drawUi() {
     pipelineInfo.entries  = pipelines_->entryCount();
     pipelineInfo.fallback = renderer_->usingFallback();
     UIPanels::drawPipelinePanel(pipelineInfo);
+    UIPanels::drawPassTimingsPanel(timestamps_ ? &passTimings_ : nullptr, context_->lastGpuMs(),
+                                   options_.gpuTimingUnfused);
 
     ImGui::Render();
 }
@@ -816,6 +910,7 @@ void Engine::buildFrameGraph(u32 width, u32 height) {
     // F2.6: seed -> reduce (async queue) -> consume, declared before Forward so
     // the async pass can overlap it.
     if (asyncProbe_) asyncProbe_->addProducers(frameGraph_);
+    if (knownCost_) knownCost_->addToGraph(frameGraph_);
 
     frameGraph_.addPass(
         "Forward", PassType::Raster,
@@ -830,6 +925,10 @@ void Engine::buildFrameGraph(u32 width, u32 height) {
             color = b.writeColor(color, 0, LoadIntent::Clear, clear);
             b.writeDepth(depth, LoadIntent::Clear, clear);
             b.setHints(HintGeometryHeavy);
+            b.setProfileShaders("forward_vs,forward_fs");
+            // F4.1 negative control: the known-cost pass runs before the
+            // forward pass, never beside it.
+            if (knownCost_) b.read(knownCost_->output(), Usage::ShaderRead, StageVertex);
             // F2.5 check: the draws are recorded by 4 threads into a render
             // pass suspended/resumed across command buffers.
             if (options_.debugSplitEncoding) b.setParallelChunks(4);
@@ -841,7 +940,10 @@ void Engine::buildFrameGraph(u32 width, u32 height) {
     if (options_.ui) {
         frameGraph_.addPass(
             "ImGui overlay", PassType::Raster,
-            [&](PassBuilder& b) { color = b.writeColor(color, 0, LoadIntent::Preserve); },
+            [&](PassBuilder& b) {
+                color = b.writeColor(color, 0, LoadIntent::Preserve);
+                b.setProfileShaders("imgui_vs,imgui_fs");
+            },
             [this](PassContext& ctx) {
                 imguiRenderer_->render(static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder()), ImGui::GetDrawData());
             });
@@ -869,8 +971,25 @@ void Engine::buildFrameGraph(u32 width, u32 height) {
             });
     }
 
-    if (!graphExecutor_->compile(frameGraph_)) {
+    // F4.1 attribution mode: every raster pass in its own render pass.
+    CompileOptions compileOptions;
+    compileOptions.fuseRasterPasses = !options_.gpuTimingUnfused;
+    if (!graphExecutor_->compile(frameGraph_, compileOptions)) {
         throw std::runtime_error("Failed to compile the frame graph");
+    }
+    if (timestamps_) {
+        passNames_.clear();
+        passShaders_.clear();
+        for (const PassNode& pass : frameGraph_.passes()) {
+            passNames_.push_back(pass.name);
+            std::string shaders;
+            for (const std::string& f : pass.profileShaders) shaders += (shaders.empty() ? "" : ",") + f;
+            passShaders_.push_back(std::move(shaders));
+        }
+        passTimings_.configure(timestamps_->plan(), passNames_, passShaders_);
+        tracyGpu_.configure(timestamps_->plan(), timestamps_->tickNs(), mach_absolute_time());
+        // The measurement restarts with the new plan (resize/switch in a benchmark).
+        passMeasureStarted_ = false;
     }
     if (graphDebug_) graphDebug_->onCompiled(frameGraph_, graphExecutor_->compiled());
     if (asyncProbe_) asyncProbe_->onCompiled(frameGraph_, graphExecutor_->compiled());

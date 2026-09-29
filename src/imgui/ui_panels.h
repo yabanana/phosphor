@@ -88,6 +88,8 @@ struct PipelinePanelInfo {
 // UIPanels -- stateless helpers that draw the ImGui diagnostic windows.
 // ---------------------------------------------------------------------------
 
+class PassTimings;
+
 class UIPanels {
 public:
     /// Combo box listing the test benches. Sets `changed` if the user picked
@@ -105,6 +107,11 @@ public:
 
     /// Pipeline cache: archive, compilations, fallbacks (F3).
     static void drawPipelinePanel(const PipelinePanelInfo& info);
+
+    /// F4.1: GPU time per timed unit of the render graph (average and maximum
+    /// over the last 60 frames), estimated DRAM bytes, and the sum compared
+    /// with the command buffer's GPU time.  `timings` null: timing is off.
+    static void drawPassTimingsPanel(const PassTimings* timings, float commandBufferGpuMs, bool unfused);
 };
 
 } // namespace phosphor

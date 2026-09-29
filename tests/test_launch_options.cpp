@@ -125,9 +125,12 @@ TEST_CASE("launch options: F4 observability switches") {
     CHECK(o.gpuCaptureMax == 1);
     CHECK(o.overlay == OverlayMode::None);
 
-    REQUIRE(parse({"--no-gpu-timing", "--gpu-timing-unfused", "--debug-gpu-cost", "2000"}, o, err));
+    CHECK_FALSE(o.gpuTimingSerial);
+    REQUIRE(parse({"--no-gpu-timing", "--gpu-timing-unfused", "--gpu-timing-serial", "--debug-gpu-cost", "2000"}, o,
+                  err));
     CHECK_FALSE(o.gpuTiming);
     CHECK(o.gpuTimingUnfused);
+    CHECK(o.gpuTimingSerial);
     CHECK(o.debugGpuCost == 2000);
 
     REQUIRE(parse({"--gpu-capture-frame", "30", "--gpu-capture-dir", "out", "--gpu-capture-max", "3"}, o, err));

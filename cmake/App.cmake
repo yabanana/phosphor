@@ -119,8 +119,11 @@ add_executable(phosphor
     src/platform/metal/async_compute_probe.cpp
     src/platform/metal/debug_overlays.cpp
     src/platform/metal/frame_capture.cpp
+    src/platform/metal/gpu_capture.cpp
     src/platform/metal/gpu_memory.cpp
+    src/platform/metal/gpu_timestamps.cpp
     src/platform/metal/graph_debug_passes.cpp
+    src/platform/metal/known_cost_pass.cpp
     src/platform/metal/metal_context.cpp
     src/platform/metal/metal_graph_executor.cpp
     src/platform/metal/metal_impl.cpp

@@ -81,6 +81,9 @@ namespace phosphor {
 //   --gpu-timing-unfused  F4.1 attribution: compile the graph without raster
 //                      pass fusion, so every pass gets its own GPU time (costs
 //                      the extra attachment store/load; declared in the report)
+//   --gpu-timing-serial  F4.1: wait for each frame's GPU work before the next
+//                      one (no overlap between frames: per-pass times without
+//                      the neighbouring frame's work; use with --no-vsync)
 //   --debug-gpu-cost N add a compute pass of known cost (N iterations of an
 //                      LCG per thread; negative control of the pass timings)
 //   --gpu-capture      F4.3: insert the Metal capture layer (F12 captures the
@@ -138,6 +141,7 @@ struct LaunchOptions {
     // F4: observability.
     bool        gpuTiming        = true;
     bool        gpuTimingUnfused = false;
+    bool        gpuTimingSerial  = false;
     u32         debugGpuCost     = 0;      // 0 = no known-cost pass
     bool        gpuCapture       = false;  // capture layer inserted
     std::optional<u32> gpuCaptureFrame;

@@ -13,6 +13,8 @@
 
 namespace phosphor {
 
+class GpuTimestamps;
+
 [[nodiscard]] MTL::PixelFormat toMetalFormat(rg::Format format);
 [[nodiscard]] MTL::Stages      toMetalStages(rg::Stages stages);
 
@@ -45,6 +47,11 @@ namespace phosphor {
 // (the two queues share transient memory and persistent buffers across
 // frames).
 //
+// F4.1: with setTimestamps(), compile() builds the graph's rg::TimingPlan and
+// execute() writes a command-buffer timestamp at the start of every commit
+// and one timestamp at the end of every timed unit (render group, compute
+// pass).  Nothing else changes in the encoded frame.
+//
 // Imported resources (drawable, readback buffers) are bound every frame
 // with bindTexture()/bindBuffer().  Imported attachments are removed from
 // the persistent descriptors right after the encoder is created: the
@@ -68,6 +75,10 @@ public:
     [[nodiscard]] bool                     valid()    const { return graph_ && compiled_.ok; }
     /// Number of successful compile() calls (graph cache diagnostics).
     [[nodiscard]] u32                      compileCount() const { return compileCount_; }
+
+    /// F4.1: time the units of the graph (null: no timestamps).  Takes effect
+    /// at the next compile().
+    void setTimestamps(GpuTimestamps* timestamps) { timestamps_ = timestamps; }
 
     void bindTexture(rg::TextureRef texture, MTL::Texture* physical);
     void bindBuffer(rg::BufferRef buffer, MTL::Buffer* physical);
@@ -103,6 +114,8 @@ private:
 
     MetalContext&            context_;
     TransientHeap            heap_;
+    GpuTimestamps*           timestamps_ = nullptr;
+    std::vector<u32>         unitOfPosition_;   // F4.1: timed unit ending at a position, or ~0u
     const rg::RenderGraph*   graph_ = nullptr;
     rg::CompiledGraph        compiled_;
     u32                      compileCount_ = 0;

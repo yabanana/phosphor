@@ -58,6 +58,9 @@ public:
 
     [[nodiscard]] u32 unitCount() const { return static_cast<u32>(units_.size()); }
     [[nodiscard]] const std::string& unitName(u32 unit) const { return units_[unit].name; }
+    [[nodiscard]] const std::string& unitQueue(u32 unit) const { return units_[unit].queue; }
+    [[nodiscard]] bool unitFused(u32 unit) const { return units_[unit].fused; }
+    [[nodiscard]] u64  unitDramBytes(u32 unit) const { return units_[unit].dramBytes; }
     [[nodiscard]] UnitStats rolling(u32 unit) const;
     /// Average over the window of the per-frame sum of valid unit times.
     [[nodiscard]] float rollingSumMs() const;

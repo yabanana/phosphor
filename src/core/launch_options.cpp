@@ -154,6 +154,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.gpuTiming = false;
         } else if (arg == "--gpu-timing-unfused") {
             out.gpuTimingUnfused = true;
+        } else if (arg == "--gpu-timing-serial") {
+            out.gpuTimingSerial = true;
         } else if (arg == "--debug-gpu-cost") {
             if (!needCount(out.debugGpuCost)) return false;
         } else if (arg == "--gpu-capture") {
