@@ -523,7 +523,8 @@ void MetalGraphExecutor::execute(MetalContext::Frame& frame) {
     bool graphicsClosed = false, asyncClosed = true, firstAsync = true;
     if (segmented_) {
         graphicsSub_ = openSubmission(frame, SubmitQueue::Graphics, 0, 0);
-        frame.submissions[graphicsSub_].bufferCount = 1; // frame.commandBuffer
+        frame.submissions[graphicsSub_].firstBuffer = 0; // frame.commandBuffer
+        frame.submissions[graphicsSub_].bufferCount = 1;
         asyncSub_ = ~0u;
     }
 

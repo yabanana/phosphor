@@ -20,6 +20,11 @@ u64 countAsyncMismatches(u32 frame, const u32* data) {
 }
 
 void addAsyncProbeChain(RenderGraph& graph, AsyncProbeRefs& refs, const AsyncProbeExec& exec) {
+    addAsyncProbeProducers(graph, refs, exec);
+    addAsyncProbeConsumer(graph, refs, exec);
+}
+
+void addAsyncProbeProducers(RenderGraph& graph, AsyncProbeRefs& refs, const AsyncProbeExec& exec) {
     refs.readback = graph.importBuffer("Async readback", {kAsyncReadbackSize}, ImportOutput);
 
     graph.addPass(
@@ -35,6 +40,9 @@ void addAsyncProbeChain(RenderGraph& graph, AsyncProbeRefs& refs, const AsyncPro
             refs.r = b.write(b.createBuffer("Async R", {kAsyncResultBytes}), Usage::ShaderWrite, StageDispatch);
         },
         exec.reduce);
+}
+
+void addAsyncProbeConsumer(RenderGraph& graph, AsyncProbeRefs& refs, const AsyncProbeExec& exec) {
     graph.addPass(
         "Async consume", PassType::Compute, Queue::Graphics,
         [&](PassBuilder& b) {

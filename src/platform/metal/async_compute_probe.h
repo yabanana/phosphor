@@ -33,7 +33,11 @@ public:
 
     /// Add the passes to `graph` (call once per graph build, before the
     /// passes the async work should overlap).
-    void addToGraph(rg::RenderGraph& graph);
+    /// Seed + async reduce; declare before the frame's main passes.
+    void addProducers(rg::RenderGraph& graph);
+    /// Graphics consume of the async result; declare after them, so that the
+    /// async reduce overlaps the passes in between.
+    void addConsumer(rg::RenderGraph& graph);
 
     /// Log the queue syncs of a freshly compiled graph and remember them.
     void onCompiled(const rg::RenderGraph& graph, const rg::CompiledGraph& compiled);
@@ -65,6 +69,7 @@ private:
     MTL4::ArgumentTable* consumeArgs_ = nullptr;
 
     rg::AsyncProbeRefs refs_;
+    rg::AsyncProbeExec exec_; // callbacks, built by addProducers()
     std::array<MTL::Buffer*, METAL_FRAMES_IN_FLIGHT> readback_{};
     struct Pending {
         bool valid = false;

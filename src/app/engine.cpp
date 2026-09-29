@@ -582,7 +582,7 @@ void Engine::buildFrameGraph(u32 width, u32 height) {
 
     // F2.6: seed -> reduce (async queue) -> consume, declared before Forward so
     // the async pass can overlap it.
-    if (asyncProbe_) asyncProbe_->addToGraph(frameGraph_);
+    if (asyncProbe_) asyncProbe_->addProducers(frameGraph_);
 
     frameGraph_.addPass(
         "Forward", PassType::Raster,
@@ -614,6 +614,7 @@ void Engine::buildFrameGraph(u32 width, u32 height) {
             });
     }
 
+    if (asyncProbe_) asyncProbe_->addConsumer(frameGraph_);
     if (graphDebug_) graphDebug_->addToGraph(frameGraph_);
 
     if (capture_) {

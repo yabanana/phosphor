@@ -85,8 +85,8 @@ MTL::ComputePipelineState* AsyncComputeProbe::computePipeline(const char* functi
     return pso;
 }
 
-void AsyncComputeProbe::addToGraph(rg::RenderGraph& graph) {
-    rg::AsyncProbeExec exec;
+void AsyncComputeProbe::addProducers(rg::RenderGraph& graph) {
+    rg::AsyncProbeExec& exec = exec_;
     exec.seed = [this](rg::PassContext& ctx) {
         MTL4::ComputeCommandEncoder* enc = computeEncoder(ctx);
         // The frame index goes through the per-frame upload ring (no allocation).
@@ -117,7 +117,11 @@ void AsyncComputeProbe::addToGraph(rg::RenderGraph& graph) {
         enc->setArgumentTable(consumeArgs_);
         enc->dispatchThreads(MTL::Size::Make(rg::kAsyncResultCount, 1, 1), MTL::Size::Make(64, 1, 1));
     };
-    rg::addAsyncProbeChain(graph, refs_, exec);
+    rg::addAsyncProbeProducers(graph, refs_, exec);
+}
+
+void AsyncComputeProbe::addConsumer(rg::RenderGraph& graph) {
+    rg::addAsyncProbeConsumer(graph, refs_, exec_);
 }
 
 void AsyncComputeProbe::onCompiled(const rg::RenderGraph& graph, const rg::CompiledGraph& compiled) {

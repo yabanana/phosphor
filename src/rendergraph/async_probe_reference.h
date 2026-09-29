@@ -79,5 +79,10 @@ struct AsyncProbeExec {
 /// Add the three passes (and the imported readback buffer) to `graph`.  `refs`
 /// is filled during the call and must outlive the graph's use.
 void addAsyncProbeChain(RenderGraph& graph, AsyncProbeRefs& refs, const AsyncProbeExec& exec);
+/// The same chain in two parts, so that other passes can be declared in
+/// between: the engine declares the producers before its forward pass and the
+/// consumer after it, and the async reduce overlaps the forward pass.
+void addAsyncProbeProducers(RenderGraph& graph, AsyncProbeRefs& refs, const AsyncProbeExec& exec);
+void addAsyncProbeConsumer(RenderGraph& graph, AsyncProbeRefs& refs, const AsyncProbeExec& exec);
 
 } // namespace phosphor::rg
