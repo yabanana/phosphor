@@ -122,3 +122,16 @@ TEST_CASE("pipelines script: covers ImGui and the F2 self-check pipelines") {
         CHECK(script.compute.count(kernel) == 1);
     }
 }
+
+TEST_CASE("pipelines script: covers the F4.7 overlay pipelines") {
+    const Script script = loadScript();
+    const auto render = [&](const char* vs, const char* fs, const char* format, const char* blend) {
+        pipe::PipelineDesc desc;
+        desc.functions = {vs, fs};
+        return script.render.count(renderKey(desc, format, blend));
+    };
+    CHECK(render("overlay_vs", "overdraw_fs", "R16Float", "Disabled") == 1);
+    CHECK(render("overlay_vs", "lightcount_fs", "R16Float", "Disabled") == 1);
+    CHECK(render("overlay_composite_vs", "overlay_composite_fs", "BGRA8Unorm_sRGB", "Enabled") == 1);
+    CHECK(script.compute.count("overlay_tilecost") == 1);
+}

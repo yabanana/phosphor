@@ -29,6 +29,17 @@ class SceneRenderer;
 //              expose no per-tile time.
 //   Timings    no GPU pass (the engine draws the pass timings with ImGui).
 //
+// Passes per mode (all transient, only while the mode is active):
+//   Overdraw    "Overlay overdraw" (R16Float, programmable blending) ->
+//               "Overlay composite"
+//   LightCount  "Overlay light count" (R16Float, cleared to -1 = no geometry,
+//               own memoryless depth) -> "Overlay composite"
+//   TileCost    both passes above -> "Overlay tile cost" (compute, one 32x32
+//               threadgroup per tile, R32Float grid) -> "Overlay composite"
+// The composite is a fullscreen triangle alpha-blended (0.7) over the colour;
+// pixels without data (no fragment drawn, no geometry) stay untouched.  A
+// legend strip (the palette from 0 to legend().maxValue) sits bottom-left.
+//
 // Each heatmap is composited over `color` (before the ImGui overlay) with a
 // fixed, documented scale; legend() gives the scale for the UI.  Pipelines
 // come from the pipeline cache; the scene geometry is drawn through
@@ -50,12 +61,14 @@ public:
 
     /// Per frame, before the graph executes: overlay constants (scale, light
     /// count) into the frame upload ring.
+    /// (`lightCount` is unused: the light loop reads it from FrameConstants.)
     void prepareFrame(OverlayMode mode, u32 lightCount, u32 width, u32 height);
 
     struct Legend {
         const char* quantity = "";  // e.g. "fragments per pixel"
         float       maxValue = 0.0f; // value mapped to the hottest colour
         const char* note     = "";  // the declared approximation
+        bool        logScale = false; // false: linear 0..maxValue
     };
     [[nodiscard]] static Legend legend(OverlayMode mode);
 

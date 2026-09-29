@@ -60,6 +60,13 @@ public:
     /// Chunks may be encoded concurrently on different encoders (F2.5).
     void encode(MTL4::RenderCommandEncoder* encoder, u32 chunk = 0, u32 chunks = 1) const;
 
+    /// F4.7: draw the same batches (same bindings, viewport and cull state) with
+    /// another pipeline of the pipeline cache, for the debug overlays.  With
+    /// `depthTest` the renderer's reverse-Z depth state (Greater, write) is
+    /// used and the pass needs a depth attachment; without it the encoder's
+    /// default state is left untouched (no depth test).  Not for chunked encoding.
+    void encodeOverlay(MTL4::RenderCommandEncoder* encoder, pipe::PipelineHandle pipeline, bool depthTest) const;
+
     [[nodiscard]] u32 lastTriangleCount() const { return lastTriangles_; }
     /// True if the last prepared frame draws with the generic pipeline
     /// because its variant is not ready yet.
@@ -71,6 +78,8 @@ public:
 private:
     MTL::Buffer* createPrivateBuffer(const void* data, size_t size, const char* label);
     void releaseGeometry();
+    void encodeBatches(MTL4::RenderCommandEncoder* encoder, MTL::RenderPipelineState* pipeline,
+                       MTL::DepthStencilState* depthState, u32 chunk, u32 chunks) const;
 
     MetalContext& context_;
 

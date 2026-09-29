@@ -172,10 +172,21 @@ void SceneRenderer::prepareFrame(const GpuScene& scene, const FrameScene& fs, co
 
 void SceneRenderer::encode(MTL4::RenderCommandEncoder* enc, u32 chunk, u32 chunks) const {
     PH_ZONE("Forward encode");
-    if (!scene_ || !frameScene_ || !vertexBuffer_ || !indexBuffer_ || frameScene_->batches.empty() || !pipeline_) return;
+    encodeBatches(enc, pipeline_, depthState_, chunk, chunks);
+}
 
-    enc->setRenderPipelineState(pipeline_);
-    enc->setDepthStencilState(depthState_);
+void SceneRenderer::encodeOverlay(MTL4::RenderCommandEncoder* enc, pipe::PipelineHandle pipeline, bool depthTest) const {
+    encodeBatches(enc, pipelines_.render(pipeline), depthTest ? depthState_ : nullptr, 0, 1);
+}
+
+void SceneRenderer::encodeBatches(MTL4::RenderCommandEncoder* enc, MTL::RenderPipelineState* pipeline,
+                                  MTL::DepthStencilState* depthState, u32 chunk, u32 chunks) const {
+    if (!scene_ || !frameScene_ || !vertexBuffer_ || !indexBuffer_ || frameScene_->batches.empty() || !pipeline) return;
+
+    enc->setRenderPipelineState(pipeline);
+    // Null: the encoder's default (no depth test, no write); overlay passes
+    // without a depth attachment must not set a redundant state.
+    if (depthState) enc->setDepthStencilState(depthState);
     enc->setArgumentTable(arguments_, MTL::RenderStageVertex | MTL::RenderStageFragment);
     enc->setViewport(MTL::Viewport{0.0, 0.0, static_cast<double>(width_), static_cast<double>(height_), 0.0, 1.0});
 
