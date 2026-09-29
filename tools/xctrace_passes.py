@@ -299,7 +299,10 @@ def to_markdown(res):
     L += ["", "## Pass share inside each encoder (shader sample time)", "",
           "Shader-to-pass map: %s.  Shares are sampled shader wall time (sum over "
           "channels); on a TBDR GPU the fragments of fused passes interleave per tile, "
-          "so treat them as indicative, not as exclusive per-pass cost." % res["pass_map"]["source"], "",
+          "so they are NOT exclusive per-pass cost: measured on Many Lights, the ImGui overlay "
+          "takes 25%% of the fused encoder's shader time but 0.144 of 62 ms when timed alone "
+          "(opt-log F4).  For exclusive per-pass GPU time use the app's `--gpu-timing-unfused` "
+          "report." % res["pass_map"]["source"], "",
           "| Encoder | Pass | Shader ms | Share |", "|---|---|---:|---:|"]
     for lab, d in res["pass_shares"].items():
         for p, v in d["passes"].items():
