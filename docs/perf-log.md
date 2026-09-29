@@ -436,3 +436,26 @@ oscilla 1,38–2,03 ms su Torus in run consecutivi). Verifiche alternate:
 - Stress Test CPU 2,48 → 2,13 ms nella tabella; con vsync 4,49–4,59 /
   4,55–4,64 (a clock bassi): invariato.
 - Allocazioni GPU nei frame misurati: 0 in tutti i 42 report.
+
+### F3 — residui chiusi dopo il merge (2026-09-29, branch `phase/f3-residues`)
+
+- **Tutte le varianti controllate sui pixel** (`tools/variant_check.sh
+  build/release`): 7 bench × 42 varianti forzate (`--force-variant`) contro
+  la pipeline generica nella stessa modalità debug (`--debug-mode`): 252
+  varianti compatibili entro 1 livello (al massimo 34 pixel diversi), 42
+  incompatibili (modalità illuminata senza un tipo di luce che la scena usa)
+  tutte diverse (controllo negativo). Cornell ha ora il pannello emissivo
+  sotto il soffitto (il materiale 3 era "emissivo" solo nel commento): i
+  bench usano 3 varianti (solo direzionale; solo puntiformi; puntiformi +
+  emissivo); riferimento del bench 6 cambiato esattamente dei 12.590 pixel
+  del pannello (anche nel percorso generico).
+- **Heap CPU su run lunghi** (Release, bench 1): senza UI +11.791 / +9.647 /
+  +9.996 blocchi a 6.000 / 30.000 / 60.000 frame; con UI +3.588 / +3.513;
+  con `--debug-graph-transients --debug-split-encoding` +1.957 / +1.150;
+  con `--debug-async-compute` +6.746 / +8.629 a 12.000 frame e +6.002 a
+  24.000.
+  Nessuna crescita con la durata: è il riempimento iniziale delle cache di
+  sistema (continuazioni `libdispatch`, pool dei drawable), poi costante.
+- Il test `pipelines script` fallisce se `shaders/pipelines.mtl4-json` non
+  copre più tutte le varianti o le pipeline del motore (va rigenerato con
+  `tools/harvest_pipelines.sh`); controllo negativo verificato.
