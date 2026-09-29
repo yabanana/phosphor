@@ -159,8 +159,16 @@ private:
 
     // Flexible base pipelines per (generic key, library).
     std::mutex flexibleMutex_;
-    std::unordered_map<u64, MTL::RenderPipelineState*> flexible_;
+    struct FlexibleBase {
+        MTL::Library*             library  = nullptr; // not retained: identity only
+        MTL::RenderPipelineState* pipeline = nullptr;
+    };
+    std::unordered_map<u64, FlexibleBase> flexible_;
     std::unordered_map<u64, std::unique_ptr<std::once_flag>> flexibleOnce_;
+    bool pruneFlexible_ = false; // a reload committed: drop the old library's bases
+    /// Release the flexible bases of libraries no longer served, once no job
+    /// of an older generation can still use them (render thread).
+    void pruneFlexibleBases();
 };
 
 } // namespace phosphor
