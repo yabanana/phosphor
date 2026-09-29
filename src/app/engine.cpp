@@ -79,6 +79,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         throw std::runtime_error("Invalid arguments: " + error);
     }
     settings_.vsync = options_.vsync;
+    settings_.debugMode = static_cast<int>(options_.debugMode);
 
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
         throw std::runtime_error(std::string("SDL_Init failed: ") + SDL_GetError());
@@ -108,7 +109,8 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     pipelineOptions.fallbackOnly   = options_.debugFlexiblePipelines;
     pipelines_     = std::make_unique<PipelineCache>(*context_, pipelineOptions);
     renderer_      = std::make_unique<SceneRenderer>(*context_, *pipelines_, options_.pipelineSalt,
-                                                     /*genericOnly*/ options_.debugPipelineFallback);
+                                                     /*genericOnly*/ options_.debugPipelineFallback,
+                                                     options_.forceVariant);
     graphExecutor_ = std::make_unique<MetalGraphExecutor>(*context_);
     if (options_.debugGraphTransients) graphDebug_ = std::make_unique<GraphDebugPasses>(*context_, *pipelines_);
     if (options_.debugAsyncCompute) asyncProbe_ = std::make_unique<AsyncComputeProbe>(*context_, *pipelines_);

@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>
+#include <string>
 
 namespace phosphor {
 
@@ -35,8 +36,12 @@ enum Binding : NS::UInteger {
 
 } // namespace
 
-SceneRenderer::SceneRenderer(MetalContext& context, PipelineCache& pipelines, u32 salt, bool genericOnly)
-    : context_(context), pipelines_(pipelines), salt_(salt), genericOnly_(genericOnly) {
+SceneRenderer::SceneRenderer(MetalContext& context, PipelineCache& pipelines, u32 salt, bool genericOnly,
+                             std::optional<u32> forceVariant)
+    : context_(context), pipelines_(pipelines), salt_(salt), genericOnly_(genericOnly), forceVariant_(forceVariant) {
+    if (forceVariant_ && *forceVariant_ >= pipe::forward::variantCount()) {
+        throw std::runtime_error("--force-variant: expected 0.." + std::to_string(pipe::forward::variantCount() - 1));
+    }
     // The generic pipeline serves every frame until its variant is ready.
     generic_ = pipelines_.request(pipe::forward::genericDesc(rg::Format::BGRA8Srgb));
     variants_.assign(pipe::forward::variantCount(), pipe::INVALID_PIPELINE);
@@ -143,7 +148,8 @@ void SceneRenderer::prepareFrame(const GpuScene& scene, const FrameScene& fs, co
 
     // F3.3: the variant for this scene and debug mode; requested on first use
     // (compiled in the background), generic pipeline meanwhile.
-    const pipe::forward::Variant variant = pipe::forward::sceneVariant(fs, constants.debugMode);
+    const pipe::forward::Variant variant =
+        forceVariant_ ? pipe::forward::variantAt(*forceVariant_) : pipe::forward::sceneVariant(fs, constants.debugMode);
     pipe::PipelineHandle& handle = genericOnly_ ? generic_ : variants_[pipe::forward::variantIndex(variant)];
     if (handle == pipe::INVALID_PIPELINE) {
         LOG_INFO("Forward variant %u requested: light types 0x%x, emissive %d, debug mode %u",

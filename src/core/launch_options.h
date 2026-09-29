@@ -60,6 +60,11 @@ namespace phosphor {
 //                      specialised variants and draws with the generic
 //                      pipeline, the fallback a new variant uses while it
 //                      compiles (F3.2/F3.3 check: same pixels as before F3)
+//   --debug-mode N     start in debug view N (0 lit, 1 normals, 2 base colour;
+//                      the F1-F3 keys, for benchmark/capture runs)
+//   --force-variant N  the forward pass always draws with variant N of the
+//                      generated table, even if it does not match the scene
+//                      (tools/variant_check.sh: pixel check of every variant)
 //   --debug-flexible-pipelines  render pipelines stay on their Metal 4
 //                      flexible fallback (never the final object): measures
 //                      what the flexible path changes (F3.2)
@@ -106,6 +111,8 @@ struct LaunchOptions {
     bool        debugCompileStorm  = false;
     bool        debugPipelineFallback = false;
     bool        debugFlexiblePipelines = false;
+    u32         debugMode      = 0;
+    std::optional<u32> forceVariant;
     std::string shaderDir;                     // hot reload (Debug)
     std::string debugHotReloadPath;
 
