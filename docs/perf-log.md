@@ -303,3 +303,62 @@ valide. Verifiche nuove:
 - Con `--debug-async-compute` la verifica esatta della sonda costa 27,6 ms di
   CPU per frame in Release (72 ms in Debug): costo della verifica, non del
   frame; PASS su 3.120 frame.
+
+## F3 — pipeline: compilazione asincrona e archivi AOT
+
+**2026-09-29** · branch `phase/f3` · M5 Max, macOS 27.2, Xcode 27.0 ·
+Release, `--no-vsync --no-ui` salvo dove indicato. Strumento: `FrameTrace`
+(`--frame-trace`, riga `SWITCH`): per ogni cambio bench le fasi
+(waitIdle, setup, upload, GC, richieste pipeline, compilazione sul render
+thread) e i 10 frame successivi confrontati con la soglia del bench di
+arrivo, max(1,5 × p99, p99 + 0,5 ms) sui frame stazionari. Il frame del
+cambio (caricamento sincrono, lavoro di F22) è riportato a parte; il
+caricamento iniziale non è un cambio.
+
+### Nessun hitch al cambio testbench
+
+`--frames 1050 --switch-every 70` (14 cambi, tutti i bench due volte).
+
+| Configurazione | Run | Hitch | Compilazione sul render thread | Chiamate al compilatore | Note |
+|---|---|---|---|---|---|
+| Archivio (default Release) | 3 | 0 / 0 / 0 | 0 ms | 0 (4 hit) | frame post-cambio peggiore 0,60–0,81 × soglia |
+| Senza archivio, cache shader OS calda | 3 | 0 / 0 / 0 | 0 ms | 4 (~2 ms, dalla cache OS) | |
+| Senza archivio, compilazioni **a freddo** (`--pipeline-salt` unico) | 6 | 1 / 1 / 0 / 0 / 0 / 0 | 0 ms | 4 (70–91 ms, max 48–69 ms) | i 2 frame segnalati non coincidono con eventi pipeline (vedi sotto) |
+| **Controllo negativo** `--pipeline-sync`, a freddo | 2 | 1 / 1 | 29,1 ms / 0,5 ms | 4 | il cambio che richiede una variante la compila sul render thread → hitch |
+
+Fasi del cambio (archivio, media/max ms): totale 18–25 / 55–110, di cui
+waitIdle 10–17 / 50–110 (Many Lights: ~95 ms di GPU per frame in volo), setup
+6–8 / 17–34, upload 0,8–1,4 / 1,7–3,0, GC 0,03 / 0,06, richieste pipeline
+0,00 / 0,02. La compilazione non compare mai nel frame.
+
+I due "hitch" a freddo sono frame con flag 0 (nessuno swap, nessun
+fallback): 1,1 ms su Culling Viz (+3…+5 dopo il cambio) e 3,75 ms su PBR (+9,
+dopo lo swap al frame +4). Il primo passaggio a PBR, dove la variante v1
+compila a freddo in parallelo, ha CPU massima ≤ 0,16 ms in 5 run su 6
+(0,26–0,34 ms con l'archivio). Picchi isolati di 5–46 ms compaiono anche in
+stato stazionario, lontano dai cambi, **con l'archivio** e su `main` (28–46 ms
+su Many Lights/Cornell; un 137 ms su Many Lights senza cambi non riprodotto in
+16 coppie alternate `main`/F3, max ≤ 2,5 ms): rumore di sistema che a volte
+cade nella finestra di 10 frame. Nota di metodo: in zsh `$RANDOM` nel primo
+elemento di una pipeline gira in una subshell e ripete lo stesso valore; i
+sali vanno passati espliciti, altrimenti la "compilazione a freddo" viene
+servita dalla cache dell'OS.
+
+### Avvio a freddo
+
+`--bench 1 --frames 5`, 3 run per riga; cache shader dell'OS svuotata
+spostando da parte `$(getconf DARWIN_USER_CACHE_DIR)com.apple.metal` e
+ripristinandola.
+
+| Configurazione | Primo frame dopo il lancio | Pipeline di avvio pronte | Chiamate al compilatore |
+|---|---|---|---|
+| Archivio, cache OS calda | 138–151 ms | 0,0 ms | **0** (2 hit) |
+| Archivio, cache OS vuota | 147–155 ms | 5,5 ms | **0** (2 hit) |
+| Senza archivio, cache OS calda | 136–147 ms | 0,0 ms | 2 (1,7–2,3 ms) |
+| Senza archivio, cache OS vuota | 166–178 ms | 27–30 ms | 2 (79–85 ms) |
+
+Run completo con archivio, UI, `--switch-every 20` e tutti i flag di debug
+F2: 12 richieste, **12 hit, 0 compilazioni**. I primi due frame costano
+16–28 ms di CPU in ogni configurazione: è `processEvents` (SDL/Cocoa alla
+comparsa della finestra), non il rendering (`frame()` < 0,6 ms, misurato con
+strumentazione temporanea).

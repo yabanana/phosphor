@@ -215,3 +215,35 @@ stesso metallib Debug funzionava. Decisione: `PHOSPHOR_SHADER_DEBUG_INFO`
 Release e CI (shader ricompilati senza debug info) lo costruiscono. Con la
 shader validation attiva l'archivio è comunque inutilizzabile (voce F3.4
 precedente).
+
+---
+
+## F3.1 — QoS dei thread di compilazione: tempesta di 42 compilazioni
+
+**2026-09-29** · M5 Max, Release, Stress Test (100K istanze, CPU ~2–3 ms
+per frame), `--no-vsync --no-ui --debug-compile-storm`: al frame misurato 60
+il forward richiede tutte le 42 varianti con un sale nuovo (compilazioni a
+freddo, verificato: 540–610 ms di compilazione in totale, max 24–29 ms per
+pipeline). 18 thread di compilazione (`maximumConcurrentCompilationTaskCount`);
+3 run per QoS, alternati, sali espliciti.
+
+Ipotesi (WWDC25-254): con i thread di compilazione a QoS più bassa del
+render thread l'hitch sparisce; a QoS uguale il render thread soffre.
+
+| QoS dei thread | CPU render thread, frame 60–69 (media / max) | Frame ms, frame 60–69 (media / max) | Swap completati entro il frame |
+|---|---|---|---|
+| utility (default) | 2,01 / 2,15 · 2,20 / 2,39 · 1,92 / 2,21 | 9,9 – 12,5 / 16,2 – 22,5 | 64–66 |
+| user-interactive (controllo) | 2,34 / 2,77 · 2,34 / 2,53 · 2,28 / 2,60 | 11,7 – 12,5 / 17,2 – 17,7 | 64 |
+
+- La QoS è quella attesa: il worker 0 legge `qos_class_self()` = 0x11
+  (utility) e lo stampa nel log.
+- Nessun hitch in nessuna delle due configurazioni: le 42 compilazioni
+  girano nel servizio di compilazione su 18 thread e finiscono in ~5 frame.
+  Con utility la CPU del render thread nei frame della tempesta è più bassa
+  in 3 run su 3 (media 2,04 contro 2,32 ms, −12%), differenza piccola ma
+  coerente.
+- Su un M5 Max (18 core) la QoS pesa poco; la verifica sul pavimento T0 (O12,
+  meno core) resta da fare quando ci sarà l'hardware.
+
+Decisione: utility come default (come da playbook), `--compile-qos
+interactive` resta come controllo negativo.

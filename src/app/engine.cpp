@@ -242,7 +242,14 @@ void Engine::run() {
             rtCompileMsBeforeFrame_ = ps.renderThreadCompileMs;
             requestMsBeforeFrame_   = pipelines_->requestMs();
         }
-        processEvents();
+        {
+            // SDL's Cocoa event pump autoreleases AppKit objects: without a
+            // pool per iteration they pile up for the whole run (measured
+            // with malloc_history: +4.3k live blocks in 4 minutes).
+            NS::AutoreleasePool* eventPool = NS::AutoreleasePool::alloc()->init();
+            processEvents();
+            eventPool->release();
+        }
         if (!running_) break;
 
         if (pendingBench_) {
