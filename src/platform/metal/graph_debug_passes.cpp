@@ -5,6 +5,7 @@
 #include "core/log.h"
 
 #include <cstdio>
+#include <cstring>
 #include <stdexcept>
 #include <string>
 
