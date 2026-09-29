@@ -362,3 +362,77 @@ F2: 12 richieste, **12 hit, 0 compilazioni**. I primi due frame costano
 16–28 ms di CPU in ogni configurazione: è `processEvents` (SDL/Cocoa alla
 comparsa della finestra), non il rendering (`frame()` < 0,6 ms, misurato con
 strumentazione temporanea).
+
+### O7 e leak
+
+- **Allocazioni GPU nei frame misurati: 0** in tutti i report (bench singoli,
+  anche con i flag di debug; con `--switch-every` le allocazioni sono quelle
+  dei cambi bench, 99 su `main` come su F3).
+- **Heap CPU, 600 contro 6000 frame** (bench 1): senza flag +1974 / +1548
+  blocchi; `--debug-graph-transients --debug-split-encoding` F3 +1057 / −43 e
+  +1196 / +1174 (`main` +1080 / +3, +2054 / −47); `--debug-async-compute` F3
+  +491 / −384, −393 (`main` +6 / −610, −477 / −594). Oscillazioni di qualche
+  migliaio di blocchi in entrambe le build.
+- **Crescita trovata solo sui run lunghi** (`--debug-async-compute`, 12000
+  frame): F3 +35.509 blocchi, `main` **+69.240**: difetto preesistente da F0.
+  Due istantanee `malloc_history -allByCount` a 4 minuti di distanza
+  (`MallocStackLogging=lite`) mettono tutta la crescita in `processEvents` →
+  SDL `Cocoa_PumpEvents` → `-[NSApplication nextEventMatchingMask:…]`: AppKit
+  mette oggetti in autorelease e solo `frame()` aveva un pool. Con un pool
+  attorno al pompaggio degli eventi: **+6.746 / +8.629** blocchi a 12000
+  frame. Il residuo (~0,08 blocchi/frame nelle istantanee) sono continuazioni
+  `libdispatch` allocate dentro IOGPU/QuartzCore/FramePacing (commit, attese
+  sugli eventi, metriche) e le IOSurface del pool dei drawable (3
+  allocazioni da 23 MB ricreate da `CAMetalLayer`): nessuna allocazione del
+  motore. Resta da verificare che si stabilizzi su run ancora più lunghi.
+- `leaks --atExit` con tutti i flag, `--switch-every 30 --resize-every 40`:
+  **0 leak**.
+
+### `bench_all` contro `main`
+
+`main` (`9ed8448`) ricompilato in Release in un worktree temporaneo e
+misurato subito prima di F3 (`4d61dd3`), stessa sessione, `tools/bench_all.sh
+build/release 600 3`, alimentazione di rete.
+
+`main`:
+
+| # | Bench | Resolution | FPS | Frame ms (p99) | CPU ms (p99) | GPU ms (p99) | Wait ms (p99) |
+|---|---|---|---|---|---|---|---|
+| 1 | Torus Demo | 3200x1800 | 339 | 2.947 (10.998) | 0.079 (0.176) | 0.896 (3.564) | 2.867 (10.913) |
+| 2 | PBR Material Grid | 3200x1800 | 349 | 2.865 (12.316) | 0.123 (0.223) | 0.56 (2.741) | 2.734 (12.138) |
+| 3 | Stress Test (100K) | 3200x1800 | 199 | 5.017 (14.713) | 2.482 (4.128) | 2.857 (4.699) | 2.541 (12.565) |
+| 4 | Scene Viewer (glTF) | 3200x1800 | 349 | 2.864 (10.968) | 0.099 (0.173) | 0.814 (2.68) | 2.77 (10.844) |
+| 5 | Many Lights (1024) | 3200x1800 | 16 | 63.774 (142.23) | 0.112 (0.194) | 113.79 (171.081) | 63.453 (142.08) |
+| 6 | Cornell Box (GI) | 3200x1800 | 327 | 3.054 (12.005) | 0.102 (0.234) | 1.047 (3.351) | 2.952 (11.893) |
+| 7 | Culling Visualization | 3200x1800 | 307 | 3.26 (12.548) | 0.554 (1.042) | 1.842 (4.461) | 2.705 (12.081) |
+
+`phase/f3`:
+
+| # | Bench | Resolution | FPS | Frame ms (p99) | CPU ms (p99) | GPU ms (p99) | Wait ms (p99) |
+|---|---|---|---|---|---|---|---|
+| 1 | Torus Demo | 3200x1800 | 298 | 3.358 (12.291) | 0.112 (0.219) | 2.165 (5.879) | 3.237 (12.075) |
+| 2 | PBR Material Grid | 3200x1800 | 314 | 3.184 (10.788) | 0.137 (0.234) | 1.702 (4.407) | 3.035 (10.568) |
+| 3 | Stress Test (100K) | 3200x1800 | 218 | 4.583 (12.942) | 2.125 (3.492) | 3.59 (6.504) | 2.458 (10.718) |
+| 4 | Scene Viewer (glTF) | 3200x1800 | 329 | 3.042 (11.838) | 0.109 (0.238) | 1.417 (4.255) | 2.911 (11.566) |
+| 5 | Many Lights (1024) | 3200x1800 | 17 | 59.021 (133.326) | 0.126 (0.365) | 106.435 (158.967) | 58.894 (133.162) |
+| 6 | Cornell Box (GI) | 3200x1800 | 240 | 4.166 (14.962) | 0.119 (0.221) | 1.248 (3.525) | 4.047 (14.836) |
+| 7 | Culling Visualization | 3200x1800 | 226 | 4.416 (15.727) | 0.781 (1.111) | 2.915 (5.379) | 3.635 (14.776) |
+
+Il pomeriggio il sistema era più rumoroso della mattina (`main` Torus GPU
+0,90 ms contro 0,72 nella tabella F2) e le differenze GPU della tabella
+(Torus 0,90 → 2,17 ms, Culling 1,84 → 2,92 ms) non si riproducono: GPU ms
+senza vsync include la sovrapposizione dei frame in coda (`main` stesso
+oscilla 1,38–2,03 ms su Torus in run consecutivi). Verifiche alternate:
+
+- **GPU con vsync** (un frame per volta, 480 frame, 3 run per build,
+  gpu ms media): Torus `main` 1,72–1,95 / F3 1,70–1,78; PBR 0,95–1,00 /
+  0,65–0,94; Stress 4,53–4,55 / 4,09–4,43; Culling 4,09–4,34 / 4,13–4,18;
+  Scene Viewer (0,20–1,11 / 0,82–2,92) e Cornell (1,53–2,61 / 1,10–2,00)
+  rumorosi in entrambi i sensi. Nessuna regressione; le varianti
+  specializzate non costano GPU in più.
+- **CPU senza vsync** (4 coppie alternate): Culling `main` 0,677–0,719 /
+  F3 0,682–0,704; Torus 0,116–0,128 / 0,101–0,134; Cornell 0,121–0,131 /
+  0,114–0,128. Lo 0,554 → 0,781 della tabella era rumore.
+- Stress Test CPU 2,48 → 2,13 ms nella tabella; con vsync 4,49–4,59 /
+  4,55–4,64 (a clock bassi): invariato.
+- Allocazioni GPU nei frame misurati: 0 in tutti i 42 report.
