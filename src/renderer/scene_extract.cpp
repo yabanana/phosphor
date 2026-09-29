@@ -86,15 +86,23 @@ void extractFrameScene(ECS& ecs, const GpuScene& scene, FrameScene& out) {
         return (gi.flags & INSTANCE_FLAG_MIRRORED) ? CullClass::BackMirrored : CullClass::Back;
     };
 
-    std::stable_sort(out.instances.begin(), out.instances.end(),
-                     [&](const GPUInstance& a, const GPUInstance& b) {
-                         if (a.meshIndex != b.meshIndex) return a.meshIndex < b.meshIndex;
-                         return static_cast<u8>(cullClassOf(a)) < static_cast<u8>(cullClassOf(b));
-                     });
-
-    for (u32 i = 0; i < out.instances.size(); ++i) {
-        const u32 mesh = out.instances[i].meshIndex;
-        const CullClass cull = cullClassOf(out.instances[i]);
+    // Sort by (mesh, cull class), stable: one 64-bit key per instance
+    // (mesh | class | original index) computed once, then a permutation.
+    const u32 count = static_cast<u32>(out.instances.size());
+    out.sortKeys.resize(count);
+    for (u32 i = 0; i < count; ++i) {
+        const GPUInstance& gi = out.instances[i];
+        out.sortKeys[i] = (static_cast<u64>(gi.meshIndex) << 32) |
+                          (static_cast<u64>(cullClassOf(gi)) << 30) | i;
+    }
+    std::sort(out.sortKeys.begin(), out.sortKeys.end());
+    out.unsorted.swap(out.instances);
+    out.instances.resize(count);
+    for (u32 i = 0; i < count; ++i) {
+        const u64 key = out.sortKeys[i];
+        out.instances[i] = out.unsorted[static_cast<u32>(key & 0x3FFFFFFFu)];
+        const u32 mesh = static_cast<u32>(key >> 32);
+        const auto cull = static_cast<CullClass>((key >> 30) & 0x3u);
         if (out.batches.empty() || out.batches.back().meshIndex != mesh || out.batches.back().cull != cull) {
             out.batches.push_back({mesh, i, 0, cull});
         }

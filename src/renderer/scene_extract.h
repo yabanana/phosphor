@@ -34,6 +34,10 @@ struct FrameScene {
     std::vector<GPUMaterial> materials; // library materials, then per-entity ones
     std::vector<GPULight>    lights;
     std::vector<DrawBatch>   batches;
+    // Scratch reused every frame (no allocation once warm): sort keys and
+    // the instances in extraction order.
+    std::vector<u64>         sortKeys;
+    std::vector<GPUInstance> unsorted;
 };
 
 /// Convert an ECS material component to its GPU layout.
