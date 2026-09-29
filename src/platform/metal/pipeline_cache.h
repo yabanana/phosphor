@@ -30,11 +30,16 @@ class MetalContext;
 //                     maximumConcurrentCompilationTaskCount workers, QoS
 //                     utility, lower than the render thread's):
 //     1. MTL4Archive lookup of the full descriptor (F3.4) -> final object;
-//     2. on a miss (F3.5, reason recorded) a render pipeline first gets a
-//        FALLBACK: the flexible pipeline of its generic variant
-//        (unspecialized output state, compiled once per library) specialised
-//        to the real output state (newRenderPipelineStateBySpecialization,
-//        F3.2), then the full compile replaces it.
+//     2. on a miss (F3.5, reason recorded) the full compile.  Meanwhile the
+//        renderer draws a new variant with its GENERIC pipeline (same output
+//        state, already final, bit-identical to the pre-F3 forward).  Only
+//        when no generic pipeline with that output state is ready does the
+//        request get a Metal 4 FLEXIBLE fallback: the generic variant
+//        compiled once with an unspecialized output state and specialised
+//        to the real one (newRenderPipelineStateBySpecialization, F3.2).
+//        Measured: that path makes the validation layer warn and changes up
+//        to 300k pixels by 1 LSB, so it is the exception, not the rule
+//        (--debug-flexible-pipelines forces it).
 //   beginFrame()   -> results become visible at frame start only; replaced
 //                     objects go through MetalContext::deferRelease, so
 //                     frames in flight keep theirs.  Passes look their

@@ -148,7 +148,7 @@ void UIPanels::drawRenderPanel(RenderSettings& settings) {
 void UIPanels::drawPipelinePanel(const PipelinePanelInfo& info) {
     if (!info.stats) return;
     const pipe::PipelineStats& s = *info.stats;
-    ImGui::SetNextWindowPos(ImVec2(10, 480), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(10, 520), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Pipelines", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::Text("Archive: %s", info.archive);
         ImGui::Text("Entries %u, compile threads %u", info.entries, info.workers);
