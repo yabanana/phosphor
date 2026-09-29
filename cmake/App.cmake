@@ -170,6 +170,13 @@ add_executable(barrier_spike
 target_link_libraries(barrier_spike PRIVATE metal_cpp)
 target_compile_features(barrier_spike PRIVATE cxx_std_20)
 
+# --- F4.1 timestamp spike (measurement tool, not engine code) ---
+add_executable(timestamp_spike
+    bench/timestamp_spike/timestamp_spike.cpp
+)
+target_link_libraries(timestamp_spike PRIVATE metal_cpp)
+target_compile_features(timestamp_spike PRIVATE cxx_std_20)
+
 # Test assets are looked up relative to the working directory.
 if(NOT EXISTS ${CMAKE_BINARY_DIR}/assets)
     file(CREATE_LINK ${CMAKE_SOURCE_DIR}/assets ${CMAKE_BINARY_DIR}/assets SYMBOLIC)

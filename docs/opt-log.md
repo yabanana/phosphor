@@ -247,3 +247,127 @@ render thread l'hitch sparisce; a QoS uguale il render thread soffre.
 
 Decisione: utility come default (come da playbook), `--compile-qos
 interactive` resta come controllo negativo.
+
+---
+
+## F4 — Spike di osservabilità: timestamp MTL4, Tracy, contatori, cattura
+
+**2026-09-29** · M5 Max, macOS 27.2, Xcode 27.0, Release · strumento:
+`bench/timestamp_spike` (offscreen, kernel e fragment di costo noto: ciclo
+LCG di `iters` iterazioni su 1M thread o su un target 2048² con blending
+additivo, così nessun frammento viene scartato). Mediane di 7 run dopo un
+riscaldamento di 20 command buffer; "feedback" = `GPUEndTime −
+GPUStartTime` del commit.
+
+### 1. Timestamp per pass con `MTL4::CounterHeap`
+
+- **Dominio temporale**: 24 MHz (41,667 ns/tick), gli stessi tick di
+  `mach_absolute_time` e di `CNTVCT_EL0`; `sampleTimestamps` restituisce
+  invece nanosecondi (per CPU e GPU). La correlazione CPU/GPU è gratuita.
+  `sizeOfCounterHeapEntry` = 8; `resolveCounterRange` (CPU) e
+  `resolveCounterHeap` (GPU → buffer) danno gli stessi valori.
+- **Il timestamp di inizio dentro un encoder è inaffidabile**: scritto in
+  ritardo quando il lavoro è lungo (dispatch da 12,3 ms: inizio encoder 10,7
+  ms dopo il timestamp di command buffer che lo precede; 8000 iterazioni:
+  intervallo "encoder" 1,6–2,6 ms contro 6,1 ms reali). Il timestamp di
+  **fine** encoder è corretto (≤ 0,07 ms prima del timestamp di command
+  buffer successivo). I timestamp di command buffer
+  (`writeTimestampIntoHeap`) coincidono col feedback (12,28 contro 12,28 ms).
+- **Linearità** (controllo negativo) con timestamp di command buffer:
+  0 / 500 / 1000 / 2000 / 4000 / 8000 / 16000 iterazioni → 0,013 / 0,36 /
+  0,72 / 1,41 / 2,95 / 6,07 / 12,28 ms: lineare, rapporto con il feedback
+  0,98–1,00.
+- **Dentro un render encoder** (due draw di costo 100/400 e 400/100 =
+  due "pass fusi"): tutti i timestamp Fragment cadono nello stesso istante,
+  a fine pass (TBDR: i frammenti di tutti i pass del gruppo si alternano per
+  tile); `Precise` non cambia nulla e non spezza l'encoder. Con Vertex il
+  timestamp segna la fine della geometria (0,012 ms). **Il tempo per pass
+  dentro un gruppo fuso non è misurabile con i timestamp.**
+- **Limite di scritture**: in un render encoder, e in un compute encoder
+  `Relaxed`, vengono scritti al massimo **4 timestamp** (tutti con lo stesso
+  valore); gli altri restano a 0, senza alcun messaggio della validazione.
+  In un compute encoder `Precise` ogni timestamp dopo un dispatch è
+  distinto (64 su 64) e segue il costo del dispatch (1000/3000/6000 →
+  0,70/2,17/4,60 ms, somma = feedback), purché l'inizio sia la fine del
+  precedente e non un timestamp d'inizio encoder.
+- **Sequenza di encoder** compute(2000) → render(100) → compute(4000) →
+  render(300) con barriere: timestamp di command buffer tra gli encoder
+  oppure un timestamp di fine per encoder (Relaxed o Precise) danno
+  1,40/0,37/3,02/0,93 ms e la somma coincide col feedback (6,19 contro
+  6,20); con i costi invertiti gli intervalli si invertono.
+- **Costo**: 65 timestamp in un encoder da 64 draw: GPU 0,849 contro 0,850
+  ms senza (non misurabile); CPU di codifica +0,15 µs circa per timestamp.
+- **Suspend/resume (F2.5)**: tre chunk di un render pass su tre command
+  buffer: tutti i timestamp dei chunk cadono a fine pass; si misura il
+  gruppo intero.
+- **Coda async (F2.6)**: stesso dominio temporale sulle due code (inizi a
+  ±0,01 ms quando partono insieme); gli intervalli sono tempi di parete e
+  includono la contesa (compute da 2,96 ms da solo → 3,4–5,3 ms in parallelo
+  al render).
+
+**Decisione**: per ogni command buffer un timestamp di command buffer
+all'inizio, per ogni encoder un timestamp di fine (render: `afterStage
+Fragment`, `Relaxed`); nei compute encoder con più pass un timestamp
+`Precise` dopo ogni pass. Tempo di un encoder/pass = sua fine − fine
+precedente (o inizio del command buffer). Un gruppo di render fuso ha un
+solo tempo, attribuito al gruppo: i pass membri sono marcati "fused" e la
+ripartizione viene da Metal System Trace (punto 3).
+
+### 2. Tracy con command buffer MTL4
+
+- Il backend Metal di Tracy 0.14.1 (`TracyMetal.hmm`) usa
+  `MTLCounterSampleBuffer` e `sampleBufferAttachments` di Metal 3: gli
+  encoder MTL4 non hanno né l'uno né l'altro (header SDK): **non
+  utilizzabile**.
+- Zone GPU manuali con l'API C (`___tracy_emit_gpu_new_context`,
+  `…_zone_begin_serial`/`…_end_serial`, `…_gpu_time_serial`): periodo
+  41,667 ns, `gpuTime` di riferimento = `mach_absolute_time()` (stesso
+  contatore di `CNTVCT_EL0` usato da Tracy per la CPU, quindi nessuna
+  calibrazione). Verifica headless con `tracy-capture` e `tracy-csvexport -g`
+  compilati dai sorgenti (CMake, senza sudo): 200 frame × 4 zone, medie
+  1,5600 / 0,4329 / 3,1352 / 1,0593 ms, **identiche** a quelle calcolate dai
+  timestamp nello stesso processo.
+- Insidia: se `tracy-capture` parte prima che il client ascolti sulla porta
+  8086, `connect` "riesce" su macOS e la cattura fallisce con "disconnected
+  during the initial connection handshake"; il client va avviato prima (o
+  la cattura ritentata).
+
+### 3. Contatori hardware (F4.4)
+
+- API pubblica: `device->counterSets()` contiene solo `timestamp`
+  (`GPUTimestamp`); campionamento Metal 3 solo ai confini di stadio; MTL4
+  espone solo `CounterHeapTypeTimestamp`. Occupancy, banda, compressione,
+  stalli: **non disponibili via API**.
+- `xcrun xctrace record --template 'Metal System Trace' --instrument 'Metal
+  GPU Counters' --launch -- ./phosphor …` funziona headless (8 s → 260 MB).
+  Il set di contatori registrato contiene solo "RT Unit Active": il set si
+  sceglie nella GUI; copie del template con `counterprofile` 0–4 e con
+  l'ID acceleratore di questo Mac non cambiano nulla. **Contatori di
+  limiter/banda non ottenibili da CLI.**
+- Utilizzabili dal trace: `metal-gpu-intervals` (intervalli per encoder con
+  l'etichetta dell'encoder, es. "Forward + ImGui overlay", per canale
+  Vertex/Fragment/Compute) e `metal-shader-profiler-intervals` ("Shader
+  Timeline": durata e percentuale del kick per shader, es. `forward_fs`
+  98,8% e `imgui_fs` 0,2% dello stesso encoder fuso). Mappando le funzioni
+  shader ai pass si ottiene la ripartizione dei gruppi fusi che i timestamp
+  non danno. Anche `gpu-performance-state-intervals` (stato di clock).
+
+**Decisione**: F4.4 parziale e dichiarato: script headless che registra
+Metal System Trace, esporta le tabelle e produce per pass le durate
+Vertex/Fragment/Compute e la quota per shader; nessun contatore hardware.
+
+### 4. Cattura `.gputrace` da eseguibile CLI (F4.3)
+
+- Senza variabili: `supportsDestination(GPUTraceDocument)` = 0,
+  `startCapture` → "Capture layer is not inserted".
+- Con `MTL_CAPTURE_ENABLED=1` (anche impostata con `setenv` nel processo
+  **prima** di creare il device): cattura di un commit della coda MTL4 in un
+  `.gputrace` da 37 MB (buffer e texture inclusi), 58–80 ms.
+- Il layer di cattura inserito non cambia i tempi GPU del kernel noto (2000
+  iterazioni 1,51 contro 1,51 ms; 4000: 2,88 contro 2,88). Il costo CPU nel
+  motore va misurato.
+
+**Decisione**: la cattura si abilita solo con le opzioni di cattura
+(`setenv` prima del device), così senza opzioni il motore resta identico;
+una cattura "sopra soglia" arma il frame successivo (non si cattura a
+posteriori).
