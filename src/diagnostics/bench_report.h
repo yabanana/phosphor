@@ -26,7 +26,7 @@ namespace phosphor {
 // gpuPassSumMs the per-frame sum of the units.  JSON schema version 2 adds
 // "schema_version", "gpu_timing", "gpu_timing_unfused", "passes" (array of
 // {"name", "queue", "fused", "passes": [..], "shaders": [..],
-// "dram_bytes", "gpu_ms": {summary}}), "gpu_pass_sum_ms" and
+// "dram_bytes", "frames", "gpu_ms": {summary}}), "gpu_pass_sum_ms" and
 // "gpu_frame_span_ms" (summaries); version 1 fields are unchanged.
 // ---------------------------------------------------------------------------
 
@@ -52,6 +52,7 @@ struct PassReport {
     std::vector<std::string> passes;     // render graph passes covered
     std::vector<std::string> shaders;    // their profile shaders (PassBuilder::setProfileShaders)
     u64                      dramBytes = 0; // estimated DRAM bytes per frame
+    u32                      frames    = 0; // measured frames with a valid time for this unit
     TimingSummary            gpuMs;
 };
 

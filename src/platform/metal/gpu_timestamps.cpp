@@ -78,7 +78,6 @@ GpuTimestamps::Resolved GpuTimestamps::resolve(u32 slot) {
     NS::Data* data = heap_->resolveCounterRange(range);  // autoreleased
     std::fill(ticks_.begin(), ticks_.end(), 0);
     if (data) std::memcpy(ticks_.data(), data->bytes(), std::min<size_t>(data->length(), count * sizeof(u64)));
-    heap_->invalidateCounterRange(range);
 
     // Clamp every commit start to the previous frame's last end on its queue.
     for (u32 c = 0; c < s.commitStarts; ++c) {
@@ -89,6 +88,19 @@ GpuTimestamps::Resolved GpuTimestamps::resolve(u32 slot) {
 
     computeUnitTimes(ticks_.data(), count, s.startQuery.data(), endQuery_.data(), unitCount_, tickNs_, ms_.data(),
                      valid_.get());
+    // Stale entries (not written by this frame) are older than the frame's
+    // first commit start on their queue.
+    std::array<u64, 2> firstStart{~0ull, ~0ull};
+    for (u32 c = 0; c < s.commitStarts; ++c) {
+        const u64 t = ticks_[unitCount_ + c];
+        if (t != 0) firstStart[s.commitQueue[c]] = std::min(firstStart[s.commitQueue[c]], t);
+    }
+    for (u32 u = 0; u < unitCount_; ++u) {
+        if (valid_[u] && (firstStart[unitQueue_[u]] == ~0ull || ticks_[u] < firstStart[unitQueue_[u]])) {
+            valid_[u] = false;
+            ms_[u]    = 0.0f;
+        }
+    }
     u64 lastGraphicsEnd = 0;
     for (u32 u = 0; u < unitCount_; ++u) {
         const u32 q = s.startQuery[u];
@@ -98,7 +110,7 @@ GpuTimestamps::Resolved GpuTimestamps::resolve(u32 slot) {
             r.sumMs += ms_[u];
             if (unitQueue_[u] == 0) lastGraphicsEnd = std::max(lastGraphicsEnd, ticks_[u]);
         }
-        if (ticks_[u] != 0) lastEndTick_[unitQueue_[u]] = std::max(lastEndTick_[unitQueue_[u]], ticks_[u]);
+        if (valid_[u]) lastEndTick_[unitQueue_[u]] = std::max(lastEndTick_[unitQueue_[u]], ticks_[u]);
     }
     if (s.firstGraphicsStart < count && ticks_[s.firstGraphicsStart] != 0 &&
         lastGraphicsEnd >= ticks_[s.firstGraphicsStart]) {

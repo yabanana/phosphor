@@ -25,8 +25,12 @@ namespace phosphor {
 //
 // One heap holds METAL_FRAMES_IN_FLIGHT ranges of `stride_` queries; a slot's
 // range is read on the CPU (resolveCounterRange) when the slot is reused,
-// i.e. after its frame has completed, then invalidated (an entry the GPU did
-// not write reads 0 and makes its unit invalid).  The heap is created at
+// i.e. after its frame has completed.  Ranges are NOT invalidated per frame:
+// measured, invalidateCounterRange on one slot while other slots are in
+// flight also wipes some of the NEXT frame's writes into that slot (1 frame
+// in 3 read back 0).  An entry the GPU did not write keeps a value from an
+// older frame instead, so a unit is valid only if its end is not older than
+// the frame's first commit start on its queue (always written).  The heap is created at
 // graph compile time (bigger plan: a new heap, the old one released after
 // the frames in flight); nothing is allocated per frame except the
 // autoreleased NSData of resolveCounterRange (drained by the frame's pool).

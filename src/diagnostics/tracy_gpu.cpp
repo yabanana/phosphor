@@ -55,9 +55,12 @@ void TracyGpuZones::configure(const rg::TimingPlan& plan, double tickNs, u64 now
         const char* names[2] = {graphicsName, asyncName};
         const u16 lens[2] = {sizeof(graphicsName) - 1, sizeof(asyncName) - 1};
         for (u32 i = 0; i < 2; ++i) {
-            ___tracy_emit_gpu_new_context({static_cast<int64_t>(nowTicks), static_cast<float>(tickNs), ids[i], 0,
+            // Serial variants like the zones: a context emitted on the per-thread queue
+            // can reach the server after serial zones queued before the connection,
+            // and tracy-capture then dereferences a null context (measured: crash).
+            ___tracy_emit_gpu_new_context_serial({static_cast<int64_t>(nowTicks), static_cast<float>(tickNs), ids[i], 0,
                                            TRACY_GPU_TYPE_METAL});
-            ___tracy_emit_gpu_context_name({ids[i], names[i], lens[i]});
+            ___tracy_emit_gpu_context_name_serial({ids[i], names[i], lens[i]});
         }
         s.contextsCreated = true;
     }

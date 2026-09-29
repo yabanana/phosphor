@@ -52,7 +52,8 @@ std::string passToJson(const PassReport& p) {
     return "    {\"name\": \"" + jsonEscape(p.name) + "\", \"queue\": \"" + jsonEscape(p.queue) +
            "\", \"fused\": " + (p.fused ? "true" : "false") + ", \"passes\": " + list(p.passes) +
            ", \"shaders\": " + list(p.shaders) + ", \"dram_bytes\": " +
-           std::to_string(static_cast<unsigned long long>(p.dramBytes)) + ", \"gpu_ms\": " +
+           std::to_string(static_cast<unsigned long long>(p.dramBytes)) +
+           ", \"frames\": " + std::to_string(p.frames) + ", \"gpu_ms\": " +
            summaryToJson(p.gpuMs) + "}";
 }
 

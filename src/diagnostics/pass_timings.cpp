@@ -185,7 +185,8 @@ void PassTimings::summarize(std::vector<PassReport>& out, TimingSummary& sum, Ti
             const float x = measuredMs_[static_cast<size_t>(f) * n + u];
             if (!std::isnan(x)) samples.push_back(x);
         }
-        report.gpuMs = phosphor::summarize(std::move(samples));
+        report.frames = static_cast<u32>(samples.size());
+        report.gpuMs  = phosphor::summarize(std::move(samples));
         out.push_back(std::move(report));
     }
     sum  = phosphor::summarize(finite(measuredSum_));
