@@ -117,6 +117,7 @@ add_executable(phosphor
     src/imgui/imgui_renderer.cpp
     src/imgui/ui_panels.cpp
     src/platform/metal/async_compute_probe.cpp
+    src/platform/metal/debug_overlays.cpp
     src/platform/metal/frame_capture.cpp
     src/platform/metal/gpu_memory.cpp
     src/platform/metal/graph_debug_passes.cpp

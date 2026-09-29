@@ -58,6 +58,9 @@ add_library(phosphor_core STATIC
     src/diagnostics/bench_report.cpp
     src/diagnostics/frame_stats.cpp
     src/diagnostics/frame_trace.cpp
+    src/diagnostics/overlay_math.cpp
+    src/diagnostics/pass_timings.cpp
+    src/diagnostics/tracy_gpu.cpp
     src/pipeline/compile_queue.cpp
     src/pipeline/forward_variants.cpp
     src/pipeline/pipeline_desc.cpp
@@ -73,6 +76,7 @@ add_library(phosphor_core STATIC
     src/rendergraph/graph_dump.cpp
     src/rendergraph/render_graph.cpp
     src/rendergraph/tbdr_passes.cpp
+    src/rendergraph/timing_plan.cpp
     src/scene/camera.cpp
     src/scene/ecs.cpp
     src/scene/gltf_loader.cpp

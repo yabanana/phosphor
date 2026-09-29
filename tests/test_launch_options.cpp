@@ -109,6 +109,49 @@ TEST_CASE("launch options: F3 pipeline switches") {
     CHECK_FALSE(o.forceVariant.has_value());
 }
 
+TEST_CASE("launch options: F4 observability switches") {
+    LaunchOptions o;
+    std::string err;
+    REQUIRE(parse({}, o, err));
+    CHECK(o.gpuTiming);
+    CHECK_FALSE(o.gpuTimingUnfused);
+    CHECK(o.debugGpuCost == 0);
+    CHECK_FALSE(o.gpuCapture);
+    CHECK_FALSE(o.gpuCaptureFrame.has_value());
+    CHECK(o.gpuCaptureOverMs == 0.0f);
+    CHECK(o.gpuCaptureDir == "captures");
+    CHECK(o.gpuCaptureMax == 1);
+    CHECK(o.overlay == OverlayMode::None);
+
+    REQUIRE(parse({"--no-gpu-timing", "--gpu-timing-unfused", "--debug-gpu-cost", "2000"}, o, err));
+    CHECK_FALSE(o.gpuTiming);
+    CHECK(o.gpuTimingUnfused);
+    CHECK(o.debugGpuCost == 2000);
+
+    REQUIRE(parse({"--gpu-capture-frame", "30", "--gpu-capture-dir", "out", "--gpu-capture-max", "3"}, o, err));
+    CHECK(o.gpuCapture);
+    REQUIRE(o.gpuCaptureFrame.has_value());
+    CHECK(*o.gpuCaptureFrame == 30);
+    CHECK(o.gpuCaptureDir == "out");
+    CHECK(o.gpuCaptureMax == 3);
+    REQUIRE(parse({"--gpu-capture-over", "12.5"}, o, err));
+    CHECK(o.gpuCapture);
+    CHECK(o.gpuCaptureOverMs == doctest::Approx(12.5f));
+    REQUIRE(parse({"--gpu-capture"}, o, err));
+    CHECK(o.gpuCapture);
+    CHECK_FALSE(parse({"--gpu-capture-over", "0"}, o, err));
+    CHECK_FALSE(parse({"--gpu-capture-over", "fast"}, o, err));
+    CHECK_FALSE(parse({"--gpu-capture-over", "3ms"}, o, err));
+
+    for (const OverlayMode m : {OverlayMode::None, OverlayMode::Overdraw, OverlayMode::LightCount,
+                                OverlayMode::TileCost, OverlayMode::Timings}) {
+        REQUIRE(parse({"--overlay", overlayName(m)}, o, err));
+        CHECK(o.overlay == m);
+    }
+    CHECK_FALSE(parse({"--overlay", "heat"}, o, err));
+    CHECK(err.find("--overlay") != std::string::npos);
+}
+
 TEST_CASE("launch options: errors") {
     LaunchOptions o;
     std::string err;
