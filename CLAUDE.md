@@ -67,7 +67,8 @@ extend it; port algorithms from it.
   time per timed unit (`passes`) with `--frames`; `tools/bench_all.sh
   [--stats] [--passes] [--vsync]`, `tools/perf_record.sh` (appends to
   `docs/perf-history*.csv`), `tools/perf_table.py latest|compare|passes`,
-  `tools/tracy_check.sh build/tracy` (build with `-DPHOSPHOR_TRACY=ON`),
+  `tools/tracy_check.sh build/tracy` (build with `-DPHOSPHOR_TRACY=ON`;
+  Tracy runs on demand: events only while a profiler is connected),
   `tools/gpu_trace.sh` (headless Metal System Trace per pass; no hardware
   counters exist headless), `--gpu-capture*` (.gputrace).  Compare per-pass
   times at saturated clocks (`--no-vsync --gpu-timing-serial`): with vsync
@@ -144,8 +145,11 @@ extend it; port algorithms from it.
   `--debug-gpu-cost N` (known-cost pass, negative control of the pass
   timings), `--gpu-timing-unfused`, `--gpu-timing-serial`, `--no-gpu-timing`.
 - GPU timing (F4.1, `GpuTimestamps` via `MetalGraphExecutor`): only END
-  timestamps (encoder-start ones are written late) plus a command-buffer
-  timestamp at every commit start; a fused render group is one timed unit
+  timestamps (encoder-start ones are written late) plus a commit-start
+  timestamp in an "anchor" compute encoder (1-thread dispatch + producer
+  barrier; never `writeTimestampIntoHeap`, whose driver bookkeeping grows
+  forever on reused command buffers, nor an encoder without a dispatch,
+  which is dropped); a fused render group is one timed unit
   (the GPU runs its passes per tile together; at most 4 timestamps are
   written per render encoder); a unit's time is its exclusive contribution
   to the queue timeline, so passes that overlap on the GPU share it.  Never
