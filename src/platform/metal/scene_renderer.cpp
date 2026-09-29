@@ -35,8 +35,8 @@ enum Binding : NS::UInteger {
 
 } // namespace
 
-SceneRenderer::SceneRenderer(MetalContext& context, PipelineCache& pipelines, u32 salt)
-    : context_(context), pipelines_(pipelines), salt_(salt) {
+SceneRenderer::SceneRenderer(MetalContext& context, PipelineCache& pipelines, u32 salt, bool genericOnly)
+    : context_(context), pipelines_(pipelines), salt_(salt), genericOnly_(genericOnly) {
     // The generic pipeline serves every frame until its variant is ready.
     generic_ = pipelines_.request(pipe::forward::genericDesc(rg::Format::BGRA8Srgb));
     variants_.assign(pipe::forward::variantCount(), pipe::INVALID_PIPELINE);
@@ -144,11 +144,11 @@ void SceneRenderer::prepareFrame(const GpuScene& scene, const FrameScene& fs, co
     // F3.3: the variant for this scene and debug mode; requested on first use
     // (compiled in the background), generic pipeline meanwhile.
     const pipe::forward::Variant variant = pipe::forward::sceneVariant(fs, constants.debugMode);
-    pipe::PipelineHandle& handle = variants_[pipe::forward::variantIndex(variant)];
+    pipe::PipelineHandle& handle = genericOnly_ ? generic_ : variants_[pipe::forward::variantIndex(variant)];
     if (handle == pipe::INVALID_PIPELINE) {
         handle = pipelines_.request(pipe::forward::pipelineDesc(variant, rg::Format::BGRA8Srgb, salt_));
     }
-    usingFallback_ = !pipelines_.isFinal(handle);
+    usingFallback_ = genericOnly_ || !pipelines_.isFinal(handle);
     pipeline_ = pipelines_.render(handle);
     if (!pipeline_) pipeline_ = pipelines_.render(generic_);
     if (usingFallback_) pipelines_.noteFallbackUse();

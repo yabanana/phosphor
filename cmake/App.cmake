@@ -44,9 +44,15 @@ set(PHOSPHOR_SHADER_OUT ${CMAKE_BINARY_DIR}/shaders)
 set(PHOSPHOR_METALLIB ${PHOSPHOR_SHADER_OUT}/phosphor.metallib)
 set(PHOSPHOR_METAL_FLAGS -std=metal4.0 -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}
     -I ${CMAKE_SOURCE_DIR}/src -I ${CMAKE_BINARY_DIR}/generated -Wall)
-if(CMAKE_BUILD_TYPE MATCHES "Debug|RelWithDebInfo")
-    # Source-level shader debugging and profiling in Xcode.
+# Source-level shader debugging and profiling in Xcode (Debug/RelWithDebInfo).
+# metal-tt cannot translate specialised functions (F3.3 function constants)
+# from a metallib with debug info ("cannot find private metadata", measured
+# with toolchain 27.1), so the pipeline archive is built only without it.
+option(PHOSPHOR_SHADER_DEBUG_INFO "Compile shaders with debug info in Debug/RelWithDebInfo" ON)
+set(PHOSPHOR_SHADER_HAS_DEBUG_INFO OFF)
+if(PHOSPHOR_SHADER_DEBUG_INFO AND CMAKE_BUILD_TYPE MATCHES "Debug|RelWithDebInfo")
     list(APPEND PHOSPHOR_METAL_FLAGS -gline-tables-only -frecord-sources)
+    set(PHOSPHOR_SHADER_HAS_DEBUG_INFO ON)
 endif()
 
 set(PHOSPHOR_AIR_FILES)

@@ -105,9 +105,10 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     pipelineOptions.harvestPath    = options_.harvestPipelinesPath;
     pipelineOptions.sync           = options_.pipelineSync;
     pipelineOptions.interactiveQos = options_.compileQosInteractive;
-    pipelineOptions.fallbackOnly   = options_.debugPipelineFallback;
+    pipelineOptions.fallbackOnly   = options_.debugFlexiblePipelines;
     pipelines_     = std::make_unique<PipelineCache>(*context_, pipelineOptions);
-    renderer_      = std::make_unique<SceneRenderer>(*context_, *pipelines_, options_.pipelineSalt);
+    renderer_      = std::make_unique<SceneRenderer>(*context_, *pipelines_, options_.pipelineSalt,
+                                                     /*genericOnly*/ options_.debugPipelineFallback);
     graphExecutor_ = std::make_unique<MetalGraphExecutor>(*context_);
     if (options_.debugGraphTransients) graphDebug_ = std::make_unique<GraphDebugPasses>(*context_, *pipelines_);
     if (options_.debugAsyncCompute) asyncProbe_ = std::make_unique<AsyncComputeProbe>(*context_, *pipelines_);
@@ -724,6 +725,10 @@ bool Engine::frame(float dt) {
         graphKey_ = key;
         buildFrameGraph(width, height);
     }
+
+    // Captures are deterministic: the captured frame draws with the final
+    // pipelines (fallbacks: --debug-pipeline-fallback, --debug-flexible-pipelines).
+    if (captureThisFrame_ && !options_.debugFlexiblePipelines) pipelines_->waitAllFinal();
 
     if (graphDebug_) graphDebug_->beginFrame(frame.slot);
     if (asyncProbe_) asyncProbe_->beginFrame(frame.slot);

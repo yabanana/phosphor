@@ -116,6 +116,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             }
         } else if (arg == "--pipeline-salt") {
             if (!needCount(out.pipelineSalt)) return false;
+        } else if (arg == "--debug-flexible-pipelines") {
+            out.debugFlexiblePipelines = true;
         } else if (arg == "--debug-pipeline-fallback") {
             out.debugPipelineFallback = true;
         } else if (arg == "--debug-compile-storm") {

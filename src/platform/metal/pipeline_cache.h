@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -128,6 +129,8 @@ private:
     NS::Object* compileFinal(const pipe::PipelineDesc& desc, MTL::Library* library, NS::Error** error);
     NS::Object* archiveLookup(const pipe::PipelineDesc& desc, MTL::Library* library, NS::Error** error);
     void waitForCompletions(const std::function<bool()>& done);
+    /// Apply completions (render thread) and finish a committed/abandoned reload.
+    u32 drain();
 
     MetalContext&        context_;
     Options              options_;
@@ -136,6 +139,7 @@ private:
     MTL4::PipelineDataSetSerializer* serializer_ = nullptr;
     MTL::Library*        library_        = nullptr; // served generation
     MTL::Library*        pendingLibrary_ = nullptr; // reload in progress
+    u32                  pendingGeneration_ = 0;
     std::string          archiveStatus_;
     bool                 startupDone_ = false;
     double               requestMs_   = 0.0;

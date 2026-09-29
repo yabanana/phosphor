@@ -78,6 +78,20 @@ MTL4::FunctionDescriptor* functionDescriptor(const std::string& name, const pipe
     return spec;
 }
 
+/// Metal's default blend substate, spelled out: a specialisation descriptor
+/// otherwise inherits the flexible pipeline's "Unspecialized" substate, and
+/// validation warns that it is ignored when blending is disabled.
+void setDefaultBlendSubstate(MTL4::RenderPipelineColorAttachmentDescriptor* color) {
+    color->setRgbBlendOperation(MTL::BlendOperationAdd);
+    color->setAlphaBlendOperation(MTL::BlendOperationAdd);
+    color->setSourceRGBBlendFactor(MTL::BlendFactorOne);
+    color->setDestinationRGBBlendFactor(MTL::BlendFactorZero);
+    color->setSourceAlphaBlendFactor(MTL::BlendFactorOne);
+    color->setDestinationAlphaBlendFactor(MTL::BlendFactorZero);
+}
+
+constexpr u32 kMetalColorAttachments = 8;
+
 /// +1 MTL4 pipeline descriptor for `desc`.
 MTL4::PipelineDescriptor* buildDescriptor(const pipe::PipelineDesc& desc, MTL::Library* library) {
     if (desc.kind == pipe::PipelineKind::Compute) {
@@ -96,6 +110,18 @@ MTL4::PipelineDescriptor* buildDescriptor(const pipe::PipelineDesc& desc, MTL::L
     d->setFragmentFunctionDescriptor(fs);
     vs->release();
     fs->release();
+    // Every attachment's output state spelled out (measured: a fresh MTL4
+    // descriptor reports an "Unspecialized" blend substate, which validation
+    // flags on flexible pipelines and their specialisations).
+    {
+        for (u32 i = 0; i < kMetalColorAttachments; ++i) {
+            MTL4::RenderPipelineColorAttachmentDescriptor* color = d->colorAttachments()->object(i);
+            color->setPixelFormat(MTL::PixelFormatInvalid);
+            color->setBlendingState(MTL4::BlendStateDisabled);
+            color->setWriteMask(MTL::ColorWriteMaskAll);
+            setDefaultBlendSubstate(color);
+        }
+    }
     for (u32 i = 0; i < desc.colorCount; ++i) {
         const pipe::ColorOutput& out = desc.color[i];
         if (out.format == rg::Format::Unknown && !out.unspecialized) continue;
@@ -242,14 +268,27 @@ pipe::PipelineHandle PipelineCache::request(const pipe::PipelineDesc& desc) {
         const u32 callsBefore = registry_.stats().compilerCalls;
         const Clock::time_point start = Clock::now();
         resolve(handle, desc, generation, library, /*allowFallback*/ false);
-        registry_.drain();
+        drain();
         const float ms = msSince(start);
         if (startupDone_ && !registry_.isFinal(handle)) LOG_ERROR("Pipeline %s failed", desc.label.c_str());
         // An archive hit is not a compile: only count real compiler work.
         if (startupDone_ && registry_.stats().compilerCalls != callsBefore) registry_.recordRenderThreadCompile(ms);
         return handle;
     }
-    submit(handle, desc, generation, library, /*allowFallback*/ true);
+    // A flexible fallback only when nothing equivalent is ready: a variant
+    // whose generic pipeline (same output state) is final is drawn with that
+    // generic meanwhile (the renderer's choice, zero compiles), and startup
+    // requests are waited for anyway.  Every specialisation of a flexible
+    // pipeline makes the validation layer print "blending substate ... is
+    // ignored" for each attachment with blending disabled (measured with a
+    // minimal repro, whatever the base configuration), so the path is used
+    // only where it buys something.  --debug-pipeline-fallback forces it.
+    bool allowFallback = options_.fallbackOnly;
+    if (!allowFallback && startupDone_ && desc.kind == pipe::PipelineKind::Render) {
+        const pipe::PipelineHandle generic = registry_.find(pipe::pipelineKey(desc.generic()));
+        allowFallback = generic == pipe::INVALID_PIPELINE || !registry_.isFinal(generic);
+    }
+    submit(handle, desc, generation, library, allowFallback);
     return handle;
 }
 
@@ -413,7 +452,7 @@ void PipelineCache::waitForCompletions(const std::function<bool()>& done) {
             std::lock_guard<std::mutex> lock(waitMutex_);
             seen = posted_;
         }
-        registry_.drain();
+        drain();
         if (done()) return;
         std::unique_lock<std::mutex> lock(waitMutex_);
         waitCv_.wait(lock, [&] { return posted_ != seen; });
@@ -461,21 +500,19 @@ MTL::ComputePipelineState* PipelineCache::compute(pipe::PipelineHandle h) const 
     return static_cast<MTL::ComputePipelineState*>(static_cast<NS::Object*>(registry_.get(h)));
 }
 
-u32 PipelineCache::beginFrame() {
-    const u32 generationBefore = registry_.generation();
-    const bool pendingBefore = registry_.reloadPending();
-    const u32 reloadFailuresBefore = registry_.stats().reloadFailures;
+u32 PipelineCache::beginFrame() { return drain(); }
+
+u32 PipelineCache::drain() {
     const u32 changed = registry_.drain();
-    if (pendingBefore && !registry_.reloadPending()) {
-        if (registry_.generation() != generationBefore) {
+    if (pendingLibrary_ && !registry_.reloadPending()) {
+        if (registry_.generation() == pendingGeneration_) {
             // Reload committed: the new library is served from now on.
             context_.deferRelease(library_);
             library_ = pendingLibrary_;
             LOG_INFO("Shaders reloaded: generation %u, %u pipelines swapped", registry_.generation(), changed);
         } else {
             context_.deferRelease(pendingLibrary_);
-            LOG_ERROR("Shader reload abandoned (%u failures so far); the previous pipelines stay",
-                      registry_.stats().reloadFailures - reloadFailuresBefore + 0);
+            LOG_ERROR("Shader reload abandoned (a pipeline failed to compile); the previous pipelines stay");
         }
         pendingLibrary_ = nullptr;
     }
@@ -487,6 +524,7 @@ bool PipelineCache::reload(MTL::Library* library) {
     library->retain();
     pendingLibrary_ = library;
     const u32 generation = registry_.beginGeneration();
+    pendingGeneration_ = generation;
     queue_->cancelBefore(generation);
     for (u32 h = 0; h < registry_.size(); ++h) {
         const pipe::PipelineDesc desc = registry_.desc(h);

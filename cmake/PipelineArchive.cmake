@@ -27,7 +27,11 @@ set(PHOSPHOR_PIPELINES_JSON ${CMAKE_SOURCE_DIR}/shaders/pipelines.mtl4-json)
 set(PHOSPHOR_ARCHIVE ${PHOSPHOR_SHADER_OUT}/phosphor-archive.metallib)
 set(PHOSPHOR_ARCHIVE_JSON ${PHOSPHOR_SHADER_OUT}/pipelines.mtl4-json)
 
-if(NOT _tt_rc EQUAL 0 OR NOT PHOSPHOR_METAL_TT)
+if(PHOSPHOR_SHADER_HAS_DEBUG_INFO)
+    message(STATUS "Pipeline archive not built: shaders carry debug info, which metal-tt cannot "
+                   "translate for specialised functions (configure with -DPHOSPHOR_SHADER_DEBUG_INFO=OFF "
+                   "or use a Release build); the app compiles every pipeline.")
+elseif(NOT _tt_rc EQUAL 0 OR NOT PHOSPHOR_METAL_TT)
     message(WARNING "metal-tt not found (xcrun -sdk macosx -f metal-tt): the pipeline "
                     "archive is not built; the app will compile every pipeline.")
 elseif(NOT EXISTS ${PHOSPHOR_PIPELINES_JSON})

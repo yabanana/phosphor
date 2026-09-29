@@ -37,7 +37,8 @@ struct FrameScene;
 class SceneRenderer {
 public:
     /// `salt` != 0: salted variants (--pipeline-salt, cold compiles).
-    SceneRenderer(MetalContext& context, PipelineCache& pipelines, u32 salt = 0);
+    /// `genericOnly`: never request variants (--debug-pipeline-fallback).
+    SceneRenderer(MetalContext& context, PipelineCache& pipelines, u32 salt = 0, bool genericOnly = false);
     ~SceneRenderer();
 
     SceneRenderer(const SceneRenderer&) = delete;
@@ -72,6 +73,7 @@ private:
 
     PipelineCache&            pipelines_;
     u32                       salt_ = 0;
+    bool                      genericOnly_ = false;
     pipe::PipelineHandle      generic_ = pipe::INVALID_PIPELINE;
     std::vector<pipe::PipelineHandle> variants_; // by variant index
     MTL::RenderPipelineState* pipeline_ = nullptr; // chosen by prepareFrame

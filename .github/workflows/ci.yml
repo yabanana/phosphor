@@ -81,7 +81,9 @@ jobs:
         # with current OS"), which is scenario (a) of tools/archive_check.sh
         # (CI_ARCHIVE=<downloaded phosphor-archive.metallib>).
         run: |
-          cmake -S . -B build -DPHOSPHOR_ARCHIVE_ARCHS=all
+          # Shader debug info blocks metal-tt on specialised functions: the
+          # Debug build rebuilds its shaders without it for the archive.
+          cmake -S . -B build -DPHOSPHOR_ARCHIVE_ARCHS=all -DPHOSPHOR_SHADER_DEBUG_INFO=OFF
           cmake --build build --target phosphor_archive
 
       - name: Upload pipeline archive
