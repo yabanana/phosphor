@@ -172,6 +172,12 @@ fragment half4 forward_fs(VertexOut in                              [[stage_in]]
                           const device GPULight* lights             [[buffer(4)]],
                           const device TextureHandle* textures      [[buffer(5)]])
 {
+#ifdef PHOSPHOR_HOT_RELOAD_PROBE
+    // F3.6 self-test (--debug-hot-reload): the probe library, built by CMake
+    // with this define, draws opaque magenta so the engine can check exactly
+    // that every forward pipeline was swapped.  Absent from normal builds.
+    return half4(1.0h, 0.0h, 1.0h, 1.0h);
+#endif
     // Salt (F3.1 cold-compile measurements): a defined salt embeds its value in
     // the binary so the OS shader cache cannot serve the specialisation.  The
     // guard depends on a runtime value (a light count of 0xFFFFFFFF cannot
