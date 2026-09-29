@@ -153,16 +153,19 @@ private:
         void* staged     = nullptr; // pending-generation final object
         bool  stagedDone = false;
         bool  servedFallback = false;
+        bool  bornPending    = false; // added while a reload was pending
     };
 
     void release(void* object) const;
     void applyCurrent(Entry& e, const Completion& c, u32& changed);
+    void abandonReload();
     void commitOrAbandonReload(u32& changed);
 
     std::vector<Entry> entries_;
     std::unordered_map<PipelineKey, PipelineHandle> byKey_;
     u32 generation_        = 0;
     u32 pendingGeneration_ = 0;
+    u32 lastIssued_        = 0;      // highest generation number handed out
     bool reloadFailed_     = false;
     PipelineStats stats_;
 
