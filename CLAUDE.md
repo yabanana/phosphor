@@ -111,7 +111,8 @@ extend it; port algorithms from it.
   explicitly: Metal defaults to clockwise), UV origin top-left, bitangent =
   `cross(N, T) * w` towards decreasing V. Mirrored instances carry
   `INSTANCE_FLAG_MIRRORED` and are drawn in their own batches with front-face
-  culling; back faces are culled (glTF `doubleSided` materials are not). `tests/test_procedural.cpp` enforces the meshes.
+  culling; back faces are culled (glTF `doubleSided` materials are not).
+  `tests/test_procedural.cpp` enforces the meshes.
 - Reverse-Z infinite projection (clear depth 0, compare Greater), NDC y up.
 - Hardware floor is Apple9 (M3); anything needing Apple10 (M5) must have a
   fallback or be an explicitly higher tier.
