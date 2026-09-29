@@ -16,8 +16,8 @@ namespace phosphor {
 //            free frame slot and for a drawable
 //   gpuMs    GPU start-to-end span of the frame's command buffer; when the
 //            GPU overlaps consecutive frames this includes the overlap, so it
-//            is an upper bound of the frame's GPU cost (per-pass timestamps
-//            arrive with F4.1)
+//            is an upper bound of the frame's GPU cost (the per-pass times
+//            below are the measured one)
 //   waitMs   CPU time blocked in beginFrame() (free frame slot + drawable)
 //
 // F4.1/F4.6: with GPU timing on, `passes` holds one entry per timed unit of

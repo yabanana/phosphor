@@ -22,7 +22,9 @@ un numero senza contesto non vale. Le ottimizzazioni sperimentali vanno in
   - **GPU ms**: intervallo inizio→fine del command buffer sulla GPU (commit
     feedback MTL4). Se la GPU sovrappone frame consecutivi l'intervallo include
     la sovrapposizione: è un **limite superiore** del costo GPU del frame, non il
-    tempo di occupazione. I timestamp per pass arrivano con F4.1.
+    tempo di occupazione. Dal F4.1 il report ha i tempi per pass
+    (`passes`, `gpu_pass_sum_ms`: contributo esclusivo di ogni unità alla
+    timeline della coda).
   - **Wait ms**: CPU bloccata in `beginFrame()` (slot di frame libero +
     `nextDrawable()`).
   - Tra parentesi il p99 (nearest-rank).
