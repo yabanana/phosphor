@@ -141,6 +141,15 @@ void UIPanels::drawRenderPanel(RenderSettings& settings) {
         ImGui::Combo("View", &settings.debugMode, kModes, IM_ARRAYSIZE(kModes));
         ImGui::SliderFloat("Exposure", &settings.exposure, 0.1f, 8.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
         ImGui::Checkbox("VSync", &settings.vsync);
+        static const char* kOverlays[] = {"None", "Overdraw", "Light count", "Tile cost", "GPU timings"};
+        ImGui::Combo("Overlay", &settings.overlay, kOverlays, IM_ARRAYSIZE(kOverlays));
+        if (settings.overlay != 0 && settings.overlayMax > 0.0f) {
+            ImGui::Text("%s: 0 .. %.0f (%s)", settings.overlayQuantity, static_cast<double>(settings.overlayMax),
+                        settings.overlayLog ? "log" : "linear");
+            ImGui::PushTextWrapPos(ImGui::GetFontSize() * 24.0f);
+            ImGui::TextDisabled("%s", settings.overlayNote);
+            ImGui::PopTextWrapPos();
+        }
         ImGui::TextDisabled("F1-F3: view modes");
     }
     ImGui::End();

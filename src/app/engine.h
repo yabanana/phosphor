@@ -31,6 +31,7 @@ class GpuScene;
 class KnownCostPass;
 class GraphDebugPasses;
 class AsyncComputeProbe;
+class DebugOverlays;
 class ImGuiRenderer;
 class Input;
 class MetalContext;
@@ -114,6 +115,7 @@ private:
     bool                                 passMeasureStarted_ = false;
     std::vector<std::string>             passNames_;    // per graph pass (PassTimings::configure)
     std::vector<std::string>             passShaders_;
+    std::unique_ptr<DebugOverlays>       overlays_;    // F4.7 heatmaps
     std::unique_ptr<MemoryPressureMonitor> pressure_;
 
     std::unique_ptr<ECS>        ecs_;
@@ -160,10 +162,12 @@ private:
         bool capture = false;
         bool splitEncoding = false;
         bool asyncCompute  = false;
+        OverlayMode overlay = OverlayMode::None;
         bool operator==(const GraphKey&) const = default;
     };
     rg::RenderGraph frameGraph_;
     GraphKey        graphKey_;
+    OverlayMode     overlayMode_ = OverlayMode::None; // --overlay, changed from the Rendering panel
     rg::TextureRef  drawableRef_;
     rg::BufferRef   captureRef_;
     bool            captureThisFrame_ = false;

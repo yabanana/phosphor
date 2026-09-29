@@ -11,6 +11,7 @@
 #include "platform/metal/known_cost_pass.h"
 #include "platform/metal/gpu_memory.h"
 #include "platform/metal/async_compute_probe.h"
+#include "platform/metal/debug_overlays.h"
 #include "platform/metal/graph_debug_passes.h"
 #include "platform/metal/memory_pressure.h"
 #include "platform/metal/memory_stress.h"
@@ -84,6 +85,8 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     }
     settings_.vsync = options_.vsync;
     settings_.debugMode = static_cast<int>(options_.debugMode);
+    overlayMode_ = options_.overlay;
+    settings_.overlay = static_cast<int>(overlayMode_);
 
     // F4.3: the capture layer exists only if requested before any Metal
     // device is created -- SDL creates one with the window's CAMetalLayer, so
@@ -133,6 +136,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     if (options_.gpuCapture) {
         gpuCapture_ = std::make_unique<GpuCapture>(*context_, options_.gpuCaptureDir, options_.gpuCaptureMax);
     }
+    overlays_ = std::make_unique<DebugOverlays>(*context_, *pipelines_);
 
     ecs_        = std::make_unique<ECS>();
     gpuScene_   = std::make_unique<GpuScene>();
@@ -213,6 +217,7 @@ Engine::~Engine() {
     graphDebug_.reset();
     asyncProbe_.reset();
     knownCost_.reset();
+    overlays_.reset();
     capture_.reset();
     imguiRenderer_.reset();
     ImGui_ImplSDL3_Shutdown();
@@ -787,7 +792,7 @@ bool Engine::frame(float dt) {
     captureThisFrame_ = capture_ && lastFrame && !captured_;
 
     const GraphKey key{width, height, options_.ui, capture_ != nullptr, options_.debugSplitEncoding,
-                       options_.debugAsyncCompute};
+                       options_.debugAsyncCompute, overlayMode_};
     if (!(key == graphKey_) || !graphExecutor_->valid()) {
         frameFlags_ |= FrameGraphCompile;
         if (key.width != graphKey_.width || key.height != graphKey_.height) frameFlags_ |= FrameResize;
@@ -810,6 +815,7 @@ bool Engine::frame(float dt) {
     if (graphDebug_) graphDebug_->beginFrame(frame.slot);
     if (asyncProbe_) asyncProbe_->beginFrame(frame.slot);
     renderer_->prepareFrame(*gpuScene_, frameScene_, constants, textures_->tableAddress(), width, height);
+    overlays_->prepareFrame(overlayMode_, constants.lightCount, width, height);
     if (renderer_->usingFallback()) frameFlags_ |= FrameFallbackDraw;
     if (options_.ui) {
         PH_ZONE("UI");
@@ -891,7 +897,15 @@ void Engine::drawUi() {
     info.textures    = textures_->textureCount();
     info.gpuMs       = context_->lastGpuMs();
     UIPanels::drawPerformancePanel(*frameStats_, info);
+    {
+        const DebugOverlays::Legend legend = DebugOverlays::legend(overlayMode_);
+        settings_.overlayQuantity = legend.quantity;
+        settings_.overlayMax      = legend.maxValue;
+        settings_.overlayLog      = legend.logScale;
+        settings_.overlayNote     = legend.note;
+    }
     UIPanels::drawRenderPanel(settings_);
+    overlayMode_ = static_cast<OverlayMode>(settings_.overlay);
     fillMemoryInfo();
     UIPanels::drawMemoryPanel(memoryInfo_);
     PipelinePanelInfo pipelineInfo;
@@ -946,6 +960,8 @@ void Engine::buildFrameGraph(u32 width, u32 height) {
         [this](PassContext& ctx) {
             renderer_->encode(static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder()), ctx.chunk(), ctx.chunkCount());
         });
+
+    color = overlays_->addToGraph(frameGraph_, color, width, height, overlayMode_, *renderer_);
 
     if (options_.ui) {
         frameGraph_.addPass(

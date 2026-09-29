@@ -16,6 +16,13 @@ struct RenderSettings {
     int   debugMode = 0;     // 0 = lit, 1 = normals, 2 = base color
     float exposure  = 1.0f;
     bool  vsync     = true;
+    // F4.7 debug overlay: index of OverlayMode (none, overdraw, lights, tile
+    // cost, timings); the legend fields are filled by the engine.
+    int         overlay         = 0;
+    const char* overlayQuantity = "";
+    float       overlayMax      = 0.0f;
+    bool        overlayLog      = false;
+    const char* overlayNote     = "";
 };
 
 /// Read-only information shown in the stats panel.
