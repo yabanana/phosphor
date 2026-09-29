@@ -52,7 +52,11 @@ public:
     void submit(CompilePriority priority, u32 generation, Job job);
     /// Drop queued jobs whose generation is < `generation`; returns how many.
     u32 cancelBefore(u32 generation);
-    /// Block until no job is queued or running.
+    /// Block until an instant with no job queued and none running is observed
+    /// (jobs submitted concurrently by other threads afterwards are not
+    /// waited for; a job submitting a job keeps the queue busy, so it is).
+    /// A job must NOT call waitIdle (it would wait for itself).  Jobs may
+    /// throw: the exception is swallowed and the worker keeps running.
     void waitIdle();
 
     [[nodiscard]] u32    workerCount() const { return static_cast<u32>(threads_.size()); }
