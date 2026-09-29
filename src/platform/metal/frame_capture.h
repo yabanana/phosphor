@@ -37,6 +37,11 @@ public:
     /// (call MetalContext::waitIdle() first).  Returns false on failure.
     bool writePng(const std::string& path);
 
+    /// Raw BGRA8 pixels of the captured frame (after waitIdle), width x height.
+    [[nodiscard]] const u8* pixels() const { return readback_ ? static_cast<const u8*>(readback_->contents()) : nullptr; }
+    [[nodiscard]] u32 width() const { return width_; }
+    [[nodiscard]] u32 height() const { return height_; }
+
 private:
     MetalContext& context_;
     MTL::Buffer*  readback_ = nullptr;

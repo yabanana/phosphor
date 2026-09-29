@@ -115,3 +115,44 @@ async) → consumo (grafica), con la riduzione sovrapposta al forward.
   `std::sort` sulle chiavi e permutazione in vettori riusati: **1,89 ms**
   (−34% rispetto a `main`), ordine stabile (immagini identiche), nessuna
   allocazione a regime.
+
+---
+
+## F3.4 — `metal-tt`, `MTL4Archive` e runner CI (spike)
+
+**2026-09-29** · M5 Max, macOS 27.2, Xcode 27.0 (toolchain Metal 27.1); runner
+GitHub `macos-26` (Xcode 26.6, toolchain 17.6). Tool usa-e-getta fuori dal
+repo (harvest con `MTL4PipelineDataSetSerializer`, lookup e compilazione
+cronometrati) e un branch CI temporaneo, poi eliminato.
+
+Ipotesi: descrittori raccolti a runtime → `.mtl4-json` → `metal-tt` in CI →
+archivio caricato dal Mac con lookup quasi gratuiti; miss gestibili.
+
+| Misura | Risultato |
+|---|---|
+| Harvest (`CaptureDescriptors`) → `serializeAsPipelinesScript` | JSON di 1,8 KB: librerie, function descriptor, pipeline descriptor |
+| `metal-tt` locale | 15,8 s per tutte le arch (13 famiglie Apple + AMD/Intel vuote), ~0,1 s con `-arch applegpu_g17s` (M5 Max, da `xcrun metal-arch`) |
+| Lookup nell'archivio | HIT 0,05–0,4 ms; compilazione a freddo della stessa pipeline 40–53 ms (seconda compilazione ~1 ms: cache shader dell'OS) |
+| `metal-tt` sul runner `macos-26` | funziona (31 s, archivio 1,1 MB) |
+| Archivio del runner aperto su macOS 27.2 | **rifiutato all'apertura**: "deployment target for architecture applegpu_g17s … is not compatible with current OS" |
+| Archivio con la sola arch `applegpu_g16s` | rifiutato all'apertura: "unable to find applegpu_g17s slice" |
+| Descrittore non raccolto (RGBA16F, `debug_reduce`) | miss per singola pipeline con errore esplicito ("Failed to find fragment function … with key") |
+| Archivio vecchio + metallib modificato (costante del tonemap) | miss solo delle pipeline con funzioni cambiate (`forward_fs`), hit delle altre (`debug_fill`) |
+| Etichette-hash del JSON sostituite con `L0…Ln` | `metal-tt` e lookup invariati: le etichette sono solo riferimenti interni, il JSON non dipende dal corpo degli shader |
+| Alternativa senza `metal-tt`: serializer `CaptureBinaries` + `serializeAsArchiveAndFlushToURL` | funziona (118 KB, HIT); con `CaptureDescriptors \| CaptureBinaries` la serializzazione fallisce senza errore |
+| `maximumConcurrentCompilationTaskCount` | 18 su M5 Max, 2 sul runner (GPU paravirtuale senza Metal 4) |
+| Lookup con `MTL_SHADER_VALIDATION=1` | **ogni lookup fallisce**: "MTL4Archive instances are not compatible with Metal shader validation" |
+
+Decisioni:
+
+- L'archivio usato dal Mac è costruito dal build locale (`phosphor_archive`,
+  `metal-tt` dello stesso OS, arch nativa); il CI costruisce l'archivio per
+  tutte le arch come verifica di coerenza JSON/metallib e lo pubblica come
+  artefatto per macOS 26. Sul Mac quell'archivio è il caso reale "OS
+  diverso" di F3.5 (`tools/archive_check.sh`, scenario a).
+- Il `.mtl4-json` è committato (`shaders/pipelines.mtl4-json`, path della
+  libreria → segnaposto): resta valido finché non cambiano nomi, costanti o
+  stato delle pipeline.
+- Con la shader validation attiva l'archivio è dichiarato "non disponibile"
+  (motivo nel log) invece di produrre un miss per pipeline; le verifiche
+  dell'archivio girano con la sola API validation.

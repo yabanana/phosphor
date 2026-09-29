@@ -76,6 +76,33 @@ add_custom_target(phosphor_shaders DEPENDS ${PHOSPHOR_METALLIB})
 # F3.4: pipeline archive (metal-tt) built from shaders/pipelines.mtl4-json.
 include(cmake/PipelineArchive.cmake)
 
+# F3.6 self-test (--debug-hot-reload): the same shaders with
+# PHOSPHOR_HOT_RELOAD_PROBE, whose forward pass outputs a constant colour.
+set(PHOSPHOR_PROBE_OUT ${PHOSPHOR_SHADER_OUT}/probe)
+set(PHOSPHOR_PROBE_METALLIB ${PHOSPHOR_SHADER_OUT}/hot-reload-probe.metallib)
+set(PHOSPHOR_PROBE_AIR_FILES)
+foreach(shader IN LISTS PHOSPHOR_METAL_SHADERS)
+    get_filename_component(name ${shader} NAME_WE)
+    set(air ${PHOSPHOR_PROBE_OUT}/${name}.air)
+    add_custom_command(
+        OUTPUT ${air}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${PHOSPHOR_PROBE_OUT}
+        COMMAND xcrun -sdk macosx metal ${PHOSPHOR_METAL_FLAGS} -DPHOSPHOR_HOT_RELOAD_PROBE=1 -c ${shader} -o ${air}
+        DEPENDS ${shader} ${PHOSPHOR_SHADER_OUT}/${name}.air
+        COMMENT "Compiling hot-reload probe shader ${name}.metal"
+        VERBATIM
+    )
+    list(APPEND PHOSPHOR_PROBE_AIR_FILES ${air})
+endforeach()
+add_custom_command(
+    OUTPUT ${PHOSPHOR_PROBE_METALLIB}
+    COMMAND xcrun -sdk macosx metallib ${PHOSPHOR_PROBE_AIR_FILES} -o ${PHOSPHOR_PROBE_METALLIB}
+    DEPENDS ${PHOSPHOR_PROBE_AIR_FILES}
+    COMMENT "Linking hot-reload-probe.metallib"
+    VERBATIM
+)
+add_custom_target(phosphor_probe_shaders DEPENDS ${PHOSPHOR_PROBE_METALLIB})
+
 # --- Executable ---
 add_executable(phosphor
     src/main.cpp
@@ -95,12 +122,21 @@ add_executable(phosphor
     src/platform/metal/pipeline_cache.cpp
     src/platform/metal/residency_manager.cpp
     src/platform/metal/scene_renderer.cpp
+    src/platform/metal/shader_reloader.cpp
     src/platform/metal/transient_heap.cpp
     src/platform/metal/upload_ring.cpp
 )
 target_link_libraries(phosphor PRIVATE phosphor_core imgui metal_cpp)
 target_compile_options(phosphor PRIVATE ${PHOSPHOR_WARNINGS})
-add_dependencies(phosphor phosphor_shaders)
+add_dependencies(phosphor phosphor_shaders phosphor_probe_shaders)
+# F3.6 hot reload rebuilds the metallib with exactly these flags ('|'-joined:
+# a ';' would split the definition).
+string(REPLACE ";" "|" _phosphor_shader_flags "${PHOSPHOR_METAL_FLAGS}")
+target_compile_definitions(phosphor PRIVATE
+    "PHOSPHOR_SHADER_FLAGS=\"${_phosphor_shader_flags}\""
+    "PHOSPHOR_SHADER_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}/shaders\""
+    "PHOSPHOR_RENDERER_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}/src/renderer\""
+)
 if(PHOSPHOR_METAL_VALIDATION)
     # main() enables the Metal API validation layer in Debug builds.
     target_compile_definitions(phosphor PRIVATE $<$<CONFIG:Debug>:PHOSPHOR_METAL_VALIDATION=1>)

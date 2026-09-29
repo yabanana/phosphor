@@ -1,5 +1,7 @@
 #include "platform/metal/scene_renderer.h"
 #include "platform/metal/gpu_memory.h"
+#include "platform/metal/pipeline_cache.h"
+#include "pipeline/forward_variants.h"
 #include "renderer/gpu_scene.h"
 #include "renderer/scene_extract.h"
 #include "core/log.h"
@@ -33,9 +35,11 @@ enum Binding : NS::UInteger {
 
 } // namespace
 
-SceneRenderer::SceneRenderer(MetalContext& context)
-    : context_(context) {
-    buildPipeline();
+SceneRenderer::SceneRenderer(MetalContext& context, PipelineCache& pipelines, u32 salt)
+    : context_(context), pipelines_(pipelines), salt_(salt) {
+    // The generic pipeline serves every frame until its variant is ready.
+    generic_ = pipelines_.request(pipe::forward::genericDesc(rg::Format::BGRA8Srgb));
+    variants_.assign(pipe::forward::variantCount(), pipe::INVALID_PIPELINE);
 
     MTL::DepthStencilDescriptor* dsDesc = MTL::DepthStencilDescriptor::alloc()->init();
     dsDesc->setDepthCompareFunction(MTL::CompareFunctionGreater); // reverse-Z
@@ -59,32 +63,14 @@ SceneRenderer::~SceneRenderer() {
     releaseGeometry();
     arguments_->release();
     depthState_->release();
-    pipeline_->release();
 }
 
-void SceneRenderer::buildPipeline() {
-    MTL4::LibraryFunctionDescriptor* vs = MTL4::LibraryFunctionDescriptor::alloc()->init();
-    vs->setLibrary(context_.library());
-    vs->setName(str("forward_vs"));
-    MTL4::LibraryFunctionDescriptor* fs = MTL4::LibraryFunctionDescriptor::alloc()->init();
-    fs->setLibrary(context_.library());
-    fs->setName(str("forward_fs"));
-
-    MTL4::RenderPipelineDescriptor* desc = MTL4::RenderPipelineDescriptor::alloc()->init();
-    desc->setLabel(str("Forward"));
-    desc->setVertexFunctionDescriptor(vs);
-    desc->setFragmentFunctionDescriptor(fs);
-    desc->colorAttachments()->object(0)->setPixelFormat(context_.colorFormat());
-    // MTL4 render pipelines take no depth format: it is inferred from the pass.
-
-    NS::Error* error = nullptr;
-    pipeline_ = context_.compiler()->newRenderPipelineState(desc, nullptr, &error);
-    desc->release();
-    fs->release();
-    vs->release();
-    if (!pipeline_) {
-        const char* reason = error ? error->localizedDescription()->utf8String() : "unknown error";
-        throw std::runtime_error(std::string("Failed to build forward pipeline: ") + reason);
+void SceneRenderer::requestAllVariants() {
+    for (u32 i = 0; i < variants_.size(); ++i) {
+        if (variants_[i] == pipe::INVALID_PIPELINE) {
+            variants_[i] = pipelines_.request(
+                pipe::forward::pipelineDesc(pipe::forward::variantAt(i), rg::Format::BGRA8Srgb, salt_));
+        }
     }
 }
 
@@ -155,6 +141,18 @@ void SceneRenderer::prepareFrame(const GpuScene& scene, const FrameScene& fs, co
     arguments_->setAddress(frameBase + lightsOffset, BindLights);
     arguments_->setAddress(textureTable, BindTextures);
 
+    // F3.3: the variant for this scene and debug mode; requested on first use
+    // (compiled in the background), generic pipeline meanwhile.
+    const pipe::forward::Variant variant = pipe::forward::sceneVariant(fs, constants.debugMode);
+    pipe::PipelineHandle& handle = variants_[pipe::forward::variantIndex(variant)];
+    if (handle == pipe::INVALID_PIPELINE) {
+        handle = pipelines_.request(pipe::forward::pipelineDesc(variant, rg::Format::BGRA8Srgb, salt_));
+    }
+    usingFallback_ = !pipelines_.isFinal(handle);
+    pipeline_ = pipelines_.render(handle);
+    if (!pipeline_) pipeline_ = pipelines_.render(generic_);
+    if (usingFallback_) pipelines_.noteFallbackUse();
+
     lastTriangles_ = 0;
     const auto& infos = scene.meshInfos();
     for (const DrawBatch& batch : fs.batches) {
@@ -163,7 +161,7 @@ void SceneRenderer::prepareFrame(const GpuScene& scene, const FrameScene& fs, co
 }
 
 void SceneRenderer::encode(MTL4::RenderCommandEncoder* enc, u32 chunk, u32 chunks) const {
-    if (!scene_ || !frameScene_ || !vertexBuffer_ || !indexBuffer_ || frameScene_->batches.empty()) return;
+    if (!scene_ || !frameScene_ || !vertexBuffer_ || !indexBuffer_ || frameScene_->batches.empty() || !pipeline_) return;
 
     enc->setRenderPipelineState(pipeline_);
     enc->setDepthStencilState(depthState_);

@@ -2,6 +2,7 @@
 
 #include "core/memory/memory_budget.h"
 #include "core/types.h"
+#include "pipeline/pipeline_registry.h"
 
 #include <array>
 #include <vector>
@@ -74,6 +75,15 @@ struct MemoryPanelInfo {
     u32         pressureEvents  = 0;
 };
 
+/// Pipeline cache state shown in the Pipelines panel (F3).
+struct PipelinePanelInfo {
+    const pipe::PipelineStats* stats = nullptr;
+    const char* archive  = "";
+    u32         workers  = 0;
+    u32         entries  = 0;
+    bool        fallback = false; // this frame drew with a fallback pipeline
+};
+
 // ---------------------------------------------------------------------------
 // UIPanels -- stateless helpers that draw the ImGui diagnostic windows.
 // ---------------------------------------------------------------------------
@@ -92,6 +102,9 @@ public:
 
     /// GPU memory: budgets per category, heaps, upload rings, residency.
     static void drawMemoryPanel(const MemoryPanelInfo& info);
+
+    /// Pipeline cache: archive, compilations, fallbacks (F3).
+    static void drawPipelinePanel(const PipelinePanelInfo& info);
 };
 
 } // namespace phosphor

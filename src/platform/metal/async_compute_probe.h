@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/types.h"
+#include "pipeline/pipeline_registry.h"
 #include "platform/metal/metal_context.h"
 #include "rendergraph/async_probe_reference.h"
 
@@ -9,6 +10,7 @@
 namespace phosphor {
 
 class MetalGraphExecutor;
+class PipelineCache;
 
 // ---------------------------------------------------------------------------
 // AsyncComputeProbe -- --debug-async-compute (F2.6).
@@ -25,7 +27,7 @@ class MetalGraphExecutor;
 
 class AsyncComputeProbe {
 public:
-    explicit AsyncComputeProbe(MetalContext& context);
+    AsyncComputeProbe(MetalContext& context, PipelineCache& pipelines);
     ~AsyncComputeProbe();
 
     AsyncComputeProbe(const AsyncComputeProbe&) = delete;
@@ -56,13 +58,14 @@ public:
 
 private:
     void verifySlot(u32 slot);
-    MTL::ComputePipelineState* computePipeline(const char* function);
+    pipe::PipelineHandle computePipeline(const char* function);
 
     MetalContext& context_;
+    PipelineCache& pipelines_;
 
-    MTL::ComputePipelineState* seed_    = nullptr;
-    MTL::ComputePipelineState* reduce_  = nullptr;
-    MTL::ComputePipelineState* consume_ = nullptr;
+    pipe::PipelineHandle seed_    = pipe::INVALID_PIPELINE;
+    pipe::PipelineHandle reduce_  = pipe::INVALID_PIPELINE;
+    pipe::PipelineHandle consume_ = pipe::INVALID_PIPELINE;
     // One table per pass: the passes are encoded into different command buffers.
     MTL4::ArgumentTable* seedArgs_    = nullptr;
     MTL4::ArgumentTable* reduceArgs_  = nullptr;

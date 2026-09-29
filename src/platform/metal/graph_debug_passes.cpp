@@ -1,6 +1,7 @@
 #include "platform/metal/graph_debug_passes.h"
 #include "platform/metal/gpu_memory.h"
 #include "platform/metal/metal_graph_executor.h"
+#include "platform/metal/pipeline_cache.h"
 #include "rendergraph/pass_context.h"
 #include "core/log.h"
 
@@ -47,7 +48,8 @@ MTL::GPUAddress bufferAddress(rg::PassContext& ctx, rg::BufferRef ref) {
 
 } // namespace
 
-GraphDebugPasses::GraphDebugPasses(MetalContext& context) : context_(context) {
+GraphDebugPasses::GraphDebugPasses(MetalContext& context, PipelineCache& pipelines)
+    : context_(context), pipelines_(pipelines) {
     buildPipelines();
     computeArgs_ = makeTable(context_, 2, 1, "Graph debug compute arguments");
     rasterArgs_  = makeTable(context_, 1, 1, "Graph debug raster arguments");
@@ -65,54 +67,29 @@ GraphDebugPasses::~GraphDebugPasses() {
     for (MTL::Buffer* b : readback_) context_.memory().release(b, MemoryCategory::Other);
     rasterArgs_->release();
     computeArgs_->release();
-    raster_->release();
-    for (auto* p : {fill_, reduce_, expand_, checksum_}) p->release();
 }
 
-MTL::ComputePipelineState* GraphDebugPasses::computePipeline(const char* function) {
-    MTL4::LibraryFunctionDescriptor* fn = MTL4::LibraryFunctionDescriptor::alloc()->init();
-    fn->setLibrary(context_.library());
-    fn->setName(str(function));
-    MTL4::ComputePipelineDescriptor* desc = MTL4::ComputePipelineDescriptor::alloc()->init();
-    desc->setLabel(str(function));
-    desc->setComputeFunctionDescriptor(fn);
-    NS::Error* error = nullptr;
-    MTL::ComputePipelineState* pso = context_.compiler()->newComputePipelineState(desc, nullptr, &error);
-    desc->release();
-    fn->release();
-    if (!pso) {
-        const char* reason = error ? error->localizedDescription()->utf8String() : "unknown error";
-        throw std::runtime_error(std::string("Failed to build ") + function + ": " + reason);
-    }
-    return pso;
+pipe::PipelineHandle GraphDebugPasses::computePipeline(const char* function) {
+    pipe::PipelineDesc desc;
+    desc.kind         = pipe::PipelineKind::Compute;
+    desc.label        = function;
+    desc.functions[0] = function;
+    return pipelines_.request(desc);
 }
 
 void GraphDebugPasses::buildPipelines() {
+    // Created before the first frame: the engine waits for every pipeline.
     fill_     = computePipeline("debug_fill");
     reduce_   = computePipeline("debug_reduce");
     expand_   = computePipeline("debug_expand");
     checksum_ = computePipeline("debug_checksum");
 
-    MTL4::LibraryFunctionDescriptor* vs = MTL4::LibraryFunctionDescriptor::alloc()->init();
-    vs->setLibrary(context_.library());
-    vs->setName(str("debug_vs"));
-    MTL4::LibraryFunctionDescriptor* fs = MTL4::LibraryFunctionDescriptor::alloc()->init();
-    fs->setLibrary(context_.library());
-    fs->setName(str("debug_fs"));
-    MTL4::RenderPipelineDescriptor* desc = MTL4::RenderPipelineDescriptor::alloc()->init();
-    desc->setLabel(str("Graph debug raster"));
-    desc->setVertexFunctionDescriptor(vs);
-    desc->setFragmentFunctionDescriptor(fs);
-    desc->colorAttachments()->object(0)->setPixelFormat(MTL::PixelFormatR32Uint);
-    NS::Error* error = nullptr;
-    raster_ = context_.compiler()->newRenderPipelineState(desc, nullptr, &error);
-    desc->release();
-    fs->release();
-    vs->release();
-    if (!raster_) {
-        const char* reason = error ? error->localizedDescription()->utf8String() : "unknown error";
-        throw std::runtime_error(std::string("Failed to build the graph debug raster pipeline: ") + reason);
-    }
+    pipe::PipelineDesc desc;
+    desc.label        = "Graph debug raster";
+    desc.functions[0] = "debug_vs";
+    desc.functions[1] = "debug_fs";
+    desc.output(0, rg::Format::R32Uint);
+    raster_ = pipelines_.request(desc);
 }
 
 void GraphDebugPasses::addToGraph(rg::RenderGraph& graph) {
@@ -124,7 +101,7 @@ void GraphDebugPasses::addToGraph(rg::RenderGraph& graph) {
         *reinterpret_cast<u32*>(constants.cpu) = static_cast<u32>(ctx.frameIndex());
         computeArgs_->setAddress(constants.gpu, kBindFrame);
         computeArgs_->setTexture(textureId(ctx, refs_.a), kBindTex);
-        enc->setComputePipelineState(fill_);
+        enc->setComputePipelineState(pipelines_.compute(fill_));
         enc->setArgumentTable(computeArgs_);
         enc->dispatchThreads(MTL::Size::Make(rg::kDebugSize, rg::kDebugSize, 1), MTL::Size::Make(16, 16, 1));
     };
@@ -132,7 +109,7 @@ void GraphDebugPasses::addToGraph(rg::RenderGraph& graph) {
         MTL4::ComputeCommandEncoder* enc = computeEncoder(ctx);
         computeArgs_->setTexture(textureId(ctx, refs_.a), kBindTex);
         computeArgs_->setAddress(bufferAddress(ctx, refs_.b), kBindBuffer);
-        enc->setComputePipelineState(reduce_);
+        enc->setComputePipelineState(pipelines_.compute(reduce_));
         enc->setArgumentTable(computeArgs_);
         enc->dispatchThreads(MTL::Size::Make(rg::kDebugSize, 1, 1), MTL::Size::Make(64, 1, 1));
     };
@@ -140,14 +117,14 @@ void GraphDebugPasses::addToGraph(rg::RenderGraph& graph) {
         MTL4::ComputeCommandEncoder* enc = computeEncoder(ctx);
         computeArgs_->setTexture(textureId(ctx, refs_.c), kBindTex);
         computeArgs_->setAddress(bufferAddress(ctx, refs_.b), kBindBuffer);
-        enc->setComputePipelineState(expand_);
+        enc->setComputePipelineState(pipelines_.compute(expand_));
         enc->setArgumentTable(computeArgs_);
         enc->dispatchThreads(MTL::Size::Make(rg::kDebugSize, rg::kDebugSize, 1), MTL::Size::Make(16, 16, 1));
     };
     exec.raster = [this](rg::PassContext& ctx) {
         auto* enc = static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder());
         rasterArgs_->setTexture(textureId(ctx, refs_.c), kBindTex);
-        enc->setRenderPipelineState(raster_);
+        enc->setRenderPipelineState(pipelines_.render(raster_));
         enc->setArgumentTable(rasterArgs_, MTL::RenderStageVertex | MTL::RenderStageFragment);
         enc->drawPrimitives(MTL::PrimitiveTypeTriangle, 0, 3);
     };
@@ -155,7 +132,7 @@ void GraphDebugPasses::addToGraph(rg::RenderGraph& graph) {
         MTL4::ComputeCommandEncoder* enc = computeEncoder(ctx);
         computeArgs_->setTexture(textureId(ctx, refs_.d), kBindTex);
         computeArgs_->setAddress(bufferAddress(ctx, refs_.readback), kBindBuffer);
-        enc->setComputePipelineState(checksum_);
+        enc->setComputePipelineState(pipelines_.compute(checksum_));
         enc->setArgumentTable(computeArgs_);
         enc->dispatchThreads(MTL::Size::Make(rg::kDebugSize, rg::kDebugSize, 1), MTL::Size::Make(16, 16, 1));
     };

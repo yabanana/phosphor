@@ -56,6 +56,12 @@ namespace phosphor {
 //   --pipeline-salt N  add a salt constant to every specialized variant so
 //                      the OS shader cache cannot serve it (cold compiles)
 //   --frame-trace FILE write per-frame times and bench-switch phases (CSV)
+//   --debug-pipeline-fallback  never apply final pipelines: every render
+//                      pipeline stays on its flexible fallback (F3.2 check:
+//                      the fallbacks must render the same pixels)
+//   --debug-compile-storm  F3.1 spike: after 60 measured frames request every
+//                      forward variant at once (with --pipeline-salt: real
+//                      compiles) while the frames keep being measured
 //   --shader-dir DIR   Debug: watch DIR's .metal files and hot-reload the
 //                      pipelines when they change (F3.6)
 //   --debug-hot-reload FILE  Debug self-test: after a few frames swap in the
@@ -93,6 +99,8 @@ struct LaunchOptions {
     bool        compileQosInteractive = false; // --compile-qos interactive
     u32         pipelineSalt       = 0;        // 0 = no salt
     std::string frameTracePath;
+    bool        debugCompileStorm  = false;
+    bool        debugPipelineFallback = false;
     std::string shaderDir;                     // hot reload (Debug)
     std::string debugHotReloadPath;
 

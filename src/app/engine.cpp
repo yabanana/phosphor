@@ -14,6 +14,8 @@
 #include "platform/metal/metal_context.h"
 #include "platform/metal/metal_graph_executor.h"
 #include "platform/metal/metal_texture_manager.h"
+#include "platform/metal/pipeline_cache.h"
+#include "platform/metal/shader_reloader.h"
 #include "platform/metal/scene_renderer.h"
 #include "renderer/gpu_scene.h"
 #include "rendergraph/graph_dump.h"
@@ -34,18 +36,26 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <stdexcept>
 #include <string>
+
+// Defined by cmake/App.cmake (F3.6 hot reload); absent in metal_syntax_check.
+#ifndef PHOSPHOR_SHADER_SOURCE_DIR
+#define PHOSPHOR_SHADER_SOURCE_DIR "shaders"
+#endif
 
 namespace phosphor {
 
 namespace {
 
-std::string shaderLibraryPath() {
+std::string shaderPath(const char* file) {
     const char* base = SDL_GetBasePath();
-    return std::string(base ? base : "") + "shaders/phosphor.metallib";
+    return std::string(base ? base : "") + "shaders/" + file;
 }
+
+std::string shaderLibraryPath() { return shaderPath("phosphor.metallib"); }
 
 using Clock = std::chrono::steady_clock;
 
@@ -63,7 +73,7 @@ float toMs(Clock::duration d) {
 
 } // namespace
 
-Engine::Engine(int argc, char* argv[]) {
+Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     std::string error;
     if (!parseLaunchOptions(argc, argv, testBenchCount(), options_, error)) {
         throw std::runtime_error("Invalid arguments: " + error);
@@ -90,10 +100,17 @@ Engine::Engine(int argc, char* argv[]) {
     SDL_GetWindowSizeInPixels(window_, &w, &h);
     context_->resize(static_cast<u32>(w), static_cast<u32>(h));
 
-    renderer_      = std::make_unique<SceneRenderer>(*context_);
+    PipelineCache::Options pipelineOptions;
+    pipelineOptions.archivePath    = pipelineArchivePath();
+    pipelineOptions.harvestPath    = options_.harvestPipelinesPath;
+    pipelineOptions.sync           = options_.pipelineSync;
+    pipelineOptions.interactiveQos = options_.compileQosInteractive;
+    pipelineOptions.fallbackOnly   = options_.debugPipelineFallback;
+    pipelines_     = std::make_unique<PipelineCache>(*context_, pipelineOptions);
+    renderer_      = std::make_unique<SceneRenderer>(*context_, *pipelines_, options_.pipelineSalt);
     graphExecutor_ = std::make_unique<MetalGraphExecutor>(*context_);
-    if (options_.debugGraphTransients) graphDebug_ = std::make_unique<GraphDebugPasses>(*context_);
-    if (options_.debugAsyncCompute) asyncProbe_ = std::make_unique<AsyncComputeProbe>(*context_);
+    if (options_.debugGraphTransients) graphDebug_ = std::make_unique<GraphDebugPasses>(*context_, *pipelines_);
+    if (options_.debugAsyncCompute) asyncProbe_ = std::make_unique<AsyncComputeProbe>(*context_, *pipelines_);
 
     ecs_        = std::make_unique<ECS>();
     gpuScene_   = std::make_unique<GpuScene>();
@@ -107,13 +124,49 @@ Engine::Engine(int argc, char* argv[]) {
     ImGui::GetIO().IniFilename = nullptr; // keep the repo free of imgui.ini
     ImGui::StyleColorsDark();
     ImGui_ImplSDL3_InitForMetal(window_);
-    imguiRenderer_ = std::make_unique<ImGuiRenderer>(*context_);
+    imguiRenderer_ = std::make_unique<ImGuiRenderer>(*context_, *pipelines_);
     pressure_      = std::make_unique<MemoryPressureMonitor>();
     if (!options_.capturePath.empty()) {
         capture_ = std::make_unique<FrameCapture>(*context_);
     }
 
+    // F3.4: the harvest records the whole forward variant table, not only the
+    // variants the benches of this run happen to use.
+    if (pipelines_->harvesting()) renderer_->requestAllVariants();
+    // Every pipeline requested so far must be usable before the first frame
+    // (flexible fallbacks count); with a complete archive nothing compiles.
+    const Clock::time_point pipelinesStart = Clock::now();
+    pipelines_->waitAllReady();
+    startupPipelinesMs_ = toMs(Clock::now() - pipelinesStart);
+    pipelines_->startupDone();
+    LOG_INFO("Startup pipelines ready in %.1f ms: %s", static_cast<double>(startupPipelinesMs_),
+             pipe::formatPipelineStats(pipelines_->stats()).c_str());
+
+    // F3.6: shader hot reload in Debug builds -- the source shaders by
+    // default in interactive runs, or --shader-dir.
+#ifndef NDEBUG
+    if (!options_.shaderDir.empty() || !options_.benchmark()) {
+        reloader_ = std::make_unique<ShaderReloader>(
+            context_->device(), options_.shaderDir.empty() ? std::string(PHOSPHOR_SHADER_SOURCE_DIR) : options_.shaderDir);
+    }
+#else
+    if (!options_.shaderDir.empty()) LOG_WARN("--shader-dir: shader hot reload is available in Debug builds only");
+#endif
+
     switchTestBench(options_.bench ? static_cast<TestBenchType>(*options_.bench) : TestBenchType::TorusDemo);
+}
+
+std::string Engine::pipelineArchivePath() const {
+    if (options_.noPipelineArchive || !options_.harvestPipelinesPath.empty()) return {};
+    if (!options_.pipelineArchivePath.empty()) return options_.pipelineArchivePath;
+    // Default: built by the phosphor_archive target next to the metallib.
+    const std::string path = shaderPath("phosphor-archive.metallib");
+    std::error_code ec;
+    return std::filesystem::exists(path, ec) ? path : std::string();
+}
+
+bool Engine::measuring() const {
+    return options_.benchmark() && presentedFrames_ >= options_.warmup;
 }
 
 Engine::~Engine() {
@@ -124,6 +177,7 @@ Engine::~Engine() {
         activeBench_.reset();
     }
 
+    reloader_.reset();
     pressure_.reset();
     graphExecutor_.reset();
     graphDebug_.reset();
@@ -135,6 +189,7 @@ Engine::~Engine() {
 
     textures_.reset();
     renderer_.reset();
+    pipelines_.reset();
     context_.reset();
 
     if (metalView_) SDL_Metal_DestroyView(static_cast<SDL_MetalView>(metalView_));
@@ -179,6 +234,13 @@ void Engine::run() {
     }
     while (running_) {
         const Clock::time_point start = Clock::now();
+        frameFlags_ = 0;
+        {
+            const pipe::PipelineStats& ps = pipelines_->stats();
+            requestsBeforeFrame_    = ps.requests;
+            rtCompileMsBeforeFrame_ = ps.renderThreadCompileMs;
+            requestMsBeforeFrame_   = pipelines_->requestMs();
+        }
         processEvents();
         if (!running_) break;
 
@@ -211,11 +273,23 @@ void Engine::run() {
         if (presented && options_.benchmark()) {
             recordBenchmarkFrame(timer_->getDeltaTime(), toMs(Clock::now() - start - frameWait_), toMs(frameWait_));
         }
+        if (presented && options_.debugCompileStorm && measuring() && samples_.size() == 60) {
+            // F3.1 spike: 42 background compiles while frames are measured.
+            LOG_INFO("Compile storm: requesting every forward variant (salt %u)", options_.pipelineSalt);
+            renderer_->requestAllVariants();
+        }
     }
     context_->waitIdle();
+    if (pipelines_->harvesting()) {
+        pipelines_->waitAllFinal();
+        if (!pipelines_->writeHarvest()) exitCode_ = 1;
+    }
     if (options_.benchmark()) {
         finishBenchmark();
     }
+    // stdout, not the log: scripts collect this line (F3.5 miss rate).
+    std::printf("%s\n", pipe::formatPipelineStats(pipelines_->stats()).c_str());
+    std::fflush(stdout);
     if (graphDebug_ && !graphDebug_->finish()) exitCode_ = 1;
     if (asyncProbe_ && !asyncProbe_->finish()) exitCode_ = 1;
     if (capture_) {
@@ -225,6 +299,70 @@ void Engine::run() {
             LOG_ERROR("No frame captured");
         }
     }
+    if (!options_.debugHotReloadPath.empty() && !checkHotReloadCapture()) exitCode_ = 1;
+}
+
+void Engine::pollShaderReload() {
+    // --debug-hot-reload: after a few frames, the probe library goes through
+    // exactly the path of a watched change.
+    if (!options_.debugHotReloadPath.empty() && !hotReloadRequested_ && presentedFrames_ >= 5) {
+        hotReloadRequested_ = true;
+        NS::Error* error = nullptr;
+        MTL::Library* probe = context_->device()->newLibrary(
+            NS::String::string(options_.debugHotReloadPath.c_str(), NS::UTF8StringEncoding), &error);
+        if (!probe) {
+            LOG_ERROR("--debug-hot-reload: cannot load %s: %s", options_.debugHotReloadPath.c_str(),
+                      error ? error->localizedDescription()->utf8String() : "unknown error");
+            exitCode_ = 1;
+            return;
+        }
+        pipelines_->reload(probe);
+        probe->release();
+        return;
+    }
+    if (!reloader_ || pipelines_->reloadPending()) return;
+    if (MTL::Library* library = reloader_->takeLibrary()) {
+        pipelines_->reload(library);
+        library->release();
+    }
+}
+
+bool Engine::checkHotReloadCapture() const {
+    // The probe forward pass writes opaque magenta; with --no-ui the frame must
+    // hold exactly two colours: the clear colour and magenta.  Any pixel of
+    // another colour was drawn by a pipeline that was not swapped.
+    const u32 reloads = pipelines_->stats().reloads;
+    if (!capture_ || !captured_ || !capture_->pixels()) {
+        std::printf("HOT-RELOAD FAIL: needs --capture\n");
+        return false;
+    }
+    const u8* p = capture_->pixels();
+    const size_t count = static_cast<size_t>(capture_->width()) * capture_->height();
+    const u32 magenta = 0xFFFF00FFu; // BGRA bytes FF 00 FF FF read as little-endian u32
+    u64 probe = 0;
+    u32 others[4] = {};
+    u32 otherCount = 0;
+    u64 otherPixels = 0;
+    for (size_t i = 0; i < count; ++i) {
+        u32 c = 0;
+        std::memcpy(&c, p + i * 4, 4);
+        c |= 0xFF000000u;
+        if (c == magenta) {
+            ++probe;
+            continue;
+        }
+        ++otherPixels;
+        bool known = false;
+        for (u32 k = 0; k < otherCount; ++k) known |= others[k] == c;
+        if (!known && otherCount < 4) others[otherCount++] = c;
+        if (!known && otherCount == 4) otherCount = 4; // saturated: > 1 anyway
+    }
+    const bool pass = reloads == 1 && probe > 0 && otherCount == 1;
+    std::printf("HOT-RELOAD reloads %u | probe pixels %llu | other pixels %llu in %u%s colours | %s\n", reloads,
+                static_cast<unsigned long long>(probe), static_cast<unsigned long long>(otherPixels), otherCount,
+                otherCount == 4 ? "+" : "", pass ? "PASS" : "FAIL");
+    std::fflush(stdout);
+    return pass;
 }
 
 void Engine::recordBenchmarkFrame(float dt, float cpuMs, float waitMs) {
@@ -233,9 +371,27 @@ void Engine::recordBenchmarkFrame(float dt, float cpuMs, float waitMs) {
         // GPU times are recorded from the next submitted frame on.
         context_->beginGpuTimeCapture(options_.frames);
         samples_.reserve(options_.frames);
+        trace_.reserve(options_.frames, options_.frames / std::max(options_.switchEvery, 1u) + 2);
         allocationsAtStart_ = context_->memory().allocationCount();
         heapUsage(heapBlocksAtStart_, heapBytesAtStart_);
     } else if (presentedFrames_ > options_.warmup) {
+        FrameRecord record;
+        record.index   = static_cast<u32>(samples_.size());
+        record.bench   = static_cast<u32>(currentBench_);
+        record.flags   = frameFlags_;
+        record.frameMs = dt * 1000.0f;
+        record.cpuMs   = cpuMs;
+        record.waitMs  = waitMs;
+        trace_.addFrame(record);
+        if (pendingSwitch_) {
+            // The switch frame is done: add what it cost on the pipeline side.
+            const pipe::PipelineStats& ps = pipelines_->stats();
+            pendingSwitch_->pipelinesRequested    = ps.requests - requestsBeforeFrame_;
+            pendingSwitch_->pipelineRequestMs     = static_cast<float>(pipelines_->requestMs() - requestMsBeforeFrame_);
+            pendingSwitch_->renderThreadCompileMs = static_cast<float>(ps.renderThreadCompileMs - rtCompileMsBeforeFrame_);
+            trace_.addSwitch(*pendingSwitch_);
+            pendingSwitch_.reset();
+        }
         samples_.push_back({dt * 1000.0f, cpuMs, 0.0f, waitMs});
         if (samples_.size() == options_.frames) running_ = false;
     }
@@ -249,6 +405,7 @@ void Engine::finishBenchmark() {
     for (size_t i = 0; i < samples_.size() && i < gpu.size(); ++i) {
         samples_[i].gpuMs = gpu[i];
     }
+    trace_.setGpuTimes(gpu);
 
     BenchReport report;
     report.bench  = activeBench_ ? activeBench_->getName() : "";
@@ -261,13 +418,22 @@ void Engine::finishBenchmark() {
     report.cpuHeapBlocksDelta = static_cast<i64>(heapBlocks) - static_cast<i64>(heapBlocksAtStart_);
     report.cpuHeapBytesDelta  = static_cast<i64>(heapBytes) - static_cast<i64>(heapBytesAtStart_);
     summarizeSamples(samples_, report);
+    report.pipelinesJson = pipe::pipelineStatsJson(pipelines_->stats());
 
     if (ignoredInputEvents_ > 0) {
         LOG_INFO("Benchmark: ignored %u keyboard/mouse events", ignoredInputEvents_);
     }
     // stdout, not the log: scripts collect this line.
     std::printf("BENCH %s\n", formatReportLine(report).c_str());
+    if (!trace_.switches().empty() || !options_.frameTracePath.empty()) {
+        std::printf("%s\n", formatHitchReport(analyzeHitches(trace_)).c_str());
+    }
     std::fflush(stdout);
+    if (!options_.frameTracePath.empty()) {
+        std::ofstream out(options_.frameTracePath);
+        out << traceToCsv(trace_);
+        if (!out) LOG_ERROR("Failed to write %s", options_.frameTracePath.c_str());
+    }
     if (!options_.reportPath.empty()) {
         std::ofstream out(options_.reportPath);
         out << reportToJson(report);
@@ -353,7 +519,11 @@ void Engine::handleShortcuts() {
 
 void Engine::switchTestBench(TestBenchType type) {
     NS::AutoreleasePool* pool = NS::AutoreleasePool::alloc()->init();
+    // F3: phases of the switch, recorded while measuring (hitch analysis).
+    const Clock::time_point t0 = Clock::now();
+    const TestBenchType from = currentBench_;
     context_->waitIdle();
+    const Clock::time_point t1 = Clock::now();
 
     if (activeBench_) {
         activeBench_->teardown(*ecs_, *gpuScene_);
@@ -369,16 +539,34 @@ void Engine::switchTestBench(TestBenchType type) {
     activeBench_ = createTestBench(type);
     LOG_INFO("Switching to test bench: %s", activeBench_->getName());
     activeBench_->setup(*ecs_, *gpuScene_, *textures_);
+    const Clock::time_point t2 = Clock::now();
 
     textures_->flushUploads();
+    const Clock::time_point t3 = Clock::now();
     renderer_->syncGeometry(*gpuScene_);
+    const Clock::time_point t4 = Clock::now();
     // The previous bench's resources are unused now: free their heap ranges
     // and give back heaps that became empty.
     context_->collectGarbage();
     context_->memory().trimEmptyHeaps();
     context_->commitResidency();
+    const Clock::time_point t5 = Clock::now();
     logMemory();
     aimCamera(activeBench_->getDefaultCamera());
+    frameFlags_ |= FrameBenchSwitch;
+    if (measuring()) {
+        SwitchRecord sw;
+        sw.frame            = static_cast<u32>(samples_.size()); // the frame about to be produced
+        sw.fromBench        = static_cast<u32>(from);
+        sw.toBench          = static_cast<u32>(type);
+        sw.waitIdleMs       = toMs(t1 - t0);
+        sw.setupMs          = toMs(t2 - t1);
+        sw.textureUploadMs  = toMs(t3 - t2);
+        sw.geometryUploadMs = toMs(t4 - t3);
+        sw.gcMs             = toMs(t5 - t4);
+        sw.totalMs          = toMs(Clock::now() - t0);
+        pendingSwitch_      = sw;
+    }
     pool->release();
 }
 
@@ -477,6 +665,11 @@ void Engine::aimCamera(const CameraSetup& setup) {
 bool Engine::frame(float dt) {
     NS::AutoreleasePool* pool = NS::AutoreleasePool::alloc()->init();
 
+    // F3: compilations finished since the last frame become visible now,
+    // never while a frame is being encoded.
+    pollShaderReload();
+    if (pipelines_->beginFrame() > 0) frameFlags_ |= FramePipelineSwap;
+
     // --- Simulation -----------------------------------------------------------
     if (orbitMode_) {
         camera_->updateOrbit(*input_, dt);
@@ -526,6 +719,8 @@ bool Engine::frame(float dt) {
     const GraphKey key{width, height, options_.ui, capture_ != nullptr, options_.debugSplitEncoding,
                        options_.debugAsyncCompute};
     if (!(key == graphKey_) || !graphExecutor_->valid()) {
+        frameFlags_ |= FrameGraphCompile;
+        if (key.width != graphKey_.width || key.height != graphKey_.height) frameFlags_ |= FrameResize;
         graphKey_ = key;
         buildFrameGraph(width, height);
     }
@@ -533,6 +728,7 @@ bool Engine::frame(float dt) {
     if (graphDebug_) graphDebug_->beginFrame(frame.slot);
     if (asyncProbe_) asyncProbe_->beginFrame(frame.slot);
     renderer_->prepareFrame(*gpuScene_, frameScene_, constants, textures_->tableAddress(), width, height);
+    if (renderer_->usingFallback()) frameFlags_ |= FrameFallbackDraw;
     if (options_.ui) drawUi();
 
     graphExecutor_->bindTexture(drawableRef_, target);
@@ -545,6 +741,14 @@ bool Engine::frame(float dt) {
     if (captureThisFrame_) captured_ = true;
 
     context_->submitFrame(frame);
+    if (!firstFrameLogged_) {
+        firstFrameLogged_ = true;
+        // stdout: startup measurements (F3 cold start with/without archive).
+        std::printf("STARTUP first frame submitted %.1f ms after launch | startup pipelines %.1f ms | %s\n",
+                    static_cast<double>(toMs(Clock::now() - launch_)), static_cast<double>(startupPipelinesMs_),
+                    pipe::formatPipelineStats(pipelines_->stats()).c_str());
+        std::fflush(stdout);
+    }
     pool->release();
     return true;
 }
@@ -573,6 +777,13 @@ void Engine::drawUi() {
     UIPanels::drawRenderPanel(settings_);
     fillMemoryInfo();
     UIPanels::drawMemoryPanel(memoryInfo_);
+    PipelinePanelInfo pipelineInfo;
+    pipelineInfo.stats    = &pipelines_->stats();
+    pipelineInfo.archive  = pipelines_->archiveStatus().c_str();
+    pipelineInfo.workers  = pipelines_->workerCount();
+    pipelineInfo.entries  = pipelines_->entryCount();
+    pipelineInfo.fallback = renderer_->usingFallback();
+    UIPanels::drawPipelinePanel(pipelineInfo);
 
     ImGui::Render();
 }

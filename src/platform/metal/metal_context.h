@@ -103,7 +103,8 @@ public:
     /// Async timeline value at which the last submitted frame's async work is
     /// done (0 if it had none).
     [[nodiscard]] u64 lastAsyncDoneValue() const { return lastAsyncDone_; }
-    [[nodiscard]] MTL4::Compiler*     compiler()     const { return compiler_; }
+    /// Shader library loaded at startup.  Pipelines are created only through
+    /// PipelineCache (F3), which also serves hot-reloaded libraries.
     [[nodiscard]] MTL::Library*       library()      const { return library_; }
     [[nodiscard]] CA::MetalLayer*     layer()        const { return layer_; }
     [[nodiscard]] MTL::SharedEvent*   frameEvent()   const { return frameEvent_; }
@@ -196,7 +197,6 @@ private:
     MTL::SharedEvent*      asyncTimeline_    = nullptr;
     std::array<u64, METAL_FRAMES_IN_FLIGHT> asyncDone_{}; // per slot
     u64                    lastAsyncDone_ = 0;
-    MTL4::Compiler*        compiler_    = nullptr;
     MTL::Library*          library_     = nullptr;
     MTL::SharedEvent*      frameEvent_  = nullptr;
     MTL::SharedEvent*      uploadEvent_ = nullptr;

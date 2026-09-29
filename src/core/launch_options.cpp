@@ -116,6 +116,10 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             }
         } else if (arg == "--pipeline-salt") {
             if (!needCount(out.pipelineSalt)) return false;
+        } else if (arg == "--debug-pipeline-fallback") {
+            out.debugPipelineFallback = true;
+        } else if (arg == "--debug-compile-storm") {
+            out.debugCompileStorm = true;
         } else if (arg == "--frame-trace") {
             if (!needString(out.frameTracePath)) return false;
         } else if (arg == "--shader-dir") {
