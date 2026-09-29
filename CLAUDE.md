@@ -56,6 +56,13 @@ extend it; port algorithms from it.
   taken with `--update` before a change). Bench switching:
   `./build/phosphor --frames 300 --warmup 0 --switch-every 20` with the same
   environment variables.
+- F3 pipeline checks (macOS): `tools/archive_check.sh build/release <ref>`
+  (archive miss scenarios, API validation only), `tools/hot_reload_check.sh`
+  (Debug), `tools/hitch_check.sh build/release` (bench-switch hitches),
+  `tools/variant_check.sh build/release` (every forward variant against the
+  generic pipeline, pixels), `tools/harvest_pipelines.sh` (regenerate
+  `shaders/pipelines.mtl4-json` when pipeline descriptors change; the
+  `pipelines script` unit test fails when it is stale).
 - Before calling a Metal API, check its exact signature in the fetched
   metal-cpp headers (`build/linux/_deps/metal_cpp-src/Metal/MTL4*.hpp`); Metal 4
   names differ from Metal 3 (e.g. no `setVertexBytes`, draws take GPU addresses,
