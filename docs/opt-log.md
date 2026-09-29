@@ -156,3 +156,62 @@ Decisioni:
 - Con la shader validation attiva l'archivio è dichiarato "non disponibile"
   (motivo nel log) invece di produrre un miss per pipeline; le verifiche
   dell'archivio girano con la sola API validation.
+
+---
+
+## F3.2/F3.3 — Pipeline flessibili e varianti specializzate: esattezza e validazione
+
+**2026-09-29** · M5 Max, macOS 27.2, build Debug, `tools/visual_check.sh`
+(7 bench, 3200×1800, API + shader validation).
+
+Ipotesi: le varianti con function constant (O11) e le pipeline flessibili di
+Metal 4 (stato di uscita `Unspecialized`, poi
+`newRenderPipelineStateBySpecialization`) rendono gli stessi pixel della
+pipeline generica, che a sua volta è identica al forward di F2.
+
+| Pipeline che disegna il forward | Pixel diversi dai riferimenti F2 (su 5,76 M) | Messaggi |
+|---|---|---|
+| Generica a stato completo (`--debug-pipeline-fallback`) | **0** su tutti i bench | 0 |
+| Variante specializzata (normale) | 9 / 3 / 14 / 13 / 30 / 10 / 9, delta max 1 | 0 |
+| Flessibile specializzata (`--debug-flexible-pipelines`) | 15.848 – 301.286, delta max 1 | ~80 per bench |
+| Variante con sale (`--pipeline-salt`) | 15.847 – 301.297, delta max 1 | 0 |
+
+- Le varianti tolgono solo rami morti per la scena, ma il compilatore genera
+  codice diverso (contrazioni FMA, scheduling): ≤1 LSB in qualche decina di
+  pixel. Nel generico, un ramo o una select attorno all'emissivo cambiava
+  1 LSB: l'agente F3.3 ha lasciato l'`add` incondizionato (fattore 0 esatto) e
+  il ramo del sale in testa alla funzione. Riferimenti rigenerati con le
+  varianti (`build/reference`); quelli F2 restano il riferimento del percorso
+  generico.
+- **Validazione e pipeline flessibili**: ogni specializzazione produce
+  "blend state set to disabled, but blending substate set to Unspecialized.
+  Blending substate is ignored." per ogni attachment con blend disabilitato,
+  qualunque configurazione della base (6 configurazioni provate in un
+  programma minimo: sottostati espliciti, tutti gli attachment
+  `Unspecialized`, blend concreto nella base…). La compilazione a stato
+  completo non avvisa mai.
+- Una funzione con function constant non si può usare non specializzata
+  ("Use newFunctionWithName:constantValues:"): il generico passa da un
+  `SpecializedFunctionDescriptor` con valori vuoti.
+
+Decisione: il fallback di una variante nuova è la pipeline **generica a stato
+completo** (già pronta, bit-identica a F2, 0 compilazioni); la
+specializzazione flessibile resta disponibile solo quando non esiste una
+generica pronta per quello stato di uscita (utile da F8, con più formati di
+uscita) e si ri-misura con `--debug-flexible-pipelines`. Il sale serve solo
+alle misure di compilazione a freddo.
+
+---
+
+## F3.4 — `metal-tt` e debug info degli shader
+
+**2026-09-29** · toolchain Metal 27.1. Con le function constant di F3.3,
+`metal-tt` fallisce ("applegpu-nt: error: cannot find private metadata at
+offset …") se il metallib è compilato con `-gline-tables-only` **oppure**
+`-frecord-sources` (provati separatamente); senza entrambi l'archivio si
+costruisce (1,7 MB per `applegpu_g17s`). Prima delle function constant lo
+stesso metallib Debug funzionava. Decisione: `PHOSPHOR_SHADER_DEBUG_INFO`
+(ON in Debug, per il debugging in Xcode) salta l'archivio con un messaggio;
+Release e CI (shader ricompilati senza debug info) lo costruiscono. Con la
+shader validation attiva l'archivio è comunque inutilizzabile (voce F3.4
+precedente).

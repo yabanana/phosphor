@@ -523,6 +523,7 @@ void Engine::switchTestBench(TestBenchType type) {
     // F3: phases of the switch, recorded while measuring (hitch analysis).
     const Clock::time_point t0 = Clock::now();
     const TestBenchType from = currentBench_;
+    const bool isSwitch = activeBench_ != nullptr; // not the initial load
     context_->waitIdle();
     const Clock::time_point t1 = Clock::now();
 
@@ -555,7 +556,7 @@ void Engine::switchTestBench(TestBenchType type) {
     logMemory();
     aimCamera(activeBench_->getDefaultCamera());
     frameFlags_ |= FrameBenchSwitch;
-    if (measuring()) {
+    if (isSwitch && measuring()) {
         SwitchRecord sw;
         sw.frame            = static_cast<u32>(samples_.size()); // the frame about to be produced
         sw.fromBench        = static_cast<u32>(from);
