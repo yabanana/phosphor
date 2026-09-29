@@ -272,13 +272,13 @@ prime misure di velocità reali.
 
 **Obiettivo**: ogni decisione di ottimizzazione si basa su numeri.
 
-- [ ] F4.1 `MTL4CounterHeap` con timestamp per pass, media/max su 60 frame, pannello Pass Timings
-- [ ] F4.2 Tracy: zone CPU per sistema, zone GPU per pass, allocazioni
-- [ ] F4.3 Cattura GPU da tasto (`MTLCaptureManager`), cattura automatica sui frame sopra soglia
-- [ ] F4.4 Contatori hardware (occupancy, banda, compressione, stalli) esportati per pass quando disponibili
-- [ ] F4.5 `docs/perf-log.md` + script che registra le misure dei testbench per commit
-- [ ] F4.6 Modalità benchmark da riga di comando (`--bench N --frames 600 --report out.json`)
-- [ ] F4.7 Sovrapposizioni di debug generiche (heatmap di costo per tile, overdraw, contatori)
+- [x] F4.1 `MTL4CounterHeap` con timestamp per pass, media/max su 60 frame, pannello Pass Timings — timestamp di fine unità + inizio commit (encoder "anchor"), unità = gruppo di render fuso o pass compute; tempo esclusivo sulla timeline della coda; pannello Pass Timings (media/max 60 frame, DRAM stimata), report JSON v2 `passes`; controllo negativo `--debug-gpu-cost` lineare (0,74 ms/1000 iterazioni) col forward fermo; attribuzione dei pass fusi con `--gpu-timing-unfused`, frame senza sovrapposizione con `--gpu-timing-serial` (`opt-log.md`, `perf-log.md`)
+- [x] F4.2 Tracy: zone CPU per sistema, zone GPU per pass, allocazioni — opzione `PHOSPHOR_TRACY` (Tracy 0.14.1, on demand); zone GPU manuali dai timestamp MTL4 (il backend Metal di Tracy non supporta MTL4), pool di allocazione CPU e GPU per categoria; `tools/tracy_check.sh`: zone GPU = report, costo CPU non misurabile
+- [x] F4.3 Cattura GPU da tasto (`MTLCaptureManager`), cattura automatica sui frame sopra soglia — `--gpu-capture` (F12), `--gpu-capture-frame N`, `--gpu-capture-over MS` (cattura il frame successivo a quello lento: non si cattura a posteriori); coda MTL4 grafica come oggetto (Metal 4 non cattura il device), archivio disattivato durante le catture
+- [ ] F4.4 Contatori hardware (occupancy, banda, compressione, stalli) esportati per pass quando disponibili — **parziale**: su M5 Max / macOS 27.2 né l'API (MTL4 ha solo timestamp, counter set legacy = solo `timestamp`) né `xctrace` da riga di comando (solo "RT Unit Active") espongono contatori hardware; `tools/gpu_trace.sh` esporta per encoder gli intervalli Vertex/Fragment/Compute, lo Shader Timeline (non affidabile come costo per pass nei gruppi fusi, misurato) e lo stato di clock. Da riprendere quando Apple esporrà i contatori
+- [x] F4.5 `docs/perf-log.md` + script che registra le misure dei testbench per commit — `tools/perf_record.sh` → `docs/perf-history*.csv` (baseline di fine F4 registrata), `tools/perf_table.py latest|compare|passes`
+- [x] F4.6 Modalità benchmark da riga di comando (`--bench N --frames 600 --report out.json`) — report v2 con tempi per pass; `tools/bench_all.sh --stats --passes --vsync` con deviazione standard e CV tra run
+- [x] F4.7 Sovrapposizioni di debug generiche (heatmap di costo per tile, overdraw, contatori) — `--overlay overdraw|lights|tilecost|timings` e selettore UI; overdraw = frammenti rasterizzati (l'HSR non è visibile), costo per tile = Σ overdraw × (1 + luci) come approssimazione dichiarata; costi per pass nel perf-log
 
 **Uscita**: ogni pass ha tempo GPU e banda visibili; benchmark ripetibili da CLI.
 

@@ -461,3 +461,111 @@ oscilla 1,38–2,03 ms su Torus in run consecutivi). Verifiche alternate:
 - Il test `pipelines script` fallisce se `shaders/pipelines.mtl4-json` non
   copre più tutte le varianti o le pipeline del motore (va rigenerato con
   `tools/harvest_pipelines.sh`); controllo negativo verificato.
+
+## F4 — Osservabilità (chiusura, 2026-09-29)
+
+M5 Max (Mac17,6), macOS 27.2, alimentazione di rete, Release, `--no-ui`.
+Metodo e scoperte in [`opt-log.md`](opt-log.md) (voci F4).
+
+### Baseline di fine fase (storico per commit)
+
+`tools/perf_record.sh build/release 600 3` sul commit `606133f`; righe in
+`docs/perf-history.csv` / `docs/perf-history-passes.csv`, tabelle da
+`tools/perf_table.py latest`. "GPU pass-sum" = somma dei tempi esclusivi
+delle unità temporizzate (F4.1); "GPU ms" = span del command buffer (limite
+superiore: include la sovrapposizione dei frame, vedi Many Lights).
+
+**2026-09-29T21:15:08Z** · commit `606133f` · Mac17,6 · Apple M5 Max · macOS 27.2 · AC · 600 frames x 3 runs, --no-ui
+
+vsync on (mean ± sd across runs (CV%); p99 of the median run in parentheses)
+
+| # | Bench | Resolution | Frame ms [p99] | CPU ms [p99] | GPU ms [p99] | GPU pass-sum ms | GPU allocs |
+|---|---|---|---|---|---|---|---|
+| 1 | Torus Demo | 3200x1800 | 8.347 ± 0.014 (0.2%) [10.306] | 0.36 ± 0.037 (10.2%) [0.588] | 2.18 ± 0.04 (1.8%) [2.692] | 2.167 ± 0.04 (1.9%) | 0 |
+| 2 | PBR Material Grid | 3200x1800 | 8.371 ± 0.022 (0.3%) [11.316] | 0.368 ± 0.098 (26.6%) [0.687] | 1.189 ± 0.178 (15.0%) [2.309] | 1.177 ± 0.177 (15.0%) | 0 |
+| 3 | Stress Test (100K) | 3200x1800 | 8.334 ± 0.002 (0.0%) [10.567] | 4.724 ± 0.012 (0.3%) [5.874] | 5.098 ± 0.054 (1.1%) [6.052] | 5.037 ± 0.071 (1.4%) | 0 |
+| 4 | Scene Viewer (glTF) | 3200x1800 | 8.356 ± 0.041 (0.5%) [9.745] | 0.388 ± 0.076 (19.6%) [0.523] | 1.702 ± 0.081 (4.7%) [2.664] | 1.69 ± 0.078 (4.6%) | 0 |
+| 5 | Many Lights (1024) | 3200x1800 | 57.324 ± 0.974 (1.7%) [120.744] | 0.15 ± 0.047 (31.0%) [0.186] | 104.954 ± 2.446 (2.3%) [165.982] | 63.353 ± 1.709 (2.7%) | 0 |
+| 6 | Cornell Box (GI) | 3200x1800 | 8.333 ± 0 (0.0%) [9.72] | 0.236 ± 0.01 (4.3%) [0.495] | 0.824 ± 0.014 (1.7%) [1.34] | 0.807 ± 0.011 (1.3%) | 0 |
+| 7 | Culling Visualization | 3200x1800 | 8.333 ± 0 (0.0%) [9.71] | 0.926 ± 0.04 (4.3%) [1.415] | 2.964 ± 0.144 (4.9%) [3.979] | 2.953 ± 0.143 (4.9%) | 0 |
+
+vsync off (mean ± sd across runs (CV%); p99 of the median run in parentheses)
+
+| # | Bench | Resolution | Frame ms [p99] | CPU ms [p99] | GPU ms [p99] | GPU pass-sum ms | GPU allocs |
+|---|---|---|---|---|---|---|---|
+| 1 | Torus Demo | 3200x1800 | 3.89 ± 0.244 (6.3%) [11.502] | 0.25 ± 0.006 (2.4%) [0.487] | 2.402 ± 0.397 (16.5%) [3.626] | 1.483 ± 0.23 (15.5%) | 0 |
+| 2 | PBR Material Grid | 3200x1800 | 4.122 ± 0.147 (3.6%) [12.033] | 0.304 ± 0.04 (13.3%) [0.544] | 1.495 ± 0.053 (3.6%) [2.674] | 1.014 ± 0.03 (2.9%) | 0 |
+| 3 | Stress Test (100K) | 3200x1800 | 4.212 ± 0.067 (1.6%) [10.759] | 2.394 ± 0.04 (1.7%) [4.134] | 2.879 ± 0.461 (16.0%) [5.759] | 2.33 ± 0.235 (10.1%) | 0 |
+| 4 | Scene Viewer (glTF) | 3200x1800 | 4.181 ± 0.024 (0.6%) [9.674] | 0.178 ± 0.028 (15.7%) [0.416] | 2.115 ± 0.087 (4.1%) [3.11] | 1.375 ± 0.04 (2.9%) | 0 |
+| 5 | Many Lights (1024) | 3200x1800 | 56.45 ± 0.306 (0.5%) [120.176] | 0.116 ± 0.002 (1.3%) [0.173] | 103.677 ± 0.74 (0.7%) [166.619] | 67.51 ± 0.42 (0.6%) | 0 |
+| 6 | Cornell Box (GI) | 3200x1800 | 2.582 ± 0.104 (4.0%) [10.725] | 0.106 ± 0.002 (2.3%) [0.21] | 0.572 ± 0.015 (2.7%) [1.962] | 0.399 ± 0.008 (2.0%) | 0 |
+| 7 | Culling Visualization | 3200x1800 | 3.127 ± 0.232 (7.4%) [11.699] | 0.772 ± 0.075 (9.7%) [1.145] | 1.824 ± 0.416 (22.8%) [5.24] | 1.357 ± 0.251 (18.5%) | 0 |
+
+
+### Profilazione spenta contro `main`
+
+`main` (`791fb36`) in un worktree Release accanto a `phase/f4`; per ogni bench
+3 ripetizioni alternate main / F4 (timing acceso, default) / F4
+`--no-gpu-timing`; CPU senza vsync (600 frame), GPU con vsync (600 frame;
+Many Lights 120). Intervallo min–max (mediana).
+
+| Bench | Config | Metric | main | F4 timing on | F4 timing off |
+|---|---|---|---|---|---|
+| 1 | novsync | CPU ms | 0.047–0.231 (0.111) | 0.115–0.202 (0.124) | 0.095–0.195 (0.103) |
+| 1 | vsync | GPU ms | 1.560–1.684 (1.613) | 1.506–1.727 (1.659) | 1.554–1.587 (1.566) |
+| 2 | novsync | CPU ms | 0.145–0.303 (0.299) | 0.305–0.329 (0.326) | 0.292–0.308 (0.296) |
+| 2 | vsync | GPU ms | 0.574–0.588 (0.575) | 0.623–0.630 (0.624) | 0.576–0.820 (0.590) |
+| 3 | novsync | CPU ms | 4.867–4.907 (4.896) | 4.439–4.867 (4.864) | 4.770–4.903 (4.883) |
+| 3 | vsync | GPU ms | 5.227–5.338 (5.321) | 5.315–5.662 (5.383) | 5.390–5.423 (5.393) |
+| 4 | novsync | CPU ms | 0.141–0.198 (0.194) | 0.149–0.243 (0.231) | 0.136–0.283 (0.270) |
+| 4 | vsync | GPU ms | 1.161–1.465 (1.397) | 1.140–1.333 (1.142) | 1.081–1.195 (1.084) |
+| 5 | novsync | CPU ms | 0.114–0.140 (0.128) | 0.126–0.632 (0.132) | 0.096–0.124 (0.110) |
+| 5 | vsync | GPU ms | 92.613–96.337 (94.897) | 94.155–102.437 (94.667) | 93.845–105.994 (93.929) |
+| 6 | novsync | CPU ms | 0.127–0.164 (0.159) | 0.157–0.171 (0.168) | 0.119–0.163 (0.162) |
+| 6 | vsync | GPU ms | 0.875–1.292 (1.077) | 1.207–1.322 (1.270) | 1.107–1.335 (1.194) |
+| 7 | novsync | CPU ms | 0.495–0.751 (0.687) | 0.695–0.823 (0.794) | 0.712–0.775 (0.755) |
+| 7 | vsync | GPU ms | 3.303–3.567 (3.464) | 3.431–3.458 (3.455) | 3.380–3.441 (3.395) |
+
+- **Timing spento** = `main` entro il rumore. Righe sospette ricontrollate
+  con 6 coppie alternate `main` / F4 spento (CPU senza vsync): Culling
+  0,659–1,03 / 0,602–0,964 (F4 più basso in 5 coppie su 6), Scene Viewer
+  0,165–0,216 / 0,151–0,229.
+- **Timing acceso** (default): +0,01–0,03 ms di CPU e fino a +0,05 ms di
+  GPU sulle scene leggere (PBR 0,624 contro 0,575–0,590): encoder anchor con
+  barriera, un timestamp per unità, risoluzione CPU. Non misurabile su
+  Stress Test e Many Lights.
+- Allocazioni GPU nei frame misurati: **0** in tutti i 126 run.
+- Pixel: `tools/visual_check.sh` 0 pixel diversi e 0 messaggi con timing
+  acceso, spento, unfused, seriale, tutti i flag F2, costo noto.
+
+### Costi dichiarati con la profilazione accesa
+
+| Strumento | Costo misurato |
+|---|---|
+| Timestamp per pass (default) | CPU +0,01–0,03 ms, GPU ≤ +0,05 ms (scene leggere) |
+| Tracy (`PHOSPHOR_TRACY=ON`, on demand) | Stress Test CPU 2,21–2,30 ms senza client, 2,21–2,26 collegato, contro 2,26–2,37: non misurabile |
+| Layer di cattura (`--gpu-capture`, archivio disattivato) | CPU invariata (2,21–2,29 contro 2,25–2,31), GPU ≤ +0,1 ms |
+| Cattura di un frame | 58–80 ms; Stress Test 559 MB di documento |
+| Overlay (per pass, `--no-vsync --gpu-timing-serial`, p50) | Stress Test: overdraw 0,70 + composizione 0,08; luci 0,74 + 0,08; costo per tile 0,72 + 1,20 + 0,05 + 0,09 ms. Many Lights: overdraw 0,13 + 0,09; luci 21,9 + 0,11 (ripete il ciclo sulle 1024 luci); costo per tile 21,6 + 0,07 + 0,05 + 0,09 ms |
+
+### Controllo negativo e coerenza
+
+- Pass di costo noto (`--debug-gpu-cost N --no-vsync --gpu-timing-serial`,
+  p50, 2 run): 2,92 / 6,11 / 11,81 ms per 4000 / 8000 / 16000 iterazioni
+  (lineare, ~0,74 ms per 1000), forward 0,216–0,218 ms. Meccanismo rotto
+  apposta: il forward ingloba il pass noto (9,5 / 7,5 / 14,7 ms).
+- Somma delle unità contro GPU ms del command buffer (vsync): Torus 2,513 /
+  2,522, Stress Test 4,463 / 4,510; Many Lights seriale 54,316 / 54,324.
+- Tracy: media delle zone GPU = report (4,9541 ms, 300 frame).
+
+### O7 e leak
+
+- Heap CPU (bench 1, timing acceso): +2635 / −286 / +1455 blocchi e
+  +178 / +71 / +523 KB a 600 / 6000 / 30000 frame (i buffer di misura, 12 B
+  per frame; `main` +2495 blocchi, +138 KB a 30000). Prima della correzione
+  del timestamp di commit: +1,72 MB a 30000 (driver, vedi opt-log).
+- Tracy on demand senza client: footprint 955 → 957 MB in 50 s (build
+  normale 949 → 951).
+- `leaks --atExit` con tutti i flag, cambio bench, resize e overlay: **0
+  leak**. Con `--gpu-capture`: 10 leak (784 B) nel framework di cattura di
+  Apple anche senza catture, +2 per cattura.

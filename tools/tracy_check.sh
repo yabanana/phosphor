@@ -41,8 +41,8 @@ port=8086
 
 # Zones every run must contain.  "Pipeline compile" needs a real compile, so
 # the app runs with --no-pipeline-archive.
-required_cpu=("Scene extract" "Scene prepare" "Forward encode" "ImGui encode" "Pipeline resolve"
-              "Pipeline compile" "Compile job")
+required_cpu=("Events" "Simulation" "Scene extract" "Scene prepare" "UI" "Forward encode" "ImGui encode"
+              "Graph execute" "Submit" "Bench switch" "Pipeline resolve" "Pipeline compile" "Compile job")
 
 fail=0
 note() { echo "tracy_check: $*"; }
@@ -82,7 +82,7 @@ rm -f "$trace" "$report"
 
 # shellcheck disable=SC2086 # EXTRA_ARGS is a whitespace-separated list
 TRACY_NO_EXIT=1 env -u MTL_DEBUG_LAYER -u MTL_SHADER_VALIDATION \
-    "$app" --bench "$bench" --frames "$frames" --warmup 0 --no-pipeline-archive \
+    "$app" --bench "$bench" --frames "$frames" --warmup 0 --no-pipeline-archive --switch-every 100 \
     --report "$report" ${EXTRA_ARGS:-} >"$applog" 2>&1 &
 app_pid=$!
 trap 'kill "$app_pid" 2>/dev/null || true' EXIT

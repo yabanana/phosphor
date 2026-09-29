@@ -591,6 +591,7 @@ void Engine::handleShortcuts() {
 }
 
 void Engine::switchTestBench(TestBenchType type) {
+    PH_ZONE("Bench switch");
     NS::AutoreleasePool* pool = NS::AutoreleasePool::alloc()->init();
     // F3: phases of the switch, recorded while measuring (hitch analysis).
     const Clock::time_point t0 = Clock::now();
@@ -754,7 +755,10 @@ bool Engine::frame(float dt) {
     camera_->setAspect(static_cast<float>(context_->width()) / static_cast<float>(std::max(context_->height(), 1u)));
     camera_->updateMatrices();
 
-    activeBench_->update(dt, *ecs_);
+    {
+        PH_ZONE("Simulation");
+        activeBench_->update(dt, *ecs_);
+    }
     extractFrameScene(*ecs_, *gpuScene_, frameScene_);
     frameStats_->update(*timer_, context_->lastGpuMs());
 
@@ -923,6 +927,7 @@ void Engine::drawUi() {
 }
 
 void Engine::buildFrameGraph(u32 width, u32 height) {
+    PH_ZONE("Render graph build");
     using namespace rg;
     frameGraph_.reset();
 
