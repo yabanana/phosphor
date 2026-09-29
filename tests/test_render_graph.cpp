@@ -587,7 +587,7 @@ TEST_CASE("render graph: TextureDesc::estimatedBytes and format helpers") {
 TEST_CASE("render graph: full compile of the engine frame (forward + overlay + capture)") {
     // The frame built by Engine::buildFrameGraph (F2.7).
     RenderGraph g;
-    TextureRef color = g.importTexture("Drawable", {Format::BGRA8Srgb, 1920, 1080}, ImportOutput);
+    TextureRef color = g.importTexture("Drawable", {Format::BGRA8Srgb, 1920, 1080}, ImportOutput | ImportPerFrame);
     const BufferRef readback = g.importBuffer("Capture readback", {1920ull * 1080 * 4}, ImportOutput);
     g.addPass("Forward", PassType::Raster, [&](PassBuilder& b) {
         const TextureRef depth = b.createTexture("Depth", {Format::Depth32Float, 1920, 1080});
@@ -623,14 +623,17 @@ TEST_CASE("render graph: full compile of the engine frame (forward + overlay + c
             CHECK(a.store == StoreAction::Store);
         }
     }
-    // One barrier: the copy waits for the fragment work on the drawable.
+    // One barrier: the copy waits for the fragment work on the drawable and,
+    // since the readback buffer is the same every frame, for the previous
+    // frame's copy into it.
     REQUIRE(c.barriers.size() == 1);
     CHECK(c.barriers[0].position == 2);
     REQUIRE(c.barriers[0].barriers.size() == 1);
     const Barrier& b = c.barriers[0].barriers[0];
     CHECK(b.scope == BarrierScope::Queue);
-    CHECK(b.afterStages == StageFragment);
+    CHECK(b.afterStages == (StageFragment | StageBlit));
     CHECK(b.beforeStages == StageBlit);
+    CHECK(b.resources == std::vector<u32>{0, 1});
     CHECK_FALSE(b.aliasing);
     CHECK(c.queueSyncs.empty());
     CHECK(c.aliasing.placements.empty()); // no sizer: no heap plan

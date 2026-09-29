@@ -304,7 +304,7 @@ std::string dumpGraphviz(const RenderGraph& graph, const CompiledGraph& compiled
         }
         std::string flags;
         if (res.imported) {
-            flags += " [imported]";
+            flags += (res.importFlags & ImportPerFrame) ? " [imported, per-frame]" : " [imported]";
         }
         if (isMemoryless(compiled, r)) {
             flags += " [memoryless]";
@@ -350,6 +350,17 @@ std::string dumpGraphviz(const RenderGraph& graph, const CompiledGraph& compiled
             out += "  " + pn + " -> r" + std::to_string(a.resource) + "_v" + std::to_string(a.version) +
                    " [label=\"" + label(a, true) + "\"" + culledStyle + "];\n";
         }
+    }
+
+    // Cross-queue events (F2.6): the producer's queue signals after the
+    // signalling pass, the consumer's queue waits before the waiting pass.
+    for (const QueueSync& q : compiled.queueSyncs) {
+        if (q.signalAfterPosition >= compiled.order.size() || q.waitBeforePosition >= compiled.order.size()) {
+            continue;
+        }
+        out += "  p" + std::to_string(compiled.order[q.signalAfterPosition]) + " -> p" +
+               std::to_string(compiled.order[q.waitBeforePosition]) + " [label=\"event " + std::to_string(q.value) +
+               "\", style=dashed, color=blue, fontcolor=blue, constraint=false];\n";
     }
 
     out += "}\n";

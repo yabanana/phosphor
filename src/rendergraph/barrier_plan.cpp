@@ -177,6 +177,35 @@ void buildBarrierPlan(const RenderGraph& graph, CompiledGraph& compiled, const B
         if (encoderBarrier) out.add(firstPos, BarrierScope::Encoder, p.aliased, afterEncoder, before, p.resource);
     }
 
+    // --- Persistent imports: previous frame's accesses ------------------------
+    // Same memory every frame: the first access waits for what the previous
+    // frame did with it (the other queue's accesses are ordered by events).
+    const auto& resources = graph.resources();
+    for (u32 r = 0; r < resources.size(); ++r) {
+        const ResourceNode& node = resources[r];
+        if (!node.imported || (node.importFlags & ImportPerFrame)) continue;
+        if (r >= compiled.lifetimes.size() || !compiled.lifetimes[r].used()) continue;
+        const Lifetime& life = compiled.lifetimes[r];
+        if (life.first >= count) continue;
+
+        bool   written = false;
+        Stages after   = StageNone;
+        for (u32 pos = life.first; pos <= life.last && pos < count; ++pos) {
+            const PassNode& other = passes[compiled.order[pos]];
+            if (!touches(other, r)) continue;
+            after |= stagesOf(other, r, true, true);
+            written |= std::any_of(other.writes.begin(), other.writes.end(),
+                                   [&](const Access& a) { return a.resource == r; });
+        }
+        if (!written) continue; // read-only in the graph: no hazard between frames
+
+        const u32 firstPos = life.first;
+        Stages before = stagesOf(passes[compiled.order[firstPos]], r, true, true);
+        if (isRasterAt(firstPos)) legalise(before, rules);
+        legaliseAfter(after, rules);
+        out.add(queuePosition(firstPos), BarrierScope::Queue, false, after, before, r);
+    }
+
     // --- Output ---------------------------------------------------------------
     for (auto& [key, barrier] : out.merged) {
         std::sort(barrier.resources.begin(), barrier.resources.end());

@@ -25,7 +25,7 @@ void addAsyncProbeChain(RenderGraph& graph, AsyncProbeRefs& refs, const AsyncPro
 }
 
 void addAsyncProbeProducers(RenderGraph& graph, AsyncProbeRefs& refs, const AsyncProbeExec& exec) {
-    refs.readback = graph.importBuffer("Async readback", {kAsyncReadbackSize}, ImportOutput);
+    refs.readback = graph.importBuffer("Async readback", {kAsyncReadbackSize}, ImportOutput | ImportPerFrame);
 
     graph.addPass(
         "Async seed", PassType::Compute, Queue::Graphics,

@@ -40,8 +40,10 @@ namespace phosphor {
 // The frame becomes a list of submissions cut at the graph's QueueSync
 // points (compile() splits encoders there): a submission waits on the other
 // queue's timeline before its commit and signals its own after it.  The
-// first async submission of frame N also waits for graphics frame N-1 (the
-// two queues share transient memory and persistent buffers across frames).
+// first async submission of frame N also waits for graphics frame N-1, and
+// the first graphics submission of frame N for the async work of frame N-1
+// (the two queues share transient memory and persistent buffers across
+// frames).
 //
 // Imported resources (drawable, readback buffers) are bound every frame
 // with bindTexture()/bindBuffer().  Imported attachments are removed from

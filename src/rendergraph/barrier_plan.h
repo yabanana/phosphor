@@ -25,6 +25,11 @@ namespace phosphor::rg {
 // its memory (including itself: the previous frame used it too), with
 // `aliasing` set when the memory is shared with another resource.
 //
+// Imported resources written by the graph and not ImportPerFrame are the
+// same memory in consecutive frames (persistent buffers): their first access
+// in the frame gets a Queue-scope barrier whose afterStages are all the
+// stages that access them in the frame (the previous frame did the same).
+//
 // Barriers at one position with the same scope and aliasing flag are merged
 // (stages OR-ed, resources concatenated): one barrier per kind (S-SYNC-1).
 //
