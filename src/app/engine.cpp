@@ -85,6 +85,11 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     settings_.vsync = options_.vsync;
     settings_.debugMode = static_cast<int>(options_.debugMode);
 
+    // F4.3: the capture layer exists only if requested before any Metal
+    // device is created -- SDL creates one with the window's CAMetalLayer, so
+    // before SDL_Init (measured: setting it later has no effect).
+    if (options_.gpuCapture) GpuCapture::enableLayer();
+
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
         throw std::runtime_error(std::string("SDL_Init failed: ") + SDL_GetError());
     }
@@ -100,8 +105,6 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         throw std::runtime_error("Failed to obtain CAMetalLayer from SDL");
     }
 
-    // F4.3: the capture layer exists only if requested before the device.
-    if (options_.gpuCapture) GpuCapture::enableLayer();
     context_ = std::make_unique<MetalContext>(layer, shaderLibraryPath());
     int w = 0, h = 0;
     SDL_GetWindowSizeInPixels(window_, &w, &h);
@@ -177,6 +180,12 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
 
 std::string Engine::pipelineArchivePath() const {
     if (options_.noPipelineArchive || !options_.harvestPipelinesPath.empty()) return {};
+    // F4.3, measured: with an MTL4Archive loaded, startCapture fails with
+    // "Capturing Metal 4 Device is not supported"; captures run without it.
+    if (options_.gpuCapture) {
+        LOG_INFO("Pipeline archive disabled: GPU capture (--gpu-capture*) is incompatible with MTL4Archive");
+        return {};
+    }
     if (!options_.pipelineArchivePath.empty()) return options_.pipelineArchivePath;
     // Default: built by the phosphor_archive target next to the metallib.
     const std::string path = shaderPath("phosphor-archive.metallib");
@@ -493,8 +502,9 @@ void Engine::finishBenchmark() {
 }
 
 void Engine::injectSyntheticInput() {
-    // As if someone typed W/D and dragged the mouse over the focused window.
-    for (const SDL_Scancode key : {SDL_SCANCODE_W, SDL_SCANCODE_D}) {
+    // As if someone typed W/D/F12 and dragged the mouse over the focused window.
+    // F12 exercises the GPU capture key (F4.3) when --gpu-capture is on.
+    for (const SDL_Scancode key : {SDL_SCANCODE_W, SDL_SCANCODE_D, SDL_SCANCODE_F12}) {
         SDL_Event e{};
         e.type = SDL_EVENT_KEY_DOWN;
         e.key.windowID = SDL_GetWindowID(window_);
@@ -851,7 +861,7 @@ void Engine::onFrameTimes(const GpuTimestamps::Resolved& r) {
     passTimings_.addFrame(r.frame, r.ms, r.unitValid, r.spanMs);
     if (passMeasureStarted_ && r.frame == measureLastFrame_) passTimings_.endMeasure();
     if (gpuCapture_ && options_.gpuCaptureOverMs > 0.0f && r.sumMs > options_.gpuCaptureOverMs &&
-        !gpuCapture_->armed()) {
+        gpuCapture_->available()) {
         // The slow frame is 3 frames old: the capture takes the next frame.
         LOG_INFO("GPU capture: frame %llu took %.3f ms of GPU (> %.3f): capturing the next frame",
                  static_cast<unsigned long long>(r.frame), static_cast<double>(r.sumMs),

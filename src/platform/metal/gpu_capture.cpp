@@ -19,10 +19,11 @@ GpuCapture::GpuCapture(MetalContext& context, std::string directory, u32 maxCapt
     }
 }
 
-void GpuCapture::request(const char* reason) {
-    if (armed_ || capturing_ || captures_ + failures_ >= maxCaptures_) return;
+bool GpuCapture::request(const char* reason) {
+    if (!available()) return false;
     armed_  = true;
     reason_ = reason;
+    return true;
 }
 
 void GpuCapture::beginFrame(u64 frameIndex) {
@@ -38,7 +39,9 @@ void GpuCapture::beginFrame(u64 frameIndex) {
 
     MTL::CaptureManager* manager = MTL::CaptureManager::sharedCaptureManager();
     MTL::CaptureDescriptor* d = MTL::CaptureDescriptor::alloc()->init();
-    d->setCaptureObject(context_.device());
+    // Measured: "Capturing Metal 4 Device is not supported": the capture
+    // object is the graphics queue (async-queue work is not in the document).
+    d->setCaptureObject(context_.queue());
     d->setDestination(MTL::CaptureDestinationGPUTraceDocument);
     d->setOutputURL(NS::URL::fileURLWithPath(NS::String::string(path.c_str(), NS::UTF8StringEncoding)));
     NS::Error* error = nullptr;

@@ -17,15 +17,19 @@ namespace phosphor {
 // engine calls it only when a capture option is given, so a run without
 // capture options is unchanged.
 //
-// A capture covers one frame: startCapture (device scope: both queues)
-// before the frame is encoded, stopCapture after it is submitted.  Captures
+// A capture covers one frame: startCapture before the frame is encoded,
+// stopCapture after it is submitted.  Metal 4 cannot capture a device
+// ("Capturing Metal 4 Device is not supported", measured): the capture object
+// is the graphics MTL4 queue, so work on the async queue (F2.6) is not in the
+// document.  Captures
 // cannot be taken after the fact, so a "slow frame" trigger arms the NEXT
 // frame (documented in the log line).
 // ---------------------------------------------------------------------------
 
 class GpuCapture {
 public:
-    /// Insert the capture layer: call before creating the MetalContext.
+    /// Insert the capture layer: call before any Metal device exists (before
+    /// SDL_Init: SDL creates one for the window's CAMetalLayer).
     static void enableLayer();
 
     GpuCapture(MetalContext& context, std::string directory, u32 maxCaptures);
@@ -35,8 +39,13 @@ public:
 
     /// Capture the next frame; `reason` goes into the log and the file name
     /// ("key", "frame", "over").  Ignored once maxCaptures were taken.
-    void request(const char* reason);
+    /// Returns false when the request was ignored.
+    bool request(const char* reason);
     [[nodiscard]] bool armed() const { return armed_; }
+    /// A request would be accepted now.
+    [[nodiscard]] bool available() const {
+        return !armed_ && !capturing_ && captures_ + failures_ < maxCaptures_;
+    }
 
     /// Before the frame is encoded: starts the capture if armed.
     void beginFrame(u64 frameIndex);
