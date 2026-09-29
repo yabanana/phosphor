@@ -40,6 +40,12 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             }
             return true;
         };
+        auto needString = [&](std::string& target) {
+            const auto value = needValue();
+            if (!value) return false;
+            target = *value;
+            return true;
+        };
 
         if (arg == "--bench") {
             u32 bench = 0;
@@ -89,6 +95,33 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.debugSplitEncoding = true;
         } else if (arg == "--debug-async-compute") {
             out.debugAsyncCompute = true;
+        } else if (arg == "--pipeline-archive") {
+            if (!needString(out.pipelineArchivePath)) return false;
+        } else if (arg == "--no-pipeline-archive") {
+            out.noPipelineArchive = true;
+        } else if (arg == "--harvest-pipelines") {
+            if (!needString(out.harvestPipelinesPath)) return false;
+        } else if (arg == "--pipeline-sync") {
+            out.pipelineSync = true;
+        } else if (arg == "--compile-qos") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "utility") {
+                out.compileQosInteractive = false;
+            } else if (*value == "interactive") {
+                out.compileQosInteractive = true;
+            } else {
+                error = "--compile-qos: expected utility or interactive, got '" + std::string(*value) + "'";
+                return false;
+            }
+        } else if (arg == "--pipeline-salt") {
+            if (!needCount(out.pipelineSalt)) return false;
+        } else if (arg == "--frame-trace") {
+            if (!needString(out.frameTracePath)) return false;
+        } else if (arg == "--shader-dir") {
+            if (!needString(out.shaderDir)) return false;
+        } else if (arg == "--debug-hot-reload") {
+            if (!needString(out.debugHotReloadPath)) return false;
         } else {
             error = "unknown option " + std::string(arg);
             return false;

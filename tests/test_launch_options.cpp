@@ -72,6 +72,35 @@ TEST_CASE("launch options: memory stress") {
     CHECK_FALSE(o.benchmark());
 }
 
+TEST_CASE("launch options: F3 pipeline switches") {
+    LaunchOptions o;
+    std::string err;
+    REQUIRE(parse({}, o, err));
+    CHECK(o.pipelineArchivePath.empty());
+    CHECK_FALSE(o.noPipelineArchive);
+    CHECK_FALSE(o.pipelineSync);
+    CHECK_FALSE(o.compileQosInteractive);
+    CHECK(o.pipelineSalt == 0);
+    REQUIRE(parse({"--pipeline-archive", "a.metallib", "--no-pipeline-archive", "--harvest-pipelines", "p.mtl4-json",
+                   "--pipeline-sync", "--compile-qos", "interactive", "--pipeline-salt", "42", "--frame-trace", "t.csv",
+                   "--shader-dir", "shaders", "--debug-hot-reload", "probe.metallib"},
+                  o, err));
+    CHECK(o.pipelineArchivePath == "a.metallib");
+    CHECK(o.noPipelineArchive);
+    CHECK(o.harvestPipelinesPath == "p.mtl4-json");
+    CHECK(o.pipelineSync);
+    CHECK(o.compileQosInteractive);
+    CHECK(o.pipelineSalt == 42);
+    CHECK(o.frameTracePath == "t.csv");
+    CHECK(o.shaderDir == "shaders");
+    CHECK(o.debugHotReloadPath == "probe.metallib");
+    REQUIRE(parse({"--compile-qos", "utility"}, o, err));
+    CHECK_FALSE(o.compileQosInteractive);
+    CHECK_FALSE(parse({"--compile-qos", "background"}, o, err));
+    CHECK(err.find("--compile-qos") != std::string::npos);
+    CHECK_FALSE(parse({"--pipeline-archive"}, o, err));
+}
+
 TEST_CASE("launch options: errors") {
     LaunchOptions o;
     std::string err;

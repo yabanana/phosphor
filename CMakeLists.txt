@@ -39,20 +39,30 @@ option(PHOSPHOR_BUILD_TESTS   "Build unit tests for phosphor_core" ON)
 option(PHOSPHOR_METAL_VALIDATION "Enable Metal API/shader validation hooks in the app" ON)
 
 include(cmake/Dependencies.cmake)
+# F3.3: generated variant tables (C++ and MSL) in ${CMAKE_BINARY_DIR}/generated.
+include(cmake/Variants.cmake)
 
 set(PHOSPHOR_WARNINGS -Wall -Wextra -Wpedantic -Wno-unused-parameter)
 
 # --- Portable core ---------------------------------------------------------
 add_library(phosphor_core STATIC
+    src/core/file_watcher.cpp
     src/core/input.cpp
     src/core/launch_options.cpp
     src/core/memory/linear_ring.cpp
     src/core/memory/memory_budget.cpp
     src/core/memory/tlsf_allocator.cpp
+    src/core/process.cpp
     src/core/timer.cpp
     src/core/worker_pool.cpp
     src/diagnostics/bench_report.cpp
     src/diagnostics/frame_stats.cpp
+    src/diagnostics/frame_trace.cpp
+    src/pipeline/compile_queue.cpp
+    src/pipeline/forward_variants.cpp
+    src/pipeline/pipeline_desc.cpp
+    src/pipeline/pipeline_key.cpp
+    src/pipeline/pipeline_registry.cpp
     src/renderer/gpu_scene.cpp
     src/renderer/meshlet_builder.cpp
     src/renderer/scene_extract.cpp
@@ -78,7 +88,7 @@ add_library(phosphor_core STATIC
     src/testbench/testbench.cpp
     src/testbench/torus_demo.cpp
 )
-target_include_directories(phosphor_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
+target_include_directories(phosphor_core PUBLIC ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/generated)
 find_package(Threads REQUIRED)
 target_link_libraries(phosphor_core PUBLIC Threads::Threads glm::glm SDL3::SDL3 meshoptimizer tinygltf mikktspace)
 target_compile_definitions(phosphor_core PUBLIC

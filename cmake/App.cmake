@@ -73,6 +73,9 @@ add_custom_command(
 )
 add_custom_target(phosphor_shaders DEPENDS ${PHOSPHOR_METALLIB})
 
+# F3.4: pipeline archive (metal-tt) built from shaders/pipelines.mtl4-json.
+include(cmake/PipelineArchive.cmake)
+
 # --- Executable ---
 add_executable(phosphor
     src/main.cpp
@@ -89,6 +92,7 @@ add_executable(phosphor
     src/platform/metal/memory_pressure.cpp
     src/platform/metal/memory_stress.cpp
     src/platform/metal/metal_texture_manager.cpp
+    src/platform/metal/pipeline_cache.cpp
     src/platform/metal/residency_manager.cpp
     src/platform/metal/scene_renderer.cpp
     src/platform/metal/transient_heap.cpp
