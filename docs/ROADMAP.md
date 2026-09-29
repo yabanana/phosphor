@@ -255,18 +255,18 @@ prime misure di velocità reali.
 
 **Uscita**: stessa immagine di F0; unit test su ordinamento, aliasing e barriere attese. Verificata il 2026-09-29: 0 pixel diversi sui 7 bench anche con i flag di debug, validazione a zero, 0 allocazioni GPU nei frame, nessuna regressione rispetto a `main` (`perf-log.md`). Due riferimenti rigenerati con motivazione: Cornell box (pareti orientate male, corrette nei contenuti) e 3 pixel di Stress Test (facce posteriori che vincevano il depth test).
 
-## F3 — Pipeline: compilazione asincrona e archivi AOT [CORE]
+## F3 — Pipeline: compilazione asincrona e archivi AOT ✅ [CORE]
 
 **Obiettivo**: stutter di compilazione zero (O9) fin dall'inizio, non alla fine.
 
-- [ ] F3.1 `MTL4Compiler` su thread dedicati con QoS inferiore al render thread, `maximumConcurrentCompilationTaskCount` worker
-- [ ] F3.2 Pipeline "flessibili" subito, specializzate in background; chiave di cache hashata
-- [ ] F3.3 Function constant per le varianti (O11); tabella delle varianti generata
-- [ ] F3.4 Raccolta automatica dei descrittori in `.mtl4-json` durante i test, `metal-tt` in CI → `MTL4Archive`
-- [ ] F3.5 Fallback obbligatorio su miss dell'archivio (OS o GPU diversi), con tasso di miss registrato
-- [ ] F3.6 Hot reload degli shader in Debug (ricompilazione del `.metallib` e sostituzione delle pipeline)
+- [x] F3.1 `MTL4Compiler` su thread dedicati con QoS inferiore al render thread, `maximumConcurrentCompilationTaskCount` worker — `PipelineCache` + `CompileQueue`: 18 thread su M5 Max, QoS utility letta a runtime (0x11); spike "tempesta" di 42 compilazioni a freddo: nessun hitch, render thread −12% di CPU rispetto a QoS interactive (`opt-log.md`); verifica su T0 (O12) da fare
+- [x] F3.2 Pipeline "flessibili" subito, specializzate in background; chiave di cache hashata — chiave FNV-1a 64 deterministica, registro portabile con swap solo a inizio frame (grafo in cache mai ricompilato); il fallback immediato di una variante è la pipeline generica a stato completo (bit-identica a F2); la specializzazione flessibile Metal 4 è usata solo senza una generica pronta, perché avvisa in validazione e cambia fino a 300k pixel di 1 LSB (misurato, `--debug-flexible-pipelines`)
+- [x] F3.3 Function constant per le varianti (O11); tabella delle varianti generata — `shaders/variants.def` → `tools/variant_gen` → tabelle C++/MSL; 42 varianti del forward (tipi di luce, emissivo, debug mode); le varianti differiscono dalla generica di ≤1 LSB in 3–30 pixel per bench (riferimenti rigenerati); i bench usano 2 varianti, le altre sono coperte da harvest e test
+- [x] F3.4 Raccolta automatica dei descrittori in `.mtl4-json` durante i test, `metal-tt` in CI → `MTL4Archive` — harvest con `MTL4PipelineDataSetSerializer` (`tools/harvest_pipelines.sh`, JSON committato), archivio costruito da CMake con `metal-tt` (Release; niente archivio con la debug info degli shader, che `metal-tt` non traduce); il CI costruisce l'archivio per tutte le arch come artefatto, valido solo per macOS 26 (rifiutato su 27, misurato)
+- [x] F3.5 Fallback obbligatorio su miss dell'archivio (OS o GPU diversi), con tasso di miss registrato — riga `PIPELINES`, report JSON, pannello Pipelines; `tools/archive_check.sh`: 7 scenari con archivi reali (OS diverso = artefatto del CI, arch diversa, parziale, vecchio, assente) PASS con controllo negativo; con `MTL_SHADER_VALIDATION` l'archivio è inutilizzabile (Metal) e viene dichiarato non disponibile
+- [x] F3.6 Hot reload degli shader in Debug (ricompilazione del `.metallib` e sostituzione delle pipeline) — `ShaderReloader` (watcher su thread utility, stessi flag di CMake) + generazioni atomiche nel registro; `tools/hot_reload_check.sh`: auto-test con tutti i flag F2, controllo negativo, watcher reale con errore di sintassi e modifica valida
 
-**Uscita**: nessun hitch al cambio testbench; avvio a freddo con archivio senza compilazioni.
+**Uscita**: nessun hitch al cambio testbench; avvio a freddo con archivio senza compilazioni. Verificata il 2026-09-29 (`perf-log.md`, sezione F3): 0 compilazioni sul render thread dopo l'avvio e 0 hitch con l'archivio (controllo negativo `--pipeline-sync` rilevato); avvio a freddo con archivio a 0 chiamate al compilatore anche con la cache shader dell'OS vuota (12 hit su 12 con tutti i bench e i flag); `visual_check` a 0 pixel e 0 messaggi con tutti i flag F2, `--switch-every`/`--resize-every`, `--pipeline-sync`, `--no-pipeline-archive`; 0 allocazioni GPU nei frame; nessuna regressione rispetto a `main`. Trovato e corretto un accumulo di memoria CPU preesistente da F0 (eventi AppKit senza autorelease pool).
 
 ## F4 — Osservabilità [CORE]
 
