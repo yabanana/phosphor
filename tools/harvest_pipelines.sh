@@ -14,7 +14,7 @@
 # from the real metallib, so the file stays valid when shader bodies change.
 # Only new/removed functions or changed pipeline state require a re-harvest.
 #
-# The graph-debug and async-probe pipelines are requested too (their flags
+# The graph-debug, async-probe and known-cost pipelines are requested too (their flags
 # are on), so the archive covers every self-check.
 # EXTRA_ARGS (environment) is appended to the app command line.
 # Default build dir: build (Debug).  Needs jq.
@@ -33,7 +33,7 @@ trap 'rm -rf "$tmp"' EXIT
 raw="$tmp/harvest.mtl4-json"
 
 # shellcheck disable=SC2086 # EXTRA_ARGS is intentionally word-split
-"$app" --harvest-pipelines "$raw" --frames 1 --no-ui --debug-graph-transients --debug-async-compute ${EXTRA_ARGS:-} >"$tmp/app.log" 2>&1 \
+"$app" --harvest-pipelines "$raw" --frames 1 --no-ui --debug-graph-transients --debug-async-compute --debug-gpu-cost 1 ${EXTRA_ARGS:-} >"$tmp/app.log" 2>&1 \
     || { echo "error: harvest run failed:" >&2; tail -20 "$tmp/app.log" >&2; exit 1; }
 [[ -s "$raw" ]] || { echo "error: the app did not write $raw" >&2; tail -20 "$tmp/app.log" >&2; exit 1; }
 

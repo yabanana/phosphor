@@ -63,7 +63,7 @@ foreach(shader IN LISTS PHOSPHOR_METAL_SHADERS)
         OUTPUT ${air}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${PHOSPHOR_SHADER_OUT}
         COMMAND xcrun -sdk macosx metal ${PHOSPHOR_METAL_FLAGS} -c ${shader} -o ${air}
-        DEPENDS ${shader} ${CMAKE_SOURCE_DIR}/src/renderer/gpu_types.h
+        DEPENDS ${shader} ${CMAKE_SOURCE_DIR}/src/renderer/gpu_types.h ${CMAKE_SOURCE_DIR}/src/diagnostics/overlay_math.h
                 ${PHOSPHOR_VARIANTS_MSL_HEADER} phosphor_variants
         COMMENT "Compiling Metal shader ${name}.metal"
         VERBATIM
