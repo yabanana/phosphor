@@ -27,8 +27,16 @@ float msSince(Clock::time_point start) {
     return std::chrono::duration<float, std::milli>(Clock::now() - start).count();
 }
 
-const char* reason(NS::Error* error) {
-    return error ? error->localizedDescription()->utf8String() : "unknown error";
+/// Metal's error text on one line (archive misses carry multi-line keys):
+/// every log line stays a single line for the scripts that parse the log.
+std::string reason(NS::Error* error) {
+    std::string text = error ? error->localizedDescription()->utf8String() : "unknown error";
+    for (char& c : text) {
+        if (c == '\n' || c == '\r' || c == '\t') c = ' ';
+    }
+    const size_t end = text.find_last_not_of(' ');
+    text.erase(end == std::string::npos ? 0 : end + 1);
+    return text;
 }
 
 MTL::DataType dataType(pipe::ConstantType type) {
@@ -187,7 +195,7 @@ PipelineCache::PipelineCache(MetalContext& context, const Options& options)
     }
     compiler_ = device->newCompiler(compilerDesc, &error);
     compilerDesc->release();
-    if (!compiler_) throw std::runtime_error(std::string("Failed to create MTL4Compiler: ") + reason(error));
+    if (!compiler_) throw std::runtime_error(std::string("Failed to create MTL4Compiler: ") + reason(error).c_str());
 
     library_ = context_.library();
     library_->retain();
@@ -208,7 +216,7 @@ PipelineCache::PipelineCache(MetalContext& context, const Options& options)
         if (archive_) {
             archiveStatus_ = "loaded " + options_.archivePath;
         } else {
-            archiveStatus_ = "unavailable (" + options_.archivePath + ": " + reason(error) + ")";
+            archiveStatus_ = "unavailable (" + options_.archivePath + ": " + reason(error).c_str() + ")";
             LOG_WARN("Pipeline archive %s", archiveStatus_.c_str());
         }
     }
@@ -260,6 +268,7 @@ pipe::PipelineHandle PipelineCache::request(const pipe::PipelineDesc& desc) {
     if (handle != pipe::INVALID_PIPELINE) return handle;
 
     handle = registry_.add(key, desc);
+    LOG_INFO("Pipeline requested: %s (key %016llx)", desc.label.c_str(), static_cast<unsigned long long>(key));
     const u32 generation = registry_.pendingGeneration();
     MTL::Library* library = registry_.reloadPending() ? pendingLibrary_ : library_;
 
@@ -319,7 +328,7 @@ void PipelineCache::resolve(pipe::PipelineHandle handle, const pipe::PipelineDes
             pool->release();
             return;
         }
-        LOG_INFO("Pipeline archive miss: %s (%s)", desc.label.c_str(), reason(error));
+        LOG_INFO("Pipeline archive miss: %s (%s)", desc.label.c_str(), reason(error).c_str());
     }
 
     // 2. Fallback (F3.2): the flexible generic pipeline specialised to this
@@ -338,7 +347,7 @@ void PipelineCache::resolve(pipe::PipelineHandle handle, const pipe::PipelineDes
             ms += msSince(start);
             ++calls;
             d->release();
-            if (!fallback) LOG_WARN("Specialising the flexible pipeline of %s failed: %s", desc.label.c_str(), reason(error));
+            if (!fallback) LOG_WARN("Specialising the flexible pipeline of %s failed: %s", desc.label.c_str(), reason(error).c_str());
             pipe::Completion fb;
             fb.handle        = handle;
             fb.generation    = generation;
@@ -363,7 +372,7 @@ void PipelineCache::resolve(pipe::PipelineHandle handle, const pipe::PipelineDes
                 final.object        = toOpaque(compileFinal(desc, library, &error));
                 final.compileMs     = msSince(start);
                 final.compilerCalls = 1;
-                if (!final.object) LOG_ERROR("Pipeline %s failed: %s", desc.label.c_str(), reason(error));
+                if (!final.object) LOG_ERROR("Pipeline %s failed: %s", desc.label.c_str(), reason(error).c_str());
                 complete(final);
                 inner->release();
             });
@@ -378,7 +387,7 @@ void PipelineCache::resolve(pipe::PipelineHandle handle, const pipe::PipelineDes
     done.object        = toOpaque(compileFinal(desc, library, &error));
     done.compileMs     = msSince(start);
     done.compilerCalls = 1;
-    if (!done.object) LOG_ERROR("Pipeline %s failed: %s", desc.label.c_str(), reason(error));
+    if (!done.object) LOG_ERROR("Pipeline %s failed: %s", desc.label.c_str(), reason(error).c_str());
     complete(done);
     pool->release();
 }
@@ -427,7 +436,7 @@ MTL::RenderPipelineState* PipelineCache::flexibleBase(const pipe::PipelineDesc& 
             object = compileFinal(flexibleDesc, library, &error);
             compileMs += msSince(start);
             ++compilerCalls;
-            if (!object) LOG_WARN("Flexible pipeline %s failed: %s", generic.label.c_str(), reason(error));
+            if (!object) LOG_WARN("Flexible pipeline %s failed: %s", generic.label.c_str(), reason(error).c_str());
         }
         std::lock_guard<std::mutex> lock(flexibleMutex_);
         flexible_[key] = static_cast<MTL::RenderPipelineState*>(object);
@@ -546,7 +555,7 @@ bool PipelineCache::writeHarvest() {
     NS::Data* script = serializer_->serializeAsPipelinesScript(&error);
     bool ok = false;
     if (!script) {
-        LOG_ERROR("Pipeline harvest failed: %s", reason(error));
+        LOG_ERROR("Pipeline harvest failed: %s", reason(error).c_str());
     } else {
         std::ofstream out(options_.harvestPath, std::ios::binary);
         out.write(static_cast<const char*>(script->bytes()), static_cast<std::streamsize>(script->length()));

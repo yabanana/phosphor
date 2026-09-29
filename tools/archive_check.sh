@@ -126,8 +126,6 @@ verdict() {
 
 # --- full ---------------------------------------------------------------
 run_case full "$full_archive" 0
-full_requests=$requests
-full_hits=$hits
 problems=()
 [[ $misses == 0 ]] || problems+=("misses $misses != 0")
 [[ $unavailable == 0 ]] || problems+=("unavailable $unavailable != 0")
@@ -196,8 +194,8 @@ fi
 # --- d: stale archive (modified metallib) ------------------------------------
 # Change one constant in forward.metal, compile exactly like App.cmake (same
 # flags, deployment target from the build's cache) and translate the script
-# against that metallib.  Expected misses = descriptors that use forward_vs or
-# forward_fs; every other requested pipeline must still hit.
+# against that metallib.  Expected misses = the requested pipelines that use
+# forward_vs or forward_fs; every other requested pipeline must still hit.
 stale_dir="$out_dir/stale"
 mkdir -p "$stale_dir"
 cp "$repo_dir"/shaders/*.metal "$stale_dir/"
@@ -211,7 +209,7 @@ else
     airs=()
     for src in "$stale_dir"/*.metal; do
         xcrun -sdk macosx metal -std=metal4.0 "-mmacosx-version-min=${target:-26.0}" \
-            -I "$repo_dir/src" -Wall -c "$src" -o "${src%.metal}.air" >"$src.log" 2>&1 \
+            -I "$repo_dir/src" -I "$build_dir/generated" -Wall -c "$src" -o "${src%.metal}.air" >"$src.log" 2>&1 \
             || { echo "error: compiling $src failed:" >&2; cat "$src.log" >&2; exit 2; }
         airs+=("${src%.metal}.air")
     done
@@ -227,12 +225,20 @@ else
       + ([.pipeline_descriptors.compute_pipeline_descriptors[]
             | select(.compute_function_descriptor as $c | $fwd | index($c))] | length)' "$script_json")
     run_case d-stale "$out_dir/d.metallib" 0
+    # The run requests only some of those descriptors: the expected misses are
+    # the requested pipelines whose label says they are forward pipelines
+    # ("Pipeline requested: Forward ..." lines), and every miss must be one.
+    d_log="$out_dir/d-stale.log"
+    requested_fwd=$(grep -c 'Pipeline requested: Forward' "$d_log" || true)
+    missed_other=$(grep 'Pipeline archive miss: ' "$d_log" | grep -vc 'Pipeline archive miss: Forward' || true)
     problems=()
     [[ $expected_stale -gt 0 ]] || problems+=("script has no forward pipeline: nothing to miss")
-    [[ $misses == "$expected_stale" ]] || problems+=("misses $misses != forward descriptors $expected_stale")
-    [[ $hits == $((full_hits - expected_stale)) ]] || problems+=("hits $hits != full-run hits $full_hits minus $expected_stale")
+    [[ $requested_fwd -gt 0 ]] || problems+=("no forward pipeline requested")
+    [[ $misses == "$requested_fwd" ]] || problems+=("misses $misses != requested forward pipelines $requested_fwd")
+    [[ $missed_other == 0 ]] || problems+=("$missed_other non-forward pipelines missed")
+    [[ $hits == $((requests - requested_fwd)) ]] || problems+=("hits $hits != requests $requests minus $requested_fwd")
     [[ $unavailable == 0 ]] || problems+=("unavailable $unavailable != 0")
-    verdict d-stale "expected misses $expected_stale (forward_vs/forward_fs users), full-run requests $full_requests" ${problems[@]+"${problems[@]}"}
+    verdict d-stale "requested forward pipelines $requested_fwd missed, others hit ($expected_stale forward descriptors in the script)" ${problems[@]+"${problems[@]}"}
 fi
 
 # --- e: nonexistent archive ---------------------------------------------------
