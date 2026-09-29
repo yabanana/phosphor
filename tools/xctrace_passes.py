@@ -297,7 +297,9 @@ def to_markdown(res):
             r["encoder"], r["channel"], r["shader"], r["total_ms"], r["samples"],
             r["mean_percent_of_kick"]))
     L += ["", "## Pass share inside each encoder (shader sample time)", "",
-          "Shader-to-pass map: %s." % res["pass_map"]["source"], "",
+          "Shader-to-pass map: %s.  Shares are sampled shader wall time (sum over "
+          "channels); on a TBDR GPU the fragments of fused passes interleave per tile, "
+          "so treat them as indicative, not as exclusive per-pass cost." % res["pass_map"]["source"], "",
           "| Encoder | Pass | Shader ms | Share |", "|---|---|---:|---:|"]
     for lab, d in res["pass_shares"].items():
         for p, v in d["passes"].items():
