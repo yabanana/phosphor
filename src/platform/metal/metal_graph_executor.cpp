@@ -174,7 +174,7 @@ void MetalGraphExecutor::releaseResources() {
             if (textures_[r]->storageMode() == MTL::StorageModeMemoryless) {
                 context_.memory().release(textures_[r], MemoryCategory::RenderTargets);
             } else {
-                heap_.release(textures_[r]);
+                heap_.release(textures_[r], /*evict: no-op if it was never registered*/ true);
             }
         }
         if (buffers_[r]) heap_.release(buffers_[r]);
@@ -321,6 +321,15 @@ bool MetalGraphExecutor::createResources() {
             MTL::TextureDescriptor* d = textureDescriptor(node.texture, usage_[p.resource], MTL::StorageModePrivate);
             d->setHazardTrackingMode(MTL::HazardTrackingModeUntracked);
             textures_[p.resource] = heap_.createTexture(d, p.offset, node.name.c_str());
+            // The heap makes its textures resident, but the Metal 4 validation
+            // layer rejects a heap-backed render target that is later bound
+            // through an argument table in a render pass ("attachment texture
+            // ... is not added to any residency set", F4.7 overlays: light
+            // count / overdraw sampled by the composite) unless the texture is
+            // in a residency set itself.  Evicted again in releaseResources().
+            if (textures_[p.resource] && (usage_[p.resource] & MTL::TextureUsageRenderTarget)) {
+                context_.makeResident(textures_[p.resource], ResidencyClass::Static);
+            }
             d->release();
         } else {
             buffers_[p.resource] = heap_.createBuffer(node.buffer.size, p.offset, node.name.c_str());

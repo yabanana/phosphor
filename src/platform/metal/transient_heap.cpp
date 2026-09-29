@@ -66,9 +66,10 @@ MTL::Buffer* TransientHeap::createBuffer(u64 length, u64 offset, const char* lab
     return buffer;
 }
 
-void TransientHeap::release(MTL::Resource* resource) {
-    // Resident through the heap: nothing to evict individually.
-    context_.deferRelease(resource, /*evict*/ false);
+void TransientHeap::release(MTL::Resource* resource, bool evict) {
+    // Resident through the heap: nothing to evict individually, unless the
+    // caller registered the resource itself.
+    context_.deferRelease(resource, evict);
 }
 
 } // namespace phosphor

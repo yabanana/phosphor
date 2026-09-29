@@ -49,7 +49,8 @@ public:
     [[nodiscard]] MTL::Buffer* createBuffer(u64 length, u64 offset, const char* label);
 
     /// Deferred release of a resource created here.
-    void release(MTL::Resource* resource);
+    /// `evict`: the resource was made resident on its own (see the executor).
+    void release(MTL::Resource* resource, bool evict = false);
 
     [[nodiscard]] u64 size() const { return heap_ ? heap_->size() : 0; }
 
