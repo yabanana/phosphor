@@ -496,17 +496,29 @@ void PipelineCache::waitAllReady() {
 }
 
 void PipelineCache::waitAllFinal() {
-    waitForCompletions([&] {
-        if (queue_ && queue_->outstanding() != 0) return false;
-        for (u32 h = 0; h < registry_.size(); ++h) {
+    // Waits on the compile queue's idle state, not on a completion count: a
+    // job posts its completion BEFORE its worker stops counting it as running,
+    // so a check of outstanding() that falls between the two sees one job left
+    // and would then wait for a completion that never comes (F4, measured: a
+    // capture run hung here for 25 minutes with every compile thread idle).
+    for (;;) {
+        if (queue_) queue_->waitIdle();
+        drain();
+        bool final = true;
+        for (u32 h = 0; h < registry_.size() && final; ++h) {
             const pipe::PipelineState s = registry_.state(h);
             if (s != pipe::PipelineState::Ready && s != pipe::PipelineState::Failed) {
-                if (!options_.fallbackOnly) return false;
-                if (s == pipe::PipelineState::Pending) return false;
+                if (!options_.fallbackOnly || s == pipe::PipelineState::Pending) final = false;
             }
         }
-        return true;
-    });
+        if (final) return;
+        // Idle queue, everything posted was drained and an entry is still not
+        // final: nothing can complete it any more.
+        if (!queue_ || queue_->outstanding() == 0) {
+            LOG_ERROR("Pipeline cache: waitAllFinal found an entry that no job will complete");
+            return;
+        }
+    }
 }
 
 MTL::RenderPipelineState* PipelineCache::render(pipe::PipelineHandle h) const {
