@@ -59,10 +59,13 @@ build_tool() { # <subdir> <binary>
     local sub=$1 bin=$2
     [[ -x "$tools/$sub/$bin" ]] && return 0
     note "building $bin from $src/$sub (first time only)"
-    cmake -S "$src/$sub" -B "$tools/$sub" -G Ninja -DCMAKE_BUILD_TYPE=Release \
-        -DCPM_SOURCE_CACHE="$tools/cpm-cache" -DCMAKE_POLICY_VERSION_MINIMUM=3.5 >"$out/tool-$sub.log" 2>&1 \
-        && cmake --build "$tools/$sub" --target "$bin" >>"$out/tool-$sub.log" 2>&1 \
-        || { tail -20 "$out/tool-$sub.log" >&2; echo "error: building $bin failed" >&2; exit 1; }
+    if ! cmake -S "$src/$sub" -B "$tools/$sub" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCPM_SOURCE_CACHE="$tools/cpm-cache" -DCMAKE_POLICY_VERSION_MINIMUM=3.5 >"$out/tool-$sub.log" 2>&1 ||
+       ! cmake --build "$tools/$sub" --target "$bin" >>"$out/tool-$sub.log" 2>&1; then
+        tail -20 "$out/tool-$sub.log" >&2
+        echo "error: building $bin failed" >&2
+        exit 1
+    fi
 }
 build_tool capture tracy-capture
 build_tool csvexport tracy-csvexport
@@ -162,14 +165,28 @@ if extra:
 print("PASS" if not bad else "FAIL %d unit(s) mismatch" % bad)
 PY
 )
-echo "$gpu_result" | sed 's/^/gpu: /'
+while IFS= read -r line; do echo "gpu: $line"; done <<<"$gpu_result"
 case "$gpu_result" in
     *FAIL*) bad "GPU zones do not match the report" ;;
 esac
 
-# Memory pools: string table of the (zstd) trace.
-pools=$(tail -c +11 "$trace" | zstd -dc 2>/dev/null | LC_ALL=C strings -n 3 \
-    | LC_ALL=C grep -aoE 'cpu|GPU (heap pages|Geometry|Textures|Upload|Transient|Render targets|Other)' | sort -u || true)
+# Memory pools: string table of the trace.  A .tracy file is a 6-byte header
+# followed by blocks [u32 compressed size][zstd frame]; each block is
+# decompressed on its own (one stream from offset 11 stops at the first block
+# boundary and misses the pools once the trace is larger than one block).
+pools=$(python3 - "$trace" <<'PY' | LC_ALL=C strings -n 3 \
+    | LC_ALL=C grep -aoE 'cpu|GPU (heap pages|Geometry|Textures|Upload|Transient|Render targets|Other)' | sort -u || true
+import struct, subprocess, sys
+data = open(sys.argv[1], "rb").read()
+pos, out = 6, sys.stdout.buffer
+while pos + 4 <= len(data):
+    size = struct.unpack_from("<I", data, pos)[0]
+    pos += 4
+    block = data[pos:pos + size]
+    pos += size
+    out.write(subprocess.run(["zstd", "-dc"], input=block, capture_output=True).stdout)
+PY
+)
 if grep -qx 'cpu' <<<"$pools"; then echo "memory ok    pool 'cpu' (operator new/delete)"; else bad "memory pool 'cpu' missing"; fi
 if grep -qE '^GPU ' <<<"$pools"; then
     echo "memory ok    GPU pools: $(grep -E '^GPU ' <<<"$pools" | tr '\n' ',' | sed 's/,$//')"
