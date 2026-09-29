@@ -179,6 +179,9 @@ void ImGuiRenderer::render(MTL4::RenderCommandEncoder* encoder, const ImDrawData
     const ImVec2 clipOffset = drawData->DisplayPos;
     const ImVec2 clipScale  = drawData->FramebufferScale;
     ImTextureID boundTexture{};
+    // The validation layer rejects redundant state: skip a scissor equal to
+    // the current one (Metal's default is the whole render target).
+    MTL::ScissorRect scissor{0, 0, static_cast<NS::UInteger>(fbWidth), static_cast<NS::UInteger>(fbHeight)};
     vtxCursor = 0;
     idxCursor = 0;
     for (const ImDrawList* list : drawData->CmdLists) {
@@ -200,9 +203,13 @@ void ImGuiRenderer::render(MTL4::RenderCommandEncoder* encoder, const ImDrawData
             const float y1 = std::min((cmd.ClipRect.w - clipOffset.y) * clipScale.y, fbHeight);
             if (x1 <= x0 || y1 <= y0 || cmd.ElemCount == 0) continue;
 
-            encoder->setScissorRect(MTL::ScissorRect{static_cast<NS::UInteger>(x0), static_cast<NS::UInteger>(y0),
-                                                     static_cast<NS::UInteger>(x1 - x0),
-                                                     static_cast<NS::UInteger>(y1 - y0)});
+            const MTL::ScissorRect rect{static_cast<NS::UInteger>(x0), static_cast<NS::UInteger>(y0),
+                                        static_cast<NS::UInteger>(x1 - x0), static_cast<NS::UInteger>(y1 - y0)};
+            if (rect.x != scissor.x || rect.y != scissor.y || rect.width != scissor.width ||
+                rect.height != scissor.height) {
+                encoder->setScissorRect(rect);
+                scissor = rect;
+            }
 
             const ImTextureID texture = cmd.GetTexID();
             if (texture != boundTexture) {

@@ -146,6 +146,8 @@ void SceneRenderer::prepareFrame(const GpuScene& scene, const FrameScene& fs, co
     const pipe::forward::Variant variant = pipe::forward::sceneVariant(fs, constants.debugMode);
     pipe::PipelineHandle& handle = genericOnly_ ? generic_ : variants_[pipe::forward::variantIndex(variant)];
     if (handle == pipe::INVALID_PIPELINE) {
+        LOG_INFO("Forward variant %u requested: light types 0x%x, emissive %d, debug mode %u",
+                 pipe::forward::variantIndex(variant), variant.lightTypes, variant.emissive ? 1 : 0, variant.debugMode);
         handle = pipelines_.request(pipe::forward::pipelineDesc(variant, rg::Format::BGRA8Srgb, salt_));
     }
     usingFallback_ = genericOnly_ || !pipelines_.isFinal(handle);
