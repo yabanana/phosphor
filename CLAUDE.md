@@ -98,6 +98,21 @@ extend it; port algorithms from it.
   frame. Passes fused in one render encoder share its state: leave
   Metal's defaults (cull none, clockwise winding) when you change them, the
   validation layer rejects redundant state.
+- Pipelines (F3): create every render/compute pipeline through
+  `PipelineCache::request(pipe::PipelineDesc)` and resolve the handle while
+  encoding (`render(h)` / `compute(h)`); never call an `MTL4::Compiler`
+  elsewhere.  Requests compile on utility-QoS threads (archive lookup →
+  flexible fallback → full variant) and become visible only at
+  `PipelineCache::beginFrame()`, so the cached graph never recompiles for
+  them.  Forward variants are declared in `shaders/variants.def` (generated
+  C++/MSL tables); a variant must only remove branches that are dead for the
+  scenes that select it (images stay identical).  The archive comes from the
+  committed `shaders/pipelines.mtl4-json` (`tools/harvest_pipelines.sh`
+  regenerates it when pipeline names/constants/state change) through
+  `metal-tt` at build time; Metal rejects archive lookups under
+  `MTL_SHADER_VALIDATION`, so archive checks (`tools/archive_check.sh`) run
+  with API validation only.  Self-checks: `--pipeline-sync`,
+  `--debug-pipeline-fallback`, `--debug-hot-reload`, `--no-pipeline-archive`.
 - Frame pacing: normally one MTL4 command buffer per frame (scene + ImGui
   overlay fused in one render pass) and one `MTLSharedEvent`; value `n+1` =
   frame n done. With `--debug-split-encoding` a render pass is suspended/

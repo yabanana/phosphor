@@ -30,9 +30,9 @@ env -u MTL_DEBUG_LAYER -u MTL_SHADER_VALIDATION \
     exit 1
 }
 
-grep -E '(^|[^A-Za-z])(SWITCH|PIPELINES)( |$)' "$log" || true
+grep -E '^(SWITCH|PIPELINES) ' "$log" || true
 
-switch_line=$(grep -E '(^|[^A-Za-z])SWITCH ' "$log" | tail -n 1 || true)
+switch_line=$(grep -E '^SWITCH ' "$log" | tail -n 1 || true)
 [[ -n "$switch_line" ]] || { echo "error: no SWITCH line in the app output" >&2; exit 1; }
 hitches=$(sed -nE 's/.*hitches ([0-9]+).*/\1/p' <<<"$switch_line")
 [[ -n "$hitches" ]] || { echo "error: cannot parse hitches from: $switch_line" >&2; exit 1; }

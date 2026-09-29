@@ -82,11 +82,14 @@ run_case() {
     shift 3
     local capture="$out_dir/$name.png" log="$out_dir/$name.log"
     status=0
-    MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 MTL_DEBUG_LAYER_WARNING_MODE=nslog \
+    # API validation only: Metal rejects every MTL4Archive lookup under shader
+    # validation ("MTL4Archive instances are not compatible with Metal shader
+    # validation"), which would turn every scenario into "unavailable".
+    MTL_DEBUG_LAYER=1 MTL_DEBUG_LAYER_WARNING_MODE=nslog \
         "$app" --bench 1 --warmup "$warmup" --frames 1 --no-ui --fixed-timestep \
         --pipeline-archive "$archive" "$@" --capture "$capture" >"$log" 2>&1 || status=$?
     local line
-    line=$(grep -m1 'PIPELINES' "$log" || true)
+    line=$(grep -m1 '^PIPELINES' "$log" || true)
     requests=$(sed -nE 's/.*requests ([0-9]+).*/\1/p' <<<"$line")
     hits=$(sed -nE 's/.*archive hits ([0-9]+),.*/\1/p' <<<"$line")
     misses=$(sed -nE 's/.*misses ([0-9]+),.*/\1/p' <<<"$line")
@@ -97,7 +100,7 @@ run_case() {
     # "Validation Enabled" banners is a problem.  A rejected archive may be
     # reported by the app as a warning mentioning the archive: tolerated only
     # in the scenarios that expect a rejection.
-    local ignore='^\[INFO\]|^BENCH|^PIPELINES|^SWITCH|^GRAPH-TRANSIENTS|^ASYNC-COMPUTE|Validation Enabled'
+    local ignore='^\[INFO\]|^BENCH|^PIPELINES|^STARTUP|^SWITCH|^GRAPH-TRANSIENTS|^ASYNC-COMPUTE|Validation Enabled'
     [[ $allow_warn == 1 ]] && ignore="$ignore|^\[WARN\].*[Aa]rchive"
     messages=$(grep -Ev "$ignore" "$log" | grep -c . || true)
     diff_ok=1
