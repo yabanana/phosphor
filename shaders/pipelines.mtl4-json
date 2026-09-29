@@ -1,0 +1,56 @@
+{
+  "function_descriptors": {
+    "library_function_descriptors": [
+      {
+        "label": "9F171471BD89E5C466F6EC157D1E68B9EDE305D1293478FBC3C7B211490EB7AC",
+        "library": "A0AC9AC3D30D3DCC2C32264BADE69673A5C38FDF1A27910020EBC20CAAA241C0",
+        "name": "debug_fill"
+      },
+      {
+        "label": "62027E2233A092CBFA38A5437173196859DD4E742C4BE87E730A74213E8A4CFA",
+        "library": "A0AC9AC3D30D3DCC2C32264BADE69673A5C38FDF1A27910020EBC20CAAA241C0",
+        "name": "forward_fs"
+      },
+      {
+        "label": "64FE173DFB9A01EC49141CDE7D64680712C88B9EEEC3F474DC6BA445EDE4885A",
+        "library": "A0AC9AC3D30D3DCC2C32264BADE69673A5C38FDF1A27910020EBC20CAAA241C0",
+        "name": "forward_vs"
+      }
+    ]
+  },
+  "generator": "MetalFramework",
+  "libraries": [
+    {
+      "label": "A0AC9AC3D30D3DCC2C32264BADE69673A5C38FDF1A27910020EBC20CAAA241C0",
+      "path": "@PHOSPHOR_METALLIB@"
+    }
+  ],
+  "pipeline_descriptors": {
+    "compute_pipeline_descriptors": [
+      {
+        "compute_function_descriptor": "fnd:9F171471BD89E5C466F6EC157D1E68B9EDE305D1293478FBC3C7B211490EB7AC",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      }
+    ],
+    "render_pipeline_descriptors": [
+      {
+        "color_attachments": [
+          {
+            "pixel_format": "BGRA8Unorm_sRGB"
+          }
+        ],
+        "fragment_function_descriptor": "fnd:62027E2233A092CBFA38A5437173196859DD4E742C4BE87E730A74213E8A4CFA",
+        "vertex_function_descriptor": "fnd:64FE173DFB9A01EC49141CDE7D64680712C88B9EEEC3F474DC6BA445EDE4885A"
+      }
+    ]
+  },
+  "version": {
+    "major": 0,
+    "minor": 1,
+    "sub_minor": 0
+  }
+}
