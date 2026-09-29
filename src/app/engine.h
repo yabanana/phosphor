@@ -129,6 +129,8 @@ private:
     RenderSettings settings_;
     bool           captured_  = false;
     bool           orbitMode_ = false;
+    bool           resizeToggle_ = false; // --resize-every
+    u32            resizeFrames_ = 0;
     bool           running_   = true;
     int            exitCode_  = 0;
 };

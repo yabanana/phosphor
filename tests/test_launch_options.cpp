@@ -33,7 +33,7 @@ TEST_CASE("launch options: benchmark switches") {
     std::string err;
     REQUIRE(parse({"--bench", "3", "--frames", "600", "--warmup", "10", "--no-vsync", "--no-ui",
                    "--fixed-timestep", "--switch-every", "20", "--simulate-pressure", "--capture", "out.png",
-                   "--report", "r.json", "--dump-graph", "g.dot", "--debug-split-encoding", "--debug-async-compute"},
+                   "--report", "r.json", "--dump-graph", "g.dot", "--debug-split-encoding", "--debug-async-compute", "--resize-every", "7"},
                   o, err));
     CHECK(o.bench == 2); // 1-based on the command line
     CHECK(o.frames == 600);
@@ -49,6 +49,7 @@ TEST_CASE("launch options: benchmark switches") {
     CHECK(o.dumpGraphPath == "g.dot");
     CHECK(o.debugSplitEncoding);
     CHECK(o.debugAsyncCompute);
+    CHECK(o.resizeEvery == 7);
 }
 
 TEST_CASE("launch options: --debug-graph-transients") {

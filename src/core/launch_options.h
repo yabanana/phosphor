@@ -20,6 +20,8 @@ namespace phosphor {
 //                      of real time (deterministic captures)
 //   --switch-every N   switch to the next test bench every N frames, through
 //                      the same path as the 1-7 hotkeys (switching tests)
+//   --resize-every N   resize the window every N frames, alternating between
+//                      two sizes (tests the render graph recompilation)
 //   --simulate-pressure  inject a memory-pressure warning at frame 10 and a
 //                      critical notification at frame 20 (F1.5 tests)
 //   --memory-stress N  create/destroy N GPU resources, check that device
@@ -54,6 +56,7 @@ struct LaunchOptions {
     bool        ui     = true;
     bool        fixedTimestep = false;
     u32         switchEvery   = 0; // 0 = never
+    u32         resizeEvery   = 0; // 0 = never
     bool        simulatePressure = false;
     u32         memoryStress  = 0; // cycles; 0 = off
     bool        transientTest = false;

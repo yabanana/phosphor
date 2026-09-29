@@ -198,6 +198,12 @@ void Engine::run() {
             if (simulatedFrames_ == 10) pressure_->simulate(MemoryPressureMonitor::Level::Warning);
             if (simulatedFrames_ == 20) pressure_->simulate(MemoryPressureMonitor::Level::Critical);
         }
+        if (presented && options_.resizeEvery > 0 && ++resizeFrames_ % options_.resizeEvery == 0) {
+            // Alternate between two window sizes: the drawable size changes,
+            // so the render graph is recompiled (resize test).
+            resizeToggle_ = !resizeToggle_;
+            SDL_SetWindowSize(window_, resizeToggle_ ? 1280 : 1600, resizeToggle_ ? 720 : 900);
+        }
         if (presented && options_.switchEvery > 0 && ++framesOnBench_ >= options_.switchEvery && !pendingBench_) {
             // Same path as the 1-7 hotkeys.
             pendingBench_ = static_cast<TestBenchType>((static_cast<int>(currentBench_) + 1) % testBenchCount());

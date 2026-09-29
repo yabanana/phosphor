@@ -71,6 +71,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.simulatePressure = true;
         } else if (arg == "--switch-every") {
             if (!needCount(out.switchEvery)) return false;
+        } else if (arg == "--resize-every") {
+            if (!needCount(out.resizeEvery)) return false;
         } else if (arg == "--capture") {
             const auto value = needValue();
             if (!value) return false;
