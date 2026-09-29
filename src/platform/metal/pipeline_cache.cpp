@@ -243,8 +243,8 @@ PipelineCache::~PipelineCache() {
     context_.waitIdle();
     registry_.setReleaser(releaseNow, nullptr);
     registry_.drain();
-    for (auto& [key, pso] : flexible_) {
-        if (pso) pso->release();
+    for (auto& [key, base] : flexible_) {
+        if (base.pipeline) base.pipeline->release();
     }
     if (pendingLibrary_) pendingLibrary_->release();
     library_->release();
@@ -439,10 +439,10 @@ MTL::RenderPipelineState* PipelineCache::flexibleBase(const pipe::PipelineDesc& 
             if (!object) LOG_WARN("Flexible pipeline %s failed: %s", generic.label.c_str(), reason(error).c_str());
         }
         std::lock_guard<std::mutex> lock(flexibleMutex_);
-        flexible_[key] = static_cast<MTL::RenderPipelineState*>(object);
+        flexible_[key] = {library, static_cast<MTL::RenderPipelineState*>(object)};
     });
     std::lock_guard<std::mutex> lock(flexibleMutex_);
-    return flexible_[key];
+    return flexible_[key].pipeline;
 }
 
 void PipelineCache::complete(const pipe::Completion& completion) {
@@ -518,6 +518,7 @@ u32 PipelineCache::drain() {
             // Reload committed: the new library is served from now on.
             context_.deferRelease(library_);
             library_ = pendingLibrary_;
+            pruneFlexible_ = true;
             LOG_INFO("Shaders reloaded: generation %u, %u pipelines swapped", registry_.generation(), changed);
         } else {
             context_.deferRelease(pendingLibrary_);
@@ -525,7 +526,28 @@ u32 PipelineCache::drain() {
         }
         pendingLibrary_ = nullptr;
     }
+    if (pruneFlexible_) pruneFlexibleBases();
     return changed;
+}
+
+void PipelineCache::pruneFlexibleBases() {
+    // Jobs of the previous generation were cancelled or are finishing; new
+    // ones use library_.  Once nothing runs, no job can hold an old base.
+    if (queue_ && queue_->outstanding() != 0) return;
+    std::lock_guard<std::mutex> lock(flexibleMutex_);
+    u32 released = 0;
+    for (auto it = flexible_.begin(); it != flexible_.end();) {
+        if (it->second.library == library_) {
+            ++it;
+            continue;
+        }
+        if (it->second.pipeline) context_.deferRelease(it->second.pipeline);
+        flexibleOnce_.erase(it->first);
+        it = flexible_.erase(it);
+        ++released;
+    }
+    pruneFlexible_ = false;
+    if (released) LOG_INFO("Released %u flexible pipelines of the previous shader library", released);
 }
 
 bool PipelineCache::reload(MTL::Library* library) {

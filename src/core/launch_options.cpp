@@ -116,6 +116,16 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             }
         } else if (arg == "--pipeline-salt") {
             if (!needCount(out.pipelineSalt)) return false;
+        } else if (arg == "--debug-mode") {
+            if (!needCount(out.debugMode)) return false;
+            if (out.debugMode > 2) {
+                error = "--debug-mode: expected 0..2";
+                return false;
+            }
+        } else if (arg == "--force-variant") {
+            u32 variant = 0;
+            if (!needCount(variant)) return false;
+            out.forceVariant = variant; // range checked by the engine (generated table)
         } else if (arg == "--debug-flexible-pipelines") {
             out.debugFlexiblePipelines = true;
         } else if (arg == "--debug-pipeline-fallback") {

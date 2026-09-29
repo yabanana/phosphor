@@ -137,6 +137,40 @@ void CornellBox::setup(ECS& ecs, GpuScene& gpuScene, TextureManager& textures) {
         ecs.addComponent(e, std::move(mat));
     }
 
+    // --- Emissive ceiling panel (material 3): the visible area light of the
+    //     classic Cornell box, just below the ceiling (no depth fighting).
+    //     The only emissive material of the benches: it exercises the
+    //     EMISSIVE axis of the forward variants (F3.3).
+    {
+        EntityID e = ecs.createEntity();
+        entities_.push_back(e);
+
+        TransformComponent xform{};
+        xform.position = glm::vec3(0.0f, S * 2.0f - 0.01f, 0.0f);
+        xform.rotation = ceilRot;
+        xform.scale    = glm::vec3(0.25f, 1.0f, 0.2f); // 1.25 x 1.0 of the 5 x 5 plane
+        xform.updateMatrix();
+        ecs.addComponent(e, std::move(xform));
+
+        MeshInstanceComponent inst{};
+        inst.meshHandle = planeHandle;
+        inst.materialIndex = 3;
+        inst.setVisible(true);
+        inst.setStatic(true);
+        ecs.addComponent(e, std::move(inst));
+
+        MaterialComponent mat{};
+        mat.baseColorFactor = glm::vec4(0.78f, 0.78f, 0.78f, 1.0f);
+        mat.metallicFactor  = 0.0f;
+        mat.roughnessFactor = 0.9f;
+        mat.emissiveFactor  = glm::vec3(1.0f, 0.93f, 0.78f) * 4.0f;
+        mat.baseColorTexIndex = textures.getDefaultWhite();
+        mat.normalTexIndex    = textures.getDefaultNormal();
+        mat.metallicRoughnessTexIndex = textures.getDefaultMR();
+        mat.emissiveTexIndex  = textures.getDefaultWhite();
+        ecs.addComponent(e, std::move(mat));
+    }
+
     // --- Ceiling light (bright point light simulating the classic area light) ---
     {
         EntityID e = ecs.createEntity();

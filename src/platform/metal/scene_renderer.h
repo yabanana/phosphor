@@ -5,6 +5,7 @@
 #include "platform/metal/metal_context.h"
 #include "renderer/gpu_types.h"
 
+#include <optional>
 #include <vector>
 
 
@@ -38,7 +39,9 @@ class SceneRenderer {
 public:
     /// `salt` != 0: salted variants (--pipeline-salt, cold compiles).
     /// `genericOnly`: never request variants (--debug-pipeline-fallback).
-    SceneRenderer(MetalContext& context, PipelineCache& pipelines, u32 salt = 0, bool genericOnly = false);
+    /// `forceVariant`: always draw with that variant index (--force-variant).
+    SceneRenderer(MetalContext& context, PipelineCache& pipelines, u32 salt = 0, bool genericOnly = false,
+                  std::optional<u32> forceVariant = std::nullopt);
     ~SceneRenderer();
 
     SceneRenderer(const SceneRenderer&) = delete;
@@ -74,6 +77,7 @@ private:
     PipelineCache&            pipelines_;
     u32                       salt_ = 0;
     bool                      genericOnly_ = false;
+    std::optional<u32>        forceVariant_;
     pipe::PipelineHandle      generic_ = pipe::INVALID_PIPELINE;
     std::vector<pipe::PipelineHandle> variants_; // by variant index
     MTL::RenderPipelineState* pipeline_ = nullptr; // chosen by prepareFrame

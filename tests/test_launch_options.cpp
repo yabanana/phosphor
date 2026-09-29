@@ -82,7 +82,7 @@ TEST_CASE("launch options: F3 pipeline switches") {
     CHECK_FALSE(o.compileQosInteractive);
     CHECK(o.pipelineSalt == 0);
     REQUIRE(parse({"--pipeline-archive", "a.metallib", "--no-pipeline-archive", "--harvest-pipelines", "p.mtl4-json",
-                   "--pipeline-sync", "--debug-compile-storm", "--debug-pipeline-fallback", "--debug-flexible-pipelines", "--compile-qos", "interactive", "--pipeline-salt", "42", "--frame-trace", "t.csv",
+                   "--pipeline-sync", "--debug-compile-storm", "--debug-pipeline-fallback", "--debug-flexible-pipelines", "--debug-mode", "2", "--force-variant", "41", "--compile-qos", "interactive", "--pipeline-salt", "42", "--frame-trace", "t.csv",
                    "--shader-dir", "shaders", "--debug-hot-reload", "probe.metallib"},
                   o, err));
     CHECK(o.pipelineArchivePath == "a.metallib");
@@ -92,6 +92,8 @@ TEST_CASE("launch options: F3 pipeline switches") {
     CHECK(o.debugCompileStorm);
     CHECK(o.debugPipelineFallback);
     CHECK(o.debugFlexiblePipelines);
+    CHECK(o.debugMode == 2);
+    CHECK(o.forceVariant == 41u);
     CHECK(o.compileQosInteractive);
     CHECK(o.pipelineSalt == 42);
     CHECK(o.frameTracePath == "t.csv");
@@ -102,6 +104,9 @@ TEST_CASE("launch options: F3 pipeline switches") {
     CHECK_FALSE(parse({"--compile-qos", "background"}, o, err));
     CHECK(err.find("--compile-qos") != std::string::npos);
     CHECK_FALSE(parse({"--pipeline-archive"}, o, err));
+    CHECK_FALSE(parse({"--debug-mode", "3"}, o, err));
+    REQUIRE(parse({}, o, err));
+    CHECK_FALSE(o.forceVariant.has_value());
 }
 
 TEST_CASE("launch options: errors") {

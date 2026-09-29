@@ -24,6 +24,7 @@ add_executable(phosphor_tests
     test_mesh_processing.cpp
     test_pipeline_key.cpp
     test_pipeline_registry.cpp
+    test_pipeline_script.cpp
     test_procedural.cpp
     test_render_graph.cpp
     test_scene_extract.cpp
@@ -34,5 +35,7 @@ add_executable(phosphor_tests
     test_worker_pool.cpp
 )
 target_link_libraries(phosphor_tests PRIVATE phosphor_core doctest::doctest)
+# test_pipeline_script.cpp reads the committed shaders/pipelines.mtl4-json.
+target_compile_definitions(phosphor_tests PRIVATE PHOSPHOR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_options(phosphor_tests PRIVATE ${PHOSPHOR_WARNINGS})
 add_test(NAME phosphor_tests COMMAND phosphor_tests)
