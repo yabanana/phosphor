@@ -43,7 +43,7 @@ file(GLOB PHOSPHOR_METAL_SHADERS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*
 set(PHOSPHOR_SHADER_OUT ${CMAKE_BINARY_DIR}/shaders)
 set(PHOSPHOR_METALLIB ${PHOSPHOR_SHADER_OUT}/phosphor.metallib)
 set(PHOSPHOR_METAL_FLAGS -std=metal4.0 -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}
-    -I ${CMAKE_SOURCE_DIR}/src -Wall)
+    -I ${CMAKE_SOURCE_DIR}/src -I ${CMAKE_BINARY_DIR}/generated -Wall)
 if(CMAKE_BUILD_TYPE MATCHES "Debug|RelWithDebInfo")
     # Source-level shader debugging and profiling in Xcode.
     list(APPEND PHOSPHOR_METAL_FLAGS -gline-tables-only -frecord-sources)
@@ -58,6 +58,7 @@ foreach(shader IN LISTS PHOSPHOR_METAL_SHADERS)
         COMMAND ${CMAKE_COMMAND} -E make_directory ${PHOSPHOR_SHADER_OUT}
         COMMAND xcrun -sdk macosx metal ${PHOSPHOR_METAL_FLAGS} -c ${shader} -o ${air}
         DEPENDS ${shader} ${CMAKE_SOURCE_DIR}/src/renderer/gpu_types.h
+                ${PHOSPHOR_VARIANTS_MSL_HEADER} phosphor_variants
         COMMENT "Compiling Metal shader ${name}.metal"
         VERBATIM
     )

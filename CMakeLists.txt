@@ -88,6 +88,7 @@ add_library(phosphor_core STATIC
     src/testbench/testbench.cpp
     src/testbench/torus_demo.cpp
 )
+add_dependencies(phosphor_core phosphor_variants)
 target_include_directories(phosphor_core PUBLIC ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/generated)
 find_package(Threads REQUIRED)
 target_link_libraries(phosphor_core PUBLIC Threads::Threads glm::glm SDL3::SDL3 meshoptimizer tinygltf mikktspace)

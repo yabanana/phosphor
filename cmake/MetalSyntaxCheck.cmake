@@ -24,6 +24,7 @@ set(_flags
     -isystem ${imgui_SOURCE_DIR}/backends
     -isystem ${tinygltf_SOURCE_DIR}
     -I ${CMAKE_SOURCE_DIR}/src
+    -I ${CMAKE_BINARY_DIR}/generated
 )
 if(DEFINED sdl3_SOURCE_DIR)
     list(APPEND _flags -isystem ${sdl3_SOURCE_DIR}/include)
@@ -36,6 +37,7 @@ endforeach()
 
 add_custom_target(metal_syntax_check
     ${_commands}
+    DEPENDS phosphor_variants
     COMMENT "Type-checking Metal host code against metal-cpp (syntax only)"
     VERBATIM
 )
