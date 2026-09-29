@@ -119,6 +119,10 @@ public:
     /// over the last 60 frames), estimated DRAM bytes, and the sum compared
     /// with the command buffer's GPU time.  `timings` null: timing is off.
     static void drawPassTimingsPanel(const PassTimings* timings, float commandBufferGpuMs, bool unfused);
+
+    /// F4.7 "timings" overlay: a compact, undecorated corner overlay with the
+    /// average GPU time of every timed unit and their sum.
+    static void drawTimingsOverlay(const PassTimings* timings);
 };
 
 } // namespace phosphor

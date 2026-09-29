@@ -917,6 +917,7 @@ void Engine::drawUi() {
     UIPanels::drawPipelinePanel(pipelineInfo);
     UIPanels::drawPassTimingsPanel(timestamps_ ? &passTimings_ : nullptr, context_->lastGpuMs(),
                                    options_.gpuTimingUnfused);
+    if (overlayMode_ == OverlayMode::Timings) UIPanels::drawTimingsOverlay(timestamps_ ? &passTimings_ : nullptr);
 
     ImGui::Render();
 }

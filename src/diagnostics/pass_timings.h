@@ -62,7 +62,7 @@ public:
     [[nodiscard]] bool unitFused(u32 unit) const { return units_[unit].fused; }
     [[nodiscard]] u64  unitDramBytes(u32 unit) const { return units_[unit].dramBytes; }
     [[nodiscard]] UnitStats rolling(u32 unit) const;
-    /// Average over the window of the per-frame sum of valid unit times.
+    /// Sum over the units of their window averages (valid samples only).
     [[nodiscard]] float rollingSumMs() const;
     [[nodiscard]] float rollingSpanMs() const;
     /// Last frame index added (~0 if none).
@@ -88,7 +88,6 @@ private:
         bool  windowValid[kWindow] = {};
     };
     std::vector<Unit> units_;
-    float sumWindow_[kWindow]  = {};
     float spanWindow_[kWindow] = {};
     u32   windowCount_ = 0;        // frames in the window (<= kWindow)
     u32   windowHead_  = 0;        // next slot

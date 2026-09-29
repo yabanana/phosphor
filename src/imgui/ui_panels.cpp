@@ -223,4 +223,28 @@ void UIPanels::drawPassTimingsPanel(const PassTimings* timings, float commandBuf
     ImGui::End();
 }
 
+void UIPanels::drawTimingsOverlay(const PassTimings* timings) {
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x - 10.0f, viewport->WorkPos.y + 10.0f),
+                            ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+    ImGui::SetNextWindowBgAlpha(0.6f);
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                                   ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+                                   ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove;
+    if (ImGui::Begin("GPU timings overlay", nullptr, flags)) {
+        if (!timings) {
+            ImGui::TextUnformatted("GPU timing off");
+        } else {
+            for (u32 u = 0; u < timings->unitCount(); ++u) {
+                const PassTimings::UnitStats st = timings->rolling(u);
+                ImGui::Text("%7.3f ms  %s", static_cast<double>(st.avgMs), timings->unitName(u).c_str());
+            }
+            ImGui::Separator();
+            ImGui::Text("%7.3f ms  GPU total (avg of %u frames)", static_cast<double>(timings->rollingSumMs()),
+                        PassTimings::kWindow);
+        }
+    }
+    ImGui::End();
+}
+
 } // namespace phosphor

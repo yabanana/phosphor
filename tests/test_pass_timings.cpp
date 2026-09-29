@@ -123,7 +123,7 @@ TEST_CASE("PassTimings: rolling average, max, sum and span skip invalid samples"
     CHECK(b.samples == 1);
     CHECK(b.avgMs == doctest::Approx(2.0f));
     CHECK(b.maxMs == doctest::Approx(2.0f));
-    CHECK(t.rollingSumMs() == doctest::Approx((3.0f + 3.0f) / 2.0f));
+    CHECK(t.rollingSumMs() == doctest::Approx(2.0f + 2.0f)); // sum of the unit averages
     CHECK(t.rollingSpanMs() == doctest::Approx(4.0f)); // the unknown span is skipped
     CHECK(t.rolling(7).samples == 0);
 }

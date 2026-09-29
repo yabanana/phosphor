@@ -68,7 +68,6 @@ void PassTimings::configure(const rg::TimingPlan& plan, const std::vector<std::s
             }
         }
     }
-    std::fill(std::begin(sumWindow_), std::end(sumWindow_), 0.0f);
     std::fill(std::begin(spanWindow_), std::end(spanWindow_), 0.0f);
     windowCount_ = 0;
     windowHead_  = 0;
@@ -93,7 +92,6 @@ void PassTimings::addFrame(u64 frameIndex, const float* ms, const bool* valid, f
             anyValid = true;
         }
     }
-    sumWindow_[windowHead_]  = sum;
     spanWindow_[windowHead_] = frameSpanMs;
     windowHead_              = (windowHead_ + 1) % kWindow;
     windowCount_             = std::min(windowCount_ + 1, kWindow);
@@ -125,10 +123,12 @@ PassTimings::UnitStats PassTimings::rolling(u32 unit) const {
 }
 
 float PassTimings::rollingSumMs() const {
-    if (windowCount_ == 0) return 0.0f;
+    // Sum of the per-unit averages (what the panel's rows add up to).  The
+    // average of per-frame sums would count a frame whose unit was invalid
+    // (overlapped with the previous frame) as 0 ms.
     double total = 0.0;
-    for (u32 i = 0; i < windowCount_; ++i) total += sumWindow_[i];
-    return static_cast<float>(total / windowCount_);
+    for (u32 u = 0; u < units_.size(); ++u) total += rolling(u).avgMs;
+    return static_cast<float>(total);
 }
 
 float PassTimings::rollingSpanMs() const {

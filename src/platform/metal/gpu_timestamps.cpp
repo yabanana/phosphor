@@ -170,6 +170,13 @@ void GpuTimestamps::commitStart(MTL4::CommandBuffer* cmd, rg::Queue queue) {
     encoder->setComputePipelineState(pipelines_.compute(anchor_));
     encoder->dispatchThreads(MTL::Size::Make(1, 1, 1), MTL::Size::Make(1, 1, 1));
     encoder->writeTimestamp(MTL4::TimestampGranularityRelaxed, heap_, base(recording_) + query);
+    // Later encoders wait for the anchor: without it the GPU may schedule the
+    // 1-thread dispatch behind the frame's fragment work and the commit start
+    // lands after the unit ends (Many Lights: 25 of 200 frames invalid).
+    encoder->barrierAfterStages(MTL::StageDispatch,
+                                MTL::StageVertex | MTL::StageObject | MTL::StageMesh | MTL::StageFragment |
+                                    MTL::StageDispatch | MTL::StageBlit,
+                                MTL4::VisibilityOptionNone);
     encoder->endEncoding();
     const u32 q = queueIndex(queue);
     lastQuery_[q] = query;
