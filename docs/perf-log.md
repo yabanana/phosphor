@@ -303,3 +303,136 @@ valide. Verifiche nuove:
 - Con `--debug-async-compute` la verifica esatta della sonda costa 27,6 ms di
   CPU per frame in Release (72 ms in Debug): costo della verifica, non del
   frame; PASS su 3.120 frame.
+
+## F3 — pipeline: compilazione asincrona e archivi AOT
+
+**2026-09-29** · branch `phase/f3` · M5 Max, macOS 27.2, Xcode 27.0 ·
+Release, `--no-vsync --no-ui` salvo dove indicato. Strumento: `FrameTrace`
+(`--frame-trace`, riga `SWITCH`): per ogni cambio bench le fasi
+(waitIdle, setup, upload, GC, richieste pipeline, compilazione sul render
+thread) e i 10 frame successivi confrontati con la soglia del bench di
+arrivo, max(1,5 × p99, p99 + 0,5 ms) sui frame stazionari. Il frame del
+cambio (caricamento sincrono, lavoro di F22) è riportato a parte; il
+caricamento iniziale non è un cambio.
+
+### Nessun hitch al cambio testbench
+
+`--frames 1050 --switch-every 70` (14 cambi, tutti i bench due volte).
+
+| Configurazione | Run | Hitch | Compilazione sul render thread | Chiamate al compilatore | Note |
+|---|---|---|---|---|---|
+| Archivio (default Release) | 3 | 0 / 0 / 0 | 0 ms | 0 (4 hit) | frame post-cambio peggiore 0,60–0,81 × soglia |
+| Senza archivio, cache shader OS calda | 3 | 0 / 0 / 0 | 0 ms | 4 (~2 ms, dalla cache OS) | |
+| Senza archivio, compilazioni **a freddo** (`--pipeline-salt` unico) | 6 | 1 / 1 / 0 / 0 / 0 / 0 | 0 ms | 4 (70–91 ms, max 48–69 ms) | i 2 frame segnalati non coincidono con eventi pipeline (vedi sotto) |
+| **Controllo negativo** `--pipeline-sync`, a freddo | 2 | 1 / 1 | 29,1 ms / 0,5 ms | 4 | il cambio che richiede una variante la compila sul render thread → hitch |
+
+Fasi del cambio (archivio, media/max ms): totale 18–25 / 55–110, di cui
+waitIdle 10–17 / 50–110 (Many Lights: ~95 ms di GPU per frame in volo), setup
+6–8 / 17–34, upload 0,8–1,4 / 1,7–3,0, GC 0,03 / 0,06, richieste pipeline
+0,00 / 0,02. La compilazione non compare mai nel frame.
+
+I due "hitch" a freddo sono frame con flag 0 (nessuno swap, nessun
+fallback): 1,1 ms su Culling Viz (+3…+5 dopo il cambio) e 3,75 ms su PBR (+9,
+dopo lo swap al frame +4). Il primo passaggio a PBR, dove la variante v1
+compila a freddo in parallelo, ha CPU massima ≤ 0,16 ms in 5 run su 6
+(0,26–0,34 ms con l'archivio). Picchi isolati di 5–46 ms compaiono anche in
+stato stazionario, lontano dai cambi, **con l'archivio** e su `main` (28–46 ms
+su Many Lights/Cornell; un 137 ms su Many Lights senza cambi non riprodotto in
+16 coppie alternate `main`/F3, max ≤ 2,5 ms): rumore di sistema che a volte
+cade nella finestra di 10 frame. Nota di metodo: in zsh `$RANDOM` nel primo
+elemento di una pipeline gira in una subshell e ripete lo stesso valore; i
+sali vanno passati espliciti, altrimenti la "compilazione a freddo" viene
+servita dalla cache dell'OS.
+
+### Avvio a freddo
+
+`--bench 1 --frames 5`, 3 run per riga; cache shader dell'OS svuotata
+spostando da parte `$(getconf DARWIN_USER_CACHE_DIR)com.apple.metal` e
+ripristinandola.
+
+| Configurazione | Primo frame dopo il lancio | Pipeline di avvio pronte | Chiamate al compilatore |
+|---|---|---|---|
+| Archivio, cache OS calda | 138–151 ms | 0,0 ms | **0** (2 hit) |
+| Archivio, cache OS vuota | 147–155 ms | 5,5 ms | **0** (2 hit) |
+| Senza archivio, cache OS calda | 136–147 ms | 0,0 ms | 2 (1,7–2,3 ms) |
+| Senza archivio, cache OS vuota | 166–178 ms | 27–30 ms | 2 (79–85 ms) |
+
+Run completo con archivio, UI, `--switch-every 20` e tutti i flag di debug
+F2: 12 richieste, **12 hit, 0 compilazioni**. I primi due frame costano
+16–28 ms di CPU in ogni configurazione: è `processEvents` (SDL/Cocoa alla
+comparsa della finestra), non il rendering (`frame()` < 0,6 ms, misurato con
+strumentazione temporanea).
+
+### O7 e leak
+
+- **Allocazioni GPU nei frame misurati: 0** in tutti i report (bench singoli,
+  anche con i flag di debug; con `--switch-every` le allocazioni sono quelle
+  dei cambi bench, 99 su `main` come su F3).
+- **Heap CPU, 600 contro 6000 frame** (bench 1): senza flag +1974 / +1548
+  blocchi; `--debug-graph-transients --debug-split-encoding` F3 +1057 / −43 e
+  +1196 / +1174 (`main` +1080 / +3, +2054 / −47); `--debug-async-compute` F3
+  +491 / −384, −393 (`main` +6 / −610, −477 / −594). Oscillazioni di qualche
+  migliaio di blocchi in entrambe le build.
+- **Crescita trovata solo sui run lunghi** (`--debug-async-compute`, 12000
+  frame): F3 +35.509 blocchi, `main` **+69.240**: difetto preesistente da F0.
+  Due istantanee `malloc_history -allByCount` a 4 minuti di distanza
+  (`MallocStackLogging=lite`) mettono tutta la crescita in `processEvents` →
+  SDL `Cocoa_PumpEvents` → `-[NSApplication nextEventMatchingMask:…]`: AppKit
+  mette oggetti in autorelease e solo `frame()` aveva un pool. Con un pool
+  attorno al pompaggio degli eventi: **+6.746 / +8.629** blocchi a 12000
+  frame. Il residuo (~0,08 blocchi/frame nelle istantanee) sono continuazioni
+  `libdispatch` allocate dentro IOGPU/QuartzCore/FramePacing (commit, attese
+  sugli eventi, metriche) e le IOSurface del pool dei drawable (3
+  allocazioni da 23 MB ricreate da `CAMetalLayer`): nessuna allocazione del
+  motore. Resta da verificare che si stabilizzi su run ancora più lunghi.
+- `leaks --atExit` con tutti i flag, `--switch-every 30 --resize-every 40`:
+  **0 leak**.
+
+### `bench_all` contro `main`
+
+`main` (`9ed8448`) ricompilato in Release in un worktree temporaneo e
+misurato subito prima di F3 (`4d61dd3`), stessa sessione, `tools/bench_all.sh
+build/release 600 3`, alimentazione di rete.
+
+`main`:
+
+| # | Bench | Resolution | FPS | Frame ms (p99) | CPU ms (p99) | GPU ms (p99) | Wait ms (p99) |
+|---|---|---|---|---|---|---|---|
+| 1 | Torus Demo | 3200x1800 | 339 | 2.947 (10.998) | 0.079 (0.176) | 0.896 (3.564) | 2.867 (10.913) |
+| 2 | PBR Material Grid | 3200x1800 | 349 | 2.865 (12.316) | 0.123 (0.223) | 0.56 (2.741) | 2.734 (12.138) |
+| 3 | Stress Test (100K) | 3200x1800 | 199 | 5.017 (14.713) | 2.482 (4.128) | 2.857 (4.699) | 2.541 (12.565) |
+| 4 | Scene Viewer (glTF) | 3200x1800 | 349 | 2.864 (10.968) | 0.099 (0.173) | 0.814 (2.68) | 2.77 (10.844) |
+| 5 | Many Lights (1024) | 3200x1800 | 16 | 63.774 (142.23) | 0.112 (0.194) | 113.79 (171.081) | 63.453 (142.08) |
+| 6 | Cornell Box (GI) | 3200x1800 | 327 | 3.054 (12.005) | 0.102 (0.234) | 1.047 (3.351) | 2.952 (11.893) |
+| 7 | Culling Visualization | 3200x1800 | 307 | 3.26 (12.548) | 0.554 (1.042) | 1.842 (4.461) | 2.705 (12.081) |
+
+`phase/f3`:
+
+| # | Bench | Resolution | FPS | Frame ms (p99) | CPU ms (p99) | GPU ms (p99) | Wait ms (p99) |
+|---|---|---|---|---|---|---|---|
+| 1 | Torus Demo | 3200x1800 | 298 | 3.358 (12.291) | 0.112 (0.219) | 2.165 (5.879) | 3.237 (12.075) |
+| 2 | PBR Material Grid | 3200x1800 | 314 | 3.184 (10.788) | 0.137 (0.234) | 1.702 (4.407) | 3.035 (10.568) |
+| 3 | Stress Test (100K) | 3200x1800 | 218 | 4.583 (12.942) | 2.125 (3.492) | 3.59 (6.504) | 2.458 (10.718) |
+| 4 | Scene Viewer (glTF) | 3200x1800 | 329 | 3.042 (11.838) | 0.109 (0.238) | 1.417 (4.255) | 2.911 (11.566) |
+| 5 | Many Lights (1024) | 3200x1800 | 17 | 59.021 (133.326) | 0.126 (0.365) | 106.435 (158.967) | 58.894 (133.162) |
+| 6 | Cornell Box (GI) | 3200x1800 | 240 | 4.166 (14.962) | 0.119 (0.221) | 1.248 (3.525) | 4.047 (14.836) |
+| 7 | Culling Visualization | 3200x1800 | 226 | 4.416 (15.727) | 0.781 (1.111) | 2.915 (5.379) | 3.635 (14.776) |
+
+Il pomeriggio il sistema era più rumoroso della mattina (`main` Torus GPU
+0,90 ms contro 0,72 nella tabella F2) e le differenze GPU della tabella
+(Torus 0,90 → 2,17 ms, Culling 1,84 → 2,92 ms) non si riproducono: GPU ms
+senza vsync include la sovrapposizione dei frame in coda (`main` stesso
+oscilla 1,38–2,03 ms su Torus in run consecutivi). Verifiche alternate:
+
+- **GPU con vsync** (un frame per volta, 480 frame, 3 run per build,
+  gpu ms media): Torus `main` 1,72–1,95 / F3 1,70–1,78; PBR 0,95–1,00 /
+  0,65–0,94; Stress 4,53–4,55 / 4,09–4,43; Culling 4,09–4,34 / 4,13–4,18;
+  Scene Viewer (0,20–1,11 / 0,82–2,92) e Cornell (1,53–2,61 / 1,10–2,00)
+  rumorosi in entrambi i sensi. Nessuna regressione; le varianti
+  specializzate non costano GPU in più.
+- **CPU senza vsync** (4 coppie alternate): Culling `main` 0,677–0,719 /
+  F3 0,682–0,704; Torus 0,116–0,128 / 0,101–0,134; Cornell 0,121–0,131 /
+  0,114–0,128. Lo 0,554 → 0,781 della tabella era rumore.
+- Stress Test CPU 2,48 → 2,13 ms nella tabella; con vsync 4,49–4,59 /
+  4,55–4,64 (a clock bassi): invariato.
+- Allocazioni GPU nei frame misurati: 0 in tutti i 42 report.

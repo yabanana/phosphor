@@ -1,5 +1,6 @@
 #include "imgui/imgui_renderer.h"
 #include "platform/metal/gpu_memory.h"
+#include "platform/metal/pipeline_cache.h"
 #include "core/log.h"
 
 #include <imgui.h>
@@ -38,7 +39,8 @@ static_assert(sizeof(ImTextureID) == sizeof(MTL::ResourceID), "texture IDs carry
 
 } // namespace
 
-ImGuiRenderer::ImGuiRenderer(MetalContext& context) : context_(context) {
+ImGuiRenderer::ImGuiRenderer(MetalContext& context, PipelineCache& pipelines)
+    : context_(context), pipelines_(pipelines) {
     ImGuiIO& io = ImGui::GetIO();
     io.BackendRendererName = "phosphor_mtl4";
     io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
@@ -71,7 +73,6 @@ ImGuiRenderer::~ImGuiRenderer() {
     context_.memory().release(fontTexture_, MemoryCategory::Textures);
     arguments_->release();
     depthState_->release();
-    pipeline_->release();
 
     ImGuiIO& io = ImGui::GetIO();
     io.Fonts->SetTexID(ImTextureID{});
@@ -80,36 +81,13 @@ ImGuiRenderer::~ImGuiRenderer() {
 }
 
 void ImGuiRenderer::buildPipeline() {
-    MTL4::LibraryFunctionDescriptor* vs = MTL4::LibraryFunctionDescriptor::alloc()->init();
-    vs->setLibrary(context_.library());
-    vs->setName(str("imgui_vs"));
-    MTL4::LibraryFunctionDescriptor* fs = MTL4::LibraryFunctionDescriptor::alloc()->init();
-    fs->setLibrary(context_.library());
-    fs->setName(str("imgui_fs"));
-
-    MTL4::RenderPipelineDescriptor* desc = MTL4::RenderPipelineDescriptor::alloc()->init();
-    desc->setLabel(str("ImGui"));
-    desc->setVertexFunctionDescriptor(vs);
-    desc->setFragmentFunctionDescriptor(fs);
-    MTL4::RenderPipelineColorAttachmentDescriptor* color = desc->colorAttachments()->object(0);
-    color->setPixelFormat(context_.colorFormat());
-    color->setBlendingState(MTL4::BlendStateEnabled);
-    color->setRgbBlendOperation(MTL::BlendOperationAdd);
-    color->setAlphaBlendOperation(MTL::BlendOperationAdd);
-    color->setSourceRGBBlendFactor(MTL::BlendFactorSourceAlpha);
-    color->setDestinationRGBBlendFactor(MTL::BlendFactorOneMinusSourceAlpha);
-    color->setSourceAlphaBlendFactor(MTL::BlendFactorOne);
-    color->setDestinationAlphaBlendFactor(MTL::BlendFactorOneMinusSourceAlpha);
-
-    NS::Error* error = nullptr;
-    pipeline_ = context_.compiler()->newRenderPipelineState(desc, nullptr, &error);
-    desc->release();
-    fs->release();
-    vs->release();
-    if (!pipeline_) {
-        const char* reason = error ? error->localizedDescription()->utf8String() : "unknown error";
-        throw std::runtime_error(std::string("Failed to build ImGui pipeline: ") + reason);
-    }
+    pipe::PipelineDesc desc;
+    desc.label        = "ImGui";
+    desc.functions[0] = "imgui_vs";
+    desc.functions[1] = "imgui_fs";
+    desc.output(0, rg::Format::BGRA8Srgb, pipe::ColorOutput::Blend::AlphaOver);
+    // Created before the first frame: the engine waits for every pipeline.
+    pipeline_ = pipelines_.request(desc);
 }
 
 void ImGuiRenderer::createFontTexture() {
@@ -143,7 +121,7 @@ void ImGuiRenderer::setupRenderState(MTL4::RenderCommandEncoder* encoder, MTL::G
     arguments_->setAddress(vertices, BindVertices);
     arguments_->setAddress(uniforms, BindUniforms);
 
-    encoder->setRenderPipelineState(pipeline_);
+    encoder->setRenderPipelineState(pipelines_.render(pipeline_));
     encoder->setDepthStencilState(depthState_);
     encoder->setArgumentTable(arguments_, MTL::RenderStageVertex | MTL::RenderStageFragment);
     // Viewport (full target) and CullModeNone are Metal's defaults, and the
@@ -201,6 +179,9 @@ void ImGuiRenderer::render(MTL4::RenderCommandEncoder* encoder, const ImDrawData
     const ImVec2 clipOffset = drawData->DisplayPos;
     const ImVec2 clipScale  = drawData->FramebufferScale;
     ImTextureID boundTexture{};
+    // The validation layer rejects redundant state: skip a scissor equal to
+    // the current one (Metal's default is the whole render target).
+    MTL::ScissorRect scissor{0, 0, static_cast<NS::UInteger>(fbWidth), static_cast<NS::UInteger>(fbHeight)};
     vtxCursor = 0;
     idxCursor = 0;
     for (const ImDrawList* list : drawData->CmdLists) {
@@ -222,9 +203,13 @@ void ImGuiRenderer::render(MTL4::RenderCommandEncoder* encoder, const ImDrawData
             const float y1 = std::min((cmd.ClipRect.w - clipOffset.y) * clipScale.y, fbHeight);
             if (x1 <= x0 || y1 <= y0 || cmd.ElemCount == 0) continue;
 
-            encoder->setScissorRect(MTL::ScissorRect{static_cast<NS::UInteger>(x0), static_cast<NS::UInteger>(y0),
-                                                     static_cast<NS::UInteger>(x1 - x0),
-                                                     static_cast<NS::UInteger>(y1 - y0)});
+            const MTL::ScissorRect rect{static_cast<NS::UInteger>(x0), static_cast<NS::UInteger>(y0),
+                                        static_cast<NS::UInteger>(x1 - x0), static_cast<NS::UInteger>(y1 - y0)};
+            if (rect.x != scissor.x || rect.y != scissor.y || rect.width != scissor.width ||
+                rect.height != scissor.height) {
+                encoder->setScissorRect(rect);
+                scissor = rect;
+            }
 
             const ImTextureID texture = cmd.GetTexID();
             if (texture != boundTexture) {

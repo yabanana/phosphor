@@ -3,6 +3,7 @@
 #include "core/launch_options.h"
 #include "core/types.h"
 #include "diagnostics/bench_report.h"
+#include "diagnostics/frame_trace.h"
 #include "platform/metal/gpu_memory.h"
 #include "imgui/ui_panels.h"
 #include "rendergraph/render_graph.h"
@@ -31,6 +32,8 @@ class MetalContext;
 class MetalGraphExecutor;
 class MemoryPressureMonitor;
 class MetalTextureManager;
+class PipelineCache;
+class ShaderReloader;
 class SceneRenderer;
 class Timer;
 
@@ -68,12 +71,22 @@ private:
     void buildFrameGraph(u32 width, u32 height);
     void drawUi();
     void recordBenchmarkFrame(float dt, float cpuMs, float waitMs);
+    /// Hand a hot-reloaded shader library to the pipeline cache (frame start).
+    void pollShaderReload();
+    /// --debug-hot-reload: exact check of the captured frame; true on PASS.
+    [[nodiscard]] bool checkHotReloadCapture() const;
+    /// Benchmark frames are being measured (after the warm-up).
+    [[nodiscard]] bool measuring() const;
+    /// Path of the pipeline archive to load ("" = none), from the options.
+    [[nodiscard]] std::string pipelineArchivePath() const;
     void finishBenchmark();
 
     SDL_Window* window_    = nullptr;
     void*       metalView_ = nullptr; // SDL_MetalView
 
     std::unique_ptr<MetalContext>        context_;
+    std::unique_ptr<PipelineCache>       pipelines_; // F3: every pipeline of the engine
+    std::unique_ptr<ShaderReloader>      reloader_;  // F3.6 hot reload (Debug)
     std::unique_ptr<SceneRenderer>       renderer_;
     std::unique_ptr<MetalTextureManager> textures_;
     std::unique_ptr<ImGuiRenderer>       imguiRenderer_;
@@ -106,6 +119,18 @@ private:
     u64                      heapBytesAtStart_   = 0;
     // CPU time spent blocked in beginFrame() (slot + drawable waits).
     std::chrono::steady_clock::duration frameWait_{};
+
+    // F3 hitch measurement: per-frame records and bench-switch phases.
+    FrameTrace                  trace_;
+    u32                         frameFlags_ = 0;        // FrameFlags of the frame being produced
+    std::optional<SwitchRecord> pendingSwitch_;         // completed after the switch frame
+    u32                         requestsBeforeFrame_ = 0;
+    double                      requestMsBeforeFrame_ = 0.0;
+    double                      rtCompileMsBeforeFrame_ = 0.0;
+    std::chrono::steady_clock::time_point launch_;
+    bool                        firstFrameLogged_ = false;
+    float                       startupPipelinesMs_ = 0.0f;
+    bool                        hotReloadRequested_ = false; // --debug-hot-reload issued
 
     // Render graph of the frame (F2), rebuilt only when its key changes.
     struct GraphKey {

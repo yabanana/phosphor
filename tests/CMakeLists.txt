@@ -9,6 +9,10 @@ add_executable(phosphor_tests
     test_main.cpp
     test_aliasing.cpp
     test_barrier_plan.cpp
+    test_compile_queue.cpp
+    test_file_watcher.cpp
+    test_forward_variants.cpp
+    test_frame_trace.cpp
     test_gltf_loader.cpp
     test_async_probe_reference.cpp
     test_graph_debug_reference.cpp
@@ -18,6 +22,8 @@ add_executable(phosphor_tests
     test_linear_ring.cpp
     test_memory_budget.cpp
     test_mesh_processing.cpp
+    test_pipeline_key.cpp
+    test_pipeline_registry.cpp
     test_procedural.cpp
     test_render_graph.cpp
     test_scene_extract.cpp

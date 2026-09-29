@@ -1,5 +1,6 @@
 #include "platform/metal/async_compute_probe.h"
 #include "platform/metal/gpu_memory.h"
+#include "platform/metal/pipeline_cache.h"
 #include "platform/metal/metal_graph_executor.h"
 #include "rendergraph/pass_context.h"
 #include "core/log.h"
@@ -42,7 +43,8 @@ MTL::GPUAddress bufferAddress(rg::PassContext& ctx, rg::BufferRef ref) {
 
 } // namespace
 
-AsyncComputeProbe::AsyncComputeProbe(MetalContext& context) : context_(context) {
+AsyncComputeProbe::AsyncComputeProbe(MetalContext& context, PipelineCache& pipelines)
+    : context_(context), pipelines_(pipelines) {
     seed_        = computePipeline("async_seed");
     reduce_      = computePipeline("async_reduce");
     consume_     = computePipeline("async_consume");
@@ -64,25 +66,15 @@ AsyncComputeProbe::~AsyncComputeProbe() {
     consumeArgs_->release();
     reduceArgs_->release();
     seedArgs_->release();
-    for (auto* p : {seed_, reduce_, consume_}) p->release();
 }
 
-MTL::ComputePipelineState* AsyncComputeProbe::computePipeline(const char* function) {
-    MTL4::LibraryFunctionDescriptor* fn = MTL4::LibraryFunctionDescriptor::alloc()->init();
-    fn->setLibrary(context_.library());
-    fn->setName(str(function));
-    MTL4::ComputePipelineDescriptor* desc = MTL4::ComputePipelineDescriptor::alloc()->init();
-    desc->setLabel(str(function));
-    desc->setComputeFunctionDescriptor(fn);
-    NS::Error* error = nullptr;
-    MTL::ComputePipelineState* pso = context_.compiler()->newComputePipelineState(desc, nullptr, &error);
-    desc->release();
-    fn->release();
-    if (!pso) {
-        const char* reason = error ? error->localizedDescription()->utf8String() : "unknown error";
-        throw std::runtime_error(std::string("Failed to build ") + function + ": " + reason);
-    }
-    return pso;
+pipe::PipelineHandle AsyncComputeProbe::computePipeline(const char* function) {
+    pipe::PipelineDesc desc;
+    desc.kind         = pipe::PipelineKind::Compute;
+    desc.label        = function;
+    desc.functions[0] = function;
+    // Created before the first frame: the engine waits for every pipeline.
+    return pipelines_.request(desc);
 }
 
 void AsyncComputeProbe::addProducers(rg::RenderGraph& graph) {
@@ -94,7 +86,7 @@ void AsyncComputeProbe::addProducers(rg::RenderGraph& graph) {
         *reinterpret_cast<u32*>(constants.cpu) = static_cast<u32>(ctx.frameIndex());
         seedArgs_->setAddress(constants.gpu, kBindFrame);
         seedArgs_->setAddress(bufferAddress(ctx, refs_.s), kBindSeed);
-        enc->setComputePipelineState(seed_);
+        enc->setComputePipelineState(pipelines_.compute(seed_));
         enc->setArgumentTable(seedArgs_);
         enc->dispatchThreads(MTL::Size::Make(rg::kAsyncSeedCount, 1, 1), MTL::Size::Make(256, 1, 1));
     };
@@ -102,7 +94,7 @@ void AsyncComputeProbe::addProducers(rg::RenderGraph& graph) {
         MTL4::ComputeCommandEncoder* enc = computeEncoder(ctx);
         reduceArgs_->setAddress(bufferAddress(ctx, refs_.s), kBindSeed);
         reduceArgs_->setAddress(bufferAddress(ctx, refs_.r), kBindResult);
-        enc->setComputePipelineState(reduce_);
+        enc->setComputePipelineState(pipelines_.compute(reduce_));
         enc->setArgumentTable(reduceArgs_);
         enc->dispatchThreads(MTL::Size::Make(rg::kAsyncResultCount, 1, 1), MTL::Size::Make(64, 1, 1));
     };
@@ -113,7 +105,7 @@ void AsyncComputeProbe::addProducers(rg::RenderGraph& graph) {
         consumeArgs_->setAddress(constants.gpu, kBindFrame);
         consumeArgs_->setAddress(bufferAddress(ctx, refs_.r), kBindResult);
         consumeArgs_->setAddress(bufferAddress(ctx, refs_.readback), kBindReadback);
-        enc->setComputePipelineState(consume_);
+        enc->setComputePipelineState(pipelines_.compute(consume_));
         enc->setArgumentTable(consumeArgs_);
         enc->dispatchThreads(MTL::Size::Make(rg::kAsyncResultCount, 1, 1), MTL::Size::Make(64, 1, 1));
     };

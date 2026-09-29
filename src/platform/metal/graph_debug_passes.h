@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/types.h"
+#include "pipeline/pipeline_registry.h"
 #include "platform/metal/metal_context.h"
 #include "rendergraph/graph_debug_reference.h"
 
@@ -9,6 +10,7 @@
 namespace phosphor {
 
 class MetalGraphExecutor;
+class PipelineCache;
 
 // ---------------------------------------------------------------------------
 // GraphDebugPasses -- --debug-graph-transients (F2.2).
@@ -16,14 +18,14 @@ class MetalGraphExecutor;
 // Adds the synthetic pass chain of rg::addDebugChain to the frame graph and
 // checks its result on the CPU, exactly (every value), once the frame that
 // wrote it has completed: when its slot is reused METAL_FRAMES_IN_FLIGHT
-// frames later, and for the remaining frames at exit.  Pipelines are built
-// once, through the context's MTL4 compiler; the readback buffers (shared
+// frames later, and for the remaining frames at exit.  Pipelines come from
+// the pipeline cache (F3); the readback buffers (shared
 // storage, one per frame in flight) come from context.memory().
 // ---------------------------------------------------------------------------
 
 class GraphDebugPasses {
 public:
-    explicit GraphDebugPasses(MetalContext& context);
+    GraphDebugPasses(MetalContext& context, PipelineCache& pipelines);
     ~GraphDebugPasses();
 
     GraphDebugPasses(const GraphDebugPasses&) = delete;
@@ -50,15 +52,16 @@ public:
 private:
     void buildPipelines();
     void verifySlot(u32 slot);
-    MTL::ComputePipelineState* computePipeline(const char* function);
+    pipe::PipelineHandle computePipeline(const char* function);
 
     MetalContext& context_;
+    PipelineCache& pipelines_;
 
-    MTL::ComputePipelineState* fill_     = nullptr;
-    MTL::ComputePipelineState* reduce_   = nullptr;
-    MTL::ComputePipelineState* expand_   = nullptr;
-    MTL::ComputePipelineState* checksum_ = nullptr;
-    MTL::RenderPipelineState*  raster_   = nullptr;
+    pipe::PipelineHandle fill_     = pipe::INVALID_PIPELINE;
+    pipe::PipelineHandle reduce_   = pipe::INVALID_PIPELINE;
+    pipe::PipelineHandle expand_   = pipe::INVALID_PIPELINE;
+    pipe::PipelineHandle checksum_ = pipe::INVALID_PIPELINE;
+    pipe::PipelineHandle       raster_   = pipe::INVALID_PIPELINE;
     MTL4::ArgumentTable*       computeArgs_ = nullptr;
     MTL4::ArgumentTable*       rasterArgs_  = nullptr;
 

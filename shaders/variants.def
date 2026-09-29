@@ -1,0 +1,31 @@
+# variants.def -- declarative axes of the forward-pass variants (F3.3, O11).
+#
+# Read by tools/variant_gen, which writes (into ${CMAKE_BINARY_DIR}/generated/pipeline/):
+#   forward_variants.generated.h        C++ axis table + index<->values helpers
+#   forward_variants.generated.metal.h  MSL function constants + fallbacks
+#
+# Line format (whitespace separated, '#' starts a comment, blank lines ignored):
+#
+#   axis <NAME> <bool|uint> <constant-index> <min> <max> <generic>
+#   reserved <NAME> <uint> <constant-index>
+#
+#   NAME            [A-Z][A-Z0-9_]*, unique.  MSL: FC_<NAME> (the function
+#                   constant), k<CamelName> (value with fallback) and
+#                   k<CamelName>Specialised (constant defined?).
+#   bool|uint       MSL type of the constant.  bool axes must be 0..1.
+#   constant-index  [[function_constant(N)]], 0..30 (31 is the salt), unique.
+#   min max         inclusive value range (bool: true/false or 0/1).
+#   generic         value the shader assumes when the constant is UNDEFINED
+#                   (the generic pipeline), or the word `runtime`: the shader
+#                   must then read the value from a runtime buffer (the MSL
+#                   header only exposes k<Name>Specialised and k<Name>).
+#   reserved        a constant declared but not an axis (the pipeline salt).
+#
+# The dense variant index is a mixed-radix number: the FIRST axis is the least
+# significant digit.  Variants = product of (max - min + 1) over the axes.
+
+axis LIGHT_TYPES uint 0 1 7 7        # bitmask: 1 directional, 2 point, 4 spot
+axis EMISSIVE    bool 1 false true true
+axis DEBUG_MODE  uint 2 0 2 runtime  # FrameConstants::debugMode
+
+reserved SALT uint 31

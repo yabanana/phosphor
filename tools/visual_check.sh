@@ -32,9 +32,15 @@ for bench in 1 2 3 4 5 6 7; do
     MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 MTL_DEBUG_LAYER_WARNING_MODE=nslog \
         "$app" --bench "$bench" --warmup "$warmup" --frames 1 --no-ui --fixed-timestep --inject-input \
         ${EXTRA_ARGS:-} --capture "$capture" >"$log" 2>&1 || status=$?
-    # Anything besides our INFO lines, the BENCH summary and the two
-    # "Validation Enabled" banners is a problem.
-    messages=$(grep -Ev '^\[INFO\]|^BENCH|^GRAPH-TRANSIENTS|^ASYNC-COMPUTE|Validation Enabled' "$log" | grep -c . || true)
+    # Anything besides our INFO lines, the BENCH/PIPELINES/STARTUP/SWITCH
+    # summaries and the two "Validation Enabled" banners is a problem.
+    messages=$(grep -Ev '^\[INFO\]|^BENCH|^GRAPH-TRANSIENTS|^ASYNC-COMPUTE|^PIPELINES|^STARTUP|^SWITCH|Validation Enabled' "$log" | grep -c . || true)
+    # F3: every pipeline must have been built (the PIPELINES summary line).
+    pipeline_failures=$(sed -nE 's/^PIPELINES .*\| failures ([0-9]+) .*/\1/p' "$log")
+    if [[ "${pipeline_failures:-missing}" != "0" ]]; then
+        messages=$((messages + 1))
+        echo "bench $bench: PIPELINES line missing or failures=${pipeline_failures:-?}"
+    fi
 
     if [[ "$update" == "--update" ]]; then
         cp "$capture" "$ref_dir/bench$bench.png"

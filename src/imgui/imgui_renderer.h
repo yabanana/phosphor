@@ -1,12 +1,15 @@
 #pragma once
 
 #include "core/types.h"
+#include "pipeline/pipeline_registry.h"
 #include "platform/metal/metal_context.h"
 
 
 struct ImDrawData;
 
 namespace phosphor {
+
+class PipelineCache;
 
 // ---------------------------------------------------------------------------
 // ImGuiRenderer -- Dear ImGui renderer backend on Metal 4.
@@ -21,7 +24,7 @@ namespace phosphor {
 class ImGuiRenderer {
 public:
     /// Requires a current ImGui context; uploads the font atlas.
-    explicit ImGuiRenderer(MetalContext& context);
+    ImGuiRenderer(MetalContext& context, PipelineCache& pipelines);
     ~ImGuiRenderer();
 
     ImGuiRenderer(const ImGuiRenderer&) = delete;
@@ -36,8 +39,9 @@ private:
     void setupRenderState(MTL4::RenderCommandEncoder* encoder, MTL::GPUAddress vertices, MTL::GPUAddress uniforms);
 
     MetalContext& context_;
+    PipelineCache& pipelines_;
 
-    MTL::RenderPipelineState* pipeline_    = nullptr;
+    pipe::PipelineHandle      pipeline_    = pipe::INVALID_PIPELINE;
     MTL::DepthStencilState*   depthState_  = nullptr;
     MTL4::ArgumentTable*      arguments_   = nullptr;
     MTL::Texture*             fontTexture_ = nullptr;

@@ -14,8 +14,19 @@
 #include <metal_stdlib>
 #include "renderer/gpu_types.h"
 
+// Function constants (F3.3, generated from shaders/variants.def).  With none
+// defined -- the generic pipeline -- every k<Name> takes its generic value, so
+// the generic pipeline behaves exactly like the unspecialised shader.
+#include "pipeline/forward_variants.generated.metal.h"
+
 using namespace metal;
 using namespace phosphor;
+
+// Light types present in the scene (bitmask 1 directional, 2 point, 4 spot).
+// A type absent from the mask has its code path removed at pipeline creation.
+constant bool kHasDirectional = (kLightTypes & 1u) != 0u;
+constant bool kHasPoint       = (kLightTypes & 2u) != 0u;
+constant bool kHasSpot        = (kLightTypes & 4u) != 0u;
 
 struct TextureHandle {
     texture2d<float> tex;
@@ -161,12 +172,35 @@ fragment half4 forward_fs(VertexOut in                              [[stage_in]]
                           const device GPULight* lights             [[buffer(4)]],
                           const device TextureHandle* textures      [[buffer(5)]])
 {
+#ifdef PHOSPHOR_HOT_RELOAD_PROBE
+    // F3.6 self-test (--debug-hot-reload): the probe library, built by CMake
+    // with this define, draws opaque magenta so the engine can check exactly
+    // that every forward pipeline was swapped.  Absent from normal builds.
+    return half4(1.0h, 0.0h, 1.0h, 1.0h);
+#endif
+    // Salt (F3.1 cold-compile measurements): a defined salt embeds its value in
+    // the binary so the OS shader cache cannot serve the specialisation.  The
+    // guard depends on a runtime value (a light count of 0xFFFFFFFF cannot
+    // occur: the light buffer would be 96 GB), so the compiler cannot fold the
+    // branch away, yet it is never taken and the output cannot change.  With
+    // the salt undefined (every normal pipeline) the branch is removed.  It
+    // sits first, before any shading maths: placed later, its control flow
+    // perturbed the floating-point contraction of the generic pipeline by 1 LSB.
+    if (is_function_constant_defined(FC_SALT) && frame.lightCount == 0xFFFFFFFFu) {
+        return half4(half(float(FC_SALT)));
+    }
+
     const device GPUMaterial& m = materials[in.materialIndex];
 
     const half4 baseTex = sampleOr(textures, m.baseColorTex, in.uv, half4(1.0h));
     const half4 mrTex   = sampleOr(textures, m.metallicRoughnessTex, in.uv, half4(1.0h));
     const half4 aoTex   = sampleOr(textures, m.occlusionTex, in.uv, half4(1.0h));
-    const half4 emTex   = sampleOr(textures, m.emissiveTex, in.uv, half4(1.0h));
+    // EMISSIVE == false: no material of the scene emits, so the texture fetch
+    // is skipped.  The multiply-add below stays unconditional on purpose: a
+    // branch around it changes the compiler's contraction of the generic
+    // pipeline by 1 LSB in some pixels (measured), and adding factor(0) * 1
+    // leaves the result exact.
+    const half4 emTex   = kEmissive ? sampleOr(textures, m.emissiveTex, in.uv, half4(1.0h)) : half4(1.0h);
     const half4 nTex    = sampleOr(textures, m.normalTex, in.uv, half4(0.5h, 0.5h, 1.0h, 1.0h));
 
     const float4 baseColor = float4(m.baseColor[0], m.baseColor[1], m.baseColor[2], m.baseColor[3]) * float4(baseTex);
@@ -199,16 +233,22 @@ fragment half4 forward_fs(VertexOut in                              [[stage_in]]
     for (uint i = 0; i < frame.lightCount; ++i) {
         const device GPULight& light = lights[i];
         const float3 lightColor = float3(light.color[0], light.color[1], light.color[2]) * light.intensity;
-        float3 L;
+        float3 L = float3(0.0);
         float attenuation = 1.0;
-        if (light.type == LIGHT_DIRECTIONAL) {
+        // Generic (all three types present): light.type == LIGHT_DIRECTIONAL.
+        // Directional-only scenes skip the test; scenes without directional
+        // lights never take the branch.
+        const bool isDirectional = kHasDirectional && (!(kHasPoint || kHasSpot) || light.type == LIGHT_DIRECTIONAL);
+        if (isDirectional) {
             L = -normalize(float3(light.direction[0], light.direction[1], light.direction[2]));
-        } else {
+        } else if (kHasPoint || kHasSpot) {
             const float3 toLight = float3(light.position[0], light.position[1], light.position[2]) - in.worldPos;
             const float dist = length(toLight);
             L = toLight / max(dist, 1e-4);
             attenuation = distanceAttenuation(dist, light.range);
-            if (light.type == LIGHT_SPOT) {
+            // Generic: light.type == LIGHT_SPOT; spot-only scenes skip the test,
+            // point-only scenes drop the cone code.
+            if (kHasSpot && (!kHasPoint || light.type == LIGHT_SPOT)) {
                 const float3 spotDir = normalize(float3(light.direction[0], light.direction[1], light.direction[2]));
                 const float cosOuter = cos(light.outerCone);
                 const float cosInner = cos(light.innerCone);
@@ -229,10 +269,20 @@ fragment half4 forward_fs(VertexOut in                              [[stage_in]]
 
     color += float3(m.emissive[0], m.emissive[1], m.emissive[2]) * float3(emTex.rgb);
 
-    if (frame.debugMode == 1) {
+    // Salt (F3.1 cold-compile measurements): a defined salt embeds its value in
+    // the binary so the OS shader cache cannot serve the specialisation.  The
+    // guard depends on a runtime value (a light count of 0xFFFFFFFF cannot
+    // occur: the light buffer would be 96 GB), so the compiler cannot fold the
+    // branch away, yet it is never taken and the output cannot change (an
+    // early return leaves the colour arithmetic untouched, unlike an add).  With
+    // the salt undefined (every normal pipeline) the branch is removed.
+    // DEBUG_MODE specialised: the debug output is chosen at pipeline creation;
+    // generic: the runtime FrameConstants::debugMode, as before.
+    const uint debugMode = kDebugModeSpecialised ? kDebugMode : frame.debugMode;
+    if (debugMode == 1) {
         return half4(half3(N * 0.5 + 0.5), 1.0h);
     }
-    if (frame.debugMode == 2) {
+    if (debugMode == 2) {
         return half4(half3(baseColor.rgb), 1.0h);
     }
 

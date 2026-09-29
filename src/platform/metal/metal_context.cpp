@@ -58,14 +58,6 @@ MetalContext::MetalContext(CA::MetalLayer* layer, const std::string& libraryPath
         throw std::runtime_error("Failed to create the async compute MTL4CommandQueue");
     }
 
-    MTL4::CompilerDescriptor* compilerDesc = MTL4::CompilerDescriptor::alloc()->init();
-    compilerDesc->setLabel(str("Phosphor compiler"));
-    compiler_ = device_->newCompiler(compilerDesc, &error);
-    compilerDesc->release();
-    if (!compiler_) {
-        throw std::runtime_error("Failed to create MTL4Compiler");
-    }
-
     library_ = device_->newLibrary(str(libraryPath.c_str()), &error);
     if (!library_) {
         const char* reason = error ? error->localizedDescription()->utf8String() : "unknown error";
@@ -124,7 +116,6 @@ MetalContext::~MetalContext() {
     asyncTimeline_->release();
     residency_.reset();
     library_->release();
-    compiler_->release();
     asyncQueue_->release();
     queue_->release();
     device_->release();

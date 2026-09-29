@@ -54,6 +54,7 @@ struct BenchReport {
     TimingSummary cpuMs;
     TimingSummary gpuMs;
     TimingSummary waitMs;
+    std::string   pipelinesJson; // F3.5: PipelineStats as a JSON object (empty: omitted)
 };
 
 /// Nearest-rank statistics of `values` (empty input gives all zeros).

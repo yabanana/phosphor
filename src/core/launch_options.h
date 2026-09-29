@@ -43,6 +43,34 @@ namespace phosphor {
 //                      render passes suspended/resumed across command buffers (F2.5)
 //   --debug-async-compute   add a synthetic compute pass on the second queue,
 //                      synchronised with events (F2.6)
+//   --pipeline-archive FILE  MTL4Archive to look pipelines up in (F3.4); by
+//                      default shaders/phosphor-archive.metallib next to the
+//                      shader library, if it exists
+//   --no-pipeline-archive    ignore any archive: every pipeline is compiled
+//   --harvest-pipelines FILE  record every pipeline descriptor the app creates
+//                      (plus the whole variant table) into FILE (.mtl4-json)
+//   --pipeline-sync    compile requested pipelines on the render thread
+//                      (negative control for the async path, F3.1/F3.2)
+//   --compile-qos Q    QoS of the compile threads: utility (default) or
+//                      interactive (negative control, F3.1)
+//   --pipeline-salt N  add a salt constant to every specialized variant so
+//                      the OS shader cache cannot serve it (cold compiles)
+//   --frame-trace FILE write per-frame times and bench-switch phases (CSV)
+//   --debug-pipeline-fallback  the forward pass never requests its
+//                      specialised variants and draws with the generic
+//                      pipeline, the fallback a new variant uses while it
+//                      compiles (F3.2/F3.3 check: same pixels as before F3)
+//   --debug-flexible-pipelines  render pipelines stay on their Metal 4
+//                      flexible fallback (never the final object): measures
+//                      what the flexible path changes (F3.2)
+//   --debug-compile-storm  F3.1 spike: after 60 measured frames request every
+//                      forward variant at once (with --pipeline-salt: real
+//                      compiles) while the frames keep being measured
+//   --shader-dir DIR   Debug: watch DIR's .metal files and hot-reload the
+//                      pipelines when they change (F3.6)
+//   --debug-hot-reload FILE  Debug self-test: after a few frames swap in the
+//                      pipelines of the probe library FILE (.metallib) through
+//                      the hot-reload path, then check the drawable exactly
 //
 // Arguments not starting with "--" are ignored: macOS may add its own
 // (e.g. -NSDocumentRevisionsDebugMode when launched from Xcode).
@@ -67,6 +95,19 @@ struct LaunchOptions {
     std::string dumpGraphPath;
     bool        debugSplitEncoding = false;
     bool        debugAsyncCompute  = false;
+    // F3: pipelines.
+    std::string pipelineArchivePath;          // empty: default location
+    bool        noPipelineArchive  = false;
+    std::string harvestPipelinesPath;
+    bool        pipelineSync       = false;
+    bool        compileQosInteractive = false; // --compile-qos interactive
+    u32         pipelineSalt       = 0;        // 0 = no salt
+    std::string frameTracePath;
+    bool        debugCompileStorm  = false;
+    bool        debugPipelineFallback = false;
+    bool        debugFlexiblePipelines = false;
+    std::string shaderDir;                     // hot reload (Debug)
+    std::string debugHotReloadPath;
 
     /// True when the app runs a fixed number of frames and then exits.
     [[nodiscard]] bool benchmark() const { return frames > 0; }

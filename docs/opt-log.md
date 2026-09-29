@@ -115,3 +115,135 @@ async) → consumo (grafica), con la riduzione sovrapposta al forward.
   `std::sort` sulle chiavi e permutazione in vettori riusati: **1,89 ms**
   (−34% rispetto a `main`), ordine stabile (immagini identiche), nessuna
   allocazione a regime.
+
+---
+
+## F3.4 — `metal-tt`, `MTL4Archive` e runner CI (spike)
+
+**2026-09-29** · M5 Max, macOS 27.2, Xcode 27.0 (toolchain Metal 27.1); runner
+GitHub `macos-26` (Xcode 26.6, toolchain 17.6). Tool usa-e-getta fuori dal
+repo (harvest con `MTL4PipelineDataSetSerializer`, lookup e compilazione
+cronometrati) e un branch CI temporaneo, poi eliminato.
+
+Ipotesi: descrittori raccolti a runtime → `.mtl4-json` → `metal-tt` in CI →
+archivio caricato dal Mac con lookup quasi gratuiti; miss gestibili.
+
+| Misura | Risultato |
+|---|---|
+| Harvest (`CaptureDescriptors`) → `serializeAsPipelinesScript` | JSON di 1,8 KB: librerie, function descriptor, pipeline descriptor |
+| `metal-tt` locale | 15,8 s per tutte le arch (13 famiglie Apple + AMD/Intel vuote), ~0,1 s con `-arch applegpu_g17s` (M5 Max, da `xcrun metal-arch`) |
+| Lookup nell'archivio | HIT 0,05–0,4 ms; compilazione a freddo della stessa pipeline 40–53 ms (seconda compilazione ~1 ms: cache shader dell'OS) |
+| `metal-tt` sul runner `macos-26` | funziona (31 s, archivio 1,1 MB) |
+| Archivio del runner aperto su macOS 27.2 | **rifiutato all'apertura**: "deployment target for architecture applegpu_g17s … is not compatible with current OS" |
+| Archivio con la sola arch `applegpu_g16s` | rifiutato all'apertura: "unable to find applegpu_g17s slice" |
+| Descrittore non raccolto (RGBA16F, `debug_reduce`) | miss per singola pipeline con errore esplicito ("Failed to find fragment function … with key") |
+| Archivio vecchio + metallib modificato (costante del tonemap) | miss solo delle pipeline con funzioni cambiate (`forward_fs`), hit delle altre (`debug_fill`) |
+| Etichette-hash del JSON sostituite con `L0…Ln` | `metal-tt` e lookup invariati: le etichette sono solo riferimenti interni, il JSON non dipende dal corpo degli shader |
+| Alternativa senza `metal-tt`: serializer `CaptureBinaries` + `serializeAsArchiveAndFlushToURL` | funziona (118 KB, HIT); con `CaptureDescriptors \| CaptureBinaries` la serializzazione fallisce senza errore |
+| `maximumConcurrentCompilationTaskCount` | 18 su M5 Max, 2 sul runner (GPU paravirtuale senza Metal 4) |
+| Lookup con `MTL_SHADER_VALIDATION=1` | **ogni lookup fallisce**: "MTL4Archive instances are not compatible with Metal shader validation" |
+
+Decisioni:
+
+- L'archivio usato dal Mac è costruito dal build locale (`phosphor_archive`,
+  `metal-tt` dello stesso OS, arch nativa); il CI costruisce l'archivio per
+  tutte le arch come verifica di coerenza JSON/metallib e lo pubblica come
+  artefatto per macOS 26. Sul Mac quell'archivio è il caso reale "OS
+  diverso" di F3.5 (`tools/archive_check.sh`, scenario a).
+- Il `.mtl4-json` è committato (`shaders/pipelines.mtl4-json`, path della
+  libreria → segnaposto): resta valido finché non cambiano nomi, costanti o
+  stato delle pipeline.
+- Con la shader validation attiva l'archivio è dichiarato "non disponibile"
+  (motivo nel log) invece di produrre un miss per pipeline; le verifiche
+  dell'archivio girano con la sola API validation.
+
+---
+
+## F3.2/F3.3 — Pipeline flessibili e varianti specializzate: esattezza e validazione
+
+**2026-09-29** · M5 Max, macOS 27.2, build Debug, `tools/visual_check.sh`
+(7 bench, 3200×1800, API + shader validation).
+
+Ipotesi: le varianti con function constant (O11) e le pipeline flessibili di
+Metal 4 (stato di uscita `Unspecialized`, poi
+`newRenderPipelineStateBySpecialization`) rendono gli stessi pixel della
+pipeline generica, che a sua volta è identica al forward di F2.
+
+| Pipeline che disegna il forward | Pixel diversi dai riferimenti F2 (su 5,76 M) | Messaggi |
+|---|---|---|
+| Generica a stato completo (`--debug-pipeline-fallback`) | **0** su tutti i bench | 0 |
+| Variante specializzata (normale) | 9 / 3 / 14 / 13 / 30 / 10 / 9, delta max 1 | 0 |
+| Flessibile specializzata (`--debug-flexible-pipelines`) | 15.848 – 301.286, delta max 1 | ~80 per bench |
+| Variante con sale (`--pipeline-salt`) | 15.847 – 301.297, delta max 1 | 0 |
+
+- Le varianti tolgono solo rami morti per la scena, ma il compilatore genera
+  codice diverso (contrazioni FMA, scheduling): ≤1 LSB in qualche decina di
+  pixel. Nel generico, un ramo o una select attorno all'emissivo cambiava
+  1 LSB: l'agente F3.3 ha lasciato l'`add` incondizionato (fattore 0 esatto) e
+  il ramo del sale in testa alla funzione. Riferimenti rigenerati con le
+  varianti (`build/reference`); quelli F2 restano il riferimento del percorso
+  generico.
+- **Validazione e pipeline flessibili**: ogni specializzazione produce
+  "blend state set to disabled, but blending substate set to Unspecialized.
+  Blending substate is ignored." per ogni attachment con blend disabilitato,
+  qualunque configurazione della base (6 configurazioni provate in un
+  programma minimo: sottostati espliciti, tutti gli attachment
+  `Unspecialized`, blend concreto nella base…). La compilazione a stato
+  completo non avvisa mai.
+- Una funzione con function constant non si può usare non specializzata
+  ("Use newFunctionWithName:constantValues:"): il generico passa da un
+  `SpecializedFunctionDescriptor` con valori vuoti.
+
+Decisione: il fallback di una variante nuova è la pipeline **generica a stato
+completo** (già pronta, bit-identica a F2, 0 compilazioni); la
+specializzazione flessibile resta disponibile solo quando non esiste una
+generica pronta per quello stato di uscita (utile da F8, con più formati di
+uscita) e si ri-misura con `--debug-flexible-pipelines`. Il sale serve solo
+alle misure di compilazione a freddo.
+
+---
+
+## F3.4 — `metal-tt` e debug info degli shader
+
+**2026-09-29** · toolchain Metal 27.1. Con le function constant di F3.3,
+`metal-tt` fallisce ("applegpu-nt: error: cannot find private metadata at
+offset …") se il metallib è compilato con `-gline-tables-only` **oppure**
+`-frecord-sources` (provati separatamente); senza entrambi l'archivio si
+costruisce (1,7 MB per `applegpu_g17s`). Prima delle function constant lo
+stesso metallib Debug funzionava. Decisione: `PHOSPHOR_SHADER_DEBUG_INFO`
+(ON in Debug, per il debugging in Xcode) salta l'archivio con un messaggio;
+Release e CI (shader ricompilati senza debug info) lo costruiscono. Con la
+shader validation attiva l'archivio è comunque inutilizzabile (voce F3.4
+precedente).
+
+---
+
+## F3.1 — QoS dei thread di compilazione: tempesta di 42 compilazioni
+
+**2026-09-29** · M5 Max, Release, Stress Test (100K istanze, CPU ~2–3 ms
+per frame), `--no-vsync --no-ui --debug-compile-storm`: al frame misurato 60
+il forward richiede tutte le 42 varianti con un sale nuovo (compilazioni a
+freddo, verificato: 540–610 ms di compilazione in totale, max 24–29 ms per
+pipeline). 18 thread di compilazione (`maximumConcurrentCompilationTaskCount`);
+3 run per QoS, alternati, sali espliciti.
+
+Ipotesi (WWDC25-254): con i thread di compilazione a QoS più bassa del
+render thread l'hitch sparisce; a QoS uguale il render thread soffre.
+
+| QoS dei thread | CPU render thread, frame 60–69 (media / max) | Frame ms, frame 60–69 (media / max) | Swap completati entro il frame |
+|---|---|---|---|
+| utility (default) | 2,01 / 2,15 · 2,20 / 2,39 · 1,92 / 2,21 | 9,9 – 12,5 / 16,2 – 22,5 | 64–66 |
+| user-interactive (controllo) | 2,34 / 2,77 · 2,34 / 2,53 · 2,28 / 2,60 | 11,7 – 12,5 / 17,2 – 17,7 | 64 |
+
+- La QoS è quella attesa: il worker 0 legge `qos_class_self()` = 0x11
+  (utility) e lo stampa nel log.
+- Nessun hitch in nessuna delle due configurazioni: le 42 compilazioni
+  girano nel servizio di compilazione su 18 thread e finiscono in ~5 frame.
+  Con utility la CPU del render thread nei frame della tempesta è più bassa
+  in 3 run su 3 (media 2,04 contro 2,32 ms, −12%), differenza piccola ma
+  coerente.
+- Su un M5 Max (18 core) la QoS pesa poco; la verifica sul pavimento T0 (O12,
+  meno core) resta da fare quando ci sarà l'hardware.
+
+Decisione: utility come default (come da playbook), `--compile-qos
+interactive` resta come controllo negativo.

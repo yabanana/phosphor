@@ -97,7 +97,8 @@ std::string reportToJson(const BenchReport& r) {
            "  \"frame_ms\": " + summaryToJson(r.frameMs) + ",\n" +
            "  \"cpu_ms\": " + summaryToJson(r.cpuMs) + ",\n" +
            "  \"gpu_ms\": " + summaryToJson(r.gpuMs) + ",\n" +
-           "  \"wait_ms\": " + summaryToJson(r.waitMs) + "\n}\n";
+           "  \"wait_ms\": " + summaryToJson(r.waitMs) +
+           (r.pipelinesJson.empty() ? std::string() : ",\n  \"pipelines\": " + r.pipelinesJson) + "\n}\n";
 }
 
 } // namespace phosphor

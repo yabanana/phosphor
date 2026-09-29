@@ -1,13 +1,17 @@
 #pragma once
 
 #include "core/types.h"
+#include "pipeline/pipeline_registry.h"
 #include "platform/metal/metal_context.h"
 #include "renderer/gpu_types.h"
+
+#include <vector>
 
 
 namespace phosphor {
 
 class GpuScene;
+class PipelineCache;
 struct FrameScene;
 
 // ---------------------------------------------------------------------------
@@ -23,11 +27,18 @@ struct FrameScene;
 // the frame's data, encode() records the draws into the graph's encoder.
 // Back faces are culled; mirrored instances and double-sided materials come
 // in their own batches (DrawBatch::cull).
+//
+// Since F3.3 the pipeline is a specialised variant chosen per frame from the
+// scene (light types, emissive materials, debug mode); a variant not compiled
+// yet is drawn with the generic pipeline (same pixels, runtime branches)
+// until the pipeline cache swaps it in at a frame start.
 // ---------------------------------------------------------------------------
 
 class SceneRenderer {
 public:
-    explicit SceneRenderer(MetalContext& context);
+    /// `salt` != 0: salted variants (--pipeline-salt, cold compiles).
+    /// `genericOnly`: never request variants (--debug-pipeline-fallback).
+    SceneRenderer(MetalContext& context, PipelineCache& pipelines, u32 salt = 0, bool genericOnly = false);
     ~SceneRenderer();
 
     SceneRenderer(const SceneRenderer&) = delete;
@@ -47,16 +58,26 @@ public:
     void encode(MTL4::RenderCommandEncoder* encoder, u32 chunk = 0, u32 chunks = 1) const;
 
     [[nodiscard]] u32 lastTriangleCount() const { return lastTriangles_; }
+    /// True if the last prepared frame draws with the generic pipeline
+    /// because its variant is not ready yet.
+    [[nodiscard]] bool usingFallback() const { return usingFallback_; }
+    /// Request every forward variant (harvest, prewarm).
+    void requestAllVariants();
     [[nodiscard]] static MTL::PixelFormat depthFormat() { return MTL::PixelFormatDepth32Float; }
 
 private:
-    void buildPipeline();
     MTL::Buffer* createPrivateBuffer(const void* data, size_t size, const char* label);
     void releaseGeometry();
 
     MetalContext& context_;
 
-    MTL::RenderPipelineState* pipeline_   = nullptr;
+    PipelineCache&            pipelines_;
+    u32                       salt_ = 0;
+    bool                      genericOnly_ = false;
+    pipe::PipelineHandle      generic_ = pipe::INVALID_PIPELINE;
+    std::vector<pipe::PipelineHandle> variants_; // by variant index
+    MTL::RenderPipelineState* pipeline_ = nullptr; // chosen by prepareFrame
+    bool                      usingFallback_ = false;
     MTL::DepthStencilState*   depthState_ = nullptr;
     MTL4::ArgumentTable*      arguments_  = nullptr;
 

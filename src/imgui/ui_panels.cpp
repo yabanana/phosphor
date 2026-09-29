@@ -145,4 +145,23 @@ void UIPanels::drawRenderPanel(RenderSettings& settings) {
     ImGui::End();
 }
 
+void UIPanels::drawPipelinePanel(const PipelinePanelInfo& info) {
+    if (!info.stats) return;
+    const pipe::PipelineStats& s = *info.stats;
+    ImGui::SetNextWindowPos(ImVec2(10, 520), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Pipelines", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Archive: %s", info.archive);
+        ImGui::Text("Entries %u, compile threads %u", info.entries, info.workers);
+        ImGui::Text("Archive hits %u, misses %u, unavailable %u (miss rate %.1f%%)", s.archiveHits, s.archiveMisses,
+                    s.archiveUnavailable, static_cast<double>(s.archiveMissRate()) * 100.0);
+        ImGui::Text("Compiler calls %u: %.1f ms total, max %.1f ms", s.compilerCalls, s.compileMs,
+                    static_cast<double>(s.compileMsMax));
+        ImGui::Text("Render-thread compiles %u (%.1f ms)", s.renderThreadCompiles, s.renderThreadCompileMs);
+        ImGui::Text("Fallbacks %u, fallback frames %llu%s", s.fallbacksServed,
+                    static_cast<unsigned long long>(s.fallbackDraws), info.fallback ? "  [drawing fallback]" : "");
+        ImGui::Text("Reloads %u (failed %u), failures %u", s.reloads, s.reloadFailures, s.failures);
+    }
+    ImGui::End();
+}
+
 } // namespace phosphor

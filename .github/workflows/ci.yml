@@ -71,3 +71,27 @@ jobs:
 
       - name: Unit tests
         run: ctest --test-dir build --output-on-failure
+
+      - name: Pipeline archive for all GPU architectures (F3.4)
+        # The default (native) archive only holds the slice of the machine that
+        # builds it, and the runner has no usable Metal 4 GPU.  Rebuild it for
+        # every architecture and publish it together with the exact metallib
+        # and the substituted pipelines script.  The archive targets the
+        # runner's macOS (26.x): newer OS versions reject it ("not compatible
+        # with current OS"), which is scenario (a) of tools/archive_check.sh
+        # (CI_ARCHIVE=<downloaded phosphor-archive.metallib>).
+        run: |
+          # Shader debug info blocks metal-tt on specialised functions: the
+          # Debug build rebuilds its shaders without it for the archive.
+          cmake -S . -B build -DPHOSPHOR_ARCHIVE_ARCHS=all -DPHOSPHOR_SHADER_DEBUG_INFO=OFF
+          cmake --build build --target phosphor_archive
+
+      - name: Upload pipeline archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-archive-macos26
+          if-no-files-found: error
+          path: |
+            build/shaders/phosphor-archive.metallib
+            build/shaders/pipelines.mtl4-json
+            build/shaders/phosphor.metallib
