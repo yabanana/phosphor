@@ -246,4 +246,44 @@ std::string stagesName(Stages stages) {
     return s.empty() ? "none" : s;
 }
 
+void splitEncodersAtQueueSyncs(CompiledGraph& compiled) {
+    if (compiled.queueSyncs.empty()) return;
+    const u32 count = static_cast<u32>(compiled.order.size());
+    std::vector<bool> waitBefore(count, false), signalAfter(count, false);
+    for (const QueueSync& q : compiled.queueSyncs) {
+        if (q.waitBeforePosition < count) waitBefore[q.waitBeforePosition] = true;
+        if (q.signalAfterPosition < count) signalAfter[q.signalAfterPosition] = true;
+    }
+    std::vector<EncoderPlan> split;
+    for (const EncoderPlan& e : compiled.encoders) {
+        if (e.type == PassType::Raster) {
+            split.push_back(e);
+            continue;
+        }
+        EncoderPlan run = e;
+        for (u32 pos = e.firstPosition; pos <= e.lastPosition; ++pos) {
+            const bool cutBefore = pos > run.firstPosition && waitBefore[pos];
+            if (cutBefore) {
+                run.lastPosition = pos - 1;
+                split.push_back(run);
+                run.firstPosition = pos;
+            }
+            if (signalAfter[pos] && pos < e.lastPosition) {
+                run.lastPosition = pos;
+                split.push_back(run);
+                run.firstPosition = pos + 1;
+            }
+        }
+        run.lastPosition = e.lastPosition;
+        if (run.firstPosition <= run.lastPosition) split.push_back(run);
+    }
+    compiled.encoders = std::move(split);
+    compiled.encoderOfPosition.assign(count, kNone);
+    for (u32 i = 0; i < compiled.encoders.size(); ++i) {
+        for (u32 pos = compiled.encoders[i].firstPosition; pos <= compiled.encoders[i].lastPosition; ++pos) {
+            compiled.encoderOfPosition[pos] = i;
+        }
+    }
+}
+
 } // namespace phosphor::rg

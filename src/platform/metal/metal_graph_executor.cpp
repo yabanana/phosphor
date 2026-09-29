@@ -260,12 +260,25 @@ bool MetalGraphExecutor::compile(const rg::RenderGraph& graph, const rg::Compile
 
     barrierIndex_.assign(compiled_.order.size(), kNone);
     for (u32 i = 0; i < compiled_.barriers.size(); ++i) barrierIndex_[compiled_.barriers[i].position] = i;
-    for (const rg::EncoderPlan& e : compiled_.encoders) {
-        if (e.queue != rg::Queue::Graphics) {
-            LOG_ERROR("Render graph: the async compute queue is not supported by this executor yet");
-            graph_ = nullptr;
-            return false;
-        }
+    // F2.6: submission boundaries at the queue sync points.
+    waitBefore_.assign(compiled_.order.size(), 0);
+    signalAfter_.assign(compiled_.order.size(), 0);
+    segmented_ = false;
+    for (const rg::EncoderPlan& e : compiled_.encoders) segmented_ |= e.queue == rg::Queue::AsyncCompute;
+    for (const rg::QueueSync& q : compiled_.queueSyncs) {
+        waitBefore_[q.waitBeforePosition]   = std::max(waitBefore_[q.waitBeforePosition], q.value);
+        signalAfter_[q.signalAfterPosition] = std::max(signalAfter_[q.signalAfterPosition], q.value);
+    }
+    if (compiled_.queueSyncs.size() + 1 >= MetalContext::TIMELINE_STRIDE ||
+        2 * compiled_.queueSyncs.size() + 2 > MetalContext::MAX_FRAME_SUBMISSIONS) {
+        LOG_ERROR("Render graph: too many queue syncs (%zu)", compiled_.queueSyncs.size());
+        graph_ = nullptr;
+        return false;
+    }
+    if (segmented_) ensureParallelResources(2); // extra command buffers for the submissions
+    if (segmented_) {
+        LOG_INFO("Render graph: async compute on the second queue, %zu cross-queue syncs",
+                 compiled_.queueSyncs.size());
     }
 
     ++compileCount_;
@@ -417,13 +430,36 @@ void MetalGraphExecutor::setImportedAttachments(u32 group, bool bind) {
     }
 }
 
-MTL4::CommandBuffer* MetalGraphExecutor::beginExtraCommandBuffer(MetalContext::Frame& frame, u32 index) {
+MTL4::CommandBuffer* MetalGraphExecutor::beginExtraCommandBuffer(MetalContext::Frame& frame, u32 index, bool async) {
     ExtraCommandBuffer& e = extra_[index];
     e.allocators[frame.slot]->reset();
     MTL4::CommandBuffer* cmd = e.buffers[frame.slot];
     cmd->beginCommandBuffer(e.allocators[frame.slot]);
-    frame.buffers[frame.bufferCount++] = cmd;
+    if (segmented_) {
+        addBuffer(frame, async, cmd);
+    } else {
+        frame.buffers[frame.bufferCount++] = cmd;
+    }
     return cmd;
+}
+
+u32 MetalGraphExecutor::openSubmission(MetalContext::Frame& frame, MetalContext::SubmitQueue queue, u64 waitValue,
+                                       u64 waitFrame) {
+    const u32 index = frame.submissionCount++;
+    frame.submissions[index] = MetalContext::Submission{queue, frame.bufferCount, 0, waitValue, 0, waitFrame};
+    return index;
+}
+
+void MetalGraphExecutor::addBuffer(MetalContext::Frame& frame, bool async, MTL4::CommandBuffer* cmd) {
+    u32& sub = async ? asyncSub_ : graphicsSub_;
+    // A submission is a contiguous range of Frame::buffers: if the other
+    // queue appended in between, continue in a new (unsynchronised) commit.
+    const MetalContext::Submission& s = frame.submissions[sub];
+    if (s.bufferCount > 0 && s.firstBuffer + s.bufferCount != frame.bufferCount) {
+        sub = openSubmission(frame, s.queue, 0, 0);
+    }
+    frame.buffers[frame.bufferCount++] = cmd;
+    ++frame.submissions[sub].bufferCount;
 }
 
 void MetalGraphExecutor::encodeChunkJob(void* user, u32 chunk) {
@@ -479,29 +515,62 @@ MTL4::CommandBuffer* MetalGraphExecutor::encodeSplitGroup(MetalContext::Frame& f
 
 void MetalGraphExecutor::execute(MetalContext::Frame& frame) {
     if (!valid()) return;
-    MTL4::CommandBuffer* cmd = frame.commandBuffer;
+    using SubmitQueue = MetalContext::SubmitQueue;
+    const u64 base = MetalContext::timelineBase(frame.index);
+
+    MTL4::CommandBuffer* cmd      = frame.commandBuffer; // graphics
+    MTL4::CommandBuffer* asyncCmd = nullptr;
+    bool graphicsClosed = false, asyncClosed = true, firstAsync = true;
+    if (segmented_) {
+        graphicsSub_ = openSubmission(frame, SubmitQueue::Graphics, 0, 0);
+        frame.submissions[graphicsSub_].bufferCount = 1; // frame.commandBuffer
+        asyncSub_ = ~0u;
+    }
+
     for (size_t e = 0; e < compiled_.encoders.size(); ++e) {
         const rg::EncoderPlan& plan = compiled_.encoders[e];
+        const bool async = plan.queue == rg::Queue::AsyncCompute;
+        if (segmented_) {
+            // Waits and signals sit between commits (encoder boundaries).
+            const u32 wait = waitBefore_[plan.firstPosition];
+            if (async && (asyncClosed || wait)) {
+                if (asyncCmd) asyncCmd->endCommandBuffer();
+                // Frame N's async work may reuse what graphics frame N-1 used:
+                // its first commit waits for frame N-1 (frame event value N).
+                const u64 waitFrame = firstAsync ? frame.index : 0;
+                firstAsync = false;
+                asyncSub_ = openSubmission(frame, SubmitQueue::Async, wait ? base + wait : 0, waitFrame);
+                asyncCmd = beginExtraCommandBuffer(frame, frame.bufferCount - 1, true);
+                asyncClosed = false;
+            } else if (!async && (graphicsClosed || wait)) {
+                if (cmd != frame.commandBuffer) cmd->endCommandBuffer();
+                graphicsSub_ = openSubmission(frame, SubmitQueue::Graphics, wait ? base + wait : 0, 0);
+                cmd = beginExtraCommandBuffer(frame, frame.bufferCount - 1, false);
+                graphicsClosed = false;
+            }
+        }
+        MTL4::CommandBuffer* target = async ? asyncCmd : cmd;
+
         if (plan.type == rg::PassType::Raster) {
             const u32 groupIndex = plan.renderGroup;
             if (splitPosition_[groupIndex] != kNone) {
                 cmd = encodeSplitGroup(frame, cmd, groupIndex, splitPosition_[groupIndex]);
-                continue;
+            } else {
+                const rg::RenderGroup& group = compiled_.renderGroups[groupIndex];
+                // Imported attachments change every frame (drawable); the
+                // encoder copies the descriptor, which then drops them again
+                // so that it does not keep the drawable alive.
+                setImportedAttachments(groupIndex, true);
+                MTL4::RenderCommandEncoder* enc = target->renderCommandEncoder(passDescriptors_[groupIndex]);
+                setImportedAttachments(groupIndex, false);
+                enc->setLabel(groupLabels_[groupIndex]);
+                // Barriers of every member were hoisted to the group start.
+                encodeBarriers(enc, group.firstPosition);
+                for (u32 pos = plan.firstPosition; pos <= plan.lastPosition; ++pos) runPass(enc, pos, frame);
+                enc->endEncoding();
             }
-            const rg::RenderGroup& group = compiled_.renderGroups[groupIndex];
-            // Imported attachments change every frame (drawable); the encoder
-            // copies the descriptor, which then drops them again so that it
-            // does not keep the drawable alive.
-            setImportedAttachments(groupIndex, true);
-            MTL4::RenderCommandEncoder* enc = cmd->renderCommandEncoder(passDescriptors_[groupIndex]);
-            setImportedAttachments(groupIndex, false);
-            enc->setLabel(groupLabels_[groupIndex]);
-            // Barriers of every member were hoisted to the group start.
-            encodeBarriers(enc, group.firstPosition);
-            for (u32 pos = plan.firstPosition; pos <= plan.lastPosition; ++pos) runPass(enc, pos, frame);
-            enc->endEncoding();
         } else {
-            MTL4::ComputeCommandEncoder* enc = cmd->computeCommandEncoder();
+            MTL4::ComputeCommandEncoder* enc = target->computeCommandEncoder();
             enc->setLabel(encoderLabels_[e]);
             for (u32 pos = plan.firstPosition; pos <= plan.lastPosition; ++pos) {
                 encodeBarriers(enc, pos);
@@ -511,9 +580,24 @@ void MetalGraphExecutor::execute(MetalContext::Frame& frame) {
             }
             enc->endEncoding();
         }
+
+        if (segmented_) {
+            if (const u32 signal = signalAfter_[plan.lastPosition]) {
+                const u32 sub = async ? asyncSub_ : graphicsSub_;
+                frame.submissions[sub].signalValue = base + signal;
+                (async ? asyncClosed : graphicsClosed) = true;
+            }
+        }
     }
     // The frame's own command buffer is ended by MetalContext::submitFrame.
     if (cmd != frame.commandBuffer) cmd->endCommandBuffer();
+    if (asyncCmd) {
+        asyncCmd->endCommandBuffer();
+        // The last async commit tells when the frame's async work is done.
+        MetalContext::Submission& last = frame.submissions[asyncSub_];
+        if (last.signalValue == 0) last.signalValue = base + MetalContext::TIMELINE_STRIDE - 1;
+        frame.asyncDoneValue = last.signalValue;
+    }
 }
 
 } // namespace phosphor

@@ -83,7 +83,8 @@ MetalContext::MetalContext(CA::MetalLayer* layer, const std::string& libraryPath
     uploadCommandBuffer_ = device_->newCommandBuffer();
 
     frameEvent_  = device_->newSharedEvent();
-    graphEvent_  = device_->newSharedEvent();
+    graphicsTimeline_ = device_->newSharedEvent();
+    asyncTimeline_    = device_->newSharedEvent();
     uploadEvent_ = device_->newSharedEvent();
 
     layer_->setDevice(device_);
@@ -119,7 +120,8 @@ MetalContext::~MetalContext() {
     uploadAllocator_->release();
     uploadEvent_->release();
     frameEvent_->release();
-    graphEvent_->release();
+    graphicsTimeline_->release();
+    asyncTimeline_->release();
     residency_.reset();
     library_->release();
     compiler_->release();
@@ -196,6 +198,7 @@ bool MetalContext::beginFrame(Frame& frame) {
 
     if (index >= METAL_FRAMES_IN_FLIGHT) {
         waitForValue(frameDoneValue(index - METAL_FRAMES_IN_FLIGHT));
+        waitForAsync(asyncDone_[slot]);
         // Frames up to index - N have finished: recycle what they could use.
         releaseCompleted(index - METAL_FRAMES_IN_FLIGHT);
     }
@@ -219,6 +222,7 @@ bool MetalContext::beginFrame(Frame& frame) {
     frame.buffers[0]      = cmd;
     frame.bufferCount     = 1;
     frame.submissionCount = 0;
+    frame.asyncDoneValue  = 0;
     return true;
 }
 
@@ -247,8 +251,9 @@ void MetalContext::submitFrame(Frame& frame) {
             queue_->wait(frame.drawable);
             drawableWaited = true;
         }
+        const bool async = sub.queue == SubmitQueue::Async;
         if (sub.waitFrame) q->wait(frameEvent_, sub.waitFrame);
-        if (sub.waitValue) q->wait(graphEvent_, sub.waitValue);
+        if (sub.waitValue) q->wait(async ? graphicsTimeline_ : asyncTimeline_, sub.waitValue);
         const MTL4::CommandBuffer* const* buffers = frame.buffers.data() + sub.firstBuffer;
         if (i == lastGraphics) {
             // A fresh options object per commit: a reused MTL4CommitOptions
@@ -265,8 +270,10 @@ void MetalContext::submitFrame(Frame& frame) {
         } else {
             q->commit(buffers, sub.bufferCount);
         }
-        if (sub.signalValue) q->signalEvent(graphEvent_, sub.signalValue);
+        if (sub.signalValue) q->signalEvent(async ? asyncTimeline_ : graphicsTimeline_, sub.signalValue);
     }
+    asyncDone_[frame.slot] = frame.asyncDoneValue;
+    if (frame.asyncDoneValue) lastAsyncDone_ = frame.asyncDoneValue;
     queue_->signalEvent(frameEvent_, frameDoneValue(frame.index));
     ++frameIndex_;
 }
@@ -362,6 +369,16 @@ void MetalContext::collectGarbage() {
 void MetalContext::waitIdle() {
     if (frameIndex_ > 0) {
         waitForValue(frameDoneValue(frameIndex_ - 1));
+    }
+    waitForAsync(lastAsyncDone_);
+}
+
+void MetalContext::waitForAsync(u64 value) {
+    if (value == 0 || asyncTimeline_->signaledValue() >= value) return;
+    if (!asyncTimeline_->waitUntilSignaledValue(value, kWaitTimeoutMs)) {
+        LOG_ERROR("GPU timeout waiting for async compute value %llu (current %llu)",
+                  static_cast<unsigned long long>(value),
+                  static_cast<unsigned long long>(asyncTimeline_->signaledValue()));
     }
 }
 

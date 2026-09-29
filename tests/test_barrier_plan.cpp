@@ -552,3 +552,60 @@ TEST_CASE("barriers: encoder-scope barrier with raster stages inside a compute e
     REQUIRE_FALSE(c.errors.empty());
     CHECK(c.errors.back().find("compute encoder") != std::string::npos);
 }
+
+TEST_CASE("barriers: compute encoders are split at queue sync points (full compile)") {
+    // Graphics: seed (0) and an independent pass (1) share a compute run;
+    // async reduce (2) needs seed; graphics consume (3) needs reduce.
+    RenderGraph g;
+    BufferRef seed, reduced;
+    g.addPass("seed", PassType::Compute, [&](PassBuilder& b) {
+        seed = b.write(b.createBuffer("S", {4096}), Usage::ShaderWrite, StageDispatch);
+    }, {});
+    g.addPass("independent", PassType::Compute, [&](PassBuilder& b) {
+        b.write(b.createBuffer("X", {4096}), Usage::ShaderWrite, StageDispatch);
+        b.setSideEffect();
+    }, {});
+    g.addPass("reduce", PassType::Compute, Queue::AsyncCompute, [&](PassBuilder& b) {
+        b.read(seed, Usage::ShaderRead, StageDispatch);
+        reduced = b.write(b.createBuffer("R", {256}), Usage::ShaderWrite, StageDispatch);
+    }, {});
+    g.addPass("consume", PassType::Compute, [&](PassBuilder& b) {
+        b.read(reduced, Usage::ShaderRead, StageDispatch);
+        b.setSideEffect();
+    }, {});
+    const CompiledGraph c = compile(g);
+    REQUIRE(c.ok);
+    CHECK(c.order == std::vector<u32>{0, 1, 2, 3});
+    REQUIRE(c.queueSyncs.size() == 2);
+    CHECK(c.queueSyncs[0].signalAfterPosition == 0);
+    CHECK(c.queueSyncs[0].waitBeforePosition == 2);
+    CHECK(c.queueSyncs[1].signalAfterPosition == 2);
+    CHECK(c.queueSyncs[1].waitBeforePosition == 3);
+    // seed signals after itself: the graphics run [seed, independent] is cut.
+    REQUIRE(c.encoders.size() == 4);
+    for (u32 i = 0; i < 4; ++i) {
+        CHECK(c.encoders[i].firstPosition == i);
+        CHECK(c.encoders[i].lastPosition == i);
+        CHECK(c.encoderOfPosition[i] == i);
+    }
+    CHECK(c.encoders[2].queue == Queue::AsyncCompute);
+    // Cross-queue dependencies are events, not barriers.
+    CHECK(c.barriers.empty());
+}
+
+TEST_CASE("barriers: splitEncodersAtQueueSyncs cuts before waits and after signals only") {
+    CompiledGraph c;
+    c.order = {0, 1, 2, 3, 4};
+    c.encoders = {EncoderPlan{PassType::Compute, Queue::Graphics, 0, 4, ~0u}};
+    c.encoderOfPosition.assign(5, 0);
+    c.queueSyncs = {QueueSync{1, 3, 1}}; // signal after 1, wait before 3 (other queue elsewhere)
+    splitEncodersAtQueueSyncs(c);
+    REQUIRE(c.encoders.size() == 3);
+    CHECK(c.encoders[0].firstPosition == 0);
+    CHECK(c.encoders[0].lastPosition == 1);
+    CHECK(c.encoders[1].firstPosition == 2);
+    CHECK(c.encoders[1].lastPosition == 2);
+    CHECK(c.encoders[2].firstPosition == 3);
+    CHECK(c.encoders[2].lastPosition == 4);
+    CHECK(c.encoderOfPosition == std::vector<u32>{0, 0, 1, 2, 2});
+}

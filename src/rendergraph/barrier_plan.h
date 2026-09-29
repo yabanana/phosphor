@@ -106,6 +106,14 @@ void buildBarrierPlan(const RenderGraph& graph, CompiledGraph& compiled, const B
 /// highest value it needs from each other queue.
 void buildQueueSyncs(const RenderGraph& graph, CompiledGraph& compiled);
 
+/// Metal 4 synchronises queues only between commits: split every Compute
+/// encoder at the positions where a QueueSync waits (before) or signals
+/// (after), so that each sync point is an encoder boundary the executor can
+/// turn into a submission boundary.  Render groups are already bounded by
+/// their syncs (hoisted to group start/end).  Rebuilds encoders and
+/// encoderOfPosition; call after buildQueueSyncs, before buildBarrierPlan.
+void splitEncodersAtQueueSyncs(CompiledGraph& compiled);
+
 /// "vertex|fragment", "none" for 0.
 [[nodiscard]] std::string stagesName(Stages stages);
 

@@ -36,6 +36,13 @@ namespace phosphor {
 // later encoder.  Each extra command buffer has its own allocator per frame
 // slot; all are committed together, in order, by MetalContext::submitFrame.
 //
+// F2.6: passes on Queue::AsyncCompute run on the context's second queue.
+// The frame becomes a list of submissions cut at the graph's QueueSync
+// points (compile() splits encoders there): a submission waits on the other
+// queue's timeline before its commit and signals its own after it.  The
+// first async submission of frame N also waits for graphics frame N-1 (the
+// two queues share transient memory and persistent buffers across frames).
+//
 // Imported resources (drawable, readback buffers) are bound every frame
 // with bindTexture()/bindBuffer().  Imported attachments are removed from
 // the persistent descriptors right after the encoder is created: the
@@ -84,8 +91,11 @@ private:
     /// returns the command buffer that later encoders must use.
     MTL4::CommandBuffer* encodeSplitGroup(MetalContext::Frame& frame, MTL4::CommandBuffer* cmd, u32 group,
                                           u32 splitPosition);
-    /// Begin extra command buffer `index` of the frame (F2.5).
-    MTL4::CommandBuffer* beginExtraCommandBuffer(MetalContext::Frame& frame, u32 index);
+    /// Begin extra command buffer `index` of the frame (F2.5/F2.6) for the
+    /// graphics queue (or the async queue) and record it in the submissions.
+    MTL4::CommandBuffer* beginExtraCommandBuffer(MetalContext::Frame& frame, u32 index, bool async = false);
+    u32  openSubmission(MetalContext::Frame& frame, MetalContext::SubmitQueue queue, u64 waitValue, u64 waitFrame);
+    void addBuffer(MetalContext::Frame& frame, bool async, MTL4::CommandBuffer* cmd);
     void ensureParallelResources(u32 maxChunks);
     static void encodeChunkJob(void* user, u32 chunk);
 
@@ -105,6 +115,13 @@ private:
     std::vector<NS::String*>   encoderLabels_; // per compute encoder (null for raster)
     std::vector<u32>           barrierIndex_;  // per position: index into compiled_.barriers or ~0u
     std::vector<u32>           splitPosition_; // per render group: position of its split pass or ~0u
+    // F2.6: timeline offsets (QueueSync::value) per position, 0 = none.
+    std::vector<u32>           waitBefore_;
+    std::vector<u32>           signalAfter_;
+    bool                       segmented_ = false; // the graph uses the async queue
+    // Per-frame submission state (execute()).
+    u32                        graphicsSub_ = 0;
+    u32                        asyncSub_    = ~0u;
 
     // F2.5 parallel encoding: extra command buffers [index][slot] with their
     // allocators, and the threads that encode the chunks.

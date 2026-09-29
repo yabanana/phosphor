@@ -462,8 +462,11 @@ CompiledGraph compile(const RenderGraph& graph, const CompileOptions& options) {
     buildRenderGroups(graph, c, options.fuseRasterPasses);
     if (!c.ok) return c;
     if (options.sizer) c.aliasing = planAliasing(graph, c, *options.sizer, options.alias);
-    buildBarrierPlan(graph, c, defaultBarrierRules());
+    // Queue syncs first: their positions become encoder boundaries, which
+    // decide the scope of the barriers.
     buildQueueSyncs(graph, c);
+    splitEncodersAtQueueSyncs(c);
+    buildBarrierPlan(graph, c, defaultBarrierRules());
     c.ok = c.errors.empty();
     return c;
 }

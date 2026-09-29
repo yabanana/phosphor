@@ -447,8 +447,9 @@ struct CompileOptions {
     bool alias = true;
 };
 
-/// Validate, cull, sort, compute lifetimes, then run the F2.4 fusion, F2.3
-/// barrier plan, F2.6 queue sync and F2.2 aliasing stages.
+/// Validate, cull, sort, compute lifetimes, then run the F2.4 fusion, F2.2
+/// aliasing, F2.6 queue sync (and encoder split at sync points) and F2.3
+/// barrier plan stages.
 CompiledGraph compile(const RenderGraph& graph, const CompileOptions& options = {});
 
 /// Stage 1 only (F2.1): validation, culling, stable Kahn order, dependencies,
