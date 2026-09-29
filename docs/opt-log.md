@@ -436,3 +436,69 @@ coda prima della connessione: contesti creati con le varianti `_serial`,
 - Stress Test, frame 100: documento da 559 MB (heap, buffer, texture,
   drawable). Soglia `--gpu-capture-over`: il frame lento è noto 3 frame dopo,
   si cattura il successivo.
+
+---
+
+## F4 — Scoperte della verifica finale
+
+**2026-09-29** · M5 Max, Release, macchina scarica salvo dove indicato.
+
+- **`writeTimestampIntoHeap` cresce senza limite nel driver.** Due istantanee
+  `malloc_history -allBySize` a un minuto di distanza: ogni chiamata aggiunge
+  un elemento a un `std::vector<ProgressMarker>` dentro l'oggetto command
+  buffer AGX, mai svuotato quando il command buffer (uno per slot) viene
+  riusato: +442 KB al minuto, heap CPU +1,72 MB a 30.000 frame con blocchi
+  invariati. La stessa chiamata apre un contesto compute. Sostituita da un
+  encoder compute con un dispatch di 1 thread (`timestamp_anchor`) e un
+  timestamp: a 30.000 frame +523 KB (i buffer di misura), come senza timing
+  più quei buffer.
+- **Un encoder compute con il solo timestamp viene scartato** dal driver: il
+  timestamp non viene mai scritto (tutte le unità invalide). Serve un
+  dispatch.
+- **L'anchor ha bisogno di una barriera produttore**: senza, il dispatch di 1
+  thread veniva schedulato dietro al lavoro fragment e l'inizio commit cadeva
+  dopo la fine dell'unità. Con `barrierAfterStages(Dispatch → tutti)`: bench
+  1 e 3 200/200 frame validi anche senza vsync.
+- **Frame che si sovrappongono (Many Lights, ~60 ms di GPU)**: in ~10% dei
+  frame il render pass del frame N finisce prima di quello del frame N−1 (i
+  due girano insieme): il tempo esclusivo non è definito e il frame è
+  scartato (il report ne dà il conteggio, `frames`). Con
+  `--gpu-timing-serial`: 200/200 e somma = command buffer (54,316 contro
+  54,324 ms).
+- **Controllo negativo a macchina scarica** (`--no-vsync --gpu-timing-serial`,
+  p50, 2 run): pass noto 2,92 / 6,11 / 11,81 ms per 4k / 8k / 16k iterazioni
+  (~0,74 ms per 1000, lineare), forward 0,216–0,218 ms, run concordi entro
+  il 2%.
+- **Shader Timeline di xctrace nei gruppi fusi non dà il costo per pass**:
+  ImGui risulta il 25% del tempo shader dell'encoder fuso su Many Lights, ma
+  0,144 ms su 62 (0,2%) misurato da solo (`--gpu-timing-unfused`).
+- **Race in `PipelineCache::waitAllFinal` (F3)**: un job pubblica la sua
+  completion prima che il worker smetta di contarlo come in corso; se il
+  controllo `outstanding()` cadeva in mezzo, l'attesa della completion
+  successiva era infinita (un run di cattura bloccato 25 minuti, tutti i
+  thread di compilazione inattivi). Controllo negativo: una pausa di 50 ms
+  in quella finestra blocca il codice vecchio 3 volte su 3 catturando il
+  frame 1 (variante in volo), mai quello nuovo, che attende lo stato idle
+  della coda.
+- **`hot_reload_check`**: `cp` + `perl -pi` erano due scritture; se il poll
+  del watcher (250 ms) cadeva in mezzo le ricariche erano 2 invece di 1.
+  Ora una rinomina.
+- **`hitch_check`**: con `--warmup 0` il cambio al frame 20 cadeva nella
+  comparsa della finestra, dove il pompaggio eventi SDL/Cocoa costa fino a
+  ~15 ms: 1 hitch per run su `main` e su F4 (3/3 ciascuno); Tracy mette il
+  tempo nella zona `Events`. Con 60 frame di warm-up: 0 hitch, 3/3 su
+  entrambe.
+- **Tracy senza client** (modalità normale): la coda degli eventi cresce
+  (~22 MB in 50 s di footprint, fuori dalle statistiche malloc perché Tracy
+  usa il proprio allocatore). Con `TRACY_ON_DEMAND`: +2 MB come senza Tracy;
+  i contesti GPU sono rimandati da Tracy alla connessione.
+- **Leak del layer di cattura**: con `--gpu-capture` `leaks --atExit` trova
+  10 leak (784 B) anche senza catture (ciclo di retain in
+  `GTMTLCaptureServiceXPCDispatcher`) e 2 per ogni cattura (`CFString` dei
+  nomi dei file del documento): tutti nel framework di Apple; senza layer 0
+  leak.
+- **xctrace `--launch`** (riportato dall'agente F4.4, non riprodotto dal
+  coordinatore, le cui tracce dello spike partivano da `~/Documents`): un
+  processo lanciato da `~/Documents` restava bloccato in `open()` di dyld;
+  `tools/gpu_trace.sh` copia l'app in `$TMPDIR`. `--target-stdout` elimina
+  le righe dello Shader Timeline.
