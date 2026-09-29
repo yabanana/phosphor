@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/types.h"
+#include "pipeline/pipeline_registry.h"
 #include "platform/metal/metal_context.h"
 #include "rendergraph/timing_plan.h"
 
@@ -20,7 +21,9 @@ namespace phosphor {
 // (Precise when it holds several passes, Relaxed otherwise), and every
 // commit (the frame's first command buffer and every command buffer that
 // opens a new submission after a cross-queue wait) starts with a
-// command-buffer timestamp.  A unit lasts from the latest of those points
+// timestamp in a compute encoder with a 1-thread anchor dispatch (not
+// writeTimestampIntoHeap, whose driver bookkeeping grows forever on reused
+// command buffers; an encoder without a dispatch is dropped: both measured).  A unit lasts from the latest of those points
 // on its queue (previous unit end or commit start) to its own end.
 //
 // One heap holds METAL_FRAMES_IN_FLIGHT ranges of `stride_` queries; a slot's
@@ -43,9 +46,11 @@ namespace phosphor {
 // that ends before its predecessor is invalid for that frame.
 // ---------------------------------------------------------------------------
 
+class PipelineCache;
+
 class GpuTimestamps {
 public:
-    explicit GpuTimestamps(MetalContext& context);
+    GpuTimestamps(MetalContext& context, PipelineCache& pipelines);
     ~GpuTimestamps();
 
     GpuTimestamps(const GpuTimestamps&) = delete;
@@ -104,7 +109,10 @@ private:
     [[nodiscard]] u32 queueIndex(rg::Queue queue) const { return queue == rg::Queue::AsyncCompute ? 1u : 0u; }
 
     MetalContext&        context_;
+    PipelineCache&       pipelines_;
+    pipe::PipelineHandle anchor_ = pipe::INVALID_PIPELINE; // shaders/timestamp.metal
     MTL4::CounterHeap*   heap_ = nullptr;
+    NS::String*          commitLabel_ = nullptr; // label of the commit-start encoder
     u32                  stride_ = 0;       // queries per slot range
     double               tickNs_ = 41.666666;
     rg::TimingPlan       plan_;

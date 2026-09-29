@@ -1,5 +1,6 @@
 #include "platform/metal/gpu_timestamps.h"
 #include "diagnostics/pass_timings.h"
+#include "platform/metal/pipeline_cache.h"
 #include "core/log.h"
 
 #include <algorithm>
@@ -7,7 +8,15 @@
 
 namespace phosphor {
 
-GpuTimestamps::GpuTimestamps(MetalContext& context) : context_(context) {
+GpuTimestamps::GpuTimestamps(MetalContext& context, PipelineCache& pipelines)
+    : context_(context),
+      pipelines_(pipelines),
+      commitLabel_(NS::String::string("Timestamp: commit start", NS::UTF8StringEncoding)->retain()) {
+    pipe::PipelineDesc desc;
+    desc.kind         = pipe::PipelineKind::Compute;
+    desc.label        = "timestamp_anchor";
+    desc.functions[0] = "timestamp_anchor";
+    anchor_ = pipelines_.request(desc);
     const u64 frequency = context_.device()->queryTimestampFrequency();
     if (frequency > 0) tickNs_ = 1e9 / static_cast<double>(frequency);
 }
@@ -15,6 +24,7 @@ GpuTimestamps::GpuTimestamps(MetalContext& context) : context_(context) {
 GpuTimestamps::~GpuTimestamps() {
     // The owner waits for the GPU before destroying the executor.
     if (heap_) heap_->release();
+    commitLabel_->release();
 }
 
 void GpuTimestamps::configure(const rg::TimingPlan& plan) {
@@ -149,7 +159,18 @@ void GpuTimestamps::commitStart(MTL4::CommandBuffer* cmd, rg::Queue queue) {
     if (query >= stride_) return; // cannot happen: commitStartQueries bounds the submissions
     s.commitQueue[s.commitStarts] = static_cast<u8>(queueIndex(queue));
     ++s.commitStarts;
-    cmd->writeTimestampIntoHeap(heap_, base(recording_) + query);
+    // Not cmd->writeTimestampIntoHeap: measured, every call appends to a
+    // vector inside the driver's command buffer object that is never cleared
+    // when the command buffer is reused (+1.4 MB over 30000 frames, 3 command
+    // buffers growing forever).  That call opens a compute context anyway; an
+    // compute encoder does the same; it needs a dispatch, or the driver drops
+    // it and the timestamp is never written (measured).
+    MTL4::ComputeCommandEncoder* encoder = cmd->computeCommandEncoder();
+    encoder->setLabel(commitLabel_);
+    encoder->setComputePipelineState(pipelines_.compute(anchor_));
+    encoder->dispatchThreads(MTL::Size::Make(1, 1, 1), MTL::Size::Make(1, 1, 1));
+    encoder->writeTimestamp(MTL4::TimestampGranularityRelaxed, heap_, base(recording_) + query);
+    encoder->endEncoding();
     const u32 q = queueIndex(queue);
     lastQuery_[q] = query;
     if (q == 0 && s.firstGraphicsStart == ~0u) s.firstGraphicsStart = query;

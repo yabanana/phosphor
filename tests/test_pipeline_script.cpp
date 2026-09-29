@@ -117,7 +117,8 @@ TEST_CASE("pipelines script: covers ImGui and the F2 self-check pipelines") {
     raster.functions = {"debug_vs", "debug_fs"};
     CHECK(script.render.count(renderKey(raster, "R32Uint", "Disabled")) == 1);
     for (const char* kernel : {"debug_fill", "debug_reduce", "debug_expand", "debug_checksum", "async_seed",
-                               "async_reduce", "async_consume", "known_cost"}) {
+                               "async_reduce", "async_consume", "known_cost",
+                               "timestamp_anchor"}) {
         CAPTURE(kernel);
         CHECK(script.compute.count(kernel) == 1);
     }

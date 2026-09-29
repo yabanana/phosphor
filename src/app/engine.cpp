@@ -130,7 +130,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         knownCost_ = std::make_unique<KnownCostPass>(*context_, *pipelines_, options_.debugGpuCost);
     }
     if (options_.gpuTiming) {
-        timestamps_ = std::make_unique<GpuTimestamps>(*context_);
+        timestamps_ = std::make_unique<GpuTimestamps>(*context_, *pipelines_);
         graphExecutor_->setTimestamps(timestamps_.get());
     }
     if (options_.gpuCapture) {
