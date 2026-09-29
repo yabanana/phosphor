@@ -371,3 +371,68 @@ Vertex/Fragment/Compute e la quota per shader; nessun contatore hardware.
 (`setenv` prima del device), così senza opzioni il motore resta identico;
 una cattura "sopra soglia" arma il frame successivo (non si cattura a
 posteriori).
+
+---
+
+## F4.1–F4.3 — Scoperte dell'integrazione nel motore
+
+**2026-09-29** · M5 Max, Release, `--frames 300`, report JSON v2.
+
+**Semantica dei tempi per pass.** Il tempo di un'unità (gruppo di render o
+pass compute) è il suo contributo **esclusivo** alla timeline della coda:
+fine − fine precedente (o inizio del commit). Le unità di un frame sommano
+allo span della coda: Torus con vsync 2,446 ms contro 2,465 del command
+buffer, Stress Test 4,095 contro 4,177.
+
+- **Sovrapposizione dentro il frame**: un pass compute senza dipendenze dal
+  forward gira in parallelo; il forward risultava ~0 ms (finiva prima del
+  compute). Due pass indipendenti si dividono il tempo: chi finisce dopo
+  prende la sovrapposizione. Il pass di costo noto è quindi una dipendenza
+  del forward (lettura dichiarata nel vertex stage).
+- **Sovrapposizione tra frame** (senza vsync): il timestamp d'inizio commit
+  del frame N+1 viene scritto mentre il GPU finisce il frame N (pass noto da
+  1000 iterazioni misurato 2,06 ms contro 0,72). Correzione: l'inizio commit
+  è limitato alla fine dell'ultima unità del frame precedente sulla stessa
+  coda. Restano 3–8 frame su 300 con un'unità invalida (fine prima
+  dell'inizio limitato) senza vsync.
+- **DVFS**: con vsync il GPU abbassa i clock per riempire il frame: il pass
+  noto costa ~5 ms con 1000, 2000 e 4000 iterazioni; con carico basso anche
+  in modalità seriale il forward passa da ~0,3 ms (clock alti) a 1,47 ms. I
+  timestamp misurano il tempo reale al clock corrente: i confronti per pass
+  vanno fatti a clock saturi (senza vsync, `--gpu-timing-serial`, carico
+  alto) e dichiarati.
+- **Controllo negativo** (`--debug-gpu-cost N --no-vsync
+  --gpu-timing-serial`, 3 run, p50): N = 4000 / 6000 / 8000 / 12000 / 16000 →
+  pass noto 3,47 / 4,95 / 6,68 / 9,75 / 13,13 ms (~0,8 ms per 1000
+  iterazioni, lineare entro ~5%, come il kernel isolato dello spike),
+  forward 0,23–0,36 ms costante. Un run su 15 (N=12000) tutto lento di
+  2,5–7× mentre altri processi usavano il GPU (agenti in parallelo).
+  Meccanismo rotto apposta (ogni unità parte dall'inizio del commit): il
+  forward diventa 9,47 / 7,52 / 14,68 ms e cresce con N → il controllo
+  distingue.
+- **`invalidateCounterRange` non è ordinata con il GPU**: invalidare il range
+  di uno slot mentre gli altri slot sono in volo azzera anche scritture del
+  frame successivo in quello slot (1 frame su 3 letto a 0; con i range
+  spostati di 1 un frame diverso a 0). Nessuna invalidazione per frame: una
+  voce non scritta conserva il valore di 3 frame prima ed è scartata perché
+  più vecchia del primo inizio commit del frame.
+
+**Tracy.** Con i contesti GPU creati sulla coda per-thread
+(`___tracy_emit_gpu_new_context`) e le zone su quella seriale, `tracy-capture`
+andava in segfault (accesso a 0x8 in `Worker::Exec`) quando le zone erano in
+coda prima della connessione: contesti creati con le varianti `_serial`,
+`tools/tracy_check.sh` passa e la media GPU di Tracy coincide col report
+(4,9659 contro 4,9659 ms).
+
+**Cattura `.gputrace` (F4.3).**
+- SDL crea un device Metal con la `CAMetalLayer` della finestra:
+  `MTL_CAPTURE_ENABLED` va impostata prima di `SDL_Init` (dopo non ha
+  effetto).
+- Un device Metal 4 non può essere l'oggetto della cattura ("Capturing Metal
+  4 Device is not supported"); la coda MTL4 grafica sì (il lavoro della coda
+  async non entra nel documento).
+- Con un `MTL4Archive` caricato ogni cattura fallisce con lo stesso
+  messaggio: con le opzioni di cattura l'archivio è disattivato (log).
+- Stress Test, frame 100: documento da 559 MB (heap, buffer, texture,
+  drawable). Soglia `--gpu-capture-over`: il frame lento è noto 3 frame dopo,
+  si cattura il successivo.
