@@ -45,11 +45,43 @@ constexpr u32 METAL_FRAMES_IN_FLIGHT = 3;
 
 class MetalContext {
 public:
+    static constexpr u32 MAX_FRAME_COMMAND_BUFFERS = 16;
+    static constexpr u32 MAX_FRAME_SUBMISSIONS     = 16;
+    /// Timeline values of one frame: (frame index + 1) * TIMELINE_STRIDE + n.
+    static constexpr u64 TIMELINE_STRIDE = 256;
+
+    enum class SubmitQueue : u8 { Graphics, Async };
+
+    /// One commit of the frame (F2.5/F2.6).  Metal 4 synchronises queues only
+    /// between commits, so a frame whose graph crosses queues is several
+    /// submissions.  Each queue has its own timeline event (values stay
+    /// monotonic): a submission waits on the OTHER queue's timeline and
+    /// signals its own.
+    struct Submission {
+        SubmitQueue queue       = SubmitQueue::Graphics;
+        u32         firstBuffer = 0; // range in Frame::buffers
+        u32         bufferCount = 0;
+        u64         waitValue   = 0; // other queue's timeline >= value before the commit (0: none)
+        u64         signalValue = 0; // own timeline = value after the commit (0: none)
+        u64         waitFrame   = 0; // frameEvent() >= value before the commit (0: none)
+    };
+
     struct Frame {
-        MTL4::CommandBuffer* commandBuffer = nullptr;
+        MTL4::CommandBuffer* commandBuffer = nullptr; // begun by beginFrame, ended by submitFrame
         CA::MetalDrawable*   drawable      = nullptr;
         u32                  slot          = 0;
         u64                  index         = 0;
+        /// Every command buffer of the frame in commit order; [0] is
+        /// commandBuffer.  The others are recorded (possibly on other
+        /// threads) and ended by their owner before submitFrame().
+        std::array<MTL4::CommandBuffer*, MAX_FRAME_COMMAND_BUFFERS> buffers{};
+        u32                  bufferCount     = 1;
+        /// Commits in order.  None: one graphics commit of all buffers.
+        std::array<Submission, MAX_FRAME_SUBMISSIONS> submissions{};
+        u32                  submissionCount = 0;
+        /// Async timeline value reached when the frame's async work is done
+        /// (0: none); the frame slot is reused only after it.
+        u64                  asyncDoneValue  = 0;
     };
 
     /// `libraryPath` is the compiled phosphor.metallib shared by every pass.
@@ -61,6 +93,10 @@ public:
 
     [[nodiscard]] MTL::Device*        device()       const { return device_; }
     [[nodiscard]] MTL4::CommandQueue* queue()        const { return queue_; }
+    /// Second queue for async compute (F2.6); shares the residency sets.
+    [[nodiscard]] MTL4::CommandQueue* asyncQueue()   const { return asyncQueue_; }
+    /// First timeline value of frame `index` (F2.6).
+    [[nodiscard]] static u64 timelineBase(u64 index) { return (index + 1) * TIMELINE_STRIDE; }
     [[nodiscard]] MTL4::Compiler*     compiler()     const { return compiler_; }
     [[nodiscard]] MTL::Library*       library()      const { return library_; }
     [[nodiscard]] CA::MetalLayer*     layer()        const { return layer_; }
@@ -102,8 +138,10 @@ public:
     /// Returns false if no drawable is available (e.g. minimised window).
     bool beginFrame(Frame& frame);
 
-    /// End and commit the frame's command buffer, present its drawable and
-    /// signal "frame done".
+    /// End the frame's command buffer, commit every submission in order (the
+    /// drawable is waited for before the first graphics commit and signalled
+    /// after the last one), present and signal "frame done" on the graphics
+    /// queue.
     void submitFrame(Frame& frame);
 
     /// Record the GPU time of the next `frames` frames (benchmark mode).
@@ -142,10 +180,16 @@ private:
     void flushResidency();
     void onFrameFeedback(MTL4::CommitFeedback* feedback);
     void waitForValue(u64 value);
+    void waitForAsync(u64 value);
 
     CA::MetalLayer*        layer_       = nullptr;
     MTL::Device*           device_      = nullptr;
     MTL4::CommandQueue*    queue_       = nullptr;
+    MTL4::CommandQueue*    asyncQueue_  = nullptr;
+    MTL::SharedEvent*      graphicsTimeline_ = nullptr; // F2.6 cross-queue events
+    MTL::SharedEvent*      asyncTimeline_    = nullptr;
+    std::array<u64, METAL_FRAMES_IN_FLIGHT> asyncDone_{}; // per slot
+    u64                    lastAsyncDone_ = 0;
     MTL4::Compiler*        compiler_    = nullptr;
     MTL::Library*          library_     = nullptr;
     MTL::SharedEvent*      frameEvent_  = nullptr;

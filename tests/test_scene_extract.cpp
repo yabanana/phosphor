@@ -146,3 +146,101 @@ TEST_CASE("instances with a negative-determinant transform are flagged as mirror
     }
     CHECK(mirroredCount == 1);
 }
+
+namespace {
+void mirror(ECS& ecs, EntityID e) {
+    auto& xf = ecs.getComponent<TransformComponent>(e);
+    xf.scale = glm::vec3(1.0f, -1.0f, 1.0f);
+    xf.updateMatrix();
+}
+} // namespace
+
+TEST_CASE("mirrored instances get their own BackMirrored batch") {
+    GpuScene scene;
+    const MeshData cube = ProceduralMeshes::generateCube(1.0f);
+    const MeshHandle mesh = scene.uploadMesh(cube.positions, cube.normals, cube.tangents, cube.uvs, cube.indices);
+    ECS ecs;
+    addInstance(ecs, mesh, 0, false);
+    mirror(ecs, addInstance(ecs, mesh, 0, false));
+    addInstance(ecs, mesh, 0, false);
+
+    FrameScene fs;
+    extractFrameScene(ecs, scene, fs);
+    REQUIRE(fs.batches.size() == 2);
+    CHECK(fs.batches[0].cull == CullClass::Back);
+    CHECK(fs.batches[0].instanceCount == 2);
+    CHECK(fs.batches[1].cull == CullClass::BackMirrored);
+    CHECK(fs.batches[1].instanceCount == 1);
+}
+
+TEST_CASE("double-sided materials disable culling, even for mirrored instances") {
+    GpuScene scene;
+    const MeshData cube = ProceduralMeshes::generateCube(1.0f);
+    const MeshHandle mesh = scene.uploadMesh(cube.positions, cube.normals, cube.tangents, cube.uvs, cube.indices);
+    GPUMaterial lib{};
+    lib.flags = MATERIAL_FLAG_DOUBLE_SIDED;
+    scene.addMaterial(lib);
+
+    ECS ecs;
+    addInstance(ecs, mesh, 0, false);
+    mirror(ecs, addInstance(ecs, mesh, 0, false));
+    addInstance(ecs, mesh, 0, true); // per-entity material, single-sided
+
+    FrameScene fs;
+    extractFrameScene(ecs, scene, fs);
+    REQUIRE(fs.batches.size() == 2);
+    CHECK(fs.batches[0].cull == CullClass::Back);
+    CHECK(fs.batches[0].instanceCount == 1);
+    CHECK(fs.batches[1].cull == CullClass::None);
+    CHECK(fs.batches[1].instanceCount == 2);
+}
+
+TEST_CASE("a double-sided MaterialComponent maps to the GPU flag") {
+    MaterialComponent mc{};
+    CHECK((toGPUMaterial(mc).flags & MATERIAL_FLAG_DOUBLE_SIDED) == 0);
+    mc.doubleSided = true;
+    CHECK((toGPUMaterial(mc).flags & MATERIAL_FLAG_DOUBLE_SIDED) != 0);
+}
+
+TEST_CASE("mixed instances of several meshes produce contiguous, consistent batches") {
+    GpuScene scene;
+    const MeshData cube = ProceduralMeshes::generateCube(1.0f);
+    const MeshData plane = ProceduralMeshes::generatePlane(1.0f, 1.0f, 1, 1);
+    const MeshHandle a = scene.uploadMesh(cube.positions, cube.normals, cube.tangents, cube.uvs, cube.indices);
+    const MeshHandle b = scene.uploadMesh(plane.positions, plane.normals, plane.tangents, plane.uvs, plane.indices);
+    GPUMaterial single{};
+    GPUMaterial dbl{};
+    dbl.flags = MATERIAL_FLAG_DOUBLE_SIDED;
+    scene.addMaterial(single); // 0
+    scene.addMaterial(dbl);    // 1
+
+    ECS ecs;
+    for (u32 i = 0; i < 24; ++i) {
+        const EntityID e = addInstance(ecs, (i % 2) ? a : b, (i % 3 == 0) ? 1 : 0, false);
+        if (i % 5 == 0) mirror(ecs, e);
+    }
+    addInstance(ecs, b, 99, false); // invalid material falls back to 0 (single-sided)
+
+    FrameScene fs;
+    extractFrameScene(ecs, scene, fs);
+    REQUIRE(fs.instances.size() == 25);
+
+    u32 covered = 0;
+    for (size_t k = 0; k < fs.batches.size(); ++k) {
+        const DrawBatch& batch = fs.batches[k];
+        CHECK(batch.instanceCount > 0);
+        CHECK(batch.firstInstance == covered); // contiguous, in order, no gaps or overlaps
+        for (u32 i = batch.firstInstance; i < batch.firstInstance + batch.instanceCount; ++i) {
+            const GPUInstance& gi = fs.instances[i];
+            CHECK(gi.meshIndex == batch.meshIndex);
+            CullClass expected = CullClass::Back;
+            if (fs.materials[gi.materialIndex].flags & MATERIAL_FLAG_DOUBLE_SIDED) expected = CullClass::None;
+            else if (gi.flags & INSTANCE_FLAG_MIRRORED) expected = CullClass::BackMirrored;
+            CHECK(batch.cull == expected);
+        }
+        covered += batch.instanceCount;
+        // Adjacent batches never share (mesh, class): they would have been merged.
+        if (k > 0) CHECK((fs.batches[k - 1].meshIndex != batch.meshIndex || fs.batches[k - 1].cull != batch.cull));
+    }
+    CHECK(covered == fs.instances.size());
+}

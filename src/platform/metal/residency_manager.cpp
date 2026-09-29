@@ -13,7 +13,8 @@ const char* setLabel(u32 cls) {
 
 } // namespace
 
-ResidencyManager::ResidencyManager(MTL::Device* device, MTL4::CommandQueue* queue) : queue_(queue) {
+ResidencyManager::ResidencyManager(MTL::Device* device, MTL4::CommandQueue* queue, MTL4::CommandQueue* asyncQueue)
+    : queue_(queue), asyncQueue_(asyncQueue) {
     for (u32 c = 0; c < COUNT; ++c) {
         MTL::ResidencySetDescriptor* desc = MTL::ResidencySetDescriptor::alloc()->init();
         desc->setLabel(NS::String::string(setLabel(c), NS::UTF8StringEncoding));
@@ -25,12 +26,14 @@ ResidencyManager::ResidencyManager(MTL::Device* device, MTL4::CommandQueue* queu
             throw std::runtime_error("Failed to create residency set");
         }
         queue_->addResidencySet(sets_[c]);
+        if (asyncQueue_) asyncQueue_->addResidencySet(sets_[c]);
     }
 }
 
 ResidencyManager::~ResidencyManager() {
     for (MTL::ResidencySet* set : sets_) {
         queue_->removeResidencySet(set);
+        if (asyncQueue_) asyncQueue_->removeResidencySet(set);
         set->release();
     }
 }

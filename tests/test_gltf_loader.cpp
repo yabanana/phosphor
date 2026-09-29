@@ -39,7 +39,7 @@ void append(std::vector<unsigned char>& bytes, const std::vector<T>& values) {
 
 // A quad facing +Z with POSITION, TEXCOORD_0 and indices only: no NORMAL,
 // no TANGENT.  glTF UVs: origin at the top-left, V grows downwards.
-std::string quadWithoutNormalsOrTangents() {
+std::string quadWithoutNormalsOrTangents(const std::string& materialJson = "") {
     const std::vector<float> positions = {-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0};
     const std::vector<float> uvs       = {0, 1, 1, 1, 1, 0, 0, 0};
     const std::vector<unsigned short> indices = {0, 1, 2, 0, 2, 3}; // counter-clockwise about +Z
@@ -52,7 +52,10 @@ std::string quadWithoutNormalsOrTangents() {
   "scene": 0,
   "scenes": [{"nodes": [0]}],
   "nodes": [{"mesh": 0}],
-  "meshes": [{"primitives": [{"attributes": {"POSITION": 0, "TEXCOORD_0": 1}, "indices": 2}]}],
+  "meshes": [{"primitives": [{"attributes": {"POSITION": 0, "TEXCOORD_0": 1}, "indices": 2)" +
+           std::string(materialJson.empty() ? "" : R"(, "material": 0)") + R"(}]}],)" +
+           std::string(materialJson.empty() ? "" : R"(
+  "materials": [)" + materialJson + R"(],)") + R"(
   "buffers": [{"byteLength": 92, "uri": "data:application/octet-stream;base64,)" + base64(bytes) + R"("}],
   "bufferViews": [
     {"buffer": 0, "byteOffset": 0,  "byteLength": 48},
@@ -100,5 +103,29 @@ TEST_CASE("glTF loader: missing normals and tangents are generated per the spec"
         CHECK(v.ty == doctest::Approx(0.0f));
         CHECK(v.tz == doctest::Approx(0.0f));
         CHECK(v.tw == doctest::Approx(1.0f));
+    }
+}
+
+TEST_CASE("glTF loader: doubleSided materials carry the flag to the GPU material") {
+    for (const bool doubleSided : {false, true}) {
+        CAPTURE(doubleSided);
+        const std::filesystem::path path = std::filesystem::temp_directory_path() / "phosphor_quad_double_sided.gltf";
+        {
+            std::ofstream out(path);
+            out << quadWithoutNormalsOrTangents(std::string(R"({"doubleSided": )") +
+                                                (doubleSided ? "true" : "false") + "}");
+        }
+
+        GpuScene scene;
+        NullTextureManager textures;
+        textures.createDefaultTextures();
+        ECS ecs;
+        GltfLoader loader(scene, textures, ecs);
+        REQUIRE(loader.loadFromFile(path.string()));
+        std::filesystem::remove(path);
+
+        REQUIRE(!scene.materials().empty());
+        const bool flagged = (scene.materials().back().flags & MATERIAL_FLAG_DOUBLE_SIDED) != 0;
+        CHECK(flagged == doubleSided);
     }
 }

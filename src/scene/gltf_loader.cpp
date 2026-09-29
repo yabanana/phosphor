@@ -402,6 +402,7 @@ u32 GltfLoader::processMaterial(const tinygltf::Model& model,
 
     // Alpha cutoff
     mc.alphaCutoff = static_cast<float>(material.alphaCutoff);
+    mc.doubleSided = material.doubleSided;
 
     // Build GPUMaterial from component and upload
     GPUMaterial gpu{};
@@ -422,6 +423,7 @@ u32 GltfLoader::processMaterial(const tinygltf::Model& model,
     gpu.emissive[1]  = mc.emissiveFactor.g;
     gpu.emissive[2]  = mc.emissiveFactor.b;
     gpu.alphaCutoff  = mc.alphaCutoff;
+    gpu.flags        = mc.doubleSided ? MATERIAL_FLAG_DOUBLE_SIDED : 0u;
 
     const u32 materialIndex = gpuScene_.addMaterial(gpu);
     materialCache_[matIdx] = materialIndex;

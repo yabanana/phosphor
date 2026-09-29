@@ -11,20 +11,33 @@ class ECS;
 class GpuScene;
 struct MaterialComponent;
 
-/// A run of instances that share one mesh and can be drawn with a single
-/// instanced draw call.
+/// Culling class of a batch (see DrawBatch::cull).
+enum class CullClass : u8 {
+    Back,         // cull back faces, front faces counter-clockwise
+    BackMirrored, // mirrored instance: its winding is reversed on screen, so the
+                  // back faces are the counter-clockwise ones (renderer: cull front)
+    None          // double-sided material: no culling
+};
+
+/// A run of instances that share one mesh and one culling class and can be
+/// drawn with a single instanced draw call.
 struct DrawBatch {
     u32 meshIndex;
     u32 firstInstance;
     u32 instanceCount;
+    CullClass cull = CullClass::Back; // all instances of a batch share it
 };
 
 /// Everything the renderer needs from the ECS for one frame.
 struct FrameScene {
-    std::vector<GPUInstance> instances; // sorted by meshIndex
+    std::vector<GPUInstance> instances; // sorted by (meshIndex, cull class)
     std::vector<GPUMaterial> materials; // library materials, then per-entity ones
     std::vector<GPULight>    lights;
     std::vector<DrawBatch>   batches;
+    // Scratch reused every frame (no allocation once warm): sort keys and
+    // the instances in extraction order.
+    std::vector<u64>         sortKeys;
+    std::vector<GPUInstance> unsorted;
 };
 
 /// Convert an ECS material component to its GPU layout.

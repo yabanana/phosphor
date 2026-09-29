@@ -12,23 +12,19 @@ FrameCapture::~FrameCapture() {
     context_.memory().release(readback_, MemoryCategory::Other);
 }
 
-void FrameCapture::encode(MetalContext::Frame& frame) {
-    MTL::Texture* target = frame.drawable->texture();
-    width_  = static_cast<u32>(target->width());
-    height_ = static_cast<u32>(target->height());
-    const size_t rowBytes = static_cast<size_t>(width_) * 4;
-
+void FrameCapture::prepare(u32 width, u32 height) {
+    if (readback_ && width == width_ && height == height_) return;
+    width_  = width;
+    height_ = height;
     context_.memory().release(readback_, MemoryCategory::Other);
-    readback_ = context_.memory().newBuffer(rowBytes * height_, MTL::ResourceStorageModeShared,
-                                            MemoryCategory::Other, "Frame capture");
+    readback_ = context_.memory().newBuffer(readbackSize(), MTL::ResourceStorageModeShared, MemoryCategory::Other,
+                                            "Frame capture");
+}
 
-    MTL4::ComputeCommandEncoder* enc = frame.commandBuffer->computeCommandEncoder();
-    enc->setLabel(NS::String::string("Frame capture", NS::UTF8StringEncoding));
-    // No hazard tracking in Metal 4: wait for the render passes that wrote the drawable.
-    enc->barrierAfterQueueStages(MTL::StageFragment, MTL::StageBlit, MTL4::VisibilityOptionDevice);
-    enc->copyFromTexture(target, 0, 0, MTL::Origin::Make(0, 0, 0), MTL::Size::Make(width_, height_, 1),
-                         readback_, 0, rowBytes, rowBytes * height_);
-    enc->endEncoding();
+void FrameCapture::encode(MTL4::ComputeCommandEncoder* enc, MTL::Texture* source) {
+    const size_t rowBytes = static_cast<size_t>(width_) * 4;
+    enc->copyFromTexture(source, 0, 0, MTL::Origin::Make(0, 0, 0), MTL::Size::Make(width_, height_, 1), readback_, 0,
+                         rowBytes, rowBytes * height_);
 }
 
 bool FrameCapture::writePng(const std::string& path) {

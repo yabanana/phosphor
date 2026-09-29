@@ -27,6 +27,7 @@ GPUMaterial toGPUMaterial(const MaterialComponent& mat) {
     gm.emissive[1]          = mat.emissiveFactor.y;
     gm.emissive[2]          = mat.emissiveFactor.z;
     gm.alphaCutoff          = mat.alphaCutoff;
+    gm.flags                = mat.doubleSided ? MATERIAL_FLAG_DOUBLE_SIDED : 0u;
     return gm;
 }
 
@@ -80,13 +81,30 @@ void extractFrameScene(ECS& ecs, const GpuScene& scene, FrameScene& out) {
         if (gi.materialIndex >= materialCount) gi.materialIndex = 0;
     }
 
-    std::stable_sort(out.instances.begin(), out.instances.end(),
-                     [](const GPUInstance& a, const GPUInstance& b) { return a.meshIndex < b.meshIndex; });
+    auto cullClassOf = [&](const GPUInstance& gi) {
+        if (out.materials[gi.materialIndex].flags & MATERIAL_FLAG_DOUBLE_SIDED) return CullClass::None;
+        return (gi.flags & INSTANCE_FLAG_MIRRORED) ? CullClass::BackMirrored : CullClass::Back;
+    };
 
-    for (u32 i = 0; i < out.instances.size(); ++i) {
-        const u32 mesh = out.instances[i].meshIndex;
-        if (out.batches.empty() || out.batches.back().meshIndex != mesh) {
-            out.batches.push_back({mesh, i, 0});
+    // Sort by (mesh, cull class), stable: one 64-bit key per instance
+    // (mesh | class | original index) computed once, then a permutation.
+    const u32 count = static_cast<u32>(out.instances.size());
+    out.sortKeys.resize(count);
+    for (u32 i = 0; i < count; ++i) {
+        const GPUInstance& gi = out.instances[i];
+        out.sortKeys[i] = (static_cast<u64>(gi.meshIndex) << 32) |
+                          (static_cast<u64>(cullClassOf(gi)) << 30) | i;
+    }
+    std::sort(out.sortKeys.begin(), out.sortKeys.end());
+    out.unsorted.swap(out.instances);
+    out.instances.resize(count);
+    for (u32 i = 0; i < count; ++i) {
+        const u64 key = out.sortKeys[i];
+        out.instances[i] = out.unsorted[static_cast<u32>(key & 0x3FFFFFFFu)];
+        const u32 mesh = static_cast<u32>(key >> 32);
+        const auto cull = static_cast<CullClass>((key >> 30) & 0x3u);
+        if (out.batches.empty() || out.batches.back().meshIndex != mesh || out.batches.back().cull != cull) {
+            out.batches.push_back({mesh, i, 0, cull});
         }
         ++out.batches.back().instanceCount;
     }

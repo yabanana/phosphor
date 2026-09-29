@@ -7,12 +7,17 @@
 #include "imgui/imgui_renderer.h"
 #include "platform/metal/frame_capture.h"
 #include "platform/metal/gpu_memory.h"
+#include "platform/metal/async_compute_probe.h"
+#include "platform/metal/graph_debug_passes.h"
 #include "platform/metal/memory_pressure.h"
 #include "platform/metal/memory_stress.h"
 #include "platform/metal/metal_context.h"
+#include "platform/metal/metal_graph_executor.h"
 #include "platform/metal/metal_texture_manager.h"
 #include "platform/metal/scene_renderer.h"
 #include "renderer/gpu_scene.h"
+#include "rendergraph/graph_dump.h"
+#include "rendergraph/pass_context.h"
 #include "scene/camera.h"
 #include "scene/ecs.h"
 
@@ -85,7 +90,10 @@ Engine::Engine(int argc, char* argv[]) {
     SDL_GetWindowSizeInPixels(window_, &w, &h);
     context_->resize(static_cast<u32>(w), static_cast<u32>(h));
 
-    renderer_ = std::make_unique<SceneRenderer>(*context_);
+    renderer_      = std::make_unique<SceneRenderer>(*context_);
+    graphExecutor_ = std::make_unique<MetalGraphExecutor>(*context_);
+    if (options_.debugGraphTransients) graphDebug_ = std::make_unique<GraphDebugPasses>(*context_);
+    if (options_.debugAsyncCompute) asyncProbe_ = std::make_unique<AsyncComputeProbe>(*context_);
 
     ecs_        = std::make_unique<ECS>();
     gpuScene_   = std::make_unique<GpuScene>();
@@ -117,6 +125,9 @@ Engine::~Engine() {
     }
 
     pressure_.reset();
+    graphExecutor_.reset();
+    graphDebug_.reset();
+    asyncProbe_.reset();
     capture_.reset();
     imguiRenderer_.reset();
     ImGui_ImplSDL3_Shutdown();
@@ -187,6 +198,12 @@ void Engine::run() {
             if (simulatedFrames_ == 10) pressure_->simulate(MemoryPressureMonitor::Level::Warning);
             if (simulatedFrames_ == 20) pressure_->simulate(MemoryPressureMonitor::Level::Critical);
         }
+        if (presented && options_.resizeEvery > 0 && ++resizeFrames_ % options_.resizeEvery == 0) {
+            // Alternate between two window sizes: the drawable size changes,
+            // so the render graph is recompiled (resize test).
+            resizeToggle_ = !resizeToggle_;
+            SDL_SetWindowSize(window_, resizeToggle_ ? 1280 : 1600, resizeToggle_ ? 720 : 900);
+        }
         if (presented && options_.switchEvery > 0 && ++framesOnBench_ >= options_.switchEvery && !pendingBench_) {
             // Same path as the 1-7 hotkeys.
             pendingBench_ = static_cast<TestBenchType>((static_cast<int>(currentBench_) + 1) % testBenchCount());
@@ -199,8 +216,14 @@ void Engine::run() {
     if (options_.benchmark()) {
         finishBenchmark();
     }
+    if (graphDebug_ && !graphDebug_->finish()) exitCode_ = 1;
+    if (asyncProbe_ && !asyncProbe_->finish()) exitCode_ = 1;
     if (capture_) {
-        capture_->writePng(options_.capturePath);
+        if (captured_) {
+            capture_->writePng(options_.capturePath);
+        } else {
+            LOG_ERROR("No frame captured");
+        }
     }
 }
 
@@ -492,50 +515,152 @@ bool Engine::frame(float dt) {
     constants.exposure   = settings_.exposure;
     constants.frameIndex = static_cast<u32>(frame.index);
 
-    MTL4::RenderCommandEncoder* pass =
-        renderer_->render(frame, *gpuScene_, frameScene_, constants, textures_->tableAddress());
-
-    // --- ImGui overlay, appended to the scene pass --------------------------
-    if (options_.ui) {
-        ImGui_ImplSDL3_NewFrame();
-        ImGui::NewFrame();
-
-        int bench = static_cast<int>(currentBench_);
-        bool changed = false;
-        UIPanels::drawTestBenchSelector(bench, changed);
-        if (changed) pendingBench_ = static_cast<TestBenchType>(bench);
-
-        RendererInfo info;
-        info.gpuName     = context_->gpuName();
-        info.apple9      = context_->isApple9OrLater();
-        info.width       = context_->width();
-        info.height      = context_->height();
-        info.instances   = static_cast<u32>(frameScene_.instances.size());
-        info.drawBatches = static_cast<u32>(frameScene_.batches.size());
-        info.triangles   = renderer_->lastTriangleCount();
-        info.meshlets    = gpuScene_->getMeshletTotalCount();
-        info.textures    = textures_->textureCount();
-        info.gpuMs       = context_->lastGpuMs();
-        UIPanels::drawPerformancePanel(*frameStats_, info);
-        UIPanels::drawRenderPanel(settings_);
-        fillMemoryInfo();
-        UIPanels::drawMemoryPanel(memoryInfo_);
-
-        ImGui::Render();
-        imguiRenderer_->render(pass, ImGui::GetDrawData());
-    }
-    pass->endEncoding();
+    MTL::Texture* target = frame.drawable->texture();
+    const u32 width  = static_cast<u32>(target->width());
+    const u32 height = static_cast<u32>(target->height());
 
     // Capture the last frame of a run (or the first frame when interactive).
     const bool lastFrame = !options_.benchmark() || presentedFrames_ + 1 == options_.warmup + options_.frames;
-    if (capture_ && lastFrame && !captured_) {
-        capture_->encode(frame);
-        captured_ = true;
+    captureThisFrame_ = capture_ && lastFrame && !captured_;
+
+    const GraphKey key{width, height, options_.ui, capture_ != nullptr, options_.debugSplitEncoding,
+                       options_.debugAsyncCompute};
+    if (!(key == graphKey_) || !graphExecutor_->valid()) {
+        graphKey_ = key;
+        buildFrameGraph(width, height);
     }
+
+    if (graphDebug_) graphDebug_->beginFrame(frame.slot);
+    if (asyncProbe_) asyncProbe_->beginFrame(frame.slot);
+    renderer_->prepareFrame(*gpuScene_, frameScene_, constants, textures_->tableAddress(), width, height);
+    if (options_.ui) drawUi();
+
+    graphExecutor_->bindTexture(drawableRef_, target);
+    if (capture_) graphExecutor_->bindBuffer(captureRef_, capture_->readback());
+    if (graphDebug_) graphDebug_->bind(*graphExecutor_, frame.slot);
+    if (asyncProbe_) asyncProbe_->bind(*graphExecutor_, frame.slot);
+    graphExecutor_->execute(frame);
+    if (graphDebug_) graphDebug_->frameEncoded(frame.slot, frame.index);
+    if (asyncProbe_) asyncProbe_->frameEncoded(frame.slot, frame.index);
+    if (captureThisFrame_) captured_ = true;
 
     context_->submitFrame(frame);
     pool->release();
     return true;
+}
+
+void Engine::drawUi() {
+    ImGui_ImplSDL3_NewFrame();
+    ImGui::NewFrame();
+
+    int bench = static_cast<int>(currentBench_);
+    bool changed = false;
+    UIPanels::drawTestBenchSelector(bench, changed);
+    if (changed) pendingBench_ = static_cast<TestBenchType>(bench);
+
+    RendererInfo info;
+    info.gpuName     = context_->gpuName();
+    info.apple9      = context_->isApple9OrLater();
+    info.width       = context_->width();
+    info.height      = context_->height();
+    info.instances   = static_cast<u32>(frameScene_.instances.size());
+    info.drawBatches = static_cast<u32>(frameScene_.batches.size());
+    info.triangles   = renderer_->lastTriangleCount();
+    info.meshlets    = gpuScene_->getMeshletTotalCount();
+    info.textures    = textures_->textureCount();
+    info.gpuMs       = context_->lastGpuMs();
+    UIPanels::drawPerformancePanel(*frameStats_, info);
+    UIPanels::drawRenderPanel(settings_);
+    fillMemoryInfo();
+    UIPanels::drawMemoryPanel(memoryInfo_);
+
+    ImGui::Render();
+}
+
+void Engine::buildFrameGraph(u32 width, u32 height) {
+    using namespace rg;
+    frameGraph_.reset();
+
+    const TextureDesc screen{Format::BGRA8Srgb, width, height};
+    // The drawable: undefined at frame start, presented after the graph.
+    drawableRef_ = frameGraph_.importTexture("Drawable", screen, ImportOutput);
+    TextureRef color = drawableRef_;
+
+    // F2.6: seed -> reduce (async queue) -> consume, declared before Forward so
+    // the async pass can overlap it.
+    if (asyncProbe_) asyncProbe_->addProducers(frameGraph_);
+
+    frameGraph_.addPass(
+        "Forward", PassType::Raster,
+        [&](PassBuilder& b) {
+            ClearValue clear;
+            clear.color[0] = 0.02f;
+            clear.color[1] = 0.025f;
+            clear.color[2] = 0.035f;
+            clear.color[3] = 1.0f;
+            clear.depth    = 0.0f; // reverse-Z: far = 0
+            TextureRef depth = b.createTexture("Depth", {Format::Depth32Float, width, height});
+            color = b.writeColor(color, 0, LoadIntent::Clear, clear);
+            b.writeDepth(depth, LoadIntent::Clear, clear);
+            b.setHints(HintGeometryHeavy);
+            // F2.5 check: the draws are recorded by 4 threads into a render
+            // pass suspended/resumed across command buffers.
+            if (options_.debugSplitEncoding) b.setParallelChunks(4);
+        },
+        [this](PassContext& ctx) {
+            renderer_->encode(static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder()), ctx.chunk(), ctx.chunkCount());
+        });
+
+    if (options_.ui) {
+        frameGraph_.addPass(
+            "ImGui overlay", PassType::Raster,
+            [&](PassBuilder& b) { color = b.writeColor(color, 0, LoadIntent::Preserve); },
+            [this](PassContext& ctx) {
+                imguiRenderer_->render(static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder()), ImGui::GetDrawData());
+            });
+    }
+
+    if (asyncProbe_) asyncProbe_->addConsumer(frameGraph_);
+    if (graphDebug_) graphDebug_->addToGraph(frameGraph_);
+
+    if (capture_) {
+        capture_->prepare(width, height);
+        captureRef_ = frameGraph_.importBuffer("Capture readback", {capture_->readbackSize()}, ImportOutput);
+        frameGraph_.addPass(
+            "Frame capture", PassType::Blit,
+            [&](PassBuilder& b) {
+                b.read(color, Usage::CopySrc, StageBlit);
+                b.write(captureRef_, Usage::CopyDst, StageBlit);
+                b.setSideEffect();
+            },
+            [this](PassContext& ctx) {
+                // In the graph for the whole run (no recompilation on the
+                // capture frame); copies only on the frame being captured.
+                if (!captureThisFrame_) return;
+                capture_->encode(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),
+                                 static_cast<MTL::Texture*>(ctx.texture(drawableRef_)));
+            });
+    }
+
+    if (!graphExecutor_->compile(frameGraph_)) {
+        throw std::runtime_error("Failed to compile the frame graph");
+    }
+    if (graphDebug_) graphDebug_->onCompiled(frameGraph_, graphExecutor_->compiled());
+    if (asyncProbe_) asyncProbe_->onCompiled(frameGraph_, graphExecutor_->compiled());
+    const BandwidthReport traffic = estimateBandwidth(frameGraph_, graphExecutor_->compiled());
+    LOG_INFO("Render graph %ux%u: estimated DRAM traffic %.2f MiB/frame (read %.2f, write %.2f)", width, height,
+             static_cast<double>(traffic.totalBytes()) / (1 << 20),
+             static_cast<double>(traffic.totalReadBytes) / (1 << 20),
+             static_cast<double>(traffic.totalWriteBytes) / (1 << 20));
+    if (!options_.dumpGraphPath.empty()) {
+        std::ofstream out(options_.dumpGraphPath);
+        out << dumpGraphviz(frameGraph_, graphExecutor_->compiled());
+        if (!out) {
+            LOG_ERROR("Failed to write %s", options_.dumpGraphPath.c_str());
+        } else {
+            LOG_INFO("Render graph written to %s", options_.dumpGraphPath.c_str());
+        }
+    }
 }
 
 } // namespace phosphor

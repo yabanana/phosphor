@@ -61,6 +61,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.fixedTimestep = true;
         } else if (arg == "--inject-input") {
             out.injectInput = true;
+        } else if (arg == "--debug-graph-transients") {
+            out.debugGraphTransients = true;
         } else if (arg == "--transient-test") {
             out.transientTest = true;
         } else if (arg == "--memory-stress") {
@@ -69,6 +71,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.simulatePressure = true;
         } else if (arg == "--switch-every") {
             if (!needCount(out.switchEvery)) return false;
+        } else if (arg == "--resize-every") {
+            if (!needCount(out.resizeEvery)) return false;
         } else if (arg == "--capture") {
             const auto value = needValue();
             if (!value) return false;
@@ -77,6 +81,14 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             const auto value = needValue();
             if (!value) return false;
             out.reportPath = *value;
+        } else if (arg == "--dump-graph") {
+            const auto value = needValue();
+            if (!value) return false;
+            out.dumpGraphPath = *value;
+        } else if (arg == "--debug-split-encoding") {
+            out.debugSplitEncoding = true;
+        } else if (arg == "--debug-async-compute") {
+            out.debugAsyncCompute = true;
         } else {
             error = "unknown option " + std::string(arg);
             return false;

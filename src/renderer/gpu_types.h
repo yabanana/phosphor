@@ -50,6 +50,11 @@ PHOSPHOR_GPU_CONSTANT u32 INSTANCE_FLAG_MIRRORED = 1u << 3;
 
 PHOSPHOR_GPU_CONSTANT u32 INVALID_TEXTURE_INDEX = 0xFFFFFFFFu;
 
+// GPUMaterial::flags bits.
+// DOUBLE_SIDED: glTF `doubleSided`; back-face culling is disabled for the
+// material and back faces are lit with the flipped normal.
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FLAG_DOUBLE_SIDED = 1u << 0;
+
 struct GPUMaterial {
     float baseColor[4];
     float metallic;
@@ -63,7 +68,8 @@ struct GPUMaterial {
     u32 emissiveTex;
     float emissive[3];
     float alphaCutoff;
-    float pad[3];
+    u32 flags;                 // MATERIAL_FLAG_*
+    float pad[2];
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUMaterial) == 80, "GPUMaterial layout");
 
