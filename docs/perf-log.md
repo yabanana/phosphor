@@ -216,3 +216,67 @@ Residui trovati dall'audit e chiusi:
 - Instruments: la traccia Allocations si registra senza `sudo` ma non è
   esportabile da riga di comando; il criterio è verificato con
   `malloc_history` (−3 allocazioni vive nel frame loop, vedi sopra).
+
+---
+
+## F2 — render graph
+
+**2026-09-29 (mattina)** · branch `phase/f2` (commit `e4116dd`; i commit
+successivi non toccano il percorso misurato) · M5 Max, **alimentazione di
+rete** · Release, `--no-vsync --no-ui`, `tools/bench_all.sh build/release`
+(3×600 frame). `main` (`e17d684`) ricompilato in un worktree e misurato
+**subito prima**, stessa sessione: il confronto valido è tra queste due
+tabelle.
+
+`main` (prima di F2):
+
+| # | Bench | Resolution | FPS | Frame ms (p99) | CPU ms (p99) | GPU ms (p99) | Wait ms (p99) |
+|---|---|---|---|---|---|---|---|
+| 1 | Torus Demo | 3200x1800 | 434 | 2.306 (18.359) | 0.089 (0.18) | 0.72 (1.357) | 2.217 (18.21) |
+| 2 | PBR Material Grid | 3200x1800 | 413 | 2.421 (18.352) | 0.106 (0.199) | 0.8 (1.105) | 2.314 (18.233) |
+| 3 | Stress Test (100K) | 3200x1800 | 236 | 4.237 (20.024) | 2.874 (3.423) | 2.249 (3.22) | 1.368 (17.039) |
+| 4 | Scene Viewer (glTF) | 3200x1800 | 437 | 2.288 (16.771) | 0.083 (0.169) | 0.858 (1.316) | 2.205 (16.63) |
+| 5 | Many Lights (1024) | 3200x1800 | 19 | 52.26 (112.878) | 0.105 (0.194) | 95.699 (156.72) | 52.268 (112.713) |
+| 6 | Cornell Box (GI) | 3200x1800 | 415 | 2.407 (16.797) | 0.109 (0.233) | 0.652 (0.767) | 2.297 (16.564) |
+| 7 | Culling Visualization | 3200x1800 | 381 | 2.623 (16.234) | 0.845 (1.15) | 1.024 (3.287) | 1.802 (16.015) |
+
+`phase/f2` (frame eseguito dal render graph, back-face culling attivo):
+
+| # | Bench | Resolution | FPS | Frame ms (p99) | CPU ms (p99) | GPU ms (p99) | Wait ms (p99) |
+|---|---|---|---|---|---|---|---|
+| 1 | Torus Demo | 3200x1800 | 391 | 2.559 (17.552) | 0.101 (0.187) | 0.969 (1.585) | 2.457 (17.42) |
+| 2 | PBR Material Grid | 3200x1800 | 449 | 2.226 (16.979) | 0.109 (0.205) | 0.574 (1.055) | 2.085 (15.675) |
+| 3 | Stress Test (100K) | 3200x1800 | 313 | 3.198 (18.107) | 1.912 (2.349) | 1.805 (2.65) | 1.287 (16.119) |
+| 4 | Scene Viewer (glTF) | 3200x1800 | 432 | 2.313 (16.85) | 0.093 (0.182) | 0.83 (1.356) | 2.22 (16.674) |
+| 5 | Many Lights (1024) | 3200x1800 | 19 | 51.472 (116.585) | 0.108 (0.198) | 93.844 (151.917) | 51.336 (116.388) |
+| 6 | Cornell Box (GI) | 3200x1800 | 437 | 2.286 (14.737) | 0.094 (0.162) | 0.627 (0.87) | 2.191 (14.581) |
+| 7 | Culling Visualization | 3200x1800 | 360 | 2.78 (17.365) | 0.722 (0.968) | 1.059 (2.979) | 2.066 (16.83) |
+
+Gli FPS sono dominati dall'attesa del drawable (Wait ≈ Frame) e non dicono
+nulla sul costo del frame: si confrontano CPU e GPU ms.
+
+- **Stress Test**: CPU −33% (2,87 → 1,91 ms), GPU −20% (2,25 → 1,81 ms).
+  CPU: l'ordinamento delle istanze ora usa chiavi a 64 bit precalcolate
+  (mesh, classe di culling, indice) invece di `stable_sort` su struct da 80
+  byte; la prima versione di F2, con il lookup del materiale nel comparatore,
+  era **+0,5 ms** (3,375 ms, misurato e corretto). GPU: back-face culling.
+- **PBR Grid** GPU 0,80 → 0,57 ms, **Culling Viz** CPU 0,85 → 0,72 ms.
+- **Torus Demo** GPU 0,72 → 0,97 ms in questo run: rumore. Run alternati
+  main/F2 (3 coppie, 600 frame): main 0,883 / 0,967 / 0,897 ms, F2 0,936 /
+  0,941 / 0,896 ms. Idem per Scene Viewer (main 0,824–0,875, F2 0,808–0,848)
+  e Cornell (main 0,637–0,654, F2 0,623–0,644).
+- **Allocazioni GPU nei frame misurati: 0** in tutti i 21 report. Heap CPU
+  +2.479…+3.442 blocchi, stesso intervallo di `main` (+1.869…+3.583):
+  fluttuazione limitata già documentata in F1, non crescita per frame.
+- Il grafo si compila **una volta**: 1 compilazione in 300 frame con
+  `--switch-every 20` (15 cambi bench); con `--resize-every 25` una per
+  cambio di dimensione del drawable (8 in 200 frame).
+- Traffico DRAM stimato dal grafo (O1, `--dump-graph`): 21,97 MiB/frame a
+  3200×1800 = solo lo store del drawable (depth memoryless, overlay fuso).
+
+Flag di debug (Debug + validazione, bench 1, solo verifica funzionale, non
+prestazioni): `--debug-async-compute` porta la CPU a ~72 ms/frame perché la
+sonda ricalcola ogni frame sulla CPU il riferimento esatto (64K elementi ×
+128 iterazioni, build Debug); con più submission per frame il GPU ms misura
+solo l'ultima submission grafica. Il guadagno reale di F2.5/F2.6 si misura
+in F5/F8, come previsto dal piano.

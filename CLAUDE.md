@@ -85,14 +85,33 @@ extend it; port algorithms from it.
   ...`, `heap <pid>`, `MallocStackLogging=lite` + `malloc_history <pid>
   -allByCount` (diff two snapshots per stack), `xcrun xctrace record
   --template Allocations --launch -- ...`.
-- Frame pacing: one MTL4 command buffer per frame (scene + ImGui overlay in
-  the same render pass) and one `MTLSharedEvent`; value `n+1` = frame n done.
-  `makeResident` allocations are committed right before each commit, so they
-  can be used by the frame being recorded.
+- The frame is a render graph (`src/rendergraph/`, portable; executed by
+  `MetalGraphExecutor`): add passes in `Engine::buildFrameGraph` declaring
+  every access with its exact stages, never encode passes or barriers by
+  hand. The graph is compiled only when its key changes (drawable size, UI,
+  capture, debug flags). Barrier rules come from the F2.3 spike
+  (`barrier_plan.h`): Fragment is fine on the consumer side of a queue
+  barrier, Tile synchronises nothing, no fragment/tile producer inside a
+  render encoder. Passes fused in one render encoder share its state: leave
+  Metal's defaults (cull none, clockwise winding) when you change them, the
+  validation layer rejects redundant state.
+- Frame pacing: normally one MTL4 command buffer per frame (scene + ImGui
+  overlay fused in one render pass) and one `MTLSharedEvent`; value `n+1` =
+  frame n done. With `--debug-split-encoding` a render pass is suspended/
+  resumed across several command buffers (one commit); with
+  `--debug-async-compute` the frame is several submissions on two queues
+  synchronised by per-queue timeline events. `makeResident` allocations are
+  committed right before each commit, so they can be used by the frame
+  being recorded.
+- Debug self-checks (all must stay green in `tools/visual_check.sh` with
+  `EXTRA_ARGS=...`): `--debug-graph-transients`, `--debug-split-encoding`,
+  `--debug-async-compute`; `--resize-every N` exercises recompilation;
+  `--dump-graph FILE` writes the Graphviz dump with DRAM estimates.
 - Engine conventions follow glTF: counter-clockwise front faces (set
   explicitly: Metal defaults to clockwise), UV origin top-left, bitangent =
   `cross(N, T) * w` towards decreasing V. Mirrored instances carry
-  `INSTANCE_FLAG_MIRRORED`. `tests/test_procedural.cpp` enforces the meshes.
+  `INSTANCE_FLAG_MIRRORED` and are drawn in their own batches with front-face
+  culling; back faces are culled (glTF `doubleSided` materials are not). `tests/test_procedural.cpp` enforces the meshes.
 - Reverse-Z infinite projection (clear depth 0, compare Greater), NDC y up.
 - Hardware floor is Apple9 (M3); anything needing Apple10 (M5) must have a
   fallback or be an explicitly higher tier.

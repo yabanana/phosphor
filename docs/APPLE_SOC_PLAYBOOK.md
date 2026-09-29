@@ -169,6 +169,7 @@ OPT-0) esegue microbenchmark e salva i risultati in
 
 **S-TBDR-5 Barriere nello stadio fragment**
 - **Fatto**: "operazione molto costosa" perché svuota la tile memory in memoria di sistema (WWDC20-10632); in Metal 4 le barriere con fragment/tile nel lato "after" non sono supportate da Apple3 ad Apple10 (Feature Set Tables).
+- **Misurato (F2.3, M5 Max, 2026-09-29, `bench/barrier_spike`)**: una barriera di coda con Fragment sul lato consumatore di un render encoder è legale ed efficace, e costa ~16% meno che attendere in Vertex; Tile è accettato ma non sincronizza; dentro un render encoder il lato produttore di `barrierAfterEncoderStages` può essere solo Vertex/Object/Mesh (fragment/tile = abort della validazione). Il divieto riguarda quindi le barriere *dentro* il pass, non l'attesa di un pass successivo.
 - **Sfruttare**: organizzare le dipendenze in modo che il consumo avvenga in compute o nel pass successivo.
 - **Evitare**: qualunque sincronizzazione dentro il fragment.
 

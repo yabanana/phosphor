@@ -240,20 +240,20 @@ prime misure di velocità reali.
 
 **Uscita**: Instruments Allocations piatto in gameplay; nessuna allocazione Metal nel frame.
 
-## F2 — Render graph e sincronizzazione automatica [CORE]
+## F2 — Render graph e sincronizzazione automatica ✅ [CORE]
 
 **Obiettivo**: aggiungere decine di pass senza bug di sincronizzazione (Metal 4 non traccia gli hazard).
 
-- [ ] F2.1 Render graph portabile (in `phosphor_core`, testato su Linux): pass, risorse virtuali, read/write per stage, culling dei pass inutili, ordinamento topologico
-- [ ] F2.2 Aliasing delle risorse transitorie sugli heap di F1 (analisi degli intervalli di vita)
-- [ ] F2.3 Barrier builder Metal 4: coppie di stage con `barrierAfterEncoderStages` / `barrierAfterQueueStages`; divieto di fragment/tile nel lato "after"
-- [ ] F2.4 Fusione automatica dei pass TBDR compatibili; load/store e `memoryless` dedotti dal grafo (O2)
-- [ ] F2.5 Encoding parallelo: più thread codificano pass diversi (allocatori per thread), render pass sospesi/ripresi tra command buffer
-- [ ] F2.6 Async compute: pass compute indipendenti su una seconda coda MTL4 con eventi
-- [ ] F2.7 Migrazione del forward di F0 sul grafo; backface culling verificato e riattivato
-- [ ] F2.8 Dump del grafo (Graphviz) con banda stimata per risorsa (O1)
+- [x] F2.1 Render graph portabile (in `phosphor_core`, testato su Linux): pass, risorse virtuali, read/write per stage, culling dei pass inutili, ordinamento topologico (accessi versionati RAW/WAR/WAW, risorse importate, Kahn stabile, intervalli di vita; `src/rendergraph/`)
+- [x] F2.2 Aliasing delle risorse transitorie sugli heap di F1 (analisi degli intervalli di vita) — greedy via `ResourceSizer`; verificato sulla GPU con `--debug-graph-transients` (controllo esatto, heap −34%)
+- [x] F2.3 Barrier builder Metal 4: coppie di stage con `barrierAfterEncoderStages` / `barrierAfterQueueStages`; divieto di fragment/tile nel lato "after" — regole misurate dallo spike `bench/barrier_spike` (2026-09-29): Fragment sul lato consumatore **è** legale ed efficace su M5 Max, Tile è inefficace, fragment/tile come produttore dentro un render encoder è illegale (tabella in `barrier_plan.h`, `opt-log.md`)
+- [x] F2.4 Fusione automatica dei pass TBDR compatibili; load/store e `memoryless` dedotti dal grafo (O2)
+- [x] F2.5 Encoding parallelo: più thread codificano pass diversi (allocatori per thread), render pass sospesi/ripresi tra command buffer — infrastruttura verificata con `--debug-split-encoding`; guadagno da misurare in F5
+- [x] F2.6 Async compute: pass compute indipendenti su una seconda coda MTL4 con eventi — verificato con `--debug-async-compute` (kernel sintetici, controllo esatto); guadagno da misurare in F5/F8
+- [x] F2.7 Migrazione del forward di F0 sul grafo; backface culling verificato e riattivato (istanze specchiate: cull front; materiali glTF `doubleSided`: niente culling)
+- [x] F2.8 Dump del grafo (Graphviz) con banda stimata per risorsa (O1) — `--dump-graph FILE`
 
-**Uscita**: stessa immagine di F0; unit test su ordinamento, aliasing e barriere attese.
+**Uscita**: stessa immagine di F0; unit test su ordinamento, aliasing e barriere attese. Verificata il 2026-09-29: 0 pixel diversi sui 7 bench anche con i flag di debug, validazione a zero, 0 allocazioni GPU nei frame, nessuna regressione rispetto a `main` (`perf-log.md`). Due riferimenti rigenerati con motivazione: Cornell box (pareti orientate male, corrette nei contenuti) e 3 pixel di Stress Test (facce posteriori che vincevano il depth test).
 
 ## F3 — Pipeline: compilazione asincrona e archivi AOT [CORE]
 
