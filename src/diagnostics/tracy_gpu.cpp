@@ -85,6 +85,9 @@ void TracyGpuZones::configure(const rg::TimingPlan& plan, double tickNs, u64 now
 void TracyGpuZones::emitFrame(const u64* startTicks, const u64* endTicks, u32 unitCount) {
     Impl& s = *impl_;
     if (!s.current) return;
+    // TRACY_ON_DEMAND: zones are dropped while nobody is connected; check once
+    // so a frame is emitted whole or not at all.
+    if (!TracyCIsConnected) return;
     const u32 count = unitCount < s.current->locations.size() ? unitCount
                                                               : static_cast<u32>(s.current->locations.size());
     for (u32 i = 0; i < count; ++i) {

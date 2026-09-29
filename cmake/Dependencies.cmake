@@ -107,5 +107,10 @@ if(PHOSPHOR_TRACY)
     set(TRACY_NO_FRAME_IMAGE ON CACHE BOOL "" FORCE)
     set(TRACY_NO_SYSTEM_TRACING ON CACHE BOOL "" FORCE)
     set(TRACY_STATIC ON CACHE BOOL "" FORCE)
+    # Events are kept only while a profiler is connected: without it the
+    # client queued every event and the process grew ~22 MB per minute with no
+    # capture attached (F4, measured).  GPU contexts are deferred and
+    # replayed on connection by Tracy itself.
+    set(TRACY_ON_DEMAND ON CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(tracy)
 endif()
