@@ -7,6 +7,7 @@
 #include "imgui/imgui_renderer.h"
 #include "platform/metal/frame_capture.h"
 #include "platform/metal/gpu_memory.h"
+#include "platform/metal/async_compute_probe.h"
 #include "platform/metal/graph_debug_passes.h"
 #include "platform/metal/memory_pressure.h"
 #include "platform/metal/memory_stress.h"
@@ -92,6 +93,7 @@ Engine::Engine(int argc, char* argv[]) {
     renderer_      = std::make_unique<SceneRenderer>(*context_);
     graphExecutor_ = std::make_unique<MetalGraphExecutor>(*context_);
     if (options_.debugGraphTransients) graphDebug_ = std::make_unique<GraphDebugPasses>(*context_);
+    if (options_.debugAsyncCompute) asyncProbe_ = std::make_unique<AsyncComputeProbe>(*context_);
 
     ecs_        = std::make_unique<ECS>();
     gpuScene_   = std::make_unique<GpuScene>();
@@ -125,6 +127,7 @@ Engine::~Engine() {
     pressure_.reset();
     graphExecutor_.reset();
     graphDebug_.reset();
+    asyncProbe_.reset();
     capture_.reset();
     imguiRenderer_.reset();
     ImGui_ImplSDL3_Shutdown();
@@ -208,6 +211,7 @@ void Engine::run() {
         finishBenchmark();
     }
     if (graphDebug_ && !graphDebug_->finish()) exitCode_ = 1;
+    if (asyncProbe_ && !asyncProbe_->finish()) exitCode_ = 1;
     if (capture_) {
         if (captured_) {
             capture_->writePng(options_.capturePath);
@@ -521,14 +525,17 @@ bool Engine::frame(float dt) {
     }
 
     if (graphDebug_) graphDebug_->beginFrame(frame.slot);
+    if (asyncProbe_) asyncProbe_->beginFrame(frame.slot);
     renderer_->prepareFrame(*gpuScene_, frameScene_, constants, textures_->tableAddress(), width, height);
     if (options_.ui) drawUi();
 
     graphExecutor_->bindTexture(drawableRef_, target);
     if (capture_) graphExecutor_->bindBuffer(captureRef_, capture_->readback());
     if (graphDebug_) graphDebug_->bind(*graphExecutor_, frame.slot);
+    if (asyncProbe_) asyncProbe_->bind(*graphExecutor_, frame.slot);
     graphExecutor_->execute(frame);
     if (graphDebug_) graphDebug_->frameEncoded(frame.slot, frame.index);
+    if (asyncProbe_) asyncProbe_->frameEncoded(frame.slot, frame.index);
     if (captureThisFrame_) captured_ = true;
 
     context_->submitFrame(frame);
@@ -572,6 +579,10 @@ void Engine::buildFrameGraph(u32 width, u32 height) {
     // The drawable: undefined at frame start, presented after the graph.
     drawableRef_ = frameGraph_.importTexture("Drawable", screen, ImportOutput);
     TextureRef color = drawableRef_;
+
+    // F2.6: seed -> reduce (async queue) -> consume, declared before Forward so
+    // the async pass can overlap it.
+    if (asyncProbe_) asyncProbe_->addToGraph(frameGraph_);
 
     frameGraph_.addPass(
         "Forward", PassType::Raster,
@@ -628,6 +639,7 @@ void Engine::buildFrameGraph(u32 width, u32 height) {
         throw std::runtime_error("Failed to compile the frame graph");
     }
     if (graphDebug_) graphDebug_->onCompiled(frameGraph_, graphExecutor_->compiled());
+    if (asyncProbe_) asyncProbe_->onCompiled(frameGraph_, graphExecutor_->compiled());
     const BandwidthReport traffic = estimateBandwidth(frameGraph_, graphExecutor_->compiled());
     LOG_INFO("Render graph %ux%u: estimated DRAM traffic %.2f MiB/frame (read %.2f, write %.2f)", width, height,
              static_cast<double>(traffic.totalBytes()) / (1 << 20),
