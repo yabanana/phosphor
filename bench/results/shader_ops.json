@@ -1,0 +1,464 @@
+{
+ "schema": "phosphor-shader-ops",
+ "schema_version": 1,
+ "compiler": "Apple metal version 32023.921 (metalfe-32023.921.6)",
+ "flags": "-std=metal4.0 -O2",
+ "functions": {
+  "async_seed": {
+   "file": "async_compute.metal",
+   "kind": "kernel",
+   "blocks": 3,
+   "static": {
+    "flops": 0,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 14,
+    "samples": 0,
+    "loads": 1,
+    "stores": 1
+   },
+   "loops": [
+    {
+     "head": "9",
+     "tail": "12",
+     "blocks": 2,
+     "per_iteration": {
+      "flops": 0,
+      "transcendentals": 0,
+      "divides": 0,
+      "int_ops": 10,
+      "samples": 0,
+      "loads": 0,
+      "stores": 1
+     }
+    }
+   ],
+   "nested_loops": 0
+  },
+  "async_reduce": {
+   "file": "async_compute.metal",
+   "kind": "kernel",
+   "blocks": 5,
+   "static": {
+    "flops": 0,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 13,
+    "samples": 0,
+    "loads": 1,
+    "stores": 1
+   },
+   "loops": [
+    {
+     "head": "7",
+     "tail": "13",
+     "blocks": 3,
+     "per_iteration": {
+      "flops": 0,
+      "transcendentals": 0,
+      "divides": 0,
+      "int_ops": 1,
+      "samples": 0,
+      "loads": 0,
+      "stores": 1
+     }
+    },
+    {
+     "head": "13",
+     "tail": "16",
+     "blocks": 2,
+     "per_iteration": {
+      "flops": 0,
+      "transcendentals": 0,
+      "divides": 0,
+      "int_ops": 12,
+      "samples": 0,
+      "loads": 1,
+      "stores": 0
+     }
+    }
+   ],
+   "nested_loops": 0
+  },
+  "async_consume": {
+   "file": "async_compute.metal",
+   "kind": "kernel",
+   "blocks": 3,
+   "static": {
+    "flops": 0,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 14,
+    "samples": 0,
+    "loads": 2,
+    "stores": 1
+   },
+   "loops": [
+    {
+     "head": "13",
+     "tail": "15",
+     "blocks": 2,
+     "per_iteration": {
+      "flops": 0,
+      "transcendentals": 0,
+      "divides": 0,
+      "int_ops": 10,
+      "samples": 0,
+      "loads": 0,
+      "stores": 1
+     }
+    }
+   ],
+   "nested_loops": 0
+  },
+  "forward_vs": {
+   "file": "forward.metal",
+   "kind": "vertex",
+   "blocks": 1,
+   "static": {
+    "flops": 82,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 2,
+    "samples": 0,
+    "loads": 46,
+    "stores": 0
+   },
+   "loops": [],
+   "nested_loops": 0
+  },
+  "forward_fs": {
+   "file": "forward.metal",
+   "kind": "fragment",
+   "blocks": 38,
+   "static": {
+    "flops": 420,
+    "transcendentals": 15,
+    "divides": 10,
+    "int_ops": 2,
+    "samples": 5,
+    "loads": 54,
+    "stores": 0
+   },
+   "loops": [
+    {
+     "head": "230",
+     "tail": "409",
+     "blocks": 13,
+     "per_iteration": {
+      "flops": 160,
+      "transcendentals": 9,
+      "divides": 7,
+      "int_ops": 1,
+      "samples": 0,
+      "loads": 21,
+      "stores": 0
+     }
+    }
+   ],
+   "nested_loops": 0
+  },
+  "debug_fill": {
+   "file": "graph_debug.metal",
+   "kind": "kernel",
+   "blocks": 1,
+   "static": {
+    "flops": 0,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 7,
+    "samples": 0,
+    "loads": 1,
+    "stores": 0
+   },
+   "loops": [],
+   "nested_loops": 0
+  },
+  "debug_reduce": {
+   "file": "graph_debug.metal",
+   "kind": "kernel",
+   "blocks": 3,
+   "static": {
+    "flops": 0,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 2,
+    "samples": 0,
+    "loads": 0,
+    "stores": 1
+   },
+   "loops": [
+    {
+     "head": "5",
+     "tail": "8",
+     "blocks": 2,
+     "per_iteration": {
+      "flops": 0,
+      "transcendentals": 0,
+      "divides": 0,
+      "int_ops": 2,
+      "samples": 0,
+      "loads": 0,
+      "stores": 1
+     }
+    }
+   ],
+   "nested_loops": 0
+  },
+  "debug_expand": {
+   "file": "graph_debug.metal",
+   "kind": "kernel",
+   "blocks": 1,
+   "static": {
+    "flops": 0,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 4,
+    "samples": 0,
+    "loads": 1,
+    "stores": 0
+   },
+   "loops": [],
+   "nested_loops": 0
+  },
+  "debug_vs": {
+   "file": "graph_debug.metal",
+   "kind": "vertex",
+   "blocks": 1,
+   "static": {
+    "flops": 4,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 3,
+    "samples": 0,
+    "loads": 0,
+    "stores": 0
+   },
+   "loops": [],
+   "nested_loops": 0
+  },
+  "debug_fs": {
+   "file": "graph_debug.metal",
+   "kind": "fragment",
+   "blocks": 1,
+   "static": {
+    "flops": 0,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 4,
+    "samples": 0,
+    "loads": 0,
+    "stores": 0
+   },
+   "loops": [],
+   "nested_loops": 0
+  },
+  "debug_checksum": {
+   "file": "graph_debug.metal",
+   "kind": "kernel",
+   "blocks": 1,
+   "static": {
+    "flops": 0,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 3,
+    "samples": 0,
+    "loads": 0,
+    "stores": 1
+   },
+   "loops": [],
+   "nested_loops": 0
+  },
+  "imgui_vs": {
+   "file": "imgui.metal",
+   "kind": "vertex",
+   "blocks": 1,
+   "static": {
+    "flops": 25,
+    "transcendentals": 3,
+    "divides": 0,
+    "int_ops": 0,
+    "samples": 0,
+    "loads": 8,
+    "stores": 0
+   },
+   "loops": [],
+   "nested_loops": 0
+  },
+  "imgui_fs": {
+   "file": "imgui.metal",
+   "kind": "fragment",
+   "blocks": 1,
+   "static": {
+    "flops": 4,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 0,
+    "samples": 1,
+    "loads": 0,
+    "stores": 0
+   },
+   "loops": [],
+   "nested_loops": 0
+  },
+  "known_cost": {
+   "file": "known_cost.metal",
+   "kind": "kernel",
+   "blocks": 3,
+   "static": {
+    "flops": 0,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 4,
+    "samples": 0,
+    "loads": 1,
+    "stores": 1
+   },
+   "loops": [
+    {
+     "head": "7",
+     "tail": "11",
+     "blocks": 2,
+     "per_iteration": {
+      "flops": 0,
+      "transcendentals": 0,
+      "divides": 0,
+      "int_ops": 3,
+      "samples": 0,
+      "loads": 0,
+      "stores": 1
+     }
+    }
+   ],
+   "nested_loops": 0
+  },
+  "overlay_vs": {
+   "file": "overlay.metal",
+   "kind": "vertex",
+   "blocks": 1,
+   "static": {
+    "flops": 52,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 0,
+    "samples": 0,
+    "loads": 35,
+    "stores": 0
+   },
+   "loops": [],
+   "nested_loops": 0
+  },
+  "overdraw_fs": {
+   "file": "overlay.metal",
+   "kind": "fragment",
+   "blocks": 1,
+   "static": {
+    "flops": 4,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 0,
+    "samples": 0,
+    "loads": 0,
+    "stores": 0
+   },
+   "loops": [],
+   "nested_loops": 0
+  },
+  "lightcount_fs": {
+   "file": "overlay.metal",
+   "kind": "fragment",
+   "blocks": 8,
+   "static": {
+    "flops": 44,
+    "transcendentals": 4,
+    "divides": 6,
+    "int_ops": 3,
+    "samples": 0,
+    "loads": 11,
+    "stores": 0
+   },
+   "loops": [
+    {
+     "head": "8",
+     "tail": "88",
+     "blocks": 7,
+     "per_iteration": {
+      "flops": 44,
+      "transcendentals": 4,
+      "divides": 6,
+      "int_ops": 3,
+      "samples": 0,
+      "loads": 10,
+      "stores": 0
+     }
+    }
+   ],
+   "nested_loops": 0
+  },
+  "overlay_tilecost": {
+   "file": "overlay.metal",
+   "kind": "kernel",
+   "blocks": 9,
+   "static": {
+    "flops": 3,
+    "transcendentals": 0,
+    "divides": 1,
+    "int_ops": 6,
+    "samples": 0,
+    "loads": 4,
+    "stores": 2
+   },
+   "loops": [],
+   "nested_loops": 0
+  },
+  "overlay_composite_vs": {
+   "file": "overlay.metal",
+   "kind": "vertex",
+   "blocks": 1,
+   "static": {
+    "flops": 4,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 3,
+    "samples": 0,
+    "loads": 0,
+    "stores": 0
+   },
+   "loops": [],
+   "nested_loops": 0
+  },
+  "overlay_composite_fs": {
+   "file": "overlay.metal",
+   "kind": "fragment",
+   "blocks": 10,
+   "static": {
+    "flops": 25,
+    "transcendentals": 8,
+    "divides": 2,
+    "int_ops": 20,
+    "samples": 0,
+    "loads": 15,
+    "stores": 0
+   },
+   "loops": [],
+   "nested_loops": 0
+  },
+  "timestamp_anchor": {
+   "file": "timestamp.metal",
+   "kind": "kernel",
+   "blocks": 1,
+   "static": {
+    "flops": 0,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 0,
+    "samples": 0,
+    "loads": 0,
+    "stores": 0
+   },
+   "loops": [],
+   "nested_loops": 0
+  }
+ },
+ "errors": {}
+}
