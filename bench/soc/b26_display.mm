@@ -178,6 +178,7 @@ struct Result {
     std::vector<double> cbInterval, presentInterval, lead, presentErr, gpuMs;
     size_t frames = 0, notPresented = 0, late = 0;
     double actualHz = 0;
+    bool   visible = true; // display awake and window not occluded at the end of the phase
 };
 
 /// Drives `layer` for `seconds`; skips the first `skip` frames.
@@ -212,6 +213,9 @@ Result drive(Win& w, SocDisplayDriver* drv, double fps, float latency, double se
         }
     }
     if (n > skip + 1) r.actualHz = double(n - skip - 1) / (f[n - 1].cb - f[skip].cb);
+    // A sleeping display or an occluded window presents nothing (observed
+    // when the display went off in the middle of a 3-run battery).
+    r.visible = !CGDisplayIsAsleep(CGMainDisplayID()) && (w.window.occlusionState & NSWindowOcclusionStateVisible) != 0;
     return r;
 }
 
@@ -327,7 +331,7 @@ void benchDisplay(Context& ctx, Report& rep) {
         }
         // 2. GPU load of known duration at 120 Hz.
         const double budget = 1e3 / 120.0;
-        bool below = true, above = false, haveAbove = false, haveBelow = false;
+        bool below = true, above = false, haveAbove = false, haveBelow = false, allVisible = true;
         std::string detail;
         for (double load : {0.0, 4.0, 7.0, 9.0}) {
             SocDisplayDriver* d = [SocDisplayDriver new];
@@ -336,6 +340,7 @@ void benchDisplay(Context& ctx, Report& rep) {
             d.loadOut = drv.loadOut;
             if (load > 0) d.loadIters = calibrate(load);
             const Result r = drive(w, d, 120.0, 0, secs, load > 0);
+            allVisible &= r.visible;
             const std::string s = "load_" + std::to_string(int(load)) + "ms.120hz";
             reportRow(s, r);
             const double gpu = r.gpuMs.empty() ? 0.0 : phosphor::soc::computeStats(r.gpuMs).median;
@@ -360,6 +365,11 @@ void benchDisplay(Context& ctx, Report& rep) {
             if (load == 0.0) { haveBelow = true; below &= pct <= 3.0 && hz >= 0.98 * 120.0; }
         }
         closeWindow(w, Titled);
+        if (!allVisible) {
+            rep.status(Status::Unsupported, "display asleep or benchmark window occluded during the load phases: presentation "
+                                            "timing not measurable (keep the display on, e.g. caffeinate -d)");
+            return;
+        }
         // Control filled in at the end (needs the load rows only).
         rep.negative(haveBelow && haveAbove && below && above,
                      std::string("120 Hz budget 8.33 ms: loads well under budget miss <= 3% of frames at >= 117.6 Hz (mean), loads over budget miss > 20% or present below 116.4 Hz: ") + detail +

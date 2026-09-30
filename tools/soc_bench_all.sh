@@ -23,18 +23,24 @@ status=0
 
 step() { echo "== $*"; }
 
+# Keep the display on: with the display asleep the window benchmarks
+# present nothing (B-26), the idle GPU draws ~0 W (B-27) and the 2 GiB
+# pointer chase read 1006 ns instead of ~475 (B-08), all observed when the
+# display went off in the middle of a battery.  caffeinate needs no root.
+keep_awake=(caffeinate -d -i -m -s)
+
 step "full suite x3 (window benchmarks included)"
-"$bench" --runs 3 --window "$@" 2>&1 | tee "$log_dir/full.log"
+"${keep_awake[@]}" "$bench" --runs 3 --window "$@" 2>&1 | tee "$log_dir/full.log"
 full_rc=${PIPESTATUS[0]}
 results=$(sed -n 's/^\[soc\] results: //p' "$log_dir/full.log" | tail -1)
 [[ $full_rc -eq 0 ]] || { echo "FAIL: full suite exit $full_rc"; status=1; }
 
 step "--validate"
-"$bench" --validate --window 2>&1 | tee "$log_dir/validate.log" | tail -3
+"${keep_awake[@]}" "$bench" --validate --window 2>&1 | tee "$log_dir/validate.log" | tail -3
 [[ ${PIPESTATUS[0]} -eq 0 ]] || { echo "FAIL: validation"; status=1; }
 
 step "--force-family apple9 (quick)"
-"$bench" --quick --runs 1 --force-family apple9 --out "$log_dir/apple9.json" 2>&1 | tee "$log_dir/apple9.log" | tail -3
+"${keep_awake[@]}" "$bench" --quick --runs 1 --force-family apple9 --out "$log_dir/apple9.json" 2>&1 | tee "$log_dir/apple9.log" | tail -3
 [[ ${PIPESTATUS[0]} -eq 0 ]] || { echo "FAIL: apple9 fallback run"; status=1; }
 
 step "leaks (quick)"
