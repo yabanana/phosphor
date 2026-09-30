@@ -95,9 +95,14 @@ struct ScenarioParams {
     bool  wideHdr = false;
     /// Scenario 3: its eligible compute passes run on the async queue.
     bool  asyncCompute = true;
+    /// Independent copies of the scenario (split screen, extra cameras)
+    /// composited by the present pass: 1..6 (graphs of 20-80+ passes).
+    u32   views = 1;
     /// OPT-1.2: resources recomputed by their consumers instead of stored
     /// (names; see scenarioRematCandidates()).
     std::vector<std::string> remat;
+    /// ALU steps a consumer spends recomputing one signal (break-even sweeps).
+    u32   rematIterations = SynthPass::kRematIterations;
 };
 
 /// Persistent textures the backend owns, fills once with deterministic
@@ -117,7 +122,7 @@ struct Scenario {
     std::string name;
     std::vector<SynthPass>      synth;    // per graph pass (kind None if not synthetic)
     std::vector<ScenarioImport> imports;  // bound by the backend every frame
-    TextureRef                  output;   // final LDR image (before the present pass)
+    TextureRef                  output;   // final LDR image of the last view (before the present pass)
 };
 
 /// Execute callback factory: the backend turns pass index -> callback.

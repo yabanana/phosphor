@@ -228,6 +228,16 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.scenarioWide = true;
         } else if (arg == "--graph-scenario-no-async") {
             out.scenarioAsync = false;
+        } else if (arg == "--graph-no-alias") {
+            out.graphNoAlias = true;
+        } else if (arg == "--graph-remat-cost") {
+            if (!needCount(out.graphRematCost)) return false;
+        } else if (arg == "--graph-scenario-views") {
+            if (!needCount(out.scenarioViews)) return false;
+            if (out.scenarioViews < 1 || out.scenarioViews > 6) {
+                error = "--graph-scenario-views: expected 1..6";
+                return false;
+            }
         } else if (arg == "--graph-remat" || arg == "--graph-order") {
             const auto value = needValue();
             if (!value) return false;

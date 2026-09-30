@@ -25,6 +25,8 @@ struct Ctx {
     const SynthExecFactory& factory;
     std::vector<std::string> rematUsed;
     u32 nextSeed = 1;
+    std::string suffix;      // " [v1]" for the second and later views
+    u32         geometryBase = 0;
 
     [[nodiscard]] Format hdr() const { return params.wideHdr ? Format::RGBA32Float : Format::RGBA16Float; }
     [[nodiscard]] u32 it(u32 n) const {
@@ -52,7 +54,7 @@ public:
     [[nodiscard]] Stages stage() const { return type_ == PassType::Compute ? StageDispatch : StageFragment; }
 
     TextureRef texture(const std::string& name, Format format, u32 w, u32 h) {
-        return b_.createTexture(name, {format, std::max(w, 1u), std::max(h, 1u)});
+        return b_.createTexture(name + c_.suffix, {format, std::max(w, 1u), std::max(h, 1u)});
     }
 
     void sample(TextureRef t) {
@@ -84,7 +86,7 @@ public:
         in.rematSlot  = sig.slot;
         in.rematFormat = sig.format;
         s_.inputs.push_back(in);
-        s_.rematIterations = c_.it(SynthPass::kRematIterations);
+        s_.rematIterations = c_.it(c_.params.rematIterations);
     }
 
     TextureRef color(TextureRef t, u32 slot, LoadIntent load = LoadIntent::Discard) {
@@ -163,7 +165,7 @@ public:
     void alu(u32 iterations) { s_.aluIterations = c_.it(iterations); }
     void geometry(u32 triangles, u32 geometrySeed) {
         s_.triangles    = c_.tris(triangles);
-        s_.geometrySeed = geometrySeed;
+        s_.geometrySeed = geometrySeed + c_.geometryBase;
     }
     void hints(u32 h) { b_.setHints(h); }
 
@@ -188,7 +190,7 @@ u32 addSynth(Ctx& c, const std::string& name, SynthKind kind, Queue queue, const
     sp.seed = (c.nextSeed++) * 0x9E3779B1u;
     const PassType type = kind == SynthKind::Compute ? PassType::Compute : PassType::Raster;
     c.graph.addPass(
-        name, type, queue,
+        name + c.suffix, type, queue,
         [&](PassBuilder& b) {
             Setup s(c, b, sp, type);
             fn(s);
@@ -263,8 +265,8 @@ TextureRef bloom(Ctx& c, TextureRef hdr, u32 levels) {
 /// TAA with a ping-pong history owned by the backend.
 TextureRef taa(Ctx& c, TextureRef hdr, const Signal& velocity, TextureRef depth) {
     const TextureDesc desc{c.hdr(), c.W(), c.H()};
-    const TextureRef prev = c.graph.importTexture("TAA history (previous)", desc, ImportContentsDefined);
-    TextureRef next = c.graph.importTexture("TAA history", desc, ImportContentsDefined | ImportOutput);
+    const TextureRef prev = c.graph.importTexture("TAA history (previous)" + c.suffix, desc, ImportContentsDefined);
+    TextureRef next = c.graph.importTexture("TAA history" + c.suffix, desc, ImportContentsDefined | ImportOutput);
     c.scenario.imports.push_back({prev.resource, ScenarioImport::Role::HistoryRead, desc});
     c.scenario.imports.push_back({next.resource, ScenarioImport::Role::HistoryWrite, desc});
     addSynth(c, "TAA", SynthKind::Compute, [&](Setup& s) {
@@ -495,7 +497,7 @@ void buildAsync(Ctx& c) {
     });
     const Queue q = c.params.asyncCompute ? Queue::AsyncCompute : Queue::Graphics;
     const TextureDesc atlasDesc{c.hdr(), 4096, 4096};
-    const TextureRef atlas = c.graph.importTexture("Probe atlas", atlasDesc, ImportContentsDefined);
+    const TextureRef atlas = c.graph.importTexture("Probe atlas" + c.suffix, atlasDesc, ImportContentsDefined);
     c.scenario.imports.push_back({atlas.resource, ScenarioImport::Role::Static, atlasDesc});
     TextureRef gi, particles;
     addSynth(c, "GI probe update", SynthKind::Compute, q, [&](Setup& s) {
@@ -562,13 +564,25 @@ bool buildScenario(u32 index, const ScenarioParams& params, RenderGraph& graph, 
             return false;
         }
     }
+    if (params.views < 1 || params.views > 6) {
+        if (error) *error = "scenario views must be 1..6";
+        return false;
+    }
     out.name = scenarios()[index].name;
     Ctx c{params, graph, out, factory, {}, 1};
-    scenarios()[index].build(c);
+    std::vector<TextureRef> outputs;
+    for (u32 v = 0; v < params.views; ++v) {
+        // Split screen / extra cameras: independent copies of the scenario
+        // (own names, seeds and geometry), composited by the present pass.
+        c.suffix       = v == 0 ? std::string() : " [v" + std::to_string(v) + "]";
+        c.geometryBase = v * 1000;
+        scenarios()[index].build(c);
+        outputs.push_back(out.output);
+    }
+    c.suffix.clear();
     if (drawable.valid()) {
-        const TextureRef source = out.output;
         addSynth(c, "Present", SynthKind::Fullscreen, [&](Setup& s) {
-            s.sample(source);
+            for (const TextureRef& t : outputs) s.sample(t);
             s.color(drawable, 0);
         });
     }

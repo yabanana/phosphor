@@ -138,6 +138,8 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         params.wideHdr      = options_.scenarioWide;
         params.asyncCompute = options_.scenarioAsync;
         params.remat        = options_.graphRemat;
+        params.views        = options_.scenarioViews;
+        params.rematIterations = options_.graphRematCost;
         scenario_ = std::make_unique<ScenarioPasses>(*context_, *pipelines_, *options_.graphScenario, params);
     }
     if (options_.gpuTiming) {
@@ -1053,6 +1055,7 @@ void Engine::buildFrameGraph(u32 width, u32 height) {
     // F4.1 attribution mode: every raster pass in its own render pass.
     CompileOptions compileOptions;
     compileOptions.fuseRasterPasses = !options_.gpuTimingUnfused;
+    compileOptions.alias            = !options_.graphNoAlias;
     // OPT-1 spike: an execution order given by pass names.
     for (const std::string& name : options_.graphOrder) {
         const auto& passes = frameGraph_.passes();

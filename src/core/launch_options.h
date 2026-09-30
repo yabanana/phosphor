@@ -106,10 +106,16 @@ namespace phosphor {
 //                      (2x bytes, same work: bandwidth control)
 //   --graph-scenario-no-async  scenario 3's eligible passes stay on the
 //                      graphics queue
+//   --graph-scenario-views N   N independent copies of the scenario (split
+//                      screen) composited by the present pass (1..6)
 //   --graph-remat LIST comma-separated scenario signals recomputed by their
 //                      consumers instead of stored (OPT-1.2)
+//   --graph-remat-cost N  ALU steps a consumer spends per recomputed signal
+//                      (default 16; break-even sweeps)
 //   --graph-order LIST comma-separated pass names: the execution order the
 //                      graph compiler must use (OPT-1 spike; validated)
+//   --graph-no-alias   every transient gets its own memory (no aliasing:
+//                      no aliasing barriers; OPT-1 spike)
 //
 // Arguments not starting with "--" are ignored: macOS may add its own
 // (e.g. -NSDocumentRevisionsDebugMode when launched from Xcode).
@@ -171,8 +177,11 @@ struct LaunchOptions {
     float       scenarioWork     = 1.0f;
     bool        scenarioWide     = false;
     bool        scenarioAsync    = true;
+    u32         scenarioViews    = 1;
     std::vector<std::string> graphRemat;
+    u32         graphRematCost   = 16;
     std::vector<std::string> graphOrder;
+    bool        graphNoAlias     = false;
 
     /// True when the app runs a fixed number of frames and then exits.
     [[nodiscard]] bool benchmark() const { return frames > 0; }
