@@ -14,6 +14,7 @@
 
 #include <json.hpp> // nlohmann/json, shipped with tinygltf
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -131,7 +132,8 @@ int cmdPredict(const std::map<std::string, std::string>& a) {
     std::string text;
     SocCostModel model;
     std::string err;
-    if (!readFile(a.at("model"), text) || !fromJson(text, model, &err)) {
+    if (!readFile(a.at("model"), text)) err = "cannot read file";
+    if (!err.empty() || !fromJson(text, model, &err)) {
         std::fprintf(stderr, "soc_model: model %s: %s\n", a.at("model").c_str(), err.c_str());
         return 1;
     }
@@ -169,7 +171,24 @@ int cmdPredict(const std::map<std::string, std::string>& a) {
     }
     for (const json& u : report["passes"]) {
         const std::string name = u.value("name", std::string("?"));
-        UnitWorkCounts wc = workFrom(u.contains("work") ? u["work"] : json(), {});
+        // Engine report v3: `work` is an array with one entry per render-graph pass
+        // ({"pass","draws",...}); v2-style single object also accepted.  Entries of a
+        // unit are summed (lights: max), since the unit lists its shaders without a
+        // per-pass mapping.
+        UnitWorkCounts wc;
+        if (u.contains("work")) {
+            const json& wj = u["work"];
+            if (wj.is_array()) {
+                for (const json& e : wj) {
+                    const UnitWorkCounts x = workFrom(e, {});
+                    wc.draws += x.draws; wc.instances += x.instances; wc.indices += x.indices;
+                    wc.vertices += x.vertices; wc.pixels += x.pixels; wc.threads += x.threads;
+                    wc.fragments += x.fragments; wc.lights = std::max(wc.lights, x.lights);
+                }
+            } else {
+                wc = workFrom(wj, wc);
+            }
+        }
         if (workFile.contains(name)) wc = workFrom(workFile[name], wc);
 
         PassWork w;
@@ -241,8 +260,9 @@ int cmdPredict(const std::map<std::string, std::string>& a) {
         "ALU time = flops/FP32 FMA rate + transcendentals/rate + divides/rate + int ops/fastest measured int rate (they share the ALUs); a rate missing from the model contributes 0.",
         "Texture samples, loads/stores, register spills, occupancy, ALU/memory overlap losses and rasteriser/geometry limits are NOT modelled (they only make the real time larger).",
         "DRAM bytes come from the render graph estimate (`dram_bytes` of the report), not from a hardware counter; on-chip bytes are not estimated (0), so the on-chip roof never binds here.",
-        "Ops are static AIR counts per lane: branches count both sides, `if` bodies always executed, loops with unknown trip count count once (forward_fs uses work.lights as trip count).",
-        "Nested loops are not modelled: inner bodies appear in the outer loop cost and again on their own.",
+        "Ops are STATIC AIR counts per lane: every block once, BOTH sides of every branch (function-constant variants included), so the ALU term can exceed what a lane really executes: it is an estimate, not a strict bound. Loops with unknown trip count count once (forward_fs uses work.lights as trip count).",
+        "Only outermost loops are scaled by the trip count; nested loops stay inside the outer body (inner trip counts are not modelled).",
+        "Report v3 `work` entries of a unit are summed over its passes (lights = max) and applied to every shader of the unit by stage: a shader used by only some passes is over-counted.",
         "Invocations: vertex = work.vertices (else work.indices, i.e. no post-transform cache reuse and no instancing multiplier); fragment = work.fragments (else work.pixels: overdraw, early-z and helper lanes ignored); compute = work.threads.",
         "FLOP counting as in B-01: fma = 2, add/mul = 1; the roof is the measured independent-chain FP32 FMA rate at the sustained P-state of the characterisation run.",
         "Shaders not found in the ops file are listed in shaders_missing and contribute no work (lower bound stays a lower bound).",

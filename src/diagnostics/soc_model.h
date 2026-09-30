@@ -142,8 +142,8 @@ struct ShaderOps {
 };
 
 /// Ops per invocation: statics + (trips - 1) * sum(loop bodies), clamped at 0.
-/// Nested loops are not modelled (inner bodies are counted inside the outer
-/// one and again on their own); the caller documents that approximation.
+/// Only outermost loops are listed (tools/air_ops.py); nested loops stay inside
+/// the outer body and their trip counts are not modelled.
 [[nodiscard]] OpCounts opsPerInvocation(const ShaderOps& s, double loopTrips);
 
 /// Parse the JSON of tools/air_ops.py: {"functions": {name: {kind, static, loops:[{per_iteration}]}}}.
