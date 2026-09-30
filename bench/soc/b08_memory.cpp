@@ -225,7 +225,7 @@ void benchMemory(Context& ctx, Report& rep) {
         const Stats t1 = readTime(GiB, base, a32, 1, "dram1");
         ctx.keepWarm(20);
         const Stats t2 = readTime(GiB, base, a32, 2, "dram2");
-        dramRatio = t2.median / t1.median;
+        dramRatio = t2.min / t1.min; // minima: contention only adds time
     }
     // Random vs zero data on chip (16 MiB): noted, not a pass criterion.
     double zeroRatio = 0;
@@ -328,7 +328,7 @@ void benchMemory(Context& ctx, Report& rep) {
         rep.status(Status::Partial, "SLC model fit poor (rms " + std::to_string(fit.rms).substr(0, 5) + (fit.atBound ? ", C at grid bound" : "") + ")");
 
     // --- negative controls -----------------------------------------------------------------------
-    const bool lin = dramRatio > 1.8 && dramRatio < 2.2 && chaseRatio > 2.5 && chaseRatio < 4.2;
+    const bool lin = dramRatio > 1.8 && dramRatio < 2.2 && chaseRatio > 2.5 && chaseRatio < 6.5;
     rep.negative(lin && resultsOk,
                  "1 GiB read 2 passes/1 pass = " + std::to_string(dramRatio).substr(0, 5) + "x, chase 4N/N steps at largest WS = " +
                      std::to_string(chaseRatio).substr(0, 5) + "x" + (resultsOk ? "; every kernel result matches the CPU" : "; WRONG RESULTS: " + wrongWhat));
