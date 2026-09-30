@@ -17,6 +17,15 @@
     "loads": 1,
     "stores": 1
    },
+   "static_min": {
+    "flops": 0,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 14,
+    "samples": 0,
+    "loads": 1,
+    "stores": 0
+   },
    "loops": [
     {
      "head": "9",
@@ -30,6 +39,15 @@
       "samples": 0,
       "loads": 0,
       "stores": 1
+     },
+     "per_iteration_min": {
+      "flops": 0,
+      "transcendentals": 0,
+      "divides": 0,
+      "int_ops": 0,
+      "samples": 0,
+      "loads": 0,
+      "stores": 0
      }
     }
    ],
@@ -48,6 +66,15 @@
     "loads": 1,
     "stores": 1
    },
+   "static_min": {
+    "flops": 0,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 12,
+    "samples": 0,
+    "loads": 1,
+    "stores": 0
+   },
    "loops": [
     {
      "head": "7",
@@ -61,6 +88,15 @@
       "samples": 0,
       "loads": 0,
       "stores": 1
+     },
+     "per_iteration_min": {
+      "flops": 0,
+      "transcendentals": 0,
+      "divides": 0,
+      "int_ops": 0,
+      "samples": 0,
+      "loads": 0,
+      "stores": 0
      }
     },
     {
@@ -74,6 +110,15 @@
       "int_ops": 12,
       "samples": 0,
       "loads": 1,
+      "stores": 0
+     },
+     "per_iteration_min": {
+      "flops": 0,
+      "transcendentals": 0,
+      "divides": 0,
+      "int_ops": 0,
+      "samples": 0,
+      "loads": 0,
       "stores": 0
      }
     }
@@ -93,6 +138,15 @@
     "loads": 2,
     "stores": 1
    },
+   "static_min": {
+    "flops": 0,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 14,
+    "samples": 0,
+    "loads": 2,
+    "stores": 0
+   },
    "loops": [
     {
      "head": "13",
@@ -106,6 +160,15 @@
       "samples": 0,
       "loads": 0,
       "stores": 1
+     },
+     "per_iteration_min": {
+      "flops": 0,
+      "transcendentals": 0,
+      "divides": 0,
+      "int_ops": 0,
+      "samples": 0,
+      "loads": 0,
+      "stores": 0
      }
     }
    ],
@@ -116,6 +179,15 @@
    "kind": "vertex",
    "blocks": 1,
    "static": {
+    "flops": 82,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 2,
+    "samples": 0,
+    "loads": 46,
+    "stores": 0
+   },
+   "static_min": {
     "flops": 82,
     "transcendentals": 0,
     "divides": 0,
@@ -140,6 +212,15 @@
     "loads": 54,
     "stores": 0
    },
+   "static_min": {
+    "flops": 0,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 0,
+    "samples": 0,
+    "loads": 2,
+    "stores": 0
+   },
    "loops": [
     {
      "head": "230",
@@ -153,6 +234,15 @@
       "samples": 0,
       "loads": 21,
       "stores": 0
+     },
+     "per_iteration_min": {
+      "flops": 0,
+      "transcendentals": 0,
+      "divides": 0,
+      "int_ops": 0,
+      "samples": 0,
+      "loads": 0,
+      "stores": 0
      }
     }
    ],
@@ -163,6 +253,15 @@
    "kind": "kernel",
    "blocks": 1,
    "static": {
+    "flops": 0,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 7,
+    "samples": 0,
+    "loads": 1,
+    "stores": 0
+   },
+   "static_min": {
     "flops": 0,
     "transcendentals": 0,
     "divides": 0,
@@ -187,6 +286,15 @@
     "loads": 0,
     "stores": 1
    },
+   "static_min": {
+    "flops": 0,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 2,
+    "samples": 0,
+    "loads": 0,
+    "stores": 0
+   },
    "loops": [
     {
      "head": "5",
@@ -200,6 +308,15 @@
       "samples": 0,
       "loads": 0,
       "stores": 1
+     },
+     "per_iteration_min": {
+      "flops": 0,
+      "transcendentals": 0,
+      "divides": 0,
+      "int_ops": 0,
+      "samples": 0,
+      "loads": 0,
+      "stores": 0
      }
     }
    ],
@@ -210,6 +327,15 @@
    "kind": "kernel",
    "blocks": 1,
    "static": {
+    "flops": 0,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 4,
+    "samples": 0,
+    "loads": 1,
+    "stores": 0
+   },
+   "static_min": {
     "flops": 0,
     "transcendentals": 0,
     "divides": 0,
@@ -234,6 +360,15 @@
     "loads": 0,
     "stores": 0
    },
+   "static_min": {
+    "flops": 4,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 3,
+    "samples": 0,
+    "loads": 0,
+    "stores": 0
+   },
    "loops": [],
    "nested_loops": 0
   },
@@ -242,6 +377,15 @@
    "kind": "fragment",
    "blocks": 1,
    "static": {
+    "flops": 0,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 4,
+    "samples": 0,
+    "loads": 0,
+    "stores": 0
+   },
+   "static_min": {
     "flops": 0,
     "transcendentals": 0,
     "divides": 0,
@@ -266,6 +410,15 @@
     "loads": 0,
     "stores": 1
    },
+   "static_min": {
+    "flops": 0,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 3,
+    "samples": 0,
+    "loads": 0,
+    "stores": 1
+   },
    "loops": [],
    "nested_loops": 0
   },
@@ -274,6 +427,15 @@
    "kind": "vertex",
    "blocks": 1,
    "static": {
+    "flops": 25,
+    "transcendentals": 3,
+    "divides": 0,
+    "int_ops": 0,
+    "samples": 0,
+    "loads": 8,
+    "stores": 0
+   },
+   "static_min": {
     "flops": 25,
     "transcendentals": 3,
     "divides": 0,
@@ -298,6 +460,15 @@
     "loads": 0,
     "stores": 0
    },
+   "static_min": {
+    "flops": 4,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 0,
+    "samples": 1,
+    "loads": 0,
+    "stores": 0
+   },
    "loops": [],
    "nested_loops": 0
   },
@@ -310,6 +481,15 @@
     "transcendentals": 0,
     "divides": 0,
     "int_ops": 4,
+    "samples": 0,
+    "loads": 1,
+    "stores": 1
+   },
+   "static_min": {
+    "flops": 0,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 1,
     "samples": 0,
     "loads": 1,
     "stores": 1
@@ -327,6 +507,15 @@
       "samples": 0,
       "loads": 0,
       "stores": 1
+     },
+     "per_iteration_min": {
+      "flops": 0,
+      "transcendentals": 0,
+      "divides": 0,
+      "int_ops": 0,
+      "samples": 0,
+      "loads": 0,
+      "stores": 0
      }
     }
    ],
@@ -337,6 +526,15 @@
    "kind": "vertex",
    "blocks": 1,
    "static": {
+    "flops": 52,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 0,
+    "samples": 0,
+    "loads": 35,
+    "stores": 0
+   },
+   "static_min": {
     "flops": 52,
     "transcendentals": 0,
     "divides": 0,
@@ -361,6 +559,15 @@
     "loads": 0,
     "stores": 0
    },
+   "static_min": {
+    "flops": 4,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 0,
+    "samples": 0,
+    "loads": 0,
+    "stores": 0
+   },
    "loops": [],
    "nested_loops": 0
   },
@@ -377,6 +584,15 @@
     "loads": 11,
     "stores": 0
    },
+   "static_min": {
+    "flops": 0,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 0,
+    "samples": 0,
+    "loads": 1,
+    "stores": 0
+   },
    "loops": [
     {
      "head": "8",
@@ -389,6 +605,15 @@
       "int_ops": 3,
       "samples": 0,
       "loads": 10,
+      "stores": 0
+     },
+     "per_iteration_min": {
+      "flops": 0,
+      "transcendentals": 0,
+      "divides": 0,
+      "int_ops": 0,
+      "samples": 0,
+      "loads": 0,
       "stores": 0
      }
     }
@@ -408,6 +633,15 @@
     "loads": 4,
     "stores": 2
    },
+   "static_min": {
+    "flops": 0,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 4,
+    "samples": 0,
+    "loads": 1,
+    "stores": 0
+   },
    "loops": [],
    "nested_loops": 0
   },
@@ -416,6 +650,15 @@
    "kind": "vertex",
    "blocks": 1,
    "static": {
+    "flops": 4,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 3,
+    "samples": 0,
+    "loads": 0,
+    "stores": 0
+   },
+   "static_min": {
     "flops": 4,
     "transcendentals": 0,
     "divides": 0,
@@ -440,6 +683,15 @@
     "loads": 15,
     "stores": 0
    },
+   "static_min": {
+    "flops": 0,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 5,
+    "samples": 0,
+    "loads": 2,
+    "stores": 0
+   },
    "loops": [],
    "nested_loops": 0
   },
@@ -448,6 +700,15 @@
    "kind": "kernel",
    "blocks": 1,
    "static": {
+    "flops": 0,
+    "transcendentals": 0,
+    "divides": 0,
+    "int_ops": 0,
+    "samples": 0,
+    "loads": 0,
+    "stores": 0
+   },
+   "static_min": {
     "flops": 0,
     "transcendentals": 0,
     "divides": 0,

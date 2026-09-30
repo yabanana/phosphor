@@ -139,12 +139,19 @@ struct ShaderOps {
     std::string kind;              // "vertex" | "fragment" | "kernel" | ""
     OpCounts    statics;           // every static instruction once (loop bodies once)
     std::vector<OpCounts> loops;   // per-iteration cost of each detected loop
+    // Cheapest CFG path (one side of every branch; tools/air_ops.py
+    // static_min / per_iteration_min): what a lower bound may count.
+    bool        hasMin = false;
+    OpCounts    staticsMin;
+    std::vector<OpCounts> loopsMin;
 };
 
 /// Ops per invocation: statics + (trips - 1) * sum(loop bodies), clamped at 0.
 /// Only outermost loops are listed (tools/air_ops.py); nested loops stay inside
 /// the outer body and their trip counts are not modelled.
-[[nodiscard]] OpCounts opsPerInvocation(const ShaderOps& s, double loopTrips);
+/// lowerBound = true: the cheapest-path counts (if the JSON has them), the
+/// only ones a lower bound may use; false: every block (an estimate).
+[[nodiscard]] OpCounts opsPerInvocation(const ShaderOps& s, double loopTrips, bool lowerBound = false);
 
 /// Parse the JSON of tools/air_ops.py: {"functions": {name: {kind, static, loops:[{per_iteration}]}}}.
 [[nodiscard]] bool parseShaderOps(const std::string& text, std::vector<ShaderOps>& out, std::string* error = nullptr);

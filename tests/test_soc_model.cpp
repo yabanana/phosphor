@@ -246,3 +246,23 @@ TEST_CASE("Shader ops: parse, lookup, loop trips") {
     CHECK(opsPerInvocation(*fs, 0).flops == 70); // loop body not executed at all
     CHECK_FALSE(parseShaderOps("{}", ops));
 }
+
+TEST_CASE("Shader ops: the lower bound uses the cheapest path (OPT-0.4)") {
+    const char* text = R"({"functions": {
+        "forward_fs": {"kind": "fragment",
+                       "static": {"flops": 100}, "static_min": {"flops": 40},
+                       "loops": [{"per_iteration": {"flops": 30}, "per_iteration_min": {"flops": 10}}]},
+        "old_fs": {"kind": "fragment", "static": {"flops": 100}, "loops": [{"per_iteration": {"flops": 30}}]}}})";
+    std::vector<ShaderOps> ops;
+    REQUIRE(parseShaderOps(text, ops));
+    const ShaderOps* fs = findShader(ops, "forward_fs");
+    REQUIRE(fs);
+    CHECK(fs->hasMin);
+    CHECK(opsPerInvocation(*fs, 4, true).flops == 40 + 3 * 10);  // lower bound
+    CHECK(opsPerInvocation(*fs, 4, false).flops == 100 + 3 * 30); // estimate
+    CHECK(opsPerInvocation(*fs, 4).flops == 100 + 3 * 30);        // default: estimate (unchanged callers)
+    const ShaderOps* old = findShader(ops, "old_fs");             // JSON without *_min: falls back
+    REQUIRE(old);
+    CHECK_FALSE(old->hasMin);
+    CHECK(opsPerInvocation(*old, 4, true).flops == 100 + 3 * 30);
+}

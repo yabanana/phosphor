@@ -194,9 +194,10 @@ int cmdPredict(const std::map<std::string, std::string>& a) {
         }
         if (workFile.contains(name)) wc = workFrom(workFile[name], wc);
 
-        PassWork w;
-        w.dramBytes = u.value("dram_bytes", 0.0);
-        w.draws = static_cast<u32>(wc.draws);
+        // w: cheapest-path counts (the lower bound); we: every block (estimate).
+        PassWork w, we;
+        w.dramBytes = we.dramBytes = u.value("dram_bytes", 0.0);
+        w.draws = we.draws = static_cast<u32>(wc.draws);
         const double vertexInv = wc.vertices > 0 ? wc.vertices : wc.indices;
         const double fragInv = wc.fragments > 0 ? wc.fragments : wc.pixels;
         json matched = json::array(), missing = json::array();
@@ -211,12 +212,18 @@ int cmdPredict(const std::map<std::string, std::string>& a) {
                 const std::string kind = kindOf(*s);
                 const double inv = kind == "vertex" ? vertexInv : kind == "fragment" ? fragInv : wc.threads;
                 const double trips = (sname.rfind("forward_fs", 0) == 0 && wc.lights > 0) ? wc.lights : 1.0;
-                const OpCounts c = opsPerInvocation(*s, trips).scaled(inv);
+                const OpCounts c = opsPerInvocation(*s, trips, /*lowerBound=*/true).scaled(inv);
                 w.flops += c.flops;
                 w.transcendentals += c.transcendentals;
                 w.divides += c.divides;
                 w.intOps += c.intOps;
                 w.samples += c.samples;
+                const OpCounts ce = opsPerInvocation(*s, trips, false).scaled(inv);
+                we.flops += ce.flops;
+                we.transcendentals += ce.transcendentals;
+                we.divides += ce.divides;
+                we.intOps += ce.intOps;
+                we.samples += ce.samples;
                 matched.push_back(s->name + " (" + kind + ", x" + std::to_string(static_cast<long long>(inv)) + ")");
             }
         }
@@ -226,6 +233,10 @@ int cmdPredict(const std::map<std::string, std::string>& a) {
         o["name"] = name;
         o["measured_ms"] = measured;
         o["predicted_ms"] = p.ms;
+        const PassPrediction pe = model.predictPass(we);
+        o["estimate_ms"] = pe.ms; // every block of the (variant's) code: not a bound
+        o["estimate_bound"] = pe.bound;
+        o["estimate_flops"] = we.flops;
         o["bound"] = p.bound;
         o["dram_ms"] = p.dramMs;
         o["onchip_ms"] = p.onchipMs;
@@ -263,7 +274,7 @@ int cmdPredict(const std::map<std::string, std::string>& a) {
         "ALU time = flops/FP32 FMA rate + transcendentals/rate + divides/rate + int ops/fastest measured int rate (they share the ALUs); a rate missing from the model contributes 0.",
         "Texture samples, loads/stores, register spills, occupancy, ALU/memory overlap losses and rasteriser/geometry limits are NOT modelled (they only make the real time larger).",
         "DRAM bytes come from the render graph estimate (`dram_bytes` of the report), not from a hardware counter; on-chip bytes are not estimated (0), so the on-chip roof never binds here.",
-        "Ops are STATIC AIR counts per lane: every block once, BOTH sides of every branch (function-constant variants included), so the ALU term can exceed what a lane really executes: it is an estimate, not a strict bound. Loops with unknown trip count count once (forward_fs uses work.lights as trip count).",
+        "predicted_ms (the lower bound) counts the CHEAPEST path of each shader's CFG (static_min / per_iteration_min of tools/air_ops.py, one side of every branch); estimate_ms counts every block (both sides of every branch): not a bound. Count the variant the engine runs (tools/air_ops.py --forward-variant) so dead function-constant branches are gone. Loops with unknown trip count count once (forward_fs uses work.lights as trip count).",
         "Only outermost loops are scaled by the trip count; nested loops stay inside the outer body (inner trip counts are not modelled).",
         "Report v3 `work` entries of a unit are summed over its passes (lights = max) and applied to every shader of the unit by stage: a shader used by only some passes is over-counted.",
         "Invocations: vertex = work.vertices (else work.indices, i.e. no post-transform cache reuse and no instancing multiplier); fragment = work.fragments (else work.pixels: overdraw, early-z and helper lanes ignored); compute = work.threads.",

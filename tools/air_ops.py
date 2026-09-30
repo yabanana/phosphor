@@ -19,7 +19,10 @@ lane on the optimised AIR:
   loads / stores   memory instructions (any address space)
 
 Counts are STATIC: every basic block once, both sides of every branch (function
-constants included).  Loops are found by back edges; a loop's `per_iteration`
+constants included).  `static_min` / `per_iteration_min` are the counts along
+the CHEAPEST path of the CFG (back edges removed; one side of every branch):
+the lower bound the cost model uses (OPT-0.4: the static totals over-predicted
+Many Lights, 64.6 ms predicted vs 52.5 measured).  Loops are found by back edges; a loop's `per_iteration`
 is the cost of its blocks (head..tail in emission order).  Only OUTERMOST loops
 are listed (back edges sharing a tail are one loop); loops nested in them are
 counted in `nested_loops` and their cost stays inside the outer body, their trip
@@ -91,6 +94,39 @@ def entry_kinds(ll):
     return kinds
 
 
+def _weight(c):
+    """Scalar used only to choose the cheapest path (FMA-equivalent slots)."""
+    return c.get("flops", 0) * 0.5 + 4 * c.get("transcendentals", 0) + 4 * c.get("divides", 0) + c.get("int_ops", 0) \
+        + c.get("samples", 0)
+
+
+def min_path(order, succ, costs, start, end, lo, hi):
+    """Counts along the cheapest forward path from `start` to `end` (None:
+    any block without forward successors inside [lo, hi]); blocks outside
+    [lo, hi] are not entered.  The lower bound of what one invocation (or
+    one loop iteration) executes: only one side of every branch."""
+    idx = {b: i for i, b in enumerate(order)}
+    best = {start: (_weight(costs[start]), costs[start])}
+    for b in order[idx[start]:hi + 1]:
+        if b not in best:
+            continue
+        w, c = best[b]
+        for t in succ[b]:
+            if not (lo <= idx[t] <= hi):
+                continue
+            ct = c + costs[t]
+            wt = _weight(ct)
+            if t not in best or wt < best[t][0]:
+                best[t] = (wt, ct)
+    if end is not None:
+        chosen = best.get(end)
+    else:
+        sinks = [best[b] for b in best if not any(lo <= idx[t] <= hi for t in succ[b])]
+        chosen = min(sinks, key=lambda x: x[0]) if sinks else None
+    c = chosen[1] if chosen else collections.Counter()
+    return {k: c.get(k, 0) for k in FIELDS}
+
+
 def analyse(ll, file=""):
     """{function: entry} for the entry points of an AIR .ll text."""
     kinds = entry_kinds(ll)
@@ -133,15 +169,27 @@ def analyse(ll, file=""):
         total = collections.Counter()
         for b in order:
             total += cost(blocks[b])
+        # Forward successors (back edges removed): the CFG as a DAG in
+        # emission order, for the cheapest path (OPT-0.4 lower bound).
+        succ = {b: [] for b in order}
+        for b in order:
+            for l in blocks[b]:
+                if re.search(r"^\s*(br|switch)\b", l):
+                    for t in re.findall(r"label %(\d+)", l):
+                        if t in idx and idx[t] > idx[b] and t not in succ[b]:
+                            succ[b].append(t)
+        costs = {b: cost(blocks[b]) for b in order}
         loops = []
         for hi, ti, h, t in outer:
             body_c = collections.Counter()
             for b in order[hi:ti + 1]:
-                body_c += cost(blocks[b])
+                body_c += costs[b]
             loops.append({"head": h, "tail": t, "blocks": ti - hi + 1,
-                          "per_iteration": {k: body_c.get(k, 0) for k in FIELDS}})
+                          "per_iteration": {k: body_c.get(k, 0) for k in FIELDS},
+                          "per_iteration_min": {k: v for k, v in min_path(order, succ, costs, h, t, hi, ti).items()}})
         out[name] = {"file": file, "kind": kinds.get(name, ""), "blocks": len(order),
                      "static": {k: total.get(k, 0) for k in FIELDS},
+                     "static_min": min_path(order, succ, costs, "entry", None, 0, len(order) - 1),
                      "loops": loops, "nested_loops": nested}
     return out
 
@@ -250,12 +298,38 @@ def main():
     ap.add_argument("--out", default=os.path.join(ROOT, "bench", "results", "shader_ops.json"))
     ap.add_argument("--only", nargs="*", help="only these .metal file names")
     ap.add_argument("--ll", help="analyse an existing AIR .ll instead of compiling")
+    ap.add_argument("--forward-variant", nargs=3, metavar=("LIGHT_TYPES", "EMISSIVE", "DEBUG_MODE"),
+                    help="count forward.metal as the specialised variant the engine logs (e.g. 0x2 0 0): the "
+                         "function constants become compile-time constants, dead branches disappear")
     a = ap.parse_args()
     if a.self_test:
         return self_test()
     functions = collections.OrderedDict()
     errors = {}
-    if a.ll:
+    if a.forward_variant:
+        lt, em, dbg = int(a.forward_variant[0], 0), int(a.forward_variant[1], 0), int(a.forward_variant[2], 0)
+        includes = a.include or [os.path.join(ROOT, "src"), os.path.join(ROOT, "build", "generated")]
+        version = compiler_version()
+        with tempfile.TemporaryDirectory() as td:
+            os.makedirs(os.path.join(td, "pipeline"))
+            # Same names as the generated header (tools/variant_gen), values fixed.
+            with open(os.path.join(td, "pipeline", "forward_variants.generated.metal.h"), "w") as f:
+                f.write("#pragma once\n"
+                        "constant bool kLightTypesSpecialised = true;\nconstant uint kLightTypes = %uu;\n"
+                        "constant bool kEmissiveSpecialised = true;\nconstant bool kEmissive = %s;\n"
+                        "constant bool kDebugModeSpecialised = true;\nconstant uint kDebugMode = %uu;\n"
+                        "constant uint FC_SALT [[function_constant(31)]];\n" % (lt, "true" if em else "false", dbg))
+            src = open(os.path.join(a.shader_dir, "forward.metal")).read()
+            # The salt (hot-reload / cold-compile probe) is never defined in a bench.
+            src = src.replace("is_function_constant_defined(FC_SALT)", "false")
+            path = os.path.join(td, "forward.metal")
+            with open(path, "w") as f:
+                f.write(src)
+            ll = compile_shader(path, [td] + includes)
+        for name, entry in analyse(ll, "forward.metal").items():
+            entry["variant"] = {"light_types": lt, "emissive": em, "debug_mode": dbg}
+            functions[name] = entry
+    elif a.ll:
         with open(a.ll) as f:
             functions.update(analyse(f.read(), os.path.basename(a.ll)))
         version = ""

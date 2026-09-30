@@ -216,10 +216,11 @@ OpCounts OpCounts::scaled(double k) const {
     return {flops * k, transcendentals * k, divides * k, intOps * k, samples * k, loads * k, stores * k};
 }
 
-OpCounts opsPerInvocation(const ShaderOps& s, double loopTrips) {
+OpCounts opsPerInvocation(const ShaderOps& s, double loopTrips, bool lowerBound) {
+    const bool useMin = lowerBound && s.hasMin;
     OpCounts body;
-    for (const OpCounts& l : s.loops) body += l;
-    OpCounts r = s.statics;
+    for (const OpCounts& l : useMin ? s.loopsMin : s.loops) body += l;
+    OpCounts r = useMin ? s.staticsMin : s.statics;
     OpCounts extra = body.scaled(loopTrips - 1.0);
     r += extra;
     auto clamp = [](double& v) { v = std::max(v, 0.0); };
@@ -254,6 +255,11 @@ bool parseShaderOps(const std::string& text, std::vector<ShaderOps>& out, std::s
             s.statics = countsFrom(f.at("static"));
             if (f.contains("loops"))
                 for (const json& l : f["loops"]) s.loops.push_back(countsFrom(l.at("per_iteration")));
+            if (f.contains("static_min")) {
+                s.hasMin = true;
+                s.staticsMin = countsFrom(f.at("static_min"));
+                for (const json& l : f["loops"]) s.loopsMin.push_back(countsFrom(l.at("per_iteration_min")));
+            }
             v.push_back(std::move(s));
         }
         out = std::move(v);
