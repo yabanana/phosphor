@@ -65,3 +65,10 @@ kernel void b11_read(texture2d<float, access::read> tex [[texture(0)]], device f
         for (uint i = 0; i < 4; ++i) acc += tex.read(uint2(gid.x * 4 + i, gid.y * 4 + j));
     out[gid.y * gsz.x + gid.x] = dot(acc, float4(1.0f, 2.0f, 3.0f, 5.0f));
 }
+
+// RGBA16Float writer with random content (the "other format" texture aliasing the measured one in the heap).
+kernel void b11_cs_write16(texture2d<half, access::write> tex [[texture(0)]], constant WriteParams& p [[buffer(0)]],
+                           uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= p.width || gid.y >= p.height) return;
+    tex.write(half4(content(p.kind, gid.x, gid.y, p.pass)), gid);
+}
