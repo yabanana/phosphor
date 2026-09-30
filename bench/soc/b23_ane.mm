@@ -263,6 +263,7 @@ void benchAne(Context& ctx, Report& rep) {
     } cleanup{dir};
 
     bool planOk = true, outputOk = true;
+    int planChecks = 0; // the ANE placement check must actually run (it passed vacuously without an ANE config)
     std::string planDetail, outputDetail;
     std::map<std::string, double> aneLatency, cpuLatency; // model -> minimum ms (least disturbed by other clients)
     double aneConvLatency = 0;
@@ -361,6 +362,7 @@ void benchAne(Context& ctx, Report& rep) {
                 if (!(rel < 0.05)) { outputOk = false; outputDetail += base + " err " + std::to_string(rel).substr(0, 6) + "; "; }
             }
             if (u.units == MLComputeUnitsCPUAndNeuralEngine) {
+                ++planChecks;
                 aneLatency[s.name] = lat.min;
                 if (std::string(s.name) == "conv") aneConvLatency = lat.median;
                 if (!(plan.ok && plan.heavy.count("ANE") && plan.heavy.at("ANE") == s.layers && plan.heavy.size() == 1)) {
@@ -469,6 +471,10 @@ void benchAne(Context& ctx, Report& rep) {
         rep.value("ane.conv.marginal_tflops", "TFLOPS", c4.flop() * 1e-12 / ((aneLatency["conv8"] - aneLatency["conv"]) * 1e-3), {{"layers_added", 4}});
         rep.value("ane.conv.fixed_overhead_ms", "ms", 2 * aneLatency["conv"] - aneLatency["conv8"], {}, false);
         rep.note("ane.conv.marginal_tflops = FLOP of 4 layers / (min latency(8 layers) - min latency(4 layers)); fixed_overhead_ms = latency extrapolated to 0 layers");
+    }
+    if (planChecks == 0) {
+        planOk = false;
+        planDetail += "no cpuAndNeuralEngine configuration was checked; ";
     }
     rep.negative(planOk && outputOk && layersOk,
                  std::string("MLComputePlan puts every conv/innerProduct layer on ANE for cpuAndNeuralEngine: ") + (planOk ? "yes" : "NO (" + planDetail + ")") +

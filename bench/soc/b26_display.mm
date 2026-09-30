@@ -46,6 +46,8 @@ constexpr uint32_t kLoadThreads = 1u << 20;
 @property(nonatomic, strong) id<MTLComputePipelineState> loadPso;
 @property(nonatomic, strong) id<MTLBuffer> loadOut;
 @property(nonatomic) uint32_t loadIters;
+@property(nonatomic, strong) id<MTLEvent> loadDone; // the present waits for the frame's load
+@property(nonatomic) uint64_t loadValue;
 @property(nonatomic) BOOL withLoad;
 @property(nonatomic) double startTime;
 @property(nonatomic) double seconds;
@@ -80,6 +82,10 @@ constexpr uint32_t kLoadThreads = 1u << 20;
         [e dispatchThreads:MTLSizeMake(soc::kLoadThreads, 1, 1) threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
         [e endEncoding];
         [lcb addCompletedHandler:^(id<MTLCommandBuffer> cb) { rec->gpuMs = (cb.GPUEndTime - cb.GPUStartTime) * 1e3; }];
+        // Without this dependency the tiny present pass ran beside the load
+        // and every frame was on time even with 9 ms of load (measured).
+        if (!self.loadDone) self.loadDone = [self.queue.device newEvent];
+        [lcb encodeSignalEvent:self.loadDone value:++self.loadValue];
         [lcb commit];
     }
     id<CAMetalDrawable> d = update.drawable;
@@ -89,6 +95,7 @@ constexpr uint32_t kLoadThreads = 1u << 20;
     rp.colorAttachments[0].storeAction = MTLStoreActionStore;
     rp.colorAttachments[0].clearColor = MTLClearColorMake(0.1 * double(idx % 10), 0.2, 0.3, 1);
     id<MTLCommandBuffer> cb = [self.queue commandBuffer];
+    if (self.withLoad) [cb encodeWaitForEvent:self.loadDone value:self.loadValue];
     [[cb renderCommandEncoderWithDescriptor:rp] endEncoding];
     [d addPresentedHandler:^(id<MTLDrawable> dr) { rec->presented = dr.presentedTime; }];
     [cb presentDrawable:d];
@@ -337,15 +344,25 @@ void benchDisplay(Context& ctx, Report& rep) {
             rep.value("display." + s + ".gpu_ms", "ms", gpu, {{"target_ms", load}});
             rep.value("display." + s + ".missed_frames", "count", double(missed), {{"frames", double(r.frames)}, {"target_ms", load}}, false);
             rep.value("display." + s + ".missed_pct", "%", pct, {{"target_ms", load}}, false);
-            detail += std::to_string(int(load)) + "ms(measured " + std::to_string(gpu).substr(0, 4) + ") missed " + std::to_string(pct).substr(0, 4) + "%; ";
-            if (gpu > 0 && gpu < 0.85 * budget) { haveBelow = true; below &= pct <= 3.0; }
-            if (gpu > 1.05 * budget) { haveAbove = true; above |= pct > 20.0; }
-            if (load == 0.0) { haveBelow = true; below &= pct <= 3.0; }
+            // Cadence actually presented: when the GPU cannot keep up, the
+            // display link may skip callbacks and present every drawn frame
+            // on time at a lower rate (measured in --quick: 9 ms load, 0%
+            // late) -- so "missing the budget" is late frames OR cadence.
+            // Mean, not median: one doubled interval in 13 leaves the median at 8.33 ms.
+            const double meanInterval =
+                r.presentInterval.empty() ? 0.0 : phosphor::soc::computeStats(r.presentInterval).mean;
+            const double hz = meanInterval > 0 ? 1e3 / meanInterval : 0.0;
+            rep.value("display." + s + ".presented_hz", "Hz", hz, {{"target_ms", load}});
+            detail += std::to_string(int(load)) + "ms(measured " + std::to_string(gpu).substr(0, 4) + ") missed " +
+                      std::to_string(pct).substr(0, 4) + "% at " + std::to_string(hz).substr(0, 5) + " Hz; ";
+            if (gpu > 0 && gpu < 0.85 * budget) { haveBelow = true; below &= pct <= 3.0 && hz >= 0.98 * 120.0; }
+            if (gpu > 1.05 * budget) { haveAbove = true; above |= pct > 20.0 || (hz > 0 && hz < 0.97 * 120.0); }
+            if (load == 0.0) { haveBelow = true; below &= pct <= 3.0 && hz >= 0.98 * 120.0; }
         }
         closeWindow(w, Titled);
         // Control filled in at the end (needs the load rows only).
         rep.negative(haveBelow && haveAbove && below && above,
-                     std::string("120 Hz budget 8.33 ms: loads well under budget miss <= 3% of frames, loads over budget miss > 20%: ") + detail +
+                     std::string("120 Hz budget 8.33 ms: loads well under budget miss <= 3% of frames at >= 117.6 Hz (mean), loads over budget miss > 20% or present below 116.4 Hz: ") + detail +
                          (haveAbove ? "" : "no load exceeded the budget (calibration failed); ") + (below ? "" : "FRAMES MISSED UNDER BUDGET; ") + (haveAbove && !above ? "NO MISS ABOVE BUDGET" : ""));
     }
     // 3. Borderless window covering the screen.
