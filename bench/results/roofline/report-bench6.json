@@ -1,0 +1,26 @@
+{
+  "schema_version": 3,
+  "bench": "Cornell Box (GI)",
+  "device": "Apple M5 Max",
+  "width": 3200,
+  "height": 1800,
+  "vsync": false,
+  "ui": false,
+  "frames": 300,
+  "fps": 95.25,
+  "gpu_allocations": 0,
+  "cpu_heap_blocks_delta": 2485,
+  "cpu_heap_bytes_delta": 163520,
+  "frame_ms": {"mean": 10.4988, "min": 0.3850, "p50": 8.3828, "p99": 16.8573, "max": 17.1990},
+  "cpu_ms": {"mean": 8.0727, "min": 0.3405, "p50": 8.3135, "p99": 11.5177, "max": 13.3949},
+  "gpu_ms": {"mean": 0.4237, "min": 0.1331, "p50": 0.3140, "p99": 0.6474, "max": 0.6755},
+  "wait_ms": {"mean": 2.4222, "min": 0.0151, "p50": 0.0758, "p99": 8.4431, "max": 8.5422},
+  "pipelines": {"requests":8,"archiveHits":8,"archiveMisses":0,"archiveUnavailable":0,"archiveMissRate":0.0000,"compilerCalls":0,"compileMs":0.000,"compileMsMax":0.000,"fallbacksServed":0,"fallbackDraws":1,"renderThreadCompiles":0,"renderThreadCompileMs":0.000,"failures":0,"swaps":8,"reloads":0,"reloadFailures":0},
+  "gpu_timing": true,
+  "gpu_timing_unfused": false,
+  "passes": [
+    {"name": "Forward", "queue": "graphics", "fused": false, "passes": ["Forward"], "shaders": ["forward_vs", "forward_fs"], "dram_bytes": 23040000, "frames": 300, "gpu_ms": {"mean": 0.4161, "min": 0.1317, "p50": 0.3067, "p99": 0.6398, "max": 0.6472}, "work": [{"pass": "Forward", "draws": 2, "instances": 8, "indices": 108, "vertices": 72, "pixels": 5760000, "threads": 0, "lights": 1}]}
+  ],
+  "gpu_pass_sum_ms": {"mean": 0.4161, "min": 0.1317, "p50": 0.3067, "p99": 0.6398, "max": 0.6472},
+  "gpu_frame_span_ms": {"mean": 0.4161, "min": 0.1317, "p50": 0.3067, "p99": 0.6398, "max": 0.6472}
+}

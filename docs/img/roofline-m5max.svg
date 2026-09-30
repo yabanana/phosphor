@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 620" width="900" height="620" font-family="Helvetica, Arial, sans-serif" font-size="12">
+<rect width="900" height="620" fill="#ffffff"/>
+<text x="80" y="26" font-size="16" font-weight="bold">Roofline — Apple M5 Max</text>
+<text x="80" y="42" fill="#555">7 testbench, 3200x1800 — punti: unità cronometrate del motore; FLOP = cammino minimo AIR (limite inferiore)</text>
+<line class="grid" x1="80.0" y1="50" x2="80.0" y2="550" stroke="#e3e3e3"/>
+<text x="80.0" y="566" text-anchor="middle">0.01</text>
+<line class="grid" x1="238.0" y1="50" x2="238.0" y2="550" stroke="#e3e3e3"/>
+<text x="238.0" y="566" text-anchor="middle">0.1</text>
+<line class="grid" x1="396.0" y1="50" x2="396.0" y2="550" stroke="#e3e3e3"/>
+<text x="396.0" y="566" text-anchor="middle">1</text>
+<line class="grid" x1="554.0" y1="50" x2="554.0" y2="550" stroke="#e3e3e3"/>
+<text x="554.0" y="566" text-anchor="middle">10</text>
+<line class="grid" x1="712.0" y1="50" x2="712.0" y2="550" stroke="#e3e3e3"/>
+<text x="712.0" y="566" text-anchor="middle">100</text>
+<line class="grid" x1="870.0" y1="50" x2="870.0" y2="550" stroke="#e3e3e3"/>
+<text x="870.0" y="566" text-anchor="middle">1000</text>
+<line class="grid" x1="80" y1="550.0" x2="870" y2="550.0" stroke="#e3e3e3"/>
+<text x="74" y="554.0" text-anchor="end">0.001</text>
+<line class="grid" x1="80" y1="444.0" x2="870" y2="444.0" stroke="#e3e3e3"/>
+<text x="74" y="448.0" text-anchor="end">0.01</text>
+<line class="grid" x1="80" y1="338.0" x2="870" y2="338.0" stroke="#e3e3e3"/>
+<text x="74" y="342.0" text-anchor="end">0.1</text>
+<line class="grid" x1="80" y1="232.0" x2="870" y2="232.0" stroke="#e3e3e3"/>
+<text x="74" y="236.0" text-anchor="end">1</text>
+<line class="grid" x1="80" y1="126.0" x2="870" y2="126.0" stroke="#e3e3e3"/>
+<text x="74" y="130.0" text-anchor="end">10</text>
+<rect x="80" y="50" width="790" height="500" fill="none" stroke="#888"/>
+<text x="475.0" y="592" text-anchor="middle">Intensità aritmetica (FLOP / byte DRAM)</text>
+<text transform="translate(20 300.0) rotate(-90)" text-anchor="middle">TFLOPS</text>
+<line class="roof-dram" x1="80.0" y1="469.7" x2="705.5" y2="50.0" stroke="#b2182b" stroke-width="2"/>
+<text x="159.4" y="413.1" fill="#b2182b" transform="rotate(-27 159.4 413.1)">DRAM 572 GB/s</text>
+<line class="roof-onchip" x1="80.0" y1="345.0" x2="519.8" y2="50.0" stroke="#ef8a62" stroke-width="2"/>
+<text x="159.4" y="288.5" fill="#ef8a62" transform="rotate(-27 159.4 288.5)">on-chip 8578 GB/s</text>
+<line class="roof-fp32" x1="620.8" y1="106.9" x2="870.0" y2="106.9" stroke="#2166ac" stroke-width="2"/>
+<text x="864.0" y="122.9" fill="#2166ac" text-anchor="end">FP32 15.1 TFLOPS</text>
+<circle class="ridge" cx="620.8" cy="106.9" r="4" fill="#2166ac"/>
+<text x="626.8" y="122.9" fill="#2166ac">ridge 26.5 F/B</text>
+<line class="roof-fp16" x1="630.1" y1="100.6" x2="870.0" y2="100.6" stroke="#67a9cf" stroke-width="2" stroke-dasharray="7 4"/>
+<text x="864.0" y="94.6" fill="#67a9cf" text-anchor="end">FP16 17.4 TFLOPS</text>
+<circle class="ridge" cx="630.1" cy="100.6" r="4" fill="#67a9cf"/>
+<text x="636.1" y="92.6" fill="#67a9cf">ridge 30.3 F/B</text>
+<circle class="unit" cx="583.8" cy="280.5" r="5" fill="#2a6fdb" stroke="#fff"/>
+<text class="unit-label" x="591.8" y="296.5" fill="#2a6fdb">Torus Demo: Forward</text>
+<circle class="unit" cx="447.6" cy="298.9" r="5" fill="#d9541e" stroke="#fff"/>
+<text class="unit-label" x="455.6" y="289.9" fill="#d9541e">PBR Material Grid: Forward</text>
+<circle class="unit" cx="636.9" cy="273.3" r="5" fill="#1a9850" stroke="#fff"/>
+<text class="unit-label" x="644.9" y="289.3" fill="#1a9850">Stress Test (100K): Forward</text>
+<circle class="unit" cx="566.2" cy="231.0" r="5" fill="#8e44ad" stroke="#fff"/>
+<text class="unit-label" x="574.2" y="222.0" fill="#8e44ad">Scene Viewer (glTF): Forward</text>
+<circle class="unit" cx="588.5" cy="458.8" r="5" fill="#c99a00" stroke="#fff"/>
+<text class="unit-label" x="596.5" y="474.8" fill="#c99a00">Many Lights (1024): Forward</text>
+<circle class="unit" cx="540.5" cy="254.2" r="5" fill="#00838f" stroke="#fff"/>
+<text class="unit-label" x="548.5" y="245.2" fill="#00838f">Cornell Box (GI): Forward</text>
+<circle class="unit" cx="604.3" cy="249.3" r="5" fill="#b03060" stroke="#fff"/>
+<text class="unit-label" x="612.3" y="265.3" fill="#b03060">Culling Visualization: Forward</text>
+</svg>

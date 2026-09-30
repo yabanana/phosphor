@@ -1,0 +1,58 @@
+{
+ "bench": "PBR Material Grid",
+ "chip": "Apple M5 Max",
+ "height": 1800,
+ "notes": [
+  "Predicted time is a LOWER BOUND: max(DRAM, on-chip, ALU) with no dispatch/barrier/pass overheads; ratio = measured p50 / predicted.",
+  "ALU time = flops/FP32 FMA rate + transcendentals/rate + divides/rate + int ops/fastest measured int rate (they share the ALUs); a rate missing from the model contributes 0.",
+  "Texture samples, loads/stores, register spills, occupancy, ALU/memory overlap losses and rasteriser/geometry limits are NOT modelled (they only make the real time larger).",
+  "DRAM bytes come from the render graph estimate (`dram_bytes` of the report), not from a hardware counter; on-chip bytes are not estimated (0), so the on-chip roof never binds here.",
+  "predicted_ms (the lower bound) counts the CHEAPEST path of each shader's CFG (static_min / per_iteration_min of tools/air_ops.py, one side of every branch); estimate_ms counts every block (both sides of every branch): not a bound. Count the variant the engine runs (tools/air_ops.py --forward-variant) so dead function-constant branches are gone. Loops with unknown trip count count once (forward_fs uses work.lights as trip count).",
+  "Only outermost loops are scaled by the trip count; nested loops stay inside the outer body (inner trip counts are not modelled).",
+  "Report v3 `work` entries of a unit are summed over its passes (lights = max) and applied to every shader of the unit by stage: a shader used by only some passes is over-counted.",
+  "Invocations: vertex = work.vertices (else work.indices, i.e. no post-transform cache reuse and no instancing multiplier); fragment = work.fragments (else work.pixels: overdraw, early-z and helper lanes ignored); compute = work.threads.",
+  "FLOP counting as in B-01: fma = 2, add/mul = 1; the roof is the measured independent-chain FP32 FMA rate at the sustained P-state of the characterisation run.",
+  "Shaders not found in the ops file are listed in shaders_missing and contribute no work (lower bound stays a lower bound)."
+ ],
+ "roofs": {
+  "dram_gbps": 572.4969181347611,
+  "f16_tflops": 17.36121626248817,
+  "f32_tflops": 15.145902457669742,
+  "onchip_gbps": 8578.03971026843,
+  "ridge_flop_per_byte": 26.45586723334032,
+  "ridge_onchip_flop_per_byte": 1.765660100586756
+ },
+ "schema": "phosphor-soc-prediction",
+ "schema_version": 1,
+ "slug": "m5max",
+ "units": [
+  {
+   "achieved_gbps": 110.3448275862069,
+   "achieved_tflops": 0.23398577586206898,
+   "alu_ms": 0.003887839913383575,
+   "arithmetic_intensity": 2.12049609375,
+   "bound": "dram",
+   "divides": 1702155.0,
+   "dram_bytes": 23040000.0,
+   "dram_ms": 0.040244758129119866,
+   "estimate_bound": "alu",
+   "estimate_flops": 669008035.0,
+   "estimate_ms": 0.0500151610828376,
+   "flops": 48856230.0,
+   "int_ops": 1246970.0,
+   "measured_ms": 0.2088,
+   "name": "Forward",
+   "onchip_ms": 0.0,
+   "predicted_ms": 0.040244758129119866,
+   "ratio": 5.1882533205962735,
+   "samples": 0.0,
+   "shaders_matched": [
+    "forward_vs (vertex, x56100)",
+    "forward_fs (fragment, x567385)"
+   ],
+   "shaders_missing": [],
+   "transcendentals": 1702155.0
+  }
+ ],
+ "width": 3200
+}

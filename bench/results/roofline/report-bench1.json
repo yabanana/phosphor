@@ -1,0 +1,26 @@
+{
+  "schema_version": 3,
+  "bench": "Torus Demo",
+  "device": "Apple M5 Max",
+  "width": 3200,
+  "height": 1800,
+  "vsync": false,
+  "ui": false,
+  "frames": 300,
+  "fps": 86.33,
+  "gpu_allocations": 0,
+  "cpu_heap_blocks_delta": 2565,
+  "cpu_heap_bytes_delta": 168560,
+  "frame_ms": {"mean": 11.5833, "min": 0.6024, "p50": 8.3933, "p99": 17.0834, "max": 17.3808},
+  "cpu_ms": {"mean": 8.6564, "min": 0.6110, "p50": 8.3360, "p99": 10.9939, "max": 13.8120},
+  "gpu_ms": {"mean": 0.9810, "min": 0.2160, "p50": 1.0279, "p99": 1.0690, "max": 1.3675},
+  "wait_ms": {"mean": 2.8971, "min": 0.0288, "p50": 0.0655, "p99": 7.9193, "max": 8.2285},
+  "pipelines": {"requests":8,"archiveHits":8,"archiveMisses":0,"archiveUnavailable":0,"archiveMissRate":0.0000,"compilerCalls":0,"compileMs":0.000,"compileMsMax":0.000,"fallbacksServed":0,"fallbackDraws":1,"renderThreadCompiles":0,"renderThreadCompileMs":0.000,"failures":0,"swaps":8,"reloads":0,"reloadFailures":0},
+  "gpu_timing": true,
+  "gpu_timing_unfused": false,
+  "passes": [
+    {"name": "Forward", "queue": "graphics", "fused": false, "passes": ["Forward"], "shaders": ["forward_vs", "forward_fs"], "dram_bytes": 23040000, "frames": 300, "gpu_ms": {"mean": 0.9735, "min": 0.2147, "p50": 1.0205, "p99": 1.0412, "max": 1.3601}, "work": [{"pass": "Forward", "draws": 2, "instances": 2, "indices": 12294, "vertices": 2149, "pixels": 5760000, "threads": 0, "lights": 1}]}
+  ],
+  "gpu_pass_sum_ms": {"mean": 0.9735, "min": 0.2147, "p50": 1.0205, "p99": 1.0412, "max": 1.3601},
+  "gpu_frame_span_ms": {"mean": 0.9735, "min": 0.2147, "p50": 1.0205, "p99": 1.0412, "max": 1.3601}
+}

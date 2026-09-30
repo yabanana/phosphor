@@ -15,6 +15,7 @@ its notes): they are estimates, not counter readings.
 Python 3 standard library only.
 """
 import argparse
+import collections
 import json
 import math
 import os
@@ -42,7 +43,7 @@ def build_svg(pred):
         ai, ach = u.get("arithmetic_intensity"), u.get("achieved_tflops")
         if _num(ai) and _num(ach) and ai > 0 and ach > 0:
             pts.append((u["name"], ai, ach))
-    xmin, xmax = 0.01, 10000.0
+    xmin, xmax = 0.01, 1000.0
     ymin = 0.001
     for _, ai, ach in pts:
         xmin = min(xmin, ai / 2)
@@ -67,8 +68,11 @@ def build_svg(pred):
     a('<rect width="%d" height="%d" fill="#ffffff"/>' % (W, H))
     a('<text x="%d" y="26" font-size="16" font-weight="bold">Roofline — %s</text>'
       % (ML, escape(pred.get("chip", "?"))))
-    a('<text x="%d" y="42" fill="#555">bench %s, %sx%s — punti: unità cronometrate dell\'engine (conteggi statici AIR)</text>'
-      % (ML, escape(str(pred.get("bench", ""))), pred.get("width", "?"), pred.get("height", "?")))
+    benches = str(pred.get("bench", ""))
+    if benches.count(",") >= 2:
+        benches = "%d testbench" % (benches.count(",") + 1)
+    a('<text x="%d" y="42" fill="#555">%s, %sx%s — punti: unità cronometrate del motore; FLOP = cammino minimo AIR (limite inferiore)</text>'
+      % (ML, escape(benches), pred.get("width", "?"), pred.get("height", "?")))
     # grid and ticks
     for e in range(int(math.floor(lx0)), int(math.ceil(lx1)) + 1):
         x = 10.0 ** e
@@ -96,14 +100,17 @@ def build_svg(pred):
         a('<text x="%.1f" y="%.1f" fill="%s" transform="rotate(-27 %.1f %.1f)">%s</text>'
           % (X(xl) + 4, Y(gbps * xl / 1000.0) - 6, colour, X(xl) + 4, Y(gbps * xl / 1000.0) - 6, escape(label)))
 
-    def flat(tf, ridge_x, colour, cls, label, dash):
+    def flat(tf, ridge_x, colour, cls, label, dash, below=True):
         x_a = max(xmin, ridge_x) if _num(ridge_x) else xmin
         a('<line class="%s" x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="%s" stroke-width="2"%s/>'
           % (cls, X(x_a), Y(tf), X(xmax), Y(tf), colour, ' stroke-dasharray="7 4"' if dash else ""))
-        a('<text x="%.1f" y="%.1f" fill="%s" text-anchor="end">%s</text>' % (X(xmax) - 6, Y(tf) - 6, colour, escape(label)))
+        a('<text x="%.1f" y="%.1f" fill="%s" text-anchor="end">%s</text>'
+          % (X(xmax) - 6, Y(tf) + (16 if below else -6), colour, escape(label)))
         if _num(ridge_x) and xmin <= ridge_x <= xmax:
             a('<circle class="ridge" cx="%.1f" cy="%.1f" r="4" fill="%s"/>' % (X(ridge_x), Y(tf), colour))
-            a('<text x="%.1f" y="%.1f" fill="%s">ridge %.3g F/B</text>' % (X(ridge_x) + 6, Y(tf) + 16, colour, ridge_x))
+            # FP32 label below its roof, FP16 above: the two ridges are close.
+            a('<text x="%.1f" y="%.1f" fill="%s">ridge %.3g F/B</text>'
+              % (X(ridge_x) + 6, Y(tf) + (16 if below else -8), colour, ridge_x))
 
     if _num(dram) and dram > 0:
         bw_line(dram, "#b2182b", "roof-dram", "DRAM %.0f GB/s" % dram)
@@ -114,13 +121,14 @@ def build_svg(pred):
              "FP32 %.1f TFLOPS" % f32, False)
     if _num(f16) and f16 > 0:
         flat(f16, f16 * 1000.0 / dram if _num(dram) and dram > 0 else None, "#67a9cf", "roof-fp16",
-             "FP16 %.1f TFLOPS" % f16, True)
+             "FP16 %.1f TFLOPS" % f16, True, below=False)
     for i, (name, ai, ach) in enumerate(pts):
         c = PALETTE[i % len(PALETTE)]
         a('<circle class="unit" cx="%.1f" cy="%.1f" r="5" fill="%s" stroke="#fff"/>' % (X(ai), Y(ach), c))
         left = X(ai) > ML + pw * 0.75  # keep the label inside the plot
         a('<text class="unit-label" x="%.1f" y="%.1f" fill="%s"%s>%s</text>'
-          % (X(ai) + (-8 if left else 8), Y(ach) + 16, c, ' text-anchor="end"' if left else "", escape(name)))
+          % (X(ai) + (-8 if left else 8), Y(ach) + (16 if i % 2 == 0 else -9), c, ' text-anchor="end"' if left else "",
+             escape(name)))
     if not pts:
         a('<text x="%d" y="%d" fill="#888">nessuna unità con FLOP e traffico DRAM noti</text>' % (ML + 12, MT + 24))
     a("</svg>")
@@ -130,18 +138,34 @@ def build_svg(pred):
 def build_table(pred):
     lines = ["# Predetto vs misurato — %s (%s)" % (pred.get("chip", "?"), pred.get("bench", "")), "",
              "Il predetto è un **limite inferiore** (roofline, nessun overhead): rapporto = misurato p50 / predetto.", "",
-             "| Unità | Misurato ms | Predetto ms | Limite | AI (F/B) | Rapporto |",
-             "|---|---:|---:|---|---:|---:|"]
+             "| Unità | Misurato ms | Predetto ms | Limite | AI (F/B) | Rapporto | Stima ms (non un limite) |",
+             "|---|---:|---:|---|---:|---:|---:|"]
 
     def f(v, d=3):
         return "—" if not _num(v) else ("%." + str(d) + "g") % v
 
     for u in pred.get("units", []):
-        lines.append("| %s | %s | %s | %s | %s | %s |" % (
+        lines.append("| %s | %s | %s | %s | %s | %s | %s |" % (
             u["name"].replace("|", "\\|"), f(u.get("measured_ms")), f(u.get("predicted_ms")), u.get("bound", "—"),
-            f(u.get("arithmetic_intensity")), f(u.get("ratio"))))
+            f(u.get("arithmetic_intensity")), f(u.get("ratio")), f(u.get("estimate_ms"))))
     lines.append("")
     return "\n".join(lines)
+
+
+def merge_preds(preds):
+    """One chip, several benches: units renamed '<bench>: <unit>' (every
+    bench has a 'Forward' unit), roofs from the first."""
+    if len(preds) == 1:
+        return preds[0]
+    merged = dict(preds[0])
+    merged["bench"] = ", ".join(p.get("bench", "?") for p in preds)
+    merged["units"] = []
+    for p in preds:
+        for u in p.get("units", []):
+            v = dict(u)
+            v["name"] = "%s: %s" % (p.get("bench", "?"), u.get("name", "?"))
+            merged["units"].append(v)
+    return merged
 
 
 def write_outputs(pred, out_dir):
@@ -214,13 +238,16 @@ def main(argv=None):
         return self_test()
     if not a.pred:
         ap.error("--pred is required")
+    by_chip = collections.OrderedDict()
     for p in a.pred:
         with open(p) as f:
             pred = json.load(f)
         if pred.get("schema") != "phosphor-soc-prediction":
             raise SystemExit("%s: not a soc_model predict output" % p)
-        svg, md = write_outputs(pred, a.out_dir)
-        print("roofline.py: wrote %s and %s" % (svg, md))
+        by_chip.setdefault(pred.get("slug") or "chip", []).append(pred)
+    for preds in by_chip.values():
+        svg, md = write_outputs(merge_preds(preds), a.out_dir)
+        print("roofline.py: wrote %s and %s (%d report(s))" % (svg, md, len(preds)))
 
 
 if __name__ == "__main__":
