@@ -16,11 +16,24 @@
 
 #include "harness.h"
 
+#include <CoreFoundation/CoreFoundation.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <numeric>
 #include <string>
+
+extern "C" {
+typedef struct IOReportSubscription* IOReportSubscriptionRef;
+CFDictionaryRef IOReportCopyChannelsInGroup(CFStringRef, CFStringRef, uint64_t, uint64_t, uint64_t);
+IOReportSubscriptionRef IOReportCreateSubscription(void*, CFMutableDictionaryRef, CFMutableDictionaryRef*, uint64_t,
+                                                   CFTypeRef);
+CFDictionaryRef IOReportCreateSamples(IOReportSubscriptionRef, CFMutableDictionaryRef, CFTypeRef);
+CFDictionaryRef IOReportCreateSamplesDelta(CFDictionaryRef, CFDictionaryRef, CFTypeRef);
+int32_t IOReportStateGetCount(CFDictionaryRef);
+int64_t IOReportStateGetResidency(CFDictionaryRef, int32_t);
+}
 
 namespace soc {
 namespace {
@@ -108,12 +121,85 @@ bool checkCopy(const u32* src, const u32* dst, u32 words) {
 }
 
 // Sattolo: a uniformly random single cycle over `lines` 128-byte lines.
+// GPU fabric state ("GPU Stats" / "AFR Performance States", IOReport, no
+// root): mean P-state index of the busy time over a window.  The single
+// thread chase runs with the fabric at ~P5 of 13 (measured), so its
+// latencies depend on the fabric governor, not only on the memory.
+class AfrState {
+public:
+    AfrState() {
+        CFDictionaryRef c = IOReportCopyChannelsInGroup(CFSTR("GPU Stats"), CFSTR("AFR Performance States"), 0, 0, 0);
+        if (!c) return;
+        CFMutableDictionaryRef m = CFDictionaryCreateMutableCopy(nullptr, 0, c);
+        CFRelease(c);
+        sub_ = IOReportCreateSubscription(nullptr, m, &subbed_, 0, nullptr);
+        CFRelease(m);
+    }
+    ~AfrState() {
+        if (start_) CFRelease(start_);
+        if (subbed_) CFRelease(subbed_);
+        if (sub_) CFRelease(reinterpret_cast<CFTypeRef>(sub_));
+    }
+    AfrState(const AfrState&) = delete;
+    AfrState& operator=(const AfrState&) = delete;
+    void begin() {
+        if (!sub_) return;
+        if (start_) CFRelease(start_);
+        start_ = IOReportCreateSamples(sub_, subbed_, nullptr);
+    }
+    /// Mean P index of the busy (non-OFF) time since begin(), -1 if unknown.
+    double end() {
+        if (!sub_ || !start_) return -1;
+        CFDictionaryRef now = IOReportCreateSamples(sub_, subbed_, nullptr);
+        CFDictionaryRef d = IOReportCreateSamplesDelta(start_, now, nullptr);
+        CFRelease(now);
+        CFRelease(start_);
+        start_ = nullptr;
+        double busy = 0, weighted = 0;
+        auto arr = static_cast<CFArrayRef>(CFDictionaryGetValue(d, CFSTR("IOReportChannels")));
+        for (CFIndex i = 0; arr && i < CFArrayGetCount(arr); ++i) {
+            auto c = static_cast<CFDictionaryRef>(CFArrayGetValueAtIndex(arr, i));
+            for (int32_t q = 1; q < IOReportStateGetCount(c); ++q) {
+                const double r = double(IOReportStateGetResidency(c, q));
+                busy += r;
+                weighted += r * q;
+            }
+        }
+        CFRelease(d);
+        return busy > 0 ? weighted / busy : -1;
+    }
+
+private:
+    IOReportSubscriptionRef sub_ = nullptr;
+    CFMutableDictionaryRef subbed_ = nullptr;
+    CFDictionaryRef start_ = nullptr;
+};
+
 void buildCycle(u32* next, size_t lines, u64 seed) {
     std::vector<u32> a(lines);
     std::iota(a.begin(), a.end(), 0u);
     u64 s = seed;
     for (size_t i = lines - 1; i > 0; --i) std::swap(a[i], a[xorshift64(s) % i]);
     for (size_t i = 0; i < lines; ++i) next[i * 32] = a[i] * 32u;
+}
+
+// Page-local cycle: pages (16 KiB = 128 lines) in random order, the lines
+// of each page in random order before the next page: the same DRAM lines
+// as a random cycle, but one TLB / page-table miss per 128 steps.
+void buildPageLocalCycle(u32* next, size_t lines, u64 seed) {
+    constexpr size_t kLinesPerPage = 16384 / 128;
+    const size_t pages = lines / kLinesPerPage;
+    std::vector<u32> pageOrder(pages), lineOrder(kLinesPerPage), order;
+    order.reserve(lines);
+    std::iota(pageOrder.begin(), pageOrder.end(), 0u);
+    u64 s = seed;
+    for (size_t i = pages - 1; i > 0; --i) std::swap(pageOrder[i], pageOrder[xorshift64(s) % (i + 1)]);
+    for (u32 p : pageOrder) {
+        std::iota(lineOrder.begin(), lineOrder.end(), 0u);
+        for (size_t i = kLinesPerPage - 1; i > 0; --i) std::swap(lineOrder[i], lineOrder[xorshift64(s) % (i + 1)]);
+        for (u32 l : lineOrder) order.push_back(p * u32(kLinesPerPage) + l);
+    }
+    for (size_t k = 0; k < order.size(); ++k) next[size_t(order[k]) * 32] = order[(k + 1) % order.size()] * 32u;
 }
 
 u32 walk(const u32* next, u32 start, u32 steps) {
@@ -271,6 +357,7 @@ void benchMemory(Context& ctx, Report& rep) {
     std::vector<double> latNs;
     double chaseRatio = 0;
     GpuState chaseState;          // own IOReport subscription (the suite's window stays intact)
+    AfrState afr;
     std::string lowClockPoints;   // latency points measured below the top P-state after 3 attempts
     for (size_t kib : latKiB) {
         const size_t lines = kib * KiB / 128;
@@ -295,25 +382,55 @@ void benchMemory(Context& ctx, Report& rep) {
         // residency of the window is checked; up to 2 re-measurements.
         Stats s1, s2;
         phosphor::soc::GpuWindow win;
+        double afrMean = -1;
         u32 attempts = 0;
         do {
             if (attempts) ctx.keepWarm(50);
             chaseState.begin();
+            afr.begin();
             s1 = ctx.measure([&] { return run(N); }, latReps);
             s2 = ctx.measure([&] { return run(4 * N); }, latReps);
             win = chaseState.end();
+            afrMean = afr.end();
         } while (++attempts < 3 && chaseState.available() && win.topStateShare < 0.9);
         if (win.topStateShare >= 0 && win.topStateShare < 0.9)
             lowClockPoints += std::to_string(kib) + "KiB(" + std::to_string(int(win.topStateShare * 100)) + "%) ";
         // Slope between N and 4N steps cancels the fixed dispatch cost (large and noisy, ~50-80 us, hence the long chains).  Minima:
         // other GPU clients only ever add time to a single-thread chase.
         const double ns = std::max(0.0, (s2.min - s1.min)) * 1e6 / (3.0 * N);
-        if (kib == latKiB.back()) chaseRatio = s2.min / s1.min;
+        // Linearity control on the smallest set: stable (CV 0%), and a loop
+        // the compiler removed still shows as ~1x.  At DRAM sizes the time
+        // per step follows the GPU fabric (AFR) P-state, which drops to ~5 of
+        // 13 during a single-thread chase (IOReport, measured): no stable
+        // ratio exists there (4N/N read 3.9..8.8x between runs).
+        if (kib == latKiB.front()) chaseRatio = s2.min / s1.min;
         latNs.push_back(ns);
         rep.value("latency.ws_" + std::to_string(kib) + "KiB", "ns", ns,
                   {{"ws_KiB", double(kib)}, {"steps", double(N)}, {"t1_min_ms", s1.min}, {"t2_min_ms", s2.min},
-                   {"top_state_share", win.topStateShare}, {"attempts", double(attempts)},
+                   {"top_state_share", win.topStateShare}, {"attempts", double(attempts)}, {"afr_mean_pstate", afrMean},
                    {"median_slope_ns", std::max(0.0, s2.median - s1.median) * 1e6 / double(N)}}, false);
+        ctx.keepWarm(15);
+    }
+
+    // --- (a2) page-local chase at the largest set: same lines, 1 page miss per 128 steps ------
+    double latPageLocal = 0;
+    {
+        const size_t kib = latKiB.back();
+        const size_t lines = kib * KiB / 128;
+        buildPageLocalCycle(w32, lines, 0x5DEECE66Dull + kib);
+        u32 cur = 0;
+        auto run = [&](u32 steps) {
+            const double ms = timeKernel(rig, chase, base, rig.out->gpuAddress(), {steps, 0, 0, cur}, 1, 1);
+            if (out32[0] != walk(a32, cur, steps)) bad("chase_page_local");
+            cur = out32[0];
+            return ms;
+        };
+        const double tp = std::max(1e-4, ctx.measure([&] { return run(512); }, 7).min);
+        const u32 NL = std::clamp<u32>(u32((quick ? 8.0 : 30.0) / (tp / 512.0)), 1024, 4000000);
+        const Stats sp = ctx.measure([&] { return run(NL); }, quick ? 3 : 7);
+        latPageLocal = sp.median * 1e6 / double(NL);
+        rep.value("latency_dram.page_local", "ns", latPageLocal,
+                  {{"ws_KiB", double(kib)}, {"steps", double(NL)}, {"t_min_ms", sp.min}, {"t_median_ms", sp.median}}, false);
         ctx.keepWarm(15);
     }
 
@@ -349,7 +466,7 @@ void benchMemory(Context& ctx, Report& rep) {
     // --- negative controls -----------------------------------------------------------------------
     const bool lin = dramRatio > 1.8 && dramRatio < 2.2 && chaseRatio > 2.5 && chaseRatio < 6.5;
     rep.negative(lin && resultsOk,
-                 "1 GiB read 2 passes/1 pass = " + std::to_string(dramRatio).substr(0, 5) + "x, chase 4N/N steps at largest WS = " +
+                 "1 GiB read 2 passes/1 pass = " + std::to_string(dramRatio).substr(0, 5) + "x, chase 4N/N steps at the L1 set (want 2.5..6.5) = " +
                      std::to_string(chaseRatio).substr(0, 5) + "x" + (resultsOk ? "; every kernel result matches the CPU" : "; WRONG RESULTS: " + wrongWhat));
     rep.negative(latDram > 5.0 * latL1, "latency_dram " + std::to_string(int(latDram)) + " ns vs 5 x latency_l1 " + std::to_string(int(5 * latL1)) + " ns");
     // Bandwidth monotone-ish from the peak: an up-step > 30% (plateaus vary up to ~25% between runs, spike) is a violation.

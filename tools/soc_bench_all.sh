@@ -2,7 +2,8 @@
 # soc_bench_all.sh -- OPT-0 exit battery of the SoC suite (bench/soc):
 #   1. full suite x 3 runs -> bench/results/<chip>-<os>.json (--window: B-26 too)
 #   2. --validate (quick suite under API + shader validation): 0 messages
-#   3. --force-family apple9 (quick): the Apple9 fallback paths run
+#   3. --force-family apple9 (1 full-quality run; --quick has too few
+#      repetitions for the timing controls): the Apple9 fallback paths run
 #   4. leaks --atExit on the quick suite: 0 leaks
 # and prints, from the results JSON, every benchmark whose negative control
 # failed and every metric with a CV between runs above 2%.
@@ -39,8 +40,8 @@ step "--validate"
 "${keep_awake[@]}" "$bench" --validate --window 2>&1 | tee "$log_dir/validate.log" | tail -3
 [[ ${PIPESTATUS[0]} -eq 0 ]] || { echo "FAIL: validation"; status=1; }
 
-step "--force-family apple9 (quick)"
-"${keep_awake[@]}" "$bench" --quick --runs 1 --force-family apple9 --out "$log_dir/apple9.json" 2>&1 | tee "$log_dir/apple9.log" | tail -3
+step "--force-family apple9 (full quality, 1 run)"
+"${keep_awake[@]}" "$bench" --runs 1 --force-family apple9 --out "$log_dir/apple9.json" 2>&1 | tee "$log_dir/apple9.log" | tail -3
 [[ ${PIPESTATUS[0]} -eq 0 ]] || { echo "FAIL: apple9 fallback run"; status=1; }
 
 step "leaks (quick)"
