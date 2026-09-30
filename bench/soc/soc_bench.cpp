@@ -6,13 +6,15 @@
 //
 // Exit status: 0 = every benchmark ran and every negative control passed;
 // 1 = a benchmark failed or a negative control failed; 2 = usage error;
-// 3 = --validate found messages.
+// 3 = --validate found messages (--validate: 1 = a benchmark failed; timing
+// controls are listed but not enforced under the validation layers).
 
 #include "harness.h"
 
 #include "core/process.h"
 
 #include <mach-o/dyld.h>
+#include <unistd.h>
 
 #include <chrono>
 #include <cstdio>
@@ -92,7 +94,9 @@ int validate(const Cli& c) {
     setenv("MTL_DEBUG_LAYER", "1", 1);
     setenv("MTL_SHADER_VALIDATION", "1", 1);
     setenv("MTL_DEBUG_LAYER_WARNING_MODE", "nslog", 1);
-    std::vector<std::string> argv = {selfPath(), "--quick", "--runs", "1", "--out", "/dev/null"};
+    const std::string json = std::string(std::getenv("TMPDIR") ? std::getenv("TMPDIR") : "/tmp") + "/soc_bench_validate_" +
+                             std::to_string(getpid()) + ".json";
+    std::vector<std::string> argv = {selfPath(), "--quick", "--runs", "1", "--out", json};
     if (!c.only.empty()) {
         std::string ids;
         for (const auto& id : c.only) ids += (ids.empty() ? "" : ",") + id;
@@ -110,9 +114,33 @@ int validate(const Cli& c) {
         ++messages;
         std::fprintf(stderr, "[soc] validation: %s\n", line.c_str());
     }
-    std::fprintf(stderr, "[soc] --validate: exit %d, %u validation message(s)\n", r.exitCode, messages);
+    // Pass = no validation message and no benchmark failed (wrong results,
+    // aborts).  Timing controls are not meaningful under the validation
+    // layers (they slow the GPU and the CPU unevenly): listed, not enforced.
+    u32 failed = 0;
+    std::ifstream f(json);
+    std::stringstream text;
+    text << f.rdbuf();
+    phosphor::soc::Results res;
+    std::string err;
+    if (!phosphor::soc::fromJson(text.str(), res, &err)) {
+        std::fprintf(stderr, "[soc] --validate: cannot read the child's results (%s), exit %d\n", err.c_str(), r.exitCode);
+        return r.exitCode ? r.exitCode : 1;
+    }
+    std::remove(json.c_str());
+    for (const auto& b : res.benchmarks) {
+        if (b.status == Status::Failed) {
+            ++failed;
+            std::fprintf(stderr, "[soc] --validate: %s FAILED: %s\n", b.id.c_str(), b.notes.c_str());
+        } else if (b.negative == Control::Fail) {
+            std::fprintf(stderr, "[soc] --validate: %s timing control not enforced under validation: %s\n", b.id.c_str(),
+                         b.negativeDetail.c_str());
+        }
+    }
+    std::fprintf(stderr, "[soc] --validate: %zu benchmark(s), %u failed, %u validation message(s)\n",
+                 res.benchmarks.size(), failed, messages);
     if (messages) return 3;
-    return r.exitCode;
+    return failed ? 1 : 0;
 }
 
 std::string gitCommit() {
