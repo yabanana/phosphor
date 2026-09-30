@@ -17,6 +17,15 @@ bool parseU32(std::string_view text, u32& value) {
 
 } // namespace
 
+const char* graphOptModeName(GraphOptMode mode) {
+    switch (mode) {
+    case GraphOptMode::Off:    return "off";
+    case GraphOptMode::Greedy: return "greedy";
+    case GraphOptMode::Plan:   return "plan";
+    }
+    return "off";
+}
+
 const char* overlayName(OverlayMode mode) {
     switch (mode) {
     case OverlayMode::None:       return "none";
@@ -228,6 +237,18 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.scenarioWide = true;
         } else if (arg == "--graph-scenario-no-async") {
             out.scenarioAsync = false;
+        } else if (arg == "--graph-opt") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "off") out.graphOpt = GraphOptMode::Off;
+            else if (*value == "greedy") out.graphOpt = GraphOptMode::Greedy;
+            else if (*value == "plan") out.graphOpt = GraphOptMode::Plan;
+            else {
+                error = "--graph-opt: expected off, greedy or plan, got '" + std::string(*value) + "'";
+                return false;
+            }
+        } else if (arg == "--graph-plan") {
+            if (!needString(out.graphPlanPath)) return false;
         } else if (arg == "--graph-no-alias") {
             out.graphNoAlias = true;
         } else if (arg == "--graph-remat-cost") {

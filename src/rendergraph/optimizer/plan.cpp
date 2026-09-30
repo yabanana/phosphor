@@ -44,8 +44,11 @@ void hashResource(Fnv& f, const ResourceNode& r) {
     f.u(r.importFlags);
     if (r.kind == ResourceKind::Texture) {
         f.u(static_cast<u64>(r.texture.format));
-        f.u(r.texture.width);
-        f.u(r.texture.height);
+        // A per-frame import (the drawable) follows the window: its size does
+        // not change what a plan orders.
+        const bool perFrame = r.imported && (r.importFlags & ImportPerFrame);
+        f.u(perFrame ? 0 : r.texture.width);
+        f.u(perFrame ? 0 : r.texture.height);
         f.u(r.texture.depth);
         f.u(r.texture.mipLevels);
         f.u(r.texture.sampleCount);

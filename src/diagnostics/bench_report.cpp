@@ -161,13 +161,29 @@ std::string reportToJson(const BenchReport& r) {
         timing += ",\n  \"gpu_pass_sum_ms\": " + summaryToJson(r.gpuPassSumMs) +
                   ",\n  \"gpu_frame_span_ms\": " + summaryToJson(r.gpuFrameSpanMs);
     }
+    std::string graph;
+    if (r.graph.present) {
+        const GraphReport& g = r.graph;
+        char nums[512];
+        std::snprintf(nums, sizeof nums,
+                      "\"passes\": %u, \"render_passes\": %u, \"memoryless\": %u, \"barriers\": %u, "
+                      "\"dram_bytes\": %llu, \"heap_bytes\": %llu, \"heap_unaliased_bytes\": %llu, "
+                      "\"max_live_bytes\": %llu",
+                      g.passes, g.renderPasses, g.memoryless, g.barrierCount,
+                      static_cast<unsigned long long>(g.dramBytes), static_cast<unsigned long long>(g.heapBytes),
+                      static_cast<unsigned long long>(g.heapUnaliasedBytes),
+                      static_cast<unsigned long long>(g.maxLiveBytes));
+        graph = ",\n  \"graph\": {\"mode\": \"" + jsonEscape(g.mode) + "\", \"family\": \"" + jsonEscape(g.family) +
+                "\", \"plan\": \"" + jsonEscape(g.plan) + "\", \"alias\": \"" + jsonEscape(g.alias) +
+                "\", \"barriers_policy\": \"" + jsonEscape(g.barriers) + "\", " + nums + "}";
+    }
     return head +
            "  \"frame_ms\": " + summaryToJson(r.frameMs) + ",\n" +
            "  \"cpu_ms\": " + summaryToJson(r.cpuMs) + ",\n" +
            "  \"gpu_ms\": " + summaryToJson(r.gpuMs) + ",\n" +
            "  \"wait_ms\": " + summaryToJson(r.waitMs) +
            (r.pipelinesJson.empty() ? std::string() : ",\n  \"pipelines\": " + r.pipelinesJson) + ",\n" + timing +
-           "\n}\n";
+           graph + "\n}\n";
 }
 
 } // namespace phosphor

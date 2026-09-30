@@ -9,6 +9,7 @@
 #include "platform/metal/gpu_memory.h"
 #include "platform/metal/gpu_timestamps.h"
 #include "imgui/ui_panels.h"
+#include "rendergraph/optimizer/plan.h"
 #include "rendergraph/render_graph.h"
 #include "renderer/scene_extract.h"
 #include "testbench/testbench.h"
@@ -76,6 +77,8 @@ private:
     /// Describe the frame as a render graph and compile it; only when the
     /// graph key changes (resize, UI or capture toggled).
     void buildFrameGraph(u32 width, u32 height);
+    /// Declare every pass of the frame graph (reset first); no compilation.
+    void declareFrameGraph(u32 width, u32 height);
     void drawUi();
     void recordBenchmarkFrame(float dt, float cpuMs, float waitMs);
     /// Hand a hot-reloaded shader library to the pipeline cache (frame start).
@@ -169,6 +172,8 @@ private:
     };
     rg::RenderGraph frameGraph_;
     GraphKey        graphKey_;
+    GraphReport     graphReport_;                 // OPT-1: how the graph was compiled
+    std::vector<rg::GraphPlan> graphPlans_;       // --graph-opt plan
     OverlayMode     overlayMode_ = OverlayMode::None; // --overlay, changed from the Rendering panel
     rg::TextureRef  drawableRef_;
     rg::BufferRef   captureRef_;

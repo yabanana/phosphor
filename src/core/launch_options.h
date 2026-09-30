@@ -116,10 +116,21 @@ namespace phosphor {
 //                      graph compiler must use (OPT-1 spike; validated)
 //   --graph-no-alias   every transient gets its own memory (no aliasing:
 //                      no aliasing barriers; OPT-1 spike)
+//   --graph-opt MODE   OPT-1 graph compilation: off (the compiler of the end
+//                      of F4: greedy aliasing, conservative barriers), greedy
+//                      (OPT-1 heuristics without a plan: interval-colouring
+//                      aliasing, minimal barriers), plan (the offline plan of
+//                      the graph's family when its key matches, else greedy)
+//   --graph-plan FILE  plans file (default: shaders/graph-plans.json next to
+//                      the shader library)
 //
 // Arguments not starting with "--" are ignored: macOS may add its own
 // (e.g. -NSDocumentRevisionsDebugMode when launched from Xcode).
 // ---------------------------------------------------------------------------
+
+/// OPT-1 graph compilation modes (--graph-opt).
+enum class GraphOptMode : u8 { Off, Greedy, Plan };
+[[nodiscard]] const char* graphOptModeName(GraphOptMode mode);
 
 /// F4.7 debug overlays.
 enum class OverlayMode : u8 { None, Overdraw, LightCount, TileCost, Timings };
@@ -182,6 +193,8 @@ struct LaunchOptions {
     u32         graphRematCost   = 16;
     std::vector<std::string> graphOrder;
     bool        graphNoAlias     = false;
+    GraphOptMode graphOpt        = GraphOptMode::Off;
+    std::string graphPlanPath;               // empty: default location
 
     /// True when the app runs a fixed number of frames and then exits.
     [[nodiscard]] bool benchmark() const { return frames > 0; }

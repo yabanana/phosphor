@@ -67,7 +67,7 @@ u32 channelCount(rg::Format f) {
 
 ScenarioPasses::ScenarioPasses(MetalContext& context, PipelineCache& pipelines, u32 index,
                                const rg::ScenarioParams& params)
-    : context_(context), pipelines_(pipelines), index_(index), params_(params) {
+    : context_(context), pipelines_(pipelines), index_(index), params_(params), defaults_(params) {
     if (index_ >= rg::scenarioCount()) {
         throw std::runtime_error("--graph-scenario: expected 0.." + std::to_string(rg::scenarioCount() - 1));
     }
@@ -160,6 +160,12 @@ void ScenarioPasses::createPersistent() {
         history_[i] = newTexture(imp.desc, MemoryCategory::RenderTargets, i ? "Scenario history B" : "Scenario history A");
         fill(history_[i], seed++);
     }
+}
+
+void ScenarioPasses::setBuildChoices(const std::vector<std::string>& remat, const std::vector<std::string>& async) {
+    params_       = defaults_;
+    params_.remat = remat;
+    params_.async = async;
 }
 
 void ScenarioPasses::build(rg::RenderGraph& graph, rg::TextureRef drawable) {

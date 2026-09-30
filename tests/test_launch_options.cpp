@@ -348,7 +348,7 @@ TEST_CASE("bench report: schema v3 without GPU timing keeps v1 fields and stays 
     r.pipelinesJson = "{\"hits\": 3}";
     const std::string json = reportToJson(r);
     CHECK_MESSAGE(validJson(json), json);
-    CHECK(json.find("\"schema_version\": 3") != std::string::npos);
+    CHECK(json.find("\"schema_version\": 4") != std::string::npos);
     CHECK(json.find("\"gpu_timing\": false") != std::string::npos);
     CHECK(json.find("\"gpu_timing_unfused\": false") != std::string::npos);
     CHECK(json.find("\"passes\"") == std::string::npos);
@@ -365,7 +365,7 @@ TEST_CASE("bench report: schema v3 with GPU timing") {
     const BenchReport r = timedReport();
     const std::string json = reportToJson(r);
     CHECK_MESSAGE(validJson(json), json);
-    CHECK(json.find("\"schema_version\": 3") != std::string::npos);
+    CHECK(json.find("\"schema_version\": 4") != std::string::npos);
     CHECK(json.find("\"gpu_timing\": true") != std::string::npos);
     CHECK(json.find("\"gpu_timing_unfused\": true") != std::string::npos);
     CHECK(json.find("\"passes\": [") != std::string::npos);

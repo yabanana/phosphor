@@ -47,6 +47,12 @@ public:
     void bind(MetalGraphExecutor& executor, u64 frameIndex);
 
     [[nodiscard]] const rg::Scenario& scenario() const { return scenario_; }
+    /// Plan family of the scenario (rg::scenarioFamily, without build choices).
+    [[nodiscard]] std::string family() const { return rg::scenarioFamily(index_, defaults_); }
+    /// Build choices of an OPT-1 plan for the next build(); reset: the
+    /// launch parameters.
+    void setBuildChoices(const std::vector<std::string>& remat, const std::vector<std::string>& async);
+    void resetBuildChoices() { params_ = defaults_; }
     [[nodiscard]] const rg::ScenarioParams& params() const { return params_; }
 
 private:
@@ -65,6 +71,7 @@ private:
     PipelineCache&     pipelines_;
     u32                index_;
     rg::ScenarioParams params_;
+    rg::ScenarioParams defaults_;
     rg::Scenario       scenario_;
     std::vector<PassState> passes_;
 

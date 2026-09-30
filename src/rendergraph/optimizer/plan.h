@@ -52,7 +52,8 @@ struct GraphPlan {
 /// Structural hash (FNV-1a 64) of the passes named by `passes` (all passes
 /// when empty) and of every resource they touch: pass names, types, queues,
 /// hints, accesses (resource name, version, usage, stages, slot, load
-/// intent), resource names, kinds, descriptors and import flags.  Stable
+/// intent), resource names, kinds, descriptors (except the size of per-frame
+/// imports such as the drawable) and import flags.  Stable
 /// across runs and platforms (no pointers, no indices of unnamed passes).
 [[nodiscard]] u64 graphKey(const RenderGraph& graph, const std::vector<std::string>& passes = {});
 
