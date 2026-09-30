@@ -417,11 +417,20 @@ void benchLoadStore(Context& ctx, Report& rep) {
     //    cheaper than dontCare elsewhere (5% for noise).
     {
         const Cell& c = cells[std::string("rgba32f.") + big];
+        // Only where the store must cost visibly (>= 48 MiB written, >= ~0.05 ms at 1 TB/s): in the
+        // small cells the store is hidden and the bimodal pass cost can stay in its slow mode for a
+        // whole cell (measured: depth32f 1080p dontCare 0.059 vs store 0.016 ms in one of 3 runs).
         bool never = true;
-        for (auto& [k, v] : cells) never &= v.b > v.a * 0.95 - 0.03; // 30 us of noise (other GPU clients)
-        rep.negative(c.b > c.a * 1.5 && never,
-                     "rgba32f " + big + ": dontCare " + num(c.a, 5) + " ms < store " + num(c.b, 5) + " ms (>1.5x needed), store never < 0.95 x dontCare in " +
-                         std::to_string(cells.size()) + " cells: " + (never ? "yes" : "NO"));
+        u32 checked = 0;
+        std::string bad;
+        for (auto& [k, v] : cells) {
+            if (v.bytes < 48.0 * 1048576.0) continue;
+            ++checked;
+            if (!(v.b > v.a * 0.95 - 0.03)) { never = false; bad += k + " "; } // 30 us of noise (other GPU clients)
+        }
+        rep.negative(c.b > c.a * 1.5 && never && checked >= 3,
+                     "rgba32f " + big + ": dontCare " + num(c.a, 5) + " ms < store " + num(c.b, 5) + " ms (>1.5x needed), store never < 0.95 x dontCare in the " +
+                         std::to_string(checked) + " cells >= 48 MiB: " + (never ? "yes" : "NO (" + bad + ")"));
     }
     // 2. Store time follows the bytes: for rgba32f the pass time is linear in bytes over the four
     //    resolutions (r2 > 0.98) and the largest texture is > 2x slower than the smallest;
