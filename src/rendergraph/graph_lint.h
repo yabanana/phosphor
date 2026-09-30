@@ -9,7 +9,7 @@ namespace phosphor::rg {
 
 // ---------------------------------------------------------------------------
 // OPT-1.6 -- store / memoryless lint of a compiled graph (S-TBDR-4, O2).
-// (Contract; implemented by OPT-1.6.)
+// (Implemented in graph_lint.cpp.)
 //   * every attachment Store must be justified by a later reader of the
 //     version it leaves or by an output import (error when not);
 //   * every transient texture used only as an attachment is memoryless, or

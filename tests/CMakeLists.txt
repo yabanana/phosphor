@@ -17,6 +17,7 @@ add_executable(phosphor_tests
     test_async_probe_reference.cpp
     test_graph_debug_reference.cpp
     test_graph_dump.cpp
+    test_graph_lint.cpp
     test_graph_opt_tool.cpp
     test_graph_plan.cpp
     test_gpu_scene.cpp
