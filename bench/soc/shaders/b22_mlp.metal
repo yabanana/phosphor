@@ -1,5 +1,5 @@
 // B-22: per-pixel MLP 64 -> 64 -> 64 -> 3 over a batch of pixels, fully fused
-// in one kernel with all the weights in threadgroup memory: the layer
+// in one kernel, activations in threadgroup memory (the 17 KB of weights stay in device memory/cache: with them in threadgroup memory the kernels exceed the 32 KB limit under API validation): the layer
 // "GEMM" on the Neural Accelerator (matmul2d with a cooperative destination
 // tensor, activation applied in registers) against the same network on
 // simdgroup_matrix (shader ALUs).
@@ -46,18 +46,12 @@ inline void loadInput(threadgroup half* x, uint tid, uint pixBase, uint seed) {
     const uint r = tid >> 1, k0 = (tid & 1u) * 32u;
     for (uint k = 0; k < 32; ++k) x[r * W + k0 + k] = input(pixBase + r, k0 + k, seed);
 }
-inline void loadWeights(threadgroup half* tw, device const half* w, uint tid) {
-    for (uint i = tid; i < uint(W_TOTAL); i += 128u) tw[i] = w[i];
-}
 
 // ---- tensor ops ------------------------------------------------------------
 kernel void mlp_tensor(device const half* w [[buffer(0)]], device float* out [[buffer(1)]],
                        constant MlpParams& p [[buffer(2)]], uint tgid [[threadgroup_position_in_grid]],
                        uint tid [[thread_index_in_threadgroup]]) {
-    threadgroup half tw[W_TOTAL];
     threadgroup half tx[TP * W];
-    loadWeights(tw, w, tid);
-    threadgroup_barrier(mem_flags::mem_threadgroup);
 
     constexpr auto d64 = matmul2d_descriptor(TP, W, static_cast<int>(dynamic_extent));
     constexpr auto d8 = matmul2d_descriptor(TP, NO, static_cast<int>(dynamic_extent));
@@ -65,9 +59,9 @@ kernel void mlp_tensor(device const half* w [[buffer(0)]], device float* out [[b
     matmul2d<d8, execution_simdgroups<4>> op8;
 
     auto X = tensor<threadgroup half, dextents<int32_t, 2>, tensor_inline>(tx, dextents<int32_t, 2>(W, TP));
-    auto B1 = tensor<threadgroup half, dextents<int32_t, 2>, tensor_inline>(tw + W1_OFF, dextents<int32_t, 2>(W, W));
-    auto B2 = tensor<threadgroup half, dextents<int32_t, 2>, tensor_inline>(tw + W2_OFF, dextents<int32_t, 2>(W, W));
-    auto B3 = tensor<threadgroup half, dextents<int32_t, 2>, tensor_inline>(tw + W3_OFF, dextents<int32_t, 2>(NO, W));
+    auto B1 = tensor<device half, dextents<int32_t, 2>, tensor_inline>(const_cast<device half*>(w) + W1_OFF, dextents<int32_t, 2>(W, W));
+    auto B2 = tensor<device half, dextents<int32_t, 2>, tensor_inline>(const_cast<device half*>(w) + W2_OFF, dextents<int32_t, 2>(W, W));
+    auto B3 = tensor<device half, dextents<int32_t, 2>, tensor_inline>(const_cast<device half*>(w) + W3_OFF, dextents<int32_t, 2>(NO, W));
 
     for (uint it = 0; it < p.tilesPerGroup; ++it) {
         const uint pixBase = (tgid * p.tilesPerGroup + it) * uint(TP);
@@ -111,7 +105,7 @@ kernel void mlp_tensor(device const half* w [[buffer(0)]], device float* out [[b
 // ---- simdgroup_matrix -------------------------------------------------------
 // Each simdgroup owns 16 pixels (2 row blocks) of the tile; the activation is
 // applied to the accumulator's thread elements and written back in place.
-inline void layerSimd(threadgroup half* x, threadgroup const half* wt, uint sg, uint lane) {
+inline void layerSimd(threadgroup half* x, device const half* wt, uint sg, uint lane) {
     simdgroup_float8x8 acc[2][8];
     for (int i = 0; i < 2; ++i)
         for (int j = 0; j < 8; ++j) acc[i][j] = simdgroup_float8x8(0);
@@ -138,26 +132,23 @@ kernel void mlp_simd(device const half* w [[buffer(0)]], device float* out [[buf
                      constant MlpParams& p [[buffer(2)]], uint tgid [[threadgroup_position_in_grid]],
                      uint tid [[thread_index_in_threadgroup]], uint sg [[simdgroup_index_in_threadgroup]],
                      uint lane [[thread_index_in_simdgroup]]) {
-    threadgroup half tw[W_TOTAL];
     threadgroup half tx[TP * W];
     threadgroup float to[4 * 16 * NO];
-    loadWeights(tw, w, tid);
-    threadgroup_barrier(mem_flags::mem_threadgroup);
 
     for (uint it = 0; it < p.tilesPerGroup; ++it) {
         const uint pixBase = (tgid * p.tilesPerGroup + it) * uint(TP);
         threadgroup_barrier(mem_flags::mem_threadgroup); // previous tile's reads done
         loadInput(tx, tid, pixBase, p.seed);
         threadgroup_barrier(mem_flags::mem_threadgroup);
-        layerSimd(tx, tw + W1_OFF, sg, lane);
-        layerSimd(tx, tw + W2_OFF, sg, lane);
+        layerSimd(tx, w + W1_OFF, sg, lane);
+        layerSimd(tx, w + W2_OFF, sg, lane);
         simdgroup_float8x8 acc[2];
         acc[0] = simdgroup_float8x8(0);
         acc[1] = simdgroup_float8x8(0);
         for (int k = 0; k < W; k += 8) {
             simdgroup_half8x8 ma[2], mb;
             for (int i = 0; i < 2; ++i) simdgroup_load(ma[i], tx + (sg * 16 + i * 8) * W + k, W);
-            simdgroup_load(mb, tw + W3_OFF + k * NO, NO);
+            simdgroup_load(mb, w + W3_OFF + k * NO, NO);
             for (int i = 0; i < 2; ++i) simdgroup_multiply_accumulate(acc[i], ma[i], mb, acc[i]);
         }
         for (int i = 0; i < 2; ++i) simdgroup_store(acc[i], to + (sg * 16 + i * 8) * NO, NO);

@@ -276,7 +276,7 @@ void benchMlp(Context& ctx, Report& rep, bool& allOk, std::string& ctl) {
     }
     if (mp[0] > 0 && mp[1] > 0) {
         rep.value("mlp.tensor_vs_simd", "ratio", mp[0] / mp[1], {{"pixels", double(kPixels)}});
-        rep.note("MLP: 64-pixel tiles, 128 threads, weights (17 KB) + activation tile in threadgroup memory, " +
+        rep.note("MLP: 64-pixel tiles, 128 threads, activation tile in threadgroup memory, weights (17 KB) read from device memory (cached), " +
                  std::to_string(kTilesPerGroup) + " tiles per threadgroup; tensor path = matmul2d 64x64 (layers 1-2) and 64x8 (layer 3), "
                  "cooperative destination (clamp in registers, store to threadgroup); layer 3 padded to 8 outputs");
     }
