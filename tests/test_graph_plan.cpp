@@ -6,6 +6,7 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -178,4 +179,58 @@ TEST_CASE("graph optimiser: result is never worse than the baseline") {
     const double planJ = r.plan.predicted.timeMs + GraphCostParams{}.gammaMsPerGiB * r.plan.predicted.heapBytes / (1024.0 * 1024 * 1024);
     CHECK(planJ <= r.baseline.J + 1e-9);
     CHECK_FALSE(r.plan.order.empty());
+}
+
+TEST_CASE("graph optimiser: matches exhaustive search on a small graph") {
+    // Scenario 3 with a fixed build (both compute passes on the graphics
+    // queue): every topological order evaluated by the real compiler + model.
+    const auto build = [](const BuildChoices& ch, RenderGraph& g, std::string* error) {
+        ScenarioParams p;
+        p.remat = ch.remat;
+        p.async = ch.async;
+        Scenario s;
+        const TextureRef d = g.importTexture("Drawable", {Format::BGRA8Srgb, 1920, 1080}, ImportOutput | ImportPerFrame);
+        return buildScenario(3, p, g, d, s, {}, error);
+    };
+    RenderGraph g;
+    REQUIRE(build({{}, {}}, g, nullptr));
+    const CompiledGraph c = compileOrder(g);
+    REQUIRE(c.ok);
+    const u32 n = static_cast<u32>(c.order.size());
+    std::vector<std::vector<u32>> preds(g.passes().size());
+    for (const Dependency& dep : c.dependencies) preds[dep.to].push_back(dep.from);
+
+    double best = 1e300;
+    u64 orders = 0;
+    std::vector<u32> order;
+    std::vector<bool> used(g.passes().size(), false);
+    std::function<void()> rec = [&] {
+        if (order.size() == n) {
+            ++orders;
+            const Evaluation e = evaluateOrder(g, order, AliasPolicy::Greedy, BarrierPolicy::Conservative, {});
+            if (e.ok) best = std::min(best, e.cost.J);
+            return;
+        }
+        for (const u32 p : c.order) {
+            if (used[p]) continue;
+            bool ready = true;
+            for (const u32 q : preds[p]) ready = ready && used[q];
+            if (!ready) continue;
+            used[p] = true;
+            order.push_back(p);
+            rec();
+            order.pop_back();
+            used[p] = false;
+        }
+    };
+    rec();
+    CHECK(orders > 100);
+
+    OptimizeOptions o;
+    o.tryPolicies = false; // same policies as the exhaustive search
+    const OptimizeResult r = optimize("t", build, o);
+    REQUIRE_MESSAGE(r.ok, r.error);
+    const double planJ = r.plan.predicted.timeMs + o.cost.gammaMsPerGiB * r.plan.predicted.heapBytes / (1024.0 * 1024 * 1024);
+    MESSAGE("topological orders: ", orders, ", exhaustive best J ", best, ", optimiser ", planJ, " (", r.plan.method, ")");
+    CHECK(planJ <= best + 1e-9);
 }

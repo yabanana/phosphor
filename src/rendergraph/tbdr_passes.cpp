@@ -264,6 +264,22 @@ RenderGroup buildGroup(const RenderGraph& graph, const CompiledGraph& c, u32 fir
 
 } // namespace
 
+bool canJoinGroup(const RenderGraph& graph, const std::vector<u32>& members, u32 pass) {
+    const auto& passes = graph.passes();
+    if (members.empty() || pass >= passes.size()) return false;
+    const PassNode& node = passes[pass];
+    if (node.type != PassType::Raster || node.queue != Queue::Graphics) return false;
+    GroupState state;
+    for (const u32 m : members) {
+        if (m >= passes.size() || passes[m].type != PassType::Raster) return false;
+        const PassAttachments pa = collectAttachments(graph, passes[m]);
+        if (!pa.error.empty()) return false;
+        absorb(state, passes[m], pa);
+    }
+    const PassAttachments pa = collectAttachments(graph, node);
+    return pa.error.empty() && canJoin(state, node, pa);
+}
+
 void buildRenderGroups(const RenderGraph& graph, CompiledGraph& compiled, bool fuse) {
     compiled.renderGroups.clear();
     compiled.encoders.clear();
