@@ -502,3 +502,172 @@ coda prima della connessione: contesti creati con le varianti `_serial`,
   processo lanciato da `~/Documents` restava bloccato in `open()` di dyld;
   `tools/gpu_trace.sh` copia l'app in `$TMPDIR`. `--target-stdout` elimina
   le righe dello Shader Timeline.
+
+---
+
+## OPT-0 — Spike di caratterizzazione: metodo, energia, API, intensità aritmetica, SLC
+
+**2026-09-30** · Apple M5 Max (Apple10, 40 core GPU, CPU 6+12), macOS 27.2
+(26B5091g), Xcode 27.0 (metal 32023.921), **a batteria** (72→61%, nessun
+avviso termico da `pmset -g therm`) · strumenti in
+[`bench/opt0_spike/`](../bench/opt0_spike/) (compilati a mano, comandi nel
+[README](../bench/opt0_spike/README.md)). Sul Mac giravano altri client GPU
+(WindowServer ~45% CPU, `replayd`, Chrome, app Codex): condizione reale della
+macchina, non eliminabile senza chiudere le app del proprietario.
+
+### 1. Metodo di misura (`method_spike`)
+
+Kernel noto: 4 catene FMA FP32 indipendenti per thread su 1M thread, risultato
+scritto e confrontato con la CPU (6 campioni, 0 errori). Tempo = timestamp
+`Precise` dopo il dispatch − timestamp dopo un dispatch "anchor" di 1 thread
+(stesso encoder, barriera Dispatch→Dispatch).
+
+- **Timestamp vs feedback**: il feedback del commit (`GPUEndTime −
+  GPUStartTime`) supera i timestamp di un offset costante di **1,5 µs** (1×…
+  8×): i due metodi coincidono; la suite usa i timestamp (più misure per
+  commit, nessun costo di commit incluso).
+- **Controllo negativo lineare** (30 ripetizioni per punto, P13 al 99–100%):
+  1× / 2× / 4× / 8× lavoro → 1,0005 / 2,0228 / 4,1266 / 8,3441 ms, rapporti
+  1 / 2,02 / 4,13 / 8,34: lineare entro il 4%. Lo scarto cresce con la durata
+  del dispatch (vedi CV).
+- **Commit quasi vuoto** (200 commit, clock caldi): solo anchor → GPU
+  **1,6 µs** (p10 1,5, p90 1,9); dispatch minimo (256 thread) → feedback
+  3,4 µs, timestamp 1,9 µs; latenza CPU commit → evento visto dalla CPU
+  **156 µs** p50 (p10 125, p90 289): base di B-28.
+- **Guardia anti-eliminazione**: stesso ciclo con risultato non scritto →
+  **0,0057 ms** contro 1,97 ms (il compilatore cancella il ciclo); risultato
+  mascherato con uno zero letto a runtime (`& p.zero`) → 1,76–1,86 ms (tenuto,
+  ma 6–10% più veloce della versione che scrive il float: il codegen cambia;
+  la suite scrive e verifica i risultati, la maschera solo dove la verifica è
+  impossibile).
+- **DVFS**: con carico continuo il GPU va allo stato più alto (P13) entro
+  0,25 s dalla ripartenza dopo 3 s di idle; la tabella `voltage-states9` di
+  `pmgr` (ioreg, senza root) dà 13 P-state da 338 a **1620 MHz** (P13), ~50 W
+  di GPU (IOReport) sul kernel FMA. Con pause tra dispatch da ~0,5 ms:
+  pausa 0 / 2 / 8 / 16 / 33 ms → 0,485 / 0,486 / 0,616 / **2,32** / 2,33 ms
+  (a 16 ms il GPU scende a P3; tempo ×4,8). La suite tiene il carico continuo
+  tra i gruppi di misura e registra la residenza dei P-state per ogni
+  benchmark.
+- **Verifica con xctrace** (Metal System Trace sul caso "pause"):
+  `gpu-performance-state-intervals` dà solo tre livelli (Minimum / Medium /
+  Maximum): Maximum nei primi 2 s (carico continuo e pause di 2 ms),
+  Minimum con le pause di 16–33 ms, coerente con IOReport. IOReport è più
+  fine (P-state esatto) ed è in-process: la suite usa IOReport, xctrace resta
+  il controllo esterno.
+- **Varianza**: a clock massimo il CV del singolo dispatch è 3–20%, con code
+  lunghe (min/mediana 0,996 per dispatch da 0,05 ms, 0,906 da 5 ms: i
+  dispatch lunghi vengono interrotti più spesso dagli altri client GPU, il
+  compositor a 120 Hz). **Il CV delle mediane** di 8 gruppi, con carico
+  continuo tra i gruppi: dispatch 0,1 ms × 5 ripetizioni → 0,04%; 0,5 ms × 15
+  → 0,05%; 1,7 ms × 5 → 2,7%, × 45 → 0,5%. Il CV dei minimi è ≤ 0,08% in
+  tutti i casi.
+
+**Decisione (protocollo della suite)**: timestamp Precise con anchor;
+dispatch da 0,1–0,5 ms (mai oltre ~2 ms); riscaldamento continuo fino a P-state
+massimo ≥ 95% del tempo attivo (IOReport); gruppi di ≥ 15 ripetizioni,
+statistica = mediana (min e p10/p90 registrati); 3 run → CV tra run per
+metrica; ogni kernel scrive un risultato verificato sulla CPU; dati di
+input casuali (vedi punto 5); ogni benchmark ha un controllo negativo.
+
+### 2. Energia e clock senza sudo (`ioreport_probe`)
+
+- `libIOReport` (nell'SDK come `libIOReport.tbd`, API privata) si usa senza
+  root: 6121 canali. **GPU Energy** (gruppo "Energy Model", nJ) si aggiorna
+  in tempo reale (~2 volte al secondo): 1,0–1,6 W a riposo, 28–29 W con il
+  kernel LCG dello spike F4, ~50–53 W con il kernel FMA; finestre < 0,5 s
+  danno 0 o il doppio: misurare su ≥ 1 s.
+- **GPU Performance States** ("GPU Stats"): residenza per P-state
+  (OFF, P1…P15; la tabella ioreg ne definisce 13), in tempo reale.
+- I canali CPU/DRAM/ANE dell'Energy Model (`CPU Energy`, `DRAM0`, `ANE0`,
+  mJ) **esistono ma sono aggiornati raramente** (fermi per decine di secondi;
+  +5,4 kJ di `CPU Energy` in ~25 min). Polling ogni secondo per 10 minuti:
+  aggiornamenti a 85 s e 405 s (**~5 minuti** tra due aggiornamenti, +209 J
+  = 0,65 W medi con la macchina quasi a riposo): utilizzabili solo come
+  media su finestre di molti minuti (soak), non per benchmark da secondi.
+- PMP "DCS BW" (istogrammi di banda DRAM per agente, 32 GB/s per bucket):
+  `AMCC RD` segue il traffico ma **sottostima** (media 346 GB/s mentre il GPU
+  legge a 540 GB/s da DRAM); `AGX RD` resta fermo: solo indicazione
+  qualitativa, non usato come misura.
+- Termica: `NSProcessInfo.thermalState` (metal-cpp `NS::ProcessInfo`),
+  `pmset -g therm` (nessun avviso registrato durante gli spike).
+
+**Decisione**: B-27 misura watt GPU (IOReport), P-state e frequenza (IOReport
++ tabella ioreg), stato termico, e la potenza CPU/DRAM/ANE solo come media
+nel soak (finestre ≥ 10 min, periodo ~5 min); senza
+alimentazione di rete e senza soak su più Mac il resto di B-27 è parziale e
+dichiarato.
+
+### 3. API sul chip
+
+- **Neural Accelerator** (`api_probe gemm`, tensor ops di
+  MetalPerformancePrimitives con tensori `tensor_inline` costruiti da
+  puntatori device, `matmul2d` 64×32, 4 SIMD-group; 4096³, input interi
+  piccoli → risultato esatto, 64 campioni verificati, 0 errori): FP16→FP32
+  **32,2 TFLOPS**, BF16→FP32 32,2, INT8→INT32 **53,8 TOPS**; GEMM FP16 con
+  `simdgroup_matrix` sugli ALU 14,3 TFLOPS. I tipi accettati dal header
+  (70 combinazioni) includono FP8 e4m3/e5m2, FP4 e2m1, INT4/INT2; `char`
+  come INT8 non compila (serve `int8_t`/`int32_t`). Fonte esterna ([R7]/
+  Creative Strategies nel playbook: 19,9 TFLOPS) sotto la nostra misura.
+- **Core ML / Neural Engine** senza modelli esterni (`coreml_probe`): modello
+  NeuralNetwork scritto in codice (protobuf codificato a mano, 4 × conv 3×3
+  256→256 + ReLU su 256×64×64, 19,3 GFLOP), compilato in 33 ms;
+  `MLComputePlan` conferma il dispositivo per layer (ANE con
+  `cpuAndNeuralEngine`/`all`). Predizione p50: CPU 12,4 ms (1,56 TFLOPS),
+  CPU+GPU 1,38 ms (14,0), **ANE 1,26 ms (15,4 TFLOPS efficaci)**.
+- **MTLIO + compressione** (`api_probe mtlio`, 256 MiB di rampe a 16 bit con
+  rumore, `MTLIOCreateCompressionContext`, chunk 64 KiB, risultato
+  confrontato byte per byte): rapporto / lettura fredda (copia scritta con
+  `F_NOCACHE`) / calda: lz4 1,45 / 1,62 / 2,33 GB/s; lzfse 2,59 / 1,08 / 1,32;
+  zlib 2,89 / 0,50 / 0,53; lzma 4,53 / 0,10 / 0,10; lzbitmap 2,45 / 2,46 /
+  2,83 GB/s. Con dati incomprimibili (rapporto 1,00, chunk salvati crudi)
+  ~15 GB/s dalla page cache: il limite è la decompressione.
+- **CPU** (`cpu_probe`): `sysctl` riporta FEAT_SME/SME2/SME2p1, vettore
+  streaming 64 B; il compilatore accetta codice SME2 con
+  `-mcpu=native+sme2` (`__arm_locally_streaming`, `svcntsb()` = 64).
+  SGEMM Accelerate 1,69 TFLOPS FP32 (4096²), NEON FMA 76,6 GFLOPS su un core.
+- **`CAMetalDisplayLink`** (`display_probe`, Objective-C++: metal-cpp non lo
+  espone): finestra 1280×800 a 120 Hz: intervallo di callback 8,332 ms
+  (sd 0,46), presentazione = target ±3 µs, intervallo di presentazione
+  8,333 ms, 1 frame non presentato su 351 (l'ultimo); a 60 Hz 16,667 ms.
+  Anticipo callback → presentazione **41,6 ms** (5 refresh) sia con
+  `preferredFrameLatency` 1 sia 2 (finestra composta): da approfondire in
+  B-26. La latenza input→fotoni richiede un sensore: non misurabile qui.
+
+### 4. Intensità aritmetica dei pass (IR AIR)
+
+`xcrun metal -S -emit-llvm` sugli shader del motore + conteggio per blocco
+di base (`air_ops.py`, `bench/opt0_spike/air_ops.py`): `forward_fs` 38 blocchi,
+427 flop statici (fadd/fmul/fma/dot/mix per lane), 15 trascendentali, 10
+divisioni, 5 campionamenti; il ciclo sulle luci (back edge rilevato) costa
+**166 flop + 9 trascendentali + 7 divisioni per luce**; `forward_vs` 82 flop.
+Con il numero di invocazioni (frammenti ≥ pixel coperti per l'HSR, vertici,
+thread) e i byte DRAM del grafo si colloca ogni pass nel roofline.
+Approssimazione da dichiarare: l'AIR non è l'ISA AGX (il backend fonde,
+espande divisioni e trascendentali); i byte del grafo contano solo gli
+attachment.
+
+### 5. SLC dalla curva latenza/banda (`method_spike chase|slc`)
+
+- **Latenza** (1 thread, ciclo casuale di linee da 128 B, mediana di 5):
+  ~31 ns fino a 128 KiB, 97–150 ns tra 256 KiB e 1 MiB, 250–320 ns a
+  2–4 MiB, **~330–345 ns piatti da 4 a 64 MiB**, poi 356 / 381 / 455–490 ns
+  a 128 / 256 / 512–2048 MiB (DRAM + TLB con pagine da 16 KiB).
+- **Banda di lettura** (327.680 thread, float4 coalescenti, ~4 GiB letti per
+  misura, dati casuali): ~9 TB/s fino a 24–40 MiB, discesa tra 48 e 72 MiB
+  (2,1–6,6), ~2 TB/s a 96–128 MiB, **~975 GB/s piatti tra 192 e 384 MiB**,
+  757–800 a 512 MiB, **540 GB/s a 1–2 GiB** (DRAM; picco dichiarato M5 Max
+  460/614 GB/s). Forma riproducibile su 3 run, livelli del plateau variabili
+  fino al 25% tra run (7,1 contro 9,4 TB/s a 24 MiB).
+- **Trappola dei dati**: con un buffer privato non inizializzato (zeri) la
+  banda on-chip sale del ~25% (9,1–9,5 TB/s): input casuali obbligatori.
+- La guardia "base della passata dipende dalla precedente" non cambia i
+  numeri: nessuno scambio di cicli da parte del compilatore.
+- Interpretazione: la banda sopra la DRAM fino a 384 MiB non si spiega con un
+  gradino netto; è compatibile con una cache di ultimo livello resistente al
+  thrashing (frazione di hit ≈ C/WS): con quel modello C ≈ 100–130 MiB. È
+  **un'ipotesi da confermare** con B-08 (curva fine × 3 run, fit), non un
+  valore.
+
+**Decisioni per il piano**: B-08 riporta curve complete (latenza e banda),
+stime dei ginocchi e fit dichiarati come stime; dati casuali; IOReport PMP
+solo qualitativo.
