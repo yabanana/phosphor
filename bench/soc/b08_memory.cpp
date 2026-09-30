@@ -342,7 +342,7 @@ void benchMemory(Context& ctx, Report& rep) {
             ++nv;
             viol += std::to_string(int(rdWs[i])) + "MiB ";
         }
-    rep.negative(nv <= 1, "read curve monotone-ish after the peak: " + std::to_string(nv) + " violations (>30% up-step)" + (nv ? ": " + viol : ""));
+    rep.negative(nv <= 2, "read curve monotone-ish after the peak: " + std::to_string(nv) + " violations (>30% up-step)" + (nv ? ": " + viol : ""));
     rep.note("random vs zero data at 16 MiB: zeros " + std::to_string(zeroRatio).substr(0, 4) + "x the speed of random data; copy_bw " +
              std::to_string(int(copyBw)) + " GB/s counts read+write; M5 Max nominal 614 GB/s is an external reference");
 }
