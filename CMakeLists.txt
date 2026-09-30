@@ -127,6 +127,11 @@ set_source_files_properties(tools/image_diff/image_diff.cpp PROPERTIES COMPILE_O
 add_executable(soc_model tools/soc_model/soc_model.cpp)
 target_link_libraries(soc_model PRIVATE phosphor_core tinygltf) # tinygltf: nlohmann json.hpp
 target_compile_options(soc_model PRIVATE ${PHOSPHOR_WARNINGS})
+# OPT-1.1: offline graph optimiser CLI (scenarios -> plans + report). Portable.
+add_executable(graph_opt tools/graph_opt/graph_opt.cpp)
+target_link_libraries(graph_opt PRIVATE phosphor_core)
+target_include_directories(graph_opt PRIVATE ${CMAKE_SOURCE_DIR}/tools)
+target_compile_options(graph_opt PRIVATE ${PHOSPHOR_WARNINGS})
 
 # --- macOS app ---------------------------------------------------------------
 if(PHOSPHOR_BUILD_APP)
