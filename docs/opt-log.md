@@ -798,10 +798,10 @@ ha fallito.
 - Energia (B-27): GPU ~63 W sul carico FMA (8 pJ per FMA), idle 0,03 W;
   carico CPU su tutti i core non rallenta il GPU (1,00).
 - Commit: 3,4 µs di GPU, 168 µs CPU commit → evento (spin 141, listener 200).
-- **Soak B-27 (10 min, a batteria 58 → 12%)**: prestazioni GPU invariate
+- **Soak B-27 (10 min, a batteria 32 → 12%)**: prestazioni GPU invariate
   (0,984 ms per dispatch, 1620 MHz), 68,5 → 67,0 W, termica "fair" dopo
-  2,5 min. Nelle fasi misurate subito dopo, con la batteria al 12–32%, il
-  controllo di B-27 è fallito: GPU a 649 MHz sotto carico misto (2,03× più
+  2,5 min. Nelle fasi dello stesso run (eseguite prima del soak, batteria
+  al ~32%) il controllo di B-27 è fallito: GPU a 649 MHz sotto carico misto (2,03× più
   lento; 1,00× nei run con batteria al 58–85%) e "GPU Energy" con delta 0
   su una finestra di 4 s. Causa: limitazione di potenza a batteria scarica
   (il run è stato scartato; le misure vanno fatte a batteria carica o
