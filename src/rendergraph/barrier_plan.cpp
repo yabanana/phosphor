@@ -74,7 +74,9 @@ BarrierRules defaultBarrierRules() {
     return rules;
 }
 
-void buildBarrierPlan(const RenderGraph& graph, CompiledGraph& compiled, const BarrierRules& rules) {
+void buildBarrierPlan(const RenderGraph& graph, CompiledGraph& compiled, const BarrierRules& rules,
+                      BarrierPolicy policy) {
+    (void)policy; // OPT-1.4 Minimal: not implemented yet (Conservative)
     compiled.barriers.clear();
     const auto& passes = graph.passes();
     const u32   count  = static_cast<u32>(compiled.order.size());

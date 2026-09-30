@@ -1,6 +1,7 @@
 #include "rendergraph/render_graph.h"
 #include "rendergraph/aliasing.h"
 #include "rendergraph/barrier_plan.h"
+#include "rendergraph/graph_lint.h"
 #include "rendergraph/tbdr_passes.h"
 
 #include <algorithm>
@@ -170,6 +171,8 @@ BufferRef PassBuilder::write(BufferRef buffer, Usage usage, Stages stages) {
 void PassBuilder::setSideEffect() { graph_.passes_[pass_].sideEffect = true; }
 void PassBuilder::setHints(u32 hints) { graph_.passes_[pass_].hints = hints; }
 void PassBuilder::setParallelChunks(u32 chunks) { graph_.passes_[pass_].parallelChunks = std::max(chunks, 1u); }
+
+void PassBuilder::setCost(const PassCost& cost) { graph_.passes_[pass_].cost = cost; }
 
 void PassBuilder::setProfileShaders(const std::string& functions) {
     std::vector<std::string>& out = graph_.passes_[pass_].profileShaders;
@@ -534,12 +537,18 @@ CompiledGraph compile(const RenderGraph& graph, const CompileOptions& options) {
     if (!c.ok) return c;
     buildRenderGroups(graph, c, options.fuseRasterPasses);
     if (!c.ok) return c;
-    if (options.sizer) c.aliasing = planAliasing(graph, c, *options.sizer, options.alias);
+    if (options.sizer) c.aliasing = planAliasing(graph, c, *options.sizer, options.alias, options.aliasPolicy);
     // Queue syncs first: their positions become encoder boundaries, which
     // decide the scope of the barriers.
     buildQueueSyncs(graph, c);
     splitEncodersAtQueueSyncs(c);
-    buildBarrierPlan(graph, c, defaultBarrierRules());
+    buildBarrierPlan(graph, c, defaultBarrierRules(), options.barrierPolicy);
+    if (options.lint != LintMode::Off) {
+        for (const LintFinding& f : lintGraph(graph, c)) {
+            c.lint.push_back(f.message);
+            if (options.lint == LintMode::Error && f.error) c.errors.push_back("lint: " + f.message);
+        }
+    }
     c.ok = c.errors.empty();
     return c;
 }

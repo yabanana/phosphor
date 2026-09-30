@@ -26,7 +26,8 @@ struct Range {
 } // namespace
 
 AliasingPlan planAliasing(const RenderGraph& graph, const CompiledGraph& compiled, const ResourceSizer& sizer,
-                          bool alias) {
+                          bool alias, AliasPolicy policy) {
+    (void)policy; // OPT-1.3 Coloring: not implemented yet (Greedy)
     AliasingPlan plan;
     const auto& resources = graph.resources();
     const auto& passes    = graph.passes();
@@ -123,6 +124,16 @@ AliasingPlan planAliasing(const RenderGraph& graph, const CompiledGraph& compile
                 if (i != j && rangesIntersect(placed[i], placed[j])) { placed[i].aliased = true; break; }
             }
         }
+    }
+
+    // Lower bound of any packing: the largest sum of footprints alive at one
+    // position (async resources are alive for the whole frame).
+    for (u32 pos = 0; pos < compiled.order.size(); ++pos) {
+        u64 live = 0;
+        for (const Candidate& c : candidates) {
+            if (c.life.first <= pos && pos <= c.life.last) live += c.size;
+        }
+        plan.maxLiveSize = std::max(plan.maxLiveSize, live);
     }
 
     std::sort(placed.begin(), placed.end(), [](const Placement& a, const Placement& b) {

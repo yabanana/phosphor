@@ -76,6 +76,10 @@ add_library(phosphor_core STATIC
     src/rendergraph/async_probe_reference.cpp
     src/rendergraph/graph_debug_reference.cpp
     src/rendergraph/graph_dump.cpp
+    src/rendergraph/graph_lint.cpp
+    src/rendergraph/optimizer/cost_model.cpp
+    src/rendergraph/optimizer/optimizer.cpp
+    src/rendergraph/optimizer/plan.cpp
     src/rendergraph/render_graph.cpp
     src/rendergraph/scenario.cpp
     src/rendergraph/tbdr_passes.cpp

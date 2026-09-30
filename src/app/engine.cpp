@@ -136,7 +136,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         params.height       = options_.scenarioHeight;
         params.work         = options_.scenarioWork;
         params.wideHdr      = options_.scenarioWide;
-        params.asyncCompute = options_.scenarioAsync;
+        if (!options_.scenarioAsync) params.async = std::vector<std::string>{};
         params.remat        = options_.graphRemat;
         params.views        = options_.scenarioViews;
         params.rematIterations = options_.graphRematCost;

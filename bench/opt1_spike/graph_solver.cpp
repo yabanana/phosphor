@@ -138,7 +138,8 @@ bool buildProblem(Problem& pb, u32 scenario, u32 views) {
     for (u32 p = 0; p < pb.scenario.synth.size(); ++p) {
         const SynthPass& s = pb.scenario.synth[p];
         const SynthWork w = synthWork(s);
-        const double ops = w.intOps / 2.0 + w.invocations * kBaseOps; // synthWork counts 8 int ops = 4 IMAD per step
+        const double ops = w.intOps; // IMADs incl. the per-invocation base (synthWork)
+        (void)kBaseOps;
         pb.passSeconds[p] = ops / kImad + w.triangles / kTris;
     }
     return true;

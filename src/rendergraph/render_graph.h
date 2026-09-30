@@ -185,6 +185,16 @@ struct ResourceNode {
     u32          versions = 1; // number of versions created so far (>= 1)
 };
 
+/// OPT-1: work of a pass for the graph cost model (optimizer/cost_model.h),
+/// whole-pass totals.  Integer multiply-adds count once (one IMAD).
+struct PassCost {
+    double flops       = 0; // FP32, FMA = 2
+    double intOps      = 0; // integer ops (IMAD = 1)
+    double triangles   = 0; // rasterised triangles
+    double invocations = 0; // fragments / threads (informational)
+    [[nodiscard]] bool empty() const { return flops == 0 && intOps == 0 && triangles == 0; }
+};
+
 class PassContext; // defined in render_graph_exec.h (backend-facing)
 using ExecuteFn = std::function<void(PassContext&)>;
 
@@ -215,6 +225,9 @@ struct PassNode {
     /// F4: shader functions the pass runs (profiling only: maps Metal System
     /// Trace's per-shader timeline to passes; no effect on compilation).
     std::vector<std::string> profileShaders;
+    /// OPT-1: work the pass declares for the graph cost model (optional:
+    /// all zero -> the model counts only its DRAM bytes and fixed costs).
+    PassCost    cost;
     ExecuteFn   execute;
 };
 
@@ -250,6 +263,8 @@ public:
     void setParallelChunks(u32 chunks);
     /// F4: comma-separated shader function names run by the pass (profiling).
     void setProfileShaders(const std::string& functions);
+    /// OPT-1: declared work for the graph cost model.
+    void setCost(const PassCost& cost);
 
 private:
     friend class RenderGraph;
@@ -426,7 +441,27 @@ struct AliasingPlan {
     std::vector<Placement> placements; // transient, non-memoryless resources
     u64 heapSize      = 0;             // bytes needed by the aliased layout
     u64 unaliasedSize = 0;             // bytes without aliasing (for the dump)
+    /// OPT-1.3: max over positions of the footprints alive at that position
+    /// (async resources alive all frame): the lower bound of any packing.
+    u64 maxLiveSize   = 0;
 };
+
+// OPT-1.3: how transients are packed into the transient heap.
+enum class AliasPolicy : u8 {
+    Greedy,   // F2.2: size-descending first fit (the end-of-F4 behaviour)
+    Coloring, // OPT-1.3: interval colouring, never larger than Greedy
+};
+
+// OPT-1.4: which stages barriers wait for.
+enum class BarrierPolicy : u8 {
+    Conservative, // F2.3: first use of placed memory waits for every stage
+                  // touching that memory in the frame (the end-of-F4 behaviour)
+    Minimal,      // OPT-1.4: only the stages of the accesses that are not
+                  // already ordered before another access of the same memory
+};
+
+// OPT-1.6: store/memoryless lint of the compiled graph.
+enum class LintMode : u8 { Off, Warn, Error };
 
 struct CompiledGraph {
     bool ok = false;
@@ -451,6 +486,9 @@ struct CompiledGraph {
     std::vector<PassBarriers> barriers;       // F2.3, sorted by position
     std::vector<QueueSync>    queueSyncs;     // F2.6
     AliasingPlan              aliasing;       // F2.2
+    /// OPT-1.6: lint findings (LintMode::Warn); with LintMode::Error they
+    /// are also in `errors` and compilation fails.
+    std::vector<std::string>  lint;
 
     [[nodiscard]] u32 position(u32 pass) const {
         return pass < positionOfPass.size() ? positionOfPass[pass] : ~0u;
@@ -469,6 +507,10 @@ struct CompileOptions {
     /// compilation fails with an error naming the violation.  Empty: stable
     /// Kahn order (declaration order with the S-TBDR-6 hint).
     std::vector<u32> order;
+    /// OPT-1.3 / OPT-1.4 / OPT-1.6 (defaults = end-of-F4 behaviour).
+    AliasPolicy   aliasPolicy   = AliasPolicy::Greedy;
+    BarrierPolicy barrierPolicy = BarrierPolicy::Conservative;
+    LintMode      lint          = LintMode::Off;
 };
 
 /// Validate, cull, sort, compute lifetimes, then run the F2.4 fusion, F2.2

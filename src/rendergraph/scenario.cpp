@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace phosphor::rg {
 
@@ -194,6 +195,12 @@ u32 addSynth(Ctx& c, const std::string& name, SynthKind kind, Queue queue, const
         [&](PassBuilder& b) {
             Setup s(c, b, sp, type);
             fn(s);
+            const SynthWork w = synthWork(sp);
+            PassCost cost;
+            cost.intOps      = w.intOps;
+            cost.triangles   = w.triangles;
+            cost.invocations = w.invocations;
+            b.setCost(cost);
             switch (kind) {
             case SynthKind::Compute:    b.setProfileShaders("synth_cs"); break;
             case SynthKind::Fullscreen: b.setProfileShaders("synth_fullscreen_vs,synth_fs"); break;
@@ -495,17 +502,21 @@ void buildAsync(Ctx& c) {
         s.alu(24);
         s.hints(HintGeometryHeavy);
     });
-    const Queue q = c.params.asyncCompute ? Queue::AsyncCompute : Queue::Graphics;
+    const auto queueOf = [&](const std::string& pass) {
+        if (!c.params.async) return Queue::AsyncCompute; // default: every candidate async
+        const auto& list = *c.params.async;
+        return std::find(list.begin(), list.end(), pass) != list.end() ? Queue::AsyncCompute : Queue::Graphics;
+    };
     const TextureDesc atlasDesc{c.hdr(), 4096, 4096};
     const TextureRef atlas = c.graph.importTexture("Probe atlas" + c.suffix, atlasDesc, ImportContentsDefined);
     c.scenario.imports.push_back({atlas.resource, ScenarioImport::Role::Static, atlasDesc});
     TextureRef gi, particles;
-    addSynth(c, "GI probe update", SynthKind::Compute, q, [&](Setup& s) {
+    addSynth(c, "GI probe update", SynthKind::Compute, queueOf("GI probe update"), [&](Setup& s) {
         s.sample(atlas);
         gi = s.storage(s.texture("GI volume", c.hdr(), 1024, 1024));
         s.alu(4);
     });
-    addSynth(c, "Particle simulation", SynthKind::Compute, q, [&](Setup& s) {
+    addSynth(c, "Particle simulation", SynthKind::Compute, queueOf("Particle simulation"), [&](Setup& s) {
         particles = s.storage(s.texture("Particles", Format::RGBA16Float, 512, 512));
         s.alu(4096);
     });
@@ -528,14 +539,15 @@ struct ScenarioInfo {
     const char* name;
     void (*build)(Ctx&);
     std::vector<std::string> remat;
+    std::vector<std::string> async;
 };
 
 const std::vector<ScenarioInfo>& scenarios() {
     static const std::vector<ScenarioInfo> list = {
-        {"deferred", buildDeferred, {"Velocity"}},
-        {"forward-plus", buildForwardPlus, {"Velocity"}},
-        {"post-chain", buildPostChain, {"Velocity", "CoC"}},
-        {"async-compute", buildAsync, {}},
+        {"deferred", buildDeferred, {"Velocity"}, {}},
+        {"forward-plus", buildForwardPlus, {"Velocity"}, {}},
+        {"post-chain", buildPostChain, {"Velocity", "CoC"}, {}},
+        {"async-compute", buildAsync, {}, {"GI probe update", "Particle simulation"}},
     };
     return list;
 }
@@ -550,12 +562,32 @@ std::vector<std::string> scenarioRematCandidates(u32 index) {
     return index < scenarioCount() ? scenarios()[index].remat : std::vector<std::string>{};
 }
 
+std::vector<std::string> scenarioAsyncCandidates(u32 index) {
+    return index < scenarioCount() ? scenarios()[index].async : std::vector<std::string>{};
+}
+
+std::string scenarioFamily(u32 index, const ScenarioParams& p) {
+    char buf[160];
+    std::snprintf(buf, sizeof buf, "scenario:%s:%ux%u:s%u:w%g:v%u:%s", scenarioName(index), p.width, p.height,
+                  p.shadowSize, static_cast<double>(p.work), p.views, p.wideHdr ? "hdr32" : "hdr16");
+    return buf;
+}
+
 bool buildScenario(u32 index, const ScenarioParams& params, RenderGraph& graph, TextureRef drawable, Scenario& out,
                    const SynthExecFactory& factory, std::string* error) {
     out = Scenario{};
     if (index >= scenarioCount()) {
         if (error) *error = "unknown scenario " + std::to_string(index);
         return false;
+    }
+    if (params.async) {
+        for (const std::string& a : *params.async) {
+            const auto& candidates = scenarios()[index].async;
+            if (std::find(candidates.begin(), candidates.end(), a) == candidates.end()) {
+                if (error) *error = "scenario '" + std::string(scenarios()[index].name) + "' has no async-eligible pass '" + a + "'";
+                return false;
+            }
+        }
     }
     for (const std::string& r : params.remat) {
         const auto& candidates = scenarios()[index].remat;
@@ -601,7 +633,7 @@ SynthWork synthWork(const SynthPass& p) {
     u32 rematInputs = 0;
     for (const SynthInput& in : p.inputs) rematInputs += in.remat ? 1 : 0;
     const double steps = p.aluIterations + static_cast<double>(p.rematIterations) * rematInputs;
-    w.intOps    = invocations * steps * 8.0;
+    w.intOps    = invocations * (steps * 4.0 + kSynthBaseOps);
     w.triangles = p.triangles;
     return w;
 }

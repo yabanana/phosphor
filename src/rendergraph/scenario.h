@@ -3,6 +3,7 @@
 #include "rendergraph/render_graph.h"
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -93,8 +94,11 @@ struct ScenarioParams {
     /// 2x-bytes control: every RGBA16Float intermediate becomes RGBA32Float
     /// (same work, twice the bytes).
     bool  wideHdr = false;
-    /// Scenario 3: its eligible compute passes run on the async queue.
-    bool  asyncCompute = true;
+    /// Passes (by name, without view suffix) that run on the async compute
+    /// queue; nullopt = the scenario's default (every candidate of
+    /// scenarioAsyncCandidates() on the async queue).  A build choice of the
+    /// OPT-1 plans (OPT-1.9).
+    std::optional<std::vector<std::string>> async;
     /// Independent copies of the scenario (split screen, extra cameras)
     /// composited by the present pass: 1..6 (graphs of 20-80+ passes).
     u32   views = 1;
@@ -132,6 +136,11 @@ using SynthExecFactory = std::function<ExecuteFn(u32 pass)>;
 [[nodiscard]] const char* scenarioName(u32 index);
 /// Resources of scenario `index` that can be rematerialised (OPT-1.2).
 [[nodiscard]] std::vector<std::string> scenarioRematCandidates(u32 index);
+/// Compute passes of scenario `index` that may run on the async queue (OPT-1.9).
+[[nodiscard]] std::vector<std::string> scenarioAsyncCandidates(u32 index);
+/// Identity of the scenario graph before its build choices (remat, async):
+/// the family of its OPT-1 plans, e.g. "scenario:deferred:2560x1440:s2048:w1:v1:hdr16".
+[[nodiscard]] std::string scenarioFamily(u32 index, const ScenarioParams& params);
 
 /// Append scenario `index` to `graph` (normally empty, or holding only the
 /// caller's imports).  `drawable` is the imported target of the final present
@@ -141,8 +150,13 @@ using SynthExecFactory = std::function<ExecuteFn(u32 pass)>;
 bool buildScenario(u32 index, const ScenarioParams& params, RenderGraph& graph, TextureRef drawable,
                    Scenario& out, const SynthExecFactory& factory, std::string* error = nullptr);
 
-/// Work of a synthetic pass for the cost model: integer ops of the ALU
-/// chains (x invocations), triangles drawn, texels read.
+/// Base cost of one synthetic invocation (hashing of inputs and outputs), in
+/// IMAD-equivalents: calibrated on the Present pass of OPT-1 spike 1
+/// (5.76 Mpx, no ALU steps, 0.147 ms).
+inline constexpr double kSynthBaseOps = 100.0;
+
+/// Work of a synthetic pass for the cost model: IMADs (one per LCG step and
+/// chain: 4 per step, plus kSynthBaseOps per invocation), triangles drawn.
 struct SynthWork {
     double intOps    = 0;
     double triangles = 0;

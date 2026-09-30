@@ -91,7 +91,7 @@ ScenarioPasses::ScenarioPasses(MetalContext& context, PipelineCache& pipelines, 
     if (!dummyDepth_) throw std::runtime_error("Failed to create the scenario dummy depth texture");
     LOG_INFO("Graph scenario %u '%s': %ux%u, shadows %u, work %.2f%s%s", index_, rg::scenarioName(index_),
              params_.width, params_.height, params_.shadowSize, static_cast<double>(params_.work),
-             params_.wideHdr ? ", wide HDR (RGBA32Float)" : "", params_.asyncCompute ? "" : ", async off");
+             params_.wideHdr ? ", wide HDR (RGBA32Float)" : "", params_.async && params_.async->empty() ? ", async off" : "");
 }
 
 ScenarioPasses::~ScenarioPasses() {

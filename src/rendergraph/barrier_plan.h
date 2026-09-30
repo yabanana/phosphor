@@ -103,7 +103,10 @@ struct BarrierRules {
 /// Fills compiled.barriers (sorted by position, only positions with at least
 /// one barrier).  Needs renderGroups/encoders (buildRenderGroups) and, for
 /// aliasing barriers, compiled.aliasing.  Adds errors on forbidden barriers.
-void buildBarrierPlan(const RenderGraph& graph, CompiledGraph& compiled, const BarrierRules& rules);
+/// OPT-1.4: `policy` Minimal narrows the stages of first-use barriers (A4,
+/// not yet: behaves as Conservative).
+void buildBarrierPlan(const RenderGraph& graph, CompiledGraph& compiled, const BarrierRules& rules,
+                      BarrierPolicy policy = BarrierPolicy::Conservative);
 
 /// Fills compiled.queueSyncs for dependencies whose passes run on different
 /// queues: one signal per producer position (values increasing with
