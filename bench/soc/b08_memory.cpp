@@ -270,6 +270,8 @@ void benchMemory(Context& ctx, Report& rep) {
                                                                    65536, 131072, 262144, 524288, 1048576, 2097152};
     std::vector<double> latNs;
     double chaseRatio = 0;
+    GpuState chaseState;          // own IOReport subscription (the suite's window stays intact)
+    std::string lowClockPoints;   // latency points measured below the top P-state after 3 attempts
     for (size_t kib : latKiB) {
         const size_t lines = kib * KiB / 128;
         buildCycle(w32, lines, 88172645463325252ull + kib);
@@ -284,10 +286,25 @@ void benchMemory(Context& ctx, Report& rep) {
             return ms;
         };
         const double tp = std::max(1e-4, ctx.measure([&] { return run(512); }, 7).min); // min: contention only adds time
-        const u32 N = std::clamp<u32>(u32(0.6 / (tp / 512.0)), 256, 200000); // ~0.6 ms; 4N ~2.4 ms
+        // ~3 ms (4N ~12 ms): with 0.6 ms spans the 2 GiB point varied 363..465 ns between runs.
+        const u32 N = std::clamp<u32>(u32((quick ? 0.6 : 3.0) / (tp / 512.0)), 256, 400000);
         const u32 latReps = std::max<u32>(ctx.reps(), 15); // cheap: 15 even with --quick
-        const Stats s1 = ctx.measure([&] { return run(N); }, latReps);
-        const Stats s2 = ctx.measure([&] { return run(4 * N); }, latReps);
+        // DVFS guard: a single-thread chase barely loads the GPU, so its
+        // clock can drop in the middle of the measurement (one 2 GiB point
+        // read 1224 ns instead of ~475 in a 3-run battery).  The P-state
+        // residency of the window is checked; up to 2 re-measurements.
+        Stats s1, s2;
+        phosphor::soc::GpuWindow win;
+        u32 attempts = 0;
+        do {
+            if (attempts) ctx.keepWarm(50);
+            chaseState.begin();
+            s1 = ctx.measure([&] { return run(N); }, latReps);
+            s2 = ctx.measure([&] { return run(4 * N); }, latReps);
+            win = chaseState.end();
+        } while (++attempts < 3 && chaseState.available() && win.topStateShare < 0.9);
+        if (win.topStateShare >= 0 && win.topStateShare < 0.9)
+            lowClockPoints += std::to_string(kib) + "KiB(" + std::to_string(int(win.topStateShare * 100)) + "%) ";
         // Slope between N and 4N steps cancels the fixed dispatch cost (large and noisy, ~50-80 us, hence the long chains).  Minima:
         // other GPU clients only ever add time to a single-thread chase.
         const double ns = std::max(0.0, (s2.min - s1.min)) * 1e6 / (3.0 * N);
@@ -295,12 +312,14 @@ void benchMemory(Context& ctx, Report& rep) {
         latNs.push_back(ns);
         rep.value("latency.ws_" + std::to_string(kib) + "KiB", "ns", ns,
                   {{"ws_KiB", double(kib)}, {"steps", double(N)}, {"t1_min_ms", s1.min}, {"t2_min_ms", s2.min},
+                   {"top_state_share", win.topStateShare}, {"attempts", double(attempts)},
                    {"median_slope_ns", std::max(0.0, s2.median - s1.median) * 1e6 / double(N)}}, false);
         ctx.keepWarm(15);
     }
 
     // --- (d) summaries ------------------------------------------------------------------------
     const double latL1 = latNs.front(), latDram = latNs.back();
+    if (!lowClockPoints.empty()) rep.note("latency points below the top P-state after 3 attempts: " + lowClockPoints);
     rep.value("latency_l1", "ns", latL1, {{"ws_KiB", double(latKiB.front())}}, false);
     rep.value("latency_dram", "ns", latDram, {{"ws_KiB", double(latKiB.back())}}, false);
     const double dramBw = rdBw.back();
