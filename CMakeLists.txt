@@ -60,6 +60,7 @@ add_library(phosphor_core STATIC
     src/diagnostics/frame_trace.cpp
     src/diagnostics/overlay_math.cpp
     src/diagnostics/pass_timings.cpp
+    src/diagnostics/soc_model.cpp
     src/diagnostics/soc_results.cpp
     src/diagnostics/tracy_gpu.cpp
     src/pipeline/compile_queue.cpp
@@ -117,6 +118,10 @@ set_source_files_properties(src/scene/gltf_loader.cpp PROPERTIES COMPILE_OPTIONS
 add_executable(image_diff tools/image_diff/image_diff.cpp)
 target_link_libraries(image_diff PRIVATE tinygltf) # stb_image / stb_image_write
 set_source_files_properties(tools/image_diff/image_diff.cpp PROPERTIES COMPILE_OPTIONS "-w")
+# OPT-0.3: SoC cost model CLI (results -> model JSON, engine report -> predictions). Portable.
+add_executable(soc_model tools/soc_model/soc_model.cpp)
+target_link_libraries(soc_model PRIVATE phosphor_core tinygltf) # tinygltf: nlohmann json.hpp
+target_compile_options(soc_model PRIVATE ${PHOSPHOR_WARNINGS})
 
 # --- macOS app ---------------------------------------------------------------
 if(PHOSPHOR_BUILD_APP)
