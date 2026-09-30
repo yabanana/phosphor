@@ -722,7 +722,8 @@ ha fallito.
   durata). Scelta: pendenza su span da 3 ms, AFR registrato per punto,
   controllo di linearità sul set L1 (stabile, CV 0,9%; un ciclo limitato dà
   1,2×), metrica `latency_dram.page_local` (un miss di pagina ogni 128 passi).
-  Risultato: latency_dram 516/523/919 ns nei 3 run (CV 35%, causa dichiarata).
+  Risultato: latency_dram 516/523/919 ns nei 3 run a batteria, 593/599/610 nei 3
+  run finali all'alimentazione (page-local 471–527); la causa è dichiarata.
 - **Validazione**: sotto `MTL_DEBUG_LAYER`/`MTL_SHADER_VALIDATION` i tempi
   cambiano in modo disuniforme (latenza L1 ×4); `--validate` ora conta i
   messaggi e i fallimenti di correttezza, i controlli di tempo sono elencati
@@ -774,7 +775,7 @@ ha fallito.
 - Atomici device su un indirizzo 1,6 Gop/s contro 204 Gop/s su indirizzi per
   thread (137×); threadgroup 104 Gop/s su un indirizzo. 64 bit: solo
   `atomic_max/min` (senza valore restituito) su Apple9+.
-- Geometria: ~8,5–9,5 Gtri/s sia vertex sia mesh shader (limite raster),
+- Geometria: ~7,9–9,5 Gtri/s sia vertex sia mesh shader (limite raster),
   front-end senza raster ~22 Gtri/s; culling nell'object shader 1,8–1,9×.
   Dispatch vuoto 0,13 µs (0,82 con barriera), draw via ICB 0,043 µs, barriera
   d'encoder 0,70 µs; barriere di coda ~0 tra compute, ~10,5 µs tra render
@@ -787,10 +788,11 @@ ha fallito.
 - Neural Accelerator: GEMM FP16/BF16 58 TFLOPS, INT8 114 TOPS, INT4 92, FP8
   62 (MSL 4.1); `simdgroup_matrix` 15; MLP fuso 1,53× la versione simdgroup.
 - ANE (Core ML, modello in codice): 15,7 TFLOPS efficaci, 1,24 ms per 19,3
-  GFLOP; GPU via Core ML 13,9, CPU 1,5.
+  GFLOP; GPU via Core ML 13,9, CPU 1,5; con il GPU carico la latenza ANE
+  sale di 2,0–2,9× (run diversi), il GPU non rallenta.
 - CPU: NEON 106 GFLOPS per core, SGEMM Accelerate 2,6 TFLOPS, SME2 diretto
   compilabile; risveglio di un thread user-interactive 1,1 µs.
-- MTLIO: SSD freddo 3,4 GB/s (non compresso), cache 62 GB/s; decompressione
+- MTLIO: SSD freddo 3,0–3,4 GB/s (non compresso), cache 62 GB/s; decompressione
   lz4 2,5, lzbitmap 2,9, lzfse 1,4, zlib 0,53, lzma 0,10 GB/s.
 - Display: jitter di presentazione ~0,04 µs a 120 Hz; anticipo callback →
   presentazione **41,6 ms in finestra e a schermo intero, 16,3 ms in una
@@ -798,6 +800,15 @@ ha fallito.
 - Energia (B-27): GPU ~63 W sul carico FMA (8 pJ per FMA), idle 0,03 W;
   carico CPU su tutti i core non rallenta il GPU (1,00).
 - Commit: 3,4 µs di GPU, 168 µs CPU commit → evento (spin 141, listener 200).
+- Roofline (OPT-0.4, `tools/soc_roofline.sh`): limite inferiore ≤ misurato
+  per i 7 pass (7/7); il limite è dominato dalla scrittura del drawable in
+  DRAM (0,040 ms) perché il lavoro per luce di `forward_fs` sta dietro un
+  `continue` dipendente dai dati (cammino minimo 0) e il modello non include
+  costi fissi né raster. I tempi misurati dei pass sotto ~1 ms non saturano i
+  clock nemmeno con `--no-vsync --gpu-timing-serial` (Torus 1,02 → 0,34 ms,
+  Scene Viewer 0,20 → 0,81 tra due sessioni); Many Lights (52,4–52,6 ms) è
+  stabile. Controllo di coerenza: 52,5 ms × 15,1 TFLOPS / (4,88 M pixel ×
+  1024 luci) ≤ 158 flop per luce realmente eseguiti.
 - **Soak B-27 (10 min, a batteria 32 → 12%)**: prestazioni GPU invariate
   (0,984 ms per dispatch, 1620 MHz), 68,5 → 67,0 W, termica "fair" dopo
   2,5 min. Nelle fasi dello stesso run (eseguite prima del soak, batteria

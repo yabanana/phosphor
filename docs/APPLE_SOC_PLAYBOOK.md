@@ -223,7 +223,7 @@ le righe "Misura" qui sotto riportano quei valori.
 
 **S-GEO-1 Mesh shader**
 - **Fatto**: da Apple9 i threadgroup object/mesh sono schedulati per tenere i meshlet on-chip; griglia mesh > 1M threadgroup; dichiarare vertici/primitive massimi solo quanto serve; omettere le primitive scartate invece di affidarsi al culling hardware successivo (111375). Payload fino a 16 KB. RT e function pointer nelle render pipeline sono incompatibili con il mesh shading (Feature Set Tables).
-- **Misura** (B-16, 5,6 M triangoli da 0,7 px): vertex 8,5 Gtri/s, mesh 8,2–9,5 con meshlet 32–256 vertici (limite raster, non geometria); senza raster (back-face) vertex 22, mesh 15 (meshlet da 32) → 21 (256); payload dell'object shader 1 KiB e 16 KiB senza costo misurabile; culling della metà dei meshlet nell'object shader 1,8–1,9×.
+- **Misura** (B-16, 5,6 M triangoli da 0,7 px): vertex 7,9–8,5 Gtri/s, mesh 8,2–9,5 con meshlet 32–256 vertici (limite raster, non geometria); senza raster (back-face) vertex 22, mesh 15 (meshlet da 32) → 21 (256); payload dell'object shader 1 KiB e 16 KiB senza costo misurabile; culling della metà dei meshlet nell'object shader 1,8–1,9×.
 - **Sfruttare**: dimensione dei meshlet scelta dalle misure (64/96/128); culling nell'object shader; output minimi.
 - **Evitare**: massimi sovradimensionati (più traffico, meno occupancy); RT nel mesh shader (impossibile).
 
@@ -370,7 +370,7 @@ le righe "Misura" qui sotto riportano quei valori.
 
 **S-ANE-1 ANE come coprocessore**
 - **Fatto**: MetalFX neurale (WWDC26) usa Neural Engine **e** Neural Accelerator su M5 Pro/Max (note Metal 4); l'ANE è separato dai core GPU.
-- **Misura** (B-23, modello scritto in codice, 4 conv 3×3 256→256 su 64×64): ANE 15,7 TFLOPS efficaci, 1,24 ms; GPU via Core ML 13,9, CPU 1,5 TFLOPS; `MLComputePlan` conferma l'ANE per layer. **Con il GPU carico la latenza ANE raddoppia (×2,08)**, il GPU non rallenta (0,995).
+- **Misura** (B-23, modello scritto in codice, 4 conv 3×3 256→256 su 64×64): ANE 15,7 TFLOPS efficaci, 1,24 ms; GPU via Core ML 13,9, CPU 1,5 TFLOPS; `MLComputePlan` conferma l'ANE per layer. **Con il GPU carico la latenza ANE sale di 2,0–2,9×**, il GPU non rallenta (0,995).
 - **Sfruttare**: reti che non devono stare nel frame GPU (animazione appresa, audio, IA dei personaggi, previsione dello streaming) su ANE tramite Core ML, lasciando la GPU libera.
 - **Evitare**: reti sul percorso critico del frame se la latenza di ANE non è compatibile (misurare).
 
@@ -395,7 +395,7 @@ le righe "Misura" qui sotto riportano quei valori.
 
 **S-IO-1 SSD**
 - **Fatto**: base M5 ~6,3 GB/s in lettura; ~13–15 GB/s riportati su un M5 Max (fonte singola); velocità dipendente dalla capacità (note GPU).
-- **Misura** (B-25, MTLIO): SSD a freddo 3,4 GB/s (non compresso, richieste 1–16 MiB, 1 coda; 4 code non aiutano), dalla page cache 62 GB/s. I 13–15 GB/s di terzi non sono riprodotti con MTLIO su un file da 128 MiB.
+- **Misura** (B-25, MTLIO): SSD a freddo 3,0–3,4 GB/s (non compresso, richieste 1–16 MiB, 1 coda; 4 code non aiutano), dalla page cache 62 GB/s. I 13–15 GB/s di terzi non sono riprodotti con MTLIO su un file da 128 MiB.
 - **Sfruttare**: budget di streaming per tier e per capacità del disco rilevata.
 
 **S-IO-2 MTLIO**

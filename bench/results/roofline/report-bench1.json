@@ -7,20 +7,20 @@
   "vsync": false,
   "ui": false,
   "frames": 300,
-  "fps": 88.24,
+  "fps": 102.30,
   "gpu_allocations": 0,
-  "cpu_heap_blocks_delta": 2483,
-  "cpu_heap_bytes_delta": 163392,
-  "frame_ms": {"mean": 11.3323, "min": 0.6225, "p50": 8.4220, "p99": 17.1285, "max": 17.3116},
-  "cpu_ms": {"mean": 8.5896, "min": 0.5608, "p50": 8.3522, "p99": 14.1880, "max": 16.3147},
-  "gpu_ms": {"mean": 0.9222, "min": 0.2158, "p50": 1.0265, "p99": 1.1184, "max": 1.3132},
-  "wait_ms": {"mean": 2.7411, "min": 0.0243, "p50": 0.0804, "p99": 8.0110, "max": 9.1439},
+  "cpu_heap_blocks_delta": 2706,
+  "cpu_heap_bytes_delta": 179264,
+  "frame_ms": {"mean": 9.7751, "min": 0.4515, "p50": 8.3664, "p99": 16.8794, "max": 18.1089},
+  "cpu_ms": {"mean": 8.4237, "min": 0.4263, "p50": 8.3027, "p99": 13.5955, "max": 14.0828},
+  "gpu_ms": {"mean": 0.6154, "min": 0.2162, "p50": 0.3491, "p99": 1.0390, "max": 1.4310},
+  "wait_ms": {"mean": 1.3241, "min": 0.0069, "p50": 0.0581, "p99": 8.3289, "max": 8.5406},
   "pipelines": {"requests":8,"archiveHits":8,"archiveMisses":0,"archiveUnavailable":0,"archiveMissRate":0.0000,"compilerCalls":0,"compileMs":0.000,"compileMsMax":0.000,"fallbacksServed":0,"fallbackDraws":1,"renderThreadCompiles":0,"renderThreadCompileMs":0.000,"failures":0,"swaps":8,"reloads":0,"reloadFailures":0},
   "gpu_timing": true,
   "gpu_timing_unfused": false,
   "passes": [
-    {"name": "Forward", "queue": "graphics", "fused": false, "passes": ["Forward"], "shaders": ["forward_vs", "forward_fs"], "dram_bytes": 23040000, "frames": 300, "gpu_ms": {"mean": 0.9137, "min": 0.2143, "p50": 1.0191, "p99": 1.0912, "max": 1.3057}, "work": [{"pass": "Forward", "draws": 2, "instances": 2, "indices": 12294, "vertices": 2149, "pixels": 5760000, "threads": 0, "lights": 1}]}
+    {"name": "Forward", "queue": "graphics", "fused": false, "passes": ["Forward"], "shaders": ["forward_vs", "forward_fs"], "dram_bytes": 23040000, "frames": 300, "gpu_ms": {"mean": 0.6087, "min": 0.2148, "p50": 0.3418, "p99": 1.0319, "max": 1.4243}, "work": [{"pass": "Forward", "draws": 2, "instances": 2, "indices": 12294, "vertices": 2149, "pixels": 5760000, "threads": 0, "lights": 1}]}
   ],
-  "gpu_pass_sum_ms": {"mean": 0.9137, "min": 0.2143, "p50": 1.0191, "p99": 1.0912, "max": 1.3057},
-  "gpu_frame_span_ms": {"mean": 0.9137, "min": 0.2143, "p50": 1.0191, "p99": 1.0912, "max": 1.3057}
+  "gpu_pass_sum_ms": {"mean": 0.6087, "min": 0.2148, "p50": 0.3418, "p99": 1.0319, "max": 1.4243},
+  "gpu_frame_span_ms": {"mean": 0.6087, "min": 0.2148, "p50": 0.3418, "p99": 1.0319, "max": 1.4243}
 }
