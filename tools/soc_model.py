@@ -63,23 +63,66 @@ MODEL_FIELDS = [
 # `key` links the row to a model field (measured / external ratio) or None.
 # `per_core_clk`: an external per-core figure, combined with the MEASURED core count
 # and top P-state to give a derived (still external-based) expectation.
+# Cause of the metrics with CV between runs > 2%, per benchmark (measured or
+# argued in docs/opt-log.md, "OPT-0 — suite").
+CV_CAUSES = {
+    "B-01": "catene dipendenti vicine alla risoluzione dei tempi",
+    "B-02": "rapporti tra tempi di mix con occupancy ridotta (pochi SIMD-group): varianza dello scheduler",
+    "B-03": "operazioni a basso costo (differenza tra due kernel quasi uguali)",
+    "B-04": "punti oltre il thrashing (spill): tempi dipendenti dal traffico di memoria",
+    "B-05": "latenza threadgroup (pochi cicli, un thread)",
+    "B-07": "contesa sugli atomici: ordine di arrivo non deterministico",
+    "B-08": "latenza e banda a working set nelle zone di transizione tra livelli (mapping fisico diverso a ogni "
+            "run) e latenza DRAM legata allo stato del fabric GPU (AFR a P4-5 su 13 durante il chase a thread "
+            "singolo, misurato con IOReport)",
+    "B-09": "memcpy CPU non vincolate ai core (niente affinità su macOS) e condivise con gli altri processi",
+    "B-10": "campionamento sparso di texture piccole (cache) e caratteristiche dipendenti dal layout",
+    "B-11": "contenuto casuale e scritture parziali: costo della compressione dipendente dai dati",
+    "B-12": "punti con pochi triangoli (tempo vicino al costo fisso del pass)",
+    "B-13": "varianti con discard e pochi strati (differenze sotto 0,1 ms)",
+    "B-14": "costo fisso bimodale dei render pass (~15 o ~60 us) e store nascosti dallo shading",
+    "B-15": "tempi di pass tile piccoli (lavoro per pass che cresce con i byte)",
+    "B-16": "throughput vincolato dal raster: frequenza del front-end e interferenza del compositor",
+    "B-17": "dispatch vuoti bimodali (0,12 o 2,6 us) e catene indirette con barriera",
+    "B-18": "costi di barriera di coda vicini a zero (differenze di pochi us tra varianti in parallelo)",
+    "B-19": "sovrapposizione tra pass dipendente dallo scheduling",
+    "B-20": "raggi incoerenti: dipendenza dalla distribuzione casuale",
+    "B-22": "tile e dimensioni piccole (span brevi); FP8/INT4 con pochi campioni",
+    "B-23": "tempi di compilazione/caricamento Core ML (cache del sistema) e latenze ANE di pochi ms",
+    "B-24": "thread CPU senza affinità, altri processi, SME2 a un solo thread",
+    "B-25": "letture fredde dall'SSD e page cache condivisa con il sistema",
+    "B-26": "jitter di presentazione: composizione del WindowServer",
+    "B-27": "fase idle con gli altri client del GPU (WindowServer, app) e carico misto CPU+GPU",
+    "B-28": "latenze CPU di risveglio (scheduler) in microsecondi",
+}
+
 EXTERNAL = [
-    {"key": "dram_bw_gbps", "label": "Banda memoria M5 Max, 40 core GPU", "value": 614.0, "unit": "GB/s",
-     "source": "Apple newsroom (specifica dichiarata, teorica di picco)", "ref": "Apple newsroom"},
-    {"key": "dram_bw_gbps", "label": "Banda memoria M5 Max, 32 core GPU", "value": 460.0, "unit": "GB/s",
-     "source": "Apple newsroom (specifica dichiarata, teorica di picco)", "ref": "Apple newsroom"},
-    {"key": "f32_fma_tflops", "label": "FP32 M5 Max", "value": 19.9, "unit": "TFLOPS",
-     "source": "Creative Strategies (stima di terzi)", "ref": "Creative Strategies"},
-    {"key": "f32_fma_tflops", "label": "FP32 = core x 128 FMA/clk x 2 x MHz (formula esterna)", "value": None,
+    # Only figures already cited by docs/APPLE_SOC_PLAYBOOK.md, with their
+    # source.  `explained` = why the measurement differs (coordinator's analysis).
+    {"key": "dram_bw_gbps", "label": "Banda memoria M5 Max (40 core GPU)", "value": 614.0, "unit": "GB/s",
+     "source": "Apple newsroom (specifica dichiarata, picco teorico)", "ref": "Apple newsroom",
+     "explained": "picco teorico contro lettura GPU sostenuta (1 GiB, float4 coalescenti): 93%; la base M5 misurata "
+                  "da terzi con STREAM era all'80% (playbook S-MEM-1)"},
+    {"key": "f32_fma_tflops", "label": "FP32 = core x 128 FMA/clk x 2 x MHz", "value": None,
      "unit": "TFLOPS", "per_core_clk": 128.0,
-     "source": "[R7] Philip Turner, metal-benchmarks (128 ALU FP32 per core, misurato su M1/M2; non verificato su M5)",
-     "ref": "[R7]"},
-    {"key": "latency_dram_ns", "label": "Latenza DRAM", "value": None, "unit": "ns",
-     "source": "[R7] Philip Turner, metal-benchmarks (valore da inserire)", "ref": "[R7]"},
-    {"key": "slc_size_mib", "label": "Dimensione SLC", "value": None, "unit": "MiB",
-     "source": "Michael's Tinkerings (valore da inserire)", "ref": "Michael's Tinkerings"},
-    {"key": "f32_fma_tflops", "label": "FP32 M5 Max (recensione)", "value": None, "unit": "TFLOPS",
-     "source": "Notebookcheck (valore da inserire)", "ref": "Notebookcheck"},
+     "source": "[R7] Philip Turner, metal-benchmarks (128 ALU FP32 per core; misurato su M1/M2, non su M5)",
+     "ref": "[R7]",
+     "explained": "117 FMA/core/clk misurate con 8 catene: il ciclo del kernel aggiunge incremento, confronto e salto "
+                  "ogni 8 FMA (8/9 = 0,89 del picco); nessuna prova di ALU FP32 diverse da 128 per core"},
+    {"key": "f32_fma_tflops", "label": "FP32 per core e per clock, M5 base riportato a M5 Max", "value": None,
+     "unit": "TFLOPS", "ext_tflops": 3.85, "ext_cores": 10, "ext_mhz": 1578.0,
+     "source": "Michael's Tinkerings: M5 base 3,85 TFLOPS a 1.578 MHz, 10 core (convertito con i nostri 40 core e "
+               "1.620 MHz)", "ref": "Michael's Tinkerings",
+     "explained": "stesso throughput per core e per clock entro il 5%: architettura ALU coerente tra M5 e M5 Max"},
+    {"key": "gemm_f16_tops", "label": "GEMM FP16 grande (Neural Accelerator)", "value": 19.9, "unit": "TFLOPS",
+     "source": "Creative Strategies (misura di terzi su M5 Max, configurazione non pubblicata)",
+     "ref": "Creative Strategies",
+     "explained": "la configurazione conta: nel nostro sweep matmul2d 64x32/4 SIMD-group fa 20-31 TFLOPS, il tile "
+                  "migliore (128x64) 58; lo spike iniziale con 64x32 misurava 32,2"},
+    {"key": "slc_size_mib", "label": "SLC", "value": 32.0, "unit": "MiB",
+     "source": "Michael's Tinkerings (M5 base, non M5 Max)", "ref": "Michael's Tinkerings",
+     "explained": "chip diverso (base vs Max); il nostro valore è la stima di un modello (fit h = C/WS sulla curva di "
+                  "banda), non una misura diretta: M5 Max non è documentato"},
 ]
 
 
@@ -226,8 +269,7 @@ def render(res, model=None):
     w("## Confronto con fonti esterne")
     w("")
     w("Le colonne «esterno» **non sono misure di questo progetto**: sono valori dichiarati o misurati da terzi, "
-      "riportati con la fonte. «Scarto spiegato» è da compilare dopo aver analizzato la differenza "
-      "(diverso stato P, teorico vs sostenuto, altra configurazione...).")
+      "riportati con la fonte e con la spiegazione dello scarto.")
     w("")
     w("| Grandezza | Misurato (questo progetto) | Esterno (fonte) | Rapporto misurato/esterno | Scarto spiegato |")
     w("|---|---:|---|---:|---|")
@@ -238,13 +280,34 @@ def render(res, model=None):
         if ext is None and e.get("per_core_clk") and cores and top:
             ext = cores * e["per_core_clk"] * 2 * top * 1e-6
             note = " (derivato: %s core x %g x 2 x %s MHz)" % (cores, e["per_core_clk"], fmt(top, 4))
+        if ext is None and e.get("ext_tflops") and cores and top:
+            ext = e["ext_tflops"] / (e["ext_cores"] * e["ext_mhz"]) * cores * top
+            note = " (derivato: %g TFLOPS / (%d core x %g MHz) x %s core x %s MHz)" % (
+                e["ext_tflops"], e["ext_cores"], e["ext_mhz"], cores, fmt(top, 4))
         ratio = "—"
         if measured is not None and ext:
             ratio = "%.2f" % (measured / ext)
         ext_txt = "**esterno**: %s %s%s — %s" % (fmt(ext), e["unit"], note, esc(e["source"])) if ext is not None \
             else "**esterno**: valore da inserire — %s" % esc(e["source"])
-        w("| %s | %s %s | %s | %s | — |" % (esc(e["label"]), fmt(measured), e["unit"] if measured is not None else "",
-                                           ext_txt, ratio))
+        w("| %s | %s %s | %s | %s | %s |" % (esc(e["label"]), fmt(measured), e["unit"] if measured is not None else "",
+                                           ext_txt, ratio, esc(e.get("explained", "—"))))
+    w("")
+
+    # Metrics with a CV between runs above 2%, grouped by benchmark, with
+    # the measured cause (docs/opt-log.md, OPT-0).
+    w("## Metriche con CV tra i run > 2%")
+    w("")
+    w("Obiettivo del protocollo: CV < 2%. Eccezioni per benchmark e causa: misurata per B-08 (stato AFR del fabric, "
+      "IOReport), B-14 e B-19 (costo bimodale dei render pass), B-17 (dispatch bimodali), B-27 (altri client GPU); "
+      "per gli altri benchmark è un'ipotesi da verificare quando la metrica servirà a una decisione (OPT-1/OPT-2).")
+    w("")
+    w("| Benchmark | Metriche con CV > 2% / totale | Causa |")
+    w("|---|---:|---|")
+    for b in res.get("benchmarks", []):
+        ms = b.get("metrics", [])
+        hi = [m for m in ms if (m.get("run_cv") or 0) > CV_LIMIT]
+        if hi:
+            w("| %s | %d / %d | %s |" % (b["id"], len(hi), len(ms), esc(CV_CAUSES.get(b["id"], "da analizzare"))))
     w("")
 
     w("## Metodo")
@@ -299,7 +362,9 @@ def self_test():
         check(needle in md, "missing %r" % needle)
     check("**3.1%**" in md, "CV 3.1% must be highlighted")
     check("**0.4%**" not in md and "0.4%" in md, "CV 0.4% must not be highlighted")
-    check("FP32 M5 Max | 20 TFLOPS | **esterno**: 19.9" in md, "external comparison row")
+    check("| Banda memoria M5 Max (40 core GPU) |" in md and "**esterno**: 614 GB/s" in md, "external comparison row")
+    check("picco teorico contro lettura GPU sostenuta" in md, "external row carries its explanation")
+    check("## Metriche con CV tra i run > 2%" in md, "CV causes section")
     check("1.01" in md, "ratio 20/19.9")
     check("| — |\n" in md, "scarto spiegato left empty")
     # external numbers only ever in the external column
