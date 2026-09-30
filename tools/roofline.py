@@ -122,13 +122,20 @@ def build_svg(pred):
     if _num(f16) and f16 > 0:
         flat(f16, f16 * 1000.0 / dram if _num(dram) and dram > 0 else None, "#67a9cf", "roof-fp16",
              "FP16 %.1f TFLOPS" % f16, True, below=False)
+    placed = []  # (x0, x1, y) of the labels already drawn: 7 px per character, 14 px per line
     for i, (name, ai, ach) in enumerate(pts):
         c = PALETTE[i % len(PALETTE)]
         a('<circle class="unit" cx="%.1f" cy="%.1f" r="5" fill="%s" stroke="#fff"/>' % (X(ai), Y(ach), c))
         left = X(ai) > ML + pw * 0.75  # keep the label inside the plot
+        w = 6.5 * len(name)
+        x0 = X(ai) - 8 - w if left else X(ai) + 8
+        y = Y(ach) + 16
+        # Move down until the label overlaps no label already placed.
+        while any(x0 < px1 and px0 < x0 + w and abs(y - py) < 14 for px0, px1, py in placed):
+            y += 14
+        placed.append((x0, x0 + w, y))
         a('<text class="unit-label" x="%.1f" y="%.1f" fill="%s"%s>%s</text>'
-          % (X(ai) + (-8 if left else 8), Y(ach) + (16 if i % 2 == 0 else -9), c, ' text-anchor="end"' if left else "",
-             escape(name)))
+          % (X(ai) + (-8 if left else 8), y, c, ' text-anchor="end"' if left else "", escape(name)))
     if not pts:
         a('<text x="%d" y="%d" fill="#888">nessuna unità con FLOP e traffico DRAM noti</text>' % (ML + 12, MT + 24))
     a("</svg>")
