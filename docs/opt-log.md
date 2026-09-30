@@ -671,3 +671,122 @@ attachment.
 **Decisioni per il piano**: B-08 riporta curve complete (latenza e banda),
 stime dei ginocchi e fit dichiarati come stime; dati casuali; IOReport PMP
 solo qualitativo.
+
+---
+
+## OPT-0 — Suite `bench/soc`: scoperte della misura e dei controlli negativi
+
+**2026-09-30** · M5 Max, macOS 27.2, a batteria, schermo tenuto acceso
+(`caffeinate -d`) · `tools/soc_bench_all.sh`: 28 benchmark × 3 run, tutti
+i controlli negativi superati, `--validate` 0 messaggi e 0 benchmark falliti,
+run con i percorsi Apple9 (`--force-family apple9`) verde, `leaks` 0.
+Risultati: [`bench/results/m5max-macos27.2.json`](../bench/results/m5max-macos27.2.json),
+modello e confronto con fonti esterne: [`docs/soc-model.md`](soc-model.md).
+Ogni controllo negativo è stato rotto apposta almeno una volta (copia degli
+shader via `SOC_SHADER_DIR` o modifica temporanea, `git diff` pulito dopo) e
+ha fallito.
+
+### Bug di metodo trovati dai controlli (e corretti)
+
+- **Catene uniformi o identiche** (B-01): con un seme intero uguale per tutti
+  i thread (`seed * int(0.0625)`) il calcolo era eseguito una volta per
+  SIMD-group e le 8 catene fuse: 8.054–13.957 op/core/clk (impossibile con 128
+  ALU). Semi per thread e per catena + limite di plausibilità 512 op/core/clk.
+  Stessa trappola per le catene ADD intere: `w - (v + w)` si semplifica anche
+  senza fast-math → coppie `v += w; w ^= v`, float in `MathModeSafe`.
+- **Costo bimodale dei render pass** (B-14, B-19): un piccolo render pass tra
+  due encoder compute costa **~6–15 µs oppure ~60 µs**; le mediane di varianti
+  diverse cadevano in modalità diverse (RGBA8 1080p: "store" 0,015 ms <
+  "dontCare" 0,055 ms; B-19: dipendenza forzata = 0,87 × (A+B)). Con i minimi
+  per giro e ordine ruotato: dipendenza forzata = **1,000 × (A+B)** in 4 run
+  su 4. Anche i dispatch vuoti sono bimodali (0,12 o 2,6 µs, B-17).
+- **Presentazione senza dipendenza dal lavoro** (B-26): il carico GPU e il
+  command buffer del drawable non avevano dipendenza, quindi il piccolo pass di
+  presentazione girava accanto al carico e 9 ms di lavoro a 120 Hz davano 0%
+  di frame in ritardo. Con un `MTLEvent` carico → presentazione: 9 ms → 80–97%
+  in ritardo a 106–111 Hz (= 1000/9). La cadenza si calcola con la media degli
+  intervalli (la mediana nasconde i frame raddoppiati).
+- **Controllo vuoto** (B-23): senza una configurazione `cpuAndNeuralEngine`
+  il controllo "MLComputePlan mette tutto su ANE" passava senza controllare
+  nulla; ora fallisce.
+- **Schermo spento durante la batteria**: B-26 senza frame presentati, B-27
+  con GPU idle a 0,02–0,06 W. La batteria gira sotto `caffeinate -d`; B-26
+  rileva `CGDisplayIsAsleep` e l'occlusione della finestra e si dichiara non
+  misurabile.
+- **Latenza DRAM e fabric** (B-08): a working set ≥ 64 MiB la latenza variava
+  475–1224 ns tra run (4N/N 3,9–8,8×), anche con il GPU al P-state massimo e
+  lo schermo acceso. IOReport "GPU Stats / AFR Performance States": durante il
+  chase a thread singolo il fabric GPU scende da un P-state medio ~12 a
+  **~4–5 su 13** (il governor segue la banda richiesta, minima). Catene
+  lunghe (30 ms) peggiorano (770–880 ns: il tempo per passo cresce con la
+  durata). Scelta: pendenza su span da 3 ms, AFR registrato per punto,
+  controllo di linearità sul set L1 (stabile, CV 0,9%; un ciclo limitato dà
+  1,2×), metrica `latency_dram.page_local` (un miss di pagina ogni 128 passi).
+  Risultato: latency_dram 516/523/919 ns nei 3 run (CV 35%, causa dichiarata).
+- **Validazione**: sotto `MTL_DEBUG_LAYER`/`MTL_SHADER_VALIDATION` i tempi
+  cambiano in modo disuniforme (latenza L1 ×4); `--validate` ora conta i
+  messaggi e i fallimenti di correttezza, i controlli di tempo sono elencati
+  ma non applicati. Controllo negativo: una riga estranea nell'output del
+  figlio → exit 3.
+- **`--quick`**: troppe poche ripetizioni per i controlli di tempo (B-08,
+  B-12, B-14 fallivano a volte): il run Apple9 della batteria usa la qualità
+  piena.
+
+### OPT-0.6: soglie critiche misurate
+
+- **Partial render (B-12)**: **nessun ginocchio fino a 16,7 M triangoli** per
+  pass (6 px ciascuno, 0/4/8/16 varyings float4): ns/triangolo 2,0–2,2 (0
+  varyings) … 4,1–4,6 (16 varyings), piatto. Se il parameter buffer va in
+  overflow, sopra questa scala o senza un salto visibile nei tempi: soglia
+  "> 16,7 M" (stato Partial, dichiarato).
+- **Thrashing dei registri (B-04)**: throughput stabile fino a 96 valori FP32
+  vivi, crollo a **128** (con carichi: 7,15 → 1,88 → 0,46 Top/s a 8/128/256);
+  stessa soglia senza carichi (spill del compilatore). Un array indicizzato
+  dinamicamente (stack) costa 62× la versione a registri.
+- **Imageblock massimo (B-15)**: tile 32×32 → 24 B/pixel espliciti (32 B
+  riportati, 32 KiB di tile memory = `maxThreadgroupMemoryLength`); 32×16 e
+  16×16 → 56 B/pixel (64 B per campione: il limite per campione); tile 16×8,
+  8×8 rifiutate dalla validazione del descrittore anche senza layer. **Oltre
+  il limite la pipeline si crea e il pass termina senza errori, ma il tile
+  kernel non gira** (sentinella intatta): va controllato a priori.
+
+### Risultati salienti (dettaglio e CV in `soc-model.md`)
+
+- ALU: FP32 FMA 15,15 TFLOPS (116,9 FMA/core/clk a 1620 MHz); FP16 raggiunge
+  **1,85× FP32 solo con 32 catene indipendenti** (1,15× con 8: serve più ILP);
+  INT32 mul 4,06 Top/s (~62% dell'add+xor). Trascendenti fast 8,3 Top/s.
+- Memoria: DRAM lettura 572 GB/s (93% dei 614 dichiarati), scrittura 486,
+  copia 535; on-chip ~8,6 TB/s fino a ~32 MiB; SLC stimata dal fit 71 MiB
+  (modello, residuo 12%). CPU e GPU condividono lo stesso budget: 6 thread
+  memcpy portano il GPU da 573 a 335 GB/s, totale ~553 GB/s (B-09).
+- Threadgroup memory 6,2 TB/s a stride 1, 1,2 TB/s a stride 32 (conflitti di
+  banco), 3,5 a stride 33; latenza 33 ns (B-05). `simd_shuffle` con lane
+  dinamica risulta 0,37× l'emulazione in threadgroup memory (quad_shuffle
+  1,9×, sum 5,7× a favore dell'intrinseco): da riverificare prima di usarlo.
+- Atomici device su un indirizzo 1,6 Gop/s contro 204 Gop/s su indirizzi per
+  thread (137×); threadgroup 104 Gop/s su un indirizzo. 64 bit: solo
+  `atomic_max/min` (senza valore restituito) su Apple9+.
+- Geometria: ~8,5–9,5 Gtri/s sia vertex sia mesh shader (limite raster),
+  front-end senza raster ~22 Gtri/s; culling nell'object shader 1,8–1,9×.
+  Dispatch vuoto 0,13 µs (0,82 con barriera), draw via ICB 0,043 µs, barriera
+  d'encoder 0,70 µs; barriere di coda ~0 tra compute, ~10,5 µs tra render
+  pass (B-18).
+- Sovrapposizione: due pass render indipendenti 0,84 della somma, compute su
+  seconda coda 0,98 (ALU) / 0,78 (banda) (B-19).
+- RT: 8,8 Grays/s coerenti, 5,4 incoerenti (`intersector`); `intersection_query`
+  ~1,9× più lento; BLAS 1M triangoli in 4,7 ms, refit 7,6× più veloce,
+  compaction 0,48.
+- Neural Accelerator: GEMM FP16/BF16 58 TFLOPS, INT8 114 TOPS, INT4 92, FP8
+  62 (MSL 4.1); `simdgroup_matrix` 15; MLP fuso 1,53× la versione simdgroup.
+- ANE (Core ML, modello in codice): 15,7 TFLOPS efficaci, 1,24 ms per 19,3
+  GFLOP; GPU via Core ML 13,9, CPU 1,5.
+- CPU: NEON 106 GFLOPS per core, SGEMM Accelerate 2,6 TFLOPS, SME2 diretto
+  compilabile; risveglio di un thread user-interactive 1,1 µs.
+- MTLIO: SSD freddo 3,4 GB/s (non compresso), cache 62 GB/s; decompressione
+  lz4 2,5, lzbitmap 2,9, lzfse 1,4, zlib 0,53, lzma 0,10 GB/s.
+- Display: jitter di presentazione ~0,04 µs a 120 Hz; anticipo callback →
+  presentazione **41,6 ms in finestra e a schermo intero, 16,3 ms in una
+  finestra borderless** grande quanto lo schermo.
+- Energia (B-27): GPU ~63 W sul carico FMA (8 pJ per FMA), idle 0,03 W;
+  carico CPU su tutti i core non rallenta il GPU (1,00).
+- Commit: 3,4 µs di GPU, 168 µs CPU commit → evento (spin 141, listener 200).
