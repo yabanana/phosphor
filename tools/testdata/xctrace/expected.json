@@ -1,0 +1,85 @@
+{
+ "encoders": [
+  {
+   "label": "Forward + ImGui overlay",
+   "channel": "Fragment",
+   "count": 37,
+   "mean_ms": 1.7924144594594593,
+   "p50_ms": 1.62475,
+   "p99_ms": 3.834563
+  },
+  {
+   "label": "Forward + ImGui overlay",
+   "channel": "Vertex",
+   "count": 28,
+   "mean_ms": 0.06102825,
+   "p50_ms": 0.049563,
+   "p99_ms": 0.26817673
+  }
+ ],
+ "shaders": [
+  {
+   "encoder": "Forward + ImGui overlay",
+   "channel": "Fragment",
+   "shader": "forward_fs",
+   "total_ms": 5.10683,
+   "samples": 30,
+   "mean_percent_of_kick": 25.12321765000001
+  },
+  {
+   "encoder": "Forward + ImGui overlay",
+   "channel": "Vertex",
+   "shader": "forward_vs",
+   "total_ms": 0.116581,
+   "samples": 22,
+   "mean_percent_of_kick": 10.670809524500003
+  },
+  {
+   "encoder": "Forward + ImGui overlay",
+   "channel": "Fragment",
+   "shader": "imgui_fs",
+   "total_ms": 0.048543,
+   "samples": 5,
+   "mean_percent_of_kick": 0.3091066616
+  },
+  {
+   "encoder": "(unattributed)",
+   "channel": "Fragment",
+   "shader": "imgui_fs",
+   "total_ms": 0.012667,
+   "samples": 1,
+   "mean_percent_of_kick": 0.318616569
+  }
+ ],
+ "pass_shares": {
+  "(unattributed)": {
+   "total_ms": 0.012667,
+   "passes": {
+    "ImGui overlay": {
+     "ms": 0.012667,
+     "share": 1.0
+    }
+   }
+  },
+  "Forward + ImGui overlay": {
+   "total_ms": 5.271954,
+   "passes": {
+    "Forward": {
+     "ms": 5.223411,
+     "share": 0.990792218596748
+    },
+    "ImGui overlay": {
+     "ms": 0.048543,
+     "share": 0.009207781403252001
+    }
+   }
+  }
+ },
+ "perf_states": [
+  {
+   "state": "Minimum",
+   "ms": 53.435623,
+   "share": 1.0
+  }
+ ]
+}

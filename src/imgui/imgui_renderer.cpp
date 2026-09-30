@@ -1,4 +1,5 @@
 #include "imgui/imgui_renderer.h"
+#include "core/profile.h"
 #include "platform/metal/gpu_memory.h"
 #include "platform/metal/pipeline_cache.h"
 #include "core/log.h"
@@ -131,6 +132,7 @@ void ImGuiRenderer::setupRenderState(MTL4::RenderCommandEncoder* encoder, MTL::G
 
 void ImGuiRenderer::render(MTL4::RenderCommandEncoder* encoder, const ImDrawData* drawData) {
     if (!drawData || drawData->CmdListsCount == 0 || drawData->TotalVtxCount == 0) return;
+    PH_ZONE("ImGui encode");
 
     const float fbWidth  = drawData->DisplaySize.x * drawData->FramebufferScale.x;
     const float fbHeight = drawData->DisplaySize.y * drawData->FramebufferScale.y;

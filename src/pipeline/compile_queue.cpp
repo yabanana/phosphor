@@ -1,4 +1,5 @@
 #include "pipeline/compile_queue.h"
+#include "core/profile.h"
 
 #include <cstdio>
 #include <exception>
@@ -24,8 +25,10 @@ void nameCurrentThread(u32 index) {
 #endif
 #if defined(__APPLE__)
     pthread_setname_np(name); // macOS: names the calling thread only
+    PH_THREAD_NAME(name);
 #elif defined(__linux__)
     pthread_setname_np(pthread_self(), name);
+    PH_THREAD_NAME(name);
 #else
     (void)index;
 #endif
@@ -125,6 +128,7 @@ void CompileQueue::workerMain(u32 id) {
         lock.unlock();
 
         try {
+            PH_ZONE("Compile job");
             job();
         } catch (...) {
             // A throwing job must never kill the worker; the exception is dropped.

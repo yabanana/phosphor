@@ -638,3 +638,18 @@ TEST_CASE("render graph: full compile of the engine frame (forward + overlay + c
     CHECK(c.queueSyncs.empty());
     CHECK(c.aliasing.placements.empty()); // no sizer: no heap plan
 }
+
+TEST_CASE("render graph: profile shaders are split on commas") {
+    RenderGraph g;
+    const TextureRef color = g.importTexture("Out", {Format::RGBA8Unorm, 8, 8}, ImportOutput);
+    g.addPass(
+        "A", PassType::Raster,
+        [&](PassBuilder& b) {
+            b.writeColor(color, 0, LoadIntent::Clear);
+            b.setProfileShaders("forward_vs,forward_fs,,x");
+        },
+        nullptr);
+    REQUIRE(g.passes().size() == 1);
+    const std::vector<std::string> want{"forward_vs", "forward_fs", "x"};
+    CHECK(g.passes()[0].profileShaders == want);
+}

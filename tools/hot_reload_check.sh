@@ -68,8 +68,11 @@ pid=$!
 sleep 3
 printf '\nthis is not metal;\n' >>"$dir/forward.metal"          # broken edit
 sleep 3
-cp "$repo_dir/shaders/forward.metal" "$dir/forward.metal"        # valid edit: magenta
-perl -0pi -e 's/(\[\[buffer\(5\)\]\]\)\n\{\n)/$1    return half4(1.0h, 0.0h, 1.0h, 1.0h);\n/' "$dir/forward.metal"
+# Valid edit (magenta), written in one rename: two separate writes let the
+# 250 ms watcher poll fall in between and reload twice (measured, F4).
+cp "$repo_dir/shaders/forward.metal" "$dir/forward.metal.tmp"
+perl -0pi -e 's/(\[\[buffer\(5\)\]\]\)\n\{\n)/$1    return half4(1.0h, 0.0h, 1.0h, 1.0h);\n/' "$dir/forward.metal.tmp"
+mv "$dir/forward.metal.tmp" "$dir/forward.metal"
 status=0
 wait "$pid" || status=$?
 # The failed build prints the compiler's diagnostics (expected here).

@@ -1,4 +1,5 @@
 #include "platform/metal/scene_renderer.h"
+#include "core/profile.h"
 #include "platform/metal/gpu_memory.h"
 #include "platform/metal/pipeline_cache.h"
 #include "pipeline/forward_variants.h"
@@ -117,6 +118,7 @@ void SceneRenderer::syncGeometry(const GpuScene& scene) {
 
 void SceneRenderer::prepareFrame(const GpuScene& scene, const FrameScene& fs, const FrameConstants& constants,
                                  MTL::GPUAddress textureTable, u32 width, u32 height) {
+    PH_ZONE("Scene prepare");
     scene_      = &scene;
     frameScene_ = &fs;
     width_      = width;
@@ -169,10 +171,22 @@ void SceneRenderer::prepareFrame(const GpuScene& scene, const FrameScene& fs, co
 }
 
 void SceneRenderer::encode(MTL4::RenderCommandEncoder* enc, u32 chunk, u32 chunks) const {
-    if (!scene_ || !frameScene_ || !vertexBuffer_ || !indexBuffer_ || frameScene_->batches.empty() || !pipeline_) return;
+    PH_ZONE("Forward encode");
+    encodeBatches(enc, pipeline_, depthState_, chunk, chunks);
+}
 
-    enc->setRenderPipelineState(pipeline_);
-    enc->setDepthStencilState(depthState_);
+void SceneRenderer::encodeOverlay(MTL4::RenderCommandEncoder* enc, pipe::PipelineHandle pipeline, bool depthTest) const {
+    encodeBatches(enc, pipelines_.render(pipeline), depthTest ? depthState_ : nullptr, 0, 1);
+}
+
+void SceneRenderer::encodeBatches(MTL4::RenderCommandEncoder* enc, MTL::RenderPipelineState* pipeline,
+                                  MTL::DepthStencilState* depthState, u32 chunk, u32 chunks) const {
+    if (!scene_ || !frameScene_ || !vertexBuffer_ || !indexBuffer_ || frameScene_->batches.empty() || !pipeline) return;
+
+    enc->setRenderPipelineState(pipeline);
+    // Null: the encoder's default (no depth test, no write); overlay passes
+    // without a depth attachment must not set a redundant state.
+    if (depthState) enc->setDepthStencilState(depthState);
     enc->setArgumentTable(arguments_, MTL::RenderStageVertex | MTL::RenderStageFragment);
     enc->setViewport(MTL::Viewport{0.0, 0.0, static_cast<double>(width_), static_cast<double>(height_), 0.0, 1.0});
 

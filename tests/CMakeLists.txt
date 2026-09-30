@@ -22,6 +22,8 @@ add_executable(phosphor_tests
     test_linear_ring.cpp
     test_memory_budget.cpp
     test_mesh_processing.cpp
+    test_overlay_math.cpp
+    test_pass_timings.cpp
     test_pipeline_key.cpp
     test_pipeline_registry.cpp
     test_pipeline_script.cpp
@@ -29,6 +31,7 @@ add_executable(phosphor_tests
     test_render_graph.cpp
     test_scene_extract.cpp
     test_tbdr_passes.cpp
+    test_timing_plan.cpp
     test_texture_manager.cpp
     test_testbenches.cpp
     test_tlsf.cpp

@@ -1,6 +1,7 @@
 #include "core/launch_options.h"
 
 #include <charconv>
+#include <cstdlib>
 #include <cstring>
 #include <string_view>
 
@@ -15,6 +16,17 @@ bool parseU32(std::string_view text, u32& value) {
 }
 
 } // namespace
+
+const char* overlayName(OverlayMode mode) {
+    switch (mode) {
+    case OverlayMode::None:       return "none";
+    case OverlayMode::Overdraw:   return "overdraw";
+    case OverlayMode::LightCount: return "lights";
+    case OverlayMode::TileCost:   return "tilecost";
+    case OverlayMode::Timings:    return "timings";
+    }
+    return "none";
+}
 
 bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
                         LaunchOptions& out, std::string& error) {
@@ -138,6 +150,53 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if (!needString(out.shaderDir)) return false;
         } else if (arg == "--debug-hot-reload") {
             if (!needString(out.debugHotReloadPath)) return false;
+        } else if (arg == "--no-gpu-timing") {
+            out.gpuTiming = false;
+        } else if (arg == "--gpu-timing-unfused") {
+            out.gpuTimingUnfused = true;
+        } else if (arg == "--gpu-timing-serial") {
+            out.gpuTimingSerial = true;
+        } else if (arg == "--debug-gpu-cost") {
+            if (!needCount(out.debugGpuCost)) return false;
+        } else if (arg == "--gpu-capture") {
+            out.gpuCapture = true;
+        } else if (arg == "--gpu-capture-frame") {
+            u32 frame = 0;
+            if (!needCount(frame)) return false;
+            out.gpuCaptureFrame = frame;
+            out.gpuCapture = true;
+        } else if (arg == "--gpu-capture-over") {
+            const auto value = needValue();
+            if (!value) return false;
+            const std::string text(*value);
+            char* end = nullptr;
+            const float ms = std::strtof(text.c_str(), &end);
+            if (text.empty() || end != text.c_str() + text.size() || !(ms > 0.0f)) {
+                error = "--gpu-capture-over: expected a positive number of ms, got '" + std::string(*value) + "'";
+                return false;
+            }
+            out.gpuCaptureOverMs = ms;
+            out.gpuCapture = true;
+        } else if (arg == "--gpu-capture-dir") {
+            if (!needString(out.gpuCaptureDir)) return false;
+        } else if (arg == "--gpu-capture-max") {
+            if (!needCount(out.gpuCaptureMax)) return false;
+        } else if (arg == "--overlay") {
+            const auto value = needValue();
+            if (!value) return false;
+            bool found = false;
+            for (const OverlayMode m : {OverlayMode::None, OverlayMode::Overdraw, OverlayMode::LightCount,
+                                        OverlayMode::TileCost, OverlayMode::Timings}) {
+                if (*value == overlayName(m)) {
+                    out.overlay = m;
+                    found = true;
+                }
+            }
+            if (!found) {
+                error = "--overlay: expected none, overdraw, lights, tilecost or timings, got '" +
+                        std::string(*value) + "'";
+                return false;
+            }
         } else {
             error = "unknown option " + std::string(arg);
             return false;

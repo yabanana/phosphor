@@ -1,5 +1,6 @@
 #include "imgui/ui_panels.h"
 #include "diagnostics/frame_stats.h"
+#include "diagnostics/pass_timings.h"
 #include "testbench/testbench.h"
 
 #include <imgui.h>
@@ -140,6 +141,15 @@ void UIPanels::drawRenderPanel(RenderSettings& settings) {
         ImGui::Combo("View", &settings.debugMode, kModes, IM_ARRAYSIZE(kModes));
         ImGui::SliderFloat("Exposure", &settings.exposure, 0.1f, 8.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
         ImGui::Checkbox("VSync", &settings.vsync);
+        static const char* kOverlays[] = {"None", "Overdraw", "Light count", "Tile cost", "GPU timings"};
+        ImGui::Combo("Overlay", &settings.overlay, kOverlays, IM_ARRAYSIZE(kOverlays));
+        if (settings.overlay != 0 && settings.overlayMax > 0.0f) {
+            ImGui::Text("%s: 0 .. %.0f (%s)", settings.overlayQuantity, static_cast<double>(settings.overlayMax),
+                        settings.overlayLog ? "log" : "linear");
+            ImGui::PushTextWrapPos(ImGui::GetFontSize() * 24.0f);
+            ImGui::TextDisabled("%s", settings.overlayNote);
+            ImGui::PopTextWrapPos();
+        }
         ImGui::TextDisabled("F1-F3: view modes");
     }
     ImGui::End();
@@ -160,6 +170,79 @@ void UIPanels::drawPipelinePanel(const PipelinePanelInfo& info) {
         ImGui::Text("Fallbacks %u, fallback frames %llu%s", s.fallbacksServed,
                     static_cast<unsigned long long>(s.fallbackDraws), info.fallback ? "  [drawing fallback]" : "");
         ImGui::Text("Reloads %u (failed %u), failures %u", s.reloads, s.reloadFailures, s.failures);
+    }
+    ImGui::End();
+}
+
+void UIPanels::drawPassTimingsPanel(const PassTimings* timings, float commandBufferGpuMs, bool unfused) {
+    ImGui::SetNextWindowPos(ImVec2(420, 10), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Pass Timings", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        if (!timings) {
+            ImGui::TextUnformatted("GPU timing off (--no-gpu-timing)");
+        } else {
+            ImGui::Text("GPU time per unit, last %u frames%s", PassTimings::kWindow,
+                        unfused ? " (unfused graph: attribution mode)" : "");
+            if (ImGui::BeginTable("passes", 5, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+                ImGui::TableSetupColumn("Unit");
+                ImGui::TableSetupColumn("Queue");
+                ImGui::TableSetupColumn("Avg ms");
+                ImGui::TableSetupColumn("Max ms");
+                ImGui::TableSetupColumn("DRAM MiB");
+                ImGui::TableHeadersRow();
+                for (u32 u = 0; u < timings->unitCount(); ++u) {
+                    const PassTimings::UnitStats st = timings->rolling(u);
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%s%s", timings->unitName(u).c_str(), timings->unitFused(u) ? " [fused]" : "");
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(timings->unitQueue(u).c_str());
+                    ImGui::TableNextColumn();
+                    if (st.samples > 0) {
+                        ImGui::Text("%.3f", static_cast<double>(st.avgMs));
+                    } else {
+                        ImGui::TextUnformatted("-");
+                    }
+                    ImGui::TableNextColumn();
+                    if (st.samples > 0) {
+                        ImGui::Text("%.3f", static_cast<double>(st.maxMs));
+                    } else {
+                        ImGui::TextUnformatted("-");
+                    }
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%.1f", static_cast<double>(timings->unitDramBytes(u)) / (1 << 20));
+                }
+                ImGui::EndTable();
+            }
+            ImGui::Text("Sum of units %.3f ms, graphics span %.3f ms", static_cast<double>(timings->rollingSumMs()),
+                        static_cast<double>(timings->rollingSpanMs()));
+            ImGui::Text("Command buffer GPU %.3f ms (includes frame overlap without vsync)",
+                        static_cast<double>(commandBufferGpuMs));
+            ImGui::TextDisabled("Fused render passes share one time: the GPU runs them per tile together.");
+        }
+    }
+    ImGui::End();
+}
+
+void UIPanels::drawTimingsOverlay(const PassTimings* timings) {
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x - 10.0f, viewport->WorkPos.y + 10.0f),
+                            ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+    ImGui::SetNextWindowBgAlpha(0.6f);
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                                   ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+                                   ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove;
+    if (ImGui::Begin("GPU timings overlay", nullptr, flags)) {
+        if (!timings) {
+            ImGui::TextUnformatted("GPU timing off");
+        } else {
+            for (u32 u = 0; u < timings->unitCount(); ++u) {
+                const PassTimings::UnitStats st = timings->rolling(u);
+                ImGui::Text("%7.3f ms  %s", static_cast<double>(st.avgMs), timings->unitName(u).c_str());
+            }
+            ImGui::Separator();
+            ImGui::Text("%7.3f ms  GPU total (avg of %u frames)", static_cast<double>(timings->rollingSumMs()),
+                        PassTimings::kWindow);
+        }
     }
     ImGui::End();
 }

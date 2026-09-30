@@ -1,6 +1,7 @@
 #include "platform/metal/pipeline_cache.h"
 
 #include "core/log.h"
+#include "core/profile.h"
 #include "platform/metal/metal_context.h"
 #include "platform/metal/metal_graph_executor.h"
 
@@ -305,6 +306,7 @@ void PipelineCache::submit(pipe::PipelineHandle handle, const pipe::PipelineDesc
                            MTL::Library* library, bool allowFallback) {
     queue_->submit(pipe::CompilePriority::Urgent, generation,
                    [this, handle, desc, generation, library, allowFallback, ref = retainLibrary(library)] {
+                       PH_ZONE("Pipeline resolve");
                        resolve(handle, desc, generation, library, allowFallback);
                    });
 }
@@ -343,7 +345,11 @@ void PipelineCache::resolve(pipe::PipelineHandle handle, const pipe::PipelineDes
             MTL4::PipelineDescriptor* d = buildDescriptor(generic, library);
             NS::Error* error = nullptr;
             const Clock::time_point start = Clock::now();
-            MTL::RenderPipelineState* fallback = compiler_->newRenderPipelineStateBySpecialization(d, base, &error);
+            MTL::RenderPipelineState* fallback = nullptr;
+            {
+                PH_ZONE("Pipeline fallback specialise");
+                fallback = compiler_->newRenderPipelineStateBySpecialization(d, base, &error);
+            }
             ms += msSince(start);
             ++calls;
             d->release();
@@ -393,6 +399,8 @@ void PipelineCache::resolve(pipe::PipelineHandle handle, const pipe::PipelineDes
 }
 
 NS::Object* PipelineCache::compileFinal(const pipe::PipelineDesc& desc, MTL::Library* library, NS::Error** error) {
+    PH_ZONE("Pipeline compile");
+    PH_ZONE_TEXT(desc.label.c_str(), desc.label.size());
     MTL4::PipelineDescriptor* d = buildDescriptor(desc, library);
     NS::Object* object = nullptr;
     if (desc.kind == pipe::PipelineKind::Compute) {
@@ -488,17 +496,29 @@ void PipelineCache::waitAllReady() {
 }
 
 void PipelineCache::waitAllFinal() {
-    waitForCompletions([&] {
-        if (queue_ && queue_->outstanding() != 0) return false;
-        for (u32 h = 0; h < registry_.size(); ++h) {
+    // Waits on the compile queue's idle state, not on a completion count: a
+    // job posts its completion BEFORE its worker stops counting it as running,
+    // so a check of outstanding() that falls between the two sees one job left
+    // and would then wait for a completion that never comes (F4, measured: a
+    // capture run hung here for 25 minutes with every compile thread idle).
+    for (;;) {
+        if (queue_) queue_->waitIdle();
+        drain();
+        bool final = true;
+        for (u32 h = 0; h < registry_.size() && final; ++h) {
             const pipe::PipelineState s = registry_.state(h);
             if (s != pipe::PipelineState::Ready && s != pipe::PipelineState::Failed) {
-                if (!options_.fallbackOnly) return false;
-                if (s == pipe::PipelineState::Pending) return false;
+                if (!options_.fallbackOnly || s == pipe::PipelineState::Pending) final = false;
             }
         }
-        return true;
-    });
+        if (final) return;
+        // Idle queue, everything posted was drained and an entry is still not
+        // final: nothing can complete it any more.
+        if (!queue_ || queue_->outstanding() == 0) {
+            LOG_ERROR("Pipeline cache: waitAllFinal found an entry that no job will complete");
+            return;
+        }
+    }
 }
 
 MTL::RenderPipelineState* PipelineCache::render(pipe::PipelineHandle h) const {

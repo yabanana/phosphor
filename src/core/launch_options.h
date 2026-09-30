@@ -76,10 +76,33 @@ namespace phosphor {
 //   --debug-hot-reload FILE  Debug self-test: after a few frames swap in the
 //                      pipelines of the probe library FILE (.metallib) through
 //                      the hot-reload path, then check the drawable exactly
+//   --no-gpu-timing    F4.1: no GPU timestamps (profiling off: no counter
+//                      heap, no timestamp commands)
+//   --gpu-timing-unfused  F4.1 attribution: compile the graph without raster
+//                      pass fusion, so every pass gets its own GPU time (costs
+//                      the extra attachment store/load; declared in the report)
+//   --gpu-timing-serial  F4.1: wait for each frame's GPU work before the next
+//                      one (no overlap between frames: per-pass times without
+//                      the neighbouring frame's work; use with --no-vsync)
+//   --debug-gpu-cost N add a compute pass of known cost (N iterations of an
+//                      LCG per thread; negative control of the pass timings)
+//   --gpu-capture      F4.3: insert the Metal capture layer (F12 captures the
+//                      next frame into a .gputrace document)
+//   --gpu-capture-frame N  capture presented frame N (0-based; implies --gpu-capture)
+//   --gpu-capture-over MS  capture the frame after one whose GPU time (sum of
+//                      the timed passes) exceeds MS (implies --gpu-capture)
+//   --gpu-capture-dir DIR  where .gputrace documents go (default: captures)
+//   --gpu-capture-max K    at most K captures per run (default 1)
+//   --overlay MODE     F4.7 debug overlay: none, overdraw, lights, tilecost,
+//                      timings
 //
 // Arguments not starting with "--" are ignored: macOS may add its own
 // (e.g. -NSDocumentRevisionsDebugMode when launched from Xcode).
 // ---------------------------------------------------------------------------
+
+/// F4.7 debug overlays.
+enum class OverlayMode : u8 { None, Overdraw, LightCount, TileCost, Timings };
+[[nodiscard]] const char* overlayName(OverlayMode mode);
 
 struct LaunchOptions {
     std::optional<int> bench;  // 0-based TestBenchType index
@@ -115,6 +138,17 @@ struct LaunchOptions {
     std::optional<u32> forceVariant;
     std::string shaderDir;                     // hot reload (Debug)
     std::string debugHotReloadPath;
+    // F4: observability.
+    bool        gpuTiming        = true;
+    bool        gpuTimingUnfused = false;
+    bool        gpuTimingSerial  = false;
+    u32         debugGpuCost     = 0;      // 0 = no known-cost pass
+    bool        gpuCapture       = false;  // capture layer inserted
+    std::optional<u32> gpuCaptureFrame;
+    float       gpuCaptureOverMs = 0.0f;   // 0 = off
+    std::string gpuCaptureDir    = "captures";
+    u32         gpuCaptureMax    = 1;
+    OverlayMode overlay          = OverlayMode::None;
 
     /// True when the app runs a fixed number of frames and then exits.
     [[nodiscard]] bool benchmark() const { return frames > 0; }

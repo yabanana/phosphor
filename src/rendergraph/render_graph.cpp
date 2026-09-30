@@ -144,6 +144,19 @@ void PassBuilder::setSideEffect() { graph_.passes_[pass_].sideEffect = true; }
 void PassBuilder::setHints(u32 hints) { graph_.passes_[pass_].hints = hints; }
 void PassBuilder::setParallelChunks(u32 chunks) { graph_.passes_[pass_].parallelChunks = std::max(chunks, 1u); }
 
+void PassBuilder::setProfileShaders(const std::string& functions) {
+    std::vector<std::string>& out = graph_.passes_[pass_].profileShaders;
+    out.clear();
+    size_t start = 0;
+    while (start <= functions.size()) {
+        const size_t comma = functions.find(',', start);
+        const size_t end   = comma == std::string::npos ? functions.size() : comma;
+        if (end > start) out.push_back(functions.substr(start, end - start));
+        if (comma == std::string::npos) break;
+        start = comma + 1;
+    }
+}
+
 TextureRef RenderGraph::importTexture(const std::string& name, const TextureDesc& desc, u32 flags) {
     if (desc.format == Format::Unknown || desc.width == 0 || desc.height == 0) {
         error("imported texture '" + name + "': format and size are required");

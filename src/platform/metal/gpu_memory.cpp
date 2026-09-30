@@ -1,6 +1,7 @@
 #include "platform/metal/gpu_memory.h"
 #include "platform/metal/metal_context.h"
 #include "core/log.h"
+#include "core/profile.h"
 
 #include <algorithm>
 
@@ -41,7 +42,9 @@ GpuMemory::~GpuMemory() {
         }
     }
     for (Heap& h : heaps_) {
-        if (h.heap) h.heap->release();
+        if (!h.heap) continue;
+        PH_FREE(h.heap, "GPU heap pages");
+        h.heap->release();
     }
 }
 
@@ -75,6 +78,7 @@ bool GpuMemory::place(u64 size, u64 align, ResidencyClass cls, Placement& out) {
     heap->setLabel(str("Placement heap"));
     context_.makeResident(heap, cls); // one residency entry for everything placed in it
     ++allocationCount_;
+    PH_ALLOC(heap, heap->size(), "GPU heap pages");
 
     // Reuse a slot left by a trimmed heap so indices stay small.
     u32 index = static_cast<u32>(heaps_.size());
@@ -96,12 +100,48 @@ bool GpuMemory::place(u64 size, u64 align, ResidencyClass cls, Placement& out) {
     return true;
 }
 
+namespace {
+
+// Tracy pool names (static strings, one per MemoryCategory).  Every resource
+// (standalone or placed in a heap page) is reported by its pointer and size
+// in its category pool.  Heaps themselves are reported in separate pools
+// (caller-owned heaps per category, internal pages in "GPU heap pages"), so
+// a page and the resources placed in it are never counted in one pool.
+[[maybe_unused]] const char* tracyPool(MemoryCategory category) {
+    switch (category) {
+    case MemoryCategory::Geometry:      return "GPU Geometry";
+    case MemoryCategory::Textures:      return "GPU Textures";
+    case MemoryCategory::Upload:        return "GPU Upload";
+    case MemoryCategory::Transient:     return "GPU Transient";
+    case MemoryCategory::RenderTargets: return "GPU Render targets";
+    case MemoryCategory::Other:         return "GPU Other";
+    case MemoryCategory::COUNT:         break;
+    }
+    return "GPU ?";
+}
+
+[[maybe_unused]] const char* tracyHeapPool(MemoryCategory category) {
+    switch (category) {
+    case MemoryCategory::Geometry:      return "GPU heap Geometry";
+    case MemoryCategory::Textures:      return "GPU heap Textures";
+    case MemoryCategory::Upload:        return "GPU heap Upload";
+    case MemoryCategory::Transient:     return "GPU heap Transient";
+    case MemoryCategory::RenderTargets: return "GPU heap Render targets";
+    case MemoryCategory::Other:         return "GPU heap Other";
+    case MemoryCategory::COUNT:         break;
+    }
+    return "GPU heap ?";
+}
+
+} // namespace
+
 void GpuMemory::account(MTL::Resource* resource, MemoryCategory category) {
     const u32 c = static_cast<u32>(category);
     CategoryStats& s = stats_[c];
     s.bytes += resource->allocatedSize();
     ++s.count;
     ++allocationCount_;
+    PH_ALLOC(resource, resource->allocatedSize(), tracyPool(category));
 
     // Log when a category crosses into Warning or Over (once per crossing).
     const MemoryBudget::Level level = context_.budget().level(category, s.bytes);
@@ -119,6 +159,7 @@ void GpuMemory::unaccount(MTL::Resource* resource, MemoryCategory category) {
     CategoryStats& s = stats_[c];
     s.bytes -= resource->allocatedSize();
     --s.count;
+    PH_FREE(resource, tracyPool(category));
     reportedLevel_[c] = std::min(reportedLevel_[c], context_.budget().level(category, s.bytes));
 }
 
@@ -208,6 +249,7 @@ MTL::Heap* GpuMemory::newPlacementHeap(u64 size, MemoryCategory category, const 
     s.bytes += heap->size();
     ++s.count;
     ++allocationCount_;
+    PH_ALLOC(heap, heap->size(), tracyHeapPool(category));
     return heap;
 }
 
@@ -216,6 +258,7 @@ void GpuMemory::releaseHeap(MTL::Heap* heap, MemoryCategory category) {
     CategoryStats& s = stats_[static_cast<u32>(category)];
     s.bytes -= heap->size();
     --s.count;
+    PH_FREE(heap, tracyHeapPool(category));
     context_.deferRelease(heap, heap);
 }
 
@@ -261,6 +304,7 @@ u64 GpuMemory::trimEmptyHeaps(bool keepSpare) {
             continue;
         }
         freed += h.heap->size();
+        PH_FREE(h.heap, "GPU heap pages");
         context_.evict(h.heap);
         h.heap->release();
         h.heap = nullptr;

@@ -1,4 +1,5 @@
 #include "platform/metal/shader_reloader.h"
+#include "core/profile.h"
 
 #include "core/file_watcher.h"
 #include "core/log.h"
@@ -97,6 +98,7 @@ MTL::Library* ShaderReloader::takeLibrary() {
 }
 
 void ShaderReloader::threadMain() {
+    PH_THREAD_NAME("phosphor-shader-reload");
     pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0);
     FileWatcher shaders(shaderDir_, {".metal", ".h"});
     FileWatcher types(PHOSPHOR_RENDERER_SOURCE_DIR, {".h"});
@@ -118,6 +120,7 @@ void ShaderReloader::threadMain() {
 }
 
 void ShaderReloader::rebuild() {
+    PH_ZONE("Shader reload");
     NS::AutoreleasePool* pool = NS::AutoreleasePool::alloc()->init();
     const auto start = std::chrono::steady_clock::now();
     std::vector<std::string> sources;

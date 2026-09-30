@@ -1,0 +1,6 @@
+date,commit,dirty,machine,chip,macos,power,bench,name,resolution,vsync,ui,frames,runs,frame_mean,frame_sd,frame_p99,cpu_mean,cpu_sd,cpu_p99,gpu_mean,gpu_sd,gpu_p99,gpupass_mean,gpupass_sd,gpupass_p99,gpu_allocations_max,cpu_heap_bytes_delta_max,cpu_heap_blocks_delta_max
+2026-09-29T10:00:00Z,aaaaaaa,0,"Mac17,6",Apple M5 Max,27.2,AC,1,Torus Demo,3200x1800,1,0,600,3,8.333,0.010,8.5,0.115,0.004,0.209,1.337,0.020,3.026,1.30,0.015,2.9,0,13152,239
+2026-09-29T10:00:00Z,aaaaaaa,0,"Mac17,6",Apple M5 Max,27.2,AC,1,Torus Demo,3200x1800,0,0,600,3,2.898,0.050,11.764,0.115,0.004,0.209,1.337,0.030,3.026,,,,0,13152,239
+2026-09-30T10:00:00Z,bbbbbbb,0,"Mac17,6",Apple M5 Max,27.2,AC,1,Torus Demo,3200x1800,1,0,600,3,8.333,0.012,8.5,0.110,0.004,0.200,1.200,0.020,2.9,1.18,0.014,2.8,0,13000,230
+2026-09-30T10:00:00Z,bbbbbbb,0,"Mac17,6",Apple M5 Max,27.2,AC,1,Torus Demo,3200x1800,0,0,600,3,2.500,0.040,11.0,0.116,0.005,0.210,1.400,0.030,3.1,,,,0,13000,230
+2026-09-30T10:00:00Z,bbbbbbb,0,"Mac17,6",Apple M5 Max,27.2,AC,2,PBR Material Grid,3200x1800,1,0,600,3,8.333,0.010,8.6,0.115,0.004,0.209,0.812,0.010,2.0,0.80,0.010,1.9,0,100,3

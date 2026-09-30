@@ -1,5 +1,7 @@
 #include "platform/metal/metal_graph_executor.h"
 #include "platform/metal/gpu_memory.h"
+#include "platform/metal/gpu_timestamps.h"
+#include "rendergraph/timing_plan.h"
 #include "rendergraph/pass_context.h"
 #include "core/log.h"
 
@@ -172,7 +174,7 @@ void MetalGraphExecutor::releaseResources() {
             if (textures_[r]->storageMode() == MTL::StorageModeMemoryless) {
                 context_.memory().release(textures_[r], MemoryCategory::RenderTargets);
             } else {
-                heap_.release(textures_[r]);
+                heap_.release(textures_[r], /*evict: no-op if it was never registered*/ true);
             }
         }
         if (buffers_[r]) heap_.release(buffers_[r]);
@@ -281,6 +283,14 @@ bool MetalGraphExecutor::compile(const rg::RenderGraph& graph, const rg::Compile
                  compiled_.queueSyncs.size());
     }
 
+    // F4.1: timed units; a position maps to the unit that ENDS there.
+    unitOfPosition_.assign(compiled_.order.size(), kNone);
+    if (timestamps_) {
+        const rg::TimingPlan plan = rg::buildTimingPlan(graph, compiled_, MetalContext::MAX_FRAME_SUBMISSIONS);
+        for (u32 u = 0; u < plan.units.size(); ++u) unitOfPosition_[plan.units[u].lastPosition] = u;
+        timestamps_->configure(plan);
+    }
+
     ++compileCount_;
     u32 culled = 0;
     for (const bool c : compiled_.culled) culled += c ? 1 : 0;
@@ -311,6 +321,15 @@ bool MetalGraphExecutor::createResources() {
             MTL::TextureDescriptor* d = textureDescriptor(node.texture, usage_[p.resource], MTL::StorageModePrivate);
             d->setHazardTrackingMode(MTL::HazardTrackingModeUntracked);
             textures_[p.resource] = heap_.createTexture(d, p.offset, node.name.c_str());
+            // The heap makes its textures resident, but the Metal 4 validation
+            // layer rejects a heap-backed render target that is later bound
+            // through an argument table in a render pass ("attachment texture
+            // ... is not added to any residency set", F4.7 overlays: light
+            // count / overdraw sampled by the composite) unless the texture is
+            // in a residency set itself.  Evicted again in releaseResources().
+            if (textures_[p.resource] && (usage_[p.resource] & MTL::TextureUsageRenderTarget)) {
+                context_.makeResident(textures_[p.resource], ResidencyClass::Static);
+            }
             d->release();
         } else {
             buffers_[p.resource] = heap_.createBuffer(node.buffer.size, p.offset, node.name.c_str());
@@ -505,6 +524,11 @@ MTL4::CommandBuffer* MetalGraphExecutor::encodeSplitGroup(MetalContext::Frame& f
 
     tail->setLabel(groupLabels_[group]);
     for (u32 pos = splitPosition + 1; pos <= plan.lastPosition; ++pos) runPass(tail, pos, frame);
+    // The whole render pass is one timed unit; its timestamp lands at the end
+    // of the pass (measured), so it goes into the resuming tail encoder.
+    if (timestamps_ && unitOfPosition_[plan.lastPosition] != kNone) {
+        timestamps_->endUnit(tail, unitOfPosition_[plan.lastPosition]);
+    }
     tail->endEncoding();
     // Measured: another encoder after the resumed pass in the same command
     // buffer makes the whole commit fail (MTL4CommandQueueErrorDomain 1), so
@@ -520,6 +544,7 @@ void MetalGraphExecutor::execute(MetalContext::Frame& frame) {
 
     MTL4::CommandBuffer* cmd      = frame.commandBuffer; // graphics
     MTL4::CommandBuffer* asyncCmd = nullptr;
+    if (timestamps_) timestamps_->commitStart(cmd, rg::Queue::Graphics);
     bool graphicsClosed = false, asyncClosed = true, firstAsync = true;
     if (segmented_) {
         // Graphics frame N may reuse what async frame N-1 still uses (an async
@@ -544,11 +569,13 @@ void MetalGraphExecutor::execute(MetalContext::Frame& frame) {
                 firstAsync = false;
                 asyncSub_ = openSubmission(frame, SubmitQueue::Async, wait ? base + wait : 0, waitFrame);
                 asyncCmd = beginExtraCommandBuffer(frame, frame.bufferCount - 1, true);
+                if (timestamps_) timestamps_->commitStart(asyncCmd, rg::Queue::AsyncCompute);
                 asyncClosed = false;
             } else if (!async && (graphicsClosed || wait)) {
                 if (cmd != frame.commandBuffer) cmd->endCommandBuffer();
                 graphicsSub_ = openSubmission(frame, SubmitQueue::Graphics, wait ? base + wait : 0, 0);
                 cmd = beginExtraCommandBuffer(frame, frame.bufferCount - 1, false);
+                if (timestamps_) timestamps_->commitStart(cmd, rg::Queue::Graphics);
                 graphicsClosed = false;
             }
         }
@@ -570,6 +597,9 @@ void MetalGraphExecutor::execute(MetalContext::Frame& frame) {
                 // Barriers of every member were hoisted to the group start.
                 encodeBarriers(enc, group.firstPosition);
                 for (u32 pos = plan.firstPosition; pos <= plan.lastPosition; ++pos) runPass(enc, pos, frame);
+                if (timestamps_ && unitOfPosition_[plan.lastPosition] != kNone) {
+                    timestamps_->endUnit(enc, unitOfPosition_[plan.lastPosition]);
+                }
                 enc->endEncoding();
             }
         } else {
@@ -580,6 +610,7 @@ void MetalGraphExecutor::execute(MetalContext::Frame& frame) {
                 // Non-raster passes with chunks run them in sequence.
                 const u32 chunks = graph_->passes()[compiled_.order[pos]].parallelChunks;
                 for (u32 c = 0; c < chunks; ++c) runPass(enc, pos, frame, c, chunks);
+                if (timestamps_ && unitOfPosition_[pos] != kNone) timestamps_->endUnit(enc, unitOfPosition_[pos]);
             }
             enc->endEncoding();
         }

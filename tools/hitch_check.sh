@@ -9,6 +9,10 @@
 # Exits 1 if the SWITCH line reports "hitches N" with N > 0.  Extra arguments
 # (also via $EXTRA_ARGS) are passed to the app, e.g. --debug-split-encoding.
 # Keep the window visible while it runs: macOS throttles occluded windows.
+# The first 60 frames are a warm-up (not measured): while the window appears
+# SDL/Cocoa event pumping costs up to ~15 ms per frame, and a switch at frame
+# 20 was flagged as a hitch on main and on every later build alike (F4,
+# measured with Tracy: the time is in "Events", not in the switch).
 set -euo pipefail
 
 build_dir=${1:-build/release}
@@ -23,7 +27,7 @@ trap 'rm -f "$log"' EXIT
 
 # shellcheck disable=SC2086 # EXTRA_ARGS is a whitespace-separated list
 env -u MTL_DEBUG_LAYER -u MTL_SHADER_VALIDATION \
-    "$app" --frames "$frames" --warmup 0 --switch-every 20 --no-vsync --no-ui \
+    "$app" --frames "$frames" --warmup 60 --switch-every 20 --no-vsync --no-ui \
     --frame-trace "$csv" ${EXTRA_ARGS:-} "$@" >"$log" 2>&1 || {
     cat "$log" >&2
     echo "error: $app failed" >&2

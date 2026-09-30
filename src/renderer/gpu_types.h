@@ -114,4 +114,17 @@ struct FrameConstants {
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(FrameConstants) == 160, "FrameConstants layout");
 
+// Constants of the debug overlays (F4.7, shaders/overlay.metal); the scales
+// and the palette are in diagnostics/overlay_math.h.
+struct OverlayConstants {
+    u32 kind;   // overlay::KIND_*
+    u32 width;  // target size in pixels
+    u32 height;
+    u32 tilesX; // tile grid (tile-cost heatmap)
+    u32 tilesY;
+    float alpha;
+    u32 pad[2];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(OverlayConstants) == 32, "OverlayConstants layout");
+
 } // namespace phosphor

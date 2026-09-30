@@ -209,6 +209,9 @@ struct PassNode {
     /// F2.5: the pass may be encoded as `parallelChunks` independent pieces
     /// on different threads (execute receives the chunk index).
     u32         parallelChunks = 1;
+    /// F4: shader functions the pass runs (profiling only: maps Metal System
+    /// Trace's per-shader timeline to passes; no effect on compilation).
+    std::vector<std::string> profileShaders;
     ExecuteFn   execute;
 };
 
@@ -237,6 +240,8 @@ public:
     void setSideEffect();
     void setHints(u32 hints);
     void setParallelChunks(u32 chunks);
+    /// F4: comma-separated shader function names run by the pass (profiling).
+    void setProfileShaders(const std::string& functions);
 
 private:
     friend class RenderGraph;

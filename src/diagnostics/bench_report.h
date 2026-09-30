@@ -16,9 +16,18 @@ namespace phosphor {
 //            free frame slot and for a drawable
 //   gpuMs    GPU start-to-end span of the frame's command buffer; when the
 //            GPU overlaps consecutive frames this includes the overlap, so it
-//            is an upper bound of the frame's GPU cost (per-pass timestamps
-//            arrive with F4.1)
+//            is an upper bound of the frame's GPU cost (the per-pass times
+//            below are the measured one)
 //   waitMs   CPU time blocked in beginFrame() (free frame slot + drawable)
+//
+// F4.1/F4.6: with GPU timing on, `passes` holds one entry per timed unit of
+// the render graph (rg::TimingPlan: a fused render group is one unit) with
+// the distribution of its GPU time over the measured frames, and
+// gpuPassSumMs the per-frame sum of the units.  JSON schema version 2 adds
+// "schema_version", "gpu_timing", "gpu_timing_unfused", "passes" (array of
+// {"name", "queue", "fused", "passes": [..], "shaders": [..],
+// "dram_bytes", "frames", "gpu_ms": {summary}}), "gpu_pass_sum_ms" and
+// "gpu_frame_span_ms" (summaries); version 1 fields are unchanged.
 // ---------------------------------------------------------------------------
 
 struct FrameSample {
@@ -35,6 +44,19 @@ struct TimingSummary {
     float p99  = 0.0f;
     float max  = 0.0f;
 };
+
+struct PassReport {
+    std::string              name;       // unit name ("A + B" for a fused group)
+    std::string              queue;      // "graphics" / "async"
+    bool                     fused = false;
+    std::vector<std::string> passes;     // render graph passes covered
+    std::vector<std::string> shaders;    // their profile shaders (PassBuilder::setProfileShaders)
+    u64                      dramBytes = 0; // estimated DRAM bytes per frame
+    u32                      frames    = 0; // measured frames with a valid time for this unit
+    TimingSummary            gpuMs;
+};
+
+constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 2;
 
 struct BenchReport {
     std::string   bench;
@@ -55,6 +77,12 @@ struct BenchReport {
     TimingSummary gpuMs;
     TimingSummary waitMs;
     std::string   pipelinesJson; // F3.5: PipelineStats as a JSON object (empty: omitted)
+    // F4.1/F4.6: per-pass GPU timing (empty `passes` when timing is off).
+    bool          gpuTiming        = false;
+    bool          gpuTimingUnfused = false; // graph compiled without raster fusion
+    std::vector<PassReport> passes;
+    TimingSummary gpuPassSumMs;
+    TimingSummary gpuFrameSpanMs;
 };
 
 /// Nearest-rank statistics of `values` (empty input gives all zeros).

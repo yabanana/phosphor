@@ -63,7 +63,7 @@ foreach(shader IN LISTS PHOSPHOR_METAL_SHADERS)
         OUTPUT ${air}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${PHOSPHOR_SHADER_OUT}
         COMMAND xcrun -sdk macosx metal ${PHOSPHOR_METAL_FLAGS} -c ${shader} -o ${air}
-        DEPENDS ${shader} ${CMAKE_SOURCE_DIR}/src/renderer/gpu_types.h
+        DEPENDS ${shader} ${CMAKE_SOURCE_DIR}/src/renderer/gpu_types.h ${CMAKE_SOURCE_DIR}/src/diagnostics/overlay_math.h
                 ${PHOSPHOR_VARIANTS_MSL_HEADER} phosphor_variants
         COMMENT "Compiling Metal shader ${name}.metal"
         VERBATIM
@@ -117,9 +117,13 @@ add_executable(phosphor
     src/imgui/imgui_renderer.cpp
     src/imgui/ui_panels.cpp
     src/platform/metal/async_compute_probe.cpp
+    src/platform/metal/debug_overlays.cpp
     src/platform/metal/frame_capture.cpp
+    src/platform/metal/gpu_capture.cpp
     src/platform/metal/gpu_memory.cpp
+    src/platform/metal/gpu_timestamps.cpp
     src/platform/metal/graph_debug_passes.cpp
+    src/platform/metal/known_cost_pass.cpp
     src/platform/metal/metal_context.cpp
     src/platform/metal/metal_graph_executor.cpp
     src/platform/metal/metal_impl.cpp
@@ -134,6 +138,12 @@ add_executable(phosphor
     src/platform/metal/upload_ring.cpp
 )
 target_link_libraries(phosphor PRIVATE phosphor_core imgui metal_cpp)
+if(PHOSPHOR_TRACY)
+    # Global operator new/delete replacement: part of the executable (not of
+    # phosphor_core) so it is always linked and the unit tests, which count
+    # allocations with their own operators, are unaffected.
+    target_sources(phosphor PRIVATE src/core/tracy_memory.cpp)
+endif()
 target_compile_options(phosphor PRIVATE ${PHOSPHOR_WARNINGS})
 add_dependencies(phosphor phosphor_shaders phosphor_probe_shaders)
 # F3.6 hot reload rebuilds the metallib with exactly these flags ('|'-joined:
@@ -169,6 +179,13 @@ add_executable(barrier_spike
 )
 target_link_libraries(barrier_spike PRIVATE metal_cpp)
 target_compile_features(barrier_spike PRIVATE cxx_std_20)
+
+# --- F4.1 timestamp spike (measurement tool, not engine code) ---
+add_executable(timestamp_spike
+    bench/timestamp_spike/timestamp_spike.cpp
+)
+target_link_libraries(timestamp_spike PRIVATE metal_cpp)
+target_compile_features(timestamp_spike PRIVATE cxx_std_20)
 
 # Test assets are looked up relative to the working directory.
 if(NOT EXISTS ${CMAKE_BINARY_DIR}/assets)

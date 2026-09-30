@@ -58,6 +58,9 @@ add_library(phosphor_core STATIC
     src/diagnostics/bench_report.cpp
     src/diagnostics/frame_stats.cpp
     src/diagnostics/frame_trace.cpp
+    src/diagnostics/overlay_math.cpp
+    src/diagnostics/pass_timings.cpp
+    src/diagnostics/tracy_gpu.cpp
     src/pipeline/compile_queue.cpp
     src/pipeline/forward_variants.cpp
     src/pipeline/pipeline_desc.cpp
@@ -73,6 +76,7 @@ add_library(phosphor_core STATIC
     src/rendergraph/graph_dump.cpp
     src/rendergraph/render_graph.cpp
     src/rendergraph/tbdr_passes.cpp
+    src/rendergraph/timing_plan.cpp
     src/scene/camera.cpp
     src/scene/ecs.cpp
     src/scene/gltf_loader.cpp
@@ -98,6 +102,12 @@ target_compile_definitions(phosphor_core PUBLIC
     GLM_ENABLE_EXPERIMENTAL
 )
 target_compile_options(phosphor_core PRIVATE ${PHOSPHOR_WARNINGS})
+if(PHOSPHOR_TRACY)
+    # PUBLIC: PHOSPHOR_TRACY selects the real macros of core/profile.h in the
+    # app and the tests as well.
+    target_link_libraries(phosphor_core PUBLIC TracyClient)
+    target_compile_definitions(phosphor_core PUBLIC PHOSPHOR_TRACY)
+endif()
 # Third-party single-header implementations compiled in gltf_loader.cpp.
 set_source_files_properties(src/scene/gltf_loader.cpp PROPERTIES COMPILE_OPTIONS "-w")
 

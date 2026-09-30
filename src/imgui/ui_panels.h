@@ -16,6 +16,13 @@ struct RenderSettings {
     int   debugMode = 0;     // 0 = lit, 1 = normals, 2 = base color
     float exposure  = 1.0f;
     bool  vsync     = true;
+    // F4.7 debug overlay: index of OverlayMode (none, overdraw, lights, tile
+    // cost, timings); the legend fields are filled by the engine.
+    int         overlay         = 0;
+    const char* overlayQuantity = "";
+    float       overlayMax      = 0.0f;
+    bool        overlayLog      = false;
+    const char* overlayNote     = "";
 };
 
 /// Read-only information shown in the stats panel.
@@ -88,6 +95,8 @@ struct PipelinePanelInfo {
 // UIPanels -- stateless helpers that draw the ImGui diagnostic windows.
 // ---------------------------------------------------------------------------
 
+class PassTimings;
+
 class UIPanels {
 public:
     /// Combo box listing the test benches. Sets `changed` if the user picked
@@ -105,6 +114,15 @@ public:
 
     /// Pipeline cache: archive, compilations, fallbacks (F3).
     static void drawPipelinePanel(const PipelinePanelInfo& info);
+
+    /// F4.1: GPU time per timed unit of the render graph (average and maximum
+    /// over the last 60 frames), estimated DRAM bytes, and the sum compared
+    /// with the command buffer's GPU time.  `timings` null: timing is off.
+    static void drawPassTimingsPanel(const PassTimings* timings, float commandBufferGpuMs, bool unfused);
+
+    /// F4.7 "timings" overlay: a compact, undecorated corner overlay with the
+    /// average GPU time of every timed unit and their sum.
+    static void drawTimingsOverlay(const PassTimings* timings);
 };
 
 } // namespace phosphor

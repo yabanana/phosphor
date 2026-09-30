@@ -88,3 +88,29 @@ if(PHOSPHOR_BUILD_APP OR (PHOSPHOR_METAL_SYNTAX_CHECK AND NOT APPLE))
     )
     FetchContent_MakeAvailable(imgui)
 endif()
+
+# --- Tracy profiler client (F4.2, optional) ---
+# Off by default: no fetch, no define, every PH_* macro (core/profile.h)
+# expands to nothing.  ONLY_LOCALHOST keeps the listener off the network;
+# broadcast discovery and frame-image capture are not used.  The capture GUI /
+# tools are built from this same source by tools/tracy_check.sh.
+option(PHOSPHOR_TRACY "Link the Tracy profiler client (CPU/GPU zones, allocations)" OFF)
+if(PHOSPHOR_TRACY)
+    FetchContent_Declare(tracy
+        GIT_REPOSITORY https://github.com/wolfpld/tracy.git
+        GIT_TAG        v0.14.1
+        GIT_SHALLOW    TRUE
+    )
+    set(TRACY_ENABLE ON CACHE BOOL "" FORCE)
+    set(TRACY_ONLY_LOCALHOST ON CACHE BOOL "" FORCE)
+    set(TRACY_NO_BROADCAST ON CACHE BOOL "" FORCE)
+    set(TRACY_NO_FRAME_IMAGE ON CACHE BOOL "" FORCE)
+    set(TRACY_NO_SYSTEM_TRACING ON CACHE BOOL "" FORCE)
+    set(TRACY_STATIC ON CACHE BOOL "" FORCE)
+    # Events are kept only while a profiler is connected: without it the
+    # client queued every event and the process grew ~22 MB per minute with no
+    # capture attached (F4, measured).  GPU contexts are deferred and
+    # replayed on connection by Tracy itself.
+    set(TRACY_ON_DEMAND ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(tracy)
+endif()

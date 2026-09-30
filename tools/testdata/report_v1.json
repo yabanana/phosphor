@@ -1,0 +1,18 @@
+{
+  "bench": "Torus Demo",
+  "device": "Apple M5 Max",
+  "width": 3200,
+  "height": 1800,
+  "vsync": false,
+  "ui": false,
+  "frames": 30,
+  "fps": 209.18,
+  "gpu_allocations": 0,
+  "cpu_heap_blocks_delta": 239,
+  "cpu_heap_bytes_delta": 13152,
+  "frame_ms": {"mean": 4.7806, "min": 0.0378, "p50": 2.8287, "p99": 17.2971, "max": 17.2971},
+  "cpu_ms": {"mean": 0.1502, "min": 0.0451, "p50": 0.1470, "p99": 0.3377, "max": 0.3377},
+  "gpu_ms": {"mean": 2.7733, "min": 0.7032, "p50": 2.7340, "p99": 4.5904, "max": 4.5904},
+  "wait_ms": {"mean": 4.7900, "min": 0.0038, "p50": 3.1230, "p99": 17.0433, "max": 17.0433},
+  "pipelines": {"requests":3,"archiveHits":3,"archiveMisses":0,"archiveUnavailable":0,"archiveMissRate":0.0000,"compilerCalls":0,"compileMs":0.000,"compileMsMax":0.000,"fallbacksServed":0,"fallbackDraws":1,"renderThreadCompiles":0,"renderThreadCompileMs":0.000,"failures":0,"swaps":3,"reloads":0,"reloadFailures":0}
+}

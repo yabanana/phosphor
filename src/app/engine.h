@@ -4,7 +4,10 @@
 #include "core/types.h"
 #include "diagnostics/bench_report.h"
 #include "diagnostics/frame_trace.h"
+#include "diagnostics/pass_timings.h"
+#include "diagnostics/tracy_gpu.h"
 #include "platform/metal/gpu_memory.h"
+#include "platform/metal/gpu_timestamps.h"
 #include "imgui/ui_panels.h"
 #include "rendergraph/render_graph.h"
 #include "renderer/scene_extract.h"
@@ -23,9 +26,12 @@ class Camera;
 class ECS;
 class FrameCapture;
 class FrameStats;
+class GpuCapture;
 class GpuScene;
+class KnownCostPass;
 class GraphDebugPasses;
 class AsyncComputeProbe;
+class DebugOverlays;
 class ImGuiRenderer;
 class Input;
 class MetalContext;
@@ -80,6 +86,9 @@ private:
     /// Path of the pipeline archive to load ("" = none), from the options.
     [[nodiscard]] std::string pipelineArchivePath() const;
     void finishBenchmark();
+    /// F4.1: consume the GPU times of a completed frame (panel window,
+    /// benchmark measurement, Tracy GPU zones, capture threshold).
+    void onFrameTimes(const GpuTimestamps::Resolved& r);
 
     SDL_Window* window_    = nullptr;
     void*       metalView_ = nullptr; // SDL_MetalView
@@ -94,6 +103,19 @@ private:
     std::unique_ptr<MetalGraphExecutor>  graphExecutor_;
     std::unique_ptr<GraphDebugPasses>    graphDebug_; // --debug-graph-transients
     std::unique_ptr<AsyncComputeProbe>   asyncProbe_;  // --debug-async-compute
+    std::unique_ptr<KnownCostPass>       knownCost_;   // --debug-gpu-cost (F4.1)
+    std::unique_ptr<GpuTimestamps>       timestamps_;  // F4.1 (null with --no-gpu-timing)
+    std::unique_ptr<GpuCapture>          gpuCapture_;  // F4.3 (--gpu-capture*)
+    PassTimings                          passTimings_;
+    TracyGpuZones                        tracyGpu_;
+    // F4.1 benchmark measurement: frame indices [first, last] of the measured
+    // frames; their timestamps are resolved METAL_FRAMES_IN_FLIGHT frames later.
+    u64                                  measureFirstFrame_ = ~0ull;
+    u64                                  measureLastFrame_  = ~0ull;
+    bool                                 passMeasureStarted_ = false;
+    std::vector<std::string>             passNames_;    // per graph pass (PassTimings::configure)
+    std::vector<std::string>             passShaders_;
+    std::unique_ptr<DebugOverlays>       overlays_;    // F4.7 heatmaps
     std::unique_ptr<MemoryPressureMonitor> pressure_;
 
     std::unique_ptr<ECS>        ecs_;
@@ -140,10 +162,12 @@ private:
         bool capture = false;
         bool splitEncoding = false;
         bool asyncCompute  = false;
+        OverlayMode overlay = OverlayMode::None;
         bool operator==(const GraphKey&) const = default;
     };
     rg::RenderGraph frameGraph_;
     GraphKey        graphKey_;
+    OverlayMode     overlayMode_ = OverlayMode::None; // --overlay, changed from the Rendering panel
     rg::TextureRef  drawableRef_;
     rg::BufferRef   captureRef_;
     bool            captureThisFrame_ = false;
