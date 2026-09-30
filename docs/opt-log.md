@@ -734,11 +734,19 @@ ha fallito.
 
 ### OPT-0.6: soglie critiche misurate
 
-- **Partial render (B-12)**: **nessun ginocchio fino a 16,7 M triangoli** per
-  pass (6 px ciascuno, 0/4/8/16 varyings float4): ns/triangolo 2,0–2,2 (0
-  varyings) … 4,1–4,6 (16 varyings), piatto. Se il parameter buffer va in
-  overflow, sopra questa scala o senza un salto visibile nei tempi: soglia
-  "> 16,7 M" (stato Partial, dichiarato).
+- **Partial render (B-12)**: la prima versione (fino a 16,7 M triangoli, un
+  target RGBA8) non vedeva nessun ginocchio, ma 16 varyings float4 per 16,7 M
+  triangoli non possono stare in nessun parameter buffer: i partial render
+  c'erano, invisibili perché il flush di 16 MiB costa poco. Con una seconda
+  curva a flush costoso (16 varyings, 4 attachment RGBA32F = 256 MiB salvati
+  per flush) e il campionamento esteso a 2^26 (ginocchio = primo N oltre 1,3 ×
+  il minimo e che resta sopra): **16 varyings → 23,7 M triangoli** per pass
+  (3/3 run, entrambe le curve; salto 4,6 → 7,7 ns/triangolo con le attachment
+  pesanti, 4,1 → 5,8 con RGBA8), **8 → 47 M** (3/3), **4 → 67 M** (2/3, 33,5 M
+  in un run), **0 varyings → nessuno netto fino a 67 M** (rialzo marginale
+  ~1,3× a 47–67 M). La soglia scala con la dimensione dei vertici in uscita e
+  il costo cresce con i byte delle attachment: la firma di un parameter
+  buffer che va in overflow.
 - **Thrashing dei registri (B-04)**: throughput stabile fino a 120 valori FP32
   vivi (6,9–7,2 Top/s), crollo a **128** (1,88; 0,46 a 256);
   stessa soglia senza carichi (spill del compilatore). Un array indicizzato

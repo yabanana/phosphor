@@ -161,7 +161,7 @@ le righe "Misura" qui sotto riportano quei valori.
 
 **S-TBDR-3 Parameter buffer e partial render**
 - **Fatto**: il tiler conserva i vertici trasformati nel parameter buffer; quando si riempie, la GPU fa un *partial render* (flush delle tile a metà pass) con perdita di prestazioni (Rosenzweig). Il V-buffer riduce l'uso del parameter buffer (Apple 111431). Soglia non documentata.
-- **Misura** (B-12, OPT-0.6): **nessun partial render rilevabile fino a 16,7 M triangoli** per pass (6 px ciascuno): 2,0–2,2 ns/triangolo senza varyings, 4,1–4,6 con 16 float4, curve piatte. La soglia è oltre questa scala (o non produce un salto nei tempi); contatori non disponibili headless.
+- **Misura** (B-12, OPT-0.6, triangoli da 6 px, draw singolo): ginocchio del partial render a **~23,7 M triangoli per pass con 16 varyings float4**, ~47 M con 8, ~67 M con 4, nessuno netto fino a 67 M senza varyings; sotto soglia 2,0 ns/triangolo (0 varyings) … 4,1 (16). Il costo di ogni flush cresce con i byte delle attachment (256 MiB di RGBA32F: salto 4,6 → 7,7 ns/triangolo): i partial render sono invisibili con attachment leggere e costosi con G-buffer pesanti.
 - **Sfruttare**: culling aggressivo prima del raster (mesh shader, occlusione), meshlet con output minimi, attributi minimi nel pass di visibilità (solo ID).
 - **Evitare**: attributi pesanti interpolati nel pass di raster; geometria densa non culled.
 
@@ -431,7 +431,7 @@ le righe "Misura" qui sotto riportano quei valori.
 | Ray tracing | HW + reorder, allineamento AS 16 KB | "RT 2x" | istanze HW, IFB HW, allineamento 1 KB | 8,8 / 5,4 Grays/s coerenti / incoerenti; `intersection_query` ~1,9× più lento (B-20) |
 | Compressione | texture non scritte da shader | come M3 | universale (anche scritte da shader) | scritture compute su texture ottimizzate 1,24–1,43× più veloci con contenuto comprimibile, 0,94× casuale; rapporto non osservabile (B-11) |
 | ML | TensorOps su ALU | come M3 | Neural Accelerator per core | matmul2d FP16 58 TFLOPS, INT8 114 TOPS (B-22); ANE 15,7 TFLOPS efficaci (B-23) |
-| Extra | — | — | depth bounds, sampler min/max, ICB estesi, MSAA 8x, texture 32K | imageblock max 24 B/pixel (tile 32×32) / 56 B (32×16, 16×16) (B-15); nessun partial render fino a 16,7 M triangoli (B-12) |
+| Extra | — | — | depth bounds, sampler min/max, ICB estesi, MSAA 8x, texture 32K | imageblock max 24 B/pixel (tile 32×32) / 56 B (32×16, 16×16) (B-15); partial render da ~23,7 M triangoli per pass con 16 varyings float4, ~47 M con 8 (B-12) |
 
 Le colonne M3/M4 sono fonti esterne (Apple): **nessun Mac Apple9 (T0) è
 stato misurato** in OPT-0; la suite gira anche con i soli percorsi Apple9
