@@ -3,6 +3,8 @@
 #include <json.hpp> // nlohmann/json, shipped with tinygltf
 
 #include <algorithm>
+#include <stdexcept>
+#include <utility>
 
 namespace phosphor::soc {
 

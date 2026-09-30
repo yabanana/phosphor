@@ -15,6 +15,9 @@
 #include <json.hpp> // nlohmann/json, shipped with tinygltf
 
 #include <algorithm>
+#include <stdexcept>
+#include <utility>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
