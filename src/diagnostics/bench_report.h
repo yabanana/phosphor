@@ -28,6 +28,9 @@ namespace phosphor {
 // {"name", "queue", "fused", "passes": [..], "shaders": [..],
 // "dram_bytes", "frames", "gpu_ms": {summary}}), "gpu_pass_sum_ms" and
 // "gpu_frame_span_ms" (summaries); version 1 fields are unchanged.
+// OPT-0.4, version 3: each pass entry may carry "work": [{"pass", "draws",
+// "instances", "indices", "vertices", "pixels", "threads", "lights"}]
+// (PassWork); nothing else changes.
 // ---------------------------------------------------------------------------
 
 struct FrameSample {
@@ -45,6 +48,22 @@ struct TimingSummary {
     float max  = 0.0f;
 };
 
+// OPT-0.4: work of one render-graph pass over one frame, from data the CPU
+// already has (no GPU counters): what the SoC cost model multiplies the
+// shaders' op counts by (tools/soc_model).  `vertices` = unique vertices of
+// the drawn meshes x instances (a lower bound of vertex shader invocations;
+// `indices` is the upper bound without post-transform reuse).
+struct PassWork {
+    std::string pass;          // render graph pass name
+    u64         draws     = 0;
+    u64         instances = 0;
+    u64         indices   = 0; // index count x instances
+    u64         vertices  = 0; // unique vertices x instances
+    u64         pixels    = 0; // render area of the pass
+    u64         threads   = 0; // compute threads dispatched
+    u32         lights    = 0; // lights the fragment shader loops over
+};
+
 struct PassReport {
     std::string              name;       // unit name ("A + B" for a fused group)
     std::string              queue;      // "graphics" / "async"
@@ -54,9 +73,10 @@ struct PassReport {
     u64                      dramBytes = 0; // estimated DRAM bytes per frame
     u32                      frames    = 0; // measured frames with a valid time for this unit
     TimingSummary            gpuMs;
+    std::vector<PassWork>    work;       // OPT-0.4 (schema 3): passes with known work
 };
 
-constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 2;
+constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 3;
 
 struct BenchReport {
     std::string   bench;

@@ -1,0 +1,26 @@
+{
+  "schema_version": 3,
+  "bench": "Stress Test (100K)",
+  "device": "Apple M5 Max",
+  "width": 3200,
+  "height": 1800,
+  "vsync": false,
+  "ui": false,
+  "frames": 300,
+  "fps": 89.34,
+  "gpu_allocations": 0,
+  "cpu_heap_blocks_delta": 2606,
+  "cpu_heap_bytes_delta": 171168,
+  "frame_ms": {"mean": 11.1933, "min": 7.6373, "p50": 8.5843, "p99": 16.9005, "max": 17.1346},
+  "cpu_ms": {"mean": 10.5134, "min": 7.5820, "p50": 8.5333, "p99": 16.6440, "max": 16.8352},
+  "gpu_ms": {"mean": 1.9412, "min": 1.7216, "p50": 1.8890, "p99": 2.2998, "max": 2.3712},
+  "wait_ms": {"mean": 0.6801, "min": 0.0312, "p50": 0.0543, "p99": 5.6131, "max": 6.1993},
+  "pipelines": {"requests":8,"archiveHits":8,"archiveMisses":0,"archiveUnavailable":0,"archiveMissRate":0.0000,"compilerCalls":0,"compileMs":0.000,"compileMsMax":0.000,"fallbacksServed":0,"fallbackDraws":1,"renderThreadCompiles":0,"renderThreadCompileMs":0.000,"failures":0,"swaps":8,"reloads":0,"reloadFailures":0},
+  "gpu_timing": true,
+  "gpu_timing_unfused": false,
+  "passes": [
+    {"name": "Forward", "queue": "graphics", "fused": false, "passes": ["Forward"], "shaders": ["forward_vs", "forward_fs"], "dram_bytes": 23040000, "frames": 300, "gpu_ms": {"mean": 1.9340, "min": 1.7190, "p50": 1.8818, "p99": 2.2931, "max": 2.3641}, "work": [{"pass": "Forward", "draws": 1, "instances": 100000, "indices": 28800000, "vertices": 6300000, "pixels": 5760000, "threads": 0, "lights": 1}]}
+  ],
+  "gpu_pass_sum_ms": {"mean": 1.9340, "min": 1.7190, "p50": 1.8818, "p99": 2.2931, "max": 2.3641},
+  "gpu_frame_span_ms": {"mean": 1.9340, "min": 1.7190, "p50": 1.8818, "p99": 2.2931, "max": 2.3641}
+}

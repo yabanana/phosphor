@@ -484,6 +484,33 @@ void Engine::finishBenchmark() {
     report.gpuTiming        = timestamps_ != nullptr && timestamps_->enabled();
     report.gpuTimingUnfused = options_.gpuTimingUnfused;
     if (report.gpuTiming) passTimings_.summarize(report.passes, report.gpuPassSumMs, report.gpuFrameSpanMs);
+    // OPT-0.4: work of the passes the cost model can price (CPU data of the
+    // last frame; the benches' scenes do not change their draw lists).
+    for (PassReport& unit : report.passes) {
+        for (const std::string& pass : unit.passes) {
+            PassWork w;
+            w.pass = pass;
+            if (pass == "Forward") {
+                const ForwardWork f = forwardPassWork(*gpuScene_, frameScene_, report.width, report.height);
+                w.draws     = f.draws;
+                w.instances = f.instances;
+                w.indices   = f.indices;
+                w.vertices  = f.vertices;
+                w.pixels    = f.pixels;
+                w.lights    = f.lights;
+            } else if (pass == "ImGui overlay" && ImGui::GetDrawData() != nullptr) {
+                const ImDrawData* d = ImGui::GetDrawData();
+                for (int i = 0; i < d->CmdListsCount; ++i) w.draws += static_cast<u64>(d->CmdLists[i]->CmdBuffer.Size);
+                w.instances = w.draws;
+                w.indices   = static_cast<u64>(d->TotalIdxCount);
+                w.vertices  = static_cast<u64>(d->TotalVtxCount);
+                w.pixels    = u64(report.width) * report.height;
+            } else {
+                continue;
+            }
+            unit.work.push_back(w);
+        }
+    }
 
     if (ignoredInputEvents_ > 0) {
         LOG_INFO("Benchmark: ignored %u keyboard/mouse events", ignoredInputEvents_);

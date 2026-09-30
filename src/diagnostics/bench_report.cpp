@@ -43,6 +43,20 @@ std::string summaryToJson(const TimingSummary& t) {
     return buf;
 }
 
+std::string workToJson(const std::vector<PassWork>& work) {
+    if (work.empty()) return "";
+    std::string out = ", \"work\": [";
+    for (size_t i = 0; i < work.size(); ++i) {
+        const PassWork& w = work[i];
+        auto n = [](u64 v) { return std::to_string(static_cast<unsigned long long>(v)); };
+        out += (i ? ", " : "") + std::string("{\"pass\": \"") + jsonEscape(w.pass) + "\", \"draws\": " + n(w.draws) +
+               ", \"instances\": " + n(w.instances) + ", \"indices\": " + n(w.indices) + ", \"vertices\": " +
+               n(w.vertices) + ", \"pixels\": " + n(w.pixels) + ", \"threads\": " + n(w.threads) +
+               ", \"lights\": " + std::to_string(w.lights) + "}";
+    }
+    return out + "]";
+}
+
 std::string passToJson(const PassReport& p) {
     auto list = [](const std::vector<std::string>& v) {
         std::string out = "[";
@@ -54,7 +68,7 @@ std::string passToJson(const PassReport& p) {
            ", \"shaders\": " + list(p.shaders) + ", \"dram_bytes\": " +
            std::to_string(static_cast<unsigned long long>(p.dramBytes)) +
            ", \"frames\": " + std::to_string(p.frames) + ", \"gpu_ms\": " +
-           summaryToJson(p.gpuMs) + "}";
+           summaryToJson(p.gpuMs) + workToJson(p.work) + "}";
 }
 
 } // namespace

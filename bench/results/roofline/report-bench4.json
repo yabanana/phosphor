@@ -1,0 +1,26 @@
+{
+  "schema_version": 3,
+  "bench": "Scene Viewer (glTF)",
+  "device": "Apple M5 Max",
+  "width": 3200,
+  "height": 1800,
+  "vsync": false,
+  "ui": false,
+  "frames": 300,
+  "fps": 89.11,
+  "gpu_allocations": 0,
+  "cpu_heap_blocks_delta": 2444,
+  "cpu_heap_bytes_delta": 160896,
+  "frame_ms": {"mean": 11.2224, "min": 1.2177, "p50": 8.4048, "p99": 17.0059, "max": 17.2874},
+  "cpu_ms": {"mean": 8.8468, "min": 1.1711, "p50": 8.3353, "p99": 13.0443, "max": 13.0718},
+  "gpu_ms": {"mean": 0.8152, "min": 0.8070, "p50": 0.8147, "p99": 0.8237, "max": 0.9588},
+  "wait_ms": {"mean": 2.3734, "min": 0.0462, "p50": 0.0767, "p99": 8.0397, "max": 8.4907},
+  "pipelines": {"requests":8,"archiveHits":8,"archiveMisses":0,"archiveUnavailable":0,"archiveMissRate":0.0000,"compilerCalls":0,"compileMs":0.000,"compileMsMax":0.000,"fallbacksServed":0,"fallbackDraws":1,"renderThreadCompiles":0,"renderThreadCompileMs":0.000,"failures":0,"swaps":8,"reloads":0,"reloadFailures":0},
+  "gpu_timing": true,
+  "gpu_timing_unfused": false,
+  "passes": [
+    {"name": "Forward", "queue": "graphics", "fused": false, "passes": ["Forward"], "shaders": ["forward_vs", "forward_fs"], "dram_bytes": 23040000, "frames": 300, "gpu_ms": {"mean": 0.8076, "min": 0.8005, "p50": 0.8072, "p99": 0.8156, "max": 0.9516}, "work": [{"pass": "Forward", "draws": 3, "instances": 6, "indices": 6258, "vertices": 1198, "pixels": 5760000, "threads": 0, "lights": 1}]}
+  ],
+  "gpu_pass_sum_ms": {"mean": 0.8076, "min": 0.8005, "p50": 0.8072, "p99": 0.8156, "max": 0.9516},
+  "gpu_frame_span_ms": {"mean": 0.8076, "min": 0.8005, "p50": 0.8072, "p99": 0.8156, "max": 0.9516}
+}

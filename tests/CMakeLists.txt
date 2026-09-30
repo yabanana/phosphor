@@ -30,6 +30,8 @@ add_executable(phosphor_tests
     test_procedural.cpp
     test_render_graph.cpp
     test_scene_extract.cpp
+    test_soc_model.cpp
+    test_soc_results.cpp
     test_tbdr_passes.cpp
     test_timing_plan.cpp
     test_texture_manager.cpp

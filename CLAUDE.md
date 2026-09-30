@@ -63,7 +63,8 @@ extend it; port algorithms from it.
   generic pipeline, pixels), `tools/harvest_pipelines.sh` (regenerate
   `shaders/pipelines.mtl4-json` when pipeline descriptors change; the
   `pipelines script` unit test fails when it is stale).
-- F4 observability (macOS): the report JSON (`--report`, schema v2) has GPU
+- F4 observability (macOS): the report JSON (`--report`, schema v3; v2 +
+  per-pass `work` since OPT-0.4) has GPU
   time per timed unit (`passes`) with `--frames`; `tools/bench_all.sh
   [--stats] [--passes] [--vsync]`, `tools/perf_record.sh` (appends to
   `docs/perf-history*.csv`), `tools/perf_table.py latest|compare|passes`,
@@ -73,6 +74,21 @@ extend it; port algorithms from it.
   counters exist headless), `--gpu-capture*` (.gputrace).  Compare per-pass
   times at saturated clocks (`--no-vsync --gpu-timing-serial`): with vsync
   the GPU lowers its clocks (DVFS) and times do not scale with work.
+- OPT-0 SoC suite (macOS, a measurement tool, not engine code):
+  `soc_bench` (`bench/soc`, README there): `--list`, `--only B-08`,
+  `--quick`, `--runs N`, `--validate`, `--force-family apple9`, `--window`
+  (B-26), `--soak MIN` (B-27); exit battery `tools/soc_bench_all.sh` (x3,
+  validation, Apple9 paths, leaks; keeps the display on with caffeinate).
+  Results `bench/results/<chip>-<os>.json`; cost model
+  `src/diagnostics/soc_model.h` + CLI `soc_model`, `docs/soc-model.md`
+  (`tools/soc_model.py`), roofline `tools/soc_roofline.sh`
+  (`tools/air_ops.py --forward-variant`, `tools/roofline.py`).  Measured
+  traps: uniform or identical ALU chains are computed once per SIMD-group
+  or merged (seed per thread and chain), use random input data (zeros read
+  25% faster in the spike, 1.00x in B-08 at 16 MiB), a small render pass between compute encoders costs either
+  ~6-15 or ~60 us (compare variants on per-round minima), single-thread
+  chases run with the GPU fabric (IOReport AFR) at a low state, the display
+  must stay on.  Every benchmark proves its negative control can fail.
 - Before calling a Metal API, check its exact signature in the fetched
   metal-cpp headers (`build/linux/_deps/metal_cpp-src/Metal/MTL4*.hpp`); Metal 4
   names differ from Metal 3 (e.g. no `setVertexBytes`, draws take GPU addresses,

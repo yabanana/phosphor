@@ -1,0 +1,578 @@
+{
+ "benchmarks": [
+  {
+   "gpu": {
+    "active_share": 0.9847810544941469,
+    "mean_mhz": 1613.0925220058214,
+    "top_state_share": 0.9937333476792121,
+    "watts": 66.3281317505608
+   },
+   "id": "B-27",
+   "metrics": [
+    {
+     "higher_is_better": false,
+     "name": "idle.gpu_watts",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      0.2918079122358405
+     ],
+     "unit": "W",
+     "value": 0.2918079122358405,
+     "within": {
+      "cv": 0.0,
+      "max": 0.2918079122358405,
+      "mean": 0.2918079122358405,
+      "median": 0.2918079122358405,
+      "min": 0.2918079122358405,
+      "n": 1,
+      "p10": 0.2918079122358405,
+      "p90": 0.2918079122358405
+     }
+    },
+    {
+     "higher_is_better": true,
+     "name": "idle.gpu_mhz",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      410.7504551857042
+     ],
+     "unit": "MHz",
+     "value": 410.7504551857042,
+     "within": {
+      "cv": 0.0,
+      "max": 410.7504551857042,
+      "mean": 410.7504551857042,
+      "median": 410.7504551857042,
+      "min": 410.7504551857042,
+      "n": 1,
+      "p10": 410.7504551857042,
+      "p90": 410.7504551857042
+     }
+    },
+    {
+     "higher_is_better": true,
+     "name": "idle.gpu_active",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      0.18742824330926597
+     ],
+     "unit": "ratio",
+     "value": 0.18742824330926597,
+     "within": {
+      "cv": 0.0,
+      "max": 0.18742824330926597,
+      "mean": 0.18742824330926597,
+      "median": 0.18742824330926597,
+      "min": 0.18742824330926597,
+      "n": 1,
+      "p10": 0.18742824330926597,
+      "p90": 0.18742824330926597
+     }
+    },
+    {
+     "higher_is_better": true,
+     "name": "idle.gpu_top_state",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      0.03052381174855702
+     ],
+     "unit": "ratio",
+     "value": 0.03052381174855702,
+     "within": {
+      "cv": 0.0,
+      "max": 0.03052381174855702,
+      "mean": 0.03052381174855702,
+      "median": 0.03052381174855702,
+      "min": 0.03052381174855702,
+      "n": 1,
+      "p10": 0.03052381174855702,
+      "p90": 0.03052381174855702
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "gpu.gpu_watts",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      0.0
+     ],
+     "unit": "W",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": true,
+     "name": "gpu.gpu_mhz",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      1619.9080775035331
+     ],
+     "unit": "MHz",
+     "value": 1619.9080775035331,
+     "within": {
+      "cv": 0.0,
+      "max": 1619.9080775035331,
+      "mean": 1619.9080775035331,
+      "median": 1619.9080775035331,
+      "min": 1619.9080775035331,
+      "n": 1,
+      "p10": 1619.9080775035331,
+      "p90": 1619.9080775035331
+     }
+    },
+    {
+     "higher_is_better": true,
+     "name": "gpu.gpu_active",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      0.9989624493508927
+     ],
+     "unit": "ratio",
+     "value": 0.9989624493508927,
+     "within": {
+      "cv": 0.0,
+      "max": 0.9989624493508927,
+      "mean": 0.9989624493508927,
+      "median": 0.9989624493508927,
+      "min": 0.9989624493508927,
+      "n": 1,
+      "p10": 0.9989624493508927,
+      "p90": 0.9989624493508927
+     }
+    },
+    {
+     "higher_is_better": true,
+     "name": "gpu.gpu_top_state",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      0.9999282975846593
+     ],
+     "unit": "ratio",
+     "value": 0.9999282975846593,
+     "within": {
+      "cv": 0.0,
+      "max": 0.9999282975846593,
+      "mean": 0.9999282975846593,
+      "median": 0.9999282975846593,
+      "min": 0.9999282975846593,
+      "n": 1,
+      "p10": 0.9999282975846593,
+      "p90": 0.9999282975846593
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "gpu.dispatch_ms",
+     "params": {
+      "iters": 919.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.98425
+     ],
+     "unit": "ms",
+     "value": 0.98425,
+     "within": {
+      "cv": 0.031811833229536034,
+      "max": 1.4020416666666664,
+      "mean": 0.9926660273766486,
+      "median": 0.98425,
+      "min": 0.9837083333333332,
+      "n": 3324,
+      "p10": 0.9840416666666666,
+      "p90": 0.9897499999999999
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "cpu.gpu_watts",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      0.3777755037336457
+     ],
+     "unit": "W",
+     "value": 0.3777755037336457,
+     "within": {
+      "cv": 0.0,
+      "max": 0.3777755037336457,
+      "mean": 0.3777755037336457,
+      "median": 0.3777755037336457,
+      "min": 0.3777755037336457,
+      "n": 1,
+      "p10": 0.3777755037336457,
+      "p90": 0.3777755037336457
+     }
+    },
+    {
+     "higher_is_better": true,
+     "name": "cpu.gpu_mhz",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      459.05775895738594
+     ],
+     "unit": "MHz",
+     "value": 459.05775895738594,
+     "within": {
+      "cv": 0.0,
+      "max": 459.05775895738594,
+      "mean": 459.05775895738594,
+      "median": 459.05775895738594,
+      "min": 459.05775895738594,
+      "n": 1,
+      "p10": 459.05775895738594,
+      "p90": 459.05775895738594
+     }
+    },
+    {
+     "higher_is_better": true,
+     "name": "cpu.gpu_active",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      0.1819647908336074
+     ],
+     "unit": "ratio",
+     "value": 0.1819647908336074,
+     "within": {
+      "cv": 0.0,
+      "max": 0.1819647908336074,
+      "mean": 0.1819647908336074,
+      "median": 0.1819647908336074,
+      "min": 0.1819647908336074,
+      "n": 1,
+      "p10": 0.1819647908336074,
+      "p90": 0.1819647908336074
+     }
+    },
+    {
+     "higher_is_better": true,
+     "name": "cpu.gpu_top_state",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      0.06350478628706721
+     ],
+     "unit": "ratio",
+     "value": 0.06350478628706721,
+     "within": {
+      "cv": 0.0,
+      "max": 0.06350478628706721,
+      "mean": 0.06350478628706721,
+      "median": 0.06350478628706721,
+      "min": 0.06350478628706721,
+      "n": 1,
+      "p10": 0.06350478628706721,
+      "p90": 0.06350478628706721
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "mixed.gpu_watts",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      4.663450807510114
+     ],
+     "unit": "W",
+     "value": 4.663450807510114,
+     "within": {
+      "cv": 0.0,
+      "max": 4.663450807510114,
+      "mean": 4.663450807510114,
+      "median": 4.663450807510114,
+      "min": 4.663450807510114,
+      "n": 1,
+      "p10": 4.663450807510114,
+      "p90": 4.663450807510114
+     }
+    },
+    {
+     "higher_is_better": true,
+     "name": "mixed.gpu_mhz",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      649.3990570537227
+     ],
+     "unit": "MHz",
+     "value": 649.3990570537227,
+     "within": {
+      "cv": 0.0,
+      "max": 649.3990570537227,
+      "mean": 649.3990570537227,
+      "median": 649.3990570537227,
+      "min": 649.3990570537227,
+      "n": 1,
+      "p10": 649.3990570537227,
+      "p90": 649.3990570537227
+     }
+    },
+    {
+     "higher_is_better": true,
+     "name": "mixed.gpu_active",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      0.5660437946297101
+     ],
+     "unit": "ratio",
+     "value": 0.5660437946297101,
+     "within": {
+      "cv": 0.0,
+      "max": 0.5660437946297101,
+      "mean": 0.5660437946297101,
+      "median": 0.5660437946297101,
+      "min": 0.5660437946297101,
+      "n": 1,
+      "p10": 0.5660437946297101,
+      "p90": 0.5660437946297101
+     }
+    },
+    {
+     "higher_is_better": true,
+     "name": "mixed.gpu_top_state",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      0.05056645909105999
+     ],
+     "unit": "ratio",
+     "value": 0.05056645909105999,
+     "within": {
+      "cv": 0.0,
+      "max": 0.05056645909105999,
+      "mean": 0.05056645909105999,
+      "median": 0.05056645909105999,
+      "min": 0.05056645909105999,
+      "n": 1,
+      "p10": 0.05056645909105999,
+      "p90": 0.05056645909105999
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "mixed.dispatch_ms",
+     "params": {
+      "iters": 919.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      2.002166666666666
+     ],
+     "unit": "ms",
+     "value": 2.002166666666666,
+     "within": {
+      "cv": 0.5779495337688202,
+      "max": 5.89025,
+      "mean": 2.9031433486238507,
+      "median": 2.002166666666666,
+      "min": 0.9838333333333332,
+      "n": 436,
+      "p10": 1.123375,
+      "p90": 4.921333333333333
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "mixed.gpu_slowdown",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      2.034205401744136
+     ],
+     "unit": "ratio",
+     "value": 2.034205401744136,
+     "within": {
+      "cv": 0.0,
+      "max": 2.034205401744136,
+      "mean": 2.034205401744136,
+      "median": 2.034205401744136,
+      "min": 2.034205401744136,
+      "n": 1,
+      "p10": 2.034205401744136,
+      "p90": 2.034205401744136
+     }
+    },
+    {
+     "higher_is_better": true,
+     "name": "soak.minutes",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      10.0
+     ],
+     "unit": "min",
+     "value": 10.0,
+     "within": {
+      "cv": 0.0,
+      "max": 10.0,
+      "mean": 10.0,
+      "median": 10.0,
+      "min": 10.0,
+      "n": 1,
+      "p10": 10.0,
+      "p90": 10.0
+     }
+    },
+    {
+     "higher_is_better": true,
+     "name": "soak.perf_end_vs_start",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      1.0000423352101944
+     ],
+     "unit": "ratio",
+     "value": 1.0000423352101944,
+     "within": {
+      "cv": 0.0,
+      "max": 1.0000423352101944,
+      "mean": 1.0000423352101944,
+      "median": 1.0000423352101944,
+      "min": 1.0000423352101944,
+      "n": 1,
+      "p10": 1.0000423352101944,
+      "p90": 1.0000423352101944
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "soak.gpu_watts_start",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      68.50931339670714
+     ],
+     "unit": "W",
+     "value": 68.50931339670714,
+     "within": {
+      "cv": 0.0,
+      "max": 68.50931339670714,
+      "mean": 68.50931339670714,
+      "median": 68.50931339670714,
+      "min": 68.50931339670714,
+      "n": 1,
+      "p10": 68.50931339670714,
+      "p90": 68.50931339670714
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "soak.gpu_watts_end",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      67.04029502578081
+     ],
+     "unit": "W",
+     "value": 67.04029502578081,
+     "within": {
+      "cv": 0.0,
+      "max": 67.04029502578081,
+      "mean": 67.04029502578081,
+      "median": 67.04029502578081,
+      "min": 67.04029502578081,
+      "n": 1,
+      "p10": 67.04029502578081,
+      "p90": 67.04029502578081
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "soak.cpu_watts_avg",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      3.294973927251629
+     ],
+     "unit": "W",
+     "value": 3.294973927251629,
+     "within": {
+      "cv": 0.0,
+      "max": 3.294973927251629,
+      "mean": 3.294973927251629,
+      "median": 3.294973927251629,
+      "min": 3.294973927251629,
+      "n": 1,
+      "p10": 3.294973927251629,
+      "p90": 3.294973927251629
+     }
+    }
+   ],
+   "name": "power.clocks",
+   "negative_control": {
+    "detail": "idle 0.29 W top 0.03 vs load 0.00 W top 1.00; mixed slowdown 2.034",
+    "status": "fail"
+   },
+   "notes": "soak thermal end: fair; thermal nominal -> fair; GPU watts = IOReport 'GPU Energy'; MHz from the pmgr voltage-states9 table weighted by P-state residency; no CPU/DRAM/package watts per phase (Energy Model counters update every ~5 min, powermetrics needs sudo); one Mac; power source recorded in machine.power_source",
+   "seconds": 617.7711616666317,
+   "status": "partial",
+   "title": "GPU watts, P-states and MHz: idle / GPU / CPU / mixed load (soak with --soak)"
+  }
+ ],
+ "machine": {
+  "battery_percent": 32,
+  "chip": "Apple M5 Max",
+  "cpu_level_names": [
+   "Super",
+   "Performance"
+  ],
+  "cpu_perflevel0_cores": 6,
+  "cpu_perflevel1_cores": 12,
+  "gpu_cores": 40,
+  "gpu_family": "Apple10",
+  "gpu_pstate_mhz": [
+   338.0,
+   486.0,
+   636.0,
+   796.0,
+   888.0,
+   988.0,
+   1084.0,
+   1182.0,
+   1278.0,
+   1374.0,
+   1470.0,
+   1578.0,
+   1620.0
+  ],
+  "memory_bytes": 137438953472,
+  "os": "macOS 27.2",
+  "os_build": "26B5091g",
+  "os_slug": "macos27.2",
+  "power_source": "Battery",
+  "sdk": "27.0",
+  "slug": "m5max",
+  "thermal_end": "fair",
+  "thermal_start": "nominal"
+ },
+ "run": {
+  "args": "--only B-27 --soak 10 --runs 1 --out build/b27soak.json",
+  "commit": "38aaeb2",
+  "date": "2026-09-30T17:34:27+0200",
+  "forced_apple9": false,
+  "quick": false,
+  "runs": 1
+ },
+ "schema": "phosphor-soc-results",
+ "schema_version": 1
+}

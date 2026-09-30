@@ -1,0 +1,631 @@
+{
+ "derived": {
+  "ridge_point_flop_per_byte": 26.641445300220052,
+  "ridge_point_onchip_flop_per_byte": 1.7688546578644029
+ },
+ "fields": {
+  "barrier_encoder_us": {
+   "run_cv": 0.012231640793552245,
+   "source": "B-18/barrier.encoder.us",
+   "unit": "us",
+   "value": 0.6974891558224892
+  },
+  "barrier_queue_us": {
+   "run_cv": 0.9063069318290022,
+   "source": "B-18/barrier.queue.us",
+   "unit": "us",
+   "value": 0.5258333333333343
+  },
+  "commit_gpu_us": {
+   "run_cv": 0.012494253020698592,
+   "source": "B-28/commit.gpu_us",
+   "unit": "us",
+   "value": 3.3333199098706245
+  },
+  "commit_to_cpu_us": {
+   "run_cv": 0.012155283546321498,
+   "source": "B-28/commit_to_cpu.us",
+   "unit": "us",
+   "value": 171.833336353302
+  },
+  "copy_bw_dram_gbps": {
+   "run_cv": 0.0031333608318612947,
+   "source": "B-08/copy_bw.dram",
+   "unit": "GB/s",
+   "value": 532.5054764792793
+  },
+  "dispatch_empty_us": {
+   "run_cv": 0.0021734476993220627,
+   "source": "B-17/dispatch.empty.us",
+   "unit": "us",
+   "value": 0.12713541666666664
+  },
+  "dispatch_indirect_us": {
+   "run_cv": 0.0028113447637159853,
+   "source": "B-17/dispatch.indirect.us",
+   "unit": "us",
+   "value": 0.1282083333333333
+  },
+  "dram_bw_gbps": {
+   "run_cv": 0.006354813700729979,
+   "source": "B-08/dram_bw",
+   "unit": "GB/s",
+   "value": 568.568612126026
+  },
+  "empty_pass_us": {
+   "run_cv": 0.003624991584435773,
+   "source": "B-14/empty_pass.us",
+   "unit": "us",
+   "value": 63.41666666666666
+  },
+  "f16_fma_tflops": {
+   "run_cv": 0.00012144089798896803,
+   "source": "B-01/f16.fma.indep",
+   "unit": "TFLOPS",
+   "value": 17.36486856421584
+  },
+  "f32_add_tops": {
+   "run_cv": 0.0002613080051959883,
+   "source": "B-01/f32.add.indep",
+   "unit": "Top/s",
+   "value": 6.815417340809969
+  },
+  "f32_div_tops": {
+   "run_cv": 0.0004028081735363186,
+   "source": "B-03/f32.div.fast",
+   "unit": "Top/s",
+   "value": 6.3694149854996045
+  },
+  "f32_fma_tflops": {
+   "run_cv": 0.00010478885104161937,
+   "source": "B-01/f32.fma.indep",
+   "unit": "TFLOPS",
+   "value": 15.147489579377552
+  },
+  "f32_transcendental_tops": {
+   "run_cv": 0.00026046143356330676,
+   "source": "B-03/f32.transcendental.fast",
+   "unit": "Top/s",
+   "value": 8.295261083909775
+  },
+  "gemm_bf16_tops": {
+   "run_cv": 0.00042242401657096494,
+   "source": "B-22/gemm.bf16.tops",
+   "unit": "TFLOPS",
+   "value": 57.783877852428006
+  },
+  "gemm_f16_tops": {
+   "run_cv": 0.0034685656112532987,
+   "source": "B-22/gemm.f16.tops",
+   "unit": "TFLOPS",
+   "value": 57.812235055524404
+  },
+  "gemm_i8_tops": {
+   "run_cv": 0.0020297021770912752,
+   "source": "B-22/gemm.i8.tops",
+   "unit": "TOPS",
+   "value": 113.50773858664833
+  },
+  "gemm_simd_f16_tops": {
+   "run_cv": 0.00035566664518462744,
+   "source": "B-22/gemm.simd_f16.tops",
+   "unit": "TFLOPS",
+   "value": 14.95907050814498
+  },
+  "i32_add_tops": {
+   "run_cv": 0.0001801592269158135,
+   "source": "B-01/i32.add.indep",
+   "unit": "Top/s",
+   "value": 6.574100445923461
+  },
+  "i32_mul_tops": {
+   "run_cv": 0.00020800832483282313,
+   "source": "B-01/i32.mul.indep",
+   "unit": "Top/s",
+   "value": 4.062127805304212
+  },
+  "latency_dram_ns": {
+   "run_cv": 0.0144837738937954,
+   "source": "B-08/latency_dram",
+   "unit": "ns",
+   "value": 598.7293379298152
+  },
+  "latency_l1_ns": {
+   "run_cv": 0.0015083315726539142,
+   "source": "B-08/latency_l1",
+   "unit": "ns",
+   "value": 29.642996870109542
+  },
+  "onchip_bw_gbps": {
+   "run_cv": 0.0013655758494577567,
+   "source": "B-08/onchip_bw",
+   "unit": "GB/s",
+   "value": 8563.445002126755
+  },
+  "rays_coherent_grays": {
+   "run_cv": 0.0006792988298442639,
+   "source": "B-20/rays.coherent",
+   "unit": "Grays/s",
+   "value": 8.80770811094584
+  },
+  "rays_incoherent_grays": {
+   "run_cv": 0.01482723348310499,
+   "source": "B-20/rays.incoherent",
+   "unit": "Grays/s",
+   "value": 5.27281420564664
+  },
+  "slc_size_mib": {
+   "run_cv": 0.005735267574731365,
+   "source": "B-08/slc_size_estimate",
+   "unit": "MiB",
+   "value": 71.41545691907547
+  },
+  "write_bw_dram_gbps": {
+   "run_cv": 0.0017193676506416715,
+   "source": "B-08/write_bw.dram",
+   "unit": "GB/s",
+   "value": 487.2984470623831
+  }
+ },
+ "machine": {
+  "chip": "Apple M5 Max",
+  "gpu_cores": 40,
+  "gpu_family": "Apple10",
+  "os": "macOS 27.2",
+  "power_source": "AC",
+  "slug": "m5max",
+  "top_pstate_mhz": 1620.0
+ },
+ "schema": "phosphor-soc-model",
+ "schema_version": 1,
+ "tbdr": [
+  {
+   "format": "rgba8",
+   "gbps": 0.015875,
+   "kind": "store",
+   "res": "1080p.ms",
+   "run_cv": 0.016993217199987632
+  },
+  {
+   "format": "rgba8",
+   "gbps": 0.022291666666666668,
+   "kind": "load",
+   "res": "1080p.ms",
+   "run_cv": 0.008433758889319644
+  },
+  {
+   "format": "rgba8",
+   "gbps": 756.9034220532322,
+   "kind": "store",
+   "res": "1080p",
+   "run_cv": 0.3139718319723514
+  },
+  {
+   "format": "rgba8",
+   "gbps": 475.0968973747018,
+   "kind": "load",
+   "res": "1080p",
+   "run_cv": 0.1821011246731063
+  },
+  {
+   "format": "rgba8",
+   "gbps": 0.023041666666666665,
+   "kind": "store",
+   "res": "1440p.ms",
+   "run_cv": 0.007233273056057823
+  },
+  {
+   "format": "rgba8",
+   "gbps": 0.033791666666666664,
+   "kind": "load",
+   "res": "1440p.ms",
+   "run_cv": 0.00990956735021014
+  },
+  {
+   "format": "rgba8",
+   "gbps": 809.8270022883297,
+   "kind": "store",
+   "res": "1440p",
+   "run_cv": 0.1846129709365376
+  },
+  {
+   "format": "rgba8",
+   "gbps": 512.1481910274964,
+   "kind": "load",
+   "res": "1440p",
+   "run_cv": 0.08957386423828596
+  },
+  {
+   "format": "rgba8",
+   "gbps": 0.03233333333333333,
+   "kind": "store",
+   "res": "1800p.ms",
+   "run_cv": 0.5137912036125053
+  },
+  {
+   "format": "rgba8",
+   "gbps": 0.049249999999999995,
+   "kind": "load",
+   "res": "1800p.ms",
+   "run_cv": 0.15166235280053147
+  },
+  {
+   "format": "rgba8",
+   "gbps": 819.1999999999999,
+   "kind": "store",
+   "res": "1800p",
+   "run_cv": 0.4722931171045428
+  },
+  {
+   "format": "rgba8",
+   "gbps": 509.6405529953918,
+   "kind": "load",
+   "res": "1800p",
+   "run_cv": 0.18449793859306993
+  },
+  {
+   "format": "rgba8",
+   "gbps": 0.04375,
+   "kind": "store",
+   "res": "2160p.ms",
+   "run_cv": 0.0035999418990809292
+  },
+  {
+   "format": "rgba8",
+   "gbps": 0.06916666666666665,
+   "kind": "load",
+   "res": "2160p.ms",
+   "run_cv": 0.009107158546768105
+  },
+  {
+   "format": "rgba8",
+   "gbps": 850.7076923076926,
+   "kind": "store",
+   "res": "2160p",
+   "run_cv": 0.07623140996421461
+  },
+  {
+   "format": "rgba8",
+   "gbps": 517.0535064935067,
+   "kind": "load",
+   "res": "2160p",
+   "run_cv": 0.03529576195769292
+  },
+  {
+   "format": "rgba16f",
+   "gbps": 0.020458333333333332,
+   "kind": "store",
+   "res": "1080p.ms",
+   "run_cv": 0.00935611509827892
+  },
+  {
+   "format": "rgba16f",
+   "gbps": 0.02845833333333333,
+   "kind": "load",
+   "res": "1080p.ms",
+   "run_cv": 0.31340781143164603
+  },
+  {
+   "format": "rgba16f",
+   "gbps": 1050.4781002638524,
+   "kind": "store",
+   "res": "1080p",
+   "run_cv": 0.21531886368871558
+  },
+  {
+   "format": "rgba16f",
+   "gbps": 679.4047781569966,
+   "kind": "load",
+   "res": "1080p",
+   "run_cv": 0.3649400206131136
+  },
+  {
+   "format": "rgba16f",
+   "gbps": 0.03204166666666666,
+   "kind": "store",
+   "res": "1440p.ms",
+   "run_cv": 0.28249059169566726
+  },
+  {
+   "format": "rgba16f",
+   "gbps": 0.04483333333333333,
+   "kind": "load",
+   "res": "1440p.ms",
+   "run_cv": 0.0023395830292131737
+  },
+  {
+   "format": "rgba16f",
+   "gbps": 1053.257142857143,
+   "kind": "store",
+   "res": "1440p",
+   "run_cv": 0.32636299102566657
+  },
+  {
+   "format": "rgba16f",
+   "gbps": 738.8192066805846,
+   "kind": "load",
+   "res": "1440p",
+   "run_cv": 0.07548970261972841
+  },
+  {
+   "format": "rgba16f",
+   "gbps": 0.04729166666666666,
+   "kind": "store",
+   "res": "1800p.ms",
+   "run_cv": 0.004169837317281726
+  },
+  {
+   "format": "rgba16f",
+   "gbps": 0.07279166666666666,
+   "kind": "load",
+   "res": "1800p.ms",
+   "run_cv": 0.04361162119880373
+  },
+  {
+   "format": "rgba16f",
+   "gbps": 1087.4336283185842,
+   "kind": "store",
+   "res": "1800p",
+   "run_cv": 0.06646993729231777
+  },
+  {
+   "format": "rgba16f",
+   "gbps": 706.2068965517243,
+   "kind": "load",
+   "res": "1800p",
+   "run_cv": 0.02667015589478315
+  },
+  {
+   "format": "rgba16f",
+   "gbps": 0.07683333333333331,
+   "kind": "store",
+   "res": "2160p.ms",
+   "run_cv": 0.06775544422973062
+  },
+  {
+   "format": "rgba16f",
+   "gbps": 0.18195833333333333,
+   "kind": "load",
+   "res": "2160p.ms",
+   "run_cv": 0.0038709898265966705
+  },
+  {
+   "format": "rgba16f",
+   "gbps": 910.5344768439111,
+   "kind": "store",
+   "res": "2160p",
+   "run_cv": 0.11828431633151956
+  },
+  {
+   "format": "rgba16f",
+   "gbps": 372.95662763466044,
+   "kind": "load",
+   "res": "2160p",
+   "run_cv": 0.018361416450830233
+  },
+  {
+   "format": "rgba32f",
+   "gbps": 0.034749999999999996,
+   "kind": "store",
+   "res": "1080p.ms",
+   "run_cv": 0.010232339814751612
+  },
+  {
+   "format": "rgba32f",
+   "gbps": 0.049083333333333326,
+   "kind": "load",
+   "res": "1080p.ms",
+   "run_cv": 0.0055713156536125975
+  },
+  {
+   "format": "rgba32f",
+   "gbps": 1115.2134453781514,
+   "kind": "store",
+   "res": "1080p",
+   "run_cv": 0.08674893500524829
+  },
+  {
+   "format": "rgba32f",
+   "gbps": 752.6109640831759,
+   "kind": "load",
+   "res": "1080p",
+   "run_cv": 0.05974716045890684
+  },
+  {
+   "format": "rgba32f",
+   "gbps": 0.06274999999999999,
+   "kind": "store",
+   "res": "1440p.ms",
+   "run_cv": 0.031688055487927955
+  },
+  {
+   "format": "rgba32f",
+   "gbps": 0.1455,
+   "kind": "load",
+   "res": "1440p.ms",
+   "run_cv": 0.050348209393081864
+  },
+  {
+   "format": "rgba32f",
+   "gbps": 1042.39882179676,
+   "kind": "store",
+   "res": "1440p",
+   "run_cv": 0.05201695931912178
+  },
+  {
+   "format": "rgba32f",
+   "gbps": 432.23743511450385,
+   "kind": "load",
+   "res": "1440p",
+   "run_cv": 0.04259778439838947
+  },
+  {
+   "format": "rgba32f",
+   "gbps": 0.12074999999999998,
+   "kind": "store",
+   "res": "1800p.ms",
+   "run_cv": 0.03876918081708893
+  },
+  {
+   "format": "rgba32f",
+   "gbps": 0.28854166666666664,
+   "kind": "load",
+   "res": "1800p.ms",
+   "run_cv": 0.05595592601851068
+  },
+  {
+   "format": "rgba32f",
+   "gbps": 796.198704103672,
+   "kind": "store",
+   "res": "1800p",
+   "run_cv": 0.020854271732078433
+  },
+  {
+   "format": "rgba32f",
+   "gbps": 323.84187408491954,
+   "kind": "load",
+   "res": "1800p",
+   "run_cv": 0.06963273941882625
+  },
+  {
+   "format": "rgba32f",
+   "gbps": 0.19216666666666665,
+   "kind": "store",
+   "res": "2160p.ms",
+   "run_cv": 0.00429947200017507
+  },
+  {
+   "format": "rgba32f",
+   "gbps": 0.41670833333333324,
+   "kind": "load",
+   "res": "2160p.ms",
+   "run_cv": 0.0016500325015979484
+  },
+  {
+   "format": "rgba32f",
+   "gbps": 705.1249944653533,
+   "kind": "store",
+   "res": "2160p",
+   "run_cv": 0.01760350568860089
+  },
+  {
+   "format": "rgba32f",
+   "gbps": 321.78718933117807,
+   "kind": "load",
+   "res": "2160p",
+   "run_cv": 0.00801295297119942
+  },
+  {
+   "format": "depth32f",
+   "gbps": 0.01633333333333333,
+   "kind": "store",
+   "res": "1080p.ms",
+   "run_cv": 0.8520695460158416
+  },
+  {
+   "format": "depth32f",
+   "gbps": 0.04566666666666667,
+   "kind": "load",
+   "res": "1080p.ms",
+   "run_cv": 0.08309297911080464
+  },
+  {
+   "format": "depth32f",
+   "gbps": 686.4331034482758,
+   "kind": "store",
+   "res": "1080p",
+   "run_cv": 0.6140355936265791
+  },
+  {
+   "format": "depth32f",
+   "gbps": 226.9847206385405,
+   "kind": "load",
+   "res": "1080p",
+   "run_cv": 0.07518521837631147
+  },
+  {
+   "format": "depth32f",
+   "gbps": 0.023749999999999997,
+   "kind": "store",
+   "res": "1440p.ms",
+   "run_cv": 0.19104701028500973
+  },
+  {
+   "format": "depth32f",
+   "gbps": 0.041583333333333326,
+   "kind": "load",
+   "res": "1440p.ms",
+   "run_cv": 0.009709298423414474
+  },
+  {
+   "format": "depth32f",
+   "gbps": 767.6668112798264,
+   "kind": "store",
+   "res": "1440p",
+   "run_cv": 0.10898517377223
+  },
+  {
+   "format": "depth32f",
+   "gbps": 397.1878787878788,
+   "kind": "load",
+   "res": "1440p",
+   "run_cv": 0.08129019580416726
+  },
+  {
+   "format": "depth32f",
+   "gbps": 0.036,
+   "kind": "store",
+   "res": "1800p.ms",
+   "run_cv": 0.18464464751707535
+  },
+  {
+   "format": "depth32f",
+   "gbps": 0.06291666666666665,
+   "kind": "load",
+   "res": "1800p.ms",
+   "run_cv": 0.004339800479352724
+  },
+  {
+   "format": "depth32f",
+   "gbps": 743.225806451613,
+   "kind": "store",
+   "res": "1800p",
+   "run_cv": 0.27842874870392503
+  },
+  {
+   "format": "depth32f",
+   "gbps": 395.5364806866953,
+   "kind": "load",
+   "res": "1800p",
+   "run_cv": 0.05276477429922062
+  },
+  {
+   "format": "depth32f",
+   "gbps": 0.05170833333333333,
+   "kind": "store",
+   "res": "2160p.ms",
+   "run_cv": 0.08947146838150422
+  },
+  {
+   "format": "depth32f",
+   "gbps": 0.09254166666666666,
+   "kind": "load",
+   "res": "2160p.ms",
+   "run_cv": 0.009084636335218051
+  },
+  {
+   "format": "depth32f",
+   "gbps": 710.3143621766279,
+   "kind": "store",
+   "res": "2160p",
+   "run_cv": 0.18099275690502833
+  },
+  {
+   "format": "depth32f",
+   "gbps": 377.1967787778304,
+   "kind": "load",
+   "res": "2160p",
+   "run_cv": 0.033132908561895116
+  }
+ ]
+}

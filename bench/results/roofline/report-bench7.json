@@ -1,0 +1,26 @@
+{
+  "schema_version": 3,
+  "bench": "Culling Visualization",
+  "device": "Apple M5 Max",
+  "width": 3200,
+  "height": 1800,
+  "vsync": false,
+  "ui": false,
+  "frames": 300,
+  "fps": 90.03,
+  "gpu_allocations": 0,
+  "cpu_heap_blocks_delta": 2263,
+  "cpu_heap_bytes_delta": 149312,
+  "frame_ms": {"mean": 11.1077, "min": 0.9662, "p50": 8.5370, "p99": 17.2171, "max": 18.4275},
+  "cpu_ms": {"mean": 8.7426, "min": 0.9643, "p50": 8.4892, "p99": 13.8368, "max": 14.8398},
+  "gpu_ms": {"mean": 0.8322, "min": 0.4561, "p50": 0.6375, "p99": 2.9936, "max": 3.1787},
+  "wait_ms": {"mean": 2.3655, "min": 0.0160, "p50": 0.0346, "p99": 7.8267, "max": 8.0671},
+  "pipelines": {"requests":8,"archiveHits":8,"archiveMisses":0,"archiveUnavailable":0,"archiveMissRate":0.0000,"compilerCalls":0,"compileMs":0.000,"compileMsMax":0.000,"fallbacksServed":0,"fallbackDraws":1,"renderThreadCompiles":0,"renderThreadCompileMs":0.000,"failures":0,"swaps":8,"reloads":0,"reloadFailures":0},
+  "gpu_timing": true,
+  "gpu_timing_unfused": false,
+  "passes": [
+    {"name": "Forward", "queue": "graphics", "fused": false, "passes": ["Forward"], "shaders": ["forward_vs", "forward_fs"], "dram_bytes": 23040000, "frames": 300, "gpu_ms": {"mean": 0.8256, "min": 0.4546, "p50": 0.6305, "p99": 2.9868, "max": 3.1718}, "work": [{"pass": "Forward", "draws": 2, "instances": 10001, "indices": 360006, "vertices": 240004, "pixels": 5760000, "threads": 0, "lights": 1}]}
+  ],
+  "gpu_pass_sum_ms": {"mean": 0.8256, "min": 0.4546, "p50": 0.6305, "p99": 2.9868, "max": 3.1718},
+  "gpu_frame_span_ms": {"mean": 0.8256, "min": 0.4546, "p50": 0.6305, "p99": 2.9868, "max": 3.1718}
+}

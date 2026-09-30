@@ -133,7 +133,7 @@ ipotesi da validare con uno spike, non come tecniche già provate.
 | F2 | Render graph e sincronizzazione automatica ✅ | CORE | I |
 | F3 | Pipeline: compilazione asincrona e archivi AOT | CORE | I |
 | F4 | Osservabilità: profiler, contatori, cattura, perf log | CORE | I |
-| OPT-0 | Caratterizzazione del SoC (`bench/`, modello di costo) | OPT | I |
+| OPT-0 | Caratterizzazione del SoC (`bench/`, modello di costo) ✅ (manca OPT-0.2 su T0) | OPT | I |
 | OPT-1 | Memoria, grafo e banda come problema di ottimizzazione | OPT | I |
 | OPT-2 | Shader, pipeline e occupancy | OPT | I |
 | F5 | GPU scene persistente e submission guidata dalla GPU | CORE | II · Geometria |
@@ -284,21 +284,26 @@ prime misure di velocità reali.
 
 ---
 
-## OPT-0 — Caratterizzazione del SoC [OPT]
+## OPT-0 — Caratterizzazione del SoC ✅ (manca OPT-0.2 su un T0) [OPT]
 
 **Obiettivo**: conoscere i chip su cui giriamo meglio di qualunque documento
 pubblico. Senza questi numeri tutte le fasi OPT successive tirano a indovinare.
 
 **Spremitura del SoC**
-- [ ] OPT-0.1 Suite `bench/` con i microbenchmark B-01…B-28 del playbook, eseguibile da CLI, risultati in `bench/results/<chip>-<os>.json`
-- [ ] OPT-0.2 Esecuzione su M5 Max e su almeno un T0 (M3/M4 base); poi su ogni Mac disponibile
-- [ ] OPT-0.3 **Modello di costo** Phosphor: tabella per chip con throughput ALU FP16/FP32, banda per livello, dimensione stimata di SLC, costo di barriere, dispatch, load/store, raggi/s, GEMM per tile
-- [ ] OPT-0.4 Grafici roofline per chip (tetto di banda e di calcolo) su cui collocare ogni pass
-- [ ] OPT-0.5 Verifica delle voci **(ipotesi)** del playbook: correggere il playbook con i dati misurati
-- [ ] OPT-0.6 Soglie critiche misurate: partial render (B-12), punto di thrashing dei registri (B-04), dimensione massima dell'imageblock (B-15)
+- [x] OPT-0.1 Suite `bench/` con i microbenchmark B-01…B-28 del playbook, eseguibile da CLI, risultati in `bench/results/<chip>-<os>.json` — `bench/soc` (`soc_bench`: `--list/--only/--quick/--runs/--out/--validate/--force-family apple9/--window/--soak`), 28 benchmark, ognuno con un controllo negativo di cui è stato provato il fallimento; `tools/soc_bench_all.sh` (× 3 run, validazione 0 messaggi, percorsi Apple9, `leaks` 0); spike e scoperte in `opt-log.md` (OPT-0)
+- [ ] OPT-0.2 Esecuzione su M5 Max e su almeno un T0 (M3/M4 base); poi su ogni Mac disponibile — **M5 Max misurato** (`bench/results/m5max-macos27.2.json`, × 3 run, all'alimentazione; anche con i soli percorsi Apple9); **T0 non disponibile**: resta da fare su un Mac M3/M4/M5 base
+- [x] OPT-0.3 **Modello di costo** Phosphor: tabella per chip con throughput ALU FP16/FP32, banda per livello, dimensione stimata di SLC, costo di barriere, dispatch, load/store, raggi/s, GEMM per tile — `SocCostModel` portabile (`src/diagnostics/soc_model.h`, doctest), CLI `soc_model`, [`soc-model.md`](soc-model.md) generato (CV tra run e cause, confronto con fonti esterne e scarti spiegati); SLC = stima da un fit, dichiarata
+- [x] OPT-0.4 Grafici roofline per chip (tetto di banda e di calcolo) su cui collocare ogni pass — [`img/roofline-m5max.svg`](img/roofline-m5max.svg) con i 7 testbench (report v3 con `work` per pass, conteggi AIR del cammino minimo della variante usata, copertura dei pixel dalle catture): predetto ≤ misurato per ogni pass, scarti tabulati; `tools/soc_roofline.sh` lo rifà
+- [x] OPT-0.5 Verifica delle voci **(ipotesi)** del playbook: correggere il playbook con i dati misurati — ogni riga "Misura" con valore e benchmark (o "non misurabile qui" e perché), §16 con la colonna misurata su M5 Max; correzioni (mul intera 1,6× l'add, FP16 2× solo con 32 catene, decompressione MTLIO sulla CPU, latenza ANE ×2–2,9 con GPU carico, 19,9 TFLOPS di terzi = GEMM FP16)
+- [x] OPT-0.6 Soglie critiche misurate: partial render (B-12), punto di thrashing dei registri (B-04), dimensione massima dell'imageblock (B-15) — partial render a ~23,7 M triangoli per pass con 16 varyings float4 (~47 M con 8, ~67 M con 4); thrashing a 128 valori FP32 vivi (stabile fino a 120); imageblock 24 B/pixel con tile 32×32, 56 B con 32×16 e 16×16 (oltre il limite il tile kernel non gira, senza errori)
 
 **Uscita**: modello di costo pubblicato in `docs/soc-model.md` e usato come
-input da render graph (OPT-1) e autotuning (F29).
+input da render graph (OPT-1) e autotuning (F29). Verificata il 2026-09-30 su
+M5 Max: `tools/soc_bench_all.sh` PASS (28 benchmark × 3 run, tutti i
+controlli negativi, `--validate` 0 messaggi, percorsi Apple9, `leaks` 0);
+motore invariato (`ctest`, `metal_syntax_check`, `visual_check` 0 pixel,
+`bench_all` A/B/A contro `main`, `perf-log.md`). L'uso del modello da parte
+del render graph è di OPT-1; OPT-0.2 attende un T0.
 
 ## OPT-1 — Memoria, grafo e banda come problema di ottimizzazione [OPT]
 
