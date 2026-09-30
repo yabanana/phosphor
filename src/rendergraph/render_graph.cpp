@@ -4,6 +4,7 @@
 #include "rendergraph/tbdr_passes.h"
 
 #include <algorithm>
+#include <string>
 #include <tuple>
 
 namespace phosphor::rg {
@@ -120,6 +121,32 @@ TextureRef PassBuilder::writeDepth(TextureRef target, LoadIntent load, const Cle
 
 void PassBuilder::readDepth(TextureRef target) {
     graph_.addRead(pass_, target.resource, target.version, Usage::DepthRead, StageFragment);
+}
+
+void PassBuilder::readColor(TextureRef target, u32 slot) {
+    RenderGraph& g = graph_;
+    PassNode& p = g.passes_[pass_];
+    if (target.resource >= g.resources_.size()) {
+        g.error("pass '" + p.name + "': read of an invalid resource handle");
+        return;
+    }
+    const ResourceNode& r = g.resources_[target.resource];
+    if (p.type != PassType::Raster) {
+        g.error("pass '" + p.name + "': attachments need a raster pass");
+        return;
+    }
+    if (r.kind != ResourceKind::Texture || isDepthFormat(r.texture.format)) {
+        g.error("pass '" + p.name + "': '" + r.name + "' is not a color texture");
+        return;
+    }
+    // Recorded like the paired read of a Preserve write: added as a shader
+    // read (validation of the version), then given the attachment usage.
+    const size_t before = p.reads.size();
+    g.addRead(pass_, target.resource, target.version, Usage::ShaderRead, StageFragment);
+    if (p.reads.size() > before) {
+        p.reads.back().usage = Usage::ColorAttachment;
+        p.reads.back().slot  = slot;
+    }
 }
 
 void PassBuilder::read(TextureRef texture, Usage usage, Stages stages) {
@@ -277,7 +304,10 @@ u32 RenderGraph::addWrite(u32 pass, u32 resource, u32 version, Usage usage, Stag
             // with the attachment usage (an attachment load, see PassNode).
             const size_t before = p.reads.size();
             addRead(pass, resource, version, depth ? Usage::DepthRead : Usage::ShaderRead, stages);
-            if (p.reads.size() > before) p.reads.back().usage = depth ? Usage::DepthRead : Usage::ColorAttachment;
+            if (p.reads.size() > before) {
+                p.reads.back().usage = depth ? Usage::DepthRead : Usage::ColorAttachment;
+                p.reads.back().slot  = slot;
+            }
         }
     }
     Access a;
@@ -326,7 +356,7 @@ VersionInfo indexVersions(const RenderGraph& graph) {
 
 } // namespace
 
-CompiledGraph compileOrder(const RenderGraph& graph) {
+CompiledGraph compileOrder(const RenderGraph& graph, const std::vector<u32>& forcedOrder) {
     CompiledGraph c;
     const auto& passes    = graph.passes();
     const auto& resources = graph.resources();
@@ -420,7 +450,37 @@ CompiledGraph compileOrder(const RenderGraph& graph) {
         if (indegree[p] == 0) ready.push_back(p);
     }
     c.positionOfPass.assign(passCount, kNone);
-    while (!ready.empty()) {
+    if (!forcedOrder.empty()) {
+        // OPT-1.1: an order chosen by a plan.  Accepted only if it is a
+        // topological order of exactly the live passes.
+        for (const u32 p : forcedOrder) {
+            if (p >= passCount || !live[p] || c.positionOfPass[p] != kNone) {
+                c.errors.push_back(p >= passCount ? "forced order: pass index out of range"
+                                   : !live[p]  ? "forced order: '" + passes[p].name + "' is culled"
+                                               : "forced order: '" + passes[p].name + "' listed twice");
+                c.order.clear();
+                return c;
+            }
+            c.positionOfPass[p] = static_cast<u32>(c.order.size());
+            c.order.push_back(p);
+        }
+        if (c.order.size() != liveCount) {
+            c.errors.push_back("forced order: " + std::to_string(liveCount - c.order.size()) +
+                               " live pass(es) missing");
+            c.order.clear();
+            return c;
+        }
+        for (const Dependency& d : deps) {
+            if (c.positionOfPass[d.from] > c.positionOfPass[d.to]) {
+                c.errors.push_back("forced order: '" + passes[d.to].name + "' runs before '" +
+                                   passes[d.from].name + "', which it depends on");
+                c.order.clear();
+                return c;
+            }
+        }
+        ready.clear();
+    }
+    while (!ready.empty() && forcedOrder.empty()) {
         auto pick = std::min_element(ready.begin(), ready.end());
         if (!c.order.empty() && (passes[c.order.back()].hints & HintFragmentHeavy)) {
             for (auto it = ready.begin(); it != ready.end(); ++it) {
@@ -470,7 +530,7 @@ CompiledGraph compileOrder(const RenderGraph& graph) {
 }
 
 CompiledGraph compile(const RenderGraph& graph, const CompileOptions& options) {
-    CompiledGraph c = compileOrder(graph);
+    CompiledGraph c = compileOrder(graph, options.order);
     if (!c.ok) return c;
     buildRenderGroups(graph, c, options.fuseRasterPasses);
     if (!c.ok) return c;

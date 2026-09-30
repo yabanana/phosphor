@@ -59,6 +59,9 @@ PassAttachments collectAttachments(const RenderGraph& graph, const PassNode& pas
     }
     for (const Access& r : pass.reads) {
         if (r.usage == Usage::DepthRead) add(r.resource, true, 0);
+        // Per-pixel read of a color attachment the pass does not write
+        // (PassBuilder::readColor; a Preserve write was added above).
+        if (r.usage == Usage::ColorAttachment) add(r.resource, false, r.slot);
     }
     if (out.list.empty()) {
         out.error = "pass '" + pass.name + "': raster pass without attachments";
@@ -212,14 +215,15 @@ RenderGroup buildGroup(const RenderGraph& graph, const CompiledGraph& c, u32 fir
             }
         }
         for (const Access& r : pass.reads) {
-            if (r.usage != Usage::DepthRead) continue;
+            if (r.usage != Usage::DepthRead && r.usage != Usage::ColorAttachment) continue;
             const size_t i = find(r.resource);
             if (i == group.attachments.size()) {
-                // First use is a read-only depth test: becomes a write only if
-                // a later member writes it.
+                // First use is a read-only depth test or a per-pixel color
+                // read: becomes a write only if a later member writes it.
                 AttachmentPlan a;
                 a.resource = r.resource;
-                a.depth    = true;
+                a.depth    = r.usage == Usage::DepthRead;
+                a.slot     = a.depth ? 0 : r.slot;
                 a.load     = LoadAction::Load;
                 a.readOnly = true;
                 group.attachments.push_back(a);

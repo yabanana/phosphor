@@ -257,7 +257,7 @@ PipelineCache::~PipelineCache() {
 
 u32 PipelineCache::workerCount() const { return queue_ ? queue_->workerCount() : 0; }
 
-pipe::PipelineHandle PipelineCache::request(const pipe::PipelineDesc& desc) {
+pipe::PipelineHandle PipelineCache::request(const pipe::PipelineDesc& desc, bool loading) {
     const Clock::time_point requestStart = Clock::now();
     struct AddTime {
         double& total;
@@ -294,7 +294,7 @@ pipe::PipelineHandle PipelineCache::request(const pipe::PipelineDesc& desc) {
     // minimal repro, whatever the base configuration), so the path is used
     // only where it buys something.  --debug-pipeline-fallback forces it.
     bool allowFallback = options_.fallbackOnly;
-    if (!allowFallback && startupDone_ && desc.kind == pipe::PipelineKind::Render) {
+    if (!allowFallback && startupDone_ && !loading && desc.kind == pipe::PipelineKind::Render) {
         const pipe::PipelineHandle generic = registry_.find(pipe::pipelineKey(desc.generic()));
         allowFallback = generic == pipe::INVALID_PIPELINE || !registry_.isFinal(generic);
     }

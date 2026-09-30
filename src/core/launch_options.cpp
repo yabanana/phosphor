@@ -197,6 +197,50 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
                         std::string(*value) + "'";
                 return false;
             }
+        } else if (arg == "--graph-scenario") {
+            u32 n = 0;
+            if (!needCount(n)) return false;
+            out.graphScenario = n;
+        } else if (arg == "--graph-scenario-size") {
+            const auto value = needValue();
+            if (!value) return false;
+            const size_t x = value->find('x');
+            u32 w = 0, h = 0;
+            if (x == std::string_view::npos || !parseU32(value->substr(0, x), w) || !parseU32(value->substr(x + 1), h) ||
+                w < 64 || h < 64 || w > 16384 || h > 16384) {
+                error = "--graph-scenario-size: expected WxH (64..16384), got '" + std::string(*value) + "'";
+                return false;
+            }
+            out.scenarioWidth  = w;
+            out.scenarioHeight = h;
+        } else if (arg == "--graph-scenario-work") {
+            const auto value = needValue();
+            if (!value) return false;
+            const std::string text(*value);
+            char* end = nullptr;
+            const float work = std::strtof(text.c_str(), &end);
+            if (text.empty() || end != text.c_str() + text.size() || !(work > 0.0f) || work > 64.0f) {
+                error = "--graph-scenario-work: expected a factor in (0, 64], got '" + text + "'";
+                return false;
+            }
+            out.scenarioWork = work;
+        } else if (arg == "--graph-scenario-wide") {
+            out.scenarioWide = true;
+        } else if (arg == "--graph-scenario-no-async") {
+            out.scenarioAsync = false;
+        } else if (arg == "--graph-remat" || arg == "--graph-order") {
+            const auto value = needValue();
+            if (!value) return false;
+            std::vector<std::string>& list = arg == "--graph-remat" ? out.graphRemat : out.graphOrder;
+            list.clear();
+            size_t start = 0;
+            while (start <= value->size()) {
+                const size_t comma = value->find(',', start);
+                const size_t end   = comma == std::string_view::npos ? value->size() : comma;
+                if (end > start) list.emplace_back(value->substr(start, end - start));
+                if (comma == std::string_view::npos) break;
+                start = comma + 1;
+            }
         } else {
             error = "unknown option " + std::string(arg);
             return false;

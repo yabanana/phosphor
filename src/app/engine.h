@@ -29,6 +29,7 @@ class FrameStats;
 class GpuCapture;
 class GpuScene;
 class KnownCostPass;
+class ScenarioPasses;
 class GraphDebugPasses;
 class AsyncComputeProbe;
 class DebugOverlays;
@@ -104,6 +105,7 @@ private:
     std::unique_ptr<GraphDebugPasses>    graphDebug_; // --debug-graph-transients
     std::unique_ptr<AsyncComputeProbe>   asyncProbe_;  // --debug-async-compute
     std::unique_ptr<KnownCostPass>       knownCost_;   // --debug-gpu-cost (F4.1)
+    std::unique_ptr<ScenarioPasses>      scenario_;    // --graph-scenario (OPT-1)
     std::unique_ptr<GpuTimestamps>       timestamps_;  // F4.1 (null with --no-gpu-timing)
     std::unique_ptr<GpuCapture>          gpuCapture_;  // F4.3 (--gpu-capture*)
     PassTimings                          passTimings_;

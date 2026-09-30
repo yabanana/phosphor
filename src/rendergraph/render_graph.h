@@ -197,7 +197,10 @@ enum PassHint : u32 {
 };
 
 // A Preserve attachment write also appears in `reads` (version consumed)
-// with usage ColorAttachment or DepthRead: an attachment load.
+// with usage ColorAttachment or DepthRead: an attachment load.  A
+// ColorAttachment read without a write of the same resource in the pass is a
+// per-pixel read of the attachment (PassBuilder::readColor); its `slot` is
+// the attachment index.
 struct PassNode {
     std::string name;
     PassType    type  = PassType::Raster;
@@ -228,6 +231,11 @@ public:
     TextureRef writeColor(TextureRef target, u32 slot, LoadIntent load, const ClearValue& clear = {});
     TextureRef writeDepth(TextureRef target, LoadIntent load, const ClearValue& clear = {});
     void       readDepth(TextureRef target);
+    /// OPT-1: read color attachment `slot` per pixel without writing it
+    /// (programmable blending / framebuffer fetch).  Bound as an attachment of
+    /// the pass's render group: loaded unless an earlier member of the group
+    /// wrote it in tile memory.
+    void       readColor(TextureRef target, u32 slot);
 
     // --- Shader / copy accesses ----------------------------------------------
     void       read(TextureRef texture, Usage usage, Stages stages);
@@ -330,7 +338,7 @@ struct AttachmentPlan {
     LoadAction  load     = LoadAction::DontCare;
     StoreAction store    = StoreAction::DontCare;
     ClearValue  clear;
-    bool        readOnly = false; // only DepthRead in the whole group
+    bool        readOnly = false; // only read in the whole group (DepthRead / readColor)
 };
 
 // A render encoder: consecutive raster passes (positions in the order)
@@ -456,6 +464,11 @@ struct CompileOptions {
     /// (F2.2); needs a sizer.  Without one, no aliasing plan is produced.
     const ResourceSizer* sizer = nullptr;
     bool alias = true;
+    /// OPT-1.1: execution order imposed by a plan (pass indices).  Must list
+    /// every live pass exactly once and respect every dependency; otherwise
+    /// compilation fails with an error naming the violation.  Empty: stable
+    /// Kahn order (declaration order with the S-TBDR-6 hint).
+    std::vector<u32> order;
 };
 
 /// Validate, cull, sort, compute lifetimes, then run the F2.4 fusion, F2.2
@@ -465,6 +478,6 @@ CompiledGraph compile(const RenderGraph& graph, const CompileOptions& options = 
 
 /// Stage 1 only (F2.1): validation, culling, stable Kahn order, dependencies,
 /// lifetimes.  Used by compile() and by the tests of the later stages.
-CompiledGraph compileOrder(const RenderGraph& graph);
+CompiledGraph compileOrder(const RenderGraph& graph, const std::vector<u32>& forcedOrder = {});
 
 } // namespace phosphor::rg

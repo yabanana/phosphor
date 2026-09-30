@@ -73,7 +73,9 @@ public:
 
     /// Handle of `desc` (render thread).  A new descriptor starts resolving on
     /// the compile threads; its object appears at a later beginFrame().
-    pipe::PipelineHandle request(const pipe::PipelineDesc& desc);
+    /// `loading`: the caller waits for the final object (loading time, like
+    /// startup requests): no flexible fallback is specialised for it.
+    pipe::PipelineHandle request(const pipe::PipelineDesc& desc, bool loading = false);
 
     /// Block until the entry has a usable object (fallback or final).  Startup
     /// and loading only.

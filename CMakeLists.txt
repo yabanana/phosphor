@@ -77,6 +77,7 @@ add_library(phosphor_core STATIC
     src/rendergraph/graph_debug_reference.cpp
     src/rendergraph/graph_dump.cpp
     src/rendergraph/render_graph.cpp
+    src/rendergraph/scenario.cpp
     src/rendergraph/tbdr_passes.cpp
     src/rendergraph/timing_plan.cpp
     src/scene/camera.cpp

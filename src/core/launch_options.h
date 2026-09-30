@@ -4,6 +4,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace phosphor {
 
@@ -95,6 +96,20 @@ namespace phosphor {
 //   --gpu-capture-max K    at most K captures per run (default 1)
 //   --overlay MODE     F4.7 debug overlay: none, overdraw, lights, tilecost,
 //                      timings
+//   --graph-scenario N OPT-1: the frame graph is graph scenario N
+//                      (rendergraph/scenario.h: 0 deferred, 1 forward-plus,
+//                      2 post-chain, 3 async-compute) of synthetic passes
+//                      instead of the test bench's forward pass
+//   --graph-scenario-size WxH  internal resolution of the scenario (2560x1440)
+//   --graph-scenario-work F    scale of the scenario's ALU work and triangles
+//   --graph-scenario-wide      RGBA16Float intermediates become RGBA32Float
+//                      (2x bytes, same work: bandwidth control)
+//   --graph-scenario-no-async  scenario 3's eligible passes stay on the
+//                      graphics queue
+//   --graph-remat LIST comma-separated scenario signals recomputed by their
+//                      consumers instead of stored (OPT-1.2)
+//   --graph-order LIST comma-separated pass names: the execution order the
+//                      graph compiler must use (OPT-1 spike; validated)
 //
 // Arguments not starting with "--" are ignored: macOS may add its own
 // (e.g. -NSDocumentRevisionsDebugMode when launched from Xcode).
@@ -149,6 +164,15 @@ struct LaunchOptions {
     std::string gpuCaptureDir    = "captures";
     u32         gpuCaptureMax    = 1;
     OverlayMode overlay          = OverlayMode::None;
+    // OPT-1: graph scenarios and plans.
+    std::optional<u32> graphScenario;
+    u32         scenarioWidth    = 2560;
+    u32         scenarioHeight   = 1440;
+    float       scenarioWork     = 1.0f;
+    bool        scenarioWide     = false;
+    bool        scenarioAsync    = true;
+    std::vector<std::string> graphRemat;
+    std::vector<std::string> graphOrder;
 
     /// True when the app runs a fixed number of frames and then exits.
     [[nodiscard]] bool benchmark() const { return frames > 0; }

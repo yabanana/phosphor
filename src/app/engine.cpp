@@ -19,6 +19,7 @@
 #include "platform/metal/metal_graph_executor.h"
 #include "platform/metal/metal_texture_manager.h"
 #include "platform/metal/pipeline_cache.h"
+#include "platform/metal/scenario_passes.h"
 #include "platform/metal/shader_reloader.h"
 #include "platform/metal/scene_renderer.h"
 #include "renderer/gpu_scene.h"
@@ -129,6 +130,16 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     if (options_.debugGpuCost > 0) {
         knownCost_ = std::make_unique<KnownCostPass>(*context_, *pipelines_, options_.debugGpuCost);
     }
+    if (options_.graphScenario) {
+        rg::ScenarioParams params;
+        params.width        = options_.scenarioWidth;
+        params.height       = options_.scenarioHeight;
+        params.work         = options_.scenarioWork;
+        params.wideHdr      = options_.scenarioWide;
+        params.asyncCompute = options_.scenarioAsync;
+        params.remat        = options_.graphRemat;
+        scenario_ = std::make_unique<ScenarioPasses>(*context_, *pipelines_, *options_.graphScenario, params);
+    }
     if (options_.gpuTiming) {
         timestamps_ = std::make_unique<GpuTimestamps>(*context_, *pipelines_);
         graphExecutor_->setTimestamps(timestamps_.get());
@@ -217,6 +228,7 @@ Engine::~Engine() {
     graphDebug_.reset();
     asyncProbe_.reset();
     knownCost_.reset();
+    scenario_.reset();
     overlays_.reset();
     capture_.reset();
     imguiRenderer_.reset();
@@ -856,6 +868,7 @@ bool Engine::frame(float dt) {
     graphExecutor_->bindTexture(drawableRef_, target);
     if (capture_) graphExecutor_->bindBuffer(captureRef_, capture_->readback());
     if (graphDebug_) graphDebug_->bind(*graphExecutor_, frame.slot);
+    if (scenario_) scenario_->bind(*graphExecutor_, frame.index);
     if (asyncProbe_) asyncProbe_->bind(*graphExecutor_, frame.slot);
     {
         PH_ZONE("Graph execute");
@@ -964,12 +977,19 @@ void Engine::buildFrameGraph(u32 width, u32 height) {
     drawableRef_ = frameGraph_.importTexture("Drawable", screen, ImportOutput | ImportPerFrame);
     TextureRef color = drawableRef_;
 
+    if (scenario_) {
+        // OPT-1: a graph scenario of synthetic passes replaces the scene; its
+        // present pass writes the drawable.
+        scenario_->build(frameGraph_, drawableRef_);
+        color = {drawableRef_.resource, frameGraph_.resources()[drawableRef_.resource].versions - 1};
+    }
+
     // F2.6: seed -> reduce (async queue) -> consume, declared before Forward so
     // the async pass can overlap it.
     if (asyncProbe_) asyncProbe_->addProducers(frameGraph_);
     if (knownCost_) knownCost_->addToGraph(frameGraph_);
 
-    frameGraph_.addPass(
+    if (!scenario_) frameGraph_.addPass(
         "Forward", PassType::Raster,
         [&](PassBuilder& b) {
             ClearValue clear;
@@ -994,7 +1014,7 @@ void Engine::buildFrameGraph(u32 width, u32 height) {
             renderer_->encode(static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder()), ctx.chunk(), ctx.chunkCount());
         });
 
-    color = overlays_->addToGraph(frameGraph_, color, width, height, overlayMode_, *renderer_);
+    if (!scenario_) color = overlays_->addToGraph(frameGraph_, color, width, height, overlayMode_, *renderer_);
 
     if (options_.ui) {
         frameGraph_.addPass(
@@ -1033,6 +1053,22 @@ void Engine::buildFrameGraph(u32 width, u32 height) {
     // F4.1 attribution mode: every raster pass in its own render pass.
     CompileOptions compileOptions;
     compileOptions.fuseRasterPasses = !options_.gpuTimingUnfused;
+    // OPT-1 spike: an execution order given by pass names.
+    for (const std::string& name : options_.graphOrder) {
+        const auto& passes = frameGraph_.passes();
+        const auto it = std::find_if(passes.begin(), passes.end(), [&](const PassNode& p) { return p.name == name; });
+        if (it == passes.end()) throw std::runtime_error("--graph-order: no pass named '" + name + "'");
+        compileOptions.order.push_back(static_cast<u32>(it - passes.begin()));
+    }
+    if (!compileOptions.order.empty()) {
+        // Passes the list does not name (the engine's UI and capture passes)
+        // follow in declaration order.
+        for (u32 p = 0; p < frameGraph_.passes().size(); ++p) {
+            if (std::find(compileOptions.order.begin(), compileOptions.order.end(), p) == compileOptions.order.end()) {
+                compileOptions.order.push_back(p);
+            }
+        }
+    }
     if (!graphExecutor_->compile(frameGraph_, compileOptions)) {
         throw std::runtime_error("Failed to compile the frame graph");
     }
@@ -1051,6 +1087,7 @@ void Engine::buildFrameGraph(u32 width, u32 height) {
         passMeasureStarted_ = false;
     }
     if (graphDebug_) graphDebug_->onCompiled(frameGraph_, graphExecutor_->compiled());
+    if (scenario_) scenario_->onCompiled(frameGraph_, graphExecutor_->compiled());
     if (asyncProbe_) asyncProbe_->onCompiled(frameGraph_, graphExecutor_->compiled());
     const BandwidthReport traffic = estimateBandwidth(frameGraph_, graphExecutor_->compiled());
     LOG_INFO("Render graph %ux%u: estimated DRAM traffic %.2f MiB/frame (read %.2f, write %.2f)", width, height,
