@@ -107,7 +107,6 @@ u32 verify(const Rig& r, u32 words, const Tile& tile) {
     return wrong;
 }
 
-std::string num(double v, size_t n = 6) { return std::to_string(v).substr(0, n); }
 
 struct Outcome {
     bool created = false, ran = false, correct = false, skipped = false;
