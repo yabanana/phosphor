@@ -188,7 +188,7 @@ def cmd_passes(prows, prefix, bench):
 
 
 def cmd_report(path):
-    """bench_all-style rows of one JSON report, schema v1 or v2."""
+    """bench_all-style rows of one JSON report, schema v1, v2 or v3 (v3 adds per-pass "work", not shown)."""
     with open(path) as f:
         j = json.load(f)
     g = lambda *ks: _dig(j, ks)

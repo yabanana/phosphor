@@ -40,6 +40,16 @@ struct FrameScene {
     std::vector<GPUInstance> unsorted;
 };
 
+/// OPT-0.4: work of the forward pass for one frame (CPU data only): draws =
+/// batches with indices, instances, indices and unique vertices x instances
+/// (a mesh's vertices are contiguous in GpuScene: its count is the next
+/// mesh's vertexOffset minus its own), render area and light count.
+struct ForwardWork {
+    u64 draws = 0, instances = 0, indices = 0, vertices = 0, pixels = 0;
+    u32 lights = 0;
+};
+ForwardWork forwardPassWork(const GpuScene& scene, const FrameScene& frame, u32 width, u32 height);
+
 /// Convert an ECS material component to its GPU layout.
 GPUMaterial toGPUMaterial(const MaterialComponent& material);
 

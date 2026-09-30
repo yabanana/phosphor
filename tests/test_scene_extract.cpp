@@ -244,3 +244,27 @@ TEST_CASE("mixed instances of several meshes produce contiguous, consistent batc
     }
     CHECK(covered == fs.instances.size());
 }
+
+TEST_CASE("forward pass work counts draws, indices and unique vertices per instance (OPT-0.4)") {
+    GpuScene scene;
+    const MeshData cube = ProceduralMeshes::generateCube(1.0f);
+    const MeshData cube2 = ProceduralMeshes::generateSphere(1.0f, 12, 8); // different vertex count
+    const MeshHandle a = scene.uploadMesh(cube.positions, cube.normals, cube.tangents, cube.uvs, cube.indices);
+    const MeshHandle b = scene.uploadMesh(cube2.positions, cube2.normals, cube2.tangents, cube2.uvs, cube2.indices);
+    GPUMaterial lib{};
+    scene.addMaterial(lib);
+    ECS ecs;
+    for (int i = 0; i < 3; ++i) addInstance(ecs, a, 0, false);
+    addInstance(ecs, b, 0, false);
+    FrameScene frame;
+    extractFrameScene(ecs, scene, frame);
+    frame.lights.resize(5);
+    const ForwardWork w = forwardPassWork(scene, frame, 320, 200);
+    CHECK(w.draws == frame.batches.size());
+    CHECK(w.instances == 4);
+    CHECK(w.indices == 3 * cube.indices.size() + cube2.indices.size());
+    CHECK(w.vertices == 3 * cube.positions.size() + cube2.positions.size());
+    CHECK(cube.positions.size() != cube2.positions.size());
+    CHECK(w.pixels == 64000);
+    CHECK(w.lights == 5);
+}

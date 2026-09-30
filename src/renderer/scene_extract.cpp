@@ -145,4 +145,24 @@ void extractFrameScene(ECS& ecs, const GpuScene& scene, FrameScene& out) {
     }
 }
 
+ForwardWork forwardPassWork(const GpuScene& scene, const FrameScene& frame, u32 width, u32 height) {
+    ForwardWork w;
+    const auto& infos = scene.meshInfos();
+    const u64 totalVertices = scene.vertices().size();
+    for (const DrawBatch& b : frame.batches) {
+        if (b.meshIndex >= infos.size()) continue;
+        const GPUMeshInfo& info = infos[b.meshIndex];
+        if (info.indexCount == 0) continue; // not drawn (SceneRenderer::encode skips it)
+        const u64 end = b.meshIndex + 1 < infos.size() ? infos[b.meshIndex + 1].vertexOffset : totalVertices;
+        const u64 meshVertices = end > info.vertexOffset ? end - info.vertexOffset : 0;
+        ++w.draws;
+        w.instances += b.instanceCount;
+        w.indices += u64(info.indexCount) * b.instanceCount;
+        w.vertices += meshVertices * b.instanceCount;
+    }
+    w.pixels = u64(width) * height;
+    w.lights = static_cast<u32>(frame.lights.size());
+    return w;
+}
+
 } // namespace phosphor

@@ -341,14 +341,14 @@ BenchReport timedReport() {
 
 } // namespace
 
-TEST_CASE("bench report: schema v2 without GPU timing keeps v1 fields and stays valid JSON") {
+TEST_CASE("bench report: schema v3 without GPU timing keeps v1 fields and stays valid JSON") {
     BenchReport r;
     r.bench  = "Torus";
     r.device = "GPU";
     r.pipelinesJson = "{\"hits\": 3}";
     const std::string json = reportToJson(r);
     CHECK_MESSAGE(validJson(json), json);
-    CHECK(json.find("\"schema_version\": 2") != std::string::npos);
+    CHECK(json.find("\"schema_version\": 3") != std::string::npos);
     CHECK(json.find("\"gpu_timing\": false") != std::string::npos);
     CHECK(json.find("\"gpu_timing_unfused\": false") != std::string::npos);
     CHECK(json.find("\"passes\"") == std::string::npos);
@@ -361,11 +361,11 @@ TEST_CASE("bench report: schema v2 without GPU timing keeps v1 fields and stays 
     CHECK(formatReportLine(r).find("GPU passes") == std::string::npos);
 }
 
-TEST_CASE("bench report: schema v2 with GPU timing") {
+TEST_CASE("bench report: schema v3 with GPU timing") {
     const BenchReport r = timedReport();
     const std::string json = reportToJson(r);
     CHECK_MESSAGE(validJson(json), json);
-    CHECK(json.find("\"schema_version\": 2") != std::string::npos);
+    CHECK(json.find("\"schema_version\": 3") != std::string::npos);
     CHECK(json.find("\"gpu_timing\": true") != std::string::npos);
     CHECK(json.find("\"gpu_timing_unfused\": true") != std::string::npos);
     CHECK(json.find("\"passes\": [") != std::string::npos);
@@ -397,4 +397,22 @@ TEST_CASE("bench report: timing enabled with no passes and long names stay valid
     CHECK(reportToJson(r).find("\"passes\": []") != std::string::npos);
     r.gpuPassSumMs.mean = std::nanf("");
     CHECK(validJson(reportToJson(r))); // non-finite numbers never reach the JSON
+}
+
+TEST_CASE("bench report: per-pass work (schema v3, OPT-0.4)") {
+    BenchReport r = timedReport();
+    CHECK(reportToJson(r).find("\"work\"") == std::string::npos); // omitted when unknown
+    PassWork w;
+    w.pass      = "Forward";
+    w.draws     = 3;
+    w.instances = 100;
+    w.indices   = 307200;
+    w.vertices  = 56100;
+    w.pixels    = 5760000;
+    w.lights    = 4;
+    r.passes[0].work.push_back(w);
+    const std::string json = reportToJson(r);
+    CHECK_MESSAGE(validJson(json), json);
+    CHECK(json.find("\"work\": [{\"pass\": \"Forward\", \"draws\": 3, \"instances\": 100, \"indices\": 307200, "
+                    "\"vertices\": 56100, \"pixels\": 5760000, \"threads\": 0, \"lights\": 4}]") != std::string::npos);
 }
