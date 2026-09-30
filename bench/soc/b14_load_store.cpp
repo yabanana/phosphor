@@ -273,8 +273,10 @@ void benchLoadStore(Context& ctx, Report& rep) {
         single.p10 -= emptyRaw.median;
         single.p90 -= emptyRaw.median;
         single.mean -= emptyRaw.median;
-        emptyPassMs = std::max(0.0, single.median) * 1e-3;
+        // Rates below subtract the fast mode (the cells are minimum-based).
+        emptyPassMs = std::max(0.0, single.min) * 1e-3;
         rep.metric("empty_pass.us", "us", single, {{"w", 64}, {"h", 64}, {"empty_span_us", emptyUs}}, false);
+        rep.value("empty_pass.fast_mode.us", "us", std::max(0.0, single.min), {{"w", 64}, {"h", 64}}, false);
         constexpr u32 kChain = 32;
         const Stats chain = ctx.measure(
             [&] {
@@ -309,13 +311,22 @@ void benchLoadStore(Context& ctx, Report& rep) {
             const PassSpec sd = spec(MTL::LoadActionLoad, MTL::StoreActionDontCare, Disc);
             // Interleave the variants in rounds so that clock drift hits all of them.
             std::vector<double> va, vb, ve, vc, vd;
+            // The first render pass after keepWarm's compute load pays a
+            // transition (measured: rgba8 1080p dontCare 0.065 ms vs store
+            // 0.035 ms when dontCare always came first): one throwaway pass,
+            // and the variant order rotates every round.
+            const PassSpec* specs[5] = {&sa, &sb, &se, &sc, &sd};
+            std::vector<double>* outs[5] = {&va, &vb, &ve, &vc, &vd};
             for (u32 round = 0; round < rounds; ++round) {
                 ctx.keepWarm(15);
-                va.push_back(ctx.measure([&] { return timePass(ctx, pipes, sa); }, reps).median);
-                vb.push_back(ctx.measure([&] { return timePass(ctx, pipes, sb); }, reps).median);
-                ve.push_back(ctx.measure([&] { return timePass(ctx, pipes, se); }, reps).median);
-                vc.push_back(ctx.measure([&] { return timePass(ctx, pipes, sc); }, reps).median);
-                vd.push_back(ctx.measure([&] { return timePass(ctx, pipes, sd); }, reps).median);
+                timePass(ctx, pipes, sb);
+                for (u32 k = 0; k < 5; ++k) {
+                    const u32 v = (round + k) % 5;
+                    // Minimum per round: a small pass costs either ~15 or ~60 us
+                    // (bimodal, measured), and medians of different variants
+                    // could land in different modes.
+                    outs[v]->push_back(ctx.measure([&] { return timePass(ctx, pipes, *specs[v]); }, reps).min);
+                }
             }
             const Stats sA = phosphor::soc::computeStats(va), sB = phosphor::soc::computeStats(vb),
                         sE = phosphor::soc::computeStats(ve), sC = phosphor::soc::computeStats(vc),
@@ -341,7 +352,7 @@ void benchLoadStore(Context& ctx, Report& rep) {
                 const PassSpec sm{m, &f, MTL::LoadActionClear, MTL::StoreActionDontCare, Full};
                 ctx.keepWarm(15);
                 const Stats sM = ctx.measure([&] { return timePass(ctx, pipes, sm); }, reps);
-                cell.m = sM.median;
+                cell.m = sM.min; // same (fast) mode as the cells above
                 rep.metric("memoryless." + key + ".ms", "ms", sM, params, false);
             }
             cells[key] = cell;
@@ -445,6 +456,8 @@ void benchLoadStore(Context& ctx, Report& rep) {
             rep.note(std::to_string(slower) + "/" + std::to_string(n) + " memoryless passes >20% slower than private dontCare at " + big);
     }
     rep.note("fit over 4 resolutions of the added time per MB: " + fitText);
+    rep.note("a small render pass between compute encoders costs either ~15 or ~60 us (bimodal: see empty_pass.us min vs "
+             "median); cells = median over rounds of the per-round MINIMUM, so every variant is compared in the fast mode");
     rep.note("pass = clear|load + full-screen triangle writing an incompressible per-pixel hash + store|dontCare (A dontcare, B store, "
              "E/C: same with a discard-1-pixel-in-4 draw, clear/load); store.<k> = bytes/(B - empty pass), load.<k> = bytes/(C - empty pass); "
              "load_added = C - E, store_added = B - A; span minus empty span");
