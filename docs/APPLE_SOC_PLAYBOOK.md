@@ -412,7 +412,7 @@ le righe "Misura" qui sotto riportano quei valori.
 - **Misura** (B-27, IOReport "GPU Energy", senza sudo): GPU ~63 W su un carico FMA a pieno clock (1620 MHz), 8 pJ per FMA; idle 0,03 W; il carico CPU su tutti i core non rallenta il GPU. Watt CPU/DRAM per fase non disponibili senza `powermetrics` (sudo): gli Energy Model di IOReport si aggiornano ogni ~5 min.
 
 **S-PWR-2 Regime termico**
-- **Misura**: B-27 (prestazioni dopo 10/30 minuti; MacBook Air senza ventola vs Pro vs Studio).
+- **Misura** (B-27 `--soak 10`, M5 Max MacBook Pro a batteria): 10 minuti di carico FMA continuo **senza perdita di prestazioni** (dispatch 0,984 ms dall'inizio alla fine, 1620 MHz costanti), GPU 68,5 → 67,0 W, stato termico "fair" dopo 2,5 minuti; CPU 3,3 W medi (Energy Model IOReport, periodo ~5 min). **Con la batteria sotto ~30% il sistema limita la potenza**: carico misto CPU+GPU → GPU a 649 MHz, rallentamento 2,03× (1,00× con batteria al 58–85%). Soak da 30 min, Air senza ventola e Studio: non misurati (un solo Mac).
 - **Sfruttare**: preset che tengono conto del regime termico, non dei primi secondi; riduzione progressiva della qualità prima del throttling.
 
 **S-PWR-3 Efficienza**
