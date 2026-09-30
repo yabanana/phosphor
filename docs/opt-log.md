@@ -739,8 +739,8 @@ ha fallito.
   varyings) … 4,1–4,6 (16 varyings), piatto. Se il parameter buffer va in
   overflow, sopra questa scala o senza un salto visibile nei tempi: soglia
   "> 16,7 M" (stato Partial, dichiarato).
-- **Thrashing dei registri (B-04)**: throughput stabile fino a 96 valori FP32
-  vivi, crollo a **128** (con carichi: 7,15 → 1,88 → 0,46 Top/s a 8/128/256);
+- **Thrashing dei registri (B-04)**: throughput stabile fino a 120 valori FP32
+  vivi (6,9–7,2 Top/s), crollo a **128** (1,88; 0,46 a 256);
   stessa soglia senza carichi (spill del compilatore). Un array indicizzato
   dinamicamente (stack) costa 62× la versione a registri.
 - **Imageblock massimo (B-15)**: tile 32×32 → 24 B/pixel espliciti (32 B
