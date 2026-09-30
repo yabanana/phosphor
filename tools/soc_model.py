@@ -365,7 +365,7 @@ def self_test():
     check("| Banda memoria M5 Max (40 core GPU) |" in md and "**esterno**: 614 GB/s" in md, "external comparison row")
     check("picco teorico contro lettura GPU sostenuta" in md, "external row carries its explanation")
     check("## Metriche con CV tra i run > 2%" in md, "CV causes section")
-    check("1.01" in md, "ratio 20/19.9")
+    check("| 0.81 |" in md, "ratio 500/614 (DRAM row)")
     check("| — |\n" in md, "scarto spiegato left empty")
     # external numbers only ever in the external column
     for line in md.splitlines():
