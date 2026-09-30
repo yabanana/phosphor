@@ -27,8 +27,8 @@
  "slug": "m5max",
  "units": [
   {
-   "achieved_gbps": 75.12226931855234,
-   "achieved_tflops": 0.617346905771112,
+   "achieved_gbps": 110.13384321223711,
+   "achieved_tflops": 0.9050683365200766,
    "alu_ms": 0.01526080407556988,
    "arithmetic_intensity": 8.217894791666666,
    "bound": "dram",
@@ -40,11 +40,11 @@
    "estimate_ms": 0.06764743664458789,
    "flops": 189340296.0,
    "int_ops": 4854872.0,
-   "measured_ms": 0.3067,
+   "measured_ms": 0.2092,
    "name": "Forward",
    "onchip_ms": 0.0,
    "predicted_ms": 0.040244758129119866,
-   "ratio": 7.620868263538682,
+   "ratio": 5.19819250320278,
    "samples": 0.0,
    "shaders_matched": [
     "forward_vs (vertex, x72)",

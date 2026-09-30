@@ -41,16 +41,16 @@
 <text x="636.1" y="92.6" fill="#67a9cf">ridge 30.3 F/B</text>
 <circle class="unit" cx="583.8" cy="280.5" r="5" fill="#2a6fdb" stroke="#fff"/>
 <text class="unit-label" x="591.8" y="296.5" fill="#2a6fdb">Torus Demo: Forward</text>
-<circle class="unit" cx="447.6" cy="298.9" r="5" fill="#d9541e" stroke="#fff"/>
-<text class="unit-label" x="455.6" y="289.9" fill="#d9541e">PBR Material Grid: Forward</text>
-<circle class="unit" cx="636.9" cy="273.3" r="5" fill="#1a9850" stroke="#fff"/>
-<text class="unit-label" x="644.9" y="289.3" fill="#1a9850">Stress Test (100K): Forward</text>
-<circle class="unit" cx="566.2" cy="231.0" r="5" fill="#8e44ad" stroke="#fff"/>
-<text class="unit-label" x="574.2" y="222.0" fill="#8e44ad">Scene Viewer (glTF): Forward</text>
-<circle class="unit" cx="588.5" cy="458.8" r="5" fill="#c99a00" stroke="#fff"/>
-<text class="unit-label" x="596.5" y="474.8" fill="#c99a00">Many Lights (1024): Forward</text>
-<circle class="unit" cx="540.5" cy="254.2" r="5" fill="#00838f" stroke="#fff"/>
-<text class="unit-label" x="548.5" y="245.2" fill="#00838f">Cornell Box (GI): Forward</text>
-<circle class="unit" cx="604.3" cy="249.3" r="5" fill="#b03060" stroke="#fff"/>
-<text class="unit-label" x="612.3" y="265.3" fill="#b03060">Culling Visualization: Forward</text>
+<circle class="unit" cx="447.6" cy="274.9" r="5" fill="#d9541e" stroke="#fff"/>
+<text class="unit-label" x="455.6" y="265.9" fill="#d9541e">PBR Material Grid: Forward</text>
+<circle class="unit" cx="636.9" cy="272.6" r="5" fill="#1a9850" stroke="#fff"/>
+<text class="unit-label" x="644.9" y="288.6" fill="#1a9850">Stress Test (100K): Forward</text>
+<circle class="unit" cx="566.2" cy="218.0" r="5" fill="#8e44ad" stroke="#fff"/>
+<text class="unit-label" x="574.2" y="209.0" fill="#8e44ad">Scene Viewer (glTF): Forward</text>
+<circle class="unit" cx="588.5" cy="458.9" r="5" fill="#c99a00" stroke="#fff"/>
+<text class="unit-label" x="596.5" y="474.9" fill="#c99a00">Many Lights (1024): Forward</text>
+<circle class="unit" cx="540.5" cy="236.6" r="5" fill="#00838f" stroke="#fff"/>
+<text class="unit-label" x="548.5" y="227.6" fill="#00838f">Cornell Box (GI): Forward</text>
+<circle class="unit" cx="604.3" cy="258.9" r="5" fill="#b03060" stroke="#fff"/>
+<text class="unit-label" x="612.3" y="274.9" fill="#b03060">Culling Visualization: Forward</text>
 </svg>
