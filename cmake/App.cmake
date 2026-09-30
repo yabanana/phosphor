@@ -187,6 +187,37 @@ add_executable(timestamp_spike
 target_link_libraries(timestamp_spike PRIVATE metal_cpp)
 target_compile_features(timestamp_spike PRIVATE cxx_std_20)
 
+# --- OPT-0.1 SoC characterisation suite (measurement tool, not engine code) ---
+# bench/soc: one file per benchmark group, registered with SOC_BENCH; MSL in
+# bench/soc/shaders compiled at run time.  See bench/soc/README.md.
+file(GLOB SOC_BENCH_SOURCES CONFIGURE_DEPENDS
+    ${CMAKE_SOURCE_DIR}/bench/soc/*.cpp
+    ${CMAKE_SOURCE_DIR}/bench/soc/*.mm)
+execute_process(COMMAND xcrun --show-sdk-version OUTPUT_VARIABLE SOC_SDK_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE)
+add_executable(soc_bench ${SOC_BENCH_SOURCES})
+target_link_libraries(soc_bench PRIVATE phosphor_core metal_cpp IOReport
+    "-framework IOKit" "-framework CoreFoundation" "-framework CoreML" "-framework Accelerate"
+    "-framework AppKit" "-framework QuartzCore")
+target_compile_features(soc_bench PRIVATE cxx_std_20)
+target_compile_options(soc_bench PRIVATE ${PHOSPHOR_WARNINGS})
+target_compile_definitions(soc_bench PRIVATE
+    "SOC_SHADER_DIR=\"${CMAKE_SOURCE_DIR}/bench/soc/shaders\""
+    "SOC_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\""
+    "SOC_SDK_VERSION=\"${SOC_SDK_VERSION}\"")
+foreach(src IN LISTS SOC_BENCH_SOURCES)
+    if(src MATCHES "\\.mm$")
+        set_source_files_properties(${src} PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    endif()
+endforeach()
+if(PHOSPHOR_DEBUGGABLE)
+    add_custom_command(TARGET soc_bench POST_BUILD
+        COMMAND codesign --force --sign - --entitlements ${CMAKE_SOURCE_DIR}/cmake/debuggable.entitlements
+                $<TARGET_FILE:soc_bench>
+        COMMENT "Signing soc_bench with get-task-allow (leaks)"
+        VERBATIM
+    )
+endif()
+
 # Test assets are looked up relative to the working directory.
 if(NOT EXISTS ${CMAKE_BINARY_DIR}/assets)
     file(CREATE_LINK ${CMAKE_SOURCE_DIR}/assets ${CMAKE_BINARY_DIR}/assets SYMBOLIC)

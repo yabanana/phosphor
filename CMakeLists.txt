@@ -60,6 +60,7 @@ add_library(phosphor_core STATIC
     src/diagnostics/frame_trace.cpp
     src/diagnostics/overlay_math.cpp
     src/diagnostics/pass_timings.cpp
+    src/diagnostics/soc_results.cpp
     src/diagnostics/tracy_gpu.cpp
     src/pipeline/compile_queue.cpp
     src/pipeline/forward_variants.cpp
