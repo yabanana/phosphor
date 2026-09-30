@@ -306,12 +306,20 @@ void benchOverlap(Context& ctx, Report& rep) {
         ctx.keepWarm(30);
         // Interleaved rounds so that clock drift hits every variant.
         std::vector<double> va, vb, vn, vd;
-        for (u32 round = 0; round < 3; ++round) {
+        // A render span costs a fixed ~15 or ~60 us (bimodal, B-14): medians
+        // of "A alone" and "B alone" could both land in the slow mode while
+        // the pair did not (dep/(A+B) 0.87 at B x0.5, twice).  Per-round
+        // minima (fast mode), rotating order, a throwaway span after the
+        // warm load.
+        const Mode modes[4] = {Mode::AOnly, Mode::BOnly, Mode::NoDep, Mode::Dep};
+        std::vector<double>* outs[4] = {&va, &vb, &vn, &vd};
+        for (u32 round = 0; round < 4; ++round) {
             ctx.keepWarm(15);
-            va.push_back(ctx.measure([&] { return timeRender(ctx, r, Mode::AOnly); }, reps).median);
-            vb.push_back(ctx.measure([&] { return timeRender(ctx, r, Mode::BOnly); }, reps).median);
-            vn.push_back(ctx.measure([&] { return timeRender(ctx, r, Mode::NoDep); }, reps).median);
-            vd.push_back(ctx.measure([&] { return timeRender(ctx, r, Mode::Dep); }, reps).median);
+            timeRender(ctx, r, Mode::Dep);
+            for (u32 k = 0; k < 4; ++k) {
+                const u32 v = (round + k) % 4;
+                outs[v]->push_back(ctx.measure([&] { return timeRender(ctx, r, modes[v]); }, reps).min);
+            }
         }
         const Stats sa = phosphor::soc::computeStats(va), sb = phosphor::soc::computeStats(vb),
                     sn = phosphor::soc::computeStats(vn), sd = phosphor::soc::computeStats(vd);
@@ -358,12 +366,16 @@ void benchOverlap(Context& ctx, Report& rep) {
         if (bw) { // calibrate the compute to the bandwidth pass as well: same target ms, nothing to change
         }
         std::vector<double> vr, vc, vcc, vd;
-        for (u32 round = 0; round < 3; ++round) {
+        // Same bimodal fixed cost: per-round minima, rotating order.
+        const AMode amodes[4] = {AMode::RenderOnly, AMode::ComputeOnly, AMode::Concurrent, AMode::Dependent};
+        std::vector<double>* aouts[4] = {&vr, &vc, &vcc, &vd};
+        for (u32 round = 0; round < 4; ++round) {
             ctx.keepWarm(15);
-            vr.push_back(ctx.measure([&] { return runAsync(a, AMode::RenderOnly, bw); }, reps).median);
-            vc.push_back(ctx.measure([&] { return runAsync(a, AMode::ComputeOnly, bw); }, reps).median);
-            vcc.push_back(ctx.measure([&] { return runAsync(a, AMode::Concurrent, bw); }, reps).median);
-            vd.push_back(ctx.measure([&] { return runAsync(a, AMode::Dependent, bw); }, reps).median);
+            runAsync(a, AMode::Dependent, bw);
+            for (u32 k = 0; k < 4; ++k) {
+                const u32 v = (round + k) % 4;
+                aouts[v]->push_back(ctx.measure([&] { return runAsync(a, amodes[v], bw); }, reps).min);
+            }
         }
         const Stats sr = phosphor::soc::computeStats(vr), sc = phosphor::soc::computeStats(vc),
                     scc = phosphor::soc::computeStats(vcc), sd = phosphor::soc::computeStats(vd);
