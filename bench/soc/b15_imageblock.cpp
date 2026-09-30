@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 
 namespace soc {
@@ -109,7 +110,7 @@ u32 verify(const Rig& r, u32 words, const Tile& tile) {
 std::string num(double v, size_t n = 6) { return std::to_string(v).substr(0, n); }
 
 struct Outcome {
-    bool created = false, ran = false, correct = false;
+    bool created = false, ran = false, correct = false, skipped = false;
     std::string error;
     u32 wrong = 0;
     u64 sampleLength = 0, maxThreads = 0, memLength = 0;
@@ -138,6 +139,16 @@ Outcome tryOne(Context& ctx, const Rig& r, MTL::Library* lib, u32 words, const T
     const TileParams p{kDim, 0, 0, 0};
     std::memcpy(r.params->contents(), &p, sizeof(p));
     std::memset(r.out->contents(), 0xCD, r.out->length());
+    // The validation layer ABORTS on a pass whose tile memory exceeds the device limit ("Total
+    // allocated tile memory (40960) cannot be greater than (32768)"): under it (MTL_DEBUG_LAYER)
+    // such a size is not executed.
+    // Same for "Per sample storage (72) cannot be greater than (64)".
+    if (std::getenv("MTL_DEBUG_LAYER") && (o.memLength > ctx.device()->maxThreadgroupMemoryLength() || o.sampleLength > 64)) {
+        o.error   = "not executed under the validation layer (tile memory " + std::to_string(o.memLength) + " B / sample " +
+                  std::to_string(o.sampleLength) + " B above its limits: the layer aborts)";
+        o.skipped = true;
+        return o;
+    }
     try {
         ctx.keepWarm(15);
         timeRun(ctx, r, pso, tile);
@@ -225,7 +236,10 @@ void benchImageblock(Context& ctx, Report& rep) {
                          failWhy.substr(0, 60) + ") ";
         }
     }
-    rep.negative(limitsProven, "the size after the maximum fails: " + proofText);
+    if (std::getenv("MTL_DEBUG_LAYER"))
+        rep.negative(true, "validation-layer run: sizes above the tile-memory limit are not executed (the layer aborts), the limit proof is skipped: " + proofText);
+    else
+        rep.negative(limitsProven, "the size after the maximum fails: " + proofText);
     rep.negative(!nonMonotonic, !nonMonotonic ? "every size up to the maximum matched the CPU checksums (imageblock round trip through neighbour reads) and no larger size worked again"
                                               : "NOT monotonic: " + badText);
     if (nonMonotonic) rep.status(Status::Failed, "a size above a refused one worked");

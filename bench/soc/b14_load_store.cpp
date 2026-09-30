@@ -8,7 +8,7 @@
 //   B  clear, store      -> B - A = store cost
 //   C  load,  store      -> C - B = load cost
 //   M  clear, dontCare on a MEMORYLESS texture (RGBA8/16F/32F only)
-// plus the empty pass (64x64 RGBA8 clear + dontCare, no draw), alone (minus
+// plus the empty pass (64x64 RGBA8 clear + dontCare, one 4096-pixel triangle), alone (minus
 // the empty CommandTimer span) and 32 chained.  Time = CommandTimer span.
 //
 // Verification: pass B on the smallest texture, then a pass with Load and no
@@ -245,7 +245,9 @@ void benchLoadStore(Context& ctx, Report& rep) {
         td->setUsage(MTL::TextureUsageRenderTarget);
         td->setStorageMode(MTL::StorageModePrivate);
         MTL::Texture* tiny = ctx.texture(td);
-        const PassSpec s{tiny, &kFormats[0], MTL::LoadActionClear, MTL::StoreActionDontCare, None};
+        // One tiny draw (4096 pixels): the validation layer flags a pass with no side effect at all
+        // ("endEncoding called for an encoder with no side effects").
+        const PassSpec s{tiny, &kFormats[0], MTL::LoadActionClear, MTL::StoreActionDontCare, Full};
         ctx.keepWarm(50);
         // Raw spans of the pass and of an empty command buffer, measured back to back
         // (the calibrated empty span drifts by a few us with the GPU clock).
@@ -446,7 +448,7 @@ void benchLoadStore(Context& ctx, Report& rep) {
     rep.note("pass = clear|load + full-screen triangle writing an incompressible per-pixel hash + store|dontCare (A dontcare, B store, "
              "E/C: same with a discard-1-pixel-in-4 draw, clear/load); store.<k> = bytes/(B - empty pass), load.<k> = bytes/(C - empty pass); "
              "load_added = C - E, store_added = B - A; span minus empty span");
-    rep.note("empty_pass.us = 64x64 RGBA8 clear+dontCare, no draw, minus the empty CommandTimer span; chain32 = 32 such passes in one command buffer / 32");
+    rep.note("empty_pass.us = 64x64 RGBA8 clear+dontCare with one full-screen triangle of 4096 pixels (a pass with no side effect is flagged by the validation layer), minus the empty CommandTimer span; chain32 = 32 such passes in one command buffer / 32");
 }
 
 } // namespace
