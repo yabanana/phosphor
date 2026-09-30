@@ -111,7 +111,8 @@ void benchCompression(Context& ctx, Report& rep) {
         m.pass = MTL4::RenderPassDescriptor::alloc()->init();
         MTL::RenderPassColorAttachmentDescriptor* c = m.pass->colorAttachments()->object(0);
         c->setTexture(m.tex);
-        c->setLoadAction(MTL::LoadActionDontCare);
+        c->setLoadAction(MTL::LoadActionClear); // Clear: no DRAM read; DontCare after Store draws a validation performance warning
+        c->setClearColor(MTL::ClearColor::Make(0, 0, 0, 0));
         c->setStoreAction(MTL::StoreActionStore);
         ctx.keep(m.pass);
     }
@@ -129,10 +130,10 @@ void benchCompression(Context& ctx, Report& rep) {
         for (u32 i = 0; i < n; ++i) setParams(i, firstPass + i, kind, partial);
         ComputeTimer t(ctx);
         MTL4::ComputeCommandEncoder* e = t.begin();
+        e->setComputePipelineState(csWrite);
         for (u32 i = 0; i < n; ++i) {
             ctx.table()->setAddress(params->gpuAddress() + i * kSlot, 0);
             ctx.table()->setTexture(m.tex->gpuResourceID(), 0);
-            e->setComputePipelineState(csWrite);
             e->setArgumentTable(ctx.table());
             e->dispatchThreads(MTL::Size::Make(kSize, kSize, 1), MTL::Size::Make(16, 16, 1));
             t.lap();
@@ -159,11 +160,11 @@ void benchCompression(Context& ctx, Report& rep) {
     auto readMs = [&](Mode& m, u32 n) {
         ComputeTimer t(ctx);
         MTL4::ComputeCommandEncoder* e = t.begin();
+        e->setComputePipelineState(csRead);
+        ctx.table()->setAddress(out->gpuAddress(), 1);
+        ctx.table()->setTexture(m.tex->gpuResourceID(), 0);
+        e->setArgumentTable(ctx.table());
         for (u32 i = 0; i < n; ++i) {
-            ctx.table()->setAddress(out->gpuAddress(), 1);
-            ctx.table()->setTexture(m.tex->gpuResourceID(), 0);
-            e->setComputePipelineState(csRead);
-            e->setArgumentTable(ctx.table());
             e->dispatchThreads(MTL::Size::Make(kSize / 4, kSize / 4, 1), MTL::Size::Make(16, 16, 1));
             t.lap();
         }
@@ -245,7 +246,7 @@ void benchCompression(Context& ctx, Report& rep) {
             gbs["write_partial." + tagBase] = bw.median;
             ctx.keepWarm(20);
 
-            // Render target write (full-screen triangle, load DontCare, store).
+            // Render target write (full-screen triangle, load Clear, store).
             t = ctx.measure([&] { return rtWriteMs(m, kind, 1, kPasses); }, linReps);
             verify(m, kind, false, kPasses, kPasses, "rt." + tagBase);
             bw = toRate(t, kTexBytes * kPasses * 1e-6);

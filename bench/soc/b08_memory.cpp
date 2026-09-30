@@ -208,7 +208,7 @@ void benchMemory(Context& ctx, Report& rep) {
         const u32 probe = u32(std::max<size_t>(1, 64 * MiB / bytes));
         const double tp = std::max(1e-4, ctx.measure([&] {
             return timeKernel(rig, read, base, rig.out->gpuAddress(), {probe, 0, words, 0}, threadsFor(words), 256);
-        }, 3).median);
+        }, 7).min); // min: contention only adds time
         const u32 passes = std::max<u32>(1, u32(targetMs / (tp / double(probe))));
         const Stats t = readTime(bytes, base, a32, passes, "ws" + std::to_string(mib));
         const Stats bw = toRate(t, double(bytes) * passes * 1e-6);
@@ -283,7 +283,7 @@ void benchMemory(Context& ctx, Report& rep) {
             cur = out32[0];
             return ms;
         };
-        const double tp = std::max(1e-4, ctx.measure([&] { return run(512); }, 3).median);
+        const double tp = std::max(1e-4, ctx.measure([&] { return run(512); }, 7).min); // min: contention only adds time
         const u32 N = std::clamp<u32>(u32(0.6 / (tp / 512.0)), 256, 200000); // ~0.6 ms; 4N ~2.4 ms
         const u32 latReps = std::max<u32>(ctx.reps(), 15); // cheap: 15 even with --quick
         const Stats s1 = ctx.measure([&] { return run(N); }, latReps);
