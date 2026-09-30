@@ -149,3 +149,40 @@ fragment float4 b12_fs16(VOut16 in [[stage_in]], constant Params& p [[buffer(0)]
     a += in.v15.x + in.v15.y * in.v15.z;
     return b12_color(in.tri, a, p);
 }
+
+// Heavy-flush variant: the same primitives with 16 varyings, four RGBA32F
+// attachments.  A partial render stores and reloads every attachment
+// (4 x 2048^2 x 16 B = 256 MiB), so each one becomes visible in the time
+// per triangle (with one RGBA8 target a flush is too cheap to see).
+struct B12Mrt4 {
+    float4 c0 [[color(0)]];
+    float4 c1 [[color(1)]];
+    float4 c2 [[color(2)]];
+    float4 c3 [[color(3)]];
+};
+fragment B12Mrt4 b12_fs16_mrt(VOut16 in [[stage_in]], constant Params& p [[buffer(0)]]) {
+    float a = 0;
+    a += in.v0.x + in.v0.y * in.v0.z;
+    a += in.v1.x + in.v1.y * in.v1.z;
+    a += in.v2.x + in.v2.y * in.v2.z;
+    a += in.v3.x + in.v3.y * in.v3.z;
+    a += in.v4.x + in.v4.y * in.v4.z;
+    a += in.v5.x + in.v5.y * in.v5.z;
+    a += in.v6.x + in.v6.y * in.v6.z;
+    a += in.v7.x + in.v7.y * in.v7.z;
+    a += in.v8.x + in.v8.y * in.v8.z;
+    a += in.v9.x + in.v9.y * in.v9.z;
+    a += in.v10.x + in.v10.y * in.v10.z;
+    a += in.v11.x + in.v11.y * in.v11.z;
+    a += in.v12.x + in.v12.y * in.v12.z;
+    a += in.v13.x + in.v13.y * in.v13.z;
+    a += in.v14.x + in.v14.y * in.v14.z;
+    a += in.v15.x + in.v15.y * in.v15.z;
+    const float4 c = b12_color(in.tri, a, p);
+    B12Mrt4 o;
+    o.c0 = c;
+    o.c1 = c.yzwx;
+    o.c2 = c.zwxy;
+    o.c3 = c.wxyz;
+    return o;
+}

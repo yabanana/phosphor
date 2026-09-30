@@ -4,9 +4,13 @@
 // One render pass (2048x2048 RGBA8, clear + store, no depth, no culling), ONE
 // draw of N small triangles (3.5 px legs = 6 covered pixels, positions hashed
 // over the whole target) with V = 0/4/8/16 float4 varyings, N from 64Ki to
-// 16Mi in steps of 2^(1/2).  ns per triangle = (span - empty span) / N.
-// A partial render (the tiler's parameter buffer is full, the GPU flushes the
-// tiles mid-pass) should show as a rise of ns/triangle that stays.
+// 64Mi (--quick: 4Mi) in steps of 2^(1/2).  ns per triangle = (span - empty
+// span) / N.  A partial render (the tiler's parameter buffer is full, the GPU
+// flushes the tiles mid-pass) shows as a rise of ns/triangle that stays; a
+// second curve (16 varyings, four RGBA32F attachments, 256 MiB stored per
+// flush) makes each flush expensive.  Measured on M5 Max: knees at 23.7 M
+// (16 varyings, both curves; larger jump with the heavy attachments), 47 M
+// (8), 67 M (4), none up to 67 M without varyings.
 //
 // Knee rule (documented, applied automatically): baseline = the smallest
 // ns/triangle of the curve at N >= 128Ki (steady state; smaller passes are
@@ -70,6 +74,32 @@ void encode(Context& ctx, const Rig& r, MTL4::CommandBuffer* cmd, u32 vIndex, u3
     re->setArgumentTable(ctx.table(), MTL::RenderStageVertex | MTL::RenderStageFragment);
     re->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0), NS::UInteger(3) * n);
     re->endEncoding();
+}
+
+// Heavy-flush variant (16 varyings, 4 RGBA32F attachments): see the shader.
+struct HeavyRig {
+    MTL::RenderPipelineState* pso = nullptr;
+    MTL::Texture* targets[4] = {};
+};
+
+double timeHeavy(Context& ctx, const Rig& r, const HeavyRig& h, u32 n) {
+    CommandTimer t(ctx);
+    MTL4::RenderPassDescriptor* pd = MTL4::RenderPassDescriptor::alloc()->init();
+    for (u32 i = 0; i < 4; ++i) {
+        auto* c = pd->colorAttachments()->object(i);
+        c->setTexture(h.targets[i]);
+        c->setLoadAction(MTL::LoadActionClear);
+        c->setStoreAction(MTL::StoreActionStore);
+        c->setClearColor(MTL::ClearColor::Make(0, 0, 0, 0));
+    }
+    MTL4::RenderCommandEncoder* re = t.begin()->renderCommandEncoder(pd);
+    pd->release();
+    re->setRenderPipelineState(h.pso);
+    ctx.table()->setAddress(r.params->gpuAddress(), 0);
+    re->setArgumentTable(ctx.table(), MTL::RenderStageVertex | MTL::RenderStageFragment);
+    re->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0), NS::UInteger(3) * n);
+    re->endEncoding();
+    return t.finish() - ctx.emptySpanMs();
 }
 
 void setParams(const Rig& r, u32 n, u32 mode) {
@@ -157,7 +187,9 @@ void benchPartialRender(Context& ctx, Report& rep) {
 
     // N grid: 2^16 .. 2^24 in half-octave steps (quick: up to 2^22, fewer repetitions).
     std::vector<u32> ns;
-    const int maxK = ctx.quick() ? 22 : 24;
+    // Up to 2^26: the first knees appear at 23.7 M (16 varyings), 47 M (8), 67 M (4) triangles;
+    // none up to 16.7 M, where the sweep stopped at first (measured).
+    const int maxK = ctx.quick() ? 22 : 26;
     for (int k = 16; k <= maxK; ++k) {
         ns.push_back(1u << k);
         if (k < maxK) ns.push_back(u32(std::llround(double(1u << k) * 1.41421356)));
@@ -202,6 +234,54 @@ void benchPartialRender(Context& ctx, Report& rep) {
             rep.value("threshold.varyings_" + v, "triangles", double(cv.n[size_t(knees[vi])]), {{"varyings", double(kVaryings[vi])}, {"baseline_ns", base}});
         ctx.log("B-12 varyings %2u: baseline %.3f ns/tri, knee %s (%u), max N %u, ns/tri at max %.3f", kVaryings[vi], base,
                 knees[vi] >= 0 ? "found" : "none", knees[vi] >= 0 ? cv.n[size_t(knees[vi])] : 0u, ns.back(), cv.ns.back());
+    }
+
+    // --- Heavy flush: 16 varyings, 4 x RGBA32F (256 MiB stored per flush) ------------------
+    // With one RGBA8 target no knee appears up to 16.7 M triangles although
+    // 16 float4 varyings x 3 vertices x 16.7 M = ~13 GB of vertex output
+    // cannot fit any parameter buffer: partial renders must happen but a
+    // flush of 16 MiB is invisible.  Here a flush costs ~0.5 ms.
+    Curve heavy;
+    int heavyKnee = -1;
+    double heavyBase = 0;
+    {
+        HeavyRig h;
+        MTL4::RenderPipelineDescriptor* d = MTL4::RenderPipelineDescriptor::alloc()->init();
+        d->setVertexFunctionDescriptor(ctx.function(lib, "b12_vs16"));
+        d->setFragmentFunctionDescriptor(ctx.function(lib, "b12_fs16_mrt"));
+        for (u32 i = 0; i < 4; ++i) d->colorAttachments()->object(i)->setPixelFormat(MTL::PixelFormatRGBA32Float);
+        h.pso = ctx.render(d);
+        d->release();
+        MTL::TextureDescriptor* hd =
+            MTL::TextureDescriptor::texture2DDescriptor(MTL::PixelFormatRGBA32Float, kDim, kDim, false);
+        hd->setUsage(MTL::TextureUsageRenderTarget);
+        hd->setStorageMode(MTL::StorageModePrivate);
+        for (u32 i = 0; i < 4; ++i) h.targets[i] = ctx.texture(hd);
+        std::vector<u32> hn;
+        for (int k = 10; k <= maxK; ++k) {
+            hn.push_back(1u << k);
+            if (k < maxK) hn.push_back(u32(std::llround(double(1u << k) * 1.41421356)));
+        }
+        for (u32 n : hn) {
+            setParams(r, n, 0);
+            ctx.keepWarm(15);
+            timeHeavy(ctx, r, h, n);
+            const Stats s = ctx.measure([&] { return timeHeavy(ctx, r, h, n); }, n >= (1u << 22) ? 7 : ctx.quick() ? 7 : 11);
+            const double per = s.median * 1e6 / double(n);
+            rep.value("ns_per_tri.heavy16.n_" + std::to_string(n), "ns", per, {{"n", double(n)}, {"ms", s.median}}, false);
+            heavy.n.push_back(n);
+            heavy.ms.push_back(s.median);
+            heavy.ns.push_back(per);
+        }
+        heavyKnee = findKnee(heavy, &heavyBase);
+        rep.value("heavy16.fixed_ms", "ms", heavy.ms.front(), {{"n", double(heavy.n.front())}}, false);
+        if (heavyKnee >= 0)
+            rep.value("threshold.heavy16", "triangles", double(heavy.n[size_t(heavyKnee)]), {{"baseline_ns", heavyBase}});
+        std::string curve;
+        for (size_t i = 0; i < heavy.n.size(); ++i)
+            curve += std::to_string(heavy.n[i]) + ":" + num(heavy.ns[i], 5) + " ";
+        ctx.log("B-12 heavy16 (4 x RGBA32F): baseline %.3f ns/tri, knee %s (%u); curve %s", heavyBase,
+                heavyKnee >= 0 ? "found" : "none", heavyKnee >= 0 ? heavy.n[size_t(heavyKnee)] : 0u, curve.c_str());
     }
 
     // --- Negative controls --------------------------------------------------------------
