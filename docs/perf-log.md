@@ -569,3 +569,36 @@ Many Lights 120). Intervallo min–max (mediana).
 - `leaks --atExit` con tutti i flag, cambio bench, resize e overlay: **0
   leak**. Con `--gpu-capture`: 10 leak (784 B) nel framework di cattura di
   Apple anche senza catture, +2 per cattura.
+
+## OPT-0 — Caratterizzazione del SoC (chiusura, 2026-09-30)
+
+OPT-0 aggiunge la suite `bench/soc`, il modello di costo e il roofline; l'unica
+modifica al motore è il campo `work` per pass nel report (schema v3, dati CPU
+calcolati a fine misura). Verifica "motore invariato":
+
+- `ctest` verde (macOS e Linux in container: build, test, `soc_model`);
+  `metal_syntax_check` verde in un container x86_64 (su Linux arm64 fallisce
+  il controllo d'architettura di metal-cpp, preesistente); `visual_check`
+  0 pixel diversi e 0 messaggi sui 7 bench.
+- `bench_all --stats` A/B/A (Release, `main` = 8d0855f in un worktree,
+  600 frame × 3 run, `--no-vsync --no-ui`, a batteria):
+
+| # | Bench | Frame ms main / branch / main | CPU ms main / branch / main | GPU ms main / branch / main |
+|---|---|---|---|---|
+| 1 | Torus Demo | 10.09 / 11.56 / 11.31 | 0.209 / 0.285 / 0.296 | 0.976 / 0.972 / 0.950 |
+| 2 | PBR Material Grid | 11.03 / 11.25 / 11.00 | 0.247 / 0.283 / 0.316 | 0.484 / 0.506 / 0.498 |
+| 3 | Stress Test (100K) | 11.46 / 11.39 / 11.47 | 4.928 / 4.426 / 5.041 | 5.252 / 5.416 / 5.177 |
+| 4 | Scene Viewer (glTF) | 11.46 / 11.44 / 11.33 | 0.228 / 0.282 / 0.291 | 0.756 / 0.777 / 0.772 |
+| 5 | Many Lights (1024) | 54.45 / 54.28 / 53.81 | 0.127 / 0.197 / 0.119 | 94.439 / 93.996 / 92.834 |
+| 6 | Cornell Box (GI) | 11.33 / 11.36 / 11.37 | 0.289 / 0.285 / 0.295 | 0.587 / 0.584 / 0.600 |
+| 7 | Culling Visualization | 11.68 / 11.63 / 11.59 | 0.930 / 0.883 / 0.914 | 2.285 / 2.120 / 2.181 |
+
+  L'unica riga sospetta (CPU di Many Lights 0,197 ms sul branch contro
+  0,127/0,119) non si riproduce in 4 run singoli alternati da 600 frame:
+  main 0,134–0,152 ms, branch 0,135–0,164 ms. Frame e GPU entro il rumore su
+  tutti i bench. Il frame a ~11 ms anche senza vsync è lo stesso su `main`
+  (attesa del drawable).
+
+Numeri del SoC, modello e roofline: [`soc-model.md`](soc-model.md),
+[`img/roofline-m5max.md`](img/roofline-m5max.md); scoperte e soglie in
+[`opt-log.md`](opt-log.md) (sezioni OPT-0).
