@@ -75,7 +75,7 @@ echo "| # | Bench | Resolution | FPS | Frame ms (p99) | CPU ms (p99) | GPU ms (p
 echo "|---|---|---|---|---|---|---|---|"
 stats_rows=()
 pass_blocks=()
-for bench in 1 2 3 4 5 6 7; do
+for bench in 1 2 3 4 5 6 7 8; do
     reports=()
     for run in $(seq 1 "$runs"); do
         report="$out_dir/bench$bench-run$run.json"

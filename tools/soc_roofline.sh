@@ -4,7 +4,7 @@
 #
 #   tools/soc_roofline.sh [build-dir] [results.json]
 #
-# For each bench 1..7: a report v3 at saturated clocks (--no-vsync
+# For each bench 1..8: a report v3 at saturated clocks (--no-vsync
 # --gpu-timing-serial --no-ui), a capture without UI whose pixels that
 # differ from the clear colour give the covered pixels (fragment work),
 # the forward variant the engine logs -> tools/air_ops.py --forward-variant
@@ -26,7 +26,7 @@ model="bench/results/$(basename "$results" .json)-model.json"
 python3 tools/air_ops.py --out bench/results/shader_ops.json > /dev/null
 
 preds=()
-for b in 1 2 3 4 5 6 7; do
+for b in 1 2 3 4 5 6 7 8; do
     caffeinate -d -i "$app" --bench "$b" --frames 300 --warmup 60 --no-vsync --gpu-timing-serial --no-ui \
         --report "$out/report-bench$b.json" > "$work/run$b.log" 2>&1
     caffeinate -d -i "$app" --bench "$b" --frames 30 --warmup 30 --fixed-timestep --no-ui \

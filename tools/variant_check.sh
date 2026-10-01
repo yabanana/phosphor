@@ -21,7 +21,7 @@
 #     it MUST differ (negative control: forcing works and the check can
 #     fail).
 # No Metal validation (pixels only; visual_check covers validation).
-# Default build dir: build/release.  ~10 min for 7 benches x 42 variants.
+# Default build dir: build/release.  ~11 min for 8 benches x 42 variants.
 set -euo pipefail
 
 build_dir=${1:-build/release}
@@ -43,7 +43,7 @@ variant_values() { # log -> "V L E D" of the (single) forward variant requested
 }
 
 failures=0 compatible=0 incompatible=0 worst_pixels=0
-for bench in 1 2 3 4 5 6 7; do
+for bench in 1 2 3 4 5 6 7 8; do
     capture "$out_dir/scene-$bench.png" "$out_dir/scene-$bench.log" --bench "$bench"
     read -r _ scene_lights scene_emissive _ <<<"$(variant_values "$out_dir/scene-$bench.log")"
     for mode in 0 1 2; do

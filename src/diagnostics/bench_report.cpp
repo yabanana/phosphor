@@ -130,6 +130,16 @@ std::string formatReportLine(const BenchReport& r) {
                       r.gpuPassSumMs.p99);
         line += extra;
     }
+    if (r.scene.present) {
+        // Short, `|`-separated like the rest, appended last so the fields
+        // above keep their positions for the scripts that parse them.
+        char extra[256];
+        std::snprintf(extra, sizeof(extra),
+                      " | scene %s %u inst %u buckets visible %.0f upload %.0f B cpu-cmds %.0f",
+                      r.scene.mode.c_str(), r.scene.instances, r.scene.buckets, r.scene.visible.mean,
+                      r.scene.uploadBytes.mean, r.scene.cpuCommands.mean);
+        line += extra;
+    }
     return line;
 }
 
@@ -177,13 +187,38 @@ std::string reportToJson(const BenchReport& r) {
                 "\", \"plan\": \"" + jsonEscape(g.plan) + "\", \"alias\": \"" + jsonEscape(g.alias) +
                 "\", \"barriers_policy\": \"" + jsonEscape(g.barriers) + "\", " + nums + "}";
     }
+    std::string scene;
+    if (r.scene.present) {
+        const SceneReport& sc = r.scene;
+        auto u = [](u64 v) { return std::to_string(static_cast<unsigned long long>(v)); };
+        scene = ",\n  \"scene\": {\"mode\": \"" + jsonEscape(sc.mode) + "\", \"instances\": " + u(sc.instances) +
+                ", \"slots\": " + u(sc.slots) + ", \"buckets\": " + u(sc.buckets) +
+                ", \"materials\": " + u(sc.materials) + ", \"commands\": " + u(sc.commands) +
+                ", \"structure_changes\": " + u(sc.structureChanges) + ", \"queue_overflow\": " + u(sc.queueOverflow) +
+                ", \"upload_bytes\": " + summaryToJson(sc.uploadBytes) +
+                ", \"delta_records\": " + summaryToJson(sc.deltaRecords) +
+                ", \"visible\": " + summaryToJson(sc.visible) +
+                ", \"culled_frustum\": " + summaryToJson(sc.culledFrustum) +
+                ", \"culled_distance\": " + summaryToJson(sc.culledDistance) +
+                ", \"culled_size\": " + summaryToJson(sc.culledSize) +
+                ", \"draw_commands\": " + summaryToJson(sc.drawCommands) +
+                ", \"cpu_commands\": " + summaryToJson(sc.cpuCommands) + "}";
+    }
+    std::string phases;
+    if (r.cpuPhases.present) {
+        const CpuPhasesReport& c = r.cpuPhases;
+        phases = ",\n  \"cpu_phases\": {\"sim\": " + summaryToJson(c.sim) +
+                 ", \"scene_sync\": " + summaryToJson(c.sceneSync) + ", \"prepare\": " + summaryToJson(c.prepare) +
+                 ", \"ui\": " + summaryToJson(c.ui) + ", \"graph\": " + summaryToJson(c.graph) +
+                 ", \"submit\": " + summaryToJson(c.submit) + "}";
+    }
     return head +
            "  \"frame_ms\": " + summaryToJson(r.frameMs) + ",\n" +
            "  \"cpu_ms\": " + summaryToJson(r.cpuMs) + ",\n" +
            "  \"gpu_ms\": " + summaryToJson(r.gpuMs) + ",\n" +
            "  \"wait_ms\": " + summaryToJson(r.waitMs) +
            (r.pipelinesJson.empty() ? std::string() : ",\n  \"pipelines\": " + r.pipelinesJson) + ",\n" + timing +
-           graph + "\n}\n";
+           graph + scene + phases + "\n}\n";
 }
 
 } // namespace phosphor

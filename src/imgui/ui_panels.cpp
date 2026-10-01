@@ -26,7 +26,7 @@ void UIPanels::drawTestBenchSelector(int& currentBench, bool& changed) {
             }
             ImGui::EndCombo();
         }
-        ImGui::TextDisabled("Press 1-7 to switch quickly");
+        ImGui::TextDisabled("Press 1-8 to switch quickly");
     }
     ImGui::End();
 }
@@ -170,6 +170,30 @@ void UIPanels::drawPipelinePanel(const PipelinePanelInfo& info) {
         ImGui::Text("Fallbacks %u, fallback frames %llu%s", s.fallbacksServed,
                     static_cast<unsigned long long>(s.fallbackDraws), info.fallback ? "  [drawing fallback]" : "");
         ImGui::Text("Reloads %u (failed %u), failures %u", s.reloads, s.reloadFailures, s.failures);
+    }
+    ImGui::End();
+}
+
+void UIPanels::drawScenePanel(const ScenePanelInfo& info) {
+    ImGui::SetNextWindowPos(ImVec2(10, 640), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("GPU Scene", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Submission: %s", info.mode);
+        ImGui::Text("Instances %u (slots %u), buckets %u, materials %u", info.instances, info.slots, info.buckets,
+                    info.materials);
+        ImGui::Text("Commands %u, draws %u (CPU-encoded %u)", info.commands, info.drawCommands, info.cpuCommands);
+        const u32 culled = info.culledFrustum + info.culledDistance + info.culledSize;
+        ImGui::Text("Visible %u of %u", info.visible, info.instances);
+        ImGui::Text("Culled %u: frustum %u, distance %u, size %u", culled, info.culledFrustum, info.culledDistance,
+                    info.culledSize);
+        ImGui::Text("Upload %.1f KiB/frame, %u delta records", static_cast<double>(info.uploadBytes) / 1024.0,
+                    info.deltaRecords);
+        ImGui::Text("Structure changes %u", info.structureChanges);
+        if (info.queueOverflow > 0) {
+            ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "GPU queue overflow: %u entries dropped",
+                               info.queueOverflow);
+        } else {
+            ImGui::TextDisabled("GPU queues: no overflow");
+        }
     }
     ImGui::End();
 }

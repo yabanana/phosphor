@@ -78,7 +78,7 @@ def trio($f; $m): [.[] | getpath($f + ["mean"]) | select(. != null)] as $v
       else [($v | mean | r4), ($v | sd | r4), ($m | getpath($f + ["p99"]) | r4)] end;
 '
 
-for bench in 1 2 3 4 5 6 7; do
+for bench in 1 2 3 4 5 6 7 8; do
     for cfg in vsync novsync; do
         vs_args=()
         vs=1

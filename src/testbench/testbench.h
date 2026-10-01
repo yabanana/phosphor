@@ -22,6 +22,7 @@ enum class TestBenchType : int {
     ManyLights  = 4,
     CornellBox  = 5,
     CullingViz  = 6,
+    MillionInstances = 7,
     COUNT
 };
 
@@ -67,7 +68,17 @@ public:
     [[nodiscard]] virtual CameraSetup getDefaultCamera() const = 0;
 };
 
+/// F5.6: parameters of the benches that take any (bench 8, "1M Instances");
+/// the other benches ignore them.  Zero / negative = the bench's default.
+struct TestBenchParams {
+    u32   instances         = 0;     // --instances
+    u32   meshes            = 0;     // --scene-meshes
+    float dynamicCpuPercent = -1.0f; // --dynamic-cpu (0..100)
+    u32   churn             = 0;     // --churn: instances destroyed + created per frame
+};
+
 /// Factory: create a concrete TestBench by type enum.
 std::unique_ptr<TestBench> createTestBench(TestBenchType type);
+std::unique_ptr<TestBench> createTestBench(TestBenchType type, const TestBenchParams& params);
 
 } // namespace phosphor

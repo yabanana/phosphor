@@ -1,0 +1,22 @@
+{
+  "schema_version": 5,
+  "bench": "1M Instances (dynamic)",
+  "device": "Apple M5 Max",
+  "width": 3200,
+  "height": 1800,
+  "vsync": false,
+  "ui": false,
+  "frames": 30,
+  "fps": 120.00,
+  "gpu_allocations": 0,
+  "cpu_heap_blocks_delta": 0,
+  "cpu_heap_bytes_delta": 0,
+  "frame_ms": {"mean": 8.3333, "min": 8.0000, "p50": 8.3000, "p99": 9.0000, "max": 9.1000},
+  "cpu_ms": {"mean": 1.2000, "min": 1.0000, "p50": 1.2000, "p99": 1.5000, "max": 1.6000},
+  "gpu_ms": {"mean": 7.5000, "min": 7.0000, "p50": 7.5000, "p99": 8.0000, "max": 8.1000},
+  "wait_ms": {"mean": 0.1000, "min": 0.0000, "p50": 0.1000, "p99": 0.2000, "max": 0.3000},
+  "gpu_timing": false,
+  "gpu_timing_unfused": false,
+  "scene": {"mode": "on", "instances": 1000000, "slots": 1048576, "buckets": 24, "materials": 256, "commands": 40, "structure_changes": 0, "queue_overflow": 0, "upload_bytes": {"mean": 262144.0000, "min": 262144.0000, "p50": 262144.0000, "p99": 262144.0000, "max": 262144.0000}, "delta_records": {"mean": 2730.0000, "min": 2730.0000, "p50": 2730.0000, "p99": 2730.0000, "max": 2730.0000}, "visible": {"mean": 350000.0000, "min": 349000.0000, "p50": 350000.0000, "p99": 351000.0000, "max": 351000.0000}, "culled_frustum": {"mean": 650000.0000, "min": 0, "p50": 0, "p99": 0, "max": 0}, "culled_distance": {"mean": 0.0000, "min": 0, "p50": 0, "p99": 0, "max": 0}, "culled_size": {"mean": 0.0000, "min": 0, "p50": 0, "p99": 0, "max": 0}, "draw_commands": {"mean": 24.0000, "min": 24, "p50": 24, "p99": 24, "max": 24}, "cpu_commands": {"mean": 3.0000, "min": 3, "p50": 3, "p99": 3, "max": 3}},
+  "cpu_phases": {"sim": {"mean": 0.9000, "min": 0.8, "p50": 0.9, "p99": 1.0, "max": 1.1}, "scene_sync": {"mean": 0.2000, "min": 0.2, "p50": 0.2, "p99": 0.3, "max": 0.3}, "prepare": {"mean": 0.1000, "min": 0.1, "p50": 0.1, "p99": 0.1, "max": 0.1}, "ui": {"mean": 0.0, "min": 0, "p50": 0, "p99": 0, "max": 0}, "graph": {"mean": 0.3000, "min": 0.3, "p50": 0.3, "p99": 0.4, "max": 0.4}, "submit": {"mean": 0.0500, "min": 0.05, "p50": 0.05, "p99": 0.06, "max": 0.06}}
+}
