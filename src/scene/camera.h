@@ -21,7 +21,9 @@ public:
     void updateMatrices();
 
     // --- Frustum ---
-    [[nodiscard]] std::array<glm::vec4, 6> getFrustumPlanes() const;
+    /// Left, right, bottom, top, near (normalised, inside = dot(n, p) + w >= 0)
+    /// of the reverse-Z infinite frustum: there is no far plane.
+    [[nodiscard]] std::array<glm::vec4, 5> getFrustumPlanes() const;
 
     // --- Setters ---
     void setAspect(float aspect);
