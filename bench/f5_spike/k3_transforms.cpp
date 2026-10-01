@@ -10,9 +10,9 @@
 // The chain is encoded exactly as the host will (Dispatch -> Dispatch encoder
 // barriers, every level always encoded, queue 0 written by the CPU with
 // gpuQueueWrite, queues 1..7 in one buffer cleared each frame):
-//   k3_queue_clear -> scene_motion -> for L = 0..7: scene_queue_args(L) +
+//   scene_queue_clear -> scene_motion -> for L = 0..7: scene_queue_args(L) +
 //   scene_hier_level(L) (dispatchThreadgroups(indirect from the queue header)).
-// (k3_queue_clear stands in for scene_queue_clear of shaders/gpu_scene.metal.)
+// (scene_queue_clear is the real kernel of shaders/gpu_scene.metal.)
 //
 // Checks
 //   1. Random forests, depth 0..7 (7 = SCENE_MAX_LEVELS - 1), 10%..100% of the
@@ -34,7 +34,8 @@
 //      compiled into scene_hier_level): the instance comparison must fail;
 //   b. one flipped bit of the expected result: the comparison must fail;
 //   c. a tampered expected overflow: the queue-chain check must fail;
-//   d. no barriers between the dispatches: reported as detected (wrong
+//   d. no barriers between the level dispatches (queue entries and parent slots made safe first,
+//      so a race gives wrong values, never wild indices): reported as detected (wrong
 //      results) or INCONCLUSIVE (the race did not show; not a proof of safety).
 
 #include "f5_common.h"
@@ -396,7 +397,21 @@ struct HierRun {
         if (on) e->barrierAfterEncoderStages(MTL::StageDispatch, MTL::StageDispatch, MTL4::VisibilityOptionDevice);
     }
 
+    // Race-control variant only: no stale garbage can be read as a slot (queue entries 0, roots'
+    // parentSlot 0), so a missing barrier gives wrong values, never wild indices or long loops.
+    void makeRaceSafe(const Forest& f) {
+        for (u32 L = 1; L < kLevels; ++L) {
+            u32* w = queues.words(L);
+            for (u32 i = 0; i < queues.cap; ++i) w[phosphor::GPU_QUEUE_WORD_ENTRIES + i] = 0;
+        }
+        auto* n = static_cast<GPUTransformNode*>(nodes->contents());
+        for (u32 s = 0; s < f.slots; ++s)
+            if (f.parent[s] == ~0u) n[s].parentSlot = 0;
+    }
+
     // clear -> motion -> levels, as Engine::buildFrameGraph will record it.
+    // barriers == false: the barriers between the level dispatches are left out (clear and motion
+    // keep theirs).
     void encode(const Forest& f, bool barriers, u32 levels = kLevels) {
         MTL4::CommandBuffer* c = ctx.beginCommands();
         MTL4::ComputeCommandEncoder* e = c->computeCommandEncoder();
@@ -409,7 +424,7 @@ struct HierRun {
         e->setComputePipelineState(pipes.clear);
         e->setArgumentTable(tb);
         e->dispatchThreads(MTL::Size::Make(kQueues, 1, 1), MTL::Size::Make(kQueues, 1, 1));
-        barrier(e, barriers);
+        barrier(e, true);
 
         tb->setAddress(frame->gpuAddress(), 0);
         tb->setAddress(motionSlots->gpuAddress(), phosphor::SB_MOTION_SLOTS);
@@ -418,7 +433,7 @@ struct HierRun {
         e->setComputePipelineState(pipes.motion);
         e->setArgumentTable(tb);
         e->dispatchThreads(MTL::Size::Make(std::max<size_t>(f.motionSlots.size(), 1), 1, 1), Tg); // 1 thread when empty
-        barrier(e, barriers);
+        barrier(e, true);
 
         for (u32 L = 0; L < levels; ++L) {
             const u64 in  = queues.addr(L);
@@ -586,6 +601,7 @@ struct SynthResult {
 // CPU model built from the entries actually stored in the previous queue.
 SynthResult runSynth(Context& ctx, const Pipes& pipes, const std::vector<u32>& seedEntries, u32 capacity, u32 stages, u32 mod,
                      bool tamperOverflow = false) {
+    ctx.log("[F5-K3]   synth run: %zu seeds, cap %u, stages %u", seedEntries.size(), capacity, stages);
     QueueSet qs(ctx, capacity);
     MTL::Buffer* counters = ctx.buffer(sizeof(GPUSceneCounters));
     u32 lp[kLevels * 4] = {};
@@ -729,12 +745,13 @@ void benchTransforms(Context& ctx, Report& rep) {
     MTL::Library* lib     = expandedLibrary(ctx, "shaders/transforms.metal", "transforms", "");
     MTL::Library* libDrop = expandedLibrary(ctx, "shaders/transforms.metal", "transforms_drop", "#define PHOSPHOR_TRANSFORMS_TEST_DROP_APPEND 1\n");
     MTL::Library* libQ    = expandedLibrary(ctx, "bench/f5_spike/shaders/k3_queues.metal", "queues", "");
+    MTL::Library* libG    = expandedLibrary(ctx, "shaders/gpu_scene.metal", "gpu_scene", "");
 
     Pipes pipes{};
     pipes.motion = ctx.compute(lib, phosphor::KERNEL_MOTION);
     pipes.args   = ctx.compute(lib, phosphor::KERNEL_QUEUE_ARGS);
     pipes.hier   = ctx.compute(lib, phosphor::KERNEL_HIER_LEVEL);
-    pipes.clear  = ctx.compute(libQ, "k3_queue_clear");
+    pipes.clear  = ctx.compute(libG, phosphor::KERNEL_QUEUE_CLEAR);
     pipes.synth  = ctx.compute(libQ, "k3_synth_stage");
     Pipes dropPipes = pipes;
     dropPipes.hier = ctx.compute(libDrop, phosphor::KERNEL_HIER_LEVEL);
@@ -761,6 +778,7 @@ void benchTransforms(Context& ctx, Report& rep) {
     Forest negForest;
     Cfg negCfg{};
     for (const Cfg& c : cfgs) {
+        ctx.log("[F5-K3]   forest %s slots %u depth %u", c.name, c.slots, c.maxDepth);
         const Forest f = buildForest(c);
         const Outcome o = runForest(ctx, pipes, c, f);
         ++cases;
@@ -777,7 +795,11 @@ void benchTransforms(Context& ctx, Report& rep) {
     {
         ctx.log("[F5-K3] overflow runs");
         const Cfg c{"overflow", ctx.quick() ? 4000u : 20000u, 4, 0.5, 1.0, 1, false, seed++};
-        const Forest f = buildForest(c);
+        Forest f = buildForest(c);
+        // Heaviest roots first: even the 8-entry queue 0 then offers more than 8 children.
+        std::stable_sort(f.dirty.begin(), f.dirty.end(), [&](u32 a, u32 b) {
+            return f.childOffsets[a + 1] - f.childOffsets[a] > f.childOffsets[b + 1] - f.childOffsets[b];
+        });
         for (const u32 cap : {8u, 64u, 200u, 1000u, 5000u}) {
             u64 dropped = 0;
             ctx.log("[F5-K3]   overflow cap %u", cap);
@@ -875,6 +897,7 @@ void benchTransforms(Context& ctx, Report& rep) {
         want = expectedInstances(negForest, sinCos, nullptr);
         for (u32 k = 0; k < reps; ++k) {
             HierRun r3(ctx, pipes, negForest, cap, sinCos);
+            r3.makeRaceSafe(negForest);
             r3.encode(negForest, false);
             const Readback rb = r3.read(negForest);
             racy += compareInstances(rb.instances, want).slots > 0;
@@ -888,7 +911,6 @@ void benchTransforms(Context& ctx, Report& rep) {
 
     rep.note("scene_hier_level: level L computes the nodes of depth L (level 0 only expands the roots), so depth 7 needs "
              "levels 0..7 (8 dispatch pairs); the last level appends nothing.  Encoded as the host will.");
-    rep.note("k3_queue_clear stands in for scene_queue_clear (shaders/gpu_scene.metal, other task).");
     if (!ctx.apple10()) rep.note("apple9 path: the kernels use no Apple10 feature, same code");
     if (!failures.empty()) {
         ctx.log("[F5-K3] FAILURES:%s", failures.c_str());

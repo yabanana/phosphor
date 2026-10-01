@@ -1,10 +1,6 @@
 // F5-K3 helper kernels (bench/f5_spike/k3_transforms.cpp).  Compiled through the
 // bench's include expander (renderer/ headers inlined).
 //
-//   k3_queue_clear  stand-in for scene_queue_clear (shaders/gpu_scene.metal,
-//                   another task): same layout and effect (queues 1.. of one
-//                   buffer: count/overflow/groups cleared, capacity kept;
-//                   counters cleared).
 //   k3_synth_stage  synthetic producer/consumer of F5.4: one thread per entry
 //                   of queueIn; appends a DATA-DEPENDENT number of entries
 //                   (0 .. mod-1, a quarter of the entries append none) to
@@ -16,23 +12,6 @@
 
 using namespace metal;
 using namespace phosphor;
-
-kernel void k3_queue_clear(constant GPUQueueClearParams& p [[buffer(0)]],
-                           device uchar*                 queues   [[buffer(SB_CLEAR_QUEUES)]],
-                           device GPUSceneCounters*      counters [[buffer(SB_CLEAR_COUNTERS)]],
-                           uint t [[thread_position_in_grid]]) {
-    if (t == 0u) {
-        device uint* c = (device uint*)counters;
-        for (uint i = 0; i < 8u; ++i) c[i] = 0u;
-    }
-    if (t >= p.queues) return;
-    device uint* q = (device uint*)(queues + ulong(t) * p.strideBytes);
-    q[GPU_QUEUE_WORD_COUNT]    = 0u;
-    q[GPU_QUEUE_WORD_OVERFLOW] = 0u;
-    q[GPU_QUEUE_WORD_GROUPS + 0] = 0u;
-    q[GPU_QUEUE_WORD_GROUPS + 1] = 1u;
-    q[GPU_QUEUE_WORD_GROUPS + 2] = 1u;
-}
 
 struct K3Synth {
     uint stage;

@@ -85,6 +85,6 @@ TEST_CASE("gpuQueueEmptyHeader") {
     CHECK(h.capacity == 77);
     CHECK(h.overflow == 0);
     CHECK(h.groups[0] == 0);
-    CHECK(h.groups[1] == 1);
-    CHECK(h.groups[2] == 1);
+    CHECK(h.groups[1] == 0);
+    CHECK(h.groups[2] == 0);
 }

@@ -139,12 +139,10 @@ inline u64 gpuQueueWrite(void* dst, const u32* entries, u32 count, u32 capacity,
 }
 
 /// Header of an empty queue (what scene_queue_clear leaves: capacity kept,
-/// groups (0, 1, 1)).
+/// everything else 0, groups included).
 inline GPUQueueHeader gpuQueueEmptyHeader(u32 capacity) {
     GPUQueueHeader h{};
-    h.capacity  = capacity;
-    h.groups[1] = 1;
-    h.groups[2] = 1;
+    h.capacity = capacity;
     return h;
 }
 #endif
