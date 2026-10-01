@@ -26,12 +26,6 @@ struct Interval {
     double begin = 0, end = 0;
 };
 
-double overlapLength(const Interval& a, const std::vector<Interval>& others) {
-    double sum = 0;
-    for (const Interval& o : others) sum += std::max(0.0, std::min(a.end, o.end) - std::max(a.begin, o.begin));
-    return std::min(sum, a.end - a.begin);
-}
-
 } // namespace
 
 GraphCost evaluateGraph(const RenderGraph& graph, const CompiledGraph& c, const GraphCostParams& P) {
@@ -89,11 +83,18 @@ GraphCost evaluateGraph(const RenderGraph& graph, const CompiledGraph& c, const 
         out.dramBytes += u.bytes;
     }
 
-    // Queue simulation.
-    std::vector<double> end(n, 0.0);
+    // Queue simulation.  Units are issued in order on their queue: a unit
+    // starts no earlier than the one before it started, and after the end of
+    // every earlier unit of its queue whose stages one of its barriers waits
+    // for (the barrier is stage-wide: it cannot tell passes apart), and after
+    // the producers of its cross-queue waits (+ event latency).  Running
+    // beside earlier units that did not finish costs a sharing penalty
+    // proportional to the concurrent time: 1 - overlapSame for the same
+    // bound (B-19), 1 - overlapDifferent otherwise (OPT-1 spike 5).
+    std::vector<double> begin(n, 0.0), end(n, 0.0);
     std::vector<Interval> span(n);
-    double t[2] = {0.0, 0.0};
-    size_t prev[2] = {~size_t{0}, ~size_t{0}};
+    double issued[2] = {0.0, 0.0};
+    double finished[2] = {0.0, 0.0};
     auto unitAt = [&](u32 position) -> size_t {
         return position < plan.unitOfPosition.size() ? plan.unitOfPosition[position] : ~size_t{0};
     };
@@ -101,42 +102,53 @@ GraphCost evaluateGraph(const RenderGraph& graph, const CompiledGraph& c, const 
         const TimedUnit& tu = plan.units[i];
         UnitCost& u = out.units[i];
         const int q = tu.queue == Queue::AsyncCompute ? 1 : 0;
-        double start = t[q];
-        bool waited = false;
+        double start = issued[q];
+        for (size_t j = 0; j < i; ++j) {
+            if (out.units[j].queue != u.queue) continue;
+            if (unitWait[i] & unitStages[j]) start = std::max(start, end[j]);
+        }
         for (const QueueSync& s : c.queueSyncs) {
             if (s.waitBeforePosition < tu.firstPosition || s.waitBeforePosition > tu.lastPosition) continue;
             const size_t producer = unitAt(s.signalAfterPosition);
             if (producer == ~size_t{0} || producer >= n) continue;
-            const double ready = end[producer] + P.eventLatencyMs;
-            if (ready > start) {
-                start = ready;
-                waited = true;
-            }
+            start = std::max(start, end[producer] + P.eventLatencyMs);
         }
-        // Same-queue overlap with the unit just before when no barrier of
-        // this unit waits for that unit's stages.
-        if (!waited && prev[q] != ~size_t{0} && !(unitWait[i] & unitStages[prev[q]])) {
-            const UnitCost& pu = out.units[prev[q]];
-            const bool different = pu.bound != u.bound && pu.bound != Bound::Fixed && u.bound != Bound::Fixed;
-            const double kappa = different ? P.overlapDifferent : P.overlapSame;
-            u.overlapMs = kappa * std::min(u.ms, pu.ms);
+        double penalty = 0, concurrent = 0;
+        for (size_t j = 0; j < i; ++j) {
+            if (out.units[j].queue != u.queue || end[j] <= start) continue;
+            const double len = std::min(end[j] - start, u.ms);
+            const UnitCost& o = out.units[j];
+            const bool different = o.bound != u.bound && o.bound != Bound::Fixed && u.bound != Bound::Fixed;
+            penalty += len * (1.0 - (different ? P.overlapDifferent : P.overlapSame));
+            concurrent += len;
         }
-        end[i]  = start + u.ms - u.overlapMs;
-        span[i] = {start, end[i]};
-        t[q]    = end[i];
-        prev[q] = i;
+        u.overlapMs = std::min(concurrent, u.ms);
+        begin[i]    = start;
+        end[i]      = start + u.ms + penalty;
+        span[i]     = {begin[i], end[i]};
+        issued[q]   = start;
+        finished[q] = std::max(finished[q], end[i]);
     }
+    double t[2] = {finished[0], finished[1]};
     double frame = std::max(t[0], t[1]);
     // Cross-queue sharing: async work that runs beside graphics work slows
-    // the pair down (B-19).
-    std::vector<Interval> gfx;
+    // the pair down.  Per overlapping pair: the same bound -> 1 - overlapSame
+    // of the concurrent time (like two passes on one queue, B-19 0.84);
+    // otherwise the B-19 cross-queue share of the async unit's bound
+    // (0.78 of the sum for bandwidth, 0.98 for ALU).
     for (size_t i = 0; i < n; ++i) {
-        if (out.units[i].queue == Queue::Graphics) gfx.push_back(span[i]);
-    }
-    for (size_t i = 0; i < n; ++i) {
-        if (out.units[i].queue != Queue::AsyncCompute) continue;
-        const double share = out.units[i].bound == Bound::Memory ? P.crossQueueBwShare : P.crossQueueAluShare;
-        frame += share * overlapLength(span[i], gfx);
+        const UnitCost& a = out.units[i];
+        if (a.queue != Queue::AsyncCompute) continue;
+        for (size_t j = 0; j < n; ++j) {
+            const UnitCost& g = out.units[j];
+            if (g.queue != Queue::Graphics) continue;
+            const double len = std::max(0.0, std::min(span[i].end, span[j].end) - std::max(span[i].begin, span[j].begin));
+            if (len <= 0) continue;
+            const bool same = a.bound == g.bound && a.bound != Bound::Fixed;
+            const double share = same ? 1.0 - P.overlapSame
+                                      : (a.bound == Bound::Memory ? P.crossQueueBwShare : P.crossQueueAluShare);
+            frame += share * len;
+        }
     }
     out.frameMs      = frame;
     out.heapBytes    = static_cast<double>(c.aliasing.heapSize);
