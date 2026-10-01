@@ -62,7 +62,8 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--app", default="build/release/phosphor")
     p.add_argument("--image-diff", default="build/release/image_diff")
-    p.add_argument("--candidates", required=True, help="directory with plans_<i>.json (graph_opt --top)")
+    p.add_argument("--candidates", required=True, action="append",
+                   help="directory with plans_<i>.json (graph_opt --top); repeatable")
     p.add_argument("--scenarios", default="0,1,2,3")
     p.add_argument("--views", type=int, default=1)
     p.add_argument("--rounds", type=int, default=3)
@@ -77,12 +78,17 @@ def main():
         print(f"graph_select: '{other}' is running: measurements would be bimodal; stop it first", file=sys.stderr)
         return 2
     os.makedirs(ARGS.work, exist_ok=True)
-    files = sorted(glob.glob(os.path.join(ARGS.candidates, "plans_*.json")),
-                   key=lambda f: int(f.rsplit("_", 1)[1].split(".")[0]))
-    candidates = {}  # family -> [(file, plan)]
+    files = []
+    for d in ARGS.candidates:
+        files += sorted(glob.glob(os.path.join(d, "plans_*.json")), key=lambda f: int(f.rsplit("_", 1)[1].split(".")[0]))
+    candidates = {}  # family -> [(file, plan)], distinct plans only
+    def same(a, b):
+        return all(a[k] == b[k] for k in ("order", "remat", "async", "alias", "barriers"))
     for f in files:
         for plan in json.load(open(f))["plans"]:
-            candidates.setdefault(plan["family"], []).append((f, plan))
+            lst = candidates.setdefault(plan["family"], [])
+            if not any(same(plan, q) for _, q in lst):
+                lst.append((f, plan))
 
     failures = 0
     winners, rows = [], []
@@ -120,12 +126,24 @@ def main():
                     print(f"graph_select: s{s} {name} round {r}: {line}", file=sys.stderr)
                     failures += 1
         base = statistics.median(spans["off"])
-        best_name, best_span = "off", base
-        for name, _, _ in variants[1:]:
-            m = statistics.median(spans[name])
-            if diffs[name] == 0 and m < best_span:
-                best_name, best_span = name, m
-        adopted = best_name != "off" and best_span < base * (1 - ARGS.min_gain)
+        med = {name: statistics.median(spans[name]) for name, _, _ in variants}
+        size = {name: reports[name].get("graph", {}).get("dram_bytes", 0) + reports[name].get("graph", {}).get("heap_bytes", 0)
+                for name, _, _ in variants}
+        clean = [name for name, _, _ in variants[1:] if diffs[name] == 0]
+        # 1. a measured time gain beyond the noise floor wins (best time);
+        # 2. else, among candidates not slower than off beyond the noise,
+        #    the one that cuts DRAM bytes + heap the most (the OPT-1 goal);
+        # 3. else the baseline plan.
+        faster = [n for n in clean if med[n] < base * (1 - ARGS.min_gain)]
+        reason = "no gain"
+        if faster:
+            best_name = min(faster, key=lambda n: med[n])
+            reason = "faster"
+        else:
+            neutral = [n for n in clean if med[n] <= base * (1 + ARGS.min_gain) and size[n] < size["off"] * 0.97]
+            best_name = min(neutral, key=lambda n: (size[n], med[n])) if neutral else "off"
+            reason = "fewer bytes/heap, time neutral" if neutral else "no gain"
+        adopted = best_name != "off"
         chosen = None
         if adopted:
             chosen = next(plan for name, _, plan in variants if name == best_name)
@@ -138,7 +156,7 @@ def main():
                     break
         if chosen is not None:
             chosen = dict(chosen)
-            chosen["method"] = chosen["method"] + (" (measured best)" if adopted else " (baseline: no measured gain)")
+            chosen["method"] = chosen["method"] + f" (measured: {reason})"
             winners.append(chosen)
         for name, f, plan in variants:
             g = reports[name].get("graph", {})

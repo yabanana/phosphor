@@ -155,7 +155,8 @@ GraphCost evaluateGraph(const RenderGraph& graph, const CompiledGraph& c, const 
     out.maxLiveBytes = static_cast<double>(c.aliasing.maxLiveSize);
     out.renderPasses = static_cast<u32>(c.renderGroups.size());
     for (const bool m : c.memoryless) out.memoryless += m ? 1 : 0;
-    out.J = out.frameMs + P.gammaMsPerGiB * out.heapBytes / (1024.0 * 1024.0 * 1024.0);
+    out.J = out.frameMs + P.gammaMsPerGiB * out.heapBytes / (1024.0 * 1024.0 * 1024.0) +
+            P.betaMsPerGiB * out.dramBytes / (1024.0 * 1024.0 * 1024.0);
     return out;
 }
 

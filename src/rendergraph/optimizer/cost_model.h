@@ -19,19 +19,23 @@ namespace phosphor::rg {
 // with ALU = PassCost::intOps / IMAD rate + flops / FMA rate, geometry =
 // triangles / raster rate, fixed = one render pass in a chain or one
 // dependent compute pass.  The frame is simulated on the two queues:
-//   * graphics units run in order; a unit whose barriers do not wait for the
-//     stages of the unit just before it overlaps with it: credit
-//     kappa * min(t_u, t_prev), kappa = overlapDifferent when their dominant
-//     resources differ (raster geometry after an ALU compute: measured ~full
-//     overlap, OPT-1 spike 5), overlapSame otherwise (B-19: 0.84 of the sum);
+//   * units are issued in order on their queue: a unit starts no earlier than
+//     the unit before it started and after the end of every earlier unit of
+//     its queue whose stages one of its barriers waits for (barriers are
+//     stage-wide); time spent beside units still running pays a sharing
+//     penalty: 1 - overlapSame of it for the same bound (B-19: two render
+//     passes = 0.84 of the sum), 1 - overlapDifferent otherwise (raster
+//     geometry beside an ALU compute: ~full overlap, OPT-1 spike 5);
 //   * async units run on their own timeline; a cross-queue wait starts the
 //     consumer at max(own time, producer end + event latency) (B-19 ~0.07 ms);
-//     work that overlaps across queues pays a sharing penalty
-//     (B-19: 0.78 of the sum for bandwidth, 0.98 for ALU).
-// J = frame ms + gamma * transient heap GiB (memory as a secondary goal).
+//     overlapping async/graphics pairs pay a sharing penalty: as on one
+//     queue for the same bound, else the B-19 cross-queue share (0.78 of the
+//     sum for bandwidth, 0.98 for ALU).
+// J = frame ms + gamma * transient heap GiB + beta * DRAM GiB (memory and
+// bytes as secondary goals; raise them for memory/bandwidth-oriented plans).
 //
 // A model, not a measurement: it ranks candidate plans; a plan is adopted only
-// after the measured comparison (tools/graph_scenarios.sh).
+// after the measured comparison (tools/graph_select.py).
 // ---------------------------------------------------------------------------
 
 struct GraphCostParams {
@@ -48,6 +52,7 @@ struct GraphCostParams {
     double crossQueueBwShare  = 0.22;   // B-19: 0.78 of the sum when bandwidth bound
     double crossQueueAluShare = 0.02;   // B-19: 0.98 of the sum when ALU bound
     double gammaMsPerGiB      = 0.1;    // weight of the transient heap in J
+    double betaMsPerGiB       = 0.0;    // weight of the DRAM bytes in J (energy proxy; 0 = time only)
 
     /// Rates from a characterisation (fields absent keep the defaults above).
     [[nodiscard]] static GraphCostParams fromSoc(const soc::SocCostModel& model);
@@ -61,7 +66,7 @@ struct UnitCost {
     double bytes = 0;
     double memMs = 0, aluMs = 0, geoMs = 0, fixedMs = 0;
     double ms    = 0;         // standalone: max(mem, alu + geo) + fixed
-    double overlapMs = 0;     // credit taken against the previous unit
+    double overlapMs = 0;     // time run beside earlier units still running
     Bound  bound = Bound::Fixed;
 };
 

@@ -4,7 +4,7 @@
 //   graph_opt [--scenario N|all] [--views V[,V..]] [--size WxH] [--work F] [--wide]
 //             [--model bench/results/m5max-macos27.2-model.json] [--cap N]
 //             [--iterations N] [--seed N] [--out plans.json] [--merge]
-//             [--report table.md] [--top K --top-dir DIR]
+//             [--report table.md] [--top K --top-dir DIR] [--gamma G] [--beta B]
 //
 // For every (scenario, views) pair it builds the scenario graph (the engine's
 // Drawable import included) under each combination of build choices (remat,
@@ -18,7 +18,8 @@
 // --model takes the cost-model JSON of `soc_model model` (not the raw
 // soc_bench results); without it the built-in M5 Max parameters are used.
 // Defaults: all scenarios, 1 view, 2560x1440, work 1.  --cap sets the DP
-// state cap, --iterations the annealing iterations.  --top K writes
+// state cap, --iterations the annealing iterations; --gamma / --beta weigh the
+// transient heap and the DRAM bytes in J (ms per GiB; memory-oriented plans).  --top K writes
 // DIR/plans_<i>.json (i < K+1): the i-th best distinct candidate of every
 // family, the baseline always among them (rg::topPlans) -- the plans that
 // tools/graph_select.py measures on the device to adopt the best.  Exit code: 0 ok,
@@ -47,7 +48,8 @@ int usage() {
     std::fputs(
         "usage: graph_opt [--scenario N|all] [--views V[,V..]] [--size WxH] [--work F] [--wide]\n"
         "                 [--model model.json] [--cap N] [--iterations N] [--seed N]\n"
-        "                 [--out plans.json] [--merge] [--report table.md] [--top K --top-dir DIR]\n",
+        "                 [--out plans.json] [--merge] [--report table.md] [--top K --top-dir DIR]\n"
+        "                 [--gamma G] [--beta B]\n",
         stderr);
     return 2;
 }
@@ -156,6 +158,7 @@ void appendFamily(std::string& md, const Family& f) {
 int main(int argc, char** argv) {
     std::string scenarioArg = "all", viewsArg = "1", sizeArg, modelPath, outPath, reportPath, topDir;
     long        top = 0;
+    double      gamma = -1, beta = -1;
     float       work = 1.0f;
     bool        wide = false, merge = false;
     long        cap = -1, iterations = -1, seed = -1;
@@ -181,6 +184,8 @@ int main(int argc, char** argv) {
         else if (a == "--report") { if (!next(reportPath)) return usage(); }
         else if (a == "--top") { if (!next(v)) return usage(); top = std::atol(v.c_str()); }
         else if (a == "--top-dir") { if (!next(topDir)) return usage(); }
+        else if (a == "--gamma") { if (!next(v)) return usage(); gamma = std::atof(v.c_str()); }
+        else if (a == "--beta") { if (!next(v)) return usage(); beta = std::atof(v.c_str()); }
         else return usage();
     }
 
@@ -224,6 +229,8 @@ int main(int argc, char** argv) {
         }
         cost = rg::GraphCostParams::fromSoc(model);
     }
+    if (gamma >= 0) cost.gammaMsPerGiB = gamma;
+    if (beta >= 0) cost.betaMsPerGiB = beta;
 
     std::vector<Family> families;
     for (u32 s : scenarios) {
