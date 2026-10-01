@@ -36,7 +36,7 @@ const char* formatToken(rg::Format f) {
 } // namespace
 
 // Canonical format (STABLE: changing it invalidates every harvested key):
-//   <kind>|<function0>|<function1>|<constants>|<outputs>
+//   <kind>|<function0>|<function1>|<constants>|<outputs>[|icb]
 //   kind       "R" (render) or "C" (compute)
 //   constants  comma separated "c<index>:<t>=<value>" in declaration order,
 //              t = b (bool, 0/1) | u (uint, decimal) | i (int, signed decimal)
@@ -101,6 +101,9 @@ std::string canonicalString(const PipelineDesc& desc) {
             s += buf;
         }
     }
+    // F5.3: only pipelines usable from ICBs carry the suffix, so every other
+    // key (and the committed harvest) is unchanged.
+    if (desc.indirectCommandBuffers) s += "|icb";
     return s;
 }
 

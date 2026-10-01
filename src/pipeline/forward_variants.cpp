@@ -40,10 +40,10 @@ Variant variantAt(u32 index) {
     return v;
 }
 
-Variant sceneVariant(const FrameScene& scene, u32 debugMode) {
+Variant sceneVariant(std::span<const GPULight> lights, bool emissive, u32 debugMode) {
     Variant v;
     v.lightTypes = 0;
-    for (const GPULight& light : scene.lights) {
+    for (const GPULight& light : lights) {
         switch (light.type) {
         case LIGHT_DIRECTIONAL: v.lightTypes |= LIGHT_DIRECTIONAL_BIT; break;
         case LIGHT_SPOT:        v.lightTypes |= LIGHT_SPOT_BIT; break;
@@ -53,15 +53,20 @@ Variant sceneVariant(const FrameScene& scene, u32 debugMode) {
     if (v.lightTypes == 0) {
         v.lightTypes = LIGHT_DIRECTIONAL_BIT;
     }
-    v.emissive = false;
+    v.emissive  = emissive;
+    v.debugMode = std::min(debugMode, gen::kAxes[gen::AXIS_DEBUG_MODE].maxValue);
+    return v;
+}
+
+Variant sceneVariant(const FrameScene& scene, u32 debugMode) {
+    bool emissive = false;
     for (const GPUMaterial& m : scene.materials) {
         if (m.emissive[0] != 0.0f || m.emissive[1] != 0.0f || m.emissive[2] != 0.0f) {
-            v.emissive = true;
+            emissive = true;
             break;
         }
     }
-    v.debugMode = std::min(debugMode, gen::kAxes[gen::AXIS_DEBUG_MODE].maxValue);
-    return v;
+    return sceneVariant(scene.lights, emissive, debugMode);
 }
 
 u16 saltConstantIndex() { return gen::kSaltConstantIndex; }
@@ -73,6 +78,8 @@ PipelineDesc genericDesc(rg::Format color) {
     desc.functions = {"forward_vs", "forward_fs"};
     desc.color[0] = ColorOutput{color, false, ColorOutput::Blend::Disabled, 0xF};
     desc.colorCount = 1;
+    // F5.3: the same pipeline draws the CPU path and the GPU-built ICB.
+    desc.indirectCommandBuffers = true;
     return desc;
 }
 

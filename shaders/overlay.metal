@@ -4,7 +4,7 @@
 // Bindings (Metal 4 argument tables):
 //   scene draws (overlay_vs / overdraw_fs / lightcount_fs) use the forward
 //   pass's table: buffer(0) FrameConstants, buffer(1) GPUVertex[], buffer(2)
-//   GPUInstance[], buffer(4) GPULight[].
+//   GPUInstance[] (by slot), buffer(4) GPULight[], buffer(6) visible slots (F5).
 //   compute overlay_tilecost: buffer(0) OverlayConstants, texture(0) overdraw,
 //   texture(1) light count, texture(2) tile costs (written).
 //   composite: buffer(0) OverlayConstants, texture(0) the value texture.
@@ -43,10 +43,11 @@ vertex OverlayVertexOut overlay_vs(uint vertexId                       [[vertex_
                                    uint instanceId                     [[instance_id]],
                                    constant FrameConstants& frame      [[buffer(0)]],
                                    const device GPUVertex* vertices    [[buffer(1)]],
-                                   const device GPUInstance* instances [[buffer(2)]])
+                                   const device GPUInstance* instances [[buffer(2)]],
+                                   const device uint* visible          [[buffer(6)]])
 {
     const device GPUVertex& v    = vertices[vertexId];
-    const device GPUInstance& gi = instances[instanceId];
+    const device GPUInstance& gi = instances[visible[instanceId]];
     const float4 world = loadMatrix(gi.modelMatrix) * float4(v.px, v.py, v.pz, 1.0);
     OverlayVertexOut out;
     out.position = loadMatrix(frame.viewProjection) * world;

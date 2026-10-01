@@ -154,6 +154,7 @@ MTL4::PipelineDescriptor* buildDescriptor(const pipe::PipelineDesc& desc, MTL::L
             color->setDestinationAlphaBlendFactor(MTL::BlendFactorOneMinusSourceAlpha);
         }
     }
+    if (desc.indirectCommandBuffers) d->setSupportIndirectCommandBuffers(MTL4::IndirectCommandBufferSupportStateEnabled);
     // MTL4 render pipelines take no depth format: it is inferred from the pass.
     return d;
 }

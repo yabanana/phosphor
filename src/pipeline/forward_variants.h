@@ -2,6 +2,9 @@
 
 #include "core/types.h"
 #include "pipeline/pipeline_desc.h"
+#include "renderer/gpu_types.h"
+
+#include <span>
 
 namespace phosphor {
 struct FrameScene;
@@ -54,6 +57,9 @@ struct Variant {
 /// `debugMode`.  A scene without lights uses LIGHT_DIRECTIONAL_BIT (the light
 /// loop runs zero times either way).
 [[nodiscard]] Variant sceneVariant(const FrameScene& scene, u32 debugMode);
+/// F5: the same choice from the frame's lights and whether any material of
+/// the persistent scene is emissive (SceneStore::hasEmissive).
+[[nodiscard]] Variant sceneVariant(std::span<const GPULight> lights, bool emissive, u32 debugMode);
 
 /// Reserved function-constant index of the salt (uint).
 [[nodiscard]] u16 saltConstantIndex();

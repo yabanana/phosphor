@@ -229,6 +229,20 @@ MTL::Texture* GpuMemory::newTexture(const MTL::TextureDescriptor* descriptor, Me
     return texture;
 }
 
+MTL::IndirectCommandBuffer* GpuMemory::newIndirectCommandBuffer(const MTL::IndirectCommandBufferDescriptor* descriptor,
+                                                               u32 maxCommands, MTL::ResourceOptions options,
+                                                               MemoryCategory category, const char* label) {
+    MTL::IndirectCommandBuffer* icb = context_.device()->newIndirectCommandBuffer(descriptor, maxCommands, options);
+    if (!icb) {
+        LOG_ERROR("GpuMemory: failed to create a %u-command indirect command buffer '%s'", maxCommands, label);
+        return nullptr;
+    }
+    context_.makeResident(icb, residencyClass(category));
+    icb->setLabel(str(label));
+    account(icb, category);
+    return icb;
+}
+
 void GpuMemory::release(MTL::Resource* resource, MemoryCategory category) {
     if (!resource) return;
     unaccount(resource, category);

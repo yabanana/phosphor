@@ -40,6 +40,14 @@ endif()
 
 # --- Shaders: .metal -> .air -> phosphor.metallib ---
 file(GLOB PHOSPHOR_METAL_SHADERS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*.metal)
+# Headers the shaders include (C++/MSL shared): an edit recompiles every shader.
+set(PHOSPHOR_SHADER_HEADERS
+    ${CMAKE_SOURCE_DIR}/src/renderer/gpu_types.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/gpu_scene_layout.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/gpu_queue.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/cull_math.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/transform_math.h
+    ${CMAKE_SOURCE_DIR}/src/diagnostics/overlay_math.h)
 set(PHOSPHOR_SHADER_OUT ${CMAKE_BINARY_DIR}/shaders)
 set(PHOSPHOR_METALLIB ${PHOSPHOR_SHADER_OUT}/phosphor.metallib)
 set(PHOSPHOR_METAL_FLAGS -std=metal4.0 -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}
@@ -63,7 +71,7 @@ foreach(shader IN LISTS PHOSPHOR_METAL_SHADERS)
         OUTPUT ${air}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${PHOSPHOR_SHADER_OUT}
         COMMAND xcrun -sdk macosx metal ${PHOSPHOR_METAL_FLAGS} -c ${shader} -o ${air}
-        DEPENDS ${shader} ${CMAKE_SOURCE_DIR}/src/renderer/gpu_types.h ${CMAKE_SOURCE_DIR}/src/diagnostics/overlay_math.h
+        DEPENDS ${shader} ${PHOSPHOR_SHADER_HEADERS}
                 ${PHOSPHOR_VARIANTS_MSL_HEADER} phosphor_variants
         COMMENT "Compiling Metal shader ${name}.metal"
         VERBATIM
@@ -130,6 +138,8 @@ add_executable(phosphor
     src/platform/metal/frame_capture.cpp
     src/platform/metal/gpu_capture.cpp
     src/platform/metal/gpu_memory.cpp
+    src/platform/metal/gpu_scene_buffers.cpp
+    src/platform/metal/gpu_scene_check.cpp
     src/platform/metal/gpu_timestamps.cpp
     src/platform/metal/graph_debug_passes.cpp
     src/platform/metal/known_cost_pass.cpp
