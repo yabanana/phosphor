@@ -284,6 +284,78 @@ TEST_CASE("budget: per-pass bytes add up to the graph estimate and to the tiers"
     }
 }
 
+// ---------------------------------------------------------------------------
+// OPT-1.7 SLC working set
+// ---------------------------------------------------------------------------
+
+TEST_CASE("slc: working sets above the estimate and adjacent reuse candidates") {
+    constexpr u64 kMiB = 1024 * 1024;
+    RenderGraph g;
+    BufferRef src = g.importBuffer("src", {64 * kMiB}, ImportContentsDefined);
+    BufferRef mid, big;
+    g.addPass("reduce", PassType::Compute,
+              [&](PassBuilder& b) {
+                  b.read(src, Usage::ShaderRead, StageDispatch);
+                  mid = b.createBuffer("mid", {1 * kMiB});
+                  mid = b.write(mid, Usage::ShaderWrite, StageDispatch);
+              },
+              nullptr);
+    g.addPass("shade", PassType::Compute,
+              [&](PassBuilder& b) {
+                  b.read(mid, Usage::ShaderRead, StageDispatch);
+                  big = b.createBuffer("big", {80 * kMiB});
+                  big = b.write(big, Usage::ShaderWrite, StageDispatch);
+              },
+              nullptr);
+    g.addPass("sink", PassType::Compute,
+              [&](PassBuilder& b) {
+                  b.read(big, Usage::ShaderRead, StageDispatch);
+                  b.setSideEffect();
+              },
+              nullptr);
+    const CompiledGraph c = compile(g);
+    REQUIRE(c.ok);
+    const GraphBudget b = analyzeBudget(g, c);
+    REQUIRE(b.workingSets.size() == 3);
+    CHECK(b.workingSets[0].total() == 65 * kMiB);
+    CHECK_FALSE(b.workingSets[0].aboveSlc);
+    CHECK(b.workingSets[1].total() == 81 * kMiB);
+    CHECK(b.workingSets[1].aboveSlc);
+    CHECK(b.workingSets[2].total() == 80 * kMiB);
+    CHECK(b.workingSets[2].aboveSlc);
+    // reduce -> shade through the 1 MiB buffer fits; shade -> sink through 80 MiB does not.
+    REQUIRE(b.reuse.size() == 1);
+    CHECK(g.passes()[b.reuse[0].producer].name == "reduce");
+    CHECK(g.passes()[b.reuse[0].consumer].name == "shade");
+    CHECK(g.resources()[b.reuse[0].resource].name == "mid");
+    CHECK(b.reuse[0].consumerFits == false); // shade moves 81 MiB
+    // A smaller SLC drops the candidate; a bigger one flags nothing.
+    BudgetOptions tiny;
+    tiny.slcBytes = kMiB / 2;
+    CHECK(analyzeBudget(g, c, tiny).reuse.empty());
+    BudgetOptions huge;
+    huge.slcBytes = 1024 * kMiB;
+    const GraphBudget h = analyzeBudget(g, c, huge);
+    CHECK(h.reuse.size() == 2);
+    for (const WorkingSet& w : h.workingSets) CHECK_FALSE(w.aboveSlc);
+    // The printed lines say the SLC size is an estimate.
+    bool saw = false;
+    for (const std::string& l : budgetSummaryLines(g, b)) saw = saw || (contains(l, "SLC") && contains(l, "ESTIMATE"));
+    CHECK(saw);
+}
+
+TEST_CASE("slc: render passes fused in one group are not reuse candidates") {
+    Deferred d(true);
+    const CompiledGraph c = compile(d.graph);
+    REQUIRE(c.ok);
+    const GraphBudget b = analyzeBudget(d.graph, c);
+    // gbuffer+light are one group; light -> blur is albedo's reuse (stored, read adjacent).
+    for (const ReuseCandidate& r : b.reuse) {
+        CHECK(d.graph.passes()[r.producer].name != "gbuffer");
+    }
+    CHECK(b.workingSets.size() == 1);
+}
+
 TEST_CASE("budget: the four scenarios at 1 view, 60 fps") {
     for (u32 s = 0; s < scenarioCount(); ++s) {
         CAPTURE(s);
