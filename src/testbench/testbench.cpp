@@ -6,6 +6,7 @@
 #include "testbench/many_lights.h"
 #include "testbench/cornell_box.h"
 #include "testbench/culling_viz.h"
+#include "testbench/million_instances.h"
 
 namespace phosphor {
 
@@ -21,6 +22,7 @@ static constexpr const char* kBenchNames[] = {
     "Many Lights (1024)",
     "Cornell Box (GI)",
     "Culling Visualization",
+    "1M Instances (dynamic)",
 };
 static_assert(std::size(kBenchNames) == static_cast<size_t>(TestBenchType::COUNT));
 
@@ -43,6 +45,10 @@ int testBenchCount() {
 // ---------------------------------------------------------------------------
 
 std::unique_ptr<TestBench> createTestBench(TestBenchType type) {
+    return createTestBench(type, TestBenchParams{});
+}
+
+std::unique_ptr<TestBench> createTestBench(TestBenchType type, const TestBenchParams& params) {
     switch (type) {
         case TestBenchType::TorusDemo:   return std::make_unique<TorusDemo>();
         case TestBenchType::PBRGrid:     return std::make_unique<PBRGrid>();
@@ -51,6 +57,7 @@ std::unique_ptr<TestBench> createTestBench(TestBenchType type) {
         case TestBenchType::ManyLights:  return std::make_unique<ManyLights>();
         case TestBenchType::CornellBox:  return std::make_unique<CornellBox>();
         case TestBenchType::CullingViz:  return std::make_unique<CullingViz>();
+        case TestBenchType::MillionInstances: return std::make_unique<MillionInstances>(params);
         default:                         return std::make_unique<TorusDemo>();
     }
 }

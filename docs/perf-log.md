@@ -668,3 +668,104 @@ e 1 su M5 Max; **T0 non disponibile** (O12).
   blocchi, branch +2686/+3615); negli scenari i byte crescono con unità ×
   frame (buffer dei campioni della misura). `leaks --atExit` 0 con i tre
   flag di debug + `greedy`, con gli scenari 0 (3 viste), 2 e 3 con piano.
+
+## F5 — GPU scene persistente e submission guidata dalla GPU (chiusura, 2026-10-01)
+
+M5 Max, macOS 27.2, Release, 3200×1800, alimentazione, `caffeinate -d`.
+**Condizioni**: durante le misure finali la macchina non era quieta (altri
+processi dell'utente: Codex Computer Use, un emulatore Android, WindowServer
+al 50–60% di CPU): i tempi sono più rumorosi delle fasi precedenti (frame
+dei bench piccoli ~3,2–4,2 ms contro ~2,4 ms in OPT-1) e i p99 sono un limite
+superiore. **T0 non disponibile** (O12).
+
+### Bench 8 "1M Instances (dynamic)", `--gpu-driven on` (default)
+
+1M istanze in moto (moto procedurale GPU, 1% aggiornato dalla CPU ogni frame
+= 10.000 record, 100K satelliti a profondità ≤ 3), 693.677 visibili dopo il
+frustum culling, 24 bucket. 600 frame + 120 di riscaldamento, 3 run:
+
+| Misura | run 1 / 2 / 3 | CV |
+|---|---|---|
+| Frame p50 (p99), `--no-vsync` | 5,94 (15,10) / 5,85 (14,14) / 5,99 (15,01) ms | 1,2% (3,6%) |
+| CPU p50 (p99) | 2,03 (3,65) / 2,06 (3,72) / 2,01 (3,77) ms | 1,4% (1,6%) |
+| GPU p50 (p99), span del command buffer | 7,55 (11,23) / 7,62 (11,47) / 7,36 (11,07) ms | 1,8% (1,8%) |
+| Somma dei pass GPU p50 (p99) | 5,53 (7,95) / 5,54 (7,83) / 5,56 (7,26) ms | 0,3% (4,8%) |
+| Con vsync (120 Hz) | 120,0 fps, frame p99 9,48 ms, max < 10,7 ms | — |
+
+Comandi CPU della scena 66 per frame (min = max); upload 0,96 MB/frame
+(10.000 record × 96 B + costanti e luci); 0 allocazioni GPU; fasi CPU p50:
+simulazione 0,35 ms (il bench aggiorna il suo 1%), sync dello store 1,44 ms,
+prepare 0,02, encoding del grafo 0,07, submit 0,04. Pass GPU (frame
+serializzati, p50 / p99): Scene update 0,005 / 0,034 ms, Scene transforms
+0,40 / 0,76, Instance cull 0,24 / 0,58, Draw build 0,009 / 0,079, Forward
+4,66 / 5,86.
+
+Percorso CPU di prima (spike S1, `main`, 1M cubi): CPU 17,7 ms a scena ferma,
+30,2 ms con tutte le istanze in moto, 152,6 MiB caricati per frame.
+
+### O8: comandi CPU costanti
+
+Bench 8, comandi CPU della scena per frame (min = max in ogni run):
+
+| N istanze | K = 8 (24 bucket) | K = 64 (192) | K = 1024 (1.858–3.072) |
+|---|---|---|---|
+| on, 10K / 100K / 1M | 90 / 90 / 90 | 90 / 90 / 90 | 90 / 90 / 90 |
+| off, 10K / 100K / 1M | 97 / 97 / 97 | 265 / 265 / 265 | 1.931 / 3.139 / 3.145 |
+
+(Misurato prima di codificare solo i livelli della gerarchia presenti: oggi
+on = 66 nel bench 8, 38 sui bench senza gerarchia, sempre indipendente da N.)
+Controllo negativo: `off` cresce con i bucket.
+
+### Byte di delta proporzionali ai cambi
+
+Bench 8, `--dynamic-cpu P` (on): 0% → 1,4 KiB/frame (costanti e luci; sync
+0,003 ms, CPU del frame 0,10 ms), 0,1% → 1.000 record, +94 KiB; 1% → 10.000,
++937 KiB; 10% → 100.000, +9,2 MiB (96 B per record); 100% → copie intere
+(1M istanze + nodi + moto, 113 MiB). Bench 3, 4, 7 (statici): 1,1 KiB/frame,
+0 record. `--churn 1000` (1.000 spawn + 1.000 despawn per frame): 14.010
+record, 1,3 MiB/frame, 0 cambi di struttura, comandi CPU costanti.
+
+### Motore invariato (bench 1–7)
+
+`bench_all --stats` A/B/A (600 frame × 3 run, `--no-vsync --no-ui`; frame ms
+p50; CPU e GPU ms p50; macchina non quieta):
+
+| # | Bench | Frame main / off / on / main | CPU main / off / on / main | GPU main / off / on / main |
+|---|---|---|---|---|
+| 1 | Torus Demo | 4,19 / 3,85 / 3,69 / 5,84 | 0,158 / 0,184 / 0,169 / 0,155 | 1,59 / 1,49 / 1,52 / 1,42 |
+| 2 | PBR Material Grid | 3,24 / 3,23 / 3,56 / 2,81 | 0,146 / 0,172 / 0,252 / 0,132 | 0,87 / 0,95 / 1,03 / 0,50 |
+| 3 | Stress Test (100K) | 4,22 / 4,25 / 4,35 / 4,24 | **1,955 / 0,178 / 0,263 / 1,963** | 2,96 / 4,32 / 3,30 / 3,98 |
+| 4 | Scene Viewer (glTF) | 3,36 / 3,92 / 4,03 / 3,26 | 0,125 / 0,195 / 0,210 / 0,064 | 1,10 / 1,39 / 1,39 / 0,78 |
+| 5 | Many Lights (1024) | 56,3 / 54,9 / 59,4 / 54,8 | 0,128 / 0,180 / 0,332 / 0,131 | 103,1 / 104,6 / 109,1 / 103,7 |
+| 6 | Cornell Box (GI) | 3,51 / 3,63 / 5,12 / 4,15 | 0,152 / 0,195 / 0,169 / 0,143 | 1,11 / 1,22 / 1,91 / 1,18 |
+| 7 | Culling Visualization | 4,49 / 4,26 / 4,24 / 4,18 | **0,829 / 0,194 / 0,260 / 0,727** | 2,09 / 2,15 / 3,63 / 2,63 |
+
+- CPU: Stress Test −87/−91%, Culling Viz −73/−65%; i bench piccoli +0,02–0,12
+  ms (passi della scena e store). GPU senza vsync: span sovrapposti, rumore
+  ±50% tra le due run di `main`.
+- GPU per pass (frame serializzati, 2 run alternate, prima delle ultime
+  ottimizzazioni): costo fisso dei pass della scena ~0,07 ms (off) / 0,15 ms
+  (on) per frame, poi ridotto a ~0,02 / 0,08 ms (passi della gerarchia
+  solo se presenti, nessun reset dell'ICB); il Forward dello Stress Test
+  sembrava +0,9 ms (2,8 contro 1,83 ms) ma è un artefatto DVFS: con 2 ms di
+  lavoro CPU per frame, come `main`, scende a 1,77 ms; con vsync main e F5
+  danno 4,9–5,3 ms entrambe (`opt-log.md`, "F5 — Scoperte dell'integrazione").
+- O7: 0 allocazioni GPU nei frame misurati su tutti i bench, anche con
+  `--churn 1000`/`10000`; heap CPU del bench 8 con churn piatto con
+  `--no-gpu-timing` (+13,5 KB a 600 frame, +11,2 KB a 6000); con i timestamp
+  lo storage delle misure per pass cresce ~30 B/frame (anche su `main`,
+  ~9 B/frame). `leaks --atExit` 0 (switch di tutti gli 8 bench, on con
+  `--debug-graph-transients --debug-async-compute`, off con
+  `--debug-split-encoding`).
+- Correttezza: `visual_check` (API + shader validation) off e on, senza flag
+  e con `--debug-graph-transients`, `--debug-split-encoding`,
+  `--debug-async-compute` e tutti e tre: 8/8 bench, 0 pixel, 0 messaggi
+  (riferimenti F5 dal modo off; bench 2–7 = `main`, bench 1 differisce di 9
+  pixel ±1 per il flag ICB della pipeline, provato); 10 run identiche per
+  bench; `--debug-gpu-scene` PASS su 8 bench off/on e con soglie di culling,
+  ogni controllo negativo FAIL; `--switch-every 20 --resize-every 45` con UI
+  sotto validazione: 0 messaggi; `archive_check` (riferimenti Release),
+  `variant_check` (284 varianti compatibili, 52 incompatibili), 
+  `hot_reload_check` verdi; `hitch_check` intermittente anche su `main` per
+  i picchi del pompaggio eventi SDL/Cocoa (macchina non quieta, vedi
+  opt-log).

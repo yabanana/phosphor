@@ -3,10 +3,12 @@
 // Bindings (Metal 4 argument table, buffers by GPU address):
 //   buffer(0)  FrameConstants
 //   buffer(1)  GPUVertex[]      (global vertex buffer)
-//   buffer(2)  GPUInstance[]    (per-frame, sorted by mesh)
+//   buffer(2)  GPUInstance[]    (F5: persistent, by scene store slot)
 //   buffer(3)  GPUMaterial[]
 //   buffer(4)  GPULight[]
 //   buffer(5)  TextureHandle[]  (bindless texture table of resource IDs)
+//   buffer(6)  uint[]           (F5: visible instance slots; instance_id
+//                               indexes it, identity in --gpu-driven off)
 //
 // The visibility-buffer / mesh-shader pipeline replaces this pass in F2; the
 // forward pass stays as the reference path and for debugging.
@@ -60,12 +62,13 @@ vertex VertexOut forward_vs(uint vertexId                          [[vertex_id]]
                             uint instanceId                        [[instance_id]],
                             constant FrameConstants& frame         [[buffer(0)]],
                             const device GPUVertex* vertices       [[buffer(1)]],
-                            const device GPUInstance* instances    [[buffer(2)]])
+                            const device GPUInstance* instances    [[buffer(2)]],
+                            const device uint* visible             [[buffer(6)]])
 {
     // vertex_id includes the draw's base vertex and instance_id includes the
-    // base instance, so both index the global arrays directly.
+    // base instance: instance_id indexes the visible list, which names the slot.
     const device GPUVertex& v    = vertices[vertexId];
-    const device GPUInstance& gi = instances[instanceId];
+    const device GPUInstance& gi = instances[visible[instanceId]];
 
     const float4x4 model = loadMatrix(gi.modelMatrix);
     const float3x3 normalMatrix = float3x3(model[0].xyz, model[1].xyz, model[2].xyz);

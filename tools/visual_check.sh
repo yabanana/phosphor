@@ -7,6 +7,11 @@
 #
 # EXTRA_ARGS (environment) is appended to every run, e.g.
 # EXTRA_ARGS=--debug-graph-transients (its GRAPH-TRANSIENTS line is expected; --debug-async-compute: ASYNC-COMPUTE).
+# BENCH8_ARGS (environment, default empty) is appended to bench 8 only
+# ("1M Instances"): under API + shader validation the 1M-instance default
+# can be slow; if a run exceeds ~2 minutes use BENCH8_ARGS="--instances 100000"
+# (the scene is a different size then, so references must be taken with the
+# same value).
 # Defaults: build (Debug), build/reference.  --update (re)creates the
 # references instead of comparing.  Captures use --fixed-timestep and the
 # same frame count, so animated benches are deterministic; --inject-input
@@ -25,16 +30,18 @@ warmup=30
 mkdir -p "$out_dir" "$ref_dir"
 
 failures=0
-for bench in 1 2 3 4 5 6 7; do
+for bench in 1 2 3 4 5 6 7 8; do
     capture="$out_dir/bench$bench.png"
     log="$out_dir/bench$bench.log"
     status=0
+    extra_bench_args=""
+    [[ "$bench" == 8 ]] && extra_bench_args=${BENCH8_ARGS:-}
     MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 MTL_DEBUG_LAYER_WARNING_MODE=nslog \
         "$app" --bench "$bench" --warmup "$warmup" --frames 1 --no-ui --fixed-timestep --inject-input \
-        ${EXTRA_ARGS:-} --capture "$capture" >"$log" 2>&1 || status=$?
+        ${EXTRA_ARGS:-} ${extra_bench_args:-} --capture "$capture" >"$log" 2>&1 || status=$?
     # Anything besides our INFO lines, the BENCH/PIPELINES/STARTUP/SWITCH
     # summaries and the two "Validation Enabled" banners is a problem.
-    messages=$(grep -Ev '^\[INFO\]|^BENCH|^GRAPH-TRANSIENTS|^ASYNC-COMPUTE|^PIPELINES|^STARTUP|^SWITCH|Validation Enabled' "$log" | grep -c . || true)
+    messages=$(grep -Ev '^\[INFO\]|^BENCH|^SCENE|^GPU-SCENE .*PASS|^GRAPH-TRANSIENTS|^ASYNC-COMPUTE|^PIPELINES|^STARTUP|^SWITCH|Validation Enabled' "$log" | grep -c . || true)
     # F3: every pipeline must have been built (the PIPELINES summary line).
     pipeline_failures=$(sed -nE 's/^PIPELINES .*\| failures ([0-9]+) .*/\1/p' "$log")
     if [[ "${pipeline_failures:-missing}" != "0" ]]; then

@@ -210,6 +210,25 @@ def cmd_report(path):
                      fmt(dram / 1048576.0) if dram is not None else "-"])
     out += ["", table(["Unit", "Queue", "Fused", "GPU ms mean", "p99", "max", "DRAM MiB"], body)
             if body else "_no per-pass data_"]
+    # Schema 5: the persistent GPU scene and the CPU phases (absent in older reports).
+    sc = j.get("scene")
+    if isinstance(sc, dict):
+        mean = lambda k: fmt(_dig(sc, (k, "mean")), 0)
+        out += ["", f"scene: gpu-driven {sc.get('mode', '?')} · {sc.get('instances', '-')} instances · "
+                    f"{sc.get('slots', '-')} slots · {sc.get('buckets', '-')} buckets · "
+                    f"{sc.get('materials', '-')} materials · queue overflow {sc.get('queue_overflow', '-')}",
+                "",
+                table(["Visible", "Culled frustum", "Culled distance", "Culled size", "Draw cmds", "CPU cmds",
+                       "Upload bytes", "Delta records"],
+                      [[mean("visible"), mean("culled_frustum"), mean("culled_distance"), mean("culled_size"),
+                        mean("draw_commands"), mean("cpu_commands"), mean("upload_bytes"), mean("delta_records")]])]
+    cp = j.get("cpu_phases")
+    if isinstance(cp, dict):
+        names = [("sim", "Sim"), ("scene_sync", "Scene sync"), ("prepare", "Prepare"), ("ui", "UI"),
+                 ("graph", "Graph"), ("submit", "Submit")]
+        out += ["", "CPU ms per frame phase (mean, p99)", "",
+                table([n for _, n in names],
+                      [[fmt_ms(_dig(cp, (k, "mean")), _dig(cp, (k, "p99"))) for k, _ in names]])]
     return "\n".join(out)
 
 
@@ -234,6 +253,12 @@ def self_test():
     check("| - |" in v1 or "- |" in v1, "v1 pass-sum shown as -")
     v2 = cmd_report(os.path.join(TESTDATA, "report_v2.json"))
     check("schema v2" in v2 and "Lighting" in v2 and "| 50 |" in v2, "v2 report (DRAM MiB)")
+    check("scene:" not in v1 and "scene:" not in v2 and "CPU ms per frame phase" not in v2,
+          "older reports show no scene section")
+    v5 = cmd_report(os.path.join(TESTDATA, "report_v5.json"))
+    check("schema v5" in v5 and "scene: gpu-driven on · 1000000 instances" in v5, "v5 scene header")
+    check("| 350000 | 650000 | 0 | 0 | 24 | 3 | 262144 | 2730 |" in v5, "v5 scene row (visible, cpu cmds, upload)")
+    check("CPU ms per frame phase" in v5 and "| 0.9 (1) |" in v5, "v5 cpu phases")
     rows = read_csv(os.path.join(TESTDATA, "history.csv"))
     prows = read_csv(os.path.join(TESTDATA, "history_passes.csv"))
     check(rows[0]["machine"] == "Mac17,6", "quoted comma in CSV")

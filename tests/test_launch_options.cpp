@@ -14,7 +14,7 @@ namespace {
 
 bool parse(std::vector<const char*> args, LaunchOptions& out, std::string& error) {
     args.insert(args.begin(), "phosphor");
-    return parseLaunchOptions(static_cast<int>(args.size()), args.data(), 7, out, error);
+    return parseLaunchOptions(static_cast<int>(args.size()), args.data(), 8, out, error);
 }
 
 } // namespace
@@ -161,7 +161,7 @@ TEST_CASE("launch options: errors") {
     LaunchOptions o;
     std::string err;
     CHECK_FALSE(parse({"--bench", "0"}, o, err));
-    CHECK_FALSE(parse({"--bench", "8"}, o, err));
+    CHECK_FALSE(parse({"--bench", "9"}, o, err));
     CHECK_FALSE(parse({"--frames", "-5"}, o, err));
     CHECK_FALSE(parse({"--frames", "12x"}, o, err));
     CHECK_FALSE(parse({"--frames"}, o, err));
@@ -348,7 +348,7 @@ TEST_CASE("bench report: schema v3 without GPU timing keeps v1 fields and stays 
     r.pipelinesJson = "{\"hits\": 3}";
     const std::string json = reportToJson(r);
     CHECK_MESSAGE(validJson(json), json);
-    CHECK(json.find("\"schema_version\": 4") != std::string::npos);
+    CHECK(json.find("\"schema_version\": 5") != std::string::npos);
     CHECK(json.find("\"gpu_timing\": false") != std::string::npos);
     CHECK(json.find("\"gpu_timing_unfused\": false") != std::string::npos);
     CHECK(json.find("\"passes\"") == std::string::npos);
@@ -365,7 +365,7 @@ TEST_CASE("bench report: schema v3 with GPU timing") {
     const BenchReport r = timedReport();
     const std::string json = reportToJson(r);
     CHECK_MESSAGE(validJson(json), json);
-    CHECK(json.find("\"schema_version\": 4") != std::string::npos);
+    CHECK(json.find("\"schema_version\": 5") != std::string::npos);
     CHECK(json.find("\"gpu_timing\": true") != std::string::npos);
     CHECK(json.find("\"gpu_timing_unfused\": true") != std::string::npos);
     CHECK(json.find("\"passes\": [") != std::string::npos);
@@ -415,4 +415,106 @@ TEST_CASE("bench report: per-pass work (schema v3, OPT-0.4)") {
     CHECK_MESSAGE(validJson(json), json);
     CHECK(json.find("\"work\": [{\"pass\": \"Forward\", \"draws\": 3, \"instances\": 100, \"indices\": 307200, "
                     "\"vertices\": 56100, \"pixels\": 5760000, \"threads\": 0, \"lights\": 4}]") != std::string::npos);
+}
+
+TEST_CASE("launch options: F5 scene switches") {
+    LaunchOptions o;
+    std::string err;
+    REQUIRE(parse({}, o, err));
+    CHECK(o.gpuDriven == GpuDrivenMode::On); // F5 default
+    CHECK(o.sceneInstances == 0);
+    CHECK(o.dynamicCpuPercent < 0.0f); // bench default
+    CHECK(o.debugGpuSceneCorrupt == SceneCorruption::None);
+
+    REQUIRE(parse({"--bench", "8", "--gpu-driven", "on", "--instances", "250000", "--scene-meshes", "64",
+                   "--dynamic-cpu", "2.5", "--churn", "100", "--cull-distance", "150.5", "--cull-min-pixels", "2",
+                   "--debug-gpu-scene", "30", "--debug-gpu-scene-corrupt", "plane"},
+                  o, err));
+    CHECK(o.bench == 7);
+    CHECK(o.gpuDriven == GpuDrivenMode::On);
+    CHECK(o.sceneInstances == 250000);
+    CHECK(o.sceneMeshes == 64);
+    CHECK(o.dynamicCpuPercent == doctest::Approx(2.5f));
+    CHECK(o.churn == 100);
+    CHECK(o.cullDistance == doctest::Approx(150.5f));
+    CHECK(o.cullMinPixels == doctest::Approx(2.0f));
+    CHECK(o.debugGpuScene == 30);
+    CHECK(o.debugGpuSceneCorrupt == SceneCorruption::Plane);
+
+    REQUIRE(parse({"--gpu-driven", "off", "--dynamic-cpu", "0"}, o, err));
+    CHECK(o.gpuDriven == GpuDrivenMode::Off);
+    CHECK(o.dynamicCpuPercent == 0.0f); // explicit 0 differs from the default (< 0)
+    for (const auto& [text, kind] : {std::pair<const char*, SceneCorruption>{"delta", SceneCorruption::Delta},
+                                     {"plane", SceneCorruption::Plane},
+                                     {"command", SceneCorruption::Command},
+                                     {"touch", SceneCorruption::Touch}}) {
+        REQUIRE(parse({"--debug-gpu-scene-corrupt", text}, o, err));
+        CHECK(o.debugGpuSceneCorrupt == kind);
+    }
+}
+
+TEST_CASE("launch options: F5 scene switch errors") {
+    LaunchOptions o;
+    std::string err;
+    CHECK_FALSE(parse({"--gpu-driven", "maybe"}, o, err));
+    CHECK(err.find("--gpu-driven") != std::string::npos);
+    CHECK_FALSE(parse({"--gpu-driven"}, o, err));
+    CHECK_FALSE(parse({"--instances", "0"}, o, err));
+    CHECK_FALSE(parse({"--instances", "-3"}, o, err));
+    CHECK_FALSE(parse({"--scene-meshes", "0"}, o, err));
+    CHECK_FALSE(parse({"--scene-meshes", "1025"}, o, err));
+    CHECK(parse({"--scene-meshes", "1024"}, o, err));
+    CHECK_FALSE(parse({"--dynamic-cpu", "101"}, o, err));
+    CHECK_FALSE(parse({"--dynamic-cpu", "-1"}, o, err));
+    CHECK_FALSE(parse({"--dynamic-cpu", "abc"}, o, err));
+    CHECK_FALSE(parse({"--dynamic-cpu", "nan"}, o, err));
+    CHECK_FALSE(parse({"--churn", "x"}, o, err));
+    CHECK_FALSE(parse({"--cull-distance", "-1"}, o, err));
+    CHECK_FALSE(parse({"--cull-min-pixels", "1.5px"}, o, err));
+    CHECK_FALSE(parse({"--debug-gpu-scene", "-1"}, o, err));
+    CHECK_FALSE(parse({"--debug-gpu-scene-corrupt", "everything"}, o, err));
+    CHECK(err.find("--debug-gpu-scene-corrupt") != std::string::npos);
+}
+
+TEST_CASE("bench report: schema v5 scene and cpu_phases objects") {
+    BenchReport base = timedReport();
+    const std::string v4 = reportToJson(base);
+    CHECK(v4.find("\"scene\"") == std::string::npos); // omitted when absent
+    CHECK(v4.find("\"cpu_phases\"") == std::string::npos);
+
+    BenchReport r = base;
+    r.scene.present   = true;
+    r.scene.mode      = "on";
+    r.scene.instances = 1000000;
+    r.scene.slots     = 1048576;
+    r.scene.buckets   = 24;
+    r.scene.materials = 256;
+    r.scene.commands  = 40;
+    r.scene.structureChanges = 7;
+    r.scene.queueOverflow    = 0;
+    r.scene.uploadBytes   = {1000.0f, 0.0f, 900.0f, 2000.0f, 2500.0f};
+    r.scene.visible       = {350000.0f, 340000.0f, 350000.0f, 360000.0f, 361000.0f};
+    r.scene.cpuCommands   = {3.0f, 3.0f, 3.0f, 3.0f, 3.0f};
+    r.cpuPhases.present   = true;
+    r.cpuPhases.sim       = {1.5f, 1.0f, 1.4f, 2.0f, 2.5f};
+    r.cpuPhases.submit    = {0.25f, 0.2f, 0.25f, 0.3f, 0.35f};
+    const std::string json = reportToJson(r);
+    CHECK_MESSAGE(validJson(json), json);
+    CHECK(json.find("\"schema_version\": 5") != std::string::npos);
+    CHECK(json.find("\"scene\": {\"mode\": \"on\", \"instances\": 1000000, \"slots\": 1048576, \"buckets\": 24, "
+                    "\"materials\": 256, \"commands\": 40, \"structure_changes\": 7, \"queue_overflow\": 0, "
+                    "\"upload_bytes\": {\"mean\": 1000.0000") != std::string::npos);
+    for (const char* key : {"\"delta_records\"", "\"visible\": {\"mean\": 350000.0000", "\"culled_frustum\"",
+                            "\"culled_distance\"", "\"culled_size\"", "\"draw_commands\"",
+                            "\"cpu_commands\": {\"mean\": 3.0000", "\"cpu_phases\": {\"sim\": {\"mean\": 1.5000",
+                            "\"scene_sync\"", "\"prepare\"", "\"ui\"", "\"graph\"", "\"submit\": {\"mean\": 0.2500"}) {
+        CHECK_MESSAGE(json.find(key) != std::string::npos, key);
+    }
+    // The v4 content is unchanged: the new objects are only appended after it.
+    CHECK(json.substr(0, v4.size() - 3) == v4.substr(0, v4.size() - 3));
+
+    r.scene.mode = "of\"f";
+    CHECK(validJson(reportToJson(r))); // strings are escaped
+    r.scene.visible.mean = std::nanf("");
+    CHECK(validJson(reportToJson(r))); // non-finite numbers never reach the JSON
 }

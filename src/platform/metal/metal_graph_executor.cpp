@@ -141,6 +141,7 @@ MetalGraphExecutor::MetalGraphExecutor(MetalContext& context) : context_(context
 
 MetalGraphExecutor::~MetalGraphExecutor() {
     context_.waitIdle();
+    if (splitFence_) splitFence_->release();
     releaseResources();
     workers_.reset();
     for (ExtraCommandBuffer& e : extra_) {
@@ -234,6 +235,7 @@ bool MetalGraphExecutor::compile(const rg::RenderGraph& graph, const rg::Compile
 
     // F2.5: raster passes to encode on several threads (one per group).
     splitPosition_.assign(compiled_.renderGroups.size(), kNone);
+    hasSplit_ = false;
     u32 maxChunks = 1, extraNeeded = 0;
     for (u32 g = 0; g < compiled_.renderGroups.size(); ++g) {
         const rg::RenderGroup& group = compiled_.renderGroups[g];
@@ -249,7 +251,8 @@ bool MetalGraphExecutor::compile(const rg::RenderGraph& graph, const rg::Compile
             maxChunks = std::max(maxChunks, chunks);
             LOG_INFO("Render graph: '%s' encoded by %u threads (render pass suspended/resumed across %u command "
                      "buffers)", graph.passes()[compiled_.order[pos]].name.c_str(), chunks, chunks + 2);
-            extraNeeded += chunks + 2; // chunks + tail + continuation
+            extraNeeded += chunks + 3; // head + chunks + tail + continuation
+            hasSplit_ = true;
         }
     }
     if (extraNeeded > MetalContext::MAX_FRAME_COMMAND_BUFFERS - 1) {
@@ -259,6 +262,7 @@ bool MetalGraphExecutor::compile(const rg::RenderGraph& graph, const rg::Compile
         return false;
     }
     ensureParallelResources(maxChunks);
+    if (hasSplit_ && !splitFence_) splitFence_ = context_.device()->newSharedEvent();
 
     barrierIndex_.assign(compiled_.order.size(), kNone);
     for (u32 i = 0; i < compiled_.barriers.size(); ++i) barrierIndex_[compiled_.barriers[i].position] = i;
@@ -481,6 +485,17 @@ void MetalGraphExecutor::addBuffer(MetalContext::Frame& frame, bool async, MTL4:
     ++frame.submissions[sub].bufferCount;
 }
 
+void MetalGraphExecutor::cutSubmissionForSplit(MetalContext::Frame& frame) {
+    MetalContext::Submission& current = frame.submissions[segmented_ ? graphicsSub_ : frame.submissionCount - 1];
+    if (!segmented_) current.bufferCount = frame.bufferCount - current.firstBuffer;
+    current.fenceEvent  = splitFence_;
+    current.fenceSignal = ++splitFenceValue_;
+    const u32 next = openSubmission(frame, MetalContext::SubmitQueue::Graphics, 0, 0);
+    frame.submissions[next].fenceEvent = splitFence_;
+    frame.submissions[next].fenceWait  = splitFenceValue_;
+    if (segmented_) graphicsSub_ = next;
+}
+
 void MetalGraphExecutor::encodeChunkJob(void* user, u32 chunk) {
     const ChunkJob& job = *static_cast<const ChunkJob*>(user);
     job.executor->runPass(job.encoders[chunk], job.position, *job.frame, chunk, job.chunks);
@@ -492,6 +507,22 @@ MTL4::CommandBuffer* MetalGraphExecutor::encodeSplitGroup(MetalContext::Frame& f
     const rg::RenderGroup& plan = compiled_.renderGroups[group];
     MTL4::RenderPassDescriptor* desc = passDescriptors_[group];
     const u32 chunks = graph_->passes()[compiled_.order[splitPosition]].parallelChunks;
+
+    // Measured in F5 (M5 Max, macOS 27.2): no barrier orders the pieces of a
+    // render pass resumed in other command buffers after earlier work of the
+    // same commit -- neither the group's queue barriers (at the head or at
+    // every piece) nor a producer barrierAfterStages at the end of the
+    // previous compute encoder: chunks intermittently read scene data the
+    // compute passes had not written yet (bench 6/8 frames = the previous
+    // frame).  So the split pass starts a new commit that waits on an event
+    // signalled after everything before it, and the next frame's first
+    // commit waits for this one (the same hazard in reverse): debug mode only.
+    {
+        MTL4::CommandBuffer* previous = cmd;
+        cutSubmissionForSplit(frame);
+        cmd = beginExtraCommandBuffer(frame, frame.bufferCount - 1);
+        if (previous != frame.commandBuffer) previous->endCommandBuffer();
+    }
 
     // Every piece of the render pass is created here, on this thread, from
     // the same descriptor; only the recording of the chunks is parallel.
@@ -513,6 +544,7 @@ MTL4::CommandBuffer* MetalGraphExecutor::encodeSplitGroup(MetalContext::Frame& f
 
     head->setLabel(groupLabels_[group]);
     encodeBarriers(head, plan.firstPosition);
+
     for (u32 pos = plan.firstPosition; pos < splitPosition; ++pos) runPass(head, pos, frame);
     head->endEncoding();
     if (cmd != frame.commandBuffer) cmd->endCommandBuffer(); // tail of an earlier split
@@ -553,6 +585,16 @@ void MetalGraphExecutor::execute(MetalContext::Frame& frame) {
         frame.submissions[graphicsSub_].firstBuffer = 0; // frame.commandBuffer
         frame.submissions[graphicsSub_].bufferCount = 1;
         asyncSub_ = ~0u;
+    } else if (hasSplit_) {
+        // F2.5 split pass: the frame is several graphics commits (see
+        // encodeSplitGroup); the first one covers frame.commandBuffer.
+        openSubmission(frame, SubmitQueue::Graphics, 0, 0);
+        frame.submissions[0].firstBuffer = 0;
+    }
+    if (hasSplit_) {
+        // The previous frame's split pass reads what this frame writes first.
+        frame.submissions[segmented_ ? graphicsSub_ : 0].fenceEvent = splitFence_;
+        frame.submissions[segmented_ ? graphicsSub_ : 0].fenceWait  = splitFenceValue_;
     }
 
     for (size_t e = 0; e < compiled_.encoders.size(); ++e) {
@@ -625,6 +667,16 @@ void MetalGraphExecutor::execute(MetalContext::Frame& frame) {
     }
     // The frame's own command buffer is ended by MetalContext::submitFrame.
     if (cmd != frame.commandBuffer) cmd->endCommandBuffer();
+    if (hasSplit_ && frame.submissionCount > 0) {
+        u32 last = 0;
+        for (u32 i = 0; i < frame.submissionCount; ++i) {
+            if (frame.submissions[i].queue == SubmitQueue::Graphics) last = i;
+        }
+        MetalContext::Submission& sub = frame.submissions[last];
+        if (!segmented_) sub.bufferCount = frame.bufferCount - sub.firstBuffer;
+        sub.fenceEvent  = splitFence_;
+        sub.fenceSignal = ++splitFenceValue_; // waited for by the next frame's first commit
+    }
     if (asyncCmd) {
         asyncCmd->endCommandBuffer();
         // The last async commit tells when the frame's async work is done.

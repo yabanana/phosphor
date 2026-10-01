@@ -1,6 +1,7 @@
 #include "core/launch_options.h"
 
 #include <charconv>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <string_view>
@@ -61,7 +62,21 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             }
             return true;
         };
-        auto needString = [&](std::string& target) {
+        // A finite decimal number (std::strtof); NaN/inf are rejected.
+        auto needFloat = [&](float& target) {
+            const auto value = needValue();
+            if (!value) return false;
+            const std::string text(*value);
+            char* end = nullptr;
+            const float f = std::strtof(text.c_str(), &end);
+            if (text.empty() || end != text.c_str() + text.size() || !std::isfinite(f)) {
+                error = std::string(arg) + ": expected a number, got '" + text + "'";
+                return false;
+            }
+            target = f;
+            return true;
+        };
+        auto needString =[&](std::string& target) {
             const auto value = needValue();
             if (!value) return false;
             target = *value;
@@ -249,6 +264,63 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             }
         } else if (arg == "--graph-plan") {
             if (!needString(out.graphPlanPath)) return false;
+        } else if (arg == "--gpu-driven") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "off") out.gpuDriven = GpuDrivenMode::Off;
+            else if (*value == "on") out.gpuDriven = GpuDrivenMode::On;
+            else {
+                error = "--gpu-driven: expected off or on, got '" + std::string(*value) + "'";
+                return false;
+            }
+        } else if (arg == "--instances") {
+            if (!needCount(out.sceneInstances)) return false;
+            if (out.sceneInstances < 1 || out.sceneInstances > 16777216) {
+                error = "--instances: expected 1..16777216";
+                return false;
+            }
+        } else if (arg == "--scene-meshes") {
+            if (!needCount(out.sceneMeshes)) return false;
+            if (out.sceneMeshes < 1 || out.sceneMeshes > 1024) {
+                error = "--scene-meshes: expected 1..1024";
+                return false;
+            }
+        } else if (arg == "--dynamic-cpu") {
+            float pct = 0.0f;
+            if (!needFloat(pct)) return false;
+            if (pct < 0.0f || pct > 100.0f) {
+                error = "--dynamic-cpu: expected a percentage in 0..100";
+                return false;
+            }
+            out.dynamicCpuPercent = pct;
+        } else if (arg == "--churn") {
+            if (!needCount(out.churn)) return false;
+        } else if (arg == "--cull-distance") {
+            if (!needFloat(out.cullDistance)) return false;
+            if (out.cullDistance < 0.0f) {
+                error = "--cull-distance: expected a distance >= 0 (0 = off)";
+                return false;
+            }
+        } else if (arg == "--cull-min-pixels") {
+            if (!needFloat(out.cullMinPixels)) return false;
+            if (out.cullMinPixels < 0.0f) {
+                error = "--cull-min-pixels: expected a size >= 0 (0 = off)";
+                return false;
+            }
+        } else if (arg == "--debug-gpu-scene") {
+            if (!needCount(out.debugGpuScene)) return false;
+        } else if (arg == "--debug-gpu-scene-corrupt") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "delta") out.debugGpuSceneCorrupt = SceneCorruption::Delta;
+            else if (*value == "plane") out.debugGpuSceneCorrupt = SceneCorruption::Plane;
+            else if (*value == "command") out.debugGpuSceneCorrupt = SceneCorruption::Command;
+            else if (*value == "touch") out.debugGpuSceneCorrupt = SceneCorruption::Touch;
+            else {
+                error = "--debug-gpu-scene-corrupt: expected delta, plane, command or touch, got '" +
+                        std::string(*value) + "'";
+                return false;
+            }
         } else if (arg == "--graph-no-alias") {
             out.graphNoAlias = true;
         } else if (arg == "--graph-remat-cost") {

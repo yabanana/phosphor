@@ -104,6 +104,21 @@ extend it; port algorithms from it.
   latency-bound passes: never adopt a plan without measuring it.  Measure
   only on a quiet machine (no agent, solver or other benchmark running:
   frame times become bimodal).
+- F5 GPU scene (macOS): `--gpu-driven off|on` (default on; off = one CPU draw
+  per bucket, same image), bench 8 `--instances N --scene-meshes K
+  --dynamic-cpu PCT --churn N`, `--cull-distance D --cull-min-pixels P`,
+  `--debug-gpu-scene N` (exact readback self-check every N frames, exit 1 on
+  FAIL) with `--debug-gpu-scene-corrupt delta|plane|command|touch` (each must
+  FAIL); report schema 5 (`scene`, `cpu_phases`) and the `SCENE` line.
+  Kernel checks: `f5_spike --only F5-K2,F5-K3` (`bench/f5_spike`).
+  `visual_check` covers bench 8 (`BENCH8_ARGS`); captures are only
+  comparable in the same mode: Debug vs Release metallibs differ by 1 pixel
+  (bench 1) and running with vs without the validation layers by 9 pixels
+  (bench 6) -- `archive_check` needs Release references
+  (`tools/visual_check.sh build/release <dir> --update`).  Comparing GPU
+  times of builds with different CPU cost per frame needs equal CPU time
+  (`--gpu-timing-serial` is DVFS-sensitive: measured 2.8 vs 1.8 ms for the
+  same forward pass).
 - Before calling a Metal API, check its exact signature in the fetched
   metal-cpp headers (`build/linux/_deps/metal_cpp-src/Metal/MTL4*.hpp`); Metal 4
   names differ from Metal 3 (e.g. no `setVertexBytes`, draws take GPU addresses,
@@ -202,6 +217,27 @@ extend it; port algorithms from it.
   `INSTANCE_FLAG_MIRRORED` and are drawn in their own batches with front-face
   culling; back faces are culled (glTF `doubleSided` materials are not).
   `tests/test_procedural.cpp` enforces the meshes.
+- GPU scene (F5): instance, material, node and motion data reach the GPU
+  only through `SceneStore` deltas (`renderer/scene_store.h`); benches change
+  components through mutable ECS access (`getComponent`/`modify` mark them
+  changed, `const` access never does) and the engine calls `ECS::endFrame()`
+  after the sync; EntityIDs are recycled.  The vertex shaders read
+  `instances[visible[instance_id]]`.  Scene passes (`Scene update`, `Scene
+  transforms`, `Instance cull`, `Draw build`) chain their own dispatches with
+  Dispatch->Dispatch encoder barriers; a draw that consumes indirect
+  arguments or an ICB written by compute waits at the **Vertex** stage
+  (Fragment/Object/Mesh do not synchronise, spike S5).  ICBs: one command per
+  bucket, three fixed ranges per cull class, the state set by the CPU; never
+  `executeCommandsInBuffer` inside a render encoder resumed in another
+  command buffer (GPU fault and recovery every frame) and never an indirect
+  execution range (shader validation aborts).  A split render pass (F2.5) is
+  a separate commit behind a fence: barriers do not order resumed pieces
+  after earlier work.  Shared C++/MSL math that must match the CPU bit for
+  bit uses `fp contract(off)` (`cull_math.h`, `transform_math.h`).  Pipelines
+  that draw the scene set `PipelineDesc::indirectCommandBuffers`.
+- GPU safety: every kernel loop has a hard bound, no kernel waits on another
+  threadgroup, command buffers stay far below 1 s, and one GPU test process
+  at a time (a 60 s job made the WindowServer watchdog kill the compositor).
 - Reverse-Z infinite projection (clear depth 0, compare Greater), NDC y up.
 - Hardware floor is Apple9 (M3); anything needing Apple10 (M5) must have a
   fallback or be an explicitly higher tier.

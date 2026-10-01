@@ -62,12 +62,14 @@ DebugOverlays::DebugOverlays(MetalContext& context, PipelineCache& pipelines) : 
     desc.label        = "Overlay overdraw";
     desc.functions    = {"overlay_vs", "overdraw_fs"};
     desc.output(0, rg::Format::R16Float);
+    desc.indirectCommandBuffers = true; // redraws the scene's draws (F5.3 ICB)
     d.overdraw = pipelines.request(desc);
 
     desc = {};
     desc.label     = "Overlay light count";
     desc.functions = {"overlay_vs", "lightcount_fs"};
     desc.output(0, rg::Format::R16Float);
+    desc.indirectCommandBuffers = true;
     d.lights = pipelines.request(desc);
 
     desc = {};
@@ -149,6 +151,7 @@ rg::TextureRef DebugOverlays::addToGraph(rg::RenderGraph& graph, rg::TextureRef 
             [&](PassBuilder& b) {
                 d.overdrawRef = b.createTexture("Overdraw count", {Format::R16Float, width, height});
                 d.overdrawRef = b.writeColor(d.overdrawRef, 0, LoadIntent::Clear); // count 0
+                renderer->declareDrawReads(b);
                 b.setHints(HintGeometryHeavy);
                 b.setProfileShaders("overlay_vs,overdraw_fs");
             },
@@ -169,6 +172,7 @@ rg::TextureRef DebugOverlays::addToGraph(rg::RenderGraph& graph, rg::TextureRef 
                 d.lightsRef = b.writeColor(d.lightsRef, 0, LoadIntent::Clear, clear);
                 const TextureRef depth = b.createTexture("Overlay depth", {Format::Depth32Float, width, height});
                 b.writeDepth(depth, LoadIntent::Clear, clear); // memoryless
+                renderer->declareDrawReads(b);
                 b.setHints(HintFragmentHeavy);
                 b.setProfileShaders("overlay_vs,lightcount_fs");
             },

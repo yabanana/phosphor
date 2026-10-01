@@ -14,10 +14,9 @@
 using namespace phosphor;
 
 // --- allocation counter (active only around run() in the allocation test) ---
-namespace {
+// External linkage: tests/test_scene_store.cpp reads the same counter.
 std::atomic<bool> g_countAllocs{false};
 std::atomic<u64>  g_allocs{0};
-} // namespace
 
 void* operator new(std::size_t n) {
     if (g_countAllocs.load(std::memory_order_relaxed)) g_allocs.fetch_add(1, std::memory_order_relaxed);

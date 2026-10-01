@@ -3,6 +3,7 @@
 #include <doctest/doctest.h>
 #include <glm/glm.hpp>
 
+#include <cmath>
 #include <string>
 #include <utility>
 #include <vector>
@@ -18,6 +19,12 @@ std::vector<std::pair<std::string, MeshData>> allMeshes() {
         {"sphere", ProceduralMeshes::generateSphere(0.5f, 16, 8)},
         {"cube", ProceduralMeshes::generateCube(1.0f)},
         {"plane", ProceduralMeshes::generatePlane(4.0f, 2.0f, 3, 2)},
+        {"icosahedron flat", ProceduralMeshes::generateIcosahedron(1.0f, 0, true)},
+        {"icosahedron smooth", ProceduralMeshes::generateIcosahedron(1.0f, 0, false)},
+        {"icosahedron sub1 flat", ProceduralMeshes::generateIcosahedron(2.0f, 1, true)},
+        {"icosahedron sub2 smooth", ProceduralMeshes::generateIcosahedron(0.5f, 2, false)},
+        {"octahedron flat", ProceduralMeshes::generateOctahedron(1.0f, true)},
+        {"octahedron smooth", ProceduralMeshes::generateOctahedron(1.5f, false)},
     };
 }
 
@@ -71,5 +78,62 @@ TEST_CASE("procedural meshes: tangent frame matches the UV layout") {
         }
         CHECK(wrongTangent == 0);
         CHECK(wrong == 0);
+    }
+}
+
+TEST_CASE("procedural meshes: icosahedron and octahedron counts, radius and unit normals") {
+    for (u32 sub = 0; sub <= 2; ++sub) {
+        for (const bool flat : {true, false}) {
+            const MeshData m = ProceduralMeshes::generateIcosahedron(2.0f, sub, flat);
+            CAPTURE(sub);
+            CAPTURE(flat);
+            CHECK(m.indices.size() == 3u * 20u * (1u << (2 * sub)));
+            CHECK(m.normals.size() == m.positions.size());
+            CHECK(m.tangents.size() == m.positions.size());
+            CHECK(m.uvs.size() == m.positions.size());
+            if (flat) CHECK(m.positions.size() == m.indices.size());
+            else CHECK(m.positions.size() < m.indices.size());
+            for (size_t i = 0; i < m.positions.size(); ++i) {
+                CHECK(glm::length(m.positions[i]) == doctest::Approx(2.0f).epsilon(1e-5));
+                CHECK(glm::length(m.normals[i]) == doctest::Approx(1.0f).epsilon(1e-5));
+                CHECK(glm::length(glm::vec3(m.tangents[i])) == doctest::Approx(1.0f).epsilon(1e-4));
+                CHECK(std::abs(glm::dot(m.normals[i], glm::vec3(m.tangents[i]))) < 1e-4f);
+                CHECK(std::abs(m.tangents[i].w) == 1.0f);
+            }
+            for (const u32 idx : m.indices) CHECK(idx < m.positions.size());
+        }
+    }
+    for (const bool flat : {true, false}) {
+        const MeshData o = ProceduralMeshes::generateOctahedron(1.0f, flat);
+        CHECK(o.indices.size() == 24);
+        for (size_t i = 0; i < o.positions.size(); ++i) {
+            CHECK(glm::length(o.positions[i]) == doctest::Approx(1.0f).epsilon(1e-5));
+            CHECK(glm::length(o.normals[i]) == doctest::Approx(1.0f).epsilon(1e-5));
+        }
+    }
+}
+
+TEST_CASE("procedural meshes: polyhedra faces wind counter-clockwise seen from outside (convex, centred)") {
+    // Independent of the stored normals (a flat normal is derived from the winding).
+    for (const auto& [name, mesh] : allMeshes()) {
+        if (name.find("icosahedron") == std::string::npos && name.find("octahedron") == std::string::npos) continue;
+        CAPTURE(name);
+        for (size_t t = 0; t < mesh.indices.size(); t += 3) {
+            const glm::vec3 a = mesh.positions[mesh.indices[t]], b = mesh.positions[mesh.indices[t + 1]],
+                            c = mesh.positions[mesh.indices[t + 2]];
+            CHECK(glm::dot(glm::cross(b - a, c - a), a + b + c) > 0.0f);
+        }
+    }
+}
+
+TEST_CASE("procedural meshes: flat polyhedra have one normal per face, smooth ones radial normals") {
+    const MeshData flat = ProceduralMeshes::generateIcosahedron(1.0f, 0, true);
+    for (size_t t = 0; t < flat.indices.size(); t += 3) {
+        CHECK(flat.normals[flat.indices[t]] == flat.normals[flat.indices[t + 1]]);
+        CHECK(flat.normals[flat.indices[t]] == flat.normals[flat.indices[t + 2]]);
+    }
+    const MeshData smooth = ProceduralMeshes::generateOctahedron(3.0f, false);
+    for (size_t i = 0; i < smooth.positions.size(); ++i) {
+        CHECK(glm::length(smooth.normals[i] - glm::normalize(smooth.positions[i])) < 1e-5f);
     }
 }

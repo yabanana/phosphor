@@ -10,6 +10,7 @@
 #include "platform/metal/gpu_capture.h"
 #include "platform/metal/known_cost_pass.h"
 #include "platform/metal/gpu_memory.h"
+#include "platform/metal/gpu_scene_check.h"
 #include "platform/metal/async_compute_probe.h"
 #include "platform/metal/debug_overlays.h"
 #include "platform/metal/graph_debug_passes.h"
@@ -22,11 +23,16 @@
 #include "platform/metal/scenario_passes.h"
 #include "platform/metal/shader_reloader.h"
 #include "platform/metal/scene_renderer.h"
+#include "renderer/cull_reference.h"
 #include "renderer/gpu_scene.h"
+#include "renderer/scene_check.h"
+#include "renderer/scene_store.h"
+#include "renderer/transform_math.h"
 #include "rendergraph/graph_dump.h"
 #include "rendergraph/optimizer/plan.h"
 #include "rendergraph/pass_context.h"
 #include "scene/camera.h"
+#include "scene/components.h"
 #include "scene/ecs.h"
 
 #include <SDL3/SDL.h>
@@ -77,6 +83,36 @@ void heapUsage(u64& blocks, u64& bytes) {
 
 float toMs(Clock::duration d) {
     return std::chrono::duration<float, std::milli>(d).count();
+}
+
+// F5 self-check negative control (--debug-gpu-scene-corrupt touch): change a
+// transform WITHOUT the ECS noticing (const access, then a cast), so the
+// scene store misses it and SceneStore::verifyAgainstEcs must report it.
+void corruptUntrackedTransform(const ECS& ecs) {
+    const auto& meshes = ecs.getArray<MeshInstanceComponent>();
+    const auto& transforms = ecs.getArray<TransformComponent>();
+    for (const EntityID e : meshes.entities()) {
+        if (!transforms.has(e)) continue;
+        auto& t = const_cast<TransformComponent&>(transforms.get(e));
+        t.worldMatrix[3][0] += 1.0f;
+        return;
+    }
+}
+
+std::string formatSceneLine(const SceneReport& s) {
+    char buf[512];
+    std::snprintf(buf, sizeof(buf),
+                  "SCENE gpu-driven %s | instances %u slots %u buckets %u materials %u commands %u | upload %.1f KiB/frame "
+                  "(p99 %.1f) | records %.0f | visible %.0f | culled frustum %.0f distance %.0f size %.0f | draws %.0f | "
+                  "cpu commands %.0f (min %.0f max %.0f) | structure changes %u | queue overflow %u",
+                  s.mode.c_str(), s.instances, s.slots, s.buckets, s.materials, s.commands,
+                  static_cast<double>(s.uploadBytes.mean) / 1024.0, static_cast<double>(s.uploadBytes.p99) / 1024.0,
+                  static_cast<double>(s.deltaRecords.mean), static_cast<double>(s.visible.mean),
+                  static_cast<double>(s.culledFrustum.mean), static_cast<double>(s.culledDistance.mean),
+                  static_cast<double>(s.culledSize.mean), static_cast<double>(s.drawCommands.mean),
+                  static_cast<double>(s.cpuCommands.mean), static_cast<double>(s.cpuCommands.min),
+                  static_cast<double>(s.cpuCommands.max), s.structureChanges, s.queueOverflow);
+    return buf;
 }
 
 } // namespace
@@ -166,6 +202,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
 
     ecs_        = std::make_unique<ECS>();
     gpuScene_   = std::make_unique<GpuScene>();
+    store_      = std::make_unique<SceneStore>();
     camera_     = std::make_unique<Camera>(glm::radians(60.0f), static_cast<float>(w) / std::max(h, 1), 0.05f, 1000.0f);
     input_      = std::make_unique<Input>();
     timer_      = std::make_unique<Timer>();
@@ -236,6 +273,7 @@ Engine::~Engine() {
     }
 
     reloader_.reset();
+    sceneChecker_.reset();
     pressure_.reset();
     graphExecutor_.reset();
     timestamps_.reset();
@@ -293,6 +331,7 @@ void Engine::run() {
             measureFirstFrame_ = context_->frameIndex();
             measureLastFrame_  = measureFirstFrame_ + options_.frames - 1;
             context_->beginGpuTimeCapture(options_.frames);
+            sceneSamples_.reserve(options_.frames);
             allocationsAtStart_ = context_->memory().allocationCount();
             heapUsage(heapBlocksAtStart_, heapBytesAtStart_);
         }
@@ -446,6 +485,7 @@ void Engine::recordBenchmarkFrame(float dt, float cpuMs, float waitMs) {
         measureLastFrame_  = measureFirstFrame_ + options_.frames - 1;
         context_->beginGpuTimeCapture(options_.frames);
         samples_.reserve(options_.frames);
+        sceneSamples_.reserve(options_.frames);
         trace_.reserve(options_.frames, options_.frames / std::max(options_.switchEvery, 1u) + 2);
         allocationsAtStart_ = context_->memory().allocationCount();
         heapUsage(heapBlocksAtStart_, heapBytesAtStart_);
@@ -511,6 +551,46 @@ void Engine::finishBenchmark() {
     report.gpuTiming        = timestamps_ != nullptr && timestamps_->enabled();
     report.gpuTimingUnfused = options_.gpuTimingUnfused;
     report.graph            = graphReport_;
+    // F5 (schema 5): the counters of the last frames (the GPU is idle).
+    for (u32 k = 0; k < 3; ++k) {
+        u32 next = ~0u;
+        for (u32 s = 0; s < 3; ++s) {
+            if (slotFrame_[s] != ~0ull && (next == ~0u || slotFrame_[s] < slotFrame_[next])) next = s;
+        }
+        if (next == ~0u) break;
+        onSceneCounters(next);
+    }
+    {
+        const SceneSamples& ss = sceneSamples_;
+        SceneReport& sr = report.scene;
+        sr.present   = true;
+        sr.mode      = options_.gpuDriven == GpuDrivenMode::On ? "on" : "off";
+        const SceneSyncStats& st = store_->stats();
+        sr.instances = store_->instanceCount();
+        sr.slots     = store_->slotCapacity();
+        sr.buckets   = static_cast<u32>(store_->buckets().size());
+        sr.materials = static_cast<u32>(store_->materials().size());
+        sr.commands  = store_->commandCount();
+        (void)st;
+        sr.structureChanges = ss.structureChanges;
+        sr.queueOverflow    = ss.queueOverflow;
+        sr.uploadBytes    = summarize(ss.uploadBytes);
+        sr.deltaRecords   = summarize(ss.deltaRecords);
+        sr.visible        = summarize(ss.visible);
+        sr.culledFrustum  = summarize(ss.culledFrustum);
+        sr.culledDistance = summarize(ss.culledDistance);
+        sr.culledSize     = summarize(ss.culledSize);
+        sr.drawCommands   = summarize(ss.drawCommands);
+        sr.cpuCommands    = summarize(ss.cpuCommands);
+        CpuPhasesReport& cp = report.cpuPhases;
+        cp.present   = true;
+        cp.sim       = summarize(ss.sim);
+        cp.sceneSync = summarize(ss.sceneSync);
+        cp.prepare   = summarize(ss.prepare);
+        cp.ui        = summarize(ss.ui);
+        cp.graph     = summarize(ss.graph);
+        cp.submit    = summarize(ss.submit);
+    }
     if (report.gpuTiming) passTimings_.summarize(report.passes, report.gpuPassSumMs, report.gpuFrameSpanMs);
     // OPT-0.4: work of the passes the cost model can price (CPU data of the
     // last frame; the benches' scenes do not change their draw lists).
@@ -519,7 +599,9 @@ void Engine::finishBenchmark() {
             PassWork w;
             w.pass = pass;
             if (pass == "Forward") {
-                const ForwardWork f = forwardPassWork(*gpuScene_, frameScene_, report.width, report.height);
+                // F5: the draws of the last frame: per bucket in off, the
+                // ICB's non-empty commands (GPU draw arguments) in on.
+                const ForwardWork f = sceneForwardWork(report.width, report.height);
                 w.draws     = f.draws;
                 w.instances = f.instances;
                 w.indices   = f.indices;
@@ -545,6 +627,11 @@ void Engine::finishBenchmark() {
     }
     // stdout, not the log: scripts collect this line.
     std::printf("BENCH %s\n", formatReportLine(report).c_str());
+    if (report.scene.present) std::printf("%s\n", formatSceneLine(report.scene).c_str());
+    if (gpuSceneChecks_ > 0) {
+        std::printf("GPU-SCENE checks %u | failures %u | %s\n", gpuSceneChecks_, gpuSceneFailures_,
+                    gpuSceneFailures_ == 0 ? "PASS" : "FAIL");
+    }
     if (!trace_.switches().empty() || !options_.frameTracePath.empty()) {
         std::printf("%s\n", formatHitchReport(analyzeHitches(trace_)).c_str());
     }
@@ -666,7 +753,12 @@ void Engine::switchTestBench(TestBenchType type) {
 
     currentBench_ = type;
     framesOnBench_ = 0;
-    activeBench_ = createTestBench(type);
+    TestBenchParams benchParams;
+    benchParams.instances         = options_.sceneInstances;
+    benchParams.meshes            = options_.sceneMeshes;
+    benchParams.dynamicCpuPercent = options_.dynamicCpuPercent;
+    benchParams.churn             = options_.churn;
+    activeBench_ = createTestBench(type, benchParams);
     LOG_INFO("Switching to test bench: %s", activeBench_->getName());
     activeBench_->setup(*ecs_, *gpuScene_, *textures_);
     const Clock::time_point t2 = Clock::now();
@@ -674,6 +766,12 @@ void Engine::switchTestBench(TestBenchType type) {
     textures_->flushUploads();
     const Clock::time_point t3 = Clock::now();
     renderer_->syncGeometry(*gpuScene_);
+    // F5.1: full build of the persistent scene, uploaded through staging.
+    store_->clear();
+    store_->sync(*ecs_, *gpuScene_);
+    ecs_->endFrame();
+    renderer_->loadScene(*store_);
+    sceneTime_ = 0.0;
     const Clock::time_point t4 = Clock::now();
     // The previous bench's resources are unused now: free their heap ranges
     // and give back heaps that became empty.
@@ -810,11 +908,24 @@ bool Engine::frame(float dt) {
     camera_->setAspect(static_cast<float>(context_->width()) / static_cast<float>(std::max(context_->height(), 1u)));
     camera_->updateMatrices();
 
+    const Clock::time_point s0 = Clock::now();
     {
         PH_ZONE("Simulation");
         activeBench_->update(dt, *ecs_);
     }
-    extractFrameScene(*ecs_, *gpuScene_, frameScene_);
+    sceneTime_ += dt;
+    const Clock::time_point s1 = Clock::now();
+    // F5.1: O(changed) sync of the persistent scene, then the ECS change
+    // lists are cleared (every component change of this frame is consumed).
+    const bool checkScene = options_.debugGpuScene > 0 && (presentedFrames_ + 1) % options_.debugGpuScene == 0;
+    if (checkScene && options_.debugGpuSceneCorrupt == SceneCorruption::Touch) corruptUntrackedTransform(*ecs_);
+    {
+        PH_ZONE("Scene sync");
+        store_->sync(*ecs_, *gpuScene_);
+        extractLights(*ecs_, lights_);
+        ecs_->endFrame();
+    }
+    const Clock::time_point s2 = Clock::now();
     frameStats_->update(*timer_, context_->lastGpuMs());
 
     context_->layer()->setDisplaySyncEnabled(settings_.vsync);
@@ -828,6 +939,8 @@ bool Engine::frame(float dt) {
         pool->release();
         return false;
     }
+    // F5: the slot's previous frame has completed: its scene counters.
+    onSceneCounters(frame.slot);
 
     FrameConstants constants{};
     std::memcpy(constants.viewProjection, &camera_->getViewProjection()[0][0], sizeof(constants.viewProjection));
@@ -837,7 +950,7 @@ bool Engine::frame(float dt) {
     constants.cameraPosition[1] = camPos.y;
     constants.cameraPosition[2] = camPos.z;
     constants.cameraPosition[3] = static_cast<float>(timer_->getTotalTime());
-    constants.lightCount = static_cast<u32>(frameScene_.lights.size());
+    constants.lightCount = static_cast<u32>(lights_.size());
     constants.debugMode  = static_cast<u32>(settings_.debugMode);
     constants.exposure   = settings_.exposure;
     constants.frameIndex = static_cast<u32>(frame.index);
@@ -850,8 +963,34 @@ bool Engine::frame(float dt) {
     const bool lastFrame = !options_.benchmark() || presentedFrames_ + 1 == options_.warmup + options_.frames;
     captureThisFrame_ = capture_ && lastFrame && !captured_;
 
+    // F5.2/F5.5: the motion table of this frame and the cull parameters.
+    motionSinCosTable(sceneTime_, motionSinCos_.data());
+    {
+        u32 flags = CULL_FLAG_FRUSTUM;
+        if (options_.cullDistance > 0.0f) flags |= CULL_FLAG_DISTANCE;
+        if (options_.cullMinPixels > 0.0f) flags |= CULL_FLAG_SIZE;
+        cullParams_ = makeCullParams(camera_->getViewProjection(), camera_->getProjection()[1][1], height, camPos,
+                                     camera_->getFront(), camera_->getNear(), flags, options_.cullDistance,
+                                     options_.cullMinPixels, store_->slotCapacity());
+    }
+    SceneRenderer::FrameParams sceneParams;
+    sceneParams.slot         = frame.slot;
+    sceneParams.width        = width;
+    sceneParams.height       = height;
+    sceneParams.mode         = options_.gpuDriven;
+    sceneParams.cull         = cullParams_;
+    sceneParams.motionSinCos = motionSinCos_.data();
+    sceneParams.corrupt      = checkScene ? options_.debugGpuSceneCorrupt : SceneCorruption::None;
+    // Bench switch or capacity growth (prepareFrame may reallocate): staged
+    // before the graph so a recompilation sees the new capacities.
+    const Clock::time_point s3 = Clock::now();
+    const u64 sceneBytes = renderer_->prepareFrame(*store_, lights_, constants, textures_->tableAddress(), sceneParams);
+    overlays_->prepareFrame(overlayMode_, constants.lightCount, width, height);
+    if (renderer_->usingFallback()) frameFlags_ |= FrameFallbackDraw;
+    const Clock::time_point s4 = Clock::now();
+
     const GraphKey key{width, height, options_.ui, capture_ != nullptr, options_.debugSplitEncoding,
-                       options_.debugAsyncCompute, overlayMode_};
+                       options_.debugAsyncCompute, overlayMode_, options_.gpuDriven, renderer_->buffers().version()};
     if (!(key == graphKey_) || !graphExecutor_->valid()) {
         frameFlags_ |= FrameGraphCompile;
         if (key.width != graphKey_.width || key.height != graphKey_.height) frameFlags_ |= FrameResize;
@@ -873,13 +1012,12 @@ bool Engine::frame(float dt) {
 
     if (graphDebug_) graphDebug_->beginFrame(frame.slot);
     if (asyncProbe_) asyncProbe_->beginFrame(frame.slot);
-    renderer_->prepareFrame(*gpuScene_, frameScene_, constants, textures_->tableAddress(), width, height);
-    overlays_->prepareFrame(overlayMode_, constants.lightCount, width, height);
-    if (renderer_->usingFallback()) frameFlags_ |= FrameFallbackDraw;
+    const Clock::time_point s5 = Clock::now();
     if (options_.ui) {
         PH_ZONE("UI");
         drawUi();
     }
+    const Clock::time_point s6 = Clock::now();
 
     graphExecutor_->bindTexture(drawableRef_, target);
     if (capture_) graphExecutor_->bindBuffer(captureRef_, capture_->readback());
@@ -893,11 +1031,32 @@ bool Engine::frame(float dt) {
     if (graphDebug_) graphDebug_->frameEncoded(frame.slot, frame.index);
     if (asyncProbe_) asyncProbe_->frameEncoded(frame.slot, frame.index);
     if (captureThisFrame_) captured_ = true;
+    lastCpuCommands_ = renderer_->cpuCommands();
 
+    const Clock::time_point s7 = Clock::now();
     {
         PH_ZONE("Submit");
         context_->submitFrame(frame);
     }
+    slotFrame_[frame.slot]    = frame.index;
+    slotMeasured_[frame.slot] = measuring();
+    if (measuring()) {
+        const Clock::time_point s8 = Clock::now();
+        SceneSamples& ss = sceneSamples_;
+        ss.sim.push_back(toMs(s1 - s0));
+        ss.sceneSync.push_back(toMs(s2 - s1));
+        ss.prepare.push_back(toMs(s4 - s3));
+        ss.ui.push_back(toMs(s6 - s5));
+        ss.graph.push_back(toMs(s7 - s6));
+        ss.submit.push_back(toMs(s8 - s7));
+        ss.uploadBytes.push_back(static_cast<float>(sceneBytes));
+        const SceneSyncStats& st = store_->stats();
+        ss.deltaRecords.push_back(static_cast<float>(st.instanceRecords + st.materialRecords + st.nodeRecords +
+                                                     st.motionRecords));
+        ss.cpuCommands.push_back(static_cast<float>(lastCpuCommands_));
+        if (st.structure) ++ss.structureChanges;
+    }
+    if (checkScene && !checkGpuScene(frame.slot)) exitCode_ = 1;
     if (gpuCapture_) gpuCapture_->endFrame();
     // F4.1: no overlap between consecutive frames on the GPU.
     if (options_.gpuTimingSerial) context_->waitIdle();
@@ -950,8 +1109,8 @@ void Engine::drawUi() {
     info.apple9      = context_->isApple9OrLater();
     info.width       = context_->width();
     info.height      = context_->height();
-    info.instances   = static_cast<u32>(frameScene_.instances.size());
-    info.drawBatches = static_cast<u32>(frameScene_.batches.size());
+    info.instances   = store_->instanceCount();
+    info.drawBatches = static_cast<u32>(store_->buckets().size());
     info.triangles   = renderer_->lastTriangleCount();
     info.meshlets    = gpuScene_->getMeshletTotalCount();
     info.textures    = textures_->textureCount();
@@ -975,11 +1134,104 @@ void Engine::drawUi() {
     pipelineInfo.entries  = pipelines_->entryCount();
     pipelineInfo.fallback = renderer_->usingFallback();
     UIPanels::drawPipelinePanel(pipelineInfo);
+    {
+        // F5: the GPU scene (counters of the last completed frame).
+        const SceneSyncStats& st = store_->stats();
+        ScenePanelInfo sp;
+        sp.mode             = options_.gpuDriven == GpuDrivenMode::On ? "on" : "off";
+        sp.instances        = store_->instanceCount();
+        sp.slots            = store_->slotCapacity();
+        sp.buckets          = static_cast<u32>(store_->buckets().size());
+        sp.materials        = static_cast<u32>(store_->materials().size());
+        sp.commands         = store_->commandCount();
+        sp.visible          = options_.gpuDriven == GpuDrivenMode::On ? lastCounters_.visible : store_->instanceCount();
+        sp.culledFrustum    = lastCounters_.culledFrustum;
+        sp.culledDistance   = lastCounters_.culledDistance;
+        sp.culledSize       = lastCounters_.culledSize;
+        sp.drawCommands     = lastCounters_.drawCommands;
+        sp.cpuCommands      = lastCpuCommands_; // the previous encoded frame
+        sp.deltaRecords     = st.instanceRecords + st.materialRecords + st.nodeRecords + st.motionRecords;
+        sp.structureChanges = sceneSamples_.structureChanges;
+        sp.queueOverflow    = lastCounters_.queueOverflow;
+        sp.uploadBytes      = st.uploadBytes;
+        UIPanels::drawScenePanel(sp);
+    }
     UIPanels::drawPassTimingsPanel(timestamps_ ? &passTimings_ : nullptr, context_->lastGpuMs(),
                                    options_.gpuTimingUnfused);
     if (overlayMode_ == OverlayMode::Timings) UIPanels::drawTimingsOverlay(timestamps_ ? &passTimings_ : nullptr);
 
     ImGui::Render();
+}
+
+void Engine::SceneSamples::reserve(u32 frames) {
+    for (std::vector<float>* v : {&sim, &sceneSync, &prepare, &ui, &graph, &submit, &uploadBytes, &deltaRecords,
+                                  &cpuCommands, &visible, &culledFrustum, &culledDistance, &culledSize, &drawCommands}) {
+        v->clear();
+        v->reserve(frames);
+    }
+    structureChanges = 0;
+    queueOverflow    = 0;
+}
+
+void Engine::onSceneCounters(u32 slot) {
+    if (slotFrame_[slot] == ~0ull) return;
+    lastCounters_ = renderer_->counters(slot);
+    if (slotMeasured_[slot]) {
+        SceneSamples& ss = sceneSamples_;
+        const bool on = options_.gpuDriven == GpuDrivenMode::On;
+        // Off draws every live instance with one CPU draw per bucket.
+        ss.visible.push_back(static_cast<float>(on ? lastCounters_.visible : store_->instanceCount()));
+        ss.culledFrustum.push_back(static_cast<float>(lastCounters_.culledFrustum));
+        ss.culledDistance.push_back(static_cast<float>(lastCounters_.culledDistance));
+        ss.culledSize.push_back(static_cast<float>(lastCounters_.culledSize));
+        u32 offDraws = 0;
+        for (const SceneBucket& b : store_->buckets()) offDraws += b.count > 0 ? 1u : 0u;
+        ss.drawCommands.push_back(static_cast<float>(on ? lastCounters_.drawCommands : offDraws));
+        ss.queueOverflow = std::max(ss.queueOverflow, lastCounters_.queueOverflow);
+    }
+    slotFrame_[slot]    = ~0ull;
+    slotMeasured_[slot] = false;
+}
+
+ForwardWork Engine::sceneForwardWork(u32 width, u32 height) const {
+    ForwardWork w;
+    const auto& infos = gpuScene_->meshInfos();
+    const u64 totalVertices = gpuScene_->vertices().size();
+    const auto buckets = store_->buckets();
+    const bool on = options_.gpuDriven == GpuDrivenMode::On;
+    // On: the instance counts the GPU wrote for the last frame's commands.
+    const u32 lastSlot = static_cast<u32>((context_->frameIndex() + METAL_FRAMES_IN_FLIGHT - 1) % METAL_FRAMES_IN_FLIGHT);
+    const auto* args = on ? static_cast<const u32*>(renderer_->buffers().frame(lastSlot).drawArgs->contents()) : nullptr;
+    for (size_t i = 0; i < buckets.size(); ++i) {
+        const SceneBucket& b = buckets[i];
+        if (b.mesh >= infos.size() || infos[b.mesh].indexCount == 0) continue;
+        const u64 instances = on ? args[2 * b.command] : b.count;
+        if (instances == 0) continue;
+        const GPUMeshInfo& info = infos[b.mesh];
+        const u64 end = b.mesh + 1 < infos.size() ? infos[b.mesh + 1].vertexOffset : totalVertices;
+        const u64 meshVertices = end > info.vertexOffset ? end - info.vertexOffset : 0;
+        ++w.draws;
+        w.instances += instances;
+        w.indices += u64(info.indexCount) * instances;
+        w.vertices += meshVertices * instances;
+    }
+    w.pixels = u64(width) * height;
+    w.lights = static_cast<u32>(lights_.size());
+    return w;
+}
+
+bool Engine::checkGpuScene(u32 slot) {
+    PH_ZONE("GPU scene check");
+    context_->waitIdle();
+    ++gpuSceneChecks_;
+    if (!sceneChecker_) sceneChecker_ = std::make_unique<GpuSceneChecker>(*context_);
+    const SceneCheckResult r = sceneChecker_->check(*renderer_, *store_, *gpuScene_, *ecs_, cullParams_,
+                                                    motionSinCos_.data(), slot, options_.gpuDriven);
+    if (!r.pass) ++gpuSceneFailures_;
+    // stdout: scripts and the negative controls read these lines.
+    std::printf("GPU-SCENE frame %u | %s\n", presentedFrames_, formatSceneCheck(r).c_str());
+    std::fflush(stdout);
+    return r.pass;
 }
 
 void Engine::declareFrameGraph(u32 width, u32 height) {
@@ -1004,6 +1256,10 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
     if (asyncProbe_) asyncProbe_->addProducers(frameGraph_);
     if (knownCost_) knownCost_->addToGraph(frameGraph_);
 
+    // F5: the scene's passes (update, transforms, and with gpu-driven on the
+    // instance cull and the ICB build) run before the forward pass.
+    if (!scenario_) renderer_->addPassesToGraph(frameGraph_, options_.gpuDriven);
+
     if (!scenario_) frameGraph_.addPass(
         "Forward", PassType::Raster,
         [&](PassBuilder& b) {
@@ -1016,14 +1272,20 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
             TextureRef depth = b.createTexture("Depth", {Format::Depth32Float, width, height});
             color = b.writeColor(color, 0, LoadIntent::Clear, clear);
             b.writeDepth(depth, LoadIntent::Clear, clear);
+            renderer_->declareDrawReads(b);
             b.setHints(HintGeometryHeavy);
             b.setProfileShaders("forward_vs,forward_fs");
             // F4.1 negative control: the known-cost pass runs before the
             // forward pass, never beside it.
             if (knownCost_) b.read(knownCost_->output(), Usage::ShaderRead, StageVertex);
             // F2.5 check: the draws are recorded by 4 threads into a render
-            // pass suspended/resumed across command buffers.
-            if (options_.debugSplitEncoding) b.setParallelChunks(4);
+            // pass suspended/resumed across command buffers.  Not with
+            // gpu-driven on (measured, M5 Max / macOS 27.2): an
+            // executeCommandsInBuffer inside a render encoder RESUMED in
+            // another command buffer makes the GPU fault and recover (every
+            // frame "Discarded (victim of GPU error/recovery)"), and the pass
+            // encodes ~7 commands anyway; the ICB runs in one encoder.
+            if (options_.debugSplitEncoding && options_.gpuDriven == GpuDrivenMode::Off) b.setParallelChunks(4);
         },
         [this](PassContext& ctx) {
             renderer_->encode(static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder()), ctx.chunk(), ctx.chunkCount());

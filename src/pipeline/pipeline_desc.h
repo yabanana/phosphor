@@ -57,6 +57,9 @@ struct PipelineDesc {
     u32 constantCount = 0;
     std::array<ColorOutput, MAX_COLOR_ATTACHMENTS> color{};
     u32 colorCount = 0;
+    /// F5.3 render pipelines: usable from indirect command buffers (the
+    /// scene's draws inherit the pipeline from the render encoder).
+    bool indirectCommandBuffers = false;
 
     /// Append a constant (asserts on overflow in debug builds).
     PipelineDesc& constant(u16 index, ConstantType type, u32 bits);

@@ -135,11 +135,11 @@ ipotesi da validare con uno spike, non come tecniche già provate.
 | F4 | Osservabilità: profiler, contatori, cattura, perf log | CORE | I |
 | OPT-0 | Caratterizzazione del SoC (`bench/`, modello di costo) ✅ (manca OPT-0.2 su T0) | OPT | I |
 | OPT-1 | Memoria, grafo e banda come problema di ottimizzazione ✅ (OPT-1.5/1.7 parziali, T0 non misurato) | OPT | I |
-| OPT-2 | Shader, pipeline e occupancy | OPT | I |
-| F5 | GPU scene persistente e submission guidata dalla GPU | CORE | II · Geometria |
+| F5 | GPU scene persistente e submission guidata dalla GPU ✅ | CORE | II · Geometria |
 | F6 | Mesh shader e culling a due fasi | CORE | II |
 | F7 | Visibility buffer e shading ibrido TBDR | CORE | II |
 | F8 | HDR, EDR, esposizione e MetalFX temporal | CORE | II |
+| OPT-2 | Shader, pipeline e occupancy (spostata dopo F8) | OPT | II |
 | OPT-3 | Geometria, culling e dati di vertice | OPT | II |
 | OPT-4 | Shading, banda e ricostruzione | OPT | II |
 | F9 | Infrastruttura ray tracing | CORE | III · Luce |
@@ -190,9 +190,9 @@ ipotesi da validare con uno spike, non come tecniche già provate.
 | Periodo | Linea principale (rendering) | Linea parallela (runtime/strumenti) |
 |---|---|---|
 | ott–nov 2026 | F1, F2, F3, F4 | — |
-| dic 2026 | **OPT-0, OPT-1, OPT-2** | F21 (cooker minimo) |
+| dic 2026 | **OPT-0, OPT-1** | F21 (cooker minimo) |
 | gen–feb 2027 | F5, F6, F7, F8 | F21 |
-| mar 2027 | **OPT-3, OPT-4** | F23 |
+| mar 2027 | **OPT-2, OPT-3, OPT-4** | F23 |
 | apr–giu 2027 | F9, F10, F11, F12, F13 + **checkpoint WWDC 2027** | F27, F24 |
 | lug 2027 | F14, **OPT-5, OPT-6** | **OPT-9** |
 | ago–ott 2027 | F15, F16, F17, F18, F22 | F25, F34 |
@@ -335,44 +335,25 @@ scenari l'ordine è imposto dai dati e i byte restano quelli degli algoritmi
 (perf-log). OPT-1.5 e OPT-1.7 restano parziali (niente contatori hardware,
 nessun compute reale da ridimensionare); T0 non disponibile (O12).
 
-## OPT-2 — Shader, pipeline e occupancy [OPT]
-
-**Obiettivo (ipotesi)**: occupancy target ≥ 90% per tutti gli shader caldi,
-−15% di tempo GPU totale a parità di immagine.
-
-**Letture**: [R5] [R6] [R7]; playbook S-ALU-*, S-OCC-*, S-SIMD-*.
-
-**Direzioni di ricerca**
-- [ ] OPT-2.1 **Shader LOD automatico**: varianti semplificate degli shader generate con tecniche di semplificazione automatica [R5][R6] e usate dove l'errore non si vede (oggetti lontani, riflessioni, GI, tier bassi)
-- [ ] OPT-2.2 **Specializzazione guidata dal profilo**: registrare durante i test quali combinazioni di feature compaiono davvero e generare varianti (function constant) solo per quelle (O11)
-- [ ] OPT-2.3 **Roofline automatica**: strumento che da counter heap e contatori calcola intensità aritmetica e collo di bottiglia per pass e lo mostra in ImGui [R4]
-- [ ] OPT-2.4 Riscrittura ILP-friendly dei kernel più caldi (più catene indipendenti, niente `float4` che maschera dipendenze) [R7]
-
-**Spremitura del SoC**
-- [ ] OPT-2.5 Censimento dei registri vivi per riga (Xcode 26.4+) per ogni shader caldo; riduzione dei picchi (S-OCC-1)
-- [ ] OPT-2.6 Tabella occupancy target + causa di throttling per shader, con correzione mirata (S-OCC-2)
-- [ ] OPT-2.7 Conversione sistematica a `half` con suffisso `h`, verificata dai test visivi (S-ALU-3)
-- [ ] OPT-2.8 Strength reduction: niente div/mod interi nei cicli caldi, trascendentali `half`/`fast::` dove accettabile (S-ALU-4)
-- [ ] OPT-2.9 Sweep delle dimensioni di threadgroup per ogni kernel e per chip, risultati salvati per l'autotuning (S-OCC-3)
-- [ ] OPT-2.10 Compattazioni e riduzioni riscritte con intrinsics SIMD-group (S-SIMD-1)
-- [ ] OPT-2.11 Tempo di compilazione e numero di varianti misurati; pruning delle varianti mai usate
-
 ---
 
 # Era II — Geometria GPU-driven
 
-## F5 — GPU scene persistente e submission guidata dalla GPU [CORE]
+## F5 — GPU scene persistente e submission guidata dalla GPU ✅ [CORE]
 
 **Obiettivo**: la CPU non codifica più draw per oggetto (O8).
 
-- [ ] F5.1 GPU scene persistente: istanze, materiali, mesh in buffer GPU con **aggiornamenti delta** (solo gli oggetti cambiati), memoria unificata con scrittura diretta
-- [ ] F5.2 Gerarchia di transform aggiornata in compute
-- [ ] F5.3 **Indirect command buffer costruiti dalla GPU**: un dispatch di culling scrive i comandi di draw
-- [ ] F5.4 Catena di dispatch indiretti come sostituto dei work graph (Metal non li ha): code GPU a produttore/consumatore tra pass
-- [ ] F5.5 Instance culling in compute (frustum + distanza + dimensione su schermo)
-- [ ] F5.6 Testbench "1M istanze" dinamiche
+- [x] F5.1 GPU scene persistente: istanze, materiali, mesh in buffer GPU con **aggiornamenti delta** (solo gli oggetti cambiati), memoria unificata con scrittura diretta — `SceneStore` (slot stabili per bucket (classe di culling, mesh), buchi riutilizzati, materiali persistenti per entità), tracciamento delle modifiche nell'ECS in O(cambiati) e riciclo degli id, record delta scritti dalla CPU nell'anello del frame e applicati da `scene_scatter` in buffer `private` persistenti (copia intera oltre 1/8 cambiato, spike S2); byte per frame proporzionali ai cambi (96 B per record, 1,1 KiB/frame sulle scene ferme), `--debug-gpu-scene` esatto byte per byte
+- [x] F5.2 Gerarchia di transform aggiornata in compute — figli e moto procedurale calcolati sulla GPU con prodotto `fp contract(off)` bit-identico a glm (spike S6), verificati bit per bit dal self-check; radici in moto con figli espanse da una coda persistente
+- [x] F5.3 **Indirect command buffer costruiti dalla GPU**: un dispatch di culling scrive i comandi di draw — `scene_draw_build` scrive un comando per bucket, tre range fissi per classe di culling (Apple9/Apple10), `--gpu-driven off|on` (default on): stessa immagine (0 pixel sugli 8 bench con ogni flag F2), comandi CPU costanti al variare delle istanze (66 nel bench 8 da 10K a 1M; off cresce con i bucket)
+- [x] F5.4 Catena di dispatch indiretti come sostituto dei work graph (Metal non li ha): code GPU a produttore/consumatore tra pass — `renderer/gpu_queue.h` (append aggregati per SIMD-group, overflow contato, argomenti scritti da un kernel a un thread, `dispatchThreadgroups` indiretto); usi reali: code dei nodi sporchi della gerarchia per livello e coda persistente delle radici in moto; verifica GPU F5-K3 con conteggi dipendenti dai dati
+- [x] F5.5 Instance culling in compute (frustum + distanza + dimensione su schermo) — `renderer/cull_math.h` condiviso C++/MSL, piani del reverse-Z infinito (corretto `Camera::getFrustumPlanes`), compattazione stabile reduce-then-scan (deterministica, spike S4); lista visibile = riferimento CPU (0 differenze anche nella banda), `--cull-distance`/`--cull-min-pixels` (spenti di default), controllo negativo a pixel
+- [x] F5.6 Testbench "1M istanze" dinamiche — bench 8 "1M Instances (dynamic)": 1M istanze in moto (moto GPU, 1% aggiornato dalla CPU, satelliti a profondità 3, `--churn`, `--instances`, `--scene-meshes`); 60 fps su M5 Max (dettagli e CV nel perf-log); T0 non disponibile (O12)
 
 **Uscita**: Stress Test con conteggio di comandi CPU costante; 1M istanze in movimento a 60 fps su T2.
+Raggiunta su M5 Max (T2): comandi CPU costanti al variare delle istanze e
+dei bucket in `--gpu-driven on`; bench 8 a 1M istanze in moto con p99 di
+frame, CPU e GPU sotto 16,6 ms e 120 fps con vsync (`perf-log.md`, "F5").
 
 ## F6 — Mesh shader e culling a due fasi [CORE]
 
@@ -411,6 +392,34 @@ nessun compute reale da ridimensionare); T0 non disponibile (O12).
 **Uscita**: stabilità temporale senza ghosting visibile sui testbench in movimento; misure base per ricalibrare i budget.
 
 ---
+
+## OPT-2 — Shader, pipeline e occupancy [OPT]
+
+*Spostata dopo F8 il 2026-10-01 (decisione del proprietario): alla fine
+dell'era I l'unico shader caldo era `forward_fs`; le direzioni di OPT-2
+(shader LOD, specializzazione da profilo, ILP, sweep dei threadgroup,
+`half`) rendono sui kernel e sugli shader che F5–F8 aggiungono (culling,
+compattazione, Hi-Z, material resolve, post). Gli ID restano invariati.*
+
+**Obiettivo (ipotesi)**: occupancy target ≥ 90% per tutti gli shader caldi,
+−15% di tempo GPU totale a parità di immagine.
+
+**Letture**: [R5] [R6] [R7]; playbook S-ALU-*, S-OCC-*, S-SIMD-*.
+
+**Direzioni di ricerca**
+- [ ] OPT-2.1 **Shader LOD automatico**: varianti semplificate degli shader generate con tecniche di semplificazione automatica [R5][R6] e usate dove l'errore non si vede (oggetti lontani, riflessioni, GI, tier bassi)
+- [ ] OPT-2.2 **Specializzazione guidata dal profilo**: registrare durante i test quali combinazioni di feature compaiono davvero e generare varianti (function constant) solo per quelle (O11)
+- [ ] OPT-2.3 **Roofline automatica**: strumento che da counter heap e contatori calcola intensità aritmetica e collo di bottiglia per pass e lo mostra in ImGui [R4]
+- [ ] OPT-2.4 Riscrittura ILP-friendly dei kernel più caldi (più catene indipendenti, niente `float4` che maschera dipendenze) [R7]
+
+**Spremitura del SoC**
+- [ ] OPT-2.5 Censimento dei registri vivi per riga (Xcode 26.4+) per ogni shader caldo; riduzione dei picchi (S-OCC-1)
+- [ ] OPT-2.6 Tabella occupancy target + causa di throttling per shader, con correzione mirata (S-OCC-2)
+- [ ] OPT-2.7 Conversione sistematica a `half` con suffisso `h`, verificata dai test visivi (S-ALU-3)
+- [ ] OPT-2.8 Strength reduction: niente div/mod interi nei cicli caldi, trascendentali `half`/`fast::` dove accettabile (S-ALU-4)
+- [ ] OPT-2.9 Sweep delle dimensioni di threadgroup per ogni kernel e per chip, risultati salvati per l'autotuning (S-OCC-3)
+- [ ] OPT-2.10 Compattazioni e riduzioni riscritte con intrinsics SIMD-group (S-SIMD-1)
+- [ ] OPT-2.11 Tempo di compilazione e numero di varianti misurati; pruning delle varianti mai usate
 
 ## OPT-3 — Geometria, culling e dati di vertice [OPT]
 

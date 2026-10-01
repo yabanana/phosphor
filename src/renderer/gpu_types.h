@@ -47,6 +47,9 @@ PHOSPHOR_STATIC_ASSERT(sizeof(GPUInstance) == 80, "GPUInstance layout");
 // Mirrored: the model matrix has a negative determinant, which reverses the
 // triangle winding on screen, so front_facing must be inverted.
 PHOSPHOR_GPU_CONSTANT u32 INSTANCE_FLAG_MIRRORED = 1u << 3;
+// F5: the slot holds a live instance (scene store slots of a bucket's slack
+// have it clear and are never drawn or culled in).
+PHOSPHOR_GPU_CONSTANT u32 INSTANCE_FLAG_VALID = 1u << 4;
 
 PHOSPHOR_GPU_CONSTANT u32 INVALID_TEXTURE_INDEX = 0xFFFFFFFFu;
 
@@ -113,6 +116,107 @@ struct FrameConstants {
     u32 frameIndex;
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(FrameConstants) == 160, "FrameConstants layout");
+
+// ---------------------------------------------------------------------------
+// F5: persistent GPU scene (renderer/scene_store.h, renderer/gpu_scene_layout.h)
+// ---------------------------------------------------------------------------
+
+/// Deepest transform hierarchy level the GPU processes (roots = level 0).
+PHOSPHOR_GPU_CONSTANT u32 SCENE_MAX_LEVELS = 8;
+/// Speed classes of the procedural motion: the CPU evaluates sin/cos of each
+/// class's angle once per frame, the GPU only multiplies and adds (bit-exact
+/// CPU mirror, F5.2).
+PHOSPHOR_GPU_CONSTANT u32 SCENE_MOTION_CLASSES = 64;
+/// Cull classes (CullClass): Back, BackMirrored, None.  The ICB holds one
+/// fixed command range per class, each ending with a sentinel command that
+/// is always reset (F5.3, D2).
+PHOSPHOR_GPU_CONSTANT u32 SCENE_CULL_CLASSES = 3;
+
+/// One CPU->GPU delta: `slot` (element index in the destination buffer) and
+/// up to 20 words of payload (GPUInstance, GPUMaterial, GPUTransformNode and
+/// GPUMotion are all 80 bytes).  Applied by kernel scene_scatter (D1).
+struct GPUDeltaRecord {
+    u32 slot;
+    u32 pad[3];
+    u32 payload[20];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDeltaRecord) == 96, "GPUDeltaRecord layout");
+
+/// Hierarchy node of a slot whose entity has a parent (F5.2): world =
+/// world(parentSlot) * local, computed on the GPU with the product of
+/// renderer/transform_math.h (fp contract off: bit-identical to glm).
+struct GPUTransformNode {
+    float local[16];  // column-major
+    u32   parentSlot; // slot of the parent instance
+    u32   depth;      // 1 .. SCENE_MAX_LEVELS - 1
+    u32   pad[2];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUTransformNode) == 80, "GPUTransformNode layout");
+
+/// Procedural motion of a root (F5.6): world = translate(orbit) * rotateY(a)
+/// * base, with (sin a, cos a) of the slot's speed class for this frame and
+/// orbit = centre + (r (cos a cosP - sin a sinP), h, r (sin a cosP + cos a sinP)).
+struct GPUMotion {
+    float centre[3];
+    float radius;
+    float cosPhase;
+    float sinPhase;
+    float height;
+    u32   speedClass;  // < SCENE_MOTION_CLASSES
+    float base[12];    // 3x4 column-major: three basis columns + translation
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUMotion) == 80, "GPUMotion layout");
+
+/// A draw bucket = (cull class, mesh): a contiguous slot region, one ICB
+/// command.  Buckets are sorted by (class, mesh); the command index of a
+/// bucket is its index plus the sentinels of the classes before it.
+struct GPUDrawBucket {
+    u32 firstSlot;
+    u32 capacity;      // slots of the region (live + slack)
+    u32 meshIndex;
+    u32 cullClass;
+    u32 indexCount;
+    u32 indexOffset;   // into the global index buffer
+    u32 vertexOffset;  // base vertex
+    u32 command;       // ICB command index
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDrawBucket) == 32, "GPUDrawBucket layout");
+
+// GPUCullParams::flags
+PHOSPHOR_GPU_CONSTANT u32 CULL_FLAG_FRUSTUM  = 1u << 0;
+PHOSPHOR_GPU_CONSTANT u32 CULL_FLAG_DISTANCE = 1u << 1;
+PHOSPHOR_GPU_CONSTANT u32 CULL_FLAG_SIZE     = 1u << 2;
+
+/// Instance culling (F5.5, renderer/cull_math.h): planes of the reverse-Z
+/// infinite frustum (left, right, bottom, top, near; xyz normal, w distance,
+/// normalised), camera, thresholds.
+struct GPUCullParams {
+    float planes[20];
+    float cameraPosition[3];
+    float maxDistance;     // CULL_FLAG_DISTANCE: culled if distance - radius > maxDistance
+    float minPixels;       // CULL_FLAG_SIZE: culled if projected diameter < minPixels
+    float pixelScale;      // projection[1][1] * viewportHeight / 2
+    float nearPlane;
+    u32   slotCount;       // slots to test (scene store capacity)
+    u32   groupCount;      // threadgroups of scene_cull_flags (SCENE_CULL_GROUP threads each)
+    u32   flags;           // CULL_FLAG_*
+    u32   pad[2];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUCullParams) == 128, "GPUCullParams layout");
+
+/// Counters written by the GPU passes of a frame and read back by the CPU
+/// METAL_FRAMES_IN_FLIGHT frames later (report, panel).
+struct GPUSceneCounters {
+    u32 tested;          // valid slots tested
+    u32 visible;
+    u32 culledFrustum;
+    u32 culledDistance;
+    u32 culledSize;
+    u32 drawCommands;    // non-empty ICB commands written
+    u32 nodesUpdated;    // hierarchy nodes recomputed
+    u32 queueOverflow;   // entries dropped by a full GPU queue (must stay 0)
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUSceneCounters) == 32, "GPUSceneCounters layout");
 
 // Constants of the debug overlays (F4.7, shaders/overlay.metal); the scales
 // and the palette are in diagnostics/overlay_math.h.

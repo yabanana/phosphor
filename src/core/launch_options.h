@@ -20,7 +20,7 @@ namespace phosphor {
 //   --fixed-timestep   advance the simulation by 1/60 s per frame regardless
 //                      of real time (deterministic captures)
 //   --switch-every N   switch to the next test bench every N frames, through
-//                      the same path as the 1-7 hotkeys (switching tests)
+//                      the same path as the 1-8 hotkeys (switching tests)
 //   --resize-every N   resize the window every N frames, alternating between
 //                      two sizes (tests the render graph recompilation)
 //   --simulate-pressure  inject a memory-pressure warning at frame 10 and a
@@ -123,10 +123,34 @@ namespace phosphor {
 //                      the graph's family when its key matches, else greedy)
 //   --graph-plan FILE  plans file (default: shaders/graph-plans.json next to
 //                      the shader library)
+//   --gpu-driven off|on  F5.3 how the scene's draws are submitted: off = the
+//                      CPU encodes one draw per (cull class, mesh) bucket; on =
+//                      GPU culling writes the indirect command buffer (default
+//                      on; both draw the same image)
+//   --instances N      bench 8: number of instances (default 1,000,000)
+//   --scene-meshes K   bench 8: number of distinct meshes (1..1024, default 8)
+//   --dynamic-cpu PCT  bench 8: percentage of the instances whose transform
+//                      the CPU changes every frame (0..100, default 1)
+//   --churn N          bench 8: N leaf instances destroyed and N created per frame
+//   --cull-distance D  F5.5: instances farther than D from the camera are
+//                      culled (0 = off)
+//   --cull-min-pixels P  F5.5: instances whose projected size is below P
+//                      pixels are culled (0 = off)
+//   --debug-gpu-scene N  F5 self-check: every N frames the GPU scene is read
+//                      back and compared exactly with the CPU model (prints a
+//                      GPU-SCENE line, exit code 1 on mismatch; 0 = off)
+//   --debug-gpu-scene-corrupt KIND  negative control of the check above:
+//                      delta, plane, command or touch (one deliberate
+//                      corruption that the check must report)
 //
 // Arguments not starting with "--" are ignored: macOS may add its own
 // (e.g. -NSDocumentRevisionsDebugMode when launched from Xcode).
 // ---------------------------------------------------------------------------
+
+/// F5.3 submission of the scene's draws (--gpu-driven).
+enum class GpuDrivenMode : u8 { Off, On };
+/// F5 self-check negative controls (--debug-gpu-scene-corrupt).
+enum class SceneCorruption : u8 { None, Delta, Plane, Command, Touch };
 
 /// OPT-1 graph compilation modes (--graph-opt).
 enum class GraphOptMode : u8 { Off, Greedy, Plan };
@@ -197,6 +221,17 @@ struct LaunchOptions {
     std::string graphPlanPath;               // empty: default location
 
     /// True when the app runs a fixed number of frames and then exits.
+    // F5: GPU scene and GPU-driven submission.
+    GpuDrivenMode gpuDriven      = GpuDrivenMode::On; // --gpu-driven off|on
+    u32         sceneInstances   = 0;     // --instances N (bench 8; 0 = bench default)
+    u32         sceneMeshes      = 0;     // --scene-meshes K (bench 8; 0 = bench default)
+    float       dynamicCpuPercent = -1.0f; // --dynamic-cpu PCT (bench 8; < 0 = bench default)
+    u32         churn            = 0;     // --churn N spawn + despawn per frame (bench 8)
+    float       cullDistance     = 0.0f;  // --cull-distance D (0 = off)
+    float       cullMinPixels    = 0.0f;  // --cull-min-pixels P (0 = off)
+    u32         debugGpuScene    = 0;     // --debug-gpu-scene N: exact readback check every N frames (0 = off)
+    SceneCorruption debugGpuSceneCorrupt = SceneCorruption::None; // --debug-gpu-scene-corrupt KIND
+
     [[nodiscard]] bool benchmark() const { return frames > 0; }
 };
 

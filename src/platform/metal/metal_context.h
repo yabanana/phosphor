@@ -67,6 +67,11 @@ public:
         u64         waitValue   = 0; // other queue's timeline >= value before the commit (0: none)
         u64         signalValue = 0; // own timeline = value after the commit (0: none)
         u64         waitFrame   = 0; // frameEvent() >= value before the commit (0: none)
+        // F2.5 split render pass: a same-queue fence (wait before the commit,
+        // signal after it; 0: none).
+        MTL::SharedEvent* fenceEvent  = nullptr;
+        u64               fenceWait   = 0;
+        u64               fenceSignal = 0;
     };
 
     struct Frame {

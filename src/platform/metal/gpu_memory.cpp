@@ -28,8 +28,11 @@ constexpr MTL::ResourceOptions kStorageModeMask = 0xF0;
 GpuMemory::GpuMemory(MetalContext& context) : context_(context) {}
 
 ResidencyClass GpuMemory::residencyClass(MemoryCategory category) {
-    return category == MemoryCategory::Geometry || category == MemoryCategory::Textures ? ResidencyClass::Streaming
-                                                                                        : ResidencyClass::Static;
+    // Level content: Geometry, Textures and the F5 GPU scene (rebuilt per bench).
+    return category == MemoryCategory::Geometry || category == MemoryCategory::Textures ||
+                   category == MemoryCategory::Scene
+               ? ResidencyClass::Streaming
+               : ResidencyClass::Static;
 }
 
 GpuMemory::~GpuMemory() {
@@ -114,6 +117,7 @@ namespace {
     case MemoryCategory::Upload:        return "GPU Upload";
     case MemoryCategory::Transient:     return "GPU Transient";
     case MemoryCategory::RenderTargets: return "GPU Render targets";
+    case MemoryCategory::Scene:         return "GPU Scene";
     case MemoryCategory::Other:         return "GPU Other";
     case MemoryCategory::COUNT:         break;
     }
@@ -127,6 +131,7 @@ namespace {
     case MemoryCategory::Upload:        return "GPU heap Upload";
     case MemoryCategory::Transient:     return "GPU heap Transient";
     case MemoryCategory::RenderTargets: return "GPU heap Render targets";
+    case MemoryCategory::Scene:         return "GPU heap Scene";
     case MemoryCategory::Other:         return "GPU heap Other";
     case MemoryCategory::COUNT:         break;
     }
@@ -222,6 +227,20 @@ MTL::Texture* GpuMemory::newTexture(const MTL::TextureDescriptor* descriptor, Me
     texture->setLabel(str(label));
     account(texture, category);
     return texture;
+}
+
+MTL::IndirectCommandBuffer* GpuMemory::newIndirectCommandBuffer(const MTL::IndirectCommandBufferDescriptor* descriptor,
+                                                               u32 maxCommands, MTL::ResourceOptions options,
+                                                               MemoryCategory category, const char* label) {
+    MTL::IndirectCommandBuffer* icb = context_.device()->newIndirectCommandBuffer(descriptor, maxCommands, options);
+    if (!icb) {
+        LOG_ERROR("GpuMemory: failed to create a %u-command indirect command buffer '%s'", maxCommands, label);
+        return nullptr;
+    }
+    context_.makeResident(icb, residencyClass(category));
+    icb->setLabel(str(label));
+    account(icb, category);
+    return icb;
 }
 
 void GpuMemory::release(MTL::Resource* resource, MemoryCategory category) {

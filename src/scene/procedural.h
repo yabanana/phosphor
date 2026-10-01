@@ -34,6 +34,19 @@ namespace ProceduralMeshes {
     // Subdivided quad on the XZ plane (Y = 0), centered at origin, normal up (+Y).
     MeshData generatePlane(float width, float depth, u32 subdivX, u32 subdivZ);
 
+    // Icosahedron inscribed in a sphere of `radius`.  subdivisions = 0 gives
+    // 20 triangles; each level splits every triangle in 4 (20 * 4^n) and
+    // projects the new vertices onto the sphere.  `flatNormals`: one normal per
+    // face, vertices not shared (faceted look); otherwise vertices are shared
+    // where position and UV agree and the normals are radial.  UVs are
+    // equirectangular like generateSphere (seam vertices duplicated, a pole
+    // vertex takes the mean U of its triangle).
+    MeshData generateIcosahedron(float radius, u32 subdivisions = 0, bool flatNormals = true);
+
+    // Octahedron with vertices at +-radius on the axes (8 triangles); same
+    // normal/UV options as generateIcosahedron.
+    MeshData generateOctahedron(float radius, bool flatNormals = true);
+
 } // namespace ProceduralMeshes
 
 } // namespace phosphor

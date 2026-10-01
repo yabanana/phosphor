@@ -11,9 +11,11 @@
 #include "imgui/ui_panels.h"
 #include "rendergraph/optimizer/plan.h"
 #include "rendergraph/render_graph.h"
+#include "renderer/gpu_types.h"
 #include "renderer/scene_extract.h"
 #include "testbench/testbench.h"
 
+#include <array>
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -43,6 +45,8 @@ class MetalTextureManager;
 class PipelineCache;
 class ShaderReloader;
 class SceneRenderer;
+class SceneStore;
+class GpuSceneChecker;
 class Timer;
 
 // ---------------------------------------------------------------------------
@@ -93,6 +97,14 @@ private:
     /// F4.1: consume the GPU times of a completed frame (panel window,
     /// benchmark measurement, Tracy GPU zones, capture threshold).
     void onFrameTimes(const GpuTimestamps::Resolved& r);
+    /// F5: the GPU scene counters of the frame that last used `slot` (it is
+    /// complete): report samples and the panel.
+    void onSceneCounters(u32 slot);
+    /// F5: --debug-gpu-scene: wait for the frame, read the scene back and
+    /// compare it with the CPU mirror and references; false on FAIL.
+    bool checkGpuScene(u32 slot);
+    /// OPT-0.4 work of the forward pass for the report (F5: from the scene store).
+    [[nodiscard]] ForwardWork sceneForwardWork(u32 width, u32 height) const;
 
     SDL_Window* window_    = nullptr;
     void*       metalView_ = nullptr; // SDL_MetalView
@@ -125,6 +137,11 @@ private:
 
     std::unique_ptr<ECS>        ecs_;
     std::unique_ptr<GpuScene>   gpuScene_;
+    std::unique_ptr<SceneStore> store_;       // F5.1 CPU mirror of the GPU scene
+    std::vector<GPULight>       lights_;      // extracted every frame (few)
+    double                      sceneTime_ = 0.0; // simulated seconds since the bench started (motion)
+    std::array<float, SCENE_MOTION_CLASSES * 2> motionSinCos_{};
+    GPUCullParams               cullParams_{};
     std::unique_ptr<Camera>     camera_;
     std::unique_ptr<Input>      input_;
     std::unique_ptr<Timer>      timer_;
@@ -146,6 +163,22 @@ private:
     u64                      heapBytesAtStart_   = 0;
     // CPU time spent blocked in beginFrame() (slot + drawable waits).
     std::chrono::steady_clock::duration frameWait_{};
+    // F5 (report schema 5): per measured frame CPU phases and scene samples.
+    struct SceneSamples {
+        std::vector<float> sim, sceneSync, prepare, ui, graph, submit;            // CPU ms
+        std::vector<float> uploadBytes, deltaRecords, cpuCommands;                 // per encoded frame
+        std::vector<float> visible, culledFrustum, culledDistance, culledSize, drawCommands; // GPU counters
+        u32 structureChanges = 0;
+        u32 queueOverflow    = 0;
+        void reserve(u32 frames);
+    } sceneSamples_;
+    std::array<u64, 3> slotFrame_{~0ull, ~0ull, ~0ull}; // frame index last submitted per slot
+    std::array<bool, 3> slotMeasured_{};                // ... and whether it was a measured frame
+    GPUSceneCounters lastCounters_{};
+    u32  lastCpuCommands_  = 0;
+    std::unique_ptr<GpuSceneChecker> sceneChecker_; // --debug-gpu-scene
+    u32  gpuSceneChecks_   = 0;
+    u32  gpuSceneFailures_ = 0;
 
     // F3 hitch measurement: per-frame records and bench-switch phases.
     FrameTrace                  trace_;
@@ -168,6 +201,8 @@ private:
         bool splitEncoding = false;
         bool asyncCompute  = false;
         OverlayMode overlay = OverlayMode::None;
+        GpuDrivenMode gpuDriven = GpuDrivenMode::Off;
+        u64  sceneBuffers  = 0; // GpuSceneBuffers::version(): capacities changed
         bool operator==(const GraphKey&) const = default;
     };
     rg::RenderGraph frameGraph_;
@@ -179,7 +214,6 @@ private:
     rg::BufferRef   captureRef_;
     bool            captureThisFrame_ = false;
 
-    FrameScene      frameScene_;
     MemoryPanelInfo memoryInfo_; // reused every frame (keeps vector capacity)
     std::vector<GpuMemory::HeapStats> heapStatsScratch_;
     RenderSettings settings_;

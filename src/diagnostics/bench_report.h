@@ -94,7 +94,42 @@ struct GraphReport {
     u64         maxLiveBytes = 0; // lower bound of the heap for this order
 };
 
-constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 4;
+// F5 (schema 5): the persistent GPU scene and its submission over the
+// measured frames.  Per-frame quantities are summaries over those frames;
+// GPU counters (visible, culled, draw commands) come from the frame's
+// GPUSceneCounters read back METAL_FRAMES_IN_FLIGHT frames later.
+struct SceneReport {
+    bool          present = false;
+    std::string   mode;            // gpu-driven "off" / "on"
+    u32           instances = 0;   // live instances (last frame)
+    u32           slots     = 0;
+    u32           buckets   = 0;
+    u32           materials = 0;
+    u32           commands  = 0;   // ICB commands (buckets + sentinels)
+    u32           structureChanges = 0; // structure events during the measured frames
+    u32           queueOverflow    = 0; // GPU queue entries dropped (must be 0)
+    TimingSummary uploadBytes;     // bytes written by the CPU for the scene per frame
+    TimingSummary deltaRecords;    // delta records per frame (all buffers)
+    TimingSummary visible;
+    TimingSummary culledFrustum;
+    TimingSummary culledDistance;
+    TimingSummary culledSize;
+    TimingSummary drawCommands;    // non-empty draws (on: ICB commands written; off: CPU draws)
+    TimingSummary cpuCommands;     // commands the CPU encoded for the scene per frame (O8)
+};
+
+// F5 (schema 5): CPU ms per frame phase (replaces the F5 spike S1 line).
+struct CpuPhasesReport {
+    bool          present = false;
+    TimingSummary sim;       // bench update
+    TimingSummary sceneSync; // SceneStore::sync + lights
+    TimingSummary prepare;   // renderer prepareFrame (delta upload)
+    TimingSummary ui;
+    TimingSummary graph;     // graph execution (encoding)
+    TimingSummary submit;
+};
+
+constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 5;
 
 struct BenchReport {
     std::string   bench;
@@ -122,6 +157,8 @@ struct BenchReport {
     TimingSummary gpuPassSumMs;
     TimingSummary gpuFrameSpanMs;
     GraphReport   graph;         // OPT-1 (schema 4)
+    SceneReport   scene;         // F5 (schema 5)
+    CpuPhasesReport cpuPhases;   // F5 (schema 5)
 };
 
 /// Nearest-rank statistics of `values` (empty input gives all zeros).

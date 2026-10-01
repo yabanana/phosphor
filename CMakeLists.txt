@@ -68,9 +68,13 @@ add_library(phosphor_core STATIC
     src/pipeline/pipeline_desc.cpp
     src/pipeline/pipeline_key.cpp
     src/pipeline/pipeline_registry.cpp
+    src/renderer/cull_reference.cpp
     src/renderer/gpu_scene.cpp
     src/renderer/meshlet_builder.cpp
+    src/renderer/scene_check.cpp
     src/renderer/scene_extract.cpp
+    src/renderer/scene_store.cpp
+    src/renderer/transform_reference.cpp
     src/rendergraph/aliasing.cpp
     src/rendergraph/barrier_plan.cpp
     src/rendergraph/async_probe_reference.cpp
@@ -94,6 +98,7 @@ add_library(phosphor_core STATIC
     src/testbench/cornell_box.cpp
     src/testbench/culling_viz.cpp
     src/testbench/many_lights.cpp
+    src/testbench/million_instances.cpp
     src/testbench/pbr_grid.cpp
     src/testbench/scene_viewer.cpp
     src/testbench/stress_test.cpp

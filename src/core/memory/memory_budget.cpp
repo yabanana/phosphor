@@ -11,6 +11,7 @@ const char* memoryCategoryName(MemoryCategory category) {
     case MemoryCategory::Upload:        return "Upload";
     case MemoryCategory::Transient:     return "Transient";
     case MemoryCategory::RenderTargets: return "Render targets";
+    case MemoryCategory::Scene:         return "Scene";
     case MemoryCategory::Other:         return "Other";
     case MemoryCategory::COUNT:         break;
     }
@@ -59,10 +60,11 @@ float MemoryBudget::share(MemoryCategory category) {
     // a game's footprint, geometry follows; rings and diagnostics are small.
     switch (category) {
     case MemoryCategory::Geometry:      return 0.25f;
-    case MemoryCategory::Textures:      return 0.45f;
+    case MemoryCategory::Textures:      return 0.40f;
     case MemoryCategory::Upload:        return 0.03f;
     case MemoryCategory::Transient:     return 0.12f;
     case MemoryCategory::RenderTargets: return 0.12f;
+    case MemoryCategory::Scene:         return 0.05f; // F5: ~0.2 GiB per million instances
     case MemoryCategory::Other:         return 0.03f;
     case MemoryCategory::COUNT:         break;
     }

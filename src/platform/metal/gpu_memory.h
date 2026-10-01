@@ -65,6 +65,13 @@ public:
     [[nodiscard]] MTL::Texture* newTexture(const MTL::TextureDescriptor* descriptor, MemoryCategory category,
                                            const char* label);
 
+    /// F5.3: an indirect command buffer (a device object, never placed in a
+    /// heap): labelled, made resident and accounted like a standalone buffer;
+    /// released with release().
+    [[nodiscard]] MTL::IndirectCommandBuffer* newIndirectCommandBuffer(const MTL::IndirectCommandBufferDescriptor* descriptor,
+                                                                       u32 maxCommands, MTL::ResourceOptions options,
+                                                                       MemoryCategory category, const char* label);
+
     /// Release after the frames currently in flight complete.  Null is ignored.
     void release(MTL::Resource* resource, MemoryCategory category);
 

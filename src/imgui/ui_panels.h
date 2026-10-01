@@ -91,6 +91,28 @@ struct PipelinePanelInfo {
     bool        fallback = false; // this frame drew with a fallback pipeline
 };
 
+/// Persistent GPU scene state shown in the GPU Scene panel (F5): plain data
+/// filled by the engine; the per-frame GPU counters are the ones read back a
+/// few frames late.
+struct ScenePanelInfo {
+    const char* mode = "off"; // --gpu-driven
+    u32 instances = 0;
+    u32 slots = 0;
+    u32 buckets = 0;
+    u32 materials = 0;
+    u32 commands = 0;
+    u32 visible = 0;
+    u32 culledFrustum = 0;
+    u32 culledDistance = 0;
+    u32 culledSize = 0;
+    u32 drawCommands = 0;
+    u32 cpuCommands = 0;
+    u32 deltaRecords = 0;
+    u32 structureChanges = 0;
+    u32 queueOverflow = 0;
+    u64 uploadBytes = 0;
+};
+
 // ---------------------------------------------------------------------------
 // UIPanels -- stateless helpers that draw the ImGui diagnostic windows.
 // ---------------------------------------------------------------------------
@@ -114,6 +136,10 @@ public:
 
     /// Pipeline cache: archive, compilations, fallbacks (F3).
     static void drawPipelinePanel(const PipelinePanelInfo& info);
+
+    /// F5: persistent GPU scene (instances, buckets, culling counters, upload
+    /// bytes, queue overflow).
+    static void drawScenePanel(const ScenePanelInfo& info);
 
     /// F4.1: GPU time per timed unit of the render graph (average and maximum
     /// over the last 60 frames), estimated DRAM bytes, and the sum compared

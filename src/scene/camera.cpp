@@ -1,5 +1,6 @@
 #include "scene/camera.h"
 #include "core/input.h"
+#include "renderer/cull_reference.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <SDL3/SDL_scancode.h>
@@ -121,40 +122,16 @@ void Camera::updateMatrices() {
 }
 
 // ---------------------------------------------------------------------------
-// Extract 6 frustum planes from the view-projection matrix.
-// Planes are in world space, normals point inward. Plane eq: dot(n,P)+d >= 0
-// Order: left, right, bottom, top, near, far
+// Extract the 5 frustum planes of the reverse-Z infinite projection from the
+// view-projection matrix.  Planes are in world space, normals point inward.
+// Plane eq: dot(n,P)+d >= 0.  Order: left, right, bottom, top, near.
 // ---------------------------------------------------------------------------
-std::array<glm::vec4, 6> Camera::getFrustumPlanes() const {
-    std::array<glm::vec4, 6> planes{};
-    const glm::mat4& m = viewProjection_;
-
-    // Left:   row3 + row0
-    planes[0] = glm::vec4(m[0][3] + m[0][0], m[1][3] + m[1][0],
-                           m[2][3] + m[2][0], m[3][3] + m[3][0]);
-    // Right:  row3 - row0
-    planes[1] = glm::vec4(m[0][3] - m[0][0], m[1][3] - m[1][0],
-                           m[2][3] - m[2][0], m[3][3] - m[3][0]);
-    // Bottom: row3 + row1
-    planes[2] = glm::vec4(m[0][3] + m[0][1], m[1][3] + m[1][1],
-                           m[2][3] + m[2][1], m[3][3] + m[3][1]);
-    // Top:    row3 - row1
-    planes[3] = glm::vec4(m[0][3] - m[0][1], m[1][3] - m[1][1],
-                           m[2][3] - m[2][1], m[3][3] - m[3][1]);
-    // Near:   row3 + row2
-    planes[4] = glm::vec4(m[0][3] + m[0][2], m[1][3] + m[1][2],
-                           m[2][3] + m[2][2], m[3][3] + m[3][2]);
-    // Far:    row3 - row2
-    planes[5] = glm::vec4(m[0][3] - m[0][2], m[1][3] - m[1][2],
-                           m[2][3] - m[2][2], m[3][3] - m[3][2]);
-
-    // Normalize each plane
-    for (auto& p : planes) {
-        float len = glm::length(glm::vec3(p));
-        if (len > 0.0f) p /= len;
-    }
-
-    return planes;
+std::array<glm::vec4, 5> Camera::getFrustumPlanes() const {
+    // Reverse-Z infinite projection: left, right, bottom, top, near, no far
+    // plane (the OpenGL extraction's slot 4 is not the near plane here).  Taken
+    // from viewProjection_, TAA jitter included: it moves the side planes by
+    // less than a pixel.
+    return extractFrustumPlanesReverseZ(viewProjection_);
 }
 
 // ---------------------------------------------------------------------------

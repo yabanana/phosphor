@@ -53,6 +53,10 @@ ForwardWork forwardPassWork(const GpuScene& scene, const FrameScene& frame, u32 
 /// Convert an ECS material component to its GPU layout.
 GPUMaterial toGPUMaterial(const MaterialComponent& material);
 
+/// Gather the lights of the ECS (const access: marks nothing) into `out`
+/// (cleared first); same output as the light loop of extractFrameScene.
+void extractLights(const ECS& ecs, std::vector<GPULight>& out);
+
 /// Gather visible instances, materials and lights from the ECS.
 ///
 /// Material resolution: an entity with a MaterialComponent gets its own GPU
