@@ -96,8 +96,10 @@ ScenarioPasses::ScenarioPasses(MetalContext& context, PipelineCache& pipelines, 
 
 ScenarioPasses::~ScenarioPasses() {
     context_.waitIdle();
-    for (MTL::Texture* t : history_) {
-        if (t) context_.memory().release(t, MemoryCategory::RenderTargets);
+    for (const auto& pair : history_) {
+        for (MTL::Texture* t : pair) {
+            if (t) context_.memory().release(t, MemoryCategory::RenderTargets);
+        }
     }
     for (MTL::Texture* t : statics_) {
         if (t) context_.memory().release(t, MemoryCategory::RenderTargets);
@@ -147,7 +149,7 @@ void ScenarioPasses::fill(MTL::Texture* texture, u32 seed) {
 }
 
 void ScenarioPasses::createPersistent() {
-    if (history_[0] || !statics_.empty()) return; // created once, reused by every rebuild
+    if (!history_.empty() || !statics_.empty()) return; // created once, reused by every rebuild
     u32 seed = 0xC0FFEEu;
     for (const rg::ScenarioImport& imp : scenario_.imports) {
         if (imp.role == rg::ScenarioImport::Role::Static) {
@@ -156,9 +158,11 @@ void ScenarioPasses::createPersistent() {
             statics_.push_back(t);
             continue;
         }
+        // A HistoryRead import opens a pair, its HistoryWrite closes it.
         const u32 i = imp.role == rg::ScenarioImport::Role::HistoryRead ? 0 : 1;
-        history_[i] = newTexture(imp.desc, MemoryCategory::RenderTargets, i ? "Scenario history B" : "Scenario history A");
-        fill(history_[i], seed++);
+        if (i == 0) history_.push_back({nullptr, nullptr});
+        history_.back()[i] = newTexture(imp.desc, MemoryCategory::RenderTargets, i ? "Scenario history B" : "Scenario history A");
+        fill(history_.back()[i], seed++);
     }
 }
 
@@ -277,13 +281,13 @@ void ScenarioPasses::bind(MetalGraphExecutor& executor, u64 frameIndex) {
     computeEncoder_ = nullptr;
     boundCompute_   = nullptr;
     const u32 parity = static_cast<u32>(frameIndex & 1u);
-    u32 s = 0;
+    u32 s = 0, h = 0;
     for (const rg::ScenarioImport& imp : scenario_.imports) {
         MTL::Texture* t = nullptr;
         switch (imp.role) {
         case rg::ScenarioImport::Role::Static:       t = statics_[s++]; break;
-        case rg::ScenarioImport::Role::HistoryRead:  t = history_[parity]; break;
-        case rg::ScenarioImport::Role::HistoryWrite: t = history_[parity ^ 1u]; break;
+        case rg::ScenarioImport::Role::HistoryRead:  t = history_[h][parity]; break;
+        case rg::ScenarioImport::Role::HistoryWrite: t = history_[h++][parity ^ 1u]; break;
         }
         executor.bindTexture({imp.resource, 0}, t);
     }

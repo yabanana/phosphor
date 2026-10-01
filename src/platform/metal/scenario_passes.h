@@ -83,8 +83,9 @@ private:
     MTL::DepthStencilState* depthWrite_ = nullptr;
     MTL::DepthStencilState* depthTest_  = nullptr;
     MTL::DepthStencilState* depthOff_   = nullptr;
-    // Persistent textures: history ping-pong pair and static imports, by import index.
-    std::array<MTL::Texture*, 2> history_{};
+    // Persistent textures: one history ping-pong pair per TAA (per view) and
+    // the static imports, in import order.
+    std::vector<std::array<MTL::Texture*, 2>> history_;
     std::vector<MTL::Texture*>   statics_;
     // Depth state of the render encoder being recorded (the validation layer
     // rejects redundant state; a new encoder starts from Metal's default).
