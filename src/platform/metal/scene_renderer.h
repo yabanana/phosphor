@@ -68,6 +68,10 @@ public:
     void encodeOverlay(MTL4::RenderCommandEncoder* encoder, pipe::PipelineHandle pipeline, bool depthTest) const;
 
     [[nodiscard]] u32 lastTriangleCount() const { return lastTriangles_; }
+    // F5 spike S1 (temporary): bytes written to the upload ring and CPU
+    // commands (draws + state + bindings) encoded for the last frame.
+    [[nodiscard]] u64 spikeUploadBytes() const { return spikeUploadBytes_; }
+    [[nodiscard]] u32 spikeCommands() const { return spikeCommands_; }
     /// True if the last prepared frame draws with the generic pipeline
     /// because its variant is not ready yet.
     [[nodiscard]] bool usingFallback() const { return usingFallback_; }
@@ -104,6 +108,8 @@ private:
     u32 width_  = 0;
     u32 height_ = 0;
     u32 lastTriangles_ = 0;
+    u64 spikeUploadBytes_ = 0;
+    mutable u32 spikeCommands_ = 0;
 };
 
 } // namespace phosphor

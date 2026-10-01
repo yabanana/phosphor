@@ -228,6 +228,32 @@ if(PHOSPHOR_DEBUGGABLE)
     )
 endif()
 
+# --- F5 spikes S2-S7 (measurement tool, not engine code) ---
+# The bench/soc harness and runner with the F5 spike benchmarks (ids F5-Sn);
+# their MSL lives in bench/f5_spike/shaders.  See bench/f5_spike/README.md.
+file(GLOB F5_SPIKE_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/bench/f5_spike/*.cpp)
+add_executable(f5_spike ${CMAKE_SOURCE_DIR}/bench/soc/harness.cpp ${CMAKE_SOURCE_DIR}/bench/soc/soc_bench.cpp
+    ${F5_SPIKE_SOURCES})
+target_include_directories(f5_spike PRIVATE ${CMAKE_SOURCE_DIR}/bench/soc)
+target_link_libraries(f5_spike PRIVATE phosphor_core metal_cpp IOReport
+    "-framework IOKit" "-framework CoreFoundation" "-framework AppKit" "-framework QuartzCore")
+target_compile_features(f5_spike PRIVATE cxx_std_20)
+target_compile_options(f5_spike PRIVATE ${PHOSPHOR_WARNINGS})
+target_compile_definitions(f5_spike PRIVATE
+    "SOC_SHADER_DIR=\"${CMAKE_SOURCE_DIR}/bench/soc/shaders\""
+    "F5_SHADER_DIR=\"${CMAKE_SOURCE_DIR}/bench/f5_spike/shaders\""
+    "SOC_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\""
+    "SOC_RESULTS_DIR=\"${CMAKE_SOURCE_DIR}/bench/results/f5-spike\""
+    "SOC_SDK_VERSION=\"${SOC_SDK_VERSION}\"")
+if(PHOSPHOR_DEBUGGABLE)
+    add_custom_command(TARGET f5_spike POST_BUILD
+        COMMAND codesign --force --sign - --entitlements ${CMAKE_SOURCE_DIR}/cmake/debuggable.entitlements
+                $<TARGET_FILE:f5_spike>
+        COMMENT "Signing f5_spike with get-task-allow (leaks)"
+        VERBATIM
+    )
+endif()
+
 # Test assets are looked up relative to the working directory.
 if(NOT EXISTS ${CMAKE_BINARY_DIR}/assets)
     file(CREATE_LINK ${CMAKE_SOURCE_DIR}/assets ${CMAKE_BINARY_DIR}/assets SYMBOLIC)

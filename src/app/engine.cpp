@@ -545,6 +545,14 @@ void Engine::finishBenchmark() {
     }
     // stdout, not the log: scripts collect this line.
     std::printf("BENCH %s\n", formatReportLine(report).c_str());
+    if (spikeFrames_ > 0) {
+        const double n = spikeFrames_;
+        std::printf("SPIKE-S1 frames %u instances %zu batches %zu | cpu ms sim %.3f extract %.3f prepare %.3f ui %.3f "
+                    "graph %.3f submit %.3f | upload MiB/frame %.2f | cpu commands/frame %.1f\n",
+                    spikeFrames_, frameScene_.instances.size(), frameScene_.batches.size(), spikeMs_[0] / n,
+                    spikeMs_[1] / n, spikeMs_[2] / n, spikeMs_[3] / n, spikeMs_[4] / n, spikeMs_[5] / n,
+                    spikeUpload_ / n / (1 << 20), spikeCommands_ / n);
+    }
     if (!trace_.switches().empty() || !options_.frameTracePath.empty()) {
         std::printf("%s\n", formatHitchReport(analyzeHitches(trace_)).c_str());
     }
@@ -810,11 +818,14 @@ bool Engine::frame(float dt) {
     camera_->setAspect(static_cast<float>(context_->width()) / static_cast<float>(std::max(context_->height(), 1u)));
     camera_->updateMatrices();
 
+    const Clock::time_point s0 = Clock::now();
     {
         PH_ZONE("Simulation");
         activeBench_->update(dt, *ecs_);
     }
+    const Clock::time_point s1 = Clock::now();
     extractFrameScene(*ecs_, *gpuScene_, frameScene_);
+    const Clock::time_point s2 = Clock::now();
     frameStats_->update(*timer_, context_->lastGpuMs());
 
     context_->layer()->setDisplaySyncEnabled(settings_.vsync);
@@ -873,13 +884,16 @@ bool Engine::frame(float dt) {
 
     if (graphDebug_) graphDebug_->beginFrame(frame.slot);
     if (asyncProbe_) asyncProbe_->beginFrame(frame.slot);
+    const Clock::time_point s3 = Clock::now();
     renderer_->prepareFrame(*gpuScene_, frameScene_, constants, textures_->tableAddress(), width, height);
     overlays_->prepareFrame(overlayMode_, constants.lightCount, width, height);
     if (renderer_->usingFallback()) frameFlags_ |= FrameFallbackDraw;
+    const Clock::time_point s4 = Clock::now();
     if (options_.ui) {
         PH_ZONE("UI");
         drawUi();
     }
+    const Clock::time_point s5 = Clock::now();
 
     graphExecutor_->bindTexture(drawableRef_, target);
     if (capture_) graphExecutor_->bindBuffer(captureRef_, capture_->readback());
@@ -894,9 +908,22 @@ bool Engine::frame(float dt) {
     if (asyncProbe_) asyncProbe_->frameEncoded(frame.slot, frame.index);
     if (captureThisFrame_) captured_ = true;
 
+    const Clock::time_point s6 = Clock::now();
     {
         PH_ZONE("Submit");
         context_->submitFrame(frame);
+    }
+    if (measuring()) {
+        const Clock::time_point s7 = Clock::now();
+        spikeMs_[0] += toMs(s1 - s0);
+        spikeMs_[1] += toMs(s2 - s1);
+        spikeMs_[2] += toMs(s4 - s3);
+        spikeMs_[3] += toMs(s5 - s4);
+        spikeMs_[4] += toMs(s6 - s5);
+        spikeMs_[5] += toMs(s7 - s6);
+        spikeUpload_ += static_cast<double>(renderer_->spikeUploadBytes());
+        spikeCommands_ += renderer_->spikeCommands();
+        ++spikeFrames_;
     }
     if (gpuCapture_) gpuCapture_->endFrame();
     // F4.1: no overlap between consecutive frames on the GPU.

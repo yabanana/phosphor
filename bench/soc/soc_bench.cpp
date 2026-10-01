@@ -27,6 +27,11 @@
 #ifndef SOC_SOURCE_DIR
 #define SOC_SOURCE_DIR "."
 #endif
+// Default directory of the results file (f5_spike reuses this runner with
+// its own directory so it never overwrites the SoC suite's results).
+#ifndef SOC_RESULTS_DIR
+#define SOC_RESULTS_DIR SOC_SOURCE_DIR "/bench/results"
+#endif
 
 namespace {
 
@@ -232,7 +237,7 @@ int main(int argc, char** argv) {
 
         std::string out = c.out;
         if (out.empty()) {
-            out = std::string(SOC_SOURCE_DIR) + "/bench/results/" + machine.slug + "-" + machine.osSlug +
+            out = std::string(SOC_RESULTS_DIR) + "/" + machine.slug + "-" + machine.osSlug +
                   (c.opts.quick ? "-quick" : "") + (c.opts.forceApple9 ? "-apple9" : "") + ".json";
         }
         std::ofstream f(out);

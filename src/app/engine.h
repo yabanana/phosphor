@@ -146,6 +146,10 @@ private:
     u64                      heapBytesAtStart_   = 0;
     // CPU time spent blocked in beginFrame() (slot + drawable waits).
     std::chrono::steady_clock::duration frameWait_{};
+    // F5 spike S1 (temporary): CPU ms per phase summed over measured frames.
+    double spikeMs_[6] = {}; // sim, extract, prepare, ui, graph, submit
+    double spikeUpload_ = 0, spikeCommands_ = 0;
+    u32    spikeFrames_ = 0;
 
     // F3 hitch measurement: per-frame records and bench-switch phases.
     FrameTrace                  trace_;

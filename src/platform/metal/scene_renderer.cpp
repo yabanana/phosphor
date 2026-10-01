@@ -131,6 +131,8 @@ void SceneRenderer::prepareFrame(const GpuScene& scene, const FrameScene& fs, co
     const size_t totalSize       = lightsOffset + alignUp(std::max<size_t>(fs.lights.size(), 1) * sizeof(GPULight));
 
     const UploadRing::Slice upload = context_.frameUploads().allocate(totalSize);
+    spikeUploadBytes_ = totalSize;
+    spikeCommands_ = 0;
     u8* base = upload.cpu;
     std::memcpy(base + constantsOffset, &constants, sizeof(constants));
     if (!fs.instances.empty())
@@ -183,6 +185,7 @@ void SceneRenderer::encodeBatches(MTL4::RenderCommandEncoder* enc, MTL::RenderPi
                                   MTL::DepthStencilState* depthState, u32 chunk, u32 chunks) const {
     if (!scene_ || !frameScene_ || !vertexBuffer_ || !indexBuffer_ || frameScene_->batches.empty() || !pipeline) return;
 
+    spikeCommands_ += 4 + (depthState ? 1 : 0);
     enc->setRenderPipelineState(pipeline);
     // Null: the encoder's default (no depth test, no write); overlay passes
     // without a depth attachment must not set a redundant state.
@@ -208,8 +211,8 @@ void SceneRenderer::encodeBatches(MTL4::RenderCommandEncoder* enc, MTL::RenderPi
     MTL::Winding  winding = MTL::WindingClockwise;
     MTL::CullMode cull    = MTL::CullModeNone;
     const auto setState = [&](MTL::Winding w, MTL::CullMode c) {
-        if (w != winding) enc->setFrontFacingWinding(winding = w);
-        if (c != cull) enc->setCullMode(cull = c);
+        if (w != winding) { enc->setFrontFacingWinding(winding = w); ++spikeCommands_; }
+        if (c != cull) { enc->setCullMode(cull = c); ++spikeCommands_; }
     };
     for (size_t i = first; i < last; ++i) {
         const DrawBatch& batch = batches[i];
@@ -220,6 +223,7 @@ void SceneRenderer::encodeBatches(MTL4::RenderCommandEncoder* enc, MTL::RenderPi
         case CullClass::BackMirrored: setState(MTL::WindingCounterClockwise, MTL::CullModeFront); break;
         case CullClass::None:         setState(MTL::WindingCounterClockwise, MTL::CullModeNone); break;
         }
+        ++spikeCommands_;
         enc->drawIndexedPrimitives(MTL::PrimitiveTypeTriangle, info.indexCount, MTL::IndexTypeUInt32,
                                    indexBase + static_cast<MTL::GPUAddress>(info.indexOffset) * sizeof(u32),
                                    static_cast<NS::UInteger>(info.indexCount) * sizeof(u32),
