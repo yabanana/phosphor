@@ -4,6 +4,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace phosphor {
 
@@ -95,10 +96,41 @@ namespace phosphor {
 //   --gpu-capture-max K    at most K captures per run (default 1)
 //   --overlay MODE     F4.7 debug overlay: none, overdraw, lights, tilecost,
 //                      timings
+//   --graph-scenario N OPT-1: the frame graph is graph scenario N
+//                      (rendergraph/scenario.h: 0 deferred, 1 forward-plus,
+//                      2 post-chain, 3 async-compute) of synthetic passes
+//                      instead of the test bench's forward pass
+//   --graph-scenario-size WxH  internal resolution of the scenario (2560x1440)
+//   --graph-scenario-work F    scale of the scenario's ALU work and triangles
+//   --graph-scenario-wide      RGBA16Float intermediates become RGBA32Float
+//                      (2x bytes, same work: bandwidth control)
+//   --graph-scenario-no-async  scenario 3's eligible passes stay on the
+//                      graphics queue
+//   --graph-scenario-views N   N independent copies of the scenario (split
+//                      screen) composited by the present pass (1..6)
+//   --graph-remat LIST comma-separated scenario signals recomputed by their
+//                      consumers instead of stored (OPT-1.2)
+//   --graph-remat-cost N  ALU steps a consumer spends per recomputed signal
+//                      (default 16; break-even sweeps)
+//   --graph-order LIST comma-separated pass names: the execution order the
+//                      graph compiler must use (OPT-1 spike; validated)
+//   --graph-no-alias   every transient gets its own memory (no aliasing:
+//                      no aliasing barriers; OPT-1 spike)
+//   --graph-opt MODE   OPT-1 graph compilation: off (the compiler of the end
+//                      of F4: greedy aliasing, conservative barriers), greedy
+//                      (OPT-1 heuristics without a plan: interval-colouring
+//                      aliasing, minimal barriers), plan (the offline plan of
+//                      the graph's family when its key matches, else greedy)
+//   --graph-plan FILE  plans file (default: shaders/graph-plans.json next to
+//                      the shader library)
 //
 // Arguments not starting with "--" are ignored: macOS may add its own
 // (e.g. -NSDocumentRevisionsDebugMode when launched from Xcode).
 // ---------------------------------------------------------------------------
+
+/// OPT-1 graph compilation modes (--graph-opt).
+enum class GraphOptMode : u8 { Off, Greedy, Plan };
+[[nodiscard]] const char* graphOptModeName(GraphOptMode mode);
 
 /// F4.7 debug overlays.
 enum class OverlayMode : u8 { None, Overdraw, LightCount, TileCost, Timings };
@@ -149,6 +181,20 @@ struct LaunchOptions {
     std::string gpuCaptureDir    = "captures";
     u32         gpuCaptureMax    = 1;
     OverlayMode overlay          = OverlayMode::None;
+    // OPT-1: graph scenarios and plans.
+    std::optional<u32> graphScenario;
+    u32         scenarioWidth    = 2560;
+    u32         scenarioHeight   = 1440;
+    float       scenarioWork     = 1.0f;
+    bool        scenarioWide     = false;
+    bool        scenarioAsync    = true;
+    u32         scenarioViews    = 1;
+    std::vector<std::string> graphRemat;
+    u32         graphRematCost   = 16;
+    std::vector<std::string> graphOrder;
+    bool        graphNoAlias     = false;
+    GraphOptMode graphOpt        = GraphOptMode::Off;
+    std::string graphPlanPath;               // empty: default location
 
     /// True when the app runs a fixed number of frames and then exits.
     [[nodiscard]] bool benchmark() const { return frames > 0; }

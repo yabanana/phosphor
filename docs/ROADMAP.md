@@ -134,7 +134,7 @@ ipotesi da validare con uno spike, non come tecniche già provate.
 | F3 | Pipeline: compilazione asincrona e archivi AOT | CORE | I |
 | F4 | Osservabilità: profiler, contatori, cattura, perf log | CORE | I |
 | OPT-0 | Caratterizzazione del SoC (`bench/`, modello di costo) ✅ (manca OPT-0.2 su T0) | OPT | I |
-| OPT-1 | Memoria, grafo e banda come problema di ottimizzazione | OPT | I |
+| OPT-1 | Memoria, grafo e banda come problema di ottimizzazione ✅ (OPT-1.5/1.7 parziali, T0 non misurato) | OPT | I |
 | OPT-2 | Shader, pipeline e occupancy | OPT | I |
 | F5 | GPU scene persistente e submission guidata dalla GPU | CORE | II · Geometria |
 | F6 | Mesh shader e culling a due fasi | CORE | II |
@@ -305,7 +305,7 @@ motore invariato (`ctest`, `metal_syntax_check`, `visual_check` 0 pixel,
 `bench_all` A/B/A contro `main`, `perf-log.md`). L'uso del modello da parte
 del render graph è di OPT-1; OPT-0.2 attende un T0.
 
-## OPT-1 — Memoria, grafo e banda come problema di ottimizzazione [OPT]
+## OPT-1 — Memoria, grafo e banda come problema di ottimizzazione ✅ (OPT-1.5 e OPT-1.7 parziali; T0 non misurato) [OPT]
 
 **Obiettivo (ipotesi)**: −25% di byte DRAM per frame e −20% di memoria di
 picco rispetto alla fine di F4, su T0 e T2.
@@ -313,20 +313,27 @@ picco rispetto alla fine di F4, su T0 e T2.
 **Letture**: [R1] [R2] [R3] [R4]; playbook S-TBDR-*, S-MEM-*, S-SYNC-*.
 
 **Direzioni di ricerca**
-- [ ] OPT-1.1 **Render graph risolto come problema di ottimizzazione**: ordinamento dei pass, aliasing e fusione dei pass TBDR formulati come programma lineare intero misto (MILP), risolto offline per ogni preset di qualità; a runtime si carica il piano ottimo invece di usare euristiche greedy [R1][R2]. Stesso approccio che Checkmate usa per i tensori [R3] e che [R12] usa per le triangle strip
-- [ ] OPT-1.2 **Rematerializzazione TBDR** (idea Phosphor, ispirata a [R3]): per ogni risorsa il grafo sceglie se scriverla in DRAM o **ricalcolarla nella tile** quando serve, minimizzando i byte (O1). Il visibility buffer è un caso particolare di questa idea: generalizzarla a tutti i segnali economici
-- [ ] OPT-1.3 Aliasing ottimo con colorazione di grafi degli intervalli di vita, vincolata ai formati che preservano la compressione lossless (S-TEX-2)
-- [ ] OPT-1.4 Barriere minime: raggruppamento, scelta intra-encoder vs coda sulla base dei costi misurati (B-18) come pesi del solver di OPT-1.1
+- [x] OPT-1.1 **Render graph risolto come problema di ottimizzazione**: ordinamento dei pass, aliasing e fusione dei pass TBDR formulati come programma lineare intero misto (MILP), risolto offline per ogni preset di qualità; a runtime si carica il piano ottimo invece di usare euristiche greedy [R1][R2]. Stesso approccio che Checkmate usa per i tensori [R3] e che [R12] usa per le triangle strip — ottimizzatore portabile `src/rendergraph/optimizer/` (spike 2: il MILP con HiGHS è ottimo fino a ~41 pass ma va al limite oltre e non trova soluzioni sopra 120 → adottati DP esatto sui downset + annealing sul compilatore reale, mai peggio del greedy; ottimo esatto verificato su 5040 ordini); piani offline per famiglia e chiave strutturale in `shaders/graph-plans.json` (`tools/graph_opt`), scelti **per misura** (`tools/graph_select.py`, immagini identiche obbligatorie), caricati con `--graph-opt plan`; scenari misurati: −8,4% / −3,5% / −0,5% / −2,3% di frame, 0 pixel, 0 messaggi (perf-log)
+- [x] OPT-1.2 **Rematerializzazione TBDR** (idea Phosphor, ispirata a [R3]): per ogni risorsa il grafo sceglie se scriverla in DRAM o **ricalcolarla nella tile** quando serve, minimizzando i byte (O1). Il visibility buffer è un caso particolare di questa idea: generalizzarla a tutti i segnali economici — scelta di costruzione per segnale (velocity, CoC) valutata dall'ottimizzatore e decisa dalla misura, ricalcolo esatto (0 pixel); TAA limitato dall'ALU: +1,5% (scartata), catena di post: −3,7% byte, −8% heap a tempo neutro (adottata)
+- [x] OPT-1.3 Aliasing ottimo con colorazione di grafi degli intervalli di vita, vincolata ai formati che preservano la compressione lossless (S-TEX-2) — `AliasPolicy::Coloring` (mai peggio del greedy, raggiunge il limite inferiore su 400/400 casi casuali) e `ColoringStageClass`; B-11 esteso: heap e alias tra formati diversi mantengono la compressione, `PixelFormatView` la toglie (nessun vincolo di formato necessario); sugli scenari il greedy era già al limite inferiore
+- [x] OPT-1.4 Barriere minime: raggruppamento, scelta intra-encoder vs coda sulla base dei costi misurati (B-18) come pesi del solver di OPT-1.1 — `BarrierPolicy::Minimal` (stadi degli accessi massimali, Minimal ⊆ Conservative su 300 grafi casuali e sugli scenari), pesi misurati nel modello (7 µs compute dipendente, 11 µs render pass); con l'ordine dei piani vale −5% di frame sullo scenario 0; limite dichiarato: nessuna corsa resa visibile dal controllo negativo sul GPU (default `off`)
 
 **Spremitura del SoC**
-- [ ] OPT-1.5 Mappa dei byte DRAM per pass (contatori) e verifica del budget per tier (S-MEM-1)
-- [ ] OPT-1.6 Ogni intermedio candidato a `memoryless` verificato; ogni `.store` giustificato (S-TBDR-4)
-- [ ] OPT-1.7 Working set dei pass compute dimensionati per restare nella SLC misurata (S-MEM-2)
-- [ ] OPT-1.8 Sovrapposizione tra pass misurata e massimizzata riordinando geometria e fragment (S-TBDR-6)
-- [ ] OPT-1.9 Seconda coda MTL4 per compute asincrono dove B-19 mostra guadagno (S-SYNC-2)
-- [ ] OPT-1.10 Anelli di upload in `shared` write-combined; tutti i dati letti spesso in `private` (S-MEM-3)
+- [ ] OPT-1.5 Mappa dei byte DRAM per pass (contatori) e verifica del budget per tier (S-MEM-1) — **parziale**: byte per pass stimati dal grafo nel report/dump e budget per tier (`graph_budget`: 5–6% del budget a 60 fps su M5 Max misurato, 19–23% su M5 base e 29–36% su M3 base da specifiche esterne); verifica indiretta tempo ≥ byte/banda in 69/69 unità (spike 1); **niente contatori hardware headless** (F4.4) e niente T0 fisico
+- [x] OPT-1.6 Ogni intermedio candidato a `memoryless` verificato; ogni `.store` giustificato (S-TBDR-4) — `graph_lint` (`LintMode`, attivo con `--graph-opt greedy|plan`): store ingiustificato = errore, ogni transitorio non memoryless con il motivo, store conservativi segnalati; 0 errori sugli scenari
+- [ ] OPT-1.7 Working set dei pass compute dimensionati per restare nella SLC misurata (S-MEM-2) — **parziale**: `graph_budget` segnala i compute oltre la SLC stimata (71,4 MiB, stima da fit) e le coppie produttore→consumatore riusabili; adiacenza misurata −7% sul pass (spike 7); il ridimensionamento dei working set riguarda i compute reali del motore (F5+), oggi assenti
+- [x] OPT-1.8 Sovrapposizione tra pass misurata e massimizzata riordinando geometria e fragment (S-TBDR-6) — modello a due code con sovrapposizione (ordinamento corretto delle varianti misurate) e piani che mettono le ombre accanto ai compute indipendenti: −8,4% (deferred) e −3,5% (forward+) misurati
+- [x] OPT-1.9 Seconda coda MTL4 per compute asincrono dove B-19 mostra guadagno (S-SYNC-2) — coda per pass idoneo scelta dal piano: scenario async, GI sulla seconda coda e particelle sulla grafica insieme alla fusione G-buffer+Lighting (−2,3% frame, −15,7% byte); la fusione anticipa le attese tra code (spike 5)
+- [x] OPT-1.10 Anelli di upload in `shared` write-combined; tutti i dati letti spesso in `private` (S-MEM-3) — nuovo B-29: WC = cached in scrittura CPU, lettura CPU da WC 20× più lenta, `private` = `shared` in lettura GPU; il motore usa già `shared`+WC per gli anelli e `private` per geometria, texture e transitori (audit)
 
 **Uscita**: obiettivo di banda raggiunto o scostamento spiegato in `docs/opt-log.md`.
+Verificata il 2026-10-01 su M5 Max: obiettivo (−25% byte, −20% picco) raggiunto
+solo per il picco dello scenario async (−27,2%, byte −15,7%); negli altri
+scenari l'ordine è imposto dai dati e i byte restano quelli degli algoritmi
+(scarto spiegato in opt-log, "OPT-1 — Risultati"); guadagni di frame
+−8,4% / −3,5% / −0,5% / −2,3% sugli scenari misurati; motore invariato
+(perf-log). OPT-1.5 e OPT-1.7 restano parziali (niente contatori hardware,
+nessun compute reale da ridimensionare); T0 non disponibile (O12).
 
 ## OPT-2 — Shader, pipeline e occupancy [OPT]
 

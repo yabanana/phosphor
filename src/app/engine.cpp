@@ -19,10 +19,12 @@
 #include "platform/metal/metal_graph_executor.h"
 #include "platform/metal/metal_texture_manager.h"
 #include "platform/metal/pipeline_cache.h"
+#include "platform/metal/scenario_passes.h"
 #include "platform/metal/shader_reloader.h"
 #include "platform/metal/scene_renderer.h"
 #include "renderer/gpu_scene.h"
 #include "rendergraph/graph_dump.h"
+#include "rendergraph/optimizer/plan.h"
 #include "rendergraph/pass_context.h"
 #include "scene/camera.h"
 #include "scene/ecs.h"
@@ -43,6 +45,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -128,6 +131,29 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     if (options_.debugAsyncCompute) asyncProbe_ = std::make_unique<AsyncComputeProbe>(*context_, *pipelines_);
     if (options_.debugGpuCost > 0) {
         knownCost_ = std::make_unique<KnownCostPass>(*context_, *pipelines_, options_.debugGpuCost);
+    }
+    if (options_.graphScenario) {
+        rg::ScenarioParams params;
+        params.width        = options_.scenarioWidth;
+        params.height       = options_.scenarioHeight;
+        params.work         = options_.scenarioWork;
+        params.wideHdr      = options_.scenarioWide;
+        if (!options_.scenarioAsync) params.async = std::vector<std::string>{};
+        params.remat        = options_.graphRemat;
+        params.views        = options_.scenarioViews;
+        params.rematIterations = options_.graphRematCost;
+        scenario_ = std::make_unique<ScenarioPasses>(*context_, *pipelines_, *options_.graphScenario, params);
+    }
+    if (options_.graphOpt == GraphOptMode::Plan) {
+        const std::string path = options_.graphPlanPath.empty() ? shaderPath("graph-plans.json") : options_.graphPlanPath;
+        std::ifstream in(path);
+        std::stringstream text;
+        text << in.rdbuf();
+        std::string error;
+        if (!in || !rg::fromJson(text.str(), graphPlans_, &error)) {
+            throw std::runtime_error("--graph-opt plan: cannot read " + path + (error.empty() ? "" : ": " + error));
+        }
+        LOG_INFO("Graph plans: %zu loaded from %s", graphPlans_.size(), path.c_str());
     }
     if (options_.gpuTiming) {
         timestamps_ = std::make_unique<GpuTimestamps>(*context_, *pipelines_);
@@ -217,6 +243,7 @@ Engine::~Engine() {
     graphDebug_.reset();
     asyncProbe_.reset();
     knownCost_.reset();
+    scenario_.reset();
     overlays_.reset();
     capture_.reset();
     imguiRenderer_.reset();
@@ -483,6 +510,7 @@ void Engine::finishBenchmark() {
     report.pipelinesJson = pipe::pipelineStatsJson(pipelines_->stats());
     report.gpuTiming        = timestamps_ != nullptr && timestamps_->enabled();
     report.gpuTimingUnfused = options_.gpuTimingUnfused;
+    report.graph            = graphReport_;
     if (report.gpuTiming) passTimings_.summarize(report.passes, report.gpuPassSumMs, report.gpuFrameSpanMs);
     // OPT-0.4: work of the passes the cost model can price (CPU data of the
     // last frame; the benches' scenes do not change their draw lists).
@@ -856,6 +884,7 @@ bool Engine::frame(float dt) {
     graphExecutor_->bindTexture(drawableRef_, target);
     if (capture_) graphExecutor_->bindBuffer(captureRef_, capture_->readback());
     if (graphDebug_) graphDebug_->bind(*graphExecutor_, frame.slot);
+    if (scenario_) scenario_->bind(*graphExecutor_, frame.index);
     if (asyncProbe_) asyncProbe_->bind(*graphExecutor_, frame.slot);
     {
         PH_ZONE("Graph execute");
@@ -953,8 +982,7 @@ void Engine::drawUi() {
     ImGui::Render();
 }
 
-void Engine::buildFrameGraph(u32 width, u32 height) {
-    PH_ZONE("Render graph build");
+void Engine::declareFrameGraph(u32 width, u32 height) {
     using namespace rg;
     frameGraph_.reset();
 
@@ -964,12 +992,19 @@ void Engine::buildFrameGraph(u32 width, u32 height) {
     drawableRef_ = frameGraph_.importTexture("Drawable", screen, ImportOutput | ImportPerFrame);
     TextureRef color = drawableRef_;
 
+    if (scenario_) {
+        // OPT-1: a graph scenario of synthetic passes replaces the scene; its
+        // present pass writes the drawable.
+        scenario_->build(frameGraph_, drawableRef_);
+        color = {drawableRef_.resource, frameGraph_.resources()[drawableRef_.resource].versions - 1};
+    }
+
     // F2.6: seed -> reduce (async queue) -> consume, declared before Forward so
     // the async pass can overlap it.
     if (asyncProbe_) asyncProbe_->addProducers(frameGraph_);
     if (knownCost_) knownCost_->addToGraph(frameGraph_);
 
-    frameGraph_.addPass(
+    if (!scenario_) frameGraph_.addPass(
         "Forward", PassType::Raster,
         [&](PassBuilder& b) {
             ClearValue clear;
@@ -994,7 +1029,7 @@ void Engine::buildFrameGraph(u32 width, u32 height) {
             renderer_->encode(static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder()), ctx.chunk(), ctx.chunkCount());
         });
 
-    color = overlays_->addToGraph(frameGraph_, color, width, height, overlayMode_, *renderer_);
+    if (!scenario_) color = overlays_->addToGraph(frameGraph_, color, width, height, overlayMode_, *renderer_);
 
     if (options_.ui) {
         frameGraph_.addPass(
@@ -1030,9 +1065,81 @@ void Engine::buildFrameGraph(u32 width, u32 height) {
             });
     }
 
+}
+
+void Engine::buildFrameGraph(u32 width, u32 height) {
+    PH_ZONE("Render graph build");
+    using namespace rg;
+
+    // OPT-1: the offline plan of this graph's family (scenarios only: the
+    // engine's own graph has no plans).
+    graphReport_ = GraphReport{};
+    graphReport_.present = true;
+    graphReport_.mode    = graphOptModeName(options_.graphOpt);
+    graphReport_.plan    = "none";
+    const GraphPlan* plan = nullptr;
+    if (scenario_) {
+        scenario_->resetBuildChoices();
+        graphReport_.family = scenario_->family();
+        if (options_.graphOpt == GraphOptMode::Plan) {
+            plan = findPlan(graphPlans_, graphReport_.family);
+            if (plan) {
+                scenario_->setBuildChoices(plan->remat, plan->async);
+            } else {
+                LOG_WARN("Graph plan: none for '%s' in %zu plans: greedy", graphReport_.family.c_str(), graphPlans_.size());
+            }
+        }
+    }
+    declareFrameGraph(width, height);
+    std::vector<u32> plannedOrder;
+    if (plan) {
+        std::string error;
+        plannedOrder = planOrder(frameGraph_, *plan, &error);
+        if (plannedOrder.empty()) {
+            // Rejected (key or names): rebuild with the default choices, greedy.
+            LOG_WARN("Graph plan rejected: %s: greedy", error.c_str());
+            graphReport_.plan = "rejected: " + error;
+            plan = nullptr;
+            scenario_->resetBuildChoices();
+            declareFrameGraph(width, height);
+        } else {
+            graphReport_.plan = "applied";
+        }
+    }
+
     // F4.1 attribution mode: every raster pass in its own render pass.
     CompileOptions compileOptions;
     compileOptions.fuseRasterPasses = !options_.gpuTimingUnfused;
+    compileOptions.alias            = !options_.graphNoAlias;
+    if (options_.graphOpt != GraphOptMode::Off) {
+        compileOptions.aliasPolicy   = plan ? plan->aliasPolicy : AliasPolicy::Coloring;
+        compileOptions.barrierPolicy = plan ? plan->barrierPolicy : BarrierPolicy::Minimal;
+        compileOptions.lint          = LintMode::Warn;
+    }
+    if (plan) compileOptions.order = plannedOrder;
+    graphReport_.alias    = aliasPolicyName(compileOptions.aliasPolicy);
+    graphReport_.barriers = barrierPolicyName(compileOptions.barrierPolicy);
+    // OPT-1 spike / debugging: an execution order given by pass names
+    // (overrides a plan's order).
+    if (!options_.graphOrder.empty()) compileOptions.order.clear();
+    for (const std::string& name : options_.graphOrder) {
+        const auto& passes = frameGraph_.passes();
+        const auto it = std::find_if(passes.begin(), passes.end(), [&](const PassNode& p) { return p.name == name; });
+        if (it == passes.end()) throw std::runtime_error("--graph-order: no pass named '" + name + "'");
+        compileOptions.order.push_back(static_cast<u32>(it - passes.begin()));
+    }
+    if (!compileOptions.order.empty()) {
+        // Passes the list does not name (the engine's UI and capture passes)
+        // follow in declaration order.
+        const CompiledGraph live = compileOrder(frameGraph_);
+        for (u32 p = 0; p < frameGraph_.passes().size(); ++p) {
+            const bool culled = p < live.culled.size() && live.culled[p];
+            if (!culled &&
+                std::find(compileOptions.order.begin(), compileOptions.order.end(), p) == compileOptions.order.end()) {
+                compileOptions.order.push_back(p);
+            }
+        }
+    }
     if (!graphExecutor_->compile(frameGraph_, compileOptions)) {
         throw std::runtime_error("Failed to compile the frame graph");
     }
@@ -1051,8 +1158,26 @@ void Engine::buildFrameGraph(u32 width, u32 height) {
         passMeasureStarted_ = false;
     }
     if (graphDebug_) graphDebug_->onCompiled(frameGraph_, graphExecutor_->compiled());
+    if (scenario_) scenario_->onCompiled(frameGraph_, graphExecutor_->compiled());
     if (asyncProbe_) asyncProbe_->onCompiled(frameGraph_, graphExecutor_->compiled());
     const BandwidthReport traffic = estimateBandwidth(frameGraph_, graphExecutor_->compiled());
+    {
+        const CompiledGraph& c = graphExecutor_->compiled();
+        graphReport_.passes       = static_cast<u32>(c.order.size());
+        graphReport_.renderPasses = static_cast<u32>(c.renderGroups.size());
+        graphReport_.memoryless   = static_cast<u32>(std::count(c.memoryless.begin(), c.memoryless.end(), true));
+        graphReport_.barrierCount = 0;
+        for (const PassBarriers& pb : c.barriers) graphReport_.barrierCount += static_cast<u32>(pb.barriers.size());
+        graphReport_.dramBytes          = traffic.totalBytes();
+        graphReport_.heapBytes          = c.aliasing.heapSize;
+        graphReport_.heapUnaliasedBytes = c.aliasing.unaliasedSize;
+        graphReport_.maxLiveBytes       = c.aliasing.maxLiveSize;
+        for (const std::string& f : c.lint) LOG_INFO("Render graph lint: %s", f.c_str());
+        LOG_INFO("Render graph mode %s (plan %s, alias %s, barriers %s): heap %.2f MiB, max live %.2f MiB, %u barriers",
+                 graphReport_.mode.c_str(), graphReport_.plan.c_str(), graphReport_.alias.c_str(),
+                 graphReport_.barriers.c_str(), static_cast<double>(graphReport_.heapBytes) / (1 << 20),
+                 static_cast<double>(graphReport_.maxLiveBytes) / (1 << 20), graphReport_.barrierCount);
+    }
     LOG_INFO("Render graph %ux%u: estimated DRAM traffic %.2f MiB/frame (read %.2f, write %.2f)", width, height,
              static_cast<double>(traffic.totalBytes()) / (1 << 20),
              static_cast<double>(traffic.totalReadBytes) / (1 << 20),

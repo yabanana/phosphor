@@ -1,6 +1,6 @@
 # `bench/soc` — SoC characterisation suite (OPT-0.1)
 
-Microbenchmarks B-01…B-28 of [`docs/APPLE_SOC_PLAYBOOK.md`](../../docs/APPLE_SOC_PLAYBOOK.md)
+Microbenchmarks B-01…B-29 of [`docs/APPLE_SOC_PLAYBOOK.md`](../../docs/APPLE_SOC_PLAYBOOK.md)
 §0. A measurement tool, **not engine code**: it creates resources with the
 device and compiles MSL at run time (both forbidden in the engine). Results go
 to `bench/results/<chip>-<os>.json` (schema: `src/diagnostics/soc_results.h`),
@@ -53,4 +53,5 @@ Exit status: 0 ok; 1 a benchmark failed or a negative control failed; 2 usage;
 | `harness.{h,cpp}` | Context, timers, IOReport GPU state, measure/warm-up, registry, machine description |
 | `soc_bench.cpp` | CLI, runs, merge, JSON, `--validate` |
 | `bNN_*.cpp` / `.mm` | one benchmark group per file, `SOC_BENCH(...)` |
+| `b29_upload.cpp` | B-29 upload storage modes: CPU write/read of write-combined vs cached shared buffers, GPU read of shared vs private (reuses `b08_read` of `shaders/b08_memory.metal`) |
 | `shaders/*.metal` | MSL compiled at run time (`harness.metal`: anchor and warm-up kernels) |

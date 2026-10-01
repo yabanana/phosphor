@@ -17,6 +17,9 @@ add_executable(phosphor_tests
     test_async_probe_reference.cpp
     test_graph_debug_reference.cpp
     test_graph_dump.cpp
+    test_graph_lint.cpp
+    test_graph_opt_tool.cpp
+    test_graph_plan.cpp
     test_gpu_scene.cpp
     test_launch_options.cpp
     test_linear_ring.cpp
@@ -42,5 +45,6 @@ add_executable(phosphor_tests
 target_link_libraries(phosphor_tests PRIVATE phosphor_core doctest::doctest)
 # test_pipeline_script.cpp reads the committed shaders/pipelines.mtl4-json.
 target_compile_definitions(phosphor_tests PRIVATE PHOSPHOR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(phosphor_tests PRIVATE ${CMAKE_SOURCE_DIR}/tools)
 target_compile_options(phosphor_tests PRIVATE ${PHOSPHOR_WARNINGS})
 add_test(NAME phosphor_tests COMMAND phosphor_tests)

@@ -78,7 +78,16 @@ add_custom_command(
     COMMENT "Linking phosphor.metallib"
     VERBATIM
 )
-add_custom_target(phosphor_shaders DEPENDS ${PHOSPHOR_METALLIB})
+# OPT-1.1: offline graph plans (tools/graph_opt) next to the shader library.
+set(PHOSPHOR_GRAPH_PLANS ${PHOSPHOR_SHADER_OUT}/graph-plans.json)
+add_custom_command(
+    OUTPUT ${PHOSPHOR_GRAPH_PLANS}
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/shaders/graph-plans.json ${PHOSPHOR_GRAPH_PLANS}
+    DEPENDS ${CMAKE_SOURCE_DIR}/shaders/graph-plans.json
+    COMMENT "Copying graph-plans.json"
+    VERBATIM
+)
+add_custom_target(phosphor_shaders DEPENDS ${PHOSPHOR_METALLIB} ${PHOSPHOR_GRAPH_PLANS})
 
 # F3.4: pipeline archive (metal-tt) built from shaders/pipelines.mtl4-json.
 include(cmake/PipelineArchive.cmake)
@@ -124,6 +133,7 @@ add_executable(phosphor
     src/platform/metal/gpu_timestamps.cpp
     src/platform/metal/graph_debug_passes.cpp
     src/platform/metal/known_cost_pass.cpp
+    src/platform/metal/scenario_passes.cpp
     src/platform/metal/metal_context.cpp
     src/platform/metal/metal_graph_executor.cpp
     src/platform/metal/metal_impl.cpp

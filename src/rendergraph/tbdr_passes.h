@@ -38,6 +38,11 @@ namespace phosphor::rg {
 /// `compiled.ok`.
 void buildRenderGroups(const RenderGraph& graph, CompiledGraph& compiled, bool fuse);
 
+/// OPT-1.1: would raster pass `pass` join the render group made of `members`
+/// (pass indices, in execution order) under the rules above?  False for an
+/// empty group, a non-raster or non-graphics pass, or an invalid pass.
+[[nodiscard]] bool canJoinGroup(const RenderGraph& graph, const std::vector<u32>& members, u32 pass);
+
 [[nodiscard]] const char* loadActionName(LoadAction action);
 [[nodiscard]] const char* storeActionName(StoreAction action);
 

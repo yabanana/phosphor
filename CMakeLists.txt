@@ -75,8 +75,14 @@ add_library(phosphor_core STATIC
     src/rendergraph/barrier_plan.cpp
     src/rendergraph/async_probe_reference.cpp
     src/rendergraph/graph_debug_reference.cpp
+    src/rendergraph/graph_budget.cpp
     src/rendergraph/graph_dump.cpp
+    src/rendergraph/graph_lint.cpp
+    src/rendergraph/optimizer/cost_model.cpp
+    src/rendergraph/optimizer/optimizer.cpp
+    src/rendergraph/optimizer/plan.cpp
     src/rendergraph/render_graph.cpp
+    src/rendergraph/scenario.cpp
     src/rendergraph/tbdr_passes.cpp
     src/rendergraph/timing_plan.cpp
     src/scene/camera.cpp
@@ -122,6 +128,11 @@ set_source_files_properties(tools/image_diff/image_diff.cpp PROPERTIES COMPILE_O
 add_executable(soc_model tools/soc_model/soc_model.cpp)
 target_link_libraries(soc_model PRIVATE phosphor_core tinygltf) # tinygltf: nlohmann json.hpp
 target_compile_options(soc_model PRIVATE ${PHOSPHOR_WARNINGS})
+# OPT-1.1: offline graph optimiser CLI (scenarios -> plans + report). Portable.
+add_executable(graph_opt tools/graph_opt/graph_opt.cpp)
+target_link_libraries(graph_opt PRIVATE phosphor_core)
+target_include_directories(graph_opt PRIVATE ${CMAKE_SOURCE_DIR}/tools)
+target_compile_options(graph_opt PRIVATE ${PHOSPHOR_WARNINGS})
 
 # --- macOS app ---------------------------------------------------------------
 if(PHOSPHOR_BUILD_APP)

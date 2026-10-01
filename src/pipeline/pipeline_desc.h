@@ -34,7 +34,7 @@ struct FunctionConstant {
 };
 
 constexpr u32 MAX_FUNCTION_CONSTANTS = 8;
-constexpr u32 MAX_COLOR_ATTACHMENTS  = 4;
+constexpr u32 MAX_COLOR_ATTACHMENTS  = 8;
 
 /// Colour format of an attachment; `Unspecialized` = flexible pipeline.
 /// rg::Format::Unknown means "no attachment at this index".

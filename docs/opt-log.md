@@ -818,3 +818,424 @@ ha fallito.
   (il run è stato scartato; le misure vanno fatte a batteria carica o
   all'alimentazione, sempre registrata in `machine.power_source` /
   `battery_percent`).
+
+---
+
+## OPT-1 — Spike: scenari di grafo, solver, compressione, rematerializzazione, code, upload
+
+**2026-09-30** · Apple M5 Max (Apple10, 40 core GPU), macOS 27.2 (26B5091g),
+all'alimentazione, schermo acceso (`caffeinate -d`), build Release,
+`--no-vsync`; GPU al P-state massimo (P13) per l'83% del tempo del run e
+spento nel resto (IOReport `GPUPH`, 39 W medi sullo scenario 0).
+
+Il grafo del frame del motore ha 1–2 pass (Forward + ImGui): OPT-1 non si
+può misurare lì. Gli spike usano **scenari di grafo realistici** eseguiti
+dal vero `MetalGraphExecutor` (`--graph-scenario N`,
+`src/rendergraph/scenario.h`, `shaders/scenario.metal`): pass sintetici
+con lavoro noto (catene LCG a 4 vie, un IMAD per passo e catena) e byte
+noti, valori interi deterministici (multipli di 1/255, profondità
+quantizzate) così che **qualunque ordine, fusione, aliasing, coda o
+rematerializzazione corretti diano la stessa immagine bit per bit**.
+Scenari: 0 deferred (4 cascate d'ombra, G-buffer, SSAO, lighting con
+framebuffer fetch, bloom 5+4, TAA, tonemap, UI), 1 forward+ (3 cascate,
+depth prepass, light grid, forward opaco con solo depth test, cielo,
+trasparenti, bloom, TAA), 2 catena di post (DoF, motion blur, bloom 6+5,
+lens flare, esposizione, tonemap, grana, FXAA, UI), 3 compute asincrono
+(4 cascate, G-buffer + lighting fondibili, aggiornamento GI limitato dalla
+banda e simulazione di particelle limitata dall'ALU sulla seconda coda).
+Risoluzione interna 2560×1440, drawable 3200×1800.
+
+Correttezza del banco di prova (Debug, `MTL_DEBUG_LAYER` +
+`MTL_SHADER_VALIDATION`): 0 messaggi sui 4 scenari; immagini identiche
+(0 pixel) tra due run, tra fuso e non fuso (`--gpu-timing-unfused`), con
+rematerializzazione e con ordini diversi. Controllo negativo: seme del
+ricalcolo sbagliato di 1 → 5.759.907 pixel su 5.760.000 diversi.
+
+### 1. Byte DRAM stimati contro tempo misurato (spike 1)
+
+Metodo: 4 scenari × 3 run × 600 frame (+120 di riscaldamento), tempo per
+unità temporizzata (F4.1: gruppo di render fuso o pass compute) = minimo
+per unità, mediana dei 3 run; byte = `estimatePassBandwidth` (O1: una
+copia per lettura/scrittura, attachment secondo load/store del gruppo);
+limite = byte / 569 GB/s (B-08). Controllo: `--graph-scenario-wide` porta
+gli intermedi RGBA16Float a RGBA32Float (stesso lavoro, byte ×2 dove li
+usano).
+
+| Scenario | Unità | Frame (p50, CV 3 run) | DRAM stimata | Limite byte/banda | Wide: byte / frame |
+|---|---:|---:|---:|---:|---:|
+| 0 deferred | 20 | 2,663 ms (0,06%) | 565,9 MiB | 1,043 ms | ×1,38 / ×1,059 |
+| 1 forward+ | 14 | 3,965 ms (0,03%) | 458,3 MiB | 0,845 ms | ×1,47 / ×1,038 |
+| 2 post | 25 | 2,989 ms (0,02%) | 524,3 MiB | 0,966 ms | ×1,62 / ×1,068 |
+| 3 async | 10 | 3,430 ms (0,02%) | 494,8 MiB | 0,912 ms | ×1,40 / ×1,176 |
+
+- **Tempo ≥ byte/banda in 69 unità su 69** (nessuna stima dei byte
+  "impossibile"). Unità vicine al limite (≤1,3×: Bloom down 1–2, DoF
+  downsample, UI): con 2× byte → **1,64–1,99× tempo** (Bloom down 1:
+  1,84–1,99); unità limitate da ALU o latenza (Lighting 2,75× il limite,
+  TAA 1,6×, G-buffer 2,6×): 0,93–1,08×. Il pass "GI probe update" (3,05×
+  il limite) sale di 1,73×: limitato in parte dalla banda.
+- Il frame è poco sensibile ai byte su M5 Max: +38–62% di byte → +3,8–17,6%
+  di tempo. La riduzione dei byte vale tempo solo nei pass limitati dalla
+  banda; negli altri vale energia (non misurabile qui, B-27) e banda lasciata
+  alla CPU (B-09).
+- **Costo fisso di un compute pass dipendente minuscolo ~7 µs** (Bloom
+  down 4–6, up 3–5, MB neighbor max: 0,007–0,008 ms per 0,03–0,5 MiB),
+  molto sopra la barriera di B-18 (≤1 µs) e il dispatch vuoto (0,13 µs):
+  svuotamento e riempimento del GPU a ogni dipendenza. Peso per il modello.
+- Un'iterazione LCG (4 catene) costa 4 IMAD: "Particle simulation" (512² ×
+  4096 passi) 1,110 ms contro 1,06 ms predetti a 4,06 Top/s (B-01 mul
+  intera): il modello conta IMAD al ritmo della mul.
+- Pass sintetici "una thread per tile" (Light grid, MB tile max, 16×16
+  letture per thread) sono limitati dalla latenza (0,39–0,41 ms per 14 MiB):
+  non rappresentano un'implementazione reale ma non dipendono dall'ordine.
+
+### 2. Solver dell'ordine: greedy, DP esatto, annealing, MILP HiGHS (spike 2)
+
+Strumento: [`bench/opt1_spike/graph_solver.cpp`](../bench/opt1_spike/graph_solver.cpp)
+(portabile, solo CPU). Ogni ordine è giudicato dallo **stesso valutatore**:
+il compilatore reale (`CompileOptions::order`: fusione, load/store,
+memoryless, aliasing con un sizer finto allineato a 64 KiB, barriere) più
+un modello T = Σ unità max(byte/569 GB/s, ALU/4,06 Top/s IMAD + triangoli/
+8 G/s) + 11 µs per render pass + 7 µs per pass compute (spike 1),
+J = T + 0,1 ms/GiB × heap. Metodi: **greedy** = Kahn per dichiarazione (F2);
+**DP** sui downset (stato = pass eseguiti + gruppo di render aperto, fusione
+identica al compilatore; costo = load/store dei gruppi chiusi + fissi + picco
+di byte vivi), esatto sotto 100–200 mila stati per livello, altrimenti beam;
+**annealing** sugli ordini topologici con il valutatore reale (5–20 mila
+valutazioni, dal greedy); **MILP** con HiGHS 1.15.1 (FetchContent, 1 thread,
+limite 120 s): assegnazione x[pass][posizione], vincoli di precedenza,
+risparmio delle coppie fondibili adiacenti, picco ≥ Σ byte vivi a ogni
+posizione (linearizzazione esatta dei vivi con x cumulati).
+
+| Grafo (pass vivi) | greedy J | DP | annealing | MILP | Nota |
+|---|---:|---|---|---|---|
+| 1 vista: deferred 21, forward+ 17, post 26 | ottimo | = greedy, ≤0,001 s, esatto | = greedy | = greedy, 0,02–0,06 s, ottimo | la struttura impone l'ordine |
+| async 11 | 3,155 | **−17,1% byte, −26,6% heap**, esatto 0,000 s | idem 0,02 s | idem 0,01 s | fusione G-buffer+Lighting |
+| async ×2 (21) | 6,144 | −17,4% / −23,1%, esatto 0,13 s | idem 0,25 s | idem 0,33 s | |
+| deferred ×2 (41) | 4,411 | heap −3,9%, esatto 0,04 s | idem 0,70 s | idem, **limite 120 s** (gap 0,6%) | |
+| post ×2 (51) | 3,918 | = greedy, esatto 0,001 s | = | = , limite (gap 3%) | |
+| async ×3 (31) | 9,133 | −17,6% / −20,4%, beam 5,3 s | −17,6% / −13,6% 0,6 s | −17,6% / −19,5%, ottimo 7,5 s | |
+| deferred ×3 (61) | 6,533 | beam: heap **+32,9%** | **heap −4,8%** 1,9 s | limite, gap 10%, heap +35% | |
+| post ×3 (76) | 5,796 | = greedy, esatto 0,045 s | = | limite, heap +20% | |
+| async ×4 (41) | 12,125 | beam: heap +3,4% | heap −12,2% 1,1 s | **heap −17,5%, ottimo 57,6 s** | |
+| deferred ×4 (81) | 8,657 | beam: heap +65% | = greedy 4,3 s | limite, +3,8% byte, +65% heap | |
+| post ×4 (101) | 7,677 | = greedy, esatto 2,8 s (2,1 M stati) | = 6,1 s | limite, +81% heap | |
+| async ×6 (61) | 18,155 | beam: −17,7% byte, heap +46% | −17,7% / heap +12%, 2,5 s | limite, heap +21% | la fusione allunga le vite dei compute |
+| deferred ×6 (121), post ×6 (151) | 12,952 / 11,487 | beam: heap +41..+118% | = greedy 12–21 s | **nessuna soluzione** in 120 s (80–123 mila righe) | |
+
+- Il **greedy è già ottimo sull'ordine** quando la catena di dati impone la
+  sequenza (scenari 0–2): lì l'ottimizzatore non guadagna byte né picco.
+- Il **DP esatto** è il più veloce finché gli stati restano pochi (grafi
+  "stretti" fino a 101 pass in 2,8 s); con viste indipendenti in parallelo
+  gli stati esplodono e il beam per J sbaglia il picco (il criterio "J
+  minimo per stato" non è esatto sul termine di massimo: serve il fronte di
+  Pareto costo/picco).
+- L'**annealing** sul valutatore reale non peggiora mai il greedy (parte da
+  lì) e trova i migliori heap nei grafi grandi, in 1–21 s.
+- **HiGHS**: ottimo e più bravo sul picco nei grafi medi (async ×4: −17,5%
+  contro −12,2%) ma 57 s; da 41–51 pass in su va al limite con soluzioni
+  peggiori del greedy, oltre 120 pass non ne trova. Il modello lineare non
+  vede fissi, barriere e sovrapposizione.
+- **Decisione**: ottimizzatore portabile con **DP esatto (fronte di Pareto
+  costo/picco, limite di stati) + annealing sul valutatore reale**, il
+  greedy sempre candidato; **HiGHS non adottato** (dipendenza pesante per
+  un modello più povero e tempi non limitati); il codice MILP resta nello
+  spike come riferimento.
+- Un trade-off vero: in async ×6 l'ordine che fonde riduce i byte del 17,7%
+  ma allunga le vite dei risultati compute (heap +12–46%): il piano deve
+  dichiarare cosa sceglie.
+
+### 3. Compressione lossless con heap placement e alias (spike 3, B-11 esteso)
+
+B-11 esteso (`bench/soc/b11_compression.cpp`): la stessa texture RGBA8
+4096² creata con `device->newTexture` (base), in un **heap placement**
+privato non tracciato (come `TransientHeap`, a 4 unità di allineamento) e
+**aliasata**: nello stesso heap e offset una RGBA16Float scritta con dati
+casuali, barriera `Device|ResourceAlias`, poi la RGBA8. Casi optimized
+(`allowGPUOptimizedContents`), plain e **pfview** (optimized +
+`TextureUsagePixelFormatView`, documentato come disattivante: controllo
+negativo, provato fallito rendendolo uguale a optimized → 1,34–1,37 contro
+la soglia). Rimisura a macchina quieta, 3 run.
+
+| Percorso | Guadagno (media geometrica celle comprimibili, optimized/plain) | pfview/plain |
+|---|---:|---:|
+| device | 1,32–1,36 | 1,00–1,01 |
+| heap | 1,31–1,37 | 0,98–1,01 |
+| heap + alias RGBA16F → RGBA8 | 1,35–1,37 | 0,98–0,99 |
+
+- **Heap placement e alias tra formati diversi mantengono la compressione**
+  (stesso vantaggio del percorso device in scrittura compute, render target
+  e lettura).
+- `heapTextureSizeAndAlign` RGBA8 4096²: optimized 67.633.152 B allineamento
+  2048, plain 67.108.864 B allineamento 128: **+1/128 di metadati e
+  allineamento 2048 B** per le texture compresse; `PixelFormatView` toglie
+  entrambi (compressione disattivata). RGBA16F: 134.742.016 contro
+  134.217.728.
+- Vincoli per OPT-1.3: nessun vincolo di formato per la compressione sugli
+  alias (coppia misurata RGBA16F→RGBA8); niente `PixelFormatView` sulle
+  risorse del grafo; offset allineati a 2048 B per le compresse (già dati da
+  `heapTextureSizeAndAlign`). Non misurati: altre coppie di formati, alias
+  parziali, costo una tantum del primo uso dopo l'alias.
+
+### 4. Rematerializzazione nella tile contro store + load (spike 4, OPT-1.2)
+
+Metodo: segnali "economici" (velocity dal G-buffer / dalla scena, CoC del
+DoF) che dipendono solo dal pixel e dalla sua profondità: con
+`--graph-remat` il produttore non li scrive e ogni consumatore li ricalcola
+dalla profondità (che legge comunque) con N passi ALU
+(`--graph-remat-cost`, 16 = riproiezione tipica). Immagini identiche (0
+pixel) con e senza; 3 giri a ordine ruotato, GPU libera (un primo giro con
+un altro benchmark sul GPU aveva CV 13–47%: scartato).
+
+| Scenario, segnale | Costo | DRAM | Frame p50 (CV) |
+|---|---:|---:|---:|
+| 0, nessuno | — | 565,9 MiB | 2,664 ms (0,05%) |
+| 0, Velocity (letto 1×1 da TAA) | 16 | 537,7 (−5,0%) | 2,704 (0,03%) = **+1,5%** |
+| 0, Velocity | 64 | 537,7 | 2,860 = +7,4% |
+| 0, Velocity | 256 | 537,7 | 3,534 = +32,7% |
+| 2, nessuno | — | 524,3 | 2,988 (0,02%) |
+| 2, Velocity (letto 16×16 dal tile max) | 16 | 510,2 (−2,7%) | ~~3,381 = +13,1%~~ → **+0,05%** (rimisura) |
+| 2, CoC (letto 1×1 e 2×2) | 16 | 517,3 (−1,3%) | ~~3,060 = +2,4%~~ → **−0,49%** |
+| 2, entrambi | 16 | 503,2 (−4,0%) | ~~3,438 = +15,0%~~ → **−0,57%** |
+
+**Correzione (2026-10-01)**: le righe barrate dello scenario 2 erano falsate
+da un bug del banco di prova trovato dalla selezione per misura
+(`tools/graph_select.py`, immagini diverse di 5,76 M pixel): quando il
+consumatore non leggeva già la profondità, la rematerializzazione gliela
+aggiungeva come input ordinario, che entrava nell'hash (immagine sbagliata)
+e, nel tile max, costava 256 letture in più per thread. Ora è un input
+"sorgente" non sommato al valore (commit `50d2f81`); immagini identiche (0
+pixel) per ogni scelta in tutti gli scenari. Rimisura (3 giri ruotati, CV ≤
+0,06%): scenario 2 Velocity 3,0512 contro 3,0498 ms (+0,05%), CoC 3,0350
+(−0,49%), entrambi 3,0323 (−0,57%); scenario 0 Velocity 2,7436 contro
+2,7015 (+1,56%, confermato). Tra sessioni la stessa configurazione si sposta
+dell'1–2% (2,66 → 2,70 ms): si confrontano solo varianti misurate a giri
+alternati nella stessa sessione.
+
+Su M5 Max **ricalcolare non conviene quando il consumatore è limitato da ALU
+o latenza** (TAA dello scenario 0: +1,5% con 16 passi, +7% con 64, +33% con
+256); dove il consumatore è vicino alla banda o legge il segnale una volta
+(scenario 2) il saldo è nullo o lievemente positivo e i byte scendono del
+2,7–4%. Il pareggio dipende dal consumatore: la rematerializzazione è una
+scelta del piano per segnale e per scenario, decisa dalla misura
+(OPT-1.2), non una regola.
+
+### 5. Riordino, sovrapposizione e seconda coda (spike 5)
+
+Metodo: `--graph-order` impone un ordine (validato: ogni pass vivo una
+volta, dipendenze rispettate); 3 giri a ordine ruotato, frame p50.
+
+Scenario 3 (async; il greedy mette G-buffer, GI, particelle, Lighting: il
+compute tra G-buffer e Lighting impedisce la fusione):
+
+| Ordine | Coda del compute | Frame p50 (CV) | DRAM stimata | Note |
+|---|---|---:|---:|---|
+| A greedy | async | **3,431 ms** (0,03%) | 494,8 MiB | G-buffer si sovrappone al compute async |
+| B compute prima, G-buffer+Lighting fusi | async | 3,660 (0,03%) = +6,7% | 410,5 (−17%) | 3 memoryless, heap −27%; l'attesa della coda async sale all'inizio del gruppo fuso: G-buffer non si sovrappone più |
+| C ombre, compute, G-buffer+Lighting | async | 3,659 (0,03%) = +6,7% | 410,5 | idem |
+| A greedy | grafica | 3,927 (0,03%) = +14,5% | 494,8 | |
+| B | grafica | **3,428 (0,04%)** | 410,5 | le 4 cascate d'ombra si sovrappongono al compute lungo (particelle 1,1 ms, ALU): nessuna barriera tra loro |
+| C | grafica | 3,860 (0,02%) = +12,5% | 410,5 | stessa fusione, ma il gruppo fuso aspetta il compute: niente sovrapposizione |
+
+Immagini identiche (0 pixel) tra A e B. Conclusioni: (1) fusione e
+sovrapposizione tra code sono in conflitto (le attese si agganciano
+all'inizio del gruppo): il modello di costo deve valutarle insieme; (2) su
+una coda, lavoro indipendente di tipo diverso (raster di geometria dopo un
+compute ALU) si sovrappone quasi del tutto se nessuna barriera lo separa
+(−0,43 ms su 0,4 ms di ombre).
+
+Scenari 0 e 1 (ombre spostate dopo SSAO / dopo la light grid): +0,5% e +0,4%,
+nessuna sovrapposizione. Causa (dal dump del grafo): **ogni primo uso di un
+transitorio piazzato ha una barriera di coda dopo tutti gli stadi che
+toccano la sua memoria** (frame precedente compreso, più gli alias): con
+alias misti raster/compute diventa `fragment|dispatch → fragment` e aspetta
+anche il compute appena precedente, indipendente. Dove la barriera resta
+`fragment → fragment` (scenario 3 B) il compute precedente continua. Le
+barriere di aliasing e di protezione tra frame sono il limite della
+sovrapposizione: materia di OPT-1.4 (stadi minimi) e OPT-1.3 (alias per
+classe di stadi) e un termine del modello (OPT-1.8).
+
+### 6. Anelli di upload e storage mode (B-29, OPT-1.10)
+
+Nuovo benchmark B-29 `upload.storage_mode` (`bench/soc/b29_upload.cpp`):
+scrittura CPU in buffer `shared` WriteCombined contro DefaultCache (memcpy
+1/4/8 thread, store da 16/64 byte, store sparsi), lettura CPU, lettura GPU
+di `shared`/`private`/`shared` WC da 1 MiB a 1 GiB. Controlli negativi
+provati falliti: WC reso DefaultCache → rapporto di lettura 1,13 e
+`cpuCacheMode()` diverso → fail; 3 passate al posto di 4 → linearità 1,39 →
+fail.
+
+- Scrittura CPU: **WC = cached** (memcpy 0,98–1,01× da 1 MiB in su; store
+  16 B 33,5–34 GB/s in entrambi; store 64 B 127–133); unica differenza gli
+  store sparsi da 16 B a 64 KiB–1 MiB (WC 22–24 contro 31–35 GB/s).
+- Lettura CPU da WC **20× più lenta** (7,0 contro 108–141 GB/s).
+- Lettura GPU: **`private` = `shared`** (rapporto 0,999–1,004 da 1 MiB a
+  1 GiB; 571–573 GB/s a 1 GiB, come B-08/B-09); WC letto dal GPU uguale.
+- Il motore usa già `shared` + WC per gli anelli (`upload_ring.cpp`,
+  `metal_texture_manager.cpp`) e `private` per ciò che il GPU legge
+  (geometria, texture, transitori): OPT-1.10 è soddisfatto; WC resta (non
+  costa in scrittura, il motore non rilegge gli anelli).
+
+### 7. SLC tra produttore e consumatore adiacenti (OPT-1.7, primo sguardo)
+
+Scenario 0, Bloom down 1 (legge l'HDR da 28 MiB scritto da Lighting) subito
+dopo Lighting contro dopo TAA (che legge 112 MiB): **0,0707 contro 0,0763 ms
+(−7%)**, frame 2,663 contro 2,637 ms (l'altro ordine è lo 0,9% più veloce
+per effetti di sovrapposizione): una parte dell'HDR si legge dalla SLC se il
+consumatore è adiacente; l'effetto sul frame è piccolo.
+
+### Trappola di misura nuova
+
+Con un processo CPU al 100% su un core (il solver dello spike 2) il frame
+degli scenari diventa **bimodale tra run identici** (2,67 oppure 3,6–3,9
+ms, CV 1–4%) pur con GPU a P13 per il 77% del tempo; a macchina quieta torna
+2,662 ms (CV 0,02%). Anche un benchmark `soc_bench` concorrente (agente)
+porta il CV al 13–47%. Tutte le misure di OPT-1 si fanno a macchina quieta,
+in serie.
+
+---
+
+## OPT-1 — Risultati: ottimizzatore del grafo, piani misurati, barriere e aliasing
+
+**2026-10-01** · M5 Max, macOS 27.2, Release, alimentazione, macchina quieta
+(nessun agente né solver in esecuzione) · tabelle complete in
+[`perf-log.md`](perf-log.md) ("OPT-1 — chiusura").
+
+### Cosa è stato costruito
+
+- **Ottimizzatore portabile** (`src/rendergraph/optimizer/`): piano
+  (`GraphPlan`: famiglia, chiave strutturale FNV-1a, ordine per nome, scelte
+  di costruzione remat/async, politiche di alias e barriere, metriche),
+  modello di costo (`GraphCostModel`: unità = max(byte/banda, ALU +
+  geometria) + fisso, simulazione delle due code con sovrapposizione e
+  condivisione), ricerca (DP esatta sui downset con fronte di Pareto, beam
+  oltre il limite di stati, annealing sul valutatore reale; il greedy è sempre
+  candidato). Test: sullo scenario 3 l'ottimizzatore raggiunge l'ottimo dei
+  5040 ordini topologici (controllo negativo: senza annealing e con beam di 1
+  stato si ferma a J 2,892 contro 2,807 e il test fallisce).
+- **Motore**: `--graph-opt off|greedy|plan`, `--graph-plan`; il piano si
+  applica solo se la chiave del grafo costruito coincide (la dimensione del
+  drawable non conta), altrimenti ripiego registrato; report schema 4 con
+  l'oggetto `graph`.
+- **OPT-1.3** `AliasPolicy::Coloring` (mai peggio del greedy, limite = max
+  byte vivi) e `ColoringStageClass`; **OPT-1.4** `BarrierPolicy::Minimal`;
+  **OPT-1.5/1.6/1.7** `graph_lint`, `graph_budget` (byte per pass, quota del
+  budget per tier, working set contro la SLC stimata, coppie di riuso),
+  dump esteso; **strumenti** `tools/graph_opt` (piani offline, `--top`),
+  `tools/graph_select.py` (adozione per misura), `tools/graph_scenarios.sh` +
+  `tools/scenario_table.py` (uscita).
+
+### Il modello ordina, la misura decide
+
+Contro le 6 varianti misurate dello spike 5 (scenario 3) il modello rispetta
+l'ordinamento misurato (async: A < B = C; una coda: B < C < A) e la stima dei
+risparmi è del giusto ordine (B-sync contro A-sync 0,56 ms predetti, 0,50
+misurati), ma i frame assoluti sono sottostimati (0,62–0,91×: la latenza dei
+pass non è modellata) e i pass limitati da latenza/ALU ingannano la scelta
+della rematerializzazione e della sovrapposizione. Con il solo modello il
+piano preferito dello scenario 3 (niente coda async, niente fusione, ombre
+intercalate) misurava +7%. Procedura adottata: `graph_opt --top 6` con J
+pesato sul tempo e con J pesato su memoria e byte (`--gamma 2 --beta 0.5`),
+poi `graph_select.py`: `off` + ogni candidato distinto, 3 giri ruotati ×
+600 frame, immagine identica a `off` obbligatoria; adottato il più veloce se
+batte `off` oltre l'1%, altrimenti quello che riduce di più byte + heap
+senza perdere oltre l'1%, altrimenti il piano di base.
+
+| Scenario | Candidati | Adottato | Misura contro off (selezione) |
+|---|---:|---|---|
+| 0 deferred | 7 | ordine DP+annealing, Coloring + Minimal | −6,7% frame |
+| 1 forward+ | 8 | ordine DP+annealing, Coloring + Minimal | −3,6% frame |
+| 2 post | 7 | Velocity e CoC rematerializzate, Coloring + Minimal | −0,8% frame (rumore), −3,7% byte, −8,0% heap |
+| 3 async | 12 | G-buffer + Lighting fusi, GI sulla coda async, particelle sulla grafica | −2,3% frame, −15,7% byte, −27,2% heap |
+
+La selezione ha trovato un **bug del banco di prova**: con la
+rematerializzazione nello scenario 2 tutte le immagini differivano (5,76 M
+pixel); la profondità aggiunta al consumatore come sorgente del ricalcolo
+entrava nell'hash del valore. Corretto (`50d2f81`, input "sorgente"),
+test aggiunto, spike 4 corretto sopra.
+
+### Uscita e attribuzione
+
+`tools/graph_scenarios.sh` (perf-log): piano contro `off` −8,4% / −3,5% /
+−0,5% / −2,3% di frame sugli scenari 0–3; 0 pixel e 0 messaggi di
+validazione per tutti i modi; `greedy` (politiche OPT-1 con l'ordine greedy)
+neutro (±0,1%). Attribuzione sugli scenari 0 e 1 con l'ordine dei piani:
+solo ordine (barriere di fine F4) −3,5% / −2,1%; ordine + barriere minime
+−8,4% / −3,6%; barriere minime con l'ordine greedy 0%. Il guadagno viene
+dalla **sovrapposizione** (OPT-1.8): l'ordine mette le cascate d'ombra
+accanto a compute indipendenti (SSAO, light grid) e le barriere minime non le
+fanno più aspettare il compute.
+
+### Obiettivo della ROADMAP (−25% byte, −20% picco rispetto alla fine di F4)
+
+Raggiunto solo per il picco dello scenario 3 (−27,2%; byte −15,7%). Scarto
+spiegato per scenario:
+- **0 deferred, 1 forward+**: il grafo impone già l'ordine dei dati (SSAO e
+  light grid compute tra i pass raster): nessun ordine permette nuove fusioni
+  o memoryless (DP esatto e annealing concordano, spike 2); l'aliasing greedy
+  è già al limite inferiore (heap = max byte vivi, OPT-1.3); la
+  rematerializzazione della velocity toglierebbe il 5% dei byte ma costa
+  +1,5% di frame (TAA limitato dall'ALU) e la selezione la scarta. Guadagno
+  ottenuto in tempo, non in byte.
+- **2 post**: unica leva sui byte la rematerializzazione (−3,7% byte, −8%
+  heap, tempo neutro): adottata.
+- **3 async**: la leva è l'ordine (compute prima del G-buffer → fusione e 3
+  memoryless): −15,7% byte, −27,2% heap, −2,3% frame; il resto dei byte è
+  lavoro reale dei pass (G-buffer letto da SSAO/lighting, ombre campionate,
+  atlante GI).
+- I byte che restano sono quelli richiesti dagli algoritmi così come sono
+  scritti; ridurli oltre richiede cambiare gli algoritmi (pass di profondità
+  per SSAO prima di un G-buffer fuso con il lighting, V-buffer: F5/OPT-4),
+  non l'ordine o la memoria del grafo.
+
+### Barriere minime: cosa è dimostrato
+
+`BarrierPolicy::Minimal` restringe la barriera di primo uso di una memoria
+agli stadi degli accessi massimali (ordinati dopo gli altri da barriere
+realmente presenti nel piano); dimostrazione per transitività nel codice;
+test: Minimal ⊆ Conservative su 300 grafi casuali (1676 barriere ristrette su
+5093) e sugli scenari 1–3 viste; 0 pixel e 0 messaggi su tutti gli scenari
+anche con `--no-vsync` e senza fusione. **Limite dichiarato**: il controllo
+negativo sul GPU non è riuscito a rendere visibile una corsa nemmeno
+togliendo del tutto le barriere di primo uso (le barriere di dipendenza
+bastano in questi carichi; togliendo quelle l'immagine cambia di 5,76 M
+pixel): la sicurezza di Minimal poggia sulla dimostrazione e sui test, non
+sulle immagini. Per questo il default resta `--graph-opt off`; i piani
+misurati che la usano sono opzionali (`--graph-opt plan`).
+
+### Aliasing, lint, budget
+
+- Coloring = greedy su tutti gli scenari 1–3 viste (il greedy è già al limite
+  inferiore); su 400 insiemi casuali di intervalli Coloring è minore in 55 e
+  raggiunge sempre il limite. `ColoringStageClass` costa 11–19 MB sugli
+  scenari 0–2 (il prezzo di non mischiare raster e compute).
+- Lint (OPT-1.6): nessun errore; note per ogni transitorio salvato (perché
+  campionato dopo: ombre, profondità, velocity, HDR, LDR), G-buffer degli
+  scenari 0/3 che attraversa due gruppi per via del compute in mezzo, store
+  conservativo della profondità solo letta (forward+).
+- Budget (OPT-1.5, stime del grafo): 458–566 MiB per frame = 5–6% del budget
+  a 60 fps su M5 Max (569 GB/s, misurato), 19–23% su M5 base (153,6 GB/s,
+  **esterno**), 29–36% su M3 base (**esterno**). Senza contatori hardware
+  (F4.4) i byte restano stime; la verifica indiretta è lo spike 1.
+- SLC (OPT-1.7, stima 71,4 MiB): sopra la stima TAA (112,5 MiB), DoF
+  composite (77,3), GI probe update (136); effetto misurato dell'adiacenza
+  produttore→consumatore: −7% sul pass (spike 7).
+
+### Più viste (solo predizione)
+
+`graph_opt --views 2,3` (modello pesato sul tempo): scenario 3 −17,4/−17,6%
+byte, −28,6/−11,8% heap; scenari 0–2 il modello sceglie ordini con heap
++6…+43% per un frame predetto migliore. Non misurati né adottati: il modello
+non è affidabile da solo (sopra), i piani per più viste vanno scelti con
+`graph_select.py --views N` quando serviranno.
+
+### Bug trovati durante la fase
+
+- Storia TAA: una sola coppia di texture per tutte le viste (perdita e viste
+  che condividevano la storia) → una coppia per vista (`7ecb750`).
+- Rematerializzazione: profondità sorgente sommata al valore (`50d2f81`).
+- Piano con un pass che diventa culled (CoC rematerializzata): l'ordine
+  forzato lo rifiutava → i pass non pianificati in coda sono solo quelli vivi
+  (`b49a716`, anche `--graph-order`).
+- Misure: un processo al 100% su un core o un benchmark concorrente rendono
+  il frame bimodale; le misure sono rifatte a macchina quieta.

@@ -1,8 +1,11 @@
 #include "rendergraph/barrier_plan.h"
+#include "rendergraph/optimizer/optimizer.h"
 #include "rendergraph/render_graph.h"
+#include "rendergraph/scenario.h"
 
 #include <doctest/doctest.h>
 
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -649,4 +652,302 @@ TEST_CASE("barriers: per-frame and read-only imports need no barrier between fra
     }, {});
     const CompiledGraph c = plan(g, {{PassType::Compute, 0, 0}});
     CHECK(c.barriers.empty());
+}
+
+// ---------------------------------------------------------------------------
+// OPT-1.4: BarrierPolicy::Minimal
+// ---------------------------------------------------------------------------
+
+namespace {
+
+const Barrier* findBarrier(const CompiledGraph& c, u32 position, BarrierScope scope, bool aliasing) {
+    const PassBarriers* pb = at(c, position);
+    if (!pb) return nullptr;
+    for (const Barrier& b : pb->barriers) if (b.scope == scope && b.aliasing == aliasing) return &b;
+    return nullptr;
+}
+
+struct Pair {
+    CompiledGraph conservative, minimal;
+};
+
+// Plans `g` with the given encoders and aliasing placements under both policies.
+Pair planBoth(const RenderGraph& g, const std::vector<EncSpec>& specs, const std::vector<Placement>& placements) {
+    Pair r;
+    r.conservative = compileOrder(g);
+    REQUIRE(r.conservative.ok);
+    assignEncoders(g, r.conservative, specs);
+    r.conservative.aliasing.placements = placements;
+    r.minimal = r.conservative;
+    buildBarrierPlan(g, r.conservative, defaultBarrierRules(), BarrierPolicy::Conservative);
+    buildBarrierPlan(g, r.minimal, defaultBarrierRules(), BarrierPolicy::Minimal);
+    return r;
+}
+
+// Same barriers at the same places; Minimal waits for a subset of the stages.
+// Returns the number of barriers whose afterStages changed.
+u32 compareBarriers(const CompiledGraph& cons, const CompiledGraph& mini, std::vector<std::string>* changes = nullptr,
+                    const RenderGraph* g = nullptr) {
+    REQUIRE(cons.barriers.size() == mini.barriers.size());
+    u32 changed = 0;
+    for (size_t i = 0; i < cons.barriers.size(); ++i) {
+        const PassBarriers& a = cons.barriers[i];
+        const PassBarriers& b = mini.barriers[i];
+        REQUIRE(a.position == b.position);
+        REQUIRE(a.barriers.size() == b.barriers.size());
+        for (size_t k = 0; k < a.barriers.size(); ++k) {
+            const Barrier& x = a.barriers[k];
+            const Barrier& y = b.barriers[k];
+            CHECK(x.scope == y.scope);
+            CHECK(x.aliasing == y.aliasing);
+            CHECK(x.beforeStages == y.beforeStages);
+            CHECK(x.resources == y.resources);
+            CHECK((y.afterStages & ~x.afterStages) == 0);
+            if (y.afterStages != x.afterStages) {
+                ++changed;
+                if (changes) {
+                    std::string name = "pos " + std::to_string(a.position);
+                    if (g && a.position < cons.order.size()) name += " (" + g->passes()[cons.order[a.position]].name + ")";
+                    changes->push_back(name + (x.scope == BarrierScope::Queue ? " queue " : " encoder ") +
+                                       (x.aliasing ? "alias " : "") + stagesName(x.afterStages) + " -> " +
+                                       stagesName(y.afterStages));
+                }
+            }
+        }
+    }
+    return changed;
+}
+
+} // namespace
+
+TEST_CASE("barriers minimal: compute to raster alias waits only for the ordered-last raster read") {
+    // A (compute) writes t1; B (raster) reads t1 in fragment; C (raster) first
+    // uses t2 placed over t1.  A is ordered before B by B's RAW barrier, so C
+    // needs no dispatch stage.
+    RenderGraph g;
+    BufferRef t1;
+    TextureRef t2;
+    BufferRef out = g.importBuffer("out", bufDesc(), ImportOutput | ImportPerFrame);
+    g.addPass("A", PassType::Compute, [&](PassBuilder& b) {
+        t1 = b.write(b.createBuffer("t1", bufDesc()), Usage::ShaderWrite, StageDispatch);
+    }, {});
+    g.addPass("B", PassType::Raster, [&](PassBuilder& b) {
+        b.read(t1, Usage::ShaderRead, StageFragment);
+        b.write(out, Usage::ShaderWrite, StageFragment);
+    }, {});
+    g.addPass("C", PassType::Raster, [&](PassBuilder& b) {
+        t2 = b.writeColor(b.createTexture("t2", colorDesc()), 0, LoadIntent::Clear);
+        b.setSideEffect();
+    }, {});
+    const std::vector<EncSpec> specs = {{PassType::Compute, 0, 0}, {PassType::Raster, 1, 1}, {PassType::Raster, 2, 2}};
+    // ids: out = 0, t1 = 1, t2 = 2
+    const Pair r = planBoth(g, specs, {{1, 0, 1024, false}, {2, 0, 1024, true}});
+    const Barrier* c = findBarrier(r.conservative, 2, BarrierScope::Queue, true);
+    const Barrier* m = findBarrier(r.minimal, 2, BarrierScope::Queue, true);
+    REQUIRE(c);
+    REQUIRE(m);
+    CHECK(c->afterStages == (StageDispatch | StageFragment));
+    CHECK(m->afterStages == StageFragment);
+    CHECK(m->beforeStages == c->beforeStages);
+    CHECK(m->resources == c->resources);
+    // t1's own first use: the previous frame's maximal access is B's read.
+    const Barrier* m0 = findBarrier(r.minimal, 0, BarrierScope::Queue, false);
+    REQUIRE(m0);
+    CHECK(m0->afterStages == StageFragment);
+    CHECK(compareBarriers(r.conservative, r.minimal) >= 2);
+}
+
+TEST_CASE("barriers minimal: unordered accesses of the same memory stay wide") {
+    // Two independent readers of t1 (fragment and dispatch) are not ordered
+    // with each other: the next occupant waits for both.
+    RenderGraph g;
+    BufferRef t1;
+    TextureRef t2;
+    BufferRef o1 = g.importBuffer("o1", bufDesc(), ImportOutput | ImportPerFrame);
+    BufferRef o2 = g.importBuffer("o2", bufDesc(), ImportOutput | ImportPerFrame);
+    g.addPass("A", PassType::Compute, [&](PassBuilder& b) {
+        t1 = b.write(b.createBuffer("t1", bufDesc()), Usage::ShaderWrite, StageDispatch);
+    }, {});
+    g.addPass("B", PassType::Raster, [&](PassBuilder& b) {
+        b.read(t1, Usage::ShaderRead, StageFragment);
+        b.write(o1, Usage::ShaderWrite, StageFragment);
+    }, {});
+    g.addPass("C", PassType::Compute, [&](PassBuilder& b) {
+        b.read(t1, Usage::ShaderRead, StageDispatch);
+        b.write(o2, Usage::ShaderWrite, StageDispatch);
+    }, {});
+    g.addPass("D", PassType::Raster, [&](PassBuilder& b) {
+        t2 = b.writeColor(b.createTexture("t2", colorDesc()), 0, LoadIntent::Clear);
+        b.setSideEffect();
+    }, {});
+    const std::vector<EncSpec> specs = {{PassType::Compute, 0, 0}, {PassType::Raster, 1, 1},
+                                        {PassType::Compute, 2, 2}, {PassType::Raster, 3, 3}};
+    // ids: o1 = 0, o2 = 1, t1 = 2, t2 = 3
+    const Pair r = planBoth(g, specs, {{2, 0, 1024, false}, {3, 0, 1024, true}});
+    const Barrier* m = findBarrier(r.minimal, 3, BarrierScope::Queue, true);
+    const Barrier* c = findBarrier(r.conservative, 3, BarrierScope::Queue, true);
+    REQUIRE(m);
+    REQUIRE(c);
+    CHECK(m->afterStages == (StageFragment | StageDispatch));
+    CHECK(m->afterStages == c->afterStages);
+}
+
+TEST_CASE("barriers minimal: persistent import waits for the maximal accesses of the previous frame") {
+    RenderGraph g;
+    BufferRef persistent = g.importBuffer("persistent", bufDesc(), ImportContentsDefined | ImportOutput);
+    TextureRef target = g.importTexture("target", colorDesc(), ImportOutput | ImportPerFrame);
+    g.addPass("update", PassType::Compute, [&](PassBuilder& b) {
+        b.read(persistent, Usage::ShaderRead, StageDispatch);
+        persistent = b.write(persistent, Usage::ShaderWrite, StageDispatch);
+    }, {});
+    g.addPass("draw", PassType::Raster, [&](PassBuilder& b) {
+        b.read(persistent, Usage::ShaderRead, StageVertex);
+        b.writeColor(target, 0, LoadIntent::Clear);
+    }, {});
+    const Pair r = planBoth(g, {{PassType::Compute, 0, 0}, {PassType::Raster, 1, 1}}, {});
+    const Barrier* c = findBarrier(r.conservative, 0, BarrierScope::Queue, false);
+    const Barrier* m = findBarrier(r.minimal, 0, BarrierScope::Queue, false);
+    REQUIRE(c);
+    REQUIRE(m);
+    CHECK(c->afterStages == (StageDispatch | StageVertex));
+    CHECK(m->afterStages == StageVertex);
+    // The dependency barrier is untouched.
+    const Barrier* d = findBarrier(r.minimal, 1, BarrierScope::Queue, false);
+    REQUIRE(d);
+    CHECK(d->afterStages == StageDispatch);
+    CHECK(d->beforeStages == StageVertex);
+    CHECK(compareBarriers(r.conservative, r.minimal) == 1);
+}
+
+TEST_CASE("barriers minimal: memory shared with another queue keeps the conservative stages") {
+    RenderGraph g;
+    BufferRef t1;
+    TextureRef t2;
+    BufferRef out = g.importBuffer("out", bufDesc(), ImportOutput | ImportPerFrame);
+    g.addPass("A", PassType::Compute, [&](PassBuilder& b) {
+        t1 = b.write(b.createBuffer("t1", bufDesc()), Usage::ShaderWrite, StageDispatch);
+    }, {});
+    g.addPass("B", PassType::Raster, [&](PassBuilder& b) {
+        b.read(t1, Usage::ShaderRead, StageFragment);
+        b.write(out, Usage::ShaderWrite, StageFragment);
+    }, {});
+    g.addPass("C", PassType::Raster, [&](PassBuilder& b) {
+        t2 = b.writeColor(b.createTexture("t2", colorDesc()), 0, LoadIntent::Clear);
+        b.setSideEffect();
+    }, {});
+    g.passes()[0].queue = Queue::AsyncCompute;
+    const Pair r = planBoth(g, {{PassType::Compute, 0, 0}, {PassType::Raster, 1, 1}, {PassType::Raster, 2, 2}},
+                            {{1, 0, 1024, false}, {2, 0, 1024, true}});
+    CHECK(compareBarriers(r.conservative, r.minimal) == 0);
+}
+
+namespace {
+
+struct Lcg {
+    u64 state;
+    u32 next() { state = state * 6364136223846793005ull + 1442695040888963407ull; return static_cast<u32>(state >> 33); }
+    u32 below(u32 n) { return next() % n; }
+};
+
+// Deterministic random graphs: raster / compute / blit passes creating
+// transients and reading or rewriting earlier ones.
+void buildRandomGraph(RenderGraph& g, u64 seed, u32 passCount) {
+    Lcg rng{seed};
+    std::vector<BufferRef> bufs;
+    std::vector<TextureRef> texs;
+    BufferRef persistent = g.importBuffer("persistent", bufDesc(), ImportContentsDefined | ImportOutput);
+    for (u32 i = 0; i < passCount; ++i) {
+        const u32 kind = rng.below(3);
+        const PassType type = kind == 0 ? PassType::Raster : kind == 1 ? PassType::Compute : PassType::Blit;
+        const Stages readStage = type == PassType::Raster ? (rng.below(2) ? StageFragment : StageVertex)
+                                 : type == PassType::Compute ? StageDispatch : StageBlit;
+        const u32 reads = rng.below(3);
+        const u32 pickB = bufs.empty() ? 0 : rng.below(static_cast<u32>(bufs.size()));
+        const u32 pickT = texs.empty() ? 0 : rng.below(static_cast<u32>(texs.size()));
+        const bool rewrite = !bufs.empty() && type != PassType::Raster && rng.below(4) == 0;
+        const bool usePersistent = rng.below(5) == 0;
+        const bool big = rng.below(3) == 0;
+        g.addPass("p" + std::to_string(i), type, [&](PassBuilder& b) {
+            for (u32 k = 0; k < reads; ++k) {
+                if (k == 0 && !bufs.empty() && !(rewrite)) b.read(bufs[pickB], Usage::ShaderRead, readStage);
+                else if (k == 1 && !texs.empty() && type != PassType::Blit) {
+                    b.read(texs[pickT], Usage::ShaderRead, type == PassType::Compute ? StageDispatch : StageFragment);
+                }
+            }
+            if (usePersistent && type == PassType::Compute) {
+                persistent = b.write(persistent, Usage::ShaderWrite, StageDispatch);
+            } else if (usePersistent) {
+                b.read(persistent, Usage::ShaderRead, readStage);
+            }
+            if (rewrite) {
+                bufs[pickB] = b.write(bufs[pickB], Usage::ShaderWrite, type == PassType::Compute ? StageDispatch : StageBlit);
+            }
+            if (type == PassType::Raster) {
+                TextureDesc d = colorDesc();
+                if (big) d.width = 256;
+                texs.push_back(b.writeColor(b.createTexture("t" + std::to_string(i), d), 0, LoadIntent::Clear));
+            } else {
+                BufferDesc d = bufDesc();
+                if (big) d.size = 8192;
+                bufs.push_back(b.write(b.createBuffer("b" + std::to_string(i), d), Usage::ShaderWrite,
+                                       type == PassType::Compute ? StageDispatch : StageBlit));
+            }
+            b.setSideEffect();
+        }, {});
+    }
+}
+
+} // namespace
+
+TEST_CASE("barriers minimal: random graphs, stages are a subset of conservative") {
+    EstimatedSizer sizer;
+    u32 graphs = 0, changed = 0, total = 0;
+    for (u64 seed = 1; seed <= 300; ++seed) {
+        RenderGraph g;
+        buildRandomGraph(g, seed * 7919, 4 + static_cast<u32>(seed % 14));
+        CompileOptions a;
+        a.sizer = &sizer;
+        CompileOptions m = a;
+        m.barrierPolicy = BarrierPolicy::Minimal;
+        const CompiledGraph ca = compile(g, a);
+        const CompiledGraph cm = compile(g, m);
+        if (!ca.ok) continue;
+        REQUIRE(cm.ok);
+        ++graphs;
+        for (const PassBarriers& pb : ca.barriers) total += static_cast<u32>(pb.barriers.size());
+        changed += compareBarriers(ca, cm);
+    }
+    CHECK(graphs > 150);
+    std::printf("  random graphs: %u graphs, %u barriers, %u narrowed\n", graphs, total, changed);
+    CHECK(changed > 0);
+}
+
+TEST_CASE("barriers minimal: OPT-1 scenarios, 1 to 3 views") {
+    EstimatedSizer sizer;
+    for (u32 index = 0; index < scenarioCount(); ++index) {
+        for (u32 views = 1; views <= 3; ++views) {
+            RenderGraph g;
+            const TextureRef drawable = g.importTexture("Drawable", {Format::BGRA8Srgb, 1920, 1080}, ImportOutput | ImportPerFrame);
+            Scenario s;
+            ScenarioParams params;
+            params.views = views;
+            std::string error;
+            REQUIRE_MESSAGE(buildScenario(index, params, g, drawable, s, {}, &error), error);
+            CompileOptions a;
+            a.sizer = &sizer;
+            CompileOptions m = a;
+            m.barrierPolicy = BarrierPolicy::Minimal;
+            const CompiledGraph ca = compile(g, a);
+            const CompiledGraph cm = compile(g, m);
+            REQUIRE(ca.ok);
+            REQUIRE(cm.ok);
+            std::vector<std::string> changes;
+            u32 total = 0;
+            for (const PassBarriers& pb : ca.barriers) total += static_cast<u32>(pb.barriers.size());
+            const u32 changed = compareBarriers(ca, cm, &changes, &g);
+            std::printf("  scenario %u (%s) views %u: %u of %u barriers narrowed\n", index, scenarioName(index), views,
+                        changed, total);
+            if (views == 1) for (const std::string& c : changes) std::printf("      %s\n", c.c_str());
+        }
+    }
 }

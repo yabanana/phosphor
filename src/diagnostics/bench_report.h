@@ -76,7 +76,25 @@ struct PassReport {
     std::vector<PassWork>    work;       // OPT-0.4 (schema 3): passes with known work
 };
 
-constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 3;
+// OPT-1 (schema 4): how the frame graph was compiled and what it costs.
+struct GraphReport {
+    bool        present = false;
+    std::string mode;          // --graph-opt: off | greedy | plan
+    std::string family;        // plan family of the graph (scenarios), or empty
+    std::string plan;          // "applied", "none", or "rejected: <reason>"
+    std::string alias;         // alias policy used
+    std::string barriers;      // barrier policy used
+    u32         passes       = 0; // live passes
+    u32         renderPasses = 0;
+    u32         memoryless   = 0;
+    u32         barrierCount = 0;
+    u64         dramBytes    = 0; // estimated DRAM bytes per frame (O1)
+    u64         heapBytes    = 0; // transient heap (memory peak of the transients)
+    u64         heapUnaliasedBytes = 0;
+    u64         maxLiveBytes = 0; // lower bound of the heap for this order
+};
+
+constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 4;
 
 struct BenchReport {
     std::string   bench;
@@ -103,6 +121,7 @@ struct BenchReport {
     std::vector<PassReport> passes;
     TimingSummary gpuPassSumMs;
     TimingSummary gpuFrameSpanMs;
+    GraphReport   graph;         // OPT-1 (schema 4)
 };
 
 /// Nearest-rank statistics of `values` (empty input gives all zeros).

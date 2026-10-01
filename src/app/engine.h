@@ -9,6 +9,7 @@
 #include "platform/metal/gpu_memory.h"
 #include "platform/metal/gpu_timestamps.h"
 #include "imgui/ui_panels.h"
+#include "rendergraph/optimizer/plan.h"
 #include "rendergraph/render_graph.h"
 #include "renderer/scene_extract.h"
 #include "testbench/testbench.h"
@@ -29,6 +30,7 @@ class FrameStats;
 class GpuCapture;
 class GpuScene;
 class KnownCostPass;
+class ScenarioPasses;
 class GraphDebugPasses;
 class AsyncComputeProbe;
 class DebugOverlays;
@@ -75,6 +77,8 @@ private:
     /// Describe the frame as a render graph and compile it; only when the
     /// graph key changes (resize, UI or capture toggled).
     void buildFrameGraph(u32 width, u32 height);
+    /// Declare every pass of the frame graph (reset first); no compilation.
+    void declareFrameGraph(u32 width, u32 height);
     void drawUi();
     void recordBenchmarkFrame(float dt, float cpuMs, float waitMs);
     /// Hand a hot-reloaded shader library to the pipeline cache (frame start).
@@ -104,6 +108,7 @@ private:
     std::unique_ptr<GraphDebugPasses>    graphDebug_; // --debug-graph-transients
     std::unique_ptr<AsyncComputeProbe>   asyncProbe_;  // --debug-async-compute
     std::unique_ptr<KnownCostPass>       knownCost_;   // --debug-gpu-cost (F4.1)
+    std::unique_ptr<ScenarioPasses>      scenario_;    // --graph-scenario (OPT-1)
     std::unique_ptr<GpuTimestamps>       timestamps_;  // F4.1 (null with --no-gpu-timing)
     std::unique_ptr<GpuCapture>          gpuCapture_;  // F4.3 (--gpu-capture*)
     PassTimings                          passTimings_;
@@ -167,6 +172,8 @@ private:
     };
     rg::RenderGraph frameGraph_;
     GraphKey        graphKey_;
+    GraphReport     graphReport_;                 // OPT-1: how the graph was compiled
+    std::vector<rg::GraphPlan> graphPlans_;       // --graph-opt plan
     OverlayMode     overlayMode_ = OverlayMode::None; // --overlay, changed from the Rendering panel
     rg::TextureRef  drawableRef_;
     rg::BufferRef   captureRef_;

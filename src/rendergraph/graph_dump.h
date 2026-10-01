@@ -1,5 +1,6 @@
 #pragma once
 
+#include "rendergraph/graph_budget.h"
 #include "rendergraph/render_graph.h"
 
 #include <string>
@@ -40,7 +41,11 @@ struct BandwidthReport {
 /// labelled with format/size, memoryless/aliased/imported flags, load/store
 /// actions and estimated bytes; edges for every access; barriers listed on
 /// the consumer pass; a graph label with the DRAM total per frame and the
-/// transient heap size (aliased vs unaliased).
-[[nodiscard]] std::string dumpGraphviz(const RenderGraph& graph, const CompiledGraph& compiled);
+/// transient heap size (aliased vs unaliased).  OPT-1.5/1.6/1.7: each live
+/// pass box also shows its estimated DRAM bytes; the graph label adds the tier
+/// budget lines (measured / external flagged), SLC flags and reuse candidates
+/// (graph_budget.h), and the lint findings (graph_lint.h).
+[[nodiscard]] std::string dumpGraphviz(const RenderGraph& graph, const CompiledGraph& compiled,
+                                       const BudgetOptions& budget = {});
 
 } // namespace phosphor::rg

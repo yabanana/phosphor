@@ -127,4 +127,47 @@ struct OverlayConstants {
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(OverlayConstants) == 32, "OverlayConstants layout");
 
+// Synthetic passes of the OPT-1 graph scenarios (shaders/scenario.metal,
+// platform/metal/scenario_passes.cpp, value model in rendergraph/scenario.h).
+PHOSPHOR_GPU_CONSTANT u32 SYNTH_MAX_INPUTS     = 8;
+PHOSPHOR_GPU_CONSTANT u32 SYNTH_COLOR_INPUTS   = 6; // texture(0..5)
+PHOSPHOR_GPU_CONSTANT u32 SYNTH_DEPTH_INPUTS   = 5; // texture(6..10)
+PHOSPHOR_GPU_CONSTANT u32 SYNTH_STORAGE_OUTPUTS = 2; // texture(11..12)
+PHOSPHOR_GPU_CONSTANT u32 SYNTH_INPUT_COLOR = 0;
+PHOSPHOR_GPU_CONSTANT u32 SYNTH_INPUT_DEPTH = 1;
+PHOSPHOR_GPU_CONSTANT u32 SYNTH_INPUT_REMAT = 2;
+PHOSPHOR_GPU_CONSTANT u32 SYNTH_INPUT_SOURCE = 3; // depth read only as a remat source (not hashed)
+
+struct GPUSynthInput {
+    u32 width;      // texture size (remat: the depth's size)
+    u32 height;
+    u32 kind;       // SYNTH_INPUT_*
+    u32 bind;       // index in the color or depth input array
+    u32 channels;   // remat: channels of the rematerialised format (1..4)
+    u32 rematDepth; // remat: input index of the depth
+    u32 rematSeed;  // remat: producer's seed and slot
+    u32 rematSlot;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUSynthInput) == 32, "GPUSynthInput layout");
+
+struct GPUSynthArgs {
+    u32 outWidth;         // raster target / dispatch size
+    u32 outHeight;
+    u32 seed;
+    u32 iterations;       // ALU steps per pixel/thread
+    u32 zero;             // runtime 0: keeps the ALU chains, changes no value
+    u32 inputCount;
+    u32 geometry;         // 1: Geometry pass (the fragment hashes its depth key)
+    u32 gridW;
+    u32 gridH;
+    u32 geometrySeed;
+    u32 vertexIterations; // ALU steps per vertex (Geometry)
+    u32 depthOnlyMask;    // outputs (color slots / storage indices) that are signals
+    u32 signalDepthInput; // non-Geometry signals: input giving the depth
+    u32 storageCount;
+    u32 pad[2];
+    GPUSynthInput inputs[8]; // SYNTH_MAX_INPUTS
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUSynthArgs) == 320, "GPUSynthArgs layout");
+
 } // namespace phosphor
