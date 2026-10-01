@@ -1,3 +1,5 @@
+#include "rendergraph/graph_budget.h"
+#include "rendergraph/graph_dump.h"
 #include "rendergraph/graph_lint.h"
 #include "rendergraph/render_graph.h"
 #include "rendergraph/scenario.h"
@@ -217,5 +219,85 @@ TEST_CASE("lint: the four scenarios have no error and every note names its reaso
         CompileOptions o;
         o.lint = LintMode::Error;
         CHECK(compile(g, o).ok);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// OPT-1.5 budget
+// ---------------------------------------------------------------------------
+
+TEST_CASE("budget: tiers flag which bandwidth is measured") {
+    const auto& tiers = bandwidthTiers();
+    REQUIRE(tiers.size() == 4);
+    int measured = 0;
+    for (const BandwidthTier& t : tiers) {
+        if (t.measured) {
+            ++measured;
+            CHECK(t.name == "T2 M5 Max");
+            CHECK(t.gbPerSecond == doctest::Approx(569.0));
+        } else {
+            CHECK(contains(t.source, "external"));
+        }
+    }
+    CHECK(measured == 1);
+}
+
+TEST_CASE("budget: arithmetic of budget per frame, fraction and share") {
+    const BandwidthTier t2{"T2 M5 Max", 569.0, true, "measured, B-08"};
+    const TierBudget b = makeTierBudget(t2, 100'000'000, 60.0, 1.0);
+    CHECK(b.budgetBytes == doctest::Approx(569e9 / 60.0));
+    CHECK(b.share == doctest::Approx(1e8 / (569e9 / 60.0)));
+    CHECK_FALSE(b.over);
+    CHECK(contains(b.line, "[measured]"));
+
+    const TierBudget half = makeTierBudget(t2, 100'000'000, 60.0, 0.5);
+    CHECK(half.budgetBytes == doctest::Approx(569e9 / 60.0 / 2));
+    CHECK(half.share == doctest::Approx(b.share * 2));
+
+    const BandwidthTier m3{"M3 base", 100.0, false, "external: Apple specifications"};
+    const TierBudget over = makeTierBudget(m3, 2'000'000'000, 60.0, 1.0); // 2 GB/frame at 60 fps = 120 GB/s
+    CHECK(over.over);
+    CHECK(over.share == doctest::Approx(1.2));
+    CHECK(contains(over.line, "NOT measured, external"));
+    CHECK(contains(over.line, "OVER BUDGET"));
+}
+
+TEST_CASE("budget: per-pass bytes add up to the graph estimate and to the tiers") {
+    Deferred d(true);
+    const CompiledGraph c = compile(d.graph);
+    REQUIRE(c.ok);
+    const GraphBudget b = analyzeBudget(d.graph, c);
+    const BandwidthReport r = estimateBandwidth(d.graph, c);
+    CHECK(b.totalBytes() == r.totalBytes());
+    u64 sum = 0;
+    for (const PassBytes& p : b.passes) sum += p.total();
+    CHECK(sum == b.totalBytes());
+    CHECK(b.passes.size() == c.order.size());
+    // drawable written once; albedo stored by the group and read by blur.
+    const u64 drawable = u64(kW) * kH * 4;
+    const u64 albedo   = u64(kW) * kH * 4;
+    CHECK(b.totalWriteBytes == drawable + albedo);
+    CHECK(b.totalReadBytes == albedo);
+    REQUIRE(b.tiers.size() == 4);
+    for (const TierBudget& t : b.tiers) {
+        CHECK(t.share == doctest::Approx(double(b.totalBytes()) / (t.tier.gbPerSecond * 1e9 / 60.0)));
+    }
+}
+
+TEST_CASE("budget: the four scenarios at 1 view, 60 fps") {
+    for (u32 s = 0; s < scenarioCount(); ++s) {
+        CAPTURE(s);
+        RenderGraph g;
+        Scenario sc;
+        const TextureRef drawable =
+            g.importTexture("Drawable", {Format::BGRA8Srgb, 1920, 1080}, ImportOutput | ImportPerFrame);
+        std::string error;
+        REQUIRE_MESSAGE(buildScenario(s, {}, g, drawable, sc, {}, &error), error);
+        const CompiledGraph c = compile(g);
+        REQUIRE(c.ok);
+        const GraphBudget b = analyzeBudget(g, c);
+        CHECK(b.totalBytes() > 0);
+        CHECK(b.totalBytes() == estimateBandwidth(g, c).totalBytes());
+        for (const TierBudget& t : b.tiers) CHECK_FALSE(t.over); // a 1-view scenario fits every tier
     }
 }

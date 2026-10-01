@@ -75,6 +75,7 @@ add_library(phosphor_core STATIC
     src/rendergraph/barrier_plan.cpp
     src/rendergraph/async_probe_reference.cpp
     src/rendergraph/graph_debug_reference.cpp
+    src/rendergraph/graph_budget.cpp
     src/rendergraph/graph_dump.cpp
     src/rendergraph/graph_lint.cpp
     src/rendergraph/optimizer/cost_model.cpp
