@@ -6,38 +6,21 @@
 #include "core/log.h"
 
 #include <glm/gtc/matrix_transform.hpp>
-#include <algorithm>
-#include <cmath>
-#include <cstdlib>
-#include <cstring>
-#include <utility>
 #include <random>
 
 namespace phosphor {
 
 void StressTest::setup(ECS& ecs, GpuScene& gpuScene, TextureManager& textures) {
     textures.createDefaultTextures();
-    if (const char* n = std::getenv("PHOSPHOR_SPIKE_INSTANCES")) count_ = static_cast<u32>(std::strtoul(n, nullptr, 10));
-    dynamic_ = std::getenv("PHOSPHOR_SPIKE_DYNAMIC") != nullptr;
-    const char* meshEnv = std::getenv("PHOSPHOR_SPIKE_MESH");
-    const bool cube = meshEnv && std::strcmp(meshEnv, "cube") == 0;
-    const float extent = VOLUME_EXTENT * std::cbrt(static_cast<float>(count_) / INSTANCE_COUNT);
-    LOG_INFO("StressTest: setting up %u instances (%s, %s)...", count_, cube ? "cube" : "sphere",
-             dynamic_ ? "dynamic" : "static");
+    LOG_INFO("StressTest: setting up %u instances...", INSTANCE_COUNT);
 
     // Low-poly sphere (8 slices x 6 stacks = ~96 triangles)
-    auto sphereMesh = cube ? ProceduralMeshes::generateCube(0.5f) : ProceduralMeshes::generateSphere(0.5f, 8, 6);
+    auto sphereMesh = ProceduralMeshes::generateSphere(0.5f, 8, 6);
     MeshHandle sphereHandle = gpuScene.uploadMesh(
         sphereMesh.positions, sphereMesh.normals,
         sphereMesh.tangents, sphereMesh.uvs, sphereMesh.indices);
-    // F5 spike S7: K copies of the mesh -> K draw batches.
-    u32 meshCopies = 1;
-    if (const char* k = std::getenv("PHOSPHOR_SPIKE_MESHES")) meshCopies = std::max(1u, static_cast<u32>(std::strtoul(k, nullptr, 10)));
-    for (u32 m = 1; m < meshCopies; ++m) {
-        gpuScene.uploadMesh(sphereMesh.positions, sphereMesh.normals, sphereMesh.tangents, sphereMesh.uvs, sphereMesh.indices);
-    }
 
-    entities_.reserve(count_ + MATERIAL_COUNT + 1);
+    entities_.reserve(INSTANCE_COUNT + MATERIAL_COUNT + 1);
 
     // --- Create random materials ---
     std::mt19937 rng(42); // deterministic seed for reproducibility
@@ -52,11 +35,11 @@ void StressTest::setup(ECS& ecs, GpuScene& gpuScene, TextureManager& textures) {
     }
 
     // --- Create 100K instances ---
-    std::uniform_real_distribution<float> posDist(-extent, extent);
+    std::uniform_real_distribution<float> posDist(-VOLUME_EXTENT, VOLUME_EXTENT);
     std::uniform_real_distribution<float> scaleDist(0.3f, 1.5f);
     std::uniform_int_distribution<u32> matDist(0, MATERIAL_COUNT - 1);
 
-    for (u32 i = 0; i < count_; ++i) {
+    for (u32 i = 0; i < INSTANCE_COUNT; ++i) {
         EntityID entity = ecs.createEntity();
         entities_.push_back(entity);
 
@@ -67,7 +50,7 @@ void StressTest::setup(ECS& ecs, GpuScene& gpuScene, TextureManager& textures) {
         ecs.addComponent(entity, std::move(xform));
 
         MeshInstanceComponent inst{};
-        inst.meshHandle    = sphereHandle + i % meshCopies;
+        inst.meshHandle    = sphereHandle;
         inst.materialIndex = matDist(rng);
         inst.setVisible(true);
         inst.setCastsShadows(false); // skip shadows for performance
@@ -99,24 +82,11 @@ void StressTest::setup(ECS& ecs, GpuScene& gpuScene, TextureManager& textures) {
     dirLight.intensity = 4.0f;
     ecs.addComponent(lightEntity, std::move(dirLight));
 
-    if (dynamic_) {
-        base_.clear();
-        // Const read: the non-const data() would flag the whole array as changed.
-        for (const TransformComponent& t : std::as_const(ecs).getArray<TransformComponent>().data()) base_.push_back(t.position);
-    }
     LOG_INFO("StressTest: setup complete (%u entities)", static_cast<u32>(entities_.size()));
 }
 
-void StressTest::update(float dt, ECS& ecs) {
-    if (!dynamic_) return;
-    // F5 spike S1: every instance moves (the best a CPU path can do: the
-    // dense array, no entity lookups).
-    time_ += dt;
-    auto xforms = ecs.getArray<TransformComponent>().data();
-    for (size_t i = 0; i < xforms.size() && i < base_.size(); ++i) {
-        xforms[i].position = base_[i] + glm::vec3(0.0f, std::sin(time_ + static_cast<float>(i) * 0.001f), 0.0f);
-        xforms[i].updateMatrix();
-    }
+void StressTest::update([[maybe_unused]] float dt, [[maybe_unused]] ECS& ecs) {
+    // Static scene -- no per-frame updates
 }
 
 void StressTest::teardown(ECS& ecs, [[maybe_unused]] GpuScene& gpuScene) {

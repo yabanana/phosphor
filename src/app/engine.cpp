@@ -1279,8 +1279,13 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
             // forward pass, never beside it.
             if (knownCost_) b.read(knownCost_->output(), Usage::ShaderRead, StageVertex);
             // F2.5 check: the draws are recorded by 4 threads into a render
-            // pass suspended/resumed across command buffers.
-            if (options_.debugSplitEncoding) b.setParallelChunks(4);
+            // pass suspended/resumed across command buffers.  Not with
+            // gpu-driven on (measured, M5 Max / macOS 27.2): an
+            // executeCommandsInBuffer inside a render encoder RESUMED in
+            // another command buffer makes the GPU fault and recover (every
+            // frame "Discarded (victim of GPU error/recovery)"), and the pass
+            // encodes ~7 commands anyway; the ICB runs in one encoder.
+            if (options_.debugSplitEncoding && options_.gpuDriven == GpuDrivenMode::Off) b.setParallelChunks(4);
         },
         [this](PassContext& ctx) {
             renderer_->encode(static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder()), ctx.chunk(), ctx.chunkCount());

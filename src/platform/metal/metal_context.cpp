@@ -245,6 +245,7 @@ void MetalContext::submitFrame(Frame& frame) {
         const bool async = sub.queue == SubmitQueue::Async;
         if (sub.waitFrame) q->wait(frameEvent_, sub.waitFrame);
         if (sub.waitValue) q->wait(async ? graphicsTimeline_ : asyncTimeline_, sub.waitValue);
+        if (sub.fenceEvent && sub.fenceWait) q->wait(sub.fenceEvent, sub.fenceWait);
         const MTL4::CommandBuffer* const* buffers = frame.buffers.data() + sub.firstBuffer;
         if (i == lastGraphics) {
             // A fresh options object per commit: a reused MTL4CommitOptions
@@ -262,6 +263,7 @@ void MetalContext::submitFrame(Frame& frame) {
             q->commit(buffers, sub.bufferCount);
         }
         if (sub.signalValue) q->signalEvent(async ? asyncTimeline_ : graphicsTimeline_, sub.signalValue);
+        if (sub.fenceEvent && sub.fenceSignal) q->signalEvent(sub.fenceEvent, sub.fenceSignal);
     }
     asyncDone_[frame.slot] = frame.asyncDoneValue;
     if (frame.asyncDoneValue) lastAsyncDone_ = frame.asyncDoneValue;

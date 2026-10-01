@@ -111,6 +111,9 @@ private:
     void addBuffer(MetalContext::Frame& frame, bool async, MTL4::CommandBuffer* cmd);
     void ensureParallelResources(u32 maxChunks);
     static void encodeChunkJob(void* user, u32 chunk);
+    /// F2.5: end the current graphics submission before a split render pass
+    /// (it signals the split fence) and open the next (it waits for it).
+    void cutSubmissionForSplit(MetalContext::Frame& frame);
 
     MetalContext&            context_;
     TransientHeap            heap_;
@@ -134,6 +137,11 @@ private:
     std::vector<u32>           waitBefore_;
     std::vector<u32>           signalAfter_;
     bool                       segmented_ = false; // the graph uses the async queue
+    // F2.5: the graph has a split render pass: same-queue fence between the
+    // commits before / from it, and between frames (values monotonic).
+    bool                       hasSplit_  = false;
+    MTL::SharedEvent*          splitFence_ = nullptr;
+    u64                        splitFenceValue_ = 0;
     // Per-frame submission state (execute()).
     u32                        graphicsSub_ = 0;
     u32                        asyncSub_    = ~0u;

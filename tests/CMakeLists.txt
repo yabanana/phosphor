@@ -36,6 +36,7 @@ add_executable(phosphor_tests
     test_pipeline_script.cpp
     test_procedural.cpp
     test_render_graph.cpp
+    test_scene_check.cpp
     test_scene_extract.cpp
     test_scene_store.cpp
     test_soc_model.cpp

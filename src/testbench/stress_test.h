@@ -27,11 +27,6 @@ private:
     static constexpr float VOLUME_EXTENT = 200.0f;
 
     std::vector<EntityID> entities_;
-    // F5 spike S1 (temporary): PHOSPHOR_SPIKE_INSTANCES / _DYNAMIC / _MESH.
-    u32 count_ = INSTANCE_COUNT;
-    bool dynamic_ = false;
-    float time_ = 0.0f;
-    std::vector<glm::vec3> base_; // dense TransformComponent order
 };
 
 } // namespace phosphor

@@ -28,7 +28,9 @@ SceneCheckResult compareScene(const SceneStore& store, const GpuScene& scene, co
     r.slots = slots;
     const auto mirror = store.instances();
     if (gpu.instances.size() < slots || mirror.size() < slots) {
+        ++r.instanceErrors;
         fail(r, "instance read-back smaller than the slot capacity");
+        r.ecs = store.verifyAgainstEcs(ecs, scene);
         return r;
     }
 
@@ -59,14 +61,13 @@ SceneCheckResult compareScene(const SceneStore& store, const GpuScene& scene, co
         fail(r, "materials differ from the mirror (" + std::to_string(r.materialErrors) + ")");
     }
 
-    if (gpuDriven) {
+    if (gpuDriven && (gpu.prefix.size() < size_t(slots) + 1 || gpu.visible.size() < slots)) {
+        ++r.listErrors;
+        fail(r, "visible list / prefix read-back too small");
+    } else if (gpuDriven) {
         // Visibility of every slot from the GPU prefix, against the CPU
         // reference evaluated on the GPU's own instances (a matrix error is
         // reported above, not twice).
-        if (gpu.prefix.size() < size_t(slots) + 1 || gpu.visible.size() < slots) {
-            fail(r, "visible list / prefix read-back too small");
-            return r;
-        }
         GPUCullParams params = cull;
         params.slotCount = slots;
         std::vector<u8> expected;
