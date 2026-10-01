@@ -1239,3 +1239,275 @@ non è affidabile da solo (sopra), i piani per più viste vanno scelti con
   (`b49a716`, anche `--graph-order`).
 - Misure: un processo al 100% su un core o un benchmark concorrente rendono
   il frame bimodale; le misure sono rifatte a macchina quieta.
+
+---
+
+## F5 — Spike: percorso CPU, delta, draw guidati dalla GPU, culling, barriere, gerarchia
+
+**2026-10-01** · Apple M5 Max (Apple10, 40 core GPU), macOS 27.2, all'alimentazione
+(batteria 100%), schermo acceso (`caffeinate -d`), macchina quieta (nessun
+agente, nessun altro benchmark), build Release. S1 e S7a girano nel motore;
+S2–S7 nello strumento [`bench/f5_spike`](../bench/f5_spike/README.md)
+(harness `bench/soc`: ≥ 15 ripetizioni per metrica, mediana, 3 run, CV tra
+run; risultati in `bench/results/f5-spike/m5max-macos27.2.json`). Ogni
+spike ha un controllo negativo integrato che verifica la propria capacità
+di fallire (prova con il meccanismo rotto a mano annotata nel commit
+dell'agente); `f5_spike --validate` (API + shader validation): 6 benchmark,
+0 falliti, 0 messaggi. Il codice degli spike S2–S6 è stato scritto da
+sotto-agenti senza misure; tutte le misure qui sotto sono state prese dopo.
+
+### 1. Baseline del percorso CPU a 10K/100K/1M istanze (S1)
+
+Metodo: Stress Test resa parametrica solo per lo spike
+(`PHOSPHOR_SPIKE_INSTANCES`, `_DYNAMIC` = ogni istanza si muove ogni frame
+scorrendo l'array denso dell'ECS, `_MESH=cube`, `_MESHES=K` = K copie della
+mesh → K batch), riga `SPIKE-S1` con i ms CPU per fase del frame, i byte
+scritti nell'anello di upload e i comandi CPU del forward (draw + stato +
+binding). Release, 3200×1800, `--no-vsync --no-ui`, 300 frame + 60 di
+riscaldamento, un run per riga (spike, non uscita).
+
+| N | mesh (tri) | moto | CPU frame p50 (p99) | sim | extract + sort | prepare (upload) | graph encode | submit | upload/frame | Forward GPU p50 (p99) | comandi CPU |
+|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 10K | sfera (96) | no | 0,83 (1,07) | 0 | 0,51 | 0,10 | 0,09 | 0,06 | 1,53 MiB | 1,49 (1,91) | 10 |
+| 10K | sfera | sì | 1,03 (1,54) | 0,37 | 0,42 | 0,08 | 0,07 | 0,05 | 1,53 MiB | 0,75 (1,63) | 10 |
+| 100K | sfera | no | 1,95 (3,44) | 0 | 1,64 | 0,36 | 0,04 | 0,03 | 15,26 MiB | 1,74 (6,56) | 10 |
+| 100K | sfera | sì | 3,02 (3,37) | 1,24 | 1,45 | 0,31 | 0,02 | 0,03 | 15,26 MiB | 1,77 (3,50) | 10 |
+| 1M | cubo (12) | no | 17,67 (17,92) | 0 | 14,39 | 3,17 | 0,04 | 0,04 | 152,6 MiB | 6,39 (9,77) | 10 |
+| 1M | cubo | sì | 30,15 (30,74) | 12,48 | 14,38 | 3,19 | 0,04 | 0,04 | 152,6 MiB | 5,59 (9,77) | 10 |
+| 1M | sfera (96) | no | 17,87 (18,07) | 0 | 14,55 | 3,21 | 0,04 | 0,04 | 152,6 MiB | 13,16 (31,18) | 10 |
+
+- Il costo CPU del percorso attuale è **O(N) per frame anche a scena
+  ferma**: extract + sort 14,4 ms e copia di 152,6 MiB (istanze + un
+  materiale per entità) 3,2 ms a 1M; con 1M istanze in moto la simulazione
+  CPU (matrice TRS per istanza) aggiunge 12,5 ms → 30 ms di CPU, 33 fps.
+- I comandi CPU **non** crescono con le istanze (un batch istanziato, 10
+  comandi) ma con i **batch** (mesh × classe di culling): 10.009 comandi con
+  10.000 mesh (riga S7). Il controllo negativo di O8 va quindi espresso sui
+  bucket (bench e scene con più mesh), non sul numero di istanze.
+- Raster: 1M cubi tutti disegnati (12 M triangoli, nessun culling) 5,6–6,4
+  ms di Forward; 1M sfere (96 M triangoli) 13,2 ms p50 e 31 ms p99, oltre
+  il ginocchio del partial render di B-12 (23,7 M triangoli con 16
+  varyings): il bench 1M deve usare mesh da ≤ 12–20 triangoli e affidarsi
+  al culling.
+- Tempi GPU senza `--gpu-timing-serial` (DVFS e sovrapposizione dei
+  frame): indicativi, servono solo a dimensionare il bench.
+
+### 7a. Encoding parallelo F2.5 sul percorso CPU (S7, residuo di F2)
+
+100K cubi in 10.000 mesh (10.000 batch, un draw ciascuno), statici, 3 run
+alternati per modo: encoding del Forward (fase `graph`) **0,50–0,53 ms →
+0,24–0,26 ms** con `--debug-split-encoding` (4 thread), CPU del frame
+3,75–4,00 → 3,55–3,67 ms (−6%). Con un solo batch (S1) l'encoding costa
+0,02–0,09 ms e F2.5 non ha nulla da dividere. Nel percorso GPU-driven la
+CPU codifica un numero costante di comandi: F2.5 resta utile solo al
+percorso CPU (`--gpu-driven off`) e ai pass futuri con molti draw CPU.
+(Il contatore dei comandi dello spike non è thread-safe: con lo split
+sottoconta, ignorato.)
+
+### 2. Aggiornamenti delta e attesa tra frame (S2)
+
+1M record da 80 B (layout `GPUInstance`), K slot distinti cambiati per frame.
+(a) **scatter**: record delta da 96 B (slot + istanza) scritti dalla CPU
+nella regione del frame di un anello condiviso, kernel di scatter in un
+buffer `private` persistente; (b) **copie dirette**: 3 copie `shared`
+persistenti, ogni frame scrive i propri cambi e riapplica quelli dei due
+frame precedenti; (c) **ricarico completo** (oggi).
+
+| Cambiati | (a) CPU scrittura | (a) GPU scatter | (a) byte | (b) CPU scrittura | (b) byte |
+|---:|---:|---:|---:|---:|---:|
+| 0,1% (1.049) | 0,002 ms | 0,003 ms | 0,10 MB | 0,030 ms | 0,25 MB |
+| 1% | 0,027 ms | 0,008 ms | 1,0 MB | 0,384 ms | 2,5 MB |
+| 10% | 0,768 ms | 0,100 ms | 10,1 MB | 4,57 ms | 25,2 MB |
+| 100% | 10,3 ms | 1,34 ms | 100,7 MB | 48,8 ms | 251,7 MB |
+| (c) completo | 1,21 ms (memcpy 80 MiB) | — | 83,9 MB | | |
+
+- Lettura GPU di 1M record (80 MiB) da `private` 0,145 ms, da copia
+  `shared` 0,143, dalla regione dell'anello 0,145: identiche (conferma B-29
+  in questo schema di accesso, ~580 GB/s).
+- **Attesa tra frame**: 3 frame in volo GPU-bound (~4,8 ms/frame: scatter →
+  cull → render pass che legge le istanze nel vertex shader). Con la
+  barriera di coda `Dispatch|Vertex → Dispatch` all'inizio del frame (ciò
+  che il grafo emette per un buffer persistente scritto dal grafo)
+  4,848 ms/frame, senza barriera 4,843, copie per frame 4,839: **sovrapposizione
+  persa 0,009 ms (0,2%)**. La variante senza barriera è rimasta esatta:
+  la corsa non si è manifestata, quindi non è una prova di sicurezza.
+- Le copie dirette costano 14× lo scatter in CPU (store sparsi da 80 B
+  ×3 in memoria non in cache) e 3× la memoria.
+- Esattezza: dopo ogni strategia memoria GPU = specchio CPU byte per byte;
+  controlli integrati: un record omesso → trovato esattamente quello slot;
+  riapplicazione n−2 saltata → 10.278 slot diversi (attesi 10.278).
+
+**Decisione D1**: scatter dall'anello del frame in buffer `private`
+persistenti (la "scrittura diretta" della ROADMAP è la scrittura dei record
+delta dalla CPU nella memoria unificata, senza staging); oltre ~1/8 di slot
+cambiati la CPU copia l'intero specchio (memcpy, 1,2 ms a 1M) e la GPU lo
+copia nel persistente. Attesa tra frame trascurabile: nessuna copia per
+frame.
+
+### 3. Emissione dei draw (S3)
+
+100.000 istanze in B bucket (mesh da 2–12 triangoli, classe di culling
+b % 3), lista visibile compattata, target 1024² R32Uint + profondità
+reverse-Z. Tempo GPU del render pass (span meno pass vuoto), CPU di
+encoding, comandi CPU:
+
+| B | ICB `reset` | ICB 0 istanze | ICB compattato | ICB Apple10 per comando | indiretti per bucket | diretti |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 0,165 ms · 3 cmd | 0,166 · 3 | 0,169 · 7 | 0,166 · 1 | 0,160 · 3 | 0,154 · 3 |
+| 100 | 0,237 · 7 | 0,242 · 7 | 0,245 · 7 | 0,239 · 1 | 0,228 · 104 | 0,236 · 94 |
+| 1.000 | 0,281 · 7 | 0,287 · 7 | 0,285 · 7 | 0,286 · 1 | 0,230 · 1.004 | 0,224 · 904 |
+| 10.000 | 0,735 · 7 | 0,764 · 7 | 0,748 · 7 | 0,839 · 1 | 0,824 · 10.004 | 0,761 · 9.004 |
+| 10.000, 90% vuoti | 0,320 | 0,378 | 0,097 | 0,505 | 0,491 | 0,039 |
+
+- CPU di encoding a 10.000 bucket: ICB 0,019 ms (7 comandi, costante con
+  B), indiretti 0,44 ms, diretti 0,41 ms. Kernel di codifica dell'ICB
+  0,008–0,012 ms, reset sulla timeline GPU (`resetCommandsInBuffer`)
+  0,0003 ms.
+- Comandi vuoti eseguiti: ~31 ns l'uno con `reset()`, ~37 ns come draw a 0
+  istanze; il compattato elimina il costo ma usa un range indiretto (vedi
+  S5 e validazione). Lo stato di culling per comando di Apple10 (compila:
+  `render_command::set_cull_mode/set_front_facing_winding`, immagine
+  identica) costa +14% a 10.000 bucket e +58% con 90% vuoti: su Apple10 non
+  conviene, i range per classe valgono su entrambe le famiglie.
+- ICB `private`, argument table dell'encoder ereditata, `instance_id`
+  comprende `base_instance`: tutte le varianti danno la stessa immagine e
+  gli stessi flag di copertura; controllo integrato: un bucket tolto →
+  rilevato a ogni B.
+- **Validazione tra command buffer**: senza layer e con il solo API layer
+  disegnano esattamente v1 (codifica ed esecuzione nello stesso command
+  buffer), v2 (codifica in A, esecuzione in B, un solo commit, come F2.5),
+  v3 (codifica sulla seconda coda, evento, esecuzione sulla principale,
+  come F2.6), v4 (stesso ICB ricodificato per 12 frame, 3 in volo). Con
+  **shader validation**: v1–v3 disegnano; v4 con draw a 0 istanze **non
+  disegna il primo frame**; un ICB codificato in un commit precedente ed
+  eseguito con range indiretto non disegna (il B-17 osservava lo stesso
+  con un ICB codificato in un command buffer precedente). Nessun messaggio
+  in tutti i casi: un controllo che non disegna si vede solo dai pixel.
+
+**Decisione D2**: ICB codificato dalla GPU, un comando per bucket, ordine
+(classe, mesh, slot), tre range fissi per classe di culling con lo stato
+impostato dalla CPU (Apple9 e Apple10), bucket vuoti con `reset()`,
+reset dell'ICB sulla timeline GPU, codifica ed esecuzione nello stesso
+frame. Nessun range indiretto (D3). I controlli sotto shader validation
+sono a pixel (`visual_check` confronta l'ultimo frame), mai "0 messaggi".
+
+### 4. Culling di 1M istanze e compattazione (S4)
+
+1.048.576 istanze in 8 bucket contigui (dimensioni dispari: i SIMD-group
+attraversano i confini), rotazioni e scale non uniformi, 5% specchiate;
+camera e proiezione come `Camera::updateMatrices` (reverse-Z infinita,
+near 0,05), 3200×1800; sfera mondo, 5 piani, distanza, dimensione
+proiettata; 33.904 visibili.
+
+| Variante | Tempo GPU | Determinismo (10 run) | Discrepanze col riferimento CPU |
+|---|---:|---|---|
+| (a) atomici per bucket (aggregati per SIMD-group) | 0,137 ms | 9/9 run in ordine diverso | 0 (fast e safe) |
+| (b) reduce-then-scan stabile (3 dispatch: flag 0,146 + scan 0,002 + scrittura 0,010) | 0,158 ms | 0/9: identico byte per byte | 0 (fast e safe) |
+
+- Riferimento CPU con le stesse formule e lo stesso ordine delle
+  operazioni (`FP_CONTRACT OFF`): 0 discrepanze fuori dalla banda (1e-4
+  relativo), 0 dentro (30 istanze nella banda), sia con la libreria
+  fast-math sia con `MathModeSafe`; tempi identici nei due modi.
+- La scansione a passata singola con look-back non è stata implementata:
+  il progresso tra threadgroup non è garantito sulle GPU Apple.
+- Controllo integrato: un piano con il segno invertito → 40.764 slot
+  diversi.
+- **Trovato**: `Camera::getFrustumPlanes()` usa l'estrazione OpenGL; con il
+  reverse-Z infinito il piano 4 (riga3 + riga2) non è il near (accetta i
+  punti dietro la camera): il near è riga3 − riga2 e non esiste un far.
+  Nessun chiamante oggi; da correggere in F5.
+
+**Decisione D4**: compattazione stabile (+0,02 ms rispetto agli atomici a
+1M) → liste per bucket contigue nell'ordine degli slot, immagini
+deterministiche e identiche al percorso CPU.
+
+### 5. Stadio del consumatore di argomenti indiretti e ICB (S5)
+
+Produttore compute di ~6 ms che scrive gli argomenti alla fine; 20
+ripetizioni per variante, "sbagliata" = il consumatore ha visto gli
+argomenti iniziali (stale); stesse conclusioni con buffer/ICB `shared` e
+`private`, senza validazione e sotto validazione (0 messaggi, le corse non
+spariscono).
+
+| Consumatore | nessuna | q Dispatch→Vertex | q Dispatch→Fragment | q Dispatch→Object\|Mesh | barriera del produttore Dispatch→Vertex |
+|---|---:|---:|---:|---:|---:|
+| `drawIndexedPrimitives` indiretto | 20/20 | 0/20 | 20/20 | 20/20 | 0/20 |
+| ICB codificato dalla GPU | 20/20 | 0/20 | 20/20 | 20/20 | 0/20 |
+| ICB con range indiretto | 20/20 | 0/20 | 20/20 | 20/20 | 0/20 |
+
+| Consumatore | nessuna | encoder Dispatch→Dispatch | coda Dispatch→Dispatch (encoder successivo) |
+|---|---:|---:|---:|
+| `dispatchThreadgroups` indiretto | 20/20 (stesso encoder), 14–20/20 (successivo) | 0/20 | 0/20 |
+| `dispatchThreads` indiretto | 20/20, 14–20/20 | 0/20 | 0/20 |
+
+- Gli argomenti e i comandi dell'ICB sono letti **allo stadio Vertex**:
+  Fragment e Object|Mesh sono accettati dall'API ma non sincronizzano
+  (come Tile in F2.3). Anche senza produttore lento il draw indiretto
+  senza barriera sbaglia (2/20): gli argomenti sono letti molto presto.
+- **Shader validation e range indiretto**: ogni
+  `executeCommandsInBuffer(icb, indirectRangeBuffer)` fa abortire il layer
+  (`NSInvalidArgumentException` in `MTL4GPUDebugCommandQueue
+  _decodeReportLogState`, uscita 134), anche con range e ICB scritti dalla
+  CPU; con il solo API layer funziona.
+
+**Decisione D5**: nel grafo un pass raster che consuma argomenti indiretti
+o un ICB dichiara `Usage::IndirectArgs` allo stadio **Vertex**; un
+dispatch indiretto allo stadio Dispatch. Nessun range indiretto (D3).
+
+### 6. Gerarchia di transform (S6)
+
+1.048.576 nodi in ordine di livello, profondità D, locali TRS costruite con
+glm come `TransformComponent::updateMatrix` (30% scale non uniformi, 5%
+specchiate).
+
+| D | GPU per livello | GPU risalita alla radice | CPU 1 thread | CPU 12 thread |
+|---:|---:|---:|---:|---:|
+| 1 | 0,246 ms | 0,247 | 2,36 | 0,52 |
+| 4 | 0,270 | 0,307 | 6,78 | 1,04 |
+| 8 | 0,255 | 0,341 | 5,07 | 1,10 |
+
+Propagazione dei soli sporchi (code GPU per livello con append aggregato
+per SIMD-group, kernel "args" a un thread, `dispatchThreadgroups`
+indiretto, tutti i livelli codificati in anticipo senza readback),
+rapporto col ricalcolo completo:
+
+| Radici sporche | D=1 | D=4 | D=8 |
+|---:|---:|---:|---:|
+| 0,1% | 0,008 ms (0,03×) | 0,031 (0,11×) | 0,064 (0,25×) |
+| 1% | 0,025 (0,10×) | 0,047 (0,18×) | 0,077 (0,30×) |
+| 10% | 0,114 (0,46×) | 0,276 (1,02×) | 0,339 (1,33×) |
+
+- **Bit-esattezza**: il prodotto `mat4` di glm su questa build **non** è
+  contratto in FMA (200.000/200.000 identici al prodotto non contratto). In
+  MSL il prodotto scritto nello stesso ordine viene contratto dal
+  compilatore anche con `MathModeSafe` (69,9% di float identici a D=4,
+  60,2% a D=8); con **`#pragma METAL fp contract(off)`** nella funzione è
+  **identico bit per bit a glm** a D = 1, 4, 8, con la libreria fast-math e
+  con quella safe (0 ulp). La risalita alla radice è bit-identica ai
+  livelli con la stessa associazione.
+- Controllo integrato: un figlio non accodato → discrepanza rilevata.
+
+**Decisione D6**: matrici mondo dei figli calcolate sulla GPU per livelli
+(prodotto con `fp contract(off)`: identico alla CPU, nessun pixel cambia),
+radici scritte dalla CPU con i delta; code di nodi sporchi + dispatch
+indiretti quando le radici sporche sono poche (≤ ~5%), ricalcolo completo
+per livelli altrimenti (bench 8: tutto in moto).
+
+### 7b. Culling sulla seconda coda accanto al raster (S7, residuo F2.6)
+
+Raster di ~3 ms (3200×1800, ALU nel fragment) sulla coda principale, cull
+stabile di 1M (3 dispatch) sulla seconda coda, span da timestamp GPU di
+entrambe le code: raster da solo 2,995 ms, cull da solo 0,228, **in serie
+3,221, concorrenti 3,059** (−0,16 ms: 70% del cull nascosto), stessa coda
+senza barriera 3,082. Risultato del cull e pixel esatti anche in
+concorrenza. Il controllo (concorrente tra max(parti) e serie) è temporale:
+15/15 run passano a macchina quieta (`--force-family apple9`), 4/8
+falliscono con il motore che gira in parallelo (span distorti; esattezza
+intatta): spiega il fallimento intermittente visto da un agente su
+macchina condivisa.
+
+**Decisione D7**: F2.6 dà ~0,16 ms nel caso favorevole ma quasi lo stesso
+si ottiene sulla coda principale senza barriera tra pass indipendenti: il
+percorso GPU-driven resta sulla coda grafica (default), la seconda coda
+resta per `--debug-async-compute`. F2.5: utile solo al percorso CPU con
+molti batch (§7a).
