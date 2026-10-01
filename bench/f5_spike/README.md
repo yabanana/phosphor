@@ -23,3 +23,12 @@ cmake --build build/release --target f5_spike
 | F5-S5 | `s5_barriers.cpp` | consumer stage that makes compute-written indirect arguments / ICB visible to draws and dispatches |
 | F5-S6 | `s6_hierarchy.cpp` | transform hierarchy: dispatch per level vs walk to root vs CPU; dirty queues with indirect dispatch; bit-exactness |
 | F5-S7 | `s7_async.cpp` | F2.6: culling on the second queue beside a raster load |
+| F5-K2 | `k2_gpu_scene.cpp` | GPU check of the engine kernels `shaders/gpu_scene.metal` (queue clear, scatter, cull + stable scan, ICB draw build) against `renderer/cull_reference` on layouts up to 4M slots; built-in negative controls |
+| F5-K3 | `k3_transforms.cpp` | GPU check of `shaders/transforms.metal` (motion, hierarchy queues with indirect dispatch, F5.4) against `renderer/transform_reference`, bit for bit; overflow and missing-barrier controls |
+
+K2/K3 compile the engine's shaders from source through a small include
+expander (the harness has no include paths).  GPU safety (learned the hard
+way in F5): every kernel loop has a hard bound, no kernel waits on another
+threadgroup, every command buffer stays far below 1 s, and only one GPU
+test process runs at a time -- a 60 s job made the WindowServer watchdog
+kill the compositor.
