@@ -375,7 +375,10 @@ OptimizeResult optimize(const std::string& family, const GraphBuilder& builder, 
     OptimizeResult result;
     struct Policy { AliasPolicy alias; BarrierPolicy barriers; };
     std::vector<Policy> policies = {{AliasPolicy::Greedy, BarrierPolicy::Conservative}};
-    if (options.tryPolicies) policies.push_back({AliasPolicy::Coloring, BarrierPolicy::Minimal});
+    if (options.tryPolicies) {
+        policies.push_back({AliasPolicy::ColoringStageClass, BarrierPolicy::Minimal});
+        policies.push_back({AliasPolicy::Coloring, BarrierPolicy::Minimal}); // annealing uses the last
+    }
 
     double bestJ = 1e300;
     auto consider = [&](const RenderGraph& g, const BuildChoices& ch, const std::string& method,

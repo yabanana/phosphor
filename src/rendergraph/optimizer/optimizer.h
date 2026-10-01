@@ -23,8 +23,9 @@ namespace phosphor::rg {
 //      of states stays under `dpStateCap`;
 //   3. simulated annealing over topological orders judged by the real
 //      compiler + evaluateGraph(), from the greedy and the DP orders.
-// Each order is compiled with both alias/barrier policy sets
-// (end-of-F4 and OPT-1) when `tryPolicies`; the lowest J wins.
+// Each order is compiled with the end-of-F4 policies and, when `tryPolicies`,
+// with the OPT-1 ones (Coloring or ColoringStageClass aliasing, Minimal
+// barriers); the lowest J wins.
 // ---------------------------------------------------------------------------
 
 struct BuildChoices {
@@ -53,7 +54,7 @@ struct OptimizeOptions {
     size_t dpStateCap       = 200000;  // states per DP layer before giving up exactness
     u32    annealIterations = 20000;
     u32    seed             = 1;
-    bool   tryPolicies      = true;    // also compile with Coloring + Minimal
+    bool   tryPolicies      = true;    // also compile with the OPT-1 policies
 };
 
 /// One evaluated candidate (for reports).
