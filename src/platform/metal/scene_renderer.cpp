@@ -191,6 +191,7 @@ u64 SceneRenderer::prepareFrame(const SceneStore& store, std::span<const GPULigh
     slotCount_    = store.slotCapacity();
     cullGroups_   = buffers_.cullGroups(std::max(slotCount_, 1u));
     motionCount_  = static_cast<u32>(store.motionSlots().size());
+    hierSteps_    = store.maxDepth() == 0 ? 0u : std::min(store.maxDepth() + 1, SCENE_MAX_LEVELS);
     commandCount_ = store.commandCount();
 
     const MTL::GPUAddress frameConstants = put(&constants, sizeof(constants));
@@ -431,6 +432,10 @@ void SceneRenderer::encodeTransforms(MTL4::ComputeCommandEncoder* enc) const {
     t->setAddress(buffers_.childOffsets()->gpuAddress(), SB_HIER_CHILD_OFFSETS);
     t->setAddress(buffers_.childSlots()->gpuAddress(), SB_HIER_CHILD_SLOTS);
     t->setAddress(fs.counters->gpuAddress(), SB_HIER_COUNTERS);
+    if (hierSteps_ == 0) {
+        count(0, n);
+        return;
+    }
     // The motion roots with children are expanded from their persistent
     // queue (its header holds the dispatch groups): their children enter
     // queue 1 beside the children of the CPU-dirty parents (queue 0).  Only
@@ -444,7 +449,10 @@ void SceneRenderer::encodeTransforms(MTL4::ComputeCommandEncoder* enc) const {
                               MTL::Size::Make(SCENE_HIER_GROUP, 1, 1));
     dispatchBarrier(enc);
     n += 4;
-    for (u32 s = 0; s < SCENE_MAX_LEVELS; ++s) {
+    // Steps 0 .. maxDepth (a node of depth d is computed at step d): a scene
+    // without hierarchy encodes none.  The count depends on the scene's
+    // depth only (<= SCENE_MAX_LEVELS), never on the number of instances.
+    for (u32 s = 0; s < hierSteps_; ++s) {
         const MTL::GPUAddress in  = s == 0 ? queue0_ : queues + (s - 1) * stride;
         const MTL::GPUAddress out = queues + std::min(s, kQueues - 1) * stride; // the last step appends nothing
         t->setAddress(hierParams_ + s * sizeof(GPUHierParams), 0);
@@ -494,10 +502,10 @@ void SceneRenderer::encodeDrawBuild(MTL4::ComputeCommandEncoder* enc) const {
     if (!store_ || buffers_.empty() || !kernelsReady() || !indexBuffer_) return;
     MTL4::ArgumentTable* t = drawTable_;
     const GpuSceneBuffers::FrameSet& fs = buffers_.frame(frame_.slot);
-    // Reset on the GPU timeline (never the CPU reset() of an ICB that a frame
-    // in flight may execute), then one thread per command (D2).
-    enc->resetCommandsInBuffer(fs.icb, NS::Range::Make(0, buffers_.commandCapacity()));
-    dispatchBarrier(enc);
+    // One thread per command (D2): every command of the class ranges is
+    // rewritten each frame (a draw, or reset() for empty buckets and the
+    // sentinels), so the ICB needs no separate reset (and never the CPU
+    // reset() of an ICB that a frame in flight may execute).
     t->setAddress(drawParams_, 0);
     t->setAddress(buffers_.buckets()->gpuAddress(), SB_DRAW_BUCKETS);
     t->setAddress(buffers_.commandBuckets()->gpuAddress(), SB_DRAW_COMMANDS);
@@ -509,7 +517,7 @@ void SceneRenderer::encodeDrawBuild(MTL4::ComputeCommandEncoder* enc) const {
     enc->setComputePipelineState(kernel(kDrawBuild_));
     enc->setArgumentTable(t);
     enc->dispatchThreads(threads1D(commandCount_), MTL::Size::Make(SCENE_DRAW_GROUP, 1, 1));
-    count(0, 5);
+    count(0, 3);
 }
 
 void SceneRenderer::encode(MTL4::RenderCommandEncoder* enc, u32 chunk, u32 chunks) const {

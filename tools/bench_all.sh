@@ -10,6 +10,7 @@
 # <build-dir>/bench-results/.  Keep the window visible while it runs: macOS
 # throttles occluded windows.  The default output is the single table below.
 #
+# EXTRA_ARGS (environment) is appended to every run (e.g. "--gpu-driven on").
 # Options (each also settable through an environment variable = 1):
 #   --stats   (STATS=1)   after the main table print a second table with the
 #                         across-run sample standard deviation of the mean and
@@ -80,7 +81,7 @@ for bench in 1 2 3 4 5 6 7 8; do
     for run in $(seq 1 "$runs"); do
         report="$out_dir/bench$bench-run$run.json"
         env -u MTL_DEBUG_LAYER -u MTL_SHADER_VALIDATION \
-            "$app" --bench "$bench" --frames "$frames" ${vsync_args[@]+"${vsync_args[@]}"} --no-ui --report "$report" >/dev/null 2>&1
+            "$app" --bench "$bench" --frames "$frames" ${vsync_args[@]+"${vsync_args[@]}"} --no-ui ${EXTRA_ARGS:-} --report "$report" >/dev/null 2>&1
         reports+=("$report")
     done
     # Median run by mean frame time.

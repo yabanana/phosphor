@@ -166,6 +166,7 @@ private:
     u32               slotCount_   = 0;
     u32               cullGroups_  = 0;
     u32               motionCount_ = 0;
+    u32               hierSteps_   = 0; // hierarchy queue steps encoded (0 .. SCENE_MAX_LEVELS)
     u32               commandCount_ = 0;
     MTL::GPUAddress   clearParams_   = 0;
     MTL::GPUAddress   scatterParams_ = 0; // 4 x GPUScatterParams

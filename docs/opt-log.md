@@ -1511,3 +1511,76 @@ si ottiene sulla coda principale senza barriera tra pass indipendenti: il
 percorso GPU-driven resta sulla coda grafica (default), la seconda coda
 resta per `--debug-async-compute`. F2.5: utile solo al percorso CPU con
 molti batch (§7a).
+
+---
+
+## F5 — Scoperte dell'integrazione nel motore
+
+**2026-10-01** · M5 Max, macOS 27.2, Release salvo dove indicato. Ogni
+scoperta è stata riprodotta e spiegata prima di decidere.
+
+1. **Il flag ICB della pipeline cambia la codegen.**
+   `setSupportIndirectCommandBuffers` sulle pipeline del forward cambia 9
+   pixel di ±1 LSB nel bench 1 (Torus) rispetto a `main`; la stessa build
+   senza il flag dà 0 pixel (prova). Off e on usano la stessa pipeline
+   (immagini identiche tra i due modi); i riferimenti di `visual_check`
+   sono stati rigenerati dalla build F5 in modo off (`build/reference-f5`),
+   bench 2–7 identici a `main`. Il flag non costa tempo misurabile
+   (Forward Stress Test 2,85/2,83 contro 2,88/2,89 ms senza flag).
+2. **`executeCommandsInBuffer` in un encoder render ripreso** in un altro
+   command buffer (F2.5) manda la GPU in errore e recovery a ogni frame
+   ("Discarded (victim of GPU error/recovery)", anche senza validazione;
+   0 errori con gli stessi pass e nessuna esecuzione di ICB): con
+   `--gpu-driven on` il forward non viene diviso in chunk (codifica ~7
+   comandi).
+3. **Nessuna barriera ordina i pezzi di un render pass ripreso** in altri
+   command buffer dopo il lavoro precedente dello stesso commit: con i pass
+   compute della scena prima del forward, `--debug-split-encoding` in modo
+   off dava immagini intermittenti (bench 6: 8.862 pixel, la cattura è
+   identica al frame **precedente**, quindi letture prima della scrittura;
+   bench 8: 1,8–2,2 M pixel). Inefficaci: le barriere di coda del gruppo
+   sull'head e su ogni pezzo, una barriera produttore `barrierAfterStages`
+   alla fine dell'encoder compute, la profondità non memoryless; esatto con
+   1 solo chunk. Soluzione nell'executor: un pass diviso apre un nuovo
+   commit che aspetta un evento segnalato dopo tutto ciò che lo precede, e
+   il primo commit del frame successivo aspetta l'ultimo di quello prima
+   (il rischio inverso). Matrice `visual_check` off/on × flag F2: 0 pixel,
+   0 messaggi. Era un bug latente di F2.5: prima di F5 nessun pass compute
+   precedeva il forward.
+4. **Validazione e pixel**: catture fatte senza layer contro riferimenti
+   fatti con i layer differiscono di 9 pixel nel bench 6 anche su `main`:
+   si confronta sempre nello stesso modo (lo fa `visual_check`).
+5. **Coda 0 statica**: le radici in moto con figli (~70K nel bench 8)
+   riscritte dalla CPU a ogni frame costavano 264 KiB/frame e 1 ms di sync
+   senza alcun cambio CPU; ora sono una coda GPU persistente (ricaricata
+   solo se cambia) espansa da un dispatch dedicato: 1,4 KiB/frame, sync
+   0,003 ms.
+6. **Swap-and-pop e churn**: spostare l'ultima istanza del bucket in ogni
+   buco cambiava la struttura in 120 frame su 300 con `--churn 1000`
+   (lista del moto e CSR ricaricate, ~5 MB/frame, comandi CPU 92–97):
+   le rimozioni lasciano buchi riutilizzati dalle aggiunte e l'ECS ricicla
+   gli `EntityID`: 0 cambi di struttura, comandi costanti, byte
+   proporzionali.
+7. **Heap CPU**: con i timestamp GPU attivi lo storage delle misure per pass
+   (allocato dopo il primo campione dell'heap) cresce di ~30 B/frame (anche
+   su `main`, ~9 B/frame con 1 unità); con `--no-gpu-timing` l'heap del
+   bench 8 con churn è piatto (+13,5 KB a 600 frame, +11,2 KB a 6000).
+8. **Trappola DVFS nelle misure seriali**: con `--gpu-timing-serial` il
+   Forward dello Stress Test sembrava +0,9 ms rispetto a `main` (2,8 contro
+   1,83 ms) sia in off sia in on; aggiungendo a F5 2 ms di lavoro CPU per
+   frame (quanto ne spendeva `main` per l'estrazione) scende a 1,77 ms. La
+   GPU riduce i clock quando la CPU lascia pause più brevi tra un frame e
+   l'altro: confrontare build con costo CPU diverso richiede di pareggiare
+   il tempo CPU (o vsync, dove sono uguali: 4,9–5,3 ms entrambe).
+9. **Costo fisso dei pass della scena** (seriale, bench 1): Scene update
+   0,013 ms, Scene transforms 0,064 → **0,009 ms** codificando solo i
+   livelli fino alla profondità della scena (comandi costanti al variare
+   delle istanze, non della profondità), Instance cull 0,026, Draw build
+   0,046 → **0,033 ms** senza `resetCommandsInBuffer` (il kernel riscrive
+   ogni comando a ogni frame, `reset()` per vuoti e sentinelle).
+10. **Sicurezza GPU**: alle 14:31 WindowServer è stato terminato dal
+    watchdog (40 s senza risposta) mentre due verifiche GPU dei sotto-agenti
+    aspettavano in `waitIdle`: il controllo negativo "senza barriere" di
+    F5-K3 usava voci di coda spazzatura come indici (job da ~60 s). Regola
+    adottata: cicli dei kernel sempre limitati, nessuna attesa tra
+    threadgroup, command buffer ≪ 1 s, mai due processi GPU insieme.
