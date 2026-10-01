@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <utility>
 #include <random>
 
 namespace phosphor {
@@ -100,7 +101,8 @@ void StressTest::setup(ECS& ecs, GpuScene& gpuScene, TextureManager& textures) {
 
     if (dynamic_) {
         base_.clear();
-        for (const TransformComponent& t : ecs.getArray<TransformComponent>().data()) base_.push_back(t.position);
+        // Const read: the non-const data() would flag the whole array as changed.
+        for (const TransformComponent& t : std::as_const(ecs).getArray<TransformComponent>().data()) base_.push_back(t.position);
     }
     LOG_INFO("StressTest: setup complete (%u entities)", static_cast<u32>(entities_.size()));
 }

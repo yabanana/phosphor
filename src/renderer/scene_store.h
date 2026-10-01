@@ -54,6 +54,14 @@ class GpuScene;
 // GPU writes their world matrix every frame (scene_motion).
 // ---------------------------------------------------------------------------
 
+// Placeholders (F5.2/F5.6): the GPUInstance::modelMatrix of a child or of a
+// motion root in the mirror (and in delta records / full copies) is the
+// IDENTITY matrix; the GPU overwrites it (scene_hier_level / scene_motion).
+// Whenever such a slot's record is written or moved, its parent is listed in
+// dirtyRoots() (and a full instance copy lists every root with children).
+// Empty buckets are kept (their ICB command draws nothing) so a bucket
+// emptied and refilled does not change the command layout.
+
 struct SceneBucket {
     u32       mesh = 0;
     CullClass cull = CullClass::Back;
@@ -79,6 +87,7 @@ struct SceneSyncStats {
     bool fullNodes       = false;
     bool fullMotions     = false;
     bool structure       = false; // bucket table / CSR / motion list / capacity changed
+    bool csrRebuilt      = false; // hierarchy-related slots moved: the CSR was recomputed (O(slots))
     u64  uploadBytes     = 0;     // bytes the CPU must write this frame (records + full copies + structure)
 };
 
@@ -126,6 +135,13 @@ public:
     [[nodiscard]] u32 maxDepth() const; // 0 = no hierarchy
     /// True if any material is emissive (forward variant selection).
     [[nodiscard]] bool hasEmissive() const;
+
+    /// Slot of an entity's instance (~0u: not in the store) and its GPU
+    /// material index (the library index or its persistent per-entity one).
+    [[nodiscard]] u32 slotOf(EntityID entity) const;
+    [[nodiscard]] u32 materialIndexOf(EntityID entity) const;
+    /// CSR rebuilds since clear() (hierarchy-related slot moves).
+    [[nodiscard]] u64 csrRebuildCount() const;
 
     // --- This frame's deltas ----------------------------------------------------
     [[nodiscard]] std::span<const GPUDeltaRecord> instanceDeltas() const;

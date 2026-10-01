@@ -16,4 +16,10 @@ void ECS::destroyEntity(EntityID entity) {
     }
 }
 
+void ECS::endFrame() {
+    for (auto& ender : enders_) {
+        ender();
+    }
+}
+
 } // namespace phosphor

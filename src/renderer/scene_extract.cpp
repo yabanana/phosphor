@@ -32,6 +32,45 @@ GPUMaterial toGPUMaterial(const MaterialComponent& mat) {
     return gm;
 }
 
+void extractLights(const ECS& ecs, std::vector<GPULight>& out) {
+    const auto& transforms = ecs.getArray<TransformComponent>();
+    const auto& lights     = ecs.getArray<LightComponent>();
+    out.clear();
+    out.reserve(lights.size());
+    for (u32 i = 0; i < lights.size(); ++i) {
+        const EntityID entity = lights.entities()[i];
+        const auto& lc = lights.data()[i];
+
+        glm::vec3 position{0.0f};
+        glm::vec3 direction{0.0f, -1.0f, 0.0f};
+        if (transforms.has(entity)) {
+            const auto& xform = transforms.get(entity);
+            position  = xform.position;
+            // Forward is -Z in local space.
+            direction = glm::normalize(glm::mat3(xform.worldMatrix) * glm::vec3(0.0f, 0.0f, -1.0f));
+        }
+
+        GPULight gl{};
+        gl.type           = static_cast<u32>(lc.type);
+        gl.position[0]    = position.x;
+        gl.position[1]    = position.y;
+        gl.position[2]    = position.z;
+        gl.direction[0]   = direction.x;
+        gl.direction[1]   = direction.y;
+        gl.direction[2]   = direction.z;
+        gl.color[0]       = lc.color.r;
+        gl.color[1]       = lc.color.g;
+        gl.color[2]       = lc.color.b;
+        gl.intensity      = lc.intensity;
+        gl.range          = lc.range;
+        gl.innerCone      = lc.innerConeAngle;
+        gl.outerCone      = lc.outerConeAngle;
+        gl.shadowMapIndex = lc.shadowMapIndex;
+        out.push_back(gl);
+    }
+}
+
+
 void extractFrameScene(ECS& ecs, const GpuScene& scene, FrameScene& out) {
     PH_ZONE("Scene extract");
     out.instances.clear();
@@ -39,10 +78,12 @@ void extractFrameScene(ECS& ecs, const GpuScene& scene, FrameScene& out) {
     out.lights.clear();
     out.batches.clear();
 
-    auto& transforms = ecs.getArray<TransformComponent>();
-    auto& meshInsts  = ecs.getArray<MeshInstanceComponent>();
-    auto& materials  = ecs.getArray<MaterialComponent>();
-    auto& lights     = ecs.getArray<LightComponent>();
+    // Const access only: a read through a mutable reference would mark every
+    // entity changed every frame (scene/ecs.h).
+    const ECS& cecs = ecs;
+    const auto& transforms = cecs.getArray<TransformComponent>();
+    const auto& meshInsts  = cecs.getArray<MeshInstanceComponent>();
+    const auto& materials  = cecs.getArray<MaterialComponent>();
 
     const auto& library = scene.materials();
     out.materials.assign(library.begin(), library.end());
@@ -111,38 +152,7 @@ void extractFrameScene(ECS& ecs, const GpuScene& scene, FrameScene& out) {
         ++out.batches.back().instanceCount;
     }
 
-    out.lights.reserve(lights.size());
-    for (u32 i = 0; i < lights.size(); ++i) {
-        const EntityID entity = lights.entities()[i];
-        const auto& lc = lights.data()[i];
-
-        glm::vec3 position{0.0f};
-        glm::vec3 direction{0.0f, -1.0f, 0.0f};
-        if (transforms.has(entity)) {
-            const auto& xform = transforms.get(entity);
-            position  = xform.position;
-            // Forward is -Z in local space.
-            direction = glm::normalize(glm::mat3(xform.worldMatrix) * glm::vec3(0.0f, 0.0f, -1.0f));
-        }
-
-        GPULight gl{};
-        gl.type           = static_cast<u32>(lc.type);
-        gl.position[0]    = position.x;
-        gl.position[1]    = position.y;
-        gl.position[2]    = position.z;
-        gl.direction[0]   = direction.x;
-        gl.direction[1]   = direction.y;
-        gl.direction[2]   = direction.z;
-        gl.color[0]       = lc.color.r;
-        gl.color[1]       = lc.color.g;
-        gl.color[2]       = lc.color.b;
-        gl.intensity      = lc.intensity;
-        gl.range          = lc.range;
-        gl.innerCone      = lc.innerConeAngle;
-        gl.outerCone      = lc.outerConeAngle;
-        gl.shadowMapIndex = lc.shadowMapIndex;
-        out.lights.push_back(gl);
-    }
+    extractLights(cecs, out.lights);
 }
 
 ForwardWork forwardPassWork(const GpuScene& scene, const FrameScene& frame, u32 width, u32 height) {
