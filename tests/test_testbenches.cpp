@@ -11,6 +11,7 @@
 #include <cmath>
 #include <map>
 #include <set>
+#include <utility>
 #include <string>
 
 using namespace phosphor;
@@ -294,21 +295,22 @@ TEST_CASE("bench 8: deterministic, and churn keeps the count with leaf-only turn
         before[e] = {a.ecs.hasComponent<MotionComponent>(e), a.ecs.hasComponent<HierarchyComponent>(e),
                      parents.count(e) > 0};
     }
+    a.ecs.endFrame(); // only this frame's changes below
     a.bench->update(1.0f / 60.0f, a.ecs);
     auto& inst = a.ecs.getArray<MeshInstanceComponent>();
     CHECK(inst.size() == 2000);
-    std::set<EntityID> now(inst.entities().begin(), inst.entities().end());
-    u32 destroyed = 0, created = 0;
-    for (const auto& [e, info] : before) {
-        if (now.count(e)) continue;
-        ++destroyed;
-        CHECK_FALSE(info.motion);
-        CHECK_FALSE(info.hier);
-        CHECK_FALSE(info.parent);
+    // Ids are recycled (ECS free list): count the removals and additions
+    // the ECS change lists report for this frame.
+    const auto changes = std::as_const(a.ecs).getArray<MeshInstanceComponent>().changes();
+    const u32 destroyed = static_cast<u32>(changes.removed.size());
+    const u32 created   = static_cast<u32>(changes.added.size());
+    for (const EntityID e : changes.removed) {
+        REQUIRE(before.count(e));
+        CHECK_FALSE(before[e].motion);
+        CHECK_FALSE(before[e].hier);
+        CHECK_FALSE(before[e].parent);
     }
-    for (const EntityID e : now) {
-        if (before.count(e)) continue;
-        ++created;
+    for (const EntityID e : changes.added) {
         CHECK_FALSE(a.ecs.hasComponent<MotionComponent>(e));
         CHECK_FALSE(a.ecs.hasComponent<HierarchyComponent>(e));
         CHECK(a.ecs.hasComponent<TransformComponent>(e));

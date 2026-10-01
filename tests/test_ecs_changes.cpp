@@ -316,3 +316,26 @@ TEST_CASE("ecs: a full scene extraction pass marks nothing (static scene = zero 
     for (u32 i = 0; i < xf.size(); ++i) (void)xf.get(xf.entities()[i]);
     CHECK(c.getArray<TransformComponent>().changes().changed.size() == 20);
 }
+
+TEST_CASE("ecs: destroyed ids are reused and a double destroy hands nothing out twice") {
+    ECS ecs;
+    const EntityID a = ecs.createEntity();
+    const EntityID b = ecs.createEntity();
+    ecs.destroyEntity(a);
+    ecs.destroyEntity(a); // ignored
+    CHECK(ecs.entityCount() == 1);
+    const EntityID c = ecs.createEntity();
+    CHECK(c == a); // reused
+    const EntityID d = ecs.createEntity();
+    CHECK(d != a);
+    CHECK(d != b);
+    CHECK(ecs.entityCount() == 3);
+    // Steady churn does not grow the id space.
+    EntityID maxId = 0;
+    for (int i = 0; i < 1000; ++i) {
+        ecs.destroyEntity(c == a && i % 2 ? d : c);
+        const EntityID e = ecs.createEntity();
+        maxId = std::max(maxId, e);
+    }
+    CHECK(maxId <= d);
+}

@@ -148,6 +148,7 @@ struct SceneStore::Impl {
     std::vector<u32> motionParents_; // entities: motion roots with live children
     std::vector<u32> csrOffsets_, csrSlots_, csrScratch_, csrSlotsNew_, csrCursor_;
     std::vector<u32> dirtyRoots_;
+    std::vector<std::vector<u32>> holes_; // per bucket id: free slots inside [firstSlot, firstSlot + used)
     std::vector<u32> motionParentSlots_, motionParentScratch_;
     bool motionParentsDirty_ = true; // the set changed or one of its slots moved
 
@@ -430,6 +431,7 @@ struct SceneStore::Impl {
         buckets_.insert(it, b);
         posIds_.insert(posIds_.begin() + pos, id);
         idPos_.push_back(pos);
+        holes_.emplace_back();
         for (u32 p = pos; p < posIds_.size(); ++p) idPos_[posIds_[p]] = p;
         keyToId_[key] = id;
         bucketsDirty_ = true;
@@ -454,7 +456,8 @@ struct SceneStore::Impl {
 
     void relocate(u32 pos) {
         SceneBucket& b0 = buckets_[pos];
-        const u32 oldFirst = b0.firstSlot, count = b0.count, newCap = std::max(b0.capacity * 2, MIN_BUCKET);
+        // Only a full bucket without holes relocates: used == count here.
+        const u32 oldFirst = b0.firstSlot, count = b0.used, newCap = std::max(b0.capacity * 2, MIN_BUCKET);
         const u32 newFirst = slotEnd();
         growSlots(newFirst + newCap); // may reallocate nothing referenced below (b0 is in buckets_)
         SceneBucket& b = buckets_[pos];
@@ -483,12 +486,21 @@ struct SceneStore::Impl {
         auto it = keyToId_.find(key);
         const u32 id = it != keyToId_.end() ? it->second : createBucket(key, MIN_BUCKET);
         u32 pos = idPos_[id];
-        if (buckets_[pos].count == buckets_[pos].capacity) {
-            relocate(pos);
-            pos = idPos_[id];
+        std::vector<u32>& holes = holes_[id];
+        u32 slot;
+        if (!holes.empty()) {
+            slot = holes.back();
+            holes.pop_back();
+            ++buckets_[pos].count;
+        } else {
+            if (buckets_[pos].used == buckets_[pos].capacity) {
+                relocate(pos);
+                pos = idPos_[id];
+            }
+            SceneBucket& b = buckets_[pos];
+            slot = b.firstSlot + b.used++;
+            ++b.count;
         }
-        SceneBucket& b = buckets_[pos];
-        const u32 slot = b.firstSlot + b.count++;
         slotEntity_[slot] = e;
         Ent& en = ent_[e];
         en.slot   = slot;
@@ -527,30 +539,23 @@ struct SceneStore::Impl {
         --liveCount_;
         if (en.d.depth > 0 || en.liveChildren > 0) csrDirty_ = true;
 
+        // No other instance moves: the slot becomes a hole of its bucket
+        // (zeroed: never valid, never culled in, degenerate if drawn).
         SceneBucket& b = buckets_[idPos_[en.bucket]];
         const u32 hole = en.slot;
-        const u32 last = b.firstSlot + b.count - 1;
-        if (hole != last) {
-            const u32 moved = slotEntity_[last];
-            instances_[hole]  = instances_[last];
-            nodes_[hole]      = nodes_[last];
-            motions_[hole]    = motions_[last];
-            slotEntity_[hole] = moved;
-            markInst(hole);
-            markNode(hole);
-            markMot(hole);
-            afterMoved(moved, hole);
+        instances_[hole]  = GPUInstance{};
+        nodes_[hole]      = GPUTransformNode{};
+        motions_[hole]    = GPUMotion{};
+        slotEntity_[hole] = NONE;
+        markInst(hole);
+        markNode(hole);
+        markMot(hole);
+        if (hole + 1 == b.firstSlot + b.used) {
+            --b.used; // the last used slot: no hole to remember
+        } else {
+            holes_[en.bucket].push_back(hole);
         }
-        instances_[last]  = GPUInstance{};
-        nodes_[last]      = GPUTransformNode{};
-        motions_[last]    = GPUMotion{};
-        slotEntity_[last] = NONE;
-        markInst(last);
-        markNode(last);
-        markMot(last);
         --b.count;
-        // `en` may not be used after afterMoved() changed other entities, but it is
-        // this entity's own record (vectors are not resized here).
         en.slot   = NONE;
         en.bucket = NONE;
     }
@@ -643,7 +648,7 @@ struct SceneStore::Impl {
         ent_.clear();
         instances_.clear(); nodes_.clear(); motions_.clear(); materials_.clear(); slotEntity_.clear();
         instStamp_.clear(); nodeStamp_.clear(); motStamp_.clear(); rootStamp_.clear(); matStamp_.clear();
-        buckets_.clear(); posIds_.clear(); idPos_.clear(); keyToId_.clear();
+        buckets_.clear(); posIds_.clear(); idPos_.clear(); keyToId_.clear(); holes_.clear();
         gpuBuckets_.clear(); commandBuckets_.clear(); classRanges_ = {};
         motionSlots_.clear(); motionParents_.clear(); motionParentSlots_.clear();
         motionParentsDirty_ = true;
@@ -984,7 +989,7 @@ std::string SceneStore::Impl::verify(const ECS& ecs, const GpuScene& scene) cons
         const SceneBucket& b = buckets_[p];
         if (p > 0 && !(keyOf(buckets_[p - 1]) < keyOf(b))) return fmt("buckets not sorted at %u", p);
         if (idPos_[posIds_[p]] != p) return fmt("bucket id table wrong at %u", p);
-        if (b.count > b.capacity) return fmt("bucket %u count > capacity", p);
+        if (b.count > b.used || b.used > b.capacity) return fmt("bucket %u count > used > capacity", p);
         if (uint64_t(b.firstSlot) + b.capacity > slotEnd()) return fmt("bucket %u region beyond slot space", p);
         for (u32 s = b.firstSlot; s < b.firstSlot + b.capacity; ++s) {
             if (owner[s] != NONE) return fmt("slot %u owned by two buckets", s);
@@ -1023,7 +1028,7 @@ std::string SceneStore::Impl::verify(const ECS& ecs, const GpuScene& scene) cons
     u32 live = 0;
     for (u32 s = 0; s < slotEnd(); ++s) {
         const u32 o = owner[s];
-        const bool inLive = o != NONE && s < buckets_[o].firstSlot + buckets_[o].count;
+        const bool inLive = o != NONE && s < buckets_[o].firstSlot + buckets_[o].used && slotEntity_[s] != NONE;
         if (inLive) {
             ++live;
             const u32 e = slotEntity_[s];
@@ -1055,7 +1060,7 @@ std::string SceneStore::Impl::verify(const ECS& ecs, const GpuScene& scene) cons
         const auto it = keyToId_.find(makeKey(static_cast<CullClass>(x.cls), x.mesh));
         if (it == keyToId_.end()) return fmt("entity %u: no bucket for its (class, mesh)", e);
         const SceneBucket& b = buckets_[idPos_[it->second]];
-        if (s < b.firstSlot || s >= b.firstSlot + b.count) return fmt("entity %u: slot %u outside its bucket", e, s);
+        if (s < b.firstSlot || s >= b.firstSlot + b.used) return fmt("entity %u: slot %u outside its bucket", e, s);
         if (slotEntity_[s] != e) return fmt("entity %u: slotEntity mismatch", e);
 
         const MeshInstanceComponent& m = mi.get(e);

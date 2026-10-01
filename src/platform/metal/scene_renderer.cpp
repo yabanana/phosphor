@@ -591,9 +591,11 @@ void SceneRenderer::encodeForward(MTL4::RenderCommandEncoder* enc, MTL::RenderPi
             const SceneBucket& b = buckets[i];
             if (b.count == 0 || gpu[i].indexCount == 0) continue;
             classState(b.cull);
+            // [firstSlot, used): the live instances and the holes of removed
+            // ones (zeroed records: degenerate, no fragment).
             enc->drawIndexedPrimitives(MTL::PrimitiveTypeTriangle, gpu[i].indexCount, MTL::IndexTypeUInt32,
                                        indexBase + static_cast<MTL::GPUAddress>(gpu[i].indexOffset) * sizeof(u32),
-                                       static_cast<NS::UInteger>(gpu[i].indexCount) * sizeof(u32), b.count,
+                                       static_cast<NS::UInteger>(gpu[i].indexCount) * sizeof(u32), b.used,
                                        gpu[i].vertexOffset, b.firstSlot);
             ++n;
         }

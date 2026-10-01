@@ -280,6 +280,8 @@ public:
 private:
     EntityID nextEntity_  = 0;
     u32      entityCount_ = 0;
+    std::vector<EntityID> freeIds_; // destroyed ids, reused by createEntity (LIFO)
+    std::vector<u8>       alive_;   // per id
 
     std::unordered_map<std::type_index, std::any>   arrays_;
     std::vector<std::function<void(EntityID)>>      removers_;

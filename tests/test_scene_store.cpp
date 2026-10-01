@@ -768,28 +768,24 @@ TEST_CASE("scene store: slots of unchanged entities are stable (swap-and-pop mov
     w.frame();
     for (EntityID e : es) CHECK(w.store.slotOf(e) == slot[e]);
 
-    // Remove one in the middle: the last live slot moves into the hole, nobody else moves.
+    // Remove one in the middle: it leaves a hole, nobody moves.
     w.ecs.destroyEntity(es[10]);
     w.frame();
-    u32 moved = 0;
     for (EntityID e : es) {
         if (e == es[10]) { CHECK(w.store.slotOf(e) == NONE); continue; }
-        if (w.store.slotOf(e) != slot[e]) {
-            ++moved;
-            CHECK(e == es[99]);
-            CHECK(w.store.slotOf(e) == slot[es[10]]);
-        }
+        CHECK(w.store.slotOf(e) == slot[e]);
     }
-    CHECK(moved == 1);
-    CHECK(w.store.stats().instanceRecords == 2); // the filled hole and the zeroed last slot
+    CHECK(w.store.stats().instanceRecords == 1); // the zeroed hole
+    CHECK_FALSE(w.store.stats().structure);
 
-    // Add: appended after the live slots of the bucket.
+    // Add: the hole is reused.
     const EntityID n = w.add(0, glm::vec3(5, 5, 5));
     w.frame();
-    CHECK(w.store.slotOf(n) == slot[es[99]]); // the slot freed by the removal's last live slot
+    CHECK(w.store.slotOf(n) == slot[es[10]]);
     for (EntityID e : es) {
-        if (e != es[10] && e != es[99]) CHECK(w.store.slotOf(e) == slot[e]);
+        if (e != es[10]) CHECK(w.store.slotOf(e) == slot[e]);
     }
+    CHECK_FALSE(w.store.stats().structure);
     CHECK(w.store.instanceCount() == 100);
 }
 
@@ -1018,8 +1014,8 @@ TEST_CASE("scene store: dirtyRoots rules") {
     CHECK(w.verify().empty());
 }
 
-TEST_CASE("scene store: a moved child or parent (swap-and-pop) updates parentSlot, CSR and dirtyRoots") {
-    SUBCASE("child moves into a hole") {
+TEST_CASE("scene store: a removal moves no child or parent (holes): no CSR rebuild, no dirty root") {
+    SUBCASE("removal next to a parent and its child") {
         World w;
         const EntityID X = w.add(0);
         const EntityID P = w.add(0, glm::vec3(1, 0, 0));
@@ -1027,33 +1023,34 @@ TEST_CASE("scene store: a moved child or parent (swap-and-pop) updates parentSlo
         const EntityID K = w.child(P, 0, glm::vec3(0, 1, 0));
         w.frame();
         const u64 rebuilds = w.store.csrRebuildCount();
-        const u32 sP = w.store.slotOf(P);
-        const u32 sX = w.store.slotOf(X);
+        const u32 sP = w.store.slotOf(P), sK = w.store.slotOf(K), sX = w.store.slotOf(X);
         w.ecs.destroyEntity(X);
         w.sync();
-        CHECK(w.store.slotOf(K) == sX); // the last live slot moved into X's hole
-        CHECK(w.store.nodes()[sX].parentSlot == sP);
-        CHECK(w.store.dirtyRoots().size() == 1);
-        CHECK(w.store.dirtyRoots()[0] == sP);
-        CHECK(w.store.stats().csrRebuilt);
-        CHECK(w.store.csrRebuildCount() == rebuilds + 1);
+        CHECK(w.store.slotOf(P) == sP);
+        CHECK(w.store.slotOf(K) == sK);
+        CHECK(w.store.nodes()[sK].parentSlot == sP);
+        CHECK(w.store.dirtyRoots().empty());
+        CHECK_FALSE(w.store.stats().csrRebuilt);
+        CHECK(w.store.csrRebuildCount() == rebuilds);
+        CHECK_FALSE(w.store.stats().structure);
         CHECK(w.verify().empty());
+        w.ecs.endFrame();
+        // The next add in the bucket takes X's hole.
+        const EntityID Z = w.add(0, glm::vec3(3, 0, 0));
+        w.sync();
+        CHECK(w.store.slotOf(Z) == sX);
         (void)Y;
+        CHECK(w.verify().empty());
     }
-    SUBCASE("parent moves into a hole") {
+    SUBCASE("removal of a child updates its parent's CSR") {
         World w2;
-        const EntityID X2 = w2.add(0);
-        const EntityID K2 = w2.add(0, glm::vec3(0, 1, 0));
         const EntityID P2 = w2.add(0, glm::vec3(1, 0, 0));
-        w2.ecs.addComponent(K2, HierarchyComponent{P2}); // K before P in dense order
+        const EntityID K2 = w2.child(P2, 0, glm::vec3(0, 1, 0));
         w2.frame();
-        const u32 sX = w2.store.slotOf(X2);
-        w2.ecs.destroyEntity(X2);
+        w2.ecs.destroyEntity(K2);
         w2.sync();
-        CHECK(w2.store.slotOf(P2) == sX);
-        CHECK(w2.store.nodes()[w2.store.slotOf(K2)].parentSlot == sX);
-        REQUIRE(w2.store.dirtyRoots().size() == 1);
-        CHECK(w2.store.dirtyRoots()[0] == sX);
+        const u32 sP = w2.store.slotOf(P2);
+        CHECK(w2.store.childOffsets()[sP + 1] == w2.store.childOffsets()[sP]); // no child left
         CHECK(w2.verify().empty());
     }
 }

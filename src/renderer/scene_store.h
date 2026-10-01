@@ -22,12 +22,15 @@ class GpuScene;
 // buckets sorted by (class, mesh): the canonical draw order of both
 // submission paths is (class, mesh, slot), so --gpu-driven off and on give
 // the same image (D2).  Each bucket owns a contiguous slot region with
-// capacity (25% slack, at least 64); a removal swap-and-pops inside the
-// bucket (the last live slot of the bucket moves into the hole), an add
-// takes the next free slot of the region; a full region relocates the bucket
+// capacity (25% slack, at least 64); a removal leaves a hole, an add takes a
+// hole of the bucket or the next free slot of its region; a full region
+// without holes relocates the bucket
 // to the end of the slot space with twice the capacity (a STRUCTURE change,
 // counted, never expected in measured frames).  Slack slots have
-// GPUInstance::flags without INSTANCE_FLAG_VALID.
+// GPUInstance::flags without INSTANCE_FLAG_VALID.  A removal leaves a HOLE
+// (a zeroed slot, reused by the next add to the bucket) instead of moving
+// another instance: churn moves no slot, so it never touches the motion list
+// or the hierarchy CSR (no structure change, bytes proportional to changes).
 //
 // sync() consumes the ECS change lists (scene/ecs.h): its cost is
 // O(changed), never O(instances), except the first sync after clear() (a
@@ -67,7 +70,9 @@ struct SceneBucket {
     CullClass cull = CullClass::Back;
     u32       firstSlot = 0;
     u32       capacity  = 0;
-    u32       count     = 0; // live instances: slots [firstSlot, firstSlot + count)
+    u32       count     = 0; // live instances
+    u32       used      = 0; // slots [firstSlot, firstSlot + used) hold the live instances and the
+                             // holes left by removals (zeroed records, reused first): never drawn
     u32       command   = 0; // ICB command index
 };
 
