@@ -28,8 +28,11 @@ constexpr MTL::ResourceOptions kStorageModeMask = 0xF0;
 GpuMemory::GpuMemory(MetalContext& context) : context_(context) {}
 
 ResidencyClass GpuMemory::residencyClass(MemoryCategory category) {
-    return category == MemoryCategory::Geometry || category == MemoryCategory::Textures ? ResidencyClass::Streaming
-                                                                                        : ResidencyClass::Static;
+    // Level content: Geometry, Textures and the F5 GPU scene (rebuilt per bench).
+    return category == MemoryCategory::Geometry || category == MemoryCategory::Textures ||
+                   category == MemoryCategory::Scene
+               ? ResidencyClass::Streaming
+               : ResidencyClass::Static;
 }
 
 GpuMemory::~GpuMemory() {
@@ -114,6 +117,7 @@ namespace {
     case MemoryCategory::Upload:        return "GPU Upload";
     case MemoryCategory::Transient:     return "GPU Transient";
     case MemoryCategory::RenderTargets: return "GPU Render targets";
+    case MemoryCategory::Scene:         return "GPU Scene";
     case MemoryCategory::Other:         return "GPU Other";
     case MemoryCategory::COUNT:         break;
     }
@@ -127,6 +131,7 @@ namespace {
     case MemoryCategory::Upload:        return "GPU heap Upload";
     case MemoryCategory::Transient:     return "GPU heap Transient";
     case MemoryCategory::RenderTargets: return "GPU heap Render targets";
+    case MemoryCategory::Scene:         return "GPU heap Scene";
     case MemoryCategory::Other:         return "GPU heap Other";
     case MemoryCategory::COUNT:         break;
     }

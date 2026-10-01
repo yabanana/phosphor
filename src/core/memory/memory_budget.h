@@ -18,6 +18,7 @@ enum class MemoryCategory : u8 {
     Upload,        // CPU-written rings (per-frame data, staging)
     Transient,     // render-graph transient heap (F2.2)
     RenderTargets, // persistent attachments (depth, history buffers)
+    Scene,         // F5 persistent GPU scene: instances, materials, nodes, lists, ICBs
     Other,         // diagnostics, capture readback, ...
     COUNT
 };

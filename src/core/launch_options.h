@@ -128,6 +128,11 @@ namespace phosphor {
 // (e.g. -NSDocumentRevisionsDebugMode when launched from Xcode).
 // ---------------------------------------------------------------------------
 
+/// F5.3 submission of the scene's draws (--gpu-driven).
+enum class GpuDrivenMode : u8 { Off, On };
+/// F5 self-check negative controls (--debug-gpu-scene-corrupt).
+enum class SceneCorruption : u8 { None, Delta, Plane, Command, Touch };
+
 /// OPT-1 graph compilation modes (--graph-opt).
 enum class GraphOptMode : u8 { Off, Greedy, Plan };
 [[nodiscard]] const char* graphOptModeName(GraphOptMode mode);
@@ -197,6 +202,17 @@ struct LaunchOptions {
     std::string graphPlanPath;               // empty: default location
 
     /// True when the app runs a fixed number of frames and then exits.
+    // F5: GPU scene and GPU-driven submission.
+    GpuDrivenMode gpuDriven      = GpuDrivenMode::Off; // --gpu-driven off|on
+    u32         sceneInstances   = 0;     // --instances N (bench 8; 0 = bench default)
+    u32         sceneMeshes      = 0;     // --scene-meshes K (bench 8; 0 = bench default)
+    float       dynamicCpuPercent = -1.0f; // --dynamic-cpu PCT (bench 8; < 0 = bench default)
+    u32         churn            = 0;     // --churn N spawn + despawn per frame (bench 8)
+    float       cullDistance     = 0.0f;  // --cull-distance D (0 = off)
+    float       cullMinPixels    = 0.0f;  // --cull-min-pixels P (0 = off)
+    u32         debugGpuScene    = 0;     // --debug-gpu-scene N: exact readback check every N frames (0 = off)
+    SceneCorruption debugGpuSceneCorrupt = SceneCorruption::None; // --debug-gpu-scene-corrupt KIND
+
     [[nodiscard]] bool benchmark() const { return frames > 0; }
 };
 

@@ -20,6 +20,27 @@ struct TransformComponent {
     }
 };
 
+// F5.2: the entity's TransformComponent is LOCAL to `parent` (its
+// worldMatrix field holds the local matrix); the GPU computes the world
+// matrix world(parent) * local (renderer/transform_math.h).  The parent must
+// have a MeshInstanceComponent (an instance slot); depth < SCENE_MAX_LEVELS.
+struct HierarchyComponent {
+    EntityID parent = INVALID_ENTITY;
+};
+
+// F5.6: procedural motion evaluated on the GPU every frame (no CPU work per
+// frame): world = translate(orbit(t)) * rotateY(a(t)) * transform.worldMatrix,
+// orbit(t) = centre + (radius cos(a + phase), height, radius sin(a + phase)),
+// a(t) = the angle of `speedClass` at time t (renderer/transform_math.h).
+// Only roots (no HierarchyComponent) may move this way.
+struct MotionComponent {
+    glm::vec3 centre{0.0f};
+    float     radius     = 0.0f;
+    float     phase      = 0.0f;  // radians
+    float     height     = 0.0f;
+    u32       speedClass = 0;     // < SCENE_MOTION_CLASSES
+};
+
 struct MeshInstanceComponent {
     u32 meshHandle    = ~0u;
     u32 materialIndex = ~0u;
