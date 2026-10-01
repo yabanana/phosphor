@@ -6,6 +6,8 @@
 #include "scene/components.h"
 #include "scene/ecs.h"
 #include "scene/procedural.h"
+#include "testbench/testbench.h"
+#include "null_texture_manager.h"
 
 #include <algorithm>
 #include <atomic>
@@ -1174,4 +1176,39 @@ TEST_CASE("scene store: only roots move procedurally (motion on a child is ignor
     w.frame();
     CHECK(w.store.motionSlots().empty());
     CHECK(w.store.slotOf(K) != NONE);
+}
+
+// ===========================================================================
+// Benches through the store: only what a bench moves is marked changed
+// ===========================================================================
+TEST_CASE("scene store: every bench syncs consistently and marks only what it moves") {
+    for (int i = 0; i < testBenchCount(); ++i) {
+        const auto type = static_cast<TestBenchType>(i);
+        CAPTURE(testBenchName(type));
+        ECS ecs;
+        GpuScene scene;
+        phosphor::test::NullTextureManager textures;
+        SceneStore store;
+        TestBenchParams params;
+        params.instances = 4000;
+        auto bench = createTestBench(type, params);
+        REQUIRE(bench);
+        bench->setup(ecs, scene, textures);
+        store.sync(ecs, scene);
+        ecs.endFrame();
+        CHECK(store.verifyAgainstEcs(ecs, scene).empty());
+
+        u32 maxChanged = 0;
+        for (int f = 0; f < 6; ++f) {
+            bench->update(1.0f / 60.0f, ecs);
+            maxChanged = std::max(maxChanged, static_cast<u32>(std::as_const(ecs).getArray<TransformComponent>().changes().changed.size()));
+            CHECK_FALSE(std::as_const(ecs).getArray<TransformComponent>().changes().all);
+            store.sync(ecs, scene);
+            CHECK(store.verifyAgainstEcs(ecs, scene).empty());
+            ecs.endFrame();
+        }
+        // No bench rewrites every transform each frame (bench 8: ~1 % plus churn).
+        if (type == TestBenchType::MillionInstances) CHECK(maxChanged < 4000 / 20);
+        bench->teardown(ecs, scene);
+    }
 }
