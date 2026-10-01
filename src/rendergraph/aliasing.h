@@ -21,8 +21,11 @@ namespace phosphor::rg {
 // With `alias` false every resource gets its own range (debug/comparison).
 // ---------------------------------------------------------------------------
 
-// OPT-1.3: `policy` Coloring packs by interval colouring (A1, not yet:
-// behaves as Greedy); maxLiveSize is filled by every policy.
+// OPT-1.3: Coloring packs by interval colouring (several deterministic
+// orders, best/first fit, seeded local search; never larger than Greedy, ties
+// keep Greedy's layout); ColoringStageClass additionally lets only resources
+// with equal stage-class sets (raster / compute) share memory.  maxLiveSize
+// is filled by every policy.
 [[nodiscard]] AliasingPlan planAliasing(const RenderGraph& graph, const CompiledGraph& compiled,
                                         const ResourceSizer& sizer, bool alias = true,
                                         AliasPolicy policy = AliasPolicy::Greedy);

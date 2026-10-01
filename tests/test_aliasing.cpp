@@ -297,3 +297,287 @@ TEST_CASE("aliasing: randomized graphs keep the placement invariants") {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// OPT-1.3 -- AliasPolicy::Coloring / ColoringStageClass
+// ---------------------------------------------------------------------------
+
+#include "rendergraph/optimizer/optimizer.h"
+#include "rendergraph/scenario.h"
+
+#include <cstdio>
+#include <cstdlib>
+#include <string>
+
+namespace {
+
+struct Interval {
+    u32 first = 0, last = 0; // pass positions, inclusive
+    u64 size = 4096;
+    bool raster = false;     // accessed with StageFragment instead of StageDispatch
+};
+
+// One compute pass per position; resource i is written in pass first and read
+// in pass last (write-only when first == last).
+std::vector<BufferRef> buildIntervals(RenderGraph& g, const std::vector<Interval>& iv) {
+    u32 passes = 1;
+    for (const Interval& i : iv) passes = std::max(passes, i.last + 1);
+    std::vector<BufferRef> refs(iv.size());
+    for (u32 p = 0; p < passes; ++p) {
+        g.addPass("p", PassType::Compute, [&](PassBuilder& b) {
+            for (u32 i = 0; i < iv.size(); ++i) {
+                const Stages st = iv[i].raster ? StageFragment : StageDispatch;
+                if (iv[i].last == p && iv[i].first != p) b.read(refs[i], Usage::ShaderRead, st);
+                if (iv[i].first == p) refs[i] = b.write(b.createBuffer("r", {iv[i].size}), Usage::ShaderWrite, st);
+            }
+            b.setSideEffect();
+        }, nullptr);
+    }
+    return refs;
+}
+
+std::vector<Lifetime> widenedLifetimes(const RenderGraph& g, const CompiledGraph& c) {
+    std::vector<Lifetime> life = c.lifetimes;
+    for (u32 pi = 0; pi < g.passes().size(); ++pi) {
+        if (g.passes()[pi].queue != Queue::AsyncCompute || c.culled[pi]) continue;
+        for (const Access& a : g.passes()[pi].reads) life[a.resource] = {0, u32(c.order.size() - 1)};
+        for (const Access& a : g.passes()[pi].writes) life[a.resource] = {0, u32(c.order.size() - 1)};
+    }
+    return life;
+}
+
+// Independent checker of a plan: no two placements with overlapping lifetimes
+// share a byte, alignment honoured, the aliased flag is exact, the heap
+// covers every placement and is at least the lower bound.
+bool planIsValid(const RenderGraph& g, const CompiledGraph& c, const AliasingPlan& plan, const ResourceSizer& sizer) {
+    const std::vector<Lifetime> life = widenedLifetimes(g, c);
+    u64 maxEnd = 0;
+    for (const Placement& p : plan.placements) {
+        const ResourceNode& n = g.resources()[p.resource];
+        const SizeAlign sa = n.kind == ResourceKind::Texture ? sizer.textureSize(p.resource, n.texture)
+                                                             : sizer.bufferSize(p.resource, n.buffer);
+        if (p.size != sa.size) return false;
+        if (sa.align > 1 && p.offset % sa.align != 0) return false;
+        maxEnd = std::max(maxEnd, p.offset + p.size);
+    }
+    if (plan.heapSize < maxEnd || plan.heapSize < plan.maxLiveSize) return false;
+    for (size_t i = 0; i < plan.placements.size(); ++i) {
+        bool any = false;
+        for (size_t j = 0; j < plan.placements.size(); ++j) {
+            if (i == j) continue;
+            const bool ranges = rangesIntersect(plan.placements[i], plan.placements[j]);
+            if (ranges && life[plan.placements[i].resource].overlaps(life[plan.placements[j].resource])) return false;
+            any = any || ranges;
+        }
+        if (plan.placements[i].aliased != any) return false;
+    }
+    return true;
+}
+
+u32 stageClassOf(const RenderGraph& g, const CompiledGraph& c, u32 resource) {
+    u32 k = 0;
+    for (u32 pi = 0; pi < g.passes().size(); ++pi) {
+        if (c.culled[pi]) continue;
+        auto add = [&](const Access& a) {
+            if (a.resource != resource) return;
+            if (a.stages & StageRaster) k |= 1u;
+            if (a.stages & (StageDispatch | StageBlit | StageAccelerationStructure)) k |= 2u;
+        };
+        for (const Access& a : g.passes()[pi].reads) add(a);
+        for (const Access& a : g.passes()[pi].writes) add(a);
+    }
+    return k;
+}
+
+bool neverMixesClasses(const RenderGraph& g, const CompiledGraph& c, const AliasingPlan& plan) {
+    for (size_t i = 0; i < plan.placements.size(); ++i)
+        for (size_t j = i + 1; j < plan.placements.size(); ++j)
+            if (rangesIntersect(plan.placements[i], plan.placements[j]) &&
+                stageClassOf(g, c, plan.placements[i].resource) != stageClassOf(g, c, plan.placements[j].resource))
+                return false;
+    return true;
+}
+
+AliasingPlan planWith(const RenderGraph& g, const CompiledGraph& c, const ResourceSizer& s, AliasPolicy p) {
+    return planAliasing(g, c, s, true, p);
+}
+
+} // namespace
+
+TEST_CASE("coloring: Greedy above the lower bound, Coloring reaches it") {
+    // Found by search: size-descending first fit needs 13 units, the lower bound is 12.
+    const std::vector<Interval> iv = {{2, 5, 3 * 4096}, {3, 4, 3 * 4096}, {3, 5, 3 * 4096},
+                                      {4, 4, 3 * 4096}, {5, 5, 4 * 4096}};
+    RenderGraph g;
+    const auto refs = buildIntervals(g, iv);
+    CompiledGraph c = compileOrder(g);
+    REQUIRE(c.ok);
+    for (u32 i = 0; i < iv.size(); ++i) REQUIRE(c.lifetimes[refs[i].resource].first == iv[i].first);
+    FakeSizer sizer;
+    const AliasingPlan greedy   = planWith(g, c, sizer, AliasPolicy::Greedy);
+    const AliasingPlan coloring = planWith(g, c, sizer, AliasPolicy::Coloring);
+    CHECK(greedy.maxLiveSize == 12 * 4096);
+    CHECK(greedy.heapSize > greedy.maxLiveSize);
+    CHECK(coloring.heapSize == coloring.maxLiveSize);
+    CHECK(planIsValid(g, c, greedy, sizer));
+    CHECK(planIsValid(g, c, coloring, sizer));
+}
+
+TEST_CASE("coloring: a tie keeps Greedy's layout") {
+    RenderGraph g;
+    BufferRef a = produce(g, "A", 10000);
+    consume(g, "readA", a);
+    BufferRef b = produce(g, "B", 8000);
+    consume(g, "readB", b);
+    CompiledGraph c = compileOrder(g);
+    REQUIRE(c.ok);
+    FakeSizer sizer;
+    const AliasingPlan greedy   = planWith(g, c, sizer, AliasPolicy::Greedy);
+    const AliasingPlan coloring = planWith(g, c, sizer, AliasPolicy::Coloring);
+    REQUIRE(greedy.placements.size() == coloring.placements.size());
+    for (size_t i = 0; i < greedy.placements.size(); ++i) {
+        CHECK(greedy.placements[i].offset == coloring.placements[i].offset);
+        CHECK(greedy.placements[i].aliased == coloring.placements[i].aliased);
+    }
+    CHECK(greedy.heapSize == coloring.heapSize);
+}
+
+TEST_CASE("coloring: random interval sets never exceed Greedy, plans are valid") {
+    std::mt19937 rng(777);
+    auto rnd = [&](u32 lo, u32 hi) { return std::uniform_int_distribution<u32>(lo, hi)(rng); };
+    const u64 aligns[] = {256, 4096, 16384, 65536};
+    u32 strictlySmaller = 0, reachedBound = 0;
+    const int cases = 400;
+    for (int iter = 0; iter < cases; ++iter) {
+        std::vector<Interval> iv(rnd(2, 14));
+        const u32 passes = rnd(2, 10);
+        for (Interval& i : iv) {
+            i.first  = rnd(0, passes - 1);
+            i.last   = rnd(i.first, passes - 1);
+            i.size   = rnd(1, 400000);
+            i.raster = rnd(0, 1) != 0;
+        }
+        RenderGraph g;
+        buildIntervals(g, iv);
+        CompiledGraph c = compileOrder(g);
+        REQUIRE(c.ok);
+        FakeSizer sizer;
+        sizer.bufAlign = aligns[rnd(0, 3)];
+        const AliasingPlan greedy   = planWith(g, c, sizer, AliasPolicy::Greedy);
+        const AliasingPlan coloring = planWith(g, c, sizer, AliasPolicy::Coloring);
+        const AliasingPlan staged   = planWith(g, c, sizer, AliasPolicy::ColoringStageClass);
+        CHECK(coloring.heapSize <= greedy.heapSize);
+        CHECK(coloring.heapSize >= coloring.maxLiveSize);
+        CHECK(staged.heapSize >= staged.maxLiveSize);
+        CHECK(staged.heapSize <= staged.unaliasedSize);
+        CHECK(coloring.maxLiveSize == greedy.maxLiveSize);
+        CHECK(planIsValid(g, c, greedy, sizer));
+        CHECK(planIsValid(g, c, coloring, sizer));
+        CHECK(planIsValid(g, c, staged, sizer));
+        CHECK(neverMixesClasses(g, c, staged));
+        const AliasingPlan again = planWith(g, c, sizer, AliasPolicy::Coloring);
+        CHECK(again.heapSize == coloring.heapSize); // deterministic
+        if (coloring.heapSize < greedy.heapSize) ++strictlySmaller;
+        if (coloring.heapSize == coloring.maxLiveSize) ++reachedBound;
+    }
+    MESSAGE("coloring smaller than greedy in " << strictlySmaller << "/" << cases << ", at the bound in " << reachedBound);
+    CHECK(strictlySmaller > 0);
+}
+
+TEST_CASE("coloring: stage class policy never mixes classes") {
+    // Raster-only R and compute-only C with disjoint lifetimes, then a second
+    // raster resource: R and R2 may share, C may not share with either.
+    const std::vector<Interval> iv = {{0, 1, 8192, true}, {2, 3, 8192, false}, {4, 5, 8192, true}};
+    RenderGraph g;
+    const auto refs = buildIntervals(g, iv);
+    CompiledGraph c = compileOrder(g);
+    REQUIRE(c.ok);
+    FakeSizer sizer;
+    const AliasingPlan coloring = planWith(g, c, sizer, AliasPolicy::Coloring);
+    const AliasingPlan staged   = planWith(g, c, sizer, AliasPolicy::ColoringStageClass);
+    CHECK(coloring.heapSize == 8192);
+    CHECK(staged.heapSize == 16384);
+    CHECK(staged.heapSize >= staged.maxLiveSize);
+    CHECK(neverMixesClasses(g, c, staged));
+    CHECK(planIsValid(g, c, staged, sizer));
+    CHECK(find(staged, refs[0].resource)->offset == find(staged, refs[2].resource)->offset);
+    CHECK(find(staged, refs[1].resource)->offset != find(staged, refs[0].resource)->offset);
+}
+
+TEST_CASE("coloring: async resources stay alive all frame, alignment honoured") {
+    RenderGraph g;
+    FakeSizer sizer;
+    sizer.bufAlign = 16384;
+    BufferRef a = produce(g, "A", 4096, Queue::AsyncCompute);
+    consume(g, "readA", a, Queue::AsyncCompute);
+    BufferRef b = produce(g, "B", 4096);
+    consume(g, "readB", b);
+    BufferRef d = produce(g, "D", 20000);
+    consume(g, "readD", d);
+    CompiledGraph c = compileOrder(g);
+    REQUIRE(c.ok);
+    for (const AliasPolicy p : {AliasPolicy::Coloring, AliasPolicy::ColoringStageClass}) {
+        const AliasingPlan plan = planWith(g, c, sizer, p);
+        REQUIRE(plan.placements.size() == 3);
+        CHECK(planIsValid(g, c, plan, sizer));
+        const Placement* pa = find(plan, a.resource);
+        CHECK_FALSE(rangesIntersect(*pa, *find(plan, b.resource)));
+        CHECK_FALSE(rangesIntersect(*pa, *find(plan, d.resource)));
+        for (const Placement& pl : plan.placements) CHECK(pl.offset % 16384 == 0);
+    }
+}
+
+TEST_CASE("coloring: checker detects an overlapping placement (negative control)") {
+    const std::vector<Interval> iv = {{0, 2, 4096}, {1, 3, 4096}, {3, 4, 4096}};
+    RenderGraph g;
+    buildIntervals(g, iv);
+    CompiledGraph c = compileOrder(g);
+    REQUIRE(c.ok);
+    FakeSizer sizer;
+    AliasingPlan plan = planWith(g, c, sizer, AliasPolicy::Coloring);
+    REQUIRE(planIsValid(g, c, plan, sizer));
+    // Resources 0 and 1 are alive together: put 1 on top of 0.
+    plan.placements[1].offset = plan.placements[0].offset;
+    CHECK_FALSE(planIsValid(g, c, plan, sizer));
+    // A misaligned offset is caught too.
+    plan = planWith(g, c, sizer, AliasPolicy::Coloring);
+    plan.placements[2].offset += 1;
+    CHECK_FALSE(planIsValid(g, c, plan, sizer));
+}
+
+TEST_CASE("coloring: scenario graphs, 1-3 views") {
+    const bool table = std::getenv("PHOSPHOR_ALIAS_TABLE") != nullptr;
+    EstimatedSizer sizer;
+    for (u32 index = 0; index < scenarioCount(); ++index) {
+        for (u32 views = 1; views <= 3; ++views) {
+            RenderGraph g;
+            const TextureRef drawable =
+                g.importTexture("Drawable", {Format::BGRA8Srgb, 1920, 1080}, ImportOutput | ImportPerFrame);
+            ScenarioParams params;
+            params.views = views;
+            Scenario s;
+            std::string error;
+            REQUIRE_MESSAGE(buildScenario(index, params, g, drawable, s, {}, &error), error);
+            u64 heap[3] = {}, maxLive = 0;
+            const AliasPolicy policies[3] = {AliasPolicy::Greedy, AliasPolicy::Coloring, AliasPolicy::ColoringStageClass};
+            for (int k = 0; k < 3; ++k) {
+                CompileOptions options;
+                options.sizer       = &sizer;
+                options.aliasPolicy = policies[k];
+                CompiledGraph c = compile(g, options);
+                REQUIRE(c.ok);
+                CHECK(planIsValid(g, c, c.aliasing, sizer));
+                if (k == 2) CHECK(neverMixesClasses(g, c, c.aliasing));
+                heap[k] = c.aliasing.heapSize;
+                maxLive = c.aliasing.maxLiveSize;
+            }
+            CHECK(heap[1] <= heap[0]);
+            CHECK(heap[1] >= maxLive);
+            CHECK(heap[2] >= maxLive);
+            if (table)
+                std::printf("scenario %u views %u: greedy %llu coloring %llu coloring-stage %llu maxLive %llu\n", index, views,
+                            (unsigned long long)heap[0], (unsigned long long)heap[1], (unsigned long long)heap[2],
+                            (unsigned long long)maxLive);
+        }
+    }
+}

@@ -59,7 +59,13 @@ void hashResource(Fnv& f, const ResourceNode& r) {
 
 } // namespace
 
-const char* aliasPolicyName(AliasPolicy p) { return p == AliasPolicy::Coloring ? "coloring" : "greedy"; }
+const char* aliasPolicyName(AliasPolicy p) {
+    switch (p) {
+        case AliasPolicy::Coloring: return "coloring";
+        case AliasPolicy::ColoringStageClass: return "coloring-stage";
+        default: return "greedy";
+    }
+}
 const char* barrierPolicyName(BarrierPolicy p) { return p == BarrierPolicy::Minimal ? "minimal" : "conservative"; }
 
 u64 graphKey(const RenderGraph& graph, const std::vector<std::string>& names) {
@@ -210,6 +216,7 @@ bool fromJson(const std::string& text, std::vector<GraphPlan>& out, std::string*
             const std::string barriers = e.value("barriers", std::string("conservative"));
             if (alias == "greedy") p.aliasPolicy = AliasPolicy::Greedy;
             else if (alias == "coloring") p.aliasPolicy = AliasPolicy::Coloring;
+            else if (alias == "coloring-stage") p.aliasPolicy = AliasPolicy::ColoringStageClass;
             else {
                 if (error) *error = "graph plans: unknown alias policy '" + alias + "'";
                 return false;

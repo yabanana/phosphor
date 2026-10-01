@@ -450,6 +450,11 @@ struct AliasingPlan {
 enum class AliasPolicy : u8 {
     Greedy,   // F2.2: size-descending first fit (the end-of-F4 behaviour)
     Coloring, // OPT-1.3: interval colouring, never larger than Greedy
+    // OPT-1.3: Coloring where resources share memory only if the sets of
+    // stage classes (raster / compute) accessing them are equal (spike 5:
+    // mixing classes puts dispatch in raster first-use barriers).  May be
+    // larger than Greedy.
+    ColoringStageClass,
 };
 
 // OPT-1.4: which stages barriers wait for.
