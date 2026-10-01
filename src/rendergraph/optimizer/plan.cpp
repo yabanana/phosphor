@@ -147,8 +147,12 @@ std::vector<u32> planOrder(const RenderGraph& graph, const GraphPlan& plan, std:
         }
         return {};
     }
+    // Unplanned passes follow in declaration order, except the ones the graph
+    // culls (a forced order may only list live passes).
+    const CompiledGraph live = compileOrder(graph);
     for (u32 p = 0; p < passes.size(); ++p) {
-        if (!used[p]) order.push_back(p);
+        const bool culled = p < live.culled.size() && live.culled[p];
+        if (!used[p] && !culled) order.push_back(p);
     }
     return order;
 }

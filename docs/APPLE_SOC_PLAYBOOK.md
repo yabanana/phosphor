@@ -65,6 +65,7 @@ le righe "Misura" qui sotto riportano quei valori.
 | B-26 | Latenza input → fotoni, jitter di presentazione, `CAMetalDisplayLink` | S-DISP-1 |
 | B-27 | Potenza (W) e frequenze sotto carico GPU, CPU, misto; tempo a regime termico (MacBook Air vs Pro vs Studio) | S-PWR-1..3 |
 | B-28 | Latenza di commit di un command buffer MTL4 e di un segnale di evento visto dalla CPU | S-SYNC-4 |
+| B-29 | Anelli di upload: scrittura CPU in `shared` write-combined vs cached, lettura GPU `shared` vs `private` (OPT-1) | S-MEM-3 |
 
 ---
 
@@ -169,6 +170,7 @@ le righe "Misura" qui sotto riportano quei valori.
 - **Fatto**: load/store "consumano la maggior parte della banda di sistema"; clear nella load action; `.dontCare` per ciò che non serve dopo; `memoryless` per attachment usati solo nel pass (solo texture); unire pass adiacenti con gli stessi attachment (WWDC20-10632).
 - **Misura** (B-14): un render pass piccolo costa **~6 µs oppure ~60 µs (bimodale)** tra due encoder compute, ~11 µs in catena; store RGBA32F ~0,8 TB/s efficaci (fit su 4 risoluzioni), store RGBA8 nascosto dallo shading; dontCare ≤ store sempre; memoryless ≈ private dontCare. Il load serve solo con un draw che non copre tutto (con copertura piena il driver lo elude).
 - **Sfruttare**: il render graph (F2) deduce load/store e memoryless; depth, MSAA, G-buffer on-tile sempre memoryless.
+- **Misura negli scenari di grafo** (OPT-1, `--graph-scenario`, opt-log "OPT-1"): il compilatore greedy non ottiene nessun memoryless nei 4 scenari realistici (un compute tra due pass raster rompe la fusione); dove l'ordine lo permette (scenario async: compute prima del G-buffer) G-buffer + lighting fusi → 3 memoryless, −17% byte, −27% heap. Rematerializzare segnali economici (velocity, CoC) nella tile invece di store+load: −1,3…−5% byte ma **+1,5…+15% di frame** su M5 Max (consumatori non limitati dalla banda). Il lint OPT-1.6 (`graph_lint`) segnala ogni store e il motivo di ogni intermedio non memoryless; gli attachment solo letti (DepthRead) vengono salvati di nuovo per prudenza.
 - **Evitare**: pass multipli che si passano la stessa texture via DRAM; `.store` per default.
 
 **S-TBDR-5 Barriere nello stadio fragment**
@@ -180,7 +182,8 @@ le righe "Misura" qui sotto riportano quei valori.
 **S-TBDR-6 Sovrapposizione tra pass**
 - **Fatto**: il vertex stage di un pass successivo può partire mentre il fragment del pass precedente finisce in tile memory (doc TBDR).
 - **Misura** (B-19): due pass render indipendenti (fragment-heavy + vertex-heavy) = 0,84 della somma; con barriera = 1,00; compute su seconda coda insieme a un render pass: 0,98 (ALU) e 0,78 (banda) della somma; latenza di un evento tra code ~0,07 ms.
-- **Sfruttare**: ordinare i pass perché geometria pesante (shadow, V-buffer) si sovrapponga a fragment pesanti; lavoro compute indipendente su una seconda coda.
+- **Misura negli scenari** (OPT-1 spike 5): su una coda le 4 cascate d'ombra dopo un compute ALU lungo (1,1 ms) si sovrappongono quasi del tutto se nessuna barriera le separa (−0,5 ms, −12,7% di frame); ma le barriere di primo uso dei transitori aspettano tutti gli stadi della loro memoria (`fragment|dispatch`) e annullano la sovrapposizione negli altri scenari. Fusione e seconda coda sono in conflitto: fondere G-buffer e lighting sposta l'attesa della coda async all'inizio del gruppo (+6,7%).
+- **Sfruttare**: ordinare i pass perché geometria pesante (shadow, V-buffer) si sovrapponga a fragment pesanti; lavoro compute indipendente su una seconda coda; barriere minime (OPT-1.4) e alias per classe di stadi (OPT-1.3) per non creare false dipendenze.
 - **Evitare**: dipendenze artificiali che serializzano pass indipendenti (falsi hazard sulla stessa risorsa).
 
 **S-TBDR-7 Programmable blending e raster order groups**
@@ -205,7 +208,8 @@ le righe "Misura" qui sotto riportano quei valori.
 **S-TEX-2 Compressione lossless della GPU**
 - **Fatto**: texture private popolate via blit sono compresse dalla GPU; `replaceRegion()` dalla CPU salta la compressione; da M5 anche le texture scritte dagli shader sono compresse ("universal compression"); per accessi sparsi conviene disattivarla (`allowGPUOptimizedContents = false`) per evitare overfetch di blocco; contatori Compression Ratio e Compressed Texture Write Inefficiency (111431).
 - **Misura** (B-11): il rapporto di compressione **non è osservabile** (nessun contatore headless, F4.4); effetto indiretto su M5 Max: scrittura compute con `allowGPUOptimizedContents` 1,43× (contenuto costante) / 1,24× (liscio) / 0,94× (casuale) rispetto al piano, lettura 1,54× / 1,53× / 0,90×; scritture parziali (50% di ogni blocco 4×4) 1,35–1,69×.
-- **Sfruttare**: scritture a blocchi interi (tile allineate) negli output compute su M5; blit per ogni caricamento.
+- **Misura heap e alias** (B-11 esteso, OPT-1 spike 3): texture in un heap placement e alias tra formati diversi (RGBA16F poi RGBA8 allo stesso offset) **mantengono la compressione** (guadagno 1,31–1,37 come le texture del device 1,32–1,36); `TextureUsagePixelFormatView` la disattiva (0,98–1,01); le texture compresse hanno +1/128 di metadati e allineamento 2048 B (`heapTextureSizeAndAlign`).
+- **Sfruttare**: scritture a blocchi interi (tile allineate) negli output compute su M5; blit per ogni caricamento; aliasing libero tra formati nel heap dei transitori, senza `PixelFormatView`.
 - **Evitare**: scritture parziali di blocco (read-modify-write); compressione su texture ad accesso casuale (tabelle, atlanti di probe consultati sparsamente → da misurare).
 
 **S-TEX-3 Mip e cache delle texture**
@@ -296,16 +300,19 @@ le righe "Misura" qui sotto riportano quei valori.
 **S-MEM-1 Banda per chip**
 - **Fatto**: M5 153,6 GB/s; M5 Pro 307; M5 Max 460/614; M5 Ultra 1,2 TB/s; M4 Max 546 (Apple Newsroom). STREAM misurato su base M5: 122 GB/s (~80% del picco).
 - **Misura** (B-08): lettura GPU sostenuta **572 GB/s** (93% dei 614 dichiarati), scrittura 486, copia 535 (lettura + scrittura).
+- **Misura negli scenari** (OPT-1 spike 1): tempo ≥ byte stimati/569 GB/s in 69 unità su 69; con 2× byte le unità limitate dalla banda impiegano 1,64–1,99× il tempo, le altre 0,93–1,08×; +38–62% di byte → +3,8–17,6% di frame (M5 Max: il frame dei 4 scenari usa il 5–6% del budget a 60 fps). `graph_budget` (OPT-1.5) riporta byte per pass e quota del budget per tier: T2 misurato, T0/T1 dalle specifiche Apple (esterni, dichiarati).
 - **Sfruttare**: budget di byte per frame per tier (O1): circa 10 GB/frame a 60 fps su M5 Max, **condivisi con la CPU**; la metà su Pro, un quarto su base.
 
 **S-MEM-2 System Level Cache (SLC)**
 - **Fatto**: 32 MB di SLC condivisa CPU/GPU su base M5 (Michael's Tinkerings); dimensioni su Pro/Max non pubblicate.
 - **Misura** (B-08): banda on-chip ~8,6 TB/s fino a ~32 MiB, discesa tra 48 e 128 MiB, sopra la DRAM fino a ~384 MiB (cache resistente al thrashing); **stima dal fit h = C/WS: ~71 MiB** (modello, residuo 12%, non una misura diretta). Latenza: 30 ns (≤128 KiB), ~330–350 ns (4–64 MiB), 480–920 ns in DRAM secondo lo stato del fabric GPU (AFR, IOReport).
+- **Misura tra pass** (OPT-1 spike 7): un consumatore subito dopo il produttore (28 MiB) è più veloce del 7% che dopo un pass da 112 MiB; effetto sul frame trascurabile. `graph_budget` (OPT-1.7) segnala i compute con working set oltre la SLC stimata e le coppie produttore→consumatore adiacenti.
 - **Sfruttare**: dimensionare i working set dei pass compute (tile di lavoro, liste, reservoir) per restare in SLC; ordinare i lavori per località (Morton) per massimizzare i riusi.
 
 **S-MEM-3 Storage mode**
 - **Fatto**: `shared` zero-copy, `private` solo GPU con layout ottimizzati e compressione, `memoryless` solo tile (Apple, storage modes).
-- **Sfruttare**: `private` per tutto ciò che la GPU legge spesso; `shared` + write-combined per gli anelli di upload; `memoryless` per gli intermedi di pass.
+- **Misura** (B-29, OPT-1.10): scrittura CPU in `shared` write-combined = cached (memcpy 0,98–1,03× da 1 MiB; 0,57–0,84× a 64 KiB con 4–8 thread; store sparsi da 16 B più lenti in WC); lettura CPU da WC **20× più lenta** (7 contro 107–140 GB/s); lettura GPU di buffer `private` = `shared` (0,999–1,005 da 1 MiB a 1 GiB). Su M5 Max WC non accelera gli upload ma non costa finché la CPU non rilegge.
+- **Sfruttare**: `private` per tutto ciò che la GPU legge spesso (texture compresse, S-TEX-2); `shared` + write-combined per gli anelli di upload scritti da un thread e mai riletti dalla CPU; `memoryless` per gli intermedi di pass.
 
 **S-MEM-4 Memoria unificata**
 - **Misura** (B-09): CPU e GPU condividono un solo budget di ~550–570 GB/s: 2/6/12 thread memcpy portano la lettura GPU da 573 a 440/335/330 GB/s, totale sempre ~551–553 GB/s.
@@ -328,11 +335,13 @@ le righe "Misura" qui sotto riportano quei valori.
 **S-SYNC-1 Costo delle barriere**
 - **Fatto**: barriere Metal 4 per coppie di stage, intra-encoder o di coda (note Metal 4).
 - **Misura** (B-18): barriera d'encoder 0,70 µs; barriere di coda ≤ 1 µs tra dispatch/blit/fragment → dispatch/vertex/fragment (dispatch→dispatch 0,97), **~11 µs tra render pass** (fragment/vertex → vertex/fragment: 10,8–11,8); senza barriera le corse si osservano su tutte le 10 coppie.
-- **Sfruttare**: il render graph usa una tabella di costi misurata per scegliere tipo e posizione delle barriere, e le raggruppa.
+- **Misura negli scenari** (OPT-1): un compute pass dipendente minuscolo costa ~7 µs (svuotamento + riempimento), non ≤1 µs; le barriere sono per stadio, non per risorsa: una barriera di primo uso che aspetta `dispatch` serializza anche un compute indipendente appena precedente.
+- **Sfruttare**: il render graph usa una tabella di costi misurata per scegliere tipo e posizione delle barriere, e le raggruppa; `BarrierPolicy::Minimal` (OPT-1.4) aspetta solo gli stadi degli accessi massimali della stessa memoria.
 
 **S-SYNC-2 Parallelismo tra pass e code**
 - **Misura**: B-19 (vedi S-TBDR-6).
-- **Sfruttare**: seconda coda MTL4 per compute asincrono (GI, streaming, build di BVH) sincronizzata con eventi.
+- **Misura negli scenari** (OPT-1 spike 5): GI (banda) + particelle (ALU) sulla seconda coda: −12,6% di frame rispetto alla stessa coda nell'ordine greedy; lo stesso guadagno si ottiene su una coda riordinando (ombre sotto il compute). La scelta della coda è una decisione del piano (OPT-1.9).
+- **Sfruttare**: seconda coda MTL4 per compute asincrono (GI, streaming, build di BVH) sincronizzata con eventi, se non costringe ad anticipare attese in un gruppo fuso.
 
 **S-SYNC-3 Overhead di dispatch**
 - **Misura** (B-17): dispatch vuoto 0,13 µs, con barriera 0,82 µs.

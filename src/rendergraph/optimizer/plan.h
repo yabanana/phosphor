@@ -58,7 +58,8 @@ struct GraphPlan {
 [[nodiscard]] u64 graphKey(const RenderGraph& graph, const std::vector<std::string>& passes = {});
 
 /// Execution order (pass indices) for `graph` from `plan`: the planned passes
-/// in plan order, then the unplanned ones in declaration order.  Empty and
+/// in plan order, then the unplanned live ones in declaration order (culled
+/// passes are left out).  Empty and
 /// `*error` set if a planned name is missing or duplicated, or the key does
 /// not match.  Dependencies are checked by compile().
 [[nodiscard]] std::vector<u32> planOrder(const RenderGraph& graph, const GraphPlan& plan, std::string* error = nullptr);

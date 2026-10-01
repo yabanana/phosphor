@@ -234,3 +234,27 @@ TEST_CASE("graph optimiser: matches exhaustive search on a small graph") {
     MESSAGE("topological orders: ", orders, ", exhaustive best J ", best, ", optimiser ", planJ, " (", r.plan.method, ")");
     CHECK(planJ <= best + 1e-9);
 }
+
+TEST_CASE("graph plan: unplanned culled passes are left out of the order") {
+    // Post chain with the CoC rematerialised: "DoF CoC" has no output left
+    // and is culled; a plan that does not list it must still apply.
+    RenderGraph g;
+    ScenarioParams p;
+    p.remat = {"CoC"};
+    buildScenarioGraph(g, 2, p);
+    const CompiledGraph c = compileOrder(g);
+    REQUIRE(c.ok);
+    GraphPlan plan;
+    plan.family = "t";
+    plan.order  = names(g, c.order);
+    plan.key    = graphKey(g, plan.order);
+    std::string error;
+    const std::vector<u32> order = planOrder(g, plan, &error);
+    REQUIRE_MESSAGE(!order.empty(), error);
+    bool listsCulled = false;
+    for (const u32 q : order) listsCulled = listsCulled || c.culled[q];
+    CHECK_FALSE(listsCulled);
+    CompileOptions opt;
+    opt.order = order;
+    CHECK(compile(g, opt).ok);
+}

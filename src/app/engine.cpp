@@ -1131,8 +1131,11 @@ void Engine::buildFrameGraph(u32 width, u32 height) {
     if (!compileOptions.order.empty()) {
         // Passes the list does not name (the engine's UI and capture passes)
         // follow in declaration order.
+        const CompiledGraph live = compileOrder(frameGraph_);
         for (u32 p = 0; p < frameGraph_.passes().size(); ++p) {
-            if (std::find(compileOptions.order.begin(), compileOptions.order.end(), p) == compileOptions.order.end()) {
+            const bool culled = p < live.culled.size() && live.culled[p];
+            if (!culled &&
+                std::find(compileOptions.order.begin(), compileOptions.order.end(), p) == compileOptions.order.end()) {
                 compileOptions.order.push_back(p);
             }
         }
