@@ -11,8 +11,12 @@
 //
 //   Scene update      scene_queue_clear, scene_scatter x4 (instances,
 //                     materials, nodes, motion) or full copies (D1)
-//   Scene transforms  scene_motion, then for L = 0 .. SCENE_MAX_LEVELS-2:
-//                     scene_queue_args(L) + scene_hier_level(L) (indirect)
+//   Scene transforms  scene_motion, then for L = 0 .. SCENE_MAX_LEVELS-1 (8
+//                     levels: level L computes the nodes of depth L, so depth
+//                     7 = SCENE_MAX_LEVELS-1 needs level 7; the last level
+//                     appends nothing): scene_queue_args(L) + scene_hier_level(L)
+//                     (indirect).  Queue L+1 is the output of level L; queue 8
+//                     does not exist (bind queue 7 as a dummy for level 7).
 //   Instance cull     scene_cull_flags, scene_cull_scan, scene_cull_write (D4)
 //   Draw build        resetCommandsInBuffer + scene_draw_build (D2)
 //   Forward           3 x (cull state + executeCommandsInBuffer(range))
