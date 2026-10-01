@@ -602,3 +602,69 @@ calcolati a fine misura). Verifica "motore invariato":
 Numeri del SoC, modello e roofline: [`soc-model.md`](soc-model.md),
 [`img/roofline-m5max.md`](img/roofline-m5max.md); scoperte e soglie in
 [`opt-log.md`](opt-log.md) (sezioni OPT-0).
+
+## OPT-1 — Memoria, grafo e banda (chiusura, 2026-10-01)
+
+OPT-1 si misura su **scenari di grafo** (`--graph-scenario N`: deferred,
+forward+, catena di post, compute asincrono; pass sintetici di lavoro e byte
+noti, immagini deterministiche) perché il grafo del motore ha 1–2 pass.
+Piani offline in `shaders/graph-plans.json` scelti **per misura**
+(`tools/graph_opt --top` + `tools/graph_select.py`); uscita con
+`tools/graph_scenarios.sh` (M5 Max, Release, alimentazione, macchina quieta,
+`--no-vsync --no-ui`, 3 giri a ordine ruotato × 600 frame; `off` = compilatore
+di fine F4, `greedy` = politiche OPT-1 senza piano, `plan` = piano adottato):
+
+| Scenario | Modo | Frame GPU p50 ms (CV) | Δ frame | DRAM MiB (Δ) | Heap MiB (Δ) | Render pass | Memoryless | Barriere | Immagine | Validazione |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|
+| 0 deferred | off | 2,700 (0,3%) | — | 609,8 | 167,0 | 8 | 0 | 36 | rif. | 0 |
+| | greedy | 2,699 (0,0%) | −0,0% | 609,8 (0) | 167,0 (0) | 8 | 0 | 36 | 0 px | 0 |
+| | **plan** | **2,473** (0,1%) | **−8,4%** | 609,8 (0) | 167,0 (0) | 8 | 0 | 41 | 0 px | 0 |
+| 1 forward+ | off | 4,005 (0,0%) | — | 502,3 | 106,1 | 7 | 0 | 23 | rif. | 0 |
+| | greedy | 4,006 (0,1%) | +0,0% | 502,3 (0) | 106,1 (0) | 7 | 0 | 23 | 0 px | 0 |
+| | **plan** | **3,865** (0,4%) | **−3,5%** | 502,3 (0) | 106,1 (0) | 7 | 0 | 26 | 0 px | 0 |
+| 2 post | off | 3,048 (0,1%) | — | 568,3 | 93,3 | 4 | 0 | 70 | rif. | 0 |
+| | greedy | 3,049 (0,0%) | +0,0% | 568,3 (0) | 93,3 (0) | 4 | 0 | 70 | 0 px | 0 |
+| | **plan** | 3,033 (0,1%) | −0,5% | **547,2 (−3,7%)** | **85,9 (−8,0%)** | 4 | 0 | 67 | 0 px | 0 |
+| 3 async | off | 3,456 (0,0%) | — | 538,8 | 161,4 | 8 | 0 | 12 | rif. | 0 |
+| | greedy | 3,453 (0,1%) | −0,1% | 538,8 (0) | 161,4 (0) | 8 | 0 | 12 | 0 px | 0 |
+| | **plan** | **3,377** (0,2%) | **−2,3%** | **454,4 (−15,7%)** | **117,5 (−27,2%)** | 7 | 3 | 11 | 0 px | 0 |
+
+(DRAM stimata dal grafo con la cattura del drawable inclusa; heap = memoria
+di picco dei transitori.) Attribuzione (scenario 0/1, stessi ordini dei
+piani): solo l'ordine con le barriere di fine F4 −3,5% / −2,1%; con le
+barriere minime OPT-1.4 −8,4% / −3,6%; le barriere minime con l'ordine
+greedy 0%. Obiettivo ROADMAP (−25% byte, −20% picco) raggiunto solo per il
+picco dello scenario 3; motivi in [`opt-log.md`](opt-log.md) ("OPT-1 —
+Risultati"). Criterio di adozione (≥ −3% frame) soddisfatto sugli scenari 0
+e 1 su M5 Max; **T0 non disponibile** (O12).
+
+**Motore invariato** (default `--graph-opt off`):
+- `ctest` verde; `visual_check` 0 pixel e 0 messaggi sui 7 bench con i flag
+  F2 (nessuno, `--debug-graph-transients`, `--debug-split-encoding`,
+  `--debug-async-compute`, `--gpu-timing-unfused`, i tre debug insieme) e con
+  `--graph-opt greedy`/`plan` (anche insieme ai tre debug);
+  `--switch-every 20 --resize-every 45` con UI sotto validazione in `off` e
+  `greedy`: 0 messaggi, 7 compilazioni; scenari con piano + UI + resize ogni
+  30 frame: 0 messaggi, piano applicato a ogni compilazione.
+- `bench_all --stats` A/B/A (Release, `main` = 98bace4 in un worktree,
+  600 frame × 3 run, `--no-vsync --no-ui`, alimentazione):
+
+| # | Bench | Frame ms main / branch / main | CPU ms main / branch / main | GPU ms main / branch / main |
+|---|---|---|---|---|
+| 1 | Torus Demo | 2,37 / 2,48 / 2,33 | 0,104 / 0,140 / 0,116 | 0,776 / 0,968 / 0,964 |
+| 2 | PBR Material Grid | 2,37 / 2,40 / 2,42 | 0,141 / 0,134 / 0,142 | 0,549 / 0,554 / 0,558 |
+| 3 | Stress Test (100K) | 3,23 / 3,14 / 3,35 | 1,966 / 1,960 / 1,994 | 1,794 / 1,793 / 1,800 |
+| 4 | Scene Viewer (glTF) | 2,36 / 2,42 / 2,31 | 0,115 / 0,112 / 0,112 | 0,743 / 0,830 / 0,757 |
+| 5 | Many Lights (1024) | 54,92 / 50,79 / 50,64 | 0,117 / 0,117 / 0,114 | 100,13 / 93,13 / 92,05 |
+| 6 | Cornell Box (GI) | 2,37 / 2,50 / 2,38 | 0,115 / 0,114 / 0,113 | 0,635 / 0,644 / 0,626 |
+| 7 | Culling Visualization | 2,80 / 2,85 / 2,67 | 0,819 / 0,842 / 0,837 | 1,162 / 1,315 / 1,212 |
+
+  Righe sospette (Torus CPU, Culling GPU) ripetute con 5 coppie di run
+  singoli alternati: Culling GPU mediana 1,218 main / 1,195 branch, Torus
+  0,999 / 1,019, span 1,151/1,159 e 1,014/1,015, CPU entro ±2%: rumore (le
+  medie tra run hanno CV 4–14%; pass < 1 ms senza clock saturi, OPT-0).
+- O7: `GPU allocations 0` nei frame misurati (testbench e scenari);
+  heap CPU a 600/6000 frame identico a `main` (bench 1: main +2701/+3619
+  blocchi, branch +2686/+3615); negli scenari i byte crescono con unità ×
+  frame (buffer dei campioni della misura). `leaks --atExit` 0 con i tre
+  flag di debug + `greedy`, con gli scenari 0 (3 viste), 2 e 3 con piano.

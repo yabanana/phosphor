@@ -89,6 +89,21 @@ extend it; port algorithms from it.
   ~6-15 or ~60 us (compare variants on per-round minima), single-thread
   chases run with the GPU fabric (IOReport AFR) at a low state, the display
   must stay on.  Every benchmark proves its negative control can fail.
+- OPT-1 graph scenarios and plans (macOS): `--graph-scenario N` (0 deferred,
+  1 forward-plus, 2 post-chain, 3 async-compute; `--graph-scenario-views N`,
+  `-size`, `-work`, `-wide`, `--graph-remat`, `--graph-order`) replaces the
+  scene with a portable graph of synthetic passes (`rendergraph/scenario.h`,
+  `shaders/scenario.metal`) whose image is identical for any correct
+  schedule: compare modes with `image_diff` (0 pixels).  `--graph-opt
+  off|greedy|plan` (default off = end-of-F4 compiler) and `--graph-plan`;
+  report schema 4 has a `graph` object.  Plans: `build/release/graph_opt
+  --top K --top-dir D` (candidates; also `--gamma/--beta` for memory/bytes),
+  `tools/graph_select.py --candidates D` (adopts by measurement into
+  `shaders/graph-plans.json`), `tools/graph_scenarios.sh` (off/greedy/plan
+  table, pixels, validation).  The cost model ranks but under-predicts
+  latency-bound passes: never adopt a plan without measuring it.  Measure
+  only on a quiet machine (no agent, solver or other benchmark running:
+  frame times become bimodal).
 - Before calling a Metal API, check its exact signature in the fetched
   metal-cpp headers (`build/linux/_deps/metal_cpp-src/Metal/MTL4*.hpp`); Metal 4
   names differ from Metal 3 (e.g. no `setVertexBytes`, draws take GPU addresses,
@@ -131,6 +146,14 @@ extend it; port algorithms from it.
   frame. Passes fused in one render encoder share its state: leave
   Metal's defaults (cull none, clockwise winding) when you change them, the
   validation layer rejects redundant state.
+- Graph optimiser (OPT-1, `src/rendergraph/optimizer/`, portable): a plan is
+  keyed by family + structural `graphKey` and applied only when the built
+  graph matches (else logged fallback); plans name passes, so renaming a
+  pass or changing its accesses invalidates them (regenerate with
+  `graph_opt` + `graph_select.py`).  `AliasPolicy`/`BarrierPolicy`/
+  `LintMode` in `CompileOptions`; `BarrierPolicy::Minimal` is proven by
+  argument and tests, not by a GPU race (OPT-1.4), so the engine default
+  stays Conservative.
 - Pipelines (F3): create every render/compute pipeline through
   `PipelineCache::request(pipe::PipelineDesc)` and resolve the handle while
   encoding (`render(h)` / `compute(h)`); never call an `MTL4::Compiler`
