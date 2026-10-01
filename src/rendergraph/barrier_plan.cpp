@@ -76,7 +76,7 @@ BarrierRules defaultBarrierRules() {
 
 void buildBarrierPlan(const RenderGraph& graph, CompiledGraph& compiled, const BarrierRules& rules,
                       BarrierPolicy policy) {
-    (void)policy; // OPT-1.4 Minimal: not implemented yet (Conservative)
+    const bool minimal = policy == BarrierPolicy::Minimal;
     compiled.barriers.clear();
     const auto& passes = graph.passes();
     const u32   count  = static_cast<u32>(compiled.order.size());
@@ -95,6 +95,72 @@ void buildBarrierPlan(const RenderGraph& graph, CompiledGraph& compiled, const B
     };
 
     Collector out;
+
+    // --- OPT-1.4: maximal accesses ------------------------------------------
+    // One record per (pass position, resource) touching a memory region.
+    struct Rec {
+        u32    pos;
+        u32    resource;
+        Stages after;  // producer-side stages (legalised)
+        Stages before; // consumer-side stages (legalised for raster)
+    };
+    auto makeRec = [&](u32 pos, u32 resource) {
+        const PassNode& pass = passes[compiled.order[pos]];
+        const Stages raw = stagesOf(pass, resource, true, true);
+        Rec r{pos, resource, raw, raw};
+        legaliseAfter(r.after, rules);
+        if (isRasterAt(pos)) legalise(r.before, rules);
+        return r;
+    };
+    // Does a barrier already collected at `position` (scope `scope`) make every
+    // stage in `after` of earlier work complete before `before` starts?
+    auto covered = [&](u32 position, BarrierScope scope, Stages after, Stages before) {
+        for (auto it = out.merged.lower_bound(Key{position, 0, false});
+             it != out.merged.end() && std::get<0>(it->first) == position; ++it) {
+            const Barrier& e = it->second;
+            if (e.scope != scope) continue;
+            if ((e.afterStages & after) == after && (e.beforeStages & before) == before) return true;
+        }
+        return false;
+    };
+    // Is access a (earlier) known to complete before access b starts?  Only
+    // evidence that the plan really encodes counts:
+    //  - same render group and same resource: tile memory keeps the order
+    //    (the dependency pass relies on it too);
+    //  - same compute encoder: an Encoder-scope barrier at b covering both;
+    //  - different encoders: a Queue-scope barrier at b's encoding position
+    //    covering both (dependency barrier, or the aliasing/first-use barrier
+    //    of an access already planned).
+    auto ordered = [&](const Rec& a, const Rec& b) {
+        if (a.pos >= b.pos) return false;
+        const u32 ga = groupOf(a.pos), gb = groupOf(b.pos);
+        if (ga != kNone && ga == gb) return a.resource == b.resource;
+        const u32 ea = encoderOf(a.pos), eb = encoderOf(b.pos);
+        if (ea != kNone && ea == eb) return covered(b.pos, BarrierScope::Encoder, a.after, b.before);
+        return covered(queuePosition(b.pos), BarrierScope::Queue, a.after, b.before);
+    };
+    // OR of the stages of the records no other record is ordered after.
+    //
+    // Soundness: a first use must start after every earlier access to its
+    // memory has completed.  If a is ordered before b, b starts only when a's
+    // stages have completed (the barrier above), and b's own stages complete
+    // after b started; waiting for b's stages therefore also waits for a
+    // (transitivity, by induction along the chain of barriers, each of which
+    // is part of the same plan on the same queue).  The barrier the first use
+    // receives waits for all earlier work in the stages it names, so naming the
+    // stages of the maximal accesses is enough.  Accesses without evidence stay
+    // maximal, so a missing or partial ordering only widens the barrier.
+    auto maximalStages = [&](const std::vector<Rec>& recs) {
+        Stages s = StageNone;
+        for (const Rec& a : recs) {
+            bool dominated = false;
+            for (const Rec& b : recs) {
+                if (&a != &b && ordered(a, b)) { dominated = true; break; }
+            }
+            if (!dominated) s |= a.after;
+        }
+        return s;
+    };
 
     // --- Dependencies -------------------------------------------------------
     for (const Dependency& d : compiled.dependencies) {
@@ -144,10 +210,21 @@ void buildBarrierPlan(const RenderGraph& graph, CompiledGraph& compiled, const B
     }
 
     // --- Transient first use ------------------------------------------------
+    // Processed in first-use order so that the first-use barriers of earlier
+    // accesses can serve as ordering evidence for later ones (Minimal).
+    std::vector<const Placement*> byFirstUse;
     for (const Placement& p : compiled.aliasing.placements) {
         if (p.resource >= compiled.lifetimes.size()) continue;
         const Lifetime& life = compiled.lifetimes[p.resource];
         if (!life.used() || life.first >= count) continue;
+        byFirstUse.push_back(&p);
+    }
+    std::stable_sort(byFirstUse.begin(), byFirstUse.end(), [&](const Placement* x, const Placement* y) {
+        return compiled.lifetimes[x->resource].first < compiled.lifetimes[y->resource].first;
+    });
+    for (const Placement* pp : byFirstUse) {
+        const Placement& p = *pp;
+        const Lifetime& life = compiled.lifetimes[p.resource];
         const u32 firstPos = life.first;
         const PassNode& firstPass = passes[compiled.order[firstPos]];
 
@@ -159,22 +236,39 @@ void buildBarrierPlan(const RenderGraph& graph, CompiledGraph& compiled, const B
         const bool inCompute = enc != kNone && enc < compiled.encoders.size() &&
                                compiled.encoders[enc].type == PassType::Compute;
 
+        std::vector<Rec> all, earlier; // whole frame / other occupants before the first use
+        bool crossQueue = firstPass.queue != Queue::Graphics;
         for (const Placement& q : compiled.aliasing.placements) {
             if (q.offset >= p.offset + p.size || p.offset >= q.offset + q.size) continue;
+            if (q.resource != p.resource && q.resource < compiled.lifetimes.size() &&
+                compiled.lifetimes[q.resource].overlaps(life)) {
+                crossQueue = true; // alive at the same time (async): ordered by events, stay wide
+            }
             for (u32 pos = 0; pos < count; ++pos) {
                 const PassNode& other = passes[compiled.order[pos]];
                 if (!touches(other, q.resource)) continue;
                 const Stages s = stagesOf(other, q.resource, true, true);
                 afterQueue |= s;
+                if (other.queue != Queue::Graphics) crossQueue = true;
+                if (minimal) {
+                    all.push_back(makeRec(pos, q.resource));
+                    if (q.resource != p.resource && pos < firstPos) earlier.push_back(all.back());
+                }
                 if (inCompute && q.resource != p.resource && pos < firstPos && encoderOf(pos) == enc) {
                     afterEncoder |= s;
                     encoderBarrier = true;
                 }
             }
         }
+        if (minimal && !crossQueue) {
+            // Previous frame: the maximal accesses of the whole frame; this
+            // frame: the maximal ones among the occupants that died before.
+            afterQueue = maximalStages(all) | maximalStages(earlier);
+        } else {
+            legaliseAfter(afterQueue, rules);
+        }
 
         if (isRasterAt(firstPos)) legalise(before, rules);
-        legaliseAfter(afterQueue, rules);
         out.add(queuePosition(firstPos), BarrierScope::Queue, p.aliased, afterQueue, before, p.resource);
         if (encoderBarrier) out.add(firstPos, BarrierScope::Encoder, p.aliased, afterEncoder, before, p.resource);
     }
@@ -192,10 +286,14 @@ void buildBarrierPlan(const RenderGraph& graph, CompiledGraph& compiled, const B
 
         bool   written = false;
         Stages after   = StageNone;
+        std::vector<Rec> recs;
+        bool crossQueue = false;
         for (u32 pos = life.first; pos <= life.last && pos < count; ++pos) {
             const PassNode& other = passes[compiled.order[pos]];
             if (!touches(other, r)) continue;
             after |= stagesOf(other, r, true, true);
+            if (other.queue != Queue::Graphics) crossQueue = true;
+            if (minimal) recs.push_back(makeRec(pos, r));
             written |= std::any_of(other.writes.begin(), other.writes.end(),
                                    [&](const Access& a) { return a.resource == r; });
         }
@@ -204,7 +302,8 @@ void buildBarrierPlan(const RenderGraph& graph, CompiledGraph& compiled, const B
         const u32 firstPos = life.first;
         Stages before = stagesOf(passes[compiled.order[firstPos]], r, true, true);
         if (isRasterAt(firstPos)) legalise(before, rules);
-        legaliseAfter(after, rules);
+        if (minimal && !crossQueue) after = maximalStages(recs);
+        else legaliseAfter(after, rules);
         out.add(queuePosition(firstPos), BarrierScope::Queue, false, after, before, r);
     }
 

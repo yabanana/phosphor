@@ -29,6 +29,9 @@ namespace phosphor::rg {
 // same memory in consecutive frames (persistent buffers): their first access
 // in the frame gets a Queue-scope barrier whose afterStages are all the
 // stages that access them in the frame (the previous frame did the same).
+// BarrierPolicy::Minimal (OPT-1.4) keeps only the stages of the accesses that
+// no other access of that memory is ordered after by the plan's own barriers
+// (or tile order); the other accesses are waited for transitively.
 //
 // Barriers at one position with the same scope and aliasing flag are merged
 // (stages OR-ed, resources concatenated): one barrier per kind (S-SYNC-1).
@@ -103,8 +106,13 @@ struct BarrierRules {
 /// Fills compiled.barriers (sorted by position, only positions with at least
 /// one barrier).  Needs renderGroups/encoders (buildRenderGroups) and, for
 /// aliasing barriers, compiled.aliasing.  Adds errors on forbidden barriers.
-/// OPT-1.4: `policy` Minimal narrows the stages of first-use barriers (A4,
-/// not yet: behaves as Conservative).
+/// OPT-1.4: `policy` Minimal narrows the afterStages of first-use barriers
+/// (placed transients, persistent imports) from "every access to that memory
+/// in the frame" to the accesses that are maximal in the happens-before order
+/// of the plan (see maximalStages in the .cpp for the soundness argument).
+/// Memory also touched from another queue, or by a resource alive at the same
+/// time as the one being planned, keeps the Conservative stages.  Dependency
+/// barriers are identical under both policies.
 void buildBarrierPlan(const RenderGraph& graph, CompiledGraph& compiled, const BarrierRules& rules,
                       BarrierPolicy policy = BarrierPolicy::Conservative);
 
