@@ -43,6 +43,9 @@ enum class SynthKind : u8 {
 struct SynthInput {
     TextureRef texture;
     bool depth = false;      // depth texture (depth2d)
+    /// Read only as the source of rematerialised inputs (not part of the
+    /// value: the stored signal would not have carried it).
+    bool rematSource = false;
     /// OPT-1.2: the input is not read but recomputed from `rematDepth` (an
     /// index into SynthPass::inputs, a depth input of the same size) with
     /// the producer's value function (`rematSeed`, `rematSlot`).

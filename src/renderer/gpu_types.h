@@ -136,6 +136,7 @@ PHOSPHOR_GPU_CONSTANT u32 SYNTH_STORAGE_OUTPUTS = 2; // texture(11..12)
 PHOSPHOR_GPU_CONSTANT u32 SYNTH_INPUT_COLOR = 0;
 PHOSPHOR_GPU_CONSTANT u32 SYNTH_INPUT_DEPTH = 1;
 PHOSPHOR_GPU_CONSTANT u32 SYNTH_INPUT_REMAT = 2;
+PHOSPHOR_GPU_CONSTANT u32 SYNTH_INPUT_SOURCE = 3; // depth read only as a remat source (not hashed)
 
 struct GPUSynthInput {
     u32 width;      // texture size (remat: the depth's size)

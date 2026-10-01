@@ -228,7 +228,7 @@ void ScenarioPasses::onCompiled(const rg::RenderGraph& graph, const rg::Compiled
             const rg::TextureDesc& t = resources[in.texture.resource].texture;
             g.width  = t.width;
             g.height = t.height;
-            g.kind   = in.depth ? SYNTH_INPUT_DEPTH : SYNTH_INPUT_COLOR;
+            g.kind   = in.rematSource ? SYNTH_INPUT_SOURCE : in.depth ? SYNTH_INPUT_DEPTH : SYNTH_INPUT_COLOR;
             g.bind   = in.depth ? depthBind++ : colorBind++;
         }
         if (colorBind > SYNTH_COLOR_INPUTS || depthBind > SYNTH_DEPTH_INPUTS) {

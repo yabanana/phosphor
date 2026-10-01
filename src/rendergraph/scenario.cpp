@@ -79,6 +79,7 @@ public:
         if (depthInput == ~0u) {
             depthInput = static_cast<u32>(s_.inputs.size());
             sample(sig.depth);
+            s_.inputs.back().rematSource = true;
         }
         SynthInput in;
         in.remat      = true;

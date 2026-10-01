@@ -96,6 +96,9 @@ static uint readInputs(uint acc, uint2 p, constant GPUSynthArgs& a,
                        array<depth2d<float, access::read>, phosphor::SYNTH_DEPTH_INPUTS> depthIn) {
     for (uint i = 0; i < a.inputCount && i < phosphor::SYNTH_MAX_INPUTS; ++i) {
         const GPUSynthInput in = a.inputs[i];
+        // A depth read only to recompute a signal is not part of the value
+        // (the stored signal would not have carried it).
+        if (in.kind == phosphor::SYNTH_INPUT_SOURCE) continue;
         const uint2 size = uint2(in.width, in.height);
         const uint2 out  = uint2(a.outWidth, a.outHeight);
         const uint2 base = p * size / out;

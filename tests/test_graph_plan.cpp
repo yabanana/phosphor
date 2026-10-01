@@ -258,3 +258,32 @@ TEST_CASE("graph plan: unplanned culled passes are left out of the order") {
     opt.order = order;
     CHECK(compile(g, opt).ok);
 }
+
+TEST_CASE("scenarios: a depth read only to rematerialise is not part of the value") {
+    // Post chain, both signals rematerialised: consumers that did not read
+    // the depth get it as a remat source (not hashed, shaders/scenario.metal),
+    // consumers that read it anyway keep their own hashed input.
+    RenderGraph g;
+    Scenario s;
+    ScenarioParams p;
+    p.remat = {"Velocity", "CoC"};
+    const TextureRef d = g.importTexture("Drawable", {Format::BGRA8Srgb, 1920, 1080}, ImportOutput | ImportPerFrame);
+    std::string error;
+    REQUIRE_MESSAGE(buildScenario(2, p, g, d, s, {}, &error), error);
+    u32 sources = 0, remats = 0;
+    for (u32 i = 0; i < s.synth.size(); ++i) {
+        for (const SynthInput& in : s.synth[i].inputs) {
+            remats += in.remat ? 1 : 0;
+            if (!in.rematSource) continue;
+            ++sources;
+            CHECK(in.depth);
+            bool usedByRemat = false;
+            for (const SynthInput& r : s.synth[i].inputs) {
+                usedByRemat = usedByRemat || (r.remat && s.synth[i].inputs[r.rematDepth].texture == in.texture);
+            }
+            CHECK(usedByRemat);
+        }
+    }
+    CHECK(remats >= 4);  // DoF downsample, DoF composite, MB tile max, Motion blur
+    CHECK(sources >= 4); // none of them reads the depth otherwise
+}
