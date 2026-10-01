@@ -1,4 +1,176 @@
 {
-  "plans": [],
+  "plans": [
+    {
+      "alias": "coloring",
+      "async": [],
+      "barriers": "minimal",
+      "baseline": {
+        "dram_bytes": 593347328.0,
+        "heap_bytes": 172597248.0,
+        "max_live_bytes": 172597248.0,
+        "time_ms": 2.2751639052634385
+      },
+      "family": "scenario:deferred:2560x1440:s2048:w1:v1:hdr16",
+      "key": "7e997bf994e39230",
+      "method": "dp+anneal (measured: faster)",
+      "order": [
+        "G-buffer",
+        "Shadow cascade 0",
+        "SSAO",
+        "Shadow cascade 3",
+        "Shadow cascade 1",
+        "SSAO blur",
+        "Shadow cascade 2",
+        "Lighting",
+        "Bloom down 1",
+        "TAA",
+        "Bloom down 2",
+        "Bloom down 3",
+        "Bloom down 4",
+        "Bloom down 5",
+        "Bloom up 4",
+        "Bloom up 3",
+        "Bloom up 2",
+        "Bloom up 1",
+        "Tonemap",
+        "UI",
+        "Present"
+      ],
+      "predicted": {
+        "dram_bytes": 593347328.0,
+        "heap_bytes": 172597248.0,
+        "max_live_bytes": 172597248.0,
+        "time_ms": 2.120093115390492
+      },
+      "remat": []
+    },
+    {
+      "alias": "coloring",
+      "async": [],
+      "barriers": "minimal",
+      "baseline": {
+        "dram_bytes": 480592896.0,
+        "heap_bytes": 110288896.0,
+        "max_live_bytes": 110288896.0,
+        "time_ms": 2.4452478468732735
+      },
+      "family": "scenario:forward-plus:2560x1440:s2048:w1:v1:hdr16",
+      "key": "fa069078f3c01faf",
+      "method": "dp+anneal (measured: faster)",
+      "order": [
+        "Shadow cascade 2",
+        "Depth prepass",
+        "Shadow cascade 0",
+        "Light grid",
+        "Shadow cascade 1",
+        "Forward opaque",
+        "Sky",
+        "Transparents",
+        "Bloom down 1",
+        "TAA",
+        "Bloom down 2",
+        "Bloom down 3",
+        "Bloom up 2",
+        "Bloom up 1",
+        "Tonemap",
+        "UI",
+        "Present"
+      ],
+      "predicted": {
+        "dram_bytes": 480592896.0,
+        "heap_bytes": 110288896.0,
+        "max_live_bytes": 110288896.0,
+        "time_ms": 2.338776673852124
+      },
+      "remat": []
+    },
+    {
+      "alias": "coloring",
+      "async": [
+        "GI probe update"
+      ],
+      "barriers": "minimal",
+      "baseline": {
+        "dram_bytes": 518885376.0,
+        "heap_bytes": 167372800.0,
+        "max_live_bytes": 167372800.0,
+        "time_ms": 2.895538782380094
+      },
+      "family": "scenario:async-compute:2560x1440:s2048:w1:v1:hdr16",
+      "key": "2d0cd23820f3718d",
+      "method": "dp+anneal (measured: faster)",
+      "order": [
+        "Shadow cascade 2",
+        "Particle simulation",
+        "Shadow cascade 1",
+        "GI probe update",
+        "Shadow cascade 3",
+        "Shadow cascade 0",
+        "G-buffer",
+        "Lighting",
+        "Tonemap",
+        "UI",
+        "Present"
+      ],
+      "predicted": {
+        "dram_bytes": 430411776.0,
+        "heap_bytes": 122785792.0,
+        "max_live_bytes": 122785792.0,
+        "time_ms": 2.415176139338857
+      },
+      "remat": []
+    },
+    {
+      "alias": "coloring",
+      "async": [],
+      "barriers": "minimal",
+      "baseline": {
+        "dram_bytes": 549779328.0,
+        "heap_bytes": 96604160.0,
+        "max_live_bytes": 96604160.0,
+        "time_ms": 2.0309165381840817
+      },
+      "family": "scenario:post-chain:2560x1440:s2048:w1:v1:hdr16",
+      "key": "a1e571ded026fb6c",
+      "method": "greedy (measured: fewer bytes/heap, time neutral)",
+      "order": [
+        "Scene",
+        "DoF downsample",
+        "DoF gather",
+        "DoF composite",
+        "MB tile max",
+        "MB neighbor max",
+        "Motion blur",
+        "Bloom down 1",
+        "Bloom down 2",
+        "Bloom down 3",
+        "Bloom down 4",
+        "Bloom down 5",
+        "Bloom down 6",
+        "Bloom up 5",
+        "Bloom up 4",
+        "Bloom up 3",
+        "Bloom up 2",
+        "Bloom up 1",
+        "Lens flare",
+        "Exposure",
+        "Tonemap",
+        "Film grain",
+        "FXAA",
+        "UI",
+        "Present"
+      ],
+      "predicted": {
+        "dram_bytes": 527660928.0,
+        "heap_bytes": 89171968.0,
+        "max_live_bytes": 89171968.0,
+        "time_ms": 2.0249242081638457
+      },
+      "remat": [
+        "Velocity",
+        "CoC"
+      ]
+    }
+  ],
   "schema": 1
 }

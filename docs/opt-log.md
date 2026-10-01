@@ -994,20 +994,31 @@ un altro benchmark sul GPU aveva CV 13–47%: scartato).
 | 0, Velocity | 64 | 537,7 | 2,860 = +7,4% |
 | 0, Velocity | 256 | 537,7 | 3,534 = +32,7% |
 | 2, nessuno | — | 524,3 | 2,988 (0,02%) |
-| 2, Velocity (letto 16×16 dal tile max) | 16 | 510,2 (−2,7%) | 3,381 = **+13,1%** |
-| 2, CoC (letto 1×1 e 2×2) | 16 | 517,3 (−1,3%) | 3,060 = +2,4% |
-| 2, entrambi | 16 | 503,2 (−4,0%) | 3,438 = +15,0% |
+| 2, Velocity (letto 16×16 dal tile max) | 16 | 510,2 (−2,7%) | ~~3,381 = +13,1%~~ → **+0,05%** (rimisura) |
+| 2, CoC (letto 1×1 e 2×2) | 16 | 517,3 (−1,3%) | ~~3,060 = +2,4%~~ → **−0,49%** |
+| 2, entrambi | 16 | 503,2 (−4,0%) | ~~3,438 = +15,0%~~ → **−0,57%** |
 
-Su M5 Max **ricalcolare costa più che leggere** anche con 16 passi: i
-consumatori (TAA 1,6× il limite di banda, tile max limitato dalla latenza)
-non sono limitati dalla banda, quindi i byte risparmiati non liberano tempo
-e l'ALU aggiunta sì; il costo scala con il footprint letto (16×16 → +13%).
-Il pareggio atteso dal modello: ricalcolo per pixel < byte risparmiati /
-banda solo se il consumatore è limitato dalla banda (ridge FP32/DRAM 26,6
-FLOP/byte, soc-model). Decisione per OPT-1.2: la rematerializzazione è una
-scelta del modello di costo per segnale e per scenario (piano), non una
-regola; sui 4 scenari il piano la sceglierà solo dove il consumatore è
-limitato dalla banda e legge 1×1.
+**Correzione (2026-10-01)**: le righe barrate dello scenario 2 erano falsate
+da un bug del banco di prova trovato dalla selezione per misura
+(`tools/graph_select.py`, immagini diverse di 5,76 M pixel): quando il
+consumatore non leggeva già la profondità, la rematerializzazione gliela
+aggiungeva come input ordinario, che entrava nell'hash (immagine sbagliata)
+e, nel tile max, costava 256 letture in più per thread. Ora è un input
+"sorgente" non sommato al valore (commit `50d2f81`); immagini identiche (0
+pixel) per ogni scelta in tutti gli scenari. Rimisura (3 giri ruotati, CV ≤
+0,06%): scenario 2 Velocity 3,0512 contro 3,0498 ms (+0,05%), CoC 3,0350
+(−0,49%), entrambi 3,0323 (−0,57%); scenario 0 Velocity 2,7436 contro
+2,7015 (+1,56%, confermato). Tra sessioni la stessa configurazione si sposta
+dell'1–2% (2,66 → 2,70 ms): si confrontano solo varianti misurate a giri
+alternati nella stessa sessione.
+
+Su M5 Max **ricalcolare non conviene quando il consumatore è limitato da ALU
+o latenza** (TAA dello scenario 0: +1,5% con 16 passi, +7% con 64, +33% con
+256); dove il consumatore è vicino alla banda o legge il segnale una volta
+(scenario 2) il saldo è nullo o lievemente positivo e i byte scendono del
+2,7–4%. Il pareggio dipende dal consumatore: la rematerializzazione è una
+scelta del piano per segnale e per scenario, decisa dalla misura
+(OPT-1.2), non una regola.
 
 ### 5. Riordino, sovrapposizione e seconda coda (spike 5)
 
