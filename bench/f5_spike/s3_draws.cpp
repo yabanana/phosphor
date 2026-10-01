@@ -560,11 +560,6 @@ void makeReferences(Rig& r) {
 
 // ---- timing ------------------------------------------------------------------------------
 
-Stats scaledSub(Stats s, double sub) {
-    s.median -= sub; s.min -= sub; s.max -= sub; s.p10 -= sub; s.p90 -= sub; s.mean -= sub;
-    return s;
-}
-
 double emptyPassMs(Rig& r) {
     const Stats s = r.ctx.measure([&] {
         CommandTimer t(r.ctx);
