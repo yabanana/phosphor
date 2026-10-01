@@ -421,7 +421,7 @@ TEST_CASE("launch options: F5 scene switches") {
     LaunchOptions o;
     std::string err;
     REQUIRE(parse({}, o, err));
-    CHECK(o.gpuDriven == GpuDrivenMode::Off);
+    CHECK(o.gpuDriven == GpuDrivenMode::On); // F5 default
     CHECK(o.sceneInstances == 0);
     CHECK(o.dynamicCpuPercent < 0.0f); // bench default
     CHECK(o.debugGpuSceneCorrupt == SceneCorruption::None);

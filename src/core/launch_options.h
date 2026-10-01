@@ -124,8 +124,9 @@ namespace phosphor {
 //   --graph-plan FILE  plans file (default: shaders/graph-plans.json next to
 //                      the shader library)
 //   --gpu-driven off|on  F5.3 how the scene's draws are submitted: off = the
-//                      CPU encodes one draw per (mesh, cull class) batch; on =
-//                      GPU culling writes the indirect command buffer (default off)
+//                      CPU encodes one draw per (cull class, mesh) bucket; on =
+//                      GPU culling writes the indirect command buffer (default
+//                      on; both draw the same image)
 //   --instances N      bench 8: number of instances (default 1,000,000)
 //   --scene-meshes K   bench 8: number of distinct meshes (1..1024, default 8)
 //   --dynamic-cpu PCT  bench 8: percentage of the instances whose transform
@@ -221,7 +222,7 @@ struct LaunchOptions {
 
     /// True when the app runs a fixed number of frames and then exits.
     // F5: GPU scene and GPU-driven submission.
-    GpuDrivenMode gpuDriven      = GpuDrivenMode::Off; // --gpu-driven off|on
+    GpuDrivenMode gpuDriven      = GpuDrivenMode::On; // --gpu-driven off|on
     u32         sceneInstances   = 0;     // --instances N (bench 8; 0 = bench default)
     u32         sceneMeshes      = 0;     // --scene-meshes K (bench 8; 0 = bench default)
     float       dynamicCpuPercent = -1.0f; // --dynamic-cpu PCT (bench 8; < 0 = bench default)
