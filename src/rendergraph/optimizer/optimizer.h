@@ -65,6 +65,7 @@ struct PlanCandidate {
     BarrierPolicy barrierPolicy = BarrierPolicy::Conservative;
     GraphCost    cost;
     std::vector<std::string> order;
+    GraphPlan    plan;     // this candidate as a loadable plan (key, metrics)
 };
 
 struct OptimizeResult {
@@ -77,6 +78,14 @@ struct OptimizeResult {
 
 [[nodiscard]] OptimizeResult optimize(const std::string& family, const GraphBuilder& builder,
                                       const OptimizeOptions& options);
+
+/// The `k` best distinct candidates by J (distinct: order, build choices or
+/// policies differ), best first; the baseline candidate (baseline choices,
+/// greedy order, end-of-F4 policies) is always included, as the last entry
+/// if it is not among them.  Plans to measure on the device: the model ranks,
+/// the measurement adopts (OPT-1: the model under-predicts latency-bound
+/// passes).
+[[nodiscard]] std::vector<GraphPlan> topPlans(const OptimizeResult& result, size_t k);
 
 /// Compile `graph` with `order` (empty: greedy) and the given policies using
 /// the estimated sizer, then evaluate it.  `ok` false if compilation fails.

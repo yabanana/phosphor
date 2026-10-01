@@ -356,6 +356,35 @@ SizeAlign EstimatedSizer::textureSize(u32, const TextureDesc& desc) const {
 
 SizeAlign EstimatedSizer::bufferSize(u32, const BufferDesc& desc) const { return {alignUp(desc.size, 256), 256}; }
 
+std::vector<GraphPlan> topPlans(const OptimizeResult& result, size_t k) {
+    std::vector<const PlanCandidate*> sorted;
+    for (const PlanCandidate& c : result.candidates) sorted.push_back(&c);
+    std::stable_sort(sorted.begin(), sorted.end(),
+                     [](const PlanCandidate* a, const PlanCandidate* b) { return a->cost.J < b->cost.J; });
+    auto same = [](const GraphPlan& a, const GraphPlan& b) {
+        return a.order == b.order && a.remat == b.remat && a.async == b.async && a.aliasPolicy == b.aliasPolicy &&
+               a.barrierPolicy == b.barrierPolicy;
+    };
+    std::vector<GraphPlan> out;
+    const PlanCandidate* baseline = nullptr;
+    for (const PlanCandidate* c : sorted) {
+        const bool isBaseline = c->method == "greedy" && c->aliasPolicy == AliasPolicy::Greedy &&
+                                c->barrierPolicy == BarrierPolicy::Conservative &&
+                                c->cost.J == result.baseline.J;
+        if (isBaseline && !baseline) baseline = c;
+        if (out.size() >= k) continue;
+        bool dup = false;
+        for (const GraphPlan& p : out) dup = dup || same(p, c->plan);
+        if (!dup) out.push_back(c->plan);
+    }
+    if (baseline) {
+        bool present = false;
+        for (const GraphPlan& p : out) present = present || same(p, baseline->plan);
+        if (!present) out.push_back(baseline->plan);
+    }
+    return out;
+}
+
 Evaluation evaluateOrder(const RenderGraph& graph, const std::vector<u32>& order, AliasPolicy alias,
                          BarrierPolicy barriers, const GraphCostParams& params) {
     static const EstimatedSizer sizer;
@@ -392,18 +421,19 @@ OptimizeResult optimize(const std::string& family, const GraphBuilder& builder, 
         cand.barrierPolicy = pol.barriers;
         cand.cost          = e.cost;
         cand.order         = namesOf(g, e.compiled.order);
+        GraphPlan& plan    = cand.plan;
+        plan.family        = family;
+        plan.order         = cand.order;
+        plan.remat         = ch.remat;
+        plan.async         = ch.async;
+        plan.aliasPolicy   = pol.alias;
+        plan.barrierPolicy = pol.barriers;
+        plan.method        = method;
+        plan.key           = graphKey(g, plan.order);
+        plan.predicted     = {e.cost.dramBytes, e.cost.heapBytes, e.cost.maxLiveBytes, e.cost.frameMs};
         if (e.cost.J < bestJ - 1e-12) {
-            bestJ = e.cost.J;
-            GraphPlan& plan    = result.plan;
-            plan.family        = family;
-            plan.order         = cand.order;
-            plan.remat         = ch.remat;
-            plan.async         = ch.async;
-            plan.aliasPolicy   = pol.alias;
-            plan.barrierPolicy = pol.barriers;
-            plan.method        = method;
-            plan.key           = graphKey(g, plan.order);
-            plan.predicted     = {e.cost.dramBytes, e.cost.heapBytes, e.cost.maxLiveBytes, e.cost.frameMs};
+            bestJ       = e.cost.J;
+            result.plan = plan;
         }
         result.candidates.push_back(std::move(cand));
     };
@@ -454,6 +484,7 @@ OptimizeResult optimize(const std::string& family, const GraphBuilder& builder, 
     }
     result.plan.baseline = {result.baseline.dramBytes, result.baseline.heapBytes, result.baseline.maxLiveBytes,
                             result.baseline.frameMs};
+    for (PlanCandidate& c : result.candidates) c.plan.baseline = result.plan.baseline;
     result.ok = true;
     return result;
 }

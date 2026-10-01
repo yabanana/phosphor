@@ -4,7 +4,7 @@
 //   graph_opt [--scenario N|all] [--views V[,V..]] [--size WxH] [--work F] [--wide]
 //             [--model bench/results/m5max-macos27.2-model.json] [--cap N]
 //             [--iterations N] [--seed N] [--out plans.json] [--merge]
-//             [--report table.md]
+//             [--report table.md] [--top K --top-dir DIR]
 //
 // For every (scenario, views) pair it builds the scenario graph (the engine's
 // Drawable import included) under each combination of build choices (remat,
@@ -18,7 +18,10 @@
 // --model takes the cost-model JSON of `soc_model model` (not the raw
 // soc_bench results); without it the built-in M5 Max parameters are used.
 // Defaults: all scenarios, 1 view, 2560x1440, work 1.  --cap sets the DP
-// state cap, --iterations the annealing iterations.  Exit code: 0 ok,
+// state cap, --iterations the annealing iterations.  --top K writes
+// DIR/plans_<i>.json (i < K+1): the i-th best distinct candidate of every
+// family, the baseline always among them (rg::topPlans) -- the plans that
+// tools/graph_select.py measures on the device to adopt the best.  Exit code: 0 ok,
 // 1 error (optimiser failure, I/O), 2 usage.
 
 #include "diagnostics/soc_model.h"
@@ -44,7 +47,7 @@ int usage() {
     std::fputs(
         "usage: graph_opt [--scenario N|all] [--views V[,V..]] [--size WxH] [--work F] [--wide]\n"
         "                 [--model model.json] [--cap N] [--iterations N] [--seed N]\n"
-        "                 [--out plans.json] [--merge] [--report table.md]\n",
+        "                 [--out plans.json] [--merge] [--report table.md] [--top K --top-dir DIR]\n",
         stderr);
     return 2;
 }
@@ -151,7 +154,8 @@ void appendFamily(std::string& md, const Family& f) {
 } // namespace
 
 int main(int argc, char** argv) {
-    std::string scenarioArg = "all", viewsArg = "1", sizeArg, modelPath, outPath, reportPath;
+    std::string scenarioArg = "all", viewsArg = "1", sizeArg, modelPath, outPath, reportPath, topDir;
+    long        top = 0;
     float       work = 1.0f;
     bool        wide = false, merge = false;
     long        cap = -1, iterations = -1, seed = -1;
@@ -175,6 +179,8 @@ int main(int argc, char** argv) {
         else if (a == "--seed") { if (!next(v)) return usage(); seed = std::atol(v.c_str()); }
         else if (a == "--out") { if (!next(outPath)) return usage(); }
         else if (a == "--report") { if (!next(reportPath)) return usage(); }
+        else if (a == "--top") { if (!next(v)) return usage(); top = std::atol(v.c_str()); }
+        else if (a == "--top-dir") { if (!next(topDir)) return usage(); }
         else return usage();
     }
 
@@ -296,6 +302,31 @@ int main(int argc, char** argv) {
             return 1;
         }
         std::fprintf(stderr, "graph_opt: wrote %zu plan(s) to %s\n", result.size(), outPath.c_str());
+    }
+    if (top > 0) {
+        if (topDir.empty()) return usage();
+        std::vector<std::vector<rg::GraphPlan>> files;
+        for (const Family& f : families) {
+            if (!f.result.ok) continue;
+            const std::vector<rg::GraphPlan> best = rg::topPlans(f.result, static_cast<size_t>(top));
+            for (size_t i = 0; i < best.size(); ++i) {
+                if (files.size() <= i) files.resize(i + 1);
+                files[i].push_back(best[i]);
+            }
+        }
+        for (size_t i = 0; i < files.size(); ++i) {
+            const std::string path = topDir + "/plans_" + std::to_string(i) + ".json";
+            if (!writeFile(path, rg::toJson(files[i]))) {
+                std::fprintf(stderr, "graph_opt: cannot write %s\n", path.c_str());
+                return 1;
+            }
+            for (const rg::GraphPlan& p : files[i]) {
+                std::fprintf(stderr, "graph_opt: %s [%zu] %s remat=%s async=%s alias=%s barriers=%s predicted %.4f ms\n",
+                             path.c_str(), i, p.family.c_str(), join(p.remat).c_str(), join(p.async).c_str(),
+                             rg::aliasPolicyName(p.aliasPolicy), rg::barrierPolicyName(p.barrierPolicy),
+                             p.predicted.timeMs);
+            }
+        }
     }
     return failed ? 1 : 0;
 }
