@@ -420,8 +420,7 @@ void SceneRenderer::encodeTransforms(MTL4::ComputeCommandEncoder* enc) const {
     t->setAddress(buffers_.instances()->gpuAddress(), SB_MOTION_INSTANCES);
     enc->setArgumentTable(t);
     enc->dispatchThreads(threads1D(motionCount_), MTL::Size::Make(SCENE_MOTION_GROUP, 1, 1));
-    dispatchBarrier(enc);
-    n += 4;
+    n += 2;
     // Hierarchy (F5.2) as a chain of GPU queues (F5.4): step s consumes queue
     // s with an indirect dispatch whose arguments the previous step's args
     // kernel wrote; every step is encoded whatever the scene (constant CPU work).
@@ -432,6 +431,19 @@ void SceneRenderer::encodeTransforms(MTL4::ComputeCommandEncoder* enc) const {
     t->setAddress(buffers_.childOffsets()->gpuAddress(), SB_HIER_CHILD_OFFSETS);
     t->setAddress(buffers_.childSlots()->gpuAddress(), SB_HIER_CHILD_SLOTS);
     t->setAddress(fs.counters->gpuAddress(), SB_HIER_COUNTERS);
+    // The motion roots with children are expanded from their persistent
+    // queue (its header holds the dispatch groups): their children enter
+    // queue 1 beside the children of the CPU-dirty parents (queue 0).  Only
+    // child slots are appended, so it may overlap the motion dispatch.
+    enc->setComputePipelineState(kernel(kHier_));
+    t->setAddress(hierParams_, 0); // level 0: expand only
+    t->setAddress(buffers_.motionParents()->gpuAddress(), SB_HIER_QUEUE_IN);
+    t->setAddress(queues, SB_HIER_QUEUE_OUT);
+    enc->setArgumentTable(t);
+    enc->dispatchThreadgroups(buffers_.motionParents()->gpuAddress() + GPU_QUEUE_ARGS_OFFSET,
+                              MTL::Size::Make(SCENE_HIER_GROUP, 1, 1));
+    dispatchBarrier(enc);
+    n += 4;
     for (u32 s = 0; s < SCENE_MAX_LEVELS; ++s) {
         const MTL::GPUAddress in  = s == 0 ? queue0_ : queues + (s - 1) * stride;
         const MTL::GPUAddress out = queues + std::min(s, kQueues - 1) * stride; // the last step appends nothing

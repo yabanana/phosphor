@@ -44,7 +44,7 @@ MTL::Buffer* GpuSceneBuffers::sharedBuffer(u64 size, const char* label) {
 void GpuSceneBuffers::releaseAll() {
     GpuMemory& m = context_.memory();
     for (MTL::Buffer** b : {&instances_, &materials_, &nodes_, &motions_, &identity_, &buckets_, &commandBuckets_,
-                            &childOffsets_, &childSlots_, &motionSlots_, &queues_}) {
+                            &childOffsets_, &childSlots_, &motionSlots_, &queues_, &motionParents_}) {
         m.release(*b, MemoryCategory::Scene);
         *b = nullptr;
     }
@@ -56,7 +56,7 @@ void GpuSceneBuffers::releaseAll() {
         m.release(f.icb, MemoryCategory::Scene);
         f.icb = nullptr;
     }
-    slotCap_ = materialCap_ = bucketCap_ = commandCap_ = childCap_ = motionCap_ = queueStride_ = 0;
+    slotCap_ = materialCap_ = bucketCap_ = commandCap_ = childCap_ = motionCap_ = queueStride_ = motionParentCap_ = 0;
 }
 
 void GpuSceneBuffers::clear() {
@@ -143,6 +143,11 @@ bool GpuSceneBuffers::reserve(const SceneStore& store) {
         motionCap_ = motion;
         swap(motionSlots_, privateBuffer(u64(motion) * sizeof(u32), "Scene motion slots"));
     }
+    const u32 parents = grow(motionParentCap_, std::max<u32>(static_cast<u32>(store.motionParentSlots().size()), 1u));
+    if (parents != motionParentCap_) {
+        motionParentCap_ = parents;
+        swap(motionParents_, privateBuffer(gpuQueueBytes(parents), "Scene motion parent queue"));
+    }
     if (changed) {
         ++version_;
         forceFull_ = true;
@@ -173,6 +178,10 @@ void GpuSceneBuffers::loadAll(const SceneStore& store) {
     upload(childSlots_, store.childSlots().data(), bytesOf(store.childSlots()));
     upload(motionSlots_, store.motionSlots().data(), bytesOf(store.motionSlots()));
     {
+        const std::vector<u8>& q = motionParentQueue(store);
+        upload(motionParents_, q.data(), q.size());
+    }
+    {
         std::vector<u32> identity(slotCap_);
         for (u32 i = 0; i < slotCap_; ++i) identity[i] = i;
         upload(identity_, identity.data(), u64(slotCap_) * sizeof(u32));
@@ -187,6 +196,20 @@ void GpuSceneBuffers::loadAll(const SceneStore& store) {
     }
     context_.flushUploads();
     forceFull_ = false;
+}
+
+const std::vector<u8>& GpuSceneBuffers::motionParentQueue(const SceneStore& store) {
+    const std::span<const u32> slots = store.motionParentSlots();
+    queueScratch_.resize(gpuQueueBytes(static_cast<u32>(slots.size())));
+    GPUQueueHeader h{};
+    h.count     = static_cast<u32>(slots.size());
+    h.capacity  = h.count;
+    h.groups[0] = gpuQueueGroups(h.count, h.capacity, SCENE_HIER_GROUP);
+    h.groups[1] = 1;
+    h.groups[2] = 1;
+    std::memcpy(queueScratch_.data(), &h, sizeof(h));
+    if (!slots.empty()) std::memcpy(queueScratch_.data() + sizeof(h), slots.data(), slots.size_bytes());
+    return queueScratch_;
 }
 
 void GpuSceneBuffers::stageFull(MTL::Buffer* dst, const void* data, u64 size) {
@@ -234,6 +257,11 @@ u64 GpuSceneBuffers::stageFrame(const SceneStore& store) {
     stage(3, store.motionDeltas(), st.fullMotions, motions_, store.motions().data(), bytesOf(store.motions()));
     for (u32 i = 0; i < 4; ++i) {
         if (!scatters_[i].dst) scatters_[i].dst = i == 0 ? instances_ : i == 1 ? materials_ : i == 2 ? nodes_ : motions_;
+    }
+    if (st.motionParentsChanged && !reallocated) {
+        const std::vector<u8>& q = motionParentQueue(store);
+        stageFull(motionParents_, q.data(), q.size());
+        bytes += q.size();
     }
     if (st.structure && !reallocated) {
         stageFull(buckets_, store.gpuBuckets().data(), bytesOf(store.gpuBuckets()));

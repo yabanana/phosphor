@@ -148,6 +148,8 @@ struct SceneStore::Impl {
     std::vector<u32> motionParents_; // entities: motion roots with live children
     std::vector<u32> csrOffsets_, csrSlots_, csrScratch_, csrSlotsNew_, csrCursor_;
     std::vector<u32> dirtyRoots_;
+    std::vector<u32> motionParentSlots_, motionParentScratch_;
+    bool motionParentsDirty_ = true; // the set changed or one of its slots moved
 
     std::vector<GPUDeltaRecord> instRecs_, matRecs_, nodeRecs_, motRecs_;
     std::vector<u32> instDirty_, nodeDirty_, motDirty_, matDirty_;
@@ -322,12 +324,14 @@ struct SceneStore::Impl {
         if (want && en.motionParentPos == NONE) {
             en.motionParentPos = static_cast<u32>(motionParents_.size());
             motionParents_.push_back(e);
+            motionParentsDirty_ = true;
         } else if (!want && en.motionParentPos != NONE) {
             const u32 pos = en.motionParentPos;
             const u32 last = motionParents_.back();
             motionParents_[pos] = last;
             ent_[last].motionParentPos = pos;
             motionParents_.pop_back();
+            motionParentsDirty_ = true;
             en.motionParentPos = NONE; // (if last == e this reset comes after the fix-up)
         }
     }
@@ -438,6 +442,7 @@ struct SceneStore::Impl {
     void afterMoved(u32 e, u32 newSlot) {
         Ent& en = ent_[e];
         en.slot = newSlot;
+        if (en.motionParentPos != NONE) motionParentsDirty_ = true;
         if (en.motionPos != NONE) {
             motionSlots_[en.motionPos] = newSlot;
             structure_ = true;
@@ -511,6 +516,7 @@ struct SceneStore::Impl {
                 motionParents_[pos] = last;
                 ent_[last].motionParentPos = pos;
                 motionParents_.pop_back();
+                motionParentsDirty_ = true;
                 en.motionParentPos = NONE;
             }
         }
@@ -639,7 +645,8 @@ struct SceneStore::Impl {
         instStamp_.clear(); nodeStamp_.clear(); motStamp_.clear(); rootStamp_.clear(); matStamp_.clear();
         buckets_.clear(); posIds_.clear(); idPos_.clear(); keyToId_.clear();
         gpuBuckets_.clear(); commandBuckets_.clear(); classRanges_ = {};
-        motionSlots_.clear(); motionParents_.clear();
+        motionSlots_.clear(); motionParents_.clear(); motionParentSlots_.clear();
+        motionParentsDirty_ = true;
         csrOffsets_.clear(); csrSlots_.clear();
         dirtyRoots_.clear();
         instRecs_.clear(); matRecs_.clear(); nodeRecs_.clear(); motRecs_.clear();
@@ -824,17 +831,30 @@ struct SceneStore::Impl {
                 dirtyRoots_.push_back(slot);
             }
         };
+        // Motion roots with children are expanded every frame from their own
+        // persistent GPU queue (motionParentSlots): never listed here, so a
+        // static CPU scene writes no queue 0 at all.
+        const auto isMotionParent = [&](u32 e) { return ent_[e].motionParentPos != NONE; };
         if (stats_.fullInstances) {
             // The full copy overwrote every child's world matrix with its placeholder.
             for (u32 s = 0; s < slotEnd(); ++s) {
                 const u32 e = slotEntity_[s];
-                if (e != NONE && ent_[e].d.depth == 0 && ent_[e].liveChildren > 0) addRoot(s);
+                if (e != NONE && ent_[e].d.depth == 0 && ent_[e].liveChildren > 0 && !isMotionParent(e)) addRoot(s);
             }
         }
         for (u32 p : dirtyParents_) {
-            if (ent_[p].slot != NONE) addRoot(ent_[p].slot);
+            if (ent_[p].slot != NONE && !isMotionParent(p)) addRoot(ent_[p].slot);
         }
-        for (u32 e : motionParents_) addRoot(ent_[e].slot);
+        // Rebuilt only when the set changed or one of its slots moved
+        // (swap-and-pop, relocation), then compared: O(1) in a steady frame.
+        stats_.motionParentsChanged = false;
+        if (motionParentsDirty_) {
+            motionParentsDirty_ = false;
+            motionParentScratch_.clear();
+            for (u32 e : motionParents_) motionParentScratch_.push_back(ent_[e].slot);
+            stats_.motionParentsChanged = motionParentScratch_ != motionParentSlots_;
+            if (stats_.motionParentsChanged) motionParentSlots_.swap(motionParentScratch_);
+        }
 
         if (stats_.structure) ++structureVersion_;
 
@@ -848,6 +868,7 @@ struct SceneStore::Impl {
         if (stats_.fullInstances) bytes += u64(instances_.size()) * sizeof(GPUInstance);
         if (stats_.fullNodes)     bytes += u64(nodes_.size()) * sizeof(GPUTransformNode);
         if (stats_.fullMotions)   bytes += u64(motions_.size()) * sizeof(GPUMotion);
+        if (stats_.motionParentsChanged) bytes += 32 + u64(motionParentSlots_.size()) * sizeof(u32);
         if (stats_.fullMaterials) bytes += u64(materials_.size()) * sizeof(GPUMaterial);
         if (stats_.structure) {
             bytes += u64(gpuBuckets_.size()) * sizeof(GPUDrawBucket) + u64(commandBuckets_.size()) * sizeof(u32) +
@@ -1139,6 +1160,7 @@ std::span<const u32> SceneStore::motionSlots() const { return impl_->motionSlots
 std::span<const u32> SceneStore::childOffsets() const { return impl_->csrOffsets_; }
 std::span<const u32> SceneStore::childSlots() const { return impl_->csrSlots_; }
 std::span<const u32> SceneStore::dirtyRoots() const { return impl_->dirtyRoots_; }
+std::span<const u32> SceneStore::motionParentSlots() const { return impl_->motionParentSlots_; }
 u32 SceneStore::maxDepth() const {
     u32 d = 0;
     for (u32 i = 1; i < SCENE_MAX_LEVELS; ++i) {

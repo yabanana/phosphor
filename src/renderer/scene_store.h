@@ -88,6 +88,7 @@ struct SceneSyncStats {
     bool fullMotions     = false;
     bool structure       = false; // bucket table / CSR / motion list / capacity changed
     bool csrRebuilt      = false; // hierarchy-related slots moved: the CSR was recomputed (O(slots))
+    bool motionParentsChanged = false; // motionParentSlots() differs from the previous sync
     u64  uploadBytes     = 0;     // bytes the CPU must write this frame (records + full copies + structure)
 };
 
@@ -130,8 +131,13 @@ public:
     /// childSlots()[childOffsets()[s] .. childOffsets()[s + 1]).
     [[nodiscard]] std::span<const u32> childOffsets() const; // slotCapacity() + 1
     [[nodiscard]] std::span<const u32> childSlots() const;
-    /// Roots with children whose world changed this frame (GPU queue 0).
+    /// Parents whose descendants must be recomputed this frame because of a
+    /// CPU change (GPU queue 0).  Motion roots with children are NOT listed:
+    /// they move every frame and are expanded from motionParentSlots().
     [[nodiscard]] std::span<const u32> dirtyRoots() const;
+    /// Slots of the motion roots that have children (a persistent GPU queue,
+    /// re-sent only when stats().motionParentsChanged).
+    [[nodiscard]] std::span<const u32> motionParentSlots() const;
     [[nodiscard]] u32 maxDepth() const; // 0 = no hierarchy
     /// True if any material is emissive (forward variant selection).
     [[nodiscard]] bool hasEmissive() const;

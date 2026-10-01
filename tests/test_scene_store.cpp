@@ -230,6 +230,11 @@ struct Sim {
                 if (root >= inst.size()) { r.worldOk = false; continue; }
                 visit(root);
             }
+            // The motion roots with children: their own persistent GPU queue.
+            for (u32 root : s.motionParentSlots()) {
+                if (root >= inst.size()) { r.worldOk = false; continue; }
+                visit(root);
+            }
         }
         for (EntityID e : all) {
             const u32 slot = s.slotOf(e);
@@ -502,8 +507,11 @@ TEST_CASE("scene store: a static scene produces no records and no bytes after th
         CHECK_FALSE(st.structure);
         CHECK(st.uploadBytes == 0);
         CHECK(w.store.structureVersion() == version);
-        // Only the motion root with a child is recomputed every frame.
-        CHECK(w.store.dirtyRoots().size() == 1);
+        // The motion root with a child is recomputed every frame from the
+        // persistent motion parent queue: nothing in queue 0, nothing re-sent.
+        CHECK(w.store.dirtyRoots().empty());
+        CHECK(w.store.motionParentSlots().size() == 1);
+        CHECK_FALSE(st.motionParentsChanged);
         w.ecs.endFrame();
     }
 }

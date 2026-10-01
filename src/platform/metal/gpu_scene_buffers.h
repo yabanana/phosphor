@@ -88,6 +88,8 @@ public:
     [[nodiscard]] MTL::Buffer* childSlots() const { return childSlots_; }
     [[nodiscard]] MTL::Buffer* motionSlots() const { return motionSlots_; }
     [[nodiscard]] MTL::Buffer* queues() const { return queues_; }
+    /// Persistent GPU queue of the motion roots with children (expanded every frame).
+    [[nodiscard]] MTL::Buffer* motionParents() const { return motionParents_; }
     [[nodiscard]] u32 queueStride() const { return queueStride_; }
     [[nodiscard]] const FrameSet& frame(u32 slot) const { return frames_[slot]; }
 
@@ -105,6 +107,8 @@ private:
     MTL::Buffer* privateBuffer(u64 size, const char* label);
     MTL::Buffer* sharedBuffer(u64 size, const char* label);
     void stageFull(MTL::Buffer* dst, const void* data, u64 size);
+    /// The motion parent queue (header with its dispatch groups + entries).
+    const std::vector<u8>& motionParentQueue(const SceneStore& store);
 
     MetalContext& context_;
     MTL::Buffer* instances_      = nullptr;
@@ -118,6 +122,7 @@ private:
     MTL::Buffer* childSlots_     = nullptr;
     MTL::Buffer* motionSlots_    = nullptr;
     MTL::Buffer* queues_         = nullptr;
+    MTL::Buffer* motionParents_  = nullptr;
     std::array<FrameSet, METAL_FRAMES_IN_FLIGHT> frames_{};
 
     u32 slotCap_     = 0;
@@ -126,6 +131,8 @@ private:
     u32 commandCap_  = 0;
     u32 childCap_    = 0;
     u32 motionCap_   = 0;
+    u32 motionParentCap_ = 0;
+    std::vector<u8> queueScratch_; // header + entries of the motion parent queue
     u32 queueStride_ = 0;
     u64 version_     = 0;
     bool forceFull_  = false; // a persistent buffer was reallocated: next stageFrame() re-sends everything
