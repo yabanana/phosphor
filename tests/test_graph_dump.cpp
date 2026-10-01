@@ -209,6 +209,10 @@ TEST_CASE("dump: graphviz of the engine frame has clusters, flags and totals") {
     CHECK(contains(dot, "3.516 MiB write"));   // 1280*720*4 bytes
     CHECK(contains(dot, "1.000 MiB aliased"));
     CHECK(contains(dot, "2.000 MiB unaliased"));
+    CHECK(contains(dot, "T2 M5 Max 569.0 GB/s [measured]"));      // OPT-1.5 tier lines
+    CHECK(contains(dot, "M3 base 100.0 GB/s [NOT measured, external]"));
+    CHECK(contains(dot, "lint: no findings"));
+    CHECK(contains(dot, "DRAM R 0.000 / W 3.516 MiB"));          // bytes on the pass box
     CHECK(count(dot, '{') == count(dot, '}'));
     CHECK(dot == dumpGraphviz(f.graph, c)); // deterministic
 }

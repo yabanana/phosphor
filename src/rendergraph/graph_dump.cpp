@@ -1,5 +1,7 @@
 #include "rendergraph/graph_dump.h"
 
+#include "rendergraph/graph_lint.h"
+
 #include <algorithm>
 #include <cstdio>
 #include <set>
@@ -198,10 +200,12 @@ BandwidthReport estimateBandwidth(const RenderGraph& graph, const CompiledGraph&
     return report;
 }
 
-std::string dumpGraphviz(const RenderGraph& graph, const CompiledGraph& compiled) {
+std::string dumpGraphviz(const RenderGraph& graph, const CompiledGraph& compiled, const BudgetOptions& budgetOptions) {
     const auto& passes = graph.passes();
     const auto& resources = graph.resources();
     const BandwidthReport bw = estimateBandwidth(graph, compiled);
+    const GraphBudget budget = analyzeBudget(graph, compiled, budgetOptions);
+    const std::vector<LintFinding> findings = lintGraph(graph, compiled);
 
     auto isCulled = [&](u32 p) {
         return (p < compiled.culled.size() && compiled.culled[p]) || compiled.position(p) == ~0u;
@@ -226,9 +230,20 @@ std::string dumpGraphviz(const RenderGraph& graph, const CompiledGraph& compiled
     std::string out;
     out += "digraph RenderGraph {\n";
     out += "  rankdir=LR;\n";
-    out += "  label=\"DRAM per frame: " + mebibytes(bw.totalReadBytes) + " MiB read, " +
-           mebibytes(bw.totalWriteBytes) + " MiB write\\ntransient heap: " + mebibytes(compiled.aliasing.heapSize) +
-           " MiB aliased, " + mebibytes(compiled.aliasing.unaliasedSize) + " MiB unaliased\";\n";
+    std::string graphLabel = "DRAM per frame: " + mebibytes(bw.totalReadBytes) + " MiB read, " +
+                             mebibytes(bw.totalWriteBytes) + " MiB write\\ntransient heap: " +
+                             mebibytes(compiled.aliasing.heapSize) + " MiB aliased, " +
+                             mebibytes(compiled.aliasing.unaliasedSize) + " MiB unaliased";
+    for (const std::string& line : budgetSummaryLines(graph, budget, budgetOptions)) {
+        graphLabel += "\\n" + esc(line);
+    }
+    if (findings.empty()) {
+        graphLabel += "\\nlint: no findings";
+    } else {
+        graphLabel += "\\nlint: " + std::to_string(findings.size()) + " finding(s)";
+        for (const LintFinding& f : findings) graphLabel += "\\n" + esc(f.message);
+    }
+    out += "  label=\"" + graphLabel + "\";\n";
     out += "  labelloc=t;\n";
     out += "  node [fontname=\"Helvetica\"];\n";
     out += "  edge [fontname=\"Helvetica\", fontsize=10];\n";
@@ -243,6 +258,11 @@ std::string dumpGraphviz(const RenderGraph& graph, const CompiledGraph& compiled
         } else {
             const u32 pos = compiled.position(p);
             label += "\\n@" + std::to_string(pos);
+            for (const PassBytes& pb : budget.passes) {
+                if (pb.pass == p) {
+                    label += "\\nDRAM R " + mebibytes(pb.readBytes) + " / W " + mebibytes(pb.writeBytes) + " MiB";
+                }
+            }
             if (const PassBarriers* pb = barriersOf(pos)) {
                 for (const Barrier& b : pb->barriers) {
                     label += std::string("\\nbarrier ") + (b.scope == BarrierScope::Encoder ? "encoder " : "queue ") +

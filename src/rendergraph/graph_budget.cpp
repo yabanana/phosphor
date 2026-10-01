@@ -75,33 +75,39 @@ GraphBudget analyzeBudget(const RenderGraph& graph, const CompiledGraph& compile
         w.aboveSlc   = w.total() > options.slcBytes;
         out.workingSets.push_back(w);
     }
-    // Reuse candidates: the pass at position p+1 reads a version the pass at
-    // position p wrote, same queue, not fused in one render group (tile memory
+    // Reuse candidates: the pass at position p+1 reads a version written by
+    // the work that ends at position p (the pass itself, or any member of the
+    // render group ending there: attachments reach DRAM at the group's end),
+    // same queue, not fused with the consumer in one render group (tile memory
     // would make it free anyway), resource not memoryless and within the SLC.
     for (u32 pos = 0; pos + 1 < compiled.order.size(); ++pos) {
-        const u32 prod = compiled.order[pos];
         const u32 cons = compiled.order[pos + 1];
-        if (passes[prod].queue != passes[cons].queue) continue;
         const u32 gp = pos < compiled.groupOfPosition.size() ? compiled.groupOfPosition[pos] : ~0u;
         const u32 gc = pos + 1 < compiled.groupOfPosition.size() ? compiled.groupOfPosition[pos + 1] : ~0u;
         if (gp != ~0u && gp == gc) continue;
+        u32 first = pos;
+        if (gp != ~0u && gp < compiled.renderGroups.size()) first = compiled.renderGroups[gp].firstPosition;
         std::vector<u32> seen;
-        for (const Access& w : passes[prod].writes) {
-            if (w.resource >= graph.resources().size()) continue;
-            if (w.resource < compiled.memoryless.size() && compiled.memoryless[w.resource]) continue;
-            for (const Access& r : passes[cons].reads) {
-                if (r.resource != w.resource || r.version != w.version) continue;
-                if (std::find(seen.begin(), seen.end(), w.resource) != seen.end()) continue;
-                const u64 bytes = resourceBytes(graph.resources()[w.resource]);
-                if (bytes == 0 || bytes > options.slcBytes) continue;
-                seen.push_back(w.resource);
-                ReuseCandidate rc;
-                rc.producer = prod;
-                rc.consumer = cons;
-                rc.resource = w.resource;
-                rc.bytes    = bytes;
-                rc.consumerFits = out.passes[pos + 1].total() <= options.slcBytes;
-                out.reuse.push_back(rc);
+        for (u32 q = pos + 1; q-- > first;) { // newest producer first
+            const u32 prod = compiled.order[q];
+            if (passes[prod].queue != passes[cons].queue) continue;
+            for (const Access& w : passes[prod].writes) {
+                if (w.resource >= graph.resources().size()) continue;
+                if (w.resource < compiled.memoryless.size() && compiled.memoryless[w.resource]) continue;
+                for (const Access& r : passes[cons].reads) {
+                    if (r.resource != w.resource || r.version != w.version) continue;
+                    if (std::find(seen.begin(), seen.end(), w.resource) != seen.end()) continue;
+                    const u64 bytes = resourceBytes(graph.resources()[w.resource]);
+                    if (bytes == 0 || bytes > options.slcBytes) continue;
+                    seen.push_back(w.resource);
+                    ReuseCandidate rc;
+                    rc.producer = prod;
+                    rc.consumer = cons;
+                    rc.resource = w.resource;
+                    rc.bytes    = bytes;
+                    rc.consumerFits = out.passes[pos + 1].total() <= options.slcBytes;
+                    out.reuse.push_back(rc);
+                }
             }
         }
     }

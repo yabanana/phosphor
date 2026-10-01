@@ -349,11 +349,28 @@ TEST_CASE("slc: render passes fused in one group are not reuse candidates") {
     const CompiledGraph c = compile(d.graph);
     REQUIRE(c.ok);
     const GraphBudget b = analyzeBudget(d.graph, c);
-    // gbuffer+light are one group; light -> blur is albedo's reuse (stored, read adjacent).
-    for (const ReuseCandidate& r : b.reuse) {
-        CHECK(d.graph.passes()[r.producer].name != "gbuffer");
-    }
+    // gbuffer+light are one group: no pair inside it, but albedo (stored at the
+    // group's end) is adjacent to its sampled read by blur.
+    REQUIRE(b.reuse.size() == 1);
+    CHECK(d.graph.passes()[b.reuse[0].producer].name == "gbuffer");
+    CHECK(d.graph.passes()[b.reuse[0].consumer].name == "blur");
+    CHECK(d.graph.resources()[b.reuse[0].resource].name == "albedo");
     CHECK(b.workingSets.size() == 1);
+}
+
+TEST_CASE("dump: lint findings, bytes per pass and budget lines reach the graph") {
+    Deferred d(true);
+    const CompiledGraph c = compile(d.graph);
+    REQUIRE(c.ok);
+    const std::string dot = dumpGraphviz(d.graph, c);
+    CHECK(contains(dot, "lint: 1 finding(s)"));
+    CHECK(contains(dot, "transient 'albedo'"));
+    CHECK(contains(dot, "SLC reuse candidate: 'gbuffer' -> 'blur' via 'albedo'"));
+    CHECK(contains(dot, "[NOT measured, external]"));
+    CHECK(contains(dot, "DRAM R 0.000 / W 1.758 MiB")); // light: drawable + albedo stores (640x360x4 each)
+    BudgetOptions o;
+    o.fps = 120.0;
+    CHECK(contains(dumpGraphviz(d.graph, c, o), "at 120 fps"));
 }
 
 TEST_CASE("budget: the four scenarios at 1 view, 60 fps") {
