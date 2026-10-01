@@ -135,7 +135,7 @@ ipotesi da validare con uno spike, non come tecniche già provate.
 | F4 | Osservabilità: profiler, contatori, cattura, perf log | CORE | I |
 | OPT-0 | Caratterizzazione del SoC (`bench/`, modello di costo) ✅ (manca OPT-0.2 su T0) | OPT | I |
 | OPT-1 | Memoria, grafo e banda come problema di ottimizzazione ✅ (OPT-1.5/1.7 parziali, T0 non misurato) | OPT | I |
-| F5 | GPU scene persistente e submission guidata dalla GPU | CORE | II · Geometria |
+| F5 | GPU scene persistente e submission guidata dalla GPU ✅ | CORE | II · Geometria |
 | F6 | Mesh shader e culling a due fasi | CORE | II |
 | F7 | Visibility buffer e shading ibrido TBDR | CORE | II |
 | F8 | HDR, EDR, esposizione e MetalFX temporal | CORE | II |
@@ -339,18 +339,21 @@ nessun compute reale da ridimensionare); T0 non disponibile (O12).
 
 # Era II — Geometria GPU-driven
 
-## F5 — GPU scene persistente e submission guidata dalla GPU [CORE]
+## F5 — GPU scene persistente e submission guidata dalla GPU ✅ [CORE]
 
 **Obiettivo**: la CPU non codifica più draw per oggetto (O8).
 
-- [ ] F5.1 GPU scene persistente: istanze, materiali, mesh in buffer GPU con **aggiornamenti delta** (solo gli oggetti cambiati), memoria unificata con scrittura diretta
-- [ ] F5.2 Gerarchia di transform aggiornata in compute
-- [ ] F5.3 **Indirect command buffer costruiti dalla GPU**: un dispatch di culling scrive i comandi di draw
-- [ ] F5.4 Catena di dispatch indiretti come sostituto dei work graph (Metal non li ha): code GPU a produttore/consumatore tra pass
-- [ ] F5.5 Instance culling in compute (frustum + distanza + dimensione su schermo)
-- [ ] F5.6 Testbench "1M istanze" dinamiche
+- [x] F5.1 GPU scene persistente: istanze, materiali, mesh in buffer GPU con **aggiornamenti delta** (solo gli oggetti cambiati), memoria unificata con scrittura diretta — `SceneStore` (slot stabili per bucket (classe di culling, mesh), buchi riutilizzati, materiali persistenti per entità), tracciamento delle modifiche nell'ECS in O(cambiati) e riciclo degli id, record delta scritti dalla CPU nell'anello del frame e applicati da `scene_scatter` in buffer `private` persistenti (copia intera oltre 1/8 cambiato, spike S2); byte per frame proporzionali ai cambi (96 B per record, 1,1 KiB/frame sulle scene ferme), `--debug-gpu-scene` esatto byte per byte
+- [x] F5.2 Gerarchia di transform aggiornata in compute — figli e moto procedurale calcolati sulla GPU con prodotto `fp contract(off)` bit-identico a glm (spike S6), verificati bit per bit dal self-check; radici in moto con figli espanse da una coda persistente
+- [x] F5.3 **Indirect command buffer costruiti dalla GPU**: un dispatch di culling scrive i comandi di draw — `scene_draw_build` scrive un comando per bucket, tre range fissi per classe di culling (Apple9/Apple10), `--gpu-driven off|on` (default on): stessa immagine (0 pixel sugli 8 bench con ogni flag F2), comandi CPU costanti al variare delle istanze (66 nel bench 8 da 10K a 1M; off cresce con i bucket)
+- [x] F5.4 Catena di dispatch indiretti come sostituto dei work graph (Metal non li ha): code GPU a produttore/consumatore tra pass — `renderer/gpu_queue.h` (append aggregati per SIMD-group, overflow contato, argomenti scritti da un kernel a un thread, `dispatchThreadgroups` indiretto); usi reali: code dei nodi sporchi della gerarchia per livello e coda persistente delle radici in moto; verifica GPU F5-K3 con conteggi dipendenti dai dati
+- [x] F5.5 Instance culling in compute (frustum + distanza + dimensione su schermo) — `renderer/cull_math.h` condiviso C++/MSL, piani del reverse-Z infinito (corretto `Camera::getFrustumPlanes`), compattazione stabile reduce-then-scan (deterministica, spike S4); lista visibile = riferimento CPU (0 differenze anche nella banda), `--cull-distance`/`--cull-min-pixels` (spenti di default), controllo negativo a pixel
+- [x] F5.6 Testbench "1M istanze" dinamiche — bench 8 "1M Instances (dynamic)": 1M istanze in moto (moto GPU, 1% aggiornato dalla CPU, satelliti a profondità 3, `--churn`, `--instances`, `--scene-meshes`); 60 fps su M5 Max (dettagli e CV nel perf-log); T0 non disponibile (O12)
 
 **Uscita**: Stress Test con conteggio di comandi CPU costante; 1M istanze in movimento a 60 fps su T2.
+Raggiunta su M5 Max (T2): comandi CPU costanti al variare delle istanze e
+dei bucket in `--gpu-driven on`; bench 8 a 1M istanze in moto con p99 di
+frame, CPU e GPU sotto 16,6 ms e 120 fps con vsync (`perf-log.md`, "F5").
 
 ## F6 — Mesh shader e culling a due fasi [CORE]
 

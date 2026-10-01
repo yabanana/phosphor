@@ -125,6 +125,7 @@ le righe "Misura" qui sotto riportano quei valori.
 - **Fatto**: 32 thread per SIMD-group (Turner); MSL offre `simd_shuffle`, `simd_ballot`, `simd_prefix_*`, `simd_sum/min/max`, `quad_*`.
 - **Misura** (B-06, intrinseco contro emulazione in threadgroup memory): `simd_sum` 5,7×, `simd_prefix_exclusive_sum` 6,3×, `simd_ballot` 10,3×, `quad_shuffle` 1,9× più veloci; **`simd_shuffle` con lane dinamica 0,37×** (più lento dell'emulazione: anomalia da riverificare prima di usarlo nei kernel caldi).
 - **Sfruttare**: compattazione (liste di meshlet visibili, pixel da ombreggiare), riduzioni (Hi-Z, istogramma di luminanza), prefix sum per l'allocazione, votazioni per uniformità (salto di rami).
+- **Misura nel motore** (F5, spike S4): culling di 1M istanze + compattazione stabile reduce-then-scan (prefix SIMD-group, 3 dispatch) 0,158 ms contro 0,137 ms con atomici aggregati per SIMD-group; la versione stabile è deterministica (liste identiche byte per byte in 10 run, gli atomici cambiano ordine in 9 su 9) e fa coincidere le immagini con il percorso CPU.
 - **Evitare**: atomici su un contatore globale per ogni thread (usare prima un prefix per SIMD-group, poi un atomico per gruppo).
 
 **S-SIMD-2 Uniformità e divergenza**
@@ -241,6 +242,7 @@ le righe "Misura" qui sotto riportano quei valori.
 **S-GEO-4 Indirect command buffer**
 - **Fatto**: ICB codificabili dalla GPU; draw mesh negli ICB da Apple9; su Apple10 stato raster, depth/stencil, cull e winding impostabili per draw dalla GPU (111431).
 - **Misura** (B-17): dispatch vuoto 0,13 µs (0,82 con barriera), indiretto 0,13, catena indiretta con barriera 1,4 µs; ICB codificato dalla GPU 0,14 ns per comando, eseguito 0,043 µs per draw (draw diretto 0,027); codifica GPU + esecuzione nello stesso command buffer verificata.
+- **Misura nel motore** (F5, spike S3 e integrazione): ICB codificato dalla GPU con un comando per bucket e tre range per classe di culling = stesso tempo di render dei draw diretti a 10.000 bucket (0,73–0,76 ms per 100K istanze) con 7 comandi CPU invece di 9.004 (CPU 0,02 contro 0,41 ms); comando vuoto 31 ns con `reset()`, 37 ns a 0 istanze; stato di culling per comando di Apple10 +14% (non conviene); `Draw build` nel frame 0,033 ms. Nel bench 8 (1M istanze) la CPU codifica 66 comandi costanti. **Mai** `executeCommandsInBuffer` in un encoder render ripreso in un altro command buffer (errore GPU e recovery a ogni frame) e mai un range di esecuzione indiretto (lo shader validation layer abortisce).
 - **Sfruttare**: submission interamente GPU-driven (O8); su M5 ICB unici per pass d'ombra con materiali misti.
 
 **S-GEO-5 Funzioni specifiche Apple10**
@@ -312,6 +314,7 @@ le righe "Misura" qui sotto riportano quei valori.
 **S-MEM-3 Storage mode**
 - **Fatto**: `shared` zero-copy, `private` solo GPU con layout ottimizzati e compressione, `memoryless` solo tile (Apple, storage modes).
 - **Misura** (B-29, OPT-1.10): scrittura CPU in `shared` write-combined = cached (memcpy 0,98–1,03× da 1 MiB; 0,57–0,84× a 64 KiB con 4–8 thread; store sparsi da 16 B più lenti in WC); lettura CPU da WC **20× più lenta** (7 contro 107–140 GB/s); lettura GPU di buffer `private` = `shared` (0,999–1,005 da 1 MiB a 1 GiB). Su M5 Max WC non accelera gli upload ma non costa finché la CPU non rilegge.
+- **Misura nel motore** (F5, spike S2): aggiornamenti delta a 1M istanze: record scritti dalla CPU nell'anello `shared` + scatter GPU in `private` (1%: CPU 0,027 ms, GPU 0,008 ms) contro copie `shared` persistenti per frame in volo (14× CPU, 3× memoria) e ricarico completo (memcpy 80 MiB 1,2 ms); lettura GPU identica da `private` e `shared` (0,143–0,145 ms per 80 MiB); l'attesa tra frame su un buffer persistente unico costa 0,2%.
 - **Sfruttare**: `private` per tutto ciò che la GPU legge spesso (texture compresse, S-TEX-2); `shared` + write-combined per gli anelli di upload scritti da un thread e mai riletti dalla CPU; `memoryless` per gli intermedi di pass.
 
 **S-MEM-4 Memoria unificata**
@@ -345,6 +348,7 @@ le righe "Misura" qui sotto riportano quei valori.
 
 **S-SYNC-3 Overhead di dispatch**
 - **Misura** (B-17): dispatch vuoto 0,13 µs, con barriera 0,82 µs.
+- **Misura nel motore** (F5): catena di code GPU della gerarchia (kernel args a un thread + `dispatchThreadgroups` indiretto per livello, barriere Dispatch→Dispatch) 0,03–0,08 ms con 0,1–1% di radici sporche su 1M nodi contro 0,25–0,27 ms per un ricalcolo completo (spike S6); senza gerarchia i passi non si codificano (0,009 ms). Lo stadio che rende visibili ad un draw argomenti/ICB scritti da compute è **Vertex** (S5).
 - **Sfruttare**: fondere dispatch piccoli; catene di dispatch indiretti per il lavoro variabile (sostituto dei work graph).
 
 **S-SYNC-4 Latenza CPU↔GPU**

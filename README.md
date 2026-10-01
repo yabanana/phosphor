@@ -37,7 +37,7 @@ component-by-component guide to squeezing Apple silicon
 | Era | Phases | Content |
 |---|---|---|
 | I · Foundations | F0 ✅, F1–F4 | Metal 4 context, memory/heaps, render graph with automatic barriers, async/AOT pipelines, profiling |
-| II · GPU-driven geometry | F5–F8 | Persistent GPU scene, GPU-built ICBs, mesh shaders + two-phase culling, visibility buffer, HDR/EDR, MetalFX |
+| II · GPU-driven geometry | F5 ✅, F6–F8 | Persistent GPU scene, GPU-built ICBs, mesh shaders + two-phase culling, visibility buffer, HDR/EDR, MetalFX |
 | III · Light | F9–F14 | Ray tracing infrastructure, hybrid shadows, ReSTIR DI, radiance-cache GI, reflections, atmosphere and clouds |
 | IV · World | F15–F22 | Advanced materials, on-tile OIT, particles, post, virtualised geometry, terrain, water, cooker, streaming |
 | V · Simulation (parallel) | F23–F27 | Job system and CPU optimisation, physics, animation, ray-traced acoustics, gameplay runtime |
@@ -75,7 +75,7 @@ validation.
 
 | Option | Effect |
 |---|---|
-| `--bench N` | Start on test bench N (1–7) |
+| `--bench N` | Start on test bench N (1–8) |
 | `--frames N` | Benchmark mode: measure N frames, print a `BENCH` summary line, exit |
 | `--warmup N` | Frames skipped before measuring (default 120) |
 | `--no-vsync` | Uncapped frame rate |
@@ -83,7 +83,11 @@ validation.
 | `--capture FILE` | Write a PNG of the last measured frame (first frame when interactive) |
 | `--report FILE` | Write the benchmark summary as JSON |
 | `--fixed-timestep` | Simulate 1/60 s per frame (deterministic captures) |
-| `--switch-every N` | Cycle to the next bench every N frames (same path as the 1–7 keys) |
+| `--switch-every N` | Cycle to the next bench every N frames (same path as the 1–8 keys) |
+| `--gpu-driven off\|on` | Scene submission: GPU culling + GPU-built indirect command buffers (on, default) or one CPU draw per bucket (off); same image |
+| `--instances N`, `--scene-meshes K`, `--dynamic-cpu PCT`, `--churn N` | Bench 8 ("1M Instances"): size, meshes, CPU-updated share, spawn/despawn per frame |
+| `--cull-distance D`, `--cull-min-pixels P` | Extra GPU instance culling (off by default) |
+| `--debug-gpu-scene N` | Read the GPU scene back every N frames and compare it exactly with the CPU mirror and references (exit 1 on failure) |
 | `--memory-stress N` | Create/destroy N GPU resources and check memory returns to baseline (exit 1 on failure) |
 | `--simulate-pressure` | Inject memory-pressure warning/critical events |
 | `--transient-test` | Aliasing self-test of the transient heap (exit 1 on failure) |
@@ -143,7 +147,7 @@ Press **1–7** or use the ImGui combo box:
 | Right mouse drag | Look (FPS) |
 | Left mouse drag, wheel | Orbit, zoom (orbit benches) |
 | Shift | Sprint |
-| 1 – 7 | Switch bench |
+| 1 – 8 | Switch bench |
 | F1 / F2 / F3 | Lit / normals / base color |
 | Esc | Quit |
 
@@ -157,8 +161,10 @@ src/
   scene/       ECS, camera, components, procedural meshes, glTF loader,
                TextureManager (API-agnostic front end)
   renderer/    GpuScene (CPU-side scene geometry), meshlet builder,
-               scene extraction, gpu_types.h (shared with MSL)
-  testbench/   the seven benches
+               SceneStore (CPU mirror of the persistent GPU scene, deltas),
+               cull/transform math and references, gpu_types.h and
+               gpu_scene_layout.h (shared with MSL)
+  testbench/   the eight benches
   platform/metal/  Metal 4 backend: context/frame loop, textures, forward pass
   app/         Engine (SDL3 window + Metal layer, main loop, benchmark mode)
   imgui/       debug panels and the Metal 4 ImGui renderer
