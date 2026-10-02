@@ -8,6 +8,7 @@
 #include "renderer/scene_store.h"
 
 #include <algorithm>
+#include <cstring>
 
 namespace phosphor {
 
