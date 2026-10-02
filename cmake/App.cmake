@@ -47,6 +47,8 @@ set(PHOSPHOR_SHADER_HEADERS
     ${CMAKE_SOURCE_DIR}/src/renderer/gpu_queue.h
     ${CMAKE_SOURCE_DIR}/src/renderer/cull_math.h
     ${CMAKE_SOURCE_DIR}/src/renderer/transform_math.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/meshlet_layout.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/meshlet_cull_math.h
     ${CMAKE_SOURCE_DIR}/src/diagnostics/overlay_math.h)
 set(PHOSPHOR_SHADER_OUT ${CMAKE_BINARY_DIR}/shaders)
 set(PHOSPHOR_METALLIB ${PHOSPHOR_SHADER_OUT}/phosphor.metallib)
@@ -262,6 +264,32 @@ if(PHOSPHOR_DEBUGGABLE)
         COMMENT "Signing f5_spike with get-task-allow (leaks)"
         VERBATIM
     )
+endif()
+
+# --- F6 spikes S3-S4 (measurement tool, not engine code) ---
+# The bench/soc harness and runner with the F6 spike benchmarks (ids F6-Sn);
+# their MSL lives in bench/f6_spike/shaders, engine shaders are compiled from
+# shaders/ with their includes.  See bench/f6_spike/README.md.
+file(GLOB F6_SPIKE_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/bench/f6_spike/*.cpp)
+add_executable(f6_spike ${CMAKE_SOURCE_DIR}/bench/soc/harness.cpp ${CMAKE_SOURCE_DIR}/bench/soc/soc_bench.cpp
+    ${F6_SPIKE_SOURCES})
+target_include_directories(f6_spike PRIVATE ${CMAKE_SOURCE_DIR}/bench/soc)
+target_link_libraries(f6_spike PRIVATE phosphor_core metal_cpp IOReport
+    "-framework IOKit" "-framework CoreFoundation" "-framework AppKit" "-framework QuartzCore")
+target_compile_features(f6_spike PRIVATE cxx_std_20)
+target_compile_options(f6_spike PRIVATE ${PHOSPHOR_WARNINGS})
+add_dependencies(f6_spike phosphor_shaders) # generated variant headers for the engine shaders
+target_compile_definitions(f6_spike PRIVATE
+    "SOC_SHADER_DIR=\"${CMAKE_SOURCE_DIR}/bench/soc/shaders\""
+    "SOC_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\""
+    "F6_GENERATED_DIR=\"${CMAKE_BINARY_DIR}/generated\""
+    "SOC_RESULTS_DIR=\"${CMAKE_SOURCE_DIR}/bench/results/f6-spike\""
+    "SOC_SDK_VERSION=\"${SOC_SDK_VERSION}\"")
+if(PHOSPHOR_DEBUGGABLE)
+    add_custom_command(TARGET f6_spike POST_BUILD
+        COMMAND codesign --force --sign - --entitlements ${CMAKE_SOURCE_DIR}/cmake/debuggable.entitlements
+                $<TARGET_FILE:f6_spike>
+        COMMENT "Signing f6_spike with get-task-allow (leaks)")
 endif()
 
 # Test assets are looked up relative to the working directory.

@@ -45,7 +45,7 @@
 #include "renderer/gpu_types.h"
 
 #ifdef __METAL_VERSION__
-#define PHOSPHOR_CULL_FN static
+#define PHOSPHOR_CULL_FN static __attribute__((unused))
 #define PHOSPHOR_DEV device
 #define PHOSPHOR_CONSTANT_AS constant
 #define PHOSPHOR_FP_STRICT _Pragma("METAL fp contract(off)") _Pragma("clang fp reassociate(off)")

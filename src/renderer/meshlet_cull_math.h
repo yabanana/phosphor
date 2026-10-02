@@ -55,7 +55,7 @@
 #include "renderer/meshlet_layout.h"
 
 #ifdef __METAL_VERSION__
-#define PHOSPHOR_MC_FN static
+#define PHOSPHOR_MC_FN static __attribute__((unused))
 #define PHOSPHOR_MC_DEV device
 #define PHOSPHOR_MC_CONST constant
 #define PHOSPHOR_MC_STRICT _Pragma("METAL fp contract(off)") _Pragma("clang fp reassociate(off)")
@@ -91,9 +91,9 @@ PHOSPHOR_GPU_CONSTANT float HIZ_NEAR_EPS           = 1.0e-6f; // clip w must exc
 /// Power-of-two level-0 size of the pyramid of a `viewport` (>= ceil(v / 2),
 /// at least 1) and its level count (down to 1x1).
 PHOSPHOR_MC_FN u32 hizLevel0Size(u32 viewport) {
-    const u32 half = (viewport + 1u) / 2u;
+    const u32 halfSize = (viewport + 1u) / 2u;
     u32 s = 1u;
-    while (s < half && s < (1u << (HIZ_MAX_LEVELS - 1u))) s <<= 1u;
+    while (s < halfSize && s < (1u << (HIZ_MAX_LEVELS - 1u))) s <<= 1u;
     return s;
 }
 PHOSPHOR_MC_FN u32 hizLevelCount(u32 w0, u32 h0) {
