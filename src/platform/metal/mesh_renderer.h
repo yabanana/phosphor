@@ -56,6 +56,12 @@ public:
         HiZBuilder::Backend hiz      = HiZBuilder::Backend::Compute;
         MeshletDebugView   debugView = MeshletDebugView::None;
         u32                debugHiZLevel = 3; // --debug-view hiz: pyramid level shown
+        /// --debug-meshlets: the graph carries the read-back passes (only
+        /// then: an empty blit encoder is dropped by Metal and would leave
+        /// the next timed unit without a valid timestamp, F4.1).
+        bool               checks = false;
+        /// Spike S2: mesh-only pipeline (no object stage, no culling).
+        bool               objectStage = true;
         u32                salt      = 0;
         bool               genericOnly = false;
         std::optional<u32> forceVariant;

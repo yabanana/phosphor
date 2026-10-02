@@ -47,6 +47,8 @@ pipe::PipelineDesc kernelDesc(const char* function) {
 
 /// Mesh pipeline of the mesh path: the forward desc's constants (variant) and
 /// output, object + mesh + fragment functions and the meshlet limits.
+bool gObjectStage = true; // spike S2 variant (one MeshRenderer per process)
+
 pipe::PipelineDesc meshDesc(const pipe::PipelineDesc& forward, const char* label) {
     pipe::PipelineDesc d = forward;
     d.kind                   = pipe::PipelineKind::Mesh;
@@ -54,6 +56,10 @@ pipe::PipelineDesc meshDesc(const pipe::PipelineDesc& forward, const char* label
     d.functions              = {MESHLET_OBJECT_FN, MESHLET_MESH_FN, "forward_fs"};
     d.indirectCommandBuffers = false;
     d.mesh = {MESHLET_OBJECT_GROUP, MESHLET_MESH_GROUP, MESHLET_PAYLOAD_BYTES, MESHLET_OBJECT_GROUP};
+    if (!gObjectStage) {
+        d.functions = {"", MESHLET_MESH_DIRECT_FN, "forward_fs"};
+        d.mesh      = {0, MESHLET_MESH_GROUP, 0, 0};
+    }
     return d;
 }
 
@@ -67,6 +73,10 @@ u64 grow(u64 have, u64 need) { return need <= have ? have : std::max<u64>(need +
 
 MeshRenderer::MeshRenderer(MetalContext& context, PipelineCache& pipelines, SceneRenderer& scene, const Options& options)
     : context_(context), pipelines_(pipelines), scene_(scene), options_(options) {
+    gObjectStage = options_.objectStage;
+    if (!options_.objectStage && options_.cull != MeshletCull::Off) {
+        throw std::runtime_error("--meshlet-object off (spike S2) needs --meshlet-cull off");
+    }
     if (options_.forceVariant && *options_.forceVariant >= pipe::forward::variantCount()) {
         throw std::runtime_error("--force-variant: expected 0.." + std::to_string(pipe::forward::variantCount() - 1));
     }
@@ -220,7 +230,7 @@ void MeshRenderer::ensureCapacity(u64 capacity, u32 slotCount) {
         if (slot != slotCap_ || !f.groupSums) swap(f.groupSums, groups * 3 * sizeof(u32), "Meshlet group sums");
         if (!f.ranges) {
             f.ranges     = sharedBuffer(MESHLET_DRAWS * sizeof(GPUMeshletDrawRange), "Meshlet draw ranges");
-            f.args       = sharedBuffer(MESHLET_DRAWS * 3 * sizeof(u32), "Meshlet indirect arguments");
+            f.args       = sharedBuffer(MESHLET_ARGS_WORDS * sizeof(u32), "Meshlet indirect arguments");
             f.counters   = sharedBuffer(sizeof(GPUMeshletCounters), "Meshlet counters");
             f.gate       = sharedBuffer(16, "Meshlet overflow gate");
             f.cullParams = sharedBuffer(sizeof(GPUMeshletCullParams), "Meshlet cull parameters (copy)");
@@ -374,7 +384,7 @@ rg::TextureRef MeshRenderer::addRasterPasses(rg::RenderGraph& graph, rg::Texture
     readbackRef_ = graph.importBuffer("Meshlet check readback", {u64(width) * height * 4 + 3 * hiz_->readbackBytes()},
                                       ImportOutput);
     // Self-check: the history phase A will test against (check frames only).
-    graph.addPass(
+    if (options_.checks) graph.addPass(
         "Meshlet check history", PassType::Blit,
         [&](PassBuilder& b) {
             b.read(hizHistoryRef_, Usage::CopySrc, StageBlit);
@@ -480,7 +490,7 @@ rg::TextureRef MeshRenderer::addRasterPasses(rg::RenderGraph& graph, rg::Texture
         LOG_WARN("--debug-view hiz needs --meshlet-cull two-phase (no pyramid otherwise)");
     }
     // Self-check: the final depth and the pyramids, copied only on check frames.
-    graph.addPass(
+    if (options_.checks) graph.addPass(
         "Meshlet check readback", PassType::Blit,
         [&](PassBuilder& b) {
             b.read(depthRef_, Usage::CopySrc, StageBlit);
@@ -610,7 +620,12 @@ void MeshRenderer::encodeRaster(MTL4::RenderCommandEncoder* enc, u32 phase) cons
         }
         t->setAddress(f.ranges->gpuAddress() + draw * sizeof(GPUMeshletDrawRange), MR_RANGE);
         enc->setArgumentTable(t, MTL::RenderStageObject | MTL::RenderStageMesh | MTL::RenderStageFragment);
-        enc->drawMeshThreadgroups(f.args->gpuAddress() + draw * 3 * sizeof(u32), objectGroup, meshGroup);
+        if (options_.objectStage) {
+            enc->drawMeshThreadgroups(f.args->gpuAddress() + draw * 3 * sizeof(u32), objectGroup, meshGroup);
+        } else {
+            enc->drawMeshThreadgroups(f.args->gpuAddress() + (MESHLET_ARGS_DIRECT + c * 3) * sizeof(u32),
+                                      MTL::Size::Make(0, 0, 0), meshGroup);
+        }
         n += 2;
         meshState = true;
         // Phase A: the class's F5 ICB range (empty unless the candidates overflowed).

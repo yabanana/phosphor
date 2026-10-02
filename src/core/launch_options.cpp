@@ -447,6 +447,15 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             }
         } else if (arg == "--culling-script") {
             out.cullingScript = true;
+        } else if (arg == "--meshlet-object") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "on") out.meshletObjectStage = true;
+            else if (*value == "off") out.meshletObjectStage = false;
+            else {
+                error = "--meshlet-object: expected on or off, got '" + std::string(*value) + "'";
+                return false;
+            }
         } else if (arg == "--history-reset-every") {
             if (!needCount(out.historyResetEvery)) return false;
         } else if (arg == "--graph-no-alias") {

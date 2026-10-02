@@ -205,6 +205,8 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         mo.hiz         = hiz;
         mo.debugView   = options_.debugView;
         mo.debugHiZLevel = options_.debugHiZLevel;
+        mo.checks      = options_.debugMeshlets > 0;
+        mo.objectStage = options_.meshletObjectStage;
         mo.salt        = options_.pipelineSalt;
         mo.genericOnly = options_.debugPipelineFallback;
         mo.forceVariant = options_.forceVariant;

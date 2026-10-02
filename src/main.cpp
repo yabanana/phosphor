@@ -3,6 +3,7 @@
 
 #include <Foundation/Foundation.hpp>
 
+#include <cstdio>
 #include <cstdlib>
 #include <exception>
 
@@ -25,5 +26,10 @@ int main(int argc, char* argv[]) {
         result = EXIT_FAILURE;
     }
     pool->release();
+    // stdout: the exit status as the app decided it, after the engine is
+    // destroyed.  A run whose shell status differs from this line (or that
+    // lacks it) was ended by a signal, not by the engine (F6 diagnosis).
+    std::printf("EXIT %d\n", result);
+    std::fflush(stdout);
     return result;
 }

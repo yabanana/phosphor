@@ -144,6 +144,12 @@ kernel void meshlet_cand_scan(constant GPUMeshletCullParams& p [[buffer(0)]], de
             const uint count = overflow ? 0u : total[c];
             ranges[c]        = GPUMeshletDrawRange{first, count, c, MESHLET_PHASE_A};
             writeArgs(args, c, count);
+            // Spike S2 mesh-only variant: one mesh threadgroup per candidate.
+            // 2D grid (x <= 32768 threadgroups): a 1D mesh grid of ~700K
+            // threadgroups drew only part of bench 8 (grid dimension limit).
+            args[MESHLET_ARGS_DIRECT + c * 3u + 0u] = min(count, 32768u);
+            args[MESHLET_ARGS_DIRECT + c * 3u + 1u] = (count + 32767u) / 32768u;
+            args[MESHLET_ARGS_DIRECT + c * 3u + 2u] = 1u;
             // Phase B starts empty (meshlet_b_scan fills it when it runs).
             ranges[3u + c] = GPUMeshletDrawRange{0u, 0u, c, MESHLET_PHASE_B};
             writeArgs(args, 3u + c, 0u);
@@ -432,6 +438,50 @@ using MeshletMesh = metal::mesh<VertexOut, void, MESHLET_MESH_GROUP, MESHLET_MES
                            const device uchar* meshletTriangles [[buffer(8)]]) {
     const GPUMeshlet m           = meshlets[payload.meshlet[gid]];
     const device GPUInstance& gi = instances[payload.slot[gid]];
+    if (tid == 0u) out.set_primitive_count(m.triangleCount);
+    if (tid < m.vertexCount) {
+        const device GPUVertex& v = vertices[meshletVertices[m.vertexOffset + tid]];
+        const float4x4 model       = loadMatrix(gi.modelMatrix);
+        const float3x3 normalMatrix = float3x3(model[0].xyz, model[1].xyz, model[2].xyz);
+        const float4 world         = model * float4(v.px, v.py, v.pz, 1.0);
+        VertexOut o;
+        o.position      = loadMatrix(frame.viewProjection) * world;
+        o.worldPos      = world.xyz;
+        o.normal        = normalMatrix * float3(v.nx, v.ny, v.nz);
+        o.tangent       = float4(normalMatrix * float3(v.tx, v.ty, v.tz), v.tw);
+        o.uv            = float2(v.u, v.v);
+        o.materialIndex = gi.materialIndex;
+        o.mirrored      = (gi.flags & INSTANCE_FLAG_MIRRORED) != 0 ? 1u : 0u;
+        out.set_vertex(tid, o);
+    }
+    if (tid < m.triangleCount) {
+        const uint base = m.triangleOffset + tid * 3u;
+        out.set_index(tid * 3u + 0u, meshletTriangles[base + 0u]);
+        out.set_index(tid * 3u + 1u, meshletTriangles[base + 1u]);
+        out.set_index(tid * 3u + 2u, meshletTriangles[base + 2u]);
+    }
+}
+
+// Spike S2 (--meshlet-object off): no object stage; mesh threadgroup g draws
+// candidate range.first + g of the phase-A list (no culling at all).
+[[mesh]] void meshlet_mesh_direct(MeshletMesh out, uint tid [[thread_index_in_threadgroup]],
+                                  uint2 tg [[threadgroup_position_in_grid]], uint2 grid [[threadgroups_per_grid]],
+                                  constant FrameConstants& frame [[buffer(0)]],
+                                  const device GPUVertex* vertices [[buffer(1)]],
+                                  const device GPUInstance* instances [[buffer(2)]],
+                                  const device GPUMeshlet* meshlets [[buffer(6)]],
+                                  const device uint* meshletVertices [[buffer(7)]],
+                                  const device uchar* meshletTriangles [[buffer(8)]],
+                                  const device GPUMeshletDrawRange& range [[buffer(11)]],
+                                  const device GPUMeshletCandidate* list [[buffer(12)]]) {
+    const uint gid = tg.y * grid.x + tg.x;
+    if (gid >= range.count) {
+        if (tid == 0u) out.set_primitive_count(0u);
+        return;
+    }
+    const GPUMeshletCandidate c  = list[range.first + gid];
+    const GPUMeshlet m           = meshlets[c.meshlet];
+    const device GPUInstance& gi = instances[c.slot];
     if (tid == 0u) out.set_primitive_count(m.triangleCount);
     if (tid < m.vertexCount) {
         const device GPUVertex& v = vertices[meshletVertices[m.vertexOffset + tid]];

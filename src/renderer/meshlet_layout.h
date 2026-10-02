@@ -53,6 +53,10 @@ PHOSPHOR_GPU_CONSTANT u32 MESHLET_MESH_GROUP   = 128;
 PHOSPHOR_GPU_CONSTANT u32 MESHLET_PAYLOAD_BYTES = MESHLET_OBJECT_GROUP * 12;
 /// Classes x phases of the indirect mesh draws.
 PHOSPHOR_GPU_CONSTANT u32 MESHLET_DRAWS = SCENE_CULL_CLASSES * 2;
+/// Indirect argument words: 6 object-grid draws, then (spike S2) 3 mesh-only
+/// phase-A draws whose grid is one mesh threadgroup per candidate.
+PHOSPHOR_GPU_CONSTANT u32 MESHLET_ARGS_DIRECT = MESHLET_DRAWS * 3;
+PHOSPHOR_GPU_CONSTANT u32 MESHLET_ARGS_WORDS  = MESHLET_DRAWS * 3 + SCENE_CULL_CLASSES * 3;
 /// Upper bound of the meshlets of one mesh (loop bound of meshlet_cand_write).
 PHOSPHOR_GPU_CONSTANT u32 MESHLET_MAX_PER_MESH = 65536;
 
@@ -86,7 +90,7 @@ PHOSPHOR_GPU_CONSTANT u32 MB_MATERIALS   = 3;  // GPUMaterial[] (double-sided ->
 PHOSPHOR_GPU_CONSTANT u32 MB_SCENE_FLAGS = 4;  // u32[slots]: F5 instance cull flags (bit 0 visible)
 PHOSPHOR_GPU_CONSTANT u32 MB_GROUP_SUMS  = 5;  // u32[groups * 3]: per-class sums, then (scan) offsets
 PHOSPHOR_GPU_CONSTANT u32 MB_RANGES      = 6;  // GPUMeshletDrawRange[MESHLET_DRAWS] (phase * 3 + class)
-PHOSPHOR_GPU_CONSTANT u32 MB_ARGS        = 7;  // u32[MESHLET_DRAWS * 3]: threadgroups per grid (indirect)
+PHOSPHOR_GPU_CONSTANT u32 MB_ARGS        = 7;  // u32[MESHLET_ARGS_WORDS]: threadgroups per grid (indirect)
 PHOSPHOR_GPU_CONSTANT u32 MB_COUNTERS    = 8;  // GPUMeshletCounters
 PHOSPHOR_GPU_CONSTANT u32 MB_GATE        = 9;  // u32[1]: nonzero = overflow (the F5 ICB fallback draws)
 PHOSPHOR_GPU_CONSTANT u32 MB_CANDIDATES  = 10; // GPUMeshletCandidate[capacity]
@@ -144,6 +148,7 @@ inline constexpr const char* KERNEL_MESHLET_B_WRITE    = "meshlet_b_write";
 inline constexpr const char* MESHLET_OBJECT_FN         = "meshlet_object";
 inline constexpr const char* MESHLET_MESH_FN           = "meshlet_mesh";
 inline constexpr const char* MESHLET_MESH_DEBUG_FN     = "meshlet_mesh_debug";
+inline constexpr const char* MESHLET_MESH_DIRECT_FN    = "meshlet_mesh_direct";
 inline constexpr const char* MESHLET_DEBUG_FS          = "meshlet_debug_fs";
 inline constexpr const char* KERNEL_HIZ_LEVEL0         = "hiz_level0";
 inline constexpr const char* KERNEL_HIZ_REDUCE         = "hiz_reduce";

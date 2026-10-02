@@ -174,6 +174,8 @@ namespace phosphor {
 //   --culling-script   bench 7: the F6 scripted Culling Viz (dense
 //                      buildings, fly-through camera, disappearing occluder,
 //                      camera cut, fast object, spawn/delete/reuse)
+//   --meshlet-object off  spike S2: mesh-only pipeline without object stage
+//                      (needs --meshlet-cull off; a measurement variant)
 //   --history-reset-every N  F6.5: invalidate the Hi-Z history every N
 //                      frames (camera-cut path; 0 = only on real cuts)
 //
@@ -292,6 +294,7 @@ struct LaunchOptions {
     u32          resolutionHeight = 0;
     bool         cullingScript    = false;
     u32          historyResetEvery = 0;
+    bool         meshletObjectStage = true; // --meshlet-object off: spike S2 mesh-only pipeline
 
     [[nodiscard]] bool benchmark() const { return frames > 0; }
 };
