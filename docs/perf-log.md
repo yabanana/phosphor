@@ -769,3 +769,26 @@ p50; CPU e GPU ms p50; macchina non quieta):
   `hot_reload_check` verdi; `hitch_check` intermittente anche su `main` per
   i picchi del pompaggio eventi SDL/Cocoa (macchina non quieta, vedi
   opt-log).
+
+## F6 — Mesh shader e culling a due fasi (2026-10-02, branch `phase/f6`)
+
+### Preset congelato del gate (dichiarato prima della misura)
+
+Preset `culling-viz-f6-1920x1080`, fissato prima delle misure del gate e non
+modificato dopo:
+
+- scena: bench 7 `--culling-script` (edifici suddivisi 12×12 per faccia,
+  1728 triangoli, 10 000 edifici + piano + muro + sfera; loop di 20 s con
+  muro che scompare/ricompare, 3 tagli di camera, salita, pan 360°, sfera a
+  150 unità/s, churn 20 edifici ogni 0,25 s nella stessa cella); seed fissi
+  nel codice (42 per le altezze, xorshift `0x9E3779B97F4A7C15` per il churn);
+- risoluzione interna = output 1920×1080 (`--resolution 1920x1080`, drawable
+  verificato all'avvio), scala 1, niente DRS né interpolazione;
+- `--geometry-path mesh --meshlet-cull two-phase --hiz-path auto` (compute
+  SIMD-group, scelta S3), cook `standard-64v124t`, `--fixed-timestep`,
+  `--no-ui`, `--warmup 120 --frames 1200` (un loop intero), vsync on (60 fps
+  reali: il display è a 120 Hz, frame presentati realmente renderizzati);
+- 3 repliche, macchina quieta (un solo processo GPU), alimentazione AC.
+  Riportati anche: vsync off (costi CPU/GPU), fallback `--force-family
+  apple9` (stesso preset), backend `--hiz-path sampler` (Apple10) e il
+  percorso indexed F5 sullo stesso preset come riferimento.
