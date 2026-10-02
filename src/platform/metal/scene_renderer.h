@@ -10,6 +10,7 @@
 
 #include <array>
 #include <atomic>
+#include <functional>
 #include <optional>
 #include <span>
 #include <vector>
@@ -81,7 +82,15 @@ public:
     // --- Render graph (Engine::declareFrameGraph) ----------------------------------
     /// Import the scene's buffers and add the scene passes for `mode` (Scene
     /// update, Scene transforms, and with on Instance cull + Draw build).
-    void addPassesToGraph(rg::RenderGraph& graph, GpuDrivenMode mode);
+    /// F6: `afterCull` (mesh path) declares its passes right after Instance
+    /// cull and returns the buffer holding the draw gate, which Draw build
+    /// then reads (see setDrawGate).
+    void addPassesToGraph(rg::RenderGraph& graph, GpuDrivenMode mode,
+                          const std::function<rg::BufferRef(rg::RenderGraph&)>& afterCull = {});
+    /// F6: the instance cull flags and visible list of the graph (read by the
+    /// meshlet candidate pass).
+    [[nodiscard]] rg::BufferRef frameListsRef() const { return graphFrame_; }
+    [[nodiscard]] rg::BufferRef dataRef() const { return graphData_; }
     /// Accesses of a pass that draws the scene (Forward, overlays): instances,
     /// materials (vertex + fragment) and, with on, the ICB / visible list as
     /// indirect arguments at the Vertex stage (spike S5).
@@ -98,6 +107,25 @@ public:
     /// F4.7: the same draws (same bindings, viewport, cull state, ICB) with
     /// another pipeline.  With `depthTest` the reverse-Z depth state is used.
     void encodeOverlay(MTL4::RenderCommandEncoder* encoder, pipe::PipelineHandle pipeline, bool depthTest) const;
+
+    // --- F6 mesh path -------------------------------------------------------------
+    /// Address of the draw gate word for this frame's Draw build (default: a
+    /// constant 1, every bucket drawn).  The mesh path passes its overflow
+    /// word, so the ICB stays empty unless the meshlet candidates overflowed.
+    void setDrawGate(MTL::GPUAddress gate) { drawGate_ = gate; }
+    /// The indexed fallback of one cull class inside the mesh path's render
+    /// encoder: forward pipeline, forward arguments, the class's ICB range.
+    /// The caller has set the class's cull state and the depth state.
+    /// Returns the commands encoded.
+    u32 encodeFallbackClass(MTL4::RenderCommandEncoder* encoder, u32 cullClass) const;
+    [[nodiscard]] MTL::GPUAddress frameConstantsAddress() const { return frameConstants_; }
+    [[nodiscard]] MTL::GPUAddress lightsAddress() const { return lightsAddress_; }
+    [[nodiscard]] MTL::GPUAddress textureTableAddress() const { return textureTable_; }
+    [[nodiscard]] MTL::Buffer* vertexBuffer() const { return vertexBuffer_; }
+    [[nodiscard]] MTL::Buffer* meshBuffer() const { return meshBuffer_; }
+    [[nodiscard]] u32 forwardVariantIndex() const { return variantIndex_; }
+    [[nodiscard]] MTL::DepthStencilState* depthState() const { return depthState_; }
+    void countCommands(u32 n) const { count(0, n); }
 
     // --- Diagnostics -------------------------------------------------------------
     [[nodiscard]] u32 lastTriangleCount() const { return lastTriangles_; }
@@ -159,6 +187,13 @@ private:
     rg::BufferRef   graphData_;
     rg::BufferRef   graphFrame_;
     GpuDrivenMode   graphMode_ = GpuDrivenMode::Off;
+    // F6: draw gate (setDrawGate), constant-1 default.
+    MTL::Buffer*    drawGateOpen_ = nullptr;
+    MTL::GPUAddress drawGate_     = 0;
+    MTL::GPUAddress frameConstants_ = 0;
+    MTL::GPUAddress lightsAddress_  = 0;
+    MTL::GPUAddress textureTable_   = 0;
+    u32             variantIndex_   = 0;
 
     // Frame state (prepareFrame -> encode*).
     const SceneStore* store_ = nullptr;

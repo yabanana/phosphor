@@ -25,7 +25,7 @@ mkdir -p "$out_dir"
 failures=0
 
 unexpected() { # log -> count of lines that are not ours / not expected
-    grep -Ev '^\[INFO\]|^BENCH|^SCENE|^PIPELINES|^STARTUP|^HOT-RELOAD|^GRAPH-TRANSIENTS|^ASYNC-COMPUTE|Validation Enabled' "$1" |
+    grep -Ev '^\[INFO\]|^BENCH|^SCENE|^MESHLET |^PIPELINES|^STARTUP|^HOT-RELOAD|^GRAPH-TRANSIENTS|^ASYNC-COMPUTE|Validation Enabled' "$1" |
         grep -Ev "${2:-^$}" | grep -c . || true
 }
 

@@ -43,6 +43,9 @@ kernel void hiz_level0(constant GPUHiZParams& p [[buffer(0)]], depth2d<float, ac
             if (px.x < p.srcSize[0] && px.y < p.srcSize[1]) m = min(m, depth.read(px));
         }
     }
+    // Self-check negative control (--debug-meshlets-corrupt depth): texel
+    // (0, 0) claims the nearest depth, an UNSAFE pyramid the check must report.
+    if (p.pad[0] != 0u && gid.x == 0u && gid.y == 0u) m = 1.0f;
     dst.write(float4(m), gid, 0);
 }
 

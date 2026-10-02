@@ -66,6 +66,18 @@ public:
 
     /// Suggested initial camera placement.
     [[nodiscard]] virtual CameraSetup getDefaultCamera() const = 0;
+
+    /// F6: a scripted camera for the simulated time `t` (seconds since the
+    /// bench started).  Returns false when the bench has none (the user
+    /// camera is used).  `cut` is set on the frame the script teleports the
+    /// camera (the renderer resets its temporal history).
+    virtual bool scriptedCamera(double t, glm::vec3& position, glm::vec3& target, bool& cut) const {
+        (void)t;
+        (void)position;
+        (void)target;
+        (void)cut;
+        return false;
+    }
 };
 
 /// F5.6: parameters of the benches that take any (bench 8, "1M Instances");
@@ -75,6 +87,7 @@ struct TestBenchParams {
     u32   meshes            = 0;     // --scene-meshes
     float dynamicCpuPercent = -1.0f; // --dynamic-cpu (0..100)
     u32   churn             = 0;     // --churn: instances destroyed + created per frame
+    bool  cullingScript     = false; // --culling-script: bench 7's scripted F6 scenario
 };
 
 /// Factory: create a concrete TestBench by type enum.

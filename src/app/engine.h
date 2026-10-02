@@ -15,6 +15,8 @@
 #include "renderer/scene_extract.h"
 #include "testbench/testbench.h"
 
+#include <glm/glm.hpp>
+
 #include <array>
 #include <chrono>
 #include <memory>
@@ -45,6 +47,7 @@ class MetalTextureManager;
 class PipelineCache;
 class ShaderReloader;
 class SceneRenderer;
+class MeshRenderer;
 class SceneStore;
 class GpuSceneChecker;
 class Timer;
@@ -113,6 +116,7 @@ private:
     std::unique_ptr<PipelineCache>       pipelines_; // F3: every pipeline of the engine
     std::unique_ptr<ShaderReloader>      reloader_;  // F3.6 hot reload (Debug)
     std::unique_ptr<SceneRenderer>       renderer_;
+    std::unique_ptr<MeshRenderer>        mesh_;      // F6 --geometry-path mesh
     std::unique_ptr<MetalTextureManager> textures_;
     std::unique_ptr<ImGuiRenderer>       imguiRenderer_;
     std::unique_ptr<FrameCapture>        capture_;
@@ -179,6 +183,30 @@ private:
     std::unique_ptr<GpuSceneChecker> sceneChecker_; // --debug-gpu-scene
     u32  gpuSceneChecks_   = 0;
     u32  gpuSceneFailures_ = 0;
+    // F6: Hi-Z history of the (single) view: valid once a two-phase frame has
+    // written it with `viewProj` at width x height; any reset makes phase A
+    // treat every geometrically valid candidate as visible.
+    struct HiZHistory {
+        bool  valid = false;
+        float viewProj[16]{};
+        u32   width = 0, height = 0;
+        u64   generation = 0;     // incremented on every reset
+        glm::vec3 cameraPosition{0.0f};
+        glm::vec3 cameraFront{0.0f, 0.0f, -1.0f};
+        const char* lastReset = "start";
+    } history_;
+    struct MeshletSamples {
+        std::vector<float> candidates, drawnA, frustum, cone, historyRejected, drawnB, occludedB, primitives;
+        u32 overflowFrames = 0;
+        u32 historyResets  = 0;
+        void reserve(u32 frames);
+    } meshletSamples_;
+    GPUMeshletCounters lastMeshletCounters_{};
+    u32  meshletChecks_   = 0;
+    u32  meshletFailures_ = 0;
+    std::unique_ptr<class MeshletChecker> meshletChecker_; // --debug-meshlets
+    /// F6.7 --debug-meshlets: read the frame's meshlet data back and check it; false on FAIL.
+    bool checkMeshlets(u32 slot);
 
     // F3 hitch measurement: per-frame records and bench-switch phases.
     FrameTrace                  trace_;
@@ -203,6 +231,8 @@ private:
         OverlayMode overlay = OverlayMode::None;
         GpuDrivenMode gpuDriven = GpuDrivenMode::Off;
         u64  sceneBuffers  = 0; // GpuSceneBuffers::version(): capacities changed
+        u64  meshletBuffers = 0; // F6: MeshRenderer::version() (+ debug view)
+        u32  debugView      = 0;
         bool operator==(const GraphKey&) const = default;
     };
     rg::RenderGraph frameGraph_;

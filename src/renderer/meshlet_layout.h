@@ -112,7 +112,11 @@ PHOSPHOR_GPU_CONSTANT u32 MR_RANGE      = 11; // GPUMeshletDrawRange of this dra
 PHOSPHOR_GPU_CONSTANT u32 MR_LIST       = 12; // GPUMeshletCandidate[]: candidates (A) or B list (B)
 PHOSPHOR_GPU_CONSTANT u32 MR_B_FLAGS    = 13; // u32[] written by phase A
 PHOSPHOR_GPU_CONSTANT u32 MR_COUNTERS   = 14; // GPUMeshletCounters
-PHOSPHOR_GPU_CONSTANT u32 MR_BIND_COUNT = 15;
+/// u32[2 * capacity]: with MESHLET_CULL_RECORD (self-check frames) phase A
+/// writes the decision of candidate i at [i], phase B the decision of B-list
+/// entry j at [capacity + j].
+PHOSPHOR_GPU_CONSTANT u32 MR_DECISIONS  = 15;
+PHOSPHOR_GPU_CONSTANT u32 MR_BIND_COUNT = 16;
 /// Texture slot of the pyramid the object shader tests against (history in
 /// phase A, Hi-Z A in phase B).
 PHOSPHOR_GPU_CONSTANT u32 MR_TEX_HIZ    = 0;

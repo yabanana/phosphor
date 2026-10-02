@@ -14,6 +14,7 @@ namespace phosphor {
 
 class CullingViz final : public TestBench {
 public:
+    explicit CullingViz(bool script = false) : script_(script) {}
     void setup(ECS& ecs, GpuScene& gpuScene, TextureManager& textures) override;
     void update(float dt, ECS& ecs) override;
     void teardown(ECS& ecs, GpuScene& gpuScene) override;
@@ -27,6 +28,7 @@ private:
     static constexpr float BLOCK_SIZE   = 5.0f;
 
     std::vector<EntityID> entities_;
+    bool script_ = false;
 };
 
 } // namespace phosphor

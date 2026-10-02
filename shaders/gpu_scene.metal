@@ -32,7 +32,7 @@ static_assert(SB_CULL_INSTANCES == 1 && SB_CULL_MESHES == 2 && SB_CULL_FLAGS == 
                   SB_CULL_COUNTERS == 5 && SB_CULL_VISIBLE == 6 && SB_CULL_PREFIX == 7,
               "scene_cull_* slots");
 static_assert(SB_DRAW_BUCKETS == 1 && SB_DRAW_COMMANDS == 2 && SB_DRAW_PREFIX == 3 && SB_DRAW_ICB == 4 &&
-                  SB_DRAW_INDICES == 5 && SB_DRAW_ARGS == 6 && SB_DRAW_COUNTERS == 7,
+                  SB_DRAW_INDICES == 5 && SB_DRAW_ARGS == 6 && SB_DRAW_COUNTERS == 7 && SB_DRAW_GATE == 8,
               "scene_draw_build slots");
 static_assert(SCENE_CULL_GROUP == 1024, "the cull kernels are written for 32 SIMD-groups of 32");
 
@@ -179,8 +179,10 @@ kernel void scene_draw_build(constant GPUDrawParams& p [[buffer(0)]], const devi
                              const device uint* commandBuckets [[buffer(2)]], const device uint* prefix [[buffer(3)]],
                              constant GPUIcbContainer& c [[buffer(4)]], const device uint* indices [[buffer(5)]],
                              device uint* drawArgs [[buffer(6)]], device atomic_uint* counters [[buffer(7)]],
-                             uint tid [[thread_position_in_grid]], uint lane [[thread_index_in_simdgroup]]) {
+                             const device uint* gate [[buffer(8)]], uint tid [[thread_position_in_grid]],
+                             uint lane [[thread_index_in_simdgroup]]) {
     uint drawn = 0u;
+    const bool enabled = gate[0] != 0u;
     if (tid < p.commandCount) {
         const uint b       = commandBuckets[tid];
         uint instanceCount = 0u;
@@ -191,9 +193,9 @@ kernel void scene_draw_build(constant GPUDrawParams& p [[buffer(0)]], const devi
             instanceCount         = prefix[k.firstSlot + k.capacity] - baseInstance;
         }
         render_command cmd(c.icb, tid);
-        if (instanceCount == 0u) {
+        if (instanceCount == 0u || !enabled) {
             cmd.reset();
-            baseInstance = 0u;
+            if (instanceCount == 0u) baseInstance = 0u;
         } else {
             const GPUDrawBucket k = buckets[b];
             cmd.draw_indexed_primitives(primitive_type::triangle, k.indexCount, indices + k.indexOffset, instanceCount,

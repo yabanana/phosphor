@@ -144,6 +144,9 @@ add_executable(phosphor
     src/platform/metal/gpu_scene_check.cpp
     src/platform/metal/gpu_timestamps.cpp
     src/platform/metal/graph_debug_passes.cpp
+    src/platform/metal/hiz_builder.cpp
+    src/platform/metal/mesh_renderer.cpp
+    src/platform/metal/meshlet_check.cpp
     src/platform/metal/known_cost_pass.cpp
     src/platform/metal/scenario_passes.cpp
     src/platform/metal/metal_context.cpp

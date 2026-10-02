@@ -28,7 +28,8 @@ static_assert(MB_PARAMS == 0 && MB_INSTANCES == 1 && MB_MESHES == 2 && MB_MATERI
               "meshlet kernel slots");
 static_assert(MR_FRAME == 0 && MR_VERTICES == 1 && MR_INSTANCES == 2 && MR_MESHLETS == 6 &&
                   MR_MESHLET_VERTICES == 7 && MR_MESHLET_TRIANGLES == 8 && MR_BOUNDS == 9 && MR_PARAMS == 10 &&
-                  MR_RANGE == 11 && MR_LIST == 12 && MR_B_FLAGS == 13 && MR_COUNTERS == 14 && MR_TEX_HIZ == 0,
+                  MR_RANGE == 11 && MR_LIST == 12 && MR_B_FLAGS == 13 && MR_COUNTERS == 14 && MR_DECISIONS == 15 &&
+                  MR_TEX_HIZ == 0,
               "meshlet draw slots");
 static_assert(MESHLET_SCAN_GROUP == 1024 && MESHLET_OBJECT_GROUP == 32 && MESHLET_MESH_GROUP == 128,
               "kernels written for these sizes");
@@ -185,6 +186,13 @@ kernel void meshlet_cand_write(constant GPUMeshletCullParams& p [[buffer(0)]],
     if (ulong(pos) + ulong(w) > ulong(p.candidateCapacity)) return; // never written out of bounds
     const uint first = meshes[instances[tid].meshIndex].meshletOffset;
     for (uint j = 0; j < w; ++j) candidates[pos + j] = GPUMeshletCandidate{tid, first + j};
+    // Self-check negative control (--debug-meshlets-corrupt id): the first
+    // candidate names another meshlet of the same mesh (or, for a 1-meshlet
+    // mesh, the neighbouring slot): in range, wrong.
+    if (p.corruptId != 0u && pos == 0u) {
+        candidates[0] = w > 1u ? GPUMeshletCandidate{tid, first + 1u}
+                               : GPUMeshletCandidate{tid + 1u < p.slotCount ? tid + 1u : 0u, first};
+    }
 }
 
 // ---- phase B list ------------------------------------------------------------------
@@ -296,7 +304,7 @@ static float hizMin(texture2d<float, access::read> hiz, HiZFootprint f) {
                                constant GPUMeshletCullParams& p [[buffer(10)]],
                                const device GPUMeshletDrawRange& range [[buffer(11)]],
                                const device GPUMeshletCandidate* list [[buffer(12)]], device uint* bFlags [[buffer(13)]],
-                               device atomic_uint* counters [[buffer(14)]],
+                               device atomic_uint* counters [[buffer(14)]], device uint* decisions [[buffer(15)]],
                                const device GPUInstance* instances [[buffer(2)]],
                                const device GPUMeshlet* meshlets [[buffer(6)]],
                                const device GPUMeshletBounds* bounds [[buffer(9)]],
@@ -335,6 +343,9 @@ static float hizMin(texture2d<float, access::read> hiz, HiZFootprint f) {
             const HiZFootprint f = hizFootprint(p.viewProj, w, p);
             if (f.usable != 0u && hizOccluded(f.nearestDepth, hizMin(hiz, f))) decision = MESHLET_DECISION_OCCLUDED;
         }
+    }
+    if (valid && (p.flags & MESHLET_CULL_RECORD) != 0u) {
+        decisions[(phaseB ? p.candidateCapacity : 0u) + range.first + idx] = decision;
     }
     const bool drawn = valid && (decision == MESHLET_DECISION_DRAWN_A || decision == MESHLET_DECISION_DRAWN_B);
     // Debug view (cull): also the cone rejects in phase A and the occluded

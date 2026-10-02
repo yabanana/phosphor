@@ -282,6 +282,7 @@ PHOSPHOR_GPU_CONSTANT u32 MESHLET_CULL_OCCLUSION     = 1u << 2; // two-phase Hi-
 PHOSPHOR_GPU_CONSTANT u32 MESHLET_CULL_HISTORY_VALID = 1u << 3; // phase A may use the history pyramid
 PHOSPHOR_GPU_CONSTANT u32 MESHLET_CULL_DEBUG_ALL     = 1u << 4; // debug view: emit every candidate, coloured by decision
 PHOSPHOR_GPU_CONSTANT u32 MESHLET_CULL_SIZE          = 1u << 5; // APPROXIMATE: projected bound smaller than minPixels
+PHOSPHOR_GPU_CONSTANT u32 MESHLET_CULL_RECORD        = 1u << 6; // self-check frame: record every decision (MR_DECISIONS)
 
 // Decision of the culling for one candidate (counters, debug views).
 PHOSPHOR_GPU_CONSTANT u32 MESHLET_DECISION_DRAWN_A   = 0; // drawn in phase A
@@ -314,7 +315,7 @@ struct GPUMeshletCullParams {
     u32   candidateCapacity; // entries of the candidate / B lists
     u32   candidateGroups;   // ceil(candidateCapacity / MESHLET_SCAN_GROUP)
     float minPixels;         // MESHLET_CULL_SIZE (approximate; off in the exact preset)
-    u32   pad;
+    u32   corruptId;         // self-check negative control: 1 = candidate 0 gets a wrong (in-range) id
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUMeshletCullParams) == 272, "GPUMeshletCullParams layout");
 
