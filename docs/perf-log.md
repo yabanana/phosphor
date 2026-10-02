@@ -823,8 +823,36 @@ il preset sopra; fps = frame realmente renderizzati e presentati.
   compreso, scende a ~87 fps con p95 ~16,0–16,5 ms mentre CPU (0,28 ms) e GPU
   (1,7 ms) del motore restano bassi: il limite è la presentazione con il
   compositore carico (WindowServer al 76% per la registrazione dello schermo
-  di un altro agente). Il margine pulito va rimisurato a macchina quieta
-  (residuo dichiarato).
+  di un altro agente). Il margine pulito è stato rimisurato in serata
+  (serie 4 sotto).
+
+#### Serie 4 (21:18, HEAD 0c097c4, macchina più libera)
+
+Emulatore Android chiuso; restavano l'app ChatGPT/Codex (renderer al
+~125% + ~100% di CPU, non chiudibili) e la GPU a riposo con picchi
+intermittenti al ~30% (campioni `ioreg` `Device Utilization %` prima della
+misura); alimentazione AC, `powermode 2`, nessun avviso termico.  Stesso
+preset, 3 repliche per configurazione in ordine ruotato:
+
+| Configurazione | fps | frame p95 ms | p99 | CPU ms | GPU pass sum ms | alloc |
+|---|---|---|---|---|---|---|
+| mesh two-phase, compute | 120,0 ×3 | 8,51 / 8,52 / 8,52 | 8,62–8,64 | 0,25–0,29 | 2,44–2,52 | 0 |
+| `--force-family apple9` | 120,0 ×3 | 8,51 / 8,52 / 8,53 | 8,62–8,64 | 0,25–0,28 | 2,36–2,53 | 0 |
+| `--hiz-path sampler` | 120,0 / 120,0 / 119,8 | 8,49 / 8,50 / 8,52 | 8,61–8,63 | 0,25–0,27 | 2,46–2,68 | 0 |
+| indexed F5 (riferimento) | 120,0 ×3 | 8,49 / 8,49 / 8,50 | 8,54–8,58 | 0,21–0,23 | 4,74–4,88 | 0 |
+| mesh, vsync off | 80,0 ×3 | 16,49–16,53 | 16,63–16,69 | 0,27–0,28 | 2,48–2,56 | 0 |
+
+- **Gate superato con margine pulito**: 120 fps reali (il display a 120 Hz
+  presenta ogni frame), p95 8,49–8,53 ms in tutte le 12 esecuzioni con vsync,
+  0 overflow, 0 allocazioni GPU.  Le serie 1–3 restano valide come esito del
+  gate, la 4 è quella che misura il margine.
+- **Vsync off limitato dalla presentazione**: 80,0 fps fissi con attesa del
+  drawable 12,2 ms in media mentre CPU (0,27 ms) e GPU (2,5 ms) sono minimi;
+  il controllo indexed senza vsync dà lo stesso 80,0 fps (attesa 12,3 ms), e
+  il bench 3 senza vsync 88–90 fps: è il compositore in questa finestra
+  (al mattino 255–297 fps), non il motore.  Con la presentazione limitata la
+  GPU scala le frequenze (DVFS): i tempi GPU senza vsync di questa serata
+  non sono confrontabili con quelli del mattino (vedi S2 in `opt-log.md`).
 - Costo del motore sul preset (serie 1, vsync off): GPU pass sum 1,12–1,35 ms
   contro 2,07 ms dell'indexed sulla stessa scena senza vsync (S2: −39%), CPU
   0,24–0,26 ms per frame; comandi CPU costanti (109 per frame, O8).

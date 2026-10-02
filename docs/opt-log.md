@@ -1663,6 +1663,18 @@ resta `--geometry-path indexed`** (riferimento F5, nessuna regressione); il
 percorso mesh two-phase è il preset di Culling Viz e la base di F7.
 Scelte per scena: candidato OPT, non attivato.
 
+Rimisura serale (21:23, HEAD 0c097c4, 3 repliche ruotate, stesso script,
+`build/f6-s2g`): non utilizzabile per i numeri assoluti. Il compositore
+limitava la presentazione senza vsync a ~80–90 fps (attesa del drawable
+~11–12 ms, anche con l'indexed), la GPU restava inattiva gran parte del
+frame e scalava le frequenze: bench 3 indexed 5,03 ms (dev. std. 0,85)
+contro 1,64 al mattino, deviazioni fino a 1,2 ms. L'ordine qualitativo
+conferma le decisioni: scena di occlusione two-phase 3,20 contro indexed
+4,75 (−33%); two-phase più caro su bench 1 e bench 7 classico; bench 8
+two-phase ≈ indexed (5,93 / 5,95); pass-through mesh mai migliore in modo
+ripetibile (bench 3 entro la deviazione standard). Restano i valori del
+mattino (frequenze sature, interlacciati).
+
 Scoperta: una griglia mesh **1D** di ~700K threadgroup (mesh-only, bench 8)
 disegna solo una parte della scena senza alcun messaggio di validazione;
 la variante usa una griglia 2D (x ≤ 32768). La griglia object 1D del
@@ -1750,7 +1762,8 @@ la lettura della fase A del frame n+1).
   Un confronto iniziale tra serie prese in momenti diversi sembrava dare
   +18% sul bench 8: era il carico della macchina, non il codice.
 - **Hitch check:** segnalazioni intermittenti allo stesso tasso su indexed e
-  mesh (2/6 esecuzioni ciascuno), singoli frame CPU da ~0,6 ms in bench con
+  mesh (2/6 esecuzioni ciascuno; in serata 1/6 indexed, 0/6 mesh,
+  interlacciati: un frame da 5,2 ms dopo uno switch), singoli frame CPU da ~0,6 ms in bench con
   soglia p99 ~0,1 + 0,5 ms; preesistente (nota F5). Le liste meshlet ora si
   ridimensionano allo switch (nessuna allocazione o rilascio differito nei
   frame successivi).
@@ -1758,7 +1771,9 @@ la lettura della fase A del frame n+1).
   report completo, nessun crash report, nessun percorso di uscita del motore
   applicabile): non riprodotta in 104 esecuzioni mirate; aggiunta la riga
   `EXIT <code>` stampata da `main` per distinguere una futura occorrenza da
-  un segnale. **Aperta, non spiegata.**
+  un segnale. Rimisura serale: 88 esecuzioni (60 S2, 16 gate, 12
+  `hitch_check`), tutte `EXIT 0` con stato della shell 0. In totale 1 su
+  ~356 esecuzioni dal primo caso. **Aperta, non spiegata.**
 - **O7:** 0 allocazioni GPU nei frame misurati (anche con churn); blocchi
   dell'heap CPU piatti; i byte crescono solo con i timestamp per pass
   (storage delle misure, comportamento F5 noto: ~48 B/frame con i pass in
