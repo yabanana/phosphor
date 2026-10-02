@@ -486,3 +486,15 @@ TEST_CASE("meshlet check: pyramidFromReadback") {
         CHECK(p.level[ref.levels - 1] == ref.level[ref.levels - 1]);
     }
 }
+
+TEST_CASE("meshlet check: a truncated current pyramid fails without reading out of bounds") {
+    // Regression (found by the unit tests): pyramidFromReadback drops an
+    // incomplete level, and the phase-B decisions indexed the missing level.
+    Frame f = buildFrame();
+    MeshletCheckInput in = f.input();
+    std::vector<float> truncated(in.current.begin(), in.current.end() - 1);
+    in.current = truncated;
+    const MeshletCheckResult r = checkMeshletFrame(in);
+    CHECK_FALSE(r.pass);
+    CHECK(r.failures.find("pyramids") != std::string::npos);
+}

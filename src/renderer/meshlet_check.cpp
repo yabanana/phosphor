@@ -197,6 +197,12 @@ MeshletCheckResult checkMeshletFrame(const MeshletCheckInput& in) {
     // ---- pyramids --------------------------------------------------------------------------------
     const HiZPyramid current = pyramidFromReadback(in.current, p.hizSize[0], p.hizSize[1], p.hizLevels);
     const HiZPyramid next    = pyramidFromReadback(in.next, p.hizSize[0], p.hizSize[1], p.hizLevels);
+    if (current.levels != p.hizLevels) {
+        // Phase-B decisions index the pyramid with levels chosen from hizLevels.
+        fail.add("pyramids", "current pyramid truncated (" + std::to_string(current.levels) + " of " +
+                                 std::to_string(p.hizLevels) + " levels)");
+        return r;
+    }
     const HiZPyramid finalRef = buildHiZReference(in.depth.data(), in.width, in.height);
     std::string where;
     if (next.levels != finalRef.levels) {

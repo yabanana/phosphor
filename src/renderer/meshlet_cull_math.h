@@ -15,20 +15,16 @@
 // Normal cone    meshoptimizer v1.3 (meshletutils.cpp): every triangle of the
 //                meshlet faces away from a camera at `cam` when
 //                  dot(normalize(apex - cam), axis) >= cutoff.
-//                Mesh-space cones are moved to world space only for
-//                SIMILARITY transforms (rotation, uniform scale, mirror,
-//                translation; tested with a relative tolerance
-//                MESHLET_SIMILARITY_TOL on the Gram matrix of the columns):
-//                angles are preserved, apex -> M (apex, 1), axis -> M3 axis
-//                (for M = sR, the outward normal M^-T n is parallel to R n =
-//                M3 n / s, mirrored or not: a mirrored instance is drawn with
-//                front-face culling, i.e. the faces whose transformed outward
-//                normal faces away are the culled ones -- the same test).  Any
-//                other matrix, a zero axis (degenerate cluster), cutoff >= 1
-//                (cone wider than ~168 degrees), the camera at the apex: no
-//                rejection.  The threshold is raised by MESHLET_CONE_EPS (cos
-//                space) to absorb the tolerance and rounding.  Double-sided
-//                materials (cull class None) never use the cone (caller).
+//                The test runs in MESH space with cam_m = M^-1 cam: facing is
+//                invariant under any invertible affine map up to sign(det M),
+//                and the sign is exactly what the cull class compensates
+//                (mirrored instances are front-face culled), so the test is
+//                exact for rotation, non-uniform scale, shear and mirror (see
+//                meshletConeCulled).  A zero axis (degenerate cluster), cutoff
+//                >= 1 (cone wider than ~168 degrees), a near-singular matrix,
+//                the camera at the apex: no rejection.  The threshold is
+//                raised by MESHLET_CONE_EPS (cos space) against rounding.
+//                Double-sided materials (cull class None) never use the cone.
 // Hi-Z footprint The 8 corners of the world sphere's AABB are projected with a
 //                view-projection matrix (current frame, or the history's):
 //                any corner with clip w <= near * (1 + 1e-6) (the AABB crosses
@@ -129,7 +125,7 @@ PHOSPHOR_MC_FN bool meshletFrustumCulled(const PHOSPHOR_MC_CONST GPUMeshletCullP
 }
 
 /// True when the 3x3 part of `m` is a similarity (rotation x uniform scale,
-/// mirror allowed) within MESHLET_SIMILARITY_TOL.
+/// mirror allowed) within MESHLET_SIMILARITY_TOL (diagnostics and tests).
 PHOSPHOR_MC_FN bool meshletIsSimilarity(const PHOSPHOR_MC_DEV float* m) {
     PHOSPHOR_MC_STRICT
     const float s0   = m[0] * m[0] + m[1] * m[1] + m[2] * m[2];
@@ -146,25 +142,41 @@ PHOSPHOR_MC_FN bool meshletIsSimilarity(const PHOSPHOR_MC_DEV float* m) {
 }
 
 /// True when every triangle of the meshlet faces away from the camera
-/// (normal cone, see the header comment).  The caller skips double-sided
-/// materials.
+/// (normal cone, see the header comment).  The test runs in MESH space: for
+/// any invertible affine M, the world facing value of a triangle
+/// ((q1-q0) x (q2-q0)) . (q0 - cam) equals det(M) times the mesh-space value
+/// with cam_m = M^-1 cam, so "all back-facing in mesh space from cam_m"
+/// means world back-facing (det > 0, class Back: back-face culled) or world
+/// front-facing (det < 0, class BackMirrored: front-face culled) -- the
+/// rasterizer culls them in both cases.  Valid for non-uniform scale and
+/// shear.  No rejection for a zero axis, cutoff >= 1, a (near-)singular
+/// matrix (|det| <= 1e-6 x the product of the column lengths) or a camera
+/// at the apex.  The caller skips double-sided materials.
 PHOSPHOR_MC_FN bool meshletConeCulled(const PHOSPHOR_MC_DEV float* m, const PHOSPHOR_MC_DEV GPUMeshletBounds& b,
                                       const PHOSPHOR_MC_CONST float* cam) {
     PHOSPHOR_MC_STRICT
     const float threshold = b.coneCutoff + MESHLET_CONE_EPS;
     if (!(threshold < 1.0f)) return false; // no usable cone (cutoff 1 = cone wider than ~168 degrees)
     if (b.coneAxis[0] == 0.0f && b.coneAxis[1] == 0.0f && b.coneAxis[2] == 0.0f) return false; // degenerate cluster
-    if (!meshletIsSimilarity(m)) return false;
-    const float ax = m[0] * b.coneAxis[0] + m[4] * b.coneAxis[1] + m[8] * b.coneAxis[2];
-    const float ay = m[1] * b.coneAxis[0] + m[5] * b.coneAxis[1] + m[9] * b.coneAxis[2];
-    const float az = m[2] * b.coneAxis[0] + m[6] * b.coneAxis[1] + m[10] * b.coneAxis[2];
-    const float dx = m[0] * b.coneApex[0] + m[4] * b.coneApex[1] + m[8] * b.coneApex[2] + m[12] - cam[0];
-    const float dy = m[1] * b.coneApex[0] + m[5] * b.coneApex[1] + m[9] * b.coneApex[2] + m[13] - cam[1];
-    const float dz = m[2] * b.coneApex[0] + m[6] * b.coneApex[1] + m[10] * b.coneApex[2] + m[14] - cam[2];
+    // Columns c0 c1 c2 of the 3x3 part; M^-1 = adj(M) / det with the rows of
+    // adj(M) = c1 x c2, c2 x c0, c0 x c1.
+    const float r0x = m[5] * m[10] - m[6] * m[9], r0y = m[6] * m[8] - m[4] * m[10], r0z = m[4] * m[9] - m[5] * m[8];
+    const float r1x = m[9] * m[2] - m[10] * m[1], r1y = m[10] * m[0] - m[8] * m[2], r1z = m[8] * m[1] - m[9] * m[0];
+    const float r2x = m[1] * m[6] - m[2] * m[5], r2y = m[2] * m[4] - m[0] * m[6], r2z = m[0] * m[5] - m[1] * m[4];
+    const float det = m[0] * r0x + m[1] * r0y + m[2] * r0z;
+    const float l0  = PHOSPHOR_MC_SQRT(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+    const float l1  = PHOSPHOR_MC_SQRT(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+    const float l2  = PHOSPHOR_MC_SQRT(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
+    if (!(PHOSPHOR_MC_ABS(det) > 1.0e-6f * l0 * l1 * l2) || !PHOSPHOR_MC_FINITE(det)) return false;
+    const float px = cam[0] - m[12], py = cam[1] - m[13], pz = cam[2] - m[14];
+    const float cx = (r0x * px + r0y * py + r0z * pz) / det;
+    const float cy = (r1x * px + r1y * py + r1z * pz) / det;
+    const float cz = (r2x * px + r2y * py + r2z * pz) / det;
+    const float dx = b.coneApex[0] - cx, dy = b.coneApex[1] - cy, dz = b.coneApex[2] - cz;
     const float dd = dx * dx + dy * dy + dz * dz;
-    const float aa = ax * ax + ay * ay + az * az;
-    if (!(dd > 0.0f) || !(aa > 0.0f) || !PHOSPHOR_MC_FINITE(dd) || !PHOSPHOR_MC_FINITE(aa)) return false;
-    const float lhs = dx * ax + dy * ay + dz * az;
+    const float aa = b.coneAxis[0] * b.coneAxis[0] + b.coneAxis[1] * b.coneAxis[1] + b.coneAxis[2] * b.coneAxis[2];
+    if (!(dd > 0.0f) || !(aa > 0.0f) || !PHOSPHOR_MC_FINITE(dd)) return false;
+    const float lhs = dx * b.coneAxis[0] + dy * b.coneAxis[1] + dz * b.coneAxis[2];
     return lhs >= threshold * PHOSPHOR_MC_SQRT(dd) * PHOSPHOR_MC_SQRT(aa);
 }
 

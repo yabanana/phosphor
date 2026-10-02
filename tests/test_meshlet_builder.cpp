@@ -326,9 +326,9 @@ bool allTrianglesCulled(const TestMesh& mesh, const MeshletBuildResult& r, const
 
 } // namespace
 
-TEST_CASE("meshlet builder: normal cone is conservative (identity, mirrored, non-uniform)") {
+TEST_CASE("meshlet builder: normal cone is conservative (identity, mirrored, non-uniform, shear)") {
     Rng rng{0xC0FFEEull};
-    u64 culledIdentity = 0, culledMirrored = 0, testedCones = 0;
+    u64 culledIdentity = 0, culledMirrored = 0, culledNonUniform = 0, culledShear = 0, testedCones = 0;
     const std::vector<TestMesh> meshes = testMeshes();
     const std::vector<MeshletBuildOptions> opts = {MeshletBuildOptions{}, optionSets()[4], optionSets()[5]};
     for (const TestMesh& mesh : meshes) {
@@ -337,6 +337,8 @@ TEST_CASE("meshlet builder: normal cone is conservative (identity, mirrored, non
             const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
             const Xf mirror = makeXf(rotation(0.4, -0.9, 1.3) * glm::dmat3(-2, 0, 0, 0, 2, 0, 0, 0, 2), glm::dvec3(3, -1, 2));
             const Xf nonUniform = makeXf(rotation(0.2, 0.3, 0.4) * glm::dmat3(1, 0, 0, 0, 3, 0, 0, 0, 0.5), glm::dvec3(0, 1, 0));
+            // A sheared, mirrored child (rotation under a non-uniform parent, then a mirror).
+            const Xf shear = makeXf(glm::dmat3(-3, 0, 0, 0, 1, 0, 0, 0, 0.7) * rotation(0.0, 0.0, 0.785), glm::dvec3(1, 2, -1));
             const Xf uniformRot = makeXf(rotation(1.1, 0.2, -0.7) * glm::dmat3(1.7), glm::dvec3(-2, 0.5, 1));
             const Xf idXf = makeXf(glm::dmat3(1.0), glm::dvec3(0));
             REQUIRE(mirror.det < 0.0);
@@ -377,9 +379,23 @@ TEST_CASE("meshlet builder: normal cone is conservative (identity, mirrored, non
                         }
                     }
                     {
+                        // F6: the test runs in mesh space (camera through M^-1),
+                        // exact for any affine map: non-uniform scale too.
                         const glm::dvec3 w = apply(nonUniform, center) + dir * dist;
                         const float wf[3] = {float(w.x), float(w.y), float(w.z)};
-                        CHECK_FALSE(meshletConeCulled(nonUniform.m, b, wf)); // not a similarity: never rejected
+                        if (meshletConeCulled(nonUniform.m, b, wf)) {
+                            ++culledNonUniform;
+                            if (!allTrianglesCulled(mesh, r, ml, nonUniform, w))
+                                FAIL("non-uniform scale: cone culled a meshlet with a visible triangle");
+                        }
+                    }
+                    {
+                        const glm::dvec3 w = apply(shear, center) + dir * dist;
+                        const float wf[3] = {float(w.x), float(w.y), float(w.z)};
+                        if (meshletConeCulled(shear.m, b, wf)) {
+                            ++culledShear;
+                            if (!allTrianglesCulled(mesh, r, ml, shear, w)) FAIL("shear + mirror: cone culled a meshlet with a visible triangle");
+                        }
                     }
                     if (zeroAxis) {
                         CHECK_FALSE(meshletConeCulled(identity, b, camF));
@@ -393,6 +409,17 @@ TEST_CASE("meshlet builder: normal cone is conservative (identity, mirrored, non
     CHECK(testedCones > 0);
     CHECK(culledIdentity > 1000);
     CHECK(culledMirrored > 1000);
+    CHECK(culledNonUniform > 1000);
+    CHECK(culledShear > 1000);
+}
+
+TEST_CASE("meshlet cone: singular matrices never reject") {
+    GPUMeshletBounds b{};
+    b.coneAxis[0] = 1.0f;
+    b.coneCutoff  = 0.1f;
+    const float flat[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}; // z collapsed: det 0
+    const float camBehind[3] = {-10, 0, 0};
+    CHECK_FALSE(meshletConeCulled(flat, b, camBehind));
 }
 
 TEST_CASE("meshlet cone: degenerate bounds are never rejected") {
