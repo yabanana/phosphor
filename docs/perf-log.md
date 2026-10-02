@@ -792,3 +792,40 @@ modificato dopo:
   Riportati anche: vsync off (costi CPU/GPU), fallback `--force-family
   apple9` (stesso preset), backend `--hiz-path sampler` (Apple10) e il
   percorso indexed F5 sullo stesso preset come riferimento.
+
+### Gate: risultati (preset congelato, M5 Max, 3 repliche per configurazione)
+
+Stato della macchina dichiarato: **non quieta** (emulatore Android dalle
+12:17, sessione Codex Computer Use con registrazione dello schermo per
+tutta la giornata, carico crescente nel pomeriggio). Tre serie, tutte con
+il preset sopra; fps = frame realmente renderizzati e presentati.
+
+| Serie (ora, codice) | Configurazione | fps | frame p95 ms | p99 | CPU ms | GPU pass sum ms |
+|---|---|---|---|---|---|---|
+| 1 (14:05, 0734cdc) | mesh two-phase, compute | 120,0 ×3 | 9,07 / 9,24 / 9,90 | 9,38–10,99 | 0,35–0,39 | 2,55–3,21 |
+| 1 | `--force-family apple9` | 120,0 ×3 | 9,09 / 9,23 / 9,68 | 9,39–11,14 | 0,35–0,37 | 2,74–3,10 |
+| 1 | `--hiz-path sampler` | 119,9–120,0 | 9,10 / 9,13 / 9,55 | 9,41–10,58 | 0,35–0,37 | 3,03–3,19 |
+| 1 | indexed F5 (riferimento) | 119,9–120,0 | 9,01 / 9,08 / 10,03 | 9,26–11,19 | 0,28–0,32 | 3,84–4,68 |
+| 1 | mesh, vsync off | 255–297 | 10,5–11,8 | 12,7–15,1 | 0,24–0,26 | 1,12–1,35 |
+| 2 (`f6_check --perf`, 1d727ec) | nativo / apple9 / sampler | – | 10,48–12,46 (9 run) | – | – | – |
+| 3 (14:50, HEAD f3505b3) | mesh two-phase, compute | 118,7 / 117,6 / 86,4 | 12,41 / 13,07 / 16,03 | 14,0–16,9 | 0,27–0,29 | 1,66–2,25 |
+| 3 | `--force-family apple9` | 119,1 / 117,3 / 86,9 | 12,07 / 13,11 / 16,28 | 13,7–16,9 | 0,27–0,28 | 1,70–2,06 |
+| 3 | `--hiz-path sampler` | 118,8 / 115,9 / 86,8 | 11,12 / 13,53 / 16,52 | 14,0–17,2 | 0,28 | 1,71–2,20 |
+| 3 | indexed F5 (riferimento) | 119,1 / 112,4 / 88,1 | 12,08 / 13,62 / 16,18 | 13,8–16,9 | 0,23 | 3,29–3,78 |
+| 3 | mesh, vsync off | 199–212 | 13,9–14,4 | 16,5–18,2 | 0,20 | 1,33–1,43 |
+
+- **Gate locale superato** in tutte le esecuzioni mesh (27 su 27 con p95 ≤
+  16,67 ms), nativo, fallback Apple9 e sampler Apple10; 0 allocazioni GPU nei
+  frame misurati, blocchi dell'heap CPU piatti, 0 overflow. Target T0 fisico:
+  `EXTERNAL_VALIDATION_PENDING`; il fallback Apple9 è stato eseguito sul M5
+  (percorso software, non una misura M3).
+- Nella serie 3 la terza replica di **tutte** le configurazioni, indexed
+  compreso, scende a ~87 fps con p95 ~16,0–16,5 ms mentre CPU (0,28 ms) e GPU
+  (1,7 ms) del motore restano bassi: il limite è la presentazione con il
+  compositore carico (WindowServer al 76% per la registrazione dello schermo
+  di un altro agente). Il margine pulito va rimisurato a macchina quieta
+  (residuo dichiarato).
+- Costo del motore sul preset (serie 1, vsync off): GPU pass sum 1,12–1,35 ms
+  contro 2,07 ms dell'indexed sulla stessa scena senza vsync (S2: −39%), CPU
+  0,24–0,26 ms per frame; comandi CPU costanti (109 per frame, O8).
+- Spike S1–S4, scelte e misure di S2 per scena: `opt-log.md`, "F6 — Spike".
