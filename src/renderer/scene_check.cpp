@@ -125,9 +125,11 @@ SceneCheckResult compareScene(const SceneStore& store, const GpuScene& scene, co
             fail(r, "tested counter " + std::to_string(c.tested) + " != live instances " +
                         std::to_string(store.instanceCount()));
         }
-        if (c.drawCommands != nonEmpty) {
+        const u32 expectedDraws = gpu.drawGateOpen ? nonEmpty : 0u;
+        if (c.drawCommands != expectedDraws) {
             ++r.counterErrors;
-            fail(r, "draw command counter " + std::to_string(c.drawCommands) + " != " + std::to_string(nonEmpty));
+            fail(r, "draw command counter " + std::to_string(c.drawCommands) + " != " + std::to_string(expectedDraws) +
+                        (gpu.drawGateOpen ? "" : " (draw gate closed)"));
         }
         if (c.visible + c.culledFrustum + c.culledDistance + c.culledSize != c.tested) {
             ++r.counterErrors;

@@ -218,6 +218,143 @@ struct GPUSceneCounters {
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUSceneCounters) == 32, "GPUSceneCounters layout");
 
+// ---------------------------------------------------------------------------
+// F6: meshlets, mesh rendering and two-phase occlusion culling
+// (renderer/meshlet_layout.h has the kernel/pass contract).
+// ---------------------------------------------------------------------------
+
+/// One meshlet (renderer/meshlet_builder.h): a range of the meshlet vertex
+/// buffer (global vertex indices) and of the packed triangle buffer (3 bytes
+/// per triangle, local vertex indices; triangleOffset is a BYTE offset).
+struct GPUMeshlet {
+    u32 vertexOffset;
+    u32 vertexCount;
+    u32 triangleOffset;
+    u32 triangleCount;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUMeshlet) == 16, "GPUMeshlet layout");
+
+/// Bounds of a meshlet in mesh space (meshoptimizer v1.3 semantics, see
+/// renderer/meshlet_cull_reference.h): bounding sphere, and the normal cone
+/// for back-facing rejection -- all triangles face away from a camera at
+/// `cam` when dot(normalize(coneApex - cam), coneAxis) >= coneCutoff.
+/// coneCutoff >= 1 or a zero axis means "no usable cone" (never rejected).
+struct GPUMeshletBounds {
+    float center[3];
+    float radius;
+    float coneApex[3];
+    float coneCutoff;
+    float coneAxis[3];
+    float pad;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUMeshletBounds) == 48, "GPUMeshletBounds layout");
+
+/// One meshlet of one instance.  `meshlet` is the GLOBAL meshlet index
+/// (GPUMeshInfo::meshletOffset + local index), so candidates of different
+/// instances never collide.  No generation is stored: the two-phase history
+/// is a depth pyramid, never per-meshlet visibility, so a recycled slot
+/// inherits nothing from the entity that used it before.
+struct GPUMeshletCandidate {
+    u32 slot;
+    u32 meshlet;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUMeshletCandidate) == 8, "GPUMeshletCandidate layout");
+
+/// Candidates of one indirect mesh draw (one cull class of one phase):
+/// list[first .. first + count) of the phase's list (A: candidates, B: the
+/// history-rejected list).  Written by the GPU (meshlet_cand_scan /
+/// meshlet_b_scan), read by the object shader.
+struct GPUMeshletDrawRange {
+    u32 first;
+    u32 count;
+    u32 cullClass; // CullClass
+    u32 phase;     // MESHLET_PHASE_*
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUMeshletDrawRange) == 16, "GPUMeshletDrawRange layout");
+
+PHOSPHOR_GPU_CONSTANT u32 MESHLET_PHASE_A = 0;
+PHOSPHOR_GPU_CONSTANT u32 MESHLET_PHASE_B = 1;
+
+// GPUMeshletCullParams::flags
+PHOSPHOR_GPU_CONSTANT u32 MESHLET_CULL_FRUSTUM       = 1u << 0; // sphere vs the 5 planes
+PHOSPHOR_GPU_CONSTANT u32 MESHLET_CULL_CONE          = 1u << 1; // normal cone (similarity transforms only)
+PHOSPHOR_GPU_CONSTANT u32 MESHLET_CULL_OCCLUSION     = 1u << 2; // two-phase Hi-Z test
+PHOSPHOR_GPU_CONSTANT u32 MESHLET_CULL_HISTORY_VALID = 1u << 3; // phase A may use the history pyramid
+PHOSPHOR_GPU_CONSTANT u32 MESHLET_CULL_DEBUG_ALL     = 1u << 4; // debug view: emit every candidate, coloured by decision
+PHOSPHOR_GPU_CONSTANT u32 MESHLET_CULL_SIZE          = 1u << 5; // APPROXIMATE: projected bound smaller than minPixels
+PHOSPHOR_GPU_CONSTANT u32 MESHLET_CULL_RECORD        = 1u << 6; // self-check frame: record every decision (MR_DECISIONS)
+
+// Decision of the culling for one candidate (counters, debug views).
+PHOSPHOR_GPU_CONSTANT u32 MESHLET_DECISION_DRAWN_A   = 0; // drawn in phase A
+PHOSPHOR_GPU_CONSTANT u32 MESHLET_DECISION_DRAWN_B   = 1; // history-rejected, recovered in phase B
+PHOSPHOR_GPU_CONSTANT u32 MESHLET_DECISION_FRUSTUM   = 2;
+PHOSPHOR_GPU_CONSTANT u32 MESHLET_DECISION_CONE      = 3;
+PHOSPHOR_GPU_CONSTANT u32 MESHLET_DECISION_OCCLUDED  = 4; // rejected by the current pyramid in phase B
+PHOSPHOR_GPU_CONSTANT u32 MESHLET_DECISION_HISTORY   = 5; // phase A only: deferred to phase B
+PHOSPHOR_GPU_CONSTANT u32 MESHLET_DECISION_SIZE      = 6; // approximate size cull (never in the exact preset)
+
+/// Per-frame parameters of the meshlet passes (candidates, object shaders).
+/// Planes as GPUCullParams (left, right, bottom, top, near of the reverse-Z
+/// infinite frustum).  The Hi-Z pyramid has power-of-two level-0 dimensions
+/// >= ceil(viewport / 2): level-0 texel (x, y) covers the pixels
+/// [2x, 2x + 2) x [2y, 2y + 2) (pixels outside the viewport count as depth
+/// 1, the neutral value of the min), level L texel covers 2^(L+1) pixels per
+/// side.  Reverse-Z: every texel holds the MINIMUM (farthest) depth.
+struct GPUMeshletCullParams {
+    float viewProj[16];      // current frame
+    float prevViewProj[16];  // view the history pyramid was rendered with
+    float planes[20];
+    float cameraPosition[3];
+    float nearPlane;
+    float viewport[2];       // drawable size in pixels
+    u32   hizSize[2];        // level-0 size of the pyramids (texels)
+    u32   hizLevels;
+    u32   flags;             // MESHLET_CULL_*
+    u32   slotCount;         // scene store slots (candidate kernels)
+    u32   groupCount;        // ceil(slotCount / MESHLET_SCAN_GROUP)
+    u32   candidateCapacity; // entries of the candidate / B lists
+    u32   candidateGroups;   // ceil(candidateCapacity / MESHLET_SCAN_GROUP)
+    float minPixels;         // MESHLET_CULL_SIZE (approximate; off in the exact preset)
+    u32   corruptId;         // self-check negative control: 1 = candidate 0 gets a wrong (in-range) id
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUMeshletCullParams) == 272, "GPUMeshletCullParams layout");
+
+/// Counters of the meshlet passes of a frame (word indices MESHLET_COUNTER_*
+/// in renderer/meshlet_layout.h), read back METAL_FRAMES_IN_FLIGHT frames
+/// later.  Identities (checked by the self-check): drawnA + frustum + cone +
+/// historyRejected == candidates (phase A tests every candidate); testedB ==
+/// historyRejected; drawnB + occludedB == testedB.
+struct GPUMeshletCounters {
+    u32 candidates;       // candidate meshlets this frame (all classes)
+    u32 overflow;         // 1: the candidates exceeded the capacity (indexed fallback drew the frame)
+    u32 drawnA;
+    u32 frustum;
+    u32 cone;
+    u32 historyRejected;  // phase A: occluded by the history pyramid -> phase B
+    u32 testedB;
+    u32 drawnB;           // recovered by phase B
+    u32 occludedB;        // final rejects of phase B
+    u32 primitivesA;      // triangles emitted by the mesh shaders
+    u32 primitivesB;
+    u32 objectGroupsA;    // object threadgroups that ran
+    u32 objectGroupsB;
+    u32 emitted;          // triangles the mesh shaders kept after per-triangle facing culling (both phases)
+    u32 sizeCulled;       // MESHLET_CULL_SIZE rejections (approximate; 0 in the exact preset)
+    u32 pad;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUMeshletCounters) == 64, "GPUMeshletCounters layout");
+
+/// One Hi-Z reduction step (shaders/hiz.metal): level `dstLevel` from level
+/// dstLevel - 1 (or from the depth texture when dstLevel == 0).
+struct GPUHiZParams {
+    u32 srcSize[2];   // depth (dstLevel 0) or source level size
+    u32 dstSize[2];
+    u32 dstLevel;
+    u32 levels;       // levels of the pyramid
+    u32 pad[2];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUHiZParams) == 32, "GPUHiZParams layout");
+
 // Constants of the debug overlays (F4.7, shaders/overlay.metal); the scales
 // and the palette are in diagnostics/overlay_math.h.
 struct OverlayConstants {

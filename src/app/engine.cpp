@@ -23,6 +23,8 @@
 #include "platform/metal/scenario_passes.h"
 #include "platform/metal/shader_reloader.h"
 #include "platform/metal/scene_renderer.h"
+#include "platform/metal/mesh_renderer.h"
+#include "platform/metal/meshlet_check.h"
 #include "renderer/cull_reference.h"
 #include "renderer/gpu_scene.h"
 #include "renderer/scene_check.h"
@@ -147,9 +149,28 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         throw std::runtime_error("Failed to obtain CAMetalLayer from SDL");
     }
 
+    // F6: --resolution sizes the window so its DRAWABLE has exactly WxH
+    // pixels (the F6 gate preset is 1920x1080 at scale 1).
+    if (options_.resolutionWidth > 0) {
+        const float density = std::max(SDL_GetWindowPixelDensity(window_), 1.0f);
+        SDL_SetWindowSize(window_, static_cast<int>(std::lround(options_.resolutionWidth / density)),
+                          static_cast<int>(std::lround(options_.resolutionHeight / density)));
+        SDL_SyncWindow(window_);
+    }
     context_ = std::make_unique<MetalContext>(layer, shaderLibraryPath());
+    // F6: --force-family apple9 restricts the EFFECTIVE capabilities before
+    // any pipeline is requested; the physical device is reported unchanged.
+    if (options_.forceApple9) context_->forceApple9();
+    LOG_INFO("GPU family: physical %s, effective %s%s", context_->physicalFamilyName(), context_->effectiveFamilyName(),
+             options_.forceApple9 ? " (--force-family apple9: Apple10 specialisations off, not an Apple9 emulation)" : "");
     int w = 0, h = 0;
     SDL_GetWindowSizeInPixels(window_, &w, &h);
+    if (options_.resolutionWidth > 0 &&
+        (static_cast<u32>(w) != options_.resolutionWidth || static_cast<u32>(h) != options_.resolutionHeight)) {
+        throw std::runtime_error("--resolution " + std::to_string(options_.resolutionWidth) + "x" +
+                                 std::to_string(options_.resolutionHeight) + ": the drawable is " + std::to_string(w) +
+                                 "x" + std::to_string(h) + " (window pixel density mismatch)");
+    }
     context_->resize(static_cast<u32>(w), static_cast<u32>(h));
 
     PipelineCache::Options pipelineOptions;
@@ -162,6 +183,37 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     renderer_      = std::make_unique<SceneRenderer>(*context_, *pipelines_, options_.pipelineSalt,
                                                      /*genericOnly*/ options_.debugPipelineFallback,
                                                      options_.forceVariant);
+    if (options_.geometryPath == GeometryPath::Mesh) {
+        // F6: Hi-Z backend.  auto = compute (SIMD-group reduction): spike S3
+        // measured it bit-exact and faster than the Apple10 sampler path on
+        // this M5 Max (docs/opt-log.md, "F6 — Spike"), and it is Apple9-legal.
+        HiZBuilder::Backend hiz = HiZBuilder::Backend::Compute;
+        if (options_.hizPath == HiZPath::Sampler) {
+            if (!context_->effectiveApple10()) {
+                throw std::runtime_error(std::string("--hiz-path sampler: the effective family is ") +
+                                         context_->effectiveFamilyName() + " (Apple10 sampler min reduction missing)");
+            }
+            hiz = HiZBuilder::Backend::Sampler;
+        }
+        if (options_.overlay == OverlayMode::Overdraw || options_.overlay == OverlayMode::LightCount ||
+            options_.overlay == OverlayMode::TileCost) {
+            throw std::runtime_error("--overlay overdraw/lights/tilecost redraw the scene with the indexed path: not "
+                                     "available with --geometry-path mesh (use --debug-view)");
+        }
+        MeshRenderer::Options mo;
+        mo.cull        = options_.meshletCull;
+        mo.hiz         = hiz;
+        mo.debugView   = options_.debugView;
+        mo.debugHiZLevel = options_.debugHiZLevel;
+        mo.checks      = options_.debugMeshlets > 0;
+        mo.objectStage = options_.meshletObjectStage;
+        mo.minPixels   = options_.meshletMinPixels;
+        mo.triangleCull = options_.meshletTriangleCull;
+        mo.salt        = options_.pipelineSalt;
+        mo.genericOnly = options_.debugPipelineFallback;
+        mo.forceVariant = options_.forceVariant;
+        mesh_ = std::make_unique<MeshRenderer>(*context_, *pipelines_, *renderer_, mo);
+    }
     graphExecutor_ = std::make_unique<MetalGraphExecutor>(*context_);
     if (options_.debugGraphTransients) graphDebug_ = std::make_unique<GraphDebugPasses>(*context_, *pipelines_);
     if (options_.debugAsyncCompute) asyncProbe_ = std::make_unique<AsyncComputeProbe>(*context_, *pipelines_);
@@ -202,6 +254,17 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
 
     ecs_        = std::make_unique<ECS>();
     gpuScene_   = std::make_unique<GpuScene>();
+    {
+        // F6.1: meshlet cook options (validated: a meshlet the mesh shader
+        // cannot emit is never built).
+        MeshletBuildOptions cook;
+        cook.algorithm = options_.meshletSpatial ? MeshletAlgorithm::Spatial : MeshletAlgorithm::Standard;
+        if (options_.meshletMaxVertices) cook.maxVertices = options_.meshletMaxVertices;
+        if (options_.meshletMaxTriangles) cook.maxTriangles = options_.meshletMaxTriangles;
+        const std::string err = validateMeshletOptions(cook);
+        if (!err.empty()) throw std::runtime_error("meshlet cook options: " + err);
+        gpuScene_->setMeshletOptions(cook);
+    }
     store_      = std::make_unique<SceneStore>();
     camera_     = std::make_unique<Camera>(glm::radians(60.0f), static_cast<float>(w) / std::max(h, 1), 0.05f, 1000.0f);
     input_      = std::make_unique<Input>();
@@ -221,7 +284,10 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
 
     // F3.4: the harvest records the whole forward variant table, not only the
     // variants the benches of this run happen to use.
-    if (pipelines_->harvesting()) renderer_->requestAllVariants();
+    if (pipelines_->harvesting()) {
+        renderer_->requestAllVariants();
+        if (mesh_) mesh_->requestAllVariants();
+    }
     // Every pipeline requested so far must be usable before the first frame
     // (flexible fallbacks count); with a complete archive nothing compiles.
     const Clock::time_point pipelinesStart = Clock::now();
@@ -289,6 +355,8 @@ Engine::~Engine() {
     ImGui::DestroyContext();
 
     textures_.reset();
+    meshletChecker_.reset();
+    mesh_.reset();
     renderer_.reset();
     pipelines_.reset();
     context_.reset();
@@ -332,6 +400,7 @@ void Engine::run() {
             measureLastFrame_  = measureFirstFrame_ + options_.frames - 1;
             context_->beginGpuTimeCapture(options_.frames);
             sceneSamples_.reserve(options_.frames);
+            meshletSamples_.reserve(options_.frames);
             allocationsAtStart_ = context_->memory().allocationCount();
             heapUsage(heapBlocksAtStart_, heapBytesAtStart_);
         }
@@ -486,6 +555,7 @@ void Engine::recordBenchmarkFrame(float dt, float cpuMs, float waitMs) {
         context_->beginGpuTimeCapture(options_.frames);
         samples_.reserve(options_.frames);
         sceneSamples_.reserve(options_.frames);
+        meshletSamples_.reserve(options_.frames);
         trace_.reserve(options_.frames, options_.frames / std::max(options_.switchEvery, 1u) + 2);
         allocationsAtStart_ = context_->memory().allocationCount();
         heapUsage(heapBlocksAtStart_, heapBytesAtStart_);
@@ -591,6 +661,47 @@ void Engine::finishBenchmark() {
         cp.graph     = summarize(ss.graph);
         cp.submit    = summarize(ss.submit);
     }
+    {
+        // F6 (schema 6): physical device vs effective capabilities, preset.
+        DeviceReport& h = report.hardware;
+        h.present               = true;
+        h.physicalDevice        = context_->gpuName();
+        h.physicalFamily        = context_->physicalFamilyName();
+        h.memoryBytes           = context_->physicalMemoryBytes();
+        h.effectiveCapabilities = context_->effectiveFamilyName();
+        if (options_.cullingScript && currentBench_ == TestBenchType::CullingViz)
+            h.preset = "culling-viz-f6-" + std::to_string(report.width) + "x" + std::to_string(report.height);
+        h.validationScope   = "development";
+        h.unverifiedDevices = {"physical Apple9 (M3)", "T0 base"};
+    }
+    {
+        MeshletReport& m = report.meshlets;
+        m.present      = true;
+        m.path         = geometryPathName(options_.geometryPath);
+        m.cull         = mesh_ ? meshletCullName(options_.meshletCull) : "none";
+        m.hizRequested = hizPathName(options_.hizPath);
+        m.hizEffective = mesh_ && mesh_->twoPhase() ? mesh_->hiz()->backendName() : "none";
+        m.cook         = meshletOptionsName(gpuScene_->meshletOptions());
+        m.meshlets     = gpuScene_->getMeshletTotalCount();
+        if (mesh_) {
+            const MeshletSamples& ms = meshletSamples_;
+            m.candidateCapacity = mesh_->capacity();
+            m.overflowFrames    = ms.overflowFrames;
+            m.historyResets     = ms.historyResets;
+            m.checks            = meshletChecks_;
+            m.checkFailures     = meshletFailures_;
+            m.candidates        = summarize(ms.candidates);
+            m.drawnA            = summarize(ms.drawnA);
+            m.frustum           = summarize(ms.frustum);
+            m.cone              = summarize(ms.cone);
+            m.historyRejected   = summarize(ms.historyRejected);
+            m.drawnB            = summarize(ms.drawnB);
+            m.occludedB         = summarize(ms.occludedB);
+            m.primitives        = summarize(ms.primitives);
+            m.emitted           = summarize(ms.emitted);
+            m.sizeCulled        = summarize(ms.sizeCulled);
+        }
+    }
     if (report.gpuTiming) passTimings_.summarize(report.passes, report.gpuPassSumMs, report.gpuFrameSpanMs);
     // OPT-0.4: work of the passes the cost model can price (CPU data of the
     // last frame; the benches' scenes do not change their draw lists).
@@ -631,6 +742,26 @@ void Engine::finishBenchmark() {
     if (gpuSceneChecks_ > 0) {
         std::printf("GPU-SCENE checks %u | failures %u | %s\n", gpuSceneChecks_, gpuSceneFailures_,
                     gpuSceneFailures_ == 0 ? "PASS" : "FAIL");
+    }
+    if (report.meshlets.present && mesh_) {
+        const MeshletReport& m = report.meshlets;
+        std::printf("MESHLET path %s cull %s hiz %s cook %s | meshlets %u capacity %llu | candidates %.0f | A drawn %.0f "
+                    "frustum %.0f cone %.0f size %.0f history %.0f | B drawn %.0f occluded %.0f | primitives %.0f emitted %.0f | overflow frames %u "
+                    "| history resets %u | device %s (%s) effective %s\n",
+                    m.path.c_str(), m.cull.c_str(), m.hizEffective.c_str(), m.cook.c_str(), m.meshlets,
+                    static_cast<unsigned long long>(m.candidateCapacity), static_cast<double>(m.candidates.mean),
+                    static_cast<double>(m.drawnA.mean), static_cast<double>(m.frustum.mean),
+                    static_cast<double>(m.cone.mean), static_cast<double>(m.sizeCulled.mean),
+                    static_cast<double>(m.historyRejected.mean),
+                    static_cast<double>(m.drawnB.mean), static_cast<double>(m.occludedB.mean),
+                    static_cast<double>(m.primitives.mean), static_cast<double>(m.emitted.mean), m.overflowFrames,
+                    m.historyResets,
+                    report.hardware.physicalDevice.c_str(), report.hardware.physicalFamily.c_str(),
+                    report.hardware.effectiveCapabilities.c_str());
+    }
+    if (meshletChecks_ > 0) {
+        std::printf("MESHLETS checks %u | failures %u | %s\n", meshletChecks_, meshletFailures_,
+                    meshletFailures_ == 0 ? "PASS" : "FAIL");
     }
     if (!trace_.switches().empty() || !options_.frameTracePath.empty()) {
         std::printf("%s\n", formatHitchReport(analyzeHitches(trace_)).c_str());
@@ -758,6 +889,7 @@ void Engine::switchTestBench(TestBenchType type) {
     benchParams.meshes            = options_.sceneMeshes;
     benchParams.dynamicCpuPercent = options_.dynamicCpuPercent;
     benchParams.churn             = options_.churn;
+    benchParams.cullingScript     = options_.cullingScript;
     activeBench_ = createTestBench(type, benchParams);
     LOG_INFO("Switching to test bench: %s", activeBench_->getName());
     activeBench_->setup(*ecs_, *gpuScene_, *textures_);
@@ -766,11 +898,17 @@ void Engine::switchTestBench(TestBenchType type) {
     textures_->flushUploads();
     const Clock::time_point t3 = Clock::now();
     renderer_->syncGeometry(*gpuScene_);
+    if (mesh_) mesh_->syncGeometry(*gpuScene_);
+    // F6.5: a new scene has no history.
+    history_.valid = false;
+    ++history_.generation;
+    history_.lastReset = "bench switch";
     // F5.1: full build of the persistent scene, uploaded through staging.
     store_->clear();
     store_->sync(*ecs_, *gpuScene_);
     ecs_->endFrame();
     renderer_->loadScene(*store_);
+    if (mesh_) mesh_->loadScene(*store_, *gpuScene_);
     sceneTime_ = 0.0;
     const Clock::time_point t4 = Clock::now();
     // The previous bench's resources are unused now: free their heap ranges
@@ -900,10 +1038,22 @@ bool Engine::frame(float dt) {
 
     // --- Simulation -----------------------------------------------------------
     PH_ZONE("Frame");
-    if (orbitMode_) {
-        camera_->updateOrbit(*input_, dt);
-    } else {
-        camera_->updateFPS(*input_, dt);
+    // F6: a bench may script the camera (bench 7 --culling-script); a cut
+    // (teleport) resets the temporal history.
+    bool scriptedCut = false;
+    {
+        glm::vec3 pos{0.0f}, target{0.0f};
+        if (activeBench_->scriptedCamera(sceneTime_ + dt, pos, target, scriptedCut)) {
+            CameraSetup setup;
+            setup.position = pos;
+            setup.target   = target;
+            setup.orbit    = false;
+            aimCamera(setup);
+        } else if (orbitMode_) {
+            camera_->updateOrbit(*input_, dt);
+        } else {
+            camera_->updateFPS(*input_, dt);
+        }
     }
     camera_->setAspect(static_cast<float>(context_->width()) / static_cast<float>(std::max(context_->height(), 1u)));
     camera_->updateMatrices();
@@ -985,12 +1135,58 @@ bool Engine::frame(float dt) {
     // before the graph so a recompilation sees the new capacities.
     const Clock::time_point s3 = Clock::now();
     const u64 sceneBytes = renderer_->prepareFrame(*store_, lights_, constants, textures_->tableAddress(), sceneParams);
+    const bool meshletCheckFrame = mesh_ && options_.debugMeshlets > 0 && (presentedFrames_ + 1) % options_.debugMeshlets == 0;
+    if (mesh_) {
+        // F6.5 history: reset on resize, camera cut (scripted teleport, or a
+        // jump of the camera between two frames), --history-reset-every.  A
+        // reset only costs efficiency (phase A treats every geometrically
+        // valid candidate as visible), never correctness.
+        const glm::vec3 front = camera_->getFront();
+        const char* reset = nullptr;
+        if (history_.valid) {
+            if (history_.width != width || history_.height != height) reset = "resize";
+            else if (scriptedCut) reset = "camera cut (script)";
+            else if (glm::length(camPos - history_.cameraPosition) > 4.0f || glm::dot(front, history_.cameraFront) < 0.9063f)
+                reset = "camera cut";
+            else if (options_.historyResetEvery > 0 && presentedFrames_ % options_.historyResetEvery == 0)
+                reset = "--history-reset-every";
+        }
+        if (reset) {
+            history_.valid = false;
+            ++history_.generation;
+            history_.lastReset = reset;
+            if (measuring()) ++meshletSamples_.historyResets;
+        }
+        MeshRenderer::FrameParams mp;
+        mp.slot   = frame.slot;
+        mp.width  = width;
+        mp.height = height;
+        std::memcpy(mp.cull.viewProj, &camera_->getViewProjection()[0][0], sizeof(mp.cull.viewProj));
+        std::memcpy(mp.cull.planes, cullParams_.planes, sizeof(mp.cull.planes));
+        mp.cull.cameraPosition[0] = camPos.x;
+        mp.cull.cameraPosition[1] = camPos.y;
+        mp.cull.cameraPosition[2] = camPos.z;
+        mp.cull.nearPlane         = camera_->getNear();
+        std::memcpy(mp.prevViewProj, history_.viewProj, sizeof(mp.prevViewProj));
+        mp.historyValid = history_.valid;
+        mp.corrupt      = meshletCheckFrame ? options_.debugMeshletsCorrupt : MeshletCorruption::None;
+        mesh_->requestCheckReadback(meshletCheckFrame);
+        mesh_->prepareFrame(*store_, *gpuScene_, mp);
+        if (mesh_->usingFallbackPipeline()) frameFlags_ |= FrameFallbackDraw;
+    }
     overlays_->prepareFrame(overlayMode_, constants.lightCount, width, height);
     if (renderer_->usingFallback()) frameFlags_ |= FrameFallbackDraw;
     const Clock::time_point s4 = Clock::now();
 
+    if (mesh_ && overlayMode_ != OverlayMode::None && overlayMode_ != OverlayMode::Timings) {
+        // F4.7 scene overlays redraw with the indexed path: not in the mesh path.
+        LOG_WARN("Overlay %s is not available with --geometry-path mesh (use --debug-view)", overlayName(overlayMode_));
+        overlayMode_      = OverlayMode::None;
+        settings_.overlay = static_cast<int>(overlayMode_);
+    }
     const GraphKey key{width, height, options_.ui, capture_ != nullptr, options_.debugSplitEncoding,
-                       options_.debugAsyncCompute, overlayMode_, options_.gpuDriven, renderer_->buffers().version()};
+                       options_.debugAsyncCompute, overlayMode_, options_.gpuDriven, renderer_->buffers().version(),
+                       mesh_ ? mesh_->version() : 0, mesh_ ? static_cast<u32>(mesh_->options().debugView) : 0};
     if (!(key == graphKey_) || !graphExecutor_->valid()) {
         frameFlags_ |= FrameGraphCompile;
         if (key.width != graphKey_.width || key.height != graphKey_.height) frameFlags_ |= FrameResize;
@@ -1057,6 +1253,16 @@ bool Engine::frame(float dt) {
         if (st.structure) ++ss.structureChanges;
     }
     if (checkScene && !checkGpuScene(frame.slot)) exitCode_ = 1;
+    if (mesh_ && mesh_->twoPhase()) {
+        // Hi-Z final of this frame wrote the history with this frame's view.
+        history_.valid = true;
+        std::memcpy(history_.viewProj, &camera_->getViewProjection()[0][0], sizeof(history_.viewProj));
+        history_.width          = width;
+        history_.height         = height;
+        history_.cameraPosition = camPos;
+        history_.cameraFront    = camera_->getFront();
+    }
+    if (meshletCheckFrame && !checkMeshlets(frame.slot)) exitCode_ = 1;
     if (gpuCapture_) gpuCapture_->endFrame();
     // F4.1: no overlap between consecutive frames on the GPU.
     if (options_.gpuTimingSerial) context_->waitIdle();
@@ -1173,9 +1379,52 @@ void Engine::SceneSamples::reserve(u32 frames) {
     queueOverflow    = 0;
 }
 
+void Engine::MeshletSamples::reserve(u32 frames) {
+    for (std::vector<float>* v : {&candidates, &drawnA, &frustum, &cone, &historyRejected, &drawnB, &occludedB, &primitives, &emitted, &sizeCulled}) {
+        v->clear();
+        v->reserve(frames);
+    }
+    overflowFrames = 0;
+    historyResets  = 0;
+}
+
+bool Engine::checkMeshlets(u32 slot) {
+    PH_ZONE("Meshlet check");
+    context_->waitIdle();
+    ++meshletChecks_;
+    if (!meshletChecker_) meshletChecker_ = std::make_unique<MeshletChecker>(*context_);
+    const MeshletCheckResult r = meshletChecker_->check(*mesh_, *renderer_, *store_, *gpuScene_, slot);
+    if (!r.pass) ++meshletFailures_;
+    // stdout: scripts and the negative controls read these lines.
+    std::printf("MESHLETS frame %u | history %s (generation %llu, last reset: %s) | %s\n", presentedFrames_,
+                history_.valid ? "valid" : "invalid", static_cast<unsigned long long>(history_.generation),
+                history_.lastReset, formatMeshletCheck(r).c_str());
+    std::fflush(stdout);
+    return r.pass;
+}
+
 void Engine::onSceneCounters(u32 slot) {
     if (slotFrame_[slot] == ~0ull) return;
     lastCounters_ = renderer_->counters(slot);
+    if (mesh_) {
+        lastMeshletCounters_ = mesh_->counters(slot);
+        if (slotMeasured_[slot]) {
+            const GPUMeshletCounters& c = lastMeshletCounters_;
+            MeshletSamples& ms          = meshletSamples_;
+            ms.candidates.push_back(static_cast<float>(c.candidates));
+            ms.drawnA.push_back(static_cast<float>(c.drawnA));
+            ms.frustum.push_back(static_cast<float>(c.frustum));
+            ms.cone.push_back(static_cast<float>(c.cone));
+            ms.historyRejected.push_back(static_cast<float>(c.historyRejected));
+            ms.drawnB.push_back(static_cast<float>(c.drawnB));
+            ms.occludedB.push_back(static_cast<float>(c.occludedB));
+            ms.primitives.push_back(static_cast<float>(c.primitivesA + c.primitivesB));
+            // Without the triangle cull every triangle of a drawn meshlet is emitted.
+            ms.emitted.push_back(static_cast<float>(options_.meshletTriangleCull ? c.emitted : c.primitivesA + c.primitivesB));
+            ms.sizeCulled.push_back(static_cast<float>(c.sizeCulled));
+            if (c.overflow) ++ms.overflowFrames;
+        }
+    }
     if (slotMeasured_[slot]) {
         SceneSamples& ss = sceneSamples_;
         const bool on = options_.gpuDriven == GpuDrivenMode::On;
@@ -1225,8 +1474,11 @@ bool Engine::checkGpuScene(u32 slot) {
     context_->waitIdle();
     ++gpuSceneChecks_;
     if (!sceneChecker_) sceneChecker_ = std::make_unique<GpuSceneChecker>(*context_);
+    // F6: in the mesh path Draw build writes draws only on an overflow frame.
+    const bool gateOpen = !mesh_ || *static_cast<const u32*>(mesh_->frame(slot).gate->contents()) != 0u;
     const SceneCheckResult r = sceneChecker_->check(*renderer_, *store_, *gpuScene_, *ecs_, cullParams_,
-                                                    motionSinCos_.data(), slot, options_.gpuDriven);
+                                                    motionSinCos_.data(), slot, mesh_ ? GpuDrivenMode::On : options_.gpuDriven,
+                                                    gateOpen);
     if (!r.pass) ++gpuSceneFailures_;
     // stdout: scripts and the negative controls read these lines.
     std::printf("GPU-SCENE frame %u | %s\n", presentedFrames_, formatSceneCheck(r).c_str());
@@ -1258,9 +1510,19 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
 
     // F5: the scene's passes (update, transforms, and with gpu-driven on the
     // instance cull and the ICB build) run before the forward pass.
-    if (!scenario_) renderer_->addPassesToGraph(frameGraph_, options_.gpuDriven);
+    // F6: in the mesh path the meshlet candidate pass sits between the
+    // instance cull and the draw build (which reads its overflow gate).
+    if (!scenario_ && mesh_) {
+        renderer_->addPassesToGraph(frameGraph_, GpuDrivenMode::On,
+                                    [this](rg::RenderGraph& g) { return mesh_->addCandidatePass(g); });
+    } else if (!scenario_) {
+        renderer_->addPassesToGraph(frameGraph_, options_.gpuDriven);
+    }
 
-    if (!scenario_) frameGraph_.addPass(
+    // F6: phase A ("Forward"), Hi-Z, phase B: object + mesh shaders.
+    if (!scenario_ && mesh_) mesh_->addRasterPasses(frameGraph_, color, width, height);
+
+    if (!scenario_ && !mesh_) frameGraph_.addPass(
         "Forward", PassType::Raster,
         [&](PassBuilder& b) {
             ClearValue clear;
@@ -1291,7 +1553,7 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
             renderer_->encode(static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder()), ctx.chunk(), ctx.chunkCount());
         });
 
-    if (!scenario_) color = overlays_->addToGraph(frameGraph_, color, width, height, overlayMode_, *renderer_);
+    if (!scenario_ && !mesh_) color = overlays_->addToGraph(frameGraph_, color, width, height, overlayMode_, *renderer_);
 
     if (options_.ui) {
         frameGraph_.addPass(

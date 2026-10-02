@@ -3,6 +3,9 @@
 #
 #   tools/variant_check.sh [build-dir] [max-pixels]
 #
+# EXTRA_ARGS (environment) is appended to every run, e.g. EXTRA_ARGS="--geometry-path
+# mesh --meshlet-cull off" checks the F6 mesh pipelines (same fragment variants).
+#
 # For each bench and debug mode the generic pipeline is captured
 # (--debug-pipeline-fallback --debug-mode D), then every variant of the
 # generated table is forced (--force-variant V) and captured with the debug
@@ -36,7 +39,7 @@ capture() { # png log args...
     local png=$1 log=$2
     shift 2
     env -u MTL_DEBUG_LAYER -u MTL_SHADER_VALIDATION "$app" --warmup 30 --frames 1 --no-ui --fixed-timestep \
-        "$@" --capture "$png" >"$log" 2>&1
+        "$@" ${EXTRA_ARGS:-} --capture "$png" >"$log" 2>&1
 }
 variant_values() { # log -> "V L E D" of the (single) forward variant requested
     sed -nE 's/.*Forward variant ([0-9]+) requested: light types 0x([0-9a-f]+), emissive ([01]), debug mode ([0-9]).*/\1 \2 \3 \4/p' "$1" | head -1

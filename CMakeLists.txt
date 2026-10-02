@@ -71,6 +71,8 @@ add_library(phosphor_core STATIC
     src/renderer/cull_reference.cpp
     src/renderer/gpu_scene.cpp
     src/renderer/meshlet_builder.cpp
+    src/renderer/meshlet_cull_reference.cpp
+    src/renderer/meshlet_check.cpp
     src/renderer/scene_check.cpp
     src/renderer/scene_extract.cpp
     src/renderer/scene_store.cpp
@@ -138,6 +140,11 @@ add_executable(graph_opt tools/graph_opt/graph_opt.cpp)
 target_link_libraries(graph_opt PRIVATE phosphor_core)
 target_include_directories(graph_opt PRIVATE ${CMAKE_SOURCE_DIR}/tools)
 target_compile_options(graph_opt PRIVATE ${PHOSPHOR_WARNINGS})
+# F6 spike S1 (CPU part): meshlet cook comparison over a procedural corpus. Portable.
+add_executable(meshlet_cook tools/meshlet_cook/meshlet_cook.cpp)
+target_link_libraries(meshlet_cook PRIVATE phosphor_core tinygltf) # tinygltf: nlohmann json.hpp
+target_compile_definitions(meshlet_cook PRIVATE PHOSPHOR_BUILD_TYPE="$<CONFIG>")
+target_compile_options(meshlet_cook PRIVATE ${PHOSPHOR_WARNINGS})
 
 # --- macOS app ---------------------------------------------------------------
 if(PHOSPHOR_BUILD_APP)

@@ -1584,3 +1584,198 @@ scoperta è stata riprodotta e spiegata prima di decidere.
     F5-K3 usava voci di coda spazzatura come indici (job da ~60 s). Regola
     adottata: cicli dei kernel sempre limitati, nessuna attesa tra
     threadgroup, command buffer ≪ 1 s, mai due processi GPU insieme.
+
+## F6 — Spike: cook dei meshlet, mesh/object shader, Hi-Z, barriere (S1–S4)
+
+**2026-10-02** · Apple M5 Max (Apple10, 40 core GPU), 128 GB, macOS 27.2
+(26B5091g), SDK 27.0, toolchain Metal 32023.921, alimentazione AC, build
+Release. Piano: [F6](plans/F6.md), pacchetto B. **Stato della macchina:
+non quieta.** Dalle 12:17 girava un emulatore Android (`qemu-system-aarch64`,
+progetto PitWall) e per tutta la giornata una sessione Codex Computer Use
+(`SkyComputerUseService`, `replayd` che registra lo schermo, WindowServer
+fino al 66% di CPU): carichi di altri, non fermabili da questa sessione.
+Tutte le misure GPU di S1/S2 e le esecuzioni formali di S3/S4 sono dopo le
+12:17; dalle ~14:20 il carico è aumentato (bench 8 two-phase da 5,0 a
+~10 ms a parità di codice). Per questo: confronti solo **interlacciati**
+(A/B/A, ordine ruotato) all'interno della stessa finestra; nessun confronto
+tra serie prese in momenti diversi; le scelte sotto il rumore restano sulla
+baseline. Strumenti: `bench/f6_spike` (target `f6_spike`, harness
+`bench/soc`, ≥15 ripetizioni per metrica, mediana, controllo negativo
+integrato; README con il protocollo), `tools/meshlet_cook` (S1 CPU) e il
+motore stesso (S1 GPU, S2: `--report` schema 6, tempi per pass validi).
+
+### S1 — cook dei meshlet (64/124 baseline, 64/64/96/128, spatial)
+
+CPU (`meshlet_cook --runs 5`, commit e0bf32a, risultati
+`bench/results/f6-spike/s1-cook-m5max-macos27.2.json`; corpus procedurale,
+Sponza non disponibile in `assets/`, dichiarato): byte/triangolo minimi
+6,07–6,16 con 96/128 e 128/128, baseline 64/124 6,28–6,43, spatial
+6,67–8,69, 64/64 6,83–6,93; riempimento della baseline 0,75–0,79 su mesh
+lisce (spatial ~0,50); duplicazione vertici 1,31–1,36; cono utilizzabile
+97–100% sulle mesh connesse (0% sulla zuppa casuale); spatial 0,26–0,82× il
+tempo di cook dello standard. Con 64 vertici, 124 e 128 triangoli danno gli
+stessi meshlet (il limite dei vertici prevale).
+
+GPU (motore, `--geometry-path mesh --meshlet-cull two-phase`, 3 repliche
+ruotate, codice di cc91f31, GPU pass sum ms, deviazione standard):
+
+| Scena | 64/124 | 64/64 | 64/96 | 96/128 | 128/128 | spatial 64/124 |
+|---|---|---|---|---|---|---|
+| bench 1 (3200×1800) | 1,210 (0,038) | 1,106 (0,090) | 1,106 (0,037) | 1,230 (0,114) | 1,210 (0,113) | 1,160 (0,041) |
+| bench 3 | 1,718 (0,062) | 1,727 (0,085) | 1,692 (0,036) | 1,852 (0,078) | 1,640 (0,097) | 1,824 (0,086) |
+| Culling Viz script 1080p | 1,243 (0,044) | 1,230 (0,087) | 1,401 (0,038) | 1,421 (0,106) | 1,372 (0,030) | 1,396 (0,065) |
+
+Fallback `--force-family apple9`, Culling Viz script (interlacciato con il
+nativo, macchina più carica, 14:33–14:35): 64/124 1,481 contro 1,457
+nativo; 64/64 1,496/1,435; 64/96 1,562/1,437; 128/128 1,485/1,401;
+spatial 1,368/1,331 (differenze nativo/Apple9 entro il rumore: il percorso
+Apple9 differisce solo per il backend Hi-Z, che con `auto` è comunque
+compute).
+
+**Decisione:** nessuna variante vince in modo ripetibile ≥3% su tutto il
+corpus (64/64 −9% sul bench 1 ma +0,5% sul bench 3 e il doppio dei
+candidati; meshlet più grandi +10% sulla scena di occlusione). Resta la
+baseline **standard 64 vertici / 124 triangoli, cone weight 0,5**; le
+opzioni restano nella CLI (`--meshlet-builder`, `--meshlet-max-*`).
+
+### S2 — indexed contro mesh contro object+mesh
+
+Motore, 3 serie ×2 (6 repliche, ordine ruotato), `--no-vsync --no-ui
+--fixed-timestep`, 600 frame + 120, codice di cc91f31, GPU pass sum ms:
+
+| Scena | indexed F5 | mesh pass-through | frustum + cono | two-phase |
+|---|---|---|---|---|
+| bench 1 (toro, 3200×1800) | 0,819 | 0,841 | 0,839 | 1,097 |
+| bench 3 (stress) | 1,643 | 1,681 | 1,625 | 1,858 |
+| bench 7 classico | 1,216 | 1,362 | 1,194 | 1,566 |
+| Culling Viz script 1080p | 2,066 | 2,134 | 1,940 | **1,270** |
+| bench 8 (1M cubi) | 5,137 | 7,384 | 7,356 | 5,006 |
+
+Variante mesh-only senza object stage (`--meshlet-object off`, 3 repliche
+interlacciate con il pass-through object+mesh): uguale su bench 1/7, +7%
+su bench 3 e sulla scena scriptata, +10% sul bench 8. **Decisione:**
+object+mesh (necessario comunque per il culling); il pass-through non batte
+l'indexed (B-16: limite raster), costa +43% con meshlet da 12 triangoli
+(bench 8); il guadagno arriva dal culling quando c'è occlusione (scena di
+occlusione −39%), mentre il two-phase costa +13…34% su scene senza
+occlusione (piramidi ~0,2–0,28 ms a 3200×1800). **Il default del motore
+resta `--geometry-path indexed`** (riferimento F5, nessuna regressione); il
+percorso mesh two-phase è il preset di Culling Viz e la base di F7.
+Scelte per scena: candidato OPT, non attivato.
+
+Rimisura serale (21:23, HEAD 0c097c4, 3 repliche ruotate, stesso script,
+`build/f6-s2g`): non utilizzabile per i numeri assoluti. Il compositore
+limitava la presentazione senza vsync a ~80–90 fps (attesa del drawable
+~11–12 ms, anche con l'indexed), la GPU restava inattiva gran parte del
+frame e scalava le frequenze: bench 3 indexed 5,03 ms (dev. std. 0,85)
+contro 1,64 al mattino, deviazioni fino a 1,2 ms. L'ordine qualitativo
+conferma le decisioni: scena di occlusione two-phase 3,20 contro indexed
+4,75 (−33%); two-phase più caro su bench 1 e bench 7 classico; bench 8
+two-phase ≈ indexed (5,93 / 5,95); pass-through mesh mai migliore in modo
+ripetibile (bench 3 entro la deviazione standard). Restano i valori del
+mattino (frequenze sature, interlacciati).
+
+Scoperta: una griglia mesh **1D** di ~700K threadgroup (mesh-only, bench 8)
+disegna solo una parte della scena senza alcun messaggio di validazione;
+la variante usa una griglia 2D (x ≤ 32768). La griglia object 1D del
+percorso principale è stata provata fino a 86 600 threadgroup (4M istanze,
+2,77M candidati: tutti disegnati, immagine identica all'indexed).
+
+### S3 — piramide Hi-Z: compute per livello, SIMD-group, sampler min
+
+`f6_spike --only F6-S3 --runs 3`, kernel del motore compilati da sorgente,
+risultati `bench/results/f6-spike/m5max-macos27.2-s3.json` (e
+`-s3-apple9paths.json` con `--force-family apple9`): i tre backend sono
+**bit-exact** con la piramide CPU su 7 dimensioni (1×1, 1×17, 17×1, 63×65,
+1920×1080, 1919×1081, 3200×1800) × 5 pattern (casuale, 1% di buchi a zero,
+tutto zero, occluder 0,8, gradiente con un buco); il buco sopravvive a ogni
+livello; il controllo negativo (riduzione puntuale) produce migliaia di
+texel diversi. Catena intera, mediana di 3 run: 1920×1080 compute
+0,046 ms, **SIMD 0,031**, sampler 0,042; 3200×1800 0,081 / **0,065** /
+0,073. `--validate`: 0 messaggi (dopo aver tolto un `setComputePipelineState`
+ridondante dello spike). Livello 0 a potenze di due ≥ ⌈dim/2⌉: ogni
+riduzione è esatta 2×2, i bordi NPOT diventano padding neutro (1).
+**Decisione:** backend compute **SIMD-group** come default e fallback Apple9
+(`auto`), sampler min Apple10 disponibile con `--hiz-path sampler` (più lento
+del SIMD su M5, equivalente bit per bit, rifiutato con l'Apple9 effettivo).
+Nel frame le due piramidi costano 0,15–0,28 ms (S2), sotto il 3% del frame
+del preset: nessun ulteriore lavoro di ottimizzazione giustificato.
+
+### S4 — ordinamenti del percorso mesh
+
+`f6_spike --only F6-S4 --runs 3` (metodo di F5-S5: produttore lento ~6 ms,
+l'ultimo threadgroup scrive), risultati
+`bench/results/f6-spike/m5max-macos27.2-s4.json`, 20 ripetizioni per
+variante, identico nelle 3 run:
+
+| Consumatore ← produttore | none | Vertex | Object | Mesh | Object+Mesh | Vertex+Object+Mesh | Fragment |
+|---|---|---|---|---|---|---|---|
+| argomenti indiretti di `drawMeshThreadgroups` ← compute | 20/20 errati | **20/20 errati** | 0/20 | 0/20 | 0/20 | 0/20 | – |
+| letture dell'object shader ← compute | 20/20 | **20/20** | 0/20 | 0/20 | 0/20 | 0/20 | – |
+| compute ← scritture dell'object shader (barriera after) | 20/20 | **20/20** | 0/20 | 0/20 | 0/20 | – | 0/20 |
+
+**Opposto a F5:** per i draw indexed gli argomenti indiretti si ordinano allo
+stadio Vertex e Object|Mesh non sincronizzano (F5-S5); per i draw **mesh**
+Vertex non ordina nulla e serve Object/Mesh. Il grafo dichiara quindi gli
+argomenti e le liste mesh a `StageObject | StageMesh`, le scritture dei flag B
+a `StageObject`, mentre il fallback ICB dello stesso pass resta a
+`StageVertex`. `--validate`: 0 messaggi. Le dipendenze depth (raster) →
+Hi-Z (compute) seguono F2.3 (Fragment → Dispatch); la storia tra frame è un
+import persistente del grafo (la scrittura di Hi-Z final del frame n precede
+la lettura della fase A del frame n+1).
+
+## F6 — Scoperte dell'integrazione nel motore
+
+- **Bug F5 trovato dalla revisione di conservatività:** il raggio della
+  sfera mondo di F5 (`cullWorldSphere`) usava la colonna più lunga, che
+  non limita lo stiramento con shear (figlio ruotato sotto un genitore a
+  scala non uniforme: colonna più lunga 1,414, stiramento 1,618).
+  Sostituito con il limite di Gershgorin sulla matrice di Gram (esatto per
+  rotazione × scala), test con il caso di shear; immagini dei bench 1–8
+  invariate.
+- **Cono in spazio mesh:** il primo test (solo similitudini) non scartava
+  quasi nulla sugli edifici a scala non uniforme (1 meshlet). La faccia è
+  invariante sotto ogni affine invertibile a meno di sign(det), che la
+  classe di cull compensa: portando la camera in spazio mesh (M⁻¹·cam) il
+  test è esatto per scala non uniforme, shear e specchio; sulla scena
+  scriptata scarta il 57% dei candidati (primitive 1,14M → 0,61M) a
+  immagine identica; test di proprietà su 5 tipi di matrice (>1000 scarti
+  ciascuno, nessun triangolo visibile scartato).
+- **Pareggi di profondità dipendenti dall'ordine:** il percorso mesh
+  disegna in ordine (classe, slot, meshlet), l'indexed in (classe, mesh,
+  slot). Bench 1–7 identici al pixel; bench 8 differisce di 1 pixel in tutti
+  i modi mesh, 0 pixel con una sola mesh (stesso ordine): un pareggio di
+  depth tra istanze intersecanti, non una superficie persa. Lo scenario
+  scriptato non crea sovrapposizioni (il churn riusa la cella).
+- **Encoder vuoti e timestamp:** i pass di readback del self-check, vuoti
+  nei frame normali, venivano scartati da Metal e lasciavano il pass
+  successivo (Forward) senza timestamp valido (frames 0, tempo attribuito
+  altrove): ora entrano nel grafo solo con `--debug-meshlets`.
+- **Gate dell'ICB F5 come fallback di overflow:** il `Draw build` scrive le
+  draw solo quando i candidati superano la capacità; con overflow forzato
+  ogni frame (controllo `count`) l'immagine è identica al riferimento
+  indexed, 0 messaggi di validazione. Il self-check F5 ora conosce il gate.
+- **Culling per triangolo nel mesh shader** (`--meshlet-triangle-cull on`):
+  tiene 1796/4098 triangoli sul bench 1 a immagine identica (controllo
+  negativo: segno invertito → 1,56M pixel diversi); A/B interlacciato
+  inconclusivo con il carico esterno (−2% / +3%): resta spento di default.
+  Un confronto iniziale tra serie prese in momenti diversi sembrava dare
+  +18% sul bench 8: era il carico della macchina, non il codice.
+- **Hitch check:** segnalazioni intermittenti allo stesso tasso su indexed e
+  mesh (2/6 esecuzioni ciascuno; in serata 1/6 indexed, 0/6 mesh,
+  interlacciati: un frame da 5,2 ms dopo uno switch), singoli frame CPU da ~0,6 ms in bench con
+  soglia p99 ~0,1 + 0,5 ms; preesistente (nota F5). Le liste meshlet ora si
+  ridimensionano allo switch (nessuna allocazione o rilascio differito nei
+  frame successivi).
+- **Uscita non nulla intermittente** (1 su 164 esecuzioni dello script S2,
+  report completo, nessun crash report, nessun percorso di uscita del motore
+  applicabile): non riprodotta in 104 esecuzioni mirate; aggiunta la riga
+  `EXIT <code>` stampata da `main` per distinguere una futura occorrenza da
+  un segnale. Rimisura serale: 88 esecuzioni (60 S2, 16 gate, 12
+  `hitch_check`), tutte `EXIT 0` con stato della shell 0. In totale 1 su
+  ~356 esecuzioni dal primo caso. **Aperta, non spiegata.**
+- **O7:** 0 allocazioni GPU nei frame misurati (anche con churn); blocchi
+  dell'heap CPU piatti; i byte crescono solo con i timestamp per pass
+  (storage delle misure, comportamento F5 noto: ~48 B/frame con i pass in
+  più del percorso mesh); con `--no-gpu-timing` −1,7 KB a 600 frame e
+  −2,2 KB a 6000. `leaks --atExit` 0 con self-check e churn.

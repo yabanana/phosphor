@@ -21,7 +21,8 @@ namespace phosphor::pipe {
 // output state by the backend (newRenderPipelineStateBySpecialization).
 // ---------------------------------------------------------------------------
 
-enum class PipelineKind : u8 { Render, Compute };
+/// F6.3: Mesh = object (optional) + mesh + fragment stages.
+enum class PipelineKind : u8 { Render, Compute, Mesh };
 
 /// Type of a function constant, as declared in MSL.
 enum class ConstantType : u8 { Bool, UInt, Int, Float };
@@ -46,11 +47,24 @@ struct ColorOutput {
     bool operator==(const ColorOutput&) const = default;
 };
 
+/// F6.3: threadgroup/payload limits of a mesh pipeline.  They select the
+/// binary (MTL4::MeshRenderPipelineDescriptor), so they are part of the key.
+struct MeshPipelineLimits {
+    u32 objectThreads = 0; // maxTotalThreadsPerObjectThreadgroup (0: no object stage)
+    u32 meshThreads   = 0; // maxTotalThreadsPerMeshThreadgroup
+    u32 payloadBytes  = 0; // payloadMemoryLength
+    u32 meshGroups    = 0; // maxTotalThreadgroupsPerMeshGrid (mesh threadgroups one object threadgroup may launch)
+    bool operator==(const MeshPipelineLimits&) const = default;
+};
+
 struct PipelineDesc {
     PipelineKind kind = PipelineKind::Render;
     std::string  label;                 // debug name; not part of the key
-    /// Render: [0] vertex, [1] fragment.  Compute: [0] kernel, [1] empty.
-    std::array<std::string, 2> functions;
+    /// Render: [0] vertex, [1] fragment.  Compute: [0] kernel.  Mesh: [0]
+    /// object ("" = none), [1] mesh, [2] fragment.  Unused entries are empty.
+    std::array<std::string, 3> functions;
+    /// Mesh pipelines only.
+    MeshPipelineLimits mesh{};
     /// Specialisation constants; count == 0 means "generic" (every constant
     /// undefined: the shader falls back to its runtime path).
     std::array<FunctionConstant, MAX_FUNCTION_CONSTANTS> constants{};

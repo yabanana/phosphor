@@ -1,0 +1,137 @@
+{
+ "schema_version": 6,
+ "bench": "Culling Viz (mesh path)",
+ "device": "Apple M5 Max",
+ "width": 3200,
+ "height": 1800,
+ "vsync": false,
+ "ui": false,
+ "frames": 300,
+ "fps": 117.65,
+ "gpu_allocations": 0,
+ "cpu_heap_blocks_delta": 0,
+ "cpu_heap_bytes_delta": 0,
+ "frame_ms": {
+  "mean": 8.5,
+  "min": 8.1,
+  "p50": 8.4,
+  "p95": 9.2,
+  "p99": 9.8,
+  "max": 10.4
+ },
+ "cpu_ms": {
+  "mean": 1.3,
+  "min": 1.0,
+  "p50": 1.3,
+  "p95": 1.6,
+  "p99": 1.9,
+  "max": 2.2
+ },
+ "gpu_ms": {
+  "mean": 7.6,
+  "min": 7.1,
+  "p50": 7.5,
+  "p95": 8.3,
+  "p99": 8.9,
+  "max": 9.4
+ },
+ "wait_ms": {
+  "mean": 0.1,
+  "min": 0,
+  "p50": 0.1,
+  "p95": 0.2,
+  "p99": 0.3,
+  "max": 0.4
+ },
+ "gpu_timing": false,
+ "gpu_timing_unfused": false,
+ "hardware": {
+  "physical_device": "Apple M5 Max",
+  "physical_family": "apple10",
+  "memory_bytes": 137438953472,
+  "effective_capabilities": "apple9",
+  "preset": "t0-apple9",
+  "validation_scope": "development",
+  "unverified_devices": [
+   "M3 Base",
+   "M4 Pro"
+  ]
+ },
+ "meshlets": {
+  "path": "mesh",
+  "cull": "two-phase",
+  "hiz_requested": "auto",
+  "hiz_effective": "compute",
+  "cook": "standard-64v124t",
+  "meshlets": 41210,
+  "candidate_capacity": 1048576,
+  "overflow_frames": 0,
+  "history_resets": 0,
+  "checks": 12,
+  "check_failures": 0,
+  "candidates": {
+   "mean": 350000,
+   "min": 349000,
+   "p50": 350000,
+   "p95": 351000,
+   "p99": 351000,
+   "max": 351000
+  },
+  "drawn_a": {
+   "mean": 120000,
+   "min": 119000,
+   "p50": 120000,
+   "p95": 121000,
+   "p99": 121500,
+   "max": 122000
+  },
+  "frustum": {
+   "mean": 150000,
+   "min": 149000,
+   "p50": 150000,
+   "p95": 151000,
+   "p99": 151500,
+   "max": 152000
+  },
+  "cone": {
+   "mean": 80000,
+   "min": 79000,
+   "p50": 80000,
+   "p95": 81000,
+   "p99": 81200,
+   "max": 81500
+  },
+  "history_rejected": {
+   "mean": 7000,
+   "min": 6900,
+   "p50": 7000,
+   "p95": 7100,
+   "p99": 7150,
+   "max": 7200
+  },
+  "drawn_b": {
+   "mean": 45000,
+   "min": 44000,
+   "p50": 45000,
+   "p95": 46000,
+   "p99": 46200,
+   "max": 46500
+  },
+  "occluded_b": {
+   "mean": 6500,
+   "min": 6400,
+   "p50": 6500,
+   "p95": 6600,
+   "p99": 6650,
+   "max": 6700
+  },
+  "primitives": {
+   "mean": 12500000,
+   "min": 12400000,
+   "p50": 12500000,
+   "p95": 12600000,
+   "p99": 12650000,
+   "max": 12700000
+  }
+ }
+}

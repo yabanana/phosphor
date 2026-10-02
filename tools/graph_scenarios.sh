@@ -176,7 +176,7 @@ for round in $(seq 1 "$rounds"); do
 done
 
 # Validation: one run per scenario, views and mode with the debug build.
-ignore='^\[INFO\]|^BENCH|^PIPELINES|^STARTUP|^SWITCH|^GRAPH-TRANSIENTS|^ASYNC-COMPUTE|Validation Enabled'
+ignore='^\[INFO\]|^BENCH|^EXIT 0$|^SCENE|^PIPELINES|^STARTUP|^SWITCH|^GRAPH-TRANSIENTS|^ASYNC-COMPUTE|Validation Enabled'
 if [[ $validate == 1 ]]; then
     for s in $scenarios; do
         for v in $views; do

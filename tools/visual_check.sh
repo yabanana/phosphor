@@ -41,7 +41,7 @@ for bench in 1 2 3 4 5 6 7 8; do
         ${EXTRA_ARGS:-} ${extra_bench_args:-} --capture "$capture" >"$log" 2>&1 || status=$?
     # Anything besides our INFO lines, the BENCH/PIPELINES/STARTUP/SWITCH
     # summaries and the two "Validation Enabled" banners is a problem.
-    messages=$(grep -Ev '^\[INFO\]|^BENCH|^SCENE|^GPU-SCENE .*PASS|^GRAPH-TRANSIENTS|^ASYNC-COMPUTE|^PIPELINES|^STARTUP|^SWITCH|Validation Enabled' "$log" | grep -c . || true)
+    messages=$(grep -Ev '^\[INFO\]|^BENCH|^SCENE|^EXIT 0$|^MESHLET |^MESHLETS .*PASS|^GPU-SCENE .*PASS|^GRAPH-TRANSIENTS|^ASYNC-COMPUTE|^PIPELINES|^STARTUP|^SWITCH|Validation Enabled' "$log" | grep -c . || true)
     # F3: every pipeline must have been built (the PIPELINES summary line).
     pipeline_failures=$(sed -nE 's/^PIPELINES .*\| failures ([0-9]+) .*/\1/p' "$log")
     if [[ "${pipeline_failures:-missing}" != "0" ]]; then

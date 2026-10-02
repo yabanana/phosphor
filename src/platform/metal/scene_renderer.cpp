@@ -99,6 +99,10 @@ SceneRenderer::SceneRenderer(MetalContext& context, PipelineCache& pipelines, u3
     transformTable_ = newTable(device, SCENE_BIND_COUNT, "Scene transforms arguments");
     cullTable_      = newTable(device, SCENE_BIND_COUNT, "Instance cull arguments");
     drawTable_      = newTable(device, SCENE_BIND_COUNT, "Draw build arguments");
+    // F6: the default draw gate (open): one shared word = 1.
+    drawGateOpen_ = context_.memory().newBuffer(16, MTL::ResourceStorageModeShared, MemoryCategory::Scene, "Draw gate (open)");
+    *static_cast<u32*>(drawGateOpen_->contents()) = 1u;
+    drawGate_ = drawGateOpen_->gpuAddress();
 }
 
 SceneRenderer::~SceneRenderer() {
@@ -106,6 +110,7 @@ SceneRenderer::~SceneRenderer() {
     releaseGeometry();
     for (MTL4::ArgumentTable* t : {arguments_, updateTable_, transformTable_, cullTable_, drawTable_}) t->release();
     depthState_->release();
+    context_.memory().release(drawGateOpen_, MemoryCategory::Scene);
 }
 
 void SceneRenderer::requestAllVariants() {
@@ -198,6 +203,10 @@ u64 SceneRenderer::prepareFrame(const SceneStore& store, std::span<const GPULigh
     GPULight noLight{};
     const MTL::GPUAddress lightsAddress =
         lights.empty() ? put(&noLight, sizeof(noLight)) : put(lights.data(), lights.size_bytes());
+    frameConstants_ = frameConstants;
+    lightsAddress_  = lightsAddress;
+    textureTable_   = textureTable;
+    drawGate_       = drawGateOpen_->gpuAddress(); // the mesh path overrides it after prepareFrame
 
     // Scene update.
     GPUQueueClearParams clear{};
@@ -295,6 +304,7 @@ u64 SceneRenderer::prepareFrame(const SceneStore& store, std::span<const GPULigh
     const pipe::forward::Variant variant = forceVariant_ ? pipe::forward::variantAt(*forceVariant_)
                                                          : pipe::forward::sceneVariant(lights, store.hasEmissive(),
                                                                                        constants.debugMode);
+    variantIndex_ = pipe::forward::variantIndex(variant);
     pipe::PipelineHandle& handle = genericOnly_ ? generic_ : variants_[pipe::forward::variantIndex(variant)];
     if (handle == pipe::INVALID_PIPELINE) {
         LOG_INFO("Forward variant %u requested: light types 0x%x, emissive %d, debug mode %u",
@@ -314,7 +324,8 @@ u64 SceneRenderer::prepareFrame(const SceneStore& store, std::span<const GPULigh
     return bytes;
 }
 
-void SceneRenderer::addPassesToGraph(rg::RenderGraph& graph, GpuDrivenMode mode) {
+void SceneRenderer::addPassesToGraph(rg::RenderGraph& graph, GpuDrivenMode mode,
+                                     const std::function<rg::BufferRef(rg::RenderGraph&)>& afterCull) {
     using namespace rg;
     graphMode_ = mode;
     // Sizes are estimates for the bandwidth model only (physical buffers are
@@ -353,9 +364,13 @@ void SceneRenderer::addPassesToGraph(rg::RenderGraph& graph, GpuDrivenMode mode)
             b.setProfileShaders("scene_cull_flags,scene_cull_scan,scene_cull_write");
         },
         [this](PassContext& ctx) { encodeCull(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder())); });
+    // F6: the mesh path's candidate pass runs between the cull and the draw
+    // build, which reads its gate word.
+    const BufferRef gate = afterCull ? afterCull(graph) : BufferRef{};
     graph.addPass(
         PASS_DRAW_BUILD, PassType::Compute,
         [&](PassBuilder& b) {
+            if (gate.valid()) b.read(gate, Usage::ShaderRead, StageDispatch);
             b.read(graphData_, Usage::ShaderRead, StageDispatch);
             b.read(graphFrame_, Usage::ShaderRead, StageDispatch);
             graphFrame_ = b.write(graphFrame_, Usage::ShaderWrite, StageDispatch | StageBlit);
@@ -514,10 +529,21 @@ void SceneRenderer::encodeDrawBuild(MTL4::ComputeCommandEncoder* enc) const {
     t->setAddress(indexBuffer_->gpuAddress(), SB_DRAW_INDICES);
     t->setAddress(fs.drawArgs->gpuAddress(), SB_DRAW_ARGS);
     t->setAddress(fs.counters->gpuAddress(), SB_DRAW_COUNTERS);
+    t->setAddress(drawGate_, SB_DRAW_GATE);
     enc->setComputePipelineState(kernel(kDrawBuild_));
     enc->setArgumentTable(t);
     enc->dispatchThreads(threads1D(commandCount_), MTL::Size::Make(SCENE_DRAW_GROUP, 1, 1));
     count(0, 3);
+}
+
+u32 SceneRenderer::encodeFallbackClass(MTL4::RenderCommandEncoder* enc, u32 cullClass) const {
+    if (!store_ || buffers_.empty() || !pipeline_ || cullClass >= SCENE_CULL_CLASSES) return 0;
+    const SceneStore::ClassRange r = store_->classRanges()[cullClass];
+    if (r.commandCount == 0) return 0;
+    enc->setRenderPipelineState(pipeline_);
+    enc->setArgumentTable(arguments_, MTL::RenderStageVertex | MTL::RenderStageFragment);
+    enc->executeCommandsInBuffer(buffers_.frame(frame_.slot).icb, NS::Range::Make(r.firstCommand, r.commandCount));
+    return 3;
 }
 
 void SceneRenderer::encode(MTL4::RenderCommandEncoder* enc, u32 chunk, u32 chunks) const {

@@ -30,7 +30,7 @@ public:
     /// `slot`: the frame slot of the completed frame to check.
     SceneCheckResult check(const SceneRenderer& renderer, const SceneStore& store, const GpuScene& scene,
                            const ECS& ecs, const GPUCullParams& cull, const float* motionSinCos, u32 slot,
-                           GpuDrivenMode mode);
+                           GpuDrivenMode mode, bool drawGateOpen = true);
 
 private:
     MTL::Buffer* readback(MTL::Buffer*& cache, u64 size, const char* label);

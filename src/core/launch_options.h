@@ -142,6 +142,48 @@ namespace phosphor {
 //   --debug-gpu-scene-corrupt KIND  negative control of the check above:
 //                      delta, plane, command or touch (one deliberate
 //                      corruption that the check must report)
+//   --geometry-path indexed|mesh  F6.3: the scene is drawn with indexed draws
+//                      (the F5 reference, default) or with object + mesh
+//                      shaders over meshlets (needs --gpu-driven on)
+//   --meshlet-cull off|frustum|two-phase  F6.2/F6.5 (mesh path): no meshlet
+//                      culling, conservative frustum + normal cone, or both
+//                      plus two-phase Hi-Z occlusion (default two-phase)
+//   --hiz-path compute|sampler|auto  F6.4 pyramid build: compute (Apple9,
+//                      always available), sampler min reduction (Apple10
+//                      only; refused when the effective family lacks it), auto
+//                      = the backend chosen by spike S3 for the effective family
+//   --force-family apple9  F6: restrict the EFFECTIVE GPU capabilities to
+//                      Apple9 (Apple10 specialisations off, fallbacks used);
+//                      the physical device, its memory and budget are
+//                      unchanged and reported as such (not an M3 emulation)
+//   --debug-meshlets N F6.7 self-check: every N frames the meshlet lists,
+//                      decisions, counters and pyramids are read back and
+//                      checked against the CPU references (MESHLETS line,
+//                      exit code 1 on mismatch; 0 = off)
+//   --debug-meshlets-corrupt KIND  negative control of the check above: id,
+//                      depth or count (one deliberate corruption that the check
+//                      must report)
+//   --debug-view MODE  F6.7 mesh-path views: none, meshlets (colour per
+//                      meshlet), cull (colour per decision: phase A, recovered
+//                      in B, rejected by cone/occlusion), hiz (pyramid level
+//                      overlay; --debug-hiz-level L, default 3)
+//   --meshlet-builder standard|spatial, --meshlet-max-vertices N,
+//   --meshlet-max-triangles N  F6.1 cook options (default standard 64/124)
+//   --resolution WxH   drawable size in pixels (the window is sized for it;
+//                      the F6 gate preset is 1920x1080)
+//   --culling-script   bench 7: the F6 scripted Culling Viz (dense
+//                      buildings, fly-through camera, disappearing occluder,
+//                      camera cut, fast object, spawn/delete/reuse)
+//   --meshlet-min-pixels P  F6.2 APPROXIMATE: meshlets whose projected bound
+//                      covers less than P x P pixels are culled (0 = off,
+//                      never in the exact/gate preset)
+//   --meshlet-triangle-cull on|off  F6.3 option: the mesh shader also drops
+//                      back/front-facing triangles and compacts the rest
+//                      (default off: measured slower on M5 Max)
+//   --meshlet-object off  spike S2: mesh-only pipeline without object stage
+//                      (needs --meshlet-cull off; a measurement variant)
+//   --history-reset-every N  F6.5: invalidate the Hi-Z history every N
+//                      frames (camera-cut path; 0 = only on real cuts)
 //
 // Arguments not starting with "--" are ignored: macOS may add its own
 // (e.g. -NSDocumentRevisionsDebugMode when launched from Xcode).
@@ -151,6 +193,17 @@ namespace phosphor {
 enum class GpuDrivenMode : u8 { Off, On };
 /// F5 self-check negative controls (--debug-gpu-scene-corrupt).
 enum class SceneCorruption : u8 { None, Delta, Plane, Command, Touch };
+
+/// F6 geometry submission and meshlet culling.
+enum class GeometryPath : u8 { Indexed, Mesh };
+enum class MeshletCull : u8 { Off, Frustum, TwoPhase };
+enum class HiZPath : u8 { Auto, Compute, Sampler };
+enum class MeshletCorruption : u8 { None, Id, Depth, Count };
+enum class MeshletDebugView : u8 { None, Meshlets, Cull, HiZ };
+[[nodiscard]] const char* geometryPathName(GeometryPath path);
+[[nodiscard]] const char* meshletCullName(MeshletCull cull);
+[[nodiscard]] const char* hizPathName(HiZPath path);
+[[nodiscard]] const char* meshletDebugViewName(MeshletDebugView view);
 
 /// OPT-1 graph compilation modes (--graph-opt).
 enum class GraphOptMode : u8 { Off, Greedy, Plan };
@@ -231,6 +284,25 @@ struct LaunchOptions {
     float       cullMinPixels    = 0.0f;  // --cull-min-pixels P (0 = off)
     u32         debugGpuScene    = 0;     // --debug-gpu-scene N: exact readback check every N frames (0 = off)
     SceneCorruption debugGpuSceneCorrupt = SceneCorruption::None; // --debug-gpu-scene-corrupt KIND
+    // F6: mesh shaders, meshlet culling, Hi-Z, capabilities.
+    GeometryPath geometryPath    = GeometryPath::Indexed;
+    MeshletCull  meshletCull     = MeshletCull::TwoPhase;
+    HiZPath      hizPath         = HiZPath::Auto;
+    bool         forceApple9     = false;
+    u32          debugMeshlets   = 0;     // --debug-meshlets N (0 = off)
+    MeshletCorruption debugMeshletsCorrupt = MeshletCorruption::None;
+    MeshletDebugView debugView   = MeshletDebugView::None;
+    u32          debugHiZLevel   = 3;
+    bool         meshletSpatial  = false; // --meshlet-builder spatial
+    u32          meshletMaxVertices  = 0; // 0 = default (64)
+    u32          meshletMaxTriangles = 0; // 0 = default (124)
+    u32          resolutionWidth  = 0;    // --resolution WxH (0 = window default)
+    u32          resolutionHeight = 0;
+    bool         cullingScript    = false;
+    u32          historyResetEvery = 0;
+    bool         meshletObjectStage = true; // --meshlet-object off: spike S2 mesh-only pipeline
+    float        meshletMinPixels   = 0.0f; // --meshlet-min-pixels P (approximate size cull, 0 = off)
+    bool         meshletTriangleCull = false; // --meshlet-triangle-cull on
 
     [[nodiscard]] bool benchmark() const { return frames > 0; }
 };

@@ -33,7 +33,11 @@ trap 'rm -rf "$tmp"' EXIT
 raw="$tmp/harvest.mtl4-json"
 
 # shellcheck disable=SC2086 # EXTRA_ARGS is intentionally word-split
-"$app" --harvest-pipelines "$raw" --frames 1 --no-ui --debug-graph-transients --debug-async-compute --debug-gpu-cost 1 ${EXTRA_ARGS:-} >"$tmp/app.log" 2>&1 \
+# F6: the mesh path (two-phase) requests every indexed pipeline too, plus the
+# mesh variants, meshlet kernels, Hi-Z kernels (both backends in harvest
+# mode) and the Hi-Z view.
+"$app" --harvest-pipelines "$raw" --frames 1 --no-ui --debug-graph-transients --debug-async-compute --debug-gpu-cost 1 \
+    --geometry-path mesh --meshlet-cull two-phase ${EXTRA_ARGS:-} >"$tmp/app.log" 2>&1 \
     || { echo "error: harvest run failed:" >&2; tail -20 "$tmp/app.log" >&2; exit 1; }
 [[ -s "$raw" ]] || { echo "error: the app did not write $raw" >&2; tail -20 "$tmp/app.log" >&2; exit 1; }
 

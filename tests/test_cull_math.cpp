@@ -178,7 +178,10 @@ TEST_CASE("world sphere: rotation, non-uniform scale, negative scale") {
         CHECK(w.x == doctest::Approx(wc.x).epsilon(1e-5));
         CHECK(w.y == doctest::Approx(wc.y).epsilon(1e-5));
         CHECK(w.z == doctest::Approx(wc.z).epsilon(1e-5));
-        CHECK(w.r == doctest::Approx(r * maxColumnLength(m)).epsilon(1e-5));
+        // F6: Gershgorin bound of the spectral norm, exact for orthogonal
+        // columns (rotation x scale) up to the 2^-16 inflation and rounding.
+        CHECK(w.r >= r * maxColumnLength(m));
+        CHECK(w.r == doctest::Approx(r * maxColumnLength(m) * (1.0f + 1.0f / 65536.0f)).epsilon(1e-5));
         // Conservative: every point of the mesh-space sphere lands inside the world sphere.
         Rng rng{7};
         for (int i = 0; i < 200; ++i) {
@@ -190,7 +193,35 @@ TEST_CASE("world sphere: rotation, non-uniform scale, negative scale") {
         }
     }
     // Non-uniform scale: the radius follows the LONGEST column (3), not the average.
-    CHECK(cullWorldSphere(glm::value_ptr(cases[2]), sph).r == doctest::Approx(4.5f).epsilon(1e-5));
+    CHECK(cullWorldSphere(glm::value_ptr(cases[2]), sph).r ==
+          doctest::Approx(4.5f * (1.0f + 1.0f / 65536.0f)).epsilon(1e-5));
+}
+
+TEST_CASE("world sphere: shear (F6 fix: the longest column is not a bound)") {
+    // A child rotated 45 degrees under a parent scaled (3, 1, 1): the product
+    // has non-orthogonal columns.  Its largest stretch exceeds the longest
+    // column, so the F5 radius (r * longest column) missed points; the
+    // Gershgorin bound must contain every transformed point.
+    const glm::mat4 parent = glm::scale(glm::mat4(1.0f), {3.0f, 1.0f, 1.0f});
+    const glm::mat4 child  = glm::rotate(glm::mat4(1.0f), glm::radians(45.0f), glm::vec3(0, 0, 1));
+    const glm::mat4 m      = parent * child;
+    const glm::vec3 c(0.0f);
+    const float r = 1.0f;
+    const float sph[4] = {c.x, c.y, c.z, r};
+    const GPUWorldSphere w = cullWorldSphere(glm::value_ptr(m), sph);
+    float maxStretch = 0.0f;
+    for (int i = 0; i < 3600; ++i) {
+        const float a = glm::radians(static_cast<float>(i) * 0.1f);
+        const glm::vec3 q = glm::vec3(m * glm::vec4(std::cos(a), std::sin(a), 0.0f, 1.0f));
+        maxStretch = std::max(maxStretch, glm::length(q));
+    }
+    CHECK(maxStretch > maxColumnLength(m) * 1.1f); // the old bound was too small
+    CHECK(w.r >= maxStretch);
+    // A shear matrix [[1,1],[0,1]]: stretch = golden ratio > sqrt(2) (longest column).
+    glm::mat4 shear(1.0f);
+    shear[1][0] = 1.0f;
+    const GPUWorldSphere s = cullWorldSphere(glm::value_ptr(shear), sph);
+    CHECK(s.r >= 1.6180339f);
 }
 
 // ---- cullSphere / margins -----------------------------------------------------------------

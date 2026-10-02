@@ -28,6 +28,9 @@ add_executable(phosphor_tests
     test_launch_options.cpp
     test_linear_ring.cpp
     test_memory_budget.cpp
+    test_meshlet_builder.cpp
+    test_meshlet_cull.cpp
+    test_meshlet_check.cpp
     test_mesh_processing.cpp
     test_overlay_math.cpp
     test_pass_timings.cpp

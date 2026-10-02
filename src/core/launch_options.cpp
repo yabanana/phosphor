@@ -38,6 +38,36 @@ const char* overlayName(OverlayMode mode) {
     return "none";
 }
 
+const char* geometryPathName(GeometryPath path) { return path == GeometryPath::Mesh ? "mesh" : "indexed"; }
+
+const char* meshletCullName(MeshletCull cull) {
+    switch (cull) {
+    case MeshletCull::Off:      return "off";
+    case MeshletCull::Frustum:  return "frustum";
+    case MeshletCull::TwoPhase: return "two-phase";
+    }
+    return "off";
+}
+
+const char* hizPathName(HiZPath path) {
+    switch (path) {
+    case HiZPath::Auto:    return "auto";
+    case HiZPath::Compute: return "compute";
+    case HiZPath::Sampler: return "sampler";
+    }
+    return "auto";
+}
+
+const char* meshletDebugViewName(MeshletDebugView view) {
+    switch (view) {
+    case MeshletDebugView::None:     return "none";
+    case MeshletDebugView::Meshlets: return "meshlets";
+    case MeshletDebugView::Cull:     return "cull";
+    case MeshletDebugView::HiZ:      return "hiz";
+    }
+    return "none";
+}
+
 bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
                         LaunchOptions& out, std::string& error) {
     out = LaunchOptions{};
@@ -321,6 +351,128 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
                         std::string(*value) + "'";
                 return false;
             }
+        } else if (arg == "--geometry-path") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "indexed") out.geometryPath = GeometryPath::Indexed;
+            else if (*value == "mesh") out.geometryPath = GeometryPath::Mesh;
+            else {
+                error = "--geometry-path: expected indexed or mesh, got '" + std::string(*value) + "'";
+                return false;
+            }
+        } else if (arg == "--meshlet-cull") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "off") out.meshletCull = MeshletCull::Off;
+            else if (*value == "frustum") out.meshletCull = MeshletCull::Frustum;
+            else if (*value == "two-phase") out.meshletCull = MeshletCull::TwoPhase;
+            else {
+                error = "--meshlet-cull: expected off, frustum or two-phase, got '" + std::string(*value) + "'";
+                return false;
+            }
+        } else if (arg == "--hiz-path") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "auto") out.hizPath = HiZPath::Auto;
+            else if (*value == "compute") out.hizPath = HiZPath::Compute;
+            else if (*value == "sampler") out.hizPath = HiZPath::Sampler;
+            else {
+                error = "--hiz-path: expected compute, sampler or auto, got '" + std::string(*value) + "'";
+                return false;
+            }
+        } else if (arg == "--force-family") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value != "apple9") {
+                error = "--force-family: expected apple9 (capabilities can only be removed), got '" +
+                        std::string(*value) + "'";
+                return false;
+            }
+            out.forceApple9 = true;
+        } else if (arg == "--debug-meshlets") {
+            if (!needCount(out.debugMeshlets)) return false;
+        } else if (arg == "--debug-meshlets-corrupt") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "id") out.debugMeshletsCorrupt = MeshletCorruption::Id;
+            else if (*value == "depth") out.debugMeshletsCorrupt = MeshletCorruption::Depth;
+            else if (*value == "count") out.debugMeshletsCorrupt = MeshletCorruption::Count;
+            else {
+                error = "--debug-meshlets-corrupt: expected id, depth or count, got '" + std::string(*value) + "'";
+                return false;
+            }
+        } else if (arg == "--debug-view") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "none") out.debugView = MeshletDebugView::None;
+            else if (*value == "meshlets") out.debugView = MeshletDebugView::Meshlets;
+            else if (*value == "cull") out.debugView = MeshletDebugView::Cull;
+            else if (*value == "hiz") out.debugView = MeshletDebugView::HiZ;
+            else {
+                error = "--debug-view: expected none, meshlets, cull or hiz, got '" + std::string(*value) + "'";
+                return false;
+            }
+        } else if (arg == "--debug-hiz-level") {
+            if (!needCount(out.debugHiZLevel)) return false;
+            if (out.debugHiZLevel > 15) {
+                error = "--debug-hiz-level: expected 0..15";
+                return false;
+            }
+        } else if (arg == "--meshlet-builder") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "standard") out.meshletSpatial = false;
+            else if (*value == "spatial") out.meshletSpatial = true;
+            else {
+                error = "--meshlet-builder: expected standard or spatial, got '" + std::string(*value) + "'";
+                return false;
+            }
+        } else if (arg == "--meshlet-max-vertices" || arg == "--meshlet-max-triangles") {
+            u32& target = arg == "--meshlet-max-vertices" ? out.meshletMaxVertices : out.meshletMaxTriangles;
+            if (!needCount(target)) return false;
+            const u32 lo = arg == "--meshlet-max-vertices" ? 3u : 1u;
+            if (target < lo || target > 128) {
+                error = std::string(arg) + ": expected " + std::to_string(lo) + "..128 (mesh shader output limit)";
+                return false;
+            }
+        } else if (arg == "--resolution") {
+            const auto value = needValue();
+            if (!value) return false;
+            const size_t x = value->find('x');
+            if (x == std::string_view::npos || !parseU32(value->substr(0, x), out.resolutionWidth) ||
+                !parseU32(value->substr(x + 1), out.resolutionHeight) || out.resolutionWidth < 64 ||
+                out.resolutionHeight < 64 || out.resolutionWidth > 8192 || out.resolutionHeight > 8192) {
+                error = "--resolution: expected WxH in pixels (64..8192), got '" + std::string(*value) + "'";
+                return false;
+            }
+        } else if (arg == "--culling-script") {
+            out.cullingScript = true;
+        } else if (arg == "--meshlet-min-pixels") {
+            if (!needFloat(out.meshletMinPixels)) return false;
+            if (out.meshletMinPixels < 0.0f) {
+                error = "--meshlet-min-pixels: expected a size >= 0 (0 = off)";
+                return false;
+            }
+        } else if (arg == "--meshlet-triangle-cull") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "on") out.meshletTriangleCull = true;
+            else if (*value == "off") out.meshletTriangleCull = false;
+            else {
+                error = "--meshlet-triangle-cull: expected on or off, got '" + std::string(*value) + "'";
+                return false;
+            }
+        } else if (arg == "--meshlet-object") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "on") out.meshletObjectStage = true;
+            else if (*value == "off") out.meshletObjectStage = false;
+            else {
+                error = "--meshlet-object: expected on or off, got '" + std::string(*value) + "'";
+                return false;
+            }
+        } else if (arg == "--history-reset-every") {
+            if (!needCount(out.historyResetEvery)) return false;
         } else if (arg == "--graph-no-alias") {
             out.graphNoAlias = true;
         } else if (arg == "--graph-remat-cost") {
@@ -348,6 +500,21 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             error = "unknown option " + std::string(arg);
             return false;
         }
+    }
+    // F6: combinations the engine cannot honour are refused, never ignored.
+    if (out.geometryPath == GeometryPath::Mesh && out.gpuDriven != GpuDrivenMode::On) {
+        error = "--geometry-path mesh needs --gpu-driven on (meshlet candidates come from the GPU instance cull)";
+        return false;
+    }
+    if (out.forceApple9 && out.hizPath == HiZPath::Sampler) {
+        error = "--hiz-path sampler needs Apple10 sampler min reduction: refused with --force-family apple9";
+        return false;
+    }
+    if (out.geometryPath != GeometryPath::Mesh &&
+        (out.debugMeshlets > 0 || out.debugMeshletsCorrupt != MeshletCorruption::None ||
+         out.debugView != MeshletDebugView::None)) {
+        error = "--debug-meshlets / --debug-meshlets-corrupt / --debug-view need --geometry-path mesh";
+        return false;
     }
     return true;
 }

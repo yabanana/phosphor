@@ -29,6 +29,9 @@ class SceneStore;
 //              the visible list == the slots of the flags in slot order
 //   arguments  draw arguments == drawArgsReference(GPU prefix)
 //   counters   tested / visible / draw commands consistent with the above
+//              (F6: draw commands are expected only while the draw gate is
+//              open -- the mesh path keeps it closed unless its candidates
+//              overflowed; the draw arguments are checked either way)
 //   ecs        SceneStore::verifyAgainstEcs() (a change the ECS missed)
 // ---------------------------------------------------------------------------
 
@@ -39,6 +42,7 @@ struct SceneReadback {
     std::span<const u32> visible;           // on: slots
     std::span<const u32> drawArgs;          // on: 2 per command
     GPUSceneCounters     counters{};
+    bool                 drawGateOpen = true; // F6: the gate word Draw build read
 };
 
 struct SceneCheckResult {

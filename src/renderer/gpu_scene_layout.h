@@ -121,7 +121,12 @@ PHOSPHOR_GPU_CONSTANT u32 SB_DRAW_ICB         = 4; // GPUIcbContainer (MSL: { co
 PHOSPHOR_GPU_CONSTANT u32 SB_DRAW_INDICES     = 5; // u32[] global index buffer
 PHOSPHOR_GPU_CONSTANT u32 SB_DRAW_ARGS        = 6; // u32[commands * 2]: instanceCount, baseInstance (self-check)
 PHOSPHOR_GPU_CONSTANT u32 SB_DRAW_COUNTERS    = 7; // GPUSceneCounters (drawCommands)
-PHOSPHOR_GPU_CONSTANT u32 SCENE_BIND_COUNT    = 8;
+/// F6: u32[1] gate: draws are written only while gate[0] != 0 (indexed path:
+/// a constant 1; mesh path: the meshlet overflow word, so the ICB draws the
+/// frame only when the meshlet candidates overflowed).  drawArgs always hold
+/// the computed counts (self-check).
+PHOSPHOR_GPU_CONSTANT u32 SB_DRAW_GATE        = 8;
+PHOSPHOR_GPU_CONSTANT u32 SCENE_BIND_COUNT    = 9;
 
 /// Forward pass: the visible list (identity in gpu-driven off) after the
 /// F0 slots 0..5 of shaders/forward.metal.

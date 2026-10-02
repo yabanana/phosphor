@@ -510,9 +510,13 @@ void encodeKernels(Rig& r, MTL4::ComputeCommandEncoder* ce, const Pipes& pl, Buf
     ce->barrierAfterEncoderStages(MTL::StageDispatch | MTL::StageBlit, MTL::StageDispatch | MTL::StageBlit, MTL4::VisibilityOptionDevice);
     ce->resetCommandsInBuffer(b.icb, NS::Range::Make(0, b.commandCount));
     ce->barrierAfterEncoderStages(MTL::StageDispatch | MTL::StageBlit, MTL::StageDispatch, MTL4::VisibilityOptionDevice);
+    // F6: the draw gate (indexed path: always open).
+    MTL::Buffer* gate = ctx.buffer(16);
+    *static_cast<u32*>(gate->contents()) = 1u;
     bindSlots(ctx, ce, pl.build,
               {{0, b.drawParams}, {ph::SB_DRAW_BUCKETS, b.buckets}, {ph::SB_DRAW_COMMANDS, b.commands}, {ph::SB_DRAW_PREFIX, b.prefix},
-               {ph::SB_DRAW_ICB, b.icbBox}, {ph::SB_DRAW_INDICES, indexBuffer}, {ph::SB_DRAW_ARGS, b.drawArgs}, {ph::SB_DRAW_COUNTERS, b.counters}});
+               {ph::SB_DRAW_ICB, b.icbBox}, {ph::SB_DRAW_INDICES, indexBuffer}, {ph::SB_DRAW_ARGS, b.drawArgs}, {ph::SB_DRAW_COUNTERS, b.counters},
+               {ph::SB_DRAW_GATE, gate}});
     ce->dispatchThreads(MTL::Size::Make(std::max(commandCount, 1u), 1, 1), MTL::Size::Make(ph::SCENE_DRAW_GROUP, 1, 1));
 }
 

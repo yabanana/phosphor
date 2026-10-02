@@ -38,6 +38,8 @@ const char* formatToken(rg::Format f) {
 // Canonical format (STABLE: changing it invalidates every harvested key):
 //   <kind>|<function0>|<function1>|<constants>|<outputs>[|icb]
 //   kind       "R" (render) or "C" (compute)
+// F6.3 mesh pipelines (no existing key changes):
+//   M|<object>|<mesh>|<fragment>|<constants>|<outputs>|mesh=<ot>,<mt>,<payload>,<groups>[|icb]
 //   constants  comma separated "c<index>:<t>=<value>" in declaration order,
 //              t = b (bool, 0/1) | u (uint, decimal) | i (int, signed decimal)
 //                | f (float, "0x" + 8 hex digits of the bit pattern)
@@ -46,12 +48,17 @@ const char* formatToken(rg::Format f) {
 std::string canonicalString(const PipelineDesc& desc) {
     std::string s;
     s.reserve(96);
-    s += desc.kind == PipelineKind::Compute ? 'C' : 'R';
+    const bool mesh = desc.kind == PipelineKind::Mesh;
+    s += desc.kind == PipelineKind::Compute ? 'C' : (mesh ? 'M' : 'R');
     s += '|';
     s += desc.functions[0];
     s += '|';
     s += desc.functions[1];
     s += '|';
+    if (mesh) {
+        s += desc.functions[2];
+        s += '|';
+    }
 
     char buf[32];
     for (u32 i = 0; i < desc.constantCount; ++i) {
@@ -100,6 +107,11 @@ std::string canonicalString(const PipelineDesc& desc) {
             std::snprintf(buf, sizeof(buf), "%X", static_cast<unsigned>(o.writeMask & 0xF));
             s += buf;
         }
+    }
+    if (mesh) {
+        std::snprintf(buf, sizeof(buf), "|mesh=%u,%u,%u,%u", desc.mesh.objectThreads, desc.mesh.meshThreads,
+                      desc.mesh.payloadBytes, desc.mesh.meshGroups);
+        s += buf;
     }
     // F5.3: only pipelines usable from ICBs carry the suffix, so every other
     // key (and the committed harvest) is unchanged.
