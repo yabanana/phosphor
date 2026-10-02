@@ -40,6 +40,12 @@ HiZBuilder::HiZBuilder(MetalContext& context, PipelineCache& pipelines, Backend 
     }
     kLevel0_ = pipelines_.request(kernelDesc(KERNEL_HIZ_LEVEL0));
     kReduce_ = pipelines_.request(kernelDesc(backend_ == Backend::Sampler ? KERNEL_HIZ_REDUCE_SAMPLER : "hiz_reduce_simd"));
+    // F3.4 harvest: the archive covers both backends (the sampler kernel only
+    // where the effective family has it).
+    if (pipelines_.harvesting()) {
+        if (context_.effectiveApple10()) pipelines_.request(kernelDesc(KERNEL_HIZ_REDUCE_SAMPLER));
+        pipelines_.request(kernelDesc("hiz_reduce_simd"));
+    }
     for (u32 i = 0; i < 2; ++i) {
         NS::Error* error = nullptr;
         MTL4::ArgumentTableDescriptor* d = MTL4::ArgumentTableDescriptor::alloc()->init();
