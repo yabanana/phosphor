@@ -31,7 +31,8 @@ Prima di spremere un chip bisogna conoscerlo. La suite [`bench/soc`](../bench/so
 in `bench/results/<chip>-<os>.json`; `tools/soc_bench_all.sh` fa i 3 run, la
 validazione, i percorsi Apple9 e `leaks`; il modello di costo e il confronto
 con le fonti esterne sono in [`soc-model.md`](soc-model.md). Va eseguita su
-**ogni** Mac disponibile (almeno un T0 e l'M5 Max) e ripetuta dopo ogni major
+**ogni** Mac disponibile (oggi solo M5 Max; T0 fisico differito secondo
+[O12 e politica hardware](plans/HARDWARE_VALIDATION.md)) e ripetuta dopo ogni major
 release di macOS. **Misurato finora: solo M5 Max** (macOS 27.2, 2026-09-30);
 le righe "Misura" qui sotto riportano quei valori.
 
@@ -320,6 +321,7 @@ le righe "Misura" qui sotto riportano quei valori.
 **S-MEM-4 Memoria unificata**
 - **Misura** (B-09): CPU e GPU condividono un solo budget di ~550–570 GB/s: 2/6/12 thread memcpy portano la lettura GPU da 573 a 440/335/330 GB/s, totale sempre ~551–553 GB/s.
 - **Sfruttare**: la CPU scrive direttamente nei buffer GPU (animazione, decompressione, dati di gioco) senza copie; lavori leggeri spostabili tra CPU e GPU a seconda del carico; dataset enormi residenti (128 GB).
+- **Precisazione (2026-10-01)**: il riuso senza copie richiede storage, layout e sincronizzazione compatibili; contare conversioni, padding e copie interne ai framework. Memoria unificata non elimina ownership, retirement e contesa (ricerca H3; F23.8/OPT-9.11).
 - **Evitare**: CPU che satura la banda durante i pass GPU più pesanti (pianificare i job CPU pesanti fuori dalle finestre critiche).
 
 **S-MEM-5 Hazard tracking e residency**
@@ -360,7 +362,7 @@ le righe "Misura" qui sotto riportano quei valori.
 ## 11. CPU (S-CPU)
 
 **S-CPU-1 Core eterogenei**
-- **Fatto**: M5 Pro/Max: CPU a 18 core, 6 "super" + 12 performance (Apple Newsroom); le classi QoS determinano il core; i thread in QoS background sono confinati sugli E-core; nessun pinning esplicito ai core (note middleware, Apple).
+- **Fatto/documentazione**: QoS esprime urgenza e influenza lo scheduling, senza garantire l'assegnazione a un tipo di core. La topologia dipende dal dispositivo; Clutch/Edge include politiche di migrazione e raccomandazioni per gruppo/QoS ([R87–R88](RESEARCH_REFERENCES.md#ricerca-soc-e-piattaforma--2026-10-01)). Rilevare le classi disponibili senza presupporre sempre una coppia P/E.
 - **Misura** (B-24): 6 core "Super" + 12 "Performance" (sysctl perflevel), NEON ~86–88 GFLOPS per core con tutti i core attivi (112 con un thread); tutte le classi QoS girano alla stessa velocità a sistema scarico; risveglio di un thread 1,1 µs (user-interactive/initiated/utility) e 9,3 µs (background).
 - **Sfruttare**: render thread e simulazione in QoS user-interactive; streaming e compilazione shader in QoS utility; lavori di fondo in background; work stealing.
 - **Evitare**: presupporre un numero fisso di core; spin-wait (spreca energia e blocca core).
@@ -383,7 +385,7 @@ le righe "Misura" qui sotto riportano quei valori.
 
 **S-ANE-1 ANE come coprocessore**
 - **Fatto**: MetalFX neurale (WWDC26) usa Neural Engine **e** Neural Accelerator su M5 Pro/Max (note Metal 4); l'ANE è separato dai core GPU.
-- **Misura** (B-23, modello scritto in codice, 4 conv 3×3 256→256 su 64×64): ANE 15,7 TFLOPS efficaci, 1,24 ms; GPU via Core ML 13,9, CPU 1,5 TFLOPS; `MLComputePlan` conferma l'ANE per layer. **Con il GPU carico la latenza ANE sale di 2,0–2,9×**, il GPU non rallenta (0,995).
+- **Misura registrata** (B-23, modello scritto in codice, 4 conv 3×3 256→256 su 64×64): percorso configurato CPU+ANE 15,7 TFLOPS efficaci, 1,24 ms; GPU via Core ML 13,9, CPU 1,5 TFLOPS; `MLComputePlan` indica l'ANE previsto per layer, ma non è un trace che certifichi il device effettivo. **Con il GPU carico la latenza di quel percorso sale di 2,0–2,9×**, il GPU non rallenta (0,995). Attribuzione runtime da completare in F30.6; tempi preesistenti conservati.
 - **Sfruttare**: reti che non devono stare nel frame GPU (animazione appresa, audio, IA dei personaggi, previsione dello streaming) su ANE tramite Core ML, lasciando la GPU libera.
 - **Evitare**: reti sul percorso critico del frame se la latenza di ANE non è compatibile (misurare).
 
@@ -471,4 +473,32 @@ per **chip misurato** tramite `bench/` e autotuning (F29).
 - [ ] Compattazioni e riduzioni con SIMD-group, non con atomici globali
 - [ ] Nessuna allocazione, compilazione o I/O bloccante nel frame
 - [ ] Budget di byte DRAM per frame rispettato per tier
-- [ ] Misurato su T0, non solo sull'M5 Max
+- [ ] Ambito M5/fallback verificato; T0 fisico misurato oppure registrato come verifica esterna pendente (O12)
+
+## 17. Ricerca integrata CPU/GPU/ANE e piattaforma (2026-10-01)
+
+Il [programma H1–H12](research/2026-10-01-apple-soc.md) e i
+[piani esecutivi](plans/README.md) estendono il playbook con esperimenti a
+livello di intero SoC. Nessun benchmark nuovo è dichiarato eseguito qui.
+Le voci sono opportunità: la [politica di attivazione](plans/SEQUENCING.md)
+richiede un limite misurato sul motore prima di sviluppare nuova infrastruttura.
+Non è necessario implementare o misurare tutto il catalogo per proseguire.
+
+| ID | Ipotesi da misurare | Esperimento e fase responsabile |
+|---|---|---|
+| S-SCHED-1 | Il cammino critico più la contesa predice meglio di FIFO il completamento del frame | Replay DAG, costo di decisione, p99 e starvation; F23.7, OPT-9.10 |
+| S-SCHED-2 | Alcune sovrapposizioni CPU/SME/GPU/ANE/I/O distruggono località o banda | Matrice di rallentamento, sweep di working set e potenza; OPT-9.9 |
+| S-SCHED-3 | Un runtime proprio può ridurre wakeup/lock senza modificare il kernel | enkiTS/GCD/continuazioni e stealing per batch; F23.9, OPT-9.13 |
+| S-UMA-1 | Layout scelti per la coppia produttore-consumatore riducono il costo più di un layout universale | SoA/AoSoA, packing, buffer doppi/shared e retirement; F23.8, OPT-9.11 |
+| S-CPU-5 | SME custom conviene solo oltre un punto di pareggio dipendente dalla shape | NEON/Accelerate/SME/GPU con packing e ABI; OPT-9.12 |
+| S-ANE-2 | Risultati anticipati con età/confidenza rendono utile l'ANE senza attese del frame | Predictor streaming/animazione contro baseline analitica; F30.6, OPT-11.10 |
+| S-ANE-3 | Accesso ANE diretto può chiarire overhead e vincoli nascosti | Laboratorio separato, API private dichiarate, confronto Core ML; F30.7 |
+| S-GRAPH-1 | Equality saturation trova piani utili oltre il solo riordino | IR con regole verificate, cap di ricerca, misura contro OPT-1; OPT-4.17 |
+| S-PWR-4 | Un controllo a orizzonte breve riduce oscillazioni di qualità e deadline mancate | Confronto con isteresi, costo decisionale e soak; OPT-13.8 |
+
+Per le misure annotate come non disponibili headless, mantenere il vincolo
+locale osservato e rivalutarlo con SDK/OS nuovi: non convertirlo in una legge
+permanente delle API Apple. Per SME distinguere ISA pubblica e ABI supportata
+dall'AMX proprietario; per ML distinguere acceleratori nella GPU dall'ANE
+separato. Non dedurre il controllo di clock, core o die dalla sola lettura
+dei sorgenti XNU. Fonti e limiti sono nella bibliografia R87–R111.

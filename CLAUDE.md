@@ -2,17 +2,54 @@
 
 Native **Metal 4** renderer for Apple silicon (C++20 + metal-cpp, MSL shaders).
 Design rationale: `reports/Engine AAA nativo per Apple Silicon.md`.
-Implementation plan (phases F0–F38, tasks, exit criteria, optimisation rules
+Implementation plan (phases F0–F41, tasks, exit criteria, optimisation rules
 O1–O12): `docs/ROADMAP.md` — cite task IDs (e.g. `F7.3`) in commits, tick a
-task only once it is verified on the device, and log measurements in
+task only once it is verified for its declared scope on the available device
+(per `docs/plans/HARDWARE_VALIDATION.md`), and log measurements in
 `docs/perf-log.md`. The report's older "F1–F5" numbering is superseded by it.
-After each era come OPT phases (OPT-0…OPT-15): optimisation only, driven by
+Planning horizons: read `docs/plans/SEQUENCING.md` and `docs/plans/README.md`.
+All 58 F/OPT plans now contain advance implementation and verification detail.
+F5 is integrated on main; F6–F8 are the current operational horizon. Later
+plans remain revisable specifications, and open OPT/EDGE work is a candidate
+catalog: planning detail does not activate implementation. Before adding optimization
+infrastructure, demonstrate a bottleneck on real engine workloads, compare a
+simple baseline, timebox one experiment and adopt only a measured benefit.
+Read the matching phase plan and `docs/plans/METHOD.md` when promoting it.
+The roadmap owns task status; unselected candidates stay unchecked and do not
+block the next functional phase. Report delivered scope and outstanding
+candidates explicitly; keep correctness and validation of selected work mandatory.
+Required product capabilities: editor, ECS/runtime, community content, 2D,
+game UI and ecosystem reuse (`docs/plans/PRODUCT_PLATFORM.md`, F39–F41).
+Prefer evaluating actual Bevy crates/App in a Rust host with a measured batched
+bridge to the C++ Metal renderer before writing equivalents. A Bevy-inspired
+C++ ECS does not make Rust/wgpu plugins compatible; verify versions, adapters
+and behavior. These functional requirements do not need an FPS improvement
+to justify implementation. Preserve the integrated F5 contracts; Vulkan is a distant
+unscheduled hypothesis only, with no legacy revival or speculative RHI work.
+SoC research
+and experimental hypotheses: `docs/research/2026-10-01-apple-soc.md`.
+After each era, select relevant OPT tasks (OPT-0…OPT-15) from measured needs, driven by
 research (`docs/RESEARCH_REFERENCES.md`, keys `[Rn]`) and by the SoC playbook
 (`docs/APPLE_SOC_PLAYBOOK.md`, item IDs like `S-TBDR-3`, benchmarks `B-xx`).
 Record every OPT spike, successful or not, in `docs/opt-log.md`. Never state
 an undocumented hardware number as fact: measure it with `bench/`.
 The Vulkan renderer in `legacy/vulkan/` is reference only — never build or
 extend it; port algorithms from it.
+
+## Available hardware and acceptance (owner decision, 2026-10-02)
+
+Only M5 Max 128 GB is available. `DEVELOPMENT_ACCEPTED` on this device permits
+integration and the next phase; physical T0/other-device certification is
+`EXTERNAL_VALIDATION_PENDING` and does not block development. Preserve the
+Apple9 feature floor and test relevant fallbacks, but never present a forced
+Apple9 path or a 16 GB application budget on M5 as M3/Base measurements.
+Read `docs/plans/HARDWARE_VALIDATION.md` for the ledger and reporting rules.
+Explicit multi-device measurement tasks (F0.8, OPT-0.2, F28.7, F37.2) remain
+partial/unticked until their actual measurements exist. Bugs or failed checks
+on M5 are not hardware exemptions. The app does not yet have `--force-family`;
+F6 plans that capability override and truthful physical/effective reporting.
+Spike results choose variants within the authorized phase; do not invent
+measurements or introduce another routine owner-approval gate before coding.
 
 ## Non-negotiable working rules (set by the project owner)
 

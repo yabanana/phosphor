@@ -1,5 +1,10 @@
 # Bibliografia per le fasi OPT
 
+La ricerca del 2026-10-01 aggiunge [R87–R111](#ricerca-soc-e-piattaforma--2026-10-01)
+con fonti primarie consultate e limiti espliciti. R1–R86 sono il catalogo
+preesistente: verificarne testo, implementazione e disponibilità prima di
+adottare una tecnica; questa integrazione non certifica nuovamente ogni voce.
+
 Riferimenti citati nelle fasi OPT di [`ROADMAP.md`](ROADMAP.md) con la chiave
 `[Rn]`. Sono raggruppati per fase OPT. I lavori del 2024–2026 sono stati
 verificati in rete a settembre 2026; per i classici vale la citazione
@@ -145,3 +150,53 @@ Claude) i riferimenti della fase, poi scegliere le direzioni da provare come spi
 - High-Performance Graphics (HPG), EGSR, I3D: atti e premi
 - Sessioni Metal della WWDC e tech talk Apple sulle GPU
 - Elenco dei paper di Ke-Sen Huang: <https://www.realtimerendering.com/kesen/>
+
+## Ricerca SoC e piattaforma — 2026-10-01
+
+Fonti primarie consultate il 2026-10-01. «Documentazione» descrive un contratto
+pubblico; «sorgente» descrive quella revisione, non il binario installato;
+«paper» e «preprint» riportano risultati degli autori, da riprodurre sul nostro
+carico. I link sono fonti, non dipendenze da installare automaticamente.
+
+- **[R87]** Apple, [Tune CPU job scheduling for Apple silicon games](https://developer.apple.com/videos/play/tech-talks/110147/). **Documentazione/talk**: granularità, pool e QoS; riferimento per F23 e OPT-9. Non promette pinning o deadline hard real-time.
+- **[R88]** Apple OSS, [Clutch/Edge scheduler](https://github.com/apple-oss-distributions/xnu/blob/main/doc/scheduler/sched_clutch_edge.md). **Sorgente/documento di progetto**: gruppi, raccomandazioni e migrazione fra cluster; base del laboratorio F23.9, da fissare a un commit prima dell'esperimento.
+- **[R89]** Apple, [Meet Audio Workgroups](https://developer.apple.com/videos/play/wwdc2020/10224/), e [implementazione libdispatch](https://github.com/apple-oss-distributions/libdispatch/blob/main/src/workgroup.c). **Documentazione/sorgente**: coordinamento dei thread audio; verificare il contratto di ogni tipo di workgroup prima di estenderne l'uso.
+- **[R90]** Apple, [Discover Metal 4](https://developer.apple.com/videos/play/wwdc2025/205/). **Documentazione/talk**: command allocator, residency, sparse placement e sincronizzazione esplicita. Consultare anche le firme metal-cpp della build.
+- **[R91]** Apple, [Boost your graphics performance with the M5 and A19 GPUs](https://developer.apple.com/videos/play/tech-talks/111431/). **Documentazione/talk**: dynamic caching, cause di limitazione dell'occupancy e compressione; i rapporti pubblicizzati non sono guadagni del renderer Phosphor.
+- **[R92]** Apple, [Accelerate your machine learning workloads with the M5 and A19 GPUs](https://developer.apple.com/videos/play/tech-talks/111432/), [Metal Performance Primitives Programming Guide](https://developer.apple.com/download/files/Metal-Performance-Primitives-Programming-Guide.pdf). **Documentazione**: percorso GPU tensoriale; distinto dal Neural Engine.
+- **[R93]** Apple, [MLComputePlan](https://developer.apple.com/documentation/coreml/mlcomputeplan-85vdw?language=objc) e [cpuAndNeuralEngine](https://developer.apple.com/documentation/coreml/mlcomputeunits/cpuandneuralengine). **API pubbliche**: piano/costi previsti e selezione delle unità ammesse; non equivalgono a un trace dell'esecuzione.
+- **[R94]** Apple ML Research, [Deploying Transformers on the Apple Neural Engine](https://machinelearning.apple.com/research/neural-engine-transformers), 2022. **Ricerca degli autori**: layout e riduzione di copie/intermedi; non trasferire limiti o performance del modello ai chip nuovi senza misura.
+- **[R95]** Apple OSS, [ARM Scalable Matrix Extension in XNU](https://github.com/apple-oss-distributions/xnu/blob/main/doc/arm/sme.md). **Sorgente/documentazione OS**: stato SME e supporto del sistema; verificare ABI e feature effettive prima dei kernel custom.
+- **[R96]** [Hello SME! Generating Fast Matrix Multiplication Kernels Using the Scalable Matrix Extension](https://arxiv.org/abs/2409.18779), SC Workshops 2024. **Paper**: caratterizzazione e generazione di kernel; riferimento OPT-9.12, con packing e shape reali inclusi.
+- **[R97]** Apple, [Installing a custom kernel extension](https://developer.apple.com/documentation/apple-silicon/installing-a-custom-kernel-extension). **Documentazione**: vincoli di installazione su Apple Silicon; non documenta una via per rimpiazzare lo scheduler o i driver GPU di macOS.
+- **[R98]** C. Augonnet et al., [StarPU: A Unified Platform for Task Scheduling on Heterogeneous Multicore Architectures](https://starpu.gitlabpages.inria.fr/publications.html), e [codelet/features](https://starpu.gitlabpages.inria.fr/features.html). **Paper/progetto degli autori**: ispirazione per costi e implementazioni alternative del job; non si assume un backend Metal/ANE pronto per Phosphor.
+- **[R99]** R. D. Blumofe, C. E. Leiserson, [Scheduling Multithreaded Computations by Work Stealing](https://www.cs.cornell.edu/courses/cs612/2006sp/papers/blumofe94.pdf). **Paper**: proprietà per computazioni fully strict; le garanzie richiedono ipotesi che il DAG GPU/CPU può non soddisfare.
+- **[R100]** M. Willsey et al., [egg: Fast and Extensible Equality Saturation](https://arxiv.org/abs/2004.03082), POPL 2021. **Paper**: e-graph e riscritture; uso proposto offline con semantica e precondizioni esplicite.
+- **[R101]** P. Jain et al., [Checkmate: Breaking the Memory Wall with Optimal Tensor Rematerialization](https://proceedings.mlsys.org/paper_files/paper/2020/hash/0b816ae8f06f8dd3543dc3d9ef196cab-Abstract.html), MLSys 2020. **Paper**, stesso lavoro di R3 riverificato: ispirazione per il tradeoff memoria/ricalcolo, non un compilatore Metal già disponibile.
+- **[R102]** B. Bitterli et al., [Spatiotemporal reservoir resampling for real-time ray tracing with dynamic direct lighting](https://research.nvidia.com/publication/2020-07_spatiotemporal-reservoir-resampling-real-time-ray-tracing-dynamic-direct), 2020. **Paper**: fondamento ReSTIR, da mantenere corretto nella gestione di pesi e riuso.
+- **[R103]** K. Vaidyanathan et al., [Random-Access Neural Compression of Material Textures](https://research.nvidia.com/publication/2023-08_random-access-neural-compression-material-textures), SIGGRAPH 2023. **Paper**, R71 riverificato: confronto proposto con formati classici su GPU Apple.
+- **[R104]** E. Hellsten et al., [BaCO: A Fast and Portable Bayesian Compiler Optimization Framework](https://arxiv.org/abs/2212.11142), ASPLOS 2023. **Paper**, R79 riverificato: ricerca su parametri misti e vincoli; validare su scene holdout.
+- **[R105]** R. Kumaresan, [Orion: Characterizing and Programming Apple's Neural Engine for LLM Training and Inference](https://arxiv.org/abs/2603.06728), 2026. **Preprint**: usa API ANE private secondo gli autori; candidato per laboratorio F30.7, risultati non riprodotti qui.
+- **[R106]** [Apple Neural Engine: Architecture, Programming, and Performance](https://arxiv.org/abs/2606.22283), 2026. **Preprint** di caratterizzazione: separare osservazioni sperimentali, API private e percorso Core ML supportato; risultati non riprodotti qui.
+- **[R107]** Jolt Physics, [release notes ufficiali](https://github.com/jrouwe/JoltPhysics/releases). **Upstream**: interfaccia compute con Metal e simulazione hair; fissare versione e verificare quali solver siano effettivamente GPU prima di pianificare il port.
+- **[R108]** Apple, [Metal Feature Set Tables](https://developer.apple.com/metal/capabilities/). **Specifiche**: matrice di disponibilità e limiti; verificare la revisione insieme all'SDK, interrogare le capacità a runtime.
+- **[R109]** [Demystifying ARM SME to Optimize General Matrix Multiplications](https://arxiv.org/abs/2512.21473), 2025. **Preprint**: candidato di ricerca per tiling e riuso SME; benchmark degli autori non esteso automaticamente ai piccoli batch del motore.
+- **[R110]** A. H. Chen et al., [Vertex Block Descent](https://arxiv.org/abs/2403.06321), SIGGRAPH 2024, e [testo degli autori](https://graphics.cs.utah.edu/research/projects/vbd/vbd-siggraph2024.pdf). **Paper**, parte di R65 riverificata: candidato per simulazione, con validazione di stabilità e collisioni separata dal solo throughput.
+- **[R111]** Apple, [What’s new in Metal](https://developer.apple.com/metal/whats-new/), consultato 2026-10-01. **Documentazione corrente**: formati tensoriali quantizzati con scale factor, MetalFX neurale su ANE e GPU Neural Accelerators, ingressi per DRS/motion/distortion; disponibilità da verificare nell'SDK e sul device.
+
+## Piattaforma Bevy e riuso — 2026-10-01
+
+Fonti primarie consultate per la progettazione; docs.rs riportava Bevy 0.19.1.
+Fissare versione e feature al kickoff, e verificare la compatibilità dei plugin.
+Queste fonti non attestano alcuna integrazione già funzionante in Phosphor.
+
+- **[R112]** Bevy, [README bevy_ecs](https://github.com/bevyengine/bevy/blob/main/crates/bevy_ecs/README.md). Uso standalone e semantica ECS; non implica compatibilità di tutti i plugin del motore.
+- **[R113]** Bevy, [Plugin](https://docs.rs/bevy/latest/bevy/app/trait.Plugin.html) e [DefaultPlugins](https://docs.rs/bevy/latest/bevy/struct.DefaultPlugins.html). Contratto App, lifecycle e composizione per feature; base dell'host da verificare.
+- **[R114]** Bevy, [bevy::ui](https://docs.rs/bevy/latest/bevy/ui/index.html). Componenti/layout della UI di riferimento; la copertura finale richiede prove di interazione e rendering.
+- **[R115]** Bevy, [bevy::sprite](https://docs.rs/bevy/latest/bevy/sprite/index.html). Dati/primitivi 2D da censire per la matrice di parità.
+- **[R116]** Bevy, [AssetLoader](https://docs.rs/bevy/latest/bevy/asset/trait.AssetLoader.html). Interfaccia di caricamento con tipi e dipendenze da preservare nell'adapter.
+- **[R117]** Bevy, [UiRenderPlugin](https://docs.rs/bevy/latest/bevy/ui_render/struct.UiRenderPlugin.html). Integrazione del rendering UI distinta dal layout; non riusabile automaticamente sul backend Metal Phosphor.
+- **[R118]** Bevy, [release 0.19](https://bevy.org/news/bevy-0-19/) e [catalogo Bevy Assets](https://bevy.org/assets/). Inventario di funzionalità ed estensioni, non garanzia di qualità o compatibilità universale.
+- **[R119]** [bevy-inspector-egui upstream](https://github.com/jakobhellermann/bevy-inspector-egui). Esempio di riuso della reflection per inspector; dipendenze egui/render da verificare.
+- **[R120]** [bevy_egui upstream](https://github.com/vladbat00/bevy_egui) e [sorgente dell'integrazione](https://github.com/vladbat00/bevy_egui/blob/main/src/lib.rs). Esempio di plugin con collegamento al renderer Bevy, candidato a integrazione mirata.
+- **[R121]** [bevy_ecs_ldtk upstream](https://github.com/Trouv/bevy_ecs_ldtk) e [API LDtk](https://ldtk.io/api/). Loader e percorso tilemap da verificare separatamente.

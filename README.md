@@ -26,10 +26,13 @@ The original Vulkan renderer is archived in [`legacy/vulkan/`](legacy/vulkan/REA
 
 ## Status and roadmap
 
-The full implementation plan — 38 phases in seven eras, each with tasks, exit
-criteria and a cross-cutting ultra-optimisation track — is in
-[`docs/ROADMAP.md`](docs/ROADMAP.md) (Italian). After every era, dedicated
-**OPT phases** (OPT-0…OPT-15) do nothing but optimise, using research
+The implementation roadmap — F0–F41 and OPT-0…OPT-15, organized by dependencies
+in seven eras — is in [`docs/ROADMAP.md`](docs/ROADMAP.md) (Italian).
+The product scope includes an editor, ECS/runtime, community content, complete
+2D and game UI, and verified Bevy ecosystem reuse. These are planned capabilities;
+see [`docs/plans/PRODUCT_PLATFORM.md`](docs/plans/PRODUCT_PLATFORM.md).
+Metal is the active renderer; a future Vulkan backend remains unscheduled.
+After each era, select **OPT tasks** justified by real engine measurements, using research
 ([`docs/RESEARCH_REFERENCES.md`](docs/RESEARCH_REFERENCES.md)) and a
 component-by-component guide to squeezing Apple silicon
 ([`docs/APPLE_SOC_PLAYBOOK.md`](docs/APPLE_SOC_PLAYBOOK.md)).
@@ -42,7 +45,7 @@ component-by-component guide to squeezing Apple silicon
 | IV · World | F15–F22 | Advanced materials, on-tile OIT, particles, post, virtualised geometry, terrain, water, cooker, streaming |
 | V · Simulation (parallel) | F23–F27 | Job system and CPU optimisation, physics, animation, ray-traced acoustics, gameplay runtime |
 | VI · Frontier | F28–F33 | Scalability, per-device autotuning, neural rendering (incl. in-house MLX-trained networks), path tracing, Gaussian splatting |
-| VII · Product | F34–F38 | Editor, automated QA, iPad/iPhone/visionOS, vertical slice, distribution |
+| VII · Product | F34–F41 | Editor, automated QA, Apple platforms, vertical slice, distribution, complete 2D/game UI and ecosystem reuse |
 
 
 ---
@@ -174,6 +177,18 @@ tools/         apple-sdk-stubs for Linux syntax checks, bench_all.sh
 legacy/vulkan/ archived Vulkan renderer (reference only)
 reports/, research_notes/   design research (Italian / English)
 ```
+
+## Planning and validation
+
+All 58 F/OPT phase plans now include implementation packages and task-level
+acceptance checks: [plan index](docs/plans/README.md). F5 is integrated;
+F6–F8 remain the immediate renderer priority. Advance detail does not activate
+the optional research catalog.
+
+Development acceptance uses the available M5 Max 128 GB. Apple9 fallback
+checks on that device do not certify M3/T0 hardware or performance; missing
+physical-device validation remains explicit and does not block development.
+See the [hardware policy](docs/plans/HARDWARE_VALIDATION.md).
 
 ## License
 

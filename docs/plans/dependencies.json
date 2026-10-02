@@ -1,0 +1,1300 @@
+{
+  "schema": 4,
+  "updated": "2026-10-02",
+  "meaning": "start_after lists usable baseline contracts, not completion of entire phase catalogs or all historical residuals. Candidate edges apply only if selected. Nothing in this graph schedules work automatically; SEQUENCING.md governs activation.",
+  "phases": {
+    "F0": {
+      "later_integration": [],
+      "start_after": []
+    },
+    "F1": {
+      "later_integration": [],
+      "start_after": [
+        "F0"
+      ]
+    },
+    "F2": {
+      "later_integration": [],
+      "start_after": [
+        "F1"
+      ]
+    },
+    "F3": {
+      "later_integration": [],
+      "start_after": [
+        "F2"
+      ]
+    },
+    "F4": {
+      "later_integration": [],
+      "start_after": [
+        "F2",
+        "F3"
+      ]
+    },
+    "OPT-0": {
+      "later_integration": [],
+      "start_after": [
+        "F4"
+      ]
+    },
+    "OPT-1": {
+      "later_integration": [],
+      "start_after": [
+        "F2",
+        "F4",
+        "OPT-0"
+      ]
+    },
+    "F5": {
+      "later_integration": [],
+      "start_after": [
+        "F1",
+        "F2",
+        "F3",
+        "F4"
+      ]
+    },
+    "F6": {
+      "later_integration": [
+        {
+          "phase": "F8",
+          "reason": "Registro history generalizzato; Hi-Z baseline ha gestione locale esplicita."
+        }
+      ],
+      "start_after": [
+        "F5"
+      ]
+    },
+    "F7": {
+      "later_integration": [],
+      "start_after": [
+        "F6"
+      ]
+    },
+    "F8": {
+      "later_integration": [],
+      "start_after": [
+        "F7"
+      ]
+    },
+    "OPT-2": {
+      "later_integration": [],
+      "start_after": [
+        "F8",
+        "OPT-0"
+      ]
+    },
+    "OPT-3": {
+      "later_integration": [],
+      "start_after": [
+        "F8",
+        "OPT-0"
+      ]
+    },
+    "OPT-4": {
+      "later_integration": [
+        {
+          "phase": "OPT-2",
+          "reason": "Use selected optimizations only when measured and adopted; the baseline does not require completing this OPT catalog."
+        },
+        {
+          "phase": "OPT-3",
+          "reason": "Use selected optimizations only when measured and adopted; the baseline does not require completing this OPT catalog."
+        }
+      ],
+      "start_after": [
+        "F8",
+        "OPT-1"
+      ]
+    },
+    "F9": {
+      "later_integration": [
+        {
+          "phase": "F21",
+          "reason": "Cooker completo; i proxy iniziali sono producibili dal cooker minimo."
+        }
+      ],
+      "start_after": [
+        "F5",
+        "F8"
+      ]
+    },
+    "F10": {
+      "later_integration": [
+        {
+          "phase": "F11",
+          "reason": "Visibilità per le luci ReSTIR dopo la baseline CSM/sole."
+        }
+      ],
+      "start_after": [
+        "F6",
+        "F9"
+      ]
+    },
+    "F11": {
+      "later_integration": [],
+      "start_after": [
+        "F9",
+        "F10"
+      ]
+    },
+    "F12": {
+      "later_integration": [
+        {
+          "phase": "F32",
+          "reason": "Reference interno quando F32.1 è validato; prima usare riferimento offline esterno."
+        }
+      ],
+      "start_after": [
+        "F9",
+        "F11"
+      ]
+    },
+    "F13": {
+      "later_integration": [],
+      "start_after": [
+        "F8",
+        "F12"
+      ]
+    },
+    "F14": {
+      "later_integration": [
+        {
+          "phase": "F16",
+          "reason": "Particelle del meteo integrate quando disponibili."
+        }
+      ],
+      "start_after": [
+        "F8",
+        "F10",
+        "F12"
+      ]
+    },
+    "OPT-5": {
+      "later_integration": [],
+      "start_after": [
+        "F13",
+        "F14"
+      ]
+    },
+    "OPT-6": {
+      "later_integration": [
+        {
+          "phase": "OPT-4",
+          "reason": "Use selected optimizations only when measured and adopted; the baseline does not require completing this OPT catalog."
+        }
+      ],
+      "start_after": [
+        "F14"
+      ]
+    },
+    "F15": {
+      "later_integration": [],
+      "start_after": [
+        "F7",
+        "F11",
+        "F13"
+      ]
+    },
+    "F16": {
+      "later_integration": [],
+      "start_after": [
+        "F8",
+        "F12",
+        "F15"
+      ]
+    },
+    "F17": {
+      "later_integration": [],
+      "start_after": [
+        "F8",
+        "F13"
+      ]
+    },
+    "F18": {
+      "later_integration": [
+        {
+          "phase": "F21",
+          "reason": "Richiede nucleo F21.3 del cooker prima della fase; non l’intera pipeline OpenUSD/parallelismo."
+        },
+        {
+          "phase": "F22",
+          "reason": "Streaming completo dopo il prototipo residente."
+        }
+      ],
+      "start_after": [
+        "F6",
+        "F7"
+      ]
+    },
+    "F19": {
+      "later_integration": [
+        {
+          "phase": "F22",
+          "reason": "Required by the corresponding implementation package only; does not block the initial baseline or unrelated candidates."
+        }
+      ],
+      "start_after": [
+        "F15",
+        "F18"
+      ]
+    },
+    "F20": {
+      "later_integration": [],
+      "start_after": [
+        "F8",
+        "F12",
+        "F14"
+      ]
+    },
+    "F21": {
+      "later_integration": [
+        {
+          "phase": "F23",
+          "reason": "Parallelismo evoluto dopo cooker seriale/pool semplice."
+        }
+      ],
+      "start_after": [
+        "F1"
+      ]
+    },
+    "F22": {
+      "later_integration": [
+        {
+          "phase": "F18",
+          "reason": "Required by the corresponding implementation package only; does not block the initial baseline or unrelated candidates."
+        }
+      ],
+      "start_after": [
+        "F1",
+        "F21"
+      ]
+    },
+    "OPT-7": {
+      "later_integration": [
+        {
+          "phase": "F16",
+          "reason": "Required by the corresponding implementation package only; does not block the initial baseline or unrelated candidates."
+        },
+        {
+          "phase": "F19",
+          "reason": "Required by the corresponding implementation package only; does not block the initial baseline or unrelated candidates."
+        },
+        {
+          "phase": "F20",
+          "reason": "Required by the corresponding implementation package only; does not block the initial baseline or unrelated candidates."
+        },
+        {
+          "phase": "F22",
+          "reason": "Required by the corresponding implementation package only; does not block the initial baseline or unrelated candidates."
+        }
+      ],
+      "start_after": [
+        "F18"
+      ]
+    },
+    "OPT-8": {
+      "later_integration": [
+        {
+          "phase": "F30",
+          "reason": "Varianti NTC/ANE successive; codec/predictor analitici prima."
+        }
+      ],
+      "start_after": [
+        "F15",
+        "F21",
+        "F22"
+      ]
+    },
+    "F23": {
+      "later_integration": [
+        {
+          "phase": "F30",
+          "reason": "Adapter ANE dopo CPU/GPU; nessuna dipendenza del job system base."
+        }
+      ],
+      "start_after": [
+        "F4",
+        "F5"
+      ]
+    },
+    "F24": {
+      "later_integration": [],
+      "start_after": [
+        "F23",
+        "F5"
+      ]
+    },
+    "F25": {
+      "later_integration": [],
+      "start_after": [
+        "F24",
+        "F9",
+        "F15"
+      ]
+    },
+    "F26": {
+      "later_integration": [
+        {
+          "phase": "F9",
+          "reason": "Only the optional RT acoustic workload requires the BVH."
+        }
+      ],
+      "start_after": [
+        "F27"
+      ]
+    },
+    "F27": {
+      "later_integration": [
+        {
+          "phase": "F23",
+          "reason": "Coordinate/reuse scheduler baselines; no dependency on custom heterogeneous scheduler or kernel research."
+        }
+      ],
+      "start_after": [
+        "F5",
+        "F8"
+      ]
+    },
+    "OPT-9": {
+      "later_integration": [
+        {
+          "phase": "F30",
+          "reason": "Contesa e scheduler ANE solo dopo F30.6; misure CPU/GPU precedenti."
+        },
+        {
+          "phase": "OPT-4",
+          "reason": "Use selected optimizations only when measured and adopted; the baseline does not require completing this OPT catalog."
+        }
+      ],
+      "start_after": [
+        "F23"
+      ]
+    },
+    "OPT-10": {
+      "later_integration": [
+        {
+          "phase": "F30",
+          "reason": "Motion matching su ANE quando disponibile."
+        }
+      ],
+      "start_after": [
+        "F24",
+        "F25",
+        "F26"
+      ]
+    },
+    "F28": {
+      "later_integration": [
+        {
+          "phase": "F35",
+          "reason": "Matrice QA automatizzata completa; fixture manuali ripetibili già richieste."
+        },
+        {
+          "phase": "OPT-4",
+          "reason": "Use selected optimizations only when measured and adopted; the baseline does not require completing this OPT catalog."
+        }
+      ],
+      "start_after": [
+        "F8"
+      ]
+    },
+    "F29": {
+      "later_integration": [
+        {
+          "phase": "OPT-12",
+          "reason": "Ricerca più avanzata dopo selezione offline di base."
+        },
+        {
+          "phase": "OPT-4",
+          "reason": "Use selected optimizations only when measured and adopted; the baseline does not require completing this OPT catalog."
+        }
+      ],
+      "start_after": [
+        "F28",
+        "OPT-0"
+      ]
+    },
+    "F30": {
+      "later_integration": [],
+      "start_after": [
+        "F12",
+        "F13"
+      ]
+    },
+    "F31": {
+      "later_integration": [
+        {
+          "phase": "F32",
+          "reason": "Basta il sottotask F32.1; il PT realtime non è prerequisito del training."
+        }
+      ],
+      "start_after": [
+        "F30"
+      ]
+    },
+    "F32": {
+      "later_integration": [
+        {
+          "phase": "F31",
+          "reason": "Denoiser proprietario successivo; iniziare col percorso F13/MetalFX."
+        },
+        {
+          "phase": "F12",
+          "reason": "Required by the corresponding implementation package only; does not block the initial baseline or unrelated candidates."
+        },
+        {
+          "phase": "F15",
+          "reason": "Required by the corresponding implementation package only; does not block the initial baseline or unrelated candidates."
+        }
+      ],
+      "start_after": [
+        "F9",
+        "F7"
+      ]
+    },
+    "F33": {
+      "later_integration": [],
+      "start_after": [
+        "F8",
+        "F12"
+      ]
+    },
+    "OPT-11": {
+      "later_integration": [
+        {
+          "phase": "F31",
+          "reason": "Required by the corresponding implementation package only; does not block the initial baseline or unrelated candidates."
+        },
+        {
+          "phase": "F32",
+          "reason": "Required by the corresponding implementation package only; does not block the initial baseline or unrelated candidates."
+        }
+      ],
+      "start_after": [
+        "F30"
+      ]
+    },
+    "OPT-12": {
+      "later_integration": [
+        {
+          "phase": "OPT-4",
+          "reason": "Use selected optimizations only when measured and adopted; the baseline does not require completing this OPT catalog."
+        },
+        {
+          "phase": "F30",
+          "reason": "Required by the corresponding implementation package only; does not block the initial baseline or unrelated candidates."
+        },
+        {
+          "phase": "F31",
+          "reason": "Required by the corresponding implementation package only; does not block the initial baseline or unrelated candidates."
+        },
+        {
+          "phase": "F32",
+          "reason": "Required by the corresponding implementation package only; does not block the initial baseline or unrelated candidates."
+        },
+        {
+          "phase": "F33",
+          "reason": "Required by the corresponding implementation package only; does not block the initial baseline or unrelated candidates."
+        }
+      ],
+      "start_after": [
+        "F29"
+      ]
+    },
+    "OPT-13": {
+      "later_integration": [
+        {
+          "phase": "OPT-9",
+          "reason": "Matrice completa di interferenza quando disponibile."
+        },
+        {
+          "phase": "F29",
+          "reason": "Required by the corresponding implementation package only; does not block the initial baseline or unrelated candidates."
+        }
+      ],
+      "start_after": [
+        "F28"
+      ]
+    },
+    "F34": {
+      "later_integration": [
+        {
+          "phase": "F39",
+          "reason": "Complete 2D authoring after the runtime."
+        },
+        {
+          "phase": "F40",
+          "reason": "Complete UI authoring after the runtime."
+        },
+        {
+          "phase": "F41",
+          "reason": "Extension host core first; compatible editor plugins added progressively."
+        }
+      ],
+      "start_after": [
+        "F21",
+        "F27"
+      ]
+    },
+    "F35": {
+      "later_integration": [
+        {
+          "phase": "F32",
+          "reason": "Reference convergente interno quando pronto; offline esterno prima."
+        },
+        {
+          "phase": "OPT-4",
+          "reason": "Use selected optimizations only when measured and adopted; the baseline does not require completing this OPT catalog."
+        },
+        {
+          "phase": "F13",
+          "reason": "Required by the corresponding implementation package only; does not block the initial baseline or unrelated candidates."
+        },
+        {
+          "phase": "F27",
+          "reason": "Required by the corresponding implementation package only; does not block the initial baseline or unrelated candidates."
+        }
+      ],
+      "start_after": [
+        "F8"
+      ]
+    },
+    "F36": {
+      "later_integration": [],
+      "start_after": [
+        "F28",
+        "F35"
+      ]
+    },
+    "F37": {
+      "later_integration": [],
+      "start_after": [
+        "F13",
+        "F14",
+        "F15",
+        "F16",
+        "F17",
+        "F18",
+        "F21",
+        "F22",
+        "F25",
+        "F27",
+        "F28",
+        "F35",
+        "F26",
+        "F34",
+        "F39",
+        "F40"
+      ]
+    },
+    "F38": {
+      "later_integration": [
+        {
+          "phase": "F41",
+          "reason": "SDK and compatibility corpus for product release."
+        }
+      ],
+      "start_after": [
+        "F21",
+        "F28",
+        "F35",
+        "F37"
+      ]
+    },
+    "OPT-14": {
+      "later_integration": [],
+      "start_after": [
+        "F35"
+      ]
+    },
+    "OPT-15": {
+      "later_integration": [],
+      "start_after": [
+        "F3",
+        "F21",
+        "F23",
+        "F38"
+      ]
+    },
+    "F39": {
+      "start_after": [
+        "F8",
+        "F27"
+      ],
+      "later_integration": [
+        {
+          "phase": "F34",
+          "reason": "Editor consumes working 2D runtime; authoring integration follows."
+        },
+        {
+          "phase": "F41",
+          "reason": "Core plugin contract required, broad plugin certification follows."
+        }
+      ]
+    },
+    "F40": {
+      "start_after": [
+        "F8",
+        "F27"
+      ],
+      "later_integration": [
+        {
+          "phase": "F34",
+          "reason": "Runtime UI works without editor; authoring follows."
+        },
+        {
+          "phase": "F41",
+          "reason": "Core host contract precedes adapters; certified UI corpus follows."
+        }
+      ]
+    },
+    "F41": {
+      "start_after": [
+        "F27"
+      ],
+      "later_integration": [
+        {
+          "phase": "F39",
+          "reason": "Graphical 2D plugin certification after 2D runtime."
+        },
+        {
+          "phase": "F40",
+          "reason": "UI plugin certification after UI runtime."
+        },
+        {
+          "phase": "F34",
+          "reason": "Editor plugins verified with editor consumer."
+        }
+      ]
+    }
+  },
+  "early_deliverables": [
+    {
+      "deliverable": "F21.3 minimo",
+      "before": "F18",
+      "requires": [
+        "F5",
+        "F6"
+      ],
+      "note": "Cook glTF/cluster/proxy residente; OpenUSD, package e pool avanzato possono seguire."
+    },
+    {
+      "deliverable": "F32.1 reference",
+      "before": "F31",
+      "requires": [
+        "F9",
+        "F15"
+      ],
+      "note": "MIS/reference validato, senza NRC, denoise appreso o PT realtime. Può precedere F30."
+    },
+    {
+      "deliverable": "F35 osservabilità/runner minimo",
+      "before": "F28",
+      "requires": [
+        "F4",
+        "F8"
+      ],
+      "note": "Clip e report possono evolvere subito; replay gameplay completo dopo F27."
+    },
+    {
+      "deliverable": "F27.1/F27.7 host feasibility",
+      "before": "F34/F39/F40",
+      "requires": [
+        "F8"
+      ],
+      "note": "Integration decision and small real corpus; not an optimization requiring +3% frame benefit."
+    },
+    {
+      "deliverable": "F41.1/F41.2 plugin core",
+      "before": "F39/F40",
+      "requires": [
+        "F27"
+      ],
+      "note": "Inventory and host contract before complete graphical plugin certification."
+    }
+  ],
+  "task_dependencies": {
+    "F6.5": [
+      "F6.4",
+      "F6.6"
+    ],
+    "F10.3": [
+      "F11.1"
+    ],
+    "F12.5": [
+      "F9.4"
+    ],
+    "F18.1": [
+      "F21.3"
+    ],
+    "F21.5": [
+      "F23.1"
+    ],
+    "F22.4": [
+      "F18.1"
+    ],
+    "F27.7": [
+      "F5.1"
+    ],
+    "F27.10": [
+      "F27.7",
+      "F27.9"
+    ],
+    "F41.2": [
+      "F27.1",
+      "F27.7"
+    ],
+    "F39.1": [
+      "F27.10",
+      "F41.2"
+    ],
+    "F39.6": [
+      "F21.8",
+      "F39.2"
+    ],
+    "F39.8": [
+      "F39.1",
+      "F39.2",
+      "F39.3",
+      "F39.4",
+      "F39.5",
+      "F39.6",
+      "F39.7"
+    ],
+    "F40.1": [
+      "F27.10",
+      "F41.2"
+    ],
+    "F40.3": [
+      "F40.2"
+    ],
+    "F40.9": [
+      "F34.1",
+      "F40.3"
+    ],
+    "F40.10": [
+      "F40.1",
+      "F40.2",
+      "F40.3",
+      "F40.4",
+      "F40.5",
+      "F40.6",
+      "F40.7",
+      "F40.8"
+    ],
+    "F34.5": [
+      "F39.2",
+      "F40.3"
+    ],
+    "F34.7": [
+      "F41.2",
+      "F27.8"
+    ],
+    "F34.8": [
+      "F34.5",
+      "F34.6",
+      "F39.8",
+      "F40.10"
+    ],
+    "F41.6": [
+      "F41.2",
+      "F41.3",
+      "F41.4",
+      "F41.5"
+    ],
+    "F35.7": [
+      "F41.5",
+      "F39.8",
+      "F40.10"
+    ],
+    "F37.4": [
+      "F26.1",
+      "F34.8",
+      "F39.8",
+      "F40.10",
+      "F35.7",
+      "F40.9"
+    ],
+    "F38.5": [
+      "F41.6",
+      "F41.7"
+    ],
+    "F6.2": [
+      "F6.1",
+      "F6.3"
+    ],
+    "F6.4": [
+      "F6.3"
+    ],
+    "F6.6": [
+      "F6.2"
+    ],
+    "F6.7": [
+      "F6.5"
+    ],
+    "F7.2": [
+      "F7.1"
+    ],
+    "F7.3": [
+      "F7.2"
+    ],
+    "F7.6": [
+      "F7.2"
+    ],
+    "F7.7": [
+      "F7.1"
+    ],
+    "F8.4": [
+      "F8.1",
+      "F8.3",
+      "F8.6"
+    ],
+    "F8.5": [
+      "F8.4"
+    ],
+    "F8.7": [
+      "F8.4"
+    ],
+    "F19.2": [
+      "F22.3"
+    ],
+    "F35.3": [
+      "F27.6"
+    ]
+  },
+  "task_dependency_notes": {
+    "F12.5": "Richiede anche un riferimento offline esterno validato; F32.1 è sostituzione successiva.",
+    "F18.1": "Solo nucleo cooker F21.3; non serve aspettare OpenUSD o F21.5.",
+    "OPT-9.9": "La matrice CPU/GPU/SME può partire subito; parte ANE e chiusura completa dopo F30.6.",
+    "OPT-8.11": "Confronto formati classici prima; parte neurale dopo F30.3.",
+    "OPT-10.3": "Baseline CPU/Metal prima; percorso ANE dopo F30.6.",
+    "F31.1": "F32.1 può essere anticipato dopo F9/F15; in alternativa riferimento esterno con contratto validato.",
+    "F32.3": "MetalFX baseline evita una dipendenza circolare da F31.2.",
+    "F41.2": "Minimal host contract only; F39/F40 do not wait for all plugin certification.",
+    "F40.9": "Editor authoring follows functioning runtime; not a prerequisite of layout or UI rendering.",
+    "F34.8": "Final authoring acceptance follows complete runtime suites; F34.1 can start earlier.",
+    "F38.5": "Public SDK/templates include the compatibility matrix; Vulkan is not a dependency.",
+    "F6.1": "Includes app capability-mask/report prerequisite; physical M3 measurement is external certification, not a development blocker."
+  },
+  "planning_levels": {
+    "F0": "audit",
+    "F1": "audit",
+    "F2": "audit",
+    "F3": "audit",
+    "F4": "audit",
+    "OPT-0": "audit",
+    "OPT-1": "audit",
+    "F5": "audit",
+    "F6": "operativo",
+    "F7": "operativo",
+    "F8": "operativo",
+    "OPT-2": "opportunita",
+    "OPT-3": "opportunita",
+    "OPT-4": "opportunita",
+    "F9": "preparazione",
+    "F10": "preparazione",
+    "F11": "preparazione",
+    "F12": "preparazione",
+    "F13": "preparazione",
+    "F14": "preparazione",
+    "OPT-5": "opportunita",
+    "OPT-6": "opportunita",
+    "F15": "pianificato",
+    "F16": "pianificato",
+    "F17": "pianificato",
+    "F18": "pianificato",
+    "F19": "pianificato",
+    "F20": "opportunita",
+    "F21": "requisito_pianificato",
+    "F22": "pianificato",
+    "OPT-7": "opportunita",
+    "OPT-8": "opportunita",
+    "F23": "pianificato",
+    "F24": "pianificato",
+    "F25": "pianificato",
+    "F26": "requisito_pianificato",
+    "F27": "requisito_pianificato",
+    "OPT-9": "opportunita",
+    "OPT-10": "opportunita",
+    "F28": "pianificato",
+    "F29": "opportunita",
+    "F30": "opportunita",
+    "F31": "opportunita",
+    "F32": "opportunita",
+    "F33": "opportunita",
+    "OPT-11": "opportunita",
+    "OPT-12": "opportunita",
+    "OPT-13": "opportunita",
+    "F34": "requisito_pianificato",
+    "F35": "pianificato",
+    "F36": "pianificato",
+    "F37": "pianificato",
+    "F38": "pianificato",
+    "OPT-14": "opportunita",
+    "OPT-15": "opportunita",
+    "F41": "requisito_pianificato",
+    "F40": "requisito_pianificato",
+    "F39": "requisito_pianificato"
+  },
+  "current_focus": [
+    "F6",
+    "F7",
+    "F8"
+  ],
+  "selected_candidate_tasks": [],
+  "candidate_tasks": [
+    "F7.4",
+    "F7.5",
+    "OPT-2.1",
+    "OPT-2.2",
+    "OPT-2.3",
+    "OPT-2.4",
+    "OPT-2.5",
+    "OPT-2.6",
+    "OPT-2.7",
+    "OPT-2.8",
+    "OPT-2.9",
+    "OPT-2.10",
+    "OPT-2.11",
+    "OPT-3.1",
+    "OPT-3.2",
+    "OPT-3.3",
+    "OPT-3.4",
+    "OPT-3.5",
+    "OPT-3.6",
+    "OPT-3.7",
+    "OPT-3.8",
+    "OPT-3.9",
+    "OPT-3.10",
+    "OPT-3.11",
+    "OPT-4.1",
+    "OPT-4.2",
+    "OPT-4.3",
+    "OPT-4.4",
+    "OPT-4.5",
+    "OPT-4.6",
+    "OPT-4.7",
+    "OPT-4.8",
+    "OPT-4.9",
+    "OPT-4.10",
+    "OPT-4.11",
+    "OPT-4.12",
+    "OPT-4.13",
+    "OPT-4.14",
+    "OPT-4.15",
+    "OPT-4.17",
+    "F9.6",
+    "F14.5",
+    "OPT-5.1",
+    "OPT-5.2",
+    "OPT-5.3",
+    "OPT-5.4",
+    "OPT-5.5",
+    "OPT-5.6",
+    "OPT-5.7",
+    "OPT-5.8",
+    "OPT-5.9",
+    "OPT-5.10",
+    "OPT-5.11",
+    "OPT-6.1",
+    "OPT-6.2",
+    "OPT-6.3",
+    "OPT-6.4",
+    "OPT-6.5",
+    "OPT-6.6",
+    "OPT-6.7",
+    "OPT-6.8",
+    "OPT-6.9",
+    "OPT-6.10",
+    "OPT-6.11",
+    "OPT-6.12",
+    "F16.5",
+    "F19.5",
+    "F20.1",
+    "F20.2",
+    "F20.3",
+    "F20.4",
+    "OPT-7.1",
+    "OPT-7.2",
+    "OPT-7.3",
+    "OPT-7.4",
+    "OPT-7.5",
+    "OPT-7.6",
+    "OPT-7.7",
+    "OPT-7.8",
+    "OPT-7.9",
+    "OPT-7.10",
+    "OPT-8.1",
+    "OPT-8.2",
+    "OPT-8.3",
+    "OPT-8.4",
+    "OPT-8.5",
+    "OPT-8.6",
+    "OPT-8.7",
+    "OPT-8.8",
+    "OPT-8.9",
+    "OPT-8.10",
+    "OPT-8.11",
+    "F23.7",
+    "F23.9",
+    "F25.4",
+    "F26.2",
+    "F26.3",
+    "OPT-9.1",
+    "OPT-9.2",
+    "OPT-9.3",
+    "OPT-9.4",
+    "OPT-9.5",
+    "OPT-9.6",
+    "OPT-9.7",
+    "OPT-9.8",
+    "OPT-9.9",
+    "OPT-9.10",
+    "OPT-9.11",
+    "OPT-9.12",
+    "OPT-9.13",
+    "OPT-10.1",
+    "OPT-10.2",
+    "OPT-10.3",
+    "OPT-10.4",
+    "OPT-10.5",
+    "OPT-10.6",
+    "OPT-10.7",
+    "OPT-10.8",
+    "F29.1",
+    "F29.2",
+    "F29.3",
+    "F29.4",
+    "F29.5",
+    "F30.1",
+    "F30.2",
+    "F30.3",
+    "F30.4",
+    "F30.5",
+    "F30.6",
+    "F30.7",
+    "F31.1",
+    "F31.2",
+    "F31.3",
+    "F31.4",
+    "F31.5",
+    "F32.2",
+    "F32.3",
+    "F32.4",
+    "F33.1",
+    "F33.2",
+    "F33.3",
+    "F33.4",
+    "OPT-11.1",
+    "OPT-11.2",
+    "OPT-11.3",
+    "OPT-11.4",
+    "OPT-11.5",
+    "OPT-11.6",
+    "OPT-11.7",
+    "OPT-11.8",
+    "OPT-11.9",
+    "OPT-11.10",
+    "OPT-11.11",
+    "OPT-12.1",
+    "OPT-12.2",
+    "OPT-12.3",
+    "OPT-12.4",
+    "OPT-12.5",
+    "OPT-12.6",
+    "OPT-12.7",
+    "OPT-12.8",
+    "OPT-12.9",
+    "OPT-12.10",
+    "OPT-13.1",
+    "OPT-13.2",
+    "OPT-13.3",
+    "OPT-13.4",
+    "OPT-13.5",
+    "OPT-13.6",
+    "OPT-13.7",
+    "OPT-13.8",
+    "F36.3",
+    "OPT-14.1",
+    "OPT-14.2",
+    "OPT-14.3",
+    "OPT-14.4",
+    "OPT-14.5",
+    "OPT-14.6",
+    "OPT-15.1",
+    "OPT-15.2",
+    "OPT-15.3",
+    "OPT-15.4",
+    "OPT-15.5",
+    "OPT-15.6"
+  ],
+  "candidate_dependencies": {
+    "F23.7": [
+      "F23.1"
+    ],
+    "OPT-9.3": [
+      "F30.6"
+    ],
+    "OPT-9.9": [
+      "F30.6"
+    ],
+    "OPT-8.5": [
+      "F30.6"
+    ],
+    "OPT-8.11": [
+      "F30.3"
+    ],
+    "OPT-10.3": [
+      "F30.6"
+    ],
+    "F30.6": [
+      "F8.6"
+    ],
+    "F31.1": [
+      "F32.1"
+    ],
+    "F31.2": [
+      "F31.1"
+    ],
+    "F32.3": [
+      "F13.3"
+    ],
+    "OPT-11.5": [
+      "F31.2"
+    ],
+    "OPT-12.8": [
+      "OPT-4.17",
+      "F23.7",
+      "F30.6"
+    ],
+    "OPT-13.8": [
+      "F28.6",
+      "F29.5"
+    ],
+    "F26.2": [
+      "F9.4",
+      "F26.1"
+    ],
+    "OPT-7.5": [
+      "F20.1"
+    ],
+    "OPT-12.2": [
+      "F32.1"
+    ],
+    "OPT-12.4": [
+      "F33.1"
+    ],
+    "OPT-11.4": [
+      "F30.3"
+    ],
+    "F32.2": [
+      "F32.1",
+      "F12.2"
+    ]
+  },
+  "one_valid_start_order_note": "Removed: a topological order is not a prioritized execution schedule. Follow current_focus and promote one phase at a time.",
+  "checkpoints": [
+    {
+      "after_baseline": "F8",
+      "collect": "OPT-4.16",
+      "next": "One justified local optimization or proceed to F9–F13"
+    },
+    {
+      "after_baseline": "F13",
+      "next": "Re-measure integrated lighting; activate advanced architecture only on its specific bottleneck"
+    }
+  ],
+  "required_product_capabilities": {
+    "ecs_runtime": "F27",
+    "content_pipeline": "F21",
+    "game_audio": "F26.1",
+    "editor": "F34",
+    "2d": "F39",
+    "game_ui": "F40",
+    "ecosystem": "F41"
+  },
+  "deferred_hypotheses": [
+    {
+      "name": "Vulkan renderer",
+      "status": "not_scheduled",
+      "note": "Future possibility only; no implementation, legacy revival or general RHI scheduled."
+    }
+  ],
+  "planning_detail": {
+    "F0": "detailed_audit",
+    "F1": "detailed_audit",
+    "F2": "detailed_audit",
+    "F3": "detailed_audit",
+    "F4": "detailed_audit",
+    "OPT-0": "detailed_audit",
+    "OPT-1": "detailed_audit",
+    "F5": "detailed_audit",
+    "F6": "detailed_advance_plan",
+    "F7": "detailed_advance_plan",
+    "F8": "detailed_advance_plan",
+    "OPT-2": "detailed_advance_plan",
+    "OPT-3": "detailed_advance_plan",
+    "OPT-4": "detailed_advance_plan",
+    "F9": "detailed_advance_plan",
+    "F10": "detailed_advance_plan",
+    "F11": "detailed_advance_plan",
+    "F12": "detailed_advance_plan",
+    "F13": "detailed_advance_plan",
+    "F14": "detailed_advance_plan",
+    "OPT-5": "detailed_advance_plan",
+    "OPT-6": "detailed_advance_plan",
+    "F15": "detailed_advance_plan",
+    "F16": "detailed_advance_plan",
+    "F17": "detailed_advance_plan",
+    "F18": "detailed_advance_plan",
+    "F19": "detailed_advance_plan",
+    "F20": "detailed_advance_plan",
+    "F21": "detailed_advance_plan",
+    "F22": "detailed_advance_plan",
+    "OPT-7": "detailed_advance_plan",
+    "OPT-8": "detailed_advance_plan",
+    "F23": "detailed_advance_plan",
+    "F24": "detailed_advance_plan",
+    "F25": "detailed_advance_plan",
+    "F26": "detailed_advance_plan",
+    "F27": "detailed_advance_plan",
+    "OPT-9": "detailed_advance_plan",
+    "OPT-10": "detailed_advance_plan",
+    "F28": "detailed_advance_plan",
+    "F29": "detailed_advance_plan",
+    "F30": "detailed_advance_plan",
+    "F31": "detailed_advance_plan",
+    "F32": "detailed_advance_plan",
+    "F33": "detailed_advance_plan",
+    "OPT-11": "detailed_advance_plan",
+    "OPT-12": "detailed_advance_plan",
+    "OPT-13": "detailed_advance_plan",
+    "F34": "detailed_advance_plan",
+    "F35": "detailed_advance_plan",
+    "F36": "detailed_advance_plan",
+    "F37": "detailed_advance_plan",
+    "F38": "detailed_advance_plan",
+    "OPT-14": "detailed_advance_plan",
+    "OPT-15": "detailed_advance_plan",
+    "F41": "detailed_advance_plan",
+    "F40": "detailed_advance_plan",
+    "F39": "detailed_advance_plan"
+  },
+  "hardware_validation": {
+    "policy": "HARDWARE_VALIDATION.md",
+    "available_device": "Apple M5 Max 128 GB",
+    "development_gate": "available_device_and_relevant_fallbacks",
+    "external_validation_blocks_development": false,
+    "physical_t0_status": "EXTERNAL_VALIDATION_PENDING",
+    "forced_apple9_is_hardware_emulation": false,
+    "app_override_status": "planned_in_F6_not_yet_implemented",
+    "explicit_multidevice_tasks_remain_open": [
+      "F0.8",
+      "OPT-0.2",
+      "F28.7",
+      "F37.2"
+    ]
+  }
+}
