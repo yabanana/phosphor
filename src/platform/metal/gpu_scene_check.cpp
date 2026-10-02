@@ -22,7 +22,7 @@ MTL::Buffer* GpuSceneChecker::readback(MTL::Buffer*& cache, u64 size, const char
 
 SceneCheckResult GpuSceneChecker::check(const SceneRenderer& renderer, const SceneStore& store, const GpuScene& scene,
                                         const ECS& ecs, const GPUCullParams& cull, const float* motionSinCos, u32 slot,
-                                        GpuDrivenMode mode) {
+                                        GpuDrivenMode mode, bool drawGateOpen) {
     const GpuSceneBuffers& b = renderer.buffers();
     const GpuSceneBuffers::FrameSet& fs = b.frame(slot);
     const u64 slots = store.slotCapacity();
@@ -53,7 +53,8 @@ SceneCheckResult GpuSceneChecker::check(const SceneRenderer& renderer, const Sce
         gpu.visible  = {static_cast<const u32*>(visible->contents()), static_cast<size_t>(slots)};
         gpu.drawArgs = {static_cast<const u32*>(fs.drawArgs->contents()), static_cast<size_t>(store.commandCount()) * 2};
     }
-    gpu.counters = renderer.counters(slot);
+    gpu.counters     = renderer.counters(slot);
+    gpu.drawGateOpen = drawGateOpen;
     return compareScene(store, scene, ecs, cull, motionSinCos, gpu, on);
 }
 

@@ -1464,8 +1464,11 @@ bool Engine::checkGpuScene(u32 slot) {
     context_->waitIdle();
     ++gpuSceneChecks_;
     if (!sceneChecker_) sceneChecker_ = std::make_unique<GpuSceneChecker>(*context_);
+    // F6: in the mesh path Draw build writes draws only on an overflow frame.
+    const bool gateOpen = !mesh_ || *static_cast<const u32*>(mesh_->frame(slot).gate->contents()) != 0u;
     const SceneCheckResult r = sceneChecker_->check(*renderer_, *store_, *gpuScene_, *ecs_, cullParams_,
-                                                    motionSinCos_.data(), slot, options_.gpuDriven);
+                                                    motionSinCos_.data(), slot, mesh_ ? GpuDrivenMode::On : options_.gpuDriven,
+                                                    gateOpen);
     if (!r.pass) ++gpuSceneFailures_;
     // stdout: scripts and the negative controls read these lines.
     std::printf("GPU-SCENE frame %u | %s\n", presentedFrames_, formatSceneCheck(r).c_str());
