@@ -185,7 +185,7 @@ pubbliche, sorgenti OS, risultati di paper e ipotesi da misurare.
 | OPT-0 | Caratterizzazione del SoC (`bench/`, modello di costo) ✅ (manca OPT-0.2 su T0) | OPT | I |
 | OPT-1 | Memoria, grafo e banda come problema di ottimizzazione ✅ (OPT-1.5/1.7 parziali, T0 non misurato) | OPT | I |
 | F5 | GPU scene persistente e submission guidata dalla GPU ✅ | CORE | II · Geometria |
-| F6 | Mesh shader e culling a due fasi | CORE | II |
+| F6 | Mesh shader e culling a due fasi ✅ (T0/M3 fisico pendente) | CORE | II |
 | F7 | Visibility buffer e shading ibrido TBDR | CORE | II |
 | F8 | HDR, EDR, esposizione e MetalFX temporal | CORE | II |
 | OPT-2 | Shader, pipeline e occupancy (spostata dopo F8) | OPT | II |
@@ -241,14 +241,14 @@ pubbliche, sorgenti OS, risultati di paper e ipotesi da misurare.
 
 | Tappa | Consegna principale | Decisione successiva |
 |---|---|---|
-| Ora | F5 integrata, poi baseline F6–F8 | Frame reale con visibilità, materiali e ricostruzione, misurato e verificato |
+| Ora | F5 integrata, F6 consegnata (branch `phase/f6`), poi baseline F7–F8 | Frame reale con visibilità, materiali e ricostruzione, misurato e verificato |
 | Dopo F8 | Baseline del corpus OPT-4.16 con strumenti esistenti | Selezionare un problema di OPT-2/3/4 se rilevante; altrimenti proseguire F9–F13 |
 | Dopo F13 | Ombre, GI, riflessi e denoise integrati; F14 se utile al corpus | Nuove misure; valutare soltanto le ottimizzazioni rese necessarie dal frame con luce |
 | Sviluppo successivo | Materiali/mondo/streaming e runtime richiesti dalla slice | Attivare un piano dettagliato quando il suo consumatore è concreto |
 | Piattaforma di prodotto | F27 integrazione ECS → nucleo F41/F21 → F39/F40 → editor F34 | Riuso e parità funzionale verificati; implementazione progressiva senza avviare optimizer generali |
 | Frontiera | F29–F33 e ricerca SoC avanzata | Attivazione per trigger misurato; nessuna dipendenza automatica della slice |
 
-Il percorso operativo è **F6→F8 dopo F5 integrata, poi F9→F13**, con una baseline corretta e
+Il percorso operativo è **F7→F8 dopo F5 integrata e F6 consegnata, poi F9→F13**, con una baseline corretta e
 semplice a ogni passaggio. Cooker, runtime e strumenti minimi si introducono
 quando necessari ai contenuti correnti. Le OPT non sono una barriera obbligatoria
 fra ere; F37 può usare fallback e preset misurati senza aspettare ogni idea
@@ -405,17 +405,22 @@ Raggiunta su M5 Max (T2): comandi CPU costanti al variare delle istanze e
 dei bucket in `--gpu-driven on`; bench 8 a 1M istanze in moto con p99 di
 frame, CPU e GPU sotto 16,6 ms e 120 fps con vsync (`perf-log.md`, "F5").
 
-## F6 — Mesh shader e culling a due fasi [CORE]
+## F6 — Mesh shader e culling a due fasi ✅ [CORE]
 
-- [ ] F6.1 Meshlet ritarati per Apple: confronto 64/96/128 triangoli e baseline 64 vertici/124 triangoli, `meshopt_buildMeshletsSpatial`, limiti verificati; misure sul M5 Max nativo e con fallback Apple9, certificazione M3 fisica differita secondo O12
-- [ ] F6.2 Object shader: culling per meshlet (frustum, cono di normali, area su schermo, occlusione Hi-Z)
-- [ ] F6.3 Mesh shader con output minimi dichiarati e primitive scartate omesse (guida Apple)
-- [ ] F6.4 Piramide Hi-Z in compute con riduzione SIMD-group (O5); percorso sampler min/max su Apple10
-- [ ] F6.5 Culling a due fasi: frame precedente → nuovo test dei rifiutati sulla profondità corrente
-- [ ] F6.6 Compattazione dei meshlet visibili con prefix sum SIMD-group, draw mesh indirette (Apple9)
-- [ ] F6.7 Debug view: meshlet colorati, rifiutati per fase, Hi-Z
+- [x] F6.1 Meshlet ritarati per Apple: confronto 64/96/128 triangoli e baseline 64 vertici/124 triangoli, `meshopt_buildMeshletsSpatial`, limiti verificati; misure sul M5 Max nativo e con fallback Apple9, certificazione M3 fisica differita secondo O12 — `MeshletBuildOptions` (standard/spatial, massimi validati contro gli assert di meshoptimizer v1.3 e le uscite del mesh shader), spike S1 CPU (`tools/meshlet_cook`, 7 mesh × 12 opzioni) e GPU nel frame (nativo e `--force-family apple9`): nessuna variante ≥3% migliore su tutto il corpus, resta 64/124; ricostruzione, bounds e coni testati; M3 fisico `EXTERNAL_VALIDATION_PENDING`
+- [x] F6.2 Object shader: culling per meshlet (frustum, cono di normali, area su schermo, occlusione Hi-Z) — `renderer/meshlet_cull_math.h` condiviso C++/MSL: sfera con limite spettrale (Gershgorin, corregge anche il raggio F5 con shear), frustum, cono esatto in spazio mesh per ogni affine invertibile, footprint Hi-Z conservativo (near plane, NPOT, margini), area su schermo approssimata (`--meshlet-min-pixels`, spenta nel preset esatto); compattazione nel payload con prefix sum SIMD; ogni decisione verificata contro il riferimento CPU (`--debug-meshlets`)
+- [x] F6.3 Mesh shader con output minimi dichiarati e primitive scartate omesse (guida Apple) — `meshlet_mesh`: attributi del forward e conteggio esatto delle primitive (nessuna primitiva di riempimento, i meshlet scartati non lanciano threadgroup); scarto per triangolo con compattazione stabile disponibile (`--meshlet-triangle-cull on`, immagine identica) ma spento di default (A/B inconclusivo sul M5, `opt-log.md`); pixel-identico all'indexed sui bench 1–7 (bench 8: 1 pixel di pareggio di depth dipendente dall'ordine, provato), varianti forward tutte verificate (`variant_check`)
+- [x] F6.4 Piramide Hi-Z in compute con riduzione SIMD-group (O5); percorso sampler min/max su Apple10 — `HiZBuilder`/`shaders/hiz.metal`: livello 0 a potenze di due, compute SIMD-group (default, Apple9) e sampler min (Apple10, `--hiz-path sampler`, rifiutato con l'Apple9 effettivo), entrambi bit-exact con la piramide CPU su NPOT/buchi (spike S3); storia per vista con reset su resize/switch/taglio
+- [x] F6.5 Culling a due fasi: frame precedente → nuovo test dei rifiutati sulla profondità corrente — fase A con la storia (solo un suggerimento), Hi-Z della fase A, flag→scan→scatter dei rifiutati, fase B contro la profondità corrente, Hi-Z finale come storia; Culling Viz scriptata (occluder che scompare, tagli, oggetto veloce, spawn/delete/riuso): two-phase = indexed al pixel sui frame degli eventi, nessuna superficie persa nel self-check
+- [x] F6.6 Compattazione dei meshlet visibili con prefix sum SIMD-group, draw mesh indirette (Apple9) — candidati in tre regioni di classe con scan stabile a 3 canali, argomenti indiretti per classe e fase (6 draw, comandi CPU costanti), capacità = limite superiore strutturale; overflow mai troncato: il `Draw build` F5 disegna il frame (provato con overflow forzato, immagine identica)
+- [x] F6.7 Debug view: meshlet colorati, rifiutati per fase, Hi-Z — `--debug-view meshlets|cull|hiz`, contatori per fase e motivo nel report (schema 6) e nel pannello, `--debug-meshlets` con controlli negativi id/depth/count, `tools/f6_check.sh`; Culling Viz 1080p a 60 fps reali sul M5 Max (p95 ≤ 16,67 ms in 27/27 esecuzioni mesh, nativo, Apple9, sampler; macchina non quieta, `perf-log.md` "F6")
 
 **Uscita di sviluppo**: Culling Viz a 60 fps reali sul M5 Max (preset fisso 1080p, p95 frame ≤16,67 ms), percorso nativo e fallback Apple9 verificati; nessuna superficie visibile persa. Target 60 fps T0 conservato come certificazione fisica esterna pendente, non blocca F7. Dettagli in [F6](plans/F6.md) e [politica hardware](plans/HARDWARE_VALIDATION.md).
+Raggiunta su M5 Max (`DEVELOPMENT_ACCEPTED`): Culling Viz scriptata 1920×1080
+a 120 fps presentati con p95 9,1–10,2 ms nella serie meno carica e ≤ 16,5 ms
+anche con il compositore saturato da un altro agente, percorso nativo,
+fallback Apple9 e sampler Apple10; nessuna superficie persa (self-check,
+eventi al pixel). Certificazione T0/M3 fisica `EXTERNAL_VALIDATION_PENDING`.
 
 ## F7 — Visibility buffer e shading ibrido TBDR [CORE]
 

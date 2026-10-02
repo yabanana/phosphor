@@ -215,3 +215,48 @@ mesh-shader launch count, fill, per-meshlet cull cost and bytes, and only the GP
 part of S1/S2 (frame cost on real engine workloads, plus Hi-Z/cone culling
 efficiency) can rank them. The decision is taken after those measurements and is
 recorded in `docs/opt-log.md`.
+
+## S1 — GPU part, S2 (in the engine)
+
+Run with the release app (reports schema 6, valid per-pass times), 3 replicas,
+rotated order, `--fixed-timestep --no-ui --no-vsync --warmup 120 --frames 600`:
+cook variants `--meshlet-max-vertices/-triangles`, `--meshlet-builder spatial`
+(also with `--force-family apple9`); geometry paths `--geometry-path indexed`,
+`--geometry-path mesh --meshlet-cull off|frustum|two-phase`, mesh-only
+`--meshlet-object off`.  Results and decisions: `docs/opt-log.md`, "F6 — Spike"
+(baseline cook 64/124 kept; object+mesh kept; default path indexed, mesh
+two-phase for the occlusion preset).
+
+## S3 — Hi-Z backends (`F6-S3`, `s3_hiz.cpp`)
+
+The engine kernels of `shaders/hiz.metal`, compiled from source with their
+includes (`f6_common.cpp` expands `#include "..."` from `src/` and the
+generated directory), build the pyramid of synthetic depth textures (7 sizes ×
+5 patterns: random, 1% zero holes, all zero, constant occluder, gradient with
+one hole) with the per-level compute, SIMD-group (5 levels per dispatch) and
+Apple10 min-reduction sampler backends; every level is compared bit for bit
+with a CPU pyramid; a point-sampling reduction is the negative control (must
+mismatch).  Chain times at 1920×1080 and 3200×1800.
+
+```sh
+./build/release/f6_spike --only F6-S3 --runs 3 --out bench/results/f6-spike/m5max-macos27.2-s3.json
+./build/release/f6_spike --only F6-S3 --force-family apple9   # sampler skipped
+./build/release/f6_spike --only F6-S3 --validate
+```
+
+## S4 — mesh-path orderings (`F6-S4`, `s4_barriers.cpp`)
+
+Method of F5-S5 (slow producer, last group writes, 20 repetitions per
+variant): compute-written indirect arguments of `drawMeshThreadgroups`,
+compute-written data read by the object shader, object-shader writes read by
+a following compute encoder; barriers none / Vertex / Object / Mesh /
+Object+Mesh (/ Fragment).  Result: Object or Mesh order them, Vertex never
+does (the opposite of indexed draws in F5-S5).
+
+```sh
+./build/release/f6_spike --only F6-S4 --runs 3 --out bench/results/f6-spike/m5max-macos27.2-s4.json
+./build/release/f6_spike --only F6-S4 --validate
+```
+
+GPU safety as in F5: bounded loops, no inter-threadgroup waits, command
+buffers far below 1 s, one GPU process at a time.

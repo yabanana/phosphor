@@ -9,7 +9,8 @@ task only once it is verified for its declared scope on the available device
 `docs/perf-log.md`. The report's older "F1–F5" numbering is superseded by it.
 Planning horizons: read `docs/plans/SEQUENCING.md` and `docs/plans/README.md`.
 All 58 F/OPT plans now contain advance implementation and verification detail.
-F5 is integrated on main; F6–F8 are the current operational horizon. Later
+F5 is integrated on main; F6 is delivered on branch phase/f6 (mesh path,
+two-phase culling); F7–F8 are the current operational horizon. Later
 plans remain revisable specifications, and open OPT/EDGE work is a candidate
 catalog: planning detail does not activate implementation. Before adding optimization
 infrastructure, demonstrate a bottleneck on real engine workloads, compare a
@@ -46,8 +47,9 @@ Apple9 path or a 16 GB application budget on M5 as M3/Base measurements.
 Read `docs/plans/HARDWARE_VALIDATION.md` for the ledger and reporting rules.
 Explicit multi-device measurement tasks (F0.8, OPT-0.2, F28.7, F37.2) remain
 partial/unticked until their actual measurements exist. Bugs or failed checks
-on M5 are not hardware exemptions. The app does not yet have `--force-family`;
-F6 plans that capability override and truthful physical/effective reporting.
+on M5 are not hardware exemptions. Since F6 the app has `--force-family apple9`
+(effective capabilities only) and reports physical and effective families
+separately (report schema 6 `hardware`).
 Spike results choose variants within the authorized phase; do not invent
 measurements or introduce another routine owner-approval gate before coding.
 
@@ -156,6 +158,23 @@ measurements or introduce another routine owner-approval gate before coding.
   times of builds with different CPU cost per frame needs equal CPU time
   (`--gpu-timing-serial` is DVFS-sensitive: measured 2.8 vs 1.8 ms for the
   same forward pass).
+- F6 mesh path (macOS): `--geometry-path indexed|mesh` (default indexed, the
+  F5 reference; mesh needs `--gpu-driven on`), `--meshlet-cull
+  off|frustum|two-phase` (default two-phase), `--hiz-path auto|compute|sampler`
+  (auto = compute SIMD-group; sampler needs effective Apple10),
+  `--force-family apple9` (EFFECTIVE capabilities only: physical device,
+  memory and budget unchanged; report schema 6 `hardware`), `--debug-meshlets
+  N` (CPU-reference check of candidates, every decision, B list, pyramids and
+  lost surfaces) with `--debug-meshlets-corrupt id|depth|count` (each must
+  FAIL), `--debug-view meshlets|cull|hiz`, `--culling-script` (bench 7 F6
+  scenario = the gate preset), `--resolution WxH`, cook options
+  `--meshlet-builder`/`--meshlet-max-*`, options `--meshlet-min-pixels`
+  (approximate) and `--meshlet-triangle-cull on`.  Battery:
+  `tools/f6_check.sh build build/release [--quick] [--perf]` (references
+  `build/reference-f6base` = indexed, `build/reference-f6mesh` = mesh off for
+  bench 8); spikes `f6_spike --only F6-S3|F6-S4` (`bench/f6_spike`), cook
+  `meshlet_cook`.  The app prints `EXIT <code>` last: a shell status that
+  differs means a signal.
 - Before calling a Metal API, check its exact signature in the fetched
   metal-cpp headers (`build/linux/_deps/metal_cpp-src/Metal/MTL4*.hpp`); Metal 4
   names differ from Metal 3 (e.g. no `setVertexBytes`, draws take GPU addresses,
@@ -275,6 +294,26 @@ measurements or introduce another routine owner-approval gate before coding.
 - GPU safety: every kernel loop has a hard bound, no kernel waits on another
   threadgroup, command buffers stay far below 1 s, and one GPU test process
   at a time (a 60 s job made the WindowServer watchdog kill the compositor).
+- Mesh path (F6, `platform/metal/mesh_renderer`, `hiz_builder`, contract
+  `renderer/meshlet_layout.h`, maths `renderer/meshlet_cull_math.h` shared
+  with the CPU reference): passes Meshlet candidates (between Instance cull
+  and Draw build) → Forward (phase A) → Hi-Z A → Meshlet B → Forward B → Hi-Z
+  final; three indirect mesh draws per phase (one per cull class, F5 cull
+  states).  Mesh indirect arguments and object-shader reads of compute data
+  order at **Object|Mesh**, never Vertex (spike S4, the opposite of the F5
+  ICB rule); object writes → compute: after Object|Mesh.  The F5 ICB stays
+  in phase A as the overflow fallback (Draw build gated by the meshlet
+  overflow word): never truncate a list.  The Hi-Z history is only a hint
+  (every history rejection is retested against the current depth), one
+  persistent pyramid read by phase A and rewritten by Hi-Z final.  Culling
+  tests must stay conservative: sphere radius from the Gershgorin
+  spectral-norm bound (`cullScaleBound`, also F5), cone test in mesh space
+  (camera through M^-1), footprint/near-plane rules in the header; a change
+  needs the property tests and `--debug-meshlets` green.  Passes that may
+  record nothing in normal frames must not be in the graph (Metal drops an
+  empty encoder and the next timed unit loses its timestamp).  Mesh grids
+  without an object stage need 2D grids (a 1D grid of ~700K threadgroups
+  drew silently part of the scene).
 - Reverse-Z infinite projection (clear depth 0, compare Greater), NDC y up.
 - Hardware floor is Apple9 (M3); anything needing Apple10 (M5) must have a
   fallback or be an explicitly higher tier.
