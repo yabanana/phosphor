@@ -60,6 +60,9 @@ public:
         /// then: an empty blit encoder is dropped by Metal and would leave
         /// the next timed unit without a valid timestamp, F4.1).
         bool               checks = false;
+        /// F6.2 APPROXIMATE size cull: meshlets whose projected bound covers
+        /// less than minPixels^2 pixels (0 = off, the exact preset).
+        float              minPixels = 0.0f;
         /// Spike S2: mesh-only pipeline (no object stage, no culling).
         bool               objectStage = true;
         u32                salt      = 0;

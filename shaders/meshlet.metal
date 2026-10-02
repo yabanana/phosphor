@@ -387,12 +387,14 @@ static float hizMin(texture2d<float, access::read> hiz, HiZFootprint f) {
     const uint nH = simd_sum(valid && decision == MESHLET_DECISION_HISTORY ? 1u : 0u);
     const uint nT = simd_sum(valid && phaseB ? 1u : 0u);
     const uint nO = simd_sum(valid && decision == MESHLET_DECISION_OCCLUDED ? 1u : 0u);
+    const uint nS = simd_sum(valid && decision == MESHLET_DECISION_SIZE ? 1u : 0u);
     if (lane == 0u) {
         if (nF) atomic_fetch_add_explicit(&counters[MESHLET_COUNTER_FRUSTUM], nF, memory_order_relaxed);
         if (nC) atomic_fetch_add_explicit(&counters[MESHLET_COUNTER_CONE], nC, memory_order_relaxed);
         if (nH) atomic_fetch_add_explicit(&counters[MESHLET_COUNTER_HISTORY], nH, memory_order_relaxed);
         if (nT) atomic_fetch_add_explicit(&counters[MESHLET_COUNTER_TESTED_B], nT, memory_order_relaxed);
         if (nO) atomic_fetch_add_explicit(&counters[MESHLET_COUNTER_OCCLUDED_B], nO, memory_order_relaxed);
+        if (nS) atomic_fetch_add_explicit(&counters[MESHLET_COUNTER_SIZE], nS, memory_order_relaxed);
     }
 }
 
@@ -426,19 +428,31 @@ static float4x4 loadMatrix(constant float* m) {
 
 using MeshletMesh = metal::mesh<VertexOut, void, MESHLET_MESH_GROUP, MESHLET_MESH_GROUP, topology::triangle>;
 
-// One meshlet per mesh threadgroup: thread t emits vertex t (< vertexCount)
-// and triangle t (< triangleCount); exactly the meshlet's primitives are
-// declared (no padding primitives).  The vertex maths are forward_vs's.
+// One meshlet per mesh threadgroup: thread t transforms vertex t (<
+// vertexCount) and tests triangle t (< triangleCount).  F6.3: triangles the
+// rasterizer would cull anyway are not emitted -- back faces (class Back) or
+// front faces (class BackMirrored, front-face culled), decided on the
+// projected triangle with a margin larger than the raster snapping error
+// (2 x area in pixels beyond 0.02 x the perimeter in pixels; a vertex
+// behind the camera or a near-zero area keeps the triangle) -- and the kept
+// ones are compacted in their original order (SIMD prefix sums), so the
+// declared primitive count is the exact output.  Double-sided materials
+// (class None) keep every triangle.  The vertex maths are forward_vs's.
 [[mesh]] void meshlet_mesh(MeshletMesh out, const object_data MeshletPayload& payload [[payload]],
                            uint tid [[thread_index_in_threadgroup]], uint gid [[threadgroup_position_in_grid]],
+                           uint sg [[simdgroup_index_in_threadgroup]], uint lane [[thread_index_in_simdgroup]],
                            constant FrameConstants& frame [[buffer(0)]], const device GPUVertex* vertices [[buffer(1)]],
                            const device GPUInstance* instances [[buffer(2)]],
+                           const device GPUMaterial* materials [[buffer(3)]],
                            const device GPUMeshlet* meshlets [[buffer(6)]],
                            const device uint* meshletVertices [[buffer(7)]],
-                           const device uchar* meshletTriangles [[buffer(8)]]) {
+                           const device uchar* meshletTriangles [[buffer(8)]],
+                           constant GPUMeshletCullParams& p [[buffer(10)]],
+                           device atomic_uint* counters [[buffer(14)]]) {
+    threadgroup float3 clip[MESHLET_MESH_GROUP]; // x, y, w of each vertex
+    threadgroup uint partial[MESHLET_MESH_GROUP / 32u];
     const GPUMeshlet m           = meshlets[payload.meshlet[gid]];
     const device GPUInstance& gi = instances[payload.slot[gid]];
-    if (tid == 0u) out.set_primitive_count(m.triangleCount);
     if (tid < m.vertexCount) {
         const device GPUVertex& v = vertices[meshletVertices[m.vertexOffset + tid]];
         const float4x4 model       = loadMatrix(gi.modelMatrix);
@@ -453,12 +467,49 @@ using MeshletMesh = metal::mesh<VertexOut, void, MESHLET_MESH_GROUP, MESHLET_MES
         o.materialIndex = gi.materialIndex;
         o.mirrored      = (gi.flags & INSTANCE_FLAG_MIRRORED) != 0 ? 1u : 0u;
         out.set_vertex(tid, o);
+        clip[tid] = float3(o.position.x, o.position.y, o.position.w);
     }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    // Facing cull of triangle `tid` (class from the instance, as SceneStore).
+    const bool doubleSided = (materials[gi.materialIndex].flags & MATERIAL_FLAG_DOUBLE_SIDED) != 0u;
+    const float facing     = (gi.flags & INSTANCE_FLAG_MIRRORED) != 0u ? -1.0f : 1.0f; // +: back faces culled
+    uchar i0 = 0, i1 = 0, i2 = 0;
+    bool keep = false;
     if (tid < m.triangleCount) {
         const uint base = m.triangleOffset + tid * 3u;
-        out.set_index(tid * 3u + 0u, meshletTriangles[base + 0u]);
-        out.set_index(tid * 3u + 1u, meshletTriangles[base + 1u]);
-        out.set_index(tid * 3u + 2u, meshletTriangles[base + 2u]);
+        i0   = meshletTriangles[base + 0u];
+        i1   = meshletTriangles[base + 1u];
+        i2   = meshletTriangles[base + 2u];
+        keep = true;
+        const float3 a = clip[i0], b = clip[i1], c = clip[i2];
+        if (!doubleSided && a.z > 0.0f && b.z > 0.0f && c.z > 0.0f) {
+            // Pixel coordinates (y up, the NDC orientation of the CCW front faces).
+            const float2 h  = float2(p.viewport[0], p.viewport[1]) * 0.5f;
+            const float2 pa = a.xy / a.z * h, pb = b.xy / b.z * h, pc = c.xy / c.z * h;
+            const float area2 = (pb.x - pa.x) * (pc.y - pa.y) - (pc.x - pa.x) * (pb.y - pa.y); // > 0: front facing
+            const float perim = length(pb - pa) + length(pc - pb) + length(pa - pc);
+            if (isfinite(area2) && isfinite(perim) && facing * area2 < -0.02f * perim) keep = false;
+        }
+    }
+    // Stable compaction of the kept triangles.
+    const uint k    = keep ? 1u : 0u;
+    const uint excl = simd_prefix_exclusive_sum(k);
+    if (lane == 31u) partial[sg] = excl + k;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    uint before = 0u, total = 0u;
+    for (uint s = 0; s < MESHLET_MESH_GROUP / 32u; ++s) {
+        if (s < sg) before += partial[s];
+        total += partial[s];
+    }
+    if (keep) {
+        const uint t = before + excl;
+        out.set_index(t * 3u + 0u, i0);
+        out.set_index(t * 3u + 1u, i1);
+        out.set_index(t * 3u + 2u, i2);
+    }
+    if (tid == 0u) {
+        out.set_primitive_count(total);
+        if (total) atomic_fetch_add_explicit(&counters[MESHLET_COUNTER_EMITTED], total, memory_order_relaxed);
     }
 }
 

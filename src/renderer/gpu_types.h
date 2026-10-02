@@ -338,7 +338,9 @@ struct GPUMeshletCounters {
     u32 primitivesB;
     u32 objectGroupsA;    // object threadgroups that ran
     u32 objectGroupsB;
-    u32 pad[3];
+    u32 emitted;          // triangles the mesh shaders kept after per-triangle facing culling (both phases)
+    u32 sizeCulled;       // MESHLET_CULL_SIZE rejections (approximate; 0 in the exact preset)
+    u32 pad;
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUMeshletCounters) == 64, "GPUMeshletCounters layout");
 

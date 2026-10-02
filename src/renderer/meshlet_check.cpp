@@ -163,7 +163,8 @@ MeshletCheckResult checkMeshletFrame(const MeshletCheckInput& in) {
     const GPUMeshletCounters& k = in.counters;
     if (k.candidates != cand.total) fail.add("counters", "candidates " + std::to_string(k.candidates));
     if (k.drawnA != nA[MESHLET_DECISION_DRAWN_A] || k.frustum != nA[MESHLET_DECISION_FRUSTUM] ||
-        k.cone != nA[MESHLET_DECISION_CONE] || k.historyRejected != nA[MESHLET_DECISION_HISTORY]) {
+        k.cone != nA[MESHLET_DECISION_CONE] || k.historyRejected != nA[MESHLET_DECISION_HISTORY] ||
+        k.sizeCulled != nA[MESHLET_DECISION_SIZE]) {
         fail.add("counters", "phase A counters differ from the recorded decisions");
     }
     if (k.drawnA + k.frustum + k.cone + k.historyRejected + nA[MESHLET_DECISION_SIZE] != k.candidates) {

@@ -289,8 +289,12 @@ void MeshRenderer::prepareFrame(const SceneStore& store, const GpuScene& scene, 
     p.candidateCapacity = static_cast<u32>(std::min<u64>(capacity_, 0xFFFFFFFFull));
     p.candidateGroups   = candidateGroups_;
     p.flags &= ~(MESHLET_CULL_FRUSTUM | MESHLET_CULL_CONE | MESHLET_CULL_OCCLUSION | MESHLET_CULL_HISTORY_VALID |
-                 MESHLET_CULL_DEBUG_ALL);
+                 MESHLET_CULL_DEBUG_ALL | MESHLET_CULL_SIZE | MESHLET_CULL_RECORD);
     if (options_.cull != MeshletCull::Off) p.flags |= MESHLET_CULL_FRUSTUM | MESHLET_CULL_CONE;
+    if (options_.cull != MeshletCull::Off && options_.minPixels > 0.0f) {
+        p.flags |= MESHLET_CULL_SIZE;
+        p.minPixels = options_.minPixels;
+    }
     if (options_.cull == MeshletCull::TwoPhase) {
         p.flags |= MESHLET_CULL_OCCLUSION;
         if (frame_.historyValid) p.flags |= MESHLET_CULL_HISTORY_VALID;

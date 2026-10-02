@@ -207,6 +207,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         mo.debugHiZLevel = options_.debugHiZLevel;
         mo.checks      = options_.debugMeshlets > 0;
         mo.objectStage = options_.meshletObjectStage;
+        mo.minPixels   = options_.meshletMinPixels;
         mo.salt        = options_.pipelineSalt;
         mo.genericOnly = options_.debugPipelineFallback;
         mo.forceVariant = options_.forceVariant;
@@ -696,6 +697,8 @@ void Engine::finishBenchmark() {
             m.drawnB            = summarize(ms.drawnB);
             m.occludedB         = summarize(ms.occludedB);
             m.primitives        = summarize(ms.primitives);
+            m.emitted           = summarize(ms.emitted);
+            m.sizeCulled        = summarize(ms.sizeCulled);
         }
     }
     if (report.gpuTiming) passTimings_.summarize(report.passes, report.gpuPassSumMs, report.gpuFrameSpanMs);
@@ -742,14 +745,16 @@ void Engine::finishBenchmark() {
     if (report.meshlets.present && mesh_) {
         const MeshletReport& m = report.meshlets;
         std::printf("MESHLET path %s cull %s hiz %s cook %s | meshlets %u capacity %llu | candidates %.0f | A drawn %.0f "
-                    "frustum %.0f cone %.0f history %.0f | B drawn %.0f occluded %.0f | primitives %.0f | overflow frames %u "
+                    "frustum %.0f cone %.0f size %.0f history %.0f | B drawn %.0f occluded %.0f | primitives %.0f emitted %.0f | overflow frames %u "
                     "| history resets %u | device %s (%s) effective %s\n",
                     m.path.c_str(), m.cull.c_str(), m.hizEffective.c_str(), m.cook.c_str(), m.meshlets,
                     static_cast<unsigned long long>(m.candidateCapacity), static_cast<double>(m.candidates.mean),
                     static_cast<double>(m.drawnA.mean), static_cast<double>(m.frustum.mean),
-                    static_cast<double>(m.cone.mean), static_cast<double>(m.historyRejected.mean),
+                    static_cast<double>(m.cone.mean), static_cast<double>(m.sizeCulled.mean),
+                    static_cast<double>(m.historyRejected.mean),
                     static_cast<double>(m.drawnB.mean), static_cast<double>(m.occludedB.mean),
-                    static_cast<double>(m.primitives.mean), m.overflowFrames, m.historyResets,
+                    static_cast<double>(m.primitives.mean), static_cast<double>(m.emitted.mean), m.overflowFrames,
+                    m.historyResets,
                     report.hardware.physicalDevice.c_str(), report.hardware.physicalFamily.c_str(),
                     report.hardware.effectiveCapabilities.c_str());
     }
@@ -1374,7 +1379,7 @@ void Engine::SceneSamples::reserve(u32 frames) {
 }
 
 void Engine::MeshletSamples::reserve(u32 frames) {
-    for (std::vector<float>* v : {&candidates, &drawnA, &frustum, &cone, &historyRejected, &drawnB, &occludedB, &primitives}) {
+    for (std::vector<float>* v : {&candidates, &drawnA, &frustum, &cone, &historyRejected, &drawnB, &occludedB, &primitives, &emitted, &sizeCulled}) {
         v->clear();
         v->reserve(frames);
     }
@@ -1413,6 +1418,8 @@ void Engine::onSceneCounters(u32 slot) {
             ms.drawnB.push_back(static_cast<float>(c.drawnB));
             ms.occludedB.push_back(static_cast<float>(c.occludedB));
             ms.primitives.push_back(static_cast<float>(c.primitivesA + c.primitivesB));
+            ms.emitted.push_back(static_cast<float>(c.emitted));
+            ms.sizeCulled.push_back(static_cast<float>(c.sizeCulled));
             if (c.overflow) ++ms.overflowFrames;
         }
     }

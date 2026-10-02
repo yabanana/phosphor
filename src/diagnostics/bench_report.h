@@ -159,6 +159,8 @@ struct MeshletReport {
     u32           historyResets   = 0; // during the measured frames
     u32           checks = 0, checkFailures = 0; // --debug-meshlets
     TimingSummary candidates, drawnA, frustum, cone, historyRejected, drawnB, occludedB, primitives;
+    TimingSummary emitted; // triangles kept by the mesh shaders' facing cull (<= primitives)
+    TimingSummary sizeCulled; // approximate size cull (--meshlet-min-pixels; 0 in the exact preset)
 };
 
 constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 6;

@@ -447,6 +447,12 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             }
         } else if (arg == "--culling-script") {
             out.cullingScript = true;
+        } else if (arg == "--meshlet-min-pixels") {
+            if (!needFloat(out.meshletMinPixels)) return false;
+            if (out.meshletMinPixels < 0.0f) {
+                error = "--meshlet-min-pixels: expected a size >= 0 (0 = off)";
+                return false;
+            }
         } else if (arg == "--meshlet-object") {
             const auto value = needValue();
             if (!value) return false;

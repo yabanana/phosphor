@@ -196,7 +196,7 @@ private:
         const char* lastReset = "start";
     } history_;
     struct MeshletSamples {
-        std::vector<float> candidates, drawnA, frustum, cone, historyRejected, drawnB, occludedB, primitives;
+        std::vector<float> candidates, drawnA, frustum, cone, historyRejected, drawnB, occludedB, primitives, emitted, sizeCulled;
         u32 overflowFrames = 0;
         u32 historyResets  = 0;
         void reserve(u32 frames);

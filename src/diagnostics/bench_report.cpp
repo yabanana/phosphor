@@ -242,7 +242,8 @@ std::string reportToJson(const BenchReport& r) {
                    ", \"frustum\": " + summaryToJson(m.frustum) + ", \"cone\": " + summaryToJson(m.cone) +
                    ", \"history_rejected\": " + summaryToJson(m.historyRejected) +
                    ", \"drawn_b\": " + summaryToJson(m.drawnB) + ", \"occluded_b\": " + summaryToJson(m.occludedB) +
-                   ", \"primitives\": " + summaryToJson(m.primitives) + "}";
+                   ", \"primitives\": " + summaryToJson(m.primitives) + ", \"emitted\": " + summaryToJson(m.emitted) +
+                   ", \"size_culled\": " + summaryToJson(m.sizeCulled) + "}";
     }
     return head +
            "  \"frame_ms\": " + summaryToJson(r.frameMs) + ",\n" +
