@@ -1,0 +1,271 @@
+{
+ "benchmarks": [
+  {
+   "gpu": {
+    "active_share": -1.0,
+    "mean_mhz": -1.0,
+    "top_state_share": -1.0,
+    "watts": -1.0
+   },
+   "id": "F6-S3",
+   "metrics": [
+    {
+     "higher_is_better": false,
+     "name": "mismatch.compute",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      0.0
+     ],
+     "unit": "texels",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "mismatch.simd",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      0.0
+     ],
+     "unit": "texels",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": true,
+     "name": "mismatch.point_control",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      662113.0
+     ],
+     "unit": "texels",
+     "value": 662113.0,
+     "within": {
+      "cv": 0.0,
+      "max": 662113.0,
+      "mean": 662113.0,
+      "median": 662113.0,
+      "min": 662113.0,
+      "n": 1,
+      "p10": 662113.0,
+      "p90": 662113.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "levels.1920x1080",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      11.0
+     ],
+     "unit": "count",
+     "value": 11.0,
+     "within": {
+      "cv": 0.0,
+      "max": 11.0,
+      "mean": 11.0,
+      "median": 11.0,
+      "min": 11.0,
+      "n": 1,
+      "p10": 11.0,
+      "p90": 11.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "ms.compute.1920x1080",
+     "params": {
+      "height": 1080.0,
+      "width": 1920.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.04691666666666666
+     ],
+     "unit": "ms",
+     "value": 0.04691666666666666,
+     "within": {
+      "cv": 0.09202141717584403,
+      "max": 0.05925,
+      "mean": 0.04883333333333335,
+      "median": 0.04691666666666666,
+      "min": 0.044958333333333336,
+      "n": 15,
+      "p10": 0.045125,
+      "p90": 0.058083333333333334
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "ms.simd.1920x1080",
+     "params": {
+      "height": 1080.0,
+      "width": 1920.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.030958333333333334
+     ],
+     "unit": "ms",
+     "value": 0.030958333333333334,
+     "within": {
+      "cv": 1.2815875872308748,
+      "max": 0.28824999999999995,
+      "mean": 0.0515861111111111,
+      "median": 0.030958333333333334,
+      "min": 0.030458333333333327,
+      "n": 15,
+      "p10": 0.030541666666666665,
+      "p90": 0.06662499999999999
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "levels.3200x1800",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      12.0
+     ],
+     "unit": "count",
+     "value": 12.0,
+     "within": {
+      "cv": 0.0,
+      "max": 12.0,
+      "mean": 12.0,
+      "median": 12.0,
+      "min": 12.0,
+      "n": 1,
+      "p10": 12.0,
+      "p90": 12.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "ms.compute.3200x1800",
+     "params": {
+      "height": 1800.0,
+      "width": 3200.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.08154166666666667
+     ],
+     "unit": "ms",
+     "value": 0.08154166666666667,
+     "within": {
+      "cv": 0.08539767104448835,
+      "max": 0.10820833333333334,
+      "mean": 0.08424444444444444,
+      "median": 0.08154166666666667,
+      "min": 0.08041666666666666,
+      "n": 15,
+      "p10": 0.08091666666666666,
+      "p90": 0.09124999999999998
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "ms.simd.3200x1800",
+     "params": {
+      "height": 1800.0,
+      "width": 3200.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.06474999999999999
+     ],
+     "unit": "ms",
+     "value": 0.06474999999999999,
+     "within": {
+      "cv": 0.17820235636613474,
+      "max": 0.10829166666666666,
+      "mean": 0.07190277777777777,
+      "median": 0.06474999999999999,
+      "min": 0.06383333333333334,
+      "n": 15,
+      "p10": 0.06429166666666666,
+      "p90": 0.08933333333333333
+     }
+    }
+   ],
+   "name": "hiz.backends",
+   "negative_control": {
+    "detail": "every backend bit-exact against the CPU pyramid on every pattern/size; point-sampling control detected (662113 texels)",
+    "status": "pass"
+   },
+   "notes": "sampler backend SKIPPED: Apple10 sampler min reduction not available (Apple9 or --force-family apple9); timing (chain, median): compute 1920x1080: 0.0469 ms (min 0.0450, p90 0.0581); simd 1920x1080: 0.0310 ms (min 0.0305, p90 0.0666); compute 3200x1800: 0.0815 ms (min 0.0804, p90 0.0912); simd 3200x1800: 0.0647 ms (min 0.0638, p90 0.0893); ",
+   "seconds": 1.003523083269596,
+   "status": "ok",
+   "title": "Hi-Z pyramid: compute / SIMD / sampler-min backends, bit-exact vs CPU, chain time"
+  }
+ ],
+ "machine": {
+  "battery_percent": 100,
+  "chip": "Apple M5 Max",
+  "cpu_level_names": [
+   "Super",
+   "Performance"
+  ],
+  "cpu_perflevel0_cores": 6,
+  "cpu_perflevel1_cores": 12,
+  "gpu_cores": 40,
+  "gpu_family": "Apple10 (forced Apple9 paths)",
+  "gpu_pstate_mhz": [
+   338.0,
+   486.0,
+   636.0,
+   796.0,
+   888.0,
+   988.0,
+   1084.0,
+   1182.0,
+   1278.0,
+   1374.0,
+   1470.0,
+   1578.0,
+   1620.0
+  ],
+  "memory_bytes": 137438953472,
+  "os": "macOS 27.2",
+  "os_build": "26B5091g",
+  "os_slug": "macos27.2",
+  "power_source": "AC",
+  "sdk": "27.0",
+  "slug": "m5max",
+  "thermal_end": "nominal",
+  "thermal_start": "nominal"
+ },
+ "run": {
+  "args": "--only F6-S3 --runs 1 --force-family apple9 --out bench/results/f6-spike/m5max-macos27.2-s3-apple9paths.json",
+  "commit": "0734cdc",
+  "date": "2026-10-02T14:06:54+0200",
+  "forced_apple9": true,
+  "quick": false,
+  "runs": 1
+ },
+ "schema": "phosphor-soc-results",
+ "schema_version": 1
+}

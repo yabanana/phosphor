@@ -1,0 +1,364 @@
+{
+ "benchmarks": [
+  {
+   "gpu": {
+    "active_share": -1.0,
+    "mean_mhz": -1.0,
+    "top_state_share": -1.0,
+    "watts": -1.0
+   },
+   "id": "F6-S3",
+   "metrics": [
+    {
+     "higher_is_better": false,
+     "name": "mismatch.compute",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "texels",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "mismatch.simd",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "texels",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "mismatch.sampler",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "texels",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": true,
+     "name": "mismatch.point_control",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      662113.0,
+      662113.0,
+      662113.0
+     ],
+     "unit": "texels",
+     "value": 662113.0,
+     "within": {
+      "cv": 0.0,
+      "max": 662113.0,
+      "mean": 662113.0,
+      "median": 662113.0,
+      "min": 662113.0,
+      "n": 1,
+      "p10": 662113.0,
+      "p90": 662113.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "levels.1920x1080",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      11.0,
+      11.0,
+      11.0
+     ],
+     "unit": "count",
+     "value": 11.0,
+     "within": {
+      "cv": 0.0,
+      "max": 11.0,
+      "mean": 11.0,
+      "median": 11.0,
+      "min": 11.0,
+      "n": 1,
+      "p10": 11.0,
+      "p90": 11.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "ms.compute.1920x1080",
+     "params": {
+      "height": 1080.0,
+      "width": 1920.0
+     },
+     "run_cv": 0.001045608697596725,
+     "runs": [
+      0.04604166666666667,
+      0.04604166666666667,
+      0.04595833333333333
+     ],
+     "unit": "ms",
+     "value": 0.04604166666666667,
+     "within": {
+      "cv": 0.045369246993018614,
+      "max": 0.05258333333333333,
+      "mean": 0.04673333333333332,
+      "median": 0.04604166666666667,
+      "min": 0.04533333333333333,
+      "n": 15,
+      "p10": 0.04554166666666667,
+      "p90": 0.051125
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "ms.simd.1920x1080",
+     "params": {
+      "height": 1080.0,
+      "width": 1920.0
+     },
+     "run_cv": 0.004750069320492713,
+     "runs": [
+      0.03066666666666666,
+      0.03095833333333333,
+      0.03079166666666666
+     ],
+     "unit": "ms",
+     "value": 0.03079166666666666,
+     "within": {
+      "cv": 0.07618293070423454,
+      "max": 0.03795833333333333,
+      "mean": 0.031905555555555555,
+      "median": 0.03079166666666666,
+      "min": 0.03041666666666666,
+      "n": 15,
+      "p10": 0.03045833333333333,
+      "p90": 0.03737499999999999
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "ms.sampler.1920x1080",
+     "params": {
+      "height": 1080.0,
+      "width": 1920.0
+     },
+     "run_cv": 0.010033002571788354,
+     "runs": [
+      0.041749999999999995,
+      0.041416666666666664,
+      0.042249999999999996
+     ],
+     "unit": "ms",
+     "value": 0.041749999999999995,
+     "within": {
+      "cv": 0.03648722698882251,
+      "max": 0.04733333333333333,
+      "mean": 0.041986111111111106,
+      "median": 0.041749999999999995,
+      "min": 0.04095833333333333,
+      "n": 15,
+      "p10": 0.040999999999999995,
+      "p90": 0.04233333333333333
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "levels.3200x1800",
+     "params": {},
+     "run_cv": 0.0,
+     "runs": [
+      12.0,
+      12.0,
+      12.0
+     ],
+     "unit": "count",
+     "value": 12.0,
+     "within": {
+      "cv": 0.0,
+      "max": 12.0,
+      "mean": 12.0,
+      "median": 12.0,
+      "min": 12.0,
+      "n": 1,
+      "p10": 12.0,
+      "p90": 12.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "ms.compute.3200x1800",
+     "params": {
+      "height": 1800.0,
+      "width": 3200.0
+     },
+     "run_cv": 0.002047082906857673,
+     "runs": [
+      0.08141666666666665,
+      0.08124999999999999,
+      0.08158333333333331
+     ],
+     "unit": "ms",
+     "value": 0.08141666666666665,
+     "within": {
+      "cv": 0.4213102556374745,
+      "max": 0.23104166666666667,
+      "mean": 0.09159444444444444,
+      "median": 0.08141666666666665,
+      "min": 0.08054166666666665,
+      "n": 15,
+      "p10": 0.08074999999999999,
+      "p90": 0.08437499999999999
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "ms.simd.3200x1800",
+     "params": {
+      "height": 1800.0,
+      "width": 3200.0
+     },
+     "run_cv": 0.0011160121182789173,
+     "runs": [
+      0.06470833333333331,
+      0.06458333333333331,
+      0.06470833333333331
+     ],
+     "unit": "ms",
+     "value": 0.06470833333333331,
+     "within": {
+      "cv": 0.6620220522726298,
+      "max": 0.24724999999999997,
+      "mean": 0.09144166666666666,
+      "median": 0.06470833333333331,
+      "min": 0.06354166666666665,
+      "n": 15,
+      "p10": 0.06358333333333333,
+      "p90": 0.22983333333333333
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "ms.sampler.3200x1800",
+     "params": {
+      "height": 1800.0,
+      "width": 3200.0
+     },
+     "run_cv": 0.003158614345604769,
+     "runs": [
+      0.07249999999999998,
+      0.07291666666666666,
+      0.07254166666666666
+     ],
+     "unit": "ms",
+     "value": 0.07254166666666666,
+     "within": {
+      "cv": 0.09403633867385866,
+      "max": 0.09229166666666666,
+      "mean": 0.07583333333333332,
+      "median": 0.07254166666666666,
+      "min": 0.07183333333333332,
+      "n": 15,
+      "p10": 0.07212499999999998,
+      "p90": 0.09124999999999998
+     }
+    }
+   ],
+   "name": "hiz.backends",
+   "negative_control": {
+    "detail": "every backend bit-exact against the CPU pyramid on every pattern/size; point-sampling control detected (662113 texels)",
+    "status": "pass"
+   },
+   "notes": "timing (chain, median): compute 1920x1080: 0.0460 ms (min 0.0453, p90 0.0511); simd 1920x1080: 0.0307 ms (min 0.0304, p90 0.0436); sampler 1920x1080: 0.0417 ms (min 0.0410, p90 0.0423); compute 3200x1800: 0.0814 ms (min 0.0805, p90 0.0844); simd 3200x1800: 0.0647 ms (min 0.0635, p90 0.2298); sampler 3200x1800: 0.0725 ms (min 0.0716, p90 0.1142);  | timing (chain, median): compute 1920x1080: 0.0460 ms (min 0.0457, p90 0.0656); simd 1920x1080: 0.0310 ms (min 0.0305, p90 0.0548); sampler 1920x1080: 0.0414 ms (min 0.0410, p90 0.0505); compute 3200x1800: 0.0812 ms (min 0.0807, p90 0.0815); simd 3200x1800: 0.0646 ms (min 0.0642, p90 0.0877); sampler 3200x1800: 0.0729 ms (min 0.0720, p90 0.0911);  | timing (chain, median): compute 1920x1080: 0.0460 ms (min 0.0456, p90 0.0511); simd 1920x1080: 0.0308 ms (min 0.0304, p90 0.0374); sampler 1920x1080: 0.0422 ms (min 0.0414, p90 0.0492); compute 3200x1800: 0.0816 ms (min 0.0810, p90 0.0964); simd 3200x1800: 0.0647 ms (min 0.0641, p90 0.0775); sampler 3200x1800: 0.0725 ms (min 0.0718, p90 0.0912); ",
+   "seconds": 3.5034922916889193,
+   "status": "ok",
+   "title": "Hi-Z pyramid: compute / SIMD / sampler-min backends, bit-exact vs CPU, chain time"
+  }
+ ],
+ "machine": {
+  "battery_percent": 100,
+  "chip": "Apple M5 Max",
+  "cpu_level_names": [
+   "Super",
+   "Performance"
+  ],
+  "cpu_perflevel0_cores": 6,
+  "cpu_perflevel1_cores": 12,
+  "gpu_cores": 40,
+  "gpu_family": "Apple10",
+  "gpu_pstate_mhz": [
+   338.0,
+   486.0,
+   636.0,
+   796.0,
+   888.0,
+   988.0,
+   1084.0,
+   1182.0,
+   1278.0,
+   1374.0,
+   1470.0,
+   1578.0,
+   1620.0
+  ],
+  "memory_bytes": 137438953472,
+  "os": "macOS 27.2",
+  "os_build": "26B5091g",
+  "os_slug": "macos27.2",
+  "power_source": "AC",
+  "sdk": "27.0",
+  "slug": "m5max",
+  "thermal_end": "nominal",
+  "thermal_start": "nominal"
+ },
+ "run": {
+  "args": "--only F6-S3 --runs 3 --out bench/results/f6-spike/m5max-macos27.2-s3.json",
+  "commit": "0734cdc",
+  "date": "2026-10-02T14:06:52+0200",
+  "forced_apple9": false,
+  "quick": false,
+  "runs": 3
+ },
+ "schema": "phosphor-soc-results",
+ "schema_version": 1
+}
