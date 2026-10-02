@@ -55,6 +55,7 @@ public:
         MeshletCull        cull      = MeshletCull::TwoPhase;
         HiZBuilder::Backend hiz      = HiZBuilder::Backend::Compute;
         MeshletDebugView   debugView = MeshletDebugView::None;
+        u32                debugHiZLevel = 3; // --debug-view hiz: pyramid level shown
         u32                salt      = 0;
         bool               genericOnly = false;
         std::optional<u32> forceVariant;
@@ -159,6 +160,9 @@ private:
     pipe::PipelineHandle kCandCount_ = pipe::INVALID_PIPELINE, kCandScan_ = pipe::INVALID_PIPELINE,
                          kCandWrite_ = pipe::INVALID_PIPELINE, kBCount_ = pipe::INVALID_PIPELINE,
                          kBScan_ = pipe::INVALID_PIPELINE, kBWrite_ = pipe::INVALID_PIPELINE;
+    pipe::PipelineHandle hizView_ = pipe::INVALID_PIPELINE; // --debug-view hiz
+    MTL4::ArgumentTable* hizViewTable_ = nullptr;
+    MTL::Buffer* hizViewParams_ = nullptr;
     MTL4::ArgumentTable* candTable_ = nullptr;
     MTL4::ArgumentTable* bTable_    = nullptr;
     std::array<MTL4::ArgumentTable*, 2> drawTables_{}; // phase A / B

@@ -132,3 +132,32 @@ kernel void hiz_reduce_sampler(constant GPUHiZParams& p [[buffer(0)]], texture2d
                                 p.srcSize[1] == 1u ? 0.5f : float(gid.y) * 2.0f + 1.0f);
     dst.write(float4(src.sample(kHiZMin, coord / size, level(float(p.dstLevel - 1u))).x), gid, p.dstLevel);
 }
+
+// ---- debug view (F6.7, --debug-view hiz) -----------------------------------------------
+
+struct HiZViewOut {
+    float4 position [[position]];
+    float2 uv;
+};
+
+// Fullscreen triangle.
+vertex HiZViewOut hiz_view_vs(uint vid [[vertex_id]]) {
+    const float2 p = float2(float((vid << 1) & 2u), float(vid & 2u));
+    HiZViewOut o;
+    o.position = float4(p * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
+    o.uv       = p;
+    return o;
+}
+
+// Level `p.dstLevel` of the pyramid (texel = 2^(L+1) pixels), the drawable's
+// part only (level 0 is padded to a power of two): reverse-Z depth shown as
+// sqrt (near = white, background 0 = black, red = never written).
+fragment half4 hiz_view_fs(HiZViewOut in [[stage_in]], constant GPUHiZParams& p [[buffer(0)]],
+                           texture2d<float, access::read> hiz [[texture(0)]]) {
+    const uint level = min(p.dstLevel, p.levels - 1u);
+    const uint2 pixel = uint2(in.uv * float2(p.srcSize[0], p.srcSize[1]));
+    const uint2 texel = min(pixel >> (level + 1u), uint2(max(p.dstSize[0] >> level, 1u) - 1u, max(p.dstSize[1] >> level, 1u) - 1u));
+    const float d = hiz.read(texel, level).x;
+    if (!isfinite(d)) return half4(1.0h, 0.0h, 0.0h, 1.0h);
+    return half4(half3(half(sqrt(saturate(d)))), 1.0h);
+}

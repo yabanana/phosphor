@@ -85,6 +85,17 @@ MeshRenderer::MeshRenderer(MetalContext& context, PipelineCache& pipelines, Scen
     kBScan_     = pipelines_.request(kernelDesc(KERNEL_MESHLET_B_SCAN));
     kBWrite_    = pipelines_.request(kernelDesc(KERNEL_MESHLET_B_WRITE));
     MTL::Device* device = context_.device();
+    {
+        pipe::PipelineDesc d;
+        d.kind      = pipe::PipelineKind::Render;
+        d.label     = "Hi-Z view";
+        d.functions = {"hiz_view_vs", "hiz_view_fs", ""};
+        d.output(0, rg::Format::BGRA8Srgb);
+        hizView_      = pipelines_.request(d);
+        hizViewTable_ = newTable(device, 1, 1, "Hi-Z view arguments");
+        hizViewParams_ = context_.memory().newBuffer(sizeof(GPUHiZParams), MTL::ResourceStorageModeShared,
+                                                     MemoryCategory::Other, "Hi-Z view parameters");
+    }
     candTable_     = newTable(device, MB_BIND_COUNT, 0, "Meshlet candidates arguments");
     bTable_        = newTable(device, MB_BIND_COUNT, 0, "Meshlet B arguments");
     drawTables_[0] = newTable(device, MR_BIND_COUNT, 1, "Meshlet phase A arguments");
@@ -100,7 +111,8 @@ MeshRenderer::~MeshRenderer() {
     context_.waitIdle();
     releaseFrames();
     releaseGeometry();
-    for (MTL4::ArgumentTable* t : {candTable_, bTable_, drawTables_[0], drawTables_[1]}) t->release();
+    for (MTL4::ArgumentTable* t : {candTable_, bTable_, drawTables_[0], drawTables_[1], hizViewTable_}) t->release();
+    context_.memory().release(hizViewParams_, MemoryCategory::Other);
 }
 
 void MeshRenderer::requestAllVariants() {
@@ -441,6 +453,31 @@ rg::TextureRef MeshRenderer::addRasterPasses(rg::RenderGraph& graph, rg::Texture
                              static_cast<MTL::Texture*>(ctx.texture(depthRef_)), hiz_->history(), 1, corruptDepth_);
                 scene_.countCommands(hiz_->commandCount());
             });
+    }
+    // F6.7 --debug-view hiz: the new history pyramid (final depth), one level.
+    if (two && options_.debugView == MeshletDebugView::HiZ) {
+        graph.addPass(
+            "Hi-Z view", PassType::Raster,
+            [&](PassBuilder& b) {
+                color = b.writeColor(color, 0, LoadIntent::Preserve);
+                b.read(hizHistoryRef_, Usage::ShaderRead, StageFragment);
+                b.setProfileShaders("hiz_view_vs,hiz_view_fs");
+            },
+            [this](PassContext& ctx) {
+                auto* enc = static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder());
+                MTL::RenderPipelineState* pso = pipelines_.render(hizView_);
+                if (!pso || !hiz_->history()) return;
+                GPUHiZParams p{{width_, height_}, {hiz_->width0(), hiz_->height0()}, options_.debugHiZLevel, hiz_->levels(), {0, 0}};
+                std::memcpy(hizViewParams_->contents(), &p, sizeof(p));
+                hizViewTable_->setAddress(hizViewParams_->gpuAddress(), 0);
+                hizViewTable_->setTexture(hiz_->history()->gpuResourceID(), 0);
+                enc->setRenderPipelineState(pso);
+                enc->setArgumentTable(hizViewTable_, MTL::RenderStageFragment);
+                enc->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0), NS::UInteger(3));
+                scene_.countCommands(3);
+            });
+    } else if (options_.debugView == MeshletDebugView::HiZ) {
+        LOG_WARN("--debug-view hiz needs --meshlet-cull two-phase (no pyramid otherwise)");
     }
     // Self-check: the final depth and the pyramids, copied only on check frames.
     graph.addPass(

@@ -484,10 +484,12 @@ static float3 decisionColor(uint d) {
     }
 }
 
-// FrameConstants::debugMode selects the colouring: 3 = meshlet id, 4 = decision.
+// --debug-view meshlets: a colour per (slot, meshlet); cull
+// (MESHLET_CULL_DEBUG_ALL): a colour per decision.
 [[mesh]] void meshlet_mesh_debug(MeshletDebugMesh out, const object_data MeshletPayload& payload [[payload]],
                                  uint tid [[thread_index_in_threadgroup]], uint gid [[threadgroup_position_in_grid]],
                                  constant FrameConstants& frame [[buffer(0)]],
+                                 constant GPUMeshletCullParams& p [[buffer(10)]],
                                  const device GPUVertex* vertices [[buffer(1)]],
                                  const device GPUInstance* instances [[buffer(2)]],
                                  const device GPUMeshlet* meshlets [[buffer(6)]],
@@ -495,8 +497,9 @@ static float3 decisionColor(uint d) {
                                  const device uchar* meshletTriangles [[buffer(8)]]) {
     const GPUMeshlet m           = meshlets[payload.meshlet[gid]];
     const device GPUInstance& gi = instances[payload.slot[gid]];
-    const float3 color = frame.debugMode == 4u ? decisionColor(payload.decision[gid])
-                                               : hashColor(payload.meshlet[gid] * 0x9E3779B9u ^ payload.slot[gid]);
+    const float3 color = (p.flags & MESHLET_CULL_DEBUG_ALL) != 0u
+                             ? decisionColor(payload.decision[gid])
+                             : hashColor(payload.meshlet[gid] * 0x9E3779B9u ^ payload.slot[gid]);
     if (tid == 0u) out.set_primitive_count(m.triangleCount);
     if (tid < m.vertexCount) {
         const device GPUVertex& v = vertices[meshletVertices[m.vertexOffset + tid]];

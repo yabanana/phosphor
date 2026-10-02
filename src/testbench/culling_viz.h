@@ -21,8 +21,9 @@ namespace phosphor {
 //   [12, 16) cut, then a rising wide view over the city
 //   [16, 20) cut, street-level 360 degree pan (history mispredictions)
 // plus a fast sphere crossing the view at 150 units/s, and every 0.25 s 20
-// buildings destroyed and 20 created elsewhere (recycled entities, slot
-// reuse: nothing inherits visibility).
+// buildings destroyed and re-created in the same cell with a new height
+// (recycled entities, slot reuse: nothing inherits visibility; never two
+// overlapping buildings, so no coplanar faces and no order-dependent ties).
 // ---------------------------------------------------------------------------
 
 class CullingViz final : public TestBench {
@@ -50,6 +51,7 @@ private:
     bool script_ = false;
     // --culling-script state
     std::vector<EntityID> buildings_;
+    std::vector<glm::vec3> cells_; // grid cell of buildings_[i] (a respawn reuses it: no overlap)
     EntityID wall_   = INVALID_ENTITY;
     EntityID sphere_ = INVALID_ENTITY;
     u32      buildingMesh_ = 0;

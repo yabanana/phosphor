@@ -138,11 +138,14 @@ void CullingViz::setupScript(ECS& ecs, GpuScene& gpuScene, TextureManager& textu
     const float halfGrid = gridTotalSize * 0.5f;
     const float cellSize = BLOCK_SIZE + STREET_WIDTH;
     buildings_.reserve(GRID_DIM * GRID_DIM);
+    cells_.clear();
+    cells_.reserve(GRID_DIM * GRID_DIM);
     for (u32 iz = 0; iz < GRID_DIM; ++iz) {
         for (u32 ix = 0; ix < GRID_DIM; ++ix) {
             const float height = 2.0f + unit(rng) * 23.0f;
             const glm::vec3 p(ix * cellSize - halfGrid + BLOCK_SIZE * 0.5f, 0.0f, iz * cellSize - halfGrid + BLOCK_SIZE * 0.5f);
             buildings_.push_back(addBuilding(ecs, buildingMesh_, p, height, 0.3f + unit(rng) * 0.5f, 0.6f + unit(rng) * 0.3f));
+            cells_.push_back(p);
         }
     }
     wall_ = addWall(ecs);
@@ -199,20 +202,15 @@ void CullingViz::updateScript(float dt, ECS& ecs) {
         t.position = glm::vec3(-150.0f + 300.0f * static_cast<float>(std::fmod(time_ * 0.5, 1.0)), 3.0f, 40.0f);
         t.updateMatrix();
     }
-    // Churn: destroy 20 buildings, create 20 elsewhere (recycled entities).
-    const float gridTotalSize = GRID_DIM * (BLOCK_SIZE + STREET_WIDTH);
-    const float halfGrid = gridTotalSize * 0.5f;
-    const float cellSize = BLOCK_SIZE + STREET_WIDTH;
+    // Churn: destroy 20 buildings and re-create them in their cells with a
+    // new height (recycled entities, reused slots, no overlap).
     while (time_ >= nextChurn_ && !buildings_.empty()) {
         nextChurn_ += 0.25;
         for (u32 k = 0; k < 20; ++k) {
             const size_t i = static_cast<size_t>(nextRandom(churnRng_) % buildings_.size());
             ecs.destroyEntity(buildings_[i]);
-            const u32 ix = static_cast<u32>(nextRandom(churnRng_) % GRID_DIM);
-            const u32 iz = static_cast<u32>(nextRandom(churnRng_) % GRID_DIM);
-            const glm::vec3 p(ix * cellSize - halfGrid + BLOCK_SIZE * 0.5f, 0.0f, iz * cellSize - halfGrid + BLOCK_SIZE * 0.5f);
-            buildings_[i] = addBuilding(ecs, buildingMesh_, p, 2.0f + unit(churnRng_) * 23.0f, 0.3f + unit(churnRng_) * 0.5f,
-                                        0.7f);
+            buildings_[i] = addBuilding(ecs, buildingMesh_, cells_[i], 2.0f + unit(churnRng_) * 23.0f,
+                                        0.3f + unit(churnRng_) * 0.5f, 0.7f);
         }
     }
 }
