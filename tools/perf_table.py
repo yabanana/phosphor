@@ -48,11 +48,24 @@ def fmt(v, digits=3):
     return f"{round(v, digits):g}"
 
 
+def fmt_count(v):
+    """Counter mean as a plain integer (no exponent notation)."""
+    v = num(v)
+    return "-" if v is None else f"{round(v):d}"
+
+
 def fmt_ms(mean, p99=None):
     """'mean (p99)' as in docs/perf-log.md."""
     if num(mean) is None:
         return "-"
     return f"{fmt(mean)} ({fmt(p99)})" if num(p99) is not None else fmt(mean)
+
+
+def fmt_ms95(mean, p95, p99):
+    """'mean (p95, p99)' (schema 6); a missing percentile shows '-'."""
+    if num(mean) is None:
+        return "-"
+    return f"{fmt(mean)} ({fmt(p95)}, {fmt(p99)})"
 
 
 def fmt_sd(mean, sd):
@@ -188,17 +201,19 @@ def cmd_passes(prows, prefix, bench):
 
 
 def cmd_report(path):
-    """bench_all-style rows of one JSON report, schema v1, v2 or v3 (v3 adds per-pass "work", not shown)."""
+    """bench_all-style rows of one JSON report, schema v1..v6 (v3 per-pass "work" is not shown;
+    v6 adds p95 to every summary, a "hardware" line and a "meshlets" table)."""
     with open(path) as f:
         j = json.load(f)
     g = lambda *ks: _dig(j, ks)
     v = j.get("schema_version", 1)
     out = [f"{j.get('bench', '?')} · {j.get('width')}x{j.get('height')} · schema v{v}", "",
-           table(["FPS", "Frame ms (p99)", "CPU ms (p99)", "GPU ms (p99)", "Wait ms (p99)", "GPU pass-sum ms"],
+           table(["FPS", "Frame ms (p95, p99)", "CPU ms (p95, p99)", "GPU ms (p95, p99)", "Wait ms (p99)",
+                  "GPU pass-sum ms"],
                  [[fmt(j.get("fps"), 0),
-                   fmt_ms(g("frame_ms", "mean"), g("frame_ms", "p99")),
-                   fmt_ms(g("cpu_ms", "mean"), g("cpu_ms", "p99")),
-                   fmt_ms(g("gpu_ms", "mean"), g("gpu_ms", "p99")),
+                   fmt_ms95(g("frame_ms", "mean"), g("frame_ms", "p95"), g("frame_ms", "p99")),
+                   fmt_ms95(g("cpu_ms", "mean"), g("cpu_ms", "p95"), g("cpu_ms", "p99")),
+                   fmt_ms95(g("gpu_ms", "mean"), g("gpu_ms", "p95"), g("gpu_ms", "p99")),
                    fmt_ms(g("wait_ms", "mean"), g("wait_ms", "p99")),
                    fmt_ms(g("gpu_pass_sum_ms", "mean"), g("gpu_pass_sum_ms", "p99"))]])]
     body = []
@@ -229,6 +244,29 @@ def cmd_report(path):
         out += ["", "CPU ms per frame phase (mean, p99)", "",
                 table([n for _, n in names],
                       [[fmt_ms(_dig(cp, (k, "mean")), _dig(cp, (k, "p99"))) for k, _ in names]])]
+    # Schema 6: hardware manifest and meshlet path.
+    hw = j.get("hardware")
+    if isinstance(hw, dict):
+        mem = num(hw.get("memory_bytes"))
+        unv = hw.get("unverified_devices") or []
+        out += ["", f"hardware: {hw.get('physical_device', '?')} ({hw.get('physical_family', '?')}, "
+                    f"{fmt(mem / 1073741824.0, 1) if mem is not None else '-'} GiB) · effective "
+                    f"{hw.get('effective_capabilities', '?')} · preset {hw.get('preset') or 'none'} · "
+                    f"validation scope {hw.get('validation_scope', '?')} · unverified devices: "
+                    f"{', '.join(unv) if unv else 'none'}"]
+    ml = j.get("meshlets")
+    if isinstance(ml, dict):
+        out += ["", table(["Path", "Cull", "Hi-Z req/eff", "Cook", "Meshlets", "Capacity", "Overflow frames",
+                           "History resets", "Checks/failures"],
+                          [[ml.get("path", "?"), ml.get("cull", "?"),
+                            f"{ml.get('hiz_requested', '?')}/{ml.get('hiz_effective', '?')}", ml.get("cook", "?"),
+                            ml.get("meshlets", "-"), ml.get("candidate_capacity", "-"),
+                            ml.get("overflow_frames", "-"), ml.get("history_resets", "-"),
+                            f"{ml.get('checks', '-')}/{ml.get('check_failures', '-')}"]]), ""]
+        keys = ["candidates", "drawn_a", "frustum", "cone", "history_rejected", "drawn_b", "occluded_b",
+                "primitives"]
+        out += ["Meshlet counters per frame (mean)", "",
+                table(keys, [[fmt_count(_dig(ml, (k, "mean"))) for k in keys]])]
     return "\n".join(out)
 
 
@@ -259,6 +297,17 @@ def self_test():
     check("schema v5" in v5 and "scene: gpu-driven on · 1000000 instances" in v5, "v5 scene header")
     check("| 350000 | 650000 | 0 | 0 | 24 | 3 | 262144 | 2730 |" in v5, "v5 scene row (visible, cpu cmds, upload)")
     check("CPU ms per frame phase" in v5 and "| 0.9 (1) |" in v5, "v5 cpu phases")
+    check("(-, 9)" in v5 and "hardware:" not in v5 and "Meshlet counters" not in v5,
+          "v5: missing p95 shows -, no hardware/meshlets sections")
+    check("(-, " in v1, "v1: missing p95 shows -")
+    v6 = cmd_report(os.path.join(TESTDATA, "report_v6.json"))
+    check("schema v6" in v6, "v6 header")
+    check("8.5 (9.2, 9.8)" in v6, "v6 frame p95/p99")
+    check("hardware: Apple M5 Max (apple10, 128 GiB) · effective apple9 · preset t0-apple9 · "
+          "validation scope development · unverified devices: M3 Base, M4 Pro" in v6, "v6 hardware line")
+    check("| mesh | two-phase | auto/compute | standard-64v124t | 41210 | 1048576 | 0 | 0 | 12/0 |" in v6,
+          "v6 meshlets row")
+    check("| 350000 | 120000 | 150000 | 80000 | 7000 | 45000 | 6500 | 12500000 |" in v6, "v6 meshlet counters")
     rows = read_csv(os.path.join(TESTDATA, "history.csv"))
     prows = read_csv(os.path.join(TESTDATA, "history_passes.csv"))
     check(rows[0]["machine"] == "Mac17,6", "quoted comma in CSV")

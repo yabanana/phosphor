@@ -163,3 +163,115 @@ TEST_CASE("pipeline desc: generic and salt") {
     CHECK(pipelineKey(a, 0) == pipelineKey(a));
     CHECK(pipelineKey(g) != pipelineKey(a));
 }
+
+namespace {
+
+PipelineDesc meshDesc() {
+    PipelineDesc d;
+    d.kind         = PipelineKind::Mesh;
+    d.label        = "meshlet";
+    d.functions[0] = "meshlet_object";
+    d.functions[1] = "meshlet_mesh";
+    d.functions[2] = "forward_fs";
+    d.constant(0, ConstantType::UInt, 7);
+    d.output(0, rg::Format::BGRA8Srgb);
+    d.mesh = {32, 128, 384, 32};
+    return d;
+}
+
+} // namespace
+
+TEST_CASE("pipeline key: mesh canonical string") {
+    CHECK(canonicalString(meshDesc()) ==
+          "M|meshlet_object|meshlet_mesh|forward_fs|c0:u=7|o0=BGRA8Srgb/none/F|mesh=32,128,384,32");
+
+    // No object stage: the empty function keeps its slot.
+    PipelineDesc d = meshDesc();
+    d.functions[0] = "";
+    d.mesh.objectThreads = 0;
+    CHECK(canonicalString(d) == "M||meshlet_mesh|forward_fs|c0:u=7|o0=BGRA8Srgb/none/F|mesh=0,128,384,32");
+
+    // Generic variant keeps the mesh limits.
+    CHECK(canonicalString(meshDesc().generic()) ==
+          "M|meshlet_object|meshlet_mesh|forward_fs||o0=BGRA8Srgb/none/F|mesh=32,128,384,32");
+}
+
+TEST_CASE("pipeline key: mesh sensitivity") {
+    const PipelineKey ref = pipelineKey(meshDesc());
+    CHECK(pipelineKey(meshDesc()) == ref);
+
+    SUBCASE("label is ignored") {
+        PipelineDesc d = meshDesc();
+        d.label        = "other";
+        CHECK(pipelineKey(d) == ref);
+    }
+    SUBCASE("each function") {
+        for (u32 i = 0; i < 3; ++i) {
+            PipelineDesc d = meshDesc();
+            d.functions[i] = "changed";
+            CHECK_MESSAGE(pipelineKey(d) != ref, "function " << i);
+        }
+    }
+    SUBCASE("each limit") {
+        PipelineDesc d = meshDesc();
+        d.mesh.objectThreads++;
+        CHECK(pipelineKey(d) != ref);
+        d = meshDesc();
+        d.mesh.meshThreads++;
+        CHECK(pipelineKey(d) != ref);
+        d = meshDesc();
+        d.mesh.payloadBytes++;
+        CHECK(pipelineKey(d) != ref);
+        d = meshDesc();
+        d.mesh.meshGroups++;
+        CHECK(pipelineKey(d) != ref);
+    }
+    SUBCASE("function and limit values do not alias") {
+        // The same numbers in another slot are another pipeline.
+        PipelineDesc d = meshDesc();
+        d.mesh = {128, 32, 384, 32};
+        CHECK(pipelineKey(d) != ref);
+    }
+    SUBCASE("constants and outputs still count") {
+        PipelineDesc d = meshDesc();
+        d.constants[0].bits = 8;
+        CHECK(pipelineKey(d) != ref);
+        d = meshDesc();
+        d.output(0, rg::Format::RGBA16Float);
+        CHECK(pipelineKey(d) != ref);
+    }
+    SUBCASE("salt") {
+        CHECK(pipelineKey(meshDesc(), 5) != ref);
+        CHECK(pipelineKey(meshDesc().generic(), 5) == pipelineKey(meshDesc().generic(), 0));
+    }
+}
+
+TEST_CASE("pipeline key: mesh differs from render with the same first two functions") {
+    PipelineDesc r;
+    r.functions[0] = "meshlet_object";
+    r.functions[1] = "meshlet_mesh";
+    r.constant(0, ConstantType::UInt, 7);
+    r.output(0, rg::Format::BGRA8Srgb);
+
+    PipelineDesc m = meshDesc();
+    m.functions[2] = "";
+    m.mesh         = {};
+    CHECK(canonicalString(r) != canonicalString(m));
+    CHECK(pipelineKey(r) != pipelineKey(m));
+    CHECK(canonicalString(r) == "R|meshlet_object|meshlet_mesh|c0:u=7|o0=BGRA8Srgb/none/F");
+}
+
+TEST_CASE("pipeline key: render and compute strings and keys are unchanged by the mesh kind") {
+    CHECK(canonicalString(baseDesc()).find("mesh=") == std::string::npos);
+    CHECK(canonicalString(baseDesc()) == "R|forward_vs|forward_fs|c0:u=7,c1:b=1|o0=BGRA8Srgb/none/F");
+    CHECK(pipelineKey(baseDesc()) == 0xc7bd0d90cf603f89ull);
+    PipelineDesc c;
+    c.kind         = PipelineKind::Compute;
+    c.functions[0] = "cull_cs";
+    CHECK(canonicalString(c) == "C|cull_cs|||");
+    // The third function and the mesh limits are ignored outside the mesh kind.
+    PipelineDesc r = baseDesc();
+    r.functions[2] = "stray";
+    r.mesh         = {1, 2, 3, 4};
+    CHECK(pipelineKey(r) == pipelineKey(baseDesc()));
+}

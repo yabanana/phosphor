@@ -518,3 +518,364 @@ TEST_CASE("bench report: schema v5 scene and cpu_phases objects") {
     r.scene.visible.mean = std::nanf("");
     CHECK(validJson(reportToJson(r))); // non-finite numbers never reach the JSON
 }
+
+// ---------------------------------------------------------------------------
+// F6: launch options and report schema 6
+// ---------------------------------------------------------------------------
+
+TEST_CASE("launch options: F6 defaults") {
+    LaunchOptions o;
+    std::string err;
+    REQUIRE(parse({}, o, err));
+    CHECK(o.geometryPath == GeometryPath::Indexed);
+    CHECK(o.meshletCull == MeshletCull::TwoPhase);
+    CHECK(o.hizPath == HiZPath::Auto);
+    CHECK_FALSE(o.forceApple9);
+    CHECK(o.debugMeshlets == 0);
+    CHECK(o.debugMeshletsCorrupt == MeshletCorruption::None);
+    CHECK(o.debugView == MeshletDebugView::None);
+    CHECK(o.debugHiZLevel == 3);
+    CHECK_FALSE(o.meshletSpatial);
+    CHECK(o.meshletMaxVertices == 0);
+    CHECK(o.meshletMaxTriangles == 0);
+    CHECK(o.resolutionWidth == 0);
+    CHECK(o.resolutionHeight == 0);
+    CHECK_FALSE(o.cullingScript);
+    CHECK(o.historyResetEvery == 0);
+    CHECK(std::string(geometryPathName(o.geometryPath)) == "indexed");
+    CHECK(std::string(meshletCullName(o.meshletCull)) == "two-phase");
+    CHECK(std::string(hizPathName(o.hizPath)) == "auto");
+    CHECK(std::string(meshletDebugViewName(o.debugView)) == "none");
+}
+
+TEST_CASE("launch options: F6 accepted values") {
+    LaunchOptions o;
+    std::string err;
+    REQUIRE(parse({"--geometry-path", "indexed"}, o, err));
+    CHECK(o.geometryPath == GeometryPath::Indexed);
+    REQUIRE(parse({"--geometry-path", "mesh"}, o, err));
+    CHECK(o.geometryPath == GeometryPath::Mesh);
+    CHECK(std::string(geometryPathName(o.geometryPath)) == "mesh");
+
+    for (const auto& [text, cull] : {std::pair<const char*, MeshletCull>{"off", MeshletCull::Off},
+                                     {"frustum", MeshletCull::Frustum},
+                                     {"two-phase", MeshletCull::TwoPhase}}) {
+        REQUIRE(parse({"--meshlet-cull", text}, o, err));
+        CHECK(o.meshletCull == cull);
+        CHECK(std::string(meshletCullName(o.meshletCull)) == text);
+    }
+    for (const auto& [text, hiz] : {std::pair<const char*, HiZPath>{"auto", HiZPath::Auto},
+                                    {"compute", HiZPath::Compute},
+                                    {"sampler", HiZPath::Sampler}}) {
+        REQUIRE(parse({"--hiz-path", text}, o, err));
+        CHECK(o.hizPath == hiz);
+        CHECK(std::string(hizPathName(o.hizPath)) == text);
+    }
+    REQUIRE(parse({"--force-family", "apple9"}, o, err));
+    CHECK(o.forceApple9);
+
+    REQUIRE(parse({"--geometry-path", "mesh", "--debug-meshlets", "30"}, o, err));
+    CHECK(o.debugMeshlets == 30);
+    for (const auto& [text, kind] : {std::pair<const char*, MeshletCorruption>{"id", MeshletCorruption::Id},
+                                     {"depth", MeshletCorruption::Depth},
+                                     {"count", MeshletCorruption::Count}}) {
+        REQUIRE(parse({"--geometry-path", "mesh", "--debug-meshlets-corrupt", text}, o, err));
+        CHECK(o.debugMeshletsCorrupt == kind);
+    }
+    for (const auto& [text, view] : {std::pair<const char*, MeshletDebugView>{"none", MeshletDebugView::None},
+                                     {"meshlets", MeshletDebugView::Meshlets},
+                                     {"cull", MeshletDebugView::Cull},
+                                     {"hiz", MeshletDebugView::HiZ}}) {
+        REQUIRE(parse({"--geometry-path", "mesh", "--debug-view", text}, o, err));
+        CHECK(o.debugView == view);
+        CHECK(std::string(meshletDebugViewName(o.debugView)) == text);
+    }
+    REQUIRE(parse({"--debug-hiz-level", "0"}, o, err));
+    CHECK(o.debugHiZLevel == 0);
+    REQUIRE(parse({"--debug-hiz-level", "15"}, o, err));
+    CHECK(o.debugHiZLevel == 15);
+
+    REQUIRE(parse({"--meshlet-builder", "spatial", "--meshlet-max-vertices", "96", "--meshlet-max-triangles", "128"},
+                  o, err));
+    CHECK(o.meshletSpatial);
+    CHECK(o.meshletMaxVertices == 96);
+    CHECK(o.meshletMaxTriangles == 128);
+    REQUIRE(parse({"--meshlet-builder", "standard"}, o, err));
+    CHECK_FALSE(o.meshletSpatial);
+
+    REQUIRE(parse({"--culling-script", "--history-reset-every", "17"}, o, err));
+    CHECK(o.cullingScript);
+    CHECK(o.historyResetEvery == 17);
+}
+
+TEST_CASE("launch options: F6 malformed values name the option") {
+    LaunchOptions o;
+    std::string err;
+    for (const auto& [opt, bad] : {std::pair<const char*, const char*>{"--geometry-path", "meshes"},
+                                   {"--meshlet-cull", "full"},
+                                   {"--hiz-path", "gpu"},
+                                   {"--force-family", "apple10"},
+                                   {"--force-family", "m3"},
+                                   {"--debug-meshlets", "x"},
+                                   {"--debug-meshlets", "-1"},
+                                   {"--debug-meshlets-corrupt", "all"},
+                                   {"--debug-view", "wireframe"},
+                                   {"--debug-hiz-level", "16"},
+                                   {"--debug-hiz-level", "abc"},
+                                   {"--meshlet-builder", "greedy"},
+                                   {"--meshlet-max-vertices", "many"},
+                                   {"--meshlet-max-triangles", "1.5"},
+                                   {"--resolution", "1920"},
+                                   {"--resolution", "axb"},
+                                   {"--history-reset-every", "soon"}}) {
+        err.clear();
+        CHECK_FALSE_MESSAGE(parse({opt, bad}, o, err), opt << " " << bad);
+        CHECK_MESSAGE(err.find(opt) != std::string::npos, opt << ": " << err);
+    }
+    // Missing value.
+    for (const char* opt : {"--geometry-path", "--meshlet-cull", "--hiz-path", "--force-family", "--debug-view",
+                            "--meshlet-builder", "--resolution", "--history-reset-every"}) {
+        err.clear();
+        CHECK_FALSE(parse({opt}, o, err));
+        CHECK_MESSAGE(err.find(opt) != std::string::npos, opt << ": " << err);
+    }
+}
+
+TEST_CASE("launch options: F6 --resolution parsing and bounds") {
+    LaunchOptions o;
+    std::string err;
+    REQUIRE(parse({"--resolution", "1920x1080"}, o, err));
+    CHECK(o.resolutionWidth == 1920);
+    CHECK(o.resolutionHeight == 1080);
+    REQUIRE(parse({"--resolution", "64x64"}, o, err));
+    CHECK(o.resolutionWidth == 64);
+    CHECK(o.resolutionHeight == 64);
+    REQUIRE(parse({"--resolution", "8192x8192"}, o, err));
+    CHECK(o.resolutionWidth == 8192);
+    CHECK(o.resolutionHeight == 8192);
+    for (const char* bad : {"63x64", "64x63", "8193x64", "64x8193", "0x0", "x1080", "1920x", "1920x1080x2",
+                            "1920X1080", "-1920x1080", "", "1920 x 1080"}) {
+        err.clear();
+        CHECK_FALSE_MESSAGE(parse({"--resolution", bad}, o, err), bad);
+        CHECK_MESSAGE(err.find("--resolution") != std::string::npos, err);
+    }
+}
+
+TEST_CASE("launch options: F6 meshlet cook bounds") {
+    LaunchOptions o;
+    std::string err;
+    REQUIRE(parse({"--meshlet-max-vertices", "3"}, o, err));
+    CHECK(o.meshletMaxVertices == 3);
+    REQUIRE(parse({"--meshlet-max-vertices", "128"}, o, err));
+    CHECK(o.meshletMaxVertices == 128);
+    REQUIRE(parse({"--meshlet-max-triangles", "1"}, o, err));
+    CHECK(o.meshletMaxTriangles == 1);
+    REQUIRE(parse({"--meshlet-max-triangles", "128"}, o, err));
+    CHECK(o.meshletMaxTriangles == 128);
+    for (const char* v : {"0", "2", "129", "256"}) {
+        err.clear();
+        CHECK_FALSE_MESSAGE(parse({"--meshlet-max-vertices", v}, o, err), v);
+        CHECK(err.find("--meshlet-max-vertices") != std::string::npos);
+    }
+    for (const char* v : {"0", "129", "512"}) {
+        err.clear();
+        CHECK_FALSE_MESSAGE(parse({"--meshlet-max-triangles", v}, o, err), v);
+        CHECK(err.find("--meshlet-max-triangles") != std::string::npos);
+    }
+}
+
+TEST_CASE("launch options: F6 refused combinations") {
+    LaunchOptions o;
+    std::string err;
+
+    SUBCASE("mesh path needs the GPU scene") {
+        CHECK_FALSE(parse({"--geometry-path", "mesh", "--gpu-driven", "off"}, o, err));
+        CHECK(err.find("--geometry-path") != std::string::npos);
+        CHECK(err.find("--gpu-driven") != std::string::npos);
+        CHECK_FALSE(parse({"--gpu-driven", "off", "--geometry-path", "mesh"}, o, err)); // order independent
+        CHECK(parse({"--geometry-path", "mesh", "--gpu-driven", "on"}, o, err));
+        CHECK(parse({"--geometry-path", "mesh"}, o, err)); // gpu-driven defaults to on
+        CHECK(parse({"--geometry-path", "indexed", "--gpu-driven", "off"}, o, err));
+    }
+    SUBCASE("sampler Hi-Z needs Apple10") {
+        CHECK_FALSE(parse({"--force-family", "apple9", "--hiz-path", "sampler"}, o, err));
+        CHECK(err.find("--hiz-path") != std::string::npos);
+        CHECK(err.find("--force-family") != std::string::npos);
+        CHECK_FALSE(parse({"--hiz-path", "sampler", "--force-family", "apple9"}, o, err));
+        CHECK(parse({"--force-family", "apple9", "--hiz-path", "compute"}, o, err));
+        CHECK(parse({"--force-family", "apple9", "--hiz-path", "auto"}, o, err));
+        CHECK(parse({"--hiz-path", "sampler"}, o, err));
+    }
+    SUBCASE("mesh path debug options need the mesh path") {
+        CHECK_FALSE(parse({"--debug-meshlets", "10"}, o, err));
+        CHECK(err.find("--geometry-path mesh") != std::string::npos);
+        CHECK_FALSE(parse({"--debug-view", "meshlets"}, o, err));
+        CHECK(err.find("--debug-view") != std::string::npos);
+        CHECK_FALSE(parse({"--debug-meshlets-corrupt", "id"}, o, err));
+        CHECK(err.find("--debug-meshlets-corrupt") != std::string::npos);
+        CHECK_FALSE(parse({"--geometry-path", "indexed", "--debug-view", "cull"}, o, err));
+        CHECK(parse({"--debug-view", "none"}, o, err));
+        CHECK(parse({"--debug-meshlets", "0"}, o, err));
+        CHECK(parse({"--geometry-path", "mesh", "--debug-view", "hiz", "--debug-meshlets", "5",
+                     "--debug-meshlets-corrupt", "count"},
+                    o, err));
+    }
+    SUBCASE("only apple9 can be forced") {
+        CHECK_FALSE(parse({"--force-family", "apple10"}, o, err));
+        CHECK(err.find("--force-family") != std::string::npos);
+        CHECK_FALSE(parse({"--force-family", "apple8"}, o, err));
+        CHECK_FALSE(parse({"--force-family", ""}, o, err));
+    }
+}
+
+TEST_CASE("bench report: schema 6 nearest-rank p95") {
+    std::vector<float> v;
+    for (int i = 20; i >= 1; --i) v.push_back(static_cast<float>(i));
+    const TimingSummary s = summarize(v);
+    CHECK(s.p50 == doctest::Approx(10.0f));
+    CHECK(s.p95 == doctest::Approx(19.0f));
+    CHECK(s.p99 == doctest::Approx(20.0f));
+    CHECK(s.max == doctest::Approx(20.0f));
+
+    const TimingSummary one = summarize({7.0f});
+    CHECK(one.p50 == doctest::Approx(7.0f));
+    CHECK(one.p95 == doctest::Approx(7.0f));
+    CHECK(one.p99 == doctest::Approx(7.0f));
+
+    std::vector<float> h;
+    for (int i = 1; i <= 100; ++i) h.push_back(static_cast<float>(i));
+    const TimingSummary s100 = summarize(h);
+    CHECK(s100.p50 == doctest::Approx(50.0f));
+    CHECK(s100.p95 == doctest::Approx(95.0f));
+    CHECK(s100.p99 == doctest::Approx(99.0f));
+
+    const TimingSummary empty = summarize({});
+    CHECK(empty.p95 == 0.0f);
+
+    for (const TimingSummary& t : {s, one, s100}) {
+        CHECK(t.p50 <= t.p95);
+        CHECK(t.p95 <= t.p99);
+        CHECK(t.p99 <= t.max);
+    }
+}
+
+TEST_CASE("bench report: positional TimingSummary initialisers keep their meaning (p95 is last)") {
+    const TimingSummary t{1.0f, 2.0f, 3.0f, 4.0f, 5.0f};
+    CHECK(t.mean == 1.0f);
+    CHECK(t.min == 2.0f);
+    CHECK(t.p50 == 3.0f);
+    CHECK(t.p99 == 4.0f);
+    CHECK(t.max == 5.0f);
+    CHECK(t.p95 == 0.0f);
+    const TimingSummary u{1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 3.5f};
+    CHECK(u.p95 == 3.5f);
+}
+
+TEST_CASE("bench report: schema 6 JSON has p95 between p50 and p99 in every summary") {
+    std::vector<FrameSample> samples;
+    for (int i = 1; i <= 20; ++i) {
+        const float f = static_cast<float>(i);
+        samples.push_back(FrameSample{f, f / 2.0f, f / 4.0f, 0.1f});
+    }
+    BenchReport r = timedReport();
+    r.bench  = "Torus";
+    r.device = "GPU";
+    summarizeSamples(samples, r);
+    r.scene.present = true;
+    r.scene.visible = summarize({1.0f, 2.0f, 3.0f});
+    r.cpuPhases.present = true;
+    r.cpuPhases.sim = summarize({1.0f, 2.0f, 3.0f});
+    r.meshlets.present = true;
+    r.meshlets.candidates = summarize({10.0f, 20.0f});
+    const std::string json = reportToJson(r);
+    CHECK_MESSAGE(validJson(json), json);
+    CHECK(json.find("\"schema_version\": 6") != std::string::npos);
+    CHECK(r.frameMs.p95 == doctest::Approx(19.0f));
+    CHECK(json.find("\"frame_ms\": {\"mean\": 10.5000, \"min\": 1.0000, \"p50\": 10.0000, \"p95\": 19.0000, "
+                    "\"p99\": 20.0000, \"max\": 20.0000}") != std::string::npos);
+    size_t summaries = 0;
+    for (size_t pos = json.find("\"mean\":"); pos != std::string::npos; pos = json.find("\"mean\":", pos + 1)) {
+        const size_t end = json.find('}', pos);
+        const std::string obj = json.substr(pos, end - pos);
+        const size_t p50 = obj.find("\"p50\"");
+        const size_t p95 = obj.find("\"p95\"");
+        const size_t p99 = obj.find("\"p99\"");
+        CHECK_MESSAGE(p50 != std::string::npos, obj);
+        CHECK_MESSAGE((p50 < p95 && p95 < p99), obj);
+        ++summaries;
+    }
+    CHECK(summaries > 10);
+
+    const std::string line = formatReportLine(r);
+    CHECK(line.find("frame 10.500 ms (p95 19.000 p99 20.000)") != std::string::npos);
+}
+
+TEST_CASE("bench report: schema 6 hardware object only when present") {
+    BenchReport r;
+    r.bench  = "Torus";
+    r.device = "GPU";
+    CHECK(reportToJson(r).find("\"hardware\"") == std::string::npos);
+    CHECK(reportToJson(r).find("\"meshlets\"") == std::string::npos);
+
+    r.hardware.present = true;
+    r.hardware.physicalDevice = "Apple M5 Max";
+    r.hardware.physicalFamily = "apple10";
+    r.hardware.memoryBytes = 137438953472ull;
+    r.hardware.effectiveCapabilities = "apple9";
+    r.hardware.preset = "t0-apple9";
+    r.hardware.unverifiedDevices = {"M3 Base", "M4 \"Pro\""};
+    std::string json = reportToJson(r);
+    CHECK_MESSAGE(validJson(json), json);
+    CHECK(json.find("\"hardware\": {\"physical_device\": \"Apple M5 Max\", \"physical_family\": \"apple10\", "
+                    "\"memory_bytes\": 137438953472, \"effective_capabilities\": \"apple9\", \"preset\": "
+                    "\"t0-apple9\", \"validation_scope\": \"development\", \"unverified_devices\": [\"M3 Base\", "
+                    "\"M4 \\\"Pro\\\"\"]}") != std::string::npos);
+    CHECK(json.find("\"meshlets\"") == std::string::npos);
+
+    r.hardware.unverifiedDevices.clear();
+    r.hardware.physicalDevice = "GPU \"x\"\\y\n";
+    r.hardware.validationScope = "multi\"device";
+    json = reportToJson(r);
+    CHECK_MESSAGE(validJson(json), json);
+    CHECK(json.find("\"unverified_devices\": []") != std::string::npos);
+    CHECK(json.find("\"physical_device\": \"GPU \\\"x\\\"\\\\y\\n\"") != std::string::npos);
+    CHECK(json.find("\"validation_scope\": \"multi\\\"device\"") != std::string::npos);
+}
+
+TEST_CASE("bench report: schema 6 meshlets object only when present") {
+    BenchReport r;
+    r.bench  = "Culling";
+    r.device = "GPU";
+    r.meshlets.present = true;
+    r.meshlets.path = "mesh";
+    r.meshlets.cull = "two-phase";
+    r.meshlets.hizRequested = "auto";
+    r.meshlets.hizEffective = "compute";
+    r.meshlets.cook = "standard-64v124t";
+    r.meshlets.meshlets = 41210;
+    r.meshlets.candidateCapacity = 1048576;
+    r.meshlets.overflowFrames = 0;
+    r.meshlets.historyResets = 2;
+    r.meshlets.checks = 12;
+    r.meshlets.checkFailures = 1;
+    r.meshlets.candidates = summarize({350000.0f});
+    r.meshlets.primitives = summarize({1.0e7f, 1.1e7f});
+    std::string json = reportToJson(r);
+    CHECK_MESSAGE(validJson(json), json);
+    CHECK(json.find("\"hardware\"") == std::string::npos);
+    CHECK(json.find("\"meshlets\": {\"path\": \"mesh\", \"cull\": \"two-phase\", \"hiz_requested\": \"auto\", "
+                    "\"hiz_effective\": \"compute\", \"cook\": \"standard-64v124t\", \"meshlets\": 41210, "
+                    "\"candidate_capacity\": 1048576, \"overflow_frames\": 0, \"history_resets\": 2, "
+                    "\"checks\": 12, \"check_failures\": 1, \"candidates\": {\"mean\": 350000.0000") !=
+          std::string::npos);
+    for (const char* key : {"\"drawn_a\"", "\"frustum\"", "\"cone\"", "\"history_rejected\"", "\"drawn_b\"",
+                            "\"occluded_b\"", "\"primitives\": {\"mean\": 10500000.0000"}) {
+        CHECK_MESSAGE(json.find(key) != std::string::npos, key);
+    }
+    r.meshlets.cook = "spatial-\"64\"";
+    CHECK(validJson(reportToJson(r)));
+    r.meshlets.drawnA.mean = std::nanf("");
+    CHECK(validJson(reportToJson(r)));
+    r.meshlets.present = false;
+    CHECK(reportToJson(r).find("\"meshlets\"") == std::string::npos);
+}
