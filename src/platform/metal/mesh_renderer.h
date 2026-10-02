@@ -84,6 +84,11 @@ public:
 
     /// Upload the meshlet geometry if the scene geometry changed (blocking).
     void syncGeometry(const GpuScene& scene);
+    /// Bench switch (after SceneRenderer::loadScene, before the switch's
+    /// collectGarbage): the lists are re-sized to the new scene right away,
+    /// so the old ones are freed by that collection and no allocation or
+    /// deferred release lands in the frames after the switch (hitch check).
+    void loadScene(const SceneStore& store, const GpuScene& scene);
     /// Frame: capacities, parameters into the frame ring, bindings, variant.
     /// After SceneRenderer::prepareFrame (uses its constants/lights addresses).
     void prepareFrame(const SceneStore& store, const GpuScene& scene, const FrameParams& params);

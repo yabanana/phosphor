@@ -902,6 +902,7 @@ void Engine::switchTestBench(TestBenchType type) {
     store_->sync(*ecs_, *gpuScene_);
     ecs_->endFrame();
     renderer_->loadScene(*store_);
+    if (mesh_) mesh_->loadScene(*store_, *gpuScene_);
     sceneTime_ = 0.0;
     const Clock::time_point t4 = Clock::now();
     // The previous bench's resources are unused now: free their heap ranges

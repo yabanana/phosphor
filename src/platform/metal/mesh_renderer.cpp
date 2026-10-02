@@ -206,6 +206,13 @@ void MeshRenderer::syncGeometry(const GpuScene& scene) {
              scene.meshletTriangles().size());
 }
 
+void MeshRenderer::loadScene(const SceneStore& store, const GpuScene& scene) {
+    releaseFrames(); // checks re-created with the next drawable size; released by the switch's collection
+    width_ = height_ = 0;
+    structureVersion_ = store.structureVersion();
+    ensureCapacity(meshletCandidateCapacity(store.buckets(), scene.meshInfos()), store.slotCapacity());
+}
+
 void MeshRenderer::ensureCapacity(u64 capacity, u32 slotCount) {
     const u64 cap  = grow(capacity_, std::max<u64>(capacity, 1));
     const u32 slot = static_cast<u32>(grow(slotCap_, std::max<u32>(slotCount, 1)));
