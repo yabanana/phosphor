@@ -151,6 +151,7 @@ inline constexpr const char* MESHLET_OBJECT_FN         = "meshlet_object";
 inline constexpr const char* MESHLET_MESH_FN           = "meshlet_mesh";
 inline constexpr const char* MESHLET_MESH_DEBUG_FN     = "meshlet_mesh_debug";
 inline constexpr const char* MESHLET_MESH_DIRECT_FN    = "meshlet_mesh_direct";
+inline constexpr const char* MESHLET_MESH_TRICULL_FN   = "meshlet_mesh_tricull";
 inline constexpr const char* MESHLET_DEBUG_FS          = "meshlet_debug_fs";
 inline constexpr const char* KERNEL_HIZ_LEVEL0         = "hiz_level0";
 inline constexpr const char* KERNEL_HIZ_REDUCE         = "hiz_reduce";

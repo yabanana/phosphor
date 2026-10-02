@@ -47,7 +47,8 @@ pipe::PipelineDesc kernelDesc(const char* function) {
 
 /// Mesh pipeline of the mesh path: the forward desc's constants (variant) and
 /// output, object + mesh + fragment functions and the meshlet limits.
-bool gObjectStage = true; // spike S2 variant (one MeshRenderer per process)
+bool gObjectStage  = true;  // spike S2 variant (one MeshRenderer per process)
+bool gTriangleCull = false; // F6.3 option
 
 pipe::PipelineDesc meshDesc(const pipe::PipelineDesc& forward, const char* label) {
     pipe::PipelineDesc d = forward;
@@ -56,6 +57,7 @@ pipe::PipelineDesc meshDesc(const pipe::PipelineDesc& forward, const char* label
     d.functions              = {MESHLET_OBJECT_FN, MESHLET_MESH_FN, "forward_fs"};
     d.indirectCommandBuffers = false;
     d.mesh = {MESHLET_OBJECT_GROUP, MESHLET_MESH_GROUP, MESHLET_PAYLOAD_BYTES, MESHLET_OBJECT_GROUP};
+    if (gTriangleCull) d.functions[1] = MESHLET_MESH_TRICULL_FN;
     if (!gObjectStage) {
         d.functions = {"", MESHLET_MESH_DIRECT_FN, "forward_fs"};
         d.mesh      = {0, MESHLET_MESH_GROUP, 0, 0};
@@ -73,7 +75,8 @@ u64 grow(u64 have, u64 need) { return need <= have ? have : std::max<u64>(need +
 
 MeshRenderer::MeshRenderer(MetalContext& context, PipelineCache& pipelines, SceneRenderer& scene, const Options& options)
     : context_(context), pipelines_(pipelines), scene_(scene), options_(options) {
-    gObjectStage = options_.objectStage;
+    gObjectStage  = options_.objectStage;
+    gTriangleCull = options_.triangleCull;
     if (!options_.objectStage && options_.cull != MeshletCull::Off) {
         throw std::runtime_error("--meshlet-object off (spike S2) needs --meshlet-cull off");
     }

@@ -453,6 +453,15 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
                 error = "--meshlet-min-pixels: expected a size >= 0 (0 = off)";
                 return false;
             }
+        } else if (arg == "--meshlet-triangle-cull") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "on") out.meshletTriangleCull = true;
+            else if (*value == "off") out.meshletTriangleCull = false;
+            else {
+                error = "--meshlet-triangle-cull: expected on or off, got '" + std::string(*value) + "'";
+                return false;
+            }
         } else if (arg == "--meshlet-object") {
             const auto value = needValue();
             if (!value) return false;

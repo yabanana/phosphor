@@ -208,6 +208,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         mo.checks      = options_.debugMeshlets > 0;
         mo.objectStage = options_.meshletObjectStage;
         mo.minPixels   = options_.meshletMinPixels;
+        mo.triangleCull = options_.meshletTriangleCull;
         mo.salt        = options_.pipelineSalt;
         mo.genericOnly = options_.debugPipelineFallback;
         mo.forceVariant = options_.forceVariant;
@@ -1418,7 +1419,8 @@ void Engine::onSceneCounters(u32 slot) {
             ms.drawnB.push_back(static_cast<float>(c.drawnB));
             ms.occludedB.push_back(static_cast<float>(c.occludedB));
             ms.primitives.push_back(static_cast<float>(c.primitivesA + c.primitivesB));
-            ms.emitted.push_back(static_cast<float>(c.emitted));
+            // Without the triangle cull every triangle of a drawn meshlet is emitted.
+            ms.emitted.push_back(static_cast<float>(options_.meshletTriangleCull ? c.emitted : c.primitivesA + c.primitivesB));
             ms.sizeCulled.push_back(static_cast<float>(c.sizeCulled));
             if (c.overflow) ++ms.overflowFrames;
         }

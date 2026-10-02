@@ -63,6 +63,9 @@ public:
         /// F6.2 APPROXIMATE size cull: meshlets whose projected bound covers
         /// less than minPixels^2 pixels (0 = off, the exact preset).
         float              minPixels = 0.0f;
+        /// F6.3 option: per-triangle facing cull + compaction in the mesh
+        /// shader (meshlet_mesh_tricull).  Off by default: slower on M5 Max.
+        bool               triangleCull = false;
         /// Spike S2: mesh-only pipeline (no object stage, no culling).
         bool               objectStage = true;
         u32                salt      = 0;

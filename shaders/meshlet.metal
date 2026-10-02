@@ -428,8 +428,46 @@ static float4x4 loadMatrix(constant float* m) {
 
 using MeshletMesh = metal::mesh<VertexOut, void, MESHLET_MESH_GROUP, MESHLET_MESH_GROUP, topology::triangle>;
 
-// One meshlet per mesh threadgroup: thread t transforms vertex t (<
-// vertexCount) and tests triangle t (< triangleCount).  F6.3: triangles the
+// One meshlet per mesh threadgroup: thread t emits vertex t (< vertexCount)
+// and triangle t (< triangleCount); exactly the meshlet's primitives are
+// declared (no padding primitives; culled meshlets were already omitted by
+// the object shader).  The vertex maths are forward_vs's.
+[[mesh]] void meshlet_mesh(MeshletMesh out, const object_data MeshletPayload& payload [[payload]],
+                           uint tid [[thread_index_in_threadgroup]], uint gid [[threadgroup_position_in_grid]],
+                           constant FrameConstants& frame [[buffer(0)]], const device GPUVertex* vertices [[buffer(1)]],
+                           const device GPUInstance* instances [[buffer(2)]],
+                           const device GPUMeshlet* meshlets [[buffer(6)]],
+                           const device uint* meshletVertices [[buffer(7)]],
+                           const device uchar* meshletTriangles [[buffer(8)]]) {
+    const GPUMeshlet m           = meshlets[payload.meshlet[gid]];
+    const device GPUInstance& gi = instances[payload.slot[gid]];
+    if (tid == 0u) out.set_primitive_count(m.triangleCount);
+    if (tid < m.vertexCount) {
+        const device GPUVertex& v = vertices[meshletVertices[m.vertexOffset + tid]];
+        const float4x4 model       = loadMatrix(gi.modelMatrix);
+        const float3x3 normalMatrix = float3x3(model[0].xyz, model[1].xyz, model[2].xyz);
+        const float4 world         = model * float4(v.px, v.py, v.pz, 1.0);
+        VertexOut o;
+        o.position      = loadMatrix(frame.viewProjection) * world;
+        o.worldPos      = world.xyz;
+        o.normal        = normalMatrix * float3(v.nx, v.ny, v.nz);
+        o.tangent       = float4(normalMatrix * float3(v.tx, v.ty, v.tz), v.tw);
+        o.uv            = float2(v.u, v.v);
+        o.materialIndex = gi.materialIndex;
+        o.mirrored      = (gi.flags & INSTANCE_FLAG_MIRRORED) != 0 ? 1u : 0u;
+        out.set_vertex(tid, o);
+    }
+    if (tid < m.triangleCount) {
+        const uint base = m.triangleOffset + tid * 3u;
+        out.set_index(tid * 3u + 0u, meshletTriangles[base + 0u]);
+        out.set_index(tid * 3u + 1u, meshletTriangles[base + 1u]);
+        out.set_index(tid * 3u + 2u, meshletTriangles[base + 2u]);
+    }
+}
+
+// --meshlet-triangle-cull on (F6.3 option, OFF by default: measured slower
+// on M5 Max, docs/opt-log.md "F6"): thread t transforms vertex t (<
+// vertexCount) and tests triangle t (< triangleCount).  Triangles the
 // rasterizer would cull anyway are not emitted -- back faces (class Back) or
 // front faces (class BackMirrored, front-face culled), decided on the
 // projected triangle with a margin larger than the raster snapping error
@@ -438,7 +476,7 @@ using MeshletMesh = metal::mesh<VertexOut, void, MESHLET_MESH_GROUP, MESHLET_MES
 // ones are compacted in their original order (SIMD prefix sums), so the
 // declared primitive count is the exact output.  Double-sided materials
 // (class None) keep every triangle.  The vertex maths are forward_vs's.
-[[mesh]] void meshlet_mesh(MeshletMesh out, const object_data MeshletPayload& payload [[payload]],
+[[mesh]] void meshlet_mesh_tricull(MeshletMesh out, const object_data MeshletPayload& payload [[payload]],
                            uint tid [[thread_index_in_threadgroup]], uint gid [[threadgroup_position_in_grid]],
                            uint sg [[simdgroup_index_in_threadgroup]], uint lane [[thread_index_in_simdgroup]],
                            constant FrameConstants& frame [[buffer(0)]], const device GPUVertex* vertices [[buffer(1)]],

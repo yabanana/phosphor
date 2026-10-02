@@ -177,6 +177,9 @@ namespace phosphor {
 //   --meshlet-min-pixels P  F6.2 APPROXIMATE: meshlets whose projected bound
 //                      covers less than P x P pixels are culled (0 = off,
 //                      never in the exact/gate preset)
+//   --meshlet-triangle-cull on|off  F6.3 option: the mesh shader also drops
+//                      back/front-facing triangles and compacts the rest
+//                      (default off: measured slower on M5 Max)
 //   --meshlet-object off  spike S2: mesh-only pipeline without object stage
 //                      (needs --meshlet-cull off; a measurement variant)
 //   --history-reset-every N  F6.5: invalidate the Hi-Z history every N
@@ -299,6 +302,7 @@ struct LaunchOptions {
     u32          historyResetEvery = 0;
     bool         meshletObjectStage = true; // --meshlet-object off: spike S2 mesh-only pipeline
     float        meshletMinPixels   = 0.0f; // --meshlet-min-pixels P (approximate size cull, 0 = off)
+    bool         meshletTriangleCull = false; // --meshlet-triangle-cull on
 
     [[nodiscard]] bool benchmark() const { return frames > 0; }
 };
