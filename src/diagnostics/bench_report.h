@@ -46,6 +46,7 @@ struct TimingSummary {
     float p50  = 0.0f;
     float p99  = 0.0f;
     float max  = 0.0f;
+    float p95  = 0.0f; // F6 (schema 6): the 60 fps gate is on the p95 frame time (last: positional inits unchanged)
 };
 
 // OPT-0.4: work of one render-graph pass over one frame, from data the CPU
@@ -129,7 +130,38 @@ struct CpuPhasesReport {
     TimingSummary submit;
 };
 
-constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 5;
+// F6 (schema 6): every summary also has "p95"; the hardware is reported as
+// physical device/family/memory, EFFECTIVE capabilities (--force-family) and
+// the frozen preset (docs/plans/HARDWARE_VALIDATION.md, "Manifest").
+struct DeviceReport {
+    bool        present = false;
+    std::string physicalDevice;        // GPU name
+    std::string physicalFamily;        // apple10 / apple9
+    u64         memoryBytes = 0;       // physical memory of the machine
+    std::string effectiveCapabilities; // apple10 / apple9 (forced)
+    std::string preset;                // frozen preset name ("" = none)
+    std::string validationScope = "development";
+    std::vector<std::string> unverifiedDevices;
+};
+
+// F6 (schema 6): the geometry path and the meshlet culling counters
+// (GPUMeshletCounters, read back METAL_FRAMES_IN_FLIGHT frames later).
+struct MeshletReport {
+    bool          present = false;
+    std::string   path;          // indexed / mesh
+    std::string   cull;          // off / frustum / two-phase
+    std::string   hizRequested;  // auto / compute / sampler
+    std::string   hizEffective;  // compute / sampler / none
+    std::string   cook;          // meshletOptionsName
+    u32           meshlets = 0;  // meshlets of the scene's meshes
+    u64           candidateCapacity = 0;
+    u32           overflowFrames  = 0; // frames that used the indexed fallback (must be 0)
+    u32           historyResets   = 0; // during the measured frames
+    u32           checks = 0, checkFailures = 0; // --debug-meshlets
+    TimingSummary candidates, drawnA, frustum, cone, historyRejected, drawnB, occludedB, primitives;
+};
+
+constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 6;
 
 struct BenchReport {
     std::string   bench;
@@ -159,6 +191,8 @@ struct BenchReport {
     GraphReport   graph;         // OPT-1 (schema 4)
     SceneReport   scene;         // F5 (schema 5)
     CpuPhasesReport cpuPhases;   // F5 (schema 5)
+    DeviceReport  hardware;      // F6 (schema 6)
+    MeshletReport meshlets;      // F6 (schema 6)
 };
 
 /// Nearest-rank statistics of `values` (empty input gives all zeros).

@@ -56,7 +56,7 @@ MeshHandle GpuScene::uploadMesh(
     MeshletBuildResult meshletData = MeshletBuilder::build(
         reinterpret_cast<const float*>(positions.data()),
         vertexCount, sizeof(glm::vec3),
-        indices.data(), indices.size());
+        indices.data(), indices.size(), meshletOptions_);
 
     // Bounding sphere around the vertex centroid.
     glm::vec3 center{0.0f};

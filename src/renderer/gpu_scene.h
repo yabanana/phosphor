@@ -57,6 +57,11 @@ public:
     /// Drop all geometry and per-frame data (used when switching benches).
     void clear();
 
+    /// F6.1: cook options of the meshlets of meshes uploaded from now on
+    /// (must pass validateMeshletOptions).  Kept across clear().
+    void setMeshletOptions(const MeshletBuildOptions& options) { meshletOptions_ = options; }
+    [[nodiscard]] const MeshletBuildOptions& meshletOptions() const { return meshletOptions_; }
+
     // --- Accessors used by the backend -----------------------------------
     [[nodiscard]] const std::vector<GPUVertex>&     vertices()          const { return vertices_; }
     [[nodiscard]] const std::vector<u32>&           indices()           const { return indices_; }
@@ -89,6 +94,7 @@ private:
     std::vector<GPULight>      lights_;
 
     u64 geometryVersion_ = 0;
+    MeshletBuildOptions meshletOptions_;
 };
 
 } // namespace phosphor

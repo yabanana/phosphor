@@ -5,9 +5,16 @@
 // the unit tests) and by MSL (shaders/gpu_scene.metal, kernel scene_cull_flags)
 // from this single source, like gpu_types.h.  Scalars only, no glm.
 //
-// World bounding sphere: centre = model * (c, 1), radius = r * the longest
-// basis column of the model matrix (conservative for non-uniform scale,
-// exact for rotation + uniform scale, sign of the scale irrelevant).
+// World bounding sphere: centre = model * (c, 1), radius = r * an upper bound
+// of the spectral norm of the model's 3x3 part (F6 fix: the longest basis
+// column, used by F5, is NOT an upper bound when the matrix has shear, e.g.
+// a child rotated under a non-uniformly scaled parent: [[1,1],[0,1]] has
+// columns of length 1 and 1.414 but stretches by 1.618).  sigma_max^2 is the
+// largest eigenvalue of the Gram matrix G = M^T M (G_ij = c_i . c_j), and
+// Gershgorin bounds it by max_i (G_ii + sum_{j != i} |G_ij|): exact (the
+// longest column) when the columns are orthogonal (rotation x scale), never
+// below sigma_max otherwise.  The result is inflated by 2^-16 against the
+// rounding of the float evaluation.
 //
 // cullSphere() tests, in this order and each only when its CULL_FLAG_* is set:
 //   1 CULL_REASON_FRUSTUM : any of the 5 planes (left, right, bottom, top,
@@ -44,6 +51,7 @@
 #define PHOSPHOR_FP_STRICT _Pragma("METAL fp contract(off)") _Pragma("clang fp reassociate(off)")
 #define PHOSPHOR_SQRT(x) metal::precise::sqrt(x)
 #define PHOSPHOR_MAX(a, b) metal::max((a), (b))
+#define PHOSPHOR_ABS(a) metal::fabs(a)
 #else
 #include <algorithm>
 #include <cfloat>
@@ -54,6 +62,7 @@
 #define PHOSPHOR_FP_STRICT _Pragma("clang fp contract(off)")
 #define PHOSPHOR_SQRT(x) std::sqrt(x)
 #define PHOSPHOR_MAX(a, b) std::max((a), (b))
+#define PHOSPHOR_ABS(a) std::fabs(a)
 #endif
 
 namespace phosphor {
@@ -89,6 +98,23 @@ struct GPUWorldSphere {
     float x, y, z, r;
 };
 
+/// Upper bound of the spectral norm (largest stretch) of the 3x3 part of the
+/// column-major matrix `m`: Gershgorin on the Gram matrix of the columns (see
+/// the header comment), inflated by 2^-16.
+PHOSPHOR_CULL_FN float cullScaleBound(const PHOSPHOR_DEV float* m) {
+    PHOSPHOR_FP_STRICT
+    const float s0  = m[0] * m[0] + m[1] * m[1] + m[2] * m[2];
+    const float s1  = m[4] * m[4] + m[5] * m[5] + m[6] * m[6];
+    const float s2  = m[8] * m[8] + m[9] * m[9] + m[10] * m[10];
+    const float g01 = PHOSPHOR_ABS(m[0] * m[4] + m[1] * m[5] + m[2] * m[6]);
+    const float g02 = PHOSPHOR_ABS(m[0] * m[8] + m[1] * m[9] + m[2] * m[10]);
+    const float g12 = PHOSPHOR_ABS(m[4] * m[8] + m[5] * m[9] + m[6] * m[10]);
+    const float b0  = s0 + g01 + g02;
+    const float b1  = s1 + g01 + g12;
+    const float b2  = s2 + g02 + g12;
+    return PHOSPHOR_SQRT(PHOSPHOR_MAX(PHOSPHOR_MAX(b0, b1), b2)) * (1.0f + 1.0f / 65536.0f);
+}
+
 /// World sphere of `sphere` (centre xyz + radius, mesh space) under the
 /// column-major model matrix `m` (16 floats).
 PHOSPHOR_CULL_FN GPUWorldSphere cullWorldSphere(const PHOSPHOR_DEV float* m, const PHOSPHOR_DEV float* sphere) {
@@ -98,11 +124,7 @@ PHOSPHOR_CULL_FN GPUWorldSphere cullWorldSphere(const PHOSPHOR_DEV float* m, con
     w.x = m[0] * cx + m[4] * cy + m[8] * cz + m[12];
     w.y = m[1] * cx + m[5] * cy + m[9] * cz + m[13];
     w.z = m[2] * cx + m[6] * cy + m[10] * cz + m[14];
-    const float s0 = m[0] * m[0] + m[1] * m[1] + m[2] * m[2];
-    const float s1 = m[4] * m[4] + m[5] * m[5] + m[6] * m[6];
-    const float s2 = m[8] * m[8] + m[9] * m[9] + m[10] * m[10];
-    const float smax = PHOSPHOR_MAX(PHOSPHOR_MAX(s0, s1), s2);
-    w.r = sphere[3] * PHOSPHOR_SQRT(smax);
+    w.r = sphere[3] * cullScaleBound(m);
     return w;
 }
 

@@ -115,8 +115,22 @@ public:
     [[nodiscard]] MTL::SharedEvent*   frameEvent()   const { return frameEvent_; }
     [[nodiscard]] MTL::PixelFormat    colorFormat()  const { return MTL::PixelFormatBGRA8Unorm_sRGB; }
     [[nodiscard]] const char*         gpuName()      const;
+    /// PHYSICAL GPU family of the device (memory budget tier, reports).
     [[nodiscard]] bool                isApple9OrLater() const { return apple9_; }
     [[nodiscard]] bool                isApple10OrLater() const { return apple10_; }
+    /// F6: EFFECTIVE capabilities used to choose shaders and APIs.  Equal to
+    /// the physical family unless restricted with forceApple9() (the app's
+    /// --force-family apple9): Apple10 specialisations are then off and their
+    /// fallbacks run on this device.  The physical family, name, memory and
+    /// budget never change (not an emulation of an Apple9 GPU).
+    [[nodiscard]] bool                effectiveApple10() const { return apple10_ && !forceApple9_; }
+    void                              forceApple9() { forceApple9_ = true; }
+    [[nodiscard]] bool                familyForced() const { return forceApple9_; }
+    [[nodiscard]] const char*         physicalFamilyName() const { return apple10_ ? "apple10" : (apple9_ ? "apple9" : "apple7"); }
+    [[nodiscard]] const char*         effectiveFamilyName() const {
+        return effectiveApple10() ? "apple10" : (apple9_ ? "apple9" : "apple7");
+    }
+    [[nodiscard]] u64                 physicalMemoryBytes() const;
     [[nodiscard]] const MemoryBudget& budget() const { return budget_; }
     /// GPU time of the most recently completed frame command buffer.
     [[nodiscard]] float               lastGpuMs() const { return lastGpuMs_.load(std::memory_order_relaxed); }
@@ -240,6 +254,7 @@ private:
     u32                     gpuTimesReceived_ = 0;
     bool apple9_         = false;
     bool apple10_        = false;
+    bool forceApple9_    = false;
     MemoryBudget budget_;
     u64  frameIndex_     = 0;
     u64  uploadValue_    = 0;

@@ -101,40 +101,21 @@ void setDefaultBlendSubstate(MTL4::RenderPipelineColorAttachmentDescriptor* colo
 
 constexpr u32 kMetalColorAttachments = 8;
 
-/// +1 MTL4 pipeline descriptor for `desc`.
-MTL4::PipelineDescriptor* buildDescriptor(const pipe::PipelineDesc& desc, MTL::Library* library) {
-    if (desc.kind == pipe::PipelineKind::Compute) {
-        MTL4::ComputePipelineDescriptor* d = MTL4::ComputePipelineDescriptor::alloc()->init();
-        if (!desc.label.empty()) d->setLabel(str(desc.label.c_str()));
-        MTL4::FunctionDescriptor* fn = functionDescriptor(desc.functions[0], desc, library);
-        d->setComputeFunctionDescriptor(fn);
-        fn->release();
-        return d;
-    }
-    MTL4::RenderPipelineDescriptor* d = MTL4::RenderPipelineDescriptor::alloc()->init();
-    if (!desc.label.empty()) d->setLabel(str(desc.label.c_str()));
-    MTL4::FunctionDescriptor* vs = functionDescriptor(desc.functions[0], desc, library);
-    MTL4::FunctionDescriptor* fs = functionDescriptor(desc.functions[1], desc, library);
-    d->setVertexFunctionDescriptor(vs);
-    d->setFragmentFunctionDescriptor(fs);
-    vs->release();
-    fs->release();
-    // Every attachment's output state spelled out (measured: a fresh MTL4
-    // descriptor reports an "Unspecialized" blend substate, which validation
-    // flags on flexible pipelines and their specialisations).
-    {
-        for (u32 i = 0; i < kMetalColorAttachments; ++i) {
-            MTL4::RenderPipelineColorAttachmentDescriptor* color = d->colorAttachments()->object(i);
-            color->setPixelFormat(MTL::PixelFormatInvalid);
-            color->setBlendingState(MTL4::BlendStateDisabled);
-            color->setWriteMask(MTL::ColorWriteMaskAll);
-            setDefaultBlendSubstate(color);
-        }
+/// Every attachment's output state spelled out (measured: a fresh MTL4
+/// descriptor reports an "Unspecialized" blend substate, which validation
+/// flags on flexible pipelines and their specialisations), then the desc's.
+void setColorOutputs(MTL4::RenderPipelineColorAttachmentDescriptorArray* attachments, const pipe::PipelineDesc& desc) {
+    for (u32 i = 0; i < kMetalColorAttachments; ++i) {
+        MTL4::RenderPipelineColorAttachmentDescriptor* color = attachments->object(i);
+        color->setPixelFormat(MTL::PixelFormatInvalid);
+        color->setBlendingState(MTL4::BlendStateDisabled);
+        color->setWriteMask(MTL::ColorWriteMaskAll);
+        setDefaultBlendSubstate(color);
     }
     for (u32 i = 0; i < desc.colorCount; ++i) {
         const pipe::ColorOutput& out = desc.color[i];
         if (out.format == rg::Format::Unknown && !out.unspecialized) continue;
-        MTL4::RenderPipelineColorAttachmentDescriptor* color = d->colorAttachments()->object(i);
+        MTL4::RenderPipelineColorAttachmentDescriptor* color = attachments->object(i);
         if (out.unspecialized) {
             // Metal 4 flexible pipeline: output state chosen at specialisation.
             color->setPixelFormat(MTL::PixelFormatUnspecialized);
@@ -154,6 +135,50 @@ MTL4::PipelineDescriptor* buildDescriptor(const pipe::PipelineDesc& desc, MTL::L
             color->setDestinationAlphaBlendFactor(MTL::BlendFactorOneMinusSourceAlpha);
         }
     }
+}
+
+/// +1 MTL4 pipeline descriptor for `desc`.
+MTL4::PipelineDescriptor* buildDescriptor(const pipe::PipelineDesc& desc, MTL::Library* library) {
+    if (desc.kind == pipe::PipelineKind::Compute) {
+        MTL4::ComputePipelineDescriptor* d = MTL4::ComputePipelineDescriptor::alloc()->init();
+        if (!desc.label.empty()) d->setLabel(str(desc.label.c_str()));
+        MTL4::FunctionDescriptor* fn = functionDescriptor(desc.functions[0], desc, library);
+        d->setComputeFunctionDescriptor(fn);
+        fn->release();
+        return d;
+    }
+    if (desc.kind == pipe::PipelineKind::Mesh) {
+        // F6.3: [optional object] + mesh + fragment; the limits are part of
+        // the key (pipe::MeshPipelineLimits).
+        MTL4::MeshRenderPipelineDescriptor* d = MTL4::MeshRenderPipelineDescriptor::alloc()->init();
+        if (!desc.label.empty()) d->setLabel(str(desc.label.c_str()));
+        if (!desc.functions[0].empty()) {
+            MTL4::FunctionDescriptor* os = functionDescriptor(desc.functions[0], desc, library);
+            d->setObjectFunctionDescriptor(os);
+            os->release();
+            d->setMaxTotalThreadsPerObjectThreadgroup(desc.mesh.objectThreads);
+            d->setPayloadMemoryLength(desc.mesh.payloadBytes);
+            d->setMaxTotalThreadgroupsPerMeshGrid(desc.mesh.meshGroups);
+        }
+        MTL4::FunctionDescriptor* ms = functionDescriptor(desc.functions[1], desc, library);
+        MTL4::FunctionDescriptor* fs = functionDescriptor(desc.functions[2], desc, library);
+        d->setMeshFunctionDescriptor(ms);
+        d->setFragmentFunctionDescriptor(fs);
+        ms->release();
+        fs->release();
+        d->setMaxTotalThreadsPerMeshThreadgroup(desc.mesh.meshThreads);
+        setColorOutputs(d->colorAttachments(), desc);
+        return d;
+    }
+    MTL4::RenderPipelineDescriptor* d = MTL4::RenderPipelineDescriptor::alloc()->init();
+    if (!desc.label.empty()) d->setLabel(str(desc.label.c_str()));
+    MTL4::FunctionDescriptor* vs = functionDescriptor(desc.functions[0], desc, library);
+    MTL4::FunctionDescriptor* fs = functionDescriptor(desc.functions[1], desc, library);
+    d->setVertexFunctionDescriptor(vs);
+    d->setFragmentFunctionDescriptor(fs);
+    vs->release();
+    fs->release();
+    setColorOutputs(d->colorAttachments(), desc);
     if (desc.indirectCommandBuffers) d->setSupportIndirectCommandBuffers(MTL4::IndirectCommandBufferSupportStateEnabled);
     // MTL4 render pipelines take no depth format: it is inferred from the pass.
     return d;

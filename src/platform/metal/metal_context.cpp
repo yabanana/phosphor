@@ -1,4 +1,6 @@
 #include "platform/metal/metal_context.h"
+
+#include <sys/sysctl.h>
 #include "platform/metal/gpu_memory.h"
 #include "platform/metal/residency_manager.h"
 #include "core/log.h"
@@ -119,6 +121,13 @@ MetalContext::~MetalContext() {
     asyncQueue_->release();
     queue_->release();
     device_->release();
+}
+
+u64 MetalContext::physicalMemoryBytes() const {
+    u64 bytes = 0;
+    size_t size = sizeof(bytes);
+    if (sysctlbyname("hw.memsize", &bytes, &size, nullptr, 0) != 0) return 0;
+    return bytes;
 }
 
 const char* MetalContext::gpuName() const {

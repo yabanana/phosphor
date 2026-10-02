@@ -35,11 +35,11 @@ std::string jsonEscape(const std::string& s) {
 float finiteOrZero(float v) { return std::isfinite(v) ? v : 0.0f; }
 
 std::string summaryToJson(const TimingSummary& t) {
-    char buf[160];
+    char buf[192];
     std::snprintf(buf, sizeof(buf),
-                  "{\"mean\": %.4f, \"min\": %.4f, \"p50\": %.4f, \"p99\": %.4f, \"max\": %.4f}",
-                  finiteOrZero(t.mean), finiteOrZero(t.min), finiteOrZero(t.p50), finiteOrZero(t.p99),
-                  finiteOrZero(t.max));
+                  "{\"mean\": %.4f, \"min\": %.4f, \"p50\": %.4f, \"p95\": %.4f, \"p99\": %.4f, \"max\": %.4f}",
+                  finiteOrZero(t.mean), finiteOrZero(t.min), finiteOrZero(t.p50), finiteOrZero(t.p95),
+                  finiteOrZero(t.p99), finiteOrZero(t.max));
     return buf;
 }
 
@@ -87,6 +87,7 @@ TimingSummary summarize(std::vector<float> values) {
     s.mean = static_cast<float>(std::accumulate(values.begin(), values.end(), 0.0) / static_cast<double>(n));
     s.min  = values.front();
     s.p50  = rank(0.50);
+    s.p95  = rank(0.95);
     s.p99  = rank(0.99);
     s.max  = values.back();
     return s;
@@ -116,10 +117,10 @@ std::string formatReportLine(const BenchReport& r) {
     char buf[512];
     std::snprintf(buf, sizeof(buf),
                   "%s | %ux%u vsync=%s ui=%s | %u frames | %.1f fps | "
-                  "frame %.3f ms (p99 %.3f) | CPU %.3f ms (p99 %.3f) | GPU %.3f ms (p99 %.3f) | "
+                  "frame %.3f ms (p95 %.3f p99 %.3f) | CPU %.3f ms (p99 %.3f) | GPU %.3f ms (p99 %.3f) | "
                   "wait %.3f ms (p99 %.3f) | GPU allocations %llu | CPU heap %+lld blocks %+lld bytes",
                   r.bench.c_str(), r.width, r.height, r.vsync ? "on" : "off", r.ui ? "on" : "off",
-                  r.frames, r.fps, r.frameMs.mean, r.frameMs.p99, r.cpuMs.mean, r.cpuMs.p99,
+                  r.frames, r.fps, r.frameMs.mean, r.frameMs.p95, r.frameMs.p99, r.cpuMs.mean, r.cpuMs.p99,
                   r.gpuMs.mean, r.gpuMs.p99, r.waitMs.mean, r.waitMs.p99,
                   static_cast<unsigned long long>(r.gpuAllocations), static_cast<long long>(r.cpuHeapBlocksDelta),
                   static_cast<long long>(r.cpuHeapBytesDelta));
@@ -212,13 +213,44 @@ std::string reportToJson(const BenchReport& r) {
                  ", \"ui\": " + summaryToJson(c.ui) + ", \"graph\": " + summaryToJson(c.graph) +
                  ", \"submit\": " + summaryToJson(c.submit) + "}";
     }
+    std::string hardware;
+    if (r.hardware.present) {
+        const DeviceReport& h = r.hardware;
+        std::string unverified = "[";
+        for (size_t i = 0; i < h.unverifiedDevices.size(); ++i) {
+            unverified += (i ? ", \"" : "\"") + jsonEscape(h.unverifiedDevices[i]) + "\"";
+        }
+        unverified += "]";
+        hardware = ",\n  \"hardware\": {\"physical_device\": \"" + jsonEscape(h.physicalDevice) +
+                   "\", \"physical_family\": \"" + jsonEscape(h.physicalFamily) +
+                   "\", \"memory_bytes\": " + std::to_string(static_cast<unsigned long long>(h.memoryBytes)) +
+                   ", \"effective_capabilities\": \"" + jsonEscape(h.effectiveCapabilities) + "\", \"preset\": \"" +
+                   jsonEscape(h.preset) + "\", \"validation_scope\": \"" + jsonEscape(h.validationScope) +
+                   "\", \"unverified_devices\": " + unverified + "}";
+    }
+    std::string meshlets;
+    if (r.meshlets.present) {
+        const MeshletReport& m = r.meshlets;
+        auto u = [](u64 v) { return std::to_string(static_cast<unsigned long long>(v)); };
+        meshlets = ",\n  \"meshlets\": {\"path\": \"" + jsonEscape(m.path) + "\", \"cull\": \"" + jsonEscape(m.cull) +
+                   "\", \"hiz_requested\": \"" + jsonEscape(m.hizRequested) + "\", \"hiz_effective\": \"" +
+                   jsonEscape(m.hizEffective) + "\", \"cook\": \"" + jsonEscape(m.cook) + "\", \"meshlets\": " +
+                   u(m.meshlets) + ", \"candidate_capacity\": " + u(m.candidateCapacity) +
+                   ", \"overflow_frames\": " + u(m.overflowFrames) + ", \"history_resets\": " + u(m.historyResets) +
+                   ", \"checks\": " + u(m.checks) + ", \"check_failures\": " + u(m.checkFailures) +
+                   ", \"candidates\": " + summaryToJson(m.candidates) + ", \"drawn_a\": " + summaryToJson(m.drawnA) +
+                   ", \"frustum\": " + summaryToJson(m.frustum) + ", \"cone\": " + summaryToJson(m.cone) +
+                   ", \"history_rejected\": " + summaryToJson(m.historyRejected) +
+                   ", \"drawn_b\": " + summaryToJson(m.drawnB) + ", \"occluded_b\": " + summaryToJson(m.occludedB) +
+                   ", \"primitives\": " + summaryToJson(m.primitives) + "}";
+    }
     return head +
            "  \"frame_ms\": " + summaryToJson(r.frameMs) + ",\n" +
            "  \"cpu_ms\": " + summaryToJson(r.cpuMs) + ",\n" +
            "  \"gpu_ms\": " + summaryToJson(r.gpuMs) + ",\n" +
            "  \"wait_ms\": " + summaryToJson(r.waitMs) +
            (r.pipelinesJson.empty() ? std::string() : ",\n  \"pipelines\": " + r.pipelinesJson) + ",\n" + timing +
-           graph + scene + phases + "\n}\n";
+           graph + scene + phases + hardware + meshlets + "\n}\n";
 }
 
 } // namespace phosphor
