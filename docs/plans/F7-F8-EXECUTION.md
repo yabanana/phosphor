@@ -1,5 +1,8 @@
 # Esecuzione F7/F8 e revisione F5/F6
 
+Registro cronologico: le note intermedie aperte descrivono il momento della prova.
+Esito corrente e limiti: [consegna F7/F8](../F7_F8_HANDOFF.md).
+
 Autorizzazione del proprietario: 2026-10-02. Branch `codex/f7-f8`, base
 `e600887` (merge F6). Scope: acquisire Sponza, rivedere F5/F6, implementare
 F7 e F8, infine sperimentare F7.4/F7.5 sul frame integrato. Fermarsi prima
@@ -105,7 +108,7 @@ conservare i confronti e non attribuirle a differenze del visibility buffer.
 - EDR usa extended-linear sRGB e headroom interrogato sul display della
   finestra; screenshot PNG sono conversioni SDR esplicite e non prova dei nit.
 
-## Stato delle verifiche (lavoro in corso, non chiusura)
+## Checkpoint intermedio (storico, non dichiarazione di chiusura)
 
 Il codice F7/F8 è integrato nel branch di lavoro. Passano build e suite
 portabile, controlli GPU di ID/guide/motion/esposizione, controlli negativi
@@ -319,3 +322,29 @@ la precisione fino alla conversione sRGB: **284 combinazioni compatibili
 passano (peggiore: 1 pixel, delta 1), 52 incompatibili vengono respinte**,
 su otto scene a 640×360 (bench 8: 100000 istanze). Le soglie restano quelle
 originali del test. Riferimenti precedenti conservati.
+
+### Confronto F8.5 e checkpoint finale
+
+Sponza, 480 frame, input 75%: il bias derivato dalla scala misura ~30,16 dB,
+contro 29,80 dB con `--debug-neutral-mip-bias`. Sharpening 0,5 passa le soglie
+(~30,09 dB); resta regolabile e di default zero. I tre confronti conservano
+la stessa scala/camera e lo stesso riferimento HDR 4×.
+La consegna raccoglie i risultati finali, inclusa la scelta generic di default.
+F7 baseline: accettazione di sviluppo M5. F8: implementata, con gate lifetime SDK aperto dopo il controllo finale. T0 esterno pendente.
+Gli esperimenti richiesti sono eseguiti, le tecniche candidate non adottate.
+Il lavoro si ferma prima delle OPT. Nessuna vecchia failure viene cancellata
+da questo checkpoint; l'exit storico F6 non attribuito resta nel registro.
+
+### Residuo finale SDK: F8.4 resta aperta
+
+`leaks` sul native: 0. Sul temporal: ciclo fra effetto MetalFX e filtro BBR.
+La riduzione finale a 640×360 usa soltanto creazione/rilascio di API pubbliche,
+senza motore o GPU submission, e una zeroing weak reference ancora viva dopo
+il drain: `bench/f8_spike/metalfx_lifetime.mm`. La sola uscita `0 leaks` di
+alcune riduzioni iniziali più piccole non dimostrava distruzione. Main/worker,
+inizializzazione asincrona, binding nil e reset dei command stream non hanno
+risolto il caso; le modifiche speculative sono state rimosse. Conservata la
+factory sui worker e corretta l'exposure texture a R16Float secondo il contratto
+SDK. Nessuna API privata o release fuori bilancio viene usata. F8.4 non viene
+spuntata come completa; documentazione e PR riportano il residuo, mentre
+native/HDR e tutte le verifiche funzionali consegnate restano utilizzabili.

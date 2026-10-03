@@ -24,8 +24,8 @@
 #            --debug-graph-transients the kernels are never requested, so
 #            misses must stay 0 (negative control); with it, misses must equal
 #            the number of dropped descriptors.
-#   d        stale archive: built from a metallib in which one constant of
-#            forward.metal was changed.  metal-tt keys are derived from the
+#   d        stale archive: built from a metallib in which one shared material constant
+#            was changed.  metal-tt keys are derived from the
 #            library contents per function, so exactly the pipelines using
 #            forward_vs / forward_fs miss (count taken from the script) and
 #            the others still hit.  The app runs with the real metallib.
@@ -192,7 +192,7 @@ else
 fi
 
 # --- d: stale archive (modified metallib) ------------------------------------
-# Change one constant in forward.metal, compile exactly like App.cmake (same
+# Change one shared material constant, compile exactly like App.cmake (same
 # flags, deployment target from the build's cache) and translate the script
 # against that metallib.  Expected misses = the requested pipelines that use
 # forward_vs or forward_fs; every other requested pipeline must still hit.

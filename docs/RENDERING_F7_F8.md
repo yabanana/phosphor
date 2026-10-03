@@ -9,19 +9,21 @@ certification. Phase status belongs to [ROADMAP](ROADMAP.md), measurements to
 ## Running the integrated renderer
 
 ```sh
-mise exec -- python3 tools/fetch_sponza.py --verify
+mise exec -- python3 tools/fetch_sponza.py
+cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build/release -j 8
 ./build/release/phosphor --bench 4 --scene assets/sponza/Sponza.gltf \
   --post --upscaler temporal --render-scale 0.75 --auto-exposure --output auto
 ```
 
-Use the fetcher without `--verify` to acquire the pinned asset. The manifest
+Use `--verify` for a check without downloading. The manifest
 and upstream license are described in [assets/README](../assets/README.md).
 `--scene procedural` selects the old deterministic fixture explicitly.
 
 `--render-path visibility --material-binning on|off` compares the two material
-resolve paths without temporal postprocessing. `--upscaler native` selects
-spatial reconstruction; `--tonemap aces|agx|custom`, `--tone-white`, `--sharpen`,
+resolve paths without temporal postprocessing. The measured default resolve is
+generic; material binning remains opt-in. `--upscaler native` selects spatial
+reconstruction; `--tonemap aces|agx|custom`, `--tone-white`, `--sharpen`,
 `--dynamic-resolution --drs-budget MS` and `--output sdr|edr|auto` control F8.
 The AgX and ACES options are documented polynomial/rational fits, not exact
 Blender OCIO or a complete ACES color-management pipeline.
@@ -54,6 +56,11 @@ and tile comparisons against generic resolve remain exact.
 
 ## Temporal ownership and presentation
 
+F8.4 retains an open runtime lifetime gate: the native path has zero leaks;
+MetalFX leaves an SDK cycle in a public-API-only reduction. Temporal use is
+explicit and this limitation is not hidden by passing image tests. See
+[the reduction](../bench/f8_spike/README.md).
+
 Three upload slots are distinct from up to four temporal views. Every view has
 its own previous poses, Hi-Z data, exposure and MetalFX scaler. Entity
 incarnations prevent a recycled GPU slot from inheriting another object's
@@ -83,6 +90,7 @@ allocations. Input sizes round up, preserving the maximum 2× ratio for odd
 outputs. Halton jitter displaces raster samples in input pixels; motion excludes
 that displacement. The temporal mip bias is `min(0, log2(input/output))`.
 
+The SDK exposure input is a 1×1 R16Float texture; adaptation state stays FP32.
 Exposure uses a 256-bin log histogram, rejects black/nonfinite samples from the
 mean, trims to the 5–95 percentiles and adapts using elapsed time for that view.
 Manual exposure and the selected display transform are applied once. EDR uses

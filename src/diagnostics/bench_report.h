@@ -174,6 +174,7 @@ struct RenderingReport {
     u64 commandBufferRebuilds = 0;
     u64 commandBufferRebuildsMeasured = 0;
     float exposure = 1, headroom = 1, potentialHeadroom = 1;
+    float mipBias = 0;
 };
 constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 7;
 

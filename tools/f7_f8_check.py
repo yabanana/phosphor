@@ -75,7 +75,7 @@ def main():
                 for path,flags in (
                     ('forward',['--render-path','forward']),
                     ('generic',['--render-path','visibility','--material-binning','off']),
-                    ('binned',['--render-path','visibility']),
+                    ('binned',['--render-path','visibility','--material-binning','on']),
                     ('tile',['--tile-resolve','--meshlet-cull','frustum'])):
                     name=f'b{bench}-{path}';images[path]=args.out/(name+'.png')
                     run(name,['--bench',str(bench),'--scene',scene,'--frames','31','--resolution','640x360',

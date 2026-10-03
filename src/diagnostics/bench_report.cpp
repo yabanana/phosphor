@@ -273,6 +273,7 @@ std::string reportToJson(const BenchReport& r) {
             ", \"engine_resource_bytes_last\": " + std::to_string(v.engineResourceBytes) +
             ", \"command_buffer_rebuilds_total\": " + std::to_string(v.commandBufferRebuilds) +
             ", \"command_buffer_rebuilds_measured\": " + std::to_string(v.commandBufferRebuildsMeasured) +
+            ", \"mip_bias_last\": " + std::to_string(v.mipBias) +
             ", \"guide_failures\": " + std::to_string(v.guideFailures) + "}";
     }
     return head + "  \"frame_ms\": " + summaryToJson(r.frameMs) + ",\n" + "  \"cpu_ms\": " + summaryToJson(r.cpuMs) +

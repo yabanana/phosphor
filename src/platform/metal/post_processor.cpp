@@ -125,7 +125,7 @@ PostProcessor::PostProcessor(MetalContext &c, PipelineCache &p, const Options &o
             c.memory().newBuffer(16, MTL::ResourceStorageModeShared, MemoryCategory::Other, "Exposure state per view");
         const float initial[4] = {1, 1, 0, 0};
         std::memcpy(v.exposureState->contents(), initial, 16);
-        v.exposure = texture(c, 1, 1, MTL::PixelFormatR32Float, "Exposure texture per view");
+        v.exposure = texture(c, 1, 1, MTL::PixelFormatR16Float, "Exposure texture per view");
     }
     for (auto &s : slots_)
         s.histogram = c.memory().newBuffer(256 * sizeof(u32), MTL::ResourceStorageModeShared, MemoryCategory::Other,
@@ -192,7 +192,7 @@ void PostProcessor::requestScaler(u32 index) {
     d->setInputContentPropertiesEnabled(true);
     d->setInputContentMinScale(1.0f);
     d->setInputContentMaxScale(2.0f);
-    d->setRequiresSynchronousInitialization(true); // runs on PipelineCache's utility workers
+    d->setRequiresSynchronousInitialization(true); // factory and compilation on utility workers
     v.requestedWidth = width_;
     v.requestedHeight = height_;
     v.pending = pipelines_.requestTemporalScaler(d);
@@ -254,7 +254,7 @@ GPUTemporalParams PostProcessor::prepareFrame(u32 slot, u64 frame, u32 view, u32
     temporal_.viewIndex = view;
     temporal_.frameIndex = static_cast<u32>(frame);
     temporal_.manualExposure = exposure;
-    temporal_.mipBias = std::min(0.0f, std::log2(float(iw) / float(w)));
+    temporal_.mipBias = options_.neutralMipBias ? 0.0f : std::min(0.0f, std::log2(float(iw) / float(w)));
     if (temporalReady()) {
         const auto j = temporalJitter(state.sample);
         temporal_.jitter[0] = j[0];
@@ -371,7 +371,7 @@ rg::TextureRef PostProcessor::addToGraph(rg::RenderGraph &g, VisibilityRenderer 
     reactive_ = scene.reactiveMask();
     histogramRef_ = g.importBuffer("Luminance histogram", {256 * sizeof(u32)}, ImportPerFrame);
     stateRef_ = g.importBuffer("Exposure and temporal state per view", {16}, ImportContentsDefined | ImportOutput);
-    exposure_ = g.importTexture("Exposure", {Format::R32Float, 1, 1}, ImportOutput);
+    exposure_ = g.importTexture("Exposure", {Format::R16Float, 1, 1}, ImportOutput);
     output_ =
         g.importTexture("Reconstructed HDR", {Format::RGBA16Float, width_, height_}, ImportOutput | ImportPerFrame);
     g.addPass(

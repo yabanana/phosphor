@@ -19,6 +19,7 @@ class PostProcessor {
     struct Options {
         bool temporal = false, autoExposure = false, corruptExposure = false, forceReset = false;
         bool checkCurves = false, corruptCurves = false;
+        bool neutralMipBias = false;
         u32 tonemap = 0, views = 1, jitterVariant = 0;
         float sharpening = 0, whitePoint = 4, debugMotionScale = 1;
     };
@@ -42,6 +43,7 @@ class PostProcessor {
     [[nodiscard]] u64 resetCount() const { return resets_; }
     [[nodiscard]] float lastExposure() const;
     [[nodiscard]] float manualExposure() const { return params_.manualExposure; }
+    [[nodiscard]] float mipBias() const { return temporal_.mipBias; }
     bool checkExposure(const std::array<u32, ExposureBins> &referenceHistogram,
                        const std::array<u32, ExposureBins> &low, const std::array<u32, ExposureBins> &high) const;
     [[nodiscard]] const char *effectiveUpscaler() const;

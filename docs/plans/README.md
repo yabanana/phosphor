@@ -1,6 +1,6 @@
 # Piani dettagliati F e OPT
 
-Aggiornato il **2026-10-02**, dopo l’integrazione di F5 in `main` (`7a7ac54`).
+Aggiornato il **2026-10-03**, al checkpoint F7/F8 ([consegna](../F7_F8_HANDOFF.md), PR #14).
 
 **58 piani, 414 task coperti.** Ogni piano contiene architettura, prerequisiti,
 file esistenti/proposti, ordine dei pacchetti, spike, implementazione e
@@ -12,17 +12,17 @@ Non attiva il catalogo di ricerca e non inventa risultati sperimentali: le
 scelte numeriche si fissano con la regola dello spike già scritta nel piano.
 I file futuri sono destinazioni proposte; il kickoff riconcilia codice e SDK.
 
-- **Adesso:** F6 → F7 baseline → F8, partendo dai contratti F5 integrati.
+- **Checkpoint:** F5/F6 integrate, F7 baseline verificata; F8 implementata, gate lifetime MetalFX F8.4 aperto nel branch PR #14. Sosta richiesta prima delle OPT.
 - **Poi:** F9–F13 e F14 se utile al corpus; renderer prima della piattaforma.
 - **Piattaforma richiesta:** ECS/runtime, contenuti, audio, editor, 2D, UI e
   riuso Bevy, con implementazione progressiva e compatibilità verificata.
 - **OPT/EDGE:** candidati selezionati per beneficio misurato, non passaggi obbligatori.
-- **Audit:** F0–F5 e OPT-0/1 mantengono evidenze e residui storici.
+- **Audit:** F0–F8 e OPT-0/1 mantengono evidenze e residui storici; F7.4/F7.5 sperimentate e non adottate.
 
 L’unico dispositivo disponibile è **M5 Max 128 GB**. Accettazione di sviluppo
 qui, fallback pertinenti esercitati; certificazione fisica T0/altri chip
-pendente senza bloccare la fase successiva. `--force-family apple9` nell’app
-è un prerequisito da implementare in F6, non una funzione già presente.
+pendente senza bloccare la fase successiva. `--force-family apple9` è implementato ed esercitato: limita le capacità
+e non emula il dispositivo fisico.
 
 ## Regole comuni
 
@@ -49,9 +49,9 @@ restano soltanto nella [roadmap](../ROADMAP.md).
 | [OPT-0](OPT-0.md) | Caratterizzazione del SoC  (manca OPT-0.2 su un T0) | audit | 6 |
 | [OPT-1](OPT-1.md) | Memoria, grafo e banda come problema di ottimizzazione  (OPT-1.5 e OPT-1.7 parziali; T0 non misurato) | audit | 10 |
 | [F5](F5.md) | GPU scene persistente e submission guidata dalla GPU | audit | 6 |
-| [F6](F6.md) | Mesh shader e culling a due fasi | operativo | 7 |
-| [F7](F7.md) | Visibility buffer e shading ibrido TBDR | operativo | 7 |
-| [F8](F8.md) | HDR, EDR, esposizione e MetalFX temporal | operativo | 7 |
+| [F6](F6.md) | Mesh shader e culling a due fasi | audit | 7 |
+| [F7](F7.md) | Visibility buffer e shading ibrido TBDR | audit | 7 |
+| [F8](F8.md) | HDR, EDR, esposizione e MetalFX temporal | operativo (residuo SDK) | 7 |
 | [OPT-2](OPT-2.md) | Shader, pipeline e occupancy | opportunita | 11 |
 | [OPT-3](OPT-3.md) | Geometria, culling e dati di vertice | opportunita | 11 |
 | [OPT-4](OPT-4.md) | Shading, banda e ricostruzione | opportunita | 17 |

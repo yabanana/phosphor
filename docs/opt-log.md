@@ -1779,3 +1779,38 @@ la lettura della fase A del frame n+1).
   (storage delle misure, comportamento F5 noto: ~48 B/frame con i pass in
   più del percorso mesh); con `--no-gpu-timing` −1,7 KB a 600 frame e
   −2,2 KB a 6000. `leaks --atExit` 0 con self-check e churn.
+
+
+## F7.3/F7.4/F7.5 — esperimenti sul frame F8, senza attivare OPT
+
+**2026-10-03**, richiesta esplicita del proprietario. Codice `3231364`,
+runner `0fc5fa3`; condizioni e 39 prove nel [perf-log](perf-log.md).
+Ipotesi: ridurre traffico o shading con tile/bins/2×2. Controllo: stesso
+material model, scena, camera, formato e ricostruzione; costo di classificazione,
+storia e fallback incluso. Soglia di adozione: beneficio completo ripetibile
+(riferimento ≥3%) o un vincolo di memoria risolto, a qualità verificata.
+
+- **F7.3:** binning esatto contro generic, ma +4,34% sul frame F7 Sponza;
+  con F8 il risultato non è stabile e Many Lights non mostra un guadagno
+  ripetibile. **Default generic**, binning disponibile con flag esplicito.
+- **F7.4:** imageblock ID e tile kernel con stessi materiali, frustum in
+  entrambe le varianti. 2,1569→2,1535 ms (−0,16%, intervalli sovrapposti),
+  transient/device allocation −8.486.912 byte (8,09 MiB). Immagini esatte
+  contro compute, clip temporali passano. **Rimanda**: il frame non guadagna
+  abbastanza e non c'è un vincolo di memoria risolto. Non è un G-buffer
+  tradizionale; HDR/guide restano in texture. Two-phase può interrompere la
+  fusione. T0 e contatori di banda fisica non disponibili.
+- **F7.5:** identità e luminanza precedenti, stesso triangolo 2×2, roughness
+  alta, materiali non sensibili e moto <0,25 px; nessun atteso fra threadgroup.
+  Cornell riusa 279867/492102 shading (56,87%) nell'ultimo frame ma costa
+  2,0829→2,0890 ms (+0,29%). Sponza 2,1612→2,2097 ms (+2,24%), zero
+  pixel eleggibili nell'ultimo frame. Storia aggiuntiva 33.177.600 byte
+  (31,64 MiB) per vista al backing 1080p, anche quando il pool già riservato
+  assorbe l'allocazione senza cambiare il totale del device. **Non adotta**
+  nel preset corrente. Disabilitare la storia elimina il riuso; clip e
+  poison dei dati temporali verificano il controllo.
+
+Le tecniche restano prototipi opt-in e candidate per carichi futuri; i
+risultati non autorizzano scheduler/optimizer generali. Le stime del grafo
+sono somme di accessi dichiarati, non byte DRAM misurati né conteggi delle
+operazioni interne MetalFX. [Consegna completa](F7_F8_HANDOFF.md).

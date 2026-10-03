@@ -40,7 +40,7 @@ component-by-component guide to squeezing Apple silicon
 | Era | Phases | Content |
 |---|---|---|
 | I · Foundations | F0 ✅, F1–F4 | Metal 4 context, memory/heaps, render graph with automatic barriers, async/AOT pipelines, profiling |
-| II · GPU-driven geometry | F5 ✅, F6 ✅, F7–F8 | Persistent GPU scene, GPU-built ICBs, mesh shaders + two-phase culling, visibility buffer, HDR/EDR, MetalFX |
+| II · GPU-driven geometry | F5 ✅, F6 ✅, F7 baseline ✅, F8 implementation (SDK lifetime gate open) | Persistent GPU scene, GPU-built ICBs, mesh shaders + two-phase culling, visibility buffer, HDR/EDR, MetalFX |
 | III · Light | F9–F14 | Ray tracing infrastructure, hybrid shadows, ReSTIR DI, radiance-cache GI, reflections, atmosphere and clouds |
 | IV · World | F15–F22 | Advanced materials, on-tile OIT, particles, post, virtualised geometry, terrain, water, cooker, streaming |
 | V · Simulation (parallel) | F23–F27 | Job system and CPU optimisation, physics, animation, ray-traced acoustics, gameplay runtime |
@@ -182,7 +182,10 @@ reports/, research_notes/   design research (Italian / English)
 
 All 58 F/OPT phase plans now include implementation packages and task-level
 acceptance checks: [plan index](docs/plans/README.md). F5 is integrated;
-F6–F8 remain the immediate renderer priority. Advance detail does not activate
+F7 baseline has M5 development acceptance in PR #14; F8 is implemented with
+a remaining MetalFX SDK lifetime gate;
+see [delivery and limits](docs/F7_F8_HANDOFF.md) and [renderer commands/contracts](docs/RENDERING_F7_F8.md).
+The requested checkpoint stops before OPT; no F9+ implementation is activated. Advance detail does not activate
 the optional research catalog.
 
 Development acceptance uses the available M5 Max 128 GB. Apple9 fallback

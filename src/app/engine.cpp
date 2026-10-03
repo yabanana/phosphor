@@ -235,6 +235,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         po.debugMotionScale = options_.debugMotionScale;
         po.checkCurves = options_.debugPostCurves;
         po.corruptCurves = options_.debugPostCurvesCorrupt;
+        po.neutralMipBias = options_.debugNeutralMipBias;
         po.temporal = options_.temporalUpscale;
         po.autoExposure = options_.autoExposure;
         po.tonemap = options_.tonemap;
@@ -753,6 +754,7 @@ void Engine::finishBenchmark() {
         r.post = bool(post_);
         r.upscaler = post_ ? post_->effectiveUpscaler() : "none";
         r.tonemap = options_.tonemap == 1 ? "agx-fit" : options_.tonemap == 2 ? "custom-reinhard" : "aces-fit";
+        r.mipBias = post_ ? post_->mipBias() : 0;
         r.inputWidth = post_ ? post_->inputWidth() : report.width;
         r.inputHeight = post_ ? post_->inputHeight() : report.height;
         r.views = post_ ? options_.temporalViews : 1;

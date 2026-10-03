@@ -527,6 +527,9 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.post = true;
         } else if (arg == "--debug-post-curves-corrupt") {
             out.debugPostCurvesCorrupt = true;
+        } else if (arg == "--debug-neutral-mip-bias") {
+            out.debugNeutralMipBias = true;
+            out.post = true;
         } else if (arg == "--post") {
             out.post = true;
         } else if (arg == "--upscaler") {

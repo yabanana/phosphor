@@ -1,6 +1,6 @@
 {
   "schema": 4,
-  "updated": "2026-10-02",
+  "updated": "2026-10-03",
   "meaning": "start_after lists usable baseline contracts, not completion of entire phase catalogs or all historical residuals. Candidate edges apply only if selected. Nothing in this graph schedules work automatically; SEQUENCING.md governs activation.",
   "phases": {
     "F0": {
@@ -877,8 +877,9 @@
     "F34.8": "Final authoring acceptance follows complete runtime suites; F34.1 can start earlier.",
     "F38.5": "Public SDK/templates include the compatibility matrix; Vulkan is not a dependency.",
     "F6.1": "Includes app capability-mask/report prerequisite; physical M3 measurement is external certification, not a development blocker.",
-    "F7.4": "Selected by the owner on 2026-10-02; experiment after F7/F8 baseline on the integrated frame, before OPT phases.",
-    "F7.5": "Selected by the owner on 2026-10-02; experiment after F7/F8 baseline on the integrated frame, before OPT phases."
+    "F7.4": "M5 experiment completed with F8; adoption deferred (0.16% median frame change inside overlapping ranges, 8.09 MiB heap reduction). Physical T0 and hardware DRAM counters remain unverified.",
+    "F7.5": "M5 experiment completed with F8; not adopted in the measured preset (+0.29% Cornell, +2.24% Sponza frame time). Revisit only with a new measured bottleneck.",
+    "F8.4": "Functional/quality checks pass. Final lifetime gate remains open: public-API-only scaler creation/release reduction keeps a weak target alive on macOS 27.2; native path has zero leaks. See bench/f8_spike/README.md."
   },
   "planning_levels": {
     "F0": "audit",
@@ -889,8 +890,8 @@
     "OPT-0": "audit",
     "OPT-1": "audit",
     "F5": "audit",
-    "F6": "operativo",
-    "F7": "operativo",
+    "F6": "audit",
+    "F7": "audit",
     "F8": "operativo",
     "OPT-2": "opportunita",
     "OPT-3": "opportunita",
@@ -941,14 +942,9 @@
     "F39": "requisito_pianificato"
   },
   "current_focus": [
-    "F6",
-    "F7",
     "F8"
   ],
-  "selected_candidate_tasks": [
-    "F7.4",
-    "F7.5"
-  ],
+  "selected_candidate_tasks": [],
   "candidate_tasks": [
     "F7.4",
     "F7.5",
@@ -1301,5 +1297,11 @@
       "F28.7",
       "F37.2"
     ]
+  },
+  "checkpoint_result": {
+    "through": "F8",
+    "scope": "F7 DEVELOPMENT_ACCEPTED on M5 Max; F8 implemented, F8.4 SDK lifetime gate open",
+    "stop": "Before OPT phases; no subsequent implementation activated",
+    "evidence": "../F7_F8_HANDOFF.md"
   }
 }

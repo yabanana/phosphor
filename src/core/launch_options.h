@@ -298,7 +298,7 @@ struct LaunchOptions {
     u32          meshletMaxTriangles = 0; // 0 = default (124)
     // F7/F8 renderer, temporal reconstruction, capture and bounded diagnostics.
     std::string scenePath;
-    bool visibility = false, materialBinning = true;
+    bool visibility = false, materialBinning = false; // measured baseline; specialization stays opt-in
     bool tileResolve = false;
     bool adaptiveShading = false;
     bool debugAdaptiveNoHistory = false;
@@ -307,6 +307,7 @@ struct LaunchOptions {
     bool debugGuideCorrupt = false;
     bool debugHistoryCorrupt = false;
     bool debugPostCurves = false, debugPostCurvesCorrupt = false;
+    bool debugNeutralMipBias = false;
     bool offscreen = false, temporalScript = false, exposureScript = false;
     std::string captureSequence;
     u32 captureEvery = 1;
