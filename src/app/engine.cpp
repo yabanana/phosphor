@@ -1,4 +1,6 @@
+#include <thread>
 #include "app/engine.h"
+#include "platform/metal/temporal_worker.h"
 
 #include "core/input.h"
 #include "core/log.h"
@@ -237,6 +239,9 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         po.corruptCurves = options_.debugPostCurvesCorrupt;
         po.neutralMipBias = options_.debugNeutralMipBias;
         po.temporal = options_.temporalUpscale;
+        po.isolatedMetalFX = options_.isolatedMetalFX;
+        po.debugWorkerCrash = options_.debugMetalFXWorkerCrash;
+        po.debugWorkerDelayMs = options_.debugMetalFXWorkerDelayMs;
         po.autoExposure = options_.autoExposure;
         po.tonemap = options_.tonemap;
         po.sharpening = options_.sharpening;
@@ -440,13 +445,13 @@ void Engine::run() {
             context_->beginGpuTimeCapture(options_.frames);
             sceneSamples_.reserve(options_.frames);
             meshletSamples_.reserve(options_.frames);
-            allocationsAtStart_ = context_->memory().allocationCount();
+            allocationsAtStart_ = context_->memory().allocationCount() + TemporalWorker::totalGpuAllocations();
             commandRebuildsAtStart_ = context_->commandBufferRebuilds();
             heapUsage(heapBlocksAtStart_, heapBytesAtStart_);
         }
     }
     while (running_) {
-        if (context_->gpuFailureCount() != 0) {
+        if (context_->gpuFailureCount() != 0 || TemporalWorker::failureCount() != 0) {
             exitCode_ = 1;
             break;
         }
@@ -502,6 +507,8 @@ void Engine::run() {
         } else if (presented) {
             ++presentedFrames_;
         }
+        if (presented && options_.debugFrameDelayMs)
+            std::this_thread::sleep_for(std::chrono::milliseconds(options_.debugFrameDelayMs));
         if (presented && options_.debugCompileStorm && measuring() && samples_.size() == 60) {
             // F3.1 spike: 42 background compiles while frames are measured.
             LOG_INFO("Compile storm: requesting every forward variant (salt %u)", options_.pipelineSalt);
@@ -509,7 +516,7 @@ void Engine::run() {
         }
     }
     context_->waitIdle();
-    if (context_->gpuFailureCount() != 0)
+    if (context_->gpuFailureCount() != 0 || TemporalWorker::failureCount() != 0)
         exitCode_ = 1;
     if (pipelines_->harvesting()) {
         pipelines_->waitAllFinal();
@@ -608,7 +615,7 @@ void Engine::recordBenchmarkFrame(float dt, float cpuMs, float waitMs) {
         sceneSamples_.reserve(options_.frames);
         meshletSamples_.reserve(options_.frames);
         trace_.reserve(options_.frames, options_.frames / std::max(options_.switchEvery, 1u) + 2);
-        allocationsAtStart_ = context_->memory().allocationCount();
+        allocationsAtStart_ = context_->memory().allocationCount() + TemporalWorker::totalGpuAllocations();
         commandRebuildsAtStart_ = context_->commandBufferRebuilds();
         heapUsage(heapBlocksAtStart_, heapBytesAtStart_);
     } else if (presentedFrames_ > options_.warmup) {
@@ -666,7 +673,8 @@ void Engine::finishBenchmark() {
     report.height = context_->height();
     report.vsync  = settings_.vsync;
     report.ui     = options_.ui;
-    report.gpuAllocations = context_->memory().allocationCount() - allocationsAtStart_;
+    report.gpuAllocations =
+        context_->memory().allocationCount() + TemporalWorker::totalGpuAllocations() - allocationsAtStart_;
     report.cpuHeapBlocksDelta = static_cast<i64>(heapBlocks) - static_cast<i64>(heapBlocksAtStart_);
     report.cpuHeapBytesDelta  = static_cast<i64>(heapBytes) - static_cast<i64>(heapBytesAtStart_);
     summarizeSamples(samples_, report);
@@ -760,6 +768,14 @@ void Engine::finishBenchmark() {
         r.views = post_ ? options_.temporalViews : 1;
         r.framesInFlight = options_.framesInFlight;
         r.gpuFailures = context_->gpuFailureCount();
+        r.workerDeviceBytes = post_ ? post_->workerDeviceBytes() : 0;
+        r.workerPhysicalFootprint = post_ ? post_->workerPhysicalFootprint() : 0;
+        r.workerBridgeBytes = post_ ? post_->workerBridgeBytes() : 0;
+        r.parentPhysicalFootprint = TemporalWorker::localPhysicalFootprint();
+        r.workersSpawned = TemporalWorker::spawnedCount();
+        r.workersReaped = TemporalWorker::reapedCount();
+        r.workersPeakLive = TemporalWorker::peakLiveCount();
+        r.workerFailures = TemporalWorker::failureCount();
         r.autoExposure = bool(post_) && options_.autoExposure;
         r.exposure = post_ ? post_->lastExposure() * post_->manualExposure() : settings_.exposure;
         r.edr = displayEDR_;

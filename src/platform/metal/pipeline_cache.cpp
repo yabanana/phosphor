@@ -1,3 +1,4 @@
+#include "platform/metal/temporal_worker.h"
 #include <MetalFX/MetalFX.hpp>
 #include "platform/metal/pipeline_cache.h"
 
@@ -307,6 +308,23 @@ PipelineCache::requestTemporalScaler(MTLFX::TemporalScalerDescriptor *descriptor
                 if (p)
                     p->release();
             }));
+        } catch (...) {
+            promise->set_exception(std::current_exception());
+        }
+        pool->release();
+    });
+    return future;
+}
+
+std::future<std::shared_ptr<TemporalWorker>>
+PipelineCache::requestTemporalWorker(std::shared_ptr<TemporalWorker> worker) {
+    auto promise = std::make_shared<std::promise<std::shared_ptr<TemporalWorker>>>();
+    auto future = promise->get_future();
+    queue_->submit(pipe::CompilePriority::Urgent, ~0u, [promise, worker] {
+        auto *pool = NS::AutoreleasePool::alloc()->init();
+        try {
+            worker->start();
+            promise->set_value(worker);
         } catch (...) {
             promise->set_exception(std::current_exception());
         }

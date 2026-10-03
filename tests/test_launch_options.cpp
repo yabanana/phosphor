@@ -348,7 +348,7 @@ TEST_CASE("bench report: schema v3 without GPU timing keeps v1 fields and stays 
     r.pipelinesJson = "{\"hits\": 3}";
     const std::string json = reportToJson(r);
     CHECK_MESSAGE(validJson(json), json);
-    CHECK(json.find("\"schema_version\": 7") != std::string::npos);
+    CHECK(json.find("\"schema_version\": 8") != std::string::npos);
     CHECK(json.find("\"gpu_timing\": false") != std::string::npos);
     CHECK(json.find("\"gpu_timing_unfused\": false") != std::string::npos);
     CHECK(json.find("\"passes\"") == std::string::npos);
@@ -365,7 +365,7 @@ TEST_CASE("bench report: schema v3 with GPU timing") {
     const BenchReport r = timedReport();
     const std::string json = reportToJson(r);
     CHECK_MESSAGE(validJson(json), json);
-    CHECK(json.find("\"schema_version\": 7") != std::string::npos);
+    CHECK(json.find("\"schema_version\": 8") != std::string::npos);
     CHECK(json.find("\"gpu_timing\": true") != std::string::npos);
     CHECK(json.find("\"gpu_timing_unfused\": true") != std::string::npos);
     CHECK(json.find("\"passes\": [") != std::string::npos);
@@ -500,7 +500,7 @@ TEST_CASE("bench report: schema v5 scene and cpu_phases objects") {
     r.cpuPhases.submit    = {0.25f, 0.2f, 0.25f, 0.3f, 0.35f};
     const std::string json = reportToJson(r);
     CHECK_MESSAGE(validJson(json), json);
-    CHECK(json.find("\"schema_version\": 7") != std::string::npos);
+    CHECK(json.find("\"schema_version\": 8") != std::string::npos);
     CHECK(json.find("\"scene\": {\"mode\": \"on\", \"instances\": 1000000, \"slots\": 1048576, \"buckets\": 24, "
                     "\"materials\": 256, \"commands\": 40, \"structure_changes\": 7, \"queue_overflow\": 0, "
                     "\"upload_bytes\": {\"mean\": 1000.0000") != std::string::npos);
@@ -789,7 +789,7 @@ TEST_CASE("bench report: schema 6 JSON has p95 between p50 and p99 in every summ
     r.meshlets.candidates = summarize({10.0f, 20.0f});
     const std::string json = reportToJson(r);
     CHECK_MESSAGE(validJson(json), json);
-    CHECK(json.find("\"schema_version\": 7") != std::string::npos);
+    CHECK(json.find("\"schema_version\": 8") != std::string::npos);
     CHECK(r.frameMs.p95 == doctest::Approx(19.0f));
     CHECK(json.find("\"frame_ms\": {\"mean\": 10.5000, \"min\": 1.0000, \"p50\": 10.0000, \"p95\": 19.0000, "
                     "\"p99\": 20.0000, \"max\": 20.0000}") != std::string::npos);
@@ -901,4 +901,19 @@ TEST_CASE("F7 F8 options select explicit rendering contracts and bounded quality
     CHECK_FALSE(parse({"--frames-in-flight", "0"}, o, error));
     CHECK_FALSE(parse({"--debug-motion-corrupt"}, o, error));
     CHECK_FALSE(parse({"--render-path", "visibility", "--gpu-driven", "off"}, o, error));
+}
+
+TEST_CASE("MetalFX worker options preserve a direct diagnostic control") {
+    LaunchOptions o;
+    std::string error;
+    REQUIRE(parse({"--post", "--upscaler", "temporal"}, o, error));
+    CHECK(o.isolatedMetalFX);
+    REQUIRE(parse({"--post", "--upscaler", "temporal", "--metalfx-mode", "direct"}, o, error));
+    CHECK_FALSE(o.isolatedMetalFX);
+    CHECK_FALSE(parse({"--metalfx-mode", "unknown"}, o, error));
+    CHECK_FALSE(parse({"--debug-frame-delay-ms", "1001"}, o, error));
+    CHECK_FALSE(parse({"--debug-metalfx-worker-crash", "2"}, o, error));
+    CHECK_FALSE(parse({"--upscaler", "temporal", "--debug-metalfx-worker-delay-ms", "2001"}, o, error));
+    REQUIRE(parse({"--upscaler", "temporal", "--debug-metalfx-worker-crash", "2"}, o, error));
+    CHECK(o.debugMetalFXWorkerCrash == 2);
 }

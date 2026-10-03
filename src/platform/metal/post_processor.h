@@ -14,12 +14,14 @@
 namespace phosphor {
 class PipelineCache;
 class VisibilityRenderer;
+class TemporalWorker;
 class PostProcessor {
   public:
     struct Options {
         bool temporal = false, autoExposure = false, corruptExposure = false, forceReset = false;
         bool checkCurves = false, corruptCurves = false;
-        bool neutralMipBias = false;
+        bool neutralMipBias = false, isolatedMetalFX = true;
+        u32 debugWorkerCrash = 0, debugWorkerDelayMs = 0;
         u32 tonemap = 0, views = 1, jitterVariant = 0;
         float sharpening = 0, whitePoint = 4, debugMotionScale = 1;
     };
@@ -48,6 +50,9 @@ class PostProcessor {
                        const std::array<u32, ExposureBins> &low, const std::array<u32, ExposureBins> &high) const;
     [[nodiscard]] const char *effectiveUpscaler() const;
     bool checkCurves() const;
+    u64 workerDeviceBytes() const;
+    u64 workerPhysicalFootprint() const;
+    u64 workerBridgeBytes() const;
 
   private:
     void configure(u32 width, u32 height);
@@ -56,11 +61,16 @@ class PostProcessor {
     void releaseTargets();
     void bind(rg::PassContext &, MTL4::ArgumentTable *);
     void encodeUpscale(rg::PassContext &);
+    void finishWorkerCopy(rg::PassContext &);
+    bool usesWorker() const { return options_.temporal && options_.isolatedMetalFX && supported_; }
     MetalContext &context_;
     PipelineCache &pipelines_;
     Options options_;
     HistoryRegistry histories_;
     struct View {
+        std::shared_ptr<TemporalWorker> worker;
+        std::future<std::shared_ptr<TemporalWorker>> pendingWorker;
+        MTL::Buffer *workerBuffer = nullptr;
         std::shared_ptr<MTL4FX::TemporalScaler> scaler;
         std::future<std::shared_ptr<MTL4FX::TemporalScaler>> pending;
         u32 requestedWidth = 0, requestedHeight = 0;
@@ -70,6 +80,7 @@ class PostProcessor {
         u64 exposureScene = ~u64{0};
     };
     std::array<View, HistoryRegistry::MaxViews> views_{};
+    std::vector<std::shared_ptr<TemporalWorker>> retiredWorkers_;
     struct Slot {
         MTL::Texture *output = nullptr;
         MTL::Buffer *histogram = nullptr;
@@ -86,6 +97,6 @@ class PostProcessor {
     GPUPostParams params_{};
     MTL::GPUAddress paramsAddress_ = 0;
     rg::TextureRef input_, depth_, motion_, reactive_, output_, exposure_;
-    rg::BufferRef histogramRef_, stateRef_;
+    rg::BufferRef histogramRef_, stateRef_, workerBridge_;
 };
 } // namespace phosphor

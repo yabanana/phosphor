@@ -65,6 +65,11 @@ public:
     [[nodiscard]] MTL::Texture* newTexture(const MTL::TextureDescriptor* descriptor, MemoryCategory category,
                                            const char* label);
 
+    /// Import a page-aligned shared mapping. The callback owns its lifetime
+    /// until the completed GPU buffer is actually destroyed.
+    [[nodiscard]] MTL::Buffer *newSharedBuffer(void *mapping, u64 length, void (^deallocator)(void *, NS::UInteger),
+                                               MemoryCategory category, const char *label);
+
     /// F5.3: an indirect command buffer (a device object, never placed in a
     /// heap): labelled, made resident and accounted like a standalone buffer;
     /// released with release().

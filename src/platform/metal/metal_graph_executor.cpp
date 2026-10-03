@@ -127,6 +127,12 @@ public:
   void *encoder() const override { return encoder_; }
   void *commandBuffer() const override { return command_; }
   void *externalFence() const override { return executor_.externalFence_; }
+  void externalDependency(const ExternalDependency &d) override {
+      if (!command_ || dependency.resume || !d.inputReady || !d.outputReady || !d.value || !d.resume)
+          throw std::logic_error("Invalid external submission dependency");
+      dependency = d;
+  }
+  ExternalDependency dependency;
   void *texture(rg::TextureRef t) const override { return executor_.textures_[t.resource]; }
   void *buffer(rg::BufferRef b) const override { return executor_.buffers_[b.resource]; }
   u32 chunk() const override { return chunk_; }
@@ -290,7 +296,8 @@ bool MetalGraphExecutor::compile(const rg::RenderGraph& graph, const rg::Compile
     waitBefore_.assign(compiled_.order.size(), 0);
     signalAfter_.assign(compiled_.order.size(), 0);
     segmented_ = false;
-    for (const rg::EncoderPlan& e : compiled_.encoders) segmented_ |= e.queue == rg::Queue::AsyncCompute;
+    for (const rg::EncoderPlan &e : compiled_.encoders)
+        segmented_ |= e.queue == rg::Queue::AsyncCompute || e.type == rg::PassType::External;
     for (const rg::QueueSync& q : compiled_.queueSyncs) {
         waitBefore_[q.waitBeforePosition]   = std::max(waitBefore_[q.waitBeforePosition], q.value);
         signalAfter_[q.signalAfterPosition] = std::max(signalAfter_[q.signalAfterPosition], q.value);
@@ -303,8 +310,7 @@ bool MetalGraphExecutor::compile(const rg::RenderGraph& graph, const rg::Compile
     }
     if (segmented_) ensureParallelResources(2); // extra command buffers for the submissions
     if (segmented_) {
-        LOG_INFO("Render graph: async compute on the second queue, %zu cross-queue syncs",
-                 compiled_.queueSyncs.size());
+        LOG_INFO("Render graph: segmented submissions, %zu cross-queue syncs", compiled_.queueSyncs.size());
     }
 
     // F4.1: timed units; a position maps to the unit that ENDS there.
@@ -688,6 +694,27 @@ void MetalGraphExecutor::execute(MetalContext::Frame& frame) {
             Context ctx(*this, nullptr, frame.index, 0, 1, target);
             if (node.execute)
                 node.execute(ctx);
+            if (ctx.dependency.resume) {
+                if (async)
+                    throw std::logic_error("Isolated external work requires the graphics queue");
+                auto &producer = frame.submissions[graphicsSub_];
+                producer.externalInputReady = static_cast<MTL::SharedEvent *>(ctx.dependency.inputReady);
+                producer.externalSignalValue = ctx.dependency.value;
+                producer.externalSubmitted = ctx.dependency.submitted;
+                producer.externalSubmissionUser = ctx.dependency.submissionUser;
+                if (target != frame.commandBuffer)
+                    target->endCommandBuffer();
+                if (frame.submissionCount >= MetalContext::MAX_FRAME_SUBMISSIONS ||
+                    frame.bufferCount >= MetalContext::MAX_FRAME_COMMAND_BUFFERS)
+                    throw std::runtime_error("External submission capacity exhausted");
+                graphicsSub_ = openSubmission(frame, SubmitQueue::Graphics, 0, 0);
+                auto &consumer = frame.submissions[graphicsSub_];
+                consumer.externalOutputReady = static_cast<MTL::SharedEvent *>(ctx.dependency.outputReady);
+                consumer.externalWaitValue = ctx.dependency.value;
+                cmd = target = beginExtraCommandBuffer(frame, frame.bufferCount - 1, false);
+                Context continuation(*this, nullptr, frame.index, 0, 1, target);
+                ctx.dependency.resume(continuation, ctx.dependency.user);
+            }
             auto *after = target->computeCommandEncoder();
             after->setLabel(encoderLabels_[e]);
             after->waitForFence(externalFence_, MTL::StageDispatch);
