@@ -1,0 +1,17 @@
+{
+  "schema": 3,
+  "preset": "F8 development, 320x180 SDR, ACES fit, 0.75 input scale, 2x supersampled raster reference",
+  "declared_before_clip_comparison": true,
+  "mean_psnr_srgb_min_db": 25.0,
+  "linear_rmse_p95_max": 0.06,
+  "linear_rmse_max": 0.15,
+  "residual_flicker_mean_max": 0.02,
+  "ghost_fraction_max": 0.25,
+  "recovery_frames_max": 4,
+  "recovery_linear_rmse": 0.06,
+  "note": "Development acceptance, not a universal perceptual equivalence claim. Also inspect camera-cut/disocclusion contact sheets. Timing from capture runs is not a performance result.",
+  "excess_ghost_fraction_max": 0.25,
+  "ghost_metric_note": "Raw and excess old-frame attraction remain diagnostics: even an edge reconstructed from current-frame samples only can fail them. Gate attraction outside the current spatial reconstruction support (one output pixel at the declared 0.75 scale). Spatial PSNR/RMSE/flicker thresholds remain unchanged. This deliberately does not claim to identify temporal lag shorter than the spatial filter support; retain image inspection, motion/pose oracle and delayed-frame negative control.",
+  "reconstruction_support_radius": 1,
+  "support_ghost_fraction_max": 0.25
+}

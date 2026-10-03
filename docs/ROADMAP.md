@@ -241,14 +241,14 @@ pubbliche, sorgenti OS, risultati di paper e ipotesi da misurare.
 
 | Tappa | Consegna principale | Decisione successiva |
 |---|---|---|
-| Ora | F5 integrata, F6 consegnata (branch `phase/f6`), poi baseline F7–F8 | Frame reale con visibilità, materiali e ricostruzione, misurato e verificato |
+| Ora | F5/F6 integrate; F7 baseline verificata; F8 implementata con gate lifetime SDK aperto (PR #14) | Frame reale con visibilità, materiali e ricostruzione, misurato e verificato |
 | Dopo F8 | Baseline del corpus OPT-4.16 con strumenti esistenti | Selezionare un problema di OPT-2/3/4 se rilevante; altrimenti proseguire F9–F13 |
 | Dopo F13 | Ombre, GI, riflessi e denoise integrati; F14 se utile al corpus | Nuove misure; valutare soltanto le ottimizzazioni rese necessarie dal frame con luce |
 | Sviluppo successivo | Materiali/mondo/streaming e runtime richiesti dalla slice | Attivare un piano dettagliato quando il suo consumatore è concreto |
 | Piattaforma di prodotto | F27 integrazione ECS → nucleo F41/F21 → F39/F40 → editor F34 | Riuso e parità funzionale verificati; implementazione progressiva senza avviare optimizer generali |
 | Frontiera | F29–F33 e ricerca SoC avanzata | Attivazione per trigger misurato; nessuna dipendenza automatica della slice |
 
-Il percorso operativo è **F7→F8 dopo F5 integrata e F6 consegnata, poi F9→F13**, con una baseline corretta e
+Il checkpoint corrente è **F7 baseline verificata; F8.4 resta aperta per il lifetime MetalFX. Sosta prima delle OPT; F9→F13 restano preparate**, con una baseline corretta e
 semplice a ogni passaggio. Cooker, runtime e strumenti minimi si introducono
 quando necessari ai contenuti correnti. Le OPT non sono una barriera obbligatoria
 fra ere; F37 può usare fallback e preset misurati senza aspettare ogni idea
@@ -424,27 +424,33 @@ eventi al pixel). Certificazione T0/M3 fisica `EXTERNAL_VALIDATION_PENDING`.
 
 ## F7 — Visibility buffer e shading ibrido TBDR [CORE]
 
+**2026-10-03: DEVELOPMENT_ACCEPTED su M5 Max**, nel branch della [PR #14](https://github.com/yabanana/phosphor/pull/14). [Consegna per task, misure e limiti](F7_F8_HANDOFF.md).
+
 **Obiettivo**: il cuore del renderer, progettato per la tile memory.
 
-- [ ] F7.1 Visibility buffer R32Uint con codifica **25 bit cluster + 7 bit triangolo**
-- [ ] F7.2 Material resolve in compute: baricentriche analitiche, derivate per il mip, fetch attributi dalla GPU scene
-- [ ] F7.3 **Binning per materiale** in compute (tile classification): uno shader specializzato per classe di materiale invece di un uber-shader (O4, O11)
+- [x] F7.1 Visibility buffer R32Uint con codifica **25 bit cluster + 7 bit triangolo**
+- [x] F7.2 Material resolve in compute: baricentriche analitiche, derivate per il mip, fetch attributi dalla GPU scene
+- [x] F7.3 **Binning per materiale** in compute (tile classification): uno shader specializzato per classe di materiale invece di un uber-shader (O4, O11)
 - [ ] F7.4 **[CANDIDATO]** **Spike [EDGE]**: deferred "on-tile" con tile shader e imageblock contro V-buffer + resolve in compute; misurare banda e tempo su T0 e T2; adottare un ibrido per tier se conviene; rivalutare dopo F8, senza bloccare la baseline F7
 - [ ] F7.5 **[CANDIDATO]** **Spike [EDGE]**: shading a frequenza variabile software nel resolve (2×2 dove il contrasto è basso), guidato dalla luminanza del frame precedente; rivalutare dopo F8, senza bloccare la baseline F7
-- [ ] F7.6 Canali per il denoiser MetalFX emessi da subito: normali con segno, albedo diffusa, albedo speculare con Fresnel, roughness, motion vector, depth
-- [ ] F7.7 Alpha test in fase raster separata; ordine opachi → alpha-test → traslucidi
+- [x] F7.6 Canali per il denoiser MetalFX emessi da subito: normali con segno, albedo diffusa, albedo speculare con Fresnel, roughness, motion vector, depth
+- [x] F7.7 Alpha test in fase raster separata; ordine opachi → alpha-test → traslucidi
+
+**Esperimenti F7.4/F7.5:** eseguiti sul M5 dopo l’integrazione F8, con controlli qualità e tre repliche. Tile: −0,16% sul frame e −8,09 MiB, adozione rimandata. Adattivo: +0,29% Cornell e +2,24% Sponza, non adottato. Le caselle candidate restano aperte come tecniche non adottate; T0 e banda hardware non misurati. F7.3 resta disponibile, ma il default misurato è generic. [Dati e decisioni](F7_F8_HANDOFF.md#decisioni-sugli-esperimenti).
 
 **Uscita della baseline**: V-buffer + resolve corretti su Sponza, confronto con forward di F0 per immagine, tempo e memoria; scarti documentati per il checkpoint dopo F8. Il vantaggio prestazionale resta un obiettivo misurato; F7.4/F7.5 si selezionano dopo F8 e non ne bloccano la baseline.
 
 ## F8 — HDR, EDR, esposizione e MetalFX temporal [CORE]
 
-- [ ] F8.1 Target RGBA16F nella tile, istogramma di luminanza in compute con SIMD-group, esposizione automatica
-- [ ] F8.2 Tonemapping configurabile (AgX, ACES, curva custom) e uscita **EDR** su display XDR con calibrazione della luminanza massima
-- [ ] F8.3 Jitter Halton sub-pixel, motion vector per oggetti e camera
-- [ ] F8.4 MetalFX temporal upscaler con risoluzione dinamica e reactive mask (scala max 2x); valutare subrectangle, motion vector diretti e distortion field se esposti dall'SDK/device [R111], mantenendo il percorso base; queste estensioni si attivano solo se necessarie al carico corrente
-- [ ] F8.5 Sharpening adattivo e mip bias corretto per la risoluzione di render
-- [ ] F8.6 **Risorse temporali esplicite nel render graph**: storia per vista, versioni fra frame, inizializzazione e invalidazione su camera cut, resize e cambio di risoluzione; distinguere storia temporale e risorse per frame slot, dichiarare ultimo lettore e sincronizzazione prima del riuso; iniziare con risorse per vista e riuso conservativo, senza richiedere aliasing temporale generale di OPT-4.14
-- [ ] F8.7 **Suite di qualità in movimento**: clip deterministiche con disocclusioni, camera rapida, dettagli sub-pixel, oggetti animati e cambi di esposizione/risoluzione; riferimento ad alta qualità e soglie dichiarate per ghosting, flicker, perdita di dettaglio e tempo di recupero della storia. Estendere la suite quando arrivano illuminazione (F13), trasparenze (F16) e vegetazione (F19), senza attendere F35
+**2026-10-03: implementazione e verifiche funzionali M5 consegnate; chiusura F8 pendente su F8.4 (lifetime MetalFX del runtime).** Nessuna OPT avviata. [Consegna e riproduttore](F7_F8_HANDOFF.md).
+
+- [x] F8.1 Target RGBA16F lineare (attachment tile nei pass raster, output compute nel resolve della baseline F7), istogramma di luminanza in compute con SIMD-group, esposizione automatica
+- [x] F8.2 Tonemapping configurabile (AgX, ACES, curva custom) e uscita **EDR** su display XDR con calibrazione relativa tramite headroom osservato; fotometria in nit non certificata
+- [x] F8.3 Jitter Halton sub-pixel, motion vector per oggetti e camera
+- [ ] F8.4 **Implementata, gate lifetime SDK aperto:** MetalFX temporal upscaler con risoluzione dinamica e reactive mask (scala max 2x); valutare subrectangle, motion vector diretti e distortion field se esposti dall'SDK/device [R111], mantenendo il percorso base; queste estensioni si attivano solo se necessarie al carico corrente
+- [x] F8.5 Sharpening adattivo e mip bias corretto per la risoluzione di render
+- [x] F8.6 **Risorse temporali esplicite nel render graph**: storia per vista, versioni fra frame, inizializzazione e invalidazione su camera cut, resize e cambio di risoluzione; distinguere storia temporale e risorse per frame slot, dichiarare ultimo lettore e sincronizzazione prima del riuso; iniziare con risorse per vista e riuso conservativo, senza richiedere aliasing temporale generale di OPT-4.14
+- [x] F8.7 **Suite di qualità in movimento**: clip deterministiche con disocclusioni, camera rapida, dettagli sub-pixel, oggetti animati e cambi di esposizione/risoluzione; riferimento ad alta qualità e soglie dichiarate per ghosting, flicker, perdita di dettaglio e tempo di recupero della storia. Estendere la suite quando arrivano illuminazione (F13), trasparenze (F16) e vegetazione (F19), senza attendere F35
 
 **Uscita**: stabilità temporale senza ghosting visibile sui testbench in movimento; storia isolata per vista e riuso corretto con più frame in volo, camera cut e resize; clip e soglie di F8.7 registrate; misure base per ricalibrare i budget.
 

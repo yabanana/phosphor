@@ -31,18 +31,21 @@ namespace phosphor::rg {
 using Stages = u32;
 // Pipeline stages of an access (mirror MTL::Stages; the backend maps them).
 enum Stage : Stages {
-    StageNone     = 0,
-    StageVertex   = 1u << 0,
+    StageNone = 0,
+    StageVertex = 1u << 0,
     StageFragment = 1u << 1,
-    StageTile     = 1u << 2,
-    StageObject   = 1u << 3,
-    StageMesh     = 1u << 4,
-    StageDispatch = 1u << 5,  // compute kernels
-    StageBlit     = 1u << 6,  // copies, fills, mipmap generation
+    StageTile = 1u << 2,
+    StageObject = 1u << 3,
+    StageMesh = 1u << 4,
+    StageDispatch = 1u << 5, // compute kernels
+    StageBlit = 1u << 6,     // copies, fills, mipmap generation
     StageAccelerationStructure = 1u << 7,
+    StageMachineLearning = 1u << 8,
+    StageExternal =
+        StageVertex | StageFragment | StageObject | StageMesh | StageDispatch | StageBlit | StageMachineLearning,
     // Raster stages that run before rasterisation (geometry front end).
     StageGeometry = StageVertex | StageObject | StageMesh,
-    StageRaster   = StageGeometry | StageFragment | StageTile,
+    StageRaster = StageGeometry | StageFragment | StageTile,
 };
 
 enum class Queue : u8 {
@@ -52,9 +55,10 @@ enum class Queue : u8 {
 
 // Encoder type a pass records into.
 enum class PassType : u8 {
-    Raster,  // render encoder; may be fused with adjacent raster passes (F2.4)
-    Compute, // compute encoder (MTL4 compute encoders also do copies)
-    Blit,    // copies only; recorded like Compute on Metal 4
+    Raster,   // render encoder; may be fused with adjacent raster passes (F2.4)
+    Compute,  // compute encoder (MTL4 compute encoders also do copies)
+    Blit,     // copies only; recorded like Compute on Metal 4
+    External, // framework owns encoders (MetalFX); explicit graph accesses + executor fence boundary
 };
 
 enum class ResourceKind : u8 { Texture, Buffer };
@@ -222,6 +226,9 @@ struct PassNode {
     /// F2.5: the pass may be encoded as `parallelChunks` independent pieces
     /// on different threads (execute receives the chunk index).
     u32         parallelChunks = 1;
+    /// Fixed tile size for a raster pass containing a tile dispatch. Zero
+    /// leaves the driver's choice; fused members must agree when nonzero.
+    u32 tileWidth = 0, tileHeight = 0;
     /// F4: shader functions the pass runs (profiling only: maps Metal System
     /// Trace's per-shader timeline to passes; no effect on compilation).
     std::vector<std::string> profileShaders;
@@ -248,7 +255,8 @@ public:
     /// (programmable blending / framebuffer fetch).  Bound as an attachment of
     /// the pass's render group: loaded unless an earlier member of the group
     /// wrote it in tile memory.
-    void       readColor(TextureRef target, u32 slot);
+    void readColor(TextureRef target, u32 slot, Stages stages = StageFragment);
+    void setTileSize(u32 width, u32 height);
 
     // --- Shader / copy accesses ----------------------------------------------
     void       read(TextureRef texture, Usage usage, Stages stages);
@@ -362,6 +370,7 @@ struct RenderGroup {
     u32 firstPosition = 0;   // positions in CompiledGraph::order
     u32 lastPosition  = 0;   // inclusive
     u32 width = 0, height = 0, sampleCount = 1;
+    u32 tileWidth = 0, tileHeight = 0;
     std::vector<AttachmentPlan> attachments;
 };
 
@@ -370,7 +379,7 @@ struct RenderGroup {
 // encoders also record copies), which then synchronise with intra-encoder
 // barriers.
 struct EncoderPlan {
-    PassType type  = PassType::Raster; // Raster or Compute (Blit runs are Compute)
+    PassType type = PassType::Raster; // Raster, Compute (includes Blit), or isolated External
     Queue    queue = Queue::Graphics;
     u32 firstPosition = 0;
     u32 lastPosition  = 0;             // inclusive

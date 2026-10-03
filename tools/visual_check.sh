@@ -37,7 +37,7 @@ for bench in 1 2 3 4 5 6 7 8; do
     extra_bench_args=""
     [[ "$bench" == 8 ]] && extra_bench_args=${BENCH8_ARGS:-}
     MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 MTL_DEBUG_LAYER_WARNING_MODE=nslog \
-        "$app" --bench "$bench" --warmup "$warmup" --frames 1 --no-ui --fixed-timestep --inject-input \
+        "$app" --scene procedural --bench "$bench" --warmup "$warmup" --frames 1 --no-ui --fixed-timestep --inject-input \
         ${EXTRA_ARGS:-} ${extra_bench_args:-} --capture "$capture" >"$log" 2>&1 || status=$?
     # Anything besides our INFO lines, the BENCH/PIPELINES/STARTUP/SWITCH
     # summaries and the two "Validation Enabled" banners is a problem.
@@ -50,8 +50,12 @@ for bench in 1 2 3 4 5 6 7 8; do
     fi
 
     if [[ "$update" == "--update" ]]; then
-        cp "$capture" "$ref_dir/bench$bench.png"
-        result="reference updated"
+        if [[ $status -eq 0 && $messages -eq 0 ]]; then
+            cp "$capture" "$ref_dir/bench$bench.png"
+            result="reference updated"
+        else
+            result="reference preserved: failed execution"
+        fi
     else
         result=$("$diff_tool" "$ref_dir/bench$bench.png" "$capture" --diff "$out_dir/bench$bench-diff.png") || failures=$((failures + 1))
     fi

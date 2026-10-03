@@ -118,6 +118,7 @@ struct SceneStore::Impl {
     const ComponentArray<HierarchyComponent>*    hier_ = nullptr;
     const ComponentArray<MotionComponent>*       mot_ = nullptr;
     const GpuScene*                              scene_ = nullptr;
+    const ECS *ecs_ = nullptr;
 
     // --- State ---------------------------------------------------------------------
     bool built_ = false;
@@ -590,6 +591,7 @@ struct SceneStore::Impl {
         GPUInstance gi{};
         if (en.d.depth == 0 && !en.d.motion) std::memcpy(gi.modelMatrix, &xf.worldMatrix[0][0], sizeof(gi.modelMatrix));
         else setIdentity(gi.modelMatrix);
+        gi.generation = ecs_->incarnation(e);
         gi.meshIndex     = mi.meshHandle;
         gi.materialIndex = matIdx;
         gi.flags         = mi.flags | (en.d.neg ? INSTANCE_FLAG_MIRRORED : 0u) | INSTANCE_FLAG_VALID;
@@ -883,6 +885,7 @@ struct SceneStore::Impl {
     }
 
     void sync(ECS& ecs, const GpuScene& scene) {
+        ecs_ = &ecs;
         const ECS& c = ecs; // const access: reading must not mark changes
         xf_   = &c.getArray<TransformComponent>();
         mi_   = &c.getArray<MeshInstanceComponent>();
@@ -1078,7 +1081,8 @@ std::string SceneStore::Impl::verify(const ECS& ecs, const GpuScene& scene) cons
         }
         const GPUInstance& gi = instances_[s];
         const u32 expFlags = m.flags | (x.neg ? INSTANCE_FLAG_MIRRORED : 0u) | INSTANCE_FLAG_VALID;
-        if (gi.meshIndex != m.meshHandle || gi.materialIndex != matIdx || gi.flags != expFlags || gi.pad != 0) {
+        if (gi.meshIndex != m.meshHandle || gi.materialIndex != matIdx || gi.flags != expFlags ||
+            gi.generation != ecs.incarnation(e)) {
             return fmt("entity %u (slot %u): instance mesh/material/flags differ", e, s);
         }
         const bool computed = x.depth > 0 || x.motion; // matrix written by the GPU

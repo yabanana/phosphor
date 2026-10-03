@@ -20,7 +20,7 @@ using namespace metal;
 using namespace phosphor;
 
 struct OverlayVertexOut {
-    float4 position [[position]];
+    float4 position [[position, invariant]];
     float3 worldPos;
 };
 

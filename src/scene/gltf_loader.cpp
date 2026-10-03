@@ -125,6 +125,7 @@ bool GltfLoader::loadFromFile(const std::string& path) {
 
     // Clear per-file caches
     meshCache_.clear();
+    createdEntities_.clear();
     materialCache_.clear();
     textureCache_.clear();
 
@@ -159,45 +160,45 @@ void GltfLoader::processNode(const tinygltf::Model& model,
     glm::mat4 localTransform = nodeTransform(node);
     glm::mat4 worldTransform = parentTransform * localTransform;
 
-    // If this node has a mesh, create an entity for each primitive
+    // A draw has one material: keep each glTF primitive separate. Nodes
+    // referencing the same mesh reuse the per-primitive geometry cache.
     if (node.mesh >= 0) {
-        MeshHandle meshHandle = processMesh(model,
-            model.meshes[static_cast<size_t>(node.mesh)]);
-
-        if (meshHandle != INVALID_MESH_HANDLE) {
-            EntityID entity = ecs_.createEntity();
-
-            // TransformComponent
-            TransformComponent tc{};
-            tc.worldMatrix = worldTransform;
-            // Decompose for editing (approximate; non-uniform shear may lose data)
-            tc.position = glm::vec3(worldTransform[3]);
-            tc.scale = glm::vec3(
-                glm::length(glm::vec3(worldTransform[0])),
-                glm::length(glm::vec3(worldTransform[1])),
-                glm::length(glm::vec3(worldTransform[2])));
-            glm::mat3 rotMat(
-                glm::vec3(worldTransform[0]) / tc.scale.x,
-                glm::vec3(worldTransform[1]) / tc.scale.y,
-                glm::vec3(worldTransform[2]) / tc.scale.z);
-            tc.rotation = glm::quat_cast(rotMat);
-            ecs_.addComponent(entity, std::move(tc));
-
-            // Determine material index for the first primitive
-            u32 materialIdx = 0;
-            const auto& gltfMesh = model.meshes[static_cast<size_t>(node.mesh)];
-            if (!gltfMesh.primitives.empty() && gltfMesh.primitives[0].material >= 0) {
-                materialIdx = processMaterial(model,
-                    model.materials[static_cast<size_t>(gltfMesh.primitives[0].material)]);
+        const auto& mesh = model.meshes.at(static_cast<size_t>(node.mesh));
+        for (size_t p = 0; p < mesh.primitives.size(); ++p) {
+            const MeshHandle handle = processPrimitive(model, node.mesh, p);
+            if (handle == INVALID_MESH_HANDLE) continue;
+            const EntityID entity = ecs_.createEntity();
+            createdEntities_.push_back(entity);
+            TransformComponent transform{};
+            transform.worldMatrix = worldTransform;
+            transform.position = glm::vec3(worldTransform[3]);
+            // The exact affine matrix is authoritative; do not decompose a
+            // reflected/sheared transform into a lossy rotation and scale.
+            ecs_.addComponent(entity, std::move(transform));
+            MeshInstanceComponent instance{};
+            instance.meshHandle = handle;
+            const int material = mesh.primitives[p].material;
+            if (material >= 0) {
+                instance.materialIndex = processMaterial(model, model.materials.at(static_cast<size_t>(material)));
+            } else {
+                // The implicit glTF default must not alias an unrelated
+                // explicit material at index zero.
+                constexpr int defaultKey = -1;
+                const auto found = materialCache_.find(defaultKey);
+                if (found != materialCache_.end()) instance.materialIndex = found->second;
+                else {
+                    GPUMaterial value{};
+                    value.baseColor[0] = value.baseColor[1] = value.baseColor[2] = value.baseColor[3] = 1.0f;
+                    value.metallic = value.roughness = value.normalScale = value.occlusionStrength = 1.0f;
+                    value.baseColorTex = value.normalTex = value.metallicRoughnessTex =
+                        value.occlusionTex = value.emissiveTex = INVALID_TEXTURE_INDEX;
+                    instance.materialIndex = gpuScene_.addMaterial(value);
+                    materialCache_[defaultKey] = instance.materialIndex;
+                }
             }
-
-            // MeshInstanceComponent
-            MeshInstanceComponent mic{};
-            mic.meshHandle = meshHandle;
-            mic.materialIndex = materialIdx;
-            mic.setVisible(true);
-            mic.setCastsShadows(true);
-            ecs_.addComponent(entity, std::move(mic));
+            instance.setVisible(true);
+            instance.setCastsShadows(true);
+            ecs_.addComponent(entity, std::move(instance));
         }
     }
 
@@ -211,121 +212,105 @@ void GltfLoader::processNode(const tinygltf::Model& model,
 // Mesh processing
 // ---------------------------------------------------------------------------
 
-MeshHandle GltfLoader::processMesh(const tinygltf::Model& model,
-                                    const tinygltf::Mesh& mesh) {
-    // Use the mesh's index in the model as cache key
-    int meshIdx = static_cast<int>(&mesh - model.meshes.data());
-    auto it = meshCache_.find(meshIdx);
-    if (it != meshCache_.end()) {
-        return it->second;
-    }
+MeshHandle GltfLoader::processPrimitive(const tinygltf::Model& model,
+                                        int meshIndex, size_t primitiveIndex) {
+    const auto& mesh = model.meshes.at(static_cast<size_t>(meshIndex));
+    const u64 key = (static_cast<u64>(meshIndex) << 32) | static_cast<u64>(primitiveIndex);
+    const auto found = meshCache_.find(key);
+    if (found != meshCache_.end()) return found->second;
 
-    // Accumulate geometry from all primitives in this mesh
-    std::vector<glm::vec3> positions;
-    std::vector<glm::vec3> normals;
-    std::vector<glm::vec4> tangents;
-    std::vector<glm::vec2> uvs;
-    std::vector<u32> indices;
-
-    for (const auto& prim : mesh.primitives) {
-        if (prim.mode != TINYGLTF_MODE_TRIANGLES && prim.mode != -1) {
-            LOG_WARN("Skipping non-triangle primitive (mode=%d) in mesh '%s'",
-                     prim.mode, mesh.name.c_str());
-            continue;
-        }
-
-        // Read the primitive into local streams (indices local to it), fill
-        // what glTF allows to omit, then append to the mesh.
-        GeometryStreams geom;
-        bool hasNormals = false, hasTangents = false, hasUVs = false;
-
-        // Positions (required)
-        {
-            auto posIt = prim.attributes.find("POSITION");
-            if (posIt == prim.attributes.end()) {
-                LOG_WARN("Primitive in mesh '%s' has no POSITION attribute, skipping",
-                         mesh.name.c_str());
-                continue;
-            }
-            geom.positions = readAccessor<glm::vec3>(model, posIt->second);
-        }
-        const u32 vertexCount = static_cast<u32>(geom.positions.size());
-
-        // Normals (optional: flat normals are generated, as the spec requires)
-        if (auto it = prim.attributes.find("NORMAL"); it != prim.attributes.end()) {
-            geom.normals = readAccessor<glm::vec3>(model, it->second);
-            hasNormals = geom.normals.size() == vertexCount;
-        }
-        // Tangents (optional: MikkTSpace, as the spec recommends)
-        if (auto it = prim.attributes.find("TANGENT"); it != prim.attributes.end()) {
-            geom.tangents = readAccessor<glm::vec4>(model, it->second);
-            hasTangents = geom.tangents.size() == vertexCount;
-        }
-        // UVs (optional)
-        if (auto it = prim.attributes.find("TEXCOORD_0"); it != prim.attributes.end()) {
-            geom.uvs = readAccessor<glm::vec2>(model, it->second);
-            hasUVs = geom.uvs.size() == vertexCount;
-        }
-        if (!hasUVs) geom.uvs.assign(vertexCount, glm::vec2{0.0f});
-
-        // Indices (generate sequential ones for non-indexed primitives)
-        if (prim.indices >= 0) {
-            const auto& accessor = model.accessors[static_cast<size_t>(prim.indices)];
-            const auto& bufView  = model.bufferViews[accessor.bufferView];
-            const auto& buf      = model.buffers[bufView.buffer];
-            const u8* base       = buf.data.data() + bufView.byteOffset + accessor.byteOffset;
-
-            geom.indices.reserve(accessor.count);
-            for (size_t i = 0; i < accessor.count; ++i) {
-                u32 idx = 0;
-                switch (accessor.componentType) {
-                    case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: {
-                        uint16_t v = 0;
-                        std::memcpy(&v, base + i * sizeof(uint16_t), sizeof(uint16_t));
-                        idx = v;
-                        break;
-                    }
-                    case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT: {
-                        std::memcpy(&idx, base + i * sizeof(u32), sizeof(u32));
-                        break;
-                    }
-                    case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE: {
-                        idx = base[i];
-                        break;
-                    }
-                    default:
-                        LOG_WARN("Unsupported index component type: %d", accessor.componentType);
-                        idx = 0;
-                        break;
-                }
-                geom.indices.push_back(idx < vertexCount ? idx : 0);
-            }
-        } else {
-            for (u32 i = 0; i < vertexCount; ++i) geom.indices.push_back(i);
-        }
-
-        if (!hasNormals || !hasTangents) {
-            completeGeometry(geom, hasNormals, hasTangents, hasUVs);
-            LOG_INFO("Mesh '%s': generated%s%s (%zu vertices)", mesh.name.c_str(),
-                     hasNormals ? "" : " flat normals", hasTangents ? "" : " MikkTSpace tangents",
-                     geom.positions.size());
-        }
-
-        const u32 vertexBase = static_cast<u32>(positions.size());
-        positions.insert(positions.end(), geom.positions.begin(), geom.positions.end());
-        normals.insert(normals.end(), geom.normals.begin(), geom.normals.end());
-        tangents.insert(tangents.end(), geom.tangents.begin(), geom.tangents.end());
-        uvs.insert(uvs.end(), geom.uvs.begin(), geom.uvs.end());
-        for (const u32 idx : geom.indices) indices.push_back(vertexBase + idx);
-    }
-
-    if (positions.empty()) {
-        meshCache_[meshIdx] = INVALID_MESH_HANDLE;
+    // Decode exactly one primitive, preserving its material and topology.
+    const auto& prim = mesh.primitives.at(primitiveIndex);
+    if (prim.mode != TINYGLTF_MODE_TRIANGLES && prim.mode != -1) {
+        LOG_WARN("Skipping non-triangle primitive (mode=%d) in mesh '%s'",
+                 prim.mode, mesh.name.c_str());
         return INVALID_MESH_HANDLE;
     }
 
-    MeshHandle handle = gpuScene_.uploadMesh(positions, normals, tangents, uvs, indices);
-    meshCache_[meshIdx] = handle;
+    // Read the primitive into local streams (indices local to it), fill
+    // what glTF allows to omit, then append to the mesh.
+    GeometryStreams geom;
+    bool hasNormals = false, hasTangents = false, hasUVs = false;
+
+    // Positions (required)
+    {
+        auto posIt = prim.attributes.find("POSITION");
+        if (posIt == prim.attributes.end()) {
+            LOG_WARN("Primitive in mesh '%s' has no POSITION attribute, skipping",
+                     mesh.name.c_str());
+            return INVALID_MESH_HANDLE;
+        }
+        geom.positions = readAccessor<glm::vec3>(model, posIt->second);
+    }
+    const u32 vertexCount = static_cast<u32>(geom.positions.size());
+
+    // Normals (optional: flat normals are generated, as the spec requires)
+    if (auto it = prim.attributes.find("NORMAL"); it != prim.attributes.end()) {
+        geom.normals = readAccessor<glm::vec3>(model, it->second);
+        hasNormals = geom.normals.size() == vertexCount;
+    }
+    // Tangents (optional: MikkTSpace, as the spec recommends)
+    if (auto it = prim.attributes.find("TANGENT"); it != prim.attributes.end()) {
+        geom.tangents = readAccessor<glm::vec4>(model, it->second);
+        hasTangents = geom.tangents.size() == vertexCount;
+    }
+    // UVs (optional)
+    if (auto it = prim.attributes.find("TEXCOORD_0"); it != prim.attributes.end()) {
+        geom.uvs = readAccessor<glm::vec2>(model, it->second);
+        hasUVs = geom.uvs.size() == vertexCount;
+    }
+    if (!hasUVs) geom.uvs.assign(vertexCount, glm::vec2{0.0f});
+
+    // Indices (generate sequential ones for non-indexed primitives)
+    if (prim.indices >= 0) {
+        const auto& accessor = model.accessors[static_cast<size_t>(prim.indices)];
+        const auto& bufView  = model.bufferViews[accessor.bufferView];
+        const auto& buf      = model.buffers[bufView.buffer];
+        const u8* base       = buf.data.data() + bufView.byteOffset + accessor.byteOffset;
+
+        geom.indices.reserve(accessor.count);
+        for (size_t i = 0; i < accessor.count; ++i) {
+            u32 idx = 0;
+            switch (accessor.componentType) {
+                case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: {
+                    uint16_t v = 0;
+                    std::memcpy(&v, base + i * sizeof(uint16_t), sizeof(uint16_t));
+                    idx = v;
+                    break;
+                }
+                case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT: {
+                    std::memcpy(&idx, base + i * sizeof(u32), sizeof(u32));
+                    break;
+                }
+                case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE: {
+                    idx = base[i];
+                    break;
+                }
+                default:
+                    LOG_WARN("Unsupported index component type: %d", accessor.componentType);
+                    idx = 0;
+                    break;
+            }
+            geom.indices.push_back(idx < vertexCount ? idx : 0);
+        }
+    } else {
+        for (u32 i = 0; i < vertexCount; ++i) geom.indices.push_back(i);
+    }
+
+    if (!hasNormals || !hasTangents) {
+        completeGeometry(geom, hasNormals, hasTangents, hasUVs);
+        LOG_INFO("Mesh '%s': generated%s%s (%zu vertices)", mesh.name.c_str(),
+                 hasNormals ? "" : " flat normals", hasTangents ? "" : " MikkTSpace tangents",
+                 geom.positions.size());
+    }
+
+    if (geom.positions.empty()) {
+        meshCache_[key] = INVALID_MESH_HANDLE;
+        return INVALID_MESH_HANDLE;
+    }
+
+    MeshHandle handle = gpuScene_.uploadMesh(geom.positions, geom.normals, geom.tangents, geom.uvs, geom.indices);
+    meshCache_[key] = handle;
     return handle;
 }
 
@@ -401,7 +386,10 @@ u32 GltfLoader::processMaterial(const tinygltf::Model& model,
     };
 
     // Alpha cutoff
-    mc.alphaCutoff = static_cast<float>(material.alphaCutoff);
+    mc.alphaCutoff = material.alphaMode == "MASK" ? static_cast<float>(material.alphaCutoff) : 0.0f;
+    if (material.alphaMode == "BLEND") {
+        LOG_WARN("glTF BLEND material rendered opaque until F16 transparency is implemented");
+    }
     mc.doubleSided = material.doubleSided;
 
     // Build GPUMaterial from component and upload
@@ -441,7 +429,8 @@ u32 GltfLoader::processTexture(const tinygltf::Model& model, int textureIndex,
         return textures_.getDefaultWhite();
     }
 
-    auto it = textureCache_.find(textureIndex);
+    const u64 key = (static_cast<u64>(textureIndex) << 1) | (sRGB ? 1u : 0u);
+    auto it = textureCache_.find(key);
     if (it != textureCache_.end()) {
         return it->second;
     }
@@ -469,7 +458,7 @@ u32 GltfLoader::processTexture(const tinygltf::Model& model, int textureIndex,
         bindlessIndex = textures_.getDefaultWhite();
     }
 
-    textureCache_[textureIndex] = bindlessIndex;
+    textureCache_[key] = bindlessIndex;
     return bindlessIndex;
 }
 

@@ -1,0 +1,15 @@
+{
+  "schema": 2,
+  "preset": "F8 development, 320x180 SDR, ACES fit, 0.75 input scale, 2x supersampled raster reference",
+  "declared_before_clip_comparison": true,
+  "mean_psnr_srgb_min_db": 25.0,
+  "linear_rmse_p95_max": 0.06,
+  "linear_rmse_max": 0.15,
+  "residual_flicker_mean_max": 0.02,
+  "ghost_fraction_max": 0.25,
+  "recovery_frames_max": 4,
+  "recovery_linear_rmse": 0.06,
+  "note": "Development acceptance, not a universal perceptual equivalence claim. Also inspect camera-cut/disocclusion contact sheets. Timing from capture runs is not a performance result.",
+  "excess_ghost_fraction_max": 0.25,
+  "ghost_metric_note": "Raw old-frame attraction also fails the no-history spatial control (Torus 0.796, Sponza 0.361). Keep it as a diagnostic; gate excess error beyond that independently rendered control. Limit remains 0.25; spatial/flicker/recovery thresholds are unchanged. Validate with a delayed-frame negative control."
+}

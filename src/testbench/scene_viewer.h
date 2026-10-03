@@ -14,18 +14,22 @@ namespace phosphor {
 
 class SceneViewer final : public TestBench {
 public:
-    void setup(ECS& ecs, GpuScene& gpuScene, TextureManager& textures) override;
-    void update(float dt, ECS& ecs) override;
-    void teardown(ECS& ecs, GpuScene& gpuScene) override;
+  explicit SceneViewer(std::string scenePath = {}) : scenePath_(std::move(scenePath)) {}
+  void setup(ECS &ecs, GpuScene &gpuScene, TextureManager &textures) override;
+  void update(float dt, ECS &ecs) override;
+  void teardown(ECS &ecs, GpuScene &gpuScene) override;
 
-    [[nodiscard]] const char* getName() const override { return "Scene Viewer (glTF)"; }
-    [[nodiscard]] CameraSetup getDefaultCamera() const override;
+  [[nodiscard]] const char *assetSource() const override { return loadedGltf_ ? loadedPath_.c_str() : "procedural"; }
+  [[nodiscard]] const char *getName() const override { return "Scene Viewer (glTF)"; }
+  [[nodiscard]] CameraSetup getDefaultCamera() const override;
 
 private:
     void setupProceduralFallback(ECS& ecs, GpuScene& gpuScene, TextureManager& textures);
 
     std::vector<EntityID> entities_;
     bool loadedGltf_ = false;
+    std::string scenePath_;
+    std::string loadedPath_;
 };
 
 } // namespace phosphor

@@ -77,6 +77,7 @@ public:
     struct Frame {
         MTL4::CommandBuffer* commandBuffer = nullptr; // begun by beginFrame, ended by submitFrame
         CA::MetalDrawable*   drawable      = nullptr;
+        MTL::Texture *target = nullptr; // drawable or offscreen benchmark target
         u32                  slot          = 0;
         u64                  index         = 0;
         /// Every command buffer of the frame in commit order; [0] is
@@ -113,7 +114,9 @@ public:
     [[nodiscard]] MTL::Library*       library()      const { return library_; }
     [[nodiscard]] CA::MetalLayer*     layer()        const { return layer_; }
     [[nodiscard]] MTL::SharedEvent*   frameEvent()   const { return frameEvent_; }
-    [[nodiscard]] MTL::PixelFormat    colorFormat()  const { return MTL::PixelFormatBGRA8Unorm_sRGB; }
+    [[nodiscard]] MTL::PixelFormat colorFormat() const {
+        return layer_ ? layer_->pixelFormat() : MTL::PixelFormatBGRA8Unorm_sRGB;
+    }
     [[nodiscard]] const char*         gpuName()      const;
     /// PHYSICAL GPU family of the device (memory budget tier, reports).
     [[nodiscard]] bool                isApple9OrLater() const { return apple9_; }
@@ -139,6 +142,11 @@ public:
 
     [[nodiscard]] GpuMemory&  memory()       { return *memory_; }
     [[nodiscard]] const ResidencyManager& residency() const { return *residency_; }
+    [[nodiscard]] u64 residencyGeneration() const { return residencyGeneration_; }
+    [[nodiscard]] u64 commandBufferRebuilds() const { return commandBufferRebuilds_; }
+    /// Only for a completed, reusable stream. Invalidates MetalTools' cached
+    /// heap references after resources leave residency; allocators stay pooled.
+    void refreshCommandBuffer(MTL4::CommandBuffer *&buffer, u64 &generation);
     [[nodiscard]] UploadRing& frameUploads() { return *frameUploads_; }
     [[nodiscard]] const UploadRing& frameUploads() const { return *frameUploads_; }
     [[nodiscard]] const UploadRing& staging() const { return *staging_; }
@@ -163,6 +171,13 @@ public:
     /// Wait for the frame slot, begin its command buffer and acquire a drawable.
     /// Returns false if no drawable is available (e.g. minimised window).
     bool beginFrame(Frame& frame);
+    void setFramesInFlight(u32 count);
+    void setOffscreen(bool enabled) { offscreen_ = enabled; }
+    void setFeedbackDiagnostics(u32 delayMs, u32 failFrame) {
+        feedbackDelayMs_ = delayMs;
+        feedbackFailFrame_ = failFrame;
+    }
+    [[nodiscard]] u32 gpuFailureCount() const { return gpuFailures_.load(); }
 
     /// End the frame's command buffer, commit every submission in order (the
     /// drawable is waited for before the first graphics commit and signalled
@@ -204,7 +219,7 @@ public:
 
 private:
     void flushResidency();
-    void onFrameFeedback(MTL4::CommitFeedback* feedback);
+    void onFrameFeedback(u64 index, MTL4::CommitFeedback *feedback, bool timed);
     void waitForValue(u64 value);
     void waitForAsync(u64 value);
 
@@ -224,6 +239,8 @@ private:
 
     std::array<MTL4::CommandAllocator*, METAL_FRAMES_IN_FLIGHT> allocators_{};
     std::array<MTL4::CommandBuffer*, METAL_FRAMES_IN_FLIGHT> commandBuffers_{};
+    std::array<u64, METAL_FRAMES_IN_FLIGHT> commandBufferGenerations_{};
+    u64 residencyGeneration_ = 0, uploadCommandGeneration_ = 0, commandBufferRebuilds_ = 0;
     // Objects released once frame `afterFrame` has completed: the frame being
     // recorded when deferRelease() was called, or -- between frames -- the
     // next one, which is conservative for every frame still in flight.
@@ -242,6 +259,14 @@ private:
     std::unique_ptr<UploadRing> staging_;
     std::vector<std::function<void(MTL4::ComputeCommandEncoder*)>> queuedUploads_;
 
+    bool offscreen_ = false;
+    std::array<MTL::Texture *, METAL_FRAMES_IN_FLIGHT> offscreenTargets_{};
+    u32 framesInFlight_ = METAL_FRAMES_IN_FLIGHT;
+    u32 feedbackDelayMs_ = 0, feedbackFailFrame_ = 0;
+    std::atomic<u32> gpuFailures_{0};
+    std::mutex feedbackMutex_;
+    std::condition_variable feedbackDone_;
+    u64 pendingFeedback_ = 0;
     std::atomic<u64>     feedbackCount_{0};
     std::atomic<float>   lastGpuMs_{0.0f};
     // Benchmark capture: frame index -> GPU ms, filled by commit feedback

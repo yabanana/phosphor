@@ -276,11 +276,14 @@ public:
     /// after the scene sync consumed them.
     void endFrame();
 
+    [[nodiscard]] u32 incarnation(EntityID entity) const { return alive_.at(entity) ? incarnation_.at(entity) : 0; }
     [[nodiscard]] u32 entityCount() const { return entityCount_; }
 
 private:
     EntityID nextEntity_  = 0;
     u32      entityCount_ = 0;
+    u32 nextIncarnation_ = 1;
+    std::vector<u32> incarnation_;
     std::vector<EntityID> freeIds_; // destroyed ids, reused by createEntity (LIFO)
     std::vector<u8>       alive_;   // per id
 

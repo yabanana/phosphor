@@ -6,6 +6,7 @@ target_include_directories(metal_cpp SYSTEM INTERFACE ${metal_cpp_SOURCE_DIR})
 target_link_libraries(metal_cpp INTERFACE
     "-framework Foundation"
     "-framework Metal"
+    "-framework MetalFX"
     "-framework QuartzCore"
 )
 
@@ -40,8 +41,25 @@ endif()
 
 # --- Shaders: .metal -> .air -> phosphor.metallib ---
 file(GLOB PHOSPHOR_METAL_SHADERS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*.metal)
+# F7/F8: one first-linked material module avoids the measured metal-tt
+# private-metadata relocation failure with separate forward/resolve modules.
+list(REMOVE_ITEM PHOSPHOR_METAL_SHADERS
+    ${CMAKE_SOURCE_DIR}/shaders/forward.metal
+    ${CMAKE_SOURCE_DIR}/shaders/visibility_resolve.metal
+    ${CMAKE_SOURCE_DIR}/shaders/material_passes.metal)
+list(PREPEND PHOSPHOR_METAL_SHADERS ${CMAKE_SOURCE_DIR}/shaders/material_passes.metal)
 # Headers the shaders include (C++/MSL shared): an edit recompiles every shader.
 set(PHOSPHOR_SHADER_HEADERS
+    ${CMAKE_SOURCE_DIR}/shaders/forward.metal
+    ${CMAKE_SOURCE_DIR}/shaders/visibility_resolve.metal
+    ${CMAKE_SOURCE_DIR}/shaders/material_shading.h
+    ${CMAKE_SOURCE_DIR}/shaders/surface_geometry.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/normal_transform.h
+    ${CMAKE_SOURCE_DIR}/shaders/temporal_motion.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/temporal_layout.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/post_layout.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/visibility_layout.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/visibility_math.h
     ${CMAKE_SOURCE_DIR}/src/renderer/gpu_types.h
     ${CMAKE_SOURCE_DIR}/src/renderer/gpu_scene_layout.h
     ${CMAKE_SOURCE_DIR}/src/renderer/gpu_queue.h
@@ -53,7 +71,7 @@ set(PHOSPHOR_SHADER_HEADERS
 set(PHOSPHOR_SHADER_OUT ${CMAKE_BINARY_DIR}/shaders)
 set(PHOSPHOR_METALLIB ${PHOSPHOR_SHADER_OUT}/phosphor.metallib)
 set(PHOSPHOR_METAL_FLAGS -std=metal4.0 -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}
-    -I ${CMAKE_SOURCE_DIR}/src -I ${CMAKE_BINARY_DIR}/generated -Wall)
+    -I ${CMAKE_SOURCE_DIR}/src -I ${CMAKE_BINARY_DIR}/generated -Wall -fpreserve-invariance)
 # Source-level shader debugging and profiling in Xcode (Debug/RelWithDebInfo).
 # metal-tt cannot translate specialised functions (F3.3 function constants)
 # from a metallib with debug info ("cannot find private metadata", measured
@@ -146,6 +164,10 @@ add_executable(phosphor
     src/platform/metal/graph_debug_passes.cpp
     src/platform/metal/hiz_builder.cpp
     src/platform/metal/mesh_renderer.cpp
+    src/platform/metal/visibility_renderer.cpp
+    src/platform/metal/visibility_check.cpp
+    src/platform/metal/post_processor.cpp
+    src/platform/metal/display_output.mm
     src/platform/metal/meshlet_check.cpp
     src/platform/metal/known_cost_pass.cpp
     src/platform/metal/scenario_passes.cpp
@@ -162,7 +184,8 @@ add_executable(phosphor
     src/platform/metal/transient_heap.cpp
     src/platform/metal/upload_ring.cpp
 )
-target_link_libraries(phosphor PRIVATE phosphor_core imgui metal_cpp)
+target_link_libraries(phosphor PRIVATE phosphor_core imgui metal_cpp "-framework AppKit")
+set_source_files_properties(src/platform/metal/display_output.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 if(PHOSPHOR_TRACY)
     # Global operator new/delete replacement: part of the executable (not of
     # phosphor_core) so it is always linked and the unit tests, which count

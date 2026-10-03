@@ -46,13 +46,15 @@ void ResidencyManager::add(const MTL::Allocation* allocation, ResidencyClass cls
     dirty_[c] = true;
 }
 
-void ResidencyManager::remove(const MTL::Allocation* allocation) {
+bool ResidencyManager::remove(const MTL::Allocation *allocation) {
     const auto it = owner_.find(allocation);
-    if (it == owner_.end()) return;
+    if (it == owner_.end())
+        return false;
     const u32 c = static_cast<u32>(it->second);
     sets_[c]->removeAllocation(allocation);
     owner_.erase(it);
     dirty_[c] = true;
+    return true;
 }
 
 void ResidencyManager::commit() {

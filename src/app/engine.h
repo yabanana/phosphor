@@ -12,6 +12,7 @@
 #include "rendergraph/optimizer/plan.h"
 #include "rendergraph/render_graph.h"
 #include "renderer/gpu_types.h"
+#include "renderer/history_registry.h"
 #include "renderer/scene_extract.h"
 #include "testbench/testbench.h"
 
@@ -47,6 +48,8 @@ class MetalTextureManager;
 class PipelineCache;
 class ShaderReloader;
 class SceneRenderer;
+class VisibilityRenderer;
+class PostProcessor;
 class MeshRenderer;
 class SceneStore;
 class GpuSceneChecker;
@@ -116,6 +119,13 @@ private:
     std::unique_ptr<PipelineCache>       pipelines_; // F3: every pipeline of the engine
     std::unique_ptr<ShaderReloader>      reloader_;  // F3.6 hot reload (Debug)
     std::unique_ptr<SceneRenderer>       renderer_;
+    std::unique_ptr<VisibilityRenderer> visibility_;
+    std::unique_ptr<PostProcessor> post_;
+    u64 sceneEpoch_ = 0;
+    float dynamicScale_ = 1.0f;
+    u32 renderBackingWidth_ = 0, renderBackingHeight_ = 0;
+    float displayHeadroom_ = 1.0f, displayPotentialHeadroom_ = 1.0f;
+    bool displayEDR_ = false;
     std::unique_ptr<MeshRenderer>        mesh_;      // F6 --geometry-path mesh
     std::unique_ptr<MetalTextureManager> textures_;
     std::unique_ptr<ImGuiRenderer>       imguiRenderer_;
@@ -163,6 +173,7 @@ private:
     u32                      ignoredInputEvents_ = 0; // benchmark mode ignores input
     std::vector<FrameSample> samples_;
     u64                      allocationsAtStart_ = 0;
+    u64 commandRebuildsAtStart_ = 0;
     u64                      heapBlocksAtStart_  = 0;
     u64                      heapBytesAtStart_   = 0;
     // CPU time spent blocked in beginFrame() (slot + drawable waits).
@@ -183,18 +194,21 @@ private:
     std::unique_ptr<GpuSceneChecker> sceneChecker_; // --debug-gpu-scene
     u32  gpuSceneChecks_   = 0;
     u32  gpuSceneFailures_ = 0;
-    // F6: Hi-Z history of the (single) view: valid once a two-phase frame has
-    // written it with `viewProj` at width x height; any reset makes phase A
-    // treat every geometrically valid candidate as visible.
+    // Camera metadata accompanies the per-view geometry history registry.
+    // The registered matrix is jittered for Hi-Z; MetalFX registers its
+    // independent unjittered signal in PostProcessor.
     struct HiZHistory {
-        bool  valid = false;
-        float viewProj[16]{};
-        u32   width = 0, height = 0;
-        u64   generation = 0;     // incremented on every reset
         glm::vec3 cameraPosition{0.0f};
-        glm::vec3 cameraFront{0.0f, 0.0f, -1.0f};
-        const char* lastReset = "start";
-    } history_;
+        glm::vec3 cameraFront{0.0f,0.0f,-1.0f};
+        double sceneTime=0;
+    };
+    std::array<HiZHistory,HistoryRegistry::MaxViews> histories_{};
+    HistoryRegistry hizRegistry_;
+    const HistoryRegistry::View &hizHistory() const { return hizRegistry_.get(currentView_); }
+    u32 currentView_ = 0;
+    u32 shaderGeneration_ = ~u32{0};
+    HiZHistory &history() { return histories_[currentView_]; }
+    const HiZHistory &history() const { return histories_[currentView_]; }
     struct MeshletSamples {
         std::vector<float> candidates, drawnA, frustum, cone, historyRejected, drawnB, occludedB, primitives, emitted, sizeCulled;
         u32 overflowFrames = 0;
@@ -216,6 +230,7 @@ private:
     double                      requestMsBeforeFrame_ = 0.0;
     double                      rtCompileMsBeforeFrame_ = 0.0;
     std::chrono::steady_clock::time_point launch_;
+    float eventPumpMs_ = 0.0f;
     bool                        firstFrameLogged_ = false;
     float                       startupPipelinesMs_ = 0.0f;
     bool                        hotReloadRequested_ = false; // --debug-hot-reload issued
@@ -233,6 +248,8 @@ private:
         u64  sceneBuffers  = 0; // GpuSceneBuffers::version(): capacities changed
         u64  meshletBuffers = 0; // F6: MeshRenderer::version() (+ debug view)
         u32  debugView      = 0;
+        rg::Format outputFormat = rg::Format::BGRA8Srgb;
+        u32 backingWidth = 0, backingHeight = 0;
         bool operator==(const GraphKey&) const = default;
     };
     rg::RenderGraph frameGraph_;
@@ -242,6 +259,7 @@ private:
     OverlayMode     overlayMode_ = OverlayMode::None; // --overlay, changed from the Rendering panel
     rg::TextureRef  drawableRef_;
     rg::BufferRef   captureRef_;
+    rg::TextureRef captureColorRef_;
     bool            captureThisFrame_ = false;
 
     MemoryPanelInfo memoryInfo_; // reused every frame (keeps vector capacity)

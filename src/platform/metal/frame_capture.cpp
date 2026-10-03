@@ -9,11 +9,15 @@
 namespace phosphor {
 
 FrameCapture::~FrameCapture() {
+    context_.memory().release(scratch_, MemoryCategory::Other);
     context_.memory().release(readback_, MemoryCategory::Other);
 }
 
 void FrameCapture::prepare(u32 width, u32 height) {
     if (readback_ && width == width_ && height == height_) return;
+    if (!scratch_)
+        scratch_ = context_.memory().newBuffer(16, MTL::ResourceStorageModeShared, MemoryCategory::Other,
+                                               "Capture boundary scratch");
     width_  = width;
     height_ = height;
     context_.memory().release(readback_, MemoryCategory::Other);
@@ -21,7 +25,12 @@ void FrameCapture::prepare(u32 width, u32 height) {
                                             "Frame capture");
 }
 
-void FrameCapture::encode(MTL4::ComputeCommandEncoder* enc, MTL::Texture* source) {
+void FrameCapture::encode(MTL4::ComputeCommandEncoder *enc, MTL::Texture *source, bool capture) {
+    if (!capture) {
+        // Keep this encoder nonempty without overwriting an earlier capture.
+        enc->copyFromTexture(source, 0, 0, MTL::Origin::Make(0, 0, 0), MTL::Size::Make(1, 1, 1), scratch_, 0, 4, 4);
+        return;
+    }
     const size_t rowBytes = static_cast<size_t>(width_) * 4;
     enc->copyFromTexture(source, 0, 0, MTL::Origin::Make(0, 0, 0), MTL::Size::Make(width_, height_, 1), readback_, 0,
                          rowBytes, rowBytes * height_);

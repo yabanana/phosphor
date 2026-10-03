@@ -245,13 +245,41 @@ std::string reportToJson(const BenchReport& r) {
                    ", \"primitives\": " + summaryToJson(m.primitives) + ", \"emitted\": " + summaryToJson(m.emitted) +
                    ", \"size_culled\": " + summaryToJson(m.sizeCulled) + "}";
     }
-    return head +
-           "  \"frame_ms\": " + summaryToJson(r.frameMs) + ",\n" +
-           "  \"cpu_ms\": " + summaryToJson(r.cpuMs) + ",\n" +
-           "  \"gpu_ms\": " + summaryToJson(r.gpuMs) + ",\n" +
-           "  \"wait_ms\": " + summaryToJson(r.waitMs) +
+    std::string rendering;
+    if (r.rendering.present) {
+        const auto &v = r.rendering;
+        const auto boolean = [](bool x) { return x ? "true" : "false"; };
+        rendering =
+            ",\n  \"rendering\": {\"offscreen\": " + std::string(boolean(v.offscreen)) + ", \"path\": \"" +
+            jsonEscape(v.path) + "\", \"asset\": \"" + jsonEscape(v.asset) +
+            "\", \"material_binning_requested\": " + boolean(v.materialBinning) + ", \"post\": " + boolean(v.post) +
+            ", \"upscaler_effective\": \"" + jsonEscape(v.upscaler) + "\", \"tonemap\": \"" + jsonEscape(v.tonemap) +
+            "\", \"input_width_last\": " + std::to_string(v.inputWidth) +
+            ", \"input_height_last\": " + std::to_string(v.inputHeight) + ", \"views\": " + std::to_string(v.views) +
+            ", \"frames_in_flight\": " + std::to_string(v.framesInFlight) +
+            ", \"gpu_failures\": " + std::to_string(v.gpuFailures) + ", \"auto_exposure\": " + boolean(v.autoExposure) +
+            ", \"exposure_last\": " + std::to_string(v.exposure) + ", \"edr\": " + boolean(v.edr) +
+            ", \"display_headroom_last\": " + std::to_string(v.headroom) +
+            ", \"display_potential_headroom\": " + std::to_string(v.potentialHeadroom) +
+            ", \"temporal_frames_total\": " + std::to_string(v.temporalFrames) +
+            ", \"native_frames_total\": " + std::to_string(v.nativeFrames) +
+            ", \"history_resets_total\": " + std::to_string(v.historyResets) +
+            ", \"binned_frames_total\": " + std::to_string(v.binnedFrames) +
+            ", \"generic_frames_total\": " + std::to_string(v.genericFrames) +
+            ", \"guide_checks\": " + std::to_string(v.guideChecks) +
+            ", \"shaded_pixels_last\": " + std::to_string(v.shadedPixels) +
+            ", \"reused_pixels_last\": " + std::to_string(v.reusedPixels) +
+            ", \"device_allocated_bytes_last\": " + std::to_string(v.deviceAllocatedBytes) +
+            ", \"engine_resource_bytes_last\": " + std::to_string(v.engineResourceBytes) +
+            ", \"command_buffer_rebuilds_total\": " + std::to_string(v.commandBufferRebuilds) +
+            ", \"command_buffer_rebuilds_measured\": " + std::to_string(v.commandBufferRebuildsMeasured) +
+            ", \"mip_bias_last\": " + std::to_string(v.mipBias) +
+            ", \"guide_failures\": " + std::to_string(v.guideFailures) + "}";
+    }
+    return head + "  \"frame_ms\": " + summaryToJson(r.frameMs) + ",\n" + "  \"cpu_ms\": " + summaryToJson(r.cpuMs) +
+           ",\n" + "  \"gpu_ms\": " + summaryToJson(r.gpuMs) + ",\n" + "  \"wait_ms\": " + summaryToJson(r.waitMs) +
            (r.pipelinesJson.empty() ? std::string() : ",\n  \"pipelines\": " + r.pipelinesJson) + ",\n" + timing +
-           graph + scene + phases + hardware + meshlets + "\n}\n";
+           graph + scene + phases + hardware + meshlets + rendering + "\n}\n";
 }
 
 } // namespace phosphor

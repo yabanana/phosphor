@@ -498,3 +498,52 @@ TEST_CASE("tbdr: a mid-group Clear of an already attached resource breaks fusion
     const CompiledGraph c = build(g);
     CHECK(c.renderGroups.size() == 2);
 }
+
+TEST_CASE("tbdr: tile shading keeps IDs in the raster imageblock and orders device outputs") {
+    RenderGraph g;
+    TextureRef id;
+    auto out = g.importTexture("hdr", colorDesc(320, 180, Format::RGBA16Float), ImportOutput);
+    g.addPass(
+        "IDs", PassType::Raster,
+        [&](PassBuilder &b) {
+            id = b.createTexture("id", colorDesc(320, 180, Format::R32Uint));
+            id = b.writeColor(id, 0, LoadIntent::Clear);
+        },
+        nullptr);
+    g.addPass(
+        "Tile shading", PassType::Raster,
+        [&](PassBuilder &b) {
+            b.setTileSize(16, 16);
+            b.readColor(id, 0, StageTile);
+            out = b.write(out, Usage::ShaderWrite, StageTile);
+        },
+        nullptr);
+    const auto compiled = build(g);
+    REQUIRE(compiled.ok);
+    REQUIRE(compiled.renderGroups.size() == 1);
+    CHECK(compiled.renderGroups[0].tileWidth == 16);
+    CHECK(compiled.renderGroups[0].tileHeight == 16);
+    CHECK(compiled.memoryless[id.resource]);
+    CHECK(compiled.renderGroups[0].attachments[0].store == StoreAction::DontCare);
+}
+TEST_CASE("tbdr: incompatible tile sizes split render groups") {
+    RenderGraph g;
+    auto target = g.importTexture("out", colorDesc(), ImportOutput);
+    g.addPass(
+        "16x16", PassType::Raster,
+        [&](PassBuilder &b) {
+            b.setTileSize(16, 16);
+            target = b.writeColor(target, 0, LoadIntent::Clear);
+        },
+        nullptr);
+    g.addPass(
+        "32x32", PassType::Raster,
+        [&](PassBuilder &b) {
+            b.setTileSize(32, 32);
+            target = b.writeColor(target, 0, LoadIntent::Preserve);
+        },
+        nullptr);
+    const auto compiled = build(g);
+    REQUIRE(compiled.ok);
+    CHECK(compiled.renderGroups.size() == 2);
+}

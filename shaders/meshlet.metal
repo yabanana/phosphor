@@ -13,6 +13,8 @@
 #include <metal_stdlib>
 
 #include "renderer/gpu_types.h"
+#include "renderer/visibility_math.h"
+#include "renderer/temporal_layout.h"
 #include "renderer/meshlet_cull_math.h"
 #include "renderer/meshlet_layout.h"
 // The fragment stage is forward_fs: the variant constants are declared here
@@ -21,6 +23,7 @@
 
 using namespace metal;
 using namespace phosphor;
+#include "surface_geometry.h"
 
 static_assert(MB_PARAMS == 0 && MB_INSTANCES == 1 && MB_MESHES == 2 && MB_MATERIALS == 3 && MB_SCENE_FLAGS == 4 &&
                   MB_GROUP_SUMS == 5 && MB_RANGES == 6 && MB_ARGS == 7 && MB_COUNTERS == 8 && MB_GATE == 9 &&
@@ -306,16 +309,13 @@ static float hizMin(texture2d<float, access::read> hiz, HiZFootprint f) {
 // pyramid (phase A's depth) under the current view.  Visible meshlets are
 // compacted into the payload with a SIMD prefix sum; one mesh threadgroup per
 // visible meshlet.
-[[object]] void meshlet_object(object_data MeshletPayload& payload [[payload]], mesh_grid_properties grid,
-                               constant GPUMeshletCullParams& p [[buffer(10)]],
-                               const device GPUMeshletDrawRange& range [[buffer(11)]],
-                               const device GPUMeshletCandidate* list [[buffer(12)]], device uint* bFlags [[buffer(13)]],
-                               device atomic_uint* counters [[buffer(14)]], device uint* decisions [[buffer(15)]],
-                               const device GPUInstance* instances [[buffer(2)]],
-                               const device GPUMeshlet* meshlets [[buffer(6)]],
-                               const device GPUMeshletBounds* bounds [[buffer(9)]],
-                               texture2d<float, access::read> hiz [[texture(0)]],
-                               uint group [[threadgroup_position_in_grid]], uint lane [[thread_index_in_threadgroup]]) {
+template <uint Pass>
+static void
+meshletObject(object_data MeshletPayload &payload, mesh_grid_properties grid, constant GPUMeshletCullParams &p,
+              const device GPUMeshletDrawRange &range, const device GPUMeshletCandidate *list, device uint *bFlags,
+              device atomic_uint *counters, device uint *decisions, const device GPUInstance *instances,
+              const device GPUMaterial *materials, const device GPUMeshlet *meshlets,
+              const device GPUMeshletBounds *bounds, texture2d<float, access::read> hiz, uint group, uint lane) {
     const uint idx    = group * MESHLET_OBJECT_GROUP + lane;
     const bool valid  = idx < range.count;
     const bool phaseB = range.phase == MESHLET_PHASE_B;
@@ -342,7 +342,7 @@ static float hizMin(texture2d<float, access::read> hiz, HiZFootprint f) {
                     if (f.usable != 0u && hizOccluded(f.nearestDepth, hizMin(hiz, f))) decision = MESHLET_DECISION_HISTORY;
                 }
             }
-            if ((p.flags & MESHLET_CULL_OCCLUSION) != 0u) {
+            if (Pass != 2u && (p.flags & MESHLET_CULL_OCCLUSION) != 0u) {
                 bFlags[range.first + idx] = decision == MESHLET_DECISION_HISTORY ? 1u : 0u;
             }
         } else {
@@ -350,7 +350,7 @@ static float hizMin(texture2d<float, access::read> hiz, HiZFootprint f) {
             if (f.usable != 0u && hizOccluded(f.nearestDepth, hizMin(hiz, f))) decision = MESHLET_DECISION_OCCLUDED;
         }
     }
-    if (valid && (p.flags & MESHLET_CULL_RECORD) != 0u) {
+    if (Pass != 2u && valid && (p.flags & MESHLET_CULL_RECORD) != 0u) {
         decisions[(phaseB ? p.candidateCapacity : 0u) + range.first + idx] = decision;
     }
     const bool drawn = valid && (decision == MESHLET_DECISION_DRAWN_A || decision == MESHLET_DECISION_DRAWN_B);
@@ -359,19 +359,22 @@ static float hizMin(texture2d<float, access::read> hiz, HiZFootprint f) {
     // on screen is a conservativeness bug).
     const bool debugExtra = (p.flags & MESHLET_CULL_DEBUG_ALL) != 0u && valid &&
                             (decision == MESHLET_DECISION_CONE || decision == MESHLET_DECISION_OCCLUDED);
-    const bool emit = drawn || debugExtra;
+    const bool masked = valid && materials[instances[cand.slot].materialIndex].alphaCutoff > 0.0f;
+    const bool materialPass = Pass == 0u || (Pass == 2u ? masked : !masked);
+    const bool emit = (drawn || debugExtra) && materialPass;
     const uint pos  = simd_prefix_exclusive_sum(emit ? 1u : 0u);
     if (emit) {
         payload.slot[pos]     = cand.slot;
         payload.meshlet[pos]  = cand.meshlet;
-        payload.decision[pos] = decision;
+        payload.decision[pos] = Pass == 0u ? decision : (phaseB ? p.candidateCapacity : 0u) + range.first + idx;
     }
     const uint total = simd_sum(emit ? 1u : 0u);
     // Counters: one atomic per SIMD-group and counter.
     const uint prims = simd_sum(drawn ? meshlets[cand.meshlet].triangleCount : 0u);
     const uint nDraw = simd_sum(drawn ? 1u : 0u);
-    if (lane == 0u) {
+    if (lane == 0u)
         grid.set_threadgroups_per_grid(uint3(total, 1u, 1u));
+    if (lane == 0u && Pass != 2u) {
         if (!phaseB) {
             atomic_fetch_add_explicit(&counters[MESHLET_COUNTER_GROUPS_A], 1u, memory_order_relaxed);
             if (nDraw) atomic_fetch_add_explicit(&counters[MESHLET_COUNTER_DRAWN_A], nDraw, memory_order_relaxed);
@@ -388,7 +391,7 @@ static float hizMin(texture2d<float, access::read> hiz, HiZFootprint f) {
     const uint nT = simd_sum(valid && phaseB ? 1u : 0u);
     const uint nO = simd_sum(valid && decision == MESHLET_DECISION_OCCLUDED ? 1u : 0u);
     const uint nS = simd_sum(valid && decision == MESHLET_DECISION_SIZE ? 1u : 0u);
-    if (lane == 0u) {
+    if (lane == 0u && Pass != 2u) {
         if (nF) atomic_fetch_add_explicit(&counters[MESHLET_COUNTER_FRUSTUM], nF, memory_order_relaxed);
         if (nC) atomic_fetch_add_explicit(&counters[MESHLET_COUNTER_CONE], nC, memory_order_relaxed);
         if (nH) atomic_fetch_add_explicit(&counters[MESHLET_COUNTER_HISTORY], nH, memory_order_relaxed);
@@ -398,12 +401,51 @@ static float hizMin(texture2d<float, access::read> hiz, HiZFootprint f) {
     }
 }
 
+[[object]] void
+meshlet_object(object_data MeshletPayload &payload [[payload]], mesh_grid_properties grid,
+               constant GPUMeshletCullParams &p [[buffer(10)]], const device GPUMeshletDrawRange &range [[buffer(11)]],
+               const device GPUMeshletCandidate *list [[buffer(12)]], device uint *bFlags [[buffer(13)]],
+               device atomic_uint *counters [[buffer(14)]], device uint *decisions [[buffer(15)]],
+               const device GPUInstance *instances [[buffer(2)]], const device GPUMaterial *materials [[buffer(3)]],
+               const device GPUMeshlet *meshlets [[buffer(6)]], const device GPUMeshletBounds *bounds [[buffer(9)]],
+               texture2d<float, access::read> hiz [[texture(0)]], uint group [[threadgroup_position_in_grid]],
+               uint lane [[thread_index_in_threadgroup]]) {
+    meshletObject<0u>(payload, grid, p, range, list, bFlags, counters, decisions, instances, materials, meshlets,
+                      bounds, hiz, group, lane);
+}
+
+[[object]] void visibility_object_opaque(
+    object_data MeshletPayload &payload [[payload]], mesh_grid_properties grid,
+    constant GPUMeshletCullParams &p [[buffer(10)]], const device GPUMeshletDrawRange &range [[buffer(11)]],
+    const device GPUMeshletCandidate *list [[buffer(12)]], device uint *bFlags [[buffer(13)]],
+    device atomic_uint *counters [[buffer(14)]], device uint *decisions [[buffer(15)]],
+    const device GPUInstance *instances [[buffer(2)]], const device GPUMaterial *materials [[buffer(3)]],
+    const device GPUMeshlet *meshlets [[buffer(6)]], const device GPUMeshletBounds *bounds [[buffer(9)]],
+    texture2d<float, access::read> hiz [[texture(0)]], uint group [[threadgroup_position_in_grid]],
+    uint lane [[thread_index_in_threadgroup]]) {
+    meshletObject<1u>(payload, grid, p, range, list, bFlags, counters, decisions, instances, materials, meshlets,
+                      bounds, hiz, group, lane);
+}
+
+[[object]] void visibility_object_alpha(
+    object_data MeshletPayload &payload [[payload]], mesh_grid_properties grid,
+    constant GPUMeshletCullParams &p [[buffer(10)]], const device GPUMeshletDrawRange &range [[buffer(11)]],
+    const device GPUMeshletCandidate *list [[buffer(12)]], device uint *bFlags [[buffer(13)]],
+    device atomic_uint *counters [[buffer(14)]], device uint *decisions [[buffer(15)]],
+    const device GPUInstance *instances [[buffer(2)]], const device GPUMaterial *materials [[buffer(3)]],
+    const device GPUMeshlet *meshlets [[buffer(6)]], const device GPUMeshletBounds *bounds [[buffer(9)]],
+    texture2d<float, access::read> hiz [[texture(0)]], uint group [[threadgroup_position_in_grid]],
+    uint lane [[thread_index_in_threadgroup]]) {
+    meshletObject<2u>(payload, grid, p, range, list, bFlags, counters, decisions, instances, materials, meshlets,
+                      bounds, hiz, group, lane);
+}
+
 // ---- mesh shaders ---------------------------------------------------------------------
 
 // Must match VertexOut of shaders/forward.metal member for member (the
 // fragment stage is forward_fs).
 struct VertexOut {
-    float4 position [[position]];
+    float4 position [[position, invariant]];
     float3 worldPos;
     float3 normal;
     float4 tangent;
@@ -450,8 +492,9 @@ using MeshletMesh = metal::mesh<VertexOut, void, MESHLET_MESH_GROUP, MESHLET_MES
         VertexOut o;
         o.position      = loadMatrix(frame.viewProjection) * world;
         o.worldPos      = world.xyz;
-        o.normal        = normalMatrix * float3(v.nx, v.ny, v.nz);
-        o.tangent       = float4(normalMatrix * float3(v.tx, v.ty, v.tz), v.tw);
+        o.normal = surfaceNormal(model, float3(v.nx, v.ny, v.nz));
+        o.tangent = float4(normalMatrix * float3(v.tx, v.ty, v.tz),
+                           v.tw * ((gi.flags & INSTANCE_FLAG_MIRRORED) ? -1.0f : 1.0f));
         o.uv            = float2(v.u, v.v);
         o.materialIndex = gi.materialIndex;
         o.mirrored      = (gi.flags & INSTANCE_FLAG_MIRRORED) != 0 ? 1u : 0u;
@@ -499,8 +542,9 @@ using MeshletMesh = metal::mesh<VertexOut, void, MESHLET_MESH_GROUP, MESHLET_MES
         VertexOut o;
         o.position      = loadMatrix(frame.viewProjection) * world;
         o.worldPos      = world.xyz;
-        o.normal        = normalMatrix * float3(v.nx, v.ny, v.nz);
-        o.tangent       = float4(normalMatrix * float3(v.tx, v.ty, v.tz), v.tw);
+        o.normal = surfaceNormal(model, float3(v.nx, v.ny, v.nz));
+        o.tangent = float4(normalMatrix * float3(v.tx, v.ty, v.tz),
+                           v.tw * ((gi.flags & INSTANCE_FLAG_MIRRORED) ? -1.0f : 1.0f));
         o.uv            = float2(v.u, v.v);
         o.materialIndex = gi.materialIndex;
         o.mirrored      = (gi.flags & INSTANCE_FLAG_MIRRORED) != 0 ? 1u : 0u;
@@ -580,8 +624,9 @@ using MeshletMesh = metal::mesh<VertexOut, void, MESHLET_MESH_GROUP, MESHLET_MES
         VertexOut o;
         o.position      = loadMatrix(frame.viewProjection) * world;
         o.worldPos      = world.xyz;
-        o.normal        = normalMatrix * float3(v.nx, v.ny, v.nz);
-        o.tangent       = float4(normalMatrix * float3(v.tx, v.ty, v.tz), v.tw);
+        o.normal = surfaceNormal(model, float3(v.nx, v.ny, v.nz));
+        o.tangent = float4(normalMatrix * float3(v.tx, v.ty, v.tz),
+                           v.tw * ((gi.flags & INSTANCE_FLAG_MIRRORED) ? -1.0f : 1.0f));
         o.uv            = float2(v.u, v.v);
         o.materialIndex = gi.materialIndex;
         o.mirrored      = (gi.flags & INSTANCE_FLAG_MIRRORED) != 0 ? 1u : 0u;
@@ -598,7 +643,7 @@ using MeshletMesh = metal::mesh<VertexOut, void, MESHLET_MESH_GROUP, MESHLET_MES
 // ---- debug views (F6.7) ---------------------------------------------------------------
 
 struct DebugVertexOut {
-    float4 position [[position]];
+    float4 position [[position, invariant]];
     float3 color [[flat]];
 };
 
@@ -657,3 +702,70 @@ static float3 decisionColor(uint d) {
 }
 
 fragment half4 meshlet_debug_fs(DebugVertexOut in [[stage_in]]) { return half4(half3(in.color), 1.0h); }
+
+// F7: primitive data identifies the exact instance/meshlet reference and
+// triangle. It does not depend on the rasterizer's primitive_id numbering.
+struct VisibilityVertex {
+    float4 position [[position, invariant]];
+    float2 uv;
+    uint materialIndex [[flat]];
+};
+struct VisibilityPrimitive {
+    uint id [[flat]];
+};
+struct VisibilityFragment {
+    VisibilityVertex vert;
+    VisibilityPrimitive primitive;
+};
+using VisibilityMesh =
+    metal::mesh<VisibilityVertex, VisibilityPrimitive, MESHLET_MESH_GROUP, MESHLET_MESH_GROUP, topology::triangle>;
+
+[[mesh]] void
+visibility_mesh(VisibilityMesh out, const object_data MeshletPayload &payload [[payload]],
+                uint tid [[thread_index_in_threadgroup]], uint gid [[threadgroup_position_in_grid]],
+                constant FrameConstants &frame [[buffer(0)]], const device GPUVertex *vertices [[buffer(1)]],
+                const device GPUInstance *instances [[buffer(2)]], const device GPUMeshlet *meshlets [[buffer(6)]],
+                const device uint *meshletVertices [[buffer(7)]], const device uchar *triangles [[buffer(8)]]) {
+    const GPUMeshlet m = meshlets[payload.meshlet[gid]];
+    const GPUInstance gi = instances[payload.slot[gid]];
+    if (tid == 0)
+        out.set_primitive_count(m.triangleCount);
+    if (tid < m.vertexCount) {
+        const GPUVertex v = vertices[meshletVertices[m.vertexOffset + tid]];
+        VisibilityVertex o;
+        const float4x4 model =
+            float4x4(float4(gi.modelMatrix[0], gi.modelMatrix[1], gi.modelMatrix[2], gi.modelMatrix[3]),
+                     float4(gi.modelMatrix[4], gi.modelMatrix[5], gi.modelMatrix[6], gi.modelMatrix[7]),
+                     float4(gi.modelMatrix[8], gi.modelMatrix[9], gi.modelMatrix[10], gi.modelMatrix[11]),
+                     float4(gi.modelMatrix[12], gi.modelMatrix[13], gi.modelMatrix[14], gi.modelMatrix[15]));
+        o.position = loadMatrix(frame.viewProjection) * model * float4(v.px, v.py, v.pz, 1);
+        o.uv = float2(v.u, v.v);
+        o.materialIndex = gi.materialIndex;
+        out.set_vertex(tid, o);
+    }
+    if (tid < m.triangleCount) {
+        for (uint k = 0; k < 3; ++k)
+            out.set_index(tid * 3 + k, triangles[m.triangleOffset + tid * 3 + k]);
+        out.set_primitive(tid, VisibilityPrimitive{visibilityPack(payload.decision[gid], tid)});
+    }
+}
+fragment uint visibility_opaque_fs(VisibilityFragment in [[stage_in]]) {
+    return in.primitive.id;
+}
+struct VisibilityTextureHandle {
+    texture2d<float> tex;
+};
+fragment uint visibility_alpha_fs(VisibilityFragment in [[stage_in]], const device GPUMaterial *materials [[buffer(3)]],
+                                  const device VisibilityTextureHandle *textures [[buffer(5)]],
+                                  constant GPUTemporalParams &temporal [[buffer(16)]]) {
+    const GPUMaterial material = materials[in.vert.materialIndex];
+    constexpr sampler sampling(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
+    const float alpha =
+        material.baseColor[3] *
+        (material.baseColorTex == INVALID_TEXTURE_INDEX
+             ? 1.0f
+             : float(half(textures[material.baseColorTex].tex.sample(sampling, in.vert.uv, bias(temporal.mipBias)).a)));
+    if (alpha < material.alphaCutoff)
+        discard_fragment();
+    return in.primitive.id;
+}

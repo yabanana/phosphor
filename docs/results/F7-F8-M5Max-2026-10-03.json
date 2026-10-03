@@ -1,0 +1,1187 @@
+{
+  "schema": 1,
+  "date": "2026-10-03",
+  "source_commit": "3231364",
+  "benchmark_runner_commit": "0fc5fa3",
+  "hardware": {
+    "device": "Apple M5 Max",
+    "physical_family": "apple10",
+    "memory_gib": 128,
+    "physical_T0": "EXTERNAL_VALIDATION_PENDING"
+  },
+  "scope": "F7 development acceptance and F8 functional evidence; F8.4 SDK lifetime gate remains open. Not hardware certification.",
+  "performance_manifest": {
+    "conditions": {
+      "power": "AC power, battery charged (100%)",
+      "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded",
+      "os_build": "26B5091g",
+      "metal": "Apple metal version 32023.921 (metalfe-32023.921.6)\nTarget: air64-apple-darwin27.2.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v27.1.266.1.nuTRiL/Metal.xctoolchain/usr/metal/current/bin"
+    },
+    "frames": 600,
+    "warmup": 120,
+    "resolution": [
+      1920,
+      1080
+    ],
+    "order": [
+      [
+        "f7-forward",
+        "f7-generic",
+        "f7-binned",
+        "f8-native",
+        "f8-temporal",
+        "f8-binned",
+        "f8-frustum",
+        "f8-tile",
+        "f8-adaptive-sponza",
+        "f8-cornell",
+        "f8-adaptive-cornell",
+        "f8-lights",
+        "f8-binned-lights"
+      ],
+      [
+        "f7-generic",
+        "f7-binned",
+        "f8-native",
+        "f8-temporal",
+        "f8-binned",
+        "f8-frustum",
+        "f8-tile",
+        "f8-adaptive-sponza",
+        "f8-cornell",
+        "f8-adaptive-cornell",
+        "f8-lights",
+        "f8-binned-lights",
+        "f7-forward"
+      ],
+      [
+        "f7-binned",
+        "f8-native",
+        "f8-temporal",
+        "f8-binned",
+        "f8-frustum",
+        "f8-tile",
+        "f8-adaptive-sponza",
+        "f8-cornell",
+        "f8-adaptive-cornell",
+        "f8-lights",
+        "f8-binned-lights",
+        "f7-forward",
+        "f7-generic"
+      ]
+    ],
+    "scope": "M5 offscreen throughput; no hardware DRAM/energy counter claim"
+  },
+  "performance": {
+    "f7-forward": {
+      "frame_mean_median_ms": 0.3081,
+      "frame_mean_range_ms": [
+        0.3077,
+        0.3084
+      ],
+      "p95_median_run_ms": 0.3482,
+      "p99_median_run_ms": 0.5023,
+      "cpu_mean_ms": 0.0257,
+      "gpu_span_mean_ms": 0.6151,
+      "device_allocated_bytes_last": 941096960,
+      "graph_heap_bytes": 0,
+      "declared_graph_dram_bytes": 16760064,
+      "shaded_pixels_last": 0,
+      "reused_pixels_last": 0,
+      "engine_resource_bytes_last": 826372132,
+      "gpu_allocations_measured": [
+        0,
+        0,
+        0
+      ],
+      "command_buffer_rebuilds_measured": [
+        0,
+        0,
+        0
+      ]
+    },
+    "f7-generic": {
+      "frame_mean_median_ms": 0.6036,
+      "frame_mean_range_ms": [
+        0.6036,
+        0.6042
+      ],
+      "p95_median_run_ms": 0.7142,
+      "p99_median_run_ms": 0.8722,
+      "cpu_mean_ms": 0.0637,
+      "gpu_span_mean_ms": 0.9123,
+      "device_allocated_bytes_last": 1089454080,
+      "graph_heap_bytes": 95174656,
+      "declared_graph_dram_bytes": 690749304,
+      "shaded_pixels_last": 0,
+      "reused_pixels_last": 0,
+      "engine_resource_bytes_last": 988822577,
+      "gpu_allocations_measured": [
+        0,
+        0,
+        0
+      ],
+      "command_buffer_rebuilds_measured": [
+        0,
+        0,
+        0
+      ]
+    },
+    "f7-binned": {
+      "frame_mean_median_ms": 0.6298,
+      "frame_mean_range_ms": [
+        0.6284,
+        0.6301
+      ],
+      "p95_median_run_ms": 0.743,
+      "p99_median_run_ms": 0.9644,
+      "cpu_mean_ms": 0.0669,
+      "gpu_span_mean_ms": 0.9346,
+      "device_allocated_bytes_last": 1089454080,
+      "graph_heap_bytes": 95174656,
+      "declared_graph_dram_bytes": 707064056,
+      "shaded_pixels_last": 0,
+      "reused_pixels_last": 0,
+      "engine_resource_bytes_last": 988822577,
+      "gpu_allocations_measured": [
+        0,
+        0,
+        0
+      ],
+      "command_buffer_rebuilds_measured": [
+        0,
+        0,
+        0
+      ]
+    },
+    "f8-native": {
+      "frame_mean_median_ms": 0.6431,
+      "frame_mean_range_ms": [
+        0.6414,
+        0.6436
+      ],
+      "p95_median_run_ms": 0.7499,
+      "p99_median_run_ms": 0.943,
+      "cpu_mean_ms": 0.0765,
+      "gpu_span_mean_ms": 0.6881,
+      "device_allocated_bytes_last": 1089454080,
+      "graph_heap_bytes": 95174656,
+      "declared_graph_dram_bytes": 686606276,
+      "shaded_pixels_last": 0,
+      "reused_pixels_last": 0,
+      "engine_resource_bytes_last": 1039354049,
+      "gpu_allocations_measured": [
+        0,
+        0,
+        0
+      ],
+      "command_buffer_rebuilds_measured": [
+        0,
+        0,
+        0
+      ]
+    },
+    "f8-temporal": {
+      "frame_mean_median_ms": 2.1612,
+      "frame_mean_range_ms": [
+        2.1561,
+        2.1692
+      ],
+      "p95_median_run_ms": 2.3165,
+      "p99_median_run_ms": 2.6549,
+      "cpu_mean_ms": 0.1403,
+      "gpu_span_mean_ms": 2.3929,
+      "device_allocated_bytes_last": 1263157248,
+      "graph_heap_bytes": 95174656,
+      "declared_graph_dram_bytes": 686606276,
+      "shaded_pixels_last": 0,
+      "reused_pixels_last": 0,
+      "engine_resource_bytes_last": 1039354049,
+      "gpu_allocations_measured": [
+        0,
+        0,
+        0
+      ],
+      "command_buffer_rebuilds_measured": [
+        0,
+        0,
+        0
+      ]
+    },
+    "f8-binned": {
+      "frame_mean_median_ms": 2.1551,
+      "frame_mean_range_ms": [
+        2.1538,
+        2.208
+      ],
+      "p95_median_run_ms": 2.3298,
+      "p99_median_run_ms": 2.5053,
+      "cpu_mean_ms": 0.139,
+      "gpu_span_mean_ms": 2.3924,
+      "device_allocated_bytes_last": 1263157248,
+      "graph_heap_bytes": 95174656,
+      "declared_graph_dram_bytes": 702921028,
+      "shaded_pixels_last": 0,
+      "reused_pixels_last": 0,
+      "engine_resource_bytes_last": 1039354049,
+      "gpu_allocations_measured": [
+        0,
+        0,
+        0
+      ],
+      "command_buffer_rebuilds_measured": [
+        0,
+        0,
+        0
+      ]
+    },
+    "f8-frustum": {
+      "frame_mean_median_ms": 2.1569,
+      "frame_mean_range_ms": [
+        2.1522,
+        2.162
+      ],
+      "p95_median_run_ms": 2.3319,
+      "p99_median_run_ms": 2.7167,
+      "cpu_mean_ms": 0.1262,
+      "gpu_span_mean_ms": 2.3894,
+      "device_allocated_bytes_last": 1263157248,
+      "graph_heap_bytes": 95174656,
+      "declared_graph_dram_bytes": 545740404,
+      "shaded_pixels_last": 0,
+      "reused_pixels_last": 0,
+      "engine_resource_bytes_last": 1039354049,
+      "gpu_allocations_measured": [
+        0,
+        0,
+        0
+      ],
+      "command_buffer_rebuilds_measured": [
+        0,
+        0,
+        0
+      ]
+    },
+    "f8-tile": {
+      "frame_mean_median_ms": 2.1535,
+      "frame_mean_range_ms": [
+        2.1534,
+        2.1575
+      ],
+      "p95_median_run_ms": 2.3118,
+      "p99_median_run_ms": 2.4898,
+      "cpu_mean_ms": 0.1274,
+      "gpu_span_mean_ms": 2.3823,
+      "device_allocated_bytes_last": 1254670336,
+      "graph_heap_bytes": 86687744,
+      "declared_graph_dram_bytes": 367149556,
+      "shaded_pixels_last": 0,
+      "reused_pixels_last": 0,
+      "engine_resource_bytes_last": 1030867137,
+      "gpu_allocations_measured": [
+        0,
+        0,
+        0
+      ],
+      "command_buffer_rebuilds_measured": [
+        0,
+        0,
+        0
+      ]
+    },
+    "f8-adaptive-sponza": {
+      "frame_mean_median_ms": 2.2097,
+      "frame_mean_range_ms": [
+        2.1993,
+        2.21
+      ],
+      "p95_median_run_ms": 2.4952,
+      "p99_median_run_ms": 2.9383,
+      "cpu_mean_ms": 0.1362,
+      "gpu_span_mean_ms": 2.278,
+      "device_allocated_bytes_last": 1263157248,
+      "graph_heap_bytes": 95174656,
+      "declared_graph_dram_bytes": 818781380,
+      "shaded_pixels_last": 1166400,
+      "reused_pixels_last": 0,
+      "engine_resource_bytes_last": 1072531649,
+      "gpu_allocations_measured": [
+        0,
+        0,
+        0
+      ],
+      "command_buffer_rebuilds_measured": [
+        0,
+        0,
+        0
+      ]
+    },
+    "f8-cornell": {
+      "frame_mean_median_ms": 2.0829,
+      "frame_mean_range_ms": [
+        2.0805,
+        2.0835
+      ],
+      "p95_median_run_ms": 2.319,
+      "p99_median_run_ms": 2.6337,
+      "cpu_mean_ms": 0.1354,
+      "gpu_span_mean_ms": 2.3518,
+      "device_allocated_bytes_last": 966590464,
+      "graph_heap_bytes": 95174656,
+      "declared_graph_dram_bytes": 602580292,
+      "shaded_pixels_last": 0,
+      "reused_pixels_last": 0,
+      "engine_resource_bytes_last": 611058710,
+      "gpu_allocations_measured": [
+        0,
+        0,
+        0
+      ],
+      "command_buffer_rebuilds_measured": [
+        0,
+        0,
+        0
+      ]
+    },
+    "f8-adaptive-cornell": {
+      "frame_mean_median_ms": 2.089,
+      "frame_mean_range_ms": [
+        2.0831,
+        2.0955
+      ],
+      "p95_median_run_ms": 2.1485,
+      "p99_median_run_ms": 2.3789,
+      "cpu_mean_ms": 0.1357,
+      "gpu_span_mean_ms": 2.1364,
+      "device_allocated_bytes_last": 966590464,
+      "graph_heap_bytes": 95174656,
+      "declared_graph_dram_bytes": 727041860,
+      "shaded_pixels_last": 212235,
+      "reused_pixels_last": 279867,
+      "engine_resource_bytes_last": 644236310,
+      "gpu_allocations_measured": [
+        0,
+        0,
+        0
+      ],
+      "command_buffer_rebuilds_measured": [
+        0,
+        0,
+        0
+      ]
+    },
+    "f8-lights": {
+      "frame_mean_median_ms": 11.4104,
+      "frame_mean_range_ms": [
+        11.3947,
+        11.5602
+      ],
+      "p95_median_run_ms": 11.6591,
+      "p99_median_run_ms": 11.7555,
+      "cpu_mean_ms": 0.2066,
+      "gpu_span_mean_ms": 11.6555,
+      "device_allocated_bytes_last": 966590464,
+      "graph_heap_bytes": 95174656,
+      "declared_graph_dram_bytes": 602753476,
+      "shaded_pixels_last": 0,
+      "reused_pixels_last": 0,
+      "engine_resource_bytes_last": 611084018,
+      "gpu_allocations_measured": [
+        0,
+        0,
+        0
+      ],
+      "command_buffer_rebuilds_measured": [
+        0,
+        0,
+        0
+      ]
+    },
+    "f8-binned-lights": {
+      "frame_mean_median_ms": 11.8327,
+      "frame_mean_range_ms": [
+        11.364,
+        12.2034
+      ],
+      "p95_median_run_ms": 12.2165,
+      "p99_median_run_ms": 12.3675,
+      "cpu_mean_ms": 0.2086,
+      "gpu_span_mean_ms": 12.0591,
+      "device_allocated_bytes_last": 966590464,
+      "graph_heap_bytes": 95174656,
+      "declared_graph_dram_bytes": 611365188,
+      "shaded_pixels_last": 0,
+      "reused_pixels_last": 0,
+      "engine_resource_bytes_last": 611084018,
+      "gpu_allocations_measured": [
+        0,
+        0,
+        0
+      ],
+      "command_buffer_rebuilds_measured": [
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  "quality": [
+    {
+      "name": "clip-b1-reference",
+      "passed": true,
+      "status": "clip-b1-reference.log.status.json"
+    },
+    {
+      "name": "clip-b1-control",
+      "passed": true,
+      "status": "clip-b1-control.log.status.json"
+    },
+    {
+      "name": "clip-b1-temporal",
+      "passed": true,
+      "status": "clip-b1-temporal.log.status.json"
+    },
+    {
+      "name": "clip-b1-adaptive",
+      "passed": true,
+      "status": "clip-b1-adaptive.log.status.json"
+    },
+    {
+      "name": "clip-b1-tile",
+      "passed": true,
+      "status": "clip-b1-tile.log.status.json"
+    },
+    {
+      "name": "quality-b1-temporal",
+      "passed": true,
+      "metrics": {
+        "frames": 480,
+        "mean_psnr_srgb_db": 34.8534496175948,
+        "linear_rmse_p95": 0.018700880743563176,
+        "linear_rmse_max": 0.02213067188858986,
+        "residual_flicker_mean": 0.001534139582508942,
+        "ghost_fraction_max": 1.0,
+        "excess_ghost_fraction_max": 0.875,
+        "support_ghost_fraction_max": 0.03282275711159737,
+        "recovery_frames": {
+          "119": 0,
+          "239": 0,
+          "359": 0
+        }
+      }
+    },
+    {
+      "name": "quality-b1-adaptive",
+      "passed": true,
+      "metrics": {
+        "frames": 480,
+        "mean_psnr_srgb_db": 34.85199524281556,
+        "linear_rmse_p95": 0.018688196409493683,
+        "linear_rmse_max": 0.022134440019726753,
+        "residual_flicker_mean": 0.0015354609582573175,
+        "ghost_fraction_max": 1.0,
+        "excess_ghost_fraction_max": 0.875,
+        "support_ghost_fraction_max": 0.0350109409190372,
+        "recovery_frames": {
+          "119": 0,
+          "239": 0,
+          "359": 0
+        }
+      }
+    },
+    {
+      "name": "quality-b1-tile",
+      "passed": true,
+      "metrics": {
+        "frames": 480,
+        "mean_psnr_srgb_db": 34.8519212536686,
+        "linear_rmse_p95": 0.018689667154103518,
+        "linear_rmse_max": 0.02213350683450699,
+        "residual_flicker_mean": 0.0015344161186173248,
+        "ghost_fraction_max": 1.0,
+        "excess_ghost_fraction_max": 0.875,
+        "support_ghost_fraction_max": 0.03282275711159737,
+        "recovery_frames": {
+          "119": 0,
+          "239": 0,
+          "359": 0
+        }
+      }
+    },
+    {
+      "name": "negative-quality-b1",
+      "passed": true
+    },
+    {
+      "name": "clip-b4-reference",
+      "passed": true,
+      "status": "clip-b4-reference.log.status.json"
+    },
+    {
+      "name": "clip-b4-control",
+      "passed": true,
+      "status": "clip-b4-control.log.status.json"
+    },
+    {
+      "name": "clip-b4-temporal",
+      "passed": true,
+      "status": "clip-b4-temporal.log.status.json"
+    },
+    {
+      "name": "clip-b4-adaptive",
+      "passed": true,
+      "status": "clip-b4-adaptive.log.status.json"
+    },
+    {
+      "name": "clip-b4-tile",
+      "passed": true,
+      "status": "clip-b4-tile.log.status.json"
+    },
+    {
+      "name": "quality-b4-temporal",
+      "passed": true,
+      "metrics": {
+        "frames": 480,
+        "mean_psnr_srgb_db": 30.160377631332253,
+        "linear_rmse_p95": 0.024352253787219523,
+        "linear_rmse_max": 0.03297777473926544,
+        "residual_flicker_mean": 0.005860329889158796,
+        "ghost_fraction_max": 1.0,
+        "excess_ghost_fraction_max": 0.6666666666666666,
+        "support_ghost_fraction_max": 0.06944444444444445,
+        "recovery_frames": {
+          "119": 0,
+          "239": 0,
+          "359": 0
+        }
+      }
+    },
+    {
+      "name": "quality-b4-adaptive",
+      "passed": true,
+      "metrics": {
+        "frames": 480,
+        "mean_psnr_srgb_db": 30.160377631332253,
+        "linear_rmse_p95": 0.024352253787219523,
+        "linear_rmse_max": 0.03297777473926544,
+        "residual_flicker_mean": 0.005860329889158796,
+        "ghost_fraction_max": 1.0,
+        "excess_ghost_fraction_max": 0.6666666666666666,
+        "support_ghost_fraction_max": 0.06944444444444445,
+        "recovery_frames": {
+          "119": 0,
+          "239": 0,
+          "359": 0
+        }
+      }
+    },
+    {
+      "name": "quality-b4-tile",
+      "passed": true,
+      "metrics": {
+        "frames": 480,
+        "mean_psnr_srgb_db": 30.160377631332253,
+        "linear_rmse_p95": 0.024352253787219523,
+        "linear_rmse_max": 0.03297777473926544,
+        "residual_flicker_mean": 0.005860329889158796,
+        "ghost_fraction_max": 1.0,
+        "excess_ghost_fraction_max": 0.6666666666666666,
+        "support_ghost_fraction_max": 0.06944444444444445,
+        "recovery_frames": {
+          "119": 0,
+          "239": 0,
+          "359": 0
+        }
+      }
+    },
+    {
+      "name": "negative-quality-b4",
+      "passed": true
+    }
+  ],
+  "context_quality": [
+    {
+      "name": "exposure-reference",
+      "passed": true,
+      "status": "exposure-reference.log.status.json"
+    },
+    {
+      "name": "exposure-control",
+      "passed": true,
+      "status": "exposure-control.log.status.json"
+    },
+    {
+      "name": "exposure-temporal",
+      "passed": true,
+      "status": "exposure-temporal.log.status.json"
+    },
+    {
+      "name": "exposure-quality",
+      "passed": true,
+      "metrics": {
+        "frames": 180,
+        "mean_psnr_srgb_db": 38.147308448746685,
+        "linear_rmse_p95": 0.02152126431465148,
+        "linear_rmse_max": 0.02591693587601185,
+        "residual_flicker_mean": 0.0007821193121748769,
+        "ghost_fraction_max": 1.0,
+        "excess_ghost_fraction_max": 1.0,
+        "support_ghost_fraction_max": 0.0002698989105898518,
+        "recovery_frames": {
+          "119": 0
+        }
+      }
+    },
+    {
+      "name": "drs-views-reference",
+      "passed": true,
+      "status": "drs-views-reference.log.status.json"
+    },
+    {
+      "name": "drs-views-control",
+      "passed": true,
+      "status": "drs-views-control.log.status.json"
+    },
+    {
+      "name": "drs-views-temporal",
+      "passed": true,
+      "status": "drs-views-temporal.log.status.json"
+    },
+    {
+      "name": "drs-views-quality",
+      "passed": true,
+      "metrics": {
+        "frames": 180,
+        "mean_psnr_srgb_db": 35.27767697003514,
+        "linear_rmse_p95": 0.021500752307474613,
+        "linear_rmse_max": 0.022757869213819504,
+        "residual_flicker_mean": 0.001915206109212401,
+        "ghost_fraction_max": 0.7206703910614525,
+        "excess_ghost_fraction_max": 0.5952380952380952,
+        "support_ghost_fraction_max": 0.00020044097013429546,
+        "recovery_frames": {
+          "119": 0
+        }
+      }
+    }
+  ],
+  "functional": [
+    {
+      "name": "b1-forward",
+      "passed": true,
+      "status": "b1-forward.log.status.json"
+    },
+    {
+      "name": "b1-generic",
+      "passed": true,
+      "status": "b1-generic.log.status.json"
+    },
+    {
+      "name": "b1-binned",
+      "passed": true,
+      "status": "b1-binned.log.status.json"
+    },
+    {
+      "name": "b1-tile",
+      "passed": true,
+      "status": "b1-tile.log.status.json"
+    },
+    {
+      "name": "b1-forward-resolve",
+      "passed": true,
+      "result": "0 of 230400 pixels differ (tolerance 1), max delta 1, PSNR 64.74 dB"
+    },
+    {
+      "name": "b1-bins",
+      "passed": true,
+      "result": "0 of 230400 pixels differ (tolerance 0), max delta 0, PSNR inf dB"
+    },
+    {
+      "name": "b1-tile",
+      "passed": true,
+      "result": "0 of 230400 pixels differ (tolerance 0), max delta 0, PSNR inf dB"
+    },
+    {
+      "name": "b4-forward",
+      "passed": true,
+      "status": "b4-forward.log.status.json"
+    },
+    {
+      "name": "b4-generic",
+      "passed": true,
+      "status": "b4-generic.log.status.json"
+    },
+    {
+      "name": "b4-binned",
+      "passed": true,
+      "status": "b4-binned.log.status.json"
+    },
+    {
+      "name": "b4-tile",
+      "passed": true,
+      "status": "b4-tile.log.status.json"
+    },
+    {
+      "name": "b4-forward-resolve",
+      "psnr_db": 51.494260508412076,
+      "p99_delta": 3.0,
+      "max_delta": 38.0,
+      "max_outside_support": 19.0,
+      "fraction_delta_over_16": 0.00014322916666666667,
+      "limits": {
+        "psnr_min_db": 50,
+        "p99_delta_max": 4,
+        "fraction_delta_over_16_max": 0.0005
+      },
+      "passed": true
+    },
+    {
+      "name": "b4-bins",
+      "passed": true,
+      "result": "0 of 230400 pixels differ (tolerance 0), max delta 0, PSNR inf dB"
+    },
+    {
+      "name": "b4-tile",
+      "passed": true,
+      "result": "0 of 230400 pixels differ (tolerance 0), max delta 0, PSNR inf dB"
+    },
+    {
+      "name": "heldout-forward",
+      "passed": true,
+      "status": "heldout-forward.log.status.json"
+    },
+    {
+      "name": "heldout-visibility",
+      "passed": true,
+      "status": "heldout-visibility.log.status.json"
+    },
+    {
+      "name": "heldout-forward-resolve",
+      "psnr_db": 50.65025591711194,
+      "p99_delta": 4.0,
+      "max_delta": 121.0,
+      "max_outside_support": 40.0,
+      "fraction_delta_over_16": 0.00045138888888888887,
+      "limits": {
+        "psnr_min_db": 50,
+        "p99_delta_max": 4,
+        "fraction_delta_over_16_max": 0.0005
+      },
+      "passed": true
+    },
+    {
+      "name": "history-1",
+      "passed": true,
+      "status": "history-1.log.status.json"
+    },
+    {
+      "name": "history-2",
+      "passed": true,
+      "status": "history-2.log.status.json"
+    },
+    {
+      "name": "history-3",
+      "passed": true,
+      "status": "history-3.log.status.json"
+    },
+    {
+      "name": "apple9",
+      "passed": true,
+      "status": "apple9.log.status.json"
+    },
+    {
+      "name": "adaptive",
+      "passed": true,
+      "status": "adaptive.log.status.json"
+    },
+    {
+      "name": "tile-guides",
+      "passed": true,
+      "status": "tile-guides.log.status.json"
+    },
+    {
+      "name": "alpha",
+      "passed": true,
+      "status": "alpha.log.status.json"
+    },
+    {
+      "name": "exposure",
+      "passed": true,
+      "status": "exposure.log.status.json"
+    },
+    {
+      "name": "negative-motion",
+      "passed": true,
+      "status": "negative-motion.log.status.json"
+    },
+    {
+      "name": "negative-guide",
+      "passed": true,
+      "status": "negative-guide.log.status.json"
+    },
+    {
+      "name": "negative-exposure",
+      "passed": true,
+      "status": "negative-exposure.log.status.json"
+    },
+    {
+      "name": "negative-feedback",
+      "passed": true,
+      "status": "negative-feedback.log.status.json"
+    },
+    {
+      "name": "feedback-drain",
+      "passed": true,
+      "status": "feedback-drain.log.status.json"
+    },
+    {
+      "name": "negative-history-age",
+      "passed": true,
+      "status": "negative-history-age.log.status.json"
+    },
+    {
+      "name": "post-curves",
+      "passed": true,
+      "status": "post-curves.log.status.json"
+    },
+    {
+      "name": "negative-post-curves",
+      "passed": true,
+      "status": "negative-post-curves.log.status.json"
+    }
+  ],
+  "tests": {
+    "portable_cases": 435,
+    "portable_assertions": 1773613,
+    "forward_variant_compatible": 284,
+    "forward_variant_negative": 52,
+    "forward_variant_worst_differing_pixels": 1,
+    "tone_curve_samples": 576,
+    "tone_curve_max_error": 2.13e-06
+  },
+  "limitations": [
+    "Historical F6 nonzero exit not causally attributed",
+    "Physical HDR luminance not measured; current screen headroom was 1 while potential was 16",
+    "Forward and visibility include different guide/intermediate work",
+    "Texture/cutout tolerances and temporal metric revisions documented, original failed reports retained"
+  ],
+  "detail_quality": {
+    "sharpen": {
+      "passed": true,
+      "metrics": {
+        "frames": 480,
+        "mean_psnr_srgb_db": 30.09019264068239,
+        "linear_rmse_p95": 0.02445504879578948,
+        "linear_rmse_max": 0.0336182601749897,
+        "residual_flicker_mean": 0.0059650437642024675,
+        "ghost_fraction_max": 1.0,
+        "excess_ghost_fraction_max": 0.6666666666666666,
+        "support_ghost_fraction_max": 0.08333333333333333,
+        "recovery_frames": {
+          "119": 0,
+          "239": 0,
+          "359": 0
+        }
+      }
+    },
+    "neutral-mips": {
+      "passed": true,
+      "metrics": {
+        "frames": 480,
+        "mean_psnr_srgb_db": 29.802930438661125,
+        "linear_rmse_p95": 0.025106482673436403,
+        "linear_rmse_max": 0.03359329700469971,
+        "residual_flicker_mean": 0.006005618622293696,
+        "ghost_fraction_max": 1.0,
+        "excess_ghost_fraction_max": 1.0,
+        "support_ghost_fraction_max": 0.08333333333333333,
+        "recovery_frames": {
+          "119": 0,
+          "239": 0,
+          "359": 0
+        }
+      }
+    }
+  },
+  "default_decision": "Generic material resolve; binning/tile/adaptive remain explicit opt-ins.",
+  "resize": {
+    "native": {
+      "gpu_failures": 0,
+      "history_resets": 5,
+      "command_buffer_rebuilds_total": 12,
+      "measured_frames": 120
+    },
+    "temporal": {
+      "gpu_failures": 0,
+      "history_resets": 5,
+      "command_buffer_rebuilds_total": 12,
+      "measured_frames": 120
+    },
+    "async": {
+      "gpu_failures": 0,
+      "history_resets": 8,
+      "command_buffer_rebuilds_total": 48,
+      "measured_frames": 120
+    }
+  },
+  "sdk_lifetime": {
+    "status": "OPEN",
+    "runtime": "macOS 27.2 (26B5091g)",
+    "native_path_leaks": 0,
+    "public_api_only_reduction_live_weak_scalers": 1,
+    "reproducer": "bench/f8_spike/metalfx_lifetime.mm",
+    "external_report_sent": false
+  },
+  "final_functional": [
+    {
+      "name": "b1-forward",
+      "passed": true,
+      "status": "b1-forward.log.status.json"
+    },
+    {
+      "name": "b1-generic",
+      "passed": true,
+      "status": "b1-generic.log.status.json"
+    },
+    {
+      "name": "b1-binned",
+      "passed": true,
+      "status": "b1-binned.log.status.json"
+    },
+    {
+      "name": "b1-tile",
+      "passed": true,
+      "status": "b1-tile.log.status.json"
+    },
+    {
+      "name": "b1-forward-resolve",
+      "passed": true,
+      "result": "0 of 230400 pixels differ (tolerance 1), max delta 1, PSNR 64.74 dB"
+    },
+    {
+      "name": "b1-bins",
+      "passed": true,
+      "result": "0 of 230400 pixels differ (tolerance 0), max delta 0, PSNR inf dB"
+    },
+    {
+      "name": "b1-tile",
+      "passed": true,
+      "result": "0 of 230400 pixels differ (tolerance 0), max delta 0, PSNR inf dB"
+    },
+    {
+      "name": "b4-forward",
+      "passed": true,
+      "status": "b4-forward.log.status.json"
+    },
+    {
+      "name": "b4-generic",
+      "passed": true,
+      "status": "b4-generic.log.status.json"
+    },
+    {
+      "name": "b4-binned",
+      "passed": true,
+      "status": "b4-binned.log.status.json"
+    },
+    {
+      "name": "b4-tile",
+      "passed": true,
+      "status": "b4-tile.log.status.json"
+    },
+    {
+      "name": "b4-forward-resolve",
+      "psnr_db": 51.494260508412076,
+      "p99_delta": 3.0,
+      "max_delta": 38.0,
+      "max_outside_support": 19.0,
+      "fraction_delta_over_16": 0.00014322916666666667,
+      "limits": {
+        "psnr_min_db": 50,
+        "p99_delta_max": 4,
+        "fraction_delta_over_16_max": 0.0005
+      },
+      "passed": true
+    },
+    {
+      "name": "b4-bins",
+      "passed": true,
+      "result": "0 of 230400 pixels differ (tolerance 0), max delta 0, PSNR inf dB"
+    },
+    {
+      "name": "b4-tile",
+      "passed": true,
+      "result": "0 of 230400 pixels differ (tolerance 0), max delta 0, PSNR inf dB"
+    },
+    {
+      "name": "heldout-forward",
+      "passed": true,
+      "status": "heldout-forward.log.status.json"
+    },
+    {
+      "name": "heldout-visibility",
+      "passed": true,
+      "status": "heldout-visibility.log.status.json"
+    },
+    {
+      "name": "heldout-forward-resolve",
+      "psnr_db": 50.65025591711194,
+      "p99_delta": 4.0,
+      "max_delta": 121.0,
+      "max_outside_support": 40.0,
+      "fraction_delta_over_16": 0.00045138888888888887,
+      "limits": {
+        "psnr_min_db": 50,
+        "p99_delta_max": 4,
+        "fraction_delta_over_16_max": 0.0005
+      },
+      "passed": true
+    },
+    {
+      "name": "history-1",
+      "passed": true,
+      "status": "history-1.log.status.json"
+    },
+    {
+      "name": "history-2",
+      "passed": true,
+      "status": "history-2.log.status.json"
+    },
+    {
+      "name": "history-3",
+      "passed": true,
+      "status": "history-3.log.status.json"
+    },
+    {
+      "name": "apple9",
+      "passed": true,
+      "status": "apple9.log.status.json"
+    },
+    {
+      "name": "adaptive",
+      "passed": true,
+      "status": "adaptive.log.status.json"
+    },
+    {
+      "name": "tile-guides",
+      "passed": true,
+      "status": "tile-guides.log.status.json"
+    },
+    {
+      "name": "alpha",
+      "passed": true,
+      "status": "alpha.log.status.json"
+    },
+    {
+      "name": "exposure",
+      "passed": true,
+      "status": "exposure.log.status.json"
+    },
+    {
+      "name": "negative-motion",
+      "passed": true,
+      "status": "negative-motion.log.status.json"
+    },
+    {
+      "name": "negative-guide",
+      "passed": true,
+      "status": "negative-guide.log.status.json"
+    },
+    {
+      "name": "negative-exposure",
+      "passed": true,
+      "status": "negative-exposure.log.status.json"
+    },
+    {
+      "name": "negative-feedback",
+      "passed": true,
+      "status": "negative-feedback.log.status.json"
+    },
+    {
+      "name": "feedback-drain",
+      "passed": true,
+      "status": "feedback-drain.log.status.json"
+    },
+    {
+      "name": "negative-history-age",
+      "passed": true,
+      "status": "negative-history-age.log.status.json"
+    },
+    {
+      "name": "post-curves",
+      "passed": true,
+      "status": "post-curves.log.status.json"
+    },
+    {
+      "name": "negative-post-curves",
+      "passed": true,
+      "status": "negative-post-curves.log.status.json"
+    }
+  ],
+  "final_context_quality": [
+    {
+      "name": "exposure-reference",
+      "passed": true,
+      "status": "exposure-reference.log.status.json"
+    },
+    {
+      "name": "exposure-control",
+      "passed": true,
+      "status": "exposure-control.log.status.json"
+    },
+    {
+      "name": "exposure-temporal",
+      "passed": true,
+      "status": "exposure-temporal.log.status.json"
+    },
+    {
+      "name": "exposure-quality",
+      "passed": true,
+      "metrics": {
+        "frames": 180,
+        "mean_psnr_srgb_db": 38.12168786323049,
+        "linear_rmse_p95": 0.02151468563824891,
+        "linear_rmse_max": 0.025920797139406204,
+        "residual_flicker_mean": 0.0007694945972212332,
+        "ghost_fraction_max": 1.0,
+        "excess_ghost_fraction_max": 1.0,
+        "support_ghost_fraction_max": 0.0002698989105898518,
+        "recovery_frames": {
+          "119": 0
+        }
+      }
+    },
+    {
+      "name": "drs-views-reference",
+      "passed": true,
+      "status": "drs-views-reference.log.status.json"
+    },
+    {
+      "name": "drs-views-control",
+      "passed": true,
+      "status": "drs-views-control.log.status.json"
+    },
+    {
+      "name": "drs-views-temporal",
+      "passed": true,
+      "status": "drs-views-temporal.log.status.json"
+    },
+    {
+      "name": "drs-views-quality",
+      "passed": true,
+      "metrics": {
+        "frames": 180,
+        "mean_psnr_srgb_db": 35.27776368860232,
+        "linear_rmse_p95": 0.02150077586993575,
+        "linear_rmse_max": 0.022757556289434433,
+        "residual_flicker_mean": 0.0019150934628366183,
+        "ghost_fraction_max": 0.7206703910614525,
+        "excess_ghost_fraction_max": 0.5952380952380952,
+        "support_ghost_fraction_max": 0.00020044097013429546,
+        "recovery_frames": {
+          "119": 0
+        }
+      }
+    }
+  ],
+  "exposure_texture_format": "R16Float (SDK contract); adaptation state FP32"
+}

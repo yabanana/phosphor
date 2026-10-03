@@ -196,7 +196,7 @@ TEST_CASE("csv has a header, frame rows then switch rows") {
     CHECK(csv.rfind("kind,index,", 0) == 0);
     CHECK(csv.substr(l1 + 1, 8) == "frame,7,");
     CHECK(csv.substr(l2 + 1, 9) == "switch,7,");
-    CHECK(csv.substr(l3 - 2, 2) == ",4");
+    CHECK(csv.substr(l3 - 3, 3) == ",4,");
     auto commas = [](const std::string& x) { return std::count(x.begin(), x.end(), ','); };
     CHECK(commas(csv.substr(0, l1)) == commas(csv.substr(l1 + 1, l2 - l1)));
     CHECK(commas(csv.substr(0, l1)) == commas(csv.substr(l2 + 1, l3 - l2)));
@@ -247,4 +247,38 @@ TEST_CASE("bench without steady frames falls back to the global threshold") {
     const HitchReport r = analyzeHitches(build(fr, {sw(60)}));
     CHECK(r.hitchSwitches == 1);
     CHECK(r.worstPostSwitchRatio == doctest::Approx(2.0f));
+}
+
+TEST_CASE("pipeline hitches distinguish event-pump stalls without hiding renderer regressions") {
+    FrameTrace t;
+    for (u32 i = 0; i < 40; ++i) {
+        FrameRecord f;
+        f.index = i;
+        f.bench = 0;
+        f.cpuMs = 0.1f;
+        if (i == 10)
+            f.flags = FrameBenchSwitch;
+        if (i == 11) {
+            f.cpuMs = 20.1f;
+            f.eventMs = 20.0f;
+        }
+        t.addFrame(f);
+    }
+    SwitchRecord s;
+    s.frame = 10;
+    t.addSwitch(s);
+    const auto r = analyzeHitches(t);
+    CHECK(r.hitchSwitches == 0);
+    CHECK(r.platformStallFrames == 1);
+    CHECK(r.worstEventMs == 20.0f);
+    FrameTrace slow;
+    for (auto f : t.frames()) {
+        if (f.index == 12) {
+            f.cpuMs = 4.0f;
+            f.eventMs = 0.1f;
+        }
+        slow.addFrame(f);
+    }
+    slow.addSwitch(s);
+    CHECK(analyzeHitches(slow).hitchSwitches == 1);
 }

@@ -38,7 +38,7 @@ struct GPUInstance {
     u32 meshIndex;
     u32 materialIndex;
     u32 flags;
-    u32 pad;
+    u32 generation; // F8: globally unique entity incarnation within this world
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUInstance) == 80, "GPUInstance layout");
 
@@ -277,7 +277,7 @@ PHOSPHOR_GPU_CONSTANT u32 MESHLET_PHASE_B = 1;
 
 // GPUMeshletCullParams::flags
 PHOSPHOR_GPU_CONSTANT u32 MESHLET_CULL_FRUSTUM       = 1u << 0; // sphere vs the 5 planes
-PHOSPHOR_GPU_CONSTANT u32 MESHLET_CULL_CONE          = 1u << 1; // normal cone (similarity transforms only)
+PHOSPHOR_GPU_CONSTANT u32 MESHLET_CULL_CONE = 1u << 1; // normal cone in mesh space (invertible affine transforms)
 PHOSPHOR_GPU_CONSTANT u32 MESHLET_CULL_OCCLUSION     = 1u << 2; // two-phase Hi-Z test
 PHOSPHOR_GPU_CONSTANT u32 MESHLET_CULL_HISTORY_VALID = 1u << 3; // phase A may use the history pyramid
 PHOSPHOR_GPU_CONSTANT u32 MESHLET_CULL_DEBUG_ALL     = 1u << 4; // debug view: emit every candidate, coloured by decision

@@ -28,7 +28,8 @@ int main(int argc, char* argv[]) {
     pool->release();
     // stdout: the exit status as the app decided it, after the engine is
     // destroyed.  A run whose shell status differs from this line (or that
-    // lacks it) was ended by a signal, not by the engine (F6 diagnosis).
+    // lacks it) needs the raw process status/signal and stderr to classify
+    // its failure; absence alone does not prove a signal (F5/F6 review).
     std::printf("EXIT %d\n", result);
     std::fflush(stdout);
     return result;

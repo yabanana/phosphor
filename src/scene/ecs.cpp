@@ -3,6 +3,8 @@
 namespace phosphor {
 
 EntityID ECS::createEntity() {
+    if (nextIncarnation_ == 0)
+        throw std::overflow_error("Entity incarnation exhausted; recreate the world");
     ++entityCount_;
     // F5: destroyed ids are reused (LIFO), so tables indexed by EntityID
     // (the scene store) stop growing under steady churn: CPU heap flat (O7).
@@ -13,8 +15,10 @@ EntityID ECS::createEntity() {
     } else {
         e = nextEntity_++;
         alive_.push_back(0);
+        incarnation_.push_back(0);
     }
     alive_[e] = 1;
+    incarnation_[e] = nextIncarnation_++;
     return e;
 }
 

@@ -362,10 +362,15 @@ void buildQueueSyncs(const RenderGraph& graph, CompiledGraph& compiled) {
 }
 
 std::string stagesName(Stages stages) {
-    static const struct { Stages bit; const char* name; } kNames[] = {
-        {StageVertex, "vertex"}, {StageFragment, "fragment"}, {StageTile, "tile"},
-        {StageObject, "object"}, {StageMesh, "mesh"},         {StageDispatch, "dispatch"},
-        {StageBlit, "blit"},     {StageAccelerationStructure, "accel"},
+    static const struct {
+        Stages bit;
+        const char *name;
+    } kNames[] = {
+        {StageVertex, "vertex"},      {StageFragment, "fragment"},
+        {StageTile, "tile"},          {StageObject, "object"},
+        {StageMesh, "mesh"},          {StageDispatch, "dispatch"},
+        {StageBlit, "blit"},          {StageAccelerationStructure, "accel"},
+        {StageMachineLearning, "ml"},
     };
     std::string s;
     for (const auto& n : kNames) {

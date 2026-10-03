@@ -25,14 +25,14 @@ NS::String* str(const char* s) {
 
 // Forward argument table slots; must match shaders/forward.metal and overlay.metal.
 enum Binding : NS::UInteger {
-    BindFrame     = 0,
-    BindVertices  = 1,
+    BindFrame = 0,
+    BindVertices = 1,
     BindInstances = 2,
     BindMaterials = 3,
-    BindLights    = 4,
-    BindTextures  = 5,
-    BindVisible   = FORWARD_BIND_VISIBLE,
-    BindCount     = 7,
+    BindLights = 4,
+    BindTextures = 5,
+    BindVisible = FORWARD_BIND_VISIBLE,
+    BindCount = 9,
 };
 
 constexpr u32 kQueues = SCENE_MAX_LEVELS - 1;
@@ -314,7 +314,6 @@ u64 SceneRenderer::prepareFrame(const SceneStore& store, std::span<const GPULigh
     usingFallback_ = genericOnly_ || !pipelines_.isFinal(handle);
     pipeline_ = pipelines_.render(handle);
     if (!pipeline_) pipeline_ = pipelines_.render(generic_);
-    if (usingFallback_) pipelines_.noteFallbackUse();
 
     // Triangles of every live instance (off draws all of them; on draws the
     // visible subset, reported from the GPU counters).
@@ -379,6 +378,10 @@ void SceneRenderer::addPassesToGraph(rg::RenderGraph& graph, GpuDrivenMode mode,
         [this](PassContext& ctx) { encodeDrawBuild(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder())); });
 }
 
+void SceneRenderer::setTemporalInputs(MTL::GPUAddress previousInstances, MTL::GPUAddress temporalParams) {
+    arguments_->setAddress(previousInstances, 7);
+    arguments_->setAddress(temporalParams, 8);
+}
 void SceneRenderer::declareDrawReads(rg::PassBuilder& b) const {
     using namespace rg;
     if (!graphData_.valid()) return;
@@ -548,6 +551,8 @@ u32 SceneRenderer::encodeFallbackClass(MTL4::RenderCommandEncoder* enc, u32 cull
 
 void SceneRenderer::encode(MTL4::RenderCommandEncoder* enc, u32 chunk, u32 chunks) const {
     PH_ZONE("Forward encode");
+    if (usingFallback_ && chunk == 0)
+        pipelines_.noteFallbackUse();
     encodeForward(enc, pipeline_, depthState_, chunk, chunks, 1 + std::min(chunk, kMaxChunks - 1));
 }
 

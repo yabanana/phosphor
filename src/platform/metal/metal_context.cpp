@@ -1,3 +1,5 @@
+#include <cstdlib>
+#include <thread>
 #include "platform/metal/metal_context.h"
 
 #include <sys/sysctl.h>
@@ -82,7 +84,7 @@ MetalContext::MetalContext(CA::MetalLayer* layer, const std::string& libraryPath
     uploadEvent_ = device_->newSharedEvent();
 
     layer_->setDevice(device_);
-    layer_->setPixelFormat(colorFormat());
+    layer_->setPixelFormat(MTL::PixelFormatBGRA8Unorm_sRGB);
     layer_->setFramebufferOnly(false); // --capture copies the drawable into a buffer
     layer_->setMaximumDrawableCount(3);
     // Drawables must be resident for the MTL4 queue; the layer owns this set.
@@ -102,6 +104,9 @@ MetalContext::MetalContext(CA::MetalLayer* layer, const std::string& libraryPath
 
 MetalContext::~MetalContext() {
     waitIdle();
+    for (auto *target : offscreenTargets_)
+        if (memory_)
+            memory_->release(target, MemoryCategory::RenderTargets);
     staging_.reset();
     frameUploads_.reset();
     releaseCompleted(~u64{0});
@@ -140,7 +145,25 @@ void MetalContext::makeResident(const MTL::Allocation* allocation, ResidencyClas
 
 void MetalContext::evict(const MTL::Allocation* allocation) {
     if (!allocation) return;
-    residency_->remove(allocation);
+    if (residency_->remove(allocation))
+        ++residencyGeneration_;
+}
+
+void MetalContext::refreshCommandBuffer(MTL4::CommandBuffer *&buffer, u64 &generation) {
+    if (generation == residencyGeneration_)
+        return;
+    // Measured on Metal 27.1: reusable command buffers retain a shader-
+    // validation HeapUsageTable entry after a heap leaves residency. The
+    // next commit messages a deallocated MTLGPUDebugHeap. Rebuild recording
+    // state only after retirement; steady frames keep reusing their streams.
+    auto *replacement = device_->newCommandBuffer();
+    if (!replacement)
+        throw std::runtime_error("Failed to rebuild a Metal command buffer");
+    replacement->setLabel(buffer->label());
+    buffer->release();
+    buffer = replacement;
+    generation = residencyGeneration_;
+    ++commandBufferRebuilds_;
 }
 
 void MetalContext::deferRelease(NS::Object* object) {
@@ -189,13 +212,25 @@ void MetalContext::waitForValue(u64 value) {
         LOG_ERROR("GPU timeout waiting for frame event value %llu (current %llu)",
                   static_cast<unsigned long long>(value),
                   static_cast<unsigned long long>(frameEvent_->signaledValue()));
+        std::fflush(nullptr);
+        std::_Exit(EXIT_FAILURE);
     }
+}
+
+void MetalContext::setFramesInFlight(u32 count) {
+    if (count < 1 || count > METAL_FRAMES_IN_FLIGHT)
+        throw std::invalid_argument("Frames in flight must be 1..3");
+    framesInFlight_ = count;
 }
 
 bool MetalContext::beginFrame(Frame& frame) {
     const u64 index = frameIndex_;
     const u32 slot  = static_cast<u32>(index % METAL_FRAMES_IN_FLIGHT);
 
+    if (index >= framesInFlight_) {
+        waitForValue(frameDoneValue(index - framesInFlight_));
+        waitForAsync(asyncDone_[static_cast<u32>((index - framesInFlight_) % METAL_FRAMES_IN_FLIGHT)]);
+    }
     if (index >= METAL_FRAMES_IN_FLIGHT) {
         waitForValue(frameDoneValue(index - METAL_FRAMES_IN_FLIGHT));
         waitForAsync(asyncDone_[slot]);
@@ -203,20 +238,33 @@ bool MetalContext::beginFrame(Frame& frame) {
         releaseCompleted(index - METAL_FRAMES_IN_FLIGHT);
     }
 
-    CA::MetalDrawable* drawable = layer_->nextDrawable();
-    if (!drawable) {
+    if (offscreen_ &&
+        (!offscreenTargets_[0] || offscreenTargets_[0]->width() != width_ ||
+         offscreenTargets_[0]->height() != height_ || offscreenTargets_[0]->pixelFormat() != colorFormat())) {
+        auto *descriptor = MTL::TextureDescriptor::texture2DDescriptor(colorFormat(), width_, height_, false);
+        descriptor->setStorageMode(MTL::StorageModePrivate);
+        descriptor->setUsage(MTL::TextureUsageRenderTarget | MTL::TextureUsageShaderRead);
+        for (auto *&texture : offscreenTargets_) {
+            memory_->release(texture, MemoryCategory::RenderTargets);
+            texture = memory_->newTexture(descriptor, MemoryCategory::RenderTargets, "Offscreen benchmark target");
+        }
+    }
+    CA::MetalDrawable *drawable = offscreen_ ? nullptr : layer_->nextDrawable();
+    if (!offscreen_ && !drawable) {
         LOG_WARN("No drawable available for frame %llu (window hidden or occluded?)",
                  static_cast<unsigned long long>(index));
         return false;
     }
     frameUploads_->beginFrame(index);
 
+    refreshCommandBuffer(commandBuffers_[slot], commandBufferGenerations_[slot]);
     allocators_[slot]->reset();
     MTL4::CommandBuffer* cmd = commandBuffers_[slot];
     cmd->beginCommandBuffer(allocators_[slot]);
 
     frame.commandBuffer   = cmd;
     frame.drawable        = drawable;
+    frame.target = offscreen_ ? offscreenTargets_[slot] : drawable->texture();
     frame.slot            = slot;
     frame.index           = index;
     frame.buffers[0]      = cmd;
@@ -245,7 +293,7 @@ void MetalContext::submitFrame(Frame& frame) {
     for (u32 i = 0; i < frame.submissionCount; ++i) {
         const Submission& sub = frame.submissions[i];
         MTL4::CommandQueue* q = sub.queue == SubmitQueue::Async ? asyncQueue_ : queue_;
-        if (sub.queue == SubmitQueue::Graphics && !drawableWaited) {
+        if (frame.drawable && sub.queue == SubmitQueue::Graphics && !drawableWaited) {
             // A drawable must be waited on before the MTL4 queue renders to
             // it, and signalled after the work that renders to it.
             queue_->wait(frame.drawable);
@@ -256,20 +304,22 @@ void MetalContext::submitFrame(Frame& frame) {
         if (sub.waitValue) q->wait(async ? graphicsTimeline_ : asyncTimeline_, sub.waitValue);
         if (sub.fenceEvent && sub.fenceWait) q->wait(sub.fenceEvent, sub.fenceWait);
         const MTL4::CommandBuffer* const* buffers = frame.buffers.data() + sub.firstBuffer;
-        if (i == lastGraphics) {
-            // A fresh options object per commit: a reused MTL4CommitOptions
-            // stops delivering feedback after its first commit (measured: 0 of
-            // 600 frames).  This small per-frame allocation is the one
-            // accepted exception to O7.  Only the last graphics commit reports
-            // (with several submissions, the GPU time covers that one only).
-            MTL4::CommitOptions* options = MTL4::CommitOptions::alloc()->init();
-            options->addFeedbackHandler([this](MTL4::CommitFeedback* feedback) { onFrameFeedback(feedback); });
-            q->commit(buffers, sub.bufferCount, options);
-            options->release();
+        // Track every submission, including async/split commits. GPU event
+        // completion alone does not drain CPU feedback callbacks.
+        auto *options = MTL4::CommitOptions::alloc()->init();
+        {
+            std::lock_guard lock(feedbackMutex_);
+            ++pendingFeedback_;
+        }
+        const u64 index = frame.index;
+        const bool timed = i == lastGraphics;
+        options->addFeedbackHandler(
+            [this, index, timed](MTL4::CommitFeedback *feedback) { onFrameFeedback(index, feedback, timed); });
+        q->commit(buffers, sub.bufferCount, options);
+        options->release();
+        if (timed && frame.drawable) {
             queue_->signalDrawable(frame.drawable);
             frame.drawable->present();
-        } else {
-            q->commit(buffers, sub.bufferCount);
         }
         if (sub.signalValue) q->signalEvent(async ? asyncTimeline_ : graphicsTimeline_, sub.signalValue);
         if (sub.fenceEvent && sub.fenceSignal) q->signalEvent(sub.fenceEvent, sub.fenceSignal);
@@ -280,23 +330,32 @@ void MetalContext::submitFrame(Frame& frame) {
     ++frameIndex_;
 }
 
-void MetalContext::onFrameFeedback(MTL4::CommitFeedback* feedback) {
-    // Only frame commits register this handler, and feedback for one queue
-    // arrives in commit order, so the n-th feedback belongs to frame n.
-    const u64 index = feedbackCount_.fetch_add(1, std::memory_order_relaxed);
-    if (NS::Error* error = feedback->error()) {
-        LOG_ERROR("Frame %llu command buffers failed: %s", static_cast<unsigned long long>(index),
-                  error->localizedDescription()->utf8String());
-        return;
-    }
-    const float ms = static_cast<float>((feedback->GPUEndTime() - feedback->GPUStartTime()) * 1000.0);
-    lastGpuMs_.store(ms, std::memory_order_relaxed);
-    std::lock_guard lock(gpuTimesMutex_);
-    if (index >= gpuTimesFirst_ && index - gpuTimesFirst_ < gpuTimes_.size()) {
-        gpuTimes_[index - gpuTimesFirst_] = ms;
-        ++gpuTimesReceived_;
+void MetalContext::onFrameFeedback(u64 index, MTL4::CommitFeedback *feedback, bool timed) {
+    if (feedbackDelayMs_)
+        std::this_thread::sleep_for(std::chrono::milliseconds(feedbackDelayMs_));
+    if (timed)
+        feedbackCount_.fetch_add(1, std::memory_order_relaxed);
+    const bool injected = timed && feedbackFailFrame_ != 0 && index + 1 == feedbackFailFrame_;
+    if (NS::Error *error = feedback->error(); error || injected) {
+        gpuFailures_.fetch_add(1);
+        LOG_ERROR("Frame %llu GPU feedback failure: %s", static_cast<unsigned long long>(index),
+                  error ? error->localizedDescription()->utf8String() : "injected negative control");
         gpuTimesCv_.notify_all();
+    } else if (timed) {
+        const float ms = static_cast<float>((feedback->GPUEndTime() - feedback->GPUStartTime()) * 1000.0);
+        lastGpuMs_.store(ms, std::memory_order_relaxed);
+        std::lock_guard lock(gpuTimesMutex_);
+        if (index >= gpuTimesFirst_ && index - gpuTimesFirst_ < gpuTimes_.size()) {
+            gpuTimes_[index - gpuTimesFirst_] = ms;
+            ++gpuTimesReceived_;
+            gpuTimesCv_.notify_all();
+        }
     }
+    // Last access to this context. waitIdle also waits for this CPU boundary
+    // before the owning context/mutexes can be destroyed.
+    std::lock_guard done(feedbackMutex_);
+    --pendingFeedback_;
+    feedbackDone_.notify_all();
 }
 
 void MetalContext::beginGpuTimeCapture(u32 frames) {
@@ -311,7 +370,7 @@ std::vector<float> MetalContext::endGpuTimeCapture() {
     std::unique_lock lock(gpuTimesMutex_);
     const size_t expected = gpuTimes_.size();
     if (!gpuTimesCv_.wait_for(lock, std::chrono::milliseconds(kWaitTimeoutMs),
-                              [&] { return gpuTimesReceived_ >= expected; })) {
+                              [&] { return gpuTimesReceived_ >= expected || gpuFailures_.load() != 0; })) {
         LOG_WARN("GPU timing feedback missing for %zu of %zu frames", expected - gpuTimesReceived_, expected);
     }
     std::vector<float> times = std::move(gpuTimes_);
@@ -345,6 +404,7 @@ void MetalContext::flushUploads() {
 void MetalContext::submitAndWait(const std::function<void(MTL4::ComputeCommandEncoder*)>& record) {
     flushResidency();
 
+    refreshCommandBuffer(uploadCommandBuffer_, uploadCommandGeneration_);
     uploadAllocator_->reset();
     uploadCommandBuffer_->beginCommandBuffer(uploadAllocator_);
     uploadCommandBuffer_->setLabel(str("Upload"));
@@ -358,7 +418,9 @@ void MetalContext::submitAndWait(const std::function<void(MTL4::ComputeCommandEn
     ++uploadValue_;
     queue_->signalEvent(uploadEvent_, uploadValue_);
     if (!uploadEvent_->waitUntilSignaledValue(uploadValue_, kWaitTimeoutMs)) {
-        LOG_ERROR("GPU timeout waiting for upload");
+        LOG_ERROR("GPU timeout waiting for upload; refusing staging reuse");
+        std::fflush(nullptr);
+        std::_Exit(EXIT_FAILURE);
     }
 }
 
@@ -373,6 +435,13 @@ void MetalContext::waitIdle() {
         waitForValue(frameDoneValue(frameIndex_ - 1));
     }
     waitForAsync(lastAsyncDone_);
+    std::unique_lock lock(feedbackMutex_);
+    if (!feedbackDone_.wait_for(lock, std::chrono::milliseconds(kWaitTimeoutMs),
+                                [this] { return pendingFeedback_ == 0; })) {
+        LOG_ERROR("GPU feedback callbacks did not drain; refusing unsafe context destruction");
+        std::fflush(nullptr);
+        std::_Exit(EXIT_FAILURE);
+    }
 }
 
 void MetalContext::waitForAsync(u64 value) {
@@ -381,6 +450,8 @@ void MetalContext::waitForAsync(u64 value) {
         LOG_ERROR("GPU timeout waiting for async compute value %llu (current %llu)",
                   static_cast<unsigned long long>(value),
                   static_cast<unsigned long long>(asyncTimeline_->signaledValue()));
+        std::fflush(nullptr);
+        std::_Exit(EXIT_FAILURE);
     }
 }
 

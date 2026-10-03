@@ -37,6 +37,13 @@ diff_tool="$dbg/image_diff"
 out="$dbg/f6-check"
 mkdir -p "$out"
 [[ -x $app && -x $diff_tool ]] || { echo "error: build $app and $diff_tool first" >&2; exit 2; }
+reference_base=${F6_REFERENCE_BASE:-build/reference-f6base}
+reference_mesh=${F6_REFERENCE_MESH:-build/reference-f6mesh}
+run_app() {
+    local logfile=$1 expected=$2
+    shift 2
+    mise exec -- python3 tools/run_checked.py --log "$logfile" --expect-exit "$expected" -- "$@"
+}
 failures=0
 fail() { echo "FAIL: $*"; failures=$((failures + 1)); }
 ok() { echo "ok: $*"; }
@@ -48,11 +55,11 @@ if ctest --test-dir "$dbg" --output-on-failure >"$out/ctest.log" 2>&1; then ok "
 
 # 2. visual checks of the mesh path
 refs_ok=1
-for d in build/reference-f6base build/reference-f6mesh; do [[ -d $d ]] || refs_ok=0; done
+for d in "$reference_base" "$reference_mesh"; do [[ -d $d ]] || refs_ok=0; done
 if (( refs_ok )); then
     mkdir -p "$out/refs"
-    for b in 1 2 3 4 5 6 7; do cp build/reference-f6base/bench$b.png "$out/refs/"; done
-    cp build/reference-f6mesh/bench8.png "$out/refs/"
+    for b in 1 2 3 4 5 6 7; do cp "$reference_base/bench$b.png" "$out/refs/"; done
+    cp "$reference_mesh/bench8.png" "$out/refs/"
     variants=("--meshlet-cull off" "--meshlet-cull frustum" "--meshlet-cull two-phase"
               "--meshlet-cull two-phase --debug-graph-transients" "--meshlet-cull two-phase --debug-async-compute"
               "--meshlet-cull two-phase --hiz-path sampler" "--meshlet-cull two-phase --force-family apple9")
@@ -71,32 +78,36 @@ fi
 # 3. self-checks and negative controls
 for sc in "1:--bench 1" "3:--bench 3" "7:--bench 7" "7s:--bench 7 --culling-script --resolution 1920x1080" "8:--bench 8 --instances 200000"; do
     name=${sc%%:*}; args=${sc#*:}
-    line=$("$app" ${=args} --warmup 5 --frames 40 --no-ui --fixed-timestep --geometry-path mesh --meshlet-cull two-phase \
-           --debug-meshlets 9 2>/dev/null | grep '^MESHLETS checks')
-    [[ $line == *"failures 0 | PASS"* ]] && ok "meshlet self-check bench $name: $line" || fail "meshlet self-check bench $name: $line"
+    run_app "$out/mesh-check-$name.log" 0 "$app" --scene procedural ${=args} --warmup 5 --frames 40 --no-ui --fixed-timestep --geometry-path mesh --meshlet-cull two-phase --debug-meshlets 9
+    st=$?
+    line=$(grep '^MESHLETS checks' "$out/mesh-check-$name.log")
+    [[ $st == 0 && $line == *"failures 0 | PASS"* ]] && ok "meshlet self-check bench $name: $line" || fail "meshlet self-check bench $name: exit $st, $line"
+
 done
 typeset -A reason
 reason=(id candidates depth pyramids count overflow)
 for k in id depth count; do
-    log=$("$app" --bench 7 --warmup 5 --frames 12 --no-ui --fixed-timestep --geometry-path mesh --meshlet-cull two-phase \
-          --debug-meshlets 7 --debug-meshlets-corrupt $k 2>/dev/null)
+    run_app "$out/mesh-negative-$k.log" 1 "$app" --scene procedural --bench 7 --warmup 5 --frames 12 --no-ui --fixed-timestep --geometry-path mesh --meshlet-cull two-phase --debug-meshlets 7 --debug-meshlets-corrupt $k
     st=$?
-    if [[ $st -ne 0 && $log == *"| FAIL |"*"${reason[$k]}:"* ]]; then ok "negative control $k fails ($(grep -m1 -oE "${reason[$k]}: [^;]*" <<<"$log"))"
-    else fail "negative control $k did not fail for '${reason[$k]}' (exit $st)"; fi
+    log=$(cat "$out/mesh-negative-$k.log")
+    if [[ $st == 0 && $log == *"| FAIL |"*"${reason[$k]}:"* ]]; then ok "negative control $k fails for the expected reason"
+    else fail "negative control $k: unexpected process status or failure reason"; fi
+
 done
 for c in none delta plane command touch; do
     ca=(); [[ $c != none ]] && ca=(--debug-gpu-scene-corrupt $c)
-    line=$("$app" --bench 8 --instances 100000 --warmup 5 --frames 20 --no-ui --fixed-timestep --geometry-path mesh \
-           --debug-gpu-scene 5 $ca 2>/dev/null | grep '^GPU-SCENE checks')
-    if [[ $c == none ]]; then [[ $line == *PASS* ]] && ok "gpu-scene check (mesh path)" || fail "gpu-scene check (mesh path): $line"
-    else [[ $line == *FAIL* ]] && ok "gpu-scene negative control $c fails" || fail "gpu-scene negative control $c: $line"; fi
+    expected=1; [[ $c == none ]] && expected=0
+    run_app "$out/scene-$c.log" $expected "$app" --scene procedural --bench 8 --instances 100000 --warmup 5 --frames 20 --no-ui --fixed-timestep --geometry-path mesh --debug-gpu-scene 5 $ca
+    st=$?
+    line=$(grep '^GPU-SCENE checks' "$out/scene-$c.log")
+    if [[ $c == none ]]; then [[ $st == 0 && $line == *PASS* ]] && ok "gpu-scene check (mesh path)" || fail "gpu-scene check: $line"
+    else [[ $st == 0 && $line == *FAIL* ]] && ok "gpu-scene negative control $c" || fail "gpu-scene negative control $c: $line"; fi
+
 done
 for b in 7 8; do
-    val "$app" --bench $b --warmup 30 --frames 1 --no-ui --fixed-timestep --inject-input --geometry-path mesh \
-        --meshlet-cull two-phase --debug-meshlets 1 --debug-meshlets-corrupt count --capture "$out/overflow-b$b.png" \
-        >"$out/overflow-b$b.log" 2>&1
+    val run_app "$out/overflow-b$b.log" 1 "$app" --scene procedural --bench $b --warmup 30 --frames 1 --no-ui --fixed-timestep --inject-input --geometry-path mesh --meshlet-cull two-phase --debug-meshlets 1 --debug-meshlets-corrupt count --capture "$out/overflow-b$b.png" || fail "overflow process bench $b"
     msgs=$(grep -Ev "$noise|^MESHLETS|^EXIT 1$" "$out/overflow-b$b.log" | grep -c .)  # the check fails on purpose
-    r=$("$diff_tool" build/reference-f6base/bench$b.png "$out/overflow-b$b.png")
+    r=$("$diff_tool" "$reference_base/bench$b.png" "$out/overflow-b$b.png")
     [[ $r == "0 of "* && $msgs == 0 ]] && ok "forced overflow bench $b: full frame via the indexed fallback" \
         || fail "forced overflow bench $b: $r, $msgs messages"
 done
@@ -106,15 +117,15 @@ frames=(179 180 181 360 361 600 720 721 960 1150)
 (( quick )) && frames=(181 361)
 S=(--bench 7 --culling-script --resolution 1920x1080 --fixed-timestep --frames 1 --no-ui)
 for w in $frames; do
-    "$app" $S --warmup $w --capture "$out/ev$w-idx.png" >/dev/null 2>&1
-    "$app" $S --warmup $w --geometry-path mesh --meshlet-cull two-phase --capture "$out/ev$w-two.png" >/dev/null 2>&1
-    r=$("$diff_tool" "$out/ev$w-idx.png" "$out/ev$w-two.png")
-    [[ $r == "0 of "* ]] && ok "event frame $w: two-phase == indexed" || fail "event frame $w: $r"
+    if run_app "$out/ev$w-idx.log" 0 "$app" --scene procedural $S --warmup $w --capture "$out/ev$w-idx.png" &&        run_app "$out/ev$w-two.log" 0 "$app" --scene procedural $S --warmup $w --geometry-path mesh --meshlet-cull two-phase --capture "$out/ev$w-two.png"; then
+        r=$("$diff_tool" "$out/ev$w-idx.png" "$out/ev$w-two.png")
+        [[ $r == "0 of "* ]] && ok "event frame $w: two-phase == indexed" || fail "event frame $w: $r"
+    else fail "event frame $w: process failed"; fi
+
 done
 
 # 5. switch + resize under validation
-val "$app" --frames 400 --warmup 0 --switch-every 20 --resize-every 45 --instances 100000 --culling-script \
-    --geometry-path mesh --meshlet-cull two-phase --debug-meshlets 13 --debug-gpu-scene 17 >"$out/switch.log" 2>&1
+val run_app "$out/switch.log" 0 "$app" --scene procedural --frames 400 --warmup 0 --switch-every 20 --resize-every 45 --instances 100000 --culling-script --geometry-path mesh --meshlet-cull two-phase --debug-meshlets 13 --debug-gpu-scene 17
 st=$?
 msgs=$(grep -Ev "$noise" "$out/switch.log" | grep -c .)
 [[ $st == 0 && $msgs == 0 ]] && ok "switch + resize under validation ($(grep -c 'Render graph compiled' "$out/switch.log") compiles)" \
@@ -126,7 +137,9 @@ if (( perf )); then
     for cfg in "native:" "apple9:--force-family apple9" "sampler:--hiz-path sampler"; do
         n=${cfg%%:*}; a=(${=cfg#*:})
         for r in 1 2 3; do
-            "$rel/phosphor" $P --geometry-path mesh --meshlet-cull two-phase $a --report "$out/gate-$n-r$r.json" >/dev/null 2>&1
+            if ! run_app "$out/gate-$n-r$r.log" 0 "$rel/phosphor" $P --geometry-path mesh --meshlet-cull two-phase $a --report "$out/gate-$n-r$r.json"; then
+                fail "gate $n r$r process failure"; continue
+            fi
             p95=$(jq '.frame_ms.p95' "$out/gate-$n-r$r.json"); alloc=$(jq '.gpu_allocations' "$out/gate-$n-r$r.json")
             if (( p95 <= 16.67 && alloc == 0 )); then ok "gate $n r$r: p95 $p95 ms, allocations $alloc"
             else fail "gate $n r$r: p95 $p95 ms, allocations $alloc"; fi

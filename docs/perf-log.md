@@ -857,3 +857,58 @@ preset, 3 repliche per configurazione in ordine ruotato:
   contro 2,07 ms dell'indexed sulla stessa scena senza vsync (S2: −39%), CPU
   0,24–0,26 ms per frame; comandi CPU costanti (109 per frame, O8).
 - Spike S1–S4, scelte e misure di S2 per scena: `opt-log.md`, "F6 — Spike".
+
+
+## F7/F8 — frame integrato e checkpoint M5 (2026-10-03)
+
+Codice `3231364`, runner `0fc5fa3`, PR #14. M5 Max 128 GB, macOS 27.2
+(26B5091g), Metal 32023.921, alimentazione AC al check iniziale. Release,
+1920×1080, 120 warmup +600 frame, tre repliche con ordine ruotato, offscreen,
+no UI/vsync/validation. Sponza pinned e camera deterministica; Cornell e
+Many Lights procedurali. Mediana dei tempi medi; p95 della replica mediana.
+
+| Caso | Frame medio ms | Intervallo repliche ms | p95 ms | Device allocato finale MiB |
+|---|---:|---:|---:|---:|
+| f7-forward | 0.3081 | 0.3077–0.3084 | 0.3482 | 897.50 |
+| f7-generic | 0.6036 | 0.6036–0.6042 | 0.7142 | 1038.98 |
+| f7-binned | 0.6298 | 0.6284–0.6301 | 0.7430 | 1038.98 |
+| f8-native | 0.6431 | 0.6414–0.6436 | 0.7499 | 1038.98 |
+| f8-temporal | 2.1612 | 2.1561–2.1692 | 2.3165 | 1204.64 |
+| f8-binned | 2.1551 | 2.1538–2.2080 | 2.3298 | 1204.64 |
+| f8-frustum | 2.1569 | 2.1522–2.1620 | 2.3319 | 1204.64 |
+| f8-tile | 2.1535 | 2.1534–2.1575 | 2.3118 | 1196.55 |
+| f8-cornell | 2.0829 | 2.0805–2.0835 | 2.3190 | 921.81 |
+| f8-adaptive-cornell | 2.0890 | 2.0831–2.0955 | 2.1485 | 921.81 |
+| f8-adaptive-sponza | 2.2097 | 2.1993–2.2100 | 2.4952 | 1204.64 |
+| f8-lights | 11.4104 | 11.3947–11.5602 | 11.6591 | 921.81 |
+| f8-binned-lights | 11.8327 | 11.3640–12.2034 | 12.2165 | 921.81 |
+
+F7 generic include guide e intermedi che il forward semplice non produce:
+non è un confronto a costo funzionale identico e il V-buffer non è più veloce
+su questo carico. F8 temporal usa input 75%; native usa input 100%.
+I tempi offscreen non sono FPS presentati; il GPU span include l'overlap.
+Tutte le 39 prove hanno zero allocazioni GpuMemory, zero rebuild di command
+buffer nel periodo misurato, zero failure e zero compilazioni sul render thread.
+I contatori non includono le allocazioni/compilazioni interne al framework.
+
+F6: batteria completa con immagini esatte e gate presentato 1080p su native,
+Apple9 forzata e sampler, tre repliche: p95 9,1945–9,2582 ms, 0 allocazioni
+tracciate. Ripetizione di regressione dopo il return FP32: pass.
+435 test/1.773.613 assert; 336 varianti (284 compatibili, 52 negativi),
+archivio full/partial/stale/foreign-arch/missing e hot reload passano.
+
+Qualità: 480 frame, riferimento HDR 4×, Torus 34,85 dB e Sponza 30,16 dB;
+clip esposizione/DRS/due viste e negativi temporali registrati. 576 campioni
+GPU delle curve colore: errore massimo 0,00000213 contro riferimento double.
+Sponza: bias neutro 29,80 dB, bias da scala 30,16 dB, sharpening 0,5 30,09 dB.
+
+Dati/condizioni: [JSON](results/F7-F8-M5Max-2026-10-03.json),
+[consegna e limiti](F7_F8_HANDOFF.md), `build/acceptance-f7-f8-*`.
+Nessun contatore DRAM/energia o risultato T0 inventato. Il vecchio exit F6
+non attribuito rimane distinto dai difetti locali riprodotti e corretti.
+
+**Residuo finale:** il controllo di lifetime MetalFX è riprodotto con un
+programma di sole API pubbliche (640×360, senza renderer o submission).
+Rimane una zeroing-weak reference viva dopo il rilascio. Native: 0 leak.
+F8.4 resta aperta; questi risultati prestazionali non dichiarano chiuso quel
+gate. [Riproduttore](../bench/f8_spike/README.md).

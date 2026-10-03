@@ -101,6 +101,7 @@ PassAttachments collectAttachments(const RenderGraph& graph, const PassNode& pas
 struct GroupState {
     bool open = false;
     u32  width = 0, height = 0, sampleCount = 1;
+    u32 tileWidth = 0, tileHeight = 0;
     std::vector<PassAttachment> attachments;  // union over members
     std::vector<u32> written;                 // resources written by any member (any usage)
     std::vector<u32> writtenNonAttachment;    // ... via ShaderWrite/CopyDst
@@ -110,6 +111,8 @@ struct GroupState {
 };
 
 bool canJoin(const GroupState& g, const PassNode& pass, const PassAttachments& pa) {
+    if (g.tileWidth && pass.tileWidth && (g.tileWidth != pass.tileWidth || g.tileHeight != pass.tileHeight))
+        return false;
     if (pa.width != g.width || pa.height != g.height || pa.sampleCount != g.sampleCount) return false;
     for (const PassAttachment& a : pa.list) {
         for (const PassAttachment& b : g.attachments) {
@@ -146,6 +149,10 @@ bool canJoin(const GroupState& g, const PassNode& pass, const PassAttachments& p
 }
 
 void absorb(GroupState& g, const PassNode& pass, const PassAttachments& pa) {
+    if (pass.tileWidth) {
+        g.tileWidth = pass.tileWidth;
+        g.tileHeight = pass.tileHeight;
+    }
     if (!g.open) {
         g.open        = true;
         g.width       = pa.width;
@@ -176,6 +183,8 @@ RenderGroup buildGroup(const RenderGraph& graph, const CompiledGraph& c, u32 fir
     group.width         = state.width;
     group.height        = state.height;
     group.sampleCount   = state.sampleCount;
+    group.tileWidth = state.tileWidth;
+    group.tileHeight = state.tileHeight;
 
     std::vector<u32>  finalVersion; // parallel to group.attachments
     std::vector<bool> hasClear;
@@ -366,6 +375,12 @@ void buildRenderGroups(const RenderGraph& graph, CompiledGraph& compiled, bool f
                 compiled.encoders.push_back(e);
                 ++groupsSeen;
             }
+        } else if (pass.type == PassType::External) {
+            EncoderPlan e;
+            e.type = PassType::External;
+            e.queue = pass.queue;
+            e.firstPosition = e.lastPosition = pos;
+            compiled.encoders.push_back(e);
         } else {
             const bool extend = !compiled.encoders.empty() && compiled.encoders.back().type == PassType::Compute &&
                                 compiled.encoders.back().queue == pass.queue &&

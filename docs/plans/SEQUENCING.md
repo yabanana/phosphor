@@ -16,15 +16,18 @@ costo prima della migrazione, senza richiedere un guadagno del 3% sul frame.
 
 | Orizzonte | Lavoro | Cosa deve produrre |
 |---|---|---|
-| Operativo | F5 integrata → F6 → F7 baseline → F8 | GPU scene, visibilità, materiali, HDR e ricostruzione in un frame reale; correttezza e misure |
+| Checkpoint verificato | F5/F6 integrate; F7 baseline verificata; F8 con residuo SDK nella PR #14 | Frame reale e verifiche M5 consegnati; F8.4 lifetime aperto, sosta prima delle OPT |
 | Prossimo | F9–F13; F14 da scegliere in base alla scena | Illuminazione integrata e qualità temporale; dettagli di progetto rivisti dopo F8 |
 | Successivo | Altre F, compresi runtime e mondo | Piani dettagliati da riconciliare quando il consumatore esiste |
 | Prodotto richiesto | F21/F27/F34, F39–F41 e audio base F26.1 | Riuso, 2D/UI/editor e compatibilità verificata; baseline incrementale, copertura finale obbligatoria |
 | Opportunità | OPT aperte, task `[CANDIDATO]`, fasi `[EDGE]` | Nessuna implementazione automatica: attivazione per un problema concreto e misurato |
-| Audit | F0–F5, OPT-0/OPT-1 | Conservare evidenze; riprendere soltanto residui e verifiche pertinenti alle modifiche |
+| Audit | F0–F8, OPT-0/OPT-1 | Conservare evidenze; riprendere soltanto residui e verifiche pertinenti alle modifiche |
 
-F5 è integrata in main; conservarne contratti ed evidenze. F7.4/F7.5 sono candidati da
-rivalutare dopo F8, non condizioni per completare la baseline F7. La storia
+F5/F6 sono integrate in main; conservarne contratti ed evidenze. F7 baseline ha accettazione di sviluppo M5 nel branch PR #14; F8 è
+implementata ma F8.4 mantiene il gate lifetime SDK aperto. Gli esperimenti F7.4/F7.5
+richiesti dal proprietario sono stati eseguiti e non adottati nel preset corrente:
+[misure e decisioni](../F7_F8_HANDOFF.md). Non bloccano la baseline F7.
+Nessuna OPT o fase F9+ viene avviata da questo checkpoint. La storia
 F8.6 parte da risorse per vista e sincronizzazione conservativa; aliasing
 temporale generale e scheduling eterogeneo non servono a renderla corretta.
 

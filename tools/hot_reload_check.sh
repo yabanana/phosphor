@@ -59,6 +59,7 @@ fi
 dir=$(mktemp -d)
 trap 'rm -rf "$dir"' EXIT
 cp "$repo_dir"/shaders/*.metal "$dir/"
+cp "$repo_dir"/shaders/*.h "$dir/"
 log="$out_dir/watcher.log"
 # 1500 frames with vsync: >= 12 s even on a 120 Hz display.
 MTL_DEBUG_LAYER=1 MTL_DEBUG_LAYER_WARNING_MODE=nslog \
@@ -70,13 +71,12 @@ printf '\nthis is not metal;\n' >>"$dir/forward.metal"          # broken edit
 sleep 3
 # Valid edit (magenta), written in one rename: two separate writes let the
 # 250 ms watcher poll fall in between and reload twice (measured, F4).
-cp "$repo_dir/shaders/forward.metal" "$dir/forward.metal.tmp"
-perl -0pi -e 's/(\[\[buffer\(5\)\]\]\)\n\{\n)/$1    return half4(1.0h, 0.0h, 1.0h, 1.0h);\n/' "$dir/forward.metal.tmp"
+{ printf '#define PHOSPHOR_HOT_RELOAD_PROBE 1\n'; cat "$repo_dir/shaders/forward.metal"; } > "$dir/forward.metal.tmp"
 mv "$dir/forward.metal.tmp" "$dir/forward.metal"
 status=0
 wait "$pid" || status=$?
 # The failed build prints the compiler's diagnostics (expected here).
-n=$(unexpected "$log" '^\[ERROR\].*build failed|forward\.metal:[0-9]+:[0-9]+: error|^this is not metal|^[[:space:]]*\^|errors? generated|^[[:space:]]*$')
+n=$(unexpected "$log" '^\[ERROR\].*build failed|In file included from|forward\.metal:[0-9]+:[0-9]+: error|^this is not metal|^[[:space:]]*\^|errors? generated|^[[:space:]]*$')
 if [[ $status -eq 0 && $n -eq 0 ]] && grep -q 'build failed, pipelines unchanged' "$log" &&
    grep -q 'Shaders reloaded: generation' "$log" && grep -q '^PIPELINES .*reloads 1 (failed 0)' "$log"; then
     echo "watcher: PASS (broken edit rejected, valid edit reloaded once)"

@@ -225,6 +225,11 @@ MTL::Texture* GpuMemory::newTexture(const MTL::TextureDescriptor* descriptor, Me
         if (!isMemoryless(texture)) context_.makeResident(texture, residencyClass(category));
     }
     texture->setLabel(str(label));
+    // Metal 4 validation can reject heap-backed attachments unless the
+    // texture itself is in a residency set (also required by graph RTs).
+    // Imported/offscreen/post targets must obey the same contract.
+    if (placements_.contains(texture) && (descriptor->usage() & MTL::TextureUsageRenderTarget))
+        context_.makeResident(texture, residencyClass(category));
     account(texture, category);
     return texture;
 }
@@ -286,6 +291,7 @@ void GpuMemory::destroy(MTL::Resource* resource) {
     if (it != placements_.end()) {
         // The heap is resident as a whole; the range is reusable once the
         // resource object is gone.
+        context_.evict(resource); // an explicitly registered heap-backed render target
         resource->release();
         heaps_[it->second.heap].tlsf.free(it->second.handle);
         placements_.erase(it);

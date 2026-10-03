@@ -296,6 +296,26 @@ struct LaunchOptions {
     bool         meshletSpatial  = false; // --meshlet-builder spatial
     u32          meshletMaxVertices  = 0; // 0 = default (64)
     u32          meshletMaxTriangles = 0; // 0 = default (124)
+    // F7/F8 renderer, temporal reconstruction, capture and bounded diagnostics.
+    std::string scenePath;
+    bool visibility = false, materialBinning = false; // measured baseline; specialization stays opt-in
+    bool tileResolve = false;
+    bool adaptiveShading = false;
+    bool debugAdaptiveNoHistory = false;
+    bool post = false, temporalUpscale = false, autoExposure = false, dynamicResolution = false;
+    bool debugVisibility = false, debugMotionCorrupt = false, debugExposureCorrupt = false, debugUpscalerReset = false;
+    bool debugGuideCorrupt = false;
+    bool debugHistoryCorrupt = false;
+    bool debugPostCurves = false, debugPostCurvesCorrupt = false;
+    bool debugNeutralMipBias = false;
+    bool offscreen = false, temporalScript = false, exposureScript = false;
+    std::string captureSequence;
+    u32 captureEvery = 1;
+    u32 referenceScale = 1;
+    u32 settledReference = 1;
+    u32 framesInFlight = 3, feedbackDelayMs = 0, feedbackFailFrame = 0, jitterVariant = 0;
+    u32 tonemap = 0, temporalViews = 1, resolutionScript = 0, displayOutput = 0;
+    float renderScale = 1.0f, drsBudget = 14.0f, sharpening = 0.0f, toneWhite = 4.0f, debugMotionScale = 1.0f;
     u32          resolutionWidth  = 0;    // --resolution WxH (0 = window default)
     u32          resolutionHeight = 0;
     bool         cullingScript    = false;
