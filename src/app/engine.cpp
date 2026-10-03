@@ -990,11 +990,9 @@ void Engine::switchTestBench(TestBenchType type) {
     if (mesh_) mesh_->syncGeometry(*gpuScene_);
     // F6.5: a new scene has no history.
     ++sceneEpoch_;
-    for (auto &h : histories_) {
-        h.valid = false;
-        ++h.generation;
-        h.lastReset = "bench switch";
-    }
+    for (u32 view=0;view<HistoryRegistry::MaxViews;++view)
+        hizRegistry_.invalidate(view,"bench switch");
+    histories_ = {};
     // F5.1: full build of the persistent scene, uploaded through staging.
     store_->clear();
     store_->sync(*ecs_, *gpuScene_);
@@ -1258,33 +1256,37 @@ bool Engine::frame(float dt) {
     }
     renderBackingWidth_ = std::max(width, renderWidth);
     renderBackingHeight_ = std::max(height, renderHeight);
+    const bool viewCameraCut=scriptedCut || (hizHistory().valid &&
+            (glm::length(camPos-history().cameraPosition)>4.0f ||
+             glm::dot(camera_->getFront(),history().cameraFront)<0.9063f));
+    if (mesh_) {
+        const auto decision=hizRegistry_.begin(currentView_,{renderWidth,renderHeight,width,height},sceneEpoch_,viewCameraCut,
+            options_.historyResetEvery && presentedFrames_%options_.historyResetEvery==0);
+        if(decision.reset && measuring())++meshletSamples_.historyResets;
+    }
     GPUTemporalParams temporal{};
     std::memcpy(temporal.currentViewProjection, &unjittered[0][0], 64);
-    std::memcpy(temporal.previousViewProjection, history().viewProj, 64);
+    std::memcpy(temporal.previousViewProjection, hizHistory().previousViewProjection.data(), 64);
     temporal.renderSize[0] = float(renderWidth);
     temporal.renderSize[1] = float(renderHeight);
     temporal.deltaTime = dt;
     temporal.manualExposure = effectiveExposure;
     temporal.historyValid =
-        history().valid &&
+        hizHistory().valid &&
         (!visibility_ || !visibility_->needsPoseReset(currentView_, store_->instances().size_bytes()));
     temporal.viewIndex = currentView_;
     if (post_) {
-        const bool cut =
-            scriptedCut || (history().valid && (glm::length(camPos - history().cameraPosition) > 4.0f ||
-                                                glm::dot(camera_->getFront(), history().cameraFront) < 0.9063f));
+        const bool cut = viewCameraCut;
         temporal =
             post_->prepareFrame(frame.slot, frame.index, currentView_, renderWidth, renderHeight, width, height,
                                 &unjittered[0][0], sceneEpoch_, cut,
                                 (options_.historyResetEvery && presentedFrames_ % options_.historyResetEvery == 0) ||
                                     (options_.settledReference > 1 && referenceStart) ||
                                     visibility_->needsPoseReset(currentView_, store_->instances().size_bytes()),
-                                history().valid ? static_cast<float>(sceneTime_ - history().sceneTime) : dt,
+                                history().sceneTime > 0 ? static_cast<float>(sceneTime_ - history().sceneTime) : dt,
                                 effectiveExposure, displayHeadroom_);
-        if (!temporal.historyValid && history().valid) {
-            history().valid = false;
-            ++history().generation;
-            history().lastReset = post_->histories().get(currentView_).resetReason;
+        if (!temporal.historyValid && hizHistory().valid) {
+            hizRegistry_.invalidate(currentView_,post_->histories().get(currentView_).resetReason);
         }
     }
     temporal.debugFlags = (options_.debugMotionCorrupt ? 1u : 0u) | (options_.debugGuideCorrupt ? 2u : 0u) |
@@ -1333,28 +1335,6 @@ bool Engine::frame(float dt) {
     const u64 sceneBytes = renderer_->prepareFrame(*store_, lights_, constants, textures_->tableAddress(), sceneParams);
     const bool meshletCheckFrame = mesh_ && options_.debugMeshlets > 0 && (presentedFrames_ + 1) % options_.debugMeshlets == 0;
     if (mesh_) {
-        // F6.5 history: reset on resize, camera cut (scripted teleport, or a
-        // jump of the camera between two frames), --history-reset-every.  A
-        // reset only costs efficiency (phase A treats every geometrically
-        // valid candidate as visible), never correctness.
-        const glm::vec3 front = camera_->getFront();
-        const char* reset = nullptr;
-        if (history().valid) {
-            if (history().width != width || history().height != height)
-                reset = "resize";
-            else if (scriptedCut) reset = "camera cut (script)";
-            else if (glm::length(camPos - history().cameraPosition) > 4.0f ||
-                     glm::dot(front, history().cameraFront) < 0.9063f)
-                reset = "camera cut";
-            else if (options_.historyResetEvery > 0 && presentedFrames_ % options_.historyResetEvery == 0)
-                reset = "--history-reset-every";
-        }
-        if (reset) {
-            history().valid = false;
-            ++history().generation;
-            history().lastReset = reset;
-            if (measuring()) ++meshletSamples_.historyResets;
-        }
         MeshRenderer::FrameParams mp;
         mp.slot   = frame.slot;
         mp.width = renderWidth;
@@ -1368,8 +1348,8 @@ bool Engine::frame(float dt) {
         mp.cull.cameraPosition[1] = camPos.y;
         mp.cull.cameraPosition[2] = camPos.z;
         mp.cull.nearPlane         = camera_->getNear();
-        std::memcpy(mp.prevViewProj, history().viewProj, sizeof(mp.prevViewProj));
-        mp.historyValid = history().valid;
+        std::memcpy(mp.prevViewProj, hizHistory().previousViewProjection.data(), sizeof(mp.prevViewProj));
+        mp.historyValid = hizHistory().valid;
         mp.corrupt      = meshletCheckFrame ? options_.debugMeshletsCorrupt : MeshletCorruption::None;
         mesh_->requestCheckReadback(meshletCheckFrame);
         mesh_->prepareFrame(*store_, *gpuScene_, mp);
@@ -1484,11 +1464,8 @@ bool Engine::frame(float dt) {
     if (post_)
         post_->finishFrame(&unjittered[0][0]);
     if (mesh_) {
-        // Hi-Z final of this frame wrote the history with this frame's view.
-        history().valid = true;
-        std::memcpy(history().viewProj, &projected[0][0], sizeof(history().viewProj));
-        history().width = width;
-        history().height = height;
+        hizRegistry_.read(currentView_,frame.index+1);
+        hizRegistry_.write(currentView_,frame.index+1,&projected[0][0]);
         history().sceneTime = sceneTime_;
         history().cameraPosition = camPos;
         history().cameraFront = camera_->getFront();
@@ -1647,8 +1624,8 @@ bool Engine::checkMeshlets(u32 slot) {
     if (!r.pass) ++meshletFailures_;
     // stdout: scripts and the negative controls read these lines.
     std::printf("MESHLETS frame %u | history %s (generation %llu, last reset: %s) | %s\n", presentedFrames_,
-                history().valid ? "valid" : "invalid", static_cast<unsigned long long>(history().generation),
-                history().lastReset, formatMeshletCheck(r).c_str());
+                hizHistory().valid ? "valid" : "invalid", static_cast<unsigned long long>(hizHistory().generation),
+                hizHistory().resetReason, formatMeshletCheck(r).c_str());
     std::fflush(stdout);
     return r.pass;
 }

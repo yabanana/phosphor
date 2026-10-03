@@ -12,6 +12,7 @@
 #include "rendergraph/optimizer/plan.h"
 #include "rendergraph/render_graph.h"
 #include "renderer/gpu_types.h"
+#include "renderer/history_registry.h"
 #include "renderer/scene_extract.h"
 #include "testbench/testbench.h"
 
@@ -192,20 +193,17 @@ private:
     std::unique_ptr<GpuSceneChecker> sceneChecker_; // --debug-gpu-scene
     u32  gpuSceneChecks_   = 0;
     u32  gpuSceneFailures_ = 0;
-    // F6: Hi-Z history of the (single) view: valid once a two-phase frame has
-    // written it with `viewProj` at width x height; any reset makes phase A
-    // treat every geometrically valid candidate as visible.
+    // Camera metadata accompanies the per-view geometry history registry.
+    // The registered matrix is jittered for Hi-Z; MetalFX registers its
+    // independent unjittered signal in PostProcessor.
     struct HiZHistory {
-        bool  valid = false;
-        float viewProj[16]{};
-        u32   width = 0, height = 0;
-        u64   generation = 0;     // incremented on every reset
         glm::vec3 cameraPosition{0.0f};
-        glm::vec3 cameraFront{0.0f, 0.0f, -1.0f};
-        const char* lastReset = "start";
-        double sceneTime = 0.0;
+        glm::vec3 cameraFront{0.0f,0.0f,-1.0f};
+        double sceneTime=0;
     };
-    std::array<HiZHistory, 4> histories_{};
+    std::array<HiZHistory,HistoryRegistry::MaxViews> histories_{};
+    HistoryRegistry hizRegistry_;
+    const HistoryRegistry::View &hizHistory() const { return hizRegistry_.get(currentView_); }
     u32 currentView_ = 0;
     HiZHistory &history() { return histories_[currentView_]; }
     const HiZHistory &history() const { return histories_[currentView_]; }

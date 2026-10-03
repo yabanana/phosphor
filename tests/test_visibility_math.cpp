@@ -4,6 +4,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <doctest/doctest.h>
 #include <cmath>
+#include <initializer_list>
 
 using namespace phosphor;
 

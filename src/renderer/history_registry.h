@@ -30,7 +30,9 @@ class HistoryRegistry {
     };
     Decision begin(u32 view, Extent extent, u64 scene, bool cameraCut = false, bool explicitReset = false);
     void read(u32 view, u64 submission);
-    void write(u32 view, u64 submission, const float *unjitteredViewProjection);
+    // Each registry owns one signal across views: Hi-Z stores a jittered
+    // projection, while motion/reconstruction stores an unjittered one.
+    void write(u32 view, u64 submission, const float *viewProjection);
     void invalidate(u32 view, const char *reason);
     [[nodiscard]] const View &get(u32 view) const;
 
