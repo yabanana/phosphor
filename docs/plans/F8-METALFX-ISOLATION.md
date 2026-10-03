@@ -1,7 +1,7 @@
 # F8.4 — isolated MetalFX lifetime experiment
 
-Active investigation requested by the owner on 2026-10-03. Do not call this
-adopted or completed before the gates below pass. PR #15 remains the delivery
+DEVELOPMENT_ACCEPTED on M5, 2026-10-03. The gates below were executed;
+see [final delivery](../F8_METALFX_LIFETIME.md) and its source evidence. PR #15 remains the delivery
 branch. The SDK's in-process destruction defect is not claimed fixed.
 
 ## Evidence and decision
@@ -87,6 +87,9 @@ vs 2.1757 ms; 1024 lights 11.6081 vs 12.4598 ms; two views 1.2656 vs
 time excludes worker CPU. There is a measured cost, especially for
 multiple views, and extra shared bridge memory. No OPT is activated.
 
-Final CI, a long fixed-extent run and publication still pending here.
+Source CI Linux/macOS passes (run 37132919847). The final 20,000-frame
+fixed-extent run also passes with zero new GpuMemory allocations in both
+processes and zero residual mappings. Four-view EDR/DRS validation passes.
+Publication is tracked by PR #15.
 The SDK-only probe remains negative; adoption concerns the engine's
 process-owned lifetime, not an assertion that the SDK cycle disappeared.

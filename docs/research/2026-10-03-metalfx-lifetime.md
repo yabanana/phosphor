@@ -1,7 +1,11 @@
 # F8.4 — versioni MetalFX, lifetime e alternativa denoised
 
+**Aggiornamento successivo:** il motore adotta [worker isolati](../F8_METALFX_LIFETIME.md)
+per recuperare le risorse del framework al rilascio. Segue l’indagine che ha
+motivato la soluzione; i suoi risultati negativi sull’SDK restano validi.
+
 Indagine sul M5 Max, 2026-10-03. Base del motore: `862032e`.
-**Nessuna correzione pubblica verificata sul runtime disponibile.** Lo scaler
+**Esito iniziale dei percorsi in-process: nessuna correzione verificata del runtime.** Lo scaler
 standard perde istanze e risorse; l'alternativa denoised libera le istanze ma
 ha un'altra perdita CPU. Lo spike non è adottato e F8.4 resta aperta.
 
@@ -120,7 +124,7 @@ il runner rigettava un messaggio INFO di archive miss contenente `error:`
 controllo senza storia; il successivo confronto usa il controllo corrispondente.
 Nessuna soglia o immagine di riferimento è stata cambiata per assorbire errori.
 
-## Decisione e prossimo controllo
+## Decisione dello spike e prossimo controllo SDK (storico)
 
 **Non adottare il denoised come workaround F8.4:** non supera il gate memoria,
 non è equivalente per la DRS e nella prova eseguita riduce il dettaglio.

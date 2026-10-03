@@ -31,7 +31,9 @@ run-loop drain on 2026-10-03 still leaves one live weak target (exit 1);
 this is not explained by the original two-second wait alone.
 
 Phosphor's native HDR path has `0 leaks` in the same exit-time test. MetalFX
-rendering/quality tests pass, but its lifetime gate remains open as F8.4.
+rendering/quality tests pass; the SDK-only destruction gate remains negative.
+The engine now uses [isolated lifetime ownership](../../docs/F8_METALFX_LIFETIME.md),
+which is verified independently without claiming the SDK cycle is fixed.
 Native is the default; temporal use is explicit. Do not force releases or alter
 private framework ivars to hide this cycle. Rerun this reduction and the engine
 lifetime tests when the runtime is updated. No external report has been sent.
