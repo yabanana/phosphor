@@ -241,7 +241,7 @@ pubbliche, sorgenti OS, risultati di paper e ipotesi da misurare.
 
 | Tappa | Consegna principale | Decisione successiva |
 |---|---|---|
-| Ora | F5/F6 integrate; F7 baseline verificata; F8 implementata con gate lifetime SDK aperto (PR #14) | Frame reale con visibilità, materiali e ricostruzione, misurato e verificato |
+| Ora | F5–F8 integrate in main (PR #14); F7 baseline verificata, F8.4 lifetime SDK aperto | Frame reale con visibilità, materiali e ricostruzione, misurato e verificato |
 | Dopo F8 | Baseline del corpus OPT-4.16 con strumenti esistenti | Selezionare un problema di OPT-2/3/4 se rilevante; altrimenti proseguire F9–F13 |
 | Dopo F13 | Ombre, GI, riflessi e denoise integrati; F14 se utile al corpus | Nuove misure; valutare soltanto le ottimizzazioni rese necessarie dal frame con luce |
 | Sviluppo successivo | Materiali/mondo/streaming e runtime richiesti dalla slice | Attivare un piano dettagliato quando il suo consumatore è concreto |
@@ -424,7 +424,7 @@ eventi al pixel). Certificazione T0/M3 fisica `EXTERNAL_VALIDATION_PENDING`.
 
 ## F7 — Visibility buffer e shading ibrido TBDR [CORE]
 
-**2026-10-03: DEVELOPMENT_ACCEPTED su M5 Max**, nel branch della [PR #14](https://github.com/yabanana/phosphor/pull/14). [Consegna per task, misure e limiti](F7_F8_HANDOFF.md).
+**2026-10-03: DEVELOPMENT_ACCEPTED su M5 Max**, integrata in main con la [PR #14](https://github.com/yabanana/phosphor/pull/14). [Consegna per task, misure e limiti](F7_F8_HANDOFF.md).
 
 **Obiettivo**: il cuore del renderer, progettato per la tile memory.
 
@@ -442,7 +442,7 @@ eventi al pixel). Certificazione T0/M3 fisica `EXTERNAL_VALIDATION_PENDING`.
 
 ## F8 — HDR, EDR, esposizione e MetalFX temporal [CORE]
 
-**2026-10-03: implementazione e verifiche funzionali M5 consegnate; chiusura F8 pendente su F8.4 (lifetime MetalFX del runtime).** Nessuna OPT avviata. [Consegna e riproduttore](F7_F8_HANDOFF.md).
+**2026-10-03: implementazione e verifiche funzionali M5 integrate in main (PR #14, `91b51c2`); chiusura F8 pendente su F8.4 (lifetime MetalFX del runtime).** Nessuna OPT avviata. [Consegna e riproduttore](F7_F8_HANDOFF.md).
 
 - [x] F8.1 Target RGBA16F lineare (attachment tile nei pass raster, output compute nel resolve della baseline F7), istogramma di luminanza in compute con SIMD-group, esposizione automatica
 - [x] F8.2 Tonemapping configurabile (AgX, ACES, curva custom) e uscita **EDR** su display XDR con calibrazione relativa tramite headroom osservato; fotometria in nit non certificata

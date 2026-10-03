@@ -9,11 +9,10 @@ task only once it is verified for its declared scope on the available device
 `docs/perf-log.md`. The report's older "F1–F5" numbering is superseded by it.
 Planning horizons: read `docs/plans/SEQUENCING.md` and `docs/plans/README.md`.
 All 58 F/OPT plans now contain advance implementation and verification detail.
-F5 and F6 are integrated on main (F6 merge e600887; mesh path,
-two-phase culling). F7 baseline has M5 development acceptance; F8 is implemented with its F8.4
-MetalFX SDK lifetime gate still open in
-`codex/f7-f8` / PR #14 (see `docs/F7_F8_HANDOFF.md`); do not claim they are
-on main before the PR is merged. The owner requested a stop before OPT.
+F5–F8 implementation is integrated on main (F6 merge e600887; F7/F8 PR #14,
+merge 91b51c2). F7 baseline has M5 development acceptance; F8.4 retains an
+open MetalFX SDK lifetime gate (see `docs/F7_F8_HANDOFF.md`). Integration
+does not close that failed check; native remains the default. The owner requested a stop before OPT.
 F7.4/F7.5 were implemented as opt-in experiments and not adopted in the
 measured preset. Material binning is available; generic resolve is the measured
 default. `docs/RENDERING_F7_F8.md` records contracts and validation commands. Later

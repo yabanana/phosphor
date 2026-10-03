@@ -1,7 +1,9 @@
 # F7/F8 — consegna e revisione F5/F6
 
-Aggiornamento: 2026-10-03. Implementazione nel branch `codex/f7-f8`,
-[PR #14](https://github.com/yabanana/phosphor/pull/14). La chiusura riguarda
+Aggiornamento: 2026-10-03. Implementazione integrata in `main` con la
+[PR #14](https://github.com/yabanana/phosphor/pull/14), merge `91b51c2`.
+L’integrazione richiesta dal proprietario è conclusa; il controllo memoria
+fallito rimane aperto e non viene trasformato in un PASS. La consegna riguarda
 lo sviluppo sul **M5 Max 128 GB**; **F7 baseline è accettata, F8.4 mantiene
 un gate aperto sul lifetime MetalFX del runtime**. T0 fisico rimane esterno. Nessuna fase OPT
 avviata. Stato delle caselle: [roadmap](ROADMAP.md). Contratti e comandi:
@@ -157,3 +159,31 @@ default; l'uso MetalFX rimane esplicito. Nessun report esterno è stato inviato.
 
 Il punto di arresto richiesto è F8. Restano preparate F9–F13 e il catalogo OPT,
 ma nessun lavoro successivo parte automaticamente.
+
+## Integrazione finale — 2026-10-03
+
+Su richiesta «chiudi tutto», PR #14 mergiata in main (`91b51c2`). Il checkout
+integrato compila in Release e supera nuovamente i test portabili, Sponza
+HDR/native e MetalFX con output 641×361, DRS, due viste e tre frame in volo
+sotto API e shader validation. Log: `build/f7-review/main-*-smoke.log`.
+La documentazione è allineata al merge; il codice del renderer non è cambiato
+rispetto alla PR verificata. CI della testa PR: run `37101475776`, Linux/macOS
+verdi; la CI di main verifica separatamente il commit pubblicato.
+
+Ulteriori controlli conservati:
+
+- Il riproduttore MetalFX resta vivo anche dopo 30 secondi di drain
+  (`metalfx-lifetime-drain30-checked.log`, exit 1). Il PASS del runner
+  certifica la riproduzione del fallimento atteso, non il rilascio dello scaler.
+- L'archivio macOS 26 scaricato dalla CI viene rifiutato su macOS 27.2:
+  18 pipeline unavailable, 18 compilate. Il confronto con archivio nativo,
+  a parità di modalità sincrona, ha zero pixel diversi su 5.760.000.
+  Contro il vecchio riferimento acquisito sotto shader validation resta un
+  pixel diverso di un livello: il confronto rigoroso originario non è
+  dichiarato superato e il suo report è conservato. Non sono state cambiate
+  immagini di riferimento o tolleranze.
+
+L'integrazione è conclusa; **F8.4 rimane aperta**. Per chiuderla servono
+rilascio effettivo nel riproduttore e prove di lifetime del renderer con
+MetalFX, resize e più viste su un runtime corretto o con un workaround
+pubblico verificato. T0 e l'exit storico F6 restano nei limiti sopra dichiarati.

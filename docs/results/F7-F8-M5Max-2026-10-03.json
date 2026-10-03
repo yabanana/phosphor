@@ -930,7 +930,10 @@
     "native_path_leaks": 0,
     "public_api_only_reduction_live_weak_scalers": 1,
     "reproducer": "bench/f8_spike/metalfx_lifetime.mm",
-    "external_report_sent": false
+    "external_report_sent": false,
+    "additional_drain_seconds": 30,
+    "additional_drain_live_weak_scalers": 1,
+    "additional_drain_log": "build/f7-review/metalfx-lifetime-drain30-checked.log"
   },
   "final_functional": [
     {
@@ -1183,5 +1186,120 @@
       }
     }
   ],
-  "exposure_texture_format": "R16Float (SDK contract); adaptation state FP32"
+  "exposure_texture_format": "R16Float (SDK contract); adaptation state FP32",
+  "integration": {
+    "pull_request": 14,
+    "merge_commit": "91b51c2509acbb9d07f44882fd8cff06dfb2f2cf",
+    "source_head_ci_run": 37101475776,
+    "scope": "Merged delivery; F8.4 lifetime still OPEN; stop before OPT",
+    "local_rebuild_and_portable_tests": "PASS",
+    "local_smoke": [
+      {
+        "name": "native",
+        "command": [
+          "env",
+          "MTL_DEBUG_LAYER=1",
+          "MTL_SHADER_VALIDATION=1",
+          "./build/release/phosphor",
+          "--offscreen",
+          "--no-ui",
+          "--no-vsync",
+          "--fixed-timestep",
+          "--warmup",
+          "0",
+          "--bench",
+          "4",
+          "--scene",
+          "assets/sponza/Sponza.gltf",
+          "--frames",
+          "40",
+          "--resolution",
+          "640x360",
+          "--post",
+          "--upscaler",
+          "native",
+          "--auto-exposure",
+          "--debug-visibility"
+        ],
+        "returncode": 0,
+        "binary_sha256": "7ced86efc87202b3df0b31ba3ffad533051cb73c27e9de94910d0ebc2f5716cb",
+        "artifacts": {
+          "build/release/phosphor": "7ced86efc87202b3df0b31ba3ffad533051cb73c27e9de94910d0ebc2f5716cb",
+          "build/release/shaders/phosphor.metallib": "5b632c1e408a9b408992c9dbb5605cf4a68ccbb4dbe3ef2f79e40ca48b6c2e56"
+        },
+        "commit": "91b51c2509acbb9d07f44882fd8cff06dfb2f2cf",
+        "validation_env": {
+          "MTL_DEBUG_LAYER": null,
+          "MTL_SHADER_VALIDATION": null,
+          "MTL_DEBUG_LAYER_WARNING_MODE": null
+        },
+        "passed": true,
+        "failures": []
+      },
+      {
+        "name": "temporal",
+        "command": [
+          "env",
+          "MTL_DEBUG_LAYER=1",
+          "MTL_SHADER_VALIDATION=1",
+          "./build/release/phosphor",
+          "--offscreen",
+          "--no-ui",
+          "--no-vsync",
+          "--fixed-timestep",
+          "--warmup",
+          "0",
+          "--bench",
+          "2",
+          "--scene",
+          "procedural",
+          "--frames",
+          "40",
+          "--resolution",
+          "641x361",
+          "--post",
+          "--upscaler",
+          "temporal",
+          "--auto-exposure",
+          "--debug-visibility",
+          "--resolution-script",
+          "9",
+          "--temporal-views",
+          "2",
+          "--frames-in-flight",
+          "3"
+        ],
+        "returncode": 0,
+        "binary_sha256": "7ced86efc87202b3df0b31ba3ffad533051cb73c27e9de94910d0ebc2f5716cb",
+        "artifacts": {
+          "build/release/phosphor": "7ced86efc87202b3df0b31ba3ffad533051cb73c27e9de94910d0ebc2f5716cb",
+          "build/release/shaders/phosphor.metallib": "5b632c1e408a9b408992c9dbb5605cf4a68ccbb4dbe3ef2f79e40ca48b6c2e56"
+        },
+        "commit": "91b51c2509acbb9d07f44882fd8cff06dfb2f2cf",
+        "validation_env": {
+          "MTL_DEBUG_LAYER": null,
+          "MTL_SHADER_VALIDATION": null,
+          "MTL_DEBUG_LAYER_WARNING_MODE": null
+        },
+        "passed": true,
+        "failures": []
+      }
+    ]
+  },
+  "foreign_os_archive": {
+    "ci_run": 37101475776,
+    "archive_os": "macOS 26",
+    "tested_os": "macOS 27.2",
+    "archive_hits": 0,
+    "archive_misses": 0,
+    "archive_unavailable": 18,
+    "compiler_calls": 18,
+    "same_mode_native_control_differing_pixels": 0,
+    "compared_pixels": 5760000,
+    "pipeline_sync": true,
+    "old_shader_validation_reference_differing_pixels": 1,
+    "old_reference_max_delta": 1,
+    "old_reference_strict_pass": false,
+    "log": "build/f7-review/archive-ci-foreign-os-sync.log"
+  }
 }

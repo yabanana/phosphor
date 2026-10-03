@@ -12,7 +12,7 @@ Non attiva il catalogo di ricerca e non inventa risultati sperimentali: le
 scelte numeriche si fissano con la regola dello spike già scritta nel piano.
 I file futuri sono destinazioni proposte; il kickoff riconcilia codice e SDK.
 
-- **Checkpoint:** F5/F6 integrate, F7 baseline verificata; F8 implementata, gate lifetime MetalFX F8.4 aperto nel branch PR #14. Sosta richiesta prima delle OPT.
+- **Checkpoint:** F5–F8 integrate in main (PR #14, `91b51c2`), F7 baseline verificata; gate lifetime MetalFX F8.4 aperto. Sosta richiesta prima delle OPT.
 - **Poi:** F9–F13 e F14 se utile al corpus; renderer prima della piattaforma.
 - **Piattaforma richiesta:** ECS/runtime, contenuti, audio, editor, 2D, UI e
   riuso Bevy, con implementazione progressiva e compatibilità verificata.

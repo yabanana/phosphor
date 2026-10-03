@@ -22,11 +22,11 @@ T0 o supporto mobile certificato prima della prova fisica.
 
 ## Percorsi Apple9 sul M5
 
-Al 2026-10-02 `soc_bench --force-family apple9` **esiste** e, da F6
-(branch `phase/f6`), anche `phosphor --force-family apple9`: limita le
+Dal 2026-10-02 `soc_bench --force-family apple9` **esiste** e F6 ha integrato
+in main anche `phosphor --force-family apple9`: limita le
 capacità EFFETTIVE (backend Hi-Z sampler Apple10 rifiutato, `auto` → compute),
 lascia invariati device, famiglia fisica, memoria e budget, e il report
-schema 6 li riporta separati (`hardware.physical_*`, `effective_capabilities`).
+schema 7 li riporta separati (`hardware.physical_*`, `effective_capabilities`).
 
 L'override deve:
 
@@ -96,8 +96,9 @@ che li richiede e non vanno riclassificati come verifiche esterne.
 
 ## Manifest e formula di consegna
 
-Estendere il report quando si implementa l'override; i campi seguenti sono
-il **contratto da implementare**, non una descrizione dello schema attuale:
+Il report schema 7 implementa l’override e distingue `hardware.physical_*`
+da `hardware.effective_capabilities`. I campi seguenti riassumono il
+**contratto semantico**; non sono una copia letterale dello schema:
 
 ```json
 {

@@ -1290,7 +1290,7 @@
     "external_validation_blocks_development": false,
     "physical_t0_status": "EXTERNAL_VALIDATION_PENDING",
     "forced_apple9_is_hardware_emulation": false,
-    "app_override_status": "planned_in_F6_not_yet_implemented",
+    "app_override_status": "implemented_in_F6_integrated_on_main_report_schema_7",
     "explicit_multidevice_tasks_remain_open": [
       "F0.8",
       "OPT-0.2",
@@ -1302,6 +1302,12 @@
     "through": "F8",
     "scope": "F7 DEVELOPMENT_ACCEPTED on M5 Max; F8 implemented, F8.4 SDK lifetime gate open",
     "stop": "Before OPT phases; no subsequent implementation activated",
-    "evidence": "../F7_F8_HANDOFF.md"
+    "evidence": "../F7_F8_HANDOFF.md",
+    "integration": {
+      "branch": "main",
+      "pull_request": 14,
+      "merge_commit": "91b51c2509acbb9d07f44882fd8cff06dfb2f2cf",
+      "phase_completion_unchanged": true
+    }
   }
 }

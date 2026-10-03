@@ -348,3 +348,16 @@ factory sui worker e corretta l'exposure texture a R16Float secondo il contratto
 SDK. Nessuna API privata o release fuori bilancio viene usata. F8.4 non viene
 spuntata come completa; documentazione e PR riportano il residuo, mentre
 native/HDR e tutte le verifiche funzionali consegnate restano utilizzabili.
+
+### Integrazione richiesta dal proprietario
+
+2026-10-03: PR #14 mergiata in main (`91b51c2`), dopo CI Linux/macOS verde
+sulla testa `1bb899e`. Build Release, test portabili e smoke GPU native/temporal
+sul checkout integrato passano. Il controllo weak MetalFX fallisce ancora
+con drain esteso a 30 secondi. Il controllo aggiuntivo dell'archivio CI prova
+il rifiuto per OS e il fallback pixel-exact contro il controllo nativo
+sincrono; il confronto col vecchio riferimento sotto shader validation
+differisce di un pixel/livello, conservato come mancato PASS rigoroso.
+Dettagli e prossima verifica del residuo nella
+[consegna](../F7_F8_HANDOFF.md#integrazione-finale--2026-10-03).
+Il merge non spunta F8.4 e non attiva OPT o F9+.

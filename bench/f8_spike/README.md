@@ -26,7 +26,9 @@ smaller/early reductions yielded `0 leaks`; that is not a reliable destruction
 proof, so the final reduction checks zeroing-weak liveness as well. Main-thread
 creation, draining the factory pool before publication, clearing input bindings
 and discarding completed command streams did not repair the engine's result.
-Those ineffective changes were not adopted as fixes.
+Those ineffective changes were not adopted as fixes. A further 30-second
+run-loop drain on 2026-10-03 still leaves one live weak target (exit 1);
+this is not explained by the original two-second wait alone.
 
 Phosphor's native HDR path has `0 leaks` in the same exit-time test. MetalFX
 rendering/quality tests pass, but its lifetime gate remains open as F8.4.

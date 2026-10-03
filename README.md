@@ -181,9 +181,10 @@ reports/, research_notes/   design research (Italian / English)
 ## Planning and validation
 
 All 58 F/OPT phase plans now include implementation packages and task-level
-acceptance checks: [plan index](docs/plans/README.md). F5 is integrated;
-F7 baseline has M5 development acceptance in PR #14; F8 is implemented with
-a remaining MetalFX SDK lifetime gate;
+acceptance checks: [plan index](docs/plans/README.md). F5–F8 implementation is
+integrated on main ([PR #14](https://github.com/yabanana/phosphor/pull/14),
+merge `91b51c2`). F7 baseline has M5 development acceptance; F8 retains
+a MetalFX SDK lifetime gate;
 see [delivery and limits](docs/F7_F8_HANDOFF.md) and [renderer commands/contracts](docs/RENDERING_F7_F8.md).
 The requested checkpoint stops before OPT; no F9+ implementation is activated. Advance detail does not activate
 the optional research catalog.
