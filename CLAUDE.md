@@ -12,7 +12,9 @@ All 58 F/OPT plans now contain advance implementation and verification detail.
 F5–F8 implementation is integrated on main (F6 merge e600887; F7/F8 PR #14,
 merge 91b51c2). F7 baseline has M5 development acceptance; F8.4 retains an
 open MetalFX SDK lifetime gate (see `docs/F7_F8_HANDOFF.md`). Integration
-does not close that failed check; native remains the default. The owner requested a stop before OPT.
+does not close that failed check; native remains the default. The SDK/API
+comparison and rejected denoised experiment are recorded in
+`docs/research/2026-10-03-metalfx-lifetime.md`. The owner requested a stop before OPT.
 F7.4/F7.5 were implemented as opt-in experiments and not adopted in the
 measured preset. Material binning is available; generic resolve is the measured
 default. `docs/RENDERING_F7_F8.md` records contracts and validation commands. Later

@@ -1,0 +1,682 @@
+{
+  "schema": 1,
+  "date": "2026-10-03",
+  "base_commit": "862032e90b29ff580ebb09057c8eed0142920993",
+  "hardware": {
+    "name": "Apple M5 Max",
+    "physical_family": "apple10",
+    "memory_gib": 128
+  },
+  "runtime": {
+    "macos": "27.2",
+    "build": "26B5091g",
+    "metalfx": "40.9",
+    "other_os_runtime_tested": false,
+    "softwareupdate_list": "No new software available."
+  },
+  "build": {
+    "xcode": "27.0 (27A266a)",
+    "clang": "Apple clang version 21.0.0 (clang-2100.3.34.2)\nTarget: arm64-apple-darwin27.2.0\nThread model: posix\nInstalledDir: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin\n",
+    "deployment_target": "26.0",
+    "sdks": [
+      "26.5",
+      "27.0"
+    ],
+    "probe_sha256": "6421d6acf051f5bc36f09d4430fcd891e427d528931bc87ecf1c02b5a2aff5ba"
+  },
+  "matrix": [
+    {
+      "sdk": "26.5",
+      "mode": "temporal4",
+      "iterations": 8,
+      "live_scalers_after_release": 8,
+      "device_allocation_delta_bytes": 167133184,
+      "samples": [
+        {
+          "released": 1,
+          "live": 1,
+          "allocated_delta": 21282816
+        },
+        {
+          "released": 2,
+          "live": 2,
+          "allocated_delta": 42024960
+        },
+        {
+          "released": 3,
+          "live": 3,
+          "allocated_delta": 63684608
+        },
+        {
+          "released": 4,
+          "live": 4,
+          "allocated_delta": 84426752
+        },
+        {
+          "released": 5,
+          "live": 5,
+          "allocated_delta": 105037824
+        },
+        {
+          "released": 6,
+          "live": 6,
+          "allocated_delta": 125779968
+        },
+        {
+          "released": 7,
+          "live": 7,
+          "allocated_delta": 146522112
+        },
+        {
+          "released": 8,
+          "live": 8,
+          "allocated_delta": 167133184
+        }
+      ],
+      "cpu_leaked_allocations": 2754,
+      "cpu_leaked_bytes": 2403840,
+      "lifetime_passed": false,
+      "run_log": "build/metalfx-investigation/matrix-no-observer-leaks/sdk-0-temporal4.log",
+      "leaks_log": "build/metalfx-investigation/matrix-no-observer-leaks/sdk-0-temporal4-leaks.log"
+    },
+    {
+      "sdk": "26.5",
+      "mode": "temporal3",
+      "iterations": 8,
+      "live_scalers_after_release": 8,
+      "device_allocation_delta_bytes": 167133184,
+      "samples": [
+        {
+          "released": 1,
+          "live": 1,
+          "allocated_delta": 21282816
+        },
+        {
+          "released": 2,
+          "live": 2,
+          "allocated_delta": 42024960
+        },
+        {
+          "released": 3,
+          "live": 3,
+          "allocated_delta": 63684608
+        },
+        {
+          "released": 4,
+          "live": 4,
+          "allocated_delta": 84426752
+        },
+        {
+          "released": 5,
+          "live": 5,
+          "allocated_delta": 105037824
+        },
+        {
+          "released": 6,
+          "live": 6,
+          "allocated_delta": 125779968
+        },
+        {
+          "released": 7,
+          "live": 7,
+          "allocated_delta": 146522112
+        },
+        {
+          "released": 8,
+          "live": 8,
+          "allocated_delta": 167133184
+        }
+      ],
+      "cpu_leaked_allocations": 2662,
+      "cpu_leaked_bytes": 2257936,
+      "lifetime_passed": false,
+      "run_log": "build/metalfx-investigation/matrix-no-observer-leaks/sdk-0-temporal3.log",
+      "leaks_log": "build/metalfx-investigation/matrix-no-observer-leaks/sdk-0-temporal3-leaks.log"
+    },
+    {
+      "sdk": "26.5",
+      "mode": "spatial4",
+      "iterations": 8,
+      "live_scalers_after_release": 0,
+      "device_allocation_delta_bytes": 393216,
+      "samples": [
+        {
+          "released": 1,
+          "live": 0,
+          "allocated_delta": 393216
+        },
+        {
+          "released": 2,
+          "live": 0,
+          "allocated_delta": 393216
+        },
+        {
+          "released": 3,
+          "live": 0,
+          "allocated_delta": 393216
+        },
+        {
+          "released": 4,
+          "live": 0,
+          "allocated_delta": 393216
+        },
+        {
+          "released": 5,
+          "live": 0,
+          "allocated_delta": 393216
+        },
+        {
+          "released": 6,
+          "live": 0,
+          "allocated_delta": 393216
+        },
+        {
+          "released": 7,
+          "live": 0,
+          "allocated_delta": 393216
+        },
+        {
+          "released": 8,
+          "live": 0,
+          "allocated_delta": 393216
+        }
+      ],
+      "cpu_leaked_allocations": 0,
+      "cpu_leaked_bytes": 0,
+      "lifetime_passed": true,
+      "run_log": "build/metalfx-investigation/matrix-no-observer-leaks/sdk-0-spatial4.log",
+      "leaks_log": "build/metalfx-investigation/matrix-no-observer-leaks/sdk-0-spatial4-leaks.log"
+    },
+    {
+      "sdk": "26.5",
+      "mode": "denoised4",
+      "iterations": 8,
+      "live_scalers_after_release": 0,
+      "device_allocation_delta_bytes": 6963200,
+      "samples": [
+        {
+          "released": 1,
+          "live": 0,
+          "allocated_delta": 6963200
+        },
+        {
+          "released": 2,
+          "live": 0,
+          "allocated_delta": 6963200
+        },
+        {
+          "released": 3,
+          "live": 0,
+          "allocated_delta": 6963200
+        },
+        {
+          "released": 4,
+          "live": 0,
+          "allocated_delta": 6963200
+        },
+        {
+          "released": 5,
+          "live": 0,
+          "allocated_delta": 6963200
+        },
+        {
+          "released": 6,
+          "live": 0,
+          "allocated_delta": 6963200
+        },
+        {
+          "released": 7,
+          "live": 0,
+          "allocated_delta": 6963200
+        },
+        {
+          "released": 8,
+          "live": 0,
+          "allocated_delta": 6963200
+        }
+      ],
+      "cpu_leaked_allocations": 8,
+      "cpu_leaked_bytes": 5120,
+      "lifetime_passed": false,
+      "run_log": "build/metalfx-investigation/matrix-no-observer-leaks/sdk-0-denoised4.log",
+      "leaks_log": "build/metalfx-investigation/matrix-no-observer-leaks/sdk-0-denoised4-leaks.log"
+    },
+    {
+      "sdk": "26.5",
+      "mode": "denoised3",
+      "iterations": 8,
+      "live_scalers_after_release": 0,
+      "device_allocation_delta_bytes": 409600,
+      "samples": [
+        {
+          "released": 1,
+          "live": 0,
+          "allocated_delta": 409600
+        },
+        {
+          "released": 2,
+          "live": 0,
+          "allocated_delta": 409600
+        },
+        {
+          "released": 3,
+          "live": 0,
+          "allocated_delta": 409600
+        },
+        {
+          "released": 4,
+          "live": 0,
+          "allocated_delta": 409600
+        },
+        {
+          "released": 5,
+          "live": 0,
+          "allocated_delta": 409600
+        },
+        {
+          "released": 6,
+          "live": 0,
+          "allocated_delta": 409600
+        },
+        {
+          "released": 7,
+          "live": 0,
+          "allocated_delta": 409600
+        },
+        {
+          "released": 8,
+          "live": 0,
+          "allocated_delta": 409600
+        }
+      ],
+      "cpu_leaked_allocations": 8,
+      "cpu_leaked_bytes": 5120,
+      "lifetime_passed": false,
+      "run_log": "build/metalfx-investigation/matrix-no-observer-leaks/sdk-0-denoised3.log",
+      "leaks_log": "build/metalfx-investigation/matrix-no-observer-leaks/sdk-0-denoised3-leaks.log"
+    },
+    {
+      "sdk": "27.0",
+      "mode": "temporal4",
+      "iterations": 8,
+      "live_scalers_after_release": 8,
+      "device_allocation_delta_bytes": 167133184,
+      "samples": [
+        {
+          "released": 1,
+          "live": 1,
+          "allocated_delta": 21282816
+        },
+        {
+          "released": 2,
+          "live": 2,
+          "allocated_delta": 42024960
+        },
+        {
+          "released": 3,
+          "live": 3,
+          "allocated_delta": 63684608
+        },
+        {
+          "released": 4,
+          "live": 4,
+          "allocated_delta": 84426752
+        },
+        {
+          "released": 5,
+          "live": 5,
+          "allocated_delta": 105037824
+        },
+        {
+          "released": 6,
+          "live": 6,
+          "allocated_delta": 125779968
+        },
+        {
+          "released": 7,
+          "live": 7,
+          "allocated_delta": 146522112
+        },
+        {
+          "released": 8,
+          "live": 8,
+          "allocated_delta": 167133184
+        }
+      ],
+      "cpu_leaked_allocations": 2836,
+      "cpu_leaked_bytes": 2419120,
+      "lifetime_passed": false,
+      "run_log": "build/metalfx-investigation/matrix-no-observer-leaks/sdk-1-temporal4.log",
+      "leaks_log": "build/metalfx-investigation/matrix-no-observer-leaks/sdk-1-temporal4-leaks.log"
+    },
+    {
+      "sdk": "27.0",
+      "mode": "temporal3",
+      "iterations": 8,
+      "live_scalers_after_release": 8,
+      "device_allocation_delta_bytes": 167133184,
+      "samples": [
+        {
+          "released": 1,
+          "live": 1,
+          "allocated_delta": 21282816
+        },
+        {
+          "released": 2,
+          "live": 2,
+          "allocated_delta": 42024960
+        },
+        {
+          "released": 3,
+          "live": 3,
+          "allocated_delta": 63684608
+        },
+        {
+          "released": 4,
+          "live": 4,
+          "allocated_delta": 84426752
+        },
+        {
+          "released": 5,
+          "live": 5,
+          "allocated_delta": 105037824
+        },
+        {
+          "released": 6,
+          "live": 6,
+          "allocated_delta": 125779968
+        },
+        {
+          "released": 7,
+          "live": 7,
+          "allocated_delta": 146522112
+        },
+        {
+          "released": 8,
+          "live": 8,
+          "allocated_delta": 167133184
+        }
+      ],
+      "cpu_leaked_allocations": 2725,
+      "cpu_leaked_bytes": 2261376,
+      "lifetime_passed": false,
+      "run_log": "build/metalfx-investigation/matrix-no-observer-leaks/sdk-1-temporal3.log",
+      "leaks_log": "build/metalfx-investigation/matrix-no-observer-leaks/sdk-1-temporal3-leaks.log"
+    },
+    {
+      "sdk": "27.0",
+      "mode": "spatial4",
+      "iterations": 8,
+      "live_scalers_after_release": 0,
+      "device_allocation_delta_bytes": 393216,
+      "samples": [
+        {
+          "released": 1,
+          "live": 0,
+          "allocated_delta": 393216
+        },
+        {
+          "released": 2,
+          "live": 0,
+          "allocated_delta": 393216
+        },
+        {
+          "released": 3,
+          "live": 0,
+          "allocated_delta": 393216
+        },
+        {
+          "released": 4,
+          "live": 0,
+          "allocated_delta": 393216
+        },
+        {
+          "released": 5,
+          "live": 0,
+          "allocated_delta": 393216
+        },
+        {
+          "released": 6,
+          "live": 0,
+          "allocated_delta": 393216
+        },
+        {
+          "released": 7,
+          "live": 0,
+          "allocated_delta": 393216
+        },
+        {
+          "released": 8,
+          "live": 0,
+          "allocated_delta": 393216
+        }
+      ],
+      "cpu_leaked_allocations": 0,
+      "cpu_leaked_bytes": 0,
+      "lifetime_passed": true,
+      "run_log": "build/metalfx-investigation/matrix-no-observer-leaks/sdk-1-spatial4.log",
+      "leaks_log": "build/metalfx-investigation/matrix-no-observer-leaks/sdk-1-spatial4-leaks.log"
+    },
+    {
+      "sdk": "27.0",
+      "mode": "denoised4",
+      "iterations": 8,
+      "live_scalers_after_release": 0,
+      "device_allocation_delta_bytes": 6963200,
+      "samples": [
+        {
+          "released": 1,
+          "live": 0,
+          "allocated_delta": 6963200
+        },
+        {
+          "released": 2,
+          "live": 0,
+          "allocated_delta": 6963200
+        },
+        {
+          "released": 3,
+          "live": 0,
+          "allocated_delta": 6963200
+        },
+        {
+          "released": 4,
+          "live": 0,
+          "allocated_delta": 6963200
+        },
+        {
+          "released": 5,
+          "live": 0,
+          "allocated_delta": 6963200
+        },
+        {
+          "released": 6,
+          "live": 0,
+          "allocated_delta": 6963200
+        },
+        {
+          "released": 7,
+          "live": 0,
+          "allocated_delta": 6963200
+        },
+        {
+          "released": 8,
+          "live": 0,
+          "allocated_delta": 6963200
+        }
+      ],
+      "cpu_leaked_allocations": 8,
+      "cpu_leaked_bytes": 5120,
+      "lifetime_passed": false,
+      "run_log": "build/metalfx-investigation/matrix-no-observer-leaks/sdk-1-denoised4.log",
+      "leaks_log": "build/metalfx-investigation/matrix-no-observer-leaks/sdk-1-denoised4-leaks.log"
+    },
+    {
+      "sdk": "27.0",
+      "mode": "denoised3",
+      "iterations": 8,
+      "live_scalers_after_release": 0,
+      "device_allocation_delta_bytes": 409600,
+      "samples": [
+        {
+          "released": 1,
+          "live": 0,
+          "allocated_delta": 409600
+        },
+        {
+          "released": 2,
+          "live": 0,
+          "allocated_delta": 409600
+        },
+        {
+          "released": 3,
+          "live": 0,
+          "allocated_delta": 409600
+        },
+        {
+          "released": 4,
+          "live": 0,
+          "allocated_delta": 409600
+        },
+        {
+          "released": 5,
+          "live": 0,
+          "allocated_delta": 409600
+        },
+        {
+          "released": 6,
+          "live": 0,
+          "allocated_delta": 409600
+        },
+        {
+          "released": 7,
+          "live": 0,
+          "allocated_delta": 409600
+        },
+        {
+          "released": 8,
+          "live": 0,
+          "allocated_delta": 409600
+        }
+      ],
+      "cpu_leaked_allocations": 8,
+      "cpu_leaked_bytes": 5120,
+      "lifetime_passed": false,
+      "run_log": "build/metalfx-investigation/matrix-no-observer-leaks/sdk-1-denoised3.log",
+      "leaks_log": "build/metalfx-investigation/matrix-no-observer-leaks/sdk-1-denoised3-leaks.log"
+    }
+  ],
+  "measurement_limits": [
+    "Device allocated bytes include driver pools, not RSS or malloc leak bytes.",
+    "Leaks is conservative and can miss cycles; zero leaked bytes alone is not destruction proof.",
+    "A destroyed weak target does not prove its internals leaked no allocations."
+  ],
+  "public_options": {
+    "no-dynamic-no-reactive": {
+      "iterations": 4,
+      "failed_creation": 0,
+      "live_scalers": 4,
+      "log": "build/metalfx-investigation/no-dynamic-no-reactive.log"
+    },
+    "async": {
+      "iterations": 4,
+      "failed_creation": 0,
+      "live_scalers": 4,
+      "log": "build/metalfx-investigation/async.log"
+    },
+    "auto-exposure": {
+      "iterations": 4,
+      "failed_creation": 0,
+      "live_scalers": 4,
+      "log": "build/metalfx-investigation/auto-exposure.log"
+    },
+    "reset": {
+      "iterations": 4,
+      "failed_creation": 0,
+      "live_scalers": 4,
+      "log": "build/metalfx-investigation/reset.log"
+    },
+    "small": {
+      "iterations": 4,
+      "failed_creation": 0,
+      "live_scalers": 4,
+      "log": "build/metalfx-investigation/small.log"
+    }
+  },
+  "larger_extent": {
+    "extent": [
+      1920,
+      1080
+    ],
+    "iterations": 4,
+    "live_scalers": 4,
+    "device_allocation_delta_bytes": 694435840,
+    "log": "build/metalfx-investigation/large.log"
+  },
+  "no_weak_control": {
+    "extent": [
+      640,
+      360
+    ],
+    "iterations": 4,
+    "device_allocation_delta_bytes": 84426752,
+    "cpu_leaked_bytes": 1217440,
+    "log": "build/metalfx-investigation/leaks-no-weak.log"
+  },
+  "denoised_engine_spike": {
+    "adopted": false,
+    "patch": "bench/f8_spike/denoised_native_spike.patch",
+    "patch_sha256": "aa4c8f812c2eaabaaceb2fd90d359a0417e6350673717072696eae5ad823ceb2",
+    "trigger": "PHOSPHOR_DENOISED_SPIKE=1",
+    "input_scale": 1.0,
+    "gpu_validation_smoke": "PASS",
+    "engine_cpu_leaked_bytes": 640,
+    "drs_supported_by_spike": false,
+    "denoise_bypass_mask": 1.0,
+    "quality_scope": "Exploratory 180-frame 320x180 Sponza at native input scale, 4x per axis linear HDR reference; not full F8 acceptance.",
+    "quality": {
+      "standard": {
+        "passed_exploratory_thresholds": true,
+        "metrics": {
+          "frames": 180,
+          "mean_psnr_srgb_db": 30.04478473057275,
+          "linear_rmse_p95": 0.022756979987025257,
+          "linear_rmse_max": 0.028205497190356255,
+          "residual_flicker_mean": 0.007460272865783837,
+          "ghost_fraction_max": 0.25806451612903225,
+          "excess_ghost_fraction_max": 0.09188660801564028,
+          "support_ghost_fraction_max": 0.023474178403755867,
+          "recovery_frames": {
+            "119": 0
+          }
+        },
+        "log": "build/metalfx-investigation/quality-native-scale/standard-with-control-metrics.json"
+      },
+      "denoised": {
+        "passed_exploratory_thresholds": true,
+        "metrics": {
+          "frames": 180,
+          "mean_psnr_srgb_db": 29.038855015804884,
+          "linear_rmse_p95": 0.026913645397871732,
+          "linear_rmse_max": 0.028841376304626465,
+          "residual_flicker_mean": 0.008163768379017711,
+          "ghost_fraction_max": 0.3269391159299416,
+          "excess_ghost_fraction_max": 0.06451612903225806,
+          "support_ghost_fraction_max": 0.007182761372705506,
+          "recovery_frames": {
+            "119": 0
+          }
+        },
+        "log": "build/metalfx-investigation/quality-native-scale/denoised-metrics.json"
+      }
+    }
+  },
+  "decision": {
+    "verified_fix": false,
+    "F8_4": "OPEN",
+    "production_renderer_changed": false,
+    "default_upscaler": "native",
+    "OPT_started": false,
+    "next_gate": "Different actual MetalFX OS runtime, then weak/leaks/allocation sequence and full engine lifetime/quality validation."
+  }
+}

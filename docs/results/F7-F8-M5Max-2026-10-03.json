@@ -933,7 +933,9 @@
     "external_report_sent": false,
     "additional_drain_seconds": 30,
     "additional_drain_live_weak_scalers": 1,
-    "additional_drain_log": "build/f7-review/metalfx-lifetime-drain30-checked.log"
+    "additional_drain_log": "build/f7-review/metalfx-lifetime-drain30-checked.log",
+    "followup_investigation": "MetalFX-lifetime-M5Max-2026-10-03.json",
+    "original_leak_bytes_are_total_retained_memory": false
   },
   "final_functional": [
     {

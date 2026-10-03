@@ -130,7 +130,10 @@ percorso nativo riporta zero leak. Il percorso MetalFX mostra un ciclo fra
 [riproduttore pubblico minimo](../bench/f8_spike/README.md) crea/rilascia un
 singolo scaler 640×360, senza motore, grafo, thread worker, texture o comandi
 GPU: dopo il rilascio e il drain rimane una weak reference viva. La riduzione
-mostra circa 0,3 MB, variabili con la configurazione; il problema non viene
+mostra circa 0,3 MB di allocazioni CPU classificate da `leaks`, non la memoria
+totale trattenuta. L’[indagine successiva](research/2026-10-03-metalfx-lifetime.md)
+misura 159,39 MiB di crescita nelle allocazioni del device per otto creazioni
+640×360 e conferma il problema con SDK 26.5/27.0 e API Metal 3/4. Il problema non viene
 ridotto a un numero di byte innocuo né coperto dai PASS di immagine.
 Non sono stati adottati doppi release, ivar privati o cache globali per
 nascondere il ciclo. F8.4 resta aperta finché un runtime corretto o un
