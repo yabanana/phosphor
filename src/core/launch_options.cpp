@@ -497,6 +497,16 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
                 error = "--output: expected sdr, edr or auto";
                 return false;
             }
+        } else if (arg == "--tile-resolve") {
+            out.tileResolve = true;
+            out.visibility = true;
+            out.materialBinning = false;
+        } else if (arg == "--adaptive-shading") {
+            out.adaptiveShading = true;
+            out.visibility = true;
+            out.materialBinning = false;
+        } else if (arg == "--debug-adaptive-no-history") {
+            out.debugAdaptiveNoHistory = true;
         } else if (arg == "--debug-upscaler-reset") {
             out.debugUpscalerReset = true;
             out.post = true;
@@ -508,6 +518,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.post = true;
         } else if (arg == "--debug-motion-corrupt") {
             out.debugMotionCorrupt = true;
+        } else if (arg == "--debug-guide-corrupt") {
+            out.debugGuideCorrupt = true;
         } else if (arg == "--post") {
             out.post = true;
         } else if (arg == "--upscaler") {
@@ -697,8 +709,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             return false;
         }
     }
-    if ((out.debugMotionCorrupt || out.debugExposureCorrupt) && !out.debugVisibility) {
-        error = "--debug-motion-corrupt requires --debug-visibility";
+    if ((out.debugMotionCorrupt || out.debugExposureCorrupt || out.debugGuideCorrupt) && !out.debugVisibility) {
+        error = "Guide/motion/exposure corruption requires --debug-visibility";
         return false;
     }
     if (!out.captureSequence.empty() && !out.capturePath.empty()) {
@@ -722,6 +734,14 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     }
     if (out.post)
         out.visibility = true;
+    if (out.tileResolve && out.adaptiveShading) {
+        error = "Tile and adaptive shading are separate experiments";
+        return false;
+    }
+    if (out.debugAdaptiveNoHistory && !out.adaptiveShading) {
+        error = "--debug-adaptive-no-history requires --adaptive-shading";
+        return false;
+    }
     if (out.visibility) {
         if (out.graphScenario) {
             error = "Visibility is unavailable in synthetic graph scenarios";

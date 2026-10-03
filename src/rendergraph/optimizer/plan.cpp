@@ -92,6 +92,12 @@ u64 graphKey(const RenderGraph& graph, const std::vector<std::string>& names) {
         f.u(static_cast<u64>(n.queue));
         f.u(n.hints);
         f.u(n.sideEffect ? 1 : 0);
+        // Keep existing keys stable for passes with a driver-selected tile.
+        if (n.tileWidth) {
+            f.s("tile");
+            f.u(n.tileWidth);
+            f.u(n.tileHeight);
+        }
         f.u(n.reads.size());
         for (const Access& a : n.reads) {
             hashAccess(f, graph, a);

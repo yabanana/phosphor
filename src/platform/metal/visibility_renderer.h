@@ -3,6 +3,7 @@
 #include "pipeline/pipeline_registry.h"
 #include "renderer/visibility_layout.h"
 #include "renderer/temporal_layout.h"
+#include "renderer/exposure.h"
 #include "rendergraph/render_graph.h"
 #include <array>
 
@@ -21,11 +22,11 @@ class PassContext;
 class VisibilityRenderer {
   public:
     VisibilityRenderer(MetalContext &context, PipelineCache &pipelines, SceneRenderer &scene, MeshRenderer &mesh,
-                       bool binning, bool checks = false);
+                       bool binning, bool checks = false, bool tileResolve = false, bool adaptive = false);
     ~VisibilityRenderer();
     void prepareFrame(u32 slot, u32 width, u32 height, u32 outputWidth, u32 outputHeight, const SceneStore &store,
-                      u32 defaultNormal, float exposure, u32 debugMode, const GPUTemporalParams &temporal,
-                      const FrameConstants &constants);
+                      std::array<u32, 3> defaultTextures, float exposure, u32 debugMode,
+                      const GPUTemporalParams &temporal, const FrameConstants &constants);
     rg::TextureRef addResolve(rg::RenderGraph &graph, rg::TextureRef visibility, rg::TextureRef depth);
     void addChecks(rg::RenderGraph &graph);
     bool check(const GpuScene &geometry);
@@ -36,6 +37,10 @@ class VisibilityRenderer {
     [[nodiscard]] u64 genericFrames() const { return genericFrames_; }
     [[nodiscard]] u32 checkCount() const { return checksCount_; }
     [[nodiscard]] u32 checkFailures() const { return checkFailures_; }
+    [[nodiscard]] std::array<u32, 2> adaptiveStats() const;
+    [[nodiscard]] const std::array<u32, ExposureBins> &checkedHistogram() const { return checkedHistogram_; }
+    [[nodiscard]] const std::array<u32, ExposureBins> &checkedHistogramLow() const { return checkedHistogramLow_; }
+    [[nodiscard]] const std::array<u32, ExposureBins> &checkedHistogramHigh() const { return checkedHistogramHigh_; }
     void addPoseSnapshot(rg::RenderGraph &graph);
     rg::TextureRef addPresent(rg::RenderGraph &graph, rg::TextureRef drawable);
     [[nodiscard]] rg::TextureRef color() const { return outputs_[0]; }
@@ -53,9 +58,19 @@ class VisibilityRenderer {
     SceneRenderer &scene_;
     MeshRenderer &mesh_;
     bool binning_;
+    bool tileResolve_ = false;
+    bool adaptive_ = false;
+    std::array<MTL::Buffer *, 4> shadingHistory_{};
+    std::array<u64, 4> shadingHistorySize_{};
+    std::array<bool, 4> shadingHistoryValid_{};
+    rg::BufferRef shadingHistoryRef_;
     bool checks_ = false;
     u32 checksCount_ = 0, checkFailures_ = 0;
     FrameConstants constants_{};
+    std::array<u32, 3> defaultTextures_{}; // white, normal, metallic-roughness
+    std::vector<GPUMaterial> checkMaterials_;
+    std::array<u32, ExposureBins> checkedHistogram_{};
+    std::array<u32, ExposureBins> checkedHistogramLow_{}, checkedHistogramHigh_{};
     GPUTemporalParams temporal_{};
     std::array<std::vector<GPUInstance>, 4> checkedPreviousPoses_{};
     std::array<MTL::Buffer *, 8> readbacks_{};
@@ -81,8 +96,9 @@ class VisibilityRenderer {
     };
     std::array<Buffers, METAL_FRAMES_IN_FLIGHT> frames_{};
     // Separate tables: mutation after encoding must not change earlier work.
-    std::array<MTL4::ArgumentTable *, 4> tables_{};
-    pipe::PipelineHandle clear_, classify_, generic_, present_, fallback_;
+    std::array<MTL4::ArgumentTable *, 5> tables_{};
+    pipe::PipelineHandle clear_, classify_, generic_, present_, fallback_, tile_;
+    pipe::PipelineHandle adaptivePipeline_, saveHistory_;
     std::array<pipe::PipelineHandle, VISIBILITY_CLASSES> resolve_{};
     rg::TextureRef visibility_, depth_;
     std::array<rg::TextureRef, 6> outputs_{};

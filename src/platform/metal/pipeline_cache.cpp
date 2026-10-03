@@ -140,6 +140,18 @@ void setColorOutputs(MTL4::RenderPipelineColorAttachmentDescriptorArray* attachm
 
 /// +1 MTL4 pipeline descriptor for `desc`.
 MTL4::PipelineDescriptor* buildDescriptor(const pipe::PipelineDesc& desc, MTL::Library* library) {
+    if (desc.kind == pipe::PipelineKind::Tile) {
+        auto *d = MTL4::TileRenderPipelineDescriptor::alloc()->init();
+        if (!desc.label.empty())
+            d->setLabel(str(desc.label.c_str()));
+        auto *fn = functionDescriptor(desc.functions[0], desc, library);
+        d->setTileFunctionDescriptor(fn);
+        fn->release();
+        d->setThreadgroupSizeMatchesTileSize(true);
+        for (u32 i = 0; i < desc.colorCount; ++i)
+            d->colorAttachments()->object(i)->setPixelFormat(toMetalFormat(desc.color[i].format));
+        return d;
+    }
     if (desc.kind == pipe::PipelineKind::Compute) {
         MTL4::ComputePipelineDescriptor* d = MTL4::ComputePipelineDescriptor::alloc()->init();
         if (!desc.label.empty()) d->setLabel(str(desc.label.c_str()));

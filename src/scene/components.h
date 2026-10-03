@@ -67,7 +67,7 @@ struct MaterialComponent {
     u32   occlusionTexIndex       = ~0u;
     u32   emissiveTexIndex        = ~0u;
     glm::vec3 emissiveFactor{0.0f};
-    float alphaCutoff             = 0.5f;
+    float alphaCutoff = 0.0f;              // opaque by default; MASK materials opt in
     bool  doubleSided             = false; // glTF doubleSided: no back-face culling, two-sided lighting
 };
 

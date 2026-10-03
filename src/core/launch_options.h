@@ -299,8 +299,12 @@ struct LaunchOptions {
     // F7/F8 renderer, temporal reconstruction, capture and bounded diagnostics.
     std::string scenePath;
     bool visibility = false, materialBinning = true;
+    bool tileResolve = false;
+    bool adaptiveShading = false;
+    bool debugAdaptiveNoHistory = false;
     bool post = false, temporalUpscale = false, autoExposure = false, dynamicResolution = false;
     bool debugVisibility = false, debugMotionCorrupt = false, debugExposureCorrupt = false, debugUpscalerReset = false;
+    bool debugGuideCorrupt = false;
     bool offscreen = false, temporalScript = false, exposureScript = false;
     std::string captureSequence;
     u32 captureEvery = 1;

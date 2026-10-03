@@ -165,7 +165,7 @@ void MillionInstances::setup(ECS& ecs, GpuScene& gpuScene, TextureManager& textu
         gm.metallicRoughnessTex = mrTex_;
         gm.occlusionTex         = INVALID_TEXTURE_INDEX;
         gm.emissiveTex          = INVALID_TEXTURE_INDEX;
-        gm.alphaCutoff          = 0.5f;
+        gm.alphaCutoff = 0.0f;
         gm.flags                = (i % 20 == 7) ? MATERIAL_FLAG_DOUBLE_SIDED : 0u;
         const u32 idx = gpuScene.addMaterial(gm);
         if (i == 0) libraryBase_ = idx;

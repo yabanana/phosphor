@@ -30,8 +30,8 @@ kernel void visibility_clear(constant GPUVisibilityParams &p [[buffer(11)]], dev
                              texture2d<float, access::write> motion [[texture(5)]],
                              texture2d<float, access::write> reactive [[texture(6)]],
                              uint2 pixel [[thread_position_in_grid]]) {
-    if (pixel.y == 0 && pixel.x < 12)
-        args[pixel.x] = (pixel.x % 3 == 0) ? 0u : 1u;
+    if (pixel.y == 0 && pixel.x < 16)
+        args[pixel.x] = pixel.x >= 12 ? 0u : (pixel.x % 3 == 0) ? 0u : 1u;
     if (pixel.x >= p.outputWidth || pixel.y >= p.outputHeight)
         return;
     color.write(float4(0.02f, 0.025f, 0.035f, 1), pixel);
@@ -76,26 +76,19 @@ kernel void visibility_classify(const device GPUInstance *instances [[buffer(2)]
     }
 }
 
-kernel void visibility_resolve(
-    constant FrameConstants &frame [[buffer(0)]], const device GPUVertex *vertices [[buffer(1)]],
-    const device GPUInstance *instances [[buffer(2)]], const device GPUMaterial *materials [[buffer(3)]],
-    const device GPULight *lights [[buffer(4)]], const device TextureHandle *textures [[buffer(5)]],
-    const device GPUMeshlet *meshlets [[buffer(6)]], const device uint *meshletVertices [[buffer(7)]],
-    const device uchar *triangles [[buffer(8)]], const device GPUMeshletCandidate *a [[buffer(9)]],
-    const device GPUMeshletCandidate *b [[buffer(10)]], constant GPUVisibilityParams &p [[buffer(11)]],
-    const device uint *bins [[buffer(12)]], const device GPUInstance *previousInstances [[buffer(14)]],
-    constant GPUTemporalParams &temporal [[buffer(15)]], texture2d<uint, access::read> visibility [[texture(0)]],
-    texture2d<float, access::write> color [[texture(1)]], texture2d<float, access::write> normal [[texture(2)]],
-    texture2d<float, access::write> diffuse [[texture(3)]], texture2d<float, access::write> specular [[texture(4)]],
-    texture2d<float, access::write> motion [[texture(5)]], texture2d<float, access::write> reactive [[texture(6)]],
-    uint2 tile [[threadgroup_position_in_grid]], uint2 local [[thread_position_in_threadgroup]]) {
-    uint index = tile.y * p.tilesX + tile.x;
-    if (kResolveClass < 4u)
-        index = bins[kResolveClass * p.tilesX * p.tilesY + tile.x];
-    const uint2 pixel = uint2(index % p.tilesX, index / p.tilesX) * VISIBILITY_TILE + local;
+static void resolveVisibilityPixel(constant FrameConstants &frame, const device GPUVertex *vertices,
+                                   const device GPUInstance *instances, const device GPUMaterial *materials,
+                                   const device GPULight *lights, const device TextureHandle *textures,
+                                   const device GPUMeshlet *meshlets, const device uint *meshletVertices,
+                                   const device uchar *triangles, const device GPUMeshletCandidate *a,
+                                   const device GPUMeshletCandidate *b, constant GPUVisibilityParams &p,
+                                   const device GPUInstance *previousInstances, constant GPUTemporalParams &temporal,
+                                   texture2d<float, access::write> color, texture2d<float, access::write> normal,
+                                   texture2d<float, access::write> diffuse, texture2d<float, access::write> specular,
+                                   texture2d<float, access::write> motion, texture2d<float, access::write> reactive,
+                                   uint2 pixel, uint id, bool reuse, thread ShadingResult &cached) {
     if (pixel.x >= p.width || pixel.y >= p.height)
         return;
-    const uint id = visibility.read(pixel).x;
     if (id == VISIBILITY_BACKGROUND || visibilityCluster(id) >= 2u * p.candidateCapacity)
         return;
     const GPUMeshletCandidate candidate = candidateOf(id, p, a, b);
@@ -142,14 +135,16 @@ kernel void visibility_resolve(
     surface.mirrored = (instance.flags & INSTANCE_FLAG_MIRRORED) != 0;
     const float3 eye = float3(frame.cameraPosition[0], frame.cameraPosition[1], frame.cameraPosition[2]);
     surface.frontFacing = dot(cross(w1.xyz - w0.xyz, w2.xyz - w0.xyz), eye - surface.worldPos) > 0;
-    const ShadingResult value = shadeSurface(surface, frame, materials, lights, textures, false);
+    const ShadingResult value = reuse ? cached : shadeSurface(surface, frame, materials, lights, textures, false);
+    cached = value;
     color.write(float4(p.debugMode == 1   ? value.normal * 0.5f + 0.5f
                        : p.debugMode == 2 ? value.baseColor
                                           : value.color,
                        1),
                 pixel);
     normal.write(float4(value.normal, value.roughness), pixel);
-    diffuse.write(float4(value.diffuseAlbedo, 1), pixel);
+    diffuse.write(float4(value.diffuseAlbedo + ((temporal.debugFlags & 2u) ? float3(0.25f, 0, 0) : float3(0)), 1),
+                  pixel);
     specular.write(float4(value.specularAlbedo, 1), pixel);
     float2 velocity = 0;
     bool validHistory = false;
@@ -165,10 +160,149 @@ kernel void visibility_resolve(
         }
     }
     motion.write(float4(velocity, 0, 0), pixel);
+    cached.alpha = length(velocity);
     const float reactiveValue = !validHistory                                          ? 1.0f
                                 : materials[instance.materialIndex].alphaCutoff > 0.0f ? 0.75f
                                                                                        : 0.0f;
     reactive.write(float4(reactiveValue), pixel);
+}
+
+kernel void visibility_resolve(
+    constant FrameConstants &frame [[buffer(0)]], const device GPUVertex *vertices [[buffer(1)]],
+    const device GPUInstance *instances [[buffer(2)]], const device GPUMaterial *materials [[buffer(3)]],
+    const device GPULight *lights [[buffer(4)]], const device TextureHandle *textures [[buffer(5)]],
+    const device GPUMeshlet *meshlets [[buffer(6)]], const device uint *meshletVertices [[buffer(7)]],
+    const device uchar *triangles [[buffer(8)]], const device GPUMeshletCandidate *a [[buffer(9)]],
+    const device GPUMeshletCandidate *b [[buffer(10)]], constant GPUVisibilityParams &p [[buffer(11)]],
+    const device uint *bins [[buffer(12)]], const device GPUInstance *previousInstances [[buffer(14)]],
+    constant GPUTemporalParams &temporal [[buffer(15)]], texture2d<uint, access::read> visibility [[texture(0)]],
+    texture2d<float, access::write> color [[texture(1)]], texture2d<float, access::write> normal [[texture(2)]],
+    texture2d<float, access::write> diffuse [[texture(3)]], texture2d<float, access::write> specular [[texture(4)]],
+    texture2d<float, access::write> motion [[texture(5)]], texture2d<float, access::write> reactive [[texture(6)]],
+    uint2 tile [[threadgroup_position_in_grid]], uint2 local [[thread_position_in_threadgroup]]) {
+    uint index = tile.y * p.tilesX + tile.x;
+    if (kResolveClass < 4u)
+        index = bins[kResolveClass * p.tilesX * p.tilesY + tile.x];
+    const uint2 pixel = uint2(index % p.tilesX, index / p.tilesX) * VISIBILITY_TILE + local;
+    if (pixel.x >= p.width || pixel.y >= p.height)
+        return;
+    const uint id = visibility.read(pixel).x;
+    ShadingResult cached{};
+    resolveVisibilityPixel(frame, vertices, instances, materials, lights, textures, meshlets, meshletVertices,
+                           triangles, a, b, p, previousInstances, temporal, color, normal, diffuse, specular, motion,
+                           reactive, pixel, id, false, cached);
+}
+kernel void visibility_adaptive(
+    constant FrameConstants &frame [[buffer(0)]], const device GPUVertex *vertices [[buffer(1)]],
+    const device GPUInstance *instances [[buffer(2)]], const device GPUMaterial *materials [[buffer(3)]],
+    const device GPULight *lights [[buffer(4)]], const device TextureHandle *textures [[buffer(5)]],
+    const device GPUMeshlet *meshlets [[buffer(6)]], const device uint *meshletVertices [[buffer(7)]],
+    const device uchar *triangles [[buffer(8)]], const device GPUMeshletCandidate *a [[buffer(9)]],
+    const device GPUMeshletCandidate *b [[buffer(10)]], constant GPUVisibilityParams &p [[buffer(11)]],
+    const device uint *bins [[buffer(12)]], const device GPUInstance *previousInstances [[buffer(14)]],
+    constant GPUTemporalParams &temporal [[buffer(15)]], const device GPUShadingHistory *history [[buffer(16)]],
+    device atomic_uint *statistics [[buffer(13)]], texture2d<uint, access::read> visibility [[texture(0)]],
+    texture2d<float, access::write> color [[texture(1)]], texture2d<float, access::write> normal [[texture(2)]],
+    texture2d<float, access::write> diffuse [[texture(3)]], texture2d<float, access::write> specular [[texture(4)]],
+    texture2d<float, access::write> motion [[texture(5)]], texture2d<float, access::write> reactive [[texture(6)]],
+    uint2 tile [[threadgroup_position_in_grid]], uint2 local [[thread_position_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+    const uint2 origin = tile * VISIBILITY_TILE + local * 2u;
+    const bool inside = all(origin < uint2(p.width, p.height));
+    const uint firstID = inside ? visibility.read(origin).x : 0u;
+    ShadingResult cached{};
+    resolveVisibilityPixel(frame, vertices, instances, materials, lights, textures, meshlets, meshletVertices,
+                           triangles, a, b, p, previousInstances, temporal, color, normal, diffuse, specular, motion,
+                           reactive, origin, firstID, false, cached);
+    bool coarse = (p.pad2 & 2u) && !(temporal.debugFlags & 4u) && temporal.historyValid && firstID != 0u &&
+                  all(origin + 1u < uint2(p.width, p.height)) && cached.alpha < 0.25f;
+    if (coarse) {
+        const auto candidate = candidateOf(firstID, p, a, b);
+        const auto instance = instances[candidate.slot];
+        const device auto &material = materials[instance.materialIndex];
+        const uint primitive = meshlets[candidate.meshlet].triangleOffset + visibilityTriangle(firstID) * 3u;
+        coarse = material.roughness >= 0.75f && material.metallic <= 0.05f && material.alphaCutoff == 0 &&
+                 materialClass(material, p) == 0u;
+        float lo = INFINITY, hi = 0;
+        for (uint y = 0; y < 2; ++y)
+            for (uint x = 0; x < 2; ++x) {
+                const uint2 pixel = origin + uint2(x, y);
+                const auto prior = history[pixel.y * p.outputWidth + pixel.x];
+                coarse &= visibility.read(pixel).x == firstID && prior.generation == instance.generation &&
+                          prior.primitive == primitive && prior.roughness >= 0.75f && isfinite(prior.luminance);
+                lo = min(lo, prior.luminance);
+                hi = max(hi, prior.luminance);
+            }
+        coarse &= (hi - lo) <= max(0.002f, hi * 0.02f);
+    }
+    uint shaded = inside && firstID != 0;
+    for (uint i = 1; i < 4; ++i) {
+        const uint2 pixel = origin + uint2(i & 1u, i >> 1u);
+        const bool valid = all(pixel < uint2(p.width, p.height));
+        const uint id = valid ? visibility.read(pixel).x : 0u;
+        resolveVisibilityPixel(frame, vertices, instances, materials, lights, textures, meshlets, meshletVertices,
+                               triangles, a, b, p, previousInstances, temporal, color, normal, diffuse, specular,
+                               motion, reactive, pixel, id, coarse, cached);
+        shaded += valid && id != 0 && !coarse;
+    }
+    const uint total = simd_sum(shaded), reused = simd_sum(coarse ? 3u : 0u);
+    if (lane == 0) {
+        atomic_fetch_add_explicit(&statistics[12], total, memory_order_relaxed);
+        atomic_fetch_add_explicit(&statistics[13], reused, memory_order_relaxed);
+    }
+}
+
+kernel void visibility_history(
+    const device GPUInstance *instances [[buffer(2)]], const device GPUMeshlet *meshlets [[buffer(6)]],
+    const device GPUMeshletCandidate *a [[buffer(9)]], const device GPUMeshletCandidate *b [[buffer(10)]],
+    constant GPUVisibilityParams &p [[buffer(11)]], device GPUShadingHistory *history [[buffer(16)]],
+    texture2d<uint, access::read> visibility [[texture(0)]], texture2d<float, access::read> color [[texture(1)]],
+    texture2d<float, access::read> normal [[texture(2)]], uint2 pixel [[thread_position_in_grid]]) {
+    if (any(pixel >= uint2(p.outputWidth, p.outputHeight)))
+        return;
+    GPUShadingHistory entry{};
+    const uint id = visibility.read(pixel).x;
+    if (all(pixel < uint2(p.width, p.height)) && id != 0 && visibilityCluster(id) < 2u * p.candidateCapacity) {
+        const auto candidate = candidateOf(id, p, a, b);
+        entry.generation = instances[candidate.slot].generation;
+        entry.primitive = meshlets[candidate.meshlet].triangleOffset + visibilityTriangle(id) * 3u;
+        entry.luminance = dot(color.read(pixel).rgb, float3(0.2126f, 0.7152f, 0.0722f));
+        entry.roughness = normal.read(pixel).w;
+    }
+    history[pixel.y * p.outputWidth + pixel.x] = entry;
+}
+struct VisibilityTile {
+    uint id [[color(0)]];
+};
+kernel void visibility_tile(
+    constant FrameConstants &frame [[buffer(0)]], const device GPUVertex *vertices [[buffer(1)]],
+    const device GPUInstance *instances [[buffer(2)]], const device GPUMaterial *materials [[buffer(3)]],
+    const device GPULight *lights [[buffer(4)]], const device TextureHandle *textures [[buffer(5)]],
+    const device GPUMeshlet *meshlets [[buffer(6)]], const device uint *meshletVertices [[buffer(7)]],
+    const device uchar *triangles [[buffer(8)]], const device GPUMeshletCandidate *a [[buffer(9)]],
+    const device GPUMeshletCandidate *b [[buffer(10)]], constant GPUVisibilityParams &p [[buffer(11)]],
+    const device uint *bins [[buffer(12)]], const device GPUInstance *previousInstances [[buffer(14)]],
+    constant GPUTemporalParams &temporal [[buffer(15)]], imageblock<VisibilityTile, imageblock_layout_implicit> image,
+    texture2d<float, access::write> color [[texture(1)]], texture2d<float, access::write> normal [[texture(2)]],
+    texture2d<float, access::write> diffuse [[texture(3)]], texture2d<float, access::write> specular [[texture(4)]],
+    texture2d<float, access::write> motion [[texture(5)]], texture2d<float, access::write> reactive [[texture(6)]],
+    uint2 tile [[threadgroup_position_in_grid]], uint2 local [[thread_position_in_threadgroup]]) {
+    const uint2 pixel = tile * VISIBILITY_TILE + local;
+    if (pixel.x >= p.outputWidth || pixel.y >= p.outputHeight)
+        return;
+    color.write(float4(0.02f, 0.025f, 0.035f, 1), pixel);
+    normal.write(float4(0), pixel);
+    diffuse.write(float4(0), pixel);
+    specular.write(float4(0), pixel);
+    motion.write(float4(0), pixel);
+    reactive.write(float4(1), pixel);
+    if (pixel.x >= p.width || pixel.y >= p.height)
+        return;
+    const uint id = image.read(ushort2(local)).id;
+    ShadingResult cached{};
+    resolveVisibilityPixel(frame, vertices, instances, materials, lights, textures, meshlets, meshletVertices,
+                           triangles, a, b, p, previousInstances, temporal, color, normal, diffuse, specular, motion,
+                           reactive, pixel, id, false, cached);
 }
 
 struct PresentVertex {

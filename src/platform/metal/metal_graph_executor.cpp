@@ -377,6 +377,10 @@ void MetalGraphExecutor::buildPassDescriptors() {
     const auto& resources = graph_->resources();
     for (const rg::RenderGroup& group : compiled_.renderGroups) {
         MTL4::RenderPassDescriptor* desc = MTL4::RenderPassDescriptor::alloc()->init();
+        if (group.tileWidth) {
+            desc->setTileWidth(group.tileWidth);
+            desc->setTileHeight(group.tileHeight);
+        }
         for (const rg::AttachmentPlan& a : group.attachments) {
             MTL::Texture* texture = resources[a.resource].imported ? nullptr : textures_[a.resource];
             if (a.depth) {

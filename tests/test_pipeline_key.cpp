@@ -275,3 +275,14 @@ TEST_CASE("pipeline key: render and compute strings and keys are unchanged by th
     r.mesh         = {1, 2, 3, 4};
     CHECK(pipelineKey(r) == pipelineKey(baseDesc()));
 }
+
+TEST_CASE("tile pipeline has a distinct stable key from a compute kernel") {
+    PipelineDesc tile;
+    tile.kind = PipelineKind::Tile;
+    tile.functions = {"visibility_tile", "", ""};
+    tile.output(0, rg::Format::R32Uint);
+    auto compute = tile;
+    compute.kind = PipelineKind::Compute;
+    CHECK(canonicalString(tile).starts_with("T|"));
+    CHECK(pipelineKey(tile) != pipelineKey(compute));
+}

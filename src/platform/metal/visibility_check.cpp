@@ -53,6 +53,9 @@ bool VisibilityRenderer::check(const GpuScene &geometry) {
     if (!checks_)
         return true;
     ++checksCount_;
+    checkedHistogram_.fill(0);
+    checkedHistogramLow_.fill(0);
+    checkedHistogramHigh_.fill(0);
     u32 idErrors = 0, guideErrors = 0, motionErrors = 0, covered = 0, motionSamples = 0;
     const auto *current = static_cast<const GPUInstance *>(currentReadback_->contents());
     const auto *previous = static_cast<const GPUInstance *>(previousReadback_->contents());
@@ -70,6 +73,7 @@ bool VisibilityRenderer::check(const GpuScene &geometry) {
                 ++poseHistoryErrors;
     }
     float worstMotion = 0;
+    u32 analyticGuideSamples = 0;
     for (u32 y = 0; y < params_.height; ++y)
         for (u32 x = 0; x < params_.width; ++x) {
             const auto *row = static_cast<const u8 *>(readbacks_[0]->contents()) + pitches_[0] * y;
@@ -85,6 +89,14 @@ bool VisibilityRenderer::check(const GpuScene &geometry) {
             float depth;
             std::memcpy(&depth, static_cast<const u8 *>(readbacks_[1]->contents()) + pitches_[1] * y + x * 4, 4);
             const bool shaded = depth > 0;
+            const float luminance =
+                shaded ? halfAt(2, 4, 0) * 0.2126f + halfAt(2, 4, 1) * 0.7152f + halfAt(2, 4, 2) * 0.0722f : 0.0f;
+            ++checkedHistogram_[exposureBin(luminance)];
+            // Dot contraction/log2 differ between CPU and GPU at exact bin
+            // boundaries. Bound each sample's luminance by 0.001%, then
+            // verify cumulative histogram counts against this interval.
+            ++checkedHistogramLow_[exposureBin(luminance * (1.0f - 1e-5f))];
+            ++checkedHistogramHigh_[exposureBin(luminance * (1.0f + 1e-5f))];
             if (!shaded) {
                 if (id != VISIBILITY_BACKGROUND)
                     ++guideErrors;
@@ -143,6 +155,31 @@ bool VisibilityRenderer::check(const GpuScene &geometry) {
                 ++idErrors;
                 continue;
             }
+            const auto &material = checkMaterials_.at(instance.materialIndex);
+            const bool constantColor =
+                material.baseColorTex == INVALID_TEXTURE_INDEX || material.baseColorTex == defaultTextures_[0];
+            const bool constantMR = material.metallicRoughnessTex == INVALID_TEXTURE_INDEX ||
+                                    material.metallicRoughnessTex == defaultTextures_[2];
+            if (constantColor && constantMR && !adaptive_) {
+                const glm::vec3 position = glm::vec3(world[0]) * weights.value[0] +
+                                           glm::vec3(world[1]) * weights.value[1] +
+                                           glm::vec3(world[2]) * weights.value[2];
+                const glm::vec3 eye(constants_.cameraPosition[0], constants_.cameraPosition[1],
+                                    constants_.cameraPosition[2]);
+                const float facing = std::max(glm::dot(n, glm::normalize(eye - position)), 0.0001f);
+                const float metal = glm::clamp(material.metallic, 0.0f, 1.0f);
+                const glm::vec3 base(material.baseColor[0], material.baseColor[1], material.baseColor[2]);
+                const glm::vec3 diffuse = base * (1.0f - metal);
+                const glm::vec3 f0 = glm::mix(glm::vec3(0.04f), base, metal);
+                const glm::vec3 specular = f0 + (1.0f - f0) * std::pow(1.0f - facing, 5.0f);
+                for (u32 c = 0; c < 3; ++c)
+                    if (std::abs(halfAt(4, 4, c) - diffuse[c]) > 0.002f ||
+                        std::abs(halfAt(5, 4, c) - specular[c]) > 0.002f)
+                        ++guideErrors;
+                if (std::abs(roughness - glm::clamp(material.roughness, 0.04f, 1.0f)) > 0.001f)
+                    ++guideErrors;
+                ++analyticGuideSamples;
+            }
             glm::vec2 expected(0);
             const auto &old = previous[candidate.slot];
             if (temporal_.historyValid && old.generation == instance.generation && (old.flags & INSTANCE_FLAG_VALID)) {
@@ -167,9 +204,9 @@ bool VisibilityRenderer::check(const GpuScene &geometry) {
     if (!pass)
         ++checkFailures_;
     std::printf("VISIBILITY view %u | pixels %u | ids %u guides %u motion %u (%u samples, max %.6f px) | pose history "
-                "%u | %s\n",
+                "%u | analytic guides %u | %s\n",
                 view_, covered, idErrors, guideErrors, motionErrors, motionSamples, double(worstMotion),
-                poseHistoryErrors, pass ? "PASS" : "FAIL");
+                poseHistoryErrors, analyticGuideSamples, pass ? "PASS" : "FAIL");
     std::fflush(stdout);
     return pass;
 }

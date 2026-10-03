@@ -124,7 +124,18 @@ void PassBuilder::readDepth(TextureRef target) {
     graph_.addRead(pass_, target.resource, target.version, Usage::DepthRead, StageFragment);
 }
 
-void PassBuilder::readColor(TextureRef target, u32 slot) {
+void PassBuilder::setTileSize(u32 width, u32 height) {
+    auto &p = graph_.passes_[pass_];
+    if (p.type != PassType::Raster ||
+        !((width == 16 && height == 16) || (width == 32 && (height == 16 || height == 32)))) {
+        graph_.error("Tile dispatch requires a raster pass and supported 16x16, 32x16 or 32x32 tile");
+        return;
+    }
+    p.tileWidth = width;
+    p.tileHeight = height;
+}
+
+void PassBuilder::readColor(TextureRef target, u32 slot, Stages stages) {
     RenderGraph& g = graph_;
     PassNode& p = g.passes_[pass_];
     if (target.resource >= g.resources_.size()) {
@@ -143,7 +154,7 @@ void PassBuilder::readColor(TextureRef target, u32 slot) {
     // Recorded like the paired read of a Preserve write: added as a shader
     // read (validation of the version), then given the attachment usage.
     const size_t before = p.reads.size();
-    g.addRead(pass_, target.resource, target.version, Usage::ShaderRead, StageFragment);
+    g.addRead(pass_, target.resource, target.version, Usage::ShaderRead, stages);
     if (p.reads.size() > before) {
         p.reads.back().usage = Usage::ColorAttachment;
         p.reads.back().slot  = slot;

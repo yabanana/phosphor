@@ -49,7 +49,7 @@ std::string canonicalString(const PipelineDesc& desc) {
     std::string s;
     s.reserve(96);
     const bool mesh = desc.kind == PipelineKind::Mesh;
-    s += desc.kind == PipelineKind::Compute ? 'C' : (mesh ? 'M' : 'R');
+    s += desc.kind == PipelineKind::Compute ? 'C' : (mesh ? 'M' : desc.kind == PipelineKind::Tile ? 'T' : 'R');
     s += '|';
     s += desc.functions[0];
     s += '|';

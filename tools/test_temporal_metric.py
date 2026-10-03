@@ -20,7 +20,14 @@ with tempfile.TemporaryDirectory() as folder:
     clean=measure(reference,spatial,thresholds,spatial_control=spatial)
     assert clean['metrics']['ghost_fraction_max']>thresholds['ghost_fraction_max']
     assert clean['metrics']['excess_ghost_fraction_max']==0
+    assert clean['metrics']['support_ghost_fraction_max']==0
+    assert clean['checks']['ghosting']
+    # The spatial metric must also recognize a current-frame shift even
+    # when its filtering differs from the independently rendered control.
+    mismatched=measure(reference,spatial,thresholds,spatial_control=reference)
+    assert mismatched['checks']['ghosting'],mismatched
     delayed=measure(reference,spatial,thresholds,lag=1,spatial_control=spatial)
     assert not delayed['checks']['ghosting'],delayed
     assert delayed['metrics']['excess_ghost_fraction_max']>0.25
+    assert delayed['metrics']['support_ghost_fraction_max']>0.25
 print('Temporal metric: no-history control distinguished from delayed-frame corruption')

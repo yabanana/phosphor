@@ -2,6 +2,7 @@
 #include "platform/metal/metal_context.h"
 #include "pipeline/pipeline_registry.h"
 #include "renderer/history_registry.h"
+#include "renderer/exposure.h"
 #include "renderer/post_layout.h"
 #include "renderer/temporal_layout.h"
 #include "rendergraph/render_graph.h"
@@ -40,7 +41,8 @@ class PostProcessor {
     [[nodiscard]] u64 resetCount() const { return resets_; }
     [[nodiscard]] float lastExposure() const;
     [[nodiscard]] float manualExposure() const { return params_.manualExposure; }
-    bool checkExposure() const;
+    bool checkExposure(const std::array<u32, ExposureBins> &referenceHistogram,
+                       const std::array<u32, ExposureBins> &low, const std::array<u32, ExposureBins> &high) const;
     [[nodiscard]] const char *effectiveUpscaler() const;
 
   private:

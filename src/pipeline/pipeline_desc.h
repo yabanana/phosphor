@@ -22,7 +22,7 @@ namespace phosphor::pipe {
 // ---------------------------------------------------------------------------
 
 /// F6.3: Mesh = object (optional) + mesh + fragment stages.
-enum class PipelineKind : u8 { Render, Compute, Mesh };
+enum class PipelineKind : u8 { Render, Compute, Mesh, Tile };
 
 /// Type of a function constant, as declared in MSL.
 enum class ConstantType : u8 { Bool, UInt, Int, Float };

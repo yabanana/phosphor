@@ -268,3 +268,10 @@ TEST_CASE("forward pass work counts draws, indices and unique vertices per insta
     CHECK(w.pixels == 64000);
     CHECK(w.lights == 5);
 }
+
+TEST_CASE("procedural materials start opaque and opt into alpha test") {
+    MaterialComponent material;
+    CHECK(material.alphaCutoff == 0.0f);
+    material.alphaCutoff = 0.5f;
+    CHECK(material.alphaCutoff == 0.5f);
+}

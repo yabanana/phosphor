@@ -232,15 +232,29 @@ GPUTemporalParams PostProcessor::prepareFrame(u32 slot, u64 frame, u32 view, u32
     paramsAddress_ = p.gpu;
     return temporal_;
 }
-bool PostProcessor::checkExposure() const {
+bool PostProcessor::checkExposure(const std::array<u32, ExposureBins> &referenceHistogram,
+                                  const std::array<u32, ExposureBins> &low,
+                                  const std::array<u32, ExposureBins> &high) const {
     std::array<u32, ExposureBins> histogram{};
     std::memcpy(histogram.data(), slots_[slot_].histogram->contents(), sizeof(histogram));
     const float expected = exposureTarget(histogram);
     const auto *state = static_cast<const float *>(views_[view_].exposureState->contents());
-    const bool pass = std::isfinite(state[0]) && state[0] > 0 && std::isfinite(state[1]) &&
+    bool histogramPass = true;
+    u32 actual = 0, upper = 0, lower = 0;
+    for (u32 i = 0; i < ExposureBins; ++i) {
+        actual += histogram[i];
+        upper += low[i];
+        lower += high[i];
+        histogramPass &= actual >= lower && actual <= upper;
+    }
+    const bool pass = histogramPass && std::isfinite(state[0]) && state[0] > 0 && std::isfinite(state[1]) &&
                       std::abs(state[1] - expected) <= std::max(0.00001f, std::abs(expected) * 0.0001f);
-    std::printf("EXPOSURE view %u | target %.6f reference %.6f adapted %.6f | %s\n", view_, double(state[1]),
-                double(expected), double(state[0]), pass ? "PASS" : "FAIL");
+    std::printf("EXPOSURE view %u | target %.6f reference %.6f adapted %.6f | histogram %s | %s\n", view_,
+                double(state[1]), double(expected), double(state[0]),
+                histogram == referenceHistogram ? "exact"
+                : histogramPass                 ? "bin-boundary rounding"
+                                                : "mismatch",
+                pass ? "PASS" : "FAIL");
     return pass;
 }
 void PostProcessor::finishFrame(const float *matrix) {
@@ -372,8 +386,6 @@ rg::TextureRef PostProcessor::addToGraph(rg::RenderGraph &g, VisibilityRenderer 
             t->setTexture(slots_[slot_].output->gpuResourceID(), 0);
             t->setTexture(views_[view_].exposure->gpuResourceID(), 1);
             enc->setRenderPipelineState(pipelines_.render(format == Format::RGBA16Float ? presentEDR_ : presentSDR_));
-            enc->setDepthStencilState(nullptr);
-            enc->setViewport(MTL::Viewport{0, 0, double(width_), double(height_), 0, 1});
             enc->setArgumentTable(t, MTL::RenderStageFragment);
             enc->drawPrimitives(MTL::PrimitiveTypeTriangle, 0, 3);
         });
@@ -393,8 +405,6 @@ rg::TextureRef PostProcessor::addSDRCapture(rg::RenderGraph &g, rg::TextureRef d
             auto *enc = static_cast<MTL4::RenderCommandEncoder *>(ctx.encoder());
             tables_[5]->setTexture(static_cast<MTL::Texture *>(ctx.texture(display))->gpuResourceID(), 0);
             enc->setRenderPipelineState(pipelines_.render(capture_));
-            enc->setDepthStencilState(nullptr);
-            enc->setViewport(MTL::Viewport{0, 0, double(width_), double(height_), 0, 1});
             enc->setArgumentTable(tables_[5], MTL::RenderStageFragment);
             enc->drawPrimitives(MTL::PrimitiveTypeTriangle, 0, 3);
         });

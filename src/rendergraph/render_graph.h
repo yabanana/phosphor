@@ -226,6 +226,9 @@ struct PassNode {
     /// F2.5: the pass may be encoded as `parallelChunks` independent pieces
     /// on different threads (execute receives the chunk index).
     u32         parallelChunks = 1;
+    /// Fixed tile size for a raster pass containing a tile dispatch. Zero
+    /// leaves the driver's choice; fused members must agree when nonzero.
+    u32 tileWidth = 0, tileHeight = 0;
     /// F4: shader functions the pass runs (profiling only: maps Metal System
     /// Trace's per-shader timeline to passes; no effect on compilation).
     std::vector<std::string> profileShaders;
@@ -252,7 +255,8 @@ public:
     /// (programmable blending / framebuffer fetch).  Bound as an attachment of
     /// the pass's render group: loaded unless an earlier member of the group
     /// wrote it in tile memory.
-    void       readColor(TextureRef target, u32 slot);
+    void readColor(TextureRef target, u32 slot, Stages stages = StageFragment);
+    void setTileSize(u32 width, u32 height);
 
     // --- Shader / copy accesses ----------------------------------------------
     void       read(TextureRef texture, Usage usage, Stages stages);
@@ -366,6 +370,7 @@ struct RenderGroup {
     u32 firstPosition = 0;   // positions in CompiledGraph::order
     u32 lastPosition  = 0;   // inclusive
     u32 width = 0, height = 0, sampleCount = 1;
+    u32 tileWidth = 0, tileHeight = 0;
     std::vector<AttachmentPlan> attachments;
 };
 

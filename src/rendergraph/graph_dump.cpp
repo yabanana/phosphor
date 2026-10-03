@@ -81,9 +81,11 @@ std::string stageList(Stages s) {
         Stages bit;
         const char* name;
     } kNames[] = {
-        {StageVertex, "vertex"}, {StageFragment, "fragment"}, {StageTile, "tile"},
-        {StageObject, "object"}, {StageMesh, "mesh"},         {StageDispatch, "dispatch"},
-        {StageBlit, "blit"},     {StageAccelerationStructure, "accel"},
+        {StageVertex, "vertex"},      {StageFragment, "fragment"},
+        {StageTile, "tile"},          {StageObject, "object"},
+        {StageMesh, "mesh"},          {StageDispatch, "dispatch"},
+        {StageBlit, "blit"},          {StageAccelerationStructure, "accel"},
+        {StageMachineLearning, "ML"},
     };
     std::string out;
     for (const auto& n : kNames) {

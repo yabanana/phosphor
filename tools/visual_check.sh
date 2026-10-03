@@ -50,8 +50,12 @@ for bench in 1 2 3 4 5 6 7 8; do
     fi
 
     if [[ "$update" == "--update" ]]; then
-        cp "$capture" "$ref_dir/bench$bench.png"
-        result="reference updated"
+        if [[ $status -eq 0 && $messages -eq 0 ]]; then
+            cp "$capture" "$ref_dir/bench$bench.png"
+            result="reference updated"
+        else
+            result="reference preserved: failed execution"
+        fi
     else
         result=$("$diff_tool" "$ref_dir/bench$bench.png" "$capture" --diff "$out_dir/bench$bench-diff.png") || failures=$((failures + 1))
     fi

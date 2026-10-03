@@ -267,6 +267,8 @@ std::string reportToJson(const BenchReport& r) {
             ", \"binned_frames_total\": " + std::to_string(v.binnedFrames) +
             ", \"generic_frames_total\": " + std::to_string(v.genericFrames) +
             ", \"guide_checks\": " + std::to_string(v.guideChecks) +
+            ", \"shaded_pixels_last\": " + std::to_string(v.shadedPixels) +
+            ", \"reused_pixels_last\": " + std::to_string(v.reusedPixels) +
             ", \"guide_failures\": " + std::to_string(v.guideFailures) + "}";
     }
     return head + "  \"frame_ms\": " + summaryToJson(r.frameMs) + ",\n" + "  \"cpu_ms\": " + summaryToJson(r.cpuMs) +

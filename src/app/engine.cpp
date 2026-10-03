@@ -169,6 +169,10 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
              options_.forceApple9 ? " (--force-family apple9: Apple10 specialisations off, not an Apple9 emulation)" : "");
     int w = 0, h = 0;
     SDL_GetWindowSizeInPixels(window_, &w, &h);
+    if (options_.offscreen && options_.resolutionWidth) {
+        w = static_cast<int>(options_.resolutionWidth);
+        h = static_cast<int>(options_.resolutionHeight);
+    }
     if (options_.resolutionWidth > 0 &&
         (static_cast<u32>(w) != options_.resolutionWidth || static_cast<u32>(h) != options_.resolutionHeight)) {
         throw std::runtime_error("--resolution " + std::to_string(options_.resolutionWidth) + "x" +
@@ -221,7 +225,8 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     }
     if (options_.visibility)
         visibility_ = std::make_unique<VisibilityRenderer>(*context_, *pipelines_, *renderer_, *mesh_,
-                                                           options_.materialBinning, options_.debugVisibility);
+                                                           options_.materialBinning, options_.debugVisibility,
+                                                           options_.tileResolve, options_.adaptiveShading);
     if (options_.post) {
         PostProcessor::Options po;
         po.forceReset = options_.debugUpscalerReset;
@@ -721,7 +726,9 @@ void Engine::finishBenchmark() {
         auto &r = report.rendering;
         r.present = true;
         r.offscreen = options_.offscreen;
-        r.path = options_.visibility                           ? "visibility"
+        r.path = options_.adaptiveShading                      ? "visibility-adaptive"
+                 : options_.tileResolve                        ? "visibility-tile"
+                 : options_.visibility                         ? "visibility"
                  : options_.geometryPath == GeometryPath::Mesh ? "forward-mesh"
                                                                : "forward-indexed";
         r.asset = activeBench_->assetSource();
@@ -731,6 +738,9 @@ void Engine::finishBenchmark() {
             r.genericFrames = visibility_->genericFrames();
             r.guideChecks = visibility_->checkCount();
             r.guideFailures = visibility_->checkFailures();
+            const auto adaptive = visibility_->adaptiveStats();
+            r.shadedPixels = adaptive[0];
+            r.reusedPixels = adaptive[1];
         }
         r.post = bool(post_);
         r.upscaler = post_ ? post_->effectiveUpscaler() : "none";
@@ -904,7 +914,8 @@ void Engine::processEvents() {
             running_ = false;
             break;
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-            context_->resize(static_cast<u32>(event.window.data1), static_cast<u32>(event.window.data2));
+            if (!options_.offscreen || !options_.resolutionWidth)
+                context_->resize(static_cast<u32>(event.window.data1), static_cast<u32>(event.window.data2));
             break;
         default:
             break;
@@ -1276,7 +1287,8 @@ bool Engine::frame(float dt) {
             history().lastReset = post_->histories().get(currentView_).resetReason;
         }
     }
-    temporal.debugFlags = options_.debugMotionCorrupt ? 1u : 0u;
+    temporal.debugFlags = (options_.debugMotionCorrupt ? 1u : 0u) | (options_.debugGuideCorrupt ? 2u : 0u) |
+                          (options_.debugAdaptiveNoHistory ? 4u : 0u);
     glm::mat4 projected = unjittered;
     applyRasterJitter(&projected[0][0], &unjittered[0][0], temporal.jitter[0], temporal.jitter[1], renderWidth,
                       renderHeight);
@@ -1364,9 +1376,10 @@ bool Engine::frame(float dt) {
         if (mesh_->usingFallbackPipeline()) frameFlags_ |= FrameFallbackDraw;
     }
     if (visibility_)
-        visibility_->prepareFrame(frame.slot, renderWidth, renderHeight, renderBackingWidth_, renderBackingHeight_,
-                                  *store_, textures_->getDefaultNormal(), constants.exposure, constants.debugMode,
-                                  temporal, constants);
+        visibility_->prepareFrame(
+            frame.slot, renderWidth, renderHeight, renderBackingWidth_, renderBackingHeight_, *store_,
+            {textures_->getDefaultWhite(), textures_->getDefaultNormal(), textures_->getDefaultMR()},
+            constants.exposure, constants.debugMode, temporal, constants);
     overlays_->prepareFrame(overlayMode_, constants.lightCount, width, height);
     if (renderer_->usingFallback()) frameFlags_ |= FrameFallbackDraw;
     const Clock::time_point s4 = Clock::now();
@@ -1464,7 +1477,8 @@ bool Engine::frame(float dt) {
         context_->waitIdle();
         if (!visibility_->check(*gpuScene_))
             exitCode_ = 1;
-        if (post_ && !post_->checkExposure())
+        if (post_ && !post_->checkExposure(visibility_->checkedHistogram(), visibility_->checkedHistogramLow(),
+                                           visibility_->checkedHistogramHigh()))
             exitCode_ = 1;
     }
     if (post_)

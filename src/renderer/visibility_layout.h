@@ -2,6 +2,11 @@
 #include "renderer/gpu_types.h"
 
 namespace phosphor {
+struct GPUShadingHistory {
+    u32 generation, primitive;
+    float luminance, roughness;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadingHistory) == 16, "adaptive shading history layout");
 PHOSPHOR_GPU_CONSTANT u32 VISIBILITY_TILE = 16;
 PHOSPHOR_GPU_CONSTANT u32 VISIBILITY_CLASSES = 4;
 struct GPUVisibilityParams {

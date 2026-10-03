@@ -135,3 +135,101 @@ il background viene identificato dalla depth per l'istogramma.
 Artefatti locali: `build/f7-review/` e `build/f8-quality/`; non sono misure
 prestazionali quando includono readback o cattura PNG. `--offscreen` separa
 il throughput di rendering dal compositore; i gate a schermo rimangono distinti.
+
+## Aggiornamento sperimentale del 2026-10-03
+
+Sono disponibili due prototipi espliciti, disattivati di default:
+
+- `--tile-resolve` (F7.4): shading differito degli ID tramite imageblock
+  implicito e tile kernel Metal 4. Non è un G-buffer tradizionale: conserva
+  lo stesso fetch degli attributi del V-buffer per isolare l'effetto del
+  posizionamento dello shading. Con culling frustum il grafo fonde raster
+  opaco/alpha e tile resolve, rendendo memoryless gli ID; con two-phase la
+  riduzione Hi-Z può interrompere la fusione. Le guide restano texture in
+  memoria principale. Il caso Sponza 641×361 coincide esattamente con compute.
+- `--adaptive-shading` (F7.5): ogni invocazione gestisce un blocco 2×2,
+  riusando lo shading soltanto su una singola primitive, generazione valida,
+  storia con identità esatta, moto <0,25 pixel, roughness ≥0,75, materiale
+  non metallico e senza normal map/emissione/alpha test, contrasto storico
+  ≤max(0,002; 2%). Il moto viene comunque ricostruito per ciascun pixel.
+  Storia per vista da 16 byte/pixel; il costo di aggiornarla è incluso.
+
+Le prime tre repliche Release offscreen a 1920×1080, input 75%, 120 warmup
++600 frame, indicano **nessuna adozione automatica**: F7.4 Sponza circa
+2,144 ms/frame compute contro 2,150 ms tile; F7.5 Cornell circa 2,075 contro
+2,087 ms nonostante 279867 shading riusati su 492102 pixel coperti nell'ultimo
+frame. Sono dati preliminari in ordine sequenziale; ripetere l'ordine ruotato
+per la decisione finale. Tempi GPU con overlap non equivalgono al throughput.
+Nessuna misura T0 fisica né contatore DRAM/energia attribuito a questi numeri.
+
+L'esperimento adattivo ha scoperto un difetto indipendente: MaterialComponent
+partiva con alphaCutoff=0,5 anche per materiali procedurali opachi. Questo
+li inseriva nella fase alpha-test e applicava una reactive mask a 0,75.
+Il default diventa opaco (cutoff zero); i MASK importati conservano il cutoff
+esplicito. La correzione non modifica la copertura dei materiali opachi.
+
+### Riferimenti e differenze numeriche
+
+Il riferimento supersampled media la luce HDR prima del tonemapping; un
+ridimensionamento di PNG già tonemappati non è un riferimento equivalente.
+`--reference-scale 2|4|8` usa la media dell'intero footprint; limite interno
+8192 pixel. `--settled-reference 16..64` ricostruisce ogni scena immobile per
+un ciclo di jitter, resettando la storia fra frame logici (diagnostica).
+
+Il primo confronto Sponza forward/resolve a 640×360 ha PSNR 51,49 dB, 1204
+pixel con delta >4 su 230400, 33 con delta >16, massimo 38. Torus senza
+texture ha massimo 1 LSB. Binning e tile hanno zero differenze dal generico.
+Gli spike a mip zero e forward con derivate razionali aumentano PSNR a
+58,42 e 57,55 dB: il filtraggio è una componente sostanziale dello scarto.
+La diagnostica UV differisce soltanto in quattro pixel di wrap; le derivate
+variano maggiormente. Le varianti diagnostiche sono state rimosse, senza
+cambiare il forward per assorbire il confronto. Anche la riscrittura
+sample-relative delle baricentriche e le derivate quad non migliorano il
+caso e non vengono adottate.
+
+La tolleranza per il corpus texturizzato viene calibrata su questo primo
+scatto: PSNR ≥50 dB, delta p99 ≤4, massimo ≤64. Non era una soglia fissata
+prima del primo scatto. `f7_f8_check.py` la verifica anche su una camera e
+risoluzione diverse (1280×720, frame 259 del percorso temporale). I confronti
+fra varianti dello stesso resolve rimangono esatti; il confronto procedurale
+forward/resolve conserva 1 LSB. Le soglie non si applicano a geometria persa,
+ID invalidi o corruzione delle guide.
+
+### Limite della metrica temporale
+
+Le metriche v1/v2 di attrazione verso il vecchio frame danno falsi positivi
+anche su ricostruzioni del solo frame corrente con diverso filtro spaziale.
+La metrica v3 conserva entrambi i diagnostici e misura la scia oltre il
+supporto spaziale corrente (un pixel output nel preset 75%). Non dimostra
+l'assenza di ritardi inferiori al supporto del filtro; PSNR/RMSE/flicker,
+immagini, camera cut e controllo GPU delle pose/motion rimangono necessari.
+Il controllo sintetico include filtri spaziali differenti e un frame
+ritardato: il primo passa il gate temporale, il secondo deve fallire.
+Soglie spaziali, flicker e recupero non sono state allentate. v1 e v2 sono
+conservate e rieseguibili. Restano da completare il corpus lungo, la review
+finale e i gate AOT/CI; nessuna chiusura di fase dichiarata in questo documento.
+
+La prima soglia sul massimo delta **fallisce** nello scatto held-out (123).
+Il confronto dei due forward preesistenti, indexed e mesh, ha già un massimo
+120 nello stesso scatto: il crop localizza i picchi sulle foglie alpha-test.
+La discrepanza rimane con culling disattivato; frustum/off/two-phase del
+V-buffer coincidono esattamente. Anche l'invarianza delle posizioni e un
+campionamento alpha a gradienti espliciti sono stati provati: il primo non
+cambia lo scatto, il secondo peggiora e viene rimosso. Non attribuire questi
+picchi a superfici perse dall'occlusion culling.
+
+La soglia finale texturizzata usa PSNR ≥50 dB, delta p99 ≤4 e al massimo
+0,05% dei pixel con delta >16. Massimo e errore oltre il footprint rimangono
+nel report come diagnostici; un massimo isolato sul cutoff è discontinuo.
+Questo è un affinamento **successivo ai primi confronti**, dichiarato, non
+un gate originale retrodatato. Conservare i report dei gate precedenti
+falliti. Il corpus lungo e un controllo negativo di immagine spostata devono
+ancora convalidare la sensibilità. Nessun riferimento viene sovrascritto.
+
+Nei test HDR l'istogramma CPU/GPU può differire per un campione esattamente
+sul confine di un bin (FMA/log2). Il readback ora verifica ogni conteggio
+cumulativo entro i limiti ottenuti perturbando ciascuna luminanza CPU di
+±0,001%; il numero totale dei campioni deve coincidere esattamente. La stampa
+distingue `exact`, `bin-boundary rounding` e `mismatch`. Non è una tolleranza
+arbitraria sul numero globale dei pixel e non può assorbire una perdita di
+campioni o uno spostamento non locale dell'istogramma.

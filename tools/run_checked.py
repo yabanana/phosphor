@@ -30,6 +30,9 @@ def run_checked(command, log, expected=0, required=(), timeout=120, marker=True,
             break
     commit = subprocess.run(['git','rev-parse','HEAD'], capture_output=True, text=True).stdout.strip()
     patch = subprocess.run(['git','diff','--binary','HEAD'], capture_output=True).stdout
+    untracked = subprocess.run(['git','ls-files','--others','--exclude-standard','-z'],capture_output=True).stdout
+    untracked_sources = {name:hashlib.sha256(Path(name).read_bytes()).hexdigest()
+                         for name in untracked.decode().split('\0') if name and Path(name).is_file()}
     begin = time.monotonic()
     timed_out = False
     with log.open('wb') as output:
@@ -52,7 +55,7 @@ def run_checked(command, log, expected=0, required=(), timeout=120, marker=True,
     for expression in required:
         if re.search(expression, text, re.M) is None:
             reasons.append(f'missing required output: {expression}')
-    if expected == 0 and re.search(r'failed assertion|\[ERROR\]|\| FAIL\b|GPU timeout|command buffers failed', text):
+    if expected == 0 and re.search(r'failed assertion|\[ERROR\]|\| FAIL\b|GPU timeout|command buffers failed|Shader Validation Error|Metal Validation Error|\berror:', text):
         reasons.append('error/validation failure in log')
     for name, checksum in artifacts.items():
         if hashlib.sha256(Path(name).read_bytes()).hexdigest() != checksum:
@@ -63,6 +66,7 @@ def run_checked(command, log, expected=0, required=(), timeout=120, marker=True,
               'exit_marker': end_marker, 'expected_exit': expected, 'timed_out': timed_out,
               'binary_sha256': binary_hash, 'artifacts': artifacts, 'commit': commit,
               'tracked_patch_sha256': hashlib.sha256(patch).hexdigest(), 'macos': platform.mac_ver()[0],
+              'untracked_sources': untracked_sources,
               'validation_env': {k:(env or os.environ).get(k) for k in ('MTL_DEBUG_LAYER','MTL_SHADER_VALIDATION','MTL_DEBUG_LAYER_WARNING_MODE')},
               'passed': not reasons, 'failures': reasons}
     log.with_suffix(log.suffix+'.status.json').write_text(json.dumps(status, indent=2)+'\n')

@@ -3,7 +3,7 @@
 #include "temporal_motion.h"
 
 struct VertexOut {
-    float4 position [[position]];
+    float4 position [[position, invariant]];
     float3 worldPos;
     float3 normal;
     float4 tangent;
@@ -80,7 +80,7 @@ fragment half4 forward_fs(VertexOut in [[stage_in]], bool frontFacing [[front_fa
 }
 
 struct SurfaceVertexOut {
-    float4 position [[position]];
+    float4 position [[position, invariant]];
     float3 worldPos;
     float3 normal;
     float4 tangent;

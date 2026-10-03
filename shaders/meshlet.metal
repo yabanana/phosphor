@@ -445,7 +445,7 @@ meshlet_object(object_data MeshletPayload &payload [[payload]], mesh_grid_proper
 // Must match VertexOut of shaders/forward.metal member for member (the
 // fragment stage is forward_fs).
 struct VertexOut {
-    float4 position [[position]];
+    float4 position [[position, invariant]];
     float3 worldPos;
     float3 normal;
     float4 tangent;
@@ -643,7 +643,7 @@ using MeshletMesh = metal::mesh<VertexOut, void, MESHLET_MESH_GROUP, MESHLET_MES
 // ---- debug views (F6.7) ---------------------------------------------------------------
 
 struct DebugVertexOut {
-    float4 position [[position]];
+    float4 position [[position, invariant]];
     float3 color [[flat]];
 };
 
@@ -706,7 +706,7 @@ fragment half4 meshlet_debug_fs(DebugVertexOut in [[stage_in]]) { return half4(h
 // F7: primitive data identifies the exact instance/meshlet reference and
 // triangle. It does not depend on the rasterizer's primitive_id numbering.
 struct VisibilityVertex {
-    float4 position [[position]];
+    float4 position [[position, invariant]];
     float2 uv;
     uint materialIndex [[flat]];
 };
