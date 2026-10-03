@@ -1,4 +1,5 @@
 #include "platform/metal/post_processor.h"
+#include "platform/metal/temporal_worker.h"
 #include "platform/metal/pipeline_cache.h"
 #include "platform/metal/visibility_renderer.h"
 #include "platform/metal/metal_graph_executor.h"
@@ -137,6 +138,11 @@ PostProcessor::~PostProcessor() {
     releaseTargets();
     for (auto &v : views_) {
         v.scaler.reset();
+        if (v.worker)
+            v.worker->cancelPending();
+        context_.memory().release(v.workerBuffer, MemoryCategory::Other);
+        v.workerBuffer = nullptr;
+        v.worker.reset();
         context_.memory().release(v.exposure, MemoryCategory::RenderTargets);
         context_.memory().release(v.exposureState, MemoryCategory::Other);
     }
@@ -167,9 +173,25 @@ void PostProcessor::configure(u32 w, u32 h) {
             context_.deferRelease(v.scaler.get());
             v.scaler.reset();
         }
+        if (usesWorker()) {
+            if (v.worker) {
+                v.worker->cancelPending();
+                retiredWorkers_.push_back(v.worker);
+            }
+            context_.memory().release(v.workerBuffer, MemoryCategory::Other);
+            v.workerBuffer = nullptr;
+            v.worker = std::make_shared<TemporalWorker>(context_.device(), w, h);
+            const auto keep = v.worker;
+            v.workerBuffer = context_.memory().newSharedBuffer(
+                keep->mapping(), keep->layout().mappedBytes,
+                ^(void *, NS::UInteger) {
+                  keep->retire();
+                },
+                MemoryCategory::Other, "MetalFX per-view shared bridge");
+        }
         v.failed = false;
         histories_.invalidate(i, "output resize");
-        if (!v.pending.valid())
+        if (!v.pending.valid() && !v.pendingWorker.valid())
             requestScaler(i);
     }
 }
@@ -177,6 +199,10 @@ void PostProcessor::requestScaler(u32 index) {
     if (!options_.temporal || !supported_)
         return;
     auto &v = views_[index];
+    if (usesWorker()) {
+        v.pendingWorker = pipelines_.requestTemporalWorker(v.worker);
+        return;
+    }
     auto *d = MTLFX::TemporalScalerDescriptor::alloc()->init();
     d->setInputWidth(width_);
     d->setInputHeight(height_);
@@ -199,8 +225,29 @@ void PostProcessor::requestScaler(u32 index) {
     d->release();
 }
 void PostProcessor::collectScalers(bool wait) {
+    std::erase_if(retiredWorkers_, [](const auto &w) { return w->finished(); });
+    if (TemporalWorker::failureCount())
+        throw std::runtime_error("MetalFX worker failed; aborting frame");
     for (u32 i = 0; i < options_.views; ++i) {
         auto &v = views_[i];
+        if (usesWorker()) {
+            if (!v.pendingWorker.valid())
+                continue;
+            if (!wait && v.pendingWorker.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+                continue;
+            auto ready = v.pendingWorker.get();
+            if (ready != v.worker) {
+                requestScaler(i);
+                continue;
+            }
+            if (!ready->ready()) {
+                requestScaler(i);
+                continue;
+            }
+            histories_.invalidate(i, "MetalFX worker ready");
+            LOG_INFO("MetalFX isolated temporal view %u ready (%ux%u)", i, width_, height_);
+            continue;
+        }
         if (!v.pending.valid())
             continue;
         if (!wait && v.pending.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
@@ -221,10 +268,11 @@ void PostProcessor::prewarm(u32 w, u32 h) {
     collectScalers(true);
 }
 bool PostProcessor::temporalReady() const {
-    return options_.temporal && bool(views_[view_].scaler);
+    return options_.temporal &&
+           (usesWorker() ? views_[view_].worker && views_[view_].worker->ready() : bool(views_[view_].scaler));
 }
 const char *PostProcessor::effectiveUpscaler() const {
-    return temporalReady() ? "metalfx-temporal" : "native-spatial";
+    return temporalReady() ? (usesWorker() ? "metalfx-temporal-isolated" : "metalfx-temporal") : "native-spatial";
 }
 float PostProcessor::lastExposure() const {
     return static_cast<const float *>(views_[view_].exposureState->contents())[0];
@@ -328,7 +376,39 @@ void PostProcessor::encodeUpscale(rg::PassContext &ctx) {
     auto *fence = static_cast<MTL::Fence *>(ctx.externalFence());
     auto &v = views_[view_];
     auto *input = static_cast<MTL::Texture *>(ctx.texture(input_));
-    if (temporalReady()) {
+    if (temporalReady() && usesWorker()) {
+        auto worker = v.worker;
+        const auto &layout = worker->layout();
+        auto *bridge = static_cast<MTL::Buffer *>(ctx.buffer(workerBridge_));
+        auto *copy = cmd->computeCommandEncoder();
+        copy->waitForFence(fence, MTL::StageBlit);
+        const std::array<rg::TextureRef, 5> inputs = {input_, depth_, motion_, reactive_, exposure_};
+        for (u32 i = 0; i < inputs.size(); ++i) {
+            const bool exposure = i == temporal_worker::Exposure;
+            copy->copyFromTexture(static_cast<MTL::Texture *>(ctx.texture(inputs[i])), 0, 0, MTL::Origin::Make(0, 0, 0),
+                                  MTL::Size::Make(exposure ? 1 : width_, exposure ? 1 : height_, 1), bridge,
+                                  slot_ * layout.slotBytes + layout.offsets[i], layout.rows[i],
+                                  layout.rows[i] * (exposure ? 1 : height_));
+        }
+        copy->endEncoding();
+        temporal_worker::Request request;
+        request.delayMs = options_.debugWorkerDelayMs;
+        request.slot = slot_;
+        request.inputWidth = params_.inputWidth;
+        request.inputHeight = params_.inputHeight;
+        request.reset = reset_ || options_.forceReset;
+        request.motionScale = options_.debugMotionScale;
+        request.jitterX = temporal_.jitter[0] * (options_.jitterVariant & 1u ? -1.0f : 1.0f);
+        request.jitterY = temporal_.jitter[1] * (options_.jitterVariant & 2u ? -1.0f : 1.0f);
+        if (options_.debugWorkerCrash && frame_ + 1 == options_.debugWorkerCrash)
+            request.command = temporal_worker::Command::CrashForTest;
+        const u64 ticket = worker->enqueue(request);
+        ctx.externalDependency(
+            {worker->inputReady(), worker->outputReady(), ticket,
+             [](rg::PassContext &c, void *p) { static_cast<PostProcessor *>(p)->finishWorkerCopy(c); }, this,
+             [](void *p, u64 value) { static_cast<TemporalWorker *>(p)->submitted(value); }, worker.get()});
+        ++temporalFrames_;
+    } else if (temporalReady()) {
         auto *s = v.scaler.get();
         s->setColorTexture(input);
         s->setDepthTexture(static_cast<MTL::Texture *>(ctx.texture(depth_)));
@@ -362,6 +442,38 @@ void PostProcessor::encodeUpscale(rg::PassContext &ctx) {
         ++fallbackFrames_;
     }
 }
+void PostProcessor::finishWorkerCopy(rg::PassContext &ctx) {
+    const auto &layout = views_[view_].worker->layout();
+    auto *command = static_cast<MTL4::CommandBuffer *>(ctx.commandBuffer());
+    auto *copy = command->computeCommandEncoder();
+    copy->copyFromBuffer(static_cast<MTL::Buffer *>(ctx.buffer(workerBridge_)),
+                         slot_ * layout.slotBytes + layout.offsets[temporal_worker::Output],
+                         layout.rows[temporal_worker::Output], layout.rows[temporal_worker::Output] * height_,
+                         MTL::Size::Make(width_, height_, 1), slots_[slot_].output, 0, 0, MTL::Origin::Make(0, 0, 0));
+    copy->updateFence(static_cast<MTL::Fence *>(ctx.externalFence()), MTL::StageBlit);
+    copy->endEncoding();
+}
+u64 PostProcessor::workerDeviceBytes() const {
+    u64 n = 0;
+    for (const auto &v : views_)
+        if (v.worker)
+            n += v.worker->deviceBytes();
+    for (const auto &w : retiredWorkers_)
+        n += w->deviceBytes();
+    return n;
+}
+u64 PostProcessor::workerPhysicalFootprint() const {
+    u64 n = 0;
+    for (const auto &v : views_)
+        if (v.worker)
+            n += v.worker->physicalFootprint();
+    for (const auto &w : retiredWorkers_)
+        n += w->physicalFootprint();
+    return n;
+}
+u64 PostProcessor::workerBridgeBytes() const {
+    return TemporalWorker::mappedBytes();
+}
 rg::TextureRef PostProcessor::addToGraph(rg::RenderGraph &g, VisibilityRenderer &scene, rg::TextureRef drawable,
                                          rg::Format format) {
     using namespace rg;
@@ -369,6 +481,10 @@ rg::TextureRef PostProcessor::addToGraph(rg::RenderGraph &g, VisibilityRenderer 
     depth_ = scene.depth();
     motion_ = scene.motion();
     reactive_ = scene.reactiveMask();
+    if (usesWorker())
+        workerBridge_ =
+            g.importBuffer("MetalFX worker transfer", {temporal_worker::makeLayout(width_, height_).mappedBytes},
+                           ImportPerFrame | ImportContentsDefined);
     histogramRef_ = g.importBuffer("Luminance histogram", {256 * sizeof(u32)}, ImportPerFrame);
     stateRef_ = g.importBuffer("Exposure and temporal state per view", {16}, ImportContentsDefined | ImportOutput);
     exposure_ = g.importTexture("Exposure", {Format::R16Float, 1, 1}, ImportOutput);
@@ -419,6 +535,10 @@ rg::TextureRef PostProcessor::addToGraph(rg::RenderGraph &g, VisibilityRenderer 
     g.addPass(
         "Temporal reconstruction", PassType::External,
         [&](PassBuilder &b) {
+            if (usesWorker()) {
+                b.read(workerBridge_, Usage::CopySrc, StageExternal);
+                workerBridge_ = b.write(workerBridge_, Usage::CopyDst, StageExternal);
+            }
             for (auto t : {input_, depth_, motion_, reactive_, exposure_})
                 b.read(t, Usage::ShaderRead, StageExternal);
             b.read(stateRef_, Usage::ShaderRead, StageExternal);
@@ -501,6 +621,8 @@ rg::TextureRef PostProcessor::addSDRCapture(rg::RenderGraph &g, rg::TextureRef d
     return result;
 }
 void PostProcessor::bindFrame(MetalGraphExecutor &e) {
+    if (usesWorker())
+        e.bindBuffer(workerBridge_, views_[view_].workerBuffer);
     e.bindTexture(output_, slots_[slot_].output);
     e.bindTexture(exposure_, views_[view_].exposure);
 }

@@ -303,6 +303,9 @@ struct LaunchOptions {
     bool adaptiveShading = false;
     bool debugAdaptiveNoHistory = false;
     bool post = false, temporalUpscale = false, autoExposure = false, dynamicResolution = false;
+    bool isolatedMetalFX = true;
+    u32 debugMetalFXWorkerCrash = 0, debugMetalFXWorkerDelayMs = 0;
+    u32 debugFrameDelayMs = 0;
     bool debugVisibility = false, debugMotionCorrupt = false, debugExposureCorrupt = false, debugUpscalerReset = false;
     bool debugGuideCorrupt = false;
     bool debugHistoryCorrupt = false;

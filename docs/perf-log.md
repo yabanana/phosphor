@@ -912,3 +912,17 @@ programma di sole API pubbliche (640×360, senza renderer o submission).
 Rimane una zeroing-weak reference viva dopo il rilascio. Native: 0 leak.
 F8.4 resta aperta; questi risultati prestazionali non dichiarano chiuso quel
 gate. [Riproduttore](../bench/f8_spike/README.md).
+
+## 2026-10-03 — F8.4 isolated lifetime (M5 Max, PR #15)
+
+Standard MetalFX algorithm preserved in a worker process per view/extent.
+Three rotated 1080p Release replicas, 120 warmup +600 measured, input 75%,
+offscreen/no UI/no validation: median mean direct → isolated Sponza
+2.1503 → 2.1851 ms (+1.62%); 1024 lights 12.0212 → 13.1646 ms (+9.51%);
+two views 1.2743 → 1.9189 ms (+50.58%). Isolated p95 respectively
+2.4530/14.3532/2.2582 ms. Zero steady GpuMemory allocations (parent+workers).
+20,000 measured frames +240 warmup: mean 2.1725, p95 2.4572, p99 2.7239 ms;
+one worker reaped and no residual mapping. This is a correctness/lifetime
+remediation with measured cost, not an OPT performance claim. Parent CPU
+timings omit worker CPU; footprint/driver/shared-memory domains are separate.
+[Full evidence and previous comparison](F8_METALFX_LIFETIME.md).

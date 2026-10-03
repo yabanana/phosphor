@@ -271,6 +271,15 @@ std::string reportToJson(const BenchReport& r) {
             ", \"reused_pixels_last\": " + std::to_string(v.reusedPixels) +
             ", \"device_allocated_bytes_last\": " + std::to_string(v.deviceAllocatedBytes) +
             ", \"engine_resource_bytes_last\": " + std::to_string(v.engineResourceBytes) +
+            ", \"worker_device_allocated_bytes_last\": " + std::to_string(v.workerDeviceBytes) +
+            ", \"worker_physical_footprint_last\": " + std::to_string(v.workerPhysicalFootprint) +
+            ", \"worker_shared_bridge_bytes_last\": " + std::to_string(v.workerBridgeBytes) +
+            ", \"parent_physical_footprint_last\": " + std::to_string(v.parentPhysicalFootprint) +
+            ", \"workers_spawned_total\": " + std::to_string(v.workersSpawned) +
+            ", \"workers_reaped_at_report\": " + std::to_string(v.workersReaped) +
+            ", \"workers_peak_live\": " + std::to_string(v.workersPeakLive) +
+            ", \"worker_failures\": " + std::to_string(v.workerFailures) +
+            ", \"gpu_time_scope\": \"graphics_submission_span\"" +
             ", \"command_buffer_rebuilds_total\": " + std::to_string(v.commandBufferRebuilds) +
             ", \"command_buffer_rebuilds_measured\": " + std::to_string(v.commandBufferRebuildsMeasured) +
             ", \"mip_bias_last\": " + std::to_string(v.mipBias) +

@@ -26,6 +26,7 @@ class TemporalScaler;
 namespace phosphor {
 
 class MetalContext;
+class TemporalWorker;
 
 // ---------------------------------------------------------------------------
 // PipelineCache -- Metal 4 pipeline creation off the render thread (F3).
@@ -119,6 +120,8 @@ public:
     // The future owns its result; discarding an obsolete request releases it.
     std::future<std::shared_ptr<MTL4FX::TemporalScaler>>
     requestTemporalScaler(MTLFX::TemporalScalerDescriptor *descriptor);
+
+    std::future<std::shared_ptr<TemporalWorker>> requestTemporalWorker(std::shared_ptr<TemporalWorker> worker);
 
     // --- F3.4 harvest -----------------------------------------------------------
     [[nodiscard]] bool harvesting() const { return serializer_ != nullptr; }

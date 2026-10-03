@@ -359,5 +359,14 @@ il rifiuto per OS e il fallback pixel-exact contro il controllo nativo
 sincrono; il confronto col vecchio riferimento sotto shader validation
 differisce di un pixel/livello, conservato come mancato PASS rigoroso.
 Dettagli e prossima verifica del residuo nella
-[consegna](../F7_F8_HANDOFF.md#integrazione-finale--2026-10-03).
+[consegna](../F7_F8_HANDOFF.md#integrazione-pr-14--2026-10-03-storico).
 Il merge non spunta F8.4 e non attiva OPT o F9+.
+
+### F8.4: lifetime del motore recuperato tramite isolamento
+
+La richiesta di continuare la ricerca porta a una conferma indipendente in
+Swift ARC e a un diverso confine di ownership. MetalFX standard resta identico,
+ma vive in worker terminati/recuperati al rilascio. Tutte le prove funzionali,
+qualità, lifetime, negativi, async/split e regressioni native passano sul M5.
+Il percorso SDK diretto resta negativo, conservato come controllo.
+[Consegna finale, numeri e costi](../F8_METALFX_LIFETIME.md). Nessuna OPT attivata.

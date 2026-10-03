@@ -72,6 +72,10 @@ public:
         MTL::SharedEvent* fenceEvent  = nullptr;
         u64               fenceWait   = 0;
         u64               fenceSignal = 0;
+        MTL::SharedEvent *externalInputReady = nullptr, *externalOutputReady = nullptr;
+        u64 externalSignalValue = 0, externalWaitValue = 0;
+        void (*externalSubmitted)(void *, u64) = nullptr;
+        void *externalSubmissionUser = nullptr;
     };
 
     struct Frame {
@@ -219,7 +223,9 @@ public:
 
 private:
     void flushResidency();
-    void onFrameFeedback(u64 index, MTL4::CommitFeedback *feedback, bool timed);
+    struct FeedbackSpan;
+    void onFrameFeedback(u64 index, MTL4::CommitFeedback *feedback, bool timed, bool graphics,
+                         const std::shared_ptr<FeedbackSpan> &span);
     void waitForValue(u64 value);
     void waitForAsync(u64 value);
 
@@ -276,6 +282,7 @@ private:
     std::condition_variable gpuTimesCv_;
     std::vector<float>      gpuTimes_;
     u64                     gpuTimesFirst_    = 0;
+    u64 lastGpuTimingFrame_ = ~u64{0};
     u32                     gpuTimesReceived_ = 0;
     bool apple9_         = false;
     bool apple10_        = false;

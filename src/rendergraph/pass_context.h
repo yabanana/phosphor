@@ -1,6 +1,7 @@
 #pragma once
 
 #include "rendergraph/render_graph.h"
+#include <stdexcept>
 
 namespace phosphor::rg {
 
@@ -18,6 +19,21 @@ public:
     /// The executor owns encoder boundaries, dependencies and fence lifetime.
     [[nodiscard]] virtual void *commandBuffer() const { return nullptr; }
     [[nodiscard]] virtual void *externalFence() const { return nullptr; }
+
+    struct ExternalDependency {
+        void *inputReady = nullptr, *outputReady = nullptr;
+        u64 value = 0;
+        void (*resume)(PassContext &, void *) = nullptr;
+        void *user = nullptr;
+        void (*submitted)(void *, u64) = nullptr;
+        void *submissionUser = nullptr;
+    };
+    // Split after the producer commands, signal inputReady, wait outputReady,
+    // then call resume to encode the consumer. Events and resources must live
+    // through the frame; the backend owns the submission boundary.
+    virtual void externalDependency(const ExternalDependency &) {
+        throw std::logic_error("External queue dependencies unsupported by this context");
+    }
 
     /// Encoder of the pass's type, already inside the (fused) render pass.
     [[nodiscard]] virtual void* encoder() const = 0;

@@ -1,3 +1,4 @@
+#include <stdexcept>
 #include "platform/metal/gpu_memory.h"
 #include "platform/metal/metal_context.h"
 #include "core/log.h"
@@ -194,6 +195,17 @@ MTL::Buffer* GpuMemory::newBuffer(u64 length, MTL::ResourceOptions options, Memo
         context_.makeResident(buffer, residencyClass(category));
     }
     buffer->setLabel(str(label));
+    account(buffer, category);
+    return buffer;
+}
+
+MTL::Buffer *GpuMemory::newSharedBuffer(void *mapping, u64 length, void (^deallocator)(void *, NS::UInteger),
+                                        MemoryCategory category, const char *label) {
+    auto *buffer = context_.device()->newBuffer(mapping, length, MTL::ResourceStorageModeShared, deallocator);
+    if (!buffer)
+        throw std::runtime_error("Failed to import GPU shared mapping");
+    buffer->setLabel(str(label));
+    context_.makeResident(buffer, residencyClass(category));
     account(buffer, category);
     return buffer;
 }

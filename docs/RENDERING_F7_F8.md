@@ -56,10 +56,12 @@ and tile comparisons against generic resolve remain exact.
 
 ## Temporal ownership and presentation
 
-F8.4 retains an open runtime lifetime gate: the native path has zero leaks;
-MetalFX leaves an SDK cycle in a public-API-only reduction. Temporal use is
-explicit and this limitation is not hidden by passing image tests. See
-[the reduction](../bench/f8_spike/README.md).
+`--upscaler temporal` uses isolated MetalFX worker processes by default.
+F8.4 engine lifetime is development-accepted on M5: workers and shared
+mappings are reclaimed at resize/shutdown. The stock SDK-only release cycle
+still reproduces; `--metalfx-mode direct` is a diagnostic comparison path.
+Native remains the product default. See [lifetime, tests and cost](F8_METALFX_LIFETIME.md)
+and [the unchanged SDK reduction](../bench/f8_spike/README.md).
 
 Three upload slots are distinct from up to four temporal views. Every view has
 its own previous poses, Hi-Z data, exposure and MetalFX scaler. Entity
@@ -76,12 +78,25 @@ feedback callbacks are drained separately before context destruction. A GPU
 failure is sticky and causes a nonzero process exit. A GPU timeout fails closed
 instead of recycling resources that may still be active.
 
-MetalFX executes in an isolated `External` graph pass. The graph owns its
+MetalFX executes through an `External` graph pass. The default temporal path
+uses a private worker process per view/extent: GPU copies exchange pixels
+through a bounded three-slot shared mapping; a socket carries only parameters
+and completion. Producer/consumer submissions synchronize with shared events.
+The broker runs outside the render thread and starts its timeout only after
+submission publication. Unknown completion fails closed; it never makes a
+possibly still-written output appear successful. At most eight workers may
+be active/retiring; startup retries with native fallback when capacity is full.
+
+In direct diagnostic mode the SDK encodes within the parent command buffer. The graph owns its
 boundary barriers/fence; the framework owns its internal resources. The state
 import represents that opaque per-view dependency as well as exposure state.
 Graph bandwidth estimates cover declared accesses, not undisclosed SDK traffic.
 Device allocation readback and GpuMemory resource accounting are reported
-separately; `gpu_allocations` counts allocations routed through GpuMemory.
+separately in report schema 8; `gpu_allocations` counts GpuMemory allocations
+in parent and workers. SDK-internal allocations remain opaque. Parent/worker
+footprints and shared mappings must not be blindly summed. GPU timing is the
+first-to-last graphics submission span, including external/IPC gaps, rather
+than the final display commit alone.
 
 The scaler is initialized on PipelineCache utility workers. Startup prewarms it;
 resize uses native/spatial reconstruction until the correct scaler is ready.
@@ -126,7 +141,8 @@ build/quality-venv/bin/python tools/f7_f8_check.py --quality-only
 build/quality-venv/bin/python tools/f7_f8_check.py --context-quality
 ```
 
-Run one GPU process at a time. Captures/readbacks/validation are correctness
+Run one coordinated GPU workload at a time (its internal workers are part of
+that workload). Captures/readbacks/validation are correctness
 workloads, not performance measurements. `--offscreen` measures rendering
 throughput separately from presentation. Keep the binary/metallib hashes,
 asset manifest, commands, raw exits, EXIT marker and report together.

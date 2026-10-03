@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <stdexcept>
+#include <limits>
 
 namespace phosphor {
 
@@ -83,23 +84,29 @@ MetalContext::MetalContext(CA::MetalLayer* layer, const std::string& libraryPath
     asyncTimeline_    = device_->newSharedEvent();
     uploadEvent_ = device_->newSharedEvent();
 
-    layer_->setDevice(device_);
-    layer_->setPixelFormat(MTL::PixelFormatBGRA8Unorm_sRGB);
-    layer_->setFramebufferOnly(false); // --capture copies the drawable into a buffer
-    layer_->setMaximumDrawableCount(3);
-    // Drawables must be resident for the MTL4 queue; the layer owns this set.
-    queue_->addResidencySet(layer_->residencySet());
+    if (layer_) {
+        layer_->setDevice(device_);
+        layer_->setPixelFormat(MTL::PixelFormatBGRA8Unorm_sRGB);
+        layer_->setFramebufferOnly(false); // --capture copies the drawable into a buffer
+        layer_->setMaximumDrawableCount(3);
+        // Drawables must be resident for the MTL4 queue; the layer owns this set.
+        queue_->addResidencySet(layer_->residencySet());
+    }
 
     memory_       = std::make_unique<GpuMemory>(*this);
-    // Ring sizes come from the budget; the frame ring still grows after an
-    // overflow and the staging ring flushes when full.
-    frameUploads_ = std::make_unique<UploadRing>(*memory_, budget_.frameUploadRingSize(), METAL_FRAMES_IN_FLIGHT,
-                                                 "Frame uploads");
-    staging_      = std::make_unique<UploadRing>(*memory_, budget_.stagingRingSize(), 1, "Staging");
-    LOG_INFO("Memory pools: frame ring %llu MiB, staging %llu MiB, heap pages %llu MiB",
-             static_cast<unsigned long long>(budget_.frameUploadRingSize() >> 20),
-             static_cast<unsigned long long>(budget_.stagingRingSize() >> 20),
-             static_cast<unsigned long long>(budget_.heapPageSize() >> 20));
+    // An effect worker has no drawable/frame uploads or staging. It imports
+    // its bounded bridge through GpuMemory and owns its command stream.
+    if (layer_) {
+        // Ring sizes come from the budget; the frame ring still grows after an
+        // overflow and the staging ring flushes when full.
+        frameUploads_ = std::make_unique<UploadRing>(*memory_, budget_.frameUploadRingSize(), METAL_FRAMES_IN_FLIGHT,
+                                                     "Frame uploads");
+        staging_ = std::make_unique<UploadRing>(*memory_, budget_.stagingRingSize(), 1, "Staging");
+        LOG_INFO("Memory pools: frame ring %llu MiB, staging %llu MiB, heap pages %llu MiB",
+                 static_cast<unsigned long long>(budget_.frameUploadRingSize() >> 20),
+                 static_cast<unsigned long long>(budget_.stagingRingSize() >> 20),
+                 static_cast<unsigned long long>(budget_.heapPageSize() >> 20));
+    }
 }
 
 MetalContext::~MetalContext() {
@@ -224,6 +231,8 @@ void MetalContext::setFramesInFlight(u32 count) {
 }
 
 bool MetalContext::beginFrame(Frame& frame) {
+    if (!frameUploads_)
+        throw std::logic_error("Effect-only context cannot begin a presentation frame");
     const u64 index = frameIndex_;
     const u32 slot  = static_cast<u32>(index % METAL_FRAMES_IN_FLIGHT);
 
@@ -274,6 +283,13 @@ bool MetalContext::beginFrame(Frame& frame) {
     return true;
 }
 
+struct MetalContext::FeedbackSpan {
+    std::mutex mutex;
+    double start = std::numeric_limits<double>::max(), end = 0;
+    u32 remaining = 0;
+    bool failed = false;
+};
+
 void MetalContext::submitFrame(Frame& frame) {
     frame.commandBuffer->endCommandBuffer();
     frameUploads_->endFrame();
@@ -289,6 +305,15 @@ void MetalContext::submitFrame(Frame& frame) {
     for (u32 i = 0; i < frame.submissionCount; ++i) {
         if (frame.submissions[i].queue == SubmitQueue::Graphics) lastGraphics = i;
     }
+    u32 graphicsCount = 0;
+    for (u32 i = 0; i < frame.submissionCount; ++i)
+        if (frame.submissions[i].queue == SubmitQueue::Graphics)
+            ++graphicsCount;
+    std::shared_ptr<FeedbackSpan> span;
+    if (graphicsCount > 1) {
+        span = std::make_shared<FeedbackSpan>();
+        span->remaining = graphicsCount;
+    }
     bool drawableWaited = false;
     for (u32 i = 0; i < frame.submissionCount; ++i) {
         const Submission& sub = frame.submissions[i];
@@ -303,6 +328,8 @@ void MetalContext::submitFrame(Frame& frame) {
         if (sub.waitFrame) q->wait(frameEvent_, sub.waitFrame);
         if (sub.waitValue) q->wait(async ? graphicsTimeline_ : asyncTimeline_, sub.waitValue);
         if (sub.fenceEvent && sub.fenceWait) q->wait(sub.fenceEvent, sub.fenceWait);
+        if (sub.externalOutputReady)
+            q->wait(sub.externalOutputReady, sub.externalWaitValue);
         const MTL4::CommandBuffer* const* buffers = frame.buffers.data() + sub.firstBuffer;
         // Track every submission, including async/split commits. GPU event
         // completion alone does not drain CPU feedback callbacks.
@@ -313,13 +340,19 @@ void MetalContext::submitFrame(Frame& frame) {
         }
         const u64 index = frame.index;
         const bool timed = i == lastGraphics;
-        options->addFeedbackHandler(
-            [this, index, timed](MTL4::CommitFeedback *feedback) { onFrameFeedback(index, feedback, timed); });
+        options->addFeedbackHandler([this, index, timed, async, span](MTL4::CommitFeedback *feedback) {
+            onFrameFeedback(index, feedback, timed, !async, span);
+        });
         q->commit(buffers, sub.bufferCount, options);
         options->release();
         if (timed && frame.drawable) {
             queue_->signalDrawable(frame.drawable);
             frame.drawable->present();
+        }
+        if (sub.externalInputReady) {
+            q->signalEvent(sub.externalInputReady, sub.externalSignalValue);
+            if (sub.externalSubmitted)
+                sub.externalSubmitted(sub.externalSubmissionUser, sub.externalSignalValue);
         }
         if (sub.signalValue) q->signalEvent(async ? asyncTimeline_ : graphicsTimeline_, sub.signalValue);
         if (sub.fenceEvent && sub.fenceSignal) q->signalEvent(sub.fenceEvent, sub.fenceSignal);
@@ -330,7 +363,8 @@ void MetalContext::submitFrame(Frame& frame) {
     ++frameIndex_;
 }
 
-void MetalContext::onFrameFeedback(u64 index, MTL4::CommitFeedback *feedback, bool timed) {
+void MetalContext::onFrameFeedback(u64 index, MTL4::CommitFeedback *feedback, bool timed, bool graphics,
+                                   const std::shared_ptr<FeedbackSpan> &span) {
     if (feedbackDelayMs_)
         std::this_thread::sleep_for(std::chrono::milliseconds(feedbackDelayMs_));
     if (timed)
@@ -341,12 +375,29 @@ void MetalContext::onFrameFeedback(u64 index, MTL4::CommitFeedback *feedback, bo
         LOG_ERROR("Frame %llu GPU feedback failure: %s", static_cast<unsigned long long>(index),
                   error ? error->localizedDescription()->utf8String() : "injected negative control");
         gpuTimesCv_.notify_all();
-    } else if (timed) {
-        const float ms = static_cast<float>((feedback->GPUEndTime() - feedback->GPUStartTime()) * 1000.0);
-        lastGpuMs_.store(ms, std::memory_order_relaxed);
+    }
+    float completeMs = -1;
+    if (graphics && !span) {
+        if (!injected && !feedback->error())
+            completeMs = static_cast<float>((feedback->GPUEndTime() - feedback->GPUStartTime()) * 1000.0);
+    } else if (graphics) {
+        std::lock_guard spanLock(span->mutex);
+        span->failed |= injected || feedback->error() != nullptr;
+        span->start = std::min(span->start, feedback->GPUStartTime());
+        span->end = std::max(span->end, feedback->GPUEndTime());
+        if (--span->remaining == 0 && !span->failed)
+            completeMs = static_cast<float>((span->end - span->start) * 1000.0);
+    }
+    if (completeMs >= 0) {
+        // Full graphics latency includes external queue/IPC gaps. Single
+        // submissions retain the original path without a shared allocation.
         std::lock_guard lock(gpuTimesMutex_);
+        if (lastGpuTimingFrame_ == ~u64{0} || index >= lastGpuTimingFrame_) {
+            lastGpuTimingFrame_ = index;
+            lastGpuMs_.store(completeMs, std::memory_order_relaxed);
+        }
         if (index >= gpuTimesFirst_ && index - gpuTimesFirst_ < gpuTimes_.size()) {
-            gpuTimes_[index - gpuTimesFirst_] = ms;
+            gpuTimes_[index - gpuTimesFirst_] = completeMs;
             ++gpuTimesReceived_;
             gpuTimesCv_.notify_all();
         }
@@ -379,6 +430,8 @@ std::vector<float> MetalContext::endGpuTimeCapture() {
 }
 
 UploadRing::Slice MetalContext::stagingAllocate(u64 size, u64 alignment) {
+    if (!staging_)
+        throw std::logic_error("Effect-only context has no staging ring");
     if (UploadRing::Slice slice = staging_->tryAllocate(size, alignment)) return slice;
     flushUploads(); // frees the whole staging ring
     if (UploadRing::Slice slice = staging_->tryAllocate(size, alignment)) return slice;

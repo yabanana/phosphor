@@ -12,7 +12,7 @@ Non attiva il catalogo di ricerca e non inventa risultati sperimentali: le
 scelte numeriche si fissano con la regola dello spike già scritta nel piano.
 I file futuri sono destinazioni proposte; il kickoff riconcilia codice e SDK.
 
-- **Checkpoint:** F5–F8 integrate in main (PR #14, `91b51c2`), F7 baseline verificata; gate lifetime MetalFX F8.4 aperto. Sosta richiesta prima delle OPT.
+- **Checkpoint:** F5/F6 integrate; F7/F8 DEVELOPMENT_ACCEPTED M5 (PR #14/#15); lifetime F8.4 tramite worker isolati. Sosta richiesta prima delle OPT.
 - **Poi:** F9–F13 e F14 se utile al corpus; renderer prima della piattaforma.
 - **Piattaforma richiesta:** ECS/runtime, contenuti, audio, editor, 2D, UI e
   riuso Bevy, con implementazione progressiva e compatibilità verificata.
@@ -51,7 +51,7 @@ restano soltanto nella [roadmap](../ROADMAP.md).
 | [F5](F5.md) | GPU scene persistente e submission guidata dalla GPU | audit | 6 |
 | [F6](F6.md) | Mesh shader e culling a due fasi | audit | 7 |
 | [F7](F7.md) | Visibility buffer e shading ibrido TBDR | audit | 7 |
-| [F8](F8.md) | HDR, EDR, esposizione e MetalFX temporal | operativo (residuo SDK) | 7 |
+| [F8](F8.md) | HDR, EDR, esposizione e MetalFX temporal | audit | 7 |
 | [OPT-2](OPT-2.md) | Shader, pipeline e occupancy | opportunita | 11 |
 | [OPT-3](OPT-3.md) | Geometria, culling e dati di vertice | opportunita | 11 |
 | [OPT-4](OPT-4.md) | Shading, banda e ricostruzione | opportunita | 17 |

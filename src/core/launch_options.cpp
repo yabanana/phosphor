@@ -579,6 +579,35 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
                 error = "--settled-reference: expected 16..64 samples";
                 return false;
             }
+        } else if (arg == "--metalfx-mode") {
+            std::string mode;
+            if (!needString(mode))
+                return false;
+            if (mode == "isolated")
+                out.isolatedMetalFX = true;
+            else if (mode == "direct")
+                out.isolatedMetalFX = false;
+            else {
+                error = "--metalfx-mode must be isolated or direct";
+                return false;
+            }
+        } else if (arg == "--debug-frame-delay-ms") {
+            if (!needCount(out.debugFrameDelayMs))
+                return false;
+            if (out.debugFrameDelayMs > 1000) {
+                error = "Frame diagnostic delay must be at most 1000 ms";
+                return false;
+            }
+        } else if (arg == "--debug-metalfx-worker-delay-ms") {
+            if (!needCount(out.debugMetalFXWorkerDelayMs))
+                return false;
+            if (out.debugMetalFXWorkerDelayMs > 2000) {
+                error = "Worker delay must be at most 2000 ms";
+                return false;
+            }
+        } else if (arg == "--debug-metalfx-worker-crash") {
+            if (!needCount(out.debugMetalFXWorkerCrash))
+                return false;
         } else if (arg == "--render-scale") {
             if (!needFloat(out.renderScale))
                 return false;
@@ -722,6 +751,11 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if ((out.debugMotionCorrupt || out.debugExposureCorrupt || out.debugGuideCorrupt || out.debugHistoryCorrupt) &&
         !out.debugVisibility) {
         error = "Guide/motion/exposure corruption requires --debug-visibility";
+        return false;
+    }
+    if ((out.debugMetalFXWorkerCrash || out.debugMetalFXWorkerDelayMs) &&
+        (!out.temporalUpscale || !out.isolatedMetalFX)) {
+        error = "Worker crash control requires isolated temporal upscaling";
         return false;
     }
     if (!out.captureSequence.empty() && !out.capturePath.empty()) {

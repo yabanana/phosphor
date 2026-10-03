@@ -1,0 +1,1103 @@
+{
+  "schema": 1,
+  "date": "2026-10-03",
+  "source_commit": "53862c3fc421ce67eb8630bb8d6520fcd22a3d9b",
+  "scope": "M5 Max macOS engine development acceptance. Stock MetalFX 40.9 release cycle remains; logical scaler lifetime ends at reaped worker-process boundary.",
+  "hardware": {
+    "device": "Apple M5 Max",
+    "memory_gib": 128,
+    "macos": "27.2",
+    "os_build": "26B5091g",
+    "metalfx": "40.9",
+    "T0": "EXTERNAL_VALIDATION_PENDING"
+  },
+  "engine_lifetime": "DEVELOPMENT_ACCEPTED",
+  "sdk_cycle_fixed": false,
+  "parent_exit_leaks": 0,
+  "direct_isolated_comparison": {
+    "scene": "Sponza",
+    "resolution": [
+      641,
+      361
+    ],
+    "render_scale": 0.75,
+    "frame": 99,
+    "different_pixels": 0,
+    "pixels": 231401,
+    "tolerance": 0
+  },
+  "functional": [
+    {
+      "name": "b1-forward",
+      "passed": true,
+      "status": "b1-forward.log.status.json"
+    },
+    {
+      "name": "b1-generic",
+      "passed": true,
+      "status": "b1-generic.log.status.json"
+    },
+    {
+      "name": "b1-binned",
+      "passed": true,
+      "status": "b1-binned.log.status.json"
+    },
+    {
+      "name": "b1-tile",
+      "passed": true,
+      "status": "b1-tile.log.status.json"
+    },
+    {
+      "name": "b1-forward-resolve",
+      "passed": true,
+      "result": "0 of 230400 pixels differ (tolerance 1), max delta 1, PSNR 64.74 dB"
+    },
+    {
+      "name": "b1-bins",
+      "passed": true,
+      "result": "0 of 230400 pixels differ (tolerance 0), max delta 0, PSNR inf dB"
+    },
+    {
+      "name": "b1-tile",
+      "passed": true,
+      "result": "0 of 230400 pixels differ (tolerance 0), max delta 0, PSNR inf dB"
+    },
+    {
+      "name": "b4-forward",
+      "passed": true,
+      "status": "b4-forward.log.status.json"
+    },
+    {
+      "name": "b4-generic",
+      "passed": true,
+      "status": "b4-generic.log.status.json"
+    },
+    {
+      "name": "b4-binned",
+      "passed": true,
+      "status": "b4-binned.log.status.json"
+    },
+    {
+      "name": "b4-tile",
+      "passed": true,
+      "status": "b4-tile.log.status.json"
+    },
+    {
+      "name": "b4-forward-resolve",
+      "psnr_db": 51.494260508412076,
+      "p99_delta": 3.0,
+      "max_delta": 38.0,
+      "max_outside_support": 19.0,
+      "fraction_delta_over_16": 0.00014322916666666667,
+      "limits": {
+        "psnr_min_db": 50,
+        "p99_delta_max": 4,
+        "fraction_delta_over_16_max": 0.0005
+      },
+      "passed": true
+    },
+    {
+      "name": "b4-bins",
+      "passed": true,
+      "result": "0 of 230400 pixels differ (tolerance 0), max delta 0, PSNR inf dB"
+    },
+    {
+      "name": "b4-tile",
+      "passed": true,
+      "result": "0 of 230400 pixels differ (tolerance 0), max delta 0, PSNR inf dB"
+    },
+    {
+      "name": "heldout-forward",
+      "passed": true,
+      "status": "heldout-forward.log.status.json"
+    },
+    {
+      "name": "heldout-visibility",
+      "passed": true,
+      "status": "heldout-visibility.log.status.json"
+    },
+    {
+      "name": "heldout-forward-resolve",
+      "psnr_db": 50.65025591711194,
+      "p99_delta": 4.0,
+      "max_delta": 121.0,
+      "max_outside_support": 40.0,
+      "fraction_delta_over_16": 0.00045138888888888887,
+      "limits": {
+        "psnr_min_db": 50,
+        "p99_delta_max": 4,
+        "fraction_delta_over_16_max": 0.0005
+      },
+      "passed": true
+    },
+    {
+      "name": "history-1",
+      "passed": true,
+      "status": "history-1.log.status.json"
+    },
+    {
+      "name": "history-2",
+      "passed": true,
+      "status": "history-2.log.status.json"
+    },
+    {
+      "name": "history-3",
+      "passed": true,
+      "status": "history-3.log.status.json"
+    },
+    {
+      "name": "apple9",
+      "passed": true,
+      "status": "apple9.log.status.json"
+    },
+    {
+      "name": "adaptive",
+      "passed": true,
+      "status": "adaptive.log.status.json"
+    },
+    {
+      "name": "tile-guides",
+      "passed": true,
+      "status": "tile-guides.log.status.json"
+    },
+    {
+      "name": "alpha",
+      "passed": true,
+      "status": "alpha.log.status.json"
+    },
+    {
+      "name": "exposure",
+      "passed": true,
+      "status": "exposure.log.status.json"
+    },
+    {
+      "name": "negative-motion",
+      "passed": true,
+      "status": "negative-motion.log.status.json"
+    },
+    {
+      "name": "negative-guide",
+      "passed": true,
+      "status": "negative-guide.log.status.json"
+    },
+    {
+      "name": "negative-exposure",
+      "passed": true,
+      "status": "negative-exposure.log.status.json"
+    },
+    {
+      "name": "negative-feedback",
+      "passed": true,
+      "status": "negative-feedback.log.status.json"
+    },
+    {
+      "name": "feedback-drain",
+      "passed": true,
+      "status": "feedback-drain.log.status.json"
+    },
+    {
+      "name": "negative-history-age",
+      "passed": true,
+      "status": "negative-history-age.log.status.json"
+    },
+    {
+      "name": "post-curves",
+      "passed": true,
+      "status": "post-curves.log.status.json"
+    },
+    {
+      "name": "negative-post-curves",
+      "passed": true,
+      "status": "negative-post-curves.log.status.json"
+    }
+  ],
+  "quality": [
+    {
+      "name": "clip-b1-reference",
+      "passed": true,
+      "status": "clip-b1-reference.log.status.json"
+    },
+    {
+      "name": "clip-b1-control",
+      "passed": true,
+      "status": "clip-b1-control.log.status.json"
+    },
+    {
+      "name": "clip-b1-temporal",
+      "passed": true,
+      "status": "clip-b1-temporal.log.status.json"
+    },
+    {
+      "name": "clip-b1-adaptive",
+      "passed": true,
+      "status": "clip-b1-adaptive.log.status.json"
+    },
+    {
+      "name": "clip-b1-tile",
+      "passed": true,
+      "status": "clip-b1-tile.log.status.json"
+    },
+    {
+      "name": "quality-b1-temporal",
+      "passed": true,
+      "metrics": {
+        "frames": 480,
+        "mean_psnr_srgb_db": 34.85192136800012,
+        "linear_rmse_p95": 0.018689667154103518,
+        "linear_rmse_max": 0.02213350683450699,
+        "residual_flicker_mean": 0.0015344160651390363,
+        "ghost_fraction_max": 1.0,
+        "excess_ghost_fraction_max": 0.875,
+        "support_ghost_fraction_max": 0.03282275711159737,
+        "recovery_frames": {
+          "119": 0,
+          "239": 0,
+          "359": 0
+        }
+      }
+    },
+    {
+      "name": "quality-b1-adaptive",
+      "passed": true,
+      "metrics": {
+        "frames": 480,
+        "mean_psnr_srgb_db": 34.85199535766515,
+        "linear_rmse_p95": 0.018688196409493683,
+        "linear_rmse_max": 0.022134440019726753,
+        "residual_flicker_mean": 0.0015354609065980184,
+        "ghost_fraction_max": 1.0,
+        "excess_ghost_fraction_max": 0.875,
+        "support_ghost_fraction_max": 0.0350109409190372,
+        "recovery_frames": {
+          "119": 0,
+          "239": 0,
+          "359": 0
+        }
+      }
+    },
+    {
+      "name": "quality-b1-tile",
+      "passed": true,
+      "metrics": {
+        "frames": 480,
+        "mean_psnr_srgb_db": 34.85192136800012,
+        "linear_rmse_p95": 0.018689667154103518,
+        "linear_rmse_max": 0.02213350683450699,
+        "residual_flicker_mean": 0.0015344160651390363,
+        "ghost_fraction_max": 1.0,
+        "excess_ghost_fraction_max": 0.875,
+        "support_ghost_fraction_max": 0.03282275711159737,
+        "recovery_frames": {
+          "119": 0,
+          "239": 0,
+          "359": 0
+        }
+      }
+    },
+    {
+      "name": "negative-quality-b1",
+      "passed": true
+    },
+    {
+      "name": "clip-b4-reference",
+      "passed": true,
+      "status": "clip-b4-reference.log.status.json"
+    },
+    {
+      "name": "clip-b4-control",
+      "passed": true,
+      "status": "clip-b4-control.log.status.json"
+    },
+    {
+      "name": "clip-b4-temporal",
+      "passed": true,
+      "status": "clip-b4-temporal.log.status.json"
+    },
+    {
+      "name": "clip-b4-adaptive",
+      "passed": true,
+      "status": "clip-b4-adaptive.log.status.json"
+    },
+    {
+      "name": "clip-b4-tile",
+      "passed": true,
+      "status": "clip-b4-tile.log.status.json"
+    },
+    {
+      "name": "quality-b4-temporal",
+      "passed": true,
+      "metrics": {
+        "frames": 480,
+        "mean_psnr_srgb_db": 30.160377631332253,
+        "linear_rmse_p95": 0.024352253787219523,
+        "linear_rmse_max": 0.03297777473926544,
+        "residual_flicker_mean": 0.005860329889158796,
+        "ghost_fraction_max": 1.0,
+        "excess_ghost_fraction_max": 0.6666666666666666,
+        "support_ghost_fraction_max": 0.06944444444444445,
+        "recovery_frames": {
+          "119": 0,
+          "239": 0,
+          "359": 0
+        }
+      }
+    },
+    {
+      "name": "quality-b4-adaptive",
+      "passed": true,
+      "metrics": {
+        "frames": 480,
+        "mean_psnr_srgb_db": 30.160377631332253,
+        "linear_rmse_p95": 0.024352253787219523,
+        "linear_rmse_max": 0.03297777473926544,
+        "residual_flicker_mean": 0.005860329889158796,
+        "ghost_fraction_max": 1.0,
+        "excess_ghost_fraction_max": 0.6666666666666666,
+        "support_ghost_fraction_max": 0.06944444444444445,
+        "recovery_frames": {
+          "119": 0,
+          "239": 0,
+          "359": 0
+        }
+      }
+    },
+    {
+      "name": "quality-b4-tile",
+      "passed": true,
+      "metrics": {
+        "frames": 480,
+        "mean_psnr_srgb_db": 30.160377631332253,
+        "linear_rmse_p95": 0.024352253787219523,
+        "linear_rmse_max": 0.03297777473926544,
+        "residual_flicker_mean": 0.005860329889158796,
+        "ghost_fraction_max": 1.0,
+        "excess_ghost_fraction_max": 0.6666666666666666,
+        "support_ghost_fraction_max": 0.06944444444444445,
+        "recovery_frames": {
+          "119": 0,
+          "239": 0,
+          "359": 0
+        }
+      }
+    },
+    {
+      "name": "negative-quality-b4",
+      "passed": true
+    }
+  ],
+  "context_quality": [
+    {
+      "name": "exposure-reference",
+      "passed": true,
+      "status": "exposure-reference.log.status.json"
+    },
+    {
+      "name": "exposure-control",
+      "passed": true,
+      "status": "exposure-control.log.status.json"
+    },
+    {
+      "name": "exposure-temporal",
+      "passed": true,
+      "status": "exposure-temporal.log.status.json"
+    },
+    {
+      "name": "exposure-quality",
+      "passed": true,
+      "metrics": {
+        "frames": 180,
+        "mean_psnr_srgb_db": 38.12168786323049,
+        "linear_rmse_p95": 0.02151468563824891,
+        "linear_rmse_max": 0.025920797139406204,
+        "residual_flicker_mean": 0.0007694945972212332,
+        "ghost_fraction_max": 1.0,
+        "excess_ghost_fraction_max": 1.0,
+        "support_ghost_fraction_max": 0.0002698989105898518,
+        "recovery_frames": {
+          "119": 0
+        }
+      }
+    },
+    {
+      "name": "drs-views-reference",
+      "passed": true,
+      "status": "drs-views-reference.log.status.json"
+    },
+    {
+      "name": "drs-views-control",
+      "passed": true,
+      "status": "drs-views-control.log.status.json"
+    },
+    {
+      "name": "drs-views-temporal",
+      "passed": true,
+      "status": "drs-views-temporal.log.status.json"
+    },
+    {
+      "name": "drs-views-quality",
+      "passed": true,
+      "metrics": {
+        "frames": 180,
+        "mean_psnr_srgb_db": 35.27776368860232,
+        "linear_rmse_p95": 0.02150077586993575,
+        "linear_rmse_max": 0.022757556289434433,
+        "residual_flicker_mean": 0.0019150934628366183,
+        "ghost_fraction_max": 0.7206703910614525,
+        "excess_ghost_fraction_max": 0.5952380952380952,
+        "support_ghost_fraction_max": 0.00020044097013429546,
+        "recovery_frames": {
+          "119": 0
+        }
+      }
+    }
+  ],
+  "four_views_edr": {
+    "status": {
+      "command": [
+        "env",
+        "MTL_DEBUG_LAYER=1",
+        "MTL_SHADER_VALIDATION=1",
+        "./build/release/phosphor",
+        "--offscreen",
+        "--no-ui",
+        "--no-vsync",
+        "--fixed-timestep",
+        "--warmup",
+        "0",
+        "--bench",
+        "2",
+        "--scene",
+        "procedural",
+        "--frames",
+        "48",
+        "--resolution",
+        "641x361",
+        "--post",
+        "--upscaler",
+        "temporal",
+        "--temporal-views",
+        "4",
+        "--frames-in-flight",
+        "3",
+        "--resolution-script",
+        "9",
+        "--auto-exposure",
+        "--output",
+        "edr",
+        "--debug-visibility",
+        "--report",
+        "build/metalfx-recheck/four-views-edr.json"
+      ],
+      "started_utc": "2026-10-03T15:28:06.772373+00:00",
+      "elapsed_seconds": 3.5440154999960214,
+      "returncode": 0,
+      "signal": null,
+      "exit_marker": 0,
+      "expected_exit": 0,
+      "timed_out": false,
+      "binary_sha256": "7c7701dafe185836bc103938a314d3844498e50c54a7e5a24e6d80bb2372ad74",
+      "artifacts": {
+        "build/release/phosphor": "7c7701dafe185836bc103938a314d3844498e50c54a7e5a24e6d80bb2372ad74",
+        "build/release/shaders/phosphor.metallib": "5b632c1e408a9b408992c9dbb5605cf4a68ccbb4dbe3ef2f79e40ca48b6c2e56"
+      },
+      "commit": "53862c3fc421ce67eb8630bb8d6520fcd22a3d9b",
+      "tracked_patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "macos": "27.2",
+      "untracked_sources": {},
+      "validation_env": {
+        "MTL_DEBUG_LAYER": null,
+        "MTL_SHADER_VALIDATION": null,
+        "MTL_DEBUG_LAYER_WARNING_MODE": null
+      },
+      "passed": true,
+      "failures": []
+    },
+    "rendering": {
+      "offscreen": true,
+      "path": "visibility",
+      "asset": "procedural",
+      "material_binning_requested": false,
+      "post": true,
+      "upscaler_effective": "metalfx-temporal-isolated",
+      "tonemap": "aces-fit",
+      "input_width_last": 481,
+      "input_height_last": 271,
+      "views": 4,
+      "frames_in_flight": 3,
+      "gpu_failures": 0,
+      "auto_exposure": true,
+      "exposure_last": 1.378966,
+      "edr": true,
+      "display_headroom_last": 1.0,
+      "display_potential_headroom": 16.0,
+      "temporal_frames_total": 48,
+      "native_frames_total": 0,
+      "history_resets_total": 23,
+      "binned_frames_total": 0,
+      "generic_frames_total": 48,
+      "guide_checks": 48,
+      "shaded_pixels_last": 0,
+      "reused_pixels_last": 0,
+      "device_allocated_bytes_last": 819429376,
+      "engine_resource_bytes_last": 523073512,
+      "worker_device_allocated_bytes_last": 815415296,
+      "worker_physical_footprint_last": 1797016888,
+      "worker_shared_bridge_bytes_last": 74317824,
+      "parent_physical_footprint_last": 1211384984,
+      "workers_spawned_total": 4,
+      "workers_reaped_at_report": 0,
+      "workers_peak_live": 4,
+      "worker_failures": 0,
+      "gpu_time_scope": "graphics_submission_span",
+      "command_buffer_rebuilds_total": 0,
+      "command_buffer_rebuilds_measured": 0,
+      "mip_bias_last": -0.414288,
+      "guide_failures": 0
+    }
+  },
+  "protocol": [
+    {
+      "case": "invalid-version",
+      "idle_seconds": 0,
+      "exit": 2,
+      "reaped": true
+    },
+    {
+      "case": "idle",
+      "idle_seconds": 35,
+      "exit": 0,
+      "reaped": true
+    }
+  ],
+  "lifetime": [
+    {
+      "case": "direct-resize",
+      "command": [
+        "build/release/phosphor",
+        "--offscreen",
+        "--no-ui",
+        "--no-vsync",
+        "--fixed-timestep",
+        "--warmup",
+        "0",
+        "--bench",
+        "1",
+        "--scene",
+        "procedural",
+        "--resolution",
+        "640x360",
+        "--post",
+        "--upscaler",
+        "temporal",
+        "--render-scale",
+        ".75",
+        "--metalfx-mode",
+        "direct",
+        "--frames",
+        "240",
+        "--resize-every",
+        "30",
+        "--temporal-views",
+        "2",
+        "--debug-frame-delay-ms",
+        "64",
+        "--report",
+        "build/metalfx-recheck/lifecycle-footprint/direct-resize.json"
+      ],
+      "exit": 0,
+      "stopped_at_8_gib_parent_physical_footprint": false,
+      "all_observed_children_gone": true,
+      "rendering": {
+        "offscreen": true,
+        "path": "visibility",
+        "asset": "procedural",
+        "material_binning_requested": false,
+        "post": true,
+        "upscaler_effective": "metalfx-temporal",
+        "tonemap": "aces-fit",
+        "input_width_last": 1920,
+        "input_height_last": 1080,
+        "views": 2,
+        "frames_in_flight": 3,
+        "gpu_failures": 0,
+        "auto_exposure": false,
+        "exposure_last": 1.0,
+        "edr": false,
+        "display_headroom_last": 1.0,
+        "display_potential_headroom": 16.0,
+        "temporal_frames_total": 225,
+        "native_frames_total": 15,
+        "history_resets_total": 25,
+        "binned_frames_total": 0,
+        "generic_frames_total": 240,
+        "guide_checks": 0,
+        "shaded_pixels_last": 0,
+        "reused_pixels_last": 0,
+        "device_allocated_bytes_last": 6942457856,
+        "engine_resource_bytes_last": 899804374,
+        "worker_device_allocated_bytes_last": 0,
+        "worker_physical_footprint_last": 0,
+        "worker_shared_bridge_bytes_last": 0,
+        "parent_physical_footprint_last": 7440994504,
+        "workers_spawned_total": 0,
+        "workers_reaped_at_report": 0,
+        "workers_peak_live": 0,
+        "worker_failures": 0,
+        "gpu_time_scope": "graphics_submission_span",
+        "command_buffer_rebuilds_total": 28,
+        "command_buffer_rebuilds_measured": 28,
+        "mip_bias_last": -0.415038,
+        "guide_failures": 0
+      },
+      "sample_count": 126,
+      "parent_physical_peak": 7497617608,
+      "max_observed_children": 0,
+      "samples_path": "build/metalfx-recheck/lifecycle-footprint/summary.json"
+    },
+    {
+      "case": "isolated-resize",
+      "command": [
+        "build/release/phosphor",
+        "--offscreen",
+        "--no-ui",
+        "--no-vsync",
+        "--fixed-timestep",
+        "--warmup",
+        "0",
+        "--bench",
+        "1",
+        "--scene",
+        "procedural",
+        "--resolution",
+        "640x360",
+        "--post",
+        "--upscaler",
+        "temporal",
+        "--render-scale",
+        ".75",
+        "--metalfx-mode",
+        "isolated",
+        "--frames",
+        "240",
+        "--resize-every",
+        "30",
+        "--temporal-views",
+        "2",
+        "--debug-frame-delay-ms",
+        "64",
+        "--report",
+        "build/metalfx-recheck/lifecycle-footprint/isolated-resize.json"
+      ],
+      "exit": 0,
+      "stopped_at_8_gib_parent_physical_footprint": false,
+      "all_observed_children_gone": true,
+      "rendering": {
+        "offscreen": true,
+        "path": "visibility",
+        "asset": "procedural",
+        "material_binning_requested": false,
+        "post": true,
+        "upscaler_effective": "metalfx-temporal-isolated",
+        "tonemap": "aces-fit",
+        "input_width_last": 1920,
+        "input_height_last": 1080,
+        "views": 2,
+        "frames_in_flight": 3,
+        "gpu_failures": 0,
+        "auto_exposure": false,
+        "exposure_last": 1.0,
+        "edr": false,
+        "display_headroom_last": 1.0,
+        "display_potential_headroom": 16.0,
+        "temporal_frames_total": 226,
+        "native_frames_total": 14,
+        "history_resets_total": 30,
+        "binned_frames_total": 0,
+        "generic_frames_total": 240,
+        "guide_checks": 0,
+        "shaded_pixels_last": 0,
+        "reused_pixels_last": 0,
+        "device_allocated_bytes_last": 1943322624,
+        "engine_resource_bytes_last": 1452862678,
+        "worker_device_allocated_bytes_last": 1434320896,
+        "worker_physical_footprint_last": 1280182096,
+        "worker_shared_bridge_bytes_last": 553058304,
+        "parent_physical_footprint_last": 1809122360,
+        "workers_spawned_total": 16,
+        "workers_reaped_at_report": 14,
+        "workers_peak_live": 4,
+        "worker_failures": 0,
+        "gpu_time_scope": "graphics_submission_span",
+        "command_buffer_rebuilds_total": 56,
+        "command_buffer_rebuilds_measured": 56,
+        "mip_bias_last": -0.415038,
+        "guide_failures": 0
+      },
+      "sample_count": 122,
+      "parent_physical_peak": 2035041336,
+      "max_observed_children": 4,
+      "samples_path": "build/metalfx-recheck/lifecycle-footprint/summary.json"
+    },
+    {
+      "case": "parent-death",
+      "parent_exit": -9,
+      "children": [
+        93236,
+        93237
+      ],
+      "all_children_gone": true
+    },
+    {
+      "case": "crash",
+      "expected_failure_observed": true,
+      "elapsed_seconds": 0.2695425000274554
+    },
+    {
+      "case": "timeout",
+      "expected_failure_observed": true,
+      "elapsed_seconds": 1.2721361250150949
+    }
+  ],
+  "performance": {
+    "manifest": {
+      "frames": 600,
+      "warmup": 120,
+      "resolution": [
+        1920,
+        1080
+      ],
+      "input_scale": 0.75,
+      "order": [
+        [
+          "sponza-direct",
+          "sponza-isolated",
+          "lights-direct",
+          "lights-isolated",
+          "two-views-direct",
+          "two-views-isolated"
+        ],
+        [
+          "sponza-isolated",
+          "lights-direct",
+          "lights-isolated",
+          "two-views-direct",
+          "two-views-isolated",
+          "sponza-direct"
+        ],
+        [
+          "lights-direct",
+          "lights-isolated",
+          "two-views-direct",
+          "two-views-isolated",
+          "sponza-direct",
+          "sponza-isolated"
+        ]
+      ],
+      "conditions": {
+        "power": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=25034851)\t100%; charged; 0:00 remaining present: true",
+        "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded",
+        "os": "ProductName:\t\tmacOS\nProductVersion:\t\t27.2\nBuildVersion:\t\t26B5091g",
+        "metal": "Apple metal version 32023.921 (metalfe-32023.921.6)\nTarget: air64-apple-darwin27.2.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v27.1.266.1.nuTRiL/Metal.xctoolchain/usr/metal/current/bin"
+      },
+      "scope": "Offscreen complete-frame throughput; GPU timing is graphics submission span including IPC gaps. Memory domains remain separate."
+    },
+    "summary": {
+      "sponza-direct": {
+        "frame_mean_median_ms": 2.1503,
+        "frame_mean_range_ms": [
+          2.1494,
+          2.1936
+        ],
+        "p95_median_run_ms": 2.2854,
+        "p99_median_run_ms": 2.5131,
+        "cpu_mean_ms": 0.1428,
+        "gpu_span_mean_ms": 2.3876,
+        "parent_device_bytes": 1263157248,
+        "worker_device_bytes": 0,
+        "shared_bridge_bytes": 0,
+        "parent_physical_footprint": 2024408744,
+        "worker_physical_footprint": 0
+      },
+      "sponza-isolated": {
+        "frame_mean_median_ms": 2.1851,
+        "frame_mean_range_ms": [
+          2.1757,
+          2.1855
+        ],
+        "p95_median_run_ms": 2.453,
+        "p99_median_run_ms": 2.7657,
+        "cpu_mean_ms": 0.0784,
+        "gpu_span_mean_ms": 2.186,
+        "parent_device_bytes": 1245413376,
+        "worker_device_bytes": 464011264,
+        "shared_bridge_bytes": 155959296,
+        "parent_physical_footprint": 1812268592,
+        "worker_physical_footprint": 508593040
+      },
+      "lights-direct": {
+        "frame_mean_median_ms": 12.0212,
+        "frame_mean_range_ms": [
+          11.7046,
+          12.1916
+        ],
+        "p95_median_run_ms": 12.8915,
+        "p99_median_run_ms": 13.3177,
+        "cpu_mean_ms": 0.2476,
+        "gpu_span_mean_ms": 12.2729,
+        "parent_device_bytes": 966590464,
+        "worker_device_bytes": 0,
+        "shared_bridge_bytes": 0,
+        "parent_physical_footprint": 1412646112,
+        "worker_physical_footprint": 0
+      },
+      "lights-isolated": {
+        "frame_mean_median_ms": 13.1646,
+        "frame_mean_range_ms": [
+          12.7072,
+          13.2691
+        ],
+        "p95_median_run_ms": 14.3532,
+        "p99_median_run_ms": 14.6719,
+        "cpu_mean_ms": 0.1575,
+        "gpu_span_mean_ms": 13.1646,
+        "parent_device_bytes": 948715520,
+        "worker_device_bytes": 464011264,
+        "shared_bridge_bytes": 155959296,
+        "parent_physical_footprint": 1206453376,
+        "worker_physical_footprint": 508576656
+      },
+      "two-views-direct": {
+        "frame_mean_median_ms": 1.2743,
+        "frame_mean_range_ms": [
+          1.2609,
+          1.281
+        ],
+        "p95_median_run_ms": 1.6135,
+        "p99_median_run_ms": 1.9013,
+        "cpu_mean_ms": 0.1368,
+        "gpu_span_mean_ms": 1.5072,
+        "parent_device_bytes": 1436401664,
+        "worker_device_bytes": 0,
+        "shared_bridge_bytes": 0,
+        "parent_physical_footprint": 2199750480,
+        "worker_physical_footprint": 0
+      },
+      "two-views-isolated": {
+        "frame_mean_median_ms": 1.9189,
+        "frame_mean_range_ms": [
+          1.9031,
+          1.9334
+        ],
+        "p95_median_run_ms": 2.2582,
+        "p99_median_run_ms": 2.4501,
+        "cpu_mean_ms": 0.0796,
+        "gpu_span_mean_ms": 1.9196,
+        "parent_device_bytes": 1401372672,
+        "worker_device_bytes": 928022528,
+        "shared_bridge_bytes": 311918592,
+        "parent_physical_footprint": 1812170264,
+        "worker_physical_footprint": 1016334016
+      },
+      "sponza-relative": {
+        "frame_delta_percent": 1.6183788308608005
+      },
+      "lights-relative": {
+        "frame_delta_percent": 9.51152963098525
+      },
+      "two-views-relative": {
+        "frame_delta_percent": 50.58463470140471
+      }
+    },
+    "previous_comparison": {
+      "sponza-direct": {
+        "frame_mean_median_ms": 2.1667,
+        "frame_mean_range_ms": [
+          2.1561,
+          2.168
+        ],
+        "p95_median_run_ms": 2.3825,
+        "p99_median_run_ms": 2.6343,
+        "cpu_mean_ms": 0.1475,
+        "gpu_span_mean_ms": 2.408,
+        "parent_device_bytes": 1263157248,
+        "worker_device_bytes": 0,
+        "shared_bridge_bytes": 0,
+        "parent_physical_footprint": 2015905424,
+        "worker_physical_footprint": 0
+      },
+      "sponza-isolated": {
+        "frame_mean_median_ms": 2.1757,
+        "frame_mean_range_ms": [
+          2.1754,
+          2.1827
+        ],
+        "p95_median_run_ms": 2.4508,
+        "p99_median_run_ms": 2.5813,
+        "cpu_mean_ms": 0.0795,
+        "gpu_span_mean_ms": 2.1765,
+        "parent_device_bytes": 1245413376,
+        "worker_device_bytes": 464011264,
+        "shared_bridge_bytes": 155959296,
+        "parent_physical_footprint": 1811990064,
+        "worker_physical_footprint": 508511120
+      },
+      "lights-direct": {
+        "frame_mean_median_ms": 11.6081,
+        "frame_mean_range_ms": [
+          11.5849,
+          11.8475
+        ],
+        "p95_median_run_ms": 12.4308,
+        "p99_median_run_ms": 12.7399,
+        "cpu_mean_ms": 0.2477,
+        "gpu_span_mean_ms": 11.857,
+        "parent_device_bytes": 966590464,
+        "worker_device_bytes": 0,
+        "shared_bridge_bytes": 0,
+        "parent_physical_footprint": 1412400328,
+        "worker_physical_footprint": 0
+      },
+      "lights-isolated": {
+        "frame_mean_median_ms": 12.4598,
+        "frame_mean_range_ms": [
+          12.3917,
+          12.6005
+        ],
+        "p95_median_run_ms": 13.3499,
+        "p99_median_run_ms": 13.5537,
+        "cpu_mean_ms": 0.1623,
+        "gpu_span_mean_ms": 12.4654,
+        "parent_device_bytes": 948715520,
+        "worker_device_bytes": 464011264,
+        "shared_bridge_bytes": 155959296,
+        "parent_physical_footprint": 1206322304,
+        "worker_physical_footprint": 508330848
+      },
+      "two-views-direct": {
+        "frame_mean_median_ms": 1.2656,
+        "frame_mean_range_ms": [
+          1.2484,
+          1.2666
+        ],
+        "p95_median_run_ms": 1.5917,
+        "p99_median_run_ms": 1.7623,
+        "cpu_mean_ms": 0.1317,
+        "gpu_span_mean_ms": 1.4961,
+        "parent_device_bytes": 1436401664,
+        "worker_device_bytes": 0,
+        "shared_bridge_bytes": 0,
+        "parent_physical_footprint": 2199373624,
+        "worker_physical_footprint": 0
+      },
+      "two-views-isolated": {
+        "frame_mean_median_ms": 1.9145,
+        "frame_mean_range_ms": [
+          1.9138,
+          1.9377
+        ],
+        "p95_median_run_ms": 2.2179,
+        "p99_median_run_ms": 2.334,
+        "cpu_mean_ms": 0.0771,
+        "gpu_span_mean_ms": 1.9157,
+        "parent_device_bytes": 1401372672,
+        "worker_device_bytes": 928022528,
+        "shared_bridge_bytes": 311918592,
+        "parent_physical_footprint": 1811957248,
+        "worker_physical_footprint": 1017022216
+      },
+      "sponza-relative": {
+        "frame_delta_percent": 0.41537822495039123
+      },
+      "lights-relative": {
+        "frame_delta_percent": 7.3371180468810415
+      },
+      "two-views-relative": {
+        "frame_delta_percent": 51.27212389380531
+      }
+    }
+  },
+  "long_fixed": {
+    "frames": 20000,
+    "gpu_allocations": 0,
+    "frame_ms": {
+      "mean": 2.1725,
+      "min": 1.4985,
+      "p50": 2.1454,
+      "p95": 2.4572,
+      "p99": 2.7239,
+      "max": 3.7472
+    },
+    "cpu_ms": {
+      "mean": 0.0768,
+      "min": 0.0627,
+      "p50": 0.0732,
+      "p95": 0.0992,
+      "p99": 0.1205,
+      "max": 0.6569
+    },
+    "gpu_ms": {
+      "mean": 2.1887,
+      "min": 1.7253,
+      "p50": 2.1618,
+      "p95": 2.4481,
+      "p99": 2.666,
+      "max": 3.7379
+    },
+    "rendering": {
+      "offscreen": true,
+      "path": "visibility",
+      "asset": "assets/sponza/Sponza.gltf",
+      "material_binning_requested": false,
+      "post": true,
+      "upscaler_effective": "metalfx-temporal-isolated",
+      "tonemap": "aces-fit",
+      "input_width_last": 1440,
+      "input_height_last": 810,
+      "views": 1,
+      "frames_in_flight": 3,
+      "gpu_failures": 0,
+      "auto_exposure": true,
+      "exposure_last": 4.314996,
+      "edr": false,
+      "display_headroom_last": 1.0,
+      "display_potential_headroom": 16.0,
+      "temporal_frames_total": 20240,
+      "native_frames_total": 0,
+      "history_resets_total": 169,
+      "binned_frames_total": 0,
+      "generic_frames_total": 20240,
+      "guide_checks": 0,
+      "shaded_pixels_last": 0,
+      "reused_pixels_last": 0,
+      "device_allocated_bytes_last": 1245413376,
+      "engine_resource_bytes_last": 1195313345,
+      "worker_device_allocated_bytes_last": 464011264,
+      "worker_physical_footprint_last": 508707728,
+      "worker_shared_bridge_bytes_last": 155959296,
+      "parent_physical_footprint_last": 1814431304,
+      "workers_spawned_total": 1,
+      "workers_reaped_at_report": 0,
+      "workers_peak_live": 1,
+      "worker_failures": 0,
+      "gpu_time_scope": "graphics_submission_span",
+      "command_buffer_rebuilds_total": 0,
+      "command_buffer_rebuilds_measured": 0,
+      "mip_bias_last": -0.415038,
+      "guide_failures": 0
+    }
+  },
+  "tests": {
+    "portable_cases": 437,
+    "assertions": 1773691,
+    "native_F6": "tools/f6_check.sh build build/release --quick: PASS",
+    "async_split": "API/shader validation positive and worker-crash negative: PASS",
+    "CI_source_run": 37132919847
+  },
+  "limits": [
+    "Measurements are offscreen throughput, not presented FPS.",
+    "Parent/worker footprint and shared mappings are different domains; do not blindly sum.",
+    "Standard CPU timing excludes worker CPU.",
+    "Direct SDK lifetime probe still fails; direct mode is diagnostic.",
+    "No OPT activated."
+  ]
+}

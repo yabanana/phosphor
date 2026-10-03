@@ -2,10 +2,10 @@
 
 Aggiornamento: 2026-10-03. Implementazione integrata in `main` con la
 [PR #14](https://github.com/yabanana/phosphor/pull/14), merge `91b51c2`.
-L’integrazione richiesta dal proprietario è conclusa; il controllo memoria
-fallito rimane aperto e non viene trasformato in un PASS. La consegna riguarda
-lo sviluppo sul **M5 Max 128 GB**; **F7 baseline è accettata, F8.4 mantiene
-un gate aperto sul lifetime MetalFX del runtime**. T0 fisico rimane esterno. Nessuna fase OPT
+La [PR #15](https://github.com/yabanana/phosphor/pull/15) completa la gestione
+del lifetime F8.4 tramite worker isolati. **F7/F8 sono DEVELOPMENT_ACCEPTED
+sul M5 Max 128 GB**: [prove e costi della soluzione](F8_METALFX_LIFETIME.md).
+Il riproduttore SDK diretto resta negativo e non viene trasformato in un PASS. T0 fisico rimane esterno. Nessuna fase OPT
 avviata. Stato delle caselle: [roadmap](ROADMAP.md). Contratti e comandi:
 [guida renderer](RENDERING_F7_F8.md). Dati compatti:
 [risultati JSON](results/F7-F8-M5Max-2026-10-03.json).
@@ -24,7 +24,7 @@ avviata. Stato delle caselle: [roadmap](ROADMAP.md). Contratti e comandi:
 | F8.1 | RGBA16F lineare, istogramma log in compute, trim/adattamento per dt e vista. Oracolo CPU su pixel HDR e distribuzione GPU; clip di esposizione. |
 | F8.2 | ACES fit, AgX fit, curva custom, SDR/EDR extended-linear sRGB con headroom osservato. 576 campioni GPU su rampe/colori e headroom 1/2/8. Presentazione EDR/resize verificata; nessuna certificazione fotometrica in nit. |
 | F8.3 | Halton, motion current→previous in pixel non jittered, pose per vista e incarnazione. Oracolo GPU/CPU e poison della storia devono distinguere formula corretta da dati della frame sbagliata. |
-| F8.4 (aperta) | MetalFX Metal 4 creato sui worker, pass External con fence del grafo, fallback native durante resize, DRS ≤2× anche su output dispari. Viste 1–4, prove con 1/2/3 frame in volo. Estensioni senza consumatore restano candidate. Rimane un ciclo di riferimenti SDK riprodotto senza il motore. |
+| F8.4 | MetalFX Metal 4 creato sui worker, pass External con fence del grafo, fallback native durante resize, DRS ≤2× anche su output dispari. Viste 1–4, prove con 1/2/3 frame in volo. Estensioni senza consumatore restano candidate. Il ciclo SDK è confinato nel worker, recuperato al rilascio: [verifica lifetime](F8_METALFX_LIFETIME.md). Il percorso diretto resta diagnostico. |
 | F8.5 | Bias dal rapporto input/output e sharpening adattivo clamped. Confronto allo stesso input scale con bias neutro e sharpening nonzero. |
 | F8.6 | Registro comune per Hi-Z e ricostruzione, segnali/matrici distinti, invalidazioni per scena/cut/extent/shader generation, retirement conservativo. Nessun alias temporale generale. |
 | F8.7 | Clip da 480 frame, tre camera cut, moto rapido, dettagli/alpha e oggetti animati; clip aggiuntive esposizione e DRS/due viste. Riferimento HDR supersampled prima del tonemapping; negativi ritardati falliscono. |
@@ -46,7 +46,7 @@ La baseline compute produce HDR/guide in texture; non mantiene tutto lo
 shading in tile memory. Questo chiarisce il vecchio testo sintetico di F8.1
 alla luce della scelta F7. Il frame resta lineare fino al display transform.
 
-## Risultati misurati
+## Risultati misurati della baseline PR #14 (percorso diretto)
 
 Release, M5 Max, macOS 27.2 (26B5091g), Metal 32023.921, rete elettrica,
 1920×1080, 120 warmup +600 frame, tre repliche con ordine ruotato, offscreen,
@@ -124,17 +124,23 @@ in spazio mesh già introdotti da F6: sono riusati, non riscritti.
 
 ## Verifiche e limiti di consegna
 
-**F8 non viene dichiarata completamente chiusa.** Il controllo `leaks` del
+**Residuo SDK diretto, conservato come evidenza storica.** La PR #15 chiude
+il lifetime del motore con [ownership del processo worker](F8_METALFX_LIFETIME.md).
+Il controllo `leaks` del
 percorso nativo riporta zero leak. Il percorso MetalFX mostra un ciclo fra
 `_M4FXTemporalScalingEffectBBR` e il filtro BBR. Il
 [riproduttore pubblico minimo](../bench/f8_spike/README.md) crea/rilascia un
 singolo scaler 640×360, senza motore, grafo, thread worker, texture o comandi
 GPU: dopo il rilascio e il drain rimane una weak reference viva. La riduzione
-mostra circa 0,3 MB, variabili con la configurazione; il problema non viene
+mostra circa 0,3 MB di allocazioni CPU classificate da `leaks`, non la memoria
+totale trattenuta. L’[indagine successiva](research/2026-10-03-metalfx-lifetime.md)
+misura 159,39 MiB di crescita nelle allocazioni del device per otto creazioni
+640×360 e conferma il problema con SDK 26.5/27.0 e API Metal 3/4. Il problema non viene
 ridotto a un numero di byte innocuo né coperto dai PASS di immagine.
 Non sono stati adottati doppi release, ivar privati o cache globali per
-nascondere il ciclo. F8.4 resta aperta finché un runtime corretto o un
-workaround pubblico verificato non supera questo controllo. Native è il
+nascondere il ciclo. Il controllo di distruzione del singolo oggetto SDK resta
+negativo; il percorso adottato recupera l’intero contesto worker e verifica
+memoria, processi e mapping dopo la chiusura. Native è il
 default; l'uso MetalFX rimane esplicito. Nessun report esterno è stato inviato.
 
 
@@ -160,7 +166,7 @@ default; l'uso MetalFX rimane esplicito. Nessun report esterno è stato inviato.
 Il punto di arresto richiesto è F8. Restano preparate F9–F13 e il catalogo OPT,
 ma nessun lavoro successivo parte automaticamente.
 
-## Integrazione finale — 2026-10-03
+## Integrazione PR #14 — 2026-10-03 (storico)
 
 Su richiesta «chiudi tutto», PR #14 mergiata in main (`91b51c2`). Il checkout
 integrato compila in Release e supera nuovamente i test portabili, Sponza
@@ -183,7 +189,7 @@ Ulteriori controlli conservati:
   dichiarato superato e il suo report è conservato. Non sono state cambiate
   immagini di riferimento o tolleranze.
 
-L'integrazione è conclusa; **F8.4 rimane aperta**. Per chiuderla servono
-rilascio effettivo nel riproduttore e prove di lifetime del renderer con
-MetalFX, resize e più viste su un runtime corretto o con un workaround
-pubblico verificato. T0 e l'exit storico F6 restano nei limiti sopra dichiarati.
+Alla chiusura della PR #14 F8.4 rimaneva aperta. La PR #15 adotta e verifica
+un nuovo confine di ownership, il processo worker: [consegna aggiornata](F8_METALFX_LIFETIME.md).
+Non dichiara risolto il ciclo SDK. T0 e l'exit storico F6 restano nei limiti
+sopra dichiarati.

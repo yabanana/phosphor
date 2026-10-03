@@ -1,0 +1,288 @@
+diff --git a/shaders/post.metal b/shaders/post.metal
+index 7af5da0..195ca22 100644
+--- a/shaders/post.metal
++++ b/shaders/post.metal
+@@ -202,3 +202,11 @@ kernel void post_curve_probe(device float4 *result [[buffer(0)]], constant GPUPo
+         mapped.x += 0.25f;
+     result[i] = float4(mapped, 1);
+ }
++
++// F8 lifetime investigation only. Mask one bypasses denoising per the SDK.
++kernel void post_denoise_guides(texture2d<float,access::read> nr [[texture(0)]],
++    texture2d<float,access::write> rough [[texture(1)]], texture2d<float,access::write> hit [[texture(2)]],
++    texture2d<float,access::write> mask [[texture(3)]], uint2 p [[thread_position_in_grid]]) {
++    if(p.x>=rough.get_width()||p.y>=rough.get_height())return;
++    rough.write(float4(nr.read(p).w),p);hit.write(float4(0),p);mask.write(float4(1),p);
++}
+diff --git a/src/app/engine.cpp b/src/app/engine.cpp
+index c4ccf90..351d239 100644
+--- a/src/app/engine.cpp
++++ b/src/app/engine.cpp
+@@ -1295,6 +1295,7 @@ bool Engine::frame(float dt) {
+     temporal.viewIndex = currentView_;
+     if (post_) {
+         const bool cut = viewCameraCut;
++        post_->setDenoisedCamera(&view[0][0], &camera_->getProjection()[0][0]);
+         temporal =
+             post_->prepareFrame(frame.slot, frame.index, currentView_, renderWidth, renderHeight, width, height,
+                                 &unjittered[0][0], sceneEpoch_, cut,
+diff --git a/src/platform/metal/pipeline_cache.cpp b/src/platform/metal/pipeline_cache.cpp
+index fb7a258..afea657 100644
+--- a/src/platform/metal/pipeline_cache.cpp
++++ b/src/platform/metal/pipeline_cache.cpp
+@@ -315,6 +315,27 @@ PipelineCache::requestTemporalScaler(MTLFX::TemporalScalerDescriptor *descriptor
+     return future;
+ }
+ 
++std::future<std::shared_ptr<MTL4FX::TemporalDenoisedScaler>>
++PipelineCache::requestTemporalDenoisedScaler(MTLFX::TemporalDenoisedScalerDescriptor *descriptor) {
++    auto promise = std::make_shared<std::promise<std::shared_ptr<MTL4FX::TemporalDenoisedScaler>>>();
++    auto future = promise->get_future();
++    auto copy = std::shared_ptr<MTLFX::TemporalDenoisedScalerDescriptor>(descriptor->copy(), [](auto *p) { p->release(); });
++    queue_->submit(pipe::CompilePriority::Urgent, ~0u, [this, promise, copy] {
++        auto *pool = NS::AutoreleasePool::alloc()->init();
++        try {
++            auto *scaler = copy->newTemporalDenoisedScaler(context_.device(), compiler_);
++            promise->set_value(std::shared_ptr<MTL4FX::TemporalDenoisedScaler>(scaler, [](auto *p) {
++                if (p)
++                    p->release();
++            }));
++        } catch (...) {
++            promise->set_exception(std::current_exception());
++        }
++        pool->release();
++    });
++    return future;
++}
++
+ u32 PipelineCache::workerCount() const { return queue_ ? queue_->workerCount() : 0; }
+ 
+ pipe::PipelineHandle PipelineCache::request(const pipe::PipelineDesc& desc, bool loading) {
+diff --git a/src/platform/metal/pipeline_cache.h b/src/platform/metal/pipeline_cache.h
+index cba2110..94d9466 100644
+--- a/src/platform/metal/pipeline_cache.h
++++ b/src/platform/metal/pipeline_cache.h
+@@ -18,9 +18,11 @@
+ 
+ namespace MTLFX {
+ class TemporalScalerDescriptor;
++class TemporalDenoisedScalerDescriptor;
+ }
+ namespace MTL4FX {
+ class TemporalScaler;
++class TemporalDenoisedScaler;
+ }
+ 
+ namespace phosphor {
+@@ -120,6 +122,9 @@ public:
+     std::future<std::shared_ptr<MTL4FX::TemporalScaler>>
+     requestTemporalScaler(MTLFX::TemporalScalerDescriptor *descriptor);
+ 
++    std::future<std::shared_ptr<MTL4FX::TemporalDenoisedScaler>>
++    requestTemporalDenoisedScaler(MTLFX::TemporalDenoisedScalerDescriptor *descriptor);
++
+     // --- F3.4 harvest -----------------------------------------------------------
+     [[nodiscard]] bool harvesting() const { return serializer_ != nullptr; }
+     [[nodiscard]] u32 generation() const { return registry_.generation(); }
+diff --git a/src/platform/metal/post_processor.cpp b/src/platform/metal/post_processor.cpp
+index d3fc1cf..f46bc40 100644
+--- a/src/platform/metal/post_processor.cpp
++++ b/src/platform/metal/post_processor.cpp
+@@ -8,6 +8,7 @@
+ #include "core/log.h"
+ #include "renderer/exposure.h"
+ #include <cstdio>
++#include <cstdlib>
+ #include <algorithm>
+ #include <cmath>
+ #include <chrono>
+@@ -81,6 +82,8 @@ PostProcessor::PostProcessor(MetalContext &c, PipelineCache &p, const Options &o
+     : context_(c), pipelines_(p), options_(o) {
+     if (!o.views || o.views > HistoryRegistry::MaxViews)
+         throw std::invalid_argument("Invalid temporal view count");
++    denoisedSpike_ = std::getenv("PHOSPHOR_DENOISED_SPIKE") != nullptr;
++    if (denoisedSpike_) denoisedGuides_ = p.request(kernel("post_denoise_guides"));
+     clear_ = p.request(kernel("exposure_clear"));
+     histogram_ = p.request(kernel("exposure_histogram"));
+     reduce_ = p.request(kernel("exposure_reduce"));
+@@ -116,7 +119,7 @@ PostProcessor::PostProcessor(MetalContext &c, PipelineCache &p, const Options &o
+         if (!t)
+             throw std::runtime_error("Post argument table creation failed");
+     }
+-    supported_ = MTLFX::TemporalScalerDescriptor::supportsMetal4FX(c.device());
++    supported_ = denoisedSpike_ ? MTLFX::TemporalDenoisedScalerDescriptor::supportsMetal4FX(c.device()) : MTLFX::TemporalScalerDescriptor::supportsMetal4FX(c.device());
+     if (o.temporal && !supported_)
+         LOG_WARN("MetalFX Metal 4 temporal unsupported; using native/spatial fallback");
+     for (u32 i = 0; i < o.views; ++i) {
+@@ -137,6 +140,7 @@ PostProcessor::~PostProcessor() {
+     releaseTargets();
+     for (auto &v : views_) {
+         v.scaler.reset();
++        v.denoised.reset();
+         context_.memory().release(v.exposure, MemoryCategory::RenderTargets);
+         context_.memory().release(v.exposureState, MemoryCategory::Other);
+     }
+@@ -167,9 +171,10 @@ void PostProcessor::configure(u32 w, u32 h) {
+             context_.deferRelease(v.scaler.get());
+             v.scaler.reset();
+         }
++        if(v.denoised) { v.denoised->retain(); context_.deferRelease(v.denoised.get()); v.denoised.reset(); }
+         v.failed = false;
+         histories_.invalidate(i, "output resize");
+-        if (!v.pending.valid())
++        if (!v.pending.valid() && !v.denoisedPending.valid())
+             requestScaler(i);
+     }
+ }
+@@ -177,6 +182,21 @@ void PostProcessor::requestScaler(u32 index) {
+     if (!options_.temporal || !supported_)
+         return;
+     auto &v = views_[index];
++    if (denoisedSpike_) {
++        auto *d = MTLFX::TemporalDenoisedScalerDescriptor::alloc()->init();
++        d->setInputWidth(width_); d->setInputHeight(height_);
++        d->setOutputWidth(width_); d->setOutputHeight(height_);
++        d->setColorTextureFormat(MTL::PixelFormatRGBA16Float); d->setOutputTextureFormat(MTL::PixelFormatRGBA16Float);
++        d->setDepthTextureFormat(MTL::PixelFormatDepth32Float); d->setMotionTextureFormat(MTL::PixelFormatRG16Float);
++        d->setDiffuseAlbedoTextureFormat(MTL::PixelFormatRGBA16Float); d->setSpecularAlbedoTextureFormat(MTL::PixelFormatRGBA16Float);
++        d->setNormalTextureFormat(MTL::PixelFormatRGBA16Float); d->setRoughnessTextureFormat(MTL::PixelFormatR16Float);
++        d->setSpecularHitDistanceTextureFormat(MTL::PixelFormatR16Float); d->setDenoiseStrengthMaskTextureFormat(MTL::PixelFormatR8Unorm);
++        d->setReactiveMaskTextureFormat(MTL::PixelFormatR8Unorm); d->setReactiveMaskTextureEnabled(true);
++        d->setTransparencyOverlayTextureFormat(MTL::PixelFormatRGBA16Float); d->setTransparencyOverlayTextureEnabled(false);
++        d->setAutoExposureEnabled(false); d->setRequiresSynchronousInitialization(true);
++        v.requestedWidth=width_; v.requestedHeight=height_;
++        v.denoisedPending=pipelines_.requestTemporalDenoisedScaler(d); d->release(); return;
++    }
+     auto *d = MTLFX::TemporalScalerDescriptor::alloc()->init();
+     d->setInputWidth(width_);
+     d->setInputHeight(height_);
+@@ -201,6 +221,15 @@ void PostProcessor::requestScaler(u32 index) {
+ void PostProcessor::collectScalers(bool wait) {
+     for (u32 i = 0; i < options_.views; ++i) {
+         auto &v = views_[i];
++        if(denoisedSpike_) {
++            if(!v.denoisedPending.valid()) continue;
++            if(!wait && v.denoisedPending.wait_for(std::chrono::seconds(0)) != std::future_status::ready) continue;
++            auto scaler=v.denoisedPending.get();
++            if(v.requestedWidth!=width_ || v.requestedHeight!=height_) { requestScaler(i);continue; }
++            v.denoised=std::move(scaler);v.failed=!v.denoised;
++            histories_.invalidate(i,"denoised spike ready");
++            LOG_INFO("MetalFX denoised spike view %u: %s",i,v.denoised?"ready":"native fallback");continue;
++        }
+         if (!v.pending.valid())
+             continue;
+         if (!wait && v.pending.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+@@ -221,10 +250,10 @@ void PostProcessor::prewarm(u32 w, u32 h) {
+     collectScalers(true);
+ }
+ bool PostProcessor::temporalReady() const {
+-    return options_.temporal && bool(views_[view_].scaler);
++    return options_.temporal && (denoisedSpike_ ? bool(views_[view_].denoised) : bool(views_[view_].scaler));
+ }
+ const char *PostProcessor::effectiveUpscaler() const {
+-    return temporalReady() ? "metalfx-temporal" : "native-spatial";
++    return temporalReady() ? (denoisedSpike_ ? "metalfx-denoised-spike" : "metalfx-temporal") : "native-spatial";
+ }
+ float PostProcessor::lastExposure() const {
+     return static_cast<const float *>(views_[view_].exposureState->contents())[0];
+@@ -323,12 +352,32 @@ void PostProcessor::bind(rg::PassContext &ctx, MTL4::ArgumentTable *table) {
+     table->setTexture(views_[view_].exposure->gpuResourceID(), 1);
+     table->setTexture(static_cast<MTL::Texture *>(ctx.texture(depth_))->gpuResourceID(), 2);
+ }
++void PostProcessor::setDenoisedCamera(const float *view, const float *projection) {
++    std::memcpy(&denoisedView_,view,64); std::memcpy(&denoisedProjection_,projection,64);
++}
+ void PostProcessor::encodeUpscale(rg::PassContext &ctx) {
+     auto *cmd = static_cast<MTL4::CommandBuffer *>(ctx.commandBuffer());
+     auto *fence = static_cast<MTL::Fence *>(ctx.externalFence());
+     auto &v = views_[view_];
+     auto *input = static_cast<MTL::Texture *>(ctx.texture(input_));
+-    if (temporalReady()) {
++    if(temporalReady() && denoisedSpike_) {
++        if(params_.inputWidth!=width_ || params_.inputHeight!=height_) throw std::runtime_error("Denoised spike requires fixed native input extent");
++        auto *s=v.denoised.get();
++        s->setColorTexture(input); s->setDepthTexture(static_cast<MTL::Texture*>(ctx.texture(depth_)));
++        s->setMotionTexture(static_cast<MTL::Texture*>(ctx.texture(motion_)));
++        s->setReactiveMaskTexture(static_cast<MTL::Texture*>(ctx.texture(reactive_)));
++        s->setDiffuseAlbedoTexture(static_cast<MTL::Texture*>(ctx.texture(diffuse_)));
++        s->setSpecularAlbedoTexture(static_cast<MTL::Texture*>(ctx.texture(specular_)));
++        s->setNormalTexture(static_cast<MTL::Texture*>(ctx.texture(normalRoughness_)));
++        s->setRoughnessTexture(static_cast<MTL::Texture*>(ctx.texture(roughness_)));
++        s->setSpecularHitDistanceTexture(static_cast<MTL::Texture*>(ctx.texture(hitDistance_)));
++        s->setDenoiseStrengthMaskTexture(static_cast<MTL::Texture*>(ctx.texture(denoiseMask_)));
++        s->setOutputTexture(slots_[slot_].output); s->setExposureTexture(v.exposure); s->setPreExposure(1);
++        s->setMotionVectorScaleX(options_.debugMotionScale);s->setMotionVectorScaleY(options_.debugMotionScale);
++        s->setJitterOffsetX(temporal_.jitter[0]);s->setJitterOffsetY(temporal_.jitter[1]);s->setDepthReversed(true);
++        s->setShouldResetHistory(reset_||options_.forceReset);s->setWorldToViewMatrix(denoisedView_);s->setViewToClipMatrix(denoisedProjection_);
++        s->setFence(fence);s->encodeToCommandBuffer(cmd);++temporalFrames_;
++    } else if (temporalReady()) {
+         auto *s = v.scaler.get();
+         s->setColorTexture(input);
+         s->setDepthTexture(static_cast<MTL::Texture *>(ctx.texture(depth_)));
+@@ -416,9 +465,30 @@ rg::TextureRef PostProcessor::addToGraph(rg::RenderGraph &g, VisibilityRenderer
+             enc->setArgumentTable(tables_[2]);
+             enc->dispatchThreadgroups(MTL::Size::Make(1, 1, 1), MTL::Size::Make(256, 1, 1));
+         });
++    if(denoisedSpike_) {
++        normalRoughness_=scene.normalRoughness();diffuse_=scene.diffuseAlbedo();specular_=scene.specularAlbedo();
++        g.addPass("Denoised spike guides",PassType::Compute,[&](PassBuilder &b) {
++            b.read(normalRoughness_,Usage::ShaderRead,StageDispatch);
++            roughness_=b.createTexture("Denoised roughness",{Format::R16Float,width_,height_});
++            roughness_=b.write(roughness_,Usage::ShaderWrite,StageDispatch);
++            hitDistance_=b.createTexture("Denoised hit distance",{Format::R16Float,width_,height_});
++            hitDistance_=b.write(hitDistance_,Usage::ShaderWrite,StageDispatch);
++            denoiseMask_=b.createTexture("Denoised bypass mask",{Format::R8Unorm,width_,height_});
++            denoiseMask_=b.write(denoiseMask_,Usage::ShaderWrite,StageDispatch);
++        },[this](PassContext &ctx) {
++            auto *enc=static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder());auto *t=tables_[7];
++            t->setTexture(static_cast<MTL::Texture*>(ctx.texture(normalRoughness_))->gpuResourceID(),0);
++            t->setTexture(static_cast<MTL::Texture*>(ctx.texture(roughness_))->gpuResourceID(),1);
++            t->setTexture(static_cast<MTL::Texture*>(ctx.texture(hitDistance_))->gpuResourceID(),2);
++            t->setTexture(static_cast<MTL::Texture*>(ctx.texture(denoiseMask_))->gpuResourceID(),3);
++            enc->setComputePipelineState(pipelines_.compute(denoisedGuides_));enc->setArgumentTable(t);
++            enc->dispatchThreadgroups(MTL::Size::Make((width_+15)/16,(height_+15)/16,1),MTL::Size::Make(16,16,1));
++        });
++    }
+     g.addPass(
+         "Temporal reconstruction", PassType::External,
+         [&](PassBuilder &b) {
++            if(denoisedSpike_) for(auto t:{normalRoughness_,diffuse_,specular_,roughness_,hitDistance_,denoiseMask_}) b.read(t,Usage::ShaderRead,StageExternal);
+             for (auto t : {input_, depth_, motion_, reactive_, exposure_})
+                 b.read(t, Usage::ShaderRead, StageExternal);
+             b.read(stateRef_, Usage::ShaderRead, StageExternal);
+diff --git a/src/platform/metal/post_processor.h b/src/platform/metal/post_processor.h
+index 60c5c4b..f801841 100644
+--- a/src/platform/metal/post_processor.h
++++ b/src/platform/metal/post_processor.h
+@@ -26,6 +26,7 @@ class PostProcessor {
+     PostProcessor(MetalContext &, PipelineCache &, const Options &);
+     ~PostProcessor();
+     void prewarm(u32 width, u32 height);
++    void setDenoisedCamera(const float *view, const float *projection);
+     GPUTemporalParams prepareFrame(u32 slot, u64 frame, u32 view, u32 inputWidth, u32 inputHeight, u32 width,
+                                    u32 height, const float *matrix, u64 scene, bool cut, bool forceReset, float dt,
+                                    float exposure, float headroom = 1);
+@@ -61,6 +62,8 @@ class PostProcessor {
+     Options options_;
+     HistoryRegistry histories_;
+     struct View {
++        std::shared_ptr<MTL4FX::TemporalDenoisedScaler> denoised;
++        std::future<std::shared_ptr<MTL4FX::TemporalDenoisedScaler>> denoisedPending;
+         std::shared_ptr<MTL4FX::TemporalScaler> scaler;
+         std::future<std::shared_ptr<MTL4FX::TemporalScaler>> pending;
+         u32 requestedWidth = 0, requestedHeight = 0;
+@@ -75,9 +78,12 @@ class PostProcessor {
+         MTL::Buffer *histogram = nullptr;
+     };
+     std::array<Slot, METAL_FRAMES_IN_FLIGHT> slots_{};
+-    std::array<MTL4::ArgumentTable *, 7> tables_{};
++    std::array<MTL4::ArgumentTable *, 8> tables_{};
+     MTL::Buffer *curveReadback_ = nullptr;
+-    pipe::PipelineHandle curveProbe_;
++    pipe::PipelineHandle curveProbe_, denoisedGuides_;
++    bool denoisedSpike_ = false;
++    simd::float4x4 denoisedView_{}, denoisedProjection_{};
++    rg::TextureRef normalRoughness_, diffuse_, specular_, roughness_, hitDistance_, denoiseMask_;
+     pipe::PipelineHandle clear_, histogram_, reduce_, native_, presentSDR_, presentEDR_, capture_;
+     u32 width_ = 0, height_ = 0, slot_ = 0, view_ = 0;
+     u64 frame_ = 0, temporalFrames_ = 0, fallbackFrames_ = 0, resets_ = 0;

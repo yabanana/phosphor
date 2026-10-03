@@ -171,12 +171,14 @@ struct RenderingReport {
     u32 guideChecks = 0, guideFailures = 0;
     u32 shadedPixels = 0, reusedPixels = 0;
     u64 deviceAllocatedBytes = 0, engineResourceBytes = 0;
+    u64 workerDeviceBytes = 0, workerPhysicalFootprint = 0, workerBridgeBytes = 0, parentPhysicalFootprint = 0;
+    u64 workersSpawned = 0, workersReaped = 0, workersPeakLive = 0, workerFailures = 0;
     u64 commandBufferRebuilds = 0;
     u64 commandBufferRebuildsMeasured = 0;
     float exposure = 1, headroom = 1, potentialHeadroom = 1;
     float mipBias = 0;
 };
-constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 7;
+constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 8;
 
 struct BenchReport {
     std::string   bench;

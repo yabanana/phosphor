@@ -26,7 +26,7 @@ Dal 2026-10-02 `soc_bench --force-family apple9` **esiste** e F6 ha integrato
 in main anche `phosphor --force-family apple9`: limita le
 capacità EFFETTIVE (backend Hi-Z sampler Apple10 rifiutato, `auto` → compute),
 lascia invariati device, famiglia fisica, memoria e budget, e il report
-schema 7 li riporta separati (`hardware.physical_*`, `effective_capabilities`).
+schema 8 li riporta separati (`hardware.physical_*`, `effective_capabilities`).
 
 L'override deve:
 
@@ -96,7 +96,7 @@ che li richiede e non vanno riclassificati come verifiche esterne.
 
 ## Manifest e formula di consegna
 
-Il report schema 7 implementa l’override e distingue `hardware.physical_*`
+Il report schema 8 implementa l’override e distingue `hardware.physical_*`
 da `hardware.effective_capabilities`. I campi seguenti riassumono il
 **contratto semantico**; non sono una copia letterale dello schema:
 

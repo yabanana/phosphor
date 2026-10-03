@@ -9,10 +9,14 @@ task only once it is verified for its declared scope on the available device
 `docs/perf-log.md`. The report's older "F1–F5" numbering is superseded by it.
 Planning horizons: read `docs/plans/SEQUENCING.md` and `docs/plans/README.md`.
 All 58 F/OPT plans now contain advance implementation and verification detail.
-F5–F8 implementation is integrated on main (F6 merge e600887; F7/F8 PR #14,
-merge 91b51c2). F7 baseline has M5 development acceptance; F8.4 retains an
-open MetalFX SDK lifetime gate (see `docs/F7_F8_HANDOFF.md`). Integration
-does not close that failed check; native remains the default. The owner requested a stop before OPT.
+F5/F6 are integrated (F6 merge e600887); F7/F8 have M5 development acceptance
+(F7/F8 baseline PR #14, merge 91b51c2; F8.4 lifetime remediation PR #15).
+`--upscaler temporal` uses isolated MetalFX workers, preserving reconstruction
+while retiring their entire OS context; native remains the product default.
+`docs/F8_METALFX_LIFETIME.md` records proof and measured overhead. The stock
+MetalFX 40.9 in-process release cycle remains reproducible; direct mode is
+diagnostic. Do not claim the vendor defect itself was fixed. The earlier
+SDK/API investigation and rejected denoised spike remain historical evidence. The owner requested a stop before OPT.
 F7.4/F7.5 were implemented as opt-in experiments and not adopted in the
 measured preset. Material binning is available; generic resolve is the measured
 default. `docs/RENDERING_F7_F8.md` records contracts and validation commands. Later
@@ -54,7 +58,7 @@ Explicit multi-device measurement tasks (F0.8, OPT-0.2, F28.7, F37.2) remain
 partial/unticked until their actual measurements exist. Bugs or failed checks
 on M5 are not hardware exemptions. Since F6 the app has `--force-family apple9`
 (effective capabilities only) and reports physical and effective families
-separately (report schema 7 `hardware`, plus `rendering`).
+separately (report schema 8 `hardware`, plus `rendering`).
 Spike results choose variants within the authorized phase; do not invent
 measurements or introduce another routine owner-approval gate before coding.
 

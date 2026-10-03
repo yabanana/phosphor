@@ -1,3 +1,4 @@
+#include "renderer/temporal_worker_layout.h"
 #include "renderer/history_registry.h"
 #include "renderer/exposure.h"
 #include <doctest/doctest.h>
@@ -63,4 +64,46 @@ TEST_CASE("raster jitter uses explicit right-down pixel displacement") {
     const float y = (0.5f - result[13] / result[15] * 0.5f) * 600;
     CHECK(x == doctest::Approx(400.0f + 0.25f));
     CHECK(y == doctest::Approx(300.0f - 0.125f));
+}
+
+TEST_CASE("Temporal IPC layout keeps planes and frame slots disjoint and rejects malformed requests") {
+    using namespace temporal_worker;
+    for (const auto size :
+         {std::array<u32, 2>{641, 361}, std::array<u32, 2>{1920, 1080}, std::array<u32, 2>{8192, 8192}}) {
+        const auto l = makeLayout(size[0], size[1]);
+        CHECK(valid(l));
+        CHECK(l.mappedBytes == Slots * l.slotBytes);
+        for (u32 i = 0; i < Planes; ++i) {
+            CHECK(l.rows[i] % 256 == 0);
+            const auto end = l.offsets[i] + l.rows[i] * (i == Exposure ? 1 : l.height);
+            CHECK(end <= (i + 1 < Planes ? l.offsets[i + 1] : l.slotBytes));
+        }
+        Request r;
+        r.ticket = 1;
+        r.inputWidth = (l.width + 1) / 2;
+        r.inputHeight = (l.height + 1) / 2;
+        CHECK(valid(r, l));
+        r.slot = Slots;
+        CHECK_FALSE(valid(r, l));
+        r.slot = 0;
+        r.inputWidth = l.width + 1;
+        CHECK_FALSE(valid(r, l));
+        r.inputWidth = l.width;
+        r.jitterX = std::numeric_limits<float>::quiet_NaN();
+        CHECK_FALSE(valid(r, l));
+        r.jitterX = 0;
+        r.delayMs = 2001;
+        CHECK_FALSE(valid(r, l));
+        r.delayMs = 0;
+        r.version = Version + 1;
+        CHECK_FALSE(valid(r, l));
+        auto corrupt = l;
+        ++corrupt.rows[0];
+        CHECK_FALSE(valid(corrupt));
+        corrupt = l;
+        corrupt.mappedBytes = 0;
+        CHECK_FALSE(valid(corrupt));
+    }
+    CHECK_THROWS(makeLayout(0, 1080));
+    CHECK_THROWS(makeLayout(1920, 9000));
 }
