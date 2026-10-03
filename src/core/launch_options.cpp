@@ -520,6 +520,13 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.debugMotionCorrupt = true;
         } else if (arg == "--debug-guide-corrupt") {
             out.debugGuideCorrupt = true;
+        } else if (arg == "--debug-history-corrupt") {
+            out.debugHistoryCorrupt = true;
+        } else if (arg == "--debug-post-curves") {
+            out.debugPostCurves = true;
+            out.post = true;
+        } else if (arg == "--debug-post-curves-corrupt") {
+            out.debugPostCurvesCorrupt = true;
         } else if (arg == "--post") {
             out.post = true;
         } else if (arg == "--upscaler") {
@@ -709,7 +716,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             return false;
         }
     }
-    if ((out.debugMotionCorrupt || out.debugExposureCorrupt || out.debugGuideCorrupt) && !out.debugVisibility) {
+    if ((out.debugMotionCorrupt || out.debugExposureCorrupt || out.debugGuideCorrupt || out.debugHistoryCorrupt) &&
+        !out.debugVisibility) {
         error = "Guide/motion/exposure corruption requires --debug-visibility";
         return false;
     }
@@ -734,6 +742,10 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     }
     if (out.post)
         out.visibility = true;
+    if (out.debugPostCurvesCorrupt && !out.debugPostCurves) {
+        error = "--debug-post-curves-corrupt requires --debug-post-curves";
+        return false;
+    }
     if (out.tileResolve && out.adaptiveShading) {
         error = "Tile and adaptive shading are separate experiments";
         return false;

@@ -18,6 +18,7 @@ class PostProcessor {
   public:
     struct Options {
         bool temporal = false, autoExposure = false, corruptExposure = false, forceReset = false;
+        bool checkCurves = false, corruptCurves = false;
         u32 tonemap = 0, views = 1, jitterVariant = 0;
         float sharpening = 0, whitePoint = 4, debugMotionScale = 1;
     };
@@ -44,6 +45,7 @@ class PostProcessor {
     bool checkExposure(const std::array<u32, ExposureBins> &referenceHistogram,
                        const std::array<u32, ExposureBins> &low, const std::array<u32, ExposureBins> &high) const;
     [[nodiscard]] const char *effectiveUpscaler() const;
+    bool checkCurves() const;
 
   private:
     void configure(u32 width, u32 height);
@@ -71,7 +73,9 @@ class PostProcessor {
         MTL::Buffer *histogram = nullptr;
     };
     std::array<Slot, METAL_FRAMES_IN_FLIGHT> slots_{};
-    std::array<MTL4::ArgumentTable *, 6> tables_{};
+    std::array<MTL4::ArgumentTable *, 7> tables_{};
+    MTL::Buffer *curveReadback_ = nullptr;
+    pipe::PipelineHandle curveProbe_;
     pipe::PipelineHandle clear_, histogram_, reduce_, native_, presentSDR_, presentEDR_, capture_;
     u32 width_ = 0, height_ = 0, slot_ = 0, view_ = 0;
     u64 frame_ = 0, temporalFrames_ = 0, fallbackFrames_ = 0, resets_ = 0;

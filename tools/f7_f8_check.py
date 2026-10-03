@@ -21,6 +21,7 @@ def main():
     parser.add_argument('--out',type=Path,default=Path('build/f7-f8-check'))
     parser.add_argument('--quality',action='store_true')
     parser.add_argument('--quality-only',action='store_true')
+    parser.add_argument('--context-quality',action='store_true',help='exposure and per-view DRS clips')
     args=parser.parse_args();args.out.mkdir(parents=True,exist_ok=True)
     app=str(args.build/'phosphor')
     common=['--offscreen','--no-ui','--no-vsync','--fixed-timestep','--warmup','0']
@@ -67,7 +68,7 @@ def main():
         results.append(result);(args.out/(name+'.json')).write_text(json.dumps(result,indent=2)+'\n')
         print(json.dumps(result),flush=True)
     try:
-        if not args.quality_only:
+        if not args.quality_only and not args.context_quality:
             # Baseline references use the exact same scene, frame and camera.
             for bench,scene in ((1,'procedural'),(4,'assets/sponza/Sponza.gltf')):
                 images={}
@@ -106,6 +107,12 @@ def main():
             run('negative-feedback',['--bench','1','--frames','8','--resolution','320x180','--debug-feedback-error','3'],
                 expected=1,required=('feedback',),validation=False)
             run('feedback-drain',['--bench','1','--frames','12','--resolution','320x180','--debug-feedback-delay-ms','50'])
+            run('negative-history-age',['--bench','1','--frames','4','--resolution','320x180','--post','--debug-visibility',
+                '--debug-history-corrupt'],expected=1,required=('pose history [1-9]',))
+            run('post-curves',['--bench','1','--frames','1','--resolution','320x180','--debug-post-curves'],
+                required=('POST-CURVES.*PASS',))
+            run('negative-post-curves',['--bench','1','--frames','1','--resolution','320x180','--debug-post-curves',
+                '--debug-post-curves-corrupt'],expected=1,required=('POST-CURVES.*FAIL',))
         if args.quality or args.quality_only:
             from temporal_check import measure,contact_sheet
             thresholds=json.loads(Path('tools/testdata/temporal_thresholds.json').read_text())
@@ -133,6 +140,28 @@ def main():
                 negative=measure(clips['reference'],clips['temporal'],thresholds,lag=3,spatial_control=clips['control'])
                 (args.out/f'negative-quality-b{bench}.json').write_text(json.dumps(negative,indent=2)+'\n')
                 results.append({'name':f'negative-quality-b{bench}','passed':not negative['passed']})
+        if args.context_quality:
+            from temporal_check import measure,contact_sheet
+            thresholds=json.loads(Path('tools/testdata/temporal_thresholds.json').read_text())
+            for case,shared,temporal_flags in (
+                ('exposure',['--auto-exposure','--exposure-script'],[]),
+                ('drs-views',['--temporal-views','2'],['--resolution-script','12'])):
+                clips={}
+                for variant,flags in (
+                    ('reference',['--upscaler','native','--reference-scale','4']),
+                    ('control',['--upscaler','temporal','--render-scale','.75','--debug-upscaler-reset',*temporal_flags]),
+                    ('temporal',['--upscaler','temporal','--render-scale','.75',*temporal_flags])):
+                    name=f'{case}-{variant}';clips[variant]=args.out/name
+                    run(name,['--bench','1','--scene','procedural','--frames','180','--resolution','320x180','--post',
+                        '--temporal-script','--no-gpu-timing',*shared,*flags,'--capture-sequence',str(clips[variant]),
+                        '--report',str(clips[variant]/'report.json')],validation=False)
+                result=measure(clips['reference'],clips['temporal'],thresholds,cuts=(119,),spatial_control=clips['control'])
+                result.update(thresholds=thresholds,reference=str(clips['reference']),candidate=str(clips['temporal']),
+                              spatial_control=str(clips['control']))
+                (args.out/(case+'-quality.json')).write_text(json.dumps(result,indent=2)+'\n')
+                contact_sheet(clips['reference'],clips['temporal'],args.out/(case+'-quality.png'),[29,30,59,60,119,150])
+                results.append({'name':case+'-quality','passed':result['passed'],'metrics':result['metrics']})
+                print(('PASS' if result['passed'] else 'FAIL')+': '+case+'-quality',flush=True)
     finally:
         (args.out/'summary.json').write_text(json.dumps(results,indent=2)+'\n')
     if not results or not all(r['passed'] for r in results):raise SystemExit(1)

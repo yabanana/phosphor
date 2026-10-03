@@ -129,6 +129,19 @@ void ShaderReloader::rebuild() {
         if (e.is_regular_file() && e.path().extension() == ".metal") sources.push_back(e.path().string());
     }
     std::sort(sources.begin(), sources.end());
+    // Match App.cmake's material module and link order. The individual
+    // source passes are watched, but compiled through the shared module.
+    const auto bundle = std::find_if(sources.begin(), sources.end(), [](const std::string &source) {
+        return fs::path(source).filename() == "material_passes.metal";
+    });
+    if (bundle != sources.end()) {
+        const auto first = *bundle;
+        std::erase_if(sources, [](const std::string &source) {
+            const auto name = fs::path(source).filename();
+            return name == "forward.metal" || name == "visibility_resolve.metal" || name == "material_passes.metal";
+        });
+        sources.insert(sources.begin(), first);
+    }
     const u32 build = builds_.load() + failures_.load() + 1;
     const std::string metallib = workDir_ + "/phosphor-" + std::to_string(build) + ".metallib";
     std::string log;

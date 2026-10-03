@@ -37,9 +37,15 @@ raw="$tmp/harvest.mtl4-json"
 # mesh variants, meshlet kernels, Hi-Z kernels (both backends in harvest
 # mode) and the Hi-Z view.
 "$app" --harvest-pipelines "$raw" --frames 1 --no-ui --debug-graph-transients --debug-async-compute --debug-gpu-cost 1 \
-    --geometry-path mesh --meshlet-cull two-phase ${EXTRA_ARGS:-} >"$tmp/app.log" 2>&1 \
+    --geometry-path mesh --meshlet-cull two-phase --post --upscaler native ${EXTRA_ARGS:-} >"$tmp/app.log" 2>&1 \
     || { echo "error: harvest run failed:" >&2; tail -20 "$tmp/app.log" >&2; exit 1; }
 [[ -s "$raw" ]] || { echo "error: the app did not write $raw" >&2; tail -20 "$tmp/app.log" >&2; exit 1; }
+
+# MetalFX owns its private shader libraries and archives. Creating a scaler
+# during capture records those too; they must never be relabeled as ours.
+[[ $(jq '.libraries | length' "$raw") == 1 ]] || {
+    echo "error: harvest captured external libraries (use --upscaler native)" >&2; exit 1;
+}
 
 jq -S '.libraries |= map(.path = "@PHOSPHOR_METALLIB@")' "$raw" >"$tmp/normalised.json"
 [[ -s "$tmp/normalised.json" ]] || { echo "error: jq produced no output" >&2; exit 1; }

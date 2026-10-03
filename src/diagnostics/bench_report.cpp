@@ -269,6 +269,10 @@ std::string reportToJson(const BenchReport& r) {
             ", \"guide_checks\": " + std::to_string(v.guideChecks) +
             ", \"shaded_pixels_last\": " + std::to_string(v.shadedPixels) +
             ", \"reused_pixels_last\": " + std::to_string(v.reusedPixels) +
+            ", \"device_allocated_bytes_last\": " + std::to_string(v.deviceAllocatedBytes) +
+            ", \"engine_resource_bytes_last\": " + std::to_string(v.engineResourceBytes) +
+            ", \"command_buffer_rebuilds_total\": " + std::to_string(v.commandBufferRebuilds) +
+            ", \"command_buffer_rebuilds_measured\": " + std::to_string(v.commandBufferRebuildsMeasured) +
             ", \"guide_failures\": " + std::to_string(v.guideFailures) + "}";
     }
     return head + "  \"frame_ms\": " + summaryToJson(r.frameMs) + ",\n" + "  \"cpu_ms\": " + summaryToJson(r.cpuMs) +

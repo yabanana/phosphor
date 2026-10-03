@@ -35,11 +35,11 @@ VisibilityRenderer::VisibilityRenderer(MetalContext &c, PipelineCache &p, SceneR
     clear_ = p.request(compute("visibility_clear"));
     classify_ = p.request(compute("visibility_classify"));
     generic_ = p.request(compute("visibility_resolve"));
-    if (adaptive_) {
+    if (adaptive_ || p.harvesting()) {
         adaptivePipeline_ = p.request(compute("visibility_adaptive"));
         saveHistory_ = p.request(compute("visibility_history"));
     }
-    if (tileResolve_) {
+    if (tileResolve_ || p.harvesting()) {
         auto d = compute("visibility_tile");
         d.kind = pipe::PipelineKind::Tile;
         d.output(0, rg::Format::R32Uint);
@@ -211,6 +211,18 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
     visibility_ = visibility;
     depth_ = depth;
     poses_ = graph.importBuffer("Previous instance poses", {poseCapacity_}, ImportContentsDefined | ImportOutput);
+    if (temporal_.debugFlags & 8u)
+        graph.addPass(
+            "Negative control: current poses as history", PassType::Blit,
+            [&](PassBuilder &b) {
+                b.read(scene_.dataRef(), Usage::CopySrc, StageBlit);
+                poses_ = b.write(poses_, Usage::CopyDst, StageBlit);
+            },
+            [this](PassContext &ctx) {
+                auto *enc = static_cast<MTL4::ComputeCommandEncoder *>(ctx.encoder());
+                enc->copyFromBuffer(scene_.buffers().instances(), 0, previousInstances_[view_], 0,
+                                    std::min<u64>(poseCapacity_, scene_.buffers().instances()->length()));
+            });
     if (adaptive_)
         shadingHistoryRef_ = graph.importBuffer("Adaptive shading history per view", {shadingHistorySize_[view_]},
                                                 ImportContentsDefined | ImportOutput);

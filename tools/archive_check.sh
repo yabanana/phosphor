@@ -199,17 +199,21 @@ fi
 stale_dir="$out_dir/stale"
 mkdir -p "$stale_dir"
 cp "$repo_dir"/shaders/*.metal "$stale_dir/"
-if ! sed -i.bak 's/float3(0\.30, 0\.36, 0\.45)/float3(0.31, 0.36, 0.45)/' "$stale_dir/forward.metal" \
-    || cmp -s "$stale_dir/forward.metal" "$repo_dir/shaders/forward.metal"; then
-    echo "d-stale: FAIL (could not modify the constant in forward.metal; update this script)"
+cp "$repo_dir"/shaders/*.h "$stale_dir/"
+if ! sed -i.bak 's/float3(0\.30, 0\.36, 0\.45)/float3(0.31, 0.36, 0.45)/' "$stale_dir/material_shading.h" \
+    || cmp -s "$stale_dir/material_shading.h" "$repo_dir/shaders/material_shading.h"; then
+    echo "d-stale: FAIL (could not modify the material constant; update this script)"
     failures=$((failures + 1))
 else
-    rm -f "$stale_dir/forward.metal.bak"
+    rm -f "$stale_dir/material_shading.h.bak"
     target=$(sed -nE 's/^CMAKE_OSX_DEPLOYMENT_TARGET:[A-Z]+=(.*)$/\1/p' "$build_dir/CMakeCache.txt")
     airs=()
-    for src in "$stale_dir"/*.metal; do
+    for src in "$stale_dir/material_passes.metal" "$stale_dir"/*.metal; do
+        name=$(basename "$src")
+        [[ $name == forward.metal || $name == visibility_resolve.metal ]] && continue
+        [[ $name == material_passes.metal && ${#airs[@]} -gt 0 ]] && continue
         xcrun -sdk macosx metal -std=metal4.0 "-mmacosx-version-min=${target:-26.0}" \
-            -I "$repo_dir/src" -I "$build_dir/generated" -Wall -c "$src" -o "${src%.metal}.air" >"$src.log" 2>&1 \
+            -I "$repo_dir/src" -I "$build_dir/generated" -Wall -fpreserve-invariance -c "$src" -o "${src%.metal}.air" >"$src.log" 2>&1 \
             || { echo "error: compiling $src failed:" >&2; cat "$src.log" >&2; exit 2; }
         airs+=("${src%.metal}.air")
     done

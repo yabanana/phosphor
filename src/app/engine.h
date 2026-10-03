@@ -173,6 +173,7 @@ private:
     u32                      ignoredInputEvents_ = 0; // benchmark mode ignores input
     std::vector<FrameSample> samples_;
     u64                      allocationsAtStart_ = 0;
+    u64 commandRebuildsAtStart_ = 0;
     u64                      heapBlocksAtStart_  = 0;
     u64                      heapBytesAtStart_   = 0;
     // CPU time spent blocked in beginFrame() (slot + drawable waits).
@@ -205,6 +206,7 @@ private:
     HistoryRegistry hizRegistry_;
     const HistoryRegistry::View &hizHistory() const { return hizRegistry_.get(currentView_); }
     u32 currentView_ = 0;
+    u32 shaderGeneration_ = ~u32{0};
     HiZHistory &history() { return histories_[currentView_]; }
     const HiZHistory &history() const { return histories_[currentView_]; }
     struct MeshletSamples {

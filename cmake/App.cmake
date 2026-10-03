@@ -41,8 +41,17 @@ endif()
 
 # --- Shaders: .metal -> .air -> phosphor.metallib ---
 file(GLOB PHOSPHOR_METAL_SHADERS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*.metal)
+# F7/F8: one first-linked material module avoids the measured metal-tt
+# private-metadata relocation failure with separate forward/resolve modules.
+list(REMOVE_ITEM PHOSPHOR_METAL_SHADERS
+    ${CMAKE_SOURCE_DIR}/shaders/forward.metal
+    ${CMAKE_SOURCE_DIR}/shaders/visibility_resolve.metal
+    ${CMAKE_SOURCE_DIR}/shaders/material_passes.metal)
+list(PREPEND PHOSPHOR_METAL_SHADERS ${CMAKE_SOURCE_DIR}/shaders/material_passes.metal)
 # Headers the shaders include (C++/MSL shared): an edit recompiles every shader.
 set(PHOSPHOR_SHADER_HEADERS
+    ${CMAKE_SOURCE_DIR}/shaders/forward.metal
+    ${CMAKE_SOURCE_DIR}/shaders/visibility_resolve.metal
     ${CMAKE_SOURCE_DIR}/shaders/material_shading.h
     ${CMAKE_SOURCE_DIR}/shaders/surface_geometry.h
     ${CMAKE_SOURCE_DIR}/src/renderer/normal_transform.h
@@ -62,7 +71,7 @@ set(PHOSPHOR_SHADER_HEADERS
 set(PHOSPHOR_SHADER_OUT ${CMAKE_BINARY_DIR}/shaders)
 set(PHOSPHOR_METALLIB ${PHOSPHOR_SHADER_OUT}/phosphor.metallib)
 set(PHOSPHOR_METAL_FLAGS -std=metal4.0 -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}
-    -I ${CMAKE_SOURCE_DIR}/src -I ${CMAKE_BINARY_DIR}/generated -Wall)
+    -I ${CMAKE_SOURCE_DIR}/src -I ${CMAKE_BINARY_DIR}/generated -Wall -fpreserve-invariance)
 # Source-level shader debugging and profiling in Xcode (Debug/RelWithDebInfo).
 # metal-tt cannot translate specialised functions (F3.3 function constants)
 # from a metallib with debug info ("cannot find private metadata", measured

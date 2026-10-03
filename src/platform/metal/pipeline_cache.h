@@ -122,6 +122,7 @@ public:
 
     // --- F3.4 harvest -----------------------------------------------------------
     [[nodiscard]] bool harvesting() const { return serializer_ != nullptr; }
+    [[nodiscard]] u32 generation() const { return registry_.generation(); }
     /// Write the recorded descriptors (every compile so far) as a pipelines
     /// script; false on error (logged).
     bool writeHarvest();

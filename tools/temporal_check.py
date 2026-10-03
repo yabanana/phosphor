@@ -57,9 +57,12 @@ def measure(reference, candidate, thresholds, cuts=(), lag=0, spatial_control=No
     if controls and any(p.name not in controls for p in refs):raise ValueError("Missing spatial-control frames")
     rmse, psnr, flicker, ghosts, excess_ghosts = [], [], [], [], []
     support_ghosts = []
-    previous_ref = previous_error = None
+    previous_by_view = {}
     frames = []
     for i, path in enumerate(refs):
+        metadata_path=path.with_suffix('.json')
+        view=json.loads(metadata_path.read_text()).get('view',0) if metadata_path.exists() else 0
+        previous_ref, previous_error = previous_by_view.get(view,(None,None))
         ref = read(path, size)
         candidate_path = candidates[refs[max(0, i-lag)].name]
         cur = read(candidate_path)
@@ -90,10 +93,10 @@ def measure(reference, candidate, thresholds, cuts=(), lag=0, spatial_control=No
                 excess_fraction=float(np.count_nonzero(excess)/max(1,np.count_nonzero(changed)))
         flicker.append(residual_flicker);ghosts.append(ghost_fraction);excess_ghosts.append(excess_fraction)
         support_ghosts.append(support_fraction)
-        frames.append({'frame':int(path.stem.split('-')[1]),'linear_rmse':rms,'psnr_srgb_db':float(psnr[-1]),
+        frames.append({'frame':int(path.stem.split('-')[1]),'view':view,'linear_rmse':rms,'psnr_srgb_db':float(psnr[-1]),
                        'residual_flicker':residual_flicker,'ghost_fraction':ghost_fraction,'excess_ghost_fraction':excess_fraction,
                        'support_ghost_fraction':support_fraction})
-        previous_ref, previous_error = ref, error
+        previous_by_view[view] = ref, error
     by_frame = {item['frame']:i for i,item in enumerate(frames)}
     recovery = {}
     for cut in cuts:
@@ -101,7 +104,7 @@ def measure(reference, candidate, thresholds, cuts=(), lag=0, spatial_control=No
             raise ValueError(f'Missing cut frame {cut}')
         start = by_frame[cut]
         recovery[str(cut)] = next((frames[j]['frame']-cut for j in range(start,len(frames))
-                                  if rmse[j] <= thresholds['recovery_linear_rmse']), len(frames))
+                                  if frames[j]['view']==frames[start]['view'] and rmse[j] <= thresholds['recovery_linear_rmse']), len(frames))
     metrics = {'frames':len(frames),'mean_psnr_srgb_db':float(np.mean(psnr)),
                'linear_rmse_p95':float(np.percentile(rmse,95)),'linear_rmse_max':max(rmse),
                'residual_flicker_mean':float(np.mean(flicker)),

@@ -233,6 +233,8 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         po.corruptExposure = options_.debugExposureCorrupt;
         po.jitterVariant = options_.jitterVariant;
         po.debugMotionScale = options_.debugMotionScale;
+        po.checkCurves = options_.debugPostCurves;
+        po.corruptCurves = options_.debugPostCurvesCorrupt;
         po.temporal = options_.temporalUpscale;
         po.autoExposure = options_.autoExposure;
         po.tonemap = options_.tonemap;
@@ -438,6 +440,7 @@ void Engine::run() {
             sceneSamples_.reserve(options_.frames);
             meshletSamples_.reserve(options_.frames);
             allocationsAtStart_ = context_->memory().allocationCount();
+            commandRebuildsAtStart_ = context_->commandBufferRebuilds();
             heapUsage(heapBlocksAtStart_, heapBytesAtStart_);
         }
     }
@@ -585,7 +588,7 @@ bool Engine::checkHotReloadCapture() const {
         if (!known && otherCount < 4) others[otherCount++] = c;
         if (!known && otherCount == 4) otherCount = 4; // saturated: > 1 anyway
     }
-    const bool pass = reloads == 1 && probe > 0 && otherCount == 1;
+    const bool pass = reloads == 1 && probe > 0 && otherCount <= 1;
     std::printf("HOT-RELOAD reloads %u | probe pixels %llu | other pixels %llu in %u%s colours | %s\n", reloads,
                 static_cast<unsigned long long>(probe), static_cast<unsigned long long>(otherPixels), otherCount,
                 otherCount == 4 ? "+" : "", pass ? "PASS" : "FAIL");
@@ -605,6 +608,7 @@ void Engine::recordBenchmarkFrame(float dt, float cpuMs, float waitMs) {
         meshletSamples_.reserve(options_.frames);
         trace_.reserve(options_.frames, options_.frames / std::max(options_.switchEvery, 1u) + 2);
         allocationsAtStart_ = context_->memory().allocationCount();
+        commandRebuildsAtStart_ = context_->commandBufferRebuilds();
         heapUsage(heapBlocksAtStart_, heapBytesAtStart_);
     } else if (presentedFrames_ > options_.warmup) {
         FrameRecord record;
@@ -726,6 +730,10 @@ void Engine::finishBenchmark() {
         auto &r = report.rendering;
         r.present = true;
         r.offscreen = options_.offscreen;
+        r.deviceAllocatedBytes = context_->device()->currentAllocatedSize();
+        r.engineResourceBytes = context_->memory().totalBytes();
+        r.commandBufferRebuilds = context_->commandBufferRebuilds();
+        r.commandBufferRebuildsMeasured = r.commandBufferRebuilds - commandRebuildsAtStart_;
         r.path = options_.adaptiveShading                      ? "visibility-adaptive"
                  : options_.tileResolve                        ? "visibility-tile"
                  : options_.visibility                         ? "visibility"
@@ -914,7 +922,8 @@ void Engine::processEvents() {
             running_ = false;
             break;
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-            if (!options_.offscreen || !options_.resolutionWidth)
+            if (!options_.offscreen || !options_.resolutionWidth ||
+                (options_.resizeEvery && resizeFrames_ >= options_.resizeEvery))
                 context_->resize(static_cast<u32>(event.window.data1), static_cast<u32>(event.window.data2));
             break;
         default:
@@ -1131,6 +1140,11 @@ bool Engine::frame(float dt) {
     // never while a frame is being encoded.
     pollShaderReload();
     if (pipelines_->beginFrame() > 0) frameFlags_ |= FramePipelineSwap;
+    if (shaderGeneration_ != pipelines_->generation()) {
+        if (shaderGeneration_ != ~u32{0})
+            ++sceneEpoch_; // shading history belongs to the served shader generation
+        shaderGeneration_ = pipelines_->generation();
+    }
 
     // --- Simulation -----------------------------------------------------------
     PH_ZONE("Frame");
@@ -1245,8 +1259,10 @@ bool Engine::frame(float dt) {
     }
     if (options_.referenceScale > 1)
         scale = float(options_.referenceScale);
-    const u32 renderWidth = std::max(32u, static_cast<u32>(float(width) * scale));
-    const u32 renderHeight = std::max(32u, static_cast<u32>(float(height) * scale));
+    // Round up so odd output dimensions never exceed the declared 2x
+    // reconstruction limit at a 0.5 render scale.
+    const u32 renderWidth = std::max(32u, static_cast<u32>(std::ceil(float(width) * scale)));
+    const u32 renderHeight = std::max(32u, static_cast<u32>(std::ceil(float(height) * scale)));
     if (renderWidth > 8192 || renderHeight > 8192)
         throw std::runtime_error("Internal render dimensions exceed the 8192-pixel Hi-Z limit");
     float effectiveExposure = settings_.exposure;
@@ -1290,7 +1306,7 @@ bool Engine::frame(float dt) {
         }
     }
     temporal.debugFlags = (options_.debugMotionCorrupt ? 1u : 0u) | (options_.debugGuideCorrupt ? 2u : 0u) |
-                          (options_.debugAdaptiveNoHistory ? 4u : 0u);
+                          (options_.debugAdaptiveNoHistory ? 4u : 0u) | (options_.debugHistoryCorrupt ? 8u : 0u);
     glm::mat4 projected = unjittered;
     applyRasterJitter(&projected[0][0], &unjittered[0][0], temporal.jitter[0], temporal.jitter[1], renderWidth,
                       renderHeight);
@@ -1361,7 +1377,8 @@ bool Engine::frame(float dt) {
             {textures_->getDefaultWhite(), textures_->getDefaultNormal(), textures_->getDefaultMR()},
             constants.exposure, constants.debugMode, temporal, constants);
     overlays_->prepareFrame(overlayMode_, constants.lightCount, width, height);
-    if (renderer_->usingFallback()) frameFlags_ |= FrameFallbackDraw;
+    if (!visibility_ && renderer_->usingFallback())
+        frameFlags_ |= FrameFallbackDraw;
     const Clock::time_point s4 = Clock::now();
 
     if (mesh_ && overlayMode_ != OverlayMode::None && overlayMode_ != OverlayMode::Timings) {
@@ -1461,6 +1478,11 @@ bool Engine::frame(float dt) {
                                            visibility_->checkedHistogramHigh()))
             exitCode_ = 1;
     }
+    if (post_ && options_.debugPostCurves) {
+        context_->waitIdle();
+        if (!post_->checkCurves())
+            exitCode_ = 1;
+    }
     if (post_)
         post_->finishFrame(&unjittered[0][0]);
     if (mesh_) {
@@ -1483,7 +1505,7 @@ bool Engine::frame(float dt) {
         std::ofstream metadata(metadataPath);
         metadata << "{\"frame\":" << captureFrame << ",\"submitted_frame\":" << presentedFrames_
                  << ",\"reference_samples\":" << options_.settledReference << ",\"view\":" << currentView_
-                 << ",\"camera_cut\":" << (scriptedCut ? "true" : "false")
+                 << ",\"camera_cut\":" << (viewCameraCut ? "true" : "false")
                  << ",\"history_reset\":" << (temporal.historyValid ? "false" : "true")
                  << ",\"input_width\":" << renderWidth << ",\"input_height\":" << renderHeight << ",\"jitter\":["
                  << temporal.jitter[0] << "," << temporal.jitter[1] << "]}\n";

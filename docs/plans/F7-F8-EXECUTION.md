@@ -233,3 +233,89 @@ cumulativo entro i limiti ottenuti perturbando ciascuna luminanza CPU di
 distingue `exact`, `bin-boundary rounding` e `mismatch`. Non è una tolleranza
 arbitraria sul numero globale dei pixel e non può assorbire una perdita di
 campioni o uno spostamento non locale dell'istogramma.
+
+### Archivio AOT, hot reload e lifetime
+
+La build Release e la suite portabile passano anche con le nuove pipeline.
+Il primo harvest con MetalFX attivo includeva le librerie private del framework:
+il fetcher dell'archivio ora usa `--upscaler native` e rifiuta librerie esterne,
+senza sostituire i loro percorsi con quello del motore. Le pipeline MetalFX
+rimangono di proprietà del framework, create sui worker prima dell'uso.
+
+Il toolchain 27.1 ha inoltre fallito l'AOT dei materiali compute/tile con
+`cannot find private metadata at offset ...`. Caso ridotto: resolve in una
+libreria singola funziona; con più moduli AIR collegati fallisce. Una sola
+unità `material_passes.metal` per forward e resolve, collegata per prima,
+permette l'archivio completo. Runtime compiler invariato, Metal 4 mantenuto.
+Tentativi con nomi/tipi, inline, cache disabilitata e versioni del linguaggio
+non sono stati adottati. Il reloader applica lo stesso raggruppamento; il
+watcher continua a osservare i file sorgente separati. Sponza con HDR e
+MetalFX: **47/47 pipeline del motore da archivio, zero compiler calls del
+motore e zero compilazioni sul render thread** nel controllo AOT iniziale.
+Questi contatori non descrivono le compilazioni interne al framework MetalFX.
+
+Il registro comune gestisce ora anche la storia geometrica/Hi-Z per vista,
+con matrice jittered; PostProcessor registra il segnale unjittered. Un cambio
+della generazione shader invalida entrambe le storie. Il controllo di reload
+con post temporale mostra una nuova invalidazione (due reset totali).
+Un controllo negativo copia deliberatamente le pose correnti nella storia
+prima del resolve: l'oracolo di età delle pose lo rileva anche quando la
+formula dei motion vector, calcolata da quelle pose scorrette, è coerente.
+
+La validazione ha riprodotto un errore offscreen di residency dei render
+target su heap. GpuMemory registra ora esplicitamente anche questi attachment,
+come già faceva il grafo per i propri target, e li rimuove alla distruzione.
+Dieci ripetizioni con callback feedback ritardate e validazione API/MSL
+passano dopo la correzione. Questo errore locale nuovo non viene spacciato
+per la causa dell'uscita intermittente storica di F6, che non è stata attribuita.
+
+Il corpus lungo contiene 480 frame per scena, tre camera cut, moto rapido e
+oggetti animati. Passano baseline, tile e adaptive su Torus e Sponza; il
+controllo ritardato di tre frame fallisce anche il gate ghosting. Passano
+inoltre clip da 180 frame con esposizione variabile e con due viste alternate
++ DRS. La metrica conserva una storia distinta per vista. Sono prove di
+qualità sul preset dichiarato, non tempi di prestazione o equivalenza a tutti
+gli scenari futuri. Artefatti in `build/f7-f8-long-quality/` e
+`build/f7-f8-context-quality/`.
+
+### Invarianza delle posizioni: regressione scoperta da F6
+
+La prima ripetizione della suite F6 ha fallito il confronto indexed/mesh,
+anche sui procedurali (15 pixel nella griglia PBR, massimo delta 145).
+L'attributo `[[position, invariant]]` era stato aggiunto, ma senza il flag
+`-fpreserve-invariance` veniva ignorato: comportamento esplicitato dalla
+[documentazione Apple](https://developer.apple.com/documentation/metal/mtlcompileoptions/preserveinvariance).
+Il flag è ora comune a build e hot reload; anche gli overlay che ridisegnano
+la geometria marcano la posizione. La coppia PBR indexed/mesh a 3200×1800
+ritorna **zero differenze su 5.760.000 pixel**. Conservati i riferimenti e i
+log precedenti, inclusa la batteria fallita; non aumentata la tolleranza F6.
+La batteria completa viene rieseguita su riferimenti coerenti con questa
+correzione. Il precedente spike con il solo attributo non era una prova
+dell'invarianza: mancava il flag necessario.
+
+### Resize e cache dei command buffer nella validazione Metal
+
+Il test che cresce da 640×360 a 2560×1440 e 3200×1800 ha riprodotto un
+SIGSEGV dentro `HeapUsageTable::processHeapEntry` con shader validation.
+Riproduce anche con ricostruzione nativa e output SDR: non è specifico di
+MetalFX o EDR. NSZombie ha identificato `MTLGPUDebugHeap enumerateBufferIndices:`
+su un heap già deallocato. Ricreare i command buffer elimina il caso ridotto.
+
+La correzione mantiene una generazione della residency: soltanto quando
+un'allocazione viene rimossa, i command buffer completati che vengono riusati
+ricreano il loro stato di registrazione (main, upload e stream aggiuntivi).
+Gli allocatori restano pooled e i frame stabili riusano i command buffer.
+Non disabilita la validazione né trattiene una lista crescente di heap vecchi.
+Passano native, temporal e async compute con EDR e quattro resize: 12 rebuild
+main nel caso semplice su 135 frame totali, anziché un rebuild per frame.
+La variante async ricrea anche i suoi stream. Il report espone il contatore.
+
+La validazione delle varianti ha inoltre scoperto due problemi distinti:
+le catture offscreen potevano precedere il completamento del caricamento AOT
+della variante richiesta; il test ora forza richieste sincrone e non viene
+usato per misurare prestazioni. Il return `half4` del forward consentiva
+arrotondamenti diversi tra generico/specializzato. Il return FP32 conserva
+la precisione fino alla conversione sRGB: **284 combinazioni compatibili
+passano (peggiore: 1 pixel, delta 1), 52 incompatibili vengono respinte**,
+su otto scene a 640×360 (bench 8: 100000 istanze). Le soglie restano quelle
+originali del test. Riferimenti precedenti conservati.

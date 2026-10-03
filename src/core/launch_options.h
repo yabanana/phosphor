@@ -305,6 +305,8 @@ struct LaunchOptions {
     bool post = false, temporalUpscale = false, autoExposure = false, dynamicResolution = false;
     bool debugVisibility = false, debugMotionCorrupt = false, debugExposureCorrupt = false, debugUpscalerReset = false;
     bool debugGuideCorrupt = false;
+    bool debugHistoryCorrupt = false;
+    bool debugPostCurves = false, debugPostCurvesCorrupt = false;
     bool offscreen = false, temporalScript = false, exposureScript = false;
     std::string captureSequence;
     u32 captureEvery = 1;

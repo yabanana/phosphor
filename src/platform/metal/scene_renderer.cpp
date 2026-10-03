@@ -314,7 +314,6 @@ u64 SceneRenderer::prepareFrame(const SceneStore& store, std::span<const GPULigh
     usingFallback_ = genericOnly_ || !pipelines_.isFinal(handle);
     pipeline_ = pipelines_.render(handle);
     if (!pipeline_) pipeline_ = pipelines_.render(generic_);
-    if (usingFallback_) pipelines_.noteFallbackUse();
 
     // Triangles of every live instance (off draws all of them; on draws the
     // visible subset, reported from the GPU counters).
@@ -552,6 +551,8 @@ u32 SceneRenderer::encodeFallbackClass(MTL4::RenderCommandEncoder* enc, u32 cull
 
 void SceneRenderer::encode(MTL4::RenderCommandEncoder* enc, u32 chunk, u32 chunks) const {
     PH_ZONE("Forward encode");
+    if (usingFallback_ && chunk == 0)
+        pipelines_.noteFallbackUse();
     encodeForward(enc, pipeline_, depthState_, chunk, chunks, 1 + std::min(chunk, kMaxChunks - 1));
 }
 

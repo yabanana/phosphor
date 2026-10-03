@@ -180,6 +180,7 @@ void MetalGraphExecutor::ensureParallelResources(u32 maxChunks) {
         for (u32 slot = 0; slot < METAL_FRAMES_IN_FLIGHT; ++slot) {
             e.allocators[slot] = context_.device()->newCommandAllocator();
             e.buffers[slot]    = context_.device()->newCommandBuffer();
+            e.residencyGenerations[slot] = context_.residencyGeneration();
         }
     }
     if (!workers_ || workers_->workerCount() < maxChunks - 1) {
@@ -478,6 +479,7 @@ void MetalGraphExecutor::setImportedAttachments(u32 group, bool bind) {
 
 MTL4::CommandBuffer* MetalGraphExecutor::beginExtraCommandBuffer(MetalContext::Frame& frame, u32 index, bool async) {
     ExtraCommandBuffer& e = extra_[index];
+    context_.refreshCommandBuffer(e.buffers[frame.slot], e.residencyGenerations[frame.slot]);
     e.allocators[frame.slot]->reset();
     MTL4::CommandBuffer* cmd = e.buffers[frame.slot];
     cmd->beginCommandBuffer(e.allocators[frame.slot]);

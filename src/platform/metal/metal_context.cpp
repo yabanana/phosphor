@@ -145,7 +145,25 @@ void MetalContext::makeResident(const MTL::Allocation* allocation, ResidencyClas
 
 void MetalContext::evict(const MTL::Allocation* allocation) {
     if (!allocation) return;
-    residency_->remove(allocation);
+    if (residency_->remove(allocation))
+        ++residencyGeneration_;
+}
+
+void MetalContext::refreshCommandBuffer(MTL4::CommandBuffer *&buffer, u64 &generation) {
+    if (generation == residencyGeneration_)
+        return;
+    // Measured on Metal 27.1: reusable command buffers retain a shader-
+    // validation HeapUsageTable entry after a heap leaves residency. The
+    // next commit messages a deallocated MTLGPUDebugHeap. Rebuild recording
+    // state only after retirement; steady frames keep reusing their streams.
+    auto *replacement = device_->newCommandBuffer();
+    if (!replacement)
+        throw std::runtime_error("Failed to rebuild a Metal command buffer");
+    replacement->setLabel(buffer->label());
+    buffer->release();
+    buffer = replacement;
+    generation = residencyGeneration_;
+    ++commandBufferRebuilds_;
 }
 
 void MetalContext::deferRelease(NS::Object* object) {
@@ -239,6 +257,7 @@ bool MetalContext::beginFrame(Frame& frame) {
     }
     frameUploads_->beginFrame(index);
 
+    refreshCommandBuffer(commandBuffers_[slot], commandBufferGenerations_[slot]);
     allocators_[slot]->reset();
     MTL4::CommandBuffer* cmd = commandBuffers_[slot];
     cmd->beginCommandBuffer(allocators_[slot]);
@@ -385,6 +404,7 @@ void MetalContext::flushUploads() {
 void MetalContext::submitAndWait(const std::function<void(MTL4::ComputeCommandEncoder*)>& record) {
     flushResidency();
 
+    refreshCommandBuffer(uploadCommandBuffer_, uploadCommandGeneration_);
     uploadAllocator_->reset();
     uploadCommandBuffer_->beginCommandBuffer(uploadAllocator_);
     uploadCommandBuffer_->setLabel(str("Upload"));

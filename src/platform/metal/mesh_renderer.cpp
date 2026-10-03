@@ -143,7 +143,7 @@ MeshRenderer::~MeshRenderer() {
 }
 
 void MeshRenderer::requestAllVariants() {
-    if (options_.visibility)
+    if (options_.visibility && !pipelines_.harvesting())
         return;
     for (u32 i = 0; i < variants_.size(); ++i) {
         if (variants_[i] == pipe::INVALID_PIPELINE) {

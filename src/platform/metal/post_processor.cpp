@@ -29,6 +29,53 @@ MTL::Texture *texture(MetalContext &c, u32 w, u32 h, MTL::PixelFormat format, co
     d->setUsage(MTL::TextureUsageShaderRead | MTL::TextureUsageShaderWrite | MTL::TextureUsageRenderTarget);
     return c.memory().newTexture(d, MemoryCategory::RenderTargets, label);
 }
+std::array<double, 3> curveReference(u32 sample, u32 curve, double headroom) {
+    const double value = std::exp2((double(sample) - 32) / 4);
+    std::array<double, 3> input = sample & 1u ? std::array<double, 3>{value, value * 0.3, value * 0.05}
+                                              : std::array<double, 3>{value, value, value};
+    if (sample == 0 || sample == 5)
+        input = {0, 0, 0};
+    else if (sample <= 3) {
+        input = {0, 0, 0};
+        input[sample - 1] = 1;
+    } else if (sample == 4)
+        input = {65504, 65504, 65504};
+    std::array<double, 3> result{};
+    if (curve == 1) {
+        constexpr double inset[3][3] = {{0.8424790623, 0.0784336, 0.0792237451},
+                                        {0.0423282423, 0.8784686365, 0.0791661275},
+                                        {0.0423756549, 0.0784336, 0.8791429738}};
+        constexpr double outset[3][3] = {{1.1968790051, -0.0980208811, -0.0990297441},
+                                         {-0.0528968518, 1.1519031299, -0.0989611768},
+                                         {-0.0529716355, -0.0980434501, 1.1510736726}};
+        double y[3]{};
+        for (u32 c = 0; c < 3; ++c) {
+            double mixed = 0;
+            for (u32 k = 0; k < 3; ++k)
+                mixed += inset[c][k] * input[k];
+            const double x = std::clamp((std::log2(std::max(mixed, 1e-10)) + 12.47393) / 16.5, 0.0, 1.0);
+            y[c] = 15.5 * std::pow(x, 6) - 40.14 * std::pow(x, 5) + 31.96 * std::pow(x, 4) - 6.868 * std::pow(x, 3) +
+                   0.4298 * x * x + 0.1191 * x - 0.00232;
+        }
+        for (u32 c = 0; c < 3; ++c) {
+            double mixed = 0;
+            for (u32 k = 0; k < 3; ++k)
+                mixed += outset[c][k] * y[k];
+            result[c] = std::clamp(std::pow(std::max(mixed, 0.0), 2.2), 0.0, 1.0);
+        }
+    } else
+        for (u32 c = 0; c < 3; ++c) {
+            const double x = input[c];
+            result[c] = std::clamp(curve == 0 ? (2.51 * x * x + 0.03 * x) / (2.43 * x * x + 0.59 * x + 0.14)
+                                              : (x + x * x / 16) / (1 + x),
+                                   0.0, 1.0);
+        }
+    for (u32 c = 0; c < 3; ++c) {
+        const double highlight = std::max(input[c] - 1, 0.0);
+        result[c] = std::clamp(result[c] + (headroom - 1) * highlight / (highlight + headroom), 0.0, headroom);
+    }
+    return result;
+}
 } // namespace
 PostProcessor::PostProcessor(MetalContext &c, PipelineCache &p, const Options &o)
     : context_(c), pipelines_(p), options_(o) {
@@ -38,6 +85,11 @@ PostProcessor::PostProcessor(MetalContext &c, PipelineCache &p, const Options &o
     histogram_ = p.request(kernel("exposure_histogram"));
     reduce_ = p.request(kernel("exposure_reduce"));
     native_ = p.request(kernel("post_native"));
+    if (o.checkCurves || p.harvesting())
+        curveProbe_ = p.request(kernel("post_curve_probe"));
+    if (o.checkCurves)
+        curveReadback_ = c.memory().newBuffer(576 * 16, MTL::ResourceStorageModeShared, MemoryCategory::Other,
+                                              "Tone curve chart readback");
     for (u32 i = 0; i < 2; ++i) {
         pipe::PipelineDesc d;
         d.kind = pipe::PipelineKind::Render;
@@ -81,6 +133,7 @@ PostProcessor::PostProcessor(MetalContext &c, PipelineCache &p, const Options &o
 }
 PostProcessor::~PostProcessor() {
     context_.waitIdle();
+    context_.memory().release(curveReadback_, MemoryCategory::Other);
     releaseTargets();
     for (auto &v : views_) {
         v.scaler.reset();
@@ -216,7 +269,8 @@ GPUTemporalParams PostProcessor::prepareFrame(u32 slot, u64 frame, u32 view, u32
                w,
                h,
                options_.tonemap,
-               (options_.autoExposure ? 1u : 0u) | (options_.corruptExposure ? 2u : 0u),
+               (options_.autoExposure ? 1u : 0u) | (options_.corruptExposure ? 2u : 0u) |
+                   (options_.corruptCurves ? 4u : 0u),
                exposureReset ? 1u : 0u,
                temporalReady() ? 1u : 0u,
                dt,
@@ -389,7 +443,43 @@ rg::TextureRef PostProcessor::addToGraph(rg::RenderGraph &g, VisibilityRenderer 
             enc->setArgumentTable(t, MTL::RenderStageFragment);
             enc->drawPrimitives(MTL::PrimitiveTypeTriangle, 0, 3);
         });
+    if (options_.checkCurves) {
+        auto check = g.importBuffer("Tone curve chart", {576 * 16}, ImportOutput);
+        g.addPass(
+            "Tone curve chart probe", PassType::Compute,
+            [&](PassBuilder &b) {
+                check = b.write(check, Usage::ShaderWrite, StageDispatch);
+                b.setSideEffect();
+            },
+            [this](PassContext &ctx) {
+                auto *enc = static_cast<MTL4::ComputeCommandEncoder *>(ctx.encoder());
+                tables_[6]->setAddress(curveReadback_->gpuAddress(), 0);
+                tables_[6]->setAddress(paramsAddress_, 1);
+                enc->setArgumentTable(tables_[6]);
+                enc->setComputePipelineState(pipelines_.compute(curveProbe_));
+                enc->dispatchThreadgroups(MTL::Size::Make(3, 1, 1), MTL::Size::Make(256, 1, 1));
+            });
+    }
     return drawable;
+}
+bool PostProcessor::checkCurves() const {
+    const auto *actual = static_cast<const float *>(curveReadback_->contents());
+    constexpr double headrooms[3] = {1, 2, 8};
+    u32 errors = 0;
+    double worst = 0;
+    for (u32 i = 0; i < 576; ++i) {
+        const double headroom = headrooms[(i / 64) % 3];
+        const auto expected = curveReference(i % 64, i / 192, headroom);
+        for (u32 c = 0; c < 3; ++c) {
+            const double value = actual[i * 4 + c], error = std::abs(value - expected[c]);
+            worst = std::max(worst, error);
+            if (!std::isfinite(value) || value < 0 || value > headroom || error > 5e-5 * headroom)
+                ++errors;
+        }
+    }
+    std::printf("POST-CURVES 576 HDR/color samples, headrooms 1/2/8 | errors %u max %.8f | %s\n", errors, worst,
+                errors ? "FAIL" : "PASS");
+    return errors == 0;
 }
 rg::TextureRef PostProcessor::addSDRCapture(rg::RenderGraph &g, rg::TextureRef display) {
     using namespace rg;

@@ -153,6 +153,7 @@ private:
     // F2.5 parallel encoding: extra command buffers [index][slot] with their
     // allocators, and the threads that encode the chunks.
     struct ExtraCommandBuffer {
+        std::array<u64, METAL_FRAMES_IN_FLIGHT> residencyGenerations{};
         std::array<MTL4::CommandAllocator*, METAL_FRAMES_IN_FLIGHT> allocators{};
         std::array<MTL4::CommandBuffer*, METAL_FRAMES_IN_FLIGHT>    buffers{};
     };

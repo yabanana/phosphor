@@ -320,6 +320,9 @@ fragment half4 visibility_present_fs(PresentVertex in [[stage_in]], constant GPU
     const float4 value = hdr.sample(sampling, in.uv);
     if (dot(normal.sample(sampling, in.uv).xyz, normal.sample(sampling, in.uv).xyz) == 0)
         return half4(0.02h, 0.025h, 0.035h, 1.0h);
+#ifdef PHOSPHOR_HOT_RELOAD_PROBE
+    return half4(1, 0, 1, 1);
+#endif
     if (p.debugMode == 1)
         return half4(half3(normal.sample(sampling, in.uv).xyz * 0.5f + 0.5f), 1.0h);
     if (p.debugMode == 2)

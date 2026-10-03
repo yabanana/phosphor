@@ -44,7 +44,7 @@ public:
 
     void add(const MTL::Allocation* allocation, ResidencyClass cls);
     /// Remove from whichever set holds it (no-op if it is not resident).
-    void remove(const MTL::Allocation* allocation);
+    bool remove(const MTL::Allocation *allocation);
     /// Commit the sets with pending changes.
     void commit();
 

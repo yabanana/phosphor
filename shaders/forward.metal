@@ -56,16 +56,18 @@ vertex VertexOut forward_vs(uint vertexId                          [[vertex_id]]
     return out;
 }
 
-fragment half4 forward_fs(VertexOut in [[stage_in]], bool frontFacing [[front_facing]],
-                          constant FrameConstants &frame [[buffer(0)]],
-                          const device GPUMaterial *materials [[buffer(3)]],
-                          const device GPULight *lights [[buffer(4)]],
-                          const device TextureHandle *textures [[buffer(5)]]) {
+// Preserve FP32 through the sRGB conversion. A half output lets specialization
+// introduce mixed-precision/double-rounding differences (F3 variant check).
+fragment float4 forward_fs(VertexOut in [[stage_in]], bool frontFacing [[front_facing]],
+                           constant FrameConstants &frame [[buffer(0)]],
+                           const device GPUMaterial *materials [[buffer(3)]],
+                           const device GPULight *lights [[buffer(4)]],
+                           const device TextureHandle *textures [[buffer(5)]]) {
 #ifdef PHOSPHOR_HOT_RELOAD_PROBE
-    return half4(1.0h, 0.0h, 1.0h, 1.0h);
+    return float4(1.0f, 0.0f, 1.0f, 1.0f);
 #endif
     if (is_function_constant_defined(FC_SALT) && frame.lightCount == 0xFFFFFFFFu)
-        return half4(half(float(FC_SALT)));
+        return float4(float(FC_SALT));
     SurfaceInput surface{in.worldPos, in.normal,        in.tangent,  in.uv,      dfdx(in.uv),
                          dfdy(in.uv), in.materialIndex, in.mirrored, frontFacing};
     const ShadingResult value = shadeSurface(surface, frame, materials, lights, textures);
@@ -73,10 +75,10 @@ fragment half4 forward_fs(VertexOut in [[stage_in]], bool frontFacing [[front_fa
         discard_fragment();
     const uint debugMode = kDebugModeSpecialised ? kDebugMode : frame.debugMode;
     if (debugMode == 1)
-        return half4(half3(value.normal * 0.5f + 0.5f), 1.0h);
+        return float4(value.normal * 0.5f + 0.5f, 1.0f);
     if (debugMode == 2)
-        return half4(half3(value.baseColor), 1.0h);
-    return half4(half3(tonemapACES(value.color * frame.exposure)), 1.0h);
+        return float4(value.baseColor, 1.0f);
+    return float4(tonemapACES(value.color * frame.exposure), 1.0f);
 }
 
 struct SurfaceVertexOut {

@@ -120,22 +120,22 @@ static float3 agxFit(float3 v) {
                                  dot(y, float3(-0.0529716355f, -0.0980434501f, 1.1510736726f)));
     return saturate(pow(max(outset, 0.0f), float3(2.2f)));
 }
-static float3 postMap(float3 color, constant GPUPostParams &p) {
+static float3 postMap(float3 color, uint tonemap, float whitePoint, float headroom) {
     color = max(color, 0.0f);
     float3 mapped;
-    if (p.tonemap == 1u)
+    if (tonemap == 1u)
         mapped = agxFit(color);
-    else if (p.tonemap == 2u)
-        mapped = saturate(color * (1.0f + color / (p.whitePoint * p.whitePoint)) / (1.0f + color));
+    else if (tonemap == 2u)
+        mapped = saturate(color * (1.0f + color / (whitePoint * whitePoint)) / (1.0f + color));
     else
         mapped = acesFit(color);
     // Display-linear extended sRGB: retain the selected SDR curve through
     // middle grey, then roll scene highlights into the available headroom.
-    if (p.headroom > 1.0f) {
+    if (headroom > 1.0f) {
         const float3 highlight = max(color - 1.0f, 0.0f);
-        mapped += (p.headroom - 1.0f) * highlight / (highlight + p.headroom);
+        mapped += (headroom - 1.0f) * highlight / (highlight + headroom);
     }
-    return clamp(mapped, 0.0f, p.headroom);
+    return clamp(mapped, 0.0f, headroom);
 }
 struct PostVertex {
     float4 position [[position]];
@@ -148,6 +148,9 @@ vertex PostVertex post_vs(uint id [[vertex_id]]) {
 fragment half4 post_fs(PostVertex in [[stage_in]], texture2d<float> hdr [[texture(0)]],
                        texture2d<float, access::read> exposure [[texture(1)]],
                        constant GPUPostParams &p [[buffer(1)]]) {
+#ifdef PHOSPHOR_HOT_RELOAD_PROBE
+    return half4(1, 0, 1, 1);
+#endif
     constexpr sampler linear(filter::linear, address::clamp_to_edge);
     const float2 uv = in.uv, step = 1.0f / float2(hdr.get_width(), hdr.get_height());
     const float3 c = hdr.sample(linear, uv).rgb;
@@ -162,7 +165,7 @@ fragment half4 post_fs(PostVertex in [[stage_in]], texture2d<float> hdr [[textur
         const float amount = p.sharpening * (1.0f - saturate(contrast));
         value = clamp(c + amount * (c - (a + b + d + e) * 0.25f), lo, hi);
     }
-    return half4(half3(postMap(value * exposure.read(uint2(0)).x, p)), 1.0h);
+    return half4(half3(postMap(value * exposure.read(uint2(0)).x, p.tonemap, p.whitePoint, p.headroom)), 1.0h);
 }
 
 // An 8-bit PNG cannot retain EDR values above reference white. Capture the
@@ -170,4 +173,32 @@ fragment half4 post_fs(PostVertex in [[stage_in]], texture2d<float> hdr [[textur
 fragment half4 post_capture_fs(PostVertex in [[stage_in]], texture2d<float> display [[texture(0)]]) {
     constexpr sampler nearest(filter::nearest, address::clamp_to_edge);
     return half4(half3(saturate(display.sample(nearest, in.uv).rgb)), 1.0h);
+}
+
+// Numeric color chart: 3 curves x 3 EDR headrooms x 64 HDR samples.
+// The CPU checks an independently evaluated double-precision reference.
+kernel void post_curve_probe(device float4 *result [[buffer(0)]], constant GPUPostParams &p [[buffer(1)]],
+                             uint i [[thread_position_in_grid]]) {
+    if (i >= 576)
+        return;
+    const uint sample = i % 64, curve = i / 192, range = (i / 64) % 3;
+    const float levels[3] = {1, 2, 8};
+    float value = exp2((float(sample) - 32) / 4);
+    float3 input = sample & 1u ? float3(value, value * 0.3f, value * 0.05f) : float3(value);
+    if (sample == 0)
+        input = 0;
+    else if (sample == 1)
+        input = float3(1, 0, 0);
+    else if (sample == 2)
+        input = float3(0, 1, 0);
+    else if (sample == 3)
+        input = float3(0, 0, 1);
+    else if (sample == 4)
+        input = 65504;
+    else if (sample == 5)
+        input = -1;
+    float3 mapped = postMap(input, curve, 4, levels[range]);
+    if (p.autoExposure & 4u)
+        mapped.x += 0.25f;
+    result[i] = float4(mapped, 1);
 }

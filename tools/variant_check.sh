@@ -24,6 +24,9 @@
 #     it MUST differ (negative control: forcing works and the check can
 #     fail).
 # No Metal validation (pixels only; visual_check covers validation).
+# Pipeline requests are synchronous in this test: fast offscreen runs can
+# otherwise finish before the requested specialization replaces the generic.
+# These runs are not compilation-latency or performance evidence.
 # Default build dir: build/release.  ~11 min for 8 benches x 42 variants.
 set -euo pipefail
 
@@ -38,7 +41,7 @@ mkdir -p "$out_dir"
 capture() { # png log args...
     local png=$1 log=$2
     shift 2
-    env -u MTL_DEBUG_LAYER -u MTL_SHADER_VALIDATION "$app" --warmup 30 --frames 1 --no-ui --fixed-timestep \
+    env -u MTL_DEBUG_LAYER -u MTL_SHADER_VALIDATION "$app" --warmup 30 --frames 1 --no-ui --fixed-timestep --pipeline-sync \
         "$@" ${EXTRA_ARGS:-} --capture "$png" >"$log" 2>&1
 }
 variant_values() { # log -> "V L E D" of the (single) forward variant requested

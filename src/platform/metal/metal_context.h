@@ -142,6 +142,11 @@ public:
 
     [[nodiscard]] GpuMemory&  memory()       { return *memory_; }
     [[nodiscard]] const ResidencyManager& residency() const { return *residency_; }
+    [[nodiscard]] u64 residencyGeneration() const { return residencyGeneration_; }
+    [[nodiscard]] u64 commandBufferRebuilds() const { return commandBufferRebuilds_; }
+    /// Only for a completed, reusable stream. Invalidates MetalTools' cached
+    /// heap references after resources leave residency; allocators stay pooled.
+    void refreshCommandBuffer(MTL4::CommandBuffer *&buffer, u64 &generation);
     [[nodiscard]] UploadRing& frameUploads() { return *frameUploads_; }
     [[nodiscard]] const UploadRing& frameUploads() const { return *frameUploads_; }
     [[nodiscard]] const UploadRing& staging() const { return *staging_; }
@@ -234,6 +239,8 @@ private:
 
     std::array<MTL4::CommandAllocator*, METAL_FRAMES_IN_FLIGHT> allocators_{};
     std::array<MTL4::CommandBuffer*, METAL_FRAMES_IN_FLIGHT> commandBuffers_{};
+    std::array<u64, METAL_FRAMES_IN_FLIGHT> commandBufferGenerations_{};
+    u64 residencyGeneration_ = 0, uploadCommandGeneration_ = 0, commandBufferRebuilds_ = 0;
     // Objects released once frame `afterFrame` has completed: the frame being
     // recorded when deferRelease() was called, or -- between frames -- the
     // next one, which is conservative for every frame still in flight.

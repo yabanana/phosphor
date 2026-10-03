@@ -33,6 +33,7 @@ struct Script {
     std::set<std::string> render;              // "vs|fs|constants|format|blend"
     std::set<std::string> compute;             // "kernel"
     std::set<std::string> mesh;                // F6: "object|mesh|fs+constants|format|limits"
+    std::set<std::string> tile;
 
     static std::string key(const Function& f) {
         std::string k = f.name;
@@ -92,6 +93,10 @@ Script loadScript() {
     for (const json& p : pds.at("compute_pipeline_descriptors")) {
         script.compute.insert(Script::key(
             script.functions.at(stripPrefix(p.at("compute_function_descriptor").get<std::string>()))));
+    }
+    for (const json &p : pds.value("tile_render_pipeline_descriptors", json::array())) {
+        script.tile.insert(
+            Script::key(script.functions.at(stripPrefix(p.at("tile_function_descriptor").get<std::string>()))));
     }
     return script;
 }
@@ -181,4 +186,31 @@ TEST_CASE("pipelines script: covers the F4.7 overlay pipelines") {
     CHECK(render("overlay_vs", "lightcount_fs", "R16Float", "Disabled") == 1);
     CHECK(render("overlay_composite_vs", "overlay_composite_fs", "BGRA8Unorm_sRGB", "Enabled") == 1);
     CHECK(script.compute.count("overlay_tilecost") == 1);
+}
+
+TEST_CASE("pipelines script: covers visibility, HDR and optional F7 experiments") {
+    const Script script = loadScript();
+    for (const char *name :
+         {"visibility_clear", "visibility_classify", "visibility_resolve", "visibility_adaptive", "visibility_history",
+          "exposure_clear", "exposure_histogram", "exposure_reduce", "post_native", "post_curve_probe"}) {
+        CAPTURE(name);
+        CHECK(script.compute.count(name) == 1);
+    }
+    for (u32 cls = 0; cls < 4; ++cls)
+        CHECK(script.compute.count("visibility_resolve,21=" + std::to_string(cls)) == 1);
+    CHECK(script.tile.count("visibility_tile") == 1);
+    const auto render = [&](const char *vs, const char *fs, const char *format) {
+        pipe::PipelineDesc d;
+        d.functions = {vs, fs};
+        return script.render.count(renderKey(d, format, "Disabled"));
+    };
+    CHECK(render("visibility_present_vs", "visibility_present_fs", "BGRA8Unorm_sRGB") == 1);
+    CHECK(render("forward_surface_vs", "forward_surface_fs", "RGBA16Float") == 1);
+    CHECK(render("post_vs", "post_fs", "BGRA8Unorm_sRGB") == 1);
+    CHECK(render("post_vs", "post_fs", "RGBA16Float") == 1);
+    CHECK(render("post_vs", "post_capture_fs", "BGRA8Unorm_sRGB") == 1);
+    for (const auto &entry : script.functions) {
+        CHECK_FALSE(entry.second.name.starts_with("BBRNet"));
+        CHECK_FALSE(entry.second.name.starts_with("brnet"));
+    }
 }
