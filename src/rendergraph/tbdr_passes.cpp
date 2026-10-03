@@ -366,6 +366,12 @@ void buildRenderGroups(const RenderGraph& graph, CompiledGraph& compiled, bool f
                 compiled.encoders.push_back(e);
                 ++groupsSeen;
             }
+        } else if (pass.type == PassType::External) {
+            EncoderPlan e;
+            e.type = PassType::External;
+            e.queue = pass.queue;
+            e.firstPosition = e.lastPosition = pos;
+            compiled.encoders.push_back(e);
         } else {
             const bool extend = !compiled.encoders.empty() && compiled.encoders.back().type == PassType::Compute &&
                                 compiled.encoders.back().queue == pass.queue &&

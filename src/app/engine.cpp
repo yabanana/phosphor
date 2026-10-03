@@ -24,6 +24,9 @@
 #include "platform/metal/shader_reloader.h"
 #include "platform/metal/scene_renderer.h"
 #include "platform/metal/mesh_renderer.h"
+#include "platform/metal/visibility_renderer.h"
+#include "platform/metal/post_processor.h"
+#include "platform/metal/display_output.h"
 #include "platform/metal/meshlet_check.h"
 #include "renderer/cull_reference.h"
 #include "renderer/gpu_scene.h"
@@ -139,7 +142,8 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     }
 
     window_ = SDL_CreateWindow("Phosphor", 1600, 900,
-                               SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_METAL);
+                               SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_METAL |
+                                   (options_.offscreen ? SDL_WINDOW_HIDDEN : 0));
     if (!window_) {
         throw std::runtime_error(std::string("SDL_CreateWindow failed: ") + SDL_GetError());
     }
@@ -201,6 +205,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
                                      "available with --geometry-path mesh (use --debug-view)");
         }
         MeshRenderer::Options mo;
+        mo.visibility = options_.visibility;
         mo.cull        = options_.meshletCull;
         mo.hiz         = hiz;
         mo.debugView   = options_.debugView;
@@ -214,7 +219,29 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         mo.forceVariant = options_.forceVariant;
         mesh_ = std::make_unique<MeshRenderer>(*context_, *pipelines_, *renderer_, mo);
     }
-    graphExecutor_ = std::make_unique<MetalGraphExecutor>(*context_);
+    if (options_.visibility)
+        visibility_ = std::make_unique<VisibilityRenderer>(*context_, *pipelines_, *renderer_, *mesh_,
+                                                           options_.materialBinning, options_.debugVisibility);
+    if (options_.post) {
+        PostProcessor::Options po;
+        po.forceReset = options_.debugUpscalerReset;
+        po.corruptExposure = options_.debugExposureCorrupt;
+        po.jitterVariant = options_.jitterVariant;
+        po.debugMotionScale = options_.debugMotionScale;
+        po.temporal = options_.temporalUpscale;
+        po.autoExposure = options_.autoExposure;
+        po.tonemap = options_.tonemap;
+        po.sharpening = options_.sharpening;
+        po.whitePoint = options_.toneWhite;
+        po.views = options_.temporalViews;
+        post_ = std::make_unique<PostProcessor>(*context_, *pipelines_, po);
+        post_->prewarm(context_->width(), context_->height());
+        dynamicScale_ = options_.renderScale;
+    }
+    context_->setOffscreen(options_.offscreen);
+    context_->setFramesInFlight(options_.framesInFlight);
+    context_->setFeedbackDiagnostics(options_.feedbackDelayMs, options_.feedbackFailFrame);
+    graphExecutor_ = std::make_unique<MetalGraphExecutor>(*context_, pipelines_.get());
     if (options_.debugGraphTransients) graphDebug_ = std::make_unique<GraphDebugPasses>(*context_, *pipelines_);
     if (options_.debugAsyncCompute) asyncProbe_ = std::make_unique<AsyncComputeProbe>(*context_, *pipelines_);
     if (options_.debugGpuCost > 0) {
@@ -278,7 +305,9 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     ImGui_ImplSDL3_InitForMetal(window_);
     imguiRenderer_ = std::make_unique<ImGuiRenderer>(*context_, *pipelines_);
     pressure_      = std::make_unique<MemoryPressureMonitor>();
-    if (!options_.capturePath.empty()) {
+    if (!options_.captureSequence.empty())
+        std::filesystem::create_directories(options_.captureSequence);
+    if (!options_.capturePath.empty() || !options_.captureSequence.empty()) {
         capture_ = std::make_unique<FrameCapture>(*context_);
     }
 
@@ -356,6 +385,8 @@ Engine::~Engine() {
 
     textures_.reset();
     meshletChecker_.reset();
+    post_.reset();
+    visibility_.reset();
     mesh_.reset();
     renderer_.reset();
     pipelines_.reset();
@@ -406,6 +437,10 @@ void Engine::run() {
         }
     }
     while (running_) {
+        if (context_->gpuFailureCount() != 0) {
+            exitCode_ = 1;
+            break;
+        }
         const Clock::time_point start = Clock::now();
         frameFlags_ = 0;
         {
@@ -420,8 +455,10 @@ void Engine::run() {
             // with malloc_history: +4.3k live blocks in 4 minutes).
             NS::AutoreleasePool* eventPool = NS::AutoreleasePool::alloc()->init();
             PH_ZONE("Events");
+            const auto eventsStart = Clock::now();
             processEvents();
             eventPool->release();
+            eventPumpMs_ = toMs(Clock::now() - eventsStart);
         }
         if (!running_) break;
 
@@ -453,6 +490,8 @@ void Engine::run() {
         }
         if (presented && options_.benchmark()) {
             recordBenchmarkFrame(timer_->getDeltaTime(), toMs(Clock::now() - start - frameWait_), toMs(frameWait_));
+        } else if (presented) {
+            ++presentedFrames_;
         }
         if (presented && options_.debugCompileStorm && measuring() && samples_.size() == 60) {
             // F3.1 spike: 42 background compiles while frames are measured.
@@ -461,6 +500,8 @@ void Engine::run() {
         }
     }
     context_->waitIdle();
+    if (context_->gpuFailureCount() != 0)
+        exitCode_ = 1;
     if (pipelines_->harvesting()) {
         pipelines_->waitAllFinal();
         if (!pipelines_->writeHarvest()) exitCode_ = 1;
@@ -475,7 +516,8 @@ void Engine::run() {
     if (asyncProbe_ && !asyncProbe_->finish()) exitCode_ = 1;
     if (capture_) {
         if (captured_) {
-            capture_->writePng(options_.capturePath);
+            if (!options_.capturePath.empty() && !capture_->writePng(options_.capturePath))
+                exitCode_ = 1;
         } else {
             LOG_ERROR("No frame captured");
         }
@@ -566,6 +608,7 @@ void Engine::recordBenchmarkFrame(float dt, float cpuMs, float waitMs) {
         record.flags   = frameFlags_;
         record.frameMs = dt * 1000.0f;
         record.cpuMs   = cpuMs;
+        record.eventMs = eventPumpMs_;
         record.waitMs  = waitMs;
         trace_.addFrame(record);
         if (pendingSwitch_) {
@@ -673,6 +716,40 @@ void Engine::finishBenchmark() {
             h.preset = "culling-viz-f6-" + std::to_string(report.width) + "x" + std::to_string(report.height);
         h.validationScope   = "development";
         h.unverifiedDevices = {"physical Apple9 (M3)", "T0 base"};
+    }
+    {
+        auto &r = report.rendering;
+        r.present = true;
+        r.offscreen = options_.offscreen;
+        r.path = options_.visibility                           ? "visibility"
+                 : options_.geometryPath == GeometryPath::Mesh ? "forward-mesh"
+                                                               : "forward-indexed";
+        r.asset = activeBench_->assetSource();
+        r.materialBinning = options_.visibility && options_.materialBinning;
+        if (visibility_) {
+            r.binnedFrames = visibility_->binnedFrames();
+            r.genericFrames = visibility_->genericFrames();
+            r.guideChecks = visibility_->checkCount();
+            r.guideFailures = visibility_->checkFailures();
+        }
+        r.post = bool(post_);
+        r.upscaler = post_ ? post_->effectiveUpscaler() : "none";
+        r.tonemap = options_.tonemap == 1 ? "agx-fit" : options_.tonemap == 2 ? "custom-reinhard" : "aces-fit";
+        r.inputWidth = post_ ? post_->inputWidth() : report.width;
+        r.inputHeight = post_ ? post_->inputHeight() : report.height;
+        r.views = post_ ? options_.temporalViews : 1;
+        r.framesInFlight = options_.framesInFlight;
+        r.gpuFailures = context_->gpuFailureCount();
+        r.autoExposure = bool(post_) && options_.autoExposure;
+        r.exposure = post_ ? post_->lastExposure() * post_->manualExposure() : settings_.exposure;
+        r.edr = displayEDR_;
+        r.headroom = displayHeadroom_;
+        r.potentialHeadroom = displayPotentialHeadroom_;
+        if (post_) {
+            r.temporalFrames = post_->temporalFrames();
+            r.nativeFrames = post_->fallbackFrames();
+            r.historyResets = post_->resetCount();
+        }
     }
     {
         MeshletReport& m = report.meshlets;
@@ -885,6 +962,7 @@ void Engine::switchTestBench(TestBenchType type) {
     currentBench_ = type;
     framesOnBench_ = 0;
     TestBenchParams benchParams;
+    benchParams.scenePath = options_.scenePath;
     benchParams.instances         = options_.sceneInstances;
     benchParams.meshes            = options_.sceneMeshes;
     benchParams.dynamicCpuPercent = options_.dynamicCpuPercent;
@@ -900,9 +978,12 @@ void Engine::switchTestBench(TestBenchType type) {
     renderer_->syncGeometry(*gpuScene_);
     if (mesh_) mesh_->syncGeometry(*gpuScene_);
     // F6.5: a new scene has no history.
-    history_.valid = false;
-    ++history_.generation;
-    history_.lastReset = "bench switch";
+    ++sceneEpoch_;
+    for (auto &h : histories_) {
+        h.valid = false;
+        ++h.generation;
+        h.lastReset = "bench switch";
+    }
     // F5.1: full build of the persistent scene, uploaded through staging.
     store_->clear();
     store_->sync(*ecs_, *gpuScene_);
@@ -1030,6 +1111,12 @@ void Engine::aimCamera(const CameraSetup& setup) {
 
 bool Engine::frame(float dt) {
     NS::AutoreleasePool* pool = NS::AutoreleasePool::alloc()->init();
+    // Quality reference: reconstruct one fixed scene for a complete jitter
+    // cycle, with no history from a different logical scene frame.
+    const bool referenceStart = presentedFrames_ % options_.settledReference == 0;
+    const bool referenceEnd = (presentedFrames_ + 1) % options_.settledReference == 0;
+    if (!referenceStart)
+        dt = 0;
 
     // F3: compilations finished since the last frame become visible now,
     // never while a frame is being encoded.
@@ -1043,7 +1130,34 @@ bool Engine::frame(float dt) {
     bool scriptedCut = false;
     {
         glm::vec3 pos{0.0f}, target{0.0f};
-        if (activeBench_->scriptedCamera(sceneTime_ + dt, pos, target, scriptedCut)) {
+        bool scripted = false;
+        if (options_.temporalScript) {
+            const double time = std::fmod(sceneTime_ + dt, 8.0);
+            const u32 phase = static_cast<u32>(time / 2.0);
+            scriptedCut = phase != static_cast<u32>(std::fmod(sceneTime_, 8.0) / 2.0);
+            auto base = activeBench_->getDefaultCamera();
+            if (currentBench_ == TestBenchType::SceneViewer) {
+                base.position = glm::vec3(-8.0f, 2.2f, 0.0f);
+                base.target = glm::vec3(8.0f, 2.2f, 0.0f);
+                base.orbit = false;
+            } else if (base.orbit)
+                base.position = base.target + glm::vec3(0, 2, base.distance);
+            pos = base.position;
+            target = base.target;
+            if (phase == 0)
+                pos.x += float(time) * 1.2f;
+            else if (phase == 1) {
+                pos += glm::vec3(3, 0.8f, 2);
+                pos.z += float(time - 2) * 0.7f;
+            } else if (phase == 2) {
+                pos += glm::vec3(-2, 0, 1);
+                target += glm::vec3(std::sin(float(time) * 5) * 2, 0, 0);
+            } else
+                pos.x += float(8 - time) * 0.8f;
+            scripted = true;
+        } else
+            scripted = activeBench_->scriptedCamera(sceneTime_ + dt, pos, target, scriptedCut);
+        if (scripted) {
             CameraSetup setup;
             setup.position = pos;
             setup.target   = target;
@@ -1079,6 +1193,12 @@ bool Engine::frame(float dt) {
     frameStats_->update(*timer_, context_->lastGpuMs());
 
     context_->layer()->setDisplaySyncEnabled(settings_.vsync);
+    if (post_ && (presentedFrames_ % 30 == 0 || displayHeadroom_ <= 1.0f)) {
+        const auto display = configureDisplayOutput(window_, context_->layer(), options_.displayOutput);
+        displayHeadroom_ = display.headroom;
+        displayPotentialHeadroom_ = display.potentialHeadroom;
+        displayEDR_ = display.edr;
+    }
 
     // --- Render ------------------------------------------------------------
     MetalContext::Frame frame;
@@ -1092,22 +1212,86 @@ bool Engine::frame(float dt) {
     // F5: the slot's previous frame has completed: its scene counters.
     onSceneCounters(frame.slot);
 
+    MTL::Texture *target = frame.target;
+    const u32 width = static_cast<u32>(target->width()), height = static_cast<u32>(target->height());
+    currentView_ = post_ ? static_cast<u32>(presentedFrames_ % options_.temporalViews) : 0;
+    const glm::vec3 offset(float(currentView_) * 2.0f, 0, 0);
+    const glm::mat4 view = camera_->getView() * glm::translate(glm::mat4(1), -offset);
+    const glm::mat4 unjittered = camera_->getProjection() * view;
+    const glm::vec3 camPos = camera_->getPosition() + offset;
+    float scale = post_ ? options_.renderScale : 1.0f;
+    if (post_ && options_.dynamicResolution) {
+        if (presentedFrames_ > 0 && presentedFrames_ % 30 == 0) {
+            const float gpu = context_->lastGpuMs();
+            if (gpu > options_.drsBudget * 1.1f)
+                dynamicScale_ = std::max(0.5f, dynamicScale_ - 0.0625f);
+            else if (gpu > 0 && gpu < options_.drsBudget * 0.8f)
+                dynamicScale_ = std::min(1.0f, dynamicScale_ + 0.0625f);
+        }
+        scale = dynamicScale_;
+    }
+    if (post_ && options_.resolutionScript) {
+        constexpr float scales[] = {1.0f, 0.75f, 0.5f, 0.875f};
+        scale = scales[(presentedFrames_ / options_.resolutionScript) % 4];
+    }
+    if (options_.referenceScale > 1)
+        scale = float(options_.referenceScale);
+    const u32 renderWidth = std::max(32u, static_cast<u32>(float(width) * scale));
+    const u32 renderHeight = std::max(32u, static_cast<u32>(float(height) * scale));
+    if (renderWidth > 8192 || renderHeight > 8192)
+        throw std::runtime_error("Internal render dimensions exceed the 8192-pixel Hi-Z limit");
+    float effectiveExposure = settings_.exposure;
+    if (options_.exposureScript) {
+        constexpr float factors[] = {0.25f, 1.0f, 4.0f, 1.0f};
+        effectiveExposure *= factors[static_cast<u32>(sceneTime_ * 2) % 4];
+    }
+    renderBackingWidth_ = std::max(width, renderWidth);
+    renderBackingHeight_ = std::max(height, renderHeight);
+    GPUTemporalParams temporal{};
+    std::memcpy(temporal.currentViewProjection, &unjittered[0][0], 64);
+    std::memcpy(temporal.previousViewProjection, history().viewProj, 64);
+    temporal.renderSize[0] = float(renderWidth);
+    temporal.renderSize[1] = float(renderHeight);
+    temporal.deltaTime = dt;
+    temporal.manualExposure = effectiveExposure;
+    temporal.historyValid =
+        history().valid &&
+        (!visibility_ || !visibility_->needsPoseReset(currentView_, store_->instances().size_bytes()));
+    temporal.viewIndex = currentView_;
+    if (post_) {
+        const bool cut =
+            scriptedCut || (history().valid && (glm::length(camPos - history().cameraPosition) > 4.0f ||
+                                                glm::dot(camera_->getFront(), history().cameraFront) < 0.9063f));
+        temporal =
+            post_->prepareFrame(frame.slot, frame.index, currentView_, renderWidth, renderHeight, width, height,
+                                &unjittered[0][0], sceneEpoch_, cut,
+                                (options_.historyResetEvery && presentedFrames_ % options_.historyResetEvery == 0) ||
+                                    (options_.settledReference > 1 && referenceStart) ||
+                                    visibility_->needsPoseReset(currentView_, store_->instances().size_bytes()),
+                                history().valid ? static_cast<float>(sceneTime_ - history().sceneTime) : dt,
+                                effectiveExposure, displayHeadroom_);
+        if (!temporal.historyValid && history().valid) {
+            history().valid = false;
+            ++history().generation;
+            history().lastReset = post_->histories().get(currentView_).resetReason;
+        }
+    }
+    temporal.debugFlags = options_.debugMotionCorrupt ? 1u : 0u;
+    glm::mat4 projected = unjittered;
+    applyRasterJitter(&projected[0][0], &unjittered[0][0], temporal.jitter[0], temporal.jitter[1], renderWidth,
+                      renderHeight);
     FrameConstants constants{};
-    std::memcpy(constants.viewProjection, &camera_->getViewProjection()[0][0], sizeof(constants.viewProjection));
-    std::memcpy(constants.view, &camera_->getView()[0][0], sizeof(constants.view));
-    const glm::vec3 camPos = camera_->getPosition();
+    std::memcpy(constants.viewProjection, &projected[0][0], sizeof(constants.viewProjection));
+    std::memcpy(constants.view, &view[0][0], sizeof(constants.view));
     constants.cameraPosition[0] = camPos.x;
     constants.cameraPosition[1] = camPos.y;
     constants.cameraPosition[2] = camPos.z;
     constants.cameraPosition[3] = static_cast<float>(timer_->getTotalTime());
     constants.lightCount = static_cast<u32>(lights_.size());
     constants.debugMode  = static_cast<u32>(settings_.debugMode);
-    constants.exposure   = settings_.exposure;
+    constants.exposure = effectiveExposure;
     constants.frameIndex = static_cast<u32>(frame.index);
 
-    MTL::Texture* target = frame.drawable->texture();
-    const u32 width  = static_cast<u32>(target->width());
-    const u32 height = static_cast<u32>(target->height());
 
     // Capture the last frame of a run (or the first frame when interactive).
     const bool lastFrame = !options_.benchmark() || presentedFrames_ + 1 == options_.warmup + options_.frames;
@@ -1119,14 +1303,14 @@ bool Engine::frame(float dt) {
         u32 flags = CULL_FLAG_FRUSTUM;
         if (options_.cullDistance > 0.0f) flags |= CULL_FLAG_DISTANCE;
         if (options_.cullMinPixels > 0.0f) flags |= CULL_FLAG_SIZE;
-        cullParams_ = makeCullParams(camera_->getViewProjection(), camera_->getProjection()[1][1], height, camPos,
+        cullParams_ = makeCullParams(projected, camera_->getProjection()[1][1], renderHeight, camPos,
                                      camera_->getFront(), camera_->getNear(), flags, options_.cullDistance,
                                      options_.cullMinPixels, store_->slotCapacity());
     }
     SceneRenderer::FrameParams sceneParams;
     sceneParams.slot         = frame.slot;
-    sceneParams.width        = width;
-    sceneParams.height       = height;
+    sceneParams.width = renderWidth;
+    sceneParams.height = renderHeight;
     sceneParams.mode         = options_.gpuDriven;
     sceneParams.cull         = cullParams_;
     sceneParams.motionSinCos = motionSinCos_.data();
@@ -1143,37 +1327,46 @@ bool Engine::frame(float dt) {
         // valid candidate as visible), never correctness.
         const glm::vec3 front = camera_->getFront();
         const char* reset = nullptr;
-        if (history_.valid) {
-            if (history_.width != width || history_.height != height) reset = "resize";
+        if (history().valid) {
+            if (history().width != width || history().height != height)
+                reset = "resize";
             else if (scriptedCut) reset = "camera cut (script)";
-            else if (glm::length(camPos - history_.cameraPosition) > 4.0f || glm::dot(front, history_.cameraFront) < 0.9063f)
+            else if (glm::length(camPos - history().cameraPosition) > 4.0f ||
+                     glm::dot(front, history().cameraFront) < 0.9063f)
                 reset = "camera cut";
             else if (options_.historyResetEvery > 0 && presentedFrames_ % options_.historyResetEvery == 0)
                 reset = "--history-reset-every";
         }
         if (reset) {
-            history_.valid = false;
-            ++history_.generation;
-            history_.lastReset = reset;
+            history().valid = false;
+            ++history().generation;
+            history().lastReset = reset;
             if (measuring()) ++meshletSamples_.historyResets;
         }
         MeshRenderer::FrameParams mp;
         mp.slot   = frame.slot;
-        mp.width  = width;
-        mp.height = height;
-        std::memcpy(mp.cull.viewProj, &camera_->getViewProjection()[0][0], sizeof(mp.cull.viewProj));
+        mp.width = renderWidth;
+        mp.height = renderHeight;
+        mp.allocationWidth = renderBackingWidth_;
+        mp.allocationHeight = renderBackingHeight_;
+        mp.viewIndex = currentView_;
+        std::memcpy(mp.cull.viewProj, &projected[0][0], sizeof(mp.cull.viewProj));
         std::memcpy(mp.cull.planes, cullParams_.planes, sizeof(mp.cull.planes));
         mp.cull.cameraPosition[0] = camPos.x;
         mp.cull.cameraPosition[1] = camPos.y;
         mp.cull.cameraPosition[2] = camPos.z;
         mp.cull.nearPlane         = camera_->getNear();
-        std::memcpy(mp.prevViewProj, history_.viewProj, sizeof(mp.prevViewProj));
-        mp.historyValid = history_.valid;
+        std::memcpy(mp.prevViewProj, history().viewProj, sizeof(mp.prevViewProj));
+        mp.historyValid = history().valid;
         mp.corrupt      = meshletCheckFrame ? options_.debugMeshletsCorrupt : MeshletCorruption::None;
         mesh_->requestCheckReadback(meshletCheckFrame);
         mesh_->prepareFrame(*store_, *gpuScene_, mp);
         if (mesh_->usingFallbackPipeline()) frameFlags_ |= FrameFallbackDraw;
     }
+    if (visibility_)
+        visibility_->prepareFrame(frame.slot, renderWidth, renderHeight, renderBackingWidth_, renderBackingHeight_,
+                                  *store_, textures_->getDefaultNormal(), constants.exposure, constants.debugMode,
+                                  temporal, constants);
     overlays_->prepareFrame(overlayMode_, constants.lightCount, width, height);
     if (renderer_->usingFallback()) frameFlags_ |= FrameFallbackDraw;
     const Clock::time_point s4 = Clock::now();
@@ -1184,9 +1377,21 @@ bool Engine::frame(float dt) {
         overlayMode_      = OverlayMode::None;
         settings_.overlay = static_cast<int>(overlayMode_);
     }
-    const GraphKey key{width, height, options_.ui, capture_ != nullptr, options_.debugSplitEncoding,
-                       options_.debugAsyncCompute, overlayMode_, options_.gpuDriven, renderer_->buffers().version(),
-                       mesh_ ? mesh_->version() : 0, mesh_ ? static_cast<u32>(mesh_->options().debugView) : 0};
+    const GraphKey key{width,
+                       height,
+                       options_.ui,
+                       capture_ != nullptr,
+                       options_.debugSplitEncoding,
+                       options_.debugAsyncCompute,
+                       overlayMode_,
+                       options_.gpuDriven,
+                       renderer_->buffers().version(),
+                       mesh_ ? mesh_->version() : 0,
+                       mesh_ ? static_cast<u32>(mesh_->options().debugView) : 0,
+                       target->pixelFormat() == MTL::PixelFormatRGBA16Float ? rg::Format::RGBA16Float
+                                                                            : rg::Format::BGRA8Srgb,
+                       renderBackingWidth_,
+                       renderBackingHeight_};
     if (!(key == graphKey_) || !graphExecutor_->valid()) {
         frameFlags_ |= FrameGraphCompile;
         if (key.width != graphKey_.width || key.height != graphKey_.height) frameFlags_ |= FrameResize;
@@ -1222,6 +1427,8 @@ bool Engine::frame(float dt) {
     if (asyncProbe_) asyncProbe_->bind(*graphExecutor_, frame.slot);
     {
         PH_ZONE("Graph execute");
+        if (post_)
+            post_->bindFrame(*graphExecutor_);
         graphExecutor_->execute(frame);
     }
     if (graphDebug_) graphDebug_->frameEncoded(frame.slot, frame.index);
@@ -1253,16 +1460,45 @@ bool Engine::frame(float dt) {
         if (st.structure) ++ss.structureChanges;
     }
     if (checkScene && !checkGpuScene(frame.slot)) exitCode_ = 1;
-    if (mesh_ && mesh_->twoPhase()) {
+    if (visibility_ && options_.debugVisibility) {
+        context_->waitIdle();
+        if (!visibility_->check(*gpuScene_))
+            exitCode_ = 1;
+        if (post_ && !post_->checkExposure())
+            exitCode_ = 1;
+    }
+    if (post_)
+        post_->finishFrame(&unjittered[0][0]);
+    if (mesh_) {
         // Hi-Z final of this frame wrote the history with this frame's view.
-        history_.valid = true;
-        std::memcpy(history_.viewProj, &camera_->getViewProjection()[0][0], sizeof(history_.viewProj));
-        history_.width          = width;
-        history_.height         = height;
-        history_.cameraPosition = camPos;
-        history_.cameraFront    = camera_->getFront();
+        history().valid = true;
+        std::memcpy(history().viewProj, &projected[0][0], sizeof(history().viewProj));
+        history().width = width;
+        history().height = height;
+        history().sceneTime = sceneTime_;
+        history().cameraPosition = camPos;
+        history().cameraFront = camera_->getFront();
     }
     if (meshletCheckFrame && !checkMeshlets(frame.slot)) exitCode_ = 1;
+    const u64 captureFrame = presentedFrames_ / options_.settledReference;
+    if (capture_ && !options_.captureSequence.empty() && referenceEnd && captureFrame % options_.captureEvery == 0) {
+        context_->waitIdle();
+        char name[64];
+        std::snprintf(name, sizeof(name), "frame-%06llu.png", static_cast<unsigned long long>(captureFrame));
+        if (!capture_->writePng((std::filesystem::path(options_.captureSequence) / name).string()))
+            exitCode_ = 1;
+        auto metadataPath = std::filesystem::path(options_.captureSequence) / name;
+        metadataPath.replace_extension(".json");
+        std::ofstream metadata(metadataPath);
+        metadata << "{\"frame\":" << captureFrame << ",\"submitted_frame\":" << presentedFrames_
+                 << ",\"reference_samples\":" << options_.settledReference << ",\"view\":" << currentView_
+                 << ",\"camera_cut\":" << (scriptedCut ? "true" : "false")
+                 << ",\"history_reset\":" << (temporal.historyValid ? "false" : "true")
+                 << ",\"input_width\":" << renderWidth << ",\"input_height\":" << renderHeight << ",\"jitter\":["
+                 << temporal.jitter[0] << "," << temporal.jitter[1] << "]}\n";
+        if (!metadata)
+            exitCode_ = 1;
+    }
     if (gpuCapture_) gpuCapture_->endFrame();
     // F4.1: no overlap between consecutive frames on the GPU.
     if (options_.gpuTimingSerial) context_->waitIdle();
@@ -1397,8 +1633,8 @@ bool Engine::checkMeshlets(u32 slot) {
     if (!r.pass) ++meshletFailures_;
     // stdout: scripts and the negative controls read these lines.
     std::printf("MESHLETS frame %u | history %s (generation %llu, last reset: %s) | %s\n", presentedFrames_,
-                history_.valid ? "valid" : "invalid", static_cast<unsigned long long>(history_.generation),
-                history_.lastReset, formatMeshletCheck(r).c_str());
+                history().valid ? "valid" : "invalid", static_cast<unsigned long long>(history().generation),
+                history().lastReset, formatMeshletCheck(r).c_str());
     std::fflush(stdout);
     return r.pass;
 }
@@ -1490,7 +1726,7 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
     using namespace rg;
     frameGraph_.reset();
 
-    const TextureDesc screen{Format::BGRA8Srgb, width, height};
+    const TextureDesc screen{graphKey_.outputFormat, width, height};
     // The drawable: undefined at frame start, presented after the graph; a
     // different texture every frame (the drawable wait orders its reuse).
     drawableRef_ = frameGraph_.importTexture("Drawable", screen, ImportOutput | ImportPerFrame);
@@ -1520,7 +1756,16 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
     }
 
     // F6: phase A ("Forward"), Hi-Z, phase B: object + mesh shaders.
-    if (!scenario_ && mesh_) mesh_->addRasterPasses(frameGraph_, color, width, height);
+    if (!scenario_ && mesh_) {
+        const auto depth = mesh_->addRasterPasses(frameGraph_, color, renderBackingWidth_, renderBackingHeight_);
+        if (visibility_) {
+            visibility_->addResolve(frameGraph_, color, depth);
+            color = post_ ? post_->addToGraph(frameGraph_, *visibility_, drawableRef_, graphKey_.outputFormat)
+                          : visibility_->addPresent(frameGraph_, drawableRef_);
+            visibility_->addChecks(frameGraph_);
+            visibility_->addPoseSnapshot(frameGraph_);
+        }
+    }
 
     if (!scenario_ && !mesh_) frameGraph_.addPass(
         "Forward", PassType::Raster,
@@ -1571,21 +1816,23 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
     if (graphDebug_) graphDebug_->addToGraph(frameGraph_);
 
     if (capture_) {
+        captureColorRef_ =
+            post_ && graphKey_.outputFormat == Format::RGBA16Float ? post_->addSDRCapture(frameGraph_, color) : color;
         capture_->prepare(width, height);
         captureRef_ = frameGraph_.importBuffer("Capture readback", {capture_->readbackSize()}, ImportOutput);
         frameGraph_.addPass(
             "Frame capture", PassType::Blit,
-            [&](PassBuilder& b) {
-                b.read(color, Usage::CopySrc, StageBlit);
+            [&](PassBuilder &b) {
+                b.read(captureColorRef_, Usage::CopySrc, StageBlit);
                 b.write(captureRef_, Usage::CopyDst, StageBlit);
                 b.setSideEffect();
             },
-            [this](PassContext& ctx) {
-                // In the graph for the whole run (no recompilation on the
-                // capture frame); copies only on the frame being captured.
-                if (!captureThisFrame_) return;
-                capture_->encode(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),
-                                 static_cast<MTL::Texture*>(ctx.texture(drawableRef_)));
+            [this](PassContext &ctx) {
+                // Always copy when capture instrumentation is enabled: an empty
+                // encoder may be dropped by Metal and invalidate timestamps.
+                capture_->encode(static_cast<MTL4::ComputeCommandEncoder *>(ctx.encoder()),
+                                 static_cast<MTL::Texture *>(ctx.texture(captureColorRef_)),
+                                 captureThisFrame_ || !options_.captureSequence.empty());
             });
     }
 

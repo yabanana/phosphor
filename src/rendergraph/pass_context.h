@@ -14,6 +14,10 @@ namespace phosphor::rg {
 class PassContext {
 public:
     virtual ~PassContext() = default;
+    /// Only for External passes: borrowed native command buffer and fence.
+    /// The executor owns encoder boundaries, dependencies and fence lifetime.
+    [[nodiscard]] virtual void *commandBuffer() const { return nullptr; }
+    [[nodiscard]] virtual void *externalFence() const { return nullptr; }
 
     /// Encoder of the pass's type, already inside the (fused) render pass.
     [[nodiscard]] virtual void* encoder() const = 0;

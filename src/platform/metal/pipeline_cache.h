@@ -1,4 +1,5 @@
 #pragma once
+#include <future>
 
 #include "core/types.h"
 #include "pipeline/compile_queue.h"
@@ -14,6 +15,13 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+
+namespace MTLFX {
+class TemporalScalerDescriptor;
+}
+namespace MTL4FX {
+class TemporalScaler;
+}
 
 namespace phosphor {
 
@@ -106,6 +114,11 @@ public:
     [[nodiscard]] double requestMs() const { return requestMs_; }
     [[nodiscard]] bool archiveLoaded() const { return archive_ != nullptr; }
     [[nodiscard]] const std::string& archiveStatus() const { return archiveStatus_; }
+
+    // F8: framework compilation shares the utility-QoS workers/compiler.
+    // The future owns its result; discarding an obsolete request releases it.
+    std::future<std::shared_ptr<MTL4FX::TemporalScaler>>
+    requestTemporalScaler(MTLFX::TemporalScalerDescriptor *descriptor);
 
     // --- F3.4 harvest -----------------------------------------------------------
     [[nodiscard]] bool harvesting() const { return serializer_ != nullptr; }

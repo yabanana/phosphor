@@ -14,6 +14,7 @@
 namespace phosphor {
 
 class GpuTimestamps;
+class PipelineCache;
 
 [[nodiscard]] MTL::PixelFormat toMetalFormat(rg::Format format);
 [[nodiscard]] MTL::Stages      toMetalStages(rg::Stages stages);
@@ -60,34 +61,34 @@ class GpuTimestamps;
 
 class MetalGraphExecutor {
 public:
-    explicit MetalGraphExecutor(MetalContext& context);
-    ~MetalGraphExecutor();
+  explicit MetalGraphExecutor(MetalContext &context, PipelineCache *pipelines = nullptr);
+  ~MetalGraphExecutor();
 
-    MetalGraphExecutor(const MetalGraphExecutor&) = delete;
-    MetalGraphExecutor& operator=(const MetalGraphExecutor&) = delete;
+  MetalGraphExecutor(const MetalGraphExecutor &) = delete;
+  MetalGraphExecutor &operator=(const MetalGraphExecutor &) = delete;
 
-    /// Compile `graph` and rebuild the physical resources.  `graph` must
-    /// outlive the executor's use of it (execute() calls its callbacks).
-    /// Returns false (and logs the errors) if the graph is invalid.
-    bool compile(const rg::RenderGraph& graph, const rg::CompileOptions& options = {});
+  /// Compile `graph` and rebuild the physical resources.  `graph` must
+  /// outlive the executor's use of it (execute() calls its callbacks).
+  /// Returns false (and logs the errors) if the graph is invalid.
+  bool compile(const rg::RenderGraph &graph, const rg::CompileOptions &options = {});
 
-    [[nodiscard]] const rg::CompiledGraph& compiled() const { return compiled_; }
-    [[nodiscard]] bool                     valid()    const { return graph_ && compiled_.ok; }
-    /// Number of successful compile() calls (graph cache diagnostics).
-    [[nodiscard]] u32                      compileCount() const { return compileCount_; }
+  [[nodiscard]] const rg::CompiledGraph &compiled() const { return compiled_; }
+  [[nodiscard]] bool valid() const { return graph_ && compiled_.ok; }
+  /// Number of successful compile() calls (graph cache diagnostics).
+  [[nodiscard]] u32 compileCount() const { return compileCount_; }
 
-    /// F4.1: time the units of the graph (null: no timestamps).  Takes effect
-    /// at the next compile().
-    void setTimestamps(GpuTimestamps* timestamps) { timestamps_ = timestamps; }
+  /// F4.1: time the units of the graph (null: no timestamps).  Takes effect
+  /// at the next compile().
+  void setTimestamps(GpuTimestamps *timestamps) { timestamps_ = timestamps; }
 
-    void bindTexture(rg::TextureRef texture, MTL::Texture* physical);
-    void bindBuffer(rg::BufferRef buffer, MTL::Buffer* physical);
+  void bindTexture(rg::TextureRef texture, MTL::Texture *physical);
+  void bindBuffer(rg::BufferRef buffer, MTL::Buffer *physical);
 
-    /// Encode the whole graph into the frame's command buffer.
-    void execute(MetalContext::Frame& frame);
+  /// Encode the whole graph into the frame's command buffer.
+  void execute(MetalContext::Frame &frame);
 
-    [[nodiscard]] MTL::Texture* texture(u32 resource) const { return textures_[resource]; }
-    [[nodiscard]] MTL::Buffer*  buffer(u32 resource)  const { return buffers_[resource]; }
+  [[nodiscard]] MTL::Texture *texture(u32 resource) const { return textures_[resource]; }
+  [[nodiscard]] MTL::Buffer *buffer(u32 resource) const { return buffers_[resource]; }
 
 private:
     class Sizer;
@@ -115,6 +116,9 @@ private:
     /// (it signals the split fence) and open the next (it waits for it).
     void cutSubmissionForSplit(MetalContext::Frame& frame);
 
+    PipelineCache *pipelines_ = nullptr;
+    u32 externalAnchor_ = ~0u;
+    MTL::Fence *externalFence_ = nullptr;
     MetalContext&            context_;
     TransientHeap            heap_;
     GpuTimestamps*           timestamps_ = nullptr;

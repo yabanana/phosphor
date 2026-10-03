@@ -53,7 +53,8 @@ std::unique_ptr<TestBench> createTestBench(TestBenchType type, const TestBenchPa
         case TestBenchType::TorusDemo:   return std::make_unique<TorusDemo>();
         case TestBenchType::PBRGrid:     return std::make_unique<PBRGrid>();
         case TestBenchType::StressTest:  return std::make_unique<StressTest>();
-        case TestBenchType::SceneViewer: return std::make_unique<SceneViewer>();
+        case TestBenchType::SceneViewer:
+            return std::make_unique<SceneViewer>(params.scenePath);
         case TestBenchType::ManyLights:  return std::make_unique<ManyLights>();
         case TestBenchType::CornellBox:  return std::make_unique<CornellBox>();
         case TestBenchType::CullingViz:  return std::make_unique<CullingViz>(params.cullingScript);

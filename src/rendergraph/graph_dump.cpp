@@ -34,6 +34,8 @@ const char* passTypeName(PassType t) {
     case PassType::Raster:  return "raster";
     case PassType::Compute: return "compute";
     case PassType::Blit:    return "blit";
+    case PassType::External:
+        return "external";
     }
     return "?";
 }

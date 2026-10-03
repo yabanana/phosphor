@@ -117,7 +117,7 @@ TEST_CASE("scene check: the CPU references pass, on and off") {
 TEST_CASE("scene check: negative controls, every corruption is reported") {
     {
         Fixture f; // a stale non-matrix field (a delta that did not land)
-        f.instances[f.store.buckets()[0].firstSlot].pad ^= 1u;
+        f.instances[f.store.buckets()[0].firstSlot].generation ^= 1u;
         const SceneCheckResult r = f.check();
         CHECK_FALSE(r.pass);
         CHECK(r.instanceErrors == 1);

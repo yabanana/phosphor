@@ -46,6 +46,7 @@ struct FrameRecord {
     float cpuMs   = 0.0f;
     float waitMs  = 0.0f;
     float gpuMs   = 0.0f; // filled at the end of the run (commit feedback)
+    float eventMs = 0.0f; // measured SDL/AppKit event pump, separate from renderer CPU work
 };
 
 struct SwitchRecord {
@@ -97,6 +98,8 @@ struct HitchReport {
     float worstPostSwitchCpuMs = 0.0f;
     float worstPostSwitchRatio = 0.0f; // max over window frames of cpuMs / its bench threshold
     float renderThreadCompileMs = 0.0f; // sum over switches
+    float worstEventMs = 0.0f;
+    u32 platformStallFrames = 0; // post-switch event pump > 16.67 ms, reported separately
     // Switch phases: mean and max over switches (ms).
     float totalMean = 0.0f, totalMax = 0.0f;
     float waitIdleMean = 0.0f, waitIdleMax = 0.0f;

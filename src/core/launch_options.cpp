@@ -435,6 +435,202 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
                 error = std::string(arg) + ": expected " + std::to_string(lo) + "..128 (mesh shader output limit)";
                 return false;
             }
+        } else if (arg == "--capture-sequence") {
+            if (!needString(out.captureSequence))
+                return false;
+        } else if (arg == "--capture-every") {
+            if (!needCount(out.captureEvery))
+                return false;
+            if (out.captureEvery == 0) {
+                error = "--capture-every must be positive";
+                return false;
+            }
+        } else if (arg == "--temporal-script") {
+            out.temporalScript = true;
+        } else if (arg == "--exposure-script") {
+            out.exposureScript = true;
+        } else if (arg == "--offscreen") {
+            out.offscreen = true;
+        } else if (arg == "--frames-in-flight") {
+            if (!needCount(out.framesInFlight))
+                return false;
+            if (out.framesInFlight < 1 || out.framesInFlight > 3) {
+                error = "--frames-in-flight: expected 1..3";
+                return false;
+            }
+        } else if (arg == "--debug-motion-scale") {
+            if (!needFloat(out.debugMotionScale))
+                return false;
+            if (std::abs(out.debugMotionScale) > 2) {
+                error = "--debug-motion-scale: expected -2..2";
+                return false;
+            }
+        } else if (arg == "--debug-jitter-variant") {
+            if (!needCount(out.jitterVariant))
+                return false;
+            if (out.jitterVariant > 3) {
+                error = "--debug-jitter-variant: expected 0..3";
+                return false;
+            }
+        } else if (arg == "--debug-feedback-delay-ms") {
+            if (!needCount(out.feedbackDelayMs))
+                return false;
+            if (out.feedbackDelayMs > 1000) {
+                error = "Feedback delay is limited to 1000 ms";
+                return false;
+            }
+        } else if (arg == "--debug-feedback-error") {
+            if (!needCount(out.feedbackFailFrame))
+                return false;
+        } else if (arg == "--output") {
+            const auto value = needValue();
+            if (!value)
+                return false;
+            out.post = true;
+            if (*value == "sdr")
+                out.displayOutput = 0;
+            else if (*value == "edr")
+                out.displayOutput = 1;
+            else if (*value == "auto")
+                out.displayOutput = 2;
+            else {
+                error = "--output: expected sdr, edr or auto";
+                return false;
+            }
+        } else if (arg == "--debug-upscaler-reset") {
+            out.debugUpscalerReset = true;
+            out.post = true;
+        } else if (arg == "--debug-visibility") {
+            out.debugVisibility = true;
+            out.visibility = true;
+        } else if (arg == "--debug-exposure-corrupt") {
+            out.debugExposureCorrupt = true;
+            out.post = true;
+        } else if (arg == "--debug-motion-corrupt") {
+            out.debugMotionCorrupt = true;
+        } else if (arg == "--post") {
+            out.post = true;
+        } else if (arg == "--upscaler") {
+            const auto value = needValue();
+            if (!value)
+                return false;
+            out.post = true;
+            if (*value == "temporal")
+                out.temporalUpscale = true;
+            else if (*value == "native")
+                out.temporalUpscale = false;
+            else {
+                error = "--upscaler: expected native or temporal";
+                return false;
+            }
+        } else if (arg == "--auto-exposure") {
+            out.autoExposure = true;
+            out.post = true;
+        } else if (arg == "--tonemap") {
+            const auto value = needValue();
+            if (!value)
+                return false;
+            out.post = true;
+            if (*value == "aces")
+                out.tonemap = 0;
+            else if (*value == "agx")
+                out.tonemap = 1;
+            else if (*value == "custom")
+                out.tonemap = 2;
+            else {
+                error = "--tonemap: expected aces, agx or custom";
+                return false;
+            }
+        } else if (arg == "--reference-scale") {
+            if (!needCount(out.referenceScale))
+                return false;
+            out.post = true;
+            if (out.referenceScale != 1 && out.referenceScale != 2 && out.referenceScale != 4 &&
+                out.referenceScale != 8) {
+                error = "--reference-scale: expected 1, 2, 4 or 8";
+                return false;
+            }
+        } else if (arg == "--settled-reference") {
+            if (!needCount(out.settledReference))
+                return false;
+            if (out.settledReference < 16 || out.settledReference > 64) {
+                error = "--settled-reference: expected 16..64 samples";
+                return false;
+            }
+        } else if (arg == "--render-scale") {
+            if (!needFloat(out.renderScale))
+                return false;
+            out.post = true;
+            if (out.renderScale < 0.5f || out.renderScale > 1.0f) {
+                error = "--render-scale: expected 0.5..1";
+                return false;
+            }
+        } else if (arg == "--sharpen") {
+            if (!needFloat(out.sharpening))
+                return false;
+            out.post = true;
+            if (out.sharpening < 0 || out.sharpening > 1) {
+                error = "--sharpen: expected 0..1";
+                return false;
+            }
+        } else if (arg == "--tone-white") {
+            if (!needFloat(out.toneWhite))
+                return false;
+            out.post = true;
+            if (out.toneWhite < 0.1f || out.toneWhite > 100) {
+                error = "--tone-white: expected 0.1..100";
+                return false;
+            }
+        } else if (arg == "--dynamic-resolution") {
+            out.dynamicResolution = true;
+            out.post = true;
+        } else if (arg == "--drs-budget") {
+            if (!needFloat(out.drsBudget))
+                return false;
+            out.post = true;
+            if (out.drsBudget < 0.1f || out.drsBudget > 100) {
+                error = "--drs-budget: expected 0.1..100 ms";
+                return false;
+            }
+        } else if (arg == "--resolution-script") {
+            if (!needCount(out.resolutionScript))
+                return false;
+            out.post = true;
+        } else if (arg == "--temporal-views") {
+            if (!needCount(out.temporalViews))
+                return false;
+            out.post = true;
+            if (out.temporalViews < 1 || out.temporalViews > 4) {
+                error = "--temporal-views: expected 1..4";
+                return false;
+            }
+        } else if (arg == "--render-path") {
+            const auto value = needValue();
+            if (!value)
+                return false;
+            if (*value == "forward")
+                out.visibility = false;
+            else if (*value == "visibility")
+                out.visibility = true;
+            else {
+                error = "--render-path: expected forward or visibility";
+                return false;
+            }
+        } else if (arg == "--material-binning") {
+            const auto value = needValue();
+            if (!value)
+                return false;
+            if (*value == "on")
+                out.materialBinning = true;
+            else if (*value == "off")
+                out.materialBinning = false;
+            else {
+                error = "--material-binning: expected on or off";
+                return false;
+            }
+        } else if (arg == "--scene") {
+            if (!needString(out.scenePath))
+                return false;
         } else if (arg == "--resolution") {
             const auto value = needValue();
             if (!value) return false;
@@ -498,6 +694,42 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             }
         } else {
             error = "unknown option " + std::string(arg);
+            return false;
+        }
+    }
+    if ((out.debugMotionCorrupt || out.debugExposureCorrupt) && !out.debugVisibility) {
+        error = "--debug-motion-corrupt requires --debug-visibility";
+        return false;
+    }
+    if (!out.captureSequence.empty() && !out.capturePath.empty()) {
+        error = "Choose --capture or --capture-sequence, not both";
+        return false;
+    }
+    if (out.offscreen && !out.benchmark()) {
+        error = "--offscreen requires --frames";
+        return false;
+    }
+    if (out.referenceScale > 1 && (out.temporalUpscale || out.dynamicResolution || out.resolutionScript)) {
+        error = "Supersampled reference requires fixed native reconstruction";
+        return false;
+    }
+    if (out.settledReference > 1 &&
+        (!out.temporalUpscale || !out.fixedTimestep || out.warmup != 0 || out.dynamicResolution ||
+         out.resolutionScript || out.temporalViews != 1 || !out.benchmark())) {
+        error =
+            "Settled reference requires fixed timestep, temporal upscaling, one view, zero warmup and fixed resolution";
+        return false;
+    }
+    if (out.post)
+        out.visibility = true;
+    if (out.visibility) {
+        if (out.graphScenario) {
+            error = "Visibility is unavailable in synthetic graph scenarios";
+            return false;
+        }
+        out.geometryPath = GeometryPath::Mesh;
+        if (out.meshletMaxTriangles > 128) {
+            error = "Visibility IDs allow at most 128 triangles per meshlet";
             return false;
         }
     }

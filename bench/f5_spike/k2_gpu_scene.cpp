@@ -252,7 +252,7 @@ Scene makeScene(const Layout& L, const Geometry& geo) {
                 in.meshIndex = 0xFFFFFFF0u;
                 in.materialIndex = rng.next();
                 in.flags = (rng.next() & 0xFu) & ~ph::INSTANCE_FLAG_VALID;
-                in.pad = 0;
+                in.generation = 0;
                 continue;
             }
             const glm::quat q = glm::normalize(glm::quat(rng.range(-1, 1) + 1.5f, rng.range(-1, 1), rng.range(-1, 1), rng.range(-1, 1)));
@@ -269,7 +269,7 @@ Scene makeScene(const Layout& L, const Geometry& geo) {
             in.meshIndex     = mesh;
             in.materialIndex = 0;
             in.flags         = 1u | ph::INSTANCE_FLAG_VALID | (mirrored ? ph::INSTANCE_FLAG_MIRRORED : 0u);
-            in.pad           = 0;
+            in.generation = 0;
             s.mirrored += mirrored;
             s.valid += 1;
         }

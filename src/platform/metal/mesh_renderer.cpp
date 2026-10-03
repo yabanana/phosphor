@@ -12,6 +12,7 @@
 #include "renderer/meshlet_cull_reference.h"
 #include "renderer/meshlet_layout.h"
 #include "renderer/scene_store.h"
+#include "renderer/visibility_math.h"
 #include "rendergraph/pass_context.h"
 
 #include <algorithm>
@@ -85,6 +86,18 @@ MeshRenderer::MeshRenderer(MetalContext& context, PipelineCache& pipelines, Scen
     }
     generic_ = pipelines_.request(meshDesc(pipe::forward::genericDesc(rg::Format::BGRA8Srgb), "Meshlet forward (generic)"));
     variants_.assign(pipe::forward::variantCount(), pipe::INVALID_PIPELINE);
+    if (options_.visibility) {
+        if (!options_.objectStage || options_.triangleCull || options_.debugView != MeshletDebugView::None)
+            throw std::runtime_error("Visibility needs the object-stage mesh path without triangle-cull/debug views");
+        for (u32 pass = 1; pass <= 2; ++pass) {
+            auto d = meshDesc(pipe::forward::genericDesc(rg::Format::R32Uint), "Visibility raster");
+            d.functions[0] = pass == 1 ? "visibility_object_opaque" : "visibility_object_alpha";
+            d.functions[1] = "visibility_mesh";
+            d.functions[2] = pass == 1 ? "visibility_opaque_fs" : "visibility_alpha_fs";
+            (pass == 1 ? visibilityOpaque_ : visibilityAlpha_) = pipelines_.request(d);
+        }
+    }
+
     {
         pipe::PipelineDesc d = meshDesc(pipe::forward::genericDesc(rg::Format::BGRA8Srgb), "Meshlet debug");
         d.functions[1] = MESHLET_MESH_DEBUG_FN;
@@ -115,7 +128,8 @@ MeshRenderer::MeshRenderer(MetalContext& context, PipelineCache& pipelines, Scen
     drawTables_[1] = newTable(device, MR_BIND_COUNT, 1, "Meshlet phase B arguments");
     // The pyramid exists in every mesh-path mode (frustum/off bind it without
     // reading it, so the object shader's texture slot is always valid).
-    hiz_ = std::make_unique<HiZBuilder>(context_, pipelines_, options_.hiz);
+    hizViews_[0] = std::make_unique<HiZBuilder>(context_, pipelines_, options_.hiz);
+    hiz_ = hizViews_[0].get();
     LOG_INFO("Mesh path: meshlet cull %s, Hi-Z %s, debug view %s", meshletCullName(options_.cull), hiz_->backendName(),
              meshletDebugViewName(options_.debugView));
 }
@@ -129,6 +143,8 @@ MeshRenderer::~MeshRenderer() {
 }
 
 void MeshRenderer::requestAllVariants() {
+    if (options_.visibility)
+        return;
     for (u32 i = 0; i < variants_.size(); ++i) {
         if (variants_[i] == pipe::INVALID_PIPELINE) {
             variants_[i] = pipelines_.request(meshDesc(
@@ -217,7 +233,9 @@ void MeshRenderer::loadScene(const SceneStore& store, const GpuScene& scene) {
 }
 
 void MeshRenderer::ensureCapacity(u64 capacity, u32 slotCount) {
-    const u64 cap  = grow(capacity_, std::max<u64>(capacity, 1));
+    const u64 cap = options_.visibility
+                        ? std::min<u64>(grow(capacity_, std::max<u64>(capacity, 1)), VISIBILITY_CLUSTER_LIMIT / 2)
+                        : grow(capacity_, std::max<u64>(capacity, 1));
     const u32 slot = static_cast<u32>(grow(slotCap_, std::max<u32>(slotCount, 1)));
     if (cap == capacity_ && slot == slotCap_ && frames_[0].candidates) return;
     // Structure change (never expected in measured frames): new lists, old
@@ -257,12 +275,20 @@ void MeshRenderer::ensureCapacity(u64 capacity, u32 slotCount) {
 void MeshRenderer::prepareFrame(const SceneStore& store, const GpuScene& scene, const FrameParams& params) {
     PH_ZONE("Meshlet prepare");
     frame_ = params;
+    if (params.viewIndex >= hizViews_.size())
+        throw std::invalid_argument("Hi-Z view index outside registry");
+    if (!hizViews_[params.viewIndex])
+        hizViews_[params.viewIndex] = std::make_unique<HiZBuilder>(context_, pipelines_, options_.hiz);
+    hiz_ = hizViews_[params.viewIndex].get();
     if (store.structureVersion() != structureVersion_ || !frames_[0].candidates) {
         structureVersion_ = store.structureVersion();
         ensureCapacity(meshletCandidateCapacity(store.buckets(), scene.meshInfos()), store.slotCapacity());
     }
-    if (hiz_->resize(params.width, params.height)) frame_.historyValid = false;
-    if (params.width != width_ || params.height != height_ || !check_.depth) {
+    const u32 allocationWidth = params.allocationWidth ? params.allocationWidth : params.width;
+    const u32 allocationHeight = params.allocationHeight ? params.allocationHeight : params.height;
+    if (hiz_->resize(allocationWidth, allocationHeight))
+        frame_.historyValid = false;
+    if (allocationWidth != width_ || allocationHeight != height_ || !check_.depth) {
         GpuMemory& m = context_.memory();
         for (MTL::Buffer** b : {&check_.history, &check_.current, &check_.next, &check_.depth}) {
             if (*b) m.release(*b, MemoryCategory::Other);
@@ -271,10 +297,10 @@ void MeshRenderer::prepareFrame(const SceneStore& store, const GpuScene& scene, 
         check_.history = m.newBuffer(pyramid, MTL::ResourceStorageModeShared, MemoryCategory::Other, "Meshlet check history");
         check_.current = m.newBuffer(pyramid, MTL::ResourceStorageModeShared, MemoryCategory::Other, "Meshlet check current");
         check_.next    = m.newBuffer(pyramid, MTL::ResourceStorageModeShared, MemoryCategory::Other, "Meshlet check next");
-        check_.depth   = m.newBuffer(u64(params.width) * params.height * 4, MTL::ResourceStorageModeShared,
-                                     MemoryCategory::Other, "Meshlet check depth");
-        width_  = params.width;
-        height_ = params.height;
+        check_.depth = m.newBuffer(u64(allocationWidth) * allocationHeight * 4, MTL::ResourceStorageModeShared,
+                                   MemoryCategory::Other, "Meshlet check depth");
+        width_ = allocationWidth;
+        height_ = allocationHeight;
     }
     slotCount_       = store.slotCapacity();
     groups_          = std::max(1u, (slotCount_ + MESHLET_SCAN_GROUP - 1) / MESHLET_SCAN_GROUP);
@@ -318,20 +344,28 @@ void MeshRenderer::prepareFrame(const SceneStore& store, const GpuScene& scene, 
     // Draw gate: the F5 ICB draws only on overflow.
     scene_.setDrawGate(frames_[params.slot].gate->gpuAddress());
 
-    // Pipelines: the forward variant of the frame (SceneRenderer chose it),
-    // generic meanwhile; debug views use the debug pipeline.
-    const u32 vi = options_.forceVariant ? *options_.forceVariant : scene_.forwardVariantIndex();
-    pipe::PipelineHandle& handle = options_.genericOnly ? generic_ : variants_[vi];
-    if (handle == pipe::INVALID_PIPELINE) {
-        handle = pipelines_.request(
-            meshDesc(pipe::forward::pipelineDesc(pipe::forward::variantAt(vi), rg::Format::BGRA8Srgb, options_.salt),
-                     "Meshlet forward"));
+    if (options_.visibility) {
+        pipeline_ = pipelines_.render(visibilityOpaque_);
+        usingFallback_ = false;
+    } else {
+        // Pipelines: the forward variant of the frame (SceneRenderer chose it),
+        // generic meanwhile; debug views use the debug pipeline.
+        const u32 vi = options_.forceVariant ? *options_.forceVariant : scene_.forwardVariantIndex();
+        pipe::PipelineHandle &handle = options_.genericOnly ? generic_ : variants_[vi];
+        if (handle == pipe::INVALID_PIPELINE) {
+            handle = pipelines_.request(meshDesc(
+                pipe::forward::pipelineDesc(pipe::forward::variantAt(vi), rg::Format::BGRA8Srgb, options_.salt),
+                "Meshlet forward"));
+        }
+        const bool debug =
+            options_.debugView == MeshletDebugView::Meshlets || options_.debugView == MeshletDebugView::Cull;
+        usingFallback_ = !debug && (options_.genericOnly || !pipelines_.isFinal(handle));
+        pipeline_ = pipelines_.render(debug ? debug_ : handle);
+        if (!pipeline_)
+            pipeline_ = pipelines_.render(generic_);
+        if (usingFallback_)
+            pipelines_.noteFallbackUse();
     }
-    const bool debug = options_.debugView == MeshletDebugView::Meshlets || options_.debugView == MeshletDebugView::Cull;
-    usingFallback_ = !debug && (options_.genericOnly || !pipelines_.isFinal(handle));
-    pipeline_      = pipelines_.render(debug ? debug_ : handle);
-    if (!pipeline_) pipeline_ = pipelines_.render(generic_);
-    if (usingFallback_) pipelines_.noteFallbackUse();
 
     // Draw tables (both phases): forward bindings + meshlet buffers.
     for (u32 ph = 0; ph < 2; ++ph) {
@@ -409,8 +443,8 @@ rg::TextureRef MeshRenderer::addRasterPasses(rg::RenderGraph& graph, rg::Texture
             if (readback_) hiz_->encodeReadback(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()), hiz_->history(), check_.history);
         });
     graph.addPass(
-        "Forward", PassType::Raster,
-        [&](PassBuilder& b) {
+        options_.visibility ? "Visibility opaque A" : "Forward", PassType::Raster,
+        [&](PassBuilder &b) {
             ClearValue clear;
             clear.color[0] = 0.02f;
             clear.color[1] = 0.025f;
@@ -418,6 +452,10 @@ rg::TextureRef MeshRenderer::addRasterPasses(rg::RenderGraph& graph, rg::Texture
             clear.color[3] = 1.0f;
             clear.depth    = 0.0f; // reverse-Z: far = 0
             depthRef_      = b.createTexture("Depth", {Format::Depth32Float, width, height});
+            if (options_.visibility) {
+                color = b.createTexture("Visibility IDs", {Format::R32Uint, width, height});
+                clear.color[0] = clear.color[1] = clear.color[2] = clear.color[3] = 0.0f;
+            }
             color          = b.writeColor(color, 0, LoadIntent::Clear, clear);
             depthRef_      = b.writeDepth(depthRef_, LoadIntent::Clear, clear);
             b.read(scene_.dataRef(), Usage::ShaderRead, StageVertex | StageFragment | StageObject | StageMesh);
@@ -427,11 +465,32 @@ rg::TextureRef MeshRenderer::addRasterPasses(rg::RenderGraph& graph, rg::Texture
             b.read(scene_.frameListsRef(), Usage::IndirectArgs, StageVertex);
             b.read(graphFrame_, Usage::IndirectArgs, StageObject | StageMesh);
             b.read(hizHistoryRef_, Usage::ShaderRead, StageObject);
-            if (two) graphFrame_ = b.write(graphFrame_, Usage::ShaderWrite, StageObject); // B flags
+            if (two)
+                graphFrame_ = b.write(graphFrame_, Usage::ShaderWrite, StageObject); // B flags
             b.setHints(HintGeometryHeavy);
             b.setProfileShaders("meshlet_object,meshlet_mesh,forward_fs");
         },
-        [this](PassContext& ctx) { encodeRaster(static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder()), MESHLET_PHASE_A); });
+        [this](PassContext &ctx) {
+            encodeRaster(static_cast<MTL4::RenderCommandEncoder *>(ctx.encoder()), MESHLET_PHASE_A);
+        });
+    const auto addAlpha = [&](u32 phase) {
+        if (!options_.visibility)
+            return;
+        graph.addPass(
+            phase == 0 ? "Visibility alpha A" : "Visibility alpha B", PassType::Raster,
+            [&](PassBuilder &b) {
+                color = b.writeColor(color, 0, LoadIntent::Preserve);
+                depthRef_ = b.writeDepth(depthRef_, LoadIntent::Preserve);
+                b.read(scene_.dataRef(), Usage::ShaderRead, StageObject | StageMesh | StageFragment);
+                b.read(graphFrame_, Usage::IndirectArgs, StageObject | StageMesh);
+                b.read(phase == 0 ? hizHistoryRef_ : hizCurrentRef_, Usage::ShaderRead, StageObject);
+                b.setProfileShaders("meshlet_object,visibility_mesh,visibility_alpha_fs");
+            },
+            [this, phase](PassContext &ctx) {
+                encodeRaster(static_cast<MTL4::RenderCommandEncoder *>(ctx.encoder()), phase, true);
+            });
+    };
+    addAlpha(MESHLET_PHASE_A);
     if (two) {
         graph.addPass(
             PASS_HIZ_A, PassType::Compute,
@@ -454,8 +513,8 @@ rg::TextureRef MeshRenderer::addRasterPasses(rg::RenderGraph& graph, rg::Texture
             },
             [this](PassContext& ctx) { encodePhaseB(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder())); });
         graph.addPass(
-            PASS_FORWARD_B, PassType::Raster,
-            [&](PassBuilder& b) {
+            options_.visibility ? "Visibility opaque B" : PASS_FORWARD_B, PassType::Raster,
+            [&](PassBuilder &b) {
                 color     = b.writeColor(color, 0, LoadIntent::Preserve);
                 depthRef_ = b.writeDepth(depthRef_, LoadIntent::Preserve);
                 b.read(scene_.dataRef(), Usage::ShaderRead, StageFragment | StageObject | StageMesh);
@@ -464,7 +523,10 @@ rg::TextureRef MeshRenderer::addRasterPasses(rg::RenderGraph& graph, rg::Texture
                 b.setHints(HintGeometryHeavy);
                 b.setProfileShaders("meshlet_object,meshlet_mesh,forward_fs");
             },
-            [this](PassContext& ctx) { encodeRaster(static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder()), MESHLET_PHASE_B); });
+            [this](PassContext &ctx) {
+                encodeRaster(static_cast<MTL4::RenderCommandEncoder *>(ctx.encoder()), MESHLET_PHASE_B);
+            });
+        addAlpha(MESHLET_PHASE_B);
         graph.addPass(
             PASS_HIZ_FINAL, PassType::Compute,
             [&](PassBuilder& b) {
@@ -595,14 +657,15 @@ void MeshRenderer::encodePhaseB(MTL4::ComputeCommandEncoder* enc) const {
     scene_.countCommands(10);
 }
 
-void MeshRenderer::encodeRaster(MTL4::RenderCommandEncoder* enc, u32 phase) const {
+void MeshRenderer::encodeRaster(MTL4::RenderCommandEncoder *enc, u32 phase, bool alpha) const {
     PH_ZONE("Meshlet raster encode");
     if (!ready() || !pipeline_) return;
     const FrameSet& f      = frames_[frame_.slot];
     MTL4::ArgumentTable* t = drawTables_[phase];
     u32 n = 0;
     enc->setDepthStencilState(scene_.depthState());
-    enc->setViewport(MTL::Viewport{0.0, 0.0, static_cast<double>(width_), static_cast<double>(height_), 0.0, 1.0});
+    enc->setViewport(
+        MTL::Viewport{0.0, 0.0, static_cast<double>(frame_.width), static_cast<double>(frame_.height), 0.0, 1.0});
     n += 2;
     // Cull state per class, tracked from Metal's defaults (clockwise, none):
     // validation rejects redundant changes (as SceneRenderer::encodeForward).
@@ -629,7 +692,7 @@ void MeshRenderer::encodeRaster(MTL4::RenderCommandEncoder* enc, u32 phase) cons
         }
         const u32 draw = phase * SCENE_CULL_CLASSES + c;
         if (!meshState) {
-            enc->setRenderPipelineState(pipeline_);
+            enc->setRenderPipelineState(alpha ? pipelines_.render(visibilityAlpha_) : pipeline_);
             ++n;
         }
         t->setAddress(f.ranges->gpuAddress() + draw * sizeof(GPUMeshletDrawRange), MR_RANGE);
@@ -643,7 +706,7 @@ void MeshRenderer::encodeRaster(MTL4::RenderCommandEncoder* enc, u32 phase) cons
         n += 2;
         meshState = true;
         // Phase A: the class's F5 ICB range (empty unless the candidates overflowed).
-        if (phase == MESHLET_PHASE_A) {
+        if (phase == MESHLET_PHASE_A && !options_.visibility) {
             const u32 fallback = scene_.encodeFallbackClass(enc, c);
             n += fallback;
             if (fallback) meshState = false;

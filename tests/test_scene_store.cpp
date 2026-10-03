@@ -1217,3 +1217,19 @@ TEST_CASE("scene store: every bench syncs consistently and marks only what it mo
         bench->teardown(ecs, scene);
     }
 }
+
+TEST_CASE("scene store invalidates previous poses when an entity ID is reused in one frame") {
+    World w;
+    const EntityID a = w.add(0);
+    w.store.sync(w.ecs, w.scene);
+    w.ecs.endFrame();
+    const u32 previous = w.store.instances()[w.store.slotOf(a)].generation;
+    REQUIRE(previous != 0);
+    w.ecs.destroyEntity(a);
+    const EntityID b = w.add(0);
+    REQUIRE(b == a);
+    w.store.sync(w.ecs, w.scene);
+    w.ecs.endFrame();
+    CHECK(w.store.instances()[w.store.slotOf(b)].generation != previous);
+    CHECK(w.store.instances()[w.store.slotOf(b)].generation == w.ecs.incarnation(b));
+}

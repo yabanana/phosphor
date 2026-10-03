@@ -50,6 +50,8 @@ add_executable(phosphor_tests
     test_testbenches.cpp
     test_tlsf.cpp
     test_transform_math.cpp
+    test_temporal.cpp
+    test_visibility_math.cpp
     test_worker_pool.cpp
 )
 target_link_libraries(phosphor_tests PRIVATE phosphor_core doctest::doctest)

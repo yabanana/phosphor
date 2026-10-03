@@ -42,6 +42,7 @@ private:
     PipelineCache& pipelines_;
 
     pipe::PipelineHandle      pipeline_    = pipe::INVALID_PIPELINE;
+    pipe::PipelineHandle pipelineEDR_ = pipe::INVALID_PIPELINE;
     MTL::DepthStencilState*   depthState_  = nullptr;
     MTL4::ArgumentTable*      arguments_   = nullptr;
     MTL::Texture*             fontTexture_ = nullptr;

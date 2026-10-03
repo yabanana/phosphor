@@ -1,0 +1,91 @@
+#pragma once
+#include "platform/metal/metal_context.h"
+#include "pipeline/pipeline_registry.h"
+#include "renderer/visibility_layout.h"
+#include "renderer/temporal_layout.h"
+#include "rendergraph/render_graph.h"
+#include <array>
+
+namespace phosphor {
+class PipelineCache;
+class SceneRenderer;
+class MeshRenderer;
+class SceneStore;
+class GpuScene;
+namespace rg {
+class PassContext;
+}
+
+// F7: material-class tile lists, linear resolve, denoiser guides and an
+// indexed overflow fallback. Resources and dependencies belong to the graph.
+class VisibilityRenderer {
+  public:
+    VisibilityRenderer(MetalContext &context, PipelineCache &pipelines, SceneRenderer &scene, MeshRenderer &mesh,
+                       bool binning, bool checks = false);
+    ~VisibilityRenderer();
+    void prepareFrame(u32 slot, u32 width, u32 height, u32 outputWidth, u32 outputHeight, const SceneStore &store,
+                      u32 defaultNormal, float exposure, u32 debugMode, const GPUTemporalParams &temporal,
+                      const FrameConstants &constants);
+    rg::TextureRef addResolve(rg::RenderGraph &graph, rg::TextureRef visibility, rg::TextureRef depth);
+    void addChecks(rg::RenderGraph &graph);
+    bool check(const GpuScene &geometry);
+    [[nodiscard]] bool needsPoseReset(u32 view, u64 bytes) const {
+        return view >= previousInstances_.size() || !previousInstances_[view] || bytes > poseCapacity_;
+    }
+    [[nodiscard]] u64 binnedFrames() const { return binnedFrames_; }
+    [[nodiscard]] u64 genericFrames() const { return genericFrames_; }
+    [[nodiscard]] u32 checkCount() const { return checksCount_; }
+    [[nodiscard]] u32 checkFailures() const { return checkFailures_; }
+    void addPoseSnapshot(rg::RenderGraph &graph);
+    rg::TextureRef addPresent(rg::RenderGraph &graph, rg::TextureRef drawable);
+    [[nodiscard]] rg::TextureRef color() const { return outputs_[0]; }
+    [[nodiscard]] rg::TextureRef normalRoughness() const { return outputs_[1]; }
+    [[nodiscard]] rg::TextureRef diffuseAlbedo() const { return outputs_[2]; }
+    [[nodiscard]] rg::TextureRef specularAlbedo() const { return outputs_[3]; }
+    [[nodiscard]] rg::TextureRef reactiveMask() const { return outputs_[5]; }
+    [[nodiscard]] rg::TextureRef depth() const { return depth_; }
+    [[nodiscard]] rg::TextureRef motion() const { return outputs_[4]; }
+
+  private:
+    void bind(rg::PassContext &ctx, MTL4::ArgumentTable *table);
+    MetalContext &context_;
+    PipelineCache &pipelines_;
+    SceneRenderer &scene_;
+    MeshRenderer &mesh_;
+    bool binning_;
+    bool checks_ = false;
+    u32 checksCount_ = 0, checkFailures_ = 0;
+    FrameConstants constants_{};
+    GPUTemporalParams temporal_{};
+    std::array<std::vector<GPUInstance>, 4> checkedPreviousPoses_{};
+    std::array<MTL::Buffer *, 8> readbacks_{};
+    std::array<u64, 8> pitches_{};
+    MTL::Buffer *currentReadback_ = nullptr;
+    MTL::Buffer *previousReadback_ = nullptr;
+    u32 readWidth_ = 0, readHeight_ = 0;
+    u64 readPoseCapacity_ = 0;
+    bool useBinning_ = false;
+    u64 binnedFrames_ = 0, genericFrames_ = 0;
+    GPUVisibilityParams params_{};
+    u32 slot_ = 0;
+    u32 view_ = 0;
+    u64 poseCapacity_ = 0;
+    std::array<MTL::Buffer *, 4> previousInstances_{};
+    MTL::GPUAddress temporalAddress_ = 0;
+    rg::BufferRef poses_;
+    u64 tileCapacity_ = 0;
+    MTL::GPUAddress paramsAddress_ = 0;
+    struct Buffers {
+        MTL::Buffer *tiles = nullptr;
+        MTL::Buffer *args = nullptr;
+    };
+    std::array<Buffers, METAL_FRAMES_IN_FLIGHT> frames_{};
+    // Separate tables: mutation after encoding must not change earlier work.
+    std::array<MTL4::ArgumentTable *, 4> tables_{};
+    pipe::PipelineHandle clear_, classify_, generic_, present_, fallback_;
+    std::array<pipe::PipelineHandle, VISIBILITY_CLASSES> resolve_{};
+    rg::TextureRef visibility_, depth_;
+    std::array<rg::TextureRef, 6> outputs_{};
+    rg::BufferRef bins_;
+};
+} // namespace phosphor

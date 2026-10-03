@@ -266,7 +266,7 @@ Forest buildForest(const Cfg& c) {
         in.meshIndex = u32(xorshift64(rng));
         in.materialIndex = u32(xorshift64(rng));
         in.flags = u32(xorshift64(rng));
-        in.pad = u32(xorshift64(rng));
+        in.generation = u32(xorshift64(rng));
         garbage(rng, &f.nodes[s], sizeof(GPUTransformNode)); // roots: unused, must not be read
         garbage(rng, &f.motions[s], sizeof(GPUMotion));
         if (f.parent[s] != ~0u) {

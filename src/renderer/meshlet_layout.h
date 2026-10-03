@@ -122,7 +122,7 @@ PHOSPHOR_GPU_CONSTANT u32 MR_COUNTERS   = 14; // GPUMeshletCounters
 /// writes the decision of candidate i at [i], phase B the decision of B-list
 /// entry j at [capacity + j].
 PHOSPHOR_GPU_CONSTANT u32 MR_DECISIONS  = 15;
-PHOSPHOR_GPU_CONSTANT u32 MR_BIND_COUNT = 16;
+PHOSPHOR_GPU_CONSTANT u32 MR_BIND_COUNT = 17;
 /// Texture slot of the pyramid the object shader tests against (history in
 /// phase A, Hi-Z A in phase B).
 PHOSPHOR_GPU_CONSTANT u32 MR_TEX_HIZ    = 0;

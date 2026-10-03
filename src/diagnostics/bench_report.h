@@ -163,7 +163,15 @@ struct MeshletReport {
     TimingSummary sizeCulled; // approximate size cull (--meshlet-min-pixels; 0 in the exact preset)
 };
 
-constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 6;
+struct RenderingReport {
+    bool present = false, materialBinning = false, post = false, autoExposure = false, edr = false, offscreen = false;
+    std::string path, asset, upscaler, tonemap;
+    u32 inputWidth = 0, inputHeight = 0, views = 1, framesInFlight = 3, gpuFailures = 0;
+    u64 temporalFrames = 0, nativeFrames = 0, historyResets = 0, binnedFrames = 0, genericFrames = 0;
+    u32 guideChecks = 0, guideFailures = 0;
+    float exposure = 1, headroom = 1, potentialHeadroom = 1;
+};
+constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 7;
 
 struct BenchReport {
     std::string   bench;
@@ -195,6 +203,7 @@ struct BenchReport {
     CpuPhasesReport cpuPhases;   // F5 (schema 5)
     DeviceReport  hardware;      // F6 (schema 6)
     MeshletReport meshlets;      // F6 (schema 6)
+    RenderingReport rendering;   // F7/F8 (schema 7), actual paths and last-frame content extent
 };
 
 /// Nearest-rank statistics of `values` (empty input gives all zeros).

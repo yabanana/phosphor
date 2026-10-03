@@ -42,7 +42,7 @@ include(cmake/Dependencies.cmake)
 # F3.3: generated variant tables (C++ and MSL) in ${CMAKE_BINARY_DIR}/generated.
 include(cmake/Variants.cmake)
 
-set(PHOSPHOR_WARNINGS -Wall -Wextra -Wpedantic -Wno-unused-parameter)
+set(PHOSPHOR_WARNINGS -Wall -Wextra -Wpedantic -Werror=format -Wno-unused-parameter)
 
 # --- Portable core ---------------------------------------------------------
 add_library(phosphor_core STATIC
@@ -69,6 +69,8 @@ add_library(phosphor_core STATIC
     src/pipeline/pipeline_key.cpp
     src/pipeline/pipeline_registry.cpp
     src/renderer/cull_reference.cpp
+    src/renderer/history_registry.cpp
+    src/renderer/exposure.cpp
     src/renderer/gpu_scene.cpp
     src/renderer/meshlet_builder.cpp
     src/renderer/meshlet_cull_reference.cpp

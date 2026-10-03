@@ -112,6 +112,7 @@ public:
     /// Address of the draw gate word for this frame's Draw build (default: a
     /// constant 1, every bucket drawn).  The mesh path passes its overflow
     /// word, so the ICB stays empty unless the meshlet candidates overflowed.
+    void setTemporalInputs(MTL::GPUAddress previousInstances, MTL::GPUAddress temporalParams);
     void setDrawGate(MTL::GPUAddress gate) { drawGate_ = gate; }
     /// The indexed fallback of one cull class inside the mesh path's render
     /// encoder: forward pipeline, forward arguments, the class's ICB range.

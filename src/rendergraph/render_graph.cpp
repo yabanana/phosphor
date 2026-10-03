@@ -170,7 +170,11 @@ BufferRef PassBuilder::write(BufferRef buffer, Usage usage, Stages stages) {
 
 void PassBuilder::setSideEffect() { graph_.passes_[pass_].sideEffect = true; }
 void PassBuilder::setHints(u32 hints) { graph_.passes_[pass_].hints = hints; }
-void PassBuilder::setParallelChunks(u32 chunks) { graph_.passes_[pass_].parallelChunks = std::max(chunks, 1u); }
+void PassBuilder::setParallelChunks(u32 chunks) {
+    if (graph_.passes_[pass_].type == PassType::External && chunks > 1)
+        graph_.error("external passes cannot split framework-owned encoders");
+    graph_.passes_[pass_].parallelChunks = std::max(chunks, 1u);
+}
 
 void PassBuilder::setCost(const PassCost& cost) { graph_.passes_[pass_].cost = cost; }
 
@@ -209,6 +213,8 @@ u32 RenderGraph::addPass(const std::string& name, PassType type, Queue queue, co
     if (type == PassType::Raster && queue != Queue::Graphics) {
         error("pass '" + name + "': raster passes run on the graphics queue");
     }
+    if (type == PassType::External && queue != Queue::Graphics)
+        error("external passes require the graphics queue");
     PassBuilder builder(*this, index);
     if (setup) setup(builder);
     return index;

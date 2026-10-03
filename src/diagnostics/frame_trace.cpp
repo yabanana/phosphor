@@ -32,6 +32,10 @@ namespace {
 // excluding it would hide exactly the hitches we look for.
 constexpr u32 kNonSteadyFlags = FrameBenchSwitch | FrameResize | FrameGraphCompile;
 
+float engineCpu(const FrameRecord &f) {
+    return std::max(0.0f, f.cpuMs - std::clamp(f.eventMs, 0.0f, f.cpuMs));
+}
+
 float thresholdFor(float p99, const HitchConfig& config) {
     return std::max(config.p99Factor * p99, p99 + config.marginMs);
 }
@@ -78,8 +82,8 @@ HitchReport analyzeHitches(const FrameTrace& trace, const HitchConfig& config) {
             continue;
         }
         if (f.flags & kNonSteadyFlags) continue;
-        steady.push_back(f.cpuMs);
-        steadyByBench[f.bench].push_back(f.cpuMs);
+        steady.push_back(engineCpu(f));
+        steadyByBench[f.bench].push_back(engineCpu(f));
     }
     r.steadyFrames = static_cast<u32>(steady.size());
     const bool haveSteady = !steady.empty();
@@ -126,10 +130,14 @@ HitchReport analyzeHitches(const FrameTrace& trace, const HitchConfig& config) {
             for (size_t i = pos + 1, n = 0; i < frames.size() && n < config.window; ++i, ++n) {
                 const FrameRecord& f = frames[i];
                 if ((hasNext && f.index >= nextSwitch) || (f.flags & FrameBenchSwitch)) break;
-                r.worstPostSwitchCpuMs = std::max(r.worstPostSwitchCpuMs, f.cpuMs);
+                r.worstPostSwitchCpuMs = std::max(r.worstPostSwitchCpuMs, engineCpu(f));
+                r.worstEventMs = std::max(r.worstEventMs, f.eventMs);
+                if (f.eventMs > 16.67f)
+                    ++r.platformStallFrames;
                 const float limit = thresholdOf(f.bench);
-                if (limit > 0.0f) r.worstPostSwitchRatio = std::max(r.worstPostSwitchRatio, f.cpuMs / limit);
-                if (f.cpuMs > limit) {
+                if (limit > 0.0f)
+                    r.worstPostSwitchRatio = std::max(r.worstPostSwitchRatio, engineCpu(f) / limit);
+                if (engineCpu(f) > limit) {
                     ++r.framesOverThreshold;
                     hitch = true;
                 }
@@ -159,7 +167,10 @@ std::string formatHitchReport(const HitchReport& r) {
                   r.setupMean, r.setupMax, r.uploadMean, r.uploadMax, r.gcMean, r.gcMax,
                   r.pipelineMean, r.pipelineMax, r.renderThreadCompileMs, r.thresholdMs,
                   r.framesOverThreshold, r.worstPostSwitchCpuMs, r.steadyCpuP99, r.worstPostSwitchRatio);
-    return buf;
+    std::string line = buf;
+    std::snprintf(buf, sizeof(buf), " | event pump worst %.2f ms, platform stalls %u", r.worstEventMs,
+                  r.platformStallFrames);
+    return line + buf;
 }
 
 // Columns (every row has the same column count; unused ones are empty):
@@ -169,22 +180,19 @@ std::string formatHitchReport(const HitchReport& r) {
 // Frame rows fill index..gpuMs; switch rows use index = switch frame,
 // bench = fromBench, then toBench and the phase columns.
 std::string traceToCsv(const FrameTrace& trace) {
-    std::string out =
-        "kind,index,bench,flags,frameMs,cpuMs,waitMs,gpuMs,toBench,totalMs,waitIdleMs,setupMs,"
-        "textureUploadMs,geometryUploadMs,gcMs,pipelineRequestMs,renderThreadCompileMs,"
-        "pipelinesRequested\n";
+    std::string out = "kind,index,bench,flags,frameMs,cpuMs,waitMs,gpuMs,toBench,totalMs,waitIdleMs,setupMs,"
+                      "textureUploadMs,geometryUploadMs,gcMs,pipelineRequestMs,renderThreadCompileMs,"
+                      "pipelinesRequested,eventMs\n";
     char buf[384];
     for (const FrameRecord& f : trace.frames()) {
-        std::snprintf(buf, sizeof(buf), "frame,%u,%u,%u,%.4f,%.4f,%.4f,%.4f,,,,,,,,,,\n",
-                      f.index, f.bench, f.flags, f.frameMs, f.cpuMs, f.waitMs, f.gpuMs);
+        std::snprintf(buf, sizeof(buf), "frame,%u,%u,%u,%.4f,%.4f,%.4f,%.4f,,,,,,,,,,,%.4f\n", f.index, f.bench,
+                      f.flags, f.frameMs, f.cpuMs, f.waitMs, f.gpuMs, f.eventMs);
         out += buf;
     }
     for (const SwitchRecord& s : trace.switches()) {
-        std::snprintf(buf, sizeof(buf),
-                      "switch,%u,%u,,,,,,%u,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%u\n",
-                      s.frame, s.fromBench, s.toBench, s.totalMs, s.waitIdleMs, s.setupMs,
-                      s.textureUploadMs, s.geometryUploadMs, s.gcMs, s.pipelineRequestMs,
-                      s.renderThreadCompileMs, s.pipelinesRequested);
+        std::snprintf(buf, sizeof(buf), "switch,%u,%u,,,,,,%u,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%u,\n", s.frame,
+                      s.fromBench, s.toBench, s.totalMs, s.waitIdleMs, s.setupMs, s.textureUploadMs, s.geometryUploadMs,
+                      s.gcMs, s.pipelineRequestMs, s.renderThreadCompileMs, s.pipelinesRequested);
         out += buf;
     }
     return out;

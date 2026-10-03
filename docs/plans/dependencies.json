@@ -876,7 +876,9 @@
     "F40.9": "Editor authoring follows functioning runtime; not a prerequisite of layout or UI rendering.",
     "F34.8": "Final authoring acceptance follows complete runtime suites; F34.1 can start earlier.",
     "F38.5": "Public SDK/templates include the compatibility matrix; Vulkan is not a dependency.",
-    "F6.1": "Includes app capability-mask/report prerequisite; physical M3 measurement is external certification, not a development blocker."
+    "F6.1": "Includes app capability-mask/report prerequisite; physical M3 measurement is external certification, not a development blocker.",
+    "F7.4": "Selected by the owner on 2026-10-02; experiment after F7/F8 baseline on the integrated frame, before OPT phases.",
+    "F7.5": "Selected by the owner on 2026-10-02; experiment after F7/F8 baseline on the integrated frame, before OPT phases."
   },
   "planning_levels": {
     "F0": "audit",
@@ -943,7 +945,10 @@
     "F7",
     "F8"
   ],
-  "selected_candidate_tasks": [],
+  "selected_candidate_tasks": [
+    "F7.4",
+    "F7.5"
+  ],
   "candidate_tasks": [
     "F7.4",
     "F7.5",

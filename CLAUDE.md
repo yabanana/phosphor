@@ -9,7 +9,7 @@ task only once it is verified for its declared scope on the available device
 `docs/perf-log.md`. The report's older "F1–F5" numbering is superseded by it.
 Planning horizons: read `docs/plans/SEQUENCING.md` and `docs/plans/README.md`.
 All 58 F/OPT plans now contain advance implementation and verification detail.
-F5 is integrated on main; F6 is delivered on branch phase/f6 (mesh path,
+F5 and F6 are integrated on main (F6 merge e600887; mesh path,
 two-phase culling); F7–F8 are the current operational horizon. Later
 plans remain revisable specifications, and open OPT/EDGE work is a candidate
 catalog: planning detail does not activate implementation. Before adding optimization

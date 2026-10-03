@@ -31,7 +31,7 @@ public:
     [[nodiscard]] u64 readbackSize() const { return static_cast<u64>(width_) * height_ * 4; }
 
     /// Encode the copy of `source` (the drawable) into the readback buffer.
-    void encode(MTL4::ComputeCommandEncoder* encoder, MTL::Texture* source);
+    void encode(MTL4::ComputeCommandEncoder *encoder, MTL::Texture *source, bool capture = true);
 
     /// Write the captured frame to `path`; the frame must have completed
     /// (call MetalContext::waitIdle() first).  Returns false on failure.
@@ -45,6 +45,7 @@ public:
 private:
     MetalContext& context_;
     MTL::Buffer*  readback_ = nullptr;
+    MTL::Buffer *scratch_ = nullptr;
     u32           width_    = 0;
     u32           height_   = 0;
 };

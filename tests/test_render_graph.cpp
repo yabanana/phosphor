@@ -653,3 +653,54 @@ TEST_CASE("render graph: profile shaders are split on commas") {
     const std::vector<std::string> want{"forward_vs", "forward_fs", "x"};
     CHECK(g.passes()[0].profileShaders == want);
 }
+
+TEST_CASE("external framework passes preserve dependencies and never fuse compute encoders") {
+    RenderGraph g;
+    TextureRef input, output;
+    g.addPass(
+        "Producer", PassType::Compute,
+        [&](PassBuilder &b) {
+            input = b.createTexture("input", {Format::RGBA16Float, 64, 64});
+            input = b.write(input, Usage::ShaderWrite, StageDispatch);
+        },
+        nullptr);
+    g.addPass(
+        "Framework", PassType::External,
+        [&](PassBuilder &b) {
+            b.read(input, Usage::ShaderRead, StageExternal);
+            output = b.createTexture("output", {Format::RGBA16Float, 64, 64});
+            output = b.write(output, Usage::ShaderWrite, StageExternal);
+        },
+        nullptr);
+    g.addPass(
+        "Consumer", PassType::Compute,
+        [&](PassBuilder &b) {
+            b.read(output, Usage::ShaderRead, StageDispatch);
+            b.setSideEffect();
+        },
+        nullptr);
+    const auto c = compile(g);
+    REQUIRE(c.ok);
+    REQUIRE(c.encoders.size() == 3);
+    CHECK(c.encoders[0].type == PassType::Compute);
+    CHECK(c.encoders[1].type == PassType::External);
+    CHECK(c.encoders[2].type == PassType::Compute);
+    CHECK(hasAnyDep(c, 0, 1));
+    CHECK(hasAnyDep(c, 1, 2));
+    CHECK(c.lifetimes[input.resource].overlaps(c.lifetimes[output.resource]));
+}
+TEST_CASE("external framework passes reject async or chunked execution") {
+    RenderGraph a;
+    a.addPass(
+        "unsupported", PassType::External, Queue::AsyncCompute, [](PassBuilder &b) { b.setSideEffect(); }, nullptr);
+    CHECK_FALSE(compile(a).ok);
+    RenderGraph b;
+    b.addPass(
+        "unsupported", PassType::External,
+        [](PassBuilder &p) {
+            p.setParallelChunks(2);
+            p.setSideEffect();
+        },
+        nullptr);
+    CHECK_FALSE(compile(b).ok);
+}

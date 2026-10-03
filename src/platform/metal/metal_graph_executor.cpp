@@ -1,3 +1,4 @@
+#include "platform/metal/pipeline_cache.h"
 #include "platform/metal/metal_graph_executor.h"
 #include "platform/metal/gpu_memory.h"
 #include "platform/metal/gpu_timestamps.h"
@@ -88,6 +89,8 @@ MTL::Stages toMetalStages(rg::Stages stages) {
     if (stages & rg::StageDispatch) out |= MTL::StageDispatch;
     if (stages & rg::StageBlit)     out |= MTL::StageBlit;
     if (stages & rg::StageAccelerationStructure) out |= MTL::StageAccelerationStructure;
+    if (stages & rg::StageMachineLearning)
+        out |= MTL::StageMachineLearning;
     return out;
 }
 
@@ -117,15 +120,18 @@ private:
 
 class MetalGraphExecutor::Context final : public rg::PassContext {
 public:
-    Context(const MetalGraphExecutor& executor, MTL4::CommandEncoder* encoder, u64 frame, u32 chunk, u32 chunks)
-        : executor_(executor), encoder_(encoder), frame_(frame), chunk_(chunk), chunks_(chunks) {}
+  Context(const MetalGraphExecutor &executor, MTL4::CommandEncoder *encoder, u64 frame, u32 chunk, u32 chunks,
+          MTL4::CommandBuffer *command = nullptr)
+      : executor_(executor), encoder_(encoder), frame_(frame), chunk_(chunk), chunks_(chunks), command_(command) {}
 
-    void* encoder() const override { return encoder_; }
-    void* texture(rg::TextureRef t) const override { return executor_.textures_[t.resource]; }
-    void* buffer(rg::BufferRef b) const override { return executor_.buffers_[b.resource]; }
-    u32   chunk() const override { return chunk_; }
-    u32   chunkCount() const override { return chunks_; }
-    u64   frameIndex() const override { return frame_; }
+  void *encoder() const override { return encoder_; }
+  void *commandBuffer() const override { return command_; }
+  void *externalFence() const override { return executor_.externalFence_; }
+  void *texture(rg::TextureRef t) const override { return executor_.textures_[t.resource]; }
+  void *buffer(rg::BufferRef b) const override { return executor_.buffers_[b.resource]; }
+  u32 chunk() const override { return chunk_; }
+  u32 chunkCount() const override { return chunks_; }
+  u64 frameIndex() const override { return frame_; }
 
 private:
     const MetalGraphExecutor& executor_;
@@ -133,15 +139,28 @@ private:
     u64 frame_;
     u32 chunk_;
     u32 chunks_;
+    MTL4::CommandBuffer *command_;
 };
 
 // --- Executor ---------------------------------------------------------------------
 
-MetalGraphExecutor::MetalGraphExecutor(MetalContext& context) : context_(context), heap_(context) {}
+MetalGraphExecutor::MetalGraphExecutor(MetalContext &context, PipelineCache *pipelines)
+    : pipelines_(pipelines), context_(context), heap_(context) {
+    if (pipelines_) {
+        pipe::PipelineDesc d;
+        d.kind = pipe::PipelineKind::Compute;
+        d.label = "External encoder boundary";
+        d.functions = {"timestamp_anchor", "", ""};
+        externalAnchor_ = pipelines_->request(d);
+        externalFence_ = context_.device()->newFence();
+    }
+}
 
 MetalGraphExecutor::~MetalGraphExecutor() {
     context_.waitIdle();
     if (splitFence_) splitFence_->release();
+    if (externalFence_)
+        externalFence_->release();
     releaseResources();
     workers_.reset();
     for (ExtraCommandBuffer& e : extra_) {
@@ -644,6 +663,33 @@ void MetalGraphExecutor::execute(MetalContext::Frame& frame) {
                 }
                 enc->endEncoding();
             }
+        } else if (plan.type == rg::PassType::External) {
+            if (!pipelines_ || !externalFence_ || plan.firstPosition != plan.lastPosition)
+                throw std::runtime_error("External graph pass requires a compiler and an isolated encoder boundary");
+            auto *anchor = pipelines_->compute(externalAnchor_);
+            if (!anchor)
+                throw std::runtime_error("External boundary pipeline is not ready");
+            // Framework-owned encoders must observe prior graph producers.
+            // A real dispatch keeps the boundary encoder alive even with timing off.
+            auto *before = target->computeCommandEncoder();
+            before->setLabel(NS::String::string("Before external pass", NS::UTF8StringEncoding));
+            encodeBarriers(before, plan.firstPosition);
+            before->setComputePipelineState(anchor);
+            before->dispatchThreadgroups(MTL::Size::Make(1, 1, 1), MTL::Size::Make(1, 1, 1));
+            before->updateFence(externalFence_, MTL::StageDispatch);
+            before->endEncoding();
+            const auto &node = graph_->passes()[compiled_.order[plan.firstPosition]];
+            Context ctx(*this, nullptr, frame.index, 0, 1, target);
+            if (node.execute)
+                node.execute(ctx);
+            auto *after = target->computeCommandEncoder();
+            after->setLabel(encoderLabels_[e]);
+            after->waitForFence(externalFence_, MTL::StageDispatch);
+            after->setComputePipelineState(anchor);
+            after->dispatchThreadgroups(MTL::Size::Make(1, 1, 1), MTL::Size::Make(1, 1, 1));
+            if (timestamps_ && unitOfPosition_[plan.lastPosition] != kNone)
+                timestamps_->endUnit(after, unitOfPosition_[plan.lastPosition]);
+            after->endEncoding();
         } else {
             MTL4::ComputeCommandEncoder* enc = target->computeCommandEncoder();
             enc->setLabel(encoderLabels_[e]);

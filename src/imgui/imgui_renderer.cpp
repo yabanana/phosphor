@@ -89,6 +89,9 @@ void ImGuiRenderer::buildPipeline() {
     desc.output(0, rg::Format::BGRA8Srgb, pipe::ColorOutput::Blend::AlphaOver);
     // Created before the first frame: the engine waits for every pipeline.
     pipeline_ = pipelines_.request(desc);
+    desc.label = "ImGui EDR";
+    desc.output(0, rg::Format::RGBA16Float, pipe::ColorOutput::Blend::AlphaOver);
+    pipelineEDR_ = pipelines_.request(desc);
 }
 
 void ImGuiRenderer::createFontTexture() {
@@ -122,7 +125,8 @@ void ImGuiRenderer::setupRenderState(MTL4::RenderCommandEncoder* encoder, MTL::G
     arguments_->setAddress(vertices, BindVertices);
     arguments_->setAddress(uniforms, BindUniforms);
 
-    encoder->setRenderPipelineState(pipelines_.render(pipeline_));
+    encoder->setRenderPipelineState(
+        pipelines_.render(context_.colorFormat() == MTL::PixelFormatRGBA16Float ? pipelineEDR_ : pipeline_));
     encoder->setDepthStencilState(depthState_);
     encoder->setArgumentTable(arguments_, MTL::RenderStageVertex | MTL::RenderStageFragment);
     // Viewport (full target) and CullModeNone are Metal's defaults, and the

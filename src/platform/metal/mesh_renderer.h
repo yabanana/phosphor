@@ -60,6 +60,7 @@ public:
         /// then: an empty blit encoder is dropped by Metal and would leave
         /// the next timed unit without a valid timestamp, F4.1).
         bool               checks = false;
+        bool visibility = false; // F7: R32Uint opaque + masked raster
         /// F6.2 APPROXIMATE size cull: meshlets whose projected bound covers
         /// less than minPixels^2 pixels (0 = off, the exact preset).
         float              minPixels = 0.0f;
@@ -75,8 +76,10 @@ public:
 
     struct FrameParams {
         u32                  slot   = 0;
+        u32 viewIndex = 0;
         u32                  width  = 0;
         u32                  height = 0;
+        u32 allocationWidth = 0, allocationHeight = 0; // F8 backing extent, 0 = logical
         GPUMeshletCullParams cull{}; // viewProj, planes, camera, near filled by the engine
         float                prevViewProj[16]{}; // view of the history (when valid)
         bool                 historyValid = false;
@@ -99,6 +102,10 @@ public:
     /// After SceneRenderer::prepareFrame (uses its constants/lights addresses).
     void prepareFrame(const SceneStore& store, const GpuScene& scene, const FrameParams& params);
     void requestAllVariants();
+    void setTemporalInputs(MTL::GPUAddress params) {
+        for (auto *table : drawTables_)
+            table->setAddress(params, 16);
+    }
 
     // --- Render graph -------------------------------------------------------------
     /// The candidate pass (SceneRenderer::addPassesToGraph's afterCull hook);
@@ -130,8 +137,12 @@ public:
     [[nodiscard]] GPUMeshletCounters counters(u32 slot) const;
     [[nodiscard]] u64 capacity() const { return capacity_; }
     [[nodiscard]] u64 version() const { return version_; }
-    [[nodiscard]] const HiZBuilder* hiz() const { return hiz_.get(); }
+    [[nodiscard]] const HiZBuilder *hiz() const { return hiz_; }
     [[nodiscard]] bool twoPhase() const { return options_.cull == MeshletCull::TwoPhase; }
+    [[nodiscard]] rg::BufferRef frameListsRef() const { return graphFrame_; }
+    [[nodiscard]] MTL::Buffer *meshletBuffer() const { return meshlets_; }
+    [[nodiscard]] MTL::Buffer *meshletVertexBuffer() const { return meshletVertices_; }
+    [[nodiscard]] MTL::Buffer *meshletTriangleBuffer() const { return meshletTriangles_; }
     [[nodiscard]] const Options& options() const { return options_; }
     [[nodiscard]] u32 meshletCount() const { return meshletCount_; }
     [[nodiscard]] bool ready() const;
@@ -160,20 +171,22 @@ private:
     MTL::Buffer* sharedBuffer(u64 size, const char* label);
     void encodeCandidates(MTL4::ComputeCommandEncoder* enc) const;
     void encodePhaseB(MTL4::ComputeCommandEncoder* enc) const;
-    void encodeRaster(MTL4::RenderCommandEncoder* enc, u32 phase) const;
+    void encodeRaster(MTL4::RenderCommandEncoder *enc, u32 phase, bool alpha = false) const;
     MTL::ComputePipelineState* kernel(pipe::PipelineHandle h) const;
 
     MetalContext&  context_;
     PipelineCache& pipelines_;
     SceneRenderer& scene_;
     Options        options_;
-    std::unique_ptr<HiZBuilder> hiz_;
+    std::array<std::unique_ptr<HiZBuilder>, 4> hizViews_{};
+    HiZBuilder *hiz_ = nullptr;
 
     // Pipelines.
     pipe::PipelineHandle generic_ = pipe::INVALID_PIPELINE, debug_ = pipe::INVALID_PIPELINE;
     std::vector<pipe::PipelineHandle> variants_;
     MTL::RenderPipelineState* pipeline_ = nullptr;
     bool usingFallback_ = false;
+    pipe::PipelineHandle visibilityOpaque_ = pipe::INVALID_PIPELINE, visibilityAlpha_ = pipe::INVALID_PIPELINE;
     pipe::PipelineHandle kCandCount_ = pipe::INVALID_PIPELINE, kCandScan_ = pipe::INVALID_PIPELINE,
                          kCandWrite_ = pipe::INVALID_PIPELINE, kBCount_ = pipe::INVALID_PIPELINE,
                          kBScan_ = pipe::INVALID_PIPELINE, kBWrite_ = pipe::INVALID_PIPELINE;

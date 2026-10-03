@@ -1,3 +1,4 @@
+#include <MetalFX/MetalFX.hpp>
 #include "platform/metal/pipeline_cache.h"
 
 #include "core/log.h"
@@ -279,6 +280,27 @@ PipelineCache::~PipelineCache() {
     compiler_->release();
     if (serializer_) serializer_->release();
     // registry_ releases what it still holds (releaseNow) when destroyed.
+}
+
+std::future<std::shared_ptr<MTL4FX::TemporalScaler>>
+PipelineCache::requestTemporalScaler(MTLFX::TemporalScalerDescriptor *descriptor) {
+    auto promise = std::make_shared<std::promise<std::shared_ptr<MTL4FX::TemporalScaler>>>();
+    auto future = promise->get_future();
+    auto copy = std::shared_ptr<MTLFX::TemporalScalerDescriptor>(descriptor->copy(), [](auto *p) { p->release(); });
+    queue_->submit(pipe::CompilePriority::Urgent, ~0u, [this, promise, copy] {
+        auto *pool = NS::AutoreleasePool::alloc()->init();
+        try {
+            auto *scaler = copy->newTemporalScaler(context_.device(), compiler_);
+            promise->set_value(std::shared_ptr<MTL4FX::TemporalScaler>(scaler, [](auto *p) {
+                if (p)
+                    p->release();
+            }));
+        } catch (...) {
+            promise->set_exception(std::current_exception());
+        }
+        pool->release();
+    });
+    return future;
 }
 
 u32 PipelineCache::workerCount() const { return queue_ ? queue_->workerCount() : 0; }

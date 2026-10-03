@@ -3,6 +3,7 @@
 #include "core/types.h"
 #include <glm/glm.hpp>
 #include <memory>
+#include <string>
 
 namespace phosphor {
 
@@ -51,6 +52,7 @@ struct CameraSetup {
 class TestBench {
 public:
     virtual ~TestBench() = default;
+    [[nodiscard]] virtual const char *assetSource() const { return "procedural"; }
 
     /// Populate the ECS and upload geometry/materials to the GPU scene.
     virtual void setup(ECS& ecs, GpuScene& gpuScene, TextureManager& textures) = 0;
@@ -83,6 +85,7 @@ public:
 /// F5.6: parameters of the benches that take any (bench 8, "1M Instances");
 /// the other benches ignore them.  Zero / negative = the bench's default.
 struct TestBenchParams {
+    std::string scenePath;
     u32   instances         = 0;     // --instances
     u32   meshes            = 0;     // --scene-meshes
     float dynamicCpuPercent = -1.0f; // --dynamic-cpu (0..100)

@@ -9,6 +9,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <filesystem>
+#include <stdexcept>
 
 namespace phosphor {
 
@@ -26,17 +27,24 @@ void SceneViewer::setup(ECS& ecs, GpuScene& gpuScene, TextureManager& textures) 
 
     loadedGltf_ = false;
 
-    for (const char* path : kAssetPaths) {
-        if (std::filesystem::exists(path)) {
-            LOG_INFO("SceneViewer: loading '%s'...", path);
-            GltfLoader loader(gpuScene, textures, ecs);
-            if (loader.loadFromFile(path)) {
-                loadedGltf_ = true;
-                LOG_INFO("SceneViewer: loaded '%s' successfully", path);
+    const auto load = [&](const std::string &path) {
+        LOG_INFO("SceneViewer: loading '%s'...", path.c_str());
+        GltfLoader loader(gpuScene, textures, ecs);
+        if (!loader.loadFromFile(path))
+            return false;
+        entities_.assign(loader.createdEntities().begin(), loader.createdEntities().end());
+        loadedGltf_ = true;
+        loadedPath_ = path;
+        LOG_INFO("SceneViewer: loaded '%s' successfully", path.c_str());
+        return true;
+    };
+    if (!scenePath_.empty() && scenePath_ != "procedural") {
+        if (!load(scenePath_))
+            throw std::runtime_error("Required scene failed to load: " + scenePath_);
+    } else if (scenePath_.empty()) {
+        for (const char *path : kAssetPaths) {
+            if (std::filesystem::exists(path) && load(path))
                 break;
-            } else {
-                LOG_WARN("SceneViewer: failed to load '%s'", path);
-            }
         }
     }
 

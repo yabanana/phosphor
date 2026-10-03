@@ -47,6 +47,8 @@ class MetalTextureManager;
 class PipelineCache;
 class ShaderReloader;
 class SceneRenderer;
+class VisibilityRenderer;
+class PostProcessor;
 class MeshRenderer;
 class SceneStore;
 class GpuSceneChecker;
@@ -116,6 +118,13 @@ private:
     std::unique_ptr<PipelineCache>       pipelines_; // F3: every pipeline of the engine
     std::unique_ptr<ShaderReloader>      reloader_;  // F3.6 hot reload (Debug)
     std::unique_ptr<SceneRenderer>       renderer_;
+    std::unique_ptr<VisibilityRenderer> visibility_;
+    std::unique_ptr<PostProcessor> post_;
+    u64 sceneEpoch_ = 0;
+    float dynamicScale_ = 1.0f;
+    u32 renderBackingWidth_ = 0, renderBackingHeight_ = 0;
+    float displayHeadroom_ = 1.0f, displayPotentialHeadroom_ = 1.0f;
+    bool displayEDR_ = false;
     std::unique_ptr<MeshRenderer>        mesh_;      // F6 --geometry-path mesh
     std::unique_ptr<MetalTextureManager> textures_;
     std::unique_ptr<ImGuiRenderer>       imguiRenderer_;
@@ -194,7 +203,12 @@ private:
         glm::vec3 cameraPosition{0.0f};
         glm::vec3 cameraFront{0.0f, 0.0f, -1.0f};
         const char* lastReset = "start";
-    } history_;
+        double sceneTime = 0.0;
+    };
+    std::array<HiZHistory, 4> histories_{};
+    u32 currentView_ = 0;
+    HiZHistory &history() { return histories_[currentView_]; }
+    const HiZHistory &history() const { return histories_[currentView_]; }
     struct MeshletSamples {
         std::vector<float> candidates, drawnA, frustum, cone, historyRejected, drawnB, occludedB, primitives, emitted, sizeCulled;
         u32 overflowFrames = 0;
@@ -216,6 +230,7 @@ private:
     double                      requestMsBeforeFrame_ = 0.0;
     double                      rtCompileMsBeforeFrame_ = 0.0;
     std::chrono::steady_clock::time_point launch_;
+    float eventPumpMs_ = 0.0f;
     bool                        firstFrameLogged_ = false;
     float                       startupPipelinesMs_ = 0.0f;
     bool                        hotReloadRequested_ = false; // --debug-hot-reload issued
@@ -233,6 +248,8 @@ private:
         u64  sceneBuffers  = 0; // GpuSceneBuffers::version(): capacities changed
         u64  meshletBuffers = 0; // F6: MeshRenderer::version() (+ debug view)
         u32  debugView      = 0;
+        rg::Format outputFormat = rg::Format::BGRA8Srgb;
+        u32 backingWidth = 0, backingHeight = 0;
         bool operator==(const GraphKey&) const = default;
     };
     rg::RenderGraph frameGraph_;
@@ -242,6 +259,7 @@ private:
     OverlayMode     overlayMode_ = OverlayMode::None; // --overlay, changed from the Rendering panel
     rg::TextureRef  drawableRef_;
     rg::BufferRef   captureRef_;
+    rg::TextureRef captureColorRef_;
     bool            captureThisFrame_ = false;
 
     MemoryPanelInfo memoryInfo_; // reused every frame (keeps vector capacity)
