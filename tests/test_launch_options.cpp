@@ -923,3 +923,16 @@ TEST_CASE("MetalFX runs in process by default; isolated workers stay opt-in") {
                   error));
     CHECK(o.debugMetalFXWorkerCrash == 2);
 }
+
+TEST_CASE("MetalFX resize settle frames are bounded") {
+    LaunchOptions o;
+    std::string error;
+    REQUIRE(parse({"--post", "--upscaler", "temporal"}, o, error));
+    CHECK(o.metalfxResizeSettleFrames == 4);
+    REQUIRE(parse({"--metalfx-resize-settle", "0"}, o, error));
+    CHECK(o.metalfxResizeSettleFrames == 0);
+    REQUIRE(parse({"--metalfx-resize-settle", "120"}, o, error));
+    CHECK(o.metalfxResizeSettleFrames == 120);
+    CHECK_FALSE(parse({"--metalfx-resize-settle", "121"}, o, error));
+    CHECK_FALSE(parse({"--metalfx-resize-settle"}, o, error));
+}

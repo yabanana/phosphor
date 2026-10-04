@@ -304,6 +304,7 @@ struct LaunchOptions {
     bool debugAdaptiveNoHistory = false;
     bool post = false, temporalUpscale = false, autoExposure = false, dynamicResolution = false;
     bool isolatedMetalFX = false;
+    u32 metalfxResizeSettleFrames = 4; // stable output frames before a new in-process scaler is requested
     u32 debugMetalFXWorkerCrash = 0, debugMetalFXWorkerDelayMs = 0;
     u32 debugFrameDelayMs = 0;
     bool debugVisibility = false, debugMotionCorrupt = false, debugExposureCorrupt = false, debugUpscalerReset = false;

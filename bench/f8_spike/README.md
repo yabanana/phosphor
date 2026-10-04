@@ -70,7 +70,9 @@ The isolated worker experiment (PR #15) remains available as
 reduction and the engine lifetime tests when the runtime is updated: the
 `METALFX-LIFETIME` exit line reports `released` (plain release sufficed),
 `cycle-released` (the self-reference was dropped) and `retained` (leak, FAIL).
-No external report has been sent.
+No external report has been sent; a ready draft with a single-file ARC
+reproduction is in [APPLE_FEEDBACK.md](APPLE_FEEDBACK.md)
+(`apple_feedback_repro.m`).
 
 ## SDK/API comparison and repeated creation
 

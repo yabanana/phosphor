@@ -591,6 +591,13 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
                 error = "--metalfx-mode must be isolated or direct";
                 return false;
             }
+        } else if (arg == "--metalfx-resize-settle") {
+            if (!needCount(out.metalfxResizeSettleFrames))
+                return false;
+            if (out.metalfxResizeSettleFrames > 120) {
+                error = "--metalfx-resize-settle: expected 0..120 frames";
+                return false;
+            }
         } else if (arg == "--debug-frame-delay-ms") {
             if (!needCount(out.debugFrameDelayMs))
                 return false;

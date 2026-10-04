@@ -145,15 +145,50 @@ distruzione dello scaler. I tempi in-process coincidono con il direct
 storico di PR #15 (2,1503 / 12,0212 / 1,2743 ms, altra sessione) entro la
 variabilità tra sessioni.
 
-## Regressione nativa
+## Regressione nativa: riferimenti F6 superati da una correzione F7
 
-`tools/f6_check.sh build build/release --quick`: 37 controlli ok e 3 FAIL nel
-percorso mesh (visual check two-phase: 3/8/154 pixel; overflow forzato
-bench 7: 9 pixel; bench 8: 190.241 pixel, delta massimo 170). Lo stesso
-comando su `main` `cc38443`, con gli stessi riferimenti F6 del 2026-10-02,
-dà **conteggi identici**: residuo deterministico preesistente, non
-attribuibile a questo lavoro e non spiegato qui. Resta aperto e separato
-(log: `build/f84-cycle/f6-check-quick*.out`).
+`tools/f6_check.sh build build/release --quick` falliva con 3 FAIL nel
+percorso mesh (visual check two-phase 3/8/154 pixel; overflow forzato
+bench 7: 9; bench 8: 190.241, delta massimo 170), con conteggi identici su
+`main` `cc38443`. La stessa batteria sul merge F6 `e600887` passa.
+Bisezione con la sonda di overflow: `d9cfacf` 0 pixel, `70a64d8` (F7: shading
+condiviso, normali con cofattori, segno della tangente per istanze
+specchiate) 186.041 pixel. Sull'HEAD overflow e indexed coincidono (0 pixel)
+e mesh contro indexed differisce di 0/1 pixel: il percorso mesh è coerente,
+è cambiata l'immagine del percorso base.
+
+Attribuzione su bench 8 (5% di istanze specchiate), annullando
+temporaneamente le righe dello shader indexed: la sola correzione della
+tangente spiega 185.854 pixel; restano 4.579 pixel, di cui 4.448 con delta 1
+(riordino aritmetico) e 131 con delta maggiore, non attribuiti singolarmente.
+Gli altri bench differiscono solo per delta 1–2 (bench 5: 221.237 pixel a
+delta 1). È una correzione voluta e coerente con la convenzione glTF del
+progetto; F7 non aveva aggiornato i riferimenti F6.
+
+Riferimenti rigenerati con gli strumenti F6 (`tools/visual_check.sh build
+build/reference-f6base --update`; `EXTRA_ARGS="--geometry-path mesh
+--meshlet-cull off"` per `build/reference-f6mesh`), conservando i precedenti
+in `build/reference-f6*-pre-f7`. Batteria quick: **40 ok, 0 FAIL**.
+
+## Ritiro al resize: attesa della dimensione stabile
+
+Con ridimensionamento continuo ogni dimensione intermedia richiedeva un
+nuovo scaler, superato prima dell'uso. Ora lo scaler in-process viene
+richiesto dopo `--metalfx-resize-settle N` frame con output invariato
+(default 4; 0 = comportamento precedente; la prima dimensione resta
+immediata e i worker isolati non cambiano). Uno scaler sostituito passa
+sempre dal ritiro differito.
+
+| Resize ogni 2 frame, due viste, 400 frame (3 ripetizioni) | settle 0 | settle 4 |
+|---|---:|---:|
+| Scaler creati | 78–83 | 2 |
+| Picco footprint | 4,96–5,11 GB | 2,53 GB |
+| Durata | 0,95–1,05 s | 0,68–0,72 s |
+
+Costo: con resize ogni 30 frame i frame temporali passano da 233 a 205 su
+240 (lo scaler arriva 4 frame più tardi; ~33 ms a 120 fps). DRS non è
+coinvolta: cambia l'input, non l'output. Controllo lifetime e suite F7/F8
+funzionale (26/26) rieseguiti con il default.
 
 ## Revisione avversariale
 
@@ -182,7 +217,7 @@ perché ogni scaler è superato prima di diventare utile. Non è un effetto del
 rimedio (senza rimedio ogni scaler resterebbe vivo), ma è un costo reale
 della ricreazione: la mitigazione naturale è attendere che la dimensione
 sia stabile prima di crearne uno nuovo, restando nel fallback nativo durante
-il trascinamento. Non implementata in questa consegna.
+il trascinamento: implementata, vedi sopra.
 
 Correzioni conseguenti (codice):
 
@@ -208,7 +243,8 @@ Correzioni conseguenti (codice):
 - Il secondo `release` richiede che l'oggetto sopravviva con un solo
   proprietario oltre alla sonda e che alla creazione ce ne fosse
   esattamente uno: ogni altra forma dà un leak visibile, mai un crash.
-- Non è stata inviata alcuna segnalazione ad Apple.
+- Non è stata inviata alcuna segnalazione ad Apple; la bozza pronta con
+  riproduttore ARC è in [`APPLE_FEEDBACK.md`](../../bench/f8_spike/APPLE_FEEDBACK.md).
 - Il confronto con macOS 27.0.1 stabile non è più necessario al gate e non è
   stato eseguito.
 

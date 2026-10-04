@@ -224,5 +224,55 @@
     "capture_layer": "Only MTL_CAPTURE_ENABLED wraps scalers (CaptureMTL4FXTemporalScaler); inner scaler leaked ~20 MB per recreation while the gate said PASS. Now counted as wrapped -> UNVERIFIED, exit unaffected. Validation, shader validation and HUD return the framework object (count 2).",
     "transient_reference": "Repro measured 2 internal references in 11/100 scalers because NSHashTable insertion preceded the measurement; adopting first gives 100/100 cycle-released, 0 unknown.",
     "version_gate": "Extra release only on MetalFX 40.9; PHOSPHOR_METALFX_UNVERIFIED=1 negative control: engine 8/8 retained, FAIL exit 1; repro 4/4 live."
+  },
+  "resize_settle": {
+    "flag": "--metalfx-resize-settle N (default 4, 0 = immediate)",
+    "continuous_resize_every_2_frames_two_views_400_frames_3_runs": {
+      "settle_0": {
+        "scalers": [
+          80,
+          83,
+          78
+        ],
+        "peak_footprint_gb": [
+          5.11,
+          4.96,
+          5.01
+        ]
+      },
+      "settle_4": {
+        "scalers": [
+          2,
+          2,
+          2
+        ],
+        "peak_footprint_gb": [
+          2.53,
+          2.53,
+          2.53
+        ]
+      }
+    },
+    "resize_every_30_temporal_frames_of_240": {
+      "settle_0": 233,
+      "settle_4": 205
+    },
+    "reverified": "metalfx_lifetime_check (direct+isolated), F7/F8 functional 26/26, ctest"
+  },
+  "f6_battery": {
+    "before": "3 FAIL (mesh visual 3/8/154 px; overflow b7 9 px, b8 190241 px) identical on main cc38443; e600887 passes",
+    "first_bad_commit": "70a64d8 (F7 shared shading, cofactor normals, mirrored tangent sign)",
+    "attribution_bench8": {
+      "mirrored_tangent_fix_px": 185854,
+      "delta1_px": 4448,
+      "larger_delta_unattributed_px": 131
+    },
+    "mesh_vs_indexed_at_head_px": {
+      "bench7": 0,
+      "bench8_overflow": 0,
+      "bench8_mesh": 1
+    },
+    "action": "F6 references regenerated (old kept as build/reference-f6*-pre-f7)",
+    "after": "f6_check --quick 40 ok, 0 FAIL"
   }
 }

@@ -74,6 +74,10 @@ versions (`40.9`); any other version gets plain releases (a persisting defect
 shows as `retained`, exit 1; `PHOSPHOR_METALFX_UNVERIFIED=1` is the negative
 control). Under the GPU capture layer the scalers are wrapped: the result is
 `UNVERIFIED` and recreations during a capture session leak until exit.
+On an output resize the in-process scaler is requested only after
+`--metalfx-resize-settle N` unchanged frames (default 4, 0 = immediate): a
+live resize stays on the native fallback instead of creating a scaler per
+intermediate size (78–83 scalers and ~5 GB peak → 2 and 2.5 GB measured).
 `--metalfx-mode isolated` keeps the PR #15 worker processes as an opt-in
 comparison ([historical cost](F8_METALFX_LIFETIME.md)). The plain SDK
 reduction still fails by design ([reduction](../bench/f8_spike/README.md)).

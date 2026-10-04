@@ -8,7 +8,10 @@ worker isolati, ma il proprietario ne ha rifiutato il costo (F8.4 riaperta il
 autoriferimento forte nel suo filtro interno e il motore lo rilascia con
 `metalfx_lifetime` ([causa, rimedio e verifiche](research/2026-10-04-metalfx-cycle-root-cause.md));
 i worker restano opt-in ([prove e costi storici](F8_METALFX_LIFETIME.md)).
-**F7/F8 sono DEVELOPMENT_ACCEPTED sul M5.** Il riproduttore SDK con rilascio
+**F7/F8 sono DEVELOPMENT_ACCEPTED sul M5.** La batteria nativa F6 falliva
+per riferimenti precedenti alla correzione F7 di normali e tangenti
+specchiate (`70a64d8`): attribuita e rigenerata, 40/40
+([dettagli](research/2026-10-04-metalfx-cycle-root-cause.md)). Il riproduttore SDK con rilascio
 semplice resta negativo per costruzione: è il controllo negativo del rimedio. T0 fisico rimane esterno. Nessuna fase OPT
 avviata. Stato delle caselle: [roadmap](ROADMAP.md). Contratti e comandi:
 [guida renderer](RENDERING_F7_F8.md). Dati compatti:

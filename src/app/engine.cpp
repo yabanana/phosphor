@@ -240,6 +240,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         po.neutralMipBias = options_.debugNeutralMipBias;
         po.temporal = options_.temporalUpscale;
         po.isolatedMetalFX = options_.isolatedMetalFX;
+        po.resizeSettleFrames = options_.metalfxResizeSettleFrames;
         po.debugWorkerCrash = options_.debugMetalFXWorkerCrash;
         po.debugWorkerDelayMs = options_.debugMetalFXWorkerDelayMs;
         po.autoExposure = options_.autoExposure;
