@@ -1,6 +1,14 @@
 # F8.4 — nuova ricerca di una correzione senza isolamento
 
 Verifica del 2026-10-03, dopo PR #15, base `cc38443`.
+
+> **Aggiornamento 2026-10-04: superata.** La causa è stata trovata in-process
+> (autoriferimento forte dello scaler nel suo filtro interno) e il motore la
+> gestisce senza isolamento: [causa e rimedio](2026-10-04-metalfx-cycle-root-cause.md).
+> Il confronto con macOS 27.0.1 stabile è **abbandonato**: il proprietario non
+> vuole un volume di sistema aggiuntivo. Il volume `Phosphor Stable 27.0.1`
+> (3,9 MB, solo copie del probe) e l'installer da 17 GB in `/Applications`
+> creati da questa indagine vanno rimossi; l'installazione non è mai partita.
 **Esito: nessuna correzione pubblica applicabile verificata. F8.4 RIAPERTA.**
 Il proprietario rifiuta il costo dei processi separati come soluzione finale.
 Le misure precedenti restano valide per l'esperimento; l'accettazione della

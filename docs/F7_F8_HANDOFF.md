@@ -1,13 +1,15 @@
 # F7/F8 — consegna e revisione F5/F6
 
-Aggiornamento: 2026-10-03. Implementazione integrata in `main` con la
+Aggiornamento: 2026-10-04. Implementazione integrata in `main` con la
 [PR #14](https://github.com/yabanana/phosphor/pull/14), merge `91b51c2`.
-La [PR #15](https://github.com/yabanana/phosphor/pull/15) verifica il recupero
-del lifetime F8.4 tramite worker isolati, ma il proprietario ne ha rifiutato
-il costo. **F7 è DEVELOPMENT_ACCEPTED; F8.4 è RIAPERTA e l'uscita F8 pendente**:
-[indagine aggiornata](research/2026-10-03-metalfx-public-fix-check.md),
-[prove e costi storici](F8_METALFX_LIFETIME.md).
-Il riproduttore SDK diretto resta negativo e non viene trasformato in un PASS. T0 fisico rimane esterno. Nessuna fase OPT
+La [PR #15](https://github.com/yabanana/phosphor/pull/15) ha verificato i
+worker isolati, ma il proprietario ne ha rifiutato il costo (F8.4 riaperta il
+2026-10-03). **F8.4 è ora risolta in-process**: lo scaler MetalFX 40.9 tiene un
+autoriferimento forte nel suo filtro interno e il motore lo rilascia con
+`metalfx_lifetime` ([causa, rimedio e verifiche](research/2026-10-04-metalfx-cycle-root-cause.md));
+i worker restano opt-in ([prove e costi storici](F8_METALFX_LIFETIME.md)).
+**F7/F8 sono DEVELOPMENT_ACCEPTED sul M5.** Il riproduttore SDK con rilascio
+semplice resta negativo per costruzione: è il controllo negativo del rimedio. T0 fisico rimane esterno. Nessuna fase OPT
 avviata. Stato delle caselle: [roadmap](ROADMAP.md). Contratti e comandi:
 [guida renderer](RENDERING_F7_F8.md). Dati compatti:
 [risultati JSON](results/F7-F8-M5Max-2026-10-03.json).

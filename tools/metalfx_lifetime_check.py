@@ -58,6 +58,8 @@ def main():
     p.add_argument('--build', type=Path, default=Path('build/release'))
     p.add_argument('--out', type=Path, default=Path('build/metalfx-lifetime-check'))
     p.add_argument('--settle-ms', type=int, default=64, help='Diagnostic pacing so workers render between output resizes; not a performance run.')
+    p.add_argument('--frames', type=int, default=240, help='Resize-run length (resize every 30 frames, two views).')
+    p.add_argument('--direct-only', action='store_true', help='In-process soak only: skip isolated runs and worker controls.')
     a = p.parse_args(); a.out.mkdir(parents=True, exist_ok=True)
     app = str(a.build/'phosphor')
     env = dict(os.environ)
@@ -66,8 +68,8 @@ def main():
     base = [app, '--offscreen', '--no-ui', '--no-vsync', '--fixed-timestep', '--warmup', '0', '--bench', '1',
             '--scene', 'procedural', '--resolution', '640x360', '--post', '--upscaler', 'temporal', '--render-scale', '.75']
     results = []
-    for mode in ('direct', 'isolated'):
-        command = [*base, '--metalfx-mode', mode, '--frames', '240', '--resize-every', '30', '--temporal-views', '2',
+    for mode in ('direct',) if a.direct_only else ('direct', 'isolated'):
+        command = [*base, '--metalfx-mode', mode, '--frames', str(a.frames), '--resize-every', '30', '--temporal-views', '2',
                    '--debug-frame-delay-ms', str(a.settle_ms), '--report', str(a.out/(mode+'-resize.json'))]
         samples, seen, limited = [], set(), False
         with (a.out/(mode+'-resize.log')).open('wb') as log:
@@ -83,7 +85,7 @@ def main():
                                 'worker_physical_footprints':{pid:physical.get(pid,0) for pid in kids},'children': kids})
                 if physical.get(process.pid,0) > 8*1024**3:
                     limited = True; process.terminate(); break
-                if time.monotonic()-begin > 120:
+                if time.monotonic()-begin > 120+a.frames*a.settle_ms/1000:
                     process.kill(); raise RuntimeError(mode+' resize timeout')
                 time.sleep(.1)
             code = process.wait(timeout=10)
@@ -97,7 +99,7 @@ def main():
             assert re.search(r'METALFX-LIFETIME adopted (\d+) .*retained 0 unknown 0 max-release-us \d+ \| PASS', text), text[-2000:]
         report=json.loads((a.out/(mode+'-resize.json')).read_text()) if not limited else {}
         if mode=='direct':
-            assert report['rendering']['temporal_frames_total']>120, 'Insufficient active temporal frames during resize'
+            assert report['rendering']['temporal_frames_total']>a.frames//2, 'Insufficient active temporal frames during resize'
         if mode=='isolated':
             assert report['rendering']['temporal_frames_total']>120, 'Insufficient active temporal frames during resize'
             assert report['rendering']['workers_spawned_total']>=14, 'Insufficient completed worker startups'
@@ -111,6 +113,8 @@ def main():
         print(mode+' resize: exit '+str(code)+', memory limit '+str(limited)+', all children gone '+str(gone)+
               ', parent footprint peak '+str(result['parent_physical_footprint_peak'])+' last '+
               str(result['parent_physical_footprint_last']), flush=True)
+    if a.direct_only:
+        return
     # Stop only our renderer process. Child exit must follow EOF even while
     # another worker exists; unrelated parent FDs must not leak through spawn.
     with (a.out/'parent-kill.log').open('wb') as log:

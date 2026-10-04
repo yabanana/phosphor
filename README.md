@@ -183,11 +183,11 @@ reports/, research_notes/   design research (Italian / English)
 All 58 F/OPT phase plans now include implementation packages and task-level
 acceptance checks: [plan index](docs/plans/README.md). F5–F8 implementation is
 integrated on main ([PR #14](https://github.com/yabanana/phosphor/pull/14),
-merge `91b51c2`). F7 has M5 development acceptance; **F8.4 is reopened**:
-the owner rejects the overhead of the isolated workers delivered in
-[PR #15](https://github.com/yabanana/phosphor/pull/15). The direct SDK release
-probe still fails. See the [current investigation and next gate](docs/research/2026-10-03-metalfx-public-fix-check.md)
-and [historical lifetime verification and cost](docs/F8_METALFX_LIFETIME.md);
+merge `91b51c2`). F7/F8 have M5 development acceptance. F8.4 MetalFX temporal
+runs in process: the scaler's internal self-reference (MetalFX 40.9) is
+released by the engine, see the [root cause and verification](docs/research/2026-10-04-metalfx-cycle-root-cause.md).
+The isolated workers of [PR #15](https://github.com/yabanana/phosphor/pull/15)
+remain opt-in ([historical cost](docs/F8_METALFX_LIFETIME.md), rejected by the owner);
 see [delivery and limits](docs/F7_F8_HANDOFF.md) and [renderer commands/contracts](docs/RENDERING_F7_F8.md).
 The requested checkpoint stops before OPT; no F9+ implementation is activated. Advance detail does not activate
 the optional research catalog.

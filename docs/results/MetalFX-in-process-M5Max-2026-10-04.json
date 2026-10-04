@@ -1,0 +1,209 @@
+{
+  "date": "2026-10-04",
+  "device": "Apple M5 Max 128 GB",
+  "os": "ProductName: macOS ProductVersion: 27.2 BuildVersion: 26B5091g",
+  "metalfx_framework": "40.9",
+  "commit_fix": "fe622ac",
+  "root_cause": "Temporal scaler (_M4FX/_MFXTemporalScalingEffectBBR) owns unique_ptr<BBRNet_Filter>; the filter holds a strong reference to the scaler (retain count 2 after creation with one external owner; spatial 1).",
+  "remedy": "src/platform/metal/metalfx_lifetime.{h,cpp}: record retainCount-1 after the creating pool drains; at release drop the self-reference only if exactly 1 was recorded and the object survives with exactly that owner; a weak reference proves deallocation. Retired scalers are destroyed on PipelineCache utility workers after frames in flight.",
+  "repro_matrix_640x360_x8": {
+    "temporal4_plain": {
+      "live": 8,
+      "allocated_delta_bytes": 167133184
+    },
+    "temporal3_plain": {
+      "live": 8,
+      "allocated_delta_bytes": 167133184
+    },
+    "temporal4_release_cycle": {
+      "live": 0,
+      "allocated_delta_bytes": 1720320,
+      "leaks": 0
+    },
+    "temporal3_release_cycle": {
+      "live": 0,
+      "allocated_delta_bytes": 1720320,
+      "leaks": 0
+    },
+    "temporal4_release_cycle_gpu_drain_1920x1080": {
+      "live": 0,
+      "allocated_delta_bytes": 1327104
+    }
+  },
+  "engine_resize_two_views_240_frames": {
+    "lifetime": {
+      "adopted": 16,
+      "released": 0,
+      "cycle_released": 16,
+      "retained": 0,
+      "unknown": 0,
+      "verdict": "PASS"
+    },
+    "direct": {
+      "exit": 0,
+      "parent_physical_footprint_peak": 3484993432,
+      "parent_physical_footprint_last": 2465760816
+    },
+    "isolated": {
+      "exit": 0,
+      "parent_physical_footprint_peak": 2034861208,
+      "parent_physical_footprint_last": 1808942232
+    },
+    "release_on_render_thread": {
+      "frame_ms_max": 232.1737,
+      "wait_ms_max": 166.9051
+    },
+    "retire_on_utility_worker": {
+      "frame_ms_max": 85.1531,
+      "wait_ms_max": 0.2005
+    },
+    "leaks_at_exit": {
+      "adopted": 16,
+      "released": 0,
+      "cycle_released": 16,
+      "retained": 0,
+      "unknown": 0,
+      "max_release_us_any_thread": 10369,
+      "verdict": "PASS",
+      "leaks": 0
+    }
+  },
+  "soak_1200_frames": {
+    "lifetime": {
+      "adopted": 80,
+      "released": 0,
+      "cycle_released": 80,
+      "retained": 0,
+      "unknown": 0,
+      "max_release_us_any_thread": 5721,
+      "verdict": "PASS"
+    },
+    "temporal_frames": 1161,
+    "footprint_quartiles_median_max_bytes": [
+      [
+        2561771104,
+        3655141392
+      ],
+      [
+        2823734928,
+        3488450552
+      ],
+      [
+        2828568232,
+        3489155064
+      ],
+      [
+        2829239976,
+        3489957904
+      ]
+    ]
+  },
+  "validation_resize_debug": {
+    "adopted": 12,
+    "released": 0,
+    "cycle_released": 12,
+    "retained": 0,
+    "unknown": 0,
+    "max_release_us_any_thread": 146656,
+    "verdict": "PASS"
+  },
+  "f7_f8_functional_debug_validation": {
+    "pass": 26,
+    "fail": 0,
+    "lifetime": {
+      "runs": 8,
+      "adopted": 11,
+      "cycle_released": 11,
+      "retained": 0
+    }
+  },
+  "f7_f8_quality": {
+    "pass": 16,
+    "fail": 0,
+    "lifetime": {
+      "runs": 8,
+      "adopted": 8,
+      "cycle_released": 8,
+      "retained": 0
+    }
+  },
+  "f7_f8_context_quality": {
+    "pass": 24,
+    "fail": 0,
+    "lifetime": {
+      "runs": 12,
+      "adopted": 14,
+      "cycle_released": 14,
+      "retained": 0
+    }
+  },
+  "performance_1080p_input75_median_of_3": {
+    "sponza-direct": {
+      "frame_mean_median_ms": 2.1369,
+      "frame_mean_range_ms": [
+        2.1355,
+        2.163
+      ],
+      "p95_median_run_ms": 2.1858,
+      "parent_physical_footprint": 2023376576,
+      "worker_physical_footprint": 0,
+      "shared_bridge_bytes": 0
+    },
+    "sponza-isolated": {
+      "frame_mean_median_ms": 2.1328,
+      "frame_mean_range_ms": [
+        2.1327,
+        2.136
+      ],
+      "p95_median_run_ms": 2.2196,
+      "parent_physical_footprint": 1811580440,
+      "worker_physical_footprint": 508527552,
+      "shared_bridge_bytes": 155959296
+    },
+    "lights-direct": {
+      "frame_mean_median_ms": 11.2585,
+      "frame_mean_range_ms": [
+        11.2474,
+        11.5347
+      ],
+      "p95_median_run_ms": 11.4514,
+      "parent_physical_footprint": 1412334888,
+      "worker_physical_footprint": 0,
+      "shared_bridge_bytes": 0
+    },
+    "lights-isolated": {
+      "frame_mean_median_ms": 12.0505,
+      "frame_mean_range_ms": [
+        11.9794,
+        12.1487
+      ],
+      "p95_median_run_ms": 12.3099,
+      "parent_physical_footprint": 1206109312,
+      "worker_physical_footprint": 508380072,
+      "shared_bridge_bytes": 155959296
+    },
+    "two-views-direct": {
+      "frame_mean_median_ms": 1.2297,
+      "frame_mean_range_ms": [
+        1.2259,
+        1.231
+      ],
+      "p95_median_run_ms": 1.2748,
+      "parent_physical_footprint": 2203453288,
+      "worker_physical_footprint": 0,
+      "shared_bridge_bytes": 0
+    },
+    "two-views-isolated": {
+      "frame_mean_median_ms": 1.8625,
+      "frame_mean_range_ms": [
+        1.8616,
+        1.868
+      ],
+      "p95_median_run_ms": 1.9374,
+      "parent_physical_footprint": 1811220040,
+      "worker_physical_footprint": 1016170320,
+      "shared_bridge_bytes": 311918592
+    }
+  },
+  "performance_conditions": "Release, offscreen, no vsync/validation, 120 warmup + 600 frames, rotated replicas; ChatGPT/Codex and Claude apps open, no other GPU load."
+}

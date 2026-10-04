@@ -1,8 +1,12 @@
 # F8.4 — esperimento di isolamento del lifetime MetalFX
 
-**Stato attuale: F8.4 RIAPERTA, 2026-10-03.** Il proprietario ha rifiutato il
-costo di questa soluzione; l'accettazione riportata sotto è storica e non
-autorizza la fase successiva. [Nuova verifica e confronto stabile pendente](research/2026-10-03-metalfx-public-fix-check.md).
+**Stato attuale, 2026-10-04: superato dal rilascio in-process.** La causa è
+un autoriferimento forte dello scaler tenuto dal suo filtro interno; il motore
+lo rilascia senza processi separati e `--upscaler temporal` torna in-process.
+[Causa, rimedio e verifiche](research/2026-10-04-metalfx-cycle-root-cause.md).
+Questo documento resta la prova storica dell'esperimento di isolamento, ora
+opt-in con `--metalfx-mode isolated`; il costo sotto è il motivo del rifiuto
+del proprietario (2026-10-03).
 
 **Esito tecnico storico, PR #15.** Il motore usa MetalFX temporale
 standard in worker isolati, con memoria limitata al loro ciclo di vita.

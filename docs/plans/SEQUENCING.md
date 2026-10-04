@@ -16,18 +16,18 @@ costo prima della migrazione, senza richiedere un guadagno del 3% sul frame.
 
 | Orizzonte | Lavoro | Cosa deve produrre |
 |---|---|---|
-| Checkpoint corrente | F5/F6 integrate; F7 DEVELOPMENT_ACCEPTED M5; F8.4 RIAPERTA | Risolvere il lifetime senza isolamento; nessuna prosecuzione OPT/F9+ |
+| Checkpoint corrente | F5/F6 integrate; F7/F8 DEVELOPMENT_ACCEPTED M5; F8.4 risolta in-process | Sosta prima delle OPT richiesta dal proprietario |
 | Prossimo | F9–F13; F14 da scegliere in base alla scena | Illuminazione integrata e qualità temporale; dettagli di progetto rivisti dopo F8 |
 | Successivo | Altre F, compresi runtime e mondo | Piani dettagliati da riconciliare quando il consumatore esiste |
 | Prodotto richiesto | F21/F27/F34, F39–F41 e audio base F26.1 | Riuso, 2D/UI/editor e compatibilità verificata; baseline incrementale, copertura finale obbligatoria |
 | Opportunità | OPT aperte, task `[CANDIDATO]`, fasi `[EDGE]` | Nessuna implementazione automatica: attivazione per un problema concreto e misurato |
 | Audit | F0–F8, OPT-0/OPT-1 | Conservare evidenze; riprendere soltanto residui e verifiche pertinenti alle modifiche |
 
-F5/F6 sono integrate; F7 ha accettazione di sviluppo M5. F8.4 è riaperta:
-il proprietario ha rifiutato il costo dei worker isolati (PR #15).
-[Indagine aggiornata](../research/2026-10-03-metalfx-public-fix-check.md) e
-[verifiche/costo storico](../F8_METALFX_LIFETIME.md). Il riproduttore SDK diretto
-resta negativo; il runtime stabile deve ancora essere provato. Gli esperimenti F7.4/F7.5
+F5/F6 sono integrate; F7/F8 hanno accettazione di sviluppo M5. F8.4, riaperta
+per il costo dei worker isolati (PR #15), è risolta in-process: il motore
+rilascia l'autoriferimento interno dello scaler MetalFX
+([causa e verifiche](../research/2026-10-04-metalfx-cycle-root-cause.md),
+[costo storico dell'isolamento](../F8_METALFX_LIFETIME.md)). Gli esperimenti F7.4/F7.5
 richiesti dal proprietario sono stati eseguiti e non adottati nel preset corrente:
 [misure e decisioni](../F7_F8_HANDOFF.md). Non bloccano la baseline F7.
 Nessuna OPT o fase F9+ viene avviata da questo checkpoint. La storia
