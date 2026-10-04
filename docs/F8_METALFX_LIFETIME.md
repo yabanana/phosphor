@@ -1,6 +1,10 @@
-# F8.4 — gestione del lifetime MetalFX completata sul M5
+# F8.4 — esperimento di isolamento del lifetime MetalFX
 
-**DEVELOPMENT_ACCEPTED, 2026-10-03**, PR #15. Il motore usa MetalFX temporale
+**Stato attuale: F8.4 RIAPERTA, 2026-10-03.** Il proprietario ha rifiutato il
+costo di questa soluzione; l'accettazione riportata sotto è storica e non
+autorizza la fase successiva. [Nuova verifica e confronto stabile pendente](research/2026-10-03-metalfx-public-fix-check.md).
+
+**Esito tecnico storico, PR #15.** Il motore usa MetalFX temporale
 standard in worker isolati, con memoria limitata al loro ciclo di vita.
 **Il ciclo di riferimenti interno di MetalFX 40.9 non è stato corretto:** il
 riproduttore diretto resta negativo. La soluzione del motore termina e recupera

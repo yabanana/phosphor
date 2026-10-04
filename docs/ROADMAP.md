@@ -241,14 +241,14 @@ pubbliche, sorgenti OS, risultati di paper e ipotesi da misurare.
 
 | Tappa | Consegna principale | Decisione successiva |
 |---|---|---|
-| Ora | F5/F6 integrate; F7/F8 DEVELOPMENT_ACCEPTED M5 (PR #14/#15), lifetime MetalFX isolato | Frame reale con visibilità, materiali e ricostruzione, misurato e verificato |
+| Ora | F5/F6 integrate; F7 DEVELOPMENT_ACCEPTED M5; F8.4 riaperta | Risolvere il lifetime temporale senza il costo dell'isolamento rifiutato dal proprietario |
 | Dopo F8 | Baseline del corpus OPT-4.16 con strumenti esistenti | Selezionare un problema di OPT-2/3/4 se rilevante; altrimenti proseguire F9–F13 |
 | Dopo F13 | Ombre, GI, riflessi e denoise integrati; F14 se utile al corpus | Nuove misure; valutare soltanto le ottimizzazioni rese necessarie dal frame con luce |
 | Sviluppo successivo | Materiali/mondo/streaming e runtime richiesti dalla slice | Attivare un piano dettagliato quando il suo consumatore è concreto |
 | Piattaforma di prodotto | F27 integrazione ECS → nucleo F41/F21 → F39/F40 → editor F34 | Riuso e parità funzionale verificati; implementazione progressiva senza avviare optimizer generali |
 | Frontiera | F29–F33 e ricerca SoC avanzata | Attivazione per trigger misurato; nessuna dipendenza automatica della slice |
 
-Il checkpoint corrente è **F7/F8 DEVELOPMENT_ACCEPTED sul M5; F8.4 usa lifetime isolato. Sosta prima delle OPT; F9→F13 restano preparate**, con una baseline corretta e
+Il checkpoint corrente è **F7 DEVELOPMENT_ACCEPTED sul M5; F8.4 RIAPERTA. Nessuna prosecuzione OPT/F9+ finché il gate non è risolto; F9→F13 restano preparate**, con una baseline corretta e
 semplice a ogni passaggio. Cooker, runtime e strumenti minimi si introducono
 quando necessari ai contenuti correnti. Le OPT non sono una barriera obbligatoria
 fra ere; F37 può usare fallback e preset misurati senza aspettare ogni idea
@@ -442,12 +442,12 @@ eventi al pixel). Certificazione T0/M3 fisica `EXTERNAL_VALIDATION_PENDING`.
 
 ## F8 — HDR, EDR, esposizione e MetalFX temporal [CORE]
 
-**2026-10-03: DEVELOPMENT_ACCEPTED sul M5 Max.** F8.4 gestisce il lifetime con worker isolati (PR #15); il riproduttore diretto SDK resta negativo. [Prove, costi e limiti](F8_METALFX_LIFETIME.md). Nessuna OPT avviata. [Consegna e riproduttore](F7_F8_HANDOFF.md).
+**2026-10-03: F8.4 RIAPERTA; uscita F8 pendente.** Il proprietario non accetta il costo dei worker isolati di PR #15 come soluzione finale. Le prove funzionali restano valide per quell'esperimento; non chiudono il nuovo gate senza isolamento. La verifica aggiornata non trova una correzione pubblica applicabile e riproduce il difetto su macOS 27.2 beta 2; il confronto con macOS 27.0.1 stabile non è ancora eseguito. [Indagine e decisione](research/2026-10-03-metalfx-public-fix-check.md), [prove e costi storici](F8_METALFX_LIFETIME.md). Nessuna OPT/F9+ avviata.
 
 - [x] F8.1 Target RGBA16F lineare (attachment tile nei pass raster, output compute nel resolve della baseline F7), istogramma di luminanza in compute con SIMD-group, esposizione automatica
 - [x] F8.2 Tonemapping configurabile (AgX, ACES, curva custom) e uscita **EDR** su display XDR con calibrazione relativa tramite headroom osservato; fotometria in nit non certificata
 - [x] F8.3 Jitter Halton sub-pixel, motion vector per oggetti e camera
-- [x] F8.4 **Verificata sul M5 con lifetime isolato; SDK diretto diagnostic-only:** MetalFX temporal upscaler con risoluzione dinamica e reactive mask (scala max 2x); valutare subrectangle, motion vector diretti e distortion field se esposti dall'SDK/device [R111], mantenendo il percorso base; queste estensioni si attivano solo se necessarie al carico corrente
+- [ ] F8.4 **RIAPERTA: lifetime senza worker isolati ancora da risolvere; direct diagnostico:** MetalFX temporal upscaler con risoluzione dinamica e reactive mask (scala max 2x); valutare subrectangle, motion vector diretti e distortion field se esposti dall'SDK/device [R111], mantenendo il percorso base; queste estensioni si attivano solo se necessarie al carico corrente
 - [x] F8.5 Sharpening adattivo e mip bias corretto per la risoluzione di render
 - [x] F8.6 **Risorse temporali esplicite nel render graph**: storia per vista, versioni fra frame, inizializzazione e invalidazione su camera cut, resize e cambio di risoluzione; distinguere storia temporale e risorse per frame slot, dichiarare ultimo lettore e sincronizzazione prima del riuso; iniziare con risorse per vista e riuso conservativo, senza richiedere aliasing temporale generale di OPT-4.14
 - [x] F8.7 **Suite di qualità in movimento**: clip deterministiche con disocclusioni, camera rapida, dettagli sub-pixel, oggetti animati e cambi di esposizione/risoluzione; riferimento ad alta qualità e soglie dichiarate per ghosting, flicker, perdita di dettaglio e tempo di recupero della storia. Estendere la suite quando arrivano illuminazione (F13), trasparenze (F16) e vegetazione (F19), senza attendere F35

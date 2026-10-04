@@ -6,6 +6,11 @@ Forced Apple9 exercises feature selection on that machine; it is not M3/T0
 certification. Phase status belongs to [ROADMAP](ROADMAP.md), measurements to
 [perf-log](perf-log.md), and experiment decisions to [opt-log](opt-log.md).
 
+F8.4 is reopened: the owner rejects the isolated temporal path's cost as a
+final solution. The commands below still reproduce the integrated experiment;
+they are not a current phase-acceptance claim. See the
+[runtime investigation](research/2026-10-03-metalfx-public-fix-check.md).
+
 ## Running the integrated renderer
 
 ```sh

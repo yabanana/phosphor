@@ -1,6 +1,9 @@
 # F8.4 — isolated MetalFX lifetime experiment
 
-DEVELOPMENT_ACCEPTED on M5, 2026-10-03. The gates below were executed;
+Current status: **adoption rejected by the owner; F8.4 reopened**, 2026-10-03.
+The measured worker overhead is not accepted as the final temporal path.
+See the [follow-up investigation](../research/2026-10-03-metalfx-public-fix-check.md).
+Historical technical result on M5: the gates below were executed;
 see [final delivery](../F8_METALFX_LIFETIME.md) and its source evidence. PR #15 remains the delivery
 branch. The SDK's in-process destruction defect is not claimed fixed.
 

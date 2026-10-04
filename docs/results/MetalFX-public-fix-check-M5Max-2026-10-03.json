@@ -1,0 +1,1198 @@
+{
+  "date": "2026-10-03",
+  "source_base": "cc384439fc61e6c3a5edfe317519d5761c39488f",
+  "decision": "F8.4_REOPENED_OWNER_REJECTS_ISOLATION_OVERHEAD",
+  "runtime": "macOS 27.2 beta 2 (26B5091g), MetalFX 40.9",
+  "stable_runtime_tested": false,
+  "no_new_software_on_current_channel": true,
+  "available_stable_installer": {
+    "version": "27.0.1",
+    "build": "26A434",
+    "size_KiB": 17955378
+  },
+  "baseline": {
+    "source_sha256": "6421d6acf051f5bc36f09d4430fcd891e427d528931bc87ecf1c02b5a2aff5ba",
+    "source_commit": "cc384439fc61e6c3a5edfe317519d5761c39488f",
+    "host": "ProductName:\t\tmacOS\nProductVersion:\t\t27.2\nBuildVersion:\t\t26B5091g\n",
+    "compiler": "Apple clang version 21.0.0 (clang-2100.3.34.2)\nTarget: arm64-apple-darwin27.2.0\nThread model: posix\nInstalledDir: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin\n",
+    "scope": "Different build SDKs; same physical GPU and OS MetalFX runtime. Creation/release only.",
+    "leaks_scan_uses_weak_monitor": false,
+    "cases": [
+      {
+        "sdk": "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+        "mach_o_versions": "build/metalfx-public-fix-check/baseline/matrix-sdk-0:\nLoad command 11\n      cmd LC_BUILD_VERSION\n  cmdsize 32\n platform MACOS\n    minos 26.0\n      sdk 27.0\n   ntools 1\n     tool LD\n  version 27037.1\n",
+        "mode": "temporal4",
+        "run": {
+          "command": [
+            "build/metalfx-public-fix-check/baseline/matrix-sdk-0",
+            "--mode",
+            "temporal4",
+            "--count",
+            "8"
+          ],
+          "returncode": 1,
+          "elapsed_seconds": 2.5201599589781836,
+          "log": "build/metalfx-public-fix-check/baseline/sdk-0-temporal4.log"
+        },
+        "samples": [
+          {
+            "released": 1,
+            "live": 1,
+            "allocated_delta": 21282816
+          },
+          {
+            "released": 2,
+            "live": 2,
+            "allocated_delta": 42024960
+          },
+          {
+            "released": 3,
+            "live": 3,
+            "allocated_delta": 63684608
+          },
+          {
+            "released": 4,
+            "live": 4,
+            "allocated_delta": 84426752
+          },
+          {
+            "released": 5,
+            "live": 5,
+            "allocated_delta": 105037824
+          },
+          {
+            "released": 6,
+            "live": 6,
+            "allocated_delta": 125779968
+          },
+          {
+            "released": 7,
+            "live": 7,
+            "allocated_delta": 146522112
+          },
+          {
+            "released": 8,
+            "live": 8,
+            "allocated_delta": 167133184
+          }
+        ],
+        "final_live_scalers": 8,
+        "leaks_run": {
+          "command": [
+            "leaks",
+            "--atExit",
+            "--",
+            "build/metalfx-public-fix-check/baseline/matrix-sdk-0",
+            "--mode",
+            "temporal4",
+            "--count",
+            "8",
+            "--no-weak"
+          ],
+          "returncode": 1,
+          "elapsed_seconds": 3.542278249980882,
+          "log": "build/metalfx-public-fix-check/baseline/sdk-0-temporal4-leaks.log"
+        },
+        "leaked_allocations": 2821,
+        "leaked_cpu_bytes": 2349376,
+        "lifetime_passed": false
+      },
+      {
+        "sdk": "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+        "mach_o_versions": "build/metalfx-public-fix-check/baseline/matrix-sdk-0:\nLoad command 11\n      cmd LC_BUILD_VERSION\n  cmdsize 32\n platform MACOS\n    minos 26.0\n      sdk 27.0\n   ntools 1\n     tool LD\n  version 27037.1\n",
+        "mode": "temporal3",
+        "run": {
+          "command": [
+            "build/metalfx-public-fix-check/baseline/matrix-sdk-0",
+            "--mode",
+            "temporal3",
+            "--count",
+            "8"
+          ],
+          "returncode": 1,
+          "elapsed_seconds": 2.133003875031136,
+          "log": "build/metalfx-public-fix-check/baseline/sdk-0-temporal3.log"
+        },
+        "samples": [
+          {
+            "released": 1,
+            "live": 1,
+            "allocated_delta": 21282816
+          },
+          {
+            "released": 2,
+            "live": 2,
+            "allocated_delta": 42024960
+          },
+          {
+            "released": 3,
+            "live": 3,
+            "allocated_delta": 63684608
+          },
+          {
+            "released": 4,
+            "live": 4,
+            "allocated_delta": 84426752
+          },
+          {
+            "released": 5,
+            "live": 5,
+            "allocated_delta": 105037824
+          },
+          {
+            "released": 6,
+            "live": 6,
+            "allocated_delta": 125779968
+          },
+          {
+            "released": 7,
+            "live": 7,
+            "allocated_delta": 146522112
+          },
+          {
+            "released": 8,
+            "live": 8,
+            "allocated_delta": 167133184
+          }
+        ],
+        "final_live_scalers": 8,
+        "leaks_run": {
+          "command": [
+            "leaks",
+            "--atExit",
+            "--",
+            "build/metalfx-public-fix-check/baseline/matrix-sdk-0",
+            "--mode",
+            "temporal3",
+            "--count",
+            "8",
+            "--no-weak"
+          ],
+          "returncode": 1,
+          "elapsed_seconds": 3.54438770795241,
+          "log": "build/metalfx-public-fix-check/baseline/sdk-0-temporal3-leaks.log"
+        },
+        "leaked_allocations": 2707,
+        "leaked_cpu_bytes": 2203360,
+        "lifetime_passed": false
+      },
+      {
+        "sdk": "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+        "mach_o_versions": "build/metalfx-public-fix-check/baseline/matrix-sdk-0:\nLoad command 11\n      cmd LC_BUILD_VERSION\n  cmdsize 32\n platform MACOS\n    minos 26.0\n      sdk 27.0\n   ntools 1\n     tool LD\n  version 27037.1\n",
+        "mode": "spatial4",
+        "run": {
+          "command": [
+            "build/metalfx-public-fix-check/baseline/matrix-sdk-0",
+            "--mode",
+            "spatial4",
+            "--count",
+            "8"
+          ],
+          "returncode": 0,
+          "elapsed_seconds": 2.038188416045159,
+          "log": "build/metalfx-public-fix-check/baseline/sdk-0-spatial4.log"
+        },
+        "samples": [
+          {
+            "released": 1,
+            "live": 0,
+            "allocated_delta": 393216
+          },
+          {
+            "released": 2,
+            "live": 0,
+            "allocated_delta": 393216
+          },
+          {
+            "released": 3,
+            "live": 0,
+            "allocated_delta": 393216
+          },
+          {
+            "released": 4,
+            "live": 0,
+            "allocated_delta": 393216
+          },
+          {
+            "released": 5,
+            "live": 0,
+            "allocated_delta": 393216
+          },
+          {
+            "released": 6,
+            "live": 0,
+            "allocated_delta": 393216
+          },
+          {
+            "released": 7,
+            "live": 0,
+            "allocated_delta": 393216
+          },
+          {
+            "released": 8,
+            "live": 0,
+            "allocated_delta": 393216
+          }
+        ],
+        "final_live_scalers": 0,
+        "leaks_run": {
+          "command": [
+            "leaks",
+            "--atExit",
+            "--",
+            "build/metalfx-public-fix-check/baseline/matrix-sdk-0",
+            "--mode",
+            "spatial4",
+            "--count",
+            "8",
+            "--no-weak"
+          ],
+          "returncode": 0,
+          "elapsed_seconds": 2.615581459016539,
+          "log": "build/metalfx-public-fix-check/baseline/sdk-0-spatial4-leaks.log"
+        },
+        "leaked_allocations": 0,
+        "leaked_cpu_bytes": 0,
+        "lifetime_passed": true
+      },
+      {
+        "sdk": "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+        "mach_o_versions": "build/metalfx-public-fix-check/baseline/matrix-sdk-0:\nLoad command 11\n      cmd LC_BUILD_VERSION\n  cmdsize 32\n platform MACOS\n    minos 26.0\n      sdk 27.0\n   ntools 1\n     tool LD\n  version 27037.1\n",
+        "mode": "denoised4",
+        "run": {
+          "command": [
+            "build/metalfx-public-fix-check/baseline/matrix-sdk-0",
+            "--mode",
+            "denoised4",
+            "--count",
+            "8"
+          ],
+          "returncode": 0,
+          "elapsed_seconds": 2.260947791975923,
+          "log": "build/metalfx-public-fix-check/baseline/sdk-0-denoised4.log"
+        },
+        "samples": [
+          {
+            "released": 1,
+            "live": 0,
+            "allocated_delta": 6963200
+          },
+          {
+            "released": 2,
+            "live": 0,
+            "allocated_delta": 6963200
+          },
+          {
+            "released": 3,
+            "live": 0,
+            "allocated_delta": 6963200
+          },
+          {
+            "released": 4,
+            "live": 0,
+            "allocated_delta": 6963200
+          },
+          {
+            "released": 5,
+            "live": 0,
+            "allocated_delta": 6963200
+          },
+          {
+            "released": 6,
+            "live": 0,
+            "allocated_delta": 6963200
+          },
+          {
+            "released": 7,
+            "live": 0,
+            "allocated_delta": 6963200
+          },
+          {
+            "released": 8,
+            "live": 0,
+            "allocated_delta": 6963200
+          }
+        ],
+        "final_live_scalers": 0,
+        "leaks_run": {
+          "command": [
+            "leaks",
+            "--atExit",
+            "--",
+            "build/metalfx-public-fix-check/baseline/matrix-sdk-0",
+            "--mode",
+            "denoised4",
+            "--count",
+            "8",
+            "--no-weak"
+          ],
+          "returncode": 1,
+          "elapsed_seconds": 3.113340166048147,
+          "log": "build/metalfx-public-fix-check/baseline/sdk-0-denoised4-leaks.log"
+        },
+        "leaked_allocations": 8,
+        "leaked_cpu_bytes": 5120,
+        "lifetime_passed": false
+      },
+      {
+        "sdk": "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+        "mach_o_versions": "build/metalfx-public-fix-check/baseline/matrix-sdk-0:\nLoad command 11\n      cmd LC_BUILD_VERSION\n  cmdsize 32\n platform MACOS\n    minos 26.0\n      sdk 27.0\n   ntools 1\n     tool LD\n  version 27037.1\n",
+        "mode": "denoised3",
+        "run": {
+          "command": [
+            "build/metalfx-public-fix-check/baseline/matrix-sdk-0",
+            "--mode",
+            "denoised3",
+            "--count",
+            "8"
+          ],
+          "returncode": 0,
+          "elapsed_seconds": 2.1959683750756085,
+          "log": "build/metalfx-public-fix-check/baseline/sdk-0-denoised3.log"
+        },
+        "samples": [
+          {
+            "released": 1,
+            "live": 0,
+            "allocated_delta": 409600
+          },
+          {
+            "released": 2,
+            "live": 0,
+            "allocated_delta": 409600
+          },
+          {
+            "released": 3,
+            "live": 0,
+            "allocated_delta": 409600
+          },
+          {
+            "released": 4,
+            "live": 0,
+            "allocated_delta": 409600
+          },
+          {
+            "released": 5,
+            "live": 0,
+            "allocated_delta": 409600
+          },
+          {
+            "released": 6,
+            "live": 0,
+            "allocated_delta": 409600
+          },
+          {
+            "released": 7,
+            "live": 0,
+            "allocated_delta": 409600
+          },
+          {
+            "released": 8,
+            "live": 0,
+            "allocated_delta": 409600
+          }
+        ],
+        "final_live_scalers": 0,
+        "leaks_run": {
+          "command": [
+            "leaks",
+            "--atExit",
+            "--",
+            "build/metalfx-public-fix-check/baseline/matrix-sdk-0",
+            "--mode",
+            "denoised3",
+            "--count",
+            "8",
+            "--no-weak"
+          ],
+          "returncode": 1,
+          "elapsed_seconds": 3.0260991250397637,
+          "log": "build/metalfx-public-fix-check/baseline/sdk-0-denoised3-leaks.log"
+        },
+        "leaked_allocations": 8,
+        "leaked_cpu_bytes": 5120,
+        "lifetime_passed": false
+      }
+    ]
+  },
+  "followup": {
+    "source_sha256": "4c53b98f8fdffcc6bcb5c94fdcb277125b8f733d4bbef77d99c3091680f98be9",
+    "host": "ProductName:\t\tmacOS\nProductVersion:\t\t27.2\nBuildVersion:\t\t26B5091g\n",
+    "cases": [
+      {
+        "name": "drain4",
+        "run": {
+          "command": [
+            "build/metalfx-public-fix-check/followup/matrix",
+            "--count",
+            "8",
+            "--mode",
+            "temporal4",
+            "--gpu-drain"
+          ],
+          "returncode": 1,
+          "elapsed_seconds": 2.522448416915722,
+          "log": "build/metalfx-public-fix-check/followup/drain4.log"
+        },
+        "created": 8,
+        "failed_creation": 0,
+        "live": 8,
+        "samples": [
+          [
+            1,
+            1,
+            20889600
+          ],
+          [
+            2,
+            2,
+            42680320
+          ],
+          [
+            3,
+            3,
+            63291392
+          ],
+          [
+            4,
+            4,
+            84033536
+          ],
+          [
+            5,
+            5,
+            104644608
+          ],
+          [
+            6,
+            6,
+            125386752
+          ],
+          [
+            7,
+            7,
+            146128896
+          ],
+          [
+            8,
+            8,
+            166739968
+          ]
+        ],
+        "leaks_run": {
+          "command": [
+            "leaks",
+            "--atExit",
+            "--",
+            "build/metalfx-public-fix-check/followup/matrix",
+            "--count",
+            "8",
+            "--mode",
+            "temporal4",
+            "--gpu-drain",
+            "--no-weak"
+          ],
+          "returncode": 1,
+          "elapsed_seconds": 3.5366535409120843,
+          "log": "build/metalfx-public-fix-check/followup/drain4-leaks.log"
+        },
+        "leaked_cpu_bytes": 2352400
+      },
+      {
+        "name": "drain3",
+        "run": {
+          "command": [
+            "build/metalfx-public-fix-check/followup/matrix",
+            "--count",
+            "8",
+            "--mode",
+            "temporal3",
+            "--gpu-drain"
+          ],
+          "returncode": 1,
+          "elapsed_seconds": 2.133327624993399,
+          "log": "build/metalfx-public-fix-check/followup/drain3.log"
+        },
+        "created": 8,
+        "failed_creation": 0,
+        "live": 8,
+        "samples": [
+          [
+            1,
+            1,
+            20889600
+          ],
+          [
+            2,
+            2,
+            42680320
+          ],
+          [
+            3,
+            3,
+            63291392
+          ],
+          [
+            4,
+            4,
+            84033536
+          ],
+          [
+            5,
+            5,
+            104644608
+          ],
+          [
+            6,
+            6,
+            125386752
+          ],
+          [
+            7,
+            7,
+            146128896
+          ],
+          [
+            8,
+            8,
+            166739968
+          ]
+        ],
+        "leaks_run": {
+          "command": [
+            "leaks",
+            "--atExit",
+            "--",
+            "build/metalfx-public-fix-check/followup/matrix",
+            "--count",
+            "8",
+            "--mode",
+            "temporal3",
+            "--gpu-drain",
+            "--no-weak"
+          ],
+          "returncode": 1,
+          "elapsed_seconds": 3.5599526669830084,
+          "log": "build/metalfx-public-fix-check/followup/drain3-leaks.log"
+        },
+        "leaked_cpu_bytes": 2226928
+      },
+      {
+        "name": "spatial-drain",
+        "run": {
+          "command": [
+            "build/metalfx-public-fix-check/followup/matrix",
+            "--count",
+            "8",
+            "--mode",
+            "spatial4",
+            "--gpu-drain"
+          ],
+          "returncode": 0,
+          "elapsed_seconds": 2.0509481250774115,
+          "log": "build/metalfx-public-fix-check/followup/spatial-drain.log"
+        },
+        "created": 8,
+        "failed_creation": 0,
+        "live": 0,
+        "samples": [
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            2,
+            0,
+            0
+          ],
+          [
+            3,
+            0,
+            0
+          ],
+          [
+            4,
+            0,
+            0
+          ],
+          [
+            5,
+            0,
+            0
+          ],
+          [
+            6,
+            0,
+            0
+          ],
+          [
+            7,
+            0,
+            0
+          ],
+          [
+            8,
+            0,
+            0
+          ]
+        ],
+        "leaks_run": {
+          "command": [
+            "leaks",
+            "--atExit",
+            "--",
+            "build/metalfx-public-fix-check/followup/matrix",
+            "--count",
+            "8",
+            "--mode",
+            "spatial4",
+            "--gpu-drain",
+            "--no-weak"
+          ],
+          "returncode": 0,
+          "elapsed_seconds": 2.663658250006847,
+          "log": "build/metalfx-public-fix-check/followup/spatial-drain-leaks.log"
+        },
+        "leaked_cpu_bytes": 0
+      },
+      {
+        "name": "denoised-drain",
+        "run": {
+          "command": [
+            "build/metalfx-public-fix-check/followup/matrix",
+            "--count",
+            "8",
+            "--mode",
+            "denoised4",
+            "--gpu-drain"
+          ],
+          "returncode": 0,
+          "elapsed_seconds": 2.2683664170326665,
+          "log": "build/metalfx-public-fix-check/followup/denoised-drain.log"
+        },
+        "created": 8,
+        "failed_creation": 0,
+        "live": 0,
+        "samples": [
+          [
+            1,
+            0,
+            6569984
+          ],
+          [
+            2,
+            0,
+            6569984
+          ],
+          [
+            3,
+            0,
+            7618560
+          ],
+          [
+            4,
+            0,
+            7618560
+          ],
+          [
+            5,
+            0,
+            7618560
+          ],
+          [
+            6,
+            0,
+            7618560
+          ],
+          [
+            7,
+            0,
+            7618560
+          ],
+          [
+            8,
+            0,
+            7618560
+          ]
+        ],
+        "leaks_run": {
+          "command": [
+            "leaks",
+            "--atExit",
+            "--",
+            "build/metalfx-public-fix-check/followup/matrix",
+            "--count",
+            "8",
+            "--mode",
+            "denoised4",
+            "--gpu-drain",
+            "--no-weak"
+          ],
+          "returncode": 1,
+          "elapsed_seconds": 3.124601833987981,
+          "log": "build/metalfx-public-fix-check/followup/denoised-drain-leaks.log"
+        },
+        "leaked_cpu_bytes": 5120
+      },
+      {
+        "name": "upscale2",
+        "run": {
+          "command": [
+            "build/metalfx-public-fix-check/followup/matrix",
+            "--count",
+            "8",
+            "--output-scale",
+            "2"
+          ],
+          "returncode": 1,
+          "elapsed_seconds": 2.210389457992278,
+          "log": "build/metalfx-public-fix-check/followup/upscale2.log"
+        },
+        "created": 8,
+        "failed_creation": 0,
+        "live": 8,
+        "samples": [
+          [
+            1,
+            1,
+            63897600
+          ],
+          [
+            2,
+            2,
+            127254528
+          ],
+          [
+            3,
+            3,
+            191528960
+          ],
+          [
+            4,
+            4,
+            254885888
+          ],
+          [
+            5,
+            5,
+            318111744
+          ],
+          [
+            6,
+            6,
+            381468672
+          ],
+          [
+            7,
+            7,
+            444825600
+          ],
+          [
+            8,
+            8,
+            508051456
+          ]
+        ]
+      },
+      {
+        "name": "upscale3",
+        "run": {
+          "command": [
+            "build/metalfx-public-fix-check/followup/matrix",
+            "--count",
+            "8",
+            "--output-scale",
+            "3"
+          ],
+          "returncode": 1,
+          "elapsed_seconds": 2.267595041077584,
+          "log": "build/metalfx-public-fix-check/followup/upscale3.log"
+        },
+        "created": 8,
+        "failed_creation": 0,
+        "live": 8,
+        "samples": [
+          [
+            1,
+            1,
+            134496256
+          ],
+          [
+            2,
+            2,
+            268451840
+          ],
+          [
+            3,
+            3,
+            403324928
+          ],
+          [
+            4,
+            4,
+            537280512
+          ],
+          [
+            5,
+            5,
+            671105024
+          ],
+          [
+            6,
+            6,
+            805060608
+          ],
+          [
+            7,
+            7,
+            939016192
+          ],
+          [
+            8,
+            8,
+            1072840704
+          ]
+        ]
+      },
+      {
+        "name": "rgba8-metal4",
+        "run": {
+          "command": [
+            "build/metalfx-public-fix-check/followup/matrix",
+            "--count",
+            "8",
+            "--format",
+            "rgba8"
+          ],
+          "returncode": 1,
+          "elapsed_seconds": 2.16142779099755,
+          "log": "build/metalfx-public-fix-check/followup/rgba8-metal4.log"
+        },
+        "created": 8,
+        "failed_creation": 0,
+        "live": 8,
+        "samples": [
+          [
+            1,
+            1,
+            21282816
+          ],
+          [
+            2,
+            2,
+            42024960
+          ],
+          [
+            3,
+            3,
+            63684608
+          ],
+          [
+            4,
+            4,
+            84426752
+          ],
+          [
+            5,
+            5,
+            105037824
+          ],
+          [
+            6,
+            6,
+            125779968
+          ],
+          [
+            7,
+            7,
+            146522112
+          ],
+          [
+            8,
+            8,
+            167133184
+          ]
+        ]
+      },
+      {
+        "name": "rgba8-metal3",
+        "run": {
+          "command": [
+            "build/metalfx-public-fix-check/followup/matrix",
+            "--count",
+            "8",
+            "--format",
+            "rgba8",
+            "--mode",
+            "temporal3"
+          ],
+          "returncode": 1,
+          "elapsed_seconds": 2.155061334022321,
+          "log": "build/metalfx-public-fix-check/followup/rgba8-metal3.log"
+        },
+        "created": 8,
+        "failed_creation": 0,
+        "live": 8,
+        "samples": [
+          [
+            1,
+            1,
+            21282816
+          ],
+          [
+            2,
+            2,
+            42024960
+          ],
+          [
+            3,
+            3,
+            63684608
+          ],
+          [
+            4,
+            4,
+            84426752
+          ],
+          [
+            5,
+            5,
+            105037824
+          ],
+          [
+            6,
+            6,
+            125779968
+          ],
+          [
+            7,
+            7,
+            146522112
+          ],
+          [
+            8,
+            8,
+            167133184
+          ]
+        ]
+      },
+      {
+        "name": "rg11",
+        "run": {
+          "command": [
+            "build/metalfx-public-fix-check/followup/matrix",
+            "--count",
+            "8",
+            "--format",
+            "rg11"
+          ],
+          "returncode": 1,
+          "elapsed_seconds": 2.1553970410022885,
+          "log": "build/metalfx-public-fix-check/followup/rg11.log"
+        },
+        "created": 8,
+        "failed_creation": 0,
+        "live": 8,
+        "samples": [
+          [
+            1,
+            1,
+            21282816
+          ],
+          [
+            2,
+            2,
+            42024960
+          ],
+          [
+            3,
+            3,
+            63684608
+          ],
+          [
+            4,
+            4,
+            84426752
+          ],
+          [
+            5,
+            5,
+            105037824
+          ],
+          [
+            6,
+            6,
+            125779968
+          ],
+          [
+            7,
+            7,
+            146522112
+          ],
+          [
+            8,
+            8,
+            167133184
+          ]
+        ]
+      },
+      {
+        "name": "r32depth",
+        "run": {
+          "command": [
+            "build/metalfx-public-fix-check/followup/matrix",
+            "--count",
+            "8",
+            "--depth-r32"
+          ],
+          "returncode": 1,
+          "elapsed_seconds": 2.1578250419115648,
+          "log": "build/metalfx-public-fix-check/followup/r32depth.log"
+        },
+        "created": 8,
+        "failed_creation": 0,
+        "live": 8,
+        "samples": [
+          [
+            1,
+            1,
+            21282816
+          ],
+          [
+            2,
+            2,
+            42024960
+          ],
+          [
+            3,
+            3,
+            63684608
+          ],
+          [
+            4,
+            4,
+            84426752
+          ],
+          [
+            5,
+            5,
+            105037824
+          ],
+          [
+            6,
+            6,
+            125779968
+          ],
+          [
+            7,
+            7,
+            146522112
+          ],
+          [
+            8,
+            8,
+            167133184
+          ]
+        ]
+      },
+      {
+        "name": "minimal-options",
+        "run": {
+          "command": [
+            "build/metalfx-public-fix-check/followup/matrix",
+            "--count",
+            "8",
+            "--no-dynamic",
+            "--no-reactive",
+            "--async",
+            "--auto-exposure",
+            "--gpu-drain",
+            "--output-scale",
+            "2"
+          ],
+          "returncode": 1,
+          "elapsed_seconds": 2.171742791077122,
+          "log": "build/metalfx-public-fix-check/followup/minimal-options.log"
+        },
+        "created": 8,
+        "failed_creation": 0,
+        "live": 8,
+        "samples": [
+          [
+            1,
+            1,
+            62455808
+          ],
+          [
+            2,
+            2,
+            125812736
+          ],
+          [
+            3,
+            3,
+            187990016
+          ],
+          [
+            4,
+            4,
+            250298368
+          ],
+          [
+            5,
+            5,
+            312475648
+          ],
+          [
+            6,
+            6,
+            374784000
+          ],
+          [
+            7,
+            7,
+            437092352
+          ],
+          [
+            8,
+            8,
+            499269632
+          ]
+        ]
+      }
+    ]
+  },
+  "final_probe_validation": {
+    "source_sha256": "07948faa4fcdaa5345b9ec30e36fc76e88f40ce477b199f523c61ef5ece95048",
+    "build": "clang++ -Wall -Wextra -Werror; source includes final output-size bound",
+    "api_shader_validation": true,
+    "cases": [
+      {
+        "name": "spatial-control",
+        "exit": 0,
+        "expected_exit": 0,
+        "output": "2026-10-03 23:40:53.969 matrix[1549:12118674] Metal API Validation Enabled\n2026-10-03 23:40:53.970 matrix[1549:12118674] Metal GPU Validation Enabled\nCONFIG mode=spatial4 count=2 size=640x360 dynamic=1 reactive=1 sync=1 auto_exposure=0 reset=0 weak=1\nFOLLOWUP output_scale=1 format=rgba16 depth_r32=0 gpu_drain=1\nDEVICE Apple M5 Max | RUNTIME Version 27.2 (Build 26B5091g) | FRAMEWORK 40.9\nCLASS _MTL4FXSpatialScalingEffectEFFECT_NAME_V1\nSAMPLE released=1 live=0 allocated_delta=262144\nSAMPLE released=2 live=0 allocated_delta=262144\nFINAL created=2 failed=0 live=0\n"
+      },
+      {
+        "name": "temporal-reproduction",
+        "exit": 1,
+        "expected_exit": 1,
+        "output": "2026-10-03 23:40:56.175 matrix[1555:12118752] Metal API Validation Enabled\n2026-10-03 23:40:56.176 matrix[1555:12118752] Metal GPU Validation Enabled\nCONFIG mode=temporal4 count=8 size=640x360 dynamic=1 reactive=1 sync=1 auto_exposure=0 reset=0 weak=1\nFOLLOWUP output_scale=1 format=rgba16 depth_r32=0 gpu_drain=1\nDEVICE Apple M5 Max | RUNTIME Version 27.2 (Build 26B5091g) | FRAMEWORK 40.9\nCLASS _M4FXTemporalScalingEffectBBR\nSAMPLE released=1 live=1 allocated_delta=21938176\nSAMPLE released=2 live=2 allocated_delta=46874624\nSAMPLE released=3 live=3 allocated_delta=67485696\nSAMPLE released=4 live=4 allocated_delta=88227840\nSAMPLE released=5 live=5 allocated_delta=108969984\nSAMPLE released=6 live=6 allocated_delta=129581056\nSAMPLE released=7 live=7 allocated_delta=150323200\nSAMPLE released=8 live=8 allocated_delta=179322880\nFINAL created=8 failed=0 live=8\n"
+      },
+      {
+        "name": "reject-output-bound",
+        "exit": 2,
+        "expected_exit": 2,
+        "output": ""
+      },
+      {
+        "name": "reject-format",
+        "exit": 2,
+        "expected_exit": 2,
+        "output": ""
+      }
+    ],
+    "note": "Expected failing temporal destruction is a reproduced defect, not acceptance."
+  }
+}

@@ -9,11 +9,16 @@ task only once it is verified for its declared scope on the available device
 `docs/perf-log.md`. The report's older "F1–F5" numbering is superseded by it.
 Planning horizons: read `docs/plans/SEQUENCING.md` and `docs/plans/README.md`.
 All 58 F/OPT plans now contain advance implementation and verification detail.
-F5/F6 are integrated (F6 merge e600887); F7/F8 have M5 development acceptance
-(F7/F8 baseline PR #14, merge 91b51c2; F8.4 lifetime remediation PR #15).
+F5/F6 are integrated (F6 merge e600887); F7 has M5 development acceptance.
+F8.4 is REOPENED by the owner on 2026-10-03: the measured process-isolation
+cost is not accepted as the final temporal path. F8 exit remains pending;
+do not advance OPT or F9+ until this gate is resolved.
+(F7/F8 baseline PR #14, merge 91b51c2; isolation experiment PR #15.)
 `--upscaler temporal` uses isolated MetalFX workers, preserving reconstruction
 while retiring their entire OS context; native remains the product default.
-`docs/F8_METALFX_LIFETIME.md` records proof and measured overhead. The stock
+`docs/F8_METALFX_LIFETIME.md` records historical proof and measured overhead.
+`docs/research/2026-10-03-metalfx-public-fix-check.md` records fresh negative
+public-API probes and the untested stable-macOS comparison. The stock
 MetalFX 40.9 in-process release cycle remains reproducible; direct mode is
 diagnostic. Do not claim the vendor defect itself was fixed. The earlier
 SDK/API investigation and rejected denoised spike remain historical evidence. The owner requested a stop before OPT.

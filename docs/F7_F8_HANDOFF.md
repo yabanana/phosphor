@@ -2,9 +2,11 @@
 
 Aggiornamento: 2026-10-03. Implementazione integrata in `main` con la
 [PR #14](https://github.com/yabanana/phosphor/pull/14), merge `91b51c2`.
-La [PR #15](https://github.com/yabanana/phosphor/pull/15) completa la gestione
-del lifetime F8.4 tramite worker isolati. **F7/F8 sono DEVELOPMENT_ACCEPTED
-sul M5 Max 128 GB**: [prove e costi della soluzione](F8_METALFX_LIFETIME.md).
+La [PR #15](https://github.com/yabanana/phosphor/pull/15) verifica il recupero
+del lifetime F8.4 tramite worker isolati, ma il proprietario ne ha rifiutato
+il costo. **F7 è DEVELOPMENT_ACCEPTED; F8.4 è RIAPERTA e l'uscita F8 pendente**:
+[indagine aggiornata](research/2026-10-03-metalfx-public-fix-check.md),
+[prove e costi storici](F8_METALFX_LIFETIME.md).
 Il riproduttore SDK diretto resta negativo e non viene trasformato in un PASS. T0 fisico rimane esterno. Nessuna fase OPT
 avviata. Stato delle caselle: [roadmap](ROADMAP.md). Contratti e comandi:
 [guida renderer](RENDERING_F7_F8.md). Dati compatti:

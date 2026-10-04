@@ -32,8 +32,10 @@ this is not explained by the original two-second wait alone.
 
 Phosphor's native HDR path has `0 leaks` in the same exit-time test. MetalFX
 rendering/quality tests pass; the SDK-only destruction gate remains negative.
-The engine now uses [isolated lifetime ownership](../../docs/F8_METALFX_LIFETIME.md),
+The integrated isolation experiment uses [process lifetime ownership](../../docs/F8_METALFX_LIFETIME.md),
 which is verified independently without claiming the SDK cycle is fixed.
+The owner has since rejected its overhead: **F8.4 is reopened**. See the
+[public-fix recheck](../../docs/research/2026-10-03-metalfx-public-fix-check.md).
 Native is the default; temporal use is explicit. Do not force releases or alter
 private framework ivars to hide this cycle. Rerun this reduction and the engine
 lifetime tests when the runtime is updated. No external report has been sent.
@@ -66,6 +68,30 @@ so weak liveness alone is also insufficient. Spatial is the passing control.
 `--async`, `--auto-exposure`, `--reset`, `--no-weak`. Public-option switches apply
 to the relevant effect; dynamic content applies only to standard temporal.
 `--no-weak` prints `live=-1`: successful execution is not proof of destruction.
+
+Follow-up switches (standard temporal unless noted): `--output-scale 1..3`
+(output still bounded to 1920x1080), `--format rgba16|rgba8|rg11`,
+`--depth-r32`, and `--gpu-drain` (all modes). The latter executes and checks
+a real Metal blit before creation and after each release/pool drain. It tests
+deferred driver reclamation; it does not encode the scaler or prove image
+quality. An external runner must bound process lifetime because the diagnostic
+blit waits for completion. These variants still reproduce the surviving
+standard scaler on the current runtime. Spatial with GPU drain is the passing
+control; denoised with GPU drain still leaks 640 CPU bytes per creation.
+
+Example after building the matrix source with the flags above:
+
+```sh
+./matrix --mode temporal4 --count 8 --gpu-drain
+leaks --atExit -- ./matrix --mode temporal4 --count 8 --gpu-drain --no-weak
+./matrix --mode temporal4 --count 8 --output-scale 2
+./matrix --mode temporal4 --count 8 --format rg11
+./matrix --mode spatial4 --count 8 --gpu-drain
+```
+
+The same probes must run on an actual alternative macOS runtime to establish
+a version difference. Running under a different Xcode/SDK on this boot does
+not do that. No stable-runtime result is currently recorded.
 
 ## Rejected denoised alternative
 
