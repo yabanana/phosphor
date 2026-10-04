@@ -6,6 +6,7 @@
 #include "core/profile.h"
 #include "platform/metal/metal_context.h"
 #include "platform/metal/metal_graph_executor.h"
+#include "platform/metal/metalfx_lifetime.h"
 
 #include <pthread/qos.h>
 
@@ -302,18 +303,30 @@ PipelineCache::requestTemporalScaler(MTLFX::TemporalScalerDescriptor *descriptor
     auto copy = std::shared_ptr<MTLFX::TemporalScalerDescriptor>(descriptor->copy(), [](auto *p) { p->release(); });
     queue_->submit(pipe::CompilePriority::Urgent, ~0u, [this, promise, copy] {
         auto *pool = NS::AutoreleasePool::alloc()->init();
+        MTL4FX::TemporalScaler *scaler = nullptr;
         try {
-            auto *scaler = copy->newTemporalScaler(context_.device(), compiler_);
-            promise->set_value(std::shared_ptr<MTL4FX::TemporalScaler>(scaler, [](auto *p) {
-                if (p)
-                    p->release();
-            }));
+            scaler = copy->newTemporalScaler(context_.device(), compiler_);
         } catch (...) {
+            pool->release();
             promise->set_exception(std::current_exception());
+            return;
         }
+        // Drain before adopting: the ownership record counts every reference
+        // left on the new scaler besides ours.
         pool->release();
+        promise->set_value(metalfx::adoptTemporalScaler(scaler));
     });
     return future;
+}
+
+void PipelineCache::retireTemporalScaler(std::shared_ptr<MTL4FX::TemporalScaler> scaler) {
+    if (!scaler)
+        return;
+    queue_->submit(pipe::CompilePriority::Prewarm, ~0u, [scaler = std::move(scaler)]() mutable {
+        auto *pool = NS::AutoreleasePool::alloc()->init();
+        scaler.reset();
+        pool->release();
+    });
 }
 
 std::future<std::shared_ptr<TemporalWorker>>

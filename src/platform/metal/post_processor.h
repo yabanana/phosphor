@@ -20,7 +20,7 @@ class PostProcessor {
     struct Options {
         bool temporal = false, autoExposure = false, corruptExposure = false, forceReset = false;
         bool checkCurves = false, corruptCurves = false;
-        bool neutralMipBias = false, isolatedMetalFX = true;
+        bool neutralMipBias = false, isolatedMetalFX = false;
         u32 debugWorkerCrash = 0, debugWorkerDelayMs = 0;
         u32 tonemap = 0, views = 1, jitterVariant = 0;
         float sharpening = 0, whitePoint = 4, debugMotionScale = 1;

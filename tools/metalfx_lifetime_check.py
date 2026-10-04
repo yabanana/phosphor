@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sequential process/lifecycle checks; sampling runs are not performance measurements."""
+"""Sequential MetalFX lifetime checks (direct default + isolated opt-in); sampling runs are not performance measurements."""
 import argparse
 import ctypes
 import json
@@ -91,21 +91,31 @@ def main():
         text = (a.out/(mode+'-resize.log')).read_text(errors='replace')
         if mode == 'isolated':
             assert code == 0 and not limited and gone and re.search(r'METALFX-WORKERS.*failures 0 shared-bytes 0 \| PASS', text), text[-2000:]
-        elif not limited:
-            assert code == 0 and 'EXIT 0' in text
+        else:
+            # In-process scalers: every one destroyed (cycle released), no leak.
+            assert code == 0 and not limited and 'EXIT 0' in text, text[-2000:]
+            assert re.search(r'METALFX-LIFETIME adopted (\d+) .*retained 0 unknown 0 max-release-us \d+ \| PASS', text), text[-2000:]
         report=json.loads((a.out/(mode+'-resize.json')).read_text()) if not limited else {}
+        if mode=='direct':
+            assert report['rendering']['temporal_frames_total']>120, 'Insufficient active temporal frames during resize'
         if mode=='isolated':
             assert report['rendering']['temporal_frames_total']>120, 'Insufficient active temporal frames during resize'
             assert report['rendering']['workers_spawned_total']>=14, 'Insufficient completed worker startups'
+        footprint=[x['parent_physical_footprint'] for x in samples if x['parent_physical_footprint']]
         result = {'case': mode+'-resize', 'command': command, 'exit': code, 'stopped_at_8_gib_parent_physical_footprint': limited,
+                  'parent_physical_footprint_peak': max(footprint, default=0),
+                  'parent_physical_footprint_last': footprint[-1] if footprint else 0,
                   'all_observed_children_gone': gone, 'samples': samples, 'rendering': report.get('rendering',{})}
         results.append(result)
         (a.out/'summary.json').write_text(json.dumps(results, indent=2)+'\n')
-        print(mode+' resize: exit '+str(code)+', memory limit '+str(limited)+', all children gone '+str(gone), flush=True)
+        print(mode+' resize: exit '+str(code)+', memory limit '+str(limited)+', all children gone '+str(gone)+
+              ', parent footprint peak '+str(result['parent_physical_footprint_peak'])+' last '+
+              str(result['parent_physical_footprint_last']), flush=True)
     # Stop only our renderer process. Child exit must follow EOF even while
     # another worker exists; unrelated parent FDs must not leak through spawn.
     with (a.out/'parent-kill.log').open('wb') as log:
-        proc = subprocess.Popen([*base, '--frames', '100000', '--temporal-views', '2'], stdout=log, stderr=subprocess.STDOUT, env=env)
+        proc = subprocess.Popen([*base, '--metalfx-mode', 'isolated', '--frames', '100000', '--temporal-views', '2'],
+                                stdout=log, stderr=subprocess.STDOUT, env=env)
         begin = time.monotonic(); kids = []
         while time.monotonic()-begin < 30:
             kids = children(proc.pid)
@@ -123,7 +133,7 @@ def main():
         results.append({'case': 'parent-death', 'parent_exit': code, 'children': kids, 'all_children_gone': gone})
         print('parent death: no orphan workers, PASS', flush=True)
     for name, flags in [('crash', ['--debug-metalfx-worker-crash', '4']), ('timeout', ['--debug-metalfx-worker-delay-ms', '1500'])]:
-        r = run_checked([*base, '--frames', '20', *flags], a.out/(name+'.log'), expected=1, marker=False,
+        r = run_checked([*base, '--metalfx-mode', 'isolated', '--frames', '20', *flags], a.out/(name+'.log'), expected=1, marker=False,
                         required=('MetalFX worker: frame IPC',), env=env, timeout=30)
         assert r['passed'], r
         results.append({'case': name, 'expected_failure_observed': True, 'elapsed_seconds': r['elapsed_seconds']})

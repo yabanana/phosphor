@@ -188,7 +188,19 @@ void MetalContext::deferRelease(NS::Object* object, const MTL::Allocation* evict
     pendingReleases_.push_back({object, evict, frameIndex_});
 }
 
+void MetalContext::deferCall(std::function<void()> fn) {
+    if (!fn) return;
+    pendingCalls_.push_back({std::move(fn), frameIndex_});
+}
+
 void MetalContext::releaseCompleted(u64 completedFrame) {
+    std::vector<std::function<void()>> ready; // run outside the vector: fn may defer again
+    std::erase_if(pendingCalls_, [&](PendingCall& c) {
+        if (completedFrame != ~u64{0} && c.afterFrame > completedFrame) return false;
+        ready.push_back(std::move(c.fn));
+        return true;
+    });
+    for (auto& fn : ready) fn();
     size_t kept = 0;
     for (size_t i = 0; i < pendingReleases_.size(); ++i) {
         const PendingRelease& p = pendingReleases_[i];

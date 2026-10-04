@@ -166,6 +166,9 @@ public:
     void deferRelease(MTL::Resource* resource, bool evict);
     /// Same, removing `evict` (e.g. a heap) from the residency set first.
     void deferRelease(NS::Object* object, const MTL::Allocation* evict);
+    /// Run `fn` once all frames currently in flight have finished (owners
+    /// whose release is more than a plain `release`, e.g. MetalFX scalers).
+    void deferCall(std::function<void()> fn);
 
     /// Resize the drawable to match the window's pixel size.
     void resize(u32 width, u32 height);
@@ -256,6 +259,11 @@ private:
         u64                    afterFrame = 0;
     };
     std::vector<PendingRelease> pendingReleases_;
+    struct PendingCall {
+        std::function<void()> fn;
+        u64                    afterFrame = 0;
+    };
+    std::vector<PendingCall> pendingCalls_;
     /// Release every entry whose frame is <= `completedFrame` (all if ~0).
     void releaseCompleted(u64 completedFrame);
 

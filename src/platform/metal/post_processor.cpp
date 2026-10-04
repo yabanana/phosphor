@@ -134,6 +134,7 @@ PostProcessor::PostProcessor(MetalContext &c, PipelineCache &p, const Options &o
 }
 PostProcessor::~PostProcessor() {
     context_.waitIdle();
+    context_.collectGarbage(); // runs the deferred scaler retirements, which use pipelines_
     context_.memory().release(curveReadback_, MemoryCategory::Other);
     releaseTargets();
     for (auto &v : views_) {
@@ -168,11 +169,10 @@ void PostProcessor::configure(u32 w, u32 h) {
         s.output = texture(context_, w, h, MTL::PixelFormatRGBA16Float, "Reconstructed HDR");
     for (u32 i = 0; i < options_.views; ++i) {
         auto &v = views_[i];
-        if (v.scaler) {
-            v.scaler->retain();
-            context_.deferRelease(v.scaler.get());
-            v.scaler.reset();
-        }
+        if (v.scaler) // retired off the render thread once its frames have completed
+            context_.deferCall([cache = &pipelines_, retired = std::move(v.scaler)]() mutable {
+                cache->retireTemporalScaler(std::move(retired));
+            });
         if (usesWorker()) {
             if (v.worker) {
                 v.worker->cancelPending();
@@ -254,6 +254,7 @@ void PostProcessor::collectScalers(bool wait) {
             continue;
         auto scaler = v.pending.get();
         if (v.requestedWidth != width_ || v.requestedHeight != height_) {
+            pipelines_.retireTemporalScaler(std::move(scaler)); // never encoded
             requestScaler(i);
             continue;
         }

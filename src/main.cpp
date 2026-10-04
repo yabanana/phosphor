@@ -1,4 +1,5 @@
 #include "app/engine.h"
+#include "platform/metal/metalfx_lifetime.h"
 #include "platform/metal/temporal_worker.h"
 #include <cstring>
 #include "core/log.h"
@@ -43,6 +44,19 @@ int main(int argc, char* argv[]) {
                     static_cast<unsigned long long>(phosphor::TemporalWorker::failureCount()),
                     static_cast<unsigned long long>(phosphor::TemporalWorker::mappedBytes()),
                     result == EXIT_SUCCESS ? "PASS" : "FAIL");
+    }
+    if (const auto fx = phosphor::metalfx::counters(); fx.adopted) {
+        // Every in-process scaler must be destroyed by now (F8.4 lifetime gate).
+        const auto destroyed = fx.released + fx.cycleReleased;
+        if (destroyed != fx.adopted || fx.retained)
+            result = EXIT_FAILURE;
+        std::printf("METALFX-LIFETIME adopted %llu released %llu cycle-released %llu retained %llu unknown %llu "
+                    "max-release-us %llu | %s\n",
+                    static_cast<unsigned long long>(fx.adopted), static_cast<unsigned long long>(fx.released),
+                    static_cast<unsigned long long>(fx.cycleReleased), static_cast<unsigned long long>(fx.retained),
+                    static_cast<unsigned long long>(fx.unknownSignature),
+                    static_cast<unsigned long long>(fx.maxReleaseMicros),
+                    destroyed == fx.adopted && !fx.retained ? "PASS" : "FAIL");
     }
     // stdout: the exit status as the app decided it, after the engine is
     // destroyed.  A run whose shell status differs from this line (or that

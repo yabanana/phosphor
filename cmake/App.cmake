@@ -167,6 +167,7 @@ add_executable(phosphor
     src/platform/metal/visibility_renderer.cpp
     src/platform/metal/visibility_check.cpp
     src/platform/metal/post_processor.cpp
+    src/platform/metal/metalfx_lifetime.cpp
     src/platform/metal/temporal_worker.cpp
     src/platform/metal/display_output.mm
     src/platform/metal/meshlet_check.cpp
