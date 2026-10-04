@@ -257,7 +257,7 @@ MTL::Buffer* scratchFor(soc::Context& ctx, const std::vector<Blas>& blases);
 double buildBlases(soc::Context& ctx, std::vector<Blas>& blases, MTL::Buffer* scratch);
 
 #pragma pack(push, 1)
-/// == MTL::IndirectAccelerationStructureInstanceDescriptor (64 B).
+/// == MTL::IndirectAccelerationStructureInstanceDescriptor (72 B packed).
 struct InstanceDesc {
     float m[12]; // column-major 4x3
     u32 options, mask, iftOffset, userID;
