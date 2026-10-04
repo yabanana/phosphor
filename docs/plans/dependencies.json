@@ -81,7 +81,7 @@
     "OPT-2": {
       "later_integration": [],
       "start_after": [
-        "F8",
+        "F13",
         "OPT-0"
       ]
     },
@@ -942,12 +942,13 @@
     "F39": "requisito_pianificato"
   },
   "current_focus": [
-    "F8"
+    "F9"
   ],
   "selected_candidate_tasks": [],
   "candidate_tasks": [
     "F7.4",
     "F7.5",
+    "OPT-2.0",
     "OPT-2.1",
     "OPT-2.2",
     "OPT-2.3",

@@ -31,15 +31,29 @@ std::vector<std::string> splitList(const std::string& list) {
 
 void computeUnitTimes(const u64* ticks, u32 tickCount, const u32* startQuery, const u32* endQuery, u32 unitCount,
                       double tickNs, float* outMs, bool* outValid) {
+    // Unit whose end is query q (endQuery[v] == v for the engine's plans).
+    const auto unitEndingAt = [&](u32 q) -> u32 {
+        if (q < unitCount && endQuery[q] == q) return q;
+        for (u32 v = 0; v < unitCount; ++v)
+            if (endQuery[v] == q) return v;
+        return ~0u;
+    };
     for (u32 u = 0; u < unitCount; ++u) {
         outMs[u]    = 0.0f;
         outValid[u] = false;
         const u32 s = startQuery[u];
         const u32 e = endQuery[u];
         if (s >= tickCount || e >= tickCount) continue;
-        const u64 t0 = ticks[s];
+        // Latest end on the chain, bounded by the unit count (no cycles).
+        u64 t0 = 0;
+        for (u32 q = s, steps = 0; q < tickCount && steps <= unitCount; ++steps) {
+            t0 = std::max(t0, ticks[q]);
+            const u32 v = unitEndingAt(q);
+            if (v == ~0u || v == u) break;
+            q = startQuery[v];
+        }
         const u64 t1 = ticks[e];
-        if (t0 == 0 || t1 == 0 || t1 < t0) continue;
+        if (ticks[s] == 0 || t0 == 0 || t1 == 0 || t1 < t0) continue;
         outMs[u]    = static_cast<float>(static_cast<double>(t1 - t0) * tickNs * 1e-6);
         outValid[u] = true;
     }

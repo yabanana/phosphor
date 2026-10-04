@@ -12,7 +12,7 @@ Baseline F8 congelata, shader prioritario dal frame reale. Specializzazione e pr
 
 ## Prerequisiti e confini
 
-Baseline richieste: [F8](F8.md), [OPT-0](OPT-0.md). Sono contratti utilizzabili, non la chiusura di interi cataloghi o di certificazioni hardware esterne.
+Baseline richieste: [F13](F13.md) (frame con luce reale), [OPT-0](OPT-0.md) e OPT-2.0 (equivalenza generica/varianti su contenuti texturizzati, derivate analitiche nel forward). Spostata dopo F13 il 2026-10-04: sul frame F8 i nostri shader pesano ~0,5 ms a 1080p, MetalFX il 69–83% dei frame temporali e Many Lights è il ciclo luci di F11 ([revisione](../research/2026-10-04-post-f8-review.md)). Sono contratti utilizzabili, non la chiusura di interi cataloghi o di certificazioni hardware esterne.
 
 ## File e ownership
 

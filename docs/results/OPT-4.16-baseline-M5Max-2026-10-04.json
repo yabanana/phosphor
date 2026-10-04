@@ -1,0 +1,355 @@
+{
+  "task": "OPT-4.16 baseline (M5 portion)",
+  "date": "2026-10-04",
+  "commit": "91c9929 (binary) / timing fix 8cdb4a8",
+  "device": "Apple M5 Max 128 GB (Mac17,6)",
+  "os": "macOS 27.2 beta 2 (26B5091g)",
+  "power": "AC",
+  "method": {
+    "product_paths": "tools/f7_f8_bench.py: Release, 1920x1080, 120 warmup + 600 frames, three rotated replicas, offscreen, no UI/vsync/validation; median of frame means; p95/p99 of the median replica",
+    "forward_benches": "tools/perf_record.sh build/release 600 3 (benches 1-8, vsync on/off): docs/perf-history.csv and perf-history-passes.csv rows for commit 91c9929",
+    "quality": "F8.7 suites on main: functional 26/26, quality 16/16 (Torus 34.85 dB, Sponza 30.16 dB PSNR), context 24/24 (exposure, DRS, two views)",
+    "per_pass": "GPU timed units after 8cdb4a8: unit sum equals the graphics span in every case"
+  },
+  "not_measured": {
+    "bandwidth": "only declared render-graph DRAM estimates (no hardware counters headless)",
+    "energy": "no power counters used",
+    "latency": "input-to-photon not measured",
+    "thermal": "no steady-state soak beyond the replicas",
+    "devices": "T0/T2 EXTERNAL_VALIDATION_PENDING"
+  },
+  "scene_classes": {
+    "heterogeneous_materials": "Sponza (bench 4, pinned fixture, scripted camera)",
+    "dense_dynamic": "1M instances (bench 8) in perf_record; Stress Test 100K (bench 3)",
+    "many_lights": "Many Lights 1024 (bench 5)",
+    "gi_proxy": "Cornell (bench 6)",
+    "temporal_clips": "F8.7 clips with disocclusion, camera cuts, exposure and resolution changes"
+  },
+  "conditions": {
+    "power": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=23986275)\t80%; AC attached; not charging present: true",
+    "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded",
+    "os_build": "26B5091g",
+    "metal": "Apple metal version 32023.921 (metalfe-32023.921.6)\nTarget: air64-apple-darwin27.2.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v27.1.266.1.jFNfdv/Metal.xctoolchain/usr/metal/current/bin"
+  },
+  "product_paths_1080p": {
+    "f7-forward": {
+      "frame_mean_ms": 0.3024,
+      "p95_ms": 0.35,
+      "p99_ms": 0.402,
+      "gpu_span_ms": 0.3022,
+      "unit_sum_ms": 0.3022,
+      "device_allocated_mib": 898,
+      "graph_heap_mib": 0.0,
+      "declared_graph_dram_mib": 16.0,
+      "top_units_ms": [
+        [
+          "Forward",
+          0.2826
+        ],
+        [
+          "Draw build",
+          0.0077
+        ],
+        [
+          "Instance cull",
+          0.0072
+        ]
+      ]
+    },
+    "f7-generic": {
+      "frame_mean_ms": 0.5922,
+      "p95_ms": 0.7101,
+      "p99_ms": 0.7523,
+      "gpu_span_ms": 0.592,
+      "unit_sum_ms": 0.592,
+      "device_allocated_mib": 1039,
+      "graph_heap_mib": 90.8,
+      "declared_graph_dram_mib": 658.7,
+      "top_units_ms": [
+        [
+          "Material resolve",
+          0.2451
+        ],
+        [
+          "Visibility opaque A",
+          0.0594
+        ],
+        [
+          "Visibility alpha A",
+          0.0527
+        ]
+      ]
+    },
+    "f7-binned": {
+      "frame_mean_ms": 0.6181,
+      "p95_ms": 0.7248,
+      "p99_ms": 0.762,
+      "gpu_span_ms": 0.618,
+      "unit_sum_ms": 0.618,
+      "device_allocated_mib": 1039,
+      "graph_heap_mib": 90.8,
+      "declared_graph_dram_mib": 674.3,
+      "top_units_ms": [
+        [
+          "Material resolve",
+          0.2443
+        ],
+        [
+          "Visibility opaque A",
+          0.0598
+        ],
+        [
+          "Visibility alpha A",
+          0.0528
+        ]
+      ]
+    },
+    "f8-native": {
+      "frame_mean_ms": 0.6318,
+      "p95_ms": 0.7423,
+      "p99_ms": 0.7915,
+      "gpu_span_ms": 0.6316,
+      "unit_sum_ms": 0.6316,
+      "device_allocated_mib": 1039,
+      "graph_heap_mib": 90.8,
+      "declared_graph_dram_mib": 654.8,
+      "top_units_ms": [
+        [
+          "Material resolve",
+          0.2513
+        ],
+        [
+          "Visibility opaque A",
+          0.0617
+        ],
+        [
+          "Visibility alpha A",
+          0.0532
+        ]
+      ]
+    },
+    "f8-temporal": {
+      "frame_mean_ms": 2.1417,
+      "p95_ms": 2.2016,
+      "p99_ms": 2.2627,
+      "gpu_span_ms": 2.1418,
+      "unit_sum_ms": 2.1418,
+      "device_allocated_mib": 1205,
+      "graph_heap_mib": 90.8,
+      "declared_graph_dram_mib": 654.8,
+      "top_units_ms": [
+        [
+          "Temporal reconstruction",
+          1.6047
+        ],
+        [
+          "Material resolve",
+          0.1827
+        ],
+        [
+          "Visibility alpha A",
+          0.0588
+        ]
+      ]
+    },
+    "f8-binned": {
+      "frame_mean_ms": 2.1416,
+      "p95_ms": 2.1985,
+      "p99_ms": 2.2708,
+      "gpu_span_ms": 2.1414,
+      "unit_sum_ms": 2.1414,
+      "device_allocated_mib": 1205,
+      "graph_heap_mib": 90.8,
+      "declared_graph_dram_mib": 670.4,
+      "top_units_ms": [
+        [
+          "Temporal reconstruction",
+          1.5887
+        ],
+        [
+          "Material resolve",
+          0.1823
+        ],
+        [
+          "Visibility alpha A",
+          0.0584
+        ]
+      ]
+    },
+    "f8-frustum": {
+      "frame_mean_ms": 2.1355,
+      "p95_ms": 2.2284,
+      "p99_ms": 2.2912,
+      "gpu_span_ms": 2.1357,
+      "unit_sum_ms": 2.1357,
+      "device_allocated_mib": 1205,
+      "graph_heap_mib": 90.8,
+      "declared_graph_dram_mib": 520.5,
+      "top_units_ms": [
+        [
+          "Temporal reconstruction",
+          1.7244
+        ],
+        [
+          "Material resolve",
+          0.1826
+        ],
+        [
+          "Visibility opaque A + Visibility alpha A",
+          0.0847
+        ]
+      ]
+    },
+    "f8-tile": {
+      "frame_mean_ms": 2.1398,
+      "p95_ms": 2.207,
+      "p99_ms": 2.2845,
+      "gpu_span_ms": 2.1397,
+      "unit_sum_ms": 2.1397,
+      "device_allocated_mib": 1197,
+      "graph_heap_mib": 82.7,
+      "declared_graph_dram_mib": 350.1,
+      "top_units_ms": [
+        [
+          "Temporal reconstruction",
+          1.7728
+        ],
+        [
+          "Visibility opaque A + Visibility alpha A + On-tile material resolve",
+          0.2725
+        ],
+        [
+          "Display tone map",
+          0.0235
+        ]
+      ]
+    },
+    "f8-adaptive-sponza": {
+      "frame_mean_ms": 2.166,
+      "p95_ms": 2.2383,
+      "p99_ms": 2.3297,
+      "gpu_span_ms": 2.1658,
+      "unit_sum_ms": 2.1658,
+      "device_allocated_mib": 1205,
+      "graph_heap_mib": 90.8,
+      "declared_graph_dram_mib": 780.9,
+      "top_units_ms": [
+        [
+          "Temporal reconstruction",
+          1.4671
+        ],
+        [
+          "Material resolve",
+          0.2639
+        ],
+        [
+          "Visibility opaque A",
+          0.0678
+        ]
+      ]
+    },
+    "f8-cornell": {
+      "frame_mean_ms": 2.0575,
+      "p95_ms": 2.1788,
+      "p99_ms": 2.2403,
+      "gpu_span_ms": 2.0578,
+      "unit_sum_ms": 2.0578,
+      "device_allocated_mib": 922,
+      "graph_heap_mib": 90.8,
+      "declared_graph_dram_mib": 574.7,
+      "top_units_ms": [
+        [
+          "Temporal reconstruction",
+          1.7592
+        ],
+        [
+          "Material resolve",
+          0.0605
+        ],
+        [
+          "Visibility clear",
+          0.0517
+        ]
+      ]
+    },
+    "f8-adaptive-cornell": {
+      "frame_mean_ms": 2.082,
+      "p95_ms": 2.1472,
+      "p99_ms": 2.1975,
+      "gpu_span_ms": 2.0821,
+      "unit_sum_ms": 2.0821,
+      "device_allocated_mib": 922,
+      "graph_heap_mib": 90.8,
+      "declared_graph_dram_mib": 693.4,
+      "top_units_ms": [
+        [
+          "Temporal reconstruction",
+          1.6037
+        ],
+        [
+          "Material resolve",
+          0.1805
+        ],
+        [
+          "Visibility clear",
+          0.0517
+        ]
+      ]
+    },
+    "f8-lights": {
+      "frame_mean_ms": 11.3247,
+      "p95_ms": 11.5377,
+      "p99_ms": 11.6317,
+      "gpu_span_ms": 11.3244,
+      "unit_sum_ms": 11.3244,
+      "device_allocated_mib": 922,
+      "graph_heap_mib": 90.8,
+      "declared_graph_dram_mib": 574.8,
+      "top_units_ms": [
+        [
+          "Material resolve",
+          10.4296
+        ],
+        [
+          "Temporal reconstruction",
+          0.644
+        ],
+        [
+          "Visibility clear",
+          0.0518
+        ]
+      ]
+    },
+    "f8-binned-lights": {
+      "frame_mean_ms": 11.4104,
+      "p95_ms": 11.6428,
+      "p99_ms": 11.751,
+      "gpu_span_ms": 11.4109,
+      "unit_sum_ms": 11.4109,
+      "device_allocated_mib": 922,
+      "graph_heap_mib": 90.8,
+      "declared_graph_dram_mib": 583.0,
+      "top_units_ms": [
+        [
+          "Material resolve",
+          10.5006
+        ],
+        [
+          "Temporal reconstruction",
+          0.6418
+        ],
+        [
+          "Visibility clear",
+          0.052
+        ]
+      ]
+    }
+  },
+  "findings": [
+    "MetalFX temporal reconstruction is 69-83% of temporal frames (vendor code, not optimisable by OPT-2)",
+    "Our shaders total ~0.5 ms at 1080p on Sponza; the visibility material resolve is the largest (0.18-0.25 ms)",
+    "Many Lights is the unculled light loop in the material resolve (~10.4 ms at 1080p, 51.5 ms frame at 3200x1800): F11",
+    "perf_record without vsync is presentation-capped at 12.5 ms by the compositor for light benches (known since F6)"
+  ],
+  "decision": "No OPT selected after F8; proceed with F9-F13; reassess OPT-2 (after OPT-2.0) on the F13 frame"
+}
