@@ -16,7 +16,7 @@ costo prima della migrazione, senza richiedere un guadagno del 3% sul frame.
 
 | Orizzonte | Lavoro | Cosa deve produrre |
 |---|---|---|
-| Checkpoint corrente | F5/F6 integrate; F7/F8 DEVELOPMENT_ACCEPTED M5; F8.4 risolta in-process | Sosta prima delle OPT richiesta dal proprietario |
+| Checkpoint corrente | F5/F6 integrate; F7/F8 DEVELOPMENT_ACCEPTED M5; revisione post-F8 e baseline M5 OPT-4.16 | Prossima fase F9; OPT-2 dopo F13 |
 | Prossimo | F9–F13; F14 da scegliere in base alla scena | Illuminazione integrata e qualità temporale; dettagli di progetto rivisti dopo F8 |
 | Successivo | Altre F, compresi runtime e mondo | Piani dettagliati da riconciliare quando il consumatore esiste |
 | Prodotto richiesto | F21/F27/F34, F39–F41 e audio base F26.1 | Riuso, 2D/UI/editor e compatibilità verificata; baseline incrementale, copertura finale obbligatoria |

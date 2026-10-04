@@ -189,7 +189,7 @@ released by the engine, see the [root cause and verification](docs/research/2026
 The isolated workers of [PR #15](https://github.com/yabanana/phosphor/pull/15)
 remain opt-in ([historical cost](docs/F8_METALFX_LIFETIME.md), rejected by the owner);
 see [delivery and limits](docs/F7_F8_HANDOFF.md) and [renderer commands/contracts](docs/RENDERING_F7_F8.md).
-The requested checkpoint stops before OPT; no F9+ implementation is activated. Advance detail does not activate
+The post-F8 review (`docs/research/2026-10-04-post-f8-review.md`) recorded the M5 OPT-4.16 baseline and moved OPT-2 after F13; the next phase is F9. Advance detail does not activate
 the optional research catalog.
 
 Development acceptance uses the available M5 Max 128 GB. Apple9 fallback
