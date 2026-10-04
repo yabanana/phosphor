@@ -15,8 +15,13 @@
 //                wait, then release the heap;
 //   heap_first : release the heap first (the resource still alive), then the
 //                resource.
-// Without validation every configuration must pass; the benchmark itself only
-// reports which configuration ran.  Negative control: the built AS must be
+// F9_S1E_CMD = fresh (default: a new command buffer per commit, never
+// reused) | reused (the harness's reused command buffer).  Measured on macOS
+// 27.2 / M5 Max under MTL_SHADER_VALIDATION: every reused configuration with
+// a heap that was used or resident crashes a later commit (exit 134, the
+// next benchmark never runs); every fresh one passes.  Without validation
+// every configuration passes.  The benchmark itself only reports which
+// configuration ran.  Negative control: the built AS must be
 // traced correctly (one ray) before the release, i.e. the heap really held a
 // live AS.
 #include "f9_common.h"
@@ -33,7 +38,7 @@ std::string env(const char* name, const char* def) {
     return v && *v ? v : def;
 }
 
-bool freshCommands() { return env("F9_S1E_CMD", "reused") == "fresh"; }
+bool freshCommands() { return env("F9_S1E_CMD", "fresh") == "fresh"; }
 
 /// Begin a command buffer: the context's reused one, or (F9_S1E_CMD=fresh)
 /// a new command buffer + allocator never used again.
