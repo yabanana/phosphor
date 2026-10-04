@@ -121,6 +121,11 @@ public:
     std::future<std::shared_ptr<MTL4FX::TemporalScaler>>
     requestTemporalScaler(MTLFX::TemporalScalerDescriptor *descriptor);
 
+    // Destroy a scaler on a utility worker: its deallocation waits for MetalFX
+    // initialisation running on other threads (up to ~150 ms measured on the
+    // render thread). The GPU must already be done with it.
+    void retireTemporalScaler(std::shared_ptr<MTL4FX::TemporalScaler> scaler);
+
     std::future<std::shared_ptr<TemporalWorker>> requestTemporalWorker(std::shared_ptr<TemporalWorker> worker);
 
     // --- F3.4 harvest -----------------------------------------------------------

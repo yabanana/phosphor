@@ -20,8 +20,11 @@ class PostProcessor {
     struct Options {
         bool temporal = false, autoExposure = false, corruptExposure = false, forceReset = false;
         bool checkCurves = false, corruptCurves = false;
-        bool neutralMipBias = false, isolatedMetalFX = true;
+        bool neutralMipBias = false, isolatedMetalFX = false;
         u32 debugWorkerCrash = 0, debugWorkerDelayMs = 0;
+        // In-process scalers are requested once the output size has been
+        // stable for this many frames (live resize: no throwaway scalers).
+        u32 resizeSettleFrames = 4;
         u32 tonemap = 0, views = 1, jitterVariant = 0;
         float sharpening = 0, whitePoint = 4, debugMotionScale = 1;
     };
@@ -57,6 +60,9 @@ class PostProcessor {
   private:
     void configure(u32 width, u32 height);
     void requestScaler(u32 view);
+    void scheduleScaler(u32 view);
+    void retireAfterFrames(std::shared_ptr<MTL4FX::TemporalScaler> scaler);
+    [[nodiscard]] u32 settleFrames() const { return usesWorker() ? 0 : options_.resizeSettleFrames; }
     void collectScalers(bool wait);
     void releaseTargets();
     void bind(rg::PassContext &, MTL4::ArgumentTable *);
@@ -76,7 +82,7 @@ class PostProcessor {
         u32 requestedWidth = 0, requestedHeight = 0;
         MTL::Buffer *exposureState = nullptr;
         MTL::Texture *exposure = nullptr;
-        bool failed = false, exposureValid = false;
+        bool failed = false, exposureValid = false, requestDeferred = false;
         u64 exposureScene = ~u64{0};
     };
     std::array<View, HistoryRegistry::MaxViews> views_{};
@@ -90,7 +96,7 @@ class PostProcessor {
     MTL::Buffer *curveReadback_ = nullptr;
     pipe::PipelineHandle curveProbe_;
     pipe::PipelineHandle clear_, histogram_, reduce_, native_, presentSDR_, presentEDR_, capture_;
-    u32 width_ = 0, height_ = 0, slot_ = 0, view_ = 0;
+    u32 width_ = 0, height_ = 0, slot_ = 0, view_ = 0, stableFrames_ = 0;
     u64 frame_ = 0, temporalFrames_ = 0, fallbackFrames_ = 0, resets_ = 0;
     bool supported_ = false, reset_ = true;
     GPUTemporalParams temporal_{};

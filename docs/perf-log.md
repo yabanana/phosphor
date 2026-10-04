@@ -926,3 +926,20 @@ one worker reaped and no residual mapping. This is a correctness/lifetime
 remediation with measured cost, not an OPT performance claim. Parent CPU
 timings omit worker CPU; footprint/driver/shared-memory domains are separate.
 [Full evidence and previous comparison](F8_METALFX_LIFETIME.md).
+
+## 2026-10-04 — F8.4 in-process MetalFX lifetime (M5 Max)
+
+Root cause: the MetalFX 40.9 temporal scaler's internal filter keeps a strong
+reference to the scaler; `metalfx_lifetime` releases it in process. Same
+bench as PR #15 (`tools/metalfx_isolation_bench.py`, three rotated 1080p
+Release replicas, 120 warmup +600, input 75%, offscreen/no validation;
+ChatGPT/Codex and Claude apps open, no other GPU load). Median mean
+in-process vs isolated: Sponza 2.1369 vs 2.1328 ms (noise); 1024 lights
+11.2585 vs 12.0505 ms (−6.6%); two views 1.2297 vs 1.8625 ms (−34.0%).
+In-process p95 2.1858/11.4514/1.2748 ms. Physical footprint in-process vs
+isolated total: 1930/2213, 1347/1635, 2101/2696 MiB. No per-frame cost:
+the release runs once per destroyed scaler, on a utility worker. Resize
+lifetime (two views, 64 ms diagnostic pacing, not a timing): render-thread
+frame max 232 → 85 ms and wait max 167 → 0.28 ms after moving the
+deallocation off the render thread; 80-scaler soak flat at 2.70 GiB median.
+[Root cause and evidence](research/2026-10-04-metalfx-cycle-root-cause.md).

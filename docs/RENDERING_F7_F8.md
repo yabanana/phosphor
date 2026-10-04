@@ -6,6 +6,11 @@ Forced Apple9 exercises feature selection on that machine; it is not M3/T0
 certification. Phase status belongs to [ROADMAP](ROADMAP.md), measurements to
 [perf-log](perf-log.md), and experiment decisions to [opt-log](opt-log.md).
 
+F8.4 (2026-10-04): MetalFX temporal runs in process again. The scaler's
+internal self-reference is released by `metalfx_lifetime`; the isolated
+worker experiment is opt-in. See the
+[root cause and verification](research/2026-10-04-metalfx-cycle-root-cause.md).
+
 ## Running the integrated renderer
 
 ```sh
@@ -56,12 +61,27 @@ and tile comparisons against generic resolve remain exact.
 
 ## Temporal ownership and presentation
 
-`--upscaler temporal` uses isolated MetalFX worker processes by default.
-F8.4 engine lifetime is development-accepted on M5: workers and shared
-mappings are reclaimed at resize/shutdown. The stock SDK-only release cycle
-still reproduces; `--metalfx-mode direct` is a diagnostic comparison path.
-Native remains the product default. See [lifetime, tests and cost](F8_METALFX_LIFETIME.md)
-and [the unchanged SDK reduction](../bench/f8_spike/README.md).
+`--upscaler temporal` creates MetalFX scalers in process (`--metalfx-mode
+direct`, the default). MetalFX 40.9 scalers keep a strong reference to
+themselves through their internal filter; `metalfx_lifetime` records it at
+creation and drops it at release only when it is the last owner, proving the
+deallocation with a weak reference. Replaced scalers are retired after their
+frames complete and destroyed on a utility worker (on the render thread the
+deallocation waited for concurrent MetalFX initialisation). The exit line
+`METALFX-LIFETIME adopted … retained 0 … framework 40.9 release on | PASS` is
+the lifetime gate. The extra release is enabled only for verified MetalFX
+versions (`40.9`); any other version gets plain releases (a persisting defect
+shows as `retained`, exit 1; `PHOSPHOR_METALFX_UNVERIFIED=1` is the negative
+control). Under the GPU capture layer the scalers are wrapped: the result is
+`UNVERIFIED` and recreations during a capture session leak until exit.
+On an output resize the in-process scaler is requested only after
+`--metalfx-resize-settle N` unchanged frames (default 4, 0 = immediate): a
+live resize stays on the native fallback instead of creating a scaler per
+intermediate size (78–83 scalers and ~5 GB peak → 2 and 2.5 GB measured).
+`--metalfx-mode isolated` keeps the PR #15 worker processes as an opt-in
+comparison ([historical cost](F8_METALFX_LIFETIME.md)). The plain SDK
+reduction still fails by design ([reduction](../bench/f8_spike/README.md)).
+Native remains the product default.
 
 Three upload slots are distinct from up to four temporal views. Every view has
 its own previous poses, Hi-Z data, exposure and MetalFX scaler. Entity

@@ -903,17 +903,36 @@ TEST_CASE("F7 F8 options select explicit rendering contracts and bounded quality
     CHECK_FALSE(parse({"--render-path", "visibility", "--gpu-driven", "off"}, o, error));
 }
 
-TEST_CASE("MetalFX worker options preserve a direct diagnostic control") {
+TEST_CASE("MetalFX runs in process by default; isolated workers stay opt-in") {
     LaunchOptions o;
     std::string error;
     REQUIRE(parse({"--post", "--upscaler", "temporal"}, o, error));
+    CHECK_FALSE(o.isolatedMetalFX);
+    REQUIRE(parse({"--post", "--upscaler", "temporal", "--metalfx-mode", "isolated"}, o, error));
     CHECK(o.isolatedMetalFX);
     REQUIRE(parse({"--post", "--upscaler", "temporal", "--metalfx-mode", "direct"}, o, error));
     CHECK_FALSE(o.isolatedMetalFX);
     CHECK_FALSE(parse({"--metalfx-mode", "unknown"}, o, error));
     CHECK_FALSE(parse({"--debug-frame-delay-ms", "1001"}, o, error));
     CHECK_FALSE(parse({"--debug-metalfx-worker-crash", "2"}, o, error));
-    CHECK_FALSE(parse({"--upscaler", "temporal", "--debug-metalfx-worker-delay-ms", "2001"}, o, error));
-    REQUIRE(parse({"--upscaler", "temporal", "--debug-metalfx-worker-crash", "2"}, o, error));
+    CHECK_FALSE(parse({"--upscaler", "temporal", "--debug-metalfx-worker-crash", "2"}, o, error));
+    CHECK_FALSE(parse({"--upscaler", "temporal", "--metalfx-mode", "isolated", "--debug-metalfx-worker-delay-ms",
+                       "2001"},
+                      o, error));
+    REQUIRE(parse({"--upscaler", "temporal", "--metalfx-mode", "isolated", "--debug-metalfx-worker-crash", "2"}, o,
+                  error));
     CHECK(o.debugMetalFXWorkerCrash == 2);
+}
+
+TEST_CASE("MetalFX resize settle frames are bounded") {
+    LaunchOptions o;
+    std::string error;
+    REQUIRE(parse({"--post", "--upscaler", "temporal"}, o, error));
+    CHECK(o.metalfxResizeSettleFrames == 4);
+    REQUIRE(parse({"--metalfx-resize-settle", "0"}, o, error));
+    CHECK(o.metalfxResizeSettleFrames == 0);
+    REQUIRE(parse({"--metalfx-resize-settle", "120"}, o, error));
+    CHECK(o.metalfxResizeSettleFrames == 120);
+    CHECK_FALSE(parse({"--metalfx-resize-settle", "121"}, o, error));
+    CHECK_FALSE(parse({"--metalfx-resize-settle"}, o, error));
 }

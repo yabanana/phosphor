@@ -879,7 +879,7 @@
     "F6.1": "Includes app capability-mask/report prerequisite; physical M3 measurement is external certification, not a development blocker.",
     "F7.4": "M5 experiment completed with F8; adoption deferred (0.16% median frame change inside overlapping ranges, 8.09 MiB heap reduction). Physical T0 and hardware DRAM counters remain unverified.",
     "F7.5": "M5 experiment completed with F8; not adopted in the measured preset (+0.29% Cornell, +2.24% Sponza frame time). Revisit only with a new measured bottleneck.",
-    "F8.4": "M5 development-accepted with isolated worker lifetime; the stock MetalFX 40.9 cycle still reproduces in direct mode. See ../F8_METALFX_LIFETIME.md."
+    "F8.4": "M5 development-accepted with in-process lifetime (2026-10-04): the MetalFX 40.9 scaler self-reference is released by metalfx_lifetime; isolated workers are opt-in after the owner rejected their cost. See ../research/2026-10-04-metalfx-cycle-root-cause.md."
   },
   "planning_levels": {
     "F0": "audit",
@@ -1300,9 +1300,9 @@
   },
   "checkpoint_result": {
     "through": "F8",
-    "scope": "F7/F8 DEVELOPMENT_ACCEPTED on M5 Max; isolated engine lifetime validated, direct SDK release defect preserved",
-    "stop": "Before OPT phases; no subsequent implementation activated",
-    "evidence": "../F8_METALFX_LIFETIME.md",
+    "scope": "F7/F8 DEVELOPMENT_ACCEPTED on M5 Max; F8.4 lifetime resolved in process (scaler self-reference released), isolation opt-in",
+    "stop": "Before OPT phases (owner request); no subsequent implementation activated",
+    "evidence": "../research/2026-10-04-metalfx-cycle-root-cause.md",
     "integration": {
       "branch": "main",
       "pull_request": 14,

@@ -1,6 +1,14 @@
-# F8.4 — gestione del lifetime MetalFX completata sul M5
+# F8.4 — esperimento di isolamento del lifetime MetalFX
 
-**DEVELOPMENT_ACCEPTED, 2026-10-03**, PR #15. Il motore usa MetalFX temporale
+**Stato attuale, 2026-10-04: superato dal rilascio in-process.** La causa è
+un autoriferimento forte dello scaler tenuto dal suo filtro interno; il motore
+lo rilascia senza processi separati e `--upscaler temporal` torna in-process.
+[Causa, rimedio e verifiche](research/2026-10-04-metalfx-cycle-root-cause.md).
+Questo documento resta la prova storica dell'esperimento di isolamento, ora
+opt-in con `--metalfx-mode isolated`; il costo sotto è il motivo del rifiuto
+del proprietario (2026-10-03).
+
+**Esito tecnico storico, PR #15.** Il motore usa MetalFX temporale
 standard in worker isolati, con memoria limitata al loro ciclo di vita.
 **Il ciclo di riferimenti interno di MetalFX 40.9 non è stato corretto:** il
 riproduttore diretto resta negativo. La soluzione del motore termina e recupera

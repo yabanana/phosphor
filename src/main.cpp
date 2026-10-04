@@ -1,4 +1,5 @@
 #include "app/engine.h"
+#include "platform/metal/metalfx_lifetime.h"
 #include "platform/metal/temporal_worker.h"
 #include <cstring>
 #include "core/log.h"
@@ -43,6 +44,21 @@ int main(int argc, char* argv[]) {
                     static_cast<unsigned long long>(phosphor::TemporalWorker::failureCount()),
                     static_cast<unsigned long long>(phosphor::TemporalWorker::mappedBytes()),
                     result == EXIT_SUCCESS ? "PASS" : "FAIL");
+    }
+    if (const auto fx = phosphor::metalfx::counters(); fx.adopted) {
+        // Every in-process scaler must be destroyed by now (F8.4 lifetime gate).
+        // Capture wrappers hide the real scaler: unverified, not a pass.
+        const auto destroyed = fx.released + fx.cycleReleased + fx.wrapped;
+        const bool failed = destroyed != fx.adopted || fx.retained;
+        if (failed)
+            result = EXIT_FAILURE;
+        std::printf("METALFX-LIFETIME adopted %llu released %llu cycle-released %llu retained %llu unknown %llu "
+                    "wrapped %llu max-release-us %llu framework %s release %s | %s\n",
+                    static_cast<unsigned long long>(fx.adopted), static_cast<unsigned long long>(fx.released),
+                    static_cast<unsigned long long>(fx.cycleReleased), static_cast<unsigned long long>(fx.retained),
+                    static_cast<unsigned long long>(fx.unknownSignature), static_cast<unsigned long long>(fx.wrapped),
+                    static_cast<unsigned long long>(fx.maxReleaseMicros), phosphor::metalfx::frameworkVersion(),
+                    phosphor::metalfx::selfReferenceReleaseEnabled() ? "on" : "off", failed ? "FAIL" : fx.wrapped ? "UNVERIFIED (GPU capture layer wraps the scalers)" : "PASS");
     }
     // stdout: the exit status as the app decided it, after the engine is
     // destroyed.  A run whose shell status differs from this line (or that

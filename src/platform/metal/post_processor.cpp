@@ -134,6 +134,7 @@ PostProcessor::PostProcessor(MetalContext &c, PipelineCache &p, const Options &o
 }
 PostProcessor::~PostProcessor() {
     context_.waitIdle();
+    context_.collectGarbage(); // runs the deferred scaler retirements, which use pipelines_
     context_.memory().release(curveReadback_, MemoryCategory::Other);
     releaseTargets();
     for (auto &v : views_) {
@@ -159,8 +160,19 @@ void PostProcessor::releaseTargets() {
     }
 }
 void PostProcessor::configure(u32 w, u32 h) {
-    if (width_ == w && height_ == h)
+    if (width_ == w && height_ == h) {
+        if (stableFrames_ < settleFrames())
+            ++stableFrames_;
+        if (stableFrames_ >= settleFrames())
+            for (u32 i = 0; i < options_.views; ++i)
+                if (views_[i].requestDeferred && !views_[i].pending.valid())
+                    requestScaler(i);
         return;
+    }
+    // The first size is requested at once (prewarm waits for it); later ones
+    // only after settleFrames() unchanged frames: a scaler per intermediate
+    // live-resize size would be superseded before use (5.1 GB peak measured).
+    stableFrames_ = width_ == 0 ? settleFrames() : 0;
     width_ = w;
     height_ = h;
     releaseTargets();
@@ -168,11 +180,7 @@ void PostProcessor::configure(u32 w, u32 h) {
         s.output = texture(context_, w, h, MTL::PixelFormatRGBA16Float, "Reconstructed HDR");
     for (u32 i = 0; i < options_.views; ++i) {
         auto &v = views_[i];
-        if (v.scaler) {
-            v.scaler->retain();
-            context_.deferRelease(v.scaler.get());
-            v.scaler.reset();
-        }
+        retireAfterFrames(std::move(v.scaler));
         if (usesWorker()) {
             if (v.worker) {
                 v.worker->cancelPending();
@@ -192,13 +200,26 @@ void PostProcessor::configure(u32 w, u32 h) {
         v.failed = false;
         histories_.invalidate(i, "output resize");
         if (!v.pending.valid() && !v.pendingWorker.valid())
-            requestScaler(i);
+            scheduleScaler(i);
     }
+}
+void PostProcessor::retireAfterFrames(std::shared_ptr<MTL4FX::TemporalScaler> scaler) {
+    if (scaler) // destroyed off the render thread once its frames have completed
+        context_.deferCall([cache = &pipelines_, retired = std::move(scaler)]() mutable {
+            cache->retireTemporalScaler(std::move(retired));
+        });
+}
+void PostProcessor::scheduleScaler(u32 index) {
+    if (stableFrames_ >= settleFrames())
+        requestScaler(index);
+    else
+        views_[index].requestDeferred = true;
 }
 void PostProcessor::requestScaler(u32 index) {
     if (!options_.temporal || !supported_)
         return;
     auto &v = views_[index];
+    v.requestDeferred = false;
     if (usesWorker()) {
         v.pendingWorker = pipelines_.requestTemporalWorker(v.worker);
         return;
@@ -254,9 +275,11 @@ void PostProcessor::collectScalers(bool wait) {
             continue;
         auto scaler = v.pending.get();
         if (v.requestedWidth != width_ || v.requestedHeight != height_) {
-            requestScaler(i);
+            pipelines_.retireTemporalScaler(std::move(scaler)); // never encoded
+            scheduleScaler(i);
             continue;
         }
+        retireAfterFrames(std::move(v.scaler)); // never drop one frames in flight may use
         v.scaler = std::move(scaler);
         v.failed = !v.scaler;
         histories_.invalidate(i, v.failed ? "MetalFX unavailable" : "MetalFX ready");

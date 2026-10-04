@@ -30,13 +30,49 @@ Those ineffective changes were not adopted as fixes. A further 30-second
 run-loop drain on 2026-10-03 still leaves one live weak target (exit 1);
 this is not explained by the original two-second wait alone.
 
-Phosphor's native HDR path has `0 leaks` in the same exit-time test. MetalFX
-rendering/quality tests pass; the SDK-only destruction gate remains negative.
-The engine now uses [isolated lifetime ownership](../../docs/F8_METALFX_LIFETIME.md),
-which is verified independently without claiming the SDK cycle is fixed.
-Native is the default; temporal use is explicit. Do not force releases or alter
-private framework ivars to hide this cycle. Rerun this reduction and the engine
-lifetime tests when the runtime is updated. No external report has been sent.
+Phosphor's native HDR path has `0 leaks` in the same exit-time test.
+
+**Root cause (2026-10-04).** The standard temporal scaler (Metal 3
+`_MFXTemporalScalingEffectBBR`, Metal 4 `_M4FXTemporalScalingEffectBBR`) owns
+its C++ `BBRNet_Filter` through a `unique_ptr`, and the filter keeps a strong
+reference back to the scaler: right after creation the retain count is 2 with
+one external owner (spatial: 1). The scaler is never deallocated, so the
+filter, which would be destroyed by it, never is either. The engine now
+releases that self-reference explicitly and only when it is provably the last
+owner ([`metalfx_lifetime`](../../src/platform/metal/metalfx_lifetime.h),
+[analysis](../../docs/research/2026-10-04-metalfx-cycle-root-cause.md)). Class and
+ivar names were used only to diagnose; the engine relies on the measured
+reference count, a weak reference and plain releases, never on private ivars.
+The plain reduction below still fails on this runtime: it is the negative
+control and must keep failing until the framework itself changes.
+
+`--release-cycle` (matrix, standard temporal) releases through the engine's
+code; build with that file and the metal-cpp implementation unit:
+
+```sh
+xcrun clang++ -std=c++20 -fno-objc-arc -mmacosx-version-min=26.0 -DPHOSPHOR_RELEASE_CYCLE \
+  -Isrc -Ibuild/_deps/metal_cpp-src -framework Foundation -framework Metal -framework MetalFX \
+  -framework QuartzCore bench/f8_spike/metalfx_lifetime_matrix.mm \
+  src/platform/metal/metalfx_lifetime.cpp src/platform/metal/metal_impl.cpp -o build/matrix-release-cycle
+build/matrix-release-cycle --mode temporal4 --count 8 --release-cycle   # FINAL live=0, exit 0
+leaks --atExit -- build/matrix-release-cycle --mode temporal3 --count 8 --release-cycle --no-weak
+```
+
+The release is enabled only for verified MetalFX versions (`40.9`); set
+`PHOSPHOR_METALFX_UNVERIFIED=1` for the negative control (every scaler stays
+alive). The matrix adopts each scaler before inserting it in its weak
+`NSHashTable`: insertion can leave an autoreleased reference (11 of 100
+scalers when measured after it). Under `MTL_CAPTURE_ENABLED=1` the scaler is a
+capture wrapper and its inner object cannot be released (`wrapped`).
+
+The isolated worker experiment (PR #15) remains available as
+`--metalfx-mode isolated`; its overhead was rejected by the owner. Rerun this
+reduction and the engine lifetime tests when the runtime is updated: the
+`METALFX-LIFETIME` exit line reports `released` (plain release sufficed),
+`cycle-released` (the self-reference was dropped) and `retained` (leak, FAIL).
+No external report has been sent; a ready draft with a single-file ARC
+reproduction is in [APPLE_FEEDBACK.md](APPLE_FEEDBACK.md)
+(`apple_feedback_repro.m`).
 
 ## SDK/API comparison and repeated creation
 
@@ -66,6 +102,30 @@ so weak liveness alone is also insufficient. Spatial is the passing control.
 `--async`, `--auto-exposure`, `--reset`, `--no-weak`. Public-option switches apply
 to the relevant effect; dynamic content applies only to standard temporal.
 `--no-weak` prints `live=-1`: successful execution is not proof of destruction.
+
+Follow-up switches (standard temporal unless noted): `--output-scale 1..3`
+(output still bounded to 1920x1080), `--format rgba16|rgba8|rg11`,
+`--depth-r32`, and `--gpu-drain` (all modes). The latter executes and checks
+a real Metal blit before creation and after each release/pool drain. It tests
+deferred driver reclamation; it does not encode the scaler or prove image
+quality. An external runner must bound process lifetime because the diagnostic
+blit waits for completion. These variants still reproduce the surviving
+standard scaler on the current runtime. Spatial with GPU drain is the passing
+control; denoised with GPU drain still leaks 640 CPU bytes per creation.
+
+Example after building the matrix source with the flags above:
+
+```sh
+./matrix --mode temporal4 --count 8 --gpu-drain
+leaks --atExit -- ./matrix --mode temporal4 --count 8 --gpu-drain --no-weak
+./matrix --mode temporal4 --count 8 --output-scale 2
+./matrix --mode temporal4 --count 8 --format rg11
+./matrix --mode spatial4 --count 8 --gpu-drain
+```
+
+Running under a different Xcode/SDK on this boot does not test another
+runtime. No stable-runtime result is recorded; after the root cause was found
+in process, the gate no longer depends on that comparison.
 
 ## Rejected denoised alternative
 

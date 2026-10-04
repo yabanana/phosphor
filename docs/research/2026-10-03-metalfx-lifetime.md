@@ -1,8 +1,11 @@
 # F8.4 — versioni MetalFX, lifetime e alternativa denoised
 
-**Aggiornamento successivo:** il motore adotta [worker isolati](../F8_METALFX_LIFETIME.md)
-per recuperare le risorse del framework al rilascio. Segue l’indagine che ha
-motivato la soluzione; i suoi risultati negativi sull’SDK restano validi.
+**Aggiornamenti successivi:** il motore ha adottato prima [worker isolati](../F8_METALFX_LIFETIME.md)
+(costo rifiutato dal proprietario), poi, il 2026-10-04, il
+[rilascio in-process dell'autoriferimento interno](2026-10-04-metalfx-cycle-root-cause.md).
+Quel rimedio usa un secondo `release` solo quando il conteggio dimostra che
+resta l'autoriferimento e lo verifica con una weak reference; non usa ivar
+privati. I risultati negativi sull'SDK sotto restano validi.
 
 Indagine sul M5 Max, 2026-10-03. Base del motore: `862032e`.
 **Esito iniziale dei percorsi in-process: nessuna correzione verificata del runtime.** Lo scaler

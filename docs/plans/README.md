@@ -12,7 +12,7 @@ Non attiva il catalogo di ricerca e non inventa risultati sperimentali: le
 scelte numeriche si fissano con la regola dello spike già scritta nel piano.
 I file futuri sono destinazioni proposte; il kickoff riconcilia codice e SDK.
 
-- **Checkpoint:** F5/F6 integrate; F7/F8 DEVELOPMENT_ACCEPTED M5 (PR #14/#15); lifetime F8.4 tramite worker isolati. Sosta richiesta prima delle OPT.
+- **Checkpoint:** F5/F6 integrate; F7/F8 DEVELOPMENT_ACCEPTED M5; F8.4 risolta in-process il 2026-10-04 (autoriferimento MetalFX rilasciato, isolamento opt-in). [Causa e verifiche](../research/2026-10-04-metalfx-cycle-root-cause.md). Sosta richiesta dal proprietario prima delle OPT.
 - **Poi:** F9–F13 e F14 se utile al corpus; renderer prima della piattaforma.
 - **Piattaforma richiesta:** ECS/runtime, contenuti, audio, editor, 2D, UI e
   riuso Bevy, con implementazione progressiva e compatibilità verificata.
