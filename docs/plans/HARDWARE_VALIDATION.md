@@ -84,6 +84,7 @@ non è eseguita: non serve inventare una casella “mezza spuntata”.
 | F4.4 / OPT-1.5 | Contatori mancanti/parziali, indipendentemente da T0 | Accesso a contatori attribuibili; stime non chiudono il requisito |
 | OPT-1.7 | Ridimensionamento dei compute reali da verificare | Misura sul carico reale: residuo tecnico, non automaticamente esentato dall'assenza T0 |
 | F6.1/F6.4/F6.7 e uscita F6 | `DEVELOPMENT_ACCEPTED` sul M5 (nativo, `--force-family apple9`, sampler Apple10; gate Culling Viz 1080p p95 ≤ 16,67 ms); M3/T0 fisico pendente | Preset `culling-viz-f6-1920x1080` e `tools/f6_check.sh --perf` su M3/T0 fisico |
+| F7.1–F7.7, F8.1–F8.7 e uscita F8 | `DEVELOPMENT_ACCEPTED` sul M5 (PR #14 e #16): visibility/resolve, HDR/EDR, MetalFX temporale in-process con lifetime verificato solo su MetalFX 40.9 (macOS 27.2 beta 2); fotometria EDR non certificata (headroom corrente 1); F7.4/F7.5 candidati non adottati; M3/T0 fisico pendente | `tools/f7_f8_check.py` (funzionale, qualità, contesto) e `tools/metalfx_lifetime_check.py` sul dispositivo e OS dichiarati; riproduttore `bench/f8_spike` a ogni nuova versione di MetalFX; display calibrato per la fotometria |
 | F28.7 / F37.2 | Matrice multi-device ancora da implementare/verificare | Righe per dispositivi fisici; nessun tick integrale con il solo M5 |
 | F36.1/F36.2/F36.3 | Port e hardware mobile/XR futuri | Compilazione più esecuzione sul target fisico; simulator non basta |
 | OPT-13 / OPT-15.4 | Energia mobile / 8 GB non verificati | MacBook/dispositivo con configurazione pertinente e protocollo sostenuto |

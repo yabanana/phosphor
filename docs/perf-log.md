@@ -943,3 +943,17 @@ lifetime (two views, 64 ms diagnostic pacing, not a timing): render-thread
 frame max 232 → 85 ms and wait max 167 → 0.28 ms after moving the
 deallocation off the render thread; 80-scaler soak flat at 2.70 GiB median.
 [Root cause and evidence](research/2026-10-04-metalfx-cycle-root-cause.md).
+
+## 2026-10-04 — Baseline post-F8 su `main` (revisione)
+
+`tools/f7_f8_bench.py`, Release, 1920×1080, 120+600 frame, tre repliche
+ruotate, offscreen, macchina quieta (app aperte, nessun altro carico GPU).
+Mediane del frame medio contro PR #14: Sponza forward 0,3027 ms (−1,8%),
+visibility 0,5928 (−1,8%), binned 0,6181 (−1,9%), HDR nativo 0,6310 (−1,9%),
+HDR+MetalFX 2,1403 (−1,0%), Cornell 2,0659 (−0,8%), Many Lights 11,3541
+(−0,5%); varianti F7.4/F7.5 2,1398–2,1740. Unità dominanti: MetalFX 1,60 ms
+(69%) su Sponza temporale e 1,77 ms (83%) su Cornell; Material resolve
+~10,46 ms su Many Lights. Tempi per pass della catena post non affidabili:
+`Luminance histogram` include il resolve (somma unità 21,83 > span 11,35 ms).
+[Rapporto](research/2026-10-04-post-f8-review.md).
+

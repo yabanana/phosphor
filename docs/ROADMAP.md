@@ -444,6 +444,8 @@ eventi al pixel). Certificazione T0/M3 fisica `EXTERNAL_VALIDATION_PENDING`.
 
 **2026-10-04: DEVELOPMENT_ACCEPTED sul M5 Max.** F8.4, riaperta il 2026-10-03 perché il proprietario ha rifiutato il costo dei worker isolati (PR #15), è risolta in-process: lo scaler MetalFX 40.9 tiene un autoriferimento forte nel filtro interno e `metalfx_lifetime` lo rilascia quando è l'ultimo proprietario, con prova weak. Suite F7/F8 funzionale, qualità e contesto, soak di 80 ricreazioni e confronto prestazionale rieseguiti sul percorso in-process. [Causa e verifiche](research/2026-10-04-metalfx-cycle-root-cause.md), [isolamento storico](F8_METALFX_LIFETIME.md). Nessuna OPT avviata. [Consegna](F7_F8_HANDOFF.md).
 
+**Revisione post-F8 (2026-10-04):** batterie storiche verdi su `main`, prestazioni invariate rispetto a PR #14. Restano **due difetti aperti** nati in F7/F8, da correggere prima di qualunque OPT: equivalenza delle varianti forward su Sponza nei modi di debug (`variant_check` indexed, bench 4) e tempi per pass doppi nella catena post (somma delle unità > span). Sui dati il tempo GPU sta in MetalFX e nel ciclo luci (F11), non in OPT-2. [Rapporto](research/2026-10-04-post-f8-review.md).
+
 - [x] F8.1 Target RGBA16F lineare (attachment tile nei pass raster, output compute nel resolve della baseline F7), istogramma di luminanza in compute con SIMD-group, esposizione automatica
 - [x] F8.2 Tonemapping configurabile (AgX, ACES, curva custom) e uscita **EDR** su display XDR con calibrazione relativa tramite headroom osservato; fotometria in nit non certificata
 - [x] F8.3 Jitter Halton sub-pixel, motion vector per oggetti e camera
