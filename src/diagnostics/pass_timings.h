@@ -30,9 +30,14 @@ struct TimingPlan;
 // ---------------------------------------------------------------------------
 
 /// Duration in ms of every unit of one frame: end tick - start tick, where
-/// ticks[] holds the frame's resolved queries.  A unit is invalid (valid[u] =
-/// false, ms 0) if either tick is 0 or end < start.  `tickNs` = ns per tick
-/// (1e9 / MTL::Device::queryTimestampFrequency()).
+/// ticks[] holds the frame's resolved queries.  The start is the LATEST tick
+/// on the unit's chain (its start query, that query's unit's start, ... back
+/// to a query no unit ends at, e.g. a commit start): the GPU may overlap a
+/// unit with independent earlier work, so an earlier unit can end after its
+/// successor, and the next unit must not count that interval again.  A unit
+/// is invalid (valid[u] = false, ms 0) if the start or end tick is 0 or
+/// end < start (fully overlapped).  `tickNs` = ns per tick
+/// (1e9 / MTL::Device::queryTimestampFrequency()).  Never allocates.
 void computeUnitTimes(const u64* ticks, u32 tickCount, const u32* startQuery, const u32* endQuery, u32 unitCount,
                       double tickNs, float* outMs, bool* outValid);
 

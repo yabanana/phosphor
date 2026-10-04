@@ -23,8 +23,10 @@ namespace phosphor {
 // opens a new submission after a cross-queue wait) starts with a
 // timestamp in a compute encoder with a 1-thread anchor dispatch (not
 // writeTimestampIntoHeap, whose driver bookkeeping grows forever on reused
-// command buffers; an encoder without a dispatch is dropped: both measured).  A unit lasts from the latest of those points
-// on its queue (previous unit end or commit start) to its own end.
+// command buffers; an encoder without a dispatch is dropped: both measured).  A unit lasts from the latest end
+// on its queue chain (previous units back to the commit start; computeUnitTimes) to its own end: the GPU
+// overlaps independent passes, so the previous unit alone can end too early (F8 post chain: the histogram
+// clear ran beside the material resolve and the histogram re-counted the resolve).
 //
 // One heap holds METAL_FRAMES_IN_FLIGHT ranges of `stride_` queries; a slot's
 // range is read on the CPU (resolveCounterRange) when the slot is reused,

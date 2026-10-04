@@ -78,6 +78,30 @@ TEST_CASE("computeUnitTimes: end before start is invalid") {
     computeUnitTimes(nullptr, 0, s2, e2, 0, 1.0, ms, valid); // no units: no access
 }
 
+TEST_CASE("computeUnitTimes: an overlapped earlier unit is not counted again") {
+    // Engine shape (F8 post chain): resolve (1), an empty overflow pass (2),
+    // a histogram clear the GPU runs beside the resolve (3, ends early), then
+    // the histogram (4).  Query 5 is the commit start.  Before the fix the
+    // histogram started at the clear's early end and re-counted the resolve.
+    const u64 ticks[] = {200, 1000, 1050, 210, 1080, 100};
+    //                   0:vis clear 1:resolve 2:overflow 3:clear 4:histogram 5:commit
+    const u32 start[] = {5, 0, 1, 2, 3};
+    const u32 end[]   = {0, 1, 2, 3, 4};
+    float ms[5];
+    bool  valid[5];
+    computeUnitTimes(ticks, 6, start, end, 5, 1000.0, ms, valid);
+    CHECK(ms[0] == doctest::Approx(0.1f));
+    CHECK(ms[1] == doctest::Approx(0.8f));
+    CHECK(ms[2] == doctest::Approx(0.05f));
+    CHECK_FALSE(valid[3]); // fully overlapped by the resolve
+    REQUIRE(valid[4]);
+    CHECK(ms[4] == doctest::Approx(0.03f)); // from the latest end (1050), not 210
+    float sum = 0.0f;
+    for (u32 u = 0; u < 5; ++u)
+        if (valid[u]) sum += ms[u];
+    CHECK(sum == doctest::Approx(0.98f)); // = span 1080 - 100
+}
+
 TEST_CASE("PassTimings: configure copies unit metadata") {
     PassTimings t = makeTimings();
     REQUIRE(t.unitCount() == 2);
