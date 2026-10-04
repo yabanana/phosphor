@@ -211,11 +211,21 @@ int main(int argc, char **argv) {
                 if (effect) {
                     if (!i)
                         std::printf("CLASS %s\n", NSStringFromClass([effect class]).UTF8String);
-                    if (monitor)
-                        [weak addObject:effect];
 #if defined(PHOSPHOR_RELEASE_CYCLE)
+                    // Adopt before the monitor: NSHashTable insertion can leave
+                    // an autoreleased reference (measured: 11 of 100 scalers).
+                    std::shared_ptr<MTL4FX::TemporalScaler> owner;
                     if (releaseCycle) // same object model for the Metal 3 and Metal 4 scalers
-                        phosphor::metalfx::adoptTemporalScaler(reinterpret_cast<MTL4FX::TemporalScaler *>(effect)).reset();
+                        owner = phosphor::metalfx::adoptTemporalScaler(reinterpret_cast<MTL4FX::TemporalScaler *>(effect));
+#endif
+                    if (monitor) {
+                        @autoreleasepool {
+                            [weak addObject:effect];
+                        }
+                    }
+#if defined(PHOSPHOR_RELEASE_CYCLE)
+                    if (releaseCycle)
+                        owner.reset();
                     else
 #endif
                         [effect release];

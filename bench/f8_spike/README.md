@@ -58,6 +58,13 @@ build/matrix-release-cycle --mode temporal4 --count 8 --release-cycle   # FINAL 
 leaks --atExit -- build/matrix-release-cycle --mode temporal3 --count 8 --release-cycle --no-weak
 ```
 
+The release is enabled only for verified MetalFX versions (`40.9`); set
+`PHOSPHOR_METALFX_UNVERIFIED=1` for the negative control (every scaler stays
+alive). The matrix adopts each scaler before inserting it in its weak
+`NSHashTable`: insertion can leave an autoreleased reference (11 of 100
+scalers when measured after it). Under `MTL_CAPTURE_ENABLED=1` the scaler is a
+capture wrapper and its inner object cannot be released (`wrapped`).
+
 The isolated worker experiment (PR #15) remains available as
 `--metalfx-mode isolated`; its overhead was rejected by the owner. Rerun this
 reduction and the engine lifetime tests when the runtime is updated: the

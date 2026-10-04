@@ -155,15 +155,59 @@ dà **conteggi identici**: residuo deterministico preesistente, non
 attribuibile a questo lavoro e non spiegato qui. Resta aperto e separato
 (log: `build/f84-cycle/f6-check-quick*.out`).
 
+## Revisione avversariale
+
+Dopo la prima consegna il proprietario ha chiesto di cercare impatti non
+considerati. Punto di partenza: con il difetto nessuna app distrugge questi
+scaler, quindi `~BBRNet_Filter` è un percorso che il framework non esercita.
+Ogni ipotesi è un test con controllo negativo e positivo (sorgenti di prova
+in scratchpad, non nel repository).
+
+| Ipotesi | Prova | Esito |
+|---|---|---|
+| Distruggere uno scaler altera un altro scaler vivo (stato condiviso) | Output dello scaler vivo, hash bit a bit per frame, contro un controllo indisturbato; distruzione di uno scaler uguale, di uno diverso, o creazione/distruzione continua su un altro thread; anche sotto API + shader validation | 0 frame diversi; determinismo 0/24; controllo positivo (un pixel di input cambiato) 12/24 diversi |
+| Il dealloc concorrente blocca l'encoding del render thread | Tempo di `encodeToCommandBuffer:` con distruzioni parallele | max 0,80–0,86 ms contro 0,21–0,53 ms; nessuno stallo |
+| Il secondo `release` dipende dall'isa ottimizzata | `OBJC_DISABLE_NONPOINTER_ISA=YES`, zombie, Guard Malloc + scribble | nessun errore, 0 vivi |
+| La coda utility ritarda il recupero della memoria | Latenza fra ritiro e distruzione, anche senza archivio pipeline | 12–44 µs (18 thread) |
+| Un layer Metal avvolge lo scaler | Classe e conteggio sotto cattura, validation, shader validation, HUD | **Solo la cattura GPU avvolge** (`CaptureMTL4FXTemporalScaler`): il rilascio distruggeva l'involucro e il controllo dichiarava PASS mentre lo scaler interno perdeva ~20 MB per ricreazione |
+| Un riferimento transitorio imita la firma | Riproduttore ripetuto 25 volte | 11/100 casi con 2 riferimenti: artefatto dell'inserimento in `NSHashTable` prima della misura; con l'ordine corretto 100/100 rilasciati |
+
+Ridimensionamento continuo (resize ogni 2 frame, due viste, output fino a
+3200×1800, come il trascinamento del bordo): 400 frame → 82 scaler creati e
+82 distrutti; 800 frame → 162 e 162. Render thread: frame max 28,5 ms,
+attesa max 9,0 ms. **Picco del footprint 5,15 GB e 5,12 GB**: limitato e
+indipendente dalla durata, ma alto. Per vista convivono uno scaler in
+creazione, uno attivo e uno in ritiro; solo 25 frame su 400 sono temporali,
+perché ogni scaler è superato prima di diventare utile. Non è un effetto del
+rimedio (senza rimedio ogni scaler resterebbe vivo), ma è un costo reale
+della ricreazione: la mitigazione naturale è attendere che la dimensione
+sia stabile prima di crearne uno nuovo, restando nel fallback nativo durante
+il trascinamento. Non implementata in questa consegna.
+
+Correzioni conseguenti (codice):
+
+- sotto cattura (`MTLCaptureManager supportsDestination:` pubblico) i
+  rilasci sono contati come `wrapped` e il risultato è **UNVERIFIED**, mai
+  PASS; avviso esplicito: durante la cattura ogni ricreazione perde memoria;
+- il secondo `release` è limitato alle versioni di MetalFX in cui difetto e
+  rimedio sono verificati (`40.9`), oltre al controllo sul singolo oggetto.
+  Su una versione nuova: rilascio semplice; se il difetto persiste il leak è
+  visibile (`retained`, exit 1) e si rivalida, invece di rischiare un
+  rilascio in eccesso nel caso "framework corretto + riferimento
+  transitorio". `PHOSPHOR_METALFX_UNVERIFIED=1` forza quel percorso:
+  controllo negativo con 8/8 trattenuti e `FAIL`;
+- il riproduttore misura prima di inserire lo scaler nel monitor weak.
+
 ## Limiti
 
-- La firma (un riferimento interno esatto) è misurata su questo runtime. Un
-  runtime con forma diversa produce una perdita **visibile** (`retained`,
-  exit 1), mai un rilascio in eccesso: il secondo `release` richiede che
-  l'oggetto sopravviva con un solo proprietario oltre alla sonda.
-- Rischio residuo: un runtime futuro in cui l'unico riferimento interno a
-  creazione sia transitorio e ancora vivo al rilascio. Il riproduttore e il
-  controllo lifetime vanno rieseguiti a ogni aggiornamento di macOS.
+- Il rimedio è attivo solo su MetalFX 40.9. Ogni aggiornamento di macOS
+  richiede di rieseguire riproduttore e controllo lifetime: con una versione
+  nuova il motore torna al rilascio semplice finché non è verificata.
+- Con la cattura GPU attiva lo scaler interno non è raggiungibile: ogni
+  ricreazione durante una sessione di cattura perde memoria fino all'uscita.
+- Il secondo `release` richiede che l'oggetto sopravviva con un solo
+  proprietario oltre alla sonda e che alla creazione ce ne fosse
+  esattamente uno: ogni altra forma dà un leak visibile, mai un crash.
 - Non è stata inviata alcuna segnalazione ad Apple.
 - Il confronto con macOS 27.0.1 stabile non è più necessario al gate e non è
   stato eseguito.

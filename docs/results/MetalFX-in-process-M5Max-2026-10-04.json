@@ -205,5 +205,24 @@
       "shared_bridge_bytes": 311918592
     }
   },
-  "performance_conditions": "Release, offscreen, no vsync/validation, 120 warmup + 600 frames, rotated replicas; ChatGPT/Codex and Claude apps open, no other GPU load."
+  "performance_conditions": "Release, offscreen, no vsync/validation, 120 warmup + 600 frames, rotated replicas; ChatGPT/Codex and Claude apps open, no other GPU load.",
+  "adversarial_review": {
+    "cross_scaler_isolation": "Victim scaler output hashed bit for bit per frame vs undisturbed control: destroying a same-config, different-config or concurrently churned scaler (other thread), also under API+shader validation -> 0 differing frames; determinism control 0/24; positive control (one input pixel changed) 12/24 differ.",
+    "render_thread_encode_with_concurrent_dealloc_max_ms": [
+      0.8,
+      0.86
+    ],
+    "render_thread_encode_baseline_max_ms": [
+      0.21,
+      0.53
+    ],
+    "objc_runtime": "OBJC_DISABLE_NONPOINTER_ISA=YES, NSZombieEnabled, Guard Malloc + MallocScribble: no errors, 0 live.",
+    "retire_queue_latency_us": [
+      12,
+      44
+    ],
+    "capture_layer": "Only MTL_CAPTURE_ENABLED wraps scalers (CaptureMTL4FXTemporalScaler); inner scaler leaked ~20 MB per recreation while the gate said PASS. Now counted as wrapped -> UNVERIFIED, exit unaffected. Validation, shader validation and HUD return the framework object (count 2).",
+    "transient_reference": "Repro measured 2 internal references in 11/100 scalers because NSHashTable insertion preceded the measurement; adopting first gives 100/100 cycle-released, 0 unknown.",
+    "version_gate": "Extra release only on MetalFX 40.9; PHOSPHOR_METALFX_UNVERIFIED=1 negative control: engine 8/8 retained, FAIL exit 1; repro 4/4 live."
+  }
 }

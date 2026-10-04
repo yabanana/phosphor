@@ -68,7 +68,12 @@ creation and drops it at release only when it is the last owner, proving the
 deallocation with a weak reference. Replaced scalers are retired after their
 frames complete and destroyed on a utility worker (on the render thread the
 deallocation waited for concurrent MetalFX initialisation). The exit line
-`METALFX-LIFETIME adopted … retained 0 … | PASS` is the lifetime gate.
+`METALFX-LIFETIME adopted … retained 0 … framework 40.9 release on | PASS` is
+the lifetime gate. The extra release is enabled only for verified MetalFX
+versions (`40.9`); any other version gets plain releases (a persisting defect
+shows as `retained`, exit 1; `PHOSPHOR_METALFX_UNVERIFIED=1` is the negative
+control). Under the GPU capture layer the scalers are wrapped: the result is
+`UNVERIFIED` and recreations during a capture session leak until exit.
 `--metalfx-mode isolated` keeps the PR #15 worker processes as an opt-in
 comparison ([historical cost](F8_METALFX_LIFETIME.md)). The plain SDK
 reduction still fails by design ([reduction](../bench/f8_spike/README.md)).

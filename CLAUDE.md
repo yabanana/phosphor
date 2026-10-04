@@ -14,7 +14,9 @@ F5/F6 are integrated (F6 merge e600887); F7/F8 have M5 development acceptance
 F8.4 lifetime (2026-10-04): MetalFX 40.9 temporal scalers keep a strong
 self-reference through their internal filter; `metalfx_lifetime` records it
 at creation and releases it when it is provably the last owner (weak-reference
-proof), retiring scalers on PipelineCache workers. `--upscaler temporal` is in
+proof), only on verified MetalFX versions (40.9; others get plain releases),
+retiring scalers on PipelineCache workers. GPU capture wraps the scalers: the
+lifetime result is UNVERIFIED there. `--upscaler temporal` is in
 process again; `--metalfx-mode isolated` keeps the PR #15 workers, whose cost
 the owner rejected. Native remains the product default. Evidence:
 `docs/research/2026-10-04-metalfx-cycle-root-cause.md`. The plain SDK

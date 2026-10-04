@@ -96,7 +96,7 @@ def main():
         else:
             # In-process scalers: every one destroyed (cycle released), no leak.
             assert code == 0 and not limited and 'EXIT 0' in text, text[-2000:]
-            assert re.search(r'METALFX-LIFETIME adopted (\d+) .*retained 0 unknown 0 max-release-us \d+ \| PASS', text), text[-2000:]
+            assert re.search(r'METALFX-LIFETIME adopted (\d+) .*retained 0 unknown 0 wrapped 0 max-release-us \d+ framework \S+ release on \| PASS', text), text[-2000:]
         report=json.loads((a.out/(mode+'-resize.json')).read_text()) if not limited else {}
         if mode=='direct':
             assert report['rendering']['temporal_frames_total']>a.frames//2, 'Insufficient active temporal frames during resize'
