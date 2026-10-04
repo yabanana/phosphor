@@ -7,6 +7,9 @@ capire se l'episodio F8.4 ha lasciato danni e se si può avviare OPT-2.
 ## Esito in breve
 
 **Il motore è sano; OPT-2 non è ancora pronta e, sui dati, non è la priorità.**
+Esito delle azioni (stesso giorno): tempi per pass corretti, divergenza
+delle varianti caratterizzata (OPT-2.0), baseline OPT-4.16 M5 registrata,
+OPT-2 spostata dopo F13; prossima fase F9.
 Quasi tutte le batterie storiche passano su `main`. La revisione trova due
 difetti reali nell'attrezzatura che OPT-2 userebbe come rete di sicurezza:
 l'equivalenza delle varianti e i tempi per pass. Entrambi nascono in F7/F8 e
@@ -102,6 +105,17 @@ casi sono fra −0,5% e −1,9%: nessuna regressione.
 - Many Lights è il ciclo su tutte le luci senza culling: un limite
   algoritmico che la roadmap assegna a F11 (cluster di luci 3D, ReSTIR;
   uscita "Many Lights stabile"), non a registri o occupancy.
+
+## Baseline OPT-4.16 (M5) dopo la correzione dei tempi
+
+Ripetuta con i tempi per pass corretti (`8cdb4a8`): in tutti i 13 casi la
+somma delle unità coincide con lo span. Sponza HDR+MetalFX 2,142 ms (MetalFX
+1,605, resolve 0,183), Cornell 2,058 (MetalFX 1,759), Many Lights 11,325
+(resolve 10,430, MetalFX 0,644), Sponza nativo 0,632 (resolve 0,251).
+`perf_record` (bench 1–8, vsync on/off, commit `91c9929`, albero pulito)
+aggiorna `docs/perf-history*.csv`. Banda solo stimata dal grafo; energia,
+latenza, regime termico e T0/T2 non misurati.
+[Dati](../results/OPT-4.16-baseline-M5Max-2026-10-04.json).
 
 ## Raccomandazione
 

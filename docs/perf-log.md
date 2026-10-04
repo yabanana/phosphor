@@ -957,3 +957,10 @@ HDR+MetalFX 2,1403 (−1,0%), Cornell 2,0659 (−0,8%), Many Lights 11,3541
 `Luminance histogram` include il resolve (somma unità 21,83 > span 11,35 ms).
 [Rapporto](research/2026-10-04-post-f8-review.md).
 
+Dopo `8cdb4a8` (tempi per pass: inizio dalla fine più tarda della catena)
+la stessa misura dà somma delle unità = span in tutti i casi: Sponza
+HDR+MetalFX 2,1417 ms (MetalFX 1,605), Many Lights 11,3247 (resolve 10,430),
+Sponza nativo 0,6318 (resolve 0,251). Baseline OPT-4.16 M5:
+[dati](results/OPT-4.16-baseline-M5Max-2026-10-04.json); `perf_record`
+commit `91c9929` nelle storie CSV.
+

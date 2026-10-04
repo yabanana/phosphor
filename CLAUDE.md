@@ -23,7 +23,11 @@ the owner rejected. Native remains the product default. Evidence:
 reduction still fails by design (negative control); the framework defect
 itself is not fixed. Never modify macOS (volumes, installers) to investigate.
 The earlier SDK/API investigation and rejected denoised spike remain historical
-evidence. The owner requested a stop before OPT.
+evidence. Post-F8 review (2026-10-04, `docs/research/2026-10-04-post-f8-review.md`):
+next phase is F9; OPT-2 moved after F13 (OPT-2.0 analytic forward derivatives
+first: generic vs specialised forward pipelines diverge in texture filtering
+on Sponza debug modes because raster derivatives depend on helper lanes).
+Per-pass GPU times start at the latest end on their queue chain (sum = span).
 F7.4/F7.5 were implemented as opt-in experiments and not adopted in the
 measured preset. Material binning is available; generic resolve is the measured
 default. `docs/RENDERING_F7_F8.md` records contracts and validation commands. Later

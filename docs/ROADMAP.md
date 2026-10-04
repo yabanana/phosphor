@@ -188,7 +188,7 @@ pubbliche, sorgenti OS, risultati di paper e ipotesi da misurare.
 | F6 | Mesh shader e culling a due fasi ✅ (T0/M3 fisico pendente) | CORE | II |
 | F7 | Visibility buffer e shading ibrido TBDR | CORE | II |
 | F8 | HDR, EDR, esposizione e MetalFX temporal | CORE | II |
-| OPT-2 | Shader, pipeline e occupancy (spostata dopo F8) | OPT | II |
+| OPT-2 | Shader, pipeline e occupancy (spostata dopo F13) | OPT | III |
 | OPT-3 | Geometria, culling e dati di vertice | OPT | II |
 | OPT-4 | Shading, banda e ricostruzione | OPT | II |
 | F9 | Infrastruttura ray tracing | CORE | III · Luce |
@@ -241,14 +241,14 @@ pubbliche, sorgenti OS, risultati di paper e ipotesi da misurare.
 
 | Tappa | Consegna principale | Decisione successiva |
 |---|---|---|
-| Ora | F5/F6 integrate; F7/F8 DEVELOPMENT_ACCEPTED M5 (PR #14 e lifetime MetalFX in-process) | Frame reale con visibilità, materiali e ricostruzione, misurato e verificato |
-| Dopo F8 | Baseline del corpus OPT-4.16 con strumenti esistenti | Selezionare un problema di OPT-2/3/4 se rilevante; altrimenti proseguire F9–F13 |
-| Dopo F13 | Ombre, GI, riflessi e denoise integrati; F14 se utile al corpus | Nuove misure; valutare soltanto le ottimizzazioni rese necessarie dal frame con luce |
+| Fatto | F5/F6 integrate; F7/F8 DEVELOPMENT_ACCEPTED M5 (PR #14, #16), revisione post-F8 e baseline M5 di OPT-4.16 (2026-10-04) | Tempo GPU in MetalFX (69–83% dei frame temporali) e nel ciclo luci (F11): nessuna OPT selezionata |
+| Ora | F9 → F13: infrastruttura RT, ombre, migliaia di luci, GI, riflessi e denoise | Misurare ogni fase sul corpus OPT-4.16; Many Lights verso F11 |
+| Dopo F13 | Ombre, GI, riflessi e denoise integrati; F14 se utile al corpus | Nuove misure; rivalutare OPT-2 (con OPT-2.0) e le altre ottimizzazioni rese necessarie dal frame con luce |
 | Sviluppo successivo | Materiali/mondo/streaming e runtime richiesti dalla slice | Attivare un piano dettagliato quando il suo consumatore è concreto |
 | Piattaforma di prodotto | F27 integrazione ECS → nucleo F41/F21 → F39/F40 → editor F34 | Riuso e parità funzionale verificati; implementazione progressiva senza avviare optimizer generali |
 | Frontiera | F29–F33 e ricerca SoC avanzata | Attivazione per trigger misurato; nessuna dipendenza automatica della slice |
 
-Il checkpoint corrente è **F7/F8 DEVELOPMENT_ACCEPTED sul M5; F8.4 con lifetime MetalFX in-process. Sosta prima delle OPT; F9→F13 restano preparate**, con una baseline corretta e
+Il checkpoint corrente è **F7/F8 DEVELOPMENT_ACCEPTED sul M5 e revisione post-F8 chiusa; prossima fase F9; OPT-2 dopo F13**, con una baseline corretta e
 semplice a ogni passaggio. Cooker, runtime e strumenti minimi si introducono
 quando necessari ai contenuti correnti. Le OPT non sono una barriera obbligatoria
 fra ere; F37 può usare fallback e preset misurati senza aspettare ogni idea
@@ -444,7 +444,7 @@ eventi al pixel). Certificazione T0/M3 fisica `EXTERNAL_VALIDATION_PENDING`.
 
 **2026-10-04: DEVELOPMENT_ACCEPTED sul M5 Max.** F8.4, riaperta il 2026-10-03 perché il proprietario ha rifiutato il costo dei worker isolati (PR #15), è risolta in-process: lo scaler MetalFX 40.9 tiene un autoriferimento forte nel filtro interno e `metalfx_lifetime` lo rilascia quando è l'ultimo proprietario, con prova weak. Suite F7/F8 funzionale, qualità e contesto, soak di 80 ricreazioni e confronto prestazionale rieseguiti sul percorso in-process. [Causa e verifiche](research/2026-10-04-metalfx-cycle-root-cause.md), [isolamento storico](F8_METALFX_LIFETIME.md). Nessuna OPT avviata. [Consegna](F7_F8_HANDOFF.md).
 
-**Revisione post-F8 (2026-10-04):** batterie storiche verdi su `main`, prestazioni invariate rispetto a PR #14. Restano **due difetti aperti** nati in F7/F8, da correggere prima di qualunque OPT: equivalenza delle varianti forward su Sponza nei modi di debug (`variant_check` indexed, bench 4) e tempi per pass doppi nella catena post (somma delle unità > span). Sui dati il tempo GPU sta in MetalFX e nel ciclo luci (F11), non in OPT-2. [Rapporto](research/2026-10-04-post-f8-review.md).
+**Revisione post-F8 (2026-10-04):** batterie storiche verdi su `main`, prestazioni invariate rispetto a PR #14. Corretti i tempi per pass della catena post (l'istogramma ricontava il resolve: ora somma = span). L'equivalenza delle varianti forward su Sponza nei modi di debug dipende dai lane helper del driver: l'immagine illuminata resta nel contratto F3.3; correzione con derivate analitiche registrata come OPT-2.0. Baseline M5 di OPT-4.16 registrata; OPT-2 spostata dopo F13. [Rapporto](research/2026-10-04-post-f8-review.md).
 
 - [x] F8.1 Target RGBA16F lineare (attachment tile nei pass raster, output compute nel resolve della baseline F7), istogramma di luminanza in compute con SIMD-group, esposizione automatica
 - [x] F8.2 Tonemapping configurabile (AgX, ACES, curva custom) e uscita **EDR** su display XDR con calibrazione relativa tramite headroom osservato; fotometria in nit non certificata
@@ -457,36 +457,6 @@ eventi al pixel). Certificazione T0/M3 fisica `EXTERNAL_VALIDATION_PENDING`.
 **Uscita**: stabilità temporale senza ghosting visibile sui testbench in movimento; storia isolata per vista e riuso corretto con più frame in volo, camera cut e resize; clip e soglie di F8.7 registrate; misure base per ricalibrare i budget.
 
 ---
-
-## OPT-2 — Shader, pipeline e occupancy [OPT]
-
-*Spostata dopo F8 il 2026-10-01 (decisione del proprietario): alla fine
-dell'era I l'unico shader caldo era `forward_fs`; le direzioni di OPT-2
-(shader LOD, specializzazione da profilo, ILP, sweep dei threadgroup,
-`half`) rendono sui kernel e sugli shader che F5–F8 aggiungono (culling,
-compattazione, Hi-Z, material resolve, post). Gli ID restano invariati.*
-
-**Obiettivo (ipotesi)**: −15% di tempo GPU totale a parità di immagine;
-occupancy, registri e stalli usati per trovare il punto migliore per shader,
-senza imporre il 90% quando aumenta la contesa [R91].
-
-**Letture**: [R5] [R6] [R7]; playbook S-ALU-*, S-OCC-*, S-SIMD-*.
-
-**Direzioni di ricerca**
-- [ ] OPT-2.1 **[CANDIDATO]** **Shader LOD automatico**: varianti semplificate degli shader generate con tecniche di semplificazione automatica [R5][R6] e usate dove l'errore non si vede (oggetti lontani, riflessioni, GI, tier bassi)
-- [ ] OPT-2.0 **[PREREQUISITO]** Equivalenza generica/varianti su contenuti texturizzati: derivate analitiche nel forward (le derivate raster dipendono dai lane helper che il driver attiva in modo diverso per ogni compilazione; `variant_check` bench 4 Sponza, modi debug 1/2, [analisi](research/2026-10-04-post-f8-review.md)). Richiesto prima di OPT-2.2/.7/.11
-- [ ] OPT-2.2 **[CANDIDATO]** **Specializzazione guidata dal profilo**: registrare durante i test quali combinazioni di feature compaiono davvero e generare varianti (function constant) solo per quelle (O11)
-- [ ] OPT-2.3 **[CANDIDATO]** **Roofline automatica**: strumento che da counter heap e contatori calcola intensità aritmetica e collo di bottiglia per pass e lo mostra in ImGui [R4]
-- [ ] OPT-2.4 **[CANDIDATO]** Riscrittura ILP-friendly dei kernel più caldi (più catene indipendenti, niente `float4` che maschera dipendenze) [R7]
-
-**Spremitura del SoC**
-- [ ] OPT-2.5 **[CANDIDATO]** Censimento dei registri vivi per riga (Xcode 26.4+) per ogni shader caldo; riduzione dei picchi (S-OCC-1)
-- [ ] OPT-2.6 **[CANDIDATO]** Tabella occupancy target + causa di throttling per shader, con correzione mirata (S-OCC-2)
-- [ ] OPT-2.7 **[CANDIDATO]** Conversione sistematica a `half` con suffisso `h`, verificata dai test visivi (S-ALU-3)
-- [ ] OPT-2.8 **[CANDIDATO]** Strength reduction: niente div/mod interi nei cicli caldi, trascendentali `half`/`fast::` dove accettabile (S-ALU-4)
-- [ ] OPT-2.9 **[CANDIDATO]** Sweep delle dimensioni di threadgroup per ogni kernel e per chip, risultati salvati per l'autotuning (S-OCC-3)
-- [ ] OPT-2.10 **[CANDIDATO]** Compattazioni e riduzioni riscritte con intrinsics SIMD-group (S-SIMD-1)
-- [ ] OPT-2.11 **[CANDIDATO]** Tempo di compilazione e numero di varianti misurati; pruning delle varianti mai usate
 
 ## OPT-3 — Geometria, culling e dati di vertice [OPT]
 
@@ -535,7 +505,7 @@ qualità percepita invariata.
 - [ ] OPT-4.13 **[CANDIDATO]** **Accessi a sottorisorse nel render graph**: mip, layer e aspect delle texture, intervalli di byte dei buffer; dipendenze e barriere per intervalli sovrapposti, mantenendo allocazione e vincoli di aliasing della risorsa fisica intera; test di accessi disgiunti, parzialmente sovrapposti e di lettura/scrittura fra code
 - [ ] OPT-4.14 **[CANDIDATO]** **Lifetimes precise fra code e frame**: sostituire la vita conservativa di tutto il frame per le risorse async con un modello di ordinamento parziale derivato da dipendenze ed eventi; aliasing solo dopo tutti gli ultimi accessi ordinati, riuso fra frame/slot coerente con F8.6. Confronto con il piano conservativo, test dell'ordinamento e stress di riuso con più frame in volo; ridurre le attese solo dove la correttezza è dimostrata
 - [ ] OPT-4.15 **[CANDIDATO]** **Piani ottimizzati sul frame reale F5–F8**: applicare ricerca e selezione misurata di OPT-1 a culling, Hi-Z, visibility, resolve e ricostruzione; scegliere ordine, fusioni, rematerializzazione e code sui dispositivi disponibili. Chiave strutturale più ambito di validità misurato (chip/famiglia, OS, preset, risoluzione e classe di carico); invalidazione e ripiego conservativo registrati. Controllare equivalenza per i riordini esatti e soglie F8.7 per le varianti approssimate; estendere i piani a ogni nuova era senza assumere che il modello di costo basti
-- [ ] OPT-4.16 **[BASELINE]** **Baseline di scene rappresentative**: oltre ai microbenchmark e agli scenari sintetici, percorsi di camera ripetibili in scene reali dense con materiali eterogenei e oggetti in movimento; estenderli con luci dinamiche, trasparenze, vegetazione e streaming quando disponibili. Registrare tempo del frame e per pass, p50/p95/p99, memoria di picco, banda (misurata o stimata esplicitamente), energia e latenza; confronto a parità di qualità e in regime termico stabile, su T0 e T2 (O12), riusando il corpus in F29/F35
+- [ ] OPT-4.16 **[BASELINE]** **Baseline di scene rappresentative**: oltre ai microbenchmark e agli scenari sintetici, percorsi di camera ripetibili in scene reali dense con materiali eterogenei e oggetti in movimento; estenderli con luci dinamiche, trasparenze, vegetazione e streaming quando disponibili. Registrare tempo del frame e per pass, p50/p95/p99, memoria di picco, banda (misurata o stimata esplicitamente), energia e latenza; confronto a parità di qualità e in regime termico stabile, su T0 e T2 (O12), riusando il corpus in F29/F35 — **M5 registrata il 2026-10-04** ([dati](results/OPT-4.16-baseline-M5Max-2026-10-04.json)): tempi frame/pass corretti, p95/p99, memoria del device, DRAM dichiarata dal grafo, qualità F8.7; restano T0/T2, energia, latenza e regime termico
 - [ ] OPT-4.17 **[CANDIDATO]** **Compilazione algebrica del frame [EDGE]**: spike offline con e-graph/equality saturation [R100] e rematerializzazione [R101], regole esatte con precondizioni e varianti approssimate separate; estrazione Pareto sotto vincoli di tile/heap/dipendenze, confronto con DP/annealing OPT-1, cap di ricerca e adozione misurata (ricerca H4)
 
 ---
@@ -589,6 +559,39 @@ qualità percepita invariata.
 - [ ] F13.4 Denoiser custom leggero per T0 (temporal + atrous) quando il denoiser MetalFX non è usato
 - [ ] F13.5 Probe di riflessione statiche filtrate per T0
 - [ ] F13.6 **Qualità temporale di luce e denoise**: estendere F8.7 con luci ed emissive in movimento, variazioni di GI, riflessi a diverse roughness e superfici appena disoccluse; verificare motion vector, rejection/invalidation della storia e recupero dopo camera cut, con confronto al riferimento di F12.5 e soglie per tier
+
+## OPT-2 — Shader, pipeline e occupancy [OPT]
+
+*Spostata dopo F8 il 2026-10-01 e **dopo F13 il 2026-10-04** (revisione
+post-F8, [rapporto](research/2026-10-04-post-f8-review.md)): sul frame F8
+misurato i nostri shader pesano ~0,5 ms a 1080p, MetalFX il 69–83% dei frame
+temporali e Many Lights è il ciclo luci senza culling (F11). Il −15% del
+tempo GPU totale non è raggiungibile ora e non è il collo di bottiglia.
+Rivalutare sul frame con luce reale di F13, dove ombre, GI, riflessi e
+denoise rendono caldi shader nostri; OPT-2.0 precede ogni specializzazione.
+Gli ID restano invariati.*
+
+**Obiettivo (ipotesi)**: −15% di tempo GPU totale a parità di immagine;
+occupancy, registri e stalli usati per trovare il punto migliore per shader,
+senza imporre il 90% quando aumenta la contesa [R91].
+
+**Letture**: [R5] [R6] [R7]; playbook S-ALU-*, S-OCC-*, S-SIMD-*.
+
+**Direzioni di ricerca**
+- [ ] OPT-2.0 **[PREREQUISITO]** Equivalenza generica/varianti su contenuti texturizzati: derivate analitiche nel forward (le derivate raster dipendono dai lane helper che il driver attiva in modo diverso per ogni compilazione; `variant_check` bench 4 Sponza, modi debug 1/2, [analisi](research/2026-10-04-post-f8-review.md)). Richiesto prima di OPT-2.2/.7/.11
+- [ ] OPT-2.1 **[CANDIDATO]** **Shader LOD automatico**: varianti semplificate degli shader generate con tecniche di semplificazione automatica [R5][R6] e usate dove l'errore non si vede (oggetti lontani, riflessioni, GI, tier bassi)
+- [ ] OPT-2.2 **[CANDIDATO]** **Specializzazione guidata dal profilo**: registrare durante i test quali combinazioni di feature compaiono davvero e generare varianti (function constant) solo per quelle (O11)
+- [ ] OPT-2.3 **[CANDIDATO]** **Roofline automatica**: strumento che da counter heap e contatori calcola intensità aritmetica e collo di bottiglia per pass e lo mostra in ImGui [R4]
+- [ ] OPT-2.4 **[CANDIDATO]** Riscrittura ILP-friendly dei kernel più caldi (più catene indipendenti, niente `float4` che maschera dipendenze) [R7]
+
+**Spremitura del SoC**
+- [ ] OPT-2.5 **[CANDIDATO]** Censimento dei registri vivi per riga (Xcode 26.4+) per ogni shader caldo; riduzione dei picchi (S-OCC-1)
+- [ ] OPT-2.6 **[CANDIDATO]** Tabella occupancy target + causa di throttling per shader, con correzione mirata (S-OCC-2)
+- [ ] OPT-2.7 **[CANDIDATO]** Conversione sistematica a `half` con suffisso `h`, verificata dai test visivi (S-ALU-3)
+- [ ] OPT-2.8 **[CANDIDATO]** Strength reduction: niente div/mod interi nei cicli caldi, trascendentali `half`/`fast::` dove accettabile (S-ALU-4)
+- [ ] OPT-2.9 **[CANDIDATO]** Sweep delle dimensioni di threadgroup per ogni kernel e per chip, risultati salvati per l'autotuning (S-OCC-3)
+- [ ] OPT-2.10 **[CANDIDATO]** Compattazioni e riduzioni riscritte con intrinsics SIMD-group (S-SIMD-1)
+- [ ] OPT-2.11 **[CANDIDATO]** Tempo di compilazione e numero di varianti misurati; pruning delle varianti mai usate
 
 ## F14 — Cielo, atmosfera, nuvole, meteo [AAA]
 

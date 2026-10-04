@@ -44,6 +44,9 @@ time, costi dei pass, memoria e qualità; usare il M5 disponibile secondo
 La baseline del corpus è OPT-4.16, anticipabile senza completare OPT-2/3/4.
 Scegliere al massimo un collo di bottiglia prioritario: correzione locale,
 esperimento mirato oppure proseguimento verso la luce se il budget è adeguato.
+Esito del 2026-10-04 ([revisione](../research/2026-10-04-post-f8-review.md)):
+baseline M5 registrata; il tempo GPU sta in MetalFX e nel ciclo luci, quindi
+si prosegue verso la luce (F9–F13) e OPT-2 si rivaluta dopo F13.
 
 **Dopo F13 — frame con luce reale.** Ripetere sul frame integrato con ombre,
 GI, riflessi e denoising; registrare contesa e aggiornamenti temporali.
