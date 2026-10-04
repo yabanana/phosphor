@@ -35,28 +35,38 @@ trasparenze, F22 streaming). Nessun link rotto o JSON non valido nei documenti.
 
 ## Difetti trovati
 
-1. **Varianti forward non equivalenti su Sponza (aperto).** Dal commit F7
-   `70a64d8` la pipeline generica e quelle specializzate di bench 4 (Sponza,
-   caricata da quando F7 ha aggiunto l'asset) differiscono nelle modalità di
-   debug 1/2: 48.081 e 69.903 pixel, delta fino a 49/52. La modalità
-   illuminata resta entro tolleranza (11 pixel, delta 1). Prima di F7
-   (`d9cfacf`, stessa scena) la differenza è 0. Il risultato "284 compatibili,
-   peggiore un pixel" del handoff F7/F8 non è riproducibile con Sponza presente.
-   Diagnosi: deterministica; raster e UV identici (normale geometrica: 0
-   pixel); campionando a mip 0 le due pipeline coincidono; restano diverse con
-   archivio AOT o senza, con gradienti espliciti o LOD hardware, con
-   anisotropia 8 o 1. La divergenza è quindi nella scelta del mip trilineare
-   fra le due compilazioni; causa ultima non isolata (prossimo passo:
-   `calculate_clamped_lod` per pixel nelle due pipeline). Rilevanza per OPT-2:
-   `variant_check` è il controllo di equivalenza di OPT-2.2/.7/.11.
-2. **Tempi per pass doppi nella catena post F8 (aperto).** Nei frame F8 la
+1. **Varianti forward non equivalenti su Sponza (aperto, causa individuata).**
+   Dal commit F7 `70a64d8` la pipeline generica e quelle specializzate di
+   bench 4 (Sponza, caricata da quando F7 ha aggiunto l'asset) differiscono
+   nelle modalità di debug 1/2: 48.081 e 69.903 pixel, delta fino a 49/52.
+   La modalità illuminata resta nel contratto (9–11 pixel, delta 1); il
+   percorso mesh passa. Prima di F7 (`d9cfacf`, stessa scena) la differenza
+   è 0. Il "peggiore un pixel" del handoff F7/F8 non si riproduce con Sponza.
+   Esperimenti (tutti temporanei, shader ripristinati e verificati a 0 pixel):
+   stesso triangolo vincente per pixel (`primitive_id`), UV dei pixel visibili
+   identiche al bit, layout del quad identico; coincidono campionando a mip 0;
+   divergono con LOD hardware o gradienti espliciti, anisotropia 8 o 1, mip
+   lineare, nearest o nessuno, archivio AOT o no, warmup 30 o 400. Le derivate
+   (`dfdx`) differiscono nei bit bassi in ~2% dei pixel anche nei quad pieni;
+   derivate esplicite via `quad_shuffle_xor` divergono ugualmente e leggono
+   valori errati dai lane inattivi. Causa: i valori dei lane non visibili
+   del quad (helper/occlusi), con cui GPU e driver calcolano le derivate, non
+   coincidono fra le due compilazioni della stessa funzione; non è
+   controllabile dallo shader. Correzione vera: derivate analitiche anche
+   nel forward (come il resolve compute), prerequisito registrato per
+   OPT-2.2/OPT-2.11. Il percorso HDR di prodotto (visibility + resolve con
+   derivate analitiche) non è interessato.
+2. **Tempi per pass doppi nella catena post F8 (corretto, `8cdb4a8`).** Nei frame F8 la
    somma delle unità supera lo span: 21,83 contro 11,35 ms (Many Lights), 0,90
    contro 0,63 ms (Sponza nativo). `Luminance histogram` riporta sempre
    resolve + ~0,03 ms (10,489/10,459; 0,291/0,252; 0,211/0,182): il suo
    intervallo parte prima del `Material resolve`, che viene contato due volte.
    Frame time e span sono corretti; nel frame forward somma e span coincidono
-   (0,302/0,303). Viola il contratto F4.1 e falserebbe la diagnosi per pass di
-   OPT-2 (.3/.5/.6) e la baseline OPT-4.16.
+   (0,302/0,303). Causa: il clear dell'istogramma gira accanto al resolve e
+   finisce prima; l'istogramma partiva dalla sua fine. Ora un'unità parte
+   dalla fine più tarda della sua catena: somma = span (0,628/0,628;
+   2,137/2,137; 11,378/11,378), istogramma 0,015–0,025 ms; controllo a costo
+   noto lineare (2000/8000 iterazioni: 1,38/5,53 ms), test di regressione.
 3. **Riferimenti visivi superati (corretto).** I riferimenti F6 precedevano
    la correzione F7 di normali e tangenti specchiate: attribuiti per bisezione,
    rigenerati, batteria F6 40/40 ([dettagli](2026-10-04-metalfx-cycle-root-cause.md)).

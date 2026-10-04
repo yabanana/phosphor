@@ -474,6 +474,7 @@ senza imporre il 90% quando aumenta la contesa [R91].
 
 **Direzioni di ricerca**
 - [ ] OPT-2.1 **[CANDIDATO]** **Shader LOD automatico**: varianti semplificate degli shader generate con tecniche di semplificazione automatica [R5][R6] e usate dove l'errore non si vede (oggetti lontani, riflessioni, GI, tier bassi)
+- [ ] OPT-2.0 **[PREREQUISITO]** Equivalenza generica/varianti su contenuti texturizzati: derivate analitiche nel forward (le derivate raster dipendono dai lane helper che il driver attiva in modo diverso per ogni compilazione; `variant_check` bench 4 Sponza, modi debug 1/2, [analisi](research/2026-10-04-post-f8-review.md)). Richiesto prima di OPT-2.2/.7/.11
 - [ ] OPT-2.2 **[CANDIDATO]** **Specializzazione guidata dal profilo**: registrare durante i test quali combinazioni di feature compaiono davvero e generare varianti (function constant) solo per quelle (O11)
 - [ ] OPT-2.3 **[CANDIDATO]** **Roofline automatica**: strumento che da counter heap e contatori calcola intensità aritmetica e collo di bottiglia per pass e lo mostra in ImGui [R4]
 - [ ] OPT-2.4 **[CANDIDATO]** Riscrittura ILP-friendly dei kernel più caldi (più catene indipendenti, niente `float4` che maschera dipendenze) [R7]
