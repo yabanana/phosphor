@@ -17,6 +17,7 @@
 #include <fstream>
 #include <numeric>
 #include <set>
+#include <fcntl.h>
 #include <unistd.h>
 
 namespace f9 {
@@ -135,6 +136,24 @@ MTL::ComputePipelineState* linkedPipeline(soc::Context& ctx, MTL::Library* lib, 
                               (err ? err->localizedDescription()->utf8String() : std::string("unknown error")));
     ctx.keep(pso);
     return pso;
+}
+
+QuietStderr::QuietStderr() {
+    std::fflush(stderr);
+    saved_ = dup(2);
+    const int devNull = open("/dev/null", O_WRONLY);
+    if (devNull >= 0) {
+        dup2(devNull, 2);
+        close(devNull);
+    }
+}
+
+QuietStderr::~QuietStderr() {
+    std::fflush(stderr);
+    if (saved_ >= 0) {
+        dup2(saved_, 2);
+        close(saved_);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -345,7 +364,12 @@ bool loadSponza(SceneData& out, std::string& error) {
     tex.createDefaultTextures();
     phosphor::ECS ecs;
     phosphor::GltfLoader loader(out.scene, tex, ecs);
-    if (!loader.loadFromFile(path.string())) {
+    bool loaded = false;
+    {
+        const QuietStderr quiet; // the loader logs every mesh upload
+        loaded = loader.loadFromFile(path.string());
+    }
+    if (!loaded) {
         error = "GltfLoader failed on " + path.string();
         return false;
     }
@@ -360,6 +384,7 @@ bool loadSponza(SceneData& out, std::string& error) {
 
 phosphor::MeshHandle addMesh(SceneData& s, const std::vector<glm::vec3>& pos, const std::vector<u32>& idx,
                              const std::vector<glm::vec2>& uv) {
+    const QuietStderr quiet;
     std::vector<glm::vec3> n(pos.size(), glm::vec3(0, 1, 0));
     std::vector<glm::vec4> t(pos.size(), glm::vec4(1, 0, 0, 1));
     std::vector<glm::vec2> u = uv.empty() ? std::vector<glm::vec2>(pos.size(), glm::vec2(0)) : uv;
@@ -368,6 +393,7 @@ phosphor::MeshHandle addMesh(SceneData& s, const std::vector<glm::vec3>& pos, co
 
 void proceduralScene(SceneData& s) {
     using namespace phosphor::ProceduralMeshes;
+    const QuietStderr quiet;
     s.name = "procedural";
     const std::vector<phosphor::MeshData> meshes = {generateSphere(1.0f, 64, 32), generateTorus(1.0f, 0.35f, 96, 48),
                                                     generateCube(1.0f), generatePlane(4.0f, 4.0f, 32, 32),

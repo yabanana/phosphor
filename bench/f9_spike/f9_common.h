@@ -48,6 +48,20 @@ using f64 = double;
 /// inlined from bench/f9_spike/shaders/, then src/, then build/generated/.
 MTL::Library* f9Library(soc::Context& ctx, const std::string& file, bool fastMath = true);
 
+/// Silences stderr while alive: the engine's CPU code (GpuScene::uploadMesh,
+/// GltfLoader) logs with LOG_INFO, and --validate counts every non-"[soc]"
+/// line as a validation message.  Never hold it around Metal calls.
+class QuietStderr {
+public:
+    QuietStderr();
+    ~QuietStderr();
+    QuietStderr(const QuietStderr&) = delete;
+    QuietStderr& operator=(const QuietStderr&) = delete;
+
+private:
+    int saved_ = -1;
+};
+
 /// Compute pipeline of `fn` statically linking the intersection functions
 /// `linked` (empty: a plain pipeline).  Kept until the benchmark ends.
 MTL::ComputePipelineState* linkedPipeline(soc::Context& ctx, MTL::Library* lib, const std::string& fn,
