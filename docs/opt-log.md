@@ -1814,3 +1814,198 @@ Le tecniche restano prototipi opt-in e candidate per carichi futuri; i
 risultati non autorizzano scheduler/optimizer generali. Le stime del grafo
 sono somme di accessi dichiarati, non byte DRAM misurati né conteggi delle
 operazioni interne MetalFX. [Consegna completa](F7_F8_HANDOFF.md).
+
+## F9 — Spike: BLAS, TLAS dalla GPU scene, traversal, proxy, alpha RT (S0–S5)
+
+**2026-10-05** · Apple M5 Max (Apple10, 40 core GPU), 128 GB, macOS 27.2
+(26B5091g), SDK 27.0, alimentazione AC, build Release, commit `12e3cea`
+(albero pulito). Piano: [F9](plans/F9.md). **Macchina quieta** (nessun
+agente o benchmark in corso; restano WindowServer e lo sfondo animato di
+sistema), `caffeinate -d`, 3 run, ≥15 ripetizioni per metrica, mediana;
+CV fra le run ≤2% per tutte le metriche citate salvo dove indicato.
+Strumento: `bench/f9_spike` (target `f9_spike`, harness `bench/soc`,
+README con il protocollo), risultati
+`bench/results/f9-spike/m5max-macos27.2.json` e `…-s5-apple9.json`.
+Riferimento CPU comune: test raggio/triangolo **watertight** (Woop et al.)
+in doppia precisione con un BVH esatto; ogni hit GPU è confrontato (t entro
+2e-4 relativo, il triangolo nominato deve contenere il punto entro 1e-5
+baricentrico). Il primo riferimento con Möller-Trumbore perdeva raggi
+esattamente sugli spigoli condivisi che la GPU (watertight) colpisce: per
+questo il riferimento è watertight. Corpus: procedurali (5 mesh) e Sponza
+(103 mesh, 262.267 triangoli, una BLAS per mesh che legge in place il
+layout `GPUVertex`/indici del motore). Tutti gli spike passano anche con
+`--validate` (API + shader validation, 0 messaggi) e S5 con
+`--force-family apple9`. Ogni controllo negativo è stato rotto
+temporaneamente e visto fallire.
+
+### S1 — ciclo di vita delle BLAS (F9-S1, S1b, S1c, S1d, S1e)
+
+- **Allocazione.** `heapAccelerationStructureSizeAndAlign` = dimensione
+  dell'AS arrotondata, allineamento **1 KiB** per tutte le 108 mesh. Sponza:
+  24.616.576 B di AS; allocazioni del device +25.198.592 B standalone,
+  +25.411.584 con un heap per AS, **+24.674.304 impacchettate in un heap di
+  piazzamento** (offset allineati a 1 KiB): tutte tracciano con 0 raggi
+  errati. Le sotto-allocazioni non entrano nel residency set: basta l'heap.
+- **Build delle 103 BLAS.** Un encoder con scratch condiviso e barriera
+  AS→AS fra le build: **22,8 ms**; scratch disgiunti per build senza
+  barriere: **2,60 ms** (8,8×; scratch 7,42 MB contro 1,26 MB). Nessun
+  vincolo di allineamento dello scratch trovato (offset a 1 B validi). Flag
+  d'uso: PreferFastBuild −1,6% byte, Refit +0,08%; `refitScratchBufferSize`
+  = 0 sempre.
+- **Compaction asincrona** (dimensione scritta in un command buffer, copia
+  in uno successivo): Sponza **0,552** (13,59 MB), per mesh 0,495–0,946;
+  copia di tutte le 103 BLAS 0,56 ms; hit bit-identici prima e dopo.
+  `writeCompactedAccelerationStructureSize` scrive **8 byte**.
+- **Refit su deformazione** (kernel che scrive le posizioni nel buffer
+  `GPUVertex`, barriera Dispatch→AS, refit in place o fuori posto, AS→Dispatch,
+  traccia): 0 raggi errati. Refit 3,4–5,2× più veloce del rebuild (mesh
+  Sponza 27.796 triangoli: 0,13 contro 0,53 ms). Dopo una deformazione
+  grande il traversal dell'AS rifittata costa **1,33×** quello della
+  ricostruita (1,61 contro 1,21 ms per 8,4 M raggi): il refit degrada.
+- **Ordinamenti** (produttore lento: piano 1M triangoli, due stati, 20
+  ripetizioni): build/refit → traccia è ordinato solo da
+  `barrierAfterEncoderStages(AccelerationStructure, Dispatch)` o da una
+  barriera di coda AS→Dispatch sull'encoder successivo (0/20 fallimenti);
+  senza barriera, con Dispatch→Dispatch o con due encoder senza barriera
+  **20/20 ripetizioni hanno tutti i 262.144 raggi stantii**. Scrittura dei
+  vertici → build: nessuna variante senza barriera ha mai fallito (anche
+  con produttore rallentato): **inconcludente**, la barriera Dispatch→AS
+  resta per contratto API.
+- **Crash del layer di shader validation (S1e).** Rilasciare un heap di
+  piazzamento (con AS **o con semplici buffer**) e poi riusare lo stesso
+  oggetto command buffer fa crashare il commit successivo in MetalTools
+  (`HeapUsageTable::processHeapEntry` da `MTL4GPUDebugCommandBuffer
+  preCommit`); con command buffer nuovi 0 crash su 8 configurazioni, senza
+  validation nessun crash. È il difetto già aggirato dal motore in
+  `MetalContext::refreshCommandBuffer` (misurato su 27.1), ancora presente
+  su 27.2: le AS del motore devono uscire dalla residency attraverso
+  `MetalContext::evict` come gli altri heap.
+
+### S2 — TLAS scritta in compute dalla GPU scene (F9-S2)
+
+`GPUInstance` (80 B) → descrittori indiretti (**72 B** impacchettati) da un
+kernel; 4 BLAS procedurali, 1K/10K/100K istanze animate, ~10% specchiate,
+5% di slot non validi. Strategie: **A** un descrittore per slot (slot non
+valido: mask 0), **B** compattazione atomica con conteggio GPU e
+`IndirectInstanceAccelerationStructureDescriptor` (nessuna lettura CPU),
+**Bs** compattazione stabile. 0 raggi errati dopo build, 1 e 5 frame di
+refit, delete/reuse di slot riciclati (nuova mesh e generazione lette via
+`user_instance_id`).
+
+| 100K istanze (ms) | A | B | Bs |
+|---|---:|---:|---:|
+| scrittura descrittori | 0,013 | 0,014 | 0,021 |
+| build usage None | 1,723 | 1,644 | 1,677 |
+| build PreferFastBuild | 1,135 | 1,061 | 1,087 |
+| refit | 0,139 | 0,137 | 0,135 |
+| **descrittori + barriera + refit** | **0,151** | 0,149 | 0,156 |
+
+1K/10K (A): build 0,41/0,52 ms, refit 0,064/0,067 ms. TLAS 100K 22,8 MB.
+**Il target 0,5 ms per 100K istanze dinamiche è raggiunto solo dal refit**
+(0,15 ms); nessun rebuild ci sta (≥1,06 ms). Il refit resta corretto anche
+dopo delete/reuse (A) e con l'ordine dei descrittori che cambia (B).
+**Specchiate:** `triangle_front_facing` ignora il segno del determinante;
+con l'opzione `TriangleFrontFacingWindingCounterClockwise` impostata
+**solo sulle istanze `INSTANCE_FLAG_MIRRORED`** 0 discordanze su entrambe le
+classi (3460 normali, 436 specchiate); controlli negativi: 4x3 trasposta
+1980/2048 errati, slot cancellati con mask 0xFF 440 hit su istanze morte,
+regola specchiata ignorata 436/436 discordanze.
+
+### S3 — traversal e costo per raggio (F9-S3)
+
+Sponza, 1920×1080 (2.073.600 raggi primari), raggi secondari dai punti
+primari (il loro tempo esclude i primari); costo ammortizzato in ns per
+raggio (GPU intera):
+
+| ns/raggio | primario | ombra | AO (0,5 m) | diffuso |
+|---|---:|---:|---:|---:|
+| `intersector` closest | 0,239 | 0,282 | 0,180 | 0,293 |
+| `intersector` any-hit | — | 0,259 | 0,174 | — |
+| `intersection_query` closest | 0,321 | 0,377 | 0,308 | 0,434 |
+| `intersection_query` any | — | 0,382 | 0,316 | — |
+
+`intersection_query` costa 1,34–1,71×; any-hit −8% sulle ombre; senza
+intersection function `assume_geometry_type`, istanze non opache e
+`force_opacity` non cambiano nulla. Un passo d'ombra a 1080p ≈ 0,54 ms.
+0 discordanze fra varianti (≈4 M raggi) e 0 errori contro la CPU.
+**Auto-intersezione:** origine sul punto 1.970.672 auto-hit e 8350 acne;
+tmin 1e-4 1747 auto-hit; tmin 1e-3 274 auto-hit e 50 fughe di luce;
+offset Wächter-Binder in spazio oggetto 0 auto-hit d'ombra ma auto-hit
+diffusi su un'istanza scalata 0,008; **offset Wächter-Binder in spazio
+mondo: 0 auto-hit, accordo 99,989% con l'ombra esatta, 0 acne**, 22 fughe
+su raggi radenti (n·l 0,005–0,25).
+
+### S4 — geometria proxy (F9-S4)
+
+Proxy solo-indici (meshoptimizer) sopra il buffer di vertici originale:
+UV/materiale condivisi per costruzione, BLAS proxy = stessi vertici, nuovi
+indici. Errore misurato contro la geometria piena (3 camere 960×540, 1,55 M
+primari, 705K ricevitori d'ombra):
+
+| Livello | triangoli | primari errati | dt95 | ombra discorde | acne |
+|---|---:|---:|---:|---:|---:|
+| ratio 0,5 senza bordi | 51% | 4,8% | 4 cm | 25,4% | 1,65% |
+| ratio 0,5 bordi bloccati | 51,7% | 4,1% | 4,2 cm | 0,57% | 0,98% |
+| errore 1e-3 | 48,4% | 0,52% | 1,1 cm | 0,89% | 1,31% |
+| sloppy 0,01 (controllo) | 3,5% | 62,4% | 5,1 m | 25,4% | 3,5% |
+| **politica adattiva, bordi bloccati** | **55,0%** | **0,10%** | **0,07 cm** | **0,05%** | **0,15%** |
+
+Un rapporto fisso non è sicuro: una sola mesh di 32 triangoli (estensione
+minima 3,25 m) collassa e produce il 25% di ombre false. La politica che
+parte grossolana (ratio 0,1 con bordi bloccati) e promuove solo le mesh
+colpevoli finché ombra ≤0,5%, primari ≤0,2%, dt95 ≤1 cm, acne ≤0,5% converge
+in 7–14 iterazioni e dimezza circa triangoli e byte delle BLAS (Sponza non
+ha mesh emissive). Controlli: pieno contro pieno esattamente 0, sloppy 0,01
+oltre soglia, una mesh sabotata è individuata.
+
+### S5 — alpha test con intersection function (F9-S5)
+
+3 materiali MASK di Sponza (34.940 triangoli) e una scena sintetica con
+buchi noti. **A**: una funzione generica all'offset 0, geometria mascherata
+non opaca, il resto opaco (portabile); **B**: slot per materiale e funzioni
+specializzate (indicizzazione hardware M5); **C**: tutto opaco (controllo).
+A, A con primitive data, B: **0 raggi errati** su 777.600 (Sponza) e
+300.000 (sintetica) contro la regola del raster in doppia precisione; C
+discorda sul 41,6% della sintetica. Nessuna chiamata a funzione su
+geometria opaca (nessun occlusore opaco può lasciare passare luce).
+
+| ns/raggio Sponza | A | B | C (opaco) |
+|---|---:|---:|---:|
+| primario | 0,287 | 0,289 | 0,285 |
+| ombra | 0,322 | 0,318 | 0,316 |
+
+Con il 5,6% di raggi primari che invocano la funzione il costo è entro
+l'1%; B **non** guadagna su A sul M5. Apple9 (`--force-family apple9`,
+solo A): 0,289/0,318 ns, 0 errori. LOD della texture (nessuna derivata in
+RT): sui raggi che toccano superfici mascherate LOD 0 contro un LOD "da
+raster" (derivate dei pixel vicini, aniso 8) cambia esito nel 16,6%, il cono
+di raggio nel 12,9%; per le ombre LOD 0 e cono differiscono solo nello
+0,02% dei raggi.
+
+### Decisioni per l'integrazione (F9.1–F9.5)
+
+1. **BLAS** in heap di piazzamento attraverso `GpuMemory` (allineamento
+   1 KiB, una voce di residency per heap, rilascio con evict ⇒ ricostruzione
+   dei command buffer); build batch con scratch disgiunti e senza barriere
+   fra build indipendenti; compaction asincrona (dimensione 8 B letta al
+   completamento, copia in un frame successivo, vecchia AS rilasciata dopo
+   l'ultimo lettore); refit per deformazioni con rebuild quando la topologia
+   cambia o il refit degrada.
+2. **TLAS per frame: strategia A** (un descrittore per slot, mask 0 per gli
+   slot non validi, `userID` = slot, opzione CCW sulle specchiate), scritta
+   da un kernel dopo `Scene transforms`, **refit ogni frame**, rebuild
+   quando cambia la capacità o l'insieme di BLAS e a cadenza configurabile
+   contro il degrado. B/Bs restano disponibili (stesse prestazioni) ma A
+   conserva l'identità slot = `instance_id` senza compattazione.
+3. **Barriere**: AS→Dispatch fra build/refit e traccia (obbligatoria),
+   Dispatch→AS fra scrittura dei descrittori/vertici e build: stadi esatti
+   dichiarati nel grafo.
+4. **Traversal**: solo `intersector`; any-hit per le ombre; origine dei
+   raggi secondari con offset Wächter-Binder in spazio mondo.
+5. **Proxy**: semplificazione solo-indici con politica adattiva e errore
+   dichiarato per mesh; senza misura la mesh resta piena.
+6. **Alpha RT**: strategia A (una funzione generica, geometria opaca per i
+   materiali opachi) su Apple9 e Apple10: B non guadagna sul M5; LOD 0 per le
+   ombre, LOD da cono per i raggi primari.
+7. **F9.6 (ray binning)**: nessuno spike ne misura un guadagno (raggi
+   coerenti 0,24–0,28 ns contro diffusi 0,29 ns): non attivato.

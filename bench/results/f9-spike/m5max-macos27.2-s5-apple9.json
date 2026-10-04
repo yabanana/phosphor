@@ -1,0 +1,3497 @@
+{
+ "benchmarks": [
+  {
+   "gpu": {
+    "active_share": 0.22616487805400792,
+    "mean_mhz": 1083.8288898324263,
+    "top_state_share": 0.5632701459207781,
+    "watts": 4.826022984793881
+   },
+   "id": "F9-S5",
+   "metrics": [
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A.view.orthogonal.wrong",
+     "params": {
+      "ambiguous": 28.0,
+      "rays": 100000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A.view.oblique.wrong",
+     "params": {
+      "ambiguous": 26.0,
+      "rays": 100000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A.primary.wrong",
+     "params": {
+      "ambiguous": 54.0,
+      "extra_hit": 0.0,
+      "missed_occluder": 0.0,
+      "rays": 200000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A.shadow.wrong",
+     "params": {
+      "ambiguous": 30.0,
+      "extra_hit": 0.0,
+      "missed_occluder": 0.0,
+      "rays": 100000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A.shadow.opaque_leaks",
+     "params": {
+      "rays": 100000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A.wrong",
+     "params": {
+      "ambiguous": 84.0,
+      "rays": 300000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A.disagree_pct",
+     "params": {
+      "rays": 300000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "%",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A.primary.ns",
+     "params": {
+      "rays": 100000.0
+     },
+     "run_cv": 0.00560990855024543,
+     "runs": [
+      0.3258333333333333,
+      0.32291666666666663,
+      0.32249999999999995
+     ],
+     "unit": "ns",
+     "value": 0.32291666666666663,
+     "within": {
+      "cv": 0.05798961762931037,
+      "max": 0.39041666666666663,
+      "mean": 0.32586111111111105,
+      "median": 0.32291666666666663,
+      "min": 0.31166666666666665,
+      "n": 15,
+      "p10": 0.31375,
+      "p90": 0.33499999999999996
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A.shadow.ns",
+     "params": {
+      "rays": 100000.0
+     },
+     "run_cv": 0.005369510918061128,
+     "runs": [
+      0.3120833333333333,
+      0.3133333333333333,
+      0.3154166666666666
+     ],
+     "unit": "ns",
+     "value": 0.3133333333333333,
+     "within": {
+      "cv": 0.05810778115302584,
+      "max": 0.3820833333333332,
+      "mean": 0.3171944444444444,
+      "median": 0.3133333333333333,
+      "min": 0.3054166666666666,
+      "n": 15,
+      "p10": 0.3070833333333333,
+      "p90": 0.31958333333333333
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A.primary.calls_per_ray",
+     "params": {
+      "rays": 200000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.721715,
+      0.721715,
+      0.721715
+     ],
+     "unit": "calls",
+     "value": 0.721715,
+     "within": {
+      "cv": 0.0,
+      "max": 0.721715,
+      "mean": 0.721715,
+      "median": 0.721715,
+      "min": 0.721715,
+      "n": 1,
+      "p10": 0.721715,
+      "p90": 0.721715
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A.primary.opaque_calls",
+     "params": {
+      "calls": 144343.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "calls",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A.shadow_closest.calls_per_ray",
+     "params": {
+      "rays": 100000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.85745,
+      0.85745,
+      0.85745
+     ],
+     "unit": "calls",
+     "value": 0.85745,
+     "within": {
+      "cv": 0.0,
+      "max": 0.85745,
+      "mean": 0.85745,
+      "median": 0.85745,
+      "min": 0.85745,
+      "n": 1,
+      "p10": 0.85745,
+      "p90": 0.85745
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A.shadow_closest.opaque_calls",
+     "params": {
+      "calls": 85745.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "calls",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_pd.view.orthogonal.wrong",
+     "params": {
+      "ambiguous": 28.0,
+      "rays": 100000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_pd.view.oblique.wrong",
+     "params": {
+      "ambiguous": 26.0,
+      "rays": 100000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_pd.primary.wrong",
+     "params": {
+      "ambiguous": 54.0,
+      "extra_hit": 0.0,
+      "missed_occluder": 0.0,
+      "rays": 200000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_pd.shadow.wrong",
+     "params": {
+      "ambiguous": 30.0,
+      "extra_hit": 0.0,
+      "missed_occluder": 0.0,
+      "rays": 100000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_pd.shadow.opaque_leaks",
+     "params": {
+      "rays": 100000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_pd.wrong",
+     "params": {
+      "ambiguous": 84.0,
+      "rays": 300000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_pd.disagree_pct",
+     "params": {
+      "rays": 300000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "%",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_pd.primary.ns",
+     "params": {
+      "rays": 100000.0
+     },
+     "run_cv": 0.008483102877492989,
+     "runs": [
+      0.3191666666666666,
+      0.32458333333333333,
+      0.32249999999999995
+     ],
+     "unit": "ns",
+     "value": 0.32249999999999995,
+     "within": {
+      "cv": 0.06203413781469947,
+      "max": 0.3975,
+      "mean": 0.3271111111111111,
+      "median": 0.32249999999999995,
+      "min": 0.3145833333333333,
+      "n": 15,
+      "p10": 0.3158333333333333,
+      "p90": 0.33458333333333323
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_pd.shadow.ns",
+     "params": {
+      "rays": 100000.0
+     },
+     "run_cv": 0.004065040650406418,
+     "runs": [
+      0.30874999999999997,
+      0.3075,
+      0.30625
+     ],
+     "unit": "ns",
+     "value": 0.3075,
+     "within": {
+      "cv": 0.06251582650964975,
+      "max": 0.3804166666666666,
+      "mean": 0.3114444444444443,
+      "median": 0.3075,
+      "min": 0.30125,
+      "n": 15,
+      "p10": 0.30166666666666664,
+      "p90": 0.315
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_pd.primary.calls_per_ray",
+     "params": {
+      "rays": 200000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.721715,
+      0.721715,
+      0.721715
+     ],
+     "unit": "calls",
+     "value": 0.721715,
+     "within": {
+      "cv": 0.0,
+      "max": 0.721715,
+      "mean": 0.721715,
+      "median": 0.721715,
+      "min": 0.721715,
+      "n": 1,
+      "p10": 0.721715,
+      "p90": 0.721715
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_pd.primary.opaque_calls",
+     "params": {
+      "calls": 144343.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "calls",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_pd.shadow_closest.calls_per_ray",
+     "params": {
+      "rays": 100000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.85745,
+      0.85745,
+      0.85745
+     ],
+     "unit": "calls",
+     "value": 0.85745,
+     "within": {
+      "cv": 0.0,
+      "max": 0.85745,
+      "mean": 0.85745,
+      "median": 0.85745,
+      "min": 0.85745,
+      "n": 1,
+      "p10": 0.85745,
+      "p90": 0.85745
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_pd.shadow_closest.opaque_calls",
+     "params": {
+      "calls": 85745.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "calls",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_all.view.orthogonal.wrong",
+     "params": {
+      "ambiguous": 28.0,
+      "rays": 100000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_all.view.oblique.wrong",
+     "params": {
+      "ambiguous": 26.0,
+      "rays": 100000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_all.primary.wrong",
+     "params": {
+      "ambiguous": 54.0,
+      "extra_hit": 0.0,
+      "missed_occluder": 0.0,
+      "rays": 200000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_all.shadow.wrong",
+     "params": {
+      "ambiguous": 30.0,
+      "extra_hit": 0.0,
+      "missed_occluder": 0.0,
+      "rays": 100000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_all.shadow.opaque_leaks",
+     "params": {
+      "rays": 100000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_all.wrong",
+     "params": {
+      "ambiguous": 84.0,
+      "rays": 300000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_all.disagree_pct",
+     "params": {
+      "rays": 300000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "%",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_all.primary.ns",
+     "params": {
+      "rays": 100000.0
+     },
+     "run_cv": 0.011049173494399702,
+     "runs": [
+      0.33291666666666664,
+      0.32708333333333334,
+      0.32624999999999993
+     ],
+     "unit": "ns",
+     "value": 0.32708333333333334,
+     "within": {
+      "cv": 0.04443881103806771,
+      "max": 0.3816666666666666,
+      "mean": 0.3308055555555556,
+      "median": 0.32708333333333334,
+      "min": 0.3208333333333333,
+      "n": 15,
+      "p10": 0.32291666666666663,
+      "p90": 0.33749999999999997
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_all.shadow.ns",
+     "params": {
+      "rays": 100000.0
+     },
+     "run_cv": 0.006124167118253799,
+     "runs": [
+      0.3237499999999999,
+      0.32,
+      0.3208333333333333
+     ],
+     "unit": "ns",
+     "value": 0.3208333333333333,
+     "within": {
+      "cv": 0.05340648880147823,
+      "max": 0.38791666666666663,
+      "mean": 0.3258055555555555,
+      "median": 0.3208333333333333,
+      "min": 0.31666666666666665,
+      "n": 15,
+      "p10": 0.3179166666666666,
+      "p90": 0.32624999999999993
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_all.primary.calls_per_ray",
+     "params": {
+      "rays": 200000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      1.32673,
+      1.32673,
+      1.32673
+     ],
+     "unit": "calls",
+     "value": 1.32673,
+     "within": {
+      "cv": 0.0,
+      "max": 1.32673,
+      "mean": 1.32673,
+      "median": 1.32673,
+      "min": 1.32673,
+      "n": 1,
+      "p10": 1.32673,
+      "p90": 1.32673
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_all.primary.opaque_calls",
+     "params": {
+      "calls": 265346.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      121003.0,
+      121003.0,
+      121003.0
+     ],
+     "unit": "calls",
+     "value": 121003.0,
+     "within": {
+      "cv": 0.0,
+      "max": 121003.0,
+      "mean": 121003.0,
+      "median": 121003.0,
+      "min": 121003.0,
+      "n": 1,
+      "p10": 121003.0,
+      "p90": 121003.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_all.shadow_closest.calls_per_ray",
+     "params": {
+      "rays": 100000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.85745,
+      0.85745,
+      0.85745
+     ],
+     "unit": "calls",
+     "value": 0.85745,
+     "within": {
+      "cv": 0.0,
+      "max": 0.85745,
+      "mean": 0.85745,
+      "median": 0.85745,
+      "min": 0.85745,
+      "n": 1,
+      "p10": 0.85745,
+      "p90": 0.85745
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_all.shadow_closest.opaque_calls",
+     "params": {
+      "calls": 85745.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "calls",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.C.view.orthogonal.wrong",
+     "params": {
+      "ambiguous": 28.0,
+      "rays": 100000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      46138.0,
+      46138.0,
+      46138.0
+     ],
+     "unit": "rays",
+     "value": 46138.0,
+     "within": {
+      "cv": 0.0,
+      "max": 46138.0,
+      "mean": 46138.0,
+      "median": 46138.0,
+      "min": 46138.0,
+      "n": 1,
+      "p10": 46138.0,
+      "p90": 46138.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.C.view.oblique.wrong",
+     "params": {
+      "ambiguous": 26.0,
+      "rays": 100000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      32150.0,
+      32150.0,
+      32150.0
+     ],
+     "unit": "rays",
+     "value": 32150.0,
+     "within": {
+      "cv": 0.0,
+      "max": 32150.0,
+      "mean": 32150.0,
+      "median": 32150.0,
+      "min": 32150.0,
+      "n": 1,
+      "p10": 32150.0,
+      "p90": 32150.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.C.primary.wrong",
+     "params": {
+      "ambiguous": 54.0,
+      "extra_hit": 0.0,
+      "missed_occluder": 0.0,
+      "rays": 200000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      78288.0,
+      78288.0,
+      78288.0
+     ],
+     "unit": "rays",
+     "value": 78288.0,
+     "within": {
+      "cv": 0.0,
+      "max": 78288.0,
+      "mean": 78288.0,
+      "median": 78288.0,
+      "min": 78288.0,
+      "n": 1,
+      "p10": 78288.0,
+      "p90": 78288.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.C.shadow.wrong",
+     "params": {
+      "ambiguous": 30.0,
+      "extra_hit": 46433.0,
+      "missed_occluder": 0.0,
+      "rays": 100000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      46433.0,
+      46433.0,
+      46433.0
+     ],
+     "unit": "rays",
+     "value": 46433.0,
+     "within": {
+      "cv": 0.0,
+      "max": 46433.0,
+      "mean": 46433.0,
+      "median": 46433.0,
+      "min": 46433.0,
+      "n": 1,
+      "p10": 46433.0,
+      "p90": 46433.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.C.shadow.opaque_leaks",
+     "params": {
+      "rays": 100000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.C.wrong",
+     "params": {
+      "ambiguous": 84.0,
+      "rays": 300000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      124721.0,
+      124721.0,
+      124721.0
+     ],
+     "unit": "rays",
+     "value": 124721.0,
+     "within": {
+      "cv": 0.0,
+      "max": 124721.0,
+      "mean": 124721.0,
+      "median": 124721.0,
+      "min": 124721.0,
+      "n": 1,
+      "p10": 124721.0,
+      "p90": 124721.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.C.disagree_pct",
+     "params": {
+      "rays": 300000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      41.57366666666667,
+      41.57366666666667,
+      41.57366666666667
+     ],
+     "unit": "%",
+     "value": 41.57366666666667,
+     "within": {
+      "cv": 0.0,
+      "max": 41.57366666666667,
+      "mean": 41.57366666666667,
+      "median": 41.57366666666667,
+      "min": 41.57366666666667,
+      "n": 1,
+      "p10": 41.57366666666667,
+      "p90": 41.57366666666667
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.C.primary.ns",
+     "params": {
+      "rays": 100000.0
+     },
+     "run_cv": 0.005344952143564878,
+     "runs": [
+      0.20666666666666664,
+      0.2070833333333333,
+      0.20499999999999996
+     ],
+     "unit": "ns",
+     "value": 0.20666666666666664,
+     "within": {
+      "cv": 0.07329459386678373,
+      "max": 0.25416666666666665,
+      "mean": 0.21061111111111103,
+      "median": 0.20666666666666664,
+      "min": 0.1975,
+      "n": 15,
+      "p10": 0.19791666666666663,
+      "p90": 0.2379166666666666
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.C.shadow.ns",
+     "params": {
+      "rays": 100000.0
+     },
+     "run_cv": 0.0025084008798968893,
+     "runs": [
+      0.19125,
+      0.1920833333333333,
+      0.1920833333333333
+     ],
+     "unit": "ns",
+     "value": 0.1920833333333333,
+     "within": {
+      "cv": 0.06441712595458267,
+      "max": 0.24083333333333332,
+      "mean": 0.19552777777777777,
+      "median": 0.1920833333333333,
+      "min": 0.1908333333333333,
+      "n": 15,
+      "p10": 0.1908333333333333,
+      "p90": 0.19541666666666663
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A.analytic_wrong",
+     "params": {
+      "checked": 79878.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_pd.analytic_wrong",
+     "params": {
+      "checked": 79878.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A_all.analytic_wrong",
+     "params": {
+      "checked": 79878.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.C.analytic_wrong",
+     "params": {
+      "checked": 79878.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      43248.0,
+      43248.0,
+      43248.0
+     ],
+     "unit": "rays",
+     "value": 43248.0,
+     "within": {
+      "cv": 0.0,
+      "max": 43248.0,
+      "mean": 43248.0,
+      "median": 43248.0,
+      "min": 43248.0,
+      "n": 1,
+      "p10": 43248.0,
+      "p90": 43248.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.synthetic.A.lod2.wrong",
+     "params": {
+      "ambiguous": 233.0,
+      "rays": 200000.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.material.0.triangles",
+     "params": {
+      "cutoff": 0.5,
+      "instances": 2.0,
+      "meshes": 2.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      31436.0,
+      31436.0,
+      31436.0
+     ],
+     "unit": "triangles",
+     "value": 31436.0,
+     "within": {
+      "cv": 0.0,
+      "max": 31436.0,
+      "mean": 31436.0,
+      "median": 31436.0,
+      "min": 31436.0,
+      "n": 1,
+      "p10": 31436.0,
+      "p90": 31436.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.material.1.triangles",
+     "params": {
+      "cutoff": 0.5,
+      "instances": 8.0,
+      "meshes": 8.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      3472.0,
+      3472.0,
+      3472.0
+     ],
+     "unit": "triangles",
+     "value": 3472.0,
+     "within": {
+      "cv": 0.0,
+      "max": 3472.0,
+      "mean": 3472.0,
+      "median": 3472.0,
+      "min": 3472.0,
+      "n": 1,
+      "p10": 3472.0,
+      "p90": 3472.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.material.20.triangles",
+     "params": {
+      "cutoff": 0.5,
+      "instances": 4.0,
+      "meshes": 4.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      32.0,
+      32.0,
+      32.0
+     ],
+     "unit": "triangles",
+     "value": 32.0,
+     "within": {
+      "cv": 0.0,
+      "max": 32.0,
+      "mean": 32.0,
+      "median": 32.0,
+      "min": 32.0,
+      "n": 1,
+      "p10": 32.0,
+      "p90": 32.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.masked_materials",
+     "params": {
+      "materials": 25.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      3.0,
+      3.0,
+      3.0
+     ],
+     "unit": "materials",
+     "value": 3.0,
+     "within": {
+      "cv": 0.0,
+      "max": 3.0,
+      "mean": 3.0,
+      "median": 3.0,
+      "min": 3.0,
+      "n": 1,
+      "p10": 3.0,
+      "p90": 3.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.masked_triangles",
+     "params": {
+      "triangles": 262267.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      34940.0,
+      34940.0,
+      34940.0
+     ],
+     "unit": "triangles",
+     "value": 34940.0,
+     "within": {
+      "cv": 0.0,
+      "max": 34940.0,
+      "mean": 34940.0,
+      "median": 34940.0,
+      "min": 34940.0,
+      "n": 1,
+      "p10": 34940.0,
+      "p90": 34940.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.view.hall.masked_hit_pct",
+     "params": {
+      "hits": 129600.0,
+      "rays": 129600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "%",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.view.plantA.masked_hit_pct",
+     "params": {
+      "hits": 129600.0,
+      "rays": 129600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      1.6720679012345678,
+      1.6720679012345678,
+      1.6720679012345678
+     ],
+     "unit": "%",
+     "value": 1.6720679012345678,
+     "within": {
+      "cv": 0.0,
+      "max": 1.6720679012345678,
+      "mean": 1.6720679012345678,
+      "median": 1.6720679012345678,
+      "min": 1.6720679012345678,
+      "n": 1,
+      "p10": 1.6720679012345678,
+      "p90": 1.6720679012345678
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.view.plantB.masked_hit_pct",
+     "params": {
+      "hits": 129600.0,
+      "rays": 129600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      1.4066358024691359,
+      1.4066358024691359,
+      1.4066358024691359
+     ],
+     "unit": "%",
+     "value": 1.4066358024691359,
+     "within": {
+      "cv": 0.0,
+      "max": 1.4066358024691359,
+      "mean": 1.4066358024691359,
+      "median": 1.4066358024691359,
+      "min": 1.4066358024691359,
+      "n": 1,
+      "p10": 1.4066358024691359,
+      "p90": 1.4066358024691359
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.view.leaves.masked_hit_pct",
+     "params": {
+      "hits": 129600.0,
+      "rays": 129600.0
+     },
+     "run_cv": 1.4533797792508303e-16,
+     "runs": [
+      1.871141975308642,
+      1.871141975308642,
+      1.871141975308642
+     ],
+     "unit": "%",
+     "value": 1.871141975308642,
+     "within": {
+      "cv": 0.0,
+      "max": 1.871141975308642,
+      "mean": 1.871141975308642,
+      "median": 1.871141975308642,
+      "min": 1.871141975308642,
+      "n": 1,
+      "p10": 1.871141975308642,
+      "p90": 1.871141975308642
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A.view.hall.wrong",
+     "params": {
+      "ambiguous": 0.0,
+      "rays": 129600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A.view.plantA.wrong",
+     "params": {
+      "ambiguous": 33.0,
+      "rays": 129600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A.view.plantB.wrong",
+     "params": {
+      "ambiguous": 16.0,
+      "rays": 129600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A.view.leaves.wrong",
+     "params": {
+      "ambiguous": 18.0,
+      "rays": 129600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A.primary.wrong",
+     "params": {
+      "ambiguous": 67.0,
+      "extra_hit": 0.0,
+      "missed_occluder": 0.0,
+      "rays": 518400.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A.shadow.wrong",
+     "params": {
+      "ambiguous": 0.0,
+      "extra_hit": 0.0,
+      "missed_occluder": 0.0,
+      "rays": 259200.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A.shadow.opaque_leaks",
+     "params": {
+      "rays": 259200.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A.wrong",
+     "params": {
+      "ambiguous": 67.0,
+      "rays": 777600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A.disagree_pct",
+     "params": {
+      "rays": 777600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "%",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A.primary.ns",
+     "params": {
+      "rays": 129600.0
+     },
+     "run_cv": 0.004629353594068449,
+     "runs": [
+      0.29063786008230447,
+      0.28806584362139914,
+      0.2887088477366255
+     ],
+     "unit": "ns",
+     "value": 0.2887088477366255,
+     "within": {
+      "cv": 0.7033107413710713,
+      "max": 1.3056198559670777,
+      "mean": 0.37956532921810693,
+      "median": 0.2887088477366255,
+      "min": 0.28292181069958844,
+      "n": 15,
+      "p10": 0.28356481481481477,
+      "p90": 0.5799897119341563
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A.shadow.ns",
+     "params": {
+      "rays": 64800.0
+     },
+     "run_cv": 0.005344952143564843,
+     "runs": [
+      0.320216049382716,
+      0.31764403292181065,
+      0.31700102880658426
+     ],
+     "unit": "ns",
+     "value": 0.31764403292181065,
+     "within": {
+      "cv": 0.6628387919614893,
+      "max": 1.2898662551440327,
+      "mean": 0.37988683127572015,
+      "median": 0.31764403292181065,
+      "min": 0.3034979423868312,
+      "n": 15,
+      "p10": 0.3060699588477366,
+      "p90": 0.3215020576131687
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A.primary.calls_per_ray",
+     "params": {
+      "rays": 518400.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.05646412037037037,
+      0.05646412037037037,
+      0.05646412037037037
+     ],
+     "unit": "calls",
+     "value": 0.05646412037037037,
+     "within": {
+      "cv": 0.0,
+      "max": 0.05646412037037037,
+      "mean": 0.05646412037037037,
+      "median": 0.05646412037037037,
+      "min": 0.05646412037037037,
+      "n": 1,
+      "p10": 0.05646412037037037,
+      "p90": 0.05646412037037037
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A.primary.opaque_calls",
+     "params": {
+      "calls": 29271.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "calls",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A.shadow_closest.calls_per_ray",
+     "params": {
+      "rays": 259200.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.03347608024691358,
+      0.03347608024691358,
+      0.03347608024691358
+     ],
+     "unit": "calls",
+     "value": 0.03347608024691358,
+     "within": {
+      "cv": 0.0,
+      "max": 0.03347608024691358,
+      "mean": 0.03347608024691358,
+      "median": 0.03347608024691358,
+      "min": 0.03347608024691358,
+      "n": 1,
+      "p10": 0.03347608024691358,
+      "p90": 0.03347608024691358
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A.shadow_closest.opaque_calls",
+     "params": {
+      "calls": 8677.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "calls",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_pd.view.hall.wrong",
+     "params": {
+      "ambiguous": 0.0,
+      "rays": 129600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_pd.view.plantA.wrong",
+     "params": {
+      "ambiguous": 33.0,
+      "rays": 129600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_pd.view.plantB.wrong",
+     "params": {
+      "ambiguous": 16.0,
+      "rays": 129600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_pd.view.leaves.wrong",
+     "params": {
+      "ambiguous": 18.0,
+      "rays": 129600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_pd.primary.wrong",
+     "params": {
+      "ambiguous": 67.0,
+      "extra_hit": 0.0,
+      "missed_occluder": 0.0,
+      "rays": 518400.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_pd.shadow.wrong",
+     "params": {
+      "ambiguous": 0.0,
+      "extra_hit": 0.0,
+      "missed_occluder": 0.0,
+      "rays": 259200.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_pd.shadow.opaque_leaks",
+     "params": {
+      "rays": 259200.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_pd.wrong",
+     "params": {
+      "ambiguous": 67.0,
+      "rays": 777600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_pd.disagree_pct",
+     "params": {
+      "rays": 777600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "%",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_pd.primary.ns",
+     "params": {
+      "rays": 129600.0
+     },
+     "run_cv": 0.0028234234986054285,
+     "runs": [
+      0.2864583333333333,
+      0.28581532921810693,
+      0.2874228395061728
+     ],
+     "unit": "ns",
+     "value": 0.2864583333333333,
+     "within": {
+      "cv": 0.02880502899313484,
+      "max": 0.31603652263374477,
+      "mean": 0.28834447873799723,
+      "median": 0.2864583333333333,
+      "min": 0.2816358024691358,
+      "n": 15,
+      "p10": 0.2819573045267489,
+      "p90": 0.293531378600823
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_pd.shadow.ns",
+     "params": {
+      "rays": 64800.0
+     },
+     "run_cv": 0.004194088649025104,
+     "runs": [
+      0.320216049382716,
+      0.31764403292181065,
+      0.3195730452674897
+     ],
+     "unit": "ns",
+     "value": 0.3195730452674897,
+     "within": {
+      "cv": 0.10754342732967843,
+      "max": 0.4552469135802469,
+      "mean": 0.32896090534979416,
+      "median": 0.3195730452674897,
+      "min": 0.3099279835390946,
+      "n": 15,
+      "p10": 0.3118569958847736,
+      "p90": 0.32986111111111105
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_pd.primary.calls_per_ray",
+     "params": {
+      "rays": 518400.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.05646412037037037,
+      0.05646412037037037,
+      0.05646412037037037
+     ],
+     "unit": "calls",
+     "value": 0.05646412037037037,
+     "within": {
+      "cv": 0.0,
+      "max": 0.05646412037037037,
+      "mean": 0.05646412037037037,
+      "median": 0.05646412037037037,
+      "min": 0.05646412037037037,
+      "n": 1,
+      "p10": 0.05646412037037037,
+      "p90": 0.05646412037037037
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_pd.primary.opaque_calls",
+     "params": {
+      "calls": 29271.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "calls",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_pd.shadow_closest.calls_per_ray",
+     "params": {
+      "rays": 259200.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.03347608024691358,
+      0.03347608024691358,
+      0.03347608024691358
+     ],
+     "unit": "calls",
+     "value": 0.03347608024691358,
+     "within": {
+      "cv": 0.0,
+      "max": 0.03347608024691358,
+      "mean": 0.03347608024691358,
+      "median": 0.03347608024691358,
+      "min": 0.03347608024691358,
+      "n": 1,
+      "p10": 0.03347608024691358,
+      "p90": 0.03347608024691358
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_pd.shadow_closest.opaque_calls",
+     "params": {
+      "calls": 8677.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "calls",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_all.view.hall.wrong",
+     "params": {
+      "ambiguous": 0.0,
+      "rays": 129600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_all.view.plantA.wrong",
+     "params": {
+      "ambiguous": 33.0,
+      "rays": 129600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_all.view.plantB.wrong",
+     "params": {
+      "ambiguous": 16.0,
+      "rays": 129600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_all.view.leaves.wrong",
+     "params": {
+      "ambiguous": 18.0,
+      "rays": 129600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_all.primary.wrong",
+     "params": {
+      "ambiguous": 67.0,
+      "extra_hit": 0.0,
+      "missed_occluder": 0.0,
+      "rays": 518400.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_all.shadow.wrong",
+     "params": {
+      "ambiguous": 0.0,
+      "extra_hit": 0.0,
+      "missed_occluder": 0.0,
+      "rays": 259200.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_all.shadow.opaque_leaks",
+     "params": {
+      "rays": 259200.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_all.wrong",
+     "params": {
+      "ambiguous": 67.0,
+      "rays": 777600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_all.disagree_pct",
+     "params": {
+      "rays": 777600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "%",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_all.primary.ns",
+     "params": {
+      "rays": 129600.0
+     },
+     "run_cv": 0.001187149285516594,
+     "runs": [
+      0.3131430041152263,
+      0.3125,
+      0.3125
+     ],
+     "unit": "ns",
+     "value": 0.3125,
+     "within": {
+      "cv": 0.024894337263389212,
+      "max": 0.33822016460905346,
+      "mean": 0.31348593964334703,
+      "median": 0.3125,
+      "min": 0.3060699588477366,
+      "n": 15,
+      "p10": 0.30671296296296297,
+      "p90": 0.31764403292181065
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_all.shadow.ns",
+     "params": {
+      "rays": 64800.0
+     },
+     "run_cv": 0.007393715341959342,
+     "runs": [
+      0.34529320987654316,
+      0.35043724279835387,
+      0.3478652263374485
+     ],
+     "unit": "ns",
+     "value": 0.3478652263374485,
+     "within": {
+      "cv": 0.11466640269406383,
+      "max": 0.5021862139917694,
+      "mean": 0.3570387517146775,
+      "median": 0.3478652263374485,
+      "min": 0.3356481481481481,
+      "n": 15,
+      "p10": 0.33693415637860075,
+      "p90": 0.35943930041152256
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_all.primary.calls_per_ray",
+     "params": {
+      "rays": 518400.0
+     },
+     "run_cv": 6.242709975927743e-06,
+     "runs": [
+      2.1408391203703703,
+      2.140815972222222,
+      2.1408391203703703
+     ],
+     "unit": "calls",
+     "value": 2.1408391203703703,
+     "within": {
+      "cv": 0.0,
+      "max": 2.1408391203703703,
+      "mean": 2.1408391203703703,
+      "median": 2.1408391203703703,
+      "min": 2.1408391203703703,
+      "n": 1,
+      "p10": 2.1408391203703703,
+      "p90": 2.1408391203703703
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_all.primary.opaque_calls",
+     "params": {
+      "calls": 1109811.0
+     },
+     "run_cv": 6.4118208280663565e-06,
+     "runs": [
+      1080540.0,
+      1080528.0,
+      1080540.0
+     ],
+     "unit": "calls",
+     "value": 1080540.0,
+     "within": {
+      "cv": 0.0,
+      "max": 1080540.0,
+      "mean": 1080540.0,
+      "median": 1080540.0,
+      "min": 1080540.0,
+      "n": 1,
+      "p10": 1080540.0,
+      "p90": 1080540.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_all.shadow_closest.calls_per_ray",
+     "params": {
+      "rays": 259200.0
+     },
+     "run_cv": 1.773034499997831e-06,
+     "runs": [
+      1.256280864197531,
+      1.2562847222222222,
+      1.256280864197531
+     ],
+     "unit": "calls",
+     "value": 1.256280864197531,
+     "within": {
+      "cv": 0.0,
+      "max": 1.256280864197531,
+      "mean": 1.256280864197531,
+      "median": 1.256280864197531,
+      "min": 1.256280864197531,
+      "n": 1,
+      "p10": 1.256280864197531,
+      "p90": 1.256280864197531
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A_all.shadow_closest.opaque_calls",
+     "params": {
+      "calls": 325628.0
+     },
+     "run_cv": 1.8215738773448683e-06,
+     "runs": [
+      316951.0,
+      316952.0,
+      316951.0
+     ],
+     "unit": "calls",
+     "value": 316951.0,
+     "within": {
+      "cv": 0.0,
+      "max": 316951.0,
+      "mean": 316951.0,
+      "median": 316951.0,
+      "min": 316951.0,
+      "n": 1,
+      "p10": 316951.0,
+      "p90": 316951.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.C.view.hall.wrong",
+     "params": {
+      "ambiguous": 0.0,
+      "rays": 129600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.C.view.plantA.wrong",
+     "params": {
+      "ambiguous": 33.0,
+      "rays": 129600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      1448.0,
+      1448.0,
+      1448.0
+     ],
+     "unit": "rays",
+     "value": 1448.0,
+     "within": {
+      "cv": 0.0,
+      "max": 1448.0,
+      "mean": 1448.0,
+      "median": 1448.0,
+      "min": 1448.0,
+      "n": 1,
+      "p10": 1448.0,
+      "p90": 1448.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.C.view.plantB.wrong",
+     "params": {
+      "ambiguous": 16.0,
+      "rays": 129600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      1452.0,
+      1452.0,
+      1452.0
+     ],
+     "unit": "rays",
+     "value": 1452.0,
+     "within": {
+      "cv": 0.0,
+      "max": 1452.0,
+      "mean": 1452.0,
+      "median": 1452.0,
+      "min": 1452.0,
+      "n": 1,
+      "p10": 1452.0,
+      "p90": 1452.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.C.view.leaves.wrong",
+     "params": {
+      "ambiguous": 18.0,
+      "rays": 129600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      1351.0,
+      1351.0,
+      1351.0
+     ],
+     "unit": "rays",
+     "value": 1351.0,
+     "within": {
+      "cv": 0.0,
+      "max": 1351.0,
+      "mean": 1351.0,
+      "median": 1351.0,
+      "min": 1351.0,
+      "n": 1,
+      "p10": 1351.0,
+      "p90": 1351.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.C.primary.wrong",
+     "params": {
+      "ambiguous": 67.0,
+      "extra_hit": 0.0,
+      "missed_occluder": 0.0,
+      "rays": 518400.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      4251.0,
+      4251.0,
+      4251.0
+     ],
+     "unit": "rays",
+     "value": 4251.0,
+     "within": {
+      "cv": 0.0,
+      "max": 4251.0,
+      "mean": 4251.0,
+      "median": 4251.0,
+      "min": 4251.0,
+      "n": 1,
+      "p10": 4251.0,
+      "p90": 4251.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.C.shadow.wrong",
+     "params": {
+      "ambiguous": 0.0,
+      "extra_hit": 68.0,
+      "missed_occluder": 0.0,
+      "rays": 259200.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      68.0,
+      68.0,
+      68.0
+     ],
+     "unit": "rays",
+     "value": 68.0,
+     "within": {
+      "cv": 0.0,
+      "max": 68.0,
+      "mean": 68.0,
+      "median": 68.0,
+      "min": 68.0,
+      "n": 1,
+      "p10": 68.0,
+      "p90": 68.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.C.shadow.opaque_leaks",
+     "params": {
+      "rays": 259200.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.C.wrong",
+     "params": {
+      "ambiguous": 67.0,
+      "rays": 777600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      4319.0,
+      4319.0,
+      4319.0
+     ],
+     "unit": "rays",
+     "value": 4319.0,
+     "within": {
+      "cv": 0.0,
+      "max": 4319.0,
+      "mean": 4319.0,
+      "median": 4319.0,
+      "min": 4319.0,
+      "n": 1,
+      "p10": 4319.0,
+      "p90": 4319.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.C.disagree_pct",
+     "params": {
+      "rays": 777600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.5554269547325102,
+      0.5554269547325102,
+      0.5554269547325102
+     ],
+     "unit": "%",
+     "value": 0.5554269547325102,
+     "within": {
+      "cv": 0.0,
+      "max": 0.5554269547325102,
+      "mean": 0.5554269547325102,
+      "median": 0.5554269547325102,
+      "min": 0.5554269547325102,
+      "n": 1,
+      "p10": 0.5554269547325102,
+      "p90": 0.5554269547325102
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.C.primary.ns",
+     "params": {
+      "rays": 129600.0
+     },
+     "run_cv": 0.003367003367003334,
+     "runs": [
+      0.2854938271604938,
+      0.2864583333333333,
+      0.2874228395061728
+     ],
+     "unit": "ns",
+     "value": 0.2864583333333333,
+     "within": {
+      "cv": 0.02431207598962758,
+      "max": 0.3112139917695472,
+      "mean": 0.2880015432098765,
+      "median": 0.2864583333333333,
+      "min": 0.2819573045267489,
+      "n": 15,
+      "p10": 0.2826003086419753,
+      "p90": 0.29224537037037035
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.C.shadow.ns",
+     "params": {
+      "rays": 64800.0
+     },
+     "run_cv": 0.006109979633401162,
+     "runs": [
+      0.31571502057613166,
+      0.31764403292181065,
+      0.31378600823045266
+     ],
+     "unit": "ns",
+     "value": 0.31571502057613166,
+     "within": {
+      "cv": 0.08182877584914548,
+      "max": 0.4102366255144032,
+      "mean": 0.32025891632373116,
+      "median": 0.31571502057613166,
+      "min": 0.2957818930041151,
+      "n": 15,
+      "p10": 0.30156893004115215,
+      "p90": 0.324074074074074
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A.shifted_cutoff_disagree_pct",
+     "params": {
+      "rays": 518400.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.19675925925925927,
+      0.19675925925925927,
+      0.19675925925925927
+     ],
+     "unit": "%",
+     "value": 0.19675925925925927,
+     "within": {
+      "cv": 0.0,
+      "max": 0.19675925925925927,
+      "mean": 0.19675925925925927,
+      "median": 0.19675925925925927,
+      "min": 0.19675925925925927,
+      "n": 1,
+      "p10": 0.19675925925925927,
+      "p90": 0.19675925925925927
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.sponza.A.lod2.wrong",
+     "params": {
+      "ambiguous": 24.0,
+      "rays": 129600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "unit": "rays",
+     "value": 0.0,
+     "within": {
+      "cv": 0.0,
+      "max": 0.0,
+      "mean": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p10": 0.0,
+      "p90": 0.0
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.lod_mismatch_pct.plantA",
+     "params": {
+      "involved_rays": 2311.0,
+      "rays": 129600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      23.150151449588922,
+      23.150151449588922,
+      23.150151449588922
+     ],
+     "unit": "%",
+     "value": 23.150151449588922,
+     "within": {
+      "cv": 0.0,
+      "max": 23.150151449588922,
+      "mean": 23.150151449588922,
+      "median": 23.150151449588922,
+      "min": 23.150151449588922,
+      "n": 1,
+      "p10": 23.150151449588922,
+      "p90": 23.150151449588922
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.lod_mismatch_pct.plantB",
+     "params": {
+      "involved_rays": 1993.0,
+      "rays": 129600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      31.51028600100351,
+      31.51028600100351,
+      31.51028600100351
+     ],
+     "unit": "%",
+     "value": 31.51028600100351,
+     "within": {
+      "cv": 0.0,
+      "max": 31.51028600100351,
+      "mean": 31.51028600100351,
+      "median": 31.51028600100351,
+      "min": 31.51028600100351,
+      "n": 1,
+      "p10": 31.51028600100351,
+      "p90": 31.51028600100351
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.lod_mismatch_pct.leaves",
+     "params": {
+      "involved_rays": 2611.0,
+      "rays": 129600.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      22.328609728073534,
+      22.328609728073534,
+      22.328609728073534
+     ],
+     "unit": "%",
+     "value": 22.328609728073534,
+     "within": {
+      "cv": 0.0,
+      "max": 22.328609728073534,
+      "mean": 22.328609728073534,
+      "median": 22.328609728073534,
+      "min": 22.328609728073534,
+      "n": 1,
+      "p10": 22.328609728073534,
+      "p90": 22.328609728073534
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.lod_mismatch_pct",
+     "params": {
+      "changed": 1746.0,
+      "involved_rays": 6915.0,
+      "rays": 388800.0
+     },
+     "run_cv": 1.7232718061590352e-16,
+     "runs": [
+      25.24945770065076,
+      25.24945770065076,
+      25.24945770065076
+     ],
+     "unit": "%",
+     "value": 25.24945770065076,
+     "within": {
+      "cv": 0.0,
+      "max": 25.24945770065076,
+      "mean": 25.24945770065076,
+      "median": 25.24945770065076,
+      "min": 25.24945770065076,
+      "n": 1,
+      "p10": 25.24945770065076,
+      "p90": 25.24945770065076
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.lod0_vs_raster_pct",
+     "params": {
+      "adds": 798.0,
+      "involved_rays": 6915.0,
+      "kills": 353.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      16.644974692697033,
+      16.644974692697033,
+      16.644974692697033
+     ],
+     "unit": "%",
+     "value": 16.644974692697033,
+     "within": {
+      "cv": 0.0,
+      "max": 16.644974692697033,
+      "mean": 16.644974692697033,
+      "median": 16.644974692697033,
+      "min": 16.644974692697033,
+      "n": 1,
+      "p10": 16.644974692697033,
+      "p90": 16.644974692697033
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.cone_vs_raster_pct",
+     "params": {
+      "adds": 676.0,
+      "involved_rays": 6915.0,
+      "kills": 219.0
+     },
+     "run_cv": 1.680912052264623e-16,
+     "runs": [
+      12.94287780187997,
+      12.94287780187997,
+      12.94287780187997
+     ],
+     "unit": "%",
+     "value": 12.94287780187997,
+     "within": {
+      "cv": 0.0,
+      "max": 12.94287780187997,
+      "mean": 12.94287780187997,
+      "median": 12.94287780187997,
+      "min": 12.94287780187997,
+      "n": 1,
+      "p10": 12.94287780187997,
+      "p90": 12.94287780187997
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.lod.mean_raster",
+     "params": {
+      "samples": 6401.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      3.667099771264079,
+      3.667099771264079,
+      3.667099771264079
+     ],
+     "unit": "lod",
+     "value": 3.667099771264079,
+     "within": {
+      "cv": 0.0,
+      "max": 3.667099771264079,
+      "mean": 3.667099771264079,
+      "median": 3.667099771264079,
+      "min": 3.667099771264079,
+      "n": 1,
+      "p10": 3.667099771264079,
+      "p90": 3.667099771264079
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.lod.mean_cone",
+     "params": {
+      "samples": 6401.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      4.363054787245355,
+      4.363054787245355,
+      4.363054787245355
+     ],
+     "unit": "lod",
+     "value": 4.363054787245355,
+     "within": {
+      "cv": 0.0,
+      "max": 4.363054787245355,
+      "mean": 4.363054787245355,
+      "median": 4.363054787245355,
+      "min": 4.363054787245355,
+      "n": 1,
+      "p10": 4.363054787245355,
+      "p90": 4.363054787245355
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.shadow.blocked_pct.opaque_only",
+     "params": {
+      "rays": 194400.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      91.89300411522635,
+      91.89300411522635,
+      91.89300411522635
+     ],
+     "unit": "%",
+     "value": 91.89300411522635,
+     "within": {
+      "cv": 0.0,
+      "max": 91.89300411522635,
+      "mean": 91.89300411522635,
+      "median": 91.89300411522635,
+      "min": 91.89300411522635,
+      "n": 1,
+      "p10": 91.89300411522635,
+      "p90": 91.89300411522635
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.shadow.blocked_pct.lod0",
+     "params": {
+      "rays": 194400.0
+     },
+     "run_cv": 1.8920871738913174e-16,
+     "runs": [
+      91.9866255144033,
+      91.9866255144033,
+      91.9866255144033
+     ],
+     "unit": "%",
+     "value": 91.9866255144033,
+     "within": {
+      "cv": 0.0,
+      "max": 91.9866255144033,
+      "mean": 91.9866255144033,
+      "median": 91.9866255144033,
+      "min": 91.9866255144033,
+      "n": 1,
+      "p10": 91.9866255144033,
+      "p90": 91.9866255144033
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.shadow.blocked_pct.cone",
+     "params": {
+      "rays": 194400.0
+     },
+     "run_cv": 1.8921929882199924e-16,
+     "runs": [
+      91.9814814814815,
+      91.9814814814815,
+      91.9814814814815
+     ],
+     "unit": "%",
+     "value": 91.9814814814815,
+     "within": {
+      "cv": 0.0,
+      "max": 91.9814814814815,
+      "mean": 91.9814814814815,
+      "median": 91.9814814814815,
+      "min": 91.9814814814815,
+      "n": 1,
+      "p10": 91.9814814814815,
+      "p90": 91.9814814814815
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.shadow.lod_mismatch_pct",
+     "params": {
+      "changed": 38.0,
+      "rays": 194400.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.01954732510288066,
+      0.01954732510288066,
+      0.01954732510288066
+     ],
+     "unit": "%",
+     "value": 0.01954732510288066,
+     "within": {
+      "cv": 0.0,
+      "max": 0.01954732510288066,
+      "mean": 0.01954732510288066,
+      "median": 0.01954732510288066,
+      "min": 0.01954732510288066,
+      "n": 1,
+      "p10": 0.01954732510288066,
+      "p90": 0.01954732510288066
+     }
+    },
+    {
+     "higher_is_better": false,
+     "name": "alpha.shadow.masked_occluded_pct",
+     "params": {
+      "rays": 194400.0
+     },
+     "run_cv": 0.0,
+     "runs": [
+      0.09362139917695474,
+      0.09362139917695474,
+      0.09362139917695474
+     ],
+     "unit": "%",
+     "value": 0.09362139917695474,
+     "within": {
+      "cv": 0.0,
+      "max": 0.09362139917695474,
+      "mean": 0.09362139917695474,
+      "median": 0.09362139917695474,
+      "min": 0.09362139917695474,
+      "n": 1,
+      "p10": 0.09362139917695474,
+      "p90": 0.09362139917695474
+     }
+    }
+   ],
+   "name": "alpha_rt",
+   "negative_control": {
+    "detail": "strategies exact vs the CPU alpha reference: yes; control C (all opaque) disagrees on 124721 synthetic rays and 4319 Sponza rays (must be > 0); shifted-cutoff reference disagrees on 0.196759% of Sponza rays (must be > 0)",
+    "status": "pass"
+   },
+   "notes": "synthetic.B: skipped (needs the M5 per-material table path; ctx.apple10() is false, Apple9 uses A only); synthetic.B_all: skipped (needs the M5 per-material table path; ctx.apple10() is false, Apple9 uses A only); Sponza alpha-masked materials: [material 0 cutoff 0.50 baseColor.a 1.00 tex 4 1024x1024: 2 instances, 2 meshes, 31436 triangles] [material 1 cutoff 0.50 baseColor.a 1.00 tex 7 1024x1024: 8 instances, 8 meshes, 3472 triangles] [material 20 cutoff 0.50 baseColor.a 1.00 tex 58 1024x1024: 4 instances, 4 meshes, 32 triangles]; sponza.B: skipped (needs the M5 per-material table path; ctx.apple10() is false, Apple9 uses A only); sponza.B_all: skipped (needs the M5 per-material table path; ctx.apple10() is false, Apple9 uses A only); --force-family apple9 / Apple9 device: only the portable strategies run (A, A_pd, A_all, C); B and B_all (per-material table slots, M5 hardware table indexing) are skipped. This verifies the fallback path of the software choice; the M5 hardware still performs the table indexing.; Intersection function resources are bound with MTL::IntersectionFunctionTable::setBuffer (Metal 3 style) and read through [[buffer(n)]] in the functions; textures are a bindless buffer of MTL::ResourceID. CPU mips are built with a 2x2 box filter and uploaded level by level (the engine uses generateMipmaps: same LOD 0, mip contents may differ slightly).",
+   "seconds": 21.82601829166338,
+   "status": "ok",
+   "title": "Alpha test in RT: intersection function strategies (generic / per-material / opaque) vs the CPU alpha rule, LOD coherence with the raster"
+  }
+ ],
+ "machine": {
+  "battery_percent": 80,
+  "chip": "Apple M5 Max",
+  "cpu_level_names": [
+   "Super",
+   "Performance"
+  ],
+  "cpu_perflevel0_cores": 6,
+  "cpu_perflevel1_cores": 12,
+  "gpu_cores": 40,
+  "gpu_family": "Apple10 (forced Apple9 paths)",
+  "gpu_pstate_mhz": [
+   338.0,
+   486.0,
+   636.0,
+   796.0,
+   888.0,
+   988.0,
+   1084.0,
+   1182.0,
+   1278.0,
+   1374.0,
+   1470.0,
+   1578.0,
+   1620.0
+  ],
+  "memory_bytes": 137438953472,
+  "os": "macOS 27.2",
+  "os_build": "26B5091g",
+  "os_slug": "macos27.2",
+  "power_source": "AC",
+  "sdk": "27.0",
+  "slug": "m5max",
+  "thermal_end": "nominal",
+  "thermal_start": "nominal"
+ },
+ "run": {
+  "args": "--only F9-S5 --force-family apple9 --runs 3 --out /Users/danielsan/Documents/phosphor/bench/results/f9-spike/m5max-macos27.2-s5-apple9.json",
+  "commit": "12e3cea",
+  "date": "2026-10-05T00:48:32+0200",
+  "forced_apple9": true,
+  "quick": false,
+  "runs": 3
+ },
+ "schema": "phosphor-soc-results",
+ "schema_version": 1
+}
