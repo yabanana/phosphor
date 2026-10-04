@@ -159,7 +159,7 @@ MTL::Heap* leakedHeap(Context& ctx, u64 bytes) {
     MTL::Heap* heap = ctx.heap(hd);
     hd->release();
     if (!heap) throw soc::BenchError("placement heap failed (" + std::to_string(bytes) + " B)");
-    heap->retain();
+    if (!std::getenv("F9_S1_RELEASE_HEAPS")) heap->retain();
     return heap;
 }
 

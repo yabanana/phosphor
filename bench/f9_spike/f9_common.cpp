@@ -467,6 +467,12 @@ MTL::AccelerationStructure* newAccelerationStructure(soc::Context& ctx, u64 size
         MTL::Heap* heap = ctx.heap(hd);
         hd->release();
         if (!heap) throw soc::BenchError("placement heap for an acceleration structure failed");
+        // Leaked on purpose: the harness reuses its command buffer, and under
+        // MTL_SHADER_VALIDATION a reused command buffer that saw a released
+        // heap crashes at its next commit (F9-S1e; the engine rebuilds its
+        // command buffers when a heap leaves residency, MetalContext::
+        // refreshCommandBuffer).
+        heap->retain();
         as = heap->newAccelerationStructure(sa.size, 0);
     }
     if (!as) throw soc::BenchError("newAccelerationStructure(" + std::to_string(size) + ") failed");
