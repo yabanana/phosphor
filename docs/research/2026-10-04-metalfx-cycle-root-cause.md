@@ -145,6 +145,16 @@ distruzione dello scaler. I tempi in-process coincidono con il direct
 storico di PR #15 (2,1503 / 12,0212 / 1,2743 ms, altra sessione) entro la
 variabilità tra sessioni.
 
+## Regressione nativa
+
+`tools/f6_check.sh build build/release --quick`: 37 controlli ok e 3 FAIL nel
+percorso mesh (visual check two-phase: 3/8/154 pixel; overflow forzato
+bench 7: 9 pixel; bench 8: 190.241 pixel, delta massimo 170). Lo stesso
+comando su `main` `cc38443`, con gli stessi riferimenti F6 del 2026-10-02,
+dà **conteggi identici**: residuo deterministico preesistente, non
+attribuibile a questo lavoro e non spiegato qui. Resta aperto e separato
+(log: `build/f84-cycle/f6-check-quick*.out`).
+
 ## Limiti
 
 - La firma (un riferimento interno esatto) è misurata su questo runtime. Un
