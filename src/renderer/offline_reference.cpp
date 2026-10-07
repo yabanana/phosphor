@@ -66,7 +66,7 @@ ReferenceExportResult validateReferenceScene(const OfflineReferenceScene& s) {
         const float det=m[0]*(m[5]*m[10]-m[9]*m[6])-m[4]*(m[1]*m[10]-m[9]*m[2])+m[8]*(m[1]*m[6]-m[5]*m[2]);
         if(std::abs(det)<1e-12f || m[3]!=0||m[7]!=0||m[11]!=0||m[15]!=1)
             return fail("noninvertible or nonaffine reference world matrix");
-        if(i.flags&1u) ++live;
+        if(i.flags&3u) ++live; // Visible OR shadow-only caster: preserve ray roles.
     }
     for(const auto& l:s.lights) if(l.type>LIGHT_SPOT || !finite(l.position,3)||!finite(l.direction,3)||
         !finite(l.color,3)||!std::isfinite(l.intensity)||!std::isfinite(l.range)||!std::isfinite(l.innerCone)||
@@ -115,6 +115,30 @@ ReferenceExportResult exportOfflineReference(const OfflineReferenceScene& s,cons
         for(u32 k=0;k<mesh.indexCount;k+=3) {out.put(char(3));for(u32 v=0;v<3;++v) little(out,s.indices[mesh.indexOffset+k+v]);}
         if(!out) return fail("failed reference PLY write");
     }
+    for(size_t k=0;k<s.sampledLights.size();++k) {
+        const auto& l=s.sampledLights[k];
+        // A valid material index is copied only from actual mesh-emitter metadata
+        // by the snapshot adapter. Standalone API triangles retain INVALID.
+        if(l.type!=6u||l.materialIndex<s.materials.size())continue;
+        float points[3][3]{};
+        for(u32 axis=0;axis<3;++axis){points[0][axis]=l.position[axis];
+            points[1][axis]=l.position[axis]+l.axisU[axis];points[2][axis]=l.position[axis]+l.axisV[axis];}
+        // DI_LIGHT_MIRRORED chooses the original material emission side.
+        if(l.flags&4u)for(u32 axis=0;axis<3;++axis)std::swap(points[1][axis],points[2][axis]);
+        const float u[3]{points[1][0]-points[0][0],points[1][1]-points[0][1],points[1][2]-points[0][2]};
+        const float v[3]{points[2][0]-points[0][0],points[2][1]-points[0][1],points[2][2]-points[0][2]};
+        float n[3]{u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]};
+        const float length=std::sqrt(norm2(n));if(!(length>1e-12f))return fail("degenerate standalone triangle emitter");
+        for(float& value:n)value/=length;
+        std::ofstream triangle(staging/("light_triangle_"+std::to_string(k)+".ply"),std::ios::binary);
+        if(!triangle)return fail("cannot open standalone triangle emitter PLY");
+        triangle<<"ply\nformat binary_little_endian 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\n"
+            <<"property float nx\nproperty float ny\nproperty float nz\nelement face 1\nproperty list uchar uint vertex_indices\nend_header\n";
+        for(const auto& p:points){for(float value:p)little(triangle,std::bit_cast<u32>(value));
+            for(float value:n)little(triangle,std::bit_cast<u32>(value));}
+        triangle.put(char(3));for(u32 i=0;i<3;++i)little(triangle,i);
+        if(!triangle)return fail("failed standalone triangle emitter PLY write");
+    }
     for(const auto& t:s.textures) {
         std::vector<float> rgb(size_t(t.width)*t.height*3),alpha(rgb.size());
         for(size_t pixel=0;pixel<size_t(t.width)*t.height;++pixel) for(size_t c=0;c<3;++c) {
@@ -150,7 +174,7 @@ ReferenceExportResult exportOfflineReference(const OfflineReferenceScene& s,cons
     out<<"],\"meshes\":[";
     for(size_t k=0;k<s.meshes.size();++k) {if(k) out<<',';out<<"\"mesh_"<<k<<".ply\"";}
     out<<"],\"instances\":[";bool first=true;
-    for(size_t k=0;k<s.worldInstances.size();++k) {const auto& i=s.worldInstances[k];if(!(i.flags&INSTANCE_FLAG_VALID)||!(i.flags&1u)) continue;
+    for(size_t k=0;k<s.worldInstances.size();++k) {const auto& i=s.worldInstances[k];if(!(i.flags&INSTANCE_FLAG_VALID)||!(i.flags&3u)) continue;
         if(!first) out<<',';first=false;
         out<<"{\"slot\":"<<k<<",\"generation\":"<<i.generation<<",\"flags\":"<<i.flags<<",\"mesh\":"<<i.meshIndex
            <<",\"material\":"<<i.materialIndex<<",\"world\":";numberArray(out,i.modelMatrix,16);out<<'}';}
@@ -165,7 +189,9 @@ ReferenceExportResult exportOfflineReference(const OfflineReferenceScene& s,cons
            <<",\"position\":";numberArray(out,l.position,3);out<<",\"u\":";numberArray(out,l.axisU,3);out<<",\"v\":";numberArray(out,l.axisV,3);
         out<<",\"emission\":";numberArray(out,l.emission,3);out<<",\"radius\":"<<l.radius<<",\"range\":"<<l.range
            <<",\"inner\":"<<l.innerCone<<",\"outer\":"<<l.outerCone<<",\"material\":"<<l.materialIndex
-           <<",\"uv0\":";numberArray(out,l.uv0,2);out<<",\"uv1\":";numberArray(out,l.uv1,2);out<<",\"uv2\":";numberArray(out,l.uv2,2);out<<'}';}
+           <<",\"uv0\":";numberArray(out,l.uv0,2);out<<",\"uv1\":";numberArray(out,l.uv1,2);out<<",\"uv2\":";numberArray(out,l.uv2,2);
+        if(l.type==6u&&l.materialIndex>=s.materials.size())out<<",\"geometry\":\"light_triangle_"<<k<<".ply\"";
+        out<<'}';}
     out<<"]}\n";out.flush();
     if(!out) return fail("failed reference manifest write");out.close();
     std::filesystem::rename(staging,destination,ec);

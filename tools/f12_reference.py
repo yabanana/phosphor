@@ -14,9 +14,42 @@ import hashlib
 import json
 import math
 import pathlib
+import struct
 import sys
 
 INVALID = 0xFFFFFFFF
+
+def float32(value):
+    """Round arithmetic as the engine's float factor, not Python double."""
+    return struct.unpack("<f",struct.pack("<f",float(value)))[0]
+
+
+def material_mask_accepts(material,filtered_alpha_half):
+    cutoff=float32(material["alpha_cutoff"])
+    if cutoff<=0:
+        return True
+    alpha=float32(float32(material["base"][3])*float(filtered_alpha_half))
+    return math.isfinite(alpha) and alpha>=cutoff
+
+
+def masked_emission(material,filtered_emission_half,filtered_alpha_half):
+    """Area emission evaluates its own MASK; BSDF opacity does not mask Le."""
+    if not material_mask_accepts(material,filtered_alpha_half):
+        return (0.0,0.0,0.0)
+    return tuple(float32(float32(material["emissive"][k])*float(filtered_emission_half[k])) for k in range(3))
+
+
+def validate_reference_roles(data):
+    # Metal visible/indirect bit1 and shadow-caster bit2 are independent. Standard
+    # Mitsuba path rays share the same shape intersection domain. A role filter
+    # is not implemented, so NEVER override this non-equivalence with model-diff.
+    for instance in data["instances"]:
+        if int(instance["flags"])&3 != 3:
+            raise ValueError("unsupported non-equivalent visibility/shadow roles: standard Mitsuba cannot compare visible-only or caster-only instances")
+
+
+def extracted_mesh_triangle(light,material_count):
+    return light["type"]==6 and 0<=int(light.get("material",INVALID))<material_count
 
 
 def np_module():
@@ -59,8 +92,15 @@ def snapshot(path):
     data = json.loads((root / "scene.json").read_text())
     if data.get("schema") != 1 or data.get("linear") is not True:
         raise ValueError("unsupported or non-linear F12 snapshot")
+    validate_reference_roles(data)
     # Imported names are data, not instructions; reject traversal/symlink escapes.
-    for name in data["meshes"] + [t[k] for t in data["textures"] for k in ("rgb", "alpha")]:
+    standalone=[]
+    for light in data["sampled_lights"]:
+        if light["type"]==6 and not extracted_mesh_triangle(light,len(data["materials"])):
+            if not light.get("geometry"):
+                raise ValueError("standalone triangle emitter has no exact PLY geometry snapshot")
+            standalone.append(light["geometry"])
+    for name in data["meshes"] + standalone + [t[k] for t in data["textures"] for k in ("rgb", "alpha")]:
         if not (root / name).resolve().is_relative_to(root):
             raise ValueError("snapshot resource escaped its directory")
         if not (root / name).is_file():
@@ -94,8 +134,6 @@ def build_scene(root, data, material_model, allow_differences):
         differences.append("Mitsuba spotlight angular interpolation differs from engine smoothstep")
     if any(l["range"] > 0 for l in data["sampled_lights"]):
         differences.append("Mitsuba area/punctual emitter does not use sampled-light range window")
-    if any(m["flags"] & 1 and any(e > 0 for e in m["emissive"]) for m in data["materials"]):
-        differences.append("Mitsuba area emission is one-sided; engine double-sided emissive must be adapted")
     if differences and not allow_differences:
         raise ValueError("reference model differences require explicit experimental override: " + "; ".join(differences))
 
@@ -128,10 +166,10 @@ def build_scene(root, data, material_model, allow_differences):
             if self.semantic == "metallic": return np.full(3, metallic)
             if self.semantic == "roughness": return np.full(3, min(1.0, max(0.04, m["roughness"] * float(mr[1]))))
             if self.semantic == "emissive":
-                return np.asarray(m["emissive"], dtype=np.float32) * bilinear(m["textures"][4], uv, [1,1,1])
+                return np.asarray(masked_emission(m,bilinear(m["textures"][4],uv,[1,1,1]),
+                    float(bilinear(m["textures"][0],uv,[1,1,1],alpha=True)[0])),dtype=np.float32)
             if self.semantic == "mask":
-                alpha = m["base"][3] * float(bilinear(m["textures"][0], uv, [1,1,1], alpha=True)[0])
-                return np.full(3, float(alpha >= m["alpha_cutoff"]))
+                return np.full(3,float(material_mask_accepts(m,float(bilinear(m["textures"][0],uv,[1,1,1],alpha=True)[0]))))
             if self.semantic == "normal":
                 normal = bilinear(m["textures"][1], uv, [0.5,0.5,1]) * 2-1
                 normal[:2] *= m["normal_scale"]
@@ -190,7 +228,8 @@ def build_scene(root, data, material_model, allow_differences):
                  "face_normals": material_model == "diffuse",
                  "bsdf": {"type": "ref", "id": f"material_{material_id}"}}
         if any(value > 0 for value in material["emissive"]):
-            shape["emitter"] = {"type": "area", "radiance": tex(material_id, "emissive")}
+            shape["emitter"] = {"type": "area", "radiance": tex(material_id, "emissive"),
+                                "twosided":bool(material["flags"]&1),"sample_texture":False}
         scene[f"instance_{instance['slot']}"] = shape
     # Analytic suns are not duplicated by the F11 sampled list. When the sampled
     # list exists it owns punctual/area emitters, as in the GI shader bridge.
@@ -229,11 +268,16 @@ def build_scene(root, data, material_model, allow_differences):
         scene[f"analytic_light_{index}"] = emitter
     for index, light in enumerate(data["sampled_lights"]):
         t = light["type"]
-        if t == 6:
+        if extracted_mesh_triangle(light,len(data["materials"])):
             # Mesh emissive exists already, with exact textures; sampling list
             # triangles are distributions over THAT geometry, never extra lights.
             continue
-        if t in (1,2):
+        if t == 6:
+            item={"type":"ply","filename":str(root/light["geometry"]),"face_normals":True,
+                  "bsdf":{"type":"diffuse","reflectance":{"type":"rgb","value":[0,0,0]}},
+                  "emitter":{"type":"area","radiance":{"type":"rgb","value":light["emission"]},
+                             "twosided":bool(light["flags"]&1),"sample_texture":False}}
+        elif t in (1,2):
             p = np.asarray(light["position"]);d = np.asarray(light["u"])
             if t == 1:
                 item = {"type": "point", "position": p.tolist(), "intensity": {"type": "rgb","value": light["emission"]}}
@@ -252,7 +296,8 @@ def build_scene(root, data, material_model, allow_differences):
                     u = u*light["radius"];v = v*light["radius"]
                 matrix = np.eye(4);matrix[:3,0]=u;matrix[:3,1]=v;matrix[:3,2]=normal;matrix[:3,3]=p
                 item = {"type": "rectangle" if t == 3 else "disk", "to_world": Transform(matrix)}
-            item["emitter"] = {"type": "area", "radiance": {"type":"rgb","value":light["emission"]}}
+            item["emitter"] = {"type": "area", "radiance": {"type":"rgb","value":light["emission"]},
+                               "twosided":bool(light["flags"]&1),"sample_texture":False}
             item["bsdf"] = {"type": "diffuse", "reflectance": {"type":"rgb","value":[0,0,0]}}
         scene[f"sampled_light_{index}"] = item
     if any(v > 0 for v in data["sky"]):
@@ -281,8 +326,8 @@ def metric(reference, candidate, region=None):
 
 
 def render(args):
-    np = np_module()
     root,data = snapshot(args.snapshot)
+    np = np_module()
     mi,scene_dict,differences = build_scene(root,data,args.material_model,args.allow_model_differences)
     out = pathlib.Path(args.output).resolve()
     out.mkdir(parents=True,exist_ok=False)
@@ -311,6 +356,7 @@ def render(args):
               "snapshot_sha256":scene_digest(root),"renderer":"Mitsuba3","renderer_version":mi.__version__,
               "variant":"scalar_rgb","seed":args.seed,"material_model":args.material_model,"signal":args.signal,
               "max_depth":args.max_depth,"model_differences":differences,"records":records,
+              "roles_equivalent":True,"emission_mask_after_lod0_filter":True,"standalone_triangle_geometry":True,
               "threshold_relative_convergence_rmse":args.max_convergence_rmse,"converged":converged,
               "validation":"renderer/plugin/UV/units implementation still requires tester validation"}
     (out/"reference_report.json").write_text(json.dumps(report,indent=2)+"\n")
@@ -319,6 +365,14 @@ def render(args):
 
 
 def compare(args):
+    provenance=pathlib.Path(args.reference).resolve().parent/"reference_report.json"
+    if not provenance.is_file():
+        raise ValueError("strict reference comparison requires reference_report.json provenance to validate ray roles")
+    reference_report=json.loads(provenance.read_text())
+    if reference_report.get("roles_equivalent") is not True:
+        raise ValueError("non-equivalent or unvalidated visibility/shadow roles cannot be compared")
+    if reference_report.get("state")!="REFERENCE_CANDIDATE_CONVERGED" or reference_report.get("model_differences"):
+        raise ValueError("nonaccepted/model-different reference cannot be used for strict comparison")
     reference,candidate = read_pfm(args.reference),read_pfm(args.candidate)
     manifest = json.loads(pathlib.Path(args.regions).read_text())
     if not manifest.get("regions"):
