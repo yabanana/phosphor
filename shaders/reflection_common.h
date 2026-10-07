@@ -2,6 +2,7 @@
 #include "gi_cache_common.h"
 #include "light_visibility.h"
 #include "surface_geometry.h"
+#include "renderer/reflection_probe_storage.h"
 constexpr sampler kReflectionProbeSampler(filter::linear,mip_filter::linear,address::clamp_to_edge);
 inline float4x4 reflectionMatrix(constant float* m){return float4x4(float4(m[0],m[1],m[2],m[3]),float4(m[4],m[5],m[6],m[7]),float4(m[8],m[9],m[10],m[11]),float4(m[12],m[13],m[14],m[15]));}
 inline float3 reflectionConstantVec(constant float* p){return float3(p[0],p[1],p[2]);}

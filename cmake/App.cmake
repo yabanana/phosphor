@@ -65,6 +65,7 @@ set(PHOSPHOR_SHADER_HEADERS
     ${CMAKE_SOURCE_DIR}/src/renderer/metalfx_denoise_fixture_layout.h
     ${CMAKE_SOURCE_DIR}/src/renderer/visibility_layout.h
     ${CMAKE_SOURCE_DIR}/shaders/reflection_common.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/reflection_probe_storage.h
     ${CMAKE_SOURCE_DIR}/shaders/atmosphere_common.h
     ${CMAKE_SOURCE_DIR}/src/renderer/atmosphere_bindings.h
     ${CMAKE_SOURCE_DIR}/src/renderer/volume_noise.h

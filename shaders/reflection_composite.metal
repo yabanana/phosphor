@@ -33,6 +33,14 @@ kernel void reflection_probe_validate(constant GPUProbeFilterParams& p [[buffer(
     if(tid>=p.side*p.side*6u)return;const uint face=tid/(p.side*p.side),pixel=tid%(p.side*p.side);
     const float4 value=faces.read(uint2(pixel%p.side,pixel/p.side),6u*p.cubeIndex+face);
     if(!all(isfinite(value))||any(value.rgb<0)||value.a<0)atomic_fetch_add_explicit(counts+(p.mip==~0u?2u:3u),1u,memory_order_relaxed);
+    else if(p.mip==~0u&&p.diagnosticReadback){
+        // Actual post-storage probe texels, not the authored emission. Positive
+        // float bits are monotonic. Last four diagnostic words are not errors.
+        atomic_fetch_max_explicit(counts+12,as_type<uint>(value.x>0?value.x:0.0f),memory_order_relaxed);
+        atomic_fetch_max_explicit(counts+13,as_type<uint>(value.y>0?value.y:0.0f),memory_order_relaxed);
+        atomic_fetch_max_explicit(counts+14,as_type<uint>(value.z>0?value.z:0.0f),memory_order_relaxed);
+        if(any(value.rgb>65504.0f))atomic_fetch_add_explicit(counts+15,1u,memory_order_relaxed);
+    }
 }
 // Metadata is GPU-published only after every source face and destination mip.
 // The persistent write also preserves cross-frame ordering of the parent/view

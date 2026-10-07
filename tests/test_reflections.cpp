@@ -1,5 +1,6 @@
 #include "renderer/reflection_settings.h"
 #include "renderer/reflection_probe.h"
+#include "renderer/reflection_probe_storage.h"
 #include "renderer/transform_reference.h"
 #include <glm/gtc/type_ptr.hpp>
 #include <cstring>
@@ -158,4 +159,21 @@ TEST_CASE("F13 probe BRDF fit stays physical without concealing invalid weights"
     }
     auto corrupt=shiny();corrupt.albedo[0]=std::numeric_limits<float>::quiet_NaN();
     CHECK_FALSE(std::isfinite(reflectionProbeContribution(corrupt,glm::vec3(1)).x));
+}
+
+TEST_CASE("Probe storage rejects the complete out-of-range physical sum before HALF conversion") {
+    constexpr u32 half=REFLECTION_CAPTURE_HALF;
+    CHECK(reflectionProbeStorageAccepts(65504,128,64,half));
+    CHECK_FALSE(reflectionProbeStorageAccepts(std::nextafter(65504.f,std::numeric_limits<float>::infinity()),128,64,half));
+    // Individually representable emission and scattering can overflow in sum.
+    CHECK(reflectionProbeStorageAccepts(40000,0,0,half));CHECK(reflectionProbeStorageAccepts(30000,0,0,half));
+    CHECK_FALSE(reflectionProbeStorageAccepts(40000+30000,0,0,half));
+    CHECK(reflectionProbeStorageAccepts(40000+30000,0,0,0));
+    CHECK_FALSE(reflectionProbeStorageAccepts(368640,128,64,half));
+    CHECK(reflectionProbeStorageAccepts(368640,128,64,REFLECTION_ENABLE_RT));
+    for(u32 flags:{0u,half}) {
+        CHECK_FALSE(reflectionProbeStorageAccepts(-1,0,0,flags));
+        CHECK_FALSE(reflectionProbeStorageAccepts(std::numeric_limits<float>::infinity(),0,0,flags));
+        CHECK_FALSE(reflectionProbeStorageAccepts(0,std::numeric_limits<float>::quiet_NaN(),0,flags));
+    }
 }

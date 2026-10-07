@@ -2,6 +2,8 @@
 #include "testbench/reflection_validation.h"
 #include "renderer/gpu_scene.h"
 #include "renderer/scene_extract.h"
+#include "renderer/reflection_probe.h"
+#include "renderer/scene_store.h"
 #include "scene/components.h"
 #include "scene/ecs.h"
 #include "null_texture_manager.h"
@@ -73,9 +75,20 @@ TEST_CASE("Opaque wide-emission fixture has an independent constant-radiance ref
     CHECK(m.baseColorFactor==glm::vec4(0,0,0,1));CHECK(m.emissiveTexIndex==INVALID_TEXTURE_INDEX);
     CHECK(m.alphaCutoff==0);CHECK(m.occlusionStrength==1);REQUIRE(m.occlusionTexIndex<textures.uploads.size());
     const std::vector<u8> black{0,0,0,255};CHECK(textures.uploads[m.occlusionTexIndex].rgba==black);
-    FrameScene frame;extractFrameScene(ecs,scene,frame);REQUIRE(frame.instances.size()==1);
+    FrameScene frame;extractFrameScene(ecs,scene,frame);REQUIRE(frame.instances.size()==2);
     for(const auto& light:frame.lights)CHECK(light.intensity==0);
     const auto& t=std::as_const(ecs).getComponent<TransformComponent>(e);const auto camera=f.getDefaultCamera();
+    // Probe bounds consume packed SceneStore slots, including VALID flags;
+    // FrameScene extraction precedes that runtime packing step.
+    SceneStore store;store.sync(ecs,scene);
+    std::vector<float> worlds;for(const auto& instance:store.instances())worlds.insert(worlds.end(),instance.modelMatrix,instance.modelMatrix+16);
+    const auto bounds=reflectionProbeWorldBounds(store.instances(),scene.meshInfos(),worlds);REQUIRE(bounds);
+    const auto capture=(bounds->minimum+bounds->maximum)*.5f;
+    CHECK(capture.z>0.05f);CHECK(capture.z<20); // The emissive front is visible from the probe.
+    for(auto id:f.entities())if(id!=e&&ecs.hasComponent<MeshInstanceComponent>(id)) {
+        const auto& anchor=std::as_const(ecs).getComponent<TransformComponent>(id);
+        CHECK(anchor.position.z>camera.position.z); // Never affects the primary radiance oracle.
+    }
     // Geometric coverage is independent of renderer projection code: a 60deg
     // perspective at z=4 and 16:9 has half-width <4.2, inside the 8m plane.
     CHECK(t.scale==glm::vec3(16,1,16));CHECK(camera.position==glm::vec3(0,0,4));

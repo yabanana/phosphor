@@ -116,5 +116,6 @@ kernel void reflection_capture_rt(constant GPUReflectionParams& p [[buffer(0)]],
     GPURtRay ray{};ray.ox=origin.x;ray.oy=origin.y;ray.oz=origin.z;ray.dx=direction.x;ray.dy=direction.y;ray.dz=direction.z;ray.tmax=p.maxDistance;ray.mask=RT_MASK_INDIRECT;ray.type=RT_PROBE_DIFFUSE;
     RtPayload payload{};const auto hit=rtTrace(ray,as,ift,instances,p.slotCount,payload);uint seed=giHash(tid^p.seed);bool numericError=false;const float3 L=hit.hit?
         reflectionSecondary(hit,direction,as,ift,p,instances,meshes,vertices,indices,materials,textures,lights,sampled,emitters,gi,states,extra,irradiance,moments,seed,numericError):reflectionConstantVec(p.environment);
-    output.write(float4(L,numericError?-1.0f:1.0f),pixel);
+    const bool valid=!numericError&&reflectionProbeStorageAccepts(L.x,L.y,L.z,p.flags);
+    output.write(float4(valid?L:float3(0),valid?1.0f:-1.0f),pixel);
 }

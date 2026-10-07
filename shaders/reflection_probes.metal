@@ -43,7 +43,10 @@ fragment float4 reflection_probe_capture_fs(ProbeVertexOut in [[stage_in]],bool 
     for(uint i=0;i<p.sampledLightCount;++i)for(uint y=0;y<4;++y)for(uint x=0;x<4;++x){DISample sample=diSampleTexturedLight(sampled[i],i,(float2(x,y)+.5f)/4.0f,in.world,emitters,materials,textures);
         if(sample.valid&&sample.pdfArea>0)result+=diBRDF(s,sample)/(16*sample.pdfArea);}
     float3 emission=float3(m.emissive[0],m.emissive[1],m.emissive[2]);if(m.emissiveTex!=INVALID_TEXTURE_INDEX)emission*=float3(half3(textures[m.emissiveTex].tex.sample(kGiMaterialSampler,in.uv,gradient2d(dx,dy)).rgb));
-    result+=emission+reflectionConstantVec(p.environment)*base*(1-s.metallic);const bool finite=all(isfinite(result))&&all(result>=0);
+    result+=emission+reflectionConstantVec(p.environment)*base*(1-s.metallic);
+    // Validate the TOTAL physical sum before the attachment's narrowing store.
+    // Negative alpha survives black repair and disables GPU probe publication.
+    const bool finite=reflectionProbeStorageAccepts(result.x,result.y,result.z,p.storageFlags);
     return float4(finite?result:float3(0),finite?1.0f:-1.0f);
 }
 
@@ -60,7 +63,9 @@ kernel void reflection_probe_prefilter(constant GPUProbeFilterParams& p [[buffer
         const uint count=clamp(p.sampleCount,1u,4096u);
         for(uint i=0;i<count;++i){float u=(float(i)+.5f)/float(count),v=reflectionRadicalInverse(i),c=sqrt((1-u)/(1+(a2-1)*u)),r=sqrt(max(0.0f,1-c*c)),phi=2*M_PI_F*v;
             const float3 h=t*(r*cos(phi))+b*(r*sin(phi))+n*c,l=reflect(-n,h);const float nl=max(0.0f,dot(n,l));L+=raw.sample(kReflectionProbeSampler,l,p.cubeIndex,level(0)).rgb*nl;weight+=nl;}}
-    filtered.write(float4(weight>0?L/weight:float3(0),1),pixel.xy,6*p.cubeIndex+pixel.z);
+    const float3 value=weight>0?L/weight:float3(0);
+    const bool valid=reflectionProbeStorageAccepts(value.x,value.y,value.z,p.storageFlags);
+    filtered.write(float4(valid?value:float3(0),valid?1.0f:-1.0f),pixel.xy,6*p.cubeIndex+pixel.z);
 }
 // Deterministic prefiltered-probe fallback uses split-sum receiver BRDF. It is
 // a separate mode, not a prefilter applied AGAIN to an already GGX sampled ray.

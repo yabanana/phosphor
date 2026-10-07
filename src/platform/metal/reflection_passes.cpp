@@ -7,6 +7,7 @@
 #include "platform/metal/metal_graph_executor.h"
 #include "renderer/reflection_settings.h"
 #include "renderer/reflection_probe.h"
+#include "core/log.h"
 #include "renderer/scene_store.h"
 #include "renderer/gpu_scene.h"
 #include "renderer/cull_math.h"
@@ -83,7 +84,13 @@ struct ReflectionPasses::Impl {
         if(rt){reflectionRT=p.request(lighting::kernel("reflection_rt",true));rtao=p.request(lighting::kernel("ao_rtao",true));captureRT=p.request(lighting::kernel("reflection_capture_rt",true));
             reflectionConsumer=std::make_unique<RtConsumer>(c,p,*rt);aoConsumer=std::make_unique<RtConsumer>(c,p,*rt);captureConsumer=std::make_unique<RtConsumer>(c,p,*rt);}
         pipe::PipelineDesc raster;raster.kind=pipe::PipelineKind::Render;raster.label="Static reflection probe scene capture";raster.functions={"reflection_probe_capture_vs","reflection_probe_capture_fs",""};
-        if(c.device()->supports32BitFloatFiltering()&&!o.forceApple9&&!o.reducedLighting){probeFormat=MTL::PixelFormatRGBA32Float;graphProbeFormat=rg::Format::RGBA32Float;}
+        // Apple9 already supports RGBA32Float filtering (Metal feature tables).
+        // Query the actual device; reduced/forcedApple9 changes sampling budgets,
+        // never silently narrows physical radiance when Float32 is supported.
+        const bool float32Filtering=c.device()->supports32BitFloatFiltering();
+        if(float32Filtering){probeFormat=MTL::PixelFormatRGBA32Float;graphProbeFormat=rg::Format::RGBA32Float;}
+        LOG_INFO("Reflection probe storage %s | Float32 filtering %u | forced Apple9 %u | reduced %u",
+            float32Filtering?"RGBA32Float":"RGBA16Float-bounded",u32(float32Filtering),u32(o.forceApple9),u32(o.reducedLighting));
         raster.output(0,graphProbeFormat);captureRaster=p.request(raster);
         prefilter=p.request(lighting::kernel("reflection_probe_prefilter"));validateProbe=p.request(lighting::kernel("reflection_probe_validate"));publishProbe=p.request(lighting::kernel("reflection_probe_ready"));
         reduce=p.request(lighting::kernel("reflection_reduce"));compose=p.request(lighting::kernel("reflection_composite"));zero=p.request(lighting::kernel("reflection_signal_zero"));clear=p.request(lighting::kernel("reflection_counter_clear"));checker=p.request(lighting::kernel("reflection_check"));
@@ -211,11 +218,13 @@ struct ReflectionPasses::Impl {
         preComposeParams=composeParams;preComposeParams.flags&=REFLECT_COMPOSE_DI|REFLECT_COMPOSE_GI;preComposeAddress=lighting::upload(c,preComposeParams);
         GPUProbeGridParams dummy{};dummy.reset=1;giDummyAddress=lighting::upload(c,dummy);GPUProbeTraceExtra extra{};extra.sampledLightCount=direct.lightCount();extra.frameSeed=options.lightingSeed;extra.sunAngularRadius=.00465f;extraDummyAddress=lighting::upload(c,extra);
         for(u32 face=0;face<6;++face){const auto vp=reflectionProbeViewProjection(probe,face,.05f,settings.maxDistance),inv=glm::inverse(vp);auto capture=params;
-            std::memcpy(capture.viewProjection,glm::value_ptr(vp),64);std::memcpy(capture.inverseViewProjection,glm::value_ptr(inv),64);for(u32 k=0;k<3;++k)capture.cameraPosition[k]=probe.capturePosition[k];capture.width=capture.height=ProbeSide;captureAddress[face]=lighting::upload(c,capture);
+            std::memcpy(capture.viewProjection,glm::value_ptr(vp),64);std::memcpy(capture.inverseViewProjection,glm::value_ptr(inv),64);for(u32 k=0;k<3;++k)capture.cameraPosition[k]=probe.capturePosition[k];capture.width=capture.height=ProbeSide;
+            if(probeFormat==MTL::PixelFormatRGBA16Float)capture.flags|=REFLECTION_CAPTURE_HALF;
+            captureAddress[face]=lighting::upload(c,capture);
             GPUProbeCaptureParams raster{};std::memcpy(raster.viewProjection,glm::value_ptr(vp),64);for(u32 k=0;k<3;++k){raster.capturePosition[k]=probe.capturePosition[k];raster.environment[k]=params.environment[k];}
-            raster.slotCount=store.slotCapacity();raster.materialCount=u32(store.materials().size());raster.lightCount=f.constants.lightCount;raster.sampledLightCount=direct.lightCount();raster.seed=options.lightingSeed;rasterCaptureAddress[face]=lighting::upload(c,raster);}
-        for(u32 mip=0;mip<ProbeMips;++mip){GPUProbeFilterParams filter{std::max(1u,ProbeSide>>mip),mip,128,0,float(mip)/float(ProbeMips-1),float(ProbeSide),{0,0}};
-            filterAddress[mip]=lighting::upload(c,filter);validateAddress[mip]=filterAddress[mip];}GPUProbeFilterParams rawCheck{ProbeSide,~0u,0,0,0,float(ProbeSide),{0,0}};rawValidateAddress=lighting::upload(c,rawCheck);
+            raster.slotCount=store.slotCapacity();raster.materialCount=u32(store.materials().size());raster.lightCount=f.constants.lightCount;raster.sampledLightCount=direct.lightCount();raster.storageFlags=probeFormat==MTL::PixelFormatRGBA16Float?REFLECTION_CAPTURE_HALF:0u;rasterCaptureAddress[face]=lighting::upload(c,raster);}
+        for(u32 mip=0;mip<ProbeMips;++mip){GPUProbeFilterParams filter{std::max(1u,ProbeSide>>mip),mip,128,0,float(mip)/float(ProbeMips-1),float(ProbeSide),probeFormat==MTL::PixelFormatRGBA16Float?REFLECTION_CAPTURE_HALF:0u,0};
+            filterAddress[mip]=lighting::upload(c,filter);validateAddress[mip]=filterAddress[mip];}GPUProbeFilterParams rawCheck{ProbeSide,~0u,0,0,0,float(ProbeSide),probeFormat==MTL::PixelFormatRGBA16Float?REFLECTION_CAPTURE_HALF:0u,u32(options.debugLighting!=0)};rawValidateAddress=lighting::upload(c,rawCheck);
         if(rtReflection)reflectionConsumer->prepare(frame.slot,reflectionRT);if(rtAO)aoConsumer->prepare(frame.slot,rtao);if(rtCapture&&probeNeedsCapture)captureConsumer->prepare(frame.slot,captureRT);
         auto& slot=slots[frame.slot];slot.customUsed=custom;slot.expected=frame.width*frame.height;
         if(store.stats().fullInstances||!store.instanceDeltas().empty())++instanceRevision;
@@ -381,7 +390,10 @@ void ReflectionPasses::prepareFrame(const SceneStore& s,const ShadowPasses::Fram
 rg::TextureRef ReflectionPasses::addToGraph(rg::RenderGraph& g,rg::TextureRef base,rg::TextureRef depth){return impl_->add(g,base,depth);}
 void ReflectionPasses::bindFrame(MetalGraphExecutor& e){impl_->bind(e);}
 u64 ReflectionPasses::version()const{const std::pair<u64,u64> components{impl_->graphVersion,impl_->denoise.version()};if(impl_->publishedComponents!=components){impl_->publishedComponents=components;++impl_->publishedVersion;}return impl_->publishedVersion;}
-bool ReflectionPasses::check(u32 slot)const{const auto& f=impl_->slots.at(slot);const auto* errors=static_cast<const u32*>(f.errors->contents());bool okay=!impl_->options.debugLighting||errors[0]==f.expected;for(u32 i=1;i<8;++i)okay=okay&&!errors[i];if(!okay){std::fprintf(stderr,"REFLECTION check slot %u expected %u counts %u %u %u %u %u %u %u %u\n",slot,f.expected,errors[0],errors[1],errors[2],errors[3],errors[4],errors[5],errors[6],errors[7]);
+bool ReflectionPasses::check(u32 slot)const{const auto& f=impl_->slots.at(slot);const auto* errors=static_cast<const u32*>(f.errors->contents());
+    if(impl_->options.debugLighting&&errors[15])std::printf("REFLECTION probe HDR slot %u | raw_above_half %u | raw_max %.9g %.9g %.9g | format %s\n",slot,errors[15],
+        double(std::bit_cast<float>(errors[12])),double(std::bit_cast<float>(errors[13])),double(std::bit_cast<float>(errors[14])),
+        impl_->probeFormat==MTL::PixelFormatRGBA32Float?"RGBA32Float":"RGBA16Float");bool okay=!impl_->options.debugLighting||errors[0]==f.expected;for(u32 i=1;i<8;++i)okay=okay&&!errors[i];if(!okay){std::fprintf(stderr,"REFLECTION check slot %u expected %u counts %u %u %u %u %u %u %u %u\n",slot,f.expected,errors[0],errors[1],errors[2],errors[3],errors[4],errors[5],errors[6],errors[7]);
     if(errors[8])std::fprintf(stderr,"REFLECTION motion raw slot %u count %u first_tid %u bits %08x %08x\n",slot,errors[8],errors[9],errors[10],errors[11]);return false;}return !f.customUsed||impl_->denoise.check(slot);}
 bool ReflectionPasses::ready()const{const auto& i=*impl_;const auto& o=i.options;
     if(!i.p.compute(i.compose)||!i.p.compute(i.zero)||!i.p.compute(i.clear)||!i.p.compute(i.prefilter)||!i.p.compute(i.validateProbe)||!i.p.compute(i.publishProbe))return false;

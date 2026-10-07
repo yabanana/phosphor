@@ -753,6 +753,7 @@ PHOSPHOR_GPU_CONSTANT u32 REFLECTION_ENABLE_SSR = 2u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_ENABLE_CACHE = 4u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_ENABLE_PROBES = 8u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_ENABLE_GI = 16u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_CAPTURE_HALF = 32u; // reject total radiance outside HALF before conversion
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_NONE = 0u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_RT = 1u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_SSR = 2u;
@@ -801,12 +802,12 @@ PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionProbe) == 64, "GPUReflectionProbe lay
 struct GPUProbeCaptureParams {
     float viewProjection[16], capturePosition[4];
     u32 lightCount, slotCount, materialCount, sampledLightCount;
-    float environment[3]; u32 seed;
+    float environment[3]; u32 storageFlags; // formerly unused raster seed; ABI size unchanged
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeCaptureParams) == 112, "GPUProbeCaptureParams layout");
 struct GPUProbeFilterParams {
     u32 side, mip, sampleCount, cubeIndex;
-    float roughness, sourceSide; u32 pad[2];
+    float roughness, sourceSide; u32 storageFlags, diagnosticReadback;
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeFilterParams) == 32, "GPUProbeFilterParams layout");
 struct GPUDenoiseParams {

@@ -58,6 +58,11 @@ void ReflectionValidation::setup(ECS& ecs,GpuScene& scene,TextureManager& textur
                     {0,0,0},0,1,{368640,128,64});
         auto& material=ecs.getComponent<MaterialComponent>(panel_);
         material.occlusionTexIndex=textures.getDefaultBlack();material.occlusionStrength=1;
+        // Move the fitted probe center off the emitter plane without changing
+        // primary visibility: this black static anchor is behind the camera.
+        const auto anchor=mesh(ecs,cube_,{0,0,20},{1,1,1},identity,{0,0,0},0,1);
+        auto& anchorMaterial=ecs.getComponent<MaterialComponent>(anchor);
+        anchorMaterial.occlusionTexIndex=textures.getDefaultBlack();anchorMaterial.occlusionStrength=1;
         sun_=ecs.createEntity();entities_.push_back(sun_);
         TransformComponent sunPose;sunPose.updateMatrix();ecs.addComponent(sun_,std::move(sunPose));
         LightComponent light;light.type=LightType::Directional;light.intensity=0;ecs.addComponent(sun_,std::move(light));
