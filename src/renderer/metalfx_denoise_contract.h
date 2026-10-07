@@ -8,6 +8,18 @@
 #include <string_view>
 
 namespace phosphor::metalfx_denoise {
+// No production scene-linear radiometric domain has passed native acceptance.
+// ControlledFixtureDiagnostic permits measurements; it is not certification.
+enum class RadiometricDomain : u8 { UnqualifiedSceneLinear,ControlledFixtureDiagnostic };
+[[nodiscard]] constexpr bool permitsNativeEncoding(RadiometricDomain domain) {
+    return domain==RadiometricDomain::ControlledFixtureDiagnostic;
+}
+[[nodiscard]] constexpr const char* radiometricDomainName(RadiometricDomain domain) {
+    return domain==RadiometricDomain::ControlledFixtureDiagnostic?"controlled-fixture-diagnostic":"unqualified-scene-linear";
+}
+inline constexpr const char* UnqualifiedRadiometryReason=
+    "UnqualifiedRadiometricDomain: native scene-linear/HDR denoising is not qualified; custom Float32 selected before graph encoding. Native SDK execution is limited to controlled diagnostic fixtures.";
+
 enum class NormalSpace : u8 { World, View, Tangent };
 enum class NormalEncoding : u8 { SignedUnit, Unorm };
 enum class MotionUnits : u8 { InputPixels, NormalizedUV, ClipNdc };

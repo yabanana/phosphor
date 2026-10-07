@@ -174,9 +174,9 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
         }
     }
     if (checks_ && (readWidth_ != outputWidth || readHeight_ != outputHeight || readPoseCapacity_ < poseCapacity_)) {
-        // Color can be replaced by physical F13/F14 RGBA32; allocate its
-        // actual maximum stride, while guide formats remain unchanged.
-        constexpr u32 bytes[] = {4, 4, 16, 8, 8, 8, 4, 1};
+        // Keep raw resolve and actual Post input in independent readbacks.
+        // Both can be RGBA32; guide formats remain unchanged.
+        constexpr u32 bytes[] = {4, 4, 16, 8, 8, 8, 4, 1, 16};
         readWidth_ = outputWidth;
         readHeight_ = outputHeight;
         readPoseCapacity_ = poseCapacity_;

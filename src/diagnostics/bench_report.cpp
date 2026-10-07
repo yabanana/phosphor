@@ -197,7 +197,10 @@ static std::string lightingToJson(const LightingReport& l) {
         ", \"failures\": "+std::to_string(l.failures)+", \"full_lighting_denoise\": \"F13_SOURCE_UNVERIFIED\", \"reflections\": \""+jsonEscape(l.reflections)+
         "\", \"ao\": \""+jsonEscape(l.ao)+"\", \"denoise_requested\": \""+jsonEscape(l.denoiseRequested)+
         "\", \"denoise_effective\": \""+jsonEscape(l.denoiseEffective)+"\", \"denoise_fallback\": \""+jsonEscape(l.denoiseFallback)+
-        "\", \"probe_source\": \""+jsonEscape(l.probeSource)+"\", \"atmosphere\": "+(l.atmosphere?"true":"false")+
+        "\", \"denoise_radiometric_domain\": \""+jsonEscape(l.denoiseRadiometricDomain)+
+        "\", \"denoise_native_production_qualified\": false, \"denoise_native_factory_requests\": "+std::to_string(l.denoiseNativeFactoryRequests)+
+        ", \"denoise_native_encoded_frames\": "+std::to_string(l.denoiseNativeEncodedFrames)+
+        ", \"probe_source\": \""+jsonEscape(l.probeSource)+"\", \"atmosphere\": "+(l.atmosphere?"true":"false")+
         ", \"fog\": "+(l.fog?"true":"false")+", \"clouds\": "+(l.clouds?"true":"false")+
         ", \"cloud_full_rate\": "+(l.cloudFullRate?"true":"false")+", \"fog_homogeneous\": "+(l.fogHomogeneous?"true":"false")+
         ", \"reflection_corrupt\": "+std::to_string(l.reflectionCorrupt)+", \"volume_corrupt\": "+std::to_string(l.volumeCorrupt)+

@@ -102,7 +102,7 @@ def make_cases(out,frames,sdk_policy,probe_dir=None):
             expected={"reflections":"rt","ao":"rtao","denoise_requested":"off","denoise_effective":"off"})
     add("metalfx-"+sdk_policy,"F13","roughness",[ *base_rt,"--reflections","rt","--ao","rtao","--lighting-denoise","metalfx"],
         expected={"reflections":"rt","ao":"rtao","denoise_requested":"metalfx","denoise_effective":"custom" if sdk_policy=="fallback" else "metalfx"},
-        sdk_policy=sdk_policy)
+        sdk_policy=sdk_policy,sdk_fallback_reason="unqualified-radiometry" if sdk_policy=="fallback" else None)
     for views in (2,4):
         add("lifecycle-views"+str(views),"F13","disocclusion",[ *base_rt,"--reflections","rt","--ao","rtao",
             "--lighting-denoise","custom","--temporal-views",str(views),"--resize-every","90","--history-reset-every","60"],
@@ -169,6 +169,36 @@ def make_cases(out,frames,sdk_policy,probe_dir=None):
     return cases
 
 
+def evaluate_sdk_policy(case,lighting):
+    """A frozen fallback cause cannot be replaced by a different failure."""
+    errors=[];policy=case.get("sdk_policy")
+    if policy=="fallback":
+        reason=lighting.get("denoise_fallback");expected=case.get("sdk_fallback_reason","missing-factory")
+        if expected=="unqualified-radiometry":
+            if not isinstance(reason,str) or not reason.startswith("UnqualifiedRadiometricDomain:"):
+                errors.append("radiometry case did not identify UnqualifiedRadiometricDomain")
+            for field,value in (("denoise_requested","metalfx"),("denoise_effective","custom"),
+                    ("denoise_radiometric_domain","unqualified-scene-linear")):
+                if lighting.get(field)!=value:errors.append("radiometry fallback mismatches "+field)
+            if lighting.get("denoise_native_production_qualified") is not False:
+                errors.append("unqualified radiometry was represented as production-native qualification")
+            for field in ("denoise_native_factory_requests","denoise_native_encoded_frames"):
+                if type(lighting.get(field)) is not int or lighting[field]!=0:
+                    errors.append("pre-graph radiometry fallback did not preserve zero "+field)
+        elif expected=="missing-factory":
+            if not isinstance(reason,str) or not re.search(r"factory|gateway",reason,re.I):
+                errors.append("frozen missing-factory case did not identify factory/gateway fallback")
+        else:errors.append("unknown frozen SDK fallback cause")
+    elif policy=="native":
+        if lighting.get("denoise_effective")!="metalfx":errors.append("native SDK was not actually selected")
+        if lighting.get("denoise_native_production_qualified") is not True:
+            errors.append("native production radiometry is not qualified; use the isolated SDK fixture for diagnostics")
+        for field in ("denoise_native_factory_requests","denoise_native_encoded_frames"):
+            if type(lighting.get(field)) is not int or lighting[field]<=0:
+                errors.append("native production claim lacks actual "+field)
+    return errors
+
+
 def evaluate(case,status,log,report):
     errors=list(status.get("failures",[]))
     expected_exit=case.get("expected_exit",0)
@@ -191,14 +221,7 @@ def evaluate(case,status,log,report):
     elif expected_exit!=0 and not any(m[2]=="FAIL" for m in lines):errors.append("negative never failed an actual LIGHTING readback")
     for field,value in case.get("expected",{}).items():
         if lighting.get(field)!=value:errors.append(f"effective/requested lighting.{field} mismatch")
-    if case.get("sdk_policy")=="fallback":
-        reason=lighting.get("denoise_fallback")
-        if not isinstance(reason,str) or not re.search(r"factory|gateway",reason,re.I):
-            errors.append("missing-factory case did not explicitly identify factory/gateway custom fallback")
-    if case.get("sdk_policy")=="native":
-        # The requested/effective string is necessary but insufficient for native
-        # lifetime/output-unit acceptance; independent evidence stays pending.
-        if lighting.get("denoise_effective")!="metalfx":errors.append("native SDK was not actually selected")
+    errors.extend(evaluate_sdk_policy(case,lighting))
     if case.get("needs_probe") and not lighting.get("probe_source"):errors.append("missing cooked probe source provenance")
     return {"functional_passed":not errors,"errors":errors,"lighting":lighting}
 

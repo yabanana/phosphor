@@ -140,3 +140,18 @@ TEST_CASE("F12 report identifies physical visibility ablation independently of c
     CHECK(json["lighting"]["gi_visibility_disabled"]==true);
     CHECK(json["lighting"]["checks"]==512);CHECK(json["lighting"]["failures"]==0);
 }
+
+TEST_CASE("Native denoise request reports custom execution and unqualified domain honestly") {
+    BenchReport report;report.lighting.present=true;
+    report.lighting.denoiseRequested="metalfx";report.lighting.denoiseEffective="custom";
+    report.lighting.denoiseFallback="UnqualifiedRadiometricDomain: custom Float32 selected before graph encoding";
+    report.lighting.denoiseRadiometricDomain="unqualified-scene-linear";
+    const auto json=nlohmann::json::parse(reportToJson(report));
+    CHECK(json["lighting"]["denoise_requested"]=="metalfx");
+    CHECK(json["lighting"]["denoise_effective"]=="custom");
+    CHECK(json["lighting"]["denoise_radiometric_domain"]=="unqualified-scene-linear");
+    CHECK(json["lighting"]["denoise_native_production_qualified"]==false);
+    CHECK(json["lighting"]["denoise_native_factory_requests"]==0);
+    CHECK(json["lighting"]["denoise_native_encoded_frames"]==0);
+    CHECK(json["lighting"]["denoise_fallback"].get<std::string>().find("UnqualifiedRadiometricDomain")!=std::string::npos);
+}

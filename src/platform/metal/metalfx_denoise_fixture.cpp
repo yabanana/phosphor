@@ -71,11 +71,15 @@ struct MetalfxDenoiseFixture::Impl {
     std::map<u32,ScaledPair> pairs;
     bool finishCalled=false,prewarmAttempted=false,prewarmReady=false;double prewarmElapsedMs=0;
     std::string prewarmStatus="NOT_ATTEMPTED";
+    u64 transitionWaits=0,transitionReady=0;double transitionWaitMs=0;
     Impl(MetalContext& context,PipelineCache& pipelines,MetalfxDenoise::Factory factory,Options o):c(context),p(pipelines),options(std::move(o)) {
         if(!MetalfxDenoiseFixture::validScenario(options.scenario)||options.outputDirectory.empty())throw std::invalid_argument("Invalid denoised fixture scenario/output");
         if(!options.activeViews||options.activeViews>HistoryRegistry::MaxViews||!options.prewarmTimeoutMs||options.prewarmTimeoutMs>120000)
             throw std::invalid_argument("Invalid SDK fixture active views/prewarm budget");
         MetalfxDenoise::Options sdkOptions;sdkOptions.enabled=true;sdkOptions.views=options.activeViews;
+        // Only this isolated, tagged fixture can exercise unqualified SDK
+        // radiometry. No production CLI flag grants this admission.
+        sdkOptions.radiometricDomain=metalfx_denoise::RadiometricDomain::ControlledFixtureDiagnostic;
         sdkOptions.autoExposure=options.autoExposure;
         // Supply a binary16-representable float so native texture-write rounding
         // cannot choose a different texel. Preserve the analytic request in logs.
@@ -97,7 +101,9 @@ struct MetalfxDenoiseFixture::Impl {
         if(depthState)depthState->release();}
     std::string exposureMetadata(const GPUFXFixtureSample* packedSamples=nullptr)const {
         const auto& stats=adapter->stats();std::ostringstream out;
-        out<<",\"auto_exposure_requested\":"<<(options.autoExposure?"true":"false")
+        out<<",\"native_radiometric_domain\":"<<quote(metalfx_denoise::radiometricDomainName(stats.radiometricDomain))
+           <<",\"native_production_qualified\":false"
+           <<",\"auto_exposure_requested\":"<<(options.autoExposure?"true":"false")
            <<",\"exposure_descriptor_configured\":"<<(stats.descriptorConfigured?"true":"false")
            <<",\"auto_exposure_enabled\":"<<(stats.autoExposureEnabled?"true":"false")
            <<",\"exposure_mode\":"<<quote(!stats.descriptorConfigured?"not-configured":stats.autoExposureEnabled?"sdk-auto":"manual")
@@ -196,6 +202,30 @@ struct MetalfxDenoiseFixture::Impl {
             if(!out)throw std::runtime_error("SDK initial prewarm evidence write failed");
             LOG_INFO("SDK fixture initial prewarm %s: %.1f ms / %u ms, %u views, frame %llu phase %u",prewarmStatus.c_str(),prewarmElapsedMs,options.prewarmTimeoutMs,options.activeViews,static_cast<unsigned long long>(frame.index),params.phase);
             if(pending&&!prewarmReady)throw std::runtime_error("SDK fixture initial prewarm failed before counting frames: "+adapter->fallbackReason());
+        } else if(options.scenario=="lifecycle"&&(p.reloadPending()||!adapter->ready())) {
+            const auto started=std::chrono::steady_clock::now();const auto generationBefore=p.generation();
+            const auto encodedBefore=adapter->stats().encodedFrames;
+            const bool ready=adapter->waitPreparedLifecycleFixture(options.activeViews,std::chrono::milliseconds(options.prewarmTimeoutMs));
+            const double elapsed=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
+            const u64 event=transitionWaits++;transitionReady+=ready;transitionWaitMs+=elapsed;
+            std::ostringstream name;name<<"readiness-transition-"<<std::setfill('0')<<std::setw(3)<<event
+                <<"-frame-"<<std::setw(6)<<frame.index<<".json";
+            const auto path=std::filesystem::path(options.outputDirectory)/name.str();
+            if(std::filesystem::exists(path))throw std::runtime_error("Refuse SDK lifecycle readiness evidence overwrite");
+            std::ofstream out(path);out<<std::setprecision(17)
+                <<"{\"schema\":\"phosphor.metalfx-transition.v1\",\"frame\":"<<frame.index<<",\"view\":"<<frame.view
+                <<",\"phase\":"<<params.phase<<",\"ready\":"<<(ready?"true":"false")<<",\"cancelled\":false"
+                <<",\"budget_ms\":"<<options.prewarmTimeoutMs<<",\"elapsed_ms\":"<<elapsed<<",\"active_views\":"<<options.activeViews
+                <<",\"input_width\":"<<frame.extent.inputWidth<<",\"input_height\":"<<frame.extent.inputHeight
+                <<",\"output_width\":"<<frame.extent.outputWidth<<",\"output_height\":"<<frame.extent.outputHeight
+                <<",\"generation_before\":"<<generationBefore<<",\"generation_after\":"<<p.generation()
+                <<",\"encoded_before_wait\":"<<encodedBefore<<",\"encoded_after_wait\":"<<adapter->stats().encodedFrames
+                <<",\"reason\":"<<quote(adapter->fallbackReason())<<"}\n";
+            if(!out)throw std::runtime_error("SDK lifecycle readiness evidence write failed");
+            LOG_INFO("SDK fixture transition %llu frame %llu: %s, %.1f ms / %u ms, generation %u -> %u",
+                static_cast<unsigned long long>(event),static_cast<unsigned long long>(frame.index),ready?"READY":"FAILED",
+                elapsed,options.prewarmTimeoutMs,generationBefore,p.generation());
+            if(!ready)throw std::runtime_error("SDK fixture lifecycle readiness failed: "+adapter->fallbackReason());
         }
     }
     bool pipelinesReady()const{return p.compute(generate)&&p.compute(readback)&&p.render(depthPipeline);}
@@ -360,6 +390,8 @@ struct MetalfxDenoiseFixture::Impl {
             <<",\"reload_requested_after_native_work\":"<<(reloadRequested?"true":"false")<<",\"captured_generation_count\":"<<capturedGenerations.size()
             <<",\"retirement_is_destruction_proof\":false,\"final_destruction_verified\":false"
             <<",\"fallback_reason\":"<<quote(adapter->fallbackReason())<<",\"preexposed_policy_experiment\":"<<(options.preExposedPolicy?"true":"false")
+            <<",\"transition_wait_count\":"<<transitionWaits<<",\"transition_ready_count\":"<<transitionReady
+            <<",\"transition_wait_ms_total\":"<<number(transitionWaitMs)
             <<",\"initial_prewarm_attempted\":"<<(prewarmAttempted?"true":"false")<<",\"initial_prewarm_ready\":"<<(prewarmReady?"true":"false")
             <<",\"initial_prewarm_state\":"<<quote(prewarmStatus)<<",\"initial_prewarm_budget_ms\":"<<options.prewarmTimeoutMs<<",\"initial_prewarm_elapsed_ms\":"<<number(prewarmElapsedMs)<<",\"initial_active_views\":"<<options.activeViews
             <<",\"phase_accepted\":false,\"production_policy_promoted\":false,\"metamorphic\":[";

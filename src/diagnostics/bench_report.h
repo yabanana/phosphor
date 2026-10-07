@@ -203,6 +203,8 @@ struct RtReport {
 struct LightingReport {
     bool present=false, reduced=false, contact=false, cache=false, giVisibilityDisabled=false;
     std::string shadows, direct, gi,reflections,ao,denoiseRequested,denoiseEffective,denoiseFallback,probeSource;
+    std::string denoiseRadiometricDomain="not-requested";
+    u64 denoiseNativeFactoryRequests=0,denoiseNativeEncodedFrames=0;
     bool atmosphere=false,fog=false,clouds=false,cloudFullRate=false,fogHomogeneous=false;
     u32 reflectionCorrupt=0,volumeCorrupt=0;std::string volumeOracle;
     u32 seed=1, sunIndex=~0u, candidates=0, spatialSamples=0, giRays=0;

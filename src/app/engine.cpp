@@ -916,7 +916,13 @@ void Engine::finishBenchmark() {
         report.lighting.ao=options_.ao==AoMode::RTAO?"rtao":options_.ao==AoMode::GTAO?"gtao":"off";
         report.lighting.denoiseRequested=options_.lightingDenoise==LightingDenoiseMode::MetalFX?"metalfx":options_.lightingDenoise==LightingDenoiseMode::Custom?"custom":"off";
         report.lighting.denoiseEffective=denoised_&&denoised_->ready()?"metalfx":options_.lightingDenoise!=LightingDenoiseMode::Off?"custom":"off";
-        if(denoised_)report.lighting.denoiseFallback=denoised_->fallbackReason();
+        if(denoised_) {
+            const auto& stats=denoised_->stats();
+            report.lighting.denoiseFallback=denoised_->fallbackReason();
+            report.lighting.denoiseRadiometricDomain=metalfx_denoise::radiometricDomainName(stats.radiometricDomain);
+            report.lighting.denoiseNativeFactoryRequests=stats.requests;
+            report.lighting.denoiseNativeEncodedFrames=stats.encodedFrames;
+        }
         if(reflections_)report.lighting.probeSource=reflections_->probeSource();
         report.lighting.reflectionCorrupt=options_.debugReflectionCorrupt;report.lighting.volumeCorrupt=options_.debugVolumeCorrupt;report.lighting.volumeOracle=options_.volumeOracle;report.lighting.fogHomogeneous=options_.fogHomogeneous;
         report.lighting.atmosphere=options_.atmosphere;report.lighting.fog=options_.fog;report.lighting.clouds=options_.clouds;report.lighting.cloudFullRate=options_.cloudFullRate;
@@ -2204,7 +2210,9 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
             if(graphKey_.reflectionReady)visibility_->replaceColor(reflections_->addToGraph(frameGraph_,visibility_->color(),visibility_->depth()));
             if(atmosphere_)visibility_->replaceColor(atmosphere_->addToGraph(frameGraph_,visibility_->color(),visibility_->depth()));
             rg::TextureRef reconstructed;
-            if(denoised_) {
+            // prepareFrame selected custom Float32 for unqualified radiometry
+            // before this graph. Do not build or bind an apparent native path.
+            if(denoised_&&denoised_->ready()) {
                 frameGraph_.addPass("Denoised roughness channel",PassType::Compute,[&](PassBuilder& b){b.read(visibility_->normalRoughness(),Usage::ShaderRead,StageDispatch);roughnessRef_=b.createTexture("Denoised perceptual roughness",{Format::R16Float,graphKey_.logicalWidth,graphKey_.logicalHeight});roughnessRef_=b.write(roughnessRef_,Usage::ShaderWrite,StageDispatch);},[this](PassContext& ctx){roughnessTable_->setAddress(visibility_->paramsAddress(),0);roughnessTable_->setTexture(static_cast<MTL::Texture*>(ctx.texture(visibility_->normalRoughness()))->gpuResourceID(),0);roughnessTable_->setTexture(static_cast<MTL::Texture*>(ctx.texture(roughnessRef_))->gpuResourceID(),1);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),*pipelines_,roughnessSplit_,roughnessTable_,graphKey_.logicalWidth,graphKey_.logicalHeight);});
                 MetalfxDenoise::Inputs in;in.noisyColor=visibility_->color();in.customFallback=visibility_->color();in.depth=visibility_->depth();in.motion=directLighting_->motion();
                 in.diffuseAlbedo=visibility_->diffuseAlbedo();in.specularAlbedo=visibility_->specularAlbedo();in.worldNormal=visibility_->normalRoughness();in.roughness=roughnessRef_;
@@ -2223,7 +2231,7 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
                                                        options_.captureLinearSignal==7?reflections_->rawAO():options_.captureLinearSignal==8?reflections_->filteredIndirectDiffuse():visibility_->color());
             color = post_ ? post_->addToGraph(frameGraph_, *visibility_, drawableRef_, graphKey_.outputFormat,reconstructed)
                           : visibility_->addPresent(frameGraph_, drawableRef_);
-            visibility_->addChecks(frameGraph_);
+            visibility_->addChecks(frameGraph_,post_?post_->exposureInput():visibility_->color());
             visibility_->addPoseSnapshot(frameGraph_);
             if (rtVisibility_ && rtVisibility_->ready() && rt_->active())
                 rtVisibility_->addToGraph(frameGraph_, visibility_->visibility(), visibility_->depth());

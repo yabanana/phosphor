@@ -39,6 +39,8 @@ class PostProcessor {
     rg::TextureRef addToGraph(rg::RenderGraph &, VisibilityRenderer &, rg::TextureRef drawable,
                               rg::Format outputFormat = rg::Format::BGRA8Srgb,rg::TextureRef reconstructed = {});
     rg::TextureRef addSDRCapture(rg::RenderGraph &, rg::TextureRef display);
+    // Borrowed exact graph version consumed by Luminance histogram.
+    [[nodiscard]] rg::TextureRef exposureInput()const{return input_;}
     void bindFrame(class MetalGraphExecutor &);
     [[nodiscard]] u32 inputWidth() const { return params_.inputWidth; }
     [[nodiscard]] u32 inputHeight() const { return params_.inputHeight; }

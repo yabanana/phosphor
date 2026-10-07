@@ -33,6 +33,7 @@ public:
         bool autoExposure=false;
         float manualExposure=1.0f; // SDK exposure hint; does not alter color packing or output restoration
         OutputScale sdkOutputScale=OutputScale::Unverified;
+        metalfx_denoise::RadiometricDomain radiometricDomain=metalfx_denoise::RadiometricDomain::UnqualifiedSceneLinear;
         u32 views=1,resizeSettleFrames=4;
     };
     struct Frame {
@@ -49,11 +50,12 @@ public:
         rg::TextureRef hitDistance{},reactiveMask{},strengthMask{},customFallback{};
     };
     enum class Status : u8 { Disabled,MissingSDK,UnsupportedDevice,MissingFactory,InvalidContract,
-                            Settling,Pending,FactoryRejected,UsageRejected,UnverifiedExposureMapping,Ready,FixturePrewarmTimeout,FixturePrewarmSuperseded };
+                            Settling,Pending,FactoryRejected,UsageRejected,UnverifiedExposureMapping,Ready,FixturePrewarmTimeout,FixturePrewarmSuperseded,UnqualifiedRadiometricDomain };
     struct Stats {
         bool requested=false,sdkAvailable=false,deviceSupported=false,factoryInstalled=false;
         // Read back from the actual descriptor, not inferred from caller intent.
         bool descriptorConfigured=false,autoExposureEnabled=false;
+        metalfx_denoise::RadiometricDomain radiometricDomain=metalfx_denoise::RadiometricDomain::UnqualifiedSceneLinear;
         u64 requests=0,encodedFrames=0,fallbackFrames=0,resets=0,discardedRequests=0,retirements=0;
     };
     struct PackCheck {
@@ -69,6 +71,10 @@ public:
     // Uses its exact current extent/phase; active view futures share one deadline.
     // No GPU frame/history advance, compiler creation or production-path wait.
     bool prewarmPreparedFixture(u32 activeViews,std::chrono::milliseconds budget);
+    // Diagnostic lifecycle fixture ONLY: wait for actual reload/resize futures
+    // under one total deadline, preserving the current logical frame/history.
+    // Requires resizeSettleFrames=0. Production never calls this method.
+    bool waitPreparedLifecycleFixture(u32 activeViews,std::chrono::milliseconds budget);
     // If not ready, this returns the caller's actual custom-denoised composite.
     // No phantom native pass, and no second energy contribution is introduced.
     [[nodiscard]] rg::TextureRef addToGraph(rg::RenderGraph&,const Inputs&);

@@ -24,12 +24,18 @@ float halfFloat(u16 bits) {
     return bits & 0x8000 ? -v : v;
 }
 } // namespace
-void VisibilityRenderer::addChecks(rg::RenderGraph &g) {
+void VisibilityRenderer::addChecks(rg::RenderGraph &g,rg::TextureRef exposureInput) {
     if (!checks_)
         return;
     using namespace rg;
-    const std::array<TextureRef, 8> images = {visibility_, depth_,      outputs_[0], outputs_[1],
-                                              outputs_[2], outputs_[3], outputs_[4], outputs_[5]};
+    if(!exposureInput.valid())throw std::invalid_argument("Exposure reference requires the actual Post input version");
+    const auto exposureFormat=g.resources().at(exposureInput.resource).texture.format;
+    if(exposureFormat!=Format::RGBA16Float&&exposureFormat!=Format::RGBA32Float)
+        throw std::invalid_argument("Exposure reference requires floating HDR input");
+    // Copy both versions by value. Later color selection cannot retarget an
+    // already-declared read, and raw guide validity is not hidden by composition.
+    const std::array<TextureRef, 9> images = {visibility_, depth_,      outputs_[0], outputs_[1],
+                                              outputs_[2], outputs_[3], outputs_[4], outputs_[5],exposureInput};
     g.addPass(
         "Visibility guide readback", PassType::Blit,
         [&](PassBuilder &b) {
@@ -45,6 +51,7 @@ void VisibilityRenderer::addChecks(rg::RenderGraph &g) {
                 auto* image=static_cast<MTL::Texture*>(ctx.texture(images[i]));
                 if(image->width()<params_.width||image->height()<params_.height)throw std::logic_error("Visibility readback does not cover the logical image");
                 if(i==2)readColorFloat32_=image->pixelFormat()==MTL::PixelFormatRGBA32Float;
+                if(i==8)readExposureFloat32_=image->pixelFormat()==MTL::PixelFormatRGBA32Float;
                 enc->copyFromTexture(image, 0, 0, MTL::Origin::Make(0, 0, 0),
                                      MTL::Size::Make(std::min<u64>(readWidth_,image->width()),std::min<u64>(readHeight_,image->height()),1),
                                      readbacks_[i], 0, pitches_[i], pitches_[i] * readHeight_);
@@ -85,7 +92,7 @@ bool VisibilityRenderer::check(const GpuScene &geometry) {
             u32 id;
             std::memcpy(&id, row + x * 4, 4);
             const auto channelAt = [&](u32 image, u32 components, u32 component) {
-                if(image==2&&readColorFloat32_){float value;const auto* data=static_cast<const u8*>(readbacks_[image]->contents())+pitches_[image]*y+(x*components+component)*4;std::memcpy(&value,data,4);return value;}
+                if((image==2&&readColorFloat32_)||(image==8&&readExposureFloat32_)){float value;const auto* data=static_cast<const u8*>(readbacks_[image]->contents())+pitches_[image]*y+(x*components+component)*4;std::memcpy(&value,data,4);return value;}
                 const auto *data = static_cast<const u8 *>(readbacks_[image]->contents()) + pitches_[image] * y +
                                    (x * components + component) * 2;
                 u16 v;
@@ -96,7 +103,7 @@ bool VisibilityRenderer::check(const GpuScene &geometry) {
             std::memcpy(&depth, static_cast<const u8 *>(readbacks_[1]->contents()) + pitches_[1] * y + x * 4, 4);
             const bool shaded = depth > 0;
             const float luminance =
-                shaded ? channelAt(2, 4, 0) * 0.2126f + channelAt(2, 4, 1) * 0.7152f + channelAt(2, 4, 2) * 0.0722f : 0.0f;
+                shaded ? channelAt(8, 4, 0) * 0.2126f + channelAt(8, 4, 1) * 0.7152f + channelAt(8, 4, 2) * 0.0722f : 0.0f;
             ++checkedHistogram_[exposureBin(luminance)];
             // Dot contraction/log2 differ between CPU and GPU at exact bin
             // boundaries. Bound each sample's luminance by 0.001%, then

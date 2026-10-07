@@ -3,9 +3,11 @@
 #include "platform/metal/pipeline_cache.h"
 #include "platform/metal/metal_graph_executor.h"
 #include "renderer/history_registry.h"
+#include "core/log.h"
 #include "rendergraph/pass_context.h"
 #include <algorithm>
 #include <chrono>
+#include <thread>
 #include <cstring>
 #include <stdexcept>
 #include <utility>
@@ -72,6 +74,11 @@ struct MetalfxDenoise::Impl {
         if(!o.views||o.views>HistoryRegistry::MaxViews)throw std::invalid_argument("MetalFX denoise views outside 1..4");
         stats.requested=o.enabled;stats.sdkAvailable=PHOSPHOR_HAS_METALFX_DENOISED!=0;
         stats.factoryInstalled=bool(factory.request)&&bool(factory.retire);
+        stats.radiometricDomain=o.radiometricDomain;
+        if(o.enabled&&!metalfx_denoise::permitsNativeEncoding(o.radiometricDomain)) {
+            setStatus(Status::UnqualifiedRadiometricDomain,metalfx_denoise::UnqualifiedRadiometryReason);
+            LOG_INFO("MetalFX denoised requested; effective custom Float32 | %s",reason.c_str());
+        }
 #if PHOSPHOR_HAS_METALFX_DENOISED
         // Safe selectors in the local SDK return false when the runtime class/API
         // is unavailable. This does not certify another physical Apple device.
@@ -82,7 +89,7 @@ struct MetalfxDenoise::Impl {
             maximumScale=MTLFX::TemporalDenoisedScalerDescriptor::supportedInputContentMaxScale(c.device());
         }
 #endif
-        if(o.enabled && stats.sdkAvailable && stats.deviceSupported && stats.factoryInstalled) {
+        if(o.enabled && metalfx_denoise::permitsNativeEncoding(o.radiometricDomain) && stats.sdkAvailable && stats.deviceSupported && stats.factoryInstalled) {
             packHandle=p.request(packPipeline("denoise_pack"));clearHandle=p.request(packPipeline("denoise_pack_clear"));
             restoreHandle=p.request(packPipeline("denoise_restore_radiance"));
             auto* d=MTL::TextureDescriptor::texture2DDescriptor(MTL::PixelFormatRGBA16Float,1,1,false);
@@ -302,6 +309,12 @@ struct MetalfxDenoise::Impl {
             }
         }
         if(!options.enabled){setStatus(Status::Disabled,"MetalFX denoised disabled; caller custom signal path");return;}
+        // Admission is decided before requests, HALF packing and graph setup.
+        // Unit preExposure or finite/in-range inputs do not qualify radiometry.
+        if(!metalfx_denoise::permitsNativeEncoding(options.radiometricDomain)) {
+            setStatus(Status::UnqualifiedRadiometricDomain,metalfx_denoise::UnqualifiedRadiometryReason);
+            ++stats.fallbackFrames;return;
+        }
         if(!stats.sdkAvailable){setStatus(Status::MissingSDK,"Built without Metal4FX TemporalDenoisedScaler SDK headers");++stats.fallbackFrames;return;}
         if(!stats.deviceSupported){setStatus(Status::UnsupportedDevice,"Runtime/device does not support Metal4FX denoised");++stats.fallbackFrames;return;}
         if(!stats.factoryInstalled){setStatus(Status::MissingFactory,"PipelineCache denoised gateway is not installed; custom fallback");++stats.fallbackFrames;return;}
@@ -383,6 +396,57 @@ struct MetalfxDenoise::Impl {
         // repeat history.begin, settle counts, phase/cut bookkeeping or uploads
         // for synthetic rendered frames while the model compiles.
         publishPrepared(views[frame.view]);return currentStatus==Status::Ready;
+    }
+    bool waitLifecycle(u32 activeViews,std::chrono::milliseconds budget) {
+        if(!activeViews||activeViews>options.views||frame.view>=activeViews||options.resizeSettleFrames!=0||
+           budget.count()<=0||budget.count()>120000||!frameValid())
+            throw std::invalid_argument("Invalid diagnostic lifecycle readiness views/budget/frame");
+        if(currentStatus!=Status::Pending&&currentStatus!=Status::Settling&&currentStatus!=Status::Ready)return false;
+        const auto deadline=std::chrono::steady_clock::now()+budget;
+        const auto timeout=[&]{setStatus(Status::FixturePrewarmTimeout,
+            "Fixture lifecycle readiness exceeded its total transition budget; jobs were not cancelled");return false;};
+        for(;;) {
+            if(std::chrono::steady_clock::now()>=deadline)return timeout();
+            // Publish a real hot reload before choosing descriptor keys. This
+            // polls boundedly; it does not call waitAllFinal or advance frames.
+            pipelines.beginFrame();
+            if(pipelines.reloadPending()) {std::this_thread::sleep_for(std::chrono::milliseconds(1));continue;}
+            const metalfx_denoise::RequestKey key{frame.extent,pipelines.generation(),descriptorFlags()};
+            for(u32 i=0;i<activeViews;++i) {
+                auto& v=views[i];
+                if(!v.desiredValid||v.desired!=key) {
+                    retire(std::move(v.scaler),v.used);v.used=false;releaseTargets(v);
+                    v.desired=key;v.desiredValid=true;v.stableFrames=0;v.failed=false;
+                    histories.invalidate(i,"Fixture lifecycle extent/pipeline transition");++graphVersion;
+                    if(i==frame.view)reset=true;
+                }
+            }
+            // Stale completed futures take the normal discard/retire path.
+            // Never overwrite a still-running request or drop its ownership.
+            collect(false);
+            bool ready=true,waiting=false;
+            for(u32 i=0;i<activeViews;++i) {
+                auto& v=views[i];
+                if(v.failed){setStatus(v.failureStatus,v.failureReason);return false;}
+#if PHOSPHOR_HAS_METALFX_DENOISED
+                if(!v.scaler&&!v.pending.valid())request(v);
+#endif
+                if(v.failed){setStatus(v.failureStatus,v.failureReason);return false;}
+                ready&=bool(v.scaler);waiting|=v.pending.valid();
+            }
+            if(ready&&pipelines.compute(packHandle)&&pipelines.compute(clearHandle)&&pipelines.compute(restoreHandle)) {
+                if(std::chrono::steady_clock::now()>=deadline)return timeout();
+                // The current Frame is still the one prepared by the caller.
+                // Do not repeat history.begin, reset counters, or mutate time.
+                publishPrepared(views[frame.view]);return currentStatus==Status::Ready;
+            }
+            if(waiting) {
+                for(u32 i=0;i<activeViews;++i) {
+                    auto& pending=views[i].pending;
+                    if(pending.valid()&&pending.wait_until(deadline)!=std::future_status::ready)return timeout();
+                }
+            } else std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
     }
     bool sourceValid(const rg::RenderGraph& g,rg::TextureRef ref,Channel ch)const {
         if(!ref.valid()||ref.resource>=g.resources().size())return false;
@@ -547,6 +611,7 @@ MetalfxDenoise::MetalfxDenoise(MetalContext& c,PipelineCache& p,Options o,Factor
 MetalfxDenoise::~MetalfxDenoise()=default;
 void MetalfxDenoise::prepareFrame(const Frame& f){impl_->prepare(f);}
 bool MetalfxDenoise::prewarmPreparedFixture(u32 views,std::chrono::milliseconds budget){return impl_->prewarm(views,budget);}
+bool MetalfxDenoise::waitPreparedLifecycleFixture(u32 views,std::chrono::milliseconds budget){return impl_->waitLifecycle(views,budget);}
 rg::TextureRef MetalfxDenoise::addToGraph(rg::RenderGraph& g,const Inputs& in){return impl_->add(g,in);}
 void MetalfxDenoise::bindFrame(MetalGraphExecutor& e){impl_->bind(e);}
 bool MetalfxDenoise::ready()const{return impl_->currentStatus==Status::Ready;}

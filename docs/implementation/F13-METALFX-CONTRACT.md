@@ -1,3 +1,5 @@
+> Stato corrente: il seguito conserva la consegna iniziale dell'adapter. Gateway e fixture native sono ora disponibili, ma F13.3 resta parziale: la produzione scene-linear/HDR usa custom Float32 per radiometria non qualificata. Vedi [F13-RADIOMETRY-POLICY.md](F13-RADIOMETRY-POLICY.md); le vecchie indicazioni di gateway non integrato non descrivono lo stato corrente.
+
 # F13.3 MetalFX denoised adapter — WRITTEN / NON VERIFIED
 
 Base4b80e36f7399f264e4c8cc4c4e5f0607d5793128. New managed worktree

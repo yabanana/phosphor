@@ -304,6 +304,9 @@ PipelineCache::PipelineCache(MetalContext& context, const Options& options)
 }
 
 PipelineCache::~PipelineCache() {
+    // CompileQueue destruction cancels queued jobs. SDK retirement jobs must
+    // actually run on their worker with an autorelease pool before shutdown.
+    queue_->waitIdle();
     queue_.reset(); // joins the workers; nothing posts after this
     context_.waitIdle();
     registry_.setReleaser(releaseNow, nullptr);

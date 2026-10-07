@@ -59,3 +59,15 @@ TEST_CASE("F13 explicit pre-exposure scaling restores physical wide HDR units") 
     CHECK(format(Channel::RestoredOutput)==rg::Format::RGBA32Float);
     // Closed-form pack/restore identity is NOT evidence of SDK output units.
 }
+
+TEST_CASE("Finite packing and unit exposure cannot qualify native scene-linear radiometry") {
+    GuideSample low;low.color={.5f,.25f,.125f};
+    REQUIRE(validateSample(low)==0);REQUIRE(validSemantics(Semantics{}));
+    CHECK_FALSE(permitsNativeEncoding(RadiometricDomain::UnqualifiedSceneLinear));
+    GuideSample wide;wide.color={368640,128,64};
+    REQUIRE(validateSample(wide,.002f,1.f/64)==0);
+    CHECK_FALSE(permitsNativeEncoding(RadiometricDomain::UnqualifiedSceneLinear));
+    CHECK_FALSE(permitsNativeEncoding(static_cast<RadiometricDomain>(255)));
+    CHECK(permitsNativeEncoding(RadiometricDomain::ControlledFixtureDiagnostic));
+    CHECK(std::string_view(radiometricDomainName(RadiometricDomain::ControlledFixtureDiagnostic))=="controlled-fixture-diagnostic");
+}

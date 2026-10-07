@@ -28,7 +28,9 @@ class VisibilityRenderer {
                       std::array<u32, 3> defaultTextures, float exposure, u32 debugMode,
                       const GPUTemporalParams &temporal, const FrameConstants &constants);
     rg::TextureRef addResolve(rg::RenderGraph &graph, rg::TextureRef visibility, rg::TextureRef depth);
-    void addChecks(rg::RenderGraph &graph);
+    // exposureInput names the SAME graph version used by Post histogram.
+    // Raw resolve/guide checks keep their independent original attachments.
+    void addChecks(rg::RenderGraph &graph,rg::TextureRef exposureInput);
     bool check(const GpuScene &geometry);
     [[nodiscard]] bool needsPoseReset(u32 view, u64 bytes) const {
         return view >= previousInstances_.size() || !previousInstances_[view] || bytes > poseCapacity_;
@@ -88,12 +90,12 @@ class VisibilityRenderer {
     std::array<u32, ExposureBins> checkedHistogramLow_{}, checkedHistogramHigh_{};
     GPUTemporalParams temporal_{};
     std::array<std::vector<GPUInstance>, 4> checkedPreviousPoses_{};
-    std::array<MTL::Buffer *, 8> readbacks_{};
-    std::array<u64, 8> pitches_{};
+    std::array<MTL::Buffer *, 9> readbacks_{};
+    std::array<u64, 9> pitches_{};
     MTL::Buffer *currentReadback_ = nullptr;
     MTL::Buffer *previousReadback_ = nullptr;
     u32 readWidth_ = 0, readHeight_ = 0;
-    bool readColorFloat32_ = false;
+    bool readColorFloat32_ = false,readExposureFloat32_ = false;
     u64 readPoseCapacity_ = 0;
     bool useBinning_ = false;
     u64 binnedFrames_ = 0, genericFrames_ = 0;
