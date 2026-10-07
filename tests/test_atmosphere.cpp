@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 #include "renderer/atmosphere.h"
+#include <algorithm>
 #include <cmath>
 #include <limits>
 using namespace phosphor;
@@ -67,6 +68,28 @@ TEST_CASE("F14 transmittance LUT mapping roundtrips physical rays away from the 
     for(double h:{0.0,1000.0,20000.0,90000.0})for(double mu:{0.0,0.1,0.5,1.0}){
         const auto uv=atmosphereTransmittanceUv(a,a.bottomRadius+h,mu),ray=atmosphereTransmittanceRay(a,uv);
         CHECK(ray.x==doctest::Approx(a.bottomRadius+h).epsilon(1e-10));CHECK(ray.y==doctest::Approx(mu).epsilon(1e-7));}
+}
+TEST_CASE("F14 sky azimuth lookup is periodic while physical LUT coordinates stay bounded") {
+    constexpr int width=192;constexpr double pi=3.14159265358979323846;
+    std::array<double,width> sky{};
+    for(int i=0;i<width;++i)sky[i]=1+.5*std::sin(2*pi*(i+.5)/width);
+    // Independent normalized linear-texture lookup on a known continuous
+    // periodic radiance field. Texel centres lie at (i+.5)/width.
+    const auto lookup=[&](double u,bool repeat){
+        const double coordinate=u*width-.5;const int lo=int(std::floor(coordinate));
+        const double fraction=coordinate-lo;
+        const auto at=[&](int i){return sky[repeat?(i%width+width)%width:std::clamp(i,0,width-1)];};
+        return at(lo)*(1-fraction)+at(lo+1)*fraction;
+    };
+    constexpr double epsilon=1e-9;
+    CHECK(lookup(epsilon,true)==doctest::Approx(lookup(1-epsilon,true)).epsilon(1e-8));
+    CHECK(lookup(0,true)==doctest::Approx(1).epsilon(1e-12));
+    // Old clamp addressing has a finite seam, not interpolation error.
+    CHECK(lookup(epsilon,false)-lookup(1-epsilon,false)==doctest::Approx(std::sin(pi/width)).epsilon(1e-9));
+    const double step=2*pi/width,analyticLinearErrorBound=.5*step*step/8;
+    for(int i=0;i<65;++i){const double u=double(i)/64;
+        CHECK(std::abs(lookup(u,true)-(1+.5*std::sin(2*pi*u)))<=analyticLinearErrorBound+1e-12);
+        CHECK(lookup(u,true)==doctest::Approx(lookup(u+3,true)).epsilon(1e-12));}
 }
 TEST_CASE("F14 phase functions normalize and retain forward scattering sign") {
     constexpr u32 samples=20000;double rayleigh=0,hg=0;
