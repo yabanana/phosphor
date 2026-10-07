@@ -545,7 +545,6 @@ struct GPUResolveLightingParams {
     u32 flags, sunIndex, width, height; // bits: sun visibility, replace local DI, indirect irradiance
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUResolveLightingParams) == 16, "GPUResolveLightingParams layout");
-||||||| parent of 4304675 (F11.1/F11.2: define portable light sampling and reservoir contracts (unverified))
 // F11: local-light sampling. Area emission is radiance (W/(m^2 sr));
 // point/spot emission is intensity (W/sr). Distances are world-space metres.
 PHOSPHOR_GPU_CONSTANT u32 DI_LIGHT_RECTANGLE = 3u;

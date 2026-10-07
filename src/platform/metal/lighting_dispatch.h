@@ -12,7 +12,7 @@ inline pipe::PipelineDesc kernel(const char* name, bool rt = false) {
     if (rt) d.linkedFunctions = {"rt_alpha_generic"};
     return d;
 }
-inline MTL4::ArgumentTable* table(MetalContext& c, u32 buffers=24, u32 textures=12) {
+inline MTL4::ArgumentTable* table(MetalContext& c, u32 buffers=24, u32 textures=16) {
     auto* d = MTL4::ArgumentTableDescriptor::alloc()->init();
     d->setMaxBufferBindCount(buffers); d->setMaxTextureBindCount(textures);
     NS::Error* error = nullptr; auto* t = c.device()->newArgumentTable(d,&error); d->release();
