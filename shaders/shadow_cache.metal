@@ -37,7 +37,7 @@ static CacheDepthOut cacheVertex(const device GPUVertex& v,const device GPUInsta
     CacheDepthOut o; o.position=cacheMatrix(p.cascades[p.cascadeIndex].viewProjection)*float4(cacheWorld(i,v),1);
     o.uv=float2(v.u,v.v);o.material=i.materialIndex;return o;
 }
-vertex CacheDepthOut shadow_cache_depth_vertex(uint vertex [[vertex_id]],uint instance [[instance_id]],
+vertex CacheDepthOut shadow_cache_depth_vertex(uint vertexId [[vertex_id]],uint instance [[instance_id]],
     constant GPUShadowParams& p [[buffer(1)]],const device GPUInstance* instances [[buffer(3)]],
     const device GPUVertex* vertices [[buffer(6)]],const device uint* flags [[buffer(14)]],
     constant GPUShadowCacheParams& cache [[buffer(18)]],const device uint* classifications [[buffer(19)]]) {
@@ -45,7 +45,7 @@ vertex CacheDepthOut shadow_cache_depth_vertex(uint vertex [[vertex_id]],uint in
     if(!cacheCaster(instance,p,cache,flags,classifications)) return invalid;
     const device GPUInstance& i=instances[instance];
     if(i.meshIndex!=p.pad || i.materialIndex>=p.materialCount) return invalid;
-    return cacheVertex(vertices[vertex],i,p);
+    return cacheVertex(vertices[vertexId],i,p);
 }
 using CacheMesh=metal::mesh<CacheDepthOut,void,MESHLET_MESH_GROUP,MESHLET_MESH_GROUP,topology::triangle>;
 [[mesh]] void shadow_cache_depth_mesh(CacheMesh out,uint tid [[thread_index_in_threadgroup]],
@@ -107,8 +107,8 @@ kernel void shadow_cache_validate(constant GPUShadowCacheParams& p [[buffer(18)]
     if(ready && !cacheSame(stored[tile],expected[tile]))
         atomic_fetch_add_explicit(counters+7,1u,memory_order_relaxed);
 }
-vertex CacheFullscreen shadow_cache_composite_vertex(uint vertex [[vertex_id]]) {
-    CacheFullscreen out;out.position=float4(vertex==1?3.0f:-1.0f,vertex==2?3.0f:-1.0f,0,1);return out;
+vertex CacheFullscreen shadow_cache_composite_vertex(uint vertexId [[vertex_id]]) {
+    CacheFullscreen out;out.position=float4(vertexId==1?3.0f:-1.0f,vertexId==2?3.0f:-1.0f,0,1);return out;
 }
 struct CacheComposedDepth { float depth [[depth(any)]]; };
 fragment CacheComposedDepth shadow_cache_composite_fragment(CacheFullscreen in [[stage_in]],

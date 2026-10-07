@@ -1,5 +1,6 @@
 #include <thread>
 #include "app/engine.h"
+#include <glm/gtc/type_ptr.hpp>
 #include "platform/metal/temporal_worker.h"
 
 #include "core/input.h"

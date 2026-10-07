@@ -147,10 +147,12 @@ fragment ShadowReceiverOutput forward_shadow_receiver_fs(
     SurfaceVertexOut in [[stage_in]], uint primitive [[primitive_id]],
     const device GPUInstance* instances [[buffer(2)]],
     const device GPUMaterial* materials [[buffer(3)]],
-    const device TextureHandle* textures [[buffer(5)]]) {
+    const device TextureHandle* textures [[buffer(5)]],
+    constant GPUTemporalParams& temporal [[buffer(8)]]) {
     const device auto& material = materials[in.materialIndex];
     const float alpha = material.baseColor[3] * float(sampleOr(textures, material.baseColorTex, in.uv,
-                                                             half4(1), dfdx(in.uv), dfdy(in.uv)).a);
+                                                             half4(1), dfdx(in.uv)*exp2(temporal.mipBias),
+                                                             dfdy(in.uv)*exp2(temporal.mipBias)).a);
     if (alpha < material.alphaCutoff) discard_fragment();
     const float3 n = cross(dfdx(in.worldPos), dfdy(in.worldPos));
     if (dot(n,n) < 1e-20f) discard_fragment();

@@ -119,7 +119,7 @@ static ShadowDepthOut shadowDepthVertex(const device GPUVertex& v,const device G
     o.uv=float2(v.u,v.v); o.material=i.materialIndex;
     return o;
 }
-vertex ShadowDepthOut shadow_depth_vertex(uint vertex [[vertex_id]],uint instanceID [[instance_id]],
+vertex ShadowDepthOut shadow_depth_vertex(uint vertexId [[vertex_id]],uint instanceID [[instance_id]],
     constant GPUShadowParams& p [[buffer(1)]],const device GPUInstance* instances [[buffer(3)]],
     const device GPUVertex* vertices [[buffer(6)]],const device uint* casterFlags [[buffer(14)]]) {
     const uint slot=p.casterSlot==~0u?instanceID:p.casterSlot;
@@ -128,7 +128,7 @@ vertex ShadowDepthOut shadow_depth_vertex(uint vertex [[vertex_id]],uint instanc
     const device GPUInstance& i=instances[slot];
     if(!(casterFlags[slot]&(1u<<p.cascadeIndex)) || i.materialIndex>=p.materialCount ||
         (p.casterSlot==~0u && i.meshIndex!=p.pad)) return invalid;
-    return shadowDepthVertex(vertices[vertex],i,p); // host passes mesh vertexOffset as baseVertex
+    return shadowDepthVertex(vertices[vertexId],i,p); // host passes mesh vertexOffset as baseVertex
 }
 
 // Direct mesh path has no object-stage/camera list. Global meshlets are X,
