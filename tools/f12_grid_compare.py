@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare only the preregistered F12 grid presets against the frozen oracle."""
+"""Compare only the preregistered F12 raw or filtered presets against the frozen oracle."""
 import argparse, hashlib, json, math, pathlib
 import numpy as np
 from f12_oracle_validate import load_reference, ply
@@ -17,6 +17,8 @@ def validate_run(case,report,status,protocol):
     command=status['command']
     if not status.get('passed'):raise ValueError(f"{case['id']}: runtime check did not pass")
     if option(command,'--gi')!=case['mode']:raise ValueError('GI mode mismatch')
+    if option(command,'--capture-linear-signal')!=protocol.get('capture_signal','indirect-diffuse'):raise ValueError('captured signal mismatch')
+    if case.get('denoiser') and option(command,'--lighting-denoise')!=case['denoiser']:raise ValueError('denoiser mismatch')
     actual_grid=tuple(map(int,option(command,'--gi-grid','8x4x8').split('x')))
     if actual_grid!=tuple(case['grid']):raise ValueError('grid mismatch')
     if '--gi-spacing' in command or '--gi-probe-anchor' in command:raise ValueError('fixed-volume sweep forbids spacing/anchor overrides')
@@ -62,7 +64,7 @@ def cost_metadata(report,status):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     for name in ['reference-script','reference-dir','protocol','grid-protocol','output']:parser.add_argument('--'+name,required=True)
-    parser.add_argument('--case',action='append',required=True,help='Frozen case ID=directory; all six required')
+    parser.add_argument('--case',action='append',required=True,help='Frozen case ID=directory; exactly the protocol case set required')
     args=parser.parse_args();paths={}
     for value in args.case:
         name,separator,path=value.partition('=')
@@ -84,7 +86,7 @@ def main():
         images=[ref.read_pfm(root/'captures'/f'frame-{frame:06d}.pfm') for frame in frames]
         mean,quality=evaluate_images(ref,oracle,masks,images,protocol);ref.write_pfm(out/f'{name}_mean.pfm',mean)
         result[name]={'config':case,'quality':quality,'cost':cost_metadata(report,status),'volume':fitted_volume(snapshot_root,data,case['grid']),'ray_work_per_frame':math.prod(case['grid'])*grid_protocol['ray_count_per_probe']}
-    record={'schema':1,'state':'BOUNDED_STATIC_CORNELL_COMPARISON_NOT_PHASE_ACCEPTANCE','quality_protocol_sha256':hashlib.sha256(pathlib.Path(args.protocol).read_bytes()).hexdigest(),'grid_protocol_sha256':hashlib.sha256(pathlib.Path(args.grid_protocol).read_bytes()).hexdigest(),'snapshot_sha256':protocol['snapshot_sha256'],'reference_spp_per_seed':reference_report['records'][-1]['spp'],'cases':result,'leak_certification':'UNAVAILABLE_INSUFFICIENT_GEOMETRIC_ROI','dynamic_recovery':'NOT_EXECUTED','performance_adoption':False}
+    record={'schema':1,'state':grid_protocol.get('report_state','BOUNDED_STATIC_CORNELL_COMPARISON_NOT_PHASE_ACCEPTANCE'),'capture_signal':grid_protocol.get('capture_signal','indirect-diffuse'),'quality_protocol_sha256':hashlib.sha256(pathlib.Path(args.protocol).read_bytes()).hexdigest(),'grid_protocol_sha256':hashlib.sha256(pathlib.Path(args.grid_protocol).read_bytes()).hexdigest(),'snapshot_sha256':protocol['snapshot_sha256'],'reference_spp_per_seed':reference_report['records'][-1]['spp'],'cases':result,'leak_certification':'UNAVAILABLE_INSUFFICIENT_GEOMETRIC_ROI','dynamic_recovery':'NOT_EXECUTED','performance_adoption':False}
     (out/'grid_quality_cost.json').write_text(json.dumps(record,indent=2)+'\n')
     print(json.dumps({name:{'roi_pass':r['quality']['roi_pass'],'worst_nrmse':max(m['relative_rmse'] for m in r['quality']['regions'].values()),'worst_absolute_bias':max(abs(m['relative_signed_bias']) for m in r['quality']['regions'].values()),'frame_gpu_p50_ms':r['cost']['gpu_frame_ms']['p50'],'frame_gpu_p95_ms':r['cost']['gpu_frame_ms']['p95'],'pass_min_samples':r['cost']['gi_pass_min_samples'],'initial_inside_room':r['volume']['initially_inside_room'],'total_probes':r['volume']['total_probes']} for name,r in result.items()},indent=2))
     return 0 if all(r['quality']['roi_pass'] for r in result.values()) else 1
