@@ -21,10 +21,10 @@ float StbnMask::sample(u32 x, u32 y, u32 frame, u32 dimension) const {
     const size_t n = size_t(config.width) * config.height * config.frames;
     const size_t index = (((size_t(dimension % config.dimensions) * config.frames + frame % config.frames) *
                           config.height + y % config.height) * config.width + x % config.width);
-    // Cranley-Patterson random rotation per dimension/candidate cycle preserves
+    // Cranley-Patterson random rotation per dimension AND temporal block preserves
     // uniform marginals while retaining ranks within each generated mask.
     const float rank = float((double(ranks[index]) + 0.5) / n);
-    const float rotation = whiteSample(0, 0, 0, dimension, config.seed ^ 0xa511e9b3u);
+    const float rotation = whiteSample(0, 0, frame / config.frames, dimension, config.seed ^ 0xa511e9b3u);
     return rank + rotation - std::floor(rank + rotation);
 }
 

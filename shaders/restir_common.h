@@ -164,7 +164,7 @@ inline float diRandom(uint2 pixel, uint dimension, constant GPUDIParams& p, cons
     const uint index = (((dimension % p.stbnDimensions) * p.stbnFrames + p.frameIndex % p.stbnFrames) *
                         p.stbnHeight + pixel.y % p.stbnHeight) * p.stbnWidth + pixel.x % p.stbnWidth;
     const float rank = (float(ranks[index]) + 0.5f) / float(n);
-    return fract(rank + diWhite(0, 0, 0, dimension, p.stbnSeed ^ 0xa511e9b3u));
+    return fract(rank + diWhite(0, 0, p.frameIndex / p.stbnFrames, dimension, p.stbnSeed ^ 0xa511e9b3u));
 }
 
 inline GPUDIReservoir diEmpty(constant GPUDIParams& p) {
