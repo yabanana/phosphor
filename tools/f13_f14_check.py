@@ -143,10 +143,13 @@ def evaluate(case,status,log,report):
     errors=list(status.get("failures",[]))
     if status.get("returncode")!=0 or status.get("exit_marker")!=0:errors.append("raw process/EXIT marker did not succeed")
     if status.get("timed_out") or GPU_ERROR.search(log):errors.append("timeout or GPU/API/shader validation failure")
-    if not isinstance(report,dict) or report.get("schema_version",0)<10:errors.append("schema10 renderer report missing")
+    schema=report.get("schema_version") if isinstance(report,dict) else None
+    if not numeric(schema) or schema<10:errors.append("schema10 renderer report missing")
     lighting=report.get("lighting",{}) if isinstance(report,dict) else {}
     rt=report.get("rt",{}) if isinstance(report,dict) else {}
-    if rt.get("enabled") is not case.get("rt_expected"):errors.append("actual RT enabled state differs from frozen baseline")
+    # Schema10 omits rt when the subsystem is not instantiated (rt.present=false).
+    rt_enabled=rt.get("enabled") if isinstance(report,dict) and "rt" in report else False
+    if rt_enabled is not case.get("rt_expected"):errors.append("actual RT enabled state differs from frozen baseline")
     if not numeric(lighting.get("checks")) or lighting.get("checks",0)<=0:errors.append("lighting checker executed zero/missing checks")
     if lighting.get("failures")!=0:errors.append("lighting checker reported failures")
     lines=list(CHECK.finditer(log))
@@ -192,6 +195,10 @@ def numeric_evidence(case,evidence,binary_hash,manifest_hash):
         for sample in samples:
             if sample.get("height_falloff")!=0:errors.append("medium is not actually homogeneous");continue
             expected=homogeneous_fog(sample["extinction"],sample["source"],sample["distance"])
+            gpu_radiance=sample.get("gpu_radiance",[])
+            if not numeric(sample.get("gpu_transmittance")) or len(gpu_radiance)!=3 or not all(numeric(x) and x>=0 for x in gpu_radiance):
+                errors.append("nonfinite or incomplete GPU medium result");continue
+            if not 0<=sample["gpu_transmittance"]<=1:errors.append("nonphysical GPU transmittance")
             if abs(sample["gpu_transmittance"]-expected["transmittance"])>1e-4:errors.append("Beer-Lambert T error")
             scale=max(1.0,max(expected["radiance"]))
             if max(abs(a-b) for a,b in zip(sample["gpu_radiance"],expected["radiance"]))>1e-4*scale:errors.append("constant-source integral error")
@@ -204,7 +211,9 @@ def numeric_evidence(case,evidence,binary_hash,manifest_hash):
             reference=sample["reference"];observed=sample["gpu"]
             if len(reference)!=len(observed) or not all(numeric(x) for x in reference+observed):errors.append("invalid numerical samples");continue
             if any(abs(a-b)>1e-4*max(1,abs(a)) for a,b in zip(reference,observed)):errors.append("independent numerical oracle mismatch")
-            if sample.get("expected_epoch")!=sample.get("gpu_epoch"):errors.append("stale LUT/history/sun clock epoch")
+            expected_epoch=sample.get("expected_epoch");observed_epoch=sample.get("gpu_epoch")
+            if not numeric(expected_epoch) or not numeric(observed_epoch) or expected_epoch!=observed_epoch:
+                errors.append("missing/stale LUT/history/sun clock epoch")
     return {"passed":not errors,"errors":errors}
 
 
