@@ -735,4 +735,84 @@ struct GPUGiCheckParams {
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUGiCheckParams) == 16, "GPUGiCheckParams layout");
 
+// F13 source-only signal ABI. All radiance is linear; distances are metres.
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_ENABLE_RT = 1u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_ENABLE_SSR = 2u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_ENABLE_CACHE = 4u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_ENABLE_PROBES = 8u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_NONE = 0u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_RT = 1u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_SSR = 2u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_CACHE = 3u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_PROBE = 4u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_ENVIRONMENT = 5u;
+PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_VALID = 1u;
+PHOSPHOR_GPU_CONSTANT u32 DENOISE_SIGNAL_DI = 0u;
+PHOSPHOR_GPU_CONSTANT u32 DENOISE_SIGNAL_GI = 1u;
+PHOSPHOR_GPU_CONSTANT u32 DENOISE_SIGNAL_SPECULAR = 2u;
+PHOSPHOR_GPU_CONSTANT u32 DENOISE_SIGNAL_AO = 3u;
+PHOSPHOR_GPU_CONSTANT u32 DENOISE_RESET = 1u;
+PHOSPHOR_GPU_CONSTANT u32 DENOISE_CLAMP_HISTORY = 2u;
+
+struct GPUReflectionParams {
+    float viewProjection[16], inverseViewProjection[16], view[16];
+    float cameraPosition[4];
+    float maxDistance, ssrThickness, rtRoughnessLow, rtRoughnessHigh;
+    u32 width, height, frameIndex, flags;
+    u32 slotCount, meshCount, materialCount, lightCount;
+    u32 ssrSteps, ssrBinarySteps, probeCount, seed;
+    float environment[3], maxProbeMip;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionParams) == 288, "GPUReflectionParams layout");
+struct GPUSpecularSample {
+    float radiance[3], hitDistance; // weighted outgoing Lo; 0 distance for environment/miss
+    float direction[3], proposalSolidAngle;
+    u32 path, secondarySlot, secondaryGeneration, flags;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUSpecularSample) == 48, "GPUSpecularSample layout");
+struct GPUAOParams {
+    float viewProjection[16], inverseViewProjection[16];
+    float radius, originBias, thickness, pixelScale;
+    u32 width, height, samples, slices;
+    u32 steps, frameIndex, flags, slotCount;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUAOParams) == 176, "GPUAOParams layout");
+struct GPUReflectionProbe {
+    float boxMin[3], blendDistance;
+    float boxMax[3], mipCount;
+    float capturePosition[3]; u32 generation;
+    u32 cubeIndex, enabled, pad[2];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionProbe) == 64, "GPUReflectionProbe layout");
+struct GPUProbeCaptureParams {
+    float viewProjection[16], capturePosition[4];
+    u32 lightCount, slotCount, materialCount, sampledLightCount;
+    float environment[3]; u32 seed;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeCaptureParams) == 112, "GPUProbeCaptureParams layout");
+struct GPUProbeFilterParams {
+    u32 side, mip, sampleCount, cubeIndex;
+    float roughness, sourceSide; u32 pad[2];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeFilterParams) == 32, "GPUProbeFilterParams layout");
+struct GPUDenoiseParams {
+    u32 width, height, frameIndex, signal;
+    u32 viewID, historyEpoch, signalRevision, flags;
+    float temporalAlpha, momentsAlpha, depthThreshold, normalThreshold;
+    float roughnessThreshold, hitDistanceThreshold, luminancePhi, normalPhi;
+    u32 maxHistory, atrousStep, minHistoryForVariance, pad0;
+    float varianceFloor, clampSigma, planeThreshold, pad1;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseParams) == 96, "GPUDenoiseParams layout");
+struct GPUDenoiseHistory {
+    float color[3], firstMoment;
+    float secondMoment, variance; u32 length, signal;
+    float normal[3], depth;
+    u32 slot, instanceGeneration, materialRevision, signalRevision;
+    u32 viewID, historyEpoch, valid, flags;
+    float position[3], roughness;
+    float hitDistance; u32 path, secondarySlot, secondaryGeneration;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseHistory) == 112, "GPUDenoiseHistory layout");
+
 } // namespace phosphor
