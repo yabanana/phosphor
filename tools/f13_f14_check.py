@@ -209,7 +209,7 @@ def numeric_evidence(case,evidence,binary_hash,manifest_hash):
             if sample.get("reference_method") not in ("adaptive-simpson","gauss-legendre","exact-sun-clock"):
                 errors.append("reference is not the independent declared method");continue
             reference=sample["reference"];observed=sample["gpu"]
-            if len(reference)!=len(observed) or not all(numeric(x) for x in reference+observed):errors.append("invalid numerical samples");continue
+            if not reference or len(reference)!=len(observed) or not all(numeric(x) for x in reference+observed):errors.append("invalid/empty numerical samples");continue
             if any(abs(a-b)>1e-4*max(1,abs(a)) for a,b in zip(reference,observed)):errors.append("independent numerical oracle mismatch")
             expected_epoch=sample.get("expected_epoch");observed_epoch=sample.get("gpu_epoch")
             if not numeric(expected_epoch) or not numeric(observed_epoch) or expected_epoch!=observed_epoch:
