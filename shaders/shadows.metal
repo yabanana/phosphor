@@ -5,6 +5,7 @@
 #include "rt_common.h"
 #include "renderer/shadow_math.h"
 #include "renderer/shadow_layout.h"
+#include "renderer/shadow_dispatch.h"
 #include "renderer/cull_math.h"
 #include "renderer/visibility_math.h"
 #include "renderer/meshlet_layout.h"
@@ -122,18 +123,17 @@ static ShadowDepthOut shadowDepthVertex(const device GPUVertex& v,const device G
 vertex ShadowDepthOut shadow_depth_vertex(uint vertexId [[vertex_id]],uint instanceID [[instance_id]],
     constant GPUShadowParams& p [[buffer(1)]],const device GPUInstance* instances [[buffer(3)]],
     const device GPUVertex* vertices [[buffer(6)]],const device uint* casterFlags [[buffer(14)]]) {
-    const uint slot=p.casterSlot==~0u?instanceID:p.casterSlot;
+    const uint slot=shadowDrawSlot(p.casterSlot,instanceID,p.slotCount);
     ShadowDepthOut invalid{}; invalid.position=float4(2,2,0,1);
     if(slot>=p.slotCount || p.cascadeIndex>=4) return invalid;
     const device GPUInstance& i=instances[slot];
     if(!(casterFlags[slot]&(1u<<p.cascadeIndex)) || i.materialIndex>=p.materialCount ||
-        (p.casterSlot==~0u && i.meshIndex!=p.pad)) return invalid;
+        !(i.flags&INSTANCE_FLAG_VALID) || !(i.flags&2u) || i.meshIndex!=p.pad) return invalid;
     return shadowDepthVertex(vertices[vertexId],i,p); // host passes mesh vertexOffset as baseVertex
 }
 
-// Direct mesh path has no object-stage/camera list. Global meshlets are X,
-// scene slots are Y when casterSlot is the all-slots sentinel. Otherwise a
-// flattened 2D grid addresses one explicit instance's meshlet range.
+// Each direct draw covers only one bucket's meshlet/slot chunk. Coordinates
+// are local to this dispatch; camera visibility never defines caster membership.
 using ShadowDepthMesh=metal::mesh<ShadowDepthOut,void,MESHLET_MESH_GROUP,MESHLET_MESH_GROUP,topology::triangle>;
 [[mesh]] void shadow_depth_mesh(ShadowDepthMesh out,uint tid [[thread_index_in_threadgroup]],
     uint2 group [[threadgroup_position_in_grid]],constant GPUShadowParams& p [[buffer(1)]],
@@ -141,12 +141,13 @@ using ShadowDepthMesh=metal::mesh<ShadowDepthOut,void,MESHLET_MESH_GROUP,MESHLET
     const device GPUVertex* vertices [[buffer(6)]],const device GPUMeshlet* meshlets [[buffer(7)]],
     const device uint* meshletVertices [[buffer(8)]],const device uchar* triangles [[buffer(9)]],
     const device uint* casterFlags [[buffer(14)]]) {
-    const uint slot=p.casterSlot==~0u?group.y:p.casterSlot;
-    const uint meshlet=p.casterSlot==~0u?group.x:p.meshletFirst+group.y*max(p.meshletGridWidth,1u)+group.x;
+    const uint slot=shadowDrawSlot(p.casterSlot,group.y,p.slotCount);
+    const uint meshlet=shadowDrawMeshlet(p.meshletFirst,group.x,p.meshletCount);
     bool valid=slot<p.slotCount && p.cascadeIndex<4;
     if(valid) {
         const device GPUInstance& i=instances[slot];
-        valid=i.meshIndex<p.meshCount && i.materialIndex<p.materialCount && (casterFlags[slot]&(1u<<p.cascadeIndex));
+        valid=(i.flags&INSTANCE_FLAG_VALID) && (i.flags&2u) && i.meshIndex==p.pad &&
+              i.meshIndex<p.meshCount && i.materialIndex<p.materialCount && (casterFlags[slot]&(1u<<p.cascadeIndex));
         if(valid) {
             const device GPUMeshInfo& mesh=meshes[i.meshIndex];
             valid=meshlet>=mesh.meshletOffset && meshlet-mesh.meshletOffset<mesh.meshletCount;

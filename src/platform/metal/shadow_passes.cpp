@@ -8,6 +8,7 @@
 #include "renderer/scene_store.h"
 #include "renderer/gpu_scene.h"
 #include "renderer/shadow_layout.h"
+#include "renderer/shadow_dispatch.h"
 #include "renderer/shadow_math.h"
 #include "renderer/cull_math.h"
 #include "renderer/transform_math.h"
@@ -39,6 +40,7 @@ struct ShadowPasses::Impl {
         MTL4::ArgumentTable* receiverTable=nullptr;
         std::vector<MTL4::ArgumentTable*> rasterTables;
         std::vector<MTL::GPUAddress> drawParams;
+        std::vector<ShadowCasterDraw> casterDraws;
         std::array<MTL4::ArgumentTable*,4> initializeTables{},publishTables{},validateTables{},compositeTables{};
         std::array<MTL::GPUAddress,4> staticParams{},dynamicParams{},expectedAddress{};
         std::array<MTL::Buffer*,4> expectedBuffer{};
@@ -134,12 +136,24 @@ struct ShadowPasses::Impl {
         for(auto& v:views) {c.memory().release(v.previous,MemoryCategory::RayTracing);c.memory().release(v.next,MemoryCategory::RayTracing);for(auto* t:v.cached)c.memory().release(t,MemoryCategory::RayTracing);for(auto* b:v.cacheTiles)c.memory().release(b,MemoryCategory::RayTracing);}
         if(depthState)depthState->release();if(receiverDepthState)receiverDepthState->release();if(compositeDepthState)compositeDepthState->release();
     }
+    void prepareCasterDraws(Slot& slot,const SceneStore& store) {
+        planShadowCasterDraws(store.buckets(),geometry,store.slotCapacity(),!options.forceApple9,slot.casterDraws);
+        const size_t required=4u*(settings.staticCache?2u:1u)*slot.casterDraws.size();
+        const size_t old=slot.rasterTables.size();
+        // This slot has completed before prepareFrame. Never rewrite another
+        // frame's argument tables, and keep a distinct table per recorded draw.
+        if(required>old) {
+            slot.rasterTables.resize(required,nullptr);
+            for(size_t i=old;i<required;++i)slot.rasterTables[i]=lighting::table(c);
+        }
+        slot.drawParams.resize(required);
+    }
     void load(const GpuScene& g,const SceneStore& store) {
         c.waitIdle();geometry.assign(g.meshInfos().begin(),g.meshInfos().end());
         for(auto& f:slots) {
             for(auto* t:f.rasterTables)if(t)t->release(); f.rasterTables.clear();
-            f.rasterTables.resize(4*(settings.staticCache?2u:1u)*(geometry.size()+1));f.drawParams.resize(f.rasterTables.size());
-            for(auto*& t:f.rasterTables)t=lighting::table(c);
+            f.drawParams.clear();f.casterDraws.clear();
+            if(settings.mode==ShadowTechnique::Cascaded)prepareCasterDraws(f,store);
         }
         ++casterRevision;++staticCasterRevision;++materialRevision;++graphVersion;
         oldStatic.assign(store.slotCapacity(),{});
@@ -315,11 +329,19 @@ struct ShadowPasses::Impl {
         params.depthBiasWorld=settings.depthBiasWorld;params.normalBiasWorld=settings.normalBiasWorld;params.maxTraceDistance=1e6f;
         params.corruption=options.debugLightingCorrupt<=4?options.debugLightingCorrupt:0;paramsAddress=lighting::upload(c,params);
         auto& slot=slots[f.slot];
-        for(u32 cascade=0;cascade<4;++cascade) {
-            auto draw=params;draw.cascadeIndex=cascade;draw.casterSlot=~0u;draw.meshletFirst=0;draw.meshletCount=mesh.meshletCount();
+        if(settings.mode==ShadowTechnique::Cascaded) {
+            prepareCasterDraws(slot,store);
             const u32 classes=settings.staticCache?2u:1u;
-            for(u32 cls=0;cls<classes;++cls)slot.drawParams[(cascade*classes+cls)*(geometry.size()+1)]=lighting::upload(c,draw);
-            for(u32 m=0;m<geometry.size();++m){draw.pad=m;for(u32 cls=0;cls<classes;++cls)slot.drawParams[(cascade*classes+cls)*(geometry.size()+1)+m+1]=lighting::upload(c,draw);}
+            for(u32 cascade=0;cascade<4;++cascade)for(u32 cls=0;cls<classes;++cls) {
+                const size_t base=(cascade*classes+cls)*slot.casterDraws.size();
+                for(size_t i=0;i<slot.casterDraws.size();++i) {
+                    const auto& range=slot.casterDraws[i];
+                    auto draw=params;draw.cascadeIndex=cascade;draw.casterSlot=range.firstSlot;
+                    draw.meshletFirst=range.meshletFirst;draw.meshletCount=range.meshletCount;
+                    draw.meshletGridWidth=range.meshletCount;draw.pad=range.mesh;
+                    slot.drawParams[base+i]=lighting::upload(c,draw);
+                }
+            }
         }
         if(options.debugLighting) {
             auto& slot=slots[f.slot];slot.expectedCount=params.slotCount;
@@ -350,22 +372,28 @@ struct ShadowPasses::Impl {
     void drawCascade(rg::PassContext& ctx,u32 cascade,u32 cls,bool cached) {
         auto* e=static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder());auto& slot=slots[frame.slot];
         e->setDepthStencilState(depthState);
-        const u32 base=(cascade*(settings.staticCache?2u:1u)+cls)*(geometry.size()+1);
-        if(!options.forceApple9 && mesh.meshletCount() && params.slotCount && mesh.meshletCount()<=65535 && params.slotCount<=65535) {
-            auto* t=slot.rasterTables[base];common(t,ctx);t->setAddress(slot.drawParams[base],1);
+        const size_t base=(cascade*(settings.staticCache?2u:1u)+cls)*slot.casterDraws.size();
+        // Shadow depth remains conservatively two-sided, as before this change.
+        // Mesh/cull-class buckets stay separate; mirrored transforms and MASK
+        // materials keep the exact same vertex/fragment handling.
+        for(size_t i=0;i<slot.casterDraws.size();++i) {
+            const auto& range=slot.casterDraws[i];
+            auto* t=slot.rasterTables[base+i];common(t,ctx);t->setAddress(slot.drawParams[base+i],SB_PARAMS);
             if(cached){t->setAddress(cls==0?slot.staticParams[cascade]:slot.dynamicParams[cascade],18);t->setAddress(slot.classificationAddress,19);}
-            e->setRenderPipelineState(pipelines.render(cached?cacheMesh:meshDepth));
-            e->setArgumentTable(t,MTL::RenderStageMesh|MTL::RenderStageFragment);
-            e->drawMeshThreadgroups(MTL::Size::Make(mesh.meshletCount(),params.slotCount,1),MTL::Size::Make(1,1,1),MTL::Size::Make(128,1,1));
-        } else {
-            e->setRenderPipelineState(pipelines.render(cached?cacheIndexed:indexed));
-            for(u32 m=0;m<geometry.size();++m) {
-                if(!geometry[m].indexCount || !params.slotCount)continue;
-                auto* t=slot.rasterTables[base+m+1];common(t,ctx);t->setAddress(slot.drawParams[base+m+1],1);
-                if(cached){t->setAddress(cls==0?slot.staticParams[cascade]:slot.dynamicParams[cascade],18);t->setAddress(slot.classificationAddress,19);}
+            if(range.meshShader) {
+                e->setRenderPipelineState(pipelines.render(cached?cacheMesh:meshDepth));
+                e->setArgumentTable(t,MTL::RenderStageMesh|MTL::RenderStageFragment);
+                e->drawMeshThreadgroups(MTL::Size::Make(range.meshletCount,range.slotCount,1),
+                    MTL::Size::Make(1,1,1),MTL::Size::Make(128,1,1));
+            } else {
+                const auto& info=geometry[range.mesh];
+                e->setRenderPipelineState(pipelines.render(cached?cacheIndexed:indexed));
                 e->setArgumentTable(t,MTL::RenderStageVertex|MTL::RenderStageFragment);
-                e->drawIndexedPrimitives(MTL::PrimitiveTypeTriangle,geometry[m].indexCount,MTL::IndexTypeUInt32,
-                    scene.indexBuffer()->gpuAddress()+u64(geometry[m].indexOffset)*4,u64(geometry[m].indexCount)*4,params.slotCount,geometry[m].vertexOffset,0);
+                // instance_id starts at zero. Shader adds range.firstSlot,
+                // explicitly, so the offset cannot be applied twice.
+                e->drawIndexedPrimitives(MTL::PrimitiveTypeTriangle,info.indexCount,MTL::IndexTypeUInt32,
+                    scene.indexBuffer()->gpuAddress()+u64(info.indexOffset)*4,u64(info.indexCount)*4,
+                    range.slotCount,info.vertexOffset,0);
             }
         }
         e->setDepthStencilState(scene.depthState());

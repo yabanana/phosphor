@@ -1,5 +1,6 @@
 #include <metal_stdlib>
 #include "renderer/gpu_types.h"
+#include "renderer/shadow_dispatch.h"
 #include "renderer/meshlet_layout.h"
 using namespace metal;
 using namespace phosphor;
@@ -42,9 +43,10 @@ vertex CacheDepthOut shadow_cache_depth_vertex(uint vertexId [[vertex_id]],uint 
     const device GPUVertex* vertices [[buffer(6)]],const device uint* flags [[buffer(14)]],
     constant GPUShadowCacheParams& cache [[buffer(18)]],const device uint* classifications [[buffer(19)]]) {
     CacheDepthOut invalid{};invalid.position=float4(2,2,0,1);
-    if(!cacheCaster(instance,p,cache,flags,classifications)) return invalid;
-    const device GPUInstance& i=instances[instance];
-    if(i.meshIndex!=p.pad || i.materialIndex>=p.materialCount) return invalid;
+    const uint slot=shadowDrawSlot(p.casterSlot,instance,p.slotCount);
+    if(!cacheCaster(slot,p,cache,flags,classifications)) return invalid;
+    const device GPUInstance& i=instances[slot];
+    if(!(i.flags&INSTANCE_FLAG_VALID) || !(i.flags&2u) || i.meshIndex!=p.pad || i.materialIndex>=p.materialCount) return invalid;
     return cacheVertex(vertices[vertexId],i,p);
 }
 using CacheMesh=metal::mesh<CacheDepthOut,void,MESHLET_MESH_GROUP,MESHLET_MESH_GROUP,topology::triangle>;
@@ -55,16 +57,20 @@ using CacheMesh=metal::mesh<CacheDepthOut,void,MESHLET_MESH_GROUP,MESHLET_MESH_G
     const device uint* vertexIndices [[buffer(8)]],const device uchar* triangles [[buffer(9)]],
     const device uint* flags [[buffer(14)]],constant GPUShadowCacheParams& cache [[buffer(18)]],
     const device uint* classifications [[buffer(19)]]) {
-    bool valid=cacheCaster(group.y,p,cache,flags,classifications);
+    const uint slot=shadowDrawSlot(p.casterSlot,group.y,p.slotCount);
+    const uint meshlet=shadowDrawMeshlet(p.meshletFirst,group.x,p.meshletCount);
+    bool valid=cacheCaster(slot,p,cache,flags,classifications);
     if(valid) {
-        const device GPUInstance& i=instances[group.y];valid=i.meshIndex<p.meshCount && i.materialIndex<p.materialCount;
-        if(valid) { const device GPUMeshInfo& m=meshes[i.meshIndex];valid=group.x>=m.meshletOffset && group.x-m.meshletOffset<m.meshletCount; }
+        const device GPUInstance& i=instances[slot];
+        valid=(i.flags&INSTANCE_FLAG_VALID) && (i.flags&2u) && i.meshIndex==p.pad &&
+              i.meshIndex<p.meshCount && i.materialIndex<p.materialCount;
+        if(valid) { const device GPUMeshInfo& m=meshes[i.meshIndex];valid=meshlet>=m.meshletOffset && meshlet-m.meshletOffset<m.meshletCount; }
     }
     if(!valid) { if(tid==0)out.set_primitive_count(0);return; }
-    const GPUMeshlet m=meshlets[group.x];
+    const GPUMeshlet m=meshlets[meshlet];
     if(m.vertexCount>MESHLET_MESH_GROUP || m.triangleCount>MESHLET_MESH_GROUP) {if(tid==0)out.set_primitive_count(0);return;}
     if(tid==0)out.set_primitive_count(m.triangleCount);
-    if(tid<m.vertexCount)out.set_vertex(tid,cacheVertex(vertices[vertexIndices[m.vertexOffset+tid]],instances[group.y],p));
+    if(tid<m.vertexCount)out.set_vertex(tid,cacheVertex(vertices[vertexIndices[m.vertexOffset+tid]],instances[slot],p));
     if(tid<m.triangleCount)for(uint k=0;k<3;++k)out.set_index(3u*tid+k,triangles[m.triangleOffset+3u*tid+k]);
 }
 struct CacheTexture { texture2d<float> tex; };
