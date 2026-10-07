@@ -346,7 +346,8 @@ kernel void shadow_filter(constant GPUShadowParams& p [[buffer(1)]],
         const GPUShadowSurface q=surfaces[uint(n.y)*p.width+uint(n.x)];
         if(!q.valid || q.slot!=s.slot || q.generation!=s.generation || dot(shadowNormal(q),shadowNormal(s))<0.95f) continue;
         const float distance=length(shadowPoint(q)-shadowPoint(s));
-        const float w=exp(-distance/max(p.temporalPositionThreshold*4,1e-5f))*0.5f;
+        const float varianceStrength=saturate(max(center.y,0.0f)*16.0f);
+        const float w=exp(-distance/max(p.temporalPositionThreshold*4,1e-5f))*mix(0.125f,0.5f,varianceStrength);
         sum+=input.read(uint2(n)).x*w; weight+=w;
     }
     output.write(float4(sum/weight,center.yzw),pixel);
