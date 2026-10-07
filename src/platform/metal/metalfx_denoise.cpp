@@ -117,6 +117,7 @@ struct MetalfxDenoise::Impl {
     }
     void retire(Scaler s,bool used) {
         if(!s)return;
+        ++stats.retirements;
         // Plain ownership only. Do NOT call adoptTemporalScaler, inspect private
         // references, or apply the F8 TemporalScaler cycle workaround here.
         if(used) context.deferCall([retire=factory.retire,s=std::move(s)]()mutable{retire(std::move(s));});
@@ -497,4 +498,6 @@ const MetalfxDenoise::Stats& MetalfxDenoise::stats()const{return impl_->stats;}
 u64 MetalfxDenoise::version()const{return impl_->graphVersion;}
 MetalfxDenoise::PackCheck MetalfxDenoise::readPackChecks(u32 view,u32 slot)const{return impl_->checks(view,slot);}
 std::vector<MetalfxDenoise::PackCheck> MetalfxDenoise::drainPackChecks(){return impl_->drainChecks();}
+rg::TextureRef MetalfxDenoise::sdkOutputRef()const{return impl_->graphNative&&ready()?impl_->packedRefs[channelIndex(Channel::Output)]:rg::TextureRef{};}
+MTL::Texture* MetalfxDenoise::sdkOutputTexture(u32 view,u32 slot)const{return impl_->views.at(view).slots.at(slot).textures[channelIndex(Channel::Output)];}
 } // namespace phosphor

@@ -48,7 +48,7 @@ public:
                             Settling,Pending,FactoryRejected,UsageRejected,UnverifiedExposureMapping,Ready };
     struct Stats {
         bool requested=false,sdkAvailable=false,deviceSupported=false,factoryInstalled=false;
-        u64 requests=0,encodedFrames=0,fallbackFrames=0,resets=0,discardedRequests=0;
+        u64 requests=0,encodedFrames=0,fallbackFrames=0,resets=0,discardedRequests=0,retirements=0;
     };
     struct PackCheck {
         bool available=false,ok=false;u64 frame=0;u32 view=0,slot=0;
@@ -70,6 +70,10 @@ public:
     [[nodiscard]] u64 version()const;
     [[nodiscard]] PackCheck readPackChecks(u32 view,u32 slot)const; // only after GPU completion
     [[nodiscard]] std::vector<PackCheck> drainPackChecks(); // includes retired resize/view records
+    // Borrowed current-frame SDK output only; consumers declare its graph read
+    // and preserve frame/view/slot tags before copying to completed readback.
+    [[nodiscard]] rg::TextureRef sdkOutputRef()const;
+    [[nodiscard]] MTL::Texture* sdkOutputTexture(u32 view,u32 slot)const;
 private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };
