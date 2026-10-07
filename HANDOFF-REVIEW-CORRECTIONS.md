@@ -22,8 +22,16 @@ Do not drop the tester's2afbf20 syntax/addressspace/receiver-alpha fixes or F9
 main integration. The writer is NOT duplicating those edits. The tester owns
 shadow drawCascade/bucket dispatch optimization; this branch does not touch it.
 
-Pending separate writer corrections: GI validzero proposal M normalization,
-geometry-vs-radiometry DDGI relocation state, independent reference MASK/roles
-and standalone triangle endpoints. These will be appended as concrete commits.
+Additional ready source corrections:
+
+8. eddfe4d — valid ZERO GI proposal histories count in M; independent Bernoulli .5/.625 negative.
+9. 1f5d44b — shader/CPU geometric-vs-radiometric probe state; host patch artifact included.
+10. 9a0fef6 — masked emitter radiance, exact exported ray roles and standalone triangle emitters.
+
+The following host-epoch commit applies the reviewed patch to production
+GiPasses; use it as well, rather than leaving a patch artifact unapplied.
+Reference role mismatches are rejected BEFORE rendering, without a model-difference
+bypass; full equivariant role filtering is not claimed. Fixture/contract tests are
+written and NOT EXECUTED. The physical/reference fixes do not lower a quality gate.
 
 F13-F14 source writing continues on a separate branch/worktree; no F15/OPT.
