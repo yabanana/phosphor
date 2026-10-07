@@ -7,7 +7,10 @@ struct DenoiseSettings {
     float roughnessThreshold=.08f, hitDistanceThreshold=.1f, luminancePhi=4, normalPhi=64;
     float varianceFloor=1e-6f, clampSigma=2, planeThreshold=.02f;
     u32 maxHistory=32, atrousIterations=3;
-    bool clampHistory=true;
+    // Opt-in biased experiment. A noisy neighborhood's extrema do not bound
+    // the expected radiance/visibility, even when every receiver is static.
+    // The baseline rejects stale history by identity/geometry/revision only.
+    bool clampHistory=false;
 };
 [[nodiscard]] bool validDenoiseSettings(const DenoiseSettings&);
 [[nodiscard]] GPUDenoiseParams denoiseParameters(const DenoiseSettings&,u32 width,u32 height,u32 signal,u32 view,u32 epoch,u32 revision,bool reset);
