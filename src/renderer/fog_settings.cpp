@@ -4,7 +4,7 @@
 #include <stdexcept>
 namespace phosphor {
 void validateFog(const FogSettings& s) {
-    if(!s.gridX||!s.gridY||!s.gridZ||s.gridX>256||s.gridY>256||s.gridZ>128||s.maxLocalLights>4096||!s.maxHistoryAge||s.maxHistoryAge>64||
+    if(!s.gridX||!s.gridY||!s.gridZ||s.gridX>256||s.gridY>256||s.gridZ>128||s.maxLocalLights>16||!s.maxHistoryAge||s.maxHistoryAge>64||
        !(s.nearDistance>0&&s.farDistance>s.nearDistance&&std::isfinite(s.farDistance))||
        !(s.densityAtBase>=0&&std::isfinite(s.densityAtBase))||!(s.heightFalloff>=0&&std::isfinite(s.heightFalloff))||
        !std::isfinite(s.heightBase)||!(s.maxDensity>=0&&std::isfinite(s.maxDensity))||

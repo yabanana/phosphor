@@ -26,8 +26,10 @@ or integrated buffer,2=previous/current cell input,3=readonly DDGI params,
 4=DDGI probe states,5=F11 GPUSampledLight buffer,6=alias table,
 7=emissive surface records,8=materials,9=bindless texture handles,
 10=GPU instances,11=TLAS,12=OWN PSO's IFT,13=GPUShadowParams,
-15=GPUVolumeCounters. Textures0/1=DDGI irradiance/distance atlases,
-2=linear HDR,3=depth,4=output HDR; 8/9/10/11=FOUR CSM depth maps.
+14=GPUAtmosphereParams,15=GPUVolumeCounters. Textures0/1=DDGI irradiance/distance atlases,
+2=linear HDR,3=depth,4=output HDR; 8/9/10/11=FOUR CSM depth maps,
+12=atmosphere transmittance LUT. maxLocalLights is bounded alias-sample count
+per froxel (default1, max16), never a truncation of the entire F11 light list.
 Fog shadows query the froxel WORLD point, never a screen shadow mask.
 RT links the single rt_alpha_generic TU and retains typed TLAS/BLAS graph
 dependencies at Dispatch; each RT consumer owns/reloads its own IFT.
