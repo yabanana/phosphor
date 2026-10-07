@@ -112,6 +112,47 @@ TEST_CASE("F12 visibility moments detect thin wall leak and corruption control")
     CHECK(probeVisibility(2,1,std::numeric_limits<float>::quiet_NaN())==0);
     CHECK(probeVisibility(1,-1,0)==0);
 }
+TEST_CASE("F12 radiance invalidation preserves multi-step probe escape geometry") {
+    auto cfg=smallGrid();cfg.raysPerProbe=64;cfg.relocationStep=0.1f;
+    ProbeGrid fixed(cfg),old(cfg);
+    auto slabRays=[&](const ProbeGrid& grid,float radiance) {
+        auto rays=skyRays(cfg.raysPerProbe,{0,0,0},cfg.maxDistance);
+        const float x=grid.position(0).x,halfThickness=0.45f;
+        const bool inside=std::abs(x)<halfThickness;
+        for(auto& r:rays) {
+            const float dx=r.direction[0];
+            if(std::abs(dx)<1e-8f)continue;
+            float boundary=0;
+            if(inside)boundary=dx>0?halfThickness:-halfThickness;
+            else if(x>halfThickness&&dx<0)boundary=halfThickness;
+            else if(x<-halfThickness&&dx>0)boundary=-halfThickness;
+            else continue;
+            const float t=(boundary-x)/dx;
+            if(!(t>0&&t<=cfg.maxDistance))continue;
+            r.backface=inside?1u:0u;r.distance=inside?-t:t;
+            if(!inside)for(float& c:r.radiance)c=radiance;
+        }
+        return rays;
+    };
+    bool recovered=false;
+    for(u32 frame=0;frame<20;++frame) {
+        const auto before=fixed.states()[0];
+        fixed.invalidateRadiance(); // Sun/emissive changed every frame.
+        CHECK(fixed.states()[0].generation==before.generation);
+        CHECK(fixed.states()[0].state==before.state);
+        for(u32 axis=0;axis<3;++axis)CHECK(fixed.states()[0].offset[axis]==before.offset[axis]);
+        recovered|=fixed.update(0,slabRays(fixed,float(frame+1))).active;
+        const auto& s=fixed.states()[0];
+        const glm::vec3 offset(s.offset[0],s.offset[1],s.offset[2]);
+        CHECK(glm::length(offset/cfg.spacing)<=cfg.maxRelocation+1e-5f);
+        old.reset(1); // Negative previous radiometric-reset-as-geometry-reset behavior.
+        CHECK_FALSE(old.update(0,slabRays(old,float(frame+1))).active);
+    }
+    REQUIRE(recovered);
+    CHECK(std::abs(fixed.position(0).x)>0.45f);
+    fixed.reset(9);CHECK(glm::length(fixed.position(0)-cfg.origin)==0);
+    CHECK(fixed.states()[0].generation==9);CHECK(fixed.states()[0].relocationTravel==0);
+}
 TEST_CASE("F12 bounded hash compares full key, evicts, ages and resets generation") {
     RadianceCacheConfig c;c.capacity=2;c.probeLimit=2;c.maxAge=2;
     RadianceCache cache(c);cache.reset(7,{1,2,3});

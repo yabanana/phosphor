@@ -95,6 +95,11 @@ void ProbeGrid::reset(u32 generation) {
     std::fill(irradiance_.begin(), irradiance_.end(), glm::vec3(0));
     std::fill(moments_.begin(), moments_.end(), glm::vec2(0));
 }
+void ProbeGrid::invalidateRadiance() {
+    for(auto& s:states_)s.age=0;
+    std::fill(irradiance_.begin(),irradiance_.end(),glm::vec3(0));
+    std::fill(moments_.begin(),moments_.end(),glm::vec2(0));
+}
 u32 ProbeGrid::probeCount() const { return u32(states_.size()); }
 glm::vec3 ProbeGrid::position(u32 p) const {
     if (p >= states_.size()) throw std::out_of_range("DDGI probe index");

@@ -68,7 +68,8 @@ kernel void ddgi_classify(constant GPUProbeGridParams& p [[buffer(0)]],
                           const device GPUProbeRay* rays [[buffer(2)]],uint probe [[thread_position_in_grid]]) {
     if(probe>=p.countX*p.countY*p.countZ) return;
     GPUProbeState s=states[probe];
-    if(p.reset || s.generation!=p.generation) {s={};s.generation=p.generation;}
+    if(s.generation!=p.generation) {s={};s.generation=p.generation;}
+    else if(p.reset)s.age=0u; // Radiometric reset preserves geometric relocation.
     float backDistance=p.maxDistance,frontDistance=p.maxDistance;float3 escape=0.0f,away=0.0f;
     uint backfaces=0u;
     for(uint i=0;i<p.raysPerProbe;++i) {

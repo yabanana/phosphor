@@ -31,6 +31,9 @@ class ProbeGrid {
 public:
     explicit ProbeGrid(ProbeGridConfig config = {});
     void reset(u32 generation);
+    // Light/material/camera radiometric invalidation keeps learned geometric
+    // offsets/classification. Topology/geometry reset() still clears everything.
+    void invalidateRadiance();
     [[nodiscard]] u32 probeCount() const;
     [[nodiscard]] glm::vec3 position(u32 probe) const;
     [[nodiscard]] const ProbeGridConfig& config() const { return config_; }

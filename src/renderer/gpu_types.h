@@ -657,7 +657,8 @@ struct GPULightClusterParams {
 PHOSPHOR_STATIC_ASSERT(sizeof(GPULightClusterParams) == 112, "GPULightClusterParams layout");
 
 // F12: experimental GI ABI. Linear RGB, metres, world geometric normals.
-// A changed generation/revision invalidates every cached/history value.
+// generation is the geometric probe-state epoch; cacheGeneration is the
+// radiometric/history epoch. A radiance reset must not erase relocated geometry.
 PHOSPHOR_GPU_CONSTANT u32 GI_MODE_DDGI = 1u;
 PHOSPHOR_GPU_CONSTANT u32 GI_MODE_CACHE = 2u;
 PHOSPHOR_GPU_CONSTANT u32 GI_MODE_RESTIR = 3u;
