@@ -33,6 +33,7 @@
 #include "platform/metal/acceleration_structures.h"
 #include "platform/metal/rt_visibility_check.h"
 #include "renderer/rt_check.h"
+#include "renderer/rt_proxy_transition.h"
 #include "renderer/cull_reference.h"
 #include "renderer/gpu_scene.h"
 #include "renderer/scene_check.h"
@@ -299,6 +300,8 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     if (options_.rtEnabled) {
         rt_ = std::make_unique<AccelerationStructures>(*context_, *pipelines_, *renderer_, options_);
         if (options_.debugRt) rtChecker_ = std::make_unique<RtChecker>();
+        if (options_.debugRtProxyTransition != RtProxyTransition::None)
+            rtProxyTransition_ = std::make_unique<RtProxyTransitionCheck>();
         if (options_.debugRt && visibility_)
             rtVisibility_ = std::make_unique<RtVisibilityChecker>(*context_, *pipelines_, *renderer_, *mesh_, *rt_);
         rtCheckRays_.reserve(512);
@@ -541,6 +544,10 @@ void Engine::run() {
         pipelines_->waitAllFinal();
         if (!pipelines_->writeHarvest()) exitCode_ = 1;
     }
+    if (rtProxyTransition_) {
+        if (!rtProxyTransition_->finish()) exitCode_ = 1;
+        std::printf("%s\n", rtProxyTransition_->line().c_str());
+    }
     if (options_.benchmark()) {
         finishBenchmark();
     }
@@ -661,12 +668,9 @@ void Engine::recordBenchmarkFrame(float dt, float cpuMs, float waitMs) {
     }
 }
 
-void Engine::finishBenchmark() {
-    // Sample the CPU heap before the report's own allocations.
-    u64 heapBlocks = 0, heapBytes = 0;
-    heapUsage(heapBlocks, heapBytes);
-    // F4.1: the last frames' timestamps (the GPU is idle): resolve the slots
-    // in frame order.
+void Engine::drainFrameReadbacks() {
+    // Resolve timestamps while their graph and resources still exist, then
+    // collect counters. Scene reload must not silently discard the ring tail.
     if (timestamps_) {
         for (;;) {
             u32 next = ~0u;
@@ -677,8 +681,22 @@ void Engine::finishBenchmark() {
             if (next == ~0u) break;
             onFrameTimes(timestamps_->drain(next));
         }
-        if (passMeasureStarted_) passTimings_.endMeasure();
     }
+    for (u32 k = 0; k < METAL_FRAMES_IN_FLIGHT; ++k) {
+        u32 next = ~0u;
+        for (u32 s = 0; s < METAL_FRAMES_IN_FLIGHT; ++s)
+            if (slotFrame_[s] != ~0ull && (next == ~0u || slotFrame_[s] < slotFrame_[next])) next = s;
+        if (next == ~0u) break;
+        onSceneCounters(next);
+    }
+}
+
+void Engine::finishBenchmark() {
+    // Sample the CPU heap before the report's own allocations.
+    u64 heapBlocks = 0, heapBytes = 0;
+    heapUsage(heapBlocks, heapBytes);
+    drainFrameReadbacks();
+    if (timestamps_ && passMeasureStarted_) passTimings_.endMeasure();
     const std::vector<float> gpu = context_->endGpuTimeCapture();
     for (size_t i = 0; i < samples_.size() && i < gpu.size(); ++i) {
         samples_[i].gpuMs = gpu[i];
@@ -701,15 +719,6 @@ void Engine::finishBenchmark() {
     report.gpuTiming        = timestamps_ != nullptr && timestamps_->enabled();
     report.gpuTimingUnfused = options_.gpuTimingUnfused;
     report.graph            = graphReport_;
-    // F5 (schema 5): the counters of the last frames (the GPU is idle).
-    for (u32 k = 0; k < 3; ++k) {
-        u32 next = ~0u;
-        for (u32 s = 0; s < 3; ++s) {
-            if (slotFrame_[s] != ~0ull && (next == ~0u || slotFrame_[s] < slotFrame_[next])) next = s;
-        }
-        if (next == ~0u) break;
-        onSceneCounters(next);
-    }
     {
         const SceneSamples& ss = sceneSamples_;
         SceneReport& sr = report.scene;
@@ -1032,6 +1041,7 @@ void Engine::switchTestBench(TestBenchType type) {
     const TestBenchType from = currentBench_;
     const bool isSwitch = activeBench_ != nullptr; // not the initial load
     context_->waitIdle();
+    if (activeBench_) drainFrameReadbacks();
     if (rt_) rt_->clear();
     rtCheckerGeometry_ = ~u64{0};
     const Clock::time_point t1 = Clock::now();
@@ -1075,6 +1085,8 @@ void Engine::switchTestBench(TestBenchType type) {
     renderer_->loadScene(*store_);
     if (mesh_) mesh_->loadScene(*store_, *gpuScene_);
     if (rt_) rt_->loadScene(*gpuScene_, *store_, *textures_);
+    if (rtProxyTransition_ && !rtProxyTransition_->arm(options_.debugRtProxyTransition, *ecs_, *gpuScene_, *store_, rt_->geometry()))
+        throw std::runtime_error(rtProxyTransition_->line());
     if (options_.debugRtDeform && gpuScene_->getMeshCount()) {
         const u32 first = gpuScene_->meshInfos()[0].vertexOffset;
         const u32 end = gpuScene_->getMeshCount() > 1 ? gpuScene_->meshInfos()[1].vertexOffset
@@ -1272,6 +1284,10 @@ bool Engine::frame(float dt) {
     {
         PH_ZONE("Simulation");
         activeBench_->update(dt, *ecs_);
+        if (rtProxyTransition_ && !rtProxyTransition_->beforeSync(framesOnBench_, *ecs_, *gpuScene_)) {
+            exitCode_ = 1;
+            running_ = false;
+        }
     }
     sceneTime_ += dt;
     const Clock::time_point s1 = Clock::now();
@@ -1296,9 +1312,15 @@ bool Engine::frame(float dt) {
             reload |= rt_->geometry().selections[mesh].level != RtProxyLevel::Full;
         if (reload) {
             LOG_INFO("RT: material assignment promotes protected meshes to full geometry");
+            context_->waitIdle();
+            drainFrameReadbacks();
             rt_->loadScene(*gpuScene_, *store_, *textures_);
             rtCheckerGeometry_ = ~u64{0};
         }
+    }
+    if (rtProxyTransition_ && !rtProxyTransition_->afterSync(*store_, rt_->geometry())) {
+        exitCode_ = 1;
+        running_ = false;
     }
     const Clock::time_point s2 = Clock::now();
     frameStats_->update(*timer_, context_->lastGpuMs());
@@ -1915,6 +1937,8 @@ bool Engine::checkRayTracing(u32 slot) {
                     static_cast<double>(v.maxRelativeDistanceError), static_cast<double>(v.relativeDistanceTolerance),
                     complete ? "MEASURED" : "INCOMPLETE");
     }
+    if (rtProxyTransition_)
+        passed &= rtProxyTransition_->afterReadback(readback.instances, readback.materials, passed);
     if (!passed) ++rtFailures_;
     rtCheckedRays_ += result.checked;
     rtAmbiguous_ += result.ambiguous;

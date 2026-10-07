@@ -56,6 +56,7 @@ class GpuSceneChecker;
 class Timer;
 class AccelerationStructures;
 class RtChecker;
+class RtProxyTransitionCheck;
 class RtVisibilityChecker;
 
 // ---------------------------------------------------------------------------
@@ -109,6 +110,8 @@ private:
     /// F5: the GPU scene counters of the frame that last used `slot` (it is
     /// complete): report samples and the panel.
     void onSceneCounters(u32 slot);
+    /// GPU must be idle; preserve pending counters/times before resource reset.
+    void drainFrameReadbacks();
     /// F5: --debug-gpu-scene: wait for the frame, read the scene back and
     /// compare it with the CPU mirror and references; false on FAIL.
     bool checkGpuScene(u32 slot);
@@ -125,6 +128,7 @@ private:
     std::unique_ptr<SceneRenderer>       renderer_;
     std::unique_ptr<AccelerationStructures> rt_;
     std::unique_ptr<RtChecker> rtChecker_;
+    std::unique_ptr<RtProxyTransitionCheck> rtProxyTransition_;
     std::unique_ptr<RtVisibilityChecker> rtVisibility_;
     u64 rtCheckerGeometry_ = ~u64{0};
     u32 rtChecks_ = 0, rtFailures_ = 0;
