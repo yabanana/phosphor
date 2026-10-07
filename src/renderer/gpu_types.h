@@ -726,4 +726,9 @@ struct GPULightingCheckParams {
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPULightingCheckParams) == 16, "GPULightingCheckParams layout");
 
+struct GPUGiCheckParams {
+    u32 width, height, mode, corruption;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUGiCheckParams) == 16, "GPUGiCheckParams layout");
+
 } // namespace phosphor
