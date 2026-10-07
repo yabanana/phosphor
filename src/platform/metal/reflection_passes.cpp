@@ -44,6 +44,10 @@ struct ReflectionPasses::Impl {
     LaunchOptions options;DenoisePasses denoise;ShadowPasses::Frame frame{};u64 graphVersion=1,pixels=0,sceneEpoch=0;u32 probeGeneration=1,lastPipelineGeneration=~0u;
     bool custom=false,probeDirty=true,probeNeedsCapture=false,rtReflection=false,rtAO=false,rtCapture=false,outputHalf=true;u64 staticStructure=0,lastSignalEpoch=~u64{0};
     std::string source="analytic-environment";
+    u64 geometryEpoch=0,instanceRevision=0,nodeRevision=0,materialRevision=0,motionRevision=0;
+    struct GeometryContent {u64 scene,structure,rtGeometry,instances,nodes,materials,motion,pipeline;bool operator==(const GeometryContent&)const=default;};
+    GeometryContent lastGeometry{};bool geometryKnown=false;
+    std::pair<u64,u64> publishedComponents{};u64 publishedVersion=1;
     ReflectionSettings settings;AOSettings aoSettings;GPUReflectionProbe probe{};GPUReflectionParams params{};GPUAOParams aoParams{};
     GPUReflectionReduceParams reduceParams{};GPUReflectionComposeParams composeParams{};
     MTL::GPUAddress paramsAddress=0,aoAddress=0,reduceAddress=0,composeAddress=0,probeAddress=0,giDummyAddress=0,extraDummyAddress=0;
@@ -69,6 +73,7 @@ struct ReflectionPasses::Impl {
     std::array<rg::TextureRef,6> faceRef{};std::array<rg::TextureRef,ProbeMips> mipRef{};
     Impl(MetalContext& context,PipelineCache& pipelines,SceneRenderer& s,DirectLightingPasses& d,AccelerationStructures* a,GiPasses* g,const LaunchOptions& o)
         :c(context),p(pipelines),scene(s),direct(d),rt(a),gi(g),options(o),denoise(c,p,o){
+        if(o.reflectionSamples<1||o.reflectionSamples>8||!std::isfinite(o.aoRadius)||o.aoRadius<=0)throw std::invalid_argument("Invalid F13 source sampling preset");
         reflectionSSR=p.request(lighting::kernel("reflection_ssr"));probeOnly=p.request(lighting::kernel("reflection_probe_only"));gtao=p.request(lighting::kernel("ao_gtao"));
         if(rt){reflectionRT=p.request(lighting::kernel("reflection_rt",true));rtao=p.request(lighting::kernel("ao_rtao",true));captureRT=p.request(lighting::kernel("reflection_capture_rt",true));
             reflectionConsumer=std::make_unique<RtConsumer>(c,p,*rt);aoConsumer=std::make_unique<RtConsumer>(c,p,*rt);captureConsumer=std::make_unique<RtConsumer>(c,p,*rt);}
@@ -134,6 +139,8 @@ struct ReflectionPasses::Impl {
         denoise.invalidateAll("F13 signal allocation growth");++graphVersion;
     }
     void prepare(const SceneStore& store,const ShadowPasses::Frame& f,bool useCustom,u64 signalEpoch){
+        if(!f.width||!f.height||f.width>f.backingWidth||f.height>f.backingHeight||f.slot>=METAL_FRAMES_IN_FLIGHT||f.view>=4||
+            u64(f.backingWidth)*f.backingHeight>std::numeric_limits<u32>::max())throw std::invalid_argument("Invalid F13 frame extent or view");
         frame=f;if(!rawCube)throw std::logic_error("F13 loadScene must precede prepareFrame");
         if(custom!=useCustom){custom=useCustom;denoise.invalidateAll("F13 denoiser path change");++graphVersion;}reserve();
         if(staticStructure!=store.structureVersion()){c.waitIdle();buildStatic(store);if(options.reflectionCaptureProbe){probeDirty=true;probeNeedsCapture=true;}++graphVersion;}
@@ -172,7 +179,13 @@ struct ReflectionPasses::Impl {
             filterAddress[mip]=lighting::upload(c,filter);validateAddress[mip]=filterAddress[mip];}GPUProbeFilterParams rawCheck{ProbeSide,~0u,0,0,0,float(ProbeSide),{0,0}};rawValidateAddress=lighting::upload(c,rawCheck);
         if(rtReflection)reflectionConsumer->prepare(frame.slot,reflectionRT);if(rtAO)aoConsumer->prepare(frame.slot,rtao);if(rtCapture&&probeNeedsCapture)captureConsumer->prepare(frame.slot,captureRT);
         auto& slot=slots[frame.slot];slot.customUsed=custom;slot.expected=frame.width*frame.height;
-        if(custom)denoise.prepareFrame(frame,signalEpoch);
+        if(store.stats().fullInstances||!store.instanceDeltas().empty())++instanceRevision;
+        if(store.stats().fullNodes||!store.nodeDeltas().empty())++nodeRevision;
+        if(store.stats().fullMaterials||!store.materialDeltas().empty())++materialRevision;
+        if(!store.motionSlots().empty()||!store.dirtyRoots().empty())++motionRevision;
+        const GeometryContent geometryContent{f.scene,store.structureVersion(),rt?rt->geometryRevision():0,instanceRevision,nodeRevision,materialRevision,motionRevision,p.generation()};
+        if(!geometryKnown||lastGeometry!=geometryContent){lastGeometry=geometryContent;geometryKnown=true;++geometryEpoch;}
+        if(custom){const std::array<u64,4> revisions{direct.lightRevision(),gi&&options.gi!=GiMode::Off?gi->readResources().parameters.cacheGeneration:0,signalEpoch,geometryEpoch};denoise.prepareFrame(frame,signalEpoch,revisions);}
     }
     void texture(MTL4::ArgumentTable* table,rg::PassContext& ctx,rg::TextureRef ref,u32 index){table->setTexture(static_cast<MTL::Texture*>(ctx.texture(ref))->gpuResourceID(),index);}
     void commonReads(rg::PassBuilder& b,rg::Stages stages=rg::StageDispatch){b.read(direct.surfaceRef(),rg::Usage::ShaderRead,stages);b.read(direct.lightsRef(),rg::Usage::ShaderRead,stages);b.read(direct.emittersRef(),rg::Usage::ShaderRead,stages);b.read(scene.dataRef(),rg::Usage::ShaderRead,stages);
@@ -270,10 +283,10 @@ struct ReflectionPasses::Impl {
         if(options.ao!=AoMode::Off)graph.addPass(rtAO?"F13 world-radius RTAO":"F13 world-radius GTAO",PassType::Compute,[this](PassBuilder& b){b.read(direct.surfaceRef(),Usage::ShaderRead,StageDispatch);b.read(depth,Usage::ShaderRead,StageDispatch);if(rtAO)rt->declareTraceReads(b);ao=b.write(ao,Usage::ShaderWrite,StageDispatch);b.setProfileShaders(rtAO?"ao_rtao":"ao_gtao");},[this](PassContext& ctx){auto* t=slots[frame.slot].aoTable;t->setAddress(aoAddress,0);t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(direct.surfaceRef()))->gpuAddress(),1);
             if(rtAO){aoConsumer->bind(t,2,3);t->setAddress(rt->traceResources(frame.slot).instances->gpuAddress(),4);}texture(t,ctx,depth,0);texture(t,ctx,ao,1);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,rtAO?rtao:gtao,t,frame.width*frame.height);});
         directSelected=direct.direct();giSelected=gi&&options.gi!=GiMode::Off?gi->irradiance():dummyTexRef;specSelected=specular;aoSelected=ao;
-        if(custom){if(options.directLighting!=DirectLightingMode::Legacy)directSelected=denoise.addSignal(graph,DENOISE_SIGNAL_DI,direct.direct(),direct.motion(),direct.surfaceRef(),{},direct.lightRevision());
-            if(gi&&options.gi!=GiMode::Off)giSelected=denoise.addSignal(graph,DENOISE_SIGNAL_GI,gi->irradiance(),direct.motion(),direct.surfaceRef(),{},gi->readResources().parameters.generation);
-            if(options.reflections!=ReflectionMode::Off)specSelected=denoise.addSignal(graph,DENOISE_SIGNAL_SPECULAR,specular,direct.motion(),direct.surfaceRef(),metadata,probeGeneration);
-            if(options.ao!=AoMode::Off)aoSelected=denoise.addSignal(graph,DENOISE_SIGNAL_AO,ao,direct.motion(),direct.surfaceRef(),{},0);}
+        if(custom){if(options.directLighting!=DirectLightingMode::Legacy)directSelected=denoise.addSignal(graph,DENOISE_SIGNAL_DI,direct.direct(),direct.motion(),direct.surfaceRef());
+            if(gi&&options.gi!=GiMode::Off)giSelected=denoise.addSignal(graph,DENOISE_SIGNAL_GI,gi->irradiance(),direct.motion(),direct.surfaceRef());
+            if(options.reflections!=ReflectionMode::Off)specSelected=denoise.addSignal(graph,DENOISE_SIGNAL_SPECULAR,specular,direct.motion(),direct.surfaceRef(),metadata);
+            if(options.ao!=AoMode::Off)aoSelected=denoise.addSignal(graph,DENOISE_SIGNAL_AO,ao,direct.motion(),direct.surfaceRef());}
         graph.addPass("F13 single-count lighting composite",PassType::Compute,[this](PassBuilder& b){b.read(base,Usage::ShaderRead,StageDispatch);b.read(direct.surfaceRef(),Usage::ShaderRead,StageDispatch);
             for(auto ref:{direct.direct(),directSelected,giSelected,specSelected,aoSelected})b.read(ref,Usage::ShaderRead,StageDispatch);if(gi&&options.gi!=GiMode::Off)b.read(gi->irradiance(),Usage::ShaderRead,StageDispatch);
             b.read(errorsRef,Usage::ShaderRead,StageDispatch);errorsRef=b.write(errorsRef,Usage::ShaderWrite,StageDispatch);output=b.createTexture("F13 composed linear HDR",graph.resources().at(base.resource).texture);output=b.write(output,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("reflection_composite");
@@ -296,7 +309,7 @@ void ReflectionPasses::loadScene(const GpuScene& g,const SceneStore& s){impl_->l
 void ReflectionPasses::prepareFrame(const SceneStore& s,const ShadowPasses::Frame& f,bool custom,u64 epoch){impl_->prepare(s,f,custom,epoch);}
 rg::TextureRef ReflectionPasses::addToGraph(rg::RenderGraph& g,rg::TextureRef base,rg::TextureRef depth){return impl_->add(g,base,depth);}
 void ReflectionPasses::bindFrame(MetalGraphExecutor& e){impl_->bind(e);}
-u64 ReflectionPasses::version()const{return impl_->graphVersion^(impl_->denoise.version()<<32);}
+u64 ReflectionPasses::version()const{const std::pair<u64,u64> components{impl_->graphVersion,impl_->denoise.version()};if(impl_->publishedComponents!=components){impl_->publishedComponents=components;++impl_->publishedVersion;}return impl_->publishedVersion;}
 bool ReflectionPasses::check(u32 slot)const{const auto& f=impl_->slots.at(slot);const auto* errors=static_cast<const u32*>(f.errors->contents());if(impl_->options.debugLighting&&errors[0]!=f.expected)return false;for(u32 i=1;i<8;++i)if(errors[i])return false;return !f.customUsed||impl_->denoise.check(slot);}
 bool ReflectionPasses::ready()const{const auto& i=*impl_;const auto& o=i.options;
     if(!i.p.compute(i.compose)||!i.p.compute(i.zero)||!i.p.compute(i.clear)||!i.p.compute(i.prefilter)||!i.p.compute(i.validateProbe)||!i.p.compute(i.publishProbe))return false;

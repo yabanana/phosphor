@@ -5,6 +5,7 @@
 #include <array>
 #include <cstring>
 #include <string>
+#include <limits>
 namespace phosphor {
 struct DenoisePasses::Impl {
     static constexpr u32 Signals=4,Views=4,MaxAtrous=5;
@@ -12,7 +13,8 @@ struct DenoisePasses::Impl {
     ShadowPasses::Frame frame{};u64 epoch=0,graphVersion=1;
     pipe::PipelineHandle temporal{},atrous{},checker{},clear{},corrupt{};
     std::array<HistoryRegistry,Signals> registries{};
-    struct History {MTL::Buffer* pair[2]{};u64 capacity=0;u32 lastWritten=0;};
+    struct Content {u64 scene=0,external=0,revision=0;bool operator==(const Content&)const=default;};
+    struct History {MTL::Buffer* pair[2]{};u64 capacity=0,contentEpoch=0;u32 lastWritten=0;Content content{};bool contentKnown=false;};
     std::array<std::array<History,Signals>,Views> histories{};
     struct SlotSignal {
         std::array<MTL4::ArgumentTable*,MaxAtrous+4> tables{};
@@ -20,7 +22,7 @@ struct DenoisePasses::Impl {
     };
     std::array<std::array<SlotSignal,Signals>,METAL_FRAMES_IN_FLIGHT> slots{};
     struct Signal {
-        bool defined=false;u64 revision=0;
+        bool defined=false;
         u32 readSide=0,writeSide=1;
         GPUDenoiseParams params{};MTL::GPUAddress address=0;
         std::array<MTL::GPUAddress,MaxAtrous> atrousAddress{};
@@ -29,6 +31,7 @@ struct DenoisePasses::Impl {
         std::array<rg::TextureRef,MaxAtrous> atrousInput{},atrousOutput{};
     };
     std::array<Signal,Signals> signal{};
+    std::array<u64,Signals> revisions{};
     Impl(MetalContext& context,PipelineCache& p,const LaunchOptions& o):c(context),pipelines(p),options(o){
         if(o.reducedLighting||o.forceApple9){settings.atrousIterations=2;settings.maxHistory=16;}
         temporal=p.request(lighting::kernel("denoise_temporal"));atrous=p.request(lighting::kernel("denoise_atrous"));
@@ -46,13 +49,16 @@ struct DenoisePasses::Impl {
         registries[sig].invalidate(frame.view,"denoise allocation growth");++graphVersion;
     }
     void updateSignal(u32 sig){reserve(sig);auto& h=histories[frame.view][sig];auto& s=signal[sig];
-        const auto decision=registries[sig].begin(frame.view,{frame.width,frame.height,frame.backingWidth,frame.backingHeight},frame.scene^(epoch*1099511628211ull)^s.revision,frame.cut,frame.reset);
-        s.params=denoiseParameters(settings,frame.width,frame.height,sig,frame.view,u32(decision.generation),u32(epoch^s.revision),decision.reset);
+        const Content content{frame.scene,epoch,revisions[sig]};if(!h.contentKnown||h.content!=content){h.content=content;h.contentKnown=true;++h.contentEpoch;}
+        const auto decision=registries[sig].begin(frame.view,{frame.width,frame.height,frame.backingWidth,frame.backingHeight},h.contentEpoch,frame.cut,frame.reset);
+        s.params=denoiseParameters(settings,frame.width,frame.height,sig,frame.view,u32(decision.generation),u32(h.contentEpoch),decision.reset);
         s.params.frameIndex=u32(frame.index);s.address=lighting::upload(c,s.params);s.readSide=h.lastWritten;s.writeSide=1u-s.readSide;
         for(u32 i=0;i<settings.atrousIterations;++i){auto p=s.params;p.atrousStep=1u<<i;s.atrousAddress[i]=lighting::upload(c,p);}
         slots[frame.slot][sig].expected=frame.width*frame.height;
     }
-    void prepare(const ShadowPasses::Frame& f,u64 signalEpoch){frame=f;epoch=signalEpoch;
+    void prepare(const ShadowPasses::Frame& f,u64 signalEpoch,const std::array<u64,Signals>& currentRevisions){frame=f;epoch=signalEpoch;revisions=currentRevisions;
+        if(!f.width||!f.height||f.width>f.backingWidth||f.height>f.backingHeight||f.slot>=METAL_FRAMES_IN_FLIGHT||f.view>=Views||
+            u64(f.backingWidth)*f.backingHeight>std::numeric_limits<u32>::max())throw std::invalid_argument("Invalid F13 denoise frame extent or view");
         for(u32 sig=0;sig<Signals;++sig){auto& state=slots.at(frame.slot)[sig];state.used=signal[sig].defined;if(state.used)updateSignal(sig);}
         // Allocate only signals selected for this view, before graph callbacks.
         // First use/resize is a resource event; steady frames allocate nothing.
@@ -64,11 +70,11 @@ struct DenoisePasses::Impl {
     void texture(MTL4::ArgumentTable* t,rg::PassContext& ctx,rg::TextureRef r,u32 index){
         t->setTexture(static_cast<MTL::Texture*>(ctx.texture(r))->gpuResourceID(),index);
     }
-    rg::TextureRef add(rg::RenderGraph& g,u32 sig,rg::TextureRef raw,rg::TextureRef motion,rg::BufferRef surfaces,rg::BufferRef metadata,u64 revision){
+    rg::TextureRef add(rg::RenderGraph& g,u32 sig,rg::TextureRef raw,rg::TextureRef motion,rg::BufferRef surfaces,rg::BufferRef metadata){
         using namespace rg;if(sig>=Signals||!raw.valid()||!motion.valid()||!surfaces.valid())throw std::invalid_argument("invalid denoise signal graph inputs");
         if(sig==DENOISE_SIGNAL_SPECULAR&&!metadata.valid())throw std::invalid_argument("specular denoise requires hit metadata");
         reserve(sig);auto& h=histories.at(frame.view).at(sig);auto& s=signal[sig];auto& state=slots[frame.slot][sig];state.used=true;state.expected=frame.width*frame.height;
-        s.defined=true;s.revision=revision;updateSignal(sig);
+        s.defined=true;updateSignal(sig);
         s.raw=raw;s.motion=motion;s.surface=surfaces;s.metadata=metadata;
         const std::string label="F13 denoise "+std::to_string(sig);
         // Both imports stay persistent even though pair sides are rebound.
@@ -115,9 +121,9 @@ struct DenoisePasses::Impl {
 };
 DenoisePasses::DenoisePasses(MetalContext& c,PipelineCache& p,const LaunchOptions& o):impl_(std::make_unique<Impl>(c,p,o)){}
 DenoisePasses::~DenoisePasses()=default;
-void DenoisePasses::prepareFrame(const ShadowPasses::Frame& f,u64 epoch){impl_->prepare(f,epoch);}
+void DenoisePasses::prepareFrame(const ShadowPasses::Frame& f,u64 epoch,const std::array<u64,4>& revisions){impl_->prepare(f,epoch,revisions);}
 void DenoisePasses::invalidateAll(const char* reason){impl_->invalidate(reason);}
-rg::TextureRef DenoisePasses::addSignal(rg::RenderGraph& g,u32 s,rg::TextureRef r,rg::TextureRef m,rg::BufferRef b,rg::BufferRef metadata,u64 revision){return impl_->add(g,s,r,m,b,metadata,revision);}
+rg::TextureRef DenoisePasses::addSignal(rg::RenderGraph& g,u32 s,rg::TextureRef r,rg::TextureRef m,rg::BufferRef b,rg::BufferRef metadata){return impl_->add(g,s,r,m,b,metadata);}
 void DenoisePasses::bindFrame(MetalGraphExecutor& e){impl_->bind(e);}u64 DenoisePasses::version()const{return impl_->graphVersion;}
 bool DenoisePasses::check(u32 slot)const{if(!impl_->options.debugLighting)return true;for(const auto& s:impl_->slots.at(slot)){if(!s.used)continue;const auto* words=static_cast<const u32*>(s.check->contents());if(words[0]!=s.expected||words[2]||words[3])return false;}return true;}
 bool DenoisePasses::ready()const{return impl_->pipelines.compute(impl_->temporal)&&impl_->pipelines.compute(impl_->atrous)&&
