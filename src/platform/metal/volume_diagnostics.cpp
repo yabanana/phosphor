@@ -70,7 +70,9 @@ struct VolumeDiagnostics::Impl {
         skyRef=g.importBuffer("Actual sky produced epoch per view",{16},rg::ImportContentsDefined|rg::ImportOutput);samplesRef={};}
     void stampProducer(rg::RenderGraph& g,rg::TextureRef texture,u32 kind){using namespace rg;
         auto& ref=kind==2?skyRef:globalRef;
-        g.addPass("Actual LUT producer revision "+std::to_string(kind),PassType::Compute,[&](PassBuilder& b){b.read(texture,Usage::ShaderRead,StageDispatch);ref=b.write(ref,Usage::ShaderWrite,StageDispatch);},
+        // A stamp replaces one lane only. Preserve previous lanes so DCE cannot
+        // discard the transmittance stamp when multiscattering stamps lane 1.
+        g.addPass("Actual LUT producer revision "+std::to_string(kind),PassType::Compute,[&](PassBuilder& b){b.read(texture,Usage::ShaderRead,StageDispatch);b.read(ref,Usage::ShaderRead,StageDispatch);ref=b.write(ref,Usage::ShaderWrite,StageDispatch);},
             [this,kind](PassContext& ctx){auto& s=slots[slot];auto* t=s.stampTables[kind];t->setAddress(s.atmosphereAddress,0);t->setAddress(s.stampAddress[kind],17);t->setAddress((kind==2?skyProduced[view]:globalProduced)->gpuAddress(),18);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,stamp,t,1);});}
     void homogeneous(rg::PassContext& ctx,MTL::Buffer* cells,MTL::GPUAddress fogAddress){auto& s=slots[slot];auto* t=s.fixtureTable;t->setAddress(fogAddress,0);t->setAddress(cells->gpuAddress(),1);t->setAddress(s.diagnosticAddress,17);
         auto* e=static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder());e->setComputePipelineState(p.compute(fixture));e->setArgumentTable(t);e->dispatchThreads(MTL::Size::Make(params.fogX,params.fogY,params.fogZ),MTL::Size::Make(4,4,4));}
