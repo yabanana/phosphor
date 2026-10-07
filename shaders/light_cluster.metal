@@ -17,7 +17,7 @@ inline float3 emitterWorldPoint(GPUInstance instance, float3 point) {
 // params0, full-scene emitter records1, scene instances2, materials3,
 // source sampled lights4, destination sampled lights5. No allocation here.
 kernel void light_emissive_update(constant GPUEmissiveUpdateParams& p [[buffer(0)]],
-                                  const device GPUEmissiveSurface* records [[buffer(1)]],
+                                  device GPUEmissiveSurface* records [[buffer(1)]],
                                   const device GPUInstance* instances [[buffer(2)]],
                                   const device GPUMaterial* materials [[buffer(3)]],
                                   const device GPUSampledLight* source [[buffer(4)]],
@@ -26,7 +26,7 @@ kernel void light_emissive_update(constant GPUEmissiveUpdateParams& p [[buffer(0
                                   uint tid [[thread_position_in_grid]]) {
     if (tid >= p.lightCount) return;
     GPUSampledLight light = source[tid];
-    const GPUEmissiveSurface emitter = records[tid];
+    GPUEmissiveSurface emitter = records[tid];
     if (emitter.valid) {
         bool valid = emitter.instanceSlot < p.slotCount && emitter.materialIndex < p.materialCount;
         GPUInstance instance{};
@@ -41,6 +41,13 @@ kernel void light_emissive_update(constant GPUEmissiveUpdateParams& p [[buffer(0
             const GPUVertex v0=emitter.geometryValid?vertices[emitter.vertex0]:GPUVertex{};
             const GPUVertex v1=emitter.geometryValid?vertices[emitter.vertex1]:GPUVertex{};
             const GPUVertex v2=emitter.geometryValid?vertices[emitter.vertex2]:GPUVertex{};
+            if(emitter.geometryValid) {
+                emitter.p0[0]=v0.px;emitter.p0[1]=v0.py;emitter.p0[2]=v0.pz;
+                emitter.p1[0]=v1.px;emitter.p1[1]=v1.py;emitter.p1[2]=v1.pz;
+                emitter.p2[0]=v2.px;emitter.p2[1]=v2.py;emitter.p2[2]=v2.pz;
+                emitter.uv0[0]=v0.u;emitter.uv0[1]=v0.v;emitter.uv1[0]=v1.u;emitter.uv1[1]=v1.v;emitter.uv2[0]=v2.u;emitter.uv2[1]=v2.v;
+                records[tid]=emitter;
+            }
             const float3 a = emitterWorldPoint(instance, emitter.geometryValid?float3(v0.px,v0.py,v0.pz):float3(emitter.p0[0],emitter.p0[1],emitter.p0[2]));
             const float3 b = emitterWorldPoint(instance, emitter.geometryValid?float3(v1.px,v1.py,v1.pz):float3(emitter.p1[0],emitter.p1[1],emitter.p1[2]));
             const float3 c = emitterWorldPoint(instance, emitter.geometryValid?float3(v2.px,v2.py,v2.pz):float3(emitter.p2[0],emitter.p2[1],emitter.p2[2]));
