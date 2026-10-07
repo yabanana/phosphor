@@ -909,4 +909,7 @@ struct GPUVolumeCounters {
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUVolumeCounters) == 32, "GPUVolumeCounters layout");
 
+struct GPUReflectionComposeParams {u32 width,height,backingWidth,backingHeight;u32 flags,pad[3];};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionComposeParams)==32,"GPUReflectionComposeParams layout");
+
 } // namespace phosphor
