@@ -1911,6 +1911,15 @@ classi (3460 normali, 436 specchiate); controlli negativi: 4x3 trasposta
 1980/2048 errati, slot cancellati con mask 0xFF 440 hit su istanze morte,
 regola specchiata ignorata 436/436 discordanze.
 
+**Riconciliazione nell'integrazione F9 (2026-10-07):** quella prova S2
+verificava il facing restituito. Usare la stessa opzione per correggere
+anche il culling delle primarie cambia invece la superficie accettata.
+Il contratto del motore preserva il culling nello spazio oggetto (come il
+raster, che inverte il cull mode per le specchiate) e corregge separatamente
+il facing geometrico restituito nello spazio mondo. F9-K1 e il riferimento
+CPU verificano entrambe le proprietà; il dato storico S2 non viene usato
+come prova della vecchia regola nel renderer.
+
 ### S3 — traversal e costo per raggio (F9-S3)
 
 Sponza, 1920×1080 (2.073.600 raggi primari), raggi secondari dai punti
@@ -1992,7 +2001,8 @@ di raggio nel 12,9%; per le ombre LOD 0 e cono differiscono solo nello
    l'ultimo lettore); refit per deformazioni con rebuild quando la topologia
    cambia o il refit degrada.
 2. **TLAS per frame: strategia A** (un descrittore per slot, mask 0 per gli
-   slot non validi, `userID` = slot, opzione CCW sulle specchiate), scritta
+   slot non validi, `userID` = slot; la regola CCW iniziale è sostituita
+   dal contratto object-cull/world-facing descritto sopra), scritta
    da un kernel dopo `Scene transforms`, **refit ogni frame**, rebuild
    quando cambia la capacità o l'insieme di BLAS e a cadenza configurabile
    contro il degrado. B/Bs restano disponibili (stesse prestazioni) ma A
@@ -2009,3 +2019,41 @@ di raggio nel 12,9%; per le ombre LOD 0 e cono differiscono solo nello
    ombre, LOD da cono per i raggi primari.
 7. **F9.6 (ray binning)**: nessuno spike ne misura un guadagno (raggi
    coerenti 0,24–0,28 ns contro diffusi 0,29 ns): non attivato.
+
+## F9 — Scoperte durante l'integrazione nel motore
+
+2026-10-07, M5 Max 128 GB, macOS 27.2 `26B5091g`. Queste sono prove
+funzionali/lifetime; non sostituiscono le misure prestazionali quiete S0–S5
+o la batteria finale del motore. [Contratti e comandi](RENDERING_F9.md).
+
+| Riscontro | Correzione e prova |
+|---|---|
+| Lo shader di primarie iniziava dalla camera, prima del near plane raster | `tmin` alla distanza del near plane; K1 e confronto con V-buffer |
+| Tolleranza baricentrica parametrica troppo stretta su triangoli visti di taglio | Residuo geometrico FP32 limitato dalla tolleranza di distanza S0; i vecchi fallimenti sono conservati. Residui osservati 3e-7–8e-7 unità mondo; negativi di corruzione continuano a fallire |
+| `--debug-rt` cambiava tipo di probe/grafo ad ogni controllo | Primarie di default e GPU snapshot stabile, cadenza N soltanto per verifica CPU; gli altri probe restano espliciti |
+| Test deformazione inattivo perché il contatore avanzava solo con `--switch-every` | Conteggio di tutti i frame presentati; il runner esige refit e rebuild effettivi. 80 frame: 68 refit e 4 rebuild oltre i 2 BLAS iniziali |
+| Una query compatta completata poteva precedere la pubblicazione della nuova versione ma seguire una nuova richiesta di vertici | La query con versione attesa rifiuta anche requested revision diverse e forced rebuild; test CPU e deformazione con frame in volo |
+| Texture emissive di fallback bianca classificava erroneamente ogni mesh come emissiva | Protezione basata sul fattore emissivo effettivo; nuovo manifest Sponza mantiene 56,24% dei triangoli, MASK/emissive Full |
+| Cambio materiale/assegnazione poteva invalidare la semplificazione | Promozione Full prima del frame; quattro transizioni reali su native/Apple9, compreso full upload senza delta |
+| Reload scartava la coda di tre readback e azzerava i contatori delle operazioni | Drain prima del reload/teardown e contatori cumulativi; prova 24 frame: tutti i 12.288 raggi e 206 build/compaction, invece di 10.752 e 103 |
+| Debug view tracciava primarie ma riportava `probe=none` | Report del probe effettivo |
+| Caricamento diretto Archive del PSO linkato perdeva 736 byte (`rt_alpha_generic`) | Il descriptor bare non risolve. Compiler pubblico con `lookupArchives` mantiene l'archivio disponibile e dà zero leak, anche con trace e switch; nessun hit dedotto né manipolazione di retain count |
+
+L'ultima prova usa
+[MTL4CompilerTaskOptions](https://developer.apple.com/documentation/metal/mtl4compilertaskoptions).
+Le pipeline ordinarie restano sul caricamento diretto Archive. Il costo della
+chiamata Compiler avviene a startup/caricamento o sul worker di hot reload,
+non nel frame steady-state. I log di entrambe le strade, inclusi quelli
+falliti, rimangono in `build/f9-validation/leaks-*.log`.
+
+Hot reload alpha: 120 frame positivi su Sponza; poi modifica della sola IFT
+in una copia temporanea degli shader. Il controllo esige che i tre slot
+eseguano la nuova funzione e falliscano con `opaque-alpha > 0`, raw exit 1 e
+`EXIT 1`; la prova è passata. API/shader errors e segnali sono respinti.
+
+Il confronto GPU RT/V-buffer conta tutti i pixel. A 640×360 per 32 frame:
+Torus 513/7.372.800 mismatch, Sponza 288/7.372.800, risultati identici con
+Apple9 forzato. Le discrepanze osservate sono su spigoli/coverage/pareggi,
+senza mismatch opaque interni nel corpus. La tolleranza di distanza resta
+quella S0. Questo non promette equivalenza numerica di raster e RT su ogni
+bordo o texture alpha a tutti i LOD.
