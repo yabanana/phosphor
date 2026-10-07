@@ -1,10 +1,108 @@
 """WRITTEN ONLY. Independent closed-form oracles; no renderer is launched."""
 import sys
 import copy
+import json
+import math
+import tempfile
+from array import array
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"tools"))
 from metalfx_denoise_fixture_check import constant_oracle,impulse_oracle,guide_oracle,leaks_at_exit,frozen_prewarm_budget,make_cases,frozen_auto_exposure_experiment,exposure_mode_oracle,frozen_manual_exposure_control,MANUAL_EXPOSURE_REQUESTED_FP32,MANUAL_EXPOSURE_R16
+import metalfx_denoise_fixture_check as runner
+
+class SDKNumpyEquivalenceTests(unittest.TestCase):
+    def both(self,call):
+        numpy=runner._NUMPY
+        if numpy is None:self.skipTest("optional NumPy unavailable; standard-library tests still run")
+        with patch.object(runner,"_NUMPY",None):slow=call()
+        with patch.object(runner,"_NUMPY",numpy):fast=call()
+        return slow,fast
+    def assert_numeric_equal(self,a,b):
+        if isinstance(a,dict):
+            self.assertEqual(set(a),set(b))
+            for k in a:self.assert_numeric_equal(a[k],b[k])
+        elif isinstance(a,float) and math.isnan(a):self.assertTrue(math.isnan(b))
+        else:self.assertEqual(a,b)
+    def test_constant_float32_float64_and_subnormal_equations_exact(self):
+        for kind in ("f","d"):
+            for target,factor in (([.5,.25,.125],1),([.5,.25,.125],1/64),([368640,128,64],1/64),
+                                  ([1e-40,0.,-0.],1),([0.,0.,0.],1)):
+                sdk=array(kind,[v*factor for v in target]*7);restored=array(kind,target*7)
+                a,b=self.both(lambda:runner.constant_oracle(sdk,restored,target,factor));self.assert_numeric_equal(a,b)
+        tiny=float.fromhex("0x0.0000000000001p-1022")
+        a,b=self.both(lambda:runner.constant_oracle(array("d",[tiny]*3),array("d",[tiny]*3),[tiny]*3,1));self.assert_numeric_equal(a,b)
+    def test_threshold_neighbors_keep_identical_decisions(self):
+        for threshold in (runner.GATES["constant_relative_max"],runner.GATES["restore_relative_max"]):
+            center=1+threshold
+            for value in (math.nextafter(center,-math.inf),center,math.nextafter(center,math.inf)):
+                for factor in (1,1/64):
+                    sdk=array("d",[value*factor]*3);restored=array("d",[value]*3)
+                    a,b=self.both(lambda:runner.constant_oracle(sdk,restored,[1]*3,factor));self.assert_numeric_equal(a,b)
+                    a,b=self.both(lambda:runner.constant_oracle(array("d",[factor]*3),restored,[1]*3,factor));self.assert_numeric_equal(a,b)
+    def test_relative_max_preserves_double_order_and_nonfinite_semantics(self):
+        for a,b in (([0.,-0.,1e-320],[0.,1e-320,0.]),([1e308,-1e308],[1e308,1e308]),
+                    ([math.nan,1.],[1.,1.]),([1.,math.nan],[1.,1.]),([math.inf],[math.inf])):
+            a,b=array("d",a),array("d",b)
+            slow,fast=self.both(lambda:runner.relative_max(a,b));self.assert_numeric_equal(slow,fast)
+    def test_invalid_radiance_and_layout_rejected_in_both_backends(self):
+        numpy=runner._NUMPY
+        for backend in (None,numpy):
+            with patch.object(runner,"_NUMPY",backend):
+                for data in ([],[True],["1"],[None],array("d",[math.nan]),array("d",[math.inf]),array("d",[-1e-320])):
+                    with self.assertRaises(ValueError):runner.pixels(data)
+                for factor in (0,-1,math.nan,math.inf,True):
+                    with self.assertRaises(ValueError):runner.constant_oracle(array("d",[1]*3),array("d",[1]*3),[1]*3,factor)
+                with self.assertRaises(ValueError):runner.constant_oracle(array("d",[1]*2),array("d",[1]*2),[1]*3,1)
+                with self.assertRaises(ValueError):runner.relative_max(array("d"),array("d"))
+                with self.assertRaises(ValueError):runner.relative_max(array("d",[1]),array("d",[1,2]))
+
+class SDKAnalyzeOnlyTests(unittest.TestCase):
+    def fixture(self,base,lifecycle=False):
+        out=base/"original";folder=out/"case";folder.mkdir(parents=True)
+        case={"name":"case","scenario":"lifecycle" if lifecycle else "constant","frames":300 if lifecycle else 96,
+              "preexposed":False,"expected_exit":0,"expected_state":"FIXTURE_CHECKS_PASSED","prewarm_ms":120000,
+              "capture":str(folder/"actual-sdk"),"log":str(folder/"renderer.log"),"lifecycle":lifecycle,
+              "command":["/not-needed/phosphor","--denoised-fixture-prewarm-ms","120000"]}
+        if lifecycle:case["leaks_tool"]="/not-needed/leaks"
+        manifest={"thresholds":runner.GATES,"hard_stop":"STOP_AFTER_F14","frozen_before_run":True,
+                  "gateway":"native","prewarm_ms":120000,"cases":[case],"binary_sha256":"b"*64}
+        path=out/"sdk-frozen-manifest.json";path.write_bytes(runner.json_bytes(manifest))
+        provenance={"source_sha":"a"*64,"binary_sha":"b"*64,"manifest_sha":runner.sha(path),
+                    "timeout_seconds":600,"frozen_before_first_case":True}
+        (out/"sdk-execution-provenance.json").write_bytes(runner.json_bytes(provenance))
+        command=case["command"] if not lifecycle else [case["leaks_tool"],"--atExit","--",*case["command"]]
+        status={"command":command,"expected_exit":0,"returncode":1 if lifecycle else 0,"exit_marker":0,
+                "binary_sha256":"b"*64,"failures":["process exit 1, expected 0"] if lifecycle else [],"timed_out":False,"signal":None}
+        (folder/"renderer.log.status.json").write_bytes(runner.json_bytes(status))
+        (folder/"renderer.log").write_text("EXIT 0\n"+("Process 7: 20 leaks for 12800 total leaked bytes.\n" if lifecycle else ""))
+        (out/"sdk-results.json").write_text("PREEXISTING RAW RESULT\n")
+        return out,path,provenance
+    def test_reanalysis_has_separate_identity_never_relaunches_or_rehashes_gpu_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out,path,provenance=self.fixture(Path(tmp));original={p:p.read_bytes() for p in out.rglob("*") if p.is_file()}
+            with patch.object(runner,"run_checked",side_effect=AssertionError("renderer must not run")),\
+                 patch.object(runner,"source_hash",side_effect=AssertionError("GPU source must not be relabelled")),\
+                 patch.object(runner,"gpu_lock",side_effect=AssertionError("no GPU scheduling")),\
+                 patch.object(runner,"evaluate_capture",return_value={"errors":[],"native_numerical_proof":True}):
+                result=runner.analyze_existing(out,path,Path(tmp)/"analysis")
+            self.assertTrue(result["passed"]);self.assertEqual(result["provenance"],provenance)
+            self.assertEqual(result["gpu_processes_launched"],0);self.assertIn("sha256",result["analyzer"])
+            self.assertTrue(all(p.read_bytes()==data for p,data in original.items()))
+            with self.assertRaises(ValueError):runner.analyze_existing(out,path,Path(tmp)/"analysis")
+            bad=json.loads((out/"sdk-execution-provenance.json").read_text());bad["manifest_sha"]="c"*64
+            (out/"sdk-execution-provenance.json").write_bytes(runner.json_bytes(bad))
+            with self.assertRaises(ValueError):runner.analyze_existing(out,path,Path(tmp)/"different")
+    def test_completed_native_frames_do_not_override_original_exit_or_leak_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out,path,_=self.fixture(Path(tmp),True)
+            with patch.object(runner,"evaluate_capture",return_value={"errors":[],"native_numerical_proof":True}):
+                result=runner.analyze_existing(out,path,Path(tmp)/"analysis")
+            self.assertFalse(result["passed"]);row=result["results"][0]
+            self.assertTrue(row["evaluation"]["native_numerical_proof"])
+            self.assertEqual(row["evaluation"]["process_at_exit"]["leaks"],20)
+            self.assertEqual(row["evaluation"]["process_at_exit"]["leaked_bytes"],12800)
 
 class SDKOracleTests(unittest.TestCase):
     def test_constant_scalar_unit_hypotheses(self):

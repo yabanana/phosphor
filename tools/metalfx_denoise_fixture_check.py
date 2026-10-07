@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Genuine SDK fixture planner/readback checker. Default NOT EXECUTED.
 
-Only --run launches existing binaries, serially. No builds, SDK enabling,
+Only --run launches existing binaries, serially. --analyze-only reuses frozen
+execution provenance and writes to a fresh analysis directory. No builds, SDK enabling,
 gateway patch application, retries or production output-policy promotion.
 All equations below independently inspect actual SDK/physical PFM pixels and
 actual packed GPU guide samples, rather than accepting a summary PASS flag.
 """
 from __future__ import annotations
 import argparse
+from array import array
 from datetime import datetime,timezone
 import fnmatch
 import hashlib
@@ -17,6 +19,11 @@ import os
 from pathlib import Path
 import re
 import struct
+import sys
+try:
+    import numpy as _NUMPY
+except ImportError:
+    _NUMPY=None
 from f13_f14_check import gpu_lock,json_bytes,sha,source_hash,GPU_ERROR
 from run_checked import run_checked
 from temporal_light_metrics import read_pfm
@@ -32,10 +39,41 @@ GATES={"constant_relative_max":0.01,"normalized_gain_error_max":0.02,
 
 
 def number(x):return isinstance(x,(int,float)) and not isinstance(x,bool) and math.isfinite(x)
+def _as_float64(values):
+    # PFM data is array('f'); conversion occurs once per image in the capture
+    # loop. Do not coerce strings/bools in arbitrary Python lists into numbers.
+    if _NUMPY is None:return None
+    if isinstance(values,array) and values.typecode in ("f","d"):
+        return _NUMPY.asarray(values,dtype=_NUMPY.float64)
+    if isinstance(values,_NUMPY.ndarray) and values.ndim==1 and values.dtype==_NUMPY.float64:
+        return values
+    return None
+
+def _relative_numpy(actual,expected):
+    with _NUMPY.errstate(over="ignore",under="ignore",invalid="ignore",divide="ignore"):
+        ratios=_NUMPY.abs(actual-expected)/_NUMPY.maximum(_NUMPY.abs(expected),1e-6)
+    # Preserve Python max's order semantics for nonfinite intermediate results
+    # too; public callers validate source radiance before doing arithmetic.
+    if _NUMPY.isnan(ratios).any():return max(float(v) for v in ratios.flat)
+    return float(_NUMPY.max(ratios))
+
+def _scaled(values,factor):
+    fast=_as_float64(values)
+    if fast is not None:
+        with _NUMPY.errstate(over="ignore",under="ignore",invalid="ignore",divide="ignore"):
+            return fast/factor
+    return [v/factor for v in values]
+
 def pixels(values):
+    fast=_as_float64(values)
+    if fast is not None:
+        if not fast.size or not _NUMPY.isfinite(fast).all() or _NUMPY.any(fast<0):raise ValueError("empty/nonfinite/negative actual radiance")
+        return
     if not values or any(not number(v) or v<0 for v in values):raise ValueError("empty/nonfinite/negative actual radiance")
 def relative_max(actual,expected):
-    if len(actual)!=len(expected) or not actual:raise ValueError("oracle extent mismatch")
+    if len(actual)!=len(expected) or not len(actual):raise ValueError("oracle extent mismatch")
+    a,b=_as_float64(actual),_as_float64(expected)
+    if a is not None and b is not None:return _relative_numpy(a,b)
     return max(abs(a-b)/max(abs(b),1e-6) for a,b in zip(actual,expected))
 
 
@@ -44,10 +82,17 @@ def constant_oracle(sdk,restored,physical,factor):
     pixels(sdk);pixels(restored)
     if len(sdk)!=len(restored) or len(sdk)%3 or len(physical)!=3 or not number(factor) or factor<=0:
         raise ValueError("constant oracle invalid RGB/factor")
-    pixels(physical);target=[physical[i%3] for i in range(len(sdk))]
-    pre=relative_max([x/factor for x in sdk],target)
-    unscaled=relative_max(sdk,target);error=relative_max(restored,target)
-    restore=relative_max(restored,[x/factor for x in sdk])
+    pixels(physical);s,r=_as_float64(sdk),_as_float64(restored)
+    if s is not None and r is not None:
+        target=_NUMPY.asarray(physical,dtype=_NUMPY.float64)
+        normalized=_scaled(s,factor).reshape(-1,3)
+        pre=_relative_numpy(normalized,target);unscaled=_relative_numpy(s.reshape(-1,3),target)
+        error=_relative_numpy(r.reshape(-1,3),target);restore=_relative_numpy(r.reshape(-1,3),normalized)
+    else:
+        target=[physical[i%3] for i in range(len(sdk))]
+        pre=relative_max([x/factor for x in sdk],target)
+        unscaled=relative_max(sdk,target);error=relative_max(restored,target)
+        restore=relative_max(restored,[x/factor for x in sdk])
     return {"sdk_preexposed_hypothesis":pre<=GATES["constant_relative_max"],
             "sdk_physical_hypothesis":unscaled<=GATES["constant_relative_max"],
             "preexposed_relative_error":pre,"physical_relative_error":unscaled,
@@ -213,10 +258,13 @@ def evaluate_capture(case,folder,provenance):
             if bounded_exposure or "auto_exposure_enabled" in record:exposure_mode_oracle(record,expected_auto,manual_control,True)
             guide_oracle(record,manual_control)
             stem=path.with_suffix("");sdk=read_pfm(str(stem)+"-sdk.pfm");physical=read_pfm(str(stem)+"-physical.pfm")
-            pixels(sdk.rgb);pixels(physical.rgb)
+            sdk_values=_as_float64(sdk.rgb);physical_values=_as_float64(physical.rgb)
+            if sdk_values is None:sdk_values=sdk.rgb
+            if physical_values is None:physical_values=physical.rgb
+            pixels(sdk_values);pixels(physical_values)
             if (sdk.width,sdk.height)!=(record.get("output_width"),record.get("output_height")) or (physical.width,physical.height)!=(sdk.width,sdk.height):
                 raise ValueError("actual SDK/physical PFM extent mismatch")
-            restore_error=relative_max(physical.rgb,[v/factor for v in sdk.rgb])
+            restore_error=relative_max(physical_values,_scaled(sdk_values,factor))
             if restore_error>GATES["restore_relative_max"]:raise ValueError("actual radiance restore differs from independent SDK/factor equation")
             if record.get("passed") is not True:raise ValueError("tagged actual frame checker failed")
             views.add(record["view"]);extents.add((record["input_width"],record["input_height"],sdk.width,sdk.height))
@@ -225,7 +273,7 @@ def evaluate_capture(case,folder,provenance):
                 steady+=1;exposures.add(factor)
                 if case["scenario"] in ("constant","lifecycle","wide-hdr"):
                     target=[368640,128,64] if case["scenario"]=="wide-hdr" else [.5,.25,.125]
-                    check=constant_oracle(sdk.rgb,physical.rgb,target,factor)
+                    check=constant_oracle(sdk_values,physical_values,target,factor)
                     experiments.append({"frame":frame,"view":record["view"],"preExposure":factor,**check})
                     if not check["passed"]:raise ValueError("actual constant unit equation failed")
                 if case["scenario"]=="impulse":
@@ -316,11 +364,86 @@ def frozen_prewarm_budget(manifest,outer_timeout):
     return budget
 
 
+def analyzer_identity():
+    """Current CPU analyzer identity; never relabel the original GPU source."""
+    files={name:sha(Path(__file__).with_name(name)) for name in
+           ("metalfx_denoise_fixture_check.py","temporal_light_metrics.py","f13_f14_check.py","run_checked.py")}
+    return {"files_sha256":files,"sha256":hashlib.sha256(json_bytes(files)).hexdigest(),
+            "python":sys.version,"numeric_backend":"numpy-float64" if _NUMPY is not None else "standard-library",
+            "numpy_version":_NUMPY.__version__ if _NUMPY is not None else None}
+
+
+def analyze_existing(out,manifest_path,analysis_out,only=()):
+    """Read completed run artifacts only; no binary/source hash or process call."""
+    out=Path(out).resolve();manifest_path=Path(manifest_path).resolve();analysis_out=Path(analysis_out).resolve()
+    raw=manifest_path.read_bytes();manifest=json.loads(raw)
+    provenance_path=out/"sdk-execution-provenance.json"
+    provenance=json.loads(provenance_path.read_text())
+    if manifest.get("thresholds")!=GATES or manifest.get("hard_stop")!="STOP_AFTER_F14" or manifest.get("frozen_before_run") is not True:
+        raise ValueError("incompatible frozen SDK plan")
+    if provenance.get("manifest_sha")!=hashlib.sha256(raw).hexdigest() or provenance.get("frozen_before_first_case") is not True:
+        raise ValueError("execution provenance does not authenticate the frozen manifest")
+    if any(not isinstance(provenance.get(key),str) or not re.fullmatch(r"[0-9a-f]{64}",provenance[key]) for key in ("source_sha","binary_sha","manifest_sha")):
+        raise ValueError("recorded GPU source/binary/manifest identity missing")
+    if manifest.get("binary_sha256") not in (None,provenance["binary_sha"]):raise ValueError("recorded execution binary differs from frozen plan")
+    frozen_auto_exposure_experiment(manifest);frozen_manual_exposure_control(manifest)
+    frozen_prewarm_budget(manifest,provenance.get("timeout_seconds"))
+    cases=[case for case in manifest["cases"] if not only or any(fnmatch.fnmatch(case["name"],pattern) for pattern in only)]
+    if not cases:raise ValueError("no existing cases selected")
+    if any(Path(c["capture"]).resolve().parent.parent!=out or Path(c["log"]).resolve().parent.parent!=out for c in cases):
+        raise ValueError("captured paths differ from the original execution directory")
+    if analysis_out.exists():raise ValueError("refuse analysis output overwrite; choose a fresh --analysis-out")
+    analysis_out.mkdir(parents=True)
+    result={"schema":1,"state":"ANALYZE_ONLY_RUNNING","provenance":provenance,
+            "execution_provenance_sha256":sha(provenance_path),"manifest_sha256":hashlib.sha256(raw).hexdigest(),
+            "analyzer":analyzer_identity(),"analyzed_utc":datetime.now(timezone.utc).isoformat(),
+            "gpu_run_reused":True,"gpu_processes_launched":0,"results":[],"phase_accepted":False,"production_policy_promoted":False}
+    target=analysis_out/"sdk-results.json"
+    def checkpoint(current=None):
+        result["current_case"]=current;target.write_bytes(json_bytes(result))
+    checkpoint()
+    for case in cases:
+        checkpoint(case["name"]);errors=[];evaluation={"native_numerical_proof":False}
+        log_path=Path(case["log"]);status_path=log_path.with_suffix(log_path.suffix+".status.json")
+        record_hashes={}
+        try:
+            status=json.loads(status_path.read_text());log=log_path.read_text(errors="replace")
+            record_hashes={"status_sha256":sha(status_path),"log_sha256":sha(log_path)}
+            command=case["command"]
+            if case.get("leaks_tool"):command=[case["leaks_tool"],"--atExit","--",*command]
+            if status.get("command")!=command or status.get("expected_exit")!=case["expected_exit"]:
+                raise ValueError("recorded command/expected exit differs from frozen case")
+            if status.get("binary_sha256")!=provenance["binary_sha"]:
+                raise ValueError("recorded run binary differs from GPU provenance")
+            if not isinstance(status.get("failures"),list):raise ValueError("recorded run status is incomplete")
+            errors.extend(status["failures"])
+            if status.get("timed_out") or status.get("signal"):errors.append("recorded GPU run timed out or signalled")
+            if status.get("returncode")!=case["expected_exit"] or status.get("exit_marker")!=case["expected_exit"]:
+                errors.append("recorded raw exit/EXIT marker failed")
+            markers=re.findall(r"^EXIT (\d+)$",log,re.M)
+            if not markers or int(markers[-1])!=status.get("exit_marker"):errors.append("recorded log and EXIT status differ")
+            if GPU_ERROR.search(log):errors.append("GPU/API/shader failure cannot satisfy SDK fixture")
+            evaluation=evaluate_capture(case,Path(case["capture"]),provenance);errors.extend(evaluation["errors"])
+            if case.get("lifecycle"):
+                evaluation["process_at_exit"]=leaks_at_exit(log) if case.get("leaks_tool") else {"state":"NOT_EXECUTED","passed":False}
+                evaluation["final_destruction_verified"]=False
+                if case.get("leaks_tool") and not evaluation["process_at_exit"]["passed"]:errors.append("requested process-at-exit leak check missing or failed")
+        except (OSError,ValueError,KeyError,TypeError) as error:errors.append(str(error))
+        result["results"].append({"name":case["name"],"state":"REANALYZED_EXISTING_CAPTURE","passed":not errors,
+                                  "errors":errors,"evaluation":evaluation,"recorded_run":record_hashes,
+                                  "phase_accepted":False,"production_policy_promoted":False})
+        checkpoint()
+    result["state"]="ANALYZE_ONLY_COMPLETE";result["passed"]=all(row["passed"] for row in result["results"]);checkpoint()
+    return result
+
+
 def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--binary",type=Path,default=Path("build/release/phosphor"));p.add_argument("--out",type=Path,required=True)
     p.add_argument("--source-root",type=Path,default=Path(__file__).resolve().parents[1]);p.add_argument("--metallib",type=Path)
     p.add_argument("--run",action="store_true");p.add_argument("--manifest",type=Path);p.add_argument("--only",action="append",default=[])
+    p.add_argument("--analyze-only",action="store_true",help="read existing --out captures/status/provenance; never launch GPU work")
+    p.add_argument("--analysis-out",type=Path,help="new destination for analyze-only results; original run artifacts stay untouched")
     p.add_argument("--gateway",choices=["expected-missing","native"],default="expected-missing")
     p.add_argument("--frames",type=int,default=192);p.add_argument("--resolution",default="128x96")
     p.add_argument("--denoised-fixture-auto-exposure",action="store_true",help="freeze only the 96-frame native wide-HDR automatic-exposure experiment")
@@ -329,6 +452,15 @@ def main(argv=None):
     p.add_argument("--leaks-tool",type=Path,default=Path("/usr/bin/leaks"))
     p.add_argument("--prewarm-ms",type=int,default=120000);p.add_argument("--timeout",type=float,default=600);p.add_argument("--gpu-lock",type=Path,default=Path("/tmp/phosphor-gpu-verification.lock"))
     a=p.parse_args(argv)
+    if a.analyze_only:
+        if a.run or a.analysis_out is None:p.error("--analyze-only requires a fresh --analysis-out and excludes --run")
+        if a.denoised_fixture_auto_exposure or a.denoised_fixture_manual_exposure_control:p.error("analyze-only uses exposure settings from the existing manifest")
+        try:
+            result=analyze_existing(a.out,a.manifest or a.out/"sdk-frozen-manifest.json",a.analysis_out,a.only)
+        except (OSError,ValueError,KeyError,TypeError) as error:p.error(str(error))
+        print("ANALYZE_ONLY_COMPLETE: "+str(a.analysis_out.resolve()/"sdk-results.json"))
+        return int(not result["passed"])
+    if a.analysis_out is not None:p.error("--analysis-out is only for --analyze-only")
     if a.frames<96 or not re.fullmatch(r"[1-9]\d*x[1-9]\d*",a.resolution) or min(map(int,a.resolution.split("x")))<16:
         p.error("at least96 frames and valid >=16px dimensions required for paired steady experiments")
     if not math.isfinite(a.timeout) or a.timeout<=0:p.error("positive finite timeout required")
