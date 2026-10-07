@@ -700,8 +700,9 @@ PHOSPHOR_STATIC_ASSERT(sizeof(GPUGiReservoir) == 128, "GPUGiReservoir layout");
 
 struct GPUProbeTraceExtra {
     u32 sampledLightCount, cacheUpdateCount, cacheCandidateCount, frameSeed;
+    float sunAngularRadius; u32 pad[3];
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeTraceExtra) == 16, "GPUProbeTraceExtra layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeTraceExtra) == 32, "GPUProbeTraceExtra layout");
 
 struct GPULightingCheckParams {
     u32 width, height, restir, lightCount;

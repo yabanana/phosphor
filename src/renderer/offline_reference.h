@@ -43,6 +43,7 @@ struct OfflineReferenceScene {
     std::span<const ReferenceTexture> textures;
     ReferenceCamera camera;
     float skyRadiance[3]{};
+    float sunAngularRadius = 0; // same configured physical disk as F10, radians
     u32 frame = 0;
     u64 geometryRevision = 0, materialRevision = 0, lightRevision = 0;
 };
