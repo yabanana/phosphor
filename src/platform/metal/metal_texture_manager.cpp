@@ -4,10 +4,13 @@
 #include "core/log.h"
 
 #include <cstring>
+#include <algorithm>
+#include <stdexcept>
 
 namespace phosphor {
 
-MetalTextureManager::MetalTextureManager(MetalContext& context) : context_(context) {
+MetalTextureManager::MetalTextureManager(MetalContext& context, bool keepCpuTextures)
+    : keepCpuTextures_(keepCpuTextures), context_(context) {
     table_ = context_.memory().newBuffer(sizeof(MTL::ResourceID) * MAX_TEXTURES,
                                          MTL::ResourceStorageModeShared | MTL::ResourceCPUCacheModeWriteCombined,
                                          MemoryCategory::Textures, "Texture table");
@@ -52,6 +55,7 @@ u32 MetalTextureManager::createTexture(const u8* rgba, u32 width, u32 height, bo
 
     const u32 index = static_cast<u32>(textures_.size());
     textures_.push_back(texture);
+    if (keepCpuTextures_) cpuTextures_.push_back(rtMakeCpuTexture(std::span(rgba, rowBytes * height), width, height));
     static_cast<MTL::ResourceID*>(table_->contents())[index] = texture->gpuResourceID();
     if (texture->mipmapLevelCount() > 1) pendingMips_.push_back(texture);
     return index;
@@ -69,7 +73,64 @@ void MetalTextureManager::flushUploads() {
     }
     context_.flushUploads();
     pendingMips_.clear();
+    if (keepCpuTextures_) readbackCpuMips();
     LOG_INFO("Texture uploads flushed (%zu textures)", textures_.size());
+}
+
+
+void MetalTextureManager::readbackCpuMips() {
+    if (cpuMipReadbackCount_ == textures_.size()) return;
+    struct Copy { size_t offset, rowBytes; u32 width, height, level; };
+    const auto layout = [](MTL::Texture* texture) {
+        std::vector<Copy> copies;
+        size_t offset = 0;
+        for (u32 level = 1; level < texture->mipmapLevelCount(); ++level) {
+            const auto width = std::max(1u, u32(texture->width()) >> level);
+            const auto height = std::max(1u, u32(texture->height()) >> level);
+            const size_t rowBytes = (size_t(width) * 4 + 255) & ~size_t(255);
+            copies.push_back({offset, rowBytes, width, height, level});
+            offset += rowBytes * height;
+        }
+        return copies;
+    };
+    // One reusable buffer bounds diagnostic GPU memory to the largest texture's
+    // mip chain. All submissions below complete before this buffer is reused.
+    size_t maxBytes = 0;
+    for (size_t i = cpuMipReadbackCount_; i < textures_.size(); ++i) {
+        const auto copies = layout(textures_[i]);
+        if (!copies.empty()) maxBytes = std::max(maxBytes, copies.back().offset + copies.back().rowBytes * copies.back().height);
+    }
+    MTL::Buffer* readback = maxBytes ? context_.memory().newBuffer(maxBytes, MTL::ResourceStorageModeShared,
+        MemoryCategory::Other, "RT diagnostic alpha mip readback") : nullptr;
+    if (maxBytes && !readback) throw std::runtime_error("RT alpha mip readback allocation failed");
+    struct ReadbackRelease {
+        GpuMemory& memory;
+        MTL::Buffer* buffer;
+        ~ReadbackRelease() { if (buffer) memory.release(buffer, MemoryCategory::Other); }
+    } release{context_.memory(), readback};
+    for (size_t i = cpuMipReadbackCount_; i < textures_.size(); ++i) {
+        auto* texture = textures_[i];
+        const auto copies = layout(texture);
+        if (!copies.empty()) {
+            context_.submitAndWait([texture, readback, &copies](MTL4::ComputeCommandEncoder* enc) {
+                // Prior upload/mipmap submission completed synchronously.
+                for (const auto& copy : copies) {
+                    enc->copyFromTexture(texture, 0, copy.level, MTL::Origin::Make(0, 0, 0),
+                        MTL::Size::Make(copy.width, copy.height, 1), readback, copy.offset, copy.rowBytes, 0);
+                }
+            });
+            auto& cpu = cpuTextures_[i];
+            for (const auto& copy : copies) {
+                RtCpuMip mip{copy.width, copy.height, std::vector<u8>(size_t(copy.width) * copy.height * 4)};
+                const auto* source = static_cast<const u8*>(readback->contents()) + copy.offset;
+                for (u32 y = 0; y < copy.height; ++y)
+                    std::memcpy(mip.rgba8.data() + size_t(y) * copy.width * 4, source + y * copy.rowBytes, size_t(copy.width) * 4);
+                cpu.mips.push_back(std::move(mip));
+            }
+        }
+        cpuTextures_[i].exactMips = true;
+    }
+    cpuMipReadbackCount_ = textures_.size();
 }
 
 } // namespace phosphor
