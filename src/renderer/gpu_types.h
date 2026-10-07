@@ -553,11 +553,16 @@ PHOSPHOR_GPU_CONSTANT u32 DI_LIGHT_DISK = 4u;
 PHOSPHOR_GPU_CONSTANT u32 DI_LIGHT_TUBE = 5u;
 PHOSPHOR_GPU_CONSTANT u32 DI_LIGHT_TRIANGLE = 6u;
 PHOSPHOR_GPU_CONSTANT u32 DI_LIGHT_TWO_SIDED = 1u;
+PHOSPHOR_GPU_CONSTANT u32 DI_LIGHT_TEXTURED_EMISSION = 2u;
+PHOSPHOR_GPU_CONSTANT u32 DI_LIGHT_MIRRORED = 4u;
 PHOSPHOR_GPU_CONSTANT u32 DI_RESET_HISTORY = 1u;
 PHOSPHOR_GPU_CONSTANT u32 DI_ENABLE_TEMPORAL = 2u;
 PHOSPHOR_GPU_CONSTANT u32 DI_ENABLE_SPATIAL = 4u;
 PHOSPHOR_GPU_CONSTANT u32 DI_ENABLE_VISIBILITY = 8u;
 PHOSPHOR_GPU_CONSTANT u32 DI_USE_STBN = 16u;
+PHOSPHOR_GPU_CONSTANT u32 DI_ERROR_WEIGHT = 1u;
+PHOSPHOR_GPU_CONSTANT u32 DI_ERROR_ALIAS = 2u;
+PHOSPHOR_GPU_CONSTANT u32 DI_ERROR_TARGET = 4u;
 
 struct GPUSampledLight {
     u32 id, generation, type, flags;
@@ -567,6 +572,22 @@ struct GPUSampledLight {
     float emission[3], outerCone;
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUSampledLight) == 80, "GPUSampledLight layout");
+
+// Indexed by the sampled-light slot; valid=0 for analytic/constant emitters.
+// Local triangle geometry is transformed by light_emissive_update AFTER scene
+// transforms, including GPU animation; never CPU guesses for moving emitters.
+struct GPUEmissiveSurface {
+    float p0[3]; u32 instanceSlot;
+    float p1[3]; u32 instanceGeneration;
+    float p2[3]; u32 materialIndex;
+    float uv0[2], uv1[2];
+    float uv2[2]; u32 valid, pad;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUEmissiveSurface) == 80, "GPUEmissiveSurface layout");
+struct GPUEmissiveUpdateParams {
+    u32 lightCount, slotCount, materialCount, pad;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUEmissiveUpdateParams) == 16, "GPUEmissiveUpdateParams layout");
 
 struct GPUAliasEntry {
     float probability; // Vose threshold for this uniform column
@@ -580,7 +601,7 @@ struct GPUDIReservoir {
     float u, v, target, weightSum;
     float normalization; // W = sumWeight / (M * target(selected))
     u32 M, age, valid;
-    u32 viewID, historyEpoch, pad[2];
+    u32 viewID, historyEpoch, pad[2]; // pad[0]=DI_ERROR_* (debug readback must fail)
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUDIReservoir) == 64, "GPUDIReservoir layout");
 
@@ -602,7 +623,7 @@ struct GPUDIParams {
     u32 flags, viewID, historyEpoch, lightRevision;
     u32 maxHistoryAge, stbnWidth, stbnHeight, stbnFrames;
     float depthRelativeThreshold, normalThreshold, targetFloor, pad0;
-    u32 stbnDimensions, stbnSeed, slotCount, pad1;
+    u32 stbnDimensions, stbnSeed, slotCount, pad1; // pad1!=0 forces full-light brute iteration in cluster shade
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUDIParams) == 96, "GPUDIParams layout");
 

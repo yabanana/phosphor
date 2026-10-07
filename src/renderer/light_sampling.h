@@ -26,6 +26,13 @@ struct LightSample {
 [[nodiscard]] double powerWeight(const GPUSampledLight& light);
 [[nodiscard]] GPUSampledLight fromPunctual(const GPULight& light, u32 id, u32 generation);
 [[nodiscard]] LightSample sampleLight(const GPUSampledLight& light, glm::dvec2 uv, glm::dvec3 receiver);
+using TextureSample = glm::dvec4 (*)(u32 textureIndex, glm::dvec2 uv, void* user); // LINEAR, LOD0
+[[nodiscard]] LightSample sampleTexturedLight(const GPUSampledLight& light, const GPUEmissiveSurface& emitter,
+                                            const GPUMaterial& material, glm::dvec2 uv, glm::dvec3 receiver,
+                                            TextureSample textures, void* user = nullptr);
+// CPU oracle for the GPU extraction kernel; production transforms live on GPU.
+[[nodiscard]] GPUSampledLight updateEmissive(const GPUSampledLight& source, const GPUEmissiveSurface& emitter,
+                                           std::span<const GPUInstance> instances, std::span<const GPUMaterial> materials);
 [[nodiscard]] glm::dvec3 incident(const LightSample& sample);
 [[nodiscard]] glm::dvec3 evaluateBRDF(const GPUDISurface& surface, const LightSample& sample);
 [[nodiscard]] double target(const GPUDISurface& surface, const LightSample& sample, double positiveFloor);
@@ -34,6 +41,11 @@ struct LightSample {
 using Visibility = double (*)(glm::dvec3 receiver, const LightSample&, void* user);
 [[nodiscard]] glm::dvec3 bruteForce(const GPUDISurface& surface, std::span<const GPUSampledLight> lights,
                                   u32 sideSamples, Visibility visibility = nullptr, void* user = nullptr);
+[[nodiscard]] glm::dvec3 bruteForceTextured(const GPUDISurface& surface, std::span<const GPUSampledLight> lights,
+                                         std::span<const GPUEmissiveSurface> emitters,
+                                         std::span<const GPUMaterial> materials, u32 sideSamples,
+                                         TextureSample textures, void* textureUser = nullptr,
+                                         Visibility visibility = nullptr, void* visibilityUser = nullptr);
 
 struct ClusterGrid {
     GPULightClusterParams params{};
