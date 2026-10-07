@@ -1156,9 +1156,9 @@ TEST_CASE("F13 SDK fixture is an explicit source experiment with isolated inputs
 
 TEST_CASE("F13 filtered indirect capture exports selected irradiance as diffuse radiance once") {
     LaunchOptions o;std::string error;
-    REQUIRE(parse({"--render-path","visibility","--rt","on","--gi","cache","--lighting-denoise","custom","--capture-linear-signal","indirect-diffuse-filtered"},o,error));
+    REQUIRE(parse({"--render-path","visibility","--rt","on","--gi","cache","--lighting","restir","--lighting-denoise","custom","--capture-linear-signal","indirect-diffuse-filtered"},o,error));
     CHECK(o.captureLinearSignal==8);
-    CHECK_FALSE(parse({"--render-path","visibility","--rt","on","--gi","cache","--capture-linear-signal","indirect-diffuse-filtered"},o,error));
-    REQUIRE(parse({"--render-path","visibility","--rt","on","--gi","cache","--capture-linear-signal","indirect-diffuse"},o,error));
+    CHECK_FALSE(parse({"--render-path","visibility","--rt","on","--gi","cache","--lighting","restir","--capture-linear-signal","indirect-diffuse-filtered"},o,error));
+    REQUIRE(parse({"--render-path","visibility","--rt","on","--gi","cache","--lighting","restir","--capture-linear-signal","indirect-diffuse"},o,error));
     CHECK(o.captureLinearSignal==1);
 }

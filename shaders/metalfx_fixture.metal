@@ -34,8 +34,9 @@ vertex FXDepthVertex fx_fixture_depth_vs(uint vertexId [[vertex_id]]) {
     return {float4(xy,0,1)};
 }
 // Legitimate Depth32 writer; never assume compute storage writes to depth format.
-fragment float fx_fixture_depth_fs(FXDepthVertex in [[stage_in]],constant GPUFXFixtureParams& p [[buffer(0)]]) [[depth(any)]] {
-    (void)in;return p.nearPlane/p.planeDistance;
+struct FXDepthOutput {float depth [[depth(any)]];};
+fragment FXDepthOutput fx_fixture_depth_fs(FXDepthVertex in [[stage_in]],constant GPUFXFixtureParams& p [[buffer(0)]]) {
+    (void)in;return {p.nearPlane/p.planeDistance};
 }
 // params0, SDK0, physical1, actual authored guide textures2..8,
 // full images buffer1(SDK RGB then physical RGB), authored samples buffer2,
