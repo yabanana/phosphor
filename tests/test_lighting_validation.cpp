@@ -25,7 +25,7 @@ struct Fixture {
 }
 
 TEST_CASE("lighting fixture: all named scenarios are explicit and invalid choices fail") {
-    CHECK(LightingValidation::scenarios().size() == 10);
+    CHECK(LightingValidation::scenarios().size() == 11);
     for (std::string_view name : LightingValidation::scenarios()) {
         CHECK(LightingValidation::validScenario(name));
         LightingValidation scene{std::string(name)};
@@ -248,4 +248,56 @@ TEST_CASE("F10 penumbra fixture has exact elevated plates and a vertical physica
     CHECK(thirtyTwo == 1);
     CHECK(8 * std::tan(LightingValidation::NominalSunAngularRadius) > 0.037f);
     CHECK(32 * std::tan(LightingValidation::NominalSunAngularRadius) > 0.148f);
+}
+
+
+TEST_CASE("F12 emissive step: only radiance changes before render frame256 and stays settled") {
+    Fixture f("emissive-step");
+    const EntityID panel = f.bench.emissivePanel();
+    REQUIRE(panel != INVALID_ENTITY);
+    REQUIRE(LightingValidation::EmissiveStepFrame == 256);
+    const glm::mat4 initialWorld = f.read().getComponent<TransformComponent>(panel).worldMatrix;
+    const auto initialCamera = f.bench.getDefaultCamera();
+    REQUIRE(f.read().getArray<LightComponent>().size() == 0);
+    FrameScene before, after;
+    u32 totalMaterialChanges = 0;
+    f.ecs.endFrame();
+    for (u32 frame = 0; frame <= 384; ++frame) {
+        CAPTURE(frame);
+        // Zero-dt setup/pause calls must not advance the visible transition.
+        f.bench.update(0, f.ecs);
+        // It is a deterministic frame fixture, not a floating elapsed-time test.
+        f.bench.update(frame % 17 == 0 ? 0.125f : 1.0f / 60.0f, f.ecs);
+        const float expected = frame <= 255 ? 12.0f : 6.0f;
+        CHECK(f.read().getComponent<MaterialComponent>(panel).emissiveFactor == glm::vec3(expected));
+        CHECK(f.read().getComponent<TransformComponent>(panel).worldMatrix == initialWorld);
+        CHECK(f.read().getArray<TransformComponent>().changes().empty());
+        const auto changes = f.read().getArray<MaterialComponent>().changes();
+        CHECK_FALSE(changes.all);
+        CHECK(changes.changed.size() == (frame == 256 ? 1 : 0));
+        totalMaterialChanges += static_cast<u32>(changes.changed.size());
+        if (frame == 255 || frame == 256) {
+            FrameScene& capture = frame == 255 ? before : after;
+            extractFrameScene(f.ecs, f.scene, capture);
+            u32 emitters = 0;
+            for (const auto& material : capture.materials) {
+                if (material.emissive[0] > 0) {
+                    ++emitters;
+                    for (float channel : material.emissive) CHECK(channel == expected);
+                }
+            }
+            CHECK(emitters == 1);
+        }
+        f.ecs.endFrame();
+    }
+    CHECK(totalMaterialChanges == 1);
+    CHECK(before.instances.size() == after.instances.size());
+    CHECK(before.materials.size() == after.materials.size());
+    CHECK(f.bench.getDefaultCamera().position == initialCamera.position);
+    CHECK(f.bench.getDefaultCamera().target == initialCamera.target);
+    // Reusing the fixture must re-arm the one-shot without retaining old state.
+    f.bench.teardown(f.ecs, f.scene);
+    f.bench.setup(f.ecs, f.scene, f.textures);
+    f.bench.update(0, f.ecs); f.bench.update(1.0f / 60.0f, f.ecs);
+    CHECK(f.read().getComponent<MaterialComponent>(f.bench.emissivePanel()).emissiveFactor == glm::vec3(12));
 }

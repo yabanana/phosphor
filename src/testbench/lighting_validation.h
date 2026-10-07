@@ -40,6 +40,8 @@ public:
     // The root runner MUST explicitly select/inspect a probe at this anchor;
     // an automatically fitted DDGI grid is not guaranteed to contain it.
     [[nodiscard]] glm::vec3 embeddedProbeAnchor() const { return {0.9f, 1.0f, -0.8f}; }
+    // update() runs before render frame0. Only positive-dt updates count.
+    static constexpr u32 EmissiveStepFrame = 256;
     static constexpr float ThinWallThickness = 0.01f;
     static constexpr float NominalSunAngularRadius = 0.00465f;
     static constexpr float SceneUnitsInMetres = 1.0f;
@@ -63,7 +65,7 @@ private:
     EntityID thinWall_ = INVALID_ENTITY, embeddedSolid_ = INVALID_ENTITY;
     double time_ = 0;
     mutable u32 cameraSegment_ = ~0u;
-    u32 materialStep_ = 0;
+    u32 materialStep_ = 0, positiveStepUpdates_ = 0;
 };
 
 } // namespace phosphor

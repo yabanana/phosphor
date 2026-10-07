@@ -12,10 +12,10 @@
 
 namespace phosphor {
 namespace {
-constexpr std::array<std::string_view, 10> kScenarios{
+constexpr std::array<std::string_view, 11> kScenarios{
     "cornell", "thin-walls", "moving-sun", "moving-emissive",
     "offscreen-caster", "shadow-bias", "disocclusion", "cache-stress",
-    "shadow-penumbra", "alpha-mip-shadow"};
+    "shadow-penumbra", "alpha-mip-shadow", "emissive-step"};
 constexpr float pi = 3.14159265358979323846f;
 const glm::quat identity(1, 0, 0, 0);
 glm::quat orientLight(glm::vec3 towardLight) {
@@ -159,8 +159,8 @@ void LightingValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& textur
     const auto plane = ProceduralMeshes::generatePlane(1, 1, 1, 1), cube = ProceduralMeshes::generateCube(0.5f);
     plane_ = scene.uploadMesh(plane.positions, plane.normals, plane.tangents, plane.uvs, plane.indices);
     cube_ = scene.uploadMesh(cube.positions, cube.normals, cube.tangents, cube.uvs, cube.indices);
-    time_ = 0; cameraSegment_ = ~0u; materialStep_ = 0;
-    if (scenario_ == "cornell" || scenario_ == "thin-walls" || scenario_ == "moving-emissive" || scenario_ == "disocclusion") room(ecs);
+    time_ = 0; cameraSegment_ = ~0u; materialStep_ = 0; positiveStepUpdates_ = 0;
+    if (scenario_ == "cornell" || scenario_ == "thin-walls" || scenario_ == "moving-emissive" || scenario_ == "disocclusion" || scenario_ == "emissive-step") room(ecs);
     else exterior(ecs);
     if (scenario_ == "alpha-mip-shadow") {
         std::vector<u8> rgba(size_t(AlphaTextureSide) * AlphaTextureSide * 4, 255);
@@ -183,6 +183,18 @@ void LightingValidation::update(float dt, ECS& ecs) {
     if (!std::isfinite(dt) || dt < 0) throw std::invalid_argument("Lighting fixture dt must be finite and nonnegative");
     if (dt == 0 || entities_.empty()) return;
     time_ += dt;
+    if (scenario_ == "emissive-step") {
+        // First positive update precedes render frame0, hence update257 is
+        // frame256. Saturation makes this a one-shot even in a long run.
+        const bool transition = positiveStepUpdates_ == EmissiveStepFrame;
+        if (positiveStepUpdates_ <= EmissiveStepFrame) ++positiveStepUpdates_;
+        if (transition) {
+            auto& material = ecs.getComponent<MaterialComponent>(panel_);
+            material.emissiveFactor = glm::vec3(6.0f);
+            ecs.markChanged<MaterialComponent>(panel_);
+        }
+        return; // Geometry/camera stay identical to static Cornell thereafter.
+    }
     // All animation frequencies are integer multiples of 1/20 rad/s; keep
     // trigonometric inputs bounded even for a large finite scripted dt.
     const float t = float(std::fmod(time_, 40.0 * double(pi)));
@@ -218,7 +230,7 @@ void LightingValidation::teardown(ECS& ecs, GpuScene&) {
     for (EntityID e : entities_) ecs.destroyEntity(e);
     entities_.clear(); cacheCasters_.clear(); cacheOrigins_.clear();
     panel_ = sun_ = mover_ = thinWall_ = embeddedSolid_ = alphaReceiver_ = INVALID_ENTITY;
-    plane_ = cube_ = ~0u; time_ = 0; cameraSegment_ = ~0u; materialStep_ = 0;
+    plane_ = cube_ = ~0u; time_ = 0; cameraSegment_ = ~0u; materialStep_ = 0; positiveStepUpdates_ = 0;
 }
 CameraSetup LightingValidation::getDefaultCamera() const {
     if (scenario_ == "offscreen-caster") return {{0, 2, 7}, {0, 0, 0}, 7, false};
