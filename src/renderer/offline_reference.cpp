@@ -28,7 +28,7 @@ ReferenceExportResult validateReferenceScene(const OfflineReferenceScene& s) {
     if(!c.width || !c.height || c.width>32768 || c.height>32768 || !finite(c.position,3)||!finite(c.direction,3)||
        !finite(c.up,3)||!finite(c.jitterPixels,2)||norm2(c.direction)<1e-12f||norm2(c.up)<1e-12f ||
        !std::isfinite(c.fovYRadians)||c.fovYRadians<=0 || c.fovYRadians>=3.14159f ||
-       !std::isfinite(c.nearPlane)||!std::isfinite(c.farPlane)||c.nearPlane<=0||c.farPlane<=c.nearPlane)
+       !std::isfinite(c.nearPlane)||!std::isfinite(c.farPlane)||c.nearPlane<=0||(c.farPlane!=0 && c.farPlane<=c.nearPlane))
         return fail("invalid reference camera");
     const float cross[3]{c.direction[1]*c.up[2]-c.direction[2]*c.up[1],
         c.direction[2]*c.up[0]-c.direction[0]*c.up[2],c.direction[0]*c.up[1]-c.direction[1]*c.up[0]};

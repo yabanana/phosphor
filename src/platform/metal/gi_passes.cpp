@@ -14,15 +14,17 @@
 #include <glm/gtc/type_ptr.hpp>
 namespace phosphor {
 struct GiPasses::Impl {
-    enum Pass { Trace,Classify,Blend,Resolve,Cache,Candidates,Temporal,Spatial,Shade,Snapshot,Count };
+    enum Pass { Trace,Classify,Blend,Resolve,Cache,Candidates,Temporal,Spatial,Shade,Snapshot,CheckClear,CheckNegative,Check,Count };
     MetalContext& c;PipelineCache& p;SceneRenderer& scene;AccelerationStructures& rt;ShadowPasses& shadow;DirectLightingPasses& direct;LaunchOptions options;
     ProbeGridConfig config;std::unique_ptr<ProbeGrid> oracle;
     ShadowPasses::Frame frame;GPUProbeGridParams params{};GPUProbeTraceExtra extra{};
-    MTL::GPUAddress paramsAddress=0,extraAddress=0;
+    MTL::GPUAddress paramsAddress=0,extraAddress=0,checkAddress=0;
+    GPUGiCheckParams checkParams{};pipe::PipelineHandle checkClear{},checkKernel{},checkNegative{};rg::BufferRef checkRef{};
     std::array<pipe::PipelineHandle,Count> kernels{};
     RtConsumer traceConsumer,candidateConsumer,temporalConsumer,spatialConsumer;
     struct Slot {
-        MTL::Buffer *rays=nullptr,*cacheCandidates=nullptr,*fresh=nullptr,*temporal=nullptr,*spatial=nullptr;
+        MTL::Buffer *rays=nullptr,*cacheCandidates=nullptr,*fresh=nullptr,*temporal=nullptr,*spatial=nullptr,*check=nullptr;
+        u32 expectedPixels=0;
         std::array<MTL4::ArgumentTable*,Count> tables{};
     };std::array<Slot,METAL_FRAMES_IN_FLIGHT> slots{};
     MTL::Buffer *states=nullptr,*cache=nullptr;std::array<MTL::Buffer*,4> histories{};
@@ -31,14 +33,17 @@ struct GiPasses::Impl {
     u64 pixels=0,graphVersion=1,sceneRevision=1,materialRevision=1;u32 generation=1;struct Signal {u64 scene,geometry,materials,rtGeometry;u32 lights;bool operator==(const Signal&)const=default;};Signal lastSignal{~u64{0},0,0,0,0};
     bool atlasValid=false;HistoryRegistry history;
     rg::BufferRef stateRef{},cacheRef{},raysRef{},cacheCandidatesRef{},freshRef{},temporalRef{},spatialRef{},historyRef{};
-    rg::TextureRef previousIrrRef{},nextIrrRef{},previousDistRef{},nextDistRef{},output{};
+    rg::TextureRef previousIrrRef{},nextIrrRef{},previousDistRef{},nextDistRef{},output{},referenceDiffuse{};
+    pipe::PipelineHandle referencePipeline{};MTL4::ArgumentTable* referenceTable=nullptr;
     Impl(MetalContext& context,PipelineCache& pipelines,SceneRenderer& s,AccelerationStructures& a,ShadowPasses& sh,DirectLightingPasses& d,const LaunchOptions& o)
         :c(context),p(pipelines),scene(s),rt(a),shadow(sh),direct(d),options(o),traceConsumer(c,p,a),candidateConsumer(c,p,a),temporalConsumer(c,p,a),spatialConsumer(c,p,a) {
         const char* names[]={"ddgi_trace","ddgi_classify","ddgi_blend","ddgi_resolve","radiance_cache_update","gi_candidates","gi_temporal","gi_spatial","gi_shade"};
         for(u32 i=0;i<Snapshot;++i)kernels[i]=p.request(lighting::kernel(names[i],i==Trace||i==Candidates||i==Temporal||i==Spatial));
-        for(auto& f:slots)for(auto*& t:f.tables)t=lighting::table(c);
+        for(auto& f:slots){for(auto*& t:f.tables)t=lighting::table(c);if(o.debugLighting)f.check=lighting::buffer(c,32,"GI invariant checker",true);}
+        if(o.debugLighting){checkClear=p.request(lighting::kernel("gi_check_clear"));checkKernel=p.request(lighting::kernel("gi_check_state"));checkNegative=p.request(lighting::kernel("gi_corrupt_state"));}
+        referencePipeline=p.request(lighting::kernel("gi_reference_diffuse"));referenceTable=lighting::table(c);
     }
-    ~Impl(){c.waitIdle();releaseVolume();for(auto& f:slots){for(auto* b:{f.fresh,f.temporal,f.spatial})c.memory().release(b,MemoryCategory::RayTracing);for(auto* t:f.tables)if(t)t->release();}for(auto* b:histories)c.memory().release(b,MemoryCategory::RayTracing);}
+    ~Impl(){c.waitIdle();if(referenceTable)referenceTable->release();releaseVolume();for(auto& f:slots){for(auto* b:{f.fresh,f.temporal,f.spatial,f.check})c.memory().release(b,MemoryCategory::RayTracing);for(auto* t:f.tables)if(t)t->release();}for(auto* b:histories)c.memory().release(b,MemoryCategory::RayTracing);}
     void releaseVolume(){for(auto* b:{states,cache})c.memory().release(b,MemoryCategory::RayTracing);states=cache=nullptr;for(auto* t:{previousIrr,nextIrr,previousDist,nextDist})c.memory().release(t,MemoryCategory::RayTracing);previousIrr=nextIrr=previousDist=nextDist=nullptr;for(auto& f:slots){c.memory().release(f.rays,MemoryCategory::RayTracing);c.memory().release(f.cacheCandidates,MemoryCategory::RayTracing);f.rays=f.cacheCandidates=nullptr;}}
     void load(const GpuScene& g,const SceneStore& s){
         c.waitIdle();releaseVolume();config=ProbeGridConfig{};config.raysPerProbe=options.giRays;
@@ -58,6 +63,9 @@ struct GiPasses::Impl {
             }
         }}
         if(any){config.origin=low-glm::vec3(0.25f);config.spacing=glm::max((high-low+glm::vec3(0.5f))/glm::vec3(config.counts-glm::uvec3(1)),glm::vec3(0.1f));}
+        if(options.giGrid[0])config.counts={options.giGrid[0],options.giGrid[1],options.giGrid[2]};
+        if(options.giSpacing>0)config.spacing=glm::vec3(options.giSpacing);
+        if(options.giProbeAnchor)config.origin=glm::vec3(options.giAnchor[0],options.giAnchor[1],options.giAnchor[2])-glm::vec3(config.counts/2u)*config.spacing;
         oracle=std::make_unique<ProbeGrid>(config);probeCount=oracle->probeCount();rayCount=probeCount*config.raysPerProbe;
         states=lighting::buffer(c,probeCount*sizeof(GPUProbeState),"DDGI probe state",true);std::memcpy(states->contents(),oracle->states().data(),probeCount*sizeof(GPUProbeState));
         cache=lighting::buffer(c,16384*sizeof(GPURadianceCacheEntry),"Bounded directional radiance cache",true);std::memset(cache->contents(),0,cache->length());
@@ -87,6 +95,7 @@ struct GiPasses::Impl {
         params.geometryRevision=sceneRevision;params.lightRevision=direct.lightRevision();params.materialRevision=materialRevision;
         params.viewRevision=(f.view<<28)|(u32(history.get(f.view).generation)&0x0fffffffu);
         extra={direct.lightCount(),std::min(256u,rayCount),rayCount,options.lightingSeed};extra.sunAngularRadius=0.00465f;
+        checkParams={f.width,f.height,params.mode,options.debugGiCorrupt};checkAddress=lighting::upload(c,checkParams);slots[f.slot].expectedPixels=f.width*f.height;
         paramsAddress=lighting::upload(c,params);extraAddress=lighting::upload(c,extra);
         traceConsumer.prepare(f.slot,kernels[Trace]);candidateConsumer.prepare(f.slot,kernels[Candidates]);temporalConsumer.prepare(f.slot,kernels[Temporal]);spatialConsumer.prepare(f.slot,kernels[Spatial]);
     }
@@ -115,13 +124,33 @@ struct GiPasses::Impl {
             }
         }
         g.addPass(options.gi==GiMode::DDGI?"DDGI indirect irradiance":"GI reservoir irradiance",PassType::Compute,[&](PassBuilder& b){b.read(stateRef,Usage::ShaderRead,StageDispatch);if(options.gi!=GiMode::DDGI)b.read(reuse?spatialRef:freshRef,Usage::ShaderRead,StageDispatch);for(auto r:{shadow.worldPosition(),shadow.geometricNormal(),nextIrrRef,nextDistRef})b.read(r,Usage::ShaderRead,StageDispatch);output=b.createTexture("Indirect diffuse irradiance",{Format::RGBA32Float,frame.width,frame.height});output=b.write(output,Usage::ShaderWrite,StageDispatch);b.setProfileShaders(options.gi==GiMode::DDGI?"ddgi_resolve":"gi_shade");},[this,reuse](PassContext& ctx){const bool ddgi=options.gi==GiMode::DDGI;auto* t=slots[frame.slot].tables[ddgi?Resolve:Shade];t->setAddress(paramsAddress,0);if(ddgi)t->setAddress(states->gpuAddress(),1);else{t->setAddress((reuse?slots[frame.slot].spatial:slots[frame.slot].fresh)->gpuAddress(),1);t->setAddress(states->gpuAddress(),2);}tex(t,ctx,shadow.worldPosition(),0);tex(t,ctx,shadow.geometricNormal(),1);tex(t,ctx,nextIrrRef,2);tex(t,ctx,nextDistRef,3);tex(t,ctx,output,4);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,kernels[ddgi?Resolve:Shade],t,frame.width,frame.height);if(!reuse)history.write(frame.view,frame.index+1,frame.constants.viewProjection);});
+        if(options.debugLighting) {
+            checkRef=g.importBuffer("GI invariant check counters",{32},ImportPerFrame|ImportOutput);
+            g.addPass("GI invariant check clear",PassType::Compute,[&](PassBuilder& b){checkRef=b.write(checkRef,Usage::ShaderWrite,StageDispatch);},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[CheckClear];t->setAddress(slots[frame.slot].check->gpuAddress(),0);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,checkClear,t,8);});
+            auto checkBind=[this,reuse](MTL4::ArgumentTable* t){t->setAddress(paramsAddress,0);t->setAddress(states->gpuAddress(),1);t->setAddress(cache->gpuAddress(),2);t->setAddress((reuse?slots[frame.slot].spatial:slots[frame.slot].fresh)->gpuAddress(),3);t->setAddress(slots[frame.slot].check->gpuAddress(),4);t->setAddress(checkAddress,5);};
+            if(options.debugGiCorrupt)g.addPass("Negative: GI state",PassType::Compute,[&](PassBuilder& b){b.read(stateRef,Usage::ShaderRead,StageDispatch);stateRef=b.write(stateRef,Usage::ShaderWrite,StageDispatch);b.read(cacheRef,Usage::ShaderRead,StageDispatch);cacheRef=b.write(cacheRef,Usage::ShaderWrite,StageDispatch);if(options.gi!=GiMode::DDGI){const auto ref=reuse?spatialRef:freshRef;b.read(ref,Usage::ShaderRead,StageDispatch);if(reuse)spatialRef=b.write(ref,Usage::ShaderWrite,StageDispatch);else freshRef=b.write(ref,Usage::ShaderWrite,StageDispatch);}},[this,checkBind](PassContext& ctx){auto* t=slots[frame.slot].tables[CheckNegative];checkBind(t);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,checkNegative,t,1);});
+            g.addPass("GI independent state check",PassType::Compute,[&](PassBuilder& b){b.read(stateRef,Usage::ShaderRead,StageDispatch);b.read(cacheRef,Usage::ShaderRead,StageDispatch);if(options.gi!=GiMode::DDGI)b.read(reuse?spatialRef:freshRef,Usage::ShaderRead,StageDispatch);b.read(output,Usage::ShaderRead,StageDispatch);b.read(checkRef,Usage::ShaderRead,StageDispatch);checkRef=b.write(checkRef,Usage::ShaderWrite,StageDispatch);},[this,checkBind](PassContext& ctx){auto* t=slots[frame.slot].tables[Check];checkBind(t);tex(t,ctx,output,0);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,checkKernel,t,std::max({frame.width*frame.height,probeCount,params.cacheCapacity}));});
+        }
+        if(options.captureLinearSignal==1)g.addPass("Independent indirect diffuse signal",PassType::Compute,[&](PassBuilder& b){
+            b.read(output,Usage::ShaderRead,StageDispatch);b.read(direct.surfaceRef(),Usage::ShaderRead,StageDispatch);
+            referenceDiffuse=b.createTexture("Unoccluded indirect diffuse reflected radiance",{Format::RGBA32Float,frame.width,frame.height});
+            referenceDiffuse=b.write(referenceDiffuse,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("gi_reference_diffuse");
+        },[this](PassContext& ctx){referenceTable->setAddress(paramsAddress,0);referenceTable->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(direct.surfaceRef()))->gpuAddress(),1);tex(referenceTable,ctx,output,0);tex(referenceTable,ctx,referenceDiffuse,1);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,referencePipeline,referenceTable,frame.width,frame.height);});
         if(reuse)g.addPass("GI history snapshot",PassType::Blit,[&](PassBuilder& b){b.read(temporalRef,Usage::CopySrc,StageBlit);historyRef=b.write(historyRef,Usage::CopyDst,StageBlit);},[this](PassContext& ctx){auto* e=static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder());e->copyFromBuffer(slots[frame.slot].temporal,0,histories[frame.view],0,u64(frame.width)*frame.height*sizeof(GPUGiReservoir));history.read(frame.view,frame.index+1);history.write(frame.view,frame.index+1,frame.constants.viewProjection);});
 
     }
-    void bind(MetalGraphExecutor& e){auto& f=slots[frame.slot];e.bindBuffer(stateRef,states);e.bindBuffer(cacheRef,cache);e.bindBuffer(raysRef,f.rays);e.bindBuffer(cacheCandidatesRef,f.cacheCandidates);e.bindBuffer(freshRef,f.fresh);e.bindBuffer(temporalRef,f.temporal);e.bindBuffer(spatialRef,f.spatial);e.bindBuffer(historyRef,histories[frame.view]);e.bindTexture(previousIrrRef,previousIrr);e.bindTexture(previousDistRef,previousDist);e.bindTexture(nextIrrRef,nextIrr);e.bindTexture(nextDistRef,nextDist);}
+    void bind(MetalGraphExecutor& e){auto& f=slots[frame.slot];e.bindBuffer(stateRef,states);e.bindBuffer(cacheRef,cache);e.bindBuffer(raysRef,f.rays);e.bindBuffer(cacheCandidatesRef,f.cacheCandidates);e.bindBuffer(freshRef,f.fresh);e.bindBuffer(temporalRef,f.temporal);e.bindBuffer(spatialRef,f.spatial);e.bindBuffer(historyRef,histories[frame.view]);if(options.debugLighting)e.bindBuffer(checkRef,f.check);e.bindTexture(previousIrrRef,previousIrr);e.bindTexture(previousDistRef,previousDist);e.bindTexture(nextIrrRef,nextIrr);e.bindTexture(nextDistRef,nextDist);}
 };
 GiPasses::GiPasses(MetalContext& c,PipelineCache& p,SceneRenderer& s,AccelerationStructures& a,ShadowPasses& sh,DirectLightingPasses& d,const LaunchOptions& o):impl_(std::make_unique<Impl>(c,p,s,a,sh,d,o)){}
 GiPasses::~GiPasses()=default;
 void GiPasses::loadScene(const GpuScene& g,const SceneStore& s){impl_->load(g,s);}void GiPasses::prepareFrame(const GpuScene& g,const SceneStore& s,const ShadowPasses::Frame& f){impl_->prepare(g,s,f);}void GiPasses::addToGraph(rg::RenderGraph& g){impl_->add(g);}void GiPasses::bindFrame(MetalGraphExecutor& e){impl_->bind(e);}
 rg::TextureRef GiPasses::irradiance()const{return impl_->output;}u64 GiPasses::version()const{return impl_->graphVersion;}
 } // namespace phosphor
+
+namespace phosphor { rg::TextureRef GiPasses::referenceDiffuse()const{return impl_->referenceDiffuse;} }
+
+namespace phosphor {bool GiPasses::check(u32 slot)const {
+    if(!impl_->options.debugLighting)return true;const auto& f=impl_->slots.at(slot);const auto* count=static_cast<const u32*>(f.check->contents());
+    if(count[0]!=f.expectedPixels || count[1]!=impl_->probeCount || count[2]!=16384)return false;
+    for(u32 i=3;i<8;++i)if(count[i])return false;return true;
+}}

@@ -341,9 +341,12 @@ struct LaunchOptions {
     bool areaLights = false, stationaryLights = false;
     u32 shadowMapResolution = 2048, lightingSeed = 1;
     u32 lightingCandidates = 8, lightingSpatialSamples = 4, giRays = 64;
-    u32 debugLighting = 0, debugLightingCorrupt = 0;
+    u32 debugLighting = 0, debugLightingCorrupt = 0, debugGiCorrupt=0;
     std::string exportReference, captureLinear, captureLinearSequence, lightingScene;
-    u32 exportReferenceFrame=0, captureLinearFrame=0;
+    bool giProbeAnchor=false;
+    float giAnchor[3]{},giSpacing=0;
+    u32 giGrid[3]{};
+    u32 exportReferenceFrame=0, captureLinearFrame=0, captureLinearSignal=0; // 0 HDR, 1 indirect diffuse, 2 local direct
     // F7/F8 renderer, temporal reconstruction, capture and bounded diagnostics.
     std::string scenePath;
     bool visibility = false, materialBinning = false; // measured baseline; specialization stays opt-in

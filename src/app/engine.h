@@ -281,7 +281,8 @@ private:
         u32 backingWidth = 0, backingHeight = 0;
         u64 rtResources = 0;
         bool rtVisibilityReady = false;
-        u64 lightingResources = 0;
+        u64 shadowResources=0,directResources=0,giResources=0,referenceResources=0,linearResources=0;
+        u32 logicalWidth=0,logicalHeight=0;
         bool operator==(const GraphKey&) const = default;
     };
     rg::RenderGraph frameGraph_;

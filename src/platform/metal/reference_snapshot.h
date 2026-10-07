@@ -7,7 +7,7 @@ class MetalTextureManager;class DirectLightingPasses;
 // does not launch a renderer or manufacture a reference image.
 class ReferenceSnapshot {
 public:
-    ReferenceSnapshot(MetalContext&,SceneRenderer&,const std::string& destination, u64 captureFrame=0);
+    ReferenceSnapshot(MetalContext&,SceneRenderer&,const std::string& destination, u64 captureFrame=0, AccelerationStructures* rt=nullptr);
     ~ReferenceSnapshot();
     void loadScene(const GpuScene&,const SceneStore&,const MetalTextureManager&);
     void prepareFrame(const ShadowPasses::Frame&,ReferenceCamera,std::span<const GPULight>,const SceneStore&,DirectLightingPasses*);

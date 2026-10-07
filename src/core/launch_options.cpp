@@ -485,6 +485,16 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if (!needCount(out.lightingCandidates)) return false;
         } else if (arg == "--lighting-spatial-samples") {
             if (!needCount(out.lightingSpatialSamples)) return false;
+        } else if (arg == "--gi-probe-anchor") {
+            auto v=needValue();if(!v)return false;std::string text(*v);const char* next=text.c_str();
+            for(u32 i=0;i<3;++i){char* end=nullptr;out.giAnchor[i]=std::strtof(next,&end);if(end==next||!std::isfinite(out.giAnchor[i])||(i<2?*end!=',':*end!=0)){error="--gi-probe-anchor: expected finite X,Y,Z";return false;}next=end+1;}
+            out.giProbeAnchor=true;
+        } else if (arg == "--gi-spacing") {
+            if(!needFloat(out.giSpacing)||out.giSpacing<=0){error="--gi-spacing: expected metres >0";return false;}
+        } else if (arg == "--gi-grid") {
+            auto v=needValue();if(!v)return false;size_t start=0;
+            for(u32 i=0;i<3;++i){const auto end=v->find('x',start);const auto text=v->substr(start,end==std::string_view::npos?v->size()-start:end-start);
+                if(!parseU32(text,out.giGrid[i])||out.giGrid[i]<2||out.giGrid[i]>32||(i<2?end==std::string_view::npos:end!=std::string_view::npos)){error="--gi-grid: expected 2..32 x 2..32 x 2..32";return false;}start=end+1;}
         } else if (arg == "--gi-rays") {
             if (!needCount(out.giRays)) return false;
         } else if (arg == "--lighting-scene") {
@@ -493,6 +503,12 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
         } else if (arg == "--capture-linear" || arg == "--capture-linear-sequence") {
             auto v=needValue();if(!v || v->empty() || v->starts_with("--")){error=std::string(arg)+": expected path";return false;}
             (arg=="--capture-linear"?out.captureLinear:out.captureLinearSequence)=*v;
+        } else if (arg == "--capture-linear-signal") {
+            auto v=needValue();if(!v)return false;
+            if(*v=="hdr")out.captureLinearSignal=0;
+            else if(*v=="indirect-diffuse")out.captureLinearSignal=1;
+            else if(*v=="direct")out.captureLinearSignal=2;
+            else{error="--capture-linear-signal: expected hdr, indirect-diffuse or direct";return false;}
         } else if (arg == "--export-reference-frame") {
             if(!needCount(out.exportReferenceFrame))return false;
         } else if (arg == "--capture-linear-frame") {
@@ -504,6 +520,10 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.exportReference = *v;
         } else if (arg == "--debug-lighting") {
             if (!needCount(out.debugLighting)) return false;
+        } else if (arg == "--debug-gi-corrupt") {
+            auto v=needValue();if(!v)return false;
+            if(*v=="cache")out.debugGiCorrupt=1;else if(*v=="probe")out.debugGiCorrupt=2;else if(*v=="pdf")out.debugGiCorrupt=3;
+            else{error="--debug-gi-corrupt: expected cache, probe or pdf";return false;}
         } else if (arg == "--debug-lighting-corrupt") {
             auto v = needValue(); if (!v) return false;
             if (*v == "bias") out.debugLightingCorrupt = 1;
@@ -973,6 +993,12 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if(!out.lightingScene.empty() && (!out.bench || *out.bench!=5)){error="--lighting-scene requires --bench 6";return false;}
     if(!out.captureLinear.empty() && !out.captureLinearSequence.empty()){error="Choose single linear capture or linear sequence";return false;}
     if((!out.captureLinear.empty() || !out.captureLinearSequence.empty()) && (!out.visibility || !out.benchmark())){error="Linear capture requires --render-path visibility and --frames";return false;}
+    if((out.giProbeAnchor||out.giSpacing||out.giGrid[0])&&out.gi==GiMode::Off){error="GI volume controls require --gi";return false;}
+    if(out.debugGiCorrupt && (!out.debugLighting || out.gi==GiMode::Off || (out.debugGiCorrupt==3 && out.gi==GiMode::DDGI))){error="GI corruption requires --debug-lighting and an applicable GI mode";return false;}
+    if(out.captureLinearSignal==1 && out.gi==GiMode::Off){error="Indirect linear signal requires --gi";return false;}
+    if(out.captureLinearSignal==2 && out.directLighting==DirectLightingMode::Legacy){error="Direct linear signal requires --lighting";return false;}
+    if((!out.exportReference.empty() && out.exportReferenceFrame>=u64(out.warmup)+out.frames) ||
+       (!out.captureLinear.empty() && out.captureLinearFrame>=u64(out.warmup)+out.frames)){error="Capture/export frame is outside the requested run";return false;}
     if(!out.exportReference.empty() && !out.benchmark()){error="Reference export requires --frames";return false;}
     if(lighting && out.debugRtDeform){error="F9 diagnostic deformation does not publish raster bounds for lighting";return false;}
     if(out.debugLightingCorrupt>=5 && out.directLighting!=DirectLightingMode::ReSTIR){error="PDF/light negative controls require --lighting restir";return false;}

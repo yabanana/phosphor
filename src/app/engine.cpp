@@ -318,7 +318,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     if (options_.directLighting != DirectLightingMode::Legacy || options_.gi != GiMode::Off)
         directLighting_=std::make_unique<DirectLightingPasses>(*context_,*pipelines_,*renderer_,*mesh_,*visibility_,*rt_,*shadows_,options_);
     if(options_.gi!=GiMode::Off)gi_=std::make_unique<GiPasses>(*context_,*pipelines_,*renderer_,*rt_,*shadows_,*directLighting_,options_);
-    if(!options_.exportReference.empty())referenceSnapshot_=std::make_unique<ReferenceSnapshot>(*context_,*renderer_,options_.exportReference,options_.exportReferenceFrame);
+    if(!options_.exportReference.empty())referenceSnapshot_=std::make_unique<ReferenceSnapshot>(*context_,*renderer_,options_.exportReference,options_.exportReferenceFrame,rt_.get());
     if(!options_.captureLinear.empty()||!options_.captureLinearSequence.empty()) {
         LinearCapture::Config capture;capture.path=options_.captureLinear;capture.sequence=options_.captureLinearSequence;
         capture.frame=options_.captureLinearFrame;capture.every=options_.captureEvery;
@@ -1572,7 +1572,9 @@ bool Engine::frame(float dt) {
                        renderBackingHeight_,
                        rt_ ? rt_->version() : 0,
                        rtVisibility_ && rtVisibility_->ready(),
-                       (shadows_ ? shadows_->version() : 0) ^ ((directLighting_ ? directLighting_->version() : 0)<<32) ^ ((gi_?gi_->version():0)<<48) ^ ((referenceSnapshot_?referenceSnapshot_->version():0)<<8) ^ ((linearCapture_?linearCapture_->version():0)<<16)};
+                       shadows_?shadows_->version():0,directLighting_?directLighting_->version():0,
+                       gi_?gi_->version():0,referenceSnapshot_?referenceSnapshot_->version():0,
+                       linearCapture_?linearCapture_->version():0,renderWidth,renderHeight};
     if (!(key == graphKey_) || !graphExecutor_->valid()) {
         frameFlags_ |= FrameGraphCompile;
         if (key.width != graphKey_.width || key.height != graphKey_.height) frameFlags_ |= FrameResize;
@@ -1873,7 +1875,7 @@ void Engine::onSceneCounters(u32 slot) {
     if(referenceSnapshot_)referenceSnapshot_->consume(slot);
     if(linearCapture_)linearCapture_->consume(slot);
     if(shadows_ && options_.debugLighting && (slotFrame_[slot]+1)%options_.debugLighting==0) {
-        ++lightingChecks_;const bool pass=shadows_->check(slot) && (!directLighting_ || directLighting_->check(slot));
+        ++lightingChecks_;const bool pass=shadows_->check(slot) && (!directLighting_ || directLighting_->check(slot)) && (!gi_ || gi_->check(slot));
         if(!pass){++lightingFailures_;exitCode_=1;}
         std::printf("LIGHTING check frame %llu | %s\n",static_cast<unsigned long long>(slotFrame_[slot]),pass?"PASS":"FAIL");
     }
@@ -2063,7 +2065,8 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
                 visibility_->setLightingTextures(shadows_->mask(),directLighting_?directLighting_->direct():shadows_->zeroLighting(),gi_?gi_->irradiance():shadows_->zeroLighting());
             }
             visibility_->addResolve(frameGraph_, color, shadows_?shadows_->depth():depth);
-            if(linearCapture_)linearCapture_->addToGraph(frameGraph_,visibility_->color());
+            if(linearCapture_)linearCapture_->addToGraph(frameGraph_,options_.captureLinearSignal==1?gi_->referenceDiffuse():
+                                                       options_.captureLinearSignal==2?directLighting_->direct():visibility_->color());
             color = post_ ? post_->addToGraph(frameGraph_, *visibility_, drawableRef_, graphKey_.outputFormat)
                           : visibility_->addPresent(frameGraph_, drawableRef_);
             visibility_->addChecks(frameGraph_);

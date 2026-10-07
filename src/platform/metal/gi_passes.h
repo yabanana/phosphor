@@ -10,7 +10,9 @@ public:
     void addToGraph(rg::RenderGraph&);
     void bindFrame(MetalGraphExecutor&);
     [[nodiscard]] rg::TextureRef irradiance() const;
+    [[nodiscard]] rg::TextureRef referenceDiffuse() const;
     [[nodiscard]] u64 version() const;
+    [[nodiscard]] bool check(u32 slot) const;
 private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };
