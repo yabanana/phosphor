@@ -8,6 +8,7 @@
 #include "renderer/scene_store.h"
 #include "renderer/gpu_scene.h"
 #include "renderer/shadow_layout.h"
+#include "renderer/shadow_math.h"
 #include "renderer/cull_math.h"
 #include "renderer/transform_math.h"
 #include "rendergraph/pass_context.h"
@@ -33,6 +34,7 @@ struct ShadowPasses::Impl {
     std::vector<GPUMeshInfo> geometry;
     struct Slot {
         MTL::Buffer *surfaces=nullptr,*flags=nullptr,*counters=nullptr;
+        std::vector<u32> expectedFlags;u32 expectedCount=0;
         std::array<MTL4::ArgumentTable*,PassCount> tables{};
         MTL4::ArgumentTable* receiverTable=nullptr;
         std::vector<MTL4::ArgumentTable*> rasterTables;
@@ -67,6 +69,8 @@ struct ShadowPasses::Impl {
     std::vector<ShadowBounds> casterBounds,changedBounds;
     u64 staticCasterRevision=1;
     u64 capacity=0, casterCapacity=0, graphVersion=1, casterRevision=1, materialRevision=1, lightRevision=1;
+    struct Signal {u64 scene,casters,materials,light,geometry;bool operator==(const Signal&)const=default;};
+    Signal lastSignal{~u64{0},0,0,0,0};u64 signalEpoch=1;
     u64 previousLightHash=0;
     u32 cachedPipelineGeneration=0;
     u32 selectedSun=~0u;
@@ -157,6 +161,7 @@ struct ShadowPasses::Impl {
         casterBounds.reserve(slotsCount);changedBounds.reserve(size_t(slotsCount)*2);
         const u64 pixels=u64(w)*h;
         if(pixels>capacity) {
+            for(u32 view=0;view<views.size();++view)history.invalidate(view,"Solar allocation growth");
             capacity=pixels;
             for(auto& f:slots) {c.memory().release(f.surfaces,MemoryCategory::RayTracing);f.surfaces=lighting::buffer(c,capacity*sizeof(GPUShadowSurface),"Shadow geometric surface");}
             for(auto& v:views) {
@@ -168,7 +173,7 @@ struct ShadowPasses::Impl {
         }
         if(slotsCount>casterCapacity) {
             casterCapacity=slotsCount;
-            for(auto& f:slots){c.memory().release(f.flags,MemoryCategory::RayTracing);f.flags=lighting::buffer(c,std::max<u64>(1,casterCapacity)*4,"CSM full-scene caster flags");}
+            for(auto& f:slots){c.memory().release(f.flags,MemoryCategory::RayTracing);f.flags=lighting::buffer(c,std::max<u64>(1,casterCapacity)*4,"CSM full-scene caster flags",options.debugLighting>0);f.expectedFlags.resize(casterCapacity);}
             ++graphVersion;
         }
     }
@@ -284,7 +289,8 @@ struct ShadowPasses::Impl {
         for(u32 i=0;i<lights.size();++i)if(lights[i].type==LIGHT_DIRECTIONAL){selectedSun=i;break;}
         if(selectedSun!=~0u)for(u32 b:std::bit_cast<std::array<u32,sizeof(GPULight)/4>>(lights[selectedSun])){hash^=b;hash*=1099511628211ull;}
         if(hash!=previousLightHash){++lightRevision;previousLightHash=hash;}
-        const u64 signalRevision=(f.scene*1099511628211ull)^casterRevision^(materialRevision<<21)^(lightRevision<<42);
+        const Signal signal{f.scene,casterRevision,materialRevision,lightRevision,rt?rt->geometryRevision():0};
+        if(!(signal==lastSignal)){++signalEpoch;lastSignal=signal;}const u64 signalRevision=signalEpoch;
         auto decision=history.begin(f.view,{f.width,f.height,f.backingWidth,f.backingHeight},signalRevision,f.cut,f.reset);
         params={};
         const auto inverse=glm::inverse(glm::make_mat4(f.constants.viewProjection));
@@ -314,6 +320,17 @@ struct ShadowPasses::Impl {
             const u32 classes=settings.staticCache?2u:1u;
             for(u32 cls=0;cls<classes;++cls)slot.drawParams[(cascade*classes+cls)*(geometry.size()+1)]=lighting::upload(c,draw);
             for(u32 m=0;m<geometry.size();++m){draw.pad=m;for(u32 cls=0;cls<classes;++cls)slot.drawParams[(cascade*classes+cls)*(geometry.size()+1)+m+1]=lighting::upload(c,draw);}
+        }
+        if(options.debugLighting) {
+            auto& slot=slots[f.slot];slot.expectedCount=params.slotCount;
+            for(u32 i=0;i<params.slotCount;++i) {
+                u32 flags=0;const auto& instance=store.instances()[i];
+                if((instance.flags&INSTANCE_FLAG_VALID)&&(instance.flags&2u)&&instance.meshIndex<geometry.size()) {
+                    const auto sphere=cullWorldSphere(worldMatrices.data()+size_t(i)*16,geometry[instance.meshIndex].boundingSphere);
+                    for(u32 cascade=0;cascade<4;++cascade)if(shadowCasterIntersects(params.cascades[cascade],sphere.x,sphere.y,sphere.z,sphere.r))flags|=1u<<cascade;
+                }
+                slot.expectedFlags[i]=flags;
+            }
         }
         if(settings.staticCache)planCache();
         if(sunConsumer)sunConsumer->prepare(f.slot,kernels[Sun]);
@@ -516,3 +533,12 @@ ShadowPasses::CacheState ShadowPasses::cacheState(u32 viewID)const {
     return state;
 }
 } // namespace phosphor
+
+namespace phosphor {
+bool ShadowPasses::check(u32 slot)const {
+    if(!impl_->options.debugLighting)return true;const auto& f=impl_->slots.at(slot);
+    if(static_cast<const GPUShadowCounters*>(f.counters->contents())->errors)return false;
+    const auto* actual=static_cast<const u32*>(f.flags->contents());
+    for(u32 i=0;i<f.expectedCount;++i)if(actual[i]!=f.expectedFlags[i])return false;return true;
+}
+}
