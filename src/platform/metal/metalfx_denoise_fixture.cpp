@@ -25,10 +25,11 @@
 namespace phosphor {
 namespace {
 constexpr std::array<std::string_view,5> scenarios{"constant","impulse","channels","lifecycle","wide-hdr"};
-// Analytic camera exposure maps the physical red target to 0.5. The documented
-// R16Float exposure texture rounds this subnormal to 23 units of 2^-24.
-constexpr float WideManualExposure=.5f/368640.f;
-constexpr float WideManualExposureR16=23.f*0x1p-24f;
+// Final bounded unit hypothesis: exposure is relative to the supplied color
+// texture, after its q=1/64 storage scaling. Supply an exact R16 value so
+// texture-write rounding cannot obscure this change of exposure basis.
+constexpr float WideManualExposure=.5f/(368640.f*(1.f/64.f));
+constexpr float WideManualExposureR16=0x1.6cp-14f; // binary16 0x05b0
 enum Input : u32 { Color,Normal,Rough,Diffuse,Specular,Motion,Hit,Reactive,Strength,Depth,InputCount };
 constexpr std::array<rg::Format,InputCount> formats{rg::Format::RGBA32Float,rg::Format::RGBA16Float,rg::Format::R16Float,
     rg::Format::RGBA16Float,rg::Format::RGBA16Float,rg::Format::RG32Float,rg::Format::R32Float,rg::Format::R8Unorm,rg::Format::R8Unorm,rg::Format::Depth32Float};
@@ -101,6 +102,7 @@ struct MetalfxDenoiseFixture::Impl {
            <<",\"auto_exposure_enabled\":"<<(stats.autoExposureEnabled?"true":"false")
            <<",\"exposure_mode\":"<<quote(!stats.descriptorConfigured?"not-configured":stats.autoExposureEnabled?"sdk-auto":"manual")
            <<",\"manual_exposure_control\":"<<(options.manualExposureControl?"true":"false")
+           <<",\"manual_exposure_basis\":"<<quote(options.manualExposureControl?"packed-input-color":"unit")
            <<",\"requested_manual_exposure_fp32\":"<<number(options.manualExposureControl?WideManualExposure:1.f)
            <<",\"provided_manual_exposure_fp32\":"<<number(options.manualExposureControl?WideManualExposureR16:1.f)
            <<",\"manual_exposure_prequantized\":"<<(options.manualExposureControl?"true":"false")

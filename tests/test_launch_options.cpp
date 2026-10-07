@@ -1210,3 +1210,18 @@ TEST_CASE("F13 SDK analytic manual exposure is a fixture-only control") {
     CHECK_FALSE(parse({"--frames","96","--denoised-fixture","wide-hdr","--denoised-fixture-output","sdk","--denoised-fixture-manual-exposure-control"},o,error));
     CHECK_FALSE(parse({"--frames","96","--denoised-fixture","wide-hdr","--denoised-fixture-output","sdk","--denoised-fixture-pre-exposed","--denoised-fixture-auto-exposure","--denoised-fixture-manual-exposure-control"},o,error));
 }
+
+TEST_CASE("Physical lighting HDR cannot enter the HALF-only standard temporal adapter") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--render-path","visibility","--post","--upscaler","temporal"},o,error));
+    CHECK(o.temporalUpscale); // F7/F8 path remains supported.
+    for(const auto& mode:std::vector<std::vector<const char*>>{{"--shadows","csm"},{"--rt","on","--lighting","brute"},
+        {"--rt","on","--lighting","brute","--gi","ddgi"},{"--reflections","ssr"},{"--ao","gtao"},{"--atmosphere","on"}}) {
+        auto args=mode;args.insert(args.end(),{"--render-path","visibility","--post","--upscaler","temporal"});
+        CHECK_FALSE(parse(args,o,error));
+        CHECK(error.find("Float32")!=std::string::npos);
+        args.back()="native";REQUIRE(parse(args,o,error));CHECK_FALSE(o.temporalUpscale);
+    }
+    REQUIRE(parse({"--bench","6","--reflection-scene","wide-emission","--render-path","visibility","--ao","gtao","--frames","4","--capture-linear","wide.pfm"},o,error));
+    CHECK(o.reflectionScene=="wide-emission");
+}

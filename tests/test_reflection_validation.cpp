@@ -64,3 +64,23 @@ TEST_CASE("F13 emissive step and camera cut are tracked and deterministic") {
     REQUIRE(camera.scriptedCamera(4.01,p,t,cut));CHECK(cut);
     REQUIRE(camera.scriptedCamera(4.1,p,t,cut));CHECK_FALSE(cut);
 }
+
+TEST_CASE("Opaque wide-emission fixture has an independent constant-radiance reference") {
+    ECS ecs;GpuScene scene;test::NullTextureManager textures;ReflectionValidation f{"wide-emission"};f.setup(ecs,scene,textures);
+    const auto e=f.emissivePanel();REQUIRE(e!=INVALID_ENTITY);
+    const auto& m=std::as_const(ecs).getComponent<MaterialComponent>(e);
+    CHECK(m.emissiveFactor==glm::vec3(368640,128,64));CHECK(m.emissiveFactor.x>65504.f);
+    CHECK(m.baseColorFactor==glm::vec4(0,0,0,1));CHECK(m.emissiveTexIndex==INVALID_TEXTURE_INDEX);
+    CHECK(m.alphaCutoff==0);CHECK(m.occlusionStrength==1);REQUIRE(m.occlusionTexIndex<textures.uploads.size());
+    const std::vector<u8> black{0,0,0,255};CHECK(textures.uploads[m.occlusionTexIndex].rgba==black);
+    FrameScene frame;extractFrameScene(ecs,scene,frame);REQUIRE(frame.instances.size()==1);
+    for(const auto& light:frame.lights)CHECK(light.intensity==0);
+    const auto& t=std::as_const(ecs).getComponent<TransformComponent>(e);const auto camera=f.getDefaultCamera();
+    // Geometric coverage is independent of renderer projection code: a 60deg
+    // perspective at z=4 and 16:9 has half-width <4.2, inside the 8m plane.
+    CHECK(t.scale==glm::vec3(16,1,16));CHECK(camera.position==glm::vec3(0,0,4));
+    CHECK(4*std::tan(3.14159265358979323846/6)*16/9<8);
+    const auto before=t.worldMatrix;f.update(1,ecs);
+    CHECK(std::as_const(ecs).getComponent<TransformComponent>(e).worldMatrix==before);
+    CHECK(std::as_const(ecs).getComponent<MaterialComponent>(e).emissiveFactor==glm::vec3(368640,128,64));
+}

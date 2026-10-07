@@ -12,7 +12,7 @@
 
 namespace phosphor {
 namespace {
-constexpr std::array<std::string_view,6> names{"mirror","roughness","ao-cavity","probe-parallax","moving-light","disocclusion"};
+constexpr std::array<std::string_view,7> names{"mirror","roughness","ao-cavity","probe-parallax","moving-light","disocclusion","wide-emission"};
 constexpr float pi=3.14159265358979323846f;
 const glm::quat identity(1,0,0,0);
 glm::quat sunRotation(glm::vec3 towardSun) {
@@ -50,6 +50,19 @@ void ReflectionValidation::setup(ECS& ecs,GpuScene& scene,TextureManager& textur
     GPUMaterial fallback{};fallback.baseColor[3]=1;
     fallback.baseColorTex=fallback.normalTex=fallback.metallicRoughnessTex=fallback.occlusionTex=fallback.emissiveTex=INVALID_TEXTURE_INDEX;
     scene.addMaterial(fallback);
+    if(scenario_=="wide-emission") {
+        // An actual opaque raster surface, not the standalone SDK texture fixture.
+        // Full camera coverage, no incident light, zero ambient occlusion and
+        // black albedo make outgoing radiance exactly the declared emission.
+        panel_=mesh(ecs,plane_,{0,0,0},{16,1,16},glm::angleAxis(pi*.5f,glm::vec3(1,0,0)),
+                    {0,0,0},0,1,{368640,128,64});
+        auto& material=ecs.getComponent<MaterialComponent>(panel_);
+        material.occlusionTexIndex=textures.getDefaultBlack();material.occlusionStrength=1;
+        sun_=ecs.createEntity();entities_.push_back(sun_);
+        TransformComponent sunPose;sunPose.updateMatrix();ecs.addComponent(sun_,std::move(sunPose));
+        LightComponent light;light.type=LightType::Directional;light.intensity=0;ecs.addComponent(sun_,std::move(light));
+        time_=0;lightStep_=0;cameraSegment_=~0u;return;
+    }
     mesh(ecs,plane_,{0,0,0},{12,1,12},identity,{0.65f,0.65f,0.65f},0,0.8f);
     // Noise-free sun: local -Z is travel direction, exactly as extractLights.
     sun_=ecs.createEntity();entities_.push_back(sun_);
@@ -118,6 +131,7 @@ void ReflectionValidation::teardown(ECS& ecs,GpuScene&) {
     panel_=mirror_=sun_=occluder_=INVALID_ENTITY;plane_=cube_=sphere_=~0u;time_=0;cameraSegment_=~0u;
 }
 CameraSetup ReflectionValidation::getDefaultCamera()const {
+    if(scenario_=="wide-emission")return {{0,0,4},{0,0,0},4,false};
     return {{0,2.2f,7},{0,1.1f,0},7,false};
 }
 bool ReflectionValidation::scriptedCamera(double t,glm::vec3& p,glm::vec3& target,bool& cut)const {

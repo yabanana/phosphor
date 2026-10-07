@@ -95,9 +95,9 @@ class SDKManualExposureProtocolTests(unittest.TestCase):
             "--denoised-fixture-pre-exposed","--denoised-fixture-manual-exposure-control"]
         return {"gateway":"native","auto_exposure_experiment":False,"manual_exposure_control":True,"cases":[case]}
     def test_exact_r16_quantization_and_one_parameter_experiment(self):
-        self.assertEqual(MANUAL_EXPOSURE_R16,23*2**-24)
-        self.assertAlmostEqual(MANUAL_EXPOSURE_REQUESTED_FP32,.5/368640,places=12)
-        self.assertEqual(MANUAL_EXPOSURE_R16*368640,.50537109375)
+        self.assertEqual(MANUAL_EXPOSURE_R16,1456*2**-24)
+        self.assertLess(abs(MANUAL_EXPOSURE_REQUESTED_FP32-.5/5760),(.5/5760)*2**-24)
+        self.assertEqual(MANUAL_EXPOSURE_R16*5760,.4998779296875)
         self.assertTrue(frozen_manual_exposure_control(self.plan()))
         self.assertFalse(frozen_auto_exposure_experiment(self.plan()))
         with self.assertRaises(ValueError):make_cases(Path("out"),96,"native",True,True)
@@ -111,11 +111,12 @@ class SDKManualExposureProtocolTests(unittest.TestCase):
             "manual_exposure_texture_ignored":False,"packed_exposure_is_provided_manual_value":True,
             "manual_exposure_control":True,"requested_manual_exposure_fp32":MANUAL_EXPOSURE_REQUESTED_FP32,
             "expected_manual_exposure_r16":MANUAL_EXPOSURE_R16,"provided_manual_exposure_fp32":MANUAL_EXPOSURE_R16,
-            "manual_exposure_prequantized":True,"actual_manual_exposure_readback":True,
+            "manual_exposure_prequantized":True,"manual_exposure_basis":"packed-input-color","actual_manual_exposure_readback":True,
             "actual_provided_manual_exposure_texture_value":MANUAL_EXPOSURE_R16}
         self.assertTrue(exposure_mode_oracle(record,False,True,True))
         for key,value in (("actual_manual_exposure_readback",False),("actual_provided_manual_exposure_texture_value",0),
             ("provided_manual_exposure_fp32",MANUAL_EXPOSURE_REQUESTED_FP32),("manual_exposure_prequantized",False),
+            ("manual_exposure_basis","physical-radiance"),
             ("provided_manual_exposure_texture_value",MANUAL_EXPOSURE_REQUESTED_FP32),("manual_exposure_texture_ignored",True)):
             with self.assertRaises(ValueError):exposure_mode_oracle({**record,key:value},False,True,True)
     def test_gpu_input_texel_check_is_independent_of_metadata(self):

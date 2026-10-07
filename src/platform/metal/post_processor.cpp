@@ -80,6 +80,8 @@ std::array<double, 3> curveReference(u32 sample, u32 curve, double headroom) {
 } // namespace
 PostProcessor::PostProcessor(MetalContext &c, PipelineCache &p, const Options &o)
     : context_(c), pipelines_(p), options_(o) {
+    if (o.physicalFloat32 && o.temporal)
+        throw std::invalid_argument("Physical Float32 lighting requires native or denoised reconstruction; standard temporal ABI is RGBA16");
     if (!o.views || o.views > HistoryRegistry::MaxViews)
         throw std::invalid_argument("Invalid temporal view count");
     clear_ = p.request(kernel("exposure_clear"));
@@ -502,6 +504,11 @@ rg::TextureRef PostProcessor::addToGraph(rg::RenderGraph &g, VisibilityRenderer 
                                          rg::Format format,rg::TextureRef reconstructed) {
     using namespace rg;
     input_ = scene.color();
+    const auto inputFormat=g.resources().at(input_.resource).texture.format;
+    if(inputFormat!=Format::RGBA16Float&&inputFormat!=Format::RGBA32Float)
+        throw std::invalid_argument("Post requires linear floating-point HDR input");
+    if(inputFormat==Format::RGBA32Float&&!options_.physicalFloat32)
+        throw std::invalid_argument("Post cannot narrow physical Float32 HDR to HALF before tone mapping");
     depth_ = scene.depth();
     motion_ = scene.motion();
     reactive_ = scene.reactiveMask();

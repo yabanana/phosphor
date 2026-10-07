@@ -23,6 +23,11 @@ pipe::PipelineDesc compute(const char *name) {
 constexpr std::array<rg::Format, 6> kFormats = {rg::Format::RGBA16Float, rg::Format::RGBA16Float,
                                                 rg::Format::RGBA16Float, rg::Format::RGBA16Float,
                                                 rg::Format::RG16Float,   rg::Format::R8Unorm};
+constexpr rg::Format resolveFormat(u32 index,bool lighting) {
+    // F10-F14 residual contains physical sun/emission before external DI/GI.
+    // Preserve its range before F13/F14 composition; F7/F8 keeps its HALF ABI.
+    return index==0&&lighting?rg::Format::RGBA32Float:kFormats[index];
+}
 constexpr std::array<const char *, 6> kNames = {
     "Linear HDR", "Signed normal + roughness", "Diffuse albedo", "Specular albedo", "Motion pixels", "Reactive mask"};
 } // namespace
@@ -61,12 +66,12 @@ VisibilityRenderer::VisibilityRenderer(MetalContext &c, PipelineCache &p, SceneR
     d.functions = {"visibility_present_vs", "visibility_present_fs", ""};
     d.output(0, rg::Format::BGRA8Srgb);
     present_ = p.request(d);
-    d = pipe::forward::genericDesc(rg::Format::RGBA16Float);
+    d = pipe::forward::genericDesc(resolveFormat(0,lighting_));
     d.label = "Visibility indexed overflow fallback";
     d.functions[0] = "forward_surface_vs";
     d.functions[1] = lighting_ ? "forward_surface_lit_fs" : "forward_surface_fs";
     for (u32 i = 0; i < kFormats.size(); ++i)
-        d.output(i, kFormats[i]);
+        d.output(i, resolveFormat(i,lighting_));
     fallback_ = p.request(d);
     for (auto &table : tables_) {
         auto *desc = MTL4::ArgumentTableDescriptor::alloc()->init();
@@ -269,7 +274,7 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
                 b.read(mesh_.frameListsRef(), Usage::ShaderRead, StageTile);
                 b.read(poses_, Usage::ShaderRead, StageTile);
                 for (u32 i = 0; i < outputs_.size(); ++i) {
-                    outputs_[i] = b.createTexture(kNames[i], {kFormats[i], params_.outputWidth, params_.outputHeight});
+                    outputs_[i] = b.createTexture(kNames[i], {resolveFormat(i,lighting_), params_.outputWidth, params_.outputHeight});
                     outputs_[i] = b.write(outputs_[i], Usage::ShaderWrite, StageTile);
                 }
                 b.setProfileShaders("visibility_tile");
@@ -288,7 +293,7 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
             [&](PassBuilder &b) {
                 bins_ = b.write(bins_, Usage::ShaderWrite, StageDispatch);
                 for (u32 i = 0; i < outputs_.size(); ++i) {
-                    outputs_[i] = b.createTexture(kNames[i], {kFormats[i], params_.outputWidth, params_.outputHeight});
+                    outputs_[i] = b.createTexture(kNames[i], {resolveFormat(i,lighting_), params_.outputWidth, params_.outputHeight});
                     outputs_[i] = b.write(outputs_[i], Usage::ShaderWrite, StageDispatch);
                 }
             },

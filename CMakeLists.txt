@@ -94,7 +94,6 @@ add_library(phosphor_core STATIC
     src/renderer/volume_oracle.cpp
     src/renderer/fog_settings.cpp
     src/renderer/cloud_settings.cpp
-    src/renderer/volume_oracle.cpp
     src/renderer/meshlet_cull_reference.cpp
     src/renderer/meshlet_check.cpp
     src/renderer/scene_check.cpp

@@ -211,7 +211,17 @@ struct ForwardLightingTextureHandle {
 };
 static_assert(sizeof(ForwardLightingTextureHandle) == 8, "Forward lighting texture handle ABI");
 
-fragment ForwardSurfaceOutput forward_surface_lit_fs(SurfaceVertexOut in [[stage_in]], bool frontFacing [[front_facing]],
+// Lighting residual must retain physical radiance above binary16 range.
+// The legacy forward_surface_fs retains ForwardSurfaceOutput and its HALF ABI.
+struct ForwardLitSurfaceOutput {
+    float4 color [[color(0)]];
+    half4 normalRoughness [[color(1)]];
+    half4 diffuseAlbedo [[color(2)]];
+    half4 specularAlbedo [[color(3)]];
+    half2 motion [[color(4)]];
+    half reactive [[color(5)]];
+};
+fragment ForwardLitSurfaceOutput forward_surface_lit_fs(SurfaceVertexOut in [[stage_in]], bool frontFacing [[front_facing]],
                                                  constant FrameConstants &frame [[buffer(0)]],
                                                  const device GPUMaterial *materials [[buffer(3)]],
                                                  const device GPULight *lights [[buffer(4)]],
@@ -234,12 +244,12 @@ fragment ForwardSurfaceOutput forward_surface_lit_fs(SurfaceVertexOut in [[stage
         (lighting.flags & 4u) != 0, (lighting.flags & 4u) ? lightingTextures[2].tex.read(uint2(in.position.xy)).xyz : float3(0),(lighting.flags & 8u)!=0,(lighting.flags & 16u)!=0,(lighting.flags & RESOLVE_EXTERNAL_DIFFUSE)!=0);
     if (value.alpha < materials[in.materialIndex].alphaCutoff)
         discard_fragment();
-    ForwardSurfaceOutput out;
+    ForwardLitSurfaceOutput out;
     const uint debugMode = kDebugModeSpecialised ? kDebugMode : frame.debugMode;
-    out.color = half4(half3(debugMode == 1   ? value.normal * 0.5f + 0.5f
+    out.color = float4(debugMode == 1   ? value.normal * 0.5f + 0.5f
                             : debugMode == 2 ? value.baseColor
-                                             : value.color),
-                      1.0h);
+                                             : value.color,
+                      1.0f);
     out.normalRoughness = half4(half3(value.normal), half(value.roughness));
     out.diffuseAlbedo = half4(half3(value.diffuseAlbedo), 1.0h);
     out.specularAlbedo = half4(half3(value.specularAlbedo), 1.0h);

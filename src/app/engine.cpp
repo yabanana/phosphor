@@ -248,7 +248,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
                                                            options_.shadows != ShadowMode::Off || options_.directLighting != DirectLightingMode::Legacy || options_.gi != GiMode::Off || options_.reflections!=ReflectionMode::Off || options_.ao!=AoMode::Off || options_.lightingDenoise!=LightingDenoiseMode::Off || options_.atmosphere || options_.fog || options_.clouds);
     if (options_.post) {
         PostProcessor::Options po;
-        po.physicalFloat32=options_.atmosphere || options_.fog || options_.clouds || options_.reflections!=ReflectionMode::Off || options_.ao!=AoMode::Off || options_.lightingDenoise!=LightingDenoiseMode::Off || !options_.denoisedFixture.empty();
+        po.physicalFloat32=options_.shadows!=ShadowMode::Off || options_.directLighting!=DirectLightingMode::Legacy || options_.gi!=GiMode::Off || options_.atmosphere || options_.fog || options_.clouds || options_.reflections!=ReflectionMode::Off || options_.ao!=AoMode::Off || options_.lightingDenoise!=LightingDenoiseMode::Off || !options_.denoisedFixture.empty();
         po.forceReset = options_.debugUpscalerReset;
         po.corruptExposure = options_.debugExposureCorrupt;
         po.jitterVariant = options_.jitterVariant;

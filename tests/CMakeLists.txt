@@ -59,7 +59,6 @@ add_executable(phosphor_tests
     test_atmosphere.cpp
     test_volume_oracle.cpp
     test_volumes.cpp
-    test_volume_oracle.cpp
     test_metalfx_denoise_contract.cpp
     test_metalfx_fixture_oracle.cpp
     test_scene_check.cpp
@@ -91,5 +90,6 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME f12_reference_contract COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_f12_reference_contract.py)
     add_test(NAME f13_temporal_light_metrics COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_temporal_light_metrics.py)
     add_test(NAME f13_metalfx_fixture_runner COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_metalfx_fixture_runner.py)
+    add_test(NAME f13_wide_emissive_check COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_wide_emissive_check.py)
     add_test(NAME f14_volume_snapshot_check COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_volume_snapshot_check.py)
 endif()
