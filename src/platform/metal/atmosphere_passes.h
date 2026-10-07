@@ -11,6 +11,13 @@ class GiPasses;
 // Physical composition returns RGBA32Float before exposure/upscaling/UI.
 class AtmospherePasses {
   public:
+    struct ReadResources {
+        MTL::Texture *transmittance=nullptr,*multiscattering=nullptr,*sky=nullptr;
+        rg::TextureRef transmittanceRef{},multiscatteringRef{},skyRef{},output{};
+        GPUAtmosphereParams atmosphere{};
+        GPUFogParams fog{};
+        GPUCloudParams clouds{};
+    }; // borrowed, read-only: caller declares graph readback and completion
     AtmospherePasses(MetalContext&,PipelineCache&,SceneRenderer&,DirectLightingPasses*,AccelerationStructures*,
                      GiPasses*,ShadowPasses*,const LaunchOptions&);
     ~AtmospherePasses();
@@ -26,6 +33,10 @@ class AtmospherePasses {
     void bindFrame(MetalGraphExecutor&);
     [[nodiscard]] u64 version()const;
     [[nodiscard]] const GiEnvironment& environment()const;
+    [[nodiscard]] u64 clockEpoch()const;
+    [[nodiscard]] bool clockReset()const;
+    [[nodiscard]] float exposureEv100()const; // hint only; physical shaders never expose
+    [[nodiscard]] ReadResources readResources()const;
     // Reads only a slot whose frameEvent reached index+1. Not-recorded startup
     // slots have no check work; in-flight reads are rejected explicitly.
     [[nodiscard]] bool check(u32 slot)const;
