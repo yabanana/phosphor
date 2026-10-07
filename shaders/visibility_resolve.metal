@@ -88,7 +88,8 @@ static void resolveVisibilityPixel(constant FrameConstants &frame, const device 
                                    texture2d<float, access::write> motion, texture2d<float, access::write> reactive,
                                    uint2 pixel, uint id, bool reuse, thread ShadingResult &cached,
                                    float sunVisibility = 1.0f, uint sunIndex = ~0u, bool replaceLocal = false,
-                                   float3 localDirect = float3(0), bool useGI = false, float3 irradiance = float3(0)) {
+                                   float3 localDirect = float3(0), bool useGI = false, float3 irradiance = float3(0),
+                                   bool omitSpecularAmbient=false, bool physicalGI=false) {
     if (pixel.x >= p.width || pixel.y >= p.height)
         return;
     if (id == VISIBILITY_BACKGROUND || visibilityCluster(id) >= 2u * p.candidateCapacity)
@@ -138,7 +139,7 @@ static void resolveVisibilityPixel(constant FrameConstants &frame, const device 
     const float3 eye = float3(frame.cameraPosition[0], frame.cameraPosition[1], frame.cameraPosition[2]);
     surface.frontFacing = dot(cross(w1.xyz - w0.xyz, w2.xyz - w0.xyz), eye - surface.worldPos) > 0;
     const ShadingResult value = reuse ? cached : shadeSurface(surface, frame, materials, lights, textures, false,
-                                                              sunVisibility, sunIndex, replaceLocal, localDirect, useGI, irradiance);
+                                                              sunVisibility, sunIndex, replaceLocal, localDirect, useGI, irradiance,omitSpecularAmbient,physicalGI);
     cached = value;
     color.write(float4(p.debugMode == 1   ? value.normal * 0.5f + 0.5f
                        : p.debugMode == 2 ? value.baseColor
@@ -225,7 +226,7 @@ kernel void visibility_lit_resolve(
                            reactive, pixel, id, false, cached,
                            (lighting.flags & 1u) ? sun.read(pixel).x : 1.0f, lighting.sunIndex,
                            (lighting.flags & 2u) != 0, (lighting.flags & 2u) ? localDirect.read(pixel).xyz : float3(0),
-                           (lighting.flags & 4u) != 0, (lighting.flags & 4u) ? irradiance.read(pixel).xyz : float3(0));
+                           (lighting.flags & 4u) != 0, (lighting.flags & 4u) ? irradiance.read(pixel).xyz : float3(0),(lighting.flags & 8u)!=0,(lighting.flags & 16u)!=0);
 }
 kernel void visibility_adaptive(
     constant FrameConstants &frame [[buffer(0)]], const device GPUVertex *vertices [[buffer(1)]],
@@ -377,11 +378,12 @@ kernel void material_lighting_guides(
     constant GPUDIParams& di [[buffer(18)]], texture2d<uint,access::read> visibility [[texture(0)]],
     texture2d<float,access::write> motion [[texture(7)]],
     texture2d<float,access::write> fallbackShading [[texture(8)]],
-    texture2d<float,access::write> fallbackAlbedo [[texture(9)]],uint2 pixel [[thread_position_in_grid]]) {
+    texture2d<float,access::write> fallbackAlbedo [[texture(9)]],
+    texture2d<float,access::write> fallbackOcclusion [[texture(10)]],uint2 pixel [[thread_position_in_grid]]) {
     if(any(pixel>=uint2(p.width,p.height)))return;
     const uint index=pixel.y*p.width+pixel.x;
     output[index]=GPUDISurface{};motion.write(float4(0),pixel);
-    fallbackShading.write(float4(0),pixel);fallbackAlbedo.write(float4(0),pixel);
+    fallbackShading.write(float4(0),pixel);fallbackAlbedo.write(float4(0),pixel);fallbackOcclusion.write(float4(1),pixel);
     const uint id=visibility.read(pixel).x;
     if(id==VISIBILITY_BACKGROUND || visibilityCluster(id)>=2u*p.candidateCapacity || !geometry[index].valid)return;
     const GPUMeshletCandidate candidate = candidateOf(id, p, a, b);
@@ -436,7 +438,7 @@ kernel void material_lighting_guides(
         guide.viewDirection[c]=normalize(eye-surface.worldPos)[c];
     }
     guide.depth=geometric.viewDepth;guide.roughness=value.roughness;guide.metallic=value.metallic;
-    guide.materialRevision=di.historyEpoch;guide.instanceSlot=candidate.slot;guide.instanceGeneration=instance.generation;guide.valid=1;
+    guide.materialRevision=di.historyEpoch;guide.instanceSlot=candidate.slot;guide.instanceGeneration=instance.generation;guide.valid=1;guide.pad[0]=as_type<uint>(value.occlusion);
     output[index]=guide;
     const float3 objectPoint=float3(v0.px,v0.py,v0.pz)*weights.x+float3(v1.px,v1.py,v1.pz)*weights.y+float3(v2.px,v2.py,v2.pz)*weights.z;
     const device GPUInstance& old=previousInstances[candidate.slot];

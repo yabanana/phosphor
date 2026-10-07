@@ -177,7 +177,7 @@ void PostProcessor::configure(u32 w, u32 h) {
     height_ = h;
     releaseTargets();
     for (auto &s : slots_)
-        s.output = texture(context_, w, h, MTL::PixelFormatRGBA16Float, "Reconstructed HDR");
+        s.output = texture(context_, w, h, options_.physicalFloat32?MTL::PixelFormatRGBA32Float:MTL::PixelFormatRGBA16Float, "Reconstructed HDR");
     for (u32 i = 0; i < options_.views; ++i) {
         auto &v = views_[i];
         retireAfterFrames(std::move(v.scaler));
@@ -295,6 +295,7 @@ bool PostProcessor::temporalReady() const {
            (usesWorker() ? views_[view_].worker && views_[view_].worker->ready() : bool(views_[view_].scaler));
 }
 const char *PostProcessor::effectiveUpscaler() const {
+    if(externalReconstruction_)return "denoised";
     return temporalReady() ? (usesWorker() ? "metalfx-temporal-isolated" : "metalfx-temporal") : "native-spatial";
 }
 float PostProcessor::lastExposure() const {
@@ -498,7 +499,7 @@ u64 PostProcessor::workerBridgeBytes() const {
     return TemporalWorker::mappedBytes();
 }
 rg::TextureRef PostProcessor::addToGraph(rg::RenderGraph &g, VisibilityRenderer &scene, rg::TextureRef drawable,
-                                         rg::Format format) {
+                                         rg::Format format,rg::TextureRef reconstructed) {
     using namespace rg;
     input_ = scene.color();
     depth_ = scene.depth();
@@ -511,8 +512,9 @@ rg::TextureRef PostProcessor::addToGraph(rg::RenderGraph &g, VisibilityRenderer 
     histogramRef_ = g.importBuffer("Luminance histogram", {256 * sizeof(u32)}, ImportPerFrame);
     stateRef_ = g.importBuffer("Exposure and temporal state per view", {16}, ImportContentsDefined | ImportOutput);
     exposure_ = g.importTexture("Exposure", {Format::R16Float, 1, 1}, ImportOutput);
-    output_ =
-        g.importTexture("Reconstructed HDR", {Format::RGBA16Float, width_, height_}, ImportOutput | ImportPerFrame);
+    externalReconstruction_=reconstructed.valid();
+    output_ = externalReconstruction_?reconstructed:g.importTexture("Reconstructed HDR",
+        {options_.physicalFloat32?Format::RGBA32Float:Format::RGBA16Float, width_, height_}, ImportOutput | ImportPerFrame);
     g.addPass(
         "Histogram clear", PassType::Compute,
         [&](PassBuilder &b) { histogramRef_ = b.write(histogramRef_, Usage::ShaderWrite, StageDispatch); },
@@ -555,7 +557,8 @@ rg::TextureRef PostProcessor::addToGraph(rg::RenderGraph &g, VisibilityRenderer 
             enc->setArgumentTable(tables_[2]);
             enc->dispatchThreadgroups(MTL::Size::Make(1, 1, 1), MTL::Size::Make(256, 1, 1));
         });
-    g.addPass(
+    if(externalReconstruction_) output_=reconstructed;
+    else g.addPass(
         "Temporal reconstruction", PassType::External,
         [&](PassBuilder &b) {
             if (usesWorker()) {
@@ -580,7 +583,7 @@ rg::TextureRef PostProcessor::addToGraph(rg::RenderGraph &g, VisibilityRenderer 
             auto *enc = static_cast<MTL4::RenderCommandEncoder *>(ctx.encoder());
             auto *t = tables_[4];
             t->setAddress(paramsAddress_, 1);
-            t->setTexture(slots_[slot_].output->gpuResourceID(), 0);
+            t->setTexture(static_cast<MTL::Texture*>(ctx.texture(output_))->gpuResourceID(), 0);
             t->setTexture(views_[view_].exposure->gpuResourceID(), 1);
             enc->setRenderPipelineState(pipelines_.render(format == Format::RGBA16Float ? presentEDR_ : presentSDR_));
             enc->setArgumentTable(t, MTL::RenderStageFragment);
@@ -646,7 +649,7 @@ rg::TextureRef PostProcessor::addSDRCapture(rg::RenderGraph &g, rg::TextureRef d
 void PostProcessor::bindFrame(MetalGraphExecutor &e) {
     if (usesWorker())
         e.bindBuffer(workerBridge_, views_[view_].workerBuffer);
-    e.bindTexture(output_, slots_[slot_].output);
+    if(!externalReconstruction_)e.bindTexture(output_, slots_[slot_].output);
     e.bindTexture(exposure_, views_[view_].exposure);
 }
 } // namespace phosphor

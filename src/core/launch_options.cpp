@@ -991,6 +991,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             "Settled reference requires fixed timestep, temporal upscaling, one view, zero warmup and fixed resolution";
         return false;
     }
+    if(out.lightingDenoise==LightingDenoiseMode::MetalFX || out.atmosphere || out.fog || out.clouds)out.post=true;
     if (out.post)
         out.visibility = true;
     if (out.debugPostCurvesCorrupt && !out.debugPostCurves) {

@@ -34,6 +34,7 @@ struct ShadingResult {
     float3 specularAlbedo;
     float roughness;
     float metallic;
+    float occlusion;
     float alpha;
 };
 
@@ -121,7 +122,8 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
                                   const device GPULight *lights, const device TextureHandle *textures,
                                   bool alphaTest = true, float sunVisibility = 1.0f, uint shadowLight = ~0u,
                                   bool replaceLocal = false, float3 localDirect = float3(0),
-                                  bool useGI = false, float3 indirectIrradiance = float3(0)) {
+                                  bool useGI = false, float3 indirectIrradiance = float3(0),
+                                  bool omitSpecularAmbient = false, bool physicalGI = false) {
     const device GPUMaterial &m = materials[in.materialIndex];
 
     const half4 baseTex = sampleOr(textures, m.baseColorTex, in.uv, half4(1.0h), in.uvDx, in.uvDy);
@@ -208,8 +210,8 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     const float3 specularDir = normalize(mix(reflect(-V, N), N, roughness * roughness));
     const float3 ambientDiffuse = hemisphere(N) * baseColor.rgb * (1.0 - metallic);
     const float3 ambientSpecular = hemisphere(specularDir) * envBRDFApprox(f0, roughness, NdotV);
-    color += ((useGI ? indirectIrradiance * baseColor.rgb * (1.0f - metallic) / M_PI_F : ambientDiffuse) +
-              ambientSpecular) * occlusion;
+    color += (useGI ? indirectIrradiance * baseColor.rgb * (1.0f - metallic) / M_PI_F * (physicalGI?1.0f:occlusion) : ambientDiffuse * occlusion);
+    if(!omitSpecularAmbient)color += ambientSpecular * occlusion;
 
     color += float3(m.emissive[0], m.emissive[1], m.emissive[2]) * float3(emTex.rgb);
 
@@ -220,5 +222,6 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     out.specularAlbedo = F_Schlick(f0, NdotV);
     out.roughness = roughness;
     out.metallic = metallic;
+    out.occlusion = occlusion;
     return out;
 }
