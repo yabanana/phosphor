@@ -1068,7 +1068,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if(out.debugGiCorrupt && (!out.debugLighting || out.gi==GiMode::Off || (out.debugGiCorrupt==3 && out.gi==GiMode::DDGI))){error="GI corruption requires --debug-lighting and an applicable GI mode";return false;}
     if(out.captureLinearSignal==1 && out.gi==GiMode::Off){error="Indirect linear signal requires --gi";return false;}
     if(out.captureLinearSignal==2 && out.directLighting==DirectLightingMode::Legacy){error="Direct linear signal requires --lighting";return false;}
-    if(out.captureLinearSignal>=3 && out.captureLinearSignal<=5 && out.shadows==ShadowMode::Off){error="Shadow linear signal requires --shadows csm|rt";return false;}
+    if(out.captureLinearSignal==3 && out.shadows==ShadowMode::Off){error="Shadow linear signal requires --shadows csm|rt";return false;}
+    if((out.captureLinearSignal==4||out.captureLinearSignal==5) && !lighting){error="Receiver guide capture requires a lighting producer";return false;}
     if((!out.exportReference.empty() && out.exportReferenceFrame>=u64(out.warmup)+out.frames) ||
        (!out.captureLinear.empty() && out.captureLinearFrame>=u64(out.warmup)+out.frames)){error="Capture/export frame is outside the requested run";return false;}
     if(!out.exportReference.empty() && !out.benchmark()){error="Reference export requires --frames";return false;}

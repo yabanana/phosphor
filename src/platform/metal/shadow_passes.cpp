@@ -469,19 +469,25 @@ struct ShadowPasses::Impl {
     }
     void add(rg::RenderGraph& g,rg::TextureRef v,rg::TextureRef d) {
         using namespace rg;visibilityRef=v;depthRef=d;auto& f=slots[frame.slot];poseRef=visibility.importPoseHistory(g);
+        // These compute-written guides also become raster MRTs. Match the
+        // physical depth attachment, not the smaller active DRS rectangle.
+        // Buffer indexing, viewport, dispatch and readback keep frame.width/height.
+        const auto receiverDepth=g.resources().at(depthRef.resource).texture;
+        if(receiverDepth.width<frame.width||receiverDepth.height<frame.height)
+            throw std::logic_error("Lighting receiver active extent exceeds its depth attachment");
         surfaceRef=g.importBuffer("Pre-resolve shadow surface",{capacity*sizeof(GPUShadowSurface)},ImportPerFrame);
         flagsRef=g.importBuffer("Independent CSM caster flags",{std::max<u64>(1,casterCapacity)*4},ImportPerFrame);
         counterRef=g.importBuffer("Shadow counters",{sizeof(GPUShadowCounters)},ImportPerFrame|ImportOutput);
         g.addPass("Shadow receiver clear",PassType::Compute,[&](PassBuilder& b){
-            counterRef=b.write(counterRef,Usage::ShaderWrite,StageDispatch);keyRef=b.createTexture("Indexed receiver keys",{Format::RGBA32Uint,frame.width,frame.height});
+            counterRef=b.write(counterRef,Usage::ShaderWrite,StageDispatch);keyRef=b.createTexture("Indexed receiver keys",{Format::RGBA32Uint,receiverDepth.width,receiverDepth.height});
             keyRef=b.write(keyRef,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("shadow_receiver_clear");
         },[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Clear];common(t,ctx);texture(t,ctx,keyRef,10);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[Clear],t,frame.width,frame.height);});
         g.addPass("Pre-resolve geometric guides",PassType::Compute,[&](PassBuilder& b){
             b.read(visibilityRef,Usage::ShaderRead,StageDispatch);b.read(depthRef,Usage::ShaderRead,StageDispatch);b.read(scene.dataRef(),Usage::ShaderRead,StageDispatch);b.read(mesh.frameListsRef(),Usage::ShaderRead,StageDispatch);
             b.read(counterRef,Usage::ShaderRead,StageDispatch);counterRef=b.write(counterRef,Usage::ShaderWrite,StageDispatch);
             surfaceRef=b.write(surfaceRef,Usage::ShaderWrite,StageDispatch);
-            pointRef=b.createTexture("Receiver world position",{Format::RGBA32Float,frame.width,frame.height});pointRef=b.write(pointRef,Usage::ShaderWrite,StageDispatch);
-            normalRef=b.createTexture("Receiver geometric normal",{Format::RGBA16Float,frame.width,frame.height});normalRef=b.write(normalRef,Usage::ShaderWrite,StageDispatch);
+            pointRef=b.createTexture("Receiver world position",{Format::RGBA32Float,receiverDepth.width,receiverDepth.height});pointRef=b.write(pointRef,Usage::ShaderWrite,StageDispatch);
+            normalRef=b.createTexture("Receiver geometric normal",{Format::RGBA16Float,receiverDepth.width,receiverDepth.height});normalRef=b.write(normalRef,Usage::ShaderWrite,StageDispatch);
             b.setProfileShaders("shadow_surface_guides");
         },[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Guide];common(t,ctx);texture(t,ctx,visibilityRef,ST_VISIBILITY);texture(t,ctx,depthRef,ST_DEPTH);texture(t,ctx,pointRef,ST_WORLD_POSITION);texture(t,ctx,normalRef,ST_GEOMETRIC_NORMAL);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[Guide],t,frame.width,frame.height);});
         g.addPass("Indexed overflow receiver prepass",PassType::Raster,[&](PassBuilder& b){
