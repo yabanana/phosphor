@@ -2,6 +2,8 @@
 #include "renderer/shadow_settings.h"
 #include "renderer/shadow_math.h"
 #include "renderer/cull_math.h"
+#include "renderer/gpu_scene.h"
+#include "renderer/visibility_math.h"
 #include <cmath>
 #include <limits>
 #include <glm/gtc/matrix_transform.hpp>
@@ -243,4 +245,44 @@ TEST_CASE("F10 tile dirty mask preserves unchanged regions and unions moved-cast
     CHECK((old|moved)!=~u64(0));
     CHECK(shadowDirtyTiles(c,{{10,10,0},{11,11,1}})==0);
     CHECK(shadowDirtyTiles(c,{{1,1,1},{0,0,0}})==~u64(0));
+}
+TEST_CASE("F10 indexed and meshlet receivers decode the same world triangle and analytic pixel") {
+    GpuScene scene;
+    scene.uploadMesh({{-1,-1,-2},{1,-1,-2},{0,1,-2}},{},{},{},{0,1,2});
+    const auto handle=scene.uploadMesh({{-2,-1,-3},{2,-1,-4},{2,1,-4},{-2,1,-3}},
+                                        {},{},{},{0,1,2,0,2,3});
+    const auto& mesh=scene.meshInfos()[handle];
+    REQUIRE(mesh.indexOffset>0);REQUIRE(mesh.vertexOffset>0);
+    const glm::mat4 vp=glm::inverse(cameraAt().inverseViewProjection);
+    for(u32 primitive=0;primitive<mesh.indexCount/3;++primitive){
+        std::array<u32,3> indexed{};for(u32 k=0;k<3;++k)indexed[k]=mesh.vertexOffset+scene.indices()[mesh.indexOffset+3*primitive+k];
+        std::array<u32,3> cooked{};bool found=false;
+        for(u32 mi=0;mi<mesh.meshletCount;++mi){const auto& m=scene.meshlets()[mesh.meshletOffset+mi];
+            for(u32 ti=0;ti<m.triangleCount;++ti){std::array<u32,3> candidate{};
+                for(u32 k=0;k<3;++k)candidate[k]=scene.meshletVertices()[m.vertexOffset+scene.meshletTriangles()[m.triangleOffset+3*ti+k]];
+                if(candidate==indexed){cooked=candidate;found=true;}}}
+        REQUIRE(found); // Original primitive_id is not the meshlet-local ID.
+        for(float mirror:{1.f,-1.f}){
+            const auto transform=glm::scale(glm::mat4(1),glm::vec3(mirror,1.3f,.8f));
+            const auto world=[&](u32 index){const auto& v=scene.vertices()[index];return glm::vec3(transform*glm::vec4(v.px,v.py,v.pz,1));};
+            std::array<glm::vec3,3> wi{},wm{};for(u32 k=0;k<3;++k){wi[k]=world(indexed[k]);wm[k]=world(cooked[k]);CHECK(wi[k]==wm[k]);}
+            for(const auto extent:{glm::vec2(640,360),glm::vec2(480,270),glm::vec2(320,180)}){
+                const glm::vec4 center=vp*glm::vec4((wi[0]+wi[1]+wi[2])/3.f,1);
+                const float px=std::floor((center.x/center.w*.5f+.5f)*extent.x)+.5f;
+                const float py=std::floor((.5f-center.y/center.w*.5f)*extent.y)+.5f;
+                const auto reconstruct=[&](const std::array<glm::vec3,3>& w){
+                    const auto a=vp*glm::vec4(w[0],1),b=vp*glm::vec4(w[1],1),c=vp*glm::vec4(w[2],1);
+                    const auto bary=visibilityBarycentrics(a.x,a.y,a.w,b.x,b.y,b.w,c.x,c.y,c.w,px,py,extent.x,extent.y);
+                    REQUIRE(bary.valid);return w[0]*bary.value[0]+w[1]*bary.value[1]+w[2]*bary.value[2];};
+                const auto pi=reconstruct(wi),pm=reconstruct(wm);CHECK(pi==pm);
+                // Independent double ray/plane intersection, not interpolated
+                // depth or a second invocation of the barycentric formula.
+                const auto h=glm::dmat4(cameraAt().inverseViewProjection)*glm::dvec4(2*double(px)/extent.x-1,1-2*double(py)/extent.y,1,1);
+                const glm::dvec3 ray=glm::dvec3(h)/h.w;
+                const auto n=glm::cross(glm::dvec3(wi[1]-wi[0]),glm::dvec3(wi[2]-wi[0]));
+                const auto reference=ray*(glm::dot(n,glm::dvec3(wi[0]))/glm::dot(n,ray));
+                CHECK(glm::length(glm::dvec3(pi)-reference)<2e-6);
+            }
+        }
+    }
 }

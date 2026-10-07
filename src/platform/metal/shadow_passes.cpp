@@ -496,8 +496,16 @@ struct ShadowPasses::Impl {
         },[this](PassContext& ctx){scene.encodeOverlay(static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder()),receiver,true,receiverDepthState);});
         g.addPass("Indexed receiver pack",PassType::Compute,[&](PassBuilder& b){
             for(auto r:{pointRef,normalRef,keyRef,depthRef})b.read(r,Usage::ShaderRead,StageDispatch);b.read(surfaceRef,Usage::ShaderRead,StageDispatch);surfaceRef=b.write(surfaceRef,Usage::ShaderWrite,StageDispatch);
+            // scene.dataRef also versions vertex updates; preserve untouched
+            // V-buffer pixels while publishing canonical indexed guides.
+            b.read(scene.dataRef(),Usage::ShaderRead,StageDispatch);
+            pointRef=b.write(pointRef,Usage::ShaderWrite,StageDispatch);normalRef=b.write(normalRef,Usage::ShaderWrite,StageDispatch);
+            b.read(counterRef,Usage::ShaderRead,StageDispatch);counterRef=b.write(counterRef,Usage::ShaderWrite,StageDispatch);
             b.setProfileShaders("shadow_receiver_pack");
-        },[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Pack];common(t,ctx);texture(t,ctx,pointRef,5);texture(t,ctx,normalRef,6);texture(t,ctx,keyRef,10);texture(t,ctx,depthRef,0);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[Pack],t,frame.width,frame.height);});
+        },[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Pack];common(t,ctx);
+            // Entry-local buffer18: original mesh-local index stream. Slots
+            //3/5/6/15 are instances/meshes/vertices/counters from common().
+            t->setAddress(scene.indexBuffer()->gpuAddress(),18);texture(t,ctx,pointRef,5);texture(t,ctx,normalRef,6);texture(t,ctx,keyRef,10);texture(t,ctx,depthRef,0);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[Pack],t,frame.width,frame.height);});
         g.addPass("CSM caster selection",PassType::Compute,[&](PassBuilder& b){
             b.read(scene.dataRef(),Usage::ShaderRead,StageDispatch);flagsRef=b.write(flagsRef,Usage::ShaderWrite,StageDispatch);
             b.read(counterRef,Usage::ShaderRead,StageDispatch);counterRef=b.write(counterRef,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("shadow_caster_flags");
