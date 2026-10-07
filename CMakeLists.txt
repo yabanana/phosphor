@@ -86,6 +86,12 @@ add_library(phosphor_core STATIC
     src/renderer/radiance_cache.cpp
     src/renderer/gi_lighting_epoch.cpp
     src/renderer/offline_reference.cpp
+    src/renderer/reflection_settings.cpp
+    src/renderer/reflection_probe.cpp
+    src/renderer/denoise_settings.cpp
+    src/renderer/atmosphere.cpp
+    src/renderer/fog_settings.cpp
+    src/renderer/cloud_settings.cpp
     src/renderer/meshlet_cull_reference.cpp
     src/renderer/meshlet_check.cpp
     src/renderer/scene_check.cpp
