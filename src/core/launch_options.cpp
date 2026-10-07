@@ -1027,6 +1027,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
        (!out.captureLinear.empty() && out.captureLinearFrame>=u64(out.warmup)+out.frames)){error="Capture/export frame is outside the requested run";return false;}
     if(!out.exportReference.empty() && !out.benchmark()){error="Reference export requires --frames";return false;}
     if(lighting && out.debugRtDeform){error="F9 diagnostic deformation does not publish raster bounds for lighting";return false;}
+    if(out.debugLightingCorrupt==7 && out.directLighting==DirectLightingMode::Legacy){error="Finite-overflow control requires --lighting";return false;}
     if((out.debugLightingCorrupt==5 || out.debugLightingCorrupt==6) && out.directLighting!=DirectLightingMode::ReSTIR){error="PDF/light negative controls require --lighting restir";return false;}
     if (out.shadowCache && out.shadows != ShadowMode::CSM) { error = "--shadow-cache on requires --shadows csm"; return false; }
     if ((out.contactShadows || out.shadowCache) && out.shadows == ShadowMode::Off) {
