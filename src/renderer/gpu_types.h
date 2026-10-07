@@ -817,4 +817,90 @@ struct GPUDenoiseHistory {
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseHistory) == 112, "GPUDenoiseHistory layout");
 
+// F14: ALL positions/radii/heights/distances are WORLD METRES; extinction and
+// scattering coefficients are m^-1. RGB radiance and irradiance remain linear
+// and pre-exposure. Atmosphere planet centre maps world origin to local ground.
+PHOSPHOR_GPU_CONSTANT u32 ATMOSPHERE_SCHEMA = 1u;
+PHOSPHOR_GPU_CONSTANT u32 ATMOSPHERE_ENABLE_MOON = 1u;
+PHOSPHOR_GPU_CONSTANT u32 ATMOSPHERE_ENABLE_STARS = 2u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_HISTORY_VALID = 1u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_SHADOW_CSM = 2u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_SHADOW_RT = 4u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_ENABLE_GI = 8u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_ENABLE_LOCAL_LIGHTS = 16u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_CORRUPT_UNITS = 1u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_CORRUPT_HISTORY = 2u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_CORRUPT_LIGHT = 3u;
+
+struct GPUAtmosphereParams {
+    float planetCenter[3], bottomRadius;
+    float topRadius, rayleighScaleHeight, mieScaleHeight, mieG;
+    float rayleighScattering[3], sunAngularRadius;
+    float mieScattering[3], mieAbsorption;
+    float ozoneAbsorption[3], ozoneCenterHeight;
+    float groundAlbedo[3], ozoneHalfWidth;
+    float sunDirection[3], pad0;
+    float sunIrradiance[3], pad1;
+    float moonDirection[3], moonAngularRadius;
+    float moonIrradiance[3], moonPhase;
+    float cameraPosition[3], timeSeconds;
+    float inverseViewProjection[16], viewProjection[16];
+    u32 transmittanceWidth, transmittanceHeight, multiWidth, multiHeight;
+    u32 skyWidth, skyHeight, marchSteps, multiDirections;
+    u32 outputWidth, outputHeight, parameterRevision, skyRevision;
+    u32 frameIndex, viewID, flags, corruption;
+    float starIntensity, starRotation, timeDelta, exposureEv100;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUAtmosphereParams) == 384, "GPUAtmosphereParams layout");
+
+struct GPUFogParams {
+    float inverseViewProjection[16], view[16], previousViewProjection[16], previousView[16];
+    u32 gridX, gridY, gridZ, maxLocalLights;
+    u32 outputWidth, outputHeight, frameIndex, viewID;
+    float nearDistance, farDistance, densityAtBase, heightFalloff;
+    float albedo[3], anisotropy;
+    float heightBase, maxDensity, historyWeight, positionThreshold;
+    float sunDirection[3], maxTraceDistance;
+    float sunIrradiance[3], depthRelativeThreshold;
+    float cameraPosition[3], timeSeconds;
+    u32 lightCount, slotCount, flags, generation;
+    u32 lightRevision, previousViewID, corruption, maxHistoryAge;
+    float moonDirection[3], pad0;
+    float moonIrradiance[3], pad1;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUFogParams) == 448, "GPUFogParams layout");
+struct GPUFogCell {
+    float source[3], extinction; // source radiance per metre; scalar extinction m^-1
+    float worldPosition[3], viewDepth;
+    u32 viewID, generation, age, valid;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUFogCell) == 48, "GPUFogCell layout");
+struct GPUFogIntegrated { float radiance[3], transmittance; };
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUFogIntegrated) == 16, "GPUFogIntegrated layout");
+
+struct GPUCloudParams {
+    float inverseViewProjection[16], previousViewProjection[16];
+    float cameraPosition[3], timeSeconds;
+    float wind[3], previousTimeSeconds;
+    float baseHeight, topHeight, coverage, densityScale;
+    float noiseScale, erosionScale, extinction, albedo;
+    float anisotropy, maxDistance, terminationTransmittance, historyWeight;
+    float depthRelativeThreshold, positionThreshold, lightStepDistance, pad;
+    u32 width, height, outputWidth, outputHeight;
+    u32 marchSteps, lightSteps, seed, generation;
+    u32 frameIndex, viewID, flags, corruption;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUCloudParams) == 272, "GPUCloudParams layout");
+struct GPUCloudHistory {
+    float worldPosition[3], opaqueDistance;
+    float radiance[3], transmittance;
+    u32 viewID, generation, samples, valid;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUCloudHistory) == 48, "GPUCloudHistory layout");
+struct GPUVolumeCounters {
+    u32 nonfinite, invalidUnits, invalidHistory, shadowRays;
+    u32 froxels, cloudSamples, historyReused, historyRejected;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUVolumeCounters) == 32, "GPUVolumeCounters layout");
+
 } // namespace phosphor
