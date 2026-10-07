@@ -52,3 +52,18 @@ sia zero. Errore positivo medio/p95 in dark limitato a10%/25% della luminanza
 media reference bright; bright mantiene20/30. La scelta delle maschere deve
 avvenire sul solo snapshot prima di aprire immagini candidate. Snapshot,
 riferimenti e misure thin-wall/recovery restano da eseguire.
+
+Strumenti CPU aggiunti:
+
+- `tools/f12_fixture_regions.py`: consuma solo snapshot/PLY, individua per
+  dimensioni il separatore10mm e la lampada, costruisce bright/dark senza leggere
+  alcuna immagine candidata. In un test geometrico sintetico costruito dalle
+  dimensioni della fixture produce1125pixel bright e1158dark. Questa è verifica
+  del programma, **non** coverage misurata sullo snapshot runtime ancora atteso.
+- `tools/f12_step_snapshot_check.py`: pretende i frame255/256, asset byte-identici,
+  stessa camera/geometria/material response e sola emissione dimezzata, poi
+  deriva il PFM post dall'oracolo indipendente accettato. Testato su snapshot
+  sintetici: accetta lo scaling esatto e rifiuta drift della camera prima di
+  generare qualsiasi riferimento. Non dimostra ancora la transizione GPU.
+- Il collector filtrato rifiuta capture raw al posto dell'ID8 e verifica la
+  selezione `--lighting-denoise custom`; positive/negative metadata test PASS.
