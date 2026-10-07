@@ -451,6 +451,9 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
         } else if (arg == "--debug-rt") {
             if (!needCount(out.debugRt)) return false;
             rtSettingsSpecified = true;
+        } else if (arg == "--debug-rt-deform") {
+            out.debugRtDeform = true;
+            rtSettingsSpecified = true;
         } else if (arg == "--debug-rt-corrupt") {
             const auto value = needValue();
             if (!value) return false;
@@ -884,6 +887,10 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     }
     if (!out.rtProxyManifestPath.empty() && !out.rtProxyManifest) {
         error = "--rt-proxy-manifest requires --rt-proxy manifest";
+        return false;
+    }
+    if (out.debugRtDeform && (out.debugRt == 0 || out.debugView != MeshletDebugView::RT || out.rtProxyManifest)) {
+        error = "--debug-rt-deform requires --debug-rt N with N > 0, --debug-view rt and --rt-proxy off";
         return false;
     }
     if (out.debugRtCorrupt != RtCorruption::None && out.debugRt == 0) {

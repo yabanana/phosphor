@@ -58,6 +58,9 @@ TEST_CASE("F9 bench report emits all typed RT evidence only when present") {
     rt.proxyTriangles = 150000;
     rt.tlasBuilds = 3;
     rt.tlasRefits = 97;
+    rt.blasBuilds = (1ull << 54) + 11;
+    rt.blasRefits = 27;
+    rt.compactions = 102;
     rt.proxyMeshes = 80;
     rt.probeRays = (1ull << 54) + 9; // retain exact integers beyond double precision
     rt.visibilityCompared = 2000000;
@@ -80,6 +83,7 @@ TEST_CASE("F9 bench report emits all typed RT evidence only when present") {
         {"checks", 20}, {"check_failures", 2}, {"blas_bytes", 1ull << 34}, {"uncompacted_bytes", 1ull << 35},
         {"blas_scratch_bytes", 1ull << 33}, {"tlas_bytes", 8192}, {"tlas_scratch_bytes", 4096},
         {"full_triangles", 262267}, {"proxy_triangles", 150000}, {"tlas_builds", 3}, {"tlas_refits", 97},
+        {"blas_builds", (1ull << 54) + 11}, {"blas_refits", 27}, {"compactions", 102},
         {"proxy_meshes", 80}, {"probe_rays", (1ull << 54) + 9}, {"visibility_compared", 2000000},
         {"visibility_mismatches", 7}, {"alpha_tests", 30000}, {"opaque_alpha_tests", 0}, {"blas_build_ms", 2.5},
         {"proxy_shadow_error_pct", 0.125}, {"proxy_primary_error_pct", 0.0625}, {"proxy_dt95_cm", 0.5},
@@ -90,6 +94,7 @@ TEST_CASE("F9 bench report emits all typed RT evidence only when present") {
     };
     CHECK(document.at("rt") == expected);
     CHECK(document.at("rt").at("probe_rays").get<u64>() == (1ull << 54) + 9);
+    CHECK(document.at("rt").at("blas_builds").get<u64>() == (1ull << 54) + 11);
     rt.enabled = false;
     CHECK_FALSE(nlohmann::json::parse(reportToJson(report)).at("rt").at("enabled").get<bool>());
     rt.present = false;

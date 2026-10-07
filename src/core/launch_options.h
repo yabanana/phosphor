@@ -191,6 +191,8 @@ namespace phosphor {
 //   --rt-proxy-manifest PATH   explicit measured manifest (needs manifest mode)
 //   --debug-view rt    RT primary-hit diagnostic, also on the indexed path
 //   --debug-rt N       CPU reference comparison every N frames (0 = disabled)
+//   --debug-rt-deform  deform mesh 0 for BLAS lifecycle diagnostics; requires
+//                      --rt on --debug-rt N>0 --debug-view rt --rt-proxy off
 //   --debug-rt-corrupt transform|mask|blas  negative control (needs --debug-rt N>0)
 //   --rt-probe primary|shadow|ao|diffuse    per-ray traversal measurement
 //                      RT settings require --rt on; synthetic graph scenarios,
@@ -319,6 +321,7 @@ struct LaunchOptions {
     bool         rtProxyManifest = false;      // --rt-proxy off|manifest
     std::string  rtProxyManifestPath;          // empty = scene's default manifest, missing = full geometry
     u32          debugRt = 0;                  // --debug-rt N: readback/check cadence, 0 = off
+    bool         debugRtDeform = false;       // diagnostic mesh-0 deformation; raster bounds are unchanged
     RtCorruption debugRtCorrupt = RtCorruption::None;
     RtProbe      rtProbe = RtProbe::None;
     // F7/F8 renderer, temporal reconstruction, capture and bounded diagnostics.

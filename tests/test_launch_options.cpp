@@ -946,6 +946,7 @@ TEST_CASE("F9 launch options keep RT off by default and accept indexed diagnosti
     CHECK(o.rtProxyManifestPath.empty());
     CHECK(o.rtTlasRebuildEvery == 0);
     CHECK(o.debugRt == 0);
+    CHECK_FALSE(o.debugRtDeform);
     CHECK(o.debugRtCorrupt == RtCorruption::None);
     CHECK(o.rtProbe == RtProbe::None);
     REQUIRE(parse({"--rt", "off", "--rt-proxy", "off"}, o, error));
@@ -1023,6 +1024,34 @@ TEST_CASE("F9 launch options reject missing values and unsupported combinations"
         {"--rt", "on", "--transient-test"},
         {"--rt", "on", "--debug-meshlets", "1"}, {"--rt", "on", "--debug-view", "meshlets"},
         {"--rt", "on", "--debug-view", "rt", "--rt", "off"}}) {
+        CHECK_FALSE(parse(args, o, error));
+        CHECK_FALSE(error.empty());
+    }
+}
+
+
+TEST_CASE("F9 BLAS deformation requires the checked full-geometry RT debug view") {
+    LaunchOptions o;
+    std::string error;
+    REQUIRE(parse({"--debug-rt-deform", "--rt", "on", "--debug-rt", "1", "--debug-view", "rt"}, o, error));
+    CHECK(o.debugRtDeform);
+    CHECK(o.debugRt == 1);
+    CHECK_FALSE(o.rtProxyManifest);
+    REQUIRE(parse({"--rt", "on", "--debug-rt", "5", "--debug-view", "rt", "--rt-proxy", "off",
+                   "--debug-rt-deform", "--frames", "30"}, o, error));
+    CHECK(o.debugRtDeform);
+    CHECK(o.frames == 30); // The flag consumes no argument.
+    for (const auto& args : std::vector<std::vector<const char*>>{
+        {"--debug-rt-deform"},
+        {"--debug-rt-deform", "--debug-rt", "1", "--debug-view", "rt"},
+        {"--rt", "off", "--debug-rt-deform", "--debug-rt", "1", "--debug-view", "rt"},
+        {"--rt", "on", "--debug-rt-deform", "--debug-view", "rt"},
+        {"--rt", "on", "--debug-rt-deform", "--debug-rt", "0", "--debug-view", "rt"},
+        {"--rt", "on", "--debug-rt-deform", "--debug-rt", "1"},
+        {"--rt", "on", "--debug-rt-deform", "--debug-rt", "1", "--debug-view", "none"},
+        {"--rt", "on", "--debug-rt-deform", "--debug-rt", "1", "--debug-view", "rt", "--rt-proxy", "manifest"},
+        {"--rt", "on", "--debug-rt-deform", "--debug-rt", "1", "--debug-view", "rt", "--rt-proxy", "manifest",
+         "--rt-proxy-manifest", "proxy.json"}}) {
         CHECK_FALSE(parse(args, o, error));
         CHECK_FALSE(error.empty());
     }

@@ -191,6 +191,7 @@ struct RtReport {
     u64 blasBytes = 0, uncompactedBytes = 0, blasScratchBytes = 0;
     u64 tlasBytes = 0, tlasScratchBytes = 0;
     u64 fullTriangles = 0, proxyTriangles = 0, tlasBuilds = 0, tlasRefits = 0;
+    u64 blasBuilds = 0, blasRefits = 0, compactions = 0; // executed operations, distinct from live AS counts
     u64 proxyMeshes = 0, probeRays = 0, visibilityCompared = 0, visibilityMismatches = 0;
     u64 alphaTests = 0, opaqueAlphaTests = 0;
     float blasBuildMs = 0;

@@ -93,6 +93,9 @@ std::string rtToJson(const RtReport& rt) {
     out += ", \"proxy_triangles\": " + std::to_string(rt.proxyTriangles);
     out += ", \"tlas_builds\": " + std::to_string(rt.tlasBuilds);
     out += ", \"tlas_refits\": " + std::to_string(rt.tlasRefits);
+    out += ", \"blas_builds\": " + std::to_string(rt.blasBuilds);
+    out += ", \"blas_refits\": " + std::to_string(rt.blasRefits);
+    out += ", \"compactions\": " + std::to_string(rt.compactions);
     out += ", \"proxy_meshes\": " + std::to_string(rt.proxyMeshes);
     out += ", \"probe_rays\": " + std::to_string(rt.probeRays);
     out += ", \"visibility_compared\": " + std::to_string(rt.visibilityCompared);
