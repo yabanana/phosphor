@@ -72,6 +72,13 @@ kernel void reflection_probe_only(constant GPUReflectionParams& p [[buffer(0)]],
         const float3 L=reflectionProbeRadiance(diVec(s.position),r,s.roughness,true,p,probes,atlas,path),f0=mix(float3(.04f),diVec(s.albedo),s.metallic);
         const float4 c0(-1,-.0275f,-.572f,.022f),c1(1,.0425f,1.04f,-.04f),fit=s.roughness*c0+c1;
         const float a004=min(fit.x*fit.x,exp2(-9.28f*max(0.0f,dot(n,v))))*fit.x+fit.y;const float2 ab=float2(-1.04f,1.04f)*a004+fit.zw;
-        result=L*(f0*ab.x+ab.y);sample.flags=SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_PREFILTERED;sample.path=path;for(uint i=0;i<3;++i){sample.direction[i]=r[i];sample.radiance[i]=result[i];}}
+        // The analytic fit can leave the physical [0,1] BRDF-integral domain
+        // (roughness=1 gives B=-.0024 for black metal). Bound ONLY the finite
+        // approximation weight, never radiance or invalid numerical input.
+        const float3 fitWeight=f0*ab.x+ab.y;const bool finiteFit=all(isfinite(fitWeight));
+        result=L*(finiteFit?clamp(fitWeight,0.0f,1.0f):fitWeight);
+        sample.flags=SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_PREFILTERED;
+        if(!finiteFit||!all(isfinite(L))||any(L<0)||!all(isfinite(result))||any(result<0))sample.flags|=SPECULAR_SAMPLE_ERROR;
+        sample.path=path;for(uint i=0;i<3;++i){sample.direction[i]=r[i];sample.radiance[i]=result[i];}}
     metadata[tid]=sample;const uint2 pixel(tid%p.width,tid/p.width);output.write(float4(result,1),pixel);distance.write(float4(0),pixel);
 }
