@@ -56,7 +56,7 @@ struct ReflectionPasses::Impl {
     std::array<MTL::GPUAddress,6> captureAddress{},rasterCaptureAddress{};std::array<MTL::GPUAddress,ProbeMips> filterAddress{},validateAddress{};MTL::GPUAddress rawValidateAddress=0;
     pipe::PipelineHandle reflectionSSR{},reflectionRT{},probeOnly{},captureRT{},captureRaster{},prefilter{},validateProbe{},publishProbe{};
     pipe::PipelineHandle rtao{},gtao{},reduce{},compose{},zero{},clear{},checker{};
-    pipe::PipelineHandle inputPoison{},inputCheck{};
+    pipe::PipelineHandle inputPoison{},inputCheck{},filteredIndirectExport{};
     std::unique_ptr<RtConsumer> reflectionConsumer,aoConsumer,captureConsumer;
     MTL::DepthStencilState* captureDepthState=nullptr;
     MTL::Texture *rawCube=nullptr,*filteredCube=nullptr,*rawArray=nullptr,*dummyTexture=nullptr;
@@ -70,11 +70,11 @@ struct ReflectionPasses::Impl {
         std::array<MTL4::ArgumentTable*,ProbeMips> filterTables{},validateTables{};
         std::vector<MTL4::ArgumentTable*> drawTables;
         MTL4::ArgumentTable *reduceTable=nullptr,*aoTable=nullptr,*composeTable=nullptr,*preComposeTable=nullptr,*zeroTable=nullptr,*clearTable=nullptr,*checkTable=nullptr,*publishTable=nullptr,*rawValidateTable=nullptr;
-        MTL4::ArgumentTable *inputPoisonTable=nullptr,*inputCheckTable=nullptr;
+        MTL4::ArgumentTable *inputPoisonTable=nullptr,*inputCheckTable=nullptr,*filteredIndirectTable=nullptr;
     };std::array<Slot,METAL_FRAMES_IN_FLIGHT> slots{};
     rg::BufferRef sampleRef{},metadata{},errorsRef{},probeRef{},probeFaultRef{},staticRef{},dummyRef{};
     rg::BufferRef receivers{};rg::TextureRef motion{};
-    rg::TextureRef residual{},base{},depth{},specular{},ao{},distance{},specSelected{},aoSelected{},directSelected{},giSelected{},output{},rawRef{},filteredRef{},dummyTexRef{};
+    rg::TextureRef residual{},base{},depth{},specular{},ao{},distance{},specSelected{},aoSelected{},directSelected{},giSelected{},filteredIndirect{},output{},rawRef{},filteredRef{},dummyTexRef{};
     std::array<rg::TextureRef,6> faceRef{};std::array<rg::TextureRef,ProbeMips> mipRef{};
     Impl(MetalContext& context,PipelineCache& pipelines,SceneRenderer& s,DirectLightingPasses& d,AccelerationStructures* a,GiPasses* g,const LaunchOptions& o)
         :c(context),p(pipelines),scene(s),direct(d),rt(a),gi(g),options(o),denoise(c,p,o){
@@ -88,6 +88,7 @@ struct ReflectionPasses::Impl {
         prefilter=p.request(lighting::kernel("reflection_probe_prefilter"));validateProbe=p.request(lighting::kernel("reflection_probe_validate"));publishProbe=p.request(lighting::kernel("reflection_probe_ready"));
         reduce=p.request(lighting::kernel("reflection_reduce"));compose=p.request(lighting::kernel("reflection_composite"));zero=p.request(lighting::kernel("reflection_signal_zero"));clear=p.request(lighting::kernel("reflection_counter_clear"));checker=p.request(lighting::kernel("reflection_check"));
         inputCheck=p.request(lighting::kernel("reflection_input_check"));if(o.debugReflectionCorrupt>=2)inputPoison=p.request(lighting::kernel("reflection_input_poison"));
+        if(o.captureLinearSignal==8)filteredIndirectExport=p.request(lighting::kernel("reflection_filtered_indirect_diffuse"));
         auto* dd=MTL::DepthStencilDescriptor::alloc()->init();dd->setDepthCompareFunction(MTL::CompareFunctionGreater);dd->setDepthWriteEnabled(true);captureDepthState=c.device()->newDepthStencilState(dd);dd->release();
         if(!captureDepthState)throw std::runtime_error("Probe depth state creation failed");
         dummyBuffer=lighting::buffer(c,256,"F13 safe disabled GI buffer",true);std::memset(dummyBuffer->contents(),0,256);
@@ -96,13 +97,14 @@ struct ReflectionPasses::Impl {
         probeFault=lighting::buffer(c,16,"F13 persistent probe validation epoch",true);std::memset(probeFault->contents(),0,16);
         for(auto& f:slots){for(auto*& t:f.sampleTables)t=lighting::table(c);for(auto*& t:f.captureTables)t=lighting::table(c);for(auto*& t:f.filterTables)t=lighting::table(c);for(auto*& t:f.validateTables)t=lighting::table(c);
             for(auto** t:{&f.reduceTable,&f.aoTable,&f.composeTable,&f.preComposeTable,&f.zeroTable,&f.clearTable,&f.checkTable,&f.publishTable,&f.rawValidateTable,&f.inputPoisonTable,&f.inputCheckTable})*t=lighting::table(c);
+            if(o.captureLinearSignal==8)f.filteredIndirectTable=lighting::table(c);
             f.errors=lighting::buffer(c,32,"F13 numerical state counters",true);std::memset(f.errors->contents(),0,32);}
         aoSettings.radius=o.aoRadius;aoSettings.rays=(o.reducedLighting||o.forceApple9)?2:4;
     }
     ~Impl(){c.waitIdle();releaseProbe();c.memory().release(probeMetadata,MemoryCategory::RayTracing);c.memory().release(probeFault,MemoryCategory::RayTracing);c.memory().release(staticSlots,MemoryCategory::RayTracing);c.memory().release(dummyBuffer,MemoryCategory::RayTracing);c.memory().release(dummyTexture,MemoryCategory::RayTracing);
         for(auto& f:slots){for(auto* b:{f.samples,f.metadata,f.errors,f.testSurfaces})c.memory().release(b,MemoryCategory::RayTracing);
             for(auto* t:f.sampleTables)t->release();for(auto* t:f.captureTables)t->release();for(auto* t:f.filterTables)t->release();for(auto* t:f.validateTables)t->release();for(auto* t:f.drawTables)t->release();
-            for(auto* t:{f.reduceTable,f.aoTable,f.composeTable,f.preComposeTable,f.zeroTable,f.clearTable,f.checkTable,f.publishTable,f.rawValidateTable,f.inputPoisonTable,f.inputCheckTable})if(t)t->release();}if(captureDepthState)captureDepthState->release();}
+            for(auto* t:{f.reduceTable,f.aoTable,f.composeTable,f.preComposeTable,f.zeroTable,f.clearTable,f.checkTable,f.publishTable,f.rawValidateTable,f.inputPoisonTable,f.inputCheckTable,f.filteredIndirectTable})if(t)t->release();}if(captureDepthState)captureDepthState->release();}
     void releaseProbe(){for(auto*& t:faceViews){c.memory().release(t,MemoryCategory::RayTracing);t=nullptr;}for(auto*& t:mipViews){c.memory().release(t,MemoryCategory::RayTracing);t=nullptr;}
         c.memory().release(rawArray,MemoryCategory::RayTracing);c.memory().release(rawCube,MemoryCategory::RayTracing);c.memory().release(filteredCube,MemoryCategory::RayTracing);rawArray=rawCube=filteredCube=nullptr;}
     MTL::Texture* cube(u32 mips,const char* label){auto* d=MTL::TextureDescriptor::alloc()->init();d->setTextureType(MTL::TextureTypeCubeArray);d->setPixelFormat(probeFormat);d->setWidth(ProbeSide);d->setHeight(ProbeSide);d->setDepth(1);d->setArrayLength(1);d->setMipmapLevelCount(mips);
@@ -277,7 +279,7 @@ struct ReflectionPasses::Impl {
         });
     }
     rg::TextureRef add(rg::RenderGraph& graph,rg::TextureRef baseHDR,rg::TextureRef sceneDepth){using namespace rg;
-        residual=baseHDR;depth=sceneDepth;receivers=direct.surfaceRef();motion=direct.motion();auto& slot=slots[frame.slot];
+        residual=baseHDR;depth=sceneDepth;receivers=direct.surfaceRef();motion=direct.motion();filteredIndirect={};auto& slot=slots[frame.slot];
         if(!residual.valid()||!depth.valid())throw std::invalid_argument("F13 needs resolved residual HDR and depth");
         const auto hdrDescriptor=graph.resources().at(residual.resource).texture;
         if(hdrDescriptor.format!=Format::RGBA16Float&&hdrDescriptor.format!=Format::RGBA32Float)throw std::invalid_argument("F13 base must be linear floating HDR");
@@ -343,6 +345,16 @@ struct ReflectionPasses::Impl {
             if(gi&&options.gi!=GiMode::Off)giSelected=denoise.addSignal(graph,DENOISE_SIGNAL_GI,gi->irradiance(),motion,receivers);
             if(options.reflections!=ReflectionMode::Off)specSelected=denoise.addSignal(graph,DENOISE_SIGNAL_SPECULAR,specular,motion,receivers,metadata);
             if(options.ao!=AoMode::Off)aoSelected=denoise.addSignal(graph,DENOISE_SIGNAL_AO,ao,motion,receivers);}
+        if(options.captureLinearSignal==8){
+            if(!custom||!gi||options.gi==GiMode::Off)throw std::logic_error("Filtered indirect capture requires GI and custom denoising");
+            graph.addPass("F13 actual filtered indirect diffuse Lo export",PassType::Compute,[this](PassBuilder& b){
+                b.read(giSelected,Usage::ShaderRead,StageDispatch);b.read(receivers,Usage::ShaderRead,StageDispatch);
+                filteredIndirect=b.createTexture("Actual filtered indirect diffuse reflected radiance",{Format::RGBA32Float,frame.width,frame.height});
+                filteredIndirect=b.write(filteredIndirect,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("reflection_filtered_indirect_diffuse");
+            },[this](PassContext& ctx){auto* t=slots[frame.slot].filteredIndirectTable;t->setAddress(composeAddress,0);
+                t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(receivers))->gpuAddress(),1);texture(t,ctx,giSelected,0);texture(t,ctx,filteredIndirect,1);
+                lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,filteredIndirectExport,t,frame.width*frame.height);});
+        }
         auto finalDescriptor=hdrDescriptor;finalDescriptor.format=Format::RGBA32Float;
         graph.addPass("F13 single-count positive lighting composite",PassType::Compute,[this,finalDescriptor](PassBuilder& b){b.read(residual,Usage::ShaderRead,StageDispatch);b.read(receivers,Usage::ShaderRead,StageDispatch);
             for(auto ref:{directSelected,giSelected,specSelected,aoSelected})b.read(ref,Usage::ShaderRead,StageDispatch);
@@ -372,6 +384,7 @@ bool ReflectionPasses::check(u32 slot)const{const auto& f=impl_->slots.at(slot);
 bool ReflectionPasses::ready()const{const auto& i=*impl_;const auto& o=i.options;
     if(!i.p.compute(i.compose)||!i.p.compute(i.zero)||!i.p.compute(i.clear)||!i.p.compute(i.prefilter)||!i.p.compute(i.validateProbe)||!i.p.compute(i.publishProbe))return false;
     if(!i.p.compute(i.inputCheck)||(o.debugReflectionCorrupt>=2&&!i.p.compute(i.inputPoison)))return false;
+    if(o.captureLinearSignal==8&&!i.p.compute(i.filteredIndirectExport))return false;
     if(o.reflections!=ReflectionMode::Off&&(!i.p.compute(i.reduce)||!i.p.compute(o.reflections==ReflectionMode::Probes?i.probeOnly:i.reflectionSSR)))return false;
     if(o.reflections==ReflectionMode::RT&&i.rt&&!i.p.compute(i.reflectionRT))return false;
     if(o.ao!=AoMode::Off&&!i.p.compute(i.gtao))return false;if(o.ao==AoMode::RTAO&&i.rt&&!i.p.compute(i.rtao))return false;
@@ -379,5 +392,6 @@ bool ReflectionPasses::ready()const{const auto& i=*impl_;const auto& o=i.options
     if(o.debugLighting&&!i.p.compute(i.checker))return false;return o.lightingDenoise==LightingDenoiseMode::Off||i.denoise.ready();}
 rg::TextureRef ReflectionPasses::hitDistance()const{return impl_->distance;}rg::TextureRef ReflectionPasses::rawSpecular()const{return impl_->specular;}rg::TextureRef ReflectionPasses::rawAO()const{return impl_->ao;}
 rg::TextureRef ReflectionPasses::filteredSpecular()const{return impl_->specSelected;}rg::TextureRef ReflectionPasses::filteredAO()const{return impl_->aoSelected;}rg::BufferRef ReflectionPasses::metadataRef()const{return impl_->metadata;}
+rg::TextureRef ReflectionPasses::filteredIndirectDiffuse()const{return impl_->filteredIndirect;}
 const char* ReflectionPasses::probeSource()const{return impl_->source.c_str();}
 } // namespace phosphor

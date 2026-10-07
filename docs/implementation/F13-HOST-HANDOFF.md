@@ -67,6 +67,19 @@ diffuse times AO (or1 when AO is off), using the current mapped normal/albedo/
 metallic/material occlusion. DI, GI,
 specular, emission and HDR total are not AO multiplied.
 
+Capture signal8 (`indirect-diffuse-filtered`) is a separate RGBA32 logical-extent
+graph export from the actual `giSelected` texture after custom GI denoising.
+`filteredIndirectDiffuse()` returns this Lo texture; root capture consumes it
+as an ordinary graph read. Its shader applies the current receiver factor
+`albedo*(1-metallic)/pi` exactly once, matching raw GI capture1, with no AO,
+exposure, combined lighting, or sanitization. Only capture8 requests/uses this
+PSO and its per-slot table. It requires active GI and custom denoising; the
+host rejects a disconnected configuration and root validates the CLI.
+Shader ABI: `reflection_filtered_indirect_diffuse`, ComposeParams buffer0,
+actual receiver surfaces buffer1, selected irradiance texture0, exported Lo
+texture1, one-dimensional logical pixel dispatch. SOURCE ONLY / NON VERIFIED;
+no build, MSL compilation, test, or render was executed for this export.
+
 ## Cached graph data and history identity
 
 DenoisePasses is reusable for4 signals. prepareFrame receives the exact live

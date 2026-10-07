@@ -11,9 +11,7 @@ class VolumeDiagnostics {
     struct Config {std::string path;u32 every=1;bool homogeneousFog=false;u32 corruption=0;};
     struct Sources {
         rg::TextureRef transmittance{},multiple{},sky{};
-        rg::BufferRef fogCells{},fogIntegrated{};
-        MTL::Buffer *fogCellsBuffer=nullptr,*fogIntegratedBuffer=nullptr;
-        MTL::Buffer* counters=nullptr;
+        rg::BufferRef fogCells{},fogIntegrated{},counters{};
     };
     VolumeDiagnostics(MetalContext&,PipelineCache&,Config);
     ~VolumeDiagnostics();

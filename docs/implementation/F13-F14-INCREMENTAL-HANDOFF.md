@@ -84,3 +84,17 @@ extracts and replicates R, without changing its producer format or denoise input
 During integration, preserve both scalar selectors: shadow mask3 OR AO7.
 The tester owns graph/parser selection for shadow3, world position4 and normal5;
 the writer's specular6/AO7 additions must not replace those routes.
+
+Tester-owned numerical follow-ups carried without writer execution:
+
+- `bf1c15a` -> writer `7bf5d52`: opaque aerial perspective excludes planetary
+  endpoint shading; sky retains its declared ground boundary.
+- `106e68b` -> `2f1787c`: sky azimuth wraps, physical LUT axes do not.
+- `2fac001` -> `9807ad9`: fog history preserves sampled source expectation.
+- `1b052e6` -> `5910351`: custom denoise raw-neighborhood clamp defaults off.
+  Its optional biased clamp remains explicitly experimental.
+
+The tester's positive-partition CPU assertion now accounts for four Float32
+unit roundoffs after rounded addition/subtraction. The image/numeric checkers
+and product tolerances are not relaxed. Preserve newer tester receiver/chainage
+fixes; no standalone writer branch claims the tester's runtime acceptance.

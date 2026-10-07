@@ -15,10 +15,10 @@
 namespace phosphor {
 namespace {
 MTL::Buffer* readbackBuffer(MetalContext& c,u64 size,const char* name){auto* p=c.memory().newBuffer(size,MTL::ResourceStorageModeShared,MemoryCategory::Other,name);if(!p)throw std::runtime_error("Volume diagnostic allocation failed");std::memset(p->contents(),0,size);return p;}
-std::string sourceHash(){u64 hash=1469598103934665603ull;
+std::string sourceHash(){u64 hash=14695981039346656037ull;
 #ifdef PHOSPHOR_SHADER_SOURCE_DIR
     const std::filesystem::path shaders(PHOSPHOR_SHADER_SOURCE_DIR),src=shaders.parent_path()/"src/renderer";
-    for(const auto& path:{shaders/"atmosphere.metal",shaders/"fog.metal",shaders/"clouds.metal",shaders/"atmosphere_common.h",shaders/"volume_diagnostics.metal",src/"gpu_types.h",src/"volume_noise.h",src/"volume_oracle.cpp"}){
+    for(const auto& path:{shaders/"atmosphere.metal",shaders/"fog.metal",shaders/"clouds.metal",shaders/"atmosphere_common.h",shaders/"volume_diagnostics.metal",src/"gpu_types.h",src/"volume_noise.h",src/"volume_math.h",src/"atmosphere.cpp",src/"fog_settings.cpp",src/"volume_oracle.cpp"}){
         std::ifstream in(path,std::ios::binary);if(!in)return "unavailable";char block[4096];while(in){in.read(block,sizeof(block));for(std::streamsize i=0;i<in.gcount();++i){hash^=u8(block[i]);hash*=1099511628211ull;}}}
 #else
     return "unavailable";
@@ -34,6 +34,7 @@ struct VolumeDiagnostics::Impl {
         std::array<MTL4::ArgumentTable*,3> stampTables{};std::array<MTL4::ArgumentTable*,2> foreignTables{};
         MTL4::ArgumentTable *fixtureTable=nullptr,*collectTable=nullptr,*solarTable=nullptr;
         MTL::GPUAddress atmosphereAddress=0,diagnosticAddress=0;
+        std::array<MTL::GPUAddress,3> stampAddress{};
         GPUAtmosphereParams submitted{};VolumeOracleInput expected;u64 frame=0;u32 view=0,generation=0;
         bool pending=false,armed=false;std::string sourceHash;
         nlohmann::json provenance;
@@ -62,28 +63,33 @@ struct VolumeDiagnostics::Impl {
         params.sampleCount=config.homogeneousFog?11u:8u;params.corruption=config.corruption;params.homogeneous=config.homogeneousFog;
         params.fixtureExtinction=0.01f;params.fixtureSource[0]=0.01f;params.fixtureSource[1]=0.02f;params.fixtureSource[2]=0.03f;
         if(config.homogeneousFog){const u32 xy=(fog.gridY/2)*fog.gridX+fog.gridX/2;params.fogIndices[0]=xy+fog.gridX*fog.gridY;params.fogIndices[1]=xy+(fog.gridZ/2)*fog.gridX*fog.gridY;params.fogIndices[2]=xy+(fog.gridZ-1)*fog.gridX*fog.gridY;}
-        s.expected.diagnostics=params;s.atmosphereAddress=lighting::upload(c,submitted);s.diagnosticAddress=lighting::upload(c,params);return capture;
+        s.expected.diagnostics=params;s.atmosphereAddress=lighting::upload(c,submitted);s.diagnosticAddress=lighting::upload(c,params);
+        for(u32 kind=0;kind<s.stampAddress.size();++kind){auto stampParams=params;stampParams.stampKind=kind;s.stampAddress[kind]=lighting::upload(c,stampParams);}return capture;
     }
     void begin(rg::RenderGraph& g){globalRef=g.importBuffer("Actual atmosphere produced epochs",{16},rg::ImportContentsDefined|rg::ImportOutput);
         skyRef=g.importBuffer("Actual sky produced epoch per view",{16},rg::ImportContentsDefined|rg::ImportOutput);samplesRef={};}
     void stampProducer(rg::RenderGraph& g,rg::TextureRef texture,u32 kind){using namespace rg;
-        auto diag=params;diag.stampKind=kind;const auto address=lighting::upload(c,diag);auto& ref=kind==2?skyRef:globalRef;
+        auto& ref=kind==2?skyRef:globalRef;
         g.addPass("Actual LUT producer revision "+std::to_string(kind),PassType::Compute,[&](PassBuilder& b){b.read(texture,Usage::ShaderRead,StageDispatch);ref=b.write(ref,Usage::ShaderWrite,StageDispatch);},
-            [this,kind,address](PassContext& ctx){auto& s=slots[slot];auto* t=s.stampTables[kind];t->setAddress(s.atmosphereAddress,0);t->setAddress(address,17);t->setAddress((kind==2?skyProduced[view]:globalProduced)->gpuAddress(),18);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,stamp,t,1);});}
+            [this,kind](PassContext& ctx){auto& s=slots[slot];auto* t=s.stampTables[kind];t->setAddress(s.atmosphereAddress,0);t->setAddress(s.stampAddress[kind],17);t->setAddress((kind==2?skyProduced[view]:globalProduced)->gpuAddress(),18);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,stamp,t,1);});}
     void homogeneous(rg::PassContext& ctx,MTL::Buffer* cells,MTL::GPUAddress fogAddress){auto& s=slots[slot];auto* t=s.fixtureTable;t->setAddress(fogAddress,0);t->setAddress(cells->gpuAddress(),1);t->setAddress(s.diagnosticAddress,17);
         auto* e=static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder());e->setComputePipelineState(p.compute(fixture));e->setArgumentTable(t);e->dispatchThreads(MTL::Size::Make(params.fogX,params.fogY,params.fogZ),MTL::Size::Make(4,4,4));}
     void foreign(rg::RenderGraph& g,rg::BufferRef& history,MTL::Buffer* buffer,u32 count,bool cloud){if(!capture||config.corruption!=VOLUME_CORRUPT_HISTORY)return;using namespace rg;
-        auto diag=params;if(cloud)diag.fogIndices[0]=count;const auto address=lighting::upload(c,diag);
+        (void)buffer;const BufferRef input=history;
         g.addPass(cloud?"Negative actual foreign cloud history":"Negative actual foreign fog history",PassType::Compute,[&](PassBuilder& b){b.read(history,Usage::ShaderRead,StageDispatch);history=b.write(history,Usage::ShaderWrite,StageDispatch);},
-            [this,address,buffer,count,cloud](PassContext& ctx){auto* t=slots[slot].foreignTables[cloud?1:0];t->setAddress(address,17);t->setAddress(buffer->gpuAddress(),18);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,cloud?foreignCloud:foreignFog,t,count);});}
-    void collect(rg::RenderGraph& g,const Sources& src){if(!capture)return;using namespace rg;slots[slot].counters=src.counters;
+            [this,input,count,cloud](PassContext& ctx){auto& s=slots[slot];auto diag=s.expected.diagnostics;if(cloud)diag.fogIndices[0]=count;
+                auto* t=s.foreignTables[cloud?1:0];t->setAddress(lighting::upload(c,diag),17);t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(input))->gpuAddress(),18);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,cloud?foreignCloud:foreignFog,t,count);});}
+    void collect(rg::RenderGraph& g,const Sources& src){if(!capture)return;using namespace rg;
         samplesRef=g.importBuffer("Immutable same-frame F14 oracle samples",{11*sizeof(GPUVolumeNumericSample)},ImportPerFrame|ImportOutput);
         g.addPass("Actual shared solar disk wide HDR probe",PassType::Compute,[&](PassBuilder& b){solarRef=b.createTexture("Solar toward-away-tangent RGBA32",{Format::RGBA32Float,3,1});solarRef=b.write(solarRef,Usage::ShaderWrite,StageDispatch);},
             [this](PassContext& ctx){auto& s=slots[slot];auto* t=s.solarTable;t->setAddress(s.atmosphereAddress,0);tex(t,ctx,solarRef,5);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,solar,t,3);});
         g.addPass("Same-frame independent volume oracle readback",PassType::Compute,[&](PassBuilder& b){for(auto r:{src.transmittance,src.multiple,src.sky,solarRef})b.read(r,Usage::ShaderRead,StageDispatch);b.read(globalRef,Usage::ShaderRead,StageDispatch);b.read(skyRef,Usage::ShaderRead,StageDispatch);
+            b.read(src.counters,Usage::ShaderRead,StageDispatch);
             if(config.homogeneousFog){b.read(src.fogCells,Usage::ShaderRead,StageDispatch);b.read(src.fogIntegrated,Usage::ShaderRead,StageDispatch);}samplesRef=b.write(samplesRef,Usage::ShaderWrite,StageDispatch);},
-            [this,src](PassContext& ctx){auto& s=slots[slot];auto* t=s.collectTable;t->setAddress(s.diagnosticAddress,17);t->setAddress(globalProduced->gpuAddress(),18);t->setAddress(skyProduced[view]->gpuAddress(),19);t->setAddress(s.samples->gpuAddress(),20);
-                t->setAddress(src.fogIntegratedBuffer?src.fogIntegratedBuffer->gpuAddress():s.samples->gpuAddress(),21);t->setAddress(src.fogCellsBuffer?src.fogCellsBuffer->gpuAddress():s.samples->gpuAddress(),22);
+            [this,src](PassContext& ctx){auto& s=slots[slot];auto* t=s.collectTable;t->setAddress(s.atmosphereAddress,0);t->setAddress(s.diagnosticAddress,17);t->setAddress(globalProduced->gpuAddress(),18);t->setAddress(skyProduced[view]->gpuAddress(),19);t->setAddress(s.samples->gpuAddress(),20);
+                s.counters=static_cast<MTL::Buffer*>(ctx.buffer(src.counters));
+                t->setAddress(config.homogeneousFog?static_cast<MTL::Buffer*>(ctx.buffer(src.fogIntegrated))->gpuAddress():s.samples->gpuAddress(),21);
+                t->setAddress(config.homogeneousFog?static_cast<MTL::Buffer*>(ctx.buffer(src.fogCells))->gpuAddress():s.samples->gpuAddress(),22);
                 tex(t,ctx,src.transmittance,0);tex(t,ctx,src.multiple,1);tex(t,ctx,src.sky,2);tex(t,ctx,solarRef,3);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,collector,t,params.sampleCount);s.pending=true;});}
     bool consume(u32 index){auto& s=slots.at(index);if(!s.pending)return true;if(c.frameEvent()->signaledValue()<=s.frame)throw std::logic_error("Volume oracle read before GPU completion");
         const auto* data=static_cast<const GPUVolumeNumericSample*>(s.samples->contents());const auto cases=evaluateVolumeOracle(s.expected,{data,s.expected.diagnostics.sampleCount});
@@ -96,9 +102,16 @@ struct VolumeDiagnostics::Impl {
         output["reference"]="adaptive-Simpson transport; independent Gauss-Legendre angular closure and CPU LUT-node memoization; homogeneous analytic exp; shared solar producer with independent CPU radiance/orientation";
         output["settings"]={{"homogeneous_fog",config.homogeneousFog},{"fixture_extinction_m_inv",s.expected.diagnostics.fixtureExtinction},{"fixture_source",{s.expected.diagnostics.fixtureSource[0],s.expected.diagnostics.fixtureSource[1],s.expected.diagnostics.fixtureSource[2]}},
             {"expected_physics_revision",s.expected.atmosphere.parameterRevision},{"expected_sky_revision",s.expected.atmosphere.skyRevision},{"planet_radius_m",s.expected.atmosphere.bottomRadius},{"march_steps",s.submitted.marchSteps},
+            {"solar_storage","RGBA32Float"},{"solar_probe_order",{"toward_submitted_sun","away_from_submitted_sun","tangent_to_submitted_sun"}},
+            {"solar_angular_radius_rad",s.expected.atmosphere.sunAngularRadius},{"expected_sun_direction",{s.expected.atmosphere.sunDirection[0],s.expected.atmosphere.sunDirection[1],s.expected.atmosphere.sunDirection[2]}},
+            {"submitted_sun_direction",{s.submitted.sunDirection[0],s.submitted.sunDirection[1],s.submitted.sunDirection[2]}},
             {"expected_sun_irradiance",{s.expected.atmosphere.sunIrradiance[0],s.expected.atmosphere.sunIrradiance[1],s.expected.atmosphere.sunIrradiance[2]}},{"submitted_sun_irradiance",{s.submitted.sunIrradiance[0],s.submitted.sunIrradiance[1],s.submitted.sunIrradiance[2]}}};
-        bool passed=true;output["cases"]=nlohmann::json::array();for(const auto& item:cases){passed&=item.passed;output["cases"].push_back({{"kind",item.kind},{"pixel",{item.x,item.y}},{"expected",item.expected},{"actual",item.actual},{"expected_epoch",item.expectedEpoch},{"actual_epoch",item.actualEpoch},
+        bool passed=true;double maxAbsolute=0,maxRelative=0;u32 epochMismatches=0,numericFailures=0;
+        output["cases"]=nlohmann::json::array();for(const auto& item:cases){passed&=item.passed;maxAbsolute=std::max(maxAbsolute,item.absoluteError);maxRelative=std::max(maxRelative,item.relativeError);
+            epochMismatches+=item.actualEpoch!=item.expectedEpoch;numericFailures+=!item.passed;
+            output["cases"].push_back({{"kind",item.kind},{"pixel",{item.x,item.y}},{"index",item.index},{"expected",item.expected},{"actual",item.actual},{"expected_epoch",item.expectedEpoch},{"actual_epoch",item.actualEpoch},
             {"absolute_error",item.absoluteError},{"relative_error",item.relativeError},{"tolerance",{{"absolute",item.absoluteTolerance},{"relative",item.relativeTolerance}}},{"passed",item.passed}});}
+        output["max_absolute_error"]=maxAbsolute;output["max_relative_error"]=maxRelative;output["epoch_mismatch_count"]=epochMismatches;output["numeric_failure_count"]=numericFailures;
         if(s.counters){const auto& counters=*static_cast<const GPUVolumeCounters*>(s.counters->contents());output["gpu_counters"]={{"nonfinite",counters.nonfinite},{"invalid_units",counters.invalidUnits},{"invalid_history",counters.invalidHistory},{"history_reused",counters.historyReused}};passed&=!counters.nonfinite&&!counters.invalidUnits&&!counters.invalidHistory;}
         output["passed"]=passed;output["certification"]=false;
         if(!config.path.empty()){std::error_code ec;std::filesystem::create_directories(config.path,ec);std::ostringstream filename;filename<<"frame-"<<std::setfill('0')<<std::setw(6)<<s.frame<<"-view-"<<s.view<<".json";const auto path=std::filesystem::path(config.path)/filename.str();

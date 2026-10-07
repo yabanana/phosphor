@@ -325,8 +325,8 @@ struct AtmospherePasses::Impl {
         // fog is then composed front-to-back over cloud+scene radiance.
         if(options.clouds)addClouds(graph);
         if(options.fog)addFog(graph);
-        if(diagnostics){VolumeDiagnostics::Sources input;input.transmittance=transRef;input.multiple=multiRef;input.sky=skyRef;input.counters=slots[frame.slot].counter;
-            if(options.fog){input.fogCells=fogFilteredRef;input.fogIntegrated=fogIntegratedRef;input.fogCellsBuffer=slots[frame.slot].fogFiltered;input.fogIntegratedBuffer=slots[frame.slot].fogIntegrated;}
+        if(diagnostics){VolumeDiagnostics::Sources input;input.transmittance=transRef;input.multiple=multiRef;input.sky=skyRef;input.counters=counterRef;
+            if(options.fog){input.fogCells=fogFilteredRef;input.fogIntegrated=fogIntegratedRef;}
             diagnostics->collect(graph,input);}
         return outputRef;
     }

@@ -23,6 +23,8 @@ public:
     [[nodiscard]] rg::TextureRef rawAO() const;
     [[nodiscard]] rg::TextureRef filteredSpecular() const;
     [[nodiscard]] rg::TextureRef filteredAO() const;
+    // Capture8: actual selected GI E converted once at the current receiver.
+    [[nodiscard]] rg::TextureRef filteredIndirectDiffuse() const;
     [[nodiscard]] rg::BufferRef metadataRef() const;
     [[nodiscard]] const char* probeSource() const;
 private:

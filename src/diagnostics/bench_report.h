@@ -244,6 +244,7 @@ struct BenchReport {
     RenderingReport rendering;   // F7/F8 (schema 7), actual paths and last-frame content extent
     RtReport rt;                 // F9 (schema 9)
     LightingReport lighting;     // F10-F12 (schema 10)
+    std::string denoisedFixtureJson; // actual native fixture evidence, never phase acceptance
 };
 
 /// Nearest-rank statistics of `values` (empty input gives all zeros).

@@ -104,6 +104,16 @@ kernel void reflection_composite(constant GPUReflectionComposeParams& p [[buffer
     if(!all(isfinite(color))||any(color<-.00001f)||(p.pad[0]&&any(color>65504.0f))){atomic_fetch_add_explicit(counts+4,1u,memory_order_relaxed);color=0;}
     output.write(float4(max(color,0.0f),1),pixel);
 }
+// Capture8 exports the actual GI denoiser result E as reflected diffuse Lo.
+// Current receiver material is applied once, matching gi_reference_diffuse;
+// no AO, exposure, other signal, or numerical sanitization alters this export.
+kernel void reflection_filtered_indirect_diffuse(constant GPUReflectionComposeParams& p [[buffer(0)]],
+    const device GPUDISurface* surfaces [[buffer(1)]],texture2d<float,access::read> irradiance [[texture(0)]],
+    texture2d<float,access::write> output [[texture(1)]],uint tid [[thread_position_in_grid]]){
+    if(tid>=p.width*p.height)return;const uint2 pixel(tid%p.width,tid/p.width);const GPUDISurface s=surfaces[tid];
+    const float3 Lo=s.valid?irradiance.read(pixel).rgb*diVec(s.albedo)*(1-s.metallic)/M_PI_F:float3(0);
+    output.write(float4(Lo,1),pixel);
+}
 kernel void reflection_check(constant GPUReflectionComposeParams& p [[buffer(0)]],const device GPUSpecularSample* metadata [[buffer(1)]],
     device atomic_uint* counts [[buffer(2)]],texture2d<float,access::read> output [[texture(0)]],texture2d<float,access::read> specular [[texture(1)]],
     texture2d<float,access::read> ao [[texture(2)]],texture2d<float,access::read> distance [[texture(3)]],uint tid [[thread_position_in_grid]],uint lane [[thread_index_in_simdgroup]]){
