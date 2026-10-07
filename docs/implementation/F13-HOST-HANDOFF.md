@@ -22,8 +22,8 @@ No phase checkbox/acceptance, push, PR or merge is delivered. Stop at F13 host.
 
 The root owns Engine, Visibility, MaterialShading, CMake, CLI, Post, MetalFX
 adapter and atmosphere. New files do not modify them. The root's later
-material-occlusion guide write, old-specular-omit flag8 and physical-GI flag16
-are prerequisites for exact composition; material occlusion is read directly
+material-occlusion guide write, old-specular-omit flag8, physical-GI flag16 and
+RESOLVE_EXTERNAL_DIFFUSE flag32 are prerequisites for exact composition; material occlusion is read directly
 from GPUDISurface.pad[0], including a legitimate zero value.
 
 ## Public API and caller order
@@ -46,19 +46,25 @@ imports for this frame slot/view. check(slot) is read only after that slot's
 GPU completion, before preparing it again. Numerical error words are kept
 even when debugLighting is off; the root must read check for those failures.
 
-The base HDR has no old hemisphere SPECULAR when F13 specular is on. It is
-the stable pre-reflection SSR source. The final output preserves base HDR
-format/backing dimensions so standard Post/MetalFX format contracts do not
-silently change. Logical pixels get lighting correction; backing padding is
-copied from the defined base image. Half output overflow is recorded BEFORE
-conversion to the RGBA16 target.
+The primary residual HDR excludes external DI/GI and hemisphere diffuse under
+flag32, retaining sun/emission/legacy direct and old hemisphere SPECULAR only
+when F13 reflections are off. Residual storage may initially remain RGBA16;
+the host adds no quantized-signal subtraction. A separate RAW positive assembly
+pass adds raw DI and raw GI E (or ambient without AO) into RGBA32 before SSR.
+SSR reads that complete pre-reflection Lo, never a stripped residual or final
+reflection image. Final output and pre-reflection source are always RGBA32 with
+the residual backing extent; the root selects physical Float32 Post storage
+so this sum is not immediately copied back to half before exposure. Padding
+is copied from the defined residual. The half-range predicate remains conditional
+on actual half output and is inactive for these Float32 outputs.
 
-Custom composition is:
-`base + (DI_filtered-DI_raw) + (GI_filteredE-GI_rawE)*albedo*(1-metal)/pi + SPEC_selected`.
+Positive final composition is:
+`residual + DI_selected + GI_selectedE*albedo*(1-metal)/pi + SPEC_selected`.
 Internal custom GI denoises IRRADIANCE E, not albedo-baked Lo; the material is
-applied once at the current receiver. In raw/MetalFX-combined mode differences
-are omitted. AO subtracts only residual legacy ambient diffuse when GI is OFF,
-using the current mapped normal/albedo/metallic/material occlusion. DI, GI,
+applied once at the current receiver. Raw/MetalFX mode selects raw DI/E/specular;
+custom mode selects filtered DI/E/specular. When GI is OFF, add guide ambient
+diffuse times AO (or1 when AO is off), using the current mapped normal/albedo/
+metallic/material occlusion. DI, GI,
 specular, emission and HDR total are not AO multiplied.
 
 ## Cached graph data and history identity

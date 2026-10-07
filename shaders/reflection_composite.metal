@@ -72,21 +72,23 @@ kernel void reflection_input_check(constant GPUReflectionComposeParams& p [[buff
     const float2 velocity=motion.read(uint2(tid%p.width,tid/p.width)).xy;const bool bad=s.valid&&(!all(isfinite(geometric))||!all(isfinite(normal))||dot(geometric,geometric)<=0||dot(normal,normal)<=0||!all(isfinite(velocity)));
     const uint failures=simd_sum(bad?1u:0u);if(lane==0&&failures)atomic_fetch_add_explicit(counts+5,failures,memory_order_relaxed);
 }
-// base0,DIraw1,DIselected2,GIrawE3,GIselectedE4,specular5,AO6,output7;
-// composeParams0,surfaces1,atomicErrorCounts2. DI/E differences are applied only
-// in custom mode. AO adjusts ONLY residual ambient diffuse when GI is OFF.
+// residual0,DIselected2,GIselectedE4,specular5,AO6,output7.
+// Root RESOLVE_EXTERNAL_DIFFUSE bit32 strips external DI/GI/hemisphere diffuse
+// from the primary residual. Assemble positive terms ONCE, never subtract an
+// FP32 signal from a quantized residual. Pre-reflection raw assembly uses this
+// same kernel with DI/GI only flags, SPEC/AO off and unfiltered inputs.
 kernel void reflection_composite(constant GPUReflectionComposeParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
-    device atomic_uint* counts [[buffer(2)]],texture2d<float,access::read> base [[texture(0)]],texture2d<float,access::read> diRaw [[texture(1)]],
-    texture2d<float,access::read> diSelected [[texture(2)]],texture2d<float,access::read> giRaw [[texture(3)]],texture2d<float,access::read> giSelected [[texture(4)]],
+    device atomic_uint* counts [[buffer(2)]],texture2d<float,access::read> base [[texture(0)]],
+    texture2d<float,access::read> diSelected [[texture(2)]],texture2d<float,access::read> giSelected [[texture(4)]],
     texture2d<float,access::read> specular [[texture(5)]],texture2d<float,access::read> ao [[texture(6)]],texture2d<float,access::write> output [[texture(7)]],uint tid [[thread_position_in_grid]]){
     if(tid>=p.backingWidth*p.backingHeight)return;const uint2 pixel(tid%p.backingWidth,tid/p.backingWidth);float3 color=base.read(pixel).rgb;
     if(all(pixel<uint2(p.width,p.height))){const GPUDISurface s=surfaces[pixel.y*p.width+pixel.x];
-        if(s.valid){if((p.flags&REFLECT_COMPOSE_CUSTOM)&&(p.flags&REFLECT_COMPOSE_DI))color+=diSelected.read(pixel).rgb-diRaw.read(pixel).rgb;
-            if((p.flags&REFLECT_COMPOSE_CUSTOM)&&(p.flags&REFLECT_COMPOSE_GI))color+=(giSelected.read(pixel).rgb-giRaw.read(pixel).rgb)*diVec(s.albedo)*(1-s.metallic)/M_PI_F;
+        if(s.valid){if(p.flags&REFLECT_COMPOSE_DI)color+=diSelected.read(pixel).rgb;
+            if(p.flags&REFLECT_COMPOSE_GI)color+=giSelected.read(pixel).rgb*diVec(s.albedo)*(1-s.metallic)/M_PI_F;
             if(p.flags&REFLECT_COMPOSE_SPEC)color+=specular.read(pixel).rgb;
-            if((p.flags&REFLECT_COMPOSE_AO)&&!(p.flags&REFLECT_COMPOSE_GI)){const float3 n=normalize(diVec(s.shadingNormal));
+            if(!(p.flags&REFLECT_COMPOSE_GI)){const float3 n=normalize(diVec(s.shadingNormal));
                 const float3 sky(.30f,.36f,.45f),ground(.10f,.09f,.08f);const float3 ambient=mix(ground,sky,n.y*.5f+.5f)*diVec(s.albedo)*(1-s.metallic)*as_type<float>(s.pad[0]);
-                color-=ambient*(1-saturate(ao.read(pixel).x));}}
+                color+=ambient*((p.flags&REFLECT_COMPOSE_AO)?saturate(ao.read(pixel).x):1.0f);}}
     }
     if(!all(isfinite(color))||any(color<-.00001f)||(p.pad[0]&&any(color>65504.0f))){atomic_fetch_add_explicit(counts+4,1u,memory_order_relaxed);color=0;}
     output.write(float4(max(color,0.0f),1),pixel);

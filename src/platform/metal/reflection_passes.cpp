@@ -42,15 +42,15 @@ std::vector<float> probePFM(const std::filesystem::path& path){std::ifstream in(
 struct ReflectionPasses::Impl {
     MetalContext& c;PipelineCache& p;SceneRenderer& scene;DirectLightingPasses& direct;AccelerationStructures* rt;GiPasses* gi;
     LaunchOptions options;DenoisePasses denoise;ShadowPasses::Frame frame{};u64 graphVersion=1,pixels=0,sceneEpoch=0;u32 probeGeneration=1,lastPipelineGeneration=~0u;
-    bool custom=false,probeDirty=true,probeNeedsCapture=false,rtReflection=false,rtAO=false,rtCapture=false,outputHalf=true;u64 staticStructure=0,lastSignalEpoch=~u64{0};
+    bool custom=false,probeDirty=true,probeNeedsCapture=false,rtReflection=false,rtAO=false,rtCapture=false,outputHalf=false;u64 staticStructure=0,lastSignalEpoch=~u64{0};
     std::string source="analytic-environment";
     u64 geometryEpoch=0,instanceRevision=0,nodeRevision=0,materialRevision=0,motionRevision=0;
     struct GeometryContent {u64 scene,structure,rtGeometry,instances,nodes,materials,motion,pipeline;bool operator==(const GeometryContent&)const=default;};
     GeometryContent lastGeometry{};bool geometryKnown=false;
     std::pair<u64,u64> publishedComponents{};u64 publishedVersion=1;
     ReflectionSettings settings;AOSettings aoSettings;GPUReflectionProbe probe{};GPUReflectionParams params{};GPUAOParams aoParams{};
-    GPUReflectionReduceParams reduceParams{};GPUReflectionComposeParams composeParams{};
-    MTL::GPUAddress paramsAddress=0,aoAddress=0,reduceAddress=0,composeAddress=0,probeAddress=0,giDummyAddress=0,extraDummyAddress=0;
+    GPUReflectionReduceParams reduceParams{};GPUReflectionComposeParams composeParams{},preComposeParams{};
+    MTL::GPUAddress paramsAddress=0,aoAddress=0,reduceAddress=0,composeAddress=0,preComposeAddress=0,probeAddress=0,giDummyAddress=0,extraDummyAddress=0;
     std::array<MTL::GPUAddress,6> captureAddress{},rasterCaptureAddress{};std::array<MTL::GPUAddress,ProbeMips> filterAddress{},validateAddress{};MTL::GPUAddress rawValidateAddress=0;
     pipe::PipelineHandle reflectionSSR{},reflectionRT{},probeOnly{},captureRT{},captureRaster{},prefilter{},validateProbe{},publishProbe{};
     pipe::PipelineHandle rtao{},gtao{},reduce{},compose{},zero{},clear{},checker{};
@@ -67,12 +67,12 @@ struct ReflectionPasses::Impl {
         std::array<MTL4::ArgumentTable*,8> sampleTables{};std::array<MTL4::ArgumentTable*,6> captureTables{};
         std::array<MTL4::ArgumentTable*,ProbeMips> filterTables{},validateTables{};
         std::vector<MTL4::ArgumentTable*> drawTables;
-        MTL4::ArgumentTable *reduceTable=nullptr,*aoTable=nullptr,*composeTable=nullptr,*zeroTable=nullptr,*clearTable=nullptr,*checkTable=nullptr,*publishTable=nullptr,*rawValidateTable=nullptr;
+        MTL4::ArgumentTable *reduceTable=nullptr,*aoTable=nullptr,*composeTable=nullptr,*preComposeTable=nullptr,*zeroTable=nullptr,*clearTable=nullptr,*checkTable=nullptr,*publishTable=nullptr,*rawValidateTable=nullptr;
         MTL4::ArgumentTable *inputPoisonTable=nullptr,*inputCheckTable=nullptr;
     };std::array<Slot,METAL_FRAMES_IN_FLIGHT> slots{};
     rg::BufferRef sampleRef{},metadata{},errorsRef{},probeRef{},probeFaultRef{},staticRef{},dummyRef{};
     rg::BufferRef receivers{};rg::TextureRef motion{};
-    rg::TextureRef base{},depth{},specular{},ao{},distance{},specSelected{},aoSelected{},directSelected{},giSelected{},output{},rawRef{},filteredRef{},dummyTexRef{};
+    rg::TextureRef residual{},base{},depth{},specular{},ao{},distance{},specSelected{},aoSelected{},directSelected{},giSelected{},output{},rawRef{},filteredRef{},dummyTexRef{};
     std::array<rg::TextureRef,6> faceRef{};std::array<rg::TextureRef,ProbeMips> mipRef{};
     Impl(MetalContext& context,PipelineCache& pipelines,SceneRenderer& s,DirectLightingPasses& d,AccelerationStructures* a,GiPasses* g,const LaunchOptions& o)
         :c(context),p(pipelines),scene(s),direct(d),rt(a),gi(g),options(o),denoise(c,p,o){
@@ -93,14 +93,14 @@ struct ReflectionPasses::Impl {
         probeMetadata=lighting::buffer(c,sizeof(GPUReflectionProbe),"F13 GPU-published probe metadata");
         probeFault=lighting::buffer(c,16,"F13 persistent probe validation epoch",true);std::memset(probeFault->contents(),0,16);
         for(auto& f:slots){for(auto*& t:f.sampleTables)t=lighting::table(c);for(auto*& t:f.captureTables)t=lighting::table(c);for(auto*& t:f.filterTables)t=lighting::table(c);for(auto*& t:f.validateTables)t=lighting::table(c);
-            for(auto** t:{&f.reduceTable,&f.aoTable,&f.composeTable,&f.zeroTable,&f.clearTable,&f.checkTable,&f.publishTable,&f.rawValidateTable,&f.inputPoisonTable,&f.inputCheckTable})*t=lighting::table(c);
+            for(auto** t:{&f.reduceTable,&f.aoTable,&f.composeTable,&f.preComposeTable,&f.zeroTable,&f.clearTable,&f.checkTable,&f.publishTable,&f.rawValidateTable,&f.inputPoisonTable,&f.inputCheckTable})*t=lighting::table(c);
             f.errors=lighting::buffer(c,32,"F13 numerical state counters",true);std::memset(f.errors->contents(),0,32);}
         aoSettings.radius=o.aoRadius;aoSettings.rays=(o.reducedLighting||o.forceApple9)?2:4;
     }
     ~Impl(){c.waitIdle();releaseProbe();c.memory().release(probeMetadata,MemoryCategory::RayTracing);c.memory().release(probeFault,MemoryCategory::RayTracing);c.memory().release(staticSlots,MemoryCategory::RayTracing);c.memory().release(dummyBuffer,MemoryCategory::RayTracing);c.memory().release(dummyTexture,MemoryCategory::RayTracing);
         for(auto& f:slots){for(auto* b:{f.samples,f.metadata,f.errors,f.testSurfaces})c.memory().release(b,MemoryCategory::RayTracing);
             for(auto* t:f.sampleTables)t->release();for(auto* t:f.captureTables)t->release();for(auto* t:f.filterTables)t->release();for(auto* t:f.validateTables)t->release();for(auto* t:f.drawTables)t->release();
-            for(auto* t:{f.reduceTable,f.aoTable,f.composeTable,f.zeroTable,f.clearTable,f.checkTable,f.publishTable,f.rawValidateTable,f.inputPoisonTable,f.inputCheckTable})if(t)t->release();}if(captureDepthState)captureDepthState->release();}
+            for(auto* t:{f.reduceTable,f.aoTable,f.composeTable,f.preComposeTable,f.zeroTable,f.clearTable,f.checkTable,f.publishTable,f.rawValidateTable,f.inputPoisonTable,f.inputCheckTable})if(t)t->release();}if(captureDepthState)captureDepthState->release();}
     void releaseProbe(){for(auto*& t:faceViews){c.memory().release(t,MemoryCategory::RayTracing);t=nullptr;}for(auto*& t:mipViews){c.memory().release(t,MemoryCategory::RayTracing);t=nullptr;}
         c.memory().release(rawArray,MemoryCategory::RayTracing);c.memory().release(rawCube,MemoryCategory::RayTracing);c.memory().release(filteredCube,MemoryCategory::RayTracing);rawArray=rawCube=filteredCube=nullptr;}
     MTL::Texture* cube(u32 mips,const char* label){auto* d=MTL::TextureDescriptor::alloc()->init();d->setTextureType(MTL::TextureTypeCubeArray);d->setPixelFormat(probeFormat);d->setWidth(ProbeSide);d->setHeight(ProbeSide);d->setDepth(1);d->setArrayLength(1);d->setMipmapLevelCount(mips);
@@ -174,7 +174,8 @@ struct ReflectionPasses::Impl {
         composeParams={f.width,f.height,f.backingWidth,f.backingHeight,0,{0,options.debugReflectionCorrupt,0}};
         if(gi&&options.gi!=GiMode::Off)composeParams.flags|=REFLECT_COMPOSE_GI;if(custom)composeParams.flags|=REFLECT_COMPOSE_CUSTOM;
         if(options.directLighting!=DirectLightingMode::Legacy)composeParams.flags|=REFLECT_COMPOSE_DI;
-        if(options.reflections!=ReflectionMode::Off)composeParams.flags|=REFLECT_COMPOSE_SPEC;if(options.ao!=AoMode::Off)composeParams.flags|=REFLECT_COMPOSE_AO;composeParams.pad[0]=outputHalf?1u:0u;composeAddress=lighting::upload(c,composeParams);
+        if(options.reflections!=ReflectionMode::Off)composeParams.flags|=REFLECT_COMPOSE_SPEC;if(options.ao!=AoMode::Off)composeParams.flags|=REFLECT_COMPOSE_AO;composeParams.pad[0]=0;composeAddress=lighting::upload(c,composeParams);
+        preComposeParams=composeParams;preComposeParams.flags&=REFLECT_COMPOSE_DI|REFLECT_COMPOSE_GI;preComposeAddress=lighting::upload(c,preComposeParams);
         GPUProbeGridParams dummy{};dummy.reset=1;giDummyAddress=lighting::upload(c,dummy);GPUProbeTraceExtra extra{};extra.sampledLightCount=direct.lightCount();extra.frameSeed=options.lightingSeed;extra.sunAngularRadius=.00465f;extraDummyAddress=lighting::upload(c,extra);
         for(u32 face=0;face<6;++face){const auto vp=reflectionProbeViewProjection(probe,face,.05f,settings.maxDistance),inv=glm::inverse(vp);auto capture=params;
             std::memcpy(capture.viewProjection,glm::value_ptr(vp),64);std::memcpy(capture.inverseViewProjection,glm::value_ptr(inv),64);for(u32 k=0;k<3;++k)capture.cameraPosition[k]=probe.capturePosition[k];capture.width=capture.height=ProbeSide;captureAddress[face]=lighting::upload(c,capture);
@@ -245,11 +246,12 @@ struct ReflectionPasses::Impl {
         });
     }
     rg::TextureRef add(rg::RenderGraph& graph,rg::TextureRef baseHDR,rg::TextureRef sceneDepth){using namespace rg;
-        base=baseHDR;depth=sceneDepth;receivers=direct.surfaceRef();motion=direct.motion();auto& slot=slots[frame.slot];
-        if(!base.valid()||!depth.valid())throw std::invalid_argument("F13 needs resolved base HDR and depth");
-        const auto hdrDescriptor=graph.resources().at(base.resource).texture;
+        residual=baseHDR;depth=sceneDepth;receivers=direct.surfaceRef();motion=direct.motion();auto& slot=slots[frame.slot];
+        if(!residual.valid()||!depth.valid())throw std::invalid_argument("F13 needs resolved residual HDR and depth");
+        const auto hdrDescriptor=graph.resources().at(residual.resource).texture;
         if(hdrDescriptor.format!=Format::RGBA16Float&&hdrDescriptor.format!=Format::RGBA32Float)throw std::invalid_argument("F13 base must be linear floating HDR");
-        outputHalf=hdrDescriptor.format==Format::RGBA16Float;composeParams.pad[0]=outputHalf?1u:0u;composeAddress=lighting::upload(c,composeParams);
+        outputHalf=false;composeParams.pad[0]=0;composeAddress=lighting::upload(c,composeParams);
+        preComposeParams=composeParams;preComposeParams.flags&=REFLECT_COMPOSE_DI|REFLECT_COMPOSE_GI;preComposeAddress=lighting::upload(c,preComposeParams);
         errorsRef=graph.importBuffer("F13 completed signal error words",{32},ImportPerFrame|ImportOutput);
         dummyRef=graph.importBuffer("F13 disabled GI safe buffer",{dummyBuffer->length()},ImportContentsDefined);
         dummyTexRef=graph.importTexture("F13 disabled GI zero texture",{Format::RGBA32Float,1,1},ImportContentsDefined);
@@ -267,6 +269,14 @@ struct ReflectionPasses::Impl {
                 t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(receivers))->gpuAddress(),1);t->setAddress(slots[frame.slot].errors->gpuAddress(),2);texture(t,ctx,motion,0);
                 lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,inputCheck,t,frame.width*frame.height);});
         addProbe(graph);
+        const auto rawSourceDescriptor=hdrDescriptor;
+        graph.addPass("F13 positive RAW pre-reflection lighting",PassType::Compute,[this,rawSourceDescriptor](PassBuilder& b){b.read(residual,Usage::ShaderRead,StageDispatch);b.read(receivers,Usage::ShaderRead,StageDispatch);
+            b.read(direct.direct(),Usage::ShaderRead,StageDispatch);b.read(gi&&options.gi!=GiMode::Off?gi->irradiance():dummyTexRef,Usage::ShaderRead,StageDispatch);b.read(dummyTexRef,Usage::ShaderRead,StageDispatch);
+            b.read(errorsRef,Usage::ShaderRead,StageDispatch);errorsRef=b.write(errorsRef,Usage::ShaderWrite,StageDispatch);auto descriptor=rawSourceDescriptor;descriptor.format=Format::RGBA32Float;
+            base=b.createTexture("F13 complete raw SSR source Lo",descriptor);base=b.write(base,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("reflection_composite");
+        },[this](PassContext& ctx){auto* t=slots[frame.slot].preComposeTable;t->setAddress(preComposeAddress,0);t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(receivers))->gpuAddress(),1);t->setAddress(slots[frame.slot].errors->gpuAddress(),2);
+            texture(t,ctx,residual,0);texture(t,ctx,direct.direct(),2);texture(t,ctx,gi&&options.gi!=GiMode::Off?gi->irradiance():dummyTexRef,4);texture(t,ctx,dummyTexRef,5);texture(t,ctx,dummyTexRef,6);texture(t,ctx,base,7);
+            lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,compose,t,frame.backingWidth*frame.backingHeight);});
         graph.addPass("F13 inactive signals clear",PassType::Compute,[this](PassBuilder& b){
             metadata=b.write(metadata,Usage::ShaderWrite,StageDispatch);
             specular=b.createTexture("F13 raw specular Lo",{Format::RGBA32Float,frame.width,frame.height});specular=b.write(specular,Usage::ShaderWrite,StageDispatch);
@@ -302,12 +312,12 @@ struct ReflectionPasses::Impl {
             if(gi&&options.gi!=GiMode::Off)giSelected=denoise.addSignal(graph,DENOISE_SIGNAL_GI,gi->irradiance(),motion,receivers);
             if(options.reflections!=ReflectionMode::Off)specSelected=denoise.addSignal(graph,DENOISE_SIGNAL_SPECULAR,specular,motion,receivers,metadata);
             if(options.ao!=AoMode::Off)aoSelected=denoise.addSignal(graph,DENOISE_SIGNAL_AO,ao,motion,receivers);}
-        const auto compositeDesc=graph.resources().at(base.resource).texture;
-        graph.addPass("F13 single-count lighting composite",PassType::Compute,[this,compositeDesc](PassBuilder& b){b.read(base,Usage::ShaderRead,StageDispatch);b.read(receivers,Usage::ShaderRead,StageDispatch);
-            for(auto ref:{direct.direct(),directSelected,giSelected,specSelected,aoSelected})b.read(ref,Usage::ShaderRead,StageDispatch);if(gi&&options.gi!=GiMode::Off)b.read(gi->irradiance(),Usage::ShaderRead,StageDispatch);
-            b.read(errorsRef,Usage::ShaderRead,StageDispatch);errorsRef=b.write(errorsRef,Usage::ShaderWrite,StageDispatch);output=b.createTexture("F13 composed linear HDR",compositeDesc);output=b.write(output,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("reflection_composite");
+        auto finalDescriptor=hdrDescriptor;finalDescriptor.format=Format::RGBA32Float;
+        graph.addPass("F13 single-count positive lighting composite",PassType::Compute,[this,finalDescriptor](PassBuilder& b){b.read(residual,Usage::ShaderRead,StageDispatch);b.read(receivers,Usage::ShaderRead,StageDispatch);
+            for(auto ref:{directSelected,giSelected,specSelected,aoSelected})b.read(ref,Usage::ShaderRead,StageDispatch);
+            b.read(errorsRef,Usage::ShaderRead,StageDispatch);errorsRef=b.write(errorsRef,Usage::ShaderWrite,StageDispatch);output=b.createTexture("F13 composed linear HDR",finalDescriptor);output=b.write(output,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("reflection_composite");
         },[this](PassContext& ctx){auto* t=slots[frame.slot].composeTable;t->setAddress(composeAddress,0);t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(receivers))->gpuAddress(),1);t->setAddress(slots[frame.slot].errors->gpuAddress(),2);
-            texture(t,ctx,base,0);texture(t,ctx,direct.direct(),1);texture(t,ctx,directSelected,2);texture(t,ctx,gi&&options.gi!=GiMode::Off?gi->irradiance():dummyTexRef,3);texture(t,ctx,giSelected,4);texture(t,ctx,specSelected,5);texture(t,ctx,aoSelected,6);texture(t,ctx,output,7);
+            texture(t,ctx,residual,0);texture(t,ctx,directSelected,2);texture(t,ctx,giSelected,4);texture(t,ctx,specSelected,5);texture(t,ctx,aoSelected,6);texture(t,ctx,output,7);
             lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,compose,t,frame.backingWidth*frame.backingHeight);});
         if(options.debugLighting)graph.addPass("F13 raw and composed independent checks",PassType::Compute,[this](PassBuilder& b){for(auto ref:{output,specular,ao,distance})b.read(ref,Usage::ShaderRead,StageDispatch);if(options.reflections!=ReflectionMode::Off)b.read(metadata,Usage::ShaderRead,StageDispatch);
             b.read(errorsRef,Usage::ShaderRead,StageDispatch);errorsRef=b.write(errorsRef,Usage::ShaderWrite,StageDispatch);
