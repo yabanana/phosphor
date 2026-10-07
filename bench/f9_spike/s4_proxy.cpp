@@ -27,6 +27,7 @@
 // proxy exceeds the thresholds, and a single sabotaged mesh is the top
 // offender and is flagged by the policy rule.
 #include "f9_common.h"
+#include "renderer/rt_proxy.h"
 
 #include <meshoptimizer.h>
 
@@ -38,6 +39,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
+#include <filesystem>
+#include <optional>
 
 namespace f9 {
 namespace {
@@ -216,7 +220,16 @@ LevelData makeLevel(soc::Context& ctx, const SceneData& s, const GpuGeometry& g,
         std::vector<u32> dst(n);
         float err = 0;
         size_t got;
-        if (spec.kind == LevelSpec::Sloppy) {
+        if (spec.lockBorder) {
+            phosphor::RtProxyLevel level;
+            if (!phosphor::rtProxyParseLevel(spec.name, level))
+                throw std::runtime_error("unknown production RT proxy level");
+            auto cooked = phosphor::rtCookProxyMesh(std::span(verts).subspan(mi.vertexOffset, vcount),
+                                                    std::span(src, n), level);
+            dst = std::move(cooked.indices);
+            got = dst.size();
+            err = cooked.relativeError;
+        } else if (spec.kind == LevelSpec::Sloppy) {
             got = meshopt_simplifySloppy(dst.data(), src, n, pos, vcount, stride, nullptr, target, FLT_MAX, &err);
         } else {
             const unsigned opts = spec.lockBorder ? meshopt_SimplifyLockBorder : 0u;
@@ -523,7 +536,7 @@ struct PolicyResult {
 /// the full mesh).  Each iteration traces the current configuration and
 /// upgrades one ladder step the meshes blamed for the error.
 PolicyResult runPolicy(soc::Context& ctx, Tracer& tr, SceneEval& se, const std::vector<LevelData>& levels,
-                       const std::vector<std::vector<int>>& ladder, const Thresholds& thr) {
+                       const std::vector<std::vector<int>>& ladder, const Thresholds& thr, bool productionPolicy = false) {
     const u32 meshes = se.s->scene.getMeshCount();
     PolicyResult r;
     std::vector<u32> pos(meshes, 0);
@@ -537,9 +550,22 @@ PolicyResult runPolicy(soc::Context& ctx, Tracer& tr, SceneEval& se, const std::
         // also land on a mesh that is already full when a neighbour's proxy is the cause).
         std::vector<char> up(meshes);
         for (u32 m = 0; m < meshes; ++m) up[m] = pos[m] + 1 < ladder[m].size();
-        const std::vector<u32> fl = flagged(r.ev, &up);
-        if (fl.empty()) break;
-        for (u32 m : fl) pos[m]++;
+        if (productionPolicy) {
+            std::vector<phosphor::RtProxyLevel> productionLevels(meshes);
+            std::vector<double> blame(meshes);
+            for (u32 m = 0; m < meshes; ++m) {
+                if (!phosphor::rtProxyParseLevel(kLevels[r.cfg[m]].name, productionLevels[m]))
+                    throw std::runtime_error("invalid production RT proxy ladder");
+                blame[m] = r.ev.score(m);
+            }
+            if (!phosphor::rtProxyPromote(productionLevels, blame)) break;
+            for (u32 m = 0; m < meshes; ++m)
+                if (std::string(phosphor::rtProxyLevelName(productionLevels[m])) != kLevels[r.cfg[m]].name) ++pos[m];
+        } else {
+            const std::vector<u32> fl = flagged(r.ev, &up);
+            if (fl.empty()) break;
+            for (u32 m : fl) pos[m]++;
+        }
     }
     std::vector<u32> instCount(meshes, 0);
     for (const auto& i : se.s->instances) instCount[i.meshIndex]++;
@@ -654,11 +680,37 @@ SceneResult runScene(soc::Context& ctx, soc::Report& rep, Tracer& tr, const std:
     // Policies: three ladders (border free, border locked, every non-sloppy
     // level sorted per mesh by triangle count).
     const char* pname[3] = {"policy_free", "policy_lock", "policy_all"};
-    const std::vector<std::vector<int>> ladders[3] = {sameLadder(meshes, {3, 2, 1, 0}), sameLadder(meshes, {6, 5, 4, 0}),
+    std::vector<std::vector<int>> ladders[3] = {sameLadder(meshes, {3, 2, 1, 0}), sameLadder(meshes, {6, 5, 4, 0}),
                                                       sortedLadder(levels, meshes)};
+    const auto protectedMeshes = phosphor::rtProxyProtectedMeshes(meshes, s.instances, s.materials);
+    for (u32 mesh : protectedMeshes) ladders[1][mesh] = {kFull};
+    rep.value("proxy." + tag + ".policy_lock.protected_meshes", "meshes", double(protectedMeshes.size()), {}, false);
+    std::optional<phosphor::RtProxyManifest> exportManifest;
     for (int k = 0; k < 3; ++k) {
-        PolicyResult p = runPolicy(ctx, tr, se, levels, ladders[k], thr);
+        PolicyResult p = runPolicy(ctx, tr, se, levels, ladders[k], thr, k == 1);
         R.policyMet[k] = p.met;
+        if (k == 1 && p.met && tag == "sponza" && std::getenv("PHOSPHOR_RT_PROXY_EXPORT_DIR")) {
+            if (ctx.quick()) throw std::runtime_error("RT proxy export requires the full three-camera S4 corpus, no --quick");
+            std::vector<phosphor::RtProxyLevel> selected(meshes);
+            for (u32 m = 0; m < meshes; ++m)
+                if (!phosphor::rtProxyParseLevel(kLevels[p.cfg[m]].name, selected[m]))
+                    throw std::runtime_error("invalid exported RT proxy level");
+            phosphor::RtProxyMeasurements measured{p.ev.rays, p.ev.recv,
+                Eval::pct(p.ev.dis[0][0], p.ev.recv), Eval::pct(p.ev.primBad, p.ev.rays),
+                p.ev.dt95, Eval::pct(p.ev.fal[0][1], p.ev.recv)};
+            exportManifest = phosphor::rtMakeProxyManifest(s.scene, selected, measured, "sponza",
+                "F9-S4 three Sponza cameras at 960x540; sun=(0.30,0.85,0.20) normalized; "
+                "full geometry receivers, offsets 0.001/0.01m; MASK/emissive meshes full");
+            // Never attach measured errors to regenerated indices unless they
+            // match the ACTUAL geometry used in this GPU evaluation exactly.
+            for (u32 m = 0; m < meshes; ++m) {
+                const auto& actual = levels[size_t(p.cfg[m])];
+                const auto indices = std::span(static_cast<const u32*>(actual.indices->contents()) + actual.offset[m],
+                                              actual.count[m]);
+                if (phosphor::rtProxyIndexFingerprint(indices) != exportManifest->meshes[m].indexFingerprint)
+                    throw std::runtime_error("exported RT proxy differs from measured index stream");
+            }
+        }
         const std::string pre = "proxy." + tag + "." + pname[k];
         LevelData agg;
         agg.tris = p.tris;
@@ -713,6 +765,15 @@ SceneResult runScene(soc::Context& ctx, soc::Report& rep, Tracer& tr, const std:
                   R.sabotageDetected ? "detected" : "NOT detected", R.policyMet[0] ? "met" : "NOT met",
                   R.policyMet[1] ? "met" : "NOT met", R.policyMet[2] ? "met" : "NOT met");
     R.detail = buf;
+    if (exportManifest && R.identityExact && R.s01Violates && R.sabotageDetected && R.policyMet[1]) {
+        const std::filesystem::path directory(std::getenv("PHOSPHOR_RT_PROXY_EXPORT_DIR"));
+        std::filesystem::create_directories(directory);
+        const auto path = directory / "sponza.rtproxy.json";
+        std::string error;
+        if (!phosphor::rtWriteProxyManifest(path.string(), *exportManifest, error)) throw std::runtime_error(error);
+        rep.note("Measured production RT proxy manifest exported: " + path.string());
+        ctx.log("S4 exported measured production proxy: %s", path.c_str());
+    }
     return R;
 }
 
