@@ -10,6 +10,7 @@
 #include "renderer/scene_store.h"
 #include "renderer/gpu_scene.h"
 #include "renderer/cull_math.h"
+#include "renderer/transform_reference.h"
 #include "rendergraph/pass_context.h"
 #include <glm/gtc/type_ptr.hpp>
 #include <array>
@@ -43,7 +44,7 @@ std::vector<float> probePFM(const std::filesystem::path& path){std::ifstream in(
 struct ReflectionPasses::Impl {
     MetalContext& c;PipelineCache& p;SceneRenderer& scene;DirectLightingPasses& direct;AccelerationStructures* rt;GiPasses* gi;
     LaunchOptions options;DenoisePasses denoise;ShadowPasses::Frame frame{};u64 graphVersion=1,pixels=0,sceneEpoch=0;u32 probeGeneration=1,lastPipelineGeneration=~0u;
-    bool custom=false,probeDirty=true,probeNeedsCapture=false,rtReflection=false,rtAO=false,rtCapture=false,outputHalf=true;u64 staticStructure=0,lastSignalEpoch=~u64{0};
+    bool custom=false,probeDirty=true,probeNeedsCapture=false,rtReflection=false,rtAO=false,rtCapture=false,outputHalf=true,probePlacementDirty=true,probePlaced=false;u64 staticStructure=0,lastSignalEpoch=~u64{0};
     std::string source="analytic-environment";
     u64 geometryEpoch=0,instanceRevision=0,nodeRevision=0,materialRevision=0,motionRevision=0;
     struct GeometryContent {u64 scene,structure,rtGeometry,instances,nodes,materials,motion,pipeline;bool operator==(const GeometryContent&)const=default;};
@@ -61,7 +62,7 @@ struct ReflectionPasses::Impl {
     std::array<MTL::Texture*,6> faceViews{};std::array<MTL::Texture*,ProbeMips> mipViews{};
     MTL::Buffer *probeMetadata=nullptr,*probeFault=nullptr,*staticSlots=nullptr,*dummyBuffer=nullptr;
     MTL::PixelFormat probeFormat=MTL::PixelFormatRGBA16Float;rg::Format graphProbeFormat=rg::Format::RGBA16Float;
-    struct Draw {GPUMeshInfo mesh;u32 staticIndex;CullClass cull;};std::vector<Draw> draws;std::vector<u32> staticIDs;std::vector<GPUMeshInfo> geometry;
+    struct Draw {GPUMeshInfo mesh;u32 staticIndex;CullClass cull;};std::vector<Draw> draws;std::vector<u32> staticIDs;std::vector<GPUMeshInfo> geometry;std::vector<float> probeWorlds;
     struct Slot {
         MTL::Buffer *samples=nullptr,*metadata=nullptr,*errors=nullptr;bool customUsed=false;u32 expected=0;
         std::array<MTL4::ArgumentTable*,8> sampleTables{};std::array<MTL4::ArgumentTable*,6> captureTables{};
@@ -106,14 +107,36 @@ struct ReflectionPasses::Impl {
     void uploadFace(u32 face,std::span<const float> rgba){const u64 pixelBytes=probeFormat==MTL::PixelFormatRGBA32Float?16:8,rowBytes=ProbeSide*pixelBytes;auto slice=c.stagingAllocate(rowBytes*ProbeSide);
         if(pixelBytes==16)std::memcpy(slice.cpu,rgba.data(),rgba.size()*4);else{auto* words=reinterpret_cast<u16*>(slice.cpu);for(size_t i=0;i<rgba.size();++i)words[i]=probeHalf(rgba[i]);}
         auto* target=rawCube;c.enqueueUpload([slice,target,face,rowBytes](MTL4::ComputeCommandEncoder* e){e->copyFromBuffer(slice.buffer,slice.offset,rowBytes,rowBytes*ProbeSide,MTL::Size::Make(ProbeSide,ProbeSide,1),target,face,0,MTL::Origin::Make(0,0,0));});}
-    void buildStatic(const SceneStore& store){staticIDs.clear();draws.clear();std::set<u32> motion(store.motionSlots().begin(),store.motionSlots().end());
-        const auto instances=store.instances();const auto nodes=store.nodes();for(u32 slot=0;slot<instances.size();++slot){const auto& i=instances[slot];
-            if(!(i.flags&INSTANCE_FLAG_VALID)||!(i.flags&1u)||!(i.flags&4u)||motion.contains(slot)||nodes[slot].depth||i.meshIndex>=geometry.size()||i.materialIndex>=store.materials().size())continue;
+    void buildStatic(const SceneStore& store){
+        std::vector<u32> eligible;reflectionProbeStaticSlots(store.instances(),store.nodes(),store.motionSlots(),eligible);
+        std::vector<u32> nextIDs;std::vector<Draw> nextDraws;nextIDs.reserve(eligible.size());nextDraws.reserve(eligible.size());
+        const auto instances=store.instances();for(u32 slot:eligible){const auto& i=instances[slot];
+            if(i.meshIndex>=geometry.size()||i.materialIndex>=store.materials().size())continue;
             const auto& m=store.materials()[i.materialIndex];const CullClass cull=(m.flags&MATERIAL_FLAG_DOUBLE_SIDED)?CullClass::None:(i.flags&INSTANCE_FLAG_MIRRORED)?CullClass::BackMirrored:CullClass::Back;
-            draws.push_back({geometry[i.meshIndex],u32(staticIDs.size()),cull});staticIDs.push_back(slot);}
-        c.memory().release(staticSlots,MemoryCategory::RayTracing);staticSlots=lighting::buffer(c,std::max<size_t>(1,staticIDs.size())*4,"Full static scene probe slots",true);
-        if(!staticIDs.empty())std::memcpy(staticSlots->contents(),staticIDs.data(),staticIDs.size()*4);
-        for(auto& f:slots){for(auto* t:f.drawTables)t->release();f.drawTables.clear();for(size_t i=0;i<6*draws.size();++i)f.drawTables.push_back(lighting::table(c));}staticStructure=store.structureVersion();
+            nextDraws.push_back({geometry[i.meshIndex],u32(nextIDs.size()),cull});nextIDs.push_back(slot);}
+        // Cull/mesh records are consumed while encoding. The GPU slot buffer and
+        // per-slot tables only need replacement when membership actually changes.
+        draws=std::move(nextDraws);
+        if(!staticSlots||nextIDs!=staticIDs){c.waitIdle();staticIDs=std::move(nextIDs);
+            c.memory().release(staticSlots,MemoryCategory::RayTracing);staticSlots=lighting::buffer(c,std::max<size_t>(1,staticIDs.size())*4,"Full static scene probe slots",true);
+            if(!staticIDs.empty())std::memcpy(staticSlots->contents(),staticIDs.data(),staticIDs.size()*4);
+            for(auto& f:slots){for(auto* t:f.drawTables)t->release();f.drawTables.clear();for(size_t i=0;i<6*draws.size();++i)f.drawTables.push_back(lighting::table(c));}
+            ++graphVersion;
+        }
+        staticStructure=store.structureVersion();
+    }
+    bool updateProbePlacement(const SceneStore& store){
+        if(!store.motionSlots().empty()&&!frame.motionSinCosValid)throw std::logic_error("Probe bounds require the capture frame motion phases");
+        referenceWorlds(store,frame.motionSinCos.data(),probeWorlds);
+        std::optional<ReflectionProbeBounds> bounds;
+        if(options.reflectionCaptureProbe&&!rtCapture){
+            if(!staticIDs.empty())bounds=reflectionProbeWorldBounds(store.instances(),geometry,probeWorlds,staticIDs);
+        }else bounds=reflectionProbeWorldBounds(store.instances(),geometry,probeWorlds);
+        const glm::vec3 low=bounds?bounds->minimum:glm::vec3(-10),high=bounds?bounds->maximum:glm::vec3(10),center=(low+high)*.5f;
+        bool changed=!probePlaced;for(u32 i=0;i<3;++i){const float minimum=low[i]-.25f,maximum=high[i]+.25f;
+            changed|=probe.boxMin[i]!=minimum||probe.boxMax[i]!=maximum||probe.capturePosition[i]!=center[i];
+            probe.boxMin[i]=minimum;probe.boxMax[i]=maximum;probe.capturePosition[i]=center[i];}
+        probePlaced=true;probePlacementDirty=false;return changed;
     }
     void load(const GpuScene& geometrySource,const SceneStore& store){c.waitIdle();releaseProbe();geometry.assign(geometrySource.meshInfos().begin(),geometrySource.meshInfos().end());buildStatic(store);
         rawCube=cube(1,"Raw reflection probe cube array");filteredCube=cube(ProbeMips,"Filtered reflection probe mip array");
@@ -121,8 +144,9 @@ struct ReflectionPasses::Impl {
         for(u32 face=0;face<6;++face)faceViews[face]=c.memory().newTextureView(rawCube,probeFormat,MTL::TextureType2D,NS::Range::Make(0,1),NS::Range::Make(face,1),MemoryCategory::RayTracing,"Probe capture face view");
         for(u32 mip=0;mip<ProbeMips;++mip)mipViews[mip]=c.memory().newTextureView(filteredCube,probeFormat,MTL::TextureType2DArray,NS::Range::Make(mip,1),NS::Range::Make(0,6),MemoryCategory::RayTracing,"Filtered probe mip array view");
         if(!rawArray||std::any_of(faceViews.begin(),faceViews.end(),[](auto* t){return !t;})||std::any_of(mipViews.begin(),mipViews.end(),[](auto* t){return !t;}))throw std::runtime_error("Probe texture view creation failed");
-        glm::vec3 low(1e20f),high(-1e20f);bool any=false;for(const auto& i:store.instances())if((i.flags&INSTANCE_FLAG_VALID)&&i.meshIndex<geometry.size()){const auto s=cullWorldSphere(i.modelMatrix,geometry[i.meshIndex].boundingSphere);low=glm::min(low,glm::vec3(s.x,s.y,s.z)-s.r);high=glm::max(high,glm::vec3(s.x,s.y,s.z)+s.r);any=true;}
-        if(!any){low=glm::vec3(-10);high=glm::vec3(10);}probe={};for(u32 i=0;i<3;++i){probe.boxMin[i]=low[i]-.25f;probe.boxMax[i]=high[i]+.25f;probe.capturePosition[i]=(low[i]+high[i])*.5f;}
+        // World placement waits for prepareFrame's exact GPU motion phases.
+        // No identity child placeholder can enter capture bounds or parallax.
+        probe={};probePlacementDirty=true;probePlaced=false;
         probe.blendDistance=1;probe.mipCount=ProbeMips;probe.generation=++probeGeneration;probe.enabled=1;
         static constexpr const char* faces[]={"px.pfm","nx.pfm","py.pfm","ny.pfm","pz.pfm","nz.pfm"};
         for(u32 face=0;face<6;++face){std::vector<float> rgba;
@@ -144,11 +168,17 @@ struct ReflectionPasses::Impl {
             u64(f.backingWidth)*f.backingHeight>std::numeric_limits<u32>::max())throw std::invalid_argument("Invalid F13 frame extent or view");
         frame=f;if(!rawCube)throw std::logic_error("F13 loadScene must precede prepareFrame");
         if(custom!=useCustom){custom=useCustom;denoise.invalidateAll("F13 denoiser path change");++graphVersion;}reserve();
-        if(staticStructure!=store.structureVersion()){c.waitIdle();buildStatic(store);if(options.reflectionCaptureProbe){probeDirty=true;probeNeedsCapture=true;}++graphVersion;}
+        const bool recordsChanged=staticStructure!=store.structureVersion()||store.stats().fullInstances||store.stats().fullNodes||store.stats().fullMaterials||
+            !store.instanceDeltas().empty()||!store.nodeDeltas().empty()||!store.materialDeltas().empty();
+        if(recordsChanged){buildStatic(store);probePlacementDirty=true;}
         const bool nextRT=rt&&rt->active();const bool nextReflection=options.reflections==ReflectionMode::RT&&nextRT;
         const bool nextAO=options.ao==AoMode::RTAO&&nextRT,nextCapture=options.reflectionCaptureProbe&&nextRT;
-        if(nextReflection!=rtReflection||nextAO!=rtAO||nextCapture!=rtCapture){rtReflection=nextReflection;rtAO=nextAO;rtCapture=nextCapture;++graphVersion;}
-        if((options.reflectionCaptureProbe&&(sceneEpoch!=f.scene||lastSignalEpoch!=signalEpoch))||lastPipelineGeneration!=p.generation()){
+        const bool captureChanged=nextCapture!=rtCapture;if(captureChanged)probePlacementDirty=true;
+        if(nextReflection!=rtReflection||nextAO!=rtAO||captureChanged){rtReflection=nextReflection;rtAO=nextAO;rtCapture=nextCapture;++graphVersion;}
+        // RT captures live geometry. A moving root moves every descendant even
+        // when the child's CPU instance remains an unchanged identity record.
+        const bool placementChanged=(probePlacementDirty||(rtCapture&&!store.motionSlots().empty()))?updateProbePlacement(store):false;
+        if(placementChanged||(options.reflectionCaptureProbe&&(sceneEpoch!=f.scene||lastSignalEpoch!=signalEpoch||recordsChanged||captureChanged))||lastPipelineGeneration!=p.generation()){
             if(!probeDirty)++graphVersion;probeDirty=true;probeNeedsCapture=options.reflectionCaptureProbe;probe.generation=++probeGeneration;}
         sceneEpoch=f.scene;lastSignalEpoch=signalEpoch;lastPipelineGeneration=p.generation();
         source=options.reflectionCaptureProbe?(rtCapture?"actual-scene-rt":"actual-static-raster-unshadowed"):options.reflectionProbePath.empty()?"analytic-environment":"cooked-linear-pfm";

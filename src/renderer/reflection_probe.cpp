@@ -1,4 +1,5 @@
 #include "renderer/reflection_probe.h"
+#include "renderer/cull_math.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
 #include <cmath>
@@ -8,6 +9,41 @@ namespace phosphor {
 namespace {
 glm::vec3 v3(const float* p){return {p[0],p[1],p[2]};}bool finite(glm::vec3 p){return std::isfinite(p.x)&&std::isfinite(p.y)&&std::isfinite(p.z);}
 float radicalInverse(u32 v){v=(v<<16)|(v>>16);v=((v&0x55555555u)<<1)|((v&0xaaaaaaaau)>>1);v=((v&0x33333333u)<<2)|((v&0xccccccccu)>>2);v=((v&0x0f0f0f0fu)<<4)|((v&0xf0f0f0f0u)>>4);v=((v&0x00ff00ffu)<<8)|((v&0xff00ff00u)>>8);return float(v)*2.3283064365386963e-10f;}
+}
+void reflectionProbeStaticSlots(std::span<const GPUInstance> instances,std::span<const GPUTransformNode> nodes,
+                                std::span<const u32> motionSlots,std::vector<u32>& output) {
+    if(nodes.size()!=instances.size())throw std::invalid_argument("Probe hierarchy extent mismatch");
+    std::vector<u8> moving(instances.size(),0);
+    for(u32 slot:motionSlots){if(slot>=instances.size())throw std::invalid_argument("Probe motion slot outside scene");moving[slot]=1;}
+    output.clear();
+    for(u32 slot=0;slot<instances.size();++slot) {
+        u32 current=slot;bool eligible=false;
+        for(u32 level=0;level<SCENE_MAX_LEVELS;++level) {
+            const auto& instance=instances[current];const auto& node=nodes[current];
+            if(!(instance.flags&INSTANCE_FLAG_VALID)||!(instance.flags&1u)||!(instance.flags&4u)||moving[current])break;
+            if(node.depth==0){eligible=true;break;}
+            if(node.depth>=SCENE_MAX_LEVELS||node.parentSlot>=instances.size()||nodes[node.parentSlot].depth+1!=node.depth)break;
+            current=node.parentSlot;
+        }
+        if(eligible)output.push_back(slot);
+    }
+}
+std::optional<ReflectionProbeBounds> reflectionProbeWorldBounds(std::span<const GPUInstance> instances,
+    std::span<const GPUMeshInfo> meshes,std::span<const float> worlds,std::span<const u32> selection) {
+    if(worlds.size()!=instances.size()*16)throw std::invalid_argument("Probe world matrix extent mismatch");
+    glm::vec3 low(std::numeric_limits<float>::infinity()),high(-std::numeric_limits<float>::infinity());bool any=false;
+    const auto add=[&](u32 slot) {
+        if(slot>=instances.size())throw std::invalid_argument("Probe selection outside scene");
+        const auto& instance=instances[slot];if(!(instance.flags&INSTANCE_FLAG_VALID)||!(instance.flags&1u)||instance.meshIndex>=meshes.size())return;
+        const auto* world=worlds.data()+size_t(slot)*16;
+        if(!std::all_of(world,world+16,[](float x){return std::isfinite(x);}))throw std::invalid_argument("Nonfinite probe world matrix");
+        const auto sphere=cullWorldSphere(world,meshes[instance.meshIndex].boundingSphere);
+        const glm::vec3 center(sphere.x,sphere.y,sphere.z);
+        if(!finite(center)||!std::isfinite(sphere.r)||sphere.r<0)throw std::invalid_argument("Invalid probe world bounds");
+        low=glm::min(low,center-sphere.r);high=glm::max(high,center+sphere.r);any=true;
+    };
+    if(selection.empty())for(u32 slot=0;slot<instances.size();++slot)add(slot);else for(u32 slot:selection)add(slot);
+    return any?std::optional(ReflectionProbeBounds{low,high}):std::nullopt;
 }
 bool validReflectionProbe(const GPUReflectionProbe& p){return p.enabled&&finite(v3(p.boxMin))&&finite(v3(p.boxMax))&&finite(v3(p.capturePosition))&&
     glm::all(glm::greaterThan(v3(p.boxMax),v3(p.boxMin)))&&glm::all(glm::greaterThanEqual(v3(p.capturePosition),v3(p.boxMin)))&&glm::all(glm::lessThanEqual(v3(p.capturePosition),v3(p.boxMax)))&&

@@ -1,5 +1,8 @@
 #include "renderer/reflection_settings.h"
 #include "renderer/reflection_probe.h"
+#include "renderer/transform_reference.h"
+#include <glm/gtc/type_ptr.hpp>
+#include <cstring>
 #include <doctest/doctest.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <array>
@@ -82,4 +85,50 @@ TEST_CASE("F13 static reflection probe parallax cube orientation and constant en
         CHECK(L.x==doctest::Approx(2).epsilon(1e-5));CHECK(L.y==doctest::Approx(3).epsilon(1e-5));CHECK(L.z==doctest::Approx(5).epsilon(1e-5));}
     for(float roughness:{.04f,.1f,.5f,1.f})for(float metal:{0.f,1.f}){auto s=shiny();s.roughness=roughness;s.metallic=metal;
         const auto Lo=reflectionProbeContribution(s,{2,3,5});CHECK(Lo.x>=0);CHECK(Lo.x<=2);CHECK(Lo.y<=3);CHECK(Lo.z<=5);}
+}
+
+
+TEST_CASE("F13 static probe hierarchy matches independently flattened world geometry") {
+    std::array<GPUInstance,2> instances{};std::array<GPUTransformNode,2> nodes{};
+    std::array<GPUMotion,2> motions{};const std::array<u32,3> offsets{0,1,1};const std::array<u32,1> children{1};
+    const glm::mat4 parent=glm::translate(glm::mat4(1),glm::vec3(100,2,-5));
+    const glm::mat4 local=glm::translate(glm::mat4(1),glm::vec3(7,3,4))*glm::scale(glm::mat4(1),glm::vec3(-2,3,1));
+    for(auto& i:instances){i.flags=INSTANCE_FLAG_VALID|1u|4u;const glm::mat4 identity(1);std::memcpy(i.modelMatrix,glm::value_ptr(identity),64);}
+    std::memcpy(instances[0].modelMatrix,glm::value_ptr(parent),64);std::memcpy(nodes[1].local,glm::value_ptr(local),64);nodes[1].parentSlot=0;nodes[1].depth=1;
+    std::vector<u32> selected;reflectionProbeStaticSlots(instances,nodes,{},selected);CHECK(selected==std::vector<u32>{0,1});
+    const HierarchyView view{instances,nodes,motions,{},offsets,children};std::vector<float> worlds;referenceWorlds(view,nullptr,worlds);
+    // Independent flattened matrix: child translation107,5,-1 and scale-2,3,1.
+    const auto flatChild=glm::translate(glm::mat4(1),glm::vec3(107,5,-1))*glm::scale(glm::mat4(1),glm::vec3(-2,3,1));
+    auto flat=instances;std::memcpy(flat[1].modelMatrix,glm::value_ptr(flatChild),64);
+    std::vector<float> flatWorlds(32);for(u32 i=0;i<2;++i)std::memcpy(flatWorlds.data()+16*i,flat[i].modelMatrix,64);
+    const std::array<GPUTransformNode,2> flatNodes{};std::vector<u32> flatSelected;reflectionProbeStaticSlots(flat,flatNodes,{},flatSelected);CHECK(flatSelected==selected);
+    std::array<GPUMeshInfo,1> meshes{};meshes[0].boundingSphere[3]=1;
+    const auto a=reflectionProbeWorldBounds(instances,meshes,worlds,selected),b=reflectionProbeWorldBounds(flat,meshes,flatWorlds,flatSelected);
+    REQUIRE(a);REQUIRE(b);for(u32 k=0;k<3;++k){CHECK(a->minimum[k]==b->minimum[k]);CHECK(a->maximum[k]==b->maximum[k]);}
+    CHECK(a->minimum.x>98);CHECK(a->maximum.x>109); // Nothing belongs near identity/origin.
+    std::vector<float> wrong(32);for(u32 i=0;i<2;++i)std::memcpy(wrong.data()+16*i,instances[i].modelMatrix,64);
+    const auto placeholder=reflectionProbeWorldBounds(instances,meshes,wrong);REQUIRE(placeholder);CHECK(placeholder->minimum.x<0);
+    // Static flag / visibility membership changes need no slot or topology move.
+    instances[0].flags&=~4u;reflectionProbeStaticSlots(instances,nodes,{},selected);CHECK(selected.empty());
+    instances[0].flags|=4u;instances[1].flags&=~1u;reflectionProbeStaticSlots(instances,nodes,{},selected);CHECK(selected==std::vector<u32>{0});
+    instances[1].flags|=1u;nodes[1].parentSlot=1;reflectionProbeStaticSlots(instances,nodes,{},selected);CHECK(selected==std::vector<u32>{0});
+}
+
+TEST_CASE("F13 animated ancestor excludes static children from raster and updates RT world bounds") {
+    std::array<GPUInstance,2> instances{};std::array<GPUTransformNode,2> nodes{};std::array<GPUMotion,2> motions{};
+    const glm::mat4 identity(1),local=glm::translate(identity,glm::vec3(2,0,0));
+    for(auto& i:instances){i.flags=INSTANCE_FLAG_VALID|1u|4u;std::memcpy(i.modelMatrix,glm::value_ptr(identity),64);}
+    std::memcpy(nodes[1].local,glm::value_ptr(local),64);nodes[1].parentSlot=0;nodes[1].depth=1;
+    motions[0].centre[0]=10;motions[0].radius=3;motions[0].cosPhase=1;motions[0].base[0]=motions[0].base[4]=motions[0].base[8]=1;
+    const std::array<u32,1> moving{0},children{1};const std::array<u32,3> offsets{0,1,1};
+    std::vector<u32> selected;reflectionProbeStaticSlots(instances,nodes,moving,selected);CHECK(selected.empty());
+    std::array<float,SCENE_MOTION_CLASSES*2> phases{};for(u32 k=0;k<SCENE_MOTION_CLASSES;++k)phases[k*2+1]=1;
+    const HierarchyView view{instances,nodes,motions,moving,offsets,children};std::vector<float> first,second;referenceWorlds(view,phases.data(),first);
+    phases[1]=-1;referenceWorlds(view,phases.data(),second);
+    CHECK(first[12]==13);CHECK(first[16+12]==15);CHECK(second[12]==7);CHECK(second[16+12]==5);
+    std::array<GPUMeshInfo,1> meshes{};meshes[0].boundingSphere[3]=.25f;
+    const auto a=reflectionProbeWorldBounds(instances,meshes,first),b=reflectionProbeWorldBounds(instances,meshes,second);
+    REQUIRE(a);REQUIRE(b);CHECK(a->minimum.x>12);CHECK(b->maximum.x<8);
+    // Removing MotionComponent restores both memberships without recreating nodes.
+    reflectionProbeStaticSlots(instances,nodes,{},selected);CHECK(selected==std::vector<u32>{0,1});
 }
