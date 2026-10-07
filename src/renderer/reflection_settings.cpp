@@ -55,7 +55,7 @@ std::optional<SSRHit> reflectionSSR(glm::vec3 origin,glm::vec3 direction,const g
         if(glm::any(glm::lessThan(uv,glm::vec2(0)))||glm::any(glm::greaterThanEqual(uv,glm::vec2(1))))return false;
         const u32 x=u32(uv.x*w),y=u32(uv.y*h);const float z=depth[size_t(y)*w+x];if(!std::isfinite(z)||z<=0||z>1)return false;
         const glm::vec2 ndc=(glm::vec2(x,y)+.5f)*glm::vec2(2,-2)/glm::vec2(w,h)+glm::vec2(-1,1);const auto p=inv*glm::vec4(ndc,z,1);
-        if(!std::isfinite(p.w)||std::abs(p.w)<1e-20)return false;hit.position=glm::vec3(p)/p.w;hit.pixel=y*w+x;hit.distance=distance;
+        if(!std::isfinite(p.w)||std::abs(p.w)<1e-20)return false;hit.position=glm::vec3(p)/p.w;hit.pixel=y*w+x;hit.distance=glm::length(hit.position-origin);
         delta=-(view*glm::vec4(point,1)).z+(view*glm::vec4(hit.position,1)).z;return std::isfinite(delta);};
     for(u32 step=1;step<=s.ssrSteps;++step){const float fraction=float(step)/s.ssrSteps;const float distance=s.maxDistance*fraction*fraction;SSRHit hit;float d=0;
         if(!evaluate(distance,hit,d)){previous=distance;previousFront=false;continue;}
