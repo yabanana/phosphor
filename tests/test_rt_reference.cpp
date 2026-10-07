@@ -353,3 +353,86 @@ TEST_CASE("RT barycentric failure reports geometric diagnostics without relaxing
     CHECK(std::stod(check.error.substr(key + std::string("bary_displacement_world=").size())) == doctest::Approx(0.02).epsilon(1e-5));
     CHECK_FALSE(ref.check(r, forged, {}, 2e-4, 1e-5).ok);
 }
+
+TEST_CASE("RT grazing barycentric discrepancy is judged by spatial backward error") {
+    RtReference ref;
+    geometry(ref);
+    auto i = instance(); ref.setInstances(std::span(&i, 1));
+    auto r = ray(-3.5f, -0.25f, 0.001f);
+    r.dx = 1; r.dz = -0.00025f;
+    const auto exact = ref.nearest(r);
+    REQUIRE(exact.hit());
+    auto rounded = exact.gpu();
+    // A float traversal may move along a nearly coplanar ray by much more
+    // than its perpendicular geometric error. Couple t and barycentrics so
+    // the reported point still lies on that ray within reconstruction error.
+    rounded.t += 4e-5f;
+    const double dt = double(rounded.t)-exact.t;
+    rounded.u = static_cast<float>(exact.u + 0.5*dt*r.dx);
+    REQUIRE(std::abs(double(rounded.u)-exact.u) > 1e-5);
+    CHECK(ref.check(r, rounded).ok);
+    auto bad = rounded; bad.u += 0.01f;
+    CHECK_FALSE(ref.check(r, bad).ok);
+    bad = rounded; bad.v += 0.01f; // Lateral displacement cannot hide behind grazing incidence.
+    CHECK_FALSE(ref.check(r, bad).ok);
+    bad = rounded; bad.t += 4e-5f; // Still inside S0 t tolerance, but no matching bary change.
+    const auto inconsistent = ref.check(r, bad);
+    CHECK_FALSE(inconsistent.ok);
+    CHECK(inconsistent.error.find("reason=spatial-residual") != std::string::npos);
+    bad = rounded; bad.t += 0.02f;
+    CHECK_FALSE(ref.check(r, bad).ok); // S0 distance tolerance is unchanged.
+}
+
+TEST_CASE("RT spatial criterion scales with actual triangle geometry rather than parameter units") {
+    RtReference ref;
+    geometry(ref);
+    auto i = instance();
+    i.modelMatrix[0] = i.modelMatrix[5] = i.modelMatrix[10] = 0.001f;
+    ref.setInstances(std::span(&i, 1));
+    const auto r = ray(0.0005f, -0.00025f);
+    const auto exact = ref.nearest(r);
+    REQUIRE(exact.hit());
+    auto gpu = exact.gpu(); gpu.u += 2e-5f;
+    REQUIRE(std::abs(double(gpu.u)-exact.u) > 1e-5);
+    CHECK(ref.check(r, gpu).ok); // 4e-8 world units despite a larger parameter error.
+    gpu.u += 0.05f;
+    CHECK_FALSE(ref.check(r, gpu).ok);
+}
+
+TEST_CASE("RT large-coordinate reconstruction budget is capped by the S0 world tolerance") {
+    RtReference ref;
+    geometry(ref);
+    auto i = instance(1e7f, 0, 0);
+    ref.setInstances(std::span(&i, 1));
+    auto r = ray(1e7f, 0, 2);
+    auto gpu = ref.nearest(r).gpu();
+    REQUIRE(gpu.hit);
+    CHECK(ref.check(r, gpu).ok);
+    gpu.u += 0.001f; // 0.002 world units: below gamma16*large coordinates, above S0's 0.0004 cap.
+    auto check = ref.check(r, gpu);
+    CHECK_FALSE(check.ok);
+    CHECK(check.error.find("reason=spatial-residual") != std::string::npos);
+    CHECK(check.error.find("distance_world_cap=") != std::string::npos);
+    // A small residual does not excuse barycentric weights outside the domain.
+    r = ray(1e7f-1, -1, 2);
+    gpu = ref.nearest(r).gpu();
+    REQUIRE(gpu.hit);
+    gpu.u = -2e-5f; // Only 4e-5 world units, but outside containment epsilon.
+    check = ref.check(r, gpu);
+    CHECK_FALSE(check.ok);
+    CHECK(check.error.find("reason=weight-domain") != std::string::npos);
+}
+
+TEST_CASE("RT spatial checker rejects meaningful errors even below the former bary delta cutoff") {
+    RtReference ref;
+    geometry(ref);
+    auto i = instance(); ref.setInstances(std::span(&i, 1));
+    const auto r = ray(0.5f, 0);
+    const auto exact = ref.nearest(r);
+    auto gpu = exact.gpu();
+    gpu.u += 4e-6f;
+    REQUIRE(std::abs(double(gpu.u)-exact.u) < 1e-5);
+    const auto check = ref.check(r, gpu);
+    CHECK_FALSE(check.ok);
+    CHECK(check.error.find("reason=spatial-residual") != std::string::npos);
+}

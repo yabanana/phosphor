@@ -361,32 +361,68 @@ RtHitCheck RtReference::check(const GPURtRay& gpuRay, const GPURtHit& gpu, const
     if (!impl_->acceptFace(gpuRay, named) || (accept && !accept(gpuRay, named)))
         return fail("named triangle rejected by face/alpha rule");
     if (bool(gpu.frontFacing) != named.frontFacing) return fail("front-facing mismatch");
-    if (!std::isfinite(gpu.u) || !std::isfinite(gpu.v) ||
-        std::abs(gpu.u - u) > baryTolerance || std::abs(gpu.v - v) > baryTolerance) {
-        // Diagnostics only: keep the original acceptance predicate above.
-        // Barycentric coordinates are dimensionless and their conditioning
-        // depends on triangle aspect ratio and ray incidence. These world-space
-        // residuals distinguish a large geometric error from a parameter error
-        // magnified by a tiny/skinny triangle or a grazing ray.
-        const V3 a = V3(instance.world * glm::dvec4(impl_->position(tri.vertices[0]), 1));
-        const V3 b = V3(instance.world * glm::dvec4(impl_->position(tri.vertices[1]), 1));
-        const V3 c = V3(instance.world * glm::dvec4(impl_->position(tri.vertices[2]), 1));
-        const V3 e1 = b - a, e2 = c - a;
-        const double edge = std::max({glm::length(e1), glm::length(e2), glm::length(c - b)});
+    // Keep S0's nearest-distance and named-triangle tests above unchanged.
+    // baryTolerance remains a dimensionless CONTAINMENT epsilon, not a bound
+    // on |CPU bary - GPU bary|: that difference is ill-conditioned for grazing
+    // rays and small/skinny triangles. Validate the reported interpolation by
+    // its geometric backward error in world units instead.
+    const V3 objectA = impl_->position(tri.vertices[0]);
+    const V3 objectB = impl_->position(tri.vertices[1]);
+    const V3 objectC = impl_->position(tri.vertices[2]);
+    const V3 a = V3(instance.world * glm::dvec4(objectA, 1));
+    const V3 b = V3(instance.world * glm::dvec4(objectB, 1));
+    const V3 c = V3(instance.world * glm::dvec4(objectC, 1));
+    const V3 e1 = b-a, e2 = c-a;
+    const double gu = gpu.u, gv = gpu.v, gw = 1.0-gu-gv;
+    const bool weightsInDomain = std::isfinite(gu) && std::isfinite(gv) &&
+        gu >= -baryTolerance && gv >= -baryTolerance && gw >= -baryTolerance &&
+        gu <= 1.0+baryTolerance && gv <= 1.0+baryTolerance && gw <= 1.0+baryTolerance;
+    const V3 gpuPoint = a + gu*e1 + gv*e2;
+    const V3 rayPoint = ray.o + double(gpu.t)*ray.d;
+    const double directionLength = glm::length(ray.d);
+    const double spatialResidual = glm::length(gpuPoint-rayPoint);
+
+    // Test budget, NOT a published bound on Metal's internal operations or
+    // traversal precision. Unit roundoff is 2^-24 for FP32. gamma(16) is a
+    // conservative reconstruction budget: affine four-term dot (7 scalar
+    // operations), barycentric weights/mix (7), ray multiply/add (2). Absolute
+    // term sums account for cancellation; in particular, the extra A term
+    // accounts for cancellation in w=1-u-v even when |w| is almost zero.
+    // The magnitude model includes the input affine terms rather than only
+    // the final world vertices, which might hide large cancelling transforms.
+    auto affineMagnitude = [&](V3 point) {
+        V3 magnitude;
+        for (int k = 0; k < 3; ++k)
+            magnitude[k] = std::abs(instance.world[0][k]*point.x) +
+                           std::abs(instance.world[1][k]*point.y) +
+                           std::abs(instance.world[2][k]*point.z) + std::abs(instance.world[3][k]);
+        return magnitude;
+    };
+    constexpr double unitRoundoff = 0x1p-24;
+    constexpr double gamma16 = (16.0*unitRoundoff) / (1.0-16.0*unitRoundoff);
+    const V3 magnitude = std::abs(gw)*affineMagnitude(objectA) + std::abs(gu)*affineMagnitude(objectB) +
+                         std::abs(gv)*affineMagnitude(objectC) + (1.0+std::abs(gu)+std::abs(gv))*glm::abs(a) +
+                         glm::abs(ray.o) + glm::abs(double(gpu.t)*ray.d);
+    const double fp32Bound = gamma16*glm::length(magnitude);
+    // Large coordinates never grant an arbitrarily large geometric allowance:
+    // cap by the unchanged S0 distance tolerance, converted to WORLD units.
+    const double worldCap = tTolerance*std::max(1.0, std::abs(t))*directionLength;
+    const double spatialBound = std::min(fp32Bound, worldCap);
+    if (!weightsInDomain || !std::isfinite(spatialResidual) || !(spatialResidual <= spatialBound)) {
+        const double edge = std::max({glm::length(e1), glm::length(e2), glm::length(c-b)});
         const V3 normal = glm::cross(e1, e2);
-        const double area = glm::length(normal), directionLength = glm::length(ray.d);
-        const V3 cpuPoint = a + u * e1 + v * e2;
-        const V3 gpuPoint = a + double(gpu.u) * e1 + double(gpu.v) * e2;
-        const V3 rayPoint = ray.o + double(gpu.t) * ray.d;
+        const double area = glm::length(normal);
+        const V3 cpuPoint = a + u*e1 + v*e2;
         double scale = 0;
-        for (const V3 p : {a, b, c, ray.o, rayPoint})
-            for (int k = 0; k < 3; ++k) scale = std::max(scale, std::abs(p[k]));
+        for (const V3 point : {a, b, c, ray.o, rayPoint})
+            for (int k = 0; k < 3; ++k) scale = std::max(scale, std::abs(point[k]));
         const float fpScale = static_cast<float>(scale);
         const double fpUlp = double(std::nextafter(fpScale, std::numeric_limits<float>::infinity())) - fpScale;
         std::ostringstream diagnostic;
         diagnostic.imbue(std::locale::classic());
         diagnostic << std::scientific << std::setprecision(12)
-                   << "barycentric mismatch: slot=" << gpu.slot << " mesh=" << instance.gpu.meshIndex
+                   << "barycentric mismatch: reason=" << (weightsInDomain ? "spatial-residual" : "weight-domain")
+                   << " slot=" << gpu.slot << " mesh=" << instance.gpu.meshIndex
                    << " primitive=" << gpu.primitive << " ray_type=" << gpuRay.type
                    << " cpu_uv=(" << u << ',' << v << ") gpu_uv=(" << gpu.u << ',' << gpu.v << ')'
                    << " abs_delta_uv=(" << std::abs(gpu.u-u) << ',' << std::abs(gpu.v-v) << ')'
@@ -394,7 +430,9 @@ RtHitCheck RtReference::check(const GPURtRay& gpuRay, const GPURtHit& gpu, const
                    << " cpu_t=" << t << " gpu_t=" << gpu.t
                    << " edge_max_world=" << edge << " altitude_min_world=" << (edge > 0 ? area / edge : 0)
                    << " incidence_cos=" << (area > 0 ? std::abs(glm::dot(normal, ray.d)) / (area * directionLength) : 0)
-                   << " spatial_residual_world=" << glm::length(gpuPoint-rayPoint)
+                   << " spatial_residual_world=" << spatialResidual
+                   << " spatial_bound_world=" << spatialBound << " fp32_reconstruction_bound=" << fp32Bound
+                   << " distance_world_cap=" << worldCap
                    << " bary_displacement_world=" << glm::length(gpuPoint-cpuPoint)
                    << " ray_perpendicular_residual_world=" << glm::length(glm::cross(gpuPoint-ray.o, ray.d)) / directionLength
                    << " coordinate_scale_world=" << scale << " fp32_ulp_world=" << fpUlp;
