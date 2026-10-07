@@ -22,6 +22,27 @@ TEST_CASE("F14 vacuum RTE limit has transmittance one and zero in-scattering") {
     CHECK(T.x==1);CHECK(T.y==1);CHECK(T.z==1);CHECK(value.radiance.x==0);CHECK(value.transmittance.x==1);
     CHECK(atmosphereMultipleScatteringReference(a,a.bottomRadius+1000,1,2,2).x==0);
 }
+TEST_CASE("F14 opaque endpoint on planetary ground contributes its material exactly once") {
+    auto a=vacuum();a.groundAlbedo=glm::dvec3(.3,.2,.1);
+    const glm::dvec3 camera(0,3,0),ray(0,-1,0),sun(0,1,0),E(5,7,11),scene(2,3,4);
+    // Analytic vacuum transport is identity for any already-shaded endpoint,
+    // independently of the unrelated planet-ground material and sunlight.
+    const auto volume=atmosphereSingleScattering(a,camera,ray,sun,E,4,3,false);
+    const auto reference=atmosphereSingleScatteringReference(a,camera,ray,sun,E,1e-8,4,3,false);
+    REQUIRE(volume.ground);REQUIRE(reference.ground);
+    const auto sky=atmosphereSingleScattering(a,camera,ray,sun,E,4,3);
+    const auto skyReference=atmosphereSingleScatteringReference(a,camera,ray,sun,E,1e-8,4,3);
+    const auto analyticGround=a.groundAlbedo*E/3.14159265358979323846;
+    for(u32 c=0;c<3;++c) {
+        CHECK(volume.transmittance[c]==1);CHECK(reference.transmittance[c]==1);
+        CHECK(volume.radiance[c]==0);CHECK(reference.radiance[c]==0);
+        CHECK(scene[c]*volume.transmittance[c]+volume.radiance[c]==scene[c]);
+        CHECK(sky.radiance[c]==doctest::Approx(analyticGround[c]).epsilon(1e-7));
+        CHECK(skyReference.radiance[c]==doctest::Approx(analyticGround[c]).epsilon(1e-7));
+        // Old composition added the planet's material on top of this mesh.
+        CHECK(scene[c]+sky.radiance[c]>scene[c]);
+    }
+}
 TEST_CASE("F14 vertical Rayleigh ozone optical depth agrees with independent analytic integral") {
     AtmosphereSettings a;a.mieScattering=glm::dvec3(0);a.mieAbsorption=0;
     const double height=a.topRadius-a.bottomRadius;
