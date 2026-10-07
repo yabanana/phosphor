@@ -135,7 +135,11 @@ inline GPURtHit rtTrace(const GPURtRay r, instance_acceleration_structure as,
     hit.slot = result.user_instance_id;
     hit.primitive = result.primitive_id;
     hit.generation = instances[hit.slot].generation;
-    hit.frontFacing = result.triangle_front_facing ? 1u : 0u;
+    // The raster reverses its cull mode for mirrored objects. Hardware RT
+    // culls in object space (no descriptor CCW override), then we report the
+    // world-geometric facing as S2 did. This does not change ray culling.
+    hit.frontFacing = (result.triangle_front_facing !=
+                       ((instances[hit.slot].flags & INSTANCE_FLAG_MIRRORED) != 0u)) ? 1u : 0u;
     hit.hit = 1u;
     return hit;
 }

@@ -194,7 +194,7 @@ void engineKernels(::soc::Context& ctx, ::soc::Report& rep) {
         if (!valid) {
             for (u32 f = 0; f < 12; ++f) wrongDescriptors += desc[i].transform[f] != ((f == 0 || f == 4 || f == 8) ? 1.0f : 0.0f);
         } else {
-            const u32 expectedOptions = (i == 2 ? 2u : 0u) | (i == 1 ? 0u : 4u);
+            const u32 expectedOptions = i == 1 ? 0u : 4u;
             wrongDescriptors += desc[i].options != expectedOptions;
         }
     }
@@ -251,6 +251,56 @@ void engineKernels(::soc::Context& ctx, ::soc::Report& rep) {
     k.p.corruption = RT_CORRUPT_NONE;
     k.build();
 
+    // S2 only checked the orientation reported by traversal; it never enabled
+    // raster-style back-face culling. Mirrored primaries must retain the same
+    // visible side as non-mirrored geometry, while reporting world facing.
+    instances[5].flags |= 1u;
+    auto aimed = [&](float x, bool back) {
+        for (u32 i = 0; i < kRays; ++i) {
+            rays[i] = {};
+            rays[i].ox = x; rays[i].oy = 0.23f; rays[i].oz = back ? -2.0f : 2.0f;
+            rays[i].dz = back ? 1.0f : -1.0f;
+            rays[i].tmax = 10;
+            rays[i].mask = RT_MASK_PRIMARY;
+            rays[i].type = RT_PROBE_PRIMARY;
+        }
+    };
+    u32 facingWrong = 0;
+    for (bool doubleSided : {false, true}) {
+        materials[0].flags = doubleSided ? MATERIAL_FLAG_DOUBLE_SIDED : 0u;
+        k.build();
+        for (bool mirrored : {false, true}) {
+            for (bool back : {false, true}) {
+                aimed(mirrored ? 3.31f : -3.31f, back);
+                k.runTrace();
+                for (u32 i = 0; i < kRays; ++i) {
+                    const bool expectedHit = !back || doubleSided;
+                    facingWrong += (hits[i].hit != 0u) != expectedHit;
+                    if (expectedHit) {
+                        facingWrong += hits[i].slot != (mirrored ? 2u : 5u);
+                        facingWrong += hits[i].frontFacing != u32(!back != mirrored);
+                    }
+                }
+            }
+        }
+    }
+    // The former descriptor-CCW convention must now fail the mirrored raster
+    // visibility test; this is a culling negative control, not just a flag test.
+    materials[0].flags = 0u;
+    k.build();
+    auto* mutableDesc = static_cast<GPURtInstanceDesc*>(k.tlas.instances->contents());
+    mutableDesc[2].options |= MTL::AccelerationStructureInstanceOptionTriangleFrontFacingWindingCounterClockwise;
+    timeEncoder(ctx, [&](MTL4::ComputeCommandEncoder* e) {
+        e->buildAccelerationStructure(k.tlas.as, k.tlas.desc, range(k.tlas.scratch));
+        e->barrierAfterEncoderStages(MTL::StageAccelerationStructure, MTL::StageDispatch, MTL4::VisibilityOptionDevice);
+    });
+    aimed(3.31f, false);
+    k.runTrace();
+    u32 wrongCcwDetected = 0;
+    for (u32 i = 0; i < kRays; ++i) wrongCcwDetected += hits[i].hit == 0u;
+    instances[5].flags = INSTANCE_FLAG_VALID | 2u;
+    k.build();
+
     // Secondary origin correctness: outgoing +Z shadows revisit the checker
     // at exactly the primary UV; holes stay open and no plane self-intersects.
     k.q.probeType = RT_PROBE_SHADOW;
@@ -295,13 +345,15 @@ void engineKernels(::soc::Context& ctx, ::soc::Report& rep) {
             const GPURtRay r = rays[y * kSize + x];
             generatedWrong += glm::length(d - glm::vec3(r.dx, r.dy, r.dz)) > 1e-5f || !(r.coneWidth > 0 && r.coneWidth < 0.1f);
         }
-    const bool pass = wrongDescriptors == 0 && primaryWrong == 0 && coneWrong == 0 && shadowWrong == 0 && offsetWrong == 0 && generatedWrong == 0 && caught == 3;
+    const bool pass = wrongDescriptors == 0 && primaryWrong == 0 && coneWrong == 0 && shadowWrong == 0 && offsetWrong == 0 && generatedWrong == 0 && facingWrong == 0 && wrongCcwDetected == kRays && caught == 3;
     rep.value("descriptors.wrong", "fields", wrongDescriptors, {}, false);
     rep.value("primary.wrong", "rays", primaryWrong, {{"rays", kRays}}, false);
     rep.value("primary_cone.wrong", "rays", coneWrong, {{"rays", kRays}}, false);
     rep.value("shadow.wrong", "rays", shadowWrong, {{"rays", kRays}}, false);
     rep.value("offset.self_hits_or_invalid", "rays", offsetWrong, {}, false);
     rep.value("primary_generated.wrong", "rays", generatedWrong, {}, false);
+    rep.value("facing.wrong", "rays", facingWrong, {}, false);
+    rep.value("negative.former_ccw.mismatches", "rays", wrongCcwDetected, {}, true);
     rep.value("primary.ms", "ms", primaryMs, {}, false);
     rep.value("shadow.ms", "ms", shadowMs, {}, false);
     rep.value("alpha.tests", "calls", primaryCounts.alphaTests, {}, false);

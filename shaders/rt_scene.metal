@@ -50,20 +50,25 @@ kernel void rt_write_instances(const device GPUInstance* instances [[buffer(0)]]
             if ((instance.flags & 1u) != 0u) d.mask |= RT_MASK_PRIMARY | RT_MASK_INDIRECT;
             if ((instance.flags & 2u) != 0u) d.mask |= RT_MASK_SHADOW;
             const device GPUMaterial& material = materials[instance.materialIndex];
-            // Exact values from MTLAccelerationStructure.hpp. CCW on mirrored
-            // instances only is the measured S2 contract (Metal RT vs raster).
-            if ((instance.flags & INSTANCE_FLAG_MIRRORED) != 0u) d.options |= 2u;
+            // Exact values from MTLAccelerationStructure.hpp. S2's CCW option
+            // on mirrored instances reports world-space geometric facing, but
+            // would cull the wrong side for the raster's mirrored CullModeFront.
+            // Keep object-space front-facing for hardware culling; rtTrace
+            // converts the reported face to world-facing after traversal.
             if ((material.flags & MATERIAL_FLAG_DOUBLE_SIDED) != 0u) d.options |= 1u;
             if (material.alphaCutoff <= 0.0f) d.options |= 4u;
             if (p.corruption == RT_CORRUPT_TRANSFORM) d.transform[9] += 100000.0f;
             if (p.corruption == RT_CORRUPT_MASK) d.mask = 0u;
             if (p.corruption == RT_CORRUPT_BLAS) {
-                // Never fabricate a resource ID or expose unchecked geometry:
-                // mask mismatching geometry out. Different valid BLAS IDs are
-                // written as well, but no shader can fetch the wrong mesh UVs.
+                // Never fabricate a resource ID. A different valid BLAS tests
+                // the mapping independently of the mask control. Attribute
+                // fetches still check primitive against the original mesh's
+                // indexCount, so mismatched geometry cannot escape its ranges.
                 const uint alternate = (meshIndex + 1u) % p.meshCount;
-                if (rtHasBlas(meshes[alternate])) meshIndex = alternate;
-                d.mask = 0u;
+                const bool different = meshes[alternate].blasLo != meshes[meshIndex].blasLo ||
+                                       meshes[alternate].blasHi != meshes[meshIndex].blasHi;
+                if (different && rtHasBlas(meshes[alternate])) meshIndex = alternate;
+                else d.mask = 0u; // one mesh / aliased IDs: safe deterministic mismatch
             }
         }
         d.blasLo = meshes[meshIndex].blasLo;
