@@ -257,6 +257,7 @@ TEST_CASE("pipelines script: retains F10-F14 lighting, depth-only and physical H
                               "gi_candidates", "gi_temporal", "gi_spatial", "gi_shade", "visibility_lit_resolve",
                               "reflection_rt", "reflection_ssr", "reflection_composite", "reflection_probe_prefilter",
                               "ao_rtao", "ao_gtao", "denoise_temporal", "denoise_atrous",
+                              "denoise_pack", "denoise_pack_clear", "denoise_restore_radiance",
                               "atmosphere_transmittance", "atmosphere_multiscattering", "atmosphere_sky_view", "atmosphere_apply",
                               "fog_inject", "fog_inject_rt", "fog_temporal", "fog_integrate", "fog_apply",
                               "clouds_march", "clouds_temporal", "clouds_apply"}) {
@@ -272,13 +273,15 @@ TEST_CASE("pipelines script: retains F10-F14 lighting, depth-only and physical H
     CHECK(script.render.count("shadow_depth_vertex|shadow_depth_fragment|DepthOnly|Disabled") == 1);
     CHECK(script.render.count("shadow_cache_depth_vertex|shadow_cache_depth_fragment|DepthOnly|Disabled") == 1);
     CHECK(script.render.count("forward_surface_vs|forward_surface_lit_fs|RGBA32Float|Disabled") == 1);
-    bool shadowMesh = false, cacheMesh = false;
+    bool shadowMesh = false, cacheMesh = false, lightingAlpha = false;
     for (const auto& key : script.mesh) {
         shadowMesh |= key.starts_with("|shadow_depth_mesh|shadow_depth_fragment|DepthOnly|");
         cacheMesh |= key.starts_with("|shadow_cache_depth_mesh|shadow_cache_depth_fragment|DepthOnly|");
+        lightingAlpha |= key.find("|visibility_alpha_lit_fs") != std::string::npos;
     }
     CHECK(shadowMesh);
     CHECK(cacheMesh);
+    CHECK(lightingAlpha);
 }
 
 TEST_CASE("pipelines script: an unlinked alpha declaration cannot satisfy RT linkage coverage") {

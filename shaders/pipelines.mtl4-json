@@ -970,6 +970,51 @@
         "label": "11DF1B59364CA2665BF210DBB8C642F3F844B42E42034DE9853C894425364EB2",
         "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
         "name": "atmosphere_transmittance"
+      },
+      {
+        "label": "89E69E53E1C752C2B6720F1C70FFD4D1C788D28249027624A9E146F020F6AFCD",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "visibility_alpha_lit_fs"
+      },
+      {
+        "label": "57BBBA3DFF35A3C23418F2B6F042649965564A06F33D359870E156E14D51113A",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "reflection_probe_prefilter"
+      },
+      {
+        "label": "903D0524ABE8E73B7D3574C29DE0785330ECBC14F58A6FCB6F442B8D0CC1B6AF",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "reflection_probe_capture_fs"
+      },
+      {
+        "label": "F3A85C767E3632C859DC30C5BF1A0440CE7A441EE809AF2B7552E5C3A28292D6",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "reflection_capture_rt"
+      },
+      {
+        "label": "3E5C0D57C96F224F4433C615AE8D3FAE5192BAB3B07628CC5049E8C5AB3DB927",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "reflection_probe_capture_vs"
+      },
+      {
+        "label": "A3A2EE31FEC3C2070FE49AC8443CA23CF2AD9B8FCEC89149BA4CDDF09D0D8383",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "reflection_probe_validate"
+      },
+      {
+        "label": "91830FE4AFC6F104F575D6828C12B58F9AE3F9813BBDC4E3E6D17C433F977AD8",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "denoise_restore_radiance"
+      },
+      {
+        "label": "A590E77FC739561FE8FF645E2855603163E8756832DC6B387E3AC9EBC7CC771B",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "denoise_pack"
+      },
+      {
+        "label": "4DE7AD72872F4D95BCC6FA13CE1DB4550DA44E4E12E4C7282B9074BA7B8851EC",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "denoise_pack_clear"
       }
     ],
     "specialized_function_descriptors": [
@@ -5408,6 +5453,59 @@
           0,
           0
         ]
+      },
+      {
+        "compute_function_descriptor": "fnd:F3A85C767E3632C859DC30C5BF1A0440CE7A441EE809AF2B7552E5C3A28292D6",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ],
+        "static_linking_descriptor": {
+          "function_descriptors": [
+            "fnd:675CDEE93E6729E03B32DACF556C5FF6120906B4A3CDE9F4AD69B4A8268DE850"
+          ]
+        }
+      },
+      {
+        "compute_function_descriptor": "fnd:57BBBA3DFF35A3C23418F2B6F042649965564A06F33D359870E156E14D51113A",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:A3A2EE31FEC3C2070FE49AC8443CA23CF2AD9B8FCEC89149BA4CDDF09D0D8383",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:4DE7AD72872F4D95BCC6FA13CE1DB4550DA44E4E12E4C7282B9074BA7B8851EC",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:91830FE4AFC6F104F575D6828C12B58F9AE3F9813BBDC4E3E6D17C433F977AD8",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:A590E77FC739561FE8FF645E2855603163E8756832DC6B387E3AC9EBC7CC771B",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
       }
     ],
     "mesh_render_pipeline_descriptors": [
@@ -7638,6 +7736,30 @@
           0,
           0
         ]
+      },
+      {
+        "color_attachments": [
+          {
+            "pixel_format": "R32Uint"
+          }
+        ],
+        "fragment_function_descriptor": "fnd:89E69E53E1C752C2B6720F1C70FFD4D1C788D28249027624A9E146F020F6AFCD",
+        "max_total_threadgroups_per_mesh_grid": 32,
+        "max_total_threads_per_mesh_threadgroup": 128,
+        "max_total_threads_per_object_threadgroup": 32,
+        "mesh_function_descriptor": "fnd:BF2DF5598D8DDE61E9C97DCC028D49C37689C20F0B78ECB5EC5E390A36894CE5",
+        "object_function_descriptor": "fnd:50CA37A6198C713A2241804BBDFDA2EBFD47FF059112CB485C0D8EF39657F736",
+        "payload_memory_length": 384,
+        "required_threads_per_mesh_threadgroup": [
+          0,
+          0,
+          0
+        ],
+        "required_threads_per_object_threadgroup": [
+          0,
+          0,
+          0
+        ]
       }
     ],
     "render_pipeline_descriptors": [
@@ -8764,6 +8886,15 @@
         ],
         "fragment_function_descriptor": "fnd:EB41E4FEA5260DFCA4F1EF858FB90BB7748FFB41D12832153626462CE5E58BE4",
         "vertex_function_descriptor": "fnd:85D2EF7C20876C7C30670BBEBAC20FB144D3D7E85D9BF62B2188BE3CDE935058"
+      },
+      {
+        "color_attachments": [
+          {
+            "pixel_format": "RGBA32Float"
+          }
+        ],
+        "fragment_function_descriptor": "fnd:903D0524ABE8E73B7D3574C29DE0785330ECBC14F58A6FCB6F442B8D0CC1B6AF",
+        "vertex_function_descriptor": "fnd:3E5C0D57C96F224F4433C615AE8D3FAE5192BAB3B07628CC5049E8C5AB3DB927"
       }
     ],
     "tile_render_pipeline_descriptors": [

@@ -89,6 +89,12 @@ struct MetalfxDenoise::Impl {
             maximumScale=MTLFX::TemporalDenoisedScalerDescriptor::supportedInputContentMaxScale(c.device());
         }
 #endif
+        if(p.harvesting()) {
+            // Record only our public MSL pipelines in the engine archive.
+            // This never creates an SDK scaler or grants radiometry admission.
+            packHandle=p.request(packPipeline("denoise_pack"));clearHandle=p.request(packPipeline("denoise_pack_clear"));
+            restoreHandle=p.request(packPipeline("denoise_restore_radiance"));
+        }
         if(o.enabled && metalfx_denoise::permitsNativeEncoding(o.radiometricDomain) && stats.sdkAvailable && stats.deviceSupported && stats.factoryInstalled) {
             packHandle=p.request(packPipeline("denoise_pack"));clearHandle=p.request(packPipeline("denoise_pack_clear"));
             restoreHandle=p.request(packPipeline("denoise_restore_radiance"));
