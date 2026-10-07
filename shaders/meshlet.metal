@@ -760,11 +760,17 @@ fragment uint visibility_alpha_fs(VisibilityFragment in [[stage_in]], const devi
                                   constant GPUTemporalParams &temporal [[buffer(16)]]) {
     const GPUMaterial material = materials[in.vert.materialIndex];
     constexpr sampler sampling(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
+    // Match every indexed receiver/material path: scale the derivative
+    // footprint itself. An implicit LOD bias does not express that same
+    // footprint to anisotropic sampling, so alpha coverage can diverge in DRS.
+    const float footprintScale = exp2(temporal.mipBias);
+    const float2 uvDx = dfdx(in.vert.uv) * footprintScale;
+    const float2 uvDy = dfdy(in.vert.uv) * footprintScale;
     const float alpha =
         material.baseColor[3] *
         (material.baseColorTex == INVALID_TEXTURE_INDEX
              ? 1.0f
-             : float(half(textures[material.baseColorTex].tex.sample(sampling, in.vert.uv, bias(temporal.mipBias)).a)));
+             : float(half(textures[material.baseColorTex].tex.sample(sampling, in.vert.uv, gradient2d(uvDx, uvDy)).a)));
     if (alpha < material.alphaCutoff)
         discard_fragment();
     return in.primitive.id;
