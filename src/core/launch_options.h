@@ -185,6 +185,22 @@ namespace phosphor {
 //   --history-reset-every N  F6.5: invalidate the Hi-Z history every N
 //                      frames (camera-cut path; 0 = only on real cuts)
 //
+//   --rt off|on        F9 BLAS/TLAS infrastructure (default off)
+//   --rt-tlas-rebuild-every N  periodic TLAS rebuild, 0 = structural changes only
+//   --rt-proxy off|manifest    RT geometry source (default full geometry)
+//   --rt-proxy-manifest PATH   explicit measured manifest (needs manifest mode)
+//   --debug-view rt    RT primary-hit diagnostic, also on the indexed path
+//   --debug-rt N       CPU reference comparison every N frames (0 = disabled)
+//   --debug-rt-deform  deform mesh 0 for BLAS lifecycle diagnostics; requires
+//                      --rt on --debug-rt N>0 --debug-view rt --rt-proxy off
+//   --debug-rt-corrupt transform|mask|blas  negative control (needs --debug-rt N>0)
+//   --debug-rt-proxy-transition mask|emissive|reassign|full-upload
+//                      diagnostic material transition on a measured proxy;
+//                      requires RT, manifest proxies, checks, and no bench switching
+//   --rt-probe primary|shadow|ao|diffuse    per-ray traversal measurement
+//                      RT settings require --rt on; synthetic graph scenarios,
+//                      memory-stress and transient-only tests cannot use RT.
+//
 // Arguments not starting with "--" are ignored: macOS may add its own
 // (e.g. -NSDocumentRevisionsDebugMode when launched from Xcode).
 // ---------------------------------------------------------------------------
@@ -199,11 +215,19 @@ enum class GeometryPath : u8 { Indexed, Mesh };
 enum class MeshletCull : u8 { Off, Frustum, TwoPhase };
 enum class HiZPath : u8 { Auto, Compute, Sampler };
 enum class MeshletCorruption : u8 { None, Id, Depth, Count };
-enum class MeshletDebugView : u8 { None, Meshlets, Cull, HiZ };
+enum class MeshletDebugView : u8 { None, Meshlets, Cull, HiZ, RT };
 [[nodiscard]] const char* geometryPathName(GeometryPath path);
 [[nodiscard]] const char* meshletCullName(MeshletCull cull);
 [[nodiscard]] const char* hizPathName(HiZPath path);
 [[nodiscard]] const char* meshletDebugViewName(MeshletDebugView view);
+
+/// F9 ray-tracing diagnostics (available on indexed and mesh paths).
+enum class RtCorruption : u8 { None, Transform, Mask, Blas };
+enum class RtProbe : u8 { None, Primary, Shadow, AO, Diffuse };
+enum class RtProxyTransition : u8 { None, Mask, Emissive, Reassign, FullUpload };
+[[nodiscard]] const char* rtCorruptionName(RtCorruption corruption);
+[[nodiscard]] const char* rtProbeName(RtProbe probe);
+[[nodiscard]] const char* rtProxyTransitionName(RtProxyTransition transition);
 
 /// OPT-1 graph compilation modes (--graph-opt).
 enum class GraphOptMode : u8 { Off, Greedy, Plan };
@@ -296,6 +320,16 @@ struct LaunchOptions {
     bool         meshletSpatial  = false; // --meshlet-builder spatial
     u32          meshletMaxVertices  = 0; // 0 = default (64)
     u32          meshletMaxTriangles = 0; // 0 = default (124)
+    // F9: RT infrastructure is opt-in until a lighting consumer needs it.
+    bool         rtEnabled = false;           // --rt off|on
+    u32          rtTlasRebuildEvery = 0;        // 0 = structural changes only; cadence needs engine measurements
+    bool         rtProxyManifest = false;      // --rt-proxy off|manifest
+    std::string  rtProxyManifestPath;          // empty = scene's default manifest, missing = full geometry
+    u32          debugRt = 0;                  // --debug-rt N: readback/check cadence, 0 = off
+    bool         debugRtDeform = false;       // diagnostic mesh-0 deformation; raster bounds are unchanged
+    RtProxyTransition debugRtProxyTransition = RtProxyTransition::None;
+    RtCorruption debugRtCorrupt = RtCorruption::None;
+    RtProbe      rtProbe = RtProbe::None;
     // F7/F8 renderer, temporal reconstruction, capture and bounded diagnostics.
     std::string scenePath;
     bool visibility = false, materialBinning = false; // measured baseline; specialization stays opt-in

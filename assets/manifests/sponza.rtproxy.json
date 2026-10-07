@@ -1,0 +1,951 @@
+{
+  "geometry_fingerprint": "fnv1a64:af59b01913502b13",
+  "measured": {
+    "acne_percent": 0.13340762195597405,
+    "distance95_cm": 0.07280111312866211,
+    "primary_bad_percent": 0.09278549382716049,
+    "primary_rays": 1555200,
+    "shadow_percent": 0.04281519854485034,
+    "shadow_receivers": 705357
+  },
+  "measurement_corpus": "F9-S4 three Sponza cameras at 960x540; sun=(0.30,0.85,0.20) normalized; full geometry receivers, offsets 0.001/0.01m; MASK/emissive meshes full",
+  "measurement_scope": "opaque-geometry-s4",
+  "meshes": [
+    {
+      "index_fingerprint": "fnv1a64:8ab128d6d6d64d68",
+      "level": "full",
+      "mesh": 0,
+      "object_space_error": 0.0,
+      "proxy_indices": 10920,
+      "relative_error": 0.0,
+      "source_indices": 10920
+    },
+    {
+      "index_fingerprint": "fnv1a64:13e066036519a617",
+      "level": "full",
+      "mesh": 1,
+      "object_space_error": 0.0,
+      "proxy_indices": 1404,
+      "relative_error": 0.0,
+      "source_indices": 1404
+    },
+    {
+      "index_fingerprint": "fnv1a64:9e635e47341a0c1b",
+      "level": "r10b",
+      "mesh": 2,
+      "object_space_error": 3.0491855144500732,
+      "proxy_indices": 663,
+      "relative_error": 0.054121531546115875,
+      "source_indices": 6633
+    },
+    {
+      "index_fingerprint": "fnv1a64:6d112086aaffb021",
+      "level": "full",
+      "mesh": 3,
+      "object_space_error": 0.0,
+      "proxy_indices": 4086,
+      "relative_error": 0.0,
+      "source_indices": 4086
+    },
+    {
+      "index_fingerprint": "fnv1a64:4c626f89f2b69c26",
+      "level": "r10b",
+      "mesh": 4,
+      "object_space_error": 0.0,
+      "proxy_indices": 324,
+      "relative_error": 0.0,
+      "source_indices": 324
+    },
+    {
+      "index_fingerprint": "fnv1a64:51dbed7bde0b36cc",
+      "level": "r10b",
+      "mesh": 5,
+      "object_space_error": 0.0,
+      "proxy_indices": 840,
+      "relative_error": 0.0,
+      "source_indices": 840
+    },
+    {
+      "index_fingerprint": "fnv1a64:487fc4e93309ad33",
+      "level": "full",
+      "mesh": 6,
+      "object_space_error": 0.0,
+      "proxy_indices": 6996,
+      "relative_error": 0.0,
+      "source_indices": 6996
+    },
+    {
+      "index_fingerprint": "fnv1a64:cf76994ca68b7831",
+      "level": "full",
+      "mesh": 7,
+      "object_space_error": 0.0,
+      "proxy_indices": 4368,
+      "relative_error": 0.0,
+      "source_indices": 4368
+    },
+    {
+      "index_fingerprint": "fnv1a64:026cf7777eafb7ea",
+      "level": "full",
+      "mesh": 8,
+      "object_space_error": 0.0,
+      "proxy_indices": 8688,
+      "relative_error": 0.0,
+      "source_indices": 8688
+    },
+    {
+      "index_fingerprint": "fnv1a64:6253f94376771dd8",
+      "level": "r10b",
+      "mesh": 9,
+      "object_space_error": 0.0,
+      "proxy_indices": 48,
+      "relative_error": 0.0,
+      "source_indices": 48
+    },
+    {
+      "index_fingerprint": "fnv1a64:487fc4e93309ad33",
+      "level": "full",
+      "mesh": 10,
+      "object_space_error": 0.0,
+      "proxy_indices": 6996,
+      "relative_error": 0.0,
+      "source_indices": 6996
+    },
+    {
+      "index_fingerprint": "fnv1a64:4424ad0b877fc639",
+      "level": "full",
+      "mesh": 11,
+      "object_space_error": 0.0,
+      "proxy_indices": 3288,
+      "relative_error": 0.0,
+      "source_indices": 3288
+    },
+    {
+      "index_fingerprint": "fnv1a64:cc2974ffd18c8635",
+      "level": "full",
+      "mesh": 12,
+      "object_space_error": 0.0,
+      "proxy_indices": 11040,
+      "relative_error": 0.0,
+      "source_indices": 11040
+    },
+    {
+      "index_fingerprint": "fnv1a64:95fdf1fc97ef602b",
+      "level": "r10b",
+      "mesh": 13,
+      "object_space_error": 0.0,
+      "proxy_indices": 612,
+      "relative_error": 0.0,
+      "source_indices": 612
+    },
+    {
+      "index_fingerprint": "fnv1a64:fdf18c65a485fa63",
+      "level": "r10b",
+      "mesh": 14,
+      "object_space_error": 0.0,
+      "proxy_indices": 612,
+      "relative_error": 0.0,
+      "source_indices": 612
+    },
+    {
+      "index_fingerprint": "fnv1a64:5358579503d5b9e5",
+      "level": "r10b",
+      "mesh": 15,
+      "object_space_error": 0.0,
+      "proxy_indices": 444,
+      "relative_error": 0.0,
+      "source_indices": 444
+    },
+    {
+      "index_fingerprint": "fnv1a64:bb3ec6334c726867",
+      "level": "r10b",
+      "mesh": 16,
+      "object_space_error": 29.0836124420166,
+      "proxy_indices": 108,
+      "relative_error": 0.5050471425056458,
+      "source_indices": 480
+    },
+    {
+      "index_fingerprint": "fnv1a64:b154bb142ef70bdf",
+      "level": "r10b",
+      "mesh": 17,
+      "object_space_error": 9.30229377746582,
+      "proxy_indices": 180,
+      "relative_error": 0.2626306712627411,
+      "source_indices": 336
+    },
+    {
+      "index_fingerprint": "fnv1a64:bb3ec6334c726867",
+      "level": "r10b",
+      "mesh": 18,
+      "object_space_error": 29.083595275878906,
+      "proxy_indices": 108,
+      "relative_error": 0.5050468444824219,
+      "source_indices": 480
+    },
+    {
+      "index_fingerprint": "fnv1a64:b154bb142ef70bdf",
+      "level": "r10b",
+      "mesh": 19,
+      "object_space_error": 9.30228042602539,
+      "proxy_indices": 180,
+      "relative_error": 0.26263028383255005,
+      "source_indices": 336
+    },
+    {
+      "index_fingerprint": "fnv1a64:bb3ec6334c726867",
+      "level": "r10b",
+      "mesh": 20,
+      "object_space_error": 29.08347511291504,
+      "proxy_indices": 108,
+      "relative_error": 0.5050447583198547,
+      "source_indices": 480
+    },
+    {
+      "index_fingerprint": "fnv1a64:b154bb142ef70bdf",
+      "level": "r10b",
+      "mesh": 21,
+      "object_space_error": 9.30227279663086,
+      "proxy_indices": 180,
+      "relative_error": 0.26263007521629333,
+      "source_indices": 336
+    },
+    {
+      "index_fingerprint": "fnv1a64:bb3ec6334c726867",
+      "level": "r10b",
+      "mesh": 22,
+      "object_space_error": 29.083526611328125,
+      "proxy_indices": 108,
+      "relative_error": 0.5050456523895264,
+      "source_indices": 480
+    },
+    {
+      "index_fingerprint": "fnv1a64:b154bb142ef70bdf",
+      "level": "r10b",
+      "mesh": 23,
+      "object_space_error": 9.302302360534668,
+      "proxy_indices": 180,
+      "relative_error": 0.2626309096813202,
+      "source_indices": 336
+    },
+    {
+      "index_fingerprint": "fnv1a64:319230a18a06a31a",
+      "level": "r10b",
+      "mesh": 24,
+      "object_space_error": 29.083646774291992,
+      "proxy_indices": 108,
+      "relative_error": 0.5050477385520935,
+      "source_indices": 480
+    },
+    {
+      "index_fingerprint": "fnv1a64:68ba6d90764fa9f0",
+      "level": "r10b",
+      "mesh": 25,
+      "object_space_error": 8.692950248718262,
+      "proxy_indices": 180,
+      "relative_error": 0.24542714655399323,
+      "source_indices": 336
+    },
+    {
+      "index_fingerprint": "fnv1a64:319230a18a06a31a",
+      "level": "r10b",
+      "mesh": 26,
+      "object_space_error": 29.08354377746582,
+      "proxy_indices": 108,
+      "relative_error": 0.5050459504127502,
+      "source_indices": 480
+    },
+    {
+      "index_fingerprint": "fnv1a64:68ba6d90764fa9f0",
+      "level": "r10b",
+      "mesh": 27,
+      "object_space_error": 8.692954063415527,
+      "proxy_indices": 180,
+      "relative_error": 0.24542725086212158,
+      "source_indices": 336
+    },
+    {
+      "index_fingerprint": "fnv1a64:319230a18a06a31a",
+      "level": "r10b",
+      "mesh": 28,
+      "object_space_error": 29.083526611328125,
+      "proxy_indices": 108,
+      "relative_error": 0.5050456523895264,
+      "source_indices": 480
+    },
+    {
+      "index_fingerprint": "fnv1a64:68ba6d90764fa9f0",
+      "level": "r10b",
+      "mesh": 29,
+      "object_space_error": 8.692935943603516,
+      "proxy_indices": 180,
+      "relative_error": 0.2454267293214798,
+      "source_indices": 336
+    },
+    {
+      "index_fingerprint": "fnv1a64:319230a18a06a31a",
+      "level": "r10b",
+      "mesh": 30,
+      "object_space_error": 29.08343505859375,
+      "proxy_indices": 108,
+      "relative_error": 0.5050440430641174,
+      "source_indices": 480
+    },
+    {
+      "index_fingerprint": "fnv1a64:68ba6d90764fa9f0",
+      "level": "r10b",
+      "mesh": 31,
+      "object_space_error": 8.692931175231934,
+      "proxy_indices": 180,
+      "relative_error": 0.24542661011219025,
+      "source_indices": 336
+    },
+    {
+      "index_fingerprint": "fnv1a64:319230a18a06a31a",
+      "level": "r10b",
+      "mesh": 32,
+      "object_space_error": 29.083492279052734,
+      "proxy_indices": 108,
+      "relative_error": 0.5050450563430786,
+      "source_indices": 480
+    },
+    {
+      "index_fingerprint": "fnv1a64:68ba6d90764fa9f0",
+      "level": "r10b",
+      "mesh": 33,
+      "object_space_error": 8.692954063415527,
+      "proxy_indices": 180,
+      "relative_error": 0.24542725086212158,
+      "source_indices": 336
+    },
+    {
+      "index_fingerprint": "fnv1a64:566472d9f467c866",
+      "level": "r10b",
+      "mesh": 34,
+      "object_space_error": 0.0,
+      "proxy_indices": 1320,
+      "relative_error": 0.0,
+      "source_indices": 1320
+    },
+    {
+      "index_fingerprint": "fnv1a64:44554a8ad785ed74",
+      "level": "r10b",
+      "mesh": 35,
+      "object_space_error": 0.0,
+      "proxy_indices": 96,
+      "relative_error": 0.0,
+      "source_indices": 96
+    },
+    {
+      "index_fingerprint": "fnv1a64:51dbed7bde0b36cc",
+      "level": "r10b",
+      "mesh": 36,
+      "object_space_error": 0.0,
+      "proxy_indices": 840,
+      "relative_error": 0.0,
+      "source_indices": 840
+    },
+    {
+      "index_fingerprint": "fnv1a64:a686b43fe800373b",
+      "level": "r10b",
+      "mesh": 37,
+      "object_space_error": 0.0,
+      "proxy_indices": 162,
+      "relative_error": 0.0,
+      "source_indices": 162
+    },
+    {
+      "index_fingerprint": "fnv1a64:22e8dc849798cd41",
+      "level": "r10b",
+      "mesh": 38,
+      "object_space_error": 10.568199157714844,
+      "proxy_indices": 444,
+      "relative_error": 0.019187195226550102,
+      "source_indices": 726
+    },
+    {
+      "index_fingerprint": "fnv1a64:a2dee61ee9a3bb8d",
+      "level": "r10b",
+      "mesh": 39,
+      "object_space_error": 0.0,
+      "proxy_indices": 72,
+      "relative_error": 0.0,
+      "source_indices": 72
+    },
+    {
+      "index_fingerprint": "fnv1a64:21be2761e11db1b9",
+      "level": "r10b",
+      "mesh": 40,
+      "object_space_error": 10.568103790283203,
+      "proxy_indices": 126,
+      "relative_error": 0.06234409660100937,
+      "source_indices": 246
+    },
+    {
+      "index_fingerprint": "fnv1a64:a2dee61ee9a3bb8d",
+      "level": "r10b",
+      "mesh": 41,
+      "object_space_error": 0.0,
+      "proxy_indices": 72,
+      "relative_error": 0.0,
+      "source_indices": 72
+    },
+    {
+      "index_fingerprint": "fnv1a64:63c971a9e49e78ac",
+      "level": "r25b",
+      "mesh": 42,
+      "object_space_error": 12.423813819885254,
+      "proxy_indices": 942,
+      "relative_error": 0.008533007465302944,
+      "source_indices": 1668
+    },
+    {
+      "index_fingerprint": "fnv1a64:80a14afacd4cf6c3",
+      "level": "r10b",
+      "mesh": 43,
+      "object_space_error": 0.3322453200817108,
+      "proxy_indices": 132,
+      "relative_error": 0.00012151955161243677,
+      "source_indices": 150
+    },
+    {
+      "index_fingerprint": "fnv1a64:e29cd0f0f9e0629e",
+      "level": "r25b",
+      "mesh": 44,
+      "object_space_error": 3.629767894744873,
+      "proxy_indices": 8352,
+      "relative_error": 0.0013278453843668103,
+      "source_indices": 10224
+    },
+    {
+      "index_fingerprint": "fnv1a64:4a8b67dd7af036d5",
+      "level": "r10b",
+      "mesh": 45,
+      "object_space_error": 0.21487130224704742,
+      "proxy_indices": 132,
+      "relative_error": 7.868695684010163e-05,
+      "source_indices": 150
+    },
+    {
+      "index_fingerprint": "fnv1a64:407c7c99fb8502f9",
+      "level": "r10b",
+      "mesh": 46,
+      "object_space_error": 0.0,
+      "proxy_indices": 15,
+      "relative_error": 0.0,
+      "source_indices": 15
+    },
+    {
+      "index_fingerprint": "fnv1a64:497fdada7303b14b",
+      "level": "full",
+      "mesh": 47,
+      "object_space_error": 0.0,
+      "proxy_indices": 4080,
+      "relative_error": 0.0,
+      "source_indices": 4080
+    },
+    {
+      "index_fingerprint": "fnv1a64:73ef31d9be86b550",
+      "level": "full",
+      "mesh": 48,
+      "object_space_error": 0.0,
+      "proxy_indices": 11208,
+      "relative_error": 0.0,
+      "source_indices": 11208
+    },
+    {
+      "index_fingerprint": "fnv1a64:03572f5e1f854127",
+      "level": "full",
+      "mesh": 49,
+      "object_space_error": 0.0,
+      "proxy_indices": 69624,
+      "relative_error": 0.0,
+      "source_indices": 69624
+    },
+    {
+      "index_fingerprint": "fnv1a64:89f271115abb69b1",
+      "level": "r10b",
+      "mesh": 50,
+      "object_space_error": 0.0,
+      "proxy_indices": 54,
+      "relative_error": 0.0,
+      "source_indices": 54
+    },
+    {
+      "index_fingerprint": "fnv1a64:91893998c96f44d6",
+      "level": "r10b",
+      "mesh": 51,
+      "object_space_error": 0.0,
+      "proxy_indices": 192,
+      "relative_error": 0.0,
+      "source_indices": 192
+    },
+    {
+      "index_fingerprint": "fnv1a64:945c88050eb80719",
+      "level": "r50b",
+      "mesh": 52,
+      "object_space_error": 0.3600232005119324,
+      "proxy_indices": 8184,
+      "relative_error": 0.00031808321364223957,
+      "source_indices": 16368
+    },
+    {
+      "index_fingerprint": "fnv1a64:32a9a737dd5473b6",
+      "level": "full",
+      "mesh": 53,
+      "object_space_error": 0.0,
+      "proxy_indices": 83388,
+      "relative_error": 0.0,
+      "source_indices": 83388
+    },
+    {
+      "index_fingerprint": "fnv1a64:3e0a69d743106ec4",
+      "level": "r50b",
+      "mesh": 54,
+      "object_space_error": 0.10456439107656479,
+      "proxy_indices": 8256,
+      "relative_error": 0.0003169270057696849,
+      "source_indices": 16512
+    },
+    {
+      "index_fingerprint": "fnv1a64:0e98bfba923f0e36",
+      "level": "r50b",
+      "mesh": 55,
+      "object_space_error": 0.1045493558049202,
+      "proxy_indices": 8256,
+      "relative_error": 0.00031688151648268104,
+      "source_indices": 16512
+    },
+    {
+      "index_fingerprint": "fnv1a64:b928abc75c4866aa",
+      "level": "r10b",
+      "mesh": 56,
+      "object_space_error": 1.5365997552871704,
+      "proxy_indices": 1650,
+      "relative_error": 0.004657321143895388,
+      "source_indices": 16512
+    },
+    {
+      "index_fingerprint": "fnv1a64:5c6c5971079a6f6d",
+      "level": "r10b",
+      "mesh": 57,
+      "object_space_error": 1.5138282775878906,
+      "proxy_indices": 1650,
+      "relative_error": 0.004588304087519646,
+      "source_indices": 16512
+    },
+    {
+      "index_fingerprint": "fnv1a64:7bc7928b2290d805",
+      "level": "r25b",
+      "mesh": 58,
+      "object_space_error": 0.5090864300727844,
+      "proxy_indices": 4128,
+      "relative_error": 0.0015430041821673512,
+      "source_indices": 16512
+    },
+    {
+      "index_fingerprint": "fnv1a64:0ca3f633432b7d13",
+      "level": "r50b",
+      "mesh": 59,
+      "object_space_error": 0.10186408460140228,
+      "proxy_indices": 8256,
+      "relative_error": 0.0003087426593992859,
+      "source_indices": 16512
+    },
+    {
+      "index_fingerprint": "fnv1a64:a8407990a919dc79",
+      "level": "r50b",
+      "mesh": 60,
+      "object_space_error": 0.10419009625911713,
+      "proxy_indices": 8256,
+      "relative_error": 0.00031579253845848143,
+      "source_indices": 16512
+    },
+    {
+      "index_fingerprint": "fnv1a64:9081458affa0334f",
+      "level": "r50b",
+      "mesh": 61,
+      "object_space_error": 0.10832255333662033,
+      "proxy_indices": 8256,
+      "relative_error": 0.0003283177502453327,
+      "source_indices": 16512
+    },
+    {
+      "index_fingerprint": "fnv1a64:b8399c836634ffa0",
+      "level": "r50b",
+      "mesh": 62,
+      "object_space_error": 0.34493371844291687,
+      "proxy_indices": 16560,
+      "relative_error": 0.00019280900596641004,
+      "source_indices": 33120
+    },
+    {
+      "index_fingerprint": "fnv1a64:f45414e1aa9f7a70",
+      "level": "r10b",
+      "mesh": 63,
+      "object_space_error": 1.4219645261764526,
+      "proxy_indices": 1458,
+      "relative_error": 0.00494945514947176,
+      "source_indices": 14592
+    },
+    {
+      "index_fingerprint": "fnv1a64:4831a4e2b556e26f",
+      "level": "r25b",
+      "mesh": 64,
+      "object_space_error": 0.6408406496047974,
+      "proxy_indices": 3456,
+      "relative_error": 0.002232558326795697,
+      "source_indices": 13824
+    },
+    {
+      "index_fingerprint": "fnv1a64:393500f32ee64d56",
+      "level": "r50b",
+      "mesh": 65,
+      "object_space_error": 0.21411490440368652,
+      "proxy_indices": 7296,
+      "relative_error": 0.0007452730787917972,
+      "source_indices": 14592
+    },
+    {
+      "index_fingerprint": "fnv1a64:439384a3ff599151",
+      "level": "full",
+      "mesh": 66,
+      "object_space_error": 0.0,
+      "proxy_indices": 14592,
+      "relative_error": 0.0,
+      "source_indices": 14592
+    },
+    {
+      "index_fingerprint": "fnv1a64:8e54df97d31fe64e",
+      "level": "r10b",
+      "mesh": 67,
+      "object_space_error": 1.3432058095932007,
+      "proxy_indices": 1380,
+      "relative_error": 0.00467945309355855,
+      "source_indices": 13824
+    },
+    {
+      "index_fingerprint": "fnv1a64:fcf290297125f110",
+      "level": "r10b",
+      "mesh": 68,
+      "object_space_error": 1.4026991128921509,
+      "proxy_indices": 1458,
+      "relative_error": 0.004882396664470434,
+      "source_indices": 14592
+    },
+    {
+      "index_fingerprint": "fnv1a64:e35eb56ede341f00",
+      "level": "full",
+      "mesh": 69,
+      "object_space_error": 0.0,
+      "proxy_indices": 13824,
+      "relative_error": 0.0,
+      "source_indices": 13824
+    },
+    {
+      "index_fingerprint": "fnv1a64:4f045a051226801d",
+      "level": "r50b",
+      "mesh": 70,
+      "object_space_error": 0.21556080877780914,
+      "proxy_indices": 7296,
+      "relative_error": 0.000750306062400341,
+      "source_indices": 14592
+    },
+    {
+      "index_fingerprint": "fnv1a64:c72d9723a67361d5",
+      "level": "r50b",
+      "mesh": 71,
+      "object_space_error": 0.24238185584545135,
+      "proxy_indices": 6912,
+      "relative_error": 0.0008444085833616555,
+      "source_indices": 13824
+    },
+    {
+      "index_fingerprint": "fnv1a64:92427fc7dbd51d07",
+      "level": "r50b",
+      "mesh": 72,
+      "object_space_error": 0.21597139537334442,
+      "proxy_indices": 7296,
+      "relative_error": 0.0007517350022681057,
+      "source_indices": 14592
+    },
+    {
+      "index_fingerprint": "fnv1a64:6eba99121a9a385d",
+      "level": "full",
+      "mesh": 73,
+      "object_space_error": 0.0,
+      "proxy_indices": 24,
+      "relative_error": 0.0,
+      "source_indices": 24
+    },
+    {
+      "index_fingerprint": "fnv1a64:e932999c61f40296",
+      "level": "r10b",
+      "mesh": 74,
+      "object_space_error": 1.0272760391235352,
+      "proxy_indices": 1485,
+      "relative_error": 0.008685237728059292,
+      "source_indices": 14871
+    },
+    {
+      "index_fingerprint": "fnv1a64:6eba99121a9a385d",
+      "level": "full",
+      "mesh": 75,
+      "object_space_error": 0.0,
+      "proxy_indices": 24,
+      "relative_error": 0.0,
+      "source_indices": 24
+    },
+    {
+      "index_fingerprint": "fnv1a64:fe81934f92031c7f",
+      "level": "r50b",
+      "mesh": 76,
+      "object_space_error": 0.13728490471839905,
+      "proxy_indices": 7431,
+      "relative_error": 0.0011606930056586862,
+      "source_indices": 14871
+    },
+    {
+      "index_fingerprint": "fnv1a64:6eba99121a9a385d",
+      "level": "full",
+      "mesh": 77,
+      "object_space_error": 0.0,
+      "proxy_indices": 24,
+      "relative_error": 0.0,
+      "source_indices": 24
+    },
+    {
+      "index_fingerprint": "fnv1a64:ca40f9f318481bd5",
+      "level": "r25b",
+      "mesh": 78,
+      "object_space_error": 0.43728432059288025,
+      "proxy_indices": 3717,
+      "relative_error": 0.0036970768123865128,
+      "source_indices": 14871
+    },
+    {
+      "index_fingerprint": "fnv1a64:6eba99121a9a385d",
+      "level": "full",
+      "mesh": 79,
+      "object_space_error": 0.0,
+      "proxy_indices": 24,
+      "relative_error": 0.0,
+      "source_indices": 24
+    },
+    {
+      "index_fingerprint": "fnv1a64:79b93ce70dcfd10f",
+      "level": "r10b",
+      "mesh": 80,
+      "object_space_error": 1.0812253952026367,
+      "proxy_indices": 1485,
+      "relative_error": 0.00914136040955782,
+      "source_indices": 14871
+    },
+    {
+      "index_fingerprint": "fnv1a64:13e066036519a617",
+      "level": "full",
+      "mesh": 81,
+      "object_space_error": 0.0,
+      "proxy_indices": 1404,
+      "relative_error": 0.0,
+      "source_indices": 1404
+    },
+    {
+      "index_fingerprint": "fnv1a64:4e31ea00ee9180dd",
+      "level": "r10b",
+      "mesh": 82,
+      "object_space_error": 3.075258731842041,
+      "proxy_indices": 663,
+      "relative_error": 0.0545843206346035,
+      "source_indices": 6633
+    },
+    {
+      "index_fingerprint": "fnv1a64:13e066036519a617",
+      "level": "full",
+      "mesh": 83,
+      "object_space_error": 0.0,
+      "proxy_indices": 1404,
+      "relative_error": 0.0,
+      "source_indices": 1404
+    },
+    {
+      "index_fingerprint": "fnv1a64:01616d1a062d818e",
+      "level": "r10b",
+      "mesh": 84,
+      "object_space_error": 3.051790714263916,
+      "proxy_indices": 663,
+      "relative_error": 0.05416777357459068,
+      "source_indices": 6633
+    },
+    {
+      "index_fingerprint": "fnv1a64:13e066036519a617",
+      "level": "full",
+      "mesh": 85,
+      "object_space_error": 0.0,
+      "proxy_indices": 1404,
+      "relative_error": 0.0,
+      "source_indices": 1404
+    },
+    {
+      "index_fingerprint": "fnv1a64:8ef46e528146ef1e",
+      "level": "r10b",
+      "mesh": 86,
+      "object_space_error": 2.9806361198425293,
+      "proxy_indices": 663,
+      "relative_error": 0.05290481448173523,
+      "source_indices": 6633
+    },
+    {
+      "index_fingerprint": "fnv1a64:e55752685dff966f",
+      "level": "full",
+      "mesh": 87,
+      "object_space_error": 0.0,
+      "proxy_indices": 1200,
+      "relative_error": 0.0,
+      "source_indices": 1200
+    },
+    {
+      "index_fingerprint": "fnv1a64:6652107fe3b4dd6b",
+      "level": "r10b",
+      "mesh": 88,
+      "object_space_error": 3.0440471172332764,
+      "proxy_indices": 663,
+      "relative_error": 0.05403032898902893,
+      "source_indices": 6633
+    },
+    {
+      "index_fingerprint": "fnv1a64:e55752685dff966f",
+      "level": "full",
+      "mesh": 89,
+      "object_space_error": 0.0,
+      "proxy_indices": 1200,
+      "relative_error": 0.0,
+      "source_indices": 1200
+    },
+    {
+      "index_fingerprint": "fnv1a64:96b339e440bc39b2",
+      "level": "r10b",
+      "mesh": 90,
+      "object_space_error": 3.0414183139801025,
+      "proxy_indices": 663,
+      "relative_error": 0.053983669728040695,
+      "source_indices": 6633
+    },
+    {
+      "index_fingerprint": "fnv1a64:e55752685dff966f",
+      "level": "full",
+      "mesh": 91,
+      "object_space_error": 0.0,
+      "proxy_indices": 1200,
+      "relative_error": 0.0,
+      "source_indices": 1200
+    },
+    {
+      "index_fingerprint": "fnv1a64:63f0724fa48afe09",
+      "level": "r10b",
+      "mesh": 92,
+      "object_space_error": 3.049163818359375,
+      "proxy_indices": 663,
+      "relative_error": 0.054121147841215134,
+      "source_indices": 6633
+    },
+    {
+      "index_fingerprint": "fnv1a64:e55752685dff966f",
+      "level": "full",
+      "mesh": 93,
+      "object_space_error": 0.0,
+      "proxy_indices": 1200,
+      "relative_error": 0.0,
+      "source_indices": 1200
+    },
+    {
+      "index_fingerprint": "fnv1a64:9f847889e468863f",
+      "level": "r10b",
+      "mesh": 94,
+      "object_space_error": 2.9807355403900146,
+      "proxy_indices": 663,
+      "relative_error": 0.0529065802693367,
+      "source_indices": 6633
+    },
+    {
+      "index_fingerprint": "fnv1a64:6456d29e9a0554ab",
+      "level": "r10b",
+      "mesh": 95,
+      "object_space_error": 4.776179313659668,
+      "proxy_indices": 2754,
+      "relative_error": 0.001933015533722937,
+      "source_indices": 27552
+    },
+    {
+      "index_fingerprint": "fnv1a64:2550af488535758f",
+      "level": "r25b",
+      "mesh": 96,
+      "object_space_error": 4.329618453979492,
+      "proxy_indices": 1137,
+      "relative_error": 0.023421522229909897,
+      "source_indices": 4563
+    },
+    {
+      "index_fingerprint": "fnv1a64:470dbaa0bc4fc71b",
+      "level": "r25b",
+      "mesh": 97,
+      "object_space_error": 4.927702903747559,
+      "proxy_indices": 1020,
+      "relative_error": 0.018559668213129044,
+      "source_indices": 4086
+    },
+    {
+      "index_fingerprint": "fnv1a64:ef99379febc959a5",
+      "level": "r50b",
+      "mesh": 98,
+      "object_space_error": 1.7580243349075317,
+      "proxy_indices": 2277,
+      "relative_error": 0.009510216303169727,
+      "source_indices": 4563
+    },
+    {
+      "index_fingerprint": "fnv1a64:5fe9e49c56c7a5fc",
+      "level": "r50b",
+      "mesh": 99,
+      "object_space_error": 2.091621160507202,
+      "proxy_indices": 2040,
+      "relative_error": 0.007877868600189686,
+      "source_indices": 4086
+    },
+    {
+      "index_fingerprint": "fnv1a64:c9bd23ad93f4123e",
+      "level": "r10b",
+      "mesh": 100,
+      "object_space_error": 0.0,
+      "proxy_indices": 84,
+      "relative_error": 0.0,
+      "source_indices": 84
+    },
+    {
+      "index_fingerprint": "fnv1a64:87f5049f169506a9",
+      "level": "r50b",
+      "mesh": 101,
+      "object_space_error": 3.744189977645874,
+      "proxy_indices": 21726,
+      "relative_error": 0.0010062716901302338,
+      "source_indices": 43452
+    },
+    {
+      "index_fingerprint": "fnv1a64:fa7b9c85a129ae79",
+      "level": "r10b",
+      "mesh": 102,
+      "object_space_error": 0.0,
+      "proxy_indices": 30,
+      "relative_error": 0.0,
+      "source_indices": 30
+    }
+  ],
+  "meshoptimizer_version": 1030,
+  "scene": "sponza",
+  "schema": 1,
+  "thresholds": {
+    "acne_percent": 0.5,
+    "distance95_cm": 1.0,
+    "primary_bad_percent": 0.2,
+    "shadow_percent": 0.5
+  }
+}

@@ -91,6 +91,12 @@ public:
     /// meshlet candidate pass).
     [[nodiscard]] rg::BufferRef frameListsRef() const { return graphFrame_; }
     [[nodiscard]] rg::BufferRef dataRef() const { return graphData_; }
+    /// A producer modifies the shared geometry represented by Scene data.
+    /// Publish the new aggregate version so all later raster/resolve readers
+    /// observe the write as well as the RT geometry dependency.
+    void declareGeometryWrite(rg::PassBuilder& builder, rg::Stages stages) {
+        graphData_ = builder.write(graphData_, rg::Usage::ShaderWrite, stages);
+    }
     /// Accesses of a pass that draws the scene (Forward, overlays): instances,
     /// materials (vertex + fragment) and, with on, the ICB / visible list as
     /// indirect arguments at the Vertex stage (spike S5).

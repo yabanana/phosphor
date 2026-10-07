@@ -5,6 +5,7 @@
 
 #include <array>
 #include <string>
+#include <vector>
 
 namespace phosphor::pipe {
 
@@ -63,6 +64,9 @@ struct PipelineDesc {
     /// Render: [0] vertex, [1] fragment.  Compute: [0] kernel.  Mesh: [0]
     /// object ("" = none), [1] mesh, [2] fragment.  Unused entries are empty.
     std::array<std::string, 3> functions;
+    /// F9 static intersection functions. Order is significant and part of the
+    /// cache key; empty preserves every pre-F9 key/archive entry.
+    std::vector<std::string> linkedFunctions;
     /// Mesh pipelines only.
     MeshPipelineLimits mesh{};
     /// Specialisation constants; count == 0 means "generic" (every constant

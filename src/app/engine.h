@@ -54,6 +54,10 @@ class MeshRenderer;
 class SceneStore;
 class GpuSceneChecker;
 class Timer;
+class AccelerationStructures;
+class RtChecker;
+class RtProxyTransitionCheck;
+class RtVisibilityChecker;
 
 // ---------------------------------------------------------------------------
 // Engine -- composition root for the macOS app.
@@ -106,9 +110,12 @@ private:
     /// F5: the GPU scene counters of the frame that last used `slot` (it is
     /// complete): report samples and the panel.
     void onSceneCounters(u32 slot);
+    /// GPU must be idle; preserve pending counters/times before resource reset.
+    void drainFrameReadbacks();
     /// F5: --debug-gpu-scene: wait for the frame, read the scene back and
     /// compare it with the CPU mirror and references; false on FAIL.
     bool checkGpuScene(u32 slot);
+    bool checkRayTracing(u32 slot);
     /// OPT-0.4 work of the forward pass for the report (F5: from the scene store).
     [[nodiscard]] ForwardWork sceneForwardWork(u32 width, u32 height) const;
 
@@ -119,6 +126,21 @@ private:
     std::unique_ptr<PipelineCache>       pipelines_; // F3: every pipeline of the engine
     std::unique_ptr<ShaderReloader>      reloader_;  // F3.6 hot reload (Debug)
     std::unique_ptr<SceneRenderer>       renderer_;
+    std::unique_ptr<AccelerationStructures> rt_;
+    std::unique_ptr<RtChecker> rtChecker_;
+    std::unique_ptr<RtProxyTransitionCheck> rtProxyTransition_;
+    std::unique_ptr<RtVisibilityChecker> rtVisibility_;
+    u64 rtCheckerGeometry_ = ~u64{0};
+    u32 rtChecks_ = 0, rtFailures_ = 0;
+    u64 rtCheckedRays_ = 0, rtAmbiguous_ = 0, rtUnsupported_ = 0;
+    u64 rtVisibilityCompared_ = 0, rtVisibilityMismatches_ = 0;
+    std::vector<GPURtRay> rtCheckRays_;
+    std::vector<GPURtHit> rtCheckHits_;
+    std::vector<GPUVertex> rtDeformedVertices_;
+    std::vector<float> rtTlasTimes_, rtProbeTimes_, rtProbeNs_;
+    u64 rtProbeRays_ = 0, rtAlphaTests_ = 0, rtOpaqueAlphaTests_ = 0;
+    std::array<GPURtCounters, 3> rtCounterSnapshots_{};
+    std::array<u64, 3> rtCounterFrames_{~u64{0}, ~u64{0}, ~u64{0}};
     std::unique_ptr<VisibilityRenderer> visibility_;
     std::unique_ptr<PostProcessor> post_;
     u64 sceneEpoch_ = 0;
@@ -250,6 +272,8 @@ private:
         u32  debugView      = 0;
         rg::Format outputFormat = rg::Format::BGRA8Srgb;
         u32 backingWidth = 0, backingHeight = 0;
+        u64 rtResources = 0;
+        bool rtVisibilityReady = false;
         bool operator==(const GraphKey&) const = default;
     };
     rg::RenderGraph frameGraph_;

@@ -12,7 +12,7 @@ namespace phosphor::rg {
 namespace {
 
 u64 resourceBytes(const ResourceNode& node) {
-    return node.kind == ResourceKind::Buffer ? node.buffer.size : node.texture.estimatedBytes();
+    return node.kind == ResourceKind::Texture ? node.texture.estimatedBytes() : node.buffer.size;
 }
 
 bool isMemoryless(const CompiledGraph& c, u32 resource) {
@@ -320,8 +320,9 @@ std::string dumpGraphviz(const RenderGraph& graph, const CompiledGraph& compiled
         }
         const ResourceNode& res = resources[r];
         std::string label = esc(res.name) + "@" + std::to_string(v) + "\\n";
-        if (res.kind == ResourceKind::Buffer) {
-            label += "buffer " + std::to_string(res.buffer.size) + " B";
+        if (res.kind != ResourceKind::Texture) {
+            label += std::string(res.kind == ResourceKind::AccelerationStructure ? "AS " : "buffer ") +
+                     std::to_string(res.buffer.size) + " B";
         } else {
             label += std::string(formatName(res.texture.format)) + " " + std::to_string(res.texture.width) + "x" +
                      std::to_string(res.texture.height) + ", " + mebibytes(res.texture.estimatedBytes()) + " MiB";

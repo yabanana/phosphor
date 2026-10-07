@@ -11,14 +11,13 @@ The direction, and the research behind it, is in
 - **Metal 4 programming model** end to end: `MTL4CommandQueue`, per-frame
   command allocators, `MTLSharedEvent` frame pacing, residency sets, argument
   tables, `MTL4Compiler`.
-- **Designed for TBDR** and unified memory: memoryless attachments, no depth
-  pre-pass, a thin visibility buffer (next phase), bandwidth measured in bytes
-  per pixel.
+- **Designed for TBDR** and unified memory: memoryless attachments, a thin
+  visibility buffer and explicit accounting of graph traffic per pixel.
 - **Hardware floor: Apple9 (M3/M4)** so hardware ray tracing, mesh-shader ICBs,
   64-bit atomics and the MetalFX denoiser are always available.  The app still
   starts on M1/M2 (Apple7+) with a warning.
-- **Ray tracing in compute** (Metal forbids RT inside mesh-shader pipelines),
-  radiance caching for GI, MetalFX for reconstruction.
+- **Ray tracing in compute**, planned radiance caching for GI, MetalFX for
+  reconstruction.
 
 The original Vulkan renderer is archived in [`legacy/vulkan/`](legacy/vulkan/README.md).
 
@@ -91,10 +90,17 @@ validation.
 | `--instances N`, `--scene-meshes K`, `--dynamic-cpu PCT`, `--churn N` | Bench 8 ("1M Instances"): size, meshes, CPU-updated share, spawn/despawn per frame |
 | `--cull-distance D`, `--cull-min-pixels P` | Extra GPU instance culling (off by default) |
 | `--debug-gpu-scene N` | Read the GPU scene back every N frames and compare it exactly with the CPU mirror and references (exit 1 on failure) |
+| `--rt off\|on` | Enable F9 BLAS/TLAS maintenance (off by default) |
+| `--debug-view rt`, `--debug-rt N` | Inspect RT geometry or compare same-frame rays with the CPU reference |
+| `--rt-probe primary\|shadow\|ao\|diffuse` | Trace and measure a diagnostic ray population; requires `--rt on` |
+| `--rt-proxy off\|manifest` | Full RT geometry or measured index-only proxies; protected meshes retain full detail |
 | `--memory-stress N` | Create/destroy N GPU resources and check memory returns to baseline (exit 1 on failure) |
 | `--simulate-pressure` | Inject memory-pressure warning/critical events |
 | `--transient-test` | Aliasing self-test of the transient heap (exit 1 on failure) |
 | `--inject-input` | Push synthetic key/mouse events every frame (benchmarks must ignore them) |
+
+RT contracts, validation and current scope are documented in
+[`docs/RENDERING_F9.md`](docs/RENDERING_F9.md).
 
 Baseline numbers live in [`docs/perf-log.md`](docs/perf-log.md); measure them
 on a Release build without validation:

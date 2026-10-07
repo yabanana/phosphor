@@ -87,6 +87,71 @@ struct GPUMeshInfo {
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUMeshInfo) == 48, "GPUMeshInfo layout");
 
+// F9: instance descriptors are exactly Metal's packed indirect layout. Resource
+// IDs use two 32-bit words so the portable/shared header needs no API types.
+PHOSPHOR_GPU_CONSTANT u32 RT_MASK_PRIMARY = 1u;
+PHOSPHOR_GPU_CONSTANT u32 RT_MASK_SHADOW = 2u;
+PHOSPHOR_GPU_CONSTANT u32 RT_MASK_INDIRECT = 4u;
+PHOSPHOR_GPU_CONSTANT u32 RT_MASK_ALL = 7u;
+PHOSPHOR_GPU_CONSTANT u32 RT_CORRUPT_NONE = 0u;
+PHOSPHOR_GPU_CONSTANT u32 RT_CORRUPT_TRANSFORM = 1u;
+PHOSPHOR_GPU_CONSTANT u32 RT_CORRUPT_MASK = 2u;
+PHOSPHOR_GPU_CONSTANT u32 RT_CORRUPT_BLAS = 3u;
+PHOSPHOR_GPU_CONSTANT u32 RT_PROBE_PRIMARY = 0u;
+PHOSPHOR_GPU_CONSTANT u32 RT_PROBE_SHADOW = 1u;
+PHOSPHOR_GPU_CONSTANT u32 RT_PROBE_AO = 2u;
+PHOSPHOR_GPU_CONSTANT u32 RT_PROBE_DIFFUSE = 3u;
+PHOSPHOR_GPU_CONSTANT u32 RT_MESH_ALPHA = 1u;
+
+struct GPURtInstanceDesc {
+    float transform[12]; // column-major packed float4x3
+    u32 options, mask, intersectionFunctionTableOffset, userID;
+    u32 blasLo, blasHi;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPURtInstanceDesc) == 72, "GPURtInstanceDesc layout");
+
+struct GPURtMesh {
+    u32 blasLo, blasHi;
+    u32 vertexOffset, indexOffset; // original GPUVertex stream, RT index stream
+    u32 indexCount, flags, proxyLevel, pad;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPURtMesh) == 32, "GPURtMesh layout");
+
+struct GPURtParams {
+    u32 slotCount, meshCount, materialCount, corruption;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPURtParams) == 16, "GPURtParams layout");
+
+struct GPURtRay {
+    float ox, oy, oz, tmin;
+    float dx, dy, dz, tmax;
+    u32 mask, type;
+    float coneWidth; // angular footprint; zero selects LOD 0
+    u32 pad; // source pixel index, preserved by secondary rays
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPURtRay) == 48, "GPURtRay layout");
+
+struct GPURtHit {
+    float t, u, v; // miss: t < 0, slot = ~0u
+    u32 slot, primitive, generation, frontFacing, hit;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPURtHit) == 32, "GPURtHit layout");
+
+struct GPURtProbeParams {
+    float inverseViewProjection[16];
+    float cameraPosition[4];
+    float lightDirection[4]; // xyz direction toward light; w = secondary tmax
+    u32 width, height, rayCount, probeType;
+    u32 slotCount, meshCount, frameIndex, flags; // bit0 alpha counters, bits1..2 debug mode, bit3 sampled primary
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPURtProbeParams) == 128, "GPURtProbeParams layout");
+
+struct GPURtCounters {
+    u32 activeInstances, maskedInstances, invalidMesh, rays;
+    u32 hits, alphaTests, opaqueAlphaTests, pad;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPURtCounters) == 32, "GPURtCounters layout");
+
 PHOSPHOR_GPU_CONSTANT u32 LIGHT_DIRECTIONAL = 0;
 PHOSPHOR_GPU_CONSTANT u32 LIGHT_POINT       = 1;
 PHOSPHOR_GPU_CONSTANT u32 LIGHT_SPOT        = 2;

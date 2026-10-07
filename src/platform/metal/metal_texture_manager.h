@@ -1,6 +1,7 @@
 #pragma once
 
 #include "scene/texture_manager.h"
+#include "renderer/rt_check.h"
 
 #include <Metal/Metal.hpp>
 #include <vector>
@@ -25,7 +26,7 @@ class MetalTextureManager final : public TextureManager {
 public:
     static constexpr u32 MAX_TEXTURES = 16384;
 
-    explicit MetalTextureManager(MetalContext& context);
+    explicit MetalTextureManager(MetalContext& context, bool keepCpuTextures = false);
     ~MetalTextureManager() override;
 
     /// Upload all textures created since the last flush (blocking).
@@ -35,11 +36,20 @@ public:
 
     /// GPU address of the MTLResourceID table (bind at buffer index 5).
     [[nodiscard]] MTL::GPUAddress tableAddress() const { return table_->gpuAddress(); }
+    [[nodiscard]] MTL::Buffer* tableBuffer() const { return table_; } // F9 intersection-function table binding
+
+    /// Present only for explicitly enabled diagnostics. Indexed exactly like
+    /// the GPU bindless table; flushUploads() reads back generated mip bytes.
+    [[nodiscard]] std::span<const RtCpuTexture> cpuTextures() const { return cpuTextures_; }
 
 protected:
     u32 createTexture(const u8* rgba, u32 width, u32 height, bool sRGB) override;
 
 private:
+    void readbackCpuMips(); // Loading time only, never on the normal render path.
+    bool keepCpuTextures_ = false;
+    size_t cpuMipReadbackCount_ = 0;
+    std::vector<RtCpuTexture> cpuTextures_;
     MetalContext&              context_;
     MTL::Buffer*               table_ = nullptr;
     std::vector<MTL::Texture*> textures_;

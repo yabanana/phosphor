@@ -30,6 +30,10 @@
 #include "platform/metal/post_processor.h"
 #include "platform/metal/display_output.h"
 #include "platform/metal/meshlet_check.h"
+#include "platform/metal/acceleration_structures.h"
+#include "platform/metal/rt_visibility_check.h"
+#include "renderer/rt_check.h"
+#include "renderer/rt_proxy_transition.h"
 #include "renderer/cull_reference.h"
 #include "renderer/gpu_scene.h"
 #include "renderer/scene_check.h"
@@ -214,7 +218,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         mo.visibility = options_.visibility;
         mo.cull        = options_.meshletCull;
         mo.hiz         = hiz;
-        mo.debugView   = options_.debugView;
+        mo.debugView   = options_.debugView == MeshletDebugView::RT ? MeshletDebugView::None : options_.debugView;
         mo.debugHiZLevel = options_.debugHiZLevel;
         mo.checks      = options_.debugMeshlets > 0;
         mo.objectStage = options_.meshletObjectStage;
@@ -293,6 +297,19 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     }
     overlays_ = std::make_unique<DebugOverlays>(*context_, *pipelines_);
 
+    if (options_.rtEnabled) {
+        rt_ = std::make_unique<AccelerationStructures>(*context_, *pipelines_, *renderer_, options_);
+        if (options_.debugRt) rtChecker_ = std::make_unique<RtChecker>();
+        if (options_.debugRtProxyTransition != RtProxyTransition::None)
+            rtProxyTransition_ = std::make_unique<RtProxyTransitionCheck>();
+        if (options_.debugRt && visibility_)
+            rtVisibility_ = std::make_unique<RtVisibilityChecker>(*context_, *pipelines_, *renderer_, *mesh_, *rt_);
+        rtCheckRays_.reserve(512);
+        rtCheckHits_.reserve(512);
+        rtTlasTimes_.reserve(options_.frames);
+        rtProbeTimes_.reserve(options_.frames);
+        rtProbeNs_.reserve(options_.frames);
+    }
     ecs_        = std::make_unique<ECS>();
     gpuScene_   = std::make_unique<GpuScene>();
     {
@@ -375,6 +392,9 @@ bool Engine::measuring() const {
 
 Engine::~Engine() {
     if (context_) context_->waitIdle();
+    rtChecker_.reset();
+    rtVisibility_.reset();
+    rt_.reset();
 
     if (activeBench_) {
         activeBench_->teardown(*ecs_, *gpuScene_);
@@ -499,7 +519,8 @@ void Engine::run() {
             resizeToggle_ = !resizeToggle_;
             SDL_SetWindowSize(window_, resizeToggle_ ? 1280 : 1600, resizeToggle_ ? 720 : 900);
         }
-        if (presented && options_.switchEvery > 0 && ++framesOnBench_ >= options_.switchEvery && !pendingBench_) {
+        if (presented) ++framesOnBench_;
+        if (presented && options_.switchEvery > 0 && framesOnBench_ >= options_.switchEvery && !pendingBench_) {
             // Same path as the 1-7 hotkeys.
             pendingBench_ = static_cast<TestBenchType>((static_cast<int>(currentBench_) + 1) % testBenchCount());
         }
@@ -522,6 +543,10 @@ void Engine::run() {
     if (pipelines_->harvesting()) {
         pipelines_->waitAllFinal();
         if (!pipelines_->writeHarvest()) exitCode_ = 1;
+    }
+    if (rtProxyTransition_) {
+        if (!rtProxyTransition_->finish()) exitCode_ = 1;
+        std::printf("%s\n", rtProxyTransition_->line().c_str());
     }
     if (options_.benchmark()) {
         finishBenchmark();
@@ -643,12 +668,9 @@ void Engine::recordBenchmarkFrame(float dt, float cpuMs, float waitMs) {
     }
 }
 
-void Engine::finishBenchmark() {
-    // Sample the CPU heap before the report's own allocations.
-    u64 heapBlocks = 0, heapBytes = 0;
-    heapUsage(heapBlocks, heapBytes);
-    // F4.1: the last frames' timestamps (the GPU is idle): resolve the slots
-    // in frame order.
+void Engine::drainFrameReadbacks() {
+    // Resolve timestamps while their graph and resources still exist, then
+    // collect counters. Scene reload must not silently discard the ring tail.
     if (timestamps_) {
         for (;;) {
             u32 next = ~0u;
@@ -659,8 +681,22 @@ void Engine::finishBenchmark() {
             if (next == ~0u) break;
             onFrameTimes(timestamps_->drain(next));
         }
-        if (passMeasureStarted_) passTimings_.endMeasure();
     }
+    for (u32 k = 0; k < METAL_FRAMES_IN_FLIGHT; ++k) {
+        u32 next = ~0u;
+        for (u32 s = 0; s < METAL_FRAMES_IN_FLIGHT; ++s)
+            if (slotFrame_[s] != ~0ull && (next == ~0u || slotFrame_[s] < slotFrame_[next])) next = s;
+        if (next == ~0u) break;
+        onSceneCounters(next);
+    }
+}
+
+void Engine::finishBenchmark() {
+    // Sample the CPU heap before the report's own allocations.
+    u64 heapBlocks = 0, heapBytes = 0;
+    heapUsage(heapBlocks, heapBytes);
+    drainFrameReadbacks();
+    if (timestamps_ && passMeasureStarted_) passTimings_.endMeasure();
     const std::vector<float> gpu = context_->endGpuTimeCapture();
     for (size_t i = 0; i < samples_.size() && i < gpu.size(); ++i) {
         samples_[i].gpuMs = gpu[i];
@@ -683,15 +719,6 @@ void Engine::finishBenchmark() {
     report.gpuTiming        = timestamps_ != nullptr && timestamps_->enabled();
     report.gpuTimingUnfused = options_.gpuTimingUnfused;
     report.graph            = graphReport_;
-    // F5 (schema 5): the counters of the last frames (the GPU is idle).
-    for (u32 k = 0; k < 3; ++k) {
-        u32 next = ~0u;
-        for (u32 s = 0; s < 3; ++s) {
-            if (slotFrame_[s] != ~0ull && (next == ~0u || slotFrame_[s] < slotFrame_[next])) next = s;
-        }
-        if (next == ~0u) break;
-        onSceneCounters(next);
-    }
     {
         const SceneSamples& ss = sceneSamples_;
         SceneReport& sr = report.scene;
@@ -817,6 +844,19 @@ void Engine::finishBenchmark() {
         }
     }
     if (report.gpuTiming) passTimings_.summarize(report.passes, report.gpuPassSumMs, report.gpuFrameSpanMs);
+    if (rt_) {
+        report.rt = rt_->report();
+        report.rt.checks = rtChecks_;
+        report.rt.checkFailures = rtFailures_;
+        report.rt.tlasUpdateMs = summarize(rtTlasTimes_);
+        report.rt.probeMs = summarize(rtProbeTimes_);
+        report.rt.probeNsPerRay = summarize(rtProbeNs_);
+        report.rt.probeRays = rtProbeRays_;
+        report.rt.alphaTests = rtAlphaTests_;
+        report.rt.opaqueAlphaTests = rtOpaqueAlphaTests_;
+        report.rt.visibilityCompared = rtVisibilityCompared_;
+        report.rt.visibilityMismatches = rtVisibilityMismatches_;
+    }
     // OPT-0.4: work of the passes the cost model can price (CPU data of the
     // last frame; the benches' scenes do not change their draw lists).
     for (PassReport& unit : report.passes) {
@@ -852,6 +892,20 @@ void Engine::finishBenchmark() {
     }
     // stdout, not the log: scripts collect this line.
     std::printf("BENCH %s\n", formatReportLine(report).c_str());
+    if (rt_) {
+        const auto& r = report.rt;
+        std::printf("RT %u BLAS (%llu bytes, %u compacted) | %u instances/%u slots | TLAS %llu builds %llu refits | "
+                    "update %.4f ms | probe %s %llu rays %.4f ns/ray | proxy %s %llu/%llu triangles\n",
+                    r.blasCount, static_cast<unsigned long long>(r.blasBytes), r.compactedCount, r.instances,
+                    r.capacity, static_cast<unsigned long long>(r.tlasBuilds), static_cast<unsigned long long>(r.tlasRefits),
+                    static_cast<double>(r.tlasUpdateMs.mean), r.probe.c_str(),
+                    static_cast<unsigned long long>(r.probeRays), static_cast<double>(r.probeNsPerRay.mean),
+                    r.proxyMode.c_str(), static_cast<unsigned long long>(r.proxyTriangles),
+                    static_cast<unsigned long long>(r.fullTriangles));
+        if (options_.debugRt)
+            std::printf("RT checks %u failures %u | %s\n", rtChecks_, rtFailures_,
+                        rtChecks_ && !rtFailures_ ? "PASS" : "FAIL");
+    }
     if (report.scene.present) std::printf("%s\n", formatSceneLine(report.scene).c_str());
     if (gpuSceneChecks_ > 0) {
         std::printf("GPU-SCENE checks %u | failures %u | %s\n", gpuSceneChecks_, gpuSceneFailures_,
@@ -987,6 +1041,9 @@ void Engine::switchTestBench(TestBenchType type) {
     const TestBenchType from = currentBench_;
     const bool isSwitch = activeBench_ != nullptr; // not the initial load
     context_->waitIdle();
+    if (activeBench_) drainFrameReadbacks();
+    if (rt_) rt_->clear();
+    rtCheckerGeometry_ = ~u64{0};
     const Clock::time_point t1 = Clock::now();
 
     if (activeBench_) {
@@ -996,7 +1053,7 @@ void Engine::switchTestBench(TestBenchType type) {
     gpuScene_->clear();
     // Textures belong to a bench; a fresh manager drops the previous set.
     textures_.reset();
-    textures_ = std::make_unique<MetalTextureManager>(*context_);
+    textures_ = std::make_unique<MetalTextureManager>(*context_, options_.debugRt > 0);
 
     currentBench_ = type;
     framesOnBench_ = 0;
@@ -1027,6 +1084,15 @@ void Engine::switchTestBench(TestBenchType type) {
     ecs_->endFrame();
     renderer_->loadScene(*store_);
     if (mesh_) mesh_->loadScene(*store_, *gpuScene_);
+    if (rt_) rt_->loadScene(*gpuScene_, *store_, *textures_);
+    if (rtProxyTransition_ && !rtProxyTransition_->arm(options_.debugRtProxyTransition, *ecs_, *gpuScene_, *store_, rt_->geometry()))
+        throw std::runtime_error(rtProxyTransition_->line());
+    if (options_.debugRtDeform && gpuScene_->getMeshCount()) {
+        const u32 first = gpuScene_->meshInfos()[0].vertexOffset;
+        const u32 end = gpuScene_->getMeshCount() > 1 ? gpuScene_->meshInfos()[1].vertexOffset
+                                                     : static_cast<u32>(gpuScene_->vertices().size());
+        rtDeformedVertices_.assign(gpuScene_->vertices().begin() + first, gpuScene_->vertices().begin() + end);
+    }
     sceneTime_ = 0.0;
     const Clock::time_point t4 = Clock::now();
     // The previous bench's resources are unused now: free their heap ranges
@@ -1218,6 +1284,10 @@ bool Engine::frame(float dt) {
     {
         PH_ZONE("Simulation");
         activeBench_->update(dt, *ecs_);
+        if (rtProxyTransition_ && !rtProxyTransition_->beforeSync(framesOnBench_, *ecs_, *gpuScene_)) {
+            exitCode_ = 1;
+            running_ = false;
+        }
     }
     sceneTime_ += dt;
     const Clock::time_point s1 = Clock::now();
@@ -1230,6 +1300,27 @@ bool Engine::frame(float dt) {
         store_->sync(*ecs_, *gpuScene_);
         extractLights(*ecs_, lights_);
         ecs_->endFrame();
+    }
+    // Material reassignment can invalidate an offline proxy's protection.
+    // Rebuild before beginning a GPU frame, with affected meshes promoted to
+    // full geometry; never keep a simplified MASK/emissive mesh silently.
+    if (rt_ && rt_->geometry().manifestApplied &&
+        (store_->stats().fullMaterials || store_->stats().fullInstances ||
+         !store_->materialDeltas().empty() || !store_->instanceDeltas().empty())) {
+        bool reload = false;
+        for (u32 mesh : rtProxyProtectedMeshes(gpuScene_->getMeshCount(), store_->instances(), store_->materials()))
+            reload |= rt_->geometry().selections[mesh].level != RtProxyLevel::Full;
+        if (reload) {
+            LOG_INFO("RT: material assignment promotes protected meshes to full geometry");
+            context_->waitIdle();
+            drainFrameReadbacks();
+            rt_->loadScene(*gpuScene_, *store_, *textures_);
+            rtCheckerGeometry_ = ~u64{0};
+        }
+    }
+    if (rtProxyTransition_ && !rtProxyTransition_->afterSync(*store_, rt_->geometry())) {
+        exitCode_ = 1;
+        running_ = false;
     }
     const Clock::time_point s2 = Clock::now();
     frameStats_->update(*timer_, context_->lastGpuMs());
@@ -1395,6 +1486,30 @@ bool Engine::frame(float dt) {
             frame.slot, renderWidth, renderHeight, renderBackingWidth_, renderBackingHeight_, *store_,
             {textures_->getDefaultWhite(), textures_->getDefaultNormal(), textures_->getDefaultMR()},
             constants.exposure, constants.debugMode, temporal, constants);
+    const bool rtCheckFrame = rt_ && options_.debugRt > 0 && (presentedFrames_ + 1) % options_.debugRt == 0;
+    if (rt_) {
+        if (options_.debugRtDeform && framesOnBench_ >= 8 && !rtDeformedVertices_.empty()) {
+            const auto first = gpuScene_->meshInfos()[0].vertexOffset;
+            for (size_t i = 0; i < rtDeformedVertices_.size(); ++i) {
+                auto vertex = gpuScene_->vertices()[first + i];
+                vertex.py += 0.08f * std::sin(vertex.px * 3.0f + static_cast<float>(frame.index) * 0.13f);
+                rtDeformedVertices_[i] = vertex;
+            }
+            rt_->updateVertices(0, rtDeformedVertices_, frame.index + 2, (framesOnBench_ % 16) == 0);
+        }
+        AccelerationStructures::FrameParams rp;
+        rp.slot = frame.slot;
+        rp.index = frame.index;
+        rp.width = renderWidth;
+        rp.height = renderHeight;
+        rp.allocationWidth = renderBackingWidth_;
+        rp.allocationHeight = renderBackingHeight_;
+        rp.constants = constants;
+        rp.check = rtCheckFrame;
+        rt_->prepareFrame(*store_, rp);
+        if (rtVisibility_ && rt_->active())
+            rtVisibility_->prepareFrame(frame.slot, renderWidth, renderHeight, constants);
+    }
     overlays_->prepareFrame(overlayMode_, constants.lightCount, width, height);
     if (!visibility_ && renderer_->usingFallback())
         frameFlags_ |= FrameFallbackDraw;
@@ -1420,7 +1535,9 @@ bool Engine::frame(float dt) {
                        target->pixelFormat() == MTL::PixelFormatRGBA16Float ? rg::Format::RGBA16Float
                                                                             : rg::Format::BGRA8Srgb,
                        renderBackingWidth_,
-                       renderBackingHeight_};
+                       renderBackingHeight_,
+                       rt_ ? rt_->version() : 0,
+                       rtVisibility_ && rtVisibility_->ready()};
     if (!(key == graphKey_) || !graphExecutor_->valid()) {
         frameFlags_ |= FrameGraphCompile;
         if (key.width != graphKey_.width || key.height != graphKey_.height) frameFlags_ |= FrameResize;
@@ -1454,6 +1571,8 @@ bool Engine::frame(float dt) {
     if (graphDebug_) graphDebug_->bind(*graphExecutor_, frame.slot);
     if (scenario_) scenario_->bind(*graphExecutor_, frame.index);
     if (asyncProbe_) asyncProbe_->bind(*graphExecutor_, frame.slot);
+    if (rt_) rt_->bindResources(*graphExecutor_);
+    if (rtVisibility_) rtVisibility_->bindFrame(*graphExecutor_);
     {
         PH_ZONE("Graph execute");
         if (post_)
@@ -1489,6 +1608,7 @@ bool Engine::frame(float dt) {
         if (st.structure) ++ss.structureChanges;
     }
     if (checkScene && !checkGpuScene(frame.slot)) exitCode_ = 1;
+    if (rtCheckFrame && !checkRayTracing(frame.slot)) exitCode_ = 1;
     if (visibility_ && options_.debugVisibility) {
         context_->waitIdle();
         if (!visibility_->check(*gpuScene_))
@@ -1553,6 +1673,33 @@ void Engine::onFrameTimes(const GpuTimestamps::Resolved& r) {
     // Benchmark: only the measured frames enter the report; the window and
     // Tracy see every frame.
     const bool measured = measureFirstFrame_ != ~0ull && r.frame >= measureFirstFrame_ && r.frame <= measureLastFrame_;
+    if (measured && rt_) {
+        float update = 0, probe = 0;
+        u32 updateParts = 0;
+        bool probeValid = false;
+        for (u32 unit = 0; unit < r.units && unit < passTimings_.unitCount(); ++unit) {
+            if (!r.unitValid[unit]) continue;
+            const auto& name = passTimings_.unitName(unit);
+            if (name == "RT instances" || name == "RT TLAS") {
+                update += r.ms[unit];
+                ++updateParts;
+            }
+            if (name.starts_with("RT probe ")) {
+                probe += r.ms[unit];
+                probeValid = true;
+            }
+        }
+        if (updateParts == 2) rtTlasTimes_.push_back(update);
+        // Slot storage always has three entries; --frames-in-flight controls
+        // queue throttling, not the physical ring index (MetalContext).
+        const u32 slot = static_cast<u32>(r.frame % METAL_FRAMES_IN_FLIGHT);
+        const auto c = rtCounterFrames_[slot] == r.frame ? rtCounterSnapshots_[slot]
+                     : slotFrame_[slot] == r.frame ? rt_->counters(slot) : GPURtCounters{};
+        if (probeValid && c.rays) {
+            rtProbeTimes_.push_back(probe);
+            rtProbeNs_.push_back(probe * 1000000.0f / static_cast<float>(c.rays));
+        }
+    }
     if (measured && !passMeasureStarted_) {
         passTimings_.beginMeasure(options_.frames);
         passMeasureStarted_ = true;
@@ -1673,6 +1820,16 @@ bool Engine::checkMeshlets(u32 slot) {
 
 void Engine::onSceneCounters(u32 slot) {
     if (slotFrame_[slot] == ~0ull) return;
+    if (rt_) {
+        rtCounterSnapshots_[slot] = rt_->counters(slot);
+        rtCounterFrames_[slot] = slotFrame_[slot];
+        if (slotMeasured_[slot]) {
+            const auto c = rtCounterSnapshots_[slot];
+            rtProbeRays_ += c.rays;
+            rtAlphaTests_ += c.alphaTests;
+            rtOpaqueAlphaTests_ += c.opaqueAlphaTests;
+        }
+    }
     lastCounters_ = renderer_->counters(slot);
     if (mesh_) {
         lastMeshletCounters_ = mesh_->counters(slot);
@@ -1737,6 +1894,66 @@ ForwardWork Engine::sceneForwardWork(u32 width, u32 height) const {
     return w;
 }
 
+bool Engine::checkRayTracing(u32 slot) {
+    context_->waitIdle();
+    ++rtChecks_;
+    const auto readback = rt_->readback(slot);
+    if (!readback.valid || readback.rays.empty() || readback.rays.size() != readback.hits.size()) {
+        ++rtFailures_;
+        std::printf("RT check frame %u | FAIL: missing same-frame readback\n", presentedFrames_);
+        return false;
+    }
+    if (rtCheckerGeometry_ != readback.geometryRevision) {
+        rtChecker_->setGeometry(readback.vertices, rt_->geometry().indices, rt_->meshes());
+        rtCheckerGeometry_ = readback.geometryRevision;
+    }
+    // The visibility comparison covers the full image on the GPU. The exact
+    // CPU oracle samples the whole ray population, not just its first row.
+    const size_t count = std::min<size_t>(512, readback.rays.size());
+    rtCheckRays_.resize(count);
+    rtCheckHits_.resize(count);
+    for (size_t i = 0; i < count; ++i) {
+        const size_t index = (2 * i + 1) * readback.rays.size() / (2 * count);
+        rtCheckRays_[i] = readback.rays[index];
+        rtCheckHits_[i] = readback.hits[index];
+    }
+    const auto result = rtChecker_->check(rtCheckRays_, rtCheckHits_, readback.instances, readback.materials,
+                                          textures_->cpuTextures());
+    const auto counters = rt_->counters(slot);
+    bool passed = result.ok() && counters.opaqueAlphaTests == 0 && counters.invalidMesh == 0;
+    if (rtVisibility_) {
+        const auto v = rtVisibility_->result(slot);
+        const bool complete = v.valid && v.frame == readback.frame && v.compared == u64(v.width) * v.height &&
+                              !v.invalidVisibility && !v.invalidRt && !v.invalidDepth && !v.depthWithoutVisibility;
+        passed &= complete;
+        rtVisibilityCompared_ += v.compared;
+        rtVisibilityMismatches_ += v.mismatches;
+        std::printf("RT visibility frame %llu | %u/%u mismatches (hit/miss %u slot %u depth %u) | "
+                    "interior opaque %u/%u edge opaque %u/%u interior MASK %u/%u edge MASK %u/%u | "
+                    "max relative distance %.7g tolerance %.7g | %s\n",
+                    static_cast<unsigned long long>(v.frame), v.mismatches, v.compared, v.hitMiss, v.slot, v.depth,
+                    v.category[0].mismatches, v.category[0].compared, v.category[1].mismatches, v.category[1].compared,
+                    v.category[2].mismatches, v.category[2].compared, v.category[3].mismatches, v.category[3].compared,
+                    static_cast<double>(v.maxRelativeDistanceError), static_cast<double>(v.relativeDistanceTolerance),
+                    complete ? "MEASURED" : "INCOMPLETE");
+    }
+    if (rtProxyTransition_)
+        passed &= rtProxyTransition_->afterReadback(readback.instances, readback.materials, passed);
+    if (!passed) ++rtFailures_;
+    rtCheckedRays_ += result.checked;
+    rtAmbiguous_ += result.ambiguous;
+    rtUnsupported_ += result.unsupported;
+    std::printf("RT check frame %llu | checked %llu ambiguous %llu skipped %llu unsupported %llu | "
+                "failures %llu opaque-alpha %u invalid-mesh %u | %s%s%s\n",
+                static_cast<unsigned long long>(readback.frame), static_cast<unsigned long long>(result.checked),
+                static_cast<unsigned long long>(result.ambiguous), static_cast<unsigned long long>(result.skipped),
+                static_cast<unsigned long long>(result.unsupported), static_cast<unsigned long long>(result.failures),
+                counters.opaqueAlphaTests, counters.invalidMesh, passed ? "PASS" : "FAIL",
+                result.firstError.empty() ? "" : ": ", result.firstError.c_str());
+    std::fflush(stdout);
+    return passed;
+}
+
 bool Engine::checkGpuScene(u32 slot) {
     PH_ZONE("GPU scene check");
     context_->waitIdle();
@@ -1787,6 +2004,8 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
         renderer_->addPassesToGraph(frameGraph_, options_.gpuDriven);
     }
 
+    if (rt_ && rt_->active()) rt_->addPassesToGraph(frameGraph_);
+
     // F6: phase A ("Forward"), Hi-Z, phase B: object + mesh shaders.
     if (!scenario_ && mesh_) {
         const auto depth = mesh_->addRasterPasses(frameGraph_, color, renderBackingWidth_, renderBackingHeight_);
@@ -1796,6 +2015,8 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
                           : visibility_->addPresent(frameGraph_, drawableRef_);
             visibility_->addChecks(frameGraph_);
             visibility_->addPoseSnapshot(frameGraph_);
+            if (rtVisibility_ && rtVisibility_->ready() && rt_->active())
+                rtVisibility_->addToGraph(frameGraph_, visibility_->visibility(), visibility_->depth());
         }
     }
 
@@ -1831,6 +2052,9 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
         });
 
     if (!scenario_ && !mesh_) color = overlays_->addToGraph(frameGraph_, color, width, height, overlayMode_, *renderer_);
+
+    if (rt_ && rt_->active() && options_.debugView == MeshletDebugView::RT)
+        color = rt_->addDebugPresent(frameGraph_, color, graphKey_.outputFormat);
 
     if (options_.ui) {
         frameGraph_.addPass(

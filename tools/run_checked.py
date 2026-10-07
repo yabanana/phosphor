@@ -17,7 +17,28 @@ import tempfile
 import time
 
 
-def run_checked(command, log, expected=0, required=(), timeout=120, marker=True, env=None):
+def scrub_allowed_error_lines(text, allowed_error_lines=()):
+    """Remove only full-line matches from error scanning; keep raw logs intact.
+
+    Patterns are opt-in Python-call-site policy, never a generic CLI ignore.
+    Newlines remain so line numbers stay comparable with the original log.
+    Every removed line and the exact permitting pattern are returned as evidence.
+    """
+    patterns = [re.compile(pattern) for pattern in allowed_error_lines]
+    scrubbed, matches = [], []
+    for number, line in enumerate(text.splitlines(keepends=True), 1):
+        body = line.rstrip('\r\n')
+        matched = next((pattern for pattern in patterns if pattern.fullmatch(body)), None)
+        if matched is None:
+            scrubbed.append(line)
+        else:
+            scrubbed.append(line[len(body):])
+            matches.append({'line': number, 'pattern': matched.pattern, 'text': body})
+    return ''.join(scrubbed), matches
+
+
+def run_checked(command, log, expected=0, required=(), timeout=120, marker=True, env=None, allowed_error_lines=()):
+    allowed_error_lines = tuple(allowed_error_lines)
     log = Path(log)
     log.parent.mkdir(parents=True, exist_ok=True)
     started = datetime.now(timezone.utc).isoformat()
@@ -43,6 +64,7 @@ def run_checked(command, log, expected=0, required=(), timeout=120, marker=True,
             code = None
             timed_out = True
     text = log.read_text(errors='replace')
+    error_text, allowed_matches = scrub_allowed_error_lines(text, allowed_error_lines)
     markers = re.findall(r'^EXIT (\d+)$', text, re.M)
     end_marker = int(markers[-1]) if markers else None
     reasons = []
@@ -55,7 +77,7 @@ def run_checked(command, log, expected=0, required=(), timeout=120, marker=True,
     for expression in required:
         if re.search(expression, text, re.M) is None:
             reasons.append(f'missing required output: {expression}')
-    if expected == 0 and re.search(r'failed assertion|\[ERROR\]|\| FAIL\b|GPU timeout|command buffers failed|Shader Validation Error|Metal Validation Error|\berror:', text):
+    if expected == 0 and re.search(r'failed assertion|\[ERROR\]|\| FAIL\b|GPU timeout|command buffers failed|Shader Validation Error|Metal Validation Error|\berror:', error_text):
         reasons.append('error/validation failure in log')
     for name, checksum in artifacts.items():
         if hashlib.sha256(Path(name).read_bytes()).hexdigest() != checksum:
@@ -67,6 +89,7 @@ def run_checked(command, log, expected=0, required=(), timeout=120, marker=True,
               'binary_sha256': binary_hash, 'artifacts': artifacts, 'commit': commit,
               'tracked_patch_sha256': hashlib.sha256(patch).hexdigest(), 'macos': platform.mac_ver()[0],
               'untracked_sources': untracked_sources,
+              'allowed_error_lines': list(allowed_error_lines), 'allowed_error_matches': allowed_matches,
               'validation_env': {k:(env or os.environ).get(k) for k in ('MTL_DEBUG_LAYER','MTL_SHADER_VALIDATION','MTL_DEBUG_LAYER_WARNING_MODE')},
               'passed': not reasons, 'failures': reasons}
     log.with_suffix(log.suffix+'.status.json').write_text(json.dumps(status, indent=2)+'\n')
@@ -82,7 +105,21 @@ def self_test():
         for i, (source, expected, passed) in enumerate(cases):
             result = run_checked([sys.executable, '-c', source], Path(folder)/f'{i}.log', expected)
             assert result['passed'] == passed, result
-    print('run_checked: positive and false-PASS controls passed')
+        permitted = '[INFO] expected error: cache miss'
+        pattern = r'\[INFO\] expected error: cache miss'
+        sources = [(permitted, (), False), (permitted, (pattern,), True),
+                   (permitted+'\n[ERROR] compiler failed', (pattern,), False),
+                   (permitted+' Shader Validation Error', (pattern,), False),
+                   (permitted+' [ERROR] compiler failed', (pattern,), False)]
+        for i, (line, patterns, passed) in enumerate(sources, len(cases)):
+            log = Path(folder)/f'{i}.log'
+            result = run_checked([sys.executable, '-c', f'print({line!r}); print("EXIT 0")'], log,
+                                 allowed_error_lines=patterns)
+            assert result['passed'] == passed, result
+            assert log.read_text().startswith(line), 'raw evidence was modified'
+            if passed:
+                assert result['allowed_error_matches'] == [{'line': 1, 'pattern': pattern, 'text': permitted}]
+    print('run_checked: positive, full-line exception and false-PASS controls passed')
 
 
 def main():

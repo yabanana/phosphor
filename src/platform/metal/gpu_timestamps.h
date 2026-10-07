@@ -27,6 +27,10 @@ namespace phosphor {
 // on its queue chain (previous units back to the commit start; computeUnitTimes) to its own end: the GPU
 // overlaps independent passes, so the previous unit alone can end too early (F8 post chain: the histogram
 // clear ran beside the material resolve and the histogram re-counted the resolve).
+// F9 AS units join AccelerationStructure -> Dispatch and run the same one-thread
+// anchor before a Precise end timestamp. Bare timestamps on M5/27.2 reported
+// 100K-instance refits as 0.3 us; the explicit join attributes their completion
+// to the AS unit. External framework passes already have their own fence/anchor.
 //
 // One heap holds METAL_FRAMES_IN_FLIGHT ranges of `stride_` queries; a slot's
 // range is read on the CPU (resolveCounterRange) when the slot is reused,
@@ -43,7 +47,7 @@ namespace phosphor {
 //
 // Semantics: a unit's time is its EXCLUSIVE contribution to its queue's
 // timeline (end minus the previous end), so the units of a frame add up to
-// the queue's busy span.  Passes the GPU overlaps (no dependency between
+// the queue's timeline span. Passes the GPU overlaps (no dependency between
 // them, or consecutive frames) are charged to whichever ends later; a unit
 // that ends before its predecessor is invalid for that frame.
 // ---------------------------------------------------------------------------

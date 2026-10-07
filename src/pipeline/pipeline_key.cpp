@@ -116,6 +116,11 @@ std::string canonicalString(const PipelineDesc& desc) {
     // F5.3: only pipelines usable from ICBs carry the suffix, so every other
     // key (and the committed harvest) is unchanged.
     if (desc.indirectCommandBuffers) s += "|icb";
+    if (!desc.linkedFunctions.empty()) {
+        s += "|linked=";
+        for (const auto& name : desc.linkedFunctions)
+            s += std::to_string(name.size()) + ":" + name;
+    }
     return s;
 }
 

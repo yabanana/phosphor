@@ -175,7 +175,7 @@ void GpuTimestamps::commitStart(MTL4::CommandBuffer* cmd, rg::Queue queue) {
     // lands after the unit ends (Many Lights: 25 of 200 frames invalid).
     encoder->barrierAfterStages(MTL::StageDispatch,
                                 MTL::StageVertex | MTL::StageObject | MTL::StageMesh | MTL::StageFragment |
-                                    MTL::StageDispatch | MTL::StageBlit,
+                                    MTL::StageDispatch | MTL::StageBlit | MTL::StageAccelerationStructure,
                                 MTL4::VisibilityOptionNone);
     encoder->endEncoding();
     const u32 q = queueIndex(queue);
@@ -196,7 +196,18 @@ void GpuTimestamps::endUnit(MTL4::ComputeCommandEncoder* encoder, u32 unit) {
     if (recording_ == ~0u || unit >= unitCount_) return;
     const u32 q = unitQueue_[unit];
     slots_[recording_].startQuery[unit] = lastQuery_[q];
-    const MTL4::TimestampGranularity granularity = kinds_[unit] == rg::TimestampKind::ComputePassEnd
+    const bool acceleration = plan_.units[unit].needsAccelerationStructureAnchor;
+    if (acceleration) {
+        // A compute timestamp has no AS stage selector. Join AS work through
+        // a real dispatch before sampling; otherwise a 100K TLAS refit was
+        // reported as 0.3 us and its work charged to a later raster/trace unit.
+        // This is timing instrumentation only, absent when timing is disabled.
+        encoder->barrierAfterEncoderStages(MTL::StageAccelerationStructure, MTL::StageDispatch,
+                                           MTL4::VisibilityOptionNone);
+        encoder->setComputePipelineState(pipelines_.compute(anchor_));
+        encoder->dispatchThreads(MTL::Size::Make(1, 1, 1), MTL::Size::Make(1, 1, 1));
+    }
+    const MTL4::TimestampGranularity granularity = acceleration || kinds_[unit] == rg::TimestampKind::ComputePassEnd
                                                        ? MTL4::TimestampGranularityPrecise
                                                        : MTL4::TimestampGranularityRelaxed;
     encoder->writeTimestamp(granularity, heap_, base(recording_) + unit);

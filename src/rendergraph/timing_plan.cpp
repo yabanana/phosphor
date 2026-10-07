@@ -5,7 +5,7 @@ namespace phosphor::rg {
 namespace {
 
 u64 resourceBytes(const ResourceNode& node) {
-    return node.kind == ResourceKind::Buffer ? node.buffer.size : node.texture.estimatedBytes();
+    return node.kind == ResourceKind::Texture ? node.texture.estimatedBytes() : node.buffer.size;
 }
 
 bool isMemoryless(const CompiledGraph& c, u32 resource) {
@@ -107,9 +107,13 @@ TimingPlan buildTimingPlan(const RenderGraph& graph, const CompiledGraph& compil
             const u32 p = compiled.order[pos];
             unit.name += (unit.name.empty() ? "" : " + ") + passes[p].name;
             unit.passes.push_back(p);
+            for (const Access& access : passes[p].reads) unit.stages |= access.stages;
+            for (const Access& access : passes[p].writes) unit.stages |= access.stages;
             if (p < traffic.size()) unit.dramBytes += traffic[p].total();
             plan.unitOfPosition[pos] = static_cast<u32>(plan.units.size());
         }
+        unit.needsAccelerationStructureAnchor = e.type == PassType::Compute &&
+                                                (unit.stages & StageAccelerationStructure) != 0;
         plan.units.push_back(std::move(unit));
     };
 

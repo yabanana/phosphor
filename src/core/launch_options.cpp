@@ -64,6 +64,39 @@ const char* meshletDebugViewName(MeshletDebugView view) {
     case MeshletDebugView::Meshlets: return "meshlets";
     case MeshletDebugView::Cull:     return "cull";
     case MeshletDebugView::HiZ:      return "hiz";
+    case MeshletDebugView::RT:       return "rt";
+    }
+    return "none";
+}
+
+const char* rtCorruptionName(RtCorruption corruption) {
+    switch (corruption) {
+    case RtCorruption::None:      return "none";
+    case RtCorruption::Transform: return "transform";
+    case RtCorruption::Mask:      return "mask";
+    case RtCorruption::Blas:      return "blas";
+    }
+    return "none";
+}
+
+const char* rtProbeName(RtProbe probe) {
+    switch (probe) {
+    case RtProbe::None:    return "none";
+    case RtProbe::Primary: return "primary";
+    case RtProbe::Shadow:  return "shadow";
+    case RtProbe::AO:      return "ao";
+    case RtProbe::Diffuse: return "diffuse";
+    }
+    return "none";
+}
+
+const char* rtProxyTransitionName(RtProxyTransition transition) {
+    switch (transition) {
+    case RtProxyTransition::None: return "none";
+    case RtProxyTransition::Mask: return "mask";
+    case RtProxyTransition::Emissive: return "emissive";
+    case RtProxyTransition::Reassign: return "reassign";
+    case RtProxyTransition::FullUpload: return "full-upload";
     }
     return "none";
 }
@@ -71,6 +104,7 @@ const char* meshletDebugViewName(MeshletDebugView view) {
 bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
                         LaunchOptions& out, std::string& error) {
     out = LaunchOptions{};
+    bool rtSettingsSpecified = false;
     for (int i = 1; i < argc; ++i) {
         const std::string_view arg = argv[i];
         if (!arg.starts_with("--")) continue;
@@ -401,6 +435,62 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
                 error = "--debug-meshlets-corrupt: expected id, depth or count, got '" + std::string(*value) + "'";
                 return false;
             }
+        } else if (arg == "--rt") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "on") out.rtEnabled = true;
+            else if (*value == "off") out.rtEnabled = false;
+            else { error = "--rt: expected off or on"; return false; }
+        } else if (arg == "--rt-tlas-rebuild-every") {
+            if (!needCount(out.rtTlasRebuildEvery)) return false;
+            rtSettingsSpecified = true;
+        } else if (arg == "--rt-proxy") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "manifest") out.rtProxyManifest = true;
+            else if (*value == "off") out.rtProxyManifest = false;
+            else { error = "--rt-proxy: expected off or manifest"; return false; }
+        } else if (arg == "--rt-proxy-manifest") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (value->empty() || value->starts_with("--")) {
+                error = "--rt-proxy-manifest requires a non-empty file path";
+                return false;
+            }
+            out.rtProxyManifestPath = *value;
+            rtSettingsSpecified = true;
+        } else if (arg == "--debug-rt") {
+            if (!needCount(out.debugRt)) return false;
+            rtSettingsSpecified = true;
+        } else if (arg == "--debug-rt-proxy-transition") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "mask") out.debugRtProxyTransition = RtProxyTransition::Mask;
+            else if (*value == "emissive") out.debugRtProxyTransition = RtProxyTransition::Emissive;
+            else if (*value == "reassign") out.debugRtProxyTransition = RtProxyTransition::Reassign;
+            else if (*value == "full-upload") out.debugRtProxyTransition = RtProxyTransition::FullUpload;
+            else { error = "--debug-rt-proxy-transition: expected mask, emissive, reassign or full-upload"; return false; }
+            rtSettingsSpecified = true;
+        } else if (arg == "--debug-rt-deform") {
+            out.debugRtDeform = true;
+            rtSettingsSpecified = true;
+        } else if (arg == "--debug-rt-corrupt") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "transform") out.debugRtCorrupt = RtCorruption::Transform;
+            else if (*value == "mask") out.debugRtCorrupt = RtCorruption::Mask;
+            else if (*value == "blas") out.debugRtCorrupt = RtCorruption::Blas;
+            else { error = "--debug-rt-corrupt: expected transform, mask or blas"; return false; }
+            rtSettingsSpecified = true;
+        } else if (arg == "--rt-probe") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "primary") out.rtProbe = RtProbe::Primary;
+            else if (*value == "shadow") out.rtProbe = RtProbe::Shadow;
+            else if (*value == "ao") out.rtProbe = RtProbe::AO;
+            else if (*value == "diffuse") out.rtProbe = RtProbe::Diffuse;
+            else { error = "--rt-probe: expected primary, shadow, ao or diffuse"; return false; }
+            rtSettingsSpecified = true;
         } else if (arg == "--debug-view") {
             const auto value = needValue();
             if (!value) return false;
@@ -408,8 +498,9 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             else if (*value == "meshlets") out.debugView = MeshletDebugView::Meshlets;
             else if (*value == "cull") out.debugView = MeshletDebugView::Cull;
             else if (*value == "hiz") out.debugView = MeshletDebugView::HiZ;
+            else if (*value == "rt") out.debugView = MeshletDebugView::RT;
             else {
-                error = "--debug-view: expected none, meshlets, cull or hiz, got '" + std::string(*value) + "'";
+                error = "--debug-view: expected none, meshlets, cull, hiz or rt, got '" + std::string(*value) + "'";
                 return false;
             }
         } else if (arg == "--debug-hiz-level") {
@@ -809,6 +900,40 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             return false;
         }
     }
+    // F9: diagnostics must never appear accepted when their graph is absent.
+    if (!out.rtEnabled && (rtSettingsSpecified || out.rtProxyManifest || out.debugView == MeshletDebugView::RT)) {
+        error = "RT settings / --debug-view rt require --rt on";
+        return false;
+    }
+    if (!out.rtProxyManifestPath.empty() && !out.rtProxyManifest) {
+        error = "--rt-proxy-manifest requires --rt-proxy manifest";
+        return false;
+    }
+    if (out.debugRtProxyTransition != RtProxyTransition::None) {
+        if (!out.rtProxyManifest || out.debugRt == 0 || out.switchEvery || out.debugRtDeform ||
+            out.debugRtCorrupt != RtCorruption::None) {
+            error = "--debug-rt-proxy-transition requires --rt-proxy manifest and --debug-rt N > 0, without switch/deform/corrupt";
+            return false;
+        }
+        // The transition happens after eight rendered frames. Preserve an
+        // interactive mode, but reject short benchmark runs including warmup.
+        if (out.benchmark() && u64(out.frames) + out.warmup < 24) {
+            error = "--debug-rt-proxy-transition needs at least 24 total frames including warmup";
+            return false;
+        }
+    }
+    if (out.debugRtDeform && (out.debugRt == 0 || out.debugView != MeshletDebugView::RT || out.rtProxyManifest)) {
+        error = "--debug-rt-deform requires --debug-rt N with N > 0, --debug-view rt and --rt-proxy off";
+        return false;
+    }
+    if (out.debugRtCorrupt != RtCorruption::None && out.debugRt == 0) {
+        error = "--debug-rt-corrupt requires --debug-rt N with N > 0";
+        return false;
+    }
+    if (out.rtEnabled && (out.graphScenario || out.memoryStress > 0 || out.transientTest)) {
+        error = "--rt on is unavailable with --graph-scenario, --memory-stress or --transient-test";
+        return false;
+    }
     // F6: combinations the engine cannot honour are refused, never ignored.
     if (out.geometryPath == GeometryPath::Mesh && out.gpuDriven != GpuDrivenMode::On) {
         error = "--geometry-path mesh needs --gpu-driven on (meshlet candidates come from the GPU instance cull)";
@@ -820,7 +945,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     }
     if (out.geometryPath != GeometryPath::Mesh &&
         (out.debugMeshlets > 0 || out.debugMeshletsCorrupt != MeshletCorruption::None ||
-         out.debugView != MeshletDebugView::None)) {
+         (out.debugView != MeshletDebugView::None && out.debugView != MeshletDebugView::RT))) {
         error = "--debug-meshlets / --debug-meshlets-corrupt / --debug-view need --geometry-path mesh";
         return false;
     }

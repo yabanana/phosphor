@@ -39,6 +39,7 @@ public:
     [[nodiscard]] virtual void* encoder() const = 0;
     [[nodiscard]] virtual void* texture(TextureRef texture) const = 0;
     [[nodiscard]] virtual void* buffer(BufferRef buffer) const = 0;
+    [[nodiscard]] virtual void* accelerationStructure(AccelerationStructureRef) const { return nullptr; }
     /// F2.5: which piece of a pass with parallelChunks > 1 this call encodes.
     [[nodiscard]] virtual u32 chunk() const = 0;
     [[nodiscard]] virtual u32 chunkCount() const = 0;

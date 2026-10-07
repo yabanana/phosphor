@@ -1,0 +1,1892 @@
+{
+  "phase": "F9",
+  "date": "2026-10-07",
+  "development_scope": "M5 Max 128 GB, macOS 27.2 (26B5091g); forced Apple9 is not physical M3 certification",
+  "implementation_commit": "a54aa84",
+  "baseline_commit": "2ccdf6b1bc6202fa3e30667515e0d951ade43898",
+  "conditions": {
+    "power": {
+      "returncode": 0,
+      "output": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=23986275)\t80%; AC attached; not charging present: true"
+    },
+    "thermal": {
+      "returncode": 0,
+      "output": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded"
+    },
+    "os": {
+      "returncode": 0,
+      "output": "ProductName:\t\tmacOS\nProductVersion:\t\t27.2\nBuildVersion:\t\t26B5091g"
+    },
+    "metal": {
+      "returncode": 0,
+      "output": "Apple metal version 32023.921 (metalfe-32023.921.6)\nTarget: air64-apple-darwin27.2.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v27.1.266.1.jFNfdv/Metal.xctoolchain/usr/metal/current/bin"
+    }
+  },
+  "verification": {
+    "quick": {
+      "state": "FUNCTIONAL_CASES_PASSED",
+      "completed_cases": 36,
+      "passed": true,
+      "cases": [
+        {
+          "name": "native-bench1",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "native-bench5",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "native-bench7",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "native-bench8",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "native-sponza-full",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "native-visibility-bench1",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "native-visibility-bench4",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "native-probe-primary",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "native-probe-shadow",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "native-probe-ao",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "native-probe-diffuse",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "native-debug-view-indexed",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "native-debug-view-mesh",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "native-proxy-sponza",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "native-negative-transform",
+          "passed": true,
+          "checker": {
+            "checks": 28,
+            "failures": 28,
+            "status": "FAIL"
+          }
+        },
+        {
+          "name": "native-negative-mask",
+          "passed": true,
+          "checker": {
+            "checks": 28,
+            "failures": 28,
+            "status": "FAIL"
+          }
+        },
+        {
+          "name": "native-negative-blas",
+          "passed": true,
+          "checker": {
+            "checks": 28,
+            "failures": 28,
+            "status": "FAIL"
+          }
+        },
+        {
+          "name": "native-negative-blas-multimesh",
+          "passed": true,
+          "checker": {
+            "checks": 28,
+            "failures": 28,
+            "status": "FAIL"
+          }
+        },
+        {
+          "name": "apple9-bench1",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-bench5",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-bench7",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-bench8",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-sponza-full",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-visibility-bench1",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-visibility-bench4",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-probe-primary",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-probe-shadow",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-probe-ao",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-probe-diffuse",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-debug-view-indexed",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-debug-view-mesh",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-proxy-sponza",
+          "passed": true,
+          "checker": {
+            "checks": 32,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-negative-transform",
+          "passed": true,
+          "checker": {
+            "checks": 28,
+            "failures": 28,
+            "status": "FAIL"
+          }
+        },
+        {
+          "name": "apple9-negative-mask",
+          "passed": true,
+          "checker": {
+            "checks": 28,
+            "failures": 28,
+            "status": "FAIL"
+          }
+        },
+        {
+          "name": "apple9-negative-blas",
+          "passed": true,
+          "checker": {
+            "checks": 28,
+            "failures": 28,
+            "status": "FAIL"
+          }
+        },
+        {
+          "name": "apple9-negative-blas-multimesh",
+          "passed": true,
+          "checker": {
+            "checks": 28,
+            "failures": 28,
+            "status": "FAIL"
+          }
+        }
+      ]
+    },
+    "lifecycle": {
+      "state": "FUNCTIONAL_CASES_PASSED",
+      "completed_cases": 12,
+      "passed": true,
+      "cases": [
+        {
+          "name": "native-flight-1",
+          "passed": true,
+          "checker": {
+            "checks": 108,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "native-flight-2",
+          "passed": true,
+          "checker": {
+            "checks": 108,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "native-flight-3",
+          "passed": true,
+          "checker": {
+            "checks": 108,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "native-dynamic-churn",
+          "passed": true,
+          "checker": {
+            "checks": 108,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "native-switch-resize",
+          "passed": true,
+          "checker": {
+            "checks": 180,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "native-periodic-rebuild",
+          "passed": true,
+          "checker": {
+            "checks": 108,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-flight-1",
+          "passed": true,
+          "checker": {
+            "checks": 108,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-flight-2",
+          "passed": true,
+          "checker": {
+            "checks": 108,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-flight-3",
+          "passed": true,
+          "checker": {
+            "checks": 108,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-dynamic-churn",
+          "passed": true,
+          "checker": {
+            "checks": 108,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-switch-resize",
+          "passed": true,
+          "checker": {
+            "checks": 180,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-periodic-rebuild",
+          "passed": true,
+          "checker": {
+            "checks": 108,
+            "failures": 0,
+            "status": "PASS"
+          }
+        }
+      ]
+    },
+    "proxy_transitions": {
+      "state": "FUNCTIONAL_CASES_PASSED",
+      "completed_cases": 8,
+      "passed": true,
+      "cases": [
+        {
+          "name": "native-proxy-transition-mask",
+          "passed": true,
+          "checker": {
+            "checks": 24,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "native-proxy-transition-emissive",
+          "passed": true,
+          "checker": {
+            "checks": 24,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "native-proxy-transition-reassign",
+          "passed": true,
+          "checker": {
+            "checks": 24,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "native-proxy-transition-full-upload",
+          "passed": true,
+          "checker": {
+            "checks": 24,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-proxy-transition-mask",
+          "passed": true,
+          "checker": {
+            "checks": 24,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-proxy-transition-emissive",
+          "passed": true,
+          "checker": {
+            "checks": 24,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-proxy-transition-reassign",
+          "passed": true,
+          "checker": {
+            "checks": 24,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-proxy-transition-full-upload",
+          "passed": true,
+          "checker": {
+            "checks": 24,
+            "failures": 0,
+            "status": "PASS"
+          }
+        }
+      ]
+    },
+    "deformation": {
+      "state": "FUNCTIONAL_CASES_PASSED",
+      "completed_cases": 4,
+      "passed": true,
+      "cases": [
+        {
+          "name": "native-deform",
+          "passed": true,
+          "checker": {
+            "checks": 120,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "native-deform-inflight",
+          "passed": true,
+          "checker": {
+            "checks": 7,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-deform",
+          "passed": true,
+          "checker": {
+            "checks": 120,
+            "failures": 0,
+            "status": "PASS"
+          }
+        },
+        {
+          "name": "apple9-deform-inflight",
+          "passed": true,
+          "checker": {
+            "checks": 7,
+            "failures": 0,
+            "status": "PASS"
+          }
+        }
+      ]
+    },
+    "archive_reload": {
+      "state": "PASS",
+      "positive_and_poison_all_slots": true
+    },
+    "variants": {
+      "mesh": "PASS: 284 compatible, worst 35 pixels delta1; 52 negative controls",
+      "indexed": "28 existing failures only: Sponza debug modes1/2, 48081/69903 pixels, delta49/52; unchanged from OPT-2.0"
+    },
+    "validation": "API and shader validation; native and effective Apple9",
+    "leaks": "0 leaks with linked Compiler archive hints, trace and scene switching"
+  },
+  "performance": {
+    "tlas": {
+      "update-native": {
+        "frame_ms": {
+          "median": 1.325,
+          "min": 1.2576,
+          "max": 1.3451,
+          "cv_percent": 2.858242048690828
+        },
+        "cpu_ms": {
+          "median": 1.3207,
+          "min": 1.2543,
+          "max": 1.3413,
+          "cv_percent": 2.8436458871105827
+        },
+        "gpu_ms": {
+          "median": 1.0046,
+          "min": 0.978,
+          "max": 1.0256,
+          "cv_percent": 1.9424301214409243
+        },
+        "frame_p99_ms": {
+          "median": 1.7892,
+          "min": 1.7359,
+          "max": 2.2589,
+          "cv_percent": 12.188342741907645
+        },
+        "tlas_update_ms": {
+          "median": 0.2213,
+          "min": 0.2125,
+          "max": 0.2288,
+          "cv_percent": 3.0160721384078863
+        },
+        "probe_ms": {
+          "median": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "cv_percent": 0
+        },
+        "probe_ns_per_ray": {
+          "median": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "cv_percent": 0
+        },
+        "probe_rays": [
+          0,
+          0,
+          0
+        ]
+      },
+      "update-apple9": {
+        "frame_ms": {
+          "median": 1.2755,
+          "min": 1.2473,
+          "max": 1.3064,
+          "cv_percent": 1.8909327349466591
+        },
+        "cpu_ms": {
+          "median": 1.2718,
+          "min": 1.2445,
+          "max": 1.3021,
+          "cv_percent": 1.848344641294305
+        },
+        "gpu_ms": {
+          "median": 0.9982,
+          "min": 0.9792,
+          "max": 0.9995,
+          "cv_percent": 0.9350287284440115
+        },
+        "frame_p99_ms": {
+          "median": 1.7716,
+          "min": 1.7577,
+          "max": 1.889,
+          "cv_percent": 3.260792876205573
+        },
+        "tlas_update_ms": {
+          "median": 0.2189,
+          "min": 0.2185,
+          "max": 0.2203,
+          "cv_percent": 0.35200963669728363
+        },
+        "probe_ms": {
+          "median": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "cv_percent": 0
+        },
+        "probe_ns_per_ray": {
+          "median": 0.0,
+          "min": 0.0,
+          "max": 0.0,
+          "cv_percent": 0
+        },
+        "probe_rays": [
+          0,
+          0,
+          0
+        ]
+      },
+      "interval-0": {
+        "frame_ms": {
+          "median": 7.992,
+          "min": 7.9492,
+          "max": 8.0042,
+          "cv_percent": 0.29546731474028404
+        },
+        "cpu_ms": {
+          "median": 7.9842,
+          "min": 7.9416,
+          "max": 7.9975,
+          "cv_percent": 0.29899484812199767
+        },
+        "gpu_ms": {
+          "median": 7.5611,
+          "min": 7.5035,
+          "max": 7.5941,
+          "cv_percent": 0.49569062321909196
+        },
+        "frame_p99_ms": {
+          "median": 11.7139,
+          "min": 11.6142,
+          "max": 12.1419,
+          "cv_percent": 1.9360730544105493
+        },
+        "tlas_update_ms": {
+          "median": 0.2215,
+          "min": 0.2182,
+          "max": 0.223,
+          "cv_percent": 0.9076476983143238
+        },
+        "probe_ms": {
+          "median": 6.3793,
+          "min": 6.3212,
+          "max": 6.3973,
+          "cv_percent": 0.5101155089051885
+        },
+        "probe_ns_per_ray": {
+          "median": 3.0764,
+          "min": 3.0484,
+          "max": 3.0851,
+          "cv_percent": 0.5100408067877152
+        },
+        "probe_rays": [
+          1244160000,
+          1244160000,
+          1244160000
+        ]
+      },
+      "interval-64": {
+        "frame_ms": {
+          "median": 8.2287,
+          "min": 8.1458,
+          "max": 8.2943,
+          "cv_percent": 0.7389315460442073
+        },
+        "cpu_ms": {
+          "median": 8.2192,
+          "min": 8.1552,
+          "max": 8.2834,
+          "cv_percent": 0.6367654705678091
+        },
+        "gpu_ms": {
+          "median": 7.7994,
+          "min": 7.7676,
+          "max": 7.8083,
+          "cv_percent": 0.22421640934036383
+        },
+        "frame_p99_ms": {
+          "median": 16.8136,
+          "min": 15.9989,
+          "max": 17.0768,
+          "cv_percent": 2.759200761433149
+        },
+        "tlas_update_ms": {
+          "median": 0.2855,
+          "min": 0.2783,
+          "max": 0.2868,
+          "cv_percent": 1.3185008582317497
+        },
+        "probe_ms": {
+          "median": 6.5401,
+          "min": 6.5394,
+          "max": 6.5516,
+          "cv_percent": 0.08547837689188482
+        },
+        "probe_ns_per_ray": {
+          "median": 3.154,
+          "min": 3.1536,
+          "max": 3.1595,
+          "cv_percent": 0.08530479284921505
+        },
+        "probe_rays": [
+          1244160000,
+          1244160000,
+          1244160000
+        ]
+      },
+      "interval-256": {
+        "frame_ms": {
+          "median": 7.9829,
+          "min": 7.9071,
+          "max": 8.112,
+          "cv_percent": 1.0572642943756514
+        },
+        "cpu_ms": {
+          "median": 7.9765,
+          "min": 7.9008,
+          "max": 8.1036,
+          "cv_percent": 1.0467638218948838
+        },
+        "gpu_ms": {
+          "median": 7.5684,
+          "min": 7.5323,
+          "max": 7.6897,
+          "cv_percent": 0.8862040733636284
+        },
+        "frame_p99_ms": {
+          "median": 16.7976,
+          "min": 16.5103,
+          "max": 17.3977,
+          "cv_percent": 2.1873654838282386
+        },
+        "tlas_update_ms": {
+          "median": 0.2335,
+          "min": 0.2292,
+          "max": 0.2352,
+          "cv_percent": 1.0853931431096524
+        },
+        "probe_ms": {
+          "median": 6.3792,
+          "min": 6.3565,
+          "max": 6.5004,
+          "cv_percent": 0.9851501034536136
+        },
+        "probe_ns_per_ray": {
+          "median": 3.0764,
+          "min": 3.0655,
+          "max": 3.1348,
+          "cv_percent": 0.9839600588765147
+        },
+        "probe_rays": [
+          1244160000,
+          1244160000,
+          1244160000
+        ]
+      }
+    },
+    "probes": {
+      "native-primary": {
+        "frame_ms": {
+          "median": 1.3906,
+          "min": 1.3784,
+          "max": 1.4349,
+          "cv_percent": 1.7323362183474083
+        },
+        "cpu_ms": {
+          "median": 1.3874,
+          "min": 1.3745,
+          "max": 1.4297,
+          "cv_percent": 1.6874236613906095
+        },
+        "gpu_ms": {
+          "median": 1.0902,
+          "min": 1.0808,
+          "max": 1.0917,
+          "cv_percent": 0.4435391242870172
+        },
+        "frame_p99_ms": {
+          "median": 1.9054,
+          "min": 1.8963,
+          "max": 1.9922,
+          "cv_percent": 2.238013584219266
+        },
+        "tlas_update_ms": {
+          "median": 0.0974,
+          "min": 0.097,
+          "max": 0.0986,
+          "cv_percent": 0.6961118789887719
+        },
+        "probe_ms": {
+          "median": 0.606,
+          "min": 0.5991,
+          "max": 0.6103,
+          "cv_percent": 0.7623552763238155
+        },
+        "probe_ns_per_ray": {
+          "median": 0.2923,
+          "min": 0.2889,
+          "max": 0.2943,
+          "cv_percent": 0.7638265447081914
+        },
+        "probe_rays": [
+          1244160000,
+          1244160000,
+          1244160000
+        ]
+      },
+      "native-shadow": {
+        "frame_ms": {
+          "median": 2.6569,
+          "min": 2.6463,
+          "max": 2.6719,
+          "cv_percent": 0.39507290735207595
+        },
+        "cpu_ms": {
+          "median": 2.6521,
+          "min": 2.6396,
+          "max": 2.6665,
+          "cv_percent": 0.4143276026405361
+        },
+        "gpu_ms": {
+          "median": 2.3156,
+          "min": 2.2705,
+          "max": 2.3243,
+          "cv_percent": 1.02367368433288
+        },
+        "frame_p99_ms": {
+          "median": 3.3235,
+          "min": 3.1845,
+          "max": 3.3715,
+          "cv_percent": 2.407965330154887
+        },
+        "tlas_update_ms": {
+          "median": 0.0995,
+          "min": 0.0978,
+          "max": 0.1029,
+          "cv_percent": 2.1188599458746533
+        },
+        "probe_ms": {
+          "median": 0.6777,
+          "min": 0.6614,
+          "max": 0.6795,
+          "cv_percent": 1.209955828713509
+        },
+        "probe_ns_per_ray": {
+          "median": 0.3268,
+          "min": 0.319,
+          "max": 0.3277,
+          "cv_percent": 1.2038228033666911
+        },
+        "probe_rays": [
+          1244160000,
+          1244160000,
+          1244160000
+        ]
+      },
+      "native-ao": {
+        "frame_ms": {
+          "median": 2.4594,
+          "min": 2.4421,
+          "max": 2.5276,
+          "cv_percent": 1.4904686499411068
+        },
+        "cpu_ms": {
+          "median": 2.4515,
+          "min": 2.4385,
+          "max": 2.5212,
+          "cv_percent": 1.4698417953351175
+        },
+        "gpu_ms": {
+          "median": 2.093,
+          "min": 2.0602,
+          "max": 2.1315,
+          "cv_percent": 1.39095382724069
+        },
+        "frame_p99_ms": {
+          "median": 3.0994,
+          "min": 2.9822,
+          "max": 3.189,
+          "cv_percent": 2.7401465919083168
+        },
+        "tlas_update_ms": {
+          "median": 0.1035,
+          "min": 0.0986,
+          "max": 0.1046,
+          "cv_percent": 2.551131743334668
+        },
+        "probe_ms": {
+          "median": 0.4603,
+          "min": 0.4499,
+          "max": 0.473,
+          "cv_percent": 2.048750237698382
+        },
+        "probe_ns_per_ray": {
+          "median": 0.222,
+          "min": 0.217,
+          "max": 0.2281,
+          "cv_percent": 2.0412084039527802
+        },
+        "probe_rays": [
+          1244160000,
+          1244160000,
+          1244160000
+        ]
+      },
+      "native-diffuse": {
+        "frame_ms": {
+          "median": 3.281,
+          "min": 3.1763,
+          "max": 3.3072,
+          "cv_percent": 1.7374830804282209
+        },
+        "cpu_ms": {
+          "median": 3.2746,
+          "min": 3.1718,
+          "max": 3.2999,
+          "cv_percent": 1.705111253199923
+        },
+        "gpu_ms": {
+          "median": 2.8731,
+          "min": 2.8112,
+          "max": 2.9092,
+          "cv_percent": 1.4127368587678428
+        },
+        "frame_p99_ms": {
+          "median": 4.4288,
+          "min": 4.1419,
+          "max": 4.5262,
+          "cv_percent": 3.7365476071909716
+        },
+        "tlas_update_ms": {
+          "median": 0.101,
+          "min": 0.0995,
+          "max": 0.1074,
+          "cv_percent": 3.337823689685197
+        },
+        "probe_ms": {
+          "median": 1.2168,
+          "min": 1.2049,
+          "max": 1.2507,
+          "cv_percent": 1.5850800608884623
+        },
+        "probe_ns_per_ray": {
+          "median": 0.5868,
+          "min": 0.5811,
+          "max": 0.6031,
+          "cv_percent": 1.5791914803200522
+        },
+        "probe_rays": [
+          1244160000,
+          1244160000,
+          1244160000
+        ]
+      },
+      "apple9-primary": {
+        "frame_ms": {
+          "median": 1.3877,
+          "min": 1.382,
+          "max": 1.446,
+          "cv_percent": 2.058032470809449
+        },
+        "cpu_ms": {
+          "median": 1.3845,
+          "min": 1.3788,
+          "max": 1.4422,
+          "cv_percent": 2.0429134505758393
+        },
+        "gpu_ms": {
+          "median": 1.0839,
+          "min": 1.0837,
+          "max": 1.1324,
+          "cv_percent": 2.0827641095640548
+        },
+        "frame_p99_ms": {
+          "median": 1.9522,
+          "min": 1.9104,
+          "max": 2.0466,
+          "cv_percent": 2.8922108603309393
+        },
+        "tlas_update_ms": {
+          "median": 0.0978,
+          "min": 0.0964,
+          "max": 0.1051,
+          "cv_percent": 3.823221426626634
+        },
+        "probe_ms": {
+          "median": 0.6075,
+          "min": 0.6009,
+          "max": 0.634,
+          "cv_percent": 2.329123423099408
+        },
+        "probe_ns_per_ray": {
+          "median": 0.293,
+          "min": 0.2898,
+          "max": 0.3057,
+          "cv_percent": 2.3184597138308463
+        },
+        "probe_rays": [
+          1244160000,
+          1244160000,
+          1244160000
+        ]
+      },
+      "apple9-shadow": {
+        "frame_ms": {
+          "median": 2.6438,
+          "min": 2.6297,
+          "max": 2.699,
+          "cv_percent": 1.1252748940651978
+        },
+        "cpu_ms": {
+          "median": 2.6382,
+          "min": 2.6253,
+          "max": 2.6939,
+          "cv_percent": 1.1222518868537894
+        },
+        "gpu_ms": {
+          "median": 2.2978,
+          "min": 2.2856,
+          "max": 2.3358,
+          "cv_percent": 0.9268663922408964
+        },
+        "frame_p99_ms": {
+          "median": 3.3813,
+          "min": 3.3025,
+          "max": 3.495,
+          "cv_percent": 2.3288740226657896
+        },
+        "tlas_update_ms": {
+          "median": 0.1001,
+          "min": 0.0995,
+          "max": 0.1017,
+          "cv_percent": 0.9245528229129834
+        },
+        "probe_ms": {
+          "median": 0.6749,
+          "min": 0.6724,
+          "max": 0.6857,
+          "cv_percent": 0.8516554873574753
+        },
+        "probe_ns_per_ray": {
+          "median": 0.3254,
+          "min": 0.3243,
+          "max": 0.3307,
+          "cv_percent": 0.8549697915012598
+        },
+        "probe_rays": [
+          1244160000,
+          1244160000,
+          1244160000
+        ]
+      },
+      "apple9-ao": {
+        "frame_ms": {
+          "median": 2.5018,
+          "min": 2.4614,
+          "max": 2.5233,
+          "cv_percent": 1.0282594926676025
+        },
+        "cpu_ms": {
+          "median": 2.4967,
+          "min": 2.4546,
+          "max": 2.5164,
+          "cv_percent": 1.035509977657125
+        },
+        "gpu_ms": {
+          "median": 2.1385,
+          "min": 2.0852,
+          "max": 2.1476,
+          "cv_percent": 1.2959350751438865
+        },
+        "frame_p99_ms": {
+          "median": 3.1965,
+          "min": 3.0905,
+          "max": 3.2194,
+          "cv_percent": 1.7719709415859468
+        },
+        "tlas_update_ms": {
+          "median": 0.1025,
+          "min": 0.102,
+          "max": 0.1048,
+          "cv_percent": 1.1826279442723542
+        },
+        "probe_ms": {
+          "median": 0.4712,
+          "min": 0.4582,
+          "max": 0.4727,
+          "cv_percent": 1.393055059170147
+        },
+        "probe_ns_per_ray": {
+          "median": 0.2272,
+          "min": 0.221,
+          "max": 0.228,
+          "cv_percent": 1.3879169720970221
+        },
+        "probe_rays": [
+          1244160000,
+          1244160000,
+          1244160000
+        ]
+      },
+      "apple9-diffuse": {
+        "frame_ms": {
+          "median": 3.2203,
+          "min": 3.2144,
+          "max": 3.2539,
+          "cv_percent": 0.5386964577221062
+        },
+        "cpu_ms": {
+          "median": 3.2131,
+          "min": 3.2071,
+          "max": 3.2471,
+          "cv_percent": 0.5465784578371602
+        },
+        "gpu_ms": {
+          "median": 2.8535,
+          "min": 2.8443,
+          "max": 2.8654,
+          "cv_percent": 0.30260352700244403
+        },
+        "frame_p99_ms": {
+          "median": 4.2918,
+          "min": 4.191,
+          "max": 4.3786,
+          "cv_percent": 1.7881047399339711
+        },
+        "tlas_update_ms": {
+          "median": 0.1023,
+          "min": 0.0991,
+          "max": 0.1034,
+          "cv_percent": 1.7951921286488834
+        },
+        "probe_ms": {
+          "median": 1.2184,
+          "min": 1.2102,
+          "max": 1.2259,
+          "cv_percent": 0.5263336757258438
+        },
+        "probe_ns_per_ray": {
+          "median": 0.5876,
+          "min": 0.5836,
+          "max": 0.5912,
+          "cv_percent": 0.5283906821072504
+        },
+        "probe_rays": [
+          1244160000,
+          1244160000,
+          1244160000
+        ]
+      }
+    },
+    "baseline_short": {
+      "forward-a1": {
+        "frame_ms": {
+          "median": 0.2211,
+          "min": 0.2157,
+          "max": 0.2489,
+          "cv_percent": 6.363949025430472
+        },
+        "cpu_ms": {
+          "median": 0.0315,
+          "min": 0.0296,
+          "max": 0.0533,
+          "cv_percent": 28.197029939918096
+        },
+        "gpu_ms": {
+          "median": 0.422,
+          "min": 0.411,
+          "max": 0.4556,
+          "cv_percent": 4.416674479747324
+        },
+        "frame_p99_ms": {
+          "median": 0.7228,
+          "min": 0.6057,
+          "max": 0.7784,
+          "cv_percent": 10.249068768531332
+        }
+      },
+      "forward-b": {
+        "frame_ms": {
+          "median": 0.2215,
+          "min": 0.2194,
+          "max": 0.2287,
+          "cv_percent": 1.7842569670017765
+        },
+        "cpu_ms": {
+          "median": 0.0302,
+          "min": 0.03,
+          "max": 0.0334,
+          "cv_percent": 4.9928724126273165
+        },
+        "gpu_ms": {
+          "median": 0.4256,
+          "min": 0.4192,
+          "max": 0.4348,
+          "cv_percent": 1.5011200004430103
+        },
+        "frame_p99_ms": {
+          "median": 0.6821,
+          "min": 0.6404,
+          "max": 0.7266,
+          "cv_percent": 5.153070696078565
+        }
+      },
+      "forward-a2": {
+        "frame_ms": {
+          "median": 0.225,
+          "min": 0.2241,
+          "max": 0.2286,
+          "cv_percent": 0.8606561352467278
+        },
+        "cpu_ms": {
+          "median": 0.0303,
+          "min": 0.03,
+          "max": 0.0316,
+          "cv_percent": 2.2668842933623186
+        },
+        "gpu_ms": {
+          "median": 0.4267,
+          "min": 0.4233,
+          "max": 0.4378,
+          "cv_percent": 1.4423601487114743
+        },
+        "frame_p99_ms": {
+          "median": 0.6838,
+          "min": 0.6173,
+          "max": 0.7242,
+          "cv_percent": 6.528395303239456
+        }
+      },
+      "temporal-a1": {
+        "frame_ms": {
+          "median": 2.3288,
+          "min": 2.3022,
+          "max": 2.343,
+          "cv_percent": 0.7274595170390383
+        },
+        "cpu_ms": {
+          "median": 0.4294,
+          "min": 0.4098,
+          "max": 0.4529,
+          "cv_percent": 4.090897788895209
+        },
+        "gpu_ms": {
+          "median": 2.575,
+          "min": 2.5699,
+          "max": 2.6095,
+          "cv_percent": 0.6804859653580358
+        },
+        "frame_p99_ms": {
+          "median": 3.3058,
+          "min": 3.1862,
+          "max": 3.5797,
+          "cv_percent": 4.906154876193387
+        }
+      },
+      "temporal-b": {
+        "frame_ms": {
+          "median": 2.3956,
+          "min": 2.3081,
+          "max": 2.7473,
+          "cv_percent": 7.642273971620132
+        },
+        "cpu_ms": {
+          "median": 0.5095,
+          "min": 0.3951,
+          "max": 0.5568,
+          "cv_percent": 13.934968083476763
+        },
+        "gpu_ms": {
+          "median": 2.5772,
+          "min": 2.5732,
+          "max": 3.0384,
+          "cv_percent": 7.999731836943272
+        },
+        "frame_p99_ms": {
+          "median": 3.521,
+          "min": 3.0557,
+          "max": 4.7335,
+          "cv_percent": 18.75930292316534
+        }
+      },
+      "temporal-a2": {
+        "frame_ms": {
+          "median": 2.2938,
+          "min": 2.2888,
+          "max": 2.2988,
+          "cv_percent": 0.1779790262724973
+        },
+        "cpu_ms": {
+          "median": 0.4216,
+          "min": 0.3706,
+          "max": 0.4337,
+          "cv_percent": 6.691459665965883
+        },
+        "gpu_ms": {
+          "median": 2.5561,
+          "min": 2.5554,
+          "max": 2.569,
+          "cv_percent": 0.24422800150644233
+        },
+        "frame_p99_ms": {
+          "median": 3.0548,
+          "min": 3.0049,
+          "max": 3.0861,
+          "cv_percent": 1.096844488558731
+        }
+      },
+      "instances-a1": {
+        "frame_ms": {
+          "median": 0.804,
+          "min": 0.7948,
+          "max": 0.8426,
+          "cv_percent": 2.544621583726837
+        },
+        "cpu_ms": {
+          "median": 0.1865,
+          "min": 0.1677,
+          "max": 0.1909,
+          "cv_percent": 5.537229713421678
+        },
+        "gpu_ms": {
+          "median": 1.6074,
+          "min": 1.589,
+          "max": 1.6823,
+          "cv_percent": 2.481224027989617
+        },
+        "frame_p99_ms": {
+          "median": 1.4442,
+          "min": 1.3463,
+          "max": 1.5724,
+          "cv_percent": 6.366005057196856
+        }
+      },
+      "instances-b": {
+        "frame_ms": {
+          "median": 0.8135,
+          "min": 0.7994,
+          "max": 0.8695,
+          "cv_percent": 3.658677679037382
+        },
+        "cpu_ms": {
+          "median": 0.1913,
+          "min": 0.1658,
+          "max": 0.1949,
+          "cv_percent": 7.039669528461067
+        },
+        "gpu_ms": {
+          "median": 1.626,
+          "min": 1.5889,
+          "max": 1.7396,
+          "cv_percent": 3.8819796251968306
+        },
+        "frame_p99_ms": {
+          "median": 1.4745,
+          "min": 1.4115,
+          "max": 1.5049,
+          "cv_percent": 2.6575577281650777
+        }
+      },
+      "instances-a2": {
+        "frame_ms": {
+          "median": 0.8163,
+          "min": 0.8101,
+          "max": 0.9446,
+          "cv_percent": 7.233867799874066
+        },
+        "cpu_ms": {
+          "median": 0.176,
+          "min": 0.1643,
+          "max": 0.2721,
+          "cv_percent": 23.659275979745757
+        },
+        "gpu_ms": {
+          "median": 1.6295,
+          "min": 1.6187,
+          "max": 1.6969,
+          "cv_percent": 2.099067023653035
+        },
+        "frame_p99_ms": {
+          "median": 1.4518,
+          "min": 1.3028,
+          "max": 1.4667,
+          "cv_percent": 5.259161868232415
+        }
+      },
+      "forward-candidate_delta_pct": {
+        "replicas": [
+          -0.4311322895393599,
+          -4.209424083769642,
+          -0.49415992812218423
+        ],
+        "median": -0.49415992812218423
+      },
+      "temporal-candidate_delta_pct": {
+        "replicas": [
+          18.992550242550244,
+          -0.5515101900124941,
+          4.247171453437759
+        ],
+        "median": 4.247171453437759
+      },
+      "instances-candidate_delta_pct": {
+        "replicas": [
+          0.7992069884145803,
+          -2.696956132497752,
+          -0.7634535410589005
+        ],
+        "median": -0.7634535410589005
+      }
+    },
+    "baseline_long": {
+      "forward-a1": {
+        "frame_ms": {
+          "median": 0.2556,
+          "min": 0.218,
+          "max": 0.2623,
+          "cv_percent": 7.948160354817373
+        },
+        "cpu_ms": {
+          "median": 0.0302,
+          "min": 0.0295,
+          "max": 0.0322,
+          "cv_percent": 3.7347121440109943
+        },
+        "gpu_ms": {
+          "median": 0.4948,
+          "min": 0.4161,
+          "max": 0.5085,
+          "cv_percent": 8.605321367527141
+        },
+        "frame_p99_ms": {
+          "median": 0.7446,
+          "min": 0.6562,
+          "max": 0.7669,
+          "cv_percent": 6.61575369462496
+        }
+      },
+      "forward-b": {
+        "frame_ms": {
+          "median": 0.2501,
+          "min": 0.2171,
+          "max": 0.2572,
+          "cv_percent": 7.235758876495693
+        },
+        "cpu_ms": {
+          "median": 0.0306,
+          "min": 0.0303,
+          "max": 0.0316,
+          "cv_percent": 1.8025223784360116
+        },
+        "gpu_ms": {
+          "median": 0.4823,
+          "min": 0.4169,
+          "max": 0.4987,
+          "cv_percent": 7.583261671094599
+        },
+        "frame_p99_ms": {
+          "median": 0.7372,
+          "min": 0.6661,
+          "max": 0.7742,
+          "cv_percent": 6.180148393320184
+        }
+      },
+      "forward-a2": {
+        "frame_ms": {
+          "median": 0.2484,
+          "min": 0.2169,
+          "max": 0.2498,
+          "cv_percent": 6.372527791431606
+        },
+        "cpu_ms": {
+          "median": 0.0304,
+          "min": 0.03,
+          "max": 0.037,
+          "cv_percent": 9.886162724608395
+        },
+        "gpu_ms": {
+          "median": 0.4797,
+          "min": 0.4145,
+          "max": 0.4823,
+          "cv_percent": 6.836113091267477
+        },
+        "frame_p99_ms": {
+          "median": 0.7242,
+          "min": 0.6988,
+          "max": 0.7277,
+          "cv_percent": 1.7963658619916112
+        }
+      },
+      "temporal-a1": {
+        "frame_ms": {
+          "median": 2.4501,
+          "min": 2.3407,
+          "max": 2.4519,
+          "cv_percent": 2.1539389081105345
+        },
+        "cpu_ms": {
+          "median": 0.3538,
+          "min": 0.3238,
+          "max": 0.3715,
+          "cv_percent": 5.629987833039646
+        },
+        "gpu_ms": {
+          "median": 2.7231,
+          "min": 2.6117,
+          "max": 2.7347,
+          "cv_percent": 2.061510617755809
+        },
+        "frame_p99_ms": {
+          "median": 3.2862,
+          "min": 3.0709,
+          "max": 3.7086,
+          "cv_percent": 7.894435466164
+        }
+      },
+      "temporal-b": {
+        "frame_ms": {
+          "median": 2.5255,
+          "min": 2.3673,
+          "max": 2.5718,
+          "cv_percent": 3.5187648582865476
+        },
+        "cpu_ms": {
+          "median": 0.3379,
+          "min": 0.3349,
+          "max": 0.3908,
+          "cv_percent": 7.241529358102961
+        },
+        "gpu_ms": {
+          "median": 2.8227,
+          "min": 2.6441,
+          "max": 2.8792,
+          "cv_percent": 3.6017624466385656
+        },
+        "frame_p99_ms": {
+          "median": 3.7401,
+          "min": 3.0949,
+          "max": 3.9536,
+          "cv_percent": 10.150474118564585
+        }
+      },
+      "temporal-a2": {
+        "frame_ms": {
+          "median": 2.4865,
+          "min": 2.3367,
+          "max": 2.5458,
+          "cv_percent": 3.5821474431249456
+        },
+        "cpu_ms": {
+          "median": 0.3159,
+          "min": 0.3152,
+          "max": 0.3942,
+          "cv_percent": 10.848649240106111
+        },
+        "gpu_ms": {
+          "median": 2.777,
+          "min": 2.6015,
+          "max": 2.8493,
+          "cv_percent": 3.793743193586989
+        },
+        "frame_p99_ms": {
+          "median": 3.7927,
+          "min": 3.0706,
+          "max": 4.0089,
+          "cv_percent": 11.070149111232876
+        }
+      },
+      "instances-a1": {
+        "frame_ms": {
+          "median": 1.0051,
+          "min": 0.7736,
+          "max": 1.0129,
+          "cv_percent": 11.930180188717118
+        },
+        "cpu_ms": {
+          "median": 0.1774,
+          "min": 0.1586,
+          "max": 0.1809,
+          "cv_percent": 5.683211692243328
+        },
+        "gpu_ms": {
+          "median": 2.009,
+          "min": 1.5454,
+          "max": 2.0234,
+          "cv_percent": 11.941003330090401
+        },
+        "frame_p99_ms": {
+          "median": 1.5115,
+          "min": 1.32,
+          "max": 1.5583,
+          "cv_percent": 7.045248975640166
+        }
+      },
+      "instances-b": {
+        "frame_ms": {
+          "median": 1.0134,
+          "min": 0.7782,
+          "max": 1.0909,
+          "cv_percent": 13.838045503873941
+        },
+        "cpu_ms": {
+          "median": 0.1849,
+          "min": 0.1779,
+          "max": 0.2127,
+          "cv_percent": 7.834486627867633
+        },
+        "gpu_ms": {
+          "median": 2.0259,
+          "min": 1.5541,
+          "max": 2.1803,
+          "cv_percent": 13.872543859033174
+        },
+        "frame_p99_ms": {
+          "median": 1.5743,
+          "min": 1.331,
+          "max": 1.7387,
+          "cv_percent": 10.819026869392193
+        }
+      },
+      "instances-a2": {
+        "frame_ms": {
+          "median": 1.0184,
+          "min": 0.7836,
+          "max": 1.052,
+          "cv_percent": 12.55038134754176
+        },
+        "cpu_ms": {
+          "median": 0.182,
+          "min": 0.169,
+          "max": 0.1829,
+          "cv_percent": 3.5686614983909695
+        },
+        "gpu_ms": {
+          "median": 2.0336,
+          "min": 1.5664,
+          "max": 2.1016,
+          "cv_percent": 12.51718493342366
+        },
+        "frame_p99_ms": {
+          "median": 1.5775,
+          "min": 1.3331,
+          "max": 1.615,
+          "cv_percent": 8.285611316492794
+        }
+      },
+      "forward-candidate_delta_pct": {
+        "replicas": [
+          -0.16095654173373664,
+          -0.7539682539682624,
+          0.44913102909587277
+        ],
+        "median": -0.16095654173373664
+      },
+      "temporal-candidate_delta_pct": {
+        "replicas": [
+          1.222901612006666,
+          1.1029043815929063,
+          4.155191965008931
+        ],
+        "median": 1.222901612006666
+      },
+      "instances-candidate_delta_pct": {
+        "replicas": [
+          -0.05137426149498525,
+          -0.22153300841823986,
+          6.061931845802326
+        ],
+        "median": -0.05137426149498525
+      }
+    }
+  },
+  "tlas_gate_runs": {
+    "native": [
+      {
+        "run": 1,
+        "instances": 100000,
+        "capacity": 125010,
+        "tlas_update_ms": {
+          "mean": 0.2125,
+          "min": 0.1945,
+          "p50": 0.2057,
+          "p95": 0.2567,
+          "p99": 0.4505,
+          "max": 0.598
+        },
+        "gpu_allocations": 0
+      },
+      {
+        "run": 2,
+        "instances": 100000,
+        "capacity": 125010,
+        "tlas_update_ms": {
+          "mean": 0.2213,
+          "min": 0.195,
+          "p50": 0.2071,
+          "p95": 0.2751,
+          "p99": 0.5872,
+          "max": 0.6019
+        },
+        "gpu_allocations": 0
+      },
+      {
+        "run": 3,
+        "instances": 100000,
+        "capacity": 125010,
+        "tlas_update_ms": {
+          "mean": 0.2288,
+          "min": 0.1958,
+          "p50": 0.208,
+          "p95": 0.3398,
+          "p99": 0.7841,
+          "max": 2.1528
+        },
+        "gpu_allocations": 0
+      }
+    ],
+    "apple9": [
+      {
+        "run": 1,
+        "instances": 100000,
+        "capacity": 125010,
+        "tlas_update_ms": {
+          "mean": 0.2203,
+          "min": 0.1962,
+          "p50": 0.207,
+          "p95": 0.2697,
+          "p99": 0.5923,
+          "max": 0.6335
+        },
+        "gpu_allocations": 0
+      },
+      {
+        "run": 2,
+        "instances": 100000,
+        "capacity": 125010,
+        "tlas_update_ms": {
+          "mean": 0.2185,
+          "min": 0.1951,
+          "p50": 0.2067,
+          "p95": 0.2649,
+          "p99": 0.5899,
+          "max": 0.6128
+        },
+        "gpu_allocations": 0
+      },
+      {
+        "run": 3,
+        "instances": 100000,
+        "capacity": 125010,
+        "tlas_update_ms": {
+          "mean": 0.2189,
+          "min": 0.1959,
+          "p50": 0.2068,
+          "p95": 0.2685,
+          "p99": 0.3947,
+          "max": 0.8291
+        },
+        "gpu_allocations": 0
+      }
+    ]
+  },
+  "decision": {
+    "tlas_rebuild_every": 0,
+    "reason": "structural rebuilds only; 64-frame rebuilds slow the frame, 256-frame rebuilds have no material median benefit and both increase p99",
+    "gate": "three-run median of mean update contribution <0.5ms on available M5; not a hard per-frame deadline guarantee",
+    "baseline": "long A/B/A 600 warmup +3000 measured frames x3; median deltas forward -0.161%, temporal +1.223%, instances -0.051%; retain noisy replicas and initial short run"
+  },
+  "invalidated_measurements": [
+    {
+      "path": "build/f9-perf-tlas",
+      "reason": "bare compute timestamps did not join AS completion; TLAS0.3us was not actual update cost"
+    },
+    {
+      "path": "build/f9-validation/deform-native.log",
+      "reason": "old trigger never exercised deformation; operation counters exposed false coverage"
+    },
+    {
+      "path": "build/f9-validation/archive-reload",
+      "reason": "runner falsely classified two exact INFO archive misses as errors; corrected classifier then complete rerun v2"
+    }
+  ],
+  "local_evidence": [
+    "build/f9-validation",
+    "build/f9-perf-tlas-v2",
+    "build/f9-perf-probes",
+    "build/f9-perf-baseline-long",
+    "build/f9-proxy-transition-accounted",
+    "build/f9-deform-controls"
+  ],
+  "unverified": [
+    "physical M3/T0 or other chips",
+    "hardware energy/DRAM counters",
+    "worst-case real-time bound",
+    "universal proxy quality outside declared S4 corpus"
+  ]
+}

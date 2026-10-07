@@ -61,6 +61,8 @@ set(PHOSPHOR_SHADER_HEADERS
     ${CMAKE_SOURCE_DIR}/src/renderer/visibility_layout.h
     ${CMAKE_SOURCE_DIR}/src/renderer/visibility_math.h
     ${CMAKE_SOURCE_DIR}/src/renderer/gpu_types.h
+    ${CMAKE_SOURCE_DIR}/shaders/rt_common.h
+    ${CMAKE_SOURCE_DIR}/src/platform/metal/rt_visibility_check.h
     ${CMAKE_SOURCE_DIR}/src/renderer/gpu_scene_layout.h
     ${CMAKE_SOURCE_DIR}/src/renderer/gpu_queue.h
     ${CMAKE_SOURCE_DIR}/src/renderer/cull_math.h
@@ -182,6 +184,8 @@ add_executable(phosphor
     src/platform/metal/pipeline_cache.cpp
     src/platform/metal/residency_manager.cpp
     src/platform/metal/scene_renderer.cpp
+    src/platform/metal/acceleration_structures.cpp
+    src/platform/metal/rt_visibility_check.cpp
     src/platform/metal/shader_reloader.cpp
     src/platform/metal/transient_heap.cpp
     src/platform/metal/upload_ring.cpp
@@ -318,6 +322,33 @@ if(PHOSPHOR_DEBUGGABLE)
         COMMAND codesign --force --sign - --entitlements ${CMAKE_SOURCE_DIR}/cmake/debuggable.entitlements
                 $<TARGET_FILE:f6_spike>
         COMMENT "Signing f6_spike with get-task-allow (leaks)")
+endif()
+
+# --- F9 spikes S0-S5 (measurement tool, not engine code) ---
+# The bench/soc harness and runner with the F9 ray-tracing spikes (ids F9-Sn);
+# their MSL lives in bench/f9_spike/shaders (includes expanded from there,
+# src/, shaders/ and the generated directory).  See bench/f9_spike/README.md.
+file(GLOB F9_SPIKE_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/bench/f9_spike/*.cpp)
+add_executable(f9_spike ${CMAKE_SOURCE_DIR}/bench/soc/harness.cpp ${CMAKE_SOURCE_DIR}/bench/soc/soc_bench.cpp
+    ${F9_SPIKE_SOURCES})
+target_include_directories(f9_spike PRIVATE ${CMAKE_SOURCE_DIR}/bench/soc)
+target_link_libraries(f9_spike PRIVATE phosphor_core metal_cpp IOReport meshoptimizer
+    "-framework IOKit" "-framework CoreFoundation" "-framework AppKit" "-framework QuartzCore")
+target_compile_features(f9_spike PRIVATE cxx_std_20)
+target_compile_options(f9_spike PRIVATE ${PHOSPHOR_WARNINGS})
+add_dependencies(f9_spike phosphor_shaders)
+target_compile_definitions(f9_spike PRIVATE
+    "SOC_SHADER_DIR=\"${CMAKE_SOURCE_DIR}/bench/soc/shaders\""
+    "SOC_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\""
+    "F9_SHADER_DIR=\"${CMAKE_SOURCE_DIR}/bench/f9_spike/shaders\""
+    "F9_GENERATED_DIR=\"${CMAKE_BINARY_DIR}/generated\""
+    "SOC_RESULTS_DIR=\"${CMAKE_SOURCE_DIR}/bench/results/f9-spike\""
+    "SOC_SDK_VERSION=\"${SOC_SDK_VERSION}\"")
+if(PHOSPHOR_DEBUGGABLE)
+    add_custom_command(TARGET f9_spike POST_BUILD
+        COMMAND codesign --force --sign - --entitlements ${CMAKE_SOURCE_DIR}/cmake/debuggable.entitlements
+                $<TARGET_FILE:f9_spike>
+        COMMENT "Signing f9_spike with get-task-allow (leaks)")
 endif()
 
 # Test assets are looked up relative to the working directory.

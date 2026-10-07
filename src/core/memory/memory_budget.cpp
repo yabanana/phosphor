@@ -12,6 +12,7 @@ const char* memoryCategoryName(MemoryCategory category) {
     case MemoryCategory::Transient:     return "Transient";
     case MemoryCategory::RenderTargets: return "Render targets";
     case MemoryCategory::Scene:         return "Scene";
+    case MemoryCategory::RayTracing:    return "Ray tracing";
     case MemoryCategory::Other:         return "Other";
     case MemoryCategory::COUNT:         break;
     }
@@ -59,12 +60,13 @@ float MemoryBudget::share(MemoryCategory category) {
     // Hypotheses (F1.4), to recalibrate with measurements: textures dominate
     // a game's footprint, geometry follows; rings and diagnostics are small.
     switch (category) {
-    case MemoryCategory::Geometry:      return 0.25f;
-    case MemoryCategory::Textures:      return 0.40f;
+    case MemoryCategory::Geometry:      return 0.20f;
+    case MemoryCategory::Textures:      return 0.35f;
     case MemoryCategory::Upload:        return 0.03f;
     case MemoryCategory::Transient:     return 0.12f;
     case MemoryCategory::RenderTargets: return 0.12f;
     case MemoryCategory::Scene:         return 0.05f; // F5: ~0.2 GiB per million instances
+    case MemoryCategory::RayTracing:    return 0.10f; // F9 hypothesis; measured usage is reported separately
     case MemoryCategory::Other:         return 0.03f;
     case MemoryCategory::COUNT:         break;
     }

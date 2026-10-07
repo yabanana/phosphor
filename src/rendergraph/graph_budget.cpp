@@ -16,7 +16,7 @@ std::string mib(u64 bytes) {
 }
 
 u64 resourceBytes(const ResourceNode& node) {
-    return node.kind == ResourceKind::Buffer ? node.buffer.size : node.texture.estimatedBytes();
+    return node.kind == ResourceKind::Texture ? node.texture.estimatedBytes() : node.buffer.size;
 }
 
 } // namespace

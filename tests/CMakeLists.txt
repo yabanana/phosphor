@@ -39,6 +39,11 @@ add_executable(phosphor_tests
     test_pipeline_script.cpp
     test_procedural.cpp
     test_render_graph.cpp
+    test_rt_proxy.cpp
+    test_rt_proxy_transition.cpp
+    test_rt_scene.cpp
+    test_rt_reference.cpp
+    test_rt_check.cpp
     test_scene_check.cpp
     test_scene_extract.cpp
     test_scene_store.cpp

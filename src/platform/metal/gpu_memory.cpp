@@ -31,7 +31,7 @@ GpuMemory::GpuMemory(MetalContext& context) : context_(context) {}
 ResidencyClass GpuMemory::residencyClass(MemoryCategory category) {
     // Level content: Geometry, Textures and the F5 GPU scene (rebuilt per bench).
     return category == MemoryCategory::Geometry || category == MemoryCategory::Textures ||
-                   category == MemoryCategory::Scene
+                   category == MemoryCategory::Scene || category == MemoryCategory::RayTracing
                ? ResidencyClass::Streaming
                : ResidencyClass::Static;
 }
@@ -119,6 +119,7 @@ namespace {
     case MemoryCategory::Transient:     return "GPU Transient";
     case MemoryCategory::RenderTargets: return "GPU Render targets";
     case MemoryCategory::Scene:         return "GPU Scene";
+    case MemoryCategory::RayTracing:    return "GPU Ray tracing";
     case MemoryCategory::Other:         return "GPU Other";
     case MemoryCategory::COUNT:         break;
     }
@@ -133,6 +134,7 @@ namespace {
     case MemoryCategory::Transient:     return "GPU heap Transient";
     case MemoryCategory::RenderTargets: return "GPU heap Render targets";
     case MemoryCategory::Scene:         return "GPU heap Scene";
+    case MemoryCategory::RayTracing:    return "GPU heap Ray tracing";
     case MemoryCategory::Other:         return "GPU heap Other";
     case MemoryCategory::COUNT:         break;
     }
@@ -197,6 +199,45 @@ MTL::Buffer* GpuMemory::newBuffer(u64 length, MTL::ResourceOptions options, Memo
     buffer->setLabel(str(label));
     account(buffer, category);
     return buffer;
+}
+
+MTL::AccelerationStructure* GpuMemory::newAccelerationStructure(u64 size, MemoryCategory category,
+                                                                const char* label) {
+    if (!size) return nullptr;
+    MTL::AccelerationStructure* structure = nullptr;
+    const auto sa = context_.device()->heapAccelerationStructureSizeAndAlign(size);
+    Placement p;
+    if (place(sa.size, sa.align, residencyClass(category), p)) {
+        structure = heaps_[p.heap].heap->newAccelerationStructure(size, p.offset);
+        if (structure) placements_[structure] = p;
+        else heaps_[p.heap].tlsf.free(p.handle);
+    }
+    if (!structure) {
+        structure = context_.device()->newAccelerationStructure(size);
+        if (!structure) {
+            LOG_ERROR("GpuMemory: failed to allocate %llu-byte acceleration structure '%s'",
+                      static_cast<unsigned long long>(size), label);
+            return nullptr;
+        }
+        context_.makeResident(structure, residencyClass(category));
+    }
+    structure->setLabel(str(label));
+    account(structure, category);
+    return structure;
+}
+
+MTL::IntersectionFunctionTable* GpuMemory::newIntersectionFunctionTable(MTL::ComputePipelineState* pipeline,
+                                                                       u32 count, MemoryCategory category,
+                                                                       const char* label) {
+    auto* descriptor = MTL::IntersectionFunctionTableDescriptor::alloc()->init();
+    descriptor->setFunctionCount(count);
+    auto* table = pipeline->newIntersectionFunctionTable(descriptor);
+    descriptor->release();
+    if (!table) return nullptr;
+    table->setLabel(str(label));
+    context_.makeResident(table, residencyClass(category));
+    account(table, category);
+    return table;
 }
 
 MTL::Buffer *GpuMemory::newSharedBuffer(void *mapping, u64 length, void (^deallocator)(void *, NS::UInteger),

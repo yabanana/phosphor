@@ -64,6 +64,13 @@ public:
                                          const char* label);
     [[nodiscard]] MTL::Texture* newTexture(const MTL::TextureDescriptor* descriptor, MemoryCategory category,
                                            const char* label);
+    /// F9: placement allocation with the device-reported AS alignment. The
+    /// containing heap is resident; release() owns retirement like buffers.
+    [[nodiscard]] MTL::AccelerationStructure* newAccelerationStructure(u64 size, MemoryCategory category,
+                                                                       const char* label);
+    [[nodiscard]] MTL::IntersectionFunctionTable* newIntersectionFunctionTable(MTL::ComputePipelineState* pipeline,
+                                                                              u32 count, MemoryCategory category,
+                                                                              const char* label);
 
     /// Import a page-aligned shared mapping. The callback owns its lifetime
     /// until the completed GPU buffer is actually destroyed.

@@ -135,6 +135,9 @@ public:
   ExternalDependency dependency;
   void *texture(rg::TextureRef t) const override { return executor_.textures_[t.resource]; }
   void *buffer(rg::BufferRef b) const override { return executor_.buffers_[b.resource]; }
+  void *accelerationStructure(rg::AccelerationStructureRef a) const override {
+      return executor_.accelerationStructures_[a.resource];
+  }
   u32 chunk() const override { return chunk_; }
   u32 chunkCount() const override { return chunks_; }
   u64 frameIndex() const override { return frame_; }
@@ -216,6 +219,7 @@ void MetalGraphExecutor::releaseResources() {
     passDescriptors_.clear();
     textures_.clear();
     buffers_.clear();
+    accelerationStructures_.clear();
     owned_.clear();
 }
 
@@ -338,6 +342,7 @@ bool MetalGraphExecutor::createResources() {
     const auto& resources = graph_->resources();
     textures_.assign(resources.size(), nullptr);
     buffers_.assign(resources.size(), nullptr);
+    accelerationStructures_.assign(resources.size(), nullptr);
     owned_.assign(resources.size(), false);
 
     if (compiled_.aliasing.heapSize > 0 && !heap_.reserve(compiled_.aliasing.heapSize)) {
@@ -439,6 +444,11 @@ void MetalGraphExecutor::bindTexture(rg::TextureRef texture, MTL::Texture* physi
 
 void MetalGraphExecutor::bindBuffer(rg::BufferRef buffer, MTL::Buffer* physical) {
     if (buffer.resource < buffers_.size()) buffers_[buffer.resource] = physical;
+}
+
+void MetalGraphExecutor::bindAccelerationStructure(rg::AccelerationStructureRef structure,
+                                                   MTL::AccelerationStructure* physical) {
+    if (structure.resource < accelerationStructures_.size()) accelerationStructures_[structure.resource] = physical;
 }
 
 void MetalGraphExecutor::encodeBarriers(MTL4::CommandEncoder* encoder, u32 position) const {

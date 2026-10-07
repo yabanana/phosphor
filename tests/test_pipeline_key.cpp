@@ -286,3 +286,18 @@ TEST_CASE("tile pipeline has a distinct stable key from a compute kernel") {
     CHECK(canonicalString(tile).starts_with("T|"));
     CHECK(pipelineKey(tile) != pipelineKey(compute));
 }
+
+TEST_CASE("pipeline key: linked intersection functions select distinct compute pipelines") {
+    PipelineDesc plain;
+    plain.kind = PipelineKind::Compute;
+    plain.functions[0] = "rt_trace_rays";
+    auto linked = plain;
+    linked.linkedFunctions = {"rt_alpha_generic"};
+    CHECK(pipelineKey(plain) != pipelineKey(linked));
+    auto renamed = linked;
+    renamed.linkedFunctions[0] = "different_alpha";
+    CHECK(pipelineKey(renamed) != pipelineKey(linked));
+    CHECK(linked.generic().linkedFunctions == linked.linkedFunctions);
+    linked.linkedFunctions.clear();
+    CHECK(pipelineKey(plain) == pipelineKey(linked));
+}
