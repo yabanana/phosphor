@@ -336,6 +336,9 @@ struct LaunchOptions {
     RtCorruption debugRtCorrupt = RtCorruption::None;
     RtProbe      rtProbe = RtProbe::None;
     // F10-F12: writing presets only; numerical adoption requires tester evidence.
+    bool atmosphere=false,fog=false,clouds=false,cloudFullRate=false;
+    float atmoDayLength=1200,atmoStartHour=12,planetCameraHeight=-1;
+    u32 timeJumpEveryN=0;
     ReflectionMode reflections=ReflectionMode::Off;
     AoMode ao=AoMode::Off;
     LightingDenoiseMode lightingDenoise=LightingDenoiseMode::Off;

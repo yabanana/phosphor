@@ -37,7 +37,11 @@ ResidencyClass GpuMemory::residencyClass(MemoryCategory category) {
 }
 
 GpuMemory::~GpuMemory() {
-    releaseCompleted(~u64{0});
+    // Retired parents may precede their views in the pending list. Drain
+    // again after each view release; never free parent storage early.
+    for(size_t previous=~size_t{0};!pending_.empty() && pending_.size()!=previous;) {
+        previous=pending_.size();releaseCompleted(~u64{0});
+    }
     for (u32 c = 0; c < MEMORY_CATEGORY_COUNT; ++c) {
         if (stats_[c].count != 0) {
             LOG_WARN("GpuMemory: %u %s allocations (%llu bytes) still alive at shutdown", stats_[c].count,

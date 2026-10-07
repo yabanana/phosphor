@@ -443,6 +443,17 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if (*value == "on") out.rtEnabled = true;
             else if (*value == "off") out.rtEnabled = false;
             else { error = "--rt: expected off or on"; return false; }
+        } else if (arg == "--atmosphere" || arg == "--fog" || arg == "--clouds") {
+            auto v=needValue();if(!v)return false;if(*v!="on"&&*v!="off"){error=std::string(arg)+": expected on or off";return false;}
+            if(arg=="--atmosphere")out.atmosphere=*v=="on";else if(arg=="--fog")out.fog=*v=="on";else out.clouds=*v=="on";
+        } else if (arg == "--cloud-full-rate") {out.cloudFullRate=true;
+        } else if (arg == "--day-length") {
+            if(!needFloat(out.atmoDayLength)||out.atmoDayLength<=0){error="--day-length: seconds >0";return false;}
+        } else if (arg == "--start-hour") {
+            if(!needFloat(out.atmoStartHour)||out.atmoStartHour<0||out.atmoStartHour>=24){error="--start-hour: expected0..24";return false;}
+        } else if (arg == "--time-jump-every") {if(!needCount(out.timeJumpEveryN))return false;
+        } else if (arg == "--planet-camera-height") {
+            if(!needFloat(out.planetCameraHeight)||out.planetCameraHeight<0){error="--planet-camera-height: metres >=0";return false;}
         } else if (arg == "--reflections") {
             auto v=needValue();if(!v)return false;
             if(*v=="off")out.reflections=ReflectionMode::Off;else if(*v=="ssr")out.reflections=ReflectionMode::SSR;
@@ -1006,11 +1017,14 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
         }
     }
     const bool lighting = out.shadows != ShadowMode::Off || out.directLighting != DirectLightingMode::Legacy || out.gi != GiMode::Off ||
-                          out.reflections!=ReflectionMode::Off || out.ao!=AoMode::Off || out.lightingDenoise!=LightingDenoiseMode::Off;
+                          out.reflections!=ReflectionMode::Off || out.ao!=AoMode::Off || out.lightingDenoise!=LightingDenoiseMode::Off || out.atmosphere || out.fog || out.clouds;
     if (lighting && (!out.visibility || out.tileResolve || out.adaptiveShading || out.graphScenario || out.memoryStress || out.transientTest)) {
         error = "F10-F12 lighting requires --render-path visibility with generic/binned resolve and a scene"; return false;
     }
-    if((out.reflections==ReflectionMode::RT || out.ao==AoMode::RTAO || out.reflectionCaptureProbe) && !out.rtEnabled){error="RT reflections/AO/probe capture require --rt on";return false;}
+    if(out.cloudFullRate&&!out.clouds){error="--cloud-full-rate requires --clouds on";return false;}
+    if((out.atmosphere||out.fog||out.clouds) && out.temporalUpscale){error="Physical atmosphere HDR requires native or F13 denoised reconstruction";return false;}
+    if(out.planetCameraHeight>=0&&!out.atmosphere&&!out.fog&&!out.clouds){error="Planetary camera control requires F14";return false;}
+    if((out.reflections==ReflectionMode::RT || out.ao==AoMode::RTAO) && !out.rtEnabled){error="RT reflections/AO/probe capture require --rt on";return false;}
     if(out.lightingDenoise==LightingDenoiseMode::MetalFX && out.temporalUpscale){error="Denoised and standard temporal reconstruction are separate paths";return false;}
     if((!out.reflectionProbePath.empty() || out.reflectionCaptureProbe) && out.reflections==ReflectionMode::Off){error="Probe controls require --reflections";return false;}
     if ((out.shadows == ShadowMode::RT || out.directLighting != DirectLightingMode::Legacy || out.gi != GiMode::Off) && !out.rtEnabled) {
