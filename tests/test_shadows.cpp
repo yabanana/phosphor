@@ -96,6 +96,38 @@ TEST_CASE("F10 caster culling keeps upstream off-camera casters") {
     const glm::vec4 outside=m*glm::vec4(100000,0,2.5f,1);
     CHECK((std::abs(outside.x)>1 || std::abs(outside.y)>1));
 }
+TEST_CASE("F10 complete caster bounds exclude empty reach from the PCSS search volume") {
+    ShadowSettings settings;
+    const std::array<ShadowBounds,3> bounds{{{{-6,-0.01f,-6},{6,0.01f,6}},
+                                           {{-1.61f,7.99f,-1.01f},{-0.79f,8.01f,1.01f}},
+                                           {{0.79f,31.99f,-1.01f},{1.61f,32.01f,1.01f}}}};
+    const auto camera=cameraAt();
+    const auto bounded=makeShadowCascades(camera,{0,1,0},settings,bounds);
+    const auto fallback=makeShadowCascades(camera,{0,1,0},settings);
+    CHECK(bounded[0].depthMax<33);
+    CHECK(fallback[0].depthMax>500);
+    // Moving the arbitrary fallback plane must not change a known scene's
+    // projection or filter search range. The XY stabilization stays identical.
+    settings.casterReach=10000;
+    const auto farther=makeShadowCascades(camera,{0,1,0},settings,bounds);
+    for(u32 c=0;c<4;++c) {
+        CHECK(bounded[c].depthMax==farther[c].depthMax);
+        CHECK(bounded[c].depthMin==farther[c].depthMin);
+        CHECK(bounded[c].radius==fallback[c].radius);
+        CHECK(bounded[c].center[0]==fallback[c].center[0]);
+        CHECK(bounded[c].center[2]==fallback[c].center[2]);
+        const glm::mat4 m=glm::make_mat4(bounded[c].viewProjection);
+        for(const auto& b:bounds)for(u32 k=0;k<8;++k) {
+            const glm::vec4 p(k&1u?b.maximum.x:b.minimum.x,k&2u?b.maximum.y:b.minimum.y,
+                              k&4u?b.maximum.z:b.minimum.z,1);
+            const float depth=(m*p).z;
+            CHECK(depth>=0); CHECK(depth<=1);
+        }
+    }
+    const float boundedSearch=bounded[0].depthMax*std::tan(settings.sunAngularRadius);
+    const float fallbackSearch=fallback[0].depthMax*std::tan(settings.sunAngularRadius);
+    CHECK(boundedSearch<0.16f); CHECK(fallbackSearch>2.3f);
+}
 TEST_CASE("F10 conservative light culling retains a sphere intersecting map border") {
     GPUShadowCascade c{}; c.viewProjection[0]=1; c.viewProjection[5]=1; c.viewProjection[10]=1; c.viewProjection[15]=1;
     CHECK(shadowCasterIntersects(c,1.2f,0,0.5f,0.25f));

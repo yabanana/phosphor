@@ -80,9 +80,12 @@ std::array<GPUShadowCascade,4> makeShadowCascades(const ShadowCamera& camera, gl
         center+=right*(x-glm::dot(center,right))+up*(y-glm::dot(center,up));
         float zMin=std::numeric_limits<float>::max(), zMax=-zMin;
         for(auto p:corners) { zMin=std::min(zMin,glm::dot(light,p)); zMax=std::max(zMax,glm::dot(light,p)); }
-        // Off-camera upstream casters remain in the light volume. If actual
-        // scene bounds are provided, use them in addition to the finite preset.
-        zMax+=settings.casterReach;
+        // Complete conservative bounds include off-camera upstream casters.
+        // The reach is only a fallback when no bounds are available: padding
+        // an already bounded scene with hundreds of empty metres also inflates
+        // the PCSS blocker-search disk measured from this light near plane.
+        // That sparse search can miss blockers or mix unrelated shadow edges.
+        if(casterBounds.empty()) zMax+=settings.casterReach;
         for(const auto& b:casterBounds) {
             if (!finite(b.minimum)||!finite(b.maximum)||glm::any(glm::greaterThan(b.minimum,b.maximum)))
                 throw std::invalid_argument("invalid caster bounds");

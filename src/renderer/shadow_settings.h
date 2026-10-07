@@ -29,6 +29,9 @@ struct ShadowCamera {
 struct ShadowBounds { glm::vec3 minimum{0.0f}, maximum{0.0f}; };
 void validateShadowSettings(const ShadowSettings& settings);
 std::array<float, 5> shadowCascadeSplits(float nearPlane, float farPlane, float lambda);
+// A nonempty casterBounds span must conservatively contain ALL scene casters,
+// including off-camera instances and evaluated hierarchy/motion poses. An empty
+// span selects casterReach fallback (also harmless for a scene with no casters).
 std::array<GPUShadowCascade, 4> makeShadowCascades(const ShadowCamera& camera, glm::vec3 towardLight,
                                                 const ShadowSettings& settings,
                                                 std::span<const ShadowBounds> casterBounds = {});
