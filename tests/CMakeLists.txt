@@ -45,6 +45,7 @@ add_executable(phosphor_tests
     test_rt_reference.cpp
     test_rt_check.cpp
     test_shadows.cpp
+    test_shadow_dispatch.cpp
     test_light_sampling.cpp
     test_gi.cpp
     test_lighting_validation.cpp

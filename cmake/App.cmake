@@ -67,6 +67,7 @@ set(PHOSPHOR_SHADER_HEADERS
     ${CMAKE_SOURCE_DIR}/shaders/light_visibility.h
     ${CMAKE_SOURCE_DIR}/src/renderer/shadow_math.h
     ${CMAKE_SOURCE_DIR}/src/renderer/shadow_layout.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/shadow_dispatch.h
     ${CMAKE_SOURCE_DIR}/shaders/rt_common.h
     ${CMAKE_SOURCE_DIR}/src/platform/metal/rt_visibility_check.h
     ${CMAKE_SOURCE_DIR}/src/renderer/gpu_scene_layout.h
