@@ -194,3 +194,19 @@ kernel void rt_debug_view(const device GPURtHit* hits [[buffer(2)]], constant GP
     }
     color.write(float4(rgb, 1), pixel);
 }
+
+// The debug image is linear RGBA16F. Present through a render pass because an
+// sRGB drawable cannot be a compute-writable texture; the target performs the
+// final linear -> sRGB conversion. The graph orders Dispatch -> Fragment.
+struct RtPresentVertex {
+    float4 position [[position]];
+    float2 uv;
+};
+vertex RtPresentVertex rt_present_vs(uint id [[vertex_id]]) {
+    const float2 xy = id == 0u ? float2(-1, -1) : id == 1u ? float2(3, -1) : float2(-1, 3);
+    return {float4(xy, 0, 1), xy * float2(0.5f, -0.5f) + 0.5f};
+}
+fragment float4 rt_present_fs(RtPresentVertex in [[stage_in]], texture2d<float> image [[texture(0)]]) {
+    constexpr sampler point(filter::nearest, address::clamp_to_edge);
+    return float4(image.sample(point, in.uv).rgb, 1);
+}
