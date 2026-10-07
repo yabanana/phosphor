@@ -80,3 +80,7 @@ Later source increments already present:
 
 Raw AO storage is RGBA32Float in the actual F13 host. Scalar capture explicitly
 extracts and replicates R, without changing its producer format or denoise input.
+
+During integration, preserve both scalar selectors: shadow mask3 OR AO7.
+The tester owns graph/parser selection for shadow3, world position4 and normal5;
+the writer's specular6/AO7 additions must not replace those routes.

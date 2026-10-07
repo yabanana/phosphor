@@ -343,7 +343,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     if(!options_.exportReference.empty())referenceSnapshot_=std::make_unique<ReferenceSnapshot>(*context_,*renderer_,options_.exportReference,options_.exportReferenceFrame,rt_.get());
     if(!options_.captureLinear.empty()||!options_.captureLinearSequence.empty()) {
         LinearCapture::Config capture;capture.path=options_.captureLinear;capture.sequence=options_.captureLinearSequence;
-        capture.frame=options_.captureLinearFrame;capture.every=options_.captureEvery;capture.scalar=options_.captureLinearSignal==7;
+        capture.frame=options_.captureLinearFrame;capture.every=options_.captureEvery;capture.scalar=options_.captureLinearSignal==3||options_.captureLinearSignal==7;
         linearCapture_=std::make_unique<LinearCapture>(*context_,*pipelines_,std::move(capture));
     }
     ecs_        = std::make_unique<ECS>();
