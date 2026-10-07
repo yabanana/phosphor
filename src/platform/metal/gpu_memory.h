@@ -64,6 +64,10 @@ public:
                                          const char* label);
     [[nodiscard]] MTL::Texture* newTexture(const MTL::TextureDescriptor* descriptor, MemoryCategory category,
                                            const char* label);
+    // A view owns no new storage; its parent texture must remain owned through
+    // all readers. Residency/accounting and deferred release still belong here.
+    [[nodiscard]] MTL::Texture* newTextureView(MTL::Texture* source,MTL::PixelFormat format,MTL::TextureType type,
+                                              NS::Range levels,NS::Range slices,MemoryCategory category,const char* label);
     /// F9: placement allocation with the device-reported AS alignment. The
     /// containing heap is resident; release() owns retirement like buffers.
     [[nodiscard]] MTL::AccelerationStructure* newAccelerationStructure(u64 size, MemoryCategory category,
@@ -141,6 +145,7 @@ private:
     std::vector<Heap> heaps_; // released heaps leave a null entry (indices stay stable)
     std::unordered_map<const MTL::Resource*, Placement> placements_;
     std::vector<Pending> pending_;
+    std::unordered_map<MTL::Resource*,MTL::Texture*> viewParents_;
 };
 
 } // namespace phosphor
