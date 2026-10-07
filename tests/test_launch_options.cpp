@@ -1131,3 +1131,25 @@ TEST_CASE("F13 capture IDs preserve tester shadow diagnostics and named scalar A
     CHECK(o.captureLinearSignal==7);
     CHECK_FALSE(parse({"--render-path","visibility","--capture-linear-signal","ao"},o,error));
 }
+
+TEST_CASE("F13/F14 diagnostic hooks require actual active consumers and checks") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--render-path","visibility","--reflections","ssr","--lighting-denoise","custom","--debug-lighting","1","--debug-reflection-corrupt","history"},o,error));
+    CHECK(o.debugReflectionCorrupt==1);
+    CHECK_FALSE(parse({"--render-path","visibility","--reflections","ssr","--debug-lighting","1","--debug-reflection-corrupt","history"},o,error));
+    REQUIRE(parse({"--fog","on","--volume-oracle","oracle","--fog-homogeneous","--debug-lighting","1"},o,error));
+    CHECK(o.fogHomogeneous);CHECK(o.volumeOracle=="oracle");
+    CHECK_FALSE(parse({"--fog","on","--fog-homogeneous"},o,error));
+    REQUIRE(parse({"--atmosphere","on","--debug-volume-corrupt","lut","--debug-lighting","1"},o,error));
+    CHECK(o.debugVolumeCorrupt==4);
+    CHECK_FALSE(parse({"--atmosphere","on","--debug-volume-corrupt","history","--debug-lighting","1"},o,error));
+}
+
+TEST_CASE("F13 SDK fixture is an explicit source experiment with isolated inputs") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--frames","64","--denoised-fixture","wide-hdr","--denoised-fixture-output","sdk","--denoised-fixture-pre-exposed"},o,error));
+    CHECK(o.denoisedFixture=="wide-hdr");CHECK(o.denoisedFixturePreExposed);CHECK(o.post);CHECK(o.visibility);
+    CHECK_FALSE(parse({"--denoised-fixture","constant","--denoised-fixture-output","sdk"},o,error));
+    CHECK_FALSE(parse({"--frames","64","--denoised-fixture","constant","--denoised-fixture-output","sdk","--atmosphere","on"},o,error));
+    CHECK_FALSE(parse({"--frames","64","--denoised-fixture-pre-exposed"},o,error));
+}

@@ -91,6 +91,7 @@ class VisibilityRenderer {
     MTL::Buffer *currentReadback_ = nullptr;
     MTL::Buffer *previousReadback_ = nullptr;
     u32 readWidth_ = 0, readHeight_ = 0;
+    bool readColorFloat32_ = false;
     u64 readPoseCapacity_ = 0;
     bool useBinning_ = false;
     u64 binnedFrames_ = 0, genericFrames_ = 0;

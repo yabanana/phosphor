@@ -50,21 +50,45 @@ kernel void reflection_probe_ready(constant GPUReflectionProbe& source [[buffer(
 kernel void denoise_history_corrupt_safe(constant GPUDenoiseParams& p [[buffer(0)]],device GPUDenoiseHistory* history [[buffer(1)]],uint tid [[thread_position_in_grid]]){
     if(!(p.flags&DENOISE_RESET)&&tid<p.width*p.height&&history[tid].valid)history[tid].viewID^=1u;
 }
-// base0,DIraw1,DIselected2,GIrawE3,GIselectedE4,specular5,AO6,output7;
-// composeParams0,surfaces1,atomicErrorCounts2. DI/E differences are applied only
-// in custom mode. AO adjusts ONLY residual ambient diffuse when GI is OFF.
+// Output-history domain negative. The independent denoise_check observes the
+// real view mismatch; no synthetic error flag or counter is injected here.
+kernel void denoise_next_foreign_view(constant GPUDenoiseParams& p [[buffer(0)]],device GPUDenoiseHistory* history [[buffer(1)]],uint tid [[thread_position_in_grid]]){
+    if(tid<p.width*p.height&&history[tid].valid)history[tid].viewID^=1u;
+}
+// Codes2/3 operate on F13-owned copies. Original Direct/F8 guides and motion
+// remain intact. Only valid receiver pixels are poisoned; background is copied.
+kernel void reflection_input_poison(constant GPUReflectionComposeParams& p [[buffer(0)]],const device GPUDISurface* input [[buffer(1)]],
+    device GPUDISurface* output [[buffer(2)]],texture2d<float,access::read> motion [[texture(0)]],texture2d<float,access::write> poisonedMotion [[texture(1)]],uint tid [[thread_position_in_grid]]){
+    if(tid>=p.width*p.height)return;const uint2 pixel(tid%p.width,tid/p.width);GPUDISurface s=input[tid];float2 velocity=motion.read(pixel).xy;
+    if(s.valid&&p.pad[1]==2u)velocity.x=as_type<float>(0x7fc00000u);
+    if(p.pad[1]==3u){if(s.valid){s.geometricNormal[0]=as_type<float>(0x7fc00000u);s.shadingNormal[0]=as_type<float>(0x7fc00000u);}output[tid]=s;}
+    poisonedMotion.write(float4(velocity,0,0),pixel);
+}
+// Independent input validator BEFORE transport/filtering: flags are irrelevant
+// to this check; it directly inspects the consumed guide and motion numerics.
+kernel void reflection_input_check(constant GPUReflectionComposeParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
+    device atomic_uint* counts [[buffer(2)]],texture2d<float,access::read> motion [[texture(0)]],uint tid [[thread_position_in_grid]],uint lane [[thread_index_in_simdgroup]]){
+    if(tid>=p.width*p.height)return;const GPUDISurface s=surfaces[tid];const float3 geometric(s.geometricNormal[0],s.geometricNormal[1],s.geometricNormal[2]),normal(s.shadingNormal[0],s.shadingNormal[1],s.shadingNormal[2]);
+    const float2 velocity=motion.read(uint2(tid%p.width,tid/p.width)).xy;const bool bad=s.valid&&(!all(isfinite(geometric))||!all(isfinite(normal))||dot(geometric,geometric)<=0||dot(normal,normal)<=0||!all(isfinite(velocity)));
+    const uint failures=simd_sum(bad?1u:0u);if(lane==0&&failures)atomic_fetch_add_explicit(counts+5,failures,memory_order_relaxed);
+}
+// residual0,DIselected2,GIselectedE4,specular5,AO6,output7.
+// Root RESOLVE_EXTERNAL_DIFFUSE bit32 strips external DI/GI/hemisphere diffuse
+// from the primary residual. Assemble positive terms ONCE, never subtract an
+// FP32 signal from a quantized residual. Pre-reflection raw assembly uses this
+// same kernel with DI/GI only flags, SPEC/AO off and unfiltered inputs.
 kernel void reflection_composite(constant GPUReflectionComposeParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
-    device atomic_uint* counts [[buffer(2)]],texture2d<float,access::read> base [[texture(0)]],texture2d<float,access::read> diRaw [[texture(1)]],
-    texture2d<float,access::read> diSelected [[texture(2)]],texture2d<float,access::read> giRaw [[texture(3)]],texture2d<float,access::read> giSelected [[texture(4)]],
+    device atomic_uint* counts [[buffer(2)]],texture2d<float,access::read> base [[texture(0)]],
+    texture2d<float,access::read> diSelected [[texture(2)]],texture2d<float,access::read> giSelected [[texture(4)]],
     texture2d<float,access::read> specular [[texture(5)]],texture2d<float,access::read> ao [[texture(6)]],texture2d<float,access::write> output [[texture(7)]],uint tid [[thread_position_in_grid]]){
     if(tid>=p.backingWidth*p.backingHeight)return;const uint2 pixel(tid%p.backingWidth,tid/p.backingWidth);float3 color=base.read(pixel).rgb;
     if(all(pixel<uint2(p.width,p.height))){const GPUDISurface s=surfaces[pixel.y*p.width+pixel.x];
-        if(s.valid){if((p.flags&REFLECT_COMPOSE_CUSTOM)&&(p.flags&REFLECT_COMPOSE_DI))color+=diSelected.read(pixel).rgb-diRaw.read(pixel).rgb;
-            if((p.flags&REFLECT_COMPOSE_CUSTOM)&&(p.flags&REFLECT_COMPOSE_GI))color+=(giSelected.read(pixel).rgb-giRaw.read(pixel).rgb)*diVec(s.albedo)*(1-s.metallic)/M_PI_F;
+        if(s.valid){if(p.flags&REFLECT_COMPOSE_DI)color+=diSelected.read(pixel).rgb;
+            if(p.flags&REFLECT_COMPOSE_GI)color+=giSelected.read(pixel).rgb*diVec(s.albedo)*(1-s.metallic)/M_PI_F;
             if(p.flags&REFLECT_COMPOSE_SPEC)color+=specular.read(pixel).rgb;
-            if((p.flags&REFLECT_COMPOSE_AO)&&!(p.flags&REFLECT_COMPOSE_GI)){const float3 n=normalize(diVec(s.shadingNormal));
+            if(!(p.flags&REFLECT_COMPOSE_GI)){const float3 n=normalize(diVec(s.shadingNormal));
                 const float3 sky(.30f,.36f,.45f),ground(.10f,.09f,.08f);const float3 ambient=mix(ground,sky,n.y*.5f+.5f)*diVec(s.albedo)*(1-s.metallic)*as_type<float>(s.pad[0]);
-                color-=ambient*(1-saturate(ao.read(pixel).x));}}
+                color+=ambient*((p.flags&REFLECT_COMPOSE_AO)?saturate(ao.read(pixel).x):1.0f);}}
     }
     if(!all(isfinite(color))||any(color<-.00001f)||(p.pad[0]&&any(color>65504.0f))){atomic_fetch_add_explicit(counts+4,1u,memory_order_relaxed);color=0;}
     output.write(float4(max(color,0.0f),1),pixel);

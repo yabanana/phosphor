@@ -68,7 +68,7 @@ kernel void atmosphere_apply(constant GPUAtmosphereParams& p [[buffer(0)]],textu
         color=sky.sample(kAtmosphereSampler,atmoSkyUv(ray,up,height,p)).rgb;
         const AtmoSegment bounds=atmoSegment(camera,ray,p);
         if(!bounds.ground){const float3 T=atmoTransmittance(camera,ray,p,trans);
-            if(dot(ray,atmoVec(p.sunDirection))>=cos(p.sunAngularRadius))color+=T*atmoVec(p.sunIrradiance)/(M_PI_F*pow(sin(p.sunAngularRadius),2.0f));
+            color+=T*atmoSolarDisk(ray,p);
             if((p.flags&ATMOSPHERE_ENABLE_MOON)&&p.moonPhase>1e-6f && dot(ray,atmoVec(p.moonDirection))>=cos(p.moonAngularRadius)) {
                 const float3 moon=atmoVec(p.moonDirection);float3 east,north;atmoBasis(moon,east,north);
                 const float2 disk=float2(dot(ray,east),dot(ray,north))/sin(p.moonAngularRadius);const float limb=sqrt(max(0.0f,1-dot(disk,disk)));

@@ -1,5 +1,14 @@
 #include "reflection_common.h"
 
+// The independent F13 input checker retains malformed guide diagnostics. Never
+// send a nonfinite copied/production receiver into the hardware intersector or
+// integer screen-address calculation; an inactive AO proposal stays neutral.
+inline bool aoReceiverFinite(GPUDISurface s){
+    const float3 n=diVec(s.geometricNormal),v=diVec(s.viewDirection);
+    return all(isfinite(n))&&all(isfinite(v))&&all(isfinite(diVec(s.position)))&&
+           dot(n,n)>0&&dot(v,v)>0&&isfinite(s.depth)&&s.depth>0;
+}
+
 // Raw AO = cosine-weighted visibility over a WORLD radius. It is a distinct
 // scalar signal [0,1], never a second multiplier on transported GI or direct
 // irradiance. Params0 surfaces1 depthtexture0 outputtexture1. RTAO adds
@@ -8,7 +17,7 @@ kernel void ao_rtao(constant GPUAOParams& p [[buffer(0)]],const device GPUDISurf
     instance_acceleration_structure as [[buffer(2)]],intersection_function_table<triangle_data,instancing> ift [[buffer(3)]],
     const device GPUInstance* instances [[buffer(4)]],texture2d<float,access::write> output [[texture(1)]],uint tid [[thread_position_in_grid]]){
     if(tid>=p.width*p.height)return;const GPUDISurface s=surfaces[tid];float visibility=1;
-    if(s.valid&&p.radius>0){const float3 n=normalize(diVec(s.geometricNormal)),t=reflectionTangent(n),b=cross(n,t),origin=rtOffsetRay(diVec(s.position),n)+n*p.originBias;
+    if(s.valid&&aoReceiverFinite(s)&&p.radius>0){const float3 n=normalize(diVec(s.geometricNormal)),t=reflectionTangent(n),b=cross(n,t),origin=rtOffsetRay(diVec(s.position),n)+n*p.originBias;
         uint seed=giHash(tid^giHash(p.frameIndex));float sum=0;const uint samples=clamp(p.samples,1u,64u);
         for(uint i=0;i<samples;++i){const float u=(float(i)+giRandom(seed))/float(samples),v=giRandom(seed),r=sqrt(u),phi=2*M_PI_F*v;
             const float3 d=t*(r*cos(phi))+b*(r*sin(phi))+n*sqrt(max(0.0f,1-u));GPURtRay ray{};
@@ -35,7 +44,7 @@ inline bool aoUnproject(uint2 pixel,float z,constant GPUAOParams& p,thread float
 kernel void ao_gtao(constant GPUAOParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
     texture2d<float,access::read> depth [[texture(0)]],texture2d<float,access::write> output [[texture(1)]],uint tid [[thread_position_in_grid]]){
     if(tid>=p.width*p.height)return;const uint2 pixel(tid%p.width,tid/p.width);const GPUDISurface s=surfaces[tid];float visibility=1;
-    if(s.valid&&p.radius>0){const float3 point=diVec(s.position),n=normalize(diVec(s.geometricNormal)),v=normalize(diVec(s.viewDirection));
+    if(s.valid&&aoReceiverFinite(s)&&p.radius>0){const float3 point=diVec(s.position),n=normalize(diVec(s.geometricNormal)),v=normalize(diVec(s.viewDirection));
         const float3 t=reflectionTangent(v),b=cross(v,t);uint seed=giHash(tid^giHash(p.frameIndex));float sum=0;
         // Projected sampling radius comes from metre radius and positive view
         // distance. Logical integer pixels avoid F8 backing-size sampling bugs.

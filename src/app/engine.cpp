@@ -246,7 +246,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
                                                            options_.shadows != ShadowMode::Off || options_.directLighting != DirectLightingMode::Legacy || options_.gi != GiMode::Off || options_.reflections!=ReflectionMode::Off || options_.ao!=AoMode::Off || options_.lightingDenoise!=LightingDenoiseMode::Off || options_.atmosphere || options_.fog || options_.clouds);
     if (options_.post) {
         PostProcessor::Options po;
-        po.physicalFloat32=options_.atmosphere || options_.fog || options_.clouds;
+        po.physicalFloat32=options_.atmosphere || options_.fog || options_.clouds || options_.reflections!=ReflectionMode::Off || options_.ao!=AoMode::Off || options_.lightingDenoise!=LightingDenoiseMode::Off || !options_.denoisedFixture.empty();
         po.forceReset = options_.debugUpscalerReset;
         po.corruptExposure = options_.debugExposureCorrupt;
         po.jitterVariant = options_.jitterVariant;
@@ -346,7 +346,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     if(!options_.exportReference.empty())referenceSnapshot_=std::make_unique<ReferenceSnapshot>(*context_,*renderer_,options_.exportReference,options_.exportReferenceFrame,rt_.get());
     if(!options_.captureLinear.empty()||!options_.captureLinearSequence.empty()) {
         LinearCapture::Config capture;capture.path=options_.captureLinear;capture.sequence=options_.captureLinearSequence;
-        capture.frame=options_.captureLinearFrame;capture.every=options_.captureEvery;capture.scalar=options_.captureLinearSignal==7;
+        capture.frame=options_.captureLinearFrame;capture.every=options_.captureEvery;capture.scalar=options_.captureLinearSignal==3||options_.captureLinearSignal==7;
         linearCapture_=std::make_unique<LinearCapture>(*context_,*pipelines_,std::move(capture));
     }
     ecs_        = std::make_unique<ECS>();
@@ -902,6 +902,7 @@ void Engine::finishBenchmark() {
         report.lighting.denoiseEffective=denoised_&&denoised_->ready()?"metalfx":options_.lightingDenoise!=LightingDenoiseMode::Off?"custom":"off";
         if(denoised_)report.lighting.denoiseFallback=denoised_->fallbackReason();
         if(reflections_)report.lighting.probeSource=reflections_->probeSource();
+        report.lighting.reflectionCorrupt=options_.debugReflectionCorrupt;report.lighting.volumeCorrupt=options_.debugVolumeCorrupt;report.lighting.volumeOracle=options_.volumeOracle;report.lighting.fogHomogeneous=options_.fogHomogeneous;
         report.lighting.atmosphere=options_.atmosphere;report.lighting.fog=options_.fog;report.lighting.clouds=options_.clouds;report.lighting.cloudFullRate=options_.cloudFullRate;
         report.lighting.cache=options_.shadowCache;report.lighting.seed=options_.lightingSeed;report.lighting.sunIndex=shadows_->sunIndex();
         report.lighting.candidates=options_.lightingCandidates;report.lighting.spatialSamples=options_.lightingSpatialSamples;report.lighting.giRays=options_.giRays;report.lighting.checks=lightingChecks_;report.lighting.failures=lightingFailures_;
@@ -1619,7 +1620,7 @@ bool Engine::frame(float dt) {
         if(reflections_&&reflections_->ready())reflections_->prepareFrame(*store_,sf,custom,surfaceSignalEpoch_);
         if(atmosphere_)atmosphere_->prepareFrame(sf,surfaceGeometryEpoch_,surfaceMaterialEpoch_);
         const u32 flags=(options_.shadows!=ShadowMode::Off?1u:0u) | (options_.directLighting!=DirectLightingMode::Legacy?2u:0u) | (options_.gi!=GiMode::Off?4u:0u) |
-                        (options_.reflections!=ReflectionMode::Off && reflections_&&reflections_->ready()?8u:0u) | (reflections_&&reflections_->ready()?16u:0u);
+                        (options_.reflections!=ReflectionMode::Off && reflections_&&reflections_->ready()?8u:0u) | (reflections_&&reflections_->ready()?16u|RESOLVE_EXTERNAL_DIFFUSE:0u);
         visibility_->prepareLighting(flags,shadows_->sunIndex());
     }
     if(referenceSnapshot_) {
@@ -1966,9 +1967,11 @@ void Engine::onSceneCounters(u32 slot) {
     if(referenceSnapshot_)referenceSnapshot_->consume(slot);
     if(linearCapture_)linearCapture_->consume(slot);
     if(denoised_)for(const auto& check:denoised_->drainPackChecks())if(check.available&&!check.ok){++lightingFailures_;exitCode_=1;}
+    const bool reflectionPassed=!slotReflectionRecorded_[slot]||reflections_->check(slot);
+    if(!reflectionPassed){++lightingFailures_;exitCode_=1;}
     if(shadows_ && options_.debugLighting && (slotFrame_[slot]+1)%options_.debugLighting==0) {
-        ++lightingChecks_;const bool pass=shadows_->check(slot) && (!directLighting_ || directLighting_->check(slot)) && (!gi_ || gi_->check(slot)) && (!slotReflectionRecorded_[slot] || reflections_->check(slot)) && (!atmosphere_ || atmosphere_->check(slot));
-        if(!pass){++lightingFailures_;exitCode_=1;}
+        ++lightingChecks_;const bool pass=shadows_->check(slot) && (!directLighting_ || directLighting_->check(slot)) && (!gi_ || gi_->check(slot)) && reflectionPassed && (!atmosphere_ || atmosphere_->check(slot));
+        if(!pass){if(reflectionPassed)++lightingFailures_;exitCode_=1;}
         std::printf("LIGHTING check frame %llu | %s\n",static_cast<unsigned long long>(slotFrame_[slot]),pass?"PASS":"FAIL");
         std::fflush(stdout); // Keep each diagnostic intact beside stderr capture logs.
     }

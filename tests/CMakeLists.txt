@@ -54,6 +54,8 @@ add_executable(phosphor_tests
     test_reflection_validation.cpp
     test_reflections.cpp
     test_denoise.cpp
+    test_surface_signal_controls.cpp
+    test_positive_lighting_partition.cpp
     test_atmosphere.cpp
     test_volumes.cpp
     test_metalfx_denoise_contract.cpp

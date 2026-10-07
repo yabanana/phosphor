@@ -127,9 +127,8 @@ void LinearCapture::addToGraph(rg::RenderGraph& graph, rg::TextureRef linearHdr)
             if (!active_ || slot.pending) throw std::logic_error("Linear capture encoding slot is not reusable");
             auto* source = static_cast<MTL::Texture*>(context.texture(linearHdr));
             if (!source || source->width() < slot.width || source->height() < slot.height ||
-                (config_.scalar ? (source->pixelFormat() != MTL::PixelFormatR16Float && source->pixelFormat() != MTL::PixelFormatR32Float &&
-                                  source->pixelFormat() != MTL::PixelFormatRGBA16Float && source->pixelFormat() != MTL::PixelFormatRGBA32Float)
-                                : (source->pixelFormat() != MTL::PixelFormatRGBA16Float && source->pixelFormat() != MTL::PixelFormatRGBA32Float)))
+                (source->pixelFormat() != MTL::PixelFormatRGBA16Float && source->pixelFormat() != MTL::PixelFormatRGBA32Float &&
+                 !(config_.scalar && (source->pixelFormat() == MTL::PixelFormatR16Float || source->pixelFormat() == MTL::PixelFormatR32Float))))
                 throw std::invalid_argument("Linear capture format does not match the declared RGB/scalar source");
             auto* pipeline = pipelines_.compute(pipeline_);
             if (!pipeline) throw std::runtime_error("Linear capture pipeline is not ready");
