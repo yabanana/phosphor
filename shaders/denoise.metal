@@ -75,11 +75,11 @@ kernel void denoise_atrous(constant GPUDenoiseParams& p [[buffer(0)]],const devi
     texture2d<float,access::read> moments [[texture(1)]],texture2d<float,access::write> output [[texture(2)]],uint tid [[thread_position_in_grid]]){
     if(tid>=p.width*p.height)return;const uint2 pixel(tid%p.width,tid/p.width);const GPUDISurface center=surfaces[tid];const float3 value=input.read(pixel).rgb;
     if(!center.valid){output.write(float4(value,1),pixel);return;}
-    const float variance=moments.read(pixel).z,lum=diLuminance(value);float3 sum=0;float weights=0;const float kernel[5]={1,4,6,4,1};
+    const float variance=moments.read(pixel).z,lum=diLuminance(value);float3 sum=0;float weights=0;const float taps[5]={1,4,6,4,1};
     for(int y=-2;y<=2;++y)for(int x=-2;x<=2;++x){const int2 q=int2(pixel)+int2(x,y)*int(p.atrousStep);if(any(q<0)||any(q>=int2(p.width,p.height)))continue;
         const uint index=uint(q.y)*p.width+uint(q.x);const float3 color=input.read(uint2(q)).rgb;if(!all(isfinite(color)))continue;
         if(p.signal==DENOISE_SIGNAL_SPECULAR){const GPUSpecularSample a=specular[tid],b=specular[index];if(a.path!=b.path||a.secondarySlot!=b.secondarySlot||a.secondaryGeneration!=b.secondaryGeneration)continue;}
-        const float weight=kernel[x+2]*kernel[y+2]*denoiseWeight(center,surfaces[index],lum,diLuminance(color),variance,p);sum+=color*weight;weights+=weight;
+        const float weight=taps[x+2]*taps[y+2]*denoiseWeight(center,surfaces[index],lum,diLuminance(color),variance,p);sum+=color*weight;weights+=weight;
     }
     float3 result=weights>0?sum/weights:value;if(p.signal==DENOISE_SIGNAL_AO)result=saturate(result);output.write(float4(result,1),pixel);
 }

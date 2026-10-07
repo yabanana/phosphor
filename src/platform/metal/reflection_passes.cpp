@@ -287,9 +287,10 @@ struct ReflectionPasses::Impl {
             if(gi&&options.gi!=GiMode::Off)giSelected=denoise.addSignal(graph,DENOISE_SIGNAL_GI,gi->irradiance(),direct.motion(),direct.surfaceRef());
             if(options.reflections!=ReflectionMode::Off)specSelected=denoise.addSignal(graph,DENOISE_SIGNAL_SPECULAR,specular,direct.motion(),direct.surfaceRef(),metadata);
             if(options.ao!=AoMode::Off)aoSelected=denoise.addSignal(graph,DENOISE_SIGNAL_AO,ao,direct.motion(),direct.surfaceRef());}
-        graph.addPass("F13 single-count lighting composite",PassType::Compute,[this](PassBuilder& b){b.read(base,Usage::ShaderRead,StageDispatch);b.read(direct.surfaceRef(),Usage::ShaderRead,StageDispatch);
+        const auto compositeDesc=graph.resources().at(base.resource).texture;
+        graph.addPass("F13 single-count lighting composite",PassType::Compute,[this,compositeDesc](PassBuilder& b){b.read(base,Usage::ShaderRead,StageDispatch);b.read(direct.surfaceRef(),Usage::ShaderRead,StageDispatch);
             for(auto ref:{direct.direct(),directSelected,giSelected,specSelected,aoSelected})b.read(ref,Usage::ShaderRead,StageDispatch);if(gi&&options.gi!=GiMode::Off)b.read(gi->irradiance(),Usage::ShaderRead,StageDispatch);
-            b.read(errorsRef,Usage::ShaderRead,StageDispatch);errorsRef=b.write(errorsRef,Usage::ShaderWrite,StageDispatch);output=b.createTexture("F13 composed linear HDR",graph.resources().at(base.resource).texture);output=b.write(output,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("reflection_composite");
+            b.read(errorsRef,Usage::ShaderRead,StageDispatch);errorsRef=b.write(errorsRef,Usage::ShaderWrite,StageDispatch);output=b.createTexture("F13 composed linear HDR",compositeDesc);output=b.write(output,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("reflection_composite");
         },[this](PassContext& ctx){auto* t=slots[frame.slot].composeTable;t->setAddress(composeAddress,0);t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(direct.surfaceRef()))->gpuAddress(),1);t->setAddress(slots[frame.slot].errors->gpuAddress(),2);
             texture(t,ctx,base,0);texture(t,ctx,direct.direct(),1);texture(t,ctx,directSelected,2);texture(t,ctx,gi&&options.gi!=GiMode::Off?gi->irradiance():dummyTexRef,3);texture(t,ctx,giSelected,4);texture(t,ctx,specSelected,5);texture(t,ctx,aoSelected,6);texture(t,ctx,output,7);
             lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,compose,t,frame.backingWidth*frame.backingHeight);});

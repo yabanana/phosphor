@@ -27,7 +27,7 @@ bool cloudHistoryCompatible(const GPUCloudParams& p,const GPUCloudHistory& h,glm
     if(!(p.flags&VOLUME_HISTORY_VALID)||!h.valid||h.viewID!=p.viewID||h.generation!=p.generation||
        !std::isfinite(depth)||!std::isfinite(h.opaqueDistance)||!h.samples||h.samples>64)return false;
     const glm::dvec3 old(h.worldPosition[0],h.worldPosition[1],h.worldPosition[2]);
-    const glm::dvec3 advected=point-glm::dvec3(p.wind[0],p.wind[1],p.wind[2])*(p.timeSeconds-p.previousTimeSeconds);
+    const glm::dvec3 advected=point-glm::dvec3(p.wind[0],p.wind[1],p.wind[2])*double(p.timeSeconds-p.previousTimeSeconds);
     for(double c:{advected.x,advected.y,advected.z,old.x,old.y,old.z})if(!std::isfinite(c))return false;
     return glm::length(advected-old)<=p.positionThreshold && std::abs(depth-h.opaqueDistance)<=p.depthRelativeThreshold*std::max(1.0,depth);
 }

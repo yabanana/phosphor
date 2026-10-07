@@ -2,6 +2,7 @@
 #include <metal_stdlib>
 #include "renderer/gpu_types.h"
 #include "renderer/volume_noise.h"
+#include "renderer/volume_math.h"
 using namespace metal;
 using namespace phosphor;
 
@@ -38,8 +39,8 @@ static AtmoMedium atmoMedium(float3 world,constant GPUAtmosphereParams& p) {
     m.extinction=m.rayleigh+m.mie+p.mieAbsorption*mieDensity+atmoVec(p.ozoneAbsorption)*ozone;return m;
 }
 static float3 atmoIntegralFactor(float3 sigma,float ds) {
-    return float3(sigma.x>1e-8f?-expm1(-sigma.x*ds)/sigma.x:ds,
-                  sigma.y>1e-8f?-expm1(-sigma.y*ds)/sigma.y:ds,sigma.z>1e-8f?-expm1(-sigma.z*ds)/sigma.z:ds);
+    return float3(volumeIntegralFactor(sigma.x,ds), volumeIntegralFactor(sigma.y,ds),
+                  volumeIntegralFactor(sigma.z,ds));
 }
 static float atmoRayleighPhase(float mu){return 3.0f/(16.0f*M_PI_F)*(1+mu*mu);}
 static float atmoHgPhase(float mu,float g){return (1-g*g)/(4*M_PI_F*pow(max(1e-8f,1+g*g-2*g*mu),1.5f));}
