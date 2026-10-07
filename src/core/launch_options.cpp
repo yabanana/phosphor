@@ -535,6 +535,13 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
         } else if (arg == "--lighting-scene") {
             auto v=needValue();if(!v)return false;
             if(!LightingValidation::validScenario(*v)){error="--lighting-scene: unknown analytic scenario";return false;}out.lightingScene=*v;
+        } else if (arg == "--denoised-fixture") {
+            auto v=needValue();if(!v)return false;
+            if(*v!="constant"&&*v!="impulse"&&*v!="channels"&&*v!="lifecycle"&&*v!="wide-hdr"){error="--denoised-fixture: expected constant, impulse, channels, lifecycle or wide-hdr";return false;}out.denoisedFixture=*v;
+        } else if (arg == "--denoised-fixture-output") {
+            auto v=needValue();if(!v||v->empty()||v->starts_with("--")){error="--denoised-fixture-output: expected output directory";return false;}out.denoisedFixtureOutput=*v;
+        } else if (arg == "--denoised-fixture-pre-exposed") {
+            out.denoisedFixturePreExposed=true;
         } else if (arg == "--fog-homogeneous") {
             out.fogHomogeneous=true;
         } else if (arg == "--volume-oracle") {
@@ -1008,7 +1015,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             "Settled reference requires fixed timestep, temporal upscaling, one view, zero warmup and fixed resolution";
         return false;
     }
-    if(out.lightingDenoise==LightingDenoiseMode::MetalFX || out.atmosphere || out.fog || out.clouds)out.post=true;
+    if(out.lightingDenoise==LightingDenoiseMode::MetalFX || out.atmosphere || out.fog || out.clouds || !out.denoisedFixture.empty())out.post=true;
     if (out.post)
         out.visibility = true;
     if (out.debugPostCurvesCorrupt && !out.debugPostCurves) {
@@ -1039,6 +1046,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if (lighting && (!out.visibility || out.tileResolve || out.adaptiveShading || out.graphScenario || out.memoryStress || out.transientTest)) {
         error = "F10-F12 lighting requires --render-path visibility with generic/binned resolve and a scene"; return false;
     }
+    if(!out.denoisedFixture.empty()&&(out.denoisedFixtureOutput.empty()||!out.benchmark()||out.temporalUpscale||out.atmosphere||out.fog||out.clouds||out.lightingDenoise!=LightingDenoiseMode::Off||out.reflections!=ReflectionMode::Off||out.ao!=AoMode::Off||!out.captureLinear.empty()||!out.captureLinearSequence.empty())){error="SDK fixture requires --frames and --denoised-fixture-output, with native post and exclusive fixture inputs";return false;}
+    if(out.denoisedFixture.empty()&&(!out.denoisedFixtureOutput.empty()||out.denoisedFixturePreExposed)){error="SDK fixture controls require --denoised-fixture";return false;}
     if((!out.volumeOracle.empty()||out.debugVolumeCorrupt) && (!(out.atmosphere||out.fog||out.clouds)||!out.debugLighting)){error="Volume oracle/corruption requires F14 and --debug-lighting N";return false;}
     if(out.fogHomogeneous&&(!out.fog||out.volumeOracle.empty())){error="Homogeneous fog requires --fog on and --volume-oracle";return false;}
     if(out.debugVolumeCorrupt==2&&(!out.fog&&(!out.clouds||out.cloudFullRate))){error="Volume history control requires fog or reconstructed clouds";return false;}

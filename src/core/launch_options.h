@@ -340,6 +340,7 @@ struct LaunchOptions {
     float atmoDayLength=1200,atmoStartHour=12,planetCameraHeight=-1;
     u32 timeJumpEveryN=0,debugVolumeCorrupt=0;
     std::string volumeOracle;bool fogHomogeneous=false;
+    std::string denoisedFixture,denoisedFixtureOutput;bool denoisedFixturePreExposed=false;
     ReflectionMode reflections=ReflectionMode::Off;
     AoMode ao=AoMode::Off;
     LightingDenoiseMode lightingDenoise=LightingDenoiseMode::Off;

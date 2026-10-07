@@ -1104,3 +1104,12 @@ TEST_CASE("F13/F14 diagnostic hooks require actual active consumers and checks")
     CHECK(o.debugVolumeCorrupt==4);
     CHECK_FALSE(parse({"--atmosphere","on","--debug-volume-corrupt","history","--debug-lighting","1"},o,error));
 }
+
+TEST_CASE("F13 SDK fixture is an explicit source experiment with isolated inputs") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--frames","64","--denoised-fixture","wide-hdr","--denoised-fixture-output","sdk","--denoised-fixture-pre-exposed"},o,error));
+    CHECK(o.denoisedFixture=="wide-hdr");CHECK(o.denoisedFixturePreExposed);CHECK(o.post);CHECK(o.visibility);
+    CHECK_FALSE(parse({"--denoised-fixture","constant","--denoised-fixture-output","sdk"},o,error));
+    CHECK_FALSE(parse({"--frames","64","--denoised-fixture","constant","--denoised-fixture-output","sdk","--atmosphere","on"},o,error));
+    CHECK_FALSE(parse({"--frames","64","--denoised-fixture-pre-exposed"},o,error));
+}
