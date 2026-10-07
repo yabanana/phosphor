@@ -179,3 +179,47 @@ package. The planned indexed layered-output path was replaced by four ordinary
 depth passes in agreement with the aggregator, preserving distinct graph refs.
 Apple's [layer-selection documentation](https://developer.apple.com/documentation/metal/rendering-to-multiple-texture-slices-in-a-draw-command)
 was consulted for the earlier array option; no device behavior was inferred.
+
+## F10.5 actual regional GPU implementation — NON VERIFIED
+
+shadow_passes.cpp now connects the 8x8 tile contract to persistent per-view/
+cascade static depth and exact GPU revisions. It rasterizes ONLY stale static
+regions to current Depth32Float, rasterizes dynamic casters separately, copies
+at most cacheUpdateBudget regions to persistent R32Float and composes nearest
+reverse depth MAX into Depth32Float before PCSS. The static/dynamic masks are
+never multiplied. Static classification excludes GPU-motion roots/hierarchy
+children even if their scene flag says static. Full-scene caster bounds come
+from F5 motionWorld/mat4Mul using the exact renderer-uploaded sin/cos table.
+
+New ABI: GPUShadowCacheParams 48 bytes (buffer18), static classification u32
+array (buffer19), expected GPUShadowCacheTile[64] (buffer20), persistent tile
+records (buffer21, each 48 bytes). Exact light/caster/material/projection
+revision fields are pairs of u32 preserving ALL 64 bits.
+
+shadow_cache_depth_vertex/mesh/fragment retain the original shadow bindings
+and add controls18/classification19. Current static fragment writes only the
+currentLo/currentHi tile mask; dynamic class always writes current geometry.
+shadow_cache_initialize clears metadata on first use/scene load (18/21, 64
+threads), shadow_cache_publish reads static depth texture0 and writes R32Float
+texture1 plus tile metadata (18/20/21), shadow_cache_validate checks the exact
+ready-or-updated tuple with compute atomics into counters15 (18/20/21, 64
+threads). shadow_cache_composite_vertex/fragment write fullscreen Depth32Float
+from cached R32 texture0, current static depth1 and current dynamic depth2,
+reading controls18/expected20/stored21. No fragment-stage atomic producer is
+introduced. Persistent cache/meta imports are Output/ContentsDefined and are
+written at Dispatch; Fragment consumption and previous-frame reuse are graph
+ordered. CPU publications name scheduled GPU writes, not completion.
+
+The host's preallocated tables are distinct per slot/cascade/class and mesh,
+plus separate initialize/publish/validate/composite tables. CacheState exposes
+CPU admissions for tester readback planning. The shader corruption control
+forces tile zero ready, suppresses its copy, and changes the expected projection
+word; GPU exact validation must fail. --shadow-cache on is CSM-only and other
+techniques are explicitly rejected. No flag is accepted and ignored.
+
+The prior coarse-cache integration limit in the original writer handoff is
+superseded by this source package. All compilation, runtime readback, visual,
+lifecycle and budget checks remain NOT EXECUTED. The host requests new cache
+PSOs via PipelineCache and creates/releases cache resources via GpuMemory.
+The source-only host copy baseline must not be cherry-picked; apply only the
+regional follow-up delta onto the parent's common a8c6a14 host integration.

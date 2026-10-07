@@ -17,7 +17,14 @@ public:
         FrameConstants constants{};
         float unjitteredVP[16]{};
         float nearPlane=0.1f;
+        std::array<float,SCENE_MOTION_CLASSES*2> motionSinCos{};
+        bool motionSinCosValid=false;
     };
+    struct CacheState {
+        bool enabled=false;
+        u32 readyTiles=0, currentTiles=0, updates=0, updateBudget=0;
+        u32 staticCasters=0, dynamicCasters=0;
+    }; // CPU admission state, not a GPU time or completion measurement
     ShadowPasses(MetalContext&, PipelineCache&, SceneRenderer&, MeshRenderer&, VisibilityRenderer&,
                  AccelerationStructures*, const LaunchOptions&);
     ~ShadowPasses();
@@ -30,10 +37,12 @@ public:
     [[nodiscard]] rg::TextureRef geometricNormal() const;
     [[nodiscard]] rg::TextureRef receiverKeys() const;
     [[nodiscard]] rg::TextureRef mask() const;
+    [[nodiscard]] rg::TextureRef depth() const; // last receiver-prepass depth version
     [[nodiscard]] rg::TextureRef zeroLighting() const;
     [[nodiscard]] u32 sunIndex() const;
     [[nodiscard]] u64 version() const;
     [[nodiscard]] GPUShadowCounters counters(u32 slot) const;
+    [[nodiscard]] CacheState cacheState(u32 view) const;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

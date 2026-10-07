@@ -540,6 +540,22 @@ struct GPUShadowCounters {
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowCounters) == 32, "GPUShadowCounters layout");
 
+// F10.5 cache region controls. Masks are 64 bits split into scalar u32 words;
+// bit y*8+x identifies a tile in the 8x8 map. Revisions are FULL 64-bit values,
+// split into words; shaders compare the tuple, never an age or hash alone.
+struct GPUShadowCacheParams {
+    u32 resolution, cascade, casterClass, slotCount; // class 0 static, 1 dynamic, 2 all
+    u32 currentLo, currentHi, updateLo, updateHi;
+    u32 readyLo, readyHi, corruption, pad;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowCacheParams) == 48, "GPUShadowCacheParams layout");
+struct GPUShadowCacheTile {
+    u32 lightLo, lightHi, casterLo, casterHi;
+    u32 materialLo, materialHi, projectionLo, projectionHi;
+    u32 valid, pad[3];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowCacheTile) == 48, "GPUShadowCacheTile layout");
+
 
 struct GPUResolveLightingParams {
     u32 flags, sunIndex, width, height; // bits: sun visibility, replace local DI, indirect irradiance

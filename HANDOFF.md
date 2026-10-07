@@ -51,9 +51,7 @@ before W&B. Never use a normal map or proxy triangle for this offset.
 
 CSM uses four independent Depth32Float graph refs and four raster passes,
 clear zero/Greater. PCSS textures are 2/7/8/9. Raster input is the full scene
-slot set and each mesh's full geometry. Full-scene caster bounds must be
-passed to makeShadowCascades; casterReach=500 is an experimental bounded
-preset, not a proof for arbitrary scenes. CSM normal/depth bias values and
+slot set and each mesh's full geometry. The host now reconstructs all motion/hierarchy world matrices with the exact uploaded renderer sin/cos table and passes full-scene caster bounds to makeShadowCascades. The finite casterReach preset no longer defines the maximum scene reach. CSM normal/depth bias values and
 solar radius are tuneable experimental presets, with no quality measurements.
 
 The RT consumer must create its IFT from its OWN resolved PSO, linked to the
@@ -76,14 +74,7 @@ visibility signal. HDR total, ambient, emissive and all other direct-light
 terms are preserved. Contact composes by min. F10.3 local-light visibility
 joins F11.1; complete lighting-denoised acceptance depends on F13.
 
-Cache API is complete portable admission/lifetime logic. The parent host must
-connect it to region rendering/composition. Key includes view/light/cascade/
-tile and revision includes light/caster/alpha-material/projection. Union old
-and new caster region masks. Dynamic/stale/budget-starved regions use CURRENT
-dynamic CSM. Never reuse stale static depth. The parent currently starts with
-coarse per-cascade regions and full-current dynamic fallback; fine 8x8 tile
-region rendering is explicitly still an integration expansion, not verified
-F10.5 completion.
+F10.5 now includes actual 8x8 tile GPU updates per view/cascade. Missing/stale static tiles are rasterized CURRENT every frame; at most cacheUpdateBudget are copied into persistent R32Float cache. Dynamic casters always use a separate current depth texture. The fullscreen composite emits Depth32Float MAX(static cached-or-current depth, dynamic depth) before PCSS. Exact tile revisions are GPU-validated and persistent resources are graph imported. This implementation is WRITTEN, with all runtime verification pending.
 
 ## Commands for the tester — NOT EXECUTED
 
@@ -123,8 +114,7 @@ readback comparison; merely accepting the flags does not validate them:
 ```
 
 Shader bias flips the W&B hemisphere, caster flips the first cascade flag,
-history mutates previous generation; parent cache corruption must inject a
-stale revision/publication into its independent checker. The tester must
+history mutates previous generation. Cache corruption forces tile zero into the ready mask, suppresses its update, and alters the expected projection revision. shadow_cache_validate must increment errors for the stale/uninitialized exact tuple. The tester must
 ensure the chosen scene actually contains the relevant caster/history/cache
 case and that each failure occurs for the intended invariant.
 
@@ -144,3 +134,71 @@ rather than per-instance previous-pose motion reuse. Generic alpha must be
 defined only once in the aggregator's extracted rt_intersections.metal TU;
 the original F9 base has an unguarded rt_common body. No local duplicate-TU
 compilation was attempted.
+
+## F10.5 regional GPU follow-up — NON VERIFIED
+
+Parent host baseline snapshot is `72ec3fb`, identical to the parent's
+`a8c6a14` shadow files. DO NOT cherry-pick the snapshot commit; cherry-pick
+only the following regional implementation delta onto the common parent
+host. It owns shadow_passes.cpp/h, adds shadow_cache.metal and adds only
+GPUShadowCacheParams/GPUShadowCacheTile to the shared GPU header. The parent
+F9 PipelineCache leak fix `e72adfc` is an integration dependency; this writer
+did not modify PipelineCache.
+
+New host hooks:
+
+- Copy the exact `motionSinCos_` values already uploaded to SceneRenderer
+  into `ShadowPasses::Frame::motionSinCos` and set `motionSinCosValid=true`.
+  GPU-motion scenes without this input fail explicitly. Parent-before-child
+  mat4Mul and motionWorld reuse F5's shared arithmetic, with preallocated CPU
+  scratch. Full-scene bounds include every valid casting slot independently
+  of camera visibility.
+- Read `shadow.depth()` for the LAST receiver-prepass depth version in DI
+  material prepass and visibility resolve.
+- Add `shaders/shadow_cache.metal` to the parent's metallib source list and
+  harvest the cache initialize/publish/validate/indexed/mesh/composite PSOs.
+- `cacheState(view)` exposes CPU admission counts (ready/current/update tiles,
+  bounded update budget, static/dynamic classifier counts). These are not
+  measured GPU results or completion proof.
+- `--shadow-cache on` explicitly requires `--shadows csm`. Constructor also
+  rejects other modes; RT solar history remains its independent signal.
+
+Each of four views owns four persistent R32Float depth maps and four 64-entry
+GPU revision buffers (each metadata record is 48 bytes). Per-frame expected
+revision records and static classifications use frameUploads. Resource
+creation/release goes through GpuMemory. Tables are allocated at startup/scene
+load per slot/cascade/class; indexed draws have a distinct table per mesh.
+Cache initialization, publication and validation each have distinct tables.
+No table is mutated for another encoded draw.
+
+Static classification requires VALID+castsShadows+static and excludes every
+GPU motion root and hierarchy child. Changed static slots invalidate the union
+of OLD and NEW conservative bounds, expanded for the maximum PCSS footprint,
+for ALL previously active views. Alpha-material/global light changes invalidate
+all affected cascade tiles conservatively. Projections compare exact snapped
+cascade data; pipeline generation changes invalidate alpha materials as well.
+There are no age-only hits or hashed equality substitutes.
+
+The steady graph always records bounded work: current stale static region
+raster (tile discard mask), current dynamic raster, admitted-tile copy, exact
+GPU validation and depth composition. The update quota is shared across all
+256 active-view tiles and rotates admission. Stale tiles not admitted still
+render CURRENT static fallback. Ready tile depths are not rerasterized or
+rewritten; dynamic texels are never stored in static cache. A temporal/spatial/
+contact RGBA16Float mask preserves moments/sample count.
+
+Additional tester requirements: freeze static camera/light, fill the cache
+across frames and verify ready tiles rise to 256; never exceed update budget;
+move/remove a static caster and change alpha material, then verify old/new
+regions fall back to current depth on the SAME frame; animate roots/children
+misflagged static and verify they remain dynamic; move the light/camera and
+verify exact projection invalidation; switch views while a caster changes and
+verify the dormant view's cache was invalidated. Compare composed DEPTH with
+uncached full-scene CSM exactly before PCSS, including overlapping static and
+dynamic occluders (MAX reverse-depth). Negative cache control must fail on
+actual GPU metadata validation, not merely on accepted CLI flags.
+
+Source-only DirectLightingPasses review additionally found texture slot12
+bound while lighting::table default maxTextureBindCount was12 (valid indices
+0..11). Parent owns the correction to at least13/16. No DirectLighting source
+was edited by this writer.
