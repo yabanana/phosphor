@@ -57,3 +57,37 @@ questa tabella, questi seed e questa configurazione. Non certifica qualità
 renderizzata, SOTA, GPU, energia, nuovi campionamenti runtime o convergenza
 illimitata. La periodicità esatta di 16 frame è già nota e resta un limite
 se il runtime ripete la stessa tabella senza ulteriori cambiamenti.
+
+## Esito S1: FAIL complessivo, dati conservati
+
+Preregistrazione `5ee62cd`; strumenti congelati in `ff186b4` prima delle FFT STBN. Il checker ha terminato con **exit 1**, come previsto per un gate fallito. Nessuna soglia è stata cambiata. I 12 sanity/negative check CPU dell’analizzatore sono passati.
+
+Risultati completi: `docs/results/STBN-cpu-spectrum-M5Max-2026-10-07.json`. Dati grezzi e log: `build/stbn-spectral/ranks-seeds-0-7`, `generation.log`, `analysis.log`.
+
+| CDF | XY / permutazione | XY / IID | Z / permutazione | Z / IID |
+|---|---:|---:|---:|---:|
+| 0.1 | 0.162853 | 0.165243 | 0.472547 | 0.476860 |
+| 0.25 | 0.088083 | 0.088902 | 0.109011 | 0.109261 |
+| 0.5 | 0.068898 | 0.069731 | 0.096501 | 0.096113 |
+| 0.75 | 0.104400 | 0.103467 | 0.128349 | 0.128250 |
+| 0.9 | 0.177462 | 0.177308 | 0.472846 | 0.474974 |
+
+Tutti i **20 gate spettrali passano**, con vantaggio in **8/8 seed** per ogni confronto. Le 512 dimensioni generate sono permutazioni complete, con 32 valori per ciascuno dei 32 bin; il rilassamento converge in tutti gli otto seed.
+
+Il gate di decorrelazione fallisce nel **seed 2: p95 |Pearson| = 0,100520759759**, contro limite 0,10. Gli altri sette seed sono fra 0,094766 e 0,099953. Il massimo assoluto su tutte le coppie/seed è 0,201130172198, entro 0,25. È un superamento lieve ma resta **FAIL**. Non dimostra da solo un difetto del generatore: la soglia è operativa, la struttura spettrale riduce i gradi di libertà effettivi rispetto al rumore bianco e Pearson non dimostra indipendenza. Non autorizza a dichiarare passato il protocollo né ad allargarne la soglia dopo aver visto i dati.
+
+Generazione CPU di tutte le 64 dimensioni: min 33.387 ms, media 34.871 ms, max 42.158 ms per seed. Un passaggio per seed, senza controllo termico/DVFS: informazione locale, non adozione prestazionale. Mac17,6, Apple M5 Max, 128 GiB; macOS 27.2; Apple Clang 21.0.0, `-O2`; Python 3.13.15, NumPy 2.5.3. Nessuna esecuzione GPU.
+
+Comandi effettivi (progetto CMake privato con i soli due sorgenti CPU):
+
+```sh
+cmake -S build/stbn-spectral/tool -B build/stbn-spectral/tool-build -G Ninja
+cmake --build build/stbn-spectral/tool-build -j2
+./build/stbn-spectral/tool-build/stbn_spectral_generate build/stbn-spectral/ranks-seeds-0-7
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 \
+  /Users/danielsan/Documents/phosphor/build/quality-venv/bin/python tools/stbn_spectral_check.py \
+  --data build/stbn-spectral/ranks-seeds-0-7 \
+  --output docs/results/STBN-cpu-spectrum-M5Max-2026-10-07.json
+```
+
+Lo stesso eseguibile standalone si può compilare senza il CMake privato con `c++ -std=c++20 -O2 -Isrc tools/stbn_spectral_generate.cpp src/renderer/stochastic_sampling.cpp -o <output>`. Occorre usare il sorgente congelato; l’analizzatore rifiuta sorgente/protocollo diversi.
