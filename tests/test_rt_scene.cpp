@@ -116,6 +116,21 @@ TEST_CASE("RT vertex revisions cancel stale compaction queries") {
     CHECK(scene.plan()[0].kind == RtWorkKind::Refit);
 }
 
+TEST_CASE("RT completed size query cannot overtake an unsubmitted geometry update") {
+    RtScene scene;
+    scene.request(0, 1, 1);
+    scene.markBuilt(0, 100, 4096, 16);
+    const auto queriedVersion = scene.mesh(0).version;
+    SUBCASE("vertex update") { scene.request(0, 1, 2); }
+    SUBCASE("topology update") { scene.request(0, 2, 1); }
+    SUBCASE("explicit rebuild") { scene.requestRebuild(0); }
+    CHECK(scene.mesh(0).version == queriedVersion);
+    CHECK_FALSE(scene.queueCompaction(0, 2048, queriedVersion));
+    CHECK(scene.mesh(0).compactBytes == 0);
+    REQUIRE(scene.plan().size() == 1);
+    CHECK(scene.plan()[0].kind != RtWorkKind::Compact);
+}
+
 TEST_CASE("RT TLAS rebuild policy tracks capacity table publication and explicit interval") {
     RtScene scene;
     scene.request(0, 1, 1);

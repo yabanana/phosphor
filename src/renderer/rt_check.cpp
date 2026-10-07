@@ -93,7 +93,7 @@ bool skippedSecondary(const GPURtRay& ray, const GPURtHit& hit) {
     // corrupted hit must still go through the failing reference check.
     return secondary && ray.tmax == -1 && ray.tmin == 0 && ray.mask == mask &&
         ray.ox == 0 && ray.oy == 0 && ray.oz == 0 && ray.dx == 0 && ray.dy == 0 && ray.dz == 0 &&
-        ray.coneWidth == 0 && ray.pad == 0 && hit.t == -2 && hit.hit == 0 && hit.u == 0 && hit.v == 0 &&
+        ray.coneWidth == 0 && hit.t == -2 && hit.hit == 0 && hit.u == 0 && hit.v == 0 &&
         hit.slot == ~0u && hit.primitive == ~0u && hit.generation == 0 && hit.frontFacing == 0;
 }
 

@@ -61,6 +61,8 @@ set(PHOSPHOR_SHADER_HEADERS
     ${CMAKE_SOURCE_DIR}/src/renderer/visibility_layout.h
     ${CMAKE_SOURCE_DIR}/src/renderer/visibility_math.h
     ${CMAKE_SOURCE_DIR}/src/renderer/gpu_types.h
+    ${CMAKE_SOURCE_DIR}/shaders/rt_common.h
+    ${CMAKE_SOURCE_DIR}/src/platform/metal/rt_visibility_check.h
     ${CMAKE_SOURCE_DIR}/src/renderer/gpu_scene_layout.h
     ${CMAKE_SOURCE_DIR}/src/renderer/gpu_queue.h
     ${CMAKE_SOURCE_DIR}/src/renderer/cull_math.h
@@ -182,6 +184,8 @@ add_executable(phosphor
     src/platform/metal/pipeline_cache.cpp
     src/platform/metal/residency_manager.cpp
     src/platform/metal/scene_renderer.cpp
+    src/platform/metal/acceleration_structures.cpp
+    src/platform/metal/rt_visibility_check.cpp
     src/platform/metal/shader_reloader.cpp
     src/platform/metal/transient_heap.cpp
     src/platform/metal/upload_ring.cpp

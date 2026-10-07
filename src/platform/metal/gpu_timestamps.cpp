@@ -175,7 +175,7 @@ void GpuTimestamps::commitStart(MTL4::CommandBuffer* cmd, rg::Queue queue) {
     // lands after the unit ends (Many Lights: 25 of 200 frames invalid).
     encoder->barrierAfterStages(MTL::StageDispatch,
                                 MTL::StageVertex | MTL::StageObject | MTL::StageMesh | MTL::StageFragment |
-                                    MTL::StageDispatch | MTL::StageBlit,
+                                    MTL::StageDispatch | MTL::StageBlit | MTL::StageAccelerationStructure,
                                 MTL4::VisibilityOptionNone);
     encoder->endEncoding();
     const u32 q = queueIndex(queue);

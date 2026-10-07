@@ -76,6 +76,7 @@ add_library(phosphor_core STATIC
     src/renderer/rt_proxy.cpp
     src/renderer/rt_scene.cpp
     src/renderer/rt_reference.cpp
+    src/renderer/rt_check.cpp
     src/renderer/meshlet_cull_reference.cpp
     src/renderer/meshlet_check.cpp
     src/renderer/scene_check.cpp

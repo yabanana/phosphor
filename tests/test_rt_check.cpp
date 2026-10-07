@@ -257,6 +257,8 @@ TEST_CASE("RT checker skips only the exact inactive secondary sentinel") {
     CHECK(mixed.ok());
     CHECK(mixed.checked == 1);
     CHECK(mixed.skipped == 1);
+    sentinel.pad = 123; // source-pixel metadata is preserved by secondary generation
+    CHECK(s.check(sentinel, skipped).skipped == 1);
     auto malformed = sentinel;
     malformed.dx = 1;
     CHECK(s.check(malformed,skipped).skipped == 0);

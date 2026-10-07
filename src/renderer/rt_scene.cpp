@@ -124,7 +124,12 @@ void RtScene::queueCompaction(u32 index, u64 bytes) {
 }
 
 bool RtScene::queueCompaction(u32 index, u64 bytes, u64 expectedVersion) {
-    if (meshes_.at(index).version != expectedVersion) return false;
+    const auto& m = meshes_.at(index);
+    // A completed query can arrive after a new update was requested but
+    // before that update publishes a new version. It is obsolete already.
+    if (m.version != expectedVersion || !m.requested || m.forceRebuild ||
+        m.topologyRevision != m.requestedTopology || m.vertexRevision != m.requestedVertices)
+        return false;
     queueCompaction(index, bytes);
     return true;
 }

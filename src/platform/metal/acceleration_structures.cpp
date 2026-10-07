@@ -299,6 +299,7 @@ struct AccelerationStructures::Impl {
             resources.emplace(id, as);
             ledger.request(m, 1, 1);
             ledger.markBuilt(m, id, b.sizes.accelerationStructureSize, context.frameIndex());
+            ++stats.blasBuilds;
             table.blasLo = static_cast<u32>(id);
             table.blasHi = static_cast<u32>(id >> 32);
             scratchOffsets[m] = alignUp(scratchBytes, 256);
@@ -318,15 +319,18 @@ struct AccelerationStructures::Impl {
                 e->buildAccelerationStructure(resources.at(ledger.mesh(m).resourceID), b.descriptor,
                     range(scratch, scratchOffsets[m], std::max<u64>(b.sizes.buildScratchBufferSize, 16)));
             }
-            e->barrierAfterEncoderStages(MTL::StageAccelerationStructure, MTL::StageAccelerationStructure,
-                                         MTL4::VisibilityOptionDevice);
+        }, &stats.blasBuildMs);
+        // The completed build submission is measured separately from the
+        // compact-size queries; no CPU wall time is labelled as GPU work.
+        context.submitAndWait([&](auto* e) {
             for (u32 m = 0; m < blases.size(); ++m)
                 if (blases[m].descriptor)
                     e->writeCompactedAccelerationStructureSize(resources.at(ledger.mesh(m).resourceID),
                                                                range(compactSizes, u64(m) * sizeof(u64), sizeof(u64)));
         });
         const double wallMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-        LOG_INFO("RT BLAS load: %u structures, CPU submit-and-wait wall %.3f ms (not GPU build time)", stats.blasCount, wallMs);
+        LOG_INFO("RT BLAS load: %u structures, GPU build %.3f ms, CPU build+query wall %.3f ms", stats.blasCount,
+                 static_cast<double>(stats.blasBuildMs), wallMs);
         const auto* sizes = static_cast<const u64*>(compactSizes->contents());
         for (u32 m = 0; m < blases.size(); ++m) {
             if (!blases[m].descriptor) continue;
@@ -464,10 +468,15 @@ struct AccelerationStructures::Impl {
             if (w.kind == RtWorkKind::Compact) {
                 if (!ledger.markCompacted(w.mesh, w.version, resourceID(job.destination), old.compactBytes, frame.index))
                     throw std::logic_error("RT compaction publication became stale on render thread");
+                ++stats.compactions;
             } else if (w.kind == RtWorkKind::Build) {
                 ledger.markBuilt(w.mesh, resourceID(job.destination), blases[w.mesh].sizes.accelerationStructureSize, frame.index);
+                ++stats.blasBuilds;
                 f.queried.emplace_back(w.mesh, ledger.mesh(w.mesh).version);
-            } else ledger.markRefitted(w.mesh, frame.index);
+            } else {
+                ledger.markRefitted(w.mesh, frame.index);
+                ++stats.blasRefits;
+            }
             const auto id = ledger.mesh(w.mesh).resourceID;
             meshTable[w.mesh].blasLo = static_cast<u32>(id);
             meshTable[w.mesh].blasHi = static_cast<u32>(id >> 32);
@@ -506,6 +515,11 @@ struct AccelerationStructures::Impl {
             out.hits = c.hits;
             out.alphaTests = c.alphaTests;
             out.opaqueAlphaTests = c.opaqueAlphaTests;
+            if (f.secondary) {
+                const auto& primary = *static_cast<const GPURtCounters*>(f.primaryCounters->contents());
+                out.alphaTests += primary.alphaTests;
+                out.opaqueAlphaTests += primary.opaqueAlphaTests;
+            }
         }
         return out;
     }
@@ -588,7 +602,8 @@ struct AccelerationStructures::Impl {
             throw std::logic_error("RT prepare attempted to overwrite an in-flight slot");
         // Material-aware proxy acceptance is an asset contract. Refuse to keep
         // a simplified mesh after it becomes MASK/emissive without recooking.
-        if (proxy.manifestApplied && (!store.materialDeltas().empty() || !store.instanceDeltas().empty())) {
+        if (proxy.manifestApplied && (!store.materialDeltas().empty() || !store.instanceDeltas().empty() ||
+                                     store.stats().fullMaterials || store.stats().fullInstances)) {
             for (u32 mesh : rtProxyProtectedMeshes(static_cast<u32>(meshTable.size()), store.instances(), store.materials()))
                 if (proxy.selections[mesh].level != RtProxyLevel::Full)
                     throw std::runtime_error("RT proxy material assignment changed; reload with full/protected geometry");
@@ -599,11 +614,12 @@ struct AccelerationStructures::Impl {
                     throw std::invalid_argument("RT dynamic material texture index is outside bindless table");
         slots = store.slotCapacity();
         materialCount = static_cast<u32>(store.materials().size());
-        diagnostic = p.check;
+        // Keep the diagnostic graph/resources stable. --debug-rt N controls
+        // CPU checking cadence; GPU snapshots are produced in every frame.
+        diagnostic = options.debugRt > 0;
         trace = debugView || options.rtProbe != RtProbe::None || diagnostic;
-        selectedProbe = options.rtProbe != RtProbe::None ? probeType(options.rtProbe)
-                         : diagnostic && !debugView ? static_cast<u32>((p.index / std::max(1u, options.debugRt)) % 4)
-                                                   : RT_PROBE_PRIMARY;
+        selectedProbe = options.rtProbe != RtProbe::None ? probeType(options.rtProbe) : RT_PROBE_PRIMARY;
+        stats.probe = trace ? probeName(selectedProbe) : "none";
         secondary = trace && selectedProbe != RT_PROBE_PRIMARY;
         sampled = diagnostic && !debugView && options.rtProbe == RtProbe::None && !options.visibility;
         const u64 pixels = u64(p.width) * p.height;
