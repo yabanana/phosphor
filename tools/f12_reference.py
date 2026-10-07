@@ -14,7 +14,6 @@ import hashlib
 import json
 import math
 import pathlib
-import struct
 import sys
 
 INVALID = 0xFFFFFFFF
@@ -84,6 +83,7 @@ def build_scene(root, data, material_model, allow_differences):
     import mitsuba as mi
     mi.set_variant("scalar_rgb")  # Independent CPU path, never the Phosphor GPU.
     np = np_module()
+    Transform = getattr(mi, "ScalarAffineTransform4f", None) or getattr(mi, "ScalarTransform4f")
     textures = {t["id"]: (read_pfm(root / t["rgb"]), read_pfm(root / t["alpha"])) for t in data["textures"]}
     differences = []
     if material_model == "principled":
@@ -157,8 +157,10 @@ def build_scene(root, data, material_model, allow_differences):
         "integrator": {"type": "path", "max_depth": 8, "rr_depth": 5},
         "sensor": {
             "type": "perspective", "fov": math.degrees(camera["fov_y_radians"]), "fov_axis": "y",
-            "near_clip": camera["near"], "far_clip": camera["far"],
-            "to_world": mi.ScalarTransform4f.look_at(origin=position.tolist(),
+            "near_clip": camera["near"], "far_clip": 1e30,
+            "principal_point_offset_x": -camera.get("jitter_pixels",[0,0])[0]/camera["width"],
+            "principal_point_offset_y": -camera.get("jitter_pixels",[0,0])[1]/camera["height"],
+            "to_world": Transform().look_at(origin=position.tolist(),
                 target=(position+np.asarray(camera["direction"])).tolist(), up=camera["up"]),
             "sampler": {"type": "independent", "sample_count": 64},
             "film": {"type": "hdrfilm", "width": camera["width"], "height": camera["height"],
@@ -184,7 +186,7 @@ def build_scene(root, data, material_model, allow_differences):
         material_id = instance["material"]
         material = data["materials"][material_id]
         shape = {"type": "ply", "filename": str(root/data["meshes"][instance["mesh"]]),
-                 "to_world": mi.ScalarTransform4f(np.asarray(instance["world"]).reshape(4,4,order="F")),
+                 "to_world": Transform(np.asarray(instance["world"]).reshape(4,4,order="F")),
                  "face_normals": material_model == "diffuse",
                  "bsdf": {"type": "ref", "id": f"material_{material_id}"}}
         if any(value > 0 for value in material["emissive"]):
@@ -205,7 +207,7 @@ def build_scene(root, data, material_model, allow_differences):
             p = np.asarray(light["position"])
             d = np.asarray(light["direction"])
             up = [0,1,0] if abs(d[1]) < 0.99 else [1,0,0]
-            emitter = {"type": "spot", "to_world": mi.ScalarTransform4f.look_at(origin=p.tolist(),target=(p+d).tolist(),up=up),
+            emitter = {"type": "spot", "to_world": Transform().look_at(origin=p.tolist(),target=(p+d).tolist(),up=up),
                        "intensity": {"type": "rgb", "value": power}, "cutoff_angle": math.degrees(light["outer"]),
                        "beam_width": math.degrees(light["inner"])}
         scene[f"analytic_light_{index}"] = emitter
@@ -221,7 +223,7 @@ def build_scene(root, data, material_model, allow_differences):
                 item = {"type": "point", "position": p.tolist(), "intensity": {"type": "rgb","value": light["emission"]}}
             else:
                 up = [0,1,0] if abs(d[1]/np.linalg.norm(d)) < 0.99 else [1,0,0]
-                item = {"type": "spot", "to_world": mi.ScalarTransform4f.look_at(origin=p.tolist(),target=(p+d).tolist(),up=up),
+                item = {"type": "spot", "to_world": Transform().look_at(origin=p.tolist(),target=(p+d).tolist(),up=up),
                         "intensity": {"type":"rgb","value":light["emission"]},
                         "cutoff_angle":math.degrees(light["outer"]), "beam_width":math.degrees(light["inner"])}
         else:
@@ -233,7 +235,7 @@ def build_scene(root, data, material_model, allow_differences):
                 if t == 4:
                     u = u*light["radius"];v = v*light["radius"]
                 matrix = np.eye(4);matrix[:3,0]=u;matrix[:3,1]=v;matrix[:3,2]=normal;matrix[:3,3]=p
-                item = {"type": "rectangle" if t == 3 else "disk", "to_world": mi.ScalarTransform4f(matrix)}
+                item = {"type": "rectangle" if t == 3 else "disk", "to_world": Transform(matrix)}
             item["emitter"] = {"type": "area", "radiance": {"type":"rgb","value":light["emission"]}}
             item["bsdf"] = {"type": "diffuse", "reflectance": {"type":"rgb","value":[0,0,0]}}
         scene[f"sampled_light_{index}"] = item

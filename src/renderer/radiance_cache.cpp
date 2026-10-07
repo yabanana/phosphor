@@ -30,7 +30,8 @@ u32 radianceCacheHash(const RadianceCacheKey& k) {
 }
 RadianceCache::RadianceCache(RadianceCacheConfig c) : config_(c) {
     if (c.capacity < 1 || c.capacity > (1u<<24) || c.probeLimit < 1 || c.probeLimit > c.capacity ||
-        c.maxAge >= 0x80000000u || c.maxSamples < 1 || !std::isfinite(c.cellSize) || c.cellSize <= 0)
+        c.maxAge >= 0x80000000u || c.maxSamples < 1 || c.maxSamples > 65536 ||
+        !std::isfinite(c.cellSize) || c.cellSize <= 0)
         throw std::invalid_argument("invalid radiance cache");
     entries_.resize(c.capacity);
 }
