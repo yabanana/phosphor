@@ -9,6 +9,9 @@ using namespace phosphor;
 // Independently implemented SI radiative-transfer equations. The low-D LUT
 // decomposition follows Hillaire2020; no external HLSL/noise asset is copied.
 constexpr sampler kAtmosphereSampler(coord::normalized,filter::linear,address::clamp_to_edge);
+// Sky azimuth is periodic, elevation is bounded. Physical transmittance and
+// multiple-scattering parameter axes keep the clamp sampler above.
+constexpr sampler kAtmosphereSkySampler(coord::normalized,filter::linear,s_address::repeat,t_address::clamp_to_edge);
 static float3 atmoVec(constant float* v){return float3(v[0],v[1],v[2]);}
 static float4x4 atmoMatrix(constant float* m){return float4x4(float4(m[0],m[1],m[2],m[3]),float4(m[4],m[5],m[6],m[7]),float4(m[8],m[9],m[10],m[11]),float4(m[12],m[13],m[14],m[15]));}
 static float2 atmoSphere(float3 point,float3 ray,float radius) {

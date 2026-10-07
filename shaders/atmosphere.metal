@@ -65,7 +65,7 @@ kernel void atmosphere_apply(constant GPUAtmosphereParams& p [[buffer(0)]],textu
         const AtmoIntegral value=atmoIntegrate(camera,ray,p,trans,multi,true,distance,false,float3(0),false,false);
         color=scene.read(pixel).rgb*value.transmittance+value.radiance;}
     else {const float3 relative=camera-atmoVec(p.planetCenter),up=normalize(relative);const float height=length(relative);
-        color=sky.sample(kAtmosphereSampler,atmoSkyUv(ray,up,height,p)).rgb;
+        color=sky.sample(kAtmosphereSkySampler,atmoSkyUv(ray,up,height,p)).rgb;
         const AtmoSegment bounds=atmoSegment(camera,ray,p);
         if(!bounds.ground){const float3 T=atmoTransmittance(camera,ray,p,trans);
             color+=T*atmoSolarDisk(ray,p);
