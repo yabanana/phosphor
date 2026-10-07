@@ -12,6 +12,7 @@
 #include "renderer/transform_math.h"
 #include "rendergraph/pass_context.h"
 #include <glm/gtc/type_ptr.hpp>
+#include <cstdio>
 namespace phosphor {
 struct GiPasses::Impl {
     enum Pass { Trace,Classify,Blend,Resolve,Cache,Candidates,Temporal,Spatial,Shade,Snapshot,CheckClear,CheckNegative,Check,Count };
@@ -155,6 +156,9 @@ namespace phosphor { rg::TextureRef GiPasses::referenceDiffuse()const{return imp
 
 namespace phosphor {bool GiPasses::check(u32 slot)const {
     if(!impl_->options.debugLighting)return true;const auto& f=impl_->slots.at(slot);const auto* count=static_cast<const u32*>(f.check->contents());
-    if(count[0]!=f.expectedPixels || count[1]!=impl_->probeCount || count[2]!=16384)return false;
-    for(u32 i=3;i<8;++i)if(count[i])return false;return true;
+    bool okay=count[0]==f.expectedPixels && count[1]==impl_->probeCount && count[2]==16384;
+    for(u32 i=3;i<8;++i)okay &= count[i]==0;
+    if(!okay)std::printf("GI diagnostics slot %u | inspected %u/%u pixels %u/%u probes %u/16384 cache | problems output %u probe %u cache %u reservoir %u duplicate %u\n",
+        slot,count[0],f.expectedPixels,count[1],impl_->probeCount,count[2],count[3],count[4],count[5],count[6],count[7]);
+    return okay;
 }}
