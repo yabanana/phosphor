@@ -10,7 +10,8 @@ namespace phosphor {
 
 // F10/F12 analytic scene corpus. SOURCE ONLY / NON VERIFIED: these are test
 // fixtures, not GPU references or acceptance evidence. World units = metres,
-// linear material/emission values; no external assets or texture dependence.
+// linear material/emission values; no external assets. The alpha-mip fixture
+// uploads a deterministic procedural texture with an analytically distinct mip1.
 // Root registers this subclass for --lighting-scene SCENARIO with bench6.
 class LightingValidation final : public TestBench {
 public:
@@ -34,6 +35,7 @@ public:
     [[nodiscard]] EntityID movingCaster() const { return mover_; }
     [[nodiscard]] EntityID thinWall() const { return thinWall_; }
     [[nodiscard]] EntityID embeddedSolid() const { return embeddedSolid_; }
+    [[nodiscard]] EntityID alphaReceiver() const { return alphaReceiver_; }
 
     // The root runner MUST explicitly select/inspect a probe at this anchor;
     // an automatically fitted DDGI grid is not guaranteed to contain it.
@@ -41,6 +43,8 @@ public:
     static constexpr float ThinWallThickness = 0.01f;
     static constexpr float NominalSunAngularRadius = 0.00465f;
     static constexpr float SceneUnitsInMetres = 1.0f;
+    static constexpr u32 AlphaTextureSide = 256;
+    static constexpr float AlphaMipCutoff = 0.75f;
 
 private:
     EntityID mesh(ECS&, u32 handle, glm::vec3 position, glm::vec3 fullSize,
@@ -55,6 +59,7 @@ private:
     std::vector<glm::vec3> cacheOrigins_;
     u32 plane_ = ~0u, cube_ = ~0u;
     EntityID panel_ = INVALID_ENTITY, sun_ = INVALID_ENTITY, mover_ = INVALID_ENTITY;
+    EntityID alphaReceiver_ = INVALID_ENTITY;
     EntityID thinWall_ = INVALID_ENTITY, embeddedSolid_ = INVALID_ENTITY;
     double time_ = 0;
     mutable u32 cameraSegment_ = ~0u;

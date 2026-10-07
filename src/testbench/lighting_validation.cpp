@@ -12,9 +12,10 @@
 
 namespace phosphor {
 namespace {
-constexpr std::array<std::string_view, 8> kScenarios{
+constexpr std::array<std::string_view, 10> kScenarios{
     "cornell", "thin-walls", "moving-sun", "moving-emissive",
-    "offscreen-caster", "shadow-bias", "disocclusion", "cache-stress"};
+    "offscreen-caster", "shadow-bias", "disocclusion", "cache-stress",
+    "shadow-penumbra", "alpha-mip-shadow"};
 constexpr float pi = 3.14159265358979323846f;
 const glm::quat identity(1, 0, 0, 0);
 glm::quat orientLight(glm::vec3 towardLight) {
@@ -110,6 +111,21 @@ void LightingValidation::exterior(ECS& ecs) {
         // receiver origin; independent sun/caster culling must retain it.
         mover_ = mesh(ecs, cube_, {-12, 6, 0}, {1, 2, 1}, identity, glm::vec3(0.4f));
         sun_ = directional(ecs, {-2, 1, 0}, 3);
+    } else if (scenario_ == "shadow-penumbra") {
+        // Exact zero-thickness plates, outside the main camera. Their straight
+        // X edges yield a disk-CDF shadow profile on the ground. The Z extent
+        // keeps the protocol's |z|<=0.2 receiver band away from end effects.
+        mesh(ecs, plane_, {-1.2f, 8.0f, 0}, {0.8f, 1, 2}, identity, glm::vec3(0.5f));
+        mesh(ecs, plane_, {1.2f, 32.0f, 0}, {0.8f, 1, 2}, identity, glm::vec3(0.5f));
+        sun_ = directional(ecs, {0, 1, 0}, 3);
+    } else if (scenario_ == "alpha-mip-shadow") {
+        const auto facingCamera = glm::angleAxis(pi * 0.5f, glm::vec3(1, 0, 0));
+        mesh(ecs, plane_, {0, 1.5f, -0.2f}, {3, 1, 3}, facingCamera, glm::vec3(0.2f));
+        alphaReceiver_ = mesh(ecs, plane_, {0, 1.5f, 0}, {3, 1, 3}, facingCamera, glm::vec3(0.7f));
+        // Light projects this off-axis caster onto the alpha receiver. Missing
+        // receiver pixels cannot hide behind an everywhere-lit shadow mask.
+        mover_ = mesh(ecs, cube_, {-4, 2, 1}, {0.8f, 0.8f, 0.2f}, identity, glm::vec3(0.4f));
+        sun_ = directional(ecs, {-4, 0.5f, 1}, 3);
     } else if (scenario_ == "shadow-bias") {
         // Horizontal 5mm plates at distinct receiver distances. With vertical
         // nominal sun, expected geometric disk penumbra radius ~h*tan(alpha).
@@ -146,6 +162,16 @@ void LightingValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& textur
     time_ = 0; cameraSegment_ = ~0u; materialStep_ = 0;
     if (scenario_ == "cornell" || scenario_ == "thin-walls" || scenario_ == "moving-emissive" || scenario_ == "disocclusion") room(ecs);
     else exterior(ecs);
+    if (scenario_ == "alpha-mip-shadow") {
+        std::vector<u8> rgba(size_t(AlphaTextureSide) * AlphaTextureSide * 4, 255);
+        for (u32 y = 0; y < AlphaTextureSide; ++y)
+            for (u32 x = 0; x < AlphaTextureSide; ++x)
+                rgba[(size_t(y) * AlphaTextureSide + x) * 4 + 3] = ((x ^ y) & 1u) ? 255 : 0;
+        auto& material = ecs.getComponent<MaterialComponent>(alphaReceiver_);
+        material.baseColorTexIndex = textures.loadTextureFromMemory(rgba.data(), AlphaTextureSide, AlphaTextureSide, 4, false);
+        material.alphaCutoff = AlphaMipCutoff;
+        ecs.markChanged<MaterialComponent>(alphaReceiver_);
+    }
 }
 
 void LightingValidation::move(ECS& ecs, EntityID entity, glm::vec3 position, glm::quat rotation) {
@@ -191,12 +217,14 @@ void LightingValidation::update(float dt, ECS& ecs) {
 void LightingValidation::teardown(ECS& ecs, GpuScene&) {
     for (EntityID e : entities_) ecs.destroyEntity(e);
     entities_.clear(); cacheCasters_.clear(); cacheOrigins_.clear();
-    panel_ = sun_ = mover_ = thinWall_ = embeddedSolid_ = INVALID_ENTITY;
+    panel_ = sun_ = mover_ = thinWall_ = embeddedSolid_ = alphaReceiver_ = INVALID_ENTITY;
     plane_ = cube_ = ~0u; time_ = 0; cameraSegment_ = ~0u; materialStep_ = 0;
 }
 CameraSetup LightingValidation::getDefaultCamera() const {
     if (scenario_ == "offscreen-caster") return {{0, 2, 7}, {0, 0, 0}, 7, false};
     if (scenario_ == "shadow-bias") return {{0, 4, 7}, {0, 0.5f, 0}, 8, false};
+    if (scenario_ == "shadow-penumbra") return {{0, 3, 6}, {0, 0, 0}, 6.708204f, false};
+    if (scenario_ == "alpha-mip-shadow") return {{0, 1.5f, 4}, {0, 1.5f, 0}, 4, false};
     if (scenario_ == "moving-sun" || scenario_ == "cache-stress") return {{0, 5, 9}, {0, 0.5f, 0}, 10, false};
     if (scenario_ == "thin-walls") return {{1.4f, 2, 7.5f}, {0.2f, 1.9f, 0}, 7.5f, false};
     return {{0, 2, 7.5f}, {0, 2, 0}, 7.5f, false};

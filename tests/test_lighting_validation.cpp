@@ -25,7 +25,7 @@ struct Fixture {
 }
 
 TEST_CASE("lighting fixture: all named scenarios are explicit and invalid choices fail") {
-    CHECK(LightingValidation::scenarios().size() == 8);
+    CHECK(LightingValidation::scenarios().size() == 10);
     for (std::string_view name : LightingValidation::scenarios()) {
         CHECK(LightingValidation::validScenario(name));
         LightingValidation scene{std::string(name)};
@@ -45,7 +45,7 @@ TEST_CASE("lighting fixture: corpus uses bounded shared geometry and exact mater
         REQUIRE(f.scene.vertices().size() == 28); // four plane +24 cube vertices
         REQUIRE(f.scene.indices().size() == 42); // two plane +12 cube triangles
         CHECK(f.ecs.entityCount() <= 40);
-        CHECK(f.textures.textureCount() == 4); // default assets only
+        CHECK(f.textures.textureCount() == (name == "alpha-mip-shadow" ? 5 : 4));
         FrameScene frame;
         extractFrameScene(f.ecs, f.scene, frame);
         REQUIRE(!frame.instances.empty());
@@ -59,7 +59,9 @@ TEST_CASE("lighting fixture: corpus uses bounded shared geometry and exact mater
         for (const auto& material : frame.materials) {
             CHECK(material.metallic == 0);
             CHECK(material.roughness == 1);
-            for (u32 index : {material.baseColorTex, material.normalTex, material.metallicRoughnessTex,
+            if (name != "alpha-mip-shadow" || material.alphaCutoff == 0)
+                CHECK(material.baseColorTex == INVALID_TEXTURE_INDEX);
+            for (u32 index : {material.normalTex, material.metallicRoughnessTex,
                                material.occlusionTex, material.emissiveTex}) CHECK(index == INVALID_TEXTURE_INDEX);
         }
         const auto camera = f.bench.getDefaultCamera();
@@ -202,4 +204,48 @@ TEST_CASE("lighting fixture: update guards dt and teardown only removes owned en
     CHECK(f.bench.entities().empty());
     f.bench.teardown(f.ecs, f.scene); // idempotent
     f.ecs.destroyEntity(unrelated);
+}
+
+TEST_CASE("F10 alpha mip fixture distinguishes mip0 from mip1 before GPU execution") {
+    Fixture f("alpha-mip-shadow");
+    REQUIRE(f.bench.alphaReceiver() != INVALID_ENTITY);
+    const auto& material = f.read().getComponent<MaterialComponent>(f.bench.alphaReceiver());
+    CHECK(material.alphaCutoff == 0.75f);
+    REQUIRE(material.baseColorTexIndex < f.textures.uploads.size());
+    const auto& texture = f.textures.uploads[material.baseColorTexIndex];
+    REQUIRE(texture.width == 256);
+    REQUIRE(texture.height == 256);
+    CHECK_FALSE(texture.sRGB);
+    u32 opaque = 0;
+    for (u32 y = 0; y < texture.height; y += 2) for (u32 x = 0; x < texture.width; x += 2) {
+        u32 sum = 0;
+        for (u32 dy = 0; dy < 2; ++dy) for (u32 dx = 0; dx < 2; ++dx) {
+            const auto alpha = texture.rgba[(size_t(y + dy) * texture.width + x + dx) * 4 + 3];
+            sum += alpha;
+            opaque += alpha == 255;
+        }
+        CHECK(sum == 510);
+        CHECK(float(sum) / (4 * 255.0f) < material.alphaCutoff);
+    }
+    CHECK(opaque == texture.width * texture.height / 2);
+    CHECK(f.bench.sun() != INVALID_ENTITY);
+}
+
+TEST_CASE("F10 penumbra fixture has exact elevated plates and a vertical physical sun") {
+    Fixture f("shadow-penumbra");
+    std::vector<GPULight> lights;
+    extractLights(f.ecs, lights);
+    REQUIRE(lights.size() == 1);
+    CHECK(lights[0].type == LIGHT_DIRECTIONAL);
+    CHECK(lights[0].direction[1] == doctest::Approx(-1).epsilon(1e-5));
+    u32 eight = 0, thirtyTwo = 0;
+    const auto& transforms = f.read().getArray<TransformComponent>();
+    for (const auto& transform : transforms.data()) {
+        eight += transform.position.y == 8;
+        thirtyTwo += transform.position.y == 32;
+    }
+    CHECK(eight == 1);
+    CHECK(thirtyTwo == 1);
+    CHECK(8 * std::tan(LightingValidation::NominalSunAngularRadius) > 0.037f);
+    CHECK(32 * std::tan(LightingValidation::NominalSunAngularRadius) > 0.148f);
 }
