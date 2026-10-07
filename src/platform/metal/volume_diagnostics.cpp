@@ -34,6 +34,7 @@ struct VolumeDiagnostics::Impl {
         std::array<MTL4::ArgumentTable*,3> stampTables{};std::array<MTL4::ArgumentTable*,2> foreignTables{};
         MTL4::ArgumentTable *fixtureTable=nullptr,*collectTable=nullptr,*solarTable=nullptr;
         MTL::GPUAddress atmosphereAddress=0,diagnosticAddress=0;
+        std::array<MTL::GPUAddress,3> stampAddress{};
         GPUAtmosphereParams submitted{};VolumeOracleInput expected;u64 frame=0;u32 view=0,generation=0;
         bool pending=false,armed=false;std::string sourceHash;
         nlohmann::json provenance;
@@ -62,27 +63,28 @@ struct VolumeDiagnostics::Impl {
         params.sampleCount=config.homogeneousFog?11u:8u;params.corruption=config.corruption;params.homogeneous=config.homogeneousFog;
         params.fixtureExtinction=0.01f;params.fixtureSource[0]=0.01f;params.fixtureSource[1]=0.02f;params.fixtureSource[2]=0.03f;
         if(config.homogeneousFog){const u32 xy=(fog.gridY/2)*fog.gridX+fog.gridX/2;params.fogIndices[0]=xy+fog.gridX*fog.gridY;params.fogIndices[1]=xy+(fog.gridZ/2)*fog.gridX*fog.gridY;params.fogIndices[2]=xy+(fog.gridZ-1)*fog.gridX*fog.gridY;}
-        s.expected.diagnostics=params;s.atmosphereAddress=lighting::upload(c,submitted);s.diagnosticAddress=lighting::upload(c,params);return capture;
+        s.expected.diagnostics=params;s.atmosphereAddress=lighting::upload(c,submitted);s.diagnosticAddress=lighting::upload(c,params);
+        for(u32 kind=0;kind<s.stampAddress.size();++kind){auto stampParams=params;stampParams.stampKind=kind;s.stampAddress[kind]=lighting::upload(c,stampParams);}return capture;
     }
     void begin(rg::RenderGraph& g){globalRef=g.importBuffer("Actual atmosphere produced epochs",{16},rg::ImportContentsDefined|rg::ImportOutput);
         skyRef=g.importBuffer("Actual sky produced epoch per view",{16},rg::ImportContentsDefined|rg::ImportOutput);samplesRef={};}
     void stampProducer(rg::RenderGraph& g,rg::TextureRef texture,u32 kind){using namespace rg;
-        auto diag=params;diag.stampKind=kind;const auto address=lighting::upload(c,diag);auto& ref=kind==2?skyRef:globalRef;
+        auto& ref=kind==2?skyRef:globalRef;
         g.addPass("Actual LUT producer revision "+std::to_string(kind),PassType::Compute,[&](PassBuilder& b){b.read(texture,Usage::ShaderRead,StageDispatch);ref=b.write(ref,Usage::ShaderWrite,StageDispatch);},
-            [this,kind,address](PassContext& ctx){auto& s=slots[slot];auto* t=s.stampTables[kind];t->setAddress(s.atmosphereAddress,0);t->setAddress(address,17);t->setAddress((kind==2?skyProduced[view]:globalProduced)->gpuAddress(),18);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,stamp,t,1);});}
+            [this,kind](PassContext& ctx){auto& s=slots[slot];auto* t=s.stampTables[kind];t->setAddress(s.atmosphereAddress,0);t->setAddress(s.stampAddress[kind],17);t->setAddress((kind==2?skyProduced[view]:globalProduced)->gpuAddress(),18);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,stamp,t,1);});}
     void homogeneous(rg::PassContext& ctx,MTL::Buffer* cells,MTL::GPUAddress fogAddress){auto& s=slots[slot];auto* t=s.fixtureTable;t->setAddress(fogAddress,0);t->setAddress(cells->gpuAddress(),1);t->setAddress(s.diagnosticAddress,17);
         auto* e=static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder());e->setComputePipelineState(p.compute(fixture));e->setArgumentTable(t);e->dispatchThreads(MTL::Size::Make(params.fogX,params.fogY,params.fogZ),MTL::Size::Make(4,4,4));}
     void foreign(rg::RenderGraph& g,rg::BufferRef& history,MTL::Buffer* buffer,u32 count,bool cloud){if(!capture||config.corruption!=VOLUME_CORRUPT_HISTORY)return;using namespace rg;
-        auto diag=params;if(cloud)diag.fogIndices[0]=count;const auto address=lighting::upload(c,diag);
         g.addPass(cloud?"Negative actual foreign cloud history":"Negative actual foreign fog history",PassType::Compute,[&](PassBuilder& b){b.read(history,Usage::ShaderRead,StageDispatch);history=b.write(history,Usage::ShaderWrite,StageDispatch);},
-            [this,address,buffer,count,cloud](PassContext& ctx){auto* t=slots[slot].foreignTables[cloud?1:0];t->setAddress(address,17);t->setAddress(buffer->gpuAddress(),18);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,cloud?foreignCloud:foreignFog,t,count);});}
+            [this,buffer,count,cloud](PassContext& ctx){auto& s=slots[slot];auto diag=s.expected.diagnostics;if(cloud)diag.fogIndices[0]=count;
+                auto* t=s.foreignTables[cloud?1:0];t->setAddress(lighting::upload(c,diag),17);t->setAddress(buffer->gpuAddress(),18);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,cloud?foreignCloud:foreignFog,t,count);});}
     void collect(rg::RenderGraph& g,const Sources& src){if(!capture)return;using namespace rg;slots[slot].counters=src.counters;
         samplesRef=g.importBuffer("Immutable same-frame F14 oracle samples",{11*sizeof(GPUVolumeNumericSample)},ImportPerFrame|ImportOutput);
         g.addPass("Actual shared solar disk wide HDR probe",PassType::Compute,[&](PassBuilder& b){solarRef=b.createTexture("Solar toward-away-tangent RGBA32",{Format::RGBA32Float,3,1});solarRef=b.write(solarRef,Usage::ShaderWrite,StageDispatch);},
             [this](PassContext& ctx){auto& s=slots[slot];auto* t=s.solarTable;t->setAddress(s.atmosphereAddress,0);tex(t,ctx,solarRef,5);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,solar,t,3);});
         g.addPass("Same-frame independent volume oracle readback",PassType::Compute,[&](PassBuilder& b){for(auto r:{src.transmittance,src.multiple,src.sky,solarRef})b.read(r,Usage::ShaderRead,StageDispatch);b.read(globalRef,Usage::ShaderRead,StageDispatch);b.read(skyRef,Usage::ShaderRead,StageDispatch);
             if(config.homogeneousFog){b.read(src.fogCells,Usage::ShaderRead,StageDispatch);b.read(src.fogIntegrated,Usage::ShaderRead,StageDispatch);}samplesRef=b.write(samplesRef,Usage::ShaderWrite,StageDispatch);},
-            [this,src](PassContext& ctx){auto& s=slots[slot];auto* t=s.collectTable;t->setAddress(s.diagnosticAddress,17);t->setAddress(globalProduced->gpuAddress(),18);t->setAddress(skyProduced[view]->gpuAddress(),19);t->setAddress(s.samples->gpuAddress(),20);
+            [this,src](PassContext& ctx){auto& s=slots[slot];auto* t=s.collectTable;t->setAddress(s.atmosphereAddress,0);t->setAddress(s.diagnosticAddress,17);t->setAddress(globalProduced->gpuAddress(),18);t->setAddress(skyProduced[view]->gpuAddress(),19);t->setAddress(s.samples->gpuAddress(),20);
                 t->setAddress(src.fogIntegratedBuffer?src.fogIntegratedBuffer->gpuAddress():s.samples->gpuAddress(),21);t->setAddress(src.fogCellsBuffer?src.fogCellsBuffer->gpuAddress():s.samples->gpuAddress(),22);
                 tex(t,ctx,src.transmittance,0);tex(t,ctx,src.multiple,1);tex(t,ctx,src.sky,2);tex(t,ctx,solarRef,3);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,collector,t,params.sampleCount);s.pending=true;});}
     bool consume(u32 index){auto& s=slots.at(index);if(!s.pending)return true;if(c.frameEvent()->signaledValue()<=s.frame)throw std::logic_error("Volume oracle read before GPU completion");
