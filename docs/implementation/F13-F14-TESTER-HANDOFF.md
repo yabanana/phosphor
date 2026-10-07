@@ -113,3 +113,12 @@ Real remaining tester evidence:
 corpus_complete and phase_accepted remain false while that evidence is pending.
 No roadmap tick or F13/F14 acceptance follows from source or a smoke pass.
 Hard boundary: STOP_AFTER_F14. No F15+ runner/implementation was introduced.
+
+Final root integration supersedes the earlier missing-source-hook list. All
+listed F13 guide/history, F14 LUT/history/fog/solar and native SDK fixture hooks
+are now concrete source paths; consult root HANDOFF.md for files/APIs and commit
+boundaries. Their actual execution and quality/lifetime evidence remain pending.
+New native F14 bridge consumes phosphor.volume-oracle.v1/cases directly. SDK
+fixtures have their separate frozen runner. ID8 indirect-diffuse-filtered exports
+actual custom-selected GI E as Lo, while raw1 remains unchanged. No threshold was
+relaxed and no writer test/build/GPU proof was run.
