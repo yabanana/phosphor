@@ -56,6 +56,7 @@ add_executable(phosphor_tests
     test_positive_lighting_partition.cpp
     test_atmosphere.cpp
     test_volumes.cpp
+    test_volume_oracle.cpp
     test_metalfx_denoise_contract.cpp
     test_scene_check.cpp
     test_scene_extract.cpp

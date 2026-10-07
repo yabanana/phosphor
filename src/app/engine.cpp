@@ -1946,10 +1946,11 @@ void Engine::onSceneCounters(u32 slot) {
     if(linearCapture_)linearCapture_->consume(slot);
     if(denoised_)for(const auto& check:denoised_->drainPackChecks())if(check.available&&!check.ok){++lightingFailures_;exitCode_=1;}
     const bool reflectionPassed=!slotReflectionRecorded_[slot]||reflections_->check(slot);
-    if(!reflectionPassed){++lightingFailures_;exitCode_=1;}
+    const bool volumePassed=!atmosphere_||atmosphere_->consumeDiagnostics(slot);
+    if(!reflectionPassed||!volumePassed){++lightingFailures_;exitCode_=1;}
     if(shadows_ && options_.debugLighting && (slotFrame_[slot]+1)%options_.debugLighting==0) {
-        ++lightingChecks_;const bool pass=shadows_->check(slot) && (!directLighting_ || directLighting_->check(slot)) && (!gi_ || gi_->check(slot)) && reflectionPassed && (!atmosphere_ || atmosphere_->check(slot));
-        if(!pass){if(reflectionPassed)++lightingFailures_;exitCode_=1;}
+        ++lightingChecks_;const bool pass=shadows_->check(slot) && (!directLighting_ || directLighting_->check(slot)) && (!gi_ || gi_->check(slot)) && reflectionPassed && volumePassed && (!atmosphere_ || atmosphere_->check(slot));
+        if(!pass){if(reflectionPassed&&volumePassed)++lightingFailures_;exitCode_=1;}
         std::printf("LIGHTING check frame %llu | %s\n",static_cast<unsigned long long>(slotFrame_[slot]),pass?"PASS":"FAIL");
     }
     lastCounters_ = renderer_->counters(slot);

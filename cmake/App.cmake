@@ -210,6 +210,7 @@ add_executable(phosphor
     src/platform/metal/reflection_passes.cpp
     src/platform/metal/denoise_passes.cpp
     src/platform/metal/atmosphere_passes.cpp
+    src/platform/metal/volume_diagnostics.cpp
     src/platform/metal/shader_reloader.cpp
     src/platform/metal/transient_heap.cpp
     src/platform/metal/upload_ring.cpp
