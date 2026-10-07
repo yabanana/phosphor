@@ -1053,7 +1053,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if(out.debugVolumeCorrupt==2&&(!out.fog&&(!out.clouds||out.cloudFullRate))){error="Volume history control requires fog or reconstructed clouds";return false;}
     if(out.debugVolumeCorrupt==3&&!out.fog){error="Volume light control requires --fog on";return false;}
     if(out.debugReflectionCorrupt&&(!out.debugLighting||!(out.reflections!=ReflectionMode::Off||out.ao!=AoMode::Off||out.lightingDenoise!=LightingDenoiseMode::Off))){error="Reflection control requires F13 and --debug-lighting N";return false;}
-    if(out.debugReflectionCorrupt==1&&out.lightingDenoise!=LightingDenoiseMode::Custom){error="Reflection history control requires --lighting-denoise custom";return false;}
+    if(out.debugReflectionCorrupt==1&&(out.lightingDenoise!=LightingDenoiseMode::Custom||!(out.reflections!=ReflectionMode::Off||out.ao!=AoMode::Off||out.directLighting!=DirectLightingMode::Legacy||out.gi!=GiMode::Off))){error="Reflection history control requires custom denoise and an active signal";return false;}
     if(out.cloudFullRate&&!out.clouds){error="--cloud-full-rate requires --clouds on";return false;}
     if((out.atmosphere||out.fog||out.clouds) && out.temporalUpscale){error="Physical atmosphere HDR requires native or F13 denoised reconstruction";return false;}
     if(out.planetCameraHeight>=0&&!out.atmosphere&&!out.fog&&!out.clouds){error="Planetary camera control requires F14";return false;}
