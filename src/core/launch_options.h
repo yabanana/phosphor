@@ -194,6 +194,9 @@ namespace phosphor {
 //   --debug-rt-deform  deform mesh 0 for BLAS lifecycle diagnostics; requires
 //                      --rt on --debug-rt N>0 --debug-view rt --rt-proxy off
 //   --debug-rt-corrupt transform|mask|blas  negative control (needs --debug-rt N>0)
+//   --debug-rt-proxy-transition mask|emissive|reassign|full-upload
+//                      diagnostic material transition on a measured proxy;
+//                      requires RT, manifest proxies, checks, and no bench switching
 //   --rt-probe primary|shadow|ao|diffuse    per-ray traversal measurement
 //                      RT settings require --rt on; synthetic graph scenarios,
 //                      memory-stress and transient-only tests cannot use RT.
@@ -221,8 +224,10 @@ enum class MeshletDebugView : u8 { None, Meshlets, Cull, HiZ, RT };
 /// F9 ray-tracing diagnostics (available on indexed and mesh paths).
 enum class RtCorruption : u8 { None, Transform, Mask, Blas };
 enum class RtProbe : u8 { None, Primary, Shadow, AO, Diffuse };
+enum class RtProxyTransition : u8 { None, Mask, Emissive, Reassign, FullUpload };
 [[nodiscard]] const char* rtCorruptionName(RtCorruption corruption);
 [[nodiscard]] const char* rtProbeName(RtProbe probe);
+[[nodiscard]] const char* rtProxyTransitionName(RtProxyTransition transition);
 
 /// OPT-1 graph compilation modes (--graph-opt).
 enum class GraphOptMode : u8 { Off, Greedy, Plan };
@@ -322,6 +327,7 @@ struct LaunchOptions {
     std::string  rtProxyManifestPath;          // empty = scene's default manifest, missing = full geometry
     u32          debugRt = 0;                  // --debug-rt N: readback/check cadence, 0 = off
     bool         debugRtDeform = false;       // diagnostic mesh-0 deformation; raster bounds are unchanged
+    RtProxyTransition debugRtProxyTransition = RtProxyTransition::None;
     RtCorruption debugRtCorrupt = RtCorruption::None;
     RtProbe      rtProbe = RtProbe::None;
     // F7/F8 renderer, temporal reconstruction, capture and bounded diagnostics.

@@ -90,6 +90,17 @@ const char* rtProbeName(RtProbe probe) {
     return "none";
 }
 
+const char* rtProxyTransitionName(RtProxyTransition transition) {
+    switch (transition) {
+    case RtProxyTransition::None: return "none";
+    case RtProxyTransition::Mask: return "mask";
+    case RtProxyTransition::Emissive: return "emissive";
+    case RtProxyTransition::Reassign: return "reassign";
+    case RtProxyTransition::FullUpload: return "full-upload";
+    }
+    return "none";
+}
+
 bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
                         LaunchOptions& out, std::string& error) {
     out = LaunchOptions{};
@@ -450,6 +461,15 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             rtSettingsSpecified = true;
         } else if (arg == "--debug-rt") {
             if (!needCount(out.debugRt)) return false;
+            rtSettingsSpecified = true;
+        } else if (arg == "--debug-rt-proxy-transition") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "mask") out.debugRtProxyTransition = RtProxyTransition::Mask;
+            else if (*value == "emissive") out.debugRtProxyTransition = RtProxyTransition::Emissive;
+            else if (*value == "reassign") out.debugRtProxyTransition = RtProxyTransition::Reassign;
+            else if (*value == "full-upload") out.debugRtProxyTransition = RtProxyTransition::FullUpload;
+            else { error = "--debug-rt-proxy-transition: expected mask, emissive, reassign or full-upload"; return false; }
             rtSettingsSpecified = true;
         } else if (arg == "--debug-rt-deform") {
             out.debugRtDeform = true;
@@ -888,6 +908,19 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if (!out.rtProxyManifestPath.empty() && !out.rtProxyManifest) {
         error = "--rt-proxy-manifest requires --rt-proxy manifest";
         return false;
+    }
+    if (out.debugRtProxyTransition != RtProxyTransition::None) {
+        if (!out.rtProxyManifest || out.debugRt == 0 || out.switchEvery || out.debugRtDeform ||
+            out.debugRtCorrupt != RtCorruption::None) {
+            error = "--debug-rt-proxy-transition requires --rt-proxy manifest and --debug-rt N > 0, without switch/deform/corrupt";
+            return false;
+        }
+        // The transition happens after eight rendered frames. Preserve an
+        // interactive mode, but reject short benchmark runs including warmup.
+        if (out.benchmark() && u64(out.frames) + out.warmup < 24) {
+            error = "--debug-rt-proxy-transition needs at least 24 total frames including warmup";
+            return false;
+        }
     }
     if (out.debugRtDeform && (out.debugRt == 0 || out.debugView != MeshletDebugView::RT || out.rtProxyManifest)) {
         error = "--debug-rt-deform requires --debug-rt N with N > 0, --debug-view rt and --rt-proxy off";

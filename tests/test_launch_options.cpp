@@ -1056,3 +1056,27 @@ TEST_CASE("F9 BLAS deformation requires the checked full-geometry RT debug view"
         CHECK_FALSE(error.empty());
     }
 }
+
+TEST_CASE("F9 proxy transitions require measured proxies checks and enough total frames") {
+    LaunchOptions o;
+    std::string error;
+    for (const char* mode : {"mask","emissive","reassign","full-upload"}) {
+        REQUIRE(parse({"--rt","on","--rt-proxy","manifest","--debug-rt","1","--debug-rt-proxy-transition",mode},o,error));
+        CHECK(std::string(rtProxyTransitionName(o.debugRtProxyTransition)) == mode); // interactive permitted
+    }
+    REQUIRE(parse({"--rt","on","--rt-proxy","manifest","--debug-rt","1","--debug-rt-proxy-transition","mask",
+                   "--frames","1","--warmup","23"},o,error));
+    for (const auto& args : std::vector<std::vector<const char*>>{
+        {"--debug-rt-proxy-transition","mask"},
+        {"--rt","on","--rt-proxy","manifest","--debug-rt-proxy-transition","mask"},
+        {"--rt","on","--debug-rt","1","--debug-rt-proxy-transition","mask"},
+        {"--rt","on","--rt-proxy","manifest","--debug-rt","1","--debug-rt-proxy-transition","unknown"},
+        {"--rt","on","--rt-proxy","manifest","--debug-rt","1","--debug-rt-proxy-transition","mask","--switch-every","1"},
+        {"--rt","on","--rt-proxy","manifest","--debug-rt","1","--debug-rt-proxy-transition","mask","--debug-rt-deform"},
+        {"--rt","on","--rt-proxy","manifest","--debug-rt","1","--debug-rt-proxy-transition","mask","--debug-rt-corrupt","mask"},
+        {"--rt","on","--rt-proxy","manifest","--debug-rt","1","--debug-rt-proxy-transition","mask","--frames","23","--warmup","0"},
+        {"--rt","on","--rt-proxy","manifest","--debug-rt","1","--debug-rt-proxy-transition"}}) {
+        CHECK_FALSE(parse(args,o,error));
+        CHECK_FALSE(error.empty());
+    }
+}

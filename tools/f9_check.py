@@ -52,6 +52,8 @@ class Case:
     require_zero_allocations: bool = True
     needs_sponza: bool = False
     capture: bool = False
+    transition: str | None = None
+    deform: bool = False
 
 
 def make_cases(families: list[str], proxy_manifest: Path, quick: bool) -> list[Case]:
@@ -75,6 +77,14 @@ def make_cases(families: list[str], proxy_manifest: Path, quick: bool) -> list[C
         add("proxy-sponza", [*sponza, "--rt-proxy", "manifest", "--rt-proxy-manifest", str(proxy_manifest)],
             proxy=True, needs_sponza=True)
         if not quick:
+            for name, cadence in (("deform", "1"), ("deform-inflight", "17")):
+                add(name, ["--scene", "procedural", "--bench", "1", "--debug-rt", cadence,
+                           "--debug-rt-deform", "--debug-view", "rt", "--frames", "120", "--warmup", "0"],
+                    deform=True, probe="primary", require_zero_allocations=False)
+            for transition in ("mask", "emissive", "reassign", "full-upload"):
+                add(f"proxy-transition-{transition}", [*sponza, "--rt-proxy", "manifest", "--rt-proxy-manifest", str(proxy_manifest),
+                    "--debug-rt-proxy-transition", transition, "--warmup", "0", "--frames", "24"],
+                    transition=transition, needs_sponza=True, require_zero_allocations=False)
             for flight in (1, 2, 3):
                 add(f"flight-{flight}", ["--scene", "procedural", "--bench", "1", "--frames-in-flight", str(flight)])
             add("dynamic-churn", ["--scene", "procedural", "--bench", "8", "--instances", "10000",
@@ -173,7 +183,48 @@ def evaluate(case: Case, status: dict, text: str, report, report_error: str | No
                     failures.append("requested proxy manifest was not reported as active")
                 if not numeric(rt.get("proxy_meshes")) or rt["proxy_meshes"] <= 0:
                     failures.append("manifest selected no proxy meshes")
+    if case.deform:
+        for field in ("blas_refits", "blas_builds", "blas_count", "compactions"):
+            if not isinstance(rt, dict) or not numeric(rt.get(field)) or rt[field] < 0:
+                failures.append(f"missing/invalid deformation counter rt.{field}")
+        if isinstance(rt, dict):
+            if not numeric(rt.get("blas_refits")) or rt["blas_refits"] <= 0:
+                failures.append("deformation executed no BLAS refit")
+            if not (numeric(rt.get("blas_builds")) and numeric(rt.get("blas_count")) and rt["blas_builds"] > rt["blas_count"]):
+                failures.append("deformation executed no BLAS rebuild after initial loading")
+            if not numeric(rt.get("compactions")) or rt["compactions"] <= 0:
+                failures.append("deformation executed no BLAS compaction")
+    transition_evidence = None
+    if case.transition:
+        pattern = (r"^RT-PROXY-TRANSITION (mask|emissive|reassign|full-upload) mesh (\d+) source (\d+) "
+                   r"before (\d+) after (\d+) material_full ([01]) instances_full ([01]) "
+                   r"material_records (\d+) instance_records (\d+) applied ([01]) promoted ([01]) verified ([01]) "
+                   r"\| (PASS|FAIL)(?:[: ].*)?$")
+        records = list(re.finditer(pattern, text, re.M))
+        if not records:
+            failures.append("missing proxy-transition evidence; checker PASS alone is insufficient")
+        else:
+            match = records[-1]
+            keys = ("mesh", "source", "before", "after", "material_full", "instances_full", "material_records",
+                    "instance_records", "applied", "promoted", "verified")
+            transition_evidence = {"mode": match[1], **dict(zip(keys, map(int, match.groups()[1:12]))), "status": match[13]}
+            e = transition_evidence
+            if e["mode"] != case.transition or e["status"] != "PASS" or not all(e[k] == 1 for k in ("applied", "promoted", "verified")):
+                failures.append("proxy transition did not apply, promote and verify the requested change")
+            if not (e["mesh"] < 0xffffffff and 0 < e["before"] < e["source"] == e["after"]):
+                failures.append("proxy transition did not go from reduced indices to the full source")
+            if case.transition == "full-upload":
+                if not (e["material_full"] == e["instances_full"] == 1 and e["material_records"] == e["instance_records"] == 0):
+                    failures.append("full-upload transition did not exercise full buffers and empty delta arrays")
+            elif case.transition == "reassign":
+                if e["instances_full"] or e["instance_records"] <= 0:
+                    failures.append("reassignment transition did not exercise instance deltas")
+            elif e["material_full"] or e["material_records"] <= 0:
+                failures.append("material transition did not exercise material deltas")
+        if not isinstance(rt, dict) or rt.get("proxy_mode") != "manifest":
+            failures.append("proxy transition requires an active measured manifest")
     return {"name": case.name, "passed": not failures, "failures": failures,
+            "transition_evidence": transition_evidence,
             "checker": check, "rt_report": rt,
             "report_present": report is not None,
             "visibility_requires_review": case.visibility,
@@ -226,6 +277,26 @@ def self_test():
     bad_report = copy.deepcopy(report); bad_report["rt"]["check_failures"] = 1
     expect(True, negative, neg_status, neg_text, bad_report)
     expect(False, negative, neg_status, neg_text, report)
+    transition = Case("transition", [], transition="mask", require_zero_allocations=False)
+    transition_report = copy.deepcopy(report); transition_report["rt"]["proxy_mode"] = "manifest"
+    marker = ("RT-PROXY-TRANSITION mask mesh 2 source 300 before 120 after 300 material_full 0 instances_full 0 "
+              "material_records 1 instance_records 0 applied 1 promoted 1 verified 1 | PASS\n")
+    expect(True, transition, status, text + marker, transition_report)
+    expect(False, transition, status, text, transition_report)
+    expect(False, transition, status, text + marker.replace("before 120", "before 300"), transition_report)
+    expect(False, transition, status, text + marker.replace("verified 1", "verified 0"), transition_report)
+    expect(False, transition, status, text + marker.replace("material_records 1", "material_records 0"), transition_report)
+    full = Case("transition-full", [], transition="full-upload", require_zero_allocations=False)
+    full_marker = marker.replace("mask mesh", "full-upload mesh").replace("material_full 0", "material_full 1").replace("instances_full 0", "instances_full 1").replace("material_records 1", "material_records 0")
+    expect(True, full, status, text + full_marker, transition_report)
+    expect(False, full, status, text + full_marker.replace("instances_full 1", "instances_full 0"), transition_report)
+    deform = Case("deform", [], deform=True, probe="primary", require_zero_allocations=False)
+    deform_report = copy.deepcopy(report)
+    deform_report["rt"].update(probe="primary", probe_rays=512, blas_count=2, blas_builds=6, blas_refits=68, compactions=2)
+    expect(True, deform, status, text, deform_report)
+    for field, value in (("blas_refits", 0), ("blas_builds", 2), ("compactions", 0), ("probe", "none")):
+        bad = copy.deepcopy(deform_report); bad["rt"][field] = value
+        expect(False, deform, status, text, bad)
     print(f"f9_check: {tests} CPU evidence-evaluator fixtures passed; no GPU invocation")
 
 
@@ -300,7 +371,7 @@ def main() -> int:
             raise RuntimeError(f"renderer executable missing: {app}")
         if any(case.needs_sponza for case in cases) and not (repo / "assets/sponza/Sponza.gltf").is_file():
             raise RuntimeError("Sponza is required by selected cases but assets/sponza/Sponza.gltf is missing")
-        if any(case.proxy for case in cases) and not proxy_manifest.is_file():
+        if any(case.proxy or case.transition for case in cases) and not proxy_manifest.is_file():
             raise RuntimeError(f"proxy manifest required by selected cases: {proxy_manifest}")
         env = {**os.environ, **plan["validation_env"]}
         for case, entry in zip(cases, entries):
