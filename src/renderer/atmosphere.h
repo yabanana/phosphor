@@ -34,6 +34,13 @@ glm::dvec3 atmosphereTransmittanceReference(const AtmosphereSettings&,glm::dvec3
                                            double tolerance=1e-9,u32 maxDepth=18);
 AtmosphereIntegral atmosphereSingleScattering(const AtmosphereSettings&,glm::dvec3 worldPoint,glm::dvec3 direction,
                                               glm::dvec3 towardSun,glm::dvec3 irradiance,u32 steps=64,double limit=1e12);
+AtmosphereIntegral atmosphereSingleScatteringReference(const AtmosphereSettings&,glm::dvec3 worldPoint,glm::dvec3 direction,
+                                                       glm::dvec3 towardSun,glm::dvec3 irradiance,
+                                                       double tolerance=1e-6,u32 maxDepth=10,double limit=1e12);
+// Independent Gauss-Legendre polar/trapezoid azimuth quadrature of Hillaire's
+// isotropic closure, with adaptive-Simpson ray integration, not Fibonacci rays.
+glm::dvec3 atmosphereMultipleScatteringReference(const AtmosphereSettings&,double radius,double cosineZenith,
+                                                u32 polarDirections=8,u32 azimuthDirections=16);
 glm::dvec2 atmosphereTransmittanceUv(const AtmosphereSettings&,double radius,double cosineZenith);
 glm::dvec2 atmosphereTransmittanceRay(const AtmosphereSettings&,glm::dvec2 uv); // radius, cosine
 double atmosphereRayleighPhase(double cosine);

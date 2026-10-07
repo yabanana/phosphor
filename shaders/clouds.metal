@@ -58,12 +58,17 @@ kernel void clouds_march(constant GPUCloudParams& p [[buffer(0)]],constant GPUAt
         for(uint i=0;i<steps;++i){const float distance=cloudDistanceAt((float(i)+jitter)*ds,intervals),pointDensityDistance=distance;
             const float3 point=camera+ray*pointDensityDistance;float density=cloudDensity(point,p,a);if(p.corruption==VOLUME_CORRUPT_UNITS)density*=1000;
             const float sigma=density*p.extinction;if(sigma<=0)continue;
-            float3 incident=atmoVec(a.sunIrradiance)*(atmoTransmittance(point,sun,a,trans)*cloudToLight(point,sun,p,a)*atmoHgPhase(dot(ray,sun),p.anisotropy)+atmoMultiple(point,sun,a,multi));
-            incident+=atmoVec(a.moonIrradiance)*(atmoTransmittance(point,moon,a,trans)*cloudToLight(point,moon,p,a)*atmoHgPhase(dot(ray,moon),p.anisotropy)+atmoMultiple(point,moon,a,multi));
             const float segment=exp(-sigma*ds),factor=-expm1(-sigma*ds)/sigma;
-            radiance+=T*incident*(sigma*p.albedo)*factor;
+            if(reference||T>p.terminationTransmittance){
+                float3 incident=atmoVec(a.sunIrradiance)*(atmoTransmittance(point,sun,a,trans)*cloudToLight(point,sun,p,a)*atmoHgPhase(dot(ray,sun),p.anisotropy)+atmoMultiple(point,sun,a,multi));
+                incident+=atmoVec(a.moonIrradiance)*(atmoTransmittance(point,moon,a,trans)*cloudToLight(point,moon,p,a)*atmoHgPhase(dot(ray,moon),p.anisotropy)+atmoMultiple(point,moon,a,multi));
+                radiance+=T*incident*(sigma*p.albedo)*factor;
+            }
             const float scatteringWeight=T*(1-segment);weightedDistance+=scatteringWeight*distance;weightSum+=scatteringWeight;T*=segment;
-            volumeCount(counters,5,1);if(T<=p.terminationTransmittance)break;
+            // Low-rate may stop expensive LIGHT marching below threshold, but
+            // keeps integrating extinction so a bright solar disk cannot leak
+            // through an artificially retained T. Full-rate is the reference.
+            volumeCount(counters,5,1);if(T==0)break;
         }
     }
     const float cloudDistance=weightSum>1e-8f?weightedDistance/weightSum:0;

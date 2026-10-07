@@ -113,6 +113,46 @@ AtmosphereIntegral atmosphereSingleScattering(const AtmosphereSettings& s,glm::d
     }
     return out;
 }
+namespace {
+AtmosphereIntegral referenceIntegral(const AtmosphereSettings& s,glm::dvec3 p,glm::dvec3 ray,glm::dvec3 sun,
+                                     glm::dvec3 E,double tolerance,u32 depth,double limit,bool isotropic) {
+    if(!(tolerance>0&&std::isfinite(tolerance))||depth>18)throw std::invalid_argument("invalid radiance reference bound");
+    const auto d=direction(ray),light=direction(sun);const auto segment=atmosphereSegment(s,p,d,limit);
+    AtmosphereIntegral out;out.ground=segment.ground;out.distance=segment.end;if(!segment.valid)return out;
+    const auto optical=[&](double t){return integrateSimpson([&](double distance){return atmosphereMedium(s,p+d*distance).extinction;},segment.begin,t,tolerance*0.25,depth);};
+    const double mu=glm::dot(d,light);
+    out.radiance=integrateSimpson([&](double t){const auto point=p+d*t;const auto m=atmosphereMedium(s,point);
+        const auto phase=isotropic?(m.rayleigh+m.mie)/(4*pi):m.rayleigh*atmosphereRayleighPhase(mu)+m.mie*atmosphereMiePhase(mu,s.mieG);
+        return glm::exp(-optical(t))*phase*E*atmosphereTransmittanceReference(s,point,light,tolerance*0.25,depth);},segment.begin,segment.end,tolerance,depth);
+    out.transmittance=glm::exp(-optical(segment.end));
+    out.scatteringFactor=integrateSimpson([&](double t){const auto m=atmosphereMedium(s,p+d*t);return glm::exp(-optical(t))*(m.rayleigh+m.mie);},segment.begin,segment.end,tolerance,depth);
+    if(segment.ground){const auto point=p+d*segment.end,normal=direction(point-s.planetCenter);
+        out.radiance+=out.transmittance*s.groundAlbedo/pi*E*atmosphereTransmittanceReference(s,point+normal*0.01,light,tolerance*0.25,depth)*std::max(0.0,glm::dot(normal,light));
+        if(isotropic)out.scatteringFactor+=out.transmittance*s.groundAlbedo;}
+    return out;
+}
+}
+AtmosphereIntegral atmosphereSingleScatteringReference(const AtmosphereSettings& s,glm::dvec3 p,glm::dvec3 ray,
+                                                       glm::dvec3 sun,glm::dvec3 E,double tolerance,u32 depth,double limit) {
+    if(!finite(E)||glm::any(glm::lessThan(E,glm::dvec3(0))))throw std::invalid_argument("invalid reference irradiance");
+    return referenceIntegral(s,p,ray,sun,E,tolerance,depth,limit,false);
+}
+glm::dvec3 atmosphereMultipleScatteringReference(const AtmosphereSettings& s,double radius,double mu,u32 polar,u32 azimuth) {
+    if(polar<2||polar>32||azimuth<2||azimuth>64||!(radius>=s.bottomRadius&&radius<=s.topRadius)||!(mu>=-1&&mu<=1))
+        throw std::invalid_argument("invalid multiple-scattering reference quadrature");
+    const glm::dvec3 point=s.planetCenter+glm::dvec3(0,radius,0),sun(std::sqrt(std::max(0.0,1-mu*mu)),mu,0);
+    glm::dvec3 first(0),returned(0);
+    for(u32 node=0;node<polar;++node) {
+        double z=std::cos(pi*(double(node)+0.75)/(double(polar)+0.5)),derivative=0;
+        for(u32 iteration=0;iteration<16;++iteration){double p0=1,p1=z;for(u32 l=2;l<=polar;++l){const double p2=((2*double(l)-1)*z*p1-(double(l)-1)*p0)/double(l);p0=p1;p1=p2;}
+            derivative=double(polar)*(z*p1-p0)/(z*z-1);const double delta=p1/derivative;z-=delta;if(std::abs(delta)<1e-14)break;}
+        const double weight=2/((1-z*z)*derivative*derivative),radial=std::sqrt(std::max(0.0,1-z*z));
+        for(u32 j=0;j<azimuth;++j){const double phi=2*pi*(double(j)+0.5)/azimuth;const auto ray=glm::dvec3(radial*std::cos(phi),z,radial*std::sin(phi));
+            const auto result=referenceIntegral(s,point,ray,sun,glm::dvec3(1),1e-5,8,1e12,true);
+            first+=result.radiance*(weight/(2*azimuth));returned+=result.scatteringFactor*(weight/(2*azimuth));}
+    }
+    return first/glm::max(glm::dvec3(1e-3),glm::dvec3(1)-returned);
+}
 glm::dvec2 atmosphereTransmittanceUv(const AtmosphereSettings& s,double radius,double mu) {
     radius=std::clamp(radius,s.bottomRadius,s.topRadius);mu=std::clamp(mu,-1.0,1.0);
     const double H=std::sqrt((s.topRadius-s.bottomRadius)*(s.topRadius+s.bottomRadius)),rho=std::sqrt(std::max(0.0,(radius-s.bottomRadius)*(radius+s.bottomRadius)));
