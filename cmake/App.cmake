@@ -67,6 +67,7 @@ set(PHOSPHOR_SHADER_HEADERS
     ${CMAKE_SOURCE_DIR}/shaders/atmosphere_common.h
     ${CMAKE_SOURCE_DIR}/src/renderer/atmosphere_bindings.h
     ${CMAKE_SOURCE_DIR}/src/renderer/volume_noise.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/volume_math.h
     ${CMAKE_SOURCE_DIR}/shaders/gi_common.h
     ${CMAKE_SOURCE_DIR}/shaders/gi_cache_common.h
     ${CMAKE_SOURCE_DIR}/shaders/restir_common.h

@@ -127,7 +127,7 @@ kernel void fog_integrate(constant GPUFogParams& p [[buffer(0)]],device GPUFogIn
     const float3 ray=fogRay(column,p);const float viewCos=max(1e-5f,-(atmoMatrix(p.view)*float4(ray,0)).z);
     for(uint z=0;z<p.gridZ&&z<128;++z){const GPUFogCell cell=cells[fogIndex(uint3(column,z),p)];
         const float ds=(fogSlice(float(z+1)/p.gridZ,p)-fogSlice(float(z)/p.gridZ,p))/viewCos;
-        const float segment=exp(-cell.extinction*ds),factor=cell.extinction>1e-8f?-expm1(-cell.extinction*ds)/cell.extinction:ds;
+        const float segment=exp(-cell.extinction*ds),factor=volumeIntegralFactor(cell.extinction,ds);
         L+=T*float3(cell.source[0],cell.source[1],cell.source[2])*factor;T*=segment;
         GPUFogIntegrated out{};out.radiance[0]=L.x;out.radiance[1]=L.y;out.radiance[2]=L.z;out.transmittance=T;integrated[fogIndex(uint3(column,z),p)]=out;}
 }
@@ -138,7 +138,7 @@ static GPUFogIntegrated fogPrefix(uint2 column,float viewDepth,constant GPUFogPa
     if(viewDepth>p.nearDistance){const uint z=min(uint(log(viewDepth/p.nearDistance)/log(p.farDistance/p.nearDistance)*p.gridZ),p.gridZ-1u);
         if(z>0){const GPUFogIntegrated previous=integrated[fogIndex(uint3(column,z-1),p)];L=float3(previous.radiance[0],previous.radiance[1],previous.radiance[2]);T=previous.transmittance;}
         const GPUFogCell cell=cells[fogIndex(uint3(column,z),p)];const float ds=max(0.0f,(viewDepth-fogSlice(float(z)/p.gridZ,p))/viewCos);
-        const float segment=exp(-cell.extinction*ds),factor=cell.extinction>1e-8f?-expm1(-cell.extinction*ds)/cell.extinction:ds;
+        const float segment=exp(-cell.extinction*ds),factor=volumeIntegralFactor(cell.extinction,ds);
         L+=T*float3(cell.source[0],cell.source[1],cell.source[2])*factor;T*=segment;}
     GPUFogIntegrated out{};out.radiance[0]=L.x;out.radiance[1]=L.y;out.radiance[2]=L.z;out.transmittance=T;return out;
 }

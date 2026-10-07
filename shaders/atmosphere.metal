@@ -36,7 +36,7 @@ kernel void atmosphere_multiscattering(constant GPUAtmosphereParams& p [[buffer(
 kernel void atmosphere_sky_view(constant GPUAtmosphereParams& p [[buffer(0)]],texture2d<float> trans [[texture(0)]],texture2d<float> multi [[texture(1)]],
     texture2d<float,access::write> output [[texture(5)]],device atomic_uint* counters [[buffer(15)]],uint2 pixel [[thread_position_in_grid]]) {
     if(pixel.x>=p.skyWidth||pixel.y>=p.skyHeight)return;
-    const float3 camera=atmoVec(p.cameraPosition),relative=camera-atmoVec(p.planetCenter);const float height=length(relative),upLength=max(height,1);
+    const float3 camera=atmoVec(p.cameraPosition),relative=camera-atmoVec(p.planetCenter);const float height=length(relative),upLength=max(height,1.0f);
     const float3 ray=atmoSkyDirection((float2(pixel)+0.5f)/float2(p.skyWidth,p.skyHeight),relative/upLength,height,p);
     const AtmoIntegral value=atmoIntegrate(camera,ray,p,trans,multi,true);
     if(!all(isfinite(value.radiance)))volumeCount(counters,0,1);output.write(float4(value.radiance,1),pixel);

@@ -2,9 +2,23 @@
 #include "renderer/fog_settings.h"
 #include "renderer/cloud_settings.h"
 #include "renderer/volume_noise.h"
+#include "renderer/volume_math.h"
 #include <cmath>
 #include <limits>
 using namespace phosphor;
+TEST_CASE("F14 segment integral matches double expm1 including near-vacuum optical depths") {
+    for (float distance : {0.0f, 0.001f, 1.0f, 100000.0f}) {
+        CHECK(volumeIntegralFactor(0, distance) == distance);
+        for (int i = -12; i <= 8; ++i) {
+            const float sigma = float(std::pow(10.0, double(i)));
+            const double expected = -std::expm1(-double(sigma) * distance) / sigma;
+            CHECK(std::abs(double(volumeIntegralFactor(sigma, distance)) - expected) <=
+                  2e-6 * std::max(expected, 1e-30));
+        }
+    }
+    for (float tau : {0.099999f, 0.1f, 0.100001f})
+        CHECK(volumeIntegralFactor(tau, 1) == doctest::Approx(-std::expm1(-double(tau)) / tau).epsilon(2e-6));
+}
 TEST_CASE("F14 fog exponential constant-density oracle and front-to-back composition") {
     const auto full=fogHomogeneous(0.01,{0.01,0.02,0.03},100);
     CHECK(full.transmittance==doctest::Approx(std::exp(-1.0)));

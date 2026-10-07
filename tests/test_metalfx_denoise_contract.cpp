@@ -35,14 +35,14 @@ TEST_CASE("F13 denoised descriptor uses exact active extent and stale future is 
 TEST_CASE("F13 channel split preserves signed world normal and linear roughness") {
     GuideSample s;s.normal={-1,0,0};s.roughness=0.5f;s.motion={-10,-10};
     REQUIRE(validateSample(s)==0); // signed normal, no remap to [0,1]
-    s.normal={0.5f,0.5f,1};CHECK(validateSample(s)&NormalError);
-    s.normal={0,0,0};s.depth=0;CHECK_FALSE(validateSample(s)&NormalError); // deterministic far background
-    s.depth=1;CHECK(validateSample(s)&NormalError);
-    s=GuideSample{};s.color={MaximumHalf+1,0,0};CHECK(validateSample(s)&ColorError);
-    s=GuideSample{};s.specularAlbedo={1.5f,0,0};CHECK(validateSample(s)&AlbedoError);
-    s=GuideSample{};s.hitDistance=-1;CHECK(validateSample(s)&HitError);
-    s=GuideSample{};s.reactive=2;CHECK(validateSample(s)&MaskError);
-    s=GuideSample{};s.motion.x=std::numeric_limits<float>::quiet_NaN();CHECK(validateSample(s)&MotionError);
+    s.normal={0.5f,0.5f,1};CHECK((validateSample(s)&NormalError)!=0);
+    s.normal={0,0,0};s.depth=0;CHECK((validateSample(s)&NormalError)==0); // deterministic far background
+    s.depth=1;CHECK((validateSample(s)&NormalError)!=0);
+    s=GuideSample{};s.color={MaximumHalf+1,0,0};CHECK((validateSample(s)&ColorError)!=0);
+    s=GuideSample{};s.specularAlbedo={1.5f,0,0};CHECK((validateSample(s)&AlbedoError)!=0);
+    s=GuideSample{};s.hitDistance=-1;CHECK((validateSample(s)&HitError)!=0);
+    s=GuideSample{};s.reactive=2;CHECK((validateSample(s)&MaskError)!=0);
+    s=GuideSample{};s.motion.x=std::numeric_limits<float>::quiet_NaN();CHECK((validateSample(s)&MotionError)!=0);
     CHECK(format(Channel::Depth)==rg::Format::Depth32Float);
     CHECK(format(Channel::Roughness)==rg::Format::R16Float);
     CHECK(format(Channel::Motion)==rg::Format::RG32Float);
@@ -53,9 +53,9 @@ TEST_CASE("F13 explicit pre-exposure scaling restores physical wide HDR units") 
     CHECK(packed==glm::vec3(5760,2,1));
     CHECK(restorePreExposedRadiance(packed,scale)==physical);
     GuideSample s;s.color=physical;
-    CHECK(validateSample(s)&ColorError);
-    CHECK_FALSE(validateSample(s,0.002f,scale)&ColorError);
-    s.color.x=MaximumHalf*128.f;CHECK(validateSample(s,0.002f,scale)&ColorError);
+    CHECK((validateSample(s)&ColorError)!=0);
+    CHECK((validateSample(s,0.002f,scale)&ColorError)==0);
+    s.color.x=MaximumHalf*128.f;CHECK((validateSample(s,0.002f,scale)&ColorError)!=0);
     CHECK(format(Channel::RestoredOutput)==rg::Format::RGBA32Float);
     // Closed-form pack/restore identity is NOT evidence of SDK output units.
 }
