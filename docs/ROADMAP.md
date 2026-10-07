@@ -517,7 +517,7 @@ qualità percepita invariata.
 - [ ] F9.1 BLAS per mesh con build, compaction e refit nel `MTL4ComputeCommandEncoder`
 - [ ] F9.2 TLAS per frame con istanze filtrate dalla GPU scene; build guidate da indirizzo (Apple9)
 - [ ] F9.3 **Geometria proxy per l'RT** (LOD semplificati misurati) separata dal raster; mesh piena per MASK/emissive, manifest assente/invalido o protezione runtime
-- [ ] F9.4 Libreria di traversal con `intersector` (non `intersection_query`, che disabilita il reorder hardware)
+- [ ] F9.4 Libreria di traversal con `intersector`, baseline scelta dal confronto misurato con `intersection_query` nello spike S3
 - [ ] F9.5 Intersection function table per alpha test nell'RT; strategia generica su Apple9/M5, indicizzazione per materiale M5 valutata nello spike e non adottata
 - [ ] F9.6 **[CANDIDATO]** **Spike [EDGE]**: ordinamento software dei raggi per coerenza (binning per direzione/materiale) come sostituto dello shader execution reordering assente in Metal
 
