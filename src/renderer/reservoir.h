@@ -30,6 +30,7 @@ inline bool stream(GPUDIReservoir& r, const GPUDIReservoir& sample, double weigh
     const double total = double(r.weightSum) + weight;
     if (!std::isfinite(total) || total > std::numeric_limits<float>::max()) { r.pad[0] |= DI_ERROR_WEIGHT; return false; }
     r.M += multiplicity;
+    r.pad[1]|=DI_PROPOSAL_VALID;
     if (weight > 0.0 && random * total < weight) {
         r.lightIndex = sample.lightIndex;
         r.lightID = sample.lightID;
@@ -60,17 +61,22 @@ inline bool finalize(GPUDIReservoir& r) {
 
 inline bool reusable(const GPUDIReservoir& source, const GPUDIParams& p,
                      const GPUSampledLight& light) {
-    return source.valid && source.pad[0] == 0 && source.M > 0 && source.age < p.maxHistoryAge &&
+    const bool zero=(source.pad[1]&DI_PROPOSAL_VALID) && !source.valid && source.weightSum==0 && source.normalization==0;
+    return (zero || source.valid) && source.pad[0] == 0 && source.M > 0 && source.age < p.maxHistoryAge &&
            source.viewID == p.viewID && source.historyEpoch == p.historyEpoch &&
-           source.lightRevision == p.lightRevision && source.lightID == light.id &&
+           source.lightRevision == p.lightRevision && (zero || (source.lightID == light.id &&
            source.lightGeneration == light.generation && source.target > 0 &&
            std::isfinite(source.target) && source.normalization > 0 &&
            std::isfinite(source.normalization) && std::isfinite(source.u) && std::isfinite(source.v) &&
-           source.u >= 0 && source.u < 1 && source.v >= 0 && source.v < 1;
+           source.u >= 0 && source.u < 1 && source.v >= 0 && source.v < 1));
 }
 
 inline bool merge(GPUDIReservoir& destination, GPUDIReservoir source,
                   float currentTarget, u32 maxM, double random, bool advanceAge = true) {
+    if((source.pad[1]&DI_PROPOSAL_VALID) && !source.valid && source.pad[0]==0 && source.M &&
+       source.weightSum==0 && source.normalization==0) {
+        return stream(destination,source,0,std::min(source.M,maxM),random);
+    }
     if (!source.valid || !std::isfinite(currentTarget) || currentTarget <= 0 ||
         !std::isfinite(source.normalization) || source.normalization <= 0)
         return false;

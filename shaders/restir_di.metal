@@ -88,11 +88,12 @@ kernel void restir_di_temporal(constant GPUDIParams& p [[buffer(0)]],
             const uint2 previousPixel = uint2(previousCenter);
             const uint index = previousPixel.y * p.width + previousPixel.x;
             const GPUDIReservoir old = history[index];
-            if (old.lightIndex < p.lightCount && diCompatible(surface, previousSurfaces[index], p, true) &&
-                diReusable(old, lights[old.lightIndex], p)) {
+            const bool zero=diZeroProposal(old,p);
+            if ((zero || old.lightIndex < p.lightCount) && diCompatible(surface, previousSurfaces[index], p, true) &&
+                (zero || diReusable(old, lights[old.lightIndex], p))) {
                 // Candidate reservoir is already finalized. Restore its stream
                 // weightSum and merge directly, recomputing normalization once.
-                diMerge(r, old, surface, lights[old.lightIndex], p, diRandom(pixel, 48u, p, ranks), true,
+                diMerge(r, old, surface, zero?GPUSampledLight{}:lights[old.lightIndex], p, diRandom(pixel, 48u, p, ranks), true,
                          emitters, materials, textures);
             }
         }
@@ -132,8 +133,9 @@ kernel void restir_di_spatial(constant GPUDIParams& p [[buffer(0)]],
             if (duplicate) continue;
             seen[seenCount++] = index;
             const GPUDIReservoir source = temporal[index];
-            if (source.lightIndex < p.lightCount && diCompatible(surface, surfaces[index], p, false))
-                diMerge(r, source, surface, lights[source.lightIndex], p, diRandom(pixel, dim + 2u, p, ranks), false,
+            const bool zero=diZeroProposal(source,p);
+            if ((zero || source.lightIndex < p.lightCount) && diCompatible(surface, surfaces[index], p, false))
+                diMerge(r, source, surface, zero?GPUSampledLight{}:lights[source.lightIndex], p, diRandom(pixel, dim + 2u, p, ranks), false,
                          emitters, materials, textures);
         }
     }

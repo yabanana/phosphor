@@ -578,6 +578,7 @@ PHOSPHOR_GPU_CONSTANT u32 DI_USE_STBN = 16u;
 PHOSPHOR_GPU_CONSTANT u32 DI_ERROR_WEIGHT = 1u;
 PHOSPHOR_GPU_CONSTANT u32 DI_ERROR_ALIAS = 2u;
 PHOSPHOR_GPU_CONSTANT u32 DI_ERROR_TARGET = 4u;
+PHOSPHOR_GPU_CONSTANT u32 DI_PROPOSAL_VALID = 1u; // GPUDIReservoir.pad[1], distinct from selected valid
 
 struct GPUSampledLight {
     u32 id, generation, type, flags;
@@ -617,7 +618,7 @@ struct GPUDIReservoir {
     float u, v, target, weightSum;
     float normalization; // W = sumWeight / (M * target(selected))
     u32 M, age, valid;
-    u32 viewID, historyEpoch, pad[2]; // pad[0]=DI_ERROR_* (debug readback must fail)
+    u32 viewID, historyEpoch, pad[2]; // pad[0]=DI_ERROR_*; pad[1]=counted proposal-domain validity
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUDIReservoir) == 64, "GPUDIReservoir layout");
 

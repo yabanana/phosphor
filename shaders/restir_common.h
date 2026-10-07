@@ -177,7 +177,7 @@ inline bool diStream(thread GPUDIReservoir& r, GPUDIReservoir sample, float weig
         m == 0 || m > ~0u - r.M) { r.pad[0] |= DI_ERROR_WEIGHT; return false; }
     const float sum = r.weightSum + weight;
     if (!isfinite(sum)) { r.pad[0] |= DI_ERROR_WEIGHT; return false; }
-    r.M += m;
+    r.M += m;r.pad[1]|=DI_PROPOSAL_VALID;
     if (weight > 0 && random * sum < weight) {
         r.lightIndex = sample.lightIndex; r.lightID = sample.lightID; r.lightGeneration = sample.lightGeneration;
         r.u = sample.u; r.v = sample.v; r.target = sample.target; r.age = sample.age; r.valid = 1;
@@ -198,8 +198,13 @@ inline bool diValid(GPUDIReservoir r, GPUSampledLight light, constant GPUDIParam
            isfinite(r.normalization) && r.normalization > 0 && isfinite(r.u) && isfinite(r.v) &&
            r.u >= 0 && r.u < 1 && r.v >= 0 && r.v < 1;
 }
+inline bool diZeroProposal(GPUDIReservoir r,constant GPUDIParams& p) {
+    return (r.pad[1]&DI_PROPOSAL_VALID) && !r.valid && r.M>0 && r.pad[0]==0 &&
+        r.weightSum==0 && r.normalization==0 && r.age<p.maxHistoryAge &&
+        r.viewID==p.viewID && r.historyEpoch==p.historyEpoch && r.lightRevision==p.lightRevision;
+}
 inline bool diReusable(GPUDIReservoir r, GPUSampledLight light, constant GPUDIParams& p) {
-    return diValid(r, light, p) && r.age < p.maxHistoryAge;
+    return diZeroProposal(r,p) || (diValid(r, light, p) && r.age < p.maxHistoryAge);
 }
 inline bool diCompatible(GPUDISurface a, GPUDISurface b, constant GPUDIParams& p, bool temporal) {
     if (!a.valid || !b.valid || !isfinite(a.depth) || !isfinite(b.depth) || a.depth <= 0 || b.depth <= 0) return false;
@@ -216,6 +221,7 @@ inline bool diMerge(thread GPUDIReservoir& r, GPUDIReservoir source, GPUDISurfac
                      GPUSampledLight light, constant GPUDIParams& p, float random, bool advanceAge,
                      const device GPUEmissiveSurface* emitters,
                      const device GPUMaterial* materials, const device DITextureHandle* textures) {
+    if(diZeroProposal(source,p))return diStream(r,source,0,min(source.M,p.maxHistoryM),random);
     if (!diReusable(source, light, p)) return false;
     const uint m = min(source.M, p.maxHistoryM);
     const DISample sample = diSampleTexturedLight(light, source.lightIndex, float2(source.u, source.v),
