@@ -82,6 +82,7 @@ add_library(phosphor_core STATIC
     src/renderer/light_sampling.cpp
     src/renderer/stochastic_sampling.cpp
     src/renderer/local_light_scene.cpp
+    src/renderer/emissive_domain.cpp
     src/renderer/probe_grid.cpp
     src/renderer/radiance_cache.cpp
     src/renderer/offline_reference.cpp
