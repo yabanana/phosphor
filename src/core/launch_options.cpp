@@ -1,4 +1,5 @@
 #include "core/launch_options.h"
+#include "testbench/lighting_validation.h"
 
 #include <charconv>
 #include <cmath>
@@ -497,6 +498,16 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if (!needCount(out.lightingSpatialSamples)) return false;
         } else if (arg == "--gi-rays") {
             if (!needCount(out.giRays)) return false;
+        } else if (arg == "--lighting-scene") {
+            auto v=needValue();if(!v)return false;
+            if(!LightingValidation::validScenario(*v)){error="--lighting-scene: unknown analytic scenario";return false;}out.lightingScene=*v;
+        } else if (arg == "--capture-linear" || arg == "--capture-linear-sequence") {
+            auto v=needValue();if(!v || v->empty() || v->starts_with("--")){error=std::string(arg)+": expected path";return false;}
+            (arg=="--capture-linear"?out.captureLinear:out.captureLinearSequence)=*v;
+        } else if (arg == "--export-reference-frame") {
+            if(!needCount(out.exportReferenceFrame))return false;
+        } else if (arg == "--capture-linear-frame") {
+            if(!needCount(out.captureLinearFrame))return false;
         } else if (arg == "--export-reference") {
             auto v = needValue(); if (!v || v->empty() || v->starts_with("--")) {
                 error = "--export-reference: expected output directory"; return false;
@@ -979,6 +990,13 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if ((out.shadows == ShadowMode::RT || out.directLighting != DirectLightingMode::Legacy || out.gi != GiMode::Off) && !out.rtEnabled) {
         error = "RT sun, local visibility and GI require --rt on"; return false;
     }
+    if(!out.lightingScene.empty() && (!out.bench || *out.bench!=5)){error="--lighting-scene requires --bench 6";return false;}
+    if(!out.captureLinear.empty() && !out.captureLinearSequence.empty()){error="Choose single linear capture or linear sequence";return false;}
+    if((!out.captureLinear.empty() || !out.captureLinearSequence.empty()) && (!out.visibility || !out.benchmark())){error="Linear capture requires --render-path visibility and --frames";return false;}
+    if(!out.exportReference.empty() && !out.benchmark()){error="Reference export requires --frames";return false;}
+    if(lighting && out.debugRtDeform){error="F9 diagnostic deformation does not publish raster bounds for lighting";return false;}
+    if(out.debugLightingCorrupt>=5 && out.directLighting!=DirectLightingMode::ReSTIR){error="PDF/light negative controls require --lighting restir";return false;}
+    if (out.shadowCache && out.shadows != ShadowMode::CSM) { error = "--shadow-cache on requires --shadows csm"; return false; }
     if ((out.contactShadows || out.shadowCache) && out.shadows == ShadowMode::Off) {
         error = "Contact/cache requires an enabled shadow signal"; return false;
     }

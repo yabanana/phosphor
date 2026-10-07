@@ -2,6 +2,7 @@
 
 #include "scene/texture_manager.h"
 #include "renderer/rt_check.h"
+#include "renderer/offline_reference.h"
 
 #include <Metal/Metal.hpp>
 #include <vector>
@@ -41,6 +42,7 @@ public:
     /// Present only for explicitly enabled diagnostics. Indexed exactly like
     /// the GPU bindless table; flushUploads() reads back generated mip bytes.
     [[nodiscard]] std::span<const RtCpuTexture> cpuTextures() const { return cpuTextures_; }
+    [[nodiscard]] std::vector<ReferenceTexture> referenceTextures() const;
 
 protected:
     u32 createTexture(const u8* rgba, u32 width, u32 height, bool sRGB) override;
@@ -50,6 +52,7 @@ private:
     bool keepCpuTextures_ = false;
     size_t cpuMipReadbackCount_ = 0;
     std::vector<RtCpuTexture> cpuTextures_;
+    std::vector<bool> srgb_;
     MetalContext&              context_;
     MTL::Buffer*               table_ = nullptr;
     std::vector<MTL::Texture*> textures_;

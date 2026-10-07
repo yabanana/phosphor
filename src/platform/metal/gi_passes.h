@@ -1,0 +1,17 @@
+#pragma once
+#include "platform/metal/direct_lighting_passes.h"
+namespace phosphor {
+class GiPasses {
+public:
+    GiPasses(MetalContext&,PipelineCache&,SceneRenderer&,AccelerationStructures&,ShadowPasses&,DirectLightingPasses&,const LaunchOptions&);
+    ~GiPasses();
+    void loadScene(const GpuScene&,const SceneStore&);
+    void prepareFrame(const GpuScene&,const SceneStore&,const ShadowPasses::Frame&);
+    void addToGraph(rg::RenderGraph&);
+    void bindFrame(MetalGraphExecutor&);
+    [[nodiscard]] rg::TextureRef irradiance() const;
+    [[nodiscard]] u64 version() const;
+private:
+    struct Impl;std::unique_ptr<Impl> impl_;
+};
+} // namespace phosphor

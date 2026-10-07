@@ -34,6 +34,9 @@
 #include "platform/metal/rt_visibility_check.h"
 #include "platform/metal/shadow_passes.h"
 #include "platform/metal/direct_lighting_passes.h"
+#include "platform/metal/gi_passes.h"
+#include "platform/metal/reference_snapshot.h"
+#include "platform/metal/linear_capture.h"
 #include "renderer/rt_check.h"
 #include "renderer/rt_proxy_transition.h"
 #include "renderer/cull_reference.h"
@@ -317,6 +320,13 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         shadows_ = std::make_unique<ShadowPasses>(*context_, *pipelines_, *renderer_, *mesh_, *visibility_, rt_.get(), options_);
     if (options_.directLighting != DirectLightingMode::Legacy || options_.gi != GiMode::Off)
         directLighting_=std::make_unique<DirectLightingPasses>(*context_,*pipelines_,*renderer_,*mesh_,*visibility_,*rt_,*shadows_,options_);
+    if(options_.gi!=GiMode::Off)gi_=std::make_unique<GiPasses>(*context_,*pipelines_,*renderer_,*rt_,*shadows_,*directLighting_,options_);
+    if(!options_.exportReference.empty())referenceSnapshot_=std::make_unique<ReferenceSnapshot>(*context_,*renderer_,options_.exportReference,options_.exportReferenceFrame);
+    if(!options_.captureLinear.empty()||!options_.captureLinearSequence.empty()) {
+        LinearCapture::Config capture;capture.path=options_.captureLinear;capture.sequence=options_.captureLinearSequence;
+        capture.frame=options_.captureLinearFrame;capture.every=options_.captureEvery;
+        linearCapture_=std::make_unique<LinearCapture>(*context_,*pipelines_,std::move(capture));
+    }
     ecs_        = std::make_unique<ECS>();
     gpuScene_   = std::make_unique<GpuScene>();
     {
@@ -401,6 +411,9 @@ Engine::~Engine() {
     if (context_) context_->waitIdle();
     rtChecker_.reset();
     rtVisibility_.reset();
+    referenceSnapshot_.reset();
+    linearCapture_.reset();
+    gi_.reset();
     directLighting_.reset();
     shadows_.reset();
     rt_.reset();
@@ -1069,12 +1082,13 @@ void Engine::switchTestBench(TestBenchType type) {
     gpuScene_->clear();
     // Textures belong to a bench; a fresh manager drops the previous set.
     textures_.reset();
-    textures_ = std::make_unique<MetalTextureManager>(*context_, options_.debugRt > 0);
+    textures_ = std::make_unique<MetalTextureManager>(*context_, options_.debugRt > 0 || !options_.exportReference.empty());
 
     currentBench_ = type;
     framesOnBench_ = 0;
     TestBenchParams benchParams;
     benchParams.scenePath = options_.scenePath;
+    benchParams.lightingScenario=options_.lightingScene;
     benchParams.instances         = options_.sceneInstances;
     benchParams.localLightCount=options_.localLightCount;benchParams.areaLights=options_.areaLights;benchParams.stationaryLights=options_.stationaryLights;
     benchParams.meshes            = options_.sceneMeshes;
@@ -1106,6 +1120,8 @@ void Engine::switchTestBench(TestBenchType type) {
         throw std::runtime_error(rtProxyTransition_->line());
     if (shadows_) shadows_->loadScene(*gpuScene_, *store_);
     if (directLighting_)directLighting_->loadScene(*gpuScene_,*store_);
+    if(gi_)gi_->loadScene(*gpuScene_,*store_);
+    if(referenceSnapshot_)referenceSnapshot_->loadScene(*gpuScene_,*store_,*textures_);
     if (options_.debugRtDeform && gpuScene_->getMeshCount()) {
         const u32 first = gpuScene_->meshInfos()[0].vertexOffset;
         const u32 end = gpuScene_->getMeshCount() > 1 ? gpuScene_->meshInfos()[1].vertexOffset
@@ -1534,12 +1550,23 @@ bool Engine::frame(float dt) {
         ShadowPasses::Frame sf;sf.slot=frame.slot;sf.index=frame.index;sf.view=currentView_;sf.scene=sceneEpoch_;
         sf.width=renderWidth;sf.height=renderHeight;sf.backingWidth=renderBackingWidth_;sf.backingHeight=renderBackingHeight_;
         sf.cut=viewCameraCut;sf.reset=options_.historyResetEvery && presentedFrames_%options_.historyResetEvery==0;
+        sf.motionSinCos=motionSinCos_;sf.motionSinCosValid=true;
         sf.constants=constants;sf.nearPlane=camera_->getNear();std::memcpy(sf.unjitteredVP,&unjittered[0][0],64);
         shadows_->prepareFrame(*store_,lights_,sf);
         if(directLighting_)directLighting_->prepareFrame(*gpuScene_,*store_,lights_,sf);
+        if(gi_)gi_->prepareFrame(*gpuScene_,*store_,sf);
         const u32 flags=(options_.shadows!=ShadowMode::Off?1u:0u) | (options_.directLighting!=DirectLightingMode::Legacy?2u:0u) | (options_.gi!=GiMode::Off?4u:0u);
         visibility_->prepareLighting(flags,shadows_->sunIndex());
     }
+    if(referenceSnapshot_) {
+        ShadowPasses::Frame ref;ref.slot=frame.slot;ref.index=frame.index;ref.width=renderWidth;ref.height=renderHeight;ref.constants=constants;
+        ReferenceCamera camera;std::memcpy(camera.position,glm::value_ptr(camPos),12);const auto front=camera_->getFront(),up=camera_->getUp();
+        std::memcpy(camera.direction,glm::value_ptr(front),12);std::memcpy(camera.up,glm::value_ptr(up),12);camera.width=renderWidth;camera.height=renderHeight;
+        camera.fovYRadians=camera_->getFovY();camera.nearPlane=camera_->getNear();camera.farPlane=0;
+        camera.jitterPixels[0]=temporal.jitter[0];camera.jitterPixels[1]=temporal.jitter[1];
+        referenceSnapshot_->prepareFrame(ref,camera,lights_,*store_,directLighting_.get());
+    }
+    if(linearCapture_)linearCapture_->prepareFrame(frame.slot,frame.index,renderWidth,renderHeight);
     if (!visibility_ && renderer_->usingFallback())
         frameFlags_ |= FrameFallbackDraw;
     const Clock::time_point s4 = Clock::now();
@@ -1567,7 +1594,7 @@ bool Engine::frame(float dt) {
                        renderBackingHeight_,
                        rt_ ? rt_->version() : 0,
                        rtVisibility_ && rtVisibility_->ready(),
-                       (shadows_ ? shadows_->version() : 0) ^ ((directLighting_ ? directLighting_->version() : 0)<<32)};
+                       (shadows_ ? shadows_->version() : 0) ^ ((directLighting_ ? directLighting_->version() : 0)<<32) ^ ((gi_?gi_->version():0)<<48) ^ ((referenceSnapshot_?referenceSnapshot_->version():0)<<8) ^ ((linearCapture_?linearCapture_->version():0)<<16)};
     if (!(key == graphKey_) || !graphExecutor_->valid()) {
         frameFlags_ |= FrameGraphCompile;
         if (key.width != graphKey_.width || key.height != graphKey_.height) frameFlags_ |= FrameResize;
@@ -1604,6 +1631,9 @@ bool Engine::frame(float dt) {
     if (rt_) rt_->bindResources(*graphExecutor_);
     if (shadows_) shadows_->bindFrame(*graphExecutor_);
     if (directLighting_)directLighting_->bindFrame(*graphExecutor_);
+    if(gi_)gi_->bindFrame(*graphExecutor_);
+    if(referenceSnapshot_)referenceSnapshot_->bindFrame(*graphExecutor_);
+    if(linearCapture_)linearCapture_->bindFrame(*graphExecutor_);
     if (rtVisibility_) rtVisibility_->bindFrame(*graphExecutor_);
     {
         PH_ZONE("Graph execute");
@@ -1862,6 +1892,13 @@ void Engine::onSceneCounters(u32 slot) {
             rtOpaqueAlphaTests_ += c.opaqueAlphaTests;
         }
     }
+    if(referenceSnapshot_)referenceSnapshot_->consume(slot);
+    if(linearCapture_)linearCapture_->consume(slot);
+    if(shadows_ && options_.debugLighting && (slotFrame_[slot]+1)%options_.debugLighting==0) {
+        ++lightingChecks_;const bool pass=shadows_->check(slot) && (!directLighting_ || directLighting_->check(slot));
+        if(!pass){++lightingFailures_;exitCode_=1;}
+        std::printf("LIGHTING check frame %llu | %s\n",static_cast<unsigned long long>(slotFrame_[slot]),pass?"PASS":"FAIL");
+    }
     lastCounters_ = renderer_->counters(slot);
     if (mesh_) {
         lastMeshletCounters_ = mesh_->counters(slot);
@@ -2046,9 +2083,11 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
             if (shadows_) {
                 shadows_->addToGraph(frameGraph_,color,depth);
                 if(directLighting_)directLighting_->addToGraph(frameGraph_,color,shadows_->depth());
-                visibility_->setLightingTextures(shadows_->mask(),directLighting_?directLighting_->direct():shadows_->zeroLighting(),shadows_->zeroLighting());
+                if(gi_)gi_->addToGraph(frameGraph_);
+                visibility_->setLightingTextures(shadows_->mask(),directLighting_?directLighting_->direct():shadows_->zeroLighting(),gi_?gi_->irradiance():shadows_->zeroLighting());
             }
             visibility_->addResolve(frameGraph_, color, shadows_?shadows_->depth():depth);
+            if(linearCapture_)linearCapture_->addToGraph(frameGraph_,visibility_->color());
             color = post_ ? post_->addToGraph(frameGraph_, *visibility_, drawableRef_, graphKey_.outputFormat)
                           : visibility_->addPresent(frameGraph_, drawableRef_);
             visibility_->addChecks(frameGraph_);
@@ -2088,6 +2127,8 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
         [this](PassContext& ctx) {
             renderer_->encode(static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder()), ctx.chunk(), ctx.chunkCount());
         });
+
+    if(referenceSnapshot_)referenceSnapshot_->addToGraph(frameGraph_);
 
     if (!scenario_ && !mesh_) color = overlays_->addToGraph(frameGraph_, color, width, height, overlayMode_, *renderer_);
 

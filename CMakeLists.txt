@@ -82,6 +82,9 @@ add_library(phosphor_core STATIC
     src/renderer/light_sampling.cpp
     src/renderer/stochastic_sampling.cpp
     src/renderer/local_light_scene.cpp
+    src/renderer/probe_grid.cpp
+    src/renderer/radiance_cache.cpp
+    src/renderer/offline_reference.cpp
     src/renderer/meshlet_cull_reference.cpp
     src/renderer/meshlet_check.cpp
     src/renderer/scene_check.cpp
@@ -109,6 +112,7 @@ add_library(phosphor_core STATIC
     src/scene/procedural.cpp
     src/scene/texture_manager.cpp
     src/testbench/cornell_box.cpp
+    src/testbench/lighting_validation.cpp
     src/testbench/culling_viz.cpp
     src/testbench/many_lights.cpp
     src/testbench/million_instances.cpp

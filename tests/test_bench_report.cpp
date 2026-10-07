@@ -34,7 +34,7 @@ TEST_CASE("bench report line: scene part is appended only when present") {
 TEST_CASE("F9 bench report emits all typed RT evidence only when present") {
     BenchReport report;
     auto document = nlohmann::json::parse(reportToJson(report));
-    CHECK(document.at("schema_version") == 9);
+    CHECK(document.at("schema_version") == BENCH_REPORT_SCHEMA_VERSION);
     CHECK_FALSE(document.contains("rt"));
     auto& rt = report.rt;
     rt.present = true;
@@ -119,4 +119,13 @@ TEST_CASE("F9 RT report keeps JSON valid for non-finite diagnostic samples") {
     CHECK(object.at("tlas_update_ms").at("mean") == 0);
     CHECK(object.at("probe_ms").at("max") == 0);
     CHECK(object.at("probe_ns_per_ray").at("p99") == 0);
+}
+
+TEST_CASE("F10-F12 report labels opt-in lighting and the denoise boundary") {
+    BenchReport r;auto json=nlohmann::json::parse(reportToJson(r));CHECK_FALSE(json.contains("lighting"));
+    r.lighting.present=true;r.lighting.shadows="rt";r.lighting.direct="restir";r.lighting.gi="ddgi";
+    r.lighting.checks=3;r.lighting.failures=1;json=nlohmann::json::parse(reportToJson(r));
+    CHECK(json["lighting"]["shadows"]=="rt");CHECK(json["lighting"]["direct"]=="restir");
+    CHECK(json["lighting"]["failures"]==1);CHECK(json["lighting"]["experimental"]==true);
+    CHECK(json["lighting"]["full_lighting_denoise"]=="F13_PENDING");
 }

@@ -348,7 +348,8 @@ struct LaunchOptions {
     u32 shadowMapResolution = 2048, lightingSeed = 1;
     u32 lightingCandidates = 8, lightingSpatialSamples = 4, giRays = 64;
     u32 debugLighting = 0, debugLightingCorrupt = 0;
-    std::string exportReference;
+    std::string exportReference, captureLinear, captureLinearSequence, lightingScene;
+    u32 exportReferenceFrame=0, captureLinearFrame=0;
     // F7/F8 renderer, temporal reconstruction, capture and bounded diagnostics.
     std::string scenePath;
     bool visibility = false, materialBinning = false; // measured baseline; specialization stays opt-in

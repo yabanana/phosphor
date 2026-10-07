@@ -1,4 +1,6 @@
 #include "platform/metal/metal_texture_manager.h"
+#include <cmath>
+#include <stdexcept>
 #include "platform/metal/gpu_memory.h"
 #include "platform/metal/metal_context.h"
 #include "core/log.h"
@@ -55,10 +57,23 @@ u32 MetalTextureManager::createTexture(const u8* rgba, u32 width, u32 height, bo
 
     const u32 index = static_cast<u32>(textures_.size());
     textures_.push_back(texture);
+    srgb_.push_back(sRGB);
     if (keepCpuTextures_) cpuTextures_.push_back(rtMakeCpuTexture(std::span(rgba, rowBytes * height), width, height));
     static_cast<MTL::ResourceID*>(table_->contents())[index] = texture->gpuResourceID();
     if (texture->mipmapLevelCount() > 1) pendingMips_.push_back(texture);
     return index;
+}
+
+std::vector<ReferenceTexture> MetalTextureManager::referenceTextures() const {
+    if(!keepCpuTextures_ || cpuTextures_.size()!=textures_.size())throw std::logic_error("Reference export requires retained exact texture texels");
+    std::vector<ReferenceTexture> result;result.reserve(cpuTextures_.size());
+    for(u32 i=0;i<cpuTextures_.size();++i) {
+        if(cpuTextures_[i].mips.empty())throw std::logic_error("Reference export texture has no base mip");
+        const auto& mip=cpuTextures_[i].mips.front();ReferenceTexture t;t.index=i;t.width=mip.width;t.height=mip.height;t.rgba.resize(mip.rgba8.size());
+        for(size_t k=0;k<mip.rgba8.size();++k){float x=float(mip.rgba8[k])/255.0f;if(srgb_[i] && k%4!=3)x=x<=0.04045f?x/12.92f:std::pow((x+0.055f)/1.055f,2.4f);t.rgba[k]=x;}
+        result.push_back(std::move(t));
+    }
+    return result;
 }
 
 void MetalTextureManager::flushUploads() {

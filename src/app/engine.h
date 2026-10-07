@@ -60,6 +60,9 @@ class RtProxyTransitionCheck;
 class RtVisibilityChecker;
 class ShadowPasses;
 class DirectLightingPasses;
+class GiPasses;
+class ReferenceSnapshot;
+class LinearCapture;
 
 // ---------------------------------------------------------------------------
 // Engine -- composition root for the macOS app.
@@ -146,6 +149,9 @@ private:
     std::unique_ptr<VisibilityRenderer> visibility_;
     std::unique_ptr<ShadowPasses> shadows_;
     std::unique_ptr<DirectLightingPasses> directLighting_;
+    std::unique_ptr<GiPasses> gi_;
+    std::unique_ptr<ReferenceSnapshot> referenceSnapshot_;
+    std::unique_ptr<LinearCapture> linearCapture_;
     u32 lightingChecks_=0,lightingFailures_=0;
     std::unique_ptr<PostProcessor> post_;
     u64 sceneEpoch_ = 0;
