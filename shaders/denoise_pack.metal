@@ -1,5 +1,6 @@
 #include <metal_stdlib>
 #include "renderer/metalfx_denoise_layout.h"
+#include "renderer/visibility_layout.h"
 using namespace metal;
 using namespace phosphor;
 
@@ -82,4 +83,11 @@ kernel void denoise_pack(constant GPUMetalfxDenoisePackParams& p [[buffer(0)]],
     packedReactive.write(float4(repaired?1.0f:(isfinite(react)?clamp(react,0.0f,1.0f):1.0f)),pixel);
     packedStrength.write(float4(repaired?1.0f:(isfinite(skip)?clamp(skip,0.0f,1.0f):1.0f)),pixel);
     if(all(pixel==uint2(0)))exposure.write(float4(p.exposureNormalization),uint2(0));
+}
+
+// Roughness is kept separate from signed world normal, as required by SDK.
+kernel void denoise_split_roughness(constant GPUVisibilityParams& p [[buffer(0)]],
+    texture2d<float,access::read> normalRoughness [[texture(0)]],texture2d<float,access::write> output [[texture(1)]],
+    uint2 pixel [[thread_position_in_grid]]) {
+    if(any(pixel>=uint2(p.width,p.height)))return;output.write(float4(normalRoughness.read(pixel).w),pixel);
 }

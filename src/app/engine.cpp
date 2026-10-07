@@ -38,6 +38,10 @@
 #include "platform/metal/gi_passes.h"
 #include "platform/metal/reference_snapshot.h"
 #include "platform/metal/linear_capture.h"
+#include "platform/metal/reflection_passes.h"
+#include "platform/metal/metalfx_denoise.h"
+#include "platform/metal/atmosphere_passes.h"
+#include "platform/metal/lighting_dispatch.h"
 #include "renderer/rt_check.h"
 #include "renderer/cull_reference.h"
 #include "renderer/gpu_scene.h"
@@ -238,9 +242,10 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         visibility_ = std::make_unique<VisibilityRenderer>(*context_, *pipelines_, *renderer_, *mesh_,
                                                            options_.materialBinning, options_.debugVisibility,
                                                            options_.tileResolve, options_.adaptiveShading,
-                                                           options_.shadows != ShadowMode::Off || options_.directLighting != DirectLightingMode::Legacy || options_.gi != GiMode::Off);
+                                                           options_.shadows != ShadowMode::Off || options_.directLighting != DirectLightingMode::Legacy || options_.gi != GiMode::Off || options_.reflections!=ReflectionMode::Off || options_.ao!=AoMode::Off || options_.lightingDenoise!=LightingDenoiseMode::Off || options_.atmosphere || options_.fog || options_.clouds);
     if (options_.post) {
         PostProcessor::Options po;
+        po.physicalFloat32=options_.atmosphere || options_.fog || options_.clouds;
         po.forceReset = options_.debugUpscalerReset;
         po.corruptExposure = options_.debugExposureCorrupt;
         po.jitterVariant = options_.jitterVariant;
@@ -314,11 +319,27 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         rtProbeTimes_.reserve(options_.frames);
         rtProbeNs_.reserve(options_.frames);
     }
-    if (options_.shadows != ShadowMode::Off || options_.directLighting != DirectLightingMode::Legacy || options_.gi != GiMode::Off)
+    if (options_.shadows != ShadowMode::Off || options_.directLighting != DirectLightingMode::Legacy || options_.gi != GiMode::Off || options_.reflections!=ReflectionMode::Off || options_.ao!=AoMode::Off || options_.lightingDenoise!=LightingDenoiseMode::Off || options_.atmosphere || options_.fog || options_.clouds)
         shadows_ = std::make_unique<ShadowPasses>(*context_, *pipelines_, *renderer_, *mesh_, *visibility_, rt_.get(), options_);
-    if (options_.directLighting != DirectLightingMode::Legacy || options_.gi != GiMode::Off)
+    if (options_.directLighting != DirectLightingMode::Legacy || options_.gi != GiMode::Off || options_.reflections!=ReflectionMode::Off || options_.ao!=AoMode::Off || options_.lightingDenoise!=LightingDenoiseMode::Off || options_.fog)
         directLighting_=std::make_unique<DirectLightingPasses>(*context_,*pipelines_,*renderer_,*mesh_,*visibility_,rt_.get(),*shadows_,options_);
     if(options_.gi!=GiMode::Off)gi_=std::make_unique<GiPasses>(*context_,*pipelines_,*renderer_,*rt_,*shadows_,*directLighting_,options_);
+    if(options_.reflections!=ReflectionMode::Off || options_.ao!=AoMode::Off || options_.lightingDenoise!=LightingDenoiseMode::Off)
+        reflections_=std::make_unique<ReflectionPasses>(*context_,*pipelines_,*renderer_,*directLighting_,rt_.get(),gi_.get(),options_);
+    if(options_.atmosphere || options_.fog || options_.clouds)
+        atmosphere_=std::make_unique<AtmospherePasses>(*context_,*pipelines_,*renderer_,directLighting_.get(),rt_.get(),gi_.get(),shadows_.get(),options_);
+    if(options_.lightingDenoise==LightingDenoiseMode::MetalFX) {
+        MetalfxDenoise::Options config;config.enabled=true;config.views=options_.temporalViews;
+        config.specularHitDistance=options_.reflections!=ReflectionMode::Off;
+        MetalfxDenoise::Factory factory;
+#ifdef PHOSPHOR_METALFX_DENOISED_GATEWAY_AVAILABLE
+        factory.request=[this](auto* desc){return pipelines_->requestTemporalDenoisedScaler(desc);};
+        factory.retire=[this](auto scaler){pipelines_->retireTemporalDenoisedScaler(std::move(scaler));};
+#endif
+        denoised_=std::make_unique<MetalfxDenoise>(*context_,*pipelines_,config,std::move(factory));
+        roughnessSplit_=pipelines_->request(lighting::kernel("denoise_split_roughness"));roughnessTable_=lighting::table(*context_,2,2);
+    }
+
     if(!options_.exportReference.empty())referenceSnapshot_=std::make_unique<ReferenceSnapshot>(*context_,*renderer_,options_.exportReference,options_.exportReferenceFrame,rt_.get());
     if(!options_.captureLinear.empty()||!options_.captureLinearSequence.empty()) {
         LinearCapture::Config capture;capture.path=options_.captureLinear;capture.sequence=options_.captureLinearSequence;
@@ -409,6 +430,10 @@ Engine::~Engine() {
     if (context_) context_->waitIdle();
     rtChecker_.reset();
     rtVisibility_.reset();
+    atmosphere_.reset();
+    reflections_.reset();
+    denoised_.reset();
+    if(roughnessTable_)roughnessTable_->release();
     referenceSnapshot_.reset();
     linearCapture_.reset();
     gi_.reset();
@@ -862,6 +887,13 @@ void Engine::finishBenchmark() {
         report.lighting.present=true; report.lighting.shadows=shadowModeName(options_.shadows);
         report.lighting.direct=directLightingModeName(options_.directLighting);report.lighting.gi=giModeName(options_.gi);
         report.lighting.reduced=options_.reducedLighting || options_.forceApple9;report.lighting.contact=options_.contactShadows;
+        report.lighting.reflections=options_.reflections==ReflectionMode::RT?"rt":options_.reflections==ReflectionMode::SSR?"ssr":options_.reflections==ReflectionMode::Probes?"probes":"off";
+        report.lighting.ao=options_.ao==AoMode::RTAO?"rtao":options_.ao==AoMode::GTAO?"gtao":"off";
+        report.lighting.denoiseRequested=options_.lightingDenoise==LightingDenoiseMode::MetalFX?"metalfx":options_.lightingDenoise==LightingDenoiseMode::Custom?"custom":"off";
+        report.lighting.denoiseEffective=denoised_&&denoised_->ready()?"metalfx":options_.lightingDenoise!=LightingDenoiseMode::Off?"custom":"off";
+        if(denoised_)report.lighting.denoiseFallback=denoised_->fallbackReason();
+        if(reflections_)report.lighting.probeSource=reflections_->probeSource();
+        report.lighting.atmosphere=options_.atmosphere;report.lighting.fog=options_.fog;report.lighting.clouds=options_.clouds;report.lighting.cloudFullRate=options_.cloudFullRate;
         report.lighting.cache=options_.shadowCache;report.lighting.seed=options_.lightingSeed;report.lighting.sunIndex=shadows_->sunIndex();
         report.lighting.candidates=options_.lightingCandidates;report.lighting.spatialSamples=options_.lightingSpatialSamples;report.lighting.giRays=options_.giRays;report.lighting.checks=lightingChecks_;report.lighting.failures=lightingFailures_;
     }
@@ -1079,7 +1111,7 @@ void Engine::switchTestBench(TestBenchType type) {
     framesOnBench_ = 0;
     TestBenchParams benchParams;
     benchParams.scenePath = options_.scenePath;
-    benchParams.lightingScenario=options_.lightingScene;
+    benchParams.lightingScenario=options_.lightingScene;benchParams.reflectionScenario=options_.reflectionScene;
     benchParams.instances         = options_.sceneInstances;
     benchParams.localLightCount=options_.localLightCount;benchParams.areaLights=options_.areaLights;benchParams.stationaryLights=options_.stationaryLights;
     benchParams.meshes            = options_.sceneMeshes;
@@ -1110,6 +1142,7 @@ void Engine::switchTestBench(TestBenchType type) {
     if (shadows_) shadows_->loadScene(*gpuScene_, *store_);
     if (directLighting_)directLighting_->loadScene(*gpuScene_,*store_);
     if(gi_)gi_->loadScene(*gpuScene_,*store_);
+    if(reflections_)reflections_->loadScene(*gpuScene_,*store_);
     if(referenceSnapshot_)referenceSnapshot_->loadScene(*gpuScene_,*store_,*textures_);
     if (options_.debugRtDeform && gpuScene_->getMeshCount()) {
         const u32 first = gpuScene_->meshInfos()[0].vertexOffset;
@@ -1319,6 +1352,13 @@ bool Engine::frame(float dt) {
         PH_ZONE("Scene sync");
         store_->sync(*ecs_, *gpuScene_);
         extractLights(*ecs_, lights_);
+        if(atmosphere_) {
+            const double clock=sceneTime_+(options_.timeJumpEveryN?double(presentedFrames_/options_.timeJumpEveryN)*options_.atmoDayLength*0.5:0);
+            const auto physical=atmosphere_->prepareLighting(clock,glm::dvec3(camera_->getPosition()));
+            std::erase_if(lights_,[](const auto& l){return l.type==LIGHT_DIRECTIONAL;});
+            lights_.insert(lights_.begin(),physical.begin(),physical.end());
+            if(gi_)gi_->setEnvironment(atmosphere_->environment());
+        }
         ecs_->endFrame();
     }
     // Material reassignment can invalidate an offline proxy's protection.
@@ -1363,6 +1403,7 @@ bool Engine::frame(float dt) {
     const u32 width = static_cast<u32>(target->width()), height = static_cast<u32>(target->height());
     currentView_ = post_ ? static_cast<u32>(presentedFrames_ % options_.temporalViews) : 0;
     const glm::vec3 offset(float(currentView_) * 2.0f, 0, 0);
+    if(options_.planetCameraHeight>=0){auto position=camera_->getPosition();position.y=options_.planetCameraHeight;camera_->setPosition(position);camera_->updateMatrices();}
     const glm::mat4 view = camera_->getView() * glm::translate(glm::mat4(1), -offset);
     const glm::mat4 unjittered = camera_->getProjection() * view;
     const glm::vec3 camPos = camera_->getPosition() + offset;
@@ -1534,7 +1575,19 @@ bool Engine::frame(float dt) {
         shadows_->prepareFrame(*store_,lights_,sf);
         if(directLighting_)directLighting_->prepareFrame(*gpuScene_,*store_,lights_,sf);
         if(gi_)gi_->prepareFrame(*gpuScene_,*store_,lights_,sf);
-        const u32 flags=(options_.shadows!=ShadowMode::Off?1u:0u) | (options_.directLighting!=DirectLightingMode::Legacy?2u:0u) | (options_.gi!=GiMode::Off?4u:0u);
+        if(denoised_) {
+            MetalfxDenoise::Frame df;df.slot=sf.slot;df.view=sf.view;df.index=sf.index;df.signalEpoch=sf.scene;
+            df.extent={renderWidth,renderHeight,width,height};std::memcpy(df.worldToView.data(),constants.view,64);
+            const auto projection=unjittered*glm::inverse(view);std::memcpy(df.viewToClip.data(),glm::value_ptr(projection),64);
+            df.jitterPixels={temporal.jitter[0],temporal.jitter[1]};df.cut=sf.cut;df.reset=sf.reset;
+            df.preExposure=(options_.atmosphere||options_.fog||options_.clouds)?1.0f/64.0f:1.0f;
+            denoised_->prepareFrame(df);
+        }
+        const bool custom=options_.lightingDenoise==LightingDenoiseMode::Custom || (denoised_&&!denoised_->ready());
+        if(reflections_)reflections_->prepareFrame(*store_,sf,custom,sceneEpoch_);
+        if(atmosphere_)atmosphere_->prepareFrame(sf,rt_?rt_->geometryRevision():gpuScene_->geometryVersion(),store_->structureVersion());
+        const u32 flags=(options_.shadows!=ShadowMode::Off?1u:0u) | (options_.directLighting!=DirectLightingMode::Legacy?2u:0u) | (options_.gi!=GiMode::Off?4u:0u) |
+                        (options_.reflections!=ReflectionMode::Off?8u:0u) | (reflections_?16u:0u);
         visibility_->prepareLighting(flags,shadows_->sunIndex());
     }
     if(referenceSnapshot_) {
@@ -1575,7 +1628,8 @@ bool Engine::frame(float dt) {
                        rtVisibility_ && rtVisibility_->ready(),
                        shadows_?shadows_->version():0,directLighting_?directLighting_->version():0,
                        gi_?gi_->version():0,referenceSnapshot_?referenceSnapshot_->version():0,
-                       linearCapture_?linearCapture_->version():0,renderWidth,renderHeight};
+                       linearCapture_?linearCapture_->version():0,renderWidth,renderHeight,
+                       reflections_?reflections_->version():0,denoised_?denoised_->version():0,atmosphere_?atmosphere_->version():0};
     if (!(key == graphKey_) || !graphExecutor_->valid()) {
         frameFlags_ |= FrameGraphCompile;
         if (key.width != graphKey_.width || key.height != graphKey_.height) frameFlags_ |= FrameResize;
@@ -1613,6 +1667,9 @@ bool Engine::frame(float dt) {
     if (shadows_) shadows_->bindFrame(*graphExecutor_);
     if (directLighting_)directLighting_->bindFrame(*graphExecutor_);
     if(gi_)gi_->bindFrame(*graphExecutor_);
+    if(reflections_)reflections_->bindFrame(*graphExecutor_);
+    if(atmosphere_)atmosphere_->bindFrame(*graphExecutor_);
+    if(denoised_)denoised_->bindFrame(*graphExecutor_);
     if(referenceSnapshot_)referenceSnapshot_->bindFrame(*graphExecutor_);
     if(linearCapture_)linearCapture_->bindFrame(*graphExecutor_);
     if (rtVisibility_) rtVisibility_->bindFrame(*graphExecutor_);
@@ -1875,8 +1932,9 @@ void Engine::onSceneCounters(u32 slot) {
     }
     if(referenceSnapshot_)referenceSnapshot_->consume(slot);
     if(linearCapture_)linearCapture_->consume(slot);
+    if(denoised_)for(const auto& check:denoised_->drainPackChecks())if(check.available&&!check.ok){++lightingFailures_;exitCode_=1;}
     if(shadows_ && options_.debugLighting && (slotFrame_[slot]+1)%options_.debugLighting==0) {
-        ++lightingChecks_;const bool pass=shadows_->check(slot) && (!directLighting_ || directLighting_->check(slot)) && (!gi_ || gi_->check(slot));
+        ++lightingChecks_;const bool pass=shadows_->check(slot) && (!directLighting_ || directLighting_->check(slot)) && (!gi_ || gi_->check(slot)) && (!reflections_ || reflections_->check(slot)) && (!atmosphere_ || atmosphere_->check(slot));
         if(!pass){++lightingFailures_;exitCode_=1;}
         std::printf("LIGHTING check frame %llu | %s\n",static_cast<unsigned long long>(slotFrame_[slot]),pass?"PASS":"FAIL");
     }
@@ -2066,9 +2124,20 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
                 visibility_->setLightingTextures(shadows_->mask(),directLighting_?directLighting_->direct():shadows_->zeroLighting(),gi_?gi_->irradiance():shadows_->zeroLighting());
             }
             visibility_->addResolve(frameGraph_, color, shadows_?shadows_->depth():depth);
+            if(reflections_)visibility_->replaceColor(reflections_->addToGraph(frameGraph_,visibility_->color(),visibility_->depth()));
+            if(atmosphere_)visibility_->replaceColor(atmosphere_->addToGraph(frameGraph_,visibility_->color(),visibility_->depth()));
+            rg::TextureRef reconstructed;
+            if(denoised_) {
+                frameGraph_.addPass("Denoised roughness channel",PassType::Compute,[&](PassBuilder& b){b.read(visibility_->normalRoughness(),Usage::ShaderRead,StageDispatch);roughnessRef_=b.createTexture("Denoised perceptual roughness",{Format::R16Float,graphKey_.logicalWidth,graphKey_.logicalHeight});roughnessRef_=b.write(roughnessRef_,Usage::ShaderWrite,StageDispatch);},[this](PassContext& ctx){roughnessTable_->setAddress(visibility_->paramsAddress(),0);roughnessTable_->setTexture(static_cast<MTL::Texture*>(ctx.texture(visibility_->normalRoughness()))->gpuResourceID(),0);roughnessTable_->setTexture(static_cast<MTL::Texture*>(ctx.texture(roughnessRef_))->gpuResourceID(),1);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),*pipelines_,roughnessSplit_,roughnessTable_,graphKey_.logicalWidth,graphKey_.logicalHeight);});
+                MetalfxDenoise::Inputs in;in.noisyColor=visibility_->color();in.customFallback=visibility_->color();in.depth=visibility_->depth();in.motion=directLighting_->motion();
+                in.diffuseAlbedo=visibility_->diffuseAlbedo();in.specularAlbedo=visibility_->specularAlbedo();in.worldNormal=visibility_->normalRoughness();in.roughness=roughnessRef_;
+                in.reactiveMask=visibility_->reactiveMask();if(reflections_)in.hitDistance=reflections_->hitDistance();
+                const auto selected=denoised_->addToGraph(frameGraph_,in);if(denoised_->ready())reconstructed=selected;
+            }
             if(linearCapture_)linearCapture_->addToGraph(frameGraph_,options_.captureLinearSignal==1?gi_->referenceDiffuse():
-                                                       options_.captureLinearSignal==2?directLighting_->direct():visibility_->color());
-            color = post_ ? post_->addToGraph(frameGraph_, *visibility_, drawableRef_, graphKey_.outputFormat)
+                                                       options_.captureLinearSignal==2?directLighting_->direct():options_.captureLinearSignal==3?reflections_->rawSpecular():
+                                                       options_.captureLinearSignal==4?reflections_->rawAO():visibility_->color());
+            color = post_ ? post_->addToGraph(frameGraph_, *visibility_, drawableRef_, graphKey_.outputFormat,reconstructed)
                           : visibility_->addPresent(frameGraph_, drawableRef_);
             visibility_->addChecks(frameGraph_);
             visibility_->addPoseSnapshot(frameGraph_);

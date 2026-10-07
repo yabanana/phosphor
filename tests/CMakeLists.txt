@@ -49,10 +49,12 @@ add_executable(phosphor_tests
     test_gi.cpp
     test_gi_lighting_epoch.cpp
     test_lighting_validation.cpp
+    test_reflection_validation.cpp
     test_reflections.cpp
     test_denoise.cpp
     test_atmosphere.cpp
     test_volumes.cpp
+    test_metalfx_denoise_contract.cpp
     test_scene_check.cpp
     test_scene_extract.cpp
     test_scene_store.cpp

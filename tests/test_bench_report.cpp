@@ -127,5 +127,5 @@ TEST_CASE("F10-F12 report labels opt-in lighting and the denoise boundary") {
     r.lighting.checks=3;r.lighting.failures=1;json=nlohmann::json::parse(reportToJson(r));
     CHECK(json["lighting"]["shadows"]=="rt");CHECK(json["lighting"]["direct"]=="restir");
     CHECK(json["lighting"]["failures"]==1);CHECK(json["lighting"]["experimental"]==true);
-    CHECK(json["lighting"]["full_lighting_denoise"]=="F13_PENDING");
+    CHECK(json["lighting"]["full_lighting_denoise"]=="F13_SOURCE_UNVERIFIED");
 }

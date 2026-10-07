@@ -120,6 +120,7 @@ add_library(phosphor_core STATIC
     src/scene/texture_manager.cpp
     src/testbench/cornell_box.cpp
     src/testbench/lighting_validation.cpp
+    src/testbench/reflection_validation.cpp
     src/testbench/culling_viz.cpp
     src/testbench/many_lights.cpp
     src/testbench/million_instances.cpp

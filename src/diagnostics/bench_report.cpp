@@ -193,7 +193,12 @@ static std::string lightingToJson(const LightingReport& l) {
         ", \"contact\": "+(l.contact?"true":"false")+", \"shadow_cache\": "+(l.cache?"true":"false")+
         ", \"candidate_count\": "+std::to_string(l.candidates)+", \"spatial_samples\": "+std::to_string(l.spatialSamples)+
         ", \"gi_rays\": "+std::to_string(l.giRays)+", \"checks\": "+std::to_string(l.checks)+
-        ", \"failures\": "+std::to_string(l.failures)+", \"full_lighting_denoise\": \"F13_PENDING\"}";
+        ", \"failures\": "+std::to_string(l.failures)+", \"full_lighting_denoise\": \"F13_SOURCE_UNVERIFIED\", \"reflections\": \""+jsonEscape(l.reflections)+
+        "\", \"ao\": \""+jsonEscape(l.ao)+"\", \"denoise_requested\": \""+jsonEscape(l.denoiseRequested)+
+        "\", \"denoise_effective\": \""+jsonEscape(l.denoiseEffective)+"\", \"denoise_fallback\": \""+jsonEscape(l.denoiseFallback)+
+        "\", \"probe_source\": \""+jsonEscape(l.probeSource)+"\", \"atmosphere\": "+(l.atmosphere?"true":"false")+
+        ", \"fog\": "+(l.fog?"true":"false")+", \"clouds\": "+(l.clouds?"true":"false")+
+        ", \"cloud_full_rate\": "+(l.cloudFullRate?"true":"false")+"}";
 }
 
 std::string reportToJson(const BenchReport& r) {

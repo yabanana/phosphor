@@ -354,7 +354,7 @@ struct LaunchOptions {
     u32 shadowMapResolution = 2048, lightingSeed = 1;
     u32 lightingCandidates = 8, lightingSpatialSamples = 4, giRays = 64;
     u32 debugLighting = 0, debugLightingCorrupt = 0, debugGiCorrupt=0;
-    std::string exportReference, captureLinear, captureLinearSequence, lightingScene;
+    std::string exportReference, captureLinear, captureLinearSequence, lightingScene,reflectionScene;
     bool giProbeAnchor=false;
     float giAnchor[3]{},giSpacing=0;
     u32 giGrid[3]{};

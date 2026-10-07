@@ -1,5 +1,6 @@
 #include "testbench/testbench.h"
 #include "testbench/lighting_validation.h"
+#include "testbench/reflection_validation.h"
 #include "testbench/torus_demo.h"
 #include "testbench/pbr_grid.h"
 #include "testbench/stress_test.h"
@@ -58,6 +59,7 @@ std::unique_ptr<TestBench> createTestBench(TestBenchType type, const TestBenchPa
             return std::make_unique<SceneViewer>(params.scenePath);
         case TestBenchType::ManyLights:  return std::make_unique<ManyLights>(params);
         case TestBenchType::CornellBox:
+            if(!params.reflectionScenario.empty())return std::make_unique<ReflectionValidation>(params.reflectionScenario);
             if(!params.lightingScenario.empty())return std::make_unique<LightingValidation>(params.lightingScenario);
             return std::make_unique<CornellBox>();
         case TestBenchType::CullingViz:  return std::make_unique<CullingViz>(params.cullingScript);

@@ -1,5 +1,6 @@
 #include "core/launch_options.h"
 #include "testbench/lighting_validation.h"
+#include "testbench/reflection_validation.h"
 
 #include <charconv>
 #include <cmath>
@@ -529,6 +530,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
                 if(!parseU32(text,out.giGrid[i])||out.giGrid[i]<2||out.giGrid[i]>32||(i<2?end==std::string_view::npos:end!=std::string_view::npos)){error="--gi-grid: expected 2..32 x 2..32 x 2..32";return false;}start=end+1;}
         } else if (arg == "--gi-rays") {
             if (!needCount(out.giRays)) return false;
+        } else if (arg == "--reflection-scene") {
+            auto v=needValue();if(!v)return false;if(!ReflectionValidation::validScenario(*v)){error="--reflection-scene: unknown scenario";return false;}out.reflectionScene=*v;
         } else if (arg == "--lighting-scene") {
             auto v=needValue();if(!v)return false;
             if(!LightingValidation::validScenario(*v)){error="--lighting-scene: unknown analytic scenario";return false;}out.lightingScene=*v;
@@ -540,7 +543,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if(*v=="hdr")out.captureLinearSignal=0;
             else if(*v=="indirect-diffuse")out.captureLinearSignal=1;
             else if(*v=="direct")out.captureLinearSignal=2;
-            else{error="--capture-linear-signal: expected hdr, indirect-diffuse or direct";return false;}
+            else if(*v=="specular")out.captureLinearSignal=3;else if(*v=="ao")out.captureLinearSignal=4;
+            else{error="--capture-linear-signal: expected hdr, indirect-diffuse, direct, specular or ao";return false;}
         } else if (arg == "--export-reference-frame") {
             if(!needCount(out.exportReferenceFrame))return false;
         } else if (arg == "--capture-linear-frame") {
@@ -1031,6 +1035,9 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if ((out.shadows == ShadowMode::RT || out.directLighting != DirectLightingMode::Legacy || out.gi != GiMode::Off) && !out.rtEnabled) {
         error = "RT sun, local visibility and GI require --rt on"; return false;
     }
+    if(!out.reflectionScene.empty() && (!out.bench||*out.bench!=5||!out.lightingScene.empty())){error="--reflection-scene requires --bench 6 and exclusive scene fixture";return false;}
+    if(out.captureLinearSignal==3 && out.reflections==ReflectionMode::Off){error="Specular capture requires --reflections";return false;}
+    if(out.captureLinearSignal==4 && out.ao==AoMode::Off){error="AO capture requires --ao";return false;}
     if(!out.lightingScene.empty() && (!out.bench || *out.bench!=5)){error="--lighting-scene requires --bench 6";return false;}
     if(!out.captureLinear.empty() && !out.captureLinearSequence.empty()){error="Choose single linear capture or linear sequence";return false;}
     if((!out.captureLinear.empty() || !out.captureLinearSequence.empty()) && (!out.visibility || !out.benchmark())){error="Linear capture requires --render-path visibility and --frames";return false;}

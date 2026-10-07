@@ -41,7 +41,7 @@ kernel void di_receiver_pack(constant FrameConstants& frame [[buffer(0)]],consta
     const float4 pos=world.read(pixel),g=geometric.read(pixel),s=shading.read(pixel),a=albedo.read(pixel);
     if(dot(s.xyz,s.xyz)<=0)return;
     GPUDISurface out{};const float3 v=normalize(float3(frame.cameraPosition[0],frame.cameraPosition[1],frame.cameraPosition[2])-pos.xyz);
-    for(uint c=0;c<3;++c){out.position[c]=pos[c];out.geometricNormal[c]=g[c];out.shadingNormal[c]=s[c];out.albedo[c]=a[c];out.viewDirection[c]=v[c];}
+    for(uint c=0;c<3;++c){out.position[c]=pos[c];out.geometricNormal[c]=normalize(g.xyz)[c];out.shadingNormal[c]=normalize(s.xyz)[c];out.albedo[c]=a[c];out.viewDirection[c]=v[c];}
     out.depth=-(guideMatrix(frame.view)*float4(pos.xyz,1)).z;out.roughness=s.w;out.metallic=a.w;
     out.materialRevision=p.historyEpoch;out.instanceSlot=key.x;out.instanceGeneration=key.y;out.pad[0]=as_type<uint>(occlusion.read(pixel).x);out.valid=pos.w>0 && g.w>0 && dot(s.xyz,s.xyz)>0;
     surfaces[pixel.y*p.width+pixel.x]=out;

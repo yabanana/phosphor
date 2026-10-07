@@ -62,6 +62,9 @@ class DirectLightingPasses;
 class GiPasses;
 class ReferenceSnapshot;
 class LinearCapture;
+class ReflectionPasses;
+class MetalfxDenoise;
+class AtmospherePasses;
 
 // ---------------------------------------------------------------------------
 // Engine -- composition root for the macOS app.
@@ -146,6 +149,12 @@ private:
     std::unique_ptr<ShadowPasses> shadows_;
     std::unique_ptr<DirectLightingPasses> directLighting_;
     std::unique_ptr<GiPasses> gi_;
+    std::unique_ptr<ReflectionPasses> reflections_;
+    std::unique_ptr<MetalfxDenoise> denoised_;
+    std::unique_ptr<AtmospherePasses> atmosphere_;
+    pipe::PipelineHandle roughnessSplit_;
+    MTL4::ArgumentTable* roughnessTable_=nullptr;
+    rg::TextureRef roughnessRef_;
     std::unique_ptr<ReferenceSnapshot> referenceSnapshot_;
     std::unique_ptr<LinearCapture> linearCapture_;
     u32 lightingChecks_=0,lightingFailures_=0;
@@ -283,6 +292,7 @@ private:
         bool rtVisibilityReady = false;
         u64 shadowResources=0,directResources=0,giResources=0,referenceResources=0,linearResources=0;
         u32 logicalWidth=0,logicalHeight=0;
+        u64 reflectionResources=0,denoiseResources=0,atmosphereResources=0;
         bool operator==(const GraphKey&) const = default;
     };
     rg::RenderGraph frameGraph_;
