@@ -16,12 +16,18 @@ inline float3 giAreaIntegrand(float3 x,float3 n,GPUGiReservoir r) {
     return max(L,0.0f)*(cosX*cosY/(M_PI_F*r2));
 }
 inline void giReservoirFinalize(thread GPUGiReservoir& r) {
+    if(!isfinite(r.weightSum)||!isfinite(r.target)||r.weightSum<0.0f||r.target<0.0f) {
+        r.W=0.0f;r.flags=0u;return; // Invalid numeric data is not a zero proposal.
+    }
     r.W=r.M && r.target>0.0f?r.weightSum/(float(r.M)*r.target):0.0f;
-    if(!isfinite(r.W) || r.W<=0.0f) {r.W=0.0f;r.flags&=~GI_SAMPLE_VALID;}
+    if(!isfinite(r.W)){r.W=0.0f;r.flags=0u;return;}
+    if(r.W<=0.0f) {r.W=0.0f;r.flags&=~GI_SAMPLE_VALID;}
     if(!r.M)r.flags=0u;
 }
 inline bool giReusable(GPUGiReservoir r,constant GPUProbeGridParams& p,const device GPUInstance* instances) {
-    bool proposal=!p.reset && (r.flags&(GI_SAMPLE_VALID|GI_PROPOSAL_VALID)) && r.M && r.age<32u &&
+    bool proposal=!p.reset && isfinite(r.W)&&isfinite(r.weightSum)&&isfinite(r.target) &&
+        r.W>=0.0f&&r.weightSum>=0.0f&&r.target>=0.0f &&
+        (r.flags&(GI_SAMPLE_VALID|GI_PROPOSAL_VALID)) && r.M && r.age<32u &&
         r.geometryRevision==p.geometryRevision && r.lightRevision==p.lightRevision &&
         r.materialRevision==p.materialRevision && r.viewRevision==p.viewRevision;
     if(!proposal)return false;
@@ -44,6 +50,8 @@ inline bool giReconnectVisible(float3 x,float3 n,GPUGiReservoir r,instance_accel
 }
 inline void giReservoirMerge(thread GPUGiReservoir& dst,GPUGiReservoir source,float target,bool visible,float random) {
     if(!(source.flags&(GI_SAMPLE_VALID|GI_PROPOSAL_VALID)) || !source.M) return;
+    if(!isfinite(source.W)||!isfinite(source.weightSum)||!isfinite(source.target) ||
+        source.W<0.0f||source.weightSum<0.0f||source.target<0.0f)return;
     uint m=min(source.M,32u),total=dst.M+m;
     if(total<dst.M) return;
     dst.M=total;

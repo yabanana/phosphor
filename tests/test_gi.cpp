@@ -221,6 +221,10 @@ TEST_CASE("F12 zero-proposal history preserves the IID two-sample Bernoulli mean
     GPUProbeGridParams p{};GiReceiver x;
     CHECK(giHistoryCompatible(zero,p,x,0.1f));
     ++p.viewRevision;CHECK_FALSE(giHistoryCompatible(zero,p,x,0.1f));
+    auto corrupt=zero;corrupt.weightSum=std::numeric_limits<float>::infinity();giFinalize(corrupt);
+    CHECK(corrupt.flags==0); // Do not reinterpret numeric poison as valid zero.
+    GPUGiReservoir destination{};
+    CHECK_FALSE(giMerge(destination,corrupt,0,false,0));CHECK(destination.M==0);
 }
 TEST_CASE("F12 reservoir zero-contribution paths count and bounded history rejects revisions") {
     GiReceiver x;auto sample=secondary();auto c=giConnection(x,sample,true);
