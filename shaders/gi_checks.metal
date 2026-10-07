@@ -115,6 +115,18 @@ kernel void gi_check_state(constant GPUProbeGridParams& p [[buffer(0)]],
                     abs(r.W-expected)>8e-5f*max(abs(expected),1e-20f);
                 float pdfTolerance=8e-5f*max(r.proposalArea,1e-20f);
                 bad=bad || abs(r.sourceProposalArea-r.proposalArea)>pdfTolerance;
+                // Independently rebuild the selected AREA target from stored
+                // current receiver and secondary endpoint. This is intentionally
+                // not a call to giAreaIntegrand or the reservoir helper.
+                float3 delta=y-x;float distance2=dot(delta,delta),expectedTarget=0.0f;
+                if(isfinite(distance2) && distance2>1e-12f) {
+                    float3 wi=delta*rsqrt(distance2);
+                    float cosX=max(0.0f,dot(float3(r.sourceNormal[0],r.sourceNormal[1],r.sourceNormal[2]),wi));
+                    float cosY=max(0.0f,dot(float3(r.normal[0],r.normal[1],r.normal[2]),-wi));
+                    expectedTarget=dot(L,float3(0.2126f,0.7152f,0.0722f))*cosX*cosY/(M_PI_F*distance2);
+                }
+                bad=bad || !isfinite(expectedTarget) || expectedTarget<=0.0f ||
+                    abs(r.target-expectedTarget)>8e-5f*max(expectedTarget,1e-20f);
             } else {
                 // A zero-contribution path may have M>0 and a finite proposal.
                 // It must not carry a positive final normalization into shading.
