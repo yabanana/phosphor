@@ -70,6 +70,7 @@ MTL::PixelFormat toMetalFormat(rg::Format format) {
     case rg::Format::RG32Float:            return MTL::PixelFormatRG32Float;
     case rg::Format::RGBA32Float:          return MTL::PixelFormatRGBA32Float;
     case rg::Format::R32Uint:              return MTL::PixelFormatR32Uint;
+    case rg::Format::RGBA32Uint:           return MTL::PixelFormatRGBA32Uint;
     case rg::Format::RG11B10Float:         return MTL::PixelFormatRG11B10Float;
     case rg::Format::RGB10A2Unorm:         return MTL::PixelFormatRGB10A2Unorm;
     case rg::Format::Depth16Unorm:         return MTL::PixelFormatDepth16Unorm;

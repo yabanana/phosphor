@@ -22,7 +22,7 @@ class PassContext;
 class VisibilityRenderer {
   public:
     VisibilityRenderer(MetalContext &context, PipelineCache &pipelines, SceneRenderer &scene, MeshRenderer &mesh,
-                       bool binning, bool checks = false, bool tileResolve = false, bool adaptive = false);
+                       bool binning, bool checks = false, bool tileResolve = false, bool adaptive = false, bool lighting = false);
     ~VisibilityRenderer();
     void prepareFrame(u32 slot, u32 width, u32 height, u32 outputWidth, u32 outputHeight, const SceneStore &store,
                       std::array<u32, 3> defaultTextures, float exposure, u32 debugMode,
@@ -42,6 +42,13 @@ class VisibilityRenderer {
     [[nodiscard]] const std::array<u32, ExposureBins> &checkedHistogramLow() const { return checkedHistogramLow_; }
     [[nodiscard]] const std::array<u32, ExposureBins> &checkedHistogramHigh() const { return checkedHistogramHigh_; }
     void addPoseSnapshot(rg::RenderGraph &graph);
+    void resetGraphRefs() { poses_ = {}; }
+    void prepareLighting(u32 flags, u32 sunIndex);
+    void setLightingTextures(rg::TextureRef sun, rg::TextureRef direct, rg::TextureRef gi);
+    rg::BufferRef importPoseHistory(rg::RenderGraph& graph);
+    [[nodiscard]] MTL::GPUAddress paramsAddress() const { return paramsAddress_; }
+    [[nodiscard]] MTL::GPUAddress temporalAddress() const { return temporalAddress_; }
+    [[nodiscard]] MTL::GPUAddress previousPoseAddress() const { return previousInstances_[view_]->gpuAddress(); }
     rg::TextureRef addPresent(rg::RenderGraph &graph, rg::TextureRef drawable);
     [[nodiscard]] rg::TextureRef color() const { return outputs_[0]; }
     [[nodiscard]] rg::TextureRef visibility() const { return visibility_; }
@@ -59,6 +66,9 @@ class VisibilityRenderer {
     SceneRenderer &scene_;
     MeshRenderer &mesh_;
     bool binning_;
+    bool lighting_ = false;
+    MTL::GPUAddress lightingAddress_ = 0;
+    rg::TextureRef sun_, direct_, indirect_;
     bool tileResolve_ = false;
     bool adaptive_ = false;
     std::array<MTL::Buffer *, 4> shadingHistory_{};

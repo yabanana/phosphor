@@ -92,6 +92,7 @@ struct SurfaceVertexOut {
     float4 unjitteredClip;
     float4 previousClip;
     uint historyValid [[flat]];
+    uint instanceSlot [[flat]];
 };
 
 vertex SurfaceVertexOut forward_surface_vs(uint vertexId [[vertex_id]], uint instanceId [[instance_id]],
@@ -124,6 +125,7 @@ vertex SurfaceVertexOut forward_surface_vs(uint vertexId [[vertex_id]], uint ins
     out.unjitteredClip = temporalMatrix(temporal.currentViewProjection) * world;
     out.previousClip = out.unjitteredClip;
     out.historyValid = 0;
+    out.instanceSlot = visible[instanceId];
     if (temporal.historyValid) {
         const device GPUInstance &old = previous[visible[instanceId]];
         out.historyValid = old.generation == gi.generation && (old.flags & INSTANCE_FLAG_VALID);
@@ -132,6 +134,28 @@ vertex SurfaceVertexOut forward_surface_vs(uint vertexId [[vertex_id]], uint ins
                                float4(v.px, v.py, v.pz, 1);
     }
     return out;
+}
+
+// F10 receiver prepass: the indexed overflow ICB fills receivers BEFORE RT.
+// No background V-buffer mask is ever used to shade an overflow receiver.
+struct ShadowReceiverOutput {
+    float4 point [[color(0)]];
+    half4 geometricNormal [[color(1)]];
+    uint4 key [[color(2)]];
+};
+fragment ShadowReceiverOutput forward_shadow_receiver_fs(
+    SurfaceVertexOut in [[stage_in]], uint primitive [[primitive_id]],
+    const device GPUInstance* instances [[buffer(2)]],
+    const device GPUMaterial* materials [[buffer(3)]],
+    const device TextureHandle* textures [[buffer(5)]]) {
+    const device auto& material = materials[in.materialIndex];
+    const float alpha = material.baseColor[3] * float(sampleOr(textures, material.baseColorTex, in.uv,
+                                                             half4(1), dfdx(in.uv), dfdy(in.uv)).a);
+    if (alpha < material.alphaCutoff) discard_fragment();
+    const float3 n = cross(dfdx(in.worldPos), dfdy(in.worldPos));
+    if (dot(n,n) < 1e-20f) discard_fragment();
+    return {float4(in.worldPos, 1), half4(half3(normalize(n)), 1),
+            uint4(in.instanceSlot, instances[in.instanceSlot].generation, primitive, in.materialIndex)};
 }
 
 // F7 overflow fallback: the existing GPU-built indexed ICB writes the same
@@ -160,6 +184,44 @@ fragment ForwardSurfaceOutput forward_surface_fs(SurfaceVertexOut in [[stage_in]
                          in.mirrored,
                          frontFacing};
     const ShadingResult value = shadeSurface(surface, frame, materials, lights, textures);
+    if (value.alpha < materials[in.materialIndex].alphaCutoff)
+        discard_fragment();
+    ForwardSurfaceOutput out;
+    const uint debugMode = kDebugModeSpecialised ? kDebugMode : frame.debugMode;
+    out.color = half4(half3(debugMode == 1   ? value.normal * 0.5f + 0.5f
+                            : debugMode == 2 ? value.baseColor
+                                             : value.color),
+                      1.0h);
+    out.normalRoughness = half4(half3(value.normal), half(value.roughness));
+    out.diffuseAlbedo = half4(half3(value.diffuseAlbedo), 1.0h);
+    out.specularAlbedo = half4(half3(value.specularAlbedo), 1.0h);
+    out.motion = half2(temporalMotion(in.unjitteredClip, in.previousClip, temporal, in.historyValid != 0));
+    out.reactive = in.historyValid == 0 ? 1.0h : materials[in.materialIndex].alphaCutoff > 0 ? 0.75h : 0.0h;
+    return out;
+}
+fragment ForwardSurfaceOutput forward_surface_lit_fs(SurfaceVertexOut in [[stage_in]], bool frontFacing [[front_facing]],
+                                                 constant FrameConstants &frame [[buffer(0)]],
+                                                 const device GPUMaterial *materials [[buffer(3)]],
+                                                 const device GPULight *lights [[buffer(4)]],
+                                                 const device TextureHandle *textures [[buffer(5)]],
+                                                 constant GPUTemporalParams &temporal [[buffer(8)]],
+    constant GPUResolveLightingParams& lighting [[buffer(9)]],
+    texture2d<float,access::read> sun [[texture(0)]],
+    texture2d<float,access::read> direct [[texture(1)]],
+    texture2d<float,access::read> irradiance [[texture(2)]]) {
+    SurfaceInput surface{in.worldPos,
+                         in.normal,
+                         in.tangent,
+                         in.uv,
+                         dfdx(in.uv) * exp2(temporal.mipBias),
+                         dfdy(in.uv) * exp2(temporal.mipBias),
+                         in.materialIndex,
+                         in.mirrored,
+                         frontFacing};
+    const ShadingResult value = shadeSurface(surface, frame, materials, lights, textures, true,
+        (lighting.flags & 1u) ? sun.read(uint2(in.position.xy)).x : 1.0f, lighting.sunIndex,
+        (lighting.flags & 2u) != 0, (lighting.flags & 2u) ? direct.read(uint2(in.position.xy)).xyz : float3(0),
+        (lighting.flags & 4u) != 0, (lighting.flags & 4u) ? irradiance.read(uint2(in.position.xy)).xyz : float3(0));
     if (value.alpha < materials[in.materialIndex].alphaCutoff)
         discard_fragment();
     ForwardSurfaceOutput out;
