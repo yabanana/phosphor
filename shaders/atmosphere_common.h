@@ -74,7 +74,7 @@ static float3 atmoMultiple(float3 world,float3 towardLight,constant GPUAtmospher
 struct AtmoIntegral {float3 radiance,transmittance,scatteringFactor;bool ground;};
 static AtmoIntegral atmoIntegrate(float3 world,float3 ray,constant GPUAtmosphereParams& p,texture2d<float> trans,
                                   texture2d<float> multi,bool multiple,float limit=1e8f,bool isotropic=false,
-                                  float3 canonicalSun=float3(0),bool unitIrradiance=false) {
+                                  float3 canonicalSun=float3(0),bool unitIrradiance=false,bool includeGroundBoundary=true) {
     AtmoIntegral out{float3(0),float3(1),float3(0),false};
     const AtmoSegment segment=atmoSegment(world,ray,p,limit);out.ground=segment.ground;if(!segment.valid)return out;
     const float3 sun=unitIrradiance?canonicalSun:atmoVec(p.sunDirection);
@@ -97,7 +97,7 @@ static AtmoIntegral atmoIntegrate(float3 world,float3 ray,constant GPUAtmosphere
         out.radiance+=out.transmittance*source*factor;out.scatteringFactor+=out.transmittance*scattering*factor;
         out.transmittance*=exp(-m.extinction*ds);
     }
-    if(segment.ground) {
+    if(segment.ground&&includeGroundBoundary) {
         const float3 point=world+ray*segment.end,up=normalize(point-atmoVec(p.planetCenter));
         out.radiance+=out.transmittance*atmoVec(p.groundAlbedo)/M_PI_F*solar*atmoTransmittance(point+up*0.5f,sun,p,trans)*max(0.0f,dot(up,sun));
         if(isotropic)out.scatteringFactor+=out.transmittance*atmoVec(p.groundAlbedo);

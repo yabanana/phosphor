@@ -33,10 +33,14 @@ glm::dvec3 atmosphereTransmittance(const AtmosphereSettings&,glm::dvec3 worldPoi
 glm::dvec3 atmosphereTransmittanceReference(const AtmosphereSettings&,glm::dvec3 worldPoint,glm::dvec3 direction,
                                            double tolerance=1e-9,u32 maxDepth=18);
 AtmosphereIntegral atmosphereSingleScattering(const AtmosphereSettings&,glm::dvec3 worldPoint,glm::dvec3 direction,
-                                              glm::dvec3 towardSun,glm::dvec3 irradiance,u32 steps=64,double limit=1e12);
+                                              glm::dvec3 towardSun,glm::dvec3 irradiance,u32 steps=64,double limit=1e12,
+                                              bool includeGroundBoundary=true);
+// Opaque-surface aerial perspective passes includeGroundBoundary=false:
+// resolved scene radiance supplies the endpoint, even exactly on the planet.
 AtmosphereIntegral atmosphereSingleScatteringReference(const AtmosphereSettings&,glm::dvec3 worldPoint,glm::dvec3 direction,
                                                        glm::dvec3 towardSun,glm::dvec3 irradiance,
-                                                       double tolerance=1e-6,u32 maxDepth=10,double limit=1e12);
+                                                       double tolerance=1e-6,u32 maxDepth=10,double limit=1e12,
+                                                       bool includeGroundBoundary=true);
 // Independent Gauss-Legendre polar/trapezoid azimuth quadrature of Hillaire's
 // isotropic closure, with adaptive-Simpson ray integration, not Fibonacci rays.
 glm::dvec3 atmosphereMultipleScatteringReference(const AtmosphereSettings&,double radius,double cosineZenith,

@@ -94,7 +94,7 @@ glm::dvec3 atmosphereTransmittanceReference(const AtmosphereSettings& s,glm::dve
 double atmosphereRayleighPhase(double mu){return 3.0/(16*pi)*(1+mu*mu);}
 double atmosphereMiePhase(double mu,double g){return (1-g*g)/(4*pi*std::pow(std::max(1e-12,1+g*g-2*g*mu),1.5));}
 AtmosphereIntegral atmosphereSingleScattering(const AtmosphereSettings& s,glm::dvec3 p,glm::dvec3 ray,
-                                              glm::dvec3 sun,glm::dvec3 irradiance,u32 steps,double limit) {
+                                              glm::dvec3 sun,glm::dvec3 irradiance,u32 steps,double limit,bool includeGroundBoundary) {
     if(!steps||steps>512||!finite(irradiance)||glm::any(glm::lessThan(irradiance,glm::dvec3(0))))throw std::invalid_argument("invalid atmosphere integration");
     const auto d=direction(ray),light=direction(sun);const auto segment=atmosphereSegment(s,p,d,limit);
     AtmosphereIntegral out;out.distance=segment.end;out.ground=segment.ground;if(!segment.valid)return out;
@@ -107,7 +107,7 @@ AtmosphereIntegral atmosphereSingleScattering(const AtmosphereSettings& s,glm::d
         out.radiance+=out.transmittance*source*factor;out.scatteringFactor+=out.transmittance*(m.rayleigh+m.mie)*factor;
         out.transmittance*=glm::exp(-m.extinction*ds);
     }
-    if(segment.ground) {
+    if(segment.ground&&includeGroundBoundary) {
         const auto point=p+d*segment.end,normal=direction(point-s.planetCenter);
         out.radiance+=out.transmittance*s.groundAlbedo/pi*irradiance*atmosphereTransmittance(s,point+normal*0.01,light,256)*std::max(0.0,glm::dot(normal,light));
     }
@@ -115,7 +115,7 @@ AtmosphereIntegral atmosphereSingleScattering(const AtmosphereSettings& s,glm::d
 }
 namespace {
 AtmosphereIntegral referenceIntegral(const AtmosphereSettings& s,glm::dvec3 p,glm::dvec3 ray,glm::dvec3 sun,
-                                     glm::dvec3 E,double tolerance,u32 depth,double limit,bool isotropic) {
+                                     glm::dvec3 E,double tolerance,u32 depth,double limit,bool isotropic,bool includeGroundBoundary) {
     if(!(tolerance>0&&std::isfinite(tolerance))||depth>18)throw std::invalid_argument("invalid radiance reference bound");
     const auto d=direction(ray),light=direction(sun);const auto segment=atmosphereSegment(s,p,d,limit);
     AtmosphereIntegral out;out.ground=segment.ground;out.distance=segment.end;if(!segment.valid)return out;
@@ -126,16 +126,16 @@ AtmosphereIntegral referenceIntegral(const AtmosphereSettings& s,glm::dvec3 p,gl
         return glm::exp(-optical(t))*phase*E*atmosphereTransmittanceReference(s,point,light,tolerance*0.25,depth);},segment.begin,segment.end,tolerance,depth);
     out.transmittance=glm::exp(-optical(segment.end));
     out.scatteringFactor=integrateSimpson([&](double t){const auto m=atmosphereMedium(s,p+d*t);return glm::exp(-optical(t))*(m.rayleigh+m.mie);},segment.begin,segment.end,tolerance,depth);
-    if(segment.ground){const auto point=p+d*segment.end,normal=direction(point-s.planetCenter);
+    if(segment.ground&&includeGroundBoundary){const auto point=p+d*segment.end,normal=direction(point-s.planetCenter);
         out.radiance+=out.transmittance*s.groundAlbedo/pi*E*atmosphereTransmittanceReference(s,point+normal*0.01,light,tolerance*0.25,depth)*std::max(0.0,glm::dot(normal,light));
         if(isotropic)out.scatteringFactor+=out.transmittance*s.groundAlbedo;}
     return out;
 }
 }
 AtmosphereIntegral atmosphereSingleScatteringReference(const AtmosphereSettings& s,glm::dvec3 p,glm::dvec3 ray,
-                                                       glm::dvec3 sun,glm::dvec3 E,double tolerance,u32 depth,double limit) {
+                                                       glm::dvec3 sun,glm::dvec3 E,double tolerance,u32 depth,double limit,bool includeGroundBoundary) {
     if(!finite(E)||glm::any(glm::lessThan(E,glm::dvec3(0))))throw std::invalid_argument("invalid reference irradiance");
-    return referenceIntegral(s,p,ray,sun,E,tolerance,depth,limit,false);
+    return referenceIntegral(s,p,ray,sun,E,tolerance,depth,limit,false,includeGroundBoundary);
 }
 glm::dvec3 atmosphereMultipleScatteringReference(const AtmosphereSettings& s,double radius,double mu,u32 polar,u32 azimuth) {
     if(polar<2||polar>32||azimuth<2||azimuth>64||!(radius>=s.bottomRadius&&radius<=s.topRadius)||!(mu>=-1&&mu<=1))
@@ -148,7 +148,7 @@ glm::dvec3 atmosphereMultipleScatteringReference(const AtmosphereSettings& s,dou
             derivative=double(polar)*(z*p1-p0)/(z*z-1);const double delta=p1/derivative;z-=delta;if(std::abs(delta)<1e-14)break;}
         const double weight=2/((1-z*z)*derivative*derivative),radial=std::sqrt(std::max(0.0,1-z*z));
         for(u32 j=0;j<azimuth;++j){const double phi=2*pi*(double(j)+0.5)/azimuth;const auto ray=glm::dvec3(radial*std::cos(phi),z,radial*std::sin(phi));
-            const auto result=referenceIntegral(s,point,ray,sun,glm::dvec3(1),1e-5,8,1e12,true);
+            const auto result=referenceIntegral(s,point,ray,sun,glm::dvec3(1),1e-5,8,1e12,true,true);
             first+=result.radiance*(weight/(2*azimuth));returned+=result.scatteringFactor*(weight/(2*azimuth));}
     }
     return first/glm::max(glm::dvec3(1e-3),glm::dvec3(1)-returned);
