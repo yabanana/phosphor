@@ -198,7 +198,9 @@ static std::string lightingToJson(const LightingReport& l) {
         "\", \"denoise_effective\": \""+jsonEscape(l.denoiseEffective)+"\", \"denoise_fallback\": \""+jsonEscape(l.denoiseFallback)+
         "\", \"probe_source\": \""+jsonEscape(l.probeSource)+"\", \"atmosphere\": "+(l.atmosphere?"true":"false")+
         ", \"fog\": "+(l.fog?"true":"false")+", \"clouds\": "+(l.clouds?"true":"false")+
-        ", \"cloud_full_rate\": "+(l.cloudFullRate?"true":"false")+"}";
+        ", \"cloud_full_rate\": "+(l.cloudFullRate?"true":"false")+", \"fog_homogeneous\": "+(l.fogHomogeneous?"true":"false")+
+        ", \"reflection_corrupt\": "+std::to_string(l.reflectionCorrupt)+", \"volume_corrupt\": "+std::to_string(l.volumeCorrupt)+
+        ", \"volume_oracle\": \""+jsonEscape(l.volumeOracle)+"\"}";
 }
 
 std::string reportToJson(const BenchReport& r) {

@@ -535,6 +535,19 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
         } else if (arg == "--lighting-scene") {
             auto v=needValue();if(!v)return false;
             if(!LightingValidation::validScenario(*v)){error="--lighting-scene: unknown analytic scenario";return false;}out.lightingScene=*v;
+        } else if (arg == "--fog-homogeneous") {
+            out.fogHomogeneous=true;
+        } else if (arg == "--volume-oracle") {
+            auto v=needValue();if(!v||v->empty()||v->starts_with("--")){error="--volume-oracle: expected output directory";return false;}out.volumeOracle=*v;
+        } else if (arg == "--debug-volume-corrupt") {
+            auto v=needValue();if(!v)return false;
+            if(*v=="units")out.debugVolumeCorrupt=1;else if(*v=="history")out.debugVolumeCorrupt=2;
+            else if(*v=="light")out.debugVolumeCorrupt=3;else if(*v=="lut")out.debugVolumeCorrupt=4;
+            else{error="--debug-volume-corrupt: expected units, history, light or lut";return false;}
+        } else if (arg == "--debug-reflection-corrupt") {
+            auto v=needValue();if(!v)return false;
+            if(*v=="history")out.debugReflectionCorrupt=1;else if(*v=="motion")out.debugReflectionCorrupt=2;else if(*v=="normal")out.debugReflectionCorrupt=3;
+            else{error="--debug-reflection-corrupt: expected history, motion or normal";return false;}
         } else if (arg == "--capture-linear" || arg == "--capture-linear-sequence") {
             auto v=needValue();if(!v || v->empty() || v->starts_with("--")){error=std::string(arg)+": expected path";return false;}
             (arg=="--capture-linear"?out.captureLinear:out.captureLinearSequence)=*v;
@@ -1026,6 +1039,12 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if (lighting && (!out.visibility || out.tileResolve || out.adaptiveShading || out.graphScenario || out.memoryStress || out.transientTest)) {
         error = "F10-F12 lighting requires --render-path visibility with generic/binned resolve and a scene"; return false;
     }
+    if((!out.volumeOracle.empty()||out.debugVolumeCorrupt) && (!(out.atmosphere||out.fog||out.clouds)||!out.debugLighting)){error="Volume oracle/corruption requires F14 and --debug-lighting N";return false;}
+    if(out.fogHomogeneous&&(!out.fog||out.volumeOracle.empty())){error="Homogeneous fog requires --fog on and --volume-oracle";return false;}
+    if(out.debugVolumeCorrupt==2&&(!out.fog&&(!out.clouds||out.cloudFullRate))){error="Volume history control requires fog or reconstructed clouds";return false;}
+    if(out.debugVolumeCorrupt==3&&!out.fog){error="Volume light control requires --fog on";return false;}
+    if(out.debugReflectionCorrupt&&(!out.debugLighting||!(out.reflections!=ReflectionMode::Off||out.ao!=AoMode::Off||out.lightingDenoise!=LightingDenoiseMode::Off))){error="Reflection control requires F13 and --debug-lighting N";return false;}
+    if(out.debugReflectionCorrupt==1&&out.lightingDenoise!=LightingDenoiseMode::Custom){error="Reflection history control requires --lighting-denoise custom";return false;}
     if(out.cloudFullRate&&!out.clouds){error="--cloud-full-rate requires --clouds on";return false;}
     if((out.atmosphere||out.fog||out.clouds) && out.temporalUpscale){error="Physical atmosphere HDR requires native or F13 denoised reconstruction";return false;}
     if(out.planetCameraHeight>=0&&!out.atmosphere&&!out.fog&&!out.clouds){error="Planetary camera control requires F14";return false;}

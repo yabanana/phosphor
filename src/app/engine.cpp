@@ -893,6 +893,7 @@ void Engine::finishBenchmark() {
         report.lighting.denoiseEffective=denoised_&&denoised_->ready()?"metalfx":options_.lightingDenoise!=LightingDenoiseMode::Off?"custom":"off";
         if(denoised_)report.lighting.denoiseFallback=denoised_->fallbackReason();
         if(reflections_)report.lighting.probeSource=reflections_->probeSource();
+        report.lighting.reflectionCorrupt=options_.debugReflectionCorrupt;report.lighting.volumeCorrupt=options_.debugVolumeCorrupt;report.lighting.volumeOracle=options_.volumeOracle;report.lighting.fogHomogeneous=options_.fogHomogeneous;
         report.lighting.atmosphere=options_.atmosphere;report.lighting.fog=options_.fog;report.lighting.clouds=options_.clouds;report.lighting.cloudFullRate=options_.cloudFullRate;
         report.lighting.cache=options_.shadowCache;report.lighting.seed=options_.lightingSeed;report.lighting.sunIndex=shadows_->sunIndex();
         report.lighting.candidates=options_.lightingCandidates;report.lighting.spatialSamples=options_.lightingSpatialSamples;report.lighting.giRays=options_.giRays;report.lighting.checks=lightingChecks_;report.lighting.failures=lightingFailures_;

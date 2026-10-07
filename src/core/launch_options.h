@@ -338,11 +338,12 @@ struct LaunchOptions {
     // F10-F12: writing presets only; numerical adoption requires tester evidence.
     bool atmosphere=false,fog=false,clouds=false,cloudFullRate=false;
     float atmoDayLength=1200,atmoStartHour=12,planetCameraHeight=-1;
-    u32 timeJumpEveryN=0;
+    u32 timeJumpEveryN=0,debugVolumeCorrupt=0;
+    std::string volumeOracle;bool fogHomogeneous=false;
     ReflectionMode reflections=ReflectionMode::Off;
     AoMode ao=AoMode::Off;
     LightingDenoiseMode lightingDenoise=LightingDenoiseMode::Off;
-    float aoRadius=1.0f;u32 reflectionSamples=1;
+    float aoRadius=1.0f;u32 reflectionSamples=1,debugReflectionCorrupt=0;
     bool reflectionCaptureProbe=false;
     std::string reflectionProbePath;
     ShadowMode shadows = ShadowMode::Off;
