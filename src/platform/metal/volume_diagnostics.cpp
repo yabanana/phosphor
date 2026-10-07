@@ -15,10 +15,10 @@
 namespace phosphor {
 namespace {
 MTL::Buffer* readbackBuffer(MetalContext& c,u64 size,const char* name){auto* p=c.memory().newBuffer(size,MTL::ResourceStorageModeShared,MemoryCategory::Other,name);if(!p)throw std::runtime_error("Volume diagnostic allocation failed");std::memset(p->contents(),0,size);return p;}
-std::string sourceHash(){u64 hash=1469598103934665603ull;
+std::string sourceHash(){u64 hash=14695981039346656037ull;
 #ifdef PHOSPHOR_SHADER_SOURCE_DIR
     const std::filesystem::path shaders(PHOSPHOR_SHADER_SOURCE_DIR),src=shaders.parent_path()/"src/renderer";
-    for(const auto& path:{shaders/"atmosphere.metal",shaders/"fog.metal",shaders/"clouds.metal",shaders/"atmosphere_common.h",shaders/"volume_diagnostics.metal",src/"gpu_types.h",src/"volume_noise.h",src/"volume_oracle.cpp"}){
+    for(const auto& path:{shaders/"atmosphere.metal",shaders/"fog.metal",shaders/"clouds.metal",shaders/"atmosphere_common.h",shaders/"volume_diagnostics.metal",src/"gpu_types.h",src/"volume_noise.h",src/"volume_math.h",src/"atmosphere.cpp",src/"fog_settings.cpp",src/"volume_oracle.cpp"}){
         std::ifstream in(path,std::ios::binary);if(!in)return "unavailable";char block[4096];while(in){in.read(block,sizeof(block));for(std::streamsize i=0;i<in.gcount();++i){hash^=u8(block[i]);hash*=1099511628211ull;}}}
 #else
     return "unavailable";
@@ -102,9 +102,16 @@ struct VolumeDiagnostics::Impl {
         output["reference"]="adaptive-Simpson transport; independent Gauss-Legendre angular closure and CPU LUT-node memoization; homogeneous analytic exp; shared solar producer with independent CPU radiance/orientation";
         output["settings"]={{"homogeneous_fog",config.homogeneousFog},{"fixture_extinction_m_inv",s.expected.diagnostics.fixtureExtinction},{"fixture_source",{s.expected.diagnostics.fixtureSource[0],s.expected.diagnostics.fixtureSource[1],s.expected.diagnostics.fixtureSource[2]}},
             {"expected_physics_revision",s.expected.atmosphere.parameterRevision},{"expected_sky_revision",s.expected.atmosphere.skyRevision},{"planet_radius_m",s.expected.atmosphere.bottomRadius},{"march_steps",s.submitted.marchSteps},
+            {"solar_storage","RGBA32Float"},{"solar_probe_order",{"toward_submitted_sun","away_from_submitted_sun","tangent_to_submitted_sun"}},
+            {"solar_angular_radius_rad",s.expected.atmosphere.sunAngularRadius},{"expected_sun_direction",{s.expected.atmosphere.sunDirection[0],s.expected.atmosphere.sunDirection[1],s.expected.atmosphere.sunDirection[2]}},
+            {"submitted_sun_direction",{s.submitted.sunDirection[0],s.submitted.sunDirection[1],s.submitted.sunDirection[2]}},
             {"expected_sun_irradiance",{s.expected.atmosphere.sunIrradiance[0],s.expected.atmosphere.sunIrradiance[1],s.expected.atmosphere.sunIrradiance[2]}},{"submitted_sun_irradiance",{s.submitted.sunIrradiance[0],s.submitted.sunIrradiance[1],s.submitted.sunIrradiance[2]}}};
-        bool passed=true;output["cases"]=nlohmann::json::array();for(const auto& item:cases){passed&=item.passed;output["cases"].push_back({{"kind",item.kind},{"pixel",{item.x,item.y}},{"expected",item.expected},{"actual",item.actual},{"expected_epoch",item.expectedEpoch},{"actual_epoch",item.actualEpoch},
+        bool passed=true;double maxAbsolute=0,maxRelative=0;u32 epochMismatches=0,numericFailures=0;
+        output["cases"]=nlohmann::json::array();for(const auto& item:cases){passed&=item.passed;maxAbsolute=std::max(maxAbsolute,item.absoluteError);maxRelative=std::max(maxRelative,item.relativeError);
+            epochMismatches+=item.actualEpoch!=item.expectedEpoch;numericFailures+=!item.passed;
+            output["cases"].push_back({{"kind",item.kind},{"pixel",{item.x,item.y}},{"index",item.index},{"expected",item.expected},{"actual",item.actual},{"expected_epoch",item.expectedEpoch},{"actual_epoch",item.actualEpoch},
             {"absolute_error",item.absoluteError},{"relative_error",item.relativeError},{"tolerance",{{"absolute",item.absoluteTolerance},{"relative",item.relativeTolerance}}},{"passed",item.passed}});}
+        output["max_absolute_error"]=maxAbsolute;output["max_relative_error"]=maxRelative;output["epoch_mismatch_count"]=epochMismatches;output["numeric_failure_count"]=numericFailures;
         if(s.counters){const auto& counters=*static_cast<const GPUVolumeCounters*>(s.counters->contents());output["gpu_counters"]={{"nonfinite",counters.nonfinite},{"invalid_units",counters.invalidUnits},{"invalid_history",counters.invalidHistory},{"history_reused",counters.historyReused}};passed&=!counters.nonfinite&&!counters.invalidUnits&&!counters.invalidHistory;}
         output["passed"]=passed;output["certification"]=false;
         if(!config.path.empty()){std::error_code ec;std::filesystem::create_directories(config.path,ec);std::ostringstream filename;filename<<"frame-"<<std::setfill('0')<<std::setw(6)<<s.frame<<"-view-"<<s.view<<".json";const auto path=std::filesystem::path(config.path)/filename.str();
