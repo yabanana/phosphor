@@ -92,7 +92,7 @@ struct MetalfxDenoise::Impl {
         }
     }
     ~Impl() {
-        context.waitIdle();collect(true);
+        context.waitIdle();collect(true,false);
         for(auto& v:views) {
             retire(std::move(v.scaler),v.used);
             releaseTargets(v);
@@ -252,7 +252,7 @@ struct MetalfxDenoise::Impl {
         }
         ++graphVersion;
     }
-    void collect(bool wait) {
+    void collect(bool wait,bool install=true) {
         for(auto& v:views) {
             if(!v.pending.valid())continue;
             if(!wait&&v.pending.wait_for(std::chrono::seconds(0))!=std::future_status::ready)continue;
@@ -261,7 +261,7 @@ struct MetalfxDenoise::Impl {
             try{s=v.pending.get();}
             catch(const std::exception& e){if(!current)++stats.discardedRequests;else fail(v,Status::FactoryRejected,e.what());continue;}
             catch(...){if(!current)++stats.discardedRequests;else fail(v,Status::FactoryRejected,"Denoised gateway future failed");continue;}
-            if(!current) {
+            if(!current||!install) {
                 ++stats.discardedRequests;retire(std::move(s),false);continue;
             }
             if(!s){fail(v,Status::FactoryRejected,"Denoised descriptor/factory rejected candidate formats");continue;}
