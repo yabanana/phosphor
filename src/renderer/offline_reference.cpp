@@ -75,7 +75,8 @@ ReferenceExportResult validateReferenceScene(const OfflineReferenceScene& s) {
         !finite(l.axisV,3)||!finite(l.emission,3)||!std::isfinite(l.range)||!std::isfinite(l.radius)||
         !std::isfinite(l.innerCone)||!std::isfinite(l.outerCone)||!finite(l.uv0,2)||!finite(l.uv1,2)||!finite(l.uv2,2)||
         ((l.flags&2u)&&l.materialIndex>=s.materials.size())) return fail("invalid reference sampled light");
-    if(!finite(s.skyRadiance,3)) return fail("invalid reference sky");
+    if(!finite(s.skyRadiance,3)||!std::isfinite(s.sunAngularRadius)||s.sunAngularRadius<0||s.sunAngularRadius>=1.570796f)
+        return fail("invalid reference sky or solar angular radius");
     return {true,{},u32(s.meshes.size()),live,u32(s.textures.size())};
 }
 bool writeLinearPfm(const std::filesystem::path& path,u32 w,u32 h,std::span<const float> rgb,std::string& error) {
@@ -135,6 +136,7 @@ ReferenceExportResult exportOfflineReference(const OfflineReferenceScene& s,cons
        <<",\"width\":"<<s.camera.width<<",\"height\":"<<s.camera.height<<",\"jitter_pixels\":";
     numberArray(out,s.camera.jitterPixels,2);
     out<<",\"projection\":\"perspective_reverse_z_infinite\"},\"sky\":";numberArray(out,s.skyRadiance,3);
+    out<<",\"sun_angular_radius\":"<<s.sunAngularRadius;
     out<<",\"textures\":[";
     for(size_t k=0;k<s.textures.size();++k) {if(k) out<<',';const auto& t=s.textures[k];
         out<<"{\"id\":"<<t.index<<",\"width\":"<<t.width<<",\"height\":"<<t.height<<",\"rgb\":\"texture_"<<t.index

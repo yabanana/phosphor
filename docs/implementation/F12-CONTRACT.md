@@ -42,7 +42,7 @@ Shared layouts appended to gpu_types.h:
 | GPUProbeGridParams | 160 B | 10 scalar blocks, grid/preset/scene/view/cache epochs |
 | GPUProbeState | 32 B | bounded WORLD offset, state, generation, active age |
 | GPUProbeRay | 32 B | unit direction, signed distance, reflected linear radiance |
-| GPUProbeTraceExtra | 16 B | sampledLightCount, cacheUpdateCount, cacheCandidateCount, frameSeed |
+| GPUProbeTraceExtra | 32 B | sampledLightCount, cacheUpdateCount, cacheCandidateCount, frameSeed, sunAngularRadius+pad |
 | GPURadianceCacheEntry | 64 B | full spatial/normal/direction key, RGB radiance, age/revisions |
 | GPUGiReservoir | 128 B | secondary area sample, source guides, sum/M/W, revisions |
 
@@ -79,6 +79,13 @@ suns and the helper skips analytic point/spot entries to prevent duplicates.
 The sampled list is complete: area/punctual/emissive. Its simple proposal is
 uniform 1/N, divided out along with area PDF. F11 alias selection can replace
 uniform selection only while keeping the actual proposal PMF in the estimator.
+
+TraceExtra.sunAngularRadius is the same F10 physical solar disk radius, radians,
+0 for an exact directional delta. Secondary sun NEE samples uniform solid angle
+in that cone, with normalization2/(1+cos(radius)) preserving GPULight's
+perpendicular irradiance. Offline snapshot retains the radius; the reference
+uses a distant physical disk at1e6m with Le=E_perp/(pi*sin(radius)^2). That
+finite-distance approximation and penumbra/unit agreement need tester evidence.
 
 ## DDGI estimator, atlas and relocation
 
@@ -147,6 +154,10 @@ leak/error validation. DDGI remains selectable even if cache is rejected.
 
 Candidate ray is cosine hemisphere: q_omega=cos_x/pi. After a hit at y,
 q_area=q_omega*cos_y/r², with cos_y=max(dot(n_y,-wi),0).
+The shader proposal is measured from the ACTUAL W&B-offset ray origin/direction;
+target evaluates the true reconstructed geometric receiver. This accounts for
+the changed endpoint sampling density instead of silently replacing it with
+the receiver geometry's density.
 Area integrand f_area=L_reflected(y)*cos_x*cos_y/(pi*r²).
 Target is its RGB luminance. Fresh reservoir weight is target/q_area;
 W=sumWeights/(M*selectedTarget); output E_indirect=pi*f_area*W. Primary

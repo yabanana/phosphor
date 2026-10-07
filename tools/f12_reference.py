@@ -199,8 +199,24 @@ def build_scene(root, data, material_model, allow_differences):
             continue
         power = (np.asarray(light["color"])*light["intensity"]).tolist()
         if light["type"] == 0:
-            emitter = {"type": "directional", "direction": light["direction"],
-                       "irradiance": {"type": "rgb", "value": power}}
+            angular_radius = data.get("sun_angular_radius",0.0)
+            if angular_radius > 0:
+                # Independently trace a distant physical disk with the same
+                # angular radius and perpendicular irradiance. Finite-distance
+                # approximation (1e6m) requires the tester's units/penumbra check.
+                d = np.asarray(light["direction"]);d /= np.linalg.norm(d)
+                helper = np.asarray([0,0,1] if abs(d[2]) < 0.99 else [0,1,0])
+                u = np.cross(helper,d);u /= np.linalg.norm(u);v = np.cross(d,u)
+                distance = 1e6;radius = distance*math.tan(angular_radius)
+                matrix = np.eye(4);matrix[:3,0]=u*radius;matrix[:3,1]=v*radius
+                matrix[:3,2]=d;matrix[:3,3]=-d*distance
+                Le = (np.asarray(power)/(math.pi*math.sin(angular_radius)**2)).tolist()
+                emitter = {"type":"disk","to_world":Transform(matrix),
+                           "bsdf":{"type":"diffuse","reflectance":{"type":"rgb","value":[0,0,0]}},
+                           "emitter":{"type":"area","radiance":{"type":"rgb","value":Le}}}
+            else:
+                emitter = {"type": "directional", "direction": light["direction"],
+                           "irradiance": {"type": "rgb", "value": power}}
         elif light["type"] == 1:
             emitter = {"type": "point", "position": light["position"], "intensity": {"type": "rgb", "value": power}}
         else:

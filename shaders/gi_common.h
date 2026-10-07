@@ -129,7 +129,19 @@ inline float3 giSecondaryRadiance(float3 point,float3 normal,GiMaterial material
         const device GPULight& light=lights[l];
         if(extra.sampledLightCount && light.type!=LIGHT_DIRECTIONAL) continue;
         float3 wi;float distance=p.maxDistance,att=1.0f;
-        if(light.type==LIGHT_DIRECTIONAL) wi=-normalize(float3(light.direction[0],light.direction[1],light.direction[2]));
+        if(light.type==LIGHT_DIRECTIONAL) {
+            float3 axis=-normalize(float3(light.direction[0],light.direction[1],light.direction[2]));
+            wi=axis;
+            if(extra.sunAngularRadius>0.0f) {
+                float coneCos=cos(extra.sunAngularRadius),z=1.0f-giRandom(seed)*(1.0f-coneCos);
+                float phi=2.0f*M_PI_F*giRandom(seed),r=sqrt(max(0.0f,1.0f-z*z));
+                float3 t=normalize(cross(abs(axis.z)<0.999f?float3(0,0,1):float3(0,1,0),axis)),b=cross(axis,t);
+                wi=t*(r*cos(phi))+b*(r*sin(phi))+axis*z;
+                // GPULight intensity remains perpendicular irradiance. Uniform
+                // cone PDF cancels Le*Omega with 2/(1+cos angularRadius).
+                att=2.0f/(1.0f+coneCos);
+            }
+        }
         else {
             float3 delta=float3(light.position[0],light.position[1],light.position[2])-point;
             distance=length(delta);wi=delta/max(distance,1e-8f);

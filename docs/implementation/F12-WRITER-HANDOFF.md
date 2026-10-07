@@ -12,7 +12,7 @@ complete. Main and phase/f9 checkouts/build/assets were not modified.
 
 ## Commit boundaries
 
-- a7e33e8 — GPUProbeGridParams160B, state32B, ray32B, traceExtra16B,
+- a7e33e8 — GPUProbeGridParams160B, state32B, ray32B, traceExtra32B,
   cache64B, reservoir128B ABI. Root reconciles append-only gpu_types.h with
   independent F10/F11 additions.
 - dd69003 — F12.5 portable exact same-frame full scene/texture/camera export,
