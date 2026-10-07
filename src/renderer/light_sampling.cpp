@@ -129,6 +129,7 @@ LightSample sampleLight(const GPUSampledLight& l, glm::dvec2 uv, glm::dvec3 rece
     LightSample s;
     if (!std::isfinite(uv.x) || !std::isfinite(uv.y) || uv.x < 0 || uv.x >= 1 || uv.y < 0 || uv.y >= 1 || !finite(receiver)) return s;
     s.position = v3(l.position);
+    if (!finite(v3(l.emission))) return s;
     s.radiance = glm::max(v3(l.emission), glm::dvec3(0));
     const auto u = v3(l.axisU), v = v3(l.axisV);
     s.delta = l.type == LIGHT_POINT || l.type == LIGHT_SPOT;
@@ -153,6 +154,7 @@ LightSample sampleLight(const GPUSampledLight& l, glm::dvec2 uv, glm::dvec3 rece
             s.position += (2 * uv.x - 1) * u + double(l.radius) * s.normal;
         } else return s;
         if (l.type != DI_LIGHT_TUBE) s.normal = glm::normalize(glm::cross(u, v));
+        if (l.type == DI_LIGHT_TRIANGLE && (l.flags & DI_LIGHT_MIRRORED)) s.normal = -s.normal;
     }
     const auto delta = s.position - receiver;
     s.distance = glm::length(delta);
@@ -181,6 +183,63 @@ LightSample sampleLight(const GPUSampledLight& l, glm::dvec2 uv, glm::dvec3 rece
     }
     s.valid = finite(s.position) && finite(s.wi) && finite(s.radiance) && std::isfinite(s.geometry) && s.geometry >= 0;
     return s;
+}
+
+LightSample sampleTexturedLight(const GPUSampledLight& l, const GPUEmissiveSurface& emitter,
+                               const GPUMaterial& material, glm::dvec2 uv, glm::dvec3 receiver,
+                               TextureSample textures, void* user) {
+    auto sample = sampleLight(l, uv, receiver);
+    if (!sample.valid || l.type != DI_LIGHT_TRIANGLE || !(l.flags & DI_LIGHT_TEXTURED_EMISSION)) return sample;
+    if (!emitter.valid || (!textures && (material.emissiveTex != INVALID_TEXTURE_INDEX ||
+                                        (material.alphaCutoff > 0 && material.baseColorTex != INVALID_TEXTURE_INDEX)))) {
+        sample.valid = false; return sample;
+    }
+    const double root = std::sqrt(uv.x);
+    const glm::dvec2 lightUV = (1 - root) * glm::dvec2(emitter.uv0[0], emitter.uv0[1]) +
+                              root * (1 - uv.y) * glm::dvec2(emitter.uv1[0], emitter.uv1[1]) +
+                              root * uv.y * glm::dvec2(emitter.uv2[0], emitter.uv2[1]);
+    const auto texel = material.emissiveTex == INVALID_TEXTURE_INDEX ? glm::dvec4(1) : textures(material.emissiveTex, lightUV, user);
+    sample.radiance = v3(material.emissive) * glm::dvec3(texel);
+    if (material.alphaCutoff > 0) {
+        const double alpha = material.baseColor[3] * (material.baseColorTex == INVALID_TEXTURE_INDEX ? 1 : textures(material.baseColorTex, lightUV, user).w);
+        if (!std::isfinite(alpha)) { sample.valid = false; return sample; }
+        if (alpha < material.alphaCutoff) sample.radiance = glm::dvec3(0);
+    }
+    sample.valid = finite(sample.radiance) && sample.radiance.x >= 0 && sample.radiance.y >= 0 && sample.radiance.z >= 0;
+    return sample;
+}
+
+GPUSampledLight updateEmissive(const GPUSampledLight& source, const GPUEmissiveSurface& emitter,
+                              std::span<const GPUInstance> instances, std::span<const GPUMaterial> materials) {
+    auto light = source;
+    if (!emitter.valid) return light;
+    bool valid = emitter.instanceSlot < instances.size() && emitter.materialIndex < materials.size();
+    if (valid) {
+        const auto& instance = instances[emitter.instanceSlot];
+        valid = (instance.flags & INSTANCE_FLAG_VALID) && instance.generation == emitter.instanceGeneration &&
+                instance.materialIndex == emitter.materialIndex;
+        if (valid) {
+            const auto& m = materials[emitter.materialIndex];
+            auto world = [&](const float* p) {
+                const float* a = instance.modelMatrix;
+                return glm::dvec3(a[0], a[1], a[2]) * double(p[0]) + glm::dvec3(a[4], a[5], a[6]) * double(p[1]) +
+                       glm::dvec3(a[8], a[9], a[10]) * double(p[2]) + glm::dvec3(a[12], a[13], a[14]);
+            };
+            const auto a = world(emitter.p0), b = world(emitter.p1), c = world(emitter.p2);
+            for (u32 i = 0; i < 3; ++i) {
+                light.position[i] = float(a[i]); light.axisU[i] = float(b[i] - a[i]); light.axisV[i] = float(c[i] - a[i]);
+                light.emission[i] = m.emissive[i];
+            }
+            light.flags = DI_LIGHT_TEXTURED_EMISSION | ((m.flags & MATERIAL_FLAG_DOUBLE_SIDED) ? DI_LIGHT_TWO_SIDED : 0u) |
+                          ((instance.flags & INSTANCE_FLAG_MIRRORED) ? DI_LIGHT_MIRRORED : 0u);
+            light.type = DI_LIGHT_TRIANGLE; light.range = 0;
+        }
+    }
+    if (!valid) {
+        for (u32 i = 0; i < 3; ++i) light.axisU[i] = light.axisV[i] = light.emission[i] = 0;
+        light.flags = 0;
+    }
+    return light;
 }
 
 glm::dvec3 incident(const LightSample& s) { return s.valid ? s.radiance * s.geometry : glm::dvec3(0); }
@@ -229,6 +288,34 @@ glm::dvec3 bruteForce(const GPUDISurface& surface, std::span<const GPUSampledLig
             if (!s.valid) continue;
             const double visible = visibility ? std::clamp(visibility(v3(surface.position), s, user), 0.0, 1.0) : 1;
             sum += evaluateBRDF(surface, s) * visible / s.pdfArea;
+        }
+        result += sum / (double(n) * n);
+    }
+    return result;
+}
+
+glm::dvec3 bruteForceTextured(const GPUDISurface& surface, std::span<const GPUSampledLight> lights,
+                            std::span<const GPUEmissiveSurface> emitters, std::span<const GPUMaterial> materials,
+                            u32 sideSamples, TextureSample textures, void* textureUser,
+                            Visibility visibility, void* visibilityUser) {
+    if (sideSamples == 0) return {};
+    glm::dvec3 result(0);
+    for (u32 i = 0; i < lights.size(); ++i) {
+        const auto& light = lights[i];
+        if (light.type == LIGHT_DIRECTIONAL) continue;
+        const bool textured = light.type == DI_LIGHT_TRIANGLE && (light.flags & DI_LIGHT_TEXTURED_EMISSION);
+        if (textured && (i >= emitters.size() || emitters[i].materialIndex >= materials.size()))
+            throw std::invalid_argument("missing reference emitter/material");
+        const u32 n = light.type == LIGHT_POINT || light.type == LIGHT_SPOT ? 1 : sideSamples;
+        glm::dvec3 sum(0);
+        for (u32 y = 0; y < n; ++y) for (u32 x = 0; x < n; ++x) {
+            const glm::dvec2 uv((x + 0.5) / n, (y + 0.5) / n);
+            const auto sample = textured ? sampleTexturedLight(light, emitters[i], materials[emitters[i].materialIndex],
+                                                               uv, v3(surface.position), textures, textureUser) :
+                                           sampleLight(light, uv, v3(surface.position));
+            if (!sample.valid) continue;
+            const double visible = visibility ? std::clamp(visibility(v3(surface.position), sample, visibilityUser), 0.0, 1.0) : 1;
+            sum += evaluateBRDF(surface, sample) * visible / sample.pdfArea;
         }
         result += sum / (double(n) * n);
     }

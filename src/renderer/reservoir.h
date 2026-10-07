@@ -7,6 +7,14 @@
 
 namespace phosphor::di {
 
+inline u32 historyPixel(u32 x, u32 y, float motionX, float motionY, u32 width, u32 height) {
+    if (x >= width || y >= height || !std::isfinite(motionX) || !std::isfinite(motionY) ||
+        u64(width) * height > std::numeric_limits<u32>::max()) return ~0u;
+    const double px = double(x) + 0.5 + motionX, py = double(y) + 0.5 + motionY;
+    if (px < 0 || py < 0 || px >= width || py >= height) return ~0u;
+    return u32(py) * width + u32(px);
+}
+
 // A reservoir integrates over the union of discrete lights and area endpoints.
 // pHat is positive on the complete proposal support (see F11-CONTRACT.md).
 // M counts proposals, INCLUDING proposals whose final contribution is black.
@@ -15,10 +23,12 @@ inline bool stream(GPUDIReservoir& r, const GPUDIReservoir& sample, double weigh
                    u32 multiplicity, double random) {
     if (!std::isfinite(weight) || weight < 0.0 || !std::isfinite(random) ||
         random < 0.0 || random >= 1.0 || multiplicity == 0 ||
-        multiplicity > std::numeric_limits<u32>::max() - r.M)
+        multiplicity > std::numeric_limits<u32>::max() - r.M) {
+        r.pad[0] |= DI_ERROR_WEIGHT;
         return false;
+    }
     const double total = double(r.weightSum) + weight;
-    if (!std::isfinite(total) || total > std::numeric_limits<float>::max()) return false;
+    if (!std::isfinite(total) || total > std::numeric_limits<float>::max()) { r.pad[0] |= DI_ERROR_WEIGHT; return false; }
     r.M += multiplicity;
     if (weight > 0.0 && random * total < weight) {
         r.lightIndex = sample.lightIndex;
@@ -39,7 +49,7 @@ inline bool stream(GPUDIReservoir& r, const GPUDIReservoir& sample, double weigh
 inline bool finalize(GPUDIReservoir& r) {
     const double denominator = double(r.M) * double(r.target);
     const double w = denominator > 0 ? double(r.weightSum) / denominator : 0;
-    if (!r.valid || !std::isfinite(w) || w <= 0 || w > std::numeric_limits<float>::max()) {
+    if (!r.valid || r.pad[0] != 0 || !std::isfinite(w) || w <= 0 || w > std::numeric_limits<float>::max()) {
         r.normalization = 0;
         r.valid = 0;
         return false;
@@ -50,7 +60,7 @@ inline bool finalize(GPUDIReservoir& r) {
 
 inline bool reusable(const GPUDIReservoir& source, const GPUDIParams& p,
                      const GPUSampledLight& light) {
-    return source.valid && source.M > 0 && source.age < p.maxHistoryAge &&
+    return source.valid && source.pad[0] == 0 && source.M > 0 && source.age < p.maxHistoryAge &&
            source.viewID == p.viewID && source.historyEpoch == p.historyEpoch &&
            source.lightRevision == p.lightRevision && source.lightID == light.id &&
            source.lightGeneration == light.generation && source.target > 0 &&
