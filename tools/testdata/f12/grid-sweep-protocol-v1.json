@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "state": "FROZEN_BEFORE_V3_PIXELS",
+  "base_quality_protocol": "oracle-protocol-v1.json",
+  "base_preregister_commit": "953e23e",
+  "snapshot_sha256": "9ea09eae5e426c449791b43c38bc3521a223e0708442861f3a4e923e1f5d237f",
+  "cases": [
+    {"id": "ddgi", "mode": "ddgi", "grid": [8,4,8]},
+    {"id": "cache", "mode": "cache", "grid": [8,4,8]},
+    {"id": "restir", "mode": "restir", "grid": [8,4,8]},
+    {"id": "ddgi_8x8x8", "mode": "ddgi", "grid": [8,8,8]},
+    {"id": "ddgi_16x8x16", "mode": "ddgi", "grid": [16,8,16]},
+    {"id": "ddgi_16x16x16", "mode": "ddgi", "grid": [16,16,16]}
+  ],
+  "ray_count_per_probe": 64,
+  "receiver_fix_required": "exact V-buffer primitive barycentric WORLD receiver",
+  "grid_fit_required": "count overrides applied before spacing; same conservative sphere-fitted volume",
+  "controls": "same Cornell128x72, lighting seed1001, frames256..504 step8, source snapshot, no explicit spacing or anchor override",
+  "quality_gates": "unchanged base protocol: per-ROI NRMSE <=30%, absolute luminance bias <=20%; insufficient leak ROI stays unverified",
+  "cost_policy": "report actual frame GPU p50/p95, memory and allocations with validation/source/sample metadata; per-pass data with one sample is diagnostic only; no sum-of-medians estimate and no performance adoption from a single validation run",
+  "selection_policy": "report every preset; select no further grid after seeing data; smallest tested passing preset is only a Cornell quality candidate pending repeated unvalidated cost and other corpus scenes",
+  "tuning_budget": "only the listed three additional DDGI grid presets"
+}
