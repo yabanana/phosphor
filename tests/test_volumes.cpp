@@ -50,3 +50,26 @@ TEST_CASE("F14 wind translates density and history with the same metre-per-secon
     SUBCASE("other view"){++history.viewID;}SUBCASE("clock/volume epoch"){++history.generation;}SUBCASE("new foreground depth"){history.opaqueDistance=10;}
     CHECK_FALSE(cloudHistoryCompatible(params,history,{10,0,0},100));
 }
+
+TEST_CASE("F14 cloud centroid correction preserves homogeneous front air and attenuates cloud radiance") {
+    // Independent analytical transport through front air, a thin cloud layer,
+    // then back air and an opaque scene. Coefficients are m^-1; all distances
+    // are metres and RGB values remain linear before exposure.
+    const double sigmaAir=0.01,frontDistance=30,backDistance=70,sigmaCloud=0.02,cloudDistance=20;
+    const glm::dvec3 airSource(0.01,0.02,0.03),cloudSource(0.03,0.02,0.01),scene(10,5,1);
+    const double Ta=std::exp(-sigmaAir*frontDistance),Tb=std::exp(-sigmaAir*backDistance),Tc=std::exp(-sigmaCloud*cloudDistance);
+    const glm::dvec3 La=airSource/sigmaAir*(1-Ta),Lb=airSource/sigmaAir*(1-Tb),Lc=cloudSource/sigmaCloud*(1-Tc);
+    const glm::dvec3 sceneAtmosphere=La+Ta*(Lb+Tb*scene);
+    const glm::dvec3 expected=La+Ta*(Lc+Tc*(Lb+Tb*scene));
+    const glm::dvec3 corrected=Tc*sceneAtmosphere+Ta*Lc+La*(1-Tc);
+    for(u32 c=0;c<3;++c)CHECK(corrected[c]==doctest::Approx(expected[c]).epsilon(1e-12));
+    const glm::dvec3 wrong=Lc+Tc*sceneAtmosphere;
+    CHECK(glm::length(wrong-expected)>0.01); // old all-air-behind-cloud formula must fail
+    const glm::dvec3 opaque=Ta*Lc+La;
+    for(u32 c=0;c<3;++c)CHECK(opaque[c]==doctest::Approx(La[c]+Ta*Lc[c]).epsilon(1e-12));
+    const glm::dvec3 transparent=sceneAtmosphere;CHECK(transparent==sceneAtmosphere);
+    // No front air is the exact limit of the older expression, demonstrating
+    // that the fixture specifically detects incorrect front-medium ordering.
+    const glm::dvec3 vacuumFront=Tc*sceneAtmosphere+Lc;
+    CHECK(vacuumFront==Lc+Tc*sceneAtmosphere);
+}

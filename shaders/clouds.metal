@@ -109,17 +109,30 @@ kernel void clouds_temporal(constant GPUCloudParams& p [[buffer(0)]],device GPUC
     }
     next[index]=h;output.write(float4(h.radiance[0],h.radiance[1],h.radiance[2],h.transmittance),pixel);
 }
-kernel void clouds_apply(constant GPUCloudParams& p [[buffer(0)]],texture2d<float,access::read> depth [[texture(0)]],
+kernel void clouds_apply(constant GPUCloudParams& p [[buffer(0)]],constant GPUAtmosphereParams& atmosphere [[buffer(1)]],
+    texture2d<float,access::read> depth [[texture(0)]],texture2d<float> transmittance [[texture(1)]],texture2d<float> multiscattering [[texture(2)]],
     texture2d<float,access::read> cloud [[texture(3)]],texture2d<float,access::read> guide [[texture(4)]],
     texture2d<float,access::write> output [[texture(5)]],texture2d<float,access::read> scene [[texture(6)]],uint2 pixel [[thread_position_in_grid]]) {
     if(pixel.x>=p.outputWidth||pixel.y>=p.outputHeight)return;
     const float opaque=atmoOpaqueDistance(pixel,uint2(p.outputWidth,p.outputHeight),depth,p.inverseViewProjection,atmoVec(p.cameraPosition),p.maxDistance);
     const float2 coordinate=(float2(pixel)+0.5f)/float2(p.outputWidth,p.outputHeight)*float2(p.width,p.height)-0.5f;
-    const int2 base=int2(floor(coordinate));const float2 f=fract(coordinate);float4 value=0;float weights=0;
+    const int2 base=int2(floor(coordinate));const float2 f=fract(coordinate);float4 value=0;float weights=0,centroid=0,opacityWeights=0;
     for(uint i=0;i<4;++i){const uint2 bit(i&1u,(i>>1u)&1u),at=uint2(clamp(base+int2(bit),int2(0),int2(p.width-1,p.height-1)));
         const float2 d=guide.read(at).xy;
         if(d.x>opaque||abs(d.y-opaque)>p.depthRelativeThreshold*max(opaque,1.0f))continue;
-        const float w=(bit.x?f.x:1-f.x)*(bit.y?f.y:1-f.y);value+=cloud.read(at)*w;weights+=w;}
+        const float w=(bit.x?f.x:1-f.x)*(bit.y?f.y:1-f.y);const float4 sample=cloud.read(at);value+=sample*w;weights+=w;
+        const float opacityWeight=w*(1-saturate(sample.w));centroid+=opacityWeight*d.x;opacityWeights+=opacityWeight;}
     if(weights>1e-6f)value/=weights;else value=float4(0,0,0,1); // valid transparent fallback at disocclusion/thin depth edges
-    output.write(float4(value.rgb+saturate(value.w)*scene.read(pixel).rgb,1),pixel);
+    const float Tcloud=saturate(value.w);const float3 sceneAtmosphere=scene.read(pixel).rgb;
+    float3 color=Tcloud*sceneAtmosphere+value.rgb;
+    if(opacityWeights>1e-6f){
+        centroid=min(opaque,centroid/opacityWeights);
+        const float3 camera=atmoVec(p.cameraPosition),ray=atmoPixelRay(pixel,uint2(p.outputWidth,p.outputHeight),p.inverseViewProjection,camera);
+        const AtmoIntegral front=atmoIntegrate(camera,ray,atmosphere,transmittance,multiscattering,true,centroid);
+        // Coherent thin-layer approximation at the cloud scattering centroid:
+        // air in FRONT must not be attenuated by the cloud; cloud radiance
+        // crosses that front air. This is not a full mixed-medium integration.
+        color=Tcloud*sceneAtmosphere+front.transmittance*value.rgb+front.radiance*(1-Tcloud);
+    }
+    output.write(float4(color,1),pixel);
 }
