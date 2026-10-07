@@ -201,6 +201,13 @@ fragment ForwardSurfaceOutput forward_surface_fs(SurfaceVertexOut in [[stage_in]
     out.reactive = in.historyValid == 0 ? 1.0h : materials[in.materialIndex].alphaCutoff > 0 ? 0.75h : 0.0h;
     return out;
 }
+// ICB pipelines inherit buffers. Lighting textures use the same direct
+// resource-ID encoding as the material bindless table, with read-only handles.
+struct ForwardLightingTextureHandle {
+    texture2d<float, access::read> tex;
+};
+static_assert(sizeof(ForwardLightingTextureHandle) == 8, "Forward lighting texture handle ABI");
+
 fragment ForwardSurfaceOutput forward_surface_lit_fs(SurfaceVertexOut in [[stage_in]], bool frontFacing [[front_facing]],
                                                  constant FrameConstants &frame [[buffer(0)]],
                                                  const device GPUMaterial *materials [[buffer(3)]],
@@ -208,9 +215,7 @@ fragment ForwardSurfaceOutput forward_surface_lit_fs(SurfaceVertexOut in [[stage
                                                  const device TextureHandle *textures [[buffer(5)]],
                                                  constant GPUTemporalParams &temporal [[buffer(8)]],
     constant GPUResolveLightingParams& lighting [[buffer(9)]],
-    texture2d<float,access::read> sun [[texture(0)]],
-    texture2d<float,access::read> direct [[texture(1)]],
-    texture2d<float,access::read> irradiance [[texture(2)]]) {
+    const device ForwardLightingTextureHandle* lightingTextures [[buffer(10)]]) {
     SurfaceInput surface{in.worldPos,
                          in.normal,
                          in.tangent,
@@ -221,9 +226,9 @@ fragment ForwardSurfaceOutput forward_surface_lit_fs(SurfaceVertexOut in [[stage
                          in.mirrored,
                          frontFacing};
     const ShadingResult value = shadeSurface(surface, frame, materials, lights, textures, true,
-        (lighting.flags & 1u) ? sun.read(uint2(in.position.xy)).x : 1.0f, lighting.sunIndex,
-        (lighting.flags & 2u) != 0, (lighting.flags & 2u) ? direct.read(uint2(in.position.xy)).xyz : float3(0),
-        (lighting.flags & 4u) != 0, (lighting.flags & 4u) ? irradiance.read(uint2(in.position.xy)).xyz : float3(0));
+        (lighting.flags & 1u) ? lightingTextures[0].tex.read(uint2(in.position.xy)).x : 1.0f, lighting.sunIndex,
+        (lighting.flags & 2u) != 0, (lighting.flags & 2u) ? lightingTextures[1].tex.read(uint2(in.position.xy)).xyz : float3(0),
+        (lighting.flags & 4u) != 0, (lighting.flags & 4u) ? lightingTextures[2].tex.read(uint2(in.position.xy)).xyz : float3(0));
     if (value.alpha < materials[in.materialIndex].alphaCutoff)
         discard_fragment();
     ForwardSurfaceOutput out;

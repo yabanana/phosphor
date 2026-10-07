@@ -32,7 +32,9 @@ enum Binding : NS::UInteger {
     BindLights = 4,
     BindTextures = 5,
     BindVisible = FORWARD_BIND_VISIBLE,
-    BindCount = 10,
+    BindLightingParams = 9,
+    BindLightingTextures = 10,
+    BindCount = 11,
 };
 
 constexpr u32 kQueues = SCENE_MAX_LEVELS - 1;
@@ -380,10 +382,16 @@ void SceneRenderer::addPassesToGraph(rg::RenderGraph& graph, GpuDrivenMode mode,
 }
 
 void SceneRenderer::setLightingInputs(MTL::GPUAddress params, MTL::Texture* sun, MTL::Texture* local, MTL::Texture* gi) {
-    arguments_->setAddress(params, 9);
-    arguments_->setTexture(sun->gpuResourceID(), 0);
-    arguments_->setTexture(local->gpuResourceID(), 1);
-    arguments_->setTexture(gi->gpuResourceID(), 2);
+    // The ICB inherits buffer bindings from this argument table. Encode the
+    // three texture handles in a fresh frame-ring slice so in-flight draws
+    // retain their exact resources across views/resize and later rebinding.
+    static_assert(sizeof(MTL::ResourceID) == 8, "Metal resource-ID ABI");
+    const MTL::ResourceID handles[] = {sun->gpuResourceID(), local->gpuResourceID(), gi->gpuResourceID()};
+    static_assert(sizeof(handles) == 3 * 8, "Forward lighting texture-table ABI");
+    const auto slice = context_.frameUploads().allocate(sizeof(handles));
+    std::memcpy(slice.cpu, handles, sizeof(handles));
+    arguments_->setAddress(params, BindLightingParams);
+    arguments_->setAddress(slice.gpu, BindLightingTextures);
 }
 void SceneRenderer::setTemporalInputs(MTL::GPUAddress previousInstances, MTL::GPUAddress temporalParams) {
     arguments_->setAddress(previousInstances, 7);
