@@ -20,6 +20,12 @@ public:
         std::array<float,SCENE_MOTION_CLASSES*2> motionSinCos{};
         bool motionSinCosValid=false;
     };
+    struct ReadResources {
+        std::array<rg::TextureRef,4> maps{};
+        MTL::GPUAddress params=0;
+        GPUShadowParams parameters{};
+    };
+    [[nodiscard]] ReadResources readResources() const;
     struct CacheState {
         bool enabled=false;
         u32 readyTiles=0, currentTiles=0, updates=0, updateBudget=0;

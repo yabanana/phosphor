@@ -375,6 +375,11 @@ void GpuMemory::releaseCompleted(u64 completedFrame) {
             pending_[kept++] = p;
             continue;
         }
+        // A parent owns storage used by its live views, including views that
+        // outlive the frame in which the caller retired the parent handle.
+        if(std::any_of(viewParents_.begin(),viewParents_.end(),[&](const auto& view){return view.second==p.resource;})) {
+            pending_[kept++]=p;continue;
+        }
         destroy(p.resource);
     }
     pending_.resize(kept);
