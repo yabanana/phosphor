@@ -16,6 +16,7 @@ namespace phosphor {
 struct GiPasses::Impl {
     enum Pass { Trace,Classify,Blend,Resolve,Cache,Candidates,Temporal,Spatial,Shade,Snapshot,CheckClear,CheckNegative,Check,Count };
     MetalContext& c;PipelineCache& p;SceneRenderer& scene;AccelerationStructures& rt;ShadowPasses& shadow;DirectLightingPasses& direct;LaunchOptions options;
+    GiLightingEpoch lightingEpoch;GiEnvironment environment;
     ProbeGridConfig config;std::unique_ptr<ProbeGrid> oracle;
     ShadowPasses::Frame frame;GPUProbeGridParams params{};GPUProbeTraceExtra extra{};
     MTL::GPUAddress paramsAddress=0,extraAddress=0,checkAddress=0;
@@ -30,7 +31,7 @@ struct GiPasses::Impl {
     MTL::Buffer *states=nullptr,*cache=nullptr;std::array<MTL::Buffer*,4> histories{};
     MTL::Texture *previousIrr=nullptr,*nextIrr=nullptr,*previousDist=nullptr,*nextDist=nullptr;
     u32 probeCount=0,rayCount=0,irrWidth=0,irrHeight=0,distWidth=0,distHeight=0;
-    u64 pixels=0,graphVersion=1,sceneRevision=1,materialRevision=1;u32 generation=1;struct Signal {u64 scene,geometry,materials,rtGeometry;u32 lights;bool operator==(const Signal&)const=default;};Signal lastSignal{~u64{0},0,0,0,0};
+    u64 pixels=0,graphVersion=1,sceneRevision=1,materialRevision=1;u32 generation=1;struct Signal {u64 scene,geometry,materials,rtGeometry;u64 lights;bool operator==(const Signal&)const=default;};Signal lastSignal{~u64{0},0,0,0,0};
     bool atlasValid=false;HistoryRegistry history;
     rg::BufferRef stateRef{},cacheRef{},raysRef{},cacheCandidatesRef{},freshRef{},temporalRef{},spatialRef{},historyRef{};
     rg::TextureRef previousIrrRef{},nextIrrRef{},previousDistRef{},nextDistRef{},output{},referenceDiffuse{};
@@ -77,12 +78,13 @@ struct GiPasses::Impl {
         atlasValid=false;++sceneRevision;++materialRevision;++generation;++graphVersion;lastSignal={~u64{0},0,0,0,0};for(u32 v=0;v<4;++v)history.invalidate(v,"GI scene load");
     }
     void reserve(u64 capacity){if(capacity<=pixels)return;for(u32 v=0;v<4;++v)history.invalidate(v,"GI allocation growth");pixels=capacity;for(auto& f:slots){for(auto* b:{f.fresh,f.temporal,f.spatial})c.memory().release(b,MemoryCategory::RayTracing);f.fresh=lighting::buffer(c,pixels*sizeof(GPUGiReservoir),"GI candidate reservoirs");f.temporal=lighting::buffer(c,pixels*sizeof(GPUGiReservoir),"GI temporal reservoirs");f.spatial=lighting::buffer(c,pixels*sizeof(GPUGiReservoir),"GI spatial reservoirs");}for(auto*& b:histories){c.memory().release(b,MemoryCategory::RayTracing);b=lighting::buffer(c,pixels*sizeof(GPUGiReservoir),"GI reservoir per view");}++graphVersion;}
-    void prepare(const GpuScene& g,const SceneStore& s,const ShadowPasses::Frame& f){
+    void prepare(const GpuScene& g,const SceneStore& s,std::span<const GPULight> lights,const ShadowPasses::Frame& f){
         frame=f;reserve(u64(f.backingWidth)*f.backingHeight);
         if(atlasValid){std::swap(previousIrr,nextIrr);std::swap(previousDist,nextDist);}
         if(s.stats().structure||s.stats().fullInstances||!s.instanceDeltas().empty()||!s.motionSlots().empty()||!s.dirtyRoots().empty())++sceneRevision;
         if(s.stats().fullMaterials||!s.materialDeltas().empty())++materialRevision;
-        const Signal signal{f.scene,sceneRevision,materialRevision,rt.geometryRevision(),direct.lightRevision()};
+        const u64 allLightEpoch=lightingEpoch.update(lights,environment);
+        const Signal signal{f.scene,sceneRevision,materialRevision,rt.geometryRevision(),allLightEpoch};
         if(!(signal==lastSignal)){++generation;lastSignal=signal;atlasValid=false;}
         const auto decision=history.begin(f.view,{f.width,f.height,f.backingWidth,f.backingHeight},generation,f.cut,f.reset);
         params=oracle->parameters(f.index,generation);params.width=f.width;params.height=f.height;
@@ -92,9 +94,10 @@ struct GiPasses::Impl {
         // the shader ABI uses one bit, a view cut may conservatively clear probes.
         params.reset=(!atlasValid||decision.reset)?1u:0u;
         params.cacheCapacity=16384;params.cacheProbeLimit=8;params.cacheMaxAge=60;params.cacheGeneration=generation;
-        params.geometryRevision=sceneRevision;params.lightRevision=direct.lightRevision();params.materialRevision=materialRevision;
+        params.geometryRevision=sceneRevision;params.lightRevision=u32(allLightEpoch);params.materialRevision=materialRevision;
         params.viewRevision=(f.view<<28)|(u32(history.get(f.view).generation)&0x0fffffffu);
-        extra={direct.lightCount(),std::min(256u,rayCount),rayCount,options.lightingSeed};extra.sunAngularRadius=0.00465f;
+        extra={direct.lightCount(),std::min(256u,rayCount),rayCount,options.lightingSeed};extra.sunAngularRadius=environment.sunAngularRadius;
+        for(u32 i=0;i<3;++i)params.skyRadiance[i]=environment.skyRadiance[i];
         checkParams={f.width,f.height,params.mode,options.debugGiCorrupt};checkAddress=lighting::upload(c,checkParams);slots[f.slot].expectedPixels=f.width*f.height;
         paramsAddress=lighting::upload(c,params);extraAddress=lighting::upload(c,extra);
         traceConsumer.prepare(f.slot,kernels[Trace]);candidateConsumer.prepare(f.slot,kernels[Candidates]);temporalConsumer.prepare(f.slot,kernels[Temporal]);spatialConsumer.prepare(f.slot,kernels[Spatial]);
@@ -143,7 +146,8 @@ struct GiPasses::Impl {
 };
 GiPasses::GiPasses(MetalContext& c,PipelineCache& p,SceneRenderer& s,AccelerationStructures& a,ShadowPasses& sh,DirectLightingPasses& d,const LaunchOptions& o):impl_(std::make_unique<Impl>(c,p,s,a,sh,d,o)){}
 GiPasses::~GiPasses()=default;
-void GiPasses::loadScene(const GpuScene& g,const SceneStore& s){impl_->load(g,s);}void GiPasses::prepareFrame(const GpuScene& g,const SceneStore& s,const ShadowPasses::Frame& f){impl_->prepare(g,s,f);}void GiPasses::addToGraph(rg::RenderGraph& g){impl_->add(g);}void GiPasses::bindFrame(MetalGraphExecutor& e){impl_->bind(e);}
+void GiPasses::loadScene(const GpuScene& g,const SceneStore& s){impl_->load(g,s);}void GiPasses::prepareFrame(const GpuScene& g,const SceneStore& s,std::span<const GPULight> lights,const ShadowPasses::Frame& f){impl_->prepare(g,s,lights,f);}
+void GiPasses::setEnvironment(const GiEnvironment& value){impl_->environment=value;}void GiPasses::addToGraph(rg::RenderGraph& g){impl_->add(g);}void GiPasses::bindFrame(MetalGraphExecutor& e){impl_->bind(e);}
 rg::TextureRef GiPasses::irradiance()const{return impl_->output;}u64 GiPasses::version()const{return impl_->graphVersion;}
 } // namespace phosphor
 
