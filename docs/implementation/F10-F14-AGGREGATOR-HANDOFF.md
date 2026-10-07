@@ -50,23 +50,40 @@ Physical M5 Max128GB/macOS27.2; forcedApple9 is not physicalM3 certification.
 
 ## Current blockers / next work
 
-1. SDK extreme colored HDR [368640,128,64] is NOT accepted. q=1/64 alone loses
-   energy; autoExposure saturates. Manual exposure hint recovers red but tiny
-   channels remain inaccurate. Native R16 texture rounding produced22*2^-24
-   instead of CPU RNE23; next exact-representable experiment6d68286 supplies23
-   explicitly. Target/q/restore/gates unchanged. Production policy unpromoted.
-2. Reviewer is preparing true Float32 lighting residuals: current visibility
-   target and indexed lit fragment half output can overflow BEFORE F13/F14
-   Float32 composition. Preserve legacy F7/F8; audit post/upscaler format
-   contracts and make unsupported combinations explicit, never silent clipping.
-3. Finish actual SDK lifecycle/resize/four-view/hot-reload/leaks tests and
-   remaining integrated temporal scenarios. Constant/guide fixtures alone do
-   not certify arbitrary moving-light GI/reflection quality.
+1. STOP the SDK exposure parameter search: final input-relative, R16-exact
+   exposure still fails the original 1% wide-colored-HDR gate. Production now
+   selects custom Float32 before graph construction (`fac7dd1`); only controlled
+   fixtures admit native SDK work. Request/effective/reason/counts are explicit.
+   GPU requested-native/custom wide-HDR captures are byte-identical and pass
+   the physical oracle; zero native requests/encodes on the guarded path.
+2. Primary residual Float32 is fixed (`28ecbe7`), including indexed output.
+   Probe HDR now stays Float32 on supported devices, including forced Apple9
+   and reduced presets (`a8212b3`). Real raster/RT probe texels preserve
+   [368640,128,64]; the residual primary oracle also passes after the fixture
+   anchor. Standard F8 temporal+lighting Float32 remains an explicit unsupported
+   combination; ordinary F7/F8 temporal is unchanged and verified.
+3. SDK lifecycle v3 now executes all 300 frames, four views, three extents and
+   two shader generations: pack/numerical checks PASS. At-exit FAIL remains:
+   20 allocations of 640 B. Public-API standalone create-only reductions with
+   1/4 scalers reproduce exactly 640/2560 B with and without validation, despite
+   weak references proving wrapper deallocation. Do not reuse the F8 workaround.
+   Original scalar CPU analysis was stopped after GPU completion; equivalent
+   NumPy float64 analyze-only checks preserve original provenance and confirm
+   numerical PASS/lifetime FAIL. F13.3 stays partial.
 4. Benchmark GI presets and full representative frames x3 on a quiet machine,
    no captures/debug validation, check O7 steady allocations. Adopt defaults
    only with declared quality/cost. Current validation timings are diagnostic.
-5. Full F9/F6/F7/F8 regression, archive harvest/hot reload/leaks, residue audit,
-   documentation/task ticks only with evidence; PR/CI/merge into main last.
+5. Regression: F7/F8 33/33 and F9 36/36 PASS. A real legacy alpha regression
+   was isolated against the preserved F9 binary (forward identical; visibility
+   differed at 87 pixels). `b0fd586` restores the old F7 entry and selects an
+   explicit-footprint entry only for lighting. Held-out PSNR returns exactly
+   to 50.6502559 dB; F10 alpha/DRS matrix still PASS without cap changes.
+6. AOT harvest now preserves unlabeled pipeline descriptors and canonicalizes
+   engine library IDs. Depth-only/new lighting coverage is tested; all eight
+   CTest targets PASS. Archive-active positive reload and changed-alpha negative
+   both PASS after updating the runner to the actual rt_intersections module.
+   Remaining: full custom lifecycle/leaks, quiet costs, writer's minimal
+   independent temporal AO control, final status docs/PR/CI/integration.
 
 ## Local evidence and collaborators
 
