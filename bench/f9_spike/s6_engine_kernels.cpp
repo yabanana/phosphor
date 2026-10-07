@@ -81,7 +81,9 @@ void engineKernels(::soc::Context& ctx, ::soc::Report& rep) {
     }
     k.geometry = uploadGeometry(ctx, scene);
     BlasOptions options;
-    options.opaque = false; // same geometry shared by opaque and MASK instances
+    // A shared BLAS initially built as opaque must still honor a later MASK
+    // material through the per-instance NonOpaque override (no rebuild).
+    options.opaque = true;
     auto blases = allocateBlases(ctx, scene, k.geometry, options);
     buildBlases(ctx, blases, scratchFor(ctx, blases));
     k.tlas = allocateTlas(ctx, kSlots, MTL::AccelerationStructureUsageNone, AsPlacement::Device);
@@ -194,7 +196,7 @@ void engineKernels(::soc::Context& ctx, ::soc::Report& rep) {
         if (!valid) {
             for (u32 f = 0; f < 12; ++f) wrongDescriptors += desc[i].transform[f] != ((f == 0 || f == 4 || f == 8) ? 1.0f : 0.0f);
         } else {
-            const u32 expectedOptions = i == 1 ? 0u : 4u;
+            const u32 expectedOptions = i == 1 ? 8u : 4u;
             wrongDescriptors += desc[i].options != expectedOptions;
         }
     }
@@ -344,14 +346,35 @@ void engineKernels(::soc::Context& ctx, ::soc::Report& rep) {
             const glm::vec3 d = glm::normalize(glm::vec3(near) / near.w - glm::vec3(0, 0, 2));
             const GPURtRay r = rays[y * kSize + x];
             generatedWrong += glm::length(d - glm::vec3(r.dx, r.dy, r.dz)) > 1e-5f || !(r.coneWidth > 0 && r.coneWidth < 0.1f);
+            generatedWrong += r.pad != y * kSize + x;
         }
-    const bool pass = wrongDescriptors == 0 && primaryWrong == 0 && coneWrong == 0 && shadowWrong == 0 && offsetWrong == 0 && generatedWrong == 0 && facingWrong == 0 && wrongCcwDetected == kRays && caught == 3;
+    // Sampled debug rays must cover the entire image, not its first rows.
+    k.q.rayCount = 127;
+    k.q.flags |= 8u;
+    k.upload();
+    timeEncoder(ctx, [&](MTL4::ComputeCommandEncoder* e) {
+        k.table->setAddress(k.rays->gpuAddress(), 1);
+        k.table->setAddress(k.probe->gpuAddress(), 3);
+        k.dispatch(e, k.primary, k.q.rayCount);
+    });
+    u32 sampledWrong = 0;
+    std::vector<bool> sampled(kRays, false);
+    for (u32 i = 0; i < k.q.rayCount; ++i) {
+        const GPURtRay r = rays[i];
+        const u32 first = u32(u64(i) * kRays / k.q.rayCount);
+        const u32 last = u32(u64(i + 1u) * kRays / k.q.rayCount);
+        const u32 expected = first + mix32(i ^ mix32(k.q.frameIndex)) % (last - first);
+        sampledWrong += r.pad != expected || r.pad >= kRays;
+        if (r.pad < kRays) { sampledWrong += sampled[r.pad]; sampled[r.pad] = true; }
+    }
+    const bool pass = wrongDescriptors == 0 && primaryWrong == 0 && coneWrong == 0 && shadowWrong == 0 && offsetWrong == 0 && generatedWrong == 0 && sampledWrong == 0 && facingWrong == 0 && wrongCcwDetected == kRays && caught == 3;
     rep.value("descriptors.wrong", "fields", wrongDescriptors, {}, false);
     rep.value("primary.wrong", "rays", primaryWrong, {{"rays", kRays}}, false);
     rep.value("primary_cone.wrong", "rays", coneWrong, {{"rays", kRays}}, false);
     rep.value("shadow.wrong", "rays", shadowWrong, {{"rays", kRays}}, false);
     rep.value("offset.self_hits_or_invalid", "rays", offsetWrong, {}, false);
     rep.value("primary_generated.wrong", "rays", generatedWrong, {}, false);
+    rep.value("sampled_primary.wrong", "rays", sampledWrong, {}, false);
     rep.value("facing.wrong", "rays", facingWrong, {}, false);
     rep.value("negative.former_ccw.mismatches", "rays", wrongCcwDetected, {}, true);
     rep.value("primary.ms", "ms", primaryMs, {}, false);

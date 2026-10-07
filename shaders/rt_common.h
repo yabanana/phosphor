@@ -110,8 +110,8 @@ bool rt_alpha_generic(uint primitive [[primitive_id]], uint slot [[user_instance
 }
 
 // All triangles use the generic alpha function at IFT slot 0. Hardware opacity
-// on an instance bypasses it entirely. Meshes shared by opaque and MASK
-// instances must not bake an unconditional geometry-level Opaque override.
+// on an instance bypasses it entirely. Explicit instance Opaque/NonOpaque
+// overrides allow a mesh to be shared by opaque and MASK materials dynamically.
 inline GPURtHit rtTrace(const GPURtRay r, instance_acceleration_structure as,
                         intersection_function_table<triangle_data, instancing> ift,
                         const device GPUInstance* instances, uint slotCount,

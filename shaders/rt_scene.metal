@@ -10,6 +10,8 @@
 // The counters use GPURtCounters word order. Clear once before descriptors;
 // alpha counters are enabled by probe.flags bit0. bits1..2 select debug mode:
 // 0 instance-slot color, 1 geometric world normal, 2 binary hit.
+// bit3 samples rayCount strata spanning the entire image, storing pixelIndex
+// in GPURtRay.pad. Flag off preserves the full-resolution 1-ray-per-pixel path.
 
 kernel void rt_clear_counters(device atomic_uint* counters [[buffer(0)]], uint tid [[thread_position_in_grid]]) {
     if (tid < sizeof(GPURtCounters) / sizeof(uint)) atomic_store_explicit(&counters[tid], 0u, memory_order_relaxed);
@@ -56,7 +58,9 @@ kernel void rt_write_instances(const device GPUInstance* instances [[buffer(0)]]
             // Keep object-space front-facing for hardware culling; rtTrace
             // converts the reported face to world-facing after traversal.
             if ((material.flags & MATERIAL_FLAG_DOUBLE_SIDED) != 0u) d.options |= 1u;
-            if (material.alphaCutoff <= 0.0f) d.options |= 4u;
+            // Instance opacity overrides the BLAS geometry's original choice,
+            // allowing a material to switch OPAQUE <-> MASK without a rebuild.
+            d.options |= material.alphaCutoff <= 0.0f ? 4u : 8u;
             if (p.corruption == RT_CORRUPT_TRANSFORM) d.transform[9] += 100000.0f;
             if (p.corruption == RT_CORRUPT_MASK) d.mask = 0u;
             if (p.corruption == RT_CORRUPT_BLAS) {
@@ -86,6 +90,8 @@ kernel void rt_write_instances(const device GPUInstance* instances [[buffer(0)]]
     }
 }
 
+inline uint rtHash(uint h) { h ^= h >> 16; h *= 0x7feb352du; h ^= h >> 15; h *= 0x846ca68bu; return h ^ (h >> 16); }
+
 inline float4x4 rtInverseViewProjection(constant GPURtProbeParams& p) {
     const constant float* m = p.inverseViewProjection;
     return float4x4(float4(m[0], m[1], m[2], m[3]), float4(m[4], m[5], m[6], m[7]),
@@ -102,7 +108,21 @@ inline float3 rtPrimaryDirection(constant GPURtProbeParams& p, float2 pixel) {
 kernel void rt_generate_primary(device GPURtRay* rays [[buffer(1)]], constant GPURtProbeParams& p [[buffer(3)]],
                                  uint tid [[thread_position_in_grid]]) {
     if (tid >= p.rayCount || p.width == 0u || p.height == 0u) return;
-    const float2 pixel = float2(tid % p.width, tid / p.width) + 0.5f;
+    const ulong pixels = ulong(p.width) * p.height;
+    uint pixelIndex = tid;
+    if ((p.flags & 8u) != 0u) {
+        const ulong first = ulong(tid) * pixels / p.rayCount;
+        const ulong last = ulong(tid + 1u) * pixels / p.rayCount;
+        const ulong span = max(last - first, 1ul);
+        pixelIndex = uint(min(first + ulong(rtHash(tid ^ rtHash(p.frameIndex))) % span, pixels - 1ul));
+    }
+    if (ulong(pixelIndex) >= pixels) {
+        GPURtRay invalid{};
+        invalid.tmax = -1.0f;
+        rays[tid] = invalid;
+        return;
+    }
+    const float2 pixel = float2(pixelIndex % p.width, pixelIndex / p.width) + 0.5f;
     const float3 direction = rtPrimaryDirection(p, pixel);
     const float3 dx = rtPrimaryDirection(p, pixel + float2(1, 0));
     const float3 dy = rtPrimaryDirection(p, pixel + float2(0, 1));
@@ -113,10 +133,10 @@ kernel void rt_generate_primary(device GPURtRay* rays [[buffer(1)]], constant GP
     r.mask = RT_MASK_PRIMARY;
     r.type = RT_PROBE_PRIMARY;
     r.coneWidth = max(length(dx - direction), length(dy - direction));
+    r.pad = pixelIndex;
     rays[tid] = r;
 }
 
-inline uint rtHash(uint h) { h ^= h >> 16; h *= 0x7feb352du; h ^= h >> 15; h *= 0x846ca68bu; return h ^ (h >> 16); }
 inline float rtRandom(uint pixel, uint seed) { return float(rtHash(pixel * 0x9e3779b1u ^ rtHash(seed)) >> 8) / 16777216.0f; }
 inline float3 rtCosineDirection(float3 normal, float u, float v) {
     const float3 axis = abs(normal.x) > 0.9f ? float3(0, 1, 0) : float3(1, 0, 0);
@@ -138,6 +158,7 @@ kernel void rt_generate_secondary(device GPURtRay* rays [[buffer(1)]], constant 
     r.tmax = -1.0f; // skipped secondary: primary ray missed
     r.type = p.probeType;
     r.mask = p.probeType == RT_PROBE_SHADOW ? RT_MASK_SHADOW : RT_MASK_INDIRECT;
+    r.pad = primaryRays[tid].pad;
     float3 point, normal;
     if (rtSurface(primaryHits[tid], instances, meshes, vertices, indices, p.slotCount, p.meshCount, point, normal)) {
         const GPURtRay primary = primaryRays[tid];
