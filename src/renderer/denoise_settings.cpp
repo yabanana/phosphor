@@ -34,20 +34,21 @@ bool denoiseCompatible(const GPUDISurface& s,const GPUDenoiseHistory& h,const GP
     if(std::abs(s.depth-h.depth)>p.depthThreshold*scale||!finite(v3(s.position))||!finite(v3(h.position))||
         std::abs(glm::dot(v3(s.position)-v3(h.position),glm::normalize(n)))>p.planeThreshold*scale)return false;
     if(p.signal==DENOISE_SIGNAL_SPECULAR){if(!(spec.flags&SPECULAR_SAMPLE_VALID)||h.path!=spec.path||
-        h.secondarySlot!=spec.secondarySlot||h.secondaryGeneration!=spec.secondaryGeneration||std::abs(h.roughness-s.roughness)>p.roughnessThreshold||
-        !std::isfinite(spec.hitDistance)||std::abs(h.hitDistance-spec.hitDistance)>p.hitDistanceThreshold*std::max(1.f,std::max(h.hitDistance,spec.hitDistance)))return false;}
+        h.secondarySlot!=spec.secondarySlot||h.secondaryGeneration!=spec.secondaryGeneration||!std::isfinite(h.roughness)||!std::isfinite(s.roughness)||std::abs(h.roughness-s.roughness)>p.roughnessThreshold||
+        !std::isfinite(h.hitDistance)||!std::isfinite(spec.hitDistance)||std::abs(h.hitDistance-spec.hitDistance)>p.hitDistanceThreshold*std::max(1.f,std::max(h.hitDistance,spec.hitDistance)))return false;}
     return true;
 }
-GPUDenoiseHistory denoiseTemporal(const GPUDISurface& s,glm::vec3 current,const GPUDenoiseHistory& old,const GPUDenoiseParams& p,glm::vec3 low,glm::vec3 high,const GPUSpecularSample& spec){
+GPUDenoiseHistory denoiseTemporal(const GPUDISurface& s,glm::vec3 current,const GPUDenoiseHistory& old,const GPUDenoiseParams& p,glm::vec3 low,glm::vec3 high,const GPUSpecularSample& spec,float neighborhoodVariance){
     GPUDenoiseHistory h{};h.signal=p.signal;h.viewID=p.viewID;h.historyEpoch=p.historyEpoch;h.signalRevision=p.signalRevision;
     if(!s.valid||!finite(current))return h;current=glm::max(current,glm::vec3(0));if(p.signal==DENOISE_SIGNAL_AO)current=glm::clamp(current,glm::vec3(0),glm::vec3(1));
     bool reuse=denoiseCompatible(s,old,p,spec);glm::vec3 previous=v3(old.color);
     if(reuse&&(p.flags&DENOISE_CLAMP_HISTORY)&&finite(low)&&finite(high))previous=glm::clamp(previous,glm::min(low,high),glm::max(low,high));
     const u32 count=reuse?std::min(old.length,p.maxHistory-1)+1:1;
     const float alpha=reuse?std::max(p.temporalAlpha,1.f/count):1,ma=reuse?std::max(p.momentsAlpha,1.f/count):1;
-    const glm::vec3 color=reuse?glm::mix(previous,current,alpha):current;const float L=luminance(current);
+    glm::vec3 color=reuse?glm::mix(previous,current,alpha):current;if(p.signal==DENOISE_SIGNAL_AO)color=glm::clamp(color,glm::vec3(0),glm::vec3(1));const float L=luminance(current);
     h.firstMoment=reuse?old.firstMoment*(1-ma)+L*ma:L;h.secondMoment=reuse?old.secondMoment*(1-ma)+L*L*ma:L*L;
     h.variance=std::max(p.varianceFloor,h.secondMoment-h.firstMoment*h.firstMoment);h.length=count;
+    if(count<p.minHistoryForVariance&&std::isfinite(neighborhoodVariance)&&neighborhoodVariance>=0)h.variance=std::max(h.variance,neighborhoodVariance/count);
     const auto n=glm::normalize(signalNormal(s,p.signal));
     for(u32 i=0;i<3;++i){h.color[i]=color[i];h.position[i]=s.position[i];h.normal[i]=n[i];}
     h.depth=s.depth;h.roughness=s.roughness;h.slot=s.instanceSlot;h.instanceGeneration=s.instanceGeneration;h.materialRevision=s.materialRevision;

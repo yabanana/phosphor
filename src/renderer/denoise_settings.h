@@ -13,7 +13,7 @@ struct DenoiseSettings {
 [[nodiscard]] GPUDenoiseParams denoiseParameters(const DenoiseSettings&,u32 width,u32 height,u32 signal,u32 view,u32 epoch,u32 revision,bool reset);
 [[nodiscard]] bool denoiseCompatible(const GPUDISurface&,const GPUDenoiseHistory&,const GPUDenoiseParams&,const GPUSpecularSample& specular={});
 [[nodiscard]] GPUDenoiseHistory denoiseTemporal(const GPUDISurface&,glm::vec3 current,const GPUDenoiseHistory&,
-    const GPUDenoiseParams&,glm::vec3 neighborhoodLow,glm::vec3 neighborhoodHigh,const GPUSpecularSample& specular={});
+    const GPUDenoiseParams&,glm::vec3 neighborhoodLow,glm::vec3 neighborhoodHigh,const GPUSpecularSample& specular={},float neighborhoodVariance=-1);
 [[nodiscard]] float denoiseSpatialWeight(const GPUDISurface&,const GPUDISurface&,float centerLuminance,float neighborLuminance,
     float variance,const GPUDenoiseParams&);
 } // namespace phosphor
