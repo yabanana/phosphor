@@ -13,6 +13,7 @@
 #include "rendergraph/render_graph.h"
 #include "renderer/gpu_types.h"
 #include "renderer/history_registry.h"
+#include "renderer/gi_lighting_epoch.h"
 #include "renderer/scene_extract.h"
 #include "testbench/testbench.h"
 
@@ -63,6 +64,9 @@ class DirectLightingPasses;
 class GiPasses;
 class ReferenceSnapshot;
 class LinearCapture;
+class ReflectionPasses;
+class MetalfxDenoise;
+class AtmospherePasses;
 
 // ---------------------------------------------------------------------------
 // Engine -- composition root for the macOS app.
@@ -150,6 +154,16 @@ private:
     std::unique_ptr<ShadowPasses> shadows_;
     std::unique_ptr<DirectLightingPasses> directLighting_;
     std::unique_ptr<GiPasses> gi_;
+    std::unique_ptr<ReflectionPasses> reflections_;
+    std::unique_ptr<MetalfxDenoise> denoised_;
+    std::unique_ptr<AtmospherePasses> atmosphere_;
+    GiLightingEpoch surfaceLightingEpoch_;
+    u64 surfaceGeometryEpoch_=1,surfaceMaterialEpoch_=1,surfaceSignalEpoch_=1;
+    struct SurfaceSignal {u64 scene=0,geometry=0,material=0,rtGeometry=0,lighting=0;u32 pipeline=0;bool operator==(const SurfaceSignal&)const=default;};
+    SurfaceSignal previousSurfaceSignal_{};
+    pipe::PipelineHandle roughnessSplit_;
+    MTL4::ArgumentTable* roughnessTable_=nullptr;
+    rg::TextureRef roughnessRef_;
     std::unique_ptr<ReferenceSnapshot> referenceSnapshot_;
     std::unique_ptr<LinearCapture> linearCapture_;
     u32 lightingChecks_=0,lightingFailures_=0;
@@ -221,6 +235,7 @@ private:
         void reserve(u32 frames);
     } sceneSamples_;
     std::array<u64, 3> slotFrame_{~0ull, ~0ull, ~0ull}; // frame index last submitted per slot
+    std::array<bool, 3> slotReflectionRecorded_{}; // producer recorded in this submitted slot
     std::array<bool, 3> slotMeasured_{};                // ... and whether it was a measured frame
     GPUSceneCounters lastCounters_{};
     u32  lastCpuCommands_  = 0;
@@ -287,6 +302,8 @@ private:
         bool rtVisibilityReady = false;
         u64 shadowResources=0,directResources=0,giResources=0,referenceResources=0,linearResources=0;
         u32 logicalWidth=0,logicalHeight=0;
+        u64 reflectionResources=0,denoiseResources=0,atmosphereResources=0;
+        bool reflectionReady=false;
         bool operator==(const GraphKey&) const = default;
     };
     rg::RenderGraph frameGraph_;

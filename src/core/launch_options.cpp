@@ -1,5 +1,6 @@
 #include "core/launch_options.h"
 #include "testbench/lighting_validation.h"
+#include "testbench/reflection_validation.h"
 
 #include <charconv>
 #include <cmath>
@@ -454,6 +455,38 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if (*value == "on") out.rtEnabled = true;
             else if (*value == "off") out.rtEnabled = false;
             else { error = "--rt: expected off or on"; return false; }
+        } else if (arg == "--atmosphere" || arg == "--fog" || arg == "--clouds") {
+            auto v=needValue();if(!v)return false;if(*v!="on"&&*v!="off"){error=std::string(arg)+": expected on or off";return false;}
+            if(arg=="--atmosphere")out.atmosphere=*v=="on";else if(arg=="--fog")out.fog=*v=="on";else out.clouds=*v=="on";
+        } else if (arg == "--cloud-full-rate") {out.cloudFullRate=true;
+        } else if (arg == "--day-length") {
+            if(!needFloat(out.atmoDayLength)||out.atmoDayLength<=0){error="--day-length: seconds >0";return false;}
+        } else if (arg == "--start-hour") {
+            if(!needFloat(out.atmoStartHour)||out.atmoStartHour<0||out.atmoStartHour>=24){error="--start-hour: expected0..24";return false;}
+        } else if (arg == "--time-jump-every") {if(!needCount(out.timeJumpEveryN))return false;
+        } else if (arg == "--planet-camera-height") {
+            if(!needFloat(out.planetCameraHeight)||out.planetCameraHeight<0){error="--planet-camera-height: metres >=0";return false;}
+        } else if (arg == "--reflections") {
+            auto v=needValue();if(!v)return false;
+            if(*v=="off")out.reflections=ReflectionMode::Off;else if(*v=="ssr")out.reflections=ReflectionMode::SSR;
+            else if(*v=="rt")out.reflections=ReflectionMode::RT;else if(*v=="probes")out.reflections=ReflectionMode::Probes;
+            else{error="--reflections: expected off, ssr, rt or probes";return false;}
+        } else if (arg == "--ao") {
+            auto v=needValue();if(!v)return false;
+            if(*v=="off")out.ao=AoMode::Off;else if(*v=="gtao")out.ao=AoMode::GTAO;else if(*v=="rtao")out.ao=AoMode::RTAO;
+            else{error="--ao: expected off, gtao or rtao";return false;}
+        } else if (arg == "--lighting-denoise") {
+            auto v=needValue();if(!v)return false;
+            if(*v=="off")out.lightingDenoise=LightingDenoiseMode::Off;else if(*v=="custom")out.lightingDenoise=LightingDenoiseMode::Custom;
+            else if(*v=="metalfx")out.lightingDenoise=LightingDenoiseMode::MetalFX;
+            else{error="--lighting-denoise: expected off, custom or metalfx";return false;}
+        } else if (arg == "--ao-radius") {
+            if(!needFloat(out.aoRadius)||out.aoRadius<=0||out.aoRadius>100){error="--ao-radius: expected world metres in (0,100]";return false;}
+        } else if (arg == "--reflection-samples") {
+            if(!needCount(out.reflectionSamples)||out.reflectionSamples<1||out.reflectionSamples>8){error="--reflection-samples: expected1..8";return false;}
+        } else if (arg == "--reflection-probe") {
+            auto v=needValue();if(!v||v->empty()||v->starts_with("--")){error="--reflection-probe: expected cooked path";return false;}out.reflectionProbePath=*v;
+        } else if (arg == "--reflection-capture-probe") {out.reflectionCaptureProbe=true;
         } else if (arg == "--shadows") {
             auto v = needValue(); if (!v) return false;
             if (*v == "off") out.shadows = ShadowMode::Off;
@@ -508,6 +541,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
                 if(!parseU32(text,out.giGrid[i])||out.giGrid[i]<2||out.giGrid[i]>32||(i<2?end==std::string_view::npos:end!=std::string_view::npos)){error="--gi-grid: expected 2..32 x 2..32 x 2..32";return false;}start=end+1;}
         } else if (arg == "--gi-rays") {
             if (!needCount(out.giRays)) return false;
+        } else if (arg == "--reflection-scene") {
+            auto v=needValue();if(!v)return false;if(!ReflectionValidation::validScenario(*v)){error="--reflection-scene: unknown scenario";return false;}out.reflectionScene=*v;
         } else if (arg == "--lighting-scene") {
             auto v=needValue();if(!v)return false;
             if(!LightingValidation::validScenario(*v)){error="--lighting-scene: unknown analytic scenario";return false;}out.lightingScene=*v;
@@ -522,7 +557,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             else if(*v=="shadow")out.captureLinearSignal=3;
             else if(*v=="shadow-position")out.captureLinearSignal=4;
             else if(*v=="shadow-normal")out.captureLinearSignal=5;
-            else{error="--capture-linear-signal: expected hdr, indirect-diffuse, direct, shadow, shadow-position or shadow-normal";return false;}
+            else if(*v=="specular")out.captureLinearSignal=6;else if(*v=="ao")out.captureLinearSignal=7;
+            else{error="--capture-linear-signal: expected hdr, indirect-diffuse, direct, shadow, shadow-position, shadow-normal, specular or ao";return false;}
         } else if (arg == "--export-reference-frame") {
             if(!needCount(out.exportReferenceFrame))return false;
         } else if (arg == "--capture-linear-frame") {
@@ -982,6 +1018,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             "Settled reference requires fixed timestep, temporal upscaling, one view, zero warmup and fixed resolution";
         return false;
     }
+    if(out.lightingDenoise==LightingDenoiseMode::MetalFX || out.atmosphere || out.fog || out.clouds)out.post=true;
     if (out.post)
         out.visibility = true;
     if (out.debugPostCurvesCorrupt && !out.debugPostCurves) {
@@ -1007,13 +1044,23 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             return false;
         }
     }
-    const bool lighting = out.shadows != ShadowMode::Off || out.directLighting != DirectLightingMode::Legacy || out.gi != GiMode::Off;
+    const bool lighting = out.shadows != ShadowMode::Off || out.directLighting != DirectLightingMode::Legacy || out.gi != GiMode::Off ||
+                          out.reflections!=ReflectionMode::Off || out.ao!=AoMode::Off || out.lightingDenoise!=LightingDenoiseMode::Off || out.atmosphere || out.fog || out.clouds;
     if (lighting && (!out.visibility || out.tileResolve || out.adaptiveShading || out.graphScenario || out.memoryStress || out.transientTest)) {
         error = "F10-F12 lighting requires --render-path visibility with generic/binned resolve and a scene"; return false;
     }
+    if(out.cloudFullRate&&!out.clouds){error="--cloud-full-rate requires --clouds on";return false;}
+    if((out.atmosphere||out.fog||out.clouds) && out.temporalUpscale){error="Physical atmosphere HDR requires native or F13 denoised reconstruction";return false;}
+    if(out.planetCameraHeight>=0&&!out.atmosphere&&!out.fog&&!out.clouds){error="Planetary camera control requires F14";return false;}
+    if((out.reflections==ReflectionMode::RT || out.ao==AoMode::RTAO) && !out.rtEnabled){error="RT reflections/AO/probe capture require --rt on";return false;}
+    if(out.lightingDenoise==LightingDenoiseMode::MetalFX && out.temporalUpscale){error="Denoised and standard temporal reconstruction are separate paths";return false;}
+    if((!out.reflectionProbePath.empty() || out.reflectionCaptureProbe) && out.reflections==ReflectionMode::Off){error="Probe controls require --reflections";return false;}
     if ((out.shadows == ShadowMode::RT || out.directLighting != DirectLightingMode::Legacy || out.gi != GiMode::Off) && !out.rtEnabled) {
         error = "RT sun, local visibility and GI require --rt on"; return false;
     }
+    if(!out.reflectionScene.empty() && (!out.bench||*out.bench!=5||!out.lightingScene.empty())){error="--reflection-scene requires --bench 6 and exclusive scene fixture";return false;}
+    if(out.captureLinearSignal==6 && out.reflections==ReflectionMode::Off){error="Specular capture requires --reflections";return false;}
+    if(out.captureLinearSignal==7 && out.ao==AoMode::Off){error="AO capture requires --ao";return false;}
     if(!out.lightingScene.empty() && (!out.bench || *out.bench!=5)){error="--lighting-scene requires --bench 6";return false;}
     if(!out.captureLinear.empty() && !out.captureLinearSequence.empty()){error="Choose single linear capture or linear sequence";return false;}
     if((!out.captureLinear.empty() || !out.captureLinearSequence.empty()) && (!out.visibility || !out.benchmark())){error="Linear capture requires --render-path visibility and --frames";return false;}

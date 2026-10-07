@@ -37,7 +37,11 @@ ResidencyClass GpuMemory::residencyClass(MemoryCategory category) {
 }
 
 GpuMemory::~GpuMemory() {
-    releaseCompleted(~u64{0});
+    // Retired parents may precede their views in the pending list. Drain
+    // again after each view release; never free parent storage early.
+    for(size_t previous=~size_t{0};!pending_.empty() && pending_.size()!=previous;) {
+        previous=pending_.size();releaseCompleted(~u64{0});
+    }
     for (u32 c = 0; c < MEMORY_CATEGORY_COUNT; ++c) {
         if (stats_[c].count != 0) {
             LOG_WARN("GpuMemory: %u %s allocations (%llu bytes) still alive at shutdown", stats_[c].count,
@@ -146,10 +150,11 @@ namespace {
 void GpuMemory::account(MTL::Resource* resource, MemoryCategory category) {
     const u32 c = static_cast<u32>(category);
     CategoryStats& s = stats_[c];
-    s.bytes += resource->allocatedSize();
+    const u64 bytes=viewParents_.contains(resource)?0:resource->allocatedSize();
+    s.bytes += bytes;
     ++s.count;
     ++allocationCount_;
-    PH_ALLOC(resource, resource->allocatedSize(), tracyPool(category));
+    PH_ALLOC(resource, bytes, tracyPool(category));
 
     // Log when a category crosses into Warning or Over (once per crossing).
     const MemoryBudget::Level level = context_.budget().level(category, s.bytes);
@@ -165,7 +170,7 @@ void GpuMemory::account(MTL::Resource* resource, MemoryCategory category) {
 void GpuMemory::unaccount(MTL::Resource* resource, MemoryCategory category) {
     const u32 c = static_cast<u32>(category);
     CategoryStats& s = stats_[c];
-    s.bytes -= resource->allocatedSize();
+    s.bytes -= viewParents_.contains(resource)?0:resource->allocatedSize();
     --s.count;
     PH_FREE(resource, tracyPool(category));
     reportedLevel_[c] = std::min(reportedLevel_[c], context_.budget().level(category, s.bytes));
@@ -249,6 +254,15 @@ MTL::Buffer *GpuMemory::newSharedBuffer(void *mapping, u64 length, void (^deallo
     context_.makeResident(buffer, residencyClass(category));
     account(buffer, category);
     return buffer;
+}
+
+MTL::Texture* GpuMemory::newTextureView(MTL::Texture* source,MTL::PixelFormat format,MTL::TextureType type,
+                                        NS::Range levels,NS::Range slices,MemoryCategory category,const char* label) {
+    if(!source || !levels.length || !slices.length)return nullptr;
+    auto* view=source->newTextureView(format,type,levels,slices);
+    if(!view){LOG_ERROR("GpuMemory: failed texture view '%s'",label);return nullptr;}
+    source->retain();viewParents_.emplace(view,source);view->setLabel(str(label));
+    context_.makeResident(view,residencyClass(category));account(view,category);return view;
 }
 
 MTL::Texture* GpuMemory::newTexture(const MTL::TextureDescriptor* descriptor, MemoryCategory category,
@@ -340,6 +354,9 @@ void GpuMemory::releaseHeap(MTL::Heap* heap, MemoryCategory category) {
 }
 
 void GpuMemory::destroy(MTL::Resource* resource) {
+    if(auto found=viewParents_.find(resource);found!=viewParents_.end()) {
+        auto* parent=found->second;context_.evict(resource);resource->release();viewParents_.erase(found);parent->release();return;
+    }
     const auto it = placements_.find(resource);
     if (it != placements_.end()) {
         // The heap is resident as a whole; the range is reusable once the
@@ -361,6 +378,11 @@ void GpuMemory::releaseCompleted(u64 completedFrame) {
         if (completedFrame != ~u64{0} && p.afterFrame > completedFrame) {
             pending_[kept++] = p;
             continue;
+        }
+        // A parent owns storage used by its live views, including views that
+        // outlive the frame in which the caller retired the parent handle.
+        if(std::any_of(viewParents_.begin(),viewParents_.end(),[&](const auto& view){return view.second==p.resource;})) {
+            pending_[kept++]=p;continue;
         }
         destroy(p.resource);
     }

@@ -233,6 +233,9 @@ enum class RtProxyTransition : u8 { None, Mask, Emissive, Reassign, FullUpload }
 enum class ShadowMode : u8 { Off, CSM, RT };
 enum class DirectLightingMode : u8 { Legacy, BruteForce, Clustered, ReSTIR };
 enum class GiMode : u8 { Off, DDGI, Cache, ReSTIR };
+enum class ReflectionMode : u8 { Off, SSR, RT, Probes };
+enum class AoMode : u8 { Off, GTAO, RTAO };
+enum class LightingDenoiseMode : u8 { Off, Custom, MetalFX };
 [[nodiscard]] const char* shadowModeName(ShadowMode);
 [[nodiscard]] const char* directLightingModeName(DirectLightingMode);
 [[nodiscard]] const char* giModeName(GiMode);
@@ -339,6 +342,15 @@ struct LaunchOptions {
     RtCorruption debugRtCorrupt = RtCorruption::None;
     RtProbe      rtProbe = RtProbe::None;
     // F10-F12: writing presets only; numerical adoption requires tester evidence.
+    bool atmosphere=false,fog=false,clouds=false,cloudFullRate=false;
+    float atmoDayLength=1200,atmoStartHour=12,planetCameraHeight=-1;
+    u32 timeJumpEveryN=0;
+    ReflectionMode reflections=ReflectionMode::Off;
+    AoMode ao=AoMode::Off;
+    LightingDenoiseMode lightingDenoise=LightingDenoiseMode::Off;
+    float aoRadius=1.0f;u32 reflectionSamples=1;
+    bool reflectionCaptureProbe=false;
+    std::string reflectionProbePath;
     ShadowMode shadows = ShadowMode::Off;
     DirectLightingMode directLighting = DirectLightingMode::Legacy;
     GiMode gi = GiMode::Off;
@@ -348,11 +360,11 @@ struct LaunchOptions {
     u32 shadowMapResolution = 2048, lightingSeed = 1;
     u32 lightingCandidates = 8, lightingSpatialSamples = 4, giRays = 64;
     u32 debugLighting = 0, debugLightingCorrupt = 0, debugGiCorrupt=0;
-    std::string exportReference, captureLinear, captureLinearSequence, lightingScene;
+    std::string exportReference, captureLinear, captureLinearSequence, lightingScene,reflectionScene;
     bool giProbeAnchor=false;
     float giAnchor[3]{},giSpacing=0;
     u32 giGrid[3]{};
-    u32 exportReferenceFrame=0, captureLinearFrame=0, captureLinearSignal=0; // 0 HDR, 1 indirect diffuse, 2 local direct, 3 shadow (R), 4 receiver position, 5 receiver normal
+    u32 exportReferenceFrame=0, captureLinearFrame=0, captureLinearSignal=0; // 0 HDR, 1 indirect diffuse, 2 direct; tester reserves 3 shadow, 4 world position, 5 world normal; 6 specular, 7 AO
     // F7/F8 renderer, temporal reconstruction, capture and bounded diagnostics.
     std::string scenePath;
     bool visibility = false, materialBinning = false; // measured baseline; specialization stays opt-in

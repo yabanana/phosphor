@@ -87,6 +87,12 @@ add_library(phosphor_core STATIC
     src/renderer/radiance_cache.cpp
     src/renderer/gi_lighting_epoch.cpp
     src/renderer/offline_reference.cpp
+    src/renderer/reflection_settings.cpp
+    src/renderer/reflection_probe.cpp
+    src/renderer/denoise_settings.cpp
+    src/renderer/atmosphere.cpp
+    src/renderer/fog_settings.cpp
+    src/renderer/cloud_settings.cpp
     src/renderer/meshlet_cull_reference.cpp
     src/renderer/meshlet_check.cpp
     src/renderer/scene_check.cpp
@@ -115,6 +121,7 @@ add_library(phosphor_core STATIC
     src/scene/texture_manager.cpp
     src/testbench/cornell_box.cpp
     src/testbench/lighting_validation.cpp
+    src/testbench/reflection_validation.cpp
     src/testbench/culling_viz.cpp
     src/testbench/many_lights.cpp
     src/testbench/million_instances.cpp

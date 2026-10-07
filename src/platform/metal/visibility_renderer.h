@@ -50,6 +50,7 @@ class VisibilityRenderer {
     [[nodiscard]] MTL::GPUAddress temporalAddress() const { return temporalAddress_; }
     [[nodiscard]] MTL::GPUAddress previousPoseAddress() const { return previousInstances_[view_]->gpuAddress(); }
     rg::TextureRef addPresent(rg::RenderGraph &graph, rg::TextureRef drawable);
+    void replaceColor(rg::TextureRef value) { outputs_[0]=value; }
     [[nodiscard]] rg::TextureRef color() const { return outputs_[0]; }
     [[nodiscard]] rg::TextureRef visibility() const { return visibility_; }
     [[nodiscard]] rg::TextureRef normalRoughness() const { return outputs_[1]; }

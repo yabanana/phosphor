@@ -18,6 +18,7 @@ class TemporalWorker;
 class PostProcessor {
   public:
     struct Options {
+        bool physicalFloat32 = false;
         bool temporal = false, autoExposure = false, corruptExposure = false, forceReset = false;
         bool checkCurves = false, corruptCurves = false;
         bool neutralMipBias = false, isolatedMetalFX = false;
@@ -36,7 +37,7 @@ class PostProcessor {
                                    float exposure, float headroom = 1);
     void finishFrame(const float *matrix);
     rg::TextureRef addToGraph(rg::RenderGraph &, VisibilityRenderer &, rg::TextureRef drawable,
-                              rg::Format outputFormat = rg::Format::BGRA8Srgb);
+                              rg::Format outputFormat = rg::Format::BGRA8Srgb,rg::TextureRef reconstructed = {});
     rg::TextureRef addSDRCapture(rg::RenderGraph &, rg::TextureRef display);
     void bindFrame(class MetalGraphExecutor &);
     [[nodiscard]] u32 inputWidth() const { return params_.inputWidth; }
@@ -99,6 +100,7 @@ class PostProcessor {
     u32 width_ = 0, height_ = 0, slot_ = 0, view_ = 0, stableFrames_ = 0;
     u64 frame_ = 0, temporalFrames_ = 0, fallbackFrames_ = 0, resets_ = 0;
     bool supported_ = false, reset_ = true;
+    bool externalReconstruction_ = false;
     GPUTemporalParams temporal_{};
     GPUPostParams params_{};
     MTL::GPUAddress paramsAddress_ = 0;

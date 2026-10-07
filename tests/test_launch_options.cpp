@@ -1119,3 +1119,12 @@ TEST_CASE("F10 raw shadow capture requires an enabled shadow producer") {
     REQUIRE(parse({"--render-path","visibility","--shadows","csm","--capture-linear-signal","shadow-normal"},o,error));
     CHECK(o.captureLinearSignal==5);
 }
+
+TEST_CASE("F13 capture IDs preserve tester shadow diagnostics and named scalar AO") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--render-path","visibility","--reflections","ssr","--capture-linear-signal","specular"},o,error));
+    CHECK(o.captureLinearSignal==6);
+    REQUIRE(parse({"--render-path","visibility","--ao","gtao","--capture-linear-signal","ao"},o,error));
+    CHECK(o.captureLinearSignal==7);
+    CHECK_FALSE(parse({"--render-path","visibility","--capture-linear-signal","ao"},o,error));
+}

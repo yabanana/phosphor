@@ -4,6 +4,14 @@
 namespace phosphor {
 class GiPasses {
 public:
+    struct ReadResources {
+        MTL::Buffer *states=nullptr,*cache=nullptr;
+        MTL::GPUAddress params=0,extra=0;
+        rg::BufferRef stateRef{},cacheRef{};
+        rg::TextureRef irradiance{},moments{};
+        GPUProbeGridParams parameters{};
+    };
+    [[nodiscard]] ReadResources readResources() const;
     GiPasses(MetalContext&,PipelineCache&,SceneRenderer&,AccelerationStructures&,ShadowPasses&,DirectLightingPasses&,const LaunchOptions&);
     ~GiPasses();
     void loadScene(const GpuScene&,const SceneStore&);

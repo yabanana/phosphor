@@ -202,7 +202,8 @@ struct RtReport {
 // records evidence; these fields identify executed requests, not phase status.
 struct LightingReport {
     bool present=false, reduced=false, contact=false, cache=false;
-    std::string shadows, direct, gi;
+    std::string shadows, direct, gi,reflections,ao,denoiseRequested,denoiseEffective,denoiseFallback,probeSource;
+    bool atmosphere=false,fog=false,clouds=false,cloudFullRate=false;
     u32 seed=1, sunIndex=~0u, candidates=0, spatialSamples=0, giRays=0;
     u64 historyResets=0;
     u32 checks=0, failures=0;

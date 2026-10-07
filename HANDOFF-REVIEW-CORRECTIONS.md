@@ -44,3 +44,14 @@ Additional DI sampling corrections (source-only):
 
 The subsequent numeric-zero guard commit rejects poisoned histories before M;
 source tests include NaN/Inf. Neither energetic nor spectral evidence was run.
+
+Final numeric-zero guards (both required after the counted-zero changes):
+
+- 06b3ae5276c605fc60f678d7b3a7a5e0f9ea4101: GI poisoned zero-history rejection.
+- c9c65d193a6341df10d3eea7befabe2409f4034e: DI poisoned zero-history rejection.
+
+These guards preserve a finite, valid zero proposal and reject NaN/Inf state
+before adding its proposal count. Writer-side tests remain NOT EXECUTED.
+Tester-owned follow-ups are separate: 2afbf20 syntax/alpha, bad600b inherited
+ICB texture binding, 3afcffd bounded caster dispatch, 8e533bf receiver normal
+normalization. Preserve the F9 owner's compiler/archive and drain fixes.

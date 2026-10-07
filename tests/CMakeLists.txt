@@ -51,6 +51,12 @@ add_executable(phosphor_tests
     test_gi.cpp
     test_gi_lighting_epoch.cpp
     test_lighting_validation.cpp
+    test_reflection_validation.cpp
+    test_reflections.cpp
+    test_denoise.cpp
+    test_atmosphere.cpp
+    test_volumes.cpp
+    test_metalfx_denoise_contract.cpp
     test_scene_check.cpp
     test_scene_extract.cpp
     test_scene_store.cpp
@@ -72,3 +78,11 @@ target_compile_definitions(phosphor_tests PRIVATE PHOSPHOR_SOURCE_DIR="${CMAKE_S
 target_include_directories(phosphor_tests PRIVATE ${CMAKE_SOURCE_DIR}/tools)
 target_compile_options(phosphor_tests PRIVATE ${PHOSPHOR_WARNINGS})
 add_test(NAME phosphor_tests COMMAND phosphor_tests)
+
+# Reference semantic fixture is independent of a renderer/Mitsuba installation.
+# Written only; the tester executes it along with the compiled unit corpus.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME f12_reference_contract COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_f12_reference_contract.py)
+    add_test(NAME f13_temporal_light_metrics COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_temporal_light_metrics.py)
+endif()

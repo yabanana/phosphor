@@ -570,3 +570,5 @@ bool ShadowPasses::check(u32 slot)const {
     for(u32 i=0;i<f.expectedCount;++i)if(actual[i]!=f.expectedFlags[i])return false;return true;
 }
 }
+
+namespace phosphor {ShadowPasses::ReadResources ShadowPasses::readResources()const{return {impl_->maps,impl_->paramsAddress,impl_->params};}}
