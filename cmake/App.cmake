@@ -186,6 +186,7 @@ add_executable(phosphor
     src/platform/metal/scene_renderer.cpp
     src/platform/metal/acceleration_structures.cpp
     src/platform/metal/rt_visibility_check.cpp
+    src/platform/metal/rt_consumer.cpp
     src/platform/metal/shader_reloader.cpp
     src/platform/metal/transient_heap.cpp
     src/platform/metal/upload_ring.cpp

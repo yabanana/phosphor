@@ -9,7 +9,7 @@
 #include <memory>
 #include <span>
 
-namespace MTL { class Buffer; }
+namespace MTL { class Buffer; class AccelerationStructure; }
 
 namespace phosphor {
 class MetalContext;
@@ -32,6 +32,13 @@ public:
         u32 width = 0, height = 0, allocationWidth = 0, allocationHeight = 0;
         FrameConstants constants{};
         bool check = false;
+    };
+    // Borrowed resources for the completed CPU frame slot. A consumer owns its
+    // own PSO-relative IFT; diagnostic tables are deliberately not exposed.
+    struct TraceResources {
+        MTL::AccelerationStructure* tlas = nullptr;
+        MTL::Buffer *materials = nullptr, *textures = nullptr, *vertices = nullptr, *indices = nullptr;
+        MTL::Buffer *instances = nullptr, *meshes = nullptr, *params = nullptr;
     };
     struct Readback {
         bool valid = false;
@@ -66,6 +73,9 @@ public:
     [[nodiscard]] rg::AccelerationStructureRef tlasRef() const;
     [[nodiscard]] rg::BufferRef geometryBufferRef() const;
     [[nodiscard]] Readback readback(u32 slot) const;
+    [[nodiscard]] TraceResources traceResources(u32 slot) const;
+    // Traversal dereferences every referenced BLAS, not only the TLAS.
+    void declareTraceReads(rg::PassBuilder&) const;
     [[nodiscard]] GPURtCounters counters(u32 slot) const;
     [[nodiscard]] RtReport report() const;
     [[nodiscard]] MTL::Buffer* rayBuffer(u32 slot) const;

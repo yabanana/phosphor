@@ -101,6 +101,18 @@ const char* rtProxyTransitionName(RtProxyTransition transition) {
     return "none";
 }
 
+const char* shadowModeName(ShadowMode m) {
+    switch (m) { case ShadowMode::CSM: return "csm"; case ShadowMode::RT: return "rt"; default: return "off"; }
+}
+const char* directLightingModeName(DirectLightingMode m) {
+    switch (m) { case DirectLightingMode::BruteForce: return "brute"; case DirectLightingMode::Clustered: return "clustered";
+        case DirectLightingMode::ReSTIR: return "restir"; default: return "legacy"; }
+}
+const char* giModeName(GiMode m) {
+    switch (m) { case GiMode::DDGI: return "ddgi"; case GiMode::Cache: return "cache";
+        case GiMode::ReSTIR: return "restir"; default: return "off"; }
+}
+
 bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
                         LaunchOptions& out, std::string& error) {
     out = LaunchOptions{};
@@ -441,6 +453,60 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if (*value == "on") out.rtEnabled = true;
             else if (*value == "off") out.rtEnabled = false;
             else { error = "--rt: expected off or on"; return false; }
+        } else if (arg == "--shadows") {
+            auto v = needValue(); if (!v) return false;
+            if (*v == "off") out.shadows = ShadowMode::Off;
+            else if (*v == "csm") out.shadows = ShadowMode::CSM;
+            else if (*v == "rt") out.shadows = ShadowMode::RT;
+            else { error = "--shadows: expected off, csm or rt"; return false; }
+        } else if (arg == "--contact-shadows" || arg == "--shadow-cache") {
+            auto v = needValue(); if (!v) return false;
+            if (*v != "off" && *v != "on") { error = std::string(arg) + ": expected off or on"; return false; }
+            (arg == "--contact-shadows" ? out.contactShadows : out.shadowCache) = *v == "on";
+        } else if (arg == "--lighting") {
+            auto v = needValue(); if (!v) return false;
+            if (*v == "legacy") out.directLighting = DirectLightingMode::Legacy;
+            else if (*v == "brute") out.directLighting = DirectLightingMode::BruteForce;
+            else if (*v == "clustered") out.directLighting = DirectLightingMode::Clustered;
+            else if (*v == "restir") out.directLighting = DirectLightingMode::ReSTIR;
+            else { error = "--lighting: expected legacy, brute, clustered or restir"; return false; }
+        } else if (arg == "--gi") {
+            auto v = needValue(); if (!v) return false;
+            if (*v == "off") out.gi = GiMode::Off;
+            else if (*v == "ddgi") out.gi = GiMode::DDGI;
+            else if (*v == "cache") out.gi = GiMode::Cache;
+            else if (*v == "restir") out.gi = GiMode::ReSTIR;
+            else { error = "--gi: expected off, ddgi, cache or restir"; return false; }
+        } else if (arg == "--lighting-preset") {
+            auto v = needValue(); if (!v) return false;
+            if (*v != "full" && *v != "reduced") { error = "--lighting-preset: expected full or reduced"; return false; }
+            out.reducedLighting = *v == "reduced";
+        } else if (arg == "--shadow-map-size") {
+            if (!needCount(out.shadowMapResolution)) return false;
+        } else if (arg == "--lighting-seed") {
+            if (!needCount(out.lightingSeed)) return false;
+        } else if (arg == "--lighting-candidates") {
+            if (!needCount(out.lightingCandidates)) return false;
+        } else if (arg == "--lighting-spatial-samples") {
+            if (!needCount(out.lightingSpatialSamples)) return false;
+        } else if (arg == "--gi-rays") {
+            if (!needCount(out.giRays)) return false;
+        } else if (arg == "--export-reference") {
+            auto v = needValue(); if (!v || v->empty() || v->starts_with("--")) {
+                error = "--export-reference: expected output directory"; return false;
+            }
+            out.exportReference = *v;
+        } else if (arg == "--debug-lighting") {
+            if (!needCount(out.debugLighting)) return false;
+        } else if (arg == "--debug-lighting-corrupt") {
+            auto v = needValue(); if (!v) return false;
+            if (*v == "bias") out.debugLightingCorrupt = 1;
+            else if (*v == "caster") out.debugLightingCorrupt = 2;
+            else if (*v == "history") out.debugLightingCorrupt = 3;
+            else if (*v == "cache") out.debugLightingCorrupt = 4;
+            else if (*v == "pdf") out.debugLightingCorrupt = 5;
+            else if (*v == "light") out.debugLightingCorrupt = 6;
+            else { error = "--debug-lighting-corrupt: expected bias, caster, history, cache, pdf or light"; return false; }
         } else if (arg == "--rt-tlas-rebuild-every") {
             if (!needCount(out.rtTlasRebuildEvery)) return false;
             rtSettingsSpecified = true;
@@ -900,6 +966,28 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             return false;
         }
     }
+    const bool lighting = out.shadows != ShadowMode::Off || out.directLighting != DirectLightingMode::Legacy || out.gi != GiMode::Off;
+    if (lighting && (!out.visibility || out.tileResolve || out.adaptiveShading || out.graphScenario || out.memoryStress || out.transientTest)) {
+        error = "F10-F12 lighting requires --render-path visibility with generic/binned resolve and a scene"; return false;
+    }
+    if ((out.shadows == ShadowMode::RT || out.directLighting != DirectLightingMode::Legacy || out.gi != GiMode::Off) && !out.rtEnabled) {
+        error = "RT sun, local visibility and GI require --rt on"; return false;
+    }
+    if ((out.contactShadows || out.shadowCache) && out.shadows == ShadowMode::Off) {
+        error = "Contact/cache requires an enabled shadow signal"; return false;
+    }
+    if (out.shadowMapResolution < 128 || out.shadowMapResolution > 8192 ||
+        (out.shadowMapResolution & (out.shadowMapResolution - 1)) || out.lightingCandidates < 1 ||
+        out.lightingCandidates > 64 || out.lightingSpatialSamples > 32 || out.giRays < 8 || out.giRays > 512) {
+        error = "Lighting preset exceeds bounded map/candidate/spatial/ray limits"; return false;
+    }
+    if (out.gi == GiMode::ReSTIR && (out.forceApple9 || out.reducedLighting)) {
+        error = "ReSTIR GI requires the full T2 preset; select DDGI on the reduced path"; return false;
+    }
+    if (out.debugLightingCorrupt && (!lighting || !out.debugLighting)) {
+        error = "Lighting corruption requires an enabled lighting path and --debug-lighting N"; return false;
+    }
+    if (out.debugLighting && !lighting) { error = "--debug-lighting requires F10-F12 lighting"; return false; }
     // F9: diagnostics must never appear accepted when their graph is absent.
     if (!out.rtEnabled && (rtSettingsSpecified || out.rtProxyManifest || out.debugView == MeshletDebugView::RT)) {
         error = "RT settings / --debug-view rt require --rt on";
