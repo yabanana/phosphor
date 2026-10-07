@@ -33,6 +33,7 @@
 #include "platform/metal/acceleration_structures.h"
 #include "platform/metal/rt_visibility_check.h"
 #include "platform/metal/shadow_passes.h"
+#include "platform/metal/direct_lighting_passes.h"
 #include "renderer/rt_check.h"
 #include "renderer/cull_reference.h"
 #include "renderer/gpu_scene.h"
@@ -311,6 +312,8 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     }
     if (options_.shadows != ShadowMode::Off || options_.directLighting != DirectLightingMode::Legacy || options_.gi != GiMode::Off)
         shadows_ = std::make_unique<ShadowPasses>(*context_, *pipelines_, *renderer_, *mesh_, *visibility_, rt_.get(), options_);
+    if (options_.directLighting != DirectLightingMode::Legacy || options_.gi != GiMode::Off)
+        directLighting_=std::make_unique<DirectLightingPasses>(*context_,*pipelines_,*renderer_,*mesh_,*visibility_,*rt_,*shadows_,options_);
     ecs_        = std::make_unique<ECS>();
     gpuScene_   = std::make_unique<GpuScene>();
     {
@@ -395,6 +398,7 @@ Engine::~Engine() {
     if (context_) context_->waitIdle();
     rtChecker_.reset();
     rtVisibility_.reset();
+    directLighting_.reset();
     shadows_.reset();
     rt_.reset();
 
@@ -845,7 +849,7 @@ void Engine::finishBenchmark() {
         report.lighting.direct=directLightingModeName(options_.directLighting);report.lighting.gi=giModeName(options_.gi);
         report.lighting.reduced=options_.reducedLighting || options_.forceApple9;report.lighting.contact=options_.contactShadows;
         report.lighting.cache=options_.shadowCache;report.lighting.seed=options_.lightingSeed;report.lighting.sunIndex=shadows_->sunIndex();
-        report.lighting.candidates=options_.lightingCandidates;report.lighting.spatialSamples=options_.lightingSpatialSamples;report.lighting.giRays=options_.giRays;
+        report.lighting.candidates=options_.lightingCandidates;report.lighting.spatialSamples=options_.lightingSpatialSamples;report.lighting.giRays=options_.giRays;report.lighting.checks=lightingChecks_;report.lighting.failures=lightingFailures_;
     }
     if (rt_) {
         report.rt = rt_->report();
@@ -1062,6 +1066,7 @@ void Engine::switchTestBench(TestBenchType type) {
     TestBenchParams benchParams;
     benchParams.scenePath = options_.scenePath;
     benchParams.instances         = options_.sceneInstances;
+    benchParams.localLightCount=options_.localLightCount;benchParams.areaLights=options_.areaLights;benchParams.stationaryLights=options_.stationaryLights;
     benchParams.meshes            = options_.sceneMeshes;
     benchParams.dynamicCpuPercent = options_.dynamicCpuPercent;
     benchParams.churn             = options_.churn;
@@ -1088,6 +1093,7 @@ void Engine::switchTestBench(TestBenchType type) {
     if (mesh_) mesh_->loadScene(*store_, *gpuScene_);
     if (rt_) rt_->loadScene(*gpuScene_, *store_, *textures_);
     if (shadows_) shadows_->loadScene(*gpuScene_, *store_);
+    if (directLighting_)directLighting_->loadScene(*gpuScene_,*store_);
     if (options_.debugRtDeform && gpuScene_->getMeshCount()) {
         const u32 first = gpuScene_->meshInfos()[0].vertexOffset;
         const u32 end = gpuScene_->getMeshCount() > 1 ? gpuScene_->meshInfos()[1].vertexOffset
@@ -1508,6 +1514,7 @@ bool Engine::frame(float dt) {
         sf.cut=viewCameraCut;sf.reset=options_.historyResetEvery && presentedFrames_%options_.historyResetEvery==0;
         sf.constants=constants;sf.nearPlane=camera_->getNear();std::memcpy(sf.unjitteredVP,&unjittered[0][0],64);
         shadows_->prepareFrame(*store_,lights_,sf);
+        if(directLighting_)directLighting_->prepareFrame(*gpuScene_,*store_,lights_,sf);
         const u32 flags=(options_.shadows!=ShadowMode::Off?1u:0u) | (options_.directLighting!=DirectLightingMode::Legacy?2u:0u) | (options_.gi!=GiMode::Off?4u:0u);
         visibility_->prepareLighting(flags,shadows_->sunIndex());
     }
@@ -1538,7 +1545,7 @@ bool Engine::frame(float dt) {
                        renderBackingHeight_,
                        rt_ ? rt_->version() : 0,
                        rtVisibility_ && rtVisibility_->ready(),
-                       shadows_ ? shadows_->version() : 0};
+                       (shadows_ ? shadows_->version() : 0) ^ ((directLighting_ ? directLighting_->version() : 0)<<32)};
     if (!(key == graphKey_) || !graphExecutor_->valid()) {
         frameFlags_ |= FrameGraphCompile;
         if (key.width != graphKey_.width || key.height != graphKey_.height) frameFlags_ |= FrameResize;
@@ -1574,6 +1581,7 @@ bool Engine::frame(float dt) {
     if (asyncProbe_) asyncProbe_->bind(*graphExecutor_, frame.slot);
     if (rt_) rt_->bindResources(*graphExecutor_);
     if (shadows_) shadows_->bindFrame(*graphExecutor_);
+    if (directLighting_)directLighting_->bindFrame(*graphExecutor_);
     if (rtVisibility_) rtVisibility_->bindFrame(*graphExecutor_);
     {
         PH_ZONE("Graph execute");
@@ -2013,9 +2021,10 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
         if (visibility_) {
             if (shadows_) {
                 shadows_->addToGraph(frameGraph_,color,depth);
-                visibility_->setLightingTextures(shadows_->mask(),shadows_->zeroLighting(),shadows_->zeroLighting());
+                if(directLighting_)directLighting_->addToGraph(frameGraph_,color,shadows_->depth());
+                visibility_->setLightingTextures(shadows_->mask(),directLighting_?directLighting_->direct():shadows_->zeroLighting(),shadows_->zeroLighting());
             }
-            visibility_->addResolve(frameGraph_, color, depth);
+            visibility_->addResolve(frameGraph_, color, shadows_?shadows_->depth():depth);
             color = post_ ? post_->addToGraph(frameGraph_, *visibility_, drawableRef_, graphKey_.outputFormat)
                           : visibility_->addPresent(frameGraph_, drawableRef_);
             visibility_->addChecks(frameGraph_);

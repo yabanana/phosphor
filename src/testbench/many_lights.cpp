@@ -103,9 +103,9 @@ void ManyLights::setup(ECS& ecs, GpuScene& gpuScene, TextureManager& textures) {
     std::uniform_real_distribution<float> speedDist(0.2f, 1.5f);
     std::uniform_real_distribution<float> phaseDist(0.0f, 6.2832f);
 
-    lightAnims_.reserve(LIGHT_COUNT);
+    lightAnims_.reserve(lightCount_);
 
-    for (u32 i = 0; i < LIGHT_COUNT; ++i) {
+    for (u32 i = 0; i < lightCount_; ++i) {
         EntityID e = ecs.createEntity();
         entities_.push_back(e);
 
@@ -133,11 +133,23 @@ void ManyLights::setup(ECS& ecs, GpuScene& gpuScene, TextureManager& textures) {
         lightAnims_.push_back({e, center, radius, speed, phase, y});
     }
 
+    if(areaLights_) {
+        std::vector<GPUSampledLight> lights;
+        for(u32 shape=0;shape<3;++shape) {
+            GPUSampledLight l{};l.id=0x40000000u+shape;l.generation=1;l.type=DI_LIGHT_RECTANGLE+shape;
+            l.position[0]=float(shape)*6-6;l.position[1]=6;l.position[2]=0;
+            l.axisU[0]=2;l.axisV[2]=1;l.radius=0.5f;
+            l.emission[0]=l.emission[1]=l.emission[2]=4;l.range=0;l.flags=DI_LIGHT_TWO_SIDED;
+            lights.push_back(l);
+        }
+        gpuScene.updateSampledLights(std::move(lights));
+    }
     time_ = 0.0f;
-    LOG_INFO("ManyLights: %u lights created", LIGHT_COUNT);
+    LOG_INFO("ManyLights: %u lights created", lightCount_);
 }
 
 void ManyLights::update(float dt, ECS& ecs) {
+    if(stationary_)return;
     time_ += dt;
     for (auto& anim : lightAnims_) {
         float angle = anim.phase + time_ * anim.orbitSpeed;

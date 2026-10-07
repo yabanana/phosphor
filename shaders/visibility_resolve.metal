@@ -364,3 +364,84 @@ fragment half4 visibility_present_fs(PresentVertex in [[stage_in]], constant GPU
         return half4(half3(value.rgb), 1.0h);
     return half4(half3(tonemapACES(value.rgb * p.exposure)), 1.0h);
 }
+
+kernel void material_lighting_guides(
+    constant FrameConstants &frame [[buffer(0)]], const device GPUVertex *vertices [[buffer(1)]],
+    const device GPUInstance *instances [[buffer(2)]], const device GPUMaterial *materials [[buffer(3)]],
+    const device GPULight *lights [[buffer(4)]], const device TextureHandle *textures [[buffer(5)]],
+    const device GPUMeshlet *meshlets [[buffer(6)]], const device uint *meshletVertices [[buffer(7)]],
+    const device uchar *triangles [[buffer(8)]], const device GPUMeshletCandidate *a [[buffer(9)]],
+    const device GPUMeshletCandidate *b [[buffer(10)]], constant GPUVisibilityParams &p [[buffer(11)]],
+    const device GPUInstance *previousInstances [[buffer(14)]], constant GPUTemporalParams &temporal [[buffer(15)]],
+    device GPUDISurface* output [[buffer(16)]], const device GPUShadowSurface* geometry [[buffer(17)]],
+    constant GPUDIParams& di [[buffer(18)]], texture2d<uint,access::read> visibility [[texture(0)]],
+    texture2d<float,access::write> motion [[texture(7)]],
+    texture2d<float,access::write> fallbackShading [[texture(8)]],
+    texture2d<float,access::write> fallbackAlbedo [[texture(9)]],uint2 pixel [[thread_position_in_grid]]) {
+    if(any(pixel>=uint2(p.width,p.height)))return;
+    const uint index=pixel.y*p.width+pixel.x;
+    output[index]=GPUDISurface{};motion.write(float4(0),pixel);
+    fallbackShading.write(float4(0),pixel);fallbackAlbedo.write(float4(0),pixel);
+    const uint id=visibility.read(pixel).x;
+    if(id==VISIBILITY_BACKGROUND || visibilityCluster(id)>=2u*p.candidateCapacity || !geometry[index].valid)return;
+    const GPUMeshletCandidate candidate = candidateOf(id, p, a, b);
+    const device GPUInstance &instance = instances[candidate.slot];
+    if (instance.materialIndex >= p.materialCount)
+        return;
+    if (kResolveClass < 4u && materialClass(materials[instance.materialIndex], p) != kResolveClass)
+        return;
+    const GPUMeshlet m = meshlets[candidate.meshlet];
+    const uint triangle = visibilityTriangle(id);
+    if (triangle >= m.triangleCount)
+        return;
+    const GPUVertex v0 = vertices[meshletVertices[m.vertexOffset + triangles[m.triangleOffset + triangle * 3]]];
+    const GPUVertex v1 = vertices[meshletVertices[m.vertexOffset + triangles[m.triangleOffset + triangle * 3 + 1]]];
+    const GPUVertex v2 = vertices[meshletVertices[m.vertexOffset + triangles[m.triangleOffset + triangle * 3 + 2]]];
+    const float4x4 model = visibilityMatrix(instance.modelMatrix);
+    const float4x4 vp = visibilityMatrix(frame.viewProjection);
+    const float4 w0 = model * float4(v0.px, v0.py, v0.pz, 1), w1 = model * float4(v1.px, v1.py, v1.pz, 1),
+                 w2 = model * float4(v2.px, v2.py, v2.pz, 1);
+    const float4 c0 = vp * w0, c1 = vp * w1, c2 = vp * w2;
+    const auto bary =
+        visibilityBarycentrics(c0.x, c0.y, c0.w, c1.x, c1.y, c1.w, c2.x, c2.y, c2.w, float(pixel.x) + 0.5f,
+                               float(pixel.y) + 0.5f, float(p.width), float(p.height));
+    if (!bary.valid)
+        return;
+    const float3 weights = float3(bary.value[0], bary.value[1], bary.value[2]);
+    const float2 uv0 = float2(v0.u, v0.v), uv1 = float2(v1.u, v1.v), uv2 = float2(v2.u, v2.v);
+    const float3x3 normalMatrix = float3x3(model[0].xyz, model[1].xyz, model[2].xyz);
+    SurfaceInput surface;
+    surface.worldPos = w0.xyz * weights.x + w1.xyz * weights.y + w2.xyz * weights.z;
+    surface.normal =
+        surfaceNormal(model, float3(v0.nx, v0.ny, v0.nz) * weights.x + float3(v1.nx, v1.ny, v1.nz) * weights.y +
+                                 float3(v2.nx, v2.ny, v2.nz) * weights.z);
+    surface.tangent =
+        float4(normalMatrix * (float3(v0.tx, v0.ty, v0.tz) * weights.x + float3(v1.tx, v1.ty, v1.tz) * weights.y +
+                               float3(v2.tx, v2.ty, v2.tz) * weights.z),
+               (v0.tw * weights.x + v1.tw * weights.y + v2.tw * weights.z) *
+                   ((instance.flags & INSTANCE_FLAG_MIRRORED) ? -1.0f : 1.0f));
+    surface.uv = uv0 * weights.x + uv1 * weights.y + uv2 * weights.z;
+    const float bias = exp2(p.mipBias);
+    surface.uvDx = (uv0 * bary.dx[0] + uv1 * bary.dx[1] + uv2 * bary.dx[2]) * bias;
+    surface.uvDy = (uv0 * bary.dy[0] + uv1 * bary.dy[1] + uv2 * bary.dy[2]) * bias;
+    surface.materialIndex = instance.materialIndex;
+    surface.mirrored = (instance.flags & INSTANCE_FLAG_MIRRORED) != 0;
+    const float3 eye = float3(frame.cameraPosition[0], frame.cameraPosition[1], frame.cameraPosition[2]);
+    surface.frontFacing = dot(cross(w1.xyz - w0.xyz, w2.xyz - w0.xyz), eye - surface.worldPos) > 0;
+    const ShadingResult value=shadeSurface(surface,frame,materials,lights,textures,false);
+    GPUDISurface guide{};const GPUShadowSurface geometric=geometry[index];
+    for(uint c=0;c<3;++c) {
+        guide.position[c]=geometric.position[c];guide.geometricNormal[c]=geometric.geometricNormal[c];
+        guide.shadingNormal[c]=value.normal[c];guide.albedo[c]=value.baseColor[c];
+        guide.viewDirection[c]=normalize(eye-surface.worldPos)[c];
+    }
+    guide.depth=geometric.viewDepth;guide.roughness=value.roughness;guide.metallic=value.metallic;
+    guide.materialRevision=di.historyEpoch;guide.instanceSlot=candidate.slot;guide.instanceGeneration=instance.generation;guide.valid=1;
+    output[index]=guide;
+    const float3 objectPoint=float3(v0.px,v0.py,v0.pz)*weights.x+float3(v1.px,v1.py,v1.pz)*weights.y+float3(v2.px,v2.py,v2.pz)*weights.z;
+    const auto old=previousInstances[candidate.slot];
+    const bool valid=temporal.historyValid && old.generation==instance.generation && (old.flags&INSTANCE_FLAG_VALID);
+    const float4 current=temporalMatrix(temporal.currentViewProjection)*float4(surface.worldPos,1);
+    const float4 previous=valid?temporalMatrix(temporal.previousViewProjection)*visibilityMatrix(old.modelMatrix)*float4(objectPoint,1):current;
+    motion.write(float4(temporalMotion(current,previous,temporal,valid),0,0),pixel);
+}

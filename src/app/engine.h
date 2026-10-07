@@ -58,6 +58,7 @@ class AccelerationStructures;
 class RtChecker;
 class RtVisibilityChecker;
 class ShadowPasses;
+class DirectLightingPasses;
 
 // ---------------------------------------------------------------------------
 // Engine -- composition root for the macOS app.
@@ -140,6 +141,8 @@ private:
     std::array<u64, 3> rtCounterFrames_{~u64{0}, ~u64{0}, ~u64{0}};
     std::unique_ptr<VisibilityRenderer> visibility_;
     std::unique_ptr<ShadowPasses> shadows_;
+    std::unique_ptr<DirectLightingPasses> directLighting_;
+    u32 lightingChecks_=0,lightingFailures_=0;
     std::unique_ptr<PostProcessor> post_;
     u64 sceneEpoch_ = 0;
     float dynamicScale_ = 1.0f;

@@ -31,3 +31,17 @@ kernel void shadow_receiver_pack(constant GPUShadowParams& p [[buffer(1)]],
 kernel void lighting_zero(texture2d<float,access::write> output [[texture(0)]], uint2 p [[thread_position_in_grid]]) {
     if(all(p<uint2(output.get_width(),output.get_height())))output.write(float4(0),p);
 }
+
+kernel void di_receiver_pack(constant FrameConstants& frame [[buffer(0)]],constant GPUDIParams& p [[buffer(1)]],
+    device GPUDISurface* surfaces [[buffer(2)]],texture2d<float,access::read> world [[texture(5)]],
+    texture2d<float,access::read> geometric [[texture(6)]],texture2d<uint,access::read> keys [[texture(10)]],
+    texture2d<float,access::read> shading [[texture(11)]],texture2d<float,access::read> albedo [[texture(12)]],
+    uint2 pixel [[thread_position_in_grid]]) {
+    if(any(pixel>=uint2(p.width,p.height)))return;const uint4 key=keys.read(pixel);if(key.x==~0u)return;
+    const float4 pos=world.read(pixel),g=geometric.read(pixel),s=shading.read(pixel),a=albedo.read(pixel);
+    GPUDISurface out{};const float3 v=normalize(float3(frame.cameraPosition[0],frame.cameraPosition[1],frame.cameraPosition[2])-pos.xyz);
+    for(uint c=0;c<3;++c){out.position[c]=pos[c];out.geometricNormal[c]=g[c];out.shadingNormal[c]=s[c];out.albedo[c]=a[c];out.viewDirection[c]=v[c];}
+    out.depth=-(guideMatrix(frame.view)*float4(pos.xyz,1)).z;out.roughness=s.w;out.metallic=a.w;
+    out.materialRevision=p.historyEpoch;out.instanceSlot=key.x;out.instanceGeneration=key.y;out.valid=pos.w>0 && g.w>0 && dot(s.xyz,s.xyz)>0;
+    surfaces[pixel.y*p.width+pixel.x]=out;
+}

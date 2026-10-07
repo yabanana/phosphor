@@ -466,6 +466,12 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             else if (*v == "cache") out.gi = GiMode::Cache;
             else if (*v == "restir") out.gi = GiMode::ReSTIR;
             else { error = "--gi: expected off, ddgi, cache or restir"; return false; }
+        } else if (arg == "--local-light-count") {
+            if (!needCount(out.localLightCount) || out.localLightCount > 16384) { error = "--local-light-count: max16384"; return false; }
+        } else if (arg == "--area-lights") {
+            out.areaLights = true;
+        } else if (arg == "--stationary-lights") {
+            out.stationaryLights = true;
         } else if (arg == "--lighting-preset") {
             auto v = needValue(); if (!v) return false;
             if (*v != "full" && *v != "reduced") { error = "--lighting-preset: expected full or reduced"; return false; }
@@ -958,8 +964,11 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     }
     if (out.shadowMapResolution < 128 || out.shadowMapResolution > 8192 ||
         (out.shadowMapResolution & (out.shadowMapResolution - 1)) || out.lightingCandidates < 1 ||
-        out.lightingCandidates > 64 || out.lightingSpatialSamples > 32 || out.giRays < 8 || out.giRays > 512) {
+        out.lightingCandidates > 8 || out.lightingSpatialSamples > 4 || out.giRays < 8 || out.giRays > 512) {
         error = "Lighting preset exceeds bounded map/candidate/spatial/ray limits"; return false;
+    }
+    if (out.gi != GiMode::Off && out.directLighting == DirectLightingMode::Legacy) {
+        error = "GI requires --lighting clustered, brute or restir for emissive direct transport"; return false;
     }
     if (out.gi == GiMode::ReSTIR && (out.forceApple9 || out.reducedLighting)) {
         error = "ReSTIR GI requires the full T2 preset; select DDGI on the reduced path"; return false;

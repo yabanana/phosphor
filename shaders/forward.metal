@@ -237,3 +237,20 @@ fragment ForwardSurfaceOutput forward_surface_lit_fs(SurfaceVertexOut in [[stage
     out.reactive = in.historyValid == 0 ? 1.0h : materials[in.materialIndex].alphaCutoff > 0 ? 0.75h : 0.0h;
     return out;
 }
+
+struct DIReceiverOutput {
+    half4 shading [[color(0)]];
+    half4 albedo [[color(1)]];
+    float2 motion [[color(2)]];
+};
+fragment DIReceiverOutput forward_di_receiver_fs(SurfaceVertexOut in [[stage_in]],bool frontFacing [[front_facing]],
+    constant FrameConstants& frame [[buffer(0)]],const device GPUMaterial* materials [[buffer(3)]],
+    const device GPULight* lights [[buffer(4)]],const device TextureHandle* textures [[buffer(5)]],
+    constant GPUTemporalParams& temporal [[buffer(8)]]) {
+    SurfaceInput surface{in.worldPos,in.normal,in.tangent,in.uv,dfdx(in.uv)*exp2(temporal.mipBias),
+                         dfdy(in.uv)*exp2(temporal.mipBias),in.materialIndex,in.mirrored,frontFacing};
+    const auto value=shadeSurface(surface,frame,materials,lights,textures,true);
+    if(value.alpha<materials[in.materialIndex].alphaCutoff)discard_fragment();
+    return {half4(half3(value.normal),half(value.roughness)),half4(half3(value.baseColor),half(value.metallic)),
+            temporalMotion(in.unjitteredClip,in.previousClip,temporal,in.historyValid!=0)};
+}

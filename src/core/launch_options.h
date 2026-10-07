@@ -337,6 +337,8 @@ struct LaunchOptions {
     DirectLightingMode directLighting = DirectLightingMode::Legacy;
     GiMode gi = GiMode::Off;
     bool contactShadows = false, shadowCache = false, reducedLighting = false;
+    u32 localLightCount = 1024;
+    bool areaLights = false, stationaryLights = false;
     u32 shadowMapResolution = 2048, lightingSeed = 1;
     u32 lightingCandidates = 8, lightingSpatialSamples = 4, giRays = 64;
     u32 debugLighting = 0, debugLightingCorrupt = 0;

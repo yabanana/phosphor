@@ -13,6 +13,7 @@ namespace phosphor {
 
 class ManyLights final : public TestBench {
 public:
+    explicit ManyLights(const TestBenchParams& p = {}) : lightCount_(p.localLightCount), areaLights_(p.areaLights), stationary_(p.stationaryLights) {}
     void setup(ECS& ecs, GpuScene& gpuScene, TextureManager& textures) override;
     void update(float dt, ECS& ecs) override;
     void teardown(ECS& ecs, GpuScene& gpuScene) override;
@@ -21,7 +22,8 @@ public:
     [[nodiscard]] CameraSetup getDefaultCamera() const override;
 
 private:
-    static constexpr u32 LIGHT_COUNT = 1024;
+    u32 lightCount_=1024;
+    bool areaLights_=false, stationary_=false;
     static constexpr float ROOM_SIZE = 30.0f;
     static constexpr float ROOM_HEIGHT = 8.0f;
 

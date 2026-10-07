@@ -61,6 +61,8 @@ set(PHOSPHOR_SHADER_HEADERS
     ${CMAKE_SOURCE_DIR}/src/renderer/visibility_layout.h
     ${CMAKE_SOURCE_DIR}/src/renderer/visibility_math.h
     ${CMAKE_SOURCE_DIR}/src/renderer/gpu_types.h
+    ${CMAKE_SOURCE_DIR}/shaders/restir_common.h
+    ${CMAKE_SOURCE_DIR}/shaders/light_visibility.h
     ${CMAKE_SOURCE_DIR}/src/renderer/shadow_math.h
     ${CMAKE_SOURCE_DIR}/src/renderer/shadow_layout.h
     ${CMAKE_SOURCE_DIR}/shaders/rt_common.h
@@ -190,6 +192,7 @@ add_executable(phosphor
     src/platform/metal/rt_visibility_check.cpp
     src/platform/metal/rt_consumer.cpp
     src/platform/metal/shadow_passes.cpp
+    src/platform/metal/direct_lighting_passes.cpp
     src/platform/metal/shader_reloader.cpp
     src/platform/metal/transient_heap.cpp
     src/platform/metal/upload_ring.cpp
