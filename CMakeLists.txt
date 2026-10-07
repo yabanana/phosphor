@@ -84,6 +84,7 @@ add_library(phosphor_core STATIC
     src/renderer/emissive_domain.cpp
     src/renderer/probe_grid.cpp
     src/renderer/radiance_cache.cpp
+    src/renderer/gi_lighting_epoch.cpp
     src/renderer/offline_reference.cpp
     src/renderer/meshlet_cull_reference.cpp
     src/renderer/meshlet_check.cpp

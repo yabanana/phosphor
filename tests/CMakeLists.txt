@@ -47,6 +47,7 @@ add_executable(phosphor_tests
     test_light_sampling.cpp
     test_emissive_domain.cpp
     test_gi.cpp
+    test_gi_lighting_epoch.cpp
     test_lighting_validation.cpp
     test_scene_check.cpp
     test_scene_extract.cpp

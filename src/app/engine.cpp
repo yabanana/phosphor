@@ -1533,7 +1533,7 @@ bool Engine::frame(float dt) {
         sf.constants=constants;sf.nearPlane=camera_->getNear();std::memcpy(sf.unjitteredVP,&unjittered[0][0],64);
         shadows_->prepareFrame(*store_,lights_,sf);
         if(directLighting_)directLighting_->prepareFrame(*gpuScene_,*store_,lights_,sf);
-        if(gi_)gi_->prepareFrame(*gpuScene_,*store_,sf);
+        if(gi_)gi_->prepareFrame(*gpuScene_,*store_,lights_,sf);
         const u32 flags=(options_.shadows!=ShadowMode::Off?1u:0u) | (options_.directLighting!=DirectLightingMode::Legacy?2u:0u) | (options_.gi!=GiMode::Off?4u:0u);
         visibility_->prepareLighting(flags,shadows_->sunIndex());
     }
