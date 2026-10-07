@@ -6,6 +6,8 @@
 #include "platform/metal/acceleration_structures.h"
 #include "platform/metal/metal_graph_executor.h"
 #include "renderer/local_light_scene.h"
+#include "renderer/emissive_domain.h"
+#include "renderer/transform_reference.h"
 #include "renderer/stochastic_sampling.h"
 #include "renderer/scene_store.h"
 #include "renderer/gpu_scene.h"
@@ -16,6 +18,7 @@ struct DirectLightingPasses::Impl {
     enum Pass { Emit, Guide, Pack, Cluster, Candidate, Temporal, Spatial, Shade, Snapshot,CheckClear,CheckNegative,Check,Count };
     MetalContext& c;PipelineCache& p;SceneRenderer& scene;MeshRenderer& mesh;VisibilityRenderer& vis;AccelerationStructures* rt;ShadowPasses& shadow;
     LaunchOptions options;LocalLightScene lightScene;HistoryRegistry history;ShadowPasses::Frame frame;
+    di::EmissiveDomainTracker emissiveDomain;std::vector<float> emissiveWorlds;
     std::array<pipe::PipelineHandle,Count> kernels{};pipe::PipelineHandle receiver{};
     MTL::DepthStencilState* equalDepth=nullptr;
     std::unique_ptr<RtConsumer> restirConsumer,clusterConsumer;
@@ -67,6 +70,12 @@ struct DirectLightingPasses::Impl {
         frame=f;lightScene.rebuild(g,s,l);reserve(std::max<size_t>(1,lightScene.lights.size()),u64(f.backingWidth)*f.backingHeight);
         auto& slot=slots[f.slot];const size_t n=lightScene.lights.size();
         if(n){std::memcpy(slot.source->contents(),lightScene.lights.data(),n*sizeof(GPUSampledLight));std::memcpy(slot.emitters->contents(),lightScene.emitters.data(),n*sizeof(GPUEmissiveSurface));std::memcpy(slot.alias->contents(),lightScene.alias.entries.data(),n*sizeof(GPUAliasEntry));}
+        const bool hasEmissive=std::any_of(lightScene.emitters.begin(),lightScene.emitters.end(),[](const auto& e){return e.valid!=0;});
+        if(hasEmissive) {
+            if(!s.motionSlots().empty()&&!f.motionSinCosValid)throw std::logic_error("DI emitter domain requires exact uploaded motion phases");
+            referenceWorlds(s,f.motionSinCos.data(),emissiveWorlds);
+        } else emissiveWorlds.clear();
+        if(emissiveDomain.update(lightScene.emitters,emissiveWorlds))++sceneSignal;
         if(s.stats().structure||s.stats().fullMaterials||!s.materialDeltas().empty())++sceneSignal;
         const Signal signal{f.scene,sceneSignal,rt?rt->geometryRevision():g.geometryVersion(),lightScene.revision};
         if(!(signal==lastSignal)){++signalEpoch;lastSignal=signal;}
