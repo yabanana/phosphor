@@ -62,15 +62,20 @@ MTL::ColorWriteMask writeMask(u8 mask) {
     return out;
 }
 
-/// +1 function descriptor for `name`, specialised with the desc's constants.
-/// Always a specialised descriptor, with no values for a generic pipeline: a
-/// function that declares function constants cannot be used unspecialised,
-/// and undefined constants select the shader's runtime path.
-MTL4::FunctionDescriptor* functionDescriptor(const std::string& name, const pipe::PipelineDesc& desc,
-                                             MTL::Library* library) {
-    MTL4::LibraryFunctionDescriptor* fn = MTL4::LibraryFunctionDescriptor::alloc()->init();
+/// +1 native descriptor for a function with no specialization requirements.
+MTL4::LibraryFunctionDescriptor* libraryFunctionDescriptor(const std::string& name, MTL::Library* library) {
+    auto* fn = MTL4::LibraryFunctionDescriptor::alloc()->init();
     fn->setLibrary(library);
     fn->setName(str(name.c_str()));
+    return fn;
+}
+
+/// +1 function descriptor for `name`, specialised with the desc's constants.
+/// Main pipeline functions retain an empty specialization for generic variants:
+/// declared-but-undefined function constants select the shader's runtime path.
+MTL4::FunctionDescriptor* functionDescriptor(const std::string& name, const pipe::PipelineDesc& desc,
+                                             MTL::Library* library) {
+    auto* fn = libraryFunctionDescriptor(name, library);
 
     MTL::FunctionConstantValues* values = MTL::FunctionConstantValues::alloc()->init();
     for (u32 i = 0; i < desc.constantCount; ++i) {
@@ -163,8 +168,12 @@ MTL4::PipelineDescriptor* buildDescriptor(const pipe::PipelineDesc& desc, MTL::L
         if (!desc.linkedFunctions.empty()) {
             std::vector<NS::Object*> functions;
             functions.reserve(desc.linkedFunctions.size());
+            // The generic RT intersection function has no function constants.
+            // Preserve its native library descriptor instead of manufacturing
+            // an empty specialization; explicit constants still specialize.
             for (const auto& name : desc.linkedFunctions)
-                functions.push_back(functionDescriptor(name, desc, library));
+                functions.push_back(desc.constantCount ? functionDescriptor(name, desc, library)
+                                                       : libraryFunctionDescriptor(name, library));
             auto* link = MTL4::StaticLinkingDescriptor::alloc()->init();
             link->setFunctionDescriptors(NS::Array::array(functions.data(), functions.size()));
             d->setStaticLinkingDescriptor(link);
