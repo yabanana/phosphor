@@ -520,7 +520,9 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             else if(*v=="indirect-diffuse")out.captureLinearSignal=1;
             else if(*v=="direct")out.captureLinearSignal=2;
             else if(*v=="shadow")out.captureLinearSignal=3;
-            else{error="--capture-linear-signal: expected hdr, indirect-diffuse, direct or shadow";return false;}
+            else if(*v=="shadow-position")out.captureLinearSignal=4;
+            else if(*v=="shadow-normal")out.captureLinearSignal=5;
+            else{error="--capture-linear-signal: expected hdr, indirect-diffuse, direct, shadow, shadow-position or shadow-normal";return false;}
         } else if (arg == "--export-reference-frame") {
             if(!needCount(out.exportReferenceFrame))return false;
         } else if (arg == "--capture-linear-frame") {
@@ -1019,7 +1021,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if(out.debugGiCorrupt && (!out.debugLighting || out.gi==GiMode::Off || (out.debugGiCorrupt==3 && out.gi==GiMode::DDGI))){error="GI corruption requires --debug-lighting and an applicable GI mode";return false;}
     if(out.captureLinearSignal==1 && out.gi==GiMode::Off){error="Indirect linear signal requires --gi";return false;}
     if(out.captureLinearSignal==2 && out.directLighting==DirectLightingMode::Legacy){error="Direct linear signal requires --lighting";return false;}
-    if(out.captureLinearSignal==3 && out.shadows==ShadowMode::Off){error="Shadow linear signal requires --shadows csm|rt";return false;}
+    if(out.captureLinearSignal>=3 && out.shadows==ShadowMode::Off){error="Shadow linear signal requires --shadows csm|rt";return false;}
     if((!out.exportReference.empty() && out.exportReferenceFrame>=u64(out.warmup)+out.frames) ||
        (!out.captureLinear.empty() && out.captureLinearFrame>=u64(out.warmup)+out.frames)){error="Capture/export frame is outside the requested run";return false;}
     if(!out.exportReference.empty() && !out.benchmark()){error="Reference export requires --frames";return false;}

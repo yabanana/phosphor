@@ -1901,6 +1901,7 @@ void Engine::onSceneCounters(u32 slot) {
         ++lightingChecks_;const bool pass=shadows_->check(slot) && (!directLighting_ || directLighting_->check(slot)) && (!gi_ || gi_->check(slot));
         if(!pass){++lightingFailures_;exitCode_=1;}
         std::printf("LIGHTING check frame %llu | %s\n",static_cast<unsigned long long>(slotFrame_[slot]),pass?"PASS":"FAIL");
+        std::fflush(stdout); // Keep each diagnostic intact beside stderr capture logs.
     }
     lastCounters_ = renderer_->counters(slot);
     if (mesh_) {
@@ -2092,7 +2093,9 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
             visibility_->addResolve(frameGraph_, color, shadows_?shadows_->depth():depth);
             if(linearCapture_)linearCapture_->addToGraph(frameGraph_,options_.captureLinearSignal==1?gi_->referenceDiffuse():
                                                        options_.captureLinearSignal==2?directLighting_->direct():
-                                                       options_.captureLinearSignal==3?shadows_->mask():visibility_->color());
+                                                       options_.captureLinearSignal==3?shadows_->mask():
+                                                       options_.captureLinearSignal==4?shadows_->worldPosition():
+                                                       options_.captureLinearSignal==5?shadows_->geometricNormal():visibility_->color());
             color = post_ ? post_->addToGraph(frameGraph_, *visibility_, drawableRef_, graphKey_.outputFormat)
                           : visibility_->addPresent(frameGraph_, drawableRef_);
             visibility_->addChecks(frameGraph_);

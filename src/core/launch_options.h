@@ -352,7 +352,7 @@ struct LaunchOptions {
     bool giProbeAnchor=false;
     float giAnchor[3]{},giSpacing=0;
     u32 giGrid[3]{};
-    u32 exportReferenceFrame=0, captureLinearFrame=0, captureLinearSignal=0; // 0 HDR, 1 indirect diffuse, 2 local direct, 3 shadow visibility (R)
+    u32 exportReferenceFrame=0, captureLinearFrame=0, captureLinearSignal=0; // 0 HDR, 1 indirect diffuse, 2 local direct, 3 shadow (R), 4 receiver position, 5 receiver normal
     // F7/F8 renderer, temporal reconstruction, capture and bounded diagnostics.
     std::string scenePath;
     bool visibility = false, materialBinning = false; // measured baseline; specialization stays opt-in

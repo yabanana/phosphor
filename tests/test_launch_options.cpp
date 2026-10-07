@@ -1114,4 +1114,8 @@ TEST_CASE("F10 raw shadow capture requires an enabled shadow producer") {
     CHECK(o.captureLinearSignal==3);
     REQUIRE(parse({"--render-path","visibility","--shadows","rt","--rt","on","--capture-linear-signal","shadow"},o,error));
     CHECK(o.captureLinearSignal==3);
+    REQUIRE(parse({"--render-path","visibility","--shadows","csm","--capture-linear-signal","shadow-position"},o,error));
+    CHECK(o.captureLinearSignal==4);
+    REQUIRE(parse({"--render-path","visibility","--shadows","csm","--capture-linear-signal","shadow-normal"},o,error));
+    CHECK(o.captureLinearSignal==5);
 }

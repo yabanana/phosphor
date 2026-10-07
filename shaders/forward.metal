@@ -145,6 +145,7 @@ struct ShadowReceiverOutput {
 };
 fragment ShadowReceiverOutput forward_shadow_receiver_fs(
     SurfaceVertexOut in [[stage_in]], uint primitive [[primitive_id]],
+    constant FrameConstants& frame [[buffer(0)]],
     const device GPUInstance* instances [[buffer(2)]],
     const device GPUMaterial* materials [[buffer(3)]],
     const device TextureHandle* textures [[buffer(5)]],
@@ -154,8 +155,10 @@ fragment ShadowReceiverOutput forward_shadow_receiver_fs(
                                                              half4(1), dfdx(in.uv)*exp2(temporal.mipBias),
                                                              dfdy(in.uv)*exp2(temporal.mipBias)).a);
     if (alpha < material.alphaCutoff) discard_fragment();
-    const float3 n = cross(dfdx(in.worldPos), dfdy(in.worldPos));
+    float3 n = cross(dfdx(in.worldPos), dfdy(in.worldPos));
     if (dot(n,n) < 1e-20f) discard_fragment();
+    const float3 eye(frame.cameraPosition[0],frame.cameraPosition[1],frame.cameraPosition[2]);
+    if(dot(n,eye-in.worldPos)<0.0f)n=-n;
     return {float4(in.worldPos, 1), half4(half3(normalize(n)), 1),
             uint4(in.instanceSlot, instances[in.instanceSlot].generation, primitive, in.materialIndex)};
 }
