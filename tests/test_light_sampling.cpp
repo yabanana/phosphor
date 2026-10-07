@@ -421,3 +421,19 @@ TEST_CASE("F11 STBN temporal blocks scramble without losing complete uniform ran
     CHECK(std::abs(longMean-0.5)<=1.0/32.0);
     CHECK(longMean!=doctest::Approx(firstMean).epsilon(1e-8));
 }
+
+TEST_CASE("F11 valid empty proposal histories preserve Bernoulli mean and detect drop-zero bias") {
+    auto sample=[](bool positive){GPUDIReservoir r{},candidate{};candidate.target=positive?1.f:0.f;
+        candidate.lightIndex=positive?0u:~0u;di::stream(r,candidate,positive?1.0:0.0,1,0.0);di::finalize(r);return r;};
+    double correct=0,oldRule=0;
+    for(u32 a=0;a<2;++a)for(u32 b=0;b<2;++b) {
+        auto first=sample(a!=0),second=sample(b!=0),wrong=first;
+        di::merge(first,second,b?1.f:0.f,32,0.0);di::finalize(first);
+        if(second.valid)di::merge(wrong,second,1,32,0.0);di::finalize(wrong);
+        correct+=(first.valid?first.normalization:0)/4.0;oldRule+=(wrong.valid?wrong.normalization:0)/4.0;
+    }
+    CHECK(correct==doctest::Approx(0.5));CHECK(oldRule==doctest::Approx(0.625));
+    auto zero=sample(false);GPUDIParams p{};p.maxHistoryAge=16;GPUSampledLight ignored{};
+    CHECK(di::reusable(zero,p,ignored));++p.historyEpoch;CHECK_FALSE(di::reusable(zero,p,ignored));
+    zero.pad[1]=0;p.historyEpoch=0;CHECK_FALSE(di::reusable(zero,p,ignored));
+}
