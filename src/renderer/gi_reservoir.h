@@ -40,8 +40,12 @@ inline GiConnection giConnection(const GiReceiver& x, const GPUGiReservoir& y, b
     return c;
 }
 inline void giFinalize(GPUGiReservoir& r) {
+    if(!std::isfinite(r.weightSum)||!std::isfinite(r.target)||r.weightSum<0||r.target<0) {
+        r.W=0;r.flags=0;return; // Numeric failure is not an eligible zero stream.
+    }
     r.W=(r.M&&r.target>0&&std::isfinite(r.weightSum)) ? r.weightSum/(float(r.M)*r.target) : 0;
-    if (!(r.W>0&&std::isfinite(r.W))) { r.W=0; r.flags&=~GI_SAMPLE_VALID; }
+    if(!std::isfinite(r.W)){r.W=0;r.flags=0;return;}
+    if (!(r.W>0)) { r.W=0; r.flags&=~GI_SAMPLE_VALID; }
     if(!r.M)r.flags=0;
 }
 // Adds a fresh independent path. Zero-contribution/blocked paths count in M;
@@ -80,6 +84,8 @@ inline void giAddCandidate(GPUGiReservoir& reservoir, GPUGiReservoir candidate,
 inline bool giMerge(GPUGiReservoir& dst, const GPUGiReservoir& src, float receiverTarget,
                     bool validShift, float uniformRandom, u32 maxHistoryM=32) {
     if (!(src.flags&(GI_SAMPLE_VALID|GI_PROPOSAL_VALID)) || !src.M || !maxHistoryM) return false;
+    if(!std::isfinite(src.W)||!std::isfinite(src.weightSum)||!std::isfinite(src.target)||
+        src.W<0||src.weightSum<0||src.target<0)return false;
     const u32 M=std::min(src.M,maxHistoryM);
     const u32 total=dst.M+M;
     if (total<dst.M) return false;
