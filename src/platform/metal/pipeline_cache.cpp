@@ -328,6 +328,7 @@ PipelineCache::requestTemporalScaler(MTLFX::TemporalScalerDescriptor *descriptor
         auto *pool = NS::AutoreleasePool::alloc()->init();
         MTL4FX::TemporalScaler *scaler = nullptr;
         try {
+            std::lock_guard sdkFactoryLock(sdkFactoryMutex_);
             scaler = copy->newTemporalScaler(context_.device(), compiler_);
         } catch (...) {
             pool->release();
@@ -362,7 +363,7 @@ PipelineCache::requestTemporalDenoisedScaler(MTLFX::TemporalDenoisedScalerDescri
     queue_->submit(pipe::CompilePriority::Urgent,~0u,[this,promise,copy]{
         auto* pool=NS::AutoreleasePool::alloc()->init();
         MTL4FX::TemporalDenoisedScaler* raw=nullptr;
-        try {raw=copy->newTemporalDenoisedScaler(context_.device(),compiler_);}
+        try {std::lock_guard sdkFactoryLock(sdkFactoryMutex_);raw=copy->newTemporalDenoisedScaler(context_.device(),compiler_);}
         catch(...) {pool->release();promise->set_exception(std::current_exception());return;}
         pool->release();
         // Ordinary ownership ONLY. DENOISED lifetime has not been measured;

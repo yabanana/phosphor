@@ -175,6 +175,10 @@ private:
     MetalContext&        context_;
     Options              options_;
     MTL4::Compiler*      compiler_   = nullptr;
+    // SDK scaler construction enters the compiler's lazy ML class cache.
+    // Keep those coarse factory calls serialized; ordinary PSO jobs and all
+    // per-frame encoding remain parallel/asynchronous.
+    std::mutex sdkFactoryMutex_;
     MTL4::Archive*       archive_    = nullptr;
     MTL4::PipelineDataSetSerializer* serializer_ = nullptr;
     MTL::Library*        library_        = nullptr; // served generation
