@@ -71,6 +71,45 @@ std::string passToJson(const PassReport& p) {
            summaryToJson(p.gpuMs) + workToJson(p.work) + "}";
 }
 
+std::string rtToJson(const RtReport& rt) {
+    if (!rt.present) return {};
+    std::string out = ",\n  \"rt\": {\"enabled\": " + std::string(rt.enabled ? "true" : "false");
+    out += ", \"proxy_mode\": \"" + jsonEscape(rt.proxyMode) + "\"";
+    out += ", \"probe\": \"" + jsonEscape(rt.probe) + "\"";
+    out += ", \"alpha_strategy\": \"" + jsonEscape(rt.alphaStrategy) + "\"";
+    out += ", \"effective_family\": \"" + jsonEscape(rt.effectiveFamily) + "\"";
+    out += ", \"blas_count\": " + std::to_string(rt.blasCount);
+    out += ", \"compacted_count\": " + std::to_string(rt.compactedCount);
+    out += ", \"instances\": " + std::to_string(rt.instances);
+    out += ", \"capacity\": " + std::to_string(rt.capacity);
+    out += ", \"checks\": " + std::to_string(rt.checks);
+    out += ", \"check_failures\": " + std::to_string(rt.checkFailures);
+    out += ", \"blas_bytes\": " + std::to_string(rt.blasBytes);
+    out += ", \"uncompacted_bytes\": " + std::to_string(rt.uncompactedBytes);
+    out += ", \"blas_scratch_bytes\": " + std::to_string(rt.blasScratchBytes);
+    out += ", \"tlas_bytes\": " + std::to_string(rt.tlasBytes);
+    out += ", \"tlas_scratch_bytes\": " + std::to_string(rt.tlasScratchBytes);
+    out += ", \"full_triangles\": " + std::to_string(rt.fullTriangles);
+    out += ", \"proxy_triangles\": " + std::to_string(rt.proxyTriangles);
+    out += ", \"tlas_builds\": " + std::to_string(rt.tlasBuilds);
+    out += ", \"tlas_refits\": " + std::to_string(rt.tlasRefits);
+    out += ", \"proxy_meshes\": " + std::to_string(rt.proxyMeshes);
+    out += ", \"probe_rays\": " + std::to_string(rt.probeRays);
+    out += ", \"visibility_compared\": " + std::to_string(rt.visibilityCompared);
+    out += ", \"visibility_mismatches\": " + std::to_string(rt.visibilityMismatches);
+    out += ", \"alpha_tests\": " + std::to_string(rt.alphaTests);
+    out += ", \"opaque_alpha_tests\": " + std::to_string(rt.opaqueAlphaTests);
+    out += ", \"blas_build_ms\": " + std::to_string(finiteOrZero(rt.blasBuildMs));
+    out += ", \"proxy_shadow_error_pct\": " + std::to_string(finiteOrZero(rt.proxyShadowErrorPct));
+    out += ", \"proxy_primary_error_pct\": " + std::to_string(finiteOrZero(rt.proxyPrimaryErrorPct));
+    out += ", \"proxy_dt95_cm\": " + std::to_string(finiteOrZero(rt.proxyDt95));
+    out += ", \"proxy_acne_pct\": " + std::to_string(finiteOrZero(rt.proxyAcnePct));
+    out += ", \"tlas_update_ms\": " + summaryToJson(rt.tlasUpdateMs);
+    out += ", \"probe_ms\": " + summaryToJson(rt.probeMs);
+    out += ", \"probe_ns_per_ray\": " + summaryToJson(rt.probeNsPerRay);
+    return out + "}";
+}
+
 } // namespace
 
 TimingSummary summarize(std::vector<float> values) {
@@ -288,7 +327,7 @@ std::string reportToJson(const BenchReport& r) {
     return head + "  \"frame_ms\": " + summaryToJson(r.frameMs) + ",\n" + "  \"cpu_ms\": " + summaryToJson(r.cpuMs) +
            ",\n" + "  \"gpu_ms\": " + summaryToJson(r.gpuMs) + ",\n" + "  \"wait_ms\": " + summaryToJson(r.waitMs) +
            (r.pipelinesJson.empty() ? std::string() : ",\n  \"pipelines\": " + r.pipelinesJson) + ",\n" + timing +
-           graph + scene + phases + hardware + meshlets + rendering + "\n}\n";
+           graph + scene + phases + hardware + meshlets + rendering + rtToJson(r.rt) + "\n}\n";
 }
 
 } // namespace phosphor

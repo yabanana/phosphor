@@ -178,7 +178,26 @@ struct RenderingReport {
     float exposure = 1, headroom = 1, potentialHeadroom = 1;
     float mipBias = 0;
 };
-constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 8;
+// F9 (schema 9): acceleration structures, measured proxy error and ray probes.
+// present controls JSON emission; enabled distinguishes requested RT from a
+// report of the disabled path. Bytes/counts are exact integers, timing/error
+// units are explicit. Proxy errors describe the manifest's offline corpus.
+struct RtReport {
+    bool present = false;
+    bool enabled = false;
+    std::string proxyMode, probe, alphaStrategy, effectiveFamily;
+    u32 blasCount = 0, compactedCount = 0, instances = 0, capacity = 0;
+    u32 checks = 0, checkFailures = 0;
+    u64 blasBytes = 0, uncompactedBytes = 0, blasScratchBytes = 0;
+    u64 tlasBytes = 0, tlasScratchBytes = 0;
+    u64 fullTriangles = 0, proxyTriangles = 0, tlasBuilds = 0, tlasRefits = 0;
+    u64 proxyMeshes = 0, probeRays = 0, visibilityCompared = 0, visibilityMismatches = 0;
+    u64 alphaTests = 0, opaqueAlphaTests = 0;
+    float blasBuildMs = 0;
+    float proxyShadowErrorPct = 0, proxyPrimaryErrorPct = 0, proxyDt95 = 0, proxyAcnePct = 0; // dt95: cm
+    TimingSummary tlasUpdateMs, probeMs, probeNsPerRay;
+};
+constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 9;
 
 struct BenchReport {
     std::string   bench;
@@ -211,6 +230,7 @@ struct BenchReport {
     DeviceReport  hardware;      // F6 (schema 6)
     MeshletReport meshlets;      // F6 (schema 6)
     RenderingReport rendering;   // F7/F8 (schema 7), actual paths and last-frame content extent
+    RtReport rt;                 // F9 (schema 9)
 };
 
 /// Nearest-rank statistics of `values` (empty input gives all zeros).

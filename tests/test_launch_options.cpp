@@ -348,7 +348,7 @@ TEST_CASE("bench report: schema v3 without GPU timing keeps v1 fields and stays 
     r.pipelinesJson = "{\"hits\": 3}";
     const std::string json = reportToJson(r);
     CHECK_MESSAGE(validJson(json), json);
-    CHECK(json.find("\"schema_version\": 8") != std::string::npos);
+    CHECK(json.find("\"schema_version\": 9") != std::string::npos);
     CHECK(json.find("\"gpu_timing\": false") != std::string::npos);
     CHECK(json.find("\"gpu_timing_unfused\": false") != std::string::npos);
     CHECK(json.find("\"passes\"") == std::string::npos);
@@ -365,7 +365,7 @@ TEST_CASE("bench report: schema v3 with GPU timing") {
     const BenchReport r = timedReport();
     const std::string json = reportToJson(r);
     CHECK_MESSAGE(validJson(json), json);
-    CHECK(json.find("\"schema_version\": 8") != std::string::npos);
+    CHECK(json.find("\"schema_version\": 9") != std::string::npos);
     CHECK(json.find("\"gpu_timing\": true") != std::string::npos);
     CHECK(json.find("\"gpu_timing_unfused\": true") != std::string::npos);
     CHECK(json.find("\"passes\": [") != std::string::npos);
@@ -500,7 +500,7 @@ TEST_CASE("bench report: schema v5 scene and cpu_phases objects") {
     r.cpuPhases.submit    = {0.25f, 0.2f, 0.25f, 0.3f, 0.35f};
     const std::string json = reportToJson(r);
     CHECK_MESSAGE(validJson(json), json);
-    CHECK(json.find("\"schema_version\": 8") != std::string::npos);
+    CHECK(json.find("\"schema_version\": 9") != std::string::npos);
     CHECK(json.find("\"scene\": {\"mode\": \"on\", \"instances\": 1000000, \"slots\": 1048576, \"buckets\": 24, "
                     "\"materials\": 256, \"commands\": 40, \"structure_changes\": 7, \"queue_overflow\": 0, "
                     "\"upload_bytes\": {\"mean\": 1000.0000") != std::string::npos);
@@ -789,7 +789,7 @@ TEST_CASE("bench report: schema 6 JSON has p95 between p50 and p99 in every summ
     r.meshlets.candidates = summarize({10.0f, 20.0f});
     const std::string json = reportToJson(r);
     CHECK_MESSAGE(validJson(json), json);
-    CHECK(json.find("\"schema_version\": 8") != std::string::npos);
+    CHECK(json.find("\"schema_version\": 9") != std::string::npos);
     CHECK(r.frameMs.p95 == doctest::Approx(19.0f));
     CHECK(json.find("\"frame_ms\": {\"mean\": 10.5000, \"min\": 1.0000, \"p50\": 10.0000, \"p95\": 19.0000, "
                     "\"p99\": 20.0000, \"max\": 20.0000}") != std::string::npos);
@@ -935,4 +935,95 @@ TEST_CASE("MetalFX resize settle frames are bounded") {
     CHECK(o.metalfxResizeSettleFrames == 120);
     CHECK_FALSE(parse({"--metalfx-resize-settle", "121"}, o, error));
     CHECK_FALSE(parse({"--metalfx-resize-settle"}, o, error));
+}
+
+TEST_CASE("F9 launch options keep RT off by default and accept indexed diagnostics") {
+    LaunchOptions o;
+    std::string error;
+    REQUIRE(parse({}, o, error));
+    CHECK_FALSE(o.rtEnabled);
+    CHECK_FALSE(o.rtProxyManifest);
+    CHECK(o.rtProxyManifestPath.empty());
+    CHECK(o.rtTlasRebuildEvery == 0);
+    CHECK(o.debugRt == 0);
+    CHECK(o.debugRtCorrupt == RtCorruption::None);
+    CHECK(o.rtProbe == RtProbe::None);
+    REQUIRE(parse({"--rt", "off", "--rt-proxy", "off"}, o, error));
+    CHECK_FALSE(o.rtEnabled);
+
+    REQUIRE(parse({"--rt", "on", "--rt-proxy", "manifest", "--rt-proxy-manifest", "path with spaces/proxy.json",
+                   "--rt-tlas-rebuild-every", "100", "--debug-rt", "5", "--debug-rt-corrupt", "mask",
+                   "--rt-probe", "shadow", "--debug-view", "rt"}, o, error));
+    CHECK(o.rtEnabled);
+    CHECK(o.rtProxyManifest);
+    CHECK(o.rtProxyManifestPath == "path with spaces/proxy.json");
+    CHECK(o.rtTlasRebuildEvery == 100);
+    CHECK(o.debugRt == 5);
+    CHECK(o.debugRtCorrupt == RtCorruption::Mask);
+    CHECK(o.rtProbe == RtProbe::Shadow);
+    CHECK(o.debugView == MeshletDebugView::RT);
+    CHECK(o.geometryPath == GeometryPath::Indexed);
+    CHECK(std::string(meshletDebugViewName(o.debugView)) == "rt");
+    CHECK(std::string(rtCorruptionName(o.debugRtCorrupt)) == "mask");
+    CHECK(std::string(rtProbeName(o.rtProbe)) == "shadow");
+    REQUIRE(parse({"--rt", "on", "--debug-view", "rt", "--geometry-path", "mesh"}, o, error));
+    CHECK(o.geometryPath == GeometryPath::Mesh);
+    REQUIRE(parse({"--rt-probe", "ao", "--rt", "on"}, o, error)); // order-independent dependencies
+    CHECK(o.rtProbe == RtProbe::AO);
+}
+
+TEST_CASE("F9 launch options validate enum alternatives and complete u32 counts") {
+    LaunchOptions o;
+    std::string error;
+    for (const auto& [name, expected] : std::vector<std::pair<const char*, RtProbe>>{
+        {"primary", RtProbe::Primary}, {"shadow", RtProbe::Shadow}, {"ao", RtProbe::AO}, {"diffuse", RtProbe::Diffuse}}) {
+        REQUIRE(parse({"--rt", "on", "--rt-probe", name}, o, error));
+        CHECK(o.rtProbe == expected);
+        CHECK(std::string(rtProbeName(o.rtProbe)) == name);
+    }
+    for (const auto& [name, expected] : std::vector<std::pair<const char*, RtCorruption>>{
+        {"transform", RtCorruption::Transform}, {"mask", RtCorruption::Mask}, {"blas", RtCorruption::Blas}}) {
+        REQUIRE(parse({"--rt", "on", "--debug-rt", "1", "--debug-rt-corrupt", name}, o, error));
+        CHECK(o.debugRtCorrupt == expected);
+        CHECK(std::string(rtCorruptionName(o.debugRtCorrupt)) == name);
+    }
+    CHECK(std::string(rtProbeName(RtProbe::None)) == "none");
+    CHECK(std::string(rtCorruptionName(RtCorruption::None)) == "none");
+    for (const char* option : {"--rt-tlas-rebuild-every", "--debug-rt"}) {
+        REQUIRE(parse({"--rt", "on", option, "0"}, o, error));
+        REQUIRE(parse({"--rt", "on", option, "4294967295"}, o, error));
+        if (std::string(option) == "--debug-rt") CHECK(o.debugRt == 0xffffffffu);
+        else CHECK(o.rtTlasRebuildEvery == 0xffffffffu);
+        for (const char* bad : {"4294967296", "-1", "+1", "1.5", "1x", "nan", ""}) {
+            CHECK_FALSE(parse({"--rt", "on", option, bad}, o, error));
+            CHECK_FALSE(error.empty());
+        }
+    }
+}
+
+TEST_CASE("F9 launch options reject missing values and unsupported combinations") {
+    LaunchOptions o;
+    std::string error;
+    for (const char* option : {"--rt", "--rt-proxy", "--rt-proxy-manifest", "--rt-tlas-rebuild-every",
+                               "--debug-rt", "--debug-rt-corrupt", "--rt-probe"}) {
+        CHECK_FALSE(parse({"--rt", "on", option}, o, error));
+        CHECK_FALSE(error.empty());
+    }
+    for (const auto& args : std::vector<std::vector<const char*>>{
+        {"--rt", "yes"}, {"--rt", "on", "--rt-proxy", "ratio"}, {"--rt", "on", "--rt-probe", "none"},
+        {"--rt", "on", "--debug-rt", "1", "--debug-rt-corrupt", "unknown"},
+        {"--debug-view", "rt"}, {"--rt-proxy", "manifest"}, {"--rt-probe", "primary"},
+        {"--debug-rt", "0"}, {"--rt-tlas-rebuild-every", "0"}, {"--debug-rt", "1"},
+        {"--rt", "on", "--rt-proxy-manifest", "proxy.json"},
+        {"--rt", "on", "--rt-proxy", "manifest", "--rt-proxy-manifest", ""},
+        {"--rt", "on", "--rt-proxy", "manifest", "--rt-proxy-manifest", "--frames", "10"},
+        {"--rt", "on", "--debug-rt-corrupt", "blas"},
+        {"--rt", "on", "--debug-rt", "0", "--debug-rt-corrupt", "transform"},
+        {"--rt", "on", "--graph-scenario", "0"}, {"--rt", "on", "--memory-stress", "1"},
+        {"--rt", "on", "--transient-test"},
+        {"--rt", "on", "--debug-meshlets", "1"}, {"--rt", "on", "--debug-view", "meshlets"},
+        {"--rt", "on", "--debug-view", "rt", "--rt", "off"}}) {
+        CHECK_FALSE(parse(args, o, error));
+        CHECK_FALSE(error.empty());
+    }
 }
