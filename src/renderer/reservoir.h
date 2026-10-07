@@ -48,6 +48,9 @@ inline bool stream(GPUDIReservoir& r, const GPUDIReservoir& sample, double weigh
 }
 
 inline bool finalize(GPUDIReservoir& r) {
+    if(!std::isfinite(r.weightSum)||!std::isfinite(r.target)||r.weightSum<0||r.target<0){
+        r.pad[0]|=DI_ERROR_WEIGHT;r.pad[1]&=~DI_PROPOSAL_VALID;r.valid=0;r.normalization=0;return false;
+    }
     const double denominator = double(r.M) * double(r.target);
     const double w = denominator > 0 ? double(r.weightSum) / denominator : 0;
     if (!r.valid || r.pad[0] != 0 || !std::isfinite(w) || w <= 0 || w > std::numeric_limits<float>::max()) {
@@ -61,7 +64,7 @@ inline bool finalize(GPUDIReservoir& r) {
 
 inline bool reusable(const GPUDIReservoir& source, const GPUDIParams& p,
                      const GPUSampledLight& light) {
-    const bool zero=(source.pad[1]&DI_PROPOSAL_VALID) && !source.valid && source.weightSum==0 && source.normalization==0;
+    const bool zero=(source.pad[1]&DI_PROPOSAL_VALID) && !source.valid && source.weightSum==0 && source.normalization==0 && std::isfinite(source.target);
     return (zero || source.valid) && source.pad[0] == 0 && source.M > 0 && source.age < p.maxHistoryAge &&
            source.viewID == p.viewID && source.historyEpoch == p.historyEpoch &&
            source.lightRevision == p.lightRevision && (zero || (source.lightID == light.id &&
@@ -74,7 +77,7 @@ inline bool reusable(const GPUDIReservoir& source, const GPUDIParams& p,
 inline bool merge(GPUDIReservoir& destination, GPUDIReservoir source,
                   float currentTarget, u32 maxM, double random, bool advanceAge = true) {
     if((source.pad[1]&DI_PROPOSAL_VALID) && !source.valid && source.pad[0]==0 && source.M &&
-       source.weightSum==0 && source.normalization==0) {
+       source.weightSum==0 && source.normalization==0 && std::isfinite(source.target)) {
         return stream(destination,source,0,std::min(source.M,maxM),random);
     }
     if (!source.valid || !std::isfinite(currentTarget) || currentTarget <= 0 ||

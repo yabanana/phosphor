@@ -35,3 +35,12 @@ bypass; full equivariant role filtering is not claimed. Fixture/contract tests a
 written and NOT EXECUTED. The physical/reference fixes do not lower a quality gate.
 
 F13-F14 source writing continues on a separate branch/worktree; no F15/OPT.
+
+Additional DI sampling corrections (source-only):
+
+- 55ce9c9a6e4398d08aacc5353ee48974b170b5ff: coherent CP scramble per temporal STBN block.
+- 52431e0c852a1169797aa628251b8092343ea383: zero counted DI proposal streams survive helper/prefilter normalization.
+- f996edd971ef851db62645c50bc72335969933f3: production host geometric/radiometric probe epoch split.
+
+The subsequent numeric-zero guard commit rejects poisoned histories before M;
+source tests include NaN/Inf. Neither energetic nor spectral evidence was run.
