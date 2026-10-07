@@ -207,9 +207,12 @@ public:
     /// the staging ring.  Loading time only (blocks).
     void flushUploads();
 
-    /// Record commands into a one-off command buffer, submit, and block until
-    /// the GPU has finished.  Used for loading-time uploads only.
-    void submitAndWait(const std::function<void(MTL4::ComputeCommandEncoder*)>& record);
+    /// Record loading-time work, submit and wait for GPU completion. When
+    /// gpuMs is non-null, also drain commit feedback and return its GPU span
+    /// in milliseconds (not CPU wall time). Missing/failed feedback or invalid
+    /// timestamps fail closed before staging/command allocator reuse. The
+    /// default path creates no feedback callback or additional allocation.
+    void submitAndWait(const std::function<void(MTL4::ComputeCommandEncoder*)>& record, float* gpuMs = nullptr);
 
     /// Block until every submitted frame has completed.
     void waitIdle();

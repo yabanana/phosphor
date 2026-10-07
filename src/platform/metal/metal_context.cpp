@@ -8,6 +8,7 @@
 #include "core/log.h"
 
 #include <chrono>
+#include <cmath>
 #include <stdexcept>
 #include <limits>
 
@@ -466,7 +467,7 @@ void MetalContext::flushUploads() {
     staging_->reset();
 }
 
-void MetalContext::submitAndWait(const std::function<void(MTL4::ComputeCommandEncoder*)>& record) {
+void MetalContext::submitAndWait(const std::function<void(MTL4::ComputeCommandEncoder*)>& record, float* gpuMs) {
     flushResidency();
 
     refreshCommandBuffer(uploadCommandBuffer_, uploadCommandGeneration_);
@@ -479,14 +480,77 @@ void MetalContext::submitAndWait(const std::function<void(MTL4::ComputeCommandEn
     uploadCommandBuffer_->endCommandBuffer();
 
     const MTL4::CommandBuffer* buffers[] = {uploadCommandBuffer_};
-    queue_->commit(buffers, 1);
+    if (!gpuMs) {
+        // Preserve the ordinary upload path: no commit options, callback or
+        // shared synchronization object when the caller does not need timing.
+        queue_->commit(buffers, 1);
+        ++uploadValue_;
+        queue_->signalEvent(uploadEvent_, uploadValue_);
+        if (!uploadEvent_->waitUntilSignaledValue(uploadValue_, kWaitTimeoutMs)) {
+            LOG_ERROR("GPU timeout waiting for upload; refusing staging reuse");
+            std::fflush(nullptr);
+            std::_Exit(EXIT_FAILURE);
+        }
+        return;
+    }
+
+    struct UploadFeedback {
+        std::mutex mutex;
+        std::condition_variable ready;
+        bool complete = false;
+        float milliseconds = 0;
+        std::string error;
+    };
+    auto feedbackState = std::make_shared<UploadFeedback>();
+    auto* options = MTL4::CommitOptions::alloc()->init();
+    if (!options) throw std::runtime_error("Failed to allocate timed-upload commit options");
+    options->addFeedbackHandler([feedbackState](MTL4::CommitFeedback* feedback) {
+        // No context, output pointer or caller stack is captured. Even after
+        // notification the callback owns the state through its final return.
+        std::lock_guard lock(feedbackState->mutex);
+        if (!feedback) {
+            feedbackState->error = "Missing Metal upload commit feedback";
+        } else if (auto* error = feedback->error()) {
+            const auto* description = error->localizedDescription();
+            const char* message = description ? description->utf8String() : nullptr;
+            feedbackState->error = message ? message : "Unspecified Metal upload GPU error";
+        } else {
+            const double start = feedback->GPUStartTime(), end = feedback->GPUEndTime();
+            const double milliseconds = (end-start)*1000.0;
+            if (!std::isfinite(start) || !std::isfinite(end) || start < 0 || !(end > start) ||
+                !std::isfinite(milliseconds) || milliseconds > std::numeric_limits<float>::max()) {
+                feedbackState->error = "Invalid GPU timestamps in upload commit feedback";
+            } else feedbackState->milliseconds = static_cast<float>(milliseconds);
+        }
+        feedbackState->complete = true;
+        // Notify under the mutex: once the waiter acquires it the callback
+        // has completed every access to the shared synchronization state.
+        feedbackState->ready.notify_all();
+    });
+    queue_->commit(buffers, 1, options);
+    options->release();
     ++uploadValue_;
     queue_->signalEvent(uploadEvent_, uploadValue_);
     if (!uploadEvent_->waitUntilSignaledValue(uploadValue_, kWaitTimeoutMs)) {
-        LOG_ERROR("GPU timeout waiting for upload; refusing staging reuse");
+        LOG_ERROR("GPU timeout waiting for timed upload; refusing staging reuse");
         std::fflush(nullptr);
         std::_Exit(EXIT_FAILURE);
     }
+    std::unique_lock lock(feedbackState->mutex);
+    if (!feedbackState->ready.wait_for(lock, std::chrono::milliseconds(kWaitTimeoutMs),
+                                       [&] { return feedbackState->complete; })) {
+        LOG_ERROR("Timed upload feedback did not complete; refusing staging reuse");
+        std::fflush(nullptr);
+        std::_Exit(EXIT_FAILURE);
+    }
+    // An event alone does not establish a successful GPU execution. Feedback
+    // errors remain fatal even when the queue signaled the completion event.
+    if (!feedbackState->error.empty()) {
+        LOG_ERROR("Timed upload GPU failure: %s", feedbackState->error.c_str());
+        std::fflush(nullptr);
+        std::_Exit(EXIT_FAILURE);
+    }
+    *gpuMs = feedbackState->milliseconds;
 }
 
 void MetalContext::collectGarbage() {
