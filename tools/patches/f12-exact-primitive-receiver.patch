@@ -1,0 +1,25 @@
+--- a/shaders/shadows.metal
++++ b/shaders/shadows.metal
+@@ -62,12 +62,18 @@
+                             const float3 w1=rtWorldPoint(instance,rtPosition(vertices[meshletVertices[m.vertexOffset+i1]]));
+                             const float3 w2=rtWorldPoint(instance,rtPosition(vertices[meshletVertices[m.vertexOffset+i2]]));
+                             const float z=depth.read(pixel).x;
+-                            const float2 ndc=(float2(pixel)+0.5f)*float2(2,-2)/float2(p.width,p.height)+float2(-1,1);
+-                            const float4 h=shadowMatrix(p.inverseViewProjection)*float4(ndc,z,1);
++                            // Raster depth can lie behind the true primitive by more
++                            // than W&B's rounding offset. Reconstruct the receiver from
++                            // its V-buffer triangle, using the same perspective weights
++                            // as material resolve, instead of launching rays from depth.
++                            const float4x4 vp=shadowMatrix(p.viewProjection);
++                            const float4 c0=vp*float4(w0,1),c1=vp*float4(w1,1),c2=vp*float4(w2,1);
++                            const auto bary=visibilityBarycentrics(c0.x,c0.y,c0.w,c1.x,c1.y,c1.w,
++                                c2.x,c2.y,c2.w,float(pixel.x)+0.5f,float(pixel.y)+0.5f,float(p.width),float(p.height));
+                             const float3 crossNormal=cross(w1-w0,w2-w0);
+-                            valid=z>0 && z<=1 && all(isfinite(h)) && abs(h.w)>1e-20f && dot(crossNormal,crossNormal)>1e-30f;
++                            valid=z>0 && z<=1 && bary.valid && dot(crossNormal,crossNormal)>1e-30f;
+                             if(valid) {
+-                                const float3 world=h.xyz/h.w;
++                                const float3 world=w0*bary.value[0]+w1*bary.value[1]+w2*bary.value[2];
+                                 float3 normal=normalize(crossNormal);
+                                 const float3 eye=float3(p.cameraPosition[0],p.cameraPosition[1],p.cameraPosition[2]);
+                                 if(dot(normal,eye-world)<0) normal=-normal;
