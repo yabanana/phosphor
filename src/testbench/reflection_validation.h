@@ -29,6 +29,11 @@ public:
     EntityID sun()const{return sun_;}
     EntityID occluder()const{return occluder_;}
     double elapsedSeconds()const{return time_;}
+    bool aoTemporalControl()const{return scenario_=="ao-temporal-wall";}
+    u64 aoTemporalOrdinal()const{return positiveUpdates_?positiveUpdates_-1:0;}
+    float aoTemporalWallX()const{return aoTemporalOrdinal()<AOWallStep?.8f:8.f;}
+    static constexpr u64 AOWallStep=32;
+    static constexpr float AOTemporalRadius=2;
     static constexpr float UnitsInMetres=1.0f;
     static constexpr float MirrorPlaneZ=0.0f;
     static constexpr double LightStepSeconds=2.0,CameraCutSeconds=4.0,ScriptPeriodSeconds=8.0;
@@ -40,7 +45,7 @@ private:
     std::vector<EntityID> entities_,roughness_;
     u32 plane_=~0u,cube_=~0u,sphere_=~0u;
     EntityID mirror_=INVALID_ENTITY,panel_=INVALID_ENTITY,sun_=INVALID_ENTITY,occluder_=INVALID_ENTITY;
-    double time_=0;u32 lightStep_=0;
+    double time_=0;u32 lightStep_=0;u64 positiveUpdates_=0;
     mutable u32 cameraSegment_=~0u;
 };
 } // namespace phosphor

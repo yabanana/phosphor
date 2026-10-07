@@ -586,8 +586,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             else if(*v=="shadow-position")out.captureLinearSignal=4;
             else if(*v=="shadow-normal")out.captureLinearSignal=5;
             else if(*v=="specular")out.captureLinearSignal=6;else if(*v=="ao")out.captureLinearSignal=7;
-            else if(*v=="indirect-diffuse-filtered")out.captureLinearSignal=8;
-            else{error="--capture-linear-signal: expected hdr, indirect-diffuse, indirect-diffuse-filtered, direct, shadow, shadow-position, shadow-normal, specular or ao";return false;}
+            else if(*v=="indirect-diffuse-filtered")out.captureLinearSignal=8;else if(*v=="ao-filtered")out.captureLinearSignal=9;
+            else{error="--capture-linear-signal: expected hdr, indirect-diffuse, indirect-diffuse-filtered, direct, shadow, shadow-position, shadow-normal, specular, ao or ao-filtered";return false;}
         } else if (arg == "--export-reference-frame") {
             if(!needCount(out.exportReferenceFrame))return false;
         } else if (arg == "--capture-linear-frame") {
@@ -1102,6 +1102,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
         error = "RT sun, local visibility and GI require --rt on"; return false;
     }
     if(!out.reflectionScene.empty() && (!out.bench||*out.bench!=5||!out.lightingScene.empty())){error="--reflection-scene requires --bench 6 and exclusive scene fixture";return false;}
+    if(out.captureLinearSignal==9&&(out.ao==AoMode::Off||out.lightingDenoise!=LightingDenoiseMode::Custom)){error="Filtered AO capture requires AO and --lighting-denoise custom";return false;}
+    if(out.reflectionScene=="ao-temporal-wall"&&(out.ao!=AoMode::RTAO||out.aoRadius!=2||out.gi!=GiMode::Off||out.reflections!=ReflectionMode::Off||out.directLighting!=DirectLightingMode::Legacy||out.temporalUpscale||out.renderScale!=1||out.dynamicResolution||out.temporalViews!=1||out.resolutionScript||out.referenceScale!=1)){error="Physical AO control requires RTAO radius2, fixed native geometry, one view and exclusive AO";return false;}
     if(out.captureLinearSignal==8&&(out.gi==GiMode::Off||out.lightingDenoise!=LightingDenoiseMode::Custom)){error="Filtered indirect capture requires GI and --lighting-denoise custom";return false;}
     if(out.captureLinearSignal==6 && out.reflections==ReflectionMode::Off){error="Specular capture requires --reflections";return false;}
     if(out.captureLinearSignal==7 && out.ao==AoMode::Off){error="AO capture requires --ao";return false;}

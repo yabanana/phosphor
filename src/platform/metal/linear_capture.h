@@ -5,6 +5,7 @@
 #include "rendergraph/render_graph.h"
 
 #include <array>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -26,6 +27,8 @@ class LinearCapture {
         u64 frame = 0;
         u32 every = 1;
         bool scalar = false;
+        // Optional source-control witness, evaluated only AFTER completion.
+        std::function<std::string(u32)> completedMetadata;
     };
     LinearCapture(MetalContext& context, PipelineCache& pipelines, Config config);
     ~LinearCapture();
@@ -34,7 +37,7 @@ class LinearCapture {
 
     // Call after the slot is reusable and consume(slot) drained its old tag.
     // Dimensions are the active linear source extent, not the output drawable.
-    void prepareFrame(u32 slot, u64 index, u32 width, u32 height);
+    void prepareFrame(u32 slot, u64 index, u32 width, u32 height,const std::string& metadata={});
     void addToGraph(rg::RenderGraph& graph, rg::TextureRef linearHdr);
     void bindFrame(MetalGraphExecutor& executor);
     // Call only after frameEvent reached captured index+1, BEFORE scene reload
@@ -53,6 +56,7 @@ class LinearCapture {
         u32 width = 0, height = 0;
         bool pending = false, single = false, sequence = false;
         std::vector<float> rgb;
+        std::string metadata;
     };
     MetalContext& context_;
     PipelineCache& pipelines_;

@@ -37,7 +37,7 @@ For each known receiver point x, a=(wall_x-x)/R. Cosine hemisphere sampling is
 uniform on its projected unit disk. The visible fraction is exactly
 
     V = 1 - (acos(a) - a*sqrt(1-a*a))/pi, for 0<a<1
-    V = 1 for a>=1; V = 0 for a<=-1
+    V = 1 for a>=1; selected receivers always have a>0
 
 The selected ROI remains entirely left of the wall, so the physical near case
 uses0<a<1 and the post casea>1. The finite wall covers every possible hit within

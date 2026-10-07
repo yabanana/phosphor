@@ -1225,3 +1225,11 @@ TEST_CASE("Physical lighting HDR cannot enter the HALF-only standard temporal ad
     REQUIRE(parse({"--bench","6","--reflection-scene","wide-emission","--render-path","visibility","--ao","gtao","--frames","4","--capture-linear","wide.pfm"},o,error));
     CHECK(o.reflectionScene=="wide-emission");
 }
+
+TEST_CASE("F13 physical AO proof selects real custom visibility without other transport") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--bench","6","--reflection-scene","ao-temporal-wall","--render-path","visibility","--rt","on","--ao","rtao","--ao-radius","2","--lighting-denoise","custom","--capture-linear-signal","ao-filtered"},o,error));
+    CHECK(o.captureLinearSignal==9);CHECK(o.gi==GiMode::Off);CHECK(o.reflections==ReflectionMode::Off);
+    CHECK_FALSE(parse({"--render-path","visibility","--ao","gtao","--capture-linear-signal","ao-filtered"},o,error));
+    CHECK_FALSE(parse({"--bench","6","--reflection-scene","ao-temporal-wall","--render-path","visibility","--rt","on","--ao","rtao","--ao-radius","1","--lighting-denoise","custom"},o,error));
+}

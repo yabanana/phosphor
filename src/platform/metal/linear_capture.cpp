@@ -6,6 +6,8 @@
 #include "core/log.h"
 
 #include <cstring>
+#include <fstream>
+#include <json.hpp>
 #include <filesystem>
 #include <iomanip>
 #include <limits>
@@ -70,7 +72,7 @@ LinearCapture::~LinearCapture() {
         context_.memory().release(slot.readback, MemoryCategory::Other);
     }
 }
-void LinearCapture::prepareFrame(u32 index, u64 frameIndex, u32 width, u32 height) {
+void LinearCapture::prepareFrame(u32 index, u64 frameIndex, u32 width, u32 height,const std::string& metadata) {
     auto& slot = slots_.at(index);
     if (slot.pending) throw std::logic_error("Consume completed linear capture before reusing its frame slot");
     if (frameIndex == std::numeric_limits<u64>::max()) throw std::overflow_error("Linear capture completion overflow");
@@ -99,6 +101,7 @@ void LinearCapture::prepareFrame(u32 index, u64 frameIndex, u32 width, u32 heigh
         slot.capacityPixels = pixels;
     }
     slot.index = frameIndex;
+    slot.metadata=metadata;
     slot.width = width;
     slot.height = height;
     slot.single = single;
@@ -159,11 +162,21 @@ bool LinearCapture::consume(u32 index) {
     slot.rgb.resize(pixels * 3);
     for (size_t pixel = 0; pixel < pixels; ++pixel)
         for (u32 channel = 0; channel < 3; ++channel) slot.rgb[pixel * 3 + channel] = rgba[pixel * 4 + (config_.scalar ? 0 : channel)];
-    if (slot.single) writeCapture(config_.path, slot.width, slot.height, slot.rgb, slot.index);
+    const auto publishMetadata=[&](const std::filesystem::path& capturePath){
+        if(slot.metadata.empty())return;
+        auto document=nlohmann::json::parse(slot.metadata);
+        if(config_.completedMetadata)document["history"]=nlohmann::json::parse(config_.completedMetadata(index));
+        const auto sidecar=capturePath.parent_path()/(capturePath.stem().string()+".json");
+        if(std::filesystem::exists(sidecar))throw std::runtime_error("Refuse completed capture metadata overwrite");
+        std::ofstream file(sidecar);file<<document.dump(2)<<'\n';if(!file)throw std::runtime_error("Cannot publish completed capture metadata");
+    };
+    if (slot.single){writeCapture(config_.path, slot.width, slot.height, slot.rgb, slot.index);publishMetadata(config_.path);}
     if (slot.sequence) {
         std::ostringstream name;
         name << "frame-" << std::setfill('0') << std::setw(6) << slot.index << ".pfm";
-        writeCapture(std::filesystem::path(config_.sequence) / name.str(), slot.width, slot.height, slot.rgb, slot.index);
+        const auto capturePath=std::filesystem::path(config_.sequence)/name.str();
+        writeCapture(capturePath, slot.width, slot.height, slot.rgb, slot.index);
+        publishMetadata(capturePath);
     }
     if (slot.single) singleWritten_ = true;
     slot.pending = false;

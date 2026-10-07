@@ -12,7 +12,7 @@
 
 namespace phosphor {
 namespace {
-constexpr std::array<std::string_view,7> names{"mirror","roughness","ao-cavity","probe-parallax","moving-light","disocclusion","wide-emission"};
+constexpr std::array<std::string_view,8> names{"mirror","roughness","ao-cavity","probe-parallax","moving-light","disocclusion","wide-emission","ao-temporal-wall"};
 constexpr float pi=3.14159265358979323846f;
 const glm::quat identity(1,0,0,0);
 glm::quat sunRotation(glm::vec3 towardSun) {
@@ -45,6 +45,15 @@ void ReflectionValidation::setup(ECS& ecs,GpuScene& scene,TextureManager& textur
     textures.createDefaultTextures(); // Existing scene fallback material refers to these slots.
     auto upload=[&](MeshData data){return scene.uploadMesh(data.positions,data.normals,data.tangents,data.uvs,data.indices);};
     plane_=upload(ProceduralMeshes::generatePlane(1,1,1,1));
+    if(aoTemporalControl()) {
+        const glm::quat faceCamera=glm::angleAxis(pi*.5f,glm::vec3(1,0,0));
+        mirror_=mesh(ecs,plane_,{0,0,0},{8,1,8},faceCamera,{.5f,.5f,.5f},0,1);
+        // Rotate the plane from +Y to -X; the receiver normal is perpendicular.
+        // Size8 covers every radius2 AO hit. Both-sided wall is physical opacity.
+        occluder_=mesh(ecs,plane_,{.8f,0,0},{8,1,8},glm::angleAxis(pi*.5f,glm::vec3(0,0,1)),{.5f,.5f,.5f},0,1);
+        ecs.getComponent<MaterialComponent>(occluder_).doubleSided=true;
+        time_=0;positiveUpdates_=0;cameraSegment_=~0u;return;
+    }
     cube_=upload(ProceduralMeshes::generateCube(0.5f));
     sphere_=upload(ProceduralMeshes::generateSphere(0.5f,32,16));
     GPUMaterial fallback{};fallback.baseColor[3]=1;
@@ -113,6 +122,11 @@ void ReflectionValidation::move(ECS& ecs,EntityID e,glm::vec3 p,glm::quat q) {
 void ReflectionValidation::update(float dt,ECS& ecs) {
     if(!std::isfinite(dt)||dt<0)throw std::invalid_argument("Reflection fixture dt must be finite nonnegative");
     if(dt==0)return;time_+=dt;
+    if(aoTemporalControl()) {
+        const auto ordinal=positiveUpdates_++;
+        if(ordinal==AOWallStep)move(ecs,occluder_,{8,0,0},glm::angleAxis(pi*.5f,glm::vec3(0,0,1)));
+        return;
+    }
     if(scenario_=="moving-light") {
         const float phase=float(std::fmod(time_,ScriptPeriodSeconds));
         move(ecs,panel_,{1.0f+0.7f*std::sin(phase),1.3f,8.4f},identity);
@@ -133,10 +147,11 @@ void ReflectionValidation::update(float dt,ECS& ecs) {
 }
 void ReflectionValidation::teardown(ECS& ecs,GpuScene&) {
     for(auto e:entities_)ecs.destroyEntity(e);entities_.clear();roughness_.clear();
-    panel_=mirror_=sun_=occluder_=INVALID_ENTITY;plane_=cube_=sphere_=~0u;time_=0;cameraSegment_=~0u;
+    panel_=mirror_=sun_=occluder_=INVALID_ENTITY;plane_=cube_=sphere_=~0u;time_=0;positiveUpdates_=0;cameraSegment_=~0u;
 }
 CameraSetup ReflectionValidation::getDefaultCamera()const {
     if(scenario_=="wide-emission")return {{0,0,4},{0,0,0},4,false};
+    if(aoTemporalControl())return {{0,0,3},{0,0,0},3,false};
     return {{0,2.2f,7},{0,1.1f,0},7,false};
 }
 bool ReflectionValidation::scriptedCamera(double t,glm::vec3& p,glm::vec3& target,bool& cut)const {

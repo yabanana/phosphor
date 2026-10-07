@@ -15,8 +15,8 @@ using namespace phosphor;
 TEST_CASE("F13 reflection corpus has actual world geometry and equivalent ray roles") {
     for(auto name:ReflectionValidation::scenarios()) {
         ECS ecs;GpuScene scene;test::NullTextureManager textures;ReflectionValidation fixture{std::string(name)};
-        fixture.setup(ecs,scene,textures);REQUIRE(scene.getMeshCount()==3);
-        FrameScene frame;extractFrameScene(ecs,scene,frame);CHECK_FALSE(frame.instances.empty());CHECK_FALSE(frame.lights.empty());
+        fixture.setup(ecs,scene,textures);REQUIRE(scene.getMeshCount()==(fixture.aoTemporalControl()?1u:3u));
+        FrameScene frame;extractFrameScene(ecs,scene,frame);CHECK_FALSE(frame.instances.empty());if(fixture.aoTemporalControl())CHECK(frame.lights.empty());else CHECK_FALSE(frame.lights.empty());
         for(auto e:fixture.entities())if(ecs.hasComponent<MeshInstanceComponent>(e)) {
             const auto& i=std::as_const(ecs).getComponent<MeshInstanceComponent>(e);
             CHECK(i.isVisible());CHECK(i.castsShadows());
@@ -96,4 +96,20 @@ TEST_CASE("Opaque wide-emission fixture has an independent constant-radiance ref
     const auto before=t.worldMatrix;f.update(1,ecs);
     CHECK(std::as_const(ecs).getComponent<TransformComponent>(e).worldMatrix==before);
     CHECK(std::as_const(ecs).getComponent<MaterialComponent>(e).emissiveFactor==glm::vec3(368640,128,64));
+}
+
+TEST_CASE("F13 physical AO temporal fixture preserves receiver and steps its only wall once") {
+    ECS ecs;GpuScene scene;test::NullTextureManager textures;ReflectionValidation f{"ao-temporal-wall"};f.setup(ecs,scene,textures);
+    const auto receiver=std::as_const(ecs).getComponent<TransformComponent>(f.mirror());
+    const auto initialWall=std::as_const(ecs).getComponent<TransformComponent>(f.occluder());
+    CHECK(receiver.position==glm::vec3(0));CHECK(initialWall.position.x==doctest::Approx(.8));
+    CHECK(std::as_const(ecs).getComponent<MaterialComponent>(f.occluder()).doubleSided);
+    FrameScene frame;extractFrameScene(ecs,scene,frame);CHECK(frame.instances.size()==2);CHECK(frame.lights.empty());
+    for(u32 ordinal=0;ordinal<64;++ordinal){
+        f.update(0,ecs);f.update(1.f/60.f,ecs);CHECK(f.aoTemporalOrdinal()==ordinal);
+        const auto& wall=std::as_const(ecs).getComponent<TransformComponent>(f.occluder());
+        CHECK(wall.position.x==doctest::Approx(ordinal<32?.8f:8.f));
+        CHECK(std::as_const(ecs).getComponent<TransformComponent>(f.mirror()).modelMatrix==receiver.modelMatrix);
+    }
+    const auto camera=f.getDefaultCamera();CHECK(camera.position==glm::vec3(0,0,3));CHECK(camera.target==glm::vec3(0));CHECK_FALSE(camera.orbit);
 }

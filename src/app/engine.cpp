@@ -1,5 +1,8 @@
 #include <thread>
+#include <cstdlib>
+#include <json.hpp>
 #include "app/engine.h"
+#include "testbench/reflection_validation.h"
 #include <glm/gtc/type_ptr.hpp>
 #include "platform/metal/temporal_worker.h"
 
@@ -356,7 +359,9 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     if(!options_.exportReference.empty())referenceSnapshot_=std::make_unique<ReferenceSnapshot>(*context_,*renderer_,options_.exportReference,options_.exportReferenceFrame,rt_.get());
     if(!options_.captureLinear.empty()||!options_.captureLinearSequence.empty()) {
         LinearCapture::Config capture;capture.path=options_.captureLinear;capture.sequence=options_.captureLinearSequence;
-        capture.frame=options_.captureLinearFrame;capture.every=options_.captureEvery;capture.scalar=options_.captureLinearSignal==3||options_.captureLinearSignal==7;
+        capture.frame=options_.captureLinearFrame;capture.every=options_.captureEvery;capture.scalar=options_.captureLinearSignal==3||options_.captureLinearSignal==7||options_.captureLinearSignal==9;
+        if(options_.reflectionScene=="ao-temporal-wall"&&options_.captureLinearSignal==9)
+            capture.completedMetadata=[this](u32 slot){return reflections_->completedAOCheckpoint(slot);};
         linearCapture_=std::make_unique<LinearCapture>(*context_,*pipelines_,std::move(capture));
     }
     ecs_        = std::make_unique<ECS>();
@@ -1672,7 +1677,23 @@ bool Engine::frame(float dt) {
         camera.jitterPixels[0]=temporal.jitter[0];camera.jitterPixels[1]=temporal.jitter[1];
         referenceSnapshot_->prepareFrame(ref,camera,lights_,*store_,directLighting_.get());
     }
-    if(linearCapture_)linearCapture_->prepareFrame(frame.slot,frame.index,renderWidth,renderHeight);
+    if(linearCapture_) {
+        std::string metadata;
+        if(options_.reflectionScene=="ao-temporal-wall") {
+            const auto* fixture=dynamic_cast<const ReflectionValidation*>(activeBench_.get());
+            if(!fixture||!fixture->aoTemporalControl())throw std::logic_error("Missing physical AO control witness");
+            const auto front=camera_->getFront(),up=camera_->getUp();
+            nlohmann::json document={{"schema","phos.f13-ao-temporal.v1"},{"frame",frame.index},{"view",currentView_},{"signal",options_.captureLinearSignal},
+                {"width",renderWidth},{"height",renderHeight},{"fixture_ordinal",fixture->aoTemporalOrdinal()},{"wall_x",fixture->aoTemporalWallX()},{"radius",options_.aoRadius},
+                {"camera",{{"position",{camPos.x,camPos.y,camPos.z}},{"front",{front.x,front.y,front.z}},{"up",{up.x,up.y,up.z}},{"fov_y",camera_->getFovY()}}},
+                {"plane",{{"z",0},{"size",8},{"normal",{0,0,1}}}},{"shader_generation",pipelines_->generation()}};
+            for(const auto& entry:std::array<std::pair<const char*,const char*>,4>{{{"source_sha","PHOSPHOR_SOURCE_SHA"},{"binary_sha","PHOSPHOR_BINARY_SHA"},{"metallib_sha","PHOSPHOR_METALLIB_SHA"},{"manifest_sha","PHOSPHOR_MANIFEST_SHA"}}}) {
+                const auto* value=std::getenv(entry.second);document["provenance"][entry.first]=value?nlohmann::json(value):nlohmann::json(nullptr);
+            }
+            metadata=document.dump();
+        }
+        linearCapture_->prepareFrame(frame.slot,frame.index,renderWidth,renderHeight,metadata);
+    }
     if (!visibility_ && renderer_->usingFallback())
         frameFlags_ |= FrameFallbackDraw;
     const Clock::time_point s4 = Clock::now();
@@ -2229,7 +2250,7 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
                                                        options_.captureLinearSignal==4?shadows_->worldPosition():
                                                        options_.captureLinearSignal==5?shadows_->geometricNormal():
                                                        options_.captureLinearSignal==6?reflections_->rawSpecular():
-                                                       options_.captureLinearSignal==7?reflections_->rawAO():options_.captureLinearSignal==8?reflections_->filteredIndirectDiffuse():visibility_->color());
+                                                       options_.captureLinearSignal==7?reflections_->rawAO():options_.captureLinearSignal==8?reflections_->filteredIndirectDiffuse():options_.captureLinearSignal==9?reflections_->filteredAO():visibility_->color());
             color = post_ ? post_->addToGraph(frameGraph_, *visibility_, drawableRef_, graphKey_.outputFormat,reconstructed)
                           : visibility_->addPresent(frameGraph_, drawableRef_);
             visibility_->addChecks(frameGraph_,post_?post_->exposureInput():visibility_->color());
