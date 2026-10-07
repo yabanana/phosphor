@@ -290,3 +290,47 @@ independent image leakage predicate must detect this physical negative. JSON
 `lighting.gi_visibility_disabled` identifies the run explicitly. This is diagnostic
 source pending root compilation/GPU execution, not a product setting or measured
 negative until that independent comparison has actually failed.
+
+## Current integration and quality appendix — 2026-10-07, HEAD8c960ad
+
+The original writer-only/nonexecuted notes above record the delivery boundary.
+They do not mean that every item is still unexecuted at this integration head.
+The current task-by-task ledger is
+[F12-STATUS-2026-10-07.md](F12-STATUS-2026-10-07.md), including the PR-ready
+F12.1–F12.5 table. **The phase remains open and ROADMAP is unchanged.**
+
+DDGI/cache/ReSTIR/emissive/export are connected. F13 rough-reflection fallback
+reads the same directional cache at its reconstructed secondary SSR hit; this
+is a real consumer, while its independent physical qualification remains a
+separate open item. Geometry epochs preserve learned probe offsets across
+radiometric changes; the corresponding source correction is integrated even
+though its earlier reviewer handoff described an unapplied patch.
+
+The accepted offline references in this ledger use unlimited path depth minus
+depth2, not an assumed exact depth8 reference: Cornell65536spp per each of two
+independent seeds and thin-wall16384spp per seed. Camera/WORLD/UV/winding/units,
+constant-material specialization and the adapter were checked for these
+untextured diffuse fixtures. The current Mitsuba3.9.1 adapter samples emitters
+uniformly in shape area while evaluating textured Le/MASK, omits unsupported
+area-plugin properties and rejects unsupported two-sided emission. A generic
+model-difference override is not physical equivalence or phase acceptance.
+
+The physical visibility-moments-off negative has now been executed by the root:
+both positive/negative keep invariants PASS; thin-wall leakage p95 increases
+from7.92% to25.669%, exceeding the frozen25% gate. The isolated diagnostic flag
+and176B parameter layout remain explicit; this does not become a product mode.
+
+Custom-filtered Cornell cases pass their six frozen ROI gates. Rawcache remains
+FAIL. DDGI/custom16x8x16 recovers by+87 and remains within the gates throughout
+the inspected tail. Dense cache/ReSTIR pass the frozen endpoint<=128 but show
+subsequent per-frame violations; ReSTIR8x4x8 fails recovery. These are retained
+limits, not blanket stable PASS results. F13 history rejection<=4frames is not
+certified by F12 convergence<=128.
+
+ProbeGridConfig still defaults to8x4x8. DDGI/custom16x8x16,64rays is only the
+full-quality candidate pending the preregistered paired cost/O7 experiment.
+No source default is changed by this appendix. Sponza with a moving sun and
+independent leak/temporal reference, GPU probe escape under moving light,
+qualified cache stress, moving/textured/on-off emissive and disocclusion
+coverage remain open as detailed in the ledger. F32's future internal reference
+is not an extra prerequisite, since the external reference path is available.
