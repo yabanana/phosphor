@@ -348,7 +348,7 @@ TEST_CASE("bench report: schema v3 without GPU timing keeps v1 fields and stays 
     r.pipelinesJson = "{\"hits\": 3}";
     const std::string json = reportToJson(r);
     CHECK_MESSAGE(validJson(json), json);
-    CHECK(json.find("\"schema_version\": 9") != std::string::npos);
+    CHECK(json.find("\"schema_version\": " + std::to_string(BENCH_REPORT_SCHEMA_VERSION)) != std::string::npos);
     CHECK(json.find("\"gpu_timing\": false") != std::string::npos);
     CHECK(json.find("\"gpu_timing_unfused\": false") != std::string::npos);
     CHECK(json.find("\"passes\"") == std::string::npos);
@@ -365,7 +365,7 @@ TEST_CASE("bench report: schema v3 with GPU timing") {
     const BenchReport r = timedReport();
     const std::string json = reportToJson(r);
     CHECK_MESSAGE(validJson(json), json);
-    CHECK(json.find("\"schema_version\": 9") != std::string::npos);
+    CHECK(json.find("\"schema_version\": " + std::to_string(BENCH_REPORT_SCHEMA_VERSION)) != std::string::npos);
     CHECK(json.find("\"gpu_timing\": true") != std::string::npos);
     CHECK(json.find("\"gpu_timing_unfused\": true") != std::string::npos);
     CHECK(json.find("\"passes\": [") != std::string::npos);
@@ -500,7 +500,7 @@ TEST_CASE("bench report: schema v5 scene and cpu_phases objects") {
     r.cpuPhases.submit    = {0.25f, 0.2f, 0.25f, 0.3f, 0.35f};
     const std::string json = reportToJson(r);
     CHECK_MESSAGE(validJson(json), json);
-    CHECK(json.find("\"schema_version\": 9") != std::string::npos);
+    CHECK(json.find("\"schema_version\": " + std::to_string(BENCH_REPORT_SCHEMA_VERSION)) != std::string::npos);
     CHECK(json.find("\"scene\": {\"mode\": \"on\", \"instances\": 1000000, \"slots\": 1048576, \"buckets\": 24, "
                     "\"materials\": 256, \"commands\": 40, \"structure_changes\": 7, \"queue_overflow\": 0, "
                     "\"upload_bytes\": {\"mean\": 1000.0000") != std::string::npos);
@@ -789,7 +789,7 @@ TEST_CASE("bench report: schema 6 JSON has p95 between p50 and p99 in every summ
     r.meshlets.candidates = summarize({10.0f, 20.0f});
     const std::string json = reportToJson(r);
     CHECK_MESSAGE(validJson(json), json);
-    CHECK(json.find("\"schema_version\": 9") != std::string::npos);
+    CHECK(json.find("\"schema_version\": " + std::to_string(BENCH_REPORT_SCHEMA_VERSION)) != std::string::npos);
     CHECK(r.frameMs.p95 == doctest::Approx(19.0f));
     CHECK(json.find("\"frame_ms\": {\"mean\": 10.5000, \"min\": 1.0000, \"p50\": 10.0000, \"p95\": 19.0000, "
                     "\"p99\": 20.0000, \"max\": 20.0000}") != std::string::npos);
@@ -1095,4 +1095,14 @@ TEST_CASE("F10-F12 launch contract refuses unavailable receiver paths and tiers"
     CHECK_FALSE(parse({"--debug-lighting-corrupt","caster"},o,e));
     REQUIRE(parse({"--render-path","visibility","--shadows","csm","--debug-lighting","1","--debug-lighting-corrupt","caster"},o,e));
     CHECK(o.debugLightingCorrupt==2);
+}
+
+TEST_CASE("F12 linear capture and exact-frame export validate their signal") {
+    LaunchOptions o;std::string e;
+    CHECK_FALSE(parse({"--capture-linear","x.pfm","--frames","1"},o,e));
+    REQUIRE(parse({"--capture-linear","x.pfm","--render-path","visibility","--frames","1"},o,e));
+    CHECK_FALSE(parse({"--export-reference","snap","--frames","1","--warmup","0","--export-reference-frame","2"},o,e));
+    REQUIRE(parse({"--bench","6","--lighting-scene","thin-walls","--render-path","visibility","--rt","on","--lighting","restir","--gi","ddgi","--capture-linear-signal","indirect-diffuse"},o,e));
+    CHECK(o.captureLinearSignal==1);CHECK(o.lightingScene=="thin-walls");
+    CHECK_FALSE(parse({"--bench","5","--lighting-scene","thin-walls"},o,e));
 }

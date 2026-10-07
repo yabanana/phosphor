@@ -46,3 +46,13 @@ kernel void di_receiver_pack(constant FrameConstants& frame [[buffer(0)]],consta
     out.materialRevision=p.historyEpoch;out.instanceSlot=key.x;out.instanceGeneration=key.y;out.valid=pos.w>0 && g.w>0 && dot(s.xyz,s.xyz)>0;
     surfaces[pixel.y*p.width+pixel.x]=out;
 }
+
+// Independent F12 comparison signal before the engine's artistic AO/specular
+// environment/exposure. This is reflected INDIRECT diffuse radiance, not E.
+kernel void gi_reference_diffuse(constant GPUProbeGridParams& p [[buffer(0)]],
+    const device GPUDISurface* surfaces [[buffer(1)]],texture2d<float,access::read> irradiance [[texture(0)]],
+    texture2d<float,access::write> output [[texture(1)]],uint2 pixel [[thread_position_in_grid]]) {
+    if(any(pixel>=uint2(p.width,p.height)))return;const GPUDISurface s=surfaces[pixel.y*p.width+pixel.x];
+    const float3 albedo(s.albedo[0],s.albedo[1],s.albedo[2]);
+    output.write(float4(s.valid?irradiance.read(pixel).xyz*albedo*(1-s.metallic)/M_PI_F:float3(0),1),pixel);
+}

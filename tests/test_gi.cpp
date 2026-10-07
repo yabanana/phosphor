@@ -169,3 +169,10 @@ TEST_CASE("F12 offline snapshot PFM remains linear and full world/material value
     CHECK(bytes.starts_with("PF\n1 1\n-1.0\n")); // HDR8 stored unexposed, FLOAT32
     std::filesystem::remove_all(dir);
 }
+
+TEST_CASE("F12 reference permits explicit infinite far and refuses inverted finite clip") {
+    OfflineReferenceScene s;s.camera.farPlane=0;
+    CHECK(validateReferenceScene(s).ok);
+    s.camera.farPlane=s.camera.nearPlane*0.5f;
+    CHECK_FALSE(validateReferenceScene(s).ok);
+}

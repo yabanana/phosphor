@@ -42,4 +42,3 @@ bool rt_alpha_generic(uint primitive [[primitive_id]], uint slot [[user_instance
     const float alpha = m.baseColor[3] * float(half(texture.sample(kRtAlphaSampler, uv, level(lod)).a));
     return alpha >= m.alphaCutoff;
 }
-
