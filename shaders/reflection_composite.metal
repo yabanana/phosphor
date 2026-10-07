@@ -71,6 +71,17 @@ kernel void reflection_input_check(constant GPUReflectionComposeParams& p [[buff
     if(tid>=p.width*p.height)return;const GPUDISurface s=surfaces[tid];const float3 geometric(s.geometricNormal[0],s.geometricNormal[1],s.geometricNormal[2]),normal(s.shadingNormal[0],s.shadingNormal[1],s.shadingNormal[2]);
     const float2 velocity=motion.read(uint2(tid%p.width,tid/p.width)).xy;const bool bad=s.valid&&(!all(isfinite(geometric))||!all(isfinite(normal))||dot(geometric,geometric)<=0||dot(normal,normal)<=0||!all(isfinite(velocity)));
     const uint failures=simd_sum(bad?1u:0u);if(lane==0&&failures)atomic_fetch_add_explicit(counts+5,failures,memory_order_relaxed);
+    // Diagnostic classification only: counts5 and its acceptance rule are
+    // unchanged. counts7 OR bits: geo nonfinite1/zero2, shading nonfinite4/zero8,
+    // motion nonfinite16. Never repair or exclude a malformed valid receiver.
+    if(s.valid){uint reasons=0;
+        if(!all(isfinite(geometric)))reasons|=1u;
+        if(dot(geometric,geometric)<=0)reasons|=2u;
+        if(!all(isfinite(normal)))reasons|=4u;
+        if(dot(normal,normal)<=0)reasons|=8u;
+        if(!all(isfinite(velocity)))reasons|=16u;
+        if(reasons)atomic_fetch_or_explicit(counts+7,reasons,memory_order_relaxed);
+    }
 }
 // residual0,DIselected2,GIselectedE4,specular5,AO6,output7.
 // Root RESOLVE_EXTERNAL_DIFFUSE bit32 strips external DI/GI/hemisphere diffuse
