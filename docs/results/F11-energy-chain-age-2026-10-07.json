@@ -1,0 +1,583 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-07",
+  "status": "STATIC_RAW_DIRECT_ENERGY_VERIFIED",
+  "phase_accepted": false,
+  "scope": "Raw direct-light energy with local visibility disabled; no post-denoiser, moving-scene, ManyLights, lifecycle or performance acceptance.",
+  "correction_commit": "970d7ce",
+  "report_activity": "Read existing artifacts and verify hashes/status arithmetic only; no build or GPU run.",
+  "protocol_unchanged": true,
+  "protocol_sha256": "09d2f0e572e769c5dab48498378f6368db6d1ebcfef0f61608ec80104defa2b7",
+  "protocol_digest_keys": [
+    "width",
+    "height",
+    "frames",
+    "warmup",
+    "reference_frame",
+    "candidate_seeds",
+    "reference_seeds",
+    "cases",
+    "regions",
+    "signal",
+    "statistical_unit",
+    "family_comparisons",
+    "familywise_alpha",
+    "student_t",
+    "precision_relative",
+    "fp32_unit_roundoff",
+    "gamma_operations",
+    "gamma4096",
+    "expected_visibility",
+    "source_stability"
+  ],
+  "protocol": {
+    "resolution": [
+      128,
+      72
+    ],
+    "measured_frames_per_run": 256,
+    "warmup_frames": 32,
+    "measured_frame_range": [
+      32,
+      287
+    ],
+    "candidate_seeds": [
+      1,
+      32
+    ],
+    "reference_seeds": [
+      1001,
+      1032
+    ],
+    "seed_ranges_inclusive": true,
+    "regions": 17,
+    "channels": 3,
+    "reuse_cases": 9,
+    "family_comparisons": 459,
+    "familywise_alpha": 0.01,
+    "ci_precision_relative_limit": 0.02,
+    "fp32_gamma4096": 0.0002442002442002442,
+    "statistical_unit": "one entire seed-run mean; never pixels or correlated frames",
+    "gate": "FAIL if abs(difference)>CI_half_width+FP32_budget; otherwise INCONCLUSIVE if CI_half_width>0.02*abs(reference); otherwise PASS.",
+    "interval_limitation": "Bonferroni-adjusted Welch Student-t diagnostic on run means, not a distribution-free proof or universal unbiasedness guarantee."
+  },
+  "datasets": {
+    "before": {
+      "directory": "build/f11-energy-reuse-ensemble",
+      "status": "FAIL",
+      "manifest_sha256": "539e1365811e3f02340b82cc1cfd0f0f778cc76d28b6ef4cf8b0728d9a649b3b",
+      "summary_sha256": "95e0f6202155e55b3398434bc30ce1fcbfe83a9be0624ddc702aeb3087c03eab",
+      "recorded_workspace_commits": [
+        "f4629c8d0ea0cd7ae58b3195ae737e3bc22e8e2e"
+      ],
+      "recorded_tracked_patch_sha256": [
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      ],
+      "recorded_artifacts_sha256": {
+        "phosphor": "446132cbd5064ddae0f17c41af2291bc05eb281ae00b5652a4ab3e2d125ef932",
+        "phosphor.metallib": "152c40e6cd0fda6b017c6a6b3babad124ab9ddfc5ac8b7ba851e1f9fed2f29ab"
+      },
+      "device": "Apple M5 Max",
+      "macos": [
+        "27.2"
+      ],
+      "completed_runs": 387,
+      "run_status_passes": 387,
+      "aggregate_passes": 387,
+      "lighting_checks_per_run": 288,
+      "lighting_failures": 0,
+      "reported_gpu_failures": 0,
+      "mean_pfm_hashes_verified": 387,
+      "validation_environment": {
+        "MTL_DEBUG_LAYER": null,
+        "MTL_DEBUG_LAYER_WARNING_MODE": null,
+        "MTL_SHADER_VALIDATION": null
+      },
+      "validation_scope": "Energy runs did not enable Metal API/shader validation; diagnostic checker PASS is a separate statement.",
+      "comparison_statuses": {
+        "PASS": 437,
+        "FAIL": 22
+      },
+      "cases": [
+        {
+          "case": "point8-spatial",
+          "status": "PASS",
+          "candidate_runs": 32,
+          "reference_runs": 32,
+          "energy_ratio": 1.0003684216693844,
+          "expected_ratio": 1.0,
+          "roi_failures": 0,
+          "roi_inconclusive": 0
+        },
+        {
+          "case": "point8-temporal",
+          "status": "FAIL",
+          "candidate_runs": 32,
+          "reference_runs": 32,
+          "energy_ratio": 1.0041905249572523,
+          "expected_ratio": 1.0,
+          "roi_failures": 9,
+          "roi_inconclusive": 0
+        },
+        {
+          "case": "point8-full",
+          "status": "FAIL",
+          "candidate_runs": 32,
+          "reference_runs": 32,
+          "energy_ratio": 1.004062399803471,
+          "expected_ratio": 1.0,
+          "roi_failures": 7,
+          "roi_inconclusive": 0
+        },
+        {
+          "case": "areas-spatial",
+          "status": "PASS",
+          "candidate_runs": 32,
+          "reference_runs": 32,
+          "energy_ratio": 0.9999949104090671,
+          "expected_ratio": 1.0,
+          "roi_failures": 0,
+          "roi_inconclusive": 0
+        },
+        {
+          "case": "areas-temporal",
+          "status": "FAIL",
+          "candidate_runs": 32,
+          "reference_runs": 32,
+          "energy_ratio": 1.0012214788004596,
+          "expected_ratio": 1.0,
+          "roi_failures": 3,
+          "roi_inconclusive": 0
+        },
+        {
+          "case": "areas-full",
+          "status": "FAIL",
+          "candidate_runs": 32,
+          "reference_runs": 32,
+          "energy_ratio": 1.0013317258089136,
+          "expected_ratio": 1.0,
+          "roi_failures": 3,
+          "roi_inconclusive": 0
+        },
+        {
+          "case": "emissive-spatial",
+          "status": "PASS",
+          "candidate_runs": 32,
+          "reference_runs": 32,
+          "energy_ratio": 1.0001672518328781,
+          "expected_ratio": 1.0,
+          "roi_failures": 0,
+          "roi_inconclusive": 0
+        },
+        {
+          "case": "emissive-temporal",
+          "status": "PASS",
+          "candidate_runs": 32,
+          "reference_runs": 32,
+          "energy_ratio": 1.0000749633479247,
+          "expected_ratio": 1.0,
+          "roi_failures": 0,
+          "roi_inconclusive": 0
+        },
+        {
+          "case": "emissive-full",
+          "status": "PASS",
+          "candidate_runs": 32,
+          "reference_runs": 32,
+          "energy_ratio": 1.0000087955982104,
+          "expected_ratio": 1.0,
+          "roi_failures": 0,
+          "roi_inconclusive": 0
+        }
+      ],
+      "failed_comparisons": [
+        {
+          "case": "point8-temporal",
+          "roi": 1,
+          "channel": "R",
+          "status": "FAIL"
+        },
+        {
+          "case": "point8-temporal",
+          "roi": 1,
+          "channel": "G",
+          "status": "FAIL"
+        },
+        {
+          "case": "point8-temporal",
+          "roi": 1,
+          "channel": "B",
+          "status": "FAIL"
+        },
+        {
+          "case": "point8-temporal",
+          "roi": 5,
+          "channel": "R",
+          "status": "FAIL"
+        },
+        {
+          "case": "point8-temporal",
+          "roi": 5,
+          "channel": "B",
+          "status": "FAIL"
+        },
+        {
+          "case": "point8-temporal",
+          "roi": 9,
+          "channel": "R",
+          "status": "FAIL"
+        },
+        {
+          "case": "point8-temporal",
+          "roi": 9,
+          "channel": "G",
+          "status": "FAIL"
+        },
+        {
+          "case": "point8-temporal",
+          "roi": 9,
+          "channel": "B",
+          "status": "FAIL"
+        },
+        {
+          "case": "point8-temporal",
+          "roi": 12,
+          "channel": "R",
+          "status": "FAIL"
+        },
+        {
+          "case": "point8-full",
+          "roi": 1,
+          "channel": "R",
+          "status": "FAIL"
+        },
+        {
+          "case": "point8-full",
+          "roi": 1,
+          "channel": "G",
+          "status": "FAIL"
+        },
+        {
+          "case": "point8-full",
+          "roi": 1,
+          "channel": "B",
+          "status": "FAIL"
+        },
+        {
+          "case": "point8-full",
+          "roi": 9,
+          "channel": "R",
+          "status": "FAIL"
+        },
+        {
+          "case": "point8-full",
+          "roi": 9,
+          "channel": "G",
+          "status": "FAIL"
+        },
+        {
+          "case": "point8-full",
+          "roi": 9,
+          "channel": "B",
+          "status": "FAIL"
+        },
+        {
+          "case": "point8-full",
+          "roi": 12,
+          "channel": "R",
+          "status": "FAIL"
+        },
+        {
+          "case": "areas-temporal",
+          "roi": 0,
+          "channel": "R",
+          "status": "FAIL"
+        },
+        {
+          "case": "areas-temporal",
+          "roi": 0,
+          "channel": "G",
+          "status": "FAIL"
+        },
+        {
+          "case": "areas-temporal",
+          "roi": 0,
+          "channel": "B",
+          "status": "FAIL"
+        },
+        {
+          "case": "areas-full",
+          "roi": 0,
+          "channel": "R",
+          "status": "FAIL"
+        },
+        {
+          "case": "areas-full",
+          "roi": 0,
+          "channel": "G",
+          "status": "FAIL"
+        },
+        {
+          "case": "areas-full",
+          "roi": 0,
+          "channel": "B",
+          "status": "FAIL"
+        }
+      ]
+    },
+    "after": {
+      "directory": "build/f11-energy-reuse-chainage-v2",
+      "status": "PASS",
+      "manifest_sha256": "13486f098ec09ebbc83abd60eddfe819e4f05051e4a1c128f9eb4e7fb18ceab0",
+      "summary_sha256": "08423c9b4069b4cef4ec155e923694d3a99b217264115a5a1d79d606aa344fdd",
+      "recorded_workspace_commits": [
+        "68b635c836b8b13bf094a2c23eb69d0f0775ba08"
+      ],
+      "recorded_tracked_patch_sha256": [
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      ],
+      "recorded_artifacts_sha256": {
+        "phosphor": "fc67e1574e40d63b2c5e3af82c2c4b356d824902aaacae4bcbe9b0894e0e0ddb",
+        "phosphor.metallib": "375bd183d6fd9b68fc18fa952e3042ccb739e33f59e1b829c99859e3dfee6ad5"
+      },
+      "device": "Apple M5 Max",
+      "macos": [
+        "27.2"
+      ],
+      "completed_runs": 387,
+      "run_status_passes": 387,
+      "aggregate_passes": 387,
+      "lighting_checks_per_run": 288,
+      "lighting_failures": 0,
+      "reported_gpu_failures": 0,
+      "mean_pfm_hashes_verified": 387,
+      "validation_environment": {
+        "MTL_DEBUG_LAYER": null,
+        "MTL_DEBUG_LAYER_WARNING_MODE": null,
+        "MTL_SHADER_VALIDATION": null
+      },
+      "validation_scope": "Energy runs did not enable Metal API/shader validation; diagnostic checker PASS is a separate statement.",
+      "comparison_statuses": {
+        "PASS": 459
+      },
+      "cases": [
+        {
+          "case": "point8-spatial",
+          "status": "PASS",
+          "candidate_runs": 32,
+          "reference_runs": 32,
+          "energy_ratio": 1.000388340936874,
+          "expected_ratio": 1.0,
+          "roi_failures": 0,
+          "roi_inconclusive": 0
+        },
+        {
+          "case": "point8-temporal",
+          "status": "PASS",
+          "candidate_runs": 32,
+          "reference_runs": 32,
+          "energy_ratio": 1.001169827856389,
+          "expected_ratio": 1.0,
+          "roi_failures": 0,
+          "roi_inconclusive": 0
+        },
+        {
+          "case": "point8-full",
+          "status": "PASS",
+          "candidate_runs": 32,
+          "reference_runs": 32,
+          "energy_ratio": 1.00109860025771,
+          "expected_ratio": 1.0,
+          "roi_failures": 0,
+          "roi_inconclusive": 0
+        },
+        {
+          "case": "areas-spatial",
+          "status": "PASS",
+          "candidate_runs": 32,
+          "reference_runs": 32,
+          "energy_ratio": 0.999996127464965,
+          "expected_ratio": 1.0,
+          "roi_failures": 0,
+          "roi_inconclusive": 0
+        },
+        {
+          "case": "areas-temporal",
+          "status": "PASS",
+          "candidate_runs": 32,
+          "reference_runs": 32,
+          "energy_ratio": 1.0000136037553264,
+          "expected_ratio": 1.0,
+          "roi_failures": 0,
+          "roi_inconclusive": 0
+        },
+        {
+          "case": "areas-full",
+          "status": "PASS",
+          "candidate_runs": 32,
+          "reference_runs": 32,
+          "energy_ratio": 1.0001999895118956,
+          "expected_ratio": 1.0,
+          "roi_failures": 0,
+          "roi_inconclusive": 0
+        },
+        {
+          "case": "emissive-spatial",
+          "status": "PASS",
+          "candidate_runs": 32,
+          "reference_runs": 32,
+          "energy_ratio": 1.0000477598787172,
+          "expected_ratio": 1.0,
+          "roi_failures": 0,
+          "roi_inconclusive": 0
+        },
+        {
+          "case": "emissive-temporal",
+          "status": "PASS",
+          "candidate_runs": 32,
+          "reference_runs": 32,
+          "energy_ratio": 0.9998764129701426,
+          "expected_ratio": 1.0,
+          "roi_failures": 0,
+          "roi_inconclusive": 0
+        },
+        {
+          "case": "emissive-full",
+          "status": "PASS",
+          "candidate_runs": 32,
+          "reference_runs": 32,
+          "energy_ratio": 1.0000693260614157,
+          "expected_ratio": 1.0,
+          "roi_failures": 0,
+          "roi_inconclusive": 0
+        }
+      ]
+    },
+    "point1": {
+      "directory": "build/f11-energy-point1-chainage",
+      "status": "PASS",
+      "manifest_sha256": "290ea9c4f4b3239a5deeb162d6b87ce668467c01d4681ac094b7bb97d8decc72",
+      "summary_sha256": "21ff92d25711143fdad5fdd69173d2b8f7589aa6763608761601ba5c78873d41",
+      "recorded_workspace_commits": [
+        "778560d0f011598fd8c1df04f527f4f3bb0b3817"
+      ],
+      "recorded_tracked_patch_sha256": [
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      ],
+      "recorded_artifacts_sha256": {
+        "phosphor": "fc67e1574e40d63b2c5e3af82c2c4b356d824902aaacae4bcbe9b0894e0e0ddb",
+        "phosphor.metallib": "5bb1fa6826b4d68f4926858466f8fbddfd76a1e99006644564da7c56f99fe3d9"
+      },
+      "device": "Apple M5 Max",
+      "macos": [
+        "27.2"
+      ],
+      "completed_runs": 5,
+      "run_status_passes": 5,
+      "aggregate_passes": 5,
+      "lighting_checks_per_run": 288,
+      "lighting_failures": 0,
+      "reported_gpu_failures": 0,
+      "mean_pfm_hashes_verified": 5,
+      "validation_environment": {
+        "MTL_DEBUG_LAYER": null,
+        "MTL_DEBUG_LAYER_WARNING_MODE": null,
+        "MTL_SHADER_VALIDATION": null
+      },
+      "validation_scope": "Energy runs did not enable Metal API/shader validation; diagnostic checker PASS is a separate statement.",
+      "comparison_statuses": {},
+      "cases": [
+        {
+          "case": "point1-clustered",
+          "status": "PASS",
+          "candidate_runs": 1,
+          "reference_runs": 1,
+          "energy_ratio": 1.0,
+          "expected_ratio": 1.0,
+          "roi_failures": 0,
+          "roi_inconclusive": 0
+        },
+        {
+          "case": "point1-fresh",
+          "status": "PASS",
+          "candidate_runs": 1,
+          "reference_runs": 1,
+          "energy_ratio": 0.9999999938557079,
+          "expected_ratio": 1.0,
+          "roi_failures": 0,
+          "roi_inconclusive": 0
+        },
+        {
+          "case": "point1-pdf2",
+          "status": "PASS",
+          "candidate_runs": 1,
+          "reference_runs": 1,
+          "energy_ratio": 0.49999999692785396,
+          "expected_ratio": 0.5,
+          "roi_failures": 0,
+          "roi_inconclusive": 0
+        }
+      ],
+      "exact_checks": {
+        "point1-clustered-1": {
+          "each_frame": {
+            "violations": 0,
+            "max_relative_nonzero": 0.0,
+            "nonzero_on_black": 0,
+            "max_absolute": 0.0
+          },
+          "unity_energy_gate_rejected": null
+        },
+        "point1-fresh-1": {
+          "each_frame": {
+            "violations": 0,
+            "max_relative_nonzero": 1.490774639299622e-07,
+            "nonzero_on_black": 0,
+            "max_absolute": 1.862645149230957e-09
+          },
+          "unity_energy_gate_rejected": null
+        },
+        "point1-pdf2-1": {
+          "each_frame": {
+            "violations": 0,
+            "max_relative_nonzero": 1.490774639299622e-07,
+            "nonzero_on_black": 0,
+            "max_absolute": 9.313225746154785e-10
+          },
+          "unity_energy_gate_rejected": true
+        }
+      },
+      "negative_artifacts_sha256": {
+        "build/f11-energy-point1-chainage/pdf2-build/shaders/restir_di.metal": "783c5aa45bbb1cacbb43a48be2d2464a9908d66eb63a092889d225297c0df3f4",
+        "build/f11-energy-point1-chainage/pdf2-build/restir_di.air": "a4b6d574e558d77f33d91d64e130237698163970618642cb6fc5cc158c716679",
+        "build/f11-energy-point1-chainage/pdf2-app/phosphor": "fc67e1574e40d63b2c5e3af82c2c4b356d824902aaacae4bcbe9b0894e0e0ddb",
+        "build/f11-energy-point1-chainage/pdf2-app/shaders/phosphor.metallib": "758fb40709f52bdbb7e25c9062832ae00cd112edbfb98ccb83ecbb49f976867b"
+      },
+      "pdf2_artifacts_manifest_sha256": "88aea66c1e1bb4b9ed00eb275c64cbd3abcb7b2fa087c427ba8ac7618789584a"
+    }
+  },
+  "exact_cpu_proof": {
+    "path": "docs/results/F11-history-expiry-exact.json",
+    "sha256": "ae7ce7532b59dee80abd5979ddfeae207a41fc88bbb7057d6c6fb8c0684b9dc8",
+    "expected": 2,
+    "old_frame4_fraction": "182666318/91265265",
+    "old_frame4_expectation": 2.0014878387741493,
+    "corrected_expectations": [
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2",
+      "2"
+    ],
+    "frames": 7
+  },
+  "limitations": [
+    "Whole-image energy ratios summarize the result; acceptance used every predeclared ROI and RGB channel.",
+    "The before and after renderer commits include other integration changes. Each ensemble uses its own same-source reference and unchanged statistical protocol; the isolated causal proof is the exact enumeration and source correction.",
+    "Metal API/shader validation was not enabled in these energy runs.",
+    "Mean images and frame hashes remain; most intermediate PFM frames were removed by the original declared retention policy.",
+    "F11 phase remains open for ManyLights, post-denoiser image/temporal quality, lifecycle and performance acceptance through F13."
+  ]
+}
