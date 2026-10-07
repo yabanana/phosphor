@@ -14,4 +14,5 @@ using ProbeRadiance = glm::vec3 (*)(glm::vec3 direction,void* user);
 // GGX convolution divided by sum(NdotL), preserving constant radiance at
 // every roughness. Capture and mip scheduling/lifetimes belong to the host.
 [[nodiscard]] glm::vec3 reflectionProbePrefilter(glm::vec3 direction,float roughness,u32 samples,ProbeRadiance,void* user=nullptr);
+[[nodiscard]] glm::vec3 reflectionProbeContribution(const GPUDISurface&,glm::vec3 prefilteredRadiance);
 } // namespace phosphor

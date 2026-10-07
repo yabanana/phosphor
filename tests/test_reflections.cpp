@@ -1,0 +1,85 @@
+#include "renderer/reflection_settings.h"
+#include "renderer/reflection_probe.h"
+#include <doctest/doctest.h>
+#include <glm/gtc/matrix_transform.hpp>
+#include <array>
+#include <cmath>
+#include <limits>
+#include <algorithm>
+#include <vector>
+using namespace phosphor;
+namespace {
+GPUDISurface shiny(){GPUDISurface s{};s.valid=1;s.geometricNormal[2]=s.shadingNormal[2]=s.viewDirection[2]=1;s.depth=3;s.roughness=1;s.metallic=1;s.albedo[0]=s.albedo[1]=s.albedo[2]=1;return s;}
+glm::dvec3 white(glm::dvec3,void*){return glm::dvec3(1);}
+glm::vec3 colored(glm::vec3,void*){return {2,3,5};}
+bool halfOcclusion(glm::vec3 d,float radius,void*){return radius>=.5f&&d.x>0;}
+bool noOcclusion(glm::vec3,float,void*){return false;}
+GPUReflectionProbe probe(){GPUReflectionProbe p{};p.enabled=1;p.boxMin[0]=-2;p.boxMin[1]=-1;p.boxMin[2]=-3;p.boxMax[0]=2;p.boxMax[1]=1;p.boxMax[2]=3;p.blendDistance=.5f;p.mipCount=6;p.generation=1;return p;}
+}
+TEST_CASE("F13 reflection solid-angle reference agrees with independent rough metal integral"){
+    const auto s=shiny();const auto reference=reflectionReference(s,32,2048,white);
+    // For N=V, roughness=1,F0=1: 2pi*integral0..1[z/(2pi*(z+1))]dz.
+    CHECK(reference.x==doctest::Approx(1-std::log(2.0)).epsilon(1e-5));
+    glm::dvec3 estimate(0);u32 zeroWeight=0;
+    for(u32 y=0;y<128;++y)for(u32 x=0;x<128;++x){const auto d=sampleSpecular(s,{(x+.5)/128,(y+.5)/128});REQUIRE(d.valid);REQUIRE(d.pdf>0);
+        estimate+=d.weight;zeroWeight+=glm::dot(glm::dvec3(0,0,1),d.direction)<=0;}
+    estimate/=128*128;
+    CHECK(estimate.x==doctest::Approx(reference.x).epsilon(1e-4));CHECK(zeroWeight==8192);
+    // Resampling rejected NDF proposals would double energy for this case.
+    CHECK(estimate.x*2!=doctest::Approx(reference.x));
+}
+TEST_CASE("F13 reflection roughness selection is continuous and misses remain explicit"){
+    ReflectionSettings s;REQUIRE(validReflectionSettings(s));CHECK(reflectionRTWeight(s.rtRoughnessLow,s)==1);CHECK(reflectionRTWeight(s.rtRoughnessHigh,s)==0);
+    CHECK(reflectionRTWeight((s.rtRoughnessLow+s.rtRoughnessHigh)*.5f,s)==doctest::Approx(.5));
+    s.flags&=~REFLECTION_ENABLE_RT;CHECK(reflectionRTWeight(.01f,s)==0);
+    s.rtRoughnessHigh=s.rtRoughnessLow;CHECK_FALSE(validReflectionSettings(s));
+    auto surface=shiny();surface.roughness=std::numeric_limits<float>::quiet_NaN();CHECK_FALSE(sampleSpecular(surface,{.3,.4}).valid);
+    surface=shiny();CHECK_FALSE(sampleSpecular(surface,{1,.4}).valid);
+    GPUSpecularSample miss{};miss.path=REFLECTION_PATH_ENVIRONMENT;miss.secondarySlot=~0u;miss.flags=SPECULAR_SAMPLE_VALID;
+    CHECK(miss.hitDistance==0); // environment is not a fake far geometry hit
+}
+TEST_CASE("F13 reflection energy is invariant under a mirrored surface frame"){
+    auto a=shiny();a.roughness=.7f;const auto n=glm::normalize(glm::vec3(.4f,.2f,.9f)),v=glm::normalize(glm::vec3(.1f,.4f,1));
+    for(u32 i=0;i<3;++i){a.shadingNormal[i]=n[i];a.viewDirection[i]=v[i];}
+    auto b=a;b.shadingNormal[0]*=-1;b.viewDirection[0]*=-1;
+    const auto ra=reflectionReference(a,64,256,white),rb=reflectionReference(b,64,256,white);
+    CHECK(ra.x==doctest::Approx(rb.x).epsilon(1e-4));
+    // Secondary front-face decisions require root's rtMaterialFrontFacing;
+    // this frame-invariance oracle never substitutes WORLD facing for it.
+}
+TEST_CASE("F13 SSR brackets a known plane and rejects background offscreen and invalid depth"){
+    constexpr u32 side=64;glm::mat4 vp(0);vp[0][0]=vp[1][1]=1;vp[2][3]=-1;vp[3][2]=.1f;
+    const auto inverse=glm::inverse(vp);std::vector<float> depth(side*side,.1f/3);ReflectionSettings settings;settings.maxDistance=10;settings.ssrBinarySteps=12;
+    const auto hit=reflectionSSR({0,0,-1},{0,0,-1},vp,inverse,glm::mat4(1),side,side,depth,settings);
+    REQUIRE(hit);CHECK(hit->position.z==doctest::Approx(-3).epsilon(1e-5));CHECK(std::abs(hit->distance-2)<.01f);
+    std::fill(depth.begin(),depth.end(),0);CHECK_FALSE(reflectionSSR({0,0,-1},{0,0,-1},vp,inverse,glm::mat4(1),side,side,depth,settings));
+    std::fill(depth.begin(),depth.end(),.1f/3);CHECK_FALSE(reflectionSSR({0,0,-1},{1,0,0},vp,inverse,glm::mat4(1),side,side,depth,settings));
+    CHECK_FALSE(reflectionSSR({0,0,-1},{0,0,0},vp,inverse,glm::mat4(1),side,side,depth,settings));
+}
+TEST_CASE("F13 AO oracle uses world radius and cosine visibility with no GI double count"){
+    AOSettings settings;CHECK(validAOSettings(settings));CHECK(aoReference({0,1,0},1,64,noOcclusion)==1);
+    CHECK(aoReference({0,1,0},1,64,halfOcclusion)==doctest::Approx(.5));CHECK(aoReference({0,1,0},.25f,64,halfOcclusion)==1);
+    const auto open=aoHorizonVisibility({0,0,1},{0,0,1},{1,0,0},float(3.141592653589793),float(3.141592653589793),512);CHECK(open==1);
+    const auto horizon=aoHorizonVisibility({0,0,1},{0,0,1},{1,0,0},float(3.141592653589793/3),float(3.141592653589793/3),1024);
+    CHECK(std::abs(horizon-.75f)<.005f);
+    const auto darkAO=composeSignalLighting(glm::vec3(2),glm::vec3(3),glm::vec3(5),glm::vec3(7),glm::vec3(11),0,true);
+    const auto openAO=composeSignalLighting(glm::vec3(2),glm::vec3(3),glm::vec3(5),glm::vec3(7),glm::vec3(11),1,true);
+    CHECK(darkAO==openAO);CHECK(darkAO==glm::vec3(17));
+    CHECK(composeSignalLighting(glm::vec3(2),{},glm::vec3(5),glm::vec3(7),glm::vec3(11),.5f,false)==glm::vec3(19.5f));
+}
+TEST_CASE("F13 static reflection probe parallax cube orientation and constant energy"){
+    const auto p=probe();REQUIRE(validReflectionProbe(p));CHECK(reflectionProbeWeight(p,{0,0,0})==1);CHECK(reflectionProbeWeight(p,{2,0,0})==0);
+    CHECK_FALSE(reflectionProbeParallax(p,{3,0,0},{0,0,1}));const auto direction=reflectionProbeParallax(p,{1,0,0},{0,0,1});REQUIRE(direction);
+    CHECK(direction->x==doctest::Approx(1/std::sqrt(10.0)));CHECK(direction->z==doctest::Approx(3/std::sqrt(10.0)));
+    for(u32 face=0;face<6;++face)for(const glm::vec2 uv:{glm::vec2(.2f,.3f),glm::vec2(.7f,.8f),glm::vec2(.5f)}){
+        const auto d=reflectionCubeDirection(face,uv);const auto recovered=reflectionCubeCoordinate(d);REQUIRE(recovered);CHECK(recovered->face==face);
+        CHECK(recovered->uv.x==doctest::Approx(uv.x));CHECK(recovered->uv.y==doctest::Approx(uv.y));
+        const auto vp=reflectionProbeViewProjection(p,face,.1f,100);const glm::vec4 clip=vp*glm::vec4(d*3.f,1);
+        const glm::vec2 raster=glm::vec2(clip)/clip.w*glm::vec2(.5f,-.5f)+.5f;
+        CHECK(raster.x==doctest::Approx(uv.x).epsilon(1e-5));CHECK(raster.y==doctest::Approx(uv.y).epsilon(1e-5));
+    }
+    for(float roughness:{0.f,.1f,.5f,1.f}){const auto L=reflectionProbePrefilter({.4f,.3f,.8f},roughness,256,colored);
+        CHECK(L.x==doctest::Approx(2).epsilon(1e-5));CHECK(L.y==doctest::Approx(3).epsilon(1e-5));CHECK(L.z==doctest::Approx(5).epsilon(1e-5));}
+    for(float roughness:{.04f,.1f,.5f,1.f})for(float metal:{0.f,1.f}){auto s=shiny();s.roughness=roughness;s.metallic=metal;
+        const auto Lo=reflectionProbeContribution(s,{2,3,5});CHECK(Lo.x>=0);CHECK(Lo.x<=2);CHECK(Lo.y<=3);CHECK(Lo.z<=5);}
+}

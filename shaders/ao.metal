@@ -46,18 +46,24 @@ kernel void ao_gtao(constant GPUAOParams& p [[buffer(0)]],const device GPUDISurf
             float2 screen=(clip.xy/max(clip.w,1e-8f)-center.xy/max(center.w,1e-8f))*float2(p.width*.5f,-p.height*.5f);
             if(dot(screen,screen)<1e-12f)screen=float2(cos(phi),sin(phi));else screen=normalize(screen);
             float positive=M_PI_F,negative=M_PI_F;
-            for(uint side=0;side<2;++side){float horizon=M_PI_F;
+            for(uint side=0;side<2;++side){float horizonCos=-1.0f,horizonDistance=0;
                 for(uint step=1;step<=steps;++step){const float fraction=float(step)/float(steps);const float2 offset=screen*((side? -1.0f:1.0f)*max(1.0f,radiusPixels*fraction*fraction));
                     const int2 q=int2(round(float2(pixel)+offset));if(any(q<0)||any(q>=int2(p.width,p.height)))continue;
                     float3 neighbor;if(!aoUnproject(uint2(q),depth.read(uint2(q)).x,p,neighbor))continue;
                     const float3 delta=neighbor-point;const float distance=length(delta);
                     // Ignore coplanar/below-surface samples. Unknown/offscreen
                     // depth remains unoccluded, preventing silhouette halos.
-                    if(!(distance>p.originBias&&distance<=p.radius)||dot(delta,n)<=p.originBias)continue;
-                    const float candidate=acos(clamp(dot(delta/distance,v),-1.0f,1.0f));
-                    const float bounded=mix(candidate,M_PI_F,saturate((distance-p.radius*.8f)/max(p.radius*.2f,1e-5f)));
-                    horizon=min(horizon,bounded);
-                }if(side)negative=horizon;else positive=horizon;}
+                    if(!(distance>p.originBias&&distance<=p.radius))continue;
+                    const float candidate=dot(delta,n)>p.originBias?clamp(dot(delta/distance,v),-1.0f,1.0f):-1.0f;
+                    const float bounded=mix(candidate,-1.0f,saturate((distance-p.radius*.8f)/max(p.radius*.2f,1e-5f)));
+                    if(bounded>=horizonCos){horizonCos=bounded;horizonDistance=distance;}
+                    else if(distance>horizonDistance+p.thickness){
+                        // Conservative height-field thin-feature erosion only
+                        // after moving beyond a WORLD thickness interval. It
+                        // cannot infer unseen back layers; compare against RTAO.
+                        horizonCos=max(-1.0f,horizonCos-1.0f/float(steps));
+                    }
+                }const float horizon=acos(clamp(horizonCos,-1.0f,1.0f));if(side)negative=horizon;else positive=horizon;}
             sum+=aoHorizonIntegral(n,v,axis,positive,negative);
         }visibility=saturate(sum/float(slices));
     }output.write(float4(visibility,visibility,visibility,1),pixel);
