@@ -13,6 +13,7 @@
 #include <metal_stdlib>
 namespace phosphor {
 using u32 = uint;
+
 } // namespace phosphor
 #define PHOSPHOR_STATIC_ASSERT(cond, msg)
 // Program-scope variables must live in the constant address space in MSL.
@@ -475,5 +476,69 @@ struct GPUSynthArgs {
     GPUSynthInput inputs[8]; // SYNTH_MAX_INPUTS
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUSynthArgs) == 320, "GPUSynthArgs layout");
+
+// ---------------------------------------------------------------------------
+// F10: visibility is one signal per selected light and view; 1 = unoccluded.
+// The guide comes from raster geometry BEFORE material resolve. No normal map
+// or RT proxy primitive may supply the geometric normal used for ray offsets.
+// ---------------------------------------------------------------------------
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_CASCADES = 4u;
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_CSM = 1u << 0;
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_RT = 1u << 1;
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_HISTORY_VALID = 1u << 2;
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_CONTACT = 1u << 3;
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_LIGHT_VALID = 1u << 4;
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_CORRUPT_NONE = 0u;
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_CORRUPT_BIAS = 1u;
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_CORRUPT_CASTER = 2u;
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_CORRUPT_HISTORY = 3u;
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_CORRUPT_CACHE = 4u;
+
+struct GPUShadowCascade {
+    float viewProjection[16]; // orthographic reverse-Z; clear 0, compare Greater
+    float splitNear, splitFar, texelWorld, depthRange;
+    float center[3], radius; // snapped receiver bound in world space
+    float depthMin, depthMax, biasWorld, normalBiasWorld;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowCascade) == 112, "GPUShadowCascade layout");
+
+struct GPUShadowSurface {
+    float position[3], viewDepth;
+    float geometricNormal[3], reverseDepth;
+    u32 slot, generation, primitive, valid; // primitive = meshlet-local triangle
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowSurface) == 48, "GPUShadowSurface layout");
+
+struct GPUShadowHistory {
+    float position[3], visibility;
+    float geometricNormal[3], secondMoment;
+    u32 slot, generation, lightID, lightRevision;
+    u32 sceneRevision, viewID, samples, valid;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowHistory) == 64, "GPUShadowHistory layout");
+
+struct GPUShadowParams {
+    float inverseViewProjection[16], viewProjection[16];
+    float previousViewProjection[16], view[16];
+    float cameraPosition[4];
+    float lightDirection[4]; // xyz toward sun, w = angular radius in RADIANS
+    u32 width, height, slotCount, meshCount;
+    u32 candidateCapacity, materialCount, frameIndex, flags;
+    u32 mapResolution, pcssSearchSamples, pcssFilterSamples, historyMaxSamples;
+    u32 viewID, lightID, lightRevision, sceneRevision;
+    float temporalNormalThreshold, temporalPositionThreshold, contactDistance, contactThickness;
+    float depthBiasWorld, normalBiasWorld, contactStrength, maxTraceDistance;
+    u32 contactSteps, cascadeIndex, casterSlot, meshletFirst;
+    u32 meshletCount, meshletGridWidth, corruption, pad;
+    GPUShadowCascade cascades[4];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowParams) == 864, "GPUShadowParams layout");
+
+struct GPUShadowCounters {
+    u32 guides, rays, hits, historyReused;
+    u32 historyRejected, casters, contactHits, errors;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowCounters) == 32, "GPUShadowCounters layout");
+
 
 } // namespace phosphor
