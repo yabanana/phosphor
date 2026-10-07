@@ -75,17 +75,21 @@ struct VolumeDiagnostics::Impl {
     void homogeneous(rg::PassContext& ctx,MTL::Buffer* cells,MTL::GPUAddress fogAddress){auto& s=slots[slot];auto* t=s.fixtureTable;t->setAddress(fogAddress,0);t->setAddress(cells->gpuAddress(),1);t->setAddress(s.diagnosticAddress,17);
         auto* e=static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder());e->setComputePipelineState(p.compute(fixture));e->setArgumentTable(t);e->dispatchThreads(MTL::Size::Make(params.fogX,params.fogY,params.fogZ),MTL::Size::Make(4,4,4));}
     void foreign(rg::RenderGraph& g,rg::BufferRef& history,MTL::Buffer* buffer,u32 count,bool cloud){if(!capture||config.corruption!=VOLUME_CORRUPT_HISTORY)return;using namespace rg;
+        (void)buffer;const BufferRef input=history;
         g.addPass(cloud?"Negative actual foreign cloud history":"Negative actual foreign fog history",PassType::Compute,[&](PassBuilder& b){b.read(history,Usage::ShaderRead,StageDispatch);history=b.write(history,Usage::ShaderWrite,StageDispatch);},
-            [this,buffer,count,cloud](PassContext& ctx){auto& s=slots[slot];auto diag=s.expected.diagnostics;if(cloud)diag.fogIndices[0]=count;
-                auto* t=s.foreignTables[cloud?1:0];t->setAddress(lighting::upload(c,diag),17);t->setAddress(buffer->gpuAddress(),18);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,cloud?foreignCloud:foreignFog,t,count);});}
-    void collect(rg::RenderGraph& g,const Sources& src){if(!capture)return;using namespace rg;slots[slot].counters=src.counters;
+            [this,input,count,cloud](PassContext& ctx){auto& s=slots[slot];auto diag=s.expected.diagnostics;if(cloud)diag.fogIndices[0]=count;
+                auto* t=s.foreignTables[cloud?1:0];t->setAddress(lighting::upload(c,diag),17);t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(input))->gpuAddress(),18);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,cloud?foreignCloud:foreignFog,t,count);});}
+    void collect(rg::RenderGraph& g,const Sources& src){if(!capture)return;using namespace rg;
         samplesRef=g.importBuffer("Immutable same-frame F14 oracle samples",{11*sizeof(GPUVolumeNumericSample)},ImportPerFrame|ImportOutput);
         g.addPass("Actual shared solar disk wide HDR probe",PassType::Compute,[&](PassBuilder& b){solarRef=b.createTexture("Solar toward-away-tangent RGBA32",{Format::RGBA32Float,3,1});solarRef=b.write(solarRef,Usage::ShaderWrite,StageDispatch);},
             [this](PassContext& ctx){auto& s=slots[slot];auto* t=s.solarTable;t->setAddress(s.atmosphereAddress,0);tex(t,ctx,solarRef,5);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,solar,t,3);});
         g.addPass("Same-frame independent volume oracle readback",PassType::Compute,[&](PassBuilder& b){for(auto r:{src.transmittance,src.multiple,src.sky,solarRef})b.read(r,Usage::ShaderRead,StageDispatch);b.read(globalRef,Usage::ShaderRead,StageDispatch);b.read(skyRef,Usage::ShaderRead,StageDispatch);
+            b.read(src.counters,Usage::ShaderRead,StageDispatch);
             if(config.homogeneousFog){b.read(src.fogCells,Usage::ShaderRead,StageDispatch);b.read(src.fogIntegrated,Usage::ShaderRead,StageDispatch);}samplesRef=b.write(samplesRef,Usage::ShaderWrite,StageDispatch);},
             [this,src](PassContext& ctx){auto& s=slots[slot];auto* t=s.collectTable;t->setAddress(s.atmosphereAddress,0);t->setAddress(s.diagnosticAddress,17);t->setAddress(globalProduced->gpuAddress(),18);t->setAddress(skyProduced[view]->gpuAddress(),19);t->setAddress(s.samples->gpuAddress(),20);
-                t->setAddress(src.fogIntegratedBuffer?src.fogIntegratedBuffer->gpuAddress():s.samples->gpuAddress(),21);t->setAddress(src.fogCellsBuffer?src.fogCellsBuffer->gpuAddress():s.samples->gpuAddress(),22);
+                s.counters=static_cast<MTL::Buffer*>(ctx.buffer(src.counters));
+                t->setAddress(config.homogeneousFog?static_cast<MTL::Buffer*>(ctx.buffer(src.fogIntegrated))->gpuAddress():s.samples->gpuAddress(),21);
+                t->setAddress(config.homogeneousFog?static_cast<MTL::Buffer*>(ctx.buffer(src.fogCells))->gpuAddress():s.samples->gpuAddress(),22);
                 tex(t,ctx,src.transmittance,0);tex(t,ctx,src.multiple,1);tex(t,ctx,src.sky,2);tex(t,ctx,solarRef,3);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,collector,t,params.sampleCount);s.pending=true;});}
     bool consume(u32 index){auto& s=slots.at(index);if(!s.pending)return true;if(c.frameEvent()->signaledValue()<=s.frame)throw std::logic_error("Volume oracle read before GPU completion");
         const auto* data=static_cast<const GPUVolumeNumericSample*>(s.samples->contents());const auto cases=evaluateVolumeOracle(s.expected,{data,s.expected.diagnostics.sampleCount});
