@@ -77,6 +77,14 @@ structure is released and the SAME command buffer object is reused.
 used or resident heap aborts the process; every fresh one passes.  The engine
 works around it in `MetalContext::refreshCommandBuffer`.
 
+The report distinguishes completed AS builds, verified AS traces and completed
+buffer fills. `F9_S1E_CMD=fresh` with `as_built` builds the AS and waits for GPU
+completion, but does **not** trace it: the existing trace helper reuses the
+harness command buffer. Only `reused` verifies the one-ray hit before release.
+The fresh result establishes survival across build/release/subsequent commits,
+not traversal correctness. Earlier S1e reports that called fresh builds
+"built and traced" overstated that scope; they are retained as historical data.
+
 ```sh
 F9_S1E_CMD=reused MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 \
     ./build/release/f9_spike --only F9-S1e,F9-S2 --quick   # aborts: the repro

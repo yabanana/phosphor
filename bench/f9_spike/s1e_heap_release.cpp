@@ -21,9 +21,10 @@
 // a heap that was used or resident crashes a later commit (exit 134, the
 // next benchmark never runs); every fresh one passes.  Without validation
 // every configuration passes.  The benchmark itself only reports which
-// configuration ran.  Negative control: the built AS must be
-// traced correctly (one ray) before the release, i.e. the heap really held a
-// live AS.
+// configuration ran. Reused mode traces one ray before release. Fresh mode
+// verifies build submission/completion only: the existing trace helper would
+// reuse the harness command buffer and change the configuration under test.
+// Neither mode should report survival as proof of a trace it did not execute.
 #include "f9_common.h"
 
 #include <cstdlib>
@@ -71,7 +72,7 @@ void heapRelease(soc::Context& ctx, soc::Report& rep) {
     const std::string content = env("F9_S1E_CONTENT", "as_built");
     const std::string order = env("F9_S1E_RELEASE", "together");
     const u32 rounds = 3;
-    u32 traced = 0;
+    u32 built = 0, traced = 0, filled = 0;
 
     // One triangle (z = 0) for the BLAS.
     MTL::Buffer* vb = ctx.buffer(3 * 3 * sizeof(float));
@@ -123,6 +124,7 @@ void heapRelease(soc::Context& ctx, soc::Report& rep) {
             e->fillBuffer(static_cast<MTL::Buffer*>(res), NS::Range::Make(0, 4096), 7);
             e->endEncoding();
             finish(ctx, cmd);
+            ++filled;
         } else {
             MTL::AccelerationStructure* as = heap->newAccelerationStructure(sz.accelerationStructureSize, 0);
             if (!as) throw soc::BenchError("heap->newAccelerationStructure failed");
@@ -133,9 +135,8 @@ void heapRelease(soc::Context& ctx, soc::Report& rep) {
                 e->buildAccelerationStructure(as, desc, range(scratch));
                 e->endEncoding();
                 finish(ctx, cmd);
-                if (freshCommands()) {
-                    ++traced; // the trace helper would reuse the context's command buffer
-                } else {
+                ++built;
+                if (!freshCommands()) {
                     const std::vector<Ray> ray = {{{0.0, 0.0, 1.0}, {0.0, 0.0, -1.0}, 0.0, 10.0}};
                     const std::vector<GpuHit> h = traceNearest(ctx, as, false, ray);
                     traced += (h[0].t > 0.99f && h[0].t < 1.01f) ? 1u : 0u;
@@ -161,11 +162,18 @@ void heapRelease(soc::Context& ctx, soc::Report& rep) {
     }
     ctx.log("S1e: content %s, release %s, %u rounds survived", content.c_str(), order.c_str(), rounds);
     rep.value("rounds_survived", "rounds", double(rounds), {}, true);
-    rep.note("content " + content + ", release " + order);
-    const bool needTrace = content == "as_built";
-    rep.negative(!needTrace || traced == rounds,
-                 needTrace ? "the heap AS was built and traced in " + std::to_string(traced) + "/" + std::to_string(rounds) + " rounds"
-                           : "no AS trace in this configuration");
+    rep.value("as_builds_completed", "builds", double(built), {}, true);
+    rep.value("as_traces_verified", "traces", double(traced), {}, true);
+    rep.value("buffer_fills_completed", "fills", double(filled), {}, true);
+    rep.note("content " + content + ", release " + order + ", command buffers " + (freshCommands() ? "fresh" : "reused"));
+    const bool needBuild = content == "as_built";
+    const bool needTrace = needBuild && !freshCommands();
+    const bool complete = (!needBuild || built == rounds) && (!needTrace || traced == rounds) &&
+                          (content != "buffer" || filled == rounds);
+    rep.negative(complete,
+                 "configuration survival: " + std::to_string(built) + " AS builds completed, " +
+                     std::to_string(traced) + " AS traces verified, " + std::to_string(filled) + " buffer fills completed; " +
+                     (needTrace ? "one trace required per round" : "no AS trace executed in this configuration"));
 }
 
 } // namespace
