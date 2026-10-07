@@ -9,8 +9,13 @@ destination=${2:-"$repo_dir/shaders/pipelines.mtl4-json"}
 command -v jq >/dev/null || { echo 'jq is required' >&2; exit 2; }
 [[ -x "$app" ]] || { echo "Build $app in the tester checkout first" >&2; exit 2; }
 [[ -f "$destination" ]] || { echo 'Existing baseline pipeline corpus is required' >&2; exit 2; }
-work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+if [[ -n ${HARVEST_ARTIFACT_DIR:-} ]]; then
+    work=$HARVEST_ARTIFACT_DIR
+    mkdir "$work" # refuse overwriting earlier raw evidence
+else
+    work=$(mktemp -d)
+    trap 'rm -rf "$work"' EXIT
+fi
 corpora=("$destination")
 for mode in surface-rt surface-apple9 denoised-request volumes-full volumes-csm; do
     case "$mode" in
@@ -32,13 +37,7 @@ done
 # Requested SDK mode can report custom MissingFactory. This script cannot
 # reconcile the owned gateway or certify SDK output units/lifetime. Engine MSL
 # descriptors are harvested; external SDK implementation stays framework-owned.
-jq -s 'reduce .[] as $doc ({};
-    reduce ($doc|keys_unsorted[]) as $key (. ;
-      if $key=="libraries" then .libraries=(($doc.libraries|map(.path="@PHOSPHOR_METALLIB@"))+(.libraries//[])|unique_by(.label))
-      elif ($doc[$key]|type)=="object" then
-        .[$key]=(reduce ($doc[$key]|keys_unsorted[]) as $sub (.[$key]//{};
-          .[$sub]=((.[$sub]//[])+$doc[$key][$sub]|unique_by(.label))))
-      else .[$key]=$doc[$key] end))' "${corpora[@]}" >"$work/merged.json"
+python3 "$repo_dir/tools/merge_pipeline_harvests.py" --output "$work/merged.json" "${corpora[@]}"
 [[ -s "$work/merged.json" ]] || exit 1
 jq -S . "$work/merged.json" >"$work/final.json"
 mv "$work/final.json" "$destination"
