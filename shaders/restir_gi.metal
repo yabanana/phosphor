@@ -144,6 +144,9 @@ kernel void gi_temporal(instance_acceleration_structure as [[buffer(0)]],constan
     if(pixel.x>=p.width || pixel.y>=p.height) return;
     uint id=pixel.y*p.width+pixel.x;GPUGiReservoir r=fresh[id];
     float3 x=positions.read(pixel).xyz,n=normals.read(pixel).xyz;
+    // Match candidate normalization after the half-float guide round trip.
+    // Preserve zero/invalid guides for their existing validity diagnostics.
+    if(dot(n,n)>1e-20f)n=normalize(n);
     float2 previous=float2(pixel)+motion.read(pixel).xy;
     if(!p.reset && all(isfinite(previous)) && all(previous>=0.0f) && previous.x<float(p.width) && previous.y<float(p.height)) {
         uint2 q=uint2(floor(previous+0.5f));
@@ -173,6 +176,7 @@ kernel void gi_spatial(instance_acceleration_structure as [[buffer(0)]],constant
     if(pixel.x>=p.width || pixel.y>=p.height) return;
     uint id=pixel.y*p.width+pixel.x;GPUGiReservoir r=input[id];
     float4 x4=positions.read(pixel),n4=normals.read(pixel);float3 x=x4.xyz,n=n4.xyz;
+    if(dot(n,n)>1e-20f)n=normalize(n);
     if(x4.w>0.0f && n4.w>0.0f) for(uint k=0;k<4u;++k) {
         int2 offset=k==0u?int2(-1,0):k==1u?int2(1,0):k==2u?int2(0,-1):int2(0,1),q=int2(pixel)+offset;
         if(any(q<0) || q.x>=int(p.width) || q.y>=int(p.height)) continue;
