@@ -271,6 +271,27 @@ TEST_CASE("F12 offline snapshot PFM remains linear and full world/material value
     CHECK(bytes.starts_with("PF\n1 1\n-1.0\n")); // HDR8 stored unexposed, FLOAT32
     std::filesystem::remove_all(dir);
 }
+TEST_CASE("F12 reference preserves caster-only roles and standalone triangle emitters") {
+    const auto dir=std::filesystem::temp_directory_path()/"phosphor_f12_reference_roles";
+    std::filesystem::remove_all(dir);std::filesystem::remove_all(dir.string()+".partial");
+    std::array<GPUVertex,3> vertices{};vertices[1].px=1;vertices[2].py=1;
+    const std::array<u32,3> indices{0,1,2};GPUMeshInfo mesh{};mesh.indexCount=3;
+    GPUMaterial m{};m.baseColor[3]=1;
+    m.baseColorTex=m.normalTex=m.metallicRoughnessTex=m.occlusionTex=m.emissiveTex=INVALID_TEXTURE_INDEX;
+    GPUInstance i{};i.modelMatrix[0]=i.modelMatrix[5]=i.modelMatrix[10]=i.modelMatrix[15]=1;
+    i.flags=INSTANCE_FLAG_VALID|2u; // Invisible camera/indirect, valid shadow caster.
+    ReferenceAreaLight light;light.type=6;light.flags=0;light.materialIndex=INVALID_TEXTURE_INDEX;
+    light.position[1]=2;light.axisU[0]=1;light.axisV[2]=1;light.emission[0]=8;
+    OfflineReferenceScene s{.vertices=vertices,.indices=indices,.meshes=std::span(&mesh,1),
+        .worldInstances=std::span(&i,1),.materials=std::span(&m,1),.sampledLights=std::span(&light,1)};
+    auto validation=validateReferenceScene(s);REQUIRE(validation.ok);CHECK(validation.instances==1);
+    REQUIRE(exportOfflineReference(s,dir).ok);
+    const auto json=contents(dir/"scene.json");
+    CHECK(json.find("\"flags\":18")!=std::string::npos); // Both exact role bits retained.
+    CHECK(json.find("\"geometry\":\"light_triangle_0.ply\"")!=std::string::npos);
+    CHECK(contents(dir/"light_triangle_0.ply").find("element face 1")!=std::string::npos);
+    std::filesystem::remove_all(dir);
+}
 
 TEST_CASE("F12 reference permits explicit infinite far and refuses inverted finite clip") {
     OfflineReferenceScene s;s.camera.farPlane=0;
