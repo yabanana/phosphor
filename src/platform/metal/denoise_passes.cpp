@@ -4,6 +4,7 @@
 #include "rendergraph/pass_context.h"
 #include <array>
 #include <cstring>
+#include <cstdio>
 #include <string>
 #include <limits>
 namespace phosphor {
@@ -125,7 +126,7 @@ void DenoisePasses::prepareFrame(const ShadowPasses::Frame& f,u64 epoch,const st
 void DenoisePasses::invalidateAll(const char* reason){impl_->invalidate(reason);}
 rg::TextureRef DenoisePasses::addSignal(rg::RenderGraph& g,u32 s,rg::TextureRef r,rg::TextureRef m,rg::BufferRef b,rg::BufferRef metadata){return impl_->add(g,s,r,m,b,metadata);}
 void DenoisePasses::bindFrame(MetalGraphExecutor& e){impl_->bind(e);}u64 DenoisePasses::version()const{return impl_->graphVersion;}
-bool DenoisePasses::check(u32 slot)const{if(!impl_->options.debugLighting)return true;for(const auto& s:impl_->slots.at(slot)){if(!s.used)continue;const auto* words=static_cast<const u32*>(s.check->contents());if(words[0]!=s.expected||words[2]||words[3])return false;}return true;}
+bool DenoisePasses::check(u32 slot)const{if(!impl_->options.debugLighting)return true;for(const auto& s:impl_->slots.at(slot)){if(!s.used)continue;const auto* words=static_cast<const u32*>(s.check->contents());if(words[0]!=s.expected||words[2]||words[3]){std::fprintf(stderr,"DENOISE check slot %u expected %u pixels %u valid %u stateErrors %u outputErrors %u\n",slot,s.expected,words[0],words[1],words[2],words[3]);return false;}}return true;}
 bool DenoisePasses::ready()const{return impl_->pipelines.compute(impl_->temporal)&&impl_->pipelines.compute(impl_->atrous)&&
     (!impl_->options.debugLighting||(impl_->pipelines.compute(impl_->checker)&&impl_->pipelines.compute(impl_->clear)))&&
     (!impl_->options.debugHistoryCorrupt||impl_->pipelines.compute(impl_->corrupt));}

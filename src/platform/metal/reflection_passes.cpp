@@ -17,6 +17,7 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -311,7 +312,7 @@ void ReflectionPasses::prepareFrame(const SceneStore& s,const ShadowPasses::Fram
 rg::TextureRef ReflectionPasses::addToGraph(rg::RenderGraph& g,rg::TextureRef base,rg::TextureRef depth){return impl_->add(g,base,depth);}
 void ReflectionPasses::bindFrame(MetalGraphExecutor& e){impl_->bind(e);}
 u64 ReflectionPasses::version()const{const std::pair<u64,u64> components{impl_->graphVersion,impl_->denoise.version()};if(impl_->publishedComponents!=components){impl_->publishedComponents=components;++impl_->publishedVersion;}return impl_->publishedVersion;}
-bool ReflectionPasses::check(u32 slot)const{const auto& f=impl_->slots.at(slot);const auto* errors=static_cast<const u32*>(f.errors->contents());if(impl_->options.debugLighting&&errors[0]!=f.expected)return false;for(u32 i=1;i<8;++i)if(errors[i])return false;return !f.customUsed||impl_->denoise.check(slot);}
+bool ReflectionPasses::check(u32 slot)const{const auto& f=impl_->slots.at(slot);const auto* errors=static_cast<const u32*>(f.errors->contents());bool okay=!impl_->options.debugLighting||errors[0]==f.expected;for(u32 i=1;i<8;++i)okay=okay&&!errors[i];if(!okay){std::fprintf(stderr,"REFLECTION check slot %u expected %u counts %u %u %u %u %u %u %u %u\n",slot,f.expected,errors[0],errors[1],errors[2],errors[3],errors[4],errors[5],errors[6],errors[7]);return false;}return !f.customUsed||impl_->denoise.check(slot);}
 bool ReflectionPasses::ready()const{const auto& i=*impl_;const auto& o=i.options;
     if(!i.p.compute(i.compose)||!i.p.compute(i.zero)||!i.p.compute(i.clear)||!i.p.compute(i.prefilter)||!i.p.compute(i.validateProbe)||!i.p.compute(i.publishProbe))return false;
     if(o.reflections!=ReflectionMode::Off&&(!i.p.compute(i.reduce)||!i.p.compute(o.reflections==ReflectionMode::Probes?i.probeOnly:i.reflectionSSR)))return false;
