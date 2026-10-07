@@ -17,16 +17,16 @@ prova alla volta. File grezzi locali: `build/lighting-smoke`, `build/f10-*`,
 | I-04 | Shadow dispatch globale meshlet×slot, lavoro cartesiano | Corretto in `3afcffd`, per bucket.used inclusi holes; 4 test CPU/1011 assertion, 5 casi GPU CSM/cache/negativi passati |
 | I-05 | Guide half non rinormalizzate nel reuse GI, target non coerente | `8e533bf`; 2192 errori reservoir al primo frame prima del fix, zero dopo; DDGI/cache/restir e negativi GPU passati nei microcase |
 | R-11-01 | Area emissiva cambia con scala/shear senza invalidare il dominio DI | Fix scrittore `dfe8cdb`+`d147149` integrati; CPU verdi, verifica GPU/moto energetica pendente |
-| R-11-02 | Nonfinite azzerati prima del checker | Fix dello scrittore pendente; serve errore registrato prima del sanitizing |
-| R-11-03 | Reservoir nero valido perde M nel reuse DI | Fix pendente; Bernoulli statico deve dare media0,5, non0,625; verificare anche filtri precedenti al merge |
-| R-11-04 | STBN ripete i medesimi campioni ogni16frame | Fix pendente; per convergenza usare seed indipendenti, non contare cicli ripetuti come nuovi campioni |
+| R-11-02 | Nonfinite azzerati prima del checker | Fix integrato; `build/f11-numeric-overflow`: 16/16 controlli negativi rilevati prima del sanitizing, exit1 previsto |
+| R-11-03 | Reservoir nero valido perde M nel reuse DI | Fix counted-zero e guard numerici integrati; suite CPU verde, energia fresh/spatial passa; ulteriore expiry bias corretto in `970d7ce`, rerun ensemble pendente |
+| R-11-04 | STBN ripete i medesimi campioni ogni16frame | Rotazione per blocco integrata. Raw S1 FAIL correlazione conservato; consumed S2 80/80 gate PASS e 2097152 valori CPU bit-exact. Vedi report STBN, nessuna prova di qualità immagine dedotta |
 | R-12-01 | Sole/direzionali non invalidano la GI | `3f9ffd9`+`ab64225` integrati; CPU verdi; verifica sole dinamico e spegnimento pendente |
 | R-12-02 | Facing world confuso con front materiale sulle specchiate | `5eb70f0` integrato; test CPU e microcase GPU passati; fixture specchiata dedicata pendente |
-| R-12-03 | Reservoir nero valido perde M nel reuse GI | Fix pendente; stesso controesempio Bernoulli indipendente |
-| R-12-04 | Reset luce azzera relocation e ne impedisce il progresso | Fix pendente; separare radiometria e stato spaziale, test embedded probe con luce mobile |
-| R-12-05 | Mitsuba reference lascia emettere i buchi MASK | Fix/model gate pendente; mai accettare un oracle con emissione differente |
-| R-12-06 | Reference altera visible/castsShadows e omette triangoli luminosi standalone | Fix/model gate pendente; verifica ruoli dei raggi e deduplicazione solo delle mesh emissive |
-| R-12-07 | UV emissive estratte da stream CPU non aggiornate con vertici GPU | Contratto API da correggere/delimitare; fuori dalla CLI di deformazione attuale |
+| R-12-03 | Reservoir nero valido perde M nel reuse GI | Fix integrato e CPU verde; expiry della catena corretto insieme a DI in `970d7ce` |
+| R-12-04 | Reset luce azzera relocation e ne impedisce il progresso | Epoch radiometrica/spaziale separate nel codice integrato; test embedded probe con luce mobile ancora pendente |
+| R-12-05 | Mitsuba reference lascia emettere i buchi MASK | Adapter MASK scritto e test contrattuali verdi; audit runtime Mitsuba in corso, sorgente non ancora accettata come oracle |
+| R-12-06 | Reference altera visible/castsShadows e omette triangoli luminosi standalone | Export e strict model gate integrati, test CPU verdi; verifica indipendente geometria/materiali/raggi in corso |
+| R-12-07 | UV emissive estratte da stream CPU non aggiornate con vertici GPU | Lettura corrente di vertici/UV GPU integrata; verifica API deformazione e texture ancora pendente |
 
 ## Prove indipendenti ancora necessarie
 
@@ -47,3 +47,14 @@ Apple9 effettivo, camere/view/resize/DRS, qualità energia/statistica, lifecycle
 archivio/hot reload, zero allocazioni stabili, misure×3 e regressioni F9/F7/F8.
 F13/F14 rimangono codice in scrittura finché non arrivano e superano gli stessi
 confini di integrazione. M3 fisico resta validazione esterna pendente.
+
+## Integrazione successiva (evidenze locali, non accettazione)
+
+- `4b3303d`: merge della consegna F13/F14 `2918f78` con correzioni F10–F12 preservate; `886ed00` abilita il gateway SDK tipizzato e corregge compilazione C++/MSL. Build Release e CTest passano.
+- `970d7ce`: scadenza della history indipendente dall'endpoint selezionato, DI e GI. Enumerazione razionale: vecchia regola 2.0014878388 contro integrale2; nuova2 esatto. L'ensemble precedente è conservato come FAIL (22 confronti); non si sono cambiate soglie.
+- Energia F11 fresh point/area/emissive PASS su32seed; point1 esatto e negativo PDF×2 energia0.5 rilevato dal gate indipendente. Tutti i processi e checker dell'ensemble precedente passavano: non erano prova dell'assenza di bias.
+- F10 oracle v1: FAIL penombre CSM/RT, bias negativo e flicker PASS. `9d49e21` elimina clip della media Bernoulli; `838f446` usa bounds caster completi senza aggiungere reach500m spurio. Rerun medesimo protocollo richiesto.
+- F12 Cornell128×72:512frame per DDGI/cache/restir, tutti checker PASS, snapshot esatto e catture grezze. Oracle CPU indipendente in costruzione/verifica; nessun giudizio di qualità GI ancora.
+- F13 smoke: rawRT/SSR/AO raggiungono i checker; custom fallisce il contatore di composizione. `463f2f4` corregge fixture texture slots e lettura AO scalare. `11ee326` rende diagnostiche le cause dei checker; non le nasconde.
+
+La consegna F13/F14 elenca ancora readback numerici e controlli negativi mancanti. Lo scrittore li completa in commit incrementali mentre l'aggregatore misura. Il branch d'integrazione non è `main`; nessuna fase F10–F14 è dichiarata chiusa.
