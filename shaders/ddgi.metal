@@ -38,7 +38,7 @@ kernel void ddgi_trace(instance_acceleration_structure as [[buffer(0)]],
     float3 point,normal;GiMaterial material;
     if(hit.hit && rtSurface(hit,instances,meshes,vertices,indices,p.slotCount,p.meshCount,point,normal) &&
         giMaterial(hit,p,instances,meshes,vertices,indices,materials,textures,material)) {
-        const bool backface=hit.frontFacing==0u && !material.doubleSided;
+        const bool backface=!rtMaterialFrontFacing(hit,instances,p.slotCount) && !material.doubleSided;
         output.backface=backface?1u:0u;output.distance=backface?-max(hit.t,1e-8f):hit.t;
         if(dot(normal,-direction)<0.0f) normal=-normal;
         uint seed=giHash(tid^giHash(p.frameIndex)^extra.frameSeed);

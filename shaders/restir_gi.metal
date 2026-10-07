@@ -90,7 +90,7 @@ kernel void gi_candidates(instance_acceleration_structure as [[buffer(0)]],
     if(hit.hit) {
         valid=rtSurface(hit,instances,meshes,vertices,indices,p.slotCount,p.meshCount,y,ny) &&
             giMaterial(hit,p,instances,meshes,vertices,indices,materials,textures,material);
-        if(valid && (hit.frontFacing || material.doubleSided)) {
+        if(valid && (rtMaterialFrontFacing(hit,instances,p.slotCount) || material.doubleSided)) {
             if(dot(ny,-wi)<0.0f) ny=-ny;
             bool cached=(p.mode!=GI_MODE_DDGI) && giCacheLookup(y,ny,point.xyz-y,p,cache,L);
             if(!cached) L=giSecondaryRadiance(y,ny,material,as,ift,instances,p,lights,materials,textures,sampled,emissive,extra,seed,states,irradiance,moments);
