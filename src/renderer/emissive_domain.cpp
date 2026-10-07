@@ -40,7 +40,7 @@ bool EmissiveDomainTracker::update(std::span<const GPUEmissiveSurface> emitters,
         const auto& e=emitters[k];auto& old=entries_[k];Entry next;
         next.valid=e.valid && u64(e.instanceSlot)*16+16<=worlds.size();
         if(next.valid){next.slot=e.instanceSlot;next.generation=e.instanceGeneration;next.metric=emitterLinearMetric(worlds.data()+size_t(e.instanceSlot)*16);}
-        if(old.valid!=next.valid || (next.valid && (old.slot!=next.slot || old.generation!=next.generation || !same(old.metric,next.metric,2e-5))))changed=true;
+        if(old.valid!=next.valid || (next.valid && (old.slot!=next.slot || old.generation!=next.generation || !same(old.metric,next.metric,0))))changed=true;
         old=next;
     }
     return changed;

@@ -6,9 +6,10 @@
 namespace phosphor::di {
 // Area-domain reuse with J=1 is allowed only for an isometry of the emitter's
 // affine map. Translation is irrelevant; scale/shear change its linear metric.
-// Relative tolerance is an FP32 arithmetic tolerance, not a quality preset.
+// Exact comparison conservatively resets even a rounded rotation whose linear
+// metric changed; there is no unimplemented small-area-change allowance.
 std::array<double,7> emitterLinearMetric(const float* world);
-bool sameEmitterAreaDomain(const float* previous,const float* current,double relativeTolerance=2e-5);
+bool sameEmitterAreaDomain(const float* previous,const float* current,double relativeTolerance=0);
 double emitterWorldArea(const GPUEmissiveSurface&,const float* world);
 class EmissiveDomainTracker {
 public:
