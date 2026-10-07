@@ -17,7 +17,9 @@ TEST_CASE("F13 positive raw SSR source contains every diffuse term and no reflec
     const auto preReflection=composeSignalLighting(residual+rawDI,diffuse,glm::vec3(0),glm::vec3(0),glm::vec3(9),1,true);
     CHECK(preReflection.x==doctest::Approx(2.65));CHECK(preReflection.y==doctest::Approx(3.9));CHECK(preReflection.z==doctest::Approx(4.85));
     const glm::vec3 reflection(5,6,7);const auto final=composeSignalLighting(residual+rawDI,diffuse,reflection,glm::vec3(0),glm::vec3(9),1,true);
-    CHECK(final-preReflection==reflection); // reflection added only downstream
+    // Match the tester's independent Float32 roundoff bound; product/image
+    // tolerances remain unchanged. No bit-exact subtraction of rounded sums.
+    for(int c=0;c<3;++c)CHECK(final[c]-preReflection[c]==doctest::Approx(reflection[c]).epsilon(4*1.1920928955078125e-7));
 }
 TEST_CASE("F13 positive ambient AO never modulates direct GI specular or emission"){
     const glm::vec3 residual(3),direct(2),spec(5),ambient(11),emission(7);
