@@ -41,7 +41,8 @@ inline GiConnection giConnection(const GiReceiver& x, const GPUGiReservoir& y, b
 }
 inline void giFinalize(GPUGiReservoir& r) {
     r.W=(r.M&&r.target>0&&std::isfinite(r.weightSum)) ? r.weightSum/(float(r.M)*r.target) : 0;
-    if (!(r.W>0&&std::isfinite(r.W))) { r.W=0; r.flags=0; }
+    if (!(r.W>0&&std::isfinite(r.W))) { r.W=0; r.flags&=~GI_SAMPLE_VALID; }
+    if(!r.M)r.flags=0;
 }
 // Adds a fresh independent path. Zero-contribution/blocked paths count in M;
 // skipping them would condition the estimator on visibility and add energy.
@@ -49,6 +50,14 @@ inline void giAddCandidate(GPUGiReservoir& reservoir, GPUGiReservoir candidate,
                            float target, float proposalArea, float uniformRandom) {
     if(reservoir.M==~0u) return;
     ++reservoir.M;
+    if((std::isfinite(proposalArea)&&proposalArea>0) || (candidate.flags&GI_PROPOSAL_VALID)) {
+        if(!(reservoir.flags&(GI_SAMPLE_VALID|GI_PROPOSAL_VALID))) {
+            const u32 M=reservoir.M;const float sum=reservoir.weightSum;
+            reservoir=candidate;reservoir.M=M;reservoir.weightSum=sum;
+            reservoir.flags&=~GI_SAMPLE_VALID;reservoir.W=0;reservoir.target=0;
+        }
+        reservoir.flags|=GI_PROPOSAL_VALID;
+    }
     if (!(std::isfinite(target)&&target>0&&std::isfinite(proposalArea)&&proposalArea>0)) return;
     const float weight=target/proposalArea;
     if (!std::isfinite(weight)) return;
@@ -57,7 +66,7 @@ inline void giAddCandidate(GPUGiReservoir& reservoir, GPUGiReservoir candidate,
     if (std::clamp(uniformRandom,0.f,0.99999994f)*sum<weight) {
         const u32 M=reservoir.M;
         candidate.target=target; candidate.proposalArea=proposalArea;
-        candidate.sourceProposalArea=proposalArea; candidate.flags|=GI_SAMPLE_VALID;
+        candidate.sourceProposalArea=proposalArea; candidate.flags|=GI_SAMPLE_VALID|GI_PROPOSAL_VALID;
         reservoir=candidate; reservoir.M=M;
     }
     reservoir.weightSum=sum;
@@ -70,11 +79,16 @@ inline void giAddCandidate(GPUGiReservoir& reservoir, GPUGiReservoir candidate,
 // a blocked shift contributes zero but STILL contributes M_source to normalizer.
 inline bool giMerge(GPUGiReservoir& dst, const GPUGiReservoir& src, float receiverTarget,
                     bool validShift, float uniformRandom, u32 maxHistoryM=32) {
-    if (!(src.flags&GI_SAMPLE_VALID) || !(src.W>0) || !src.M || !maxHistoryM) return false;
+    if (!(src.flags&(GI_SAMPLE_VALID|GI_PROPOSAL_VALID)) || !src.M || !maxHistoryM) return false;
     const u32 M=std::min(src.M,maxHistoryM);
     const u32 total=dst.M+M;
     if (total<dst.M) return false;
     dst.M=total;
+    dst.flags|=GI_PROPOSAL_VALID;
+    if(!(src.flags&GI_SAMPLE_VALID) || !(src.W>0)) {
+        if(!(dst.flags&GI_SAMPLE_VALID))dst.age=std::min(32u,std::max(dst.age,src.age+1u));
+        return false; // A valid zero proposal still contributes M above.
+    }
     if (!validShift || !(std::isfinite(receiverTarget)&&receiverTarget>0)) return false;
     const float weight=receiverTarget*src.W*float(M), sum=dst.weightSum+weight;
     if (!(std::isfinite(weight)&&weight>0&&std::isfinite(sum))) return false;
@@ -85,7 +99,7 @@ inline bool giMerge(GPUGiReservoir& dst, const GPUGiReservoir& src, float receiv
 }
 inline bool giHistoryCompatible(const GPUGiReservoir& r, const GPUProbeGridParams& p,
                                 const GiReceiver& receiver, float positionTolerance, float normalCos=0.95f) {
-    return (r.flags&GI_SAMPLE_VALID) && r.age<32 && r.geometryRevision==p.geometryRevision &&
+    return (r.flags&(GI_SAMPLE_VALID|GI_PROPOSAL_VALID)) && r.M && r.age<32 && r.geometryRevision==p.geometryRevision &&
         r.lightRevision==p.lightRevision && r.materialRevision==p.materialRevision &&
         r.viewRevision==p.viewRevision && giFinite(receiver.position)&&giFinite(receiver.normal)&&
         glm::length(giVector(r.sourcePosition)-receiver.position)<=positionTolerance &&

@@ -17,13 +17,17 @@ inline float3 giAreaIntegrand(float3 x,float3 n,GPUGiReservoir r) {
 }
 inline void giReservoirFinalize(thread GPUGiReservoir& r) {
     r.W=r.M && r.target>0.0f?r.weightSum/(float(r.M)*r.target):0.0f;
-    if(!isfinite(r.W) || r.W<=0.0f) {r.W=0.0f;r.flags=0u;}
+    if(!isfinite(r.W) || r.W<=0.0f) {r.W=0.0f;r.flags&=~GI_SAMPLE_VALID;}
+    if(!r.M)r.flags=0u;
 }
 inline bool giReusable(GPUGiReservoir r,constant GPUProbeGridParams& p,const device GPUInstance* instances) {
-    return !p.reset && (r.flags&GI_SAMPLE_VALID) && r.slot<p.slotCount && r.age<32u &&
+    bool proposal=!p.reset && (r.flags&(GI_SAMPLE_VALID|GI_PROPOSAL_VALID)) && r.M && r.age<32u &&
         r.geometryRevision==p.geometryRevision && r.lightRevision==p.lightRevision &&
-        r.materialRevision==p.materialRevision && r.viewRevision==p.viewRevision &&
-        instances[r.slot].generation==r.instanceGeneration && (instances[r.slot].flags&INSTANCE_FLAG_VALID);
+        r.materialRevision==p.materialRevision && r.viewRevision==p.viewRevision;
+    if(!proposal)return false;
+    if(!(r.flags&GI_SAMPLE_VALID))return r.W==0.0f; // No selected secondary to validate/dereference.
+    return r.slot<p.slotCount && instances[r.slot].generation==r.instanceGeneration &&
+        (instances[r.slot].flags&INSTANCE_FLAG_VALID);
 }
 inline bool giReconnectVisible(float3 x,float3 n,GPUGiReservoir r,instance_acceleration_structure as,
                                 intersection_function_table<triangle_data,instancing> ift,
@@ -39,10 +43,15 @@ inline bool giReconnectVisible(float3 x,float3 n,GPUGiReservoir r,instance_accel
     return rtTrace(ray,as,ift,instances,p.slotCount,payload).hit==0u;
 }
 inline void giReservoirMerge(thread GPUGiReservoir& dst,GPUGiReservoir source,float target,bool visible,float random) {
-    if(!(source.flags&GI_SAMPLE_VALID) || !source.M || source.W<=0.0f) return;
+    if(!(source.flags&(GI_SAMPLE_VALID|GI_PROPOSAL_VALID)) || !source.M) return;
     uint m=min(source.M,32u),total=dst.M+m;
     if(total<dst.M) return;
     dst.M=total;
+    dst.flags|=GI_PROPOSAL_VALID;
+    if(!(source.flags&GI_SAMPLE_VALID) || source.W<=0.0f) {
+        if(!(dst.flags&GI_SAMPLE_VALID))dst.age=min(32u,max(dst.age,source.age+1u));
+        return; // Count zero proposals without inventing a selected endpoint.
+    }
     float weight=visible?target*source.W*float(m):0.0f,sum=dst.weightSum+weight;
     if(!isfinite(weight) || !isfinite(sum) || weight<=0.0f) return;
     if(random*sum<weight) {dst=source;dst.M=total;dst.target=target;dst.age=source.age+1u;}
@@ -100,7 +109,7 @@ kernel void gi_candidates(instance_acceleration_structure as [[buffer(0)]],
     r.M=1u; // even zero contribution/backface/miss counts as a sampled path
     r.slot=hit.hit?hit.slot:~0u;r.instanceGeneration=hit.generation;
     for(uint k=0;k<3u;++k) {r.position[k]=y[k];r.normal[k]=ny[k];r.radiance[k]=L[k];r.sourcePosition[k]=point[k];r.sourceNormal[k]=n[k];}
-    r.flags=valid?GI_SAMPLE_VALID:0u;
+    r.flags=valid?(GI_SAMPLE_VALID|GI_PROPOSAL_VALID):0u;
 
     r.proposalSolidAngle=max(0.0f,dot(n,wi))/M_PI_F;
     // Proposal density belongs to the ACTUAL biased ray origin/direction;

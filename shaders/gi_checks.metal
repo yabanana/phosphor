@@ -98,7 +98,7 @@ kernel void gi_check_state(constant GPUProbeGridParams& p [[buffer(0)]],
                 !isfinite(r.proposalSolidAngle) || r.proposalSolidAngle<0.0f ||
                 r.proposalSolidAngle>1.0f/M_PI_F+1e-5f ||
                 !isfinite(r.sourceProposalArea) || r.sourceProposalArea<0.0f ||
-                (r.flags&~GI_SAMPLE_VALID)!=0u ||
+                (r.flags&~(GI_SAMPLE_VALID|GI_PROPOSAL_VALID))!=0u ||
                 (q.mode==GI_MODE_CACHE?r.M>1u:r.M>161u);
             if(r.flags&GI_SAMPLE_VALID) {
                 bad=bad || r.M==0u || r.W<=0.0f || r.target<=0.0f || r.weightSum<=0.0f ||
@@ -131,6 +131,12 @@ kernel void gi_check_state(constant GPUProbeGridParams& p [[buffer(0)]],
                 // A zero-contribution path may have M>0 and a finite proposal.
                 // It must not carry a positive final normalization into shading.
                 bad=bad || r.W!=0.0f;
+            }
+            if(r.flags&GI_PROPOSAL_VALID) {
+                bad=bad || r.M==0u || r.geometryRevision!=p.geometryRevision ||
+                    r.lightRevision!=p.lightRevision || r.materialRevision!=p.materialRevision ||
+                    r.viewRevision!=p.viewRevision ||
+                    !giCheckUnit(float3(r.sourceNormal[0],r.sourceNormal[1],r.sourceNormal[2]));
             }
             if(bad) giCheckAdd(counters,6u);
         }

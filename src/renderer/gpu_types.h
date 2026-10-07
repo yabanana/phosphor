@@ -668,6 +668,9 @@ PHOSPHOR_GPU_CONSTANT u32 GI_CORRUPT_PDF = 3u;
 PHOSPHOR_GPU_CONSTANT u32 GI_PROBE_ACTIVE = 1u;
 PHOSPHOR_GPU_CONSTANT u32 GI_PROBE_INACTIVE = 2u;
 PHOSPHOR_GPU_CONSTANT u32 GI_SAMPLE_VALID = 1u;
+// A receiver/proposal can be valid while every sampled contribution is zero.
+// Keep that proposal count/history distinct from a positive selected endpoint.
+PHOSPHOR_GPU_CONSTANT u32 GI_PROPOSAL_VALID = 2u;
 
 struct GPUProbeGridParams {
     float origin[3], maxDistance;
