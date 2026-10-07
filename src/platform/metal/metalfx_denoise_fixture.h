@@ -5,7 +5,7 @@
 namespace phosphor {
 class MetalfxDenoiseFixture {
 public:
-    struct Options {std::string scenario,outputDirectory;bool preExposedPolicy=false;u32 activeViews=1,prewarmTimeoutMs=120000;};
+    struct Options {std::string scenario,outputDirectory;bool preExposedPolicy=false;u32 activeViews=1,prewarmTimeoutMs=120000;bool autoExposure=false;};
     MetalfxDenoiseFixture(MetalContext&,PipelineCache&,MetalfxDenoise::Factory,Options);
     ~MetalfxDenoiseFixture();
     static bool validScenario(std::string_view);

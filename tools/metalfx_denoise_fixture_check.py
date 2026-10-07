@@ -108,11 +108,28 @@ def guide_oracle(record):
             if not isinstance(actual,list) or len(actual)!=3 or any(not number(a) or abs(a-b)>(GATES["packed_color_relative_max"] if packed else 1e-6)*max(1,abs(b)) for a,b in zip(actual,rgb)):
                 raise ValueError("actual packed/authored color differs from declared pre-exposure")
             if packed and any(s.get(key)!=expected for key,expected in (("exposure",1),("hitDistance",0),("reactive",0),("strength",0))):
-                raise ValueError("unit exposure/optional neutral SDK guide mismatch")
+                raise ValueError("provided manual exposure/optional neutral SDK guide mismatch")
     return True
 
 
-def make_cases(out,frames,gateway):
+def exposure_mode_oracle(record,expected_auto):
+    """The descriptor mode is observed; the internal SDK exposure is not public."""
+    required={"auto_exposure_requested":expected_auto,"exposure_descriptor_configured":True,
+        "auto_exposure_enabled":expected_auto,"exposure_mode":"sdk-auto" if expected_auto else "manual",
+        "provided_manual_exposure_texture_value":1,"manual_exposure_texture_ignored":expected_auto,
+        "packed_exposure_is_provided_manual_value":True}
+    if any(record.get(key)!=value or isinstance(value,bool) and record.get(key) is not value for key,value in required.items()):
+        raise ValueError("actual SDK descriptor/manual texture semantics differ from frozen exposure mode")
+    return True
+
+
+def make_cases(out,frames,gateway,auto_exposure=False):
+    if auto_exposure:
+        if gateway!="native" or frames!=96:
+            raise ValueError("automatic exposure experiment requires native gateway and exactly 96 frames")
+        return [{"name":"wide-hdr-auto-exposure","scenario":"wide-hdr","preexposed":True,
+            "auto_exposure":True,"expected_exit":0,"expected_state":"FIXTURE_CHECKS_PASSED","frames":96,
+            "physical_target":[368640,128,64],"pre_exposure":1/64,"packed_target":[5760,2,1]}]
     if gateway=="expected-missing":
         return [{"name":"missing-factory","scenario":"constant","preexposed":False,"expected_exit":1,
                  "expected_state":"NOT_EXECUTED_NATIVE","missing_factory":True,"frames":frames}]
@@ -137,6 +154,15 @@ def evaluate_capture(case,folder,provenance):
         if case["name"]=="wide-hdr-unverified-policy" and "pre-exposure" not in summary.get("fallback_reason",""):errors.append("unverified nonunit output mapping did not select fallback")
         return {"passed":not errors,"errors":errors,"native_numerical_proof":False,"summary":summary}
     prewarm=json.loads((folder/"prewarm.json").read_text())
+    expected_auto=case.get("auto_exposure",False)
+    for record in (summary,prewarm):
+        # Old manual artifacts remain inspectable; automatic mode needs explicit
+        # evidence from the actual descriptor, including ignored manual texture.
+        if expected_auto or "auto_exposure_enabled" in record:
+            try:exposure_mode_oracle(record,expected_auto)
+            except ValueError as error:errors.append(str(error))
+    if expected_auto and (summary.get("native_frames")!=96 or len(files)!=96):
+        errors.append("automatic exposure experiment requires exactly 96 actual native frames")
     if prewarm.get("schema")!="phosphor.metalfx-prewarm.v1" or prewarm.get("ready") is not True or prewarm.get("state")!="READY":errors.append("initial native SDK prewarm did not complete")
     if prewarm.get("actual_encoded_before_counting")!=0 or prewarm.get("phase")!=0 or prewarm.get("frame")!=0:errors.append("fixture advanced frame/phase/native work during initial prewarm")
     expected_views=4 if case.get("lifecycle") else 1
@@ -152,7 +178,7 @@ def evaluate_capture(case,folder,provenance):
     if summary.get("checked_frames")!=expected_count or summary.get("pack_checks")!=expected_count or summary.get("actual_encoded_frames")!=expected_count:
         errors.append("SDK encoded/readback/pack-check frame identity mismatch")
     if summary.get("failures")!=0 or summary.get("passed") is not True:errors.append("real host checker failed")
-    steady=0;exposures=set();pairs={};views=set();extents=set()
+    steady=0;exposures=set();pairs={};views=set();extents=set();frame_tags=set()
     for path in files:
         record=json.loads(path.read_text());p=record.get("provenance",{})
         if record.get("schema")!=SCHEMA or record.get("actual_sdk_encoded") is not True or record.get("scenario")!=case["scenario"]:
@@ -162,9 +188,11 @@ def evaluate_capture(case,folder,provenance):
         if not isinstance(p.get("shader_generation"),int):errors.append("missing pipeline generation")
         frame=record.get("frame")
         if not isinstance(frame,int) or frame<0:errors.append("invalid encoded frame tag");continue
+        frame_tags.add(frame)
         factor=1/64 if case["scenario"]=="wide-hdr" or case["preexposed"] and (frame//48)%2 else 1
         if record.get("preExposure")!=factor:errors.append("SDK scalar differs from frozen input script");continue
         try:
+            if expected_auto or "auto_exposure_enabled" in record:exposure_mode_oracle(record,expected_auto)
             guide_oracle(record)
             stem=path.with_suffix("");sdk=read_pfm(str(stem)+"-sdk.pfm");physical=read_pfm(str(stem)+"-physical.pfm")
             pixels(sdk.rgb);pixels(physical.rgb)
@@ -185,6 +213,7 @@ def evaluate_capture(case,folder,provenance):
                 if case["scenario"]=="impulse":
                     key=(record["view"],sdk.width,sdk.height);pairs.setdefault(key,{})[factor]=sdk.rgb
         except (KeyError,TypeError,ValueError,OSError) as error:errors.append(path.name+": "+str(error))
+    if expected_auto and frame_tags!=set(range(96)):errors.append("automatic exposure native frame sequence is not 0..95")
     if not steady:errors.append("zero steady native readback records")
     if case["preexposed"] and case["scenario"]!="wide-hdr" and exposures!={1,1/64}:errors.append("unit/scaled native experiment pair incomplete")
     if case["scenario"]=="impulse":
@@ -203,6 +232,29 @@ def evaluate_capture(case,folder,provenance):
             if not number(summary.get(key)) or summary[key]<minimum:errors.append("lifecycle did not exercise "+key)
     if summary.get("production_policy_promoted") is not False or summary.get("phase_accepted") is not False:errors.append("fixture improperly promotes production policy/phase")
     return {"passed":not errors,"errors":errors,"native_numerical_proof":not errors,"experiments":experiments,"summary":summary}
+
+
+def frozen_auto_exposure_experiment(manifest):
+    cases=manifest.get("cases",[]);automatic=manifest.get("auto_exposure_experiment",False)
+    if type(automatic) is not bool:raise ValueError("invalid frozen automatic exposure selection")
+    if automatic and (manifest.get("gateway")!="native" or len(cases)!=1):
+        raise ValueError("automatic exposure is a single native wide-HDR experiment")
+    for case in cases:
+        enabled=case.get("auto_exposure",False);command=case.get("command",[])
+        if type(enabled) is not bool or enabled!=automatic or command.count("--denoised-fixture-auto-exposure")!=int(enabled):
+            raise ValueError("automatic exposure command/case differs from frozen experiment")
+        if not enabled:continue
+        required={"name":"wide-hdr-auto-exposure","scenario":"wide-hdr","preexposed":True,"frames":96,
+            "physical_target":[368640,128,64],"pre_exposure":1/64,"packed_target":[5760,2,1],
+            "expected_exit":0,"expected_state":"FIXTURE_CHECKS_PASSED"}
+        if any(case.get(key)!=value for key,value in required.items()):
+            raise ValueError("wide-HDR physical target, pre-exposure, frame count or acceptance changed")
+        for flag,value in (("--frames","96"),("--denoised-fixture","wide-hdr")):
+            if command.count(flag)!=1 or command.index(flag)+1>=len(command) or command[command.index(flag)+1]!=value:
+                raise ValueError("frozen automatic exposure command changes the fixture or frame count")
+        if command.count("--denoised-fixture-pre-exposed")!=1 or any(flag in command for flag in ("--temporal-views","--resize-every","--history-reset-every")):
+            raise ValueError("automatic exposure experiment changed its exposure policy or lifecycle")
+    return automatic
 
 
 def frozen_prewarm_budget(manifest,outer_timeout):
@@ -228,6 +280,7 @@ def main(argv=None):
     p.add_argument("--run",action="store_true");p.add_argument("--manifest",type=Path);p.add_argument("--only",action="append",default=[])
     p.add_argument("--gateway",choices=["expected-missing","native"],default="expected-missing")
     p.add_argument("--frames",type=int,default=192);p.add_argument("--resolution",default="128x96")
+    p.add_argument("--denoised-fixture-auto-exposure",action="store_true",help="freeze only the 96-frame native wide-HDR automatic-exposure experiment")
     p.add_argument("--leaks-at-exit",action="store_true",help="wrap only native lifecycle with existing macOS leaks; never install")
     p.add_argument("--leaks-tool",type=Path,default=Path("/usr/bin/leaks"))
     p.add_argument("--prewarm-ms",type=int,default=120000);p.add_argument("--timeout",type=float,default=600);p.add_argument("--gpu-lock",type=Path,default=Path("/tmp/phosphor-gpu-verification.lock"))
@@ -237,7 +290,8 @@ def main(argv=None):
     if not math.isfinite(a.timeout) or a.timeout<=0:p.error("positive finite timeout required")
     if not 1<=a.prewarm_ms<=120000:p.error("prewarm 1..120000ms required")
     out=a.out.resolve();out.mkdir(parents=True,exist_ok=True)
-    cases=make_cases(out,a.frames,a.gateway)
+    try:cases=make_cases(out,a.frames,a.gateway,a.denoised_fixture_auto_exposure)
+    except ValueError as error:p.error(str(error))
     if a.only:cases=[c for c in cases if any(fnmatch.fnmatch(c["name"],x) for x in a.only)]
     if not cases:p.error("no cases selected")
     for case in cases:
@@ -250,23 +304,29 @@ def main(argv=None):
             "--denoised-fixture",case["scenario"],"--denoised-fixture-output",case["capture"],
             "--denoised-fixture-prewarm-ms",str(a.prewarm_ms),
             *(["--denoised-fixture-pre-exposed"] if case["preexposed"] else []),
+            *(["--denoised-fixture-auto-exposure"] if case.get("auto_exposure") else []),
             *(["--temporal-views","4","--resize-every","90","--history-reset-every","60"] if case.get("lifecycle") else [])]
     manifest={"schema":1,"state":"NOT_EXECUTED","frozen_before_run":True,"hard_stop":"STOP_AFTER_F14",
         "created_utc":datetime.now(timezone.utc).isoformat(),"thresholds":GATES,"gateway":a.gateway,"cases":cases,
+        "auto_exposure_experiment":a.denoised_fixture_auto_exposure,
         "prewarm_ms":a.prewarm_ms,"production_policy_promoted":False,"source_only_delivery":True,"binary_sha256":sha(a.binary) if a.binary.is_file() else None}
     path=a.manifest.resolve() if a.manifest else out/"sdk-frozen-manifest.json"
     if a.manifest:
-        if not a.run or a.only:p.error("consume existing manifest only with --run and unchanged case selection")
+        if not a.run or a.only or a.denoised_fixture_auto_exposure:p.error("consume existing manifest only with --run and unchanged case selection")
         raw=path.read_bytes();manifest=json.loads(raw);cases=manifest["cases"]
         if manifest.get("thresholds")!=GATES or manifest.get("hard_stop")!="STOP_AFTER_F14" or manifest.get("frozen_before_run") is not True:p.error("incompatible frozen SDK plan")
 
         if any(Path(c["command"][0]).resolve()!=a.binary.resolve() or Path(c["capture"]).parent.parent!=out for c in cases):p.error("binary/output differs from frozen manifest")
     else:
-        try:frozen_prewarm_budget(manifest,a.timeout)
+        try:
+            frozen_auto_exposure_experiment(manifest)
+            frozen_prewarm_budget(manifest,a.timeout)
         except ValueError as error:p.error(str(error))
         if path.exists():p.error("refuse frozen plan overwrite; choose new output or --run --manifest")
         raw=json_bytes(manifest);path.write_bytes(raw)
-    try:a.prewarm_ms=frozen_prewarm_budget(manifest,a.timeout)
+    try:
+        frozen_auto_exposure_experiment(manifest)
+        a.prewarm_ms=frozen_prewarm_budget(manifest,a.timeout)
     except ValueError as error:p.error(str(error))
     if not a.run:print(f"NOT_EXECUTED: SDK fixture plan frozen at {path}");return 0
     if not a.binary.is_file():p.error("existing compiled binary required; runner never builds")

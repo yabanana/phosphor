@@ -29,6 +29,8 @@ public:
     struct Options {
         enum class OutputScale : u8 { Unverified,PreExposed };
         bool enabled=false, reactiveMask=true, specularHitDistance=false, strengthMask=false;
+        // Diagnostic fixture opt-in; production retains manual exposure.
+        bool autoExposure=false;
         OutputScale sdkOutputScale=OutputScale::Unverified;
         u32 views=1,resizeSettleFrames=4;
     };
@@ -49,6 +51,8 @@ public:
                             Settling,Pending,FactoryRejected,UsageRejected,UnverifiedExposureMapping,Ready,FixturePrewarmTimeout,FixturePrewarmSuperseded };
     struct Stats {
         bool requested=false,sdkAvailable=false,deviceSupported=false,factoryInstalled=false;
+        // Read back from the actual descriptor, not inferred from caller intent.
+        bool descriptorConfigured=false,autoExposureEnabled=false;
         u64 requests=0,encodedFrames=0,fallbackFrames=0,resets=0,discardedRequests=0,retirements=0;
     };
     struct PackCheck {

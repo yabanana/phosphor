@@ -69,6 +69,7 @@ struct MetalfxDenoiseFixture::Impl {
         if(!options.activeViews||options.activeViews>HistoryRegistry::MaxViews||!options.prewarmTimeoutMs||options.prewarmTimeoutMs>120000)
             throw std::invalid_argument("Invalid SDK fixture active views/prewarm budget");
         MetalfxDenoise::Options sdkOptions;sdkOptions.enabled=true;sdkOptions.views=options.activeViews;
+        sdkOptions.autoExposure=options.autoExposure;
         sdkOptions.resizeSettleFrames=0; // controlled fixture extents; production keeps its async settling
         sdkOptions.reactiveMask=true;sdkOptions.specularHitDistance=false;sdkOptions.strengthMask=true;
         sdkOptions.sdkOutputScale=options.preExposedPolicy?MetalfxDenoise::Options::OutputScale::PreExposed:MetalfxDenoise::Options::OutputScale::Unverified;
@@ -84,6 +85,18 @@ struct MetalfxDenoiseFixture::Impl {
         }
         adapter.reset();for(auto& view:slots)for(auto& s:view){release(s);for(auto* t:{s.generate,s.depth,s.readback})if(t)t->release();}
         if(depthState)depthState->release();}
+    std::string exposureMetadata()const {
+        const auto& stats=adapter->stats();std::ostringstream out;
+        out<<",\"auto_exposure_requested\":"<<(options.autoExposure?"true":"false")
+           <<",\"exposure_descriptor_configured\":"<<(stats.descriptorConfigured?"true":"false")
+           <<",\"auto_exposure_enabled\":"<<(stats.autoExposureEnabled?"true":"false")
+           <<",\"exposure_mode\":"<<quote(!stats.descriptorConfigured?"not-configured":stats.autoExposureEnabled?"sdk-auto":"manual")
+           <<",\"provided_manual_exposure_texture_value\":1,\"manual_exposure_texture_ignored\":"<<(stats.autoExposureEnabled?"true":"false")
+           <<",\"packed_exposure_is_provided_manual_value\":true";
+        // packed_samples.exposure is read back from the supplied 1x1 texture.
+        // Auto exposure ignores it; the SDK internal exposure is not exposed.
+        return out.str();
+    }
     void release(Slot& s) {
         if(s.pending)throw std::logic_error("SDK fixture readback cannot retire before consumption");
         for(auto*& t:s.textures){c.memory().release(t,MemoryCategory::RenderTargets);t=nullptr;}
@@ -148,7 +161,7 @@ struct MetalfxDenoiseFixture::Impl {
             std::filesystem::create_directories(options.outputDirectory);
             const auto path=std::filesystem::path(options.outputDirectory)/"prewarm.json";
             if(std::filesystem::exists(path))throw std::runtime_error("Refuse SDK fixture initial prewarm evidence overwrite");
-            std::ofstream out(path);out<<"{\"schema\":\"phosphor.metalfx-prewarm.v1\",\"state\":"<<quote(prewarmStatus)
+            std::ofstream out(path);out<<"{\"schema\":\"phosphor.metalfx-prewarm.v1\",\"state\":"<<quote(prewarmStatus)<<exposureMetadata()
                 <<",\"ready\":"<<(prewarmReady?"true":"false")<<",\"budget_ms\":"<<options.prewarmTimeoutMs<<",\"elapsed_ms\":"<<number(prewarmElapsedMs)
                 <<",\"active_views\":"<<options.activeViews<<",\"frame\":"<<frame.index<<",\"phase\":"<<params.phase
                 <<",\"input_width\":"<<frame.extent.inputWidth<<",\"input_height\":"<<frame.extent.inputHeight<<",\"output_width\":"<<frame.extent.outputWidth<<",\"output_height\":"<<frame.extent.outputHeight
@@ -261,7 +274,7 @@ struct MetalfxDenoiseFixture::Impl {
                 !writeLinearPfm(base.string()+"-physical.pfm",s.tag.outputWidth,s.tag.outputHeight,physicalImage,error))throw std::runtime_error(error);
             std::ofstream out(base.string()+".json");out<<std::setprecision(17);
             out<<"{\"schema\":\"phosphor.metalfx-fixture.v1\",\"kind\":\"f13-sdk\",\"actual_sdk_encoded\":true,\"frame\":"<<s.frame
-               <<",\"view\":"<<s.view<<",\"slot\":"<<index<<",\"scenario\":"<<quote(options.scenario)<<",\"preExposure\":"<<s.tag.preExposure
+               <<",\"view\":"<<s.view<<",\"slot\":"<<index<<",\"scenario\":"<<quote(options.scenario)<<",\"preExposure\":"<<s.tag.preExposure<<exposureMetadata()
                <<",\"steady\":"<<(s.steady?"true":"false")<<",\"finite\":"<<(finite?"true":"false")<<",\"channels_passed\":"<<(channelPass?"true":"false")
                <<",\"restored_passed\":"<<(constant.restored?"true":"false")<<",\"sdk_preexposed_hypothesis\":"<<(constant.preExposed?"true":"false")
                <<",\"sdk_physical_hypothesis\":"<<(constant.physical?"true":"false")<<",\"restored_relative_error\":"<<number(constant.restoredRelativeError)
@@ -302,7 +315,7 @@ struct MetalfxDenoiseFixture::Impl {
     }
     std::string report()const {
         const bool pass=passed();const auto& stats=adapter->stats();
-        std::ostringstream out;out<<"{\"schema\":\"phosphor.metalfx-fixture.v1\",\"scenario\":"<<quote(options.scenario)
+        std::ostringstream out;out<<"{\"schema\":\"phosphor.metalfx-fixture.v1\",\"scenario\":"<<quote(options.scenario)<<exposureMetadata()
             <<",\"state\":"<<quote(!nativeFrames?"NOT_EXECUTED_NATIVE":!finishCalled?"GPU_RECORDS_PENDING":pass?"FIXTURE_CHECKS_PASSED":"FIXTURE_CHECKS_FAILED")
             <<",\"native_frames\":"<<nativeFrames<<",\"checked_frames\":"<<checkedFrames<<",\"steady_frames\":"<<steadyFrames<<",\"pack_checks\":"<<packChecks<<",\"failures\":"<<failures<<",\"passed\":"<<(pass?"true":"false")
             <<",\"actual_encoded_frames\":"<<stats.encodedFrames<<",\"factory_requests\":"<<stats.requests<<",\"retirements_submitted\":"<<stats.retirements<<",\"obsolete_requests\":"<<stats.discardedRequests

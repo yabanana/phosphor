@@ -343,6 +343,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
 #endif
         if(!options_.denoisedFixture.empty()) {
             MetalfxDenoiseFixture::Options fixture{options_.denoisedFixture,options_.denoisedFixtureOutput,options_.denoisedFixturePreExposed,options_.temporalViews,options_.denoisedFixturePrewarmMs};
+            fixture.autoExposure=options_.denoisedFixtureAutoExposure;
             denoisedFixture_=std::make_unique<MetalfxDenoiseFixture>(*context_,*pipelines_,std::move(factory),std::move(fixture));
         } else {
             denoised_=std::make_unique<MetalfxDenoise>(*context_,*pipelines_,config,std::move(factory));
@@ -920,6 +921,7 @@ void Engine::finishBenchmark() {
         report.lighting.atmosphere=options_.atmosphere;report.lighting.fog=options_.fog;report.lighting.clouds=options_.clouds;report.lighting.cloudFullRate=options_.cloudFullRate;
         report.lighting.cache=options_.shadowCache;report.lighting.seed=options_.lightingSeed;report.lighting.sunIndex=shadows_->sunIndex();
         report.lighting.candidates=options_.lightingCandidates;report.lighting.spatialSamples=options_.lightingSpatialSamples;report.lighting.giRays=options_.giRays;report.lighting.checks=lightingChecks_;report.lighting.failures=lightingFailures_;
+        report.lighting.giVisibilityDisabled=options_.debugGiNoVisibility;
     }
     if (rt_) {
         report.rt = rt_->report();

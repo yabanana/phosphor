@@ -1187,3 +1187,15 @@ TEST_CASE("F12 physical visibility ablation is explicit and cannot masquerade as
     CHECK_FALSE(parse({"--render-path","visibility","--rt","on","--lighting","restir","--gi","ddgi","--debug-gi-no-visibility"},options,error));
     CHECK_FALSE(parse({"--render-path","visibility","--rt","on","--lighting","restir","--gi","ddgi","--debug-lighting","1","--debug-gi-corrupt","probe","--debug-gi-no-visibility"},options,error));
 }
+
+TEST_CASE("F13 SDK automatic exposure stays inside the explicit wide-HDR fixture") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--frames","96","--denoised-fixture","wide-hdr","--denoised-fixture-output","sdk","--denoised-fixture-pre-exposed"},o,error));
+    CHECK_FALSE(o.denoisedFixtureAutoExposure);
+    REQUIRE(parse({"--frames","96","--denoised-fixture","wide-hdr","--denoised-fixture-output","sdk","--denoised-fixture-pre-exposed","--denoised-fixture-auto-exposure"},o,error));
+    CHECK(o.denoisedFixtureAutoExposure);CHECK(o.denoisedFixturePreExposed);
+    CHECK(o.lightingDenoise==LightingDenoiseMode::Off);
+    CHECK_FALSE(parse({"--frames","96","--denoised-fixture-auto-exposure"},o,error));
+    CHECK_FALSE(parse({"--frames","96","--denoised-fixture","wide-hdr","--denoised-fixture-output","sdk","--denoised-fixture-auto-exposure"},o,error));
+    CHECK_FALSE(parse({"--frames","96","--denoised-fixture","constant","--denoised-fixture-output","sdk","--denoised-fixture-pre-exposed","--denoised-fixture-auto-exposure"},o,error));
+}

@@ -137,6 +137,10 @@ struct MetalfxDenoise::Impl {
             (options.reactiveMask?METALFX_PACK_REACTIVE:0u) |
             (options.strengthMask?METALFX_PACK_STRENGTH:0u);
     }
+    u32 descriptorFlags()const {
+        // Request identity includes SDK exposure mode; shader pack flags do not.
+        return flags()|(options.autoExposure?1u<<31:0u);
+    }
     bool frameValid()const {
         return frame.slot<METAL_FRAMES_IN_FLIGHT && frame.view<options.views &&
             metalfx_denoise::validSemantics(frame.semantics) &&
@@ -168,7 +172,11 @@ struct MetalfxDenoise::Impl {
         d->setSpecularHitDistanceTextureFormat(toMetalFormat(metalfx_denoise::format(Channel::HitDistance)));
         d->setDenoiseStrengthMaskTextureEnabled(options.strengthMask);
         d->setDenoiseStrengthMaskTextureFormat(toMetalFormat(metalfx_denoise::format(Channel::Strength)));
-        d->setTransparencyOverlayTextureEnabled(false);d->setAutoExposureEnabled(false);
+        d->setTransparencyOverlayTextureEnabled(false);d->setAutoExposureEnabled(options.autoExposure);
+        stats.descriptorConfigured=true;stats.autoExposureEnabled=d->isAutoExposureEnabled();
+        if(stats.autoExposureEnabled!=options.autoExposure) {
+            d->release();fail(v,Status::FactoryRejected,"SDK descriptor did not retain requested exposure mode");return;
+        }
         // Full synchronous framework compilation belongs on the gateway worker,
         // never on this render thread. The callback returns a queue future.
         d->setRequiresSynchronousInitialization(true);
@@ -302,7 +310,7 @@ struct MetalfxDenoise::Impl {
             ++stats.fallbackFrames;return;
         }
         auto& v=views[f.view];
-        const metalfx_denoise::RequestKey desired{f.extent,pipelines.generation(),flags()};
+        const metalfx_denoise::RequestKey desired{f.extent,pipelines.generation(),descriptorFlags()};
         if(!v.desiredValid || !(desired==v.desired)) {
             retire(std::move(v.scaler),v.used);v.used=false;releaseTargets(v);
             v.desired=desired;v.desiredValid=true;v.stableFrames=0;v.failed=false;
@@ -338,7 +346,7 @@ struct MetalfxDenoise::Impl {
         if(currentStatus!=Status::Pending&&currentStatus!=Status::Settling&&currentStatus!=Status::Ready)return false;
         if(!frameValid()||stats.encodedFrames)throw std::logic_error("Fixture prewarm requires an unencoded canonical frame");
         const auto deadline=std::chrono::steady_clock::now()+budget;
-        const metalfx_denoise::RequestKey key{frame.extent,pipelines.generation(),flags()};
+        const metalfx_denoise::RequestKey key{frame.extent,pipelines.generation(),descriptorFlags()};
         for(u32 i=0;i<activeViews;++i) {
             auto& v=views[i];
             if(v.used||(v.desiredValid&&v.desired!=key)||(v.pending.valid()&&v.requested!=key)) {

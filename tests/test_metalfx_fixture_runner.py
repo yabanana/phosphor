@@ -1,9 +1,10 @@
 """WRITTEN ONLY. Independent closed-form oracles; no renderer is launched."""
 import sys
+import copy
 from pathlib import Path
 import unittest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"tools"))
-from metalfx_denoise_fixture_check import constant_oracle,impulse_oracle,guide_oracle,leaks_at_exit,frozen_prewarm_budget
+from metalfx_denoise_fixture_check import constant_oracle,impulse_oracle,guide_oracle,leaks_at_exit,frozen_prewarm_budget,make_cases,frozen_auto_exposure_experiment,exposure_mode_oracle
 
 class SDKOracleTests(unittest.TestCase):
     def test_constant_scalar_unit_hypotheses(self):
@@ -47,5 +48,44 @@ class SDKPrewarmProtocolTests(unittest.TestCase):
         with self.assertRaises(ValueError):frozen_prewarm_budget(self.plan(60000,120000),90)
         with self.assertRaises(ValueError):frozen_prewarm_budget(self.plan(0),90)
         self.assertEqual(frozen_prewarm_budget(self.plan(120000),300),120000)
+
+class SDKAutomaticExposureProtocolTests(unittest.TestCase):
+    def plan(self):
+        case=make_cases(Path("out"),96,"native",True)[0]
+        case["command"]=["phosphor","--frames","96","--denoised-fixture","wide-hdr",
+            "--denoised-fixture-pre-exposed","--denoised-fixture-auto-exposure"]
+        return {"gateway":"native","auto_exposure_experiment":True,"cases":[case]}
+    def test_only_one_wide_hdr_case_and_existing_manual_suite_unchanged(self):
+        self.assertTrue(frozen_auto_exposure_experiment(self.plan()))
+        manual=make_cases(Path("out"),96,"native")
+        self.assertEqual(len(manual),7);self.assertFalse(any(c.get("auto_exposure") for c in manual))
+        for frames,gateway in ((95,"native"),(192,"native"),(96,"expected-missing")):
+            with self.assertRaises(ValueError):make_cases(Path("out"),frames,gateway,True)
+    def test_manifest_cannot_silently_change_units_frames_or_actual_mode(self):
+        for key,value in (("physical_target",[5760,2,1]),("pre_exposure",1),("packed_target",[90,2,1]),("frames",192),("expected_exit",1)):
+            bad=copy.deepcopy(self.plan());bad["cases"][0][key]=value
+            with self.assertRaises(ValueError):frozen_auto_exposure_experiment(bad)
+        bad=copy.deepcopy(self.plan());bad["cases"][0]["command"].remove("--denoised-fixture-auto-exposure")
+        with self.assertRaises(ValueError):frozen_auto_exposure_experiment(bad)
+        bad=copy.deepcopy(self.plan());bad["cases"][0]["command"][2]="192"
+        with self.assertRaises(ValueError):frozen_auto_exposure_experiment(bad)
+        bad=copy.deepcopy(self.plan());bad["cases"].append(copy.deepcopy(bad["cases"][0]))
+        with self.assertRaises(ValueError):frozen_auto_exposure_experiment(bad)
+    def test_actual_descriptor_mode_and_manual_texture_semantics_are_required(self):
+        record={"auto_exposure_requested":True,"exposure_descriptor_configured":True,
+            "auto_exposure_enabled":True,"exposure_mode":"sdk-auto","provided_manual_exposure_texture_value":1,
+            "manual_exposure_texture_ignored":True,"packed_exposure_is_provided_manual_value":True}
+        self.assertTrue(exposure_mode_oracle(record,True))
+        for key,value in (("auto_exposure_enabled",False),("exposure_descriptor_configured",False),
+            ("manual_exposure_texture_ignored",False),("provided_manual_exposure_texture_value",.015625),
+            ("packed_exposure_is_provided_manual_value",False)):
+            with self.assertRaises(ValueError):exposure_mode_oracle({**record,key:value},True)
+        with self.assertRaises(ValueError):exposure_mode_oracle(record,False)
+    def test_auto_mode_does_not_excuse_radiometric_loss_or_change_output_equation(self):
+        physical=[368640,128,64];sdk=[5760,2,1]
+        self.assertTrue(constant_oracle(sdk,physical,physical,1/64)["passed"])
+        damaged=[31.98,.82,.5]
+        self.assertFalse(constant_oracle(damaged,[v*64 for v in damaged],physical,1/64)["passed"])
+        self.assertFalse(constant_oracle(sdk,sdk,physical,1/64)["passed"])
 
 if __name__=="__main__":unittest.main()
