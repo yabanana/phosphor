@@ -83,6 +83,7 @@ public:
 
   void bindTexture(rg::TextureRef texture, MTL::Texture *physical);
   void bindBuffer(rg::BufferRef buffer, MTL::Buffer *physical);
+  void bindAccelerationStructure(rg::AccelerationStructureRef structure, MTL::AccelerationStructure *physical);
 
   /// Encode the whole graph into the frame's command buffer.
   void execute(MetalContext::Frame &frame);
@@ -130,6 +131,7 @@ private:
     std::vector<MTL::TextureUsage> usage_;     // per resource, from the accesses
     std::vector<MTL::Texture*> textures_;      // per resource (imported: bound per frame)
     std::vector<MTL::Buffer*>  buffers_;
+    std::vector<MTL::AccelerationStructure*> accelerationStructures_; // imported, owned by RT subsystem
     std::vector<bool>          owned_;         // created here (released on recompile)
     std::vector<MTL4::RenderPassDescriptor*> passDescriptors_; // per render group
     std::vector<NS::String*>   groupLabels_;   // per render group

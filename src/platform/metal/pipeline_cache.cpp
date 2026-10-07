@@ -160,6 +160,17 @@ MTL4::PipelineDescriptor* buildDescriptor(const pipe::PipelineDesc& desc, MTL::L
         MTL4::FunctionDescriptor* fn = functionDescriptor(desc.functions[0], desc, library);
         d->setComputeFunctionDescriptor(fn);
         fn->release();
+        if (!desc.linkedFunctions.empty()) {
+            std::vector<NS::Object*> functions;
+            functions.reserve(desc.linkedFunctions.size());
+            for (const auto& name : desc.linkedFunctions)
+                functions.push_back(functionDescriptor(name, desc, library));
+            auto* link = MTL4::StaticLinkingDescriptor::alloc()->init();
+            link->setFunctionDescriptors(NS::Array::array(functions.data(), functions.size()));
+            d->setStaticLinkingDescriptor(link);
+            link->release();
+            for (auto* function : functions) function->release();
+        }
         return d;
     }
     if (desc.kind == pipe::PipelineKind::Mesh) {

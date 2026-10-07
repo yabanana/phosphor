@@ -169,6 +169,23 @@ void PassBuilder::read(BufferRef buffer, Usage usage, Stages stages) {
     graph_.addRead(pass_, buffer.resource, buffer.version, usage, stages);
 }
 
+void PassBuilder::read(AccelerationStructureRef structure, Usage usage, Stages stages) {
+    if (structure.resource < graph_.resources().size() &&
+        graph_.resources()[structure.resource].kind != ResourceKind::AccelerationStructure)
+        graph_.error("acceleration-structure access requires an acceleration-structure import");
+    graph_.addRead(pass_, structure.resource, structure.version, usage, stages);
+}
+
+AccelerationStructureRef PassBuilder::write(AccelerationStructureRef structure, Usage usage, Stages stages) {
+    if (structure.resource < graph_.resources().size() &&
+        graph_.resources()[structure.resource].kind != ResourceKind::AccelerationStructure)
+        graph_.error("acceleration-structure access requires an acceleration-structure import");
+    if (!(stages & StageAccelerationStructure))
+        graph_.error("acceleration-structure writes require the acceleration-structure stage");
+    return {structure.resource,
+            graph_.addWrite(pass_, structure.resource, structure.version, usage, stages, 0, LoadIntent::Discard, {})};
+}
+
 TextureRef PassBuilder::write(TextureRef texture, Usage usage, Stages stages) {
     return {texture.resource,
             graph_.addWrite(pass_, texture.resource, texture.version, usage, stages, 0, LoadIntent::Discard, {})};
@@ -211,6 +228,10 @@ TextureRef RenderGraph::importTexture(const std::string& name, const TextureDesc
 
 BufferRef RenderGraph::importBuffer(const std::string& name, const BufferDesc& desc, u32 flags) {
     return {addResource(name, ResourceKind::Buffer, {}, desc, true, flags), 0};
+}
+
+AccelerationStructureRef RenderGraph::importAccelerationStructure(const std::string& name, u64 bytes, u32 flags) {
+    return {addResource(name, ResourceKind::AccelerationStructure, {}, {bytes}, true, flags), 0};
 }
 
 u32 RenderGraph::addPass(const std::string& name, PassType type, Queue queue, const SetupFn& setup,

@@ -42,7 +42,8 @@ enum Stage : Stages {
     StageAccelerationStructure = 1u << 7,
     StageMachineLearning = 1u << 8,
     StageExternal =
-        StageVertex | StageFragment | StageObject | StageMesh | StageDispatch | StageBlit | StageMachineLearning,
+        StageVertex | StageFragment | StageObject | StageMesh | StageDispatch | StageBlit | StageMachineLearning |
+        StageAccelerationStructure,
     // Raster stages that run before rasterisation (geometry front end).
     StageGeometry = StageVertex | StageObject | StageMesh,
     StageRaster = StageGeometry | StageFragment | StageTile,
@@ -61,7 +62,7 @@ enum class PassType : u8 {
     External, // framework owns encoders (MetalFX); explicit graph accesses + executor fence boundary
 };
 
-enum class ResourceKind : u8 { Texture, Buffer };
+enum class ResourceKind : u8 { Texture, Buffer, AccelerationStructure };
 
 // Abstract texture formats (the backend maps them to MTL::PixelFormat).
 enum class Format : u16 {
@@ -148,6 +149,14 @@ struct BufferRef {
     u32 version  = 0;
     [[nodiscard]] bool valid() const { return resource != ~0u; }
     bool operator==(const BufferRef&) const = default;
+};
+/// F9 imported AS (or a coherently owned collection of BLAS). Never a buffer
+/// allocation and never eligible for transient aliasing; bytes are diagnostic.
+struct AccelerationStructureRef {
+    u32 resource = ~0u;
+    u32 version = 0;
+    [[nodiscard]] bool valid() const { return resource != ~0u; }
+    bool operator==(const AccelerationStructureRef&) const = default;
 };
 
 // Imported resource flags.
@@ -261,8 +270,10 @@ public:
     // --- Shader / copy accesses ----------------------------------------------
     void       read(TextureRef texture, Usage usage, Stages stages);
     void       read(BufferRef buffer, Usage usage, Stages stages);
+    void       read(AccelerationStructureRef structure, Usage usage, Stages stages);
     TextureRef write(TextureRef texture, Usage usage, Stages stages);
     BufferRef  write(BufferRef buffer, Usage usage, Stages stages);
+    AccelerationStructureRef write(AccelerationStructureRef structure, Usage usage, Stages stages);
 
     /// The pass has effects outside the graph (readback, present, UI state):
     /// it is never culled.
@@ -292,6 +303,7 @@ public:
     /// External resources.  `flags` is a combination of ImportFlags.
     TextureRef importTexture(const std::string& name, const TextureDesc& desc, u32 flags);
     BufferRef  importBuffer(const std::string& name, const BufferDesc& desc, u32 flags);
+    AccelerationStructureRef importAccelerationStructure(const std::string& name, u64 bytes, u32 flags);
 
     /// Declare a pass; `setup` runs immediately and declares its accesses.
     /// Returns the pass index.

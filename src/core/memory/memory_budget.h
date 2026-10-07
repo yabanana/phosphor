@@ -19,6 +19,7 @@ enum class MemoryCategory : u8 {
     Transient,     // render-graph transient heap (F2.2)
     RenderTargets, // persistent attachments (depth, history buffers)
     Scene,         // F5 persistent GPU scene: instances, materials, nodes, lists, ICBs
+    RayTracing,    // F9 acceleration structures, scratch and RT scene tables
     Other,         // diagnostics, capture readback, ...
     COUNT
 };

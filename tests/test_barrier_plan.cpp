@@ -951,3 +951,42 @@ TEST_CASE("barriers minimal: OPT-1 scenarios, 1 to 3 views") {
         }
     }
 }
+
+TEST_CASE("F9: AS imports order descriptor write, build and traversal with exact stages") {
+    RenderGraph g;
+    auto descriptors = g.importBuffer("RT descriptors", {7200}, ImportPerFrame);
+    auto blas = g.importAccelerationStructure("RT BLAS", 4096, ImportContentsDefined);
+    auto tlas = g.importAccelerationStructure("RT TLAS", 8192, ImportPerFrame);
+    g.addPass("instances", PassType::Compute, [&](PassBuilder& b) {
+        descriptors = b.write(descriptors, Usage::ShaderWrite, StageDispatch);
+    }, nullptr);
+    g.addPass("build", PassType::Compute, [&](PassBuilder& b) {
+        b.read(descriptors, Usage::ShaderRead, StageAccelerationStructure);
+        b.read(blas, Usage::ShaderRead, StageAccelerationStructure);
+        tlas = b.write(tlas, Usage::ShaderWrite, StageAccelerationStructure);
+    }, nullptr);
+    g.addPass("trace", PassType::Compute, [&](PassBuilder& b) {
+        b.read(tlas, Usage::ShaderRead, StageDispatch);
+        b.read(blas, Usage::ShaderRead, StageDispatch);
+        b.setSideEffect();
+    }, nullptr);
+    const auto c = plan(g, {{PassType::Compute, 0, 2}});
+    bool descriptorsReady = false, traversalReady = false;
+    for (const auto& point : c.barriers) for (const auto& barrier : point.barriers) {
+        descriptorsReady |= (barrier.afterStages & StageDispatch) && (barrier.beforeStages & StageAccelerationStructure);
+        traversalReady |= (barrier.afterStages & StageAccelerationStructure) && (barrier.beforeStages & StageDispatch);
+    }
+    CHECK(descriptorsReady);
+    CHECK(traversalReady);
+    CHECK(g.resources()[tlas.resource].kind == ResourceKind::AccelerationStructure);
+    CHECK(g.resources()[tlas.resource].imported);
+}
+
+TEST_CASE("F9: AS writes cannot silently use dispatch instead of the AS stage") {
+    RenderGraph g;
+    auto tlas = g.importAccelerationStructure("TLAS", 1024, ImportOutput);
+    g.addPass("invalid build", PassType::Compute, [&](PassBuilder& b) {
+        tlas = b.write(tlas, Usage::ShaderWrite, StageDispatch);
+    }, nullptr);
+    CHECK_FALSE(compileOrder(g).ok);
+}

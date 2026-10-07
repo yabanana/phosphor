@@ -127,7 +127,7 @@ struct GPURtRay {
     float dx, dy, dz, tmax;
     u32 mask, type;
     float coneWidth; // angular footprint; zero selects LOD 0
-    u32 pad;
+    u32 pad; // source pixel index, preserved by secondary rays
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPURtRay) == 48, "GPURtRay layout");
 
@@ -142,7 +142,7 @@ struct GPURtProbeParams {
     float cameraPosition[4];
     float lightDirection[4]; // xyz direction toward light; w = secondary tmax
     u32 width, height, rayCount, probeType;
-    u32 slotCount, meshCount, frameIndex, flags;
+    u32 slotCount, meshCount, frameIndex, flags; // bit0 alpha counters, bits1..2 debug mode, bit3 sampled primary
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPURtProbeParams) == 128, "GPURtProbeParams layout");
 
