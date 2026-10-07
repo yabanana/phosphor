@@ -185,7 +185,7 @@ baseline has `clampHistory=false`: a noisy raw neighborhood is not a bound on
 expected radiance or visibility. Exact enumeration of independent Bernoulli
 3x3 samples verifies temporal expectation preservation for DI/GI/SPECULAR/AO;
 the old raw-extrema clamp alone biases a steady p=0.1 signal downward by more
-than0.03 per update. Identity, geometry, light/material revisions and epochs
+than 0.03 per update. Identity, geometry, light/material revisions and epochs
 still reject stale history. The optional RGB clamp is an explicitly biased
 experiment requiring its own energy/quality evidence, not a baseline repair
 for motion. Short history uses a compatible3x3 local variance estimate; a
