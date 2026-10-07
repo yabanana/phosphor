@@ -31,6 +31,13 @@ or integrated buffer,2=previous/current cell input,3=readonly DDGI params,
 12=atmosphere transmittance LUT. maxLocalLights is bounded alias-sample count
 per froxel (default1, max16), never a truncation of the entire F11 light list.
 Fog shadows query the froxel WORLD point, never a screen shadow mask.
+Froxel temporal source uses a linear mean after identity/position/extinction
+rejection. It does not clip the importance-weighted mean to current raw
+neighborhood extrema: with one contributing light of proposal probability
+.1 and history weight .9, that old clip loses more than30% of expected source
+energy in one steady update. An independent512-outcome CPU test enumerates
+the3x3 light proposals for several probabilities and intensities; the rejected
+formula is retained only as a negative control in that test.
 RT links the single rt_alpha_generic TU and retains typed TLAS/BLAS graph
 dependencies at Dispatch; each RT consumer owns/reloads its own IFT.
 

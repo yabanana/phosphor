@@ -34,6 +34,28 @@ TEST_CASE("F14 fog source compositing order cannot be replaced by multiplying ma
     const auto rb=fogComposite(red,blue),br=fogComposite(blue,red);
     CHECK(rb.transmittance==doctest::Approx(br.transmittance));CHECK(rb.radiance.x>br.radiance.x);CHECK(rb.radiance.z<br.radiance.z);
 }
+TEST_CASE("F14 fog temporal source conserves importance-sampled local illumination") {
+    const float historyWeight=float(FogSettings{}.historyWeight);
+    for(const float probability:{.1f,.25f,.9f})for(const float intensity:{1.f,7.5f}) {
+        double mean=0,oldClampedMean=0,mass=0;
+        // One luminous light drawn with PMF p and zero-contribution proposals
+        // otherwise. Raw X=I/p or0 has mean I, including phase/extinction and
+        // albedo. Enumerate the independent 3x3 proposal outcomes exactly.
+        for(u32 bits=0;bits<512;++bits) {
+            double likelihood=1;
+            for(u32 k=0;k<9;++k)likelihood*=bits&(1u<<k)?probability:1-probability;
+            const float raw=bits&1u?intensity/probability:0;
+            mean+=likelihood*volumeTemporalSource(raw,intensity,historyWeight);
+            const float clipped=bits==0?0:bits==511?intensity/probability:intensity;
+            oldClampedMean+=likelihood*volumeTemporalSource(raw,clipped,historyWeight);
+            mass+=likelihood;
+        }
+        CHECK(mass==doctest::Approx(1).epsilon(1e-6));
+        CHECK(mean==doctest::Approx(intensity).epsilon(1e-6));
+        CHECK(std::abs(oldClampedMean-intensity)>.03*intensity);
+        if(probability==.1f)CHECK(oldClampedMean<.7*intensity);
+    }
+}
 TEST_CASE("F14 fog slices density and budgets are world-unit bounded") {
     FogSettings s;CHECK_NOTHROW(validateFog(s));CHECK(fogDensity(s,100)<fogDensity(s,0));
     CHECK(fogSliceDistance(s,0)==s.nearDistance);CHECK(fogSliceDistance(s,1)==doctest::Approx(s.farDistance));

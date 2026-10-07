@@ -110,12 +110,14 @@ kernel void fog_temporal(constant GPUFogParams& p [[buffer(0)]],device GPUFogCel
             const bool identity=h.viewID==p.viewID&&h.generation==p.generation&&p.previousViewID==p.viewID;
             accepted=h.valid&&(identity||p.corruption==VOLUME_CORRUPT_HISTORY)&&h.age>0&&h.age<=p.maxHistoryAge&&
                 length(oldPoint-point)<=p.positionThreshold&&abs(h.extinction-value.extinction)<=p.depthRelativeThreshold*max(value.extinction,1e-6f);
-            if(accepted){float3 low=float3(value.source[0],value.source[1],value.source[2]),high=low;
+            if(accepted){
                 if(!identity)volumeCount(counters,2,1); // actual stale identity consumed by the negative control
-                for(int dy=-1;dy<=1;++dy)for(int dx=-1;dx<=1;++dx){const int2 q=int2(cell.xy)+int2(dx,dy);if(any(q<0)||any(q>=int2(p.gridX,p.gridY)))continue;
-                    const GPUFogCell n=current[fogIndex(uint3(uint2(q),cell.z),p)];const float3 source(n.source[0],n.source[1],n.source[2]);low=min(low,source);high=max(high,source);}
-                const float3 filtered=mix(float3(value.source[0],value.source[1],value.source[2]),clamp(float3(h.source[0],h.source[1],h.source[2]),low,high),p.historyWeight);
-                value.source[0]=filtered.x;value.source[1]=filtered.y;value.source[2]=filtered.z;value.age=min(h.age+1,p.maxHistoryAge);}
+                // Current source is an importance-weighted light sample. A
+                // dark raw neighborhood can be legitimate sampling noise;
+                // clipping to its extrema systematically removes light energy.
+                // Geometry/extinction/epoch rejection still guards stale data.
+                for(uint k=0;k<3;++k)value.source[k]=volumeTemporalSource(value.source[k],h.source[k],p.historyWeight);
+                value.age=min(h.age+1,p.maxHistoryAge);}
         }
         volumeCount(counters,accepted?6u:7u,1u);
     }
