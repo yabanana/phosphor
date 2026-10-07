@@ -73,6 +73,7 @@ public:
     // Borrowed current-frame SDK output only; consumers declare its graph read
     // and preserve frame/view/slot tags before copying to completed readback.
     [[nodiscard]] rg::TextureRef sdkOutputRef()const;
+    [[nodiscard]] rg::TextureRef packedChannelRef(metalfx_denoise::Channel)const;
     [[nodiscard]] MTL::Texture* sdkOutputTexture(u32 view,u32 slot)const;
 private:
     struct Impl;std::unique_ptr<Impl> impl_;

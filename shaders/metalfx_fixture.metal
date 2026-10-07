@@ -38,14 +38,23 @@ fragment float fx_fixture_depth_fs(FXDepthVertex in [[stage_in]],constant GPUFXF
     (void)in;return p.nearPlane/p.planeDistance;
 }
 // params0, SDK0, physical1, actual authored guide textures2..8,
-// full images buffer1(SDK RGB then physical RGB), samples buffer2.
+// full images buffer1(SDK RGB then physical RGB), authored samples buffer2,
+// actual SDK-packed samples buffer3. Packed guides9..15/exposure16/hit17/
+// reactive18/strength19 prove the actual pack, not merely authored inputs.
 kernel void fx_fixture_readback(constant GPUFXFixtureParams& p [[buffer(0)]],
     device float* images [[buffer(1)]],device GPUFXFixtureSample* samples [[buffer(2)]],
+    device GPUFXFixtureSample* packedSamples [[buffer(3)]],
     texture2d<float,access::read> sdk [[texture(0)]],texture2d<float,access::read> physical [[texture(1)]],
     texture2d<float,access::read> color [[texture(2)]],texture2d<float,access::read> normal [[texture(3)]],
     texture2d<float,access::read> rough [[texture(4)]],texture2d<float,access::read> motion [[texture(5)]],
     texture2d<float,access::read> depth [[texture(6)]],texture2d<float,access::read> diffuse [[texture(7)]],
-    texture2d<float,access::read> specular [[texture(8)]],uint tid [[thread_position_in_grid]]) {
+    texture2d<float,access::read> specular [[texture(8)]],
+    texture2d<float,access::read> packedColor [[texture(9)]],texture2d<float,access::read> packedNormal [[texture(10)]],
+    texture2d<float,access::read> packedRough [[texture(11)]],texture2d<float,access::read> packedMotion [[texture(12)]],
+    texture2d<float,access::read> packedDepth [[texture(13)]],texture2d<float,access::read> packedDiffuse [[texture(14)]],
+    texture2d<float,access::read> packedSpecular [[texture(15)]],texture2d<float,access::read> exposure [[texture(16)]],
+    texture2d<float,access::read> packedHit [[texture(17)]],texture2d<float,access::read> packedReactive [[texture(18)]],
+    texture2d<float,access::read> packedStrength [[texture(19)]],uint tid [[thread_position_in_grid]]) {
     uint count=p.outputWidth*p.outputHeight;
     if(tid<count) {
         uint2 xy(tid%p.outputWidth,tid/p.outputWidth);
@@ -60,5 +69,12 @@ kernel void fx_fixture_readback(constant GPUFXFixtureParams& p [[buffer(0)]],
         s.roughness=rough.read(point).x;s.depth=depth.read(point).x;
         float2 mv=motion.read(point).xy;s.motion[0]=mv.x;s.motion[1]=mv.y;
         s.diffuseR=diffuse.read(point).x;s.specularR=specular.read(point).x;samples[tid]=s;
+        GPUFXFixtureSample k{};rgb=packedColor.read(point).rgb;n=packedNormal.read(point).xyz;
+        for(uint c=0;c<3u;++c){k.color[c]=rgb[c];k.normal[c]=n[c];}
+        k.roughness=packedRough.read(point).x;k.depth=packedDepth.read(point).x;
+        mv=packedMotion.read(point).xy;k.motion[0]=mv.x;k.motion[1]=mv.y;
+        k.diffuseR=packedDiffuse.read(point).x;k.specularR=packedSpecular.read(point).x;
+        k.hitDistance=packedHit.read(point).x;k.reactive=packedReactive.read(point).x;
+        k.strength=packedStrength.read(point).x;k.exposure=exposure.read(uint2(0)).x;packedSamples[tid]=k;
     }
 }

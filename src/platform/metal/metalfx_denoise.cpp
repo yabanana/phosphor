@@ -499,5 +499,8 @@ u64 MetalfxDenoise::version()const{return impl_->graphVersion;}
 MetalfxDenoise::PackCheck MetalfxDenoise::readPackChecks(u32 view,u32 slot)const{return impl_->checks(view,slot);}
 std::vector<MetalfxDenoise::PackCheck> MetalfxDenoise::drainPackChecks(){return impl_->drainChecks();}
 rg::TextureRef MetalfxDenoise::sdkOutputRef()const{return impl_->graphNative&&ready()?impl_->packedRefs[channelIndex(Channel::Output)]:rg::TextureRef{};}
+rg::TextureRef MetalfxDenoise::packedChannelRef(metalfx_denoise::Channel channel)const {
+    return impl_->graphNative&&ready()&&channelIndex(channel)<ChannelCount?impl_->packedRefs[channelIndex(channel)]:rg::TextureRef{};
+}
 MTL::Texture* MetalfxDenoise::sdkOutputTexture(u32 view,u32 slot)const{return impl_->views.at(view).slots.at(slot).textures[channelIndex(Channel::Output)];}
 } // namespace phosphor

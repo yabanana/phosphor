@@ -13,13 +13,14 @@ struct GPUFXFixtureParams {
     float nearPlane,planeDistance,motionPixels,impulseAmplitude;
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUFXFixtureParams)==64,"SDK fixture parameters");
-// Twelve scalar words/sample. The channel readback samples actual generated
-// color, normal, roughness, motion, depth, albedo and flags; SDK image readbacks
+// Sixteen scalar words/sample. Channel readback samples actual generated and
+// actual SDK-packed guides, including unit exposure and optional masks. Images
 // remain separate full-frame arrays, so an authored guide is not native output.
 struct GPUFXFixtureSample {
     float color[3],roughness;
     float normal[3],depth;
     float motion[2],diffuseR,specularR;
+    float hitDistance,reactive,strength,exposure;
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUFXFixtureSample)==48,"SDK fixture sample");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUFXFixtureSample)==64,"SDK fixture sample");
 } // namespace phosphor

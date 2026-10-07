@@ -47,6 +47,10 @@ struct MetalfxDenoiseFixture::Impl {
     };
     std::array<std::array<Slot,METAL_FRAMES_IN_FLIGHT>,HistoryRegistry::MaxViews> slots{};
     std::array<rg::TextureRef,InputCount> refs{};rg::TextureRef sdk{},physical{};
+    static constexpr std::array<metalfx_denoise::Channel,11> packedChannels{metalfx_denoise::Channel::Color,metalfx_denoise::Channel::Normal,
+        metalfx_denoise::Channel::Roughness,metalfx_denoise::Channel::Motion,metalfx_denoise::Channel::Depth,metalfx_denoise::Channel::DiffuseAlbedo,
+        metalfx_denoise::Channel::SpecularAlbedo,metalfx_denoise::Channel::Exposure,metalfx_denoise::Channel::HitDistance,metalfx_denoise::Channel::Reactive,metalfx_denoise::Channel::Strength};
+    std::array<rg::TextureRef,packedChannels.size()> packed{};
     rg::BufferRef imageRef{},sampleRef{};bool nativeGraph=false;
     u64 ownVersion=1,nativeFrames=0,checkedFrames=0,steadyFrames=0,packChecks=0,failures=0;
     u32 capturedViews=0;u64 suppliedCuts=0;std::vector<metalfx_denoise::Extent> capturedExtents;
@@ -93,9 +97,9 @@ struct MetalfxDenoiseFixture::Impl {
             if(!s.textures[i])throw std::runtime_error("SDK fixture texture allocation failed");
         }
         s.images=c.memory().newBuffer(u64(s.outWidth)*s.outHeight*6*sizeof(float),MTL::ResourceStorageModeShared,MemoryCategory::Other,"SDK actual half and physical readback");
-        s.samples=c.memory().newBuffer(4*sizeof(GPUFXFixtureSample),MTL::ResourceStorageModeShared,MemoryCategory::Other,"SDK actual authored guide probes");
+        s.samples=c.memory().newBuffer(8*sizeof(GPUFXFixtureSample),MTL::ResourceStorageModeShared,MemoryCategory::Other,"SDK actual authored and packed guide probes");
         if(!s.images||!s.samples)throw std::runtime_error("SDK fixture readback allocation failed");
-        if(!s.generate)s.generate=table(1,9);if(!s.depth)s.depth=table(1,0);if(!s.readback)s.readback=table(3,9);++ownVersion;
+        if(!s.generate)s.generate=table(1,9);if(!s.depth)s.depth=table(1,0);if(!s.readback)s.readback=table(4,20);++ownVersion;
     }
     void prepare(const MetalfxDenoise::Frame& source) {
         if(source.view>=HistoryRegistry::MaxViews||source.slot>=METAL_FRAMES_IN_FLIGHT)throw std::invalid_argument("Invalid SDK fixture view/slot");
@@ -147,17 +151,21 @@ struct MetalfxDenoiseFixture::Impl {
                                      refs[Hit],refs[Reactive],refs[Strength],refs[Color]};
         physical=adapter->addToGraph(graph,inputs);sdk=adapter->sdkOutputRef();
         if(!adapter->ready()||!sdk.valid())return physical;
+        for(u32 i=0;i<packed.size();++i)packed[i]=adapter->packedChannelRef(packedChannels[i]);
         imageRef=graph.importBuffer("SDK fixture actual images",{slot.images->length()},ImportPerFrame|ImportOutput);
         sampleRef=graph.importBuffer("SDK fixture actual input sample probes",{slot.samples->length()},ImportPerFrame|ImportOutput);
         graph.addPass("SDK fixture actual output and guide readback",PassType::Compute,[&](PassBuilder& b){
             b.read(sdk,Usage::ShaderRead,StageDispatch);b.read(physical,Usage::ShaderRead,StageDispatch);
             for(auto i:{Color,Normal,Rough,Motion,Depth,Diffuse,Specular})b.read(refs[i],Usage::ShaderRead,StageDispatch);
+            for(auto guide:packed)b.read(guide,Usage::ShaderRead,StageDispatch);
             imageRef=b.write(imageRef,Usage::ShaderWrite,StageDispatch);sampleRef=b.write(sampleRef,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("fx_fixture_readback");
         },[this](PassContext& ctx){
             auto& s=slots[frame.view][frame.slot];auto* t=s.readback;t->setAddress(paramsAddress,0);t->setAddress(s.images->gpuAddress(),1);t->setAddress(s.samples->gpuAddress(),2);
+            t->setAddress(s.samples->gpuAddress()+4*sizeof(GPUFXFixtureSample),3);
             t->setTexture(static_cast<MTL::Texture*>(ctx.texture(sdk))->gpuResourceID(),0);t->setTexture(static_cast<MTL::Texture*>(ctx.texture(physical))->gpuResourceID(),1);
             const std::array<Input,7> authored{Color,Normal,Rough,Motion,Depth,Diffuse,Specular};
             for(u32 i=0;i<authored.size();++i)t->setTexture(s.textures[authored[i]]->gpuResourceID(),i+2);
+            for(u32 i=0;i<packed.size();++i)t->setTexture(static_cast<MTL::Texture*>(ctx.texture(packed[i]))->gpuResourceID(),i+9);
             auto* e=static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder());e->setComputePipelineState(p.compute(readback));e->setArgumentTable(t);
             e->dispatchThreads(MTL::Size::Make(std::max(4u,params.outputWidth*params.outputHeight),1,1),MTL::Size::Make(32,1,1));
             s.tag=params;s.frame=frame.index;s.view=frame.view;s.shaderGeneration=p.generation();s.pending=true;s.steady=frame.index%48u>=8u;++nativeFrames;
@@ -171,7 +179,7 @@ struct MetalfxDenoiseFixture::Impl {
         for(u32 i=0;i<InputCount;++i)e.bindTexture(refs[i],s.textures[i]);
         adapter->bindFrame(e);if(nativeGraph){e.bindBuffer(imageRef,s.images);e.bindBuffer(sampleRef,s.samples);}
     }
-    bool channels(const Slot& s,const GPUFXFixtureSample* points)const {
+    bool channels(const Slot& s,const GPUFXFixtureSample* points,bool packedSample=false)const {
         bool pass=true;const auto& t=s.tag;
         for(u32 i=0;i<4;++i) {
             const u32 x=i==0?t.width/4u:i==1?3u*t.width/4u:i==2?t.width/2u:std::min(t.width/4u+t.phase,t.width-1u);
@@ -186,7 +194,9 @@ struct MetalfxDenoiseFixture::Impl {
             std::array<float,3> expectedColor{t.color[0],t.color[1],t.color[2]};
             if(t.scenario==FX_FIXTURE_IMPULSE)expectedColor=std::abs(int(x)-int(t.width/2u))<=3?std::array<float,3>{t.impulseAmplitude,t.impulseAmplitude,t.impulseAmplitude}:std::array<float,3>{0,0,0};
             if(t.scenario==FX_FIXTURE_CHANNELS)expectedColor=std::abs(int(x)-int(center))<=3?std::array<float,3>{.75f,.5f,.25f}:std::array<float,3>{.125f,.125f,.125f};
-            for(u32 j=0;j<3;++j)pass=pass&&std::isfinite(sample.color[j])&&std::abs(sample.color[j]-expectedColor[j])<=1e-6f*std::max(1.f,std::abs(expectedColor[j]));
+            for(u32 j=0;j<3;++j){if(packedSample)expectedColor[j]*=t.preExposure;
+                pass=pass&&std::isfinite(sample.color[j])&&std::abs(sample.color[j]-expectedColor[j])<=(packedSample?.001f:1e-6f)*std::max(1.f,std::abs(expectedColor[j]));}
+            if(packedSample)pass=pass&&sample.exposure==1&&sample.hitDistance==0&&sample.reactive==0&&sample.strength==0;
         }
         return pass;
     }
@@ -198,7 +208,7 @@ struct MetalfxDenoiseFixture::Impl {
             const auto* data=static_cast<const float*>(s.images->contents());const auto* samples=static_cast<const GPUFXFixtureSample*>(s.samples->contents());
             const std::span<const float> sdkImage(data,count),physicalImage(data+count,count);
             bool finite=std::all_of(data,data+count*2,[](float value){return std::isfinite(value)&&value>=0;});
-            const bool channelPass=channels(s,samples);bool constantPass=true;FXConstantComparison constant{};
+            const bool channelPass=channels(s,samples)&&channels(s,samples+4,true);bool constantPass=true;FXConstantComparison constant{};
             if(s.tag.scenario==FX_FIXTURE_CONSTANT||s.tag.scenario==FX_FIXTURE_LIFECYCLE||s.tag.scenario==FX_FIXTURE_WIDE_HDR) {
                 constant=compareFXConstant(sdkImage,physicalImage,{s.tag.color[0],s.tag.color[1],s.tag.color[2]},s.tag.preExposure);
                 constantPass=!s.steady||constant.restored;
@@ -224,10 +234,12 @@ struct MetalfxDenoiseFixture::Impl {
                <<",\"sdk_physical_hypothesis\":"<<(constant.physical?"true":"false")<<",\"restored_relative_error\":"<<number(constant.restoredRelativeError)
                <<",\"input_width\":"<<s.tag.width<<",\"input_height\":"<<s.tag.height<<",\"output_width\":"<<s.tag.outputWidth<<",\"output_height\":"<<s.tag.outputHeight
                <<",\"phase\":"<<s.tag.phase<<",\"constant_physical\":["<<s.tag.color[0]<<','<<s.tag.color[1]<<','<<s.tag.color[2]<<"],\"input_samples\":[";
-            for(u32 i=0;i<4;++i){if(i)out<<',';const auto& a=samples[i];
+            auto writeSamples=[&](u32 first){for(u32 i=0;i<4;++i){if(i)out<<',';const auto& a=samples[first+i];
                 out<<"{\"color\":["<<number(a.color[0])<<','<<number(a.color[1])<<','<<number(a.color[2])<<"],\"normal\":["<<number(a.normal[0])<<','<<number(a.normal[1])<<','<<number(a.normal[2])
                    <<"],\"roughness\":"<<number(a.roughness)<<",\"depth\":"<<number(a.depth)<<",\"motion\":["<<number(a.motion[0])<<','<<number(a.motion[1])
-                   <<"],\"diffuseR\":"<<number(a.diffuseR)<<",\"specularR\":"<<number(a.specularR)<<'}';}
+                   <<"],\"diffuseR\":"<<number(a.diffuseR)<<",\"specularR\":"<<number(a.specularR)<<",\"exposure\":"<<number(a.exposure)
+                   <<",\"hitDistance\":"<<number(a.hitDistance)<<",\"reactive\":"<<number(a.reactive)<<",\"strength\":"<<number(a.strength)<<'}';}};
+            writeSamples(0);out<<"],\"packed_samples\":[";writeSamples(4);
             out<<"],\"passed\":"<<(pass?"true":"false")<<",\"policy_promoted\":false,\"provenance\":{\"shader_generation\":"<<s.shaderGeneration
                <<",\"source_sha\":"<<supplied("PHOSPHOR_SOURCE_SHA")<<",\"binary_sha\":"<<supplied("PHOSPHOR_BINARY_SHA")
                <<",\"manifest_sha\":"<<supplied("PHOSPHOR_MANIFEST_SHA")<<"}}\n";
@@ -261,6 +273,7 @@ struct MetalfxDenoiseFixture::Impl {
             <<",\"state\":"<<quote(!nativeFrames?"NOT_EXECUTED_NATIVE":!finishCalled?"GPU_RECORDS_PENDING":pass?"FIXTURE_CHECKS_PASSED":"FIXTURE_CHECKS_FAILED")
             <<",\"native_frames\":"<<nativeFrames<<",\"checked_frames\":"<<checkedFrames<<",\"steady_frames\":"<<steadyFrames<<",\"pack_checks\":"<<packChecks<<",\"failures\":"<<failures<<",\"passed\":"<<(pass?"true":"false")
             <<",\"actual_encoded_frames\":"<<stats.encodedFrames<<",\"factory_requests\":"<<stats.requests<<",\"retirements_submitted\":"<<stats.retirements<<",\"obsolete_requests\":"<<stats.discardedRequests
+            <<",\"sdk_available\":"<<(stats.sdkAvailable?"true":"false")<<",\"device_supported\":"<<(stats.deviceSupported?"true":"false")<<",\"factory_installed\":"<<(stats.factoryInstalled?"true":"false")
             <<",\"history_resets\":"<<stats.resets<<",\"supplied_cuts\":"<<suppliedCuts<<",\"captured_view_mask\":"<<capturedViews<<",\"captured_extent_count\":"<<capturedExtents.size()<<",\"lifecycle_passed\":"<<(lifecyclePassed()?"true":"false")
             <<",\"fallback_reason\":"<<quote(adapter->fallbackReason())<<",\"preexposed_policy_experiment\":"<<(options.preExposedPolicy?"true":"false")
             <<",\"phase_accepted\":false,\"production_policy_promoted\":false,\"metamorphic\":[";
