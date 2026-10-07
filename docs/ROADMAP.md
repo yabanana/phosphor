@@ -242,13 +242,13 @@ pubbliche, sorgenti OS, risultati di paper e ipotesi da misurare.
 | Tappa | Consegna principale | Decisione successiva |
 |---|---|---|
 | Fatto | F5/F6 integrate; F7/F8 DEVELOPMENT_ACCEPTED M5 (PR #14, #16), revisione post-F8 e baseline M5 di OPT-4.16 (2026-10-04) | Tempo GPU in MetalFX (69–83% dei frame temporali) e nel ciclo luci (F11): nessuna OPT selezionata |
-| Ora | F9 → F13: infrastruttura RT, ombre, migliaia di luci, GI, riflessi e denoise | Misurare ogni fase sul corpus OPT-4.16; Many Lights verso F11 |
+| Ora | F9 integrata (PR #18, d5ec450); verifica e integrazione F10–F14 | Misurare ogni fase, poi STOP dopo F14 secondo la decisione del proprietario 2026-10-07 |
 | Dopo F13 | Ombre, GI, riflessi e denoise integrati; F14 se utile al corpus | Nuove misure; rivalutare OPT-2 (con OPT-2.0) e le altre ottimizzazioni rese necessarie dal frame con luce |
 | Sviluppo successivo | Materiali/mondo/streaming e runtime richiesti dalla slice | Attivare un piano dettagliato quando il suo consumatore è concreto |
 | Piattaforma di prodotto | F27 integrazione ECS → nucleo F41/F21 → F39/F40 → editor F34 | Riuso e parità funzionale verificati; implementazione progressiva senza avviare optimizer generali |
 | Frontiera | F29–F33 e ricerca SoC avanzata | Attivazione per trigger misurato; nessuna dipendenza automatica della slice |
 
-Il checkpoint corrente è **F7/F8 DEVELOPMENT_ACCEPTED sul M5 e revisione post-F8 chiusa; prossima fase F9; OPT-2 dopo F13**, con una baseline corretta e
+Il checkpoint corrente è **F9 integrata e DEVELOPMENT_ACCEPTED sul M5; F10–F14 in sviluppo/verifica; stop dopo F14**, con una baseline corretta e
 semplice a ogni passaggio. Cooker, runtime e strumenti minimi si introducono
 quando necessari ai contenuti correnti. Le OPT non sono una barriera obbligatoria
 fra ere; F37 può usare fallback e preset misurati senza aspettare ogni idea

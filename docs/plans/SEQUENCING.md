@@ -16,8 +16,8 @@ costo prima della migrazione, senza richiedere un guadagno del 3% sul frame.
 
 | Orizzonte | Lavoro | Cosa deve produrre |
 |---|---|---|
-| Checkpoint corrente | F5/F6 integrate; F7/F8 DEVELOPMENT_ACCEPTED M5; revisione post-F8 e baseline M5 OPT-4.16 | Prossima fase F9; OPT-2 dopo F13 |
-| Prossimo | F9–F13; F14 da scegliere in base alla scena | Illuminazione integrata e qualità temporale; dettagli di progetto rivisti dopo F8 |
+| Checkpoint corrente | F5–F9 integrate; F9 DEVELOPMENT_ACCEPTED M5, PR #18, merge d5ec450 | Verifica e integrazione F10–F14 |
+| Prossimo autorizzato | F10–F14, poi STOP per decisione del proprietario 2026-10-07 | Codice scritto in chat separata; build, correttezza GPU, qualità e misure decise dall'aggregatore |
 | Successivo | Altre F, compresi runtime e mondo | Piani dettagliati da riconciliare quando il consumatore esiste |
 | Prodotto richiesto | F21/F27/F34, F39–F41 e audio base F26.1 | Riuso, 2D/UI/editor e compatibilità verificata; baseline incrementale, copertura finale obbligatoria |
 | Opportunità | OPT aperte, task `[CANDIDATO]`, fasi `[EDGE]` | Nessuna implementazione automatica: attivazione per un problema concreto e misurato |
@@ -30,7 +30,8 @@ rilascia l'autoriferimento interno dello scaler MetalFX
 [costo storico dell'isolamento](../F8_METALFX_LIFETIME.md)). Gli esperimenti F7.4/F7.5
 richiesti dal proprietario sono stati eseguiti e non adottati nel preset corrente:
 [misure e decisioni](../F7_F8_HANDOFF.md). Non bloccano la baseline F7.
-Nessuna OPT o fase F9+ viene avviata da questo checkpoint. La storia
+F9 è ora integrata; il proprietario ha autorizzato F10–F14 e lo stop successivo.
+Nessuna OPT viene attivata automaticamente. La storia
 F8.6 parte da risorse per vista e sincronizzazione conservativa; aliasing
 temporale generale e scheduling eterogeneo non servono a renderla corretta.
 
@@ -107,8 +108,8 @@ delle normali fasi F.
 **Aggiornamento richiesto dal proprietario il 2026-10-02:** tutti i piani F e
 OPT contengono dettaglio anticipato: file, contratti, pacchetti, spike e verifica
 per ogni task. Questo sostituisce la scelta precedente di mantenere soltanto
-brevi bozze lontane. Rimane distinta l'attivazione: F6–F8 sono operative,
-F9–F14 sono successive, le altre specifiche si riconciliano al kickoff.
+brevi bozze lontane. Rimane distinta l'attivazione: F5–F9 sono integrate,
+F10–F14 sono in sviluppo/verifica, le altre specifiche si riconciliano al kickoff.
 Gli OPT restano cataloghi di interventi selezionabili.
 Per i requisiti di piattaforma, «pianificato» riguarda tempi e soluzione,
 non la facoltà di omettere editor/2D/UI dal prodotto completo. I primi
