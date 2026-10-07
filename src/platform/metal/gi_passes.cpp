@@ -83,7 +83,7 @@ struct GiPasses::Impl {
         if(atlasValid){std::swap(previousIrr,nextIrr);std::swap(previousDist,nextDist);}
         if(s.stats().structure||s.stats().fullInstances||!s.instanceDeltas().empty()||!s.motionSlots().empty()||!s.dirtyRoots().empty())++sceneRevision;
         if(s.stats().fullMaterials||!s.materialDeltas().empty())++materialRevision;
-        const u64 allLightEpoch=lightingEpoch.update(lights,environment);
+        const u64 allLightEpoch=lightingEpoch.update(lights,environment,direct.lightRevision());
         const Signal signal{f.scene,sceneRevision,materialRevision,rt.geometryRevision(),allLightEpoch};
         if(!(signal==lastSignal)){++generation;lastSignal=signal;atlasValid=false;}
         const auto decision=history.begin(f.view,{f.width,f.height,f.backingWidth,f.backingHeight},generation,f.cut,f.reset);
