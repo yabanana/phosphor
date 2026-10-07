@@ -38,11 +38,11 @@ struct MetalfxDenoise::Impl {
     MetalContext& context;PipelineCache& pipelines;Options options;Factory factory;Frame frame{};
     Stats stats{};Status currentStatus=Status::Disabled;std::string reason="MetalFX denoised was not requested";
     float minimumScale=1,maximumScale=1;u64 graphVersion=1;
-    pipe::PipelineHandle packHandle{},clearHandle{};
+    pipe::PipelineHandle packHandle{},clearHandle{},restoreHandle{};
     HistoryRegistry histories;
     struct Packed {
         std::array<MTL::Texture*,ChannelCount> textures{};
-        MTL::Buffer* counters=nullptr;MTL4::ArgumentTable* table=nullptr;MTL4::ArgumentTable* clearTable=nullptr;
+        MTL::Buffer* counters=nullptr;MTL4::ArgumentTable* table=nullptr;MTL4::ArgumentTable* clearTable=nullptr;MTL4::ArgumentTable* restoreTable=nullptr;
         u64 recordedFrame=0;u32 expectedPixels=0;bool recorded=false,consumed=false;
     };
     struct View {
@@ -61,7 +61,7 @@ struct MetalfxDenoise::Impl {
     Inputs inputs{};
     std::array<rg::TextureRef,ChannelCount> packedRefs{};
     rg::BufferRef counterRef{},historyRef{};
-    MTL::GPUAddress packParamsAddress=0;
+    MTL::GPUAddress packParamsAddress=0,restoreParamsAddress=0;
     bool reset=true,graphNative=false;
     struct RetiredCheck {MTL::Buffer* buffer;u64 frame;u32 view,slot,expectedPixels;};
     std::vector<RetiredCheck> retiredChecks;
@@ -84,6 +84,7 @@ struct MetalfxDenoise::Impl {
 #endif
         if(o.enabled && stats.sdkAvailable && stats.deviceSupported && stats.factoryInstalled) {
             packHandle=p.request(packPipeline("denoise_pack"));clearHandle=p.request(packPipeline("denoise_pack_clear"));
+            restoreHandle=p.request(packPipeline("denoise_restore_radiance"));
             auto* d=MTL::TextureDescriptor::texture2DDescriptor(MTL::PixelFormatRGBA16Float,1,1,false);
             d->setStorageMode(MTL::StorageModeShared);d->setUsage(MTL::TextureUsageShaderRead);
             neutral=c.memory().newTexture(d,MemoryCategory::RenderTargets,"MetalFX absent optional guide");
@@ -100,6 +101,7 @@ struct MetalfxDenoise::Impl {
             for(auto& slot:v.slots) {
                 if(slot.table)slot.table->release();
                 if(slot.clearTable)slot.clearTable->release();
+                if(slot.restoreTable)slot.restoreTable->release();
             }
         }
         collectChecks(); // waitIdle above makes every archived readback available.
@@ -192,6 +194,7 @@ struct MetalfxDenoise::Impl {
         v.usage[channelIndex(Channel::Strength)]=options.strengthMask?s->denoiseStrengthMaskTextureUsage():MTL::TextureUsageUnknown;
         v.usage[channelIndex(Channel::Exposure)]=MTL::TextureUsageShaderRead;
         v.usage[channelIndex(Channel::Output)]=s->outputTextureUsage();
+        v.usage[channelIndex(Channel::RestoredOutput)]=MTL::TextureUsageShaderRead|MTL::TextureUsageShaderWrite;
         // Depth32Float cannot be a generic compute storage destination. If an
         // unexpected framework asks that usage, choose the custom path.
         if(v.usage[channelIndex(Channel::Depth)]&MTL::TextureUsageShaderWrite)
@@ -204,7 +207,7 @@ struct MetalfxDenoise::Impl {
             s->colorTextureFormat(),s->depthTextureFormat(),s->motionTextureFormat(),
             s->diffuseAlbedoTextureFormat(),s->specularAlbedoTextureFormat(),s->normalTextureFormat(),
             s->roughnessTextureFormat(),s->specularHitDistanceTextureFormat(),s->reactiveMaskTextureFormat(),
-            s->denoiseStrengthMaskTextureFormat(),MTL::PixelFormatR16Float,s->outputTextureFormat()};
+            s->denoiseStrengthMaskTextureFormat(),MTL::PixelFormatR16Float,s->outputTextureFormat(),MTL::PixelFormatRGBA32Float};
         for(size_t i=0;i<ChannelCount;++i) {
             if((i==channelIndex(Channel::HitDistance)&&!options.specularHitDistance) ||
                (i==channelIndex(Channel::Reactive)&&!options.reactiveMask) ||
@@ -217,7 +220,7 @@ struct MetalfxDenoise::Impl {
         const auto e=v.desired.extent;
         for(auto& slot:v.slots) {
             for(size_t i=0;i<ChannelCount;++i) {
-                const Channel ch=Channel(i);const bool output=ch==Channel::Output,exposure=ch==Channel::Exposure;
+                const Channel ch=Channel(i);const bool output=ch==Channel::Output||ch==Channel::RestoredOutput,exposure=ch==Channel::Exposure;
                 const u32 w=exposure?1u:output?e.outputWidth:e.inputWidth;
                 const u32 h=exposure?1u:output?e.outputHeight:e.inputHeight;
                 auto* d=MTL::TextureDescriptor::texture2DDescriptor(toMetalFormat(metalfx_denoise::Formats[i]),w,h,false);
@@ -243,6 +246,11 @@ struct MetalfxDenoise::Impl {
                 auto* d=MTL4::ArgumentTableDescriptor::alloc()->init();d->setMaxBufferBindCount(1);
                 NS::Error* error=nullptr;slot.clearTable=context.device()->newArgumentTable(d,&error);d->release();
                 if(!slot.clearTable)throw std::runtime_error("Denoised check clear argument table allocation failed");
+            }
+            if(!slot.restoreTable) {
+                auto* d=MTL4::ArgumentTableDescriptor::alloc()->init();d->setMaxBufferBindCount(1);d->setMaxTextureBindCount(2);
+                NS::Error* error=nullptr;slot.restoreTable=context.device()->newArgumentTable(d,&error);d->release();
+                if(!slot.restoreTable)throw std::runtime_error("Denoised radiance restore argument table allocation failed");
             }
         }
         if(!v.historyToken) {
@@ -288,6 +296,10 @@ struct MetalfxDenoise::Impl {
         if(!stats.deviceSupported){setStatus(Status::UnsupportedDevice,"Runtime/device does not support Metal4FX denoised");++stats.fallbackFrames;return;}
         if(!stats.factoryInstalled){setStatus(Status::MissingFactory,"PipelineCache denoised gateway is not installed; custom fallback");++stats.fallbackFrames;return;}
         if(!frameValid()){setStatus(Status::InvalidContract,"Invalid SDK extent/channel-space/matrix/exposure contract");++stats.fallbackFrames;return;}
+        if(f.preExposure!=1.0f&&options.sdkOutputScale==Options::OutputScale::Unverified) {
+            setStatus(Status::UnverifiedExposureMapping,"Nonunit pre-exposure requires an explicit SDK output-unit scalar/impulse fixture; custom fallback");
+            ++stats.fallbackFrames;return;
+        }
         auto& v=views[f.view];
         const metalfx_denoise::RequestKey desired{f.extent,pipelines.generation(),flags()};
         if(!v.desiredValid || !(desired==v.desired)) {
@@ -307,10 +319,12 @@ struct MetalfxDenoise::Impl {
             setStatus(v.pending.valid()?Status::Pending:Status::Settling,v.pending.valid()?"Denoised gateway request pending":"Denoised input/output extent settling");
             ++stats.fallbackFrames;return;
         }
-        if(!pipelines.compute(packHandle)||!pipelines.compute(clearHandle)){setStatus(Status::Pending,"Denoised guide-pack pipelines pending");++stats.fallbackFrames;return;}
+        if(!pipelines.compute(packHandle)||!pipelines.compute(clearHandle)||!pipelines.compute(restoreHandle)){setStatus(Status::Pending,"Denoised guide-pack/restore pipelines pending");++stats.fallbackFrames;return;}
         setStatus(Status::Ready,"");
-        GPUMetalfxDenoisePackParams pp{f.extent.inputWidth,f.extent.inputHeight,flags(),0,1.0f,0.002f,{0,0}};
+        GPUMetalfxDenoisePackParams pp{f.extent.inputWidth,f.extent.inputHeight,flags(),0,1.0f,0.002f,f.preExposure,0};
         auto slice=context.frameUploads().allocate(sizeof(pp));std::memcpy(slice.cpu,&pp,sizeof(pp));packParamsAddress=slice.gpu;
+        GPUMetalfxRestoreParams rp{f.extent.outputWidth,f.extent.outputHeight,1.0f/f.preExposure,0};
+        auto restore=context.frameUploads().allocate(sizeof(rp));std::memcpy(restore.cpu,&rp,sizeof(rp));restoreParamsAddress=restore.gpu;
     }
     bool sourceValid(const rg::RenderGraph& g,rg::TextureRef ref,Channel ch)const {
         if(!ref.valid()||ref.resource>=g.resources().size())return false;
@@ -341,7 +355,7 @@ struct MetalfxDenoise::Impl {
         using namespace rg;const auto e=frame.extent;auto& v=views[frame.view];auto& slot=v.slots[frame.slot];
         neutralRef=g.importTexture("MetalFX optional neutral guide",{Format::RGBA16Float,1,1},ImportContentsDefined);
         for(size_t i=0;i<ChannelCount;++i) {
-            const bool output=i==channelIndex(Channel::Output),exposure=i==channelIndex(Channel::Exposure);
+            const bool output=i==channelIndex(Channel::Output)||i==channelIndex(Channel::RestoredOutput),exposure=i==channelIndex(Channel::Exposure);
             packedRefs[i]=g.importTexture(std::string(metalfx_denoise::Names[i]),{metalfx_denoise::Formats[i],
                 exposure?1u:output?e.outputWidth:e.inputWidth,exposure?1u:output?e.outputHeight:e.inputHeight},ImportPerFrame|ImportOutput);
         }
@@ -369,7 +383,7 @@ struct MetalfxDenoise::Impl {
             if(options.reactiveMask)b.read(inputs.reactiveMask,Usage::ShaderRead,StageDispatch);
             if(options.strengthMask)b.read(inputs.strengthMask,Usage::ShaderRead,StageDispatch);
             b.read(counterRef,Usage::ShaderRead,StageDispatch);counterRef=b.write(counterRef,Usage::ShaderWrite,StageDispatch);
-            for(size_t i=0;i<ChannelCount;++i)if(i!=channelIndex(Channel::Depth)&&i!=channelIndex(Channel::Output))
+            for(size_t i=0;i<channelIndex(Channel::Output);++i)if(i!=channelIndex(Channel::Depth))
                 packedRefs[i]=b.write(packedRefs[i],Usage::ShaderWrite,StageDispatch);
             b.setProfileShaders("denoise_pack");
         },[this](PassContext& ctx){encodePack(ctx);});
@@ -378,7 +392,18 @@ struct MetalfxDenoise::Impl {
             b.read(historyRef,Usage::ShaderRead,StageExternal);historyRef=b.write(historyRef,Usage::ShaderWrite,StageExternal);
             packedRefs[channelIndex(Channel::Output)]=b.write(packedRefs[channelIndex(Channel::Output)],Usage::ShaderWrite,StageExternal);
         },[this](PassContext& ctx){encodeEffect(ctx);});
-        graphNative=true;return packedRefs[channelIndex(Channel::Output)];
+        g.addPass("MetalFX physical radiance restore",PassType::Compute,[&](PassBuilder& b){
+            b.read(packedRefs[channelIndex(Channel::Output)],Usage::ShaderRead,StageDispatch);
+            packedRefs[channelIndex(Channel::RestoredOutput)]=b.write(packedRefs[channelIndex(Channel::RestoredOutput)],Usage::ShaderWrite,StageDispatch);
+            b.setProfileShaders("denoise_restore_radiance");
+        },[this](PassContext& ctx){
+            auto& slot=views[frame.view].slots[frame.slot];auto* t=slot.restoreTable;
+            t->setAddress(restoreParamsAddress,0);t->setTexture(slot.textures[channelIndex(Channel::Output)]->gpuResourceID(),0);
+            t->setTexture(slot.textures[channelIndex(Channel::RestoredOutput)]->gpuResourceID(),1);
+            auto* enc=static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder());enc->setComputePipelineState(pipelines.compute(restoreHandle));enc->setArgumentTable(t);
+            enc->dispatchThreads(MTL::Size::Make(frame.extent.outputWidth,frame.extent.outputHeight,1),MTL::Size::Make(8,8,1));
+        });
+        graphNative=true;return packedRefs[channelIndex(Channel::RestoredOutput)];
     }
     void encodePack(rg::PassContext& ctx) {
         auto& slot=views[frame.view].slots[frame.slot];auto* t=slot.table;

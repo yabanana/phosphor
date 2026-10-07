@@ -47,3 +47,15 @@ TEST_CASE("F13 channel split preserves signed world normal and linear roughness"
     CHECK(format(Channel::Roughness)==rg::Format::R16Float);
     CHECK(format(Channel::Motion)==rg::Format::RG32Float);
 }
+TEST_CASE("F13 explicit pre-exposure scaling restores physical wide HDR units") {
+    const glm::vec3 physical(368640,128,64);constexpr float scale=1.f/64.f;
+    const auto packed=scaleInputRadiance(physical,scale);
+    CHECK(packed==glm::vec3(5760,2,1));
+    CHECK(restorePreExposedRadiance(packed,scale)==physical);
+    GuideSample s;s.color=physical;
+    CHECK(validateSample(s)&ColorError);
+    CHECK_FALSE(validateSample(s,0.002f,scale)&ColorError);
+    s.color.x=MaximumHalf*128.f;CHECK(validateSample(s,0.002f,scale)&ColorError);
+    CHECK(format(Channel::RestoredOutput)==rg::Format::RGBA32Float);
+    // Closed-form pack/restore identity is NOT evidence of SDK output units.
+}

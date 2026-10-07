@@ -26,7 +26,9 @@ public:
         std::function<void(Scaler)> retire;
     };
     struct Options {
+        enum class OutputScale : u8 { Unverified,PreExposed };
         bool enabled=false, reactiveMask=true, specularHitDistance=false, strengthMask=false;
+        OutputScale sdkOutputScale=OutputScale::Unverified;
         u32 views=1,resizeSettleFrames=4;
     };
     struct Frame {
@@ -43,7 +45,7 @@ public:
         rg::TextureRef hitDistance{},reactiveMask{},strengthMask{},customFallback{};
     };
     enum class Status : u8 { Disabled,MissingSDK,UnsupportedDevice,MissingFactory,InvalidContract,
-                            Settling,Pending,FactoryRejected,UsageRejected,Ready };
+                            Settling,Pending,FactoryRejected,UsageRejected,UnverifiedExposureMapping,Ready };
     struct Stats {
         bool requested=false,sdkAvailable=false,deviceSupported=false,factoryInstalled=false;
         u64 requests=0,encodedFrames=0,fallbackFrames=0,resets=0,discardedRequests=0;

@@ -41,17 +41,17 @@ struct Extent {
     const float x=float(e.outputWidth)/float(e.inputWidth),y=float(e.outputHeight)/float(e.inputHeight);
     return x>=minimumScale && x<=maximumScale && y>=minimumScale && y<=maximumScale;
 }
-enum class Channel : u8 { Color,Depth,Motion,DiffuseAlbedo,SpecularAlbedo,Normal,Roughness,HitDistance,Reactive,Strength,Exposure,Output,Count };
+enum class Channel : u8 { Color,Depth,Motion,DiffuseAlbedo,SpecularAlbedo,Normal,Roughness,HitDistance,Reactive,Strength,Exposure,Output,RestoredOutput,Count };
 inline constexpr std::array<rg::Format,size_t(Channel::Count)> Formats{
     rg::Format::RGBA16Float,rg::Format::Depth32Float,rg::Format::RG32Float,
     rg::Format::RGBA16Float,rg::Format::RGBA16Float,rg::Format::RGBA16Float,
     rg::Format::R16Float,rg::Format::R32Float,rg::Format::R8Unorm,rg::Format::R8Unorm,
-    rg::Format::R16Float,rg::Format::RGBA16Float};
+    rg::Format::R16Float,rg::Format::RGBA16Float,rg::Format::RGBA32Float};
 inline constexpr std::array<std::string_view,size_t(Channel::Count)> Names{
     "MetalFX noisy linear color","MetalFX reverse-Z depth","MetalFX input-pixel motion",
     "MetalFX diffuse albedo","MetalFX Fresnel specular albedo","MetalFX signed world normal",
     "MetalFX linear roughness","MetalFX world specular distance","MetalFX reactive mask",
-    "MetalFX skip-denoise mask","MetalFX unit exposure","MetalFX denoised HDR output"};
+    "MetalFX skip-denoise mask","MetalFX unit exposure","MetalFX denoised HDR output","MetalFX restored physical radiance"};
 [[nodiscard]] inline rg::Format format(Channel c){return Formats[size_t(c)];}
 [[nodiscard]] inline std::string_view name(Channel c){return Names[size_t(c)];}
 inline constexpr float MaximumHalf=65504.f;
@@ -62,10 +62,11 @@ struct GuideSample {
 };
 enum Error : u32 { ColorError=1,NormalError=2,AlbedoError=4,RoughnessError=8,MotionError=16,HitError=32,MaskError=64,DepthError=128 };
 [[nodiscard]] inline bool finite(glm::vec3 v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z);}
-[[nodiscard]] inline u32 validateSample(const GuideSample& s,float normalTolerance=0.002f) {
+[[nodiscard]] inline u32 validateSample(const GuideSample& s,float normalTolerance=0.002f,float colorScale=1) {
     u32 result=0;
-    if(!finite(s.color)||glm::any(glm::lessThan(s.color,glm::vec3(0)))||
-       glm::any(glm::greaterThan(s.color,glm::vec3(MaximumHalf))))result|=ColorError;
+    const auto packed=s.color*colorScale;
+    if(!std::isfinite(colorScale)||colorScale<=0||!finite(packed)||glm::any(glm::lessThan(packed,glm::vec3(0)))||
+       glm::any(glm::greaterThan(packed,glm::vec3(MaximumHalf))))result|=ColorError;
     if(!std::isfinite(s.depth)||s.depth<0||s.depth>1)result|=DepthError;
     if(s.depth>0 && (!finite(s.normal)||std::abs(glm::dot(s.normal,s.normal)-1)>normalTolerance))result|=NormalError;
     if(!finite(s.diffuseAlbedo)||!finite(s.specularAlbedo)||
@@ -81,6 +82,10 @@ enum Error : u32 { ColorError=1,NormalError=2,AlbedoError=4,RoughnessError=8,Mot
 // Keep the existing validated F8 adapter convention: scale=(1,1), same jitter.
 [[nodiscard]] inline glm::vec2 sdkMotionScale(){return {1,1};}
 [[nodiscard]] inline glm::vec2 sdkJitter(glm::vec2 rasterDisplacement){return rasterDisplacement;}
+[[nodiscard]] inline glm::vec3 scaleInputRadiance(glm::vec3 physical,float preExposure){return physical*preExposure;}
+// This mapping applies ONLY if the tester confirms SDK output preserves the
+// input pre-exposure scale. It is not inferred from the SDK's input-division API.
+[[nodiscard]] inline glm::vec3 restorePreExposedRadiance(glm::vec3 sdkOutput,float preExposure){return sdkOutput/preExposure;}
 
 // A portable selection model for request supersession/lifecycle tests; an old
 // future result is never installed merely because its view ID matches.

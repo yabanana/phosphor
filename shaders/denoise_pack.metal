@@ -51,7 +51,7 @@ kernel void denoise_pack(constant GPUMetalfxDenoisePackParams& p [[buffer(0)]],
     if(any(pixel>=uint2(p.width,p.height)))return;
     uint pixels=simd_sum(1u);
     if(lane==0u)atomic_fetch_add_explicit(counters,pixels,memory_order_relaxed);
-    float3 C=color.read(pixel).rgb,N=normal.read(pixel).xyz,D=diffuse.read(pixel).rgb,S=specular.read(pixel).rgb;
+    float3 C=color.read(pixel).rgb*p.colorScale,N=normal.read(pixel).xyz,D=diffuse.read(pixel).rgb,S=specular.read(pixel).rgb;
     float r=roughness.read(pixel).x,z=depth.read(pixel).x;
     float2 mv=motion.read(pixel).xy;
     bool colorBad=!all(isfinite(C))||any(C<0.0f)||any(C>65504.0f);
@@ -90,4 +90,13 @@ kernel void denoise_split_roughness(constant GPUVisibilityParams& p [[buffer(0)]
     texture2d<float,access::read> normalRoughness [[texture(0)]],texture2d<float,access::write> output [[texture(1)]],
     uint2 pixel [[thread_position_in_grid]]) {
     if(any(pixel>=uint2(p.width,p.height)))return;output.write(float4(normalRoughness.read(pixel).w),pixel);
+// Scalar/impulse SDK output-unit fixture is mandatory before selecting the
+// PreExposed output policy. Input0 is SDK half output, output1 is physical
+// linear RGBA32Float. Exposure texture remains1; no tone exposure is applied.
+kernel void denoise_restore_radiance(constant GPUMetalfxRestoreParams& p [[buffer(0)]],
+                                     texture2d<float,access::read> sdkOutput [[texture(0)]],
+                                     texture2d<float,access::write> physicalOutput [[texture(1)]],
+                                     uint2 pixel [[thread_position_in_grid]]) {
+    if(any(pixel>=uint2(p.width,p.height)))return;
+    physicalOutput.write(float4(sdkOutput.read(pixel).rgb*p.inversePreExposure,1),pixel);
 }

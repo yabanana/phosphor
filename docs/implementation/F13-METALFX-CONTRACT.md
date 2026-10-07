@@ -62,7 +62,7 @@ texture usage checks are mandatory on the actual device.
 
 | Channel | Packed format | Data |
 |---|---|---|
-| Color | RGBA16Float | complete noisy linear HDR radiance, composed ONCE |
+| Color | RGBA16Float | complete noisy linear radiance * declared preExposure, composed ONCE |
 | Depth | Depth32Float | reverse-Z, far0; exact active rectangle copied by Blit |
 | Motion | RG32Float | current to previous INPUT pixels, +Y down, unjittered |
 | Diffuse albedo | RGBA16Float | material diffuse factor; dark for metallic surfaces |
@@ -73,7 +73,8 @@ texture usage checks are mandatory on the actual device.
 | Reactive | R8Unorm | optional1 suppresses temporal history |
 | Strength | R8Unorm | optional1 skips denoising; differs from reactive |
 | Exposure | R16Float1x1 | fixed1, keeping the before-Post exposure HDR signal |
-| Output | RGBA16Float/private | denoised, reconstructed linear HDR |
+| SDK output | RGBA16Float/private | denoised, reconstructed; output scale requires scalar fixture |
+| Returned output | RGBA32Float/private | physical linear radiance restored by1/preExposure |
 
 No gamma/tonemap, normal0.5 remapping, roughness square, albedo/radiance mixing
 or input-pixel motion rescaling occurs. Motion scales are1/1. F8's current
@@ -88,12 +89,24 @@ No backing-sized DRS texture is assigned as if it had a smaller active region.
 The adapter does not call the guessed denoised descriptor dynamic-content
 setters present in metal-cpp but absent from the configured Objective-C header.
 
-Colour outside finite nonnegative half range is reported, not accepted. Pack
+Colour outside finite nonnegative half range AFTER declared preExposure scaling is reported, not accepted. Pack
 repairs protect finite SDK inputs but any repair fails the readback predicate.
 Exposure/preExposure must match actual source multiplication; default1 consumes
 unexposed raw radiance. Optional hit distance defaults DISABLED until real
 RT/SSR/miss conventions are checked; unavailable/unknown hit distances must not
 be fabricated from camera depth.
+
+Wide-HDR normalization is explicit: pack multiplies physical noisy color by
+Frame.preExposure BEFORE half-range validation, unit exposure texture stays1,
+the SDK receives the same preExposure scalar, and a separate PipelineCache
+compute pass copies SDK half output into physical RGBA32Float by1/preExposure.
+The public [preExposure documentation](https://developer.apple.com/documentation/metalfx/mtlfxtemporaldenoisedscalerbase/preexposure)
+specifies input division by the declared multiplier; it does not expressly
+guarantee output scale. Options.sdkOutputScale therefore defaults Unverified.
+Nonunit scaling under that default selects custom fallback with an explicit
+output-unit diagnostic. PreExposed is an experimental declaration requiring
+the tester's independent constant/impulse SDK roundtrip before adoption.
+F14's1/64 normalization is a declared experiment, not an observed result.
 
 ## API and graph integration
 
@@ -139,6 +152,9 @@ Pass order and declared accesses:
    history anchor and writes output. PassContext supplies borrowed MTL4 command
    buffer/fence; the framework waits/updates that fence. No unmanaged encoder
    boundary or async queue shortcut is introduced.
+5. denoise_restore_radiance Compute reads SDK output and writes physical
+   RGBA32Float; root Post consumes this returned signal without another
+   pre-exposure undo or standard temporal pass.
 
 The token is a graph dependency anchor for OPAQUE framework state, not a fake
 GPU data representation of its history. StageExternal provides the conservative
@@ -153,6 +169,8 @@ strength17/exposure18. Inactive optional sources bind a defined neutral texture;
 their disabled branches do not read active image coordinates from that1x1 data.
 Counter fields: pixels/color/normal/albedo/roughness/motion/distance/mask errors.
 Pixel counts reduce per SIMD group; error counters are sparse object errors.
+Restore ABI is GPUMetalfxRestoreParams buffer0, SDK output texture0, physical
+RGBA32Float destination1. It has its own per-view/per-slot argument table.
 
 ## View, resize, hot reload and lifetime
 
@@ -196,6 +214,8 @@ Required tests after reconciliation:
 - Pixel motion/jitter/matrices, camera rotation/cut, reflection roughness,
   emissive/sun/light movement, disocclusion, dynamic objects,4 views, resize,
   repeated input/output extent change, hot reload and scene switching.
+- Wide-HDR constant/impulse inputs at preExposure1 and1/64, actual SDK output
+  scale, physical post-restore identity and overflow rejection AFTER scaling.
 - Bad normal encoding, motion sign/scale, roughness squaring, isolated-signal
   color, corrupted guide, missing valid specular distance MUST fail controls.
 - API/shader validation, final readback drain, leak/lifetime/capture paths and
