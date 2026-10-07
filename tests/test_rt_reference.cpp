@@ -330,3 +330,26 @@ TEST_CASE("RT descriptor eligibility masks invalid material degenerate and nonfi
     ref.setInstances(std::span(&i, 1));
     CHECK_FALSE(ref.any(ray())); // Descriptor float determinant overflows.
 }
+
+TEST_CASE("RT barycentric failure reports geometric diagnostics without relaxing acceptance") {
+    RtReference ref;
+    geometry(ref);
+    auto i = instance();
+    ref.setInstances(std::span(&i, 1));
+    const auto r = ray(0.5f, 0);
+    auto forged = ref.nearest(r).gpu();
+    forged.u += 0.01f;
+    const auto check = ref.check(r, forged);
+    CHECK_FALSE(check.ok);
+    CHECK(check.error.starts_with("barycentric mismatch:"));
+    for (const char* field : {"cpu_uv=", "gpu_uv=", "abs_delta_uv=", "bary_tolerance=", "cpu_t=", "gpu_t=",
+                              "edge_max_world=", "altitude_min_world=", "incidence_cos=",
+                              "spatial_residual_world=", "bary_displacement_world=", "ray_perpendicular_residual_world=",
+                              "coordinate_scale_world=", "fp32_ulp_world="})
+        CHECK(check.error.find(field) != std::string::npos);
+    // This known perturbation moves the reconstructed point by 0.02 world units.
+    const auto key = check.error.find("bary_displacement_world=");
+    REQUIRE(key != std::string::npos);
+    CHECK(std::stod(check.error.substr(key + std::string("bary_displacement_world=").size())) == doctest::Approx(0.02).epsilon(1e-5));
+    CHECK_FALSE(ref.check(r, forged, {}, 2e-4, 1e-5).ok);
+}
