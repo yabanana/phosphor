@@ -48,6 +48,8 @@ struct MetalfxDenoiseFixture::Impl {
         MTL4::ArgumentTable *generate=nullptr,*depth=nullptr,*readback=nullptr;
         u32 width=0,height=0,outWidth=0,outHeight=0;bool pending=false;
         GPUFXFixtureParams tag{};u64 frame=0;u32 view=0,shaderGeneration=0;bool steady=false;
+        u64 inputSignalEpoch=0,signalEpoch=0,sdkResetsBefore=0,sdkEncodesBefore=0,sdkEncodeDelta=0;
+        bool requestedReset=false,requestedCut=false,channelsWrap=false,sdkResetSubmitted=false;
     };
     std::array<std::array<Slot,METAL_FRAMES_IN_FLIGHT>,HistoryRegistry::MaxViews> slots{};
     std::array<rg::TextureRef,InputCount> refs{};rg::TextureRef sdk{},physical{};
@@ -147,9 +149,15 @@ struct MetalfxDenoiseFixture::Impl {
         frame.worldToView={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
         const float f=1.7320508075688772f,aspect=float(source.extent.outputWidth)/source.extent.outputHeight;
         frame.viewToClip={f/aspect,0,0,0,0,f,0,0,0,0,0,-1,0,0,.1f,0};frame.jitterPixels={0,0};
-        frame.signalEpoch=source.signalEpoch+u64(source.index/48u)+1;
-        frame.reset=source.reset||source.index%48u==0;
+        // A modulo wrap replaces the authored signal without a motion-vector
+        // correspondence. Invalidate that known source change once; ordinary
+        // one-pixel motion keeps temporal history, as in production.
+        const auto history=fxFixtureHistoryPolicy(params.scenario,source.index,params.width,source.signalEpoch,source.reset);
+        frame.signalEpoch=history.signalEpoch;frame.reset=history.reset;
         auto& slot=slots[frame.view][frame.slot];reserve(slot);
+        slot.inputSignalEpoch=source.signalEpoch;slot.signalEpoch=frame.signalEpoch;slot.requestedReset=frame.reset;
+        slot.requestedCut=frame.cut;slot.channelsWrap=history.channelsWrap;slot.steady=history.steady;
+        slot.sdkResetsBefore=adapter->stats().resets;slot.sdkEncodesBefore=adapter->stats().encodedFrames;
         auto slice=c.frameUploads().allocate(sizeof(params));std::memcpy(slice.cpu,&params,sizeof(params));paramsAddress=slice.gpu;
         adapter->prepareFrame(frame);finishCalled=false;
         if(!prewarmAttempted) {
@@ -213,7 +221,11 @@ struct MetalfxDenoiseFixture::Impl {
             for(u32 i=0;i<packed.size();++i)t->setTexture(static_cast<MTL::Texture*>(ctx.texture(packed[i]))->gpuResourceID(),i+9);
             auto* e=static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder());e->setComputePipelineState(p.compute(readback));e->setArgumentTable(t);
             e->dispatchThreads(MTL::Size::Make(std::max(4u,params.outputWidth*params.outputHeight),1,1),MTL::Size::Make(32,1,1));
-            s.tag=params;s.frame=frame.index;s.view=frame.view;s.shaderGeneration=p.generation();s.pending=true;s.steady=frame.index%48u>=8u;++nativeFrames;
+            // These counters advance in the actual SDK encoding callback,
+            // after setShouldResetHistory(reset) and encodeToCommandBuffer.
+            s.sdkEncodeDelta=adapter->stats().encodedFrames-s.sdkEncodesBefore;
+            s.sdkResetSubmitted=adapter->stats().resets==s.sdkResetsBefore+1u;
+            s.tag=params;s.frame=frame.index;s.view=frame.view;s.shaderGeneration=p.generation();s.pending=true;++nativeFrames;
             capturedViews|=1u<<frame.view;
             if(std::find(capturedExtents.begin(),capturedExtents.end(),frame.extent)==capturedExtents.end())capturedExtents.push_back(frame.extent);
             if(std::find(capturedGenerations.begin(),capturedGenerations.end(),s.shaderGeneration)==capturedGenerations.end())capturedGenerations.push_back(s.shaderGeneration);
@@ -264,7 +276,8 @@ struct MetalfxDenoiseFixture::Impl {
                 if(s.tag.preExposure==1)pair.unit.assign(sdkImage.begin(),sdkImage.end());else pair.scaled.assign(sdkImage.begin(),sdkImage.end());
                 if(!pair.unit.empty()&&!pair.scaled.empty()){pair.result=compareFXScaledPair(pair.unit,pair.scaled,1.f/64);pair.checked=true;}
             }
-            const bool pass=finite&&channelPass&&constantPass;if(!pass)++failures;++checkedFrames;if(s.steady)++steadyFrames;all=all&&pass;
+            const bool historyPass=s.sdkEncodeDelta==1u&&(!(s.requestedReset||s.requestedCut)||s.sdkResetSubmitted);
+            const bool pass=finite&&channelPass&&constantPass&&historyPass;if(!pass)++failures;++checkedFrames;if(s.steady)++steadyFrames;all=all&&pass;
             std::ostringstream stem;stem<<"frame-"<<std::setw(6)<<std::setfill('0')<<s.frame<<"-view-"<<s.view;
             std::filesystem::create_directories(options.outputDirectory);
             const auto base=std::filesystem::path(options.outputDirectory)/stem.str();
@@ -276,6 +289,10 @@ struct MetalfxDenoiseFixture::Impl {
             out<<"{\"schema\":\"phosphor.metalfx-fixture.v1\",\"kind\":\"f13-sdk\",\"actual_sdk_encoded\":true,\"frame\":"<<s.frame
                <<",\"view\":"<<s.view<<",\"slot\":"<<index<<",\"scenario\":"<<quote(options.scenario)<<",\"preExposure\":"<<s.tag.preExposure<<exposureMetadata()
                <<",\"steady\":"<<(s.steady?"true":"false")<<",\"finite\":"<<(finite?"true":"false")<<",\"channels_passed\":"<<(channelPass?"true":"false")
+               <<",\"requested_history_reset\":"<<(s.requestedReset?"true":"false")<<",\"requested_camera_cut\":"<<(s.requestedCut?"true":"false")
+               <<",\"input_signal_epoch\":"<<s.inputSignalEpoch<<",\"source_signal_epoch\":"<<s.signalEpoch
+               <<",\"channels_wrap\":"<<(s.channelsWrap?"true":"false")<<",\"sdk_reset_submitted\":"<<(s.sdkResetSubmitted?"true":"false")
+               <<",\"sdk_encode_delta\":"<<s.sdkEncodeDelta<<",\"history_hint_passed\":"<<(historyPass?"true":"false")
                <<",\"restored_passed\":"<<(constant.restored?"true":"false")<<",\"sdk_preexposed_hypothesis\":"<<(constant.preExposed?"true":"false")
                <<",\"sdk_physical_hypothesis\":"<<(constant.physical?"true":"false")<<",\"restored_relative_error\":"<<number(constant.restoredRelativeError)
                <<",\"input_width\":"<<s.tag.width<<",\"input_height\":"<<s.tag.height<<",\"output_width\":"<<s.tag.outputWidth<<",\"output_height\":"<<s.tag.outputHeight

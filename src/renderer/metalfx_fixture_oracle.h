@@ -3,10 +3,29 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <span>
 #include <stdexcept>
 
 namespace phosphor {
+struct FXFixtureHistoryPolicy {
+    u64 signalEpoch=0;
+    bool reset=false,channelsWrap=false,steady=false;
+};
+inline FXFixtureHistoryPolicy fxFixtureHistoryPolicy(u32 scenario,u64 frame,u32 width,u64 sourceEpoch,bool sourceReset) {
+    const bool channels=scenario==FX_FIXTURE_CHANNELS;
+    if(channels&&width<2)throw std::invalid_argument("invalid channel fixture period");
+    const u64 period=std::max(1u,width/2u),wraps=channels?frame/period:0;
+    const u64 phaseEpoch=frame/48u+1u;
+    if(wraps>std::numeric_limits<u64>::max()-phaseEpoch||sourceEpoch>std::numeric_limits<u64>::max()-phaseEpoch-wraps)
+        throw std::invalid_argument("SDK fixture signal epoch overflow");
+    FXFixtureHistoryPolicy result;
+    result.channelsWrap=channels&&frame>0&&frame%period==0;
+    result.signalEpoch=sourceEpoch+phaseEpoch+wraps;
+    result.reset=sourceReset||frame%48u==0||result.channelsWrap;
+    result.steady=frame%48u>=8u&&(!channels||frame%period>=8u);
+    return result;
+}
 struct FXConstantComparison {
     bool finite=true,preExposed=false,physical=false,restored=false;
     double preExposedRelativeError=0,physicalRelativeError=0,restoredRelativeError=0;
