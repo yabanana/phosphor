@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "frozen_before_candidate_read": true,
+  "snapshot_sha256": "9ea09eae5e426c449791b43c38bc3521a223e0708442861f3a4e923e1f5d237f",
+  "source_script_sha256": "c34de7a88a324b4a50987c26297c3c00e32b5076cad040f26aa6bb57119b537a",
+  "signal": "linear indirect diffuse reflected radiance; signed reference; unscaled candidate",
+  "reference": {
+    "renderer": "Mitsuba 3.9.1 scalar_rgb CPU",
+    "full_depth": -1,
+    "direct_depth": 2,
+    "rr_depth": 5,
+    "seeds": [1234, 5678],
+    "spp_checkpoints": [64, 256, 1024, 4096, 16384, 65536],
+    "convergence_relative_rmse": 0.02,
+    "convergence_rule": "independent-seed references at the same SPP must agree within gate on combined interior and every ROI; previous checkpoints retained; mean of final two seeds is reference",
+    "depth_check": "compare depth8 and unlimited with identical seed/SPP; report truncation, do not silently call depth8 full transport",
+    "validation": ["camera rays and near clip", "PLY winding and world transforms", "emitter area and Le; no duplicate extracted triangles", "UV repeat and half-filter arithmetic", "zero-indirect fixture and emission linearity", "native constant texture specialization only for exact constant semantics"]
+  },
+  "regions": {
+    "definition": "nearest geometric primary hit instance labels, front facing; Chebyshev erosion radius2; discard background/emitter; at least16 pixels per ROI",
+    "slots": {"floor": 0, "back": 2, "red_wall": 3, "green_wall": 4, "short_box": 64, "tall_box": 65},
+    "minimum_pixels": 16,
+    "erode_pixels": 2,
+    "leak": "eroded floor pixels whose segment to geometric emitter centre is occluded by either box; no radiance-dependent selection"
+  },
+  "candidate": {
+    "variants": ["ddgi", "cache", "restir"],
+    "frames": {"first": 256, "last_exclusive": 512, "step": 8},
+    "summary": "arithmetic temporal mean, 32 captures; report per-frame error and temporal spread separately",
+    "roi_relative_rmse_max": 0.30,
+    "roi_absolute_relative_luminance_bias_max": 0.20,
+    "leak_positive_mean_over_reference_interior_mean_max": 0.10,
+    "leak_positive_p95_over_reference_interior_mean_max": 0.25,
+    "finite_and_nonnegative": true,
+    "no_exposure_fit_or_rescaling": true
+  },
+  "future_dynamic_recovery": {
+    "state": "NOT_EXECUTED_BY_STATIC_CORNELL",
+    "frames": [0, 1, 8, 32, 128],
+    "max_recovery_frames": 128,
+    "rule": "by frame128 meet static ROI gates against new-state reference and old-state residual <=10% of the old/new reference change; require nonzero measurable change",
+    "scenarios": ["moving_sun", "emissive_toggle_or_move", "disocclusion", "probe_inside_wall", "thin_wall_leak"]
+  },
+  "failure_policy": "preserve failed checkpoints and gates; no threshold or ROI changes after opening candidates; oracle nonconvergence blocks strict quality claims; static Cornell is not complete phase acceptance"
+}
