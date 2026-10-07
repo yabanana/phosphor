@@ -392,7 +392,7 @@ pipe::PipelineHandle PipelineCache::request(const pipe::PipelineDesc& desc, bool
         drain();
         const float ms = msSince(start);
         if (startupDone_ && !registry_.isFinal(handle)) LOG_ERROR("Pipeline %s failed", desc.label.c_str());
-        // An archive hit is not a compile: only count real compiler work.
+        // Only a direct archive hit avoids a compiler API invocation.
         if (startupDone_ && registry_.stats().compilerCalls != callsBefore) registry_.recordRenderThreadCompile(ms);
         return handle;
     }
@@ -429,10 +429,15 @@ void PipelineCache::resolve(pipe::PipelineHandle handle, const pipe::PipelineDes
     done.handle     = handle;
     done.generation = generation;
     done.archive    = archive_ ? pipe::ArchiveOutcome::Miss : pipe::ArchiveOutcome::Unavailable;
-    if (serializer_) done.archive = pipe::ArchiveOutcome::NotTried;
+    const bool linkedCompute = desc.kind == pipe::PipelineKind::Compute && !desc.linkedFunctions.empty();
+    // The direct Archive static-link path retained a linked function in the
+    // F9 lifetime checks. Route only linked compute pipelines through Compiler;
+    // lookupArchives is an optional cache hint, whose hit state is not exposed.
+    // Report the actual compiler API call below, never an inferred archive hit.
+    if (serializer_ || linkedCompute) done.archive = pipe::ArchiveOutcome::NotTried;
 
-    // 1. Archive (F3.4): no compilation at all on a hit.
-    if (archive_ && !options_.fallbackOnly) {
+    // 1. Archive (F3.4): no compiler API invocation on a direct hit.
+    if (archive_ && !options_.fallbackOnly && !linkedCompute) {
         NS::Error* error = nullptr;
         if (NS::Object* object = archiveLookup(desc, library, &error)) {
             done.object  = toOpaque(object);
@@ -512,14 +517,21 @@ void PipelineCache::resolve(pipe::PipelineHandle handle, const pipe::PipelineDes
 NS::Object* PipelineCache::compileFinal(const pipe::PipelineDesc& desc, MTL::Library* library, NS::Error** error) {
     PH_ZONE("Pipeline compile");
     PH_ZONE_TEXT(desc.label.c_str(), desc.label.size());
-    MTL4::PipelineDescriptor* d = buildDescriptor(desc, library);
+    auto d = NS::TransferPtr(buildDescriptor(desc, library));
     NS::Object* object = nullptr;
     if (desc.kind == pipe::PipelineKind::Compute) {
-        object = compiler_->newComputePipelineState(static_cast<MTL4::ComputePipelineDescriptor*>(d), nullptr, error);
+        NS::SharedPtr<MTL4::CompilerTaskOptions> task;
+        if (!desc.linkedFunctions.empty() && archive_ && !serializer_) {
+            task = NS::TransferPtr(MTL4::CompilerTaskOptions::alloc()->init());
+            if (!task) throw std::runtime_error("Failed to create compiler archive-lookup options");
+            // Public compiler cache hint. The task copies the array; its
+            // autoreleased reference is drained by resolve()'s autorelease pool.
+            task->setLookupArchives(NS::Array::array(archive_));
+        }
+        object = compiler_->newComputePipelineState(static_cast<MTL4::ComputePipelineDescriptor*>(d.get()), task.get(), error);
     } else {
-        object = compiler_->newRenderPipelineState(d, nullptr, error);
+        object = compiler_->newRenderPipelineState(d.get(), nullptr, error);
     }
-    d->release();
     return object;
 }
 
