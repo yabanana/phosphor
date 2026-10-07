@@ -543,7 +543,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if(*v=="hdr")out.captureLinearSignal=0;
             else if(*v=="indirect-diffuse")out.captureLinearSignal=1;
             else if(*v=="direct")out.captureLinearSignal=2;
-            else if(*v=="specular")out.captureLinearSignal=3;else if(*v=="ao")out.captureLinearSignal=4;
+            else if(*v=="specular")out.captureLinearSignal=6;else if(*v=="ao")out.captureLinearSignal=7;
             else{error="--capture-linear-signal: expected hdr, indirect-diffuse, direct, specular or ao";return false;}
         } else if (arg == "--export-reference-frame") {
             if(!needCount(out.exportReferenceFrame))return false;
@@ -1036,8 +1036,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
         error = "RT sun, local visibility and GI require --rt on"; return false;
     }
     if(!out.reflectionScene.empty() && (!out.bench||*out.bench!=5||!out.lightingScene.empty())){error="--reflection-scene requires --bench 6 and exclusive scene fixture";return false;}
-    if(out.captureLinearSignal==3 && out.reflections==ReflectionMode::Off){error="Specular capture requires --reflections";return false;}
-    if(out.captureLinearSignal==4 && out.ao==AoMode::Off){error="AO capture requires --ao";return false;}
+    if(out.captureLinearSignal==6 && out.reflections==ReflectionMode::Off){error="Specular capture requires --reflections";return false;}
+    if(out.captureLinearSignal==7 && out.ao==AoMode::Off){error="AO capture requires --ao";return false;}
     if(!out.lightingScene.empty() && (!out.bench || *out.bench!=5)){error="--lighting-scene requires --bench 6";return false;}
     if(!out.captureLinear.empty() && !out.captureLinearSequence.empty()){error="Choose single linear capture or linear sequence";return false;}
     if((!out.captureLinear.empty() || !out.captureLinearSequence.empty()) && (!out.visibility || !out.benchmark())){error="Linear capture requires --render-path visibility and --frames";return false;}

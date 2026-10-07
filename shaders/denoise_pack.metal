@@ -90,6 +90,7 @@ kernel void denoise_split_roughness(constant GPUVisibilityParams& p [[buffer(0)]
     texture2d<float,access::read> normalRoughness [[texture(0)]],texture2d<float,access::write> output [[texture(1)]],
     uint2 pixel [[thread_position_in_grid]]) {
     if(any(pixel>=uint2(p.width,p.height)))return;output.write(float4(normalRoughness.read(pixel).w),pixel);
+}
 // Scalar/impulse SDK output-unit fixture is mandatory before selecting the
 // PreExposed output policy. Input0 is SDK half output, output1 is physical
 // linear RGBA32Float. Exposure texture remains1; no tone exposure is applied.

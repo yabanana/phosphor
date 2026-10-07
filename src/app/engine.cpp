@@ -343,7 +343,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     if(!options_.exportReference.empty())referenceSnapshot_=std::make_unique<ReferenceSnapshot>(*context_,*renderer_,options_.exportReference,options_.exportReferenceFrame,rt_.get());
     if(!options_.captureLinear.empty()||!options_.captureLinearSequence.empty()) {
         LinearCapture::Config capture;capture.path=options_.captureLinear;capture.sequence=options_.captureLinearSequence;
-        capture.frame=options_.captureLinearFrame;capture.every=options_.captureEvery;
+        capture.frame=options_.captureLinearFrame;capture.every=options_.captureEvery;capture.scalar=options_.captureLinearSignal==7;
         linearCapture_=std::make_unique<LinearCapture>(*context_,*pipelines_,std::move(capture));
     }
     ecs_        = std::make_unique<ECS>();
@@ -1431,6 +1431,9 @@ bool Engine::frame(float dt) {
     if (renderWidth > 8192 || renderHeight > 8192)
         throw std::runtime_error("Internal render dimensions exceed the 8192-pixel Hi-Z limit");
     float effectiveExposure = settings_.exposure;
+    // Approximate clock metering is a display-only multiplier. Histogram auto
+    // exposure uses the actual physical HDR instead; never expose DI/GI/LUTs.
+    if(atmosphere_&&!options_.autoExposure)effectiveExposure*=std::clamp(std::exp2(-atmosphere_->exposureEv100()),1.0f/1024.0f,1024.0f);
     if (options_.exposureScript) {
         constexpr float factors[] = {0.25f, 1.0f, 4.0f, 1.0f};
         effectiveExposure *= factors[static_cast<u32>(sceneTime_ * 2) % 4];
@@ -1566,17 +1569,24 @@ bool Engine::frame(float dt) {
             rtVisibility_->prepareFrame(frame.slot, renderWidth, renderHeight, constants);
     }
     overlays_->prepareFrame(overlayMode_, constants.lightCount, width, height);
+    if(linearCapture_&&options_.captureLinearSignal>=6)pipelines_->waitAllFinal();
     if (shadows_) {
         ShadowPasses::Frame sf;sf.slot=frame.slot;sf.index=frame.index;sf.view=currentView_;sf.scene=sceneEpoch_;
         sf.width=renderWidth;sf.height=renderHeight;sf.backingWidth=renderBackingWidth_;sf.backingHeight=renderBackingHeight_;
-        sf.cut=viewCameraCut;sf.reset=options_.historyResetEvery && presentedFrames_%options_.historyResetEvery==0;
+        sf.cut=viewCameraCut;sf.reset=(options_.historyResetEvery && presentedFrames_%options_.historyResetEvery==0) || (atmosphere_&&atmosphere_->clockReset());
         sf.motionSinCos=motionSinCos_;sf.motionSinCosValid=true;
         sf.constants=constants;sf.nearPlane=camera_->getNear();std::memcpy(sf.unjitteredVP,&unjittered[0][0],64);
         shadows_->prepareFrame(*store_,lights_,sf);
         if(directLighting_)directLighting_->prepareFrame(*gpuScene_,*store_,lights_,sf);
         if(gi_)gi_->prepareFrame(*gpuScene_,*store_,lights_,sf);
+        if(store_->stats().structure||store_->stats().fullInstances||store_->stats().fullNodes||!store_->instanceDeltas().empty()||!store_->nodeDeltas().empty()||!store_->motionSlots().empty()||!store_->dirtyRoots().empty())++surfaceGeometryEpoch_;
+        if(store_->stats().fullMaterials||!store_->materialDeltas().empty())++surfaceMaterialEpoch_;
+        const GiEnvironment environment=atmosphere_?atmosphere_->environment():GiEnvironment{};
+        const auto lightEpoch=surfaceLightingEpoch_.update(lights_,environment,directLighting_?directLighting_->lightRevision():0);
+        const SurfaceSignal signal{sceneEpoch_,surfaceGeometryEpoch_,surfaceMaterialEpoch_,rt_?rt_->geometryRevision():gpuScene_->geometryVersion(),lightEpoch,pipelines_->generation()};
+        if(!(signal==previousSurfaceSignal_)){++surfaceSignalEpoch_;previousSurfaceSignal_=signal;}
         if(denoised_) {
-            MetalfxDenoise::Frame df;df.slot=sf.slot;df.view=sf.view;df.index=sf.index;df.signalEpoch=sf.scene;
+            MetalfxDenoise::Frame df;df.slot=sf.slot;df.view=sf.view;df.index=sf.index;df.signalEpoch=surfaceSignalEpoch_;
             df.extent={renderWidth,renderHeight,width,height};std::memcpy(df.worldToView.data(),constants.view,64);
             const auto projection=unjittered*glm::inverse(view);std::memcpy(df.viewToClip.data(),glm::value_ptr(projection),64);
             df.jitterPixels={temporal.jitter[0],temporal.jitter[1]};df.cut=sf.cut;df.reset=sf.reset;
@@ -1584,10 +1594,10 @@ bool Engine::frame(float dt) {
             denoised_->prepareFrame(df);
         }
         const bool custom=options_.lightingDenoise==LightingDenoiseMode::Custom || (denoised_&&!denoised_->ready());
-        if(reflections_)reflections_->prepareFrame(*store_,sf,custom,sceneEpoch_);
-        if(atmosphere_)atmosphere_->prepareFrame(sf,rt_?rt_->geometryRevision():gpuScene_->geometryVersion(),store_->structureVersion());
+        if(reflections_&&reflections_->ready())reflections_->prepareFrame(*store_,sf,custom,surfaceSignalEpoch_);
+        if(atmosphere_)atmosphere_->prepareFrame(sf,surfaceGeometryEpoch_,surfaceMaterialEpoch_);
         const u32 flags=(options_.shadows!=ShadowMode::Off?1u:0u) | (options_.directLighting!=DirectLightingMode::Legacy?2u:0u) | (options_.gi!=GiMode::Off?4u:0u) |
-                        (options_.reflections!=ReflectionMode::Off?8u:0u) | (reflections_?16u:0u);
+                        (options_.reflections!=ReflectionMode::Off && reflections_&&reflections_->ready()?8u:0u) | (reflections_&&reflections_->ready()?16u:0u);
         visibility_->prepareLighting(flags,shadows_->sunIndex());
     }
     if(referenceSnapshot_) {
@@ -1629,7 +1639,7 @@ bool Engine::frame(float dt) {
                        shadows_?shadows_->version():0,directLighting_?directLighting_->version():0,
                        gi_?gi_->version():0,referenceSnapshot_?referenceSnapshot_->version():0,
                        linearCapture_?linearCapture_->version():0,renderWidth,renderHeight,
-                       reflections_?reflections_->version():0,denoised_?denoised_->version():0,atmosphere_?atmosphere_->version():0};
+                       reflections_?reflections_->version():0,denoised_?denoised_->version():0,atmosphere_?atmosphere_->version():0,reflections_&&reflections_->ready()};
     if (!(key == graphKey_) || !graphExecutor_->valid()) {
         frameFlags_ |= FrameGraphCompile;
         if (key.width != graphKey_.width || key.height != graphKey_.height) frameFlags_ |= FrameResize;
@@ -1667,7 +1677,7 @@ bool Engine::frame(float dt) {
     if (shadows_) shadows_->bindFrame(*graphExecutor_);
     if (directLighting_)directLighting_->bindFrame(*graphExecutor_);
     if(gi_)gi_->bindFrame(*graphExecutor_);
-    if(reflections_)reflections_->bindFrame(*graphExecutor_);
+    if(graphKey_.reflectionReady)reflections_->bindFrame(*graphExecutor_);
     if(atmosphere_)atmosphere_->bindFrame(*graphExecutor_);
     if(denoised_)denoised_->bindFrame(*graphExecutor_);
     if(referenceSnapshot_)referenceSnapshot_->bindFrame(*graphExecutor_);
@@ -1690,6 +1700,7 @@ bool Engine::frame(float dt) {
         context_->submitFrame(frame);
     }
     slotFrame_[frame.slot]    = frame.index;
+    slotReflectionRecorded_[frame.slot]=graphKey_.reflectionReady;
     slotMeasured_[frame.slot] = measuring();
     if (measuring()) {
         const Clock::time_point s8 = Clock::now();
@@ -1934,7 +1945,7 @@ void Engine::onSceneCounters(u32 slot) {
     if(linearCapture_)linearCapture_->consume(slot);
     if(denoised_)for(const auto& check:denoised_->drainPackChecks())if(check.available&&!check.ok){++lightingFailures_;exitCode_=1;}
     if(shadows_ && options_.debugLighting && (slotFrame_[slot]+1)%options_.debugLighting==0) {
-        ++lightingChecks_;const bool pass=shadows_->check(slot) && (!directLighting_ || directLighting_->check(slot)) && (!gi_ || gi_->check(slot)) && (!reflections_ || reflections_->check(slot)) && (!atmosphere_ || atmosphere_->check(slot));
+        ++lightingChecks_;const bool pass=shadows_->check(slot) && (!directLighting_ || directLighting_->check(slot)) && (!gi_ || gi_->check(slot)) && (!slotReflectionRecorded_[slot] || reflections_->check(slot)) && (!atmosphere_ || atmosphere_->check(slot));
         if(!pass){++lightingFailures_;exitCode_=1;}
         std::printf("LIGHTING check frame %llu | %s\n",static_cast<unsigned long long>(slotFrame_[slot]),pass?"PASS":"FAIL");
     }
@@ -1972,6 +1983,7 @@ void Engine::onSceneCounters(u32 slot) {
         ss.queueOverflow = std::max(ss.queueOverflow, lastCounters_.queueOverflow);
     }
     slotFrame_[slot]    = ~0ull;
+    slotReflectionRecorded_[slot]=false;
     slotMeasured_[slot] = false;
 }
 
@@ -2124,19 +2136,19 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
                 visibility_->setLightingTextures(shadows_->mask(),directLighting_?directLighting_->direct():shadows_->zeroLighting(),gi_?gi_->irradiance():shadows_->zeroLighting());
             }
             visibility_->addResolve(frameGraph_, color, shadows_?shadows_->depth():depth);
-            if(reflections_)visibility_->replaceColor(reflections_->addToGraph(frameGraph_,visibility_->color(),visibility_->depth()));
+            if(graphKey_.reflectionReady)visibility_->replaceColor(reflections_->addToGraph(frameGraph_,visibility_->color(),visibility_->depth()));
             if(atmosphere_)visibility_->replaceColor(atmosphere_->addToGraph(frameGraph_,visibility_->color(),visibility_->depth()));
             rg::TextureRef reconstructed;
             if(denoised_) {
                 frameGraph_.addPass("Denoised roughness channel",PassType::Compute,[&](PassBuilder& b){b.read(visibility_->normalRoughness(),Usage::ShaderRead,StageDispatch);roughnessRef_=b.createTexture("Denoised perceptual roughness",{Format::R16Float,graphKey_.logicalWidth,graphKey_.logicalHeight});roughnessRef_=b.write(roughnessRef_,Usage::ShaderWrite,StageDispatch);},[this](PassContext& ctx){roughnessTable_->setAddress(visibility_->paramsAddress(),0);roughnessTable_->setTexture(static_cast<MTL::Texture*>(ctx.texture(visibility_->normalRoughness()))->gpuResourceID(),0);roughnessTable_->setTexture(static_cast<MTL::Texture*>(ctx.texture(roughnessRef_))->gpuResourceID(),1);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),*pipelines_,roughnessSplit_,roughnessTable_,graphKey_.logicalWidth,graphKey_.logicalHeight);});
                 MetalfxDenoise::Inputs in;in.noisyColor=visibility_->color();in.customFallback=visibility_->color();in.depth=visibility_->depth();in.motion=directLighting_->motion();
                 in.diffuseAlbedo=visibility_->diffuseAlbedo();in.specularAlbedo=visibility_->specularAlbedo();in.worldNormal=visibility_->normalRoughness();in.roughness=roughnessRef_;
-                in.reactiveMask=visibility_->reactiveMask();if(reflections_)in.hitDistance=reflections_->hitDistance();
+                in.reactiveMask=visibility_->reactiveMask();if(graphKey_.reflectionReady)in.hitDistance=reflections_->hitDistance();
                 const auto selected=denoised_->addToGraph(frameGraph_,in);if(denoised_->ready())reconstructed=selected;
             }
             if(linearCapture_)linearCapture_->addToGraph(frameGraph_,options_.captureLinearSignal==1?gi_->referenceDiffuse():
-                                                       options_.captureLinearSignal==2?directLighting_->direct():options_.captureLinearSignal==3?reflections_->rawSpecular():
-                                                       options_.captureLinearSignal==4?reflections_->rawAO():visibility_->color());
+                                                       options_.captureLinearSignal==2?directLighting_->direct():options_.captureLinearSignal==6?reflections_->rawSpecular():
+                                                       options_.captureLinearSignal==7?reflections_->rawAO():visibility_->color());
             color = post_ ? post_->addToGraph(frameGraph_, *visibility_, drawableRef_, graphKey_.outputFormat,reconstructed)
                           : visibility_->addPresent(frameGraph_, drawableRef_);
             visibility_->addChecks(frameGraph_);

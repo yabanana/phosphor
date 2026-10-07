@@ -1082,3 +1082,12 @@ TEST_CASE("F12 linear capture and exact-frame export validate their signal") {
     CHECK(o.captureLinearSignal==1);CHECK(o.lightingScene=="thin-walls");
     CHECK_FALSE(parse({"--bench","5","--lighting-scene","thin-walls"},o,e));
 }
+
+TEST_CASE("F13 capture IDs preserve tester shadow diagnostics and named scalar AO") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--render-path","visibility","--reflections","ssr","--capture-linear-signal","specular"},o,error));
+    CHECK(o.captureLinearSignal==6);
+    REQUIRE(parse({"--render-path","visibility","--ao","gtao","--capture-linear-signal","ao"},o,error));
+    CHECK(o.captureLinearSignal==7);
+    CHECK_FALSE(parse({"--render-path","visibility","--capture-linear-signal","ao"},o,error));
+}

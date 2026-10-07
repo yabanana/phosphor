@@ -127,8 +127,9 @@ void LinearCapture::addToGraph(rg::RenderGraph& graph, rg::TextureRef linearHdr)
             if (!active_ || slot.pending) throw std::logic_error("Linear capture encoding slot is not reusable");
             auto* source = static_cast<MTL::Texture*>(context.texture(linearHdr));
             if (!source || source->width() < slot.width || source->height() < slot.height ||
-                (source->pixelFormat() != MTL::PixelFormatRGBA16Float && source->pixelFormat() != MTL::PixelFormatRGBA32Float))
-                throw std::invalid_argument("Linear capture requires matching RGBA16Float or RGBA32Float HDR");
+                (config_.scalar ? (source->pixelFormat() != MTL::PixelFormatR16Float && source->pixelFormat() != MTL::PixelFormatR32Float)
+                                : (source->pixelFormat() != MTL::PixelFormatRGBA16Float && source->pixelFormat() != MTL::PixelFormatRGBA32Float)))
+                throw std::invalid_argument("Linear capture format does not match the declared RGB/scalar source");
             auto* pipeline = pipelines_.compute(pipeline_);
             if (!pipeline) throw std::runtime_error("Linear capture pipeline is not ready");
             slot.table->setAddress(extentAddress_, 0);
@@ -157,7 +158,7 @@ bool LinearCapture::consume(u32 index) {
     if (!rgba) throw std::runtime_error("Linear capture shared buffer has no CPU contents");
     slot.rgb.resize(pixels * 3);
     for (size_t pixel = 0; pixel < pixels; ++pixel)
-        for (u32 channel = 0; channel < 3; ++channel) slot.rgb[pixel * 3 + channel] = rgba[pixel * 4 + channel];
+        for (u32 channel = 0; channel < 3; ++channel) slot.rgb[pixel * 3 + channel] = rgba[pixel * 4 + (config_.scalar ? 0 : channel)];
     if (slot.single) writeCapture(config_.path, slot.width, slot.height, slot.rgb, slot.index);
     if (slot.sequence) {
         std::ostringstream name;

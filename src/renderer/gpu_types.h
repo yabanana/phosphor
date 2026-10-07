@@ -909,6 +909,15 @@ struct GPUVolumeCounters {
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUVolumeCounters) == 32, "GPUVolumeCounters layout");
 
+PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_ERROR = 1u<<31;
+PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_MIXED = 4u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_GI = 1u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_CUSTOM = 2u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_DI = 4u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_SPEC = 8u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_AO = 16u;
+struct GPUReflectionReduceParams {u32 width,height,samples,stridePixels;};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionReduceParams)==16,"GPUReflectionReduceParams layout");
 struct GPUReflectionComposeParams {u32 width,height,backingWidth,backingHeight;u32 flags,pad[3];};
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionComposeParams)==32,"GPUReflectionComposeParams layout");
 

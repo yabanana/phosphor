@@ -65,6 +65,7 @@ set(PHOSPHOR_SHADER_HEADERS
     ${CMAKE_SOURCE_DIR}/src/renderer/visibility_layout.h
     ${CMAKE_SOURCE_DIR}/shaders/reflection_common.h
     ${CMAKE_SOURCE_DIR}/shaders/atmosphere_common.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/atmosphere_bindings.h
     ${CMAKE_SOURCE_DIR}/src/renderer/volume_noise.h
     ${CMAKE_SOURCE_DIR}/shaders/gi_common.h
     ${CMAKE_SOURCE_DIR}/shaders/gi_cache_common.h
@@ -205,6 +206,8 @@ add_executable(phosphor
     src/platform/metal/reference_snapshot.cpp
     src/platform/metal/linear_capture.cpp
     src/platform/metal/metalfx_denoise.cpp
+    src/platform/metal/reflection_passes.cpp
+    src/platform/metal/denoise_passes.cpp
     src/platform/metal/atmosphere_passes.cpp
     src/platform/metal/shader_reloader.cpp
     src/platform/metal/transient_heap.cpp
