@@ -136,6 +136,17 @@ def evaluate_capture(case,folder,provenance):
         if case.get("missing_factory") and summary.get("factory_installed") is not False:errors.append("case expects a build without the injected gateway")
         if case["name"]=="wide-hdr-unverified-policy" and "pre-exposure" not in summary.get("fallback_reason",""):errors.append("unverified nonunit output mapping did not select fallback")
         return {"passed":not errors,"errors":errors,"native_numerical_proof":False,"summary":summary}
+    prewarm=json.loads((folder/"prewarm.json").read_text())
+    if prewarm.get("schema")!="phosphor.metalfx-prewarm.v1" or prewarm.get("ready") is not True or prewarm.get("state")!="READY":errors.append("initial native SDK prewarm did not complete")
+    if prewarm.get("actual_encoded_before_counting")!=0 or prewarm.get("phase")!=0 or prewarm.get("frame")!=0:errors.append("fixture advanced frame/phase/native work during initial prewarm")
+    expected_views=4 if case.get("lifecycle") else 1
+    if prewarm.get("active_views")!=expected_views or summary.get("initial_active_views")!=expected_views:errors.append("not every actual active view was prewarmed")
+    if prewarm.get("budget_ms")!=case.get("prewarm_ms") or prewarm.get("budget_ms")!=summary.get("initial_prewarm_budget_ms") or summary.get("initial_prewarm_ready") is not True:errors.append("prewarm summary differs from actual initial wait")
+    first_record=next(iter(sorted(folder.glob("frame-*-view-*.json"))),None)
+    if first_record is not None:
+        row=json.loads(first_record.read_text())
+        for key in ("input_width","input_height","output_width","output_height"):
+            if prewarm.get(key)!=row.get(key):errors.append("initial requested extent differs from first native output")
     expected_count=summary.get("native_frames")
     if not isinstance(expected_count,int) or expected_count<=0 or len(files)!=expected_count:errors.append("zero/incomplete actual native records")
     if summary.get("checked_frames")!=expected_count or summary.get("pack_checks")!=expected_count or summary.get("actual_encoded_frames")!=expected_count:
@@ -194,6 +205,22 @@ def evaluate_capture(case,folder,provenance):
     return {"passed":not errors,"errors":errors,"native_numerical_proof":not errors,"experiments":experiments,"summary":summary}
 
 
+def frozen_prewarm_budget(manifest,outer_timeout):
+    budget=manifest.get("prewarm_ms")
+    if not isinstance(budget,int) or isinstance(budget,bool) or not 1<=budget<=120000:
+        raise ValueError("SDK plan must freeze bounded initial prewarm")
+    for case in manifest.get("cases",[]):
+        command=case.get("command",[]);flag="--denoised-fixture-prewarm-ms"
+        if case.get("prewarm_ms")!=budget or command.count(flag)!=1:
+            raise ValueError("frozen case prewarm differs from manifest")
+        pos=command.index(flag)
+        if pos+1>=len(command) or command[pos+1]!=str(budget):
+            raise ValueError("actual frozen command uses a different initial wait budget")
+    if not number(outer_timeout) or outer_timeout<=budget/1000:
+        raise ValueError("outer process timeout must exceed frozen initial prewarm")
+    return budget
+
+
 def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--binary",type=Path,default=Path("build/release/phosphor"));p.add_argument("--out",type=Path,required=True)
@@ -203,36 +230,44 @@ def main(argv=None):
     p.add_argument("--frames",type=int,default=192);p.add_argument("--resolution",default="128x96")
     p.add_argument("--leaks-at-exit",action="store_true",help="wrap only native lifecycle with existing macOS leaks; never install")
     p.add_argument("--leaks-tool",type=Path,default=Path("/usr/bin/leaks"))
-    p.add_argument("--timeout",type=float,default=600);p.add_argument("--gpu-lock",type=Path,default=Path("/tmp/phosphor-gpu-verification.lock"))
+    p.add_argument("--prewarm-ms",type=int,default=120000);p.add_argument("--timeout",type=float,default=600);p.add_argument("--gpu-lock",type=Path,default=Path("/tmp/phosphor-gpu-verification.lock"))
     a=p.parse_args(argv)
     if a.frames<96 or not re.fullmatch(r"[1-9]\d*x[1-9]\d*",a.resolution) or min(map(int,a.resolution.split("x")))<16:
         p.error("at least96 frames and valid >=16px dimensions required for paired steady experiments")
     if not math.isfinite(a.timeout) or a.timeout<=0:p.error("positive finite timeout required")
+    if not 1<=a.prewarm_ms<=120000:p.error("prewarm 1..120000ms required")
     out=a.out.resolve();out.mkdir(parents=True,exist_ok=True)
     cases=make_cases(out,a.frames,a.gateway)
     if a.only:cases=[c for c in cases if any(fnmatch.fnmatch(c["name"],x) for x in a.only)]
     if not cases:p.error("no cases selected")
     for case in cases:
+        case["prewarm_ms"]=a.prewarm_ms
         if case.get("lifecycle") and a.leaks_at_exit:case["leaks_tool"]=str(a.leaks_tool.resolve())
         folder=out/case["name"];case["capture"]=str(folder/"actual-sdk");case["log"]=str(folder/"renderer.log")
         case["command"]=[str(a.binary.resolve()),"--scene","procedural","--bench","1","--render-path","visibility",
             "--geometry-path","mesh","--no-ui","--no-vsync","--fixed-timestep","--frames",str(case["frames"]),"--warmup","0",
             "--resolution",a.resolution,"--post","--upscaler","native","--no-gpu-timing",
             "--denoised-fixture",case["scenario"],"--denoised-fixture-output",case["capture"],
+            "--denoised-fixture-prewarm-ms",str(a.prewarm_ms),
             *(["--denoised-fixture-pre-exposed"] if case["preexposed"] else []),
             *(["--temporal-views","4","--resize-every","90","--history-reset-every","60"] if case.get("lifecycle") else [])]
     manifest={"schema":1,"state":"NOT_EXECUTED","frozen_before_run":True,"hard_stop":"STOP_AFTER_F14",
         "created_utc":datetime.now(timezone.utc).isoformat(),"thresholds":GATES,"gateway":a.gateway,"cases":cases,
-        "production_policy_promoted":False,"source_only_delivery":True,"binary_sha256":sha(a.binary) if a.binary.is_file() else None}
+        "prewarm_ms":a.prewarm_ms,"production_policy_promoted":False,"source_only_delivery":True,"binary_sha256":sha(a.binary) if a.binary.is_file() else None}
     path=a.manifest.resolve() if a.manifest else out/"sdk-frozen-manifest.json"
     if a.manifest:
         if not a.run or a.only:p.error("consume existing manifest only with --run and unchanged case selection")
         raw=path.read_bytes();manifest=json.loads(raw);cases=manifest["cases"]
         if manifest.get("thresholds")!=GATES or manifest.get("hard_stop")!="STOP_AFTER_F14" or manifest.get("frozen_before_run") is not True:p.error("incompatible frozen SDK plan")
+
         if any(Path(c["command"][0]).resolve()!=a.binary.resolve() or Path(c["capture"]).parent.parent!=out for c in cases):p.error("binary/output differs from frozen manifest")
     else:
+        try:frozen_prewarm_budget(manifest,a.timeout)
+        except ValueError as error:p.error(str(error))
         if path.exists():p.error("refuse frozen plan overwrite; choose new output or --run --manifest")
         raw=json_bytes(manifest);path.write_bytes(raw)
+    try:a.prewarm_ms=frozen_prewarm_budget(manifest,a.timeout)
+    except ValueError as error:p.error(str(error))
     if not a.run:print(f"NOT_EXECUTED: SDK fixture plan frozen at {path}");return 0
     if not a.binary.is_file():p.error("existing compiled binary required; runner never builds")
     binary_sha=sha(a.binary);source_sha=source_hash(a.source_root.resolve());manifest_sha=hashlib.sha256(raw).hexdigest()

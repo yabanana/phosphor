@@ -3,6 +3,7 @@
 #include "renderer/metalfx_denoise_contract.h"
 #include "rendergraph/render_graph.h"
 #include <array>
+#include <chrono>
 #include <functional>
 #include <future>
 #include <memory>
@@ -45,7 +46,7 @@ public:
         rg::TextureRef hitDistance{},reactiveMask{},strengthMask{},customFallback{};
     };
     enum class Status : u8 { Disabled,MissingSDK,UnsupportedDevice,MissingFactory,InvalidContract,
-                            Settling,Pending,FactoryRejected,UsageRejected,UnverifiedExposureMapping,Ready };
+                            Settling,Pending,FactoryRejected,UsageRejected,UnverifiedExposureMapping,Ready,FixturePrewarmTimeout,FixturePrewarmSuperseded };
     struct Stats {
         bool requested=false,sdkAvailable=false,deviceSupported=false,factoryInstalled=false;
         u64 requests=0,encodedFrames=0,fallbackFrames=0,resets=0,discardedRequests=0,retirements=0;
@@ -59,6 +60,10 @@ public:
     MetalfxDenoise(const MetalfxDenoise&)=delete;
     MetalfxDenoise& operator=(const MetalfxDenoise&)=delete;
     void prepareFrame(const Frame&);
+    // Diagnostic-only initial prewarm AFTER one real prepare inside beginFrame.
+    // Uses its exact current extent/phase; active view futures share one deadline.
+    // No GPU frame/history advance, compiler creation or production-path wait.
+    bool prewarmPreparedFixture(u32 activeViews,std::chrono::milliseconds budget);
     // If not ready, this returns the caller's actual custom-denoised composite.
     // No phantom native pass, and no second energy contribution is introduced.
     [[nodiscard]] rg::TextureRef addToGraph(rg::RenderGraph&,const Inputs&);

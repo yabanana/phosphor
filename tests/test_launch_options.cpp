@@ -1167,3 +1167,12 @@ TEST_CASE("F13 filtered indirect capture exports selected irradiance as diffuse 
     REQUIRE(parse({"--render-path","visibility","--rt","on","--gi","cache","--lighting","restir","--capture-linear-signal","indirect-diffuse"},o,error));
     CHECK(o.captureLinearSignal==1);
 }
+
+TEST_CASE("F13 fixture prewarm is bounded explicit and isolated from production") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--frames","96","--denoised-fixture","constant","--denoised-fixture-output","sdk","--denoised-fixture-prewarm-ms","60000"},o,error));
+    CHECK(o.denoisedFixturePrewarmMs==60000);
+    CHECK_FALSE(parse({"--frames","96","--denoised-fixture","constant","--denoised-fixture-output","sdk","--denoised-fixture-prewarm-ms","0"},o,error));
+    CHECK_FALSE(parse({"--frames","96","--denoised-fixture","constant","--denoised-fixture-output","sdk","--denoised-fixture-prewarm-ms","120001"},o,error));
+    CHECK_FALSE(parse({"--frames","96","--denoised-fixture-prewarm-ms","120000"},o,error));
+}

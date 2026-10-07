@@ -315,6 +315,9 @@ struct MetalfxDenoise::Impl {
 #if PHOSPHOR_HAS_METALFX_DENOISED
         if(!v.scaler&&!v.pending.valid()&&!v.failed && v.stableFrames>=options.resizeSettleFrames)request(v);
 #endif
+        publishPrepared(v);
+    }
+    void publishPrepared(View& v) {
         if(v.failed){setStatus(v.failureStatus,v.failureReason);++stats.fallbackFrames;return;}
         if(!v.scaler) {
             setStatus(v.pending.valid()?Status::Pending:Status::Settling,v.pending.valid()?"Denoised gateway request pending":"Denoised input/output extent settling");
@@ -322,10 +325,55 @@ struct MetalfxDenoise::Impl {
         }
         if(!pipelines.compute(packHandle)||!pipelines.compute(clearHandle)||!pipelines.compute(restoreHandle)){setStatus(Status::Pending,"Denoised guide-pack/restore pipelines pending");++stats.fallbackFrames;return;}
         setStatus(Status::Ready,"");
-        GPUMetalfxDenoisePackParams pp{f.extent.inputWidth,f.extent.inputHeight,flags(),0,1.0f,0.002f,f.preExposure,0};
+        GPUMetalfxDenoisePackParams pp{frame.extent.inputWidth,frame.extent.inputHeight,flags(),0,1.0f,0.002f,frame.preExposure,0};
         auto slice=context.frameUploads().allocate(sizeof(pp));std::memcpy(slice.cpu,&pp,sizeof(pp));packParamsAddress=slice.gpu;
-        GPUMetalfxRestoreParams rp{f.extent.outputWidth,f.extent.outputHeight,1.0f/f.preExposure,0};
+        GPUMetalfxRestoreParams rp{frame.extent.outputWidth,frame.extent.outputHeight,1.0f/frame.preExposure,0};
         auto restore=context.frameUploads().allocate(sizeof(rp));std::memcpy(restore.cpu,&rp,sizeof(rp));restoreParamsAddress=restore.gpu;
+    }
+    bool prewarm(u32 activeViews,std::chrono::milliseconds budget) {
+        if(!activeViews||activeViews>options.views||frame.view>=activeViews||budget.count()<=0||budget.count()>120000)
+            throw std::invalid_argument("Invalid initial fixture prewarm views/budget");
+        // First real prepare has already applied SDK/device/factory, semantic,
+        // matrix and output-policy validation. Terminal diagnostics are retained.
+        if(currentStatus!=Status::Pending&&currentStatus!=Status::Settling&&currentStatus!=Status::Ready)return false;
+        if(!frameValid()||stats.encodedFrames)throw std::logic_error("Fixture prewarm requires an unencoded canonical frame");
+        const auto deadline=std::chrono::steady_clock::now()+budget;
+        const metalfx_denoise::RequestKey key{frame.extent,pipelines.generation(),flags()};
+        for(u32 i=0;i<activeViews;++i) {
+            auto& v=views[i];
+            if(v.used||(v.desiredValid&&v.desired!=key)||(v.pending.valid()&&v.requested!=key)) {
+                setStatus(Status::FixturePrewarmSuperseded,"Fixture initial prewarm key was superseded before waiting");return false;
+            }
+            if(v.failed){setStatus(v.failureStatus,v.failureReason);return false;}
+            if(!v.desiredValid){v.desired=key;v.desiredValid=true;histories.invalidate(i,"Fixture initial prewarm");++graphVersion;}
+#if PHOSPHOR_HAS_METALFX_DENOISED
+            if(!v.scaler&&!v.pending.valid())request(v);
+#endif
+            if(v.failed){setStatus(v.failureStatus,v.failureReason);return false;}
+        }
+        for(u32 i=0;i<activeViews;++i) {
+            auto& v=views[i];
+            if(v.pending.valid()&&v.pending.wait_until(deadline)!=std::future_status::ready) {
+                setStatus(Status::FixturePrewarmTimeout,"Fixture initial denoised future exceeded bounded prewarm deadline; initialization is not cancelled");return false;
+            }
+        }
+        // Use ordinary stale-result/usage/format validation. This never invokes
+        // the unbounded collect(true) or queue waitAllFinal/drain APIs.
+        pipelines.beginFrame();
+        if(pipelines.generation()!=key.pipelineGeneration){setStatus(Status::FixturePrewarmSuperseded,"Fixture initial prewarm generation was superseded before result collection");return false;}
+        collect(false);
+        for(u32 i=0;i<activeViews;++i) {
+            const auto& v=views[i];
+            if(v.desired!=key||pipelines.generation()!=key.pipelineGeneration) {
+                setStatus(Status::FixturePrewarmSuperseded,"Fixture initial prewarm generation/extent was superseded");return false;
+            }
+            if(v.failed){setStatus(v.failureStatus,v.failureReason);return false;}
+            if(!v.scaler){setStatus(Status::FactoryRejected,"Fixture initial prewarm produced no native scaler");return false;}
+        }
+        // Refresh ONLY the already prepared frame's uniforms/status. Do not
+        // repeat history.begin, settle counts, phase/cut bookkeeping or uploads
+        // for synthetic rendered frames while the model compiles.
+        publishPrepared(views[frame.view]);return currentStatus==Status::Ready;
     }
     bool sourceValid(const rg::RenderGraph& g,rg::TextureRef ref,Channel ch)const {
         if(!ref.valid()||ref.resource>=g.resources().size())return false;
@@ -489,6 +537,7 @@ struct MetalfxDenoise::Impl {
 MetalfxDenoise::MetalfxDenoise(MetalContext& c,PipelineCache& p,Options o,Factory f):impl_(std::make_unique<Impl>(c,p,o,std::move(f))){}
 MetalfxDenoise::~MetalfxDenoise()=default;
 void MetalfxDenoise::prepareFrame(const Frame& f){impl_->prepare(f);}
+bool MetalfxDenoise::prewarmPreparedFixture(u32 views,std::chrono::milliseconds budget){return impl_->prewarm(views,budget);}
 rg::TextureRef MetalfxDenoise::addToGraph(rg::RenderGraph& g,const Inputs& in){return impl_->add(g,in);}
 void MetalfxDenoise::bindFrame(MetalGraphExecutor& e){impl_->bind(e);}
 bool MetalfxDenoise::ready()const{return impl_->currentStatus==Status::Ready;}

@@ -5,6 +5,8 @@
 #include "renderer/metalfx_fixture_oracle.h"
 #include "renderer/offline_reference.h"
 #include "renderer/history_registry.h"
+#include "core/log.h"
+#include <chrono>
 #include "rendergraph/pass_context.h"
 #include <algorithm>
 #include <array>
@@ -60,10 +62,14 @@ struct MetalfxDenoiseFixture::Impl {
     mutable u64 publishedVersion=1;mutable std::pair<u64,u64> published{};
     struct ScaledPair {std::vector<float> unit,scaled;u32 width=0,height=0;FXMetamorphicComparison result{};bool checked=false;};
     std::map<u32,ScaledPair> pairs;
-    bool finishCalled=false;
+    bool finishCalled=false,prewarmAttempted=false,prewarmReady=false;double prewarmElapsedMs=0;
+    std::string prewarmStatus="NOT_ATTEMPTED";
     Impl(MetalContext& context,PipelineCache& pipelines,MetalfxDenoise::Factory factory,Options o):c(context),p(pipelines),options(std::move(o)) {
         if(!MetalfxDenoiseFixture::validScenario(options.scenario)||options.outputDirectory.empty())throw std::invalid_argument("Invalid denoised fixture scenario/output");
-        MetalfxDenoise::Options sdkOptions;sdkOptions.enabled=true;sdkOptions.views=HistoryRegistry::MaxViews;
+        if(!options.activeViews||options.activeViews>HistoryRegistry::MaxViews||!options.prewarmTimeoutMs||options.prewarmTimeoutMs>120000)
+            throw std::invalid_argument("Invalid SDK fixture active views/prewarm budget");
+        MetalfxDenoise::Options sdkOptions;sdkOptions.enabled=true;sdkOptions.views=options.activeViews;
+        sdkOptions.resizeSettleFrames=0; // controlled fixture extents; production keeps its async settling
         sdkOptions.reactiveMask=true;sdkOptions.specularHitDistance=false;sdkOptions.strengthMask=true;
         sdkOptions.sdkOutputScale=options.preExposedPolicy?MetalfxDenoise::Options::OutputScale::PreExposed:MetalfxDenoise::Options::OutputScale::Unverified;
         adapter=std::make_unique<MetalfxDenoise>(c,p,sdkOptions,std::move(factory));
@@ -133,6 +139,24 @@ struct MetalfxDenoiseFixture::Impl {
         auto& slot=slots[frame.view][frame.slot];reserve(slot);
         auto slice=c.frameUploads().allocate(sizeof(params));std::memcpy(slice.cpu,&params,sizeof(params));paramsAddress=slice.gpu;
         adapter->prepareFrame(frame);finishCalled=false;
+        if(!prewarmAttempted) {
+            const auto started=std::chrono::steady_clock::now();prewarmAttempted=true;
+            const bool pending=adapter->status()==MetalfxDenoise::Status::Pending||adapter->status()==MetalfxDenoise::Status::Settling||adapter->status()==MetalfxDenoise::Status::Ready;
+            prewarmReady=pending&&adapter->prewarmPreparedFixture(options.activeViews,std::chrono::milliseconds(options.prewarmTimeoutMs));
+            prewarmElapsedMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
+            prewarmStatus=prewarmReady?"READY":pending?"INITIAL_PREWARM_FAILED":"SKIPPED_TERMINAL_CONTRACT";
+            std::filesystem::create_directories(options.outputDirectory);
+            const auto path=std::filesystem::path(options.outputDirectory)/"prewarm.json";
+            if(std::filesystem::exists(path))throw std::runtime_error("Refuse SDK fixture initial prewarm evidence overwrite");
+            std::ofstream out(path);out<<"{\"schema\":\"phosphor.metalfx-prewarm.v1\",\"state\":"<<quote(prewarmStatus)
+                <<",\"ready\":"<<(prewarmReady?"true":"false")<<",\"budget_ms\":"<<options.prewarmTimeoutMs<<",\"elapsed_ms\":"<<number(prewarmElapsedMs)
+                <<",\"active_views\":"<<options.activeViews<<",\"frame\":"<<frame.index<<",\"phase\":"<<params.phase
+                <<",\"input_width\":"<<frame.extent.inputWidth<<",\"input_height\":"<<frame.extent.inputHeight<<",\"output_width\":"<<frame.extent.outputWidth<<",\"output_height\":"<<frame.extent.outputHeight
+                <<",\"shader_generation\":"<<p.generation()<<",\"actual_encoded_before_counting\":"<<adapter->stats().encodedFrames<<",\"cancelled\":false,\"reason\":"<<quote(adapter->fallbackReason())<<"}\n";
+            if(!out)throw std::runtime_error("SDK initial prewarm evidence write failed");
+            LOG_INFO("SDK fixture initial prewarm %s: %.1f ms / %u ms, %u views, frame %llu phase %u",prewarmStatus.c_str(),prewarmElapsedMs,options.prewarmTimeoutMs,options.activeViews,static_cast<unsigned long long>(frame.index),params.phase);
+            if(pending&&!prewarmReady)throw std::runtime_error("SDK fixture initial prewarm failed before counting frames: "+adapter->fallbackReason());
+        }
     }
     bool pipelinesReady()const{return p.compute(generate)&&p.compute(readback)&&p.render(depthPipeline);}
     rg::TextureRef add(rg::RenderGraph& graph) {
@@ -287,6 +311,8 @@ struct MetalfxDenoiseFixture::Impl {
             <<",\"reload_requested_after_native_work\":"<<(reloadRequested?"true":"false")<<",\"captured_generation_count\":"<<capturedGenerations.size()
             <<",\"retirement_is_destruction_proof\":false,\"final_destruction_verified\":false"
             <<",\"fallback_reason\":"<<quote(adapter->fallbackReason())<<",\"preexposed_policy_experiment\":"<<(options.preExposedPolicy?"true":"false")
+            <<",\"initial_prewarm_attempted\":"<<(prewarmAttempted?"true":"false")<<",\"initial_prewarm_ready\":"<<(prewarmReady?"true":"false")
+            <<",\"initial_prewarm_state\":"<<quote(prewarmStatus)<<",\"initial_prewarm_budget_ms\":"<<options.prewarmTimeoutMs<<",\"initial_prewarm_elapsed_ms\":"<<number(prewarmElapsedMs)<<",\"initial_active_views\":"<<options.activeViews
             <<",\"phase_accepted\":false,\"production_policy_promoted\":false,\"metamorphic\":[";
         bool first=true;for(const auto& [view,pair]:pairs){if(!first)out<<',';first=false;out<<"{\"view\":"<<view<<",\"checked\":"<<(pair.checked?"true":"false")
             <<",\"normalized_gain\":"<<number(pair.result.normalizedGain)<<",\"shape_relative_error\":"<<number(pair.result.relativeShapeError)
@@ -298,6 +324,7 @@ bool MetalfxDenoiseFixture::validScenario(std::string_view name){return std::fin
 MetalfxDenoiseFixture::MetalfxDenoiseFixture(MetalContext& c,PipelineCache& p,MetalfxDenoise::Factory f,Options o):impl_(std::make_unique<Impl>(c,p,std::move(f),std::move(o))){}
 MetalfxDenoiseFixture::~MetalfxDenoiseFixture()=default;
 void MetalfxDenoiseFixture::prepareFrame(const MetalfxDenoise::Frame& f){impl_->prepare(f);}
+bool MetalfxDenoiseFixture::initialPrewarmAttempted()const{return impl_->prewarmAttempted;}
 rg::TextureRef MetalfxDenoiseFixture::addToGraph(rg::RenderGraph& g){return impl_->add(g);}
 void MetalfxDenoiseFixture::bindFrame(MetalGraphExecutor& e){impl_->bind(e);}
 bool MetalfxDenoiseFixture::consume(u32 slot){return impl_->consume(slot);}

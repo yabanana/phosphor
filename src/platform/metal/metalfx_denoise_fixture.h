@@ -5,11 +5,12 @@
 namespace phosphor {
 class MetalfxDenoiseFixture {
 public:
-    struct Options {std::string scenario,outputDirectory;bool preExposedPolicy=false;};
+    struct Options {std::string scenario,outputDirectory;bool preExposedPolicy=false;u32 activeViews=1,prewarmTimeoutMs=120000;};
     MetalfxDenoiseFixture(MetalContext&,PipelineCache&,MetalfxDenoise::Factory,Options);
     ~MetalfxDenoiseFixture();
     static bool validScenario(std::string_view);
     void prepareFrame(const MetalfxDenoise::Frame&);
+    bool initialPrewarmAttempted()const;
     rg::TextureRef addToGraph(rg::RenderGraph&);
     void bindFrame(MetalGraphExecutor&);
     bool consume(u32 slot);

@@ -227,6 +227,8 @@ private:
     u64                      heapBytesAtStart_   = 0;
     // CPU time spent blocked in beginFrame() (slot + drawable waits).
     std::chrono::steady_clock::duration frameWait_{};
+    std::chrono::steady_clock::duration fixtureStartupThisFrame_{},fixtureStartupPreviousFrame_{};
+    bool fixtureMeasurementStarted_=false;
     // F5 (report schema 5): per measured frame CPU phases and scene samples.
     struct SceneSamples {
         std::vector<float> sim, sceneSync, prepare, ui, graph, submit;            // CPU ms

@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 import unittest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"tools"))
-from metalfx_denoise_fixture_check import constant_oracle,impulse_oracle,guide_oracle,leaks_at_exit
+from metalfx_denoise_fixture_check import constant_oracle,impulse_oracle,guide_oracle,leaks_at_exit,frozen_prewarm_budget
 
 class SDKOracleTests(unittest.TestCase):
     def test_constant_scalar_unit_hypotheses(self):
@@ -36,5 +36,16 @@ class SDKOracleTests(unittest.TestCase):
         self.assertFalse(leaks_at_exit("retirements_submitted=8")["passed"])
         self.assertTrue(leaks_at_exit("Process 123: 0 leaks for 0 total leaked bytes.")["passed"])
         self.assertFalse(leaks_at_exit("Process 123: 1 leak for 80 total leaked bytes.")["passed"])
+
+class SDKPrewarmProtocolTests(unittest.TestCase):
+    def plan(self,budget,command_budget=None):
+        return {"prewarm_ms":budget,"cases":[{"prewarm_ms":budget,"command":["phosphor","--denoised-fixture-prewarm-ms",str(budget if command_budget is None else command_budget)]}]}
+    def test_process_timeout_is_checked_against_actual_frozen_wait(self):
+        with self.assertRaises(ValueError):frozen_prewarm_budget(self.plan(120000),2)
+        self.assertEqual(frozen_prewarm_budget(self.plan(60000),90),60000)
+    def test_a_case_cannot_hide_a_different_wait_in_its_command(self):
+        with self.assertRaises(ValueError):frozen_prewarm_budget(self.plan(60000,120000),90)
+        with self.assertRaises(ValueError):frozen_prewarm_budget(self.plan(0),90)
+        self.assertEqual(frozen_prewarm_budget(self.plan(120000),300),120000)
 
 if __name__=="__main__":unittest.main()

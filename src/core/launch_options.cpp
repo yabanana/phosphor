@@ -118,7 +118,7 @@ const char* giModeName(GiMode m) {
 bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
                         LaunchOptions& out, std::string& error) {
     out = LaunchOptions{};
-    bool rtSettingsSpecified = false;
+    bool rtSettingsSpecified = false,fixturePrewarmSpecified=false;
     for (int i = 1; i < argc; ++i) {
         const std::string_view arg = argv[i];
         if (!arg.starts_with("--")) continue;
@@ -552,6 +552,9 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if(*v!="constant"&&*v!="impulse"&&*v!="channels"&&*v!="lifecycle"&&*v!="wide-hdr"){error="--denoised-fixture: expected constant, impulse, channels, lifecycle or wide-hdr";return false;}out.denoisedFixture=*v;
         } else if (arg == "--denoised-fixture-output") {
             auto v=needValue();if(!v||v->empty()||v->starts_with("--")){error="--denoised-fixture-output: expected output directory";return false;}out.denoisedFixtureOutput=*v;
+        } else if (arg == "--denoised-fixture-prewarm-ms") {
+            fixturePrewarmSpecified=true;
+            if(!needCount(out.denoisedFixturePrewarmMs)||!out.denoisedFixturePrewarmMs||out.denoisedFixturePrewarmMs>120000){error="--denoised-fixture-prewarm-ms: expected 1..120000";return false;}
         } else if (arg == "--denoised-fixture-pre-exposed") {
             out.denoisedFixturePreExposed=true;
         } else if (arg == "--fog-homogeneous") {
@@ -1072,7 +1075,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
         error = "F10-F12 lighting requires --render-path visibility with generic/binned resolve and a scene"; return false;
     }
     if(!out.denoisedFixture.empty()&&(out.denoisedFixtureOutput.empty()||!out.benchmark()||out.temporalUpscale||out.atmosphere||out.fog||out.clouds||out.lightingDenoise!=LightingDenoiseMode::Off||out.reflections!=ReflectionMode::Off||out.ao!=AoMode::Off||!out.captureLinear.empty()||!out.captureLinearSequence.empty())){error="SDK fixture requires --frames and --denoised-fixture-output, with native post and exclusive fixture inputs";return false;}
-    if(out.denoisedFixture.empty()&&(!out.denoisedFixtureOutput.empty()||out.denoisedFixturePreExposed)){error="SDK fixture controls require --denoised-fixture";return false;}
+    if(out.denoisedFixture.empty()&&(!out.denoisedFixtureOutput.empty()||out.denoisedFixturePreExposed||fixturePrewarmSpecified)){error="SDK fixture controls require --denoised-fixture";return false;}
     if((!out.volumeOracle.empty()||out.debugVolumeCorrupt) && (!(out.atmosphere||out.fog||out.clouds)||!out.debugLighting)){error="Volume oracle/corruption requires F14 and --debug-lighting N";return false;}
     if(out.fogHomogeneous&&(!out.fog||out.volumeOracle.empty())){error="Homogeneous fog requires --fog on and --volume-oracle";return false;}
     if(out.debugVolumeCorrupt==2&&(!out.fog&&(!out.clouds||out.cloudFullRate))){error="Volume history control requires fog or reconstructed clouds";return false;}

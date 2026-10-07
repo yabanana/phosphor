@@ -342,7 +342,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         factory.retire=[this](auto scaler){pipelines_->retireTemporalDenoisedScaler(std::move(scaler));};
 #endif
         if(!options_.denoisedFixture.empty()) {
-            MetalfxDenoiseFixture::Options fixture{options_.denoisedFixture,options_.denoisedFixtureOutput,options_.denoisedFixturePreExposed};
+            MetalfxDenoiseFixture::Options fixture{options_.denoisedFixture,options_.denoisedFixtureOutput,options_.denoisedFixturePreExposed,options_.temporalViews,options_.denoisedFixturePrewarmMs};
             denoisedFixture_=std::make_unique<MetalfxDenoiseFixture>(*context_,*pipelines_,std::move(factory),std::move(fixture));
         } else {
             denoised_=std::make_unique<MetalfxDenoise>(*context_,*pipelines_,config,std::move(factory));
@@ -516,7 +516,7 @@ void Engine::run() {
     if (options_.benchmark()) {
         LOG_INFO("Benchmark: %u warm-up + %u measured frames, vsync %s, UI %s", options_.warmup, options_.frames,
                  options_.vsync ? "on" : "off", options_.ui ? "on" : "off");
-        if (options_.warmup == 0) {
+        if (options_.warmup == 0 && !denoisedFixture_) {
             measureFirstFrame_ = context_->frameIndex();
             measureLastFrame_  = measureFirstFrame_ + options_.frames - 1;
             context_->beginGpuTimeCapture(options_.frames);
@@ -560,9 +560,13 @@ void Engine::run() {
         handleMemoryPressure();
 
         timer_->tick();
-        // Fixed step: deterministic animation for captures; timings stay real.
-        const float simDt = options_.fixedTimestep ? 1.0f / 60.0f : timer_->getDeltaTime();
+        // The first fixture prepare waits for startup only, with no frame/index
+        // advance. Remove that wall time from the next SDL interval as well.
+        const float measuredDt=std::max(0.0f,timer_->getDeltaTime()-std::chrono::duration<float>(fixtureStartupPreviousFrame_).count());
+        fixtureStartupPreviousFrame_={};fixtureStartupThisFrame_={};
+        const float simDt = options_.fixedTimestep ? 1.0f / 60.0f : measuredDt;
         const bool presented = frame(simDt);
+        fixtureStartupPreviousFrame_=fixtureStartupThisFrame_;
         input_->resetFrameState();
         if (presented && options_.simulatePressure) {
             ++simulatedFrames_;
@@ -581,7 +585,7 @@ void Engine::run() {
             pendingBench_ = static_cast<TestBenchType>((static_cast<int>(currentBench_) + 1) % testBenchCount());
         }
         if (presented && options_.benchmark()) {
-            recordBenchmarkFrame(timer_->getDeltaTime(), toMs(Clock::now() - start - frameWait_), toMs(frameWait_));
+            recordBenchmarkFrame(measuredDt, toMs(Clock::now() - start - frameWait_ - fixtureStartupThisFrame_), toMs(frameWait_));
         } else if (presented) {
             ++presentedFrames_;
         }
@@ -1605,7 +1609,18 @@ bool Engine::frame(float dt) {
         MetalfxDenoise::Frame df;df.slot=frame.slot;df.view=currentView_;df.index=frame.index;df.signalEpoch=sceneEpoch_;
         df.extent={renderWidth,renderHeight,width,height};df.cut=viewCameraCut;
         df.reset=options_.historyResetEvery&&presentedFrames_%options_.historyResetEvery==0;
+        const bool first=!denoisedFixture_->initialPrewarmAttempted();const auto fixtureStarted=Clock::now();
         denoisedFixture_->prepareFrame(df);
+        if(first)fixtureStartupThisFrame_=Clock::now()-fixtureStarted;
+        if(!fixtureMeasurementStarted_&&options_.benchmark()&&options_.warmup==0) {
+            // Establish allocation/feedback/timing baselines AFTER initial SDK
+            // views/targets are ready, before the same frame0 is encoded.
+            measureFirstFrame_=frame.index;measureLastFrame_=frame.index+options_.frames-1;
+            context_->beginGpuTimeCapture(options_.frames);sceneSamples_.reserve(options_.frames);meshletSamples_.reserve(options_.frames);
+            allocationsAtStart_=context_->memory().allocationCount()+TemporalWorker::totalGpuAllocations();
+            commandRebuildsAtStart_=context_->commandBufferRebuilds();heapUsage(heapBlocksAtStart_,heapBytesAtStart_);
+            fixtureMeasurementStarted_=true;
+        }
     }
     overlays_->prepareFrame(overlayMode_, constants.lightCount, width, height);
     if(linearCapture_&&options_.captureLinearSignal>=6)pipelines_->waitAllFinal();
@@ -1747,7 +1762,7 @@ bool Engine::frame(float dt) {
         SceneSamples& ss = sceneSamples_;
         ss.sim.push_back(toMs(s1 - s0));
         ss.sceneSync.push_back(toMs(s2 - s1));
-        ss.prepare.push_back(toMs(s4 - s3));
+        ss.prepare.push_back(toMs(s4 - s3 - fixtureStartupThisFrame_));
         ss.ui.push_back(toMs(s6 - s5));
         ss.graph.push_back(toMs(s7 - s6));
         ss.submit.push_back(toMs(s8 - s7));
