@@ -117,13 +117,22 @@ def main():
     root=Path(protocol["captures"]);refs=[reference(f) for f in range(96)];sdk=[];physical=[];artifacts=[];provenance=None
     # Metadata validation happens before pixels. The analytic source is authored
     # from its geometry/time contract, never inferred from candidate images.
-    records=[]
+    records=[];history_records=[]
     for frame in range(96):
         path=root/f"frame-{frame:06d}-view-0.json";r=json.loads(path.read_text())
         if not (r.get("actual_sdk_encoded") and r.get("finite") and r.get("channels_passed") and r.get("passed")):raise ValueError("missing successful native frame")
         if [r[k] for k in ("input_width","input_height","output_width","output_height")]!=[128,96,128,96] or r["preExposure"]!=1 or r["phase"]!=frame%64 or r["frame"]!=frame or r["view"]!=0 or r["scenario"]!="channels":raise ValueError("frame contract mismatch")
         if provenance is None:provenance=r["provenance"]
         if r["provenance"]!=provenance:raise ValueError("source/binary/manifest changed across clip")
+        if "known_signal_replacement_frame" in protocol["reference"]:
+            expected=frame in protocol["reference"]["host_reset_frames"]
+            if (r.get("requested_history_reset") is not expected or r.get("sdk_reset_submitted") is not expected or
+                r.get("requested_camera_cut") is not False or r.get("sdk_encode_delta")!=1 or r.get("history_hint_passed") is not True):
+                raise ValueError("known source reset did not reach exactly one native SDK encode")
+            if r.get("channels_wrap") is not (frame>0 and frame%64==0) or r.get("source_signal_epoch")!=r.get("input_signal_epoch",0)+frame//48+frame//64+1:
+                raise ValueError("known wrap did not persist in the source signal domain")
+            history_records.append({"frame":frame,"requested_reset":expected,"sdk_reset_submitted":r["sdk_reset_submitted"],
+                                    "input_signal_epoch":r["input_signal_epoch"],"source_signal_epoch":r["source_signal_epoch"]})
         records.append(r);artifacts.append({"path":str(path),"sha256":sha(path)})
     for frame in range(96):
         for suffix,frames in (("sdk",sdk),("physical",physical)):
@@ -142,6 +151,7 @@ def main():
         centroid=[float((weight*xx).sum()/mass),float((weight*yy).sum()/mass)] if mass else None
         diagnostic.append({"frame":f,"authored_center":[cx,48],"patch_contrast_ratio_rgb":contrast.tolist(),"positive_red_centroid":centroid})
     result.update(state="CPU_ANALYSIS_COMPLETE",provenance=provenance,input_artifacts=artifacts,
+                  history_reset_records=history_records,
                   sdk_physical_max_absolute_difference=max(float(np.max(np.abs(a-b))) for a,b in zip(sdk,physical)),
                   diagnostics=diagnostic,scope=protocol["limitations"])
     result["passed"]=result["control_sensitivity_passed"] and result["sdk"]["passed"] and result["physical"]["passed"]
