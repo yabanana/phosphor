@@ -1,0 +1,66 @@
+{
+  "protocol": "phosphor-stbn-consumer-cpu-spectrum-v2",
+  "source_commit": "12adf1218234e80ff8c67f6b3eac78a7cda71f0c",
+  "generator_version": 2,
+  "config": {
+    "width": 8,
+    "height": 8,
+    "frames": 16,
+    "dimensions": 64,
+    "sigma_spatial": 1.9,
+    "sigma_temporal": 1.9,
+    "max_relaxation_swaps": 4096
+  },
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "thresholds": [
+    0.1,
+    0.25,
+    0.5,
+    0.75,
+    0.9
+  ],
+  "controls": [
+    "uniform_permutation",
+    "iid_uniform"
+  ],
+  "control_rng": "numpy PCG64, SeedSequence([seed, 1398030926, dimension, control_index, block]); control_index=0 permutation, 1 iid",
+  "normalization": "sum band FFT power / sum all non-DC FFT power, pooled over all independent slices or pixel histories and dimensions within one seed",
+  "spatial_band": "DFT on 8x8 slice, integer-frequency modes 0<kx^2+ky^2<=2; remove each slice DC; no window (toroidal table)",
+  "temporal_band": "DFT on length16 history per fixed pixel, integer-frequency modes |kt|=1; remove each history DC; no window",
+  "gates": {
+    "rank_permutation_every_dimension": true,
+    "exact_32_bin_histogram_every_dimension": true,
+    "relaxation_converged_every_seed": true,
+    "max_mean_low_band_ratio_to_each_control": 0.75,
+    "min_seeds_better_than_each_control": 7,
+    "per_seed_dimension_abs_pearson_p95_max": 0.1,
+    "per_seed_dimension_abs_pearson_max": 0.25
+  },
+  "gate_scope": "Same v1 gates independently in EACH of 4 blocks; overall PASS requires all blocks. Rank permutation now means floor(sample*1024) is a permutation in every dimension/block. Range [0,1), C++/Python float32 bit-exact agreement and raw-mask hash reuse are additional mandatory sanity gates.",
+  "diagnostics_only": [
+    "raw-rank spectra",
+    "xy angular anisotropy",
+    "per-seed generation wall time",
+    "constant-slice/history counts",
+    "control distribution and correlations",
+    "64-frame sequence temporal spectrum at modes |k|=1 (same FFT helper, not a v1 gate on a different length)"
+  ],
+  "adoption_boundary": "Actual CPU sample() values from source v2 on 4 named blocks only. Original raw-table result stays FAIL. No GPU execution, frame-performance, rendered-quality or unbounded-convergence claim.",
+  "rank_source_commit": "8e533bfec3254dca2684de539470ca8ab4e0ea55",
+  "rank_result_sha256": "c6fca83077358c2459476029e5d855158db7d0f1e7b72e9dd14f91a51965dd99",
+  "blocks": [
+    0,
+    1,
+    2,
+    3
+  ]
+}
