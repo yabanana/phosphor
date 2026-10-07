@@ -155,7 +155,15 @@ normal-plane separation, instance slot/incarnation and material revision.
 Camera cut, resize/internal scale, world/view/signal replacement and explicit
 reset advance historyEpoch and/or set DI_RESET_HISTORY. Light mutation
 advances lightRevision. Light ID/generation and finite positive W/target are
-checked on EVERY reuse; age bounds stop indefinite old sample persistence.
+checked on EVERY reuse. `age` bounds the complete incorporated history chain:
+merging temporal history sets `max(destination.age, source.age+1)` regardless
+of endpoint selection, and counted zero proposals advance it too. Spatial
+merges propagate the maximum without adding a temporal step. The existing
+preset age/M limits remain unchanged. Resetting age when a fresh endpoint wins
+would let the survival of old proposal mass depend on its random weighted
+selection, which biases even same-receiver, IID reuse. The CPU gate enumerates
+that failure with positive weights {1,3}; this rule does not claim arbitrary
+support-changing reuse is unbiased.
 
 Cluster cells use positive near/far, rigid view transform, logarithmic z and
 conservative sphere/plane intersections. Shape extent enlarges light range.

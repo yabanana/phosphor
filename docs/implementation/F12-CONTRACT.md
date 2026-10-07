@@ -270,3 +270,12 @@ Algorithms/shader/reference code are original implementation. Local legacy
 Vulkan is reference only; no Vulkan backend or build is introduced.
 
 Parent integration amendment (NON VERIFIED): emissive records now include three live raster vertex indices and a geometryValid flag (96 B total); light_emissive_update additionally reads current GPUVertex buffer6, while updateParams.pad names its vertex count. Local positions/UV remain the portable oracle/export metadata. Geometry maintenance therefore changes world emitter sampling in the same frame. DI identity/domain revision is separate from full radiance content revision; GI invalidates on the latter.
+
+
+Integration correction: reservoir age describes the complete incorporated reuse
+chain. Every counted source advances it to max(destination.age, source.age+1),
+saturated at32, including zero/blocked histories and when a fresh endpoint wins.
+The previous selected-endpoint age caused selection-dependent expiry and biased
+even same-receiver IID reuse. Both32 limits stay unchanged. The corresponding
+finite-state CPU regression isolates this effect; correcting it does not remove
+the separately documented GI bias from differing visibility/support domains.

@@ -56,13 +56,16 @@ inline void giReservoirMerge(thread GPUGiReservoir& dst,GPUGiReservoir source,fl
     if(total<dst.M) return;
     dst.M=total;
     dst.flags|=GI_PROPOSAL_VALID;
+    // Age belongs to the incorporated history chain, not its selected endpoint.
+    // Every counted source advances it, including zero or blocked proposals.
+    const uint mergedAge=min(32u,max(dst.age,min(source.age,31u)+1u));
+    dst.age=mergedAge;
     if(!(source.flags&GI_SAMPLE_VALID) || source.W<=0.0f) {
-        if(!(dst.flags&GI_SAMPLE_VALID))dst.age=min(32u,max(dst.age,source.age+1u));
         return; // Count zero proposals without inventing a selected endpoint.
     }
     float weight=visible?target*source.W*float(m):0.0f,sum=dst.weightSum+weight;
     if(!isfinite(weight) || !isfinite(sum) || weight<=0.0f) return;
-    if(random*sum<weight) {dst=source;dst.M=total;dst.target=target;dst.age=source.age+1u;}
+    if(random*sum<weight) {dst=source;dst.M=total;dst.target=target;dst.age=mergedAge;}
     dst.weightSum=sum;
 }
 

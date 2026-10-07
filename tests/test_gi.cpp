@@ -303,3 +303,53 @@ TEST_CASE("F12 reference permits explicit infinite far and refuses inverted fini
     s.camera.farPlane=s.camera.nearPlane*0.5f;
     CHECK_FALSE(validateReferenceScene(s).ok);
 }
+
+
+TEST_CASE("F12 history-chain age includes unselected zero and blocked source mass") {
+    auto sample=secondary();sample.flags|=GI_PROPOSAL_VALID;
+    GPUGiReservoir history{},fresh{};
+    giAddCandidate(history,sample,1,1,0);giFinalize(history);history.age=31;
+    giAddCandidate(fresh,sample,1,1,0);giFinalize(fresh);
+    auto merged=fresh;CHECK_FALSE(giMerge(merged,history,1,true,0.999999f,32));
+    CHECK(merged.age==32);CHECK(merged.M==2);
+    giFinalize(merged);GPUProbeGridParams params{};GiReceiver receiver;
+    CHECK_FALSE(giHistoryCompatible(merged,params,receiver,0.1f));
+    GPUGiReservoir zero{};giAddCandidate(zero,sample,0,1,0);giFinalize(zero);zero.age=31;
+    merged=fresh;CHECK_FALSE(giMerge(merged,zero,0,false,0,32));CHECK(merged.age==32);CHECK(merged.M==2);
+    merged=fresh;CHECK_FALSE(giMerge(merged,history,0,false,0,32));CHECK(merged.age==32);CHECK(merged.M==2);
+}
+
+TEST_CASE("F12 exact same-support IID expiry is independent of endpoint selection") {
+    // Shrink the caller's age threshold to1 and capM to2 for exhaustive five-frame
+    // enumeration; production bounds remain32. True integral2, proposal weights
+    // 1/3 with equal probability. No shift or visibility mismatch is involved.
+    auto expectation=[](bool oldEndpointAge) {
+        struct State { GPUGiReservoir r;double probability; };
+        std::vector<State> states{{{},1.0}};
+        for(u32 frame=0;frame<5;++frame) {
+            std::vector<State> next;
+            for(const auto& state:states)for(float weight:{1.f,3.f}) {
+                GPUGiReservoir fresh{};auto sample=secondary();sample.flags|=GI_PROPOSAL_VALID;
+                giAddCandidate(fresh,sample,weight*0.5f,0.5f,0);giFinalize(fresh);
+                if(!state.r.M || state.r.age>=1) {next.push_back({fresh,state.probability*0.5});continue;}
+                const u32 m=std::min(state.r.M,2u);
+                const double oldWeight=double(state.r.target)*state.r.W*m;
+                const double chooseOld=oldWeight/(oldWeight+weight);
+                for(bool selectedOld:{false,true}) {
+                    auto merged=fresh;
+                    giMerge(merged,state.r,state.r.target,true,selectedOld?0.f:0.999999f,2);
+                    if(oldEndpointAge)merged.age=selectedOld?state.r.age+1:0;
+                    giFinalize(merged);
+                    next.push_back({merged,state.probability*0.5*(selectedOld?chooseOld:1-chooseOld)});
+                }
+            }
+            states=std::move(next);
+        }
+        double mean=0,probability=0;
+        for(const auto& state:states) {mean+=state.probability*state.r.target*state.r.W;probability+=state.probability;}
+        CHECK(probability==doctest::Approx(1));return mean;
+    };
+    CHECK(expectation(false)==doctest::Approx(2).epsilon(1e-6));
+    CHECK(expectation(true)==doctest::Approx(182666318.0/91265265.0).epsilon(1e-6));
+    CHECK(expectation(true)>2.001);
+}

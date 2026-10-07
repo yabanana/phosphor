@@ -76,17 +76,24 @@ inline bool reusable(const GPUDIReservoir& source, const GPUDIParams& p,
 
 inline bool merge(GPUDIReservoir& destination, GPUDIReservoir source,
                   float currentTarget, u32 maxM, double random, bool advanceAge = true) {
+    // Age bounds the complete reused history chain, not the randomly selected
+    // endpoint. Selection-dependent expiry conditions the estimator on its weights.
+    const u32 sourceAge = source.age + u32(advanceAge && source.age != std::numeric_limits<u32>::max());
+    const u32 mergedAge = std::max(destination.age, sourceAge);
     if((source.pad[1]&DI_PROPOSAL_VALID) && !source.valid && source.pad[0]==0 && source.M &&
        source.weightSum==0 && source.normalization==0 && std::isfinite(source.target)) {
-        return stream(destination,source,0,std::min(source.M,maxM),random);
+        const bool accepted = stream(destination,source,0,std::min(source.M,maxM),random);
+        if (accepted) destination.age = mergedAge; // Zero proposals also carry history.
+        return accepted;
     }
     if (!source.valid || !std::isfinite(currentTarget) || currentTarget <= 0 ||
         !std::isfinite(source.normalization) || source.normalization <= 0)
         return false;
     const u32 m = std::min(source.M, maxM);
     source.target = currentTarget;
-    if (advanceAge && source.age != std::numeric_limits<u32>::max()) ++source.age;
-    return stream(destination, source, double(currentTarget) * source.normalization * m, m, random);
+    const bool accepted = stream(destination, source, double(currentTarget) * source.normalization * m, m, random);
+    if (accepted) destination.age = mergedAge; // Also when the fresh sample wins.
+    return accepted;
 }
 
 inline bool compatible(const GPUDISurface& a, const GPUDISurface& b,

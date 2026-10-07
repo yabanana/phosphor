@@ -91,15 +91,18 @@ inline bool giMerge(GPUGiReservoir& dst, const GPUGiReservoir& src, float receiv
     if (total<dst.M) return false;
     dst.M=total;
     dst.flags|=GI_PROPOSAL_VALID;
+    // The reused mass expires independently of stochastic endpoint selection.
+    // Counted zero/blocked proposals carry the same history-chain age.
+    const u32 mergedAge=std::min(32u,std::max(dst.age,std::min(src.age,31u)+1u));
+    dst.age=mergedAge;
     if(!(src.flags&GI_SAMPLE_VALID) || !(src.W>0)) {
-        if(!(dst.flags&GI_SAMPLE_VALID))dst.age=std::min(32u,std::max(dst.age,src.age+1u));
         return false; // A valid zero proposal still contributes M above.
     }
     if (!validShift || !(std::isfinite(receiverTarget)&&receiverTarget>0)) return false;
     const float weight=receiverTarget*src.W*float(M), sum=dst.weightSum+weight;
     if (!(std::isfinite(weight)&&weight>0&&std::isfinite(sum))) return false;
     const bool selected=std::clamp(uniformRandom,0.f,0.99999994f)*sum<weight;
-    if (selected) { dst=src; dst.M=total; dst.target=receiverTarget; dst.age=src.age+1; }
+    if (selected) { dst=src; dst.M=total; dst.target=receiverTarget; dst.age=mergedAge; }
     dst.weightSum=sum;
     return selected;
 }

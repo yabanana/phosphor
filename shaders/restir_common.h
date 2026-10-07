@@ -224,14 +224,24 @@ inline bool diMerge(thread GPUDIReservoir& r, GPUDIReservoir source, GPUDISurfac
                      GPUSampledLight light, constant GPUDIParams& p, float random, bool advanceAge,
                      const device GPUEmissiveSurface* emitters,
                      const device GPUMaterial* materials, const device DITextureHandle* textures) {
-    if(diZeroProposal(source,p))return diStream(r,source,0,min(source.M,p.maxHistoryM),random);
-    if (!diReusable(source, light, p)) return false;
+    const bool zero = diZeroProposal(source,p);
+    if (!zero && !diReusable(source, light, p)) return false;
+    // Bounds the complete history chain independently of which endpoint wins.
+    // Both validity predicates guarantee source.age < maxHistoryAge, so +1
+    // cannot overflow even when the configured upper bound is UINT_MAX.
+    const uint mergedAge = max(r.age, source.age + uint(advanceAge));
     const uint m = min(source.M, p.maxHistoryM);
+    if (zero) {
+        const bool accepted = diStream(r,source,0,m,random);
+        if (accepted) r.age = mergedAge;
+        return accepted;
+    }
     const DISample sample = diSampleTexturedLight(light, source.lightIndex, float2(source.u, source.v),
                                                  diVec(destination.position), emitters, materials, textures);
     source.target = diTarget(destination, sample, p.targetFloor);
-    if (advanceAge) ++source.age;
-    return diStream(r, source, source.target * source.normalization * float(m), m, random);
+    const bool accepted = diStream(r, source, source.target * source.normalization * float(m), m, random);
+    if (accepted) r.age = mergedAge; // A fresh selection must not rejuvenate old mass.
+    return accepted;
 }
 
 // Persistent diagnostics survive sanitization; this is independent of output

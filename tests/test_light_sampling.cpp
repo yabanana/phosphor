@@ -8,6 +8,7 @@
 #include <limits>
 #include <numeric>
 #include <stdexcept>
+#include <vector>
 
 using namespace phosphor;
 namespace di = phosphor::di;
@@ -443,4 +444,58 @@ TEST_CASE("F11 poisoned empty history is not a counted zero proposal") {
     GPUDIReservoir r{},candidate{};di::stream(r,candidate,0,1,0);r.target=std::numeric_limits<float>::quiet_NaN();
     CHECK_FALSE(di::finalize(r));CHECK((r.pad[1]&DI_PROPOSAL_VALID)==0);CHECK(r.pad[0]!=0);
     GPUDIReservoir dst{};CHECK_FALSE(di::merge(dst,r,0,32,0));CHECK(dst.M==0);
+}
+
+
+TEST_CASE("F11 history-chain age advances when fresh or zero proposals win") {
+    GPUDIReservoir history{},fresh{};
+    REQUIRE(di::stream(history,candidate(1,1),1,1,0));REQUIRE(di::finalize(history));history.age=15;
+    REQUIRE(di::stream(fresh,candidate(2,1),1,1,0));REQUIRE(di::finalize(fresh));
+    auto merged=fresh;
+    REQUIRE(di::merge(merged,history,1,64,0.999999));
+    CHECK(merged.lightID==fresh.lightID);CHECK(merged.age==16);CHECK(merged.M==2);
+    GPUDIParams params{};params.maxHistoryAge=16;params.viewID=11;params.historyEpoch=4;params.lightRevision=6;
+    auto light=rectangle();light.id=merged.lightID;REQUIRE(di::finalize(merged));
+    CHECK_FALSE(di::reusable(merged,params,light));
+    GPUDIReservoir zero{};REQUIRE(di::stream(zero,candidate(0,0),0,1,0));di::finalize(zero);zero.age=15;
+    merged=fresh;REQUIRE(di::merge(merged,zero,0,64,0));
+    CHECK(merged.lightID==fresh.lightID);CHECK(merged.age==16);CHECK(merged.M==2);
+    merged=fresh;REQUIRE(di::merge(merged,history,1,64,0.999999,false));
+    CHECK(merged.age==15); // Spatial propagation does not invent a temporal step.
+}
+
+TEST_CASE("F11 exact IID history expiry does not condition the estimate on weighted selection") {
+    // Five frames, one fresh proposal/frame with weights1 or3, equal probability.
+    // Same receiver/support, capM2 and age1 isolate expiry. The scalar integral
+    // is exactly2. Enumerate ALL proposal and selection outcomes, no random seed.
+    // The old endpoint-age rule gives182666318/91265265 instead of2 at frame4.
+    auto expectation=[](bool oldEndpointAge) {
+        struct State { GPUDIReservoir r;double probability; };
+        std::vector<State> states{{{},1.0}};
+        for(u32 frame=0;frame<5;++frame) {
+            std::vector<State> next;
+            for(const auto& state:states)for(float weight:{1.f,3.f}) {
+                GPUDIReservoir fresh{};
+                di::stream(fresh,candidate(weight==1?0:1,weight*0.5f),weight,1,0);di::finalize(fresh);
+                if(!state.r.M || state.r.age>=1) {next.push_back({fresh,state.probability*0.5});continue;}
+                const u32 m=std::min(state.r.M,2u);
+                const double oldWeight=double(state.r.target)*state.r.normalization*m;
+                const double chooseOld=oldWeight/(oldWeight+weight);
+                for(bool selectedOld:{false,true}) {
+                    auto merged=fresh;
+                    di::merge(merged,state.r,state.r.target,2,selectedOld?0.0:0.999999);
+                    if(oldEndpointAge)merged.age=selectedOld?state.r.age+1:0;
+                    di::finalize(merged);
+                    next.push_back({merged,state.probability*0.5*(selectedOld?chooseOld:1-chooseOld)});
+                }
+            }
+            states=std::move(next);
+        }
+        double mean=0,probability=0;
+        for(const auto& state:states) {mean+=state.probability*state.r.target*state.r.normalization;probability+=state.probability;}
+        CHECK(probability==doctest::Approx(1));return mean;
+    };
+    CHECK(expectation(false)==doctest::Approx(2).epsilon(1e-6));
+    CHECK(expectation(true)==doctest::Approx(182666318.0/91265265.0).epsilon(1e-6));
+    CHECK(expectation(true)>2.001); // Negative old policy must lose the energy gate.
 }
