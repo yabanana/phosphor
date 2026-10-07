@@ -90,16 +90,18 @@ kernel void denoise_corrupt_history_view(constant GPUDenoiseParams& p [[buffer(0
     if(tid<p.width*p.height&&history[tid].valid)history[tid].viewID^=1u;
 }
 
-// Optional readback checker: params0,nextHistory1,atomicCounts2; outputtexture0.
-// Counts[0]=pixels,[1]=valid,[2]=invalid state/domain,[3]=invalid output. The
-// host clears these four words and fails on counts2/3; raw/reference checks
-// remain independent. ONE dimensional exact width*height dispatch.
+// Always-on checker: params0,nextHistory1,atomicCounts2; outputtexture0.
+// Eight cleared words: pixels0,valid1,invalid state/domain2,invalid output3,
+// reused valid histories4,max valid length5,actual GPU params view6/frame7.
+// Raw/reference checks remain independent. One-dimensional exact pixel dispatch.
 kernel void denoise_check(constant GPUDenoiseParams& p [[buffer(0)]],const device GPUDenoiseHistory* history [[buffer(1)]],
     device atomic_uint* counts [[buffer(2)]],texture2d<float,access::read> output [[texture(0)]],uint tid [[thread_position_in_grid]],uint lane [[thread_index_in_simdgroup]]){
     if(tid>=p.width*p.height)return;const GPUDenoiseHistory h=history[tid];bool invalid=h.flags!=0;
     if(h.valid)invalid|=h.signal!=p.signal||h.viewID!=p.viewID||h.historyEpoch!=p.historyEpoch||h.signalRevision!=p.signalRevision||
         h.length<1||h.length>p.maxHistory||!isfinite(h.firstMoment)||!isfinite(h.secondMoment)||!isfinite(h.variance)||h.variance<0||!all(isfinite(diVec(h.color)));
     const float3 color=output.read(uint2(tid%p.width,tid/p.width)).rgb;const bool badOutput=!all(isfinite(color))||any(color<0)||(p.signal==DENOISE_SIGNAL_AO&&any(color>1));
-    const uint values[4]={1u,h.valid?1u:0u,invalid?1u:0u,badOutput?1u:0u};
-    for(uint i=0;i<4;++i){const uint sum=simd_sum(values[i]);if(lane==0&&sum)atomic_fetch_add_explicit(counts+i,sum,memory_order_relaxed);}
+    const uint values[5]={1u,h.valid?1u:0u,invalid?1u:0u,badOutput?1u:0u,h.valid&&h.length>1u?1u:0u};
+    for(uint i=0;i<5;++i){const uint sum=simd_sum(values[i]);if(lane==0&&sum)atomic_fetch_add_explicit(counts+i,sum,memory_order_relaxed);}
+    const uint longest=simd_max(h.valid?h.length:0u);if(lane==0&&longest)atomic_fetch_max_explicit(counts+5,longest,memory_order_relaxed);
+    if(tid==0){atomic_store_explicit(counts+6,p.viewID,memory_order_relaxed);atomic_store_explicit(counts+7,p.frameIndex,memory_order_relaxed);}
 }

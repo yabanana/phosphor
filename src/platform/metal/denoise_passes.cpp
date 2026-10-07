@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <string>
 #include <limits>
+#include <sstream>
+#include <stdexcept>
 namespace phosphor {
 struct DenoisePasses::Impl {
     static constexpr u32 Signals=4,Views=4,MaxAtrous=5;
@@ -20,6 +22,10 @@ struct DenoisePasses::Impl {
     struct SlotSignal {
         std::array<MTL4::ArgumentTable*,MaxAtrous+5> tables{};
         MTL::Buffer* check=nullptr;bool used=false;u32 expected=0;
+        struct Checkpoint {
+            u64 frame=0;u32 view=0,pixels=0,epoch=0,revision=0,atrousIterations=0;
+            bool reset=false,scheduled=false;
+        } checkpoint;
     };
     std::array<std::array<SlotSignal,Signals>,METAL_FRAMES_IN_FLIGHT> slots{};
     struct Signal {
@@ -61,7 +67,9 @@ struct DenoisePasses::Impl {
     void prepare(const ShadowPasses::Frame& f,u64 signalEpoch,const std::array<u64,Signals>& currentRevisions){frame=f;epoch=signalEpoch;revisions=currentRevisions;
         if(!f.width||!f.height||f.width>f.backingWidth||f.height>f.backingHeight||f.slot>=METAL_FRAMES_IN_FLIGHT||f.view>=Views||
             u64(f.backingWidth)*f.backingHeight>std::numeric_limits<u32>::max())throw std::invalid_argument("Invalid F13 denoise frame extent or view");
-        for(u32 sig=0;sig<Signals;++sig){auto& state=slots.at(frame.slot)[sig];state.used=signal[sig].defined;if(state.used)updateSignal(sig);}
+        for(u32 sig=0;sig<Signals;++sig){auto& state=slots.at(frame.slot)[sig];
+            if(state.checkpoint.scheduled&&c.frameEvent()->signaledValue()<=state.checkpoint.frame)throw std::logic_error("Denoise checkpoint slot is still GPU-owned");
+            state.checkpoint.scheduled=false;state.used=signal[sig].defined;if(state.used)updateSignal(sig);}
         // Allocate only signals selected for this view, before graph callbacks.
         // First use/resize is a resource event; steady frames allocate nothing.
         if(options.directLighting!=DirectLightingMode::Legacy)reserve(DENOISE_SIGNAL_DI);
@@ -119,7 +127,12 @@ struct DenoisePasses::Impl {
             lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,poisonNext,t,frame.width*frame.height);});
         {s.counts=g.importBuffer(label+" check counts",{32},ImportPerFrame|ImportOutput);
             g.addPass(label+" checks clear",PassType::Compute,[this,sig](PassBuilder& b){signal[sig].counts=b.write(signal[sig].counts,Usage::ShaderWrite,StageDispatch);},[this,sig](PassContext& ctx){auto* t=slots[frame.slot][sig].tables[MaxAtrous+1];t->setAddress(slots[frame.slot][sig].check->gpuAddress(),0);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,clear,t,8);});
-            g.addPass(label+" independent state check",PassType::Compute,[this,sig](PassBuilder& b){auto& s=signal[sig];b.read(s.next,Usage::ShaderRead,StageDispatch);b.read(s.filtered,Usage::ShaderRead,StageDispatch);b.read(s.counts,Usage::ShaderRead,StageDispatch);s.counts=b.write(s.counts,Usage::ShaderWrite,StageDispatch);},[this,sig](PassContext& ctx){auto& s=signal[sig];auto* t=slots[frame.slot][sig].tables[MaxAtrous+2];t->setAddress(s.address,0);t->setAddress(histories[frame.view][sig].pair[s.writeSide]->gpuAddress(),1);t->setAddress(slots[frame.slot][sig].check->gpuAddress(),2);texture(t,ctx,s.filtered,0);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,checker,t,frame.width*frame.height);});}
+            g.addPass(label+" independent state check",PassType::Compute,[this,sig](PassBuilder& b){auto& s=signal[sig];b.read(s.next,Usage::ShaderRead,StageDispatch);b.read(s.filtered,Usage::ShaderRead,StageDispatch);b.read(s.counts,Usage::ShaderRead,StageDispatch);s.counts=b.write(s.counts,Usage::ShaderWrite,StageDispatch);},[this,sig](PassContext& ctx){auto& s=signal[sig];auto& state=slots[frame.slot][sig];auto* t=state.tables[MaxAtrous+2];t->setAddress(s.address,0);t->setAddress(histories[frame.view][sig].pair[s.writeSide]->gpuAddress(),1);t->setAddress(state.check->gpuAddress(),2);texture(t,ctx,s.filtered,0);
+                lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,checker,t,frame.width*frame.height);
+                // Tag only the check actually encoded, never graph definition
+                // or prepare. Later frame/view params cannot rewrite this tag.
+                state.checkpoint={frame.index,s.params.viewID,s.params.width*s.params.height,s.params.historyEpoch,s.params.signalRevision,
+                                  settings.atrousIterations,(s.params.flags&DENOISE_RESET)!=0,true};});}
         return s.filtered;
     }
     void bind(MetalGraphExecutor& e){for(u32 sig=0;sig<Signals;++sig){if(!slots[frame.slot][sig].used)continue;const auto& s=signal[sig];const auto& h=histories[frame.view][sig];
@@ -131,7 +144,20 @@ void DenoisePasses::prepareFrame(const ShadowPasses::Frame& f,u64 epoch,const st
 void DenoisePasses::invalidateAll(const char* reason){impl_->invalidate(reason);}
 rg::TextureRef DenoisePasses::addSignal(rg::RenderGraph& g,u32 s,rg::TextureRef r,rg::TextureRef m,rg::BufferRef b,rg::BufferRef metadata){return impl_->add(g,s,r,m,b,metadata);}
 void DenoisePasses::bindFrame(MetalGraphExecutor& e){impl_->bind(e);}u64 DenoisePasses::version()const{return impl_->graphVersion;}
-bool DenoisePasses::check(u32 slot)const{for(const auto& s:impl_->slots.at(slot)){if(!s.used)continue;const auto* words=static_cast<const u32*>(s.check->contents());if(words[0]!=s.expected||words[2]||words[3]){std::fprintf(stderr,"DENOISE check slot %u expected %u pixels %u valid %u stateErrors %u outputErrors %u\n",slot,s.expected,words[0],words[1],words[2],words[3]);return false;}}return true;}
+bool DenoisePasses::check(u32 slot)const{for(const auto& s:impl_->slots.at(slot)){if(!s.used)continue;const auto& tag=s.checkpoint;
+    if(!tag.scheduled||impl_->c.frameEvent()->signaledValue()<=tag.frame){std::fprintf(stderr,"DENOISE check slot %u before completed GPU frame %llu\n",slot,static_cast<unsigned long long>(tag.frame));return false;}
+    const auto* words=static_cast<const u32*>(s.check->contents());if(!words||words[0]!=tag.pixels||words[2]||words[3]||words[6]!=tag.view||words[7]!=u32(tag.frame)){if(words)std::fprintf(stderr,"DENOISE check slot %u expected %u pixels %u valid %u stateErrors %u outputErrors %u view %u/%u frame %u/%u\n",slot,tag.pixels,words[0],words[1],words[2],words[3],words[6],tag.view,words[7],u32(tag.frame));return false;}}return true;}
+std::string DenoisePasses::completedCheckpoint(u32 slot,u32 sig)const{
+    const auto& state=impl_->slots.at(slot).at(sig);const auto& tag=state.checkpoint;
+    if(!state.used||!tag.scheduled)throw std::logic_error("Denoise checkpoint was not actually encoded for this slot/signal");
+    if(impl_->c.frameEvent()->signaledValue()<=tag.frame)throw std::logic_error("Denoise checkpoint read before real GPU completion");
+    const auto* words=static_cast<const u32*>(state.check->contents());
+    if(!words||words[0]!=tag.pixels||words[6]!=tag.view||words[7]!=u32(tag.frame))throw std::logic_error("Denoise checkpoint GPU frame/view/pixel identity mismatch");
+    std::ostringstream out;out<<"{\"frame\":"<<tag.frame<<",\"view\":"<<words[6]<<",\"pixels\":"<<words[0]<<",\"valid\":"<<words[1]
+        <<",\"reused\":"<<words[4]<<",\"max_length\":"<<words[5]<<",\"invalid\":"<<words[2]<<",\"invalid_output\":"<<words[3]
+        <<",\"epoch\":"<<tag.epoch<<",\"revision\":"<<tag.revision<<",\"reset\":"<<(tag.reset?"true":"false")
+        <<",\"atrous_iterations\":"<<tag.atrousIterations<<'}';return out.str();
+}
 bool DenoisePasses::ready()const{return impl_->pipelines.compute(impl_->temporal)&&impl_->pipelines.compute(impl_->atrous)&&
     impl_->pipelines.compute(impl_->checker)&&impl_->pipelines.compute(impl_->clear)&&
     (!impl_->options.debugHistoryCorrupt||impl_->pipelines.compute(impl_->corrupt))&&

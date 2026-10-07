@@ -407,5 +407,6 @@ bool ReflectionPasses::ready()const{const auto& i=*impl_;const auto& o=i.options
 rg::TextureRef ReflectionPasses::hitDistance()const{return impl_->distance;}rg::TextureRef ReflectionPasses::rawSpecular()const{return impl_->specular;}rg::TextureRef ReflectionPasses::rawAO()const{return impl_->ao;}
 rg::TextureRef ReflectionPasses::filteredSpecular()const{return impl_->specSelected;}rg::TextureRef ReflectionPasses::filteredAO()const{return impl_->aoSelected;}rg::BufferRef ReflectionPasses::metadataRef()const{return impl_->metadata;}
 rg::TextureRef ReflectionPasses::filteredIndirectDiffuse()const{return impl_->filteredIndirect;}
+std::string ReflectionPasses::completedAOCheckpoint(u32 slot)const{return impl_->denoise.completedCheckpoint(slot,DENOISE_SIGNAL_AO);}
 const char* ReflectionPasses::probeSource()const{return impl_->source.c_str();}
 } // namespace phosphor

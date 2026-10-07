@@ -1,6 +1,7 @@
 #pragma once
 #include "platform/metal/direct_lighting_passes.h"
 #include <memory>
+#include <string>
 namespace phosphor {
 class GiPasses;
 // SOURCE ONLY / NON VERIFIED. Complete connected F13 graph host. prepareFrame
@@ -23,6 +24,7 @@ public:
     [[nodiscard]] rg::TextureRef rawAO() const;
     [[nodiscard]] rg::TextureRef filteredSpecular() const;
     [[nodiscard]] rg::TextureRef filteredAO() const;
+    [[nodiscard]] std::string completedAOCheckpoint(u32 slot) const;
     // Capture8: actual selected GI E converted once at the current receiver.
     [[nodiscard]] rg::TextureRef filteredIndirectDiffuse() const;
     [[nodiscard]] rg::BufferRef metadataRef() const;
