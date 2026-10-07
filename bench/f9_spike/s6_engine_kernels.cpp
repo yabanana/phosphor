@@ -347,6 +347,7 @@ void engineKernels(::soc::Context& ctx, ::soc::Report& rep) {
             const GPURtRay r = rays[y * kSize + x];
             generatedWrong += glm::length(d - glm::vec3(r.dx, r.dy, r.dz)) > 1e-5f || !(r.coneWidth > 0 && r.coneWidth < 0.1f);
             generatedWrong += r.pad != y * kSize + x;
+            generatedWrong += std::abs(r.tmin - glm::length(glm::vec3(near) / near.w - glm::vec3(0, 0, 2))) > 1e-5f;
         }
     // Sampled debug rays must cover the entire image, not its first rows.
     k.q.rayCount = 127;
@@ -367,7 +368,31 @@ void engineKernels(::soc::Context& ctx, ::soc::Report& rep) {
         sampledWrong += r.pad != expected || r.pad >= kRays;
         if (r.pad < kRays) { sampledWrong += sampled[r.pad]; sampled[r.pad] = true; }
     }
-    const bool pass = wrongDescriptors == 0 && primaryWrong == 0 && coneWrong == 0 && shadowWrong == 0 && offsetWrong == 0 && generatedWrong == 0 && sampledWrong == 0 && facingWrong == 0 && wrongCcwDetected == kRays && caught == 3;
+    // An opaque plane between the eye and near plane must not occlude the
+    // raster-visible backing plane. Setting tmin=0 is the negative control.
+    k.q.rayCount = kRays;
+    k.q.flags &= ~8u;
+    instances[1].modelMatrix[14] = 1.99f; // eye z2, near z1.9
+    materials[1].alphaCutoff = 0.0f;
+    k.build();
+    timeEncoder(ctx, [&](MTL4::ComputeCommandEncoder* e) {
+        k.table->setAddress(k.rays->gpuAddress(), 1);
+        k.table->setAddress(k.probe->gpuAddress(), 3);
+        k.dispatch(e, k.primary, kRays);
+    });
+    k.runTrace();
+    u32 nearClipWrong = 0, backingHits = 0;
+    for (u32 i = 0; i < kRays; ++i) {
+        nearClipWrong += hits[i].hit != 0 && hits[i].slot == 1;
+        backingHits += hits[i].hit != 0 && hits[i].slot == 0;
+        rays[i].tmin = 0;
+    }
+    k.runTrace();
+    u32 nearClipNegative = 0;
+    for (u32 i = 0; i < kRays; ++i) nearClipNegative += hits[i].hit != 0 && hits[i].slot == 1;
+    const bool pass = wrongDescriptors == 0 && primaryWrong == 0 && coneWrong == 0 && shadowWrong == 0 && offsetWrong == 0 &&
+                      generatedWrong == 0 && sampledWrong == 0 && facingWrong == 0 && wrongCcwDetected == kRays &&
+                      nearClipWrong == 0 && backingHits > 0 && nearClipNegative == kRays && caught == 3;
     rep.value("descriptors.wrong", "fields", wrongDescriptors, {}, false);
     rep.value("primary.wrong", "rays", primaryWrong, {{"rays", kRays}}, false);
     rep.value("primary_cone.wrong", "rays", coneWrong, {{"rays", kRays}}, false);
@@ -375,6 +400,8 @@ void engineKernels(::soc::Context& ctx, ::soc::Report& rep) {
     rep.value("offset.self_hits_or_invalid", "rays", offsetWrong, {}, false);
     rep.value("primary_generated.wrong", "rays", generatedWrong, {}, false);
     rep.value("sampled_primary.wrong", "rays", sampledWrong, {}, false);
+    rep.value("near_clip.wrong", "rays", nearClipWrong, {{"backing_hits", backingHits}}, false);
+    rep.value("negative.near_clip.mismatches", "rays", nearClipNegative, {}, true);
     rep.value("facing.wrong", "rays", facingWrong, {}, false);
     rep.value("negative.former_ccw.mismatches", "rays", wrongCcwDetected, {}, true);
     rep.value("primary.ms", "ms", primaryMs, {}, false);

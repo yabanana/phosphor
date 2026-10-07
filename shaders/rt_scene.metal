@@ -97,12 +97,15 @@ inline float4x4 rtInverseViewProjection(constant GPURtProbeParams& p) {
     return float4x4(float4(m[0], m[1], m[2], m[3]), float4(m[4], m[5], m[6], m[7]),
                     float4(m[8], m[9], m[10], m[11]), float4(m[12], m[13], m[14], m[15]));
 }
-inline float3 rtPrimaryDirection(constant GPURtProbeParams& p, float2 pixel) {
+inline float3 rtPrimaryNearPoint(constant GPURtProbeParams& p, float2 pixel) {
     const float2 ndc = float2(2.0f, -2.0f) * pixel / float2(p.width, p.height) + float2(-1.0f, 1.0f);
     // Reverse-Z: depth 1 is the finite near plane. Using depth 0 would produce
     // w=0 with the engine's infinite-far projection.
     const float4 near = rtInverseViewProjection(p) * float4(ndc, 1.0f, 1.0f);
-    return normalize(near.xyz / near.w - float3(p.cameraPosition[0], p.cameraPosition[1], p.cameraPosition[2]));
+    return near.xyz / near.w;
+}
+inline float3 rtPrimaryDirection(constant GPURtProbeParams& p, float2 pixel) {
+    return normalize(rtPrimaryNearPoint(p, pixel) - float3(p.cameraPosition[0], p.cameraPosition[1], p.cameraPosition[2]));
 }
 
 kernel void rt_generate_primary(device GPURtRay* rays [[buffer(1)]], constant GPURtProbeParams& p [[buffer(3)]],
@@ -123,12 +126,15 @@ kernel void rt_generate_primary(device GPURtRay* rays [[buffer(1)]], constant GP
         return;
     }
     const float2 pixel = float2(pixelIndex % p.width, pixelIndex / p.width) + 0.5f;
-    const float3 direction = rtPrimaryDirection(p, pixel);
+    const float3 eye(p.cameraPosition[0], p.cameraPosition[1], p.cameraPosition[2]);
+    const float3 nearPoint = rtPrimaryNearPoint(p, pixel);
+    const float3 direction = normalize(nearPoint - eye);
     const float3 dx = rtPrimaryDirection(p, pixel + float2(1, 0));
     const float3 dy = rtPrimaryDirection(p, pixel + float2(0, 1));
     GPURtRay r{};
     r.ox = p.cameraPosition[0]; r.oy = p.cameraPosition[1]; r.oz = p.cameraPosition[2];
     r.dx = direction.x; r.dy = direction.y; r.dz = direction.z;
+    r.tmin = length(nearPoint - eye); // raster near-plane clipping, including off-axis pixels
     r.tmax = 1e30f;
     r.mask = RT_MASK_PRIMARY;
     r.type = RT_PROBE_PRIMARY;
