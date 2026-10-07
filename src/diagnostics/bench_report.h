@@ -201,7 +201,7 @@ struct RtReport {
 // F10-F12 opt-in path metadata. Acceptance remains unverified until a tester
 // records evidence; these fields identify executed requests, not phase status.
 struct LightingReport {
-    bool present=false, reduced=false, contact=false, cache=false;
+    bool present=false, reduced=false, contact=false, cache=false, giVisibilityDisabled=false;
     std::string shadows, direct, gi,reflections,ao,denoiseRequested,denoiseEffective,denoiseFallback,probeSource;
     bool atmosphere=false,fog=false,clouds=false,cloudFullRate=false,fogHomogeneous=false;
     u32 reflectionCorrupt=0,volumeCorrupt=0;std::string volumeOracle;

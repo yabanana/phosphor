@@ -677,6 +677,9 @@ PHOSPHOR_GPU_CONSTANT u32 GI_SAMPLE_VALID = 1u;
 // Keep that proposal count/history distinct from a positive selected endpoint.
 PHOSPHOR_GPU_CONSTANT u32 GI_PROPOSAL_VALID = 2u;
 
+// Physical ablation for independent leakage validation, never a product preset.
+PHOSPHOR_GPU_CONSTANT u32 GI_DEBUG_NO_VISIBILITY = 1u;
+
 struct GPUProbeGridParams {
     float origin[3], maxDistance;
     float spacing[3], hysteresis;
@@ -688,8 +691,9 @@ struct GPUProbeGridParams {
     u32 width, height, mode, reset;
     u32 cacheCapacity, cacheProbeLimit, cacheMaxAge, cacheGeneration;
     u32 geometryRevision, lightRevision, materialRevision, viewRevision;
+    u32 debugFlags, debugPadding[3];
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeGridParams) == 160, "GPUProbeGridParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeGridParams) == 176, "GPUProbeGridParams layout");
 
 struct GPUProbeState {
     float offset[3]; u32 state;

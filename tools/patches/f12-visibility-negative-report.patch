@@ -1,0 +1,10 @@
+--- a/src/app/engine.cpp
++++ b/src/app/engine.cpp
+@@ -920,6 +920,7 @@
+         report.lighting.atmosphere=options_.atmosphere;report.lighting.fog=options_.fog;report.lighting.clouds=options_.clouds;report.lighting.cloudFullRate=options_.cloudFullRate;
+         report.lighting.cache=options_.shadowCache;report.lighting.seed=options_.lightingSeed;report.lighting.sunIndex=shadows_->sunIndex();
+         report.lighting.candidates=options_.lightingCandidates;report.lighting.spatialSamples=options_.lightingSpatialSamples;report.lighting.giRays=options_.giRays;report.lighting.checks=lightingChecks_;report.lighting.failures=lightingFailures_;
++        report.lighting.giVisibilityDisabled=options_.debugGiNoVisibility;
+     }
+     if (rt_) {
+         report.rt = rt_->report();

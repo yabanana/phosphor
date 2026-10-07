@@ -94,6 +94,7 @@ struct GiPasses::Impl {
         params=oracle->parameters(f.index,geometryGeneration);params.width=f.width;params.height=f.height;
         params.slotCount=s.slotCapacity();params.meshCount=g.getMeshCount();params.materialCount=s.materials().size();params.lightCount=f.constants.lightCount;
         params.mode=options.gi==GiMode::DDGI?GI_MODE_DDGI:options.gi==GiMode::Cache?GI_MODE_CACHE:GI_MODE_RESTIR;
+        params.debugFlags=options.debugGiNoVisibility?GI_DEBUG_NO_VISIBILITY:0u;
         // Radiometric reset clears atlas/cache/history, while geometric
         // generation alone owns classification and relocation offsets.
         params.reset=(!atlasValid||decision.reset)?1u:0u;

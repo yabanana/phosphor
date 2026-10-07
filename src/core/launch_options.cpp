@@ -595,6 +595,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.exportReference = *v;
         } else if (arg == "--debug-lighting") {
             if (!needCount(out.debugLighting)) return false;
+        } else if (arg == "--debug-gi-no-visibility") {
+            out.debugGiNoVisibility=true;
         } else if (arg == "--debug-gi-corrupt") {
             auto v=needValue();if(!v)return false;
             if(*v=="cache")out.debugGiCorrupt=1;else if(*v=="probe")out.debugGiCorrupt=2;else if(*v=="pdf")out.debugGiCorrupt=3;
@@ -1101,6 +1103,9 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if(!out.captureLinear.empty() && !out.captureLinearSequence.empty()){error="Choose single linear capture or linear sequence";return false;}
     if((!out.captureLinear.empty() || !out.captureLinearSequence.empty()) && (!out.visibility || !out.benchmark())){error="Linear capture requires --render-path visibility and --frames";return false;}
     if((out.giProbeAnchor||out.giSpacing||out.giGrid[0])&&out.gi==GiMode::Off){error="GI volume controls require --gi";return false;}
+    if(out.debugGiNoVisibility && (!out.debugLighting || out.gi==GiMode::Off || out.debugGiCorrupt)) {
+        error="--debug-gi-no-visibility requires GI, --debug-lighting N>0 and no GI state corruption";return false;
+    }
     if(out.debugGiCorrupt && (!out.debugLighting || out.gi==GiMode::Off || (out.debugGiCorrupt==3 && out.gi==GiMode::DDGI))){error="GI corruption requires --debug-lighting and an applicable GI mode";return false;}
     if(out.captureLinearSignal==1 && out.gi==GiMode::Off){error="Indirect linear signal requires --gi";return false;}
     if(out.captureLinearSignal==2 && out.directLighting==DirectLightingMode::Legacy){error="Direct linear signal requires --lighting";return false;}

@@ -192,6 +192,7 @@ static std::string lightingToJson(const LightingReport& l) {
         "\", \"experimental\": true, \"seed\": "+std::to_string(l.seed)+", \"sun_index\": "+std::to_string(l.sunIndex)+
         ", \"contact\": "+(l.contact?"true":"false")+", \"shadow_cache\": "+(l.cache?"true":"false")+
         ", \"candidate_count\": "+std::to_string(l.candidates)+", \"spatial_samples\": "+std::to_string(l.spatialSamples)+
+        ", \"gi_visibility_disabled\": "+(l.giVisibilityDisabled?"true":"false")+
         ", \"gi_rays\": "+std::to_string(l.giRays)+", \"checks\": "+std::to_string(l.checks)+
         ", \"failures\": "+std::to_string(l.failures)+", \"full_lighting_denoise\": \"F13_SOURCE_UNVERIFIED\", \"reflections\": \""+jsonEscape(l.reflections)+
         "\", \"ao\": \""+jsonEscape(l.ao)+"\", \"denoise_requested\": \""+jsonEscape(l.denoiseRequested)+

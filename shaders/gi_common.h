@@ -64,7 +64,10 @@ inline float3 giIrradiance(float3 point,float3 normal,constant GPUProbeGridParam
         float2 m=moments.sample(kGiAtlasSampler,giAtlasUV(probe,p.distanceTexels,direction,p)).xy;
         float3 tri=mix(1.0f-f,f,float3(bit));
         float wrap=max(0.05f,(dot(normal,-direction)+1.0f)*0.5f);
-        float w=tri.x*tri.y*tri.z*wrap*wrap*giVisibility(distance,m);
+        // A physical ablation: keep real rays/moments/classification and finite
+        // output so the independent image oracle, not a forced counter, detects leaks.
+        float visibility=(p.debugFlags&GI_DEBUG_NO_VISIBILITY)?1.0f:giVisibility(distance,m);
+        float w=tri.x*tri.y*tri.z*wrap*wrap*visibility;
         result+=irradiance.sample(kGiAtlasSampler,giAtlasUV(probe,p.irradianceTexels,normal,p)).rgb*w;
         weights+=w;
     }

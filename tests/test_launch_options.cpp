@@ -1176,3 +1176,14 @@ TEST_CASE("F13 fixture prewarm is bounded explicit and isolated from production"
     CHECK_FALSE(parse({"--frames","96","--denoised-fixture","constant","--denoised-fixture-output","sdk","--denoised-fixture-prewarm-ms","120001"},o,error));
     CHECK_FALSE(parse({"--frames","96","--denoised-fixture-prewarm-ms","120000"},o,error));
 }
+
+
+TEST_CASE("F12 physical visibility ablation is explicit and cannot masquerade as an invariant negative") {
+    LaunchOptions options; std::string error;
+    CHECK_FALSE(options.debugGiNoVisibility);
+    REQUIRE(parse({"--render-path","visibility","--rt","on","--lighting","restir","--gi","ddgi","--debug-lighting","1","--debug-gi-no-visibility"},options,error));
+    CHECK(options.debugGiNoVisibility); CHECK(options.debugGiCorrupt==0);
+    CHECK_FALSE(parse({"--debug-gi-no-visibility"},options,error));
+    CHECK_FALSE(parse({"--render-path","visibility","--rt","on","--lighting","restir","--gi","ddgi","--debug-gi-no-visibility"},options,error));
+    CHECK_FALSE(parse({"--render-path","visibility","--rt","on","--lighting","restir","--gi","ddgi","--debug-lighting","1","--debug-gi-corrupt","probe","--debug-gi-no-visibility"},options,error));
+}

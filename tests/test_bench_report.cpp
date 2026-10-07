@@ -129,3 +129,14 @@ TEST_CASE("F10-F12 report labels opt-in lighting and the denoise boundary") {
     CHECK(json["lighting"]["failures"]==1);CHECK(json["lighting"]["experimental"]==true);
     CHECK(json["lighting"]["full_lighting_denoise"]=="F13_SOURCE_UNVERIFIED");
 }
+
+
+TEST_CASE("F12 report identifies physical visibility ablation independently of check failures") {
+    BenchReport report;report.lighting.present=true;
+    auto json=nlohmann::json::parse(reportToJson(report));
+    CHECK(json["lighting"]["gi_visibility_disabled"]==false);
+    report.lighting.giVisibilityDisabled=true;report.lighting.checks=512;
+    json=nlohmann::json::parse(reportToJson(report));
+    CHECK(json["lighting"]["gi_visibility_disabled"]==true);
+    CHECK(json["lighting"]["checks"]==512);CHECK(json["lighting"]["failures"]==0);
+}

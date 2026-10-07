@@ -39,7 +39,7 @@ Shared layouts appended to gpu_types.h:
 
 | Type | Size | Meaning |
 |---|---:|---|
-| GPUProbeGridParams | 160 B | 10 scalar blocks, grid/preset/scene/view/cache epochs |
+| GPUProbeGridParams | 176 B | 11 scalar blocks, grid/preset/scene/view/cache epochs |
 | GPUProbeState | 32 B | bounded WORLD offset, state, generation, active age |
 | GPUProbeRay | 32 B | unit direction, signed distance, reflected linear radiance |
 | GPUProbeTraceExtra | 32 B | sampledLightCount, cacheUpdateCount, cacheCandidateCount, frameSeed, sunAngularRadius+pad |
@@ -279,3 +279,14 @@ The previous selected-endpoint age caused selection-dependent expiry and biased
 even same-receiver IID reuse. Both32 limits stay unchanged. The corresponding
 finite-state CPU regression isolates this effect; correcting it does not remove
 the separately documented GI bias from differing visibility/support domains.
+
+Independent leakage negative: `--debug-gi-no-visibility` requires enabled GI and
+`--debug-lighting N>0`, and cannot combine with a GI state-corruption negative.
+GPUProbeGridParams now appends debugFlags+padding (176B); flags default to zero.
+GI_DEBUG_NO_VISIBILITY replaces only the distance-moment visibility weight with1.
+Real rays, moments, classification, relocation, normal/trilinear weights and cache
+updates remain intact. Ordinary finite/state invariants should PASS: the frozen
+independent image leakage predicate must detect this physical negative. JSON
+`lighting.gi_visibility_disabled` identifies the run explicitly. This is diagnostic
+source pending root compilation/GPU execution, not a product setting or measured
+negative until that independent comparison has actually failed.
