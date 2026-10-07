@@ -88,6 +88,10 @@ class PhysicalAOTests(unittest.TestCase):
         self.assertFalse(result["passed"]);self.assertFalse(result["checks"]["event_ghost"])
         self.assertTrue(result["checks"]["persistent_recovery"])
         self.assertTrue(all(v for k,v in result["checks"].items() if k!="event_ghost"))
+    def test_gpu_frame_ids_cannot_be_rebased_to_fit_the_fixture_event(self):
+        protocol,_=load_protocol();shifted=records()
+        for m in shifted:m["frame"]+=1;m["history"]["frame"]+=1
+        with self.assertRaises(ValueError):validate_metadata(shifted,protocol,PROVENANCE)
     def test_rgb_scalar_and_actual_provenance_join_required(self):
         protocol,_=load_protocol();m=records();references=validate_metadata(m,protocol,PROVENANCE)
         bad=records();bad[0]["provenance"]["binary_sha"]="other-binary"

@@ -98,7 +98,7 @@ def validate_metadata(records,protocol,provenance):
     last_frame=None;baseline_identity=None;post_identity=None;references=[]
     for ordinal,m in enumerate(records):
         if m.get("schema")!=protocol["metadata_schema"] or m.get("fixture_ordinal")!=ordinal:raise ValueError("missing/misaligned fixture ordinal")
-        if not integer(m.get("frame")) or last_frame is not None and m["frame"]!=last_frame+1:raise ValueError("actual GPU submission IDs must be contiguous")
+        if not integer(m.get("frame")) or m["frame"]!=ordinal or last_frame is not None and m["frame"]!=last_frame+1:raise ValueError("actual GPU submission IDs must match fixed contiguous fixture ordinals0..63")
         last_frame=m["frame"]
         for key,value in (("view",0),("signal",9),("width",128),("height",96)):
             if m.get(key)!=value:raise ValueError("actual capture "+key+" mismatch")
@@ -196,7 +196,7 @@ def capture_files(folder):
         match=re.fullmatch(r"frame-(\d+)",p.stem)
         if not match:raise ValueError("ambiguous scalar frame filename")
         ids.append(int(match[1]))
-    if ids!=list(range(ids[0],ids[0]+64)):raise ValueError("noncontiguous actual frame filenames")
+    if ids!=list(range(64)):raise ValueError("actual frame filenames must be the fixed contiguous GPU sequence0..63")
     return pfms,jsons,ids
 
 def main(argv=None):
