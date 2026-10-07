@@ -545,5 +545,78 @@ struct GPUResolveLightingParams {
     u32 flags, sunIndex, width, height; // bits: sun visibility, replace local DI, indirect irradiance
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUResolveLightingParams) == 16, "GPUResolveLightingParams layout");
+||||||| parent of 4304675 (F11.1/F11.2: define portable light sampling and reservoir contracts (unverified))
+// F11: local-light sampling. Area emission is radiance (W/(m^2 sr));
+// point/spot emission is intensity (W/sr). Distances are world-space metres.
+PHOSPHOR_GPU_CONSTANT u32 DI_LIGHT_RECTANGLE = 3u;
+PHOSPHOR_GPU_CONSTANT u32 DI_LIGHT_DISK = 4u;
+PHOSPHOR_GPU_CONSTANT u32 DI_LIGHT_TUBE = 5u;
+PHOSPHOR_GPU_CONSTANT u32 DI_LIGHT_TRIANGLE = 6u;
+PHOSPHOR_GPU_CONSTANT u32 DI_LIGHT_TWO_SIDED = 1u;
+PHOSPHOR_GPU_CONSTANT u32 DI_RESET_HISTORY = 1u;
+PHOSPHOR_GPU_CONSTANT u32 DI_ENABLE_TEMPORAL = 2u;
+PHOSPHOR_GPU_CONSTANT u32 DI_ENABLE_SPATIAL = 4u;
+PHOSPHOR_GPU_CONSTANT u32 DI_ENABLE_VISIBILITY = 8u;
+PHOSPHOR_GPU_CONSTANT u32 DI_USE_STBN = 16u;
+
+struct GPUSampledLight {
+    u32 id, generation, type, flags;
+    float position[3], range;
+    float axisU[3], radius;
+    float axisV[3], innerCone;
+    float emission[3], outerCone;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUSampledLight) == 80, "GPUSampledLight layout");
+
+struct GPUAliasEntry {
+    float probability; // Vose threshold for this uniform column
+    float selectionPdf; // probability of choosing THIS entry's light
+    u32 alias, lightIndex;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUAliasEntry) == 16, "GPUAliasEntry layout");
+
+struct GPUDIReservoir {
+    u32 lightIndex, lightID, lightGeneration, lightRevision;
+    float u, v, target, weightSum;
+    float normalization; // W = sumWeight / (M * target(selected))
+    u32 M, age, valid;
+    u32 viewID, historyEpoch, pad[2];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDIReservoir) == 64, "GPUDIReservoir layout");
+
+struct GPUDISurface {
+    float position[3], depth; // world position; positive view distance
+    float geometricNormal[3], roughness; // WORLD geometric normal for ray offset
+    float shadingNormal[3], metallic; // material/normal-map result, matches resolve
+    float albedo[3];
+    u32 materialRevision;
+    float viewDirection[3];
+    u32 instanceSlot;
+    u32 instanceGeneration, valid, pad[2];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDISurface) == 96, "GPUDISurface layout");
+
+struct GPUDIParams {
+    u32 width, height, lightCount, frameIndex;
+    u32 candidateCount, spatialCount, spatialRadius, maxHistoryM;
+    u32 flags, viewID, historyEpoch, lightRevision;
+    u32 maxHistoryAge, stbnWidth, stbnHeight, stbnFrames;
+    float depthRelativeThreshold, normalThreshold, targetFloor, pad0;
+    u32 stbnDimensions, stbnSeed, slotCount, pad1;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDIParams) == 96, "GPUDIParams layout");
+
+struct GPULightCluster {
+    u32 count, overflow, pad[2]; // overflow selects full local-light iteration
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPULightCluster) == 16, "GPULightCluster layout");
+
+struct GPULightClusterParams {
+    float view[16];
+    float nearPlane, farPlane, tanHalfFovX, tanHalfFovY;
+    u32 gridX, gridY, gridZ, capacity;
+    u32 lightCount, pad[3];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPULightClusterParams) == 112, "GPULightClusterParams layout");
 
 } // namespace phosphor
