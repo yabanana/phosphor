@@ -20,3 +20,8 @@ TEST_CASE("F12 GI environment tuple includes solar disk sky and external LUT rev
     sky.sunAngularRadius*=2;const auto disk=epoch.update({},sky);CHECK(disk>lit);
     ++sky.externalRevision;CHECK(epoch.update({},sky)>disk);
 }
+
+TEST_CASE("F12 full GI epoch includes standalone sampled-light radiance changes") {
+    GiLightingEpoch epoch;GiEnvironment sky;const auto first=epoch.update({},sky,1);
+    CHECK(epoch.update({},sky,1)==first);CHECK(epoch.update({},sky,2)>first);
+}

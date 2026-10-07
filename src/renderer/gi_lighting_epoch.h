@@ -13,7 +13,7 @@ struct GiEnvironment {
 // radiance domain even though F11's sampled local list deliberately omits them.
 class GiLightingEpoch {
 public:
-    u64 update(std::span<const GPULight>,const GiEnvironment&);
+    u64 update(std::span<const GPULight>,const GiEnvironment&,u32 sampledRadianceRevision=0);
     [[nodiscard]] u64 value()const{return epoch_;}
 private:
     std::vector<u32> previous_;
