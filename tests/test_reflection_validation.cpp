@@ -109,7 +109,7 @@ TEST_CASE("F13 physical AO temporal fixture preserves receiver and steps its onl
         f.update(0,ecs);f.update(1.f/60.f,ecs);CHECK(f.aoTemporalOrdinal()==ordinal);
         const auto& wall=std::as_const(ecs).getComponent<TransformComponent>(f.occluder());
         CHECK(wall.position.x==doctest::Approx(ordinal<32?.8f:8.f));
-        CHECK(std::as_const(ecs).getComponent<TransformComponent>(f.mirror()).modelMatrix==receiver.modelMatrix);
+        CHECK(std::as_const(ecs).getComponent<TransformComponent>(f.mirror()).worldMatrix==receiver.worldMatrix);
     }
     const auto camera=f.getDefaultCamera();CHECK(camera.position==glm::vec3(0,0,3));CHECK(camera.target==glm::vec3(0));CHECK_FALSE(camera.orbit);
 }
