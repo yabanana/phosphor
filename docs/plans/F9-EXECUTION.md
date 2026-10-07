@@ -3,7 +3,8 @@
 Piano approvato recuperato dalla sessione Claude; esecuzione ripresa il 2026-10-07.
 Gli agenti disponibili in questa sessione mantengono la divisione per file e la
 serializzazione della GPU. Il proprietario ha successivamente autorizzato
-la prosecuzione fino a F27 e delegato la scrittura di F10–F12 a una chat
+prima la prosecuzione fino a F27, poi il limite definitivo F14, delegando
+la scrittura di F10–F14 a una chat
 separata; verifica e integrazione restano qui, dopo F9. Vedi
 [registro di prosecuzione](F9-F27-EXECUTION.md). Nessuna OPT viene attivata
 automaticamente.

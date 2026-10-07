@@ -1,7 +1,7 @@
 # F9 — Infrastruttura ray tracing
 
-Stato al 2026-10-07: implementazione integrata sul branch `phase/f9`,
-verifica di uscita in corso. La [roadmap](ROADMAP.md) conserva lo stato
+Stato al 2026-10-07: implementazione e verifica locale completate sul M5;
+la PR #18 governa CI e merge. La [roadmap](ROADMAP.md) conserva lo stato
 ufficiale. F9 costruisce e verifica le risorse RT; le ombre e l'illuminazione
 arrivano con F10–F13. Il default resta `--rt off`.
 
@@ -142,7 +142,39 @@ mise exec -- python3 tools/f9_bench.py --suite baseline --baseline-app /path/to/
 
 Il runner conserva condizioni, hash asset/binari, ordine e report di tre
 repliche; il confronto con baseline è A/B/A. La decisione finale su intervallo
-di rebuild, gate TLAS e regressioni richiede la lettura dei risultati.
+di rebuild è `0` (solo cambi strutturali): 64 frame peggiora il frame medio,
+256 frame non guadagna oltre il rumore ed entrambi aumentano il p99.
+
+Il campionamento finale delle unità AS usa una barriera AS→Dispatch e un
+dispatch di un thread prima del timestamp preciso. Sul M5/27.2 il timestamp
+nudo attribuiva soltanto 0,3 µs al TLAS e spostava il suo costo nelle unità
+successive. La prima serie è conservata come non valida per l'attribuzione AS.
+L'anchor si applica solo agli encoder Compute con lavoro AS dichiarato;
+External/MetalFX e traversal Dispatch ne sono esclusi. Non esiste con timing
+disabilitato. La prova con rebuild ogni frame misura 1,585 ms invece del
+refit a circa 0,22 ms, rendendo visibile il lavoro effettivamente eseguito.
+
+Tre repliche 1080p, 120 warmup +600 frame: aggiornamento TLAS 100K, mediana
+delle medie, **0,2213 ms native / 0,2189 ms Apple9 forzato**, contro il gate
+medio di 0,5 ms. Native p95 delle tre run: 0,257–0,340 ms; p99 0,451–0,784 ms,
+picco 2,153 ms. Non è una garanzia di deadline su ogni frame del desktop.
+
+Sponza 1080p, costo ammortizzato del probe finale in ns/raggio:
+
+| Percorso | Primary | Shadow | AO | Diffuse |
+|---|---:|---:|---:|---:|
+| Native M5 | 0,2923 | 0,3268 | 0,2220 | 0,5868 |
+| Apple9 forzato sul M5 | 0,2930 | 0,3254 | 0,2272 | 0,5876 |
+
+Tre run per caso, CV delle medie 0,5–2,4%. I secondari escludono il setup
+primario dal tempo; in questa vista tutti i pixel hanno un ricevitore.
+A/B/A lungo contro `main` `2ccdf6b`, 600+3000 frame ×3: variazione mediana
+del frame −0,16% forward, +1,22% temporal, −0,05% instances; variazione p99
+mediana −1,12%, +2,54%, +0,41%. Sono entro il criterio materiale del 3%.
+Le app desktop sono rimaste aperte; alcune repliche hanno interferenza e
+picchi maggiori. La prima serie breve rumorosa e tutte le repliche lunghe
+sono conservate, senza eliminare frame o scegliere soltanto i risultati migliori.
+[Dati](results/F9-M5Max-2026-10-07.json).
 
 ## Verifiche già eseguite e limiti
 
@@ -157,7 +189,12 @@ di rebuild, gate TLAS e regressioni richiede la lettura dei risultati.
   le discrepanze riguardano bordi/coverage/pareggi. Tutti i pixel sono inclusi.
   Il runner verifica completezza dei dati: l'accettazione delle discrepanze
   resta una revisione distinta, non un PASS automatico del solo conteggio.
-- Misure prestazionali finali, verifica completa delle varianti, CI e merge
-  ancora da completare al momento di questa nota.
+- Varianti complete: mesh 284 compatibili/52 negativi PASS (peggiore 35 pixel,
+  delta 1); indexed conserva i 28 fallimenti noti su Sponza debug 1/2, con
+  esattamente 48.081/69.903 pixel e delta 49/52 della baseline OPT-2.0.
+  L'archivio CI macOS 26 è stato verificato anche come fallback da OS diverso.
+- Hot reload Release con archivio attivo e funzione alpha avvelenata: PASS;
+  l'archivio consultato dal Compiler non nasconde la nuova funzione.
+- CI e merge restano registrati nella PR #18, separati dall'accettazione locale.
 - Unico dispositivo fisico M5 Max 128 GB. Apple9 forzato non certifica M3/T0.
   F9.6 ray binning resta candidato non attivato.

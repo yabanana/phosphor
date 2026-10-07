@@ -1,6 +1,8 @@
-# Prosecuzione F9–F27
+# Prosecuzione F9–F14 (limite aggiornato)
 
-Autorizzazione del proprietario: 2026-10-07, proseguire lo sviluppo fino a F27.
+Autorizzazione del proprietario, aggiornata 2026-10-07: proseguire fino a F14
+sviluppata, verificata e integrata, poi fermarsi. **Sostituisce il precedente
+limite F27.** Il nome del file conserva il riferimento iniziale.
 Questo registro coordina i piani esistenti; non sostituisce le caselle della
 [roadmap](../ROADMAP.md) né dichiara implementate le fasi future.
 
@@ -9,7 +11,7 @@ Questo registro coordina i piani esistenti; non sostituisce le caselle della
 - F7/F8 e revisione post-F8 integrate (PR #16/#17); indagine OS abbandonata.
 - F9 in corso su `phase/f9`, con [piano approvato](F9-EXECUTION.md), spike
   misurati e integrazione BLAS/TLAS/traversal/proxy/diagnostica in verifica.
-- F10–F12 assegnate il 2026-10-07 alla chat **Sviluppo Phosphor** per sola
+- F10–F14 assegnate il 2026-10-07 alla chat **Sviluppo Phosphor** per sola
   scrittura in worktree separato da `7997f12`: sorgenti, shader, test e runner
   non eseguiti. Questa chat aggregatrice conserva F9, review, build, prove
   CPU/GPU, misure, integrazione e merge. La consegna di codice non costituisce
@@ -17,21 +19,28 @@ Questo registro coordina i piani esistenti; non sostituisce le caselle della
 - OPT-2 resta dopo F13; i candidati OPT/EDGE richiedono un consumatore e un
   beneficio misurato. F9.6 non è attivato.
 
-## Ordine per dipendenze
+## Ordine autorizzato per dipendenze
 
 1. Chiudere F9: correttezza CPU/GPU, lifecycle, proxy misurati, V-buffer,
    regressioni, prestazioni, documenti, PR e CI prima del merge.
 2. F10–F13: ombre, luci, GI, riflessi/AO/denoiser. F10.3 richiede F11.1;
    l'uscita denoised di F11 richiede F13, senza bloccare la baseline DI.
-3. Materiali/post e mondo: F15–F17, F14 quando il corpus outdoor lo rende
+3. Completare F14 sul corpus outdoor e fermarsi dopo la sua integrazione.
+   F14.5 resta candidato, senza attivare particelle/materiali di fasi future.
+
+## Mappa futura conservata, non autorizzata in questa prosecuzione
+
+Il seguente ordine oltre F14 è solo contesto del precedente incarico.
+
+4. Materiali/post e mondo: F15–F17, F14 quando il corpus outdoor lo rende
    concreto. F14.5, F16.5 e l'intera F20 restano candidati.
-4. Anticipare il nucleo F21.3 prima di F18; prima geometria virtualizzata
+5. Anticipare il nucleo F21.3 prima di F18; prima geometria virtualizzata
    residente, poi streaming F22. F19.2 dipende da F22.3: evitare il ciclo
    fra intere fasi F18/F21/F22.
-5. Anticipare i contratti host/bridge F27.1/.7 prima di consolidare F23–F26,
+6. Anticipare i contratti host/bridge F27.1/.7 prima di consolidare F23–F26,
    per mantenere un solo mondo, scheduler e sistema asset/input. F27 dipende
    già da F5/F8; F26.1 richiede il suo runtime minimo.
-6. Completare i pacchetti selezionati di F21–F27: asset/community, streaming,
+7. Completare i pacchetti selezionati di F21–F27: asset/community, streaming,
    servizi CPU, fisica, animazione, audio e host/ECS, verificando i consumatori
    integrati e conservando i limiti hardware espliciti.
 

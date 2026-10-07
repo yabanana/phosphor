@@ -964,3 +964,40 @@ Sponza nativo 0,6318 (resolve 0,251). Baseline OPT-4.16 M5:
 [dati](results/OPT-4.16-baseline-M5Max-2026-10-04.json); `perf_record`
 commit `91c9929` nelle storie CSV.
 
+## 2026-10-07 — F9 RT nel motore (M5 Max)
+
+Release, M5 Max 128 GB, macOS 27.2 `26B5091g`, AC, nessun warning termico
+riportato dal sistema. Un processo GPU di prova alla volta, compilatori
+fermi; applicazioni desktop aperte. `tools/f9_bench.py`, tre repliche
+ruotate, 1920×1080, timestep fisso. [Dati](results/F9-M5Max-2026-10-07.json).
+
+- **TLAS:** bench8, 100K istanze vive con moto GPU, capacità 125.010 slot,
+  120 warmup +600 frame, GPU timing seriale. Mediana delle medie di
+  `RT instances + RT TLAS`: **0,2213 ms native**, **0,2189 ms Apple9 forzato**
+  (CV 3,02% / 0,35%). Native p95 0,257–0,340 ms, p99 0,451–0,784 ms,
+  massimo 2,153 ms: gate medio 0,5 ms raggiunto, nessun bound worst-case.
+- **Politica rebuild:** frame medio 7,9920 ms con solo rebuild strutturali,
+  8,2287 ms ogni 64 frame, 7,9829 ms ogni 256; p99 11,714 / 16,814 / 16,798 ms.
+  Default **0**, perché il rebuild periodico non migliora il frame oltre
+  il rumore e aumenta le code. Il rebuild ogni frame è il controllo di
+  lavoro: aggiornamento 1,585 ms contro circa 0,22 ms in refit.
+- **Sponza probe finale, ns/raggio** native: primary 0,2923, shadow 0,3268,
+  AO 0,2220, diffuse 0,5868; Apple9 forzato sullo stesso M5: 0,2930 / 0,3254
+  / 0,2272 / 0,5876. 1.244.160.000 raggi reali per run, CV 0,5–2,4%. Il costo
+  dei secondari esclude il setup primario, riportato separatamente.
+- **RT off A/B/A contro `main` `2ccdf6b`:** la serie breve da 600 frame aveva
+  forte variabilità sul temporal (+18,99%, −0,55%, +4,25%). Estesa per tutti
+  i casi a 600 warmup +3000 frame, senza scartare repliche: delta mediano
+  forward −0,16%, temporal +1,22%, instances −0,05%; delta p99 mediano −1,12%,
+  +2,54%, +0,41%. Tutti sotto la soglia materiale 3%; singole repliche
+  hanno interferenze maggiori, conservate nei dati. Nessun claim energetico.
+
+La prima serie `build/f9-perf-tlas/` **non è valida per l'attribuzione AS**:
+il timestamp diretto seguiva il dispatch ma anticipava il completamento AS
+(TLAS 0,3 µs, costo attribuito al pass successivo). Il piano di timing ora
+riconosce gli stadi dichiarati e inserisce un join AS→Dispatch +anchor prima
+del timestamp. La serie adottata è `build/f9-perf-tlas-v2/`; questa
+strumentazione è assente con timing disabilitato ed esclude External/MetalFX.
+I tempi sono contributi esclusivi alla timeline della coda, non hardware
+busy counters. GPU allocations misurate 0 nei preset stabili e nessuna
+compilazione sul render thread.

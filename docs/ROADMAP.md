@@ -514,14 +514,20 @@ qualità percepita invariata.
 
 ## F9 — Infrastruttura ray tracing [CORE]
 
-- [ ] F9.1 BLAS per mesh con build, compaction e refit nel `MTL4ComputeCommandEncoder`
-- [ ] F9.2 TLAS per frame con istanze filtrate dalla GPU scene; build guidate da indirizzo (Apple9)
-- [ ] F9.3 **Geometria proxy per l'RT** (LOD semplificati misurati) separata dal raster; mesh piena per MASK/emissive, manifest assente/invalido o protezione runtime
-- [ ] F9.4 Libreria di traversal con `intersector`, baseline scelta dal confronto misurato con `intersection_query` nello spike S3
-- [ ] F9.5 Intersection function table per alpha test nell'RT; strategia generica su Apple9/M5, indicizzazione per materiale M5 valutata nello spike e non adottata
+- [x] F9.1 BLAS per mesh con build, compaction e refit nel `MTL4ComputeCommandEncoder`
+- [x] F9.2 TLAS per frame con istanze filtrate dalla GPU scene; build guidate da indirizzo (Apple9)
+- [x] F9.3 **Geometria proxy per l'RT** (LOD semplificati misurati) separata dal raster; mesh piena per MASK/emissive, manifest assente/invalido o protezione runtime
+- [x] F9.4 Libreria di traversal con `intersector`, baseline scelta dal confronto misurato con `intersection_query` nello spike S3
+- [x] F9.5 Intersection function table per alpha test nell'RT; strategia generica su Apple9/M5, indicizzazione per materiale M5 valutata nello spike e non adottata
 - [ ] F9.6 **[CANDIDATO]** **Spike [EDGE]**: ordinamento software dei raggi per coerenza (binning per direzione/materiale) come sostituto dello shader execution reordering assente in Metal
 
 **Uscita**: TLAS da 100K istanze aggiornato entro 0,5 ms su T2; costo per raggio misurato per tier.
+
+Accettazione di sviluppo locale M5 (2026-10-07, PR #18): mediana delle medie
+TLAS 0,2213 ms native / 0,2189 ms Apple9 forzato, probe 1080p ×3, 60 casi
+funzionali/lifecycle, regressioni e controlli negativi. Picchi e dispositivi
+non disponibili restano espliciti: nessuna garanzia worst-case né certificazione
+M3. [Consegna](F9_HANDOFF.md), [dati](results/F9-M5Max-2026-10-07.json).
 
 ## F10 — Ombre ibride [AAA]
 

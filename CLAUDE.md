@@ -11,11 +11,12 @@ Planning horizons: read `docs/plans/SEQUENCING.md` and `docs/plans/README.md`.
 All 58 F/OPT plans now contain advance implementation and verification detail.
 F5/F6 are integrated (F6 merge e600887); F7/F8 have M5 development acceptance
 (F7/F8 baseline PR #14, merge 91b51c2; isolation experiment PR #15).
-Owner direction, 2026-10-07: continue development through F27. Finish and
-validate the active F9 integration, then advance phases in roadmap dependency
+Owner direction, updated 2026-10-07: continue development through F14, then STOP.
+This supersedes the earlier F27 instruction. F9 has M5 development acceptance
+(PR #18; docs/F9_HANDOFF.md). Advance phases in roadmap dependency
 order with measured spikes, regression checks, phase PRs and integration.
 The existing OPT/EDGE catalog stays selectable, not an automatic prerequisite.
-Owner work split: the `Sviluppo Phosphor` chat writes F10-F12 in a separate
+Owner work split: the `Sviluppo Phosphor` chat writes F10-F14 in a separate
 worktree, including tests and runners, without running builds or tests. The
 aggregating chat owns F9, review, CPU/GPU verification, measurements and merges.
 Writing a phase does not mark it accepted; deliver unverified phase commits.
