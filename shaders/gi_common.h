@@ -23,7 +23,7 @@ inline float3 giOctDecode(float2 uv) {
 inline float3 giProbePosition(uint id,constant GPUProbeGridParams& p,const device GPUProbeState* states) {
     uint3 c(id%p.countX,(id/p.countX)%p.countY,id/(p.countX*p.countY));
     const device GPUProbeState& s=states[id];
-    float3 offset=(p.reset || s.generation!=p.generation)?float3(0):float3(s.offset[0],s.offset[1],s.offset[2]);
+    float3 offset=s.generation!=p.generation?float3(0):float3(s.offset[0],s.offset[1],s.offset[2]);
     return float3(p.origin[0],p.origin[1],p.origin[2])+float3(p.spacing[0],p.spacing[1],p.spacing[2])*float3(c)+offset;
 }
 inline float3 giProbeDirection(uint ray,uint count,uint frame) {
