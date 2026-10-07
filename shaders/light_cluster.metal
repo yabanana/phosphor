@@ -143,6 +143,7 @@ kernel void light_cluster_shade(constant GPUDIParams& p [[buffer(0)]],
                                 const device GPUEmissiveSurface* emitters [[buffer(12)]],
                                 const device GPUMaterial* materials [[buffer(13)]],
                                 const device DITextureHandle* textures [[buffer(14)]],
+                                device atomic_uint* signalErrors [[buffer(15)]],
                                 texture2d<float, access::write> localDirect [[texture(0)]],
                                 uint tid [[thread_position_in_grid]]) {
     if (tid >= p.width * p.height) return;
@@ -160,11 +161,14 @@ kernel void light_cluster_shade(constant GPUDIParams& p [[buffer(0)]],
             // while maintaining a uniform marginal and repeatable A/B seeds.
             const float2 uv(fract(diRandom(pixel, 40u, p, ranks) + diWhite(0, 0, p.frameIndex, lightIndex * 2u, p.stbnSeed)),
                             fract(diRandom(pixel, 41u, p, ranks) + diWhite(0, 0, p.frameIndex, lightIndex * 2u + 1u, p.stbnSeed)));
+            if(!diLightFinite(lights[lightIndex]))atomic_fetch_add_explicit(signalErrors+3,1u,memory_order_relaxed);
             const DISample sample = diSampleTexturedLight(lights[lightIndex], lightIndex, uv,
                                                           diVec(surface.position), emitters, materials, textures);
-            if (sample.valid && sample.pdfArea > 0) value += diBRDF(surface, sample) / sample.pdfArea;
+            const float3 contribution=diBRDF(surface,sample);diRecordNonfinite(contribution,signalErrors,0u);
+            if (sample.valid && sample.pdfArea > 0) {value += contribution / sample.pdfArea;diRecordNonfinite(value,signalErrors,2u);}
         }
     }
+    diRecordNonfinite(value,signalErrors,1u);
     localDirect.write(float4(all(isfinite(value)) ? value : float3(0), 1), pixel);
 }
 
@@ -185,6 +189,7 @@ kernel void light_cluster_shade_rt(constant GPUDIParams& p [[buffer(0)]],
                                    const device GPUEmissiveSurface* emitters [[buffer(12)]],
                                    const device GPUMaterial* materials [[buffer(13)]],
                                    const device DITextureHandle* textures [[buffer(14)]],
+                                device atomic_uint* signalErrors [[buffer(15)]],
                                    texture2d<float, access::write> localDirect [[texture(0)]],
                                    uint tid [[thread_position_in_grid]]) {
     if (tid >= p.width * p.height) return;
@@ -200,12 +205,14 @@ kernel void light_cluster_shade_rt(constant GPUDIParams& p [[buffer(0)]],
             if (lightIndex >= p.lightCount || lights[lightIndex].type == LIGHT_DIRECTIONAL) continue;
             const float2 uv(fract(diRandom(pixel, 40u, p, ranks) + diWhite(0, 0, p.frameIndex, lightIndex * 2u, p.stbnSeed)),
                             fract(diRandom(pixel, 41u, p, ranks) + diWhite(0, 0, p.frameIndex, lightIndex * 2u + 1u, p.stbnSeed)));
+            if(!diLightFinite(lights[lightIndex]))atomic_fetch_add_explicit(signalErrors+3,1u,memory_order_relaxed);
             const DISample sample = diSampleTexturedLight(lights[lightIndex], lightIndex, uv,
                                                           diVec(surface.position), emitters, materials, textures);
-            const float3 contribution = diBRDF(surface, sample);
+            const float3 contribution = diBRDF(surface, sample);diRecordNonfinite(contribution,signalErrors,0u);
             if (sample.valid && sample.pdfArea > 0 && (!(p.flags & DI_ENABLE_VISIBILITY) || !any(contribution > 0) ||
-                diEndpointVisible(surface, sample, tlas, ift, instances, p.slotCount))) value += contribution / sample.pdfArea;
+                diEndpointVisible(surface, sample, tlas, ift, instances, p.slotCount))) {value += contribution / sample.pdfArea;diRecordNonfinite(value,signalErrors,2u);}
         }
     }
+    diRecordNonfinite(value,signalErrors,1u);
     localDirect.write(float4(all(isfinite(value)) ? value : float3(0), 1), pixel);
 }

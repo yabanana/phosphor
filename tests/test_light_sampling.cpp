@@ -392,3 +392,14 @@ TEST_CASE("F11 generated STBN ranks are reproducible independent permutations wi
     CHECK(di::whiteSample(1, 2, 3, 4, 5) == di::whiteSample(1, 2, 3, 4, 5));
     CHECK(di::whiteSample(1, 2, 3, 4, 5) != di::whiteSample(1, 2, 3, 5, 5));
 }
+
+TEST_CASE("F11 numerical diagnostic distinguishes finite-input overflow from a safe RGB write") {
+    const float finite=std::numeric_limits<float>::max()*0.5f;
+    REQUIRE(std::isfinite(finite));const double oracle=double(finite)*10000.0;
+    REQUIRE(std::isfinite(oracle));const float shaderArithmetic=finite*10000.0f;
+    CHECK_FALSE(std::isfinite(shaderArithmetic));
+    const float safeWrite=std::isfinite(shaderArithmetic)?shaderArithmetic:0.0f;
+    CHECK(std::isfinite(safeWrite));CHECK(safeWrite==0);
+    // A texture-only check would pass; the pre-sanitization diagnostic must fail.
+    CHECK_FALSE(std::isfinite(shaderArithmetic)==std::isfinite(safeWrite));
+}

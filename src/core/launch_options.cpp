@@ -543,7 +543,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             else if (*v == "cache") out.debugLightingCorrupt = 4;
             else if (*v == "pdf") out.debugLightingCorrupt = 5;
             else if (*v == "light") out.debugLightingCorrupt = 6;
-            else { error = "--debug-lighting-corrupt: expected bias, caster, history, cache, pdf or light"; return false; }
+            else if (*v == "overflow") out.debugLightingCorrupt = 7;
+            else { error = "--debug-lighting-corrupt: expected bias, caster, history, cache, pdf, light or overflow"; return false; }
         } else if (arg == "--rt-tlas-rebuild-every") {
             if (!needCount(out.rtTlasRebuildEvery)) return false;
             rtSettingsSpecified = true;
@@ -1021,7 +1022,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
        (!out.captureLinear.empty() && out.captureLinearFrame>=u64(out.warmup)+out.frames)){error="Capture/export frame is outside the requested run";return false;}
     if(!out.exportReference.empty() && !out.benchmark()){error="Reference export requires --frames";return false;}
     if(lighting && out.debugRtDeform){error="F9 diagnostic deformation does not publish raster bounds for lighting";return false;}
-    if(out.debugLightingCorrupt>=5 && out.directLighting!=DirectLightingMode::ReSTIR){error="PDF/light negative controls require --lighting restir";return false;}
+    if((out.debugLightingCorrupt==5 || out.debugLightingCorrupt==6) && out.directLighting!=DirectLightingMode::ReSTIR){error="PDF/light negative controls require --lighting restir";return false;}
     if (out.shadowCache && out.shadows != ShadowMode::CSM) { error = "--shadow-cache on requires --shadows csm"; return false; }
     if ((out.contactShadows || out.shadowCache) && out.shadows == ShadowMode::Off) {
         error = "Contact/cache requires an enabled shadow signal"; return false;
