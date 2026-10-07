@@ -101,7 +101,7 @@ kernel void gi_candidates(instance_acceleration_structure as [[buffer(0)]],
     r.slot=hit.hit?hit.slot:~0u;r.instanceGeneration=hit.generation;
     for(uint k=0;k<3u;++k) {r.position[k]=y[k];r.normal[k]=ny[k];r.radiance[k]=L[k];r.sourcePosition[k]=point[k];r.sourceNormal[k]=n[k];}
     r.flags=valid?GI_SAMPLE_VALID:0u;
-    
+
     r.proposalSolidAngle=max(0.0f,dot(n,wi))/M_PI_F;
     // Proposal density belongs to the ACTUAL biased ray origin/direction;
     // the target remains evaluated at the unoffset geometric receiver.
