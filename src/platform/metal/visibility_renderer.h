@@ -44,6 +44,7 @@ class VisibilityRenderer {
     void addPoseSnapshot(rg::RenderGraph &graph);
     rg::TextureRef addPresent(rg::RenderGraph &graph, rg::TextureRef drawable);
     [[nodiscard]] rg::TextureRef color() const { return outputs_[0]; }
+    [[nodiscard]] rg::TextureRef visibility() const { return visibility_; }
     [[nodiscard]] rg::TextureRef normalRoughness() const { return outputs_[1]; }
     [[nodiscard]] rg::TextureRef diffuseAlbedo() const { return outputs_[2]; }
     [[nodiscard]] rg::TextureRef specularAlbedo() const { return outputs_[3]; }
