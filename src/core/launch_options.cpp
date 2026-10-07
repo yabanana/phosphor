@@ -443,6 +443,27 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if (*value == "on") out.rtEnabled = true;
             else if (*value == "off") out.rtEnabled = false;
             else { error = "--rt: expected off or on"; return false; }
+        } else if (arg == "--reflections") {
+            auto v=needValue();if(!v)return false;
+            if(*v=="off")out.reflections=ReflectionMode::Off;else if(*v=="ssr")out.reflections=ReflectionMode::SSR;
+            else if(*v=="rt")out.reflections=ReflectionMode::RT;else if(*v=="probes")out.reflections=ReflectionMode::Probes;
+            else{error="--reflections: expected off, ssr, rt or probes";return false;}
+        } else if (arg == "--ao") {
+            auto v=needValue();if(!v)return false;
+            if(*v=="off")out.ao=AoMode::Off;else if(*v=="gtao")out.ao=AoMode::GTAO;else if(*v=="rtao")out.ao=AoMode::RTAO;
+            else{error="--ao: expected off, gtao or rtao";return false;}
+        } else if (arg == "--lighting-denoise") {
+            auto v=needValue();if(!v)return false;
+            if(*v=="off")out.lightingDenoise=LightingDenoiseMode::Off;else if(*v=="custom")out.lightingDenoise=LightingDenoiseMode::Custom;
+            else if(*v=="metalfx")out.lightingDenoise=LightingDenoiseMode::MetalFX;
+            else{error="--lighting-denoise: expected off, custom or metalfx";return false;}
+        } else if (arg == "--ao-radius") {
+            if(!needFloat(out.aoRadius)||out.aoRadius<=0||out.aoRadius>100){error="--ao-radius: expected world metres in (0,100]";return false;}
+        } else if (arg == "--reflection-samples") {
+            if(!needCount(out.reflectionSamples)||out.reflectionSamples<1||out.reflectionSamples>8){error="--reflection-samples: expected1..8";return false;}
+        } else if (arg == "--reflection-probe") {
+            auto v=needValue();if(!v||v->empty()||v->starts_with("--")){error="--reflection-probe: expected cooked path";return false;}out.reflectionProbePath=*v;
+        } else if (arg == "--reflection-capture-probe") {out.reflectionCaptureProbe=true;
         } else if (arg == "--shadows") {
             auto v = needValue(); if (!v) return false;
             if (*v == "off") out.shadows = ShadowMode::Off;
@@ -983,10 +1004,14 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             return false;
         }
     }
-    const bool lighting = out.shadows != ShadowMode::Off || out.directLighting != DirectLightingMode::Legacy || out.gi != GiMode::Off;
+    const bool lighting = out.shadows != ShadowMode::Off || out.directLighting != DirectLightingMode::Legacy || out.gi != GiMode::Off ||
+                          out.reflections!=ReflectionMode::Off || out.ao!=AoMode::Off || out.lightingDenoise!=LightingDenoiseMode::Off;
     if (lighting && (!out.visibility || out.tileResolve || out.adaptiveShading || out.graphScenario || out.memoryStress || out.transientTest)) {
         error = "F10-F12 lighting requires --render-path visibility with generic/binned resolve and a scene"; return false;
     }
+    if((out.reflections==ReflectionMode::RT || out.ao==AoMode::RTAO || out.reflectionCaptureProbe) && !out.rtEnabled){error="RT reflections/AO/probe capture require --rt on";return false;}
+    if(out.lightingDenoise==LightingDenoiseMode::MetalFX && out.temporalUpscale){error="Denoised and standard temporal reconstruction are separate paths";return false;}
+    if((!out.reflectionProbePath.empty() || out.reflectionCaptureProbe) && out.reflections==ReflectionMode::Off){error="Probe controls require --reflections";return false;}
     if ((out.shadows == ShadowMode::RT || out.directLighting != DirectLightingMode::Legacy || out.gi != GiMode::Off) && !out.rtEnabled) {
         error = "RT sun, local visibility and GI require --rt on"; return false;
     }

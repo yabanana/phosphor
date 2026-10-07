@@ -154,3 +154,10 @@ namespace phosphor {bool GiPasses::check(u32 slot)const {
     if(count[0]!=f.expectedPixels || count[1]!=impl_->probeCount || count[2]!=16384)return false;
     for(u32 i=3;i<8;++i)if(count[i])return false;return true;
 }}
+
+namespace phosphor {
+GiPasses::ReadResources GiPasses::readResources()const {
+    return {impl_->states,impl_->cache,impl_->paramsAddress,impl_->extraAddress,impl_->stateRef,impl_->cacheRef,
+            impl_->nextIrrRef,impl_->nextDistRef,impl_->params};
+}
+}

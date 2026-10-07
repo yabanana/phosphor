@@ -228,6 +228,9 @@ enum class RtProbe : u8 { None, Primary, Shadow, AO, Diffuse };
 enum class ShadowMode : u8 { Off, CSM, RT };
 enum class DirectLightingMode : u8 { Legacy, BruteForce, Clustered, ReSTIR };
 enum class GiMode : u8 { Off, DDGI, Cache, ReSTIR };
+enum class ReflectionMode : u8 { Off, SSR, RT, Probes };
+enum class AoMode : u8 { Off, GTAO, RTAO };
+enum class LightingDenoiseMode : u8 { Off, Custom, MetalFX };
 [[nodiscard]] const char* shadowModeName(ShadowMode);
 [[nodiscard]] const char* directLightingModeName(DirectLightingMode);
 [[nodiscard]] const char* giModeName(GiMode);
@@ -333,6 +336,12 @@ struct LaunchOptions {
     RtCorruption debugRtCorrupt = RtCorruption::None;
     RtProbe      rtProbe = RtProbe::None;
     // F10-F12: writing presets only; numerical adoption requires tester evidence.
+    ReflectionMode reflections=ReflectionMode::Off;
+    AoMode ao=AoMode::Off;
+    LightingDenoiseMode lightingDenoise=LightingDenoiseMode::Off;
+    float aoRadius=1.0f;u32 reflectionSamples=1;
+    bool reflectionCaptureProbe=false;
+    std::string reflectionProbePath;
     ShadowMode shadows = ShadowMode::Off;
     DirectLightingMode directLighting = DirectLightingMode::Legacy;
     GiMode gi = GiMode::Off;

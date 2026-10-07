@@ -7,7 +7,7 @@
 namespace phosphor {
 class DirectLightingPasses {
 public:
-    DirectLightingPasses(MetalContext&,PipelineCache&,SceneRenderer&,MeshRenderer&,VisibilityRenderer&,AccelerationStructures&,
+    DirectLightingPasses(MetalContext&,PipelineCache&,SceneRenderer&,MeshRenderer&,VisibilityRenderer&,AccelerationStructures*,
                          ShadowPasses&,const LaunchOptions&);
     ~DirectLightingPasses();
     void loadScene(const GpuScene&,const SceneStore&);
