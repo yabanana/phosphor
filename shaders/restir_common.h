@@ -186,6 +186,9 @@ inline bool diStream(thread GPUDIReservoir& r, GPUDIReservoir sample, float weig
     return true;
 }
 inline void diFinalize(thread GPUDIReservoir& r) {
+    if(!isfinite(r.weightSum)||!isfinite(r.target)||r.weightSum<0||r.target<0){
+        r.pad[0]|=DI_ERROR_WEIGHT;r.pad[1]&=~DI_PROPOSAL_VALID;r.valid=0;r.normalization=0;return;
+    }
     // Divide successively to avoid overflow of M*target even when W is finite.
     const float w = r.M > 0 && r.target > 0 ? (r.weightSum / float(r.M)) / r.target : 0;
     r.valid = r.valid && r.pad[0] == 0 && isfinite(w) && w > 0;
@@ -200,7 +203,7 @@ inline bool diValid(GPUDIReservoir r, GPUSampledLight light, constant GPUDIParam
 }
 inline bool diZeroProposal(GPUDIReservoir r,constant GPUDIParams& p) {
     return (r.pad[1]&DI_PROPOSAL_VALID) && !r.valid && r.M>0 && r.pad[0]==0 &&
-        r.weightSum==0 && r.normalization==0 && r.age<p.maxHistoryAge &&
+        r.weightSum==0 && r.normalization==0 && isfinite(r.target) && r.age<p.maxHistoryAge &&
         r.viewID==p.viewID && r.historyEpoch==p.historyEpoch && r.lightRevision==p.lightRevision;
 }
 inline bool diReusable(GPUDIReservoir r, GPUSampledLight light, constant GPUDIParams& p) {

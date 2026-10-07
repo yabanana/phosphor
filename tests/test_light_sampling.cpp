@@ -437,3 +437,9 @@ TEST_CASE("F11 valid empty proposal histories preserve Bernoulli mean and detect
     CHECK(di::reusable(zero,p,ignored));++p.historyEpoch;CHECK_FALSE(di::reusable(zero,p,ignored));
     zero.pad[1]=0;p.historyEpoch=0;CHECK_FALSE(di::reusable(zero,p,ignored));
 }
+
+TEST_CASE("F11 poisoned empty history is not a counted zero proposal") {
+    GPUDIReservoir r{},candidate{};di::stream(r,candidate,0,1,0);r.target=std::numeric_limits<float>::quiet_NaN();
+    CHECK_FALSE(di::finalize(r));CHECK((r.pad[1]&DI_PROPOSAL_VALID)==0);CHECK(r.pad[0]!=0);
+    GPUDIReservoir dst{};CHECK_FALSE(di::merge(dst,r,0,32,0));CHECK(dst.M==0);
+}
