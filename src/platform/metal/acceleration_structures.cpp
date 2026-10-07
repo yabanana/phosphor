@@ -1021,6 +1021,24 @@ bool AccelerationStructures::maintenancePending() const { return !impl_->mainten
 rg::AccelerationStructureRef AccelerationStructures::tlasRef() const { return impl_->tlas; }
 rg::BufferRef AccelerationStructures::geometryBufferRef() const { return impl_->vertexRef; }
 
+AccelerationStructures::TraceResources AccelerationStructures::traceResources(u32 slot) const {
+    const auto& f = impl_->frames.at(slot);
+    if (!impl_->enabled || !f.tlas || !impl_->textures) return {};
+    return {f.tlas, impl_->renderer.buffers().materials(), impl_->textures->tableBuffer(),
+            impl_->renderer.vertexBuffer(), impl_->indexBuffer, impl_->renderer.buffers().instances(),
+            f.meshTable, f.params};
+}
+void AccelerationStructures::declareTraceReads(rg::PassBuilder& b) const {
+    using namespace rg;
+    if (!impl_->enabled || !impl_->tlas.valid()) throw std::logic_error("RT consumer has no graph TLAS");
+    b.read(impl_->tlas, Usage::ShaderRead, StageDispatch);
+    for (auto ref : impl_->blasRefs) if (ref.valid()) b.read(ref, Usage::ShaderRead, StageDispatch);
+    b.read(impl_->renderer.dataRef(), Usage::ShaderRead, StageDispatch);
+    b.read(impl_->vertexRef, Usage::ShaderRead, StageDispatch);
+    b.read(impl_->indexRef, Usage::ShaderRead, StageDispatch);
+    b.read(impl_->meshTableRef, Usage::ShaderRead, StageDispatch);
+}
+
 AccelerationStructures::Readback AccelerationStructures::readback(u32 slot) const {
     const auto& f = impl_->frames.at(slot);
     if (!f.recorded || !f.check || !f.trace || impl_->context.frameEvent()->signaledValue() <= f.frame) return {};

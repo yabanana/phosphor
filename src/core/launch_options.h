@@ -224,6 +224,14 @@ enum class RtProbe : u8 { None, Primary, Shadow, AO, Diffuse };
 [[nodiscard]] const char* rtCorruptionName(RtCorruption corruption);
 [[nodiscard]] const char* rtProbeName(RtProbe probe);
 
+// F10-F12 experimental lighting paths. Defaults preserve the F9 baseline.
+enum class ShadowMode : u8 { Off, CSM, RT };
+enum class DirectLightingMode : u8 { Legacy, BruteForce, Clustered, ReSTIR };
+enum class GiMode : u8 { Off, DDGI, Cache, ReSTIR };
+[[nodiscard]] const char* shadowModeName(ShadowMode);
+[[nodiscard]] const char* directLightingModeName(DirectLightingMode);
+[[nodiscard]] const char* giModeName(GiMode);
+
 /// OPT-1 graph compilation modes (--graph-opt).
 enum class GraphOptMode : u8 { Off, Greedy, Plan };
 [[nodiscard]] const char* graphOptModeName(GraphOptMode mode);
@@ -324,6 +332,15 @@ struct LaunchOptions {
     bool         debugRtDeform = false;       // diagnostic mesh-0 deformation; raster bounds are unchanged
     RtCorruption debugRtCorrupt = RtCorruption::None;
     RtProbe      rtProbe = RtProbe::None;
+    // F10-F12: writing presets only; numerical adoption requires tester evidence.
+    ShadowMode shadows = ShadowMode::Off;
+    DirectLightingMode directLighting = DirectLightingMode::Legacy;
+    GiMode gi = GiMode::Off;
+    bool contactShadows = false, shadowCache = false, reducedLighting = false;
+    u32 shadowMapResolution = 2048, lightingSeed = 1;
+    u32 lightingCandidates = 8, lightingSpatialSamples = 4, giRays = 64;
+    u32 debugLighting = 0, debugLightingCorrupt = 0;
+    std::string exportReference;
     // F7/F8 renderer, temporal reconstruction, capture and bounded diagnostics.
     std::string scenePath;
     bool visibility = false, materialBinning = false; // measured baseline; specialization stays opt-in
