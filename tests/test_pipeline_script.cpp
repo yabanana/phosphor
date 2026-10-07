@@ -32,6 +32,7 @@ struct Script {
     std::map<std::string, Function> functions; // by label
     std::set<std::string> render;              // "vs|fs|constants|format|blend"
     std::set<std::string> compute;             // "kernel"
+    std::map<std::string, std::set<std::string>> computeLinked; // kernel -> statically linked function keys
     std::set<std::string> mesh;                // F6: "object|mesh|fs+constants|format|limits"
     std::set<std::string> tile;
 
@@ -41,6 +42,17 @@ struct Script {
         return k;
     }
 };
+
+// Metal's serializer emits this exact static_linking_descriptor layout in the
+// F9 harvest. Merely finding an alpha function in the global function list is
+// insufficient: it must be linked into the requested trace pipeline.
+std::set<std::string> computeLinkedFunctions(const json& pipeline, const std::map<std::string, Function>& functions) {
+    std::set<std::string> result;
+    if (!pipeline.contains("static_linking_descriptor")) return result;
+    for (const auto& ref : pipeline.at("static_linking_descriptor").value("function_descriptors", json::array()))
+        result.insert(Script::key(functions.at(stripPrefix(ref.get<std::string>()))));
+    return result;
+}
 
 Script loadScript() {
     std::ifstream in(PHOSPHOR_SOURCE_DIR "/shaders/pipelines.mtl4-json");
@@ -91,8 +103,10 @@ Script loadScript() {
                            std::to_string(p.value("max_total_threadgroups_per_mesh_grid", 0)));
     }
     for (const json& p : pds.at("compute_pipeline_descriptors")) {
-        script.compute.insert(Script::key(
-            script.functions.at(stripPrefix(p.at("compute_function_descriptor").get<std::string>()))));
+        const auto key = Script::key(script.functions.at(stripPrefix(p.at("compute_function_descriptor").get<std::string>())));
+        script.compute.insert(key);
+        const auto linked = computeLinkedFunctions(p, script.functions);
+        script.computeLinked[key].insert(linked.begin(), linked.end());
     }
     for (const json &p : pds.value("tile_render_pipeline_descriptors", json::array())) {
         script.tile.insert(
@@ -213,4 +227,31 @@ TEST_CASE("pipelines script: covers visibility, HDR and optional F7 experiments"
         CHECK_FALSE(entry.second.name.starts_with("BBRNet"));
         CHECK_FALSE(entry.second.name.starts_with("brnet"));
     }
+}
+
+TEST_CASE("pipelines script: covers RT kernels, static alpha linkage and SDR/HDR presentation") {
+    const Script script = loadScript();
+    for (const char* kernel : {"rt_clear_counters", "rt_write_instances", "rt_generate_primary", "rt_generate_secondary",
+                               "rt_trace_rays", "rt_debug_view", "rt_visibility_clear", "rt_visibility_compare"}) {
+        CAPTURE(kernel);
+        CHECK_MESSAGE(script.compute.count(kernel) == 1, "F9 pipeline missing; run tools/harvest_pipelines.sh");
+    }
+    const auto trace = script.computeLinked.find("rt_trace_rays");
+    REQUIRE_MESSAGE(trace != script.computeLinked.end(), "Missing trace pipeline in the AOT script");
+    CHECK(trace->second == std::set<std::string>{"rt_alpha_generic"});
+    pipe::PipelineDesc present;
+    present.functions = {"rt_present_vs", "rt_present_fs"};
+    CHECK(script.render.count(renderKey(present, "BGRA8Unorm_sRGB", "Disabled")) == 1);
+    CHECK(script.render.count(renderKey(present, "RGBA16Float", "Disabled")) == 1);
+}
+
+TEST_CASE("pipelines script: an unlinked alpha declaration cannot satisfy RT linkage coverage") {
+    const std::map<std::string, Function> functions{{"trace", {"rt_trace_rays", {}, false}},
+                                                 {"alpha", {"rt_alpha_generic", {}, false}}};
+    json pipeline = {{"compute_function_descriptor", "fnd:trace"}};
+    CHECK(computeLinkedFunctions(pipeline, functions).empty()); // Alpha exists, but is not linked.
+    pipeline["static_linking_descriptor"] = {{"function_descriptors", {"fnd:alpha"}}};
+    CHECK(computeLinkedFunctions(pipeline, functions) == std::set<std::string>{"rt_alpha_generic"});
+    pipeline["static_linking_descriptor"]["function_descriptors"] = json::array();
+    CHECK(computeLinkedFunctions(pipeline, functions).empty());
 }
