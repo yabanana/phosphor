@@ -703,4 +703,9 @@ struct GPUProbeTraceExtra {
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeTraceExtra) == 16, "GPUProbeTraceExtra layout");
 
+struct GPULightingCheckParams {
+    u32 width, height, restir, lightCount;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPULightingCheckParams) == 16, "GPULightingCheckParams layout");
+
 } // namespace phosphor
