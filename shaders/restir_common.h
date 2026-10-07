@@ -139,11 +139,13 @@ inline float3 diBRDF(GPUDISurface surface, DISample s) {
     const float3 fresnel = f0 + (1.0f - f0) * pow(1.0f - vh, 5.0f);
     const float3 result = ((1.0f - fresnel) * (1.0f - metallic) * albedo / M_PI_F +
                            distribution * smith * fresnel) * diIncident(s) * nl;
-    return all(isfinite(result)) ? result : float3(0);
+    return result; // caller MUST record nonfinite BEFORE any safe-output sanitization
 }
 inline float diTarget(GPUDISurface surface, DISample sample, float positiveFloor) {
     if (!sample.valid || !isfinite(positiveFloor) || !(positiveFloor > 0)) return 0;
-    return max(diLuminance(diBRDF(surface, sample)), positiveFloor);
+    const float3 value=diBRDF(surface,sample);
+    if(!all(isfinite(value)))return as_type<float>(0x7fc00000u);
+    return max(diLuminance(value),positiveFloor);
 }
 
 inline uint diHash(uint v) {
@@ -221,4 +223,15 @@ inline bool diMerge(thread GPUDIReservoir& r, GPUDIReservoir source, GPUDISurfac
     source.target = diTarget(destination, sample, p.targetFloor);
     if (advanceAge) ++source.age;
     return diStream(r, source, source.target * source.normalization * float(m), m, random);
+}
+
+// Persistent diagnostics survive sanitization; this is independent of output
+// texture consistency and does not claim an energetic reference comparison.
+inline void diRecordNonfinite(float3 value,device atomic_uint* errors,uint word) {
+    if(!all(isfinite(value)))atomic_fetch_add_explicit(errors+word,1u,memory_order_relaxed);
+}
+inline bool diLightFinite(GPUSampledLight light) {
+    return all(isfinite(diVec(light.emission))) && all(isfinite(diVec(light.position))) &&
+           all(isfinite(diVec(light.axisU))) && all(isfinite(diVec(light.axisV))) &&
+           isfinite(light.range) && isfinite(light.radius) && isfinite(light.innerCone) && isfinite(light.outerCone);
 }

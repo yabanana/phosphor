@@ -95,3 +95,19 @@ kernel void lighting_corrupt_alias(constant GPULightingCheckParams& p [[buffer(0
                                     uint tid [[thread_position_in_grid]]) {
     if (tid < p.lightCount) aliases[tid].selectionPdf = 0;
 }
+
+kernel void di_clear_signal_errors(device atomic_uint* errors [[buffer(15)]],uint tid [[thread_position_in_grid]]) {
+    if(tid<4)atomic_store_explicit(errors+tid,0u,memory_order_relaxed);
+}
+// Finite-input overflow control: place one intense point endpoint above an
+// actual receiver. Every input remains finite; BRDF*inverse-square overflows.
+kernel void di_corrupt_finite_radiance(constant GPUDIParams& p [[buffer(0)]],
+    const device GPUDISurface* surfaces [[buffer(1)]],device GPUSampledLight* lights [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+    if(tid || !p.lightCount)return;
+    for(uint i=0;i<p.width*p.height;++i)if(surfaces[i].valid){
+        GPUSampledLight l=lights[0];l.type=LIGHT_POINT;l.flags=0;l.range=1;
+        for(uint c=0;c<3;++c){l.position[c]=surfaces[i].position[c]+surfaces[i].shadingNormal[c]*0.01f;l.emission[c]=as_type<float>(0x7f000000u);}
+        lights[0]=l;break;
+    }
+}

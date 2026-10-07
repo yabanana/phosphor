@@ -41,6 +41,7 @@ kernel void restir_di_candidates(constant GPUDIParams& p [[buffer(0)]],
                 r.pad[0] |= DI_ERROR_ALIAS; continue;
             }
             const GPUSampledLight light = lights[selectedEntry.lightIndex];
+            if(!diLightFinite(light)){r.pad[0]|=DI_ERROR_WEIGHT;continue;}
             const float2 uv(diRandom(pixel, base + 2u, p, ranks), diRandom(pixel, base + 3u, p, ranks));
             const DISample sample = diSampleTexturedLight(light, selectedEntry.lightIndex, uv,
                                                           diVec(surface.position), emitters, materials, textures);
@@ -48,6 +49,7 @@ kernel void restir_di_candidates(constant GPUDIParams& p [[buffer(0)]],
             candidate.lightIndex = selectedEntry.lightIndex; candidate.lightID = light.id; candidate.lightGeneration = light.generation;
             candidate.u = uv.x; candidate.v = uv.y;
             candidate.target = diTarget(surface, sample, p.targetFloor);
+            if(!isfinite(candidate.target)){r.pad[0]|=DI_ERROR_TARGET;continue;}
             const float proposal = selectedEntry.selectionPdf * sample.pdfArea;
             const float weight = sample.valid && proposal > 0 ? candidate.target / proposal : 0;
             // Degenerate emitters have black integrands: count these proposals
@@ -159,11 +161,13 @@ kernel void restir_di_shade(constant GPUDIParams& p [[buffer(0)]],
                             const device GPUEmissiveSurface* emitters [[buffer(12)]],
                             const device GPUMaterial* materials [[buffer(13)]],
                             const device DITextureHandle* textures [[buffer(14)]],
+                            device atomic_uint* signalErrors [[buffer(15)]],
                             texture2d<float, access::write> localDirect [[texture(0)]],
                             uint tid [[thread_position_in_grid]]) {
     if (tid >= p.width * p.height) return;
     DISample sample{};
     const float3 value = diShadeSelected(surfaces[tid], reservoirs[tid], lights, p, emitters, materials, textures, sample);
+    diRecordNonfinite(value,signalErrors,1u);
     localDirect.write(float4(all(isfinite(value)) ? value : float3(0), 1), uint2(tid % p.width, tid / p.width));
 }
 
@@ -180,13 +184,16 @@ kernel void restir_di_shade_rt(constant GPUDIParams& p [[buffer(0)]],
                                const device GPUEmissiveSurface* emitters [[buffer(12)]],
                                const device GPUMaterial* materials [[buffer(13)]],
                                const device DITextureHandle* textures [[buffer(14)]],
+                            device atomic_uint* signalErrors [[buffer(15)]],
                                texture2d<float, access::write> localDirect [[texture(0)]],
                                uint tid [[thread_position_in_grid]]) {
     if (tid >= p.width * p.height) return;
     const GPUDISurface surface = surfaces[tid];
     DISample sample{};
     float3 value = diShadeSelected(surface, reservoirs[tid], lights, p, emitters, materials, textures, sample);
+    diRecordNonfinite(value,signalErrors,0u);
     if ((p.flags & DI_ENABLE_VISIBILITY) && sample.valid && any(value > 0) &&
         !diEndpointVisible(surface, sample, tlas, ift, instances, p.slotCount)) value = float3(0);
+    diRecordNonfinite(value,signalErrors,1u);
     localDirect.write(float4(all(isfinite(value)) ? value : float3(0), 1), uint2(tid % p.width, tid / p.width));
 }
