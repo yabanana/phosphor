@@ -48,9 +48,11 @@ previous INPUT PIXELS, +Y down, unjittered. Depth is reverse-Z; positive guide
 view distance is separate from device depth. No normalized texture sampling
 uses a larger F8 backing extent: SSR/depth accesses use logical integer pixels.
 
-DI/GI/SPECULAR RGB represent linear outgoing Lo, already carrying the receiving
-material factors. Reflection RGB is GGX/Fresnel weighted exactly once; it is
-not bare incident radiance. Root removes the old hemisphere SPECULAR term when
+DI and SPECULAR RGB represent linear outgoing Lo, already carrying receiving
+material factors. The integrated GI denoise input/output is irradiance E;
+surface resolve/composition converts it once with albedo*(1-metallic)/pi.
+The separate F12 indirect-diffuse reference capture is outgoing diffuse Lo.
+Reflection RGB is GGX/Fresnel weighted exactly once. Root removes the old hemisphere SPECULAR term when
 F13 reflections are enabled, then adds the reflection Lo once. SSR reads a
 stable PRE-REFLECTION radiance image (DI/GI/sun/emissive/residual diffuse),
 never the final image containing its own reflection. Guide reconstruction

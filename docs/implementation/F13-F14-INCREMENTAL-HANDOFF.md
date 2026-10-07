@@ -68,3 +68,15 @@ preExposure is blocked in production until the tester verifies its units.
 
 Stop after F14. F14.5 weather remains unactivated pending real particle/material
 consumers. No F15/OPT work, acceptance checkbox, push, PR or merge is performed.
+
+Later source increments already present:
+
+- `7def9f4`: tester463f2f4 fixture default-texture initialization.
+- `c8eec66` / `026a17a`: legitimate internal noRT probe capture, external exact
+  cooked input, supported expected-failure controls, valid nslog validation mode
+  and frozen binary/source/metallib provenance in the serial runner.
+- `90d6340`: malformed AO receiver guard before hardware rays or integer address
+  conversion; input diagnostics remain independently recorded.
+
+Raw AO storage is RGBA32Float in the actual F13 host. Scalar capture explicitly
+extracts and replicates R, without changing its producer format or denoise input.
