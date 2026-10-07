@@ -885,7 +885,8 @@ struct GPUCloudParams {
     float baseHeight, topHeight, coverage, densityScale;
     float noiseScale, erosionScale, extinction, albedo;
     float anisotropy, maxDistance, terminationTransmittance, historyWeight;
-    float depthRelativeThreshold, positionThreshold, lightStepDistance, pad;
+    float depthRelativeThreshold, positionThreshold, lightStepDistance;
+    u32 maxHistorySamples;
     u32 width, height, outputWidth, outputHeight;
     u32 marchSteps, lightSteps, seed, generation;
     u32 frameIndex, viewID, flags, corruption;

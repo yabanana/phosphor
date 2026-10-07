@@ -18,7 +18,8 @@ double fogDensity(const FogSettings& s,double y){if(!std::isfinite(y))throw std:
 double fogSliceDistance(const FogSettings& s,double slice){return s.nearDistance*std::pow(s.farDistance/s.nearDistance,std::clamp(slice,0.0,1.0));}
 FogIntegral fogHomogeneous(double sigma,glm::dvec3 source,double distance) {
     if(!(sigma>=0&&std::isfinite(sigma)&&distance>=0&&std::isfinite(distance)))throw std::invalid_argument("invalid homogeneous volume");
-    const double tau=sigma*distance,T=std::exp(-tau),integral=sigma>1e-12?-std::expm1(-tau)/sigma:distance;
+    for(double c:{source.x,source.y,source.z})if(!std::isfinite(c)||c<0)throw std::invalid_argument("invalid volume source");
+    const double tau=sigma*distance,T=std::exp(-tau),integral=sigma>0?-std::expm1(-tau)/sigma:distance;
     return {source*integral,T};
 }
 FogIntegral fogComposite(FogIntegral front,FogIntegral back){return {front.radiance+front.transmittance*back.radiance,front.transmittance*back.transmittance};}

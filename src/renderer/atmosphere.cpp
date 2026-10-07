@@ -56,7 +56,9 @@ void validateAtmosphere(const AtmosphereSettings& s) {
         if(d<2||d>2048)throw std::invalid_argument("invalid atmosphere LUT dimension");
 }
 AtmosphereMedium atmosphereMedium(const AtmosphereSettings& s,glm::dvec3 world) {
+    if(!finite(world))throw std::invalid_argument("nonfinite atmospheric world point");
     const double height=std::max(0.0,glm::length(world-s.planetCenter)-s.bottomRadius);
+    if(height>s.topRadius-s.bottomRadius)return {};
     const double rayleigh=std::exp(-height/s.rayleighScaleHeight),mie=std::exp(-height/s.mieScaleHeight);
     const double ozone=std::clamp(1.0-std::abs(height-s.ozoneCenterHeight)/s.ozoneHalfWidth,0.0,1.0);
     AtmosphereMedium m;m.rayleigh=s.rayleighScattering*rayleigh;m.mie=s.mieScattering*mie;

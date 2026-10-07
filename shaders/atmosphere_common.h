@@ -31,6 +31,7 @@ static AtmoSegment atmoSegment(float3 world,float3 ray,constant GPUAtmospherePar
 struct AtmoMedium {float3 rayleigh,mie,extinction;};
 static AtmoMedium atmoMedium(float3 world,constant GPUAtmosphereParams& p) {
     const float h=max(0.0f,length(world-atmoVec(p.planetCenter))-p.bottomRadius);
+    if(h>p.topRadius-p.bottomRadius)return {float3(0),float3(0),float3(0)};
     const float rayDensity=exp(-h/p.rayleighScaleHeight),mieDensity=exp(-h/p.mieScaleHeight);
     const float ozone=saturate(1.0f-abs(h-p.ozoneCenterHeight)/p.ozoneHalfWidth);
     AtmoMedium m;m.rayleigh=atmoVec(p.rayleighScattering)*rayDensity;m.mie=atmoVec(p.mieScattering)*mieDensity;
