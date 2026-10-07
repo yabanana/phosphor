@@ -148,7 +148,7 @@ inline float3 giSecondaryRadiance(float3 point,float3 normal,GiMaterial material
             float t=distance/max(light.range,1e-3f), window=saturate(1.0f-t*t*t*t);
             att=window*window/max(distance*distance,1e-4f);
             if(light.type==LIGHT_SPOT) att*=smoothstep(cos(light.outerCone),cos(light.innerCone),
-                dot(-wi,normalize(float3(light.direction[0],light.direction[1],light.direction[2])));
+                dot(-wi,normalize(float3(light.direction[0],light.direction[1],light.direction[2]))));
         }
         float cosN=max(0.0f,dot(normal,wi));
         if(cosN>0.0f && att>0.0f && giShadowVisible(point,normal,wi,distance,as,ift,instances,p))

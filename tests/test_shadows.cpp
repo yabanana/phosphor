@@ -94,7 +94,7 @@ TEST_CASE("F10 caster culling keeps upstream off-camera casters") {
     CHECK_FALSE(shadowCasterIntersects(cascades[0],100000,0,2.5f,0.5f));
     const glm::mat4 m=glm::make_mat4(cascades[0].viewProjection);
     const glm::vec4 outside=m*glm::vec4(100000,0,2.5f,1);
-    CHECK(std::abs(outside.x)>1 || std::abs(outside.y)>1);
+    CHECK((std::abs(outside.x)>1 || std::abs(outside.y)>1));
 }
 TEST_CASE("F10 conservative light culling retains a sphere intersecting map border") {
     GPUShadowCascade c{}; c.viewProjection[0]=1; c.viewProjection[5]=1; c.viewProjection[10]=1; c.viewProjection[15]=1;

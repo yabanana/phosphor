@@ -439,7 +439,7 @@ kernel void material_lighting_guides(
     guide.materialRevision=di.historyEpoch;guide.instanceSlot=candidate.slot;guide.instanceGeneration=instance.generation;guide.valid=1;
     output[index]=guide;
     const float3 objectPoint=float3(v0.px,v0.py,v0.pz)*weights.x+float3(v1.px,v1.py,v1.pz)*weights.y+float3(v2.px,v2.py,v2.pz)*weights.z;
-    const auto old=previousInstances[candidate.slot];
+    const device GPUInstance& old=previousInstances[candidate.slot];
     const bool valid=temporal.historyValid && old.generation==instance.generation && (old.flags&INSTANCE_FLAG_VALID);
     const float4 current=temporalMatrix(temporal.currentViewProjection)*float4(surface.worldPos,1);
     const float4 previous=valid?temporalMatrix(temporal.previousViewProjection)*visibilityMatrix(old.modelMatrix)*float4(objectPoint,1):current;
