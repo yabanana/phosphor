@@ -56,6 +56,7 @@ struct MetalfxDenoiseFixture::Impl {
     rg::BufferRef imageRef{},sampleRef{};bool nativeGraph=false;
     u64 ownVersion=1,nativeFrames=0,checkedFrames=0,steadyFrames=0,packChecks=0,failures=0;
     u32 capturedViews=0;u64 suppliedCuts=0;std::vector<metalfx_denoise::Extent> capturedExtents;
+    bool reloadRequested=false;std::vector<u32> capturedGenerations;
     mutable u64 publishedVersion=1;mutable std::pair<u64,u64> published{};
     struct ScaledPair {std::vector<float> unit,scaled;u32 width=0,height=0;FXMetamorphicComparison result{};bool checked=false;};
     std::map<u32,ScaledPair> pairs;
@@ -108,6 +109,11 @@ struct MetalfxDenoiseFixture::Impl {
         if(!metalfx_denoise::validExtent(source.extent)||source.extent.inputWidth<16||source.extent.inputHeight<16)
             throw std::invalid_argument("SDK fixture needs valid extents and at least 16 input pixels per axis");
         consume(source.slot);frame=source;if(source.cut||source.reset)++suppliedCuts;
+        // Exercise the existing cache gateway after real native GPU work, rather
+        // than merely racing an initial request at the renderer's frame5 hook.
+        // The cache owns its compiler, atomic generation and old PSO retirement.
+        if(options.scenario=="lifecycle"&&!reloadRequested&&nativeFrames>=8&&!p.reloadPending())
+            reloadRequested=p.reload(p.library());
         params={};params.width=source.extent.inputWidth;params.height=source.extent.inputHeight;params.outputWidth=source.extent.outputWidth;params.outputHeight=source.extent.outputHeight;
         params.scenario=u32(std::find(scenarios.begin(),scenarios.end(),options.scenario)-scenarios.begin());params.frame=u32(source.index);
         const u32 phase=u32(source.index/48u)%2u;
@@ -173,6 +179,7 @@ struct MetalfxDenoiseFixture::Impl {
             s.tag=params;s.frame=frame.index;s.view=frame.view;s.shaderGeneration=p.generation();s.pending=true;s.steady=frame.index%48u>=8u;++nativeFrames;
             capturedViews|=1u<<frame.view;
             if(std::find(capturedExtents.begin(),capturedExtents.end(),frame.extent)==capturedExtents.end())capturedExtents.push_back(frame.extent);
+            if(std::find(capturedGenerations.begin(),capturedGenerations.end(),s.shaderGeneration)==capturedGenerations.end())capturedGenerations.push_back(s.shaderGeneration);
         });
         nativeGraph=true;return physical;
     }
@@ -252,7 +259,7 @@ struct MetalfxDenoiseFixture::Impl {
     }
     bool lifecyclePassed()const {
         const auto& stats=adapter->stats();
-        return options.scenario!="lifecycle"||((capturedViews&(capturedViews-1u))!=0&&capturedExtents.size()>1&&suppliedCuts>0&&stats.requests>1&&stats.retirements>0&&stats.resets>1);
+        return options.scenario!="lifecycle"||((capturedViews&(capturedViews-1u))!=0&&capturedExtents.size()>1&&suppliedCuts>0&&stats.requests>1&&stats.retirements>0&&stats.resets>1&&reloadRequested&&capturedGenerations.size()>1);
     }
     bool passed()const {
         bool pairPass=true;if(options.scenario=="impulse"){
@@ -277,6 +284,8 @@ struct MetalfxDenoiseFixture::Impl {
             <<",\"actual_encoded_frames\":"<<stats.encodedFrames<<",\"factory_requests\":"<<stats.requests<<",\"retirements_submitted\":"<<stats.retirements<<",\"obsolete_requests\":"<<stats.discardedRequests
             <<",\"sdk_available\":"<<(stats.sdkAvailable?"true":"false")<<",\"device_supported\":"<<(stats.deviceSupported?"true":"false")<<",\"factory_installed\":"<<(stats.factoryInstalled?"true":"false")
             <<",\"history_resets\":"<<stats.resets<<",\"supplied_cuts\":"<<suppliedCuts<<",\"captured_view_mask\":"<<capturedViews<<",\"captured_extent_count\":"<<capturedExtents.size()<<",\"lifecycle_passed\":"<<(lifecyclePassed()?"true":"false")
+            <<",\"reload_requested_after_native_work\":"<<(reloadRequested?"true":"false")<<",\"captured_generation_count\":"<<capturedGenerations.size()
+            <<",\"retirement_is_destruction_proof\":false,\"final_destruction_verified\":false"
             <<",\"fallback_reason\":"<<quote(adapter->fallbackReason())<<",\"preexposed_policy_experiment\":"<<(options.preExposedPolicy?"true":"false")
             <<",\"phase_accepted\":false,\"production_policy_promoted\":false,\"metamorphic\":[";
         bool first=true;for(const auto& [view,pair]:pairs){if(!first)out<<',';first=false;out<<"{\"view\":"<<view<<",\"checked\":"<<(pair.checked?"true":"false")
