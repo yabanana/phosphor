@@ -1,0 +1,161 @@
+{
+  "scope": "M5 Max, API/shader validation, 300 frames at160x90; sparse numerics and full-rate control, not complete independent image certification",
+  "provenance": {
+    "binary_sha256": "6851ba1681142340ba96ae69f1b8ff68ba0db7689ef53742ce14f693daf82ca4",
+    "frozen_before_first_case": true,
+    "manifest_sha256": "ecb519f6ea00c160442685b780ba8642ae206de94650ba1815fd849d17cc7f65",
+    "metallib_path": "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/lighting/shaders/phosphor.metallib",
+    "metallib_sha256": "d202ea3987f7ee0f02c0997e9ef784eea5c604512c10a2629cb686642989b4c0",
+    "source_hash_method": "sha256-sorted-src-shaders-tools-path-and-bytes",
+    "source_sha256": "ae47e345e0f5d814d31c36bef29699551d54dbf5867b917c79ecc455ef6bc759",
+    "timeout_seconds": 300
+  },
+  "manifest_sha256": "ecb519f6ea00c160442685b780ba8642ae206de94650ba1815fd849d17cc7f65",
+  "functional_passed": true,
+  "cases": [
+    {
+      "name": "atmo-time-jump",
+      "functional_passed": true,
+      "errors": [],
+      "numerical": {
+        "actual_component_checks": 2400,
+        "actual_snapshots": 300,
+        "armed_snapshots": 0,
+        "certification": false,
+        "errors": [],
+        "failed_snapshots": 0,
+        "history_exercised_snapshots": 0,
+        "kinds": [
+          "multiscattering",
+          "sky_view",
+          "solar_disk",
+          "transmittance"
+        ],
+        "passed": true,
+        "solar_wide_snapshots": 300
+      },
+      "independent_reference_pending": true
+    },
+    {
+      "name": "fog-homogeneous-oracle",
+      "functional_passed": true,
+      "errors": [],
+      "numerical": {
+        "actual_component_checks": 3300,
+        "actual_snapshots": 300,
+        "armed_snapshots": 0,
+        "certification": false,
+        "errors": [],
+        "failed_snapshots": 0,
+        "history_exercised_snapshots": 0,
+        "kinds": [
+          "homogeneous_fog",
+          "multiscattering",
+          "sky_view",
+          "solar_disk",
+          "transmittance"
+        ],
+        "passed": true,
+        "solar_wide_snapshots": 300
+      },
+      "independent_reference_pending": true
+    },
+    {
+      "name": "clouds-full",
+      "functional_passed": true,
+      "errors": [],
+      "numerical": {
+        "actual_component_checks": 2400,
+        "actual_snapshots": 300,
+        "armed_snapshots": 0,
+        "certification": false,
+        "errors": [],
+        "failed_snapshots": 0,
+        "history_exercised_snapshots": 0,
+        "kinds": [
+          "multiscattering",
+          "sky_view",
+          "solar_disk",
+          "transmittance"
+        ],
+        "passed": true,
+        "solar_wide_snapshots": 300
+      },
+      "independent_reference_pending": true
+    },
+    {
+      "name": "clouds-reconstructed",
+      "functional_passed": true,
+      "errors": [],
+      "numerical": {
+        "actual_component_checks": 2400,
+        "actual_snapshots": 300,
+        "armed_snapshots": 0,
+        "certification": false,
+        "errors": [],
+        "failed_snapshots": 0,
+        "history_exercised_snapshots": 0,
+        "kinds": [
+          "multiscattering",
+          "sky_view",
+          "solar_disk",
+          "transmittance"
+        ],
+        "passed": true,
+        "solar_wide_snapshots": 300
+      },
+      "independent_reference_pending": true,
+      "control_metrics": {
+        "passed": true,
+        "reference_accepted": false,
+        "regions": {
+          "primary-signal": {
+            "checks": {
+              "dynamic_sensitivity": true,
+              "flicker": true,
+              "ghost_support": true,
+              "recovery": true,
+              "spatial_p95": true,
+              "worst_frame": true
+            },
+            "metrics": {
+              "linear_rmse_max": 0.002271372818737719,
+              "linear_rmse_p95": 0.002163931192280019,
+              "old_frame_attraction_max": 0.7126962224067738,
+              "recovery_frames": {
+                "camera-cut": 0
+              },
+              "reference_change_energy": 13.760292737656812,
+              "residual_flicker_mean": 0.00026822506062706156,
+              "signed_bias_mean": 6.544681991396285e-05,
+              "support_ghost_fraction_max": 0.02138861713388592
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "all-volumes-moving",
+      "functional_passed": true,
+      "errors": [],
+      "numerical": {
+        "actual_component_checks": 2400,
+        "actual_snapshots": 300,
+        "armed_snapshots": 0,
+        "certification": false,
+        "errors": [],
+        "failed_snapshots": 0,
+        "history_exercised_snapshots": 0,
+        "kinds": [
+          "multiscattering",
+          "sky_view",
+          "solar_disk",
+          "transmittance"
+        ],
+        "passed": true,
+        "solar_wide_snapshots": 300
+      },
+      "independent_reference_pending": true
+    }
+  ]
+}
