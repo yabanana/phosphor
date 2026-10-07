@@ -132,3 +132,30 @@ TEST_CASE("F13 animated ancestor excludes static children from raster and update
     // Removing MotionComponent restores both memberships without recreating nodes.
     reflectionProbeStaticSlots(instances,nodes,{},selected);CHECK(selected==std::vector<u32>{0,1});
 }
+
+TEST_CASE("F13 probe BRDF fit stays physical without concealing invalid weights"){
+    for(float roughness:{.5f,1.f})for(float nv:{.05f,.5f,1.f})for(float f0:{0.f,1.f}) {
+        auto s=shiny();s.roughness=roughness;s.albedo[0]=s.albedo[1]=s.albedo[2]=f0;
+        s.viewDirection[0]=std::sqrt(1-nv*nv);s.viewDirection[2]=nv;
+        const auto bounded=reflectionProbeContribution(s,glm::vec3(1));
+        const auto reference=reflectionReference(s,256,512,white);
+        // Uniform solid-angle GGX quadrature is independent of the split-sum
+        // fit. Projecting a finite fit onto [0,1] cannot increase its absolute
+        // error against this physical integral; it is not an exact-fit claim.
+        const glm::vec4 r=roughness*glm::vec4(-1,-.0275f,-.572f,.022f)+glm::vec4(1,.0425f,1.04f,-.04f);
+        const float a=std::min(r.x*r.x,std::exp2(-9.28f*nv))*r.x+r.y;
+        const float raw=f0*(-1.04f*a+r.z)+(1.04f*a+r.w);
+        REQUIRE(reference.x>=0);REQUIRE(reference.x<=1);
+        CHECK(bounded.x>=0);CHECK(bounded.x<=1);
+        CHECK(std::abs(double(bounded.x)-reference.x)<=std::abs(double(raw)-reference.x)+1e-6);
+        if(roughness==1&&f0==0){CHECK(raw==doctest::Approx(-.0024f));CHECK(bounded.x==0);CHECK(reference.x>0);}
+        // A deliberately limited fit remains detectably approximate at rough
+        // normal incidence, rather than claiming all clamps solve its error.
+        if(roughness==1&&f0==1&&nv==1){
+            CHECK(reference.x==doctest::Approx(1-std::log(2.0)).epsilon(1e-5));
+            CHECK(bounded.x==doctest::Approx(.45f));
+        }
+    }
+    auto corrupt=shiny();corrupt.albedo[0]=std::numeric_limits<float>::quiet_NaN();
+    CHECK_FALSE(std::isfinite(reflectionProbeContribution(corrupt,glm::vec3(1)).x));
+}

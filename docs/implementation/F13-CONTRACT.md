@@ -103,6 +103,20 @@ and proposalPDF0. These two paths are alternatives. Probe coverage/blend
 weights normalize overlapping captures and fill incomplete coverage with the
 declared environment. The environment is a parameter, not measured sky data.
 
+The split-sum fit's finite BRDF-integral weight is projected onto [0,1] before
+multiplying incident radiance. This is a domain correction for that analytic
+approximation only: roughness1 gives B=-.0024, which otherwise makes black
+or strongly saturated metals emit negative reflection channels. NaN/Inf fit
+weights and invalid radiance remain errors recorded before reduction; there
+is no final-radiance clamp hiding them. Independent uniform-solid-angle GGX
+quadrature checks black/white metals at roughness .5/1 and NdotV .05/.5/1.
+Projection onto the physical interval cannot worsen absolute integral error.
+It does not make the fit exact: at roughness1, NdotV1, F0=1 the fit is .45
+versus exact 1-ln(2)=.3068528. A CPU-only 256x512 quadrature at roughness1,
+NdotV .05 gives approximately .847777 for F0=1 and .032090 for F0=0 versus
+bounded-fit .45 and0 respectively. These limitations need image-level quality
+decisions separately; they are not passed GPU reference gates.
+
 ## AO model and limits
 
 RTAO samples cosine-weighted geometric hemisphere visibility over radiusR,

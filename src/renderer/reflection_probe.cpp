@@ -78,6 +78,10 @@ glm::vec3 reflectionProbeContribution(const GPUDISurface& s,glm::vec3 L){
     const float nv=std::max(0.f,glm::dot(glm::normalize(v3(s.shadingNormal)),glm::normalize(v3(s.viewDirection))));
     const glm::vec4 fit=std::clamp(s.roughness,0.f,1.f)*glm::vec4(-1,-.0275f,-.572f,.022f)+glm::vec4(1,.0425f,1.04f,-.04f);
     const float a=std::min(fit.x*fit.x,std::exp2(-9.28f*nv))*fit.x+fit.y;const glm::vec2 ab=glm::vec2(-1.04f,1.04f)*a+glm::vec2(fit.z,fit.w);
-    const auto f0=glm::mix(glm::vec3(.04f),v3(s.albedo),std::clamp(s.metallic,0.f,1.f));return glm::max(L,glm::vec3(0))*(f0*ab.x+ab.y);
+    const auto f0=glm::mix(glm::vec3(.04f),v3(s.albedo),std::clamp(s.metallic,0.f,1.f));
+    const auto weight=f0*ab.x+ab.y;
+    // This bounds the known analytic-fit error, not arbitrary radiance errors.
+    // Preserve nonfinite weight so the caller can observe invalid source data.
+    return glm::max(L,glm::vec3(0))*(finite(weight)?glm::clamp(weight,glm::vec3(0),glm::vec3(1)):weight);
 }
 } // namespace phosphor
