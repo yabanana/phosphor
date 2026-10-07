@@ -24,6 +24,7 @@ public:
     [[nodiscard]] u32 lightCount() const;
     [[nodiscard]] u32 lightRevision() const;
     [[nodiscard]] u64 version() const;
+    [[nodiscard]] bool check(u32 slot) const;
 private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };

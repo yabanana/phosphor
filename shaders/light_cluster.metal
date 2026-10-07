@@ -22,6 +22,7 @@ kernel void light_emissive_update(constant GPUEmissiveUpdateParams& p [[buffer(0
                                   const device GPUMaterial* materials [[buffer(3)]],
                                   const device GPUSampledLight* source [[buffer(4)]],
                                   device GPUSampledLight* destination [[buffer(5)]],
+                                  const device GPUVertex* vertices [[buffer(6)]],
                                   uint tid [[thread_position_in_grid]]) {
     if (tid >= p.lightCount) return;
     GPUSampledLight light = source[tid];
@@ -34,11 +35,15 @@ kernel void light_emissive_update(constant GPUEmissiveUpdateParams& p [[buffer(0
             valid = (instance.flags & INSTANCE_FLAG_VALID) && instance.generation == emitter.instanceGeneration &&
                     instance.materialIndex == emitter.materialIndex;
         }
+        if(emitter.geometryValid && (emitter.vertex0>=p.pad || emitter.vertex1>=p.pad || emitter.vertex2>=p.pad))valid=false;
         if (valid) {
             const GPUMaterial material = materials[emitter.materialIndex];
-            const float3 a = emitterWorldPoint(instance, float3(emitter.p0[0], emitter.p0[1], emitter.p0[2]));
-            const float3 b = emitterWorldPoint(instance, float3(emitter.p1[0], emitter.p1[1], emitter.p1[2]));
-            const float3 c = emitterWorldPoint(instance, float3(emitter.p2[0], emitter.p2[1], emitter.p2[2]));
+            const GPUVertex v0=emitter.geometryValid?vertices[emitter.vertex0]:GPUVertex{};
+            const GPUVertex v1=emitter.geometryValid?vertices[emitter.vertex1]:GPUVertex{};
+            const GPUVertex v2=emitter.geometryValid?vertices[emitter.vertex2]:GPUVertex{};
+            const float3 a = emitterWorldPoint(instance, emitter.geometryValid?float3(v0.px,v0.py,v0.pz):float3(emitter.p0[0],emitter.p0[1],emitter.p0[2]));
+            const float3 b = emitterWorldPoint(instance, emitter.geometryValid?float3(v1.px,v1.py,v1.pz):float3(emitter.p1[0],emitter.p1[1],emitter.p1[2]));
+            const float3 c = emitterWorldPoint(instance, emitter.geometryValid?float3(v2.px,v2.py,v2.pz):float3(emitter.p2[0],emitter.p2[1],emitter.p2[2]));
             const float3 u = b - a, v = c - a;
             light.position[0] = a.x; light.position[1] = a.y; light.position[2] = a.z;
             light.axisU[0] = u.x; light.axisU[1] = u.y; light.axisU[2] = u.z;

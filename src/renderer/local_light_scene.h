@@ -11,9 +11,9 @@ public:
     std::vector<GPUSampledLight> lights;
     std::vector<GPUEmissiveSurface> emitters;
     di::AliasTable alias;
-    u32 revision=1;
+    u32 revision=1, radianceRevision=1;
 private:
     std::vector<double> weights_;
-    u64 hash_=0;
+    u64 hash_=0, radianceHash_=0;
 };
 } // namespace phosphor
