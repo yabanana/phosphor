@@ -10,8 +10,8 @@ by4; old W then underestimates a constant-integrand current integral by4.
 The host now evaluates the same world poses as the scene transform producer,
 using the frame's actual uploaded motion phases. An exact identity/incarnation
 plus linear-metric check permits rigid movement and rejects non-rigid changes,
-then increments the history content epoch. The tiny comparison tolerance2e-5
-covers FP32 matrix arithmetic, not a measured quality/estimator budget. Shear is
+then increments the history content epoch. Comparison is exact: a rounded rotation that changes the serialized linear metric
+may conservatively reset. No small-scale-change bias allowance is assumed. Shear is
 conservatively rejected even if one triangle's area is accidentally unchanged.
 Proposal support remains full and unchanged; a fresh candidate uses CURRENT
 world area/PDF. No unimplemented Jacobian is substituted in `diMerge`.
