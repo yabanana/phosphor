@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 #include "renderer/atmosphere.h"
+#include "renderer/history_registry.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -116,6 +117,31 @@ TEST_CASE("F14 one clock is deterministic for sun moon stars exposure and resets
     const auto explicitJump=a.sample(900.016,true);CHECK(explicitJump.reset);
     const auto backwards=a.sample(800);CHECK(backwards.reset);CHECK(backwards.moonPhase>=0);CHECK(backwards.moonPhase<=1);
     CHECK_THROWS(a.sample(std::numeric_limits<double>::infinity()));
+}
+TEST_CASE("F14 controlled clock retains real jumps and permits naturally eligible static histories") {
+    DayNightSettings settings;settings.dayLengthSeconds=16;
+    DayNightClock clock(settings);AtmosphereVersions versions;AtmosphereSettings atmosphere;
+    HistoryRegistry history;const HistoryRegistry::Extent extent{64,36,160,90};
+    const float vp[16]={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
+    u64 previousEpoch=0,previousSky=0;
+    for(u64 frame=0;frame<7;++frame) {
+        const double source=(double(frame)+1)/60;
+        CHECK(atmosphereClockSeconds(source,frame,16,0,false)==source);
+        CHECK(atmosphereClockSeconds(source,frame,16,3,false)==source+double(frame/3)*8);
+        const double frozen=atmosphereClockSeconds(source,frame,16,3,true);
+        CHECK(frozen==double(frame/3)*8);
+        const bool jump=frame>0&&frame%3==0;const auto state=clock.sample(frozen,jump);
+        const auto revision=versions.update(atmosphere,state,{0,2,0});
+        const auto decision=history.begin(0,extent,revision.skyRevision,state.reset,state.reset);
+        CHECK(state.reset==(frame==0||jump));CHECK(decision.reset==state.reset);
+        if(frame>0){CHECK((state.epoch!=previousEpoch)==jump);CHECK((revision.skyRevision!=previousSky)==jump);}
+        if(jump)CHECK(state.deltaSeconds==8);else if(frame>0)CHECK(state.deltaSeconds==0);
+        history.write(0,frame+1,vp);previousEpoch=state.epoch;previousSky=revision.skyRevision;
+    }
+    // The production exact-light tuple is intentionally conservative: a
+    // continuously changing sun changes the sky/environment revision each frame.
+    DayNightClock continuous(settings);AtmosphereVersions dynamic;
+    for(u64 frame=0;frame<3;++frame)CHECK(dynamic.update(atmosphere,continuous.sample((frame+1)/60.0),{0,2,0}).skyView);
 }
 TEST_CASE("F14 directional scene lights attenuate through the same atmosphere before exposure") {
     DayNightSettings c;c.latitudeRadians=0;c.startDayFraction=0.5;DayNightClock clock(c);const auto state=clock.sample(0);

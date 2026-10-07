@@ -16,6 +16,7 @@ class VolumeDiagnostics {
     VolumeDiagnostics(MetalContext&,PipelineCache&,Config);
     ~VolumeDiagnostics();
     bool prepare(u32 slot,u64 frame,u32 view,const GPUAtmosphereParams& expected,const GPUAtmosphereParams& submitted,const GPUFogParams& fog,bool armed);
+    void temporalState(const DayNightState&,bool clockFrozen,bool fogHistoryEligible,bool cloudHistoryEligible);
     void beginGraph(rg::RenderGraph&);
     void stamp(rg::RenderGraph&,rg::TextureRef actualProducerOutput,u32 kind);
     void homogeneous(rg::PassContext&,MTL::Buffer* cells,MTL::GPUAddress fogParams);

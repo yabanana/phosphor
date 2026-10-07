@@ -6,7 +6,7 @@ import struct
 import sys
 import unittest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"tools"))
-from volume_snapshot_check import VOLUME_GATES,analytic_component,check_record,volume_words
+from volume_snapshot_check import VOLUME_GATES,analytic_component,check_record,volume_words,temporal_record
 
 def words(floats):return list(struct.unpack("<"+"I"*len(floats),struct.pack("<"+"f"*len(floats),*floats)))
 def record_fixture():
@@ -55,5 +55,19 @@ class VolumeSnapshotTests(unittest.TestCase):
             record=record_fixture();record["cases"][index]["actual"][0]=value
             record["cases"][index]["passed"]=False;record["passed"]=False;record["numeric_failure_count"]=1
             self.assertTrue(check_record(record,{},negative=True)["failed"])
+    def test_history_control_needs_natural_reuse_and_actual_clock(self):
+        record=record_fixture()
+        record["clock"]={"seconds":0.,"delta_seconds":0.,"day_fraction":.5,"epoch":2,"reset":False,"frozen_base":True}
+        record["history_eligible"]={"fog":True,"clouds":False}
+        self.assertFalse(temporal_record(record))
+        record["gpu_counters"]["history_reused"]=12
+        self.assertTrue(temporal_record(record))
+        record["corruption_requested"]=2;record["corruption_armed"]=True
+        record["clock"]["reset"]=True
+        with self.assertRaises(ValueError):temporal_record(record)
+        record["clock"]["reset"]=False;record["history_eligible"]["fog"]=False
+        with self.assertRaises(ValueError):temporal_record(record)
+        record["history_eligible"]["fog"]=True;record["clock"]["seconds"]=8
+        with self.assertRaises(ValueError):temporal_record(record)
 
 if __name__=="__main__":unittest.main()

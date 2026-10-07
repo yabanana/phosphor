@@ -1143,6 +1143,11 @@ TEST_CASE("F13/F14 diagnostic hooks require actual active consumers and checks")
     REQUIRE(parse({"--atmosphere","on","--debug-volume-corrupt","lut","--debug-lighting","1"},o,error));
     CHECK(o.debugVolumeCorrupt==4);
     CHECK_FALSE(parse({"--atmosphere","on","--debug-volume-corrupt","history","--debug-lighting","1"},o,error));
+    CHECK_FALSE(parse({"--fog","on","--debug-volume-corrupt","history","--debug-lighting","1"},o,error));
+    REQUIRE(parse({"--fog","on","--atmo-freeze-clock","--debug-volume-corrupt","history","--debug-lighting","1"},o,error));
+    CHECK(o.atmoFreezeClock);CHECK(o.debugVolumeCorrupt==2);
+    CHECK_FALSE(parse({"--atmo-freeze-clock"},o,error));
+    CHECK_FALSE(parse({"--fog","on","--volume-oracle","oracle","--fog-homogeneous","--atmo-freeze-clock","--debug-volume-corrupt","history","--debug-lighting","1"},o,error));
 }
 
 TEST_CASE("F13 SDK fixture is an explicit source experiment with isolated inputs") {

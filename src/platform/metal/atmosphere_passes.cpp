@@ -57,6 +57,7 @@ struct AtmospherePasses::Impl {
     std::unique_ptr<RtConsumer> fogConsumer;
     std::unique_ptr<VolumeDiagnostics> diagnostics;
     bool diagnosticSelected=false,previousDiagnosticSelected=false,diagnosticArmed=false,hadFogHistory=false,hadCloudHistory=false;
+    u32 previousHistoryInjectionMask=0;
     MTL::Texture *transmittance=nullptr,*multiscattering=nullptr;
     MTL::Buffer *dummyState=nullptr,*dummyLight=nullptr,*dummyEmitter=nullptr;
     HistoryRegistry fogHistory,cloudHistory;
@@ -220,6 +221,7 @@ struct AtmospherePasses::Impl {
         const bool reset=f.cut||f.reset||celestial.reset;
         if(options.fog){
             auto fogDecision=fogHistory.begin(f.view,{fog.gridX,fog.gridY,f.width,f.height},volumeEpoch,reset,reset);
+            hadFogHistory=hadFogHistory&&!fogDecision.reset&&!(diagnostics&&diagnostics->homogeneousFog());
             fogParams={};std::memcpy(fogParams.inverseViewProjection,glm::value_ptr(inverse),64);std::memcpy(fogParams.view,f.constants.view,64);
             std::memcpy(fogParams.previousViewProjection,fogHistory.get(f.view).previousViewProjection.data(),64);std::memcpy(fogParams.previousView,views[f.view].fogPreviousView.data(),64);
             fogParams.gridX=fog.gridX;fogParams.gridY=fog.gridY;fogParams.gridZ=fog.gridZ;fogParams.maxLocalLights=fog.maxLocalLights;
@@ -236,7 +238,7 @@ struct AtmospherePasses::Impl {
             fogParams.flags=(!fogDecision.reset?VOLUME_HISTORY_VALID:0u)|(fogUsesRt?VOLUME_SHADOW_RT:shadows?VOLUME_SHADOW_CSM:0u)|
                              (gi?VOLUME_ENABLE_GI:0u)|(fogParams.lightCount?VOLUME_ENABLE_LOCAL_LIGHTS:0u);
             if(diagnostics&&diagnostics->homogeneousFog()){fogParams.heightFalloff=0;fogParams.densityAtBase=0.01f;fogParams.flags&=~VOLUME_HISTORY_VALID;}
-            if(diagnostics&&diagnosticSelected&&diagnostics->corruption()==VOLUME_CORRUPT_HISTORY&&hadFogHistory){fogParams.corruption=VOLUME_CORRUPT_HISTORY;fogParams.flags|=VOLUME_HISTORY_VALID;diagnosticArmed=true;}
+            if(diagnostics&&diagnosticSelected&&diagnostics->corruption()==VOLUME_CORRUPT_HISTORY&&hadFogHistory){fogParams.corruption=VOLUME_CORRUPT_HISTORY;diagnosticArmed=true;}
             fogAddress=lighting::upload(c,fogParams);reserveAlias(fogParams.lightCount);
             auto* aliases=static_cast<GPUAliasEntry*>(slot.alias->contents());const u32 count=std::max(fogParams.lightCount,1u);
             for(u32 i=0;i<count;++i)aliases[i]={1.0f,1.0f/float(count),i,i};
@@ -246,6 +248,7 @@ struct AtmospherePasses::Impl {
             const u32 divisor=options.cloudFullRate?1u:options.forceApple9?4u:2u;cloudWidth=(f.width+divisor-1)/divisor;cloudHeight=(f.height+divisor-1)/divisor;
             const u64 pixels=u64((f.backingWidth+divisor-1)/divisor)*((f.backingHeight+divisor-1)/divisor);reserveCloud(std::max(pixels,u64(cloudWidth)*cloudHeight));
             auto decision=cloudHistory.begin(f.view,{cloudWidth,cloudHeight,f.width,f.height},volumeEpoch,reset,reset||options.cloudFullRate);
+            hadCloudHistory=hadCloudHistory&&!decision.reset&&!options.cloudFullRate;
             cloudParams={};std::memcpy(cloudParams.inverseViewProjection,glm::value_ptr(inverse),64);std::memcpy(cloudParams.previousViewProjection,cloudHistory.get(f.view).previousViewProjection.data(),64);
             copy3(cloudParams.cameraPosition,glm::dvec3(glm::make_vec3(f.constants.cameraPosition)));copy3(cloudParams.wind,clouds.wind);
             cloudParams.timeSeconds=float(celestial.seconds);cloudParams.previousTimeSeconds=float(views[f.view].cloudPreviousTime);
@@ -258,12 +261,16 @@ struct AtmospherePasses::Impl {
             cloudParams.marchSteps=clouds.marchSteps;cloudParams.lightSteps=clouds.lightSteps;cloudParams.seed=clouds.seed;cloudParams.generation=u32(decision.generation);
             cloudParams.frameIndex=u32(f.index);cloudParams.viewID=f.view;cloudParams.flags=!options.cloudFullRate&&!decision.reset?VOLUME_HISTORY_VALID:0u;
             if(options.atmosphere)cloudParams.flags|=CLOUD_SCENE_HAS_ATMOSPHERE;
-            if(diagnostics&&diagnosticSelected&&diagnostics->corruption()==VOLUME_CORRUPT_HISTORY&&hadCloudHistory&&!options.cloudFullRate){cloudParams.corruption=VOLUME_CORRUPT_HISTORY;cloudParams.flags|=VOLUME_HISTORY_VALID;diagnosticArmed=true;}
+            if(diagnostics&&diagnosticSelected&&diagnostics->corruption()==VOLUME_CORRUPT_HISTORY&&hadCloudHistory){cloudParams.corruption=VOLUME_CORRUPT_HISTORY;diagnosticArmed=true;}
             cloudAddress=lighting::upload(c,cloudParams);
         }
+        const u32 historyInjectionMask=diagnosticSelected&&diagnostics->corruption()==VOLUME_CORRUPT_HISTORY?
+            ((hadFogHistory?1u:0u)|(hadCloudHistory?2u:0u)):0u;
+        if(previousHistoryInjectionMask!=historyInjectionMask){previousHistoryInjectionMask=historyInjectionMask;++graphVersion;}
         if(diagnostics){GPUAtmosphereParams expected=originalAtmosphere;
             if(diagnosticSelected&&diagnostics->corruption()==VOLUME_CORRUPT_OMIT_LUT&&diagnosticArmed)expected=atmosphereParams;
-            diagnostics->prepare(f.slot,f.index,f.view,expected,atmosphereParams,fogParams,diagnosticArmed);}
+            diagnostics->prepare(f.slot,f.index,f.view,expected,atmosphereParams,fogParams,diagnosticArmed);
+            diagnostics->temporalState(celestial,options.atmoFreezeClock,hadFogHistory,hadCloudHistory);}
         if(f.index==0)LOG_INFO("F14 SI: atmosphere=%u fog=%u range=%.1fm shadow=%s locals=%u GI=%u clouds=%u full-reference=%u physical-HDR=RGBA32Float",
                               unsigned(options.atmosphere),unsigned(options.fog),double(fogFar),fogUsesRt?"RT-own-IFT":shadows?"CSM-bounded120m":"unshadowed",
                               fogParams.lightCount,unsigned(gi!=nullptr),unsigned(options.clouds),unsigned(options.cloudFullRate));

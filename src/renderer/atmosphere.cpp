@@ -167,6 +167,14 @@ glm::dvec2 atmosphereTransmittanceRay(const AtmosphereSettings& s,glm::dvec2 uv)
     return {r,d>1e-10?std::clamp((s.topRadius*s.topRadius-r*r-d*d)/(2*r*d),-1.0,1.0):1.0};
 }
 
+double atmosphereClockSeconds(double sceneSeconds,u64 frame,double dayLengthSeconds,u32 jumpEvery,bool freeze) {
+    if(!std::isfinite(sceneSeconds)||!(dayLengthSeconds>0&&std::isfinite(dayLengthSeconds)))
+        throw std::invalid_argument("invalid atmosphere test clock");
+    const double offset=jumpEvery?double(frame/jumpEvery)*dayLengthSeconds*.5:0;
+    const double seconds=(freeze?0:sceneSeconds)+offset;
+    if(!std::isfinite(seconds))throw std::invalid_argument("atmosphere test clock overflow");
+    return seconds;
+}
 DayNightClock::DayNightClock(DayNightSettings settings):settings_(settings) {
     if(!(settings.dayLengthSeconds>0&&std::isfinite(settings.dayLengthSeconds))||!std::isfinite(settings.startDayFraction)||
        !(std::abs(settings.latitudeRadians)<=pi/2)||!(std::abs(settings.solarDeclinationRadians)<=pi/2)||

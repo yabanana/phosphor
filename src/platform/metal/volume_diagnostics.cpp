@@ -37,6 +37,7 @@ struct VolumeDiagnostics::Impl {
         std::array<MTL::GPUAddress,3> stampAddress{};
         GPUAtmosphereParams submitted{};VolumeOracleInput expected;u64 frame=0;u32 view=0,generation=0;
         bool pending=false,armed=false;std::string sourceHash;
+        DayNightState clock{};bool clockFrozen=false,fogHistoryEligible=false,cloudHistoryEligible=false;
         nlohmann::json provenance;
     };std::array<Slot,METAL_FRAMES_IN_FLIGHT> slots{};
     rg::BufferRef globalRef{},skyRef{},samplesRef{};rg::TextureRef solarRef{};
@@ -96,6 +97,8 @@ struct VolumeDiagnostics::Impl {
     bool consume(u32 index){auto& s=slots.at(index);if(!s.pending)return true;if(c.frameEvent()->signaledValue()<=s.frame)throw std::logic_error("Volume oracle read before GPU completion");
         const auto* data=static_cast<const GPUVolumeNumericSample*>(s.samples->contents());const auto cases=evaluateVolumeOracle(s.expected,{data,s.expected.diagnostics.sampleCount});
         nlohmann::json output;output["schema"]="phosphor.volume-oracle.v1";output["kind"]="f14-volume";output["frame"]=s.frame;output["view"]=s.view;output["corruption_requested"]=config.corruption;output["corruption_armed"]=s.armed;
+        output["clock"]={{"seconds",s.clock.seconds},{"delta_seconds",s.clock.deltaSeconds},{"epoch",s.clock.epoch},{"reset",s.clock.reset},{"frozen_base",s.clockFrozen},{"day_fraction",s.clock.dayFraction}};
+        output["history_eligible"]={{"fog",s.fogHistoryEligible},{"clouds",s.cloudHistoryEligible}};
         output["provenance"]={{"shader_generation",s.generation},{"source_hash_method","fnv1a64-source-files-at-prepare"},{"source_hash_at_prepare",s.sourceHash},{"source_sha",nullptr},{"binary_sha",nullptr},{"manifest",nullptr},{"gpu_name",c.gpuName()}};
         if(!s.provenance.is_null()){output["provenance"]["supplied_manifest"]=s.provenance;for(const char* field:{"source_sha","binary_sha","manifest"})if(s.provenance.contains(field))output["provenance"][field]=s.provenance[field];}
         std::array<u32,sizeof(GPUAtmosphereParams)/4> expectedWords{},submittedWords{};std::array<u32,sizeof(GPUFogParams)/4> fogWords{};
@@ -123,6 +126,7 @@ struct VolumeDiagnostics::Impl {
 VolumeDiagnostics::VolumeDiagnostics(MetalContext& c,PipelineCache& p,Config config):impl_(std::make_unique<Impl>(c,p,std::move(config))){}
 VolumeDiagnostics::~VolumeDiagnostics()=default;
 bool VolumeDiagnostics::prepare(u32 s,u64 f,u32 v,const GPUAtmosphereParams& e,const GPUAtmosphereParams& a,const GPUFogParams& fog,bool armed){return impl_->prepare(s,f,v,e,a,fog,armed);}
+void VolumeDiagnostics::temporalState(const DayNightState& clock,bool frozen,bool fog,bool clouds){auto& s=impl_->slots.at(impl_->slot);s.clock=clock;s.clockFrozen=frozen;s.fogHistoryEligible=fog;s.cloudHistoryEligible=clouds;}
 void VolumeDiagnostics::beginGraph(rg::RenderGraph& g){impl_->begin(g);}
 void VolumeDiagnostics::stamp(rg::RenderGraph& g,rg::TextureRef t,u32 kind){impl_->stampProducer(g,t,kind);}
 void VolumeDiagnostics::homogeneous(rg::PassContext& c,MTL::Buffer* b,MTL::GPUAddress p){impl_->homogeneous(c,b,p);}

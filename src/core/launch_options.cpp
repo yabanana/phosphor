@@ -464,6 +464,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
         } else if (arg == "--start-hour") {
             if(!needFloat(out.atmoStartHour)||out.atmoStartHour<0||out.atmoStartHour>=24){error="--start-hour: expected0..24";return false;}
         } else if (arg == "--time-jump-every") {if(!needCount(out.timeJumpEveryN))return false;
+        } else if (arg == "--atmo-freeze-clock") {out.atmoFreezeClock=true;
         } else if (arg == "--planet-camera-height") {
             if(!needFloat(out.planetCameraHeight)||out.planetCameraHeight<0){error="--planet-camera-height: metres >=0";return false;}
         } else if (arg == "--reflections") {
@@ -1075,6 +1076,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if((!out.volumeOracle.empty()||out.debugVolumeCorrupt) && (!(out.atmosphere||out.fog||out.clouds)||!out.debugLighting)){error="Volume oracle/corruption requires F14 and --debug-lighting N";return false;}
     if(out.fogHomogeneous&&(!out.fog||out.volumeOracle.empty())){error="Homogeneous fog requires --fog on and --volume-oracle";return false;}
     if(out.debugVolumeCorrupt==2&&(!out.fog&&(!out.clouds||out.cloudFullRate))){error="Volume history control requires fog or reconstructed clouds";return false;}
+    if(out.atmoFreezeClock&&!(out.atmosphere||out.fog||out.clouds)){error="--atmo-freeze-clock requires F14";return false;}
+    if(out.debugVolumeCorrupt==2&&(!out.atmoFreezeClock||out.fogHomogeneous)){error="Volume history control requires --atmo-freeze-clock and a non-homogeneous-fixture history path";return false;}
     if(out.debugVolumeCorrupt==3&&!out.fog){error="Volume light control requires --fog on";return false;}
     if(out.debugReflectionCorrupt&&(!out.debugLighting||!(out.reflections!=ReflectionMode::Off||out.ao!=AoMode::Off||out.lightingDenoise!=LightingDenoiseMode::Off))){error="Reflection control requires F13 and --debug-lighting N";return false;}
     if(out.debugReflectionCorrupt==1&&(out.lightingDenoise!=LightingDenoiseMode::Custom||!(out.reflections!=ReflectionMode::Off||out.ao!=AoMode::Off||out.directLighting!=DirectLightingMode::Legacy||out.gi!=GiMode::Off))){error="Reflection history control requires custom denoise and an active signal";return false;}

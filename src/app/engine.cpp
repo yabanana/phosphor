@@ -42,6 +42,7 @@
 #include "platform/metal/metalfx_denoise.h"
 #include "platform/metal/metalfx_denoise_fixture.h"
 #include "platform/metal/atmosphere_passes.h"
+#include "renderer/atmosphere.h"
 #include "platform/metal/lighting_dispatch.h"
 #include "renderer/rt_check.h"
 #include "renderer/rt_proxy_transition.h"
@@ -1379,7 +1380,7 @@ bool Engine::frame(float dt) {
         store_->sync(*ecs_, *gpuScene_);
         extractLights(*ecs_, lights_);
         if(atmosphere_) {
-            const double clock=sceneTime_+(options_.timeJumpEveryN?double(presentedFrames_/options_.timeJumpEveryN)*options_.atmoDayLength*0.5:0);
+            const double clock=atmosphereClockSeconds(sceneTime_,presentedFrames_,options_.atmoDayLength,options_.timeJumpEveryN,options_.atmoFreezeClock);
             const auto physical=atmosphere_->prepareLighting(clock,glm::dvec3(camera_->getPosition()));
             std::erase_if(lights_,[](const auto& l){return l.type==LIGHT_DIRECTIONAL;});
             lights_.insert(lights_.begin(),physical.begin(),physical.end());

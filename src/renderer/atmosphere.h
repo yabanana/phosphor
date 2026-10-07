@@ -61,6 +61,11 @@ struct DayNightState {
     double seconds=0,deltaSeconds=0,dayFraction=0,moonPhase=0,starRotation=0,exposureEv100=0;
     u64 epoch=1;bool reset=false;
 };
+// Test-time clock controls. With both controls off, return sceneSeconds
+// unchanged. A jump advances half a configured day at each frame multiple.
+// Freeze holds the base at zero (startDayFraction still selects the hour),
+// while explicit jumps remain real discontinuities rather than reset markers.
+double atmosphereClockSeconds(double sceneSeconds,u64 frame,double dayLengthSeconds,u32 jumpEvery,bool freeze);
 class DayNightClock {
   public:
     explicit DayNightClock(DayNightSettings settings={});

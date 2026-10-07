@@ -139,10 +139,16 @@ def make_cases(out,frames,sdk_policy,probe_dir=None):
     add("all-volumes-moving","F14","moving-light",[ *volume_base,"--atmosphere","on","--fog","on","--clouds","on",
          "--day-length","16","--start-hour","5","--time-jump-every","60"],
          expected={"atmosphere":True,"fog":True,"clouds":True,"cloud_full_rate":False},roi_scale=25)
+    # Static geometry/material/camera and a genuinely frozen celestial clock
+    # keep the ordinary history eligibility rules satisfied before corruption.
+    history_base=["--rt","on","--shadows","rt","--lighting","brute","--gi","off",
+                  "--reflections","off","--ao","off","--lighting-denoise","off"]
+    add("volume-history-static-positive","F14","ao-cavity",[ *history_base,"--atmosphere","on","--fog","on","--clouds","on","--atmo-freeze-clock"],
+        expected={"atmosphere":True,"fog":True,"clouds":True,"cloud_full_rate":False},require_volume_history_reuse=True)
     for corruption in ("units","history","light","lut"):
-        add("negative-f14-"+corruption,"F14","disocclusion",[ *volume_base,"--atmosphere","on","--fog","on","--clouds","on",
-            "--debug-volume-corrupt",corruption],capture=False,expected_exit=1,expected_failure_domain="lighting",
-            expected={"atmosphere":True,"fog":True,"clouds":True,"cloud_full_rate":False})
+        add("negative-f14-"+corruption,"F14","ao-cavity" if corruption=="history" else "disocclusion",[ *(history_base if corruption=="history" else volume_base),"--atmosphere","on","--fog","on","--clouds","on",
+            *(["--atmo-freeze-clock"] if corruption=="history" else []),"--debug-volume-corrupt",corruption],capture=False,expected_exit=1,expected_failure_domain="lighting",
+            expected={"atmosphere":True,"fog":True,"clouds":True,"cloud_full_rate":False},require_volume_history_reuse=corruption=="history")
     for case in cases:
         for flag,field in (("--reflections","reflections"),("--ao","ao"),("--lighting-denoise","denoise_requested"),
                            ("--gi","gi"),("--lighting","direct"),("--shadows","shadows")):

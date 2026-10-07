@@ -90,18 +90,43 @@ def check_record(record,provenance,negative=False,require_fog=False):
         raise ValueError("numeric/epoch aggregate does not match actual rows")
     return {"failed":failed,"armed":record.get("corruption_armed") is True,"checks":len(rows),"kinds":kinds,"solar_wide":solar_wide}
 
+def temporal_record(record):
+    """Verify host clock evidence and naturally eligible reuse, never invent it."""
+    clock=record.get("clock",{});eligible=record.get("history_eligible",{})
+    if not all(numeric(clock.get(k)) for k in ("seconds","delta_seconds","day_fraction")):
+        raise ValueError("complete exact host clock missing")
+    if not isinstance(clock.get("epoch"),int) or isinstance(clock["epoch"],bool) or clock["epoch"]<1:
+        raise ValueError("clock epoch missing")
+    if any(not isinstance(clock.get(k),bool) for k in ("reset","frozen_base")) or any(not isinstance(eligible.get(k),bool) for k in ("fog","clouds")):
+        raise ValueError("clock reset/freeze or per-signal eligibility missing")
+    params=volume_words(record.get("parameter_blocks",{}).get("expected_atmosphere"),96)
+    gpu_seconds=struct.unpack("<f",struct.pack("<f",clock["seconds"]))[0]
+    gpu_delta=struct.unpack("<f",struct.pack("<f",clock["delta_seconds"]))[0]
+    if params[43]!=gpu_seconds or params[94]!=gpu_delta:raise ValueError("host clock disagrees with submitted GPU time ABI")
+    natural=(eligible["fog"] or eligible["clouds"]) and not clock["reset"]
+    if record.get("corruption_requested")==2 and record.get("corruption_armed") and not (natural and clock["frozen_base"]):
+        raise ValueError("history corruption armed by overriding a reset or moving clock")
+    reused=record.get("gpu_counters",{}).get("history_reused",0)
+    return clock["frozen_base"] and natural and reused>0
+
 def native_volume_evidence(case,binary_hash,manifest_hash,source_sha):
-    paths=sorted(Path(case["volume_oracle"]).glob("frame-*-view-*.json"));errors=[];failed_snapshots=0;armed=0;checks=0;kinds=set();solar_wide=0
+    paths=sorted(Path(case["volume_oracle"]).glob("frame-*-view-*.json"));errors=[];failed_snapshots=0;armed=0;checks=0;kinds=set();solar_wide=0;history_exercised=0
     if not paths:return {"passed":False,"pending":"zero actual native F14 readback snapshots"}
     negative=case.get("expected_exit",0)!=0
     for path in paths:
         try:
-            check=check_record(json.loads(path.read_text()),{"source_sha":source_sha,"binary_sha":binary_hash,"manifest":manifest_hash},
+            record=json.loads(path.read_text())
+            check=check_record(record,{"source_sha":source_sha,"binary_sha":binary_hash,"manifest":manifest_hash},
                 negative,case.get("numerical_oracle")=="fog-homogeneous")
+            if case.get("require_volume_history_reuse"):
+                reused=temporal_record(record);history_exercised+=reused
+                if negative and check["armed"] and (not reused or record["gpu_counters"]["invalid_history"]<=0):
+                    errors.append(path.name+": foreign history was not actually consumed/detected")
             kinds|=check["kinds"];checks+=check["checks"];armed+=check["armed"];failed_snapshots+=check["failed"];solar_wide+=check["solar_wide"]
             if not negative and check["failed"]:errors.append(path.name+": actual sparse F14 oracle failed")
         except (OSError,ValueError,TypeError,KeyError,IndexError,OverflowError) as error:errors.append(path.name+": "+str(error))
     if negative and (not armed or not failed_snapshots):errors.append("negative never armed/exercised a real failed numerical/epoch/device-counter check")
+    if case.get("require_volume_history_reuse") and not history_exercised:errors.append("no naturally eligible frozen-clock volume history was reused")
     if not negative and case.get("name") in ("atmo-zenith","atmo-space") and not solar_wide:errors.append("no actual solar output exceeded half range in declared wide-HDR case")
     return {"passed":not errors,"errors":errors,"actual_snapshots":len(paths),"actual_component_checks":checks,
-        "failed_snapshots":failed_snapshots,"armed_snapshots":armed,"solar_wide_snapshots":solar_wide,"kinds":sorted(kinds),"certification":False}
+        "failed_snapshots":failed_snapshots,"armed_snapshots":armed,"solar_wide_snapshots":solar_wide,"history_exercised_snapshots":history_exercised,"kinds":sorted(kinds),"certification":False}
