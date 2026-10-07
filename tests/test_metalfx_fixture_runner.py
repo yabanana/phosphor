@@ -110,10 +110,12 @@ class SDKManualExposureProtocolTests(unittest.TestCase):
             "auto_exposure_enabled":False,"exposure_mode":"manual","provided_manual_exposure_texture_value":MANUAL_EXPOSURE_R16,
             "manual_exposure_texture_ignored":False,"packed_exposure_is_provided_manual_value":True,
             "manual_exposure_control":True,"requested_manual_exposure_fp32":MANUAL_EXPOSURE_REQUESTED_FP32,
-            "expected_manual_exposure_r16":MANUAL_EXPOSURE_R16,"actual_manual_exposure_readback":True,
+            "expected_manual_exposure_r16":MANUAL_EXPOSURE_R16,"provided_manual_exposure_fp32":MANUAL_EXPOSURE_R16,
+            "manual_exposure_prequantized":True,"actual_manual_exposure_readback":True,
             "actual_provided_manual_exposure_texture_value":MANUAL_EXPOSURE_R16}
         self.assertTrue(exposure_mode_oracle(record,False,True,True))
         for key,value in (("actual_manual_exposure_readback",False),("actual_provided_manual_exposure_texture_value",0),
+            ("provided_manual_exposure_fp32",MANUAL_EXPOSURE_REQUESTED_FP32),("manual_exposure_prequantized",False),
             ("provided_manual_exposure_texture_value",MANUAL_EXPOSURE_REQUESTED_FP32),("manual_exposure_texture_ignored",True)):
             with self.assertRaises(ValueError):exposure_mode_oracle({**record,key:value},False,True,True)
     def test_gpu_input_texel_check_is_independent_of_metadata(self):

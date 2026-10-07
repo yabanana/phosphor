@@ -76,7 +76,9 @@ struct MetalfxDenoiseFixture::Impl {
             throw std::invalid_argument("Invalid SDK fixture active views/prewarm budget");
         MetalfxDenoise::Options sdkOptions;sdkOptions.enabled=true;sdkOptions.views=options.activeViews;
         sdkOptions.autoExposure=options.autoExposure;
-        sdkOptions.manualExposure=options.manualExposureControl?WideManualExposure:1.f;
+        // Supply a binary16-representable float so native texture-write rounding
+        // cannot choose a different texel. Preserve the analytic request in logs.
+        sdkOptions.manualExposure=options.manualExposureControl?WideManualExposureR16:1.f;
         sdkOptions.resizeSettleFrames=0; // controlled fixture extents; production keeps its async settling
         sdkOptions.reactiveMask=true;sdkOptions.specularHitDistance=false;sdkOptions.strengthMask=true;
         sdkOptions.sdkOutputScale=options.preExposedPolicy?MetalfxDenoise::Options::OutputScale::PreExposed:MetalfxDenoise::Options::OutputScale::Unverified;
@@ -100,6 +102,8 @@ struct MetalfxDenoiseFixture::Impl {
            <<",\"exposure_mode\":"<<quote(!stats.descriptorConfigured?"not-configured":stats.autoExposureEnabled?"sdk-auto":"manual")
            <<",\"manual_exposure_control\":"<<(options.manualExposureControl?"true":"false")
            <<",\"requested_manual_exposure_fp32\":"<<number(options.manualExposureControl?WideManualExposure:1.f)
+           <<",\"provided_manual_exposure_fp32\":"<<number(options.manualExposureControl?WideManualExposureR16:1.f)
+           <<",\"manual_exposure_prequantized\":"<<(options.manualExposureControl?"true":"false")
            <<",\"expected_manual_exposure_r16\":"<<number(options.manualExposureControl?WideManualExposureR16:1.f)
            <<",\"provided_manual_exposure_texture_value\":"<<number(packedSamples?packedSamples[0].exposure:options.manualExposureControl?WideManualExposureR16:1.f)
            <<",\"actual_manual_exposure_readback\":"<<(packedSamples?"true":"false")

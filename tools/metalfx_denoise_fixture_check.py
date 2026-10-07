@@ -123,7 +123,8 @@ def exposure_mode_oracle(record,expected_auto,manual_control=False,require_readb
         "packed_exposure_is_provided_manual_value":True}
     if manual_control:
         required.update({"manual_exposure_control":True,"requested_manual_exposure_fp32":MANUAL_EXPOSURE_REQUESTED_FP32,
-            "expected_manual_exposure_r16":MANUAL_EXPOSURE_R16})
+            "expected_manual_exposure_r16":MANUAL_EXPOSURE_R16,
+            "provided_manual_exposure_fp32":MANUAL_EXPOSURE_R16,"manual_exposure_prequantized":True})
         if require_readback:
             required.update({"actual_manual_exposure_readback":True,"actual_provided_manual_exposure_texture_value":MANUAL_EXPOSURE_R16})
     if any(record.get(key)!=value or isinstance(value,bool) and record.get(key) is not value for key,value in required.items()):
@@ -135,10 +136,11 @@ def make_cases(out,frames,gateway,auto_exposure=False,manual_control=False):
     if manual_control:
         if gateway!="native" or frames!=96 or auto_exposure:
             raise ValueError("manual exposure control requires native gateway, exactly 96 frames and automatic exposure off")
-        return [{"name":"wide-hdr-manual-exposure","scenario":"wide-hdr","preexposed":True,
+        return [{"name":"wide-hdr-manual-exposure-exact","scenario":"wide-hdr","preexposed":True,
             "auto_exposure":False,"manual_exposure_control":True,"expected_exit":0,"expected_state":"FIXTURE_CHECKS_PASSED","frames":96,
             "physical_target":[368640,128,64],"pre_exposure":1/64,"packed_target":[5760,2,1],
-            "requested_manual_exposure_fp32":MANUAL_EXPOSURE_REQUESTED_FP32,"expected_manual_exposure_r16":MANUAL_EXPOSURE_R16}]
+            "requested_manual_exposure_fp32":MANUAL_EXPOSURE_REQUESTED_FP32,"expected_manual_exposure_r16":MANUAL_EXPOSURE_R16,
+            "provided_manual_exposure_fp32":MANUAL_EXPOSURE_R16,"manual_exposure_prequantized":True}]
     if auto_exposure:
         if gateway!="native" or frames!=96:
             raise ValueError("automatic exposure experiment requires native gateway and exactly 96 frames")
@@ -283,9 +285,10 @@ def frozen_manual_exposure_control(manifest):
         if type(enabled) is not bool or enabled!=control or command.count("--denoised-fixture-manual-exposure-control")!=int(enabled):
             raise ValueError("manual exposure command/case differs from frozen control")
         if not enabled:continue
-        required={"name":"wide-hdr-manual-exposure","scenario":"wide-hdr","preexposed":True,"frames":96,
+        required={"name":"wide-hdr-manual-exposure-exact","scenario":"wide-hdr","preexposed":True,"frames":96,
             "physical_target":[368640,128,64],"pre_exposure":1/64,"packed_target":[5760,2,1],
             "requested_manual_exposure_fp32":MANUAL_EXPOSURE_REQUESTED_FP32,"expected_manual_exposure_r16":MANUAL_EXPOSURE_R16,
+            "provided_manual_exposure_fp32":MANUAL_EXPOSURE_R16,"manual_exposure_prequantized":True,
             "expected_exit":0,"expected_state":"FIXTURE_CHECKS_PASSED","auto_exposure":False}
         if any(case.get(key)!=value for key,value in required.items()):
             raise ValueError("manual exposure control changed its target, units, exposure, frames or acceptance")
@@ -321,7 +324,7 @@ def main(argv=None):
     p.add_argument("--gateway",choices=["expected-missing","native"],default="expected-missing")
     p.add_argument("--frames",type=int,default=192);p.add_argument("--resolution",default="128x96")
     p.add_argument("--denoised-fixture-auto-exposure",action="store_true",help="freeze only the 96-frame native wide-HDR automatic-exposure experiment")
-    p.add_argument("--denoised-fixture-manual-exposure-control",action="store_true",help="freeze one 96-frame wide-HDR control at analytic exposure 0.5/368640; no output compensation")
+    p.add_argument("--denoised-fixture-manual-exposure-control",action="store_true",help="freeze one 96-frame wide-HDR control at R16-exact nearest representation of analytic exposure 0.5/368640; no output compensation")
     p.add_argument("--leaks-at-exit",action="store_true",help="wrap only native lifecycle with existing macOS leaks; never install")
     p.add_argument("--leaks-tool",type=Path,default=Path("/usr/bin/leaks"))
     p.add_argument("--prewarm-ms",type=int,default=120000);p.add_argument("--timeout",type=float,default=600);p.add_argument("--gpu-lock",type=Path,default=Path("/tmp/phosphor-gpu-verification.lock"))
