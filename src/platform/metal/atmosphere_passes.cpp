@@ -63,6 +63,7 @@ struct AtmospherePasses::Impl {
         MTL::Buffer *fog=nullptr,*cloud=nullptr;
         AtmosphereVersions skyVersions;
         u32 pipelineGeneration=~u32(0);
+        bool skyReady=false;
         std::array<float,16> fogPreviousView{};
         double cloudPreviousTime=0;
     };
@@ -80,7 +81,7 @@ struct AtmospherePasses::Impl {
     u64 cloudCapacity=0,aliasCapacity=0,fogCells=0,graphVersion=1;
     u32 cloudWidth=0,cloudHeight=0,lutMask=0,previousMask=~0u,lastPipelineGeneration=~0u;
     u32 lastWidth=0,lastHeight=0,lastView=~0u;
-    bool fogUsesRt=false,previousFogRt=false,active=false;
+    bool fogUsesRt=false,previousFogRt=false,active=false,transmittanceReady=false,multiscatteringReady=false;
     struct VolumeSignal {
         u64 scene=0,geometry=0,material=0,clock=0,environment=0;
         u32 localLight=0,pipeline=0,nearBits=0,farBits=0;
@@ -176,10 +177,12 @@ struct AtmospherePasses::Impl {
         if(options.fog&&!direct&&f.constants.lightCount>2)throw std::logic_error("Fog local lighting requires the F11 world-light producer even with legacy visible shading");
         if(lastWidth!=f.width||lastHeight!=f.height||lastView!=f.view){lastWidth=f.width;lastHeight=f.height;lastView=f.view;++graphVersion;}
         const u32 pipelineGeneration=pipelines.generation();const bool newPipelines=lastPipelineGeneration!=pipelineGeneration;lastPipelineGeneration=pipelineGeneration;
+        if(newPipelines){transmittanceReady=false;multiscatteringReady=false;for(auto& view:views)view.skyReady=false;}
         physicalUpdate=physicalVersions.update(atmosphere,celestial,groundReference(),newPipelines);
         const auto skyUpdate=views[f.view].skyVersions.update(atmosphere,celestial,glm::dvec3(glm::make_vec3(f.constants.cameraPosition)),views[f.view].pipelineGeneration!=pipelineGeneration);
         views[f.view].pipelineGeneration=pipelineGeneration;
-        lutMask=(physicalUpdate.transmittance?1u:0u)|(physicalUpdate.multiscattering?2u:0u)|(skyUpdate.skyView?4u:0u);
+        if(physicalUpdate.transmittance)transmittanceReady=false;if(physicalUpdate.multiscattering)multiscatteringReady=false;if(skyUpdate.skyView)views[f.view].skyReady=false;
+        lutMask=(!transmittanceReady?1u:0u)|(!multiscatteringReady?2u:0u)|(!views[f.view].skyReady?4u:0u);
         if(previousMask!=lutMask){previousMask=lutMask;++graphVersion;}
         const glm::mat4 inverse=glm::inverse(glm::make_mat4(f.constants.viewProjection));
         AtmosphereUpdate update=physicalUpdate;update.skyRevision=skyUpdate.skyRevision;
@@ -283,9 +286,9 @@ struct AtmospherePasses::Impl {
         multiRef=graph.importTexture("Persistent atmosphere multiscattering",{Format::RGBA32Float,atmosphere.multiWidth,atmosphere.multiHeight},ImportContentsDefined|ImportOutput);
         skyRef=graph.importTexture("Persistent sky view per camera",{Format::RGBA32Float,atmosphere.skyWidth,atmosphere.skyHeight},ImportContentsDefined|ImportOutput);
         graph.addPass("F14 diagnostics clear",PassType::Compute,[&](PassBuilder& b){counterRef=b.write(counterRef,Usage::ShaderWrite,StageDispatch);},[this](PassContext& ctx){auto& s=slots[frame.slot];auto* t=s.tables[Clear];t->setAddress(s.counter->gpuAddress(),15);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,handles[Clear],t,8);s.recorded=true;s.recordedIndex=frame.index;});
-        if(lutMask&1u)graph.addPass("Physical atmosphere transmittance LUT",PassType::Compute,[&](PassBuilder& b){transRef=b.write(transRef,Usage::ShaderWrite,StageDispatch);counterAccess(b);b.setProfileShaders("atmosphere_transmittance");},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Transmittance];atmosphereBindings(t);texture(t,ctx,transRef,5);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,handles[Transmittance],t,atmosphere.transmittanceWidth,atmosphere.transmittanceHeight);});
-        if(lutMask&2u)graph.addPass("Physical atmosphere multiscattering LUT",PassType::Compute,[&](PassBuilder& b){b.read(transRef,Usage::ShaderRead,StageDispatch);multiRef=b.write(multiRef,Usage::ShaderWrite,StageDispatch);counterAccess(b);b.setProfileShaders("atmosphere_multiscattering");},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Multiscattering];atmosphereBindings(t);texture(t,ctx,transRef,0);texture(t,ctx,multiRef,5);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,handles[Multiscattering],t,atmosphere.multiWidth,atmosphere.multiHeight);});
-        if(lutMask&4u)graph.addPass("Physical sky-view LUT",PassType::Compute,[&](PassBuilder& b){b.read(transRef,Usage::ShaderRead,StageDispatch);b.read(multiRef,Usage::ShaderRead,StageDispatch);skyRef=b.write(skyRef,Usage::ShaderWrite,StageDispatch);counterAccess(b);b.setProfileShaders("atmosphere_sky_view");},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Sky];atmosphereBindings(t);texture(t,ctx,transRef,0);texture(t,ctx,multiRef,1);texture(t,ctx,skyRef,5);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,handles[Sky],t,atmosphere.skyWidth,atmosphere.skyHeight);});
+        if(lutMask&1u)graph.addPass("Physical atmosphere transmittance LUT",PassType::Compute,[&](PassBuilder& b){transRef=b.write(transRef,Usage::ShaderWrite,StageDispatch);counterAccess(b);b.setProfileShaders("atmosphere_transmittance");},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Transmittance];atmosphereBindings(t);texture(t,ctx,transRef,5);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,handles[Transmittance],t,atmosphere.transmittanceWidth,atmosphere.transmittanceHeight);transmittanceReady=true;});
+        if(lutMask&2u)graph.addPass("Physical atmosphere multiscattering LUT",PassType::Compute,[&](PassBuilder& b){b.read(transRef,Usage::ShaderRead,StageDispatch);multiRef=b.write(multiRef,Usage::ShaderWrite,StageDispatch);counterAccess(b);b.setProfileShaders("atmosphere_multiscattering");},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Multiscattering];atmosphereBindings(t);texture(t,ctx,transRef,0);texture(t,ctx,multiRef,5);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,handles[Multiscattering],t,atmosphere.multiWidth,atmosphere.multiHeight);multiscatteringReady=true;});
+        if(lutMask&4u)graph.addPass("Physical sky-view LUT",PassType::Compute,[&](PassBuilder& b){b.read(transRef,Usage::ShaderRead,StageDispatch);b.read(multiRef,Usage::ShaderRead,StageDispatch);skyRef=b.write(skyRef,Usage::ShaderWrite,StageDispatch);counterAccess(b);b.setProfileShaders("atmosphere_sky_view");},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Sky];atmosphereBindings(t);texture(t,ctx,transRef,0);texture(t,ctx,multiRef,1);texture(t,ctx,skyRef,5);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,handles[Sky],t,atmosphere.skyWidth,atmosphere.skyHeight);views[frame.view].skyReady=true;});
         outputRef=sourceRef;
         if(options.atmosphere){const TextureRef input=outputRef;graph.addPass("Physical sky and aerial perspective",PassType::Compute,[&,input](PassBuilder& b){for(auto r:{input,depthRef,transRef,multiRef,skyRef})b.read(r,Usage::ShaderRead,StageDispatch);counterAccess(b);atmosphereOutput=b.createTexture("Physical atmosphere RGBA32 HDR",{Format::RGBA32Float,frame.width,frame.height});atmosphereOutput=b.write(atmosphereOutput,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("atmosphere_apply");},[this,input](PassContext& ctx){physicalSource(ctx,input);auto* t=slots[frame.slot].tables[AtmosphereApply];atmosphereBindings(t);texture(t,ctx,transRef,0);texture(t,ctx,multiRef,1);texture(t,ctx,skyRef,2);texture(t,ctx,input,3);texture(t,ctx,depthRef,4);texture(t,ctx,atmosphereOutput,5);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,handles[AtmosphereApply],t,frame.width,frame.height);});outputRef=atmosphereOutput;}
         // Clouds are the farther medium in the declared preset; near-ground
@@ -295,7 +298,7 @@ struct AtmospherePasses::Impl {
         return outputRef;
     }
     void addClouds(rg::RenderGraph& graph) {
-        using namespace rg;auto& slot=slots[frame.slot];
+        using namespace rg;
         cloudFreshRef=graph.importBuffer("Current cloud world/depth tags",{cloudCapacity*sizeof(GPUCloudHistory)},ImportPerFrame|ImportOutput);
         graph.addPass(options.cloudFullRate?"Cloud full-rate reference":"Cloud low-rate ray march",PassType::Compute,[&](PassBuilder& b){for(auto r:{depthRef,transRef,multiRef})b.read(r,Usage::ShaderRead,StageDispatch);counterAccess(b);cloudFreshRef=b.write(cloudFreshRef,Usage::ShaderWrite,StageDispatch);
             cloudRaw=b.createTexture("Cloud raw linear radiance and T",{Format::RGBA32Float,cloudWidth,cloudHeight});cloudRaw=b.write(cloudRaw,Usage::ShaderWrite,StageDispatch);
@@ -312,10 +315,10 @@ struct AtmospherePasses::Impl {
             cloudInput=cloudFiltered;
         }
         const TextureRef input=outputRef,cloud=cloudInput,guide=cloudGuide;
-        graph.addPass("Cloud depth-aware physical composition",PassType::Compute,[&,input,cloud,guide](PassBuilder& b){for(auto r:{input,cloud,guide,depthRef,transRef,multiRef})b.read(r,Usage::ShaderRead,StageDispatch);cloudOutput=b.createTexture("Cloud physical RGBA32 HDR",{Format::RGBA32Float,frame.width,frame.height});cloudOutput=b.write(cloudOutput,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("clouds_apply");},[this,input,cloud,guide](PassContext& ctx){physicalSource(ctx,input);auto* t=slots[frame.slot].tables[CloudApply];cloudBindings(t);texture(t,ctx,depthRef,0);texture(t,ctx,transRef,1);texture(t,ctx,multiRef,2);texture(t,ctx,cloud,3);texture(t,ctx,guide,4);texture(t,ctx,cloudOutput,5);texture(t,ctx,input,6);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,handles[CloudApply],t,frame.width,frame.height);});outputRef=cloudOutput;
+        graph.addPass("Cloud depth-aware physical composition",PassType::Compute,[&,input,cloud,guide](PassBuilder& b){for(auto r:{input,cloud,guide,depthRef,transRef,multiRef})b.read(r,Usage::ShaderRead,StageDispatch);counterAccess(b);cloudOutput=b.createTexture("Cloud physical RGBA32 HDR",{Format::RGBA32Float,frame.width,frame.height});cloudOutput=b.write(cloudOutput,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("clouds_apply");},[this,input,cloud,guide](PassContext& ctx){physicalSource(ctx,input);auto* t=slots[frame.slot].tables[CloudApply];cloudBindings(t);texture(t,ctx,depthRef,0);texture(t,ctx,transRef,1);texture(t,ctx,multiRef,2);texture(t,ctx,cloud,3);texture(t,ctx,guide,4);texture(t,ctx,cloudOutput,5);texture(t,ctx,input,6);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,handles[CloudApply],t,frame.width,frame.height);});outputRef=cloudOutput;
     }
     void addFog(rg::RenderGraph& graph) {
-        using namespace rg;auto& slot=slots[frame.slot];
+        using namespace rg;
         fogFreshRef=graph.importBuffer("Current froxel injection",{fogCells*sizeof(GPUFogCell)},ImportPerFrame);
         fogFilteredRef=graph.importBuffer("Filtered froxel injection",{fogCells*sizeof(GPUFogCell)},ImportPerFrame);
         fogIntegratedRef=graph.importBuffer("Integrated froxel volume",{fogCells*sizeof(GPUFogIntegrated)},ImportPerFrame);

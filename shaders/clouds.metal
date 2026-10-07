@@ -111,6 +111,7 @@ kernel void clouds_temporal(constant GPUCloudParams& p [[buffer(0)]],device GPUC
     next[index]=h;output.write(float4(h.radiance[0],h.radiance[1],h.radiance[2],h.transmittance),pixel);
 }
 kernel void clouds_apply(constant GPUCloudParams& p [[buffer(0)]],constant GPUAtmosphereParams& atmosphere [[buffer(1)]],
+    device atomic_uint* counters [[buffer(15)]],
     texture2d<float,access::read> depth [[texture(0)]],texture2d<float> transmittance [[texture(1)]],texture2d<float> multiscattering [[texture(2)]],
     texture2d<float,access::read> cloud [[texture(3)]],texture2d<float,access::read> guide [[texture(4)]],
     texture2d<float,access::write> output [[texture(5)]],texture2d<float,access::read> scene [[texture(6)]],uint2 pixel [[thread_position_in_grid]]) {
@@ -135,5 +136,6 @@ kernel void clouds_apply(constant GPUCloudParams& p [[buffer(0)]],constant GPUAt
         // crosses that front air. This is not a full mixed-medium integration.
         color=Tcloud*sceneAtmosphere+front.transmittance*value.rgb+front.radiance*(1-Tcloud);
     }
+    if(!all(isfinite(color)))volumeCount(counters,0,1);
     output.write(float4(color,1),pixel);
 }
