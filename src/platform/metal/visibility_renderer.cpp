@@ -32,6 +32,11 @@ VisibilityRenderer::VisibilityRenderer(MetalContext &c, PipelineCache &p, SceneR
       tileResolve_(tileResolve), adaptive_(adaptive), checks_(checks), lighting_(lighting) {
     if (tileResolve && adaptive)
         throw std::invalid_argument("Tile and adaptive shading are separate experiments");
+    if (lighting_) {
+        auto* d = MTL::DepthStencilDescriptor::alloc()->init();d->setDepthCompareFunction(MTL::CompareFunctionGreaterEqual);
+        d->setDepthWriteEnabled(false);lightingFallbackDepth_=c.device()->newDepthStencilState(d);d->release();
+        if (!lightingFallbackDepth_) throw std::runtime_error("Lighting fallback depth state failed");
+    }
     clear_ = p.request(compute("visibility_clear"));
     classify_ = p.request(compute("visibility_classify"));
     generic_ = p.request(compute(lighting_ ? "visibility_lit_resolve" : "visibility_resolve"));
@@ -76,6 +81,7 @@ VisibilityRenderer::VisibilityRenderer(MetalContext &c, PipelineCache &p, SceneR
 }
 VisibilityRenderer::~VisibilityRenderer() {
     context_.waitIdle();
+    if (lightingFallbackDepth_) lightingFallbackDepth_->release();
     for (auto &f : frames_) {
         context_.memory().release(f.tiles, MemoryCategory::Other);
         context_.memory().release(f.args, MemoryCategory::Other);
@@ -367,7 +373,7 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
             if (lighting_) scene_.setLightingInputs(lightingAddress_, static_cast<MTL::Texture*>(ctx.texture(sun_)),
                                                      static_cast<MTL::Texture*>(ctx.texture(direct_)),
                                                      static_cast<MTL::Texture*>(ctx.texture(indirect_)));
-            scene_.encodeOverlay(static_cast<MTL4::RenderCommandEncoder *>(ctx.encoder()), fallback_, true);
+            scene_.encodeOverlay(static_cast<MTL4::RenderCommandEncoder *>(ctx.encoder()), fallback_, true, lightingFallbackDepth_);
         });
     return outputs_[0];
 }
