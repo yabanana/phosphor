@@ -27,6 +27,12 @@ SHADOW_FN float shadowPenumbraWorld(float receiverDistance, float blockerDistanc
 SHADOW_FN bool shadowDepthVisible(float receiverDepth, float storedDepth, float biasDepth) {
     return receiverDepth + biasDepth >= storedDepth;
 }
+// A raw solar sample is Bernoulli, so an all-zero/all-one neighborhood is
+// legitimate Monte Carlo noise, not a bound on the expected visibility.
+// Geometry/revision checks reject stale history before this bounded mean.
+SHADOW_FN float shadowTemporalMean(float previous, float observation, u32 samples) {
+    return previous + (observation - previous) / float(SHADOW_MAX(samples, 1u));
+}
 // Sphere vs orthographic light volume. Each matrix row scales sphere radius;
 // no camera-visible, distance or occlusion input is allowed in this predicate.
 SHADOW_FN bool shadowCasterIntersects(const SHADOW_AS GPUShadowCascade& c,

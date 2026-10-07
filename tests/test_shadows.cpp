@@ -143,6 +143,29 @@ TEST_CASE("F10 shadow history is isolated by view light incarnation revision and
     SUBCASE("invalid sky") { s.valid=0; }
     CHECK_FALSE(shadowHistoryMatches(p,s,h));
 }
+TEST_CASE("F10 Bernoulli temporal mean preserves penumbra expectation at the history cap") {
+    // Enumerate every 3x3 raw outcome exactly, without RNG or a rendered
+    // reference. The centre and eight neighbors have the same true visibility.
+    // A steady unbiased history must keep that expectation for either edge.
+    for (const float visibility : {0.1f, 0.5f, 0.9f}) {
+        double mean=0, clipped=0, mass=0;
+        for (u32 bits=0; bits<512; ++bits) {
+            double probability=1;
+            for (u32 k=0; k<9; ++k)
+                probability *= bits&(1u<<k) ? visibility : 1-visibility;
+            const float observation=float(bits&1u);
+            mean += probability*shadowTemporalMean(visibility,observation,16);
+            const float old=bits==0 ? 0.0f : bits==511 ? 1.0f : visibility;
+            clipped += probability*shadowTemporalMean(old,observation,16);
+            mass += probability;
+        }
+        CHECK(mass==doctest::Approx(1).epsilon(1e-6));
+        CHECK(mean==doctest::Approx(visibility).epsilon(1e-6));
+        if (visibility!=0.5f) CHECK(std::abs(clipped-visibility)>0.03);
+    }
+    CHECK(shadowTemporalMean(0.3f,1.0f,1)==doctest::Approx(1));
+    CHECK(shadowTemporalMean(0.1f,0.0f,16)==doctest::Approx(0.09375f));
+}
 TEST_CASE("F10 cache never reuses stale light caster material or projection revision") {
     ShadowStaticCache cache(1); const ShadowCacheKey key{0,1,0,0};
     ShadowCacheRevision revision{1,2,3,4};

@@ -309,19 +309,13 @@ kernel void shadow_temporal(constant GPUShadowParams& p [[buffer(1)]],
                 if(p.corruption==SHADOW_CORRUPT_HISTORY) prev.generation^=1u;
                 accepted=shadowHistoryMatches(p,s,prev) && isfinite(prev.visibility) && isfinite(prev.secondMoment);
                 if(accepted) {
-                    // Neighborhood clip prevents persistent stale dark trails.
-                    float low=1,high=0;
-                    for(int y=-1;y<=1;++y) for(int x=-1;x<=1;++x) {
-                        const int2 n=int2(pixel)+int2(x,y);
-                        if(any(n<0)||any(n>=int2(p.width,p.height))) continue;
-                        const GPUShadowSurface guide=surfaces[uint(n.y)*p.width+uint(n.x)];
-                        if(!guide.valid || guide.slot!=s.slot || guide.generation!=s.generation) continue;
-                        const float r=raw.read(uint2(n)).x; low=min(low,r); high=max(high,r);
-                    }
+                    // Keep the Bernoulli expectation. Clipping a converged
+                    // mean to one noisy raw neighborhood contracts penumbrae
+                    // even with a static scene; stale history is rejected by
+                    // shadowHistoryMatches rather than by sample extrema.
                     h.samples=min(prev.samples+1u,clamp(p.historyMaxSamples,1u,64u));
-                    const float alpha=1.0f/float(h.samples);
-                    h.visibility=mix(clamp(prev.visibility,low,high),value,alpha);
-                    h.secondMoment=mix(clamp(prev.secondMoment,0.0f,1.0f),value*value,alpha);
+                    h.visibility=shadowTemporalMean(prev.visibility,value,h.samples);
+                    h.secondMoment=shadowTemporalMean(prev.secondMoment,value*value,h.samples);
                 }
             }
         }
