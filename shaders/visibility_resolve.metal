@@ -89,7 +89,7 @@ static void resolveVisibilityPixel(constant FrameConstants &frame, const device 
                                    uint2 pixel, uint id, bool reuse, thread ShadingResult &cached,
                                    float sunVisibility = 1.0f, uint sunIndex = ~0u, bool replaceLocal = false,
                                    float3 localDirect = float3(0), bool useGI = false, float3 irradiance = float3(0),
-                                   bool omitSpecularAmbient=false, bool physicalGI=false) {
+                                   bool omitSpecularAmbient=false, bool physicalGI=false, bool externalDiffuse=false) {
     if (pixel.x >= p.width || pixel.y >= p.height)
         return;
     if (id == VISIBILITY_BACKGROUND || visibilityCluster(id) >= 2u * p.candidateCapacity)
@@ -139,7 +139,7 @@ static void resolveVisibilityPixel(constant FrameConstants &frame, const device 
     const float3 eye = float3(frame.cameraPosition[0], frame.cameraPosition[1], frame.cameraPosition[2]);
     surface.frontFacing = dot(cross(w1.xyz - w0.xyz, w2.xyz - w0.xyz), eye - surface.worldPos) > 0;
     const ShadingResult value = reuse ? cached : shadeSurface(surface, frame, materials, lights, textures, false,
-                                                              sunVisibility, sunIndex, replaceLocal, localDirect, useGI, irradiance,omitSpecularAmbient,physicalGI);
+                                                              sunVisibility, sunIndex, replaceLocal, localDirect, useGI, irradiance,omitSpecularAmbient,physicalGI,externalDiffuse);
     cached = value;
     color.write(float4(p.debugMode == 1   ? value.normal * 0.5f + 0.5f
                        : p.debugMode == 2 ? value.baseColor
@@ -226,7 +226,7 @@ kernel void visibility_lit_resolve(
                            reactive, pixel, id, false, cached,
                            (lighting.flags & 1u) ? sun.read(pixel).x : 1.0f, lighting.sunIndex,
                            (lighting.flags & 2u) != 0, (lighting.flags & 2u) ? localDirect.read(pixel).xyz : float3(0),
-                           (lighting.flags & 4u) != 0, (lighting.flags & 4u) ? irradiance.read(pixel).xyz : float3(0),(lighting.flags & 8u)!=0,(lighting.flags & 16u)!=0);
+                           (lighting.flags & 4u) != 0, (lighting.flags & 4u) ? irradiance.read(pixel).xyz : float3(0),(lighting.flags & 8u)!=0,(lighting.flags & 16u)!=0,(lighting.flags & RESOLVE_EXTERNAL_DIFFUSE)!=0);
 }
 kernel void visibility_adaptive(
     constant FrameConstants &frame [[buffer(0)]], const device GPUVertex *vertices [[buffer(1)]],

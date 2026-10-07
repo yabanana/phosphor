@@ -245,7 +245,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
                                                            options_.shadows != ShadowMode::Off || options_.directLighting != DirectLightingMode::Legacy || options_.gi != GiMode::Off || options_.reflections!=ReflectionMode::Off || options_.ao!=AoMode::Off || options_.lightingDenoise!=LightingDenoiseMode::Off || options_.atmosphere || options_.fog || options_.clouds);
     if (options_.post) {
         PostProcessor::Options po;
-        po.physicalFloat32=options_.atmosphere || options_.fog || options_.clouds;
+        po.physicalFloat32=options_.atmosphere || options_.fog || options_.clouds || options_.reflections!=ReflectionMode::Off || options_.ao!=AoMode::Off || options_.lightingDenoise!=LightingDenoiseMode::Off || !options_.denoisedFixture.empty();
         po.forceReset = options_.debugUpscalerReset;
         po.corruptExposure = options_.debugExposureCorrupt;
         po.jitterVariant = options_.jitterVariant;
@@ -1598,7 +1598,7 @@ bool Engine::frame(float dt) {
         if(reflections_&&reflections_->ready())reflections_->prepareFrame(*store_,sf,custom,surfaceSignalEpoch_);
         if(atmosphere_)atmosphere_->prepareFrame(sf,surfaceGeometryEpoch_,surfaceMaterialEpoch_);
         const u32 flags=(options_.shadows!=ShadowMode::Off?1u:0u) | (options_.directLighting!=DirectLightingMode::Legacy?2u:0u) | (options_.gi!=GiMode::Off?4u:0u) |
-                        (options_.reflections!=ReflectionMode::Off && reflections_&&reflections_->ready()?8u:0u) | (reflections_&&reflections_->ready()?16u:0u);
+                        (options_.reflections!=ReflectionMode::Off && reflections_&&reflections_->ready()?8u:0u) | (reflections_&&reflections_->ready()?16u|RESOLVE_EXTERNAL_DIFFUSE:0u);
         visibility_->prepareLighting(flags,shadows_->sunIndex());
     }
     if(referenceSnapshot_) {

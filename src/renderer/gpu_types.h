@@ -557,6 +557,9 @@ struct GPUShadowCacheTile {
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowCacheTile) == 48, "GPUShadowCacheTile layout");
 
 
+// F13 residual surface base omits external DI/GI and hemisphere diffuse.
+// A positive raw assembly supplies full pre-reflection Lo for SSR separately.
+PHOSPHOR_GPU_CONSTANT u32 RESOLVE_EXTERNAL_DIFFUSE = 1u<<5;
 struct GPUResolveLightingParams {
     u32 flags, sunIndex, width, height; // bits: sun visibility, replace local DI, indirect irradiance
 };
