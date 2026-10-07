@@ -32,7 +32,7 @@ import sys
 import tempfile
 import time
 
-from run_checked import run_checked
+from run_checked import run_checked, scrub_allowed_error_lines
 
 
 VALIDATION_ERROR = re.compile(
@@ -40,6 +40,21 @@ VALIDATION_ERROR = re.compile(
     r'Metal Validation Error|\berror:')
 CHECK = re.compile(r'^RT check frame (\d+).*?opaque-alpha (\d+).*?\| (PASS|FAIL)(?:$|:)', re.M)
 RELOAD = re.compile(r'Shaders reloaded: generation')
+
+
+def forward_probe_archive_miss(repo: Path) -> str:
+    # Observed normal consequence of changing forward_fs to the probe. Exact
+    # producer, pipeline names, function, hash fields and line ending only;
+    # an actual compiler/validation error adjacent to or appended here remains.
+    location = re.escape(str(repo/'src/platform/metal/pipeline_cache.cpp'))
+    digest = r'[0-9A-Fa-f]{64}'
+    return (r'\[INFO\] \[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\] '
+            + location + r':[0-9]+: Pipeline archive miss: Forward (?:generic|v0) '
+            + r'\(Failed with error: Failed to find fragment function forward_fs with key:Key:   ' + digest
+            + r' Function hash  ' + digest + r' air-nt   ' + digest + r' air-nt plugin  ' + digest + r' metal framework\)')
+
+
+ALLOWED_ERROR_LINES = (forward_probe_archive_miss(Path(__file__).resolve().parents[1]),)
 
 
 def checksum(path: Path) -> str:
@@ -134,9 +149,10 @@ def archive_environment() -> dict[str, str]:
     return env
 
 
-def assess(text: str, report: dict, negative: bool) -> list[str]:
+def assess(text: str, report: dict, negative: bool, allowed_error_lines=ALLOWED_ERROR_LINES) -> list[str]:
     errors = []
-    if VALIDATION_ERROR.search(text):
+    error_text, allowed_matches = scrub_allowed_error_lines(text, allowed_error_lines)
+    if VALIDATION_ERROR.search(error_text):
         errors.append('unexpected GPU, compiler, or validation error')
     if 'Validation Enabled' in text:
         errors.append('Metal validation was enabled; this is not the archive-active path')
@@ -160,13 +176,15 @@ def assess(text: str, report: dict, negative: bool) -> list[str]:
     if re.search(r'^HOT-RELOAD .*\| PASS$', text, re.M) is None:
         errors.append('probe capture does not prove the new raster library became active')
     pipelines = report.get('pipelines', {})
-    for field in ('archiveHits', 'compilerCalls'):
+    for field in ('archiveHits', 'archiveMisses', 'compilerCalls'):
         value = pipelines.get(field)
         if type(value) is not int or value <= 0:
             errors.append(f'pipelines.{field} must be positive')
     for field, expected in (('reloads', 1), ('reloadFailures', 0), ('failures', 0), ('renderThreadCompiles', 0)):
         if pipelines.get(field) != expected:
             errors.append(f'pipelines.{field} must equal {expected}')
+    if pipelines.get('archiveMisses', 0) < len(allowed_matches):
+        errors.append('reported archive misses do not cover the permitted log lines')
     rt = report.get('rt', {})
     if rt.get('enabled') is not True or rt.get('checks', 0) <= 0 or rt.get('alpha_tests', 0) <= 0:
         errors.append('missing enabled, checked RT work with real MASK intersections')
@@ -209,7 +227,8 @@ def run_case(name: str, command: list[str], out: Path, env: dict[str, str], immu
     report_path = out / f'{name}.json'
     command = [*command, '--report', str(report_path), '--capture', str(out / f'{name}.png')]
     status = run_checked(command, log, expected=int(negative), timeout=timeout, env=env,
-                         required=(r'^HOT-RELOAD .*\| PASS$', r'^RT checks [1-9][0-9]* failures \d+ \| (PASS|FAIL)$'))
+                         required=(r'^HOT-RELOAD .*\| PASS$', r'^RT checks [1-9][0-9]* failures \d+ \| (PASS|FAIL)$'),
+                         allowed_error_lines=ALLOWED_ERROR_LINES)
     report = json.loads(report_path.read_text()) if report_path.is_file() else {}
     errors = list(status['failures']) + assess(log.read_text(errors='replace'), report, negative)
     assert_unchanged(immutable)
@@ -245,7 +264,7 @@ def self_test() -> None:
                             {'CMAKE_OSX_DEPLOYMENT_TARGET': '26.0'}, root/'source with spaces', root/'build with spaces')
         assert str(root/'source with spaces/src') in flags and '-mmacosx-version-min=26.0' in flags
         assert poison_alpha('    ++payload.alphaTests;\n').count('++payload.opaqueAlphaTests;') == 1
-        report = {'pipelines': {'archiveHits': 25, 'compilerCalls': 2, 'reloads': 1, 'reloadFailures': 0,
+        report = {'pipelines': {'archiveHits': 25, 'archiveMisses': 2, 'compilerCalls': 2, 'reloads': 1, 'reloadFailures': 0,
                                 'failures': 0, 'renderThreadCompiles': 0},
                   'rt': {'enabled': True, 'checks': 4, 'alpha_tests': 12, 'check_failures': 0, 'opaque_alpha_tests': 0}}
         before = 'RT check frame 0 | checked 512 | opaque-alpha 0 invalid-mesh 0 | PASS\n'
@@ -253,6 +272,19 @@ def self_test() -> None:
         after = ''.join(f'RT check frame {i} | checked 512 | opaque-alpha 0 invalid-mesh 0 | PASS\n' for i in (6, 7, 8))
         tail = 'HOT-RELOAD reloads 1 | probe pixels 100 | PASS\n'
         assert not assess(before+reload+after+tail, report, False)
+        source_root = Path(__file__).resolve().parents[1]
+        h = 'A'*64
+        miss = (f'[INFO] [2026-10-07 15:39:27] {source_root}/src/platform/metal/pipeline_cache.cpp:449: '
+                f'Pipeline archive miss: Forward generic (Failed with error: Failed to find fragment function forward_fs '
+                f'with key:Key:   {h} Function hash  {h} air-nt   {h} air-nt plugin  {h} metal framework)')
+        clean, matches = scrub_allowed_error_lines(miss+'\n', ALLOWED_ERROR_LINES)
+        assert clean == '\n' and len(matches) == 1
+        assert not assess(before+miss+'\n'+reload+after+tail, report, False)
+        for extra in (' [ERROR] compiler failed', ' Shader Validation Error', '\n[ERROR] compiler failed', '\nerror: bad shader'):
+            assert assess(before+miss+extra+'\n'+reload+after+tail, report, False)
+        for bad in (miss.replace('forward_fs', 'rt_trace_rays'), miss.replace('[INFO]', '[ERROR]'),
+                    miss.replace('Forward generic', 'Forward v99'), miss.replace(h, 'A'*63, 1)):
+            assert assess(before+bad+'\n'+reload+after+tail, report, False)
         poison = after.replace('opaque-alpha 0', 'opaque-alpha 3').replace('| PASS', '| FAIL')
         report['rt']['check_failures'] = 3; report['rt']['opaque_alpha_tests'] = 9
         valid = before+reload+poison+tail
