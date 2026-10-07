@@ -91,6 +91,7 @@ add_library(phosphor_core STATIC
     src/renderer/reflection_probe.cpp
     src/renderer/denoise_settings.cpp
     src/renderer/atmosphere.cpp
+    src/renderer/volume_oracle.cpp
     src/renderer/fog_settings.cpp
     src/renderer/cloud_settings.cpp
     src/renderer/meshlet_cull_reference.cpp

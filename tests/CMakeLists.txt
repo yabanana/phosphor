@@ -57,6 +57,7 @@ add_executable(phosphor_tests
     test_surface_signal_controls.cpp
     test_positive_lighting_partition.cpp
     test_atmosphere.cpp
+    test_volume_oracle.cpp
     test_volumes.cpp
     test_metalfx_denoise_contract.cpp
     test_scene_check.cpp
