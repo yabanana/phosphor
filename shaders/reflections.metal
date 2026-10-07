@@ -9,7 +9,7 @@
 inline bool reflectionMaterial(GPURtHit hit,float3 point,float3 geometric,float3 outgoing,
     constant GPUReflectionParams& p,const device GPUInstance* instances,const device GPURtMesh* meshes,
     const device GPUVertex* vertices,const device uint* indices,const device GPUMaterial* materials,
-    const device DITextureHandle* textures,thread GPUDISurface& surface,thread float3& emission){
+    const device DITextureHandle* textures,thread GPUDISurface& surface,thread float3& emission,thread bool& numericError){
     if(hit.slot>=p.slotCount)return false;const GPUInstance instance=instances[hit.slot];
     if(instance.meshIndex>=p.meshCount||instance.materialIndex>=p.materialCount)return false;
     const GPURtMesh mesh=meshes[instance.meshIndex];if(hit.primitive>=mesh.indexCount/3u)return false;
@@ -31,7 +31,7 @@ inline bool reflectionMaterial(GPURtHit hit,float3 point,float3 geometric,float3
     emission=float3(m.emissive[0],m.emissive[1],m.emissive[2]);if(m.emissiveTex!=INVALID_TEXTURE_INDEX)emission*=float3(half3(textures[m.emissiveTex].tex.sample(kGiMaterialSampler,uv,level(0)).rgb));
     surface={};for(uint i=0;i<3;++i){surface.position[i]=point[i];surface.geometricNormal[i]=geometric[i];surface.shadingNormal[i]=n[i];surface.albedo[i]=albedo[i];surface.viewDirection[i]=outgoing[i];}
     surface.roughness=clamp(rough,.04f,1.0f);surface.metallic=saturate(metal);surface.instanceSlot=hit.slot;surface.instanceGeneration=hit.generation;surface.valid=1;
-    return all(isfinite(n))&&all(isfinite(albedo))&&all(isfinite(emission));
+    const bool finite=all(isfinite(n))&&all(isfinite(albedo))&&all(isfinite(emission));if(!finite)numericError=true;return finite;
 }
 inline float3 reflectionSecondary(GPURtHit hit,float3 direction,
     instance_acceleration_structure as,intersection_function_table<triangle_data,instancing> ift,
@@ -39,10 +39,10 @@ inline float3 reflectionSecondary(GPURtHit hit,float3 direction,
     const device GPUVertex* vertices,const device uint* indices,const device GPUMaterial* materials,
     const device DITextureHandle* textures,const device GPULight* lights,const device GPUSampledLight* sampled,
     const device GPUEmissiveSurface* emitters,constant GPUProbeGridParams& gi,const device GPUProbeState* states,
-    constant GPUProbeTraceExtra& extra,texture2d<float> irradiance,texture2d<float> moments,thread uint& seed){
+    constant GPUProbeTraceExtra& extra,texture2d<float> irradiance,texture2d<float> moments,thread uint& seed,thread bool& numericError){
     float3 point,normal,emission;GPUDISurface surface;
     if(!rtSurface(hit,instances,meshes,vertices,indices,p.slotCount,p.meshCount,point,normal)||
-        !reflectionMaterial(hit,point,normal,-direction,p,instances,meshes,vertices,indices,materials,textures,surface,emission))return 0;
+        !reflectionMaterial(hit,point,normal,-direction,p,instances,meshes,vertices,indices,materials,textures,surface,emission,numericError))return 0;
     float3 result=max(emission,0.0f);const float3 n=diVec(surface.shadingNormal),geometric=diVec(surface.geometricNormal);
     for(uint i=0;i<p.lightCount;++i){const GPULight light=lights[i];if(extra.sampledLightCount&&light.type!=LIGHT_DIRECTIONAL)continue;
         DISample sample{};sample.valid=true;sample.delta=true;sample.distance=p.maxDistance;sample.radiance=float3(light.color[0],light.color[1],light.color[2])*light.intensity;
@@ -52,15 +52,17 @@ inline float3 reflectionSecondary(GPURtHit hit,float3 direction,
             sample.position=point+sample.wi*p.maxDistance;}
         else{GPUSampledLight l{};l.type=light.type;l.range=light.range;l.innerCone=light.innerCone;l.outerCone=light.outerCone;
             for(uint c=0;c<3;++c){l.position[c]=light.position[c];l.axisU[c]=light.direction[c];l.emission[c]=light.color[c]*light.intensity;}sample=diSampleLight(l,float2(.5f),point);}
-        if(sample.valid&&any(diBRDF(surface,sample)>0)&&diEndpointVisible(surface,sample,as,ift,instances,p.slotCount))result+=diBRDF(surface,sample);
+        const float3 contribution=diBRDF(surface,sample);if(!all(isfinite(contribution))||any(contribution<0))numericError=true;
+        else if(sample.valid&&any(contribution>0)&&diEndpointVisible(surface,sample,as,ift,instances,p.slotCount))result+=contribution;
     }
     if(extra.sampledLightCount){const uint i=min(uint(giRandom(seed)*extra.sampledLightCount),extra.sampledLightCount-1u);
         const DISample sample=diSampleTexturedLight(sampled[i],i,float2(giRandom(seed),giRandom(seed)),point,emitters,materials,textures);
-        if(sample.valid&&sample.pdfArea>0&&diEndpointVisible(surface,sample,as,ift,instances,p.slotCount))result+=diBRDF(surface,sample)*float(extra.sampledLightCount)/sample.pdfArea;}
+        if(sample.valid&&sample.pdfArea>0){const float3 contribution=diBRDF(surface,sample)*float(extra.sampledLightCount)/sample.pdfArea;
+            if(!all(isfinite(contribution))||any(contribution<0))numericError=true;else if(diEndpointVisible(surface,sample,as,ift,instances,p.slotCount))result+=contribution;}}
     // GI atlas is INDIRECT irradiance. Add once; AO never modulates it.
     if((p.flags&REFLECTION_ENABLE_GI)&&gi.countX>=2&&gi.countY>=2&&gi.countZ>=2)
         result+=giIrradiance(point,geometric,gi,states,irradiance,moments,true)*diVec(surface.albedo)*(1-surface.metallic)/M_PI_F;
-    return all(isfinite(result))?max(result,0.0f):float3(0);
+    if(!all(isfinite(result))||any(result<0)){numericError=true;return 0;}return result;
 }
 
 kernel void reflection_ssr(constant GPUReflectionParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
@@ -90,10 +92,11 @@ kernel void reflection_rt(constant GPUReflectionParams& p [[buffer(0)]],const de
         ray.ox=origin.x;ray.oy=origin.y;ray.oz=origin.z;ray.dx=dir.direction.x;ray.dy=dir.direction.y;ray.dz=dir.direction.z;ray.tmax=p.maxDistance;ray.mask=RT_MASK_INDIRECT;ray.type=RT_PROBE_DIFFUSE;
         RtPayload payload{};const auto hit=rtTrace(ray,as,ift,instances,p.slotCount,payload);float3 L;
         sample.flags=SPECULAR_SAMPLE_VALID;sample.proposalSolidAngle=dir.pdf;for(uint i=0;i<3;++i)sample.direction[i]=dir.direction[i];
-        if(hit.hit){L=reflectionSecondary(hit,dir.direction,as,ift,p,instances,meshes,vertices,indices,materials,textures,lights,sampled,emitters,gi,states,extra,irradiance,moments,seed);
+        bool numericError=dir.error;
+        if(hit.hit){L=reflectionSecondary(hit,dir.direction,as,ift,p,instances,meshes,vertices,indices,materials,textures,lights,sampled,emitters,gi,states,extra,irradiance,moments,seed,numericError);
             sample.path=REFLECTION_PATH_RT;sample.hitDistance=length(origin+dir.direction*hit.t-diVec(s.position));sample.secondarySlot=hit.slot;sample.secondaryGeneration=hit.generation;}
         else L=reflectionProbeRadiance(diVec(s.position),dir.direction,s.roughness,false,p,probes,atlas,sample.path);
-        L*=dir.weight;for(uint i=0;i<3;++i)sample.radiance[i]=L[i];
+        L*=dir.weight;if(!all(isfinite(L))||any(L<0)){numericError=true;L=0;}if(numericError)sample.flags|=SPECULAR_SAMPLE_ERROR;for(uint i=0;i<3;++i)sample.radiance[i]=L[i];
     }else sample=reflectionFallback(s,dir,p,surfaces,cache,gi,probes,baseRadiance,depth,atlas);
     metadata[tid]=sample;uint2 pixel(tid%p.width,tid/p.width);output.write(float4(sample.radiance[0],sample.radiance[1],sample.radiance[2],1),pixel);distance.write(float4(sample.hitDistance),pixel);
 }
@@ -111,7 +114,7 @@ kernel void reflection_capture_rt(constant GPUReflectionParams& p [[buffer(0)]],
     if(tid>=p.width*p.height)return;const uint2 pixel(tid%p.width,tid/p.width);const float2 ndc=(float2(pixel)+.5f)*float2(2,-2)/float2(p.width,p.height)+float2(-1,1);
     const float4 near=reflectionMatrix(p.inverseViewProjection)*float4(ndc,1,1);const float3 origin=reflectionConstantVec(p.cameraPosition),direction=normalize(near.xyz/near.w-origin);
     GPURtRay ray{};ray.ox=origin.x;ray.oy=origin.y;ray.oz=origin.z;ray.dx=direction.x;ray.dy=direction.y;ray.dz=direction.z;ray.tmax=p.maxDistance;ray.mask=RT_MASK_INDIRECT;ray.type=RT_PROBE_DIFFUSE;
-    RtPayload payload{};const auto hit=rtTrace(ray,as,ift,instances,p.slotCount,payload);uint seed=giHash(tid^p.seed);const float3 L=hit.hit?
-        reflectionSecondary(hit,direction,as,ift,p,instances,meshes,vertices,indices,materials,textures,lights,sampled,emitters,gi,states,extra,irradiance,moments,seed):reflectionConstantVec(p.environment);
-    output.write(float4(L,1),pixel);
+    RtPayload payload{};const auto hit=rtTrace(ray,as,ift,instances,p.slotCount,payload);uint seed=giHash(tid^p.seed);bool numericError=false;const float3 L=hit.hit?
+        reflectionSecondary(hit,direction,as,ift,p,instances,meshes,vertices,indices,materials,textures,lights,sampled,emitters,gi,states,extra,irradiance,moments,seed,numericError):reflectionConstantVec(p.environment);
+    output.write(float4(L,numericError?-1.0f:1.0f),pixel);
 }

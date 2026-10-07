@@ -43,7 +43,8 @@ fragment float4 reflection_probe_capture_fs(ProbeVertexOut in [[stage_in]],bool 
     for(uint i=0;i<p.sampledLightCount;++i)for(uint y=0;y<4;++y)for(uint x=0;x<4;++x){DISample sample=diSampleTexturedLight(sampled[i],i,(float2(x,y)+.5f)/4.0f,in.world,emitters,materials,textures);
         if(sample.valid&&sample.pdfArea>0)result+=diBRDF(s,sample)/(16*sample.pdfArea);}
     float3 emission=float3(m.emissive[0],m.emissive[1],m.emissive[2]);if(m.emissiveTex!=INVALID_TEXTURE_INDEX)emission*=float3(half3(textures[m.emissiveTex].tex.sample(kGiMaterialSampler,in.uv,gradient2d(dx,dy)).rgb));
-    result+=emission+reflectionConstantVec(p.environment)*base*(1-s.metallic);return float4(all(isfinite(result))?max(result,0.0f):float3(0),1);
+    result+=emission+reflectionConstantVec(p.environment)*base*(1-s.metallic);const bool finite=all(isfinite(result))&&all(result>=0);
+    return float4(finite?result:float3(0),finite?1.0f:-1.0f);
 }
 
 inline float3 reflectionCubeDirection(uint face,float2 uv){const float2 p=uv*2-1;switch(face){case 0:return normalize(float3(1,-p.y,-p.x));case 1:return normalize(float3(-1,-p.y,p.x));case 2:return normalize(float3(p.x,1,p.y));case 3:return normalize(float3(p.x,-1,-p.y));case 4:return normalize(float3(p.x,-p.y,1));default:return normalize(float3(-p.x,-p.y,-1));}}

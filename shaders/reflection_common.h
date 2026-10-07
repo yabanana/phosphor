@@ -14,16 +14,17 @@ inline float3 reflectionSpecularBRDF(GPUDISurface s,float3 wi){
     float3 f0=mix(float3(.04f),diVec(s.albedo),saturate(s.metallic)),F=f0+(1-f0)*pow(1-vh,5.0f);
     return D*(.5f/max(gv+gl,1e-5f))*F;
 }
-struct ReflectionDirection {float3 direction,weight;float pdf;bool valid;};
+struct ReflectionDirection {float3 direction,weight;float pdf;bool valid,error;};
 inline ReflectionDirection reflectionDirection(GPUDISurface s,float2 u){
     ReflectionDirection out{};float3 n=diVec(s.shadingNormal),v=diVec(s.viewDirection);
-    if(!s.valid||!all(isfinite(n))||!all(isfinite(v))||dot(n,n)<=0||dot(v,v)<=0)return out;
+    if(!s.valid)return out;if(!all(isfinite(n))||!all(isfinite(v))||dot(n,n)<=0||dot(v,v)<=0){out.error=true;return out;}
     n=normalize(n);v=normalize(v);float3 t=reflectionTangent(n),b=cross(n,t);
     float a=max(s.roughness*s.roughness,.002f),a2=a*a,c=sqrt((1-u.x)/(1+(a2-1)*u.x)),r=sqrt(max(0.0f,1-c*c)),phi=2*M_PI_F*u.y;
     float3 h=t*(r*cos(phi))+b*(r*sin(phi))+n*c;float vh=dot(v,h);if(vh<=0)return out;
     out.direction=reflect(-v,h);float d=c*c*(a2-1)+1;out.pdf=(a2/(M_PI_F*d*d))*c/(4*vh);
-    out.valid=all(isfinite(out.direction))&&isfinite(out.pdf)&&out.pdf>0;
-    if(out.valid&&dot(n,out.direction)>0)out.weight=reflectionSpecularBRDF(s,out.direction)*dot(n,out.direction)/out.pdf;
+    out.valid=all(isfinite(out.direction))&&isfinite(out.pdf)&&out.pdf>0;if(!out.valid)out.error=true;
+    if(out.valid&&dot(n,out.direction)>0){out.weight=reflectionSpecularBRDF(s,out.direction)*dot(n,out.direction)/out.pdf;
+        if(!all(isfinite(out.weight))||any(out.weight<0)){out.error=true;out.weight=0;}}
     return out;
 }
 inline float reflectionRTWeight(float roughness,constant GPUReflectionParams& p){return (p.flags&REFLECTION_ENABLE_RT)?1-smoothstep(p.rtRoughnessLow,p.rtRoughnessHigh,roughness):0;}
@@ -75,7 +76,7 @@ inline GPUSpecularSample reflectionFallback(GPUDISurface surface,ReflectionDirec
     constant GPUReflectionParams& p,const device GPUDISurface* surfaces,const device GPURadianceCacheEntry* cache,
     constant GPUProbeGridParams& gi,const device GPUReflectionProbe* probes,
     texture2d<float,access::read> baseRadiance,texture2d<float,access::read> depth,texturecube_array<float> probeAtlas){
-    GPUSpecularSample out=reflectionEmpty();if(!surface.valid||!direction.valid)return out;out.flags=SPECULAR_SAMPLE_VALID;
+    GPUSpecularSample out=reflectionEmpty();if(direction.error)out.flags|=SPECULAR_SAMPLE_ERROR;if(!surface.valid||!direction.valid)return out;out.flags|=SPECULAR_SAMPLE_VALID;
     for(uint i=0;i<3;++i)out.direction[i]=direction.direction[i];out.proposalSolidAngle=direction.pdf;
     if(!any(direction.weight>0))return out;float3 L;
     const auto hit=reflectionSSR(diVec(surface.position),direction.direction,p,depth);
@@ -84,5 +85,6 @@ inline GPUSpecularSample reflectionFallback(GPUDISurface surface,ReflectionDirec
         if((p.flags&REFLECTION_ENABLE_CACHE)&&giCacheLookup(hit.point,diVec(secondary.geometricNormal),-direction.direction,gi,cache,L))out.path=REFLECTION_PATH_CACHE;
         else L=baseRadiance.read(uint2(hit.pixel%p.width,hit.pixel/p.width)).rgb;
     }else L=reflectionProbeRadiance(diVec(surface.position),direction.direction,surface.roughness,false,p,probes,probeAtlas,out.path);
-    const float3 result=max(L,0.0f)*direction.weight;for(uint i=0;i<3;++i)out.radiance[i]=result[i];return out;
+    float3 result=L*direction.weight;if(!all(isfinite(L))||any(L<0)||!all(isfinite(result))||any(result<0)){out.flags|=SPECULAR_SAMPLE_ERROR;result=0;}
+    for(uint i=0;i<3;++i)out.radiance[i]=result[i];return out;
 }
