@@ -40,6 +40,7 @@ class AtmospherePasses {
     // Reads only a slot whose frameEvent reached index+1. Not-recorded startup
     // slots have no check work; in-flight reads are rejected explicitly.
     [[nodiscard]] bool check(u32 slot)const;
+    bool consumeDiagnostics(u32 completedSlot);
   private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };

@@ -911,6 +911,26 @@ struct GPUVolumeCounters {
     u32 froxels, cloudSamples, historyReused, historyRejected;
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUVolumeCounters) == 32, "GPUVolumeCounters layout");
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_CORRUPT_OMIT_LUT = 4u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_NUMERIC_TRANS = 0u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_NUMERIC_MULTI = 1u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_NUMERIC_SKY = 2u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_NUMERIC_FOG = 3u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_NUMERIC_SOLAR = 4u;
+struct GPUVolumeDiagnosticParams {
+    u32 transWidth,transHeight,multiWidth,multiHeight;
+    u32 skyWidth,skyHeight,fogX,fogY;
+    u32 fogZ,frameLo,frameHi,expectedPhysicsRevision;
+    u32 expectedSkyRevision,sampleCount,corruption,homogeneous;
+    float fixtureExtinction,fixtureSource[3];
+    u32 fogIndices[3],stampKind;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUVolumeDiagnosticParams)==96,"GPUVolumeDiagnosticParams layout");
+struct GPUVolumeNumericSample {
+    float value[4];
+    u32 kind,x,y,producedRevision;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUVolumeNumericSample)==32,"GPUVolumeNumericSample layout");
 
 PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_ERROR = 1u<<31;
 PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_MIXED = 4u;

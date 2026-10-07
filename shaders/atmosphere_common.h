@@ -44,6 +44,9 @@ static float3 atmoIntegralFactor(float3 sigma,float ds) {
 }
 static float atmoRayleighPhase(float mu){return 3.0f/(16.0f*M_PI_F)*(1+mu*mu);}
 static float atmoHgPhase(float mu,float g){return (1-g*g)/(4*M_PI_F*pow(max(1e-8f,1+g*g-2*g*mu),1.5f));}
+static float3 atmoSolarDisk(float3 ray,constant GPUAtmosphereParams& p) {
+    return dot(ray,atmoVec(p.sunDirection))>=cos(p.sunAngularRadius)?atmoVec(p.sunIrradiance)/(M_PI_F*pow(sin(p.sunAngularRadius),2.0f)):float3(0);
+}
 static float2 atmoTransUv(float r,float mu,constant GPUAtmosphereParams& p) {
     r=clamp(r,p.bottomRadius,p.topRadius);mu=clamp(mu,-1.0f,1.0f);
     const float H=sqrt((p.topRadius-p.bottomRadius)*(p.topRadius+p.bottomRadius));
