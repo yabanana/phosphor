@@ -44,6 +44,64 @@ Full-rate reference sets cloud width/height equal output extent; low resolution
 changes only width/height. History and reconstruction use independent per-view
 state, scene-depth validity and neighborhood clamping; clock jumps reset.
 
+CloudParams.maxHistorySamples is u32 at the old final-pad location (ABI size
+remains272). Cloud raw radiance+T, composed HDR and sky/reference LUTs use
+RGBA32Float; raw guide is RG32Float, since cloud distances exceed half range.
+Full-rate reference uses equal cloud/output extent, midpoint marching, no
+history reuse and no light-step early termination. Low-rate ratios are1..4.
+Below terminationTransmittance, low-rate skips expensive lighting traces but
+continues extinction so direct solar-disk transmission is not artificially
+retained. Primary marching stops only when transmittance underflows to zero.
+
+Exact per-entry fog bindings: inject uses0/1/3..15 as above; temporal output
+cell1, fresh input2, PREVIOUS view-history16 and counters15. Integrate output
+GPUFogIntegrated1 and filtered cells2, one thread per XY column loops bounded
+gridZ<=128. Apply integrated1/cells2 plus scene2/depth3/output4 textures; prefix
+interpolation is bilinear XY and stops within the actual opaque depth slice.
+Full-rate cloud march writes raw tex5/guide7 and fresh buffer2. Temporal reads
+raw tex3/guide4/previous buffer3 and writes tex5/next buffer2. Apply reads
+depth0/cloud3/guide4/HDR6 and writes HDR5. Fresh, temporal and final graph refs
+and argument tables are distinct; no encoded table is repurposed for a later
+pass in that frame.
+
+All volume histories belong to a VIEW/SIGNAL, not a frame-ring slot. The root
+sets epochs from scene/geometry/material, physics/noise/coverage/wind, light
+revisions and clock jump. Camera cuts, extent replacements and view mismatches
+clear HISTORY_VALID. Frozen-frame old buffers remain GPU-owned through their
+last reader; persistent graph imports provide first-access previous-frame
+ordering. Clock changes never read a post-resolve screen shadow/normal buffer.
+
+The CSM fog fallback has declared finite coverage. Its far volume must stay
+within the configured shadow receiver distance or the root must extend CSM
+coverage; outside the maps the shader explicitly uses visible. Root currently
+chooses the bounded120m CSM fog preset rather than claiming universal500m
+coverage. CSM fallback local/moon lights are unshadowed; RT mode performs
+actual froxel-point visibility for sun/moon and each sampled local emitter
+with its own PSO-specific IFT. Froxel volume origins do not invent a geometric
+normal for W&B; world origin and bounded metre ray segments are used.
+
+F11 alias sampling includes the complete light list: local sample contribution
+is incident radiance ×phase / (selectionPMF ×areaPDF), with punctual endpoints
+discrete. No receiver-surface cosine is applied to volume scattering. DDGI
+ambient uses six diffuse irradiance orientations divided by6*pi, an explicit
+isotropic incident-radiance approximation, with probe epoch/active/age guards.
+
+Numerical presets (steps, LUT extents, history weights, phase, solar/stellar
+intensity, fog/cloud density) have no measured quality/cost acceptance. The
+clock is a deterministic diurnal/lunar model with configurable latitude and
+declination, not a precision ephemeris. Scene GPULights receive atmospheric
+attenuation at a declared reference position; volumetric/sky shaders receive
+extraterrestrial irradiance and evaluate atmospheric transmittance locally.
+ExposureEv100 is a target from the same clock; it is applied once by the root
+post-processing path, never in the physical linear kernels.
+
+Written CPU references are independent adaptive-Simpson optical-depth/radiance
+quadrature and Gauss-Legendre-polar/trapezoid-azimuth multiple-scattering
+quadrature. GPU uses midpoint segment integration and Fibonacci angular rays.
+Tests also use analytic vertical Rayleigh+ozone depth, vacuum and homogeneous
+fog limits, phase normalization, exact version tuples, clock resets, periodic
+noise bounds/advection and history identity/depth negatives. NO tests were run.
+
 One portable clock supplies sun, moon, star rotation, cloud/fog time and
 exposure target to root BEFORE light/scene preparation. It also names a jump
 revision for F10/F11/F12/F13 histories. Atmosphere/volume composition occurs
