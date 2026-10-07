@@ -75,9 +75,6 @@ constexpr LevelSpec kLevels[] = {
 };
 constexpr int kLevelCount = int(sizeof(kLevels) / sizeof(kLevels[0]));
 constexpr int kFull = 0, kS01 = 10;
-// Policy ladders, coarse to fine (ending on the full mesh).
-constexpr int kLadderFree[4] = {3, 2, 1, 0};
-constexpr int kLadderLock[4] = {6, 5, 4, 0};
 
 struct Thresholds {
     double shadowPct = 0.5;  // shadow disagreement (all instances, offset 1e-3) of receivers

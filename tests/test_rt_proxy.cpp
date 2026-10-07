@@ -259,6 +259,7 @@ TEST_CASE("RT proxy protects all mesh users with alpha or emission") {
     materials[1].alphaCutoff = 0.5f;
     materials[2].emissive[2] = 1;
     materials[3].emissiveTex = 0;
+    materials[3].emissive[0] = 0.5f;
     std::array<GPUInstance, 7> instances{};
     instances[0].meshIndex = 0; instances[0].materialIndex = 0;
     instances[1].meshIndex = 1; instances[1].materialIndex = 1;
@@ -277,5 +278,31 @@ TEST_CASE("RT proxy protects all mesh users with alpha or emission") {
     CHECK(result.selections[0].level == RtProxyLevel::R10);
     CHECK(result.selections[1].level == RtProxyLevel::Full);
     CHECK(result.meshes[1].indexCount == scene.meshInfos()[1].indexCount);
+    CHECK(result.proxyTriangles < result.fullTriangles);
+}
+
+
+TEST_CASE("RT proxy does not mistake glTF fallback white for active emission") {
+    std::array<GPUMaterial, 7> materials{};
+    std::array<GPUInstance, 7> instances{};
+    for (u32 i = 0; i < materials.size(); ++i) {
+        materials[i].emissiveTex = 5; // GltfLoader defaultWhite with emissiveFactor=(0,0,0).
+        instances[i].meshIndex = instances[i].materialIndex = i;
+    }
+    materials[1].emissiveTex = 17; // An explicit emissive texture times zero still emits nothing.
+    materials[2].emissive[0] = 0.25f;
+    materials[3].emissive[1] = std::numeric_limits<float>::quiet_NaN();
+    materials[4].emissive[2] = std::numeric_limits<float>::infinity();
+    materials[5].emissive[0] = -0.25f; // Malformed nonzero factor remains conservatively full.
+    materials[6].emissive[1] = -0.0f;
+    CHECK(rtProxyProtectedMeshes(7, instances, materials) == std::vector<u32>{2, 3, 4, 5});
+    GpuScene scene;
+    addGrid(scene);
+    const auto manifest = manifestFor(scene);
+    const auto protectedMeshes = rtProxyProtectedMeshes(1, std::span(instances).first(1), materials);
+    REQUIRE(protectedMeshes.empty());
+    const auto result = rtBuildProxyGeometry(scene, &manifest, protectedMeshes);
+    REQUIRE(result.manifestApplied);
+    CHECK(result.selections[0].level == RtProxyLevel::R10);
     CHECK(result.proxyTriangles < result.fullTriangles);
 }

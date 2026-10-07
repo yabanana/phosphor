@@ -360,8 +360,11 @@ std::vector<u32> rtProxyProtectedMeshes(u32 meshCount, std::span<const GPUInstan
         bool protect = instance.materialIndex >= materials.size();
         if (!protect) {
             const auto& material = materials[instance.materialIndex];
-            protect = material.alphaCutoff > 0 || material.emissiveTex != INVALID_TEXTURE_INDEX ||
-                material.emissive[0] > 0 || material.emissive[1] > 0 || material.emissive[2] > 0;
+            // Emission is factor * texture. GltfLoader binds the default white
+            // texture when emissiveTexture is absent; that valid index alone
+            // must not protect every non-emissive mesh in the scene.
+            protect = material.alphaCutoff > 0 || std::any_of(material.emissive, material.emissive + 3,
+                [](float factor) { return !std::isfinite(factor) || factor != 0.0f; });
         }
         if (protect) protectedMeshes.push_back(instance.meshIndex);
     }
