@@ -50,6 +50,28 @@ kernel void reflection_probe_ready(constant GPUReflectionProbe& source [[buffer(
 kernel void denoise_history_corrupt_safe(constant GPUDenoiseParams& p [[buffer(0)]],device GPUDenoiseHistory* history [[buffer(1)]],uint tid [[thread_position_in_grid]]){
     if(!(p.flags&DENOISE_RESET)&&tid<p.width*p.height&&history[tid].valid)history[tid].viewID^=1u;
 }
+// Output-history domain negative. The independent denoise_check observes the
+// real view mismatch; no synthetic error flag or counter is injected here.
+kernel void denoise_next_foreign_view(constant GPUDenoiseParams& p [[buffer(0)]],device GPUDenoiseHistory* history [[buffer(1)]],uint tid [[thread_position_in_grid]]){
+    if(tid<p.width*p.height&&history[tid].valid)history[tid].viewID^=1u;
+}
+// Codes2/3 operate on F13-owned copies. Original Direct/F8 guides and motion
+// remain intact. Only valid receiver pixels are poisoned; background is copied.
+kernel void reflection_input_poison(constant GPUReflectionComposeParams& p [[buffer(0)]],const device GPUDISurface* input [[buffer(1)]],
+    device GPUDISurface* output [[buffer(2)]],texture2d<float,access::read> motion [[texture(0)]],texture2d<float,access::write> poisonedMotion [[texture(1)]],uint tid [[thread_position_in_grid]]){
+    if(tid>=p.width*p.height)return;const uint2 pixel(tid%p.width,tid/p.width);GPUDISurface s=input[tid];float2 velocity=motion.read(pixel).xy;
+    if(s.valid&&p.pad[1]==2u)velocity.x=as_type<float>(0x7fc00000u);
+    if(p.pad[1]==3u){if(s.valid){s.geometricNormal[0]=as_type<float>(0x7fc00000u);s.shadingNormal[0]=as_type<float>(0x7fc00000u);}output[tid]=s;}
+    poisonedMotion.write(float4(velocity,0,0),pixel);
+}
+// Independent input validator BEFORE transport/filtering: flags are irrelevant
+// to this check; it directly inspects the consumed guide and motion numerics.
+kernel void reflection_input_check(constant GPUReflectionComposeParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
+    device atomic_uint* counts [[buffer(2)]],texture2d<float,access::read> motion [[texture(0)]],uint tid [[thread_position_in_grid]],uint lane [[thread_index_in_simdgroup]]){
+    if(tid>=p.width*p.height)return;const GPUDISurface s=surfaces[tid];const float3 geometric(s.geometricNormal[0],s.geometricNormal[1],s.geometricNormal[2]),normal(s.shadingNormal[0],s.shadingNormal[1],s.shadingNormal[2]);
+    const float2 velocity=motion.read(uint2(tid%p.width,tid/p.width)).xy;const bool bad=s.valid&&(!all(isfinite(geometric))||!all(isfinite(normal))||dot(geometric,geometric)<=0||dot(normal,normal)<=0||!all(isfinite(velocity)));
+    const uint failures=simd_sum(bad?1u:0u);if(lane==0&&failures)atomic_fetch_add_explicit(counts+5,failures,memory_order_relaxed);
+}
 // base0,DIraw1,DIselected2,GIrawE3,GIselectedE4,specular5,AO6,output7;
 // composeParams0,surfaces1,atomicErrorCounts2. DI/E differences are applied only
 // in custom mode. AO adjusts ONLY residual ambient diffuse when GI is OFF.

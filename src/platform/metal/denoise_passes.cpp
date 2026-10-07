@@ -11,13 +11,13 @@ struct DenoisePasses::Impl {
     static constexpr u32 Signals=4,Views=4,MaxAtrous=5;
     MetalContext& c;PipelineCache& pipelines;LaunchOptions options;DenoiseSettings settings;
     ShadowPasses::Frame frame{};u64 epoch=0,graphVersion=1;
-    pipe::PipelineHandle temporal{},atrous{},checker{},clear{},corrupt{};
+    pipe::PipelineHandle temporal{},atrous{},checker{},clear{},corrupt{},poisonNext{};
     std::array<HistoryRegistry,Signals> registries{};
     struct Content {u64 scene=0,external=0,revision=0;bool operator==(const Content&)const=default;};
     struct History {MTL::Buffer* pair[2]{};u64 capacity=0,contentEpoch=0;u32 lastWritten=0;Content content{};bool contentKnown=false;};
     std::array<std::array<History,Signals>,Views> histories{};
     struct SlotSignal {
-        std::array<MTL4::ArgumentTable*,MaxAtrous+4> tables{};
+        std::array<MTL4::ArgumentTable*,MaxAtrous+5> tables{};
         MTL::Buffer* check=nullptr;bool used=false;u32 expected=0;
     };
     std::array<std::array<SlotSignal,Signals>,METAL_FRAMES_IN_FLIGHT> slots{};
@@ -37,8 +37,9 @@ struct DenoisePasses::Impl {
         temporal=p.request(lighting::kernel("denoise_temporal"));atrous=p.request(lighting::kernel("denoise_atrous"));
         checker=p.request(lighting::kernel("denoise_check"));clear=p.request(lighting::kernel("lighting_check_clear"));
         corrupt=p.request(lighting::kernel("denoise_history_corrupt_safe"));
+        if(o.debugReflectionCorrupt==1)poisonNext=p.request(lighting::kernel("denoise_next_foreign_view"));
         for(auto& slot:slots)for(auto& s:slot){for(auto*& table:s.tables)table=lighting::table(c);
-            if(o.debugLighting)s.check=lighting::buffer(c,32,"F13 per-signal denoise checks",true);}
+            s.check=lighting::buffer(c,32,"F13 per-signal denoise checks",true);}
     }
     ~Impl(){c.waitIdle();for(auto& view:histories)for(auto& h:view)for(auto* b:h.pair)c.memory().release(b,MemoryCategory::RayTracing);
         for(auto& slot:slots)for(auto& s:slot){for(auto* t:s.tables)if(t)t->release();c.memory().release(s.check,MemoryCategory::RayTracing);}}
@@ -111,13 +112,17 @@ struct DenoisePasses::Impl {
                 t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(s.surface))->gpuAddress(),1);t->setAddress(s.metadata.valid()?static_cast<MTL::Buffer*>(ctx.buffer(s.metadata))->gpuAddress():histories[frame.view][sig].pair[s.readSide]->gpuAddress(),3);
                 texture(t,ctx,s.atrousInput[iteration],0);texture(t,ctx,s.moments,1);texture(t,ctx,s.atrousOutput[iteration],2);
                 lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,atrous,t,frame.width*frame.height);});s.filtered=s.atrousOutput[iteration];}
-        if(options.debugLighting){s.counts=g.importBuffer(label+" check counts",{32},ImportPerFrame|ImportOutput);
+        if(options.debugReflectionCorrupt==1)g.addPass(label+" negative NEXT foreign view",PassType::Compute,[this,sig](PassBuilder& b){auto& s=signal[sig];
+            b.read(s.next,Usage::ShaderRead,StageDispatch);s.next=b.write(s.next,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("denoise_next_foreign_view");
+        },[this,sig](PassContext& ctx){auto& s=signal[sig];auto* t=slots[frame.slot][sig].tables[MaxAtrous+4];t->setAddress(s.address,0);t->setAddress(histories[frame.view][sig].pair[s.writeSide]->gpuAddress(),1);
+            lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,poisonNext,t,frame.width*frame.height);});
+        {s.counts=g.importBuffer(label+" check counts",{32},ImportPerFrame|ImportOutput);
             g.addPass(label+" checks clear",PassType::Compute,[this,sig](PassBuilder& b){signal[sig].counts=b.write(signal[sig].counts,Usage::ShaderWrite,StageDispatch);},[this,sig](PassContext& ctx){auto* t=slots[frame.slot][sig].tables[MaxAtrous+1];t->setAddress(slots[frame.slot][sig].check->gpuAddress(),0);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,clear,t,8);});
             g.addPass(label+" independent state check",PassType::Compute,[this,sig](PassBuilder& b){auto& s=signal[sig];b.read(s.next,Usage::ShaderRead,StageDispatch);b.read(s.filtered,Usage::ShaderRead,StageDispatch);b.read(s.counts,Usage::ShaderRead,StageDispatch);s.counts=b.write(s.counts,Usage::ShaderWrite,StageDispatch);},[this,sig](PassContext& ctx){auto& s=signal[sig];auto* t=slots[frame.slot][sig].tables[MaxAtrous+2];t->setAddress(s.address,0);t->setAddress(histories[frame.view][sig].pair[s.writeSide]->gpuAddress(),1);t->setAddress(slots[frame.slot][sig].check->gpuAddress(),2);texture(t,ctx,s.filtered,0);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,checker,t,frame.width*frame.height);});}
         return s.filtered;
     }
     void bind(MetalGraphExecutor& e){for(u32 sig=0;sig<Signals;++sig){if(!slots[frame.slot][sig].used)continue;const auto& s=signal[sig];const auto& h=histories[frame.view][sig];
-        e.bindBuffer(s.previous,h.pair[s.readSide]);e.bindBuffer(s.next,h.pair[s.writeSide]);if(options.debugLighting)e.bindBuffer(s.counts,slots[frame.slot][sig].check);}}
+        e.bindBuffer(s.previous,h.pair[s.readSide]);e.bindBuffer(s.next,h.pair[s.writeSide]);e.bindBuffer(s.counts,slots[frame.slot][sig].check);}}
 };
 DenoisePasses::DenoisePasses(MetalContext& c,PipelineCache& p,const LaunchOptions& o):impl_(std::make_unique<Impl>(c,p,o)){}
 DenoisePasses::~DenoisePasses()=default;
@@ -125,8 +130,9 @@ void DenoisePasses::prepareFrame(const ShadowPasses::Frame& f,u64 epoch,const st
 void DenoisePasses::invalidateAll(const char* reason){impl_->invalidate(reason);}
 rg::TextureRef DenoisePasses::addSignal(rg::RenderGraph& g,u32 s,rg::TextureRef r,rg::TextureRef m,rg::BufferRef b,rg::BufferRef metadata){return impl_->add(g,s,r,m,b,metadata);}
 void DenoisePasses::bindFrame(MetalGraphExecutor& e){impl_->bind(e);}u64 DenoisePasses::version()const{return impl_->graphVersion;}
-bool DenoisePasses::check(u32 slot)const{if(!impl_->options.debugLighting)return true;for(const auto& s:impl_->slots.at(slot)){if(!s.used)continue;const auto* words=static_cast<const u32*>(s.check->contents());if(words[0]!=s.expected||words[2]||words[3])return false;}return true;}
+bool DenoisePasses::check(u32 slot)const{for(const auto& s:impl_->slots.at(slot)){if(!s.used)continue;const auto* words=static_cast<const u32*>(s.check->contents());if(words[0]!=s.expected||words[2]||words[3])return false;}return true;}
 bool DenoisePasses::ready()const{return impl_->pipelines.compute(impl_->temporal)&&impl_->pipelines.compute(impl_->atrous)&&
-    (!impl_->options.debugLighting||(impl_->pipelines.compute(impl_->checker)&&impl_->pipelines.compute(impl_->clear)))&&
-    (!impl_->options.debugHistoryCorrupt||impl_->pipelines.compute(impl_->corrupt));}
+    impl_->pipelines.compute(impl_->checker)&&impl_->pipelines.compute(impl_->clear)&&
+    (!impl_->options.debugHistoryCorrupt||impl_->pipelines.compute(impl_->corrupt))&&
+    (impl_->options.debugReflectionCorrupt!=1||impl_->pipelines.compute(impl_->poisonNext));}
 } // namespace phosphor
