@@ -4,7 +4,7 @@
 
 namespace phosphor::di {
 
-inline constexpr u32 STOCHASTIC_GENERATOR_VERSION = 1;
+inline constexpr u32 STOCHASTIC_GENERATOR_VERSION = 2;
 struct StbnConfig {
     u32 width = 8, height = 8, frames = 16, dimensions = 64;
     u32 seed = 0x5eeda11u;

@@ -403,3 +403,21 @@ TEST_CASE("F11 numerical diagnostic distinguishes finite-input overflow from a s
     // A texture-only check would pass; the pre-sanitization diagnostic must fail.
     CHECK_FALSE(std::isfinite(shaderArithmetic)==std::isfinite(safeWrite));
 }
+
+TEST_CASE("F11 STBN temporal blocks scramble without losing complete uniform rank support") {
+    di::StbnMask mask;mask.config.width=2;mask.config.height=2;mask.config.frames=4;mask.config.dimensions=1;
+    mask.ranks.resize(16);std::iota(mask.ranks.begin(),mask.ranks.end(),0u);
+    CHECK(mask.sample(0,0,0,0)!=mask.sample(0,0,4,0));
+    double firstMean=0,longMean=0;
+    for(u32 block=0;block<64;++block) {
+        std::array<u32,16> bins{};double mean=0;
+        for(u32 t=0;t<4;++t)for(u32 y=0;y<2;++y)for(u32 x=0;x<2;++x) {
+            const float value=mask.sample(x,y,block*4+t,0);REQUIRE(value>=0);REQUIRE(value<1);
+            ++bins[std::min(15u,u32(value*16))];mean+=value/16.0;
+        }
+        for(u32 count:bins)CHECK(count==1); // independent uniform stratification oracle
+        CHECK(std::abs(mean-0.5)<=1.0/32.0);longMean+=mean/64.0;if(!block)firstMean=mean;
+    }
+    CHECK(std::abs(longMean-0.5)<=1.0/32.0);
+    CHECK(longMean!=doctest::Approx(firstMean).epsilon(1e-8));
+}
