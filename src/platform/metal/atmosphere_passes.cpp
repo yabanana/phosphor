@@ -171,7 +171,7 @@ struct AtmospherePasses::Impl {
     }
     void prepare(const ShadowPasses::Frame& f,u64 geometry,u64 material) {
         if(!active)return;if(!lightingPrepared)throw std::logic_error("F14 prepareLighting must precede scene/volume preparation");
-        if(f.slot>=slots.size()||f.view>=views.size()||!f.width||!f.height)throw std::invalid_argument("Invalid F14 frame/view");
+        if(f.slot>=slots.size()||f.view>=views.size()||!f.width||!f.height||f.index==std::numeric_limits<u64>::max())throw std::invalid_argument("Invalid F14 frame/view or completion timeline");
         auto& slot=slots[f.slot];if(slot.recorded&&c.frameEvent()->signaledValue()<=slot.recordedIndex)throw std::logic_error("F14 frame slot still GPU-owned");
         frame=f;lightingPrepared=false;
         if(options.fog&&!direct&&f.constants.lightCount>2)throw std::logic_error("Fog local lighting requires the F11 world-light producer even with legacy visible shading");
