@@ -237,6 +237,7 @@ rg::BufferRef VisibilityRenderer::importPoseHistory(rg::RenderGraph& graph) {
 }
 rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::TextureRef visibility, rg::TextureRef depth) {
     using namespace rg;
+    composedColor_ = {};
     visibility_ = visibility;
     depth_ = depth;
     importPoseHistory(graph);
@@ -423,17 +424,20 @@ std::array<u32, 2> VisibilityRenderer::adaptiveStats() const {
 }
 rg::TextureRef VisibilityRenderer::addPresent(rg::RenderGraph &graph, rg::TextureRef drawable) {
     using namespace rg;
+    const TextureRef presentedColor = color();
     graph.addPass(
         "Visibility present", PassType::Raster,
         [&](PassBuilder &b) {
-            for (u32 i = 0; i < 4; ++i)
+            b.read(presentedColor, Usage::ShaderRead, StageFragment);
+            for (u32 i = 1; i < 4; ++i)
                 b.read(outputs_[i], Usage::ShaderRead, StageFragment);
             drawable = b.writeColor(drawable, 0, LoadIntent::Clear);
             b.setProfileShaders("visibility_present_vs,visibility_present_fs");
         },
-        [this](PassContext &ctx) {
+        [this,presentedColor](PassContext &ctx) {
             auto *enc = static_cast<MTL4::RenderCommandEncoder *>(ctx.encoder());
             bind(ctx, tables_[3]);
+            tables_[3]->setTexture(static_cast<MTL::Texture *>(ctx.texture(presentedColor))->gpuResourceID(), 1);
             enc->setRenderPipelineState(pipelines_.render(present_));
             enc->setArgumentTable(tables_[3], MTL::RenderStageFragment);
             enc->drawPrimitives(MTL::PrimitiveTypeTriangle, 0, 3);

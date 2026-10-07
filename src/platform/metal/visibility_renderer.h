@@ -42,7 +42,7 @@ class VisibilityRenderer {
     [[nodiscard]] const std::array<u32, ExposureBins> &checkedHistogramLow() const { return checkedHistogramLow_; }
     [[nodiscard]] const std::array<u32, ExposureBins> &checkedHistogramHigh() const { return checkedHistogramHigh_; }
     void addPoseSnapshot(rg::RenderGraph &graph);
-    void resetGraphRefs() { poses_ = {}; }
+    void resetGraphRefs() { poses_ = {}; composedColor_ = {}; }
     void prepareLighting(u32 flags, u32 sunIndex);
     void setLightingTextures(rg::TextureRef sun, rg::TextureRef direct, rg::TextureRef gi);
     rg::BufferRef importPoseHistory(rg::RenderGraph& graph);
@@ -50,8 +50,10 @@ class VisibilityRenderer {
     [[nodiscard]] MTL::GPUAddress temporalAddress() const { return temporalAddress_; }
     [[nodiscard]] MTL::GPUAddress previousPoseAddress() const { return previousInstances_[view_]->gpuAddress(); }
     rg::TextureRef addPresent(rg::RenderGraph &graph, rg::TextureRef drawable);
-    void replaceColor(rg::TextureRef value) { outputs_[0]=value; }
-    [[nodiscard]] rg::TextureRef color() const { return outputs_[0]; }
+    // Post-lighting selection must never retarget the already-declared resolve
+    // writes. Encode callbacks bind outputs_ after the whole graph is built.
+    void replaceColor(rg::TextureRef value) { composedColor_=value; }
+    [[nodiscard]] rg::TextureRef color() const { return composedColor_.valid() ? composedColor_ : outputs_[0]; }
     [[nodiscard]] rg::TextureRef visibility() const { return visibility_; }
     [[nodiscard]] rg::TextureRef normalRoughness() const { return outputs_[1]; }
     [[nodiscard]] rg::TextureRef diffuseAlbedo() const { return outputs_[2]; }
@@ -115,6 +117,7 @@ class VisibilityRenderer {
     pipe::PipelineHandle adaptivePipeline_, saveHistory_;
     std::array<pipe::PipelineHandle, VISIBILITY_CLASSES> resolve_{};
     rg::TextureRef visibility_, depth_;
+    rg::TextureRef composedColor_;
     std::array<rg::TextureRef, 6> outputs_{};
     rg::BufferRef bins_;
 };
