@@ -13,6 +13,9 @@ public:
     void loadScene(const GpuScene&,const SceneStore&);
     void prepareFrame(const GpuScene&,const SceneStore&,std::span<const GPULight>,const ShadowPasses::Frame&);
     void addToGraph(rg::RenderGraph&,rg::TextureRef visibility,rg::TextureRef depth);
+    // Diagnostic only, enabled by PHOSPHOR_DIAGNOSTIC_MOTION_READBACK=1.
+    // Stage0 after compute,1 after indexed MRT,2 immediately before F13 input.
+    void addMotionReadback(rg::RenderGraph&,u32 stage);
     void bindFrame(MetalGraphExecutor&);
     [[nodiscard]] rg::TextureRef direct() const;
     [[nodiscard]] rg::TextureRef motion() const;

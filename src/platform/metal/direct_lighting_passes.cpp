@@ -13,10 +13,16 @@
 #include "renderer/gpu_scene.h"
 #include "rendergraph/pass_context.h"
 #include <glm/gtc/type_ptr.hpp>
+#include <cstdlib>
+#include <cstdio>
+#include <cstring>
+#include <cmath>
 namespace phosphor {
 struct DirectLightingPasses::Impl {
     enum Pass { Emit, Guide, Pack, Cluster, Candidate, Temporal, Spatial, Shade, Snapshot,SignalClear,CheckClear,CheckNegative,Check,Count };
     MetalContext& c;PipelineCache& p;SceneRenderer& scene;MeshRenderer& mesh;VisibilityRenderer& vis;AccelerationStructures* rt;ShadowPasses& shadow;
+    const bool traceMotion=[](){const char* value=std::getenv("PHOSPHOR_DIAGNOSTIC_MOTION_READBACK");return value&&std::strcmp(value,"1")==0;}();
+    std::array<rg::BufferRef,3> motionTraceRefs{};
     LaunchOptions options;LocalLightScene lightScene;HistoryRegistry history;ShadowPasses::Frame frame;
     di::EmissiveDomainTracker emissiveDomain;std::vector<float> emissiveWorlds;
     std::array<pipe::PipelineHandle,Count> kernels{};pipe::PipelineHandle receiver{};
@@ -25,6 +31,8 @@ struct DirectLightingPasses::Impl {
     struct Slot {
         MTL::Buffer *source=nullptr,*lights=nullptr,*emitters=nullptr,*alias=nullptr,*surface=nullptr;
         MTL::Buffer *fresh=nullptr,*temporal=nullptr,*spatial=nullptr,*cells=nullptr,*indices=nullptr,*check=nullptr,*signalErrors=nullptr;
+        MTL::Buffer* motionTrace=nullptr;u64 traceRowBytes=0,tracePlaneBytes=0,traceStageBytes=0,traceFrame=0;
+        u32 traceWidth=0,traceHeight=0,traceRecorded=0;
         std::array<MTL4::ArgumentTable*,Count> tables{};
     };std::array<Slot,METAL_FRAMES_IN_FLIGHT> slots{};
     struct View { MTL::Buffer* reservoir=nullptr;MTL::Buffer* surface=nullptr; };std::array<View,4> views{};
@@ -58,7 +66,7 @@ struct DirectLightingPasses::Impl {
         ranks=lighting::buffer(c,stbn.ranks.size()*4,"Generated STBN ranks",true);std::memcpy(ranks->contents(),stbn.ranks.data(),stbn.ranks.size()*4);
     }
     pipe::PipelineHandle clusterShade{};
-    ~Impl(){c.waitIdle();for(auto& f:slots){for(auto* b:{f.source,f.lights,f.emitters,f.alias,f.surface,f.fresh,f.temporal,f.spatial,f.cells,f.indices,f.check,f.signalErrors})c.memory().release(b,MemoryCategory::RayTracing);for(auto* t:f.tables)if(t)t->release();}for(auto& v:views){c.memory().release(v.reservoir,MemoryCategory::RayTracing);c.memory().release(v.surface,MemoryCategory::RayTracing);}c.memory().release(ranks,MemoryCategory::RayTracing);if(equalDepth)equalDepth->release();}
+    ~Impl(){c.waitIdle();for(auto& f:slots){for(auto* b:{f.source,f.lights,f.emitters,f.alias,f.surface,f.fresh,f.temporal,f.spatial,f.cells,f.indices,f.check,f.signalErrors,f.motionTrace})c.memory().release(b,MemoryCategory::RayTracing);for(auto* t:f.tables)if(t)t->release();}for(auto& v:views){c.memory().release(v.reservoir,MemoryCategory::RayTracing);c.memory().release(v.surface,MemoryCategory::RayTracing);}c.memory().release(ranks,MemoryCategory::RayTracing);if(equalDepth)equalDepth->release();}
     void load(const GpuScene& g,const SceneStore& s){lightScene.rebuild(g,s,g.lights());for(u32 v=0;v<4;++v)history.invalidate(v,"scene load");reserve(std::max<size_t>(1,lightScene.lights.size()),pixelCapacity);++graphVersion;}
     void reserve(u64 lights,u64 pixels){
         if(lights>lightCapacity){lightCapacity=std::max<u64>(lights,lightCapacity+lightCapacity/2);for(auto& f:slots){for(auto* b:{f.source,f.lights,f.emitters,f.alias})c.memory().release(b,MemoryCategory::RayTracing);f.source=lighting::buffer(c,lightCapacity*sizeof(GPUSampledLight),"Local source lights",true);f.lights=lighting::buffer(c,lightCapacity*sizeof(GPUSampledLight),"Local world lights");f.emitters=lighting::buffer(c,lightCapacity*sizeof(GPUEmissiveSurface),"Full scene emitter records",true);f.alias=lighting::buffer(c,lightCapacity*sizeof(GPUAliasEntry),"Light proposal aliases",true);}++graphVersion;}
@@ -70,6 +78,17 @@ struct DirectLightingPasses::Impl {
     void prepare(const GpuScene& g,const SceneStore& s,std::span<const GPULight> l,const ShadowPasses::Frame& f){
         frame=f;lightScene.rebuild(g,s,l);reserve(std::max<size_t>(1,lightScene.lights.size()),u64(f.backingWidth)*f.backingHeight);
         auto& slot=slots[f.slot];const size_t n=lightScene.lights.size();
+        if(traceMotion){
+            if(!options.debugLighting||u64(f.width)*f.height>16384)throw std::logic_error("Motion readback diagnostic requires --debug-lighting and <=16384 active pixels");
+            const u64 row=(u64(f.width)*8+255)&~u64(255),plane=row*f.height;
+            const u64 stage=(plane+u64(f.width)*f.height*sizeof(GPUDISurface)+255)&~u64(255);
+            if(!slot.motionTrace||slot.motionTrace->length()<3*stage){
+                for(auto& entry:slots){c.memory().release(entry.motionTrace,MemoryCategory::RayTracing);entry.motionTrace=lighting::buffer(c,3*stage,"Bounded motion and receiver stage readback",true);}
+                ++graphVersion;
+            }
+            slot.traceRowBytes=row;slot.tracePlaneBytes=plane;slot.traceStageBytes=stage;slot.traceFrame=f.index;
+            slot.traceWidth=f.width;slot.traceHeight=f.height;slot.traceRecorded=0;
+        }
         if(n){std::memcpy(slot.source->contents(),lightScene.lights.data(),n*sizeof(GPUSampledLight));std::memcpy(slot.emitters->contents(),lightScene.emitters.data(),n*sizeof(GPUEmissiveSurface));std::memcpy(slot.alias->contents(),lightScene.alias.entries.data(),n*sizeof(GPUAliasEntry));}
         const bool hasEmissive=std::any_of(lightScene.emitters.begin(),lightScene.emitters.end(),[](const auto& e){return e.valid!=0;});
         if(hasEmissive) {
@@ -99,6 +118,40 @@ struct DirectLightingPasses::Impl {
     }
     void bindCommon(MTL4::ArgumentTable* t){auto& f=slots[frame.slot];auto& v=views[frame.view];t->setAddress(paramsAddress,0);t->setAddress(f.surface->gpuAddress(),1);t->setAddress(f.lights->gpuAddress(),2);t->setAddress(f.alias->gpuAddress(),3);t->setAddress(f.fresh->gpuAddress(),4);t->setAddress(v.reservoir->gpuAddress(),5);t->setAddress(v.surface->gpuAddress(),6);t->setAddress(ranks->gpuAddress(),8);t->setAddress(f.emitters->gpuAddress(),12);t->setAddress(scene.buffers().materials()->gpuAddress(),13);t->setAddress(scene.textureTableAddress(),14);t->setAddress(f.signalErrors->gpuAddress(),15);}
     void tex(MTL4::ArgumentTable* t,rg::PassContext& ctx,rg::TextureRef r,u32 b){t->setTexture(static_cast<MTL::Texture*>(ctx.texture(r))->gpuResourceID(),b);}
+    void addMotionReadback(rg::RenderGraph& g,u32 stage){
+        if(!traceMotion)return;if(stage>=motionTraceRefs.size())throw std::logic_error("Invalid motion diagnostic stage");
+        using namespace rg;const auto sourceMotion=motionRef;const auto sourceSurface=surfaceRef;auto& f=slots[frame.slot];
+        motionTraceRefs[stage]=g.importBuffer("Motion diagnostic readback "+std::to_string(stage),{f.motionTrace->length()},ImportPerFrame|ImportOutput);
+        g.addPass("Motion diagnostic snapshot "+std::to_string(stage),PassType::Blit,
+            [&,stage,sourceMotion,sourceSurface](PassBuilder& builder){builder.read(sourceMotion,Usage::CopySrc,StageBlit);builder.read(sourceSurface,Usage::CopySrc,StageBlit);
+                motionTraceRefs[stage]=builder.write(motionTraceRefs[stage],Usage::CopyDst,StageBlit);},
+            [this,stage,sourceMotion,sourceSurface](PassContext& ctx){auto& slot=slots[frame.slot];const u64 offset=stage*slot.traceStageBytes;
+                auto* encoder=static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder());auto* source=static_cast<MTL::Texture*>(ctx.texture(sourceMotion));
+                if(source->pixelFormat()!=MTL::PixelFormatRG32Float)throw std::logic_error("Motion diagnostic expected actual RG32Float source");
+                encoder->copyFromTexture(source,0,0,MTL::Origin::Make(0,0,0),MTL::Size::Make(slot.traceWidth,slot.traceHeight,1),
+                    slot.motionTrace,offset,slot.traceRowBytes,slot.tracePlaneBytes);
+                encoder->copyFromBuffer(static_cast<MTL::Buffer*>(ctx.buffer(sourceSurface)),0,slot.motionTrace,offset+slot.tracePlaneBytes,
+                    u64(slot.traceWidth)*slot.traceHeight*sizeof(GPUDISurface));slot.traceRecorded|=1u<<stage;
+            });
+    }
+    void printMotionReadback(u32 index)const{
+        if(!traceMotion)return;const auto& slot=slots.at(index);if(!slot.traceRecorded)return;
+        if(c.frameEvent()->signaledValue()<=slot.traceFrame)throw std::logic_error("Motion diagnostic read before frame completion");
+        const auto* all=static_cast<const u8*>(slot.motionTrace->contents());
+        for(u32 stage=0;stage<3;++stage){if(!(slot.traceRecorded&(1u<<stage)))continue;const auto* start=all+stage*slot.traceStageBytes;
+            const auto* surfaces=reinterpret_cast<const GPUDISurface*>(start+slot.tracePlaneBytes);
+            u32 valid=0,bad=0,allBad=0,nonzero=0,printed=0;
+            for(u32 y=0;y<slot.traceHeight;++y)for(u32 x=0;x<slot.traceWidth;++x){u32 bits[2];float value[2];
+                std::memcpy(bits,start+y*slot.traceRowBytes+x*8,8);std::memcpy(value,bits,8);const auto& surface=surfaces[y*slot.traceWidth+x];
+                const bool finite=std::isfinite(value[0])&&std::isfinite(value[1]);allBad+=!finite;valid+=surface.valid!=0;
+                if(surface.valid){bad+=!finite;nonzero+=finite&&(value[0]!=0||value[1]!=0);
+                    if(!finite&&printed++<4)std::fprintf(stderr,"DI_MOTION_BAD frame %llu slot %u stage %u xy %u %u instance %u bits %08x %08x\n",
+                        static_cast<unsigned long long>(slot.traceFrame),index,stage,x,y,surface.instanceSlot,bits[0],bits[1]);}
+            }
+            std::fprintf(stderr,"DI_MOTION_SNAPSHOT frame %llu slot %u stage %u extent %u %u valid %u nonfinite_valid %u nonfinite_all %u nonzero_finite_valid %u\n",
+                static_cast<unsigned long long>(slot.traceFrame),index,stage,slot.traceWidth,slot.traceHeight,valid,bad,allBad,nonzero);
+        }
+    }
     void add(rg::RenderGraph& g,rg::TextureRef visibility,rg::TextureRef depth){using namespace rg;visibilityRef=visibility;depthRef=depth;auto& f=slots[frame.slot];auto& view=views[frame.view];
         // These compute-written guides also become raster MRTs. Match the
         // physical depth attachment, not the smaller active DRS rectangle.
@@ -106,6 +159,7 @@ struct DirectLightingPasses::Impl {
         const auto receiverDepth=g.resources().at(depthRef.resource).texture;
         if(receiverDepth.width<frame.width||receiverDepth.height<frame.height)
             throw std::logic_error("Lighting receiver active extent exceeds its depth attachment");
+        motionTraceRefs={};
         sourceRef=g.importBuffer("Local source light records",{f.source->length()},ImportPerFrame|ImportContentsDefined);
         lightsRef=g.importBuffer("Local world lights",{f.lights->length()},ImportPerFrame);
         emittersRef=g.importBuffer("Full emitter geometry UV records",{f.emitters->length()},ImportPerFrame|ImportContentsDefined);
@@ -117,7 +171,9 @@ struct DirectLightingPasses::Impl {
         historyRef=g.importBuffer("DI history reservoirs per view",{view.reservoir->length()},ImportContentsDefined|ImportOutput);previousSurfaceRef=g.importBuffer("DI history surfaces per view",{view.surface->length()},ImportContentsDefined|ImportOutput);poseRef=vis.importPoseHistory(g);
         g.addPass("World emissive lights",PassType::Compute,[&](PassBuilder& b){b.read(sourceRef,Usage::ShaderRead,StageDispatch);b.read(emittersRef,Usage::ShaderRead,StageDispatch);emittersRef=b.write(emittersRef,Usage::ShaderWrite,StageDispatch);b.read(scene.dataRef(),Usage::ShaderRead,StageDispatch);if(rt)b.read(rt->geometryBufferRef(),Usage::ShaderRead,StageDispatch);lightsRef=b.write(lightsRef,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("light_emissive_update");},[this](PassContext& ctx){auto& f=slots[frame.slot];auto* t=f.tables[Emit];t->setAddress(emitterAddress,0);t->setAddress(f.emitters->gpuAddress(),1);t->setAddress(scene.buffers().instances()->gpuAddress(),2);t->setAddress(scene.buffers().materials()->gpuAddress(),3);t->setAddress(f.source->gpuAddress(),4);t->setAddress(f.lights->gpuAddress(),5);t->setAddress(scene.vertexBuffer()->gpuAddress(),6);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,kernels[Emit],t,std::max(1u,params.lightCount));});
         g.addPass("Pre-resolve material lighting guides",PassType::Compute,[&](PassBuilder& b){b.read(visibilityRef,Usage::ShaderRead,StageDispatch);b.read(shadow.surfaces(),Usage::ShaderRead,StageDispatch);b.read(scene.dataRef(),Usage::ShaderRead,StageDispatch);b.read(mesh.frameListsRef(),Usage::ShaderRead,StageDispatch);b.read(poseRef,Usage::ShaderRead,StageDispatch);surfaceRef=b.write(surfaceRef,Usage::ShaderWrite,StageDispatch);motionRef=b.createTexture("Pre-resolve pixel motion",{Format::RG32Float,receiverDepth.width,receiverDepth.height});motionRef=b.write(motionRef,Usage::ShaderWrite,StageDispatch);fallbackShading=b.createTexture("Indexed DI shading normal roughness",{Format::RGBA16Float,receiverDepth.width,receiverDepth.height});fallbackShading=b.write(fallbackShading,Usage::ShaderWrite,StageDispatch);fallbackAlbedo=b.createTexture("Indexed DI albedo metallic",{Format::RGBA16Float,receiverDepth.width,receiverDepth.height});fallbackAlbedo=b.write(fallbackAlbedo,Usage::ShaderWrite,StageDispatch);fallbackOcclusion=b.createTexture("Indexed material occlusion",{Format::R16Float,receiverDepth.width,receiverDepth.height});fallbackOcclusion=b.write(fallbackOcclusion,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("material_lighting_guides");},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Guide];t->setAddress(scene.frameConstantsAddress(),0);t->setAddress(scene.vertexBuffer()->gpuAddress(),1);t->setAddress(scene.buffers().instances()->gpuAddress(),2);t->setAddress(scene.buffers().materials()->gpuAddress(),3);t->setAddress(scene.lightsAddress(),4);t->setAddress(scene.textureTableAddress(),5);t->setAddress(mesh.meshletBuffer()->gpuAddress(),6);t->setAddress(mesh.meshletVertexBuffer()->gpuAddress(),7);t->setAddress(mesh.meshletTriangleBuffer()->gpuAddress(),8);t->setAddress(mesh.frame(frame.slot).candidates->gpuAddress(),9);t->setAddress(mesh.frame(frame.slot).bList->gpuAddress(),10);t->setAddress(vis.paramsAddress(),11);t->setAddress(vis.previousPoseAddress(),14);t->setAddress(vis.temporalAddress(),15);t->setAddress(slots[frame.slot].surface->gpuAddress(),16);t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(shadow.surfaces()))->gpuAddress(),17);t->setAddress(paramsAddress,18);tex(t,ctx,visibilityRef,0);tex(t,ctx,motionRef,7);tex(t,ctx,fallbackShading,8);tex(t,ctx,fallbackAlbedo,9);tex(t,ctx,fallbackOcclusion,10);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,kernels[Guide],t,frame.width,frame.height);});
+        addMotionReadback(g,0);
         g.addPass("Indexed overflow material receivers",PassType::Raster,[&](PassBuilder& b){fallbackShading=b.writeColor(fallbackShading,0,LoadIntent::Preserve);fallbackAlbedo=b.writeColor(fallbackAlbedo,1,LoadIntent::Preserve);motionRef=b.writeColor(motionRef,2,LoadIntent::Preserve);fallbackOcclusion=b.writeColor(fallbackOcclusion,3,LoadIntent::Preserve);b.readDepth(depthRef);scene.declareDrawReads(b);b.read(poseRef,Usage::ShaderRead,StageVertex);b.setProfileShaders("forward_surface_vs,forward_di_receiver_fs");},[this](PassContext& ctx){scene.encodeOverlay(static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder()),receiver,true,equalDepth);});
+        addMotionReadback(g,1);
         g.addPass("Indexed DI receiver pack",PassType::Compute,[&](PassBuilder& b){for(auto r:{shadow.worldPosition(),shadow.geometricNormal(),shadow.receiverKeys(),fallbackShading,fallbackAlbedo,fallbackOcclusion})b.read(r,Usage::ShaderRead,StageDispatch);b.read(surfaceRef,Usage::ShaderRead,StageDispatch);surfaceRef=b.write(surfaceRef,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("di_receiver_pack");},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Pack];t->setAddress(scene.frameConstantsAddress(),0);t->setAddress(paramsAddress,1);t->setAddress(slots[frame.slot].surface->gpuAddress(),2);tex(t,ctx,shadow.worldPosition(),5);tex(t,ctx,shadow.geometricNormal(),6);tex(t,ctx,shadow.receiverKeys(),10);tex(t,ctx,fallbackShading,11);tex(t,ctx,fallbackAlbedo,12);tex(t,ctx,fallbackOcclusion,13);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,kernels[Pack],t,frame.width,frame.height);});
         signalErrorsRef=g.importBuffer("DI numerical error words",{16},ImportPerFrame|ImportOutput);
         g.addPass("DI numerical errors clear",PassType::Compute,[&](PassBuilder& b){signalErrorsRef=b.write(signalErrorsRef,Usage::ShaderWrite,StageDispatch);},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[SignalClear];t->setAddress(slots[frame.slot].signalErrors->gpuAddress(),15);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,signalClear,t,4);});
@@ -142,13 +198,14 @@ struct DirectLightingPasses::Impl {
         }
         if(ris)g.addPass("DI history snapshot",PassType::Blit,[&](PassBuilder& b){b.read(temporalRef,Usage::CopySrc,StageBlit);b.read(surfaceRef,Usage::CopySrc,StageBlit);historyRef=b.write(historyRef,Usage::CopyDst,StageBlit);previousSurfaceRef=b.write(previousSurfaceRef,Usage::CopyDst,StageBlit);},[this](PassContext& ctx){auto* e=static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder());const u64 count=u64(frame.width)*frame.height;auto& f=slots[frame.slot];auto& v=views[frame.view];e->copyFromBuffer(f.temporal,0,v.reservoir,0,count*sizeof(GPUDIReservoir));e->copyFromBuffer(f.surface,0,v.surface,0,count*sizeof(GPUDISurface));history.read(frame.view,frame.index+1);history.write(frame.view,frame.index+1,frame.constants.viewProjection);});
     }
-    void bind(MetalGraphExecutor& e){auto& f=slots[frame.slot];auto& v=views[frame.view];e.bindBuffer(sourceRef,f.source);e.bindBuffer(lightsRef,f.lights);e.bindBuffer(emittersRef,f.emitters);e.bindBuffer(aliasRef,f.alias);e.bindBuffer(surfaceRef,f.surface);e.bindBuffer(freshRef,f.fresh);e.bindBuffer(temporalRef,f.temporal);e.bindBuffer(spatialRef,f.spatial);e.bindBuffer(cellRef,f.cells);e.bindBuffer(indexRef,f.indices);e.bindBuffer(historyRef,v.reservoir);e.bindBuffer(previousSurfaceRef,v.surface);e.bindBuffer(rankRef,ranks);if(options.debugLighting)e.bindBuffer(checkRef,f.check);e.bindBuffer(signalErrorsRef,f.signalErrors);}
+    void bind(MetalGraphExecutor& e){auto& f=slots[frame.slot];if(traceMotion)for(auto ref:motionTraceRefs)if(ref.valid())e.bindBuffer(ref,f.motionTrace);auto& v=views[frame.view];e.bindBuffer(sourceRef,f.source);e.bindBuffer(lightsRef,f.lights);e.bindBuffer(emittersRef,f.emitters);e.bindBuffer(aliasRef,f.alias);e.bindBuffer(surfaceRef,f.surface);e.bindBuffer(freshRef,f.fresh);e.bindBuffer(temporalRef,f.temporal);e.bindBuffer(spatialRef,f.spatial);e.bindBuffer(cellRef,f.cells);e.bindBuffer(indexRef,f.indices);e.bindBuffer(historyRef,v.reservoir);e.bindBuffer(previousSurfaceRef,v.surface);e.bindBuffer(rankRef,ranks);if(options.debugLighting)e.bindBuffer(checkRef,f.check);e.bindBuffer(signalErrorsRef,f.signalErrors);}
 };
 DirectLightingPasses::DirectLightingPasses(MetalContext& c,PipelineCache& p,SceneRenderer& s,MeshRenderer& m,VisibilityRenderer& v,AccelerationStructures* a,ShadowPasses& sh,const LaunchOptions& o):impl_(std::make_unique<Impl>(c,p,s,m,v,a,sh,o)){}
 DirectLightingPasses::~DirectLightingPasses()=default;
 void DirectLightingPasses::loadScene(const GpuScene& g,const SceneStore& s){impl_->load(g,s);}
 void DirectLightingPasses::prepareFrame(const GpuScene& g,const SceneStore& s,std::span<const GPULight> l,const ShadowPasses::Frame& f){impl_->prepare(g,s,l,f);}
 void DirectLightingPasses::addToGraph(rg::RenderGraph& g,rg::TextureRef v,rg::TextureRef d){impl_->add(g,v,d);}
+void DirectLightingPasses::addMotionReadback(rg::RenderGraph& g,u32 stage){impl_->addMotionReadback(g,stage);}
 void DirectLightingPasses::bindFrame(MetalGraphExecutor& e){impl_->bind(e);}
 rg::TextureRef DirectLightingPasses::direct()const{return impl_->output;}rg::TextureRef DirectLightingPasses::motion()const{return impl_->motionRef;}
 rg::BufferRef DirectLightingPasses::surfaceRef()const{return impl_->surfaceRef;}rg::BufferRef DirectLightingPasses::lightsRef()const{return impl_->lightsRef;}rg::BufferRef DirectLightingPasses::emittersRef()const{return impl_->emittersRef;}
@@ -158,6 +215,7 @@ u32 DirectLightingPasses::lightCount()const{return impl_->params.lightCount;}u32
 
 namespace phosphor {
 bool DirectLightingPasses::check(u32 slot)const {
+    impl_->printMotionReadback(slot);
     if(!impl_->options.debugLighting)return true;const auto* c=static_cast<const u32*>(impl_->slots.at(slot).check->contents());
     const auto* errors=static_cast<const u32*>(impl_->slots.at(slot).signalErrors->contents());for(u32 i=0;i<4;++i)if(errors[i])return false;
     if(!c[0])return false;for(u32 i=3;i<8;++i)if(c[i])return false;return true;

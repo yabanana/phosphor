@@ -297,6 +297,7 @@ struct ReflectionPasses::Impl {
             },[this](PassContext& ctx){auto* t=slots[frame.slot].inputPoisonTable;t->setAddress(composeAddress,0);t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(direct.surfaceRef()))->gpuAddress(),1);
                 t->setAddress(options.debugReflectionCorrupt==3?slots[frame.slot].testSurfaces->gpuAddress():dummyBuffer->gpuAddress(),2);texture(t,ctx,direct.motion(),0);texture(t,ctx,motion,1);
                 lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,inputPoison,t,frame.width*frame.height);});}
+        direct.addMotionReadback(graph,2);
         graph.addPass("F13 independent receiver motion input check",PassType::Compute,[this](PassBuilder& b){b.read(receivers,Usage::ShaderRead,StageDispatch);b.read(motion,Usage::ShaderRead,StageDispatch);
             b.read(errorsRef,Usage::ShaderRead,StageDispatch);errorsRef=b.write(errorsRef,Usage::ShaderWrite,StageDispatch);},[this](PassContext& ctx){auto* t=slots[frame.slot].inputCheckTable;t->setAddress(composeAddress,0);
                 t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(receivers))->gpuAddress(),1);t->setAddress(slots[frame.slot].errors->gpuAddress(),2);texture(t,ctx,motion,0);
