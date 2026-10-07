@@ -102,7 +102,7 @@ kernel void shadow_caster_flags(constant GPUShadowParams& p [[buffer(1)]],
         const GPUWorldSphere s=cullWorldSphere(i.modelMatrix,meshes[i.meshIndex].boundingSphere);
         for(uint c=0;c<4;++c) if(shadowCasterIntersects(p.cascades[c],s.x,s.y,s.z,s.r)) bits|=1u<<c;
     }
-    if(p.corruption==SHADOW_CORRUPT_CASTER && slot==0) bits^=1u;
+    if(p.corruption==SHADOW_CORRUPT_CASTER) bits=0u;
     flags[slot]=bits;
     shadowCount(counters,5,bits!=0);
 }

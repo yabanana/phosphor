@@ -41,6 +41,7 @@ public:
     [[nodiscard]] rg::TextureRef zeroLighting() const;
     [[nodiscard]] u32 sunIndex() const;
     [[nodiscard]] u64 version() const;
+    [[nodiscard]] bool check(u32 slot) const;
     [[nodiscard]] GPUShadowCounters counters(u32 slot) const;
     [[nodiscard]] CacheState cacheState(u32 view) const;
 private:
