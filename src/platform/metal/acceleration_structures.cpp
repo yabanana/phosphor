@@ -213,7 +213,16 @@ struct AccelerationStructures::Impl {
         ++graphVersion;
         ++geometryVersion;
         lastGraphSignature = ~u64{0};
+        // Operation counters cover this backend's whole lifetime, including
+        // proxy promotion reloads and bench switches. Live counts, byte totals
+        // and blasBuildMs describe only the latest scene/load and reset here.
+        const auto cumulative = stats;
         stats = {};
+        stats.blasBuilds = cumulative.blasBuilds;
+        stats.blasRefits = cumulative.blasRefits;
+        stats.compactions = cumulative.compactions;
+        stats.tlasBuilds = cumulative.tlasBuilds;
+        stats.tlasRefits = cumulative.tlasRefits;
         stats.present = stats.enabled = options.rtEnabled;
     }
     ~Impl() {

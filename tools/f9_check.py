@@ -223,6 +223,19 @@ def evaluate(case: Case, status: dict, text: str, report, report_error: str | No
                 failures.append("material transition did not exercise material deltas")
         if not isinstance(rt, dict) or rt.get("proxy_mode") != "manifest":
             failures.append("proxy transition requires an active measured manifest")
+        # These cases use primary diagnostics, warmup=0 and a fixed extent:
+        # reload must not erase the completed but uncollected frame slots.
+        dimensions = [report.get(k) if isinstance(report, dict) else None for k in ("frames", "width", "height")]
+        if not all(isinstance(v, int) and not isinstance(v, bool) and v > 0 for v in dimensions):
+            failures.append("proxy transition needs valid frame count and extent for exact ray accounting")
+        elif not isinstance(rt, dict) or rt.get("probe_rays") != dimensions[0] * min(512, dimensions[1] * dimensions[2]):
+            failures.append("proxy transition lost measured rays across the reload")
+        if not isinstance(rt, dict) or not numeric(rt.get("blas_count")) or rt["blas_count"] <= 0:
+            failures.append("proxy transition has no valid live BLAS count")
+        else:
+            for key in ("blas_builds", "compactions"):
+                if not numeric(rt.get(key)) or rt[key] < 2 * rt["blas_count"]:
+                    failures.append(f"proxy transition rt.{key} does not include both scene loads")
     return {"name": case.name, "passed": not failures, "failures": failures,
             "transition_evidence": transition_evidence,
             "checker": check, "rt_report": rt,
@@ -278,7 +291,9 @@ def self_test():
     expect(True, negative, neg_status, neg_text, bad_report)
     expect(False, negative, neg_status, neg_text, report)
     transition = Case("transition", [], transition="mask", require_zero_allocations=False)
-    transition_report = copy.deepcopy(report); transition_report["rt"]["proxy_mode"] = "manifest"
+    transition_report = copy.deepcopy(report)
+    transition_report.update(frames=24, width=640, height=360)
+    transition_report["rt"].update(proxy_mode="manifest", probe_rays=24*512, blas_count=103, blas_builds=206, compactions=206)
     marker = ("RT-PROXY-TRANSITION mask mesh 2 source 300 before 120 after 300 material_full 0 instances_full 0 "
               "material_records 1 instance_records 0 applied 1 promoted 1 verified 1 | PASS\n")
     expect(True, transition, status, text + marker, transition_report)
@@ -286,6 +301,9 @@ def self_test():
     expect(False, transition, status, text + marker.replace("before 120", "before 300"), transition_report)
     expect(False, transition, status, text + marker.replace("verified 1", "verified 0"), transition_report)
     expect(False, transition, status, text + marker.replace("material_records 1", "material_records 0"), transition_report)
+    for key, value in (("probe_rays", 21*512), ("blas_builds", 103), ("compactions", 103)):
+        bad = copy.deepcopy(transition_report); bad["rt"][key] = value
+        expect(False, transition, status, text + marker, bad)
     full = Case("transition-full", [], transition="full-upload", require_zero_allocations=False)
     full_marker = marker.replace("mask mesh", "full-upload mesh").replace("material_full 0", "material_full 1").replace("instances_full 0", "instances_full 1").replace("material_records 1", "material_records 0")
     expect(True, full, status, text + full_marker, transition_report)
