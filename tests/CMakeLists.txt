@@ -58,6 +58,7 @@ add_executable(phosphor_tests
     test_volumes.cpp
     test_volume_oracle.cpp
     test_metalfx_denoise_contract.cpp
+    test_metalfx_fixture_oracle.cpp
     test_scene_check.cpp
     test_scene_extract.cpp
     test_scene_store.cpp

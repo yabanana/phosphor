@@ -65,6 +65,7 @@ class ReferenceSnapshot;
 class LinearCapture;
 class ReflectionPasses;
 class MetalfxDenoise;
+class MetalfxDenoiseFixture;
 class AtmospherePasses;
 
 // ---------------------------------------------------------------------------
@@ -152,6 +153,7 @@ private:
     std::unique_ptr<GiPasses> gi_;
     std::unique_ptr<ReflectionPasses> reflections_;
     std::unique_ptr<MetalfxDenoise> denoised_;
+    std::unique_ptr<MetalfxDenoiseFixture> denoisedFixture_;
     std::unique_ptr<AtmospherePasses> atmosphere_;
     GiLightingEpoch surfaceLightingEpoch_;
     u64 surfaceGeometryEpoch_=1,surfaceMaterialEpoch_=1,surfaceSignalEpoch_=1;
@@ -300,6 +302,7 @@ private:
         u32 logicalWidth=0,logicalHeight=0;
         u64 reflectionResources=0,denoiseResources=0,atmosphereResources=0;
         bool reflectionReady=false;
+        u64 fixtureResources=0;bool fixtureReady=false;
         bool operator==(const GraphKey&) const = default;
     };
     rg::RenderGraph frameGraph_;

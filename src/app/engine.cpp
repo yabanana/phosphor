@@ -40,6 +40,7 @@
 #include "platform/metal/linear_capture.h"
 #include "platform/metal/reflection_passes.h"
 #include "platform/metal/metalfx_denoise.h"
+#include "platform/metal/metalfx_denoise_fixture.h"
 #include "platform/metal/atmosphere_passes.h"
 #include "platform/metal/lighting_dispatch.h"
 #include "renderer/rt_check.h"
@@ -328,7 +329,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         reflections_=std::make_unique<ReflectionPasses>(*context_,*pipelines_,*renderer_,*directLighting_,rt_.get(),gi_.get(),options_);
     if(options_.atmosphere || options_.fog || options_.clouds)
         atmosphere_=std::make_unique<AtmospherePasses>(*context_,*pipelines_,*renderer_,directLighting_.get(),rt_.get(),gi_.get(),shadows_.get(),options_);
-    if(options_.lightingDenoise==LightingDenoiseMode::MetalFX) {
+    if(options_.lightingDenoise==LightingDenoiseMode::MetalFX||!options_.denoisedFixture.empty()) {
         MetalfxDenoise::Options config;config.enabled=true;config.views=options_.temporalViews;
         config.specularHitDistance=options_.reflections!=ReflectionMode::Off;
         MetalfxDenoise::Factory factory;
@@ -336,8 +337,13 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         factory.request=[this](auto* desc){return pipelines_->requestTemporalDenoisedScaler(desc);};
         factory.retire=[this](auto scaler){pipelines_->retireTemporalDenoisedScaler(std::move(scaler));};
 #endif
-        denoised_=std::make_unique<MetalfxDenoise>(*context_,*pipelines_,config,std::move(factory));
-        roughnessSplit_=pipelines_->request(lighting::kernel("denoise_split_roughness"));roughnessTable_=lighting::table(*context_,2,2);
+        if(!options_.denoisedFixture.empty()) {
+            MetalfxDenoiseFixture::Options fixture{options_.denoisedFixture,options_.denoisedFixtureOutput,options_.denoisedFixturePreExposed};
+            denoisedFixture_=std::make_unique<MetalfxDenoiseFixture>(*context_,*pipelines_,std::move(factory),std::move(fixture));
+        } else {
+            denoised_=std::make_unique<MetalfxDenoise>(*context_,*pipelines_,config,std::move(factory));
+            roughnessSplit_=pipelines_->request(lighting::kernel("denoise_split_roughness"));roughnessTable_=lighting::table(*context_,2,2);
+        }
     }
 
     if(!options_.exportReference.empty())referenceSnapshot_=std::make_unique<ReferenceSnapshot>(*context_,*renderer_,options_.exportReference,options_.exportReferenceFrame,rt_.get());
@@ -432,6 +438,7 @@ Engine::~Engine() {
     rtVisibility_.reset();
     atmosphere_.reset();
     reflections_.reset();
+    denoisedFixture_.reset();
     denoised_.reset();
     if(roughnessTable_)roughnessTable_->release();
     referenceSnapshot_.reset();
@@ -589,6 +596,7 @@ void Engine::run() {
         pipelines_->waitAllFinal();
         if (!pipelines_->writeHarvest()) exitCode_ = 1;
     }
+    if(denoisedFixture_&&!denoisedFixture_->finish())exitCode_=1;
     if (options_.benchmark()) {
         finishBenchmark();
     }
@@ -746,6 +754,7 @@ void Engine::finishBenchmark() {
     report.cpuHeapBytesDelta  = static_cast<i64>(heapBytes) - static_cast<i64>(heapBytesAtStart_);
     summarizeSamples(samples_, report);
     report.pipelinesJson = pipe::pipelineStatsJson(pipelines_->stats());
+    if(denoisedFixture_)report.denoisedFixtureJson=denoisedFixture_->reportJSON();
     report.gpuTiming        = timestamps_ != nullptr && timestamps_->enabled();
     report.gpuTimingUnfused = options_.gpuTimingUnfused;
     report.graph            = graphReport_;
@@ -1569,6 +1578,12 @@ bool Engine::frame(float dt) {
         if (rtVisibility_ && rt_->active())
             rtVisibility_->prepareFrame(frame.slot, renderWidth, renderHeight, constants);
     }
+    if(denoisedFixture_) {
+        MetalfxDenoise::Frame df;df.slot=frame.slot;df.view=currentView_;df.index=frame.index;df.signalEpoch=sceneEpoch_;
+        df.extent={renderWidth,renderHeight,width,height};df.cut=viewCameraCut;
+        df.reset=options_.historyResetEvery&&presentedFrames_%options_.historyResetEvery==0;
+        denoisedFixture_->prepareFrame(df);
+    }
     overlays_->prepareFrame(overlayMode_, constants.lightCount, width, height);
     if(linearCapture_&&options_.captureLinearSignal>=6)pipelines_->waitAllFinal();
     if (shadows_) {
@@ -1640,7 +1655,7 @@ bool Engine::frame(float dt) {
                        shadows_?shadows_->version():0,directLighting_?directLighting_->version():0,
                        gi_?gi_->version():0,referenceSnapshot_?referenceSnapshot_->version():0,
                        linearCapture_?linearCapture_->version():0,renderWidth,renderHeight,
-                       reflections_?reflections_->version():0,denoised_?denoised_->version():0,atmosphere_?atmosphere_->version():0,reflections_&&reflections_->ready()};
+                       reflections_?reflections_->version():0,denoised_?denoised_->version():0,atmosphere_?atmosphere_->version():0,reflections_&&reflections_->ready(),denoisedFixture_?denoisedFixture_->version():0,denoisedFixture_&&denoisedFixture_->ready()};
     if (!(key == graphKey_) || !graphExecutor_->valid()) {
         frameFlags_ |= FrameGraphCompile;
         if (key.width != graphKey_.width || key.height != graphKey_.height) frameFlags_ |= FrameResize;
@@ -1681,6 +1696,7 @@ bool Engine::frame(float dt) {
     if(graphKey_.reflectionReady)reflections_->bindFrame(*graphExecutor_);
     if(atmosphere_)atmosphere_->bindFrame(*graphExecutor_);
     if(denoised_)denoised_->bindFrame(*graphExecutor_);
+    if(denoisedFixture_)denoisedFixture_->bindFrame(*graphExecutor_);
     if(referenceSnapshot_)referenceSnapshot_->bindFrame(*graphExecutor_);
     if(linearCapture_)linearCapture_->bindFrame(*graphExecutor_);
     if (rtVisibility_) rtVisibility_->bindFrame(*graphExecutor_);
@@ -1945,6 +1961,7 @@ void Engine::onSceneCounters(u32 slot) {
     if(referenceSnapshot_)referenceSnapshot_->consume(slot);
     if(linearCapture_)linearCapture_->consume(slot);
     if(denoised_)for(const auto& check:denoised_->drainPackChecks())if(check.available&&!check.ok){++lightingFailures_;exitCode_=1;}
+    if(denoisedFixture_&&!denoisedFixture_->consume(slot)){++lightingFailures_;exitCode_=1;}
     const bool reflectionPassed=!slotReflectionRecorded_[slot]||reflections_->check(slot);
     const bool volumePassed=!atmosphere_||atmosphere_->consumeDiagnostics(slot);
     if(!reflectionPassed||!volumePassed){++lightingFailures_;exitCode_=1;}
@@ -2149,6 +2166,10 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
                 in.diffuseAlbedo=visibility_->diffuseAlbedo();in.specularAlbedo=visibility_->specularAlbedo();in.worldNormal=visibility_->normalRoughness();in.roughness=roughnessRef_;
                 in.reactiveMask=visibility_->reactiveMask();if(graphKey_.reflectionReady)in.hitDistance=reflections_->hitDistance();
                 const auto selected=denoised_->addToGraph(frameGraph_,in);if(denoised_->ready())reconstructed=selected;
+            }
+            if(denoisedFixture_) {
+                const auto fixtureColor=denoisedFixture_->addToGraph(frameGraph_);
+                if(graphKey_.fixtureReady&&fixtureColor.valid())reconstructed=fixtureColor;
             }
             if(linearCapture_)linearCapture_->addToGraph(frameGraph_,options_.captureLinearSignal==1?gi_->referenceDiffuse():
                                                        options_.captureLinearSignal==2?directLighting_->direct():options_.captureLinearSignal==6?reflections_->rawSpecular():
