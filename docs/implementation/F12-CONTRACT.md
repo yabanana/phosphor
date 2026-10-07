@@ -72,7 +72,7 @@ BLAS dependency and deferred lifetime; do not substitute diagnostic IFTs.
 | gi_shade | params0 reservoirs1 states2 | WORLDpoint0 geometricNormal1 currentIrr2 currentMoments3 outputIndirectE4 |
 
 F11 dependencies are restir_common.h, GPUSampledLight 80 B, GPUEmissiveSurface
-80 B, DITextureHandle 8 B and diSampleTexturedLight. Emissive records are indexed
+96 B, DITextureHandle 8 B and diSampleTexturedLight. Emissive records are indexed
 by light index, actual current material UV/half-filtered emissive/MASK sampling
 matches F11. When sampledLightCount > 0, analyticLights supplies directional
 suns and the helper skips analytic point/spot entries to prevent duplicates.
@@ -268,3 +268,5 @@ test_gi.cpp to tests, shader modules/helpers to shader lists and harvest. Then:
 
 Algorithms/shader/reference code are original implementation. Local legacy
 Vulkan is reference only; no Vulkan backend or build is introduced.
+
+Parent integration amendment (NON VERIFIED): emissive records now include three live raster vertex indices and a geometryValid flag (96 B total); light_emissive_update additionally reads current GPUVertex buffer6, while updateParams.pad names its vertex count. Local positions/UV remain the portable oracle/export metadata. Geometry maintenance therefore changes world emitter sampling in the same frame. DI identity/domain revision is separate from full radiance content revision; GI invalidates on the latter.

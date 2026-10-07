@@ -84,7 +84,7 @@ Power alias weights are only heuristics; area emits `pi*A*Le` per side.
 normals use `DI_LIGHT_MIRRORED`, preserving object outward-facing orientation
 without swapping UVs or barycentrics. RGB emission is linear.
 
-Textured triangles have a per-light `GPUEmissiveSurface` (80 B): local triangle
+Textured triangles have a per-light `GPUEmissiveSurface` (96 B): local triangle
 positions/UVs, instance slot/incarnation, material and validity. The scene
 must extract FULL geometry, independent of camera culling and RT proxies.
 `light_emissive_update` transforms endpoints from the actual GPU scene after
@@ -99,7 +99,7 @@ revision reset (no area-domain shift/Jacobian reuse across moving emitters).
 ## Immutable GPU ABI
 
 `gpu_types.h` remains the single scalar-only layout definition. Sizes are:
-GPUSampledLight 80 B, GPUEmissiveSurface 80 B, GPUEmissiveUpdateParams 16 B,
+GPUSampledLight 80 B, GPUEmissiveSurface 96 B, GPUEmissiveUpdateParams 16 B,
 GPUAliasEntry 16 B, GPUDIReservoir 64 B, GPUDISurface 96 B, GPUDIParams 96 B,
 GPULightCluster 16 B, GPULightClusterParams 112 B.
 
@@ -235,3 +235,5 @@ F11 output is raw stochastic LOCAL direct illumination. The denoised Many
 Lights exit depends on F13; this package does not close that boundary or
 assert temporal quality/performance. M5 development proof and physical T0
 certification remain separate records.
+
+Parent integration amendment (NON VERIFIED): emissive records now include three live raster vertex indices and a geometryValid flag (96 B total); light_emissive_update additionally reads current GPUVertex buffer6, while updateParams.pad names its vertex count. Local positions/UV remain the portable oracle/export metadata. Geometry maintenance therefore changes world emitter sampling in the same frame. DI identity/domain revision is separate from full radiance content revision; GI invalidates on the latter.

@@ -27,6 +27,9 @@ void LocalLightScene::rebuild(const GpuScene& scene,const SceneStore& store,std:
             GPUEmissiveSurface e{};std::memcpy(e.p0,p0,12);std::memcpy(e.p1,p1,12);std::memcpy(e.p2,p2,12);
             e.instanceSlot=slot;e.instanceGeneration=i.generation;e.materialIndex=i.materialIndex;e.valid=1;
             e.uv0[0]=a.u;e.uv0[1]=a.v;e.uv1[0]=b.u;e.uv1[1]=b.v;e.uv2[0]=c.u;e.uv2[1]=c.v;
+            e.vertex0=mesh.vertexOffset+scene.indices()[mesh.indexOffset+triangle*3];
+            e.vertex1=mesh.vertexOffset+scene.indices()[mesh.indexOffset+triangle*3+1];
+            e.vertex2=mesh.vertexOffset+scene.indices()[mesh.indexOffset+triangle*3+2];e.geometryValid=1;
             append(l,e);
         }
     }
@@ -36,6 +39,16 @@ void LocalLightScene::rebuild(const GpuScene& scene,const SceneStore& store,std:
     // Proposal weights may be local-area based: they are sampling heuristics,
     // while exact transformed area/PDF is evaluated by the shader integrand.
     for(const auto& l:lights)weights_.push_back(di::powerWeight(l));
+    if(hash!=radianceHash_){++radianceRevision;radianceHash_=hash;}
+    // Rigid light movement keeps the discrete/area domain and can reuse DI.
+    // The radiance cache still sees the FULL content revision above.
+    hash=1469598103934665603ull;
+    for(const auto& l:lights) {
+        hashBytes(&l.id,16);hashBytes(l.emission,12);hashBytes(&l.range,4);
+        hashBytes(&l.radius,4);hashBytes(&l.innerCone,4);hashBytes(&l.outerCone,4);
+        const double a=di::area(l);hashBytes(&a,sizeof a);
+    }
+    hashBytes(emitters.data(),emitters.size()*sizeof(GPUEmissiveSurface));
     if(hash!=hash_){++revision;hash_=hash;}alias.rebuild(weights_,revision);
 }
 } // namespace phosphor

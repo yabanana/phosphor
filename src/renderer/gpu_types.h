@@ -597,8 +597,9 @@ struct GPUEmissiveSurface {
     float p2[3]; u32 materialIndex;
     float uv0[2], uv1[2];
     float uv2[2]; u32 valid, pad;
+    u32 vertex0, vertex1, vertex2, geometryValid; // live raster vertex lookup for deformation
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUEmissiveSurface) == 80, "GPUEmissiveSurface layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUEmissiveSurface) == 96, "GPUEmissiveSurface layout");
 struct GPUEmissiveUpdateParams {
     u32 lightCount, slotCount, materialCount, pad;
 };
