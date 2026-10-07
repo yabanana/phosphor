@@ -40,8 +40,9 @@ EntityID ReflectionValidation::mesh(ECS& ecs,u32 handle,glm::vec3 p,glm::vec3 si
     // No default MR/normal textures: they would alter exact analytic factors.
     ecs.addComponent(e,std::move(m));return e;
 }
-void ReflectionValidation::setup(ECS& ecs,GpuScene& scene,TextureManager&) {
+void ReflectionValidation::setup(ECS& ecs,GpuScene& scene,TextureManager& textures) {
     if(!entities_.empty())throw std::logic_error("Reflection fixture setup requires teardown");
+    textures.createDefaultTextures(); // Existing scene fallback material refers to these slots.
     auto upload=[&](MeshData data){return scene.uploadMesh(data.positions,data.normals,data.tangents,data.uvs,data.indices);};
     plane_=upload(ProceduralMeshes::generatePlane(1,1,1,1));
     cube_=upload(ProceduralMeshes::generateCube(0.5f));

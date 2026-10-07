@@ -289,7 +289,7 @@ def main(argv=None):
         "binary_sha256":binary_hash,"frozen_before_first_case":True}))
     refs=json.loads(args.references.read_text()) if args.references else {}
     evidence=json.loads(args.numeric_evidence.read_text()) if args.numeric_evidence else {}
-    results=[];env=dict(os.environ,MTL_DEBUG_LAYER="1",MTL_SHADER_VALIDATION="1",MTL_DEBUG_LAYER_WARNING_MODE="0")
+    results=[];env=dict(os.environ,MTL_DEBUG_LAYER="1",MTL_SHADER_VALIDATION="1",MTL_DEBUG_LAYER_WARNING_MODE="nslog")
     try:
         with gpu_lock(args.gpu_lock):
             for case in cases:
