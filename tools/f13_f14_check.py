@@ -38,6 +38,13 @@ def sha(path):
     with Path(path).open("rb") as stream:
         for chunk in iter(lambda:stream.read(1024*1024),b""):digest.update(chunk)
     return digest.hexdigest()
+def source_hash(root):
+    digest=hashlib.sha256()
+    for subtree in ("src","shaders","tools"):
+        folder=Path(root)/subtree
+        for path in sorted(p for p in folder.rglob("*") if p.is_file() and p.suffix in (".cpp",".h",".hpp",".metal",".py")):
+            digest.update(str(path.relative_to(root)).encode());digest.update(path.read_bytes())
+    return digest.hexdigest()
 def numeric(x):return isinstance(x,(int,float)) and not isinstance(x,bool) and math.isfinite(x)
 
 
@@ -252,6 +259,7 @@ def gpu_lock(path):
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary",type=Path,default=Path("build/release/phosphor"));parser.add_argument("--out",type=Path,required=True)
+    parser.add_argument("--metallib",type=Path);parser.add_argument("--source-root",type=Path,default=Path(__file__).resolve().parents[1])
     parser.add_argument("--run",action="store_true");parser.add_argument("--only",action="append",default=[])
     parser.add_argument("--manifest",type=Path,help="--run consumes this existing frozen plan without rewriting it")
     parser.add_argument("--frames",type=int,default=300);parser.add_argument("--resolution",default="640x360")
@@ -307,18 +315,27 @@ def main(argv=None):
         return 0
     if not args.binary.is_file():parser.error("--run requires an existing compiled renderer; this runner never builds")
     binary_hash=sha(args.binary)
+    source_sha=source_hash(args.source_root.resolve())
+    metallib=args.metallib.resolve() if args.metallib else args.binary.resolve().parent/"shaders"/"phosphor.metallib"
+    metallib_hash=sha(metallib) if metallib.is_file() else None
     if manifest.get("binary_sha256") is not None and manifest["binary_sha256"]!=binary_hash:parser.error("compiled binary differs from frozen plan")
     # A source-only plan may precede compilation. Freeze the actual binary before
     # the first case without altering the ROI/scene/threshold manifest identity.
     (out/"execution-provenance.json").write_bytes(json_bytes({"manifest_sha256":manifest_hash,
-        "binary_sha256":binary_hash,"frozen_before_first_case":True}))
+        "binary_sha256":binary_hash,"metallib_path":str(metallib),"metallib_sha256":metallib_hash,
+        "source_sha256":source_sha,"source_hash_method":"sha256-sorted-src-shaders-tools-path-and-bytes",
+        "timeout_seconds":args.timeout,"frozen_before_first_case":True}))
     refs=json.loads(args.references.read_text()) if args.references else {}
     evidence=json.loads(args.numeric_evidence.read_text()) if args.numeric_evidence else {}
-    results=[];env=dict(os.environ,MTL_DEBUG_LAYER="1",MTL_SHADER_VALIDATION="1",MTL_DEBUG_LAYER_WARNING_MODE="0")
+    results=[];env=dict(os.environ,MTL_DEBUG_LAYER="1",MTL_SHADER_VALIDATION="1",MTL_DEBUG_LAYER_WARNING_MODE="nslog",
+        PHOSPHOR_SOURCE_SHA=source_sha,PHOSPHOR_BINARY_SHA=binary_hash,PHOSPHOR_MANIFEST_SHA=manifest_hash)
     try:
         with gpu_lock(args.gpu_lock):
             for case in cases:
                 if sha(args.binary)!=binary_hash:raise RuntimeError("binary changed between corpus cases")
+                if metallib_hash is not None and (not metallib.is_file() or sha(metallib)!=metallib_hash):
+                    raise RuntimeError("metallib changed between corpus cases")
+                if source_hash(args.source_root.resolve())!=source_sha:raise RuntimeError("source tree changed between corpus cases")
                 if case.get("needs_probe"):
                     try:
                         if not case.get("probe_input"):raise ValueError("--probe-dir external input was not supplied")
