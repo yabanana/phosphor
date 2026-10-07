@@ -59,16 +59,24 @@ def analyze(args):
     plan_path=pathlib.Path(args.plan).resolve();plan=json.loads(plan_path.read_text());protocol=plan['protocol'];runs={};global_errors=[]
     for name,expected in {**plan['artifacts'],**plan['assets']}.items():
         if not pathlib.Path(name).is_file() or sha(name)!=expected:global_errors.append('pinned artifact/asset changed: '+name)
+    previous_end=None
     for job in plan['jobs']:
         folder=pathlib.Path(job['folder']);errors=[]
         try:status=json.loads((folder/'run.log.status.json').read_text());report=json.loads((folder/'report.json').read_text())
         except (OSError,json.JSONDecodeError) as exc:runs[job['id']]={'valid':False,'errors':[str(exc)]};continue
         if not status.get('passed') or status.get('returncode')!=0 or status.get('exit_marker')!=0:errors.append('process/error gate failed')
         if status['command']!=job['command']:errors.append('command differs from frozen plan')
+        started=datetime.datetime.fromisoformat(status['started_utc']).timestamp()
+        duration=float(status['elapsed_seconds'])
+        if not math.isfinite(duration) or duration<0:errors.append('invalid runtime duration')
+        if previous_end is not None and started<previous_end-0.001:errors.append('runs overlap or ABA order changed')
+        previous_end=started+duration
         if status['commit']!=plan['commit'] or status['tracked_patch_sha256']!=plan['tracked_patch_sha256']:errors.append('source provenance changed')
         for name,expected in status.get('artifacts',{}).items():
             if plan['artifacts'].get(name)!=expected:errors.append('runtime artifact mismatch: '+name)
         if status.get('binary_sha256')!=plan['artifacts'][job['command'][0]]:errors.append('binary hash mismatch')
+        for artifact in [job['command'][0],str(pathlib.Path(job['command'][0]).parent/'shaders/phosphor.metallib')]:
+            if status.get('artifacts',{}).get(artifact)!=plan['artifacts'][artifact]:errors.append('missing or mismatched runtime artifact: '+artifact)
         for variable in ['MTL_DEBUG_LAYER','MTL_SHADER_VALIDATION','MTL_DEBUG_LAYER_WARNING_MODE']:
             if status.get('validation_env',{}).get(variable) not in [None,'','0']:errors.append('validation environment enabled: '+variable)
         view=report.get('rendering',{});light=report.get('lighting',{});hardware=report.get('hardware',{})
@@ -81,6 +89,7 @@ def analyze(args):
             if report.get(group,{}).get(key,0):errors.append('diagnostic checker active: '+group)
         for field in ['gpu_ms','cpu_ms','frame_ms','wait_ms']:
             if any(not math.isfinite(report[field][key]) or report[field][key]<0 for key in ['mean','p50','p95','p99']):errors.append('nonfinite timing: '+field)
+        if report['gpu_ms']['mean']<=0 or report['gpu_ms']['p50']<=0:errors.append('no positive GPU timing evidence')
         if job['scene']=='sponza' and 'sponza' not in view.get('asset','').lower():errors.append('Sponza asset fallback/mismatch')
         passes=report.get('passes',[]);coverage={'units':len(passes),'min_samples':min((p['frames'] for p in passes),default=0),'sufficient_units':sum(p['frames']>=.9*512 for p in passes),'steady_attribution_available':bool(passes and all(p['frames']>=.9*512 for p in passes))}
         runs[job['id']]={'valid':not errors,'errors':errors,'gpu_ms':report['gpu_ms'],'cpu_ms':report['cpu_ms'],'frame_ms':report['frame_ms'],'wait_ms':report['wait_ms'],'gpu_allocations':report['gpu_allocations'],'memory':{k:view.get(k) for k in ['engine_resource_bytes_last','device_allocated_bytes_last','parent_physical_footprint_last']},'passes':passes,'pass_coverage':coverage,'pipelines':report.get('pipelines',{}),'runtime_status':status}
