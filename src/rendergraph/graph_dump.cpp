@@ -334,6 +334,11 @@ std::string dumpGraphviz(const RenderGraph& graph, const CompiledGraph& compiled
         if (isMemoryless(compiled, r)) {
             flags += " [memoryless]";
         }
+        if (const Placement* pl = placementOf(r); pl && r < compiled.lifetimes.size()) {
+            const auto life = compiled.lifetimes[r];
+            label += "\\n[placement offset " + std::to_string(pl->offset) + " size " + std::to_string(pl->size) +
+                     " life " + std::to_string(life.first) + ".." + std::to_string(life.last) + "]";
+        }
         if (const Placement* pl = placementOf(r); pl && pl->aliased) {
             flags += " [aliased @" + std::to_string(pl->offset) + "]";
         }

@@ -1,6 +1,6 @@
 #include "restir_common.h"
 kernel void reflection_counter_clear(device atomic_uint* counts [[buffer(0)]],uint tid [[thread_position_in_grid]]){
-    if(tid<8)atomic_store_explicit(counts+tid,0u,memory_order_relaxed);
+    if(tid<16)atomic_store_explicit(counts+tid,0u,memory_order_relaxed);
 }
 // Metadata is per-sample, each block stridePixels long. Average contributions,
 // not already-denoised signals. Mixed paths report hitDistance0 (unknown), no
@@ -79,7 +79,15 @@ kernel void reflection_input_check(constant GPUReflectionComposeParams& p [[buff
         if(dot(geometric,geometric)<=0)reasons|=2u;
         if(!all(isfinite(normal)))reasons|=4u;
         if(dot(normal,normal)<=0)reasons|=8u;
-        if(!all(isfinite(velocity)))reasons|=16u;
+        if(!all(isfinite(velocity))){reasons|=16u;
+            // One winning invocation records the exact bits read from motion.
+            // All writes finish before the existing per-slot CPU readback.
+            if(atomic_fetch_add_explicit(counts+8,1u,memory_order_relaxed)==0u){
+                atomic_store_explicit(counts+9,tid,memory_order_relaxed);
+                atomic_store_explicit(counts+10,as_type<uint>(velocity.x),memory_order_relaxed);
+                atomic_store_explicit(counts+11,as_type<uint>(velocity.y),memory_order_relaxed);
+            }
+        }
         if(reasons)atomic_fetch_or_explicit(counts+7,reasons,memory_order_relaxed);
     }
 }
