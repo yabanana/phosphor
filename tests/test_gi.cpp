@@ -150,6 +150,37 @@ TEST_CASE("F12 fresh cosine path oracle transforms PDF from solid angle to area 
     CHECK(std::abs(giShade(wrong,c).x-L.x)>1); // negative omitted area Jacobian
     CHECK_FALSE(giConnection(x,sample,false).valid);
 }
+TEST_CASE("F12 zero-proposal history preserves the IID two-sample Bernoulli mean") {
+    // Independent exact expectation: four equally probable outcomes of two
+    // Bernoulli(0.5) samples. The empirical two-sample estimator is (a+b)/2.
+    // This test enumerates outcomes rather than reproducing a shader RNG.
+    double correctedMean=0,oldMean=0;
+    for(int a=0;a<2;++a)for(int b=0;b<2;++b) {
+        auto candidate=secondary();candidate.proposalSolidAngle=1;candidate.flags|=GI_PROPOSAL_VALID;
+        GPUGiReservoir receiver{},source{};
+        giAddCandidate(receiver,candidate,float(a),1,0);giFinalize(receiver);
+        giAddCandidate(source,candidate,float(b),1,0);giFinalize(source);
+        REQUIRE(receiver.M==1);REQUIRE(source.M==1);
+        const bool sourceHadPositive=bool(source.flags&GI_SAMPLE_VALID);
+        auto old=receiver;
+        if(sourceHadPositive)giMerge(old,source,float(b),true,0,32);giFinalize(old);
+        giMerge(receiver,source,float(b),true,0,32);giFinalize(receiver);
+        REQUIRE(receiver.M==2);
+        const double expected=double(a+b)/2;
+        const double value=(receiver.flags&GI_SAMPLE_VALID)?receiver.target*receiver.W:0;
+        CHECK(value==doctest::Approx(expected));
+        correctedMean+=value/4;
+        oldMean+=((old.flags&GI_SAMPLE_VALID)?old.target*old.W:0)/4;
+    }
+    CHECK(correctedMean==doctest::Approx(0.5));
+    CHECK(oldMean==doctest::Approx(0.625)); // negative old discard-zero-source rule
+    GPUGiReservoir zero{};auto candidate=secondary();candidate.flags|=GI_PROPOSAL_VALID;
+    giAddCandidate(zero,candidate,0,1,0);giFinalize(zero);
+    CHECK_FALSE(zero.flags&GI_SAMPLE_VALID);CHECK(zero.flags&GI_PROPOSAL_VALID);CHECK(zero.W==0);
+    GPUProbeGridParams p{};GiReceiver x;
+    CHECK(giHistoryCompatible(zero,p,x,0.1f));
+    ++p.viewRevision;CHECK_FALSE(giHistoryCompatible(zero,p,x,0.1f));
+}
 TEST_CASE("F12 reservoir zero-contribution paths count and bounded history rejects revisions") {
     GiReceiver x;auto sample=secondary();auto c=giConnection(x,sample,true);
     GPUGiReservoir r{};giAddCandidate(r,sample,c.target,c.proposalArea,0);
