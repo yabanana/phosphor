@@ -228,6 +228,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         }
         MeshRenderer::Options mo;
         mo.visibility = options_.visibility;
+        mo.lightingReceivers = options_.shadows != ShadowMode::Off || options_.directLighting != DirectLightingMode::Legacy || options_.gi != GiMode::Off || options_.reflections!=ReflectionMode::Off || options_.ao!=AoMode::Off || options_.lightingDenoise!=LightingDenoiseMode::Off || options_.atmosphere || options_.fog || options_.clouds;
         mo.cull        = options_.meshletCull;
         mo.hiz         = hiz;
         mo.debugView   = options_.debugView == MeshletDebugView::RT ? MeshletDebugView::None : options_.debugView;

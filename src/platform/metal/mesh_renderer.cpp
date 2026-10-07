@@ -93,7 +93,8 @@ MeshRenderer::MeshRenderer(MetalContext& context, PipelineCache& pipelines, Scen
             auto d = meshDesc(pipe::forward::genericDesc(rg::Format::R32Uint), "Visibility raster");
             d.functions[0] = pass == 1 ? "visibility_object_opaque" : "visibility_object_alpha";
             d.functions[1] = "visibility_mesh";
-            d.functions[2] = pass == 1 ? "visibility_opaque_fs" : "visibility_alpha_fs";
+            d.functions[2] = pass == 1 ? "visibility_opaque_fs" :
+                options_.lightingReceivers ? "visibility_alpha_lit_fs" : "visibility_alpha_fs";
             (pass == 1 ? visibilityOpaque_ : visibilityAlpha_) = pipelines_.request(d);
         }
     }
@@ -484,7 +485,9 @@ rg::TextureRef MeshRenderer::addRasterPasses(rg::RenderGraph& graph, rg::Texture
                 b.read(scene_.dataRef(), Usage::ShaderRead, StageObject | StageMesh | StageFragment);
                 b.read(graphFrame_, Usage::IndirectArgs, StageObject | StageMesh);
                 b.read(phase == 0 ? hizHistoryRef_ : hizCurrentRef_, Usage::ShaderRead, StageObject);
-                b.setProfileShaders("meshlet_object,visibility_mesh,visibility_alpha_fs");
+                b.setProfileShaders(options_.lightingReceivers ?
+                    "visibility_object_alpha,visibility_mesh,visibility_alpha_lit_fs" :
+                    "visibility_object_alpha,visibility_mesh,visibility_alpha_fs");
             },
             [this, phase](PassContext &ctx) {
                 encodeRaster(static_cast<MTL4::RenderCommandEncoder *>(ctx.encoder()), phase, true);

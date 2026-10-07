@@ -61,6 +61,7 @@ public:
         /// the next timed unit without a valid timestamp, F4.1).
         bool               checks = false;
         bool visibility = false; // F7: R32Uint opaque + masked raster
+        bool lightingReceivers = false; // F10+: alpha footprint matches indexed lighting receivers
         /// F6.2 APPROXIMATE size cull: meshlets whose projected bound covers
         /// less than minPixels^2 pixels (0 = off, the exact preset).
         float              minPixels = 0.0f;
