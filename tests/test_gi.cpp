@@ -3,6 +3,7 @@
 #include "renderer/radiance_cache.h"
 #include "renderer/gi_reservoir.h"
 #include "renderer/offline_reference.h"
+#include "renderer/rt_geometry.h"
 #include <array>
 #include <filesystem>
 #include <fstream>
@@ -12,6 +13,35 @@
 #include <vector>
 
 using namespace phosphor;
+
+TEST_CASE("F12 mirrored world winding does not invert the original material front") {
+    // Independent geometric oracle: object-space CCW triangle, original normal
+    // +Z. Reflect X through the model; world cross is -Z. A ray from z=2 toward
+    // the outside/front still sees the material front even though WORLD facing
+    // is false. No call to the shader or RT facing helper computes this oracle.
+    const glm::dvec3 a(-1,-1,0),b(1,-1,0),c(0,1,0),outsideOrigin(0,0,2),outsideDirection(0,0,-1);
+    auto mirrorX=[](glm::dvec3 p){return glm::dvec3(-p.x,p.y,p.z);};
+    const glm::dvec3 wa=mirrorX(a),wb=mirrorX(b),wc=mirrorX(c);
+    const glm::dvec3 worldCross=glm::cross(wb-wa,wc-wa);
+    const bool worldFront=glm::dot(worldCross,-outsideDirection)>0;
+    const glm::dvec3 objectCross=glm::cross(b-a,c-a);
+    const bool materialFrontOracle=glm::dot(objectCross,mirrorX(outsideOrigin)-a)>0;
+    REQUIRE(materialFrontOracle);
+    REQUIRE_FALSE(worldFront);
+    CHECK(rtMaterialFrontFacing(u32(worldFront),INSTANCE_FLAG_MIRRORED)==materialFrontOracle);
+    // Negative old path: interpreting world facing as material front would mark
+    // this outside probe as inside/backfacing and zero the reflected GI.
+    CHECK(worldFront!=materialFrontOracle);
+    const glm::dvec3 insideOrigin(0,0,-2),insideDirection(0,0,1);
+    const bool insideWorldFront=glm::dot(worldCross,-insideDirection)>0;
+    const bool insideMaterialOracle=glm::dot(objectCross,mirrorX(insideOrigin)-a)>0;
+    REQUIRE_FALSE(insideMaterialOracle);
+    CHECK(rtMaterialFrontFacing(u32(insideWorldFront),INSTANCE_FLAG_MIRRORED)==insideMaterialOracle);
+    CHECK(rtMaterialFrontFacing(1,0));
+    CHECK_FALSE(rtMaterialFrontFacing(0,0));
+    CHECK(rtMaterialFrontFacing(1,INSTANCE_FLAG_VALID|3u)); // unrelated flags do not change side
+}
+
 namespace {
 std::vector<GPUProbeRay> skyRays(u32 count,glm::vec3 L={1,1,1},float distance=100) {
     std::vector<GPUProbeRay> rays(count);

@@ -2,6 +2,7 @@
 #include <metal_stdlib>
 #include <metal_raytracing>
 #include "renderer/gpu_types.h"
+#include "renderer/rt_geometry.h"
 
 using namespace metal;
 using namespace raytracing;
@@ -51,6 +52,12 @@ inline GPURtHit rtMiss(float distance = -1.0f) {
     h.slot = ~0u;
     h.primitive = ~0u;
     return h;
+}
+
+// Preserve F9 WORLD winding; convert only where a consumer needs material side.
+inline bool rtMaterialFrontFacing(GPURtHit hit,const device GPUInstance* instances,uint slotCount) {
+    return hit.hit!=0u && hit.slot<slotCount &&
+        phosphor::rtMaterialFrontFacing(hit.frontFacing,instances[hit.slot].flags);
 }
 
 inline float rtConeLod(float width, float distance, float3 a, float3 b, float3 c,
