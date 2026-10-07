@@ -23,7 +23,7 @@ struct StbnMask {
 // Original implementation of scalar void-and-cluster with the STBN same-z or
 // same-xy toroidal Gaussian energy, described by Wolfe et al. (EGSR 2022).
 // Generation is explicit LOADING/OFFLINE work. Never call this every frame.
-// No external code or texture assets are copied. Repository licence applies.
+// No external code or texture assets are copied; project-authored source.
 [[nodiscard]] StbnMask generateStbn(const StbnConfig& config);
 // Independent full-range fallback. This is WHITE noise, never labelled STBN.
 [[nodiscard]] u32 stochasticHash(u32 value);
