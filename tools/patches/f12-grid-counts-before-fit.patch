@@ -1,0 +1,19 @@
+--- a/src/platform/metal/gi_passes.cpp
++++ b/src/platform/metal/gi_passes.cpp
+@@ -50,6 +50,8 @@
+     void load(const GpuScene& g,const SceneStore& s){
+         c.waitIdle();releaseVolume();config=ProbeGridConfig{};config.raysPerProbe=options.giRays;
+         if(options.reducedLighting||options.forceApple9){config.counts={4,3,4};config.raysPerProbe=std::min(32u,options.giRays);}
++        // Count overrides refine the same fitted scene volume. Apply before spacing.
++        if(options.giGrid[0])config.counts={options.giGrid[0],options.giGrid[1],options.giGrid[2]};
+         // Freeze a scene-volume preset at load. The API stays bounded and the
+         // tester must sweep grid spacing/ray budget before quality acceptance.
+         glm::vec3 low(1e30f),high(-1e30f);bool any=false;
+@@ -65,7 +67,6 @@
+             }
+         }}
+         if(any){config.origin=low-glm::vec3(0.25f);config.spacing=glm::max((high-low+glm::vec3(0.5f))/glm::vec3(config.counts-glm::uvec3(1)),glm::vec3(0.1f));}
+-        if(options.giGrid[0])config.counts={options.giGrid[0],options.giGrid[1],options.giGrid[2]};
+         if(options.giSpacing>0)config.spacing=glm::vec3(options.giSpacing);
+         if(options.giProbeAnchor)config.origin=glm::vec3(options.giAnchor[0],options.giAnchor[1],options.giAnchor[2])-glm::vec3(config.counts/2u)*config.spacing;
+         oracle=std::make_unique<ProbeGrid>(config);probeCount=oracle->probeCount();rayCount=probeCount*config.raysPerProbe;
