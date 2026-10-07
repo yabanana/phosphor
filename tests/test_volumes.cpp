@@ -65,11 +65,4 @@ TEST_CASE("F14 cloud centroid correction preserves homogeneous front air and att
     for(u32 c=0;c<3;++c)CHECK(corrected[c]==doctest::Approx(expected[c]).epsilon(1e-12));
     const glm::dvec3 wrong=Lc+Tc*sceneAtmosphere;
     CHECK(glm::length(wrong-expected)>0.01); // old all-air-behind-cloud formula must fail
-    const glm::dvec3 opaque=Ta*Lc+La;
-    for(u32 c=0;c<3;++c)CHECK(opaque[c]==doctest::Approx(La[c]+Ta*Lc[c]).epsilon(1e-12));
-    const glm::dvec3 transparent=sceneAtmosphere;CHECK(transparent==sceneAtmosphere);
-    // No front air is the exact limit of the older expression, demonstrating
-    // that the fixture specifically detects incorrect front-medium ordering.
-    const glm::dvec3 vacuumFront=Tc*sceneAtmosphere+Lc;
-    CHECK(vacuumFront==Lc+Tc*sceneAtmosphere);
 }

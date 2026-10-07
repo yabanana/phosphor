@@ -1,4 +1,5 @@
 #include "atmosphere_common.h"
+#include "renderer/atmosphere_bindings.h"
 
 static float cloudDensity(float3 point,constant GPUCloudParams& p,constant GPUAtmosphereParams& atmosphere) {
     const float altitude=length(point-atmoVec(atmosphere.planetCenter))-atmosphere.bottomRadius;
@@ -125,7 +126,7 @@ kernel void clouds_apply(constant GPUCloudParams& p [[buffer(0)]],constant GPUAt
     if(weights>1e-6f)value/=weights;else value=float4(0,0,0,1); // valid transparent fallback at disocclusion/thin depth edges
     const float Tcloud=saturate(value.w);const float3 sceneAtmosphere=scene.read(pixel).rgb;
     float3 color=Tcloud*sceneAtmosphere+value.rgb;
-    if(opacityWeights>1e-6f){
+    if((p.flags&CLOUD_SCENE_HAS_ATMOSPHERE)&&opacityWeights>1e-6f){
         centroid=min(opaque,centroid/opacityWeights);
         const float3 camera=atmoVec(p.cameraPosition),ray=atmoPixelRay(pixel,uint2(p.outputWidth,p.outputHeight),p.inverseViewProjection,camera);
         const AtmoIntegral front=atmoIntegrate(camera,ray,atmosphere,transmittance,multiscattering,true,centroid);

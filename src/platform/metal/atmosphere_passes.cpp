@@ -8,6 +8,7 @@
 #include "renderer/atmosphere.h"
 #include "renderer/fog_settings.h"
 #include "renderer/cloud_settings.h"
+#include "renderer/atmosphere_bindings.h"
 #include "renderer/history_registry.h"
 #include "rendergraph/pass_context.h"
 #include "core/log.h"
@@ -231,6 +232,7 @@ struct AtmospherePasses::Impl {
             cloudParams.width=cloudWidth;cloudParams.height=cloudHeight;cloudParams.outputWidth=f.width;cloudParams.outputHeight=f.height;
             cloudParams.marchSteps=clouds.marchSteps;cloudParams.lightSteps=clouds.lightSteps;cloudParams.seed=clouds.seed;cloudParams.generation=u32(decision.generation);
             cloudParams.frameIndex=u32(f.index);cloudParams.viewID=f.view;cloudParams.flags=!options.cloudFullRate&&!decision.reset?VOLUME_HISTORY_VALID:0u;
+            if(options.atmosphere)cloudParams.flags|=CLOUD_SCENE_HAS_ATMOSPHERE;
             cloudAddress=lighting::upload(c,cloudParams);
         }
         if(f.index==0)LOG_INFO("F14 SI: atmosphere=%u fog=%u range=%.1fm shadow=%s locals=%u GI=%u clouds=%u full-reference=%u physical-HDR=RGBA32Float",
