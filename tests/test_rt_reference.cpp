@@ -33,6 +33,8 @@ void geometry(RtReference& ref) {
     GPURtMesh mesh{};
     mesh.indexCount = 6;
     ref.setGeometry(v, indices, std::span(&mesh, 1));
+    const GPUMaterial material{};
+    ref.setMaterials(std::span(&material, 1));
 }
 }
 
@@ -45,6 +47,8 @@ TEST_CASE("RT reference uses mesh-local indices and global stream offsets") {
     mesh.vertexOffset = mesh.indexOffset = 1;
     mesh.indexCount = 6;
     ref.setGeometry(vertices, indices, std::span(&mesh, 1));
+    const GPUMaterial material{};
+    ref.setMaterials(std::span(&material, 1));
     auto i = instance();
     ref.setInstances(std::span(&i, 1));
     const auto h = ref.nearest(ray(0.5f, 0));
@@ -97,14 +101,18 @@ TEST_CASE("RT reference preserves t under nonuniform scale and shear") {
     CHECK(ref.check(r, h.gpu()).ok);
 }
 
-TEST_CASE("RT reference mirrored facing and primary culling match world winding") {
+TEST_CASE("RT primary culling uses object winding but mirrored hits report world winding") {
     RtReference ref;
     geometry(ref);
     auto i = instance();
     i.modelMatrix[0] = -1;
     i.flags |= INSTANCE_FLAG_MIRRORED;
     ref.setInstances(std::span(&i, 1));
-    CHECK_FALSE(ref.nearest(ray()).hit()); // Mirrored world triangle faces away.
+    REQUIRE(ref.nearest(ray()).hit()); // Object front is visible despite reversed world winding.
+    CHECK_FALSE(ref.nearest(ray()).frontFacing);
+    CHECK(ref.check(ray(), ref.nearest(ray()).gpu()).ok);
+    auto reverse = ray(0,0,-2); reverse.dz = 1;
+    CHECK_FALSE(ref.nearest(reverse).hit());
     auto shadow = ray();
     shadow.mask = RT_MASK_SHADOW;
     shadow.type = RT_PROBE_SHADOW;
@@ -115,6 +123,8 @@ TEST_CASE("RT reference mirrored facing and primary culling match world winding"
     GPUMaterial material{};
     material.flags = MATERIAL_FLAG_DOUBLE_SIDED;
     ref.setMaterials(std::span(&material, 1));
+    CHECK(ref.nearest(reverse).hit());
+    CHECK(ref.nearest(reverse).frontFacing);
     h = ref.nearest(ray());
     REQUIRE(h.hit());
     CHECK_FALSE(h.frontFacing);
@@ -258,4 +268,65 @@ TEST_CASE("RT reference rejects malformed geometry and clears stale snapshots on
     CHECK_FALSE(ref.any(ray()));
     const std::array<u32,2> invalidMasks{1,1};
     CHECK_THROWS(ref.setInstances(std::span(&i,1), invalidMasks));
+}
+
+TEST_CASE("RT shadow validation accepts a farther any-hit but closest rays reject it") {
+    RtReference ref;
+    geometry(ref);
+    const std::array<GPUInstance, 2> instances{instance(0,0,1), instance(0,0,0)};
+    ref.setInstances(instances);
+    auto r = ray(0.5f, 0);
+    r.type = RT_PROBE_SHADOW;
+    r.mask = RT_MASK_SHADOW;
+    // Compute the farther candidate independently by filtering out the near one.
+    const auto far = ref.nearest(r, [](const GPURtRay&, const RtReferenceHit& h) { return h.slot == 1; }).gpu();
+    REQUIRE(far.hit);
+    CHECK(far.t == doctest::Approx(2));
+    CHECK(ref.nearest(r).t == doctest::Approx(1));
+    const auto accepted = ref.check(r, far);
+    CHECK(accepted.ok);
+    CHECK_FALSE(accepted.edgeTie);
+    for (u32 type : {RT_PROBE_PRIMARY, RT_PROBE_AO, RT_PROBE_DIFFUSE}) {
+        r.type = type;
+        CHECK_FALSE(ref.check(r, far).ok);
+    }
+    r.type = RT_PROBE_SHADOW;
+    auto forged = far; forged.t = 1; // Distance must still belong to the named triangle.
+    CHECK_FALSE(ref.check(r, forged).ok);
+    forged = far; ++forged.generation;
+    CHECK_FALSE(ref.check(r, forged).ok);
+    forged = far; forged.u += 0.2f;
+    CHECK_FALSE(ref.check(r, forged).ok);
+    CHECK_FALSE(ref.check(r, far, [](const GPURtRay&, const RtReferenceHit& h) { return h.slot == 0; }).ok);
+    r.tmax = 1.5f;
+    CHECK_FALSE(ref.check(r, far).ok);
+}
+
+TEST_CASE("RT descriptor eligibility masks invalid material degenerate and nonfinite matrices") {
+    RtReference ref;
+    geometry(ref);
+    auto i = instance();
+    i.materialIndex = 1;
+    ref.setInstances(std::span(&i, 1));
+    CHECK_FALSE(ref.any(ray()));
+    i = instance();
+    i.modelMatrix[0] = 1e-21f;
+    ref.setInstances(std::span(&i, 1));
+    CHECK_FALSE(ref.any(ray()));
+    i.modelMatrix[0] = -1e-21f;
+    i.flags |= INSTANCE_FLAG_MIRRORED;
+    ref.setInstances(std::span(&i, 1));
+    CHECK_FALSE(ref.any(ray()));
+    i = instance();
+    i.modelMatrix[0] = -1;
+    i.flags |= INSTANCE_FLAG_MIRRORED;
+    ref.setInstances(std::span(&i, 1));
+    CHECK(ref.any(ray())); // Negative determinant itself is valid.
+    i.modelMatrix[12] = std::numeric_limits<float>::infinity();
+    ref.setInstances(std::span(&i, 1));
+    CHECK_FALSE(ref.any(ray()));
+    i = instance();
+    i.modelMatrix[0] = i.modelMatrix[5] = i.modelMatrix[10] = 1e20f;
+    ref.setInstances(std::span(&i, 1));
+    CHECK_FALSE(ref.any(ray())); // Descriptor float determinant overflows.
 }

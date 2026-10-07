@@ -45,13 +45,17 @@ public:
     // Optional masks override the default per-slot flags policy (same length).
     // With no override: primary+indirect for visible (bit 0), shadow for
     // castsShadows (bit 1), all gated by VALID. This ignores camera culling.
-    // Primary rays cull backfaces unless their material is double-sided.
-    // Invalid slots/mesh IDs never intersect.
+    // Primary rays cull by OBJECT winding unless their material is double-sided;
+    // hit.frontFacing still reports WORLD geometric winding.
+    // Invalid slots/mesh/material IDs and singular/nonfinite transforms never
+    // intersect. Set materials before instances so descriptor eligibility agrees.
     void setInstances(std::span<const GPUInstance> instances, std::span<const u32> masks = {});
     [[nodiscard]] RtReferenceHit nearest(const GPURtRay& ray, const Filter& accept = {}) const;
     [[nodiscard]] bool any(const GPURtRay& ray, const Filter& accept = {}) const;
-    // Checks nearest distance AND the named triangle; accepts alternate
-    // edge-tied IDs only when that triangle contains the ray within baryTolerance.
+    // Primary/AO/diffuse: checks nearest distance AND the named triangle;
+    // alternate edge-tied IDs must contain the ray within baryTolerance.
+    // Shadow: any valid occluder is accepted, still checking its named triangle,
+    // t, barycentrics, mask, generation, face and alpha rules.
     [[nodiscard]] RtHitCheck check(const GPURtRay& ray, const GPURtHit& hit, const Filter& accept = {},
                                    double tTolerance = 2e-4, double baryTolerance = 1e-5) const;
     [[nodiscard]] size_t meshCount() const;

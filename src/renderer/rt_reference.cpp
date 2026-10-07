@@ -189,8 +189,15 @@ struct RtReference::Impl {
         return h;
     }
     bool acceptFace(const GPURtRay& ray, const RtReferenceHit& hit) const {
-        return ray.type != RT_PROBE_PRIMARY || hit.frontFacing ||
-               (hit.material < materials.size() && (materials[hit.material].flags & MATERIAL_FLAG_DOUBLE_SIDED));
+        if (hit.material >= materials.size()) return false;
+        if (ray.type != RT_PROBE_PRIMARY || (materials[hit.material].flags & MATERIAL_FLAG_DOUBLE_SIDED)) return true;
+        // The raster/RT primary culling contract follows object winding. A
+        // mirrored transform reverses world winding, reported separately in
+        // frontFacing, but does not reverse this application-facing front.
+        const auto& i = instances[hit.slot];
+        const auto& tri = meshes[hit.mesh].triangles[hit.primitive];
+        const V3 a = position(tri.vertices[0]), b = position(tri.vertices[1]), c = position(tri.vertices[2]);
+        return glm::dot(glm::cross(b-a, c-a), local(fromGpu(ray), i).d) < 0;
     }
     RtReferenceHit trace(const GPURtRay& gpu, const Filter& accept, bool any) const {
         RtReferenceHit best;
@@ -278,7 +285,8 @@ void RtReference::setInstances(std::span<const GPUInstance> instances, std::span
     for (u32 slot = 0; slot < instances.size(); ++slot) {
         auto& dst = impl_->instances[slot];
         dst.gpu = instances[slot];
-        if (!(dst.gpu.flags & INSTANCE_FLAG_VALID) || dst.gpu.meshIndex >= impl_->meshes.size()) continue;
+        if (!(dst.gpu.flags & INSTANCE_FLAG_VALID) || dst.gpu.meshIndex >= impl_->meshes.size() ||
+            dst.gpu.materialIndex >= impl_->materials.size()) continue;
         const auto& mesh = impl_->meshes[dst.gpu.meshIndex];
         if (mesh.triangles.empty()) continue;
         dst.mask = masks.empty() ? ((dst.gpu.flags & 1u ? RT_MASK_PRIMARY | RT_MASK_INDIRECT : 0u) |
@@ -288,8 +296,10 @@ void RtReference::setInstances(std::span<const GPUInstance> instances, std::span
         bool validMatrix = true;
         for (int c = 0; c < 4; ++c) for (int r = 0; r < 4; ++r)
             validMatrix = validMatrix && std::isfinite(dst.world[c][r]);
-        const double determinant = glm::determinant(dst.world);
-        if (!validMatrix || !std::isfinite(determinant) || determinant == 0 ||
+        // Mirror the descriptor kernel's float determinant eligibility gate;
+        // retain a double inverse/intersection for the independent reference.
+        const float determinant = glm::determinant(glm::mat3(glm::make_mat4(dst.gpu.modelMatrix)));
+        if (!validMatrix || !std::isfinite(determinant) || std::abs(determinant) <= 1e-20f ||
             dst.world[0][3] != 0 || dst.world[1][3] != 0 || dst.world[2][3] != 0 || dst.world[3][3] != 1) {
             dst.mask = 0;
             continue;
@@ -323,11 +333,14 @@ RtHitCheck RtReference::check(const GPURtRay& gpuRay, const GPURtHit& gpu, const
     if (!valid(ray)) return fail("invalid ray");
     if (!std::isfinite(gpu.t) || gpu.hit > 1 || gpu.frontFacing > 1 ||
         (bool(gpu.hit) != (gpu.t >= 0))) return fail("inconsistent GPU hit state");
-    const auto expected = nearest(gpuRay, accept);
+    const bool shadow = gpuRay.type == RT_PROBE_SHADOW;
+    const auto expected = impl_->trace(gpuRay, accept, shadow);
     if (expected.hit() != bool(gpu.hit)) return fail("hit/miss mismatch");
     if (!expected.hit()) return result;
-    result.relativeError = std::abs(expected.t - gpu.t) / std::max(1.0, std::abs(expected.t));
-    if (result.relativeError > tTolerance) return fail("nearest distance mismatch");
+    if (!shadow) {
+        result.relativeError = std::abs(expected.t - gpu.t) / std::max(1.0, std::abs(expected.t));
+        if (result.relativeError > tTolerance) return fail("nearest distance mismatch");
+    }
     if (gpu.slot >= impl_->instances.size()) return fail("instance slot out of range");
     const auto& instance = impl_->instances[gpu.slot];
     if (!(instance.mask & gpuRay.mask)) return fail("hit on masked/invalid instance");
@@ -339,7 +352,8 @@ RtHitCheck RtReference::check(const GPURtRay& gpuRay, const GPURtHit& gpu, const
     const double t = looseTriangle(impl_->local(ray, instance), impl_->position(tri.vertices[0]),
         impl_->position(tri.vertices[1]), impl_->position(tri.vertices[2]), baryTolerance, u, v);
     if (t < 0 || std::abs(t - gpu.t) > tTolerance * std::max(1.0, std::abs(t)))
-        return fail("named triangle does not contain the nearest hit");
+        return fail("named triangle does not contain the reported hit");
+    if (shadow) result.relativeError = std::abs(t - gpu.t) / std::max(1.0, std::abs(t));
     const auto named = impl_->candidate(gpu.slot, gpu.primitive, t, u, v, ray);
     if (!impl_->acceptFace(gpuRay, named) || (accept && !accept(gpuRay, named)))
         return fail("named triangle rejected by face/alpha rule");
@@ -347,7 +361,7 @@ RtHitCheck RtReference::check(const GPURtRay& gpuRay, const GPURtHit& gpu, const
     if (!std::isfinite(gpu.u) || !std::isfinite(gpu.v) ||
         std::abs(gpu.u - u) > baryTolerance || std::abs(gpu.v - v) > baryTolerance)
         return fail("barycentric mismatch");
-    result.edgeTie = gpu.slot != expected.slot || gpu.primitive != expected.primitive;
+    result.edgeTie = !shadow && (gpu.slot != expected.slot || gpu.primitive != expected.primitive);
     return result;
 }
 
