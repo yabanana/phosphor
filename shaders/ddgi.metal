@@ -125,7 +125,8 @@ kernel void ddgi_blend(constant GPUProbeGridParams& p [[buffer(0)]],
             if(!r.backface) sum+=float3(r.radiance[0],r.radiance[1],r.radiance[2])*max(0.0f,dot(n,float3(r.direction[0],r.direction[1],r.direction[2])));
         }
         float history=active && !p.reset && s.age>1u?p.hysteresis:0.0f;
-        float3 E=mix(sum*(4.0f*M_PI_F/float(p.raysPerProbe)),previousIrradiance.read(pixel).rgb,history);
+        float3 fresh=sum*(4.0f*M_PI_F/float(p.raysPerProbe));
+        float3 E=history>0.0f?mix(fresh,previousIrradiance.read(pixel).rgb,history):fresh;
         nextIrradiance.write(float4(E,active?1.0f:0.0f),pixel);
     }
     if(giTile(pixel,p.distanceTexels,p,probe,n)) {
@@ -137,7 +138,8 @@ kernel void ddgi_blend(constant GPUProbeGridParams& p [[buffer(0)]],
             float distance=max(0.0f,r.distance);sum+=float2(distance,distance*distance)*w;weights+=w;
         }
         float history=active && !p.reset && s.age>1u?p.hysteresis:0.0f;
-        float2 m=mix(weights>1e-20f?sum/weights:float2(0.0f),previousMoments.read(pixel).xy,history);
+        float2 fresh=weights>1e-20f?sum/weights:float2(0.0f);
+        float2 m=history>0.0f?mix(fresh,previousMoments.read(pixel).xy,history):fresh;
         nextMoments.write(float4(m,0.0f,active?1.0f:0.0f),pixel);
     }
 }

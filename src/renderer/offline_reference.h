@@ -17,6 +17,7 @@ struct ReferenceTexture {
 struct ReferenceCamera {
     float position[3]{}, direction[3]{0,0,-1}, up[3]{0,1,0};
     float fovYRadians = 1.04719755f, nearPlane = 0.1f, farPlane = 1000.f;
+    float jitterPixels[2]{}; // rendered projection jitter, +X right/+Y down
     u32 width = 1920, height = 1080;
 };
 // Mirrors F11 sampling semantics without making portable export depend on a

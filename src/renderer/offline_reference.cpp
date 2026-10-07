@@ -26,7 +26,7 @@ ReferenceExportResult fail(std::string why) {return {false,std::move(why),0,0,0}
 ReferenceExportResult validateReferenceScene(const OfflineReferenceScene& s) {
     const auto& c=s.camera;
     if(!c.width || !c.height || c.width>32768 || c.height>32768 || !finite(c.position,3)||!finite(c.direction,3)||
-       !finite(c.up,3)||norm2(c.direction)<1e-12f||norm2(c.up)<1e-12f ||
+       !finite(c.up,3)||!finite(c.jitterPixels,2)||norm2(c.direction)<1e-12f||norm2(c.up)<1e-12f ||
        !std::isfinite(c.fovYRadians)||c.fovYRadians<=0 || c.fovYRadians>=3.14159f ||
        !std::isfinite(c.nearPlane)||!std::isfinite(c.farPlane)||c.nearPlane<=0||c.farPlane<=c.nearPlane)
         return fail("invalid reference camera");
@@ -132,7 +132,9 @@ ReferenceExportResult exportOfflineReference(const OfflineReferenceScene& s,cons
        <<"\"camera\":{\"position\":";numberArray(out,s.camera.position,3);
     out<<",\"direction\":";numberArray(out,s.camera.direction,3);out<<",\"up\":";numberArray(out,s.camera.up,3);
     out<<",\"fov_y_radians\":"<<s.camera.fovYRadians<<",\"near\":"<<s.camera.nearPlane<<",\"far\":"<<s.camera.farPlane
-       <<",\"width\":"<<s.camera.width<<",\"height\":"<<s.camera.height<<"},\"sky\":";numberArray(out,s.skyRadiance,3);
+       <<",\"width\":"<<s.camera.width<<",\"height\":"<<s.camera.height<<",\"jitter_pixels\":";
+    numberArray(out,s.camera.jitterPixels,2);
+    out<<",\"projection\":\"perspective_reverse_z_infinite\"},\"sky\":";numberArray(out,s.skyRadiance,3);
     out<<",\"textures\":[";
     for(size_t k=0;k<s.textures.size();++k) {if(k) out<<',';const auto& t=s.textures[k];
         out<<"{\"id\":"<<t.index<<",\"width\":"<<t.width<<",\"height\":"<<t.height<<",\"rgb\":\"texture_"<<t.index
