@@ -31,7 +31,7 @@ struct GiPasses::Impl {
     MTL::Buffer *states=nullptr,*cache=nullptr;std::array<MTL::Buffer*,4> histories{};
     MTL::Texture *previousIrr=nullptr,*nextIrr=nullptr,*previousDist=nullptr,*nextDist=nullptr;
     u32 probeCount=0,rayCount=0,irrWidth=0,irrHeight=0,distWidth=0,distHeight=0;
-    u64 pixels=0,graphVersion=1,sceneRevision=1,materialRevision=1;u32 generation=1;struct Signal {u64 scene,geometry,materials,rtGeometry;u64 lights;bool operator==(const Signal&)const=default;};Signal lastSignal{~u64{0},0,0,0,0};
+    u64 pixels=0,graphVersion=1,sceneRevision=1,materialRevision=1;u32 geometryGeneration=1,radianceGeneration=1;struct GeometrySignal {u64 scene,geometry,rtGeometry;bool operator==(const GeometrySignal&)const=default;};GeometrySignal lastGeometry{~u64{0},0,0};struct Signal {u64 scene,geometry,materials,rtGeometry;u64 lights;bool operator==(const Signal&)const=default;};Signal lastSignal{~u64{0},0,0,0,0};
     bool atlasValid=false;HistoryRegistry history;
     rg::BufferRef stateRef{},cacheRef{},raysRef{},cacheCandidatesRef{},freshRef{},temporalRef{},spatialRef{},historyRef{};
     rg::TextureRef previousIrrRef{},nextIrrRef{},previousDistRef{},nextDistRef{},output{},referenceDiffuse{};
@@ -75,7 +75,7 @@ struct GiPasses::Impl {
         previousIrr=lighting::texture(c,irrWidth,irrHeight,MTL::PixelFormatRGBA32Float,"DDGI previous irradiance");nextIrr=lighting::texture(c,irrWidth,irrHeight,MTL::PixelFormatRGBA32Float,"DDGI next irradiance");
         previousDist=lighting::texture(c,distWidth,distHeight,MTL::PixelFormatRG32Float,"DDGI previous distance moments");nextDist=lighting::texture(c,distWidth,distHeight,MTL::PixelFormatRG32Float,"DDGI next distance moments");
         for(auto& f:slots){f.rays=lighting::buffer(c,rayCount*sizeof(GPUProbeRay),"DDGI radiance distance rays");f.cacheCandidates=lighting::buffer(c,rayCount*sizeof(GPUGiReservoir),"DDGI cache radiance candidates");}
-        atlasValid=false;++sceneRevision;++materialRevision;++generation;++graphVersion;lastSignal={~u64{0},0,0,0,0};for(u32 v=0;v<4;++v)history.invalidate(v,"GI scene load");
+        atlasValid=false;++sceneRevision;++materialRevision;++geometryGeneration;++radianceGeneration;++graphVersion;lastGeometry={~u64{0},0,0};lastSignal={~u64{0},0,0,0,0};for(u32 v=0;v<4;++v)history.invalidate(v,"GI scene load");
     }
     void reserve(u64 capacity){if(capacity<=pixels)return;for(u32 v=0;v<4;++v)history.invalidate(v,"GI allocation growth");pixels=capacity;for(auto& f:slots){for(auto* b:{f.fresh,f.temporal,f.spatial})c.memory().release(b,MemoryCategory::RayTracing);f.fresh=lighting::buffer(c,pixels*sizeof(GPUGiReservoir),"GI candidate reservoirs");f.temporal=lighting::buffer(c,pixels*sizeof(GPUGiReservoir),"GI temporal reservoirs");f.spatial=lighting::buffer(c,pixels*sizeof(GPUGiReservoir),"GI spatial reservoirs");}for(auto*& b:histories){c.memory().release(b,MemoryCategory::RayTracing);b=lighting::buffer(c,pixels*sizeof(GPUGiReservoir),"GI reservoir per view");}++graphVersion;}
     void prepare(const GpuScene& g,const SceneStore& s,std::span<const GPULight> lights,const ShadowPasses::Frame& f){
@@ -84,16 +84,18 @@ struct GiPasses::Impl {
         if(s.stats().structure||s.stats().fullInstances||!s.instanceDeltas().empty()||!s.motionSlots().empty()||!s.dirtyRoots().empty())++sceneRevision;
         if(s.stats().fullMaterials||!s.materialDeltas().empty())++materialRevision;
         const u64 allLightEpoch=lightingEpoch.update(lights,environment,direct.lightRevision());
+        const GeometrySignal geometry{f.scene,sceneRevision,rt.geometryRevision()};
+        if(!(geometry==lastGeometry)){++geometryGeneration;lastGeometry=geometry;}
         const Signal signal{f.scene,sceneRevision,materialRevision,rt.geometryRevision(),allLightEpoch};
-        if(!(signal==lastSignal)){++generation;lastSignal=signal;atlasValid=false;}
-        const auto decision=history.begin(f.view,{f.width,f.height,f.backingWidth,f.backingHeight},generation,f.cut,f.reset);
-        params=oracle->parameters(f.index,generation);params.width=f.width;params.height=f.height;
+        if(!(signal==lastSignal)){++radianceGeneration;lastSignal=signal;atlasValid=false;}
+        const auto decision=history.begin(f.view,{f.width,f.height,f.backingWidth,f.backingHeight},radianceGeneration,f.cut,f.reset);
+        params=oracle->parameters(f.index,geometryGeneration);params.width=f.width;params.height=f.height;
         params.slotCount=s.slotCapacity();params.meshCount=g.getMeshCount();params.materialCount=s.materials().size();params.lightCount=f.constants.lightCount;
         params.mode=options.gi==GiMode::DDGI?GI_MODE_DDGI:options.gi==GiMode::Cache?GI_MODE_CACHE:GI_MODE_RESTIR;
-        // Probe/cache reset is independent of view/camera history reset. Since
-        // the shader ABI uses one bit, a view cut may conservatively clear probes.
+        // Radiometric reset clears atlas/cache/history, while geometric
+        // generation alone owns classification and relocation offsets.
         params.reset=(!atlasValid||decision.reset)?1u:0u;
-        params.cacheCapacity=16384;params.cacheProbeLimit=8;params.cacheMaxAge=60;params.cacheGeneration=generation;
+        params.cacheCapacity=16384;params.cacheProbeLimit=8;params.cacheMaxAge=60;params.cacheGeneration=radianceGeneration;
         params.geometryRevision=sceneRevision;params.lightRevision=u32(allLightEpoch);params.materialRevision=materialRevision;
         params.viewRevision=(f.view<<28)|(u32(history.get(f.view).generation)&0x0fffffffu);
         extra={direct.lightCount(),std::min(256u,rayCount),rayCount,options.lightingSeed};extra.sunAngularRadius=environment.sunAngularRadius;
