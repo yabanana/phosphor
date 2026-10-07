@@ -36,12 +36,43 @@ TEST_CASE("F13 specular denoise rejects hit path distance and secondary reincarn
     auto normal=s;normal.shadingNormal[2]=-1;CHECK_FALSE(denoiseCompatible(normal,h,p,source));
 }
 TEST_CASE("F13 denoise clamp touches only history and AO remains bounded"){
-    DenoiseSettings settings;const auto p=denoiseParameters(settings,4,4,DENOISE_SIGNAL_AO,0,1,1,false);const auto s=receiver();
+    DenoiseSettings settings;settings.clampHistory=true;const auto p=denoiseParameters(settings,4,4,DENOISE_SIGNAL_AO,0,1,1,false);const auto s=receiver();
     auto old=denoiseTemporal(s,glm::vec3(1),{},p,{},{});const glm::vec3 raw(.1f);
     const auto clipped=denoiseTemporal(s,raw,old,p,glm::vec3(.08f),glm::vec3(.12f));CHECK(clipped.color[0]<=.12f);CHECK(raw==glm::vec3(.1f));
     CHECK(denoiseTemporal(s,glm::vec3(7),{},p,{},{}).color[0]==1);
     auto invalid=s;invalid.valid=0;CHECK_FALSE(denoiseTemporal(invalid,raw,old,p,{},{ }).valid);
     settings.maxHistory=0;CHECK_FALSE(validDenoiseSettings(settings));
+}
+TEST_CASE("F13 baseline temporal accumulation preserves independent Bernoulli energy"){
+    DenoiseSettings settings;REQUIRE_FALSE(settings.clampHistory);
+    const auto s=receiver();const auto metadata=spec();
+    for(u32 signal:{DENOISE_SIGNAL_DI,DENOISE_SIGNAL_GI,DENOISE_SIGNAL_SPECULAR,DENOISE_SIGNAL_AO}) {
+        const auto p=denoiseParameters(settings,4,4,signal,0,1,1,false);
+        REQUIRE_FALSE(p.flags&DENOISE_CLAMP_HISTORY);
+        for(const float visibility:{0.1f,0.5f,0.9f}) {
+            auto history=denoiseTemporal(s,glm::vec3(visibility),{},p,{},{},metadata);
+            history.length=settings.maxHistory;history.firstMoment=visibility;
+            history.secondMoment=visibility;history.variance=visibility*(1-visibility);
+            double mean=0,biasedMean=0,mass=0;
+            // Exact independent outcomes, no RNG, rendered images or fitted
+            // reference. The centre shares the eight neighbors' probability.
+            for(u32 bits=0;bits<512;++bits) {
+                double probability=1;
+                for(u32 k=0;k<9;++k)probability*=bits&(1u<<k)?visibility:1-visibility;
+                const glm::vec3 low(bits==511?1.0f:0.0f),high(bits==0?0.0f:1.0f),raw(float(bits&1u));
+                const auto next=denoiseTemporal(s,raw,history,p,low,high,metadata);
+                CHECK(next.valid);CHECK(next.length==settings.maxHistory);
+                mean+=probability*next.color[0];mass+=probability;
+                auto experimental=p;experimental.flags|=DENOISE_CLAMP_HISTORY;
+                biasedMean+=probability*denoiseTemporal(s,raw,history,experimental,low,high,metadata).color[0];
+            }
+            CHECK(mass==doctest::Approx(1).epsilon(1e-6));
+            CHECK(mean==doctest::Approx(visibility).epsilon(1e-6));
+            // Raw-extrema-only clipping already loses/gains this much. The
+            // shader's extra sigma bound cannot rescue this all-equal outcome.
+            if(visibility!=0.5f)CHECK(std::abs(biasedMean-visibility)>0.03);
+        }
+    }
 }
 TEST_CASE("F13 atrous edge weights preserve identity on constant signals and stop normal edges"){
     const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_DI,0,1,1,false);auto a=receiver(),b=a;

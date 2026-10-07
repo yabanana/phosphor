@@ -182,9 +182,17 @@ path, secondary slot/incarnation and world hit-distance disagreement. A camera
 cut/resize/DRS/scene change must invalidate every affected view/signal; pool
 growth replacing all view buffers invalidates ALL those histories.
 
-Temporal mean/moments accumulate with bounded alpha/history length. Short
-history uses a compatible3x3 local variance estimate; optional RGB clamp acts
-only on filtered history, never the raw light/reference buffer. Raw first/
+Temporal mean/moments accumulate with bounded alpha/history length. The
+baseline has `clampHistory=false`: a noisy raw neighborhood is not a bound on
+expected radiance or visibility. Exact enumeration of independent Bernoulli
+3x3 samples verifies temporal expectation preservation for DI/GI/SPECULAR/AO;
+the old raw-extrema clamp alone biases a steady p=0.1 signal downward by more
+than0.03 per update. Identity, geometry, light/material revisions and epochs
+still reject stale history. The optional RGB clamp is an explicitly biased
+experiment requiring its own energy/quality evidence, not a baseline repair
+for motion. Short history uses a compatible3x3 local variance estimate; a
+requested clamp acts only on filtered history, never the raw light/reference
+buffer. Raw first/
 second moments remain separate. à-trous uses5x5 B3 weights and independent
 stride1/2/4 outputs (maximum16), normal/depth/luminance/roughness/path edges;
 its final output is not feedback history. AO is clamped[0,1]. This is a
