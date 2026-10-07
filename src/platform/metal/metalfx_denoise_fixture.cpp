@@ -6,7 +6,9 @@
 #include "renderer/offline_reference.h"
 #include "renderer/history_registry.h"
 #include "rendergraph/pass_context.h"
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>

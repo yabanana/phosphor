@@ -29,8 +29,8 @@ kernel void fx_fixture_generate(constant GPUFXFixtureParams& p [[buffer(0)]],
     motion.write(float4(mv,0,0),xy);hit.write(float4(0),xy);reactive.write(float4(0),xy);strength.write(float4(0),xy);
 }
 struct FXDepthVertex {float4 position [[position]];};
-vertex FXDepthVertex fx_fixture_depth_vs(uint vertex [[vertex_id]]) {
-    float2 xy=vertex==0u?float2(-1,-1):vertex==1u?float2(3,-1):float2(-1,3);
+vertex FXDepthVertex fx_fixture_depth_vs(uint vertexId [[vertex_id]]) {
+    float2 xy=vertexId==0u?float2(-1,-1):vertexId==1u?float2(3,-1):float2(-1,3);
     return {float4(xy,0,1)};
 }
 // Legitimate Depth32 writer; never assume compute storage writes to depth format.
