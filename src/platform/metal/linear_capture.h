@@ -14,7 +14,8 @@ class MetalGraphExecutor;
 // F12 reference comparison readback. The source MUST be linear pre-exposure
 // HDR, before tonemapping/upscaling/UI. GPU float4 readback preserves values
 // from RGBA16Float or RGBA32Float; PFM writes only RGB, as linear float32.
-// Explicit scalar captures accept R16Float/R32Float and replicate R to RGB.
+// Explicit scalar captures accept R16Float/R32Float or the R channel of
+// RGBA16Float/RGBA32Float storage, and replicate R to RGB.
 // Scalar values retain their own units (e.g. dimensionless AO), never radiance.
 class LinearCapture {
   public:
