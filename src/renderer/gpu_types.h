@@ -639,4 +639,68 @@ struct GPULightClusterParams {
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPULightClusterParams) == 112, "GPULightClusterParams layout");
 
+// F12: experimental GI ABI. Linear RGB, metres, world geometric normals.
+// A changed generation/revision invalidates every cached/history value.
+PHOSPHOR_GPU_CONSTANT u32 GI_MODE_DDGI = 1u;
+PHOSPHOR_GPU_CONSTANT u32 GI_MODE_CACHE = 2u;
+PHOSPHOR_GPU_CONSTANT u32 GI_MODE_RESTIR = 3u;
+PHOSPHOR_GPU_CONSTANT u32 GI_PROBE_ACTIVE = 1u;
+PHOSPHOR_GPU_CONSTANT u32 GI_PROBE_INACTIVE = 2u;
+PHOSPHOR_GPU_CONSTANT u32 GI_SAMPLE_VALID = 1u;
+
+struct GPUProbeGridParams {
+    float origin[3], maxDistance;
+    float spacing[3], hysteresis;
+    u32 countX, countY, countZ, raysPerProbe;
+    u32 irradianceTexels, distanceTexels, frameIndex, generation;
+    float skyRadiance[3], normalBias;
+    u32 slotCount, meshCount, materialCount, lightCount;
+    float backfaceThreshold, minFrontDistance, relocationStep, maxRelocation;
+    u32 width, height, mode, reset;
+    u32 cacheCapacity, cacheProbeLimit, cacheMaxAge, cacheGeneration;
+    u32 geometryRevision, lightRevision, materialRevision, viewRevision;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeGridParams) == 160, "GPUProbeGridParams layout");
+
+struct GPUProbeState {
+    float offset[3]; u32 state;
+    float relocationTravel; u32 generation, age, pad;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeState) == 32, "GPUProbeState layout");
+struct GPUProbeRay {
+    float direction[3], distance; // negative distance = backface, miss = maxDistance
+    float radiance[3]; u32 backface;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeRay) == 32, "GPUProbeRay layout");
+
+// Full key comparison after hashing; RADIANCE along directionBin, not irradiance.
+// Single-writer resolve pass owns each table lane (no races/partially published RGB).
+struct GPURadianceCacheEntry {
+    u32 cellX, cellY, cellZ, normalBin;
+    u32 directionBin, generation, lastFrame, samples;
+    float radiance[3]; u32 state;
+    u32 geometryRevision, lightRevision, materialRevision, pad;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPURadianceCacheEntry) == 64, "GPURadianceCacheEntry layout");
+
+// F12 diffuse reconnection reservoir uses SECONDARY AREA measure. Fresnel/specular
+// paths are excluded explicitly. sourceProposalArea records the selected path's
+// original area density; it is diagnostic and is not substituted for W on reuse.
+struct GPUGiReservoir {
+    float position[3], proposalArea;
+    float normal[3], proposalSolidAngle;
+    float radiance[3], target;
+    float sourcePosition[3], sourceProposalArea;
+    float sourceNormal[3], W;
+    float weightSum; u32 M, age, flags;
+    u32 slot, instanceGeneration, geometryRevision, lightRevision;
+    u32 materialRevision, viewRevision, pad[2];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUGiReservoir) == 128, "GPUGiReservoir layout");
+
+struct GPUProbeTraceExtra {
+    u32 sampledLightCount, cacheUpdateCount, cacheCandidateCount, frameSeed;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeTraceExtra) == 16, "GPUProbeTraceExtra layout");
+
 } // namespace phosphor
