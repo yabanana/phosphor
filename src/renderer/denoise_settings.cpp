@@ -40,7 +40,9 @@ bool denoiseCompatible(const GPUDISurface& s,const GPUDenoiseHistory& h,const GP
 }
 GPUDenoiseHistory denoiseTemporal(const GPUDISurface& s,glm::vec3 current,const GPUDenoiseHistory& old,const GPUDenoiseParams& p,glm::vec3 low,glm::vec3 high,const GPUSpecularSample& spec,float neighborhoodVariance){
     GPUDenoiseHistory h{};h.signal=p.signal;h.viewID=p.viewID;h.historyEpoch=p.historyEpoch;h.signalRevision=p.signalRevision;
-    if(!s.valid||!finite(current))return h;current=glm::max(current,glm::vec3(0));if(p.signal==DENOISE_SIGNAL_AO)current=glm::clamp(current,glm::vec3(0),glm::vec3(1));
+    if(!s.valid)return h;
+    const auto rawNormal=signalNormal(s,p.signal);if(!finite(current)||!finite(rawNormal)||glm::dot(rawNormal,rawNormal)<=0){h.flags=1;return h;}
+    current=glm::max(current,glm::vec3(0));if(p.signal==DENOISE_SIGNAL_AO)current=glm::clamp(current,glm::vec3(0),glm::vec3(1));
     bool reuse=denoiseCompatible(s,old,p,spec);glm::vec3 previous=v3(old.color);
     if(reuse&&(p.flags&DENOISE_CLAMP_HISTORY)&&finite(low)&&finite(high))previous=glm::clamp(previous,glm::min(low,high),glm::max(low,high));
     const u32 count=reuse?std::min(old.length,p.maxHistory-1)+1:1;
@@ -53,7 +55,7 @@ GPUDenoiseHistory denoiseTemporal(const GPUDISurface& s,glm::vec3 current,const 
     for(u32 i=0;i<3;++i){h.color[i]=color[i];h.position[i]=s.position[i];h.normal[i]=n[i];}
     h.depth=s.depth;h.roughness=s.roughness;h.slot=s.instanceSlot;h.instanceGeneration=s.instanceGeneration;h.materialRevision=s.materialRevision;
     h.hitDistance=spec.hitDistance;h.path=spec.path;h.secondarySlot=spec.secondarySlot;h.secondaryGeneration=spec.secondaryGeneration;
-    h.valid=finite(color)&&std::isfinite(h.variance)&&finite(n);return h;
+    h.valid=finite(color)&&std::isfinite(h.variance)&&finite(n);if(!h.valid)h.flags=1;return h;
 }
 float denoiseSpatialWeight(const GPUDISurface& a,const GPUDISurface& b,float la,float lb,float variance,const GPUDenoiseParams& p){
     if(!a.valid||!b.valid||!std::isfinite(la)||!std::isfinite(lb)||!std::isfinite(variance)||variance<0)return 0;

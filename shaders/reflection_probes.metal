@@ -29,7 +29,7 @@ fragment float4 reflection_probe_capture_fs(ProbeVertexOut in [[stage_in]],bool 
     const float3 geometric=normalize(cross(dfdx(in.world),dfdy(in.world)));float3 t=in.tangent-n*dot(n,in.tangent);
     if(m.normalTex!=INVALID_TEXTURE_INDEX&&dot(t,t)>1e-8f){t=normalize(t);float3 tn=float3(half3(textures[m.normalTex].tex.sample(kGiMaterialSampler,in.uv,gradient2d(dx,dy)).rgb))*2-1;tn.xy*=m.normalScale;n=normalize(t*tn.x+cross(n,t)*in.handed*tn.y+n*tn.z);}
     const half4 mr=m.metallicRoughnessTex==INVALID_TEXTURE_INDEX?half4(1):half4(textures[m.metallicRoughnessTex].tex.sample(kGiMaterialSampler,in.uv,gradient2d(dx,dy)));
-    GPUDISurface s{};const float3 base=float3(m.baseColor[0],m.baseColor[1],m.baseColor[2])*float3(baseTex.rgb),v=normalize(diVec(p.capturePosition)-in.world);
+    GPUDISurface s{};const float3 base=float3(m.baseColor[0],m.baseColor[1],m.baseColor[2])*float3(baseTex.rgb),v=normalize(reflectionConstantVec(p.capturePosition)-in.world);
     for(uint c=0;c<3;++c){s.position[c]=in.world[c];s.geometricNormal[c]=geometric[c];s.shadingNormal[c]=n[c];s.albedo[c]=base[c];s.viewDirection[c]=v[c];}
     s.valid=1;s.roughness=clamp(m.roughness*float(mr.g),.04f,1.0f);s.metallic=saturate(m.metallic*float(mr.b));float3 result=0;
     for(uint i=0;i<p.lightCount;++i){GPULight light=lights[i];if(p.sampledLightCount&&light.type!=LIGHT_DIRECTIONAL)continue;DISample sample{};
@@ -43,7 +43,7 @@ fragment float4 reflection_probe_capture_fs(ProbeVertexOut in [[stage_in]],bool 
     for(uint i=0;i<p.sampledLightCount;++i)for(uint y=0;y<4;++y)for(uint x=0;x<4;++x){DISample sample=diSampleTexturedLight(sampled[i],i,(float2(x,y)+.5f)/4.0f,in.world,emitters,materials,textures);
         if(sample.valid&&sample.pdfArea>0)result+=diBRDF(s,sample)/(16*sample.pdfArea);}
     float3 emission=float3(m.emissive[0],m.emissive[1],m.emissive[2]);if(m.emissiveTex!=INVALID_TEXTURE_INDEX)emission*=float3(half3(textures[m.emissiveTex].tex.sample(kGiMaterialSampler,in.uv,gradient2d(dx,dy)).rgb));
-    result+=emission+diVec(p.environment)*base*(1-s.metallic);return float4(all(isfinite(result))?max(result,0.0f):float3(0),1);
+    result+=emission+reflectionConstantVec(p.environment)*base*(1-s.metallic);return float4(all(isfinite(result))?max(result,0.0f):float3(0),1);
 }
 
 inline float3 reflectionCubeDirection(uint face,float2 uv){const float2 p=uv*2-1;switch(face){case 0:return normalize(float3(1,-p.y,-p.x));case 1:return normalize(float3(-1,-p.y,p.x));case 2:return normalize(float3(p.x,1,p.y));case 3:return normalize(float3(p.x,-1,-p.y));case 4:return normalize(float3(p.x,-p.y,1));default:return normalize(float3(-p.x,-p.y,-1));}}
@@ -56,7 +56,8 @@ kernel void reflection_probe_prefilter(constant GPUProbeFilterParams& p [[buffer
     if(pixel.x>=p.side||pixel.y>=p.side||pixel.z>=6)return;const float3 n=reflectionCubeDirection(pixel.z,(float2(pixel.xy)+.5f)/float(p.side));float3 L=0;float weight=0;
     if(p.roughness<=0){L=raw.sample(kReflectionProbeSampler,n,p.cubeIndex,level(0)).rgb;weight=1;}
     else{const float3 t=reflectionTangent(n),b=cross(n,t);const float a=max(p.roughness*p.roughness,.002f),a2=a*a;
-        for(uint i=0;i<min(p.sampleCount,4096u);++i){float u=(float(i)+.5f)/float(p.sampleCount),v=reflectionRadicalInverse(i),c=sqrt((1-u)/(1+(a2-1)*u)),r=sqrt(max(0.0f,1-c*c)),phi=2*M_PI_F*v;
+        const uint count=clamp(p.sampleCount,1u,4096u);
+        for(uint i=0;i<count;++i){float u=(float(i)+.5f)/float(count),v=reflectionRadicalInverse(i),c=sqrt((1-u)/(1+(a2-1)*u)),r=sqrt(max(0.0f,1-c*c)),phi=2*M_PI_F*v;
             const float3 h=t*(r*cos(phi))+b*(r*sin(phi))+n*c,l=reflect(-n,h);const float nl=max(0.0f,dot(n,l));L+=raw.sample(kReflectionProbeSampler,l,p.cubeIndex,level(0)).rgb*nl;weight+=nl;}}
     filtered.write(float4(weight>0?L/weight:float3(0),1),pixel.xy,6*p.cubeIndex+pixel.z);
 }

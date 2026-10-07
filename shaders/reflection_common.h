@@ -4,6 +4,7 @@
 #include "surface_geometry.h"
 constexpr sampler kReflectionProbeSampler(filter::linear,mip_filter::linear,address::clamp_to_edge);
 inline float4x4 reflectionMatrix(constant float* m){return float4x4(float4(m[0],m[1],m[2],m[3]),float4(m[4],m[5],m[6],m[7]),float4(m[8],m[9],m[10],m[11]),float4(m[12],m[13],m[14],m[15]));}
+inline float3 reflectionConstantVec(constant float* p){return float3(p[0],p[1],p[2]);}
 inline float3 reflectionTangent(float3 n){return normalize(cross(abs(n.z)<.999f?float3(0,0,1):float3(0,1,0),n));}
 inline float3 reflectionSpecularBRDF(GPUDISurface s,float3 wi){
     float3 n=normalize(diVec(s.shadingNormal)),v=normalize(diVec(s.viewDirection));float nl=dot(n,wi),nv=dot(n,v);
@@ -41,8 +42,8 @@ inline float3 reflectionProbeRadiance(float3 point,float3 direction,float roughn
         if(reflectionProbeDirection(probe,point,direction,corrected,weight)){const float lod=prefiltered?roughness*max(probe.mipCount-1,0.0f):0;
             float3 L=atlas.sample(kReflectionProbeSampler,corrected,probe.cubeIndex,level(lod)).rgb;if(all(isfinite(L))&&all(L>=0)){sum+=L*weight;total+=weight;}}
     }
-    if(total>0){path=REFLECTION_PATH_PROBE;float coverage=saturate(total);return (sum/total)*coverage+diVec(p.environment)*(1-coverage);}
-    return diVec(p.environment);
+    if(total>0){path=REFLECTION_PATH_PROBE;float coverage=saturate(total);return (sum/total)*coverage+reflectionConstantVec(p.environment)*(1-coverage);}
+    return reflectionConstantVec(p.environment);
 }
 struct ReflectionSSRHit {uint pixel;float distance;float3 point;bool valid;};
 inline bool reflectionSSRPoint(float3 origin,float3 direction,float distance,constant GPUReflectionParams& p,
@@ -60,7 +61,8 @@ inline bool reflectionSSRPoint(float3 origin,float3 direction,float distance,con
 inline ReflectionSSRHit reflectionSSR(float3 origin,float3 direction,constant GPUReflectionParams& p,texture2d<float,access::read> depth){
     ReflectionSSRHit hit{};hit.pixel=~0u;float previous=0;bool front=false;
     if(!(p.flags&REFLECTION_ENABLE_SSR))return hit;
-    for(uint step=1;step<=min(p.ssrSteps,512u);++step){float f=float(step)/float(p.ssrSteps),distance=p.maxDistance*f*f,delta;
+    const uint count=clamp(p.ssrSteps,2u,512u);
+    for(uint step=1;step<=count;++step){float f=float(step)/float(count),distance=p.maxDistance*f*f,delta;
         ReflectionSSRHit candidate{};if(!reflectionSSRPoint(origin,direction,distance,p,depth,candidate,delta)){previous=distance;front=false;continue;}
         if(front&&delta>=0){float low=previous,high=distance;for(uint j=0;j<min(p.ssrBinarySteps,16u);++j){float m=(low+high)*.5f,md;ReflectionSSRHit mid;
             if(!reflectionSSRPoint(origin,direction,m,p,depth,mid,md)||md<0)low=m;else{high=m;candidate=mid;}}

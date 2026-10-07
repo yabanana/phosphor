@@ -109,9 +109,9 @@ kernel void reflection_capture_rt(constant GPUReflectionParams& p [[buffer(0)]],
     const device GPUProbeState* states [[buffer(15)]],constant GPUProbeTraceExtra& extra [[buffer(16)]],texture2d<float> irradiance [[texture(3)]],texture2d<float> moments [[texture(4)]],
     texture2d<float,access::write> output [[texture(5)]],uint tid [[thread_position_in_grid]]){
     if(tid>=p.width*p.height)return;const uint2 pixel(tid%p.width,tid/p.width);const float2 ndc=(float2(pixel)+.5f)*float2(2,-2)/float2(p.width,p.height)+float2(-1,1);
-    const float4 near=reflectionMatrix(p.inverseViewProjection)*float4(ndc,1,1);const float3 origin=diVec(p.cameraPosition),direction=normalize(near.xyz/near.w-origin);
+    const float4 near=reflectionMatrix(p.inverseViewProjection)*float4(ndc,1,1);const float3 origin=reflectionConstantVec(p.cameraPosition),direction=normalize(near.xyz/near.w-origin);
     GPURtRay ray{};ray.ox=origin.x;ray.oy=origin.y;ray.oz=origin.z;ray.dx=direction.x;ray.dy=direction.y;ray.dz=direction.z;ray.tmax=p.maxDistance;ray.mask=RT_MASK_INDIRECT;ray.type=RT_PROBE_DIFFUSE;
     RtPayload payload{};const auto hit=rtTrace(ray,as,ift,instances,p.slotCount,payload);uint seed=giHash(tid^p.seed);const float3 L=hit.hit?
-        reflectionSecondary(hit,direction,as,ift,p,instances,meshes,vertices,indices,materials,textures,lights,sampled,emitters,gi,states,extra,irradiance,moments,seed):diVec(p.environment);
+        reflectionSecondary(hit,direction,as,ift,p,instances,meshes,vertices,indices,materials,textures,lights,sampled,emitters,gi,states,extra,irradiance,moments,seed):reflectionConstantVec(p.environment);
     output.write(float4(L,1),pixel);
 }
