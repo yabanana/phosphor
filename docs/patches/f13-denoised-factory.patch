@@ -1,7 +1,7 @@
 --- a/src/platform/metal/pipeline_cache.h
 +++ b/src/platform/metal/pipeline_cache.h
 @@ -18,9 +18,11 @@
- 
+
  namespace MTLFX {
  class TemporalScalerDescriptor;
 +class TemporalDenoisedScalerDescriptor;
@@ -10,12 +10,12 @@
  class TemporalScaler;
 +class TemporalDenoisedScaler;
  }
- 
+
  namespace phosphor {
 @@ -126,6 +128,15 @@
      // render thread). The GPU must already be done with it.
      void retireTemporalScaler(std::shared_ptr<MTL4FX::TemporalScaler> scaler);
- 
+
 +#if defined(PHOSPHOR_METALFX_DENOISED_FACTORY) && PHOSPHOR_METALFX_DENOISED_FACTORY && !defined(PHOSPHOR_DISABLE_METALFX_DENOISED) && \
 +    __has_include(<MetalFX/MTL4FXTemporalDenoisedScaler.hpp>)
 +#define PHOSPHOR_METALFX_DENOISED_GATEWAY_AVAILABLE 1
@@ -26,7 +26,7 @@
 +#endif
 +
      std::future<std::shared_ptr<TemporalWorker>> requestTemporalWorker(std::shared_ptr<TemporalWorker> worker);
- 
+
      // --- F3.4 harvest -----------------------------------------------------------
 --- a/src/platform/metal/pipeline_cache.cpp
 +++ b/src/platform/metal/pipeline_cache.cpp
@@ -37,7 +37,7 @@
 +#ifdef PHOSPHOR_METALFX_DENOISED_GATEWAY_AVAILABLE
 +#include <MetalFX/MTL4FXTemporalDenoisedScaler.hpp>
 +#endif
- 
+
  #include "core/log.h"
  #include "core/profile.h"
 @@ -339,6 +342,36 @@
@@ -74,6 +74,6 @@
 +    });
 +}
 +#endif
- 
+
  std::future<std::shared_ptr<TemporalWorker>>
  PipelineCache::requestTemporalWorker(std::shared_ptr<TemporalWorker> worker) {
