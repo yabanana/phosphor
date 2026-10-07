@@ -67,6 +67,7 @@ class VisibilityRenderer {
     MeshRenderer &mesh_;
     bool binning_;
     bool lighting_ = false;
+    MTL::DepthStencilState* lightingFallbackDepth_ = nullptr;
     MTL::GPUAddress lightingAddress_ = 0;
     rg::TextureRef sun_, direct_, indirect_;
     bool tileResolve_ = false;
