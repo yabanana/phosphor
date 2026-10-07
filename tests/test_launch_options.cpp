@@ -1199,3 +1199,14 @@ TEST_CASE("F13 SDK automatic exposure stays inside the explicit wide-HDR fixture
     CHECK_FALSE(parse({"--frames","96","--denoised-fixture","wide-hdr","--denoised-fixture-output","sdk","--denoised-fixture-auto-exposure"},o,error));
     CHECK_FALSE(parse({"--frames","96","--denoised-fixture","constant","--denoised-fixture-output","sdk","--denoised-fixture-pre-exposed","--denoised-fixture-auto-exposure"},o,error));
 }
+
+TEST_CASE("F13 SDK analytic manual exposure is a fixture-only control") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--frames","96","--denoised-fixture","wide-hdr","--denoised-fixture-output","sdk","--denoised-fixture-pre-exposed"},o,error));
+    CHECK_FALSE(o.denoisedFixtureManualExposureControl);
+    REQUIRE(parse({"--frames","96","--denoised-fixture","wide-hdr","--denoised-fixture-output","sdk","--denoised-fixture-pre-exposed","--denoised-fixture-manual-exposure-control"},o,error));
+    CHECK(o.denoisedFixtureManualExposureControl);CHECK_FALSE(o.denoisedFixtureAutoExposure);CHECK(o.lightingDenoise==LightingDenoiseMode::Off);
+    CHECK_FALSE(parse({"--frames","96","--denoised-fixture-manual-exposure-control"},o,error));
+    CHECK_FALSE(parse({"--frames","96","--denoised-fixture","wide-hdr","--denoised-fixture-output","sdk","--denoised-fixture-manual-exposure-control"},o,error));
+    CHECK_FALSE(parse({"--frames","96","--denoised-fixture","wide-hdr","--denoised-fixture-output","sdk","--denoised-fixture-pre-exposed","--denoised-fixture-auto-exposure","--denoised-fixture-manual-exposure-control"},o,error));
+}

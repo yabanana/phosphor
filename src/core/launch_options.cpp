@@ -559,6 +559,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.denoisedFixturePreExposed=true;
         } else if (arg == "--denoised-fixture-auto-exposure") {
             out.denoisedFixtureAutoExposure=true;
+        } else if (arg == "--denoised-fixture-manual-exposure-control") {
+            out.denoisedFixtureManualExposureControl=true;
         } else if (arg == "--fog-homogeneous") {
             out.fogHomogeneous=true;
         } else if (arg == "--volume-oracle") {
@@ -1079,8 +1081,9 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
         error = "F10-F12 lighting requires --render-path visibility with generic/binned resolve and a scene"; return false;
     }
     if(!out.denoisedFixture.empty()&&(out.denoisedFixtureOutput.empty()||!out.benchmark()||out.temporalUpscale||out.atmosphere||out.fog||out.clouds||out.lightingDenoise!=LightingDenoiseMode::Off||out.reflections!=ReflectionMode::Off||out.ao!=AoMode::Off||!out.captureLinear.empty()||!out.captureLinearSequence.empty())){error="SDK fixture requires --frames and --denoised-fixture-output, with native post and exclusive fixture inputs";return false;}
-    if(out.denoisedFixture.empty()&&(!out.denoisedFixtureOutput.empty()||out.denoisedFixturePreExposed||out.denoisedFixtureAutoExposure||fixturePrewarmSpecified)){error="SDK fixture controls require --denoised-fixture";return false;}
+    if(out.denoisedFixture.empty()&&(!out.denoisedFixtureOutput.empty()||out.denoisedFixturePreExposed||out.denoisedFixtureAutoExposure||out.denoisedFixtureManualExposureControl||fixturePrewarmSpecified)){error="SDK fixture controls require --denoised-fixture";return false;}
     if(out.denoisedFixtureAutoExposure&&(out.denoisedFixture!="wide-hdr"||!out.denoisedFixturePreExposed)){error="Automatic SDK exposure experiment requires wide-hdr fixture and explicit pre-exposed policy";return false;}
+    if(out.denoisedFixtureManualExposureControl&&(out.denoisedFixture!="wide-hdr"||!out.denoisedFixturePreExposed||out.denoisedFixtureAutoExposure)){error="Manual SDK exposure control requires wide-hdr fixture, explicit pre-exposed policy and automatic exposure off";return false;}
     if((!out.volumeOracle.empty()||out.debugVolumeCorrupt) && (!(out.atmosphere||out.fog||out.clouds)||!out.debugLighting)){error="Volume oracle/corruption requires F14 and --debug-lighting N";return false;}
     if(out.fogHomogeneous&&(!out.fog||out.volumeOracle.empty())){error="Homogeneous fog requires --fog on and --volume-oracle";return false;}
     if(out.debugVolumeCorrupt==2&&(!out.fog&&(!out.clouds||out.cloudFullRate))){error="Volume history control requires fog or reconstructed clouds";return false;}

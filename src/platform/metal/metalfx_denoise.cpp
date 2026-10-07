@@ -147,7 +147,8 @@ struct MetalfxDenoise::Impl {
             metalfx_denoise::validExtent(frame.extent,minimumScale,maximumScale) &&
             finiteMatrix(frame.worldToView)&&finiteMatrix(frame.viewToClip) &&
             std::isfinite(frame.jitterPixels.x)&&std::isfinite(frame.jitterPixels.y) &&
-            std::isfinite(frame.preExposure)&&frame.preExposure>0;
+            std::isfinite(frame.preExposure)&&frame.preExposure>0 &&
+            std::isfinite(options.manualExposure)&&options.manualExposure>=0x1p-24f&&options.manualExposure<=65504.f;
     }
 #if PHOSPHOR_HAS_METALFX_DENOISED
     void request(View& v) {
@@ -333,7 +334,7 @@ struct MetalfxDenoise::Impl {
         }
         if(!pipelines.compute(packHandle)||!pipelines.compute(clearHandle)||!pipelines.compute(restoreHandle)){setStatus(Status::Pending,"Denoised guide-pack/restore pipelines pending");++stats.fallbackFrames;return;}
         setStatus(Status::Ready,"");
-        GPUMetalfxDenoisePackParams pp{frame.extent.inputWidth,frame.extent.inputHeight,flags(),0,1.0f,0.002f,frame.preExposure,0};
+        GPUMetalfxDenoisePackParams pp{frame.extent.inputWidth,frame.extent.inputHeight,flags(),0,options.manualExposure,0.002f,frame.preExposure,0};
         auto slice=context.frameUploads().allocate(sizeof(pp));std::memcpy(slice.cpu,&pp,sizeof(pp));packParamsAddress=slice.gpu;
         GPUMetalfxRestoreParams rp{frame.extent.outputWidth,frame.extent.outputHeight,1.0f/frame.preExposure,0};
         auto restore=context.frameUploads().allocate(sizeof(rp));std::memcpy(restore.cpu,&rp,sizeof(rp));restoreParamsAddress=restore.gpu;

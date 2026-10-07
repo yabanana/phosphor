@@ -4,7 +4,7 @@ import copy
 from pathlib import Path
 import unittest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"tools"))
-from metalfx_denoise_fixture_check import constant_oracle,impulse_oracle,guide_oracle,leaks_at_exit,frozen_prewarm_budget,make_cases,frozen_auto_exposure_experiment,exposure_mode_oracle
+from metalfx_denoise_fixture_check import constant_oracle,impulse_oracle,guide_oracle,leaks_at_exit,frozen_prewarm_budget,make_cases,frozen_auto_exposure_experiment,exposure_mode_oracle,frozen_manual_exposure_control,MANUAL_EXPOSURE_REQUESTED_FP32,MANUAL_EXPOSURE_R16
 
 class SDKOracleTests(unittest.TestCase):
     def test_constant_scalar_unit_hypotheses(self):
@@ -87,5 +87,44 @@ class SDKAutomaticExposureProtocolTests(unittest.TestCase):
         damaged=[31.98,.82,.5]
         self.assertFalse(constant_oracle(damaged,[v*64 for v in damaged],physical,1/64)["passed"])
         self.assertFalse(constant_oracle(sdk,sdk,physical,1/64)["passed"])
+
+class SDKManualExposureProtocolTests(unittest.TestCase):
+    def plan(self):
+        case=make_cases(Path("out"),96,"native",False,True)[0]
+        case["command"]=["phosphor","--frames","96","--denoised-fixture","wide-hdr",
+            "--denoised-fixture-pre-exposed","--denoised-fixture-manual-exposure-control"]
+        return {"gateway":"native","auto_exposure_experiment":False,"manual_exposure_control":True,"cases":[case]}
+    def test_exact_r16_quantization_and_one_parameter_experiment(self):
+        self.assertEqual(MANUAL_EXPOSURE_R16,23*2**-24)
+        self.assertAlmostEqual(MANUAL_EXPOSURE_REQUESTED_FP32,.5/368640,places=12)
+        self.assertEqual(MANUAL_EXPOSURE_R16*368640,.50537109375)
+        self.assertTrue(frozen_manual_exposure_control(self.plan()))
+        self.assertFalse(frozen_auto_exposure_experiment(self.plan()))
+        with self.assertRaises(ValueError):make_cases(Path("out"),96,"native",True,True)
+        for key,value in (("expected_manual_exposure_r16",0),("requested_manual_exposure_fp32",1),
+            ("physical_target",[.5,.25,.125]),("pre_exposure",1),("frames",192)):
+            bad=copy.deepcopy(self.plan());bad["cases"][0][key]=value
+            with self.assertRaises(ValueError):frozen_manual_exposure_control(bad)
+    def test_actual_manual_texel_must_be_read_back_and_not_flushed(self):
+        record={"auto_exposure_requested":False,"exposure_descriptor_configured":True,
+            "auto_exposure_enabled":False,"exposure_mode":"manual","provided_manual_exposure_texture_value":MANUAL_EXPOSURE_R16,
+            "manual_exposure_texture_ignored":False,"packed_exposure_is_provided_manual_value":True,
+            "manual_exposure_control":True,"requested_manual_exposure_fp32":MANUAL_EXPOSURE_REQUESTED_FP32,
+            "expected_manual_exposure_r16":MANUAL_EXPOSURE_R16,"actual_manual_exposure_readback":True,
+            "actual_provided_manual_exposure_texture_value":MANUAL_EXPOSURE_R16}
+        self.assertTrue(exposure_mode_oracle(record,False,True,True))
+        for key,value in (("actual_manual_exposure_readback",False),("actual_provided_manual_exposure_texture_value",0),
+            ("provided_manual_exposure_texture_value",MANUAL_EXPOSURE_REQUESTED_FP32),("manual_exposure_texture_ignored",True)):
+            with self.assertRaises(ValueError):exposure_mode_oracle({**record,key:value},False,True,True)
+    def test_gpu_input_texel_check_is_independent_of_metadata(self):
+        authored={"color":[368640,128,64],"normal":[0,0,1],"roughness":.5,"depth":.025,
+            "motion":[0,0],"diffuseR":.6,"specularR":.04,"exposure":1,"hitDistance":0,"reactive":0,"strength":0}
+        packed={**authored,"color":[5760,2,1],"exposure":MANUAL_EXPOSURE_R16}
+        record={"input_width":64,"input_height":64,"frame":8,"phase":0,"scenario":"wide-hdr","preExposure":1/64,
+            "input_samples":[dict(authored) for _ in range(4)],"packed_samples":[dict(packed) for _ in range(4)]}
+        self.assertTrue(guide_oracle(record,True))
+        for value in (0,1,MANUAL_EXPOSURE_REQUESTED_FP32):
+            bad=copy.deepcopy(record);bad["packed_samples"][2]["exposure"]=value
+            with self.assertRaises(ValueError):guide_oracle(bad,True)
 
 if __name__=="__main__":unittest.main()

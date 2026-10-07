@@ -25,6 +25,10 @@
 namespace phosphor {
 namespace {
 constexpr std::array<std::string_view,5> scenarios{"constant","impulse","channels","lifecycle","wide-hdr"};
+// Analytic camera exposure maps the physical red target to 0.5. The documented
+// R16Float exposure texture rounds this subnormal to 23 units of 2^-24.
+constexpr float WideManualExposure=.5f/368640.f;
+constexpr float WideManualExposureR16=23.f*0x1p-24f;
 enum Input : u32 { Color,Normal,Rough,Diffuse,Specular,Motion,Hit,Reactive,Strength,Depth,InputCount };
 constexpr std::array<rg::Format,InputCount> formats{rg::Format::RGBA32Float,rg::Format::RGBA16Float,rg::Format::R16Float,
     rg::Format::RGBA16Float,rg::Format::RGBA16Float,rg::Format::RG32Float,rg::Format::R32Float,rg::Format::R8Unorm,rg::Format::R8Unorm,rg::Format::Depth32Float};
@@ -72,6 +76,7 @@ struct MetalfxDenoiseFixture::Impl {
             throw std::invalid_argument("Invalid SDK fixture active views/prewarm budget");
         MetalfxDenoise::Options sdkOptions;sdkOptions.enabled=true;sdkOptions.views=options.activeViews;
         sdkOptions.autoExposure=options.autoExposure;
+        sdkOptions.manualExposure=options.manualExposureControl?WideManualExposure:1.f;
         sdkOptions.resizeSettleFrames=0; // controlled fixture extents; production keeps its async settling
         sdkOptions.reactiveMask=true;sdkOptions.specularHitDistance=false;sdkOptions.strengthMask=true;
         sdkOptions.sdkOutputScale=options.preExposedPolicy?MetalfxDenoise::Options::OutputScale::PreExposed:MetalfxDenoise::Options::OutputScale::Unverified;
@@ -87,15 +92,23 @@ struct MetalfxDenoiseFixture::Impl {
         }
         adapter.reset();for(auto& view:slots)for(auto& s:view){release(s);for(auto* t:{s.generate,s.depth,s.readback})if(t)t->release();}
         if(depthState)depthState->release();}
-    std::string exposureMetadata()const {
+    std::string exposureMetadata(const GPUFXFixtureSample* packedSamples=nullptr)const {
         const auto& stats=adapter->stats();std::ostringstream out;
         out<<",\"auto_exposure_requested\":"<<(options.autoExposure?"true":"false")
            <<",\"exposure_descriptor_configured\":"<<(stats.descriptorConfigured?"true":"false")
            <<",\"auto_exposure_enabled\":"<<(stats.autoExposureEnabled?"true":"false")
            <<",\"exposure_mode\":"<<quote(!stats.descriptorConfigured?"not-configured":stats.autoExposureEnabled?"sdk-auto":"manual")
-           <<",\"provided_manual_exposure_texture_value\":1,\"manual_exposure_texture_ignored\":"<<(stats.autoExposureEnabled?"true":"false")
+           <<",\"manual_exposure_control\":"<<(options.manualExposureControl?"true":"false")
+           <<",\"requested_manual_exposure_fp32\":"<<number(options.manualExposureControl?WideManualExposure:1.f)
+           <<",\"expected_manual_exposure_r16\":"<<number(options.manualExposureControl?WideManualExposureR16:1.f)
+           <<",\"provided_manual_exposure_texture_value\":"<<number(packedSamples?packedSamples[0].exposure:options.manualExposureControl?WideManualExposureR16:1.f)
+           <<",\"actual_manual_exposure_readback\":"<<(packedSamples?"true":"false")
+           <<",\"actual_provided_manual_exposure_texture_value\":"<<(packedSamples?number(packedSamples[0].exposure):"null")
+           <<",\"manual_exposure_texture_ignored\":"<<(stats.autoExposureEnabled?"true":"false")
            <<",\"packed_exposure_is_provided_manual_value\":true";
-        // packed_samples.exposure is read back from the supplied 1x1 texture.
+        // Before GPU readback, provided_manual_exposure_texture_value is the
+        // expected R16 value; actual_manual_exposure_readback explicitly says so.
+        // Per-frame packed_samples.exposure comes from the supplied 1x1 texture.
         // Auto exposure ignores it; the SDK internal exposure is not exposed.
         return out.str();
     }
@@ -254,7 +267,7 @@ struct MetalfxDenoiseFixture::Impl {
             if(t.scenario==FX_FIXTURE_CHANNELS)expectedColor=std::abs(int(x)-int(center))<=3?std::array<float,3>{.75f,.5f,.25f}:std::array<float,3>{.125f,.125f,.125f};
             for(u32 j=0;j<3;++j){if(packedSample)expectedColor[j]*=t.preExposure;
                 pass=pass&&std::isfinite(sample.color[j])&&std::abs(sample.color[j]-expectedColor[j])<=(packedSample?.001f:1e-6f)*std::max(1.f,std::abs(expectedColor[j]));}
-            if(packedSample)pass=pass&&sample.exposure==1&&sample.hitDistance==0&&sample.reactive==0&&sample.strength==0;
+            if(packedSample)pass=pass&&sample.exposure==(options.manualExposureControl?WideManualExposureR16:1.f)&&sample.hitDistance==0&&sample.reactive==0&&sample.strength==0;
         }
         return pass;
     }
@@ -287,7 +300,7 @@ struct MetalfxDenoiseFixture::Impl {
                 !writeLinearPfm(base.string()+"-physical.pfm",s.tag.outputWidth,s.tag.outputHeight,physicalImage,error))throw std::runtime_error(error);
             std::ofstream out(base.string()+".json");out<<std::setprecision(17);
             out<<"{\"schema\":\"phosphor.metalfx-fixture.v1\",\"kind\":\"f13-sdk\",\"actual_sdk_encoded\":true,\"frame\":"<<s.frame
-               <<",\"view\":"<<s.view<<",\"slot\":"<<index<<",\"scenario\":"<<quote(options.scenario)<<",\"preExposure\":"<<s.tag.preExposure<<exposureMetadata()
+               <<",\"view\":"<<s.view<<",\"slot\":"<<index<<",\"scenario\":"<<quote(options.scenario)<<",\"preExposure\":"<<s.tag.preExposure<<exposureMetadata(samples+4)
                <<",\"steady\":"<<(s.steady?"true":"false")<<",\"finite\":"<<(finite?"true":"false")<<",\"channels_passed\":"<<(channelPass?"true":"false")
                <<",\"requested_history_reset\":"<<(s.requestedReset?"true":"false")<<",\"requested_camera_cut\":"<<(s.requestedCut?"true":"false")
                <<",\"input_signal_epoch\":"<<s.inputSignalEpoch<<",\"source_signal_epoch\":"<<s.signalEpoch

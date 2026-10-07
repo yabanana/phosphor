@@ -31,6 +31,7 @@ public:
         bool enabled=false, reactiveMask=true, specularHitDistance=false, strengthMask=false;
         // Diagnostic fixture opt-in; production retains manual exposure.
         bool autoExposure=false;
+        float manualExposure=1.0f; // SDK exposure hint; does not alter color packing or output restoration
         OutputScale sdkOutputScale=OutputScale::Unverified;
         u32 views=1,resizeSettleFrames=4;
     };

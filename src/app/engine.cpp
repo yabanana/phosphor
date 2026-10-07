@@ -344,6 +344,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         if(!options_.denoisedFixture.empty()) {
             MetalfxDenoiseFixture::Options fixture{options_.denoisedFixture,options_.denoisedFixtureOutput,options_.denoisedFixturePreExposed,options_.temporalViews,options_.denoisedFixturePrewarmMs};
             fixture.autoExposure=options_.denoisedFixtureAutoExposure;
+            fixture.manualExposureControl=options_.denoisedFixtureManualExposureControl;
             denoisedFixture_=std::make_unique<MetalfxDenoiseFixture>(*context_,*pipelines_,std::move(factory),std::move(fixture));
         } else {
             denoised_=std::make_unique<MetalfxDenoise>(*context_,*pipelines_,config,std::move(factory));
