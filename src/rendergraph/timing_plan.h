@@ -45,6 +45,13 @@ struct TimedUnit {
     bool          fused         = false; // more than one pass in one render group
     std::vector<u32> passes;         // pass indices (RenderGraph::passes()) covered
     u64           dramBytes     = 0; // estimatePassBandwidth summed over `passes`
+    // Union of explicitly declared read/write stages of the covered passes.
+    // Resource kind and pass name do not imply a stage: tracing an AS at
+    // Dispatch stays Dispatch; an AS build/refit carries StageAccelerationStructure.
+    Stages        stages        = StageNone;
+    // External frameworks declare StageExternal (a union containing AS), but
+    // own their completion fence/dispatch. Only compute AS work needs this anchor.
+    bool          needsAccelerationStructureAnchor = false;
 };
 
 struct TimingPlan {

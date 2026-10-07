@@ -320,3 +320,121 @@ TEST_CASE("per-pass bandwidth: fused group charges load to first toucher and sto
     CHECK(per[f.overlay].writeBytes == u64(kW) * kH * 4);
     CHECK(per[f.overlay].readBytes == 0);
 }
+
+TEST_CASE("timing stages preserve AS build and refit without reclassifying compute units") {
+    RenderGraph graph;
+    auto structure = graph.importAccelerationStructure("typed AS", 4096, ImportContentsDefined | ImportOutput);
+    const auto vertices = graph.importBuffer("vertices", {4096}, ImportContentsDefined);
+    const auto control = graph.importBuffer("control", {4}, ImportContentsDefined);
+    auto result = graph.importBuffer("result", {128}, ImportOutput);
+    const u32 build = graph.addPass("not a stage hint", PassType::Compute, [&](PassBuilder& b) {
+        b.read(control, Usage::ShaderRead, StageDispatch);
+        b.read(vertices, Usage::ShaderRead, StageAccelerationStructure);
+        structure = b.write(structure, Usage::ShaderWrite, StageAccelerationStructure);
+    }, nullptr);
+    const u32 refit = graph.addPass("another arbitrary name", PassType::Compute, [&](PassBuilder& b) {
+        b.read(vertices, Usage::ShaderRead, StageAccelerationStructure);
+        b.read(structure, Usage::ShaderRead, StageAccelerationStructure);
+        structure = b.write(structure, Usage::ShaderWrite, StageAccelerationStructure);
+    }, nullptr);
+    const u32 trace = graph.addPass("RT TLAS misleading consumer name", PassType::Compute, [&](PassBuilder& b) {
+        b.read(structure, Usage::ShaderRead, StageDispatch);
+        result = b.write(result, Usage::ShaderWrite, StageDispatch);
+    }, nullptr);
+    const auto compiled = compile(graph);
+    REQUIRE(compiled.ok);
+    const auto plan = buildTimingPlan(graph, compiled, 1);
+    REQUIRE(plan.units.size() == 3);
+    CHECK(plan.units[0].passes == std::vector<u32>{build});
+    CHECK(plan.units[0].stages == (StageDispatch | StageAccelerationStructure));
+    CHECK(plan.units[0].needsAccelerationStructureAnchor);
+    CHECK(plan.units[1].passes == std::vector<u32>{refit});
+    CHECK(plan.units[1].stages == StageAccelerationStructure);
+    CHECK(plan.units[1].needsAccelerationStructureAnchor);
+    CHECK(plan.units[2].passes == std::vector<u32>{trace});
+    CHECK(plan.units[2].stages == StageDispatch); // Typed AS does not imply AS-stage work.
+    CHECK_FALSE(plan.units[2].needsAccelerationStructureAnchor);
+    for (const auto& unit : plan.units) {
+        CHECK(unit.kind == TimestampKind::ComputePassEnd);
+        CHECK(unit.encoder == 0);
+    }
+}
+
+TEST_CASE("timing stages include reads of an imported AS in a single compute unit") {
+    RenderGraph graph;
+    const auto source = graph.importAccelerationStructure("source", 4096, ImportContentsDefined);
+    auto destination = graph.importAccelerationStructure("destination", 2048, ImportOutput);
+    graph.addPass("Copy compact", PassType::Compute, [&](PassBuilder& b) {
+        b.read(source, Usage::ShaderRead, StageAccelerationStructure);
+        destination = b.write(destination, Usage::ShaderWrite, StageAccelerationStructure);
+    }, nullptr);
+    const auto compiled = compile(graph);
+    REQUIRE(compiled.ok);
+    const auto plan = buildTimingPlan(graph, compiled, 1);
+    REQUIRE(plan.units.size() == 1);
+    CHECK(plan.units[0].kind == TimestampKind::ComputeEnd);
+    CHECK(plan.units[0].stages == StageAccelerationStructure);
+    CHECK(plan.units[0].needsAccelerationStructureAnchor);
+}
+
+TEST_CASE("timing stages unite every fused raster member and exclude culled AS work") {
+    RenderGraph graph;
+    auto target = graph.importTexture("target", {Format::BGRA8Unorm,kW,kH}, ImportOutput);
+    const auto vertices = graph.importBuffer("vertices", {128}, ImportContentsDefined);
+    const auto meshlets = graph.importBuffer("meshlets", {128}, ImportContentsDefined);
+    auto unused = graph.importAccelerationStructure("unused AS", 2048, ImportContentsDefined);
+    const auto dead = graph.addPass("discarded AS", PassType::Compute, [&](PassBuilder& b) {
+        unused = b.write(unused, Usage::ShaderWrite, StageAccelerationStructure);
+    }, nullptr);
+    const auto forward = graph.addPass("Vertex draw", PassType::Raster, [&](PassBuilder& b) {
+        b.read(vertices, Usage::ShaderRead, StageVertex);
+        target = b.writeColor(target, 0, LoadIntent::Clear);
+    }, nullptr);
+    const auto overlay = graph.addPass("Mesh overlay", PassType::Raster, [&](PassBuilder& b) {
+        b.read(meshlets, Usage::ShaderRead, StageObject | StageMesh);
+        target = b.writeColor(target, 0, LoadIntent::Preserve);
+    }, nullptr);
+    const auto compiled = compile(graph);
+    REQUIRE(compiled.ok);
+    REQUIRE(compiled.culled[dead]);
+    const auto plan = buildTimingPlan(graph, compiled, 1);
+    REQUIRE(plan.units.size() == 1);
+    const auto& unit = plan.units[0];
+    CHECK(unit.fused);
+    CHECK(unit.passes == std::vector<u32>{forward,overlay});
+    CHECK(unit.kind == TimestampKind::RenderEnd);
+    CHECK(unit.stages == (StageVertex | StageObject | StageMesh | StageFragment));
+    CHECK((unit.stages & StageAccelerationStructure) == 0);
+    CHECK_FALSE(unit.needsAccelerationStructureAnchor);
+}
+
+TEST_CASE("timing stages do not infer GPU work from an encoder kind or name") {
+    RenderGraph graph;
+    graph.addPass("RT BLAS maintenance", PassType::Compute, [](PassBuilder& b) { b.setSideEffect(); }, nullptr);
+    const auto compiled = compile(graph);
+    REQUIRE(compiled.ok);
+    const auto plan = buildTimingPlan(graph, compiled, 1);
+    REQUIRE(plan.units.size() == 1);
+    CHECK(plan.units[0].kind == TimestampKind::ComputeEnd);
+    CHECK(plan.units[0].stages == StageNone);
+    CHECK_FALSE(plan.units[0].needsAccelerationStructureAnchor);
+}
+
+
+TEST_CASE("timing stages exclude external framework work from compute AS anchors") {
+    RenderGraph graph;
+    const auto input = graph.importTexture("framework input", {Format::RGBA16Float,kW,kH}, ImportContentsDefined);
+    auto output = graph.importTexture("framework output", {Format::RGBA16Float,kW,kH}, ImportOutput);
+    graph.addPass("MetalFX-style framework", PassType::External, [&](PassBuilder& b) {
+        b.read(input, Usage::ShaderRead, StageExternal);
+        output = b.write(output, Usage::ShaderWrite, StageExternal);
+    }, nullptr);
+    const auto compiled = compile(graph);
+    REQUIRE(compiled.ok);
+    const auto plan = buildTimingPlan(graph, compiled, 1);
+    REQUIRE(plan.units.size() == 1);
+    CHECK(plan.units[0].kind == TimestampKind::ComputeEnd);
+    CHECK(plan.units[0].stages == StageExternal);
+    CHECK((plan.units[0].stages & StageAccelerationStructure) != 0);
+    CHECK_FALSE(plan.units[0].needsAccelerationStructureAnchor);
+}
