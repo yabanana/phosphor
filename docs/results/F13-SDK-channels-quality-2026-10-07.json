@@ -1,0 +1,358 @@
+{
+  "schema": "phosphor.sdk-channels-quality.v1",
+  "state": "CPU_ANALYSIS_COMPLETE",
+  "passed": false,
+  "phase_accepted": false,
+  "production_policy_promoted": false,
+  "protocol_sha256": "037e952f7fd4b7ef6327b42f97c3b9e104211898537acf753d458d0e65e56353",
+  "provenance": {
+    "shader_generation": 0,
+    "source_sha": "276065e588677bc2786d8f26315d59fb1c59a0375ed8cba132402efa70b07903",
+    "binary_sha": "b340e0111329539153791f661ad80e876063d2f3acffb8a7b53ca65e6cd51618",
+    "manifest_sha": "a676efd901a93627c75794a7cef27c9b5e2078ae489804c4f6386bbccb994e47"
+  },
+  "control_sensitivity_passed": true,
+  "sdk_physical_max_absolute_difference": 0.0,
+  "scope": [
+    "One noiseless authored patch with abrupt static normal/roughness split; not general denoising quality.",
+    "Frame64 is unannounced source replacement with zero patch motion and no camera reset.",
+    "Native SDK edges may filter; bounded existing reconstruction support and original numeric caps are retained."
+  ],
+  "artifact_path": "build/f13-sdk-channels-quality-v1/analysis/result.json",
+  "artifact_sha256": "e8912e243d26bc35f1468f5822906bbcd6b6cf457000e6d11f209e7a0f346301",
+  "input_artifacts_count": 288,
+  "input_artifact_records_sha256": "7d3214507d23a2088d5a6b6ce88ffdf23db16056f4bc8512c02f9154aa90af57",
+  "sdk": {
+    "full-image": {
+      "metrics": {
+        "linear_rmse_p95": 0.015893792704408657,
+        "linear_rmse_max": 0.026169077791592298,
+        "residual_flicker_mean": 0.00045041653707071595,
+        "support_ghost_fraction_max": 0.3336249259748542,
+        "old_frame_attraction_max": 0.5707106698706268,
+        "signed_bias_mean": -3.451452142110577e-05,
+        "reference_change_energy": 773.28125,
+        "recovery_frames": {
+          "startup-reset": 0,
+          "host-reset48": 0,
+          "signal-replacement64-not-a-motion-vector-proof": 0
+        }
+      },
+      "checks": {
+        "spatial_p95": true,
+        "worst_frame": true,
+        "flicker": true,
+        "ghost_support": false,
+        "recovery": true,
+        "dynamic_sensitivity": true
+      },
+      "frames_rmse_exceeds_recovery_cap": [],
+      "frames_ghost_exceeds_cap": [
+        64
+      ]
+    },
+    "geometry-defined-swept-patch": {
+      "metrics": {
+        "linear_rmse_p95": 0.06907745825591902,
+        "linear_rmse_max": 0.11395308343536163,
+        "residual_flicker_mean": 0.00790813724690504,
+        "support_ghost_fraction_max": 0.3336249259748542,
+        "old_frame_attraction_max": 0.5707106698706268,
+        "signed_bias_mean": -0.0035355516258417665,
+        "reference_change_energy": 773.28125,
+        "recovery_frames": {
+          "startup-reset": 0,
+          "host-reset48": 0,
+          "signal-replacement64-not-a-motion-vector-proof": 8
+        }
+      },
+      "checks": {
+        "spatial_p95": false,
+        "worst_frame": true,
+        "flicker": true,
+        "ghost_support": false,
+        "recovery": false,
+        "dynamic_sensitivity": true
+      },
+      "frames_rmse_exceeds_recovery_cap": [
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71
+      ],
+      "frames_ghost_exceeds_cap": [
+        64
+      ]
+    }
+  },
+  "physical_matches_sdk_exactly": true,
+  "cpu_controls": {
+    "exact-positive": {
+      "passed": true,
+      "checks": {
+        "full-image": {
+          "spatial_p95": true,
+          "worst_frame": true,
+          "flicker": true,
+          "ghost_support": true,
+          "recovery": true,
+          "dynamic_sensitivity": true
+        },
+        "geometry-defined-swept-patch": {
+          "spatial_p95": true,
+          "worst_frame": true,
+          "flicker": true,
+          "ghost_support": true,
+          "recovery": true,
+          "dynamic_sensitivity": true
+        }
+      }
+    },
+    "constant-background-negative": {
+      "passed": false,
+      "checks": {
+        "full-image": {
+          "spatial_p95": true,
+          "worst_frame": true,
+          "flicker": true,
+          "ghost_support": false,
+          "recovery": true,
+          "dynamic_sensitivity": true
+        },
+        "geometry-defined-swept-patch": {
+          "spatial_p95": false,
+          "worst_frame": true,
+          "flicker": true,
+          "ghost_support": false,
+          "recovery": false,
+          "dynamic_sensitivity": true
+        }
+      }
+    },
+    "one-frame-lag-negative": {
+      "passed": false,
+      "checks": {
+        "full-image": {
+          "spatial_p95": true,
+          "worst_frame": true,
+          "flicker": true,
+          "ghost_support": false,
+          "recovery": true,
+          "dynamic_sensitivity": true
+        },
+        "geometry-defined-swept-patch": {
+          "spatial_p95": false,
+          "worst_frame": false,
+          "flicker": true,
+          "ghost_support": false,
+          "recovery": false,
+          "dynamic_sensitivity": true
+        }
+      }
+    },
+    "opposite-direction-negative": {
+      "passed": false,
+      "checks": {
+        "full-image": {
+          "spatial_p95": true,
+          "worst_frame": true,
+          "flicker": true,
+          "ghost_support": true,
+          "recovery": true,
+          "dynamic_sensitivity": true
+        },
+        "geometry-defined-swept-patch": {
+          "spatial_p95": false,
+          "worst_frame": false,
+          "flicker": true,
+          "ghost_support": true,
+          "recovery": false,
+          "dynamic_sensitivity": true
+        }
+      }
+    }
+  },
+  "selected_diagnostics": [
+    {
+      "frame": 0,
+      "authored_center": [
+        32,
+        48
+      ],
+      "patch_contrast_ratio_rgb": [
+        0.7175382653061225,
+        0.7220317814625848,
+        0.7299306441326531
+      ],
+      "positive_red_centroid": [
+        31.952135719223076,
+        47.75795945086083
+      ]
+    },
+    {
+      "frame": 8,
+      "authored_center": [
+        40,
+        48
+      ],
+      "patch_contrast_ratio_rgb": [
+        0.6007334183673467,
+        0.6023596938775512,
+        0.6046715561224489
+      ],
+      "positive_red_centroid": [
+        39.511200210536096,
+        47.78434499022143
+      ]
+    },
+    {
+      "frame": 32,
+      "authored_center": [
+        64,
+        48
+      ],
+      "patch_contrast_ratio_rgb": [
+        0.7869658801020408,
+        0.7910554846938775,
+        0.7974131058673469
+      ],
+      "positive_red_centroid": [
+        63.064392424996534,
+        47.87168430414243
+      ]
+    },
+    {
+      "frame": 48,
+      "authored_center": [
+        80,
+        48
+      ],
+      "patch_contrast_ratio_rgb": [
+        0.7643654336734694,
+        0.7751780399659861,
+        0.7948022959183674
+      ],
+      "positive_red_centroid": [
+        79.90770940059689,
+        47.99797316771572
+      ]
+    },
+    {
+      "frame": 63,
+      "authored_center": [
+        95,
+        48
+      ],
+      "patch_contrast_ratio_rgb": [
+        0.874139030612245,
+        0.8811251062925167,
+        0.8943120216836735
+      ],
+      "positive_red_centroid": [
+        94.67652492246157,
+        47.99591546192566
+      ]
+    },
+    {
+      "frame": 64,
+      "authored_center": [
+        32,
+        48
+      ],
+      "patch_contrast_ratio_rgb": [
+        0.046687659438775515,
+        0.055810214710884355,
+        0.08822943239795919
+      ],
+      "positive_red_centroid": [
+        81.87392886987806,
+        47.966035437587635
+      ]
+    },
+    {
+      "frame": 65,
+      "authored_center": [
+        33,
+        48
+      ],
+      "patch_contrast_ratio_rgb": [
+        0.13461017219387758,
+        0.14815848214285715,
+        0.1837531887755102
+      ],
+      "positive_red_centroid": [
+        51.118948824343015,
+        47.76457221892907
+      ]
+    },
+    {
+      "frame": 68,
+      "authored_center": [
+        36,
+        48
+      ],
+      "patch_contrast_ratio_rgb": [
+        0.40958625637755103,
+        0.41962957057823136,
+        0.43857621173469385
+      ],
+      "positive_red_centroid": [
+        38.166663226623186,
+        47.74545054249486
+      ]
+    },
+    {
+      "frame": 71,
+      "authored_center": [
+        39,
+        48
+      ],
+      "patch_contrast_ratio_rgb": [
+        0.5257732780612245,
+        0.5302003613945577,
+        0.5385243941326531
+      ],
+      "positive_red_centroid": [
+        39.32924186503234,
+        47.761571801036126
+      ]
+    },
+    {
+      "frame": 72,
+      "authored_center": [
+        40,
+        48
+      ],
+      "patch_contrast_ratio_rgb": [
+        0.5605707908163264,
+        0.5641475340136053,
+        0.5708506058673469
+      ],
+      "positive_red_centroid": [
+        40.01712668005478,
+        47.765309270816985
+      ]
+    },
+    {
+      "frame": 95,
+      "authored_center": [
+        63,
+        48
+      ],
+      "patch_contrast_ratio_rgb": [
+        0.7790417729591834,
+        0.7827912414965987,
+        0.7883051658163265
+      ],
+      "positive_red_centroid": [
+        62.03624132737363,
+        47.84769873457805
+      ]
+    }
+  ],
+  "note": "Every PFM frame0..95 included. No data-derived crop, temporal shift, intensity fit or exclusion; all failed limits retained."
+}
