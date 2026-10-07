@@ -37,7 +37,10 @@ def main():
             start=point+n*1e-5;delta=light-start;distance=np.linalg.norm(delta);block=intersect(triangles,start,delta/distance,distance-1e-5)
             bright[y,x]=(floor or back or left) and point[0]<-.1 and block is None
             dark[y,x]=(floor or back or right or wall_right) and point[0]>=.004 and block is not None and slots[block[0]]==wall[0]
-    masks={'bright_control':erode(bright,2),'dark_behind_wall':erode(dark,2)}
+    # Keep pixel-footprint differences away from visible surface boundaries,
+    # even where two adjacent surfaces belong to the same bright/dark region.
+    surface_interior=np.logical_or.reduce([erode(labels==slot,2) for slot in np.unique(labels) if slot>=0])
+    masks={'bright_control':erode(bright,2)&surface_interior,'dark_behind_wall':erode(dark,2)&surface_interior}
     counts={name:int(mask.sum()) for name,mask in masks.items()}
     for name,mask in masks.items():surface_counts[name]={str(slot):int(np.count_nonzero(mask&(labels==slot))) for slot in np.unique(labels[mask])}
     passed=all(n>=protocol['minimum_pixels_each_mask'] for n in counts.values())

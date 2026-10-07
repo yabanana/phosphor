@@ -58,7 +58,8 @@ Strumenti CPU aggiunti:
 - `tools/f12_fixture_regions.py`: consuma solo snapshot/PLY, individua per
   dimensioni il separatore10mm e la lampada, costruisce bright/dark senza leggere
   alcuna immagine candidata. In un test geometrico sintetico costruito dalle
-  dimensioni della fixture produce1125pixel bright e1158dark. Questa è verifica
+  dimensioni della fixture produce849pixel bright e830dark dopo erosione sia dei
+  label delle superfici sia delle maschere geometriche. Questa è verifica
   del programma, **non** coverage misurata sullo snapshot runtime ancora atteso.
 - `tools/f12_step_snapshot_check.py`: pretende i frame255/256, asset byte-identici,
   stessa camera/geometria/material response e sola emissione dimezzata, poi
@@ -67,3 +68,12 @@ Strumenti CPU aggiunti:
   generare qualsiasi riferimento. Non dimostra ancora la transizione GPU.
 - Il collector filtrato rifiuta capture raw al posto dell'ID8 e verifica la
   selezione `--lighting-denoise custom`; positive/negative metadata test PASS.
+
+- `tools/f12_recovery_compare.py`: misura ogni frame0..128 dopo il cambio,
+  riporta tutti i checkpoint e il primo PASS che rimane tale fino a128.
+  Al checkpoint128 richiede sia l'immagine istantanea sia la media trailing8
+  entro i gate fisici e residuo≤10%; la media non sostituisce il requisito
+  istantaneo. Il baseline224..255 deve già passare i gate fisici.
+  Test sintetico di cambio istantaneo esatto PASS aoffset0; negativi immagine
+  vecchia e immagine nera FAIL. Sono unit check dello strumento, non prove
+  di convergenza del renderer. Il report include gli hash dei protocolli.
