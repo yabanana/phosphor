@@ -34,11 +34,15 @@ actual custom/SDK output so the same raw signal cannot masquerade as filtering.
 
 The manifest covers RT/SSR/probes/off reflection, GTAO/RTAO/off AO, raw/custom/
 requested MetalFX, exact material/roughness and temporal cases, view counts/
-resize/reset, unshadowed probe capture with RT OFF, six-PFM cooked probe use,
+   resize/reset, internal unshadowed probe capture with RT OFF, external six-PFM cooked probe use,
 atmosphere zenith/horizon/space/time jump, fog, full-rate versus reconstructed
 clouds and all volumes moving. Actual schema10 lighting fields and LIGHTING
 check lines must agree with requested/effective controls. RT report absence is
 the documented not-instantiated schema10 state; a present report must agree.
+Internal capture uses --reflections probes --reflection-capture-probe with NO
+cooked input path, and must report actual-static-raster-unshadowed. It does NOT
+export PFMs. The separate cooked case requires tester-authored --probe-dir input
+with EXACT px/nx/py/ny/pz/nz.pfm names and64x64 faces; no surrogate is generated.
 Missing factory must identify factory/gateway and select custom. Native SDK
 selection alone does not certify its output units/lifetime/gateway ownership.
 
@@ -64,13 +68,21 @@ Simpson/Gauss/exact-clock numbers. Nonfinite/missing/stale samples fail.
 Missing references remain PENDING. Remaining unimplemented negative/numerical
 hooks are listed in every plan/report, never replaced with fake run commands.
 
-Real remaining tester/root hooks:
+Supported frozen negative commands now include --debug-reflection-corrupt
+history/motion/normal, --debug-lighting-corrupt pdf/light/overflow in ReSTIR DI,
+and --debug-volume-corrupt units/history/light/lut with their actual required
+paths. Expected raw renderer exit AND EXIT marker are1, plus positive actual
+LIGHTING failure counts/FAIL lines; a GPU crash/validation error cannot pass.
+--debug-history-corrupt is the legacy F8 pose overwrite and safe F13 rejection
+stimulus (requires --debug-visibility); --debug-motion-scale affects ordinary F8
+temporal only. Neither is mislabeled as a guaranteed F13 nonzero-exit control.
 
-- F13 foreign-view/history/normal/motion corruption CLI/readbacks.
-- F14 stale/omitted LUT and foreign cloud/fog history controls.
+Real remaining tester/root evidence:
+
 - Same-frame LUT readback against independent quadrature.
-- Actual homogeneous fog configuration heightFalloff0 and source/sigma/distance
-  readback; ordinary --fog on alone is NOT that analytic fixture.
+- --volume-oracle emits authored readback data; --fog-homogeneous explicitly
+  requests heightFalloff0 and the correct homogeneous source/sigma/distance.
+  Numeric comparison remains pending until actual bridge data is consumed.
 - Solar disk wide-HDR orientation/scalar probe and actual SDK preExposure
   output-unit/constant/impulse/lifetime fixtures after the owned gateway change.
 

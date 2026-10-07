@@ -26,8 +26,6 @@ CHECK=re.compile(r"LIGHTING check frame (\d+)\s*\|\s*(PASS|FAIL)")
 THRESHOLDS={"linear_rmse_p95_max":0.06,"linear_rmse_max":0.15,"residual_flicker_mean_max":0.02,
             "support_ghost_fraction_max":0.25,"recovery_frames_max":4,"recovery_linear_rmse":0.06}
 MISSING_CONTROLS=[
-    "F13 foreign-view/normal/motion/history corruption CLI and independent raw-state oracle",
-    "F14 omitted/stale LUT update and invalid cloud-history corruption CLI",
     "F14 GPU LUT readback versus independent adaptive-Simpson/Gauss reference",
     "F14 homogeneous-fog parameter/readback export and exact Beer-Lambert comparison",
     "native denoised SDK scalar/impulse output-unit and lifetime proof after owner/tester gateway reconciliation",
@@ -63,16 +61,16 @@ def enforce_gates(config):
             if roi["thresholds"][field]>limit:raise ValueError(f"cannot relax retained {field} gate")
 
 
-def make_cases(out,frames,sdk_policy):
+def make_cases(out,frames,sdk_policy,probe_dir=None):
     cases=[]
     def add(name,phase,scene,flags,**extra):
         cases.append({"name":name,"phase":phase,"scene":scene,"flags":flags,"state":"NOT_EXECUTED",**extra})
     base_rt=["--rt","on","--shadows","rt","--lighting","brute","--gi","ddgi"]
     no_rt=["--rt","off","--shadows","off","--lighting","legacy","--gi","off"]
     add("probe-capture-unshadowed","F13","probe-parallax",
-        [*no_rt,"--reflections","off","--ao","off","--lighting-denoise","off","--reflection-capture-probe",
-         "--reflection-probe",str(out/"cooked-probe")],probe_capture=True,
-        expected={"reflections":"off","ao":"off","denoise_requested":"off","denoise_effective":"off"})
+        [*no_rt,"--reflections","probes","--ao","off","--lighting-denoise","off","--reflection-capture-probe"],probe_capture=True,
+        expected={"reflections":"probes","ao":"off","denoise_requested":"off","denoise_effective":"off",
+                  "probe_source":"actual-static-raster-unshadowed"})
     for scene in ("mirror","roughness","moving-light","disocclusion"):
         for variant,denoise,samples in (("raw","off",1),("custom","custom",1),("rt8-control","off",8)):
             name=f"{scene}-{variant}"
@@ -84,8 +82,9 @@ def make_cases(out,frames,sdk_policy):
     add("mirror-ssr","F13","mirror",[ *no_rt,"--reflections","ssr","--ao","off","--lighting-denoise","custom"],
         expected={"reflections":"ssr","ao":"off","denoise_requested":"custom","denoise_effective":"custom"})
     add("probe-parallax-cooked","F13","probe-parallax",[ *no_rt,"--reflections","probes","--ao","off","--lighting-denoise","custom",
-         "--reflection-probe",str(out/"cooked-probe")],needs_probe=True,
-        expected={"reflections":"probes","ao":"off","denoise_requested":"custom","denoise_effective":"custom"})
+         "--reflection-probe",str(probe_dir or out/"EXTERNAL-COOKED-PROBE-REQUIRED")],needs_probe=True,
+        probe_input=str(probe_dir) if probe_dir else None,
+        expected={"reflections":"probes","ao":"off","denoise_requested":"custom","denoise_effective":"custom","probe_source":"cooked-linear-pfm"})
     for ao in ("gtao","rtao"):
         add("ao-cavity-"+ao,"F13","ao-cavity",[*(base_rt if ao=="rtao" else no_rt),
             "--reflections","off","--ao",ao,"--ao-radius","1.0","--lighting-denoise","custom"],
@@ -101,6 +100,16 @@ def make_cases(out,frames,sdk_policy):
         add("lifecycle-views"+str(views),"F13","disocclusion",[ *base_rt,"--reflections","rt","--ao","rtao",
             "--lighting-denoise","custom","--temporal-views",str(views),"--resize-every","90","--history-reset-every","60"],
             capture=False,expected={"reflections":"rt","ao":"rtao","denoise_requested":"custom","denoise_effective":"custom"})
+    for corruption in ("history","motion","normal"):
+        add("negative-f13-"+corruption,"F13","disocclusion",[ *base_rt,"--reflections","rt","--ao","rtao",
+            "--lighting-denoise","custom","--debug-reflection-corrupt",corruption],
+            capture=False,expected_exit=1,expected_failure_domain="lighting",
+            expected={"reflections":"rt","ao":"rtao","denoise_requested":"custom","denoise_effective":"custom"})
+    for corruption in ("pdf","light","overflow"):
+        add("negative-lighting-"+corruption,"F13","moving-light",[ "--rt","on","--shadows","rt","--lighting","restir",
+            "--gi","ddgi","--reflections","rt","--ao","rtao","--lighting-denoise","custom",
+            "--debug-lighting-corrupt",corruption],capture=False,expected_exit=1,expected_failure_domain="lighting",
+            expected={"reflections":"rt","ao":"rtao","denoise_requested":"custom","denoise_effective":"custom"})
     volume_base=[ *base_rt,"--reflections","rt","--ao","rtao","--lighting-denoise","custom"]
     for name,hour,height in (("atmo-zenith",12,2),("atmo-horizon",6.05,2),("atmo-space",12,150000)):
         add(name,"F14","mirror",[ *volume_base,"--atmosphere","on","--fog","off","--clouds","off",
@@ -112,8 +121,7 @@ def make_cases(out,frames,sdk_policy):
          expected={"atmosphere":True,"fog":False,"clouds":False,"cloud_full_rate":False},numerical_oracle="sun-clock-history")
     add("fog-homogeneous-oracle","F14","ao-cavity",[ *volume_base,"--atmosphere","on","--fog","on","--clouds","off"],
         expected={"atmosphere":True,"fog":True,"clouds":False,"cloud_full_rate":False},
-        numerical_oracle="fog-homogeneous",
-        pending_hook="Force heightFalloff0 and export same-frame sigma/source/distance/T/Lo; ordinary --fog on alone is not a homogeneous fixture")
+        numerical_oracle="fog-homogeneous")
     for variant in ("full","reconstructed"):
         add("clouds-"+variant,"F14","disocclusion",[ *volume_base,"--atmosphere","on","--fog","off","--clouds","on",
             "--day-length","1200","--start-hour","11","--planet-camera-height","2000",
@@ -124,6 +132,10 @@ def make_cases(out,frames,sdk_policy):
     add("all-volumes-moving","F14","moving-light",[ *volume_base,"--atmosphere","on","--fog","on","--clouds","on",
          "--day-length","16","--start-hour","5","--time-jump-every","60"],
          expected={"atmosphere":True,"fog":True,"clouds":True,"cloud_full_rate":False},roi_scale=25)
+    for corruption in ("units","history","light","lut"):
+        add("negative-f14-"+corruption,"F14","disocclusion",[ *volume_base,"--atmosphere","on","--fog","on","--clouds","on",
+            "--debug-volume-corrupt",corruption],capture=False,expected_exit=1,expected_failure_domain="lighting",
+            expected={"atmosphere":True,"fog":True,"clouds":True,"cloud_full_rate":False})
     for case in cases:
         for flag,field in (("--reflections","reflections"),("--ao","ao"),("--lighting-denoise","denoise_requested"),
                            ("--gi","gi"),("--lighting","direct"),("--shadows","shadows")):
@@ -132,6 +144,10 @@ def make_cases(out,frames,sdk_policy):
                 if field=="denoise_requested" and value!="metalfx":case["expected"]["denoise_effective"]=value
         case["rt_expected"]=case["flags"][case["flags"].index("--rt")+1]=="on"
         folder=out/case["name"];case["report"]=str(folder/"renderer.json");case["log"]=str(folder/"renderer.log")
+        case["expected_exit"]=case.get("expected_exit",0)
+        if case.get("numerical_oracle"):
+            case["volume_oracle"]=str(folder/"volume-oracle");case["flags"]+=["--volume-oracle",case["volume_oracle"]]
+            if case["numerical_oracle"]=="fog-homogeneous":case["flags"]+=["--fog-homogeneous"]
         case["linear"]=str(folder/"linear");case["signal"]=case.get("signal","hdr")
         case["roi"]=default_roi(case["scene"],frames)
         if case.get("roi_scale"):
@@ -141,7 +157,8 @@ def make_cases(out,frames,sdk_policy):
 
 def evaluate(case,status,log,report):
     errors=list(status.get("failures",[]))
-    if status.get("returncode")!=0 or status.get("exit_marker")!=0:errors.append("raw process/EXIT marker did not succeed")
+    expected_exit=case.get("expected_exit",0)
+    if status.get("returncode")!=expected_exit or status.get("exit_marker")!=expected_exit:errors.append("raw process/EXIT marker differs from frozen expected exit")
     if status.get("timed_out") or GPU_ERROR.search(log):errors.append("timeout or GPU/API/shader validation failure")
     schema=report.get("schema_version") if isinstance(report,dict) else None
     if not numeric(schema) or schema<10:errors.append("schema10 renderer report missing")
@@ -151,9 +168,13 @@ def evaluate(case,status,log,report):
     rt_enabled=rt.get("enabled") if isinstance(report,dict) and "rt" in report else False
     if rt_enabled is not case.get("rt_expected"):errors.append("actual RT enabled state differs from frozen baseline")
     if not numeric(lighting.get("checks")) or lighting.get("checks",0)<=0:errors.append("lighting checker executed zero/missing checks")
-    if lighting.get("failures")!=0:errors.append("lighting checker reported failures")
+    if expected_exit==0 and lighting.get("failures")!=0:errors.append("lighting checker reported failures")
+    if expected_exit!=0 and (not numeric(lighting.get("failures")) or lighting.get("failures",0)<=0):
+        errors.append("negative did not produce a real checker failure")
     lines=list(CHECK.finditer(log))
-    if not lines or any(m[2]!="PASS" for m in lines):errors.append("missing/failed actual LIGHTING readback lines")
+    if not lines:errors.append("missing actual LIGHTING readback lines")
+    elif expected_exit==0 and any(m[2]!="PASS" for m in lines):errors.append("positive LIGHTING readback failed")
+    elif expected_exit!=0 and not any(m[2]=="FAIL" for m in lines):errors.append("negative never failed an actual LIGHTING readback")
     for field,value in case.get("expected",{}).items():
         if lighting.get(field)!=value:errors.append(f"effective/requested lighting.{field} mismatch")
     if case.get("sdk_policy")=="fallback":
@@ -170,12 +191,13 @@ def evaluate(case,status,log,report):
 
 def validate_probe(folder):
     # Directory is a cooked six-face PFM corpus. No synthetic substitution.
+    expected={"px.pfm","nx.pfm","py.pfm","ny.pfm","pz.pfm","nz.pfm"}
     faces=list(Path(folder).glob("*.pfm"))
-    if len(faces)!=6:raise ValueError("cooked probe must contain exactly six PFM faces")
+    if {p.name for p in faces}!=expected:raise ValueError("external cooked probe requires exact px/nx/py/ny/pz/nz PFM faces")
     dimensions=None
     for face in sorted(faces):
         image=read_pfm(face)
-        if image.width!=image.height:raise ValueError("probe face is not square")
+        if image.width!=64 or image.height!=64:raise ValueError("external cooked probe faces must be exactly 64x64")
         shape=(image.width,image.height)
         if dimensions and shape!=dimensions:raise ValueError("probe faces have different exact extents")
         dimensions=shape
@@ -235,11 +257,12 @@ def main(argv=None):
     parser.add_argument("--frames",type=int,default=300);parser.add_argument("--resolution",default="640x360")
     parser.add_argument("--sdk-policy",choices=["fallback","native"],default="fallback")
     parser.add_argument("--roi-config",type=Path);parser.add_argument("--references",type=Path);parser.add_argument("--numeric-evidence",type=Path)
+    parser.add_argument("--probe-dir",type=Path,help="external authored cooked six-PFM input; internal capture does not export files")
     parser.add_argument("--timeout",type=float,default=300);parser.add_argument("--gpu-lock",type=Path,default=Path("/tmp/phosphor-gpu-verification.lock"))
     args=parser.parse_args(argv)
     if args.frames<2 or not re.fullmatch(r"[1-9]\d*x[1-9]\d*",args.resolution):parser.error("positive resolution and >=2 frames required")
     out=args.out.resolve();out.mkdir(parents=True,exist_ok=True)
-    cases=make_cases(out,args.frames,args.sdk_policy)
+    cases=make_cases(out,args.frames,args.sdk_policy,args.probe_dir.resolve() if args.probe_dir else None)
     if args.only:cases=[c for c in cases if any(fnmatch.fnmatch(c["name"],pattern) for pattern in args.only)]
     if not cases:parser.error("--only selected no cases")
     roi_overrides=json.loads(args.roi_config.read_text()) if args.roi_config else {}
@@ -256,6 +279,8 @@ def main(argv=None):
               "created_utc":datetime.now(timezone.utc).isoformat(),"frames":args.frames,"resolution":args.resolution,
               "thresholds":THRESHOLDS,"cases":cases,"missing_controls":MISSING_CONTROLS,
               "existing_F8_gates_required_unchanged":"tools/testdata/temporal_thresholds.json",
+              "legacy_control_scope":{"debug-history-corrupt":"F8 pose history and safe F13 rejection stimulus; requires --debug-visibility",
+                  "debug-motion-scale":"ordinary F8 temporal reconstruction only; native-upscaler linear F13 captures do not exercise it"},
               "independent_reference_required":True,"native_gateway_owner_tester_only":True,
               "binary_sha256":sha(args.binary) if args.binary.is_file() else None}
     manifest_path=args.manifest.resolve() if args.manifest else out/"frozen-manifest.json"
@@ -295,19 +320,18 @@ def main(argv=None):
             for case in cases:
                 if sha(args.binary)!=binary_hash:raise RuntimeError("binary changed between corpus cases")
                 if case.get("needs_probe"):
-                    try:validate_probe(out/"cooked-probe")
+                    try:
+                        if not case.get("probe_input"):raise ValueError("--probe-dir external input was not supplied")
+                        validate_probe(case["probe_input"])
                     except (ValueError,OSError) as error:
                         results.append({"name":case["name"],"state":"NOT_EXECUTED","functional_passed":False,
                             "errors":["cooked probe prerequisite failed: "+str(error)],"phase_accepted":False})
                         continue
-                status=run_checked(case["command"],Path(case["log"]),timeout=args.timeout,env=env)
+                status=run_checked(case["command"],Path(case["log"]),expected=case.get("expected_exit",0),timeout=args.timeout,env=env)
                 log=Path(case["log"]).read_text(errors="replace")
                 try:report=json.loads(Path(case["report"]).read_text())
                 except (OSError,ValueError):report=None
                 result=evaluate(case,status,log,report);result.update(name=case["name"],state="EXECUTED",phase_accepted=False)
-                if case.get("probe_capture"):
-                    try:result["probe"]=validate_probe(out/"cooked-probe")
-                    except (ValueError,OSError) as error:result["errors"].append(str(error));result["functional_passed"]=False
                 if case.get("capture",True) and not case.get("probe_capture"):
                     try:
                         captures=sorted(Path(case["linear"]).glob("frame-*.pfm"))
