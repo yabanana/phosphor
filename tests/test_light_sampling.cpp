@@ -366,7 +366,7 @@ TEST_CASE("F11 cluster sphere culling preserves known interior receiver") {
     CHECK_THROWS_AS(clusters.rebuild({}, invalid), std::invalid_argument);
 }
 
-TEST_CASE("F11 generated STBN ranks are reproducible independent permutations with declared periods") {
+TEST_CASE("F11 generated STBN ranks preserve spatial wrapping and decorrelate temporal blocks") {
     di::StbnConfig config;
     config.width = config.height = 4; config.frames = 8; config.dimensions = 4;
     const auto mask = di::generateStbn(config), again = di::generateStbn(config);
@@ -379,7 +379,8 @@ TEST_CASE("F11 generated STBN ranks are reproducible independent permutations wi
         for (u32 i = 0; i < count; ++i) CHECK(ranks[i] == i);
     }
     CHECK_FALSE(std::equal(mask.ranks.begin(), mask.ranks.begin() + count, mask.ranks.begin() + count));
-    CHECK(mask.sample(1, 2, 3, 0) == mask.sample(5, 6, 11, 0));
+    CHECK(mask.sample(1, 2, 3, 0) == mask.sample(5, 6, 3, 0));
+    CHECK(mask.sample(1, 2, 3, 0) != mask.sample(5, 6, 11, 0));
     for (u32 t = 0; t < config.frames; ++t) for (u32 y = 0; y < config.height; ++y) for (u32 x = 0; x < config.width; ++x) {
         const float value = mask.sample(x, y, t, 0);
         CHECK(value >= 0); CHECK(value < 1);

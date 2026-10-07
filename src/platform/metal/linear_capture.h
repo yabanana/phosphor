@@ -11,8 +11,9 @@
 namespace phosphor {
 class MetalGraphExecutor;
 
-// F12 reference comparison readback. The source MUST be linear pre-exposure
-// HDR, before tonemapping/upscaling/UI. GPU float4 readback preserves values
+// F10/F12 reference comparison readback. The source is a linear signal before
+// tonemapping/upscaling/UI: radiance or dimensionless shadow visibility in R.
+// GPU float4 readback preserves values
 // from RGBA16Float or RGBA32Float; PFM writes only RGB, as linear float32.
 class LinearCapture {
   public:

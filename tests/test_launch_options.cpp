@@ -1106,3 +1106,12 @@ TEST_CASE("F12 linear capture and exact-frame export validate their signal") {
     CHECK(o.captureLinearSignal==1);CHECK(o.lightingScene=="thin-walls");
     CHECK_FALSE(parse({"--bench","5","--lighting-scene","thin-walls"},o,e));
 }
+
+TEST_CASE("F10 raw shadow capture requires an enabled shadow producer") {
+    LaunchOptions o;std::string error;
+    CHECK_FALSE(parse({"--render-path","visibility","--capture-linear-signal","shadow"},o,error));
+    REQUIRE(parse({"--render-path","visibility","--shadows","csm","--capture-linear-signal","shadow"},o,error));
+    CHECK(o.captureLinearSignal==3);
+    REQUIRE(parse({"--render-path","visibility","--shadows","rt","--rt","on","--capture-linear-signal","shadow"},o,error));
+    CHECK(o.captureLinearSignal==3);
+}

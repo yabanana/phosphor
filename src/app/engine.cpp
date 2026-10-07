@@ -2091,7 +2091,8 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
             }
             visibility_->addResolve(frameGraph_, color, shadows_?shadows_->depth():depth);
             if(linearCapture_)linearCapture_->addToGraph(frameGraph_,options_.captureLinearSignal==1?gi_->referenceDiffuse():
-                                                       options_.captureLinearSignal==2?directLighting_->direct():visibility_->color());
+                                                       options_.captureLinearSignal==2?directLighting_->direct():
+                                                       options_.captureLinearSignal==3?shadows_->mask():visibility_->color());
             color = post_ ? post_->addToGraph(frameGraph_, *visibility_, drawableRef_, graphKey_.outputFormat)
                           : visibility_->addPresent(frameGraph_, drawableRef_);
             visibility_->addChecks(frameGraph_);

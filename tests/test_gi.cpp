@@ -217,7 +217,7 @@ TEST_CASE("F12 zero-proposal history preserves the IID two-sample Bernoulli mean
     CHECK(oldMean==doctest::Approx(0.625)); // negative old discard-zero-source rule
     GPUGiReservoir zero{};auto candidate=secondary();candidate.flags|=GI_PROPOSAL_VALID;
     giAddCandidate(zero,candidate,0,1,0);giFinalize(zero);
-    CHECK_FALSE(zero.flags&GI_SAMPLE_VALID);CHECK(zero.flags&GI_PROPOSAL_VALID);CHECK(zero.W==0);
+    CHECK((zero.flags&GI_SAMPLE_VALID)==0);CHECK((zero.flags&GI_PROPOSAL_VALID)!=0);CHECK(zero.W==0);
     GPUProbeGridParams p{};GiReceiver x;
     CHECK(giHistoryCompatible(zero,p,x,0.1f));
     ++p.viewRevision;CHECK_FALSE(giHistoryCompatible(zero,p,x,0.1f));
