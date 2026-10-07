@@ -32,7 +32,7 @@ enum Binding : NS::UInteger {
     BindLights = 4,
     BindTextures = 5,
     BindVisible = FORWARD_BIND_VISIBLE,
-    BindCount = 9,
+    BindCount = 10,
 };
 
 constexpr u32 kQueues = SCENE_MAX_LEVELS - 1;
@@ -41,6 +41,7 @@ MTL4::ArgumentTable* newTable(MTL::Device* device, u32 bindings, const char* lab
     NS::Error* error = nullptr;
     MTL4::ArgumentTableDescriptor* d = MTL4::ArgumentTableDescriptor::alloc()->init();
     d->setMaxBufferBindCount(bindings);
+    d->setMaxTextureBindCount(3);
     d->setLabel(str(label));
     MTL4::ArgumentTable* t = device->newArgumentTable(d, &error);
     d->release();
@@ -378,6 +379,12 @@ void SceneRenderer::addPassesToGraph(rg::RenderGraph& graph, GpuDrivenMode mode,
         [this](PassContext& ctx) { encodeDrawBuild(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder())); });
 }
 
+void SceneRenderer::setLightingInputs(MTL::GPUAddress params, MTL::Texture* sun, MTL::Texture* local, MTL::Texture* gi) {
+    arguments_->setAddress(params, 9);
+    arguments_->setTexture(sun->gpuResourceID(), 0);
+    arguments_->setTexture(local->gpuResourceID(), 1);
+    arguments_->setTexture(gi->gpuResourceID(), 2);
+}
 void SceneRenderer::setTemporalInputs(MTL::GPUAddress previousInstances, MTL::GPUAddress temporalParams) {
     arguments_->setAddress(previousInstances, 7);
     arguments_->setAddress(temporalParams, 8);
@@ -556,8 +563,8 @@ void SceneRenderer::encode(MTL4::RenderCommandEncoder* enc, u32 chunk, u32 chunk
     encodeForward(enc, pipeline_, depthState_, chunk, chunks, 1 + std::min(chunk, kMaxChunks - 1));
 }
 
-void SceneRenderer::encodeOverlay(MTL4::RenderCommandEncoder* enc, pipe::PipelineHandle pipeline, bool depthTest) const {
-    encodeForward(enc, pipelines_.render(pipeline), depthTest ? depthState_ : nullptr, 0, 1, 0);
+void SceneRenderer::encodeOverlay(MTL4::RenderCommandEncoder* enc, pipe::PipelineHandle pipeline, bool depthTest, MTL::DepthStencilState* depthOverride) const {
+    encodeForward(enc, pipelines_.render(pipeline), depthTest ? (depthOverride ? depthOverride : depthState_) : nullptr, 0, 1, 0);
 }
 
 void SceneRenderer::encodeForward(MTL4::RenderCommandEncoder* enc, MTL::RenderPipelineState* pipeline,

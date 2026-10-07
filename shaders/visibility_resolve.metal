@@ -86,7 +86,9 @@ static void resolveVisibilityPixel(constant FrameConstants &frame, const device 
                                    texture2d<float, access::write> color, texture2d<float, access::write> normal,
                                    texture2d<float, access::write> diffuse, texture2d<float, access::write> specular,
                                    texture2d<float, access::write> motion, texture2d<float, access::write> reactive,
-                                   uint2 pixel, uint id, bool reuse, thread ShadingResult &cached) {
+                                   uint2 pixel, uint id, bool reuse, thread ShadingResult &cached,
+                                   float sunVisibility = 1.0f, uint sunIndex = ~0u, bool replaceLocal = false,
+                                   float3 localDirect = float3(0), bool useGI = false, float3 irradiance = float3(0)) {
     if (pixel.x >= p.width || pixel.y >= p.height)
         return;
     if (id == VISIBILITY_BACKGROUND || visibilityCluster(id) >= 2u * p.candidateCapacity)
@@ -135,7 +137,8 @@ static void resolveVisibilityPixel(constant FrameConstants &frame, const device 
     surface.mirrored = (instance.flags & INSTANCE_FLAG_MIRRORED) != 0;
     const float3 eye = float3(frame.cameraPosition[0], frame.cameraPosition[1], frame.cameraPosition[2]);
     surface.frontFacing = dot(cross(w1.xyz - w0.xyz, w2.xyz - w0.xyz), eye - surface.worldPos) > 0;
-    const ShadingResult value = reuse ? cached : shadeSurface(surface, frame, materials, lights, textures, false);
+    const ShadingResult value = reuse ? cached : shadeSurface(surface, frame, materials, lights, textures, false,
+                                                              sunVisibility, sunIndex, replaceLocal, localDirect, useGI, irradiance);
     cached = value;
     color.write(float4(p.debugMode == 1   ? value.normal * 0.5f + 0.5f
                        : p.debugMode == 2 ? value.baseColor
@@ -191,6 +194,38 @@ kernel void visibility_resolve(
     resolveVisibilityPixel(frame, vertices, instances, materials, lights, textures, meshlets, meshletVertices,
                            triangles, a, b, p, previousInstances, temporal, color, normal, diffuse, specular, motion,
                            reactive, pixel, id, false, cached);
+}
+kernel void visibility_lit_resolve(
+    constant FrameConstants &frame [[buffer(0)]], const device GPUVertex *vertices [[buffer(1)]],
+    const device GPUInstance *instances [[buffer(2)]], const device GPUMaterial *materials [[buffer(3)]],
+    const device GPULight *lights [[buffer(4)]], const device TextureHandle *textures [[buffer(5)]],
+    const device GPUMeshlet *meshlets [[buffer(6)]], const device uint *meshletVertices [[buffer(7)]],
+    const device uchar *triangles [[buffer(8)]], const device GPUMeshletCandidate *a [[buffer(9)]],
+    const device GPUMeshletCandidate *b [[buffer(10)]], constant GPUVisibilityParams &p [[buffer(11)]],
+    const device uint *bins [[buffer(12)]], const device GPUInstance *previousInstances [[buffer(14)]],
+    constant GPUTemporalParams &temporal [[buffer(15)]], texture2d<uint, access::read> visibility [[texture(0)]],
+    texture2d<float, access::write> color [[texture(1)]], texture2d<float, access::write> normal [[texture(2)]],
+    texture2d<float, access::write> diffuse [[texture(3)]], texture2d<float, access::write> specular [[texture(4)]],
+    texture2d<float, access::write> motion [[texture(5)]], texture2d<float, access::write> reactive [[texture(6)]],
+    constant GPUResolveLightingParams& lighting [[buffer(17)]],
+    texture2d<float, access::read> sun [[texture(7)]],
+    texture2d<float, access::read> localDirect [[texture(8)]],
+    texture2d<float, access::read> irradiance [[texture(9)]],
+    uint2 tile [[threadgroup_position_in_grid]], uint2 local [[thread_position_in_threadgroup]]) {
+    uint index = tile.y * p.tilesX + tile.x;
+    if (kResolveClass < 4u)
+        index = bins[kResolveClass * p.tilesX * p.tilesY + tile.x];
+    const uint2 pixel = uint2(index % p.tilesX, index / p.tilesX) * VISIBILITY_TILE + local;
+    if (pixel.x >= p.width || pixel.y >= p.height)
+        return;
+    const uint id = visibility.read(pixel).x;
+    ShadingResult cached{};
+    resolveVisibilityPixel(frame, vertices, instances, materials, lights, textures, meshlets, meshletVertices,
+                           triangles, a, b, p, previousInstances, temporal, color, normal, diffuse, specular, motion,
+                           reactive, pixel, id, false, cached,
+                           (lighting.flags & 1u) ? sun.read(pixel).x : 1.0f, lighting.sunIndex,
+                           (lighting.flags & 2u) != 0, (lighting.flags & 2u) ? localDirect.read(pixel).xyz : float3(0),
+                           (lighting.flags & 4u) != 0, (lighting.flags & 4u) ? irradiance.read(pixel).xyz : float3(0));
 }
 kernel void visibility_adaptive(
     constant FrameConstants &frame [[buffer(0)]], const device GPUVertex *vertices [[buffer(1)]],

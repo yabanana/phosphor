@@ -27,14 +27,14 @@ constexpr std::array<const char *, 6> kNames = {
     "Linear HDR", "Signed normal + roughness", "Diffuse albedo", "Specular albedo", "Motion pixels", "Reactive mask"};
 } // namespace
 VisibilityRenderer::VisibilityRenderer(MetalContext &c, PipelineCache &p, SceneRenderer &s, MeshRenderer &m,
-                                       bool binning, bool checks, bool tileResolve, bool adaptive)
+                                       bool binning, bool checks, bool tileResolve, bool adaptive, bool lighting)
     : context_(c), pipelines_(p), scene_(s), mesh_(m), binning_(binning && !tileResolve && !adaptive),
-      tileResolve_(tileResolve), adaptive_(adaptive), checks_(checks) {
+      tileResolve_(tileResolve), adaptive_(adaptive), checks_(checks), lighting_(lighting) {
     if (tileResolve && adaptive)
         throw std::invalid_argument("Tile and adaptive shading are separate experiments");
     clear_ = p.request(compute("visibility_clear"));
     classify_ = p.request(compute("visibility_classify"));
-    generic_ = p.request(compute("visibility_resolve"));
+    generic_ = p.request(compute(lighting_ ? "visibility_lit_resolve" : "visibility_resolve"));
     if (adaptive_ || p.harvesting()) {
         adaptivePipeline_ = p.request(compute("visibility_adaptive"));
         saveHistory_ = p.request(compute("visibility_history"));
@@ -46,7 +46,7 @@ VisibilityRenderer::VisibilityRenderer(MetalContext &c, PipelineCache &p, SceneR
         tile_ = p.request(d);
     }
     for (u32 i = 0; i < VISIBILITY_CLASSES; ++i) {
-        auto d = compute("visibility_resolve");
+        auto d = compute(lighting_ ? "visibility_lit_resolve" : "visibility_resolve");
         d.constant(21, pipe::ConstantType::UInt, i);
         resolve_[i] = p.request(d);
     }
@@ -59,14 +59,14 @@ VisibilityRenderer::VisibilityRenderer(MetalContext &c, PipelineCache &p, SceneR
     d = pipe::forward::genericDesc(rg::Format::RGBA16Float);
     d.label = "Visibility indexed overflow fallback";
     d.functions[0] = "forward_surface_vs";
-    d.functions[1] = "forward_surface_fs";
+    d.functions[1] = lighting_ ? "forward_surface_lit_fs" : "forward_surface_fs";
     for (u32 i = 0; i < kFormats.size(); ++i)
         d.output(i, kFormats[i]);
     fallback_ = p.request(d);
     for (auto &table : tables_) {
         auto *desc = MTL4::ArgumentTableDescriptor::alloc()->init();
-        desc->setMaxBufferBindCount(17);
-        desc->setMaxTextureBindCount(7);
+        desc->setMaxBufferBindCount(18);
+        desc->setMaxTextureBindCount(10);
         NS::Error *error = nullptr;
         table = c.device()->newArgumentTable(desc, &error);
         desc->release();
@@ -183,6 +183,13 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
     std::memcpy(upload.cpu, &params_, sizeof(params_));
     paramsAddress_ = upload.gpu;
 }
+void VisibilityRenderer::prepareLighting(u32 flags, u32 sunIndex) {
+    const GPUResolveLightingParams p{flags, sunIndex, params_.width, params_.height};
+    auto u = context_.frameUploads().allocate(sizeof p); std::memcpy(u.cpu, &p, sizeof p); lightingAddress_ = u.gpu;
+}
+void VisibilityRenderer::setLightingTextures(rg::TextureRef sun, rg::TextureRef direct, rg::TextureRef gi) {
+    sun_ = sun; direct_ = direct; indirect_ = gi;
+}
 void VisibilityRenderer::bind(rg::PassContext &ctx, MTL4::ArgumentTable *table) {
     table->setAddress(scene_.frameConstantsAddress(), 0);
     table->setAddress(scene_.vertexBuffer()->gpuAddress(), 1);
@@ -198,6 +205,12 @@ void VisibilityRenderer::bind(rg::PassContext &ctx, MTL4::ArgumentTable *table) 
     table->setAddress(previousInstances_[view_]->gpuAddress(), 14);
     table->setAddress(temporalAddress_, 15);
     table->setAddress(paramsAddress_, 11);
+    if (lighting_) {
+        table->setAddress(lightingAddress_, 17);
+        table->setTexture(static_cast<MTL::Texture*>(ctx.texture(sun_))->gpuResourceID(), 7);
+        table->setTexture(static_cast<MTL::Texture*>(ctx.texture(direct_))->gpuResourceID(), 8);
+        table->setTexture(static_cast<MTL::Texture*>(ctx.texture(indirect_))->gpuResourceID(), 9);
+    }
     if (adaptive_)
         table->setAddress(shadingHistory_[view_]->gpuAddress(), 16);
     table->setAddress(frames_[slot_].tiles->gpuAddress(), 12);
@@ -206,11 +219,19 @@ void VisibilityRenderer::bind(rg::PassContext &ctx, MTL4::ArgumentTable *table) 
     for (u32 i = 0; i < outputs_.size(); ++i)
         table->setTexture(static_cast<MTL::Texture *>(ctx.texture(outputs_[i]))->gpuResourceID(), i + 1);
 }
+rg::BufferRef VisibilityRenderer::importPoseHistory(rg::RenderGraph& graph) {
+    // The caller imports before receiver guides; addResolve reuses this exact
+    // ref, rather than creating a second logical resource for the same memory.
+    if (!poses_.valid() || poses_.resource >= graph.resources().size() ||
+        graph.resources()[poses_.resource].name != "Previous instance poses")
+        poses_ = graph.importBuffer("Previous instance poses", {poseCapacity_}, rg::ImportContentsDefined | rg::ImportOutput);
+    return poses_;
+}
 rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::TextureRef visibility, rg::TextureRef depth) {
     using namespace rg;
     visibility_ = visibility;
     depth_ = depth;
-    poses_ = graph.importBuffer("Previous instance poses", {poseCapacity_}, ImportContentsDefined | ImportOutput);
+    importPoseHistory(graph);
     if (temporal_.debugFlags & 8u)
         graph.addPass(
             "Negative control: current poses as history", PassType::Blit,
@@ -307,7 +328,8 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
                     b.read(output, Usage::ShaderRead, StageDispatch);
                     output = b.write(output, Usage::ShaderWrite, StageDispatch);
                 }
-                b.setProfileShaders("visibility_resolve");
+                if (lighting_) for (auto ref : {sun_, direct_, indirect_}) b.read(ref, Usage::ShaderRead, StageDispatch);
+                b.setProfileShaders(lighting_ ? "visibility_lit_resolve" : "visibility_resolve");
             },
             [this](PassContext &ctx) {
                 auto *enc = static_cast<MTL4::ComputeCommandEncoder *>(ctx.encoder());
@@ -338,9 +360,13 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
             depth_ = b.writeDepth(depth_, LoadIntent::Preserve);
             scene_.declareDrawReads(b);
             b.read(poses_, Usage::ShaderRead, StageVertex);
-            b.setProfileShaders("forward_vs,forward_surface_fs");
+            if (lighting_) for (auto ref : {sun_, direct_, indirect_}) b.read(ref, Usage::ShaderRead, StageFragment);
+            b.setProfileShaders(lighting_ ? "forward_surface_vs,forward_surface_lit_fs" : "forward_vs,forward_surface_fs");
         },
         [this](PassContext &ctx) {
+            if (lighting_) scene_.setLightingInputs(lightingAddress_, static_cast<MTL::Texture*>(ctx.texture(sun_)),
+                                                     static_cast<MTL::Texture*>(ctx.texture(direct_)),
+                                                     static_cast<MTL::Texture*>(ctx.texture(indirect_)));
             scene_.encodeOverlay(static_cast<MTL4::RenderCommandEncoder *>(ctx.encoder()), fallback_, true);
         });
     return outputs_[0];

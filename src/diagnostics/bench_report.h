@@ -198,7 +198,16 @@ struct RtReport {
     float proxyShadowErrorPct = 0, proxyPrimaryErrorPct = 0, proxyDt95 = 0, proxyAcnePct = 0; // dt95: cm
     TimingSummary tlasUpdateMs, probeMs, probeNsPerRay;
 };
-constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 9;
+// F10-F12 opt-in path metadata. Acceptance remains unverified until a tester
+// records evidence; these fields identify executed requests, not phase status.
+struct LightingReport {
+    bool present=false, reduced=false, contact=false, cache=false;
+    std::string shadows, direct, gi;
+    u32 seed=1, sunIndex=~0u, candidates=0, spatialSamples=0, giRays=0;
+    u64 historyResets=0;
+    u32 checks=0, failures=0;
+};
+constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 10;
 
 struct BenchReport {
     std::string   bench;
@@ -232,6 +241,7 @@ struct BenchReport {
     MeshletReport meshlets;      // F6 (schema 6)
     RenderingReport rendering;   // F7/F8 (schema 7), actual paths and last-frame content extent
     RtReport rt;                 // F9 (schema 9)
+    LightingReport lighting;     // F10-F12 (schema 10)
 };
 
 /// Nearest-rank statistics of `values` (empty input gives all zeros).

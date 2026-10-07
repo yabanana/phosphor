@@ -541,4 +541,9 @@ struct GPUShadowCounters {
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowCounters) == 32, "GPUShadowCounters layout");
 
 
+struct GPUResolveLightingParams {
+    u32 flags, sunIndex, width, height; // bits: sun visibility, replace local DI, indirect irradiance
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUResolveLightingParams) == 16, "GPUResolveLightingParams layout");
+
 } // namespace phosphor

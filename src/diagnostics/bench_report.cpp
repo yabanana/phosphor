@@ -186,6 +186,16 @@ std::string formatReportLine(const BenchReport& r) {
     return line;
 }
 
+static std::string lightingToJson(const LightingReport& l) {
+    return ",\n  \"lighting\": {\"shadows\": \""+jsonEscape(l.shadows)+"\", \"direct\": \""+jsonEscape(l.direct)+
+        "\", \"gi\": \""+jsonEscape(l.gi)+"\", \"preset\": \""+(l.reduced?"reduced":"full")+
+        "\", \"experimental\": true, \"seed\": "+std::to_string(l.seed)+", \"sun_index\": "+std::to_string(l.sunIndex)+
+        ", \"contact\": "+(l.contact?"true":"false")+", \"shadow_cache\": "+(l.cache?"true":"false")+
+        ", \"candidate_count\": "+std::to_string(l.candidates)+", \"spatial_samples\": "+std::to_string(l.spatialSamples)+
+        ", \"gi_rays\": "+std::to_string(l.giRays)+", \"checks\": "+std::to_string(l.checks)+
+        ", \"failures\": "+std::to_string(l.failures)+", \"full_lighting_denoise\": \"F13_PENDING\"}";
+}
+
 std::string reportToJson(const BenchReport& r) {
     const std::string bench  = jsonEscape(r.bench);
     const std::string device = jsonEscape(r.device);
@@ -330,7 +340,8 @@ std::string reportToJson(const BenchReport& r) {
     return head + "  \"frame_ms\": " + summaryToJson(r.frameMs) + ",\n" + "  \"cpu_ms\": " + summaryToJson(r.cpuMs) +
            ",\n" + "  \"gpu_ms\": " + summaryToJson(r.gpuMs) + ",\n" + "  \"wait_ms\": " + summaryToJson(r.waitMs) +
            (r.pipelinesJson.empty() ? std::string() : ",\n  \"pipelines\": " + r.pipelinesJson) + ",\n" + timing +
-           graph + scene + phases + hardware + meshlets + rendering + rtToJson(r.rt) + "\n}\n";
+           graph + scene + phases + hardware + meshlets + rendering + rtToJson(r.rt) +
+           (r.lighting.present ? lightingToJson(r.lighting) : std::string()) + "\n}\n";
 }
 
 } // namespace phosphor

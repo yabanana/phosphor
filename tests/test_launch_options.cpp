@@ -1080,3 +1080,19 @@ TEST_CASE("F9 proxy transitions require measured proxies checks and enough total
         CHECK_FALSE(error.empty());
     }
 }
+
+TEST_CASE("F10-F12 launch contract refuses unavailable receiver paths and tiers") {
+    LaunchOptions o; std::string e;
+    REQUIRE(parse({"--render-path","visibility","--shadows","csm"},o,e));
+    CHECK(o.shadows==ShadowMode::CSM); CHECK_FALSE(o.rtEnabled);
+    CHECK_FALSE(parse({"--shadows","rt","--rt","on"},o,e));
+    CHECK_FALSE(parse({"--render-path","visibility","--shadows","rt"},o,e));
+    REQUIRE(parse({"--render-path","visibility","--shadows","rt","--rt","on"},o,e));
+    CHECK_FALSE(parse({"--render-path","visibility","--rt","on","--gi","restir","--force-family","apple9"},o,e));
+    CHECK_FALSE(parse({"--render-path","visibility","--rt","on","--lighting","restir","--adaptive-shading"},o,e));
+    CHECK_FALSE(parse({"--render-path","visibility","--shadows","csm","--shadow-map-size","1000"},o,e));
+    CHECK_FALSE(parse({"--contact-shadows","on"},o,e));
+    CHECK_FALSE(parse({"--debug-lighting-corrupt","caster"},o,e));
+    REQUIRE(parse({"--render-path","visibility","--shadows","csm","--debug-lighting","1","--debug-lighting-corrupt","caster"},o,e));
+    CHECK(o.debugLightingCorrupt==2);
+}

@@ -32,6 +32,7 @@
 #include "platform/metal/meshlet_check.h"
 #include "platform/metal/acceleration_structures.h"
 #include "platform/metal/rt_visibility_check.h"
+#include "platform/metal/shadow_passes.h"
 #include "renderer/rt_check.h"
 #include "renderer/rt_proxy_transition.h"
 #include "renderer/cull_reference.h"
@@ -232,7 +233,8 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     if (options_.visibility)
         visibility_ = std::make_unique<VisibilityRenderer>(*context_, *pipelines_, *renderer_, *mesh_,
                                                            options_.materialBinning, options_.debugVisibility,
-                                                           options_.tileResolve, options_.adaptiveShading);
+                                                           options_.tileResolve, options_.adaptiveShading,
+                                                           options_.shadows != ShadowMode::Off || options_.directLighting != DirectLightingMode::Legacy || options_.gi != GiMode::Off);
     if (options_.post) {
         PostProcessor::Options po;
         po.forceReset = options_.debugUpscalerReset;
@@ -310,6 +312,8 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         rtProbeTimes_.reserve(options_.frames);
         rtProbeNs_.reserve(options_.frames);
     }
+    if (options_.shadows != ShadowMode::Off || options_.directLighting != DirectLightingMode::Legacy || options_.gi != GiMode::Off)
+        shadows_ = std::make_unique<ShadowPasses>(*context_, *pipelines_, *renderer_, *mesh_, *visibility_, rt_.get(), options_);
     ecs_        = std::make_unique<ECS>();
     gpuScene_   = std::make_unique<GpuScene>();
     {
@@ -394,6 +398,7 @@ Engine::~Engine() {
     if (context_) context_->waitIdle();
     rtChecker_.reset();
     rtVisibility_.reset();
+    shadows_.reset();
     rt_.reset();
 
     if (activeBench_) {
@@ -844,6 +849,13 @@ void Engine::finishBenchmark() {
         }
     }
     if (report.gpuTiming) passTimings_.summarize(report.passes, report.gpuPassSumMs, report.gpuFrameSpanMs);
+    if (shadows_) {
+        report.lighting.present=true; report.lighting.shadows=shadowModeName(options_.shadows);
+        report.lighting.direct=directLightingModeName(options_.directLighting);report.lighting.gi=giModeName(options_.gi);
+        report.lighting.reduced=options_.reducedLighting || options_.forceApple9;report.lighting.contact=options_.contactShadows;
+        report.lighting.cache=options_.shadowCache;report.lighting.seed=options_.lightingSeed;report.lighting.sunIndex=shadows_->sunIndex();
+        report.lighting.candidates=options_.lightingCandidates;report.lighting.spatialSamples=options_.lightingSpatialSamples;report.lighting.giRays=options_.giRays;
+    }
     if (rt_) {
         report.rt = rt_->report();
         report.rt.checks = rtChecks_;
@@ -1087,6 +1099,7 @@ void Engine::switchTestBench(TestBenchType type) {
     if (rt_) rt_->loadScene(*gpuScene_, *store_, *textures_);
     if (rtProxyTransition_ && !rtProxyTransition_->arm(options_.debugRtProxyTransition, *ecs_, *gpuScene_, *store_, rt_->geometry()))
         throw std::runtime_error(rtProxyTransition_->line());
+    if (shadows_) shadows_->loadScene(*gpuScene_, *store_);
     if (options_.debugRtDeform && gpuScene_->getMeshCount()) {
         const u32 first = gpuScene_->meshInfos()[0].vertexOffset;
         const u32 end = gpuScene_->getMeshCount() > 1 ? gpuScene_->meshInfos()[1].vertexOffset
@@ -1511,6 +1524,15 @@ bool Engine::frame(float dt) {
             rtVisibility_->prepareFrame(frame.slot, renderWidth, renderHeight, constants);
     }
     overlays_->prepareFrame(overlayMode_, constants.lightCount, width, height);
+    if (shadows_) {
+        ShadowPasses::Frame sf;sf.slot=frame.slot;sf.index=frame.index;sf.view=currentView_;sf.scene=sceneEpoch_;
+        sf.width=renderWidth;sf.height=renderHeight;sf.backingWidth=renderBackingWidth_;sf.backingHeight=renderBackingHeight_;
+        sf.cut=viewCameraCut;sf.reset=options_.historyResetEvery && presentedFrames_%options_.historyResetEvery==0;
+        sf.constants=constants;sf.nearPlane=camera_->getNear();std::memcpy(sf.unjitteredVP,&unjittered[0][0],64);
+        shadows_->prepareFrame(*store_,lights_,sf);
+        const u32 flags=(options_.shadows!=ShadowMode::Off?1u:0u) | (options_.directLighting!=DirectLightingMode::Legacy?2u:0u) | (options_.gi!=GiMode::Off?4u:0u);
+        visibility_->prepareLighting(flags,shadows_->sunIndex());
+    }
     if (!visibility_ && renderer_->usingFallback())
         frameFlags_ |= FrameFallbackDraw;
     const Clock::time_point s4 = Clock::now();
@@ -1537,7 +1559,8 @@ bool Engine::frame(float dt) {
                        renderBackingWidth_,
                        renderBackingHeight_,
                        rt_ ? rt_->version() : 0,
-                       rtVisibility_ && rtVisibility_->ready()};
+                       rtVisibility_ && rtVisibility_->ready(),
+                       shadows_ ? shadows_->version() : 0};
     if (!(key == graphKey_) || !graphExecutor_->valid()) {
         frameFlags_ |= FrameGraphCompile;
         if (key.width != graphKey_.width || key.height != graphKey_.height) frameFlags_ |= FrameResize;
@@ -1572,6 +1595,7 @@ bool Engine::frame(float dt) {
     if (scenario_) scenario_->bind(*graphExecutor_, frame.index);
     if (asyncProbe_) asyncProbe_->bind(*graphExecutor_, frame.slot);
     if (rt_) rt_->bindResources(*graphExecutor_);
+    if (shadows_) shadows_->bindFrame(*graphExecutor_);
     if (rtVisibility_) rtVisibility_->bindFrame(*graphExecutor_);
     {
         PH_ZONE("Graph execute");
@@ -1974,6 +1998,7 @@ bool Engine::checkGpuScene(u32 slot) {
 void Engine::declareFrameGraph(u32 width, u32 height) {
     using namespace rg;
     frameGraph_.reset();
+    if (visibility_) visibility_->resetGraphRefs();
 
     const TextureDesc screen{graphKey_.outputFormat, width, height};
     // The drawable: undefined at frame start, presented after the graph; a
@@ -2010,6 +2035,10 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
     if (!scenario_ && mesh_) {
         const auto depth = mesh_->addRasterPasses(frameGraph_, color, renderBackingWidth_, renderBackingHeight_);
         if (visibility_) {
+            if (shadows_) {
+                shadows_->addToGraph(frameGraph_,color,depth);
+                visibility_->setLightingTextures(shadows_->mask(),shadows_->zeroLighting(),shadows_->zeroLighting());
+            }
             visibility_->addResolve(frameGraph_, color, depth);
             color = post_ ? post_->addToGraph(frameGraph_, *visibility_, drawableRef_, graphKey_.outputFormat)
                           : visibility_->addPresent(frameGraph_, drawableRef_);

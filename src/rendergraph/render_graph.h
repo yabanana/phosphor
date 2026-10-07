@@ -80,6 +80,7 @@ enum class Format : u16 {
     RG32Float,
     RGBA32Float,
     R32Uint,
+    RGBA32Uint,
     RG11B10Float,
     RGB10A2Unorm,
     Depth16Unorm,

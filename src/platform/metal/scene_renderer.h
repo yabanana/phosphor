@@ -112,13 +112,15 @@ public:
     void encode(MTL4::RenderCommandEncoder* encoder, u32 chunk = 0, u32 chunks = 1) const;
     /// F4.7: the same draws (same bindings, viewport, cull state, ICB) with
     /// another pipeline.  With `depthTest` the reverse-Z depth state is used.
-    void encodeOverlay(MTL4::RenderCommandEncoder* encoder, pipe::PipelineHandle pipeline, bool depthTest) const;
+    void encodeOverlay(MTL4::RenderCommandEncoder* encoder, pipe::PipelineHandle pipeline, bool depthTest, MTL::DepthStencilState* depthOverride = nullptr) const;
 
     // --- F6 mesh path -------------------------------------------------------------
     /// Address of the draw gate word for this frame's Draw build (default: a
     /// constant 1, every bucket drawn).  The mesh path passes its overflow
     /// word, so the ICB stays empty unless the meshlet candidates overflowed.
     void setTemporalInputs(MTL::GPUAddress previousInstances, MTL::GPUAddress temporalParams);
+    void setLightingInputs(MTL::GPUAddress params, MTL::Texture* sun, MTL::Texture* local, MTL::Texture* gi);
+    [[nodiscard]] MTL::Buffer* indexBuffer() const { return indexBuffer_; }
     void setDrawGate(MTL::GPUAddress gate) { drawGate_ = gate; }
     /// The indexed fallback of one cull class inside the mesh path's render
     /// encoder: forward pipeline, forward arguments, the class's ICB range.
