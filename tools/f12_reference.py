@@ -124,6 +124,9 @@ def build_scene(root, data, material_model, allow_differences):
     mi.set_variant("scalar_rgb")  # Independent CPU path, never the Phosphor GPU.
     np = np_module()
     Transform = getattr(mi, "ScalarAffineTransform4f", None) or getattr(mi, "ScalarTransform4f")
+    # Mitsuba 3.9.1 area emitters are one-sided and have no twosided property.
+    if any((m["flags"] & 1) and any(v > 0 for v in m["emissive"]) for m in data["materials"]) or any(l["type"] >= 3 and (l["flags"] & 1) for l in data["sampled_lights"]):
+        raise ValueError("unsupported two-sided area emission in Mitsuba scalar reference")
     textures = {t["id"]: (read_pfm(root / t["rgb"]), read_pfm(root / t["alpha"])) for t in data["textures"]}
     differences = []
     if material_model == "principled":
@@ -180,7 +183,10 @@ def build_scene(root, data, material_model, allow_differences):
         def eval_3(self, si, active=True): return mi.Color3f(self.values(si))
         def eval_1(self, si, active=True): return float(self.values(si)[0])
         def mean(self): return 0.5  # Only an emitter/BSDF sampling heuristic, never radiance.
-        def is_spatially_varying(self): return True
+        # Area emitters use this flag to choose their proposal. Force uniform
+        # shape-area sampling, while eval still evaluates textured Le/MASK.
+        # UV parameterization sampling is invalid for general overlapping UVs.
+        def is_spatially_varying(self): return self.semantic != "emissive"
         def to_string(self): return f"PhosphorSnapshotTexture[{self.semantic}]"
 
     mi.register_texture("phosphor_snapshot", lambda props: SnapshotTexture(props))
@@ -228,8 +234,7 @@ def build_scene(root, data, material_model, allow_differences):
                  "face_normals": material_model == "diffuse",
                  "bsdf": {"type": "ref", "id": f"material_{material_id}"}}
         if any(value > 0 for value in material["emissive"]):
-            shape["emitter"] = {"type": "area", "radiance": tex(material_id, "emissive"),
-                                "twosided":bool(material["flags"]&1),"sample_texture":False}
+            shape["emitter"] = {"type": "area", "radiance": tex(material_id, "emissive")}
         scene[f"instance_{instance['slot']}"] = shape
     # Analytic suns are not duplicated by the F11 sampled list. When the sampled
     # list exists it owns punctual/area emitters, as in the GI shader bridge.
@@ -275,8 +280,7 @@ def build_scene(root, data, material_model, allow_differences):
         if t == 6:
             item={"type":"ply","filename":str(root/light["geometry"]),"face_normals":True,
                   "bsdf":{"type":"diffuse","reflectance":{"type":"rgb","value":[0,0,0]}},
-                  "emitter":{"type":"area","radiance":{"type":"rgb","value":light["emission"]},
-                             "twosided":bool(light["flags"]&1),"sample_texture":False}}
+                  "emitter":{"type":"area","radiance":{"type":"rgb","value":light["emission"]}}}
         elif t in (1,2):
             p = np.asarray(light["position"]);d = np.asarray(light["u"])
             if t == 1:
@@ -296,8 +300,7 @@ def build_scene(root, data, material_model, allow_differences):
                     u = u*light["radius"];v = v*light["radius"]
                 matrix = np.eye(4);matrix[:3,0]=u;matrix[:3,1]=v;matrix[:3,2]=normal;matrix[:3,3]=p
                 item = {"type": "rectangle" if t == 3 else "disk", "to_world": Transform(matrix)}
-            item["emitter"] = {"type": "area", "radiance": {"type":"rgb","value":light["emission"]},
-                               "twosided":bool(light["flags"]&1),"sample_texture":False}
+            item["emitter"] = {"type": "area", "radiance": {"type":"rgb","value":light["emission"]}}
             item["bsdf"] = {"type": "diffuse", "reflectance": {"type":"rgb","value":[0,0,0]}}
         scene[f"sampled_light_{index}"] = item
     if any(v > 0 for v in data["sky"]):
@@ -424,8 +427,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if hasattr(args,"spp") and (len(args.spp) < 2 or any(n < 1 for n in args.spp) or args.spp != sorted(set(args.spp))):
         parser.error("at least two strictly increasing positive SPP checkpoints required")
-    if hasattr(args,"max_depth") and args.max_depth < 3:
-        parser.error("indirect reference needs max_depth >=3")
+    if hasattr(args,"max_depth") and args.max_depth != -1 and args.max_depth < 3:
+        parser.error("indirect reference needs max_depth >=3 or -1 (unlimited)")
     for field in ("max_convergence_rmse","max_relative_rmse","max_relative_bias"):
         if hasattr(args,field) and (not math.isfinite(getattr(args,field)) or getattr(args,field) < 0):
             parser.error(f"{field} must be finite and nonnegative")

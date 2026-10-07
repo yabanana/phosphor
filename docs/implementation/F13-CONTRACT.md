@@ -246,3 +246,16 @@ comparison require the root's final CLI/runner. Freeze ROI/tolerances/preset
 before execution; retain raw/reference outputs separately. No performance,
 ghosting, quality, physical M3 or phase-completion result is implied. Apple9
 is the feature floor; M5 forced paths are functional tests only when run.
+
+
+Integration correction: static raster probe membership includes hierarchical
+children only when their entire parent chain is valid, visible, explicitly
+static and free of procedural motion. Membership/cull records are refreshed
+on instance/node/material deltas, not only slot-layout changes. Identical
+slot lists retain their GPU buffer and argument tables. Probe placement uses
+resolved WORLD matrices from the capture frame's exact motion phases; CPU
+identity placeholders never define volume or capture position. Static raster
+bounds cover its eligible draw list; actual RT capture bounds cover current
+visible geometry including descendants of animated roots. The CPU gate compares
+a translated/mirrored hierarchy against independent flattened world geometry
+and verifies moving-ancestor exclusion plus same-frame bounds changes.

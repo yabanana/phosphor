@@ -129,6 +129,12 @@ def functional(job,status,text,report):
     if UNRELATED_ERROR.search(text):failures.append('GPU/validation/runtime error')
     mesh_fail=list(MESHLET_FAIL.finditer(text))
     scrubbed=MESHLET_FAIL.sub('',text) if job['overflow'] else text
+    if job['overflow']:
+        # Accept only the exact summary of the already-required per-frame negative.
+        n=job['frames']
+        scrubbed=re.sub(rf'^MESHLETS checks {n} \| failures {n} \| FAIL$', '', scrubbed, flags=re.M)
+        frame_ids=[int(re.search(r'^MESHLETS frame (\d+)',match.group()).group(1)) for match in mesh_fail]
+        if frame_ids!=list(range(n)):failures.append('overflow frame IDs missing or duplicated')
     if re.search(r'\| FAIL\b',scrubbed):failures.append('unexpected checker FAIL')
     checks=CHECK.findall(text)
     if sorted(int(frame) for frame,_ in checks)!=expected_checks(job['argv']) or any(state!='PASS' for _,state in checks):

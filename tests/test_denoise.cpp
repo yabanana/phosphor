@@ -48,7 +48,7 @@ TEST_CASE("F13 baseline temporal accumulation preserves independent Bernoulli en
     const auto s=receiver();const auto metadata=spec();
     for(u32 signal:{DENOISE_SIGNAL_DI,DENOISE_SIGNAL_GI,DENOISE_SIGNAL_SPECULAR,DENOISE_SIGNAL_AO}) {
         const auto p=denoiseParameters(settings,4,4,signal,0,1,1,false);
-        REQUIRE_FALSE(p.flags&DENOISE_CLAMP_HISTORY);
+        REQUIRE((p.flags&DENOISE_CLAMP_HISTORY)==0);
         for(const float visibility:{0.1f,0.5f,0.9f}) {
             auto history=denoiseTemporal(s,glm::vec3(visibility),{},p,{},{},metadata);
             history.length=settings.maxHistory;history.firstMoment=visibility;
