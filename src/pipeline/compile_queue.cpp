@@ -54,6 +54,9 @@ CompileQueue::~CompileQueue() {
     }
     workCv_.notify_all();
     idleCv_.notify_all();
+    // Cancel queued captures/promises before waiting for in-flight work.
+    // Destroy outside mutex_: cancellation can release user-owned resources.
+    dropped.clear();
     for (auto& t : threads_) t.join();
 }
 
