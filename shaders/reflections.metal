@@ -91,7 +91,7 @@ kernel void reflection_rt(constant GPUReflectionParams& p [[buffer(0)]],const de
         float3 n=normalize(diVec(s.geometricNormal));if(dot(n,dir.direction)<0)n=-n;const float3 origin=rtOffsetRay(diVec(s.position),n);GPURtRay ray{};
         ray.ox=origin.x;ray.oy=origin.y;ray.oz=origin.z;ray.dx=dir.direction.x;ray.dy=dir.direction.y;ray.dz=dir.direction.z;ray.tmax=p.maxDistance;ray.mask=RT_MASK_INDIRECT;ray.type=RT_PROBE_DIFFUSE;
         RtPayload payload{};const auto hit=rtTrace(ray,as,ift,instances,p.slotCount,payload);float3 L;
-        sample.flags=SPECULAR_SAMPLE_VALID;sample.proposalSolidAngle=dir.pdf;for(uint i=0;i<3;++i)sample.direction[i]=dir.direction[i];
+        sample.flags=SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_STOCHASTIC;sample.proposalSolidAngle=dir.pdf;for(uint i=0;i<3;++i)sample.direction[i]=dir.direction[i];
         bool numericError=dir.error;
         if(hit.hit){L=reflectionSecondary(hit,dir.direction,as,ift,p,instances,meshes,vertices,indices,materials,textures,lights,sampled,emitters,gi,states,extra,irradiance,moments,seed,numericError);
             sample.path=REFLECTION_PATH_RT;sample.hitDistance=length(origin+dir.direction*hit.t-diVec(s.position));sample.secondarySlot=hit.slot;sample.secondaryGeneration=hit.generation;}

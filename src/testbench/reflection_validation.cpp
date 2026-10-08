@@ -12,7 +12,7 @@
 
 namespace phosphor {
 namespace {
-constexpr std::array<std::string_view,8> names{"mirror","roughness","ao-cavity","probe-parallax","moving-light","disocclusion","wide-emission","ao-temporal-wall"};
+constexpr std::array<std::string_view,9> names{"mirror","roughness","ao-cavity","probe-parallax","moving-light","disocclusion","wide-emission","ao-temporal-wall","specular-environment"};
 constexpr float pi=3.14159265358979323846f;
 const glm::quat identity(1,0,0,0);
 glm::quat sunRotation(glm::vec3 towardSun) {
@@ -45,6 +45,12 @@ void ReflectionValidation::setup(ECS& ecs,GpuScene& scene,TextureManager& textur
     textures.createDefaultTextures(); // Existing scene fallback material refers to these slots.
     auto upload=[&](MeshData data){return scene.uploadMesh(data.positions,data.normals,data.tangents,data.uvs,data.indices);};
     plane_=upload(ProceduralMeshes::generatePlane(1,1,1,1));
+    if(scenario_=="specular-environment") {
+        // Rough white conductor in a constant infinite environment. The centre
+        // N=V receiver has the independent closed-form reflectance 1-log(2).
+        mirror_=mesh(ecs,plane_,{0,0,0},{8,1,8},glm::angleAxis(pi*.5f,glm::vec3(1,0,0)),{1,1,1},1,1);
+        time_=0;positiveUpdates_=0;cameraSegment_=~0u;return;
+    }
     if(aoTemporalControl()) {
         const glm::quat faceCamera=glm::angleAxis(pi*.5f,glm::vec3(1,0,0));
         mirror_=mesh(ecs,plane_,{0,0,0},{8,1,8},faceCamera,{.5f,.5f,.5f},0,1);
@@ -151,7 +157,7 @@ void ReflectionValidation::teardown(ECS& ecs,GpuScene&) {
 }
 CameraSetup ReflectionValidation::getDefaultCamera()const {
     if(scenario_=="wide-emission")return {{0,0,4},{0,0,0},4,false};
-    if(aoTemporalControl())return {{0,0,3},{0,0,0},3,false};
+    if(aoTemporalControl()||scenario_=="specular-environment")return {{0,0,3},{0,0,0},3,false};
     return {{0,2.2f,7},{0,1.1f,0},7,false};
 }
 bool ReflectionValidation::scriptedCamera(double t,glm::vec3& p,glm::vec3& target,bool& cut)const {

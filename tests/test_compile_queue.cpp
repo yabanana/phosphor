@@ -4,6 +4,9 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <chrono>
+#include <future>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <stdexcept>
@@ -298,6 +301,9 @@ TEST_CASE("compile queue: destructor drops queued jobs and does not hang") {
     Gate             gate;
     Started          started;
     std::thread      releaser;
+    std::promise<void> cancelled;
+    auto cancellation=cancelled.get_future();
+    bool cancelledBeforeRelease=false;
     {
         CompileQueue q(1);
         q.submit(CompilePriority::Urgent, 0, [&] {
@@ -306,11 +312,19 @@ TEST_CASE("compile queue: destructor drops queued jobs and does not hang") {
             ran.fetch_add(1);
         });
         started.waitFor(1);
-        for (int i = 0; i < 10; ++i) q.submit(CompilePriority::Urgent, 0, [&] { ran.fetch_add(100); });
-        // The destructor must wait for the running job; release it from another thread.
-        releaser = std::thread([&] { gate.open(); });
+        auto witness=std::shared_ptr<int>(new int(0),[&](int* p){delete p;cancelled.set_value();});
+        for (int i = 0; i < 10; ++i) q.submit(CompilePriority::Urgent, 0, [&,witness] { ran.fetch_add(100); });
+        witness.reset(); // only queued jobs own the cancellation witness
+        // Observe actual cancellation while the first job is still blocked.
+        // Timeout releases it only to turn a regression into a failed test,
+        // rather than hanging the test suite.
+        releaser = std::thread([&] {
+            cancelledBeforeRelease=cancellation.wait_for(std::chrono::seconds(5))==std::future_status::ready;
+            gate.open();
+        });
     }
     releaser.join();
+    CHECK(cancelledBeforeRelease);
     CHECK(ran.load() == 1); // running job finished, queued ones never started
 }
 

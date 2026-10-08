@@ -203,6 +203,9 @@ struct ReflectionPasses::Impl {
         params.ssrSteps=settings.ssrSteps;params.ssrBinarySteps=settings.ssrBinarySteps;params.probeCount=1;params.seed=options.lightingSeed;params.maxProbeMip=ProbeMips-1;
         params.environment[0]=.03f;params.environment[1]=.035f;params.environment[2]=.045f;
         params.flags=REFLECTION_ENABLE_PROBES;if(options.reflections!=ReflectionMode::Probes)params.flags|=REFLECTION_ENABLE_SSR;
+        // Tagged physical fixture: no local probe/SSR geometry, only the
+        // constant infinite incident radiance specified above.
+        if(options.reflectionScene=="specular-environment")params.flags=0;
         if(rtReflection)params.flags|=REFLECTION_ENABLE_RT;if(gi&&options.gi!=GiMode::Off)params.flags|=REFLECTION_ENABLE_GI|REFLECTION_ENABLE_CACHE;
         paramsAddress=lighting::upload(c,params);probeAddress=lighting::upload(c,probe);
         for(u32 i=0;i<options.reflectionSamples;++i){auto sample=params;sample.seed=options.lightingSeed+i*0x9e3779b9u;sampleAddress[i]=lighting::upload(c,sample);}

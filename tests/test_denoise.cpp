@@ -81,3 +81,27 @@ TEST_CASE("F13 atrous edge weights preserve identity on constant signals and sto
     b=a;b.depth=30;CHECK(denoiseSpatialWeight(a,b,2,2,1,p)<.001f);
     CHECK(denoiseSpatialWeight(a,a,2,200,1,p)<.001f);
 }
+
+TEST_CASE("Stochastic reflection outcomes preserve the mean and reduce independent sample variance") {
+    DenoiseSettings settings;settings.temporalAlpha=settings.momentsAlpha=.01f;
+    const auto p=denoiseParameters(settings,1,1,DENOISE_SIGNAL_SPECULAR,0,1,1,false);
+    const auto s=receiver();double mean=0,second=0;
+    // Exact enumeration: four IID fair outcomes, radiance0 or4. The true
+    // mean is2, raw variance4; the four-sample average has variance1.
+    for(u32 bits=0;bits<16;++bits){GPUDenoiseHistory h{};
+        for(u32 k=0;k<4;++k){auto m=spec();m.flags|=SPECULAR_SAMPLE_STOCHASTIC;
+            const bool hit=(bits&(1u<<k))!=0;m.path=hit?REFLECTION_PATH_RT:REFLECTION_PATH_NONE;
+            m.secondarySlot=hit?k:~0u;m.secondaryGeneration=k+1;m.hitDistance=hit?float(2+k):0;
+            h=denoiseTemporal(s,glm::vec3(hit?4:0),h,p,{},{},m);REQUIRE(h.valid);CHECK(h.length==k+1);
+        }
+        mean+=h.color[0]/16.;second+=double(h.color[0])*h.color[0]/16.;
+    }
+    CHECK(mean==doctest::Approx(2));CHECK(second-mean*mean==doctest::Approx(1));
+    auto m=spec();m.flags|=SPECULAR_SAMPLE_STOCHASTIC;
+    const auto h=denoiseTemporal(s,glm::vec3(1),{},p,{},{},m);
+    auto changed=m;changed.flags=SPECULAR_SAMPLE_VALID;CHECK_FALSE(denoiseCompatible(s,h,p,changed));
+    changed=m;changed.flags|=SPECULAR_SAMPLE_ERROR;CHECK_FALSE(denoiseCompatible(s,h,p,changed));
+    auto stale=p;++stale.signalRevision;CHECK_FALSE(denoiseCompatible(s,h,stale,m));
+    stale=p;stale.flags|=DENOISE_RESET;CHECK_FALSE(denoiseCompatible(s,h,stale,m));
+    auto wrong=h;wrong.flags|=1u;CHECK_FALSE(denoiseCompatible(s,wrong,p,m));
+}

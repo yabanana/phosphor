@@ -16,8 +16,8 @@ costo prima della migrazione, senza richiedere un guadagno del 3% sul frame.
 
 | Orizzonte | Lavoro | Cosa deve produrre |
 |---|---|---|
-| Checkpoint corrente | F5–F9 integrate; F9 DEVELOPMENT_ACCEPTED M5, PR #18, merge d5ec450 | Verifica e integrazione F10–F14 |
-| Prossimo autorizzato | F10–F14, poi STOP per decisione del proprietario 2026-10-07 | Codice scritto in chat separata; build, correttezza GPU, qualità e misure decise dall'aggregatore |
+| Checkpoint corrente | F10–F14 baseline integrate in main, PR19, merge84bd80e | Residui F13 e qualificazione; limiti e misure nel handoff |
+| Prossimo autorizzato | Residui F13, decisione2026-10-08 | Qualità speculare e verifica nativa MetalFX; rimisurare dopo le correzioni. OPT da valutare nel prossimo turno, nessuna attivazione ora |
 | Successivo | Altre F, compresi runtime e mondo | Piani dettagliati da riconciliare quando il consumatore esiste |
 | Prodotto richiesto | F21/F27/F34, F39–F41 e audio base F26.1 | Riuso, 2D/UI/editor e compatibilità verificata; baseline incrementale, copertura finale obbligatoria |
 | Opportunità | OPT aperte, task `[CANDIDATO]`, fasi `[EDGE]` | Nessuna implementazione automatica: attivazione per un problema concreto e misurato |
@@ -34,6 +34,10 @@ F9 è ora integrata; il proprietario ha autorizzato F10–F14 e lo stop successi
 Nessuna OPT viene attivata automaticamente. La storia
 F8.6 parte da risorse per vista e sincronizzazione conservativa; aliasing
 temporale generale e scheduling eterogeneo non servono a renderla corretta.
+
+## Correzioni prima delle OPT (2026-10-08)
+
+F10–F14 sono integrate in main con PR19. Prima di valutare il catalogo OPT si correggono i residui funzionali/di qualità F13 e si verificano i limiti nativi MetalFX. Il costo Sponza1080p40–43ms resta il confronto misurato; non si chiude un budget cambiandone il valore. La selezione delle OPT è rinviata al prossimo turno del proprietario.
 
 ## Due momenti di decisione
 

@@ -77,7 +77,12 @@ inline GPUSpecularSample reflectionFallback(GPUDISurface surface,ReflectionDirec
     constant GPUReflectionParams& p,const device GPUDISurface* surfaces,const device GPURadianceCacheEntry* cache,
     constant GPUProbeGridParams& gi,const device GPUReflectionProbe* probes,
     texture2d<float,access::read> baseRadiance,texture2d<float,access::read> depth,texturecube_array<float> probeAtlas){
-    GPUSpecularSample out=reflectionEmpty();if(direction.error)out.flags|=SPECULAR_SAMPLE_ERROR;if(!surface.valid||!direction.valid)return out;out.flags|=SPECULAR_SAMPLE_VALID;
+    GPUSpecularSample out=reflectionEmpty();if(direction.error){out.flags|=SPECULAR_SAMPLE_ERROR;return out;}
+    if(!surface.valid)return out;
+    out.flags|=SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_STOCHASTIC;
+    // A rejected NDF proposal (e.g. V.H <=0) contributes zero to the same
+    // estimator. Keep that zero in history, rather than resetting its mean.
+    if(!direction.valid)return out;
     for(uint i=0;i<3;++i)out.direction[i]=direction.direction[i];out.proposalSolidAngle=direction.pdf;
     if(!any(direction.weight>0))return out;float3 L;
     const auto hit=reflectionSSR(diVec(surface.position),direction.direction,p,depth);
