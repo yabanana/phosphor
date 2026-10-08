@@ -5,6 +5,7 @@
 #include <array>
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <limits>
 #include <sstream>
@@ -14,6 +15,7 @@ struct DenoisePasses::Impl {
     static constexpr u32 Signals=4,Views=4,MaxAtrous=5;
     MetalContext& c;PipelineCache& pipelines;LaunchOptions options;DenoiseSettings settings;
     ShadowPasses::Frame frame{};u64 epoch=0,graphVersion=1;
+    bool diagnosticHistory=false;
     pipe::PipelineHandle temporal{},atrous{},checker{},clear{},corrupt{},poisonNext{};
     std::array<HistoryRegistry,Signals> registries{};
     struct Content {u64 scene=0,external=0,revision=0;bool operator==(const Content&)const=default;};
@@ -40,6 +42,10 @@ struct DenoisePasses::Impl {
     std::array<Signal,Signals> signal{};
     std::array<u64,Signals> revisions{};
     Impl(MetalContext& context,PipelineCache& p,const LaunchOptions& o):c(context),pipelines(p),options(o){
+        if(const char* value=std::getenv("PHOSPHOR_DIAGNOSTIC_DENOISE_HISTORY");value&&std::strcmp(value,"1")==0){
+            if(!o.debugLighting)throw std::invalid_argument("PHOSPHOR_DIAGNOSTIC_DENOISE_HISTORY=1 requires --debug-lighting N");
+            diagnosticHistory=true;
+        }
         if(o.reducedLighting||o.forceApple9){settings.atrousIterations=2;settings.maxHistory=16;}
         temporal=p.request(lighting::kernel("denoise_temporal"));atrous=p.request(lighting::kernel("denoise_atrous"));
         checker=p.request(lighting::kernel("denoise_check"));clear=p.request(lighting::kernel("lighting_check_clear"));
@@ -144,9 +150,17 @@ void DenoisePasses::prepareFrame(const ShadowPasses::Frame& f,u64 epoch,const st
 void DenoisePasses::invalidateAll(const char* reason){impl_->invalidate(reason);}
 rg::TextureRef DenoisePasses::addSignal(rg::RenderGraph& g,u32 s,rg::TextureRef r,rg::TextureRef m,rg::BufferRef b,rg::BufferRef metadata){return impl_->add(g,s,r,m,b,metadata);}
 void DenoisePasses::bindFrame(MetalGraphExecutor& e){impl_->bind(e);}u64 DenoisePasses::version()const{return impl_->graphVersion;}
-bool DenoisePasses::check(u32 slot)const{for(const auto& s:impl_->slots.at(slot)){if(!s.used)continue;const auto& tag=s.checkpoint;
+bool DenoisePasses::check(u32 slot)const{for(u32 sig=0;sig<Impl::Signals;++sig){const auto& s=impl_->slots.at(slot)[sig];if(!s.used)continue;const auto& tag=s.checkpoint;
     if(!tag.scheduled||impl_->c.frameEvent()->signaledValue()<=tag.frame){std::fprintf(stderr,"DENOISE check slot %u before completed GPU frame %llu\n",slot,static_cast<unsigned long long>(tag.frame));return false;}
-    const auto* words=static_cast<const u32*>(s.check->contents());if(!words||words[0]!=tag.pixels||words[2]||words[3]||words[6]!=tag.view||words[7]!=u32(tag.frame)){if(words)std::fprintf(stderr,"DENOISE check slot %u expected %u pixels %u valid %u stateErrors %u outputErrors %u view %u/%u frame %u/%u\n",slot,tag.pixels,words[0],words[1],words[2],words[3],words[6],tag.view,words[7],u32(tag.frame));return false;}}return true;}
+    const auto* words=static_cast<const u32*>(s.check->contents());
+    if(impl_->diagnosticHistory&&words&&words[0]==tag.pixels&&words[6]==tag.view&&words[7]==u32(tag.frame)) {
+        // Completed, existing GPU counters only: no new readback, shader or
+        // history mutation. The JSON includes reset/epoch/revision and actual
+        // valid/reused/max_length counts for this exact frame/view/signal.
+        const auto checkpoint=completedCheckpoint(slot,sig);
+        std::printf("DENOISE-HISTORY slot %u signal %u %s\n",slot,sig,checkpoint.c_str());std::fflush(stdout);
+    }
+    if(!words||words[0]!=tag.pixels||words[2]||words[3]||words[6]!=tag.view||words[7]!=u32(tag.frame)){if(words)std::fprintf(stderr,"DENOISE check slot %u expected %u pixels %u valid %u stateErrors %u outputErrors %u view %u/%u frame %u/%u\n",slot,tag.pixels,words[0],words[1],words[2],words[3],words[6],tag.view,words[7],u32(tag.frame));return false;}}return true;}
 std::string DenoisePasses::completedCheckpoint(u32 slot,u32 sig)const{
     const auto& state=impl_->slots.at(slot).at(sig);const auto& tag=state.checkpoint;
     if(!state.used||!tag.scheduled)throw std::logic_error("Denoise checkpoint was not actually encoded for this slot/signal");
