@@ -6,6 +6,15 @@
 #include <chrono>
 #include <cstdlib>
 #include <string>
+#include <cstring>
+#include <cstdio>
+#include <new>
+#ifdef __APPLE__
+#include <objc/runtime.h>
+#include <dlfcn.h>
+#include <mach-o/loader.h>
+#include <malloc/malloc.h>
+#endif
 
 // Weak-reference entry points of the Objective-C runtime, specified by the
 // Clang ARC ABI ("Runtime support"); the SDK has no C++ declaration of them.
@@ -158,6 +167,64 @@ ReleaseOutcome releaseTemporalScaler(MTL4FX::TemporalScaler *scaler, u32 interna
         break;
     }
     return outcome;
+}
+
+namespace {
+void* denoisedTimingRecord(MTL4FX::TemporalDenoisedScaler* scaler) {
+#ifdef __APPLE__
+    // Pin the actual loaded image, not CFBundleVersion alone: Apple can reuse
+    // a marketing version across OS builds with different dealloc code.
+    static constexpr unsigned char verifiedUUID[16]={0xea,0xb6,0x8c,0xbc,0x37,0x6a,0x37,0x91,0xbd,0x74,0xb0,0x94,0xfa,0x13,0xad,0x4e};
+    if(const char* value=std::getenv("PHOSPHOR_METALFX_DENOISED_PLAIN_RELEASE");value&&std::strcmp(value,"1")==0)return nullptr;
+    const Class cls=object_getClass(reinterpret_cast<id>(scaler));
+    if(!cls||std::strcmp(class_getName(cls),"_M4FXTemporalDenoisingScalingEffect")!=0)return nullptr;
+    const auto method=class_getInstanceMethod(cls,sel_registerName("dealloc"));
+    Dl_info image{};
+    if(!method||!dladdr(reinterpret_cast<const void*>(method_getImplementation(method)),&image)||!image.dli_fbase)return nullptr;
+    const auto* header=static_cast<const mach_header_64*>(image.dli_fbase);
+    if(header->magic!=MH_MAGIC_64)return nullptr;
+    const auto* command=reinterpret_cast<const load_command*>(header+1);bool verified=false;
+    for(uint32_t i=0;i<header->ncmds;++i) {
+        if(command->cmd==LC_UUID&&command->cmdsize>=sizeof(uuid_command))
+            verified=std::memcmp(reinterpret_cast<const uuid_command*>(command)->uuid,verifiedUUID,16)==0;
+        command=reinterpret_cast<const load_command*>(reinterpret_cast<const char*>(command)+command->cmdsize);
+    }
+    if(!verified)return nullptr;
+    const Ivar field=class_getInstanceVariable(cls,"_timingRecord");
+    if(!field||std::strcmp(ivar_getTypeEncoding(field),"^{CHistoryRecord=fIIff[120f]ff}")!=0||
+       ivar_getOffset(field)!=1072||class_getInstanceSize(cls)!=1248)return nullptr;
+    // CHistoryRecord is 508 bytes of scalar timing values, no object pointers,
+    // no destructor. The verified constructor allocates it with operator new;
+    // neither dealloc nor .cxx_destruct destroys/deletes this particular field.
+    void* record=nullptr;std::memcpy(&record,reinterpret_cast<const char*>(scaler)+ivar_getOffset(field),sizeof(record));
+    if(record&&(malloc_size(record)<508||malloc_size(record)>640))return nullptr;
+    return record;
+#else
+    (void)scaler;return nullptr;
+#endif
+}
+}
+
+std::shared_ptr<MTL4FX::TemporalDenoisedScaler> adoptTemporalDenoisedScaler(MTL4FX::TemporalDenoisedScaler* scaler) {
+    if(!scaler)return {};
+    void* const record=denoisedTimingRecord(scaler);
+    return std::shared_ptr<MTL4FX::TemporalDenoisedScaler>(scaler,[record](auto* pointer) {
+        // Adapter retirement guarantees GPU completion and uses the cache
+        // worker's autorelease pool. Do not change any SDK ivar or swizzle a
+        // method; let the framework perform its complete ordinary teardown.
+        const bool unchanged=record&&denoisedTimingRecord(pointer)==record;
+        id weak=nullptr;objc_initWeak(&weak,reinterpret_cast<id>(pointer));
+        reinterpret_cast<NS::Object*>(pointer)->release();
+        id alive=objc_loadWeakRetained(&weak);const bool destroyed=alive==nullptr;
+        if(alive)reinterpret_cast<NS::Object*>(alive)->release();
+        objc_destroyWeak(&weak);
+        const bool reclaimed=unchanged&&destroyed;
+        if(reclaimed)::operator delete(record);
+        std::fprintf(stdout,"METALFX-DENOISED-LIFETIME weak_nil=%u timing_reclaimed=%u signature_matched=%u\n",
+                     unsigned(destroyed),unsigned(reclaimed),unsigned(unchanged));
+        // A surviving SDK owner or unknown image remains visible to leaks and
+        // fails qualification; never free its memory merely to clear a report.
+    });
 }
 
 LifetimeCounters counters() {

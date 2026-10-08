@@ -19,8 +19,9 @@ The existing OPT/EDGE catalog stays selectable, not an automatic prerequisite.
 F10–F14 source integration and scoped M5 evidence are in `docs/F10_F14_HANDOFF.md`.
 Do not treat source integration as phase acceptance: native F13.3, full F13.6
 qualification and frame budgets remain open. Dense DDGI is explicit, not promoted
-to a default; no further OPT/F15 work is authorized by this checkpoint.
-Owner update2026-10-08: repair/qualify remaining F13 specular and native MetalFX work before considering OPT. Re-measure after correctness changes; choose whether to activate OPT only in the next owner turn. This supersedes the stop only for those F13 residues.
+to a default; no F15 or later work is authorized. Targeted remaining-budget work is governed by the owner update below.
+Owner update 2026-10-08 (budget closure): close native MetalFX correctness/lifetime and the measured full Sponza 1080p frame budget before advancing. Targeted measured performance fixes are authorized; this does not start F15 or activate the whole OPT catalog.
+Latest evidence: `docs/implementation/F13-F14-BUDGET-CLOSURE-2026-10-08.md`. Native timing-record retirement is limited to one verified MetalFX image; HDR admission and 60fps remain open. Keep private-ABI limits and rejected timing pairs visible.
 Owner work split: the `Sviluppo Phosphor` chat writes F10-F14 in a separate
 worktree, including tests and runners, without running builds or tests. The
 aggregating chat owns F9, review, CPU/GPU verification, measurements and merges.

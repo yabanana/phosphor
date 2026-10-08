@@ -31,6 +31,7 @@ public:
         bool enabled=false, reactiveMask=true, specularHitDistance=false, strengthMask=false;
         // Diagnostic fixture opt-in; production retains manual exposure.
         bool autoExposure=false;
+        bool diagnosticPackedColorUnits=false; // fixture-only SDK input-unit control
         bool diagnosticFloat32Color=false; // explicit fixture format experiment; no production admission
         float manualExposure=1.0f; // SDK exposure hint; does not alter color packing or output restoration
         OutputScale sdkOutputScale=OutputScale::Unverified;
@@ -56,6 +57,7 @@ public:
         bool requested=false,sdkAvailable=false,deviceSupported=false,factoryInstalled=false;
         // Read back from the actual descriptor, not inferred from caller intent.
         bool descriptorConfigured=false,autoExposureEnabled=false;
+        float observedSdkPreExposure=0;
         metalfx_denoise::RadiometricDomain radiometricDomain=metalfx_denoise::RadiometricDomain::UnqualifiedSceneLinear;
         u64 requests=0,encodedFrames=0,fallbackFrames=0,resets=0,discardedRequests=0,retirements=0;
     };

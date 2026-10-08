@@ -4,6 +4,7 @@ namespace phosphor {
 PHOSPHOR_GPU_CONSTANT u32 METALFX_PACK_HIT_DISTANCE = 1u;
 PHOSPHOR_GPU_CONSTANT u32 METALFX_PACK_REACTIVE = 2u;
 PHOSPHOR_GPU_CONSTANT u32 METALFX_PACK_STRENGTH = 4u;
+PHOSPHOR_GPU_CONSTANT u32 METALFX_PACK_FLOAT32_COLOR = 8u;
 struct GPUMetalfxDenoisePackParams {
     u32 width, height, flags, pad;
     float exposureNormalization, normalTolerance, colorScale, padFloat;

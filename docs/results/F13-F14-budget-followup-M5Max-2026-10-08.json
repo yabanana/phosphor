@@ -1,0 +1,795 @@
+{
+  "schema": 1,
+  "device": "Apple M5 Max 128GB",
+  "os": "macOS 27.2 (26B5091g)",
+  "framework": "MetalFX 40.9",
+  "framework_uuid": "EAB68CBC-376A-3791-BD74-B094FA13AD4E",
+  "phase_accepted": false,
+  "native_production_qualified": false,
+  "frame_budget_ms": 16.666666666666668,
+  "native_constant_relative_gate": 0.01,
+  "raw_root": "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/native-budget-closure",
+  "native_lifetime": [
+    {
+      "name": "lifetime-final",
+      "expected_leaking_negative": false,
+      "native_frames": 300,
+      "requests": 20,
+      "view_mask": 15,
+      "extents": 3,
+      "generations": 2,
+      "native_numerical_proof": true,
+      "process_at_exit": {
+        "leaked_bytes": 0,
+        "leaks": 0,
+        "native_internal_lifetime_accepted": false,
+        "passed": true,
+        "state": "EXECUTED_PROCESS_AT_EXIT_CHECK"
+      },
+      "reclaimed": 20,
+      "weak_nil": 20,
+      "process_returncode": 0,
+      "exit_marker": 0,
+      "binary_sha256": "a8220ca91ab2aeb295cb991e34951c9a5709118f71d0ed46fcbe25b60b34d604",
+      "log": {
+        "path": "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/native-budget-closure/lifetime-final/lifecycle-views-resize-cuts/renderer.log",
+        "sha256": "c4eb78e03004cc6f515efa3e7735d71cb5d2c8772bcf09b60979852023ea9085"
+      }
+    },
+    {
+      "name": "lifetime-negative",
+      "expected_leaking_negative": true,
+      "native_frames": 300,
+      "requests": 20,
+      "view_mask": 15,
+      "extents": 3,
+      "generations": 2,
+      "native_numerical_proof": true,
+      "process_at_exit": {
+        "leaked_bytes": 12800,
+        "leaks": 20,
+        "native_internal_lifetime_accepted": false,
+        "passed": false,
+        "state": "EXECUTED_PROCESS_AT_EXIT_CHECK"
+      },
+      "reclaimed": 0,
+      "weak_nil": 20,
+      "process_returncode": 1,
+      "exit_marker": 0,
+      "binary_sha256": "a8220ca91ab2aeb295cb991e34951c9a5709118f71d0ed46fcbe25b60b34d604",
+      "log": {
+        "path": "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/native-budget-closure/lifetime-negative/lifecycle-views-resize-cuts/renderer.log",
+        "sha256": "9b2f7fe207312afe026236e26a88f59e7237d8307a6738f9d36398841534b602"
+      }
+    }
+  ],
+  "native_hdr": [
+    {
+      "name": "hdr-final",
+      "target": [
+        368640,
+        128,
+        64
+      ],
+      "steady_frames": 80,
+      "native_frames": 96,
+      "all_channels_passed": true,
+      "relative_max": 0.0517578125,
+      "passed": false,
+      "physical_min": [
+        363264.0,
+        126.6875,
+        60.9375
+      ],
+      "physical_max": [
+        375296.0,
+        129.875,
+        67.3125
+      ],
+      "preExposure": 0.015625,
+      "observed_sdk_preExposure": null,
+      "float32_input_output": false,
+      "supplied_exposure": 8.678436279296875e-05,
+      "summary": {
+        "path": "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/native-budget-closure/hdr-final/wide-hdr-manual-input-exposure-exact/actual-sdk/summary.json",
+        "sha256": "2d2166b1aae06b82a4cab06838968e2d17d3882f702da14a322ea4674a5b3fe1"
+      }
+    },
+    {
+      "name": "physical-hdr",
+      "target": [
+        368640,
+        128,
+        64
+      ],
+      "steady_frames": 80,
+      "native_frames": 96,
+      "all_channels_passed": true,
+      "relative_max": 81.4375,
+      "passed": false,
+      "physical_min": [
+        65504.0,
+        1472.0,
+        1370.0
+      ],
+      "physical_max": [
+        65504.0,
+        5276.0,
+        5276.0
+      ],
+      "preExposure": 1,
+      "observed_sdk_preExposure": null,
+      "float32_input_output": true,
+      "supplied_exposure": 1.3709068298339844e-06,
+      "summary": {
+        "path": "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/native-budget-closure/physical-hdr/actual-sdk/summary.json",
+        "sha256": "e0541b58c57f6a280a8a661e732c4c3702e06b3b3edf1eb5c1a31becdeeec9bd"
+      }
+    },
+    {
+      "name": "packed-units",
+      "target": [
+        368640,
+        128,
+        64
+      ],
+      "steady_frames": 80,
+      "native_frames": 96,
+      "all_channels_passed": true,
+      "relative_max": 1.8046875,
+      "passed": false,
+      "physical_min": [
+        368128.0,
+        102.5625,
+        0.0
+      ],
+      "physical_max": [
+        369152.0,
+        205.125,
+        179.5
+      ],
+      "preExposure": 0.015625,
+      "observed_sdk_preExposure": 1,
+      "float32_input_output": false,
+      "supplied_exposure": 8.678436279296875e-05,
+      "summary": {
+        "path": "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/native-budget-closure/packed-units/wide-hdr-manual-input-exposure-exact/actual-sdk/summary.json",
+        "sha256": "65787fea78a5fed7b40d2eba117cb5e472c7228712a324651bcac5160ec2bfe9"
+      }
+    }
+  ],
+  "quality": {
+    "small_matrix": [
+      {
+        "name": "noon-reference",
+        "status": true,
+        "failures": [],
+        "passed": true
+      },
+      {
+        "name": "noon-tiled",
+        "status": true,
+        "failures": [],
+        "normalized_max": 5.336784928634733e-07,
+        "relative_max": 8.89589490033929e-07,
+        "normalized_rmse": 1.6382787256449823e-08,
+        "values": 5625984,
+        "passed": true
+      },
+      {
+        "name": "noon-adaptive",
+        "status": true,
+        "failures": [],
+        "normalized_max": 1.6519123363161363e-06,
+        "relative_max": 2.97480144078769e-05,
+        "normalized_rmse": 1.202236518034969e-07,
+        "values": 5625984,
+        "passed": true
+      },
+      {
+        "name": "sunrise-reference",
+        "status": true,
+        "failures": [],
+        "passed": true
+      },
+      {
+        "name": "sunrise-tiled",
+        "status": true,
+        "failures": [],
+        "normalized_max": 2.5646294639379435e-07,
+        "relative_max": 7.576576649612045e-07,
+        "normalized_rmse": 3.1517784623730416e-09,
+        "values": 5625984,
+        "passed": true
+      },
+      {
+        "name": "sunrise-adaptive",
+        "status": true,
+        "failures": [],
+        "normalized_max": 4.731342225683876e-06,
+        "relative_max": 0.0006247209595412528,
+        "normalized_rmse": 4.0246847224572334e-08,
+        "values": 5625984,
+        "passed": true
+      },
+      {
+        "name": "night-reference",
+        "status": true,
+        "failures": [],
+        "passed": true
+      },
+      {
+        "name": "night-tiled",
+        "status": true,
+        "failures": [],
+        "normalized_max": 2.46515305858011e-07,
+        "relative_max": 6.593353598162602e-07,
+        "normalized_rmse": 3.0654634858971634e-09,
+        "values": 5625984,
+        "passed": true
+      },
+      {
+        "name": "night-adaptive",
+        "status": true,
+        "failures": [],
+        "normalized_max": 1.6885276190240898e-06,
+        "relative_max": 2.622503527939682e-06,
+        "normalized_rmse": 3.85780044751809e-08,
+        "values": 5625984,
+        "passed": true
+      }
+    ],
+    "full_hd": [
+      {
+        "name": "reference",
+        "passed": true,
+        "failures": []
+      },
+      {
+        "name": "selected",
+        "passed": true,
+        "failures": []
+      },
+      {
+        "normalized_max": 6.932435444294588e-07,
+        "relative_max": 1.7852619592414475e-05,
+        "rmse": 5.8373328365168524e-09,
+        "limit": 0.01,
+        "passed": true
+      }
+    ],
+    "forced_apple9_full_hd": [
+      {
+        "name": "reference",
+        "passed": true,
+        "failures": []
+      },
+      {
+        "name": "selected",
+        "passed": true,
+        "failures": []
+      },
+      {
+        "normalized_max": 8.125613628929227e-07,
+        "relative_max": 1.9032464482105013e-05,
+        "rmse": 4.745085701972718e-09,
+        "limit": 0.01,
+        "passed": true
+      }
+    ],
+    "apple9_is_capability_simulation_only": true,
+    "production_old_binary_vs_selected": [
+      {
+        "name": "reference",
+        "passed": true,
+        "failures": []
+      },
+      {
+        "name": "selected",
+        "passed": true,
+        "failures": []
+      },
+      {
+        "normalized_max": 7.625305783427036e-07,
+        "relative_max": 2.261054804389764e-05,
+        "rmse": 5.938247358941816e-09,
+        "limit": 0.01,
+        "passed": true
+      }
+    ]
+  },
+  "runtime_regressions": {
+    "functional_passed": true,
+    "corpus_complete": false,
+    "cases": [
+      {
+        "name": "metalfx-fallback",
+        "functional_passed": true,
+        "errors": []
+      },
+      {
+        "name": "lifecycle-views4",
+        "functional_passed": true,
+        "errors": []
+      },
+      {
+        "name": "negative-f13-history",
+        "functional_passed": true,
+        "errors": []
+      },
+      {
+        "name": "negative-f13-motion",
+        "functional_passed": true,
+        "errors": []
+      },
+      {
+        "name": "negative-f13-normal",
+        "functional_passed": true,
+        "errors": []
+      },
+      {
+        "name": "negative-f14-units",
+        "functional_passed": true,
+        "errors": []
+      },
+      {
+        "name": "negative-f14-history",
+        "functional_passed": true,
+        "errors": []
+      },
+      {
+        "name": "negative-f14-light",
+        "functional_passed": true,
+        "errors": []
+      },
+      {
+        "name": "negative-f14-lut",
+        "functional_passed": true,
+        "errors": []
+      }
+    ]
+  },
+  "independent_ao": {
+    "passed": true,
+    "result": {
+      "path": "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/native-budget-closure/ao-final/results.json",
+      "sha256": "312e6f0a919547754160ae9250f46d962a4881659be0a76e63e02ed41c2387b7"
+    }
+  },
+  "timings": [
+    {
+      "series": "cost-final",
+      "conditioned_before_series": false,
+      "rows": [
+        {
+          "mode": "baseline",
+          "gpu_ms": {
+            "mean": 40.8342,
+            "min": 39.8947,
+            "p50": 40.4593,
+            "p95": 42.611,
+            "p99": 42.962,
+            "max": 43.1927
+          },
+          "passed": true,
+          "gpu_allocations": 0,
+          "engine_resource_bytes": 12022490133,
+          "device_allocated_bytes": 13944324096,
+          "binary_sha256": "7a6763b23fff062f0a56c5dc9d1a1c3c81e7d4e60dc136bceaef5bfff57ea50c",
+          "report": {
+            "path": "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/native-budget-closure/cost-final/0-baseline/report.json",
+            "sha256": "87ff7468914d32b18a4ca1cc8f8dd5ada15b2442d84ef901d97a28c1aed39db6"
+          }
+        },
+        {
+          "mode": "candidate",
+          "gpu_ms": {
+            "mean": 29.6867,
+            "min": 29.116,
+            "p50": 29.4446,
+            "p95": 31.0302,
+            "p99": 31.5565,
+            "max": 31.5961
+          },
+          "passed": true,
+          "gpu_allocations": 0,
+          "engine_resource_bytes": 8572021397,
+          "device_allocated_bytes": 11430363136,
+          "binary_sha256": "a8220ca91ab2aeb295cb991e34951c9a5709118f71d0ed46fcbe25b60b34d604",
+          "report": {
+            "path": "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/native-budget-closure/cost-final/1-candidate/report.json",
+            "sha256": "2c867d729af96c7bcea00fce52d59fda434338e55788bf90bac0bca940e9d72e"
+          }
+        },
+        {
+          "mode": "baseline",
+          "gpu_ms": {
+            "mean": 46.1497,
+            "min": 43.6604,
+            "p50": 46.0985,
+            "p95": 48.1614,
+            "p99": 49.4227,
+            "max": 50.6478
+          },
+          "passed": true,
+          "gpu_allocations": 0,
+          "engine_resource_bytes": 12022490133,
+          "device_allocated_bytes": 13944324096,
+          "binary_sha256": "7a6763b23fff062f0a56c5dc9d1a1c3c81e7d4e60dc136bceaef5bfff57ea50c",
+          "report": {
+            "path": "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/native-budget-closure/cost-final/2-baseline/report.json",
+            "sha256": "872856b12854b45a2c9aab927963f6d59aabf167579393ea9702590379c0aed5"
+          }
+        },
+        {
+          "mode": "candidate",
+          "gpu_ms": {
+            "mean": 35.3416,
+            "min": 32.6181,
+            "p50": 35.3032,
+            "p95": 36.6856,
+            "p99": 37.3238,
+            "max": 37.5906
+          },
+          "passed": true,
+          "gpu_allocations": 0,
+          "engine_resource_bytes": 8572021397,
+          "device_allocated_bytes": 11430363136,
+          "binary_sha256": "a8220ca91ab2aeb295cb991e34951c9a5709118f71d0ed46fcbe25b60b34d604",
+          "report": {
+            "path": "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/native-budget-closure/cost-final/3-candidate/report.json",
+            "sha256": "8d580e77c2e735f8a663e8b368873530cf862e2964938e6f818d6e510255e46f"
+          }
+        },
+        {
+          "mode": "baseline",
+          "gpu_ms": {
+            "mean": 49.5266,
+            "min": 45.3442,
+            "p50": 48.6343,
+            "p95": 55.6478,
+            "p99": 58.1347,
+            "max": 58.8173
+          },
+          "passed": true,
+          "gpu_allocations": 0,
+          "engine_resource_bytes": 12022490133,
+          "device_allocated_bytes": 13944324096,
+          "binary_sha256": "7a6763b23fff062f0a56c5dc9d1a1c3c81e7d4e60dc136bceaef5bfff57ea50c",
+          "report": {
+            "path": "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/native-budget-closure/cost-final/4-baseline/report.json",
+            "sha256": "5a47bf1178a9f1d1d50c0404b81736175c2e0af14db09378da6682d50fc37494"
+          }
+        },
+        {
+          "mode": "candidate",
+          "gpu_ms": {
+            "mean": 35.8535,
+            "min": 32.8006,
+            "p50": 35.7503,
+            "p95": 38.6937,
+            "p99": 39.1595,
+            "max": 39.7984
+          },
+          "passed": true,
+          "gpu_allocations": 0,
+          "engine_resource_bytes": 8572021397,
+          "device_allocated_bytes": 11430363136,
+          "binary_sha256": "a8220ca91ab2aeb295cb991e34951c9a5709118f71d0ed46fcbe25b60b34d604",
+          "report": {
+            "path": "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/native-budget-closure/cost-final/5-candidate/report.json",
+            "sha256": "46c31c8a1a4bbded1560c2ef2d25d1f2f7ec1d6a869075d54489440f65735d83"
+          }
+        },
+        {
+          "mode": "baseline",
+          "gpu_ms": {
+            "mean": 49.353,
+            "min": 44.8282,
+            "p50": 49.1822,
+            "p95": 53.3184,
+            "p99": 54.9201,
+            "max": 56.2282
+          },
+          "passed": true,
+          "gpu_allocations": 0,
+          "engine_resource_bytes": 12022490133,
+          "device_allocated_bytes": 13944324096,
+          "binary_sha256": "7a6763b23fff062f0a56c5dc9d1a1c3c81e7d4e60dc136bceaef5bfff57ea50c",
+          "report": {
+            "path": "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/native-budget-closure/cost-final/6-baseline/report.json",
+            "sha256": "39e0f6e21c2749d22852e25f17608fbfdb28a4b123daf58b041ea186243e42de"
+          }
+        }
+      ],
+      "pairs": [
+        {
+          "indices": [
+            0,
+            1,
+            2
+          ],
+          "baseline_p50_mean": 43.2789,
+          "candidate_p50": 29.4446,
+          "baseline_drift_fraction": 0.13029906028110702,
+          "drift_passed": false,
+          "speedup_fraction": 0.3196546122937505,
+          "budget_passed": false
+        },
+        {
+          "indices": [
+            2,
+            3,
+            4
+          ],
+          "baseline_p50_mean": 47.3664,
+          "candidate_p50": 35.3032,
+          "baseline_drift_fraction": 0.05353583975138499,
+          "drift_passed": false,
+          "speedup_fraction": 0.2546784218348872,
+          "budget_passed": false
+        },
+        {
+          "indices": [
+            4,
+            5,
+            6
+          ],
+          "baseline_p50_mean": 48.90825,
+          "candidate_p50": 35.7503,
+          "baseline_drift_fraction": 0.011202608966789825,
+          "drift_passed": true,
+          "speedup_fraction": 0.26903334304539617,
+          "budget_passed": false
+        }
+      ]
+    },
+    {
+      "series": "cost-soaked",
+      "conditioned_before_series": true,
+      "rows": [
+        {
+          "mode": "baseline",
+          "gpu_ms": {
+            "mean": 45.0685,
+            "min": 40.4424,
+            "p50": 45.0868,
+            "p95": 47.1837,
+            "p99": 49.2426,
+            "max": 50.9397
+          },
+          "passed": true,
+          "gpu_allocations": 0,
+          "engine_resource_bytes": 12022490133,
+          "device_allocated_bytes": 13952630784,
+          "binary_sha256": "7a6763b23fff062f0a56c5dc9d1a1c3c81e7d4e60dc136bceaef5bfff57ea50c",
+          "report": {
+            "path": "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/native-budget-closure/cost-soaked/0-baseline/report.json",
+            "sha256": "e59b4ad713aa64743d7b557b9d4e83639e7853b368ecde99f172c0e80c8ed78f"
+          }
+        },
+        {
+          "mode": "candidate",
+          "gpu_ms": {
+            "mean": 31.267,
+            "min": 30.737,
+            "p50": 31.0503,
+            "p95": 32.8628,
+            "p99": 33.479,
+            "max": 34.0585
+          },
+          "passed": true,
+          "gpu_allocations": 0,
+          "engine_resource_bytes": 8572021397,
+          "device_allocated_bytes": 11422056448,
+          "binary_sha256": "a8220ca91ab2aeb295cb991e34951c9a5709118f71d0ed46fcbe25b60b34d604",
+          "report": {
+            "path": "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/native-budget-closure/cost-soaked/1-candidate/report.json",
+            "sha256": "691c9f5e3db8c2b0d83077caf7157810f4f7ac7b9b5e81321ed1162bf0cee1cc"
+          }
+        },
+        {
+          "mode": "baseline",
+          "gpu_ms": {
+            "mean": 45.8293,
+            "min": 40.3368,
+            "p50": 45.4422,
+            "p95": 49.3465,
+            "p99": 53.1241,
+            "max": 53.897
+          },
+          "passed": true,
+          "gpu_allocations": 0,
+          "engine_resource_bytes": 12022490133,
+          "device_allocated_bytes": 13952630784,
+          "binary_sha256": "7a6763b23fff062f0a56c5dc9d1a1c3c81e7d4e60dc136bceaef5bfff57ea50c",
+          "report": {
+            "path": "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/native-budget-closure/cost-soaked/2-baseline/report.json",
+            "sha256": "74ceac3a49d6a57e4c14dfb10e6f5b6f7bcd0e96b1a6c85cd102c1c0a4043f2f"
+          }
+        },
+        {
+          "mode": "candidate",
+          "gpu_ms": {
+            "mean": 33.3629,
+            "min": 32.7724,
+            "p50": 33.3222,
+            "p95": 33.7771,
+            "p99": 34.022,
+            "max": 34.4781
+          },
+          "passed": true,
+          "gpu_allocations": 0,
+          "engine_resource_bytes": 8572021397,
+          "device_allocated_bytes": 11422056448,
+          "binary_sha256": "a8220ca91ab2aeb295cb991e34951c9a5709118f71d0ed46fcbe25b60b34d604",
+          "report": {
+            "path": "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/native-budget-closure/cost-soaked/3-candidate/report.json",
+            "sha256": "da75ad14f38c15d006fc8ee7c1fe14bb1efde0679c2812e706a1d0b4186b24f3"
+          }
+        },
+        {
+          "mode": "baseline",
+          "gpu_ms": {
+            "mean": 44.3598,
+            "min": 42.3294,
+            "p50": 44.2938,
+            "p95": 46.2207,
+            "p99": 46.834,
+            "max": 47.0476
+          },
+          "passed": true,
+          "gpu_allocations": 0,
+          "engine_resource_bytes": 12022490133,
+          "device_allocated_bytes": 13952630784,
+          "binary_sha256": "7a6763b23fff062f0a56c5dc9d1a1c3c81e7d4e60dc136bceaef5bfff57ea50c",
+          "report": {
+            "path": "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/native-budget-closure/cost-soaked/4-baseline/report.json",
+            "sha256": "0cb9e6abc36cc9a1b99286153e01483d35f141b7f0e81bb112d89659c4b90639"
+          }
+        },
+        {
+          "mode": "candidate",
+          "gpu_ms": {
+            "mean": 33.578,
+            "min": 32.2901,
+            "p50": 33.4688,
+            "p95": 34.7777,
+            "p99": 35.1869,
+            "max": 35.304
+          },
+          "passed": true,
+          "gpu_allocations": 0,
+          "engine_resource_bytes": 8572021397,
+          "device_allocated_bytes": 11430363136,
+          "binary_sha256": "a8220ca91ab2aeb295cb991e34951c9a5709118f71d0ed46fcbe25b60b34d604",
+          "report": {
+            "path": "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/native-budget-closure/cost-soaked/5-candidate/report.json",
+            "sha256": "b3733577221eb5615083e3a069015e3021dbfb5991eb3f9090780cc71e7edbb8"
+          }
+        },
+        {
+          "mode": "baseline",
+          "gpu_ms": {
+            "mean": 51.3828,
+            "min": 41.1189,
+            "p50": 51.2743,
+            "p95": 59.9077,
+            "p99": 61.1119,
+            "max": 61.7355
+          },
+          "passed": true,
+          "gpu_allocations": 0,
+          "engine_resource_bytes": 12022490133,
+          "device_allocated_bytes": 13952630784,
+          "binary_sha256": "7a6763b23fff062f0a56c5dc9d1a1c3c81e7d4e60dc136bceaef5bfff57ea50c",
+          "report": {
+            "path": "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/native-budget-closure/cost-soaked/6-baseline/report.json",
+            "sha256": "c3f86e691cff00227d9011d734884c6be094d263576e8fcf45f5590cc9c54deb"
+          }
+        }
+      ],
+      "pairs": [
+        {
+          "indices": [
+            0,
+            1,
+            2
+          ],
+          "baseline_p50_mean": 45.2645,
+          "candidate_p50": 31.0503,
+          "baseline_drift_fraction": 0.007851627655226569,
+          "drift_passed": true,
+          "speedup_fraction": 0.31402533994631554,
+          "budget_passed": false
+        },
+        {
+          "indices": [
+            2,
+            3,
+            4
+          ],
+          "baseline_p50_mean": 44.867999999999995,
+          "candidate_p50": 33.3222,
+          "baseline_drift_fraction": 0.02559507889810115,
+          "drift_passed": true,
+          "speedup_fraction": 0.25732816261032343,
+          "budget_passed": false
+        },
+        {
+          "indices": [
+            4,
+            5,
+            6
+          ],
+          "baseline_p50_mean": 47.78404999999999,
+          "candidate_p50": 33.4688,
+          "baseline_drift_fraction": 0.14608431055969515,
+          "drift_passed": false,
+          "speedup_fraction": 0.2995821827576355,
+          "budget_passed": false
+        }
+      ]
+    }
+  ],
+  "rejected_experiments": [
+    {
+      "name": "1D dispatch128",
+      "reason": "No useful measured full-frame gain",
+      "artifact": "dispatch128-report.json"
+    },
+    {
+      "name": "power64 multiplication chain",
+      "reason": "No useful measured full-frame gain",
+      "artifact": "power-ready-report.json"
+    },
+    {
+      "name": "large stride4 shared tile",
+      "reason": "Shader validation required61440B, above32768B",
+      "artifact": "quality-v3/noon-tiled/renderer.log"
+    },
+    {
+      "name": "experimental guide validity bit",
+      "reason": "Aliased specular error flag; independent image comparison failed; corrected with disjoint-bit static assertion",
+      "artifact": "quality-v4/results.json"
+    },
+    {
+      "name": "SIMD row / sparse sublattice stride4",
+      "reason": "Image-correct but no useful wider-stride speedup; original stride4+ retained",
+      "artifacts": [
+        "cost-v1/results.json",
+        "cost-v2/results.json"
+      ]
+    }
+  ],
+  "guard_malloc": {
+    "process_passed": true,
+    "failures": [],
+    "reclaimed": 20,
+    "weak_nil": 20,
+    "passed": true,
+    "plan": "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/native-budget-closure/guard-lifetime/plan.json"
+  },
+  "native_unit_regressions": [
+    {
+      "name": "constant-unit",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "name": "constant-scaled-pair",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "name": "impulse-scaled-pair",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "name": "channels-motion-normal-roughness",
+      "passed": true,
+      "errors": []
+    }
+  ]
+}

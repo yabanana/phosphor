@@ -1028,3 +1028,31 @@ not an adopted default; existing coarse presets do not inherit its quality.
 Aerial perspective and specular atrous passes are major measured units. No OPT
 is activated. F13 specular quality and native denoised qualification remain
 open independently of these cost results. Development stops at F14.
+
+
+## 2026-10-08 — F13/F14 native lifetime and measured cost follow-up
+
+M5 Max128GB, macOS27.2 (26B5091g), Release/AOT. Full Sponza native1920x1080,
+all F10–F14 features, DDGI16x8x16/64rays,128warmup+256measured frames and
+serial GPU timing. Resolution, filter taps/history and GI/reflection rays are
+unchanged. New shared-memory strides1/2, bounded short aerial quadrature and
+DDGI-only allocation/work removal pass independent/runtime and image checks.
+
+Two A/B/A series preserve all raw reports. Selected p50 runs are
+29.4446/35.3032/35.7503ms; after device conditioning31.0503/33.3222/33.4688ms.
+Three of six pairs satisfy the predeclared5% baseline-drift gate, giving
+26.90%,31.40%,25.73% lower p50. Rejected pairs are not silently averaged into
+that claim. **16.67ms remains unmet.** The matching baseline also drifts above
+the earlier40–42ms observation; no cause of that drift is claimed without
+hardware-counter evidence. Every selected run has0steady GPU allocations;
+DDGI logical resources decrease by3,450,468,736bytes at1080p.
+
+The native SDK leak is separately localized to its POD HUD timing record.
+Version/image/layout-guarded retirement passes300SDK frames,4views,3sizes,
+2generations and20scalers with0leaks. Its disabled-control returns20leaks /
+12800B. This is an engine workaround for one verified private ABI, not an
+Apple fix. Native HDR still fails its unchanged1% gate, so custom remains
+selected and no later phase is entered.
+
+Evidence and limits: [follow-up](implementation/F13-F14-BUDGET-CLOSURE-2026-10-08.md),
+[ledger](results/F13-F14-budget-followup-M5Max-2026-10-08.json).

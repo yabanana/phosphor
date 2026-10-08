@@ -25,8 +25,8 @@ logs remain in the aggregator worktree's `build/` directories.
 | F11.5 | Reduced clustered/DI path and Many Lights workload | Physical base/Pro devices unavailable; 1024-light full profile is about25 ms on M5 Max |
 | F12.1–F12.5 | DDGI, keyed radiance cache, ReSTIR GI, emissive changes, independent Mitsuba export/reference | Dense DDGI is the strongest measured quality candidate; cost gate and Sponza dynamic quality remain open. Cache/ReSTIR variability is retained as a limitation |
 | F13.1–F13.2 | RT/SSR/cache/probe reflection paths, RTAO/GTAO, separate signal composition | Broad roughness/disocclusion references remain pending |
-| F13.3 | Typed native adapter and real SDK channel/lifecycle fixtures | **Partial:** production native radiometry is unqualified and uses custom Float32 before the graph. Native SDK retains640 B per creation in the standalone reduction |
-| F13.4 | Per-signal temporal/atrous custom denoising | Static Sponza still shows specular noise with frozen clock; AO/filtered-GI successes do not close this quality defect |
+| F13.3 | Typed native adapter and real SDK channel/lifecycle fixtures | **Partial:** production native radiometry is unqualified and uses custom Float32 before the graph. The unchanged public reduction retains640 B per creation; the verified-image timing-record retirement now passes300native frames with0leaks (see follow-up) |
+| F13.4 | Per-signal temporal/atrous custom denoising | PR20 corrects stochastic endpoint rejection and closes the reproduced static Sponza noise defect; broad dynamic GGX quality remains pending |
 | F13.5 | Static raster/RT/cooked cubemaps, hierarchy bounds, GGX prefilter, parallax; wide HDR preserved on supported Apple9/reduced paths | The bounded split-sum BRDF remains approximate, especially rough/grazing cases |
 | F13.6 | Immutable linear captures, independent physical AO control, history checkpoints, temporal metrics and negative controls | **Partial:** moving-camera disocclusions and a converged dynamic GGX/reference corpus remain pending |
 | F14.1–F14.4 | Atmosphere LUTs, aerial perspective, froxel fog, clouds, sun/moon/stars and clock jumps | Sparse physical numerics and300-frame full-rate comparisons pass. Continuous celestial changes conservatively reset fog/cloud history; general temporal reuse under changing radiometry is not claimed |
@@ -37,15 +37,12 @@ The detailed [F12 status](implementation/F12-STATUS-2026-10-07.md) retains its
 per-task evidence and gaps. Native admission follows the
 [F13 radiometry policy](implementation/F13-RADIOMETRY-POLICY.md).
 
-The final static-Sponza visual check exposes substantial specular noise, also
-with the celestial clock frozen and auto exposure enabled. Completed GPU
-checkpoints at640×360 show full valid/reused histories for DI, GI and AO by
-frame31; specular reuse is110008/230400 pixels (47.75%) in that frame. Thus a
-global history reset is not established as the sole cause. Per-ray path/hit
-rejection in the specular filter is a concrete candidate for further bounded
-verification, not a proved or corrected cause. F13.4/F13.6 qualification
-remains open. The opt-in history diagnostic changes no denoise parameters or
-shader algorithm and requires `--debug-lighting`.
+The original static-Sponza noise observation is preserved in the earlier reports.
+PR20 establishes and fixes incorrect stochastic endpoint rejection; see the
+[F13 qualification](implementation/F13-QUALIFICATION-2026-10-08.md). The subsequent
+[lifetime/budget follow-up](implementation/F13-F14-BUDGET-CLOSURE-2026-10-08.md)
+records the bounded native timing-record retirement and validated custom-path
+cost reductions. Native HDR, sustained60fps and broad dynamic GGX remain open.
 Raw evidence: `build/f13-history-sponza-static-v1/history.json`,
 `build/f10-f14-sponza-daylight-review/sponza-daylight.png` and
 `build/f10-f14-sponza-frozen-review/sponza-frozen.png` in the aggregator checkout;

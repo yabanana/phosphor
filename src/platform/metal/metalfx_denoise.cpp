@@ -148,7 +148,8 @@ struct MetalfxDenoise::Impl {
     u32 flags()const {
         return (options.specularHitDistance?METALFX_PACK_HIT_DISTANCE:0u) |
             (options.reactiveMask?METALFX_PACK_REACTIVE:0u) |
-            (options.strengthMask?METALFX_PACK_STRENGTH:0u);
+            (options.strengthMask?METALFX_PACK_STRENGTH:0u) |
+            (options.diagnosticFloat32Color?METALFX_PACK_FLOAT32_COLOR:0u);
     }
     u32 descriptorFlags()const {
         // Request identity includes SDK exposure mode; shader pack flags do not.
@@ -563,7 +564,10 @@ struct MetalfxDenoise::Impl {
         s->setSpecularHitDistanceTexture(options.specularHitDistance?get(Channel::HitDistance):nullptr);
         s->setReactiveMaskTexture(options.reactiveMask?get(Channel::Reactive):nullptr);
         s->setDenoiseStrengthMaskTexture(options.strengthMask?get(Channel::Strength):nullptr);
-        s->setTransparencyOverlayTexture(nullptr);s->setExposureTexture(get(Channel::Exposure));s->setPreExposure(frame.preExposure);
+        s->setTransparencyOverlayTexture(nullptr);s->setExposureTexture(get(Channel::Exposure));s->setPreExposure(options.diagnosticPackedColorUnits?1.f:frame.preExposure);
+        stats.observedSdkPreExposure=s->preExposure();
+        if(stats.observedSdkPreExposure!=(options.diagnosticPackedColorUnits?1.f:frame.preExposure))
+            throw std::runtime_error("SDK preExposure property mismatch");
         const auto scale=metalfx_denoise::sdkMotionScale(),jitter=metalfx_denoise::sdkJitter(frame.jitterPixels);
         s->setMotionVectorScaleX(scale.x);s->setMotionVectorScaleY(scale.y);s->setJitterOffsetX(jitter.x);s->setJitterOffsetY(jitter.y);
         s->setDepthReversed(true);s->setShouldResetHistory(reset);

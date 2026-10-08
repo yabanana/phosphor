@@ -55,6 +55,7 @@ struct MetalfxDenoiseFixture::Impl {
         GPUFXFixtureParams tag{};u64 frame=0;u32 view=0,shaderGeneration=0;bool steady=false;
         u64 inputSignalEpoch=0,signalEpoch=0,sdkResetsBefore=0,sdkEncodesBefore=0,sdkEncodeDelta=0;
         bool requestedReset=false,requestedCut=false,channelsWrap=false,sdkResetSubmitted=false;
+        float observedSdkPreExposure=0;
     };
     std::array<std::array<Slot,METAL_FRAMES_IN_FLIGHT>,HistoryRegistry::MaxViews> slots{};
     std::array<rg::TextureRef,InputCount> refs{};rg::TextureRef sdk{},physical{};
@@ -71,7 +72,8 @@ struct MetalfxDenoiseFixture::Impl {
     std::map<u32,ScaledPair> pairs;
     bool finishCalled=false,prewarmAttempted=false,prewarmReady=false;double prewarmElapsedMs=0;
     std::string prewarmStatus="NOT_ATTEMPTED";
-    u64 transitionWaits=0,transitionReady=0;double transitionWaitMs=0;bool diagnosticSkipDenoise=false,diagnosticFloat32=false;
+    u64 transitionWaits=0,transitionReady=0;double transitionWaitMs=0;bool diagnosticSkipDenoise=false,diagnosticFloat32=false,diagnosticPhysical=false,diagnosticPackedUnits=false;
+    float manualRequested=WideManualExposure,manualProvided=WideManualExposureR16;
     Impl(MetalContext& context,PipelineCache& pipelines,MetalfxDenoise::Factory factory,Options o):c(context),p(pipelines),options(std::move(o)) {
         if(!MetalfxDenoiseFixture::validScenario(options.scenario)||options.outputDirectory.empty())throw std::invalid_argument("Invalid denoised fixture scenario/output");
         if(const char* value=std::getenv("PHOSPHOR_DIAGNOSTIC_METALFX_SKIP_DENOISE");value&&std::strcmp(value,"1")==0){
@@ -85,13 +87,23 @@ struct MetalfxDenoiseFixture::Impl {
             if(options.scenario!="wide-hdr")throw std::invalid_argument("Float32 SDK diagnostic requires the wide-HDR fixture");
             diagnosticFloat32=true;sdkOptions.diagnosticFloat32Color=true;
         }
+        if(const char* value=std::getenv("PHOSPHOR_DIAGNOSTIC_METALFX_PHYSICAL");value&&std::strcmp(value,"1")==0) {
+            if(!diagnosticFloat32||!options.manualExposureControl||options.autoExposure)
+                throw std::invalid_argument("Physical HDR diagnostic requires Float32 wide-HDR with manual exposure");
+            diagnosticPhysical=true;manualRequested=.5f/368640.f;manualProvided=23.f/16777216.f;
+        }
+        if(const char* value=std::getenv("PHOSPHOR_DIAGNOSTIC_METALFX_PACKED_UNITS");value&&std::strcmp(value,"1")==0) {
+            if(options.scenario!="wide-hdr"||!options.manualExposureControl||options.autoExposure||diagnosticPhysical)
+                throw std::invalid_argument("Packed-color-unit diagnostic requires manual wide-HDR with external pre-exposure");
+            diagnosticPackedUnits=true;sdkOptions.diagnosticPackedColorUnits=true;
+        }
         // Only this isolated, tagged fixture can exercise unqualified SDK
         // radiometry. No production CLI flag grants this admission.
         sdkOptions.radiometricDomain=metalfx_denoise::RadiometricDomain::ControlledFixtureDiagnostic;
         sdkOptions.autoExposure=options.autoExposure;
         // Supply a binary16-representable float so native texture-write rounding
         // cannot choose a different texel. Preserve the analytic request in logs.
-        sdkOptions.manualExposure=options.manualExposureControl?WideManualExposureR16:1.f;
+        sdkOptions.manualExposure=options.manualExposureControl?manualProvided:1.f;
         sdkOptions.resizeSettleFrames=0; // controlled fixture extents; production keeps its async settling
         sdkOptions.reactiveMask=true;sdkOptions.specularHitDistance=false;sdkOptions.strengthMask=true;
         sdkOptions.sdkOutputScale=options.preExposedPolicy?MetalfxDenoise::Options::OutputScale::PreExposed:MetalfxDenoise::Options::OutputScale::Unverified;
@@ -107,23 +119,27 @@ struct MetalfxDenoiseFixture::Impl {
         }
         adapter.reset();for(auto& view:slots)for(auto& s:view){release(s);for(auto* t:{s.generate,s.depth,s.readback})if(t)t->release();}
         if(depthState)depthState->release();}
-    std::string exposureMetadata(const GPUFXFixtureSample* packedSamples=nullptr)const {
+    std::string exposureMetadata(const GPUFXFixtureSample* packedSamples=nullptr,float recordedPreExposure=0)const {
         const auto& stats=adapter->stats();std::ostringstream out;
+        const float observed=packedSamples?recordedPreExposure:stats.observedSdkPreExposure;
         out<<",\"native_radiometric_domain\":"<<quote(metalfx_denoise::radiometricDomainName(stats.radiometricDomain))
            <<",\"native_production_qualified\":false"
            <<",\"diagnostic_skip_denoise\":"<<(diagnosticSkipDenoise?"true":"false")
            <<",\"diagnostic_float32_color\":"<<(diagnosticFloat32?"true":"false")
+           <<",\"diagnostic_packed_color_units\":"<<(diagnosticPackedUnits?"true":"false")
+           <<",\"observed_sdk_preExposure_property\":"<<(observed>0?number(observed):"null")
+           <<",\"diagnostic_physical_input\":"<<(diagnosticPhysical?"true":"false")
            <<",\"auto_exposure_requested\":"<<(options.autoExposure?"true":"false")
            <<",\"exposure_descriptor_configured\":"<<(stats.descriptorConfigured?"true":"false")
            <<",\"auto_exposure_enabled\":"<<(stats.autoExposureEnabled?"true":"false")
            <<",\"exposure_mode\":"<<quote(!stats.descriptorConfigured?"not-configured":stats.autoExposureEnabled?"sdk-auto":"manual")
            <<",\"manual_exposure_control\":"<<(options.manualExposureControl?"true":"false")
            <<",\"manual_exposure_basis\":"<<quote(options.manualExposureControl?"packed-input-color":"unit")
-           <<",\"requested_manual_exposure_fp32\":"<<number(options.manualExposureControl?WideManualExposure:1.f)
-           <<",\"provided_manual_exposure_fp32\":"<<number(options.manualExposureControl?WideManualExposureR16:1.f)
+           <<",\"requested_manual_exposure_fp32\":"<<number(options.manualExposureControl?manualRequested:1.f)
+           <<",\"provided_manual_exposure_fp32\":"<<number(options.manualExposureControl?manualProvided:1.f)
            <<",\"manual_exposure_prequantized\":"<<(options.manualExposureControl?"true":"false")
-           <<",\"expected_manual_exposure_r16\":"<<number(options.manualExposureControl?WideManualExposureR16:1.f)
-           <<",\"provided_manual_exposure_texture_value\":"<<number(packedSamples?packedSamples[0].exposure:options.manualExposureControl?WideManualExposureR16:1.f)
+           <<",\"expected_manual_exposure_r16\":"<<number(options.manualExposureControl?manualProvided:1.f)
+           <<",\"provided_manual_exposure_texture_value\":"<<number(packedSamples?packedSamples[0].exposure:options.manualExposureControl?manualProvided:1.f)
            <<",\"actual_manual_exposure_readback\":"<<(packedSamples?"true":"false")
            <<",\"actual_provided_manual_exposure_texture_value\":"<<(packedSamples?number(packedSamples[0].exposure):"null")
            <<",\"manual_exposure_texture_ignored\":"<<(stats.autoExposureEnabled?"true":"false")
@@ -177,7 +193,7 @@ struct MetalfxDenoiseFixture::Impl {
         params.color[0]=.5f;params.color[1]=.25f;params.color[2]=.125f;
         params.nearPlane=.1f;params.planeDistance=4;params.motionPixels=1;params.impulseAmplitude=.5f;
         frame.preExposure=options.preExposedPolicy&&phase?1.f/64.f:1.f;
-        if(params.scenario==FX_FIXTURE_WIDE_HDR){params.color[0]=368640;params.color[1]=128;params.color[2]=64;frame.preExposure=1.f/64.f;}
+        if(params.scenario==FX_FIXTURE_WIDE_HDR){params.color[0]=368640;params.color[1]=128;params.color[2]=64;frame.preExposure=diagnosticPhysical?1.f:1.f/64.f;}
         params.preExposure=frame.preExposure;
         if(diagnosticSkipDenoise)params.flags|=4u;
         // This is an actual analytic plane camera, independent of whatever scene
@@ -284,6 +300,7 @@ struct MetalfxDenoiseFixture::Impl {
             // These counters advance in the actual SDK encoding callback,
             // after setShouldResetHistory(reset) and encodeToCommandBuffer.
             s.sdkEncodeDelta=adapter->stats().encodedFrames-s.sdkEncodesBefore;
+            s.observedSdkPreExposure=adapter->stats().observedSdkPreExposure;
             s.sdkResetSubmitted=adapter->stats().resets==s.sdkResetsBefore+1u;
             s.tag=params;s.frame=frame.index;s.view=frame.view;s.shaderGeneration=p.generation();s.pending=true;++nativeFrames;
             capturedViews|=1u<<frame.view;
@@ -314,7 +331,7 @@ struct MetalfxDenoiseFixture::Impl {
             if(t.scenario==FX_FIXTURE_CHANNELS)expectedColor=std::abs(int(x)-int(center))<=3?std::array<float,3>{.75f,.5f,.25f}:std::array<float,3>{.125f,.125f,.125f};
             for(u32 j=0;j<3;++j){if(packedSample)expectedColor[j]*=t.preExposure;
                 pass=pass&&std::isfinite(sample.color[j])&&std::abs(sample.color[j]-expectedColor[j])<=(packedSample?.001f:1e-6f)*std::max(1.f,std::abs(expectedColor[j]));}
-            if(packedSample)pass=pass&&sample.exposure==(options.manualExposureControl?WideManualExposureR16:1.f)&&sample.hitDistance==0&&sample.reactive==0&&sample.strength==(diagnosticSkipDenoise?1.f:0.f);
+            if(packedSample)pass=pass&&sample.exposure==(options.manualExposureControl?manualProvided:1.f)&&sample.hitDistance==0&&sample.reactive==0&&sample.strength==(diagnosticSkipDenoise?1.f:0.f);
         }
         return pass;
     }
@@ -336,7 +353,7 @@ struct MetalfxDenoiseFixture::Impl {
                 if(s.tag.preExposure==1)pair.unit.assign(sdkImage.begin(),sdkImage.end());else pair.scaled.assign(sdkImage.begin(),sdkImage.end());
                 if(!pair.unit.empty()&&!pair.scaled.empty()){pair.result=compareFXScaledPair(pair.unit,pair.scaled,1.f/64);pair.checked=true;}
             }
-            const bool historyPass=s.sdkEncodeDelta==1u&&(!(s.requestedReset||s.requestedCut)||s.sdkResetSubmitted);
+            const bool historyPass=s.observedSdkPreExposure==(diagnosticPackedUnits?1.f:s.tag.preExposure)&&s.sdkEncodeDelta==1u&&(!(s.requestedReset||s.requestedCut)||s.sdkResetSubmitted);
             const bool pass=finite&&channelPass&&constantPass&&historyPass;if(!pass)++failures;++checkedFrames;if(s.steady)++steadyFrames;all=all&&pass;
             std::ostringstream stem;stem<<"frame-"<<std::setw(6)<<std::setfill('0')<<s.frame<<"-view-"<<s.view;
             std::filesystem::create_directories(options.outputDirectory);
@@ -347,7 +364,7 @@ struct MetalfxDenoiseFixture::Impl {
                 !writeLinearPfm(base.string()+"-physical.pfm",s.tag.outputWidth,s.tag.outputHeight,physicalImage,error))throw std::runtime_error(error);
             std::ofstream out(base.string()+".json");out<<std::setprecision(17);
             out<<"{\"schema\":\"phosphor.metalfx-fixture.v1\",\"kind\":\"f13-sdk\",\"actual_sdk_encoded\":true,\"frame\":"<<s.frame
-               <<",\"view\":"<<s.view<<",\"slot\":"<<index<<",\"scenario\":"<<quote(options.scenario)<<",\"preExposure\":"<<s.tag.preExposure<<exposureMetadata(samples+4)
+               <<",\"view\":"<<s.view<<",\"slot\":"<<index<<",\"scenario\":"<<quote(options.scenario)<<",\"preExposure\":"<<s.tag.preExposure<<exposureMetadata(samples+4,s.observedSdkPreExposure)
                <<",\"steady\":"<<(s.steady?"true":"false")<<",\"finite\":"<<(finite?"true":"false")<<",\"channels_passed\":"<<(channelPass?"true":"false")
                <<",\"requested_history_reset\":"<<(s.requestedReset?"true":"false")<<",\"requested_camera_cut\":"<<(s.requestedCut?"true":"false")
                <<",\"input_signal_epoch\":"<<s.inputSignalEpoch<<",\"source_signal_epoch\":"<<s.signalEpoch

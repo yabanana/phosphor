@@ -2057,3 +2057,18 @@ Apple9 forzato. Le discrepanze osservate sono su spigoli/coverage/pareggi,
 senza mismatch opaque interni nel corpus. La tolleranza di distanza resta
 quella S0. Questo non promette equivalenza numerica di raster e RT su ogni
 bordo o texture alpha a tutti i LOD.
+
+
+## 2026-10-08 — Measured F13/F14 budget follow-up (owner-authorized)
+
+This does not activate/complete the entire OPT catalogue. Real full-frame
+costs selected bounded experiments: atrous filtering and short-distance aerial
+integration. See [implementation/evidence](implementation/F13-F14-BUDGET-CLOSURE-2026-10-08.md).
+Adopted: exact Float32 shared-memory stencils for strides1/2, qualified adaptive
+aerial quadrature, unused DDGI reservoir allocation/cache-update removal.
+Rejected: generic1D group widening, power64 multiplication chain, oversized
+stride4 shared tiles, SIMD row exchange and sparse sublattice stride4 variants.
+The initial metadata-bit collision was caught by pixel comparison and fixed
+before acceptance. The original wider-stride kernel remains selected. Three
+of six frozen A/B/A pairs pass drift and show25.73–31.40% lower GPU p50;
+all failures and other pairs are retained. The60fps gate is still open.

@@ -93,6 +93,78 @@ kernel void denoise_atrous(constant GPUDenoiseParams& p [[buffer(0)]],const devi
     float3 result=weights>0?sum/weights:value;if(p.signal==DENOISE_SIGNAL_AO)result=saturate(result);output.write(float4(result,1),pixel);
 }
 
+constant constexpr uint DENOISE_TILE_VALID=1u<<30;
+static_assert((DENOISE_TILE_VALID&(SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_PREFILTERED|SPECULAR_SAMPLE_ERROR|SPECULAR_SAMPLE_STOCHASTIC|SPECULAR_SAMPLE_MIXED))==0,
+              "Tile validity must not alias any specular metadata flag");
+// Cache the unchanged 5x5 atrous stencil in threadgroup memory. All source
+// values remain Float32; sample order, rejection rules and filter weights are
+// identical to denoise_atrous. Specializing the stride bounds the shared tile
+// (largest: 24x16x40 = 15360 bytes), without per-pixel guide copies.
+// Larger strides retain the measured-faster scalar reference kernel.
+template<uint Step>
+inline void denoiseAtrousTile(constant GPUDenoiseParams& p,const device GPUDISurface* surfaces,
+    const device GPUSpecularSample* specular,texture2d<float,access::read> input,
+    texture2d<float,access::read> moments,texture2d<float,access::write> output,
+    uint2 group,uint2 local,uint lane,
+    threadgroup float4* colors,threadgroup float4* guides,threadgroup uint2* metadata) {
+    constexpr uint W=16+4*Step,H=8+4*Step,N=W*H;
+    const int2 origin=int2(group*uint2(16,8))-int2(2*Step);
+    for(uint i=lane;i<N;i+=128) {
+        const int2 q=origin+int2(i%W,i/W);float4 color=0,guide=0;uint2 meta=0;
+        if(all(q>=0)&&all(q<int2(p.width,p.height))) {
+            const uint index=uint(q.y)*p.width+uint(q.x);const GPUDISurface surface=surfaces[index];
+            color=input.read(uint2(q));const float3 n=denoiseNormal(surface,p.signal);
+            if(surface.valid&&dot(n,n)>0) {
+                guide=float4(normalize(n),surface.depth);meta.x=as_type<uint>(surface.roughness);
+                meta.y=DENOISE_TILE_VALID|(p.signal==DENOISE_SIGNAL_SPECULAR?specular[index].flags:0u);
+            }
+        }
+        colors[i]=color;guides[i]=guide;metadata[i]=meta;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    const uint2 pixel=group*uint2(16,8)+local;
+    if(any(pixel>=uint2(p.width,p.height)))return;
+    const uint centerIndex=(local.y+2*Step)*W+local.x+2*Step,tid=pixel.y*p.width+pixel.x;
+    const float3 value=colors[centerIndex].rgb;const float4 center=guides[centerIndex];const uint2 centerMeta=metadata[centerIndex];
+    if(!(centerMeta.y&DENOISE_TILE_VALID)){output.write(float4(value,1),pixel);return;}
+    const float variance=moments.read(pixel).z,lum=diLuminance(value);
+    const float taps[5]={1,4,6,4,1};float3 sum=0;float weights=0;
+    for(int y=-2;y<=2;++y)for(int x=-2;x<=2;++x) {
+        const int2 q=int2(pixel)+int2(x,y)*int(Step);
+        if(any(q<0)||any(q>=int2(p.width,p.height)))continue;
+        const uint i=uint(int(centerIndex)+y*int(Step*W)+x*int(Step));
+        const float3 color=colors[i].rgb;const float4 neighbor=guides[i];const uint2 meta=metadata[i];
+        if(!all(isfinite(color))||!(meta.y&DENOISE_TILE_VALID))continue;
+        if(p.signal==DENOISE_SIGNAL_SPECULAR) {
+            if((centerMeta.y|meta.y)&SPECULAR_SAMPLE_ERROR||((centerMeta.y^meta.y)&SPECULAR_SAMPLE_STOCHASTIC))continue;
+            if(!(centerMeta.y&SPECULAR_SAMPLE_STOCHASTIC)||(p.flags&DENOISE_DIAGNOSTIC_ENDPOINTS)) {
+                const GPUSpecularSample a=specular[tid],b=specular[uint(q.y)*p.width+uint(q.x)];
+                if(a.path!=b.path||a.secondarySlot!=b.secondarySlot||a.secondaryGeneration!=b.secondaryGeneration)continue;
+            }
+        }
+        const float normal=pow(max(0.0f,dot(center.xyz,neighbor.xyz)),p.normalPhi);
+        const float depth=exp(-abs(center.w-neighbor.w)/max(1e-6f,p.depthThreshold*max(center.w,neighbor.w)*float(p.atrousStep)));
+        const float radiance=exp(-abs(lum-diLuminance(color))/(p.luminancePhi*sqrt(max(variance,p.varianceFloor))+1e-6f));
+        const float rough=p.signal==DENOISE_SIGNAL_SPECULAR?exp(-abs(as_type<float>(centerMeta.x)-as_type<float>(meta.x))/max(p.roughnessThreshold,1e-6f)):1;
+        const float weight=taps[x+2]*taps[y+2]*(normal*depth*radiance*rough);
+        sum+=color*weight;weights+=weight;
+    }
+    float3 result=weights>0?sum/weights:value;if(p.signal==DENOISE_SIGNAL_AO)result=saturate(result);
+    output.write(float4(result,1),pixel);
+}
+#define DENOISE_TILE_KERNEL(Name,Step) \
+kernel void Name(constant GPUDenoiseParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]], \
+    const device GPUSpecularSample* specular [[buffer(3)]],texture2d<float,access::read> input [[texture(0)]], \
+    texture2d<float,access::read> moments [[texture(1)]],texture2d<float,access::write> output [[texture(2)]], \
+    uint2 group [[threadgroup_position_in_grid]],uint2 local [[thread_position_in_threadgroup]],uint lane [[thread_index_in_threadgroup]]) { \
+    threadgroup float4 colors[(16+4*Step)*(8+4*Step)],guides[(16+4*Step)*(8+4*Step)]; \
+    threadgroup uint2 metadata[(16+4*Step)*(8+4*Step)]; \
+    denoiseAtrousTile<Step>(p,surfaces,specular,input,moments,output,group,local,lane,colors,guides,metadata); \
+}
+DENOISE_TILE_KERNEL(denoise_atrous_tile1,1)
+DENOISE_TILE_KERNEL(denoise_atrous_tile2,2)
+#undef DENOISE_TILE_KERNEL
+
 // History corruption control: wrong view ID without setting an error flag.
 // Independent compatible() rejects it and resets length to1 at the next frame.
 kernel void denoise_corrupt_history_view(constant GPUDenoiseParams& p [[buffer(0)]],device GPUDenoiseHistory* history [[buffer(1)]],uint tid [[thread_position_in_grid]]){
