@@ -34,6 +34,7 @@
 
 namespace MTL4FX {
 class TemporalScaler;
+class TemporalDenoisedScaler;
 }
 
 namespace phosphor::metalfx {
@@ -51,6 +52,12 @@ struct LifetimeCounters {
 /// Wrap a +1 scaler; the deleter calls releaseTemporalScaler. Call after the
 /// creating autorelease pool has drained. A null scaler yields an empty pointer.
 std::shared_ptr<MTL4FX::TemporalScaler> adoptTemporalScaler(MTL4FX::TemporalScaler *scaler);
+
+// F13 SDK diagnostic ownership bridge. The verified MetalFX image forgets
+// its POD HUD timing record. Reclaim only after ordinary release proves the
+// scaler dead, and only for that exact image/class/ivar signature. Unknown
+// frameworks and capture wrappers get plain release. See the root-cause note.
+std::shared_ptr<MTL4FX::TemporalDenoisedScaler> adoptTemporalDenoisedScaler(MTL4FX::TemporalDenoisedScaler*);
 
 enum class ReleaseOutcome { Released, CycleReleased, Wrapped, Retained };
 /// Release the caller's reference given the internal count recorded at adoption;

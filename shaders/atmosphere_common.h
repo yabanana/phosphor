@@ -82,7 +82,15 @@ static AtmoIntegral atmoIntegrate(float3 world,float3 ray,constant GPUAtmosphere
     const AtmoSegment segment=atmoSegment(world,ray,p,limit);out.ground=segment.ground;if(!segment.valid)return out;
     const float3 sun=unitIrradiance?canonicalSun:atmoVec(p.sunDirection);
     const float3 solar=unitIrradiance?float3(1):atmoVec(p.sunIrradiance),moon=atmoVec(p.moonDirection);
-    const uint steps=clamp(p.marchSteps,1u,512u);
+    // Short surface segments do not need a whole atmosphere's quadrature
+    // budget. Keep at least eight samples and resolve the shortest density
+    // scale height by 128 samples; long rays retain the reference budget.
+    // LUT, sky, multiple scattering and ground-boundary integrals are unchanged.
+    const uint referenceSteps=clamp(p.marchSteps,1u,512u);
+    const float span=segment.end-segment.begin;
+    const float required=ceil(span*128.0f/min(p.rayleighScaleHeight,p.mieScaleHeight));
+    const uint steps=includeGroundBoundary||(p.flags&ATMOSPHERE_REFERENCE_AERIAL)?referenceSteps:
+        uint(clamp(required,float(min(8u,referenceSteps)),float(referenceSteps)));
     for(uint i=0;i<steps;++i) {
         const float a=float(i)/float(steps),b=float(i+1)/float(steps),span=segment.end-segment.begin;
         const float t0=segment.begin+span*a*a,t1=segment.begin+span*b*b,ds=t1-t0;

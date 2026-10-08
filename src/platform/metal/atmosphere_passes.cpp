@@ -18,6 +18,7 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
+#include <cstdlib>
 #include <limits>
 #include <stdexcept>
 #include <vector>
@@ -200,6 +201,9 @@ struct AtmospherePasses::Impl {
         AtmosphereUpdate update=physicalUpdate;update.skyRevision=skyUpdate.skyRevision;
         atmosphereParams=makeAtmosphereParams(atmosphere,clockSettings,celestial,update,glm::dvec3(glm::make_vec3(f.constants.cameraPosition)),
                                                glm::value_ptr(inverse),f.constants.viewProjection,f.width,f.height,u32(f.index),f.view);
+        if(const char* value=std::getenv("PHOSPHOR_DIAGNOSTIC_AERIAL_REFERENCE");value&&std::strcmp(value,"1")==0)
+            atmosphereParams.flags|=ATMOSPHERE_REFERENCE_AERIAL;
+        if(f.index==0)LOG_INFO("F14 aerial quadrature: %s",(atmosphereParams.flags&ATMOSPHERE_REFERENCE_AERIAL)?"reference":"distance-adaptive");
         const auto originalAtmosphere=atmosphereParams;
         diagnosticSelected=diagnostics&&(f.index+1)%options.debugLighting==0;diagnosticArmed=false;
         if(diagnostics&&diagnosticSelected){const u32 fault=diagnostics->corruption();

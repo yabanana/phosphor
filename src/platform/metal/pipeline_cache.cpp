@@ -369,10 +369,10 @@ PipelineCache::requestTemporalDenoisedScaler(MTLFX::TemporalDenoisedScalerDescri
         try {std::lock_guard sdkFactoryLock(sdkFactoryMutex_);raw=copy->newTemporalDenoisedScaler(context_.device(),compiler_);}
         catch(...) {pool->release();promise->set_exception(std::current_exception());return;}
         pool->release();
-        // Ordinary ownership ONLY. DENOISED lifetime has not been measured;
-        // never use metalfx::adoptTemporalScaler or private cycle logic.
+        // F13 uses its separately verified POD timing-record retirement.
+        // This is not the F8 temporal scaler self-reference workaround.
         try {
-            promise->set_value(std::shared_ptr<MTL4FX::TemporalDenoisedScaler>(raw,[](auto* p){if(p)p->release();}));
+            promise->set_value(metalfx::adoptTemporalDenoisedScaler(raw));
         } catch(...) {promise->set_exception(std::current_exception());}
     });
     return future;

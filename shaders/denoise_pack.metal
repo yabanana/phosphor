@@ -54,7 +54,8 @@ kernel void denoise_pack(constant GPUMetalfxDenoisePackParams& p [[buffer(0)]],
     float3 C=color.read(pixel).rgb*p.colorScale,N=normal.read(pixel).xyz,D=diffuse.read(pixel).rgb,S=specular.read(pixel).rgb;
     float r=roughness.read(pixel).x,z=depth.read(pixel).x;
     float2 mv=motion.read(pixel).xy;
-    bool colorBad=!all(isfinite(C))||any(C<0.0f)||any(C>65504.0f);
+    const float colorMaximum=(p.flags&METALFX_PACK_FLOAT32_COLOR)?MAXFLOAT:65504.0f;
+    bool colorBad=!all(isfinite(C))||any(C<0.0f)||any(C>colorMaximum);
     bool normalBad=!isfinite(z)||z<0.0f||z>1.0f||
         (z>0.0f&&(!all(isfinite(N))||abs(dot(N,N)-1.0f)>p.normalTolerance));
     bool albedoBad=!all(isfinite(D))||!all(isfinite(S))||any(D<0.0f)||any(D>1.0f)||any(S<0.0f)||any(S>1.0f);
@@ -73,7 +74,7 @@ kernel void denoise_pack(constant GPUMetalfxDenoisePackParams& p [[buffer(0)]],
     if(maskBad)denoisePackError(counters,7u);
     N=(z>0.0f&&all(isfinite(N))&&dot(N,N)>1e-20f)?normalize(N):float3(0,0,1);
     bool repaired=colorBad||normalBad||albedoBad||roughnessBad||motionBad||hitBad||maskBad;
-    packedColor.write(float4(denoisePackRgb(C,65504.0f),1.0f),pixel);
+    packedColor.write(float4(denoisePackRgb(C,colorMaximum),1.0f),pixel);
     packedNormal.write(float4(N,0.0f),pixel);
     packedRoughness.write(float4(isfinite(r)?clamp(r,0.0f,1.0f):1.0f),pixel);
     packedDiffuse.write(float4(denoisePackRgb(D,1.0f),1.0f),pixel);

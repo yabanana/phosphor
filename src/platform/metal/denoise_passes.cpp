@@ -2,6 +2,7 @@
 #include "platform/metal/lighting_dispatch.h"
 #include "platform/metal/metal_graph_executor.h"
 #include "rendergraph/pass_context.h"
+#include "core/log.h"
 #include <array>
 #include <cstring>
 #include <cstdio>
@@ -15,7 +16,8 @@ struct DenoisePasses::Impl {
     static constexpr u32 Signals=4,Views=4,MaxAtrous=5;
     MetalContext& c;PipelineCache& pipelines;LaunchOptions options;DenoiseSettings settings;
     ShadowPasses::Frame frame{};u64 epoch=0,graphVersion=1;
-    bool diagnosticHistory=false,diagnosticEndpoints=false;
+    bool diagnosticHistory=false,diagnosticEndpoints=false,diagnosticReference=false;
+    std::array<pipe::PipelineHandle,2> tiledAtrous{};
     pipe::PipelineHandle temporal{},atrous{},checker{},clear{},corrupt{},poisonNext{};
     std::array<HistoryRegistry,Signals> registries{};
     struct Content {u64 scene=0,external=0,revision=0;bool operator==(const Content&)const=default;};
@@ -50,8 +52,12 @@ struct DenoisePasses::Impl {
             if(!o.debugLighting)throw std::invalid_argument("Specular endpoint negative requires --debug-lighting N");
             diagnosticEndpoints=true;
         }
+        if(const char* value=std::getenv("PHOSPHOR_DIAGNOSTIC_DENOISE_REFERENCE");value&&std::strcmp(value,"1")==0)
+            diagnosticReference=true;
+        LOG_INFO("F13 atrous backend: %s",diagnosticReference?"reference":"tiled strides 1/2, reference 4+");
         if(o.reducedLighting||o.forceApple9){settings.atrousIterations=2;settings.maxHistory=16;}
         temporal=p.request(lighting::kernel("denoise_temporal"));atrous=p.request(lighting::kernel("denoise_atrous"));
+        for(u32 i=0;i<2;++i)tiledAtrous[i]=p.request(lighting::kernel(("denoise_atrous_tile"+std::to_string(1u<<i)).c_str()));
         checker=p.request(lighting::kernel("denoise_check"));clear=p.request(lighting::kernel("lighting_check_clear"));
         corrupt=p.request(lighting::kernel("denoise_history_corrupt_safe"));
         if(o.debugReflectionCorrupt==1)poisonNext=p.request(lighting::kernel("denoise_next_foreign_view"));
@@ -127,11 +133,15 @@ struct DenoisePasses::Impl {
             g.addPass(label+" atrous "+std::to_string(iteration),PassType::Compute,[this,sig,iteration](PassBuilder& b){auto& s=signal[sig];
                 b.read(s.atrousInput[iteration],Usage::ShaderRead,StageDispatch);b.read(s.moments,Usage::ShaderRead,StageDispatch);b.read(s.surface,Usage::ShaderRead,StageDispatch);
                 if(s.metadata.valid())b.read(s.metadata,Usage::ShaderRead,StageDispatch);s.atrousOutput[iteration]=b.createTexture("F13 filtered signal "+std::to_string(sig)+" "+std::to_string(iteration),{Format::RGBA32Float,frame.width,frame.height});
-                s.atrousOutput[iteration]=b.write(s.atrousOutput[iteration],Usage::ShaderWrite,StageDispatch);b.setProfileShaders("denoise_atrous");
+                s.atrousOutput[iteration]=b.write(s.atrousOutput[iteration],Usage::ShaderWrite,StageDispatch);b.setProfileShaders(iteration<2&&!diagnosticReference?("denoise_atrous_tile"+std::to_string(1u<<iteration)).c_str():"denoise_atrous");
             },[this,sig,iteration](PassContext& ctx){auto& s=signal[sig];auto* t=slots[frame.slot][sig].tables[1+iteration];t->setAddress(s.atrousAddress[iteration],0);
                 t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(s.surface))->gpuAddress(),1);t->setAddress(s.metadata.valid()?static_cast<MTL::Buffer*>(ctx.buffer(s.metadata))->gpuAddress():histories[frame.view][sig].pair[s.readSide]->gpuAddress(),3);
                 texture(t,ctx,s.atrousInput[iteration],0);texture(t,ctx,s.moments,1);texture(t,ctx,s.atrousOutput[iteration],2);
-                lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,atrous,t,frame.width*frame.height);});s.filtered=s.atrousOutput[iteration];}
+                if(iteration<2&&!diagnosticReference) {
+                    auto* encoder=static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder());
+                    encoder->setComputePipelineState(pipelines.compute(tiledAtrous[iteration]));encoder->setArgumentTable(t);
+                    encoder->dispatchThreadgroups(MTL::Size::Make((frame.width+15)/16,(frame.height+7)/8,1),MTL::Size::Make(16,8,1));
+                } else lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,atrous,t,frame.width*frame.height);});s.filtered=s.atrousOutput[iteration];}
         if(options.debugReflectionCorrupt==1)g.addPass(label+" negative NEXT foreign view",PassType::Compute,[this,sig](PassBuilder& b){auto& s=signal[sig];
             b.read(s.next,Usage::ShaderRead,StageDispatch);s.next=b.write(s.next,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("denoise_next_foreign_view");
         },[this,sig](PassContext& ctx){auto& s=signal[sig];auto* t=slots[frame.slot][sig].tables[MaxAtrous+4];t->setAddress(s.address,0);t->setAddress(histories[frame.view][sig].pair[s.writeSide]->gpuAddress(),1);
@@ -177,7 +187,7 @@ std::string DenoisePasses::completedCheckpoint(u32 slot,u32 sig)const{
         <<",\"epoch\":"<<tag.epoch<<",\"revision\":"<<tag.revision<<",\"reset\":"<<(tag.reset?"true":"false")
         <<",\"atrous_iterations\":"<<tag.atrousIterations<<'}';return out.str();
 }
-bool DenoisePasses::ready()const{return impl_->pipelines.compute(impl_->temporal)&&impl_->pipelines.compute(impl_->atrous)&&
+bool DenoisePasses::ready()const{for(auto h:impl_->tiledAtrous)if(!impl_->pipelines.compute(h))return false;return impl_->pipelines.compute(impl_->temporal)&&impl_->pipelines.compute(impl_->atrous)&&
     impl_->pipelines.compute(impl_->checker)&&impl_->pipelines.compute(impl_->clear)&&
     (!impl_->options.debugHistoryCorrupt||impl_->pipelines.compute(impl_->corrupt))&&
     (impl_->options.debugReflectionCorrupt!=1||impl_->pipelines.compute(impl_->poisonNext));}

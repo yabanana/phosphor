@@ -42,7 +42,7 @@ reference qualification remains distinct and is not claimed completed.
 
 ## Native SDK alternatives: failures remain visible
 
-No OS installation or private-pointer release was attempted. Public-API
+At the PR20 checkpoint, no OS installation or private-pointer release had been attempted. The later [native lifetime and budget follow-up](F13-F14-BUDGET-CLOSURE-2026-10-08.md) identifies and retires the leaked POD timing record on one exact verified framework image; the HDR gate remains open. Public-API
 create/release reductions tested:
 
 | Configuration | Live wrappers after release | Residual allocations |
