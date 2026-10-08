@@ -82,7 +82,8 @@ Script loadScript() {
     for (const json& p : pds.at("render_pipeline_descriptors")) {
         const Function& vs = script.functions.at(stripPrefix(p.at("vertex_function_descriptor").get<std::string>()));
         const Function& fs = script.functions.at(stripPrefix(p.at("fragment_function_descriptor").get<std::string>()));
-        const json& color = p.at("color_attachments").at(0);
+        const auto colors = p.value("color_attachments", json::array());
+        const json color = colors.empty() ? json{{"pixel_format", "DepthOnly"}} : colors.at(0);
         const std::string blend = color.value("blending_state", std::string("Disabled"));
         // The serializer records a function without function constants as a
         // plain library function even when it was specialised, so only the
@@ -95,8 +96,10 @@ Script loadScript() {
             return p.contains(field) ? script.functions.at(stripPrefix(p.at(field).get<std::string>())).name : std::string();
         };
         const Function& fs = script.functions.at(stripPrefix(p.at("fragment_function_descriptor").get<std::string>()));
+        const auto colors = p.value("color_attachments", json::array());
+        const std::string format = colors.empty() ? "DepthOnly" : colors.at(0).at("pixel_format").get<std::string>();
         script.mesh.insert(name("object_function_descriptor") + "|" + name("mesh_function_descriptor") + "|" +
-                           Script::key(fs) + "|" + p.at("color_attachments").at(0).at("pixel_format").get<std::string>() +
+                           Script::key(fs) + "|" + format +
                            "|" + std::to_string(p.value("max_total_threads_per_object_threadgroup", 0)) + "," +
                            std::to_string(p.value("max_total_threads_per_mesh_threadgroup", 0)) + "," +
                            std::to_string(p.value("payload_memory_length", 0)) + "," +
@@ -243,6 +246,42 @@ TEST_CASE("pipelines script: covers RT kernels, static alpha linkage and SDR/HDR
     present.functions = {"rt_present_vs", "rt_present_fs"};
     CHECK(script.render.count(renderKey(present, "BGRA8Unorm_sRGB", "Disabled")) == 1);
     CHECK(script.render.count(renderKey(present, "RGBA16Float", "Disabled")) == 1);
+}
+
+TEST_CASE("pipelines script: retains F10-F14 lighting, depth-only and physical HDR pipelines") {
+    const Script script = loadScript();
+    for (const char* kernel : {"shadow_surface_guides", "shadow_csm_pcss", "shadow_sun_rt", "shadow_temporal", "shadow_contact",
+                              "shadow_cache_publish", "shadow_cache_initialize", "shadow_cache_validate",
+                              "restir_di_candidates", "restir_di_temporal", "restir_di_spatial", "restir_di_shade_rt",
+                              "ddgi_trace", "ddgi_classify", "ddgi_blend", "ddgi_resolve", "radiance_cache_update",
+                              "gi_candidates", "gi_temporal", "gi_spatial", "gi_shade", "visibility_lit_resolve",
+                              "reflection_rt", "reflection_ssr", "reflection_composite", "reflection_probe_prefilter",
+                              "ao_rtao", "ao_gtao", "denoise_temporal", "denoise_atrous",
+                              "denoise_pack", "denoise_pack_clear", "denoise_restore_radiance",
+                              "atmosphere_transmittance", "atmosphere_multiscattering", "atmosphere_sky_view", "atmosphere_apply",
+                              "fog_inject", "fog_inject_rt", "fog_temporal", "fog_integrate", "fog_apply",
+                              "clouds_march", "clouds_temporal", "clouds_apply"}) {
+        CAPTURE(kernel);
+        CHECK_MESSAGE(script.compute.count(kernel) == 1, "F10-F14 pipeline missing; run both lighting harvest scripts");
+    }
+    for (const char* kernel : {"shadow_sun_rt", "restir_di_shade_rt", "ddgi_trace", "gi_candidates", "gi_temporal",
+                              "gi_spatial", "reflection_rt", "ao_rtao", "fog_inject_rt"}) {
+        CAPTURE(kernel);
+        REQUIRE(script.computeLinked.count(kernel) == 1);
+        CHECK(script.computeLinked.at(kernel) == std::set<std::string>{"rt_alpha_generic"});
+    }
+    CHECK(script.render.count("shadow_depth_vertex|shadow_depth_fragment|DepthOnly|Disabled") == 1);
+    CHECK(script.render.count("shadow_cache_depth_vertex|shadow_cache_depth_fragment|DepthOnly|Disabled") == 1);
+    CHECK(script.render.count("forward_surface_vs|forward_surface_lit_fs|RGBA32Float|Disabled") == 1);
+    bool shadowMesh = false, cacheMesh = false, lightingAlpha = false;
+    for (const auto& key : script.mesh) {
+        shadowMesh |= key.starts_with("|shadow_depth_mesh|shadow_depth_fragment|DepthOnly|");
+        cacheMesh |= key.starts_with("|shadow_cache_depth_mesh|shadow_cache_depth_fragment|DepthOnly|");
+        lightingAlpha |= key.find("|visibility_alpha_lit_fs") != std::string::npos;
+    }
+    CHECK(shadowMesh);
+    CHECK(cacheMesh);
+    CHECK(lightingAlpha);
 }
 
 TEST_CASE("pipelines script: an unlinked alpha declaration cannot satisfy RT linkage coverage") {

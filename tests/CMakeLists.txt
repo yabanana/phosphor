@@ -44,6 +44,23 @@ add_executable(phosphor_tests
     test_rt_scene.cpp
     test_rt_reference.cpp
     test_rt_check.cpp
+    test_shadows.cpp
+    test_shadow_dispatch.cpp
+    test_light_sampling.cpp
+    test_emissive_domain.cpp
+    test_gi.cpp
+    test_gi_lighting_epoch.cpp
+    test_lighting_validation.cpp
+    test_reflection_validation.cpp
+    test_reflections.cpp
+    test_denoise.cpp
+    test_surface_signal_controls.cpp
+    test_positive_lighting_partition.cpp
+    test_atmosphere.cpp
+    test_volume_oracle.cpp
+    test_volumes.cpp
+    test_metalfx_denoise_contract.cpp
+    test_metalfx_fixture_oracle.cpp
     test_scene_check.cpp
     test_scene_extract.cpp
     test_scene_store.cpp
@@ -65,3 +82,17 @@ target_compile_definitions(phosphor_tests PRIVATE PHOSPHOR_SOURCE_DIR="${CMAKE_S
 target_include_directories(phosphor_tests PRIVATE ${CMAKE_SOURCE_DIR}/tools)
 target_compile_options(phosphor_tests PRIVATE ${PHOSPHOR_WARNINGS})
 add_test(NAME phosphor_tests COMMAND phosphor_tests)
+
+# Reference semantic fixture is independent of a renderer/Mitsuba installation.
+# Written only; the tester executes it along with the compiled unit corpus.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME pipeline_harvest_merge COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_pipeline_harvest_merge.py)
+    add_test(NAME f12_reference_contract COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_f12_reference_contract.py)
+    add_test(NAME f13_temporal_light_metrics COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_temporal_light_metrics.py)
+    add_test(NAME f13_metalfx_fixture_runner COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_metalfx_fixture_runner.py)
+    add_test(NAME f13_wide_emissive_check COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_wide_emissive_check.py)
+    add_test(NAME f13_native_radiometry_policy COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_native_radiometry_policy.py)
+    add_test(NAME f14_volume_snapshot_check COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_volume_snapshot_check.py)
+    add_test(NAME f13_physical_ao_temporal_control COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_f13_ao_temporal_check.py)
+endif()

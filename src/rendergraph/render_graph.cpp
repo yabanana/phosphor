@@ -32,7 +32,8 @@ u32 bytesPerPixel(Format format) {
     case Format::Depth32FloatStencil8: return 5;
     case Format::RGBA16Float:
     case Format::RG32Float:            return 8;
-    case Format::RGBA32Float:          return 16;
+    case Format::RGBA32Float:
+    case Format::RGBA32Uint:           return 16;
     }
     return 0;
 }
@@ -58,6 +59,7 @@ const char* formatName(Format format) {
     case Format::RG32Float:            return "RG32Float";
     case Format::RGBA32Float:          return "RGBA32Float";
     case Format::R32Uint:              return "R32Uint";
+    case Format::RGBA32Uint:           return "RGBA32Uint";
     case Format::RG11B10Float:         return "RG11B10Float";
     case Format::RGB10A2Unorm:         return "RGB10A2Unorm";
     case Format::Depth16Unorm:         return "Depth16Unorm";

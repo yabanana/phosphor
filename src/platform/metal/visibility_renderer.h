@@ -22,13 +22,15 @@ class PassContext;
 class VisibilityRenderer {
   public:
     VisibilityRenderer(MetalContext &context, PipelineCache &pipelines, SceneRenderer &scene, MeshRenderer &mesh,
-                       bool binning, bool checks = false, bool tileResolve = false, bool adaptive = false);
+                       bool binning, bool checks = false, bool tileResolve = false, bool adaptive = false, bool lighting = false);
     ~VisibilityRenderer();
     void prepareFrame(u32 slot, u32 width, u32 height, u32 outputWidth, u32 outputHeight, const SceneStore &store,
                       std::array<u32, 3> defaultTextures, float exposure, u32 debugMode,
                       const GPUTemporalParams &temporal, const FrameConstants &constants);
     rg::TextureRef addResolve(rg::RenderGraph &graph, rg::TextureRef visibility, rg::TextureRef depth);
-    void addChecks(rg::RenderGraph &graph);
+    // exposureInput names the SAME graph version used by Post histogram.
+    // Raw resolve/guide checks keep their independent original attachments.
+    void addChecks(rg::RenderGraph &graph,rg::TextureRef exposureInput);
     bool check(const GpuScene &geometry);
     [[nodiscard]] bool needsPoseReset(u32 view, u64 bytes) const {
         return view >= previousInstances_.size() || !previousInstances_[view] || bytes > poseCapacity_;
@@ -42,8 +44,18 @@ class VisibilityRenderer {
     [[nodiscard]] const std::array<u32, ExposureBins> &checkedHistogramLow() const { return checkedHistogramLow_; }
     [[nodiscard]] const std::array<u32, ExposureBins> &checkedHistogramHigh() const { return checkedHistogramHigh_; }
     void addPoseSnapshot(rg::RenderGraph &graph);
+    void resetGraphRefs() { poses_ = {}; composedColor_ = {}; }
+    void prepareLighting(u32 flags, u32 sunIndex);
+    void setLightingTextures(rg::TextureRef sun, rg::TextureRef direct, rg::TextureRef gi);
+    rg::BufferRef importPoseHistory(rg::RenderGraph& graph);
+    [[nodiscard]] MTL::GPUAddress paramsAddress() const { return paramsAddress_; }
+    [[nodiscard]] MTL::GPUAddress temporalAddress() const { return temporalAddress_; }
+    [[nodiscard]] MTL::GPUAddress previousPoseAddress() const { return previousInstances_[view_]->gpuAddress(); }
     rg::TextureRef addPresent(rg::RenderGraph &graph, rg::TextureRef drawable);
-    [[nodiscard]] rg::TextureRef color() const { return outputs_[0]; }
+    // Post-lighting selection must never retarget the already-declared resolve
+    // writes. Encode callbacks bind outputs_ after the whole graph is built.
+    void replaceColor(rg::TextureRef value) { composedColor_=value; }
+    [[nodiscard]] rg::TextureRef color() const { return composedColor_.valid() ? composedColor_ : outputs_[0]; }
     [[nodiscard]] rg::TextureRef visibility() const { return visibility_; }
     [[nodiscard]] rg::TextureRef normalRoughness() const { return outputs_[1]; }
     [[nodiscard]] rg::TextureRef diffuseAlbedo() const { return outputs_[2]; }
@@ -59,6 +71,10 @@ class VisibilityRenderer {
     SceneRenderer &scene_;
     MeshRenderer &mesh_;
     bool binning_;
+    bool lighting_ = false;
+    MTL::DepthStencilState* lightingFallbackDepth_ = nullptr;
+    MTL::GPUAddress lightingAddress_ = 0;
+    rg::TextureRef sun_, direct_, indirect_;
     bool tileResolve_ = false;
     bool adaptive_ = false;
     std::array<MTL::Buffer *, 4> shadingHistory_{};
@@ -74,11 +90,12 @@ class VisibilityRenderer {
     std::array<u32, ExposureBins> checkedHistogramLow_{}, checkedHistogramHigh_{};
     GPUTemporalParams temporal_{};
     std::array<std::vector<GPUInstance>, 4> checkedPreviousPoses_{};
-    std::array<MTL::Buffer *, 8> readbacks_{};
-    std::array<u64, 8> pitches_{};
+    std::array<MTL::Buffer *, 9> readbacks_{};
+    std::array<u64, 9> pitches_{};
     MTL::Buffer *currentReadback_ = nullptr;
     MTL::Buffer *previousReadback_ = nullptr;
     u32 readWidth_ = 0, readHeight_ = 0;
+    bool readColorFloat32_ = false,readExposureFloat32_ = false;
     u64 readPoseCapacity_ = 0;
     bool useBinning_ = false;
     u64 binnedFrames_ = 0, genericFrames_ = 0;
@@ -102,6 +119,7 @@ class VisibilityRenderer {
     pipe::PipelineHandle adaptivePipeline_, saveHistory_;
     std::array<pipe::PipelineHandle, VISIBILITY_CLASSES> resolve_{};
     rg::TextureRef visibility_, depth_;
+    rg::TextureRef composedColor_;
     std::array<rg::TextureRef, 6> outputs_{};
     rg::BufferRef bins_;
 };

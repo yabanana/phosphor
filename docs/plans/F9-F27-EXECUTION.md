@@ -9,8 +9,8 @@ Questo registro coordina i piani esistenti; non sostituisce le caselle della
 ## Checkpoint
 
 - F7/F8 e revisione post-F8 integrate (PR #16/#17); indagine OS abbandonata.
-- F9 in corso su `phase/f9`, con [piano approvato](F9-EXECUTION.md), spike
-  misurati e integrazione BLAS/TLAS/traversal/proxy/diagnostica in verifica.
+- F9 integrata in `main` con PR #18, merge `d5ec450`: [consegna](../F9_HANDOFF.md),
+  spike e misure, BLAS/TLAS/traversal/proxy/diagnostica verificati sul M5.
 - F10–F14 assegnate il 2026-10-07 alla chat **Sviluppo Phosphor** per sola
   scrittura in worktree separato da `7997f12`: sorgenti, shader, test e runner
   non eseguiti. Questa chat aggregatrice conserva F9, review, build, prove

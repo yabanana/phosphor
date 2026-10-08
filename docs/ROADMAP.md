@@ -242,13 +242,13 @@ pubbliche, sorgenti OS, risultati di paper e ipotesi da misurare.
 | Tappa | Consegna principale | Decisione successiva |
 |---|---|---|
 | Fatto | F5/F6 integrate; F7/F8 DEVELOPMENT_ACCEPTED M5 (PR #14, #16), revisione post-F8 e baseline M5 di OPT-4.16 (2026-10-04) | Tempo GPU in MetalFX (69–83% dei frame temporali) e nel ciclo luci (F11): nessuna OPT selezionata |
-| Ora | F9 → F13: infrastruttura RT, ombre, migliaia di luci, GI, riflessi e denoise | Misurare ogni fase sul corpus OPT-4.16; Many Lights verso F11 |
+| Ora | F9 integrata (PR #18, d5ec450); verifica e integrazione F10–F14 | Misurare ogni fase, poi STOP dopo F14 secondo la decisione del proprietario 2026-10-07 |
 | Dopo F13 | Ombre, GI, riflessi e denoise integrati; F14 se utile al corpus | Nuove misure; rivalutare OPT-2 (con OPT-2.0) e le altre ottimizzazioni rese necessarie dal frame con luce |
 | Sviluppo successivo | Materiali/mondo/streaming e runtime richiesti dalla slice | Attivare un piano dettagliato quando il suo consumatore è concreto |
 | Piattaforma di prodotto | F27 integrazione ECS → nucleo F41/F21 → F39/F40 → editor F34 | Riuso e parità funzionale verificati; implementazione progressiva senza avviare optimizer generali |
 | Frontiera | F29–F33 e ricerca SoC avanzata | Attivazione per trigger misurato; nessuna dipendenza automatica della slice |
 
-Il checkpoint corrente è **F7/F8 DEVELOPMENT_ACCEPTED sul M5 e revisione post-F8 chiusa; prossima fase F9; OPT-2 dopo F13**, con una baseline corretta e
+Il checkpoint corrente è **F9 integrata e DEVELOPMENT_ACCEPTED sul M5; F10–F14 in sviluppo/verifica; stop dopo F14**, con una baseline corretta e
 semplice a ogni passaggio. Cooker, runtime e strumenti minimi si introducono
 quando necessari ai contenuti correnti. Le OPT non sono una barriera obbligatoria
 fra ere; F37 può usare fallback e preset misurati senza aspettare ogni idea
@@ -531,6 +531,8 @@ M3. [Consegna](F9_HANDOFF.md), [dati](results/F9-M5Max-2026-10-07.json).
 
 ## F10 — Ombre ibride [AAA]
 
+**Integrazione 2026-10-07:** sorgente implementata nella baseline sperimentale F10–F14, con verifiche M5 circoscritte. Le caselle restano aperte dove i criteri complessivi non sono chiusi: [risultati, costi e residui per ID](F10_F14_HANDOFF.md). Nessuna certificazione fisica T0 o chiusura implicita delle OPT.
+
 - [ ] F10.1 CSM a 4 cascate renderizzate con mesh shader, stabilizzate, PCSS (fallback T0)
 - [ ] F10.2 Ombre RT del sole con penombra fisica (1 raggio + denoise)
 - [ ] F10.3 Ombre RT per luci locali integrate con ReSTIR
@@ -538,6 +540,8 @@ M3. [Consegna](F9_HANDOFF.md), [dati](results/F9-M5Max-2026-10-07.json).
 - [ ] F10.5 Cache delle ombre statiche (aggiornamento solo delle regioni cambiate)
 
 ## F11 — Migliaia di luci [AAA]
+
+**Integrazione 2026-10-07:** sorgente implementata nella baseline sperimentale F10–F14, con verifiche M5 circoscritte. Le caselle restano aperte dove i criteri complessivi non sono chiusi: [risultati, costi e residui per ID](F10_F14_HANDOFF.md). Nessuna certificazione fisica T0 o chiusura implicita delle OPT.
 
 - [ ] F11.1 ReSTIR DI (port da `legacy/vulkan/shaders/lighting/`): candidati, riuso temporale e spaziale, shading
 - [ ] F11.2 Luci ad area (rettangoli, dischi, tubi) e mesh emissive campionate
@@ -549,6 +553,8 @@ M3. [Consegna](F9_HANDOFF.md), [dati](results/F9-M5Max-2026-10-07.json).
 
 ## F12 — Illuminazione globale [AAA]
 
+**Integrazione 2026-10-07:** sorgente implementata nella baseline sperimentale F10–F14, con verifiche M5 circoscritte. Le caselle restano aperte dove i criteri complessivi non sono chiusi: [risultati, costi e residui per ID](F10_F14_HANDOFF.md). Nessuna certificazione fisica T0 o chiusura implicita delle OPT.
+
 - [ ] F12.1 DDGI in compute (port da `legacy/vulkan/shaders/gi/` con `intersector`): trace, atlanti, classificazione e riallocazione delle sonde
 - [ ] F12.2 **Radiance cache a hash spaziale** (stile SHaRC) come cache unica per GI e riflessioni ruvide
 - [ ] F12.3 ReSTIR GI su T2+ sopra la radiance cache
@@ -559,9 +565,11 @@ M3. [Consegna](F9_HANDOFF.md), [dati](results/F9-M5Max-2026-10-07.json).
 
 ## F13 — Riflessioni, AO e denoiser [AAA]
 
+**Integrazione 2026-10-07:** sorgente implementata nella baseline sperimentale F10–F14, con verifiche M5 circoscritte. Le caselle restano aperte dove i criteri complessivi non sono chiusi: [risultati, costi e residui per ID](F10_F14_HANDOFF.md). Nessuna certificazione fisica T0 o chiusura implicita delle OPT.
+
 - [ ] F13.1 Riflessioni RT per roughness bassa, fallback su radiance cache e SSR (T0)
 - [ ] F13.2 RTAO (T1+) / GTAO (T0)
-- [ ] F13.3 **MetalFX denoised upscaler** (Apple9) collegato ai canali di F7.6
+- [ ] F13.3 **MetalFX denoised upscaler** (Apple9) collegato ai canali di F7.6 — **parziale, nativo di produzione non promosso**: adapter e fixture SDK reali disponibili; radiometria scene-linear/HDR non qualificata, incluso il controllo wide-HDR finale fuori soglia. In produzione viene scelto il custom Float32 prima del grafo; esecuzione nativa limitata alle fixture diagnostiche esplicite. Vedi [policy radiometrica](implementation/F13-RADIOMETRY-POLICY.md).
 - [ ] F13.4 Denoiser custom leggero per T0 (temporal + atrous) quando il denoiser MetalFX non è usato
 - [ ] F13.5 Probe di riflessione statiche filtrate per T0
 - [ ] F13.6 **Qualità temporale di luce e denoise**: estendere F8.7 con luci ed emissive in movimento, variazioni di GI, riflessi a diverse roughness e superfici appena disoccluse; verificare motion vector, rejection/invalidation della storia e recupero dopo camera cut, con confronto al riferimento di F12.5 e soglie per tier
@@ -600,6 +608,8 @@ senza imporre il 90% quando aumenta la contesa [R91].
 - [ ] OPT-2.11 **[CANDIDATO]** Tempo di compilazione e numero di varianti misurati; pruning delle varianti mai usate
 
 ## F14 — Cielo, atmosfera, nuvole, meteo [AAA]
+
+**Integrazione 2026-10-07:** sorgente implementata nella baseline sperimentale F10–F14, con verifiche M5 circoscritte. Le caselle restano aperte dove i criteri complessivi non sono chiusi: [risultati, costi e residui per ID](F10_F14_HANDOFF.md). Nessuna certificazione fisica T0 o chiusura implicita delle OPT.
 
 - [ ] F14.1 Atmosfera fisica (Hillaire): LUT di trasmittanza, multi-scattering, sky-view
 - [ ] F14.2 Nebbia volumetrica froxel con scattering di luci e ombre, integrata con la GI

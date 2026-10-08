@@ -1,0 +1,310 @@
+{
+  "scope": "Public API create-only reduction; no engine, command queues, textures or encoding. Original executable exited0; leaks tool exited1 in each case.",
+  "original_source_sha256": "412bbea2d0260d7032d18118d4a419f4dc500181d480c2b011fc00ca561eb9ce",
+  "retained_source_comment_only_changes": true,
+  "cases": [
+    {
+      "name": "sdk-create-1",
+      "record": {
+        "schema": "phosphor.sdk-create-only.v1",
+        "count": 1,
+        "created": 1,
+        "gpu_encodes": 0,
+        "shared_compilers": 1,
+        "factory_serialized": true,
+        "requires_synchronous_initialization": true,
+        "extent": [
+          128,
+          96,
+          128,
+          96
+        ],
+        "os_version": [
+          27,
+          2,
+          0
+        ],
+        "supported": true,
+        "compiler_created": true,
+        "descriptor_matched": true,
+        "worker_exception": false,
+        "worker_joined": true,
+        "weak_alive_after_creation": true,
+        "weak_nil_after_worker_release": true,
+        "weak_nil_after_teardown": true,
+        "objects": [
+          {
+            "index": 0,
+            "created": true,
+            "create_ms": 93.538375,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          }
+        ],
+        "public_object_lifetime_passed": true,
+        "leak_free_proven": false
+      },
+      "leaks": 1,
+      "leaked_bytes": 640,
+      "log_sha256": "b74e41bf52b98c86aace7828b83b6939d4fe2f24e2719d8eddb72a3d3b7d799d"
+    },
+    {
+      "name": "sdk-create-4",
+      "record": {
+        "schema": "phosphor.sdk-create-only.v1",
+        "count": 4,
+        "created": 4,
+        "gpu_encodes": 0,
+        "shared_compilers": 1,
+        "factory_serialized": true,
+        "requires_synchronous_initialization": true,
+        "extent": [
+          128,
+          96,
+          128,
+          96
+        ],
+        "os_version": [
+          27,
+          2,
+          0
+        ],
+        "supported": true,
+        "compiler_created": true,
+        "descriptor_matched": true,
+        "worker_exception": false,
+        "worker_joined": true,
+        "weak_alive_after_creation": true,
+        "weak_nil_after_worker_release": true,
+        "weak_nil_after_teardown": true,
+        "objects": [
+          {
+            "index": 0,
+            "created": true,
+            "create_ms": 89.907416,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          },
+          {
+            "index": 1,
+            "created": true,
+            "create_ms": 60.2305,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          },
+          {
+            "index": 2,
+            "created": true,
+            "create_ms": 64.369083,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          },
+          {
+            "index": 3,
+            "created": true,
+            "create_ms": 62.519583,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          }
+        ],
+        "public_object_lifetime_passed": true,
+        "leak_free_proven": false
+      },
+      "leaks": 4,
+      "leaked_bytes": 2560,
+      "log_sha256": "4b218ca0c8bf7048dbea123d95761c5b2f447327387d2aa51fc5fa6be8587b63"
+    },
+    {
+      "name": "sdk-create-1-no-validation",
+      "record": {
+        "schema": "phosphor.sdk-create-only.v1",
+        "count": 1,
+        "created": 1,
+        "gpu_encodes": 0,
+        "shared_compilers": 1,
+        "factory_serialized": true,
+        "requires_synchronous_initialization": true,
+        "extent": [
+          128,
+          96,
+          128,
+          96
+        ],
+        "os_version": [
+          27,
+          2,
+          0
+        ],
+        "supported": true,
+        "compiler_created": true,
+        "descriptor_matched": true,
+        "worker_exception": false,
+        "worker_joined": true,
+        "weak_alive_after_creation": true,
+        "weak_nil_after_worker_release": true,
+        "weak_nil_after_teardown": true,
+        "objects": [
+          {
+            "index": 0,
+            "created": true,
+            "create_ms": 969.653209,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          }
+        ],
+        "public_object_lifetime_passed": true,
+        "leak_free_proven": false
+      },
+      "leaks": 1,
+      "leaked_bytes": 640,
+      "log_sha256": "7bffb4704e36cbf949755f34973e5c1d2300c9ec4b51f2dd90c8413b55dd9d6e"
+    },
+    {
+      "name": "sdk-create-4-no-validation",
+      "record": {
+        "schema": "phosphor.sdk-create-only.v1",
+        "count": 4,
+        "created": 4,
+        "gpu_encodes": 0,
+        "shared_compilers": 1,
+        "factory_serialized": true,
+        "requires_synchronous_initialization": true,
+        "extent": [
+          128,
+          96,
+          128,
+          96
+        ],
+        "os_version": [
+          27,
+          2,
+          0
+        ],
+        "supported": true,
+        "compiler_created": true,
+        "descriptor_matched": true,
+        "worker_exception": false,
+        "worker_joined": true,
+        "weak_alive_after_creation": true,
+        "weak_nil_after_worker_release": true,
+        "weak_nil_after_teardown": true,
+        "objects": [
+          {
+            "index": 0,
+            "created": true,
+            "create_ms": 79.599875,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          },
+          {
+            "index": 1,
+            "created": true,
+            "create_ms": 49.766042,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          },
+          {
+            "index": 2,
+            "created": true,
+            "create_ms": 49.351583,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          },
+          {
+            "index": 3,
+            "created": true,
+            "create_ms": 47.763458,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          }
+        ],
+        "public_object_lifetime_passed": true,
+        "leak_free_proven": false
+      },
+      "leaks": 4,
+      "leaked_bytes": 2560,
+      "log_sha256": "8c32b972341833628572645f9639bedfbfb9abdaeae19cd4eb9c7b46db624180"
+    },
+    {
+      "name": "sdk-create-4-debuggable",
+      "record": {
+        "schema": "phosphor.sdk-create-only.v1",
+        "count": 4,
+        "created": 4,
+        "gpu_encodes": 0,
+        "shared_compilers": 1,
+        "factory_serialized": true,
+        "requires_synchronous_initialization": true,
+        "extent": [
+          128,
+          96,
+          128,
+          96
+        ],
+        "os_version": [
+          27,
+          2,
+          0
+        ],
+        "supported": true,
+        "compiler_created": true,
+        "descriptor_matched": true,
+        "worker_exception": false,
+        "worker_joined": true,
+        "weak_alive_after_creation": true,
+        "weak_nil_after_worker_release": true,
+        "weak_nil_after_teardown": true,
+        "objects": [
+          {
+            "index": 0,
+            "created": true,
+            "create_ms": 79.8995,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          },
+          {
+            "index": 1,
+            "created": true,
+            "create_ms": 54.623583,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          },
+          {
+            "index": 2,
+            "created": true,
+            "create_ms": 52.853583,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          },
+          {
+            "index": 3,
+            "created": true,
+            "create_ms": 53.655125,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          }
+        ],
+        "public_object_lifetime_passed": true,
+        "leak_free_proven": false
+      },
+      "leaks": 4,
+      "leaked_bytes": 2560,
+      "log_sha256": "73ec0e1906ad1a385d1e62eb1e9bab9566410b4e49476d17a2224a750d910363"
+    }
+  ],
+  "native_production_accepted": false
+}

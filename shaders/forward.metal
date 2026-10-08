@@ -92,6 +92,7 @@ struct SurfaceVertexOut {
     float4 unjitteredClip;
     float4 previousClip;
     uint historyValid [[flat]];
+    uint instanceSlot [[flat]];
 };
 
 vertex SurfaceVertexOut forward_surface_vs(uint vertexId [[vertex_id]], uint instanceId [[instance_id]],
@@ -124,6 +125,7 @@ vertex SurfaceVertexOut forward_surface_vs(uint vertexId [[vertex_id]], uint ins
     out.unjitteredClip = temporalMatrix(temporal.currentViewProjection) * world;
     out.previousClip = out.unjitteredClip;
     out.historyValid = 0;
+    out.instanceSlot = visible[instanceId];
     if (temporal.historyValid) {
         const device GPUInstance &old = previous[visible[instanceId]];
         out.historyValid = old.generation == gi.generation && (old.flags & INSTANCE_FLAG_VALID);
@@ -132,6 +134,33 @@ vertex SurfaceVertexOut forward_surface_vs(uint vertexId [[vertex_id]], uint ins
                                float4(v.px, v.py, v.pz, 1);
     }
     return out;
+}
+
+// F10 receiver prepass: the indexed overflow ICB fills receivers BEFORE RT.
+// No background V-buffer mask is ever used to shade an overflow receiver.
+struct ShadowReceiverOutput {
+    float4 point [[color(0)]];
+    half4 geometricNormal [[color(1)]];
+    uint4 key [[color(2)]];
+};
+fragment ShadowReceiverOutput forward_shadow_receiver_fs(
+    SurfaceVertexOut in [[stage_in]], uint primitive [[primitive_id]],
+    constant FrameConstants& frame [[buffer(0)]],
+    const device GPUInstance* instances [[buffer(2)]],
+    const device GPUMaterial* materials [[buffer(3)]],
+    const device TextureHandle* textures [[buffer(5)]],
+    constant GPUTemporalParams& temporal [[buffer(8)]]) {
+    const device auto& material = materials[in.materialIndex];
+    const float alpha = material.baseColor[3] * float(sampleOr(textures, material.baseColorTex, in.uv,
+                                                             half4(1), dfdx(in.uv)*exp2(temporal.mipBias),
+                                                             dfdy(in.uv)*exp2(temporal.mipBias)).a);
+    if (alpha < material.alphaCutoff) discard_fragment();
+    float3 n = cross(dfdx(in.worldPos), dfdy(in.worldPos));
+    if (dot(n,n) < 1e-20f) discard_fragment();
+    const float3 eye(frame.cameraPosition[0],frame.cameraPosition[1],frame.cameraPosition[2]);
+    if(dot(n,eye-in.worldPos)<0.0f)n=-n;
+    return {float4(in.worldPos, 1), half4(half3(normalize(n)), 1),
+            uint4(in.instanceSlot, instances[in.instanceSlot].generation, primitive, in.materialIndex)};
 }
 
 // F7 overflow fallback: the existing GPU-built indexed ICB writes the same
@@ -174,4 +203,75 @@ fragment ForwardSurfaceOutput forward_surface_fs(SurfaceVertexOut in [[stage_in]
     out.motion = half2(temporalMotion(in.unjitteredClip, in.previousClip, temporal, in.historyValid != 0));
     out.reactive = in.historyValid == 0 ? 1.0h : materials[in.materialIndex].alphaCutoff > 0 ? 0.75h : 0.0h;
     return out;
+}
+// ICB pipelines inherit buffers. Lighting textures use the same direct
+// resource-ID encoding as the material bindless table, with read-only handles.
+struct ForwardLightingTextureHandle {
+    texture2d<float, access::read> tex;
+};
+static_assert(sizeof(ForwardLightingTextureHandle) == 8, "Forward lighting texture handle ABI");
+
+// Lighting residual must retain physical radiance above binary16 range.
+// The legacy forward_surface_fs retains ForwardSurfaceOutput and its HALF ABI.
+struct ForwardLitSurfaceOutput {
+    float4 color [[color(0)]];
+    half4 normalRoughness [[color(1)]];
+    half4 diffuseAlbedo [[color(2)]];
+    half4 specularAlbedo [[color(3)]];
+    half2 motion [[color(4)]];
+    half reactive [[color(5)]];
+};
+fragment ForwardLitSurfaceOutput forward_surface_lit_fs(SurfaceVertexOut in [[stage_in]], bool frontFacing [[front_facing]],
+                                                 constant FrameConstants &frame [[buffer(0)]],
+                                                 const device GPUMaterial *materials [[buffer(3)]],
+                                                 const device GPULight *lights [[buffer(4)]],
+                                                 const device TextureHandle *textures [[buffer(5)]],
+                                                 constant GPUTemporalParams &temporal [[buffer(8)]],
+    constant GPUResolveLightingParams& lighting [[buffer(9)]],
+    const device ForwardLightingTextureHandle* lightingTextures [[buffer(10)]]) {
+    SurfaceInput surface{in.worldPos,
+                         in.normal,
+                         in.tangent,
+                         in.uv,
+                         dfdx(in.uv) * exp2(temporal.mipBias),
+                         dfdy(in.uv) * exp2(temporal.mipBias),
+                         in.materialIndex,
+                         in.mirrored,
+                         frontFacing};
+    const ShadingResult value = shadeSurface(surface, frame, materials, lights, textures, true,
+        (lighting.flags & 1u) ? lightingTextures[0].tex.read(uint2(in.position.xy)).x : 1.0f, lighting.sunIndex,
+        (lighting.flags & 2u) != 0, (lighting.flags & 2u) ? lightingTextures[1].tex.read(uint2(in.position.xy)).xyz : float3(0),
+        (lighting.flags & 4u) != 0, (lighting.flags & 4u) ? lightingTextures[2].tex.read(uint2(in.position.xy)).xyz : float3(0),(lighting.flags & 8u)!=0,(lighting.flags & 16u)!=0,(lighting.flags & RESOLVE_EXTERNAL_DIFFUSE)!=0);
+    if (value.alpha < materials[in.materialIndex].alphaCutoff)
+        discard_fragment();
+    ForwardLitSurfaceOutput out;
+    const uint debugMode = kDebugModeSpecialised ? kDebugMode : frame.debugMode;
+    out.color = float4(debugMode == 1   ? value.normal * 0.5f + 0.5f
+                            : debugMode == 2 ? value.baseColor
+                                             : value.color,
+                      1.0f);
+    out.normalRoughness = half4(half3(value.normal), half(value.roughness));
+    out.diffuseAlbedo = half4(half3(value.diffuseAlbedo), 1.0h);
+    out.specularAlbedo = half4(half3(value.specularAlbedo), 1.0h);
+    out.motion = half2(temporalMotion(in.unjitteredClip, in.previousClip, temporal, in.historyValid != 0));
+    out.reactive = in.historyValid == 0 ? 1.0h : materials[in.materialIndex].alphaCutoff > 0 ? 0.75h : 0.0h;
+    return out;
+}
+
+struct DIReceiverOutput {
+    half4 shading [[color(0)]];
+    half4 albedo [[color(1)]];
+    float2 motion [[color(2)]];
+    half occlusion [[color(3)]];
+};
+fragment DIReceiverOutput forward_di_receiver_fs(SurfaceVertexOut in [[stage_in]],bool frontFacing [[front_facing]],
+    constant FrameConstants& frame [[buffer(0)]],const device GPUMaterial* materials [[buffer(3)]],
+    const device GPULight* lights [[buffer(4)]],const device TextureHandle* textures [[buffer(5)]],
+    constant GPUTemporalParams& temporal [[buffer(8)]]) {
+    SurfaceInput surface{in.worldPos,in.normal,in.tangent,in.uv,dfdx(in.uv)*exp2(temporal.mipBias),
+                         dfdy(in.uv)*exp2(temporal.mipBias),in.materialIndex,in.mirrored,frontFacing};
+    const auto value=shadeSurface(surface,frame,materials,lights,textures,true);
+    if(value.alpha<materials[in.materialIndex].alphaCutoff)discard_fragment();
+    return {half4(half3(value.normal),half(value.roughness)),half4(half3(value.baseColor),half(value.metallic)),
+            temporalMotion(in.unjitteredClip,in.previousClip,temporal,in.historyValid!=0),half(value.occlusion)};
 }

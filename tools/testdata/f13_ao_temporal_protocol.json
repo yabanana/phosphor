@@ -1,0 +1,66 @@
+{
+  "schema": "phos.f13-ao-temporal-protocol.v1",
+  "state": "NOT_EXECUTED",
+  "scope": "F13.6_MINIMUM_CUSTOM_AO_CONTROL_ONLY",
+  "phase_accepted": false,
+  "frames": 64,
+  "width": 128,
+  "height": 96,
+  "view": 0,
+  "signal": 9,
+  "signal_name": "ao-filtered",
+  "fixture": "ao-temporal-wall",
+  "step_ordinal": 32,
+  "baseline_window": [16, 31],
+  "post_window": [32, 63],
+  "roi": {"name": "known-plane-receiver", "xywh": [48, 38, 16, 20], "scale": 1.0},
+  "physics": {
+    "radius_m": 2.0,
+    "wall_x_m": [0.8, 8.0],
+    "wall_half_extent_yz_m": [4.0, 4.0],
+    "wall_double_sided": true,
+    "plane_z_m": 0.0,
+    "plane_full_size_m": 8.0,
+    "plane_normal": [0.0, 0.0, 1.0],
+    "camera_position": [0.0, 0.0, 3.0],
+    "camera_front": [0.0, 0.0, -1.0],
+    "camera_up": [0.0, 1.0, 0.0],
+    "camera_tolerance": 0.000001,
+    "fov_y_units": "radians",
+    "pixel_samples": "center; +Y down; no raster jitter",
+    "reference": "cosine-hemisphere uniform projected disk; independent pixel ray-plane geometry",
+    "reference_domain": "ROI and declared halo must lie on visible plane with receiver_x < wall_x"
+  },
+  "history": {
+    "atrous_iterations": 3,
+    "spatial_support_radius_pixels": 14,
+    "max_length": 32,
+    "baseline_reuse_required": true,
+    "step_completed_reset_required": true,
+    "post_reuse_required": true
+  },
+  "thresholds": {
+    "linear_rmse_p95_max": 0.06,
+    "linear_rmse_max": 0.15,
+    "residual_flicker_mean_max": 0.02,
+    "support_ghost_fraction_max": 0.25,
+    "recovery_frames_max": 4,
+    "recovery_linear_rmse": 0.06
+  },
+  "identifiability": {
+    "minimum_baseline_visibility": 0.5,
+    "minimum_step_reference_mean_change": 0.15,
+    "event_anchor_ordinal": 31,
+    "event_old_state_fraction": "max per ROI pixel max(0,(candidate-current_reference)*(anchor_reference-current_reference)/(anchor_reference-current_reference)^2)",
+    "event_old_state_fraction_cap": 0.25,
+    "persistent_recovery_through_last_post_frame": true
+  },
+  "metadata_schema": "phos.f13-ao-temporal.v1",
+  "metadata_keys": {
+    "top": ["frame", "view", "signal", "width", "height", "fixture_ordinal", "wall_x", "radius", "camera", "plane", "history", "provenance"],
+    "camera": ["position", "front", "up", "fov_y"],
+    "plane": ["z", "size", "normal"],
+    "history": ["frame", "view", "pixels", "valid", "reused", "max_length", "invalid", "invalid_output", "epoch", "revision", "reset", "atrous_iterations"],
+    "provenance": ["source_sha", "binary_sha", "metallib_sha", "manifest_sha"]
+  }
+}

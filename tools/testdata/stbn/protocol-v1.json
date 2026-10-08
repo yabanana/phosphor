@@ -1,0 +1,25 @@
+{
+  "protocol": "phosphor-stbn-cpu-spectrum-v1",
+  "source_commit": "8e533bfec3254dca2684de539470ca8ab4e0ea55",
+  "generator_version": 1,
+  "config": {"width":8,"height":8,"frames":16,"dimensions":64,"sigma_spatial":1.9,"sigma_temporal":1.9,"max_relaxation_swaps":4096},
+  "seeds": [0,1,2,3,4,5,6,7],
+  "thresholds": [0.1,0.25,0.5,0.75,0.9],
+  "controls": ["uniform_permutation","iid_uniform"],
+  "control_rng": "numpy PCG64, SeedSequence([seed, 1398030926, dimension, control_index]); control_index=0 permutation, 1 iid",
+  "normalization": "sum band FFT power / sum all non-DC FFT power, pooled over all independent slices or pixel histories and dimensions within one seed",
+  "spatial_band": "DFT on 8x8 slice, integer-frequency modes 0<kx^2+ky^2<=2; remove each slice DC; no window (toroidal table)",
+  "temporal_band": "DFT on length16 history per fixed pixel, integer-frequency modes |kt|=1; remove each history DC; no window",
+  "gates": {
+    "rank_permutation_every_dimension": true,
+    "exact_32_bin_histogram_every_dimension": true,
+    "relaxation_converged_every_seed": true,
+    "max_mean_low_band_ratio_to_each_control": 0.75,
+    "min_seeds_better_than_each_control": 7,
+    "per_seed_dimension_abs_pearson_p95_max": 0.10,
+    "per_seed_dimension_abs_pearson_max": 0.25
+  },
+  "gate_scope": "Each of 5 thresholds, both spectral axes and both controls separately. Correlation is flattened raw rank values, all off-diagonal dimension pairs, separately for every seed.",
+  "diagnostics_only": ["raw-rank spectra","xy angular anisotropy","per-seed generation wall time","constant-slice/history counts","control distribution and correlations"],
+  "adoption_boundary": "A pass supports only low-frequency suppression/uniform rank coverage for these original tables. No renderer quality, GPU, energy, frame-performance, runtime block-rotation or general SOTA claim. Fixed 16-frame rank period is outside these gates and remains a runtime-sampling limitation."
+}

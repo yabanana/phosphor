@@ -1,5 +1,7 @@
 #include "platform/metal/pipeline_cache.h"
 #include "platform/metal/metal_graph_executor.h"
+#include <cstdlib>
+#include <cstring>
 #include "platform/metal/gpu_memory.h"
 #include "platform/metal/gpu_timestamps.h"
 #include "rendergraph/timing_plan.h"
@@ -70,6 +72,7 @@ MTL::PixelFormat toMetalFormat(rg::Format format) {
     case rg::Format::RG32Float:            return MTL::PixelFormatRG32Float;
     case rg::Format::RGBA32Float:          return MTL::PixelFormatRGBA32Float;
     case rg::Format::R32Uint:              return MTL::PixelFormatR32Uint;
+    case rg::Format::RGBA32Uint:           return MTL::PixelFormatRGBA32Uint;
     case rg::Format::RG11B10Float:         return MTL::PixelFormatRG11B10Float;
     case rg::Format::RGB10A2Unorm:         return MTL::PixelFormatRGB10A2Unorm;
     case rg::Format::Depth16Unorm:         return MTL::PixelFormatDepth16Unorm;
@@ -355,6 +358,13 @@ bool MetalGraphExecutor::createResources() {
         if (node.kind == rg::ResourceKind::Texture) {
             MTL::TextureDescriptor* d = textureDescriptor(node.texture, usage_[p.resource], MTL::StorageModePrivate);
             d->setHazardTrackingMode(MTL::HazardTrackingModeUntracked);
+            if(const char* diagnostic=std::getenv("PHOSPHOR_DIAGNOSTIC_MOTION_READBACK");diagnostic&&std::strcmp(diagnostic,"1")==0){
+                const auto actual=heap_.sizeAndAlign(d); // Exact descriptor passed to newTexture below.
+                LOG_INFO("GRAPH_FOOTPRINT resource %u '%s' offset %llu planned %llu actual %llu align %llu usage %u hazard %u",
+                    p.resource,node.name.c_str(),static_cast<unsigned long long>(p.offset),static_cast<unsigned long long>(p.size),
+                    static_cast<unsigned long long>(actual.size),static_cast<unsigned long long>(actual.align),unsigned(d->usage()),unsigned(d->hazardTrackingMode()));
+                if(actual.size>p.size||!actual.align||p.offset%actual.align){LOG_ERROR("Final Untracked texture does not fit its planned placement");d->release();return false;}
+            }
             textures_[p.resource] = heap_.createTexture(d, p.offset, node.name.c_str());
             // The heap makes its textures resident, but the Metal 4 validation
             // layer rejects a heap-backed render target that is later bound

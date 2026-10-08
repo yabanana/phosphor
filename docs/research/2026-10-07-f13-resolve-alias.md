@@ -1,0 +1,11 @@
+# Confirmed F13 motion alias root cause
+
+Fix690e18a separates downstream composition selection from declared visibility resolve outputs. Previously Engine called replaceColor(F13/F14 HDR) after building resolve passes; replaceColor rewrote outputs_[0]. The deferred VisibilityRenderer::bind callback then bound that future HDR texture at slot1. The graph still declared a write to the original resolve color. Because the future HDR legitimately reused the live motion allocation, the undeclared resolve write corrupted RG32 motion. No barrier/alias-planner change or data sanitization is justified.
+
+Review of the fix: private outputs_ remains the raw resolve/check/history attachment set. composedColor_ is reset both by resetGraphRefs and addResolve. Public color() selects the downstream signal. addPresent captures presentedColor by value and declares/overrides that exact input, so it cannot retroactively retarget resolve or silently disagree with its graph dependency.
+
+Root's no-observer A/B under API+shader validation both exits0 with all four LIGHTING frames PASS. The four raw PFM files are byte-identical between alias and --graph-no-alias. Binary SHA2565f686b4d9dd60e190f281ae75aebba9fa78d73d7393b8c12327cbb2b94af3464. The execution status recorded1db117e plus the dirty fix; eventual commit690e18a is the source correction. Exact status/dirty patch/log/graph/image hashes are in resolve-alias-proof.json.
+
+Keep this as an actual renderer regression: static roughness, raw specular,160x90,4frames, same seed/config, API+shader validation, observer environment absent, alias versus no-alias. Require process+EXIT0, zero input errors, all frames present and byte-equal PFMs. A CPU test that merely checks replaceColor writes another field would mirror the implementation and would not catch the actual GPU binding. A reusable CPU guard would need the real encode binding request checked against the declared graph output; that general binding-audit infrastructure is outside this targeted fix. Existing graph-lifetime tests cannot detect a shader writing a different texture from the declared one.
+
+Earlier diagnostics/hypotheses are preserved for evidence; attachment-stage broadening is explicitly rejected as this bug's fix. No GPU/build was executed by this reviewer.

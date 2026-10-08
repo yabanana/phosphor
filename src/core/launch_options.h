@@ -229,6 +229,17 @@ enum class RtProxyTransition : u8 { None, Mask, Emissive, Reassign, FullUpload }
 [[nodiscard]] const char* rtProbeName(RtProbe probe);
 [[nodiscard]] const char* rtProxyTransitionName(RtProxyTransition transition);
 
+// F10-F12 experimental lighting paths. Defaults preserve the F9 baseline.
+enum class ShadowMode : u8 { Off, CSM, RT };
+enum class DirectLightingMode : u8 { Legacy, BruteForce, Clustered, ReSTIR };
+enum class GiMode : u8 { Off, DDGI, Cache, ReSTIR };
+enum class ReflectionMode : u8 { Off, SSR, RT, Probes };
+enum class AoMode : u8 { Off, GTAO, RTAO };
+enum class LightingDenoiseMode : u8 { Off, Custom, MetalFX };
+[[nodiscard]] const char* shadowModeName(ShadowMode);
+[[nodiscard]] const char* directLightingModeName(DirectLightingMode);
+[[nodiscard]] const char* giModeName(GiMode);
+
 /// OPT-1 graph compilation modes (--graph-opt).
 enum class GraphOptMode : u8 { Off, Greedy, Plan };
 [[nodiscard]] const char* graphOptModeName(GraphOptMode mode);
@@ -330,6 +341,33 @@ struct LaunchOptions {
     RtProxyTransition debugRtProxyTransition = RtProxyTransition::None;
     RtCorruption debugRtCorrupt = RtCorruption::None;
     RtProbe      rtProbe = RtProbe::None;
+    // F10-F12: writing presets only; numerical adoption requires tester evidence.
+    bool atmosphere=false,fog=false,clouds=false,cloudFullRate=false;
+    float atmoDayLength=1200,atmoStartHour=12,planetCameraHeight=-1;
+    u32 timeJumpEveryN=0,debugVolumeCorrupt=0;
+    std::string volumeOracle;bool fogHomogeneous=false,atmoFreezeClock=false;
+    std::string denoisedFixture,denoisedFixtureOutput;bool denoisedFixturePreExposed=false,denoisedFixtureAutoExposure=false,denoisedFixtureManualExposureControl=false;u32 denoisedFixturePrewarmMs=120000;
+    ReflectionMode reflections=ReflectionMode::Off;
+    AoMode ao=AoMode::Off;
+    LightingDenoiseMode lightingDenoise=LightingDenoiseMode::Off;
+    float aoRadius=1.0f;u32 reflectionSamples=1,debugReflectionCorrupt=0;
+    bool reflectionCaptureProbe=false;
+    std::string reflectionProbePath;
+    ShadowMode shadows = ShadowMode::Off;
+    DirectLightingMode directLighting = DirectLightingMode::Legacy;
+    GiMode gi = GiMode::Off;
+    bool contactShadows = false, shadowCache = false, reducedLighting = false;
+    u32 localLightCount = 1024;
+    bool areaLights = false, stationaryLights = false;
+    u32 shadowMapResolution = 2048, lightingSeed = 1;
+    u32 lightingCandidates = 8, lightingSpatialSamples = 4, giRays = 64;
+    u32 debugLighting = 0, debugLightingCorrupt = 0, debugGiCorrupt=0;
+    bool debugGiNoVisibility=false; // Physical quality negative; invariant checks stay enabled.
+    std::string exportReference, captureLinear, captureLinearSequence, lightingScene,reflectionScene;
+    bool giProbeAnchor=false;
+    float giAnchor[3]{},giSpacing=0;
+    u32 giGrid[3]{};
+    u32 exportReferenceFrame=0, captureLinearFrame=0, captureLinearSignal=0; // 0 HDR, 1 indirect diffuse, 2 direct; tester reserves 3 shadow, 4 world position, 5 world normal; 6 specular, 7 AO, 8 filtered indirect diffuse Lo, 9 filtered AO visibility
     // F7/F8 renderer, temporal reconstruction, capture and bounded diagnostics.
     std::string scenePath;
     bool visibility = false, materialBinning = false; // measured baseline; specialization stays opt-in

@@ -31,4 +31,4 @@ Thumbs.db
 __pycache__/
 
 # Pinned Sponza fixture: reproducible fetch; source hashes stay in assets/manifests.
-assets/sponza/
+assets/sponza

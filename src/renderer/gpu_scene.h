@@ -43,6 +43,9 @@ public:
     /// Replace the light list.
     void updateLights(const std::vector<GPULight>& lights);
 
+    void updateSampledLights(std::vector<GPUSampledLight> lights) { sampledLights_=std::move(lights); }
+    [[nodiscard]] const std::vector<GPUSampledLight>& sampledLights() const { return sampledLights_; }
+
     /// Replace the shared material library.
     void updateMaterials(const std::vector<GPUMaterial>& materials);
 
@@ -92,6 +95,7 @@ private:
     std::vector<GPUInstance>   instances_;
     std::vector<GPUMaterial>   materials_;
     std::vector<GPULight>      lights_;
+    std::vector<GPUSampledLight> sampledLights_;
 
     u64 geometryVersion_ = 0;
     MeshletBuildOptions meshletOptions_;

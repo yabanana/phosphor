@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "state": "FROZEN_BEFORE_FILTERED_CANDIDATE_PIXELS",
+  "report_state": "BOUNDED_FILTERED_STATIC_CORNELL_NOT_PHASE_ACCEPTANCE",
+  "base_quality_protocol": "oracle-protocol-v1.json",
+  "base_preregister_commit": "953e23e",
+  "snapshot_sha256": "9ea09eae5e426c449791b43c38bc3521a223e0708442861f3a4e923e1f5d237f",
+  "capture_signal": "indirect-diffuse-filtered",
+  "capture_signal_id": 8,
+  "signal_contract": "actual selected F13 custom GI irradiance times primary albedo*(1-metallic)/pi; before artistic AO, exposure, tone mapping; no surrogate re-filtering offline",
+  "cases": [
+    {"id": "cache_custom", "mode": "cache", "grid": [8,4,8], "denoiser": "custom"},
+    {"id": "cache_custom_16x8x16", "mode": "cache", "grid": [16,8,16], "denoiser": "custom"},
+    {"id": "ddgi_custom_16x8x16", "mode": "ddgi", "grid": [16,8,16], "denoiser": "custom"},
+    {"id": "restir_custom", "mode": "restir", "grid": [8,4,8], "denoiser": "custom"}
+  ],
+  "ray_count_per_probe": 64,
+  "controls": "same frozen Cornell128x72, seed1001, 512frames, warmup256, capture every8; score frames256..504 with unchanged geometry masks",
+  "quality_gates": "identical six-ROI NRMSE <=30%, absolute luminance bias <=20%; no changed exposure, crop, sample window or reference",
+  "raw_results_preserved": "F12-bounded-grid-M5Max-2026-10-07.json raw cache FAIL remains a separate result; filtered PASS cannot replace it",
+  "additional_reporting": "report every frame, temporal spread, all presets including FAIL, actual runtime cost metadata; leak ROI remains insufficient",
+  "no_adoption": "single static validation run cannot certify denoiser recovery, leaks, performance, whole F12 or F13"
+}

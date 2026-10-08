@@ -33,6 +33,8 @@ struct ShadingResult {
     float3 diffuseAlbedo;
     float3 specularAlbedo;
     float roughness;
+    float metallic;
+    float occlusion;
     float alpha;
 };
 
@@ -118,7 +120,10 @@ static float3 tonemapACES(float3 x) {
 
 static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &frame, const device GPUMaterial *materials,
                                   const device GPULight *lights, const device TextureHandle *textures,
-                                  bool alphaTest = true) {
+                                  bool alphaTest = true, float sunVisibility = 1.0f, uint shadowLight = ~0u,
+                                  bool replaceLocal = false, float3 localDirect = float3(0),
+                                  bool useGI = false, float3 indirectIrradiance = float3(0),
+                                  bool omitSpecularAmbient = false, bool physicalGI = false, bool externalDiffuse = false) {
     const device GPUMaterial &m = materials[in.materialIndex];
 
     const half4 baseTex = sampleOr(textures, m.baseColorTex, in.uv, half4(1.0h), in.uvDx, in.uvDy);
@@ -191,8 +196,12 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
                 attenuation *= smoothstep(cosOuter, cosInner, dot(-L, spotDir));
             }
         }
-        color += evaluateLight(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, roughness);
+        if (!isDirectional && replaceLocal) continue;
+        const float visibility = i == shadowLight ? sunVisibility : 1.0f;
+        color += evaluateLight(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, roughness) * visibility;
     }
+
+    if (replaceLocal && !externalDiffuse) color += localDirect;
 
     // Ambient: diffuse for dielectrics only, specular from the hemisphere in
     // the reflected direction, widened towards N as the lobe gets rougher.
@@ -201,7 +210,10 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     const float3 specularDir = normalize(mix(reflect(-V, N), N, roughness * roughness));
     const float3 ambientDiffuse = hemisphere(N) * baseColor.rgb * (1.0 - metallic);
     const float3 ambientSpecular = hemisphere(specularDir) * envBRDFApprox(f0, roughness, NdotV);
-    color += (ambientDiffuse + ambientSpecular) * occlusion;
+    // F13 assembles these positive signals once outside this residual base.
+    // Never subtract full-float lighting from a quantized summed color later.
+    if(!externalDiffuse)color += (useGI ? indirectIrradiance * baseColor.rgb * (1.0f - metallic) / M_PI_F * (physicalGI?1.0f:occlusion) : ambientDiffuse * occlusion);
+    if(!omitSpecularAmbient)color += ambientSpecular * occlusion;
 
     color += float3(m.emissive[0], m.emissive[1], m.emissive[2]) * float3(emTex.rgb);
 
@@ -211,5 +223,7 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     out.diffuseAlbedo = baseColor.rgb * (1.0f - metallic);
     out.specularAlbedo = F_Schlick(f0, NdotV);
     out.roughness = roughness;
+    out.metallic = metallic;
+    out.occlusion = occlusion;
     return out;
 }

@@ -132,6 +132,7 @@ void GpuScene::clear() {
     instances_.clear();
     materials_.clear();
     lights_.clear();
+    sampledLights_.clear();
     ++geometryVersion_;
 }
 

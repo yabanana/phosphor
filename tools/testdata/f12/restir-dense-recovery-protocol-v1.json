@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "state": "FROZEN_BEFORE_ADDITIONAL_CASE_PIXELS",
+  "base_recovery_protocol": "leak-recovery-protocol-v1.json",
+  "base_quality_protocol": "oracle-protocol-v1.json",
+  "case": {"id":"step-restir-dense","mode":"restir","grid":[16,8,16],"denoiser":"custom","signal":"indirect-diffuse-filtered","lighting_seed":1001,"resolution":[128,72],"total_frames":512,"warmup":0,"capture_every":1,"export_snapshot_frame":256},
+  "preserved_failure": "ReSTIR/custom8x4x8 recovery FAIL at+128: short_box NRMSE31.13%>30%; history residual and bias pass. Do not replace or relabel that result.",
+  "motivation": "ReSTIR secondary radiance consumes DDGI; coarse8x4x8 has measured short_box bias. The16x8x16 grid already passed DDGI/cache static tests, not a prior ReSTIR dense test. This changes only the preset.",
+  "gates": "unchanged physical six-ROI NRMSE<=30%, |luminance bias|<=20%, residual<=10%; pre224..255 must pass; instantaneous AND trailing8 must pass at+128",
+  "report": "every frame0..128; checkpoints0/1/4/8/16/32/64/128; first passing offset and first offset that remains passing through128",
+  "scope": "one additional case; no algorithm, hysteresis, ray count, thresholds, ROI or sample-window change; no further tuning from the outcome",
+  "not_certified": ["F13 history rejection<=4", "performance adoption", "other scenes or devices"],
+  "deferred_opportunity": "uniform global radiance scaling could preserve/rescale caches under a separately proven contract; not implemented before this simple preset comparison"
+}

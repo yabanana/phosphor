@@ -1,0 +1,79 @@
+--- a/src/platform/metal/pipeline_cache.h
++++ b/src/platform/metal/pipeline_cache.h
+@@ -18,9 +18,11 @@
+
+ namespace MTLFX {
+ class TemporalScalerDescriptor;
++class TemporalDenoisedScalerDescriptor;
+ }
+ namespace MTL4FX {
+ class TemporalScaler;
++class TemporalDenoisedScaler;
+ }
+
+ namespace phosphor {
+@@ -126,6 +128,15 @@
+     // render thread). The GPU must already be done with it.
+     void retireTemporalScaler(std::shared_ptr<MTL4FX::TemporalScaler> scaler);
+
++#if defined(PHOSPHOR_METALFX_DENOISED_FACTORY) && PHOSPHOR_METALFX_DENOISED_FACTORY && !defined(PHOSPHOR_DISABLE_METALFX_DENOISED) && \
++    __has_include(<MetalFX/MTL4FXTemporalDenoisedScaler.hpp>)
++#define PHOSPHOR_METALFX_DENOISED_GATEWAY_AVAILABLE 1
++    // F13 gateway: no ordinary TemporalScaler casts or F8 cycle workaround.
++    std::future<std::shared_ptr<MTL4FX::TemporalDenoisedScaler>>
++    requestTemporalDenoisedScaler(MTLFX::TemporalDenoisedScalerDescriptor* descriptor);
++    void retireTemporalDenoisedScaler(std::shared_ptr<MTL4FX::TemporalDenoisedScaler> scaler);
++#endif
++
+     std::future<std::shared_ptr<TemporalWorker>> requestTemporalWorker(std::shared_ptr<TemporalWorker> worker);
+
+     // --- F3.4 harvest -----------------------------------------------------------
+--- a/src/platform/metal/pipeline_cache.cpp
++++ b/src/platform/metal/pipeline_cache.cpp
+@@ -1,6 +1,9 @@
+ #include "platform/metal/temporal_worker.h"
+ #include <MetalFX/MetalFX.hpp>
+ #include "platform/metal/pipeline_cache.h"
++#ifdef PHOSPHOR_METALFX_DENOISED_GATEWAY_AVAILABLE
++#include <MetalFX/MTL4FXTemporalDenoisedScaler.hpp>
++#endif
+
+ #include "core/log.h"
+ #include "core/profile.h"
+@@ -339,6 +342,36 @@
+         pool->release();
+     });
+ }
++
++#ifdef PHOSPHOR_METALFX_DENOISED_GATEWAY_AVAILABLE
++std::future<std::shared_ptr<MTL4FX::TemporalDenoisedScaler>>
++PipelineCache::requestTemporalDenoisedScaler(MTLFX::TemporalDenoisedScalerDescriptor* descriptor) {
++    auto promise=std::make_shared<std::promise<std::shared_ptr<MTL4FX::TemporalDenoisedScaler>>>();
++    auto future=promise->get_future();
++    // Copy synchronously: the caller releases its descriptor after this returns.
++    auto copy=std::shared_ptr<MTLFX::TemporalDenoisedScalerDescriptor>(descriptor->copy(),[](auto* p){p->release();});
++    queue_->submit(pipe::CompilePriority::Urgent,~0u,[this,promise,copy]{
++        auto* pool=NS::AutoreleasePool::alloc()->init();
++        MTL4FX::TemporalDenoisedScaler* raw=nullptr;
++        try {raw=copy->newTemporalDenoisedScaler(context_.device(),compiler_);}
++        catch(...) {pool->release();promise->set_exception(std::current_exception());return;}
++        pool->release();
++        // Ordinary ownership ONLY. DENOISED lifetime has not been measured;
++        // never use metalfx::adoptTemporalScaler or private cycle logic.
++        try {
++            promise->set_value(std::shared_ptr<MTL4FX::TemporalDenoisedScaler>(raw,[](auto* p){if(p)p->release();}));
++        } catch(...) {promise->set_exception(std::current_exception());}
++    });
++    return future;
++}
++void PipelineCache::retireTemporalDenoisedScaler(std::shared_ptr<MTL4FX::TemporalDenoisedScaler> scaler) {
++    if(!scaler)return;
++    // Adapter deferred this until all GPU consumers completed.
++    queue_->submit(pipe::CompilePriority::Prewarm,~0u,[scaler=std::move(scaler)]()mutable{
++        auto* pool=NS::AutoreleasePool::alloc()->init();scaler.reset();pool->release();
++    });
++}
++#endif
+
+ std::future<std::shared_ptr<TemporalWorker>>
+ PipelineCache::requestTemporalWorker(std::shared_ptr<TemporalWorker> worker) {

@@ -7,8 +7,8 @@ Run explicitly on the Mac, with no other GPU workload:
 
 The build must already contain the app, its AOT archive, probe AIR files and
 hot-reload-probe.metallib. This script never builds/changes those artifacts.
-It runs the normal probe, then compiles only a temporary rt_scene.metal against
-a poisoned copy of rt_common.h and links a new probe library in the new output
+It runs the normal probe, then compiles only a poisoned temporary rt_intersections.metal
+against an unchanged copy of rt_common.h and links a new probe library in the new output
 directory. --debug-hot-reload works in Release without the Debug-only watcher.
 No --pipeline-sync: that diagnostic disables PipelineCache::reload itself.
 
@@ -121,12 +121,12 @@ def ordered_probe_air(probe_dir: Path, replacement: Path, modules: list[str]) ->
     # Follow the CMake link list, not globbed build leftovers. In particular,
     # older forward.air/visibility_resolve.air can exist on disk even though
     # these source files are now included by the first-linked material module.
-    if 'material_passes.air' not in modules or 'rt_scene.air' not in modules:
+    if 'material_passes.air' not in modules or 'rt_intersections.air' not in modules:
         raise ValueError('current CMake shader list lacks the material or RT module')
     missing = [name for name in modules if not (probe_dir/name).is_file()]
     if missing:
         raise ValueError('probe AIR files are incomplete; build phosphor_probe_shaders first: '+str(missing))
-    return [replacement if name == 'rt_scene.air' else probe_dir/name for name in modules]
+    return [replacement if name == 'rt_intersections.air' else probe_dir/name for name in modules]
 
 
 def poison_alpha(source: str) -> str:
@@ -243,20 +243,21 @@ def self_test() -> None:
     with tempfile.TemporaryDirectory() as folder:
         root = Path(folder)
         probe = root / 'probe'; probe.mkdir()
-        for name in ('a.air', 'material_passes.air', 'rt_scene.air', 'z.air'):
+        for name in ('a.air', 'material_passes.air', 'rt_intersections.air', 'rt_scene.air', 'z.air'):
             (probe/name).write_bytes(b'test')
         replacement = root / 'poison.air'
         shaders = root/'shaders'; shaders.mkdir()
-        for name in ('a.metal', 'forward.metal', 'material_passes.metal', 'rt_scene.metal', 'visibility_resolve.metal', 'z.metal'):
+        for name in ('a.metal', 'forward.metal', 'material_passes.metal', 'rt_intersections.metal', 'rt_scene.metal', 'visibility_resolve.metal', 'z.metal'):
             (shaders/name).write_text('// test')
         cmake = ('list(REMOVE_ITEM PHOSPHOR_METAL_SHADERS ${CMAKE_SOURCE_DIR}/shaders/forward.metal '
                  '${CMAKE_SOURCE_DIR}/shaders/visibility_resolve.metal ${CMAKE_SOURCE_DIR}/shaders/material_passes.metal)\n'
                  'list(PREPEND PHOSPHOR_METAL_SHADERS ${CMAKE_SOURCE_DIR}/shaders/material_passes.metal)')
         modules = shader_modules(cmake, root)
-        assert modules == ['material_passes.air', 'a.air', 'rt_scene.air', 'z.air']
+        assert modules == ['material_passes.air', 'a.air', 'rt_intersections.air', 'rt_scene.air', 'z.air']
         linked = ordered_probe_air(probe, replacement, modules)
         assert linked[0].name == 'material_passes.air' and linked.count(replacement) == 1
-        assert probe/'rt_scene.air' not in linked
+        assert probe/'rt_intersections.air' not in linked
+        assert probe/'rt_scene.air' in linked
         (probe/'forward.air').write_bytes(b'stale')
         assert probe/'forward.air' not in ordered_probe_air(probe, replacement, modules)
         flags = metal_flags('set(PHOSPHOR_METAL_FLAGS -std=metal4.0 -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}\n'
@@ -335,9 +336,9 @@ def main() -> int:
     normal_probe = build/'shaders/hot-reload-probe.metallib'
     scene = repo/'assets/sponza/Sponza.gltf'
     generated = build/'generated'
-    original_scene = repo/'shaders/rt_scene.metal'
+    original_scene = repo/'shaders/rt_intersections.metal'
     original_common = repo/'shaders/rt_common.h'
-    poison_air, poison_library = out/'rt_scene-poison.air', out/'poison.metallib'
+    poison_air, poison_library = out/'rt_intersections-poison.air', out/'poison.metallib'
     linked_air = ordered_probe_air(build/'shaders/probe', poison_air, modules)
     inputs = [app, library, archive, normal_probe, scene, cache_path, cmake_path,
               original_scene, original_common, repo/'src/renderer/gpu_types.h',
@@ -377,13 +378,13 @@ def main() -> int:
             raise RuntimeError('normal archive-active reload failed; poison run not started')
         with tempfile.TemporaryDirectory(prefix='poison-source-', dir=out) as temporary:
             temporary = Path(temporary)
-            shader = temporary/'rt_scene.metal'
+            shader = temporary/'rt_intersections.metal'
             header = temporary/'rt_common.h'
-            shutil.copyfile(original_scene, shader)
-            header.write_text(poison_alpha(original_common.read_text()))
+            shader.write_text(poison_alpha(original_scene.read_text()))
+            shutil.copyfile(original_common, header)
             # Keep the exact changed source as evidence after the temporary
             # compile directory is removed. The normal shader remains intact.
-            shutil.copyfile(header, out/'poison-rt_common.h')
+            shutil.copyfile(shader, out/'poison-rt_intersections.metal')
             compile_command = ['xcrun', '-sdk', 'macosx', 'metal', *flags, '-DPHOSPHOR_HOT_RELOAD_PROBE=1',
                                '-c', str(shader), '-o', str(poison_air)]
             link_command = ['xcrun', '-sdk', 'macosx', 'metallib', *map(str, linked_air), '-o', str(poison_library)]
@@ -391,7 +392,7 @@ def main() -> int:
                 manifest['compile_steps'].append(compile_step(command, out/f'{name}.log', args.timeout, environment))
                 save()
         assert_unchanged(immutable)
-        generated_hashes = {str(path): checksum(path) for path in (poison_air, poison_library, out/'poison-rt_common.h')}
+        generated_hashes = {str(path): checksum(path) for path in (poison_air, poison_library, out/'poison-rt_intersections.metal')}
         manifest['generated_artifacts'] = generated_hashes
         negative = run_case('alpha-poison', [*common, '--debug-hot-reload', str(poison_library)], out, environment,
                             {**immutable, **generated_hashes}, args.timeout, True)

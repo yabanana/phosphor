@@ -61,6 +61,23 @@ set(PHOSPHOR_SHADER_HEADERS
     ${CMAKE_SOURCE_DIR}/src/renderer/visibility_layout.h
     ${CMAKE_SOURCE_DIR}/src/renderer/visibility_math.h
     ${CMAKE_SOURCE_DIR}/src/renderer/gpu_types.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/metalfx_denoise_layout.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/metalfx_denoise_fixture_layout.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/visibility_layout.h
+    ${CMAKE_SOURCE_DIR}/shaders/reflection_common.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/reflection_probe_storage.h
+    ${CMAKE_SOURCE_DIR}/shaders/atmosphere_common.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/atmosphere_bindings.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/volume_noise.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/volume_math.h
+    ${CMAKE_SOURCE_DIR}/shaders/gi_common.h
+    ${CMAKE_SOURCE_DIR}/shaders/gi_cache_common.h
+    ${CMAKE_SOURCE_DIR}/shaders/restir_common.h
+    ${CMAKE_SOURCE_DIR}/shaders/light_visibility.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/shadow_math.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/shadow_layout.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/shadow_dispatch.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/rt_geometry.h
     ${CMAKE_SOURCE_DIR}/shaders/rt_common.h
     ${CMAKE_SOURCE_DIR}/src/platform/metal/rt_visibility_check.h
     ${CMAKE_SOURCE_DIR}/src/renderer/gpu_scene_layout.h
@@ -186,6 +203,18 @@ add_executable(phosphor
     src/platform/metal/scene_renderer.cpp
     src/platform/metal/acceleration_structures.cpp
     src/platform/metal/rt_visibility_check.cpp
+    src/platform/metal/rt_consumer.cpp
+    src/platform/metal/shadow_passes.cpp
+    src/platform/metal/direct_lighting_passes.cpp
+    src/platform/metal/gi_passes.cpp
+    src/platform/metal/reference_snapshot.cpp
+    src/platform/metal/linear_capture.cpp
+    src/platform/metal/metalfx_denoise.cpp
+    src/platform/metal/metalfx_denoise_fixture.cpp
+    src/platform/metal/reflection_passes.cpp
+    src/platform/metal/denoise_passes.cpp
+    src/platform/metal/atmosphere_passes.cpp
+    src/platform/metal/volume_diagnostics.cpp
     src/platform/metal/shader_reloader.cpp
     src/platform/metal/transient_heap.cpp
     src/platform/metal/upload_ring.cpp
@@ -354,4 +383,11 @@ endif()
 # Test assets are looked up relative to the working directory.
 if(NOT EXISTS ${CMAKE_BINARY_DIR}/assets)
     file(CREATE_LINK ${CMAKE_SOURCE_DIR}/assets ${CMAKE_BINARY_DIR}/assets SYMBOLIC)
+endif()
+
+# The F9 owner applies the separately reviewed typed gateway patch first. This
+# writer does not alter PipelineCache or enable a speculative SDK/lifetime path.
+option(PHOSPHOR_METALFX_DENOISED_FACTORY "Enable the reviewed denoised PipelineCache gateway" OFF)
+if(PHOSPHOR_METALFX_DENOISED_FACTORY)
+    target_compile_definitions(phosphor PRIVATE PHOSPHOR_METALFX_DENOISED_FACTORY=1)
 endif()

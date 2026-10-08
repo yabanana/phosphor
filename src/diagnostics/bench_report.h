@@ -198,7 +198,20 @@ struct RtReport {
     float proxyShadowErrorPct = 0, proxyPrimaryErrorPct = 0, proxyDt95 = 0, proxyAcnePct = 0; // dt95: cm
     TimingSummary tlasUpdateMs, probeMs, probeNsPerRay;
 };
-constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 9;
+// F10-F12 opt-in path metadata. Acceptance remains unverified until a tester
+// records evidence; these fields identify executed requests, not phase status.
+struct LightingReport {
+    bool present=false, reduced=false, contact=false, cache=false, giVisibilityDisabled=false;
+    std::string shadows, direct, gi,reflections,ao,denoiseRequested,denoiseEffective,denoiseFallback,probeSource;
+    std::string denoiseRadiometricDomain="not-requested";
+    u64 denoiseNativeFactoryRequests=0,denoiseNativeEncodedFrames=0;
+    bool atmosphere=false,fog=false,clouds=false,cloudFullRate=false,fogHomogeneous=false;
+    u32 reflectionCorrupt=0,volumeCorrupt=0;std::string volumeOracle;
+    u32 seed=1, sunIndex=~0u, candidates=0, spatialSamples=0, giRays=0;
+    u64 historyResets=0;
+    u32 checks=0, failures=0;
+};
+constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 10;
 
 struct BenchReport {
     std::string   bench;
@@ -232,6 +245,8 @@ struct BenchReport {
     MeshletReport meshlets;      // F6 (schema 6)
     RenderingReport rendering;   // F7/F8 (schema 7), actual paths and last-frame content extent
     RtReport rt;                 // F9 (schema 9)
+    LightingReport lighting;     // F10-F12 (schema 10)
+    std::string denoisedFixtureJson; // actual native fixture evidence, never phase acceptance
 };
 
 /// Nearest-rank statistics of `values` (empty input gives all zeros).

@@ -13,6 +13,7 @@
 #include <metal_stdlib>
 namespace phosphor {
 using u32 = uint;
+
 } // namespace phosphor
 #define PHOSPHOR_STATIC_ASSERT(cond, msg)
 // Program-scope variables must live in the constant address space in MSL.
@@ -475,5 +476,477 @@ struct GPUSynthArgs {
     GPUSynthInput inputs[8]; // SYNTH_MAX_INPUTS
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUSynthArgs) == 320, "GPUSynthArgs layout");
+
+// ---------------------------------------------------------------------------
+// F10: visibility is one signal per selected light and view; 1 = unoccluded.
+// The guide comes from raster geometry BEFORE material resolve. No normal map
+// or RT proxy primitive may supply the geometric normal used for ray offsets.
+// ---------------------------------------------------------------------------
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_CASCADES = 4u;
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_CSM = 1u << 0;
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_RT = 1u << 1;
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_HISTORY_VALID = 1u << 2;
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_CONTACT = 1u << 3;
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_LIGHT_VALID = 1u << 4;
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_CORRUPT_NONE = 0u;
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_CORRUPT_BIAS = 1u;
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_CORRUPT_CASTER = 2u;
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_CORRUPT_HISTORY = 3u;
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_CORRUPT_CACHE = 4u;
+
+struct GPUShadowCascade {
+    float viewProjection[16]; // orthographic reverse-Z; clear 0, compare Greater
+    float splitNear, splitFar, texelWorld, depthRange;
+    float center[3], radius; // snapped receiver bound in world space
+    float depthMin, depthMax, biasWorld, normalBiasWorld;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowCascade) == 112, "GPUShadowCascade layout");
+
+struct GPUShadowSurface {
+    float position[3], viewDepth;
+    float geometricNormal[3], reverseDepth;
+    u32 slot, generation, primitive, valid; // primitive = meshlet-local triangle
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowSurface) == 48, "GPUShadowSurface layout");
+
+struct GPUShadowHistory {
+    float position[3], visibility;
+    float geometricNormal[3], secondMoment;
+    u32 slot, generation, lightID, lightRevision;
+    u32 sceneRevision, viewID, samples, valid;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowHistory) == 64, "GPUShadowHistory layout");
+
+struct GPUShadowParams {
+    float inverseViewProjection[16], viewProjection[16];
+    float previousViewProjection[16], view[16];
+    float cameraPosition[4];
+    float lightDirection[4]; // xyz toward sun, w = angular radius in RADIANS
+    u32 width, height, slotCount, meshCount;
+    u32 candidateCapacity, materialCount, frameIndex, flags;
+    u32 mapResolution, pcssSearchSamples, pcssFilterSamples, historyMaxSamples;
+    u32 viewID, lightID, lightRevision, sceneRevision;
+    float temporalNormalThreshold, temporalPositionThreshold, contactDistance, contactThickness;
+    float depthBiasWorld, normalBiasWorld, contactStrength, maxTraceDistance;
+    u32 contactSteps, cascadeIndex, casterSlot, meshletFirst;
+    u32 meshletCount, meshletGridWidth, corruption, pad;
+    GPUShadowCascade cascades[4];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowParams) == 864, "GPUShadowParams layout");
+
+struct GPUShadowCounters {
+    u32 guides, rays, hits, historyReused;
+    u32 historyRejected, casters, contactHits, errors;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowCounters) == 32, "GPUShadowCounters layout");
+
+// F10.5 cache region controls. Masks are 64 bits split into scalar u32 words;
+// bit y*8+x identifies a tile in the 8x8 map. Revisions are FULL 64-bit values,
+// split into words; shaders compare the tuple, never an age or hash alone.
+struct GPUShadowCacheParams {
+    u32 resolution, cascade, casterClass, slotCount; // class 0 static, 1 dynamic, 2 all
+    u32 currentLo, currentHi, updateLo, updateHi;
+    u32 readyLo, readyHi, corruption, pad;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowCacheParams) == 48, "GPUShadowCacheParams layout");
+struct GPUShadowCacheTile {
+    u32 lightLo, lightHi, casterLo, casterHi;
+    u32 materialLo, materialHi, projectionLo, projectionHi;
+    u32 valid, pad[3];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowCacheTile) == 48, "GPUShadowCacheTile layout");
+
+
+// F13 residual surface base omits external DI/GI and hemisphere diffuse.
+// A positive raw assembly supplies full pre-reflection Lo for SSR separately.
+PHOSPHOR_GPU_CONSTANT u32 RESOLVE_EXTERNAL_DIFFUSE = 1u<<5;
+struct GPUResolveLightingParams {
+    u32 flags, sunIndex, width, height; // bits: sun visibility, replace local DI, indirect irradiance
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUResolveLightingParams) == 16, "GPUResolveLightingParams layout");
+// F11: local-light sampling. Area emission is radiance (W/(m^2 sr));
+// point/spot emission is intensity (W/sr). Distances are world-space metres.
+PHOSPHOR_GPU_CONSTANT u32 DI_LIGHT_RECTANGLE = 3u;
+PHOSPHOR_GPU_CONSTANT u32 DI_LIGHT_DISK = 4u;
+PHOSPHOR_GPU_CONSTANT u32 DI_LIGHT_TUBE = 5u;
+PHOSPHOR_GPU_CONSTANT u32 DI_LIGHT_TRIANGLE = 6u;
+PHOSPHOR_GPU_CONSTANT u32 DI_LIGHT_TWO_SIDED = 1u;
+PHOSPHOR_GPU_CONSTANT u32 DI_LIGHT_TEXTURED_EMISSION = 2u;
+PHOSPHOR_GPU_CONSTANT u32 DI_LIGHT_MIRRORED = 4u;
+PHOSPHOR_GPU_CONSTANT u32 DI_RESET_HISTORY = 1u;
+PHOSPHOR_GPU_CONSTANT u32 DI_ENABLE_TEMPORAL = 2u;
+PHOSPHOR_GPU_CONSTANT u32 DI_ENABLE_SPATIAL = 4u;
+PHOSPHOR_GPU_CONSTANT u32 DI_ENABLE_VISIBILITY = 8u;
+PHOSPHOR_GPU_CONSTANT u32 DI_USE_STBN = 16u;
+PHOSPHOR_GPU_CONSTANT u32 DI_ERROR_WEIGHT = 1u;
+PHOSPHOR_GPU_CONSTANT u32 DI_ERROR_ALIAS = 2u;
+PHOSPHOR_GPU_CONSTANT u32 DI_ERROR_TARGET = 4u;
+PHOSPHOR_GPU_CONSTANT u32 DI_PROPOSAL_VALID = 1u; // GPUDIReservoir.pad[1], distinct from selected valid
+
+struct GPUSampledLight {
+    u32 id, generation, type, flags;
+    float position[3], range;
+    float axisU[3], radius;
+    float axisV[3], innerCone;
+    float emission[3], outerCone;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUSampledLight) == 80, "GPUSampledLight layout");
+
+// Indexed by the sampled-light slot; valid=0 for analytic/constant emitters.
+// Local triangle geometry is transformed by light_emissive_update AFTER scene
+// transforms, including GPU animation; never CPU guesses for moving emitters.
+struct GPUEmissiveSurface {
+    float p0[3]; u32 instanceSlot;
+    float p1[3]; u32 instanceGeneration;
+    float p2[3]; u32 materialIndex;
+    float uv0[2], uv1[2];
+    float uv2[2]; u32 valid, pad;
+    u32 vertex0, vertex1, vertex2, geometryValid; // live raster vertex lookup for deformation
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUEmissiveSurface) == 96, "GPUEmissiveSurface layout");
+struct GPUEmissiveUpdateParams {
+    u32 lightCount, slotCount, materialCount, pad;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUEmissiveUpdateParams) == 16, "GPUEmissiveUpdateParams layout");
+
+struct GPUAliasEntry {
+    float probability; // Vose threshold for this uniform column
+    float selectionPdf; // probability of choosing THIS entry's light
+    u32 alias, lightIndex;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUAliasEntry) == 16, "GPUAliasEntry layout");
+
+struct GPUDIReservoir {
+    u32 lightIndex, lightID, lightGeneration, lightRevision;
+    float u, v, target, weightSum;
+    float normalization; // W = sumWeight / (M * target(selected))
+    u32 M, age, valid;
+    u32 viewID, historyEpoch, pad[2]; // pad[0]=DI_ERROR_*; pad[1]=counted proposal-domain validity
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDIReservoir) == 64, "GPUDIReservoir layout");
+
+struct GPUDISurface {
+    float position[3], depth; // world position; positive view distance
+    float geometricNormal[3], roughness; // WORLD geometric normal for ray offset
+    float shadingNormal[3], metallic; // material/normal-map result, matches resolve
+    float albedo[3];
+    u32 materialRevision;
+    float viewDirection[3];
+    u32 instanceSlot;
+    u32 instanceGeneration, valid, pad[2];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDISurface) == 96, "GPUDISurface layout");
+
+struct GPUDIParams {
+    u32 width, height, lightCount, frameIndex;
+    u32 candidateCount, spatialCount, spatialRadius, maxHistoryM;
+    u32 flags, viewID, historyEpoch, lightRevision;
+    u32 maxHistoryAge, stbnWidth, stbnHeight, stbnFrames;
+    float depthRelativeThreshold, normalThreshold, targetFloor, pad0;
+    u32 stbnDimensions, stbnSeed, slotCount, pad1; // pad1!=0 forces full-light brute iteration in cluster shade
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDIParams) == 96, "GPUDIParams layout");
+
+struct GPULightCluster {
+    u32 count, overflow, pad[2]; // overflow selects full local-light iteration
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPULightCluster) == 16, "GPULightCluster layout");
+
+struct GPULightClusterParams {
+    float view[16];
+    float nearPlane, farPlane, tanHalfFovX, tanHalfFovY;
+    u32 gridX, gridY, gridZ, capacity;
+    u32 lightCount, pad[3];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPULightClusterParams) == 112, "GPULightClusterParams layout");
+
+// F12: experimental GI ABI. Linear RGB, metres, world geometric normals.
+// generation is the geometric probe-state epoch; cacheGeneration is the
+// radiometric/history epoch. A radiance reset must not erase relocated geometry.
+PHOSPHOR_GPU_CONSTANT u32 GI_MODE_DDGI = 1u;
+PHOSPHOR_GPU_CONSTANT u32 GI_MODE_CACHE = 2u;
+PHOSPHOR_GPU_CONSTANT u32 GI_MODE_RESTIR = 3u;
+PHOSPHOR_GPU_CONSTANT u32 GI_CORRUPT_NONE = 0u;
+PHOSPHOR_GPU_CONSTANT u32 GI_CORRUPT_CACHE = 1u;
+PHOSPHOR_GPU_CONSTANT u32 GI_CORRUPT_PROBE = 2u;
+PHOSPHOR_GPU_CONSTANT u32 GI_CORRUPT_PDF = 3u;
+PHOSPHOR_GPU_CONSTANT u32 GI_PROBE_ACTIVE = 1u;
+PHOSPHOR_GPU_CONSTANT u32 GI_PROBE_INACTIVE = 2u;
+PHOSPHOR_GPU_CONSTANT u32 GI_SAMPLE_VALID = 1u;
+// A receiver/proposal can be valid while every sampled contribution is zero.
+// Keep that proposal count/history distinct from a positive selected endpoint.
+PHOSPHOR_GPU_CONSTANT u32 GI_PROPOSAL_VALID = 2u;
+
+// Physical ablation for independent leakage validation, never a product preset.
+PHOSPHOR_GPU_CONSTANT u32 GI_DEBUG_NO_VISIBILITY = 1u;
+
+struct GPUProbeGridParams {
+    float origin[3], maxDistance;
+    float spacing[3], hysteresis;
+    u32 countX, countY, countZ, raysPerProbe;
+    u32 irradianceTexels, distanceTexels, frameIndex, generation;
+    float skyRadiance[3], normalBias;
+    u32 slotCount, meshCount, materialCount, lightCount;
+    float backfaceThreshold, minFrontDistance, relocationStep, maxRelocation;
+    u32 width, height, mode, reset;
+    u32 cacheCapacity, cacheProbeLimit, cacheMaxAge, cacheGeneration;
+    u32 geometryRevision, lightRevision, materialRevision, viewRevision;
+    u32 debugFlags, debugPadding[3];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeGridParams) == 176, "GPUProbeGridParams layout");
+
+struct GPUProbeState {
+    float offset[3]; u32 state;
+    float relocationTravel; u32 generation, age, pad;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeState) == 32, "GPUProbeState layout");
+struct GPUProbeRay {
+    float direction[3], distance; // negative distance = backface, miss = maxDistance
+    float radiance[3]; u32 backface;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeRay) == 32, "GPUProbeRay layout");
+
+// Full key comparison after hashing; RADIANCE along directionBin, not irradiance.
+// Single-writer resolve pass owns each table lane (no races/partially published RGB).
+struct GPURadianceCacheEntry {
+    u32 cellX, cellY, cellZ, normalBin;
+    u32 directionBin, generation, lastFrame, samples;
+    float radiance[3]; u32 state;
+    u32 geometryRevision, lightRevision, materialRevision, pad;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPURadianceCacheEntry) == 64, "GPURadianceCacheEntry layout");
+
+// F12 diffuse reconnection reservoir uses SECONDARY AREA measure. Fresnel/specular
+// paths are excluded explicitly. sourceProposalArea records the selected path's
+// original area density; it is diagnostic and is not substituted for W on reuse.
+struct GPUGiReservoir {
+    float position[3], proposalArea;
+    float normal[3], proposalSolidAngle;
+    float radiance[3], target;
+    float sourcePosition[3], sourceProposalArea;
+    float sourceNormal[3], W;
+    float weightSum; u32 M, age, flags;
+    u32 slot, instanceGeneration, geometryRevision, lightRevision;
+    u32 materialRevision, viewRevision, pad[2];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUGiReservoir) == 128, "GPUGiReservoir layout");
+
+struct GPUProbeTraceExtra {
+    u32 sampledLightCount, cacheUpdateCount, cacheCandidateCount, frameSeed;
+    float sunAngularRadius; u32 pad[3];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeTraceExtra) == 32, "GPUProbeTraceExtra layout");
+
+struct GPULightingCheckParams {
+    u32 width, height, restir, lightCount;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPULightingCheckParams) == 16, "GPULightingCheckParams layout");
+
+struct GPUGiCheckParams {
+    u32 width, height, mode, corruption;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUGiCheckParams) == 16, "GPUGiCheckParams layout");
+
+// F13 source-only signal ABI. All radiance is linear; distances are metres.
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_ENABLE_RT = 1u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_ENABLE_SSR = 2u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_ENABLE_CACHE = 4u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_ENABLE_PROBES = 8u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_ENABLE_GI = 16u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_CAPTURE_HALF = 32u; // reject total radiance outside HALF before conversion
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_NONE = 0u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_RT = 1u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_SSR = 2u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_CACHE = 3u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_PROBE = 4u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_ENVIRONMENT = 5u;
+PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_VALID = 1u;
+PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_PREFILTERED = 2u; // deterministic split-sum probe path, no MC PDF
+PHOSPHOR_GPU_CONSTANT u32 DENOISE_SIGNAL_DI = 0u;
+PHOSPHOR_GPU_CONSTANT u32 DENOISE_SIGNAL_GI = 1u;
+PHOSPHOR_GPU_CONSTANT u32 DENOISE_SIGNAL_SPECULAR = 2u;
+PHOSPHOR_GPU_CONSTANT u32 DENOISE_SIGNAL_AO = 3u;
+PHOSPHOR_GPU_CONSTANT u32 DENOISE_RESET = 1u;
+PHOSPHOR_GPU_CONSTANT u32 DENOISE_CLAMP_HISTORY = 2u;
+
+struct GPUReflectionParams {
+    float viewProjection[16], inverseViewProjection[16], view[16];
+    float cameraPosition[4];
+    float maxDistance, ssrThickness, rtRoughnessLow, rtRoughnessHigh;
+    u32 width, height, frameIndex, flags;
+    u32 slotCount, meshCount, materialCount, lightCount;
+    u32 ssrSteps, ssrBinarySteps, probeCount, seed;
+    float environment[3], maxProbeMip;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionParams) == 288, "GPUReflectionParams layout");
+struct GPUSpecularSample {
+    float radiance[3], hitDistance; // weighted outgoing Lo; 0 distance for environment/miss
+    float direction[3], proposalSolidAngle;
+    u32 path, secondarySlot, secondaryGeneration, flags;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUSpecularSample) == 48, "GPUSpecularSample layout");
+struct GPUAOParams {
+    float viewProjection[16], inverseViewProjection[16];
+    float radius, originBias, thickness, pixelScale;
+    u32 width, height, samples, slices;
+    u32 steps, frameIndex, flags, slotCount;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUAOParams) == 176, "GPUAOParams layout");
+struct GPUReflectionProbe {
+    float boxMin[3], blendDistance;
+    float boxMax[3], mipCount;
+    float capturePosition[3]; u32 generation;
+    u32 cubeIndex, enabled, pad[2];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionProbe) == 64, "GPUReflectionProbe layout");
+struct GPUProbeCaptureParams {
+    float viewProjection[16], capturePosition[4];
+    u32 lightCount, slotCount, materialCount, sampledLightCount;
+    float environment[3]; u32 storageFlags; // formerly unused raster seed; ABI size unchanged
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeCaptureParams) == 112, "GPUProbeCaptureParams layout");
+struct GPUProbeFilterParams {
+    u32 side, mip, sampleCount, cubeIndex;
+    float roughness, sourceSide; u32 storageFlags, diagnosticReadback;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeFilterParams) == 32, "GPUProbeFilterParams layout");
+struct GPUDenoiseParams {
+    u32 width, height, frameIndex, signal;
+    u32 viewID, historyEpoch, signalRevision, flags;
+    float temporalAlpha, momentsAlpha, depthThreshold, normalThreshold;
+    float roughnessThreshold, hitDistanceThreshold, luminancePhi, normalPhi;
+    u32 maxHistory, atrousStep, minHistoryForVariance, pad0;
+    float varianceFloor, clampSigma, planeThreshold, pad1;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseParams) == 96, "GPUDenoiseParams layout");
+struct GPUDenoiseHistory {
+    float color[3], firstMoment;
+    float secondMoment, variance; u32 length, signal;
+    float normal[3], depth;
+    u32 slot, instanceGeneration, materialRevision, signalRevision;
+    u32 viewID, historyEpoch, valid, flags;
+    float position[3], roughness;
+    float hitDistance; u32 path, secondarySlot, secondaryGeneration;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseHistory) == 112, "GPUDenoiseHistory layout");
+
+// F14: ALL positions/radii/heights/distances are WORLD METRES; extinction and
+// scattering coefficients are m^-1. RGB radiance and irradiance remain linear
+// and pre-exposure. Atmosphere planet centre maps world origin to local ground.
+PHOSPHOR_GPU_CONSTANT u32 ATMOSPHERE_SCHEMA = 1u;
+PHOSPHOR_GPU_CONSTANT u32 ATMOSPHERE_ENABLE_MOON = 1u;
+PHOSPHOR_GPU_CONSTANT u32 ATMOSPHERE_ENABLE_STARS = 2u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_HISTORY_VALID = 1u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_SHADOW_CSM = 2u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_SHADOW_RT = 4u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_ENABLE_GI = 8u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_ENABLE_LOCAL_LIGHTS = 16u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_CORRUPT_UNITS = 1u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_CORRUPT_HISTORY = 2u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_CORRUPT_LIGHT = 3u;
+
+struct GPUAtmosphereParams {
+    float planetCenter[3], bottomRadius;
+    float topRadius, rayleighScaleHeight, mieScaleHeight, mieG;
+    float rayleighScattering[3], sunAngularRadius;
+    float mieScattering[3], mieAbsorption;
+    float ozoneAbsorption[3], ozoneCenterHeight;
+    float groundAlbedo[3], ozoneHalfWidth;
+    float sunDirection[3], pad0;
+    float sunIrradiance[3], pad1;
+    float moonDirection[3], moonAngularRadius;
+    float moonIrradiance[3], moonPhase;
+    float cameraPosition[3], timeSeconds;
+    float inverseViewProjection[16], viewProjection[16];
+    u32 transmittanceWidth, transmittanceHeight, multiWidth, multiHeight;
+    u32 skyWidth, skyHeight, marchSteps, multiDirections;
+    u32 outputWidth, outputHeight, parameterRevision, skyRevision;
+    u32 frameIndex, viewID, flags, corruption;
+    float starIntensity, starRotation, timeDelta, exposureEv100;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUAtmosphereParams) == 384, "GPUAtmosphereParams layout");
+
+struct GPUFogParams {
+    float inverseViewProjection[16], view[16], previousViewProjection[16], previousView[16];
+    u32 gridX, gridY, gridZ, maxLocalLights;
+    u32 outputWidth, outputHeight, frameIndex, viewID;
+    float nearDistance, farDistance, densityAtBase, heightFalloff;
+    float albedo[3], anisotropy;
+    float heightBase, maxDensity, historyWeight, positionThreshold;
+    float sunDirection[3], maxTraceDistance;
+    float sunIrradiance[3], depthRelativeThreshold;
+    float cameraPosition[3], timeSeconds;
+    u32 lightCount, slotCount, flags, generation;
+    u32 lightRevision, previousViewID, corruption, maxHistoryAge;
+    float moonDirection[3], pad0;
+    float moonIrradiance[3], pad1;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUFogParams) == 448, "GPUFogParams layout");
+struct GPUFogCell {
+    float source[3], extinction; // source radiance per metre; scalar extinction m^-1
+    float worldPosition[3], viewDepth;
+    u32 viewID, generation, age, valid;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUFogCell) == 48, "GPUFogCell layout");
+struct GPUFogIntegrated { float radiance[3], transmittance; };
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUFogIntegrated) == 16, "GPUFogIntegrated layout");
+
+struct GPUCloudParams {
+    float inverseViewProjection[16], previousViewProjection[16];
+    float cameraPosition[3], timeSeconds;
+    float wind[3], previousTimeSeconds;
+    float baseHeight, topHeight, coverage, densityScale;
+    float noiseScale, erosionScale, extinction, albedo;
+    float anisotropy, maxDistance, terminationTransmittance, historyWeight;
+    float depthRelativeThreshold, positionThreshold, lightStepDistance;
+    u32 maxHistorySamples;
+    u32 width, height, outputWidth, outputHeight;
+    u32 marchSteps, lightSteps, seed, generation;
+    u32 frameIndex, viewID, flags, corruption;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUCloudParams) == 272, "GPUCloudParams layout");
+struct GPUCloudHistory {
+    float worldPosition[3], opaqueDistance;
+    float radiance[3], transmittance;
+    u32 viewID, generation, samples, valid;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUCloudHistory) == 48, "GPUCloudHistory layout");
+struct GPUVolumeCounters {
+    u32 nonfinite, invalidUnits, invalidHistory, shadowRays;
+    u32 froxels, cloudSamples, historyReused, historyRejected;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUVolumeCounters) == 32, "GPUVolumeCounters layout");
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_CORRUPT_OMIT_LUT = 4u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_NUMERIC_TRANS = 0u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_NUMERIC_MULTI = 1u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_NUMERIC_SKY = 2u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_NUMERIC_FOG = 3u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_NUMERIC_SOLAR = 4u;
+struct GPUVolumeDiagnosticParams {
+    u32 transWidth,transHeight,multiWidth,multiHeight;
+    u32 skyWidth,skyHeight,fogX,fogY;
+    u32 fogZ,frameLo,frameHi,expectedPhysicsRevision;
+    u32 expectedSkyRevision,sampleCount,corruption,homogeneous;
+    float fixtureExtinction,fixtureSource[3];
+    u32 fogIndices[3],stampKind;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUVolumeDiagnosticParams)==96,"GPUVolumeDiagnosticParams layout");
+struct GPUVolumeNumericSample {
+    float value[4];
+    u32 kind,x,y,producedRevision;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUVolumeNumericSample)==32,"GPUVolumeNumericSample layout");
+
+PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_ERROR = 1u<<31;
+PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_MIXED = 4u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_GI = 1u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_CUSTOM = 2u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_DI = 4u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_SPEC = 8u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_AO = 16u;
+struct GPUReflectionReduceParams {u32 width,height,samples,stridePixels;};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionReduceParams)==16,"GPUReflectionReduceParams layout");
+struct GPUReflectionComposeParams {u32 width,height,backingWidth,backingHeight;u32 flags,pad[3];};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionComposeParams)==32,"GPUReflectionComposeParams layout");
 
 } // namespace phosphor

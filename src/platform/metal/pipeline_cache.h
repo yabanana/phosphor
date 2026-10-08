@@ -18,9 +18,11 @@
 
 namespace MTLFX {
 class TemporalScalerDescriptor;
+class TemporalDenoisedScalerDescriptor;
 }
 namespace MTL4FX {
 class TemporalScaler;
+class TemporalDenoisedScaler;
 }
 
 namespace phosphor {
@@ -126,6 +128,15 @@ public:
     // render thread). The GPU must already be done with it.
     void retireTemporalScaler(std::shared_ptr<MTL4FX::TemporalScaler> scaler);
 
+#if defined(PHOSPHOR_METALFX_DENOISED_FACTORY) && PHOSPHOR_METALFX_DENOISED_FACTORY && !defined(PHOSPHOR_DISABLE_METALFX_DENOISED) && \
+    __has_include(<MetalFX/MTL4FXTemporalDenoisedScaler.hpp>)
+#define PHOSPHOR_METALFX_DENOISED_GATEWAY_AVAILABLE 1
+    // F13 gateway: no ordinary TemporalScaler casts or F8 cycle workaround.
+    std::future<std::shared_ptr<MTL4FX::TemporalDenoisedScaler>>
+    requestTemporalDenoisedScaler(MTLFX::TemporalDenoisedScalerDescriptor* descriptor);
+    void retireTemporalDenoisedScaler(std::shared_ptr<MTL4FX::TemporalDenoisedScaler> scaler);
+#endif
+
     std::future<std::shared_ptr<TemporalWorker>> requestTemporalWorker(std::shared_ptr<TemporalWorker> worker);
 
     // --- F3.4 harvest -----------------------------------------------------------
@@ -164,6 +175,10 @@ private:
     MetalContext&        context_;
     Options              options_;
     MTL4::Compiler*      compiler_   = nullptr;
+    // SDK scaler construction enters the compiler's lazy ML class cache.
+    // Keep those coarse factory calls serialized; ordinary PSO jobs and all
+    // per-frame encoding remain parallel/asynchronous.
+    std::mutex sdkFactoryMutex_;
     MTL4::Archive*       archive_    = nullptr;
     MTL4::PipelineDataSetSerializer* serializer_ = nullptr;
     MTL::Library*        library_        = nullptr; // served generation

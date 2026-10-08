@@ -25,6 +25,8 @@ The original Vulkan renderer is archived in [`legacy/vulkan/`](legacy/vulkan/REA
 
 ## Status and roadmap
 
+F9 is integrated. F10–F14 now provide an **experimental renderer baseline** with scoped M5 validation. [Integration handoff](docs/F10_F14_HANDOFF.md) records the completed checks and open acceptance work. Native F13 denoised reconstruction remains guarded, specular denoise quality is still being qualified, and the full 1080p scene currently exceeds the 60-fps budget. Development stops at F14 before further OPT work.
+
 The implementation roadmap — F0–F41 and OPT-0…OPT-15, organized by dependencies
 in seven eras — is in [`docs/ROADMAP.md`](docs/ROADMAP.md) (Italian).
 The product scope includes an editor, ECS/runtime, community content, complete
@@ -195,7 +197,7 @@ released by the engine, see the [root cause and verification](docs/research/2026
 The isolated workers of [PR #15](https://github.com/yabanana/phosphor/pull/15)
 remain opt-in ([historical cost](docs/F8_METALFX_LIFETIME.md), rejected by the owner);
 see [delivery and limits](docs/F7_F8_HANDOFF.md) and [renderer commands/contracts](docs/RENDERING_F7_F8.md).
-The post-F8 review (`docs/research/2026-10-04-post-f8-review.md`) recorded the M5 OPT-4.16 baseline and moved OPT-2 after F13; the next phase is F9. Advance detail does not activate
+The post-F8 review (`docs/research/2026-10-04-post-f8-review.md`) recorded the M5 OPT-4.16 baseline and moved OPT-2 after F13; F9 is integrated and the F10–F14 experimental baseline is documented in `docs/F10_F14_HANDOFF.md`. The owner stop is F14. Advance detail does not activate
 the optional research catalog.
 
 Development acceptance uses the available M5 Max 128 GB. Apple9 fallback

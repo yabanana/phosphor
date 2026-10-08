@@ -1001,3 +1001,30 @@ strumentazione è assente con timing disabilitato ed esclude External/MetalFX.
 I tempi sono contributi esclusivi alla timeline della coda, non hardware
 busy counters. GPU allocations misurate 0 nei preset stabili e nessuna
 compilazione sul render thread.
+
+
+## 2026-10-08 — F10–F14 experimental integration checkpoint
+
+M5 Max128GB, macOS27.2 (26B5091g), Release,1920×1080, native post,
+fixed timestep, serial GPU timing; no validation/capture/checkers. Exact
+commands, source/binary hashes, per-pass sample counts and memory scopes:
+[handoff](F10_F14_HANDOFF.md) and [ledger](results/F10-F14-integration-M5Max-2026-10-07.json).
+
+Three paired ABA replicates per scene (128warmup+512measured): dense
+DDGI/custom16×8×16 adds median GPU p50 **3.0087ms Cornell** and **6.2240ms
+Sponza**. All18processes, six frozen pair-drift gates and O7=0 GPU allocations
+pass. The initial analyzer used an incorrect effective-mode enum; schema-correct
+reanalysis preserves all raw timings and requires640native/0temporal frames.
+
+Separate three-replicate full profiles (128warmup+256measured), p50 GPU ranges:
+Sponza full **39.915–42.879ms**, Many Lights1024 **24.963–25.470ms**, forced
+Apple9/reduced full **34.341–36.477ms**. All nine O7/process checks pass.
+Logical engine resources are respectively11.197/5.893/10.921GiB, not process
+footprint. CPU spans include serial synchronization; no CPU compute bottleneck
+is inferred. Forced Apple9 is not a physical M3 measurement.
+
+The60fps budget remains unmet. Dense DDGI is an explicit quality candidate,
+not an adopted default; existing coarse presets do not inherit its quality.
+Aerial perspective and specular atrous passes are major measured units. No OPT
+is activated. F13 specular quality and native denoised qualification remain
+open independently of these cost results. Development stops at F14.

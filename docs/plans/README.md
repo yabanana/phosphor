@@ -12,8 +12,8 @@ Non attiva il catalogo di ricerca e non inventa risultati sperimentali: le
 scelte numeriche si fissano con la regola dello spike già scritta nel piano.
 I file futuri sono destinazioni proposte; il kickoff riconcilia codice e SDK.
 
-- **Checkpoint:** F5/F6 integrate; F7/F8 DEVELOPMENT_ACCEPTED M5; revisione post-F8 (2026-10-04): tempi per pass corretti, baseline M5 OPT-4.16 registrata, OPT-2 spostata dopo F13 con prerequisito OPT-2.0. Prossima fase: F9. [Revisione](../research/2026-10-04-post-f8-review.md).
-- **Poi:** F9–F13 e F14 se utile al corpus; renderer prima della piattaforma.
+- **Checkpoint:** F5/F6 integrate; F7/F8 DEVELOPMENT_ACCEPTED M5; revisione post-F8 (2026-10-04): tempi per pass corretti, baseline M5 OPT-4.16 registrata, OPT-2 spostata dopo F13 con prerequisito OPT-2.0. F9 è integrata; la baseline F10–F14 e i limiti di qualificazione sono nel [handoff](../F10_F14_HANDOFF.md). [Revisione](../research/2026-10-04-post-f8-review.md).
+- **Stop del proprietario:** F14. Nessuna F15/OPT viene attivata automaticamente; i criteri ancora aperti restano espliciti.
 - **Piattaforma richiesta:** ECS/runtime, contenuti, audio, editor, 2D, UI e
   riuso Bevy, con implementazione progressiva e compatibilità verificata.
 - **OPT/EDGE:** candidati selezionati per beneficio misurato, non passaggi obbligatori.
@@ -56,11 +56,11 @@ restano soltanto nella [roadmap](../ROADMAP.md).
 | [OPT-3](OPT-3.md) | Geometria, culling e dati di vertice | opportunita | 11 |
 | [OPT-4](OPT-4.md) | Shading, banda e ricostruzione | opportunita | 17 |
 | [F9](F9.md) | Infrastruttura ray tracing | preparazione | 6 |
-| [F10](F10.md) | Ombre ibride | preparazione | 5 |
-| [F11](F11.md) | Migliaia di luci | preparazione | 5 |
-| [F12](F12.md) | Illuminazione globale | preparazione | 5 |
-| [F13](F13.md) | Riflessioni, AO e denoiser | preparazione | 6 |
-| [F14](F14.md) | Cielo, atmosfera, nuvole, meteo | preparazione | 5 |
+| [F10](F10.md) | Ombre ibride | qualificazione parziale | 5 |
+| [F11](F11.md) | Migliaia di luci | qualificazione parziale | 5 |
+| [F12](F12.md) | Illuminazione globale | qualificazione parziale | 5 |
+| [F13](F13.md) | Riflessioni, AO e denoiser | qualificazione parziale | 6 |
+| [F14](F14.md) | Cielo, atmosfera, nuvole, meteo | qualificazione parziale | 5 |
 | [OPT-5](OPT-5.md) | Budget di raggi e campionamento | opportunita | 11 |
 | [OPT-6](OPT-6.md) | Illuminazione globale, cache e ammortamento | opportunita | 12 |
 | [F15](F15.md) | Materiali avanzati e varianti shader | pianificato | 4 |

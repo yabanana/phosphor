@@ -348,7 +348,7 @@ TEST_CASE("bench report: schema v3 without GPU timing keeps v1 fields and stays 
     r.pipelinesJson = "{\"hits\": 3}";
     const std::string json = reportToJson(r);
     CHECK_MESSAGE(validJson(json), json);
-    CHECK(json.find("\"schema_version\": 9") != std::string::npos);
+    CHECK(json.find("\"schema_version\": " + std::to_string(BENCH_REPORT_SCHEMA_VERSION)) != std::string::npos);
     CHECK(json.find("\"gpu_timing\": false") != std::string::npos);
     CHECK(json.find("\"gpu_timing_unfused\": false") != std::string::npos);
     CHECK(json.find("\"passes\"") == std::string::npos);
@@ -365,7 +365,7 @@ TEST_CASE("bench report: schema v3 with GPU timing") {
     const BenchReport r = timedReport();
     const std::string json = reportToJson(r);
     CHECK_MESSAGE(validJson(json), json);
-    CHECK(json.find("\"schema_version\": 9") != std::string::npos);
+    CHECK(json.find("\"schema_version\": " + std::to_string(BENCH_REPORT_SCHEMA_VERSION)) != std::string::npos);
     CHECK(json.find("\"gpu_timing\": true") != std::string::npos);
     CHECK(json.find("\"gpu_timing_unfused\": true") != std::string::npos);
     CHECK(json.find("\"passes\": [") != std::string::npos);
@@ -500,7 +500,7 @@ TEST_CASE("bench report: schema v5 scene and cpu_phases objects") {
     r.cpuPhases.submit    = {0.25f, 0.2f, 0.25f, 0.3f, 0.35f};
     const std::string json = reportToJson(r);
     CHECK_MESSAGE(validJson(json), json);
-    CHECK(json.find("\"schema_version\": 9") != std::string::npos);
+    CHECK(json.find("\"schema_version\": " + std::to_string(BENCH_REPORT_SCHEMA_VERSION)) != std::string::npos);
     CHECK(json.find("\"scene\": {\"mode\": \"on\", \"instances\": 1000000, \"slots\": 1048576, \"buckets\": 24, "
                     "\"materials\": 256, \"commands\": 40, \"structure_changes\": 7, \"queue_overflow\": 0, "
                     "\"upload_bytes\": {\"mean\": 1000.0000") != std::string::npos);
@@ -789,7 +789,7 @@ TEST_CASE("bench report: schema 6 JSON has p95 between p50 and p99 in every summ
     r.meshlets.candidates = summarize({10.0f, 20.0f});
     const std::string json = reportToJson(r);
     CHECK_MESSAGE(validJson(json), json);
-    CHECK(json.find("\"schema_version\": 9") != std::string::npos);
+    CHECK(json.find("\"schema_version\": " + std::to_string(BENCH_REPORT_SCHEMA_VERSION)) != std::string::npos);
     CHECK(r.frameMs.p95 == doctest::Approx(19.0f));
     CHECK(json.find("\"frame_ms\": {\"mean\": 10.5000, \"min\": 1.0000, \"p50\": 10.0000, \"p95\": 19.0000, "
                     "\"p99\": 20.0000, \"max\": 20.0000}") != std::string::npos);
@@ -1079,4 +1079,157 @@ TEST_CASE("F9 proxy transitions require measured proxies checks and enough total
         CHECK_FALSE(parse(args,o,error));
         CHECK_FALSE(error.empty());
     }
+}
+
+TEST_CASE("F10-F12 launch contract refuses unavailable receiver paths and tiers") {
+    LaunchOptions o; std::string e;
+    REQUIRE(parse({"--render-path","visibility","--shadows","csm"},o,e));
+    CHECK(o.shadows==ShadowMode::CSM); CHECK_FALSE(o.rtEnabled);
+    CHECK_FALSE(parse({"--shadows","rt","--rt","on"},o,e));
+    CHECK_FALSE(parse({"--render-path","visibility","--shadows","rt"},o,e));
+    REQUIRE(parse({"--render-path","visibility","--shadows","rt","--rt","on"},o,e));
+    CHECK_FALSE(parse({"--render-path","visibility","--rt","on","--gi","restir","--force-family","apple9"},o,e));
+    CHECK_FALSE(parse({"--render-path","visibility","--rt","on","--lighting","restir","--adaptive-shading"},o,e));
+    CHECK_FALSE(parse({"--render-path","visibility","--shadows","csm","--shadow-map-size","1000"},o,e));
+    CHECK_FALSE(parse({"--contact-shadows","on"},o,e));
+    CHECK_FALSE(parse({"--debug-lighting-corrupt","caster"},o,e));
+    REQUIRE(parse({"--render-path","visibility","--shadows","csm","--debug-lighting","1","--debug-lighting-corrupt","caster"},o,e));
+    CHECK(o.debugLightingCorrupt==2);
+}
+
+TEST_CASE("F12 linear capture and exact-frame export validate their signal") {
+    LaunchOptions o;std::string e;
+    CHECK_FALSE(parse({"--capture-linear","x.pfm","--frames","1"},o,e));
+    REQUIRE(parse({"--capture-linear","x.pfm","--render-path","visibility","--frames","1"},o,e));
+    CHECK_FALSE(parse({"--export-reference","snap","--frames","1","--warmup","0","--export-reference-frame","2"},o,e));
+    REQUIRE(parse({"--bench","6","--lighting-scene","thin-walls","--render-path","visibility","--rt","on","--lighting","restir","--gi","ddgi","--capture-linear-signal","indirect-diffuse"},o,e));
+    CHECK(o.captureLinearSignal==1);CHECK(o.lightingScene=="thin-walls");
+    CHECK_FALSE(parse({"--bench","5","--lighting-scene","thin-walls"},o,e));
+}
+
+TEST_CASE("F10 raw shadow capture requires an enabled shadow producer") {
+    LaunchOptions o;std::string error;
+    CHECK_FALSE(parse({"--render-path","visibility","--capture-linear-signal","shadow"},o,error));
+    REQUIRE(parse({"--render-path","visibility","--shadows","csm","--capture-linear-signal","shadow"},o,error));
+    CHECK(o.captureLinearSignal==3);
+    REQUIRE(parse({"--render-path","visibility","--shadows","rt","--rt","on","--capture-linear-signal","shadow"},o,error));
+    CHECK(o.captureLinearSignal==3);
+    REQUIRE(parse({"--render-path","visibility","--shadows","csm","--capture-linear-signal","shadow-position"},o,error));
+    CHECK(o.captureLinearSignal==4);
+    REQUIRE(parse({"--render-path","visibility","--shadows","csm","--capture-linear-signal","shadow-normal"},o,error));
+    CHECK(o.captureLinearSignal==5);
+    REQUIRE(parse({"--render-path","visibility","--rt","on","--gi","ddgi","--lighting","brute","--capture-linear-signal","shadow-position"},o,error));
+    CHECK(o.captureLinearSignal==4);
+    CHECK_FALSE(parse({"--render-path","visibility","--capture-linear-signal","shadow-normal"},o,error));
+}
+
+TEST_CASE("F13 capture IDs preserve tester shadow diagnostics and named scalar AO") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--render-path","visibility","--reflections","ssr","--capture-linear-signal","specular"},o,error));
+    CHECK(o.captureLinearSignal==6);
+    REQUIRE(parse({"--render-path","visibility","--ao","gtao","--capture-linear-signal","ao"},o,error));
+    CHECK(o.captureLinearSignal==7);
+    CHECK_FALSE(parse({"--render-path","visibility","--capture-linear-signal","ao"},o,error));
+}
+
+TEST_CASE("F13/F14 diagnostic hooks require actual active consumers and checks") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--render-path","visibility","--reflections","ssr","--lighting-denoise","custom","--debug-lighting","1","--debug-reflection-corrupt","history"},o,error));
+    CHECK(o.debugReflectionCorrupt==1);
+    CHECK_FALSE(parse({"--render-path","visibility","--reflections","ssr","--debug-lighting","1","--debug-reflection-corrupt","history"},o,error));
+    REQUIRE(parse({"--fog","on","--volume-oracle","oracle","--fog-homogeneous","--debug-lighting","1"},o,error));
+    CHECK(o.fogHomogeneous);CHECK(o.volumeOracle=="oracle");
+    CHECK_FALSE(parse({"--fog","on","--fog-homogeneous"},o,error));
+    REQUIRE(parse({"--atmosphere","on","--debug-volume-corrupt","lut","--debug-lighting","1"},o,error));
+    CHECK(o.debugVolumeCorrupt==4);
+    CHECK_FALSE(parse({"--atmosphere","on","--debug-volume-corrupt","history","--debug-lighting","1"},o,error));
+    CHECK_FALSE(parse({"--fog","on","--debug-volume-corrupt","history","--debug-lighting","1"},o,error));
+    REQUIRE(parse({"--fog","on","--atmo-freeze-clock","--debug-volume-corrupt","history","--debug-lighting","1"},o,error));
+    CHECK(o.atmoFreezeClock);CHECK(o.debugVolumeCorrupt==2);
+    CHECK_FALSE(parse({"--atmo-freeze-clock"},o,error));
+    CHECK_FALSE(parse({"--fog","on","--volume-oracle","oracle","--fog-homogeneous","--atmo-freeze-clock","--debug-volume-corrupt","history","--debug-lighting","1"},o,error));
+}
+
+TEST_CASE("F13 SDK fixture is an explicit source experiment with isolated inputs") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--frames","64","--denoised-fixture","wide-hdr","--denoised-fixture-output","sdk","--denoised-fixture-pre-exposed"},o,error));
+    CHECK(o.denoisedFixture=="wide-hdr");CHECK(o.denoisedFixturePreExposed);CHECK(o.post);CHECK(o.visibility);
+    CHECK_FALSE(parse({"--denoised-fixture","constant","--denoised-fixture-output","sdk"},o,error));
+    CHECK_FALSE(parse({"--frames","64","--denoised-fixture","constant","--denoised-fixture-output","sdk","--atmosphere","on"},o,error));
+    CHECK_FALSE(parse({"--frames","64","--denoised-fixture-pre-exposed"},o,error));
+}
+
+TEST_CASE("F13 filtered indirect capture exports selected irradiance as diffuse radiance once") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--render-path","visibility","--rt","on","--gi","cache","--lighting","restir","--lighting-denoise","custom","--capture-linear-signal","indirect-diffuse-filtered"},o,error));
+    CHECK(o.captureLinearSignal==8);
+    CHECK_FALSE(parse({"--render-path","visibility","--rt","on","--gi","cache","--lighting","restir","--capture-linear-signal","indirect-diffuse-filtered"},o,error));
+    REQUIRE(parse({"--render-path","visibility","--rt","on","--gi","cache","--lighting","restir","--capture-linear-signal","indirect-diffuse"},o,error));
+    CHECK(o.captureLinearSignal==1);
+}
+
+TEST_CASE("F13 fixture prewarm is bounded explicit and isolated from production") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--frames","96","--denoised-fixture","constant","--denoised-fixture-output","sdk","--denoised-fixture-prewarm-ms","60000"},o,error));
+    CHECK(o.denoisedFixturePrewarmMs==60000);
+    CHECK_FALSE(parse({"--frames","96","--denoised-fixture","constant","--denoised-fixture-output","sdk","--denoised-fixture-prewarm-ms","0"},o,error));
+    CHECK_FALSE(parse({"--frames","96","--denoised-fixture","constant","--denoised-fixture-output","sdk","--denoised-fixture-prewarm-ms","120001"},o,error));
+    CHECK_FALSE(parse({"--frames","96","--denoised-fixture-prewarm-ms","120000"},o,error));
+}
+
+
+TEST_CASE("F12 physical visibility ablation is explicit and cannot masquerade as an invariant negative") {
+    LaunchOptions options; std::string error;
+    CHECK_FALSE(options.debugGiNoVisibility);
+    REQUIRE(parse({"--render-path","visibility","--rt","on","--lighting","restir","--gi","ddgi","--debug-lighting","1","--debug-gi-no-visibility"},options,error));
+    CHECK(options.debugGiNoVisibility); CHECK(options.debugGiCorrupt==0);
+    CHECK_FALSE(parse({"--debug-gi-no-visibility"},options,error));
+    CHECK_FALSE(parse({"--render-path","visibility","--rt","on","--lighting","restir","--gi","ddgi","--debug-gi-no-visibility"},options,error));
+    CHECK_FALSE(parse({"--render-path","visibility","--rt","on","--lighting","restir","--gi","ddgi","--debug-lighting","1","--debug-gi-corrupt","probe","--debug-gi-no-visibility"},options,error));
+}
+
+TEST_CASE("F13 SDK automatic exposure stays inside the explicit wide-HDR fixture") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--frames","96","--denoised-fixture","wide-hdr","--denoised-fixture-output","sdk","--denoised-fixture-pre-exposed"},o,error));
+    CHECK_FALSE(o.denoisedFixtureAutoExposure);
+    REQUIRE(parse({"--frames","96","--denoised-fixture","wide-hdr","--denoised-fixture-output","sdk","--denoised-fixture-pre-exposed","--denoised-fixture-auto-exposure"},o,error));
+    CHECK(o.denoisedFixtureAutoExposure);CHECK(o.denoisedFixturePreExposed);
+    CHECK(o.lightingDenoise==LightingDenoiseMode::Off);
+    CHECK_FALSE(parse({"--frames","96","--denoised-fixture-auto-exposure"},o,error));
+    CHECK_FALSE(parse({"--frames","96","--denoised-fixture","wide-hdr","--denoised-fixture-output","sdk","--denoised-fixture-auto-exposure"},o,error));
+    CHECK_FALSE(parse({"--frames","96","--denoised-fixture","constant","--denoised-fixture-output","sdk","--denoised-fixture-pre-exposed","--denoised-fixture-auto-exposure"},o,error));
+}
+
+TEST_CASE("F13 SDK analytic manual exposure is a fixture-only control") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--frames","96","--denoised-fixture","wide-hdr","--denoised-fixture-output","sdk","--denoised-fixture-pre-exposed"},o,error));
+    CHECK_FALSE(o.denoisedFixtureManualExposureControl);
+    REQUIRE(parse({"--frames","96","--denoised-fixture","wide-hdr","--denoised-fixture-output","sdk","--denoised-fixture-pre-exposed","--denoised-fixture-manual-exposure-control"},o,error));
+    CHECK(o.denoisedFixtureManualExposureControl);CHECK_FALSE(o.denoisedFixtureAutoExposure);CHECK(o.lightingDenoise==LightingDenoiseMode::Off);
+    CHECK_FALSE(parse({"--frames","96","--denoised-fixture-manual-exposure-control"},o,error));
+    CHECK_FALSE(parse({"--frames","96","--denoised-fixture","wide-hdr","--denoised-fixture-output","sdk","--denoised-fixture-manual-exposure-control"},o,error));
+    CHECK_FALSE(parse({"--frames","96","--denoised-fixture","wide-hdr","--denoised-fixture-output","sdk","--denoised-fixture-pre-exposed","--denoised-fixture-auto-exposure","--denoised-fixture-manual-exposure-control"},o,error));
+}
+
+TEST_CASE("Physical lighting HDR cannot enter the HALF-only standard temporal adapter") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--render-path","visibility","--post","--upscaler","temporal"},o,error));
+    CHECK(o.temporalUpscale); // F7/F8 path remains supported.
+    for(const auto& mode:std::vector<std::vector<const char*>>{{"--shadows","csm"},{"--rt","on","--lighting","brute"},
+        {"--rt","on","--lighting","brute","--gi","ddgi"},{"--reflections","ssr"},{"--ao","gtao"},{"--atmosphere","on"}}) {
+        auto args=mode;args.insert(args.end(),{"--render-path","visibility","--post","--upscaler","temporal"});
+        CHECK_FALSE(parse(args,o,error));
+        CHECK(error.find("Float32")!=std::string::npos);
+        args.back()="native";REQUIRE(parse(args,o,error));CHECK_FALSE(o.temporalUpscale);
+    }
+    REQUIRE(parse({"--bench","6","--reflection-scene","wide-emission","--render-path","visibility","--ao","gtao","--frames","4","--capture-linear","wide.pfm"},o,error));
+    CHECK(o.reflectionScene=="wide-emission");
+}
+
+TEST_CASE("F13 physical AO proof selects real custom visibility without other transport") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--bench","6","--reflection-scene","ao-temporal-wall","--render-path","visibility","--rt","on","--ao","rtao","--ao-radius","2","--lighting-denoise","custom","--capture-linear-signal","ao-filtered"},o,error));
+    CHECK(o.captureLinearSignal==9);CHECK(o.gi==GiMode::Off);CHECK(o.reflections==ReflectionMode::Off);
+    CHECK_FALSE(parse({"--render-path","visibility","--ao","gtao","--capture-linear-signal","ao-filtered"},o,error));
+    CHECK_FALSE(parse({"--bench","6","--reflection-scene","ao-temporal-wall","--render-path","visibility","--rt","on","--ao","rtao","--ao-radius","1","--lighting-denoise","custom"},o,error));
 }

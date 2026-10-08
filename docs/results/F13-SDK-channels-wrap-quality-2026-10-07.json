@@ -1,0 +1,268 @@
+{
+  "schema": "phosphor.sdk-channels-quality.v1",
+  "state": "CPU_ANALYSIS_COMPLETE",
+  "passed": true,
+  "phase_accepted": false,
+  "production_policy_promoted": false,
+  "protocol_sha256": "248c05bb2880f7b84537d87546670bf2845fdce08ca7383f5a4dc703a2a87bb1",
+  "provenance": {
+    "shader_generation": 0,
+    "source_sha": "05d7007574e4781b8db195d6ec746f77624c3ca4aefd946fa92bd0276b7d38a8",
+    "binary_sha": "fa9ba06e57f8e1db32a446a10c2ab9a72579a23ebed3b7210a1b6f14048a6875",
+    "manifest_sha": "388aa016d87d8093f95a7d516b411e2fca9c510f4951d7194c6fd3eb41e9dbe2"
+  },
+  "control_sensitivity_passed": true,
+  "sdk_physical_max_absolute_difference": 0.0,
+  "scope": [
+    "One noiseless authored patch with abrupt static normal/roughness split; not general denoising quality.",
+    "Frame64 is a known source replacement with zero patch motion; the wrap fix must submit reset and permanently advance the source epoch.",
+    "Native SDK edges may filter; bounded existing reconstruction support and original numeric caps are retained."
+  ],
+  "artifact_worktree": "/Users/danielsan/.codex/worktrees/f9-shaders/phosphor",
+  "artifact_path": "build/f13-sdk-channels-wrap-quality-v1/analysis-with-reset-checks/result.json",
+  "artifact_sha256": "1f6dec227956169c57260a822bee1a81752ea3c95347f4a46364d9ab075c227b",
+  "input_artifacts_count": 288,
+  "input_artifact_records_sha256": "b335ae82727009599483ba7b5b47de7b5d3998b17310a1402e7c41eb931cb31b",
+  "sdk": {
+    "full-image": {
+      "metrics": {
+        "linear_rmse_p95": 0.012903992452461259,
+        "linear_rmse_max": 0.013035741447174136,
+        "residual_flicker_mean": 0.00043922916261686216,
+        "support_ghost_fraction_max": 0.035062579719387754,
+        "old_frame_attraction_max": 0.35233976403061223,
+        "signed_bias_mean": 6.364210060349217e-06,
+        "reference_change_energy": 773.28125,
+        "recovery_frames": {
+          "startup-reset": 0,
+          "host-reset48": 0,
+          "signal-replacement64-not-a-motion-vector-proof": 0
+        }
+      },
+      "checks": {
+        "spatial_p95": true,
+        "worst_frame": true,
+        "flicker": true,
+        "ghost_support": true,
+        "recovery": true,
+        "dynamic_sensitivity": true
+      }
+    },
+    "geometry-defined-swept-patch": {
+      "metrics": {
+        "linear_rmse_p95": 0.055912014898841504,
+        "linear_rmse_max": 0.05651675752079702,
+        "residual_flicker_mean": 0.007591572645106271,
+        "support_ghost_fraction_max": 0.035062579719387754,
+        "old_frame_attraction_max": 0.35233976403061223,
+        "signed_bias_mean": -0.00287975761298453,
+        "reference_change_energy": 773.28125,
+        "recovery_frames": {
+          "startup-reset": 0,
+          "host-reset48": 0,
+          "signal-replacement64-not-a-motion-vector-proof": 0
+        }
+      },
+      "checks": {
+        "spatial_p95": true,
+        "worst_frame": true,
+        "flicker": true,
+        "ghost_support": true,
+        "recovery": true,
+        "dynamic_sensitivity": true
+      }
+    }
+  },
+  "physical_matches_sdk_exactly": true,
+  "actual_sdk_reset_frames": [
+    0,
+    48,
+    64
+  ],
+  "source_epoch_segments": [
+    {
+      "frame_range": [
+        0,
+        47
+      ],
+      "epoch": 2
+    },
+    {
+      "frame_range": [
+        48,
+        63
+      ],
+      "epoch": 3
+    },
+    {
+      "frame_range": [
+        64,
+        95
+      ],
+      "epoch": 4
+    }
+  ],
+  "cpu_controls": {
+    "exact-positive": true,
+    "constant-background-negative": false,
+    "one-frame-lag-negative": false,
+    "opposite-direction-negative": false
+  },
+  "selected_diagnostics": [
+    {
+      "frame": 0,
+      "authored_center": [
+        32,
+        48
+      ],
+      "patch_contrast_ratio_rgb": [
+        0.7175382653061225,
+        0.7220317814625848,
+        0.7299306441326531
+      ],
+      "positive_red_centroid": [
+        31.952135719223076,
+        47.75795945086083
+      ]
+    },
+    {
+      "frame": 48,
+      "authored_center": [
+        80,
+        48
+      ],
+      "patch_contrast_ratio_rgb": [
+        0.7643654336734694,
+        0.7751780399659861,
+        0.7948022959183674
+      ],
+      "positive_red_centroid": [
+        79.90770940059689,
+        47.99797316771572
+      ]
+    },
+    {
+      "frame": 63,
+      "authored_center": [
+        95,
+        48
+      ],
+      "patch_contrast_ratio_rgb": [
+        0.874139030612245,
+        0.8811251062925167,
+        0.8943120216836735
+      ],
+      "positive_red_centroid": [
+        94.67652492246157,
+        47.99591546192566
+      ]
+    },
+    {
+      "frame": 64,
+      "authored_center": [
+        32,
+        48
+      ],
+      "patch_contrast_ratio_rgb": [
+        0.7175382653061225,
+        0.7220317814625848,
+        0.7299306441326531
+      ],
+      "positive_red_centroid": [
+        31.952135719223076,
+        47.75795945086083
+      ]
+    },
+    {
+      "frame": 65,
+      "authored_center": [
+        33,
+        48
+      ],
+      "patch_contrast_ratio_rgb": [
+        0.5979512117346939,
+        0.5996425914115647,
+        0.5974768813775511
+      ],
+      "positive_red_centroid": [
+        33.23168650650009,
+        47.74769626955973
+      ]
+    },
+    {
+      "frame": 68,
+      "authored_center": [
+        36,
+        48
+      ],
+      "patch_contrast_ratio_rgb": [
+        0.579555963010204,
+        0.5818850977891156,
+        0.5843231823979592
+      ],
+      "positive_red_centroid": [
+        35.754017037001745,
+        47.76370028006755
+      ]
+    },
+    {
+      "frame": 72,
+      "authored_center": [
+        40,
+        48
+      ],
+      "patch_contrast_ratio_rgb": [
+        0.6007334183673467,
+        0.6023596938775512,
+        0.6046715561224489
+      ],
+      "positive_red_centroid": [
+        39.511200210536096,
+        47.78434499022143
+      ]
+    },
+    {
+      "frame": 95,
+      "authored_center": [
+        63,
+        48
+      ],
+      "patch_contrast_ratio_rgb": [
+        0.7784438775510201,
+        0.7824325042517007,
+        0.7883848852040817
+      ],
+      "positive_red_centroid": [
+        62.02069936672799,
+        47.84823855959106
+      ]
+    }
+  ],
+  "before_after": {
+    "before_compact_result": "docs/results/F13-SDK-channels-quality-2026-10-07.json",
+    "before_passed": false,
+    "numeric_config_identical": true,
+    "frames_before64_bitwise_identical": 64,
+    "maximum_pixel_difference_before64": 0,
+    "before_swept_roi_metrics": {
+      "linear_rmse_p95": 0.06907745825591902,
+      "linear_rmse_max": 0.11395308343536163,
+      "residual_flicker_mean": 0.00790813724690504,
+      "support_ghost_fraction_max": 0.3336249259748542,
+      "old_frame_attraction_max": 0.5707106698706268,
+      "signed_bias_mean": -0.0035355516258417665,
+      "reference_change_energy": 773.28125,
+      "recovery_frames": {
+        "startup-reset": 0,
+        "host-reset48": 0,
+        "signal-replacement64-not-a-motion-vector-proof": 8
+      }
+    },
+    "known_source_wrap_recovery_before_after": [
+      8,
+      0
+    ],
+    "before_after_artifact_sha256": "ccdaf311af837126d56787b48f2d658c8151cdb01014e9a60ae9abdbabc36f7c"
+  },
+  "corrected_wrap64_matches_initial0_bitwise": true
+}

@@ -86,6 +86,9 @@ public:
 /// the other benches ignore them.  Zero / negative = the bench's default.
 struct TestBenchParams {
     std::string scenePath;
+    std::string lightingScenario,reflectionScenario;
+    u32 localLightCount = 1024;
+    bool areaLights = false, stationaryLights = false;
     u32   instances         = 0;     // --instances
     u32   meshes            = 0;     // --scene-meshes
     float dynamicCpuPercent = -1.0f; // --dynamic-cpu (0..100)

@@ -1,0 +1,89 @@
+{
+  "schema": 1,
+  "state": "FROZEN_BEFORE_THIN_WALL_OR_DYNAMIC_CANDIDATE_PIXELS",
+  "signal": "indirect diffuse reflected radiance, raw or actual custom filtered explicitly separated",
+  "thin_wall": {
+    "fixture": "existing LightingValidation thin-walls, closed10mm separator with left emissive panel; physical indirect around front opening is allowed by oracle",
+    "capture_resolution": [
+      256,
+      144
+    ],
+    "pixel_masks": "independent primary ray/triangle intersections, opaque non-emitter surfaces; erode each primary surface label and each geometric bright/dark mask by2px; no intensity or candidate-dependent ROI selection",
+    "bright_control": "primary floor/back/left-wall surfaces with WORLD x<-0.1,z<-0.1; segment to emitter centre unoccluded",
+    "dark_behind_wall": "primary floor/back/right-wall/right face of thin separator with WORLD x>=0.004,z<-0.1; segment to emitter centre first blocked by the known10mm separator",
+    "minimum_pixels_each_mask": 16,
+    "missing_coverage": "fail coverage, do not expand regions after seeing candidate; no leakage acceptance",
+    "reference": {
+      "renderer": "Mitsuba3.9.1 scalar_rgb",
+      "depth": -1,
+      "direct_depth": 2,
+      "seeds": [
+        1234,
+        5678
+      ],
+      "spp_checkpoints": [
+        64,
+        256,
+        1024,
+        4096,
+        16384,
+        65536
+      ],
+      "bright_convergence_nrmse_max": 0.02,
+      "dark_seed_difference_rmse_over_bright_mean_max": 0.01,
+      "dark_seed_mean_difference_over_bright_mean_max": 0.002
+    },
+    "candidate_frames": {
+      "first": 256,
+      "last_exclusive": 512,
+      "step": 8
+    },
+    "bright_control_nrmse_max": 0.3,
+    "bright_control_absolute_relative_bias_max": 0.2,
+    "dark_mean_positive_error_over_bright_reference_mean_max": 0.1,
+    "dark_p95_positive_error_over_bright_reference_mean_max": 0.25,
+    "requirements": "finite nonnegative candidate; root must also execute a distance-moment-disabled physical negative when available, whose leak predicate must fail; state-checker failure alone is not the quality negative",
+    "no_zero_reference_assumption": true
+  },
+  "recovery": {
+    "fixture": "emissive-step: exact Cornell geometry/camera/materials except unique emitter Le12 through frame255, Le6 from frame256 onward; update is called before frame0; dt0 setup/pause does not count",
+    "transition_frame": 256,
+    "before_snapshot_frame": 255,
+    "after_snapshot_frame": 256,
+    "total_frames": 512,
+    "capture_every": 1,
+    "seed": 1001,
+    "resolution": [
+      128,
+      72
+    ],
+    "reference_before": "validated Cornell unlimited-minus-direct reference already frozen",
+    "reference_after": "exact0.5*reference_before ONLY after snapshot comparison proves unchanged physical scene/camera and all emission scaled0.5, with no other light/sky",
+    "regions": "same frozen Cornell six eroded geometry ROIs; no crop or threshold change",
+    "baseline_candidate_frames": {
+      "first": 224,
+      "last_exclusive": 256,
+      "step": 1
+    },
+    "checkpoint_offsets": [
+      0,
+      1,
+      4,
+      8,
+      16,
+      32,
+      64,
+      128
+    ],
+    "required_max_recovery_frames": 128,
+    "static_quality": "at+128 require same20% bias /30% NRMSE against physical reference_after; report instantaneous each checkpoint and fixed trailing8frame mean once available",
+    "history_residual": "perROI absolute(mean_luminance(candidate_checkpoint)-0.5*mean_luminance(candidate_pretransition_mean))/(0.5*mean_luminance(candidate_pretransition_mean)) <=0.10 at+128; this separates old-state retention from stationary approximation bias, while physical static gates remain mandatory",
+    "history_residual_scale_floor": "pretransition mean must exceed1e-6 and its physical static gates must pass; otherwise recovery is inconclusive, never PASS",
+    "report": "first sampled passing checkpoint and every0/1/4/8/16/32/64/128 value, plus whether it remains passing at all later sampled checkpoints; no report of only the128 checkbox",
+    "f13_separate_gate": "F13 history rejection <=4frames is independent and NOT certified by F12 convergence<=128; report+1/+4 images and history diagnostics separately",
+    "negative_controls": "retained pretransition image and allzero posttransition image must fail both physical endpoint and history-residual predicates",
+    "endpoint_gate": "At+128 both instantaneous image and trailing8frame mean must pass physical quality and history residual; the latter does not replace the instantaneous requirement.",
+    "history_residual_max": 0.1
+  },
+  "failure_policy": "preserve previous raw and filtered failures; no new threshold or ROI chosen from candidate pixels; no phase acceptance from one fixture"
+}

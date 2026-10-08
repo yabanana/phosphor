@@ -34,7 +34,7 @@ TEST_CASE("bench report line: scene part is appended only when present") {
 TEST_CASE("F9 bench report emits all typed RT evidence only when present") {
     BenchReport report;
     auto document = nlohmann::json::parse(reportToJson(report));
-    CHECK(document.at("schema_version") == 9);
+    CHECK(document.at("schema_version") == BENCH_REPORT_SCHEMA_VERSION);
     CHECK_FALSE(document.contains("rt"));
     auto& rt = report.rt;
     rt.present = true;
@@ -119,4 +119,39 @@ TEST_CASE("F9 RT report keeps JSON valid for non-finite diagnostic samples") {
     CHECK(object.at("tlas_update_ms").at("mean") == 0);
     CHECK(object.at("probe_ms").at("max") == 0);
     CHECK(object.at("probe_ns_per_ray").at("p99") == 0);
+}
+
+TEST_CASE("F10-F12 report labels opt-in lighting and the denoise boundary") {
+    BenchReport r;auto json=nlohmann::json::parse(reportToJson(r));CHECK_FALSE(json.contains("lighting"));
+    r.lighting.present=true;r.lighting.shadows="rt";r.lighting.direct="restir";r.lighting.gi="ddgi";
+    r.lighting.checks=3;r.lighting.failures=1;json=nlohmann::json::parse(reportToJson(r));
+    CHECK(json["lighting"]["shadows"]=="rt");CHECK(json["lighting"]["direct"]=="restir");
+    CHECK(json["lighting"]["failures"]==1);CHECK(json["lighting"]["experimental"]==true);
+    CHECK(json["lighting"]["full_lighting_denoise"]=="F13_SOURCE_UNVERIFIED");
+}
+
+
+TEST_CASE("F12 report identifies physical visibility ablation independently of check failures") {
+    BenchReport report;report.lighting.present=true;
+    auto json=nlohmann::json::parse(reportToJson(report));
+    CHECK(json["lighting"]["gi_visibility_disabled"]==false);
+    report.lighting.giVisibilityDisabled=true;report.lighting.checks=512;
+    json=nlohmann::json::parse(reportToJson(report));
+    CHECK(json["lighting"]["gi_visibility_disabled"]==true);
+    CHECK(json["lighting"]["checks"]==512);CHECK(json["lighting"]["failures"]==0);
+}
+
+TEST_CASE("Native denoise request reports custom execution and unqualified domain honestly") {
+    BenchReport report;report.lighting.present=true;
+    report.lighting.denoiseRequested="metalfx";report.lighting.denoiseEffective="custom";
+    report.lighting.denoiseFallback="UnqualifiedRadiometricDomain: custom Float32 selected before graph encoding";
+    report.lighting.denoiseRadiometricDomain="unqualified-scene-linear";
+    const auto json=nlohmann::json::parse(reportToJson(report));
+    CHECK(json["lighting"]["denoise_requested"]=="metalfx");
+    CHECK(json["lighting"]["denoise_effective"]=="custom");
+    CHECK(json["lighting"]["denoise_radiometric_domain"]=="unqualified-scene-linear");
+    CHECK(json["lighting"]["denoise_native_production_qualified"]==false);
+    CHECK(json["lighting"]["denoise_native_factory_requests"]==0);
+    CHECK(json["lighting"]["denoise_native_encoded_frames"]==0);
+    CHECK(json["lighting"]["denoise_fallback"].get<std::string>().find("UnqualifiedRadiometricDomain")!=std::string::npos);
 }
