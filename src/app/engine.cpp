@@ -2250,7 +2250,7 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
                                                        options_.captureLinearSignal==4?shadows_->worldPosition():
                                                        options_.captureLinearSignal==5?shadows_->geometricNormal():
                                                        options_.captureLinearSignal==6?reflections_->rawSpecular():
-                                                       options_.captureLinearSignal==7?reflections_->rawAO():options_.captureLinearSignal==8?reflections_->filteredIndirectDiffuse():options_.captureLinearSignal==9?reflections_->filteredAO():visibility_->color());
+                                                       options_.captureLinearSignal==7?reflections_->rawAO():options_.captureLinearSignal==8?reflections_->filteredIndirectDiffuse():options_.captureLinearSignal==9?reflections_->filteredAO():options_.captureLinearSignal==10?reflections_->filteredSpecular():visibility_->color());
             color = post_ ? post_->addToGraph(frameGraph_, *visibility_, drawableRef_, graphKey_.outputFormat,reconstructed)
                           : visibility_->addPresent(frameGraph_, drawableRef_);
             visibility_->addChecks(frameGraph_,post_?post_->exposureInput():visibility_->color());

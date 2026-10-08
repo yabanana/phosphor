@@ -15,8 +15,8 @@ using namespace phosphor;
 TEST_CASE("F13 reflection corpus has actual world geometry and equivalent ray roles") {
     for(auto name:ReflectionValidation::scenarios()) {
         ECS ecs;GpuScene scene;test::NullTextureManager textures;ReflectionValidation fixture{std::string(name)};
-        fixture.setup(ecs,scene,textures);REQUIRE(scene.getMeshCount()==(fixture.aoTemporalControl()?1u:3u));
-        FrameScene frame;extractFrameScene(ecs,scene,frame);CHECK_FALSE(frame.instances.empty());if(fixture.aoTemporalControl())CHECK(frame.lights.empty());else CHECK_FALSE(frame.lights.empty());
+        fixture.setup(ecs,scene,textures);REQUIRE(scene.getMeshCount()==((fixture.aoTemporalControl()||name=="specular-environment")?1u:3u));
+        FrameScene frame;extractFrameScene(ecs,scene,frame);CHECK_FALSE(frame.instances.empty());if(fixture.aoTemporalControl()||name=="specular-environment")CHECK(frame.lights.empty());else CHECK_FALSE(frame.lights.empty());
         for(auto e:fixture.entities())if(ecs.hasComponent<MeshInstanceComponent>(e)) {
             const auto& i=std::as_const(ecs).getComponent<MeshInstanceComponent>(e);
             CHECK(i.isVisible());CHECK(i.castsShadows());

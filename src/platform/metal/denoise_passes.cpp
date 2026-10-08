@@ -15,7 +15,7 @@ struct DenoisePasses::Impl {
     static constexpr u32 Signals=4,Views=4,MaxAtrous=5;
     MetalContext& c;PipelineCache& pipelines;LaunchOptions options;DenoiseSettings settings;
     ShadowPasses::Frame frame{};u64 epoch=0,graphVersion=1;
-    bool diagnosticHistory=false;
+    bool diagnosticHistory=false,diagnosticEndpoints=false;
     pipe::PipelineHandle temporal{},atrous{},checker{},clear{},corrupt{},poisonNext{};
     std::array<HistoryRegistry,Signals> registries{};
     struct Content {u64 scene=0,external=0,revision=0;bool operator==(const Content&)const=default;};
@@ -46,6 +46,10 @@ struct DenoisePasses::Impl {
             if(!o.debugLighting)throw std::invalid_argument("PHOSPHOR_DIAGNOSTIC_DENOISE_HISTORY=1 requires --debug-lighting N");
             diagnosticHistory=true;
         }
+        if(const char* value=std::getenv("PHOSPHOR_DIAGNOSTIC_SPECULAR_ENDPOINTS");value&&std::strcmp(value,"1")==0){
+            if(!o.debugLighting)throw std::invalid_argument("Specular endpoint negative requires --debug-lighting N");
+            diagnosticEndpoints=true;
+        }
         if(o.reducedLighting||o.forceApple9){settings.atrousIterations=2;settings.maxHistory=16;}
         temporal=p.request(lighting::kernel("denoise_temporal"));atrous=p.request(lighting::kernel("denoise_atrous"));
         checker=p.request(lighting::kernel("denoise_check"));clear=p.request(lighting::kernel("lighting_check_clear"));
@@ -66,6 +70,7 @@ struct DenoisePasses::Impl {
         const Content content{frame.scene,epoch,revisions[sig]};if(!h.contentKnown||h.content!=content){h.content=content;h.contentKnown=true;++h.contentEpoch;}
         const auto decision=registries[sig].begin(frame.view,{frame.width,frame.height,frame.backingWidth,frame.backingHeight},h.contentEpoch,frame.cut,frame.reset);
         s.params=denoiseParameters(settings,frame.width,frame.height,sig,frame.view,u32(decision.generation),u32(h.contentEpoch),decision.reset);
+        if(diagnosticEndpoints&&sig==DENOISE_SIGNAL_SPECULAR)s.params.flags|=DENOISE_DIAGNOSTIC_ENDPOINTS;
         s.params.frameIndex=u32(frame.index);s.address=lighting::upload(c,s.params);s.readSide=h.lastWritten;s.writeSide=1u-s.readSide;
         for(u32 i=0;i<settings.atrousIterations;++i){auto p=s.params;p.atrousStep=1u<<i;s.atrousAddress[i]=lighting::upload(c,p);}
         slots[frame.slot][sig].expected=frame.width*frame.height;

@@ -33,13 +33,23 @@ bool denoiseCompatible(const GPUDISurface& s,const GPUDenoiseHistory& h,const GP
     const float scale=std::max(s.depth,h.depth);
     if(std::abs(s.depth-h.depth)>p.depthThreshold*scale||!finite(v3(s.position))||!finite(v3(h.position))||
         std::abs(glm::dot(v3(s.position)-v3(h.position),glm::normalize(n)))>p.planeThreshold*scale)return false;
-    if(p.signal==DENOISE_SIGNAL_SPECULAR){if(!(spec.flags&SPECULAR_SAMPLE_VALID)||h.path!=spec.path||
-        h.secondarySlot!=spec.secondarySlot||h.secondaryGeneration!=spec.secondaryGeneration||!std::isfinite(h.roughness)||!std::isfinite(s.roughness)||std::abs(h.roughness-s.roughness)>p.roughnessThreshold||
-        !std::isfinite(h.hitDistance)||!std::isfinite(spec.hitDistance)||std::abs(h.hitDistance-spec.hitDistance)>p.hitDistanceThreshold*std::max(1.f,std::max(h.hitDistance,spec.hitDistance)))return false;}
+    if(h.flags&~(p.signal==DENOISE_SIGNAL_SPECULAR?DENOISE_HISTORY_STOCHASTIC:0u))return false;
+    if(p.signal==DENOISE_SIGNAL_SPECULAR){
+        const bool stochastic=(spec.flags&SPECULAR_SAMPLE_STOCHASTIC)!=0&&!(p.flags&DENOISE_DIAGNOSTIC_ENDPOINTS);
+        if(!(spec.flags&SPECULAR_SAMPLE_VALID)||(spec.flags&SPECULAR_SAMPLE_ERROR)||
+           stochastic!=bool(h.flags&DENOISE_HISTORY_STOCHASTIC)||!std::isfinite(h.roughness)||!std::isfinite(s.roughness)||
+           std::abs(h.roughness-s.roughness)>p.roughnessThreshold||!std::isfinite(spec.hitDistance)||spec.hitDistance<0)return false;
+        // A fresh GGX ray can legitimately hit another object, miss, or have
+        // zero contribution. Primary geometry and source revisions above own
+        // validity; conditioning accumulation on the random endpoint defeats it.
+        if(!stochastic&&(h.path!=spec.path||h.secondarySlot!=spec.secondarySlot||h.secondaryGeneration!=spec.secondaryGeneration||
+           !std::isfinite(h.hitDistance)||std::abs(h.hitDistance-spec.hitDistance)>p.hitDistanceThreshold*std::max(1.f,std::max(h.hitDistance,spec.hitDistance))))return false;
+    }
     return true;
 }
 GPUDenoiseHistory denoiseTemporal(const GPUDISurface& s,glm::vec3 current,const GPUDenoiseHistory& old,const GPUDenoiseParams& p,glm::vec3 low,glm::vec3 high,const GPUSpecularSample& spec,float neighborhoodVariance){
     GPUDenoiseHistory h{};h.signal=p.signal;h.viewID=p.viewID;h.historyEpoch=p.historyEpoch;h.signalRevision=p.signalRevision;
+    if(p.signal==DENOISE_SIGNAL_SPECULAR&&(spec.flags&SPECULAR_SAMPLE_STOCHASTIC)&&!(p.flags&DENOISE_DIAGNOSTIC_ENDPOINTS))h.flags|=DENOISE_HISTORY_STOCHASTIC;
     if(!s.valid)return h;
     const auto rawNormal=signalNormal(s,p.signal);if(!finite(current)||!finite(rawNormal)||glm::dot(rawNormal,rawNormal)<=0){h.flags=1;return h;}
     current=glm::max(current,glm::vec3(0));if(p.signal==DENOISE_SIGNAL_AO)current=glm::clamp(current,glm::vec3(0),glm::vec3(1));

@@ -14,9 +14,15 @@ inline bool denoiseCompatible(GPUDISurface s,GPUDenoiseHistory h,constant GPUDen
     const float3 n=denoiseNormal(s,p.signal),old=diVec(h.normal);if(!all(isfinite(n))||!all(isfinite(old))||dot(n,n)<=0||dot(old,old)<=0||dot(normalize(n),normalize(old))<p.normalThreshold)return false;
     const float scale=max(s.depth,h.depth);if(abs(s.depth-h.depth)>p.depthThreshold*scale||!all(isfinite(diVec(s.position)))||!all(isfinite(diVec(h.position)))||
         abs(dot(diVec(s.position)-diVec(h.position),normalize(n)))>p.planeThreshold*scale)return false;
-    if(p.signal==DENOISE_SIGNAL_SPECULAR){if(!(spec.flags&SPECULAR_SAMPLE_VALID)||h.path!=spec.path||h.secondarySlot!=spec.secondarySlot||h.secondaryGeneration!=spec.secondaryGeneration||
-        !isfinite(h.roughness)||!isfinite(s.roughness)||abs(h.roughness-s.roughness)>p.roughnessThreshold||!isfinite(h.hitDistance)||!isfinite(spec.hitDistance)||
-        abs(h.hitDistance-spec.hitDistance)>p.hitDistanceThreshold*max(1.0f,max(h.hitDistance,spec.hitDistance)))return false;}
+    if(h.flags&~(p.signal==DENOISE_SIGNAL_SPECULAR?DENOISE_HISTORY_STOCHASTIC:0u))return false;
+    if(p.signal==DENOISE_SIGNAL_SPECULAR){
+        const bool stochastic=(spec.flags&SPECULAR_SAMPLE_STOCHASTIC)!=0&&!(p.flags&DENOISE_DIAGNOSTIC_ENDPOINTS);
+        if(!(spec.flags&SPECULAR_SAMPLE_VALID)||(spec.flags&SPECULAR_SAMPLE_ERROR)||
+           stochastic!=bool(h.flags&DENOISE_HISTORY_STOCHASTIC)||!isfinite(h.roughness)||!isfinite(s.roughness)||
+           abs(h.roughness-s.roughness)>p.roughnessThreshold||!isfinite(spec.hitDistance)||spec.hitDistance<0)return false;
+        if(!stochastic&&(h.path!=spec.path||h.secondarySlot!=spec.secondarySlot||h.secondaryGeneration!=spec.secondaryGeneration||
+           !isfinite(h.hitDistance)||abs(h.hitDistance-spec.hitDistance)>p.hitDistanceThreshold*max(1.0f,max(h.hitDistance,spec.hitDistance))))return false;
+    }
     return true;
 }
 inline bool denoiseNeighbor(GPUDISurface a,GPUDISurface b,constant GPUDenoiseParams& p){
@@ -31,6 +37,7 @@ kernel void denoise_temporal(constant GPUDenoiseParams& p [[buffer(0)]],const de
     GPUDenoiseHistory h{};h.signal=p.signal;h.viewID=p.viewID;h.historyEpoch=p.historyEpoch;h.signalRevision=p.signalRevision;
     float3 current=raw.read(pixel).rgb;const float3 normal=denoiseNormal(s,p.signal);GPUSpecularSample spec{};
     if(p.signal==DENOISE_SIGNAL_SPECULAR)spec=specular[tid];
+    if(p.signal==DENOISE_SIGNAL_SPECULAR&&(spec.flags&SPECULAR_SAMPLE_STOCHASTIC)&&!(p.flags&DENOISE_DIAGNOSTIC_ENDPOINTS))h.flags|=DENOISE_HISTORY_STOCHASTIC;
     if(s.valid&&(!all(isfinite(current))||!all(isfinite(normal))||dot(normal,normal)<=0))h.flags=1u;
     if(s.valid&&all(isfinite(current))&&all(isfinite(normal))&&dot(normal,normal)>0){current=max(current,0.0f);if(p.signal==DENOISE_SIGNAL_AO)current=saturate(current);
         GPUDenoiseHistory old{};bool reuse=false;
@@ -78,7 +85,9 @@ kernel void denoise_atrous(constant GPUDenoiseParams& p [[buffer(0)]],const devi
     const float variance=moments.read(pixel).z,lum=diLuminance(value);float3 sum=0;float weights=0;const float taps[5]={1,4,6,4,1};
     for(int y=-2;y<=2;++y)for(int x=-2;x<=2;++x){const int2 q=int2(pixel)+int2(x,y)*int(p.atrousStep);if(any(q<0)||any(q>=int2(p.width,p.height)))continue;
         const uint index=uint(q.y)*p.width+uint(q.x);const float3 color=input.read(uint2(q)).rgb;if(!all(isfinite(color)))continue;
-        if(p.signal==DENOISE_SIGNAL_SPECULAR){const GPUSpecularSample a=specular[tid],b=specular[index];if(a.path!=b.path||a.secondarySlot!=b.secondarySlot||a.secondaryGeneration!=b.secondaryGeneration)continue;}
+        if(p.signal==DENOISE_SIGNAL_SPECULAR){const GPUSpecularSample a=specular[tid],b=specular[index];
+            if((a.flags|b.flags)&SPECULAR_SAMPLE_ERROR||((a.flags^b.flags)&SPECULAR_SAMPLE_STOCHASTIC))continue;
+            if((!(a.flags&SPECULAR_SAMPLE_STOCHASTIC)||(p.flags&DENOISE_DIAGNOSTIC_ENDPOINTS))&&(a.path!=b.path||a.secondarySlot!=b.secondarySlot||a.secondaryGeneration!=b.secondaryGeneration))continue;}
         const float weight=taps[x+2]*taps[y+2]*denoiseWeight(center,surfaces[index],lum,diLuminance(color),variance,p);sum+=color*weight;weights+=weight;
     }
     float3 result=weights>0?sum/weights:value;if(p.signal==DENOISE_SIGNAL_AO)result=saturate(result);output.write(float4(result,1),pixel);
@@ -96,7 +105,7 @@ kernel void denoise_corrupt_history_view(constant GPUDenoiseParams& p [[buffer(0
 // Raw/reference checks remain independent. One-dimensional exact pixel dispatch.
 kernel void denoise_check(constant GPUDenoiseParams& p [[buffer(0)]],const device GPUDenoiseHistory* history [[buffer(1)]],
     device atomic_uint* counts [[buffer(2)]],texture2d<float,access::read> output [[texture(0)]],uint tid [[thread_position_in_grid]],uint lane [[thread_index_in_simdgroup]]){
-    if(tid>=p.width*p.height)return;const GPUDenoiseHistory h=history[tid];bool invalid=h.flags!=0;
+    if(tid>=p.width*p.height)return;const GPUDenoiseHistory h=history[tid];bool invalid=(h.flags&~(p.signal==DENOISE_SIGNAL_SPECULAR?DENOISE_HISTORY_STOCHASTIC:0u))!=0;
     if(h.valid)invalid|=h.signal!=p.signal||h.viewID!=p.viewID||h.historyEpoch!=p.historyEpoch||h.signalRevision!=p.signalRevision||
         h.length<1||h.length>p.maxHistory||!isfinite(h.firstMoment)||!isfinite(h.secondMoment)||!isfinite(h.variance)||h.variance<0||!all(isfinite(diVec(h.color)));
     const float3 color=output.read(uint2(tid%p.width,tid/p.width)).rgb;const bool badOutput=!all(isfinite(color))||any(color<0)||(p.signal==DENOISE_SIGNAL_AO&&any(color>1));
