@@ -1,4 +1,5 @@
 #include "renderer/denoise_settings.h"
+#include <initializer_list>
 #include <doctest/doctest.h>
 #include <cmath>
 #include <limits>
