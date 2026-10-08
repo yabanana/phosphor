@@ -71,12 +71,20 @@ struct MetalfxDenoiseFixture::Impl {
     std::map<u32,ScaledPair> pairs;
     bool finishCalled=false,prewarmAttempted=false,prewarmReady=false;double prewarmElapsedMs=0;
     std::string prewarmStatus="NOT_ATTEMPTED";
-    u64 transitionWaits=0,transitionReady=0;double transitionWaitMs=0;
+    u64 transitionWaits=0,transitionReady=0;double transitionWaitMs=0;bool diagnosticSkipDenoise=false,diagnosticFloat32=false;
     Impl(MetalContext& context,PipelineCache& pipelines,MetalfxDenoise::Factory factory,Options o):c(context),p(pipelines),options(std::move(o)) {
         if(!MetalfxDenoiseFixture::validScenario(options.scenario)||options.outputDirectory.empty())throw std::invalid_argument("Invalid denoised fixture scenario/output");
+        if(const char* value=std::getenv("PHOSPHOR_DIAGNOSTIC_METALFX_SKIP_DENOISE");value&&std::strcmp(value,"1")==0){
+            if(options.scenario!="wide-hdr")throw std::invalid_argument("Skip-denoise diagnostic requires the noise-free wide-HDR fixture");
+            diagnosticSkipDenoise=true;
+        }
         if(!options.activeViews||options.activeViews>HistoryRegistry::MaxViews||!options.prewarmTimeoutMs||options.prewarmTimeoutMs>120000)
             throw std::invalid_argument("Invalid SDK fixture active views/prewarm budget");
         MetalfxDenoise::Options sdkOptions;sdkOptions.enabled=true;sdkOptions.views=options.activeViews;
+        if(const char* value=std::getenv("PHOSPHOR_DIAGNOSTIC_METALFX_FLOAT32");value&&std::strcmp(value,"1")==0){
+            if(options.scenario!="wide-hdr")throw std::invalid_argument("Float32 SDK diagnostic requires the wide-HDR fixture");
+            diagnosticFloat32=true;sdkOptions.diagnosticFloat32Color=true;
+        }
         // Only this isolated, tagged fixture can exercise unqualified SDK
         // radiometry. No production CLI flag grants this admission.
         sdkOptions.radiometricDomain=metalfx_denoise::RadiometricDomain::ControlledFixtureDiagnostic;
@@ -103,6 +111,8 @@ struct MetalfxDenoiseFixture::Impl {
         const auto& stats=adapter->stats();std::ostringstream out;
         out<<",\"native_radiometric_domain\":"<<quote(metalfx_denoise::radiometricDomainName(stats.radiometricDomain))
            <<",\"native_production_qualified\":false"
+           <<",\"diagnostic_skip_denoise\":"<<(diagnosticSkipDenoise?"true":"false")
+           <<",\"diagnostic_float32_color\":"<<(diagnosticFloat32?"true":"false")
            <<",\"auto_exposure_requested\":"<<(options.autoExposure?"true":"false")
            <<",\"exposure_descriptor_configured\":"<<(stats.descriptorConfigured?"true":"false")
            <<",\"auto_exposure_enabled\":"<<(stats.autoExposureEnabled?"true":"false")
@@ -169,6 +179,7 @@ struct MetalfxDenoiseFixture::Impl {
         frame.preExposure=options.preExposedPolicy&&phase?1.f/64.f:1.f;
         if(params.scenario==FX_FIXTURE_WIDE_HDR){params.color[0]=368640;params.color[1]=128;params.color[2]=64;frame.preExposure=1.f/64.f;}
         params.preExposure=frame.preExposure;
+        if(diagnosticSkipDenoise)params.flags|=4u;
         // This is an actual analytic plane camera, independent of whatever scene
         // the renderer displays behind the fixture. Depth=.1/4 is reverse-Z.
         frame.worldToView={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
@@ -303,7 +314,7 @@ struct MetalfxDenoiseFixture::Impl {
             if(t.scenario==FX_FIXTURE_CHANNELS)expectedColor=std::abs(int(x)-int(center))<=3?std::array<float,3>{.75f,.5f,.25f}:std::array<float,3>{.125f,.125f,.125f};
             for(u32 j=0;j<3;++j){if(packedSample)expectedColor[j]*=t.preExposure;
                 pass=pass&&std::isfinite(sample.color[j])&&std::abs(sample.color[j]-expectedColor[j])<=(packedSample?.001f:1e-6f)*std::max(1.f,std::abs(expectedColor[j]));}
-            if(packedSample)pass=pass&&sample.exposure==(options.manualExposureControl?WideManualExposureR16:1.f)&&sample.hitDistance==0&&sample.reactive==0&&sample.strength==0;
+            if(packedSample)pass=pass&&sample.exposure==(options.manualExposureControl?WideManualExposureR16:1.f)&&sample.hitDistance==0&&sample.reactive==0&&sample.strength==(diagnosticSkipDenoise?1.f:0.f);
         }
         return pass;
     }

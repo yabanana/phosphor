@@ -152,7 +152,10 @@ struct MetalfxDenoise::Impl {
     }
     u32 descriptorFlags()const {
         // Request identity includes SDK exposure mode; shader pack flags do not.
-        return flags()|(options.autoExposure?1u<<31:0u);
+        return flags()|(options.autoExposure?1u<<31:0u)|(options.diagnosticFloat32Color?1u<<30:0u);
+    }
+    rg::Format sdkFormat(Channel ch)const {
+        return options.diagnosticFloat32Color&&(ch==Channel::Color||ch==Channel::Output)?rg::Format::RGBA32Float:metalfx_denoise::format(ch);
     }
     bool frameValid()const {
         return frame.slot<METAL_FRAMES_IN_FLIGHT && frame.view<options.views &&
@@ -172,14 +175,14 @@ struct MetalfxDenoise::Impl {
         const auto e=v.desired.extent;
         d->setInputWidth(e.inputWidth);d->setInputHeight(e.inputHeight);
         d->setOutputWidth(e.outputWidth);d->setOutputHeight(e.outputHeight);
-        d->setColorTextureFormat(toMetalFormat(metalfx_denoise::format(Channel::Color)));
+        d->setColorTextureFormat(toMetalFormat(sdkFormat(Channel::Color)));
         d->setDepthTextureFormat(toMetalFormat(metalfx_denoise::format(Channel::Depth)));
         d->setMotionTextureFormat(toMetalFormat(metalfx_denoise::format(Channel::Motion)));
         d->setDiffuseAlbedoTextureFormat(toMetalFormat(metalfx_denoise::format(Channel::DiffuseAlbedo)));
         d->setSpecularAlbedoTextureFormat(toMetalFormat(metalfx_denoise::format(Channel::SpecularAlbedo)));
         d->setNormalTextureFormat(toMetalFormat(metalfx_denoise::format(Channel::Normal)));
         d->setRoughnessTextureFormat(toMetalFormat(metalfx_denoise::format(Channel::Roughness)));
-        d->setOutputTextureFormat(toMetalFormat(metalfx_denoise::format(Channel::Output)));
+        d->setOutputTextureFormat(toMetalFormat(sdkFormat(Channel::Output)));
         d->setReactiveMaskTextureEnabled(options.reactiveMask);
         d->setReactiveMaskTextureFormat(toMetalFormat(metalfx_denoise::format(Channel::Reactive)));
         d->setSpecularHitDistanceTextureEnabled(options.specularHitDistance);
@@ -235,7 +238,7 @@ struct MetalfxDenoise::Impl {
             if((i==channelIndex(Channel::HitDistance)&&!options.specularHitDistance) ||
                (i==channelIndex(Channel::Reactive)&&!options.reactiveMask) ||
                (i==channelIndex(Channel::Strength)&&!options.strengthMask))continue;
-            if(actual[i]!=toMetalFormat(metalfx_denoise::Formats[i]))throw std::runtime_error("Denoised scaler format mismatch");
+            if(actual[i]!=toMetalFormat(sdkFormat(Channel(i))))throw std::runtime_error("Denoised scaler format mismatch");
         }
     }
 #endif
@@ -246,7 +249,7 @@ struct MetalfxDenoise::Impl {
                 const Channel ch=Channel(i);const bool output=ch==Channel::Output||ch==Channel::RestoredOutput,exposure=ch==Channel::Exposure;
                 const u32 w=exposure?1u:output?e.outputWidth:e.inputWidth;
                 const u32 h=exposure?1u:output?e.outputHeight:e.inputHeight;
-                auto* d=MTL::TextureDescriptor::texture2DDescriptor(toMetalFormat(metalfx_denoise::Formats[i]),w,h,false);
+                auto* d=MTL::TextureDescriptor::texture2DDescriptor(toMetalFormat(sdkFormat(ch)),w,h,false);
                 d->setStorageMode(MTL::StorageModePrivate);
                 auto usage=v.usage[i]|MTL::TextureUsageShaderRead;
                 if(ch!=Channel::Depth)usage|=MTL::TextureUsageShaderWrite;
@@ -484,7 +487,7 @@ struct MetalfxDenoise::Impl {
         neutralRef=g.importTexture("MetalFX optional neutral guide",{Format::RGBA16Float,1,1},ImportContentsDefined);
         for(size_t i=0;i<ChannelCount;++i) {
             const bool output=i==channelIndex(Channel::Output)||i==channelIndex(Channel::RestoredOutput),exposure=i==channelIndex(Channel::Exposure);
-            packedRefs[i]=g.importTexture(std::string(metalfx_denoise::Names[i]),{metalfx_denoise::Formats[i],
+            packedRefs[i]=g.importTexture(std::string(metalfx_denoise::Names[i]),{sdkFormat(Channel(i)),
                 exposure?1u:output?e.outputWidth:e.inputWidth,exposure?1u:output?e.outputHeight:e.inputHeight},ImportPerFrame|ImportOutput);
         }
         counterRef=g.importBuffer("MetalFX guide pack check counters",{sizeof(GPUMetalfxDenoisePackCounters)},ImportPerFrame|ImportOutput);

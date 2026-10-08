@@ -26,7 +26,7 @@ kernel void fx_fixture_generate(constant GPUFXFixtureParams& p [[buffer(0)]],
     }
     color.write(float4(value,1),xy);normal.write(float4(n,0),xy);rough.write(float4(r),xy);
     diffuse.write(float4(.6f,.6f,.6f,1),xy);specular.write(float4(.04f,.04f,.04f,1),xy);
-    motion.write(float4(mv,0,0),xy);hit.write(float4(0),xy);reactive.write(float4(0),xy);strength.write(float4(0),xy);
+    motion.write(float4(mv,0,0),xy);hit.write(float4(0),xy);reactive.write(float4(0),xy);strength.write(float4((p.flags&4u)?1.0f:0.0f),xy);
 }
 struct FXDepthVertex {float4 position [[position]];};
 vertex FXDepthVertex fx_fixture_depth_vs(uint vertexId [[vertex_id]]) {

@@ -31,6 +31,7 @@ public:
         bool enabled=false, reactiveMask=true, specularHitDistance=false, strengthMask=false;
         // Diagnostic fixture opt-in; production retains manual exposure.
         bool autoExposure=false;
+        bool diagnosticFloat32Color=false; // explicit fixture format experiment; no production admission
         float manualExposure=1.0f; // SDK exposure hint; does not alter color packing or output restoration
         OutputScale sdkOutputScale=OutputScale::Unverified;
         metalfx_denoise::RadiometricDomain radiometricDomain=metalfx_denoise::RadiometricDomain::UnqualifiedSceneLinear;
