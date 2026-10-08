@@ -82,8 +82,20 @@ Physical M5 Max128GB/macOS27.2; forcedApple9 is not physicalM3 certification.
    engine library IDs. Depth-only/new lighting coverage is tested; all eight
    CTest targets PASS. Archive-active positive reload and changed-alpha negative
    both PASS after updating the runner to the actual rt_intersections module.
-   Remaining: full custom lifecycle/leaks, quiet costs, writer's minimal
-   independent temporal AO control, final status docs/PR/CI/integration.
+   Full custom lifecycle now passes at-exit with zero leaks in production;
+   the shader-validation run retains a2128 B compiler-cache finding, with
+   cause unattributed and archive use differing between configurations.
+   Quiet GI costs pass all six paired-replicate drift checks and O7; full
+   1080p scene costs40–43 ms, so no default/preset promotion is made.
+   The independent AO control passes64 frames and its physical/history gates.
+7. Final visual residual: static Sponza remains noisy under auto exposure,
+   also with frozen celestial clock. DI/GI/AO reuse230400/230400 pixels by
+   frame31, SPEC110008/230400. Do not restart broad clock changes or claim a
+   specular filter cause fixed without evidence. Diagnostics are opt-in only.
+   Owner direction2026-10-08: merge/push the tested F14 experimental baseline,
+   preserving F13 quality/native and budget gaps. Next: final source commit,
+   PR/CI/merge and primary checkout update, then STOP. Current detailed status:
+   `docs/F10_F14_HANDOFF.md`.
 
 ## Local evidence and collaborators
 

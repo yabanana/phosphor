@@ -16,6 +16,10 @@ This supersedes the earlier F27 instruction. F9 has M5 development acceptance
 (PR #18; docs/F9_HANDOFF.md). Advance phases in roadmap dependency
 order with measured spikes, regression checks, phase PRs and integration.
 The existing OPT/EDGE catalog stays selectable, not an automatic prerequisite.
+F10–F14 source integration and scoped M5 evidence are in `docs/F10_F14_HANDOFF.md`.
+Do not treat source integration as phase acceptance: native F13.3, full F13.6
+qualification and frame budgets remain open. Dense DDGI is explicit, not promoted
+to a default; no further OPT/F15 work is authorized by this checkpoint.
 Owner work split: the `Sviluppo Phosphor` chat writes F10-F14 in a separate
 worktree, including tests and runners, without running builds or tests. The
 aggregating chat owns F9, review, CPU/GPU verification, measurements and merges.

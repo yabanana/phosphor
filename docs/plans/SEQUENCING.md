@@ -30,7 +30,7 @@ rilascia l'autoriferimento interno dello scaler MetalFX
 [costo storico dell'isolamento](../F8_METALFX_LIFETIME.md)). Gli esperimenti F7.4/F7.5
 richiesti dal proprietario sono stati eseguiti e non adottati nel preset corrente:
 [misure e decisioni](../F7_F8_HANDOFF.md). Non bloccano la baseline F7.
-F9 è ora integrata; il proprietario ha autorizzato F10–F14 e lo stop successivo.
+F9 è ora integrata; il proprietario ha autorizzato F10–F14 e lo stop successivo. La baseline sperimentale e la distinzione fra integrazione del sorgente e criteri ancora aperti sono nel [handoff F10–F14](../F10_F14_HANDOFF.md).
 Nessuna OPT viene attivata automaticamente. La storia
 F8.6 parte da risorse per vista e sincronizzazione conservativa; aliasing
 temporale generale e scheduling eterogeneo non servono a renderla corretta.
