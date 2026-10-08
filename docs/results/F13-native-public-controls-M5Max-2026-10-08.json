@@ -1,0 +1,1036 @@
+{
+  "scope": "Public API alternatives; no OS changes/private releases. All keep the leak; native production not qualified.",
+  "cases": [
+    {
+      "variant": "sdk-create-async4.log",
+      "creation": {
+        "schema": "phosphor.sdk-create-only.v1",
+        "count": 4,
+        "created": 4,
+        "gpu_encodes": 0,
+        "shared_compilers": 1,
+        "factory_serialized": true,
+        "requires_synchronous_initialization": false,
+        "extent": [
+          128,
+          96,
+          128,
+          96
+        ],
+        "os_version": [
+          27,
+          2,
+          0
+        ],
+        "supported": true,
+        "compiler_created": true,
+        "descriptor_matched": true,
+        "worker_exception": false,
+        "worker_joined": true,
+        "weak_alive_after_creation": true,
+        "weak_nil_after_worker_release": true,
+        "weak_nil_after_teardown": true,
+        "objects": [
+          {
+            "index": 0,
+            "created": true,
+            "create_ms": 118.991,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          },
+          {
+            "index": 1,
+            "created": true,
+            "create_ms": 43.475541,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          },
+          {
+            "index": 2,
+            "created": true,
+            "create_ms": 40.967583,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          },
+          {
+            "index": 3,
+            "created": true,
+            "create_ms": 39.775209,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          }
+        ],
+        "public_object_lifetime_passed": true,
+        "leak_free_proven": false
+      },
+      "leaks": 4,
+      "leaked_bytes": 2560,
+      "log_sha256": "ec14a276b29f61a7dbed389c18e30357e154c288ecd476e099c8d1f5cfad23d2"
+    },
+    {
+      "variant": "sdk-create-legacy4.log",
+      "creation": {
+        "schema": "phosphor.sdk-create-legacy.v1",
+        "count": 4,
+        "created": 4,
+        "gpu_encodes": 0,
+        "shared_compilers": 1,
+        "factory_serialized": true,
+        "requires_synchronous_initialization": true,
+        "extent": [
+          128,
+          96,
+          128,
+          96
+        ],
+        "os_version": [
+          27,
+          2,
+          0
+        ],
+        "supported": true,
+        "compiler_created": true,
+        "descriptor_matched": true,
+        "worker_exception": false,
+        "worker_joined": true,
+        "weak_alive_after_creation": true,
+        "weak_nil_after_worker_release": true,
+        "weak_nil_after_teardown": true,
+        "objects": [
+          {
+            "index": 0,
+            "created": true,
+            "create_ms": 86.7865,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          },
+          {
+            "index": 1,
+            "created": true,
+            "create_ms": 28.483125,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          },
+          {
+            "index": 2,
+            "created": true,
+            "create_ms": 31.27925,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          },
+          {
+            "index": 3,
+            "created": true,
+            "create_ms": 35.876375,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          }
+        ],
+        "public_object_lifetime_passed": true,
+        "leak_free_proven": false
+      },
+      "leaks": 4,
+      "leaked_bytes": 2560,
+      "log_sha256": "cfe5c08b5e27eeddaecc1fe0e8bb372d27240fec340112af59efc3dbc11727d9"
+    },
+    {
+      "variant": "sdk-create-no-masks4.log",
+      "creation": {
+        "schema": "phosphor.sdk-create-no-masks.v1",
+        "count": 4,
+        "created": 4,
+        "gpu_encodes": 0,
+        "shared_compilers": 1,
+        "factory_serialized": true,
+        "requires_synchronous_initialization": true,
+        "extent": [
+          128,
+          96,
+          128,
+          96
+        ],
+        "os_version": [
+          27,
+          2,
+          0
+        ],
+        "supported": true,
+        "compiler_created": true,
+        "descriptor_matched": true,
+        "worker_exception": false,
+        "worker_joined": true,
+        "weak_alive_after_creation": true,
+        "weak_nil_after_worker_release": true,
+        "weak_nil_after_teardown": true,
+        "objects": [
+          {
+            "index": 0,
+            "created": true,
+            "create_ms": 142.502125,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          },
+          {
+            "index": 1,
+            "created": true,
+            "create_ms": 39.532041,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          },
+          {
+            "index": 2,
+            "created": true,
+            "create_ms": 38.014334,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          },
+          {
+            "index": 3,
+            "created": true,
+            "create_ms": 37.376,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          }
+        ],
+        "public_object_lifetime_passed": true,
+        "leak_free_proven": false
+      },
+      "leaks": 4,
+      "leaked_bytes": 2560,
+      "log_sha256": "bca4612c3a5d7e5281c611466224c543eb7bafe15665b56d3c9a26456db48672"
+    },
+    {
+      "variant": "sdk-create-float32-leaks.log",
+      "creation": {
+        "schema": "phosphor.sdk-create-float32.v1",
+        "count": 1,
+        "created": 1,
+        "gpu_encodes": 0,
+        "shared_compilers": 1,
+        "factory_serialized": true,
+        "requires_synchronous_initialization": true,
+        "extent": [
+          128,
+          96,
+          128,
+          96
+        ],
+        "os_version": [
+          27,
+          2,
+          0
+        ],
+        "supported": true,
+        "compiler_created": true,
+        "descriptor_matched": true,
+        "worker_exception": false,
+        "worker_joined": true,
+        "weak_alive_after_creation": true,
+        "weak_nil_after_worker_release": true,
+        "weak_nil_after_teardown": true,
+        "objects": [
+          {
+            "index": 0,
+            "created": true,
+            "create_ms": 77.250209,
+            "weak_alive_after_creation": true,
+            "weak_nil_after_worker_release": true,
+            "weak_nil_after_teardown": true
+          }
+        ],
+        "public_object_lifetime_passed": true,
+        "leak_free_proven": false
+      },
+      "leaks": 1,
+      "leaked_bytes": 640,
+      "log_sha256": "097ce8f42bb96a15d5d0ca63171b4e300dca1c4cf49de4470be7d1792cb67e2e"
+    }
+  ],
+  "hdr_mask1": {
+    "runtime": {
+      "command": [
+        "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/lighting/phosphor",
+        "--scene",
+        "procedural",
+        "--bench",
+        "1",
+        "--render-path",
+        "visibility",
+        "--geometry-path",
+        "mesh",
+        "--no-ui",
+        "--no-vsync",
+        "--fixed-timestep",
+        "--frames",
+        "96",
+        "--warmup",
+        "0",
+        "--resolution",
+        "128x96",
+        "--post",
+        "--upscaler",
+        "native",
+        "--no-gpu-timing",
+        "--denoised-fixture",
+        "wide-hdr",
+        "--denoised-fixture-output",
+        "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/f13-qualification/wide-skip/actual-sdk",
+        "--denoised-fixture-prewarm-ms",
+        "120000",
+        "--denoised-fixture-pre-exposed",
+        "--denoised-fixture-manual-exposure-control"
+      ],
+      "started_utc": "2026-10-08T09:32:59.378523+00:00",
+      "elapsed_seconds": 1.6122136249905452,
+      "returncode": 1,
+      "signal": null,
+      "exit_marker": 1,
+      "expected_exit": 0,
+      "timed_out": false,
+      "binary_sha256": "711014198ac5ff1d44eb451a43cf3088ffa2077484e551295935bb317089177f",
+      "artifacts": {
+        "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/lighting/phosphor": "711014198ac5ff1d44eb451a43cf3088ffa2077484e551295935bb317089177f",
+        "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/lighting/shaders/phosphor.metallib": "d9e8a18215bcc66def4626cd2c8efee227aaf4f6edc73c91cbbba3c544da3453"
+      },
+      "commit": "84bd80e3081ff06543769fcee4b469634a9a1e2d",
+      "tracked_patch_sha256": "8a10d9bd62e2a98eeaa9a057f47dc4df5121ab8d052a28f9bd37da6bada53869",
+      "macos": "27.2",
+      "untracked_sources": {},
+      "allowed_error_lines": [],
+      "allowed_error_matches": [],
+      "validation_env": {
+        "MTL_DEBUG_LAYER": "1",
+        "MTL_SHADER_VALIDATION": "1",
+        "MTL_DEBUG_LAYER_WARNING_MODE": "nslog"
+      },
+      "passed": false,
+      "failures": [
+        "process exit 1, expected 0",
+        "EXIT marker 1, expected 0"
+      ]
+    },
+    "steady": [
+      {
+        "frame": 8,
+        "max_relative_error": 0.0390625
+      },
+      {
+        "frame": 9,
+        "max_relative_error": 0.0390625
+      },
+      {
+        "frame": 10,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 11,
+        "max_relative_error": 0.0390625
+      },
+      {
+        "frame": 12,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 13,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 14,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 15,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 16,
+        "max_relative_error": 0.0517578125
+      },
+      {
+        "frame": 17,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 18,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 19,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 20,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 21,
+        "max_relative_error": 0.0390625
+      },
+      {
+        "frame": 22,
+        "max_relative_error": 0.0390625
+      },
+      {
+        "frame": 23,
+        "max_relative_error": 0.0517578125
+      },
+      {
+        "frame": 24,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 25,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 26,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 27,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 28,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 29,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 30,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 31,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 32,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 33,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 34,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 35,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 36,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 37,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 38,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 39,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 40,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 41,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 42,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 43,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 44,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 45,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 46,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 47,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 56,
+        "max_relative_error": 0.0390625
+      },
+      {
+        "frame": 57,
+        "max_relative_error": 0.0390625
+      },
+      {
+        "frame": 58,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 59,
+        "max_relative_error": 0.0390625
+      },
+      {
+        "frame": 60,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 61,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 62,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 63,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 64,
+        "max_relative_error": 0.0517578125
+      },
+      {
+        "frame": 65,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 66,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 67,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 68,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 69,
+        "max_relative_error": 0.0390625
+      },
+      {
+        "frame": 70,
+        "max_relative_error": 0.0390625
+      },
+      {
+        "frame": 71,
+        "max_relative_error": 0.0517578125
+      },
+      {
+        "frame": 72,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 73,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 74,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 75,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 76,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 77,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 78,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 79,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 80,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 81,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 82,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 83,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 84,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 85,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 86,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 87,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 88,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 89,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 90,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 91,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 92,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 93,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 94,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 95,
+        "max_relative_error": 0.0478515625
+      }
+    ],
+    "bypass_radiometry_passed": false,
+    "denoising_qualified": false
+  },
+  "hdr_color_output_float32": {
+    "runtime": {
+      "command": [
+        "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/lighting/phosphor",
+        "--scene",
+        "procedural",
+        "--bench",
+        "1",
+        "--render-path",
+        "visibility",
+        "--geometry-path",
+        "mesh",
+        "--no-ui",
+        "--no-vsync",
+        "--fixed-timestep",
+        "--frames",
+        "96",
+        "--warmup",
+        "0",
+        "--resolution",
+        "128x96",
+        "--post",
+        "--upscaler",
+        "native",
+        "--no-gpu-timing",
+        "--denoised-fixture",
+        "wide-hdr",
+        "--denoised-fixture-output",
+        "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/f13-qualification/wide-float32/actual-sdk",
+        "--denoised-fixture-prewarm-ms",
+        "120000",
+        "--denoised-fixture-pre-exposed",
+        "--denoised-fixture-manual-exposure-control"
+      ],
+      "started_utc": "2026-10-08T09:47:22.566153+00:00",
+      "elapsed_seconds": 1.596965332981199,
+      "returncode": 1,
+      "signal": null,
+      "exit_marker": 1,
+      "expected_exit": 0,
+      "timed_out": false,
+      "binary_sha256": "c9b4a71ba4cca06bf123acbb744158352e868e641d84a915dc239265307abf0c",
+      "artifacts": {
+        "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/lighting/phosphor": "c9b4a71ba4cca06bf123acbb744158352e868e641d84a915dc239265307abf0c",
+        "/Users/danielsan/.codex/worktrees/f9-core/phosphor/build/lighting/shaders/phosphor.metallib": "6132f97a947ed1193dc5a3becdcbb2897beebc45f1b51f4e4c8dacec8b634337"
+      },
+      "commit": "84bd80e3081ff06543769fcee4b469634a9a1e2d",
+      "tracked_patch_sha256": "4a4991e69d1dc3b9c5280335f3ca5ced99a703e69648a54cc153bf5ecc0d3eda",
+      "macos": "27.2",
+      "untracked_sources": {},
+      "allowed_error_lines": [],
+      "allowed_error_matches": [],
+      "validation_env": {
+        "MTL_DEBUG_LAYER": "1",
+        "MTL_SHADER_VALIDATION": "1",
+        "MTL_DEBUG_LAYER_WARNING_MODE": "nslog"
+      },
+      "passed": false,
+      "failures": [
+        "process exit 1, expected 0",
+        "EXIT marker 1, expected 0"
+      ]
+    },
+    "steady": [
+      {
+        "frame": 8,
+        "max_relative_error": 0.0390625
+      },
+      {
+        "frame": 9,
+        "max_relative_error": 0.0390625
+      },
+      {
+        "frame": 10,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 11,
+        "max_relative_error": 0.0390625
+      },
+      {
+        "frame": 12,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 13,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 14,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 15,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 16,
+        "max_relative_error": 0.0517578125
+      },
+      {
+        "frame": 17,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 18,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 19,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 20,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 21,
+        "max_relative_error": 0.0390625
+      },
+      {
+        "frame": 22,
+        "max_relative_error": 0.0390625
+      },
+      {
+        "frame": 23,
+        "max_relative_error": 0.0517578125
+      },
+      {
+        "frame": 24,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 25,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 26,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 27,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 28,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 29,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 30,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 31,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 32,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 33,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 34,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 35,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 36,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 37,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 38,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 39,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 40,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 41,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 42,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 43,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 44,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 45,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 46,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 47,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 56,
+        "max_relative_error": 0.0390625
+      },
+      {
+        "frame": 57,
+        "max_relative_error": 0.0390625
+      },
+      {
+        "frame": 58,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 59,
+        "max_relative_error": 0.0390625
+      },
+      {
+        "frame": 60,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 61,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 62,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 63,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 64,
+        "max_relative_error": 0.0517578125
+      },
+      {
+        "frame": 65,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 66,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 67,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 68,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 69,
+        "max_relative_error": 0.0390625
+      },
+      {
+        "frame": 70,
+        "max_relative_error": 0.0390625
+      },
+      {
+        "frame": 71,
+        "max_relative_error": 0.0517578125
+      },
+      {
+        "frame": 72,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 73,
+        "max_relative_error": 0.0263671875
+      },
+      {
+        "frame": 74,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 75,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 76,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 77,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 78,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 79,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 80,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 81,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 82,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 83,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 84,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 85,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 86,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 87,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 88,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 89,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 90,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 91,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 92,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 93,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 94,
+        "max_relative_error": 0.0478515625
+      },
+      {
+        "frame": 95,
+        "max_relative_error": 0.0478515625
+      }
+    ],
+    "radiometry_passed": false
+  }
+}

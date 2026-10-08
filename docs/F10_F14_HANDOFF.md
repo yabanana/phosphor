@@ -1,5 +1,7 @@
 # F10–F14: integration and measured boundaries
 
+Current F13 follow-up: [2026-10-08 qualification](implementation/F13-QUALIFICATION-2026-10-08.md). The static specular-noise defect described below is corrected by that follow-up; native SDK and broader dynamic qualification remain open.
+
 The renderer implementations and diagnostic tools are integrated in
 `codex/lighting-integration`, on top of F9/PR18. This is an **experimental
 development baseline**, not completion of every phase exit criterion.

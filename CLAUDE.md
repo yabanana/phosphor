@@ -20,6 +20,7 @@ F10–F14 source integration and scoped M5 evidence are in `docs/F10_F14_HANDOFF
 Do not treat source integration as phase acceptance: native F13.3, full F13.6
 qualification and frame budgets remain open. Dense DDGI is explicit, not promoted
 to a default; no further OPT/F15 work is authorized by this checkpoint.
+Owner update2026-10-08: repair/qualify remaining F13 specular and native MetalFX work before considering OPT. Re-measure after correctness changes; choose whether to activate OPT only in the next owner turn. This supersedes the stop only for those F13 residues.
 Owner work split: the `Sviluppo Phosphor` chat writes F10-F14 in a separate
 worktree, including tests and runners, without running builds or tests. The
 aggregating chat owns F9, review, CPU/GPU verification, measurements and merges.
