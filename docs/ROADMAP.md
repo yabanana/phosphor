@@ -567,6 +567,8 @@ M3. [Consegna](F9_HANDOFF.md), [dati](results/F9-M5Max-2026-10-07.json).
 
 **Integrazione 2026-10-07:** sorgente implementata nella baseline sperimentale F10–F14, con verifiche M5 circoscritte. Le caselle restano aperte dove i criteri complessivi non sono chiusi: [risultati, costi e residui per ID](F10_F14_HANDOFF.md). Nessuna certificazione fisica T0 o chiusura implicita delle OPT.
 
+**Verifica 2026-11-05:** corretta la profondità storica con camera in moto e verificati tag GPU, camera cut e kernel ottimizzati su Sponza dinamica. I gate HDR nativo e 16,67 ms restano falliti; i confronti numerici delle ottimizzazioni non sostituiscono il riferimento dinamico indipendente. [Evidenze e residui](implementation/F13-F14-DYNAMIC-SPONZA-2026-11-05.md).
+
 - [ ] F13.1 Riflessioni RT per roughness bassa, fallback su radiance cache e SSR (T0)
 - [ ] F13.2 RTAO (T1+) / GTAO (T0)
 - [ ] F13.3 **MetalFX denoised upscaler** (Apple9) collegato ai canali di F7.6 — **parziale, nativo di produzione non promosso**: adapter e fixture SDK reali disponibili; radiometria scene-linear/HDR non qualificata, incluso il controllo wide-HDR finale fuori soglia. In produzione viene scelto il custom Float32 prima del grafo; esecuzione nativa limitata alle fixture diagnostiche esplicite. Vedi [policy radiometrica](implementation/F13-RADIOMETRY-POLICY.md) e [follow-up lifetime/budget](implementation/F13-F14-BUDGET-CLOSURE-2026-10-08.md): il leak del record HUD viene recuperato sul preciso binario verificato; HDR nativo e budget restano aperti.

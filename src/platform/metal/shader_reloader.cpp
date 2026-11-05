@@ -19,6 +19,9 @@
 #ifndef PHOSPHOR_RENDERER_SOURCE_DIR
 #define PHOSPHOR_RENDERER_SOURCE_DIR ""
 #endif
+#ifndef PHOSPHOR_METAL_TOOLCHAIN_DIR
+#define PHOSPHOR_METAL_TOOLCHAIN_DIR ""
+#endif
 
 namespace phosphor {
 
@@ -45,7 +48,9 @@ bool ShaderReloader::buildLibrary(const std::vector<std::string>& sources, const
     std::vector<std::string> airs;
     for (const std::string& source : sources) {
         const std::string air = workDir + "/" + fs::path(source).stem().string() + ".air";
-        std::vector<std::string> argv = {"xcrun", "-sdk", "macosx", "metal"};
+        std::vector<std::string> argv = std::string(PHOSPHOR_METAL_TOOLCHAIN_DIR).empty() ?
+            std::vector<std::string>{"xcrun", "-sdk", "macosx", "metal"} :
+            std::vector<std::string>{std::string(PHOSPHOR_METAL_TOOLCHAIN_DIR)+"/usr/bin/metal"};
         const std::vector<std::string> flags = compilerFlags();
         argv.insert(argv.end(), flags.begin(), flags.end());
         argv.insert(argv.end(), {"-c", source, "-o", air});
@@ -56,7 +61,9 @@ bool ShaderReloader::buildLibrary(const std::vector<std::string>& sources, const
         }
         airs.push_back(air);
     }
-    std::vector<std::string> argv = {"xcrun", "-sdk", "macosx", "metallib"};
+    std::vector<std::string> argv = std::string(PHOSPHOR_METAL_TOOLCHAIN_DIR).empty() ?
+        std::vector<std::string>{"xcrun", "-sdk", "macosx", "metallib"} :
+        std::vector<std::string>{std::string(PHOSPHOR_METAL_TOOLCHAIN_DIR)+"/usr/bin/metallib"};
     argv.insert(argv.end(), airs.begin(), airs.end());
     argv.insert(argv.end(), {"-o", metallib});
     const ProcessResult r = runProcess(argv);

@@ -256,13 +256,20 @@ TEST_CASE("pipelines script: retains F10-F14 lighting, depth-only and physical H
                               "ddgi_trace", "ddgi_classify", "ddgi_blend", "ddgi_resolve", "radiance_cache_update",
                               "gi_candidates", "gi_temporal", "gi_spatial", "gi_shade", "visibility_lit_resolve",
                               "reflection_rt", "reflection_ssr", "reflection_composite", "reflection_probe_prefilter",
-                              "ao_rtao", "ao_gtao", "denoise_temporal", "denoise_atrous",
+                              "ao_rtao", "ao_gtao", "denoise_atrous_diffuse4",
                               "denoise_pack", "denoise_pack_clear", "denoise_restore_radiance",
                               "atmosphere_transmittance", "atmosphere_multiscattering", "atmosphere_sky_view", "atmosphere_apply",
                               "fog_inject", "fog_inject_rt", "fog_temporal", "fog_integrate", "fog_apply",
                               "clouds_march", "clouds_temporal", "clouds_apply"}) {
         CAPTURE(kernel);
         CHECK_MESSAGE(script.compute.count(kernel) == 1, "F10-F14 pipeline missing; run both lighting harvest scripts");
+    }
+    for(const char* kernel:{"denoise_temporal","denoise_atrous","denoise_atrous_guide4","denoise_atrous_tile1","denoise_atrous_tile2","denoise_check"}){
+        for(u32 signal:{0u,1u,2u,3u,0xffffffffu}){
+            const auto key=std::string(kernel)+",40="+std::to_string(signal);CAPTURE(key);
+            CHECK_MESSAGE(script.compute.count(key)==1,"denoise signal specialisation missing; reharvest F13/F14 pipelines");
+        }
+        CHECK(script.compute.count(kernel)==0); // An unset constant cannot be lowered by metal-tt.
     }
     for (const char* kernel : {"shadow_sun_rt", "restir_di_shade_rt", "ddgi_trace", "gi_candidates", "gi_temporal",
                               "gi_spatial", "reflection_rt", "ao_rtao", "fog_inject_rt"}) {

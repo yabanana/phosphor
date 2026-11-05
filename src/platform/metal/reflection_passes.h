@@ -25,6 +25,7 @@ public:
     [[nodiscard]] rg::TextureRef filteredSpecular() const;
     [[nodiscard]] rg::TextureRef filteredAO() const;
     [[nodiscard]] std::string completedAOCheckpoint(u32 slot) const;
+    [[nodiscard]] std::string completedSignalCheckpoint(u32 slot,u32 signal) const;
     // Capture8: actual selected GI E converted once at the current receiver.
     [[nodiscard]] rg::TextureRef filteredIndirectDiffuse() const;
     [[nodiscard]] rg::BufferRef metadataRef() const;

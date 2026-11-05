@@ -1056,3 +1056,33 @@ selected and no later phase is entered.
 
 Evidence and limits: [follow-up](implementation/F13-F14-BUDGET-CLOSURE-2026-10-08.md),
 [ledger](results/F13-F14-budget-followup-M5Max-2026-10-08.json).
+
+## 2026-11-05 — F13/F14 dynamic Sponza follow-up (M5 Max; phase gates open)
+
+Full native1080p Sponza, dynamic camera/64s solar cycle, mesh visibility,
+ReSTIR DI, solar RT, dense DDGI16×8×16/64rays, RT reflections/RTAO,
+custom denoising and atmosphere/fog/clouds. 128warmup+256measured frames,
+serial GPU timing, no UI/vsync/validation/capture, AC power, DwarfStar inactive.
+Same-binary generic/unbatched/reference-stride4 controls retain all sample,
+filter and rejection thresholds. Compatible compiler/AOT32023.921 results:
+
+| A/B/A replica | Baseline p50 drift | GPU p50 reduction | Candidate GPU p50 / p95 / p99 ms |
+|---|---:|---:|---|
+| 1 | 4.40% | 10.59% | 28.5974 / 29.3456 / 29.6170 |
+| 2 | 1.48% | 13.05% | 29.3388 / 30.8008 / 30.9929 |
+| 3 | 0.34% | 10.53% | 29.8226 / 30.9616 / 31.1401 |
+
+All nine runs have zero steady GPU allocations and zero archive misses or
+unavailable requests. An additional runtime-compiler series has three valid
+11.95–13.47% reductions; it is kept distinct from the accepted archive series.
+**Every candidate still fails 1000/60ms.** These are measured cost reductions,
+not a 60fps or full phase acceptance claim. The later native-lifetime guard
+extension is not called by this custom workload (zero native requests/encodes).
+
+Six384-frame API/shader clips pass the unchanged5e-5 equivalence cap (worst
+1.36190e-6); all three camera cuts have actual completed GPU reset witnesses.
+The dynamic-sun sequence conservatively resets lighting history every frame.
+Independent broad GGX/GI references and the native HDR1% gate remain open;
+current-runtime F9 failures reproduce on the unmodified baseline. Full methods,
+rejected trials, raw locations and per-run hashes: [follow-up](implementation/F13-F14-DYNAMIC-SPONZA-2026-11-05.md)
+and [ledger](results/F13-F14-dynamic-Sponza-M5Max-2026-11-05.json). No F15.
