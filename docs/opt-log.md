@@ -2072,3 +2072,24 @@ The initial metadata-bit collision was caught by pixel comparison and fixed
 before acceptance. The original wider-stride kernel remains selected. Three
 of six frozen A/B/A pairs pass drift and show25.73–31.40% lower GPU p50;
 all failures and other pairs are retained. The60fps gate is still open.
+
+## 2026-11-05 — Selected F13 cost experiments on dynamic Sponza
+
+Targeted work within the owner's F13/F14 closure request; no OPT catalog or
+later phase is activated. The baseline shows denoise around half the complete
+1080p GPU span. All resolution/ray/tap/quality budgets remain unchanged.
+
+| Experiment | Result | Disposition |
+|---|---|---|
+| Cache stride4 guides only (13.5KiB) | Image equivalence passes; first timing series drifts6.14% against5% cap | Timing inconclusive; retained. Guide path is included in the subsequently measured combined candidate. |
+| Increase generic temporal/checker groups8→32 | Valid3.46% drift; full frame regresses2.61% | Rejected and removed. |
+| Per-signal kernel constant40 | Valid0.24% drift; full-frame p50 improves4.04%; image cap passes | Selected for combined candidate. |
+| Share final DI/GI/AO geometry weights | Valid0.67% drift; full-frame p50 improves7.00%;128-frame worst normalized error8.48e-8 | Selected for combined candidate; histories and signal variance/color weights stay separate. |
+| Combined specialization/guide cache/diffuse final pass | Three valid runtime pairs improve11.95–13.47%; three valid compatible-AOT pairs improve10.53–13.05% | Measured candidate retained on the review branch; full closure/merge still gated. |
+
+The final three-view384-frame equivalence corpus passes unchanged caps, including
+camera cuts and forced Apple9 capabilities on M5. Compatible runtime/AOT32-frame
+outputs are bit-identical. No new general batching/scheduling system is added.
+Native HDR, the16.67ms target, independent dynamic references and reproduced
+current-runtime F9 failures remain open; no tolerance is widened to pass them.
+Details and all raw trial paths: [dynamic Sponza follow-up](implementation/F13-F14-DYNAMIC-SPONZA-2026-11-05.md).

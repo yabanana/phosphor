@@ -21,7 +21,8 @@ Do not treat source integration as phase acceptance: native F13.3, full F13.6
 qualification and frame budgets remain open. Dense DDGI is explicit, not promoted
 to a default; no F15 or later work is authorized. Targeted remaining-budget work is governed by the owner update below.
 Owner update 2026-10-08 (budget closure): close native MetalFX correctness/lifetime and the measured full Sponza 1080p frame budget before advancing. Targeted measured performance fixes are authorized; this does not start F15 or activate the whole OPT catalog.
-Latest evidence: `docs/implementation/F13-F14-BUDGET-CLOSURE-2026-10-08.md`. Native timing-record retirement is limited to one verified MetalFX image; HDR admission and 60fps remain open. Keep private-ABI limits and rejected timing pairs visible.
+Historical evidence: `docs/implementation/F13-F14-BUDGET-CLOSURE-2026-10-08.md` qualified native timing-record retirement on one MetalFX image; HDR admission and 60fps stayed open. Keep private-ABI limits and rejected timing pairs visible.
+Current-runtime follow-up: `docs/implementation/F13-F14-DYNAMIC-SPONZA-2026-11-05.md` records camera-space history correction, dynamic Sponza cost/equivalence tests and bounded retirement on the second verified MetalFX UUID. Native HDR, 16.67ms, independent dynamic references and reproduced current-runtime F9 failures remain open; do not treat the increment as F13/F14 closure or advance to F15.
 Owner work split: the `Sviluppo Phosphor` chat writes F10-F14 in a separate
 worktree, including tests and runners, without running builds or tests. The
 aggregating chat owns F9, review, CPU/GPU verification, measurements and merges.
