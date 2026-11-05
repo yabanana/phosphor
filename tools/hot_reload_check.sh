@@ -68,7 +68,7 @@ if [[ $rt_only -eq 1 ]]; then
     trap cleanup_rt EXIT
     cp "$repo_dir"/shaders/*.metal "$rt_temp/"
     cp "$repo_dir"/shaders/*.h "$rt_temp/"
-    cp "$repo_dir/shaders/rt_common.h" "$rt_out/original-rt_common.h"
+    cp "$repo_dir/shaders/rt_intersections.metal" "$rt_out/original-rt_intersections.metal"
 
     # Positive: ordinary reload, three frame slots, real MASK materials. A
     # magenta raster capture proves the new library became active; exact RT
@@ -117,7 +117,7 @@ PY_RT_POSITIVE
         sleep 0.1
     done
     [[ $ready -eq 1 ]] || { echo "RT IFT poison: no checked baseline before watcher edit" >&2; exit 1; }
-    "${python_cmd[@]}" - "$rt_temp/rt_common.h" <<'PY_RT_POISON'
+    "${python_cmd[@]}" - "$rt_temp/rt_intersections.metal" <<'PY_RT_POISON'
 from pathlib import Path
 import sys
 path = Path(sys.argv[1])
@@ -126,7 +126,7 @@ needle = '    ++payload.alphaTests;'
 if source.count(needle) != 1:
     raise SystemExit('RT IFT poison: alpha function anchor changed; refusing an ambiguous edit')
 poison = needle + '\n    ++payload.opaqueAlphaTests; // F9 hot-reload negative control'
-replacement = path.with_suffix('.h.tmp')
+replacement = path.with_name(path.name+'.tmp')
 replacement.write_text(source.replace(needle, poison, 1))
 replacement.replace(path)
 PY_RT_POISON
@@ -145,7 +145,7 @@ PY_RT_POISON
     wait "$rt_pid" || status=$?
     rt_pid=
     "${python_cmd[@]}" - "$negative_log" "$negative_report" "$status" "$timed_out" \
-        "$repo_dir/shaders/rt_common.h" "$rt_out/original-rt_common.h" <<'PY_RT_NEGATIVE'
+        "$repo_dir/shaders/rt_intersections.metal" "$rt_out/original-rt_intersections.metal" <<'PY_RT_NEGATIVE'
 import json, re, sys
 from pathlib import Path
 log, report_path = Path(sys.argv[1]), Path(sys.argv[2])

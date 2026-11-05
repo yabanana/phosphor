@@ -354,10 +354,14 @@ struct ReflectionPasses::Impl {
         if(options.ao!=AoMode::Off)graph.addPass(rtAO?"F13 world-radius RTAO":"F13 world-radius GTAO",PassType::Compute,[this](PassBuilder& b){b.read(receivers,Usage::ShaderRead,StageDispatch);b.read(depth,Usage::ShaderRead,StageDispatch);if(rtAO)rt->declareTraceReads(b);ao=b.write(ao,Usage::ShaderWrite,StageDispatch);b.setProfileShaders(rtAO?"ao_rtao":"ao_gtao");},[this](PassContext& ctx){auto* t=slots[frame.slot].aoTable;t->setAddress(aoAddress,0);t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(receivers))->gpuAddress(),1);
             if(rtAO){aoConsumer->bind(t,2,3);t->setAddress(rt->traceResources(frame.slot).instances->gpuAddress(),4);}texture(t,ctx,depth,0);texture(t,ctx,ao,1);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,rtAO?rtao:gtao,t,frame.width*frame.height);});
         directSelected=direct.direct();giSelected=gi&&options.gi!=GiMode::Off?gi->irradiance():dummyTexRef;specSelected=specular;aoSelected=ao;
-        if(custom){if(options.directLighting!=DirectLightingMode::Legacy)directSelected=denoise.addSignal(graph,DENOISE_SIGNAL_DI,direct.direct(),motion,receivers);
-            if(gi&&options.gi!=GiMode::Off)giSelected=denoise.addSignal(graph,DENOISE_SIGNAL_GI,gi->irradiance(),motion,receivers);
+        if(custom){const bool diffuseBatch=options.directLighting!=DirectLightingMode::Legacy&&gi&&options.gi!=GiMode::Off&&options.ao!=AoMode::Off;
+            if(diffuseBatch){const auto filtered=denoise.addDiffuseSignals(graph,{direct.direct(),gi->irradiance(),ao},motion,receivers);
+                directSelected=filtered[0];giSelected=filtered[1];aoSelected=filtered[2];}
+            else{if(options.directLighting!=DirectLightingMode::Legacy)directSelected=denoise.addSignal(graph,DENOISE_SIGNAL_DI,direct.direct(),motion,receivers);
+                if(gi&&options.gi!=GiMode::Off)giSelected=denoise.addSignal(graph,DENOISE_SIGNAL_GI,gi->irradiance(),motion,receivers);
+                if(options.ao!=AoMode::Off)aoSelected=denoise.addSignal(graph,DENOISE_SIGNAL_AO,ao,motion,receivers);}
             if(options.reflections!=ReflectionMode::Off)specSelected=denoise.addSignal(graph,DENOISE_SIGNAL_SPECULAR,specular,motion,receivers,metadata);
-            if(options.ao!=AoMode::Off)aoSelected=denoise.addSignal(graph,DENOISE_SIGNAL_AO,ao,motion,receivers);}
+        }
         if(options.captureLinearSignal==8){
             if(!custom||!gi||options.gi==GiMode::Off)throw std::logic_error("Filtered indirect capture requires GI and custom denoising");
             graph.addPass("F13 actual filtered indirect diffuse Lo export",PassType::Compute,[this](PassBuilder& b){
@@ -411,5 +415,6 @@ rg::TextureRef ReflectionPasses::hitDistance()const{return impl_->distance;}rg::
 rg::TextureRef ReflectionPasses::filteredSpecular()const{return impl_->specSelected;}rg::TextureRef ReflectionPasses::filteredAO()const{return impl_->aoSelected;}rg::BufferRef ReflectionPasses::metadataRef()const{return impl_->metadata;}
 rg::TextureRef ReflectionPasses::filteredIndirectDiffuse()const{return impl_->filteredIndirect;}
 std::string ReflectionPasses::completedAOCheckpoint(u32 slot)const{return impl_->denoise.completedCheckpoint(slot,DENOISE_SIGNAL_AO);}
+std::string ReflectionPasses::completedSignalCheckpoint(u32 slot,u32 signal)const{return impl_->denoise.completedCheckpoint(slot,signal);}
 const char* ReflectionPasses::probeSource()const{return impl_->source.c_str();}
 } // namespace phosphor

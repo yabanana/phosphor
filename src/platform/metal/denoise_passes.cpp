@@ -16,9 +16,12 @@ struct DenoisePasses::Impl {
     static constexpr u32 Signals=4,Views=4,MaxAtrous=5;
     MetalContext& c;PipelineCache& pipelines;LaunchOptions options;DenoiseSettings settings;
     ShadowPasses::Frame frame{};u64 epoch=0,graphVersion=1;
-    bool diagnosticHistory=false,diagnosticEndpoints=false,diagnosticReference=false;
-    std::array<pipe::PipelineHandle,2> tiledAtrous{};
-    pipe::PipelineHandle temporal{},atrous{},checker{},clear{},corrupt{},poisonNext{};
+    bool diagnosticHistory=false,diagnosticEndpoints=false,diagnosticReference=false,diagnosticGuide4Reference=false,diagnosticGeneric=false;
+    struct Kernels {pipe::PipelineHandle temporal{},atrous{},guide4{},checker{};std::array<pipe::PipelineHandle,2> tiled{};};
+    std::array<Kernels,Signals> kernels{};
+    pipe::PipelineHandle clear{},corrupt{},poisonNext{},diffuse4{};
+    bool diagnosticUnbatched=false;
+    std::array<MTL4::ArgumentTable*,METAL_FRAMES_IN_FLIGHT> diffuseTables{};
     std::array<HistoryRegistry,Signals> registries{};
     struct Content {u64 scene=0,external=0,revision=0;bool operator==(const Content&)const=default;};
     struct History {MTL::Buffer* pair[2]{};u64 capacity=0,contentEpoch=0;u32 lastWritten=0;Content content{};bool contentKnown=false;};
@@ -54,18 +57,28 @@ struct DenoisePasses::Impl {
         }
         if(const char* value=std::getenv("PHOSPHOR_DIAGNOSTIC_DENOISE_REFERENCE");value&&std::strcmp(value,"1")==0)
             diagnosticReference=true;
-        LOG_INFO("F13 atrous backend: %s",diagnosticReference?"reference":"tiled strides 1/2, reference 4+");
+        if(const char* value=std::getenv("PHOSPHOR_DIAGNOSTIC_DENOISE_GUIDE4_REFERENCE");value&&std::strcmp(value,"1")==0)
+            diagnosticGuide4Reference=true;
+        LOG_INFO("F13 atrous backend: %s",diagnosticReference?"reference":diagnosticGuide4Reference?"tiled strides 1/2, reference 4+":"tiled strides 1/2, shared guides 4");
         if(o.reducedLighting||o.forceApple9){settings.atrousIterations=2;settings.maxHistory=16;}
-        temporal=p.request(lighting::kernel("denoise_temporal"));atrous=p.request(lighting::kernel("denoise_atrous"));
-        for(u32 i=0;i<2;++i)tiledAtrous[i]=p.request(lighting::kernel(("denoise_atrous_tile"+std::to_string(1u<<i)).c_str()));
-        checker=p.request(lighting::kernel("denoise_check"));clear=p.request(lighting::kernel("lighting_check_clear"));
+        if(const char* value=std::getenv("PHOSPHOR_DIAGNOSTIC_DENOISE_GENERIC");value&&std::strcmp(value,"1")==0)diagnosticGeneric=true;
+        for(u32 sig=0;sig<Signals;++sig){
+            auto request=[&](const char* name){auto d=lighting::kernel(name);d.constant(40,pipe::ConstantType::UInt,diagnosticGeneric?0xffffffffu:sig);return p.request(d);};
+            auto& k=kernels[sig];k.temporal=request("denoise_temporal");k.atrous=request("denoise_atrous");k.guide4=request("denoise_atrous_guide4");k.checker=request("denoise_check");
+            for(u32 i=0;i<2;++i)k.tiled[i]=request(("denoise_atrous_tile"+std::to_string(1u<<i)).c_str());
+        }
+        clear=p.request(lighting::kernel("lighting_check_clear"));
+        diffuse4=p.request(lighting::kernel("denoise_atrous_diffuse4"));
+        if(const char* value=std::getenv("PHOSPHOR_DIAGNOSTIC_DENOISE_UNBATCHED");value&&std::strcmp(value,"1")==0)diagnosticUnbatched=true;
+        for(auto*& table:diffuseTables)table=lighting::table(c);
         corrupt=p.request(lighting::kernel("denoise_history_corrupt_safe"));
         if(o.debugReflectionCorrupt==1)poisonNext=p.request(lighting::kernel("denoise_next_foreign_view"));
         for(auto& slot:slots)for(auto& s:slot){for(auto*& table:s.tables)table=lighting::table(c);
             s.check=lighting::buffer(c,32,"F13 per-signal denoise checks",true);}
     }
     ~Impl(){c.waitIdle();for(auto& view:histories)for(auto& h:view)for(auto* b:h.pair)c.memory().release(b,MemoryCategory::RayTracing);
-        for(auto& slot:slots)for(auto& s:slot){for(auto* t:s.tables)if(t)t->release();c.memory().release(s.check,MemoryCategory::RayTracing);}}
+        for(auto& slot:slots)for(auto& s:slot){for(auto* t:s.tables)if(t)t->release();c.memory().release(s.check,MemoryCategory::RayTracing);}
+        for(auto* table:diffuseTables)if(table)table->release();}
     void invalidate(const char* reason){for(auto& r:registries)for(u32 v=0;v<Views;++v)r.invalidate(v,reason);}
     void reserve(u32 sig){auto& h=histories.at(frame.view).at(sig);const u64 count=u64(frame.backingWidth)*frame.backingHeight;
         if(count<=h.capacity)return;for(auto* b:h.pair)c.memory().release(b,MemoryCategory::RayTracing);
@@ -76,6 +89,8 @@ struct DenoisePasses::Impl {
         const Content content{frame.scene,epoch,revisions[sig]};if(!h.contentKnown||h.content!=content){h.content=content;h.contentKnown=true;++h.contentEpoch;}
         const auto decision=registries[sig].begin(frame.view,{frame.width,frame.height,frame.backingWidth,frame.backingHeight},h.contentEpoch,frame.cut,frame.reset);
         s.params=denoiseParameters(settings,frame.width,frame.height,sig,frame.view,u32(decision.generation),u32(h.contentEpoch),decision.reset);
+        s.params.flags|=DENOISE_CURRENT_VIEW_DEPTH;
+        for(u32 c=0;c<4;++c)s.params.currentViewDepthRow[c]=frame.constants.view[c*4+2];
         if(diagnosticEndpoints&&sig==DENOISE_SIGNAL_SPECULAR)s.params.flags|=DENOISE_DIAGNOSTIC_ENDPOINTS;
         s.params.frameIndex=u32(frame.index);s.address=lighting::upload(c,s.params);s.readSide=h.lastWritten;s.writeSide=1u-s.readSide;
         for(u32 i=0;i<settings.atrousIterations;++i){auto p=s.params;p.atrousStep=1u<<i;s.atrousAddress[i]=lighting::upload(c,p);}
@@ -97,7 +112,7 @@ struct DenoisePasses::Impl {
     void texture(MTL4::ArgumentTable* t,rg::PassContext& ctx,rg::TextureRef r,u32 index){
         t->setTexture(static_cast<MTL::Texture*>(ctx.texture(r))->gpuResourceID(),index);
     }
-    rg::TextureRef add(rg::RenderGraph& g,u32 sig,rg::TextureRef raw,rg::TextureRef motion,rg::BufferRef surfaces,rg::BufferRef metadata){
+    rg::TextureRef add(rg::RenderGraph& g,u32 sig,rg::TextureRef raw,rg::TextureRef motion,rg::BufferRef surfaces,rg::BufferRef metadata,bool deferFinal=false){
         using namespace rg;if(sig>=Signals||!raw.valid()||!motion.valid()||!surfaces.valid())throw std::invalid_argument("invalid denoise signal graph inputs");
         if(sig==DENOISE_SIGNAL_SPECULAR&&!metadata.valid())throw std::invalid_argument("specular denoise requires hit metadata");
         reserve(sig);auto& h=histories.at(frame.view).at(sig);auto& s=signal[sig];auto& state=slots[frame.slot][sig];state.used=true;state.expected=frame.width*frame.height;
@@ -123,25 +138,33 @@ struct DenoisePasses::Impl {
             t->setAddress(h.pair[s.readSide]->gpuAddress(),2);if(s.metadata.valid())t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(s.metadata))->gpuAddress(),3);
             else t->setAddress(h.pair[s.readSide]->gpuAddress(),3);t->setAddress(h.pair[s.writeSide]->gpuAddress(),4);
             texture(t,ctx,s.raw,0);texture(t,ctx,s.motion,1);texture(t,ctx,s.temporalOutput,2);texture(t,ctx,s.moments,3);
-            lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,temporal,t,frame.width*frame.height);
+            lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[sig].temporal,t,frame.width*frame.height);
             // Encoding is not GPU completion. Persistent imports/order preserve
             // retirement; registry records the submission identity only.
             registries[sig].read(frame.view,frame.index+1);registries[sig].write(frame.view,frame.index+1,frame.unjitteredVP);h.lastWritten=s.writeSide;
         });
         s.filtered=s.temporalOutput;
-        for(u32 iteration=0;iteration<settings.atrousIterations;++iteration){s.atrousInput[iteration]=s.filtered;
+        for(u32 iteration=0;iteration<settings.atrousIterations-(deferFinal?1u:0u);++iteration){s.atrousInput[iteration]=s.filtered;
             g.addPass(label+" atrous "+std::to_string(iteration),PassType::Compute,[this,sig,iteration](PassBuilder& b){auto& s=signal[sig];
                 b.read(s.atrousInput[iteration],Usage::ShaderRead,StageDispatch);b.read(s.moments,Usage::ShaderRead,StageDispatch);b.read(s.surface,Usage::ShaderRead,StageDispatch);
                 if(s.metadata.valid())b.read(s.metadata,Usage::ShaderRead,StageDispatch);s.atrousOutput[iteration]=b.createTexture("F13 filtered signal "+std::to_string(sig)+" "+std::to_string(iteration),{Format::RGBA32Float,frame.width,frame.height});
-                s.atrousOutput[iteration]=b.write(s.atrousOutput[iteration],Usage::ShaderWrite,StageDispatch);b.setProfileShaders(iteration<2&&!diagnosticReference?("denoise_atrous_tile"+std::to_string(1u<<iteration)).c_str():"denoise_atrous");
+                s.atrousOutput[iteration]=b.write(s.atrousOutput[iteration],Usage::ShaderWrite,StageDispatch);b.setProfileShaders(iteration<2&&!diagnosticReference?("denoise_atrous_tile"+std::to_string(1u<<iteration)).c_str():iteration==2&&!diagnosticReference&&!diagnosticGuide4Reference?"denoise_atrous_guide4":"denoise_atrous");
             },[this,sig,iteration](PassContext& ctx){auto& s=signal[sig];auto* t=slots[frame.slot][sig].tables[1+iteration];t->setAddress(s.atrousAddress[iteration],0);
                 t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(s.surface))->gpuAddress(),1);t->setAddress(s.metadata.valid()?static_cast<MTL::Buffer*>(ctx.buffer(s.metadata))->gpuAddress():histories[frame.view][sig].pair[s.readSide]->gpuAddress(),3);
                 texture(t,ctx,s.atrousInput[iteration],0);texture(t,ctx,s.moments,1);texture(t,ctx,s.atrousOutput[iteration],2);
                 if(iteration<2&&!diagnosticReference) {
                     auto* encoder=static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder());
-                    encoder->setComputePipelineState(pipelines.compute(tiledAtrous[iteration]));encoder->setArgumentTable(t);
+                    encoder->setComputePipelineState(pipelines.compute(kernels[sig].tiled[iteration]));encoder->setArgumentTable(t);
                     encoder->dispatchThreadgroups(MTL::Size::Make((frame.width+15)/16,(frame.height+7)/8,1),MTL::Size::Make(16,8,1));
-                } else lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,atrous,t,frame.width*frame.height);});s.filtered=s.atrousOutput[iteration];}
+                } else if(iteration==2&&!diagnosticReference&&!diagnosticGuide4Reference) {
+                    auto* encoder=static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder());
+                    encoder->setComputePipelineState(pipelines.compute(kernels[sig].guide4));encoder->setArgumentTable(t);
+                    encoder->dispatchThreadgroups(MTL::Size::Make((frame.width+7)/8,(frame.height+7)/8,1),MTL::Size::Make(8,8,1));
+                } else lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[sig].atrous,t,frame.width*frame.height);});s.filtered=s.atrousOutput[iteration];}
+        if(!deferFinal)addChecks(g,sig);
+        return s.filtered;
+    }
+    void addChecks(rg::RenderGraph& g,u32 sig){using namespace rg;auto& s=signal[sig];const std::string label="F13 denoise "+std::to_string(sig);
         if(options.debugReflectionCorrupt==1)g.addPass(label+" negative NEXT foreign view",PassType::Compute,[this,sig](PassBuilder& b){auto& s=signal[sig];
             b.read(s.next,Usage::ShaderRead,StageDispatch);s.next=b.write(s.next,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("denoise_next_foreign_view");
         },[this,sig](PassContext& ctx){auto& s=signal[sig];auto* t=slots[frame.slot][sig].tables[MaxAtrous+4];t->setAddress(s.address,0);t->setAddress(histories[frame.view][sig].pair[s.writeSide]->gpuAddress(),1);
@@ -149,12 +172,34 @@ struct DenoisePasses::Impl {
         {s.counts=g.importBuffer(label+" check counts",{32},ImportPerFrame|ImportOutput);
             g.addPass(label+" checks clear",PassType::Compute,[this,sig](PassBuilder& b){signal[sig].counts=b.write(signal[sig].counts,Usage::ShaderWrite,StageDispatch);},[this,sig](PassContext& ctx){auto* t=slots[frame.slot][sig].tables[MaxAtrous+1];t->setAddress(slots[frame.slot][sig].check->gpuAddress(),0);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,clear,t,8);});
             g.addPass(label+" independent state check",PassType::Compute,[this,sig](PassBuilder& b){auto& s=signal[sig];b.read(s.next,Usage::ShaderRead,StageDispatch);b.read(s.filtered,Usage::ShaderRead,StageDispatch);b.read(s.counts,Usage::ShaderRead,StageDispatch);s.counts=b.write(s.counts,Usage::ShaderWrite,StageDispatch);},[this,sig](PassContext& ctx){auto& s=signal[sig];auto& state=slots[frame.slot][sig];auto* t=state.tables[MaxAtrous+2];t->setAddress(s.address,0);t->setAddress(histories[frame.view][sig].pair[s.writeSide]->gpuAddress(),1);t->setAddress(state.check->gpuAddress(),2);texture(t,ctx,s.filtered,0);
-                lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,checker,t,frame.width*frame.height);
+                lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[sig].checker,t,frame.width*frame.height);
                 // Tag only the check actually encoded, never graph definition
                 // or prepare. Later frame/view params cannot rewrite this tag.
                 state.checkpoint={frame.index,s.params.viewID,s.params.width*s.params.height,s.params.historyEpoch,s.params.signalRevision,
                                   settings.atrousIterations,(s.params.flags&DENOISE_RESET)!=0,true};});}
-        return s.filtered;
+    }
+    std::array<rg::TextureRef,3> addDiffuse(rg::RenderGraph& g,std::array<rg::TextureRef,3> raw,rg::TextureRef motion,rg::BufferRef surfaces){
+        using namespace rg;constexpr std::array<u32,3> signals{DENOISE_SIGNAL_DI,DENOISE_SIGNAL_GI,DENOISE_SIGNAL_AO};
+        const bool batch=settings.atrousIterations==3&&!diagnosticUnbatched&&!diagnosticReference&&!diagnosticGuide4Reference;
+        for(u32 i=0;i<3;++i)raw[i]=add(g,signals[i],raw[i],motion,surfaces,{},batch);
+        if(batch){
+            g.addPass("F13 denoise diffuse atrous 2",PassType::Compute,[this](PassBuilder& b){
+                b.read(signal[DENOISE_SIGNAL_DI].surface,Usage::ShaderRead,StageDispatch);
+                for(u32 sig:{DENOISE_SIGNAL_DI,DENOISE_SIGNAL_GI,DENOISE_SIGNAL_AO}){auto& s=signal[sig];s.atrousInput[2]=s.filtered;
+                    b.read(s.atrousInput[2],Usage::ShaderRead,StageDispatch);b.read(s.moments,Usage::ShaderRead,StageDispatch);
+                    s.atrousOutput[2]=b.createTexture("F13 filtered diffuse "+std::to_string(sig),{Format::RGBA32Float,frame.width,frame.height});
+                    s.atrousOutput[2]=b.write(s.atrousOutput[2],Usage::ShaderWrite,StageDispatch);s.filtered=s.atrousOutput[2];}
+                b.setProfileShaders("denoise_atrous_diffuse4");
+            },[this](PassContext& ctx){auto* table=diffuseTables[frame.slot];table->setAddress(signal[DENOISE_SIGNAL_DI].atrousAddress[2],0);
+                table->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(signal[DENOISE_SIGNAL_DI].surface))->gpuAddress(),1);
+                u32 index=0;for(u32 sig:{DENOISE_SIGNAL_DI,DENOISE_SIGNAL_GI,DENOISE_SIGNAL_AO}){const auto& s=signal[sig];
+                    texture(table,ctx,s.atrousInput[2],index);texture(table,ctx,s.moments,index+3);texture(table,ctx,s.filtered,index+6);++index;}
+                auto* encoder=static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder());encoder->setComputePipelineState(pipelines.compute(diffuse4));encoder->setArgumentTable(table);
+                encoder->dispatchThreadgroups(MTL::Size::Make((frame.width+7)/8,(frame.height+7)/8,1),MTL::Size::Make(8,8,1));
+            });
+            for(u32 i=0;i<3;++i){addChecks(g,signals[i]);raw[i]=signal[signals[i]].filtered;}
+        }
+        return raw;
     }
     void bind(MetalGraphExecutor& e){for(u32 sig=0;sig<Signals;++sig){if(!slots[frame.slot][sig].used)continue;const auto& s=signal[sig];const auto& h=histories[frame.view][sig];
         e.bindBuffer(s.previous,h.pair[s.readSide]);e.bindBuffer(s.next,h.pair[s.writeSide]);e.bindBuffer(s.counts,slots[frame.slot][sig].check);}}
@@ -164,6 +209,7 @@ DenoisePasses::~DenoisePasses()=default;
 void DenoisePasses::prepareFrame(const ShadowPasses::Frame& f,u64 epoch,const std::array<u64,4>& revisions){impl_->prepare(f,epoch,revisions);}
 void DenoisePasses::invalidateAll(const char* reason){impl_->invalidate(reason);}
 rg::TextureRef DenoisePasses::addSignal(rg::RenderGraph& g,u32 s,rg::TextureRef r,rg::TextureRef m,rg::BufferRef b,rg::BufferRef metadata){return impl_->add(g,s,r,m,b,metadata);}
+std::array<rg::TextureRef,3> DenoisePasses::addDiffuseSignals(rg::RenderGraph& g,std::array<rg::TextureRef,3> r,rg::TextureRef m,rg::BufferRef b){return impl_->addDiffuse(g,r,m,b);}
 void DenoisePasses::bindFrame(MetalGraphExecutor& e){impl_->bind(e);}u64 DenoisePasses::version()const{return impl_->graphVersion;}
 bool DenoisePasses::check(u32 slot)const{for(u32 sig=0;sig<Impl::Signals;++sig){const auto& s=impl_->slots.at(slot)[sig];if(!s.used)continue;const auto& tag=s.checkpoint;
     if(!tag.scheduled||impl_->c.frameEvent()->signaledValue()<=tag.frame){std::fprintf(stderr,"DENOISE check slot %u before completed GPU frame %llu\n",slot,static_cast<unsigned long long>(tag.frame));return false;}
@@ -187,8 +233,11 @@ std::string DenoisePasses::completedCheckpoint(u32 slot,u32 sig)const{
         <<",\"epoch\":"<<tag.epoch<<",\"revision\":"<<tag.revision<<",\"reset\":"<<(tag.reset?"true":"false")
         <<",\"atrous_iterations\":"<<tag.atrousIterations<<'}';return out.str();
 }
-bool DenoisePasses::ready()const{for(auto h:impl_->tiledAtrous)if(!impl_->pipelines.compute(h))return false;return impl_->pipelines.compute(impl_->temporal)&&impl_->pipelines.compute(impl_->atrous)&&
-    impl_->pipelines.compute(impl_->checker)&&impl_->pipelines.compute(impl_->clear)&&
-    (!impl_->options.debugHistoryCorrupt||impl_->pipelines.compute(impl_->corrupt))&&
-    (impl_->options.debugReflectionCorrupt!=1||impl_->pipelines.compute(impl_->poisonNext));}
+bool DenoisePasses::ready()const{
+    for(const auto& k:impl_->kernels){
+        for(auto h:{k.temporal,k.atrous,k.guide4,k.checker,k.tiled[0],k.tiled[1]})if(!impl_->pipelines.compute(h))return false;
+    }
+    return impl_->pipelines.compute(impl_->clear)&&impl_->pipelines.compute(impl_->diffuse4)&&(!impl_->options.debugHistoryCorrupt||impl_->pipelines.compute(impl_->corrupt))&&
+        (impl_->options.debugReflectionCorrupt!=1||impl_->pipelines.compute(impl_->poisonNext));
+}
 } // namespace phosphor

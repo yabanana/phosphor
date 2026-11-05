@@ -362,6 +362,17 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
         capture.frame=options_.captureLinearFrame;capture.every=options_.captureEvery;capture.scalar=options_.captureLinearSignal==3||options_.captureLinearSignal==7||options_.captureLinearSignal==9;
         if(options_.reflectionScene=="ao-temporal-wall"&&options_.captureLinearSignal==9)
             capture.completedMetadata=[this](u32 slot){return reflections_->completedAOCheckpoint(slot);};
+        else if(options_.temporalScript&&options_.lightingDenoise!=LightingDenoiseMode::Off)
+            capture.completedMetadata=[this](u32 slot){
+                nlohmann::json signals=nlohmann::json::object();
+                for(const auto& [enabled,signal]:std::array<std::pair<bool,u32>,4>{{
+                    {options_.directLighting!=DirectLightingMode::Legacy,DENOISE_SIGNAL_DI},
+                    {options_.gi!=GiMode::Off,DENOISE_SIGNAL_GI},
+                    {options_.reflections!=ReflectionMode::Off,DENOISE_SIGNAL_SPECULAR},
+                    {options_.ao!=AoMode::Off,DENOISE_SIGNAL_AO}}})
+                    if(enabled)signals[std::to_string(signal)]=nlohmann::json::parse(reflections_->completedSignalCheckpoint(slot,signal));
+                return signals.dump();
+            };
         linearCapture_=std::make_unique<LinearCapture>(*context_,*pipelines_,std::move(capture));
     }
     ecs_        = std::make_unique<ECS>();
@@ -1690,6 +1701,16 @@ bool Engine::frame(float dt) {
             for(const auto& entry:std::array<std::pair<const char*,const char*>,4>{{{"source_sha","PHOSPHOR_SOURCE_SHA"},{"binary_sha","PHOSPHOR_BINARY_SHA"},{"metallib_sha","PHOSPHOR_METALLIB_SHA"},{"manifest_sha","PHOSPHOR_MANIFEST_SHA"}}}) {
                 const auto* value=std::getenv(entry.second);document["provenance"][entry.first]=value?nlohmann::json(value):nlohmann::json(nullptr);
             }
+            metadata=document.dump();
+        } else if(options_.temporalScript) {
+            std::array<float,16> viewMatrix{},projectionMatrix{};
+            std::memcpy(viewMatrix.data(),constants.view,sizeof(constants.view));
+            std::memcpy(projectionMatrix.data(),&unjittered[0][0],sizeof(float)*16);
+            nlohmann::json document={{"schema","phosphor.dynamic-lighting-capture.v1"},{"frame",frame.index},
+                {"view",currentView_},{"signal",options_.captureLinearSignal},{"width",renderWidth},{"height",renderHeight},
+                {"scene_time",sceneTime_},{"camera_cut",viewCameraCut},{"scene_epoch",sceneEpoch_},
+                {"signal_epoch",surfaceSignalEpoch_},{"shader_generation",pipelines_->generation()},
+                {"camera",{{"position",{camPos.x,camPos.y,camPos.z}},{"view",viewMatrix},{"unjittered_view_projection",projectionMatrix}}}};
             metadata=document.dump();
         }
         linearCapture_->prepareFrame(frame.slot,frame.index,renderWidth,renderHeight,metadata);

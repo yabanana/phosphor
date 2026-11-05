@@ -28,6 +28,31 @@ TEST_CASE("F13 denoise moments raw signal remains unchanged and reset recovers i
     GPUDenoiseHistory history=a;for(u32 i=0;i<100;++i)history=denoiseTemporal(s,first,history,p,{},{});CHECK(history.length==settings.maxHistory);CHECK(history.color[0]==doctest::Approx(2));
     const auto startup=denoiseTemporal(s,first,{},p,{},{},{},4);CHECK(startup.variance==doctest::Approx(4)); // short history uses local variance
 }
+TEST_CASE("F13 camera motion compares historical world receivers in the current view") {
+    auto before=receiver();before.position[2]=-4;before.depth=4;
+    auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_GI,0,1,1,false);
+    const auto history=denoiseTemporal(before,glm::vec3(2),{},p,{},{});
+    REQUIRE(history.valid);
+    auto now=before;now.depth=5; // Camera translated back one metre.
+    CHECK_FALSE(denoiseCompatible(now,history,p)); // Old comparison mixed cameras.
+    p.flags|=DENOISE_CURRENT_VIEW_DEPTH;p.currentViewDepthRow[2]=1;p.currentViewDepthRow[3]=-1;
+    CHECK(denoiseCompatible(now,history,p));
+    const auto accumulated=denoiseTemporal(now,glm::vec3(4),history,p,{},{});
+    CHECK(accumulated.length==2);CHECK(accumulated.color[0]==doctest::Approx(3));
+    SUBCASE("rotation also changes depth without changing the receiver") {
+        p.currentViewDepthRow[0]=.5f;p.currentViewDepthRow[2]=std::sqrt(.75f);p.currentViewDepthRow[3]=0;
+        now.depth=4*std::sqrt(.75f);CHECK(denoiseCompatible(now,history,p));
+    }
+    SUBCASE("a different depth or foreign point still rejects history") {
+        now.depth=6;CHECK_FALSE(denoiseCompatible(now,history,p));
+        now.depth=5;auto foreign=history;foreign.position[2]=-8;
+        CHECK_FALSE(denoiseCompatible(now,foreign,p));
+    }
+    SUBCASE("invalid reprojection cannot make a valid history") {
+        p.currentViewDepthRow[2]=std::numeric_limits<float>::quiet_NaN();
+        CHECK_FALSE(denoiseCompatible(now,history,p));
+    }
+}
 TEST_CASE("F13 specular denoise rejects hit path distance and secondary reincarnation"){
     const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);const auto s=receiver();const auto source=spec();
     const auto h=denoiseTemporal(s,glm::vec3(1),{},p,{}, {},source);REQUIRE(denoiseCompatible(s,h,p,source));

@@ -769,6 +769,7 @@ PHOSPHOR_GPU_CONSTANT u32 DENOISE_SIGNAL_SPECULAR = 2u;
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_SIGNAL_AO = 3u;
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_RESET = 1u;
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_CLAMP_HISTORY = 2u;
+PHOSPHOR_GPU_CONSTANT u32 DENOISE_CURRENT_VIEW_DEPTH = 8u;
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_HISTORY_STOCHASTIC = 2u; // history flags: bit0 remains a numerical error
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_DIAGNOSTIC_ENDPOINTS = 4u; // opt-in old endpoint rejection for the quality negative
 
@@ -820,8 +821,9 @@ struct GPUDenoiseParams {
     float roughnessThreshold, hitDistanceThreshold, luminancePhi, normalPhi;
     u32 maxHistory, atrousStep, minHistoryForVariance, pad0;
     float varianceFloor, clampSigma, planeThreshold, pad1;
+    float currentViewDepthRow[4]; // world point -> current positive view depth (negated dot)
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseParams) == 96, "GPUDenoiseParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseParams) == 112, "GPUDenoiseParams layout");
 struct GPUDenoiseHistory {
     float color[3], firstMoment;
     float secondMoment, variance; u32 length, signal;

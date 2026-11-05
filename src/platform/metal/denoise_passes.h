@@ -15,6 +15,8 @@ public:
     void invalidateAll(const char* reason);
     rg::TextureRef addSignal(rg::RenderGraph&,u32 signal,rg::TextureRef raw,rg::TextureRef motion,
                             rg::BufferRef surfaces,rg::BufferRef specularMetadata={});
+    std::array<rg::TextureRef,3> addDiffuseSignals(rg::RenderGraph&,std::array<rg::TextureRef,3> raw,
+                                                rg::TextureRef motion,rg::BufferRef surfaces);
     void bindFrame(MetalGraphExecutor&);
     [[nodiscard]] u64 version() const;
     [[nodiscard]] bool check(u32 slot) const;

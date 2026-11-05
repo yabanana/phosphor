@@ -15,19 +15,31 @@
 
 set(PHOSPHOR_ARCHIVE_ARCHS "native" CACHE STRING "GPU architectures of the pipeline archive: native | all")
 set_property(CACHE PHOSPHOR_ARCHIVE_ARCHS PROPERTY STRINGS native all)
+option(PHOSPHOR_BUILD_PIPELINE_ARCHIVE "Build the harvested Metal pipeline archive (disable only to bootstrap a new harvest)" ON)
 
-execute_process(
-    COMMAND xcrun -sdk macosx -f metal-tt
-    OUTPUT_VARIABLE PHOSPHOR_METAL_TT
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    RESULT_VARIABLE _tt_rc
-    ERROR_QUIET
-)
+if(PHOSPHOR_METAL_TOOLCHAIN_DIR)
+    set(PHOSPHOR_METAL_TT "${PHOSPHOR_METAL_TOOLCHAIN_DIR}/usr/bin/metal-tt")
+    if(EXISTS "${PHOSPHOR_METAL_TT}")
+        set(_tt_rc 0)
+    else()
+        set(_tt_rc 1)
+    endif()
+else()
+    execute_process(
+        COMMAND xcrun -sdk macosx -f metal-tt
+        OUTPUT_VARIABLE PHOSPHOR_METAL_TT
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _tt_rc
+        ERROR_QUIET
+    )
+endif()
 set(PHOSPHOR_PIPELINES_JSON ${CMAKE_SOURCE_DIR}/shaders/pipelines.mtl4-json)
 set(PHOSPHOR_ARCHIVE ${PHOSPHOR_SHADER_OUT}/phosphor-archive.metallib)
 set(PHOSPHOR_ARCHIVE_JSON ${PHOSPHOR_SHADER_OUT}/pipelines.mtl4-json)
 
-if(PHOSPHOR_SHADER_HAS_DEBUG_INFO)
+if(NOT PHOSPHOR_BUILD_PIPELINE_ARCHIVE)
+    message(STATUS "Pipeline archive explicitly disabled; harvest runtime descriptors before enabling it")
+elseif(PHOSPHOR_SHADER_HAS_DEBUG_INFO)
     message(STATUS "Pipeline archive not built: shaders carry debug info, which metal-tt cannot "
                    "translate for specialised functions (configure with -DPHOSPHOR_SHADER_DEBUG_INFO=OFF "
                    "or use a Release build); the app compiles every pipeline.")
@@ -38,10 +50,17 @@ elseif(NOT EXISTS ${PHOSPHOR_PIPELINES_JSON})
     message(WARNING "${PHOSPHOR_PIPELINES_JSON} missing: pipeline archive not built "
                     "(run tools/harvest_pipelines.sh).")
 else()
+    # Match the archive target to the host driver; the app may target older
+    # macOS. A compatible compiler/driver pair is still required.
+    execute_process(COMMAND sw_vers -productVersion OUTPUT_VARIABLE _archive_os_version
+                    OUTPUT_STRIP_TRAILING_WHITESPACE RESULT_VARIABLE _archive_os_rc)
+    if(NOT _archive_os_rc EQUAL 0 OR NOT _archive_os_version MATCHES "^[0-9]+\\.[0-9]+")
+        message(FATAL_ERROR "Cannot determine the host macOS version for the Metal pipeline archive")
+    endif()
     set(PHOSPHOR_ARCHIVE_ARCH_ARGS)
     if(PHOSPHOR_ARCHIVE_ARCHS STREQUAL "native")
         execute_process(
-            COMMAND xcrun metal-arch
+            COMMAND ${PHOSPHOR_METAL_ARCH_COMMAND}
             OUTPUT_VARIABLE _native_arch
             OUTPUT_STRIP_TRAILING_WHITESPACE
             RESULT_VARIABLE _arch_rc
@@ -72,7 +91,8 @@ file(WRITE "${OUT}" "${_content}")
         COMMAND ${CMAKE_COMMAND} -E make_directory ${PHOSPHOR_SHADER_OUT}
         COMMAND ${CMAKE_COMMAND} -DIN=${PHOSPHOR_PIPELINES_JSON} -DOUT=${PHOSPHOR_ARCHIVE_JSON}
                 -DMETALLIB=${PHOSPHOR_METALLIB} -P ${_subst}
-        COMMAND xcrun -sdk macosx metal-tt ${PHOSPHOR_ARCHIVE_JSON}
+        COMMAND "${PHOSPHOR_METAL_TT}" ${PHOSPHOR_ARCHIVE_JSON}
+                -macos-version-min ${_archive_os_version}
                 ${PHOSPHOR_ARCHIVE_ARCH_ARGS} -o ${PHOSPHOR_ARCHIVE}
         DEPENDS ${PHOSPHOR_METALLIB} ${PHOSPHOR_PIPELINES_JSON} ${_subst}
         COMMENT "Translating pipelines.mtl4-json into phosphor-archive.metallib (metal-tt)"

@@ -30,8 +30,11 @@ bool denoiseCompatible(const GPUDISurface& s,const GPUDenoiseHistory& h,const GP
         !std::isfinite(h.secondMoment)||!std::isfinite(h.variance)||h.variance<0)return false;
     auto n=signalNormal(s,p.signal),old=v3(h.normal);if(!finite(n)||!finite(old)||glm::dot(n,n)<=0||glm::dot(old,old)<=0||
         glm::dot(glm::normalize(n),glm::normalize(old))<p.normalThreshold)return false;
-    const float scale=std::max(s.depth,h.depth);
-    if(std::abs(s.depth-h.depth)>p.depthThreshold*scale||!finite(v3(s.position))||!finite(v3(h.position))||
+    const float oldDepth=(p.flags&DENOISE_CURRENT_VIEW_DEPTH)?
+        -(p.currentViewDepthRow[0]*h.position[0]+p.currentViewDepthRow[1]*h.position[1]+p.currentViewDepthRow[2]*h.position[2]+p.currentViewDepthRow[3]):h.depth;
+    if(!std::isfinite(oldDepth)||oldDepth<=0)return false;
+    const float scale=std::max(s.depth,oldDepth);
+    if(std::abs(s.depth-oldDepth)>p.depthThreshold*scale||!finite(v3(s.position))||!finite(v3(h.position))||
         std::abs(glm::dot(v3(s.position)-v3(h.position),glm::normalize(n)))>p.planeThreshold*scale)return false;
     if(h.flags&~(p.signal==DENOISE_SIGNAL_SPECULAR?DENOISE_HISTORY_STOCHASTIC:0u))return false;
     if(p.signal==DENOISE_SIGNAL_SPECULAR){
