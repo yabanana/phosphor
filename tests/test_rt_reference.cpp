@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 #include "renderer/rt_reference.h"
+#include "renderer/rt_check.h"
 
 #include <array>
 #include <cmath>
@@ -435,4 +436,141 @@ TEST_CASE("RT spatial checker rejects meaningful errors even below the former ba
     const auto check = ref.check(r, gpu);
     CHECK_FALSE(check.ok);
     CHECK(check.error.find("reason=spatial-residual") != std::string::npos);
+}
+
+namespace {
+// F9 bench8 frame48/ray64 witness (owner decision D3, 2026-11-10): float32
+// inputs frozen from the one-triangle Metal control. In exact arithmetic the
+// ray hits at u = 1.02e-6, 2.1e-7 m from the edge, 0.056 ULP of the origin.
+constexpr float witnessVertices[9] = {-.175000012f, -.150000006f, .303108871f, -.25000003f, 2.6226834e-8f, .433012694f,
+                                      -.349999994f, -.150000006f, -3.05979704e-8f};
+constexpr float witnessTransform[12] = {-.325449258f, .0220670607f, -1.0048188f, 1.00503695f, -.000158555209f, -.325523376f,
+                                        -.00695022568f, -1.05620921f, -.0209445711f, 5.08867741f, 15.563817f, 44.1563911f};
+constexpr float witnessOrigin[3] = {0, 12.9266081f, 58.169735f};
+constexpr float witnessDirection[3] = {.341815978f, .1762207f, -.923097014f};
+
+struct Witness {
+    RtReference ref;
+    std::vector<GPUInstance> instances;
+    explicit Witness(bool secondBehind = false) {
+        std::vector<GPUVertex> v(3);
+        for (int k = 0; k < 3; ++k) { v[k].px = witnessVertices[3*k]; v[k].py = witnessVertices[3*k+1]; v[k].pz = witnessVertices[3*k+2]; }
+        const auto quad = square();
+        v.insert(v.end(), quad.begin(), quad.end());
+        const std::array<u32, 9> indices{0, 1, 2, 0, 1, 2, 0, 2, 3};
+        std::array<GPURtMesh, 2> meshes{};
+        meshes[0].indexCount = 3;
+        meshes[1].vertexOffset = 3; meshes[1].indexOffset = 3; meshes[1].indexCount = 6;
+        ref.setGeometry(v, indices, meshes);
+        GPUMaterial material{};
+        material.flags = MATERIAL_FLAG_DOUBLE_SIDED; // the Metal control disables culling
+        ref.setMaterials(std::span(&material, 1));
+        instances.push_back(place(0));
+        // Optional large square perpendicular to z, 5 m further along the ray and
+        // crossed well inside: the exact result without the edge triangle is then
+        // a hit, so a GPU miss must still fail.
+        if (secondBehind) {
+            GPUInstance back = instance();
+            back.meshIndex = 1;
+            const float t = 14.764225f + 5;
+            back.modelMatrix[0] = back.modelMatrix[5] = 50;
+            for (int row = 0; row < 3; ++row) back.modelMatrix[12+row] = witnessOrigin[row] + t*witnessDirection[row];
+            instances.push_back(back);
+        }
+        ref.setInstances(instances);
+    }
+    static GPUInstance place(float along) {
+        GPUInstance i = instance();
+        for (int column = 0; column < 3; ++column)
+            for (int row = 0; row < 3; ++row) i.modelMatrix[4*column+row] = witnessTransform[3*column+row];
+        for (int row = 0; row < 3; ++row) i.modelMatrix[12+row] = witnessTransform[9+row] + along*witnessDirection[row];
+        return i;
+    }
+    static GPURtRay ray(float inward = 0) {
+        GPURtRay r{witnessOrigin[0], witnessOrigin[1], witnessOrigin[2], .0579443984f, witnessDirection[0], witnessDirection[1],
+                   witnessDirection[2], 1e30f, RT_MASK_INDIRECT, RT_PROBE_DIFFUSE, 0, 0};
+        // Move the origin toward vertex B in world space, as the Metal positive control does.
+        float* o = &r.ox;
+        for (int row = 0; row < 3; ++row)
+            for (int k = 0; k < 3; ++k)
+                o[row] += inward * witnessTransform[3*k+row] * (witnessVertices[3+k] - witnessVertices[k]);
+        return r;
+    }
+    static GPURtHit miss() { return {-1, 0, 0, ~0u, ~0u, 0, 0, 0}; }
+};
+}
+
+TEST_CASE("D3 edge rule: a GPU miss on the frozen F9 witness matches the exact result without the edge triangle") {
+    Witness w;
+    const auto r = Witness::ray();
+    const auto h = w.ref.nearest(r);
+    REQUIRE(h.hit());
+    CHECK(h.t == doctest::Approx(14.764225).epsilon(1e-6));
+    CHECK(std::min({h.u, h.v, 1 - h.u - h.v}) < 2e-6); // the frozen ray really is at the edge
+    const auto excluded = w.ref.check(r, Witness::miss());
+    CHECK(excluded.ok);
+    CHECK(excluded.edgeExcluded);
+    // Reporting the edge hit itself stays an ordinary pass.
+    const auto direct = w.ref.check(r, h.gpu());
+    CHECK(direct.ok);
+    CHECK_FALSE(direct.edgeExcluded);
+}
+
+TEST_CASE("D3 edge rule never accepts an interior miss") {
+    Witness w;
+    const auto r = Witness::ray(0.005f); // the Metal control's interior positive case, about 1.1e-3 m inside
+    REQUIRE(w.ref.nearest(r).hit());
+    const auto check = w.ref.check(r, Witness::miss());
+    CHECK_FALSE(check.ok);
+    CHECK_FALSE(check.edgeExcluded);
+    CHECK(check.error == "hit/miss mismatch");
+}
+
+TEST_CASE("D3 edge rule compares strictly with the result without that one triangle") {
+    Witness w(true);
+    const auto r = Witness::ray();
+    const auto front = w.ref.nearest(r);
+    REQUIRE(front.hit());
+    // Without the edge triangle the exact result is the copy behind it: a miss is wrong.
+    CHECK_FALSE(w.ref.check(r, Witness::miss()).ok);
+    // Skipping the edge triangle and reporting the copy behind it is the admitted outcome.
+    const auto back = w.ref.nearest(r, [&](const GPURtRay&, const RtReferenceHit& hit) { return hit.slot != front.slot; });
+    REQUIRE(back.hit());
+    CHECK(back.t == doctest::Approx(front.t + 5).epsilon(1e-6));
+    const auto skipped = w.ref.check(r, back.gpu());
+    CHECK(skipped.ok);
+    CHECK(skipped.edgeExcluded);
+    // The same farther hit is still refused when the ray is well inside the front triangle.
+    const auto inside = Witness::ray(0.005f);
+    const auto insideBack = w.ref.nearest(inside, [&](const GPURtRay&, const RtReferenceHit& hit) { return hit.slot != front.slot; });
+    REQUIRE(insideBack.hit());
+    CHECK_FALSE(w.ref.check(inside, insideBack.gpu()).ok);
+}
+
+TEST_CASE("D3 edge rule is counted and capped per frame by the checker") {
+    std::vector<GPUVertex> v(3);
+    for (int k = 0; k < 3; ++k) { v[k].px = witnessVertices[3*k]; v[k].py = witnessVertices[3*k+1]; v[k].pz = witnessVertices[3*k+2]; }
+    const std::array<u32, 3> indices{0, 1, 2};
+    GPURtMesh mesh{};
+    mesh.indexCount = 3;
+    RtChecker checker;
+    checker.setGeometry(v, indices, std::span(&mesh, 1));
+    GPUMaterial material{};
+    material.flags = MATERIAL_FLAG_DOUBLE_SIDED;
+    material.baseColorTex = INVALID_TEXTURE_INDEX;
+    const std::vector<GPUInstance> instances{Witness::place(0)};
+    const std::vector<RtCpuTexture> textures;
+    const std::array<GPURtRay, 2> rays{Witness::ray(), Witness::ray(0.005f)};
+    Witness w;
+    const std::array<GPURtHit, 2> oneEdge{Witness::miss(), w.ref.nearest(rays[1]).gpu()};
+    const auto ok = checker.check(rays, oneEdge, instances, std::span(&material, 1), textures);
+    CHECK(ok.ok());
+    CHECK(ok.edgeExclusions == 1);
+    CHECK(ok.checked == 2);
+    const std::array<GPURtRay, 2> twoEdge{Witness::ray(), Witness::ray()};
+    const std::array<GPURtHit, 2> twoMiss{Witness::miss(), Witness::miss()};
+    const auto capped = checker.check(twoEdge, twoMiss, instances, std::span(&material, 1), textures);
+    CHECK_FALSE(capped.ok());
+    CHECK(capped.edgeExclusions == 2);
+    CHECK(capped.firstError.find("edge-excluded") != std::string::npos);
 }

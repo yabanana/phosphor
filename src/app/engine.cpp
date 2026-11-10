@@ -1009,8 +1009,9 @@ void Engine::finishBenchmark() {
                     r.proxyMode.c_str(), static_cast<unsigned long long>(r.proxyTriangles),
                     static_cast<unsigned long long>(r.fullTriangles));
         if (options_.debugRt)
-            std::printf("RT checks %u failures %u | %s\n", rtChecks_, rtFailures_,
-                        rtChecks_ && !rtFailures_ ? "PASS" : "FAIL");
+            std::printf("RT checks %u failures %u | %s | edge-excluded rays %llu of %llu\n", rtChecks_, rtFailures_,
+                        rtChecks_ && !rtFailures_ ? "PASS" : "FAIL", static_cast<unsigned long long>(rtEdgeExcluded_),
+                        static_cast<unsigned long long>(rtCheckedRays_));
     }
     if (report.scene.present) std::printf("%s\n", formatSceneLine(report.scene).c_str());
     if (gpuSceneChecks_ > 0) {
@@ -2179,10 +2180,12 @@ bool Engine::checkRayTracing(u32 slot) {
     rtCheckedRays_ += result.checked;
     rtAmbiguous_ += result.ambiguous;
     rtUnsupported_ += result.unsupported;
-    std::printf("RT check frame %llu | checked %llu ambiguous %llu skipped %llu unsupported %llu | "
+    rtEdgeExcluded_ += result.edgeExclusions;
+    std::printf("RT check frame %llu | checked %llu ambiguous %llu edge-excluded %llu skipped %llu unsupported %llu | "
                 "failures %llu opaque-alpha %u invalid-mesh %u | %s%s%s\n",
                 static_cast<unsigned long long>(readback.frame), static_cast<unsigned long long>(result.checked),
-                static_cast<unsigned long long>(result.ambiguous), static_cast<unsigned long long>(result.skipped),
+                static_cast<unsigned long long>(result.ambiguous), static_cast<unsigned long long>(result.edgeExclusions),
+                static_cast<unsigned long long>(result.skipped),
                 static_cast<unsigned long long>(result.unsupported), static_cast<unsigned long long>(result.failures),
                 counters.opaqueAlphaTests, counters.invalidMesh, passed ? "PASS" : "FAIL",
                 result.firstError.empty() ? "" : ": ", result.firstError.c_str());

@@ -20,7 +20,9 @@ struct RtReferenceHit {
     [[nodiscard]] GPURtHit gpu() const;
 };
 struct RtHitCheck {
-    bool ok = true, edgeTie = false;
+    // edgeExcluded: the reference's nearest triangle was within FP32 rounding
+    // of its own edge and the GPU matched the exact result WITHOUT it (D3).
+    bool ok = true, edgeTie = false, edgeExcluded = false;
     double relativeError = 0;
     std::string error;
 };
@@ -56,6 +58,12 @@ public:
     // alternate edge-tied IDs must contain the ray within baryTolerance.
     // Shadow: any valid occluder is accepted, still checking its named triangle,
     // t, barycentrics, mask, generation, face and alpha rules.
+    // Edge rule (owner decision D3, 2026-11-10): when the GPU disagrees with the
+    // reference's hit and that triangle is closer to one of its edges than the
+    // FP32 rounding budget of the inputs, the containment is not determined by
+    // the inputs. Then the GPU may instead match, strictly, the exact result
+    // with that one triangle excluded; edgeExcluded reports it. Nothing else
+    // is relaxed: an interior miss, or a GPU result matching neither, fails.
     [[nodiscard]] RtHitCheck check(const GPURtRay& ray, const GPURtHit& hit, const Filter& accept = {},
                                    double tTolerance = 2e-4, double baryTolerance = 1e-5) const;
     [[nodiscard]] size_t meshCount() const;
@@ -63,6 +71,8 @@ public:
     [[nodiscard]] size_t triangleCount() const; // unique geometry, not instanced
 
 private:
+    [[nodiscard]] RtHitCheck checkWith(const GPURtRay& ray, const GPURtHit& hit, const Filter& accept,
+                                       double tTolerance, double baryTolerance, bool allowEdgeExclusion) const;
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

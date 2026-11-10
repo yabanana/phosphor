@@ -202,6 +202,43 @@ struct RtReference::Impl {
         const V3 a = position(tri.vertices[0]), b = position(tri.vertices[1]), c = position(tri.vertices[2]);
         return glm::dot(glm::cross(b-a, c-a), local(fromGpu(ray), i).d) < 0;
     }
+    // Distance in WORLD units from the ray/plane point to the nearest edge of
+    // the hit triangle, against an FP32 rounding budget of the inputs that
+    // produce it: transformed vertices (affine terms, with cancellation), ray
+    // origin and t*d. gamma(8) covers the affine transform (3 products, 3 sums)
+    // and the edge function's product/difference; it is a test budget, not a
+    // published bound on Metal's traversal. Capped by the S0 distance
+    // tolerance in world units, like the reconstruction bound in check().
+    bool nearOwnEdge(const Ray& ray, const RtReferenceHit& hit, double tTolerance) const {
+        const auto& i = instances[hit.slot];
+        if (hit.mesh >= meshes.size() || hit.primitive >= meshes[hit.mesh].triangles.size()) return false;
+        const auto& tri = meshes[hit.mesh].triangles[hit.primitive];
+        V3 world[3], magnitude(0);
+        for (int k = 0; k < 3; ++k) {
+            const V3 p = position(tri.vertices[k]);
+            world[k] = V3(i.world * glm::dvec4(p, 1));
+            for (int axis = 0; axis < 3; ++axis)
+                magnitude[axis] = std::max(magnitude[axis], std::abs(i.world[0][axis]*p.x) + std::abs(i.world[1][axis]*p.y) +
+                                                            std::abs(i.world[2][axis]*p.z) + std::abs(i.world[3][axis]));
+        }
+        const V3 point = ray.o + hit.t * ray.d;
+        const V3 normal = glm::cross(world[1]-world[0], world[2]-world[0]);
+        const double twiceArea = glm::length(normal);
+        if (!(twiceArea > 0) || !std::isfinite(twiceArea)) return false;
+        double margin = std::numeric_limits<double>::infinity();
+        for (int k = 0; k < 3; ++k) {
+            const V3 from = world[(k+1)%3], to = world[(k+2)%3];
+            const double length = glm::length(to-from);
+            if (!(length > 0)) return false;
+            // Signed distance of the point from edge k inside the triangle plane.
+            margin = std::min(margin, glm::dot(glm::cross(to-from, point-from), normal) / (twiceArea * length));
+        }
+        constexpr double unitRoundoff = 0x1p-24;
+        constexpr double gamma8 = (8.0*unitRoundoff) / (1.0-8.0*unitRoundoff);
+        const double budget = std::min(gamma8 * glm::length(magnitude + glm::abs(ray.o) + glm::abs(hit.t*ray.d)),
+                                       tTolerance * std::max(1.0, std::abs(hit.t)) * glm::length(ray.d));
+        return std::isfinite(margin) && std::abs(margin) <= budget;
+    }
     RtReferenceHit trace(const GPURtRay& gpu, const Filter& accept, bool any) const {
         RtReferenceHit best;
         const Ray ray = fromGpu(gpu);
@@ -329,6 +366,11 @@ bool RtReference::any(const GPURtRay& ray, const Filter& accept) const {
 
 RtHitCheck RtReference::check(const GPURtRay& gpuRay, const GPURtHit& gpu, const Filter& accept,
                              double tTolerance, double baryTolerance) const {
+    return checkWith(gpuRay, gpu, accept, tTolerance, baryTolerance, true);
+}
+
+RtHitCheck RtReference::checkWith(const GPURtRay& gpuRay, const GPURtHit& gpu, const Filter& accept,
+                                  double tTolerance, double baryTolerance, bool allowEdgeExclusion) const {
     RtHitCheck result;
     auto fail = [&](const char* reason) { result.ok = false; result.error = reason; return result; };
     if (!(tTolerance >= 0) || !(baryTolerance >= 0)) return fail("invalid comparison tolerance");
@@ -338,6 +380,17 @@ RtHitCheck RtReference::check(const GPURtRay& gpuRay, const GPURtHit& gpu, const
         (bool(gpu.hit) != (gpu.t >= 0))) return fail("inconsistent GPU hit state");
     const bool shadow = gpuRay.type == RT_PROBE_SHADOW;
     const auto expected = impl_->trace(gpuRay, accept, shadow);
+    if (allowEdgeExclusion && expected.hit() && expected.slot < impl_->instances.size()) {
+        const bool sameTriangle = gpu.hit && gpu.slot == expected.slot && gpu.primitive == expected.primitive;
+        const bool farther = gpu.hit && !shadow && gpu.t - expected.t > tTolerance * std::max(1.0, std::abs(expected.t));
+        if ((!gpu.hit || (farther && !sameTriangle)) && impl_->nearOwnEdge(ray, expected, tTolerance)) {
+            const Filter without = [&](const GPURtRay& r, const RtReferenceHit& h) {
+                return !(h.slot == expected.slot && h.primitive == expected.primitive) && (!accept || accept(r, h));
+            };
+            auto excluded = checkWith(gpuRay, gpu, without, tTolerance, baryTolerance, false);
+            if (excluded.ok) { excluded.edgeExcluded = true; return excluded; }
+        }
+    }
     if (expected.hit() != bool(gpu.hit)) return fail("hit/miss mismatch");
     if (!expected.hit()) return result;
     if (!shadow) {
