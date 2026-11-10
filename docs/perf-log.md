@@ -1107,3 +1107,12 @@ by a further 3.98–5.88% in three valid A/B/A replicas. GPU p95 is 23.4450,
 ray budgets, with zero steady GPU allocations. Six validation runs stay within
 the original image gate. A separate 40-frame scene-switch sequence verifies
 DI history invalidation and recovery. The 16.67 ms gate remains open.
+
+### Share the final GI and AO filter pass
+
+Against the preceding zero-DI-denoising binary, two valid 1080p A/B/A
+pairs reduce GPU p50 by 5.91% and 5.23%. The shared stride takes about
+1.07 ms at p50, down from 2.14 ms summed across the separate GI and AO passes.
+Full GPU p95 is 22.6877 and 23.1716 ms. A third pair is rejected at 6.82%
+baseline drift. Every run has zero steady GPU allocations and AOT misses.
+The 16.67 ms gate remains open.

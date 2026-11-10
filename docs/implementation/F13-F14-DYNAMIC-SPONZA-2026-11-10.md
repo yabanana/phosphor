@@ -144,3 +144,57 @@ The original 96-frame native HDR control still measures 5.17578125% against
 1%. Both F9 failures reproduce on native and forced Apple9. Nine CTest groups
 and the physical AO fixture pass. The full preliminary gates still apply
 before F15 and F16. [Measurement ledger](../results/F13-F14-dynamic-Sponza-M5Max-2026-11-10.json)
+
+## Shared final diffuse denoising pass
+
+GI and AO now share the geometric weights of the final stride on the full
+preset, even when DI has no local lights. The two AOT variants bind only the
+active signals. Both keep each signal's own Float32 input, variance, weight
+sum and history. The reduced two-stride preset still uses its existing passes.
+
+Three more 1920×1080 A/B/A pairs use the preceding zero-DI-denoising build as
+the baseline, with the same Sponza camera and sun motion, 128 warmup frames,
+256 timed frames, ray counts, and 5% drift cap. All nine runs have zero steady
+GPU allocations, archive misses and unavailable archive requests.
+
+| Pair | Baseline p50 drift | GPU p50 reduction | Candidate GPU p95 | Candidate frame p95 |
+|---|---:|---:|---:|---:|
+| 1 | 1.02% | 5.91% | 22.6877 ms | 23.5060 ms |
+| 2 (discarded) | 6.82% | — | 23.4799 ms | 24.4756 ms |
+| 3 | 2.49% | 5.23% | 23.1716 ms | 24.2171 ms |
+
+The summed pass medians for GI and AO at the last stride fell from about
+2.14 ms to 1.07 ms in both valid pairs. The full GPU frame still exceeds the
+unchanged 16.67 ms p95 budget.
+
+The follow-up [multi-jittered Mitsuba sampling experiment](https://mitsuba.readthedocs.io/en/v3.9.0/src/generated/plugins_samplers.html#correlated-multi-jittered-sampler-multijitter)
+changes only the sampler in the secondary-path pilot. At frame 119, the same
+768 receiver positions match and the unchanged seeds disagree by 49.82%
+at 1,024 spp, versus 51.95% with the independent sampler in the same pilot.
+This remains far from 2%; no reference is promoted. The frozen protocol,
+seed renders and pilot source are in `build/f13-f14-reference-multijitter`.
+
+All 18 API- and shader-validated runs compare the baseline and candidate on
+384 frames at 322×182, with separate captures of the HDR composite, filtered
+GI and filtered AO. The maximum normalized error is 5.365e-7 across the
+corpus, below 5e-5; forced Apple9 captures are identical. The 40-frame scene
+switch exercises both AOT resource layouts and matches within 1.249e-8.
+DI has no history on empty Sponza frames, resets on both returns to Many
+Lights, and resumes reuse afterwards. All nine CTest groups and 13 selected
+functional controls passed. The full independent qualification remains open.
+
+The four previously failing F9 cases were rerun on this build. Bench 8
+reproduced frame 48/ray 64, and the diffuse probe reproduced frame 37/ray 162,
+in native and forced Apple9 modes. For Bench 8, a separate one-triangle
+Metal fixture using the recorded ray and instance transform reproduces the
+edge miss. Moving the test ray into the triangle produces a hit, with and
+without rebasing the instance around the camera. Rebasing alone also misses
+the original edge ray, despite recovering a hit in a host FP32 affine model.
+The host model therefore cannot establish a hardware fix. The model and
+Metal fixture are in `build/f13-f14-pair-validation`; production ray traversal
+and its checker are unchanged.
+
+The unchanged native HDR control encoded all 96 frames. Its 80 steady
+readbacks still reach 5.17578125% restored error against the 1% cap. The
+custom Float32 fallback remains active for the production request.
+The four open gates still prevent merging and starting F15/F16.

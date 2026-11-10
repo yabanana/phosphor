@@ -730,6 +730,576 @@
   },
   "runtime": "macOS 27.3 26C5035r",
   "schema": 1,
+  "shared_final_diffuse_follow_up": {
+    "baseline_revision": "a2368d4601c60d179384b2cc7cfa30217b1b1915",
+    "binaries": {
+      "baseline": {
+        "phosphor": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/pre-pair-denoise/phosphor",
+          "sha256": "666010d42e52bc9b7ec058f741d56d008a5ebf7f86ecdc215c8444931a0ebdab"
+        },
+        "shaders/phosphor-archive.metallib": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/pre-pair-denoise/shaders/phosphor-archive.metallib",
+          "sha256": "c7d2cfab60e2d8ec7534b229712db2b04c7af91a1847b5b61c15cbd4e70add8d"
+        },
+        "shaders/phosphor.metallib": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/pre-pair-denoise/shaders/phosphor.metallib",
+          "sha256": "f6ba3e330f5784f1aa89a8a2af12750a1acd152dc329efbde4ea711686216245"
+        }
+      },
+      "candidate": {
+        "phosphor": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/closure-release/phosphor",
+          "sha256": "037e06f6be47bdbb043808d1ac79ce8777e70ec35ec912b2fc83a67fd2f6cd53"
+        },
+        "shaders/phosphor-archive.metallib": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/closure-release/shaders/phosphor-archive.metallib",
+          "sha256": "5549723affa992556071788519c84e56099740b0dc1e35e095bb5f25cf1f59f1"
+        },
+        "shaders/phosphor.metallib": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/closure-release/shaders/phosphor.metallib",
+          "sha256": "b6b164d0bdb63e3a40bb4c769dbb670b6c0ae8d82a0d264b9683991f504393d3"
+        }
+      }
+    },
+    "ctest_groups_passed": 9,
+    "f9": {
+      "apple9-bench8": {
+        "failure": "RT check frame 48 | checked 512 ambiguous 0 skipped 0 unsupported 0 | failures 1 opaque-alpha 0 invalid-mesh 0 | FAIL: ray 64: hit/miss mismatch",
+        "log": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-validation/apple9-bench8/apple9-bench8.log",
+          "sha256": "15d798251857d46f23d769ed8ebf06a95f3ddd0fe69480d0afa0e44ee35bb7d0"
+        },
+        "passed": false
+      },
+      "apple9-probe-diffuse": {
+        "failure": "RT check frame 37 | checked 512 ambiguous 0 skipped 0 unsupported 0 | failures 1 opaque-alpha 0 invalid-mesh 0 | FAIL: ray 162: barycentric mismatch: reason=spatial-residual slot=3136 mesh=51 primitive=57 ray_type=3 cpu_uv=(1.417715909282e-02,2.158828890661e-01) gpu_uv=(1.417722459882e-02,2.158807516098e-01) abs_delta_uv=(6.550600889152e-08,2.137456345946e-06) bary_tolerance=1.000000000000e-05 cpu_t=6.902596999387e+00 gpu_t=6.902643680573e+00 edge_max_world=1.501588293657e+01 altitude_min_world=5.519982494914e-02 incidence_cos=5.029780238726e-01 spatial_residual_world=3.529279087398e-05 spatial_bound_world=3.148013295446e-05 fp32_reconstruction_bound=3.148013295446e-05 distance_world_cap=1.380519408096e-03 bary_displacement_world=3.111195369828e-05 ray_perpendicular_residual_world=2.351896029993e-05 coordinate_scale_world=8.036484268431e+00 fp32_ulp_world=9.536743164062e-07",
+        "log": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-validation/apple9-probe-diffuse/apple9-probe-diffuse.log",
+          "sha256": "c38e0b537b892ff290766a9738a933c5cd2f155fd94fd6af9981147dd5e9362d"
+        },
+        "passed": false
+      },
+      "native-bench8": {
+        "failure": "RT check frame 48 | checked 512 ambiguous 0 skipped 0 unsupported 0 | failures 1 opaque-alpha 0 invalid-mesh 0 | FAIL: ray 64: hit/miss mismatch",
+        "log": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-validation/native-bench8/native-bench8.log",
+          "sha256": "e6eb2ed7b0666ec6e6724ae0dbe6d3dce3ad68efc2af09967db2f327afbaf806"
+        },
+        "passed": false
+      },
+      "native-probe-diffuse": {
+        "failure": "RT check frame 37 | checked 512 ambiguous 0 skipped 0 unsupported 0 | failures 1 opaque-alpha 0 invalid-mesh 0 | FAIL: ray 162: barycentric mismatch: reason=spatial-residual slot=3136 mesh=51 primitive=57 ray_type=3 cpu_uv=(1.417715909282e-02,2.158828890661e-01) gpu_uv=(1.417722459882e-02,2.158807516098e-01) abs_delta_uv=(6.550600889152e-08,2.137456345946e-06) bary_tolerance=1.000000000000e-05 cpu_t=6.902596999387e+00 gpu_t=6.902643680573e+00 edge_max_world=1.501588293657e+01 altitude_min_world=5.519982494914e-02 incidence_cos=5.029780238726e-01 spatial_residual_world=3.529279087398e-05 spatial_bound_world=3.148013295446e-05 fp32_reconstruction_bound=3.148013295446e-05 distance_world_cap=1.380519408096e-03 bary_displacement_world=3.111195369828e-05 ray_perpendicular_residual_world=2.351896029993e-05 coordinate_scale_world=8.036484268431e+00 fp32_ulp_world=9.536743164062e-07",
+        "log": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-validation/native-probe-diffuse/native-probe-diffuse.log",
+          "sha256": "c53acd21b29ed2569d97dd0a6fe3c4736b7c57058d7770498d686773a4d51f6f"
+        },
+        "passed": false
+      }
+    },
+    "f9_edge_rebase": {
+      "evidence": {
+        "rt-precision-gpu-controls.log": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-validation/rt-precision-gpu-controls.log",
+          "sha256": "ae56a7fb719171a718510f34ad7d9a8ed4faf3c4ee37df2c30f635a6266457da"
+        },
+        "rt-precision-gpu-controls.mm": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-validation/rt-precision-gpu-controls.mm",
+          "sha256": "7a3ce163b4fe9089d7bbc687388558c3cf36628c4f0846fd0be1385b3ba2ec77"
+        },
+        "rt-precision.json": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-validation/rt-precision.json",
+          "sha256": "f71bad664fe802824921727e6ebe51f0f0fe6c211077af65f64ca8dcc735b27e"
+        },
+        "rt-precision.py": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-validation/rt-precision.py",
+          "sha256": "d18dc58b41be6080138f6d1ef65142afcfeacf88beef0eb14b509379f0edda6b"
+        }
+      },
+      "hardware_edge_hit_after": false,
+      "hardware_edge_hit_before": false,
+      "hardware_interior_hit_after": true,
+      "hardware_interior_hit_before": true,
+      "host_model_hit": true
+    },
+    "functional": {
+      "cases": 13,
+      "evidence": {
+        "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-validation/functional/summary.json",
+        "sha256": "07d46c3730f1c2d87b837d07f9c81441be112758e1d89024ae12e1517849fb0f"
+      },
+      "passed": true,
+      "selected_evidence_complete": false
+    },
+    "image_cap": 5e-05,
+    "native_hdr": {
+      "actual_encoded_frames": 96,
+      "evidence": {
+        "sdk-execution-provenance.json": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-validation/wide-hdr/sdk-execution-provenance.json",
+          "sha256": "e83e1f106c57802181afd4f0d5ea781f048ead5e15c7e421c6d46430168d9f0a"
+        },
+        "sdk-frozen-manifest.json": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-validation/wide-hdr/sdk-frozen-manifest.json",
+          "sha256": "6ba2010a59d6f4c79a1f890aef1d495768d7b5c753d23c001509f1842d41f52e"
+        },
+        "sdk-results.json": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-validation/wide-hdr/sdk-results.json",
+          "sha256": "271f16c089990ef29e5cde3a827128a201fe8645b8ef04526859bf294500d0ab"
+        }
+      },
+      "limit": 0.01,
+      "passed": false,
+      "steady_frames": 80,
+      "steady_max_restored_error": 0.0517578125
+    },
+    "perf": {
+      "baseline_drift_cap": 0.05,
+      "evidence": {
+        "protocol.json": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-perf/protocol.json",
+          "sha256": "af6c298571702d2cc805dc2f065e648d35de320279c90fef3074b713045a3227"
+        },
+        "results.json": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-perf/results.json",
+          "sha256": "a38e32f9f36b77e808a4044a47cb3215736b71b73fc312b3ed6c9bdc5a1de5d9"
+        },
+        "runs.json": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-perf/runs.json",
+          "sha256": "9276bcc404e44298500336203ce66b0a421b220a9da0dc4b6d6a23b866b1eda1"
+        }
+      },
+      "gpu_p95_cap_ms": 16.666666666666668,
+      "pairs": [
+        {
+          "baseline": {
+            "allocations": 0,
+            "archive_hits": 134,
+            "archive_misses": 0,
+            "archive_unavailable": 0,
+            "final_gi_ao_pass_p50_sum_ms": 2.1369,
+            "frame_ms": {
+              "max": 26.9686,
+              "mean": 24.0068,
+              "min": 22.32,
+              "p50": 23.8988,
+              "p95": 25.8823,
+              "p99": 26.5496
+            },
+            "gpu_ms": {
+              "max": 25.7342,
+              "mean": 23.0589,
+              "min": 21.5291,
+              "p50": 23.014,
+              "p95": 24.8813,
+              "p99": 25.1584
+            }
+          },
+          "baseline_drift": 0.01022855653080727,
+          "candidate": {
+            "allocations": 0,
+            "archive_hits": 135,
+            "archive_misses": 0,
+            "archive_unavailable": 0,
+            "final_gi_ao_pass_p50_sum_ms": 1.0725,
+            "frame_ms": {
+              "max": 23.8291,
+              "mean": 22.4513,
+              "min": 21.2656,
+              "p50": 22.5224,
+              "p95": 23.506,
+              "p99": 23.7232
+            },
+            "gpu_ms": {
+              "max": 22.9048,
+              "mean": 21.6294,
+              "min": 20.5089,
+              "p50": 21.5441,
+              "p95": 22.6877,
+              "p99": 22.862
+            }
+          },
+          "candidate_budget_passed": false,
+          "index": 1,
+          "p50_reduction": 0.059057576988421734,
+          "repeat": {
+            "allocations": 0,
+            "archive_hits": 134,
+            "archive_misses": 0,
+            "archive_unavailable": 0,
+            "final_gi_ao_pass_p50_sum_ms": 2.143,
+            "frame_ms": {
+              "max": 26.1868,
+              "mean": 23.8793,
+              "min": 22.4015,
+              "p50": 23.6673,
+              "p95": 25.6351,
+              "p99": 25.7773
+            },
+            "gpu_ms": {
+              "max": 25.2202,
+              "mean": 22.9686,
+              "min": 21.5891,
+              "p50": 22.7786,
+              "p95": 24.6125,
+              "p99": 24.7601
+            }
+          },
+          "valid": true
+        },
+        {
+          "baseline": {
+            "allocations": 0,
+            "archive_hits": 134,
+            "archive_misses": 0,
+            "archive_unavailable": 0,
+            "final_gi_ao_pass_p50_sum_ms": 2.1402,
+            "frame_ms": {
+              "max": 25.8436,
+              "mean": 23.8121,
+              "min": 22.4262,
+              "p50": 23.649,
+              "p95": 25.1254,
+              "p99": 25.3745
+            },
+            "gpu_ms": {
+              "max": 24.5465,
+              "mean": 22.9358,
+              "min": 21.606,
+              "p50": 22.8045,
+              "p95": 24.1998,
+              "p99": 24.441
+            }
+          },
+          "baseline_drift": 0.06824530246223334,
+          "candidate": {
+            "allocations": 0,
+            "archive_hits": 135,
+            "archive_misses": 0,
+            "archive_unavailable": 0,
+            "final_gi_ao_pass_p50_sum_ms": 1.0789,
+            "frame_ms": {
+              "max": 41.8415,
+              "mean": 23.2995,
+              "min": 21.7275,
+              "p50": 23.196,
+              "p95": 24.4756,
+              "p99": 25.0807
+            },
+            "gpu_ms": {
+              "max": 24.0231,
+              "mean": 22.2048,
+              "min": 20.6913,
+              "p50": 22.2111,
+              "p95": 23.4799,
+              "p99": 23.8358
+            }
+          },
+          "candidate_budget_passed": false,
+          "index": 2,
+          "p50_reduction": 0.05815928235376444,
+          "repeat": {
+            "allocations": 0,
+            "archive_hits": 134,
+            "archive_misses": 0,
+            "archive_unavailable": 0,
+            "final_gi_ao_pass_p50_sum_ms": 2.2489999999999997,
+            "frame_ms": {
+              "max": 30.467,
+              "mean": 25.8633,
+              "min": 23.4888,
+              "p50": 25.6034,
+              "p95": 28.7796,
+              "p99": 30.2893
+            },
+            "gpu_ms": {
+              "max": 29.2785,
+              "mean": 24.6228,
+              "min": 22.3215,
+              "p50": 24.3608,
+              "p95": 27.5348,
+              "p99": 29.0095
+            }
+          },
+          "valid": false
+        },
+        {
+          "baseline": {
+            "allocations": 0,
+            "archive_hits": 134,
+            "archive_misses": 0,
+            "archive_unavailable": 0,
+            "final_gi_ao_pass_p50_sum_ms": 2.1417,
+            "frame_ms": {
+              "max": 25.0376,
+              "mean": 23.5178,
+              "min": 22.5853,
+              "p50": 23.4778,
+              "p95": 24.5886,
+              "p99": 24.8112
+            },
+            "gpu_ms": {
+              "max": 24.0823,
+              "mean": 22.5366,
+              "min": 21.6086,
+              "p50": 22.4931,
+              "p95": 23.6252,
+              "p99": 23.7589
+            }
+          },
+          "baseline_drift": 0.024874294783733833,
+          "candidate": {
+            "allocations": 0,
+            "archive_hits": 135,
+            "archive_misses": 0,
+            "archive_unavailable": 0,
+            "final_gi_ao_pass_p50_sum_ms": 1.0737,
+            "frame_ms": {
+              "max": 37.8088,
+              "mean": 22.5981,
+              "min": 21.2155,
+              "p50": 22.5781,
+              "p95": 24.2171,
+              "p99": 24.6669
+            },
+            "gpu_ms": {
+              "max": 23.4153,
+              "mean": 21.6553,
+              "min": 20.448,
+              "p50": 21.5823,
+              "p95": 23.1716,
+              "p99": 23.2957
+            }
+          },
+          "candidate_budget_passed": false,
+          "index": 3,
+          "p50_reduction": 0.052279358973514434,
+          "repeat": {
+            "allocations": 0,
+            "archive_hits": 134,
+            "archive_misses": 0,
+            "archive_unavailable": 0,
+            "final_gi_ao_pass_p50_sum_ms": 2.1421,
+            "frame_ms": {
+              "max": 35.5427,
+              "mean": 23.6992,
+              "min": 22.331,
+              "p50": 23.827,
+              "p95": 25.1885,
+              "p99": 25.769
+            },
+            "gpu_ms": {
+              "max": 24.7794,
+              "mean": 22.7228,
+              "min": 21.4875,
+              "p50": 23.0526,
+              "p95": 24.1265,
+              "p99": 24.5075
+            }
+          },
+          "valid": true
+        }
+      ]
+    },
+    "phase_accepted": false,
+    "quality": {
+      "ao-filtered": {
+        "comparisons": {
+          "apple9": {
+            "normalized_max": 0.0,
+            "normalized_rmse": 0.0,
+            "passed": true,
+            "values": 67511808
+          },
+          "camera": {
+            "normalized_max": 5.364418029785156e-07,
+            "normalized_rmse": 5.56981073579307e-08,
+            "passed": true,
+            "values": 67511808
+          },
+          "sun": {
+            "normalized_max": 4.76837158203125e-07,
+            "normalized_rmse": 5.384235384599715e-08,
+            "passed": true,
+            "values": 67511808
+          }
+        },
+        "evidence": {
+          "protocol.json": {
+            "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-quality-ao-filtered/protocol.json",
+            "sha256": "f1db8ab138d2770476ddc44355e643769b228c3363b2601668e2fdc2f6a9fa3e"
+          },
+          "results.json": {
+            "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-quality-ao-filtered/results.json",
+            "sha256": "7e7d7b74976127bd1492496ee518a6fc339d654b84ba7390b07dc39e2401e09c"
+          },
+          "runs.json": {
+            "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-quality-ao-filtered/runs.json",
+            "sha256": "d5efba9c19071138326545b42576bbb550f9fa0c477ca963a8943a32d3b7c176"
+          }
+        },
+        "passed": true
+      },
+      "hdr": {
+        "comparisons": {
+          "apple9": {
+            "normalized_max": 0.0,
+            "normalized_rmse": 0.0,
+            "passed": true,
+            "values": 67511808
+          },
+          "camera": {
+            "normalized_max": 2.788695209668607e-07,
+            "normalized_rmse": 4.725894206334848e-09,
+            "passed": true,
+            "values": 67511808
+          },
+          "sun": {
+            "normalized_max": 2.6118844792225567e-07,
+            "normalized_rmse": 2.922322200165209e-09,
+            "passed": true,
+            "values": 67511808
+          }
+        },
+        "evidence": {
+          "protocol.json": {
+            "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-quality/protocol.json",
+            "sha256": "1228773aa09ff24ee4c3efa508a03b1e5fac8ac1a0328c686794c5f78b7dbb8a"
+          },
+          "results.json": {
+            "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-quality/results.json",
+            "sha256": "6a113bd154dfd6fb0ca0ca6df8ac31c572081143c1cece49e9c28178c5e3f2ea"
+          },
+          "runs.json": {
+            "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-quality/runs.json",
+            "sha256": "e54d43f9ca2fc14006d79c7c1614721bc481fc0951c508f4987699cf17b76960"
+          }
+        },
+        "passed": true
+      },
+      "indirect-diffuse-filtered": {
+        "comparisons": {
+          "apple9": {
+            "normalized_max": 0.0,
+            "normalized_rmse": 0.0,
+            "passed": true,
+            "values": 67511808
+          },
+          "camera": {
+            "normalized_max": 3.1946702676989927e-07,
+            "normalized_rmse": 6.949977796243331e-09,
+            "passed": true,
+            "values": 67511808
+          },
+          "sun": {
+            "normalized_max": 3.0066303716270306e-07,
+            "normalized_rmse": 5.748369208230721e-09,
+            "passed": true,
+            "values": 67511808
+          }
+        },
+        "evidence": {
+          "protocol.json": {
+            "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-quality-indirect-diffuse-filtered/protocol.json",
+            "sha256": "dcd01301185c125f812247728617b0d82aa8ac0b5df792e231495dbe424db630"
+          },
+          "results.json": {
+            "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-quality-indirect-diffuse-filtered/results.json",
+            "sha256": "b2f60f91706012d44d7864ab91f02b02a22f799f0d09c4bc1d79011557130186"
+          },
+          "runs.json": {
+            "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-quality-indirect-diffuse-filtered/runs.json",
+            "sha256": "1b448ced0ce70ac8e2c69f78e0abd8f5ef9827a3d1dcb78e906ffb0ddc33ae30"
+          }
+        },
+        "passed": true
+      }
+    },
+    "reference_pilot": {
+      "evidence": {
+        "frame-000119/reference_report.json": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-reference-multijitter/frame-000119/reference_report.json",
+          "sha256": "d7dac274717b9c552a1f6fe981ba43fee36a7790ed0d504c3f9113ba1dbf4a16"
+        },
+        "runner.py": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-reference-multijitter/runner.py",
+          "sha256": "307902cf2e3f3145bce49f6ad242fe4cc9ba1a883ce9441ae31aedb295c2922b"
+        }
+      },
+      "experimental": true,
+      "frame": 119,
+      "passed": false,
+      "receivers": {
+        "max_position_error_m": 4.202127456665039e-05,
+        "mismatches": 0,
+        "misses": 0,
+        "passed": true,
+        "pixels": 768,
+        "position_cap_m": 0.0001
+      },
+      "records": [
+        {
+          "converged": false,
+          "minimum_seed_rms": 0.0002987008902878849,
+          "seed_nrmse": 1.4686537909320294,
+          "spp": 64
+        },
+        {
+          "converged": false,
+          "minimum_seed_rms": 0.00022689352546414513,
+          "seed_nrmse": 0.9319782618728427,
+          "spp": 256
+        },
+        {
+          "converged": false,
+          "minimum_seed_rms": 0.00018883640523021208,
+          "seed_nrmse": 0.49821250116633037,
+          "spp": 1024
+        }
+      ],
+      "sampler": "multijitter"
+    },
+    "runner_evidence": {
+      "compare.py": {
+        "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-validation/compare.py",
+        "sha256": "85ba525a4bbb008a8d7523000d6ace65caea29abccce3e708aa7cb41948721d4"
+      },
+      "ctest.log": {
+        "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-validation/ctest.log",
+        "sha256": "af5d172859e067d61405c36d10fd3a4e246cfd638335631476b1b7ccfcc3b5ad"
+      },
+      "switch.py": {
+        "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-validation/switch.py",
+        "sha256": "5c3eb56890d057daf17a30ec41036eaec0a963c0ee0a216eba578efae818d415"
+      }
+    },
+    "source_revision": "d7b1250ae0569f8d3598cfe5259e879c6a69321f",
+    "switch": {
+      "empty_frames": [
+        0,
+        1,
+        2,
+        3,
+        32,
+        33,
+        34,
+        35
+      ],
+      "evidence": {
+        "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-pair-switch/results.json",
+        "sha256": "552ab79ab340c2dbebee0c20a13d8beca5311b4a3b22614baf7c9a43c65d6f3c"
+      },
+      "normalized_max": 1.2483663046293417e-08,
+      "normalized_rmse": 2.833084558905887e-10,
+      "passed": true,
+      "reintroduced_frames": [
+        4,
+        36
+      ],
+      "reuse_observed": true,
+      "values": 1105920
+    }
+  },
   "temporal_arithmetic_rejected": {
     "replicas": [
       {

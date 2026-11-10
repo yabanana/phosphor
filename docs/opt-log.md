@@ -2110,3 +2110,10 @@ A/B/A pairs reduce GPU p50 a further 3.98–5.88%, with GPU p95 23.45–23.63 ms
 The independent diffuse estimator pilot still fails the 2% convergence gate
 at 1,024 spp. The retained evidence is in the
 [dynamic Sponza follow-up](implementation/F13-F14-DYNAMIC-SPONZA-2026-11-10.md#follow-up-on-the-preliminary-gates).
+
+The final diffuse stride now shares geometric weights between GI and AO even
+when the local DI signal is absent. AOT specializes the two resource layouts,
+with separate histories and radiance weights. Two valid A/B/A replicas reduce
+GPU p50 by 5.23–5.91%. The 16.67 ms frame target remains open. The
+[follow-up](implementation/F13-F14-DYNAMIC-SPONZA-2026-11-10.md#shared-final-diffuse-denoising-pass)
+records the discarded timing pair and image checks.
