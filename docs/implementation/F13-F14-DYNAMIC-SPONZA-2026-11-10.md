@@ -104,3 +104,43 @@ and reclaimed all 20 records. The post-fix HDR run still reaches 5.17578125%.
 The final binary also passed the normal Sponza path with the empty estimator
 omitted. The timing binaries precede the cold native-lifetime change and use
 the identical metallib. [Machine-readable evidence](../results/F13-F14-dynamic-Sponza-M5Max-2026-11-10.json)
+
+## Follow-up on the preliminary gates
+
+The empty local estimator also lets composition bypass its denoiser. Each
+frame slot records whether DI was omitted. On an empty domain, the denoiser
+releases its graph definition for DI and invalidates that signal's history in
+all views. Captures omit the checkpoint for an intentionally absent pass.
+Reintroduced local lights schedule the ordinary filter and start fresh history.
+The diagnostic path still schedules all requested signals.
+
+Six 384-frame runs retain the 5e-5 normalized image gate. Maximum error is
+2.79e-7 with camera motion, 2.61e-7 with moving sun, and zero on forced Apple9.
+A 40-frame test switches Sponza → Many Lights → other benches → Sponza → Many
+Lights with the clock and local lights frozen. Its captures match bit for bit.
+The DI checkpoint is absent on frames 0–3 and 32–35. Frames 4 and 36 both reset
+with zero reuse. The following active frames show actual history reuse.
+
+| Replica | Baseline p50 drift | Additional GPU p50 reduction | GPU p95 | Frame p95 |
+|---|---:|---:|---:|---:|
+| 1 | 1.24% | 5.88% | 23.4450 ms | 24.4736 ms |
+| 2 | 1.24% | 3.98% | 23.6283 ms | 24.6300 ms |
+| 3 | 0.11% | 4.08% | 23.4732 ms | 24.4534 ms |
+
+The 1080p workload and A/B/A gates stay fixed, with 128 warmup and 256 timed
+frames. All nine runs report zero steady GPU allocations and use the accepted
+AOT archive. The 16.67 ms gate remains open.
+
+A separate CPU pilot traced the indirect term directly from the verified
+frame 119 receivers instead of subtracting two noisy images. At 1,024 spp
+its seeds disagree by 51.95%, compared with 58.54% for the original estimator.
+It fails the unchanged 2% gate and remains experimental. The first attempt
+also hit a traversal bound on a grazing secondary ray. The repeat used the
+reference renderer's surface-ray offset for secondary rays and completed.
+The production reference runner retains the original estimator. Pilot code
+and captures are in `build/f13-f14-secondary-pilot-v2`.
+
+The original 96-frame native HDR control still measures 5.17578125% against
+1%. Both F9 failures reproduce on native and forced Apple9. Nine CTest groups
+and the physical AO fixture pass. The full preliminary gates still apply
+before F15 and F16. [Measurement ledger](../results/F13-F14-dynamic-Sponza-M5Max-2026-11-10.json)

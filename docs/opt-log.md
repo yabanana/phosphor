@@ -2103,3 +2103,10 @@ zero radiance directly while retaining the guide graph and view invalidation.
 That change preserves image equality and saves 11.85–15.86% GPU p50 across three
 valid 1080p A/B/A pairs. GPU p95 remains 24.86–27.39 ms. The measurements and
 retained failures are in the [follow-up](implementation/F13-F14-DYNAMIC-SPONZA-2026-11-10.md).
+
+The follow-up bypasses denoising of the exactly zero local signal. It preserves
+scene-switch output and resets DI history on reintroduction. Three valid
+A/B/A pairs reduce GPU p50 a further 3.98–5.88%, with GPU p95 23.45–23.63 ms.
+The independent diffuse estimator pilot still fails the 2% convergence gate
+at 1,024 spp. The retained evidence is in the
+[dynamic Sponza follow-up](implementation/F13-F14-DYNAMIC-SPONZA-2026-11-10.md#follow-up-on-the-preliminary-gates).

@@ -751,5 +751,496 @@
         "valid": true
       }
     ]
+  },
+  "zero_direct_denoise_follow_up": {
+    "code_revision": "e79ecdb1cbaf689d92e730bcde39ea47b3979f26",
+    "ctest": {
+      "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-zero-denoise-ctest.log",
+      "sha256": "91b73bea17637a2687a9ff9f151713bceb374d2020cae7256dba5bc2590441af"
+    },
+    "functional_count": 13,
+    "functional_passed": true,
+    "hdr_native_frames": 96,
+    "hdr_relative_error_max": 0.0517578125,
+    "phase_accepted": false,
+    "quality": {
+      "comparisons": {
+        "apple9": {
+          "normalized_max": 0.0,
+          "normalized_rmse": 0.0,
+          "passed": true,
+          "values": 67511808
+        },
+        "camera": {
+          "normalized_max": 2.788695209668607e-07,
+          "normalized_rmse": 4.725894209594181e-09,
+          "passed": true,
+          "values": 67511808
+        },
+        "sun": {
+          "normalized_max": 2.6118844792225567e-07,
+          "normalized_rmse": 2.9223222024998397e-09,
+          "passed": true,
+          "values": 67511808
+        }
+      },
+      "passed": true
+    },
+    "quality_protocol": {
+      "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-zero-denoise-quality/protocol.json",
+      "sha256": "b25d6363ccf7161ddb89fc35b4ab07566167fb7f801f026c7d56fc972bef95b4"
+    },
+    "rechecks": {
+      "apple9-bench8": 1,
+      "apple9-probe-diffuse": 1,
+      "functional": 1,
+      "native-bench8": 1,
+      "native-probe-diffuse": 1,
+      "physical-ao": 0,
+      "wide-hdr": 1
+    },
+    "secondary_estimator": {
+      "accepted": false,
+      "cap": 0.02,
+      "report": {
+        "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-secondary-pilot-v2/frame-000119/reference_report.json",
+        "sha256": "09dcce65e8193a843335b64f515866c9bc141789d79eb6581b5fe20049ee1d1d"
+      },
+      "seed_nrmse": 0.5194988415034297,
+      "spp": 1024
+    },
+    "switch": {
+      "empty_frames": [
+        0,
+        1,
+        2,
+        3,
+        32,
+        33,
+        34,
+        35
+      ],
+      "normalized_max": 0.0,
+      "normalized_rmse": 0.0,
+      "passed": true,
+      "reintroduced_frames": [
+        4,
+        36
+      ],
+      "reuse_observed": true,
+      "values": 1105920
+    },
+    "timing": {
+      "replicas": [
+        {
+          "baseline_drift": 0.012394983460809939,
+          "candidate_budget_passed": false,
+          "p50_reduction": 0.05878046009417326,
+          "valid": true
+        },
+        {
+          "baseline_drift": 0.012439115459324229,
+          "candidate_budget_passed": false,
+          "p50_reduction": 0.03984532154669995,
+          "valid": true
+        },
+        {
+          "baseline_drift": 0.0010564411087117089,
+          "candidate_budget_passed": false,
+          "p50_reduction": 0.04084729754109673,
+          "valid": true
+        }
+      ]
+    },
+    "timing_protocol": {
+      "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-zero-denoise-perf/protocol.json",
+      "sha256": "e20f34707b9546c53e612d57cd0efa15caf37c1a4a0c776e1d398fbb01552e89"
+    },
+    "timing_runs": {
+      "1-A": {
+        "allocations": 0,
+        "frame": {
+          "max": 27.0868,
+          "mean": 24.5633,
+          "min": 23.3341,
+          "p50": 24.8341,
+          "p95": 25.5713,
+          "p99": 25.9963
+        },
+        "gpu": {
+          "max": 25.6559,
+          "mean": 23.6597,
+          "min": 22.5641,
+          "p50": 23.9129,
+          "p95": 24.5774,
+          "p99": 25.0655
+        },
+        "pipelines": {
+          "archiveHits": 134,
+          "archiveMissRate": 0.0,
+          "archiveMisses": 0,
+          "archiveUnavailable": 0,
+          "compileMs": 22.164,
+          "compileMsMax": 4.902,
+          "compilerCalls": 12,
+          "failures": 0,
+          "fallbackDraws": 0,
+          "fallbacksServed": 0,
+          "reloadFailures": 0,
+          "reloads": 0,
+          "renderThreadCompileMs": 0.0,
+          "renderThreadCompiles": 0,
+          "requests": 146,
+          "swaps": 146
+        },
+        "temporal": {
+          "F13 denoise 0 temporal": 0.7844,
+          "F13 denoise 1 temporal": 0.85,
+          "F13 denoise 2 temporal": 1.0841,
+          "F13 denoise 3 temporal": 0.8315
+        }
+      },
+      "1-A2": {
+        "allocations": 0,
+        "frame": {
+          "max": 26.5258,
+          "mean": 24.669,
+          "min": 23.5347,
+          "p50": 24.6455,
+          "p95": 25.9517,
+          "p99": 26.2761
+        },
+        "gpu": {
+          "max": 25.494,
+          "mean": 23.6704,
+          "min": 22.5878,
+          "p50": 23.6165,
+          "p95": 24.9475,
+          "p99": 25.2529
+        },
+        "pipelines": {
+          "archiveHits": 134,
+          "archiveMissRate": 0.0,
+          "archiveMisses": 0,
+          "archiveUnavailable": 0,
+          "compileMs": 20.265,
+          "compileMsMax": 4.755,
+          "compilerCalls": 12,
+          "failures": 0,
+          "fallbackDraws": 0,
+          "fallbacksServed": 0,
+          "reloadFailures": 0,
+          "reloads": 0,
+          "renderThreadCompileMs": 0.0,
+          "renderThreadCompiles": 0,
+          "requests": 146,
+          "swaps": 146
+        },
+        "temporal": {
+          "F13 denoise 0 temporal": 0.7815,
+          "F13 denoise 1 temporal": 0.8513,
+          "F13 denoise 2 temporal": 1.0801,
+          "F13 denoise 3 temporal": 0.8354
+        }
+      },
+      "1-B": {
+        "allocations": 0,
+        "frame": {
+          "max": 24.8445,
+          "mean": 23.4001,
+          "min": 22.2134,
+          "p50": 23.283,
+          "p95": 24.4736,
+          "p99": 24.7442
+        },
+        "gpu": {
+          "max": 23.8748,
+          "mean": 22.4514,
+          "min": 21.4387,
+          "p50": 22.3678,
+          "p95": 23.445,
+          "p99": 23.6005
+        },
+        "pipelines": {
+          "archiveHits": 134,
+          "archiveMissRate": 0.0,
+          "archiveMisses": 0,
+          "archiveUnavailable": 0,
+          "compileMs": 19.872,
+          "compileMsMax": 4.728,
+          "compilerCalls": 12,
+          "failures": 0,
+          "fallbackDraws": 0,
+          "fallbacksServed": 0,
+          "reloadFailures": 0,
+          "reloads": 0,
+          "renderThreadCompileMs": 0.0,
+          "renderThreadCompiles": 0,
+          "requests": 146,
+          "swaps": 146
+        },
+        "temporal": {
+          "F13 denoise 1 temporal": 0.852,
+          "F13 denoise 2 temporal": 1.0702,
+          "F13 denoise 3 temporal": 0.8252
+        }
+      },
+      "2-A": {
+        "allocations": 0,
+        "frame": {
+          "max": 26.1515,
+          "mean": 24.5054,
+          "min": 23.3666,
+          "p50": 24.7341,
+          "p95": 25.6212,
+          "p99": 26.0477
+        },
+        "gpu": {
+          "max": 25.2103,
+          "mean": 23.5893,
+          "min": 22.5791,
+          "p50": 23.8361,
+          "p95": 24.6252,
+          "p99": 25.0756
+        },
+        "pipelines": {
+          "archiveHits": 134,
+          "archiveMissRate": 0.0,
+          "archiveMisses": 0,
+          "archiveUnavailable": 0,
+          "compileMs": 19.725,
+          "compileMsMax": 4.778,
+          "compilerCalls": 12,
+          "failures": 0,
+          "fallbackDraws": 0,
+          "fallbacksServed": 0,
+          "reloadFailures": 0,
+          "reloads": 0,
+          "renderThreadCompileMs": 0.0,
+          "renderThreadCompiles": 0,
+          "requests": 146,
+          "swaps": 146
+        },
+        "temporal": {
+          "F13 denoise 0 temporal": 0.7792,
+          "F13 denoise 1 temporal": 0.8536,
+          "F13 denoise 2 temporal": 1.0765,
+          "F13 denoise 3 temporal": 0.8273
+        }
+      },
+      "2-A2": {
+        "allocations": 0,
+        "frame": {
+          "max": 27.0071,
+          "mean": 24.6927,
+          "min": 23.6144,
+          "p50": 24.5315,
+          "p95": 26.1268,
+          "p99": 26.5404
+        },
+        "gpu": {
+          "max": 26.006,
+          "mean": 23.6994,
+          "min": 22.6776,
+          "p50": 23.5396,
+          "p95": 25.0835,
+          "p99": 25.5614
+        },
+        "pipelines": {
+          "archiveHits": 134,
+          "archiveMissRate": 0.0,
+          "archiveMisses": 0,
+          "archiveUnavailable": 0,
+          "compileMs": 32.847,
+          "compileMsMax": 7.853,
+          "compilerCalls": 12,
+          "failures": 0,
+          "fallbackDraws": 0,
+          "fallbacksServed": 0,
+          "reloadFailures": 0,
+          "reloads": 0,
+          "renderThreadCompileMs": 0.0,
+          "renderThreadCompiles": 0,
+          "requests": 146,
+          "swaps": 146
+        },
+        "temporal": {
+          "F13 denoise 0 temporal": 0.7833,
+          "F13 denoise 1 temporal": 0.8545,
+          "F13 denoise 2 temporal": 1.082,
+          "F13 denoise 3 temporal": 0.8336
+        }
+      },
+      "2-B": {
+        "allocations": 0,
+        "frame": {
+          "max": 25.1874,
+          "mean": 23.5752,
+          "min": 22.4099,
+          "p50": 23.7646,
+          "p95": 24.63,
+          "p99": 25.056
+        },
+        "gpu": {
+          "max": 24.2025,
+          "mean": 22.5923,
+          "min": 21.4722,
+          "p50": 22.744,
+          "p95": 23.6283,
+          "p99": 23.9484
+        },
+        "pipelines": {
+          "archiveHits": 134,
+          "archiveMissRate": 0.0,
+          "archiveMisses": 0,
+          "archiveUnavailable": 0,
+          "compileMs": 20.709,
+          "compileMsMax": 4.974,
+          "compilerCalls": 12,
+          "failures": 0,
+          "fallbackDraws": 0,
+          "fallbacksServed": 0,
+          "reloadFailures": 0,
+          "reloads": 0,
+          "renderThreadCompileMs": 0.0,
+          "renderThreadCompiles": 0,
+          "requests": 146,
+          "swaps": 146
+        },
+        "temporal": {
+          "F13 denoise 1 temporal": 0.8581,
+          "F13 denoise 2 temporal": 1.0755,
+          "F13 denoise 3 temporal": 0.8333
+        }
+      },
+      "3-A": {
+        "allocations": 0,
+        "frame": {
+          "max": 26.39,
+          "mean": 24.7136,
+          "min": 23.6155,
+          "p50": 24.5922,
+          "p95": 25.9409,
+          "p99": 26.3289
+        },
+        "gpu": {
+          "max": 25.3896,
+          "mean": 23.6987,
+          "min": 22.6181,
+          "p50": 23.5697,
+          "p95": 24.9327,
+          "p99": 25.2779
+        },
+        "pipelines": {
+          "archiveHits": 134,
+          "archiveMissRate": 0.0,
+          "archiveMisses": 0,
+          "archiveUnavailable": 0,
+          "compileMs": 19.647,
+          "compileMsMax": 4.634,
+          "compilerCalls": 12,
+          "failures": 0,
+          "fallbackDraws": 0,
+          "fallbacksServed": 0,
+          "reloadFailures": 0,
+          "reloads": 0,
+          "renderThreadCompileMs": 0.0,
+          "renderThreadCompiles": 0,
+          "requests": 146,
+          "swaps": 146
+        },
+        "temporal": {
+          "F13 denoise 0 temporal": 0.7847,
+          "F13 denoise 1 temporal": 0.8567,
+          "F13 denoise 2 temporal": 1.0838,
+          "F13 denoise 3 temporal": 0.8357
+        }
+      },
+      "3-A2": {
+        "allocations": 0,
+        "frame": {
+          "max": 26.1389,
+          "mean": 24.6363,
+          "min": 23.4281,
+          "p50": 24.5238,
+          "p95": 25.7802,
+          "p99": 26.0673
+        },
+        "gpu": {
+          "max": 25.18,
+          "mean": 23.6372,
+          "min": 22.6197,
+          "p50": 23.5448,
+          "p95": 24.7004,
+          "p99": 24.8751
+        },
+        "pipelines": {
+          "archiveHits": 134,
+          "archiveMissRate": 0.0,
+          "archiveMisses": 0,
+          "archiveUnavailable": 0,
+          "compileMs": 20.07,
+          "compileMsMax": 4.626,
+          "compilerCalls": 12,
+          "failures": 0,
+          "fallbackDraws": 0,
+          "fallbacksServed": 0,
+          "reloadFailures": 0,
+          "reloads": 0,
+          "renderThreadCompileMs": 0.0,
+          "renderThreadCompiles": 0,
+          "requests": 146,
+          "swaps": 146
+        },
+        "temporal": {
+          "F13 denoise 0 temporal": 0.7807,
+          "F13 denoise 1 temporal": 0.8517,
+          "F13 denoise 2 temporal": 1.0807,
+          "F13 denoise 3 temporal": 0.8327
+        }
+      },
+      "3-B": {
+        "allocations": 0,
+        "frame": {
+          "max": 25.2779,
+          "mean": 23.4592,
+          "min": 22.311,
+          "p50": 23.6481,
+          "p95": 24.4534,
+          "p99": 24.6234
+        },
+        "gpu": {
+          "max": 24.1551,
+          "mean": 22.4976,
+          "min": 21.4841,
+          "p50": 22.595,
+          "p95": 23.4732,
+          "p99": 23.7169
+        },
+        "pipelines": {
+          "archiveHits": 134,
+          "archiveMissRate": 0.0,
+          "archiveMisses": 0,
+          "archiveUnavailable": 0,
+          "compileMs": 30.84,
+          "compileMsMax": 7.436,
+          "compilerCalls": 12,
+          "failures": 0,
+          "fallbackDraws": 0,
+          "fallbacksServed": 0,
+          "reloadFailures": 0,
+          "reloads": 0,
+          "renderThreadCompileMs": 0.0,
+          "renderThreadCompiles": 0,
+          "requests": 146,
+          "swaps": 146
+        },
+        "temporal": {
+          "F13 denoise 1 temporal": 0.8567,
+          "F13 denoise 2 temporal": 1.0725,
+          "F13 denoise 3 temporal": 0.8284
+        }
+      }
+    }
   }
 }

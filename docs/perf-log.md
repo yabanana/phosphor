@@ -1098,3 +1098,12 @@ steady GPU allocations. The 16.67 ms gate remains open. The separate temporal
 arithmetic experiment was removed after inconclusive performance results.
 See the [dynamic Sponza follow-up](implementation/F13-F14-DYNAMIC-SPONZA-2026-11-10.md)
 for the unchanged image checks, reference receiver validation and raw paths.
+
+### Empty DI denoiser follow-up
+
+Bypassing the filter when local radiance is identically zero reduces GPU p50
+by a further 3.98–5.88% in three valid A/B/A replicas. GPU p95 is 23.4450,
+23.6283 and 23.4732 ms at 1080p. Every run retains the full scene and the same
+ray budgets, with zero steady GPU allocations. Six validation runs stay within
+the original image gate. A separate 40-frame scene-switch sequence verifies
+DI history invalidation and recovery. The 16.67 ms gate remains open.
