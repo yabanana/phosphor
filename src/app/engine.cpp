@@ -1686,7 +1686,8 @@ bool Engine::frame(float dt) {
         std::memcpy(camera.direction,glm::value_ptr(front),12);std::memcpy(camera.up,glm::value_ptr(up),12);camera.width=renderWidth;camera.height=renderHeight;
         camera.fovYRadians=camera_->getFovY();camera.nearPlane=camera_->getNear();camera.farPlane=0;
         camera.jitterPixels[0]=temporal.jitter[0];camera.jitterPixels[1]=temporal.jitter[1];
-        referenceSnapshot_->prepareFrame(ref,camera,lights_,*store_,directLighting_.get());
+        const GiEnvironment environment=atmosphere_?atmosphere_->environment():GiEnvironment{};
+        referenceSnapshot_->prepareFrame(ref,camera,lights_,environment,*store_,directLighting_.get());
     }
     if(linearCapture_) {
         std::string metadata;
