@@ -6,6 +6,24 @@
 #include <stdexcept>
 
 namespace phosphor {
+std::pair<glm::vec3,glm::vec3> probeMeshWorldBounds(const GPUMeshInfo& mesh,
+    std::span<const GPUVertex> vertices,std::span<const u32> indices,const float* world) {
+    if(size_t(mesh.indexOffset)+mesh.indexCount>indices.size())
+        throw std::out_of_range("probe fit mesh index range");
+    glm::vec3 low(1e30f),high(-1e30f);
+    if(!mesh.indexCount)low=high=glm::vec3(world[12],world[13],world[14]);
+    for(u32 k=0;k<mesh.indexCount;++k) {
+        const size_t index=size_t(mesh.vertexOffset)+indices[size_t(mesh.indexOffset)+k];
+        if(index>=vertices.size())throw std::out_of_range("probe fit vertex index");
+        const auto& v=vertices[index];
+        const glm::vec3 point=glm::vec3(world[0],world[1],world[2])*v.px+
+            glm::vec3(world[4],world[5],world[6])*v.py+
+            glm::vec3(world[8],world[9],world[10])*v.pz+glm::vec3(world[12],world[13],world[14]);
+        low=glm::min(low,point);high=glm::max(high,point);
+    }
+    return {low,high};
+}
+
 namespace {
 constexpr float pi = 3.14159265358979323846f;
 bool finite(glm::vec3 v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }

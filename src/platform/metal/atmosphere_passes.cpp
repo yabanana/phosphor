@@ -166,6 +166,7 @@ struct AtmospherePasses::Impl {
         if(!std::isfinite(camera.x)||!std::isfinite(camera.y)||!std::isfinite(camera.z))throw std::invalid_argument("F14 camera position is not finite");
         const bool jump=options.timeJumpEveryN&&lightingCalls&&lightingCalls%options.timeJumpEveryN==0;
         ++lightingCalls;celestial=clock.sample(seconds,jump);lightingPrepared=true;updateEnvironment();
+        environmentValue.continuousCelestialUpdate=!celestial.reset;
         return atmosphereDirectionalLights(atmosphere,celestial,groundReference());
     }
     void reserveCloud(u64 pixels) {

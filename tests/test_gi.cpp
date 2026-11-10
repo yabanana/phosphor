@@ -384,3 +384,19 @@ TEST_CASE("F12 probe parameter ABI has zero-default explicit physical diagnostic
     for (u32 word : params.debugPadding) CHECK(word==0);
     CHECK((GI_DEBUG_NO_VISIBILITY & (GI_DEBUG_NO_VISIBILITY-1u))==0);
 }
+
+TEST_CASE("Probe volume fit uses actual geometry without turning thin walls into spheres") {
+    std::array<GPUVertex,4> vertices{};
+    vertices[0].px=-10;vertices[0].pz=-1;
+    vertices[1].px=10;vertices[1].pz=-1;
+    vertices[2].px=10;vertices[2].pz=1;
+    vertices[3].px=-10;vertices[3].pz=1;
+    std::array<u32,6> indices{0,1,2,0,2,3};
+    GPUMeshInfo mesh{};mesh.indexCount=6;
+    std::array<float,16> world{};world[0]=-2;world[5]=3;world[10]=1;world[15]=1;world[13]=4;
+    auto [low,high]=probeMeshWorldBounds(mesh,vertices,indices,world.data());
+    CHECK(low.x==-20);CHECK(high.x==20);
+    CHECK(low.y==4);CHECK(high.y==4);
+    CHECK(low.z==-1);CHECK(high.z==1);
+    indices[0]=4;CHECK_THROWS(probeMeshWorldBounds(mesh,vertices,indices,world.data()));
+}

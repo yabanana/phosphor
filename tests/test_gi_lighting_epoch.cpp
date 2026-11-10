@@ -25,3 +25,18 @@ TEST_CASE("F12 full GI epoch includes standalone sampled-light radiance changes"
     GiLightingEpoch epoch;GiEnvironment sky;const auto first=epoch.update({},sky,1);
     CHECK(epoch.update({},sky,1)==first);CHECK(epoch.update({},sky,2)>first);
 }
+
+TEST_CASE("DDGI warm starts only producer-attested continuous celestial changes") {
+    GiRadianceState before{1,2,3,4,5,6},after=before;after.lights++;
+    GiEnvironment environment;
+    CHECK_FALSE(after.continuousFrom(before,environment,false));
+    environment.continuousCelestialUpdate=true;
+    CHECK(after.continuousFrom(before,environment,false));
+    CHECK_FALSE(after.continuousFrom(before,environment,true));
+    for(u64 GiRadianceState::* field:{&GiRadianceState::scene,&GiRadianceState::geometry,
+        &GiRadianceState::materials,&GiRadianceState::rtGeometry}) {
+        auto changed=after;changed.*field+=1;
+        CHECK_FALSE(changed.continuousFrom(before,environment,false));
+    }
+    after.sampled++;CHECK_FALSE(after.continuousFrom(before,environment,false));
+}

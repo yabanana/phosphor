@@ -4,6 +4,7 @@
 #include <glm/glm.hpp>
 #include <span>
 #include <vector>
+#include <utility>
 
 namespace phosphor {
 
@@ -21,6 +22,10 @@ struct ProbeGridConfig {
 [[nodiscard]] glm::vec3 probeOctDecode(glm::vec2 uv);
 [[nodiscard]] glm::vec3 probeRayDirection(u32 ray, u32 count, u32 frame);
 [[nodiscard]] float probeVisibility(float distance, float mean, float secondMoment);
+
+// Exact bounds of referenced world vertices for the fixed probe-volume fit.
+[[nodiscard]] std::pair<glm::vec3,glm::vec3> probeMeshWorldBounds(
+    const GPUMeshInfo&,std::span<const GPUVertex>,std::span<const u32>,const float* world);
 
 struct ProbeTexel { glm::vec3 irradiance{}; glm::vec2 moments{}; };
 struct ProbeUpdate { bool active = false, relocated = false; float backfaceFraction = 0; };
