@@ -25,6 +25,7 @@ public:
     [[nodiscard]] MTL::Buffer* lightsBuffer() const;
     [[nodiscard]] MTL::Buffer* emittersBuffer() const;
     [[nodiscard]] u32 lightCount() const;
+    [[nodiscard]] bool emptyLocalLighting() const;
     [[nodiscard]] u32 lightRevision() const;
     [[nodiscard]] u64 version() const;
     [[nodiscard]] bool check(u32 slot) const;

@@ -370,7 +370,10 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
                     {options_.gi!=GiMode::Off,DENOISE_SIGNAL_GI},
                     {options_.reflections!=ReflectionMode::Off,DENOISE_SIGNAL_SPECULAR},
                     {options_.ao!=AoMode::Off,DENOISE_SIGNAL_AO}}})
-                    if(enabled)signals[std::to_string(signal)]=nlohmann::json::parse(reflections_->completedSignalCheckpoint(slot,signal));
+                    if(enabled){
+                        const auto checkpoint=reflections_->completedSignalCheckpoint(slot,signal);
+                        if(!checkpoint.empty())signals[std::to_string(signal)]=nlohmann::json::parse(checkpoint);
+                    }
                 return signals.dump();
             };
         linearCapture_=std::make_unique<LinearCapture>(*context_,*pipelines_,std::move(capture));

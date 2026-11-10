@@ -11,7 +11,8 @@ class DenoisePasses {
 public:
     DenoisePasses(MetalContext&,PipelineCache&,const LaunchOptions&);
     ~DenoisePasses();
-    void prepareFrame(const ShadowPasses::Frame&,u64 signalEpoch,const std::array<u64,4>& currentRevisions);
+    void prepareFrame(const ShadowPasses::Frame&,u64 signalEpoch,const std::array<u64,4>& currentRevisions,
+                      bool useDirectLighting);
     void invalidateAll(const char* reason);
     rg::TextureRef addSignal(rg::RenderGraph&,u32 signal,rg::TextureRef raw,rg::TextureRef motion,
                             rg::BufferRef surfaces,rg::BufferRef specularMetadata={});

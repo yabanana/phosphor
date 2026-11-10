@@ -67,6 +67,7 @@ struct ReflectionPasses::Impl {
     struct Draw {GPUMeshInfo mesh;u32 staticIndex;CullClass cull;};std::vector<Draw> draws;std::vector<u32> staticIDs;std::vector<GPUMeshInfo> geometry;std::vector<float> probeWorlds;
     struct Slot {
         MTL::Buffer *samples=nullptr,*metadata=nullptr,*errors=nullptr,*testSurfaces=nullptr;bool customUsed=false;u32 expected=0;
+        bool skipLocalDenoise=false;
         std::array<MTL4::ArgumentTable*,8> sampleTables{};std::array<MTL4::ArgumentTable*,6> captureTables{};
         std::array<MTL4::ArgumentTable*,ProbeMips> filterTables{},validateTables{};
         std::vector<MTL4::ArgumentTable*> drawTables;
@@ -236,7 +237,9 @@ struct ReflectionPasses::Impl {
         if(!store.motionSlots().empty()||!store.dirtyRoots().empty())++motionRevision;
         const GeometryContent geometryContent{f.scene,store.structureVersion(),rt?rt->geometryRevision():0,instanceRevision,nodeRevision,materialRevision,motionRevision,p.generation()};
         if(!geometryKnown||lastGeometry!=geometryContent){lastGeometry=geometryContent;geometryKnown=true;++geometryEpoch;}
-        if(custom){const std::array<u64,4> revisions{direct.lightRevision(),gi&&options.gi!=GiMode::Off?gi->readResources().parameters.cacheGeneration:0,signalEpoch,geometryEpoch};denoise.prepareFrame(frame,signalEpoch,revisions);}
+        slots[f.slot].skipLocalDenoise = direct.emptyLocalLighting();
+        if(custom){const std::array<u64,4> revisions{direct.lightRevision(),gi&&options.gi!=GiMode::Off?gi->readResources().parameters.cacheGeneration:0,signalEpoch,geometryEpoch};
+            denoise.prepareFrame(frame,signalEpoch,revisions,options.directLighting!=DirectLightingMode::Legacy&&!slots[f.slot].skipLocalDenoise);}
     }
     void texture(MTL4::ArgumentTable* table,rg::PassContext& ctx,rg::TextureRef ref,u32 index){table->setTexture(static_cast<MTL::Texture*>(ctx.texture(ref))->gpuResourceID(),index);}
     void commonReads(rg::PassBuilder& b,rg::Stages stages=rg::StageDispatch){b.read(receivers,rg::Usage::ShaderRead,stages);b.read(direct.lightsRef(),rg::Usage::ShaderRead,stages);b.read(direct.emittersRef(),rg::Usage::ShaderRead,stages);b.read(scene.dataRef(),rg::Usage::ShaderRead,stages);
@@ -354,10 +357,11 @@ struct ReflectionPasses::Impl {
         if(options.ao!=AoMode::Off)graph.addPass(rtAO?"F13 world-radius RTAO":"F13 world-radius GTAO",PassType::Compute,[this](PassBuilder& b){b.read(receivers,Usage::ShaderRead,StageDispatch);b.read(depth,Usage::ShaderRead,StageDispatch);if(rtAO)rt->declareTraceReads(b);ao=b.write(ao,Usage::ShaderWrite,StageDispatch);b.setProfileShaders(rtAO?"ao_rtao":"ao_gtao");},[this](PassContext& ctx){auto* t=slots[frame.slot].aoTable;t->setAddress(aoAddress,0);t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(receivers))->gpuAddress(),1);
             if(rtAO){aoConsumer->bind(t,2,3);t->setAddress(rt->traceResources(frame.slot).instances->gpuAddress(),4);}texture(t,ctx,depth,0);texture(t,ctx,ao,1);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,rtAO?rtao:gtao,t,frame.width*frame.height);});
         directSelected=direct.direct();giSelected=gi&&options.gi!=GiMode::Off?gi->irradiance():dummyTexRef;specSelected=specular;aoSelected=ao;
-        if(custom){const bool diffuseBatch=options.directLighting!=DirectLightingMode::Legacy&&gi&&options.gi!=GiMode::Off&&options.ao!=AoMode::Off;
+        if(custom){const bool useDirectLighting=options.directLighting!=DirectLightingMode::Legacy&&!slots[frame.slot].skipLocalDenoise;
+            const bool diffuseBatch=useDirectLighting&&gi&&options.gi!=GiMode::Off&&options.ao!=AoMode::Off;
             if(diffuseBatch){const auto filtered=denoise.addDiffuseSignals(graph,{direct.direct(),gi->irradiance(),ao},motion,receivers);
                 directSelected=filtered[0];giSelected=filtered[1];aoSelected=filtered[2];}
-            else{if(options.directLighting!=DirectLightingMode::Legacy)directSelected=denoise.addSignal(graph,DENOISE_SIGNAL_DI,direct.direct(),motion,receivers);
+            else{if(useDirectLighting)directSelected=denoise.addSignal(graph,DENOISE_SIGNAL_DI,direct.direct(),motion,receivers);
                 if(gi&&options.gi!=GiMode::Off)giSelected=denoise.addSignal(graph,DENOISE_SIGNAL_GI,gi->irradiance(),motion,receivers);
                 if(options.ao!=AoMode::Off)aoSelected=denoise.addSignal(graph,DENOISE_SIGNAL_AO,ao,motion,receivers);}
             if(options.reflections!=ReflectionMode::Off)specSelected=denoise.addSignal(graph,DENOISE_SIGNAL_SPECULAR,specular,motion,receivers,metadata);
@@ -415,6 +419,9 @@ rg::TextureRef ReflectionPasses::hitDistance()const{return impl_->distance;}rg::
 rg::TextureRef ReflectionPasses::filteredSpecular()const{return impl_->specSelected;}rg::TextureRef ReflectionPasses::filteredAO()const{return impl_->aoSelected;}rg::BufferRef ReflectionPasses::metadataRef()const{return impl_->metadata;}
 rg::TextureRef ReflectionPasses::filteredIndirectDiffuse()const{return impl_->filteredIndirect;}
 std::string ReflectionPasses::completedAOCheckpoint(u32 slot)const{return impl_->denoise.completedCheckpoint(slot,DENOISE_SIGNAL_AO);}
-std::string ReflectionPasses::completedSignalCheckpoint(u32 slot,u32 signal)const{return impl_->denoise.completedCheckpoint(slot,signal);}
+std::string ReflectionPasses::completedSignalCheckpoint(u32 slot,u32 signal)const{
+    if(signal==DENOISE_SIGNAL_DI&&impl_->slots.at(slot).skipLocalDenoise)return {};
+    return impl_->denoise.completedCheckpoint(slot,signal);
+}
 const char* ReflectionPasses::probeSource()const{return impl_->source.c_str();}
 } // namespace phosphor

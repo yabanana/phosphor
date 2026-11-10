@@ -96,15 +96,21 @@ struct DenoisePasses::Impl {
         for(u32 i=0;i<settings.atrousIterations;++i){auto p=s.params;p.atrousStep=1u<<i;s.atrousAddress[i]=lighting::upload(c,p);}
         slots[frame.slot][sig].expected=frame.width*frame.height;
     }
-    void prepare(const ShadowPasses::Frame& f,u64 signalEpoch,const std::array<u64,Signals>& currentRevisions){frame=f;epoch=signalEpoch;revisions=currentRevisions;
+    void prepare(const ShadowPasses::Frame& f,u64 signalEpoch,const std::array<u64,Signals>& currentRevisions,
+                 bool useDirectLighting){frame=f;epoch=signalEpoch;revisions=currentRevisions;
         if(!f.width||!f.height||f.width>f.backingWidth||f.height>f.backingHeight||f.slot>=METAL_FRAMES_IN_FLIGHT||f.view>=Views||
             u64(f.backingWidth)*f.backingHeight>std::numeric_limits<u32>::max())throw std::invalid_argument("Invalid F13 denoise frame extent or view");
+        if (!useDirectLighting && signal[DENOISE_SIGNAL_DI].defined) {
+            signal[DENOISE_SIGNAL_DI].defined = false;
+            for (u32 view = 0; view < Views; ++view)
+                registries[DENOISE_SIGNAL_DI].invalidate(view, "empty local lighting");
+        }
         for(u32 sig=0;sig<Signals;++sig){auto& state=slots.at(frame.slot)[sig];
             if(state.checkpoint.scheduled&&c.frameEvent()->signaledValue()<=state.checkpoint.frame)throw std::logic_error("Denoise checkpoint slot is still GPU-owned");
             state.checkpoint.scheduled=false;state.used=signal[sig].defined;if(state.used)updateSignal(sig);}
         // Allocate only signals selected for this view, before graph callbacks.
         // First use/resize is a resource event; steady frames allocate nothing.
-        if(options.directLighting!=DirectLightingMode::Legacy)reserve(DENOISE_SIGNAL_DI);
+        if(useDirectLighting)reserve(DENOISE_SIGNAL_DI);
         if(options.gi!=GiMode::Off)reserve(DENOISE_SIGNAL_GI);
         if(options.reflections!=ReflectionMode::Off)reserve(DENOISE_SIGNAL_SPECULAR);
         if(options.ao!=AoMode::Off)reserve(DENOISE_SIGNAL_AO);
@@ -206,7 +212,8 @@ struct DenoisePasses::Impl {
 };
 DenoisePasses::DenoisePasses(MetalContext& c,PipelineCache& p,const LaunchOptions& o):impl_(std::make_unique<Impl>(c,p,o)){}
 DenoisePasses::~DenoisePasses()=default;
-void DenoisePasses::prepareFrame(const ShadowPasses::Frame& f,u64 epoch,const std::array<u64,4>& revisions){impl_->prepare(f,epoch,revisions);}
+void DenoisePasses::prepareFrame(const ShadowPasses::Frame& f,u64 epoch,const std::array<u64,4>& revisions,
+                                bool useDirectLighting){impl_->prepare(f,epoch,revisions,useDirectLighting);}
 void DenoisePasses::invalidateAll(const char* reason){impl_->invalidate(reason);}
 rg::TextureRef DenoisePasses::addSignal(rg::RenderGraph& g,u32 s,rg::TextureRef r,rg::TextureRef m,rg::BufferRef b,rg::BufferRef metadata){return impl_->add(g,s,r,m,b,metadata);}
 std::array<rg::TextureRef,3> DenoisePasses::addDiffuseSignals(rg::RenderGraph& g,std::array<rg::TextureRef,3> r,rg::TextureRef m,rg::BufferRef b){return impl_->addDiffuse(g,r,m,b);}

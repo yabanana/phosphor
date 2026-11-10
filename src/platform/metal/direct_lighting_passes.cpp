@@ -224,6 +224,7 @@ rg::TextureRef DirectLightingPasses::direct()const{return impl_->output;}rg::Tex
 rg::BufferRef DirectLightingPasses::surfaceRef()const{return impl_->surfaceRef;}rg::BufferRef DirectLightingPasses::lightsRef()const{return impl_->lightsRef;}rg::BufferRef DirectLightingPasses::emittersRef()const{return impl_->emittersRef;}
 MTL::Buffer* DirectLightingPasses::lightsBuffer()const{return impl_->slots[impl_->frame.slot].lights;}MTL::Buffer* DirectLightingPasses::emittersBuffer()const{return impl_->slots[impl_->frame.slot].emitters;}
 u32 DirectLightingPasses::lightCount()const{return impl_->params.lightCount;}u32 DirectLightingPasses::lightRevision()const{return impl_->lightScene.radianceRevision;}u64 DirectLightingPasses::version()const{return impl_->graphVersion;}
+bool DirectLightingPasses::emptyLocalLighting() const { return impl_->emptyLocalLighting; }
 } // namespace phosphor
 
 namespace phosphor {
