@@ -1,0 +1,755 @@
+{
+  "base": "07b1805ea2cae39fd1b3671278dcbd3baf51ce31",
+  "code_revision": "ed2ca221b6958c7b089d0075f3f3f656db749cef",
+  "ctest": {
+    "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-regression-20261110/final-ctest.log",
+    "sha256": "2b4063481b5f79dad9b2689ae09a5207172c55ab7ce06283157ccb9f8a5e9fed"
+  },
+  "device": "Apple M5 Max",
+  "f14_numeric": {
+    "count": 9,
+    "passed": true
+  },
+  "frames": {
+    "118": {
+      "identical_filtered_indirect_capture": true,
+      "positions": {
+        "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-regression-20261110/world-position-000118/position.pfm",
+        "sha256": "0d36ed9830e768bf7eb3917b075905690f55e6aa244b2fc8be9898f7256b509a"
+      },
+      "receivers": {
+        "max_position_error_m": 2.1997952461242676,
+        "mismatches": 36,
+        "misses": 0,
+        "passed": false,
+        "pixels": 768,
+        "position_cap_m": 0.0001
+      },
+      "sky": [
+        0.281980753,
+        0.523165524,
+        0.882745683
+      ],
+      "sun_angular_radius": 0.00465000002
+    },
+    "119": {
+      "checked_receivers": {
+        "max_position_error_m": 4.202127456665039e-05,
+        "mismatches": 0,
+        "misses": 0,
+        "passed": true,
+        "pixels": 768,
+        "position_cap_m": 0.0001
+      },
+      "convergence": [
+        {
+          "converged": false,
+          "minimum_seed_rms": 0.0003101938564655656,
+          "seed_nrmse": 1.164828722743589,
+          "spp": 64
+        },
+        {
+          "converged": false,
+          "minimum_seed_rms": 0.00021928824868267438,
+          "seed_nrmse": 0.9686477656562656,
+          "spp": 256
+        },
+        {
+          "converged": false,
+          "minimum_seed_rms": 0.00019126575062595737,
+          "seed_nrmse": 0.585425973793233,
+          "spp": 1024
+        }
+      ],
+      "identical_filtered_indirect_capture": true,
+      "positions": {
+        "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-regression-20261110/world-position-000119/position.pfm",
+        "sha256": "62b8a205c48539bbde45fae4ac5d0d9fca6ae091eb647b74164ace8ebfff0c2f"
+      },
+      "receivers": {
+        "max_position_error_m": 4.202127456665039e-05,
+        "mismatches": 0,
+        "misses": 0,
+        "passed": true,
+        "pixels": 768,
+        "position_cap_m": 0.0001
+      },
+      "reference_report": {
+        "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-reference-20261110-sky/frame-000119/centre-checked/reference_report.json",
+        "sha256": "c1325fd007ef63f27f73f922adf6349e1fcc11746ab69a722fda8dfffa5db89a"
+      },
+      "sky": [
+        0.281965524,
+        0.523156047,
+        0.882724345
+      ],
+      "sun_angular_radius": 0.00465000002
+    },
+    "120": {
+      "checked_receivers": {
+        "max_position_error_m": 5.128979682922363e-05,
+        "mismatches": 0,
+        "misses": 0,
+        "passed": true,
+        "pixels": 768,
+        "position_cap_m": 0.0001
+      },
+      "convergence": [
+        {
+          "converged": false,
+          "minimum_seed_rms": 0.00036800043946564356,
+          "seed_nrmse": 1.1608543613981175,
+          "spp": 64
+        },
+        {
+          "converged": false,
+          "minimum_seed_rms": 0.000245334898869564,
+          "seed_nrmse": 0.9081696459462305,
+          "spp": 256
+        },
+        {
+          "converged": false,
+          "minimum_seed_rms": 0.00021354986119758059,
+          "seed_nrmse": 0.5316138249957463,
+          "spp": 1024
+        }
+      ],
+      "identical_filtered_indirect_capture": true,
+      "positions": {
+        "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-regression-20261110/world-position-000120/position.pfm",
+        "sha256": "804fbbf971f7c9bb472e75a683e5adfc113b092dd000619da46cebf6445387a4"
+      },
+      "receivers": {
+        "max_position_error_m": 5.128979682922363e-05,
+        "mismatches": 0,
+        "misses": 0,
+        "passed": true,
+        "pixels": 768,
+        "position_cap_m": 0.0001
+      },
+      "reference_report": {
+        "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-reference-20261110-sky/frame-000120/centre-checked/reference_report.json",
+        "sha256": "d3a3c5713912b89940188cfdc5257188c4649894e0b9448b0c33947fdbbb6b40"
+      },
+      "sky": [
+        0.281950325,
+        0.52314657,
+        0.882702827
+      ],
+      "sun_angular_radius": 0.00465000002
+    },
+    "239": {
+      "identical_filtered_indirect_capture": true,
+      "positions": {
+        "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-regression-20261110/world-position-000239/position.pfm",
+        "sha256": "c8d907b1cf50e02b2b5c40a5ef948ecc4de2b27d9dfa1618a2e393ac83c310e5"
+      },
+      "receivers": {
+        "max_position_error_m": 3.8503642082214355,
+        "mismatches": 30,
+        "misses": 0,
+        "passed": false,
+        "pixels": 768,
+        "position_cap_m": 0.0001
+      },
+      "sky": [
+        0.280831039,
+        0.522551954,
+        0.879104555
+      ],
+      "sun_angular_radius": 0.00465000002
+    },
+    "240": {
+      "identical_filtered_indirect_capture": true,
+      "positions": {
+        "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-regression-20261110/world-position-000240/position.pfm",
+        "sha256": "1acaa905f6645da004bd7f746455485da1cf84d2c35d5246ccf00dd88180230a"
+      },
+      "receivers": {
+        "max_position_error_m": 3.850705146789551,
+        "mismatches": 29,
+        "misses": 0,
+        "passed": false,
+        "pixels": 768,
+        "position_cap_m": 0.0001
+      },
+      "sky": [
+        0.280831933,
+        0.522553504,
+        0.879063547
+      ],
+      "sun_angular_radius": 0.00465000002
+    }
+  },
+  "functional_f13_f14": {
+    "complete": false,
+    "count": 13,
+    "passed": true
+  },
+  "hdr": {
+    "actual_encodes": 96,
+    "cap": 0.01,
+    "relative_error_max": 0.0517578125
+  },
+  "image_checks": {
+    "comparisons": {
+      "apple9": {
+        "normalized_max": 0.0,
+        "normalized_rmse": 0.0,
+        "passed": true,
+        "values": 67511808
+      },
+      "camera": {
+        "normalized_max": 0.0,
+        "normalized_rmse": 0.0,
+        "passed": true,
+        "values": 67511808
+      },
+      "sun": {
+        "normalized_max": 0.0,
+        "normalized_rmse": 0.0,
+        "passed": true,
+        "values": 67511808
+      }
+    },
+    "passed": true
+  },
+  "native_layout": {
+    "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-regression-20261110/native-layout/debugger.log",
+    "sha256": "4a0ac5639125cb7b509102bc688d22198df568b9d6e040aed580bcdbf000370f"
+  },
+  "native_lifecycle": {
+    "native-current-guardmalloc": {
+      "evidence": {
+        "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-regression-20261110/native-current-guardmalloc/lifecycle-views-resize-cuts/renderer.log",
+        "sha256": "867c93214f3fd3b7cbbc6e7db18e9c39f858f39b86de8aca9f98335525b5a168"
+      },
+      "guardmalloc_loaded": true,
+      "leaks": {
+        "passed": false,
+        "state": "NOT_EXECUTED"
+      },
+      "matched_reclaimed": 20,
+      "native_frames": 300,
+      "passed": true
+    },
+    "native-current-negative": {
+      "evidence": {
+        "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-regression-20261110/native-current-negative/lifecycle-views-resize-cuts/renderer.log",
+        "sha256": "7dbce03bbc2661c8fa9ae447facd58c61653b2e245ed4508e30584b1fa1d7d2b"
+      },
+      "guardmalloc_loaded": false,
+      "leaks": {
+        "leaked_bytes": 12800,
+        "leaks": 20,
+        "native_internal_lifetime_accepted": false,
+        "passed": false,
+        "state": "EXECUTED_PROCESS_AT_EXIT_CHECK"
+      },
+      "matched_reclaimed": 0,
+      "native_frames": 300,
+      "passed": false
+    },
+    "native-current-qualified": {
+      "evidence": {
+        "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-regression-20261110/native-current-qualified/lifecycle-views-resize-cuts/renderer.log",
+        "sha256": "7284f4b1916b5950026e5fed3385a5e96e6973c3a02a7cb383b7920d1f26cdda"
+      },
+      "guardmalloc_loaded": false,
+      "leaks": {
+        "leaked_bytes": 0,
+        "leaks": 0,
+        "native_internal_lifetime_accepted": false,
+        "passed": true,
+        "state": "EXECUTED_PROCESS_AT_EXIT_CHECK"
+      },
+      "matched_reclaimed": 20,
+      "native_frames": 300,
+      "passed": true
+    }
+  },
+  "performance": {
+    "gpu_budget_ms": 16.666666666666668,
+    "protocol": {
+      "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-empty-di-perf-20261110-v2/protocol.json",
+      "sha256": "aa3ce5e06057c80d1e5918c427f7a2977bff27568ce8d391f4f29ce58d34db3b"
+    },
+    "results": {
+      "replicas": [
+        {
+          "baseline_drift": 0.013248774904835555,
+          "candidate_budget_passed": false,
+          "p50_reduction": 0.1530385348828841,
+          "valid": true
+        },
+        {
+          "baseline_drift": 0.03118762386906001,
+          "candidate_budget_passed": false,
+          "p50_reduction": 0.11852161057483268,
+          "valid": true
+        },
+        {
+          "baseline_drift": 0.037974683544303695,
+          "candidate_budget_passed": false,
+          "p50_reduction": 0.15861199732167486,
+          "valid": true
+        }
+      ]
+    },
+    "runs": {
+      "1-A": {
+        "allocations": 0,
+        "frame": {
+          "max": 30.8545,
+          "mean": 28.6222,
+          "min": 27.4331,
+          "p50": 28.4764,
+          "p95": 30.013,
+          "p99": 30.4292
+        },
+        "gpu": {
+          "max": 29.6272,
+          "mean": 27.7807,
+          "min": 26.6471,
+          "p50": 27.6101,
+          "p95": 29.1652,
+          "p99": 29.5546
+        },
+        "pipelines": {
+          "archiveHits": 134,
+          "archiveMissRate": 0.0,
+          "archiveMisses": 0,
+          "archiveUnavailable": 0,
+          "compileMs": 19.075,
+          "compileMsMax": 4.587,
+          "compilerCalls": 12,
+          "failures": 0,
+          "fallbackDraws": 0,
+          "fallbacksServed": 0,
+          "reloadFailures": 0,
+          "reloads": 0,
+          "renderThreadCompileMs": 0.0,
+          "renderThreadCompiles": 0,
+          "requests": 146,
+          "swaps": 146
+        },
+        "temporal": {
+          "F13 denoise 0 temporal": 0.7811,
+          "F13 denoise 1 temporal": 0.8516,
+          "F13 denoise 2 temporal": 1.0717,
+          "F13 denoise 3 temporal": 0.8287
+        }
+      },
+      "1-A2": {
+        "allocations": 0,
+        "frame": {
+          "max": 30.7478,
+          "mean": 28.6997,
+          "min": 27.4372,
+          "p50": 28.8808,
+          "p95": 29.9002,
+          "p99": 30.4362
+        },
+        "gpu": {
+          "max": 29.9454,
+          "mean": 27.8356,
+          "min": 26.5582,
+          "p50": 27.9759,
+          "p95": 28.9951,
+          "p99": 29.389
+        },
+        "pipelines": {
+          "archiveHits": 134,
+          "archiveMissRate": 0.0,
+          "archiveMisses": 0,
+          "archiveUnavailable": 0,
+          "compileMs": 20.932,
+          "compileMsMax": 5.062,
+          "compilerCalls": 12,
+          "failures": 0,
+          "fallbackDraws": 0,
+          "fallbacksServed": 0,
+          "reloadFailures": 0,
+          "reloads": 0,
+          "renderThreadCompileMs": 0.0,
+          "renderThreadCompiles": 0,
+          "requests": 146,
+          "swaps": 146
+        },
+        "temporal": {
+          "F13 denoise 0 temporal": 0.7809,
+          "F13 denoise 1 temporal": 0.8469,
+          "F13 denoise 2 temporal": 1.0741,
+          "F13 denoise 3 temporal": 0.8377
+        }
+      },
+      "1-B": {
+        "allocations": 0,
+        "frame": {
+          "max": 26.4615,
+          "mean": 24.466,
+          "min": 23.3557,
+          "p50": 24.3593,
+          "p95": 25.8027,
+          "p99": 26.1015
+        },
+        "gpu": {
+          "max": 25.4353,
+          "mean": 23.6423,
+          "min": 22.5935,
+          "p50": 23.5396,
+          "p95": 24.8613,
+          "p99": 25.2149
+        },
+        "pipelines": {
+          "archiveHits": 134,
+          "archiveMissRate": 0.0,
+          "archiveMisses": 0,
+          "archiveUnavailable": 0,
+          "compileMs": 19.661,
+          "compileMsMax": 4.747,
+          "compilerCalls": 12,
+          "failures": 0,
+          "fallbackDraws": 0,
+          "fallbacksServed": 0,
+          "reloadFailures": 0,
+          "reloads": 0,
+          "renderThreadCompileMs": 0.0,
+          "renderThreadCompiles": 0,
+          "requests": 146,
+          "swaps": 146
+        },
+        "temporal": {
+          "F13 denoise 0 temporal": 0.7775,
+          "F13 denoise 1 temporal": 0.848,
+          "F13 denoise 2 temporal": 1.08,
+          "F13 denoise 3 temporal": 0.8357
+        }
+      },
+      "2-A": {
+        "allocations": 0,
+        "frame": {
+          "max": 30.641,
+          "mean": 28.9195,
+          "min": 27.4438,
+          "p50": 29.0981,
+          "p95": 29.9578,
+          "p99": 30.4706
+        },
+        "gpu": {
+          "max": 29.772,
+          "mean": 28.0777,
+          "min": 26.6346,
+          "p50": 28.3061,
+          "p95": 29.0852,
+          "p99": 29.3827
+        },
+        "pipelines": {
+          "archiveHits": 134,
+          "archiveMissRate": 0.0,
+          "archiveMisses": 0,
+          "archiveUnavailable": 0,
+          "compileMs": 18.411,
+          "compileMsMax": 4.441,
+          "compilerCalls": 12,
+          "failures": 0,
+          "fallbackDraws": 0,
+          "fallbacksServed": 0,
+          "reloadFailures": 0,
+          "reloads": 0,
+          "renderThreadCompileMs": 0.0,
+          "renderThreadCompiles": 0,
+          "requests": 146,
+          "swaps": 146
+        },
+        "temporal": {
+          "F13 denoise 0 temporal": 0.7901,
+          "F13 denoise 1 temporal": 0.861,
+          "F13 denoise 2 temporal": 1.0898,
+          "F13 denoise 3 temporal": 0.8425
+        }
+      },
+      "2-A2": {
+        "allocations": 0,
+        "frame": {
+          "max": 33.3251,
+          "mean": 30.0772,
+          "min": 27.7295,
+          "p50": 30.0311,
+          "p95": 31.628,
+          "p99": 32.2775
+        },
+        "gpu": {
+          "max": 31.8481,
+          "mean": 29.2255,
+          "min": 26.9504,
+          "p50": 29.1889,
+          "p95": 30.7555,
+          "p99": 31.3009
+        },
+        "pipelines": {
+          "archiveHits": 134,
+          "archiveMissRate": 0.0,
+          "archiveMisses": 0,
+          "archiveUnavailable": 0,
+          "compileMs": 18.999,
+          "compileMsMax": 4.576,
+          "compilerCalls": 12,
+          "failures": 0,
+          "fallbackDraws": 0,
+          "fallbacksServed": 0,
+          "reloadFailures": 0,
+          "reloads": 0,
+          "renderThreadCompileMs": 0.0,
+          "renderThreadCompiles": 0,
+          "requests": 146,
+          "swaps": 146
+        },
+        "temporal": {
+          "F13 denoise 0 temporal": 0.791,
+          "F13 denoise 1 temporal": 0.8617,
+          "F13 denoise 2 temporal": 1.0849,
+          "F13 denoise 3 temporal": 0.8417
+        }
+      },
+      "2-B": {
+        "allocations": 0,
+        "frame": {
+          "max": 28.8506,
+          "mean": 26.3374,
+          "min": 24.329,
+          "p50": 26.1523,
+          "p95": 28.19,
+          "p99": 28.5539
+        },
+        "gpu": {
+          "max": 28.0509,
+          "mean": 25.5154,
+          "min": 23.4715,
+          "p50": 25.3403,
+          "p95": 27.3878,
+          "p99": 27.7388
+        },
+        "pipelines": {
+          "archiveHits": 134,
+          "archiveMissRate": 0.0,
+          "archiveMisses": 0,
+          "archiveUnavailable": 0,
+          "compileMs": 21.089,
+          "compileMsMax": 5.113,
+          "compilerCalls": 12,
+          "failures": 0,
+          "fallbackDraws": 0,
+          "fallbacksServed": 0,
+          "reloadFailures": 0,
+          "reloads": 0,
+          "renderThreadCompileMs": 0.0,
+          "renderThreadCompiles": 0,
+          "requests": 146,
+          "swaps": 146
+        },
+        "temporal": {
+          "F13 denoise 0 temporal": 0.8112,
+          "F13 denoise 1 temporal": 0.8806,
+          "F13 denoise 2 temporal": 1.1055,
+          "F13 denoise 3 temporal": 0.8531
+        }
+      },
+      "3-A": {
+        "allocations": 0,
+        "frame": {
+          "max": 31.1967,
+          "mean": 29.4959,
+          "min": 27.4922,
+          "p50": 29.4896,
+          "p95": 30.6425,
+          "p99": 31.0008
+        },
+        "gpu": {
+          "max": 30.306,
+          "mean": 28.6397,
+          "min": 26.7065,
+          "p50": 28.6533,
+          "p95": 29.803,
+          "p99": 30.1276
+        },
+        "pipelines": {
+          "archiveHits": 134,
+          "archiveMissRate": 0.0,
+          "archiveMisses": 0,
+          "archiveUnavailable": 0,
+          "compileMs": 19.829,
+          "compileMsMax": 4.697,
+          "compilerCalls": 12,
+          "failures": 0,
+          "fallbackDraws": 0,
+          "fallbacksServed": 0,
+          "reloadFailures": 0,
+          "reloads": 0,
+          "renderThreadCompileMs": 0.0,
+          "renderThreadCompiles": 0,
+          "requests": 146,
+          "swaps": 146
+        },
+        "temporal": {
+          "F13 denoise 0 temporal": 0.7876,
+          "F13 denoise 1 temporal": 0.8551,
+          "F13 denoise 2 temporal": 1.0865,
+          "F13 denoise 3 temporal": 0.8356
+        }
+      },
+      "3-A2": {
+        "allocations": 0,
+        "frame": {
+          "max": 34.1645,
+          "mean": 30.7159,
+          "min": 28.7913,
+          "p50": 30.6008,
+          "p95": 32.866,
+          "p99": 33.1743
+        },
+        "gpu": {
+          "max": 33.1516,
+          "mean": 29.8227,
+          "min": 27.8881,
+          "p50": 29.7414,
+          "p95": 31.9459,
+          "p99": 32.2582
+        },
+        "pipelines": {
+          "archiveHits": 134,
+          "archiveMissRate": 0.0,
+          "archiveMisses": 0,
+          "archiveUnavailable": 0,
+          "compileMs": 18.054,
+          "compileMsMax": 4.466,
+          "compilerCalls": 12,
+          "failures": 0,
+          "fallbackDraws": 0,
+          "fallbacksServed": 0,
+          "reloadFailures": 0,
+          "reloads": 0,
+          "renderThreadCompileMs": 0.0,
+          "renderThreadCompiles": 0,
+          "requests": 146,
+          "swaps": 146
+        },
+        "temporal": {
+          "F13 denoise 0 temporal": 0.8077,
+          "F13 denoise 1 temporal": 0.8779,
+          "F13 denoise 2 temporal": 1.0928,
+          "F13 denoise 3 temporal": 0.8634
+        }
+      },
+      "3-B": {
+        "allocations": 0,
+        "frame": {
+          "max": 27.0453,
+          "mean": 25.542,
+          "min": 24.5402,
+          "p50": 25.4187,
+          "p95": 26.524,
+          "p99": 26.8663
+        },
+        "gpu": {
+          "max": 26.0526,
+          "mean": 24.7143,
+          "min": 23.8037,
+          "p50": 24.5663,
+          "p95": 25.6337,
+          "p99": 25.9498
+        },
+        "pipelines": {
+          "archiveHits": 134,
+          "archiveMissRate": 0.0,
+          "archiveMisses": 0,
+          "archiveUnavailable": 0,
+          "compileMs": 18.783,
+          "compileMsMax": 4.426,
+          "compilerCalls": 12,
+          "failures": 0,
+          "fallbackDraws": 0,
+          "fallbacksServed": 0,
+          "reloadFailures": 0,
+          "reloads": 0,
+          "renderThreadCompileMs": 0.0,
+          "renderThreadCompiles": 0,
+          "requests": 146,
+          "swaps": 146
+        },
+        "temporal": {
+          "F13 denoise 0 temporal": 0.7843,
+          "F13 denoise 1 temporal": 0.8488,
+          "F13 denoise 2 temporal": 1.0749,
+          "F13 denoise 3 temporal": 0.8304
+        }
+      }
+    }
+  },
+  "phase_accepted": false,
+  "post_lifetime_sponza_smoke": {
+    "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-regression-20261110/final-sponza-smoke/renderer.log.status.json",
+    "sha256": "91cecb4d9979fcbec3f53633cd2e338196e83710dcb8d5a46fd1742bd5091d4a"
+  },
+  "reference_caps": {
+    "position_m": 0.0001,
+    "seed_nrmse": 0.02
+  },
+  "regressions": {
+    "functional": 1,
+    "legacy-f7-f8": 0,
+    "legacy-f9": {
+      "failed": [
+        "native-bench8",
+        "native-probe-diffuse",
+        "apple9-bench8",
+        "apple9-probe-diffuse"
+      ],
+      "passed": 56,
+      "total": 60
+    },
+    "native-hdr": 1,
+    "native-lifecycle": 1,
+    "physical-ao": 0,
+    "switch-baseline": true,
+    "switch-candidate": true,
+    "switch-comparison": {
+      "active_after_switch": true,
+      "empty_before_switch": true,
+      "normalized_max": 0.0,
+      "normalized_rmse": 0.0,
+      "passed": true,
+      "values": 663552
+    },
+    "volumes": 1,
+    "world-position-000118": true,
+    "world-position-000119": true,
+    "world-position-000120": true,
+    "world-position-000239": true,
+    "world-position-000240": true
+  },
+  "runtime": "macOS 27.3 26C5035r",
+  "schema": 1,
+  "temporal_arithmetic_rejected": {
+    "replicas": [
+      {
+        "baseline_drift": 0.0027390090718771194,
+        "candidate_budget_passed": false,
+        "p50_reduction": 0.00281714678955014,
+        "valid": true
+      },
+      {
+        "baseline_drift": 0.009582076691081385,
+        "candidate_budget_passed": false,
+        "p50_reduction": -0.006760524356243636,
+        "valid": true
+      },
+      {
+        "baseline_drift": 0.019107656899106106,
+        "candidate_budget_passed": false,
+        "p50_reduction": 0.008657875907185919,
+        "valid": true
+      }
+    ]
+  }
+}

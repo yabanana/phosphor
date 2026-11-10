@@ -2093,3 +2093,13 @@ outputs are bit-identical. No new general batching/scheduling system is added.
 Native HDR, the16.67ms target, independent dynamic references and reproduced
 current-runtime F9 failures remain open; no tolerance is widened to pass them.
 Details and all raw trial paths: [dynamic Sponza follow-up](implementation/F13-F14-DYNAMIC-SPONZA-2026-11-05.md).
+
+## 2026-11-10 — Local estimator and temporal filter experiments
+
+The exact temporal arithmetic experiment preserves every pixel but its
+full-frame p50 changes range from a 0.68% regression to a 0.87% improvement.
+The experiment is removed. On Sponza the empty local-light estimator can use
+zero radiance directly while retaining the guide graph and view invalidation.
+That change preserves image equality and saves 11.85–15.86% GPU p50 across three
+valid 1080p A/B/A pairs. GPU p95 remains 24.86–27.39 ms. The measurements and
+retained failures are in the [follow-up](implementation/F13-F14-DYNAMIC-SPONZA-2026-11-10.md).

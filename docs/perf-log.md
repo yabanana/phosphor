@@ -1086,3 +1086,15 @@ Independent broad GGX/GI references and the native HDR1% gate remain open;
 current-runtime F9 failures reproduce on the unmodified baseline. Full methods,
 rejected trials, raw locations and per-run hashes: [follow-up](implementation/F13-F14-DYNAMIC-SPONZA-2026-11-05.md)
 and [ledger](results/F13-F14-dynamic-Sponza-M5Max-2026-11-05.json). No F15.
+
+## 2026-11-10 — Empty local estimator on dynamic Sponza (F13/F14)
+
+M5 Max, macOS 27.3 (26C5035r), active AOT archive. Full 1080p workload with
+128 warmup and 256 measured frames. The scene has zero sampled local emitters,
+so the optimized graph reuses its zero texture and drops the local estimator
+passes. Three valid A/B/A replicas reduce GPU p50 by 15.30%, 11.85% and 15.86%.
+Candidate GPU p95 is 24.8613, 27.3878 and 25.6337 ms. All nine runs have zero
+steady GPU allocations. The 16.67 ms gate remains open. The separate temporal
+arithmetic experiment was removed after inconclusive performance results.
+See the [dynamic Sponza follow-up](implementation/F13-F14-DYNAMIC-SPONZA-2026-11-10.md)
+for the unchanged image checks, reference receiver validation and raw paths.
