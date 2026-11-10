@@ -111,6 +111,58 @@ inline GPURtHit rtTrace(const GPURtRay r, instance_acceleration_structure as,
     return hit;
 }
 
+// Refine a returned surface hit in ray-relative world coordinates. Hardware
+// still owns traversal/face/alpha selection; visibility-only rays keep its fast path.
+inline GPURtHit rtRefineSurfaceHit(const GPURtRay r,GPURtHit hit,
+    const device GPUInstance* instances,uint slotCount,
+    const device GPURtMesh* meshes,const device GPUVertex* vertices,const device uint* indices,uint meshCount) {
+    if(!hit.hit||hit.slot>=slotCount||r.type==RT_PROBE_SHADOW)return hit;
+    const device GPUInstance& instance=instances[hit.slot];
+    if(instance.meshIndex>=meshCount||instance.generation!=hit.generation)return hit;
+    const GPURtMesh mesh=meshes[instance.meshIndex];
+    if(hit.primitive>=mesh.indexCount/3u)return hit;
+    const uint first=mesh.indexOffset+3u*hit.primitive;
+    const float3 a=rtPosition(vertices[mesh.vertexOffset+indices[first]]);
+    const float3 b=rtPosition(vertices[mesh.vertexOffset+indices[first+1]]);
+    const float3 c=rtPosition(vertices[mesh.vertexOffset+indices[first+2]]);
+    const device float* m=instance.modelMatrix;
+    const float3 x(m[0],m[1],m[2]),y(m[4],m[5],m[6]),z(m[8],m[9],m[10]);
+    const float3 translation=float3(m[12],m[13],m[14])-float3(r.ox,r.oy,r.oz);
+    const float3 relative=fma(x,a.x,fma(y,a.y,fma(z,a.z,translation)));
+    const float3 ab=b-a,ac=c-a;
+    const float3 e1=fma(x,ab.x,fma(y,ab.y,z*ab.z)),e2=fma(x,ac.x,fma(y,ac.y,z*ac.z));
+    const float3 direction(r.dx,r.dy,r.dz),normal=cross(e1,e2);
+    const float determinant=dot(normal,direction);
+    if(!isfinite(determinant)||abs(determinant)<=1e-20f)return hit;
+    const float t=dot(normal,relative)/determinant;
+    const float3 point=fma(direction,t,-relative);
+    const float3 magnitude=abs(normal);
+    const uint drop=magnitude.x>magnitude.y?(magnitude.x>magnitude.z?0u:2u):(magnitude.y>magnitude.z?1u:2u);
+    uint a0=(drop+1u)%3u,a1=(drop+2u)%3u;
+    const bool swapEdges=max(abs(e2[a0]),abs(e2[a1]))>max(abs(e1[a0]),abs(e1[a1]));
+    const float3 firstEdge=swapEdges?e2:e1,secondEdge=swapEdges?e1:e2;
+    if(abs(firstEdge[a1])>abs(firstEdge[a0])){const uint tmp=a0;a0=a1;a1=tmp;}
+    if(firstEdge[a0]==0)return hit;
+    const float ratio=firstEdge[a1]/firstEdge[a0];
+    const float divisor=fma(-ratio,secondEdge[a0],secondEdge[a1]);
+    if(divisor==0)return hit;
+    const float second=fma(-ratio,point[a0],point[a1])/divisor;
+    const float firstWeight=fma(-secondEdge[a0],second,point[a0])/firstEdge[a0];
+    const float u=swapEdges?second:firstWeight,v=swapEdges?firstWeight:second;
+    if(isfinite(t)&&isfinite(u)&&isfinite(v)&&t>=r.tmin&&t<=r.tmax&&u>=0&&v>=0&&u+v<=1) {
+        hit.t=t;hit.u=u;hit.v=v;
+    }
+    return hit;
+}
+
+inline GPURtHit rtTraceSurface(const GPURtRay r, instance_acceleration_structure as,
+    intersection_function_table<triangle_data,instancing> ift,
+    const device GPUInstance* instances,uint slotCount,thread RtPayload& payload,
+    const device GPURtMesh* meshes,const device GPUVertex* vertices,const device uint* indices,uint meshCount) {
+    return rtRefineSurfaceHit(r,rtTrace(r,as,ift,instances,slotCount,payload),
+                             instances,slotCount,meshes,vertices,indices,meshCount);
+}
+
 // Geometry fetch shared by secondary ray generation and the debug view. Proxy
 // primitive IDs refer to the RT index stream, never the raster index stream.
 inline bool rtSurface(GPURtHit hit, const device GPUInstance* instances, const device GPURtMesh* meshes,

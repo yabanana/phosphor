@@ -90,7 +90,7 @@ kernel void reflection_rt(constant GPUReflectionParams& p [[buffer(0)]],const de
     if(s.valid&&dir.valid&&any(dir.weight>0)&&giRandom(seed)<reflectionRTWeight(s.roughness,p)){
         float3 n=normalize(diVec(s.geometricNormal));if(dot(n,dir.direction)<0)n=-n;const float3 origin=rtOffsetRay(diVec(s.position),n);GPURtRay ray{};
         ray.ox=origin.x;ray.oy=origin.y;ray.oz=origin.z;ray.dx=dir.direction.x;ray.dy=dir.direction.y;ray.dz=dir.direction.z;ray.tmax=p.maxDistance;ray.mask=RT_MASK_INDIRECT;ray.type=RT_PROBE_DIFFUSE;
-        RtPayload payload{};const auto hit=rtTrace(ray,as,ift,instances,p.slotCount,payload);float3 L;
+        RtPayload payload{};const auto hit=rtTraceSurface(ray,as,ift,instances,p.slotCount,payload,meshes,vertices,indices,p.meshCount);float3 L;
         sample.flags=SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_STOCHASTIC;sample.proposalSolidAngle=dir.pdf;for(uint i=0;i<3;++i)sample.direction[i]=dir.direction[i];
         bool numericError=dir.error;
         if(hit.hit){L=reflectionSecondary(hit,dir.direction,as,ift,p,instances,meshes,vertices,indices,materials,textures,lights,sampled,emitters,gi,states,extra,irradiance,moments,seed,numericError);
@@ -114,7 +114,7 @@ kernel void reflection_capture_rt(constant GPUReflectionParams& p [[buffer(0)]],
     if(tid>=p.width*p.height)return;const uint2 pixel(tid%p.width,tid/p.width);const float2 ndc=(float2(pixel)+.5f)*float2(2,-2)/float2(p.width,p.height)+float2(-1,1);
     const float4 near=reflectionMatrix(p.inverseViewProjection)*float4(ndc,1,1);const float3 origin=reflectionConstantVec(p.cameraPosition),direction=normalize(near.xyz/near.w-origin);
     GPURtRay ray{};ray.ox=origin.x;ray.oy=origin.y;ray.oz=origin.z;ray.dx=direction.x;ray.dy=direction.y;ray.dz=direction.z;ray.tmax=p.maxDistance;ray.mask=RT_MASK_INDIRECT;ray.type=RT_PROBE_DIFFUSE;
-    RtPayload payload{};const auto hit=rtTrace(ray,as,ift,instances,p.slotCount,payload);uint seed=giHash(tid^p.seed);bool numericError=false;const float3 L=hit.hit?
+    RtPayload payload{};const auto hit=rtTraceSurface(ray,as,ift,instances,p.slotCount,payload,meshes,vertices,indices,p.meshCount);uint seed=giHash(tid^p.seed);bool numericError=false;const float3 L=hit.hit?
         reflectionSecondary(hit,direction,as,ift,p,instances,meshes,vertices,indices,materials,textures,lights,sampled,emitters,gi,states,extra,irradiance,moments,seed,numericError):reflectionConstantVec(p.environment);
     const bool valid=!numericError&&reflectionProbeStorageAccepts(L.x,L.y,L.z,p.flags);
     output.write(float4(valid?L:float3(0),valid?1.0f:-1.0f),pixel);
