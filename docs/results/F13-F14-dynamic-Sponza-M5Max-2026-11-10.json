@@ -728,6 +728,274 @@
     "world-position-000239": true,
     "world-position-000240": true
   },
+  "rejected_cost_and_reference_domain_follow_up": {
+    "base_revision": "3aae36a",
+    "centre_reference": {
+      "adapter_sha256": "843bdbcf74c6aa2d0cbdbbae09332f01e7620da2705aeca9df5f43f8954e123d",
+      "camera_check": {
+        "direction_error": 6.394247820118437e-08,
+        "origin_error": 1.6898329580072868e-07,
+        "passed": true
+      },
+      "candidate_read": false,
+      "converged": false,
+      "crop_xywh": [
+        62,
+        34,
+        4,
+        4
+      ],
+      "experimental": true,
+      "frame": 119,
+      "limits_sha256": "0a76cc37ca890813d2e0c44b1b59ab9bd8ff1cb659e9d304d24ae464e3e0b435",
+      "max_spp": 65536,
+      "model_differences": [],
+      "phase_accepted": false,
+      "position_sidecar_sha256": "afe26655ec3da87a9fe13dee39a323446b09172dc9373e3cd5bb59e153053ebd",
+      "positions_sha256": "62b8a205c48539bbde45fae4ac5d0d9fca6ae091eb647b74164ace8ebfff0c2f",
+      "receivers": {
+        "max_position_error_m": 1.430511474609375e-06,
+        "mismatches": 0,
+        "misses": 0,
+        "passed": true,
+        "pixels": 16,
+        "position_cap_m": 0.0001
+      },
+      "records": [
+        {
+          "converged": false,
+          "minimum_seed_rms": 1.3502371972545706e-06,
+          "seed_nrmse": 9.516945542556517,
+          "spp": 64
+        },
+        {
+          "converged": false,
+          "minimum_seed_rms": 9.75517843005255e-07,
+          "seed_nrmse": 17.121295473917495,
+          "spp": 256
+        },
+        {
+          "converged": false,
+          "minimum_seed_rms": 9.276389640369995e-06,
+          "seed_nrmse": 1.1657697098710162,
+          "spp": 1024
+        },
+        {
+          "converged": false,
+          "minimum_seed_rms": 1.3033675928205909e-05,
+          "seed_nrmse": 0.3989510385743697,
+          "spp": 4096
+        },
+        {
+          "converged": false,
+          "minimum_seed_rms": 1.0397063642442952e-05,
+          "seed_nrmse": 0.14372110154431295,
+          "spp": 16384
+        },
+        {
+          "converged": false,
+          "minimum_seed_rms": 1.1666234452491697e-05,
+          "seed_nrmse": 0.04988764452137635,
+          "spp": 65536
+        }
+      ],
+      "reference": {
+        "convergence_relative_rmse": 0.02,
+        "convergence_rule": "independent-seed references at the same SPP must agree within gate on combined interior and every ROI; previous checkpoints retained; mean of final two seeds is reference",
+        "depth_check": "compare depth8 and unlimited with identical seed/SPP; report truncation, do not silently call depth8 full transport",
+        "direct_depth": 2,
+        "full_depth": -1,
+        "renderer": "Mitsuba 3.9.1 scalar_rgb CPU",
+        "rr_depth": 5,
+        "seeds": [
+          1234,
+          5678
+        ],
+        "spp_checkpoints": [
+          64,
+          256,
+          1024,
+          4096,
+          16384,
+          65536
+        ],
+        "validation": [
+          "camera rays and near clip",
+          "PLY winding and world transforms",
+          "emitter area and Le; no duplicate extracted triangles",
+          "UV repeat and half-filter arithmetic",
+          "zero-indirect fixture and emission linearity",
+          "native constant texture specialization only for exact constant semantics"
+        ]
+      },
+      "renderer": "Mitsuba",
+      "runner_sha256": "307902cf2e3f3145bce49f6ad242fe4cc9ba1a883ce9441ae31aedb295c2922b",
+      "sampler": "multijitter",
+      "schema": 1,
+      "scope": "experimental secondary transport control",
+      "snapshot_sha256": "6e2e4210e52d1b1d7e6fb25560a642c0deabc0b3726c33fbb0f9a40eb559ecf1",
+      "variant": "scalar_rgb",
+      "version": "3.9.1"
+    },
+    "experiments": {
+      "normal-power": {
+        "adopted": false,
+        "protocol": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-normal-power-perf/protocol.json",
+          "sha256": "c121df9cc43136561e8bbb948ed197e71d51d6ed76ac00f2190c52f43bbb72df"
+        },
+        "results": {
+          "replicas": [
+            {
+              "baseline_drift": 0.002081127123716455,
+              "candidate_budget_passed": false,
+              "p50_reduction": 0.0032288332045479207,
+              "valid": true
+            },
+            {
+              "baseline_drift": 0.004378392563638724,
+              "candidate_budget_passed": false,
+              "p50_reduction": -0.034229620145113104,
+              "valid": true
+            },
+            {
+              "baseline_drift": 0.018471918307804553,
+              "candidate_budget_passed": false,
+              "p50_reduction": -0.001463185695749436,
+              "valid": true
+            }
+          ]
+        },
+        "runs": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-normal-power-perf/runs.json",
+          "sha256": "1107600e0aa0cb3f3bd0138f5fdb0c57ca90a4c0cd1397fef58a1a2b9762abed"
+        }
+      },
+      "variance": {
+        "adopted": false,
+        "protocol": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-variance-perf/protocol.json",
+          "sha256": "cb100fb1677e11ced0e1f2ff3364aecc3483d06a9b8f41b80525186dde3f2283"
+        },
+        "results": {
+          "replicas": [
+            {
+              "baseline_drift": 0.013912034003033317,
+              "candidate_budget_passed": false,
+              "p50_reduction": 0.0022127802002660513,
+              "valid": true
+            },
+            {
+              "baseline_drift": 0.003082777610069925,
+              "candidate_budget_passed": false,
+              "p50_reduction": 0.001963730356988047,
+              "valid": true
+            },
+            {
+              "baseline_drift": 0.025341612672604773,
+              "candidate_budget_passed": false,
+              "p50_reduction": -0.02226721546583521,
+              "valid": true
+            }
+          ]
+        },
+        "runs": {
+          "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-variance-perf/runs.json",
+          "sha256": "04ef8b12f59a4250b9807b962e851d7835428802cf2b621c13c324407644b90f"
+        }
+      }
+    },
+    "material_admission_control": {
+      "adapter_sha256": "843bdbcf74c6aa2d0cbdbbae09332f01e7620da2705aeca9df5f43f8954e123d",
+      "camera_check": {
+        "direction_error": 6.394247820118437e-08,
+        "origin_error": 1.6898329580072868e-07,
+        "passed": true
+      },
+      "candidate_read": false,
+      "converged": false,
+      "crop_xywh": [
+        62,
+        34,
+        4,
+        4
+      ],
+      "frame": 119,
+      "limits_sha256": "0a76cc37ca890813d2e0c44b1b59ab9bd8ff1cb659e9d304d24ae464e3e0b435",
+      "max_spp": 256,
+      "model_differences": [
+        "Primary textured materials: CPU base-level bilinear sampling versus GPU derivative-based mip/anisotropic sampling; parity unverified"
+      ],
+      "phase_accepted": false,
+      "position_sidecar_sha256": "afe26655ec3da87a9fe13dee39a323446b09172dc9373e3cd5bb59e153053ebd",
+      "positions_sha256": "62b8a205c48539bbde45fae4ac5d0d9fca6ae091eb647b74164ace8ebfff0c2f",
+      "primary_material_parity_verified": false,
+      "receivers": {
+        "max_position_error_m": 1.430511474609375e-06,
+        "mismatches": 0,
+        "misses": 0,
+        "passed": true,
+        "pixels": 16,
+        "position_cap_m": 0.0001
+      },
+      "records": [
+        {
+          "converged": false,
+          "minimum_seed_rms": 6.979235710421926e-06,
+          "seed_nrmse": 1.7429616851590246,
+          "spp": 64
+        },
+        {
+          "converged": false,
+          "minimum_seed_rms": 4.734961429743339e-06,
+          "seed_nrmse": 1.4884037615618069,
+          "spp": 256
+        }
+      ],
+      "reference": {
+        "convergence_relative_rmse": 0.02,
+        "convergence_rule": "independent-seed references at the same SPP must agree within gate on combined interior and every ROI; previous checkpoints retained; mean of final two seeds is reference",
+        "depth_check": "compare depth8 and unlimited with identical seed/SPP; report truncation, do not silently call depth8 full transport",
+        "direct_depth": 2,
+        "full_depth": -1,
+        "renderer": "Mitsuba 3.9.1 scalar_rgb CPU",
+        "rr_depth": 5,
+        "seeds": [
+          1234,
+          5678
+        ],
+        "spp_checkpoints": [
+          64,
+          256,
+          1024,
+          4096,
+          16384,
+          65536
+        ],
+        "validation": [
+          "camera rays and near clip",
+          "PLY winding and world transforms",
+          "emitter area and Le; no duplicate extracted triangles",
+          "UV repeat and half-filter arithmetic",
+          "zero-indirect fixture and emission linearity",
+          "native constant texture specialization only for exact constant semantics"
+        ]
+      },
+      "reference_accepted": false,
+      "renderer": "Mitsuba",
+      "runner_sha256": "da4150b298969cdf8772d64695c79c87659a19f74aa7243c1887483091ebca86",
+      "schema": 1,
+      "scope": "sparse centre-sampled surface indirect diffuse control",
+      "snapshot_sha256": "6e2e4210e52d1b1d7e6fb25560a642c0deabc0b3726c33fbb0f9a40eb559ecf1",
+      "variant": "scalar_rgb",
+      "version": "3.9.1"
+    },
+    "phase_accepted": false,
+    "restored_ctest": {
+      "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-normal-power-validation/restored-ctest.log",
+      "sha256": "a7b551c5414d506fc40ee54393ef2a64753236ae90005d5dcd642f98bef9a60c"
+    }
+  },
   "runtime": "macOS 27.3 26C5035r",
   "schema": 1,
   "shared_final_diffuse_follow_up": {

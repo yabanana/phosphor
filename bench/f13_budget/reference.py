@@ -161,6 +161,12 @@ def main():
             'scope': 'sparse centre-sampled surface indirect diffuse control', 'candidate_read': False}
     (args.out/'protocol.json').write_text(json.dumps(plan, indent=2)+'\n')
     mi, description, differences = build_scene(root, data, 'diffuse', False)
+    # Receiver positions alone do not prove the same primary material footprint.
+    # GPU visibility guides use UV derivatives, trilinear mips and anisotropy;
+    # the scalar adapter samples the exported base level bilinearly.
+    material_parity = not any(t['width'] > 1 or t['height'] > 1 for t in data['textures'])
+    if not material_parity:
+        differences.append('Primary textured materials: CPU base-level bilinear sampling versus GPU derivative-based mip/anisotropic sampling; parity unverified')
     rays = []
     pixel_index = register_camera_path(mi, camera, args.crop, rays)
     description['sensor']['film'].update(crop_offset_x=x, crop_offset_y=y, crop_width=width, crop_height=height)
@@ -201,9 +207,10 @@ def main():
             break
     report = {**plan, 'renderer': 'Mitsuba', 'version': mi.__version__, 'variant': 'scalar_rgb',
               'camera_check': camera_check, 'receivers': receivers, 'model_differences': differences, 'records': records,
-              'converged': records[-1]['converged'], 'phase_accepted': False}
+              'converged': records[-1]['converged'], 'primary_material_parity_verified': material_parity,
+              'reference_accepted': records[-1]['converged'] and material_parity and not differences, 'phase_accepted': False}
     (args.out/'reference_report.json').write_text(json.dumps(report, indent=2)+'\n')
-    return 0 if report['converged'] else 1
+    return 0 if report['reference_accepted'] else 1
 
 
 if __name__ == '__main__':

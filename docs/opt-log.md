@@ -2117,3 +2117,12 @@ with separate histories and radiance weights. Two valid A/B/A replicas reduce
 GPU p50 by 5.23–5.91%. The 16.67 ms frame target remains open. The
 [follow-up](implementation/F13-F14-DYNAMIC-SPONZA-2026-11-10.md#shared-final-diffuse-denoising-pass)
 records the discarded timing pair and image checks.
+
+### Rejected variance storage and normal-power trials
+
+Three valid full-preset A/B/A pairs each fail to show a repeatable gain:
+R32Float spatial variance gives +0.22%, +0.20%, −2.23% GPU p50; six squarings
+for the default normal exponent give +0.32%, −3.42%, −0.15%.
+Both changes were removed and the baseline rebuilt and retested (nine CTest
+groups). Frozen evidence and the independent reference-domain finding are in
+the [follow-up](implementation/F13-F14-DYNAMIC-SPONZA-2026-11-10.md#reference-material-domain-and-rejected-cost-experiments).

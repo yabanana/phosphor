@@ -198,3 +198,37 @@ The unchanged native HDR control encoded all 96 frames. Its 80 steady
 readbacks still reach 5.17578125% restored error against the 1% cap. The
 custom Float32 fallback remains active for the production request.
 The four open gates still prevent merging and starting F15/F16.
+
+## Reference material domain and rejected cost experiments
+
+The dynamic reference now distinguishes seed convergence from reference
+admission. GPU primary guides use analytic UV derivatives and the material
+sampler's trilinear mip filtering and anisotropy. The CPU adapter uses bilinear
+sampling of the exported base level. For nontrivial textures, matching camera
+positions does not establish matching primary albedo, metallic or alpha.
+The report records this model difference, sets
+`primary_material_parity_verified=false` and keeps
+`reference_accepted=false`, even if the seeds eventually converge.
+The existing 2% convergence criterion is unchanged. This finding does not
+quantify how much of the GPU/reference difference is caused by texture filtering.
+
+A diagnostic central 4×4 crop (62,34) at frame 119 was sampled up to 65,536 spp
+with the same secondary-path pilot and seeds 1234/5678. All receiver positions
+match. Seed disagreement decreases from 39.90% at 4,096 spp to 14.37% at
+16,384 and 4.99% at 65,536. It still fails 2%. This small region is explicitly
+a diagnostic and cannot replace the frozen 32×24 crop or temporal corpus.
+The current main reference runner was separately executed at 256 spp on that
+region and correctly reported the unverified material domain and denied
+admission. Artifacts: `build/f13-f14-centre-reference`.
+
+Two bounded cost experiments were rejected after three valid 1080p A/B/A
+pairs each. Storing only spatial variance in R32Float instead of RGBA32Float
+changed GPU p50 by +0.22%, +0.20%, and −2.23% (positive means faster).
+Replacing the default normal exponent 64 with six squarings changed p50 by
++0.32%, −3.42%, and −0.15%. Neither establishes a repeatable speedup.
+Their source, frozen protocols and all reports remain under
+`build/f13-f14-variance-validation`, `build/f13-f14-variance-perf`,
+`build/f13-f14-normal-power-validation`, and `build/f13-f14-normal-power-perf`.
+Neither experiment was adopted; image equivalence was not qualified for them.
+The preceding production shader was restored and rebuilt; all nine CTest
+groups passed afterwards. No new F9 or native HDR fix is claimed.
