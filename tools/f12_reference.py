@@ -100,7 +100,21 @@ def snapshot(path):
             if not light.get("geometry"):
                 raise ValueError("standalone triangle emitter has no exact PLY geometry snapshot")
             standalone.append(light["geometry"])
-    for name in data["meshes"] + standalone + [t[k] for t in data["textures"] for k in ("rgb", "alpha")]:
+    mip_resources=[]
+    for texture in data["textures"]:
+        width,height=texture["width"],texture["height"]
+        for level,mip in enumerate(texture.get("mips",[]),1):
+            if width==height==1:raise ValueError("mip chain exceeds 1x1")
+            width,height=max(1,width//2),max(1,height//2)
+            if (mip.get("level"),mip.get("width"),mip.get("height"))!=(level,width,height):
+                raise ValueError("invalid snapshot mip extent or level")
+            mip_resources.extend(mip[k] for k in ("rgb","alpha"))
+        if texture.get("mip_chain_complete") and (width,height)!=(1,1):
+            raise ValueError("incomplete snapshot mip chain")
+    if data.get("primary_material_witness") not in (None,"primary-surfaces.json"):
+        raise ValueError("unsupported primary witness resource")
+    witnesses=[data["primary_material_witness"]] if data.get("primary_material_witness") else []
+    for name in data["meshes"] + standalone + witnesses + mip_resources + [t[k] for t in data["textures"] for k in ("rgb", "alpha")]:
         if not (root / name).resolve().is_relative_to(root):
             raise ValueError("snapshot resource escaped its directory")
         if not (root / name).is_file():
@@ -111,7 +125,7 @@ def snapshot(path):
 def scene_digest(root):
     digest = hashlib.sha256()
     for file in sorted(p for p in root.iterdir() if p.is_file()):
-        if file.name == "scene.json" or file.suffix in (".pfm", ".ply"):
+        if file.name in ("scene.json","primary-surfaces.json") or file.suffix in (".pfm", ".ply"):
             digest.update(file.name.encode())
             with file.open("rb") as stream:
                 for block in iter(lambda: stream.read(1024 * 1024), b""):

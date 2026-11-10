@@ -1,3 +1,4 @@
+#include <bit>
 #include <doctest/doctest.h>
 #include "renderer/probe_grid.h"
 #include "renderer/radiance_cache.h"
@@ -263,7 +264,28 @@ TEST_CASE("F12 offline snapshot PFM remains linear and full world/material value
     material.baseColorTex=material.normalTex=material.metallicRoughnessTex=material.occlusionTex=material.emissiveTex=INVALID_TEXTURE_INDEX;
     GPUInstance i{};i.modelMatrix[0]=i.modelMatrix[5]=i.modelMatrix[10]=i.modelMatrix[15]=1;i.modelMatrix[12]=5;i.flags=INSTANCE_FLAG_VALID|1;
     OfflineReferenceScene s{.vertices=v,.indices=ids,.meshes=std::span(&m,1),.worldInstances=std::span(&i,1),.materials=std::span(&material,1)};
+    ReferenceTexture texture;texture.index=7;texture.width=2;texture.height=2;texture.rgba.assign(16,1);
+    texture.mips.push_back({1,1,{.25f,.5f,2.f,.75f}});
+    s.textures=std::span(&texture,1);
+    texture.mips[0].width=2;CHECK_FALSE(validateReferenceScene(s).ok);texture.mips[0].width=1;
+    s.camera.width=s.camera.height=1;
+    GPUDISurface surface{};surface.valid=1;surface.instanceSlot=0;surface.instanceGeneration=i.generation;
+    surface.albedo[0]=.25f;surface.metallic=.5f;
+    s.primarySurfaces=std::span(&surface,1);
+    surface.instanceGeneration++;CHECK_FALSE(validateReferenceScene(s).ok);surface.instanceGeneration--;
     auto result=exportOfflineReference(s,dir);REQUIRE(result.ok);
+    const auto mipBytes=contents(dir/"texture_7_mip1.pfm");
+    const std::string mipHeader="PF\n1 1\n-1.0\n";
+    REQUIRE(mipBytes.starts_with(mipHeader));
+    REQUIRE(mipBytes.size()==mipHeader.size()+12);
+    const std::array<float,3> expectedMip{.25f,.5f,2.f};
+    for(size_t channel=0;channel<3;++channel){
+        u32 bits=0;for(size_t byte=0;byte<4;++byte)
+            bits|=u32(static_cast<unsigned char>(mipBytes[mipHeader.size()+4*channel+byte]))<<(8*byte);
+        CHECK(std::bit_cast<float>(bits)==expectedMip[channel]);
+    }
+    CHECK(contents(dir/"primary-surfaces.json").find("\"independent\":false")!=std::string::npos);
+    CHECK(contents(dir/"primary-surfaces.json").find("\"metallic\":0.5")!=std::string::npos);
     const auto manifest=contents(dir/"scene.json");
     CHECK(manifest.find("\"emissive\":[8,0,0]")!=std::string::npos);
     CHECK(manifest.find("\"world\":[1,0,0,0,0,1,0,0,0,0,1,0,5,0,0,1]")!=std::string::npos);
