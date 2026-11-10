@@ -38,6 +38,7 @@ struct DirectLightingPasses::Impl {
     struct View { MTL::Buffer* reservoir=nullptr;MTL::Buffer* surface=nullptr; };std::array<View,4> views{};
     di::StbnMask stbn;MTL::Buffer* ranks=nullptr;
     u64 pixelCapacity=0,lightCapacity=0,graphVersion=1;u64 sceneSignal=0;
+    bool emptyLocalLighting=false;
     struct Signal {u64 scene, domain, geometry;u32 light;bool operator==(const Signal&)const=default;};
     Signal lastSignal{~u64{0},0,0,0};u64 signalEpoch=1;
     GPUDIParams params{};GPULightClusterParams clusterParams{};GPUEmissiveUpdateParams emitterParams{};
@@ -78,6 +79,13 @@ struct DirectLightingPasses::Impl {
     void prepare(const GpuScene& g,const SceneStore& s,std::span<const GPULight> l,const ShadowPasses::Frame& f){
         frame=f;lightScene.rebuild(g,s,l);reserve(std::max<size_t>(1,lightScene.lights.size()),u64(f.backingWidth)*f.backingHeight);
         auto& slot=slots[f.slot];const size_t n=lightScene.lights.size();
+        const bool empty = n == 0 && !options.debugLighting && !options.debugLightingCorrupt;
+        if (empty != emptyLocalLighting) {
+            emptyLocalLighting = empty;
+            ++graphVersion;
+            for (u32 view = 0; view < views.size(); ++view)
+                history.invalidate(view, "local light domain transition");
+        }
         if(traceMotion){
             if(!options.debugLighting||u64(f.width)*f.height>16384)throw std::logic_error("Motion readback diagnostic requires --debug-lighting and <=16384 active pixels");
             const u64 row=(u64(f.width)*8+255)&~u64(255),plane=row*f.height;
@@ -177,6 +185,11 @@ struct DirectLightingPasses::Impl {
         g.addPass("Indexed DI receiver pack",PassType::Compute,[&](PassBuilder& b){for(auto r:{shadow.worldPosition(),shadow.geometricNormal(),shadow.receiverKeys(),fallbackShading,fallbackAlbedo,fallbackOcclusion})b.read(r,Usage::ShaderRead,StageDispatch);b.read(surfaceRef,Usage::ShaderRead,StageDispatch);surfaceRef=b.write(surfaceRef,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("di_receiver_pack");},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Pack];t->setAddress(scene.frameConstantsAddress(),0);t->setAddress(paramsAddress,1);t->setAddress(slots[frame.slot].surface->gpuAddress(),2);tex(t,ctx,shadow.worldPosition(),5);tex(t,ctx,shadow.geometricNormal(),6);tex(t,ctx,shadow.receiverKeys(),10);tex(t,ctx,fallbackShading,11);tex(t,ctx,fallbackAlbedo,12);tex(t,ctx,fallbackOcclusion,13);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,kernels[Pack],t,frame.width,frame.height);});
         signalErrorsRef=g.importBuffer("DI numerical error words",{16},ImportPerFrame|ImportOutput);
         g.addPass("DI numerical errors clear",PassType::Compute,[&](PassBuilder& b){signalErrorsRef=b.write(signalErrorsRef,Usage::ShaderWrite,StageDispatch);},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[SignalClear];t->setAddress(slots[frame.slot].signalErrors->gpuAddress(),15);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,signalClear,t,4);});
+        // Directional lighting is resolved separately. The empty local estimator is exactly zero.
+        if (emptyLocalLighting) {
+            output = shadow.zeroLighting();
+            return;
+        }
         if(options.debugLightingCorrupt==7)g.addPass("Negative: finite radiance overflow",PassType::Compute,[&](PassBuilder& b){b.read(surfaceRef,Usage::ShaderRead,StageDispatch);b.read(lightsRef,Usage::ShaderRead,StageDispatch);lightsRef=b.write(lightsRef,Usage::ShaderWrite,StageDispatch);},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[CheckNegative];t->setAddress(paramsAddress,0);t->setAddress(slots[frame.slot].surface->gpuAddress(),1);t->setAddress(slots[frame.slot].lights->gpuAddress(),2);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,corruptFinite,t,1);});
         auto reads=[&](PassBuilder& b){for(auto r:{surfaceRef,lightsRef,emittersRef,aliasRef,rankRef})b.read(r,Usage::ShaderRead,StageDispatch);b.read(scene.dataRef(),Usage::ShaderRead,StageDispatch);};
         if(options.debugLightingCorrupt==5 && options.directLighting==DirectLightingMode::ReSTIR)
