@@ -50,3 +50,30 @@ case covers four views, three sizes, pipeline reload and actual SDK frames.
 `PHOSPHOR_METALFX_DENOISED_PLAIN_RELEASE=1` disables only the newly identified
 POD timing-record retirement for the deliberate leaking negative control.
 Native production admission remains disabled while HDR qualification fails.
+
+## CPU vector reference and material footprint checks
+
+The optional llvm_ad_rgb backend uses the same exported texels and half
+conversion as scalar_rgb. It is a CPU transport implementation, not the
+Phosphor GPU renderer. It requires a compatible LLVM shared library and
+DRJIT_LIBLLVM_PATH if that library is not discoverable. The local qualification
+used a checksum-verified Homebrew LLVM20.1.8 bottle extracted under build/,
+with its zstd linkage resolved to the existing system package and the local
+copy re-signed. No global package installation is required.
+
+Run variant_check.py SNAPSHOT --out FRESH_DIR before accepting backend output.
+It evaluates 1,029 UVs (including wrapping/boundary cases) for all seven texture
+semantics on every material, in separate scalar/LLVM processes, and requires
+bit equality. The measured Sponza comparison covers 540,225 scalar values.
+
+reference.py accepts --variant llvm_ad_rgb. Camera receiver selection and its
+position checks run independently in scalar mode first, then cache those rays
+for vector transport. Seeds, full-minus-direct accounting and the 2% convergence
+cap remain unchanged. The frozen plan records additional SPP checkpoints through
+4,194,304; these increase sampling effort, not the allowed error. Seed agreement
+does not qualify a mismatched primary material model.
+
+materials.py now disables scene-object merging for identity audits and records
+independently reconstructed UVs and perspective UV derivatives. The
+primary_uv_footprint helper is tested against finite differences and vertex
+permutation. It is not a claim that a CPU anisotropic filter matches the GPU.

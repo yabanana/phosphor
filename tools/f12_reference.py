@@ -133,9 +133,52 @@ def scene_digest(root):
     return digest.hexdigest()
 
 
-def build_scene(root, data, material_model, allow_differences):
+def primary_uv_footprint(camera, world_vertices, texcoords, pixel):
+    """Independent analytic perspective UV derivatives, unjittered pixel units."""
+    if any(camera.get("jitter_pixels", [0, 0])):
+        raise ValueError("primary footprint requires an unjittered camera")
+    def dot(a,b): return sum(x*y for x,y in zip(a,b))
+    def cross(a,b): return [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]]
+    def unit(a):
+        length=math.sqrt(dot(a,a))
+        if not length: raise ValueError("degenerate camera basis")
+        return [v/length for v in a]
+    forward=unit(camera["direction"]);right=unit(cross(forward,camera["up"]));up=cross(right,forward)
+    scale=camera["height"]/(2*math.tan(camera["fov_y_radians"]/2))
+    xy=[];depth=[]
+    for vertex in world_vertices:
+        delta=[float(v)-p for v,p in zip(vertex,camera["position"])]
+        z=dot(delta,forward)
+        if abs(z)<1e-12: raise ValueError("vertex lies on projection plane")
+        depth.append(z)
+        xy.append([camera["width"]/2+scale*dot(delta,right)/z,camera["height"]/2-scale*dot(delta,up)/z])
+    ax,ay=xy[1][0]-xy[0][0],xy[1][1]-xy[0][1]
+    bx,by=xy[2][0]-xy[0][0],xy[2][1]-xy[0][1]
+    determinant=ax*by-bx*ay
+    if abs(determinant)<1e-12: raise ValueError("degenerate projected triangle")
+    x,y=pixel[0]-xy[0][0],pixel[1]-xy[0][1]
+    b1=(x*by-y*bx)/determinant;b2=(ax*y-ay*x)/determinant
+    bary=[1-b1-b2,b1,b2]
+    dx=[(ay-by)/determinant,by/determinant,-ay/determinant]
+    dy=[(bx-ax)/determinant,-bx/determinant,ax/determinant]
+    weights=[v/z for v,z in zip(bary,depth)];denominator=sum(weights)
+    if abs(denominator)<1e-12: raise ValueError("singular perspective interpolation")
+    uv=[sum(w*float(t[c]) for w,t in zip(weights,texcoords))/denominator for c in range(2)]
+    def derivative(b):
+        weighted=[v/z for v,z in zip(b,depth)]
+        return [(sum(w*float(t[c]) for w,t in zip(weighted,texcoords))-uv[c]*sum(weighted))/denominator for c in range(2)]
+    return uv,derivative(dx),derivative(dy)
+
+
+def build_scene(root, data, material_model, allow_differences, variant="scalar_rgb"):
     import mitsuba as mi
-    mi.set_variant("scalar_rgb")  # Independent CPU path, never the Phosphor GPU.
+    if variant not in ("scalar_rgb","llvm_ad_rgb"):
+        raise ValueError("independent reference requires a CPU variant")
+    mi.set_variant(variant)
+    vector = variant == "llvm_ad_rgb"
+    if vector:
+        import drjit as dr
+        dr.set_flag(dr.JitFlag.FastMath, False)
     np = np_module()
     Transform = getattr(mi, "ScalarAffineTransform4f", None) or getattr(mi, "ScalarTransform4f")
     # Mitsuba 3.9.1 area emitters are one-sided and have no twosided property.
@@ -167,6 +210,26 @@ def build_scene(root, data, material_model, allow_differences):
         # Shader converts the FILTERED sample to half before factor multiplication.
         return value.astype(np.float16).astype(np.float32)
 
+    if vector:
+        # Gather exact exported texels; do not substitute a native bitmap with
+        # different filtering or half-conversion semantics.
+        arrays={key:tuple(tuple(mi.Float(image[:,:,c].ravel()) for c in range(3))
+                          for image in pair) for key,pair in textures.items()}
+
+    def vector_bilinear(texture_id, uv, fallback, alpha=False):
+        if texture_id == INVALID:
+            return mi.Color3f(*fallback)
+        h,w=textures[texture_id][int(alpha)].shape[:2]
+        x=dr.llvm.Float64(dr.detach(uv.x))*w-.5
+        y=dr.llvm.Float64(dr.detach(uv.y))*h-.5
+        ix,iy=mi.Int(dr.floor(x)),mi.Int(dr.floor(y))
+        fx,fy=mi.Float(x-dr.floor(x)),mi.Float(y-dr.floor(y))
+        def tex(dx,dy):
+            index=mi.UInt((((iy+dy)%h+h)%h)*w+((ix+dx)%w+w)%w)
+            return mi.Color3f(*(dr.gather(mi.Float,a,index) for a in arrays[texture_id][int(alpha)]))
+        value=(tex(0,0)*(1-fx)+tex(1,0)*fx)*(1-fy)+(tex(0,1)*(1-fx)+tex(1,1)*fx)*fy
+        return mi.Color3f(*(mi.Float(mi.Float16(value[c])) for c in range(3)))
+
     class SnapshotTexture(mi.Texture):
         def __init__(self, props):
             super().__init__(props)
@@ -174,6 +237,8 @@ def build_scene(root, data, material_model, allow_differences):
             self.semantic = str(props["semantic"])
 
         def values(self, si):
+            if vector:
+                return self.vector_values(si)
             m, uv = self.material, si.uv
             base = np.asarray(m["base"][:3], dtype=np.float32) * bilinear(m["textures"][0], uv, [1,1,1])
             mr = bilinear(m["textures"][2], uv, [1,1,1])
@@ -193,9 +258,30 @@ def build_scene(root, data, material_model, allow_differences):
                 return normal * 0.5+0.5
             raise ValueError(self.semantic)
 
+        def vector_values(self,si):
+            m,uv=self.material,si.uv
+            base=mi.Color3f(*m["base"][:3])*vector_bilinear(m["textures"][0],uv,[1,1,1])
+            mr=vector_bilinear(m["textures"][2],uv,[1,1,1])
+            metallic=dr.clip(dr.llvm.Float64(dr.detach(mr.z))*m["metallic"],0,1)
+            if self.semantic=="base":return base
+            if self.semantic=="diffuse":return base*mi.Float(1-metallic)
+            if self.semantic=="metallic":return mi.Color3f(mi.Float(metallic))
+            if self.semantic=="roughness":return mi.Color3f(mi.Float(dr.clip(dr.llvm.Float64(dr.detach(mr.y))*m["roughness"],.04,1)))
+            alpha=vector_bilinear(m["textures"][0],uv,[1,1,1],alpha=True).x
+            accepted=(m["alpha_cutoff"]<=0)|(mi.Float(m["base"][3])*alpha>=np.float32(m["alpha_cutoff"]))
+            if self.semantic=="mask":return mi.Color3f(mi.Float(accepted))
+            if self.semantic=="emissive":
+                emission=mi.Color3f(*m["emissive"])*vector_bilinear(m["textures"][4],uv,[1,1,1])
+                return dr.select(accepted,emission,mi.Color3f(0))
+            if self.semantic=="normal":
+                normal=vector_bilinear(m["textures"][1],uv,[.5,.5,1])*2-1
+                normal.x*=m["normal_scale"];normal.y*=m["normal_scale"]
+                return normal*.5+.5
+            raise ValueError(self.semantic)
+
         def eval(self, si, active=True): return mi.Color3f(self.values(si))
         def eval_3(self, si, active=True): return mi.Color3f(self.values(si))
-        def eval_1(self, si, active=True): return float(self.values(si)[0])
+        def eval_1(self, si, active=True): return mi.Float(self.values(si)[0]) if vector else float(self.values(si)[0])
         def mean(self): return 0.5  # Only an emitter/BSDF sampling heuristic, never radiance.
         # Area emitters use this flag to choose their proposal. Force uniform
         # shape-area sampling, while eval still evaluates textured Le/MASK.

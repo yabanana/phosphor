@@ -105,6 +105,43 @@ def register_camera_path(mi, camera, crop, receivers):
     return pixel_index
 
 
+def register_vector_camera_path(mi, camera, crop, origins, directions):
+    import drjit as dr
+
+    x, y, width, height = crop
+    forward = np.asarray(camera['direction'], dtype=float)
+    forward /= np.linalg.norm(forward)
+    right = np.cross(forward, camera['up'])
+    right /= np.linalg.norm(right)
+    up = np.cross(right, forward)
+    forward, right, up = (mi.Vector3f(*map(float, axis)) for axis in (forward, right, up))
+    scale = camera['height'] / (2*math.tan(camera['fov_y_radians']/2))
+    origins, directions = mi.Point3f(origins.T), mi.Vector3f(directions.T)
+
+    class CachedCameraPath(mi.SamplingIntegrator):
+        def __init__(self, properties):
+            super().__init__(properties)
+            self.path = mi.load_dict({'type':'path', 'max_depth':properties['depth'],
+                                     'rr_depth':properties['roulette_depth']})
+
+        def sample(self, scene, sampler, ray, medium=None, active=True):
+            depth = dr.dot(ray.d, forward)
+            column = mi.Int(dr.floor(camera['width']/2+scale*dr.dot(ray.d,right)/depth))-x
+            row = mi.Int(dr.floor(camera['height']/2-scale*dr.dot(ray.d,up)/depth))-y
+            index = mi.UInt(dr.clip(row,0,height-1)*width+dr.clip(column,0,width-1))
+            visible = mi.RayDifferential3f(ray)
+            visible.o = dr.gather(mi.Point3f, origins, index)
+            visible.d = dr.gather(mi.Vector3f, directions, index)
+            visible.maxt = 1e30
+            visible.has_differentials = False
+            return self.path.sample(scene, sampler, visible, medium, active)
+
+        def to_string(self):
+            return 'SponzaCachedCameraPath'
+
+    mi.register_integrator('sponza_cached_camera_path', CachedCameraPath)
+
+
 def validate_receivers(mi, scene, positions, crop, receivers, pixel_index):
     x, y, width, height = crop
     misses = mismatches = 0
@@ -134,7 +171,8 @@ def main():
     parser.add_argument('--positions', type=Path, required=True, help='same-frame shadow-position PFM and JSON sidecar')
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--crop', type=int, nargs=4, required=True, metavar=('X', 'Y', 'WIDTH', 'HEIGHT'))
-    parser.add_argument('--max-spp', type=int, choices=(256, 1024, 4096, 16384, 65536), default=4096)
+    parser.add_argument('--max-spp', type=int, choices=(256, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304), default=4096)
+    parser.add_argument('--variant', choices=('scalar_rgb','llvm_ad_rgb'), default='scalar_rgb')
     args = parser.parse_args()
     limits_path = REPO / 'tools/testdata/f12/oracle-protocol-v1.json'
     limits = json.loads(limits_path.read_text())['reference']
@@ -158,6 +196,7 @@ def main():
             'positions_sha256': sha(args.positions), 'position_sidecar_sha256': sha(sidecar),
             'runner_sha256': sha(Path(__file__)),
             'limits_sha256': sha(limits_path), 'reference': limits, 'max_spp': args.max_spp,
+            'variant': args.variant, 'spp_checkpoints': [*limits['spp_checkpoints'],262144,1048576,4194304],
             'scope': 'sparse centre-sampled surface indirect diffuse control', 'candidate_read': False}
     (args.out/'protocol.json').write_text(json.dumps(plan, indent=2)+'\n')
     mi, description, differences = build_scene(root, data, 'diffuse', False)
@@ -182,11 +221,23 @@ def main():
     print(json.dumps(receivers), flush=True)
     if not receivers['passed']:
         return 1
+    if args.variant == 'llvm_ad_rgb':
+        origins = np.asarray([np.asarray(r.o) for r in rays])
+        directions = np.asarray([np.asarray(r.d) for r in rays])
+        del full, rays
+        mi, description, _ = build_scene(root, data, 'diffuse', False, args.variant)
+        import drjit as dr
+        dr.set_thread_count(8)
+        register_vector_camera_path(mi,camera,args.crop,origins,directions)
+        description['sensor']['film'].update(crop_offset_x=x,crop_offset_y=y,crop_width=width,crop_height=height)
+        description['integrator']={'type':'sponza_cached_camera_path','depth':limits['full_depth'],
+                                   'roulette_depth':limits['rr_depth'],'samples_per_pass':256}
+        full=mi.load_dict(description)
     description['integrator']['depth'] = limits['direct_depth']
     direct = mi.load_dict(description)
 
     records = []
-    for spp in limits['spp_checkpoints']:
+    for spp in plan['spp_checkpoints']:
         if spp > args.max_spp:
             break
         images = []
@@ -205,7 +256,7 @@ def main():
         if converged:
             write_pfm(args.out/'indirect.pfm', np.mean(images, axis=0, dtype=np.float64))
             break
-    report = {**plan, 'renderer': 'Mitsuba', 'version': mi.__version__, 'variant': 'scalar_rgb',
+    report = {**plan, 'renderer': 'Mitsuba', 'version': mi.__version__, 'variant': args.variant,
               'camera_check': camera_check, 'receivers': receivers, 'model_differences': differences, 'records': records,
               'converged': records[-1]['converged'], 'primary_material_parity_verified': material_parity,
               'reference_accepted': records[-1]['converged'] and material_parity and not differences, 'phase_accepted': False}
