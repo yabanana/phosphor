@@ -220,10 +220,11 @@ kernel void denoise_atrous_guide4(constant GPUDenoiseParams& p [[buffer(0)]],con
 
 // DI/GI/AO share the same geometric receiver. The final stride computes its
 // geometry weights once; each signal retains its own variance/color weights.
+constant bool kDenoiseDiffuseDI=kDenoiseSignal!=DENOISE_SIGNAL_GI;
 kernel void denoise_atrous_diffuse4(constant GPUDenoiseParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
-    texture2d<float,access::read> di [[texture(0)]],texture2d<float,access::read> gi [[texture(1)]],texture2d<float,access::read> ao [[texture(2)]],
-    texture2d<float,access::read> dm [[texture(3)]],texture2d<float,access::read> gm [[texture(4)]],texture2d<float,access::read> am [[texture(5)]],
-    texture2d<float,access::write> dout [[texture(6)]],texture2d<float,access::write> gout [[texture(7)]],texture2d<float,access::write> aout [[texture(8)]],
+    texture2d<float,access::read> di [[texture(0), function_constant(kDenoiseDiffuseDI)]],texture2d<float,access::read> gi [[texture(1)]],texture2d<float,access::read> ao [[texture(2)]],
+    texture2d<float,access::read> dm [[texture(3), function_constant(kDenoiseDiffuseDI)]],texture2d<float,access::read> gm [[texture(4)]],texture2d<float,access::read> am [[texture(5)]],
+    texture2d<float,access::write> dout [[texture(6), function_constant(kDenoiseDiffuseDI)]],texture2d<float,access::write> gout [[texture(7)]],texture2d<float,access::write> aout [[texture(8)]],
     uint2 group [[threadgroup_position_in_grid]],uint2 local [[thread_position_in_threadgroup]],uint lane [[thread_index_in_threadgroup]]) {
     constexpr uint W=24,N=W*W;threadgroup float4 geometry[N];threadgroup uint valid[N];
     const int2 origin=int2(group*uint2(8))-int2(8);
@@ -234,20 +235,21 @@ kernel void denoise_atrous_diffuse4(constant GPUDenoiseParams& p [[buffer(0)]],c
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);const uint2 pixel=group*uint2(8)+local;if(any(pixel>=uint2(p.width,p.height)))return;
     const uint centerIndex=(local.y+8)*W+local.x+8;const float4 center=geometry[centerIndex];
-    const float3 dv=di.read(pixel).rgb,gv=gi.read(pixel).rgb,av=ao.read(pixel).rgb;
-    if(!valid[centerIndex]){dout.write(float4(dv,1),pixel);gout.write(float4(gv,1),pixel);aout.write(float4(av,1),pixel);return;}
-    const float3 lum(diLuminance(dv),diLuminance(gv),diLuminance(av));const float3 variance(dm.read(pixel).z,gm.read(pixel).z,am.read(pixel).z);
+    const float3 dv=kDenoiseDiffuseDI?di.read(pixel).rgb:float3(0),gv=gi.read(pixel).rgb,av=ao.read(pixel).rgb;
+    if(!valid[centerIndex]){if(kDenoiseDiffuseDI)dout.write(float4(dv,1),pixel);gout.write(float4(gv,1),pixel);aout.write(float4(av,1),pixel);return;}
+    const float3 lum(diLuminance(dv),diLuminance(gv),diLuminance(av));const float3 variance(kDenoiseDiffuseDI?dm.read(pixel).z:0.0f,gm.read(pixel).z,am.read(pixel).z);
     const float taps[5]={1,4,6,4,1};float3 ds=0,gs=0,as=0,weights=0;
     for(int y=-2;y<=2;++y)for(int x=-2;x<=2;++x){const int2 q=int2(pixel)+int2(x,y)*4;if(any(q<0)||any(q>=int2(p.width,p.height)))continue;
         const uint i=uint(int(centerIndex)+y*int(4*W)+x*4);if(!valid[i])continue;const float4 neighbor=geometry[i];
         const float normal=pow(max(0.0f,dot(center.xyz,neighbor.xyz)),p.normalPhi);
         const float depth=exp(-abs(center.w-neighbor.w)/max(1e-6f,p.depthThreshold*max(center.w,neighbor.w)*float(p.atrousStep)));
-        const float3 dc=di.read(uint2(q)).rgb,gc=gi.read(uint2(q)).rgb,ac=ao.read(uint2(q)).rgb;
-        if(all(isfinite(dc))){const float c=exp(-abs(lum.x-diLuminance(dc))/(p.luminancePhi*sqrt(max(variance.x,p.varianceFloor))+1e-6f));const float w=taps[x+2]*taps[y+2]*(normal*depth*c*1.0f);ds+=dc*w;weights.x+=w;}
+        const float3 dc=kDenoiseDiffuseDI?di.read(uint2(q)).rgb:float3(0),gc=gi.read(uint2(q)).rgb,ac=ao.read(uint2(q)).rgb;
+        if(kDenoiseDiffuseDI&&all(isfinite(dc))){const float c=exp(-abs(lum.x-diLuminance(dc))/(p.luminancePhi*sqrt(max(variance.x,p.varianceFloor))+1e-6f));const float w=taps[x+2]*taps[y+2]*(normal*depth*c*1.0f);ds+=dc*w;weights.x+=w;}
         if(all(isfinite(gc))){const float c=exp(-abs(lum.y-diLuminance(gc))/(p.luminancePhi*sqrt(max(variance.y,p.varianceFloor))+1e-6f));const float w=taps[x+2]*taps[y+2]*(normal*depth*c*1.0f);gs+=gc*w;weights.y+=w;}
         if(all(isfinite(ac))){const float c=exp(-abs(lum.z-diLuminance(ac))/(p.luminancePhi*sqrt(max(variance.z,p.varianceFloor))+1e-6f));const float w=taps[x+2]*taps[y+2]*(normal*depth*c*1.0f);as+=ac*w;weights.z+=w;}
     }
-    dout.write(float4(weights.x>0?ds/weights.x:dv,1),pixel);gout.write(float4(weights.y>0?gs/weights.y:gv,1),pixel);aout.write(float4(saturate(weights.z>0?as/weights.z:av),1),pixel);
+    if(kDenoiseDiffuseDI)dout.write(float4(weights.x>0?ds/weights.x:dv,1),pixel);
+    gout.write(float4(weights.y>0?gs/weights.y:gv,1),pixel);aout.write(float4(saturate(weights.z>0?as/weights.z:av),1),pixel);
 }
 
 // History corruption control: wrong view ID without setting an error flag.

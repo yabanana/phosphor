@@ -256,7 +256,7 @@ TEST_CASE("pipelines script: retains F10-F14 lighting, depth-only and physical H
                               "ddgi_trace", "ddgi_classify", "ddgi_blend", "ddgi_resolve", "radiance_cache_update",
                               "gi_candidates", "gi_temporal", "gi_spatial", "gi_shade", "visibility_lit_resolve",
                               "reflection_rt", "reflection_ssr", "reflection_composite", "reflection_probe_prefilter",
-                              "ao_rtao", "ao_gtao", "denoise_atrous_diffuse4",
+                              "ao_rtao", "ao_gtao",
                               "denoise_pack", "denoise_pack_clear", "denoise_restore_radiance",
                               "atmosphere_transmittance", "atmosphere_multiscattering", "atmosphere_sky_view", "atmosphere_apply",
                               "fog_inject", "fog_inject_rt", "fog_temporal", "fog_integrate", "fog_apply",
@@ -264,6 +264,9 @@ TEST_CASE("pipelines script: retains F10-F14 lighting, depth-only and physical H
         CAPTURE(kernel);
         CHECK_MESSAGE(script.compute.count(kernel) == 1, "F10-F14 pipeline missing; run both lighting harvest scripts");
     }
+    CHECK(script.compute.count("denoise_atrous_diffuse4,40=0")==1); // DI + GI + AO
+    CHECK(script.compute.count("denoise_atrous_diffuse4,40=1")==1); // GI + AO
+    CHECK(script.compute.count("denoise_atrous_diffuse4")==0);
     for(const char* kernel:{"denoise_temporal","denoise_atrous","denoise_atrous_guide4","denoise_atrous_tile1","denoise_atrous_tile2","denoise_check"}){
         for(u32 signal:{0u,1u,2u,3u,0xffffffffu}){
             const auto key=std::string(kernel)+",40="+std::to_string(signal);CAPTURE(key);

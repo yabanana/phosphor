@@ -41,7 +41,8 @@ done
 # descriptors are harvested; external SDK implementation stays framework-owned.
 python3 "$repo_dir/tools/merge_pipeline_harvests.py" --output "$work/merged.json" \
     --replace-compute denoise_temporal --replace-compute denoise_atrous --replace-compute denoise_check \
-    --replace-compute denoise_atrous_tile1 --replace-compute denoise_atrous_tile2 "${corpora[@]}"
+    --replace-compute denoise_atrous_tile1 --replace-compute denoise_atrous_tile2 \
+    --replace-compute denoise_atrous_diffuse4 "${corpora[@]}"
 [[ -s "$work/merged.json" ]] || exit 1
 jq -S . "$work/merged.json" >"$work/final.json"
 mv "$work/final.json" "$destination"

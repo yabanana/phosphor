@@ -358,8 +358,8 @@ struct ReflectionPasses::Impl {
             if(rtAO){aoConsumer->bind(t,2,3);t->setAddress(rt->traceResources(frame.slot).instances->gpuAddress(),4);}texture(t,ctx,depth,0);texture(t,ctx,ao,1);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,rtAO?rtao:gtao,t,frame.width*frame.height);});
         directSelected=direct.direct();giSelected=gi&&options.gi!=GiMode::Off?gi->irradiance():dummyTexRef;specSelected=specular;aoSelected=ao;
         if(custom){const bool useDirectLighting=options.directLighting!=DirectLightingMode::Legacy&&!slots[frame.slot].skipLocalDenoise;
-            const bool diffuseBatch=useDirectLighting&&gi&&options.gi!=GiMode::Off&&options.ao!=AoMode::Off;
-            if(diffuseBatch){const auto filtered=denoise.addDiffuseSignals(graph,{direct.direct(),gi->irradiance(),ao},motion,receivers);
+            const bool diffuseBatch=gi&&options.gi!=GiMode::Off&&options.ao!=AoMode::Off;
+            if(diffuseBatch){const auto filtered=denoise.addDiffuseSignals(graph,{direct.direct(),gi->irradiance(),ao},motion,receivers,useDirectLighting);
                 directSelected=filtered[0];giSelected=filtered[1];aoSelected=filtered[2];}
             else{if(useDirectLighting)directSelected=denoise.addSignal(graph,DENOISE_SIGNAL_DI,direct.direct(),motion,receivers);
                 if(gi&&options.gi!=GiMode::Off)giSelected=denoise.addSignal(graph,DENOISE_SIGNAL_GI,gi->irradiance(),motion,receivers);

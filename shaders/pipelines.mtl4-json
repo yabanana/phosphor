@@ -7111,6 +7111,38 @@
         ],
         "function_descriptor": "fnd:CDC26B60A7830D5F623EB72A01722B7428144BF494AFDF2EEC96F2F8B3F0FC30",
         "label": "A0D968235E70E2254FB1E05F5B67A01E1914F134BA11BEEE439E18DF014BAD74"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 40
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 0
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:AF684CF4B1382F928B3C2265573D39A40643B2A12738AFFB5AE8A216F1436844",
+        "label": "AAA0F74B1FE5999EEEA0F16E3F71D4AC07995E04D0C3EEA3D816C36A8A2A93C4"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 40
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 1
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:AF684CF4B1382F928B3C2265573D39A40643B2A12738AFFB5AE8A216F1436844",
+        "label": "136E35809F11E8212AD931B433F9ADE06699517454E1A6D70A2B5177AFD62E4F"
       }
     ]
   },
@@ -9111,7 +9143,15 @@
         ]
       },
       {
-        "compute_function_descriptor": "fnd:AF684CF4B1382F928B3C2265573D39A40643B2A12738AFFB5AE8A216F1436844",
+        "compute_function_descriptor": "fnd:136E35809F11E8212AD931B433F9ADE06699517454E1A6D70A2B5177AFD62E4F",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:AAA0F74B1FE5999EEEA0F16E3F71D4AC07995E04D0C3EEA3D816C36A8A2A93C4",
         "required_threads_per_threadgroup": [
           0,
           0,
