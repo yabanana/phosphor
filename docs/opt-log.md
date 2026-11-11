@@ -2126,3 +2126,32 @@ for the default normal exponent give +0.32%, −3.42%, −0.15%.
 Both changes were removed and the baseline rebuilt and retested (nine CTest
 groups). Frozen evidence and the independent reference-domain finding are in
 the [follow-up](implementation/F13-F14-DYNAMIC-SPONZA-2026-11-10.md#reference-material-domain-and-rejected-cost-experiments).
+
+### F13/F14 closure budget (2026-11-11, phase/f13-f14-closure)
+
+Sponza 1080p full path, protocol of the budget closure (`--gpu-timing-serial`,
+256 frames after 128 warm-up), M5 Max, toolchain 32023.922. Baseline binary
+2b285df built with the same options. Quality is judged on the frozen D4 ROI
+configs against the independent F13 clips; F8/F14 gates are unchanged.
+
+- **Check passes only with `--debug-lighting`** (7c2f285). Three A/B/A pairs:
+  GPU p50 22.02/22.10 → 20.16 ms, p95 24.5/24.3 → 21.62 ms. Adopted, pixels
+  unchanged.
+- **Lobe-bounded specular filter and per-pixel specular history** (dc6f3bb).
+  These are quality changes. They cost about 0.65 ms of denoise on Sponza
+  (8.8 → 9.45 ms).
+- **Two specular a-trous strides instead of three** (e31c9bf). One run per
+  variant, base repeated: p95 22.3 → 20.8 ms. Fixture metrics are identical
+  to four decimals. Adopted.
+- **SSR march down to 16 steps on rough lobes** (e31c9bf). Reflection sample
+  pass 2.93 → 2.24 ms, p95 −0.5 ms. Mirror floor 0.0244 → 0.0247. Adopted.
+- **Two RTAO rays** (e31c9bf). RTAO 1.19 → 0.64 ms; ao-cavity-rtao p95
+  0.0091 → 0.0101. Adopted. Combined with the two changes above:
+  p50 17.36 ms, p95 18.57 ms.
+- **Rejected: soft-change test from the history's temporal variance.**
+  moving-light-custom p95 0.0531 → 0.0634 fails, and disocclusion
+  0.0573 → 0.0598. Removed.
+- **Rejected earlier: deterministic sun-disk BRDF at secondary hits.**
+  Roughness is unchanged, at an extra quadrature cost. Never committed.
+
+The 16.67 ms target remains open, about 1.9 ms over at p95.
