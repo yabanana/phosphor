@@ -380,7 +380,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
                 nlohmann::json signals=nlohmann::json::object();
                 for(const auto& [enabled,signal]:std::array<std::pair<bool,u32>,4>{{
                     {options_.directLighting!=DirectLightingMode::Legacy,DENOISE_SIGNAL_DI},
-                    {options_.gi!=GiMode::Off,DENOISE_SIGNAL_GI},
+                    {denoisesGi(options_),DENOISE_SIGNAL_GI},
                     {options_.reflections!=ReflectionMode::Off,DENOISE_SIGNAL_SPECULAR},
                     {options_.ao!=AoMode::Off,DENOISE_SIGNAL_AO}}})
                     if(enabled){

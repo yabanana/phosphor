@@ -1266,4 +1266,12 @@ TEST_CASE("F13/F14 budget defaults are the measured ones") {
     LaunchOptions w;REQUIRE(parse({"--ssr-rough-steps","64","--ao-rays","4","--specular-atrous-iterations","3"},w,error));
     CHECK(w.ssrRoughSteps==64);CHECK(w.aoRays==4);CHECK(w.specularAtrousIterations==3);
     LaunchOptions bad;CHECK_FALSE(parse({"--ao-rays","0"},bad,error));CHECK_FALSE(parse({"--ssr-rough-steps","1"},bad,error));
+    // DDGI irradiance is deterministic per pixel: denoised only on request; stochastic GI always.
+    CHECK_FALSE(o.ddgiDenoise);CHECK_FALSE(denoisesGi(o));
+    const std::vector<const char*> gi={"--render-path","visibility","--rt","on","--lighting","restir","--lighting-denoise","custom","--gi"};
+    auto with=[&](std::vector<const char*> extra){auto args=gi;args.insert(args.end(),extra.begin(),extra.end());return args;};
+    LaunchOptions on;REQUIRE(parse(with({"ddgi","--ddgi-denoise","on"}),on,error));CHECK(denoisesGi(on));
+    LaunchOptions ddgi;REQUIRE(parse(with({"ddgi"}),ddgi,error));CHECK_FALSE(denoisesGi(ddgi));
+    LaunchOptions cache;REQUIRE(parse(with({"cache"}),cache,error));CHECK(denoisesGi(cache));
+    CHECK_FALSE(parse({"--ddgi-denoise","maybe"},bad,error));
 }

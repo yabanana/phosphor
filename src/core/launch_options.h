@@ -351,6 +351,10 @@ struct LaunchOptions {
     float reflectionRegularizationScale=1;
     u32 specularAtrousIterations=2; // capped by the denoiser's a-trous iterations; 2 measured: -1.5 ms, fixtures unchanged
     u32 ssrRoughSteps=16,aoRays=2; // budget defaults measured on Sponza 1080p and the F13 fixtures; 0 = 64 SSR steps / preset rays
+    // DDGI irradiance is a deterministic probe interpolation per pixel (no
+    // Monte Carlo noise), so the custom denoiser leaves it unfiltered unless
+    // --ddgi-denoise on; stochastic GI (cache, ReSTIR) is always denoised.
+    bool ddgiDenoise=false;
     u32 timeJumpEveryN=0,debugVolumeCorrupt=0;
     std::string volumeOracle;bool fogHomogeneous=false,atmoFreezeClock=false;
     std::string denoisedFixture,denoisedFixtureOutput;bool denoisedFixturePreExposed=false,denoisedFixtureAutoExposure=false,denoisedFixtureManualExposureControl=false;u32 denoisedFixturePrewarmMs=120000;
@@ -414,5 +418,8 @@ struct LaunchOptions {
 /// `benchCount` bounds the accepted --bench values.
 bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
                         LaunchOptions& out, std::string& error);
+
+/// Whether the F13 custom denoiser filters the GI signal (see ddgiDenoise).
+inline bool denoisesGi(const LaunchOptions& o) { return o.gi != GiMode::Off && (o.gi != GiMode::DDGI || o.ddgiDenoise); }
 
 } // namespace phosphor

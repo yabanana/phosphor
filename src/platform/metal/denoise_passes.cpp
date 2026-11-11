@@ -121,7 +121,7 @@ struct DenoisePasses::Impl {
         // Allocate only signals selected for this view, before graph callbacks.
         // First use/resize is a resource event; steady frames allocate nothing.
         if(useDirectLighting)reserve(DENOISE_SIGNAL_DI);
-        if(options.gi!=GiMode::Off)reserve(DENOISE_SIGNAL_GI);
+        if(denoisesGi(options))reserve(DENOISE_SIGNAL_GI);
         if(options.reflections!=ReflectionMode::Off)reserve(DENOISE_SIGNAL_SPECULAR);
         if(options.ao!=AoMode::Off)reserve(DENOISE_SIGNAL_AO);
     }

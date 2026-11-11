@@ -470,6 +470,9 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if(!needCount(out.ssrRoughSteps)||out.ssrRoughSteps<2||out.ssrRoughSteps>512){error="--ssr-rough-steps: expected 2..512";return false;}
         } else if (arg == "--ao-rays") {
             if(!needCount(out.aoRays)||out.aoRays<1||out.aoRays>64){error="--ao-rays: expected 1..64";return false;}
+        } else if (arg == "--ddgi-denoise") {
+            const auto value=needValue();if(!value)return false;
+            if(*value=="on")out.ddgiDenoise=true;else if(*value=="off")out.ddgiDenoise=false;else{error="--ddgi-denoise: expected on|off";return false;}
         } else if (arg == "--specular-atrous-iterations") {
             if(!needCount(out.specularAtrousIterations)||out.specularAtrousIterations<1||out.specularAtrousIterations>5){error="--specular-atrous-iterations: expected 1..5";return false;}
         } else if (arg == "--reflection-regularization-scale") {
