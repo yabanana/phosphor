@@ -350,6 +350,9 @@ struct LaunchOptions {
     // F13.6 declared path regularisation of the reflection light connection.
     float reflectionRegularizationScale=1;
     u32 specularAtrousIterations=2; // capped by the denoiser's a-trous iterations; 2 measured: -1.5 ms, fixtures unchanged
+    // Capped likewise; fewer than the denoiser's disables the batched diffuse
+    // final stride. 2 measured: ao-cavity-rtao p95 0.0101 -> 0.0070 (less blur).
+    u32 aoAtrousIterations=2;
     u32 ssrRoughSteps=16,aoRays=2; // budget defaults measured on Sponza 1080p and the F13 fixtures; 0 = 64 SSR steps / preset rays
     // DDGI irradiance is a deterministic probe interpolation per pixel (no
     // Monte Carlo noise), so the custom denoiser leaves it unfiltered unless

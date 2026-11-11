@@ -1262,7 +1262,9 @@ TEST_CASE("F13.6 reflection regularisation scale option") {
 
 TEST_CASE("F13/F14 budget defaults are the measured ones") {
     LaunchOptions o;std::string error;REQUIRE(parse({},o,error));
-    CHECK(o.specularAtrousIterations==2);CHECK(o.ssrRoughSteps==16);CHECK(o.aoRays==2);
+    CHECK(o.specularAtrousIterations==2);CHECK(o.ssrRoughSteps==16);CHECK(o.aoRays==2);CHECK(o.aoAtrousIterations==2);
+    LaunchOptions ao3;REQUIRE(parse({"--ao-atrous-iterations","3"},ao3,error));CHECK(ao3.aoAtrousIterations==3);
+    LaunchOptions badAo;CHECK_FALSE(parse({"--ao-atrous-iterations","0"},badAo,error));CHECK_FALSE(parse({"--ao-atrous-iterations","6"},badAo,error));
     LaunchOptions w;REQUIRE(parse({"--ssr-rough-steps","64","--ao-rays","4","--specular-atrous-iterations","3"},w,error));
     CHECK(w.ssrRoughSteps==64);CHECK(w.aoRays==4);CHECK(w.specularAtrousIterations==3);
     LaunchOptions bad;CHECK_FALSE(parse({"--ao-rays","0"},bad,error));CHECK_FALSE(parse({"--ssr-rough-steps","1"},bad,error));

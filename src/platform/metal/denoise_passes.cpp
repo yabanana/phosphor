@@ -166,7 +166,8 @@ struct DenoisePasses::Impl {
         s.filtered=s.temporalOutput;
         // Specular may run fewer strides: the reflection-lobe bound leaves the
         // widest one little to do (--specular-atrous-iterations, measured).
-        const u32 iterations=sig==DENOISE_SIGNAL_SPECULAR?std::min(settings.atrousIterations,options.specularAtrousIterations):settings.atrousIterations;
+        const u32 iterations=sig==DENOISE_SIGNAL_SPECULAR?std::min(settings.atrousIterations,options.specularAtrousIterations):
+            sig==DENOISE_SIGNAL_AO?std::min(settings.atrousIterations,options.aoAtrousIterations):settings.atrousIterations;
         for(u32 iteration=0;iteration<iterations-(deferFinal?1u:0u);++iteration){s.atrousInput[iteration]=s.filtered;
             g.addPass(label+" atrous "+std::to_string(iteration),PassType::Compute,[this,sig,iteration](PassBuilder& b){auto& s=signal[sig];
                 b.read(s.atrousInput[iteration],Usage::ShaderRead,StageDispatch);b.read(s.moments,Usage::ShaderRead,StageDispatch);b.read(s.surface,Usage::ShaderRead,StageDispatch);
@@ -205,7 +206,7 @@ struct DenoisePasses::Impl {
     }
     std::array<rg::TextureRef,3> addDiffuse(rg::RenderGraph& g,std::array<rg::TextureRef,3> raw,rg::TextureRef motion,rg::BufferRef surfaces,bool withDI){
         using namespace rg;constexpr std::array<u32,3> signals{DENOISE_SIGNAL_DI,DENOISE_SIGNAL_GI,DENOISE_SIGNAL_AO};
-        const bool batch=settings.atrousIterations==3&&!diagnosticUnbatched&&!diagnosticReference&&!diagnosticGuide4Reference;
+        const bool batch=settings.atrousIterations==3&&options.aoAtrousIterations>=3&&!diagnosticUnbatched&&!diagnosticReference&&!diagnosticGuide4Reference;
         const u32 first=withDI?0u:1u;
         for(u32 i=first;i<3;++i)raw[i]=add(g,signals[i],raw[i],motion,surfaces,{},batch);
         if(batch){
