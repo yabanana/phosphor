@@ -159,7 +159,10 @@ struct DenoisePasses::Impl {
             registries[sig].read(frame.view,frame.index+1);registries[sig].write(frame.view,frame.index+1,frame.unjitteredVP);h.lastWritten=s.writeSide;
         });
         s.filtered=s.temporalOutput;
-        for(u32 iteration=0;iteration<settings.atrousIterations-(deferFinal?1u:0u);++iteration){s.atrousInput[iteration]=s.filtered;
+        // Specular may run fewer strides: the reflection-lobe bound leaves the
+        // widest one little to do (--specular-atrous-iterations, measured).
+        const u32 iterations=sig==DENOISE_SIGNAL_SPECULAR?std::min(settings.atrousIterations,options.specularAtrousIterations):settings.atrousIterations;
+        for(u32 iteration=0;iteration<iterations-(deferFinal?1u:0u);++iteration){s.atrousInput[iteration]=s.filtered;
             g.addPass(label+" atrous "+std::to_string(iteration),PassType::Compute,[this,sig,iteration](PassBuilder& b){auto& s=signal[sig];
                 b.read(s.atrousInput[iteration],Usage::ShaderRead,StageDispatch);b.read(s.moments,Usage::ShaderRead,StageDispatch);b.read(s.surface,Usage::ShaderRead,StageDispatch);
                 if(s.metadata.valid())b.read(s.metadata,Usage::ShaderRead,StageDispatch);s.atrousOutput[iteration]=b.createTexture("F13 filtered signal "+std::to_string(sig)+" "+std::to_string(iteration),{Format::RGBA32Float,frame.width,frame.height});

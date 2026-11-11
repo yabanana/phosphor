@@ -466,6 +466,12 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if(!needFloat(out.atmoStartHour)||out.atmoStartHour<0||out.atmoStartHour>=24){error="--start-hour: expected0..24";return false;}
         } else if (arg == "--time-jump-every") {if(!needCount(out.timeJumpEveryN))return false;
         } else if (arg == "--atmo-freeze-clock") {out.atmoFreezeClock=true;
+        } else if (arg == "--ssr-rough-steps") {
+            if(!needCount(out.ssrRoughSteps)||out.ssrRoughSteps<2||out.ssrRoughSteps>512){error="--ssr-rough-steps: expected 2..512";return false;}
+        } else if (arg == "--ao-rays") {
+            if(!needCount(out.aoRays)||out.aoRays<1||out.aoRays>64){error="--ao-rays: expected 1..64";return false;}
+        } else if (arg == "--specular-atrous-iterations") {
+            if(!needCount(out.specularAtrousIterations)||out.specularAtrousIterations<1||out.specularAtrousIterations>5){error="--specular-atrous-iterations: expected 1..5";return false;}
         } else if (arg == "--reflection-regularization-scale") {
             if(!needFloat(out.reflectionRegularizationScale)||!(out.reflectionRegularizationScale>=1&&out.reflectionRegularizationScale<=100)){
                 error="--reflection-regularization-scale: expected [1,100]";return false;}

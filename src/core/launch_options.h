@@ -349,6 +349,8 @@ struct LaunchOptions {
     float atmoScatteringScale=1,atmoOzoneScale=1,atmoMieG=-2,atmoGroundAlbedo=-1;
     // F13.6 declared path regularisation of the reflection light connection.
     float reflectionRegularizationScale=1;
+    u32 specularAtrousIterations=2; // capped by the denoiser's a-trous iterations; 2 measured: -1.5 ms, fixtures unchanged
+    u32 ssrRoughSteps=16,aoRays=2; // budget defaults measured on Sponza 1080p and the F13 fixtures; 0 = 64 SSR steps / preset rays
     u32 timeJumpEveryN=0,debugVolumeCorrupt=0;
     std::string volumeOracle;bool fogHomogeneous=false,atmoFreezeClock=false;
     std::string denoisedFixture,denoisedFixtureOutput;bool denoisedFixturePreExposed=false,denoisedFixtureAutoExposure=false,denoisedFixtureManualExposureControl=false;u32 denoisedFixturePrewarmMs=120000;

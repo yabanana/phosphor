@@ -60,10 +60,13 @@ inline bool reflectionSSRPoint(float3 origin,float3 direction,float distance,con
     hit.point=world.xyz/world.w;hit.pixel=pixel.y*p.width+pixel.x;hit.distance=length(hit.point-origin);
     delta=-(reflectionMatrix(p.view)*float4(point,1)).z+(reflectionMatrix(p.view)*float4(hit.point,1)).z;return isfinite(delta);
 }
-inline ReflectionSSRHit reflectionSSR(float3 origin,float3 direction,constant GPUReflectionParams& p,texture2d<float,access::read> depth){
+inline ReflectionSSRHit reflectionSSR(float3 origin,float3 direction,constant GPUReflectionParams& p,texture2d<float,access::read> depth,float roughness=0.0f){
     ReflectionSSRHit hit{};hit.pixel=~0u;float previous=0;bool front=false;
     if(!(p.flags&REFLECTION_ENABLE_SSR))return hit;
-    const uint count=clamp(p.ssrSteps,2u,512u);
+    // Rough lobes reflect a blurred image: march fewer steps above the RT band
+    // (ssrRoughSteps at roughness 1, 0 keeps the full count everywhere).
+    const uint full=clamp(p.ssrSteps,2u,512u);
+    const uint count=p.ssrRoughSteps?uint(mix(float(full),float(clamp(p.ssrRoughSteps,2u,full)),smoothstep(p.rtRoughnessHigh,1.0f,roughness))+.5f):full;
     for(uint step=1;step<=count;++step){float f=float(step)/float(count),distance=p.maxDistance*f*f,delta;
         ReflectionSSRHit candidate{};if(!reflectionSSRPoint(origin,direction,distance,p,depth,candidate,delta)){previous=distance;front=false;continue;}
         if(front&&delta>=0){float low=previous,high=distance;for(uint j=0;j<min(p.ssrBinarySteps,16u);++j){float m=(low+high)*.5f,md;ReflectionSSRHit mid;
@@ -85,7 +88,7 @@ inline GPUSpecularSample reflectionFallback(GPUDISurface surface,ReflectionDirec
     if(!direction.valid)return out;
     for(uint i=0;i<3;++i)out.direction[i]=direction.direction[i];out.proposalSolidAngle=direction.pdf;
     if(!any(direction.weight>0))return out;float3 L;
-    const auto hit=reflectionSSR(diVec(surface.position),direction.direction,p,depth);
+    const auto hit=reflectionSSR(diVec(surface.position),direction.direction,p,depth,surface.roughness);
     if(hit.valid&&surfaces[hit.pixel].valid){const GPUDISurface secondary=surfaces[hit.pixel];out.path=REFLECTION_PATH_SSR;out.hitDistance=hit.distance;
         out.secondarySlot=secondary.instanceSlot;out.secondaryGeneration=secondary.instanceGeneration;
         if((p.flags&REFLECTION_ENABLE_CACHE)&&giCacheLookup(hit.point,diVec(secondary.geometricNormal),-direction.direction,gi,cache,L))out.path=REFLECTION_PATH_CACHE;

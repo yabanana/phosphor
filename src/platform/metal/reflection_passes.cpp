@@ -109,7 +109,7 @@ struct ReflectionPasses::Impl {
             for(auto** t:{&f.reduceTable,&f.aoTable,&f.composeTable,&f.preComposeTable,&f.zeroTable,&f.clearTable,&f.checkTable,&f.publishTable,&f.rawValidateTable,&f.inputPoisonTable,&f.inputCheckTable})*t=lighting::table(c);
             if(o.captureLinearSignal==8)f.filteredIndirectTable=lighting::table(c);
             f.errors=lighting::buffer(c,64,"F13 numerical state counters",true);std::memset(f.errors->contents(),0,64);}
-        aoSettings.radius=o.aoRadius;aoSettings.rays=(o.reducedLighting||o.forceApple9)?2:4;
+        aoSettings.radius=o.aoRadius;aoSettings.rays=o.aoRays?o.aoRays:((o.reducedLighting||o.forceApple9)?2:4);
     }
     ~Impl(){c.waitIdle();releaseProbe();c.memory().release(probeMetadata,MemoryCategory::RayTracing);c.memory().release(probeFault,MemoryCategory::RayTracing);c.memory().release(staticSlots,MemoryCategory::RayTracing);c.memory().release(dummyBuffer,MemoryCategory::RayTracing);c.memory().release(dummyTexture,MemoryCategory::RayTracing);
         for(auto& f:slots){for(auto* b:{f.samples,f.metadata,f.errors,f.testSurfaces})c.memory().release(b,MemoryCategory::RayTracing);
@@ -204,7 +204,7 @@ struct ReflectionPasses::Impl {
         params.width=f.width;params.height=f.height;params.frameIndex=u32(f.index);params.maxDistance=settings.maxDistance;params.ssrThickness=settings.ssrThickness;
         params.rtRoughnessLow=settings.rtRoughnessLow;params.rtRoughnessHigh=settings.rtRoughnessHigh;params.slotCount=store.slotCapacity();params.meshCount=u32(geometry.size());params.materialCount=u32(store.materials().size());params.lightCount=f.constants.lightCount;
         params.ssrSteps=settings.ssrSteps;params.ssrBinarySteps=settings.ssrBinarySteps;params.probeCount=1;params.seed=options.lightingSeed;params.maxProbeMip=ProbeMips-1;
-        for(u32 i=0;i<3;++i)params.environment[i]=environment[i];params.regularizationScale=options.reflectionRegularizationScale;
+        for(u32 i=0;i<3;++i)params.environment[i]=environment[i];params.regularizationScale=options.reflectionRegularizationScale;params.ssrRoughSteps=options.ssrRoughSteps;
         // The analytic probe is a fixed gradient, not the declared environment:
         // it is consulted only in probe-only mode or for real probe content.
         const bool realProbe=options.reflectionCaptureProbe||!options.reflectionProbePath.empty()||options.reflections==ReflectionMode::Probes;

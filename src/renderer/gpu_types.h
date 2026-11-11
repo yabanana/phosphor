@@ -795,7 +795,7 @@ struct GPUReflectionParams {
     u32 slotCount, meshCount, materialCount, lightCount;
     u32 ssrSteps, ssrBinarySteps, probeCount, seed;
     float environment[3], maxProbeMip;
-    float regularizationScale; u32 pad[3]; // k: alpha' = max(alpha_secondary, k*alpha_camera)
+    float regularizationScale; u32 ssrRoughSteps; u32 pad[2]; // k: alpha' = max(alpha_secondary, k*alpha_camera); SSR steps at roughness 1
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionParams) == 304, "GPUReflectionParams layout");
 struct GPUSpecularSample {
