@@ -369,7 +369,11 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     if(!options_.captureLinear.empty()||!options_.captureLinearSequence.empty()) {
         LinearCapture::Config capture;capture.path=options_.captureLinear;capture.sequence=options_.captureLinearSequence;
         capture.frame=options_.captureLinearFrame;capture.every=options_.captureEvery;capture.scalar=options_.captureLinearSignal==3||options_.captureLinearSignal==7||options_.captureLinearSignal==9;
-        if(options_.reflectionScene=="ao-temporal-wall"&&options_.captureLinearSignal==9)
+        // Denoise history checkpoints exist only where the independent checks
+        // are encoded (--debug-lighting, always passed by the F13/F14 runner);
+        // product captures carry no history metadata.
+        if(!options_.debugLighting){}
+        else if(options_.reflectionScene=="ao-temporal-wall"&&options_.captureLinearSignal==9)
             capture.completedMetadata=[this](u32 slot){return reflections_->completedAOCheckpoint(slot);};
         else if(options_.temporalScript&&options_.lightingDenoise!=LightingDenoiseMode::Off)
             capture.completedMetadata=[this](u32 slot){
