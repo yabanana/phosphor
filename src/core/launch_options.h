@@ -363,7 +363,11 @@ struct LaunchOptions {
     // (single-sample custom path); 1 disables the boost. 8x8 below 0.2 measured:
     // every F13 fixture improves, Sponza GPU p95 unchanged, p99 +0.5 ms.
     u32 reflectionBoostSamples=8,reflectionBoostFrames=8;float reflectionBoostRoughness=0.2f;
-    u32 ssrRoughSteps=16,aoRays=2; // budget defaults measured on Sponza 1080p and the F13 fixtures; 0 = 64 SSR steps / preset rays
+    // ssrRoughSteps: budget default measured on Sponza 1080p and the F13
+    // fixtures (0 = 64 SSR steps). aoRays 0 = the preset's RTAO rays (4, or 2
+    // reduced): owner decision D2 keeps the ray budgets, so the budget closure
+    // does not lower them.
+    u32 ssrRoughSteps=16,aoRays=0;
     // DDGI irradiance is a deterministic probe interpolation per pixel (no
     // Monte Carlo noise), so the custom denoiser leaves it unfiltered unless
     // --ddgi-denoise on; stochastic GI (cache, ReSTIR) is always denoised.

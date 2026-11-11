@@ -1263,7 +1263,7 @@ TEST_CASE("F13.6 reflection regularisation scale option") {
 
 TEST_CASE("F13/F14 budget defaults are the measured ones") {
     LaunchOptions o;std::string error;REQUIRE(parse({},o,error));
-    CHECK(o.specularAtrousIterations==2);CHECK(o.ssrRoughSteps==16);CHECK(o.aoRays==2);CHECK(o.aoAtrousIterations==2);
+    CHECK(o.specularAtrousIterations==2);CHECK(o.ssrRoughSteps==16);CHECK(o.aoRays==0);CHECK(o.aoAtrousIterations==2); // D2: preset RTAO rays
     CHECK(o.specularMaxHistory==128);CHECK(o.reflectionBoostSamples==8);CHECK(o.reflectionBoostFrames==8);CHECK(o.reflectionBoostRoughness==0.2f);
     LaunchOptions nb;REQUIRE(parse({"--reflection-boost-samples","1","--reflection-boost-frames","0","--reflection-boost-roughness","0.5"},nb,error));CHECK(nb.reflectionBoostSamples==1);CHECK(nb.reflectionBoostFrames==0);
     CHECK_FALSE(parse({"--reflection-boost-samples","9"},nb,error));CHECK_FALSE(parse({"--reflection-boost-roughness","2"},nb,error));LaunchOptions mh;REQUIRE(parse({"--specular-max-history","32"},mh,error));CHECK(mh.specularMaxHistory==32);
