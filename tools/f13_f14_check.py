@@ -68,6 +68,35 @@ def enforce_gates(config):
             if roi["thresholds"][field]>limit:raise ValueError(f"cannot relax retained {field} gate")
 
 
+def reference_role(case):
+    """Reference each case is judged against, as the F13/F14 plans declare it.
+
+    independent-clip: the product output must match an independent converged
+      clip (F13 custom denoise, AO, probes, MetalFX); pending until supplied.
+    numerical: F14 sparse numerical oracles (LUT integrals, Beer-Lambert,
+      solar clock); the volume evidence gates the case.
+    full-rate-pair: temporal reconstruction against its full-rate control
+      (F14 clouds); the pair metrics gate the case.
+    control: raw inputs, higher-sample controls, SSR/probe-capture and
+      full-rate controls; metrics are reported, they do not gate.
+    functional: no capture; functional and negative checks only.
+    """
+    name=case["name"]
+    if not case.get("capture",True):return "functional"
+    if case.get("raw_diagnostic") or case.get("probe_capture") or case.get("reference_kind"):return "control"
+    if name=="mirror-ssr" or name.endswith("-raw"):return "control"
+    if case["phase"]=="F14":return "full-rate-pair" if case.get("quality_pair") else "numerical"
+    return "independent-clip"
+
+
+def gating_passed(result,role):
+    """True when the evidence this case's role requires exists and passes."""
+    if not result.get("functional_passed",False):return False
+    if role=="independent-clip" and not result.get("independent_metrics",{}).get("passed",False):return False
+    if role=="full-rate-pair" and not result.get("control_metrics",{}).get("passed",False):return False
+    return result.get("numerical",{}).get("passed",True) and result.get("external_numerical",{}).get("passed",True)
+
+
 def make_cases(out,frames,sdk_policy,probe_dir=None):
     cases=[]
     def add(name,phase,scene,flags,**extra):
@@ -164,6 +193,7 @@ def make_cases(out,frames,sdk_policy,probe_dir=None):
             if case["numerical_oracle"]=="fog-homogeneous":case["flags"]+=["--fog-homogeneous"]
         case["linear"]=str(folder/"linear");case["signal"]=case.get("signal","hdr")
         case["roi"]=default_roi(case["scene"],frames)
+        case["reference_role"]=reference_role(case)
         if case.get("roi_scale"):
             for roi in case["roi"]["rois"]:roi["scale"]=case["roi_scale"]
     return cases
@@ -405,7 +435,8 @@ def main(argv=None):
                 if case.get("volume_oracle"):
                     result["numerical"]=native_volume_evidence(case,binary_hash,manifest_hash,source_sha)
                     if case["name"] in evidence:result["external_numerical"]=numeric_evidence(case,evidence,binary_hash,manifest_hash)
-                result["independent_reference_pending"]=case.get("capture",True) and not case.get("raw_diagnostic") and not case.get("probe_capture") and not reference
+                result["reference_role"]=reference_role(case)
+                result["independent_reference_pending"]=result["reference_role"]=="independent-clip" and not reference
                 results.append(result)
                 (out/case["name"]/"result.json").write_bytes(json_bytes(result))
     except (RuntimeError,OSError,ValueError) as error:
@@ -425,12 +456,16 @@ def main(argv=None):
              "functional_passed":all(r.get("functional_passed",False) for r in results) and len(results)==len(cases),
              "phase_accepted":False,"hard_stop":PHASE_LIMIT,"missing_controls":MISSING_CONTROLS}
     (out/"summary.json").write_bytes(json_bytes(summary))
-    selected_evidence_complete=summary["functional_passed"] and all(not r.get("independent_reference_pending",False) and
-        r.get("independent_metrics",{}).get("passed",True) and r.get("control_metrics",{}).get("passed",True) and
-        r.get("numerical",{}).get("passed",True) and r.get("external_numerical",{}).get("passed",True) for r in results)
+    roles={case["name"]:reference_role(case) for case in cases}
+    for r in results:r["gating_passed"]=gating_passed(r,roles.get(r.get("name"),"independent-clip"))
+    selected_evidence_complete=summary["functional_passed"] and all(r["gating_passed"] for r in results)
+    summary["gating"]={role:{"cases":sum(1 for r in results if roles.get(r.get("name"))==role),
+                             "passed":sum(1 for r in results if roles.get(r.get("name"))==role and r["gating_passed"])}
+                       for role in sorted(set(roles.values()))}
     summary["selected_evidence_complete"]=selected_evidence_complete
     summary["corpus_complete"]=False # Full independent image/SDK/lifetime evidence remains separate from sparse numerical hooks.
     (out/"summary.json").write_bytes(json_bytes(summary))
+    print("gating by reference role: "+", ".join(f"{role} {v['passed']}/{v['cases']}" for role,v in summary["gating"].items()))
     print(f"F13/F14 functional checks {'PASS' if summary['functional_passed'] else 'FAIL'}; selected evidence {'complete' if selected_evidence_complete else 'PENDING/FAIL'}; remaining controls PENDING; phase acceptance NOT CLAIMED")
     return 0 if selected_evidence_complete else 1
 
