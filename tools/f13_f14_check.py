@@ -77,6 +77,8 @@ def reference_role(case):
       solar clock); the volume evidence gates the case.
     full-rate-pair: temporal reconstruction against its full-rate control
       (F14 clouds); the pair metrics gate the case.
+    repeatability-pair: a second identical run (F14.4 day/night); its frames
+      must equal the first run's bit for bit, and its numerical oracle passes.
     control: raw inputs, higher-sample controls, SSR/probe-capture and
       full-rate controls; metrics are reported, they do not gate.
     functional: no capture; functional and negative checks only.
@@ -85,6 +87,7 @@ def reference_role(case):
     if not case.get("capture",True):return "functional"
     if case.get("raw_diagnostic") or case.get("probe_capture") or case.get("reference_kind"):return "control"
     if name=="mirror-ssr" or name.endswith("-raw"):return "control"
+    if case.get("repeat_of"):return "repeatability-pair"
     if case["phase"]=="F14":return "full-rate-pair" if case.get("quality_pair") else "numerical"
     return "independent-clip"
 
@@ -94,7 +97,22 @@ def gating_passed(result,role):
     if not result.get("functional_passed",False):return False
     if role=="independent-clip" and not result.get("independent_metrics",{}).get("passed",False):return False
     if role=="full-rate-pair" and not result.get("control_metrics",{}).get("passed",False):return False
+    if role=="repeatability-pair" and not result.get("repeatability",{}).get("passed",False):return False
     return result.get("numerical",{}).get("passed",True) and result.get("external_numerical",{}).get("passed",True)
+
+
+def repeatability(first,second,frames):
+    """Frame-by-frame comparison of two runs of the same frozen case."""
+    a=sorted(Path(first).glob("frame-*.pfm"));b=sorted(Path(second).glob("frame-*.pfm"))
+    if len(a)!=frames or [p.name for p in a]!=[p.name for p in b]:raise ValueError("repeat runs captured different frame sets")
+    differing=[];worst=0.0
+    for x,y in zip(a,b):
+        if x.read_bytes()==y.read_bytes():continue
+        ix,iy=read_pfm(x),read_pfm(y)
+        if (ix.width,ix.height)!=(iy.width,iy.height):raise ValueError("repeat extent differs")
+        d=max(abs(float(p)-float(q)) for p,q in zip(ix.rgb,iy.rgb));worst=max(worst,d);differing.append(x.name)
+    return {"frames":frames,"bit_identical_frames":frames-len(differing),"differing_frames":differing[:16],
+            "max_abs_difference":worst,"passed":not differing}
 
 
 def make_cases(out,frames,sdk_policy,probe_dir=None):
@@ -161,6 +179,12 @@ def make_cases(out,frames,sdk_policy,probe_dir=None):
             "--day-length","1200","--start-hour",str(hour),"--planet-camera-height",str(height),*extra],
             expected={"atmosphere":True,"fog":False,"clouds":False,"cloud_full_rate":False},
             numerical_oracle="atmosphere-lut-independent",roi_scale=25)
+    # F14.4 repeatability: dusk into night (17:00 + 7.5 h of a 16 s day), twice.
+    for name in ("daynight-a","daynight-b"):
+        add(name,"F14","moving-light",[ *volume_base,"--atmosphere","on","--fog","off","--clouds","off",
+            "--day-length","16","--start-hour","17"],
+            expected={"atmosphere":True,"fog":False,"clouds":False,"cloud_full_rate":False},
+            numerical_oracle="atmosphere-lut-independent",roi_scale=25,**({"repeat_of":"daynight-a"} if name.endswith("-b") else {}))
     add("atmo-time-jump","F14","moving-light",[ *volume_base,"--atmosphere","on","--fog","off","--clouds","off",
          "--day-length","16","--start-hour","5","--time-jump-every","60"],
          expected={"atmosphere":True,"fog":False,"clouds":False,"cloud_full_rate":False},numerical_oracle="sun-clock-history")
@@ -460,6 +484,12 @@ def main(argv=None):
         try:result["control_metrics"]=analyse_paths(control,case["linear"],case["roi"])
         except (ValueError,OSError) as error:result["control_metrics"]={"passed":False,"error":str(error)}
         result["control_reference_accepted"]=False
+        (out/case["name"]/"result.json").write_bytes(json_bytes(result))
+    for case in cases:
+        result=by_name.get(case["name"])
+        if result is None or not case.get("repeat_of"):continue
+        try:result["repeatability"]=repeatability(Path(case["linear"]),out/case["repeat_of"]/"linear",args.frames)
+        except (ValueError,OSError) as error:result["repeatability"]={"passed":False,"error":str(error)}
         (out/case["name"]/"result.json").write_bytes(json_bytes(result))
     summary={"schema":1,"state":"EXECUTED_CHECKS_ONLY","manifest_sha256":manifest_hash,"results":results,
              "functional_passed":all(r.get("functional_passed",False) for r in results) and len(results)==len(cases),
