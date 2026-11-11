@@ -50,7 +50,10 @@ class ScriptTiming(unittest.TestCase):
 
     def test_unknown_scene_refused(self):
         with self.assertRaises(ValueError):
-            clip.state("roughness", base(), 0)
+            clip.state("ao-cavity", base(), 0)
+
+    def test_roughness_is_static(self):
+        self.assertEqual(len({clip.key(clip.state("roughness", base(), f)) for f in range(300)}), 1)
 
 
 class Window(unittest.TestCase):

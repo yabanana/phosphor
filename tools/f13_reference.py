@@ -79,7 +79,7 @@ def require_texture_free(data):
 class Context:
     """Scene, per-shape material tables and camera for one snapshot."""
 
-    def __init__(self, root, data, threads, secondary_specular, max_bounces=16, rr_depth=5):
+    def __init__(self, root, data, threads, secondary_specular, max_bounces=16, rr_depth=5, regularization_scale=1.0):
         import drjit as dr
         import mitsuba as mi
         import numpy as np
@@ -89,6 +89,11 @@ class Context:
         dr.set_thread_count(threads)
         self.mi, self.dr, self.np = mi, dr, np
         self.data, self.secondary_specular = data, secondary_specular
+        # Declared path regularisation: the light connection after the camera's
+        # specular lobe uses alpha' = max(alpha_secondary, k * alpha_camera).
+        self.regularization_scale = float(regularization_scale)
+        if not (self.regularization_scale >= 1.0):
+            raise ValueError("regularization scale must be >= 1")
         self.max_bounces, self.rr_depth = max_bounces, rr_depth
         require_texture_free(data)
         transform = getattr(mi, "ScalarAffineTransform4f", None) or mi.ScalarTransform4f
@@ -315,7 +320,8 @@ class Context:
         beta = mi.Color3f(specular / dr.maximum(specular_pdf, 1e-30))
         direction = si.to_world(mi.Vector3f(local))
         go = active & (local.z > 0) & (specular_pdf > 0) & (dr.dot(si.n, direction) > 0) & (dr.max(beta) > 0)
-        radiance += self.tail(si, direction, beta, mi.Float(specular_pdf), go, True, alpha)
+        radiance += self.tail(si, direction, beta, mi.Float(specular_pdf), go, True,
+                              dr.minimum(alpha * self.regularization_scale, 1.0))
         image = np.zeros((pixels, 3), dtype=np.float64)
         for channel, values in enumerate((radiance.x, radiance.y, radiance.z)):
             target = dr.zeros(mi.Float64, pixels)
@@ -495,7 +501,8 @@ def render_frame(context, args, out, positions=None, regions=None):
     np = context.np
     out.mkdir(parents=True, exist_ok=False)
     report = {"schema": 1, "tool": "tools/f13_reference.py", "tool_sha256": sha(__file__), "model": MODEL,
-              "secondary_specular": context.secondary_specular, "seeds": list(SEEDS),
+              "secondary_specular": context.secondary_specular, "regularization_scale": context.regularization_scale,
+              "seeds": list(SEEDS),
               "convergence_relative_rmse": CONVERGENCE, "frame": context.data["frame"],
               "candidate_read": False, "phase_accepted": False}
     if positions:
@@ -529,7 +536,8 @@ def command_validate(args):
 
 def command_render(args):
     root, data = snapshot(args.snapshot)
-    context = Context(root, data, args.threads, args.secondary_specular)
+    context = Context(root, data, args.threads, args.secondary_specular,
+                      regularization_scale=getattr(args, "regularization_scale", 1.0))
     regions = json.loads(pathlib.Path(args.regions).read_text()) if args.regions else None
     report = render_frame(context, args, pathlib.Path(args.out).resolve(), args.positions, regions)
     report["snapshot_sha256"] = scene_digest(root)
@@ -552,6 +560,8 @@ def main(argv=None):
     p.add_argument("--spp", type=int, nargs="+", default=[64, 256, 1024, 4096])
     p.add_argument("--spp-per-pass", type=int, default=16)
     p.add_argument("--secondary-specular", choices=["regularized", "raw", "off"], default="regularized")
+    p.add_argument("--regularization-scale", type=float, default=1.0,
+                   help="k in alpha' = max(alpha_secondary, k * alpha_camera) (default 1)")
     p.add_argument("--threads", type=int, default=min(12, os.cpu_count() or 1))
     p.set_defaults(function=command_render)
     args = parser.parse_args(argv)

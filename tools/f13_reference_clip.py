@@ -81,7 +81,7 @@ def state(scene, base, frame):
         emission = [0.0, 0.0, 0.0] if step == 1 else [0.2, 0.5, 8.0] if step == 2 else [8.0, 0.4, 0.2]
         data["materials"][PANEL_MATERIAL]["emissive"] = emission
         data["lights"][0]["intensity"] = 6.0 if step == 1 else 12.0
-    elif scene != "mirror":
+    elif scene not in ("mirror", "roughness"):  # static fixtures: the base state for every frame
         raise ValueError(f"no script for fixture {scene}")
     return data
 
@@ -174,7 +174,8 @@ def command_render(args):
             if folder.exists():
                 shutil.rmtree(folder)
             data = state(args.scene, base, members[0])
-            context = reference.Context(root, data, args.threads, args.secondary_specular)
+            context = reference.Context(root, data, args.threads, args.secondary_specular,
+                                        regularization_scale=args.regularization_scale)
             if args.window_regions:
                 context.window = window(regions, context.width, context.height, args.window_margin)
             namespace = argparse.Namespace(spp=args.spp, spp_per_pass=args.spp_per_pass)
@@ -204,7 +205,8 @@ def command_render(args):
     manifest = {"schema": 1, "scene": args.scene, "base_snapshot": str(pathlib.Path(args.base).resolve()),
                 "base_snapshot_sha256": reference.scene_digest(root), "frames": [frames[0], frames[-1]],
                 "states": index, "converged": converged, "model": reference.MODEL,
-                "secondary_specular": args.secondary_specular, "regions": regions or {},
+                "secondary_specular": args.secondary_specular, "regularization_scale": args.regularization_scale,
+                "regions": regions or {},
                 "window_regions": bool(args.window_regions), "window_margin": args.window_margin,
                 "tool_sha256": reference.sha(__file__), "reference_tool_sha256": reference.sha(reference.__file__),
                 "candidate_read": False, "phase_accepted": False}
@@ -258,6 +260,8 @@ def main(argv=None):
     p.add_argument("--spp", type=int, nargs="+", default=[256, 1024, 4096, 16384])
     p.add_argument("--spp-per-pass", type=int, default=32)
     p.add_argument("--secondary-specular", choices=["regularized", "raw", "off"], default="regularized")
+    p.add_argument("--regularization-scale", type=float, default=1.0,
+                   help="k in alpha' = max(alpha_secondary, k * alpha_camera) (default 1)")
     p.add_argument("--threads", type=int, default=min(12, os.cpu_count() or 1))
     p.add_argument("--resume", action="store_true", help="keep converged states already in --out")
     p.add_argument("--window-regions", action="store_true", help="render only the regions' bounding box (+margin)")
