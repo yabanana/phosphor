@@ -192,3 +192,18 @@ TEST_CASE("F13 compact denoise history round-trips every field a later frame rea
         CHECK_FALSE(denoiseCompatible(s,denoiseUnpack(header,denoisePackRecord(h),specular?denoisePackSpecular(h):GPUDenoiseSpecularHistory{}),p,m));
     }
 }
+TEST_CASE("F13.6 stationary specular history is a running mean up to its cap"){
+    // DENOISE_STATIONARY (content and camera unchanged): alpha = 1/length, so a
+    // static noisy signal converges like a plain average instead of an EMA
+    // with the temporalAlpha floor; any other frame keeps the floor.
+    DenoiseSettings settings;auto p=denoiseParameters(settings,1,1,DENOISE_SIGNAL_SPECULAR,0,1,1,false);p.maxHistory=128;
+    auto still=p;still.flags|=DENOISE_STATIONARY;const auto s=receiver();auto m=spec();m.flags|=SPECULAR_SAMPLE_STOCHASTIC;
+    DenoiseHistory a{},b{};double sum=0;
+    for(u32 i=0;i<100;++i){const float value=float(i%7);sum+=value;a=denoiseTemporal(s,glm::vec3(value),a,still,{},{},m);b=denoiseTemporal(s,glm::vec3(value),b,p,{},{},m);}
+    REQUIRE(a.valid);CHECK(a.length==100);CHECK(a.color[0]==doctest::Approx(sum/100).epsilon(1e-4));
+    // The EMA keeps weighting recent samples: its value differs from the mean.
+    CHECK(std::abs(b.color[0]-float(sum/100))>1e-3f);
+    // The cap still bounds the length, and a reset restarts the mean.
+    for(u32 i=0;i<100;++i)a=denoiseTemporal(s,glm::vec3(1),a,still,{},{},m);CHECK(a.length==128);
+    auto cut=still;cut.flags|=DENOISE_RESET;CHECK(denoiseTemporal(s,glm::vec3(5),a,cut,{},{},m).length==1);
+}

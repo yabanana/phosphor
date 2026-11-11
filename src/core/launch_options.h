@@ -353,6 +353,8 @@ struct LaunchOptions {
     // Capped likewise; fewer than the denoiser's disables the batched diffuse
     // final stride. 2 measured: ao-cavity-rtao p95 0.0101 -> 0.0070 (less blur).
     u32 aoAtrousIterations=2;
+    // History cap of the soft (specular) signal, reached only in stationary frames.
+    u32 specularMaxHistory=128;
     u32 ssrRoughSteps=16,aoRays=2; // budget defaults measured on Sponza 1080p and the F13 fixtures; 0 = 64 SSR steps / preset rays
     // DDGI irradiance is a deterministic probe interpolation per pixel (no
     // Monte Carlo noise), so the custom denoiser leaves it unfiltered unless

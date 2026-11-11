@@ -25,7 +25,7 @@ struct DenoisePasses::Impl {
     bool diagnosticUnbatched=false;
     std::array<MTL4::ArgumentTable*,METAL_FRAMES_IN_FLIGHT> diffuseTables{};
     std::array<HistoryRegistry,Signals> registries{};
-    u32 softSignals=0;bool softChange=false;
+    u32 softSignals=0;bool softChange=false,stationary=false;
     struct Content {u64 scene=0,external=0,revision=0;bool operator==(const Content&)const=default;};
     struct History {MTL::Buffer* pair[2]{};u64 capacity=0,contentEpoch=0;u32 lastWritten=0;Content content{};bool contentKnown=false;};
     std::array<std::array<History,Signals>,Views> histories{};
@@ -100,6 +100,9 @@ struct DenoisePasses::Impl {
         const auto decision=registries[sig].begin(frame.view,{frame.width,frame.height,frame.backingWidth,frame.backingHeight},h.contentEpoch,frame.cut,frame.reset);
         s.params=denoiseParameters(settings,frame.width,frame.height,sig,frame.view,u32(decision.generation),u32(h.contentEpoch),decision.reset);
         s.params.flags|=DENOISE_CURRENT_VIEW_DEPTH;if(soft&&softChange)s.params.flags|=DENOISE_SOFT_CHANGE;
+        // A soft signal keeps a longer history; the cap only matters in stationary
+        // frames, every other frame's alpha floor (temporalAlpha) is above 1/32.
+        if(soft){s.params.maxHistory=std::max(s.params.maxHistory,options.specularMaxHistory);if(stationary)s.params.flags|=DENOISE_STATIONARY;}
         for(u32 c=0;c<4;++c)s.params.currentViewDepthRow[c]=frame.constants.view[c*4+2];
         if(diagnosticEndpoints&&sig==DENOISE_SIGNAL_SPECULAR)s.params.flags|=DENOISE_DIAGNOSTIC_ENDPOINTS;
         s.params.frameIndex=u32(frame.index);s.address=lighting::upload(c,s.params);s.readSide=h.lastWritten;s.writeSide=1u-s.readSide;
@@ -107,7 +110,7 @@ struct DenoisePasses::Impl {
         slots[frame.slot][sig].expected=frame.width*frame.height;
     }
     void prepare(const ShadowPasses::Frame& f,u64 signalEpoch,const std::array<u64,Signals>& currentRevisions,
-                 bool useDirectLighting,u32 soft,bool change){frame=f;epoch=signalEpoch;revisions=currentRevisions;softSignals=soft;softChange=change;
+                 bool useDirectLighting,u32 soft,bool change,bool still){frame=f;epoch=signalEpoch;revisions=currentRevisions;softSignals=soft;softChange=change;stationary=still&&!change;
         if(!f.width||!f.height||f.width>f.backingWidth||f.height>f.backingHeight||f.slot>=METAL_FRAMES_IN_FLIGHT||f.view>=Views||
             u64(f.backingWidth)*f.backingHeight>std::numeric_limits<u32>::max())throw std::invalid_argument("Invalid F13 denoise frame extent or view");
         if (!useDirectLighting && signal[DENOISE_SIGNAL_DI].defined) {
@@ -234,7 +237,7 @@ struct DenoisePasses::Impl {
 DenoisePasses::DenoisePasses(MetalContext& c,PipelineCache& p,const LaunchOptions& o):impl_(std::make_unique<Impl>(c,p,o)){}
 DenoisePasses::~DenoisePasses()=default;
 void DenoisePasses::prepareFrame(const ShadowPasses::Frame& f,u64 epoch,const std::array<u64,4>& revisions,
-                                bool useDirectLighting,u32 softSignals,bool softChange){impl_->prepare(f,epoch,revisions,useDirectLighting,softSignals,softChange);}
+                                bool useDirectLighting,u32 softSignals,bool softChange,bool stationary){impl_->prepare(f,epoch,revisions,useDirectLighting,softSignals,softChange,stationary);}
 void DenoisePasses::invalidateAll(const char* reason){impl_->invalidate(reason);}
 rg::TextureRef DenoisePasses::addSignal(rg::RenderGraph& g,u32 s,rg::TextureRef r,rg::TextureRef m,rg::BufferRef b,rg::BufferRef metadata){return impl_->add(g,s,r,m,b,metadata);}
 std::array<rg::TextureRef,3> DenoisePasses::addDiffuseSignals(rg::RenderGraph& g,std::array<rg::TextureRef,3> r,rg::TextureRef m,rg::BufferRef b,bool withDI){return impl_->addDiffuse(g,r,m,b,withDI);}

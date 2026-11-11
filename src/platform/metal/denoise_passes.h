@@ -13,7 +13,7 @@ public:
     ~DenoisePasses();
     void prepareFrame(const ShadowPasses::Frame&,u64 signalEpoch,const std::array<u64,4>& currentRevisions,
                       bool useDirectLighting,
-                      u32 softSignals=0,bool softChange=false);
+                      u32 softSignals=0,bool softChange=false,bool stationary=false);
     void invalidateAll(const char* reason);
     rg::TextureRef addSignal(rg::RenderGraph&,u32 signal,rg::TextureRef raw,rg::TextureRef motion,
                             rg::BufferRef surfaces,rg::BufferRef specularMetadata={});

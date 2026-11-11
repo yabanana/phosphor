@@ -53,6 +53,7 @@ struct ReflectionPasses::Impl {
     std::pair<u64,u64> publishedComponents{};u64 publishedVersion=1;
     struct SpecularContent {u64 scene=0,structure=0,materials=0,pipelines=0;bool operator==(const SpecularContent&)const=default;};
     SpecularContent lastSpecular{};bool specularKnown=false;u64 specularEpoch=0,lastSoftEpoch=~u64{0};
+    std::array<std::array<float,16>,4> lastCamera{};std::array<bool,4> cameraKnown{}; // per view: unjittered view-projection
     std::array<float,3> environment{};ReflectionSettings settings;AOSettings aoSettings;GPUReflectionProbe probe{};GPUReflectionParams params{};GPUAOParams aoParams{};
     GPUReflectionReduceParams reduceParams{};GPUReflectionComposeParams composeParams{},preComposeParams{};
     MTL::GPUAddress paramsAddress=0,aoAddress=0,reduceAddress=0,composeAddress=0,preComposeAddress=0,probeAddress=0,giDummyAddress=0,extraDummyAddress=0;
@@ -252,9 +253,14 @@ struct ReflectionPasses::Impl {
         const SpecularContent specular{f.scene,store.structureVersion(),materialRevision,p.generation()};
         if(!specularKnown||lastSpecular!=specular){lastSpecular=specular;specularKnown=true;++specularEpoch;}
         const bool softChange=signalEpoch!=lastSoftEpoch;lastSoftEpoch=signalEpoch;
+        // Stationary: same content (no soft change) and the same camera as this
+        // view's previous frame; reflections are view-dependent, so camera motion
+        // alone keeps the temporalAlpha floor.
+        auto& camera=lastCamera.at(f.view);const bool sameCamera=cameraKnown.at(f.view)&&std::memcmp(camera.data(),f.unjitteredVP,sizeof(f.unjitteredVP))==0;
+        std::memcpy(camera.data(),f.unjitteredVP,sizeof(f.unjitteredVP));cameraKnown.at(f.view)=true;
         if(custom){const std::array<u64,4> revisions{direct.lightRevision(),gi&&options.gi!=GiMode::Off?gi->readResources().parameters.cacheGeneration:0,specularEpoch,geometryEpoch};
             denoise.prepareFrame(frame,signalEpoch,revisions,options.directLighting!=DirectLightingMode::Legacy&&!slots[f.slot].skipLocalDenoise,
-                                 1u<<DENOISE_SIGNAL_SPECULAR,softChange);}
+                                 1u<<DENOISE_SIGNAL_SPECULAR,softChange,sameCamera);}
     }
     void texture(MTL4::ArgumentTable* table,rg::PassContext& ctx,rg::TextureRef ref,u32 index){table->setTexture(static_cast<MTL::Texture*>(ctx.texture(ref))->gpuResourceID(),index);}
     void commonReads(rg::PassBuilder& b,rg::Stages stages=rg::StageDispatch){b.read(receivers,rg::Usage::ShaderRead,stages);b.read(direct.lightsRef(),rg::Usage::ShaderRead,stages);b.read(direct.emittersRef(),rg::Usage::ShaderRead,stages);b.read(scene.dataRef(),rg::Usage::ShaderRead,stages);

@@ -785,6 +785,10 @@ PHOSPHOR_GPU_CONSTANT u32 DENOISE_CURRENT_VIEW_DEPTH = 8u;
 // unless it leaves the current neighbourhood (clampSigma * sigma, plus a 2%
 // relative margin); kept histories adapt with at least twice temporalAlpha.
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_SOFT_CHANGE = 16u;
+// F13.6: neither the content nor this view's camera changed since the previous
+// frame. A soft signal's history then accumulates as a running mean (alpha =
+// 1/length, up to maxHistory) instead of the temporalAlpha floor.
+PHOSPHOR_GPU_CONSTANT u32 DENOISE_STATIONARY = 32u;
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_HISTORY_STOCHASTIC = 2u; // history flags: bit0 remains a numerical error
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_DIAGNOSTIC_ENDPOINTS = 4u; // opt-in old endpoint rejection for the quality negative
 
