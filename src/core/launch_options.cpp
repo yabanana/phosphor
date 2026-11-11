@@ -465,6 +465,14 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if(!needFloat(out.atmoStartHour)||out.atmoStartHour<0||out.atmoStartHour>=24){error="--start-hour: expected0..24";return false;}
         } else if (arg == "--time-jump-every") {if(!needCount(out.timeJumpEveryN))return false;
         } else if (arg == "--atmo-freeze-clock") {out.atmoFreezeClock=true;
+        } else if (arg == "--atmo-scattering-scale") {
+            if(!needFloat(out.atmoScatteringScale)||!(out.atmoScatteringScale>0&&out.atmoScatteringScale<=100)){error="--atmo-scattering-scale: expected (0,100]";return false;}
+        } else if (arg == "--atmo-ozone-scale") {
+            if(!needFloat(out.atmoOzoneScale)||!(out.atmoOzoneScale>=0&&out.atmoOzoneScale<=100)){error="--atmo-ozone-scale: expected [0,100]";return false;}
+        } else if (arg == "--atmo-mie-g") {
+            if(!needFloat(out.atmoMieG)||!(std::abs(out.atmoMieG)<0.99f)){error="--atmo-mie-g: expected (-0.99,0.99)";return false;}
+        } else if (arg == "--atmo-ground-albedo") {
+            if(!needFloat(out.atmoGroundAlbedo)||!(out.atmoGroundAlbedo>=0&&out.atmoGroundAlbedo<=1)){error="--atmo-ground-albedo: expected [0,1]";return false;}
         } else if (arg == "--planet-camera-height") {
             if(!needFloat(out.planetCameraHeight)||out.planetCameraHeight<0){error="--planet-camera-height: metres >=0";return false;}
         } else if (arg == "--reflections") {
@@ -1095,6 +1103,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if(out.cloudFullRate&&!out.clouds){error="--cloud-full-rate requires --clouds on";return false;}
     if(lighting && out.temporalUpscale){error="Physical Float32 lighting HDR requires native or F13 denoised reconstruction; standard temporal ABI is RGBA16";return false;}
     if(out.planetCameraHeight>=0&&!out.atmosphere&&!out.fog&&!out.clouds){error="Planetary camera control requires F14";return false;}
+    if((out.atmoScatteringScale!=1||out.atmoOzoneScale!=1||out.atmoMieG>-2||out.atmoGroundAlbedo>=0)&&!out.atmosphere){
+        error="Atmosphere parameter controls require --atmosphere on";return false;}
     if((out.reflections==ReflectionMode::RT || out.ao==AoMode::RTAO) && !out.rtEnabled){error="RT reflections/AO/probe capture require --rt on";return false;}
     if(out.lightingDenoise==LightingDenoiseMode::MetalFX && out.temporalUpscale){error="Denoised and standard temporal reconstruction are separate paths";return false;}
     if((!out.reflectionProbePath.empty() || out.reflectionCaptureProbe) && out.reflections==ReflectionMode::Off){error="Probe controls require --reflections";return false;}

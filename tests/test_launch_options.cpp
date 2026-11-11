@@ -1233,3 +1233,14 @@ TEST_CASE("F13 physical AO proof selects real custom visibility without other tr
     CHECK_FALSE(parse({"--render-path","visibility","--ao","gtao","--capture-linear-signal","ao-filtered"},o,error));
     CHECK_FALSE(parse({"--bench","6","--reflection-scene","ao-temporal-wall","--render-path","visibility","--rt","on","--ao","rtao","--ao-radius","1","--lighting-denoise","custom"},o,error));
 }
+
+TEST_CASE("F14.1 extreme atmosphere parameter controls") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--atmosphere","on","--atmo-scattering-scale","8","--atmo-ozone-scale","0","--atmo-mie-g","0.95","--atmo-ground-albedo","1"},o,error));
+    CHECK(o.atmoScatteringScale==8);CHECK(o.atmoOzoneScale==0);CHECK(o.atmoMieG==doctest::Approx(.95f));CHECK(o.atmoGroundAlbedo==1);
+    LaunchOptions d;REQUIRE(parse({"--atmosphere","on"},d,error));CHECK(d.atmoScatteringScale==1);CHECK(d.atmoMieG<-1);CHECK(d.atmoGroundAlbedo<0);
+    LaunchOptions bad;CHECK_FALSE(parse({"--atmo-scattering-scale","2"},bad,error));                     // needs the atmosphere
+    CHECK_FALSE(parse({"--atmosphere","on","--atmo-scattering-scale","0"},bad,error));
+    CHECK_FALSE(parse({"--atmosphere","on","--atmo-mie-g","0.995"},bad,error));
+    CHECK_FALSE(parse({"--atmosphere","on","--atmo-ground-albedo","1.5"},bad,error));
+}

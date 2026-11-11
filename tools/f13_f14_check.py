@@ -153,6 +153,14 @@ def make_cases(out,frames,sdk_policy,probe_dir=None):
             "--day-length","1200","--start-hour",str(hour),"--planet-camera-height",str(height)],
             expected={"atmosphere":True,"fog":False,"clouds":False,"cloud_full_rate":False},
             numerical_oracle="atmosphere-lut-independent",roi_scale=25)
+    # F14.1 extreme parameters: dense forward-scattering medium at the horizon
+    # over a white ground, and a nearly empty, ozone-free sky at the zenith.
+    for name,hour,height,extra in (("atmo-extreme-dense",6.05,2,["--atmo-scattering-scale","8","--atmo-mie-g","0.95","--atmo-ground-albedo","1"]),
+                                   ("atmo-extreme-thin",12,20000,["--atmo-scattering-scale","0.05","--atmo-ozone-scale","0","--atmo-ground-albedo","0"])):
+        add(name,"F14","mirror",[ *volume_base,"--atmosphere","on","--fog","off","--clouds","off",
+            "--day-length","1200","--start-hour",str(hour),"--planet-camera-height",str(height),*extra],
+            expected={"atmosphere":True,"fog":False,"clouds":False,"cloud_full_rate":False},
+            numerical_oracle="atmosphere-lut-independent",roi_scale=25)
     add("atmo-time-jump","F14","moving-light",[ *volume_base,"--atmosphere","on","--fog","off","--clouds","off",
          "--day-length","16","--start-hour","5","--time-jump-every","60"],
          expected={"atmosphere":True,"fog":False,"clouds":False,"cloud_full_rate":False},numerical_oracle="sun-clock-history")

@@ -106,6 +106,10 @@ struct AtmospherePasses::Impl {
         active=o.atmosphere||o.fog||o.clouds;
         if(o.cloudFullRate&&!o.clouds)throw std::invalid_argument("Cloud full-rate reference requires clouds enabled");
         if(o.forceApple9){atmosphere.skyWidth=128;atmosphere.skyHeight=72;atmosphere.marchSteps=48;atmosphere.multiDirections=32;fog.gridX=32;fog.gridY=18;}
+        // F14.1 extreme parameters (validation controls; defaults unchanged).
+        atmosphere.rayleighScattering*=double(o.atmoScatteringScale);atmosphere.mieScattering*=double(o.atmoScatteringScale);
+        atmosphere.mieAbsorption*=double(o.atmoScatteringScale);atmosphere.ozoneAbsorption*=double(o.atmoOzoneScale);
+        if(o.atmoMieG>-2)atmosphere.mieG=o.atmoMieG;if(o.atmoGroundAlbedo>=0)atmosphere.groundAlbedo=glm::dvec3(o.atmoGroundAlbedo);
         validateAtmosphere(atmosphere);validateFog(fog);validateClouds(clouds);
         const char* names[]={"volume_clear_counters","atmosphere_transmittance","atmosphere_multiscattering","atmosphere_sky_view","atmosphere_apply",
                              "fog_inject","fog_temporal","fog_integrate","fog_apply","clouds_march","clouds_temporal","clouds_apply"};
