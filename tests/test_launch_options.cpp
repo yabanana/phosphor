@@ -1256,7 +1256,8 @@ TEST_CASE("F14 moon corruption is selectable only with atmosphere diagnostics") 
 
 TEST_CASE("F13.6 reflection regularisation scale option") {
     LaunchOptions o;std::string error;REQUIRE(parse({"--reflection-regularization-scale","4"},o,error));CHECK(o.reflectionRegularizationScale==4);
-    LaunchOptions d;REQUIRE(parse({},d,error));CHECK(d.reflectionRegularizationScale==1);
+    LaunchOptions d;REQUIRE(parse({},d,error));CHECK(d.reflectionRegularizationScale==8); // D5
+    LaunchOptions one;REQUIRE(parse({"--reflection-regularization-scale","1"},one,error));CHECK(one.reflectionRegularizationScale==1);
     LaunchOptions bad;CHECK_FALSE(parse({"--reflection-regularization-scale","0.5"},bad,error));
 }
 

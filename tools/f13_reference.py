@@ -20,8 +20,9 @@ Declared reference model (every item is part of the report):
   sampling combined with the power heuristic).
 - Excluded by construction: light reaching a diffuse receiver through a
   specular bounce (caustics) and specular inter-reflection beyond one bounce.
-- Secondary specular light connections use alpha >= the camera vertex alpha
-  (path regularisation) unless --secondary-specular raw|off is selected.
+- Secondary specular light connections use alpha' = max(alpha_secondary,
+  k * alpha_camera), k = 8 by owner decision D5, the engine default
+  (path regularisation), unless --secondary-specular raw|off is selected.
 - Back faces absorb. The environment is the snapshot's single sky radiance.
 """
 from __future__ import annotations
@@ -79,7 +80,7 @@ def require_texture_free(data):
 class Context:
     """Scene, per-shape material tables and camera for one snapshot."""
 
-    def __init__(self, root, data, threads, secondary_specular, max_bounces=16, rr_depth=5, regularization_scale=1.0):
+    def __init__(self, root, data, threads, secondary_specular, max_bounces=16, rr_depth=5, regularization_scale=8.0):
         import drjit as dr
         import mitsuba as mi
         import numpy as np
@@ -537,7 +538,7 @@ def command_validate(args):
 def command_render(args):
     root, data = snapshot(args.snapshot)
     context = Context(root, data, args.threads, args.secondary_specular,
-                      regularization_scale=getattr(args, "regularization_scale", 1.0))
+                      regularization_scale=getattr(args, "regularization_scale", 8.0))
     regions = json.loads(pathlib.Path(args.regions).read_text()) if args.regions else None
     report = render_frame(context, args, pathlib.Path(args.out).resolve(), args.positions, regions)
     report["snapshot_sha256"] = scene_digest(root)
@@ -560,8 +561,8 @@ def main(argv=None):
     p.add_argument("--spp", type=int, nargs="+", default=[64, 256, 1024, 4096])
     p.add_argument("--spp-per-pass", type=int, default=16)
     p.add_argument("--secondary-specular", choices=["regularized", "raw", "off"], default="regularized")
-    p.add_argument("--regularization-scale", type=float, default=1.0,
-                   help="k in alpha' = max(alpha_secondary, k * alpha_camera) (default 1)")
+    p.add_argument("--regularization-scale", type=float, default=8.0,
+                   help="k in alpha' = max(alpha_secondary, k * alpha_camera); default 8, owner decision D5 (engine default)")
     p.add_argument("--threads", type=int, default=min(12, os.cpu_count() or 1))
     p.set_defaults(function=command_render)
     args = parser.parse_args(argv)

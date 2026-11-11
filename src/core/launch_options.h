@@ -347,8 +347,11 @@ struct LaunchOptions {
     // F14.1 extreme-parameter validation: scale the default Hillaire medium.
     // Unset (<0 for g/albedo) keeps the defaults; the oracle reads the actual GPU block.
     float atmoScatteringScale=1,atmoOzoneScale=1,atmoMieG=-2,atmoGroundAlbedo=-1;
-    // F13.6 declared path regularisation of the reflection light connection.
-    float reflectionRegularizationScale=1;
+    // F13.6 declared path regularisation of the reflection light connection,
+    // alpha' = max(alpha_secondary, k * alpha_camera). Owner decision D5
+    // (2026-11-11): k = 8, the smallest scale whose roughness fixture passes
+    // against its independent clip on every seed (k = 4 did not).
+    float reflectionRegularizationScale=8;
     u32 specularAtrousIterations=2; // capped by the denoiser's a-trous iterations; 2 measured: -1.5 ms, fixtures unchanged
     // Capped likewise; fewer than the denoiser's disables the batched diffuse
     // final stride. 2 measured: ao-cavity-rtao p95 0.0101 -> 0.0070 (less blur).

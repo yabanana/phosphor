@@ -260,8 +260,8 @@ def main(argv=None):
     p.add_argument("--spp", type=int, nargs="+", default=[256, 1024, 4096, 16384])
     p.add_argument("--spp-per-pass", type=int, default=32)
     p.add_argument("--secondary-specular", choices=["regularized", "raw", "off"], default="regularized")
-    p.add_argument("--regularization-scale", type=float, default=1.0,
-                   help="k in alpha' = max(alpha_secondary, k * alpha_camera) (default 1)")
+    p.add_argument("--regularization-scale", type=float, default=8.0,
+                   help="k in alpha' = max(alpha_secondary, k * alpha_camera); default 8, owner decision D5 (engine default)")
     p.add_argument("--threads", type=int, default=min(12, os.cpu_count() or 1))
     p.add_argument("--resume", action="store_true", help="keep converged states already in --out")
     p.add_argument("--window-regions", action="store_true", help="render only the regions' bounding box (+margin)")
