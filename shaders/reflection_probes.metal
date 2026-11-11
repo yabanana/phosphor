@@ -70,7 +70,7 @@ kernel void reflection_probe_prefilter(constant GPUProbeFilterParams& p [[buffer
 // Deterministic prefiltered-probe fallback uses split-sum receiver BRDF. It is
 // a separate mode, not a prefilter applied AGAIN to an already GGX sampled ray.
 kernel void reflection_probe_only(constant GPUReflectionParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
-    device GPUSpecularSample* metadata [[buffer(17)]],const device GPUReflectionProbe* probes [[buffer(18)]],texturecube_array<float> atlas [[texture(2)]],
+    device GPUSpecularSample* metadata [[buffer(17)]],const device GPUReflectionProbe* probes [[buffer(18)]],device atomic_uint* counts [[buffer(19)]],texturecube_array<float> atlas [[texture(2)]],
     texture2d<float,access::write> output [[texture(5)]],texture2d<float,access::write> distance [[texture(6)]],uint tid [[thread_position_in_grid]]){
     if(tid>=p.width*p.height)return;const GPUDISurface s=surfaces[tid];GPUSpecularSample sample=reflectionEmpty();float3 result=0;
     if(s.valid){const float3 n=normalize(diVec(s.shadingNormal)),v=normalize(diVec(s.viewDirection)),r=reflect(-v,n);uint path;
@@ -85,5 +85,7 @@ kernel void reflection_probe_only(constant GPUReflectionParams& p [[buffer(0)]],
         sample.flags=SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_PREFILTERED;
         if(!finiteFit||!all(isfinite(L))||any(L<0)||!all(isfinite(result))||any(result<0))sample.flags|=SPECULAR_SAMPLE_ERROR;
         sample.path=path;for(uint i=0;i<3;++i){sample.direction[i]=r[i];sample.radiance[i]=result[i];}}
-    metadata[tid]=sample;const uint2 pixel(tid%p.width,tid/p.width);output.write(float4(result,1),pixel);distance.write(float4(0),pixel);
+    // The record carries result and distance 0, the values written before the
+    // shared store (multi-sample reduction reads them back from the record).
+    sample.hitDistance=0;reflectionStoreSample(p.flags,tid,p.width,sample,metadata,counts,output,distance);
 }

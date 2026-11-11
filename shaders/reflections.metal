@@ -73,12 +73,12 @@ inline float3 reflectionSecondary(GPURtHit hit,float3 direction,
 
 kernel void reflection_ssr(constant GPUReflectionParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
     const device GPURadianceCacheEntry* cache [[buffer(13)]],constant GPUProbeGridParams& gi [[buffer(14)]],
-    device GPUSpecularSample* metadata [[buffer(17)]],const device GPUReflectionProbe* probes [[buffer(18)]],
+    device GPUSpecularSample* metadata [[buffer(17)]],const device GPUReflectionProbe* probes [[buffer(18)]],device atomic_uint* counts [[buffer(19)]],
     texture2d<float,access::read> baseRadiance [[texture(0)]],texture2d<float,access::read> depth [[texture(1)]],texturecube_array<float> atlas [[texture(2)]],
     texture2d<float,access::write> output [[texture(5)]],texture2d<float,access::write> distance [[texture(6)]],uint tid [[thread_position_in_grid]]){
     if(tid>=p.width*p.height)return;uint seed=giHash(tid^giHash(p.frameIndex)^p.seed);const GPUDISurface s=surfaces[tid];
     const auto dir=reflectionDirection(s,float2(giRandom(seed),giRandom(seed)));const auto sample=reflectionFallback(s,dir,p,surfaces,cache,gi,probes,baseRadiance,depth,atlas);
-    metadata[tid]=sample;uint2 pixel(tid%p.width,tid/p.width);output.write(float4(sample.radiance[0],sample.radiance[1],sample.radiance[2],1),pixel);distance.write(float4(sample.hitDistance),pixel);
+    reflectionStoreSample(p.flags,tid,p.width,sample,metadata,counts,output,distance);
 }
 
 kernel void reflection_rt(constant GPUReflectionParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
@@ -87,7 +87,7 @@ kernel void reflection_rt(constant GPUReflectionParams& p [[buffer(0)]],const de
     const device GPUMaterial* materials [[buffer(8)]],const device DITextureHandle* textures [[buffer(9)]],const device GPULight* lights [[buffer(10)]],
     const device GPUSampledLight* sampled [[buffer(11)]],const device GPUEmissiveSurface* emitters [[buffer(12)]],const device GPURadianceCacheEntry* cache [[buffer(13)]],
     constant GPUProbeGridParams& gi [[buffer(14)]],const device GPUProbeState* states [[buffer(15)]],constant GPUProbeTraceExtra& extra [[buffer(16)]],
-    device GPUSpecularSample* metadata [[buffer(17)]],const device GPUReflectionProbe* probes [[buffer(18)]],
+    device GPUSpecularSample* metadata [[buffer(17)]],const device GPUReflectionProbe* probes [[buffer(18)]],device atomic_uint* counts [[buffer(19)]],
     texture2d<float,access::read> baseRadiance [[texture(0)]],texture2d<float,access::read> depth [[texture(1)]],texturecube_array<float> atlas [[texture(2)]],
     texture2d<float> irradiance [[texture(3)]],texture2d<float> moments [[texture(4)]],texture2d<float,access::write> output [[texture(5)]],
     texture2d<float,access::write> distance [[texture(6)]],uint tid [[thread_position_in_grid]]){
@@ -106,7 +106,7 @@ kernel void reflection_rt(constant GPUReflectionParams& p [[buffer(0)]],const de
         else L=reflectionProbeRadiance(diVec(s.position),dir.direction,s.roughness,false,p,probes,atlas,sample.path);
         L*=dir.weight;if(!all(isfinite(L))||any(L<0)){numericError=true;L=0;}if(numericError)sample.flags|=SPECULAR_SAMPLE_ERROR;for(uint i=0;i<3;++i)sample.radiance[i]=L[i];
     }else sample=reflectionFallback(s,dir,p,surfaces,cache,gi,probes,baseRadiance,depth,atlas);
-    metadata[tid]=sample;uint2 pixel(tid%p.width,tid/p.width);output.write(float4(sample.radiance[0],sample.radiance[1],sample.radiance[2],1),pixel);distance.write(float4(sample.hitDistance),pixel);
+    reflectionStoreSample(p.flags,tid,p.width,sample,metadata,counts,output,distance);
 }
 
 // Optional STATIC actual scene capture from each probe face, not a constant
