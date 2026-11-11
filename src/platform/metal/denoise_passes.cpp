@@ -172,7 +172,9 @@ struct DenoisePasses::Impl {
                     encoder->setComputePipelineState(pipelines.compute(kernels[sig].guide4));encoder->setArgumentTable(t);
                     encoder->dispatchThreadgroups(MTL::Size::Make((frame.width+7)/8,(frame.height+7)/8,1),MTL::Size::Make(8,8,1));
                 } else lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[sig].atrous,t,frame.width*frame.height);});s.filtered=s.atrousOutput[iteration];}
-        if(!deferFinal)addChecks(g,sig);
+        // Independent state checks are a --debug-lighting diagnostic (the F13/F14
+        // runner always passes it); product frames do not pay for them.
+        if(!deferFinal&&options.debugLighting)addChecks(g,sig);
         return s.filtered;
     }
     void addChecks(rg::RenderGraph& g,u32 sig){using namespace rg;auto& s=signal[sig];const std::string label="F13 denoise "+std::to_string(sig);
@@ -209,12 +211,12 @@ struct DenoisePasses::Impl {
                 auto* encoder=static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder());encoder->setComputePipelineState(pipelines.compute(diffuse4[withDI]));encoder->setArgumentTable(table);
                 encoder->dispatchThreadgroups(MTL::Size::Make((frame.width+7)/8,(frame.height+7)/8,1),MTL::Size::Make(8,8,1));
             });
-            for(u32 i=first;i<3;++i){addChecks(g,signals[i]);raw[i]=signal[signals[i]].filtered;}
+            for(u32 i=first;i<3;++i){if(options.debugLighting)addChecks(g,signals[i]);raw[i]=signal[signals[i]].filtered;}
         }
         return raw;
     }
     void bind(MetalGraphExecutor& e){for(u32 sig=0;sig<Signals;++sig){if(!slots[frame.slot][sig].used)continue;const auto& s=signal[sig];const auto& h=histories[frame.view][sig];
-        e.bindBuffer(s.previous,h.pair[s.readSide]);e.bindBuffer(s.next,h.pair[s.writeSide]);e.bindBuffer(s.counts,slots[frame.slot][sig].check);}}
+        e.bindBuffer(s.previous,h.pair[s.readSide]);e.bindBuffer(s.next,h.pair[s.writeSide]);if(options.debugLighting)e.bindBuffer(s.counts,slots[frame.slot][sig].check);}}
 };
 DenoisePasses::DenoisePasses(MetalContext& c,PipelineCache& p,const LaunchOptions& o):impl_(std::make_unique<Impl>(c,p,o)){}
 DenoisePasses::~DenoisePasses()=default;
@@ -224,7 +226,8 @@ void DenoisePasses::invalidateAll(const char* reason){impl_->invalidate(reason);
 rg::TextureRef DenoisePasses::addSignal(rg::RenderGraph& g,u32 s,rg::TextureRef r,rg::TextureRef m,rg::BufferRef b,rg::BufferRef metadata){return impl_->add(g,s,r,m,b,metadata);}
 std::array<rg::TextureRef,3> DenoisePasses::addDiffuseSignals(rg::RenderGraph& g,std::array<rg::TextureRef,3> r,rg::TextureRef m,rg::BufferRef b,bool withDI){return impl_->addDiffuse(g,r,m,b,withDI);}
 void DenoisePasses::bindFrame(MetalGraphExecutor& e){impl_->bind(e);}u64 DenoisePasses::version()const{return impl_->graphVersion;}
-bool DenoisePasses::check(u32 slot)const{for(u32 sig=0;sig<Impl::Signals;++sig){const auto& s=impl_->slots.at(slot)[sig];if(!s.used)continue;const auto& tag=s.checkpoint;
+bool DenoisePasses::check(u32 slot)const{if(!impl_->options.debugLighting)return true; // checks not encoded
+    for(u32 sig=0;sig<Impl::Signals;++sig){const auto& s=impl_->slots.at(slot)[sig];if(!s.used)continue;const auto& tag=s.checkpoint;
     if(!tag.scheduled||impl_->c.frameEvent()->signaledValue()<=tag.frame){std::fprintf(stderr,"DENOISE check slot %u before completed GPU frame %llu\n",slot,static_cast<unsigned long long>(tag.frame));return false;}
     const auto* words=static_cast<const u32*>(s.check->contents());
     if(impl_->diagnosticHistory&&words&&words[0]==tag.pixels&&words[6]==tag.view&&words[7]==u32(tag.frame)) {
