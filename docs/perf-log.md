@@ -1145,3 +1145,22 @@ the shorter rough SSR march, two RTAO rays, the compact denoise history and
 unfiltered DDGI. `docs/opt-log.md` lists each change and its fixture checks.
 This is development evidence on one device, not certification for other
 devices.
+
+### Correction after owner decision D2 (same ray budgets), HEAD c152b99
+
+The table above was measured at 42adefd, whose default had cut RTAO from
+4 rays to 2. D2 keeps ray budgets, so c152b99 restores the preset's 4 rays
+(RTAO 1.18 ms at p50). HEAD also has the F13.6 quality changes: stationary
+history, the near-specular boost and k = 8. The measurement is interleaved
+with 954034b, three repetitions, with the load logged; the machine carried
+light Xcode, Rust and ANE activity (`build/regress-20261111/budget-d2/`).
+
+| binary | GPU p50 | GPU p95 | GPU p99 | frame p95 |
+|---|---:|---:|---:|---:|
+| 954034b | 17.31–18.26 | 18.57–18.72 | 18.64–18.99 | 19.32–19.67 |
+| c152b99 | 14.82–14.90 | 16.01–16.06 | 16.83–16.87 | 16.73–16.89 |
+
+GPU p95, the metric this budget has used throughout, meets 16.67 ms with
+about 0.6 ms of margin. Frame p95 (serial GPU timing) and GPU p99 are
+0.1–0.2 ms over. The p99 includes the frames after camera cuts that use
+the near-specular boost. There are zero steady GPU allocations.

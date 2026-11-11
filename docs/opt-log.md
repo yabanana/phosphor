@@ -2202,6 +2202,26 @@ machine carried CPU compile load, so frame times are relative only):
   would cut that, but with stride 4 gone from every Sponza signal nothing
   is left to gain there.
 
+Quality round after the budget (F13.6), measured against the independent
+clips with the D4 ROI config:
+
+- **Stationary specular history** (c0527d6). If neither content nor camera
+  changed, the history is a running mean up to 128 samples, replacing the
+  0.08 EMA floor. roughness k=4 p95 0.1135 → 0.0707; mirror flicker halves.
+  Moving content is bit-identical.
+- **Near-specular boost after a reset** (ee21dce). For 8 frames after a
+  reset, pixels below roughness 0.2 take 8 RT samples, and the mean is
+  weighted by sample count. Every fixture improves. Boosting the whole RT
+  band (roughness 0.4) was rejected: Sponza p95 15.4 → 16.5 ms, p99 20 ms.
+  The restricted version leaves p95 unchanged and adds 0.5 ms at p99.
+- **Declared regularisation k = 8** (aec6ddc, owner decision D5).
+  roughness-custom p95 0.031–0.039 over three seeds against a k = 8 clip.
+  The other fixtures are unchanged.
+- **RTAO rays back to the preset's 4** (c152b99, owner decision D2: same ray
+  budgets). The two-ray default of e31c9bf is withdrawn. ao-cavity-rtao p95
+  0.0070 → 0.0050. The SSR rough-lobe march (16 steps) is not a ray budget
+  and stays.
+
 Final quiet measurement, interleaved (`docs/perf-log.md`, 2026-11-11):
 HEAD 42adefd GPU p95 14.91–15.39 ms, frame p95 15.74–16.36 ms in five clean
 runs, against 22.4–23.1 ms for 2b285df. The 16.67 ms gate is met on this
