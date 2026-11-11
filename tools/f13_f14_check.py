@@ -124,7 +124,8 @@ def make_cases(out,frames,sdk_policy,probe_dir=None):
     for ao in ("gtao","rtao"):
         add("ao-cavity-"+ao,"F13","ao-cavity",[*(base_rt if ao=="rtao" else no_rt),
             "--reflections","off","--ao",ao,"--ao-radius","1.0","--lighting-denoise","custom"],
-            expected={"reflections":"off","ao":ao,"denoise_requested":"custom","denoise_effective":"custom"},signal="ao")
+            # The product AO is the denoised one; raw AO is the raw-signal-ao diagnostic.
+            expected={"reflections":"off","ao":ao,"denoise_requested":"custom","denoise_effective":"custom"},signal="ao-filtered")
     for signal in ("specular","ao"):
         add("raw-signal-"+signal,"F13","roughness",[ *base_rt,"--reflections","rt","--ao","rtao","--lighting-denoise","off"],
             signal=signal,raw_diagnostic=True,
