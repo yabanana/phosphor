@@ -77,8 +77,29 @@ def relative_max(actual,expected):
     return max(abs(a-b)/max(abs(b),1e-6) for a,b in zip(actual,expected))
 
 
-def constant_oracle(sdk,restored,physical,factor):
-    """Two output-unit hypotheses; only the explicit experiment may restore."""
+def product_sdr(x):
+    """Product display transform: Narkowicz ACES fit (post.metal), then sRGB."""
+    x=max(x,0.0);t=min(max((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14),0.0),1.0)
+    return 12.92*t if t<=0.0031308 else 1.055*t**(1/2.4)-0.055
+
+
+def d1_excess(target,restored,exposure_scale):
+    """Owner decision D1 (closure brief 4): error over its allowance, <=1 passes.
+
+    x = target*exposure_scale (exposed, white = 1). Up to 4x white the allowance
+    is max(1% of target, 5e-4 of white); above, 2/255 after the SDR transform.
+    """
+    if not (number(target) and number(restored) and number(exposure_scale) and exposure_scale>0):return math.inf
+    x=target*exposure_scale
+    if x<=4:return abs(restored-target)/max(0.01*abs(target),5e-4/exposure_scale)
+    return abs(product_sdr(restored*exposure_scale)-product_sdr(x))/(2/255)
+
+
+def constant_oracle(sdk,restored,physical,factor,exposure_scale=None):
+    """Two output-unit hypotheses; only the explicit experiment may restore.
+
+    With exposure_scale (physical -> exposed) the restored image is judged by
+    the D1 criterion; without it, by the retained 1% relative cap."""
     pixels(sdk);pixels(restored)
     if len(sdk)!=len(restored) or len(sdk)%3 or len(physical)!=3 or not number(factor) or factor<=0:
         raise ValueError("constant oracle invalid RGB/factor")
@@ -93,11 +114,16 @@ def constant_oracle(sdk,restored,physical,factor):
         pre=relative_max([x/factor for x in sdk],target)
         unscaled=relative_max(sdk,target);error=relative_max(restored,target)
         restore=relative_max(restored,[x/factor for x in sdk])
-    return {"sdk_preexposed_hypothesis":pre<=GATES["constant_relative_max"],
+    result={"sdk_preexposed_hypothesis":pre<=GATES["constant_relative_max"],
             "sdk_physical_hypothesis":unscaled<=GATES["constant_relative_max"],
             "preexposed_relative_error":pre,"physical_relative_error":unscaled,
             "restored_relative_error":error,"restore_equation_error":restore,
             "passed":error<=GATES["constant_relative_max"] and restore<=GATES["restore_relative_max"]}
+    if exposure_scale is not None:
+        excess=max(d1_excess(physical[i%3],float(v),exposure_scale) for i,v in enumerate(restored))
+        result.update(criterion="D1",exposure_scale=exposure_scale,d1_excess=excess,
+                      passed=excess<=1 and restore<=GATES["restore_relative_max"])
+    return result
 
 
 def impulse_oracle(unit,scaled,factor=1/64):
@@ -273,7 +299,10 @@ def evaluate_capture(case,folder,provenance):
                 steady+=1;exposures.add(factor)
                 if case["scenario"] in ("constant","lifecycle","wide-hdr"):
                     target=[368640,128,64] if case["scenario"]=="wide-hdr" else [.5,.25,.125]
-                    check=constant_oracle(sdk_values,physical_values,target,factor)
+                    # D1 uses the SDK's actual manual exposure (physical -> exposed); unit when absent.
+                    scale=record.get("provided_manual_exposure_fp32") if record.get("manual_exposure_control") else 1.0
+                    if not number(scale) or scale<=0:raise ValueError("actual manual exposure missing for D1")
+                    check=constant_oracle(sdk_values,physical_values,target,factor,float(scale))
                     experiments.append({"frame":frame,"view":record["view"],"preExposure":factor,**check})
                     if not check["passed"]:raise ValueError("actual constant unit equation failed")
                 if case["scenario"]=="impulse":
