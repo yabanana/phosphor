@@ -41,17 +41,6 @@ kernel void atmosphere_sky_view(constant GPUAtmosphereParams& p [[buffer(0)]],te
     const AtmoIntegral value=atmoIntegrate(camera,ray,p,trans,multi,true);
     if(!all(isfinite(value.radiance)))volumeCount(counters,0,1);output.write(float4(value.radiance,1),pixel);
 }
-static float atmoStars(float3 direction,float rotation,float footprint) {
-    const float u=fract(atan2(direction.z,direction.x)/(2*M_PI_F)+rotation/(2*M_PI_F))*256,
-                v=acos(clamp(direction.y,-1.0f,1.0f))/M_PI_F*128;
-    const int ix=int(floor(u)),iy=int(floor(v));float result=0;
-    for(int y=-1;y<=1;++y)for(int x=-1;x<=1;++x){const int cx=ix+x,cy=iy+y;if(cy<0||cy>=128)continue;
-        const uint h=volumeHash(uint(cx)&255u,uint(cy),0,0x51a7u);if((h&127u)!=0)continue;
-        const float px=float(cx)+volumeRandom(volumeHash(h,1,0,0x51a7u)),py=float(cy)+volumeRandom(volumeHash(h,2,0,0x51a7u));
-        const float dx=(u-px)*2*M_PI_F/256*max(0.02f,sin(v*M_PI_F/128)),dy=(v-py)*M_PI_F/128,radius=max(footprint,0.00035f);
-        result+=(0.25f+volumeRandom(h)*2)*exp(-(dx*dx+dy*dy)/(2*radius*radius));}
-    return result;
-}
 kernel void atmosphere_apply(constant GPUAtmosphereParams& p [[buffer(0)]],texture2d<float> trans [[texture(0)]],texture2d<float> multi [[texture(1)]],
     texture2d<float> sky [[texture(2)]],texture2d<float,access::read> scene [[texture(3)]],texture2d<float,access::read> depth [[texture(4)]],
     texture2d<float,access::write> output [[texture(5)]],device atomic_uint* counters [[buffer(15)]],uint2 pixel [[thread_position_in_grid]]) {
@@ -69,13 +58,8 @@ kernel void atmosphere_apply(constant GPUAtmosphereParams& p [[buffer(0)]],textu
         const AtmoSegment bounds=atmoSegment(camera,ray,p);
         if(!bounds.ground){const float3 T=atmoTransmittance(camera,ray,p,trans);
             color+=T*atmoSolarDisk(ray,p);
-            if((p.flags&ATMOSPHERE_ENABLE_MOON)&&p.moonPhase>1e-6f && dot(ray,atmoVec(p.moonDirection))>=cos(p.moonAngularRadius)) {
-                const float3 moon=atmoVec(p.moonDirection);float3 east,north;atmoBasis(moon,east,north);
-                const float2 disk=float2(dot(ray,east),dot(ray,north))/sin(p.moonAngularRadius);const float limb=sqrt(max(0.0f,1-dot(disk,disk)));
-                const float3 normal=east*disk.x+north*disk.y-moon*limb;
-                color+=T*(atmoVec(p.moonIrradiance)/p.moonPhase)*max(0.0f,dot(normal,atmoVec(p.sunDirection)))/
-                    ((2.0f/3.0f)*M_PI_F*pow(sin(p.moonAngularRadius),2.0f));}
-            if(p.flags&ATMOSPHERE_ENABLE_STARS)color+=T*p.starIntensity*atmoStars(ray,p.starRotation,M_PI_F/float(p.outputHeight));
+            color+=T*atmoLunarDisk(ray,p);
+            color+=T*atmoStars(ray,p);
         }
     }
     if(!all(isfinite(color)))volumeCount(counters,0,1);output.write(float4(color,1),pixel);

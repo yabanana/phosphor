@@ -211,6 +211,16 @@ def make_cases(out,frames,sdk_policy,probe_dir=None):
         add("negative-f14-"+corruption,"F14","ao-cavity" if corruption=="history" else "disocclusion",[ *(history_base if corruption=="history" else volume_base),"--atmosphere","on","--fog","on","--clouds","on",
             *(["--atmo-freeze-clock"] if corruption=="history" else []),"--debug-volume-corrupt",corruption],capture=False,expected_exit=1,expected_failure_domain="lighting",
             expected={"atmosphere":True,"fog":True,"clouds":True,"cloud_full_rate":False},require_volume_history_reuse=corruption=="history")
+    # F14.4 celestial probes. At 00:00 the default 45-degree latitude puts
+    # the Sun at -45 degrees and the default lunar phase offset gives a full
+    # Moon at +45 degrees. An 86400 s day preserves night over 300 fixed steps.
+    night_flags=[*history_base,"--atmosphere","on","--fog","off","--clouds","off",
+                 "--day-length","86400","--start-hour","0","--planet-camera-height","2"]
+    night_expected={"atmosphere":True,"fog":False,"clouds":False,"cloud_full_rate":False}
+    add("atmo-night","F14","mirror",night_flags.copy(),expected=night_expected.copy(),night_frames=frames,
+        numerical_oracle="celestial-night")
+    add("negative-f14-moon","F14","mirror",[*night_flags,"--debug-volume-corrupt","moon"],
+        capture=False,expected_exit=1,expected_failure_domain="lighting",expected=night_expected.copy(),night_frames=frames)
     for case in cases:
         for flag,field in (("--reflections","reflections"),("--ao","ao"),("--lighting-denoise","denoise_requested"),
                            ("--gi","gi"),("--lighting","direct"),("--shadows","shadows")):

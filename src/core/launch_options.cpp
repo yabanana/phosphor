@@ -1,4 +1,5 @@
 #include "core/launch_options.h"
+#include "renderer/gpu_types.h"
 #include "testbench/lighting_validation.h"
 #include "testbench/reflection_validation.h"
 
@@ -577,7 +578,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             auto v=needValue();if(!v)return false;
             if(*v=="units")out.debugVolumeCorrupt=1;else if(*v=="history")out.debugVolumeCorrupt=2;
             else if(*v=="light")out.debugVolumeCorrupt=3;else if(*v=="lut")out.debugVolumeCorrupt=4;
-            else{error="--debug-volume-corrupt: expected units, history, light or lut";return false;}
+            else if(*v=="moon")out.debugVolumeCorrupt=VOLUME_CORRUPT_MOON;
+            else{error="--debug-volume-corrupt: expected units, history, light, lut or moon";return false;}
         } else if (arg == "--debug-reflection-corrupt") {
             auto v=needValue();if(!v)return false;
             if(*v=="history")out.debugReflectionCorrupt=1;else if(*v=="motion")out.debugReflectionCorrupt=2;else if(*v=="normal")out.debugReflectionCorrupt=3;
@@ -1098,6 +1100,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if(out.atmoFreezeClock&&!(out.atmosphere||out.fog||out.clouds)){error="--atmo-freeze-clock requires F14";return false;}
     if(out.debugVolumeCorrupt==2&&(!out.atmoFreezeClock||out.fogHomogeneous)){error="Volume history control requires --atmo-freeze-clock and a non-homogeneous-fixture history path";return false;}
     if(out.debugVolumeCorrupt==3&&!out.fog){error="Volume light control requires --fog on";return false;}
+    if(out.debugVolumeCorrupt==VOLUME_CORRUPT_MOON&&!out.atmosphere){error="Volume moon control requires --atmosphere on";return false;}
     if(out.debugReflectionCorrupt&&(!out.debugLighting||!(out.reflections!=ReflectionMode::Off||out.ao!=AoMode::Off||out.lightingDenoise!=LightingDenoiseMode::Off))){error="Reflection control requires F13 and --debug-lighting N";return false;}
     if(out.debugReflectionCorrupt==1&&(out.lightingDenoise!=LightingDenoiseMode::Custom||!(out.reflections!=ReflectionMode::Off||out.ao!=AoMode::Off||out.directLighting!=DirectLightingMode::Legacy||out.gi!=GiMode::Off))){error="Reflection history control requires custom denoise and an active signal";return false;}
     if(out.cloudFullRate&&!out.clouds){error="--cloud-full-rate requires --clouds on";return false;}

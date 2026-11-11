@@ -1244,3 +1244,12 @@ TEST_CASE("F14.1 extreme atmosphere parameter controls") {
     CHECK_FALSE(parse({"--atmosphere","on","--atmo-mie-g","0.995"},bad,error));
     CHECK_FALSE(parse({"--atmosphere","on","--atmo-ground-albedo","1.5"},bad,error));
 }
+
+TEST_CASE("F14 moon corruption is selectable only with atmosphere diagnostics") {
+    LaunchOptions o;
+    std::string error;
+    REQUIRE(parse({"--atmosphere","on","--debug-lighting","1","--debug-volume-corrupt","moon"},o,error));
+    CHECK(o.debugVolumeCorrupt==5);
+    CHECK_FALSE(parse({"--atmosphere","on","--debug-volume-corrupt","moon"},o,error));
+    CHECK_FALSE(parse({"--fog","on","--debug-lighting","1","--debug-volume-corrupt","moon"},o,error));
+}

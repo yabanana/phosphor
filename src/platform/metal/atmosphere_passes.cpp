@@ -214,6 +214,10 @@ struct AtmospherePasses::Impl {
         if(diagnostics&&diagnosticSelected){const u32 fault=diagnostics->corruption();
             if(fault==VOLUME_CORRUPT_UNITS){atmosphereParams.corruption=fault;lutMask|=7u;diagnosticArmed=true;}
             if(fault==VOLUME_CORRUPT_LIGHT){for(auto& value:atmosphereParams.sunIrradiance)value*=8;diagnosticArmed=true;}
+            if(fault==VOLUME_CORRUPT_MOON&&atmosphereParams.moonPhase>2e-6f){
+                // Change the disk's phase divisor while preserving the irradiance used by the sky LUT.
+                atmosphereParams.moonPhase*=0.5f;diagnosticArmed=true;
+            }
             if(fault==VOLUME_CORRUPT_OMIT_LUT&&hadLuts){for(auto& value:atmosphereParams.rayleighScattering)value*=1.5f;++atmosphereParams.parameterRevision;++atmosphereParams.skyRevision;lutMask=0;diagnosticArmed=true;}
         }
         if(previousMask!=lutMask){previousMask=lutMask;++graphVersion;}

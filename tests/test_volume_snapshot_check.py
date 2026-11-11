@@ -10,7 +10,9 @@ from volume_snapshot_check import VOLUME_GATES,analytic_component,check_record,v
 
 def words(floats):return list(struct.unpack("<"+"I"*len(floats),struct.pack("<"+"f"*len(floats),*floats)))
 def record_fixture():
-    a=[0.0]*96;a[11]=.01;a[28:31]=[100]*3;aw=words(a);aw[86]=7;aw[87]=9
+    a=[0.0]*96;a[11]=.01;a[24:27]=[.8,-.6,0];a[28:31]=[100]*3
+    a[32:40]=[0,1,0,.0045,.0025,.003,.005,.25]
+    aw=words(a);aw[86]=7;aw[87]=9;aw[90]=1
     f=[0.0]*112
     for i in (0,5,15,16,21,26,31):f[i]=1
     f[10]=-1;f[72]=1;f[73]=9
@@ -22,10 +24,12 @@ def record_fixture():
         epoch=9 if kind=="sky_view" else 7
         cases.append({"kind":kind,"pixel":[0,0],"index":0,"expected":[.5]*3+[1],"actual":[.5]*3+[1],
             "expected_epoch":epoch,"actual_epoch":epoch,"tolerance":VOLUME_GATES[kind],"passed":True})
-    for index in range(3):
-        row={"kind":"solar_disk","pixel":[index,0],"index":index,"expected_epoch":9,"actual_epoch":9,
-            "tolerance":VOLUME_GATES["solar_disk"],"passed":True}
-        row["expected"]=analytic_component(row,blocks,settings);row["actual"]=list(row["expected"]);cases.append(row)
+    for kind,count in (("solar_disk",3),("lunar_disk",3),("star_field",64)):
+        for index in range(count):
+            row={"kind":kind,"pixel":[index,0],"index":index,"expected_epoch":9,"actual_epoch":9,
+                "tolerance":VOLUME_GATES[kind],"passed":True}
+            row["expected"]=analytic_component(row,blocks,settings) or [0,0,0,1]
+            row["actual"]=list(row["expected"]);cases.append(row)
     return {"schema":"phosphor.volume-oracle.v1","kind":"f14-volume","certification":False,
         "provenance":{"source_sha":"s","binary_sha":"b","manifest":"m","shader_generation":2,"source_hash_at_prepare":"abc"},
         "parameter_blocks":blocks,"settings":settings,"cases":cases,"gpu_counters":{"nonfinite":0,"invalid_units":0,"invalid_history":0,"history_reused":0},
@@ -38,6 +42,18 @@ class VolumeSnapshotTests(unittest.TestCase):
         with self.assertRaises(ValueError):volume_words([0]*95,96)
         bad=copy.deepcopy(record);bad["cases"]=[]
         with self.assertRaises(ValueError):check_record(bad,{})
+    def test_independent_lunar_radiance_and_star_ray_coverage(self):
+        record=record_fixture()
+        centre=record["cases"][6]
+        self.assertAlmostEqual(centre["expected"][0],.01*.6/((2/3)*math.pi*math.sin(.0045)**2),places=4)
+        self.assertEqual(record["cases"][7]["expected"],[0,0,0,1])
+        self.assertEqual(record["cases"][8]["expected"],[0,0,0,1])
+        centre["expected"][0]*=.25
+        with self.assertRaisesRegex(ValueError,"independent analytic equation"):check_record(record,{})
+        record=record_fixture();record["cases"].pop()
+        with self.assertRaisesRegex(ValueError,"star_field producer samples missing"):check_record(record,{})
+        record=record_fixture();record["cases"][-1]=record["cases"][-2]
+        with self.assertRaisesRegex(ValueError,"duplicate star_field ray"):check_record(record,{})
     def test_independent_homogeneous_eight_metre_prefix(self):
         record=record_fixture();row={"kind":"homogeneous_fog","index":1}
         answer=analytic_component(row,record["parameter_blocks"],record["settings"])
