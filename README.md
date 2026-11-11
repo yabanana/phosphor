@@ -1,210 +1,66 @@
 # Phosphor
 
-**Phosphor** is a real-time renderer being rebuilt as a **native Metal 4 engine
-for Apple silicon**, with the goal of AAA-grade rendering on Mac (and later
-iPad).  It is written in C++20 on top of [metal-cpp](https://github.com/apple/metal-cpp).
+Phosphor is a native Metal 4 renderer for Apple silicon, written in C++20 and
+Metal Shading Language. It uses GPU-driven mesh submission and a visibility
+buffer, with experimental ray-traced lighting, reflections, and volumetric
+clouds. The test scenes are built to make rendering changes measurable.
 
-The direction, and the research behind it, is in
-[`reports/Engine AAA nativo per Apple Silicon.md`](reports/Engine%20AAA%20nativo%20per%20Apple%20Silicon.md)
-(Italian).  In short:
+[![Phosphor’s material grid rendered under a volumetric sky](docs/img/phosphor-showcase.jpg)](docs/SHOWCASE.md)
 
-- **Metal 4 programming model** end to end: `MTL4CommandQueue`, per-frame
-  command allocators, `MTLSharedEvent` frame pacing, residency sets, argument
-  tables, `MTL4Compiler`.
-- **Designed for TBDR** and unified memory: memoryless attachments, a thin
-  visibility buffer and explicit accounting of graph traffic per pixel.
-- **Hardware floor: Apple9 (M3/M4)** so hardware ray tracing, mesh-shader ICBs,
-  64-bit atomics and the MetalFX denoiser are always available.  The app still
-  starts on M1/M2 (Apple7+) with a warning.
-- **Ray tracing in compute**, planned radiance caching for GI, MetalFX for
-  reconstruction.
+[Watch and reproduce the demo](docs/SHOWCASE.md) · [Read the devlog](docs/devlog/2026-11-11-metal4.md) · [Contribute](CONTRIBUTING.md)
 
-The original Vulkan renderer is archived in [`legacy/vulkan/`](legacy/vulkan/README.md).
+## Run on a Mac
 
----
+Use an Apple silicon Mac with macOS 26 or later, Xcode 26 or later with the
+Metal toolchain, CMake 3.25 or later, and Ninja. M3 or newer is the target for
+the full feature path. Physical M3 and M4 test results are welcome.
 
-## Status and roadmap
-
-F9 is integrated. F10–F14 now provide an **experimental renderer baseline** with scoped M5 validation. [Integration handoff](docs/F10_F14_HANDOFF.md) records the completed checks and open acceptance work. Native F13 denoised reconstruction remains guarded, specular denoise quality is still being qualified, and the full 1080p scene currently exceeds the 60-fps budget. Development stops at F14 before further OPT work.
-
-The implementation roadmap — F0–F41 and OPT-0…OPT-15, organized by dependencies
-in seven eras — is in [`docs/ROADMAP.md`](docs/ROADMAP.md) (Italian).
-The product scope includes an editor, ECS/runtime, community content, complete
-2D and game UI, and verified Bevy ecosystem reuse. These are planned capabilities;
-see [`docs/plans/PRODUCT_PLATFORM.md`](docs/plans/PRODUCT_PLATFORM.md).
-Metal is the active renderer; a future Vulkan backend remains unscheduled.
-After each era, select **OPT tasks** justified by real engine measurements, using research
-([`docs/RESEARCH_REFERENCES.md`](docs/RESEARCH_REFERENCES.md)) and a
-component-by-component guide to squeezing Apple silicon
-([`docs/APPLE_SOC_PLAYBOOK.md`](docs/APPLE_SOC_PLAYBOOK.md)).
-
-| Era | Phases | Content |
-|---|---|---|
-| I · Foundations | F0 ✅, F1–F4 | Metal 4 context, memory/heaps, render graph with automatic barriers, async/AOT pipelines, profiling |
-| II · GPU-driven geometry | F5 ✅, F6 ✅, F7 baseline ✅, F8 ✅ (M5 development) | Persistent GPU scene, GPU-built ICBs, mesh shaders + two-phase culling, visibility buffer, HDR/EDR, MetalFX |
-| III · Light | F9–F14 | Ray tracing infrastructure, hybrid shadows, ReSTIR DI, radiance-cache GI, reflections, atmosphere and clouds |
-| IV · World | F15–F22 | Advanced materials, on-tile OIT, particles, post, virtualised geometry, terrain, water, cooker, streaming |
-| V · Simulation (parallel) | F23–F27 | Job system and CPU optimisation, physics, animation, ray-traced acoustics, gameplay runtime |
-| VI · Frontier | F28–F33 | Scalability, per-device autotuning, neural rendering (incl. in-house MLX-trained networks), path tracing, Gaussian splatting |
-| VII · Product | F34–F41 | Editor, automated QA, Apple platforms, vertical slice, distribution, complete 2D/game UI and ecosystem reuse |
-
-
----
-
-## Requirements
-
-- Apple silicon Mac, **macOS 26** or later (Metal 4). M3 or later recommended.
-- Xcode 26 with the Metal toolchain
-  (`xcodebuild -downloadComponent MetalToolchain` if `xcrun metal` is missing).
-- CMake 3.25+ and Ninja (`brew install cmake ninja`).
-
-All other dependencies (SDL3, glm, meshoptimizer, tinygltf, MikkTSpace, Dear ImGui,
-metal-cpp, doctest) are fetched and pinned by CMake.
-
-## Build and run
-
-```bash
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+```sh
+brew install cmake ninja
+xcrun -sdk macosx metal --version  # If missing, run xcodebuild -downloadComponent MetalToolchain
+git clone https://github.com/yabanana/phosphor.git
+cd phosphor
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-./build/phosphor            # or: ./build/phosphor --bench 4
-ctest --test-dir build      # unit tests for the portable core
+./build/phosphor --bench 5
 ```
 
-For GPU captures and shader debugging, generate an Xcode project instead:
-`cmake -S . -B build-xcode -G Xcode`.  Debug builds enable the Metal API
-validation layer automatically; set `MTL_SHADER_VALIDATION=1` for shader
-validation.
+Bench 5 is a procedural scene with 1,024 lights. Use keys **1–8** to switch
+scenes, **W/A/S/D** and right-drag in first-person scenes, or left-drag and
+scroll in orbit scenes. The [scene guide](assets/README.md) covers the optional
+Sponza download. The [renderer reference](docs/RENDERER.md) covers all benches,
+controls, build modes, capture commands, and diagnostic flags.
 
-### Command line and benchmarks
+On Linux, you can build the portable C++ core, run its tests, and type-check
+the Metal host code using [the Linux build instructions](docs/RENDERER.md#building-on-linux-no-gpu).
 
-| Option | Effect |
-|---|---|
-| `--bench N` | Start on test bench N (1–8) |
-| `--frames N` | Benchmark mode: measure N frames, print a `BENCH` summary line, exit |
-| `--warmup N` | Frames skipped before measuring (default 120) |
-| `--no-vsync` | Uncapped frame rate |
-| `--no-ui` | Hide the ImGui overlay |
-| `--capture FILE` | Write a PNG of the last measured frame (first frame when interactive) |
-| `--report FILE` | Write the benchmark summary as JSON |
-| `--fixed-timestep` | Simulate 1/60 s per frame (deterministic captures) |
-| `--switch-every N` | Cycle to the next bench every N frames (same path as the 1–8 keys) |
-| `--gpu-driven off\|on` | Scene submission: GPU culling + GPU-built indirect command buffers (on, default) or one CPU draw per bucket (off); same image |
-| `--instances N`, `--scene-meshes K`, `--dynamic-cpu PCT`, `--churn N` | Bench 8 ("1M Instances"): size, meshes, CPU-updated share, spawn/despawn per frame |
-| `--cull-distance D`, `--cull-min-pixels P` | Extra GPU instance culling (off by default) |
-| `--debug-gpu-scene N` | Read the GPU scene back every N frames and compare it exactly with the CPU mirror and references (exit 1 on failure) |
-| `--rt off\|on` | Enable F9 BLAS/TLAS maintenance (off by default) |
-| `--debug-view rt`, `--debug-rt N` | Inspect RT geometry or compare same-frame rays with the CPU reference |
-| `--rt-probe primary\|shadow\|ao\|diffuse` | Trace and measure a diagnostic ray population; requires `--rt on` |
-| `--rt-proxy off\|manifest` | Full RT geometry or measured index-only proxies; protected meshes retain full detail |
-| `--memory-stress N` | Create/destroy N GPU resources and check memory returns to baseline (exit 1 on failure) |
-| `--simulate-pressure` | Inject memory-pressure warning/critical events |
-| `--transient-test` | Aliasing self-test of the transient heap (exit 1 on failure) |
-| `--inject-input` | Push synthetic key/mouse events every frame (benchmarks must ignore them) |
+## Renderer status
 
-RT contracts, validation and current scope are documented in
-[`docs/RENDERING_F9.md`](docs/RENDERING_F9.md).
+| Area | Current state |
+| --- | --- |
+| GPU-driven rendering | GPU scene and culling, mesh shaders and indirect draws, visibility buffer, HDR/EDR, and the F8 MetalFX temporal path |
+| Ray tracing | BLAS/TLAS maintenance and diagnostic rays exercised on M5 Max |
+| Lighting and atmosphere | Experimental shadows, ReSTIR DI, GI, reflections, denoising, atmosphere, fog, and clouds |
+| Open validation | Physical M3/M4 measurements, dynamic reflection quality, native MetalFX wide-HDR admission, and the full-scene 1080p/60 fps budget |
 
-Baseline numbers live in [`docs/perf-log.md`](docs/perf-log.md); measure them
-on a Release build without validation:
+The [F10–F14 integration report](docs/F10_F14_HANDOFF.md),
+[budget follow-up](docs/implementation/F13-F14-BUDGET-CLOSURE-2026-10-08.md),
+and [performance log](docs/perf-log.md) identify the workload and hardware
+behind each result. The [roadmap](docs/ROADMAP.md) tracks future work. The
+original Vulkan renderer is archived under [legacy/vulkan](legacy/vulkan/README.md).
 
-```bash
-cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build/release
-tools/bench_all.sh build/release   # all benches, Markdown rows for the perf log
-```
+## Contribute
 
-Visual regression and validation check of every bench (capture references
-with `--update` before a change):
+A first contribution can be a **Many Lights benchmark on an M3 or M4**, a
+**Linux build and test report**, or a **Metal capture for a single GPU pass**.
+The [contribution guide](CONTRIBUTING.md) has the commands, what to attach, and
+links to the open tasks.
 
-```bash
-tools/visual_check.sh build build/reference [--update]
-```
+## License and official upstream
 
-### Building on Linux (no GPU)
-
-The portable core, its tests and a **syntax check of all Metal host code**
-(against the real metal-cpp headers plus minimal SDK stubs in
-`tools/apple-sdk-stubs`) run on Linux:
-
-```bash
-cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang
-cmake --build build && ctest --test-dir build
-cmake --build build --target metal_syntax_check
-```
-
-MSL shaders can only be compiled on macOS; CI does that on a hosted Mac.
-
----
-
-## Test benches
-
-Press **1–7** or use the ImGui combo box:
-
-| # | Bench | Purpose |
-|---|---|---|
-| 1 | Torus Demo | Gold torus on a plane; end-to-end sanity check |
-| 2 | PBR Material Grid | Metallic × roughness sweep |
-| 3 | Stress Test | 100,000 instanced spheres |
-| 4 | Scene Viewer | glTF/GLB from `assets/` (see `assets/README.md`) |
-| 5 | Many Lights | 1,024 point lights (ReSTIR target) |
-| 6 | Cornell Box | GI reference scene |
-| 7 | Culling Viz | 10,000 buildings for occlusion culling |
-
-## Controls
-
-| Input | Action |
-|---|---|
-| W A S D, Q / E | Move, down / up (FPS benches) |
-| Right mouse drag | Look (FPS) |
-| Left mouse drag, wheel | Orbit, zoom (orbit benches) |
-| Shift | Sprint |
-| 1 – 8 | Switch bench |
-| F1 / F2 / F3 | Lit / normals / base color |
-| Esc | Quit |
-
----
-
-## Layout
-
-```
-src/
-  core/        types, logging, input, timer
-  scene/       ECS, camera, components, procedural meshes, glTF loader,
-               TextureManager (API-agnostic front end)
-  renderer/    GpuScene (CPU-side scene geometry), meshlet builder,
-               SceneStore (CPU mirror of the persistent GPU scene, deltas),
-               cull/transform math and references, gpu_types.h and
-               gpu_scene_layout.h (shared with MSL)
-  testbench/   the eight benches
-  platform/metal/  Metal 4 backend: context/frame loop, textures, forward pass
-  app/         Engine (SDL3 window + Metal layer, main loop, benchmark mode)
-  imgui/       debug panels and the Metal 4 ImGui renderer
-shaders/       MSL (compiled to build/shaders/phosphor.metallib)
-tests/         doctest unit tests for the portable core
-tools/         apple-sdk-stubs for Linux syntax checks, bench_all.sh
-legacy/vulkan/ archived Vulkan renderer (reference only)
-reports/, research_notes/   design research (Italian / English)
-```
-
-## Planning and validation
-
-All 58 F/OPT phase plans now include implementation packages and task-level
-acceptance checks: [plan index](docs/plans/README.md). F5–F8 implementation is
-integrated on main ([PR #14](https://github.com/yabanana/phosphor/pull/14),
-merge `91b51c2`). F7/F8 have M5 development acceptance. F8.4 MetalFX temporal
-runs in process: the scaler's internal self-reference (MetalFX 40.9) is
-released by the engine, see the [root cause and verification](docs/research/2026-10-04-metalfx-cycle-root-cause.md).
-The isolated workers of [PR #15](https://github.com/yabanana/phosphor/pull/15)
-remain opt-in ([historical cost](docs/F8_METALFX_LIFETIME.md), rejected by the owner);
-see [delivery and limits](docs/F7_F8_HANDOFF.md) and [renderer commands/contracts](docs/RENDERING_F7_F8.md).
-The post-F8 review (`docs/research/2026-10-04-post-f8-review.md`) recorded the M5 OPT-4.16 baseline and moved OPT-2 after F13; F9 is integrated and the F10–F14 experimental baseline is documented in `docs/F10_F14_HANDOFF.md`. The owner stop is F14. Advance detail does not activate
-the optional research catalog.
-
-Development acceptance uses the available M5 Max 128 GB. Apple9 fallback
-checks on that device do not certify M3/T0 hardware or performance; missing
-physical-device validation remains explicit and does not block development.
-See the [hardware policy](docs/plans/HARDWARE_VALIDATION.md).
-
-## License
-
-No license has been chosen yet; all rights reserved by the author.
+[Apache License 2.0 with Commons Clause 1.0](LICENSE) applies to Phosphor's
+first-party work. This is a source-available license. It allows study,
+modification and redistribution under its terms, including use in a distinct
+commercial product whose value does not derive substantially from Phosphor.
+See [licensing and project identity](docs/LICENSING.md) for examples, third-party
+scope, and how releases and contributions reach the official `main` branch.
