@@ -114,7 +114,8 @@ kernel void reflection_composite(constant GPUReflectionComposeParams& p [[buffer
             if(p.flags&REFLECT_COMPOSE_GI)color+=giSelected.read(pixel).rgb*diVec(s.albedo)*(1-s.metallic)/M_PI_F;
             if(p.flags&REFLECT_COMPOSE_SPEC)color+=specular.read(pixel).rgb;
             if(!(p.flags&REFLECT_COMPOSE_GI)){const float3 n=normalize(diVec(s.shadingNormal));
-                const float3 sky(.30f,.36f,.45f),ground(.10f,.09f,.08f);const float3 ambient=mix(ground,sky,n.y*.5f+.5f)*diVec(s.albedo)*(1-s.metallic)*as_type<float>(s.pad[0]);
+                // Declared isotropic environment (Lo = albedo * L), not the legacy gradient.
+                (void)n;const float3 ambient=float3(p.environment[0],p.environment[1],p.environment[2])*diVec(s.albedo)*(1-s.metallic)*as_type<float>(s.pad[0]);
                 color+=ambient*((p.flags&REFLECT_COMPOSE_AO)?saturate(ao.read(pixel).x):1.0f);}}
     }
     if(!all(isfinite(color))||any(color<-.00001f)||(p.pad[0]&&any(color>65504.0f))){atomic_fetch_add_explicit(counts+4,1u,memory_order_relaxed);color=0;}

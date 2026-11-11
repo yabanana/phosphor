@@ -1,5 +1,6 @@
 #pragma once
 #include "platform/metal/direct_lighting_passes.h"
+#include <array>
 #include <memory>
 #include <string>
 namespace phosphor {
@@ -14,6 +15,9 @@ public:
     ~ReflectionPasses();
     void loadScene(const GpuScene&,const SceneStore&);
     void prepareFrame(const SceneStore&,const ShadowPasses::Frame&,bool useCustom,u64 signalEpoch);
+    // The scene's single declared isotropic environment (GiEnvironment sky):
+    // reflection misses, probe-capture misses and the GI-off ambient use it.
+    void setEnvironment(std::array<float,3> skyRadiance);
     rg::TextureRef addToGraph(rg::RenderGraph&,rg::TextureRef baseHDR,rg::TextureRef depth);
     void bindFrame(MetalGraphExecutor&);
     [[nodiscard]] u64 version() const;

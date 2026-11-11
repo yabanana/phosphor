@@ -123,7 +123,8 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
                                   bool alphaTest = true, float sunVisibility = 1.0f, uint shadowLight = ~0u,
                                   bool replaceLocal = false, float3 localDirect = float3(0),
                                   bool useGI = false, float3 indirectIrradiance = float3(0),
-                                  bool omitSpecularAmbient = false, bool physicalGI = false, bool externalDiffuse = false) {
+                                  bool omitSpecularAmbient = false, bool physicalGI = false, bool externalDiffuse = false,
+                                  float3 environment = float3(0)) {
     const device GPUMaterial &m = materials[in.materialIndex];
 
     const half4 baseTex = sampleOr(textures, m.baseColorTex, in.uv, half4(1.0h), in.uvDx, in.uvDy);
@@ -208,8 +209,10 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     const float NdotV = max(dot(N, V), 1e-4);
     const float3 f0 = mix(float3(0.04), baseColor.rgb, metallic);
     const float3 specularDir = normalize(mix(reflect(-V, N), N, roughness * roughness));
-    const float3 ambientDiffuse = hemisphere(N) * baseColor.rgb * (1.0 - metallic);
-    const float3 ambientSpecular = hemisphere(specularDir) * envBRDFApprox(f0, roughness, NdotV);
+    // F13 path (physicalGI): the scene's single declared isotropic environment,
+    // the same radiance GI and reflection misses see; legacy keeps the gradient.
+    const float3 ambientDiffuse = (physicalGI ? environment : hemisphere(N)) * baseColor.rgb * (1.0 - metallic);
+    const float3 ambientSpecular = (physicalGI ? environment : hemisphere(specularDir)) * envBRDFApprox(f0, roughness, NdotV);
     // F13 assembles these positive signals once outside this residual base.
     // Never subtract full-float lighting from a quantized summed color later.
     if(!externalDiffuse)color += (useGI ? indirectIrradiance * baseColor.rgb * (1.0f - metallic) / M_PI_F * (physicalGI?1.0f:occlusion) : ambientDiffuse * occlusion);

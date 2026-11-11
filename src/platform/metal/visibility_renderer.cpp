@@ -159,6 +159,8 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
                outputWidth,
                outputHeight,
                adaptive_ ? (shadingHistoryValid_[view_] ? 3u : 1u) : 0u,
+               0,
+               {background_[0], background_[1], background_[2]},
                0};
     const u64 tiles = u64((outputWidth + 15) / 16) * ((outputHeight + 15) / 16);
     if (tiles > tileCapacity_) {
@@ -196,8 +198,8 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
     std::memcpy(upload.cpu, &params_, sizeof(params_));
     paramsAddress_ = upload.gpu;
 }
-void VisibilityRenderer::prepareLighting(u32 flags, u32 sunIndex) {
-    const GPUResolveLightingParams p{flags, sunIndex, params_.width, params_.height};
+void VisibilityRenderer::prepareLighting(u32 flags, u32 sunIndex, std::array<float, 3> environment) {
+    const GPUResolveLightingParams p{flags, sunIndex, params_.width, params_.height, {environment[0], environment[1], environment[2]}, 0};
     auto u = context_.frameUploads().allocate(sizeof p); std::memcpy(u.cpu, &p, sizeof p); lightingAddress_ = u.gpu;
 }
 void VisibilityRenderer::setLightingTextures(rg::TextureRef sun, rg::TextureRef direct, rg::TextureRef gi) {

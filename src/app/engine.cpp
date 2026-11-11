@@ -87,6 +87,15 @@
 #endif
 
 namespace phosphor {
+namespace {
+// F13: the scene's single declared isotropic environment. The atmosphere owns
+// it when present; the specular-environment fixture declares its constant
+// infinite environment; every other scene is black outside its geometry.
+GiEnvironment declaredEnvironment(const AtmospherePasses* atmosphere,const LaunchOptions& options){
+    if(atmosphere)return atmosphere->environment();
+    GiEnvironment e{};if(options.reflectionScene=="specular-environment")e.skyRadiance={.03f,.035f,.045f};return e;
+}
+}
 
 namespace {
 
@@ -1606,6 +1615,12 @@ bool Engine::frame(float dt) {
         mesh_->prepareFrame(*store_, *gpuScene_, mp);
         if (mesh_->usingFallbackPipeline()) frameFlags_ |= FrameFallbackDraw;
     }
+    if (visibility_) {
+        // F13 path: pixels without geometry show the declared environment
+        // (black without an atmosphere), the same radiance every miss sees.
+        const GiEnvironment declared=declaredEnvironment(atmosphere_.get(),options_);
+        visibility_->setBackground(reflections_&&reflections_->ready()?declared.skyRadiance:std::array<float,3>{0.02f,0.025f,0.035f});
+    }
     if (visibility_)
         visibility_->prepareFrame(
             frame.slot, renderWidth, renderHeight, renderBackingWidth_, renderBackingHeight_, *store_,
@@ -1665,7 +1680,7 @@ bool Engine::frame(float dt) {
         if(gi_)gi_->prepareFrame(*gpuScene_,*store_,lights_,sf);
         if(store_->stats().structure||store_->stats().fullInstances||store_->stats().fullNodes||!store_->instanceDeltas().empty()||!store_->nodeDeltas().empty()||!store_->motionSlots().empty()||!store_->dirtyRoots().empty())++surfaceGeometryEpoch_;
         if(store_->stats().fullMaterials||!store_->materialDeltas().empty())++surfaceMaterialEpoch_;
-        const GiEnvironment environment=atmosphere_?atmosphere_->environment():GiEnvironment{};
+        const GiEnvironment environment=declaredEnvironment(atmosphere_.get(),options_);
         const auto lightEpoch=surfaceLightingEpoch_.update(lights_,environment,directLighting_?directLighting_->lightRevision():0);
         const SurfaceSignal signal{sceneEpoch_,surfaceGeometryEpoch_,surfaceMaterialEpoch_,rt_?rt_->geometryRevision():gpuScene_->geometryVersion(),lightEpoch,pipelines_->generation()};
         if(!(signal==previousSurfaceSignal_)){++surfaceSignalEpoch_;previousSurfaceSignal_=signal;}
@@ -1678,11 +1693,11 @@ bool Engine::frame(float dt) {
             denoised_->prepareFrame(df);
         }
         const bool custom=options_.lightingDenoise==LightingDenoiseMode::Custom || (denoised_&&!denoised_->ready());
-        if(reflections_&&reflections_->ready())reflections_->prepareFrame(*store_,sf,custom,surfaceSignalEpoch_);
+        if(reflections_&&reflections_->ready()){reflections_->setEnvironment(environment.skyRadiance);reflections_->prepareFrame(*store_,sf,custom,surfaceSignalEpoch_);}
         if(atmosphere_)atmosphere_->prepareFrame(sf,surfaceGeometryEpoch_,surfaceMaterialEpoch_);
         const u32 flags=(options_.shadows!=ShadowMode::Off?1u:0u) | (options_.directLighting!=DirectLightingMode::Legacy?2u:0u) | (options_.gi!=GiMode::Off?4u:0u) |
                         (options_.reflections!=ReflectionMode::Off && reflections_&&reflections_->ready()?8u:0u) | (reflections_&&reflections_->ready()?16u|RESOLVE_EXTERNAL_DIFFUSE:0u);
-        visibility_->prepareLighting(flags,shadows_->sunIndex());
+        visibility_->prepareLighting(flags,shadows_->sunIndex(),environment.skyRadiance);
     }
     if(referenceSnapshot_) {
         ShadowPasses::Frame ref;ref.slot=frame.slot;ref.index=frame.index;ref.width=renderWidth;ref.height=renderHeight;ref.constants=constants;

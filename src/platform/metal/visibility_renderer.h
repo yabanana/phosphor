@@ -45,7 +45,10 @@ class VisibilityRenderer {
     [[nodiscard]] const std::array<u32, ExposureBins> &checkedHistogramHigh() const { return checkedHistogramHigh_; }
     void addPoseSnapshot(rg::RenderGraph &graph);
     void resetGraphRefs() { poses_ = {}; composedColor_ = {}; }
-    void prepareLighting(u32 flags, u32 sunIndex);
+    // environment: the scene's declared isotropic radiance, used by the F13
+    // path (flag 16) for ambient fallbacks. Background: pixels without geometry.
+    void prepareLighting(u32 flags, u32 sunIndex, std::array<float, 3> environment = {});
+    void setBackground(std::array<float, 3> radiance) { background_ = radiance; }
     void setLightingTextures(rg::TextureRef sun, rg::TextureRef direct, rg::TextureRef gi);
     rg::BufferRef importPoseHistory(rg::RenderGraph& graph);
     [[nodiscard]] MTL::GPUAddress paramsAddress() const { return paramsAddress_; }
@@ -99,6 +102,7 @@ class VisibilityRenderer {
     u64 readPoseCapacity_ = 0;
     bool useBinning_ = false;
     u64 binnedFrames_ = 0, genericFrames_ = 0;
+    std::array<float, 3> background_{0.02f, 0.025f, 0.035f}; // legacy clear colour
     GPUVisibilityParams params_{};
     u32 slot_ = 0;
     u32 view_ = 0;

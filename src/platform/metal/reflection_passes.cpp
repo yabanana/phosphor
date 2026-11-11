@@ -51,7 +51,7 @@ struct ReflectionPasses::Impl {
     struct GeometryContent {u64 scene,structure,rtGeometry,instances,nodes,materials,motion,pipeline;bool operator==(const GeometryContent&)const=default;};
     GeometryContent lastGeometry{};bool geometryKnown=false;
     std::pair<u64,u64> publishedComponents{};u64 publishedVersion=1;
-    ReflectionSettings settings;AOSettings aoSettings;GPUReflectionProbe probe{};GPUReflectionParams params{};GPUAOParams aoParams{};
+    std::array<float,3> environment{};ReflectionSettings settings;AOSettings aoSettings;GPUReflectionProbe probe{};GPUReflectionParams params{};GPUAOParams aoParams{};
     GPUReflectionReduceParams reduceParams{};GPUReflectionComposeParams composeParams{},preComposeParams{};
     MTL::GPUAddress paramsAddress=0,aoAddress=0,reduceAddress=0,composeAddress=0,preComposeAddress=0,probeAddress=0,giDummyAddress=0,extraDummyAddress=0;
     std::array<MTL::GPUAddress,6> captureAddress{},rasterCaptureAddress{};std::array<MTL::GPUAddress,ProbeMips> filterAddress{},validateAddress{};MTL::GPUAddress rawValidateAddress=0;
@@ -202,8 +202,11 @@ struct ReflectionPasses::Impl {
         params.width=f.width;params.height=f.height;params.frameIndex=u32(f.index);params.maxDistance=settings.maxDistance;params.ssrThickness=settings.ssrThickness;
         params.rtRoughnessLow=settings.rtRoughnessLow;params.rtRoughnessHigh=settings.rtRoughnessHigh;params.slotCount=store.slotCapacity();params.meshCount=u32(geometry.size());params.materialCount=u32(store.materials().size());params.lightCount=f.constants.lightCount;
         params.ssrSteps=settings.ssrSteps;params.ssrBinarySteps=settings.ssrBinarySteps;params.probeCount=1;params.seed=options.lightingSeed;params.maxProbeMip=ProbeMips-1;
-        params.environment[0]=.03f;params.environment[1]=.035f;params.environment[2]=.045f;
-        params.flags=REFLECTION_ENABLE_PROBES;if(options.reflections!=ReflectionMode::Probes)params.flags|=REFLECTION_ENABLE_SSR;
+        for(u32 i=0;i<3;++i)params.environment[i]=environment[i];
+        // The analytic probe is a fixed gradient, not the declared environment:
+        // it is consulted only in probe-only mode or for real probe content.
+        const bool realProbe=options.reflectionCaptureProbe||!options.reflectionProbePath.empty()||options.reflections==ReflectionMode::Probes;
+        params.flags=realProbe?REFLECTION_ENABLE_PROBES:0u;if(options.reflections!=ReflectionMode::Probes)params.flags|=REFLECTION_ENABLE_SSR;
         // Tagged physical fixture: no local probe/SSR geometry, only the
         // constant infinite incident radiance specified above.
         if(options.reflectionScene=="specular-environment")params.flags=0;
@@ -215,7 +218,7 @@ struct ReflectionPasses::Impl {
         aoParams.samples=aoSettings.rays;aoParams.slices=aoSettings.slices;aoParams.steps=aoSettings.steps;aoParams.frameIndex=u32(f.index);aoParams.slotCount=store.slotCapacity();
         const auto projection=glm::make_mat4(f.unjitteredVP)*glm::inverse(glm::make_mat4(f.constants.view));aoParams.pixelScale=std::abs(projection[1][1])*f.height*.5f;aoAddress=lighting::upload(c,aoParams);
         reduceParams={f.width,f.height,options.reflectionSamples,u32(pixels)};reduceAddress=lighting::upload(c,reduceParams);
-        composeParams={f.width,f.height,f.backingWidth,f.backingHeight,0,{0,options.debugReflectionCorrupt,0}};
+        composeParams={f.width,f.height,f.backingWidth,f.backingHeight,0,{0,options.debugReflectionCorrupt,0},{environment[0],environment[1],environment[2]},0};
         if(gi&&options.gi!=GiMode::Off)composeParams.flags|=REFLECT_COMPOSE_GI;if(custom)composeParams.flags|=REFLECT_COMPOSE_CUSTOM;
         if(options.directLighting!=DirectLightingMode::Legacy)composeParams.flags|=REFLECT_COMPOSE_DI;
         if(options.reflections!=ReflectionMode::Off)composeParams.flags|=REFLECT_COMPOSE_SPEC;if(options.ao!=AoMode::Off)composeParams.flags|=REFLECT_COMPOSE_AO;composeParams.pad[0]=0;composeAddress=lighting::upload(c,composeParams);
@@ -398,6 +401,7 @@ ReflectionPasses::ReflectionPasses(MetalContext& c,PipelineCache& p,SceneRendere
 ReflectionPasses::~ReflectionPasses()=default;
 void ReflectionPasses::loadScene(const GpuScene& g,const SceneStore& s){impl_->load(g,s);}
 void ReflectionPasses::prepareFrame(const SceneStore& s,const ShadowPasses::Frame& f,bool custom,u64 epoch){impl_->prepare(s,f,custom,epoch);}
+void ReflectionPasses::setEnvironment(std::array<float,3> sky){impl_->environment=sky;}
 rg::TextureRef ReflectionPasses::addToGraph(rg::RenderGraph& g,rg::TextureRef base,rg::TextureRef depth){return impl_->add(g,base,depth);}
 void ReflectionPasses::bindFrame(MetalGraphExecutor& e){impl_->bind(e);}
 u64 ReflectionPasses::version()const{const std::pair<u64,u64> components{impl_->graphVersion,impl_->denoise.version()};if(impl_->publishedComponents!=components){impl_->publishedComponents=components;++impl_->publishedVersion;}return impl_->publishedVersion;}

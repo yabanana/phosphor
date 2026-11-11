@@ -562,8 +562,9 @@ PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowCacheTile) == 48, "GPUShadowCacheTile lay
 PHOSPHOR_GPU_CONSTANT u32 RESOLVE_EXTERNAL_DIFFUSE = 1u<<5;
 struct GPUResolveLightingParams {
     u32 flags, sunIndex, width, height; // bits: sun visibility, replace local DI, indirect irradiance
+    float environment[3]; u32 pad;      // declared isotropic environment radiance (bit16 = F13 path)
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUResolveLightingParams) == 16, "GPUResolveLightingParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUResolveLightingParams) == 32, "GPUResolveLightingParams layout");
 // F11: local-light sampling. Area emission is radiance (W/(m^2 sr));
 // point/spot emission is intensity (W/sr). Distances are world-space metres.
 PHOSPHOR_GPU_CONSTANT u32 DI_LIGHT_RECTANGLE = 3u;
@@ -959,7 +960,7 @@ PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_SPEC = 8u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_AO = 16u;
 struct GPUReflectionReduceParams {u32 width,height,samples,stridePixels;};
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionReduceParams)==16,"GPUReflectionReduceParams layout");
-struct GPUReflectionComposeParams {u32 width,height,backingWidth,backingHeight;u32 flags,pad[3];};
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionComposeParams)==32,"GPUReflectionComposeParams layout");
+struct GPUReflectionComposeParams {u32 width,height,backingWidth,backingHeight;u32 flags,pad[3];float environment[3];u32 pad2;};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionComposeParams)==48,"GPUReflectionComposeParams layout");
 
 } // namespace phosphor
