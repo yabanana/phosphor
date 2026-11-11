@@ -97,6 +97,14 @@ def spatial_envelope_residual(candidate,reference,region,radius):
     return output
 
 
+def ghost_metric_key(roi):
+    """F8 legacy support ghost by default; F13.6 ROIs may declare the D4 error-change ghost."""
+    kind=roi.get("ghost_metric","support")
+    if kind=="support":return "support_ghost_fraction_max"
+    if kind=="error-change":return "error_change_ghost_fraction"
+    raise ValueError(f"unknown ghost metric {kind}")
+
+
 def validate_config(config):
     if config.get("linear") is not True or config.get("frozen_before_run") is not True:
         raise ValueError("linear, pre-frozen ROI configuration required")
@@ -106,6 +114,7 @@ def validate_config(config):
         if not roi.get("name") or roi["name"] in names:raise ValueError("unique ROI names required")
         names.add(roi["name"])
         if not math.isfinite(roi.get("scale",0)) or roi["scale"]<=0:raise ValueError("positive predeclared radiance scale required")
+        ghost_metric_key(roi)
         required=("linear_rmse_p95_max","linear_rmse_max","residual_flicker_mean_max",
                   "support_ghost_fraction_max","recovery_frames_max","recovery_linear_rmse")
         for field in required:
@@ -119,7 +128,7 @@ def analyse_clips(reference,candidate,config,frame_ids=None):
     """Stream matched exact-sized frames; no temporal alignment fitted to data."""
     validate_config(config)
     iterator=iter(zip(reference,candidate,strict=True))
-    states={r["name"]:{"definition":r,"frames":[],"prev_ref":None,"prev_error":None} for r in config["rois"]}
+    states={r["name"]:{"definition":r,"frames":[],"prev_ref":None,"prev_error":None,"prev_change":None,"prev_outside":None,"lag_num":0.0,"lag_den":0.0} for r in config["rois"]}
     ids=iter(frame_ids) if frame_ids is not None else None
     count=0;shape=None
     for ref,cur in iterator:
@@ -134,19 +143,36 @@ def analyse_clips(reference,candidate,config,frame_ids=None):
             E=array("d",(c-r for c,r in zip(C,R)));scale=roi["scale"]
             rms=math.sqrt(math.fsum(e*e for e in E)/len(E))/scale
             signed=math.fsum(E)/len(E)/scale
-            flicker=ghost=support=0.0;change_energy=0.0
+            flicker=ghost=support=lag=0.0;change_energy=0.0;D=outside=None
             if state["prev_ref"] is not None:
                 D=array("d",(p-r for p,r in zip(state["prev_ref"],R)))
                 change_energy=math.fsum(d*d for d in D)
                 flicker=math.fsum(abs(e-p) for e,p in zip(E,state["prev_error"]))/len(E)/scale
+                outside=spatial_envelope_residual(cur,ref,region,int(config.get("reconstruction_support_radius",1)))
                 if change_energy>1e-20:
                     ghost=max(0.0,math.fsum(e*d for e,d in zip(E,D))/change_energy)
-                    outside=spatial_envelope_residual(cur,ref,region,int(config.get("reconstruction_support_radius",1)))
                     support=max(0.0,math.fsum(e*d for e,d in zip(outside,D))/change_energy)
+                # Owner decision D4 (F13.6): attraction of the CHANGE of the out-of-
+                # support residual to the CHANGE of the reference change. A static
+                # bias and a steady drift cancel; a history that holds old values
+                # at an event follows the old frame (1 for a one-frame delay). The
+                # gate is the clip-level regression (sums over frames, weighted by
+                # the reference acceleration energy): a per-frame ratio is noise
+                # wherever the reference barely accelerates. Per-frame values are
+                # diagnostics only.
+                if state["prev_change"] is not None:
+                    dD=array("d",(d-q for d,q in zip(D,state["prev_change"])))
+                    accel=math.fsum(v*v for v in dD)
+                    joint=math.fsum((o-q)*v for o,q,v in zip(outside,state["prev_outside"],dD))
+                    state["lag_num"]+=joint;state["lag_den"]+=accel
+                    # Numerical floor, not a perceptual one: below an RMS of 1e-5 of the
+                    # ROI scale (~100x float32 rounding of D) the ratio is rounding noise.
+                    if accel>len(dD)*(1e-5*scale)**2:lag=max(0.0,joint/accel)
             state["frames"].append({"frame":frame,"linear_rmse":rms,"signed_bias":signed,
                 "residual_flicker":flicker,"old_frame_attraction":ghost,"support_ghost_fraction":support,
-                "reference_change_energy":change_energy/(scale*scale)})
+                "error_change_ghost_fraction":lag,"reference_change_energy":change_energy/(scale*scale)})
             state["prev_ref"],state["prev_error"]=R,E
+            state["prev_change"],state["prev_outside"]=D,outside
         count+=1
     if count<2:raise ValueError("temporal metrics require at least two matching frames")
     regions={};passed=True
@@ -170,6 +196,9 @@ def analyse_clips(reference,candidate,config,frame_ids=None):
                  "linear_rmse_max":max(r["linear_rmse"] for r in rows),
                  "residual_flicker_mean":math.fsum(r["residual_flicker"] for r in rows)/len(rows),
                  "support_ghost_fraction_max":max(r["support_ghost_fraction"] for r in rows),
+                 "error_change_ghost_fraction_frame_max":max(r["error_change_ghost_fraction"] for r in rows),
+                 "error_change_ghost_fraction":max(0.0,state["lag_num"]/state["lag_den"])
+                     if state["lag_den"]>len(state["prev_ref"])*(1e-5*roi["scale"])**2 else 0.0,
                  "old_frame_attraction_max":max(r["old_frame_attraction"] for r in rows),
                  "signed_bias_mean":math.fsum(r["signed_bias"] for r in rows)/len(rows),
                  "reference_change_energy":math.fsum(r["reference_change_energy"] for r in rows),
@@ -177,7 +206,8 @@ def analyse_clips(reference,candidate,config,frame_ids=None):
         checks={"spatial_p95":metrics["linear_rmse_p95"]<=thresholds["linear_rmse_p95_max"],
                 "worst_frame":metrics["linear_rmse_max"]<=thresholds["linear_rmse_max"],
                 "flicker":metrics["residual_flicker_mean"]<=thresholds["residual_flicker_mean_max"],
-                "ghost_support":metrics["support_ghost_fraction_max"]<=thresholds["support_ghost_fraction_max"],
+                # The same frozen 0.25 cap; the ROI declares which ghost definition it gates.
+                "ghost_support":metrics[ghost_metric_key(roi)]<=thresholds["support_ghost_fraction_max"],
                 "recovery":all(n is not None and n<=thresholds["recovery_frames_max"] for n in recovery.values()),
                 "dynamic_sensitivity":not roi.get("require_change",False) or metrics["reference_change_energy"]>config.get("minimum_change_energy",1e-8)}
         passed=passed and all(checks.values())

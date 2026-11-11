@@ -236,6 +236,10 @@ def make_cases(out,frames,sdk_policy,probe_dir=None):
             if case["numerical_oracle"]=="fog-homogeneous":case["flags"]+=["--fog-homogeneous"]
         case["linear"]=str(folder/"linear");case["signal"]=case.get("signal","hdr")
         case["roi"]=default_roi(case["scene"],frames)
+        # Owner decision D4 (2026-11-11): F13 image cases gate the ghost on the
+        # clip-level change of the error; F14 keeps the F8 support ghost.
+        if case["phase"]=="F13":
+            for roi in case["roi"]["rois"]:roi["ghost_metric"]="error-change"
         case["reference_role"]=reference_role(case)
         if case.get("roi_scale"):
             for roi in case["roi"]["rois"]:roi["scale"]=case["roi_scale"]

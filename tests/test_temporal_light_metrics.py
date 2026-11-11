@@ -18,6 +18,41 @@ def config(events=(),require_change=False):
                                    "recovery_frames_max":4,"recovery_linear_rmse":0.06}}]}
 
 
+def d4(events=()):
+    c=config(events);c["rois"][0]["ghost_metric"]="error-change";return c
+
+
+class ErrorChangeGhostD4(unittest.TestCase):
+    """Owner decision D4: ghost on the change of the error (F13.6 ROIs only)."""
+    def images(self,values):return [metrics.solid(2,2,float(v)) for v in values]
+    def key(self,result):return result["regions"]["fixture"]["metrics"]["error_change_ghost_fraction"]
+    def test_one_frame_delay_at_a_step_fails(self):
+        ref=self.images([0,0,1,1,1,1]);late=self.images([0,0,0,1,1,1])
+        result=metrics.analyse_clips(ref,late,d4())
+        self.assertAlmostEqual(self.key(result),1);self.assertFalse(result["regions"]["fixture"]["checks"]["ghost_support"])
+    def test_exponential_history_at_a_step_fails(self):
+        ref=self.images([0,0,1,1,1,1,1,1]);alpha=.2;value=0.0;ema=[]
+        for r in [0,0,1,1,1,1,1,1]:value=value+alpha*(r-value);ema.append(value)
+        result=metrics.analyse_clips(ref,self.images(ema),d4())
+        # Clip-level regression over the step and the next frame: (1-alpha^2)/2.
+        self.assertAlmostEqual(self.key(result),(1-alpha*alpha)/2,places=6);self.assertFalse(result["regions"]["fixture"]["checks"]["ghost_support"])
+    def test_static_bias_under_steady_drift_passes_and_fails_the_legacy_metric(self):
+        ref=self.images([.1*i for i in range(8)]);biased=self.images([.1*i-.05 for i in range(8)])
+        result=metrics.analyse_clips(ref,biased,d4())
+        self.assertEqual(self.key(result),0);self.assertTrue(result["regions"]["fixture"]["checks"]["ghost_support"])
+        legacy=metrics.analyse_clips(ref,biased,config())
+        self.assertGreater(legacy["regions"]["fixture"]["metrics"]["support_ghost_fraction_max"],.25)
+        self.assertFalse(legacy["regions"]["fixture"]["checks"]["ghost_support"])
+    def test_independent_flicker_is_not_ghost(self):
+        ref=self.images([0,0,1,1,1,1]);noisy=self.images([.01,-.01,1.01,.99,1.01,.99])
+        self.assertLess(self.key(metrics.analyse_clips(ref,noisy,d4())),.25)
+    def test_unknown_ghost_definition_is_refused(self):
+        c=config();c["rois"][0]["ghost_metric"]="lenient"
+        with self.assertRaises(ValueError):metrics.analyse_clips(self.images([0,1]),self.images([0,1]),c)
+    def test_default_remains_the_f8_metric(self):
+        self.assertEqual(metrics.ghost_metric_key(config()["rois"][0]),"support_ghost_fraction_max")
+
+
 class TemporalFixtures(unittest.TestCase):
     def images(self,values):return [metrics.solid(2,2,float(v)) for v in values]
     def test_identical_linear_step_has_zero_error_and_immediate_recovery(self):

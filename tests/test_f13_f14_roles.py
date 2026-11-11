@@ -27,6 +27,10 @@ class Roles(unittest.TestCase):
         self.assertEqual(self.cases["mirror-ssr"]["reference_role"], "control")
         self.assertEqual(self.cases["ao-cavity-gtao"]["reference_role"], "independent-clip")
 
+    def test_ghost_definition_per_phase(self):
+        self.assertEqual(self.cases["moving-light-custom"]["roi"]["rois"][0]["ghost_metric"], "error-change")
+        self.assertNotIn("ghost_metric", self.cases["clouds-reconstructed"]["roi"]["rois"][0])
+
     def test_f14_roles_follow_the_plan(self):
         self.assertEqual(self.cases["atmo-zenith"]["reference_role"], "numerical")
         self.assertEqual(self.cases["fog-homogeneous-oracle"]["reference_role"], "numerical")
