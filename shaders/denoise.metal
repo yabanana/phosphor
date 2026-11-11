@@ -10,6 +10,17 @@ inline uint denoiseSignal(constant GPUDenoiseParams& p){return kDenoiseSignal==0
 // params0 surfaces1 previousHistory2 optionalSpecMetadata3 nextHistory4;
 // textures raw0 pre-resolvePixelMotion1 temporalOUT2 momentsVarianceOUT3.
 inline float3 denoiseNormal(GPUDISurface s,uint signal){return signal==DENOISE_SIGNAL_SPECULAR?diVec(s.shadingNormal):diVec(s.geometricNormal);}
+// Spatial filter guide. Specular radiance varies with the reflection axis
+// R = reflect(-V, N), not with N alone: on a flat mirror N is constant while
+// the reflected image moves one pixel per pixel. Other signals keep N.
+inline float3 denoiseGuide(GPUDISurface s,uint signal){
+    const float3 n=denoiseNormal(s,signal);if(signal!=DENOISE_SIGNAL_SPECULAR)return n;
+    const float3 v=diVec(s.viewDirection);
+    return (dot(n,n)>0&&dot(v,v)>0&&all(isfinite(n))&&all(isfinite(v)))?reflect(-normalize(v),normalize(n)):float3(0);
+}
+// F13.6 lobe bound: neighbours whose reflection axes differ by more than the
+// centre's GGX lobe (angle ~ alpha) see a different reflected image.
+inline float denoiseLobe(float cosine,float roughness){const float a=max(roughness*roughness,0.002f);return exp(-max(0.0f,1.0f-cosine)/(a*a));}
 inline bool denoiseCompatible(GPUDISurface s,GPUDenoiseHistory h,constant GPUDenoiseParams& p,GPUSpecularSample spec){
     if((p.flags&DENOISE_RESET)||!s.valid||!h.valid||!h.length||h.signal!=denoiseSignal(p)||h.viewID!=p.viewID||h.historyEpoch!=p.historyEpoch||h.signalRevision!=p.signalRevision||
         h.slot!=s.instanceSlot||h.instanceGeneration!=s.instanceGeneration||h.materialRevision!=s.materialRevision||
@@ -54,15 +65,19 @@ kernel void denoise_temporal(constant GPUDenoiseParams& p [[buffer(0)]],const de
             if(all(isfinite(delta))&&all(center>=0)&&all(center<float2(p.width,p.height))){const uint2 q=uint2(center);old=previous[q.y*p.width+q.x];reuse=denoiseCompatible(s,old,p,spec);}}
         float3 oldColor=diVec(old.color);
         float localVariance=0;
-        if(!reuse||old.length<p.minHistoryForVariance||(p.flags&DENOISE_CLAMP_HISTORY)){float3 sum=0,square=0,lo=INFINITY,hi=-INFINITY;float count=0,lumSum=0,lumSquare=0;
+        const bool softTest=reuse&&(p.flags&DENOISE_SOFT_CHANGE);
+        if(!reuse||old.length<p.minHistoryForVariance||(p.flags&DENOISE_CLAMP_HISTORY)||softTest){float3 sum=0,square=0,lo=INFINITY,hi=-INFINITY;float count=0,lumSum=0,lumSquare=0;
             for(int y=-1;y<=1;++y)for(int x=-1;x<=1;++x){const int2 q=int2(pixel)+int2(x,y);if(any(q<0)||any(q>=int2(p.width,p.height)))continue;
                 const uint index=uint(q.y)*p.width+uint(q.x);if(!denoiseNeighbor(s,surfaces[index],p))continue;const float3 value=raw.read(uint2(q)).rgb;
                 if(!all(isfinite(value)))continue;sum+=value;square+=value*value;lo=min(lo,value);hi=max(hi,value);const float l=diLuminance(value);lumSum+=l;lumSquare+=l*l;++count;}
             if(count>0){const float3 mean=sum/count,variance=max(square/count-mean*mean,0.0f),sigma=sqrt(variance+p.varianceFloor);
                 localVariance=max(0.0f,lumSquare/count-(lumSum/count)*(lumSum/count));
-                const float3 low=max(lo,mean-p.clampSigma*sigma),high=min(hi,mean+p.clampSigma*sigma);if(reuse&&(p.flags&DENOISE_CLAMP_HISTORY))oldColor=clamp(oldColor,low,high);}
+                const float3 low=max(lo,mean-p.clampSigma*sigma),high=min(hi,mean+p.clampSigma*sigma);if(reuse&&(p.flags&DENOISE_CLAMP_HISTORY))oldColor=clamp(oldColor,low,high);
+                // Soft change: drop the history only where it left the current neighbourhood.
+                if(softTest&&any(abs(oldColor-mean)>p.clampSigma*sigma+.02f*max(abs(mean),float3(1e-4f))))reuse=false;}
         }
-        const uint length=reuse?min(old.length,p.maxHistory-1u)+1u:1u;const float alpha=reuse?max(p.temporalAlpha,1.0f/float(length)):1;
+        const uint length=reuse?min(old.length,p.maxHistory-1u)+1u:1u;
+        const float alpha=reuse?max((p.flags&DENOISE_SOFT_CHANGE)?2*p.temporalAlpha:p.temporalAlpha,1.0f/float(length)):1;
         const float ma=reuse?max(p.momentsAlpha,1.0f/float(length)):1,L=diLuminance(current);float3 color=reuse?mix(oldColor,current,alpha):current;if(denoiseSignal(p)==DENOISE_SIGNAL_AO)color=saturate(color);
         h.length=length;h.firstMoment=reuse?mix(old.firstMoment,L,ma):L;h.secondMoment=reuse?mix(old.secondMoment,L*L,ma):L*L;
         h.variance=max(p.varianceFloor,h.secondMoment-h.firstMoment*h.firstMoment);if(length<p.minHistoryForVariance)h.variance=max(h.variance,localVariance/float(length));h.depth=s.depth;h.roughness=s.roughness;
@@ -76,11 +91,11 @@ kernel void denoise_temporal(constant GPUDenoiseParams& p [[buffer(0)]],const de
 }
 
 inline float denoiseWeight(GPUDISurface a,GPUDISurface b,float la,float lb,float variance,constant GPUDenoiseParams& p){
-    if(!a.valid||!b.valid)return 0;const float3 na=denoiseNormal(a,denoiseSignal(p)),nb=denoiseNormal(b,denoiseSignal(p));if(dot(na,na)<=0||dot(nb,nb)<=0)return 0;
-    const float normal=pow(max(0.0f,dot(normalize(na),normalize(nb))),p.normalPhi);
+    if(!a.valid||!b.valid)return 0;const float3 na=denoiseGuide(a,denoiseSignal(p)),nb=denoiseGuide(b,denoiseSignal(p));if(dot(na,na)<=0||dot(nb,nb)<=0)return 0;
+    const float cosine=dot(normalize(na),normalize(nb));const float normal=pow(max(0.0f,cosine),p.normalPhi);
     const float depth=exp(-abs(a.depth-b.depth)/max(1e-6f,p.depthThreshold*max(a.depth,b.depth)*float(p.atrousStep)));
     const float color=exp(-abs(la-lb)/(p.luminancePhi*sqrt(max(variance,p.varianceFloor))+1e-6f));
-    const float rough=denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR?exp(-abs(a.roughness-b.roughness)/max(p.roughnessThreshold,1e-6f)):1;
+    const float rough=denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR?exp(-abs(a.roughness-b.roughness)/max(p.roughnessThreshold,1e-6f))*denoiseLobe(cosine,a.roughness):1;
     return normal*depth*color*rough;
 }
 // params0/surfaces1/optionalSpecMetadata3. Textures input0, moments1, output2.
@@ -122,7 +137,7 @@ inline void denoiseAtrousTile(constant GPUDenoiseParams& p,const device GPUDISur
         const int2 q=origin+int2(i%W,i/W);float4 color=0,guide=0;uint2 meta=0;
         if(all(q>=0)&&all(q<int2(p.width,p.height))) {
             const uint index=uint(q.y)*p.width+uint(q.x);const GPUDISurface surface=surfaces[index];
-            color=input.read(uint2(q));const float3 n=denoiseNormal(surface,denoiseSignal(p));
+            color=input.read(uint2(q));const float3 n=denoiseGuide(surface,denoiseSignal(p));
             if(surface.valid&&dot(n,n)>0) {
                 guide=float4(normalize(n),surface.depth);meta.x=as_type<uint>(surface.roughness);
                 meta.y=DENOISE_TILE_VALID|(denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR?specular[index].flags:0u);
@@ -151,10 +166,10 @@ inline void denoiseAtrousTile(constant GPUDenoiseParams& p,const device GPUDISur
                 if(a.path!=b.path||a.secondarySlot!=b.secondarySlot||a.secondaryGeneration!=b.secondaryGeneration)continue;
             }
         }
-        const float normal=pow(max(0.0f,dot(center.xyz,neighbor.xyz)),p.normalPhi);
+        const float cosine=dot(center.xyz,neighbor.xyz);const float normal=pow(max(0.0f,cosine),p.normalPhi);
         const float depth=exp(-abs(center.w-neighbor.w)/max(1e-6f,p.depthThreshold*max(center.w,neighbor.w)*float(p.atrousStep)));
         const float radiance=exp(-abs(lum-diLuminance(color))/(p.luminancePhi*sqrt(max(variance,p.varianceFloor))+1e-6f));
-        const float rough=denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR?exp(-abs(as_type<float>(centerMeta.x)-as_type<float>(meta.x))/max(p.roughnessThreshold,1e-6f)):1;
+        const float rough=denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR?exp(-abs(as_type<float>(centerMeta.x)-as_type<float>(meta.x))/max(p.roughnessThreshold,1e-6f))*denoiseLobe(cosine,as_type<float>(centerMeta.x)):1;
         const float weight=taps[x+2]*taps[y+2]*(normal*depth*radiance*rough);
         sum+=color*weight;weights+=weight;
     }
@@ -186,7 +201,7 @@ kernel void denoise_atrous_guide4(constant GPUDenoiseParams& p [[buffer(0)]],con
     for(uint i=lane;i<N;i+=64){
         const int2 q=origin+int2(i%W,i/W);float4 guide=0;uint2 meta=0;
         if(all(q>=0)&&all(q<int2(p.width,p.height))){
-            const uint index=uint(q.y)*p.width+uint(q.x);const GPUDISurface s=surfaces[index];const float3 n=denoiseNormal(s,denoiseSignal(p));
+            const uint index=uint(q.y)*p.width+uint(q.x);const GPUDISurface s=surfaces[index];const float3 n=denoiseGuide(s,denoiseSignal(p));
             if(s.valid&&dot(n,n)>0){guide=float4(normalize(n),s.depth);meta.x=as_type<uint>(s.roughness);
                 meta.y=DENOISE_TILE_VALID|(denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR?specular[index].flags:0u);}
         }
@@ -209,10 +224,10 @@ kernel void denoise_atrous_guide4(constant GPUDenoiseParams& p [[buffer(0)]],con
                 if(a.path!=b.path||a.secondarySlot!=b.secondarySlot||a.secondaryGeneration!=b.secondaryGeneration)continue;
             }
         }
-        const float normal=pow(max(0.0f,dot(center.xyz,neighbor.xyz)),p.normalPhi);
+        const float cosine=dot(center.xyz,neighbor.xyz);const float normal=pow(max(0.0f,cosine),p.normalPhi);
         const float depth=exp(-abs(center.w-neighbor.w)/max(1e-6f,p.depthThreshold*max(center.w,neighbor.w)*float(p.atrousStep)));
         const float radiance=exp(-abs(lum-diLuminance(color))/(p.luminancePhi*sqrt(max(variance,p.varianceFloor))+1e-6f));
-        const float rough=denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR?exp(-abs(as_type<float>(centerMeta.x)-as_type<float>(meta.x))/max(p.roughnessThreshold,1e-6f)):1;
+        const float rough=denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR?exp(-abs(as_type<float>(centerMeta.x)-as_type<float>(meta.x))/max(p.roughnessThreshold,1e-6f))*denoiseLobe(cosine,as_type<float>(centerMeta.x)):1;
         const float weight=taps[x+2]*taps[y+2]*(normal*depth*radiance*rough);sum+=color*weight;weights+=weight;
     }
     float3 result=weights>0?sum/weights:value;if(denoiseSignal(p)==DENOISE_SIGNAL_AO)result=saturate(result);output.write(float4(result,1),pixel);

@@ -51,6 +51,8 @@ struct ReflectionPasses::Impl {
     struct GeometryContent {u64 scene,structure,rtGeometry,instances,nodes,materials,motion,pipeline;bool operator==(const GeometryContent&)const=default;};
     GeometryContent lastGeometry{};bool geometryKnown=false;
     std::pair<u64,u64> publishedComponents{};u64 publishedVersion=1;
+    struct SpecularContent {u64 scene=0,structure=0,materials=0,pipelines=0;bool operator==(const SpecularContent&)const=default;};
+    SpecularContent lastSpecular{};bool specularKnown=false;u64 specularEpoch=0,lastSoftEpoch=~u64{0};
     std::array<float,3> environment{};ReflectionSettings settings;AOSettings aoSettings;GPUReflectionProbe probe{};GPUReflectionParams params{};GPUAOParams aoParams{};
     GPUReflectionReduceParams reduceParams{};GPUReflectionComposeParams composeParams{},preComposeParams{};
     MTL::GPUAddress paramsAddress=0,aoAddress=0,reduceAddress=0,composeAddress=0,preComposeAddress=0,probeAddress=0,giDummyAddress=0,extraDummyAddress=0;
@@ -202,7 +204,7 @@ struct ReflectionPasses::Impl {
         params.width=f.width;params.height=f.height;params.frameIndex=u32(f.index);params.maxDistance=settings.maxDistance;params.ssrThickness=settings.ssrThickness;
         params.rtRoughnessLow=settings.rtRoughnessLow;params.rtRoughnessHigh=settings.rtRoughnessHigh;params.slotCount=store.slotCapacity();params.meshCount=u32(geometry.size());params.materialCount=u32(store.materials().size());params.lightCount=f.constants.lightCount;
         params.ssrSteps=settings.ssrSteps;params.ssrBinarySteps=settings.ssrBinarySteps;params.probeCount=1;params.seed=options.lightingSeed;params.maxProbeMip=ProbeMips-1;
-        for(u32 i=0;i<3;++i)params.environment[i]=environment[i];
+        for(u32 i=0;i<3;++i)params.environment[i]=environment[i];params.regularizationScale=options.reflectionRegularizationScale;
         // The analytic probe is a fixed gradient, not the declared environment:
         // it is consulted only in probe-only mode or for real probe content.
         const bool realProbe=options.reflectionCaptureProbe||!options.reflectionProbePath.empty()||options.reflections==ReflectionMode::Probes;
@@ -241,8 +243,15 @@ struct ReflectionPasses::Impl {
         const GeometryContent geometryContent{f.scene,store.structureVersion(),rt?rt->geometryRevision():0,instanceRevision,nodeRevision,materialRevision,motionRevision,p.generation()};
         if(!geometryKnown||lastGeometry!=geometryContent){lastGeometry=geometryContent;geometryKnown=true;++geometryEpoch;}
         slots[f.slot].skipLocalDenoise = direct.emptyLocalLighting();
-        if(custom){const std::array<u64,4> revisions{direct.lightRevision(),gi&&options.gi!=GiMode::Off?gi->readResources().parameters.cacheGeneration:0,signalEpoch,geometryEpoch};
-            denoise.prepareFrame(frame,signalEpoch,revisions,options.directLighting!=DirectLightingMode::Legacy&&!slots[f.slot].skipLocalDenoise);}
+        // Specular history: hard reset only when the scene, its structure, its
+        // materials or the pipelines change; motion of geometry or lights is a
+        // soft change judged per pixel by the temporal pass.
+        const SpecularContent specular{f.scene,store.structureVersion(),materialRevision,p.generation()};
+        if(!specularKnown||lastSpecular!=specular){lastSpecular=specular;specularKnown=true;++specularEpoch;}
+        const bool softChange=signalEpoch!=lastSoftEpoch;lastSoftEpoch=signalEpoch;
+        if(custom){const std::array<u64,4> revisions{direct.lightRevision(),gi&&options.gi!=GiMode::Off?gi->readResources().parameters.cacheGeneration:0,specularEpoch,geometryEpoch};
+            denoise.prepareFrame(frame,signalEpoch,revisions,options.directLighting!=DirectLightingMode::Legacy&&!slots[f.slot].skipLocalDenoise,
+                                 1u<<DENOISE_SIGNAL_SPECULAR,softChange);}
     }
     void texture(MTL4::ArgumentTable* table,rg::PassContext& ctx,rg::TextureRef ref,u32 index){table->setTexture(static_cast<MTL::Texture*>(ctx.texture(ref))->gpuResourceID(),index);}
     void commonReads(rg::PassBuilder& b,rg::Stages stages=rg::StageDispatch){b.read(receivers,rg::Usage::ShaderRead,stages);b.read(direct.lightsRef(),rg::Usage::ShaderRead,stages);b.read(direct.emittersRef(),rg::Usage::ShaderRead,stages);b.read(scene.dataRef(),rg::Usage::ShaderRead,stages);

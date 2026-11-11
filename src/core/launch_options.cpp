@@ -466,6 +466,9 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if(!needFloat(out.atmoStartHour)||out.atmoStartHour<0||out.atmoStartHour>=24){error="--start-hour: expected0..24";return false;}
         } else if (arg == "--time-jump-every") {if(!needCount(out.timeJumpEveryN))return false;
         } else if (arg == "--atmo-freeze-clock") {out.atmoFreezeClock=true;
+        } else if (arg == "--reflection-regularization-scale") {
+            if(!needFloat(out.reflectionRegularizationScale)||!(out.reflectionRegularizationScale>=1&&out.reflectionRegularizationScale<=100)){
+                error="--reflection-regularization-scale: expected [1,100]";return false;}
         } else if (arg == "--atmo-scattering-scale") {
             if(!needFloat(out.atmoScatteringScale)||!(out.atmoScatteringScale>0&&out.atmoScatteringScale<=100)){error="--atmo-scattering-scale: expected (0,100]";return false;}
         } else if (arg == "--atmo-ozone-scale") {

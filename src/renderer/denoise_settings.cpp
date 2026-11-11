@@ -8,6 +8,10 @@ glm::vec3 v3(const float* p){return {p[0],p[1],p[2]};}
 bool finite(glm::vec3 p){return std::isfinite(p.x)&&std::isfinite(p.y)&&std::isfinite(p.z);}
 float luminance(glm::vec3 c){return glm::dot(c,glm::vec3(.2126f,.7152f,.0722f));}
 glm::vec3 signalNormal(const GPUDISurface& s,u32 signal){return v3(signal==DENOISE_SIGNAL_SPECULAR?s.shadingNormal:s.geometricNormal);}
+// Shader mirror (denoiseGuide): specular filters on the reflection axis.
+glm::vec3 signalGuide(const GPUDISurface& s,u32 signal){const auto n=signalNormal(s,signal);if(signal!=DENOISE_SIGNAL_SPECULAR)return n;
+    const auto v=v3(s.viewDirection);if(!finite(n)||!finite(v)||glm::dot(n,n)<=0||glm::dot(v,v)<=0)return {};
+    return glm::reflect(-glm::normalize(v),glm::normalize(n));}
 }
 bool validDenoiseSettings(const DenoiseSettings& s){return std::isfinite(s.temporalAlpha)&&s.temporalAlpha>0&&s.temporalAlpha<=1&&
     std::isfinite(s.momentsAlpha)&&s.momentsAlpha>0&&s.momentsAlpha<=1&&std::isfinite(s.depthThreshold)&&s.depthThreshold>0&&
@@ -50,7 +54,8 @@ bool denoiseCompatible(const GPUDISurface& s,const GPUDenoiseHistory& h,const GP
     }
     return true;
 }
-GPUDenoiseHistory denoiseTemporal(const GPUDISurface& s,glm::vec3 current,const GPUDenoiseHistory& old,const GPUDenoiseParams& p,glm::vec3 low,glm::vec3 high,const GPUSpecularSample& spec,float neighborhoodVariance){
+GPUDenoiseHistory denoiseTemporal(const GPUDISurface& s,glm::vec3 current,const GPUDenoiseHistory& old,const GPUDenoiseParams& p,glm::vec3 low,glm::vec3 high,const GPUSpecularSample& spec,float neighborhoodVariance,
+                                   glm::vec3 mean,glm::vec3 sigma){
     GPUDenoiseHistory h{};h.signal=p.signal;h.viewID=p.viewID;h.historyEpoch=p.historyEpoch;h.signalRevision=p.signalRevision;
     if(p.signal==DENOISE_SIGNAL_SPECULAR&&(spec.flags&SPECULAR_SAMPLE_STOCHASTIC)&&!(p.flags&DENOISE_DIAGNOSTIC_ENDPOINTS))h.flags|=DENOISE_HISTORY_STOCHASTIC;
     if(!s.valid)return h;
@@ -58,8 +63,12 @@ GPUDenoiseHistory denoiseTemporal(const GPUDISurface& s,glm::vec3 current,const 
     current=glm::max(current,glm::vec3(0));if(p.signal==DENOISE_SIGNAL_AO)current=glm::clamp(current,glm::vec3(0),glm::vec3(1));
     bool reuse=denoiseCompatible(s,old,p,spec);glm::vec3 previous=v3(old.color);
     if(reuse&&(p.flags&DENOISE_CLAMP_HISTORY)&&finite(low)&&finite(high))previous=glm::clamp(previous,glm::min(low,high),glm::max(low,high));
+    // Shader mirror of DENOISE_SOFT_CHANGE: keep history only inside the current neighbourhood.
+    if(reuse&&(p.flags&DENOISE_SOFT_CHANGE)&&sigma.x>=0)for(u32 i=0;i<3;++i)
+        if(std::abs(previous[i]-mean[i])>p.clampSigma*sigma[i]+.02f*std::max(std::abs(mean[i]),1e-4f))reuse=false;
     const u32 count=reuse?std::min(old.length,p.maxHistory-1)+1:1;
-    const float alpha=reuse?std::max(p.temporalAlpha,1.f/count):1,ma=reuse?std::max(p.momentsAlpha,1.f/count):1;
+    const float base=(p.flags&DENOISE_SOFT_CHANGE)?2*p.temporalAlpha:p.temporalAlpha;
+    const float alpha=reuse?std::max(base,1.f/count):1,ma=reuse?std::max(p.momentsAlpha,1.f/count):1;
     glm::vec3 color=reuse?glm::mix(previous,current,alpha):current;if(p.signal==DENOISE_SIGNAL_AO)color=glm::clamp(color,glm::vec3(0),glm::vec3(1));const float L=luminance(current);
     h.firstMoment=reuse?old.firstMoment*(1-ma)+L*ma:L;h.secondMoment=reuse?old.secondMoment*(1-ma)+L*L*ma:L*L;
     h.variance=std::max(p.varianceFloor,h.secondMoment-h.firstMoment*h.firstMoment);h.length=count;
@@ -72,11 +81,13 @@ GPUDenoiseHistory denoiseTemporal(const GPUDISurface& s,glm::vec3 current,const 
 }
 float denoiseSpatialWeight(const GPUDISurface& a,const GPUDISurface& b,float la,float lb,float variance,const GPUDenoiseParams& p){
     if(!a.valid||!b.valid||!std::isfinite(la)||!std::isfinite(lb)||!std::isfinite(variance)||variance<0)return 0;
-    const auto na=signalNormal(a,p.signal),nb=signalNormal(b,p.signal);if(!finite(na)||!finite(nb)||glm::dot(na,na)<=0||glm::dot(nb,nb)<=0)return 0;
-    const float normal=std::pow(std::max(0.f,glm::dot(glm::normalize(na),glm::normalize(nb))),p.normalPhi);
+    const auto na=signalGuide(a,p.signal),nb=signalGuide(b,p.signal);if(!finite(na)||!finite(nb)||glm::dot(na,na)<=0||glm::dot(nb,nb)<=0)return 0;
+    const float cosine=glm::dot(glm::normalize(na),glm::normalize(nb));const float normal=std::pow(std::max(0.f,cosine),p.normalPhi);
     const float depth=std::exp(-std::abs(a.depth-b.depth)/std::max(1e-6f,p.depthThreshold*std::max(a.depth,b.depth)*p.atrousStep));
     const float color=std::exp(-std::abs(la-lb)/(p.luminancePhi*std::sqrt(std::max(variance,p.varianceFloor))+1e-6f));
-    const float rough=p.signal==DENOISE_SIGNAL_SPECULAR?std::exp(-std::abs(a.roughness-b.roughness)/std::max(p.roughnessThreshold,1e-6f)):1;
+    const float alpha=std::max(a.roughness*a.roughness,0.002f);
+    const float rough=p.signal==DENOISE_SIGNAL_SPECULAR?std::exp(-std::abs(a.roughness-b.roughness)/std::max(p.roughnessThreshold,1e-6f))*
+        std::exp(-std::max(0.f,1.f-cosine)/(alpha*alpha)):1;
     return normal*depth*color*rough;
 }
 } // namespace phosphor

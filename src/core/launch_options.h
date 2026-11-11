@@ -347,6 +347,8 @@ struct LaunchOptions {
     // F14.1 extreme-parameter validation: scale the default Hillaire medium.
     // Unset (<0 for g/albedo) keeps the defaults; the oracle reads the actual GPU block.
     float atmoScatteringScale=1,atmoOzoneScale=1,atmoMieG=-2,atmoGroundAlbedo=-1;
+    // F13.6 declared path regularisation of the reflection light connection.
+    float reflectionRegularizationScale=1;
     u32 timeJumpEveryN=0,debugVolumeCorrupt=0;
     std::string volumeOracle;bool fogHomogeneous=false,atmoFreezeClock=false;
     std::string denoisedFixture,denoisedFixtureOutput;bool denoisedFixturePreExposed=false,denoisedFixtureAutoExposure=false,denoisedFixtureManualExposureControl=false;u32 denoisedFixturePrewarmMs=120000;

@@ -779,6 +779,11 @@ PHOSPHOR_GPU_CONSTANT u32 DENOISE_SIGNAL_AO = 3u;
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_RESET = 1u;
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_CLAMP_HISTORY = 2u;
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_CURRENT_VIEW_DEPTH = 8u;
+// F13.6: the scene changed continuously this frame (geometry or light motion)
+// while the signal's hard content key did not. History survives per pixel
+// unless it leaves the current neighbourhood (clampSigma * sigma, plus a 2%
+// relative margin); kept histories adapt with at least twice temporalAlpha.
+PHOSPHOR_GPU_CONSTANT u32 DENOISE_SOFT_CHANGE = 16u;
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_HISTORY_STOCHASTIC = 2u; // history flags: bit0 remains a numerical error
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_DIAGNOSTIC_ENDPOINTS = 4u; // opt-in old endpoint rejection for the quality negative
 
@@ -790,8 +795,9 @@ struct GPUReflectionParams {
     u32 slotCount, meshCount, materialCount, lightCount;
     u32 ssrSteps, ssrBinarySteps, probeCount, seed;
     float environment[3], maxProbeMip;
+    float regularizationScale; u32 pad[3]; // k: alpha' = max(alpha_secondary, k*alpha_camera)
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionParams) == 288, "GPUReflectionParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionParams) == 304, "GPUReflectionParams layout");
 struct GPUSpecularSample {
     float radiance[3], hitDistance; // weighted outgoing Lo; 0 distance for environment/miss
     float direction[3], proposalSolidAngle;

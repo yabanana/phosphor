@@ -107,6 +107,35 @@ TEST_CASE("F13 atrous edge weights preserve identity on constant signals and sto
     CHECK(denoiseSpatialWeight(a,a,2,200,1,p)<.001f);
 }
 
+TEST_CASE("F13.6 specular atrous weight is bounded by the reflection lobe"){
+    const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);auto a=receiver();
+    a.shadingNormal[0]=0;a.shadingNormal[1]=0;a.shadingNormal[2]=1;a.viewDirection[0]=0;a.viewDirection[1]=0;a.viewDirection[2]=1;
+    auto b=a;const float angle=.003f;b.viewDirection[0]=std::sin(angle);b.viewDirection[2]=std::cos(angle); // next pixel on a flat mirror
+    CHECK(denoiseSpatialWeight(a,a,2,2,1,p)==doctest::Approx(1));
+    a.roughness=b.roughness=.04f; // alpha 0.002: the reflected image moves one lobe width per pixel
+    CHECK(denoiseSpatialWeight(a,b,2,2,1,p)==doctest::Approx(std::exp(-(1-std::cos(angle))/(.002f*.002f))).epsilon(1e-3));
+    CHECK(denoiseSpatialWeight(a,b,2,2,1,p)<.4f);
+    auto c=a;c.viewDirection[0]=std::sin(2*angle);c.viewDirection[2]=std::cos(2*angle);CHECK(denoiseSpatialWeight(a,c,2,2,1,p)<.02f);
+    a.roughness=b.roughness=.8f;  // wide lobe: unchanged filtering
+    CHECK(denoiseSpatialWeight(a,b,2,2,1,p)>.99f);
+    // DI keeps the normal guide: the view direction does not matter there.
+    const auto d=denoiseParameters({},4,4,DENOISE_SIGNAL_DI,0,1,1,false);a.roughness=b.roughness=.04f;
+    CHECK(denoiseSpatialWeight(a,b,2,2,1,d)==doctest::Approx(denoiseSpatialWeight(a,a,2,2,1,d)));
+}
+
+TEST_CASE("F13.6 soft change keeps history only inside the current neighbourhood"){
+    DenoiseSettings settings;auto p=denoiseParameters(settings,4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);const auto s=receiver();const auto sp=spec();
+    auto h=denoiseTemporal(s,glm::vec3(1),{},p,{},{},sp);REQUIRE(h.valid);for(int i=0;i<8;++i)h=denoiseTemporal(s,glm::vec3(1),h,p,{},{},sp);
+    const u32 length=h.length;REQUIRE(length>1);
+    p.flags|=DENOISE_SOFT_CHANGE;
+    auto kept=denoiseTemporal(s,glm::vec3(1.01f),h,p,{},{},sp,-1,glm::vec3(1.01f),glm::vec3(.05f));
+    CHECK(kept.length==length+1);CHECK(kept.color[0]==doctest::Approx(1+.01f*2*settings.temporalAlpha).epsilon(1e-4));
+    auto dropped=denoiseTemporal(s,glm::vec3(3),h,p,{},{},sp,-1,glm::vec3(3),glm::vec3(.05f));
+    CHECK(dropped.length==1);CHECK(dropped.color[0]==doctest::Approx(3));
+    p.flags&=~DENOISE_SOFT_CHANGE; // without the event a static history is never tested
+    CHECK(denoiseTemporal(s,glm::vec3(3),h,p,{},{},sp,-1,glm::vec3(3),glm::vec3(.05f)).length==length+1);
+}
+
 TEST_CASE("Stochastic reflection outcomes preserve the mean and reduce independent sample variance") {
     DenoiseSettings settings;settings.temporalAlpha=settings.momentsAlpha=.01f;
     const auto p=denoiseParameters(settings,1,1,DENOISE_SIGNAL_SPECULAR,0,1,1,false);

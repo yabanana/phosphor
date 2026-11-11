@@ -15,8 +15,10 @@ struct DenoiseSettings {
 [[nodiscard]] bool validDenoiseSettings(const DenoiseSettings&);
 [[nodiscard]] GPUDenoiseParams denoiseParameters(const DenoiseSettings&,u32 width,u32 height,u32 signal,u32 view,u32 epoch,u32 revision,bool reset);
 [[nodiscard]] bool denoiseCompatible(const GPUDISurface&,const GPUDenoiseHistory&,const GPUDenoiseParams&,const GPUSpecularSample& specular={});
+// neighborhoodMean/Sigma: the current 3x3 raw statistics, used by DENOISE_SOFT_CHANGE.
 [[nodiscard]] GPUDenoiseHistory denoiseTemporal(const GPUDISurface&,glm::vec3 current,const GPUDenoiseHistory&,
-    const GPUDenoiseParams&,glm::vec3 neighborhoodLow,glm::vec3 neighborhoodHigh,const GPUSpecularSample& specular={},float neighborhoodVariance=-1);
+    const GPUDenoiseParams&,glm::vec3 neighborhoodLow,glm::vec3 neighborhoodHigh,const GPUSpecularSample& specular={},float neighborhoodVariance=-1,
+    glm::vec3 neighborhoodMean=glm::vec3(0),glm::vec3 neighborhoodSigma=glm::vec3(-1));
 [[nodiscard]] float denoiseSpatialWeight(const GPUDISurface&,const GPUDISurface&,float centerLuminance,float neighborLuminance,
     float variance,const GPUDenoiseParams&);
 } // namespace phosphor
