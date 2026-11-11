@@ -2179,5 +2179,30 @@ no Metal loaded.
   the RT reflection fixtures differ run to run, HEAD against itself
   included (299/300 frames, up to 1.8% relative).
 
-The 16.67 ms target remains open: about 1.0 ms over at p95 (p50 is already
-below it).
+After that round the target was still open, about 1.0 ms over at p95.
+
+Third round (same protocol, same binary, flag A/B interleaved x3; the
+machine carried CPU compile load, so frame times are relative only):
+
+- **DDGI irradiance left unfiltered** (71bfed3, `--ddgi-denoise on|off`).
+  DDGI's per-pixel irradiance is a deterministic probe interpolation, so
+  there is no Monte Carlo noise for the denoiser to remove. The F12 Cornell
+  oracle already showed raw 16x8x16 at 23.31% worst-ROI NRMSE against 24.19%
+  filtered. The GI temporal pass and two strides (1.66 ms) are gone. AO's
+  stride 4 alone costs what the shared GI+AO stride did (1.09 ms).
+  Fixtures are unchanged to four decimals, except mirror floor-front p95
+  0.0247 → 0.0251. Adopted. Reproducing the frozen F12 filtered DDGI case
+  needs `--ddgi-denoise on`.
+- **Two AO strides** (42adefd, `--ao-atrous-iterations`). The denoise
+  passes drop 5.75 → 4.65 ms. ao-cavity-rtao gets closer to its reference:
+  p95 0.0101 → 0.0070, flicker 0.0002 → 0.0004. ao-cavity-gtao is unchanged
+  (0.0807 → 0.0805; its bias remains open). Adopted.
+- **Measured but not done: guide4 overfetch.** The stride-4 pass loads
+  576 96-byte receivers per 64 pixels. A compact per-frame guide texture
+  would cut that, but with stride 4 gone from every Sponza signal nothing
+  is left to gain there.
+
+Final quiet measurement, interleaved (`docs/perf-log.md`, 2026-11-11):
+HEAD 42adefd GPU p95 14.91–15.39 ms, frame p95 15.74–16.36 ms in five clean
+runs, against 22.4–23.1 ms for 2b285df. The 16.67 ms gate is met on this
+M5 Max.

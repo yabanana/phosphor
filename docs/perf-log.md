@@ -1116,3 +1116,32 @@ pairs reduce GPU p50 by 5.91% and 5.23%. The shared stride takes about
 Full GPU p95 is 22.6877 and 23.1716 ms. A third pair is rejected at 6.82%
 baseline drift. Every run has zero steady GPU allocations and AOT misses.
 The 16.67 ms gate remains open.
+
+## 2026-11-11 — F13/F14 closure budget, Sponza 1080p full path (phase/f13-f14-closure)
+
+M5 Max, macOS 27.3, toolchain 32023.922, built with the factory flag on and
+shader debug info off. The full path runs RT shadows, ReSTIR DI, DDGI 16x8x16,
+RT reflections, RTAO, the custom denoiser, atmosphere, fog, clouds and post.
+Each run uses `--gpu-timing-serial` with 128 warm-up and 256 measured frames.
+Binaries run interleaved, separated by 20 s, under the same toolchain and
+options. Raw runs are in `build/regress-20261111/budget-final{,2}/`.
+
+| binary | GPU p50 | GPU p95 | frame p95 | runs |
+|---|---:|---:|---:|---|
+| base 2b285df | 21.46 | 22.43 / 23.09 | 23.17 / 24.18 | 2 clean (1 disturbed) |
+| 954034b | 17.33–17.84 | 18.58–19.30 | 19.37–20.15 | 5 clean |
+| 42adefd (HEAD) | 13.63–14.27 | 14.91–15.39 | 15.74–16.36 | 5 clean |
+
+Every run has zero steady GPU allocations. In one disturbed window all
+binaries were 2–4 ms slower: rep 2 of the first battery moved 954034b
+18.61 → 21.74 ms and HEAD to 17.36 ms. That window is excluded and reported
+here. Three more interleaved repetitions with the load logged reproduce the
+clean numbers.
+
+The 16.67 ms gate is met at native 1080p on this M5 Max. GPU p95 has about
+1.3 ms of margin; frame p95 has 0.3–0.9 ms. The gain comes from removing
+check passes and the reflection reduction, two specular and two AO strides,
+the shorter rough SSR march, two RTAO rays, the compact denoise history and
+unfiltered DDGI. `docs/opt-log.md` lists each change and its fixture checks.
+This is development evidence on one device, not certification for other
+devices.
