@@ -47,13 +47,15 @@ kernel void reflection_probe_ready(constant GPUReflectionProbe& source [[buffer(
     out.enabled=source.enabled&&!fault[1];
     metadata[0]=out;
 }
-kernel void denoise_history_corrupt_safe(constant GPUDenoiseParams& p [[buffer(0)]],device GPUDenoiseHistory* history [[buffer(1)]],uint tid [[thread_position_in_grid]]){
-    if(!(p.flags&DENOISE_RESET)&&tid<p.width*p.height&&history[tid].valid)history[tid].viewID^=1u;
+// The view ID lives in the history buffer header (offset 0), shared by every
+// pixel: flipping it rejects every valid history, as a per-pixel flip did.
+kernel void denoise_history_corrupt_safe(constant GPUDenoiseParams& p [[buffer(0)]],device GPUDenoiseHistoryHeader* header [[buffer(1)]],uint tid [[thread_position_in_grid]]){
+    if(!(p.flags&DENOISE_RESET)&&tid==0)header[0].viewID^=1u;
 }
 // Output-history domain negative. The independent denoise_check observes the
 // real view mismatch; no synthetic error flag or counter is injected here.
-kernel void denoise_next_foreign_view(constant GPUDenoiseParams& p [[buffer(0)]],device GPUDenoiseHistory* history [[buffer(1)]],uint tid [[thread_position_in_grid]]){
-    if(tid<p.width*p.height&&history[tid].valid)history[tid].viewID^=1u;
+kernel void denoise_next_foreign_view(constant GPUDenoiseParams& p [[buffer(0)]],device GPUDenoiseHistoryHeader* header [[buffer(1)]],uint tid [[thread_position_in_grid]]){
+    if(tid==0)header[0].viewID^=1u;
 }
 // Codes2/3 operate on F13-owned copies. Original Direct/F8 guides and motion
 // remain intact. Only valid receiver pixels are poisoned; background is copied.

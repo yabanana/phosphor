@@ -25,7 +25,7 @@ TEST_CASE("F13 denoise moments raw signal remains unchanged and reset recovers i
     CHECK(b.length==2);CHECK(b.color[0]==doctest::Approx(3));CHECK(b.firstMoment==doctest::Approx(3));CHECK(b.secondMoment==doctest::Approx(10));CHECK(b.variance==doctest::Approx(1));
     CHECK(first==glm::vec3(2));CHECK(second==glm::vec3(4));auto cut=p;cut.flags|=DENOISE_RESET;
     const auto recovered=denoiseTemporal(s,glm::vec3(0),b,cut,{},{});CHECK(recovered.length==1);CHECK(recovered.color[0]==0);
-    GPUDenoiseHistory history=a;for(u32 i=0;i<100;++i)history=denoiseTemporal(s,first,history,p,{},{});CHECK(history.length==settings.maxHistory);CHECK(history.color[0]==doctest::Approx(2));
+    DenoiseHistory history=a;for(u32 i=0;i<100;++i)history=denoiseTemporal(s,first,history,p,{},{});CHECK(history.length==settings.maxHistory);CHECK(history.color[0]==doctest::Approx(2));
     const auto startup=denoiseTemporal(s,first,{},p,{},{},{},4);CHECK(startup.variance==doctest::Approx(4)); // short history uses local variance
 }
 TEST_CASE("F13 camera motion compares historical world receivers in the current view") {
@@ -142,7 +142,7 @@ TEST_CASE("Stochastic reflection outcomes preserve the mean and reduce independe
     const auto s=receiver();double mean=0,second=0;
     // Exact enumeration: four IID fair outcomes, radiance0 or4. The true
     // mean is2, raw variance4; the four-sample average has variance1.
-    for(u32 bits=0;bits<16;++bits){GPUDenoiseHistory h{};
+    for(u32 bits=0;bits<16;++bits){DenoiseHistory h{};
         for(u32 k=0;k<4;++k){auto m=spec();m.flags|=SPECULAR_SAMPLE_STOCHASTIC;
             const bool hit=(bits&(1u<<k))!=0;m.path=hit?REFLECTION_PATH_RT:REFLECTION_PATH_NONE;
             m.secondarySlot=hit?k:~0u;m.secondaryGeneration=k+1;m.hitDistance=hit?float(2+k):0;
@@ -158,4 +158,37 @@ TEST_CASE("Stochastic reflection outcomes preserve the mean and reduce independe
     auto stale=p;++stale.signalRevision;CHECK_FALSE(denoiseCompatible(s,h,stale,m));
     stale=p;stale.flags|=DENOISE_RESET;CHECK_FALSE(denoiseCompatible(s,h,stale,m));
     auto wrong=h;wrong.flags|=1u;CHECK_FALSE(denoiseCompatible(s,wrong,p,m));
+}
+TEST_CASE("F13 compact denoise history round-trips every field a later frame reads"){
+    // Budget closure: header + 64-byte record + 16-byte specular extension
+    // replace the 112-byte record. Every value the temporal pass can write must
+    // survive packing, and the reuse decision on the unpacked history must match.
+    static_assert(sizeof(GPUDenoiseHistoryHeader)==64&&sizeof(GPUDenoiseHistoryRecord)==64&&sizeof(GPUDenoiseSpecularHistory)==16);
+    CHECK(DenoiseSettings{}.maxHistory<=DENOISE_HISTORY_MAX_LENGTH);CHECK(REFLECTION_PATH_ENVIRONMENT<=DENOISE_HISTORY_MAX_PATH);
+    CHECK((1u|DENOISE_HISTORY_STOCHASTIC)<=DENOISE_HISTORY_MAX_FLAGS);
+    for(const u32 length:{0u,1u,2u,255u,256u})for(const u32 flags:{0u,1u,DENOISE_HISTORY_STOCHASTIC,1u|DENOISE_HISTORY_STOCHASTIC})
+        for(u32 path=0;path<=REFLECTION_PATH_ENVIRONMENT;++path)for(const u32 valid:{0u,1u}){const u32 state=denoisePackState(length,flags,path,valid);
+            CHECK(denoiseStateLength(state)==length);CHECK(denoiseStateFlags(state)==flags);CHECK(denoiseStatePath(state)==path);CHECK(denoiseStateValid(state)==valid);}
+    CHECK(denoiseHistoryBytes(100,false)==64+100*64);CHECK(denoiseHistoryBytes(100,true)==64+100*80);CHECK(denoiseHistorySpecularOffset(100)==64+100*64);
+    DenoiseSettings settings;const auto s=receiver();
+    for(const u32 variant:{0u,1u,2u,3u,4u}){const u32 signal=variant==4?DENOISE_SIGNAL_SPECULAR:variant;
+        const auto p=denoiseParameters(settings,4,4,signal,2,7,9,false);auto m=spec();if(variant==4)m.flags|=SPECULAR_SAMPLE_STOCHASTIC;
+        DenoiseHistory h{};for(u32 i=0;i<5;++i)h=denoiseTemporal(s,glm::vec3(.25f*float(i+1)),h,p,{},{},m);REQUIRE(h.valid);REQUIRE(h.length==5);
+        const bool specular=signal==DENOISE_SIGNAL_SPECULAR;
+        const auto back=denoiseUnpack(denoisePackHeader(h),denoisePackRecord(h),specular?denoisePackSpecular(h):GPUDenoiseSpecularHistory{});
+        for(u32 i=0;i<3;++i){CHECK(back.color[i]==h.color[i]);CHECK(back.normal[i]==h.normal[i]);CHECK(back.position[i]==h.position[i]);}
+        CHECK(back.firstMoment==h.firstMoment);CHECK(back.secondMoment==h.secondMoment);CHECK(back.depth==h.depth);CHECK(back.length==h.length);
+        CHECK(back.signal==h.signal);CHECK(back.viewID==h.viewID);CHECK(back.historyEpoch==h.historyEpoch);CHECK(back.signalRevision==h.signalRevision);
+        CHECK(back.slot==h.slot);CHECK(back.instanceGeneration==h.instanceGeneration);CHECK(back.materialRevision==h.materialRevision);
+        CHECK(back.valid==h.valid);CHECK(back.flags==h.flags);CHECK(back.variance==0);CHECK(h.variance>=settings.varianceFloor);
+        if(specular){CHECK(back.roughness==h.roughness);CHECK(back.hitDistance==h.hitDistance);CHECK(back.path==h.path);
+            CHECK(back.secondarySlot==h.secondarySlot);CHECK(back.secondaryGeneration==h.secondaryGeneration);}
+        // Same reuse decision and the same next history from either form.
+        CHECK(denoiseCompatible(s,back,p,m)==denoiseCompatible(s,h,p,m));CHECK(denoiseCompatible(s,back,p,m));
+        const auto a=denoiseTemporal(s,glm::vec3(3),h,p,{},{},m),b=denoiseTemporal(s,glm::vec3(3),back,p,{},{},m);
+        CHECK(a.color[0]==b.color[0]);CHECK(a.length==b.length);CHECK(a.variance==b.variance);CHECK(a.firstMoment==b.firstMoment);
+        // The shared header carries the domain: a flipped view rejects the history.
+        auto header=denoisePackHeader(h);header.viewID^=1u;
+        CHECK_FALSE(denoiseCompatible(s,denoiseUnpack(header,denoisePackRecord(h),specular?denoisePackSpecular(h):GPUDenoiseSpecularHistory{}),p,m));
+    }
 }

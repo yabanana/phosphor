@@ -1,4 +1,5 @@
 #include "platform/metal/denoise_passes.h"
+#include "renderer/denoise_history_layout.h"
 #include "platform/metal/lighting_dispatch.h"
 #include "platform/metal/metal_graph_executor.h"
 #include "rendergraph/pass_context.h"
@@ -88,7 +89,7 @@ struct DenoisePasses::Impl {
     void invalidate(const char* reason){for(auto& r:registries)for(u32 v=0;v<Views;++v)r.invalidate(v,reason);}
     void reserve(u32 sig){auto& h=histories.at(frame.view).at(sig);const u64 count=u64(frame.backingWidth)*frame.backingHeight;
         if(count<=h.capacity)return;for(auto* b:h.pair)c.memory().release(b,MemoryCategory::RayTracing);
-        h.capacity=count;h.lastWritten=0;for(auto*& b:h.pair)b=lighting::buffer(c,count*sizeof(GPUDenoiseHistory),"F13 view signal history");
+        h.capacity=count;h.lastWritten=0;for(auto*& b:h.pair)b=lighting::buffer(c,denoiseHistoryBytes(count,sig==DENOISE_SIGNAL_SPECULAR),"F13 view signal history");
         registries[sig].invalidate(frame.view,"denoise allocation growth");++graphVersion;
     }
     void updateSignal(u32 sig){reserve(sig);auto& h=histories[frame.view][sig];auto& s=signal[sig];
@@ -137,8 +138,8 @@ struct DenoisePasses::Impl {
         // Both imports stay persistent even though pair sides are rebound.
         // The temporal pass reads AND writes them at Dispatch; the graph emits
         // its cross-frame queue barrier before either physical side is used.
-        s.previous=g.importBuffer(label+" previous history",{h.capacity*sizeof(GPUDenoiseHistory)},ImportContentsDefined);
-        s.next=g.importBuffer(label+" next history",{h.capacity*sizeof(GPUDenoiseHistory)},ImportOutput);
+        s.previous=g.importBuffer(label+" previous history",{denoiseHistoryBytes(h.capacity,sig==DENOISE_SIGNAL_SPECULAR)},ImportContentsDefined);
+        s.next=g.importBuffer(label+" next history",{denoiseHistoryBytes(h.capacity,sig==DENOISE_SIGNAL_SPECULAR)},ImportOutput);
         if(options.debugHistoryCorrupt)g.addPass(label+" negative view",PassType::Compute,[this,sig](PassBuilder& b){
             auto& s=signal[sig];b.read(s.previous,Usage::ShaderRead,StageDispatch);s.previous=b.write(s.previous,Usage::ShaderWrite,StageDispatch);
         },[this,sig](PassContext& ctx){auto& s=signal[sig];auto& h=histories[frame.view][sig];auto* t=slots[frame.slot][sig].tables[MaxAtrous+3];
@@ -150,8 +151,12 @@ struct DenoisePasses::Impl {
             s.moments=b.createTexture("F13 moments variance "+std::to_string(sig),{Format::RGBA32Float,frame.width,frame.height});s.moments=b.write(s.moments,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("denoise_temporal");
         },[this,sig](PassContext& ctx){auto& s=signal[sig];auto& h=histories[frame.view][sig];auto* t=slots[frame.slot][sig].tables[0];
             t->setAddress(s.address,0);t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(s.surface))->gpuAddress(),1);
-            t->setAddress(h.pair[s.readSide]->gpuAddress(),2);if(s.metadata.valid())t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(s.metadata))->gpuAddress(),3);
-            else t->setAddress(h.pair[s.readSide]->gpuAddress(),3);t->setAddress(h.pair[s.writeSide]->gpuAddress(),4);
+            if(s.metadata.valid())t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(s.metadata))->gpuAddress(),3);else t->setAddress(h.pair[s.readSide]->gpuAddress(),3);
+            // Header at the buffer start, records after it, then the specular
+            // extension (only allocated, and only read, for the specular signal).
+            const bool specularSignal=sig==DENOISE_SIGNAL_SPECULAR;
+            for(const auto& [side,header,records,extension]:{std::array<u32,4>{s.readSide,5,2,7},std::array<u32,4>{s.writeSide,6,4,8}}){const auto base=h.pair[side]->gpuAddress();
+                t->setAddress(base,header);t->setAddress(base+denoiseHistoryRecordsOffset(),records);t->setAddress(specularSignal?base+denoiseHistorySpecularOffset(h.capacity):base,extension);}
             texture(t,ctx,s.raw,0);texture(t,ctx,s.motion,1);texture(t,ctx,s.temporalOutput,2);texture(t,ctx,s.moments,3);
             lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[sig].temporal,t,frame.width*frame.height);
             // Encoding is not GPU completion. Persistent imports/order preserve
@@ -191,7 +196,7 @@ struct DenoisePasses::Impl {
             lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,poisonNext,t,frame.width*frame.height);});
         {s.counts=g.importBuffer(label+" check counts",{32},ImportPerFrame|ImportOutput);
             g.addPass(label+" checks clear",PassType::Compute,[this,sig](PassBuilder& b){signal[sig].counts=b.write(signal[sig].counts,Usage::ShaderWrite,StageDispatch);},[this,sig](PassContext& ctx){auto* t=slots[frame.slot][sig].tables[MaxAtrous+1];t->setAddress(slots[frame.slot][sig].check->gpuAddress(),0);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,clear,t,8);});
-            g.addPass(label+" independent state check",PassType::Compute,[this,sig](PassBuilder& b){auto& s=signal[sig];b.read(s.next,Usage::ShaderRead,StageDispatch);b.read(s.filtered,Usage::ShaderRead,StageDispatch);b.read(s.counts,Usage::ShaderRead,StageDispatch);s.counts=b.write(s.counts,Usage::ShaderWrite,StageDispatch);},[this,sig](PassContext& ctx){auto& s=signal[sig];auto& state=slots[frame.slot][sig];auto* t=state.tables[MaxAtrous+2];t->setAddress(s.address,0);t->setAddress(histories[frame.view][sig].pair[s.writeSide]->gpuAddress(),1);t->setAddress(state.check->gpuAddress(),2);texture(t,ctx,s.filtered,0);
+            g.addPass(label+" independent state check",PassType::Compute,[this,sig](PassBuilder& b){auto& s=signal[sig];b.read(s.next,Usage::ShaderRead,StageDispatch);b.read(s.filtered,Usage::ShaderRead,StageDispatch);b.read(s.counts,Usage::ShaderRead,StageDispatch);s.counts=b.write(s.counts,Usage::ShaderWrite,StageDispatch);},[this,sig](PassContext& ctx){auto& s=signal[sig];auto& state=slots[frame.slot][sig];auto* t=state.tables[MaxAtrous+2];const auto next=histories[frame.view][sig].pair[s.writeSide]->gpuAddress();t->setAddress(s.address,0);t->setAddress(next+denoiseHistoryRecordsOffset(),1);t->setAddress(state.check->gpuAddress(),2);t->setAddress(next,3);texture(t,ctx,s.filtered,0);
                 lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[sig].checker,t,frame.width*frame.height);
                 // Tag only the check actually encoded, never graph definition
                 // or prepare. Later frame/view params cannot rewrite this tag.

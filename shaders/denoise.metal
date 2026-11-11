@@ -1,4 +1,5 @@
 #include "restir_common.h"
+#include "renderer/denoise_history_layout.h"
 
 constant uint FC_DENOISE_SIGNAL [[function_constant(40)]];
 constant uint kDenoiseSignal=is_function_constant_defined(FC_DENOISE_SIGNAL)?FC_DENOISE_SIGNAL:0xffffffffu;
@@ -7,7 +8,9 @@ inline uint denoiseSignal(constant GPUDenoiseParams& p){return kDenoiseSignal==0
 // Each view AND signal owns previous/next history buffers. Never share DI,GI,
 // SPECULAR or AO histories even if dimensions/formats coincide. Temporal output
 // is stored as history; final atrous output is NOT temporal feedback.
-// params0 surfaces1 previousHistory2 optionalSpecMetadata3 nextHistory4;
+// params0 surfaces1 previousRecords2 optionalSpecMetadata3 nextRecords4
+// previousHeader5 nextHeader6 previousSpecular7 nextSpecular8 (one history
+// buffer per side, denoise_history_layout.h; the extension only for specular);
 // textures raw0 pre-resolvePixelMotion1 temporalOUT2 momentsVarianceOUT3.
 inline float3 denoiseNormal(GPUDISurface s,uint signal){return signal==DENOISE_SIGNAL_SPECULAR?diVec(s.shadingNormal):diVec(s.geometricNormal);}
 // Spatial filter guide. Specular radiance varies with the reflection axis
@@ -21,7 +24,10 @@ inline float3 denoiseGuide(GPUDISurface s,uint signal){
 // F13.6 lobe bound: neighbours whose reflection axes differ by more than the
 // centre's GGX lobe (angle ~ alpha) see a different reflected image.
 inline float denoiseLobe(float cosine,float roughness){const float a=max(roughness*roughness,0.002f);return exp(-max(0.0f,1.0f-cosine)/(a*a));}
-inline bool denoiseCompatible(GPUDISurface s,GPUDenoiseHistory h,constant GPUDenoiseParams& p,GPUSpecularSample spec){
+inline DenoiseHistory denoiseLoad(constant GPUDenoiseParams& p,const device GPUDenoiseHistoryHeader* header,const device GPUDenoiseHistoryRecord* records,
+    const device GPUDenoiseSpecularHistory* specular,uint index){
+    return denoiseUnpack(header[0],records[index],denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR?specular[index]:GPUDenoiseSpecularHistory{});}
+inline bool denoiseCompatible(GPUDISurface s,DenoiseHistory h,constant GPUDenoiseParams& p,GPUSpecularSample spec){
     if((p.flags&DENOISE_RESET)||!s.valid||!h.valid||!h.length||h.signal!=denoiseSignal(p)||h.viewID!=p.viewID||h.historyEpoch!=p.historyEpoch||h.signalRevision!=p.signalRevision||
         h.slot!=s.instanceSlot||h.instanceGeneration!=s.instanceGeneration||h.materialRevision!=s.materialRevision||
         !isfinite(s.depth)||!isfinite(h.depth)||s.depth<=0||h.depth<=0||!all(isfinite(diVec(h.color)))||
@@ -50,19 +56,21 @@ inline bool denoiseNeighbor(GPUDISurface a,GPUDISurface b,constant GPUDenoisePar
         dot(normalize(n),normalize(m))>=p.normalThreshold&&abs(a.depth-b.depth)<=p.depthThreshold*max(a.depth,b.depth);
 }
 kernel void denoise_temporal(constant GPUDenoiseParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
-    const device GPUDenoiseHistory* previous [[buffer(2)]],const device GPUSpecularSample* specular [[buffer(3)]],device GPUDenoiseHistory* next [[buffer(4)]],
+    const device GPUDenoiseHistoryRecord* previous [[buffer(2)]],const device GPUSpecularSample* specular [[buffer(3)]],device GPUDenoiseHistoryRecord* next [[buffer(4)]],
+    const device GPUDenoiseHistoryHeader* previousHeader [[buffer(5)]],device GPUDenoiseHistoryHeader* nextHeader [[buffer(6)]],
+    const device GPUDenoiseSpecularHistory* previousSpecular [[buffer(7)]],device GPUDenoiseSpecularHistory* nextSpecular [[buffer(8)]],
     texture2d<float,access::read> raw [[texture(0)]],texture2d<float,access::read> motion [[texture(1)]],
     texture2d<float,access::write> output [[texture(2)]],texture2d<float,access::write> moments [[texture(3)]],uint tid [[thread_position_in_grid]]){
     if(tid>=p.width*p.height)return;const uint2 pixel(tid%p.width,tid/p.width);const GPUDISurface s=surfaces[tid];
-    GPUDenoiseHistory h{};h.signal=denoiseSignal(p);h.viewID=p.viewID;h.historyEpoch=p.historyEpoch;h.signalRevision=p.signalRevision;
+    DenoiseHistory h{};h.signal=denoiseSignal(p);h.viewID=p.viewID;h.historyEpoch=p.historyEpoch;h.signalRevision=p.signalRevision;
     float3 current=raw.read(pixel).rgb;const float3 normal=denoiseNormal(s,denoiseSignal(p));GPUSpecularSample spec{};
     if(denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR)spec=specular[tid];
     if(denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR&&(spec.flags&SPECULAR_SAMPLE_STOCHASTIC)&&!(p.flags&DENOISE_DIAGNOSTIC_ENDPOINTS))h.flags|=DENOISE_HISTORY_STOCHASTIC;
     if(s.valid&&(!all(isfinite(current))||!all(isfinite(normal))||dot(normal,normal)<=0))h.flags=1u;
     if(s.valid&&all(isfinite(current))&&all(isfinite(normal))&&dot(normal,normal)>0){current=max(current,0.0f);if(denoiseSignal(p)==DENOISE_SIGNAL_AO)current=saturate(current);
-        GPUDenoiseHistory old{};bool reuse=false;
+        DenoiseHistory old{};bool reuse=false;
         if(!(p.flags&DENOISE_RESET)){const float2 delta=motion.read(pixel).xy,center=float2(pixel)+.5f+delta;
-            if(all(isfinite(delta))&&all(center>=0)&&all(center<float2(p.width,p.height))){const uint2 q=uint2(center);old=previous[q.y*p.width+q.x];reuse=denoiseCompatible(s,old,p,spec);}}
+            if(all(isfinite(delta))&&all(center>=0)&&all(center<float2(p.width,p.height))){const uint2 q=uint2(center);old=denoiseLoad(p,previousHeader,previous,previousSpecular,q.y*p.width+q.x);reuse=denoiseCompatible(s,old,p,spec);}}
         float3 oldColor=diVec(old.color);
         float localVariance=0;
         const bool softTest=reuse&&(p.flags&DENOISE_SOFT_CHANGE);
@@ -86,7 +94,9 @@ kernel void denoise_temporal(constant GPUDenoiseParams& p [[buffer(0)]],const de
         for(uint i=0;i<3;++i){h.color[i]=color[i];h.position[i]=s.position[i];h.normal[i]=normalize(normal)[i];}
         h.valid=all(isfinite(color))&&isfinite(h.variance);if(!h.valid)h.flags=1u;
     }
-    next[tid]=h;output.write(float4(h.color[0],h.color[1],h.color[2],1),pixel);
+    next[tid]=denoisePackRecord(h);if(denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR)nextSpecular[tid]=denoisePackSpecular(h);
+    if(tid==0)nextHeader[0]=denoisePackHeader(h); // the same domain identity for every pixel of this dispatch
+    output.write(float4(h.color[0],h.color[1],h.color[2],1),pixel);
     moments.write(float4(h.firstMoment,h.secondMoment,h.variance,float(h.length)),pixel);
 }
 
@@ -269,17 +279,18 @@ kernel void denoise_atrous_diffuse4(constant GPUDenoiseParams& p [[buffer(0)]],c
 
 // History corruption control: wrong view ID without setting an error flag.
 // Independent compatible() rejects it and resets length to1 at the next frame.
-kernel void denoise_corrupt_history_view(constant GPUDenoiseParams& p [[buffer(0)]],device GPUDenoiseHistory* history [[buffer(1)]],uint tid [[thread_position_in_grid]]){
-    if(tid<p.width*p.height&&history[tid].valid)history[tid].viewID^=1u;
+// The view ID lives in the buffer header (offset 0), shared by every pixel.
+kernel void denoise_corrupt_history_view(constant GPUDenoiseParams& p [[buffer(0)]],device GPUDenoiseHistoryHeader* header [[buffer(1)]],uint tid [[thread_position_in_grid]]){
+    if(tid==0)header[0].viewID^=1u;
 }
 
-// Always-on checker: params0,nextHistory1,atomicCounts2; outputtexture0.
+// Always-on checker: params0,nextRecords1,atomicCounts2,nextHeader3; outputtexture0.
 // Eight cleared words: pixels0,valid1,invalid state/domain2,invalid output3,
 // reused valid histories4,max valid length5,actual GPU params view6/frame7.
 // Raw/reference checks remain independent. One-dimensional exact pixel dispatch.
-kernel void denoise_check(constant GPUDenoiseParams& p [[buffer(0)]],const device GPUDenoiseHistory* history [[buffer(1)]],
-    device atomic_uint* counts [[buffer(2)]],texture2d<float,access::read> output [[texture(0)]],uint tid [[thread_position_in_grid]],uint lane [[thread_index_in_simdgroup]]){
-    if(tid>=p.width*p.height)return;const GPUDenoiseHistory h=history[tid];bool invalid=(h.flags&~(denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR?DENOISE_HISTORY_STOCHASTIC:0u))!=0;
+kernel void denoise_check(constant GPUDenoiseParams& p [[buffer(0)]],const device GPUDenoiseHistoryRecord* history [[buffer(1)]],
+    device atomic_uint* counts [[buffer(2)]],const device GPUDenoiseHistoryHeader* header [[buffer(3)]],texture2d<float,access::read> output [[texture(0)]],uint tid [[thread_position_in_grid]],uint lane [[thread_index_in_simdgroup]]){
+    if(tid>=p.width*p.height)return;const DenoiseHistory h=denoiseUnpack(header[0],history[tid],GPUDenoiseSpecularHistory{});bool invalid=(h.flags&~(denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR?DENOISE_HISTORY_STOCHASTIC:0u))!=0;
     if(h.valid)invalid|=h.signal!=denoiseSignal(p)||h.viewID!=p.viewID||h.historyEpoch!=p.historyEpoch||h.signalRevision!=p.signalRevision||
         h.length<1||h.length>p.maxHistory||!isfinite(h.firstMoment)||!isfinite(h.secondMoment)||!isfinite(h.variance)||h.variance<0||!all(isfinite(diVec(h.color)));
     const float3 color=output.read(uint2(tid%p.width,tid/p.width)).rgb;const bool badOutput=!all(isfinite(color))||any(color<0)||(denoiseSignal(p)==DENOISE_SIGNAL_AO&&any(color>1));

@@ -27,7 +27,7 @@ GPUDenoiseParams denoiseParameters(const DenoiseSettings& s,u32 w,u32 h,u32 sign
     p.roughnessThreshold=s.roughnessThreshold;p.hitDistanceThreshold=s.hitDistanceThreshold;p.luminancePhi=s.luminancePhi;p.normalPhi=s.normalPhi;
     p.maxHistory=s.maxHistory;p.atrousStep=1;p.minHistoryForVariance=4;p.varianceFloor=s.varianceFloor;p.clampSigma=s.clampSigma;p.planeThreshold=s.planeThreshold;return p;
 }
-bool denoiseCompatible(const GPUDISurface& s,const GPUDenoiseHistory& h,const GPUDenoiseParams& p,const GPUSpecularSample& spec){
+bool denoiseCompatible(const GPUDISurface& s,const DenoiseHistory& h,const GPUDenoiseParams& p,const GPUSpecularSample& spec){
     if((p.flags&DENOISE_RESET)||!s.valid||!h.valid||!h.length||h.signal!=p.signal||h.viewID!=p.viewID||h.historyEpoch!=p.historyEpoch||
         h.signalRevision!=p.signalRevision||h.slot!=s.instanceSlot||h.instanceGeneration!=s.instanceGeneration||h.materialRevision!=s.materialRevision||
         !std::isfinite(s.depth)||!std::isfinite(h.depth)||s.depth<=0||h.depth<=0||!finite(v3(h.color))||!std::isfinite(h.firstMoment)||
@@ -54,9 +54,9 @@ bool denoiseCompatible(const GPUDISurface& s,const GPUDenoiseHistory& h,const GP
     }
     return true;
 }
-GPUDenoiseHistory denoiseTemporal(const GPUDISurface& s,glm::vec3 current,const GPUDenoiseHistory& old,const GPUDenoiseParams& p,glm::vec3 low,glm::vec3 high,const GPUSpecularSample& spec,float neighborhoodVariance,
+DenoiseHistory denoiseTemporal(const GPUDISurface& s,glm::vec3 current,const DenoiseHistory& old,const GPUDenoiseParams& p,glm::vec3 low,glm::vec3 high,const GPUSpecularSample& spec,float neighborhoodVariance,
                                    glm::vec3 mean,glm::vec3 sigma){
-    GPUDenoiseHistory h{};h.signal=p.signal;h.viewID=p.viewID;h.historyEpoch=p.historyEpoch;h.signalRevision=p.signalRevision;
+    DenoiseHistory h{};h.signal=p.signal;h.viewID=p.viewID;h.historyEpoch=p.historyEpoch;h.signalRevision=p.signalRevision;
     if(p.signal==DENOISE_SIGNAL_SPECULAR&&(spec.flags&SPECULAR_SAMPLE_STOCHASTIC)&&!(p.flags&DENOISE_DIAGNOSTIC_ENDPOINTS))h.flags|=DENOISE_HISTORY_STOCHASTIC;
     if(!s.valid)return h;
     const auto rawNormal=signalNormal(s,p.signal);if(!finite(current)||!finite(rawNormal)||glm::dot(rawNormal,rawNormal)<=0){h.flags=1;return h;}

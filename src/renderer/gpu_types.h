@@ -840,16 +840,32 @@ struct GPUDenoiseParams {
     float currentViewDepthRow[4]; // world point -> current positive view depth (negated dot)
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseParams) == 112, "GPUDenoiseParams layout");
-struct GPUDenoiseHistory {
-    float color[3], firstMoment;
-    float secondMoment, variance; u32 length, signal;
-    float normal[3], depth;
-    u32 slot, instanceGeneration, materialRevision, signalRevision;
-    u32 viewID, historyEpoch, valid, flags;
-    float position[3], roughness;
-    float hitDistance; u32 path, secondarySlot, secondaryGeneration;
+// F13 denoise history, split by access (budget closure). Each view/signal
+// history buffer is [header][capacity records][capacity specular extensions,
+// specular signal only]; denoise_history_layout.h packs the record state word
+// and gives the offsets. The logical history (CPU DenoiseHistory, MSL
+// DenoiseHistory) keeps every field; nothing that a later frame reads is lost.
+// Header: the per-frame domain identity, identical for every pixel one temporal
+// dispatch writes (its thread 0 stores it).
+struct GPUDenoiseHistoryHeader {
+    u32 signal, viewID, historyEpoch, signalRevision;
+    u32 pad[12]; // 64 bytes keep the records 64-byte aligned
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseHistory) == 112, "GPUDenoiseHistory layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseHistoryHeader) == 64, "GPUDenoiseHistoryHeader layout");
+// Per-pixel state. The variance is not stored: the temporal pass writes it to
+// the moments texture, and a record it marks valid always had a finite
+// variance >= varianceFloor > 0 (the only property a later frame tested).
+struct GPUDenoiseHistoryRecord {
+    float color[3], firstMoment;
+    float secondMoment; u32 state, slot, instanceGeneration; // state: length | flags | path | valid
+    float normal[3], depth;
+    float position[3]; u32 materialRevision;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseHistoryRecord) == 64, "GPUDenoiseHistoryRecord layout");
+struct GPUDenoiseSpecularHistory {
+    float roughness, hitDistance; u32 secondarySlot, secondaryGeneration;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseSpecularHistory) == 16, "GPUDenoiseSpecularHistory layout");
 
 // F14: ALL positions/radii/heights/distances are WORLD METRES; extinction and
 // scattering coefficients are m^-1. RGB radiance and irradiance remain linear

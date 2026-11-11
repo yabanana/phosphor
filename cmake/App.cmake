@@ -71,6 +71,7 @@ set(PHOSPHOR_SHADER_HEADERS
     ${CMAKE_SOURCE_DIR}/src/renderer/visibility_layout.h
     ${CMAKE_SOURCE_DIR}/src/renderer/visibility_math.h
     ${CMAKE_SOURCE_DIR}/src/renderer/gpu_types.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/denoise_history_layout.h
     ${CMAKE_SOURCE_DIR}/src/renderer/metalfx_denoise_layout.h
     ${CMAKE_SOURCE_DIR}/src/renderer/metalfx_denoise_fixture_layout.h
     ${CMAKE_SOURCE_DIR}/src/renderer/visibility_layout.h
