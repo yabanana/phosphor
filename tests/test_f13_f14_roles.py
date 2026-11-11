@@ -38,7 +38,10 @@ class Roles(unittest.TestCase):
         self.assertEqual(self.cases["clouds-full"]["reference_role"], "control")
         self.assertEqual(self.cases["negative-f14-lut"]["reference_role"], "functional")
         self.assertEqual(self.cases["daynight-a"]["reference_role"], "numerical")
-        self.assertEqual(self.cases["daynight-b"]["reference_role"], "repeatability-pair")
+        self.assertEqual(self.cases["daynight-r1"]["reference_role"], "numerical")
+        self.assertEqual(self.cases["daynight-r2"]["reference_role"], "repeatability-pair")
+        self.assertEqual(self.cases["daynight-r2"]["validation"], "api")
+        self.assertNotIn("validation", self.cases["daynight-a"])
         self.assertEqual(self.cases["atmo-extreme-dense"]["reference_role"], "numerical")
 
     def test_gating(self):
