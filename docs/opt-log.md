@@ -2154,4 +2154,30 @@ configs against the independent F13 clips; F8/F14 gates are unchanged.
 - **Rejected earlier: deterministic sun-disk BRDF at secondary hits.**
   Roughness is unchanged, at an extra quadrature cost. Never committed.
 
-The 16.67 ms target remains open, about 1.9 ms over at p95.
+The 16.67 ms target remained open after these, about 1.9 ms over at p95.
+
+Second round, measured interleaved base 2b285df / 954034b / 5cd7aab, three
+repetitions each; the same binary agrees within 0.05 ms at p95
+(`build/regress-20261111/budget-compact/`). GPU p50/p95 medians:
+base 21.90/22.68, 954034b 17.45/18.62, 5cd7aab 16.42/17.68 ms; 0 GPU
+allocations. The other load on the machine was CPU-only test binaries with
+no Metal loaded.
+
+- **One reflection sample stores its reduced record directly** (96d1507).
+  The `F13 independent raw specular reduction` pass (0.394 ms) and two
+  scratch textures are gone. Bit-identical under API validation: mirror,
+  moving-light, roughness custom 300/300 frames; Sponza 12/12 at 1 and
+  3 samples. Adopted.
+- **Compact denoise history** (5cd7aab). A buffer header plus a 64-byte
+  record replaces the 112-byte one; the 16-byte extension is specular-only.
+  Temporal passes per signal: GI 0.844 → 0.681, AO 0.824 → 0.659,
+  specular 1.514 → 1.286 ms. About 0.55 ms in total, less than the 1 ms the
+  byte count suggested: the temporal passes are not purely bandwidth-bound.
+  Bit-identical on the same cases plus disocclusion and
+  `--debug-history-corrupt`; the history negatives still fail. Adopted.
+- **Bit-identity needs API validation only.** Under `MTL_SHADER_VALIDATION`
+  the RT reflection fixtures differ run to run, HEAD against itself
+  included (299/300 frames, up to 1.8% relative).
+
+The 16.67 ms target remains open: about 1.0 ms over at p95 (p50 is already
+below it).
