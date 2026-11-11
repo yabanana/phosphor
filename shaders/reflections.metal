@@ -91,8 +91,15 @@ kernel void reflection_rt(constant GPUReflectionParams& p [[buffer(0)]],const de
     texture2d<float,access::read> baseRadiance [[texture(0)]],texture2d<float,access::read> depth [[texture(1)]],texturecube_array<float> atlas [[texture(2)]],
     texture2d<float> irradiance [[texture(3)]],texture2d<float> moments [[texture(4)]],texture2d<float,access::write> output [[texture(5)]],
     texture2d<float,access::write> distance [[texture(6)]],uint tid [[thread_position_in_grid]]){
-    if(tid>=p.width*p.height)return;const GPUDISurface s=surfaces[tid];uint seed=giHash(tid^giHash(p.frameIndex)^p.seed);
-    const auto dir=reflectionDirection(s,float2(giRandom(seed),giRandom(seed)));GPUSpecularSample sample=reflectionEmpty();
+    if(tid>=p.width*p.height)return;const GPUDISurface s=surfaces[tid];
+    // F13.6 start-up boost (single-sample graph only): for the first frames after
+    // a specular history reset, surfaces in the RT band take boostSamples
+    // independent samples, reduced in registers exactly like reflection_reduce.
+    // Sample 0 keeps the single-sample seed, so count 1 is the plain path.
+    const uint count=(p.boostSamples>1u&&(p.flags&REFLECTION_SINGLE_SAMPLE)&&s.valid&&s.roughness<p.boostRoughness)?min(p.boostSamples,8u):1u;
+    auto reduction=reflectionReduceBegin();GPUSpecularSample sample=reflectionEmpty();
+    for(uint k=0;k<count;++k){uint seed=giHash(tid^giHash(p.frameIndex)^(p.seed+k*0x9e3779b9u));
+    const auto dir=reflectionDirection(s,float2(giRandom(seed),giRandom(seed)));sample=reflectionEmpty();
     if(s.valid&&dir.valid&&any(dir.weight>0)&&giRandom(seed)<reflectionRTWeight(s.roughness,p)){
         float3 n=normalize(diVec(s.geometricNormal));if(dot(n,dir.direction)<0)n=-n;const float3 origin=rtOffsetRay(diVec(s.position),n);GPURtRay ray{};
         ray.ox=origin.x;ray.oy=origin.y;ray.oz=origin.z;ray.dx=dir.direction.x;ray.dy=dir.direction.y;ray.dz=dir.direction.z;ray.tmax=p.maxDistance;ray.mask=RT_MASK_INDIRECT;ray.type=RT_PROBE_DIFFUSE;
@@ -106,7 +113,9 @@ kernel void reflection_rt(constant GPUReflectionParams& p [[buffer(0)]],const de
         else L=reflectionProbeRadiance(diVec(s.position),dir.direction,s.roughness,false,p,probes,atlas,sample.path);
         L*=dir.weight;if(!all(isfinite(L))||any(L<0)){numericError=true;L=0;}if(numericError)sample.flags|=SPECULAR_SAMPLE_ERROR;for(uint i=0;i<3;++i)sample.radiance[i]=L[i];
     }else sample=reflectionFallback(s,dir,p,surfaces,cache,gi,probes,baseRadiance,depth,atlas);
-    reflectionStoreSample(p.flags,tid,p.width,sample,metadata,counts,output,distance);
+    if(count>1u)reflectionReduceAdd(reduction,sample,count);}
+    if(count==1u)reflectionStoreSample(p.flags,tid,p.width,sample,metadata,counts,output,distance);
+    else{auto reduced=reflectionReduceEnd(reduction,counts);reduced.flags|=count<<SPECULAR_SAMPLE_COUNT_SHIFT;reflectionWriteSample(tid,p.width,reduced,metadata,output,distance);}
 }
 
 // Optional STATIC actual scene capture from each probe face, not a constant

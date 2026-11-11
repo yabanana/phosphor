@@ -207,3 +207,13 @@ TEST_CASE("F13.6 stationary specular history is a running mean up to its cap"){
     for(u32 i=0;i<100;++i)a=denoiseTemporal(s,glm::vec3(1),a,still,{},{},m);CHECK(a.length==128);
     auto cut=still;cut.flags|=DENOISE_RESET;CHECK(denoiseTemporal(s,glm::vec3(5),a,cut,{},{},m).length==1);
 }
+TEST_CASE("F13.6 stationary specular history weights frames by their sample count"){
+    // A boosted record (SPECULAR_SAMPLE_COUNT) of four samples weighs four times
+    // a single-sample frame, so the mean equals the per-sample mean.
+    DenoiseSettings settings;auto p=denoiseParameters(settings,1,1,DENOISE_SIGNAL_SPECULAR,0,1,1,false);p.maxHistory=128;p.flags|=DENOISE_STATIONARY;
+    const auto s=receiver();auto one=spec();one.flags|=SPECULAR_SAMPLE_STOCHASTIC;auto four=one;four.flags|=4u<<SPECULAR_SAMPLE_COUNT_SHIFT;
+    auto h=denoiseTemporal(s,glm::vec3(2),{},p,{},{},four);CHECK(h.length==4);
+    h=denoiseTemporal(s,glm::vec3(7),h,p,{},{},one);CHECK(h.length==5);CHECK(h.color[0]==doctest::Approx((4*2+7)/5.0));
+    // Without the stationary flag the count is ignored (frame-weighted EMA).
+    auto moving=p;moving.flags&=~DENOISE_STATIONARY;auto e=denoiseTemporal(s,glm::vec3(2),{},moving,{},{},four);CHECK(e.length==1);
+}

@@ -24,8 +24,11 @@ inline GPUSpecularSample reflectionReduceEnd(thread ReflectionReduction& r,devic
     for(uint i=0;i<3;++i)out.radiance[i]=sum[i];return out;}
 // Final store of one pixel's raw specular signal: the per-sample record
 // (multi-sample: reduced later) or the reduced record (single sample).
+inline void reflectionWriteSample(uint tid,uint width,GPUSpecularSample sample,device GPUSpecularSample* records,
+    texture2d<float,access::write> radiance,texture2d<float,access::write> distance){
+    records[tid]=sample;const uint2 pixel(tid%width,tid/width);
+    radiance.write(float4(sample.radiance[0],sample.radiance[1],sample.radiance[2],1),pixel);distance.write(float4(sample.hitDistance),pixel);}
 inline void reflectionStoreSample(uint flags,uint tid,uint width,GPUSpecularSample sample,device GPUSpecularSample* records,device atomic_uint* counts,
     texture2d<float,access::write> radiance,texture2d<float,access::write> distance){
     if(flags&REFLECTION_SINGLE_SAMPLE){auto r=reflectionReduceBegin();reflectionReduceAdd(r,sample,1u);sample=reflectionReduceEnd(r,counts);}
-    records[tid]=sample;const uint2 pixel(tid%width,tid/width);
-    radiance.write(float4(sample.radiance[0],sample.radiance[1],sample.radiance[2],1),pixel);distance.write(float4(sample.hitDistance),pixel);}
+    reflectionWriteSample(tid,width,sample,records,radiance,distance);}

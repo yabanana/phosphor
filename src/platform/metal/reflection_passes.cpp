@@ -261,6 +261,13 @@ struct ReflectionPasses::Impl {
         if(custom){const std::array<u64,4> revisions{direct.lightRevision(),gi&&options.gi!=GiMode::Off?gi->readResources().parameters.cacheGeneration:0,specularEpoch,geometryEpoch};
             denoise.prepareFrame(frame,signalEpoch,revisions,options.directLighting!=DirectLightingMode::Legacy&&!slots[f.slot].skipLocalDenoise,
                                  1u<<DENOISE_SIGNAL_SPECULAR,softChange,sameCamera);}
+        // F13.6 start-up boost: the first frames of a specular history (after a
+        // reset or camera cut) take more RT-band samples, so the denoised signal
+        // converges within the F8 recovery bound instead of ~20 frames.
+        const bool boost=custom&&rtReflection&&options.reflectionSamples==1&&options.reflectionBoostSamples>1&&
+            denoise.historyFrames(DENOISE_SIGNAL_SPECULAR)<=options.reflectionBoostFrames;
+        params.boostSamples=boost?options.reflectionBoostSamples:1u;params.boostRoughness=options.reflectionBoostRoughness;
+        {auto sample=params;sample.seed=options.lightingSeed;sampleAddress[0]=lighting::upload(c,sample);}
     }
     void texture(MTL4::ArgumentTable* table,rg::PassContext& ctx,rg::TextureRef ref,u32 index){table->setTexture(static_cast<MTL::Texture*>(ctx.texture(ref))->gpuResourceID(),index);}
     void commonReads(rg::PassBuilder& b,rg::Stages stages=rg::StageDispatch){b.read(receivers,rg::Usage::ShaderRead,stages);b.read(direct.lightsRef(),rg::Usage::ShaderRead,stages);b.read(direct.emittersRef(),rg::Usage::ShaderRead,stages);b.read(scene.dataRef(),rg::Usage::ShaderRead,stages);

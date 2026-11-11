@@ -26,6 +26,8 @@ struct DenoisePasses::Impl {
     std::array<MTL4::ArgumentTable*,METAL_FRAMES_IN_FLIGHT> diffuseTables{};
     std::array<HistoryRegistry,Signals> registries{};
     u32 softSignals=0;bool softChange=false,stationary=false;
+    struct Age {u64 frame=~u64{0};u32 frames=0;}; // frames accumulated since the last reset, including that frame
+    std::array<std::array<Age,Signals>,Views> ages{};
     struct Content {u64 scene=0,external=0,revision=0;bool operator==(const Content&)const=default;};
     struct History {MTL::Buffer* pair[2]{};u64 capacity=0,contentEpoch=0;u32 lastWritten=0;Content content{};bool contentKnown=false;};
     std::array<std::array<History,Signals>,Views> histories{};
@@ -99,6 +101,7 @@ struct DenoisePasses::Impl {
         const Content content{frame.scene,soft?0:epoch,revisions[sig]};if(!h.contentKnown||h.content!=content){h.content=content;h.contentKnown=true;++h.contentEpoch;}
         const auto decision=registries[sig].begin(frame.view,{frame.width,frame.height,frame.backingWidth,frame.backingHeight},h.contentEpoch,frame.cut,frame.reset);
         s.params=denoiseParameters(settings,frame.width,frame.height,sig,frame.view,u32(decision.generation),u32(h.contentEpoch),decision.reset);
+        {auto& age=ages[frame.view][sig];if(age.frame!=frame.index||decision.reset){age.frames=decision.reset?1u:age.frames+1u;age.frame=frame.index;}}
         s.params.flags|=DENOISE_CURRENT_VIEW_DEPTH;if(soft&&softChange)s.params.flags|=DENOISE_SOFT_CHANGE;
         // A soft signal keeps a longer history; the cap only matters in stationary
         // frames, every other frame's alpha floor (temporalAlpha) is above 1/32.
@@ -265,6 +268,9 @@ std::string DenoisePasses::completedCheckpoint(u32 slot,u32 sig)const{
         <<",\"epoch\":"<<tag.epoch<<",\"revision\":"<<tag.revision<<",\"reset\":"<<(tag.reset?"true":"false")
         <<",\"atrous_iterations\":"<<tag.atrousIterations<<'}';return out.str();
 }
+u32 DenoisePasses::historyFrames(u32 sig)const{
+    // Before the signal is prepared for this frame, report the frame it will be.
+    const auto& age=impl_->ages.at(impl_->frame.view).at(sig);return age.frame==impl_->frame.index?age.frames:age.frames+1u;}
 bool DenoisePasses::ready()const{
     for(const auto& k:impl_->kernels){
         for(auto h:{k.temporal,k.atrous,k.guide4,k.checker,k.tiled[0],k.tiled[1]})if(!impl_->pipelines.compute(h))return false;

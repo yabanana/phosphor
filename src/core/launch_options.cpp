@@ -473,6 +473,12 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
         } else if (arg == "--ddgi-denoise") {
             const auto value=needValue();if(!value)return false;
             if(*value=="on")out.ddgiDenoise=true;else if(*value=="off")out.ddgiDenoise=false;else{error="--ddgi-denoise: expected on|off";return false;}
+        } else if (arg == "--reflection-boost-samples") {
+            if(!needCount(out.reflectionBoostSamples)||out.reflectionBoostSamples<1||out.reflectionBoostSamples>8){error="--reflection-boost-samples: expected 1..8";return false;}
+        } else if (arg == "--reflection-boost-roughness") {
+            if(!needFloat(out.reflectionBoostRoughness)||!(out.reflectionBoostRoughness>=0&&out.reflectionBoostRoughness<=1)){error="--reflection-boost-roughness: expected [0,1]";return false;}
+        } else if (arg == "--reflection-boost-frames") {
+            if(!needCount(out.reflectionBoostFrames)||out.reflectionBoostFrames>64){error="--reflection-boost-frames: expected 0..64";return false;}
         } else if (arg == "--specular-max-history") {
             if(!needCount(out.specularMaxHistory)||out.specularMaxHistory<1||out.specularMaxHistory>256){error="--specular-max-history: expected 1..256";return false;}
         } else if (arg == "--ao-atrous-iterations") {

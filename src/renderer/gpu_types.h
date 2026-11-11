@@ -800,7 +800,7 @@ struct GPUReflectionParams {
     u32 slotCount, meshCount, materialCount, lightCount;
     u32 ssrSteps, ssrBinarySteps, probeCount, seed;
     float environment[3], maxProbeMip;
-    float regularizationScale; u32 ssrRoughSteps; u32 pad[2]; // k: alpha' = max(alpha_secondary, k*alpha_camera); SSR steps at roughness 1
+    float regularizationScale; u32 ssrRoughSteps, boostSamples; float boostRoughness; // k: alpha' = max(alpha_secondary, k*alpha_camera); SSR steps at roughness 1; samples after a reset below boostRoughness
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionParams) == 304, "GPUReflectionParams layout");
 struct GPUSpecularSample {
@@ -990,6 +990,9 @@ PHOSPHOR_STATIC_ASSERT(sizeof(GPUVolumeNumericSample)==32,"GPUVolumeNumericSampl
 
 PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_ERROR = 1u<<31;
 PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_MIXED = 4u;
+// Samples averaged into a boosted record (bits 16-23; 0 = one sample). The
+// stationary specular history weights each frame by it.
+PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_COUNT_SHIFT = 16u, SPECULAR_SAMPLE_COUNT_MASK = 0xffu;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_GI = 1u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_CUSTOM = 2u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_DI = 4u;

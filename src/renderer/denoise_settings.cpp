@@ -66,12 +66,15 @@ DenoiseHistory denoiseTemporal(const GPUDISurface& s,glm::vec3 current,const Den
     // Shader mirror of DENOISE_SOFT_CHANGE: keep history only inside the current neighbourhood.
     if(reuse&&(p.flags&DENOISE_SOFT_CHANGE)&&sigma.x>=0)for(u32 i=0;i<3;++i)
         if(std::abs(previous[i]-mean[i])>p.clampSigma*sigma[i]+.02f*std::max(std::abs(mean[i]),1e-4f))reuse=false;
+    // Shader mirror: the stationary history is a sample-weighted running mean.
     const u32 count=reuse?std::min(old.length,p.maxHistory-1)+1:1;
-    const float base=(p.flags&DENOISE_STATIONARY)?0.f:(p.flags&DENOISE_SOFT_CHANGE)?2*p.temporalAlpha:p.temporalAlpha;
-    const float alpha=reuse?std::max(base,1.f/count):1,ma=reuse?std::max(p.momentsAlpha,1.f/count):1;
+    const u32 spp=p.signal==DENOISE_SIGNAL_SPECULAR?std::max(1u,(spec.flags>>SPECULAR_SAMPLE_COUNT_SHIFT)&SPECULAR_SAMPLE_COUNT_MASK):1u;
+    const bool still=(p.flags&DENOISE_STATIONARY)!=0;const u32 length=still?std::min(reuse?old.length+spp:spp,p.maxHistory):count;
+    const float base=(p.flags&DENOISE_SOFT_CHANGE)?2*p.temporalAlpha:p.temporalAlpha;
+    const float alpha=reuse?(still?float(spp)/float(length):std::max(base,1.f/count)):1,ma=reuse?std::max(p.momentsAlpha,1.f/count):1;
     glm::vec3 color=reuse?glm::mix(previous,current,alpha):current;if(p.signal==DENOISE_SIGNAL_AO)color=glm::clamp(color,glm::vec3(0),glm::vec3(1));const float L=luminance(current);
     h.firstMoment=reuse?old.firstMoment*(1-ma)+L*ma:L;h.secondMoment=reuse?old.secondMoment*(1-ma)+L*L*ma:L*L;
-    h.variance=std::max(p.varianceFloor,h.secondMoment-h.firstMoment*h.firstMoment);h.length=count;
+    h.variance=std::max(p.varianceFloor,h.secondMoment-h.firstMoment*h.firstMoment);h.length=length;
     if(count<p.minHistoryForVariance&&std::isfinite(neighborhoodVariance)&&neighborhoodVariance>=0)h.variance=std::max(h.variance,neighborhoodVariance/count);
     const auto n=glm::normalize(signalNormal(s,p.signal));
     for(u32 i=0;i<3;++i){h.color[i]=color[i];h.position[i]=s.position[i];h.normal[i]=n[i];}

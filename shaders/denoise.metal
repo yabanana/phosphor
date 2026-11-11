@@ -84,11 +84,15 @@ kernel void denoise_temporal(constant GPUDenoiseParams& p [[buffer(0)]],const de
                 // Soft change: drop the history only where it left the current neighbourhood.
                 if(softTest&&any(abs(oldColor-mean)>p.clampSigma*sigma+.02f*max(abs(mean),float3(1e-4f))))reuse=false;}
         }
-        const uint length=reuse?min(old.length,p.maxHistory-1u)+1u:1u;
-        const float alpha=reuse?max((p.flags&DENOISE_STATIONARY)?0.0f:(p.flags&DENOISE_SOFT_CHANGE)?2*p.temporalAlpha:p.temporalAlpha,1.0f/float(length)):1;
-        const float ma=reuse?max(p.momentsAlpha,1.0f/float(length)):1,L=diLuminance(current);float3 color=reuse?mix(oldColor,current,alpha):current;if(denoiseSignal(p)==DENOISE_SIGNAL_AO)color=saturate(color);
+        // Stationary: a running mean weighted by the samples behind each frame
+        // (boosted records carry their count), so the length counts samples.
+        const uint frames=reuse?min(old.length,p.maxHistory-1u)+1u:1u;
+        const uint spp=denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR?max(1u,(spec.flags>>SPECULAR_SAMPLE_COUNT_SHIFT)&SPECULAR_SAMPLE_COUNT_MASK):1u;
+        const bool still=(p.flags&DENOISE_STATIONARY)!=0;const uint length=still?min(reuse?old.length+spp:spp,p.maxHistory):frames;
+        const float alpha=reuse?(still?float(spp)/float(length):max((p.flags&DENOISE_SOFT_CHANGE)?2*p.temporalAlpha:p.temporalAlpha,1.0f/float(length))):1;
+        const float ma=reuse?max(p.momentsAlpha,1.0f/float(frames)):1,L=diLuminance(current);float3 color=reuse?mix(oldColor,current,alpha):current;if(denoiseSignal(p)==DENOISE_SIGNAL_AO)color=saturate(color);
         h.length=length;h.firstMoment=reuse?mix(old.firstMoment,L,ma):L;h.secondMoment=reuse?mix(old.secondMoment,L*L,ma):L*L;
-        h.variance=max(p.varianceFloor,h.secondMoment-h.firstMoment*h.firstMoment);if(length<p.minHistoryForVariance)h.variance=max(h.variance,localVariance/float(length));h.depth=s.depth;h.roughness=s.roughness;
+        h.variance=max(p.varianceFloor,h.secondMoment-h.firstMoment*h.firstMoment);if(frames<p.minHistoryForVariance)h.variance=max(h.variance,localVariance/float(frames));h.depth=s.depth;h.roughness=s.roughness;
         h.slot=s.instanceSlot;h.instanceGeneration=s.instanceGeneration;h.materialRevision=s.materialRevision;
         h.hitDistance=spec.hitDistance;h.path=spec.path;h.secondarySlot=spec.secondarySlot;h.secondaryGeneration=spec.secondaryGeneration;
         for(uint i=0;i<3;++i){h.color[i]=color[i];h.position[i]=s.position[i];h.normal[i]=normalize(normal)[i];}

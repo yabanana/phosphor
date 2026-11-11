@@ -15,6 +15,8 @@ public:
                       bool useDirectLighting,
                       u32 softSignals=0,bool softChange=false,bool stationary=false);
     void invalidateAll(const char* reason);
+    /// Frames the signal's history of the current view holds, counting this one (1 = reset now).
+    [[nodiscard]] u32 historyFrames(u32 signal)const;
     rg::TextureRef addSignal(rg::RenderGraph&,u32 signal,rg::TextureRef raw,rg::TextureRef motion,
                             rg::BufferRef surfaces,rg::BufferRef specularMetadata={});
     std::array<rg::TextureRef,3> addDiffuseSignals(rg::RenderGraph&,std::array<rg::TextureRef,3> raw,

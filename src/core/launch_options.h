@@ -355,6 +355,11 @@ struct LaunchOptions {
     u32 aoAtrousIterations=2;
     // History cap of the soft (specular) signal, reached only in stationary frames.
     u32 specularMaxHistory=128;
+    // RT reflection samples per near-specular pixel (roughness below
+    // reflectionBoostRoughness) during the first frames of a specular history
+    // (single-sample custom path); 1 disables the boost. 8x8 below 0.2 measured:
+    // every F13 fixture improves, Sponza GPU p95 unchanged, p99 +0.5 ms.
+    u32 reflectionBoostSamples=8,reflectionBoostFrames=8;float reflectionBoostRoughness=0.2f;
     u32 ssrRoughSteps=16,aoRays=2; // budget defaults measured on Sponza 1080p and the F13 fixtures; 0 = 64 SSR steps / preset rays
     // DDGI irradiance is a deterministic probe interpolation per pixel (no
     // Monte Carlo noise), so the custom denoiser leaves it unfiltered unless
