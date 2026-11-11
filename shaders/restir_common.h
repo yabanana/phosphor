@@ -119,7 +119,7 @@ inline DISample diSampleTexturedLight(GPUSampledLight l, uint lightIndex, float2
 }
 
 inline float3 diIncident(DISample s) { return s.valid ? s.radiance * s.geometry : float3(0); }
-inline float3 diBRDF(GPUDISurface surface, DISample s) {
+inline float3 diBRDFWeighted(GPUDISurface surface, DISample s, float specularWeight) {
     if (!surface.valid || !s.valid) return float3(0);
     float3 n = diVec(surface.shadingNormal), v = diVec(surface.viewDirection);
     if (!all(isfinite(n)) || !all(isfinite(v)) || !(dot(n, n) > 0 && dot(v, v) > 0)) return float3(0);
@@ -138,8 +138,16 @@ inline float3 diBRDF(GPUDISurface surface, DISample s) {
     const float3 f0 = mix(float3(0.04f), albedo, metallic);
     const float3 fresnel = f0 + (1.0f - f0) * pow(1.0f - vh, 5.0f);
     const float3 result = ((1.0f - fresnel) * (1.0f - metallic) * albedo / M_PI_F +
-                           distribution * smith * fresnel) * diIncident(s) * nl;
+                           specularWeight * distribution * smith * fresnel) * diIncident(s) * nl;
     return result; // caller MUST record nonfinite BEFORE any safe-output sanitization
+}
+inline float3 diBRDF(GPUDISurface surface, DISample s) { return diBRDFWeighted(surface, s, 1.0f); }
+// Share of a light's specular lobe that primary DI owns (DI_REFLECTED_EMITTER_SPECULAR).
+// Same smoothstep as reflectionRTWeight on the same packed roughness, so the
+// DI share plus the RT reflection probability is exactly one.
+inline float diEmitterSpecularWeight(constant GPUDIParams& p, GPUSampledLight l, GPUDISurface surface) {
+    if (!(p.flags & DI_REFLECTED_EMITTER_SPECULAR) || l.type != DI_LIGHT_TRIANGLE) return 1.0f;
+    return smoothstep(p.emitterSpecularLow, p.emitterSpecularHigh, surface.roughness);
 }
 inline float diTarget(GPUDISurface surface, DISample sample, float positiveFloor) {
     if (!sample.valid || !isfinite(positiveFloor) || !(positiveFloor > 0)) return 0;

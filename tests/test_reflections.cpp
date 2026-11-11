@@ -35,7 +35,10 @@ TEST_CASE("F13 reflection solid-angle reference agrees with independent rough me
 TEST_CASE("F13 reflection roughness selection is continuous and misses remain explicit"){
     ReflectionSettings s;REQUIRE(validReflectionSettings(s));CHECK(reflectionRTWeight(s.rtRoughnessLow,s)==1);CHECK(reflectionRTWeight(s.rtRoughnessHigh,s)==0);
     CHECK(reflectionRTWeight((s.rtRoughnessLow+s.rtRoughnessHigh)*.5f,s)==doctest::Approx(.5));
-    s.flags&=~REFLECTION_ENABLE_RT;CHECK(reflectionRTWeight(.01f,s)==0);
+    // Geometry-backed emitter specular: DI share + RT reflection probability = 1.
+    for(float r=0;r<=1.0001f;r+=1.0f/64)CHECK(emitterSpecularDIWeight(r,s)+reflectionRTWeight(r,s)==doctest::Approx(1).epsilon(1e-6));
+    CHECK(emitterSpecularDIWeight(.04f,s)==0);CHECK(emitterSpecularDIWeight(.8f,s)==1);
+    s.flags&=~REFLECTION_ENABLE_RT;CHECK(reflectionRTWeight(.01f,s)==0);CHECK(emitterSpecularDIWeight(.01f,s)==1);
     s.rtRoughnessHigh=s.rtRoughnessLow;CHECK_FALSE(validReflectionSettings(s));
     auto surface=shiny();surface.roughness=std::numeric_limits<float>::quiet_NaN();CHECK_FALSE(sampleSpecular(surface,{.3,.4}).valid);
     surface=shiny();CHECK_FALSE(sampleSpecular(surface,{1,.4}).valid);

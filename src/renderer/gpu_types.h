@@ -578,6 +578,12 @@ PHOSPHOR_GPU_CONSTANT u32 DI_ENABLE_TEMPORAL = 2u;
 PHOSPHOR_GPU_CONSTANT u32 DI_ENABLE_SPATIAL = 4u;
 PHOSPHOR_GPU_CONSTANT u32 DI_ENABLE_VISIBILITY = 8u;
 PHOSPHOR_GPU_CONSTANT u32 DI_USE_STBN = 16u;
+// F13.6: RT reflections also see geometry-backed emitters (DI_LIGHT_TRIANGLE).
+// Their specular lobe is then split by the reflection RT probability: DI keeps
+// smoothstep(low, high, roughness), the RT path (taken with the complementary
+// probability) adds the emission it hits. Analytic and punctual lights keep
+// their full DI specular: no reflection ray can hit them.
+PHOSPHOR_GPU_CONSTANT u32 DI_REFLECTED_EMITTER_SPECULAR = 32u;
 PHOSPHOR_GPU_CONSTANT u32 DI_ERROR_WEIGHT = 1u;
 PHOSPHOR_GPU_CONSTANT u32 DI_ERROR_ALIAS = 2u;
 PHOSPHOR_GPU_CONSTANT u32 DI_ERROR_TARGET = 4u;
@@ -644,8 +650,9 @@ struct GPUDIParams {
     u32 maxHistoryAge, stbnWidth, stbnHeight, stbnFrames;
     float depthRelativeThreshold, normalThreshold, targetFloor, pad0;
     u32 stbnDimensions, stbnSeed, slotCount, pad1; // pad1!=0 forces full-light brute iteration in cluster shade
+    float emitterSpecularLow, emitterSpecularHigh; u32 pad2, pad3; // = ReflectionSettings rtRoughnessLow/High
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUDIParams) == 96, "GPUDIParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDIParams) == 112, "GPUDIParams layout");
 
 struct GPULightCluster {
     u32 count, overflow, pad[2]; // overflow selects full local-light iteration

@@ -10,6 +10,10 @@ struct ReflectionSettings {
 };
 [[nodiscard]] bool validReflectionSettings(const ReflectionSettings&);
 [[nodiscard]] float reflectionRTWeight(float roughness, const ReflectionSettings&);
+// F13.6 single count of geometry-backed emitters: the share of their specular
+// lobe that primary DI keeps when RT reflections are active (shader mirror:
+// diEmitterSpecularWeight). It is exactly 1 - reflectionRTWeight.
+[[nodiscard]] float emitterSpecularDIWeight(float roughness, const ReflectionSettings&);
 struct SpecularDirection { glm::dvec3 direction{}, weight{}; double pdf = 0; bool valid = false; };
 // GGX NDF importance sampling, not a falsely labelled VNDF. Rejected reflected
 // hemispheres contribute black proposals, never resample until accepted.
