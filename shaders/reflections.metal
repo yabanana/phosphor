@@ -39,11 +39,17 @@ inline float3 reflectionSecondary(GPURtHit hit,float3 direction,
     const device GPUVertex* vertices,const device uint* indices,const device GPUMaterial* materials,
     const device DITextureHandle* textures,const device GPULight* lights,const device GPUSampledLight* sampled,
     const device GPUEmissiveSurface* emitters,constant GPUProbeGridParams& gi,const device GPUProbeState* states,
-    constant GPUProbeTraceExtra& extra,texture2d<float> irradiance,texture2d<float> moments,thread uint& seed,thread bool& numericError){
+    constant GPUProbeTraceExtra& extra,texture2d<float> irradiance,texture2d<float> moments,thread uint& seed,thread bool& numericError,
+    float minRoughness=0.0f){
     float3 point,normal,emission;GPUDISurface surface;
     if(!rtSurface(hit,instances,meshes,vertices,indices,p.slotCount,p.meshCount,point,normal)||
         !reflectionMaterial(hit,point,normal,-direction,p,instances,meshes,vertices,indices,materials,textures,surface,emission,numericError))return 0;
     float3 result=max(emission,0.0f);const float3 n=diVec(surface.shadingNormal),geometric=diVec(surface.geometricNormal);
+    // Path regularisation (declared in the F13 reference): the light connection
+    // at the vertex after a sampled specular lobe uses at least that lobe's
+    // roughness, alpha = max(alpha_secondary, alpha_camera). It bounds the
+    // variance of specular-specular-light paths through a near-delta lobe.
+    surface.roughness=max(surface.roughness,minRoughness);
     for(uint i=0;i<p.lightCount;++i){const GPULight light=lights[i];if(extra.sampledLightCount&&light.type!=LIGHT_DIRECTIONAL)continue;
         DISample sample{};sample.valid=true;sample.delta=true;sample.distance=p.maxDistance;sample.radiance=float3(light.color[0],light.color[1],light.color[2])*light.intensity;
         if(light.type==LIGHT_DIRECTIONAL){sample.wi=-normalize(float3(light.direction[0],light.direction[1],light.direction[2]));sample.geometry=1;
@@ -93,7 +99,7 @@ kernel void reflection_rt(constant GPUReflectionParams& p [[buffer(0)]],const de
         RtPayload payload{};const auto hit=rtTraceSurface(ray,as,ift,instances,p.slotCount,payload,meshes,vertices,indices,p.meshCount);float3 L;
         sample.flags=SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_STOCHASTIC;sample.proposalSolidAngle=dir.pdf;for(uint i=0;i<3;++i)sample.direction[i]=dir.direction[i];
         bool numericError=dir.error;
-        if(hit.hit){L=reflectionSecondary(hit,dir.direction,as,ift,p,instances,meshes,vertices,indices,materials,textures,lights,sampled,emitters,gi,states,extra,irradiance,moments,seed,numericError);
+        if(hit.hit){L=reflectionSecondary(hit,dir.direction,as,ift,p,instances,meshes,vertices,indices,materials,textures,lights,sampled,emitters,gi,states,extra,irradiance,moments,seed,numericError,s.roughness);
             sample.path=REFLECTION_PATH_RT;sample.hitDistance=length(origin+dir.direction*hit.t-diVec(s.position));sample.secondarySlot=hit.slot;sample.secondaryGeneration=hit.generation;}
         else L=reflectionProbeRadiance(diVec(s.position),dir.direction,s.roughness,false,p,probes,atlas,sample.path);
         L*=dir.weight;if(!all(isfinite(L))||any(L<0)){numericError=true;L=0;}if(numericError)sample.flags|=SPECULAR_SAMPLE_ERROR;for(uint i=0;i<3;++i)sample.radiance[i]=L[i];
