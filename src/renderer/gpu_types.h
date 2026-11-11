@@ -562,7 +562,8 @@ PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowCacheTile) == 48, "GPUShadowCacheTile lay
 PHOSPHOR_GPU_CONSTANT u32 RESOLVE_EXTERNAL_DIFFUSE = 1u<<5;
 struct GPUResolveLightingParams {
     u32 flags, sunIndex, width, height; // bits: sun visibility, replace local DI, indirect irradiance
-    float environment[3]; u32 pad;      // declared isotropic environment radiance (bit16 = F13 path)
+    float environment[3];               // declared isotropic environment radiance (bit16 = F13 path)
+    float sunAngularRadius;             // disk of the shadow-casting directional light (F13 path)
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUResolveLightingParams) == 32, "GPUResolveLightingParams layout");
 // F11: local-light sampling. Area emission is radiance (W/(m^2 sr));

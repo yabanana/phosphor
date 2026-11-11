@@ -47,7 +47,7 @@ class VisibilityRenderer {
     void resetGraphRefs() { poses_ = {}; composedColor_ = {}; }
     // environment: the scene's declared isotropic radiance, used by the F13
     // path (flag 16) for ambient fallbacks. Background: pixels without geometry.
-    void prepareLighting(u32 flags, u32 sunIndex, std::array<float, 3> environment = {});
+    void prepareLighting(u32 flags, u32 sunIndex, std::array<float, 3> environment = {}, float sunAngularRadius = 0);
     void setBackground(std::array<float, 3> radiance) { background_ = radiance; }
     void setLightingTextures(rg::TextureRef sun, rg::TextureRef direct, rg::TextureRef gi);
     rg::BufferRef importPoseHistory(rg::RenderGraph& graph);

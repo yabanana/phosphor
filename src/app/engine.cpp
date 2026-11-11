@@ -1697,7 +1697,7 @@ bool Engine::frame(float dt) {
         if(atmosphere_)atmosphere_->prepareFrame(sf,surfaceGeometryEpoch_,surfaceMaterialEpoch_);
         const u32 flags=(options_.shadows!=ShadowMode::Off?1u:0u) | (options_.directLighting!=DirectLightingMode::Legacy?2u:0u) | (options_.gi!=GiMode::Off?4u:0u) |
                         (options_.reflections!=ReflectionMode::Off && reflections_&&reflections_->ready()?8u:0u) | (reflections_&&reflections_->ready()?16u|RESOLVE_EXTERNAL_DIFFUSE:0u);
-        visibility_->prepareLighting(flags,shadows_->sunIndex(),environment.skyRadiance);
+        visibility_->prepareLighting(flags,shadows_->sunIndex(),environment.skyRadiance,environment.sunAngularRadius);
     }
     if(referenceSnapshot_) {
         ShadowPasses::Frame ref;ref.slot=frame.slot;ref.index=frame.index;ref.width=renderWidth;ref.height=renderHeight;ref.constants=constants;

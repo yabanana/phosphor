@@ -198,8 +198,8 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
     std::memcpy(upload.cpu, &params_, sizeof(params_));
     paramsAddress_ = upload.gpu;
 }
-void VisibilityRenderer::prepareLighting(u32 flags, u32 sunIndex, std::array<float, 3> environment) {
-    const GPUResolveLightingParams p{flags, sunIndex, params_.width, params_.height, {environment[0], environment[1], environment[2]}, 0};
+void VisibilityRenderer::prepareLighting(u32 flags, u32 sunIndex, std::array<float, 3> environment, float sunAngularRadius) {
+    const GPUResolveLightingParams p{flags, sunIndex, params_.width, params_.height, {environment[0], environment[1], environment[2]}, sunAngularRadius};
     auto u = context_.frameUploads().allocate(sizeof p); std::memcpy(u.cpu, &p, sizeof p); lightingAddress_ = u.gpu;
 }
 void VisibilityRenderer::setLightingTextures(rg::TextureRef sun, rg::TextureRef direct, rg::TextureRef gi) {
