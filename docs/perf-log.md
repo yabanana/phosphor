@@ -1247,3 +1247,20 @@ Both binaries read about 0.3–0.5 ms higher than the quiet-machine D2
 measurement (16.01–16.06 ms). Under this load, GPU p95 is 16.30–16.54 ms in
 the accepted pairs, against the 16.67 ms gate. The absolute gate needs a
 repeat on a quiet machine with the battery not charging.
+
+### Absolute repeats of 75c0b6e (same day)
+
+Three runs of the final binary alone, same protocol, 20 s gaps, load logged.
+
+| window | GPU p50 | GPU p95 | other load | verdict |
+|---|---|---|---|---|
+| A (`build/budget-abs-20261112/`) | 15.24–15.32 | 16.69 / 16.42 / 16.48 | the corpus runner's metric pass (one CPU core, large arrays); battery charging | 2 of 3 under 16.67 ms, run 1 over by 0.02 ms |
+| B (`build/budget-abs2-20261112/`) | 16.16–16.33 | 19.03 / 19.07 / 17.87 | another project's sustained native GPU test, `mediaanalysisd`, Neural Engine service at about 99% CPU; battery charging | rejected: shared GPU |
+
+The physical sky pass reads 0.666–0.672 ms in both windows, as on the quiet
+D2 day (0.667–0.670 ms), so the clock state did not change. The extra time
+sits in the memory-bound passes: `F13 reflection sample 0` is 2.62 ms quiet,
+2.75–2.78 ms in window A and 2.86–2.93 ms in window B. The interleaved pairs
+above show the same environment cost on c152b99. The absolute gate for
+75c0b6e is therefore not yet measured on a quiet machine: what is measured is
+parity with c152b99 (within 0.04 ms) and c152b99 at 16.01–16.06 ms quiet.
