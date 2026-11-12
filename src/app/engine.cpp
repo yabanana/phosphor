@@ -942,6 +942,11 @@ void Engine::finishBenchmark() {
         }
     }
     if (report.gpuTiming) passTimings_.summarize(report.passes, report.gpuPassSumMs, report.gpuFrameSpanMs);
+    if (report.gpuTiming && !options_.reportFramesPath.empty()) {
+        std::ofstream frames(options_.reportFramesPath);
+        frames << passTimings_.framesCsv();
+        if (!frames) LOG_ERROR("Failed to write %s", options_.reportFramesPath.c_str());
+    }
     if (shadows_) {
         report.lighting.present=true; report.lighting.shadows=shadowModeName(options_.shadows);
         report.lighting.direct=directLightingModeName(options_.directLighting);report.lighting.gi=giModeName(options_.gi);

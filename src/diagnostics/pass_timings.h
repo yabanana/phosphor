@@ -80,6 +80,10 @@ public:
     /// Per-unit summaries of the measured frames (TimingSummary nearest rank,
     /// invalid samples skipped) plus the per-frame sum.
     void summarize(std::vector<PassReport>& out, TimingSummary& sum, TimingSummary& span) const;
+    /// F14.2: the measured frames as CSV, one row per frame in measurement
+    /// order: "frame,span_ms,sum_ms" then one column per unit (header = unit
+    /// names, quoted); an invalid sample is an empty field.
+    [[nodiscard]] std::string framesCsv() const;
 
 private:
     struct Unit {

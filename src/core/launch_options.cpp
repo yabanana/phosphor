@@ -203,6 +203,10 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             const auto value = needValue();
             if (!value) return false;
             out.reportPath = *value;
+        } else if (arg == "--report-frames") {
+            const auto value = needValue();
+            if (!value) return false;
+            out.reportFramesPath = *value;
         } else if (arg == "--dump-graph") {
             const auto value = needValue();
             if (!value) return false;

@@ -3,7 +3,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <limits>
+#include <string>
 
 namespace phosphor {
 
@@ -171,6 +173,35 @@ void PassTimings::beginMeasure(u32 frames) {
 u32 PassTimings::endMeasure() {
     measuring_ = false;
     return measured_;
+}
+
+std::string PassTimings::framesCsv() const {
+    std::string out = "frame,span_ms,sum_ms";
+    for (const Unit& unit : units_) {
+        out += ",\"";
+        for (const char c : unit.name) out += c == '"' ? std::string("\"\"") : std::string(1, c);
+        out += '"';
+    }
+    out += '\n';
+    char buffer[32];
+    auto field = [&](float v) {
+        out += ',';
+        if (std::isnan(v)) return;
+        std::snprintf(buffer, sizeof buffer, "%.6f", static_cast<double>(v));
+        out += buffer;
+    };
+    const size_t n = units_.size();
+    for (u32 f = 0; f < measured_; ++f) {
+        out += std::to_string(f);
+        field(f < measuredSpan_.size() && measuredSpan_[f] >= 0.0f ? measuredSpan_[f] : std::numeric_limits<float>::quiet_NaN());
+        field(f < measuredSum_.size() ? measuredSum_[f] : std::numeric_limits<float>::quiet_NaN());
+        for (size_t u = 0; u < n; ++u) {
+            const size_t i = static_cast<size_t>(f) * n + u;
+            field(i < measuredMs_.size() ? measuredMs_[i] : std::numeric_limits<float>::quiet_NaN());
+        }
+        out += '\n';
+    }
+    return out;
 }
 
 void PassTimings::summarize(std::vector<PassReport>& out, TimingSummary& sum, TimingSummary& span) const {
