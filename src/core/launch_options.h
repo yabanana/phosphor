@@ -384,6 +384,9 @@ struct LaunchOptions {
     float cameraClimb=0,cameraPitch=-1000,cameraYawRate=0,cameraAimSun=-1000;
     u32 cloudMarchSteps=0; // F14.3 validation control: view-ray steps (0 keeps CloudSettings)
     std::string volumeOracle;bool fogHomogeneous=false,atmoFreezeClock=false;
+    // F13.3 spike: run the native SDK on the product inputs in the controlled
+    // diagnostic domain (measurement only, never production qualification).
+    bool metalfxNativeDiagnostic=false;
     std::string denoisedFixture,denoisedFixtureOutput;bool denoisedFixturePreExposed=false,denoisedFixtureAutoExposure=false,denoisedFixtureManualExposureControl=false;u32 denoisedFixturePrewarmMs=120000;
     ReflectionMode reflections=ReflectionMode::Off;
     AoMode ao=AoMode::Off;

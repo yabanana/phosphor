@@ -1322,3 +1322,12 @@ TEST_CASE("F14.2/F14.3 validation controls keep product defaults") {
     CHECK(t.captureLinearSignal==11);
     CHECK_FALSE(parse({"--frames","10","--fog","on","--capture-linear-sequence","seq","--capture-linear-signal","cloud-transmittance"},bad,error));
 }
+
+TEST_CASE("F13.3 native diagnostic flag needs the native denoiser in a benchmark") {
+    LaunchOptions o;std::string error;
+    auto with=[](std::initializer_list<const char*> extra){std::vector<const char*> a{"--bench","6","--reflection-scene","roughness","--render-path","visibility","--frames","4"};
+        a.insert(a.end(),extra);return a;};
+    REQUIRE(parse(with({"--lighting-denoise","metalfx","--metalfx-native-diagnostic"}),o,error));CHECK(o.metalfxNativeDiagnostic);
+    o={};CHECK_FALSE(parse(with({"--lighting-denoise","custom","--metalfx-native-diagnostic"}),o,error));
+    o={};REQUIRE(parse(with({"--lighting-denoise","metalfx"}),o,error));CHECK_FALSE(o.metalfxNativeDiagnostic);
+}

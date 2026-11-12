@@ -589,6 +589,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if(!needCount(out.denoisedFixturePrewarmMs)||!out.denoisedFixturePrewarmMs||out.denoisedFixturePrewarmMs>120000){error="--denoised-fixture-prewarm-ms: expected 1..120000";return false;}
         } else if (arg == "--denoised-fixture-pre-exposed") {
             out.denoisedFixturePreExposed=true;
+        } else if (arg == "--metalfx-native-diagnostic") {
+            out.metalfxNativeDiagnostic=true;
         } else if (arg == "--denoised-fixture-auto-exposure") {
             out.denoisedFixtureAutoExposure=true;
         } else if (arg == "--denoised-fixture-manual-exposure-control") {
@@ -1172,6 +1174,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
         error="Atmosphere parameter controls require --atmosphere on";return false;}
     if((out.reflections==ReflectionMode::RT || out.ao==AoMode::RTAO) && !out.rtEnabled){error="RT reflections/AO/probe capture require --rt on";return false;}
     if(out.lightingDenoise==LightingDenoiseMode::MetalFX && out.temporalUpscale){error="Denoised and standard temporal reconstruction are separate paths";return false;}
+    if(out.metalfxNativeDiagnostic&&(out.lightingDenoise!=LightingDenoiseMode::MetalFX||!out.denoisedFixture.empty()||!out.benchmark())){
+        error="--metalfx-native-diagnostic requires --lighting-denoise metalfx, a benchmark run and no SDK fixture";return false;}
     if((!out.reflectionProbePath.empty() || out.reflectionCaptureProbe) && out.reflections==ReflectionMode::Off){error="Probe controls require --reflections";return false;}
     if ((out.shadows == ShadowMode::RT || out.directLighting != DirectLightingMode::Legacy || out.gi != GiMode::Off) && !out.rtEnabled) {
         error = "RT sun, local visibility and GI require --rt on"; return false;

@@ -349,6 +349,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     if(options_.lightingDenoise==LightingDenoiseMode::MetalFX||!options_.denoisedFixture.empty()) {
         MetalfxDenoise::Options config;config.enabled=true;config.views=options_.temporalViews;
         config.specularHitDistance=options_.reflections!=ReflectionMode::Off;
+        if(options_.metalfxNativeDiagnostic)config.radiometricDomain=metalfx_denoise::RadiometricDomain::ControlledFixtureDiagnostic;
         MetalfxDenoise::Factory factory;
 #ifdef PHOSPHOR_METALFX_DENOISED_GATEWAY_AVAILABLE
         factory.request=[this](auto* desc){return pipelines_->requestTemporalDenoisedScaler(desc);};
