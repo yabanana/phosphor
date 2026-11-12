@@ -86,10 +86,11 @@ kernel void denoise_temporal(constant GPUDenoiseParams& p [[buffer(0)]],const de
         }
         // Stationary: a running mean weighted by the samples behind each frame
         // (boosted records carry their count), so the length counts samples.
+        // A cap below the per-frame sample count makes the current frame replace the history.
         const uint frames=reuse?min(old.length,p.maxHistory-1u)+1u:1u;
         const uint spp=denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR?max(1u,(spec.flags>>SPECULAR_SAMPLE_COUNT_SHIFT)&SPECULAR_SAMPLE_COUNT_MASK):1u;
         const bool still=(p.flags&DENOISE_STATIONARY)!=0;const uint length=still?min(reuse?old.length+spp:spp,p.maxHistory):frames;
-        const float alpha=reuse?(still?float(spp)/float(length):max((p.flags&DENOISE_SOFT_CHANGE)?2*p.temporalAlpha:p.temporalAlpha,1.0f/float(length))):1;
+        const float alpha=reuse?(still?min(1.0f,float(spp)/float(length)):max((p.flags&DENOISE_SOFT_CHANGE)?2*p.temporalAlpha:p.temporalAlpha,1.0f/float(length))):1;
         const float ma=reuse?max(p.momentsAlpha,1.0f/float(frames)):1,L=diLuminance(current);float3 color=reuse?mix(oldColor,current,alpha):current;if(denoiseSignal(p)==DENOISE_SIGNAL_AO)color=saturate(color);
         h.length=length;h.firstMoment=reuse?mix(old.firstMoment,L,ma):L;h.secondMoment=reuse?mix(old.secondMoment,L*L,ma):L*L;
         h.variance=max(p.varianceFloor,h.secondMoment-h.firstMoment*h.firstMoment);if(frames<p.minHistoryForVariance)h.variance=max(h.variance,localVariance/float(frames));h.depth=s.depth;h.roughness=s.roughness;
