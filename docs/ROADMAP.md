@@ -576,7 +576,7 @@ M3. [Consegna](F9_HANDOFF.md), [dati](results/F9-M5Max-2026-10-07.json).
 - [x] F13.2 RTAO (T1+) / GTAO (T0)
 - [x] F13.3 **MetalFX denoised upscaler** (Apple9) collegato ai canali di F7.6 — **scopo ridefinito dal proprietario (D7, 2026-11-12)**: adapter e fixture SDK reali, criterio radiometrico D1, vita dello scaler verificata sull'immagine MetalFX attuale; il nativo, misurato sugli input reali contro la clip indipendente `roughness` (`--metalfx-native-diagnostic`), è respinto per qualità (p95 0,174 contro 0,06, flicker 0,035) e in produzione viene scelto il custom Float32 prima del grafo. Una versione successiva di MetalFX riapre l'ammissione solo superando lo stesso confronto. Vedi [policy radiometrica](implementation/F13-RADIOMETRY-POLICY.md) e [follow-up lifetime/budget](implementation/F13-F14-BUDGET-CLOSURE-2026-10-08.md).
 - [x] F13.4 Denoiser custom leggero per T0 (temporal + atrous) quando il denoiser MetalFX non è usato
-- [x] F13.5 Probe di riflessione statiche filtrate per T0 — chiuso per T0; la cattura RT (`probe-box-rt-capture`, fuori da T0) resta oltre il limite a roughness 0,9 per l'orizzonte della probe prefiltrata
+- [x] F13.5 Probe di riflessione statiche filtrate per T0 — chiuso: T0 e cattura RT passano la clip indipendente a ogni roughness (lettura lungo la direzione dominante GGX, 2026-11-12)
 - [x] F13.6 **Qualità temporale di luce e denoise**: estendere F8.7 con luci ed emissive in movimento, variazioni di GI, riflessi a diverse roughness e superfici appena disoccluse; verificare motion vector, rejection/invalidation della storia e recupero dopo camera cut, con confronto al riferimento di F12.5 e soglie per tier — accettato su M5; le soglie per gli altri tier restano `EXTERNAL_VALIDATION_PENDING`
 
 Accettazione di sviluppo locale M5 (2026-11-12, branch `phase/f13-f14-closure`):
@@ -586,8 +586,8 @@ a soglia assoluta (D1), oracolo F9 (D3), F13.3 ridefinito (D7). Budget D2
 rispettato a macchina quieta: p95 GPU 15,98–16,03 ms nelle tre coppie senza
 contesa, alternate con c152b99; una run a 16,86 ms ha la firma di contesa
 esterna (passata del cielo a lavoro costante da 0,676 a 0,770 ms), riprodotta
-su entrambi i binari. Il frame p95 con timing seriale resta 0,04–0,12 ms sopra. I residui restano espliciti: cattura RT della
-probe a roughness 0,9, soglie degli altri tier, certificazione T0 fisica. [Chiusura per ID](implementation/F13-F14-CLOSURE-2026-11-12.md).
+su entrambi i binari. Il frame p95 con timing seriale resta 0,04–0,12 ms sopra. Restano solo le verifiche che
+richiedono altro hardware: soglie degli altri tier, certificazione T0 fisica. [Chiusura per ID](implementation/F13-F14-CLOSURE-2026-11-12.md).
 
 ## OPT-2 — Shader, pipeline e occupancy [OPT]
 

@@ -197,3 +197,25 @@ TEST_CASE("Probe storage rejects the complete out-of-range physical sum before H
         CHECK_FALSE(reflectionProbeStorageAccepts(0,std::numeric_limits<float>::quiet_NaN(),0,flags));
     }
 }
+
+TEST_CASE("F13.5 prefiltered probe lookup follows the GGX dominant direction") {
+    const glm::vec3 n(0,1,0);
+    // A floor seen at a grazing angle: the mirror direction skims the horizon.
+    const glm::vec3 r=glm::normalize(glm::vec3(1,0.05f,0));
+    // Smooth receivers keep the mirror direction; roughness 1 reads along the normal.
+    const glm::vec3 smooth=reflectionProbeDominantDirection(n,r,0.0f);
+    CHECK(glm::length(smooth-r)==doctest::Approx(0).epsilon(1e-6));
+    const glm::vec3 rough=reflectionProbeDominantDirection(n,r,1.0f);
+    CHECK(glm::length(rough-n)==doctest::Approx(0).epsilon(1e-6));
+    // Monotonic toward the normal, always unit length and above the horizon.
+    float previous=-1;
+    for(float roughness:{0.0f,0.3f,0.6f,0.9f,1.0f}){
+        const glm::vec3 d=reflectionProbeDominantDirection(n,r,roughness);
+        CHECK(glm::length(d)==doctest::Approx(1).epsilon(1e-6));
+        CHECK(d.y>=r.y-1e-6f);
+        CHECK(d.y>=previous-1e-6f);
+        previous=d.y;
+    }
+    // At roughness 0.9 (the probe-box failure) the lookup is well above the horizon.
+    CHECK(reflectionProbeDominantDirection(n,r,0.9f).y>0.7f);
+}

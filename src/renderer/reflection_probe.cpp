@@ -57,6 +57,10 @@ bool validReflectionProbe(const GPUReflectionProbe& p){return p.enabled&&finite(
 float reflectionProbeWeight(const GPUReflectionProbe& p,glm::vec3 x){if(!validReflectionProbe(p)||!finite(x))return 0;
     const auto out=glm::max(glm::max(v3(p.boxMin)-x,x-v3(p.boxMax)),glm::vec3(0));
     return std::clamp(1.f-std::max({out.x,out.y,out.z})/p.blendDistance,0.f,1.f);}
+glm::vec3 reflectionProbeDominantDirection(glm::vec3 n,glm::vec3 r,float roughness){
+    const float a=roughness*roughness,k=(1.0f-a)*(std::sqrt(1.0f-a)+a);
+    return glm::normalize(glm::mix(n,r,k));
+}
 std::optional<glm::vec3> reflectionProbeParallax(const GPUReflectionProbe& p,glm::vec3 x,glm::vec3 d){
     if(!validReflectionProbe(p)||!finite(x)||!finite(d)||glm::dot(d,d)<=0||!(reflectionProbeWeight(p,x)>0))return std::nullopt;
     d=glm::normalize(d);float exit=std::numeric_limits<float>::infinity();for(u32 i=0;i<3;++i)if(std::abs(d[i])>1e-8f)exit=std::min(exit,((d[i]>0?p.boxMax[i]:p.boxMin[i])-x[i])/d[i]);
