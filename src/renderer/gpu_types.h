@@ -766,10 +766,13 @@ PHOSPHOR_GPU_CONSTANT u32 REFLECTION_ENABLE_PROBES = 8u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_ENABLE_GI = 16u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_CAPTURE_HALF = 32u; // reject total radiance outside HALF before conversion
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_SINGLE_SAMPLE = 64u; // one sample: the kernel stores the reduced record, signal and distance
-// F13.1 single count: primary DI integrates the specular lobe of every
-// geometry emitter on the fallback paths, so the radiance cache and probe
-// captures leave the emission out (RT rays keep it: their share is 1 - DI's).
+// F13.1 single count of geometry emitters. EXCLUDE: non-legacy DI integrates
+// emitters (the SSR source carries none). BAND: DI owns only
+// smoothstep(rtRoughnessLow, rtRoughnessHigh, roughness) of their specular
+// lobe and the reflection paths own the rest; without BAND, DI owns all of it.
+// reflectionFallbackEmissionShare() is the share a non-RT path adds back.
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_EXCLUDE_DI_EMISSION = 128u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_DI_EMITTER_BAND = 512u;
 // F13.5 negative control: probe lookups ignore the box projection.
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_DEBUG_NO_PARALLAX = 256u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_NONE = 0u;

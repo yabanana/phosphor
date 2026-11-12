@@ -118,9 +118,10 @@ struct DirectLightingPasses::Impl {
         params.flags=DI_ENABLE_TEMPORAL|DI_ENABLE_SPATIAL|(rt?DI_ENABLE_VISIBILITY:0u)|DI_USE_STBN|(decision.reset?DI_RESET_HISTORY:0u);
         params.stbnWidth=stbn.config.width;params.stbnHeight=stbn.config.height;params.stbnFrames=stbn.config.frames;params.stbnDimensions=stbn.config.dimensions;params.stbnSeed=options.lightingSeed;
         params.depthRelativeThreshold=0.02f;params.normalThreshold=0.95f;params.targetFloor=1e-6f;params.slotCount=s.slotCapacity();params.pad1=options.directLighting==DirectLightingMode::BruteForce;
-        // Same activation and roughness band as ReflectionPasses (RT reflections
-        // see emissive geometry): the emitter specular lobe is counted once.
-        if(options.reflections==ReflectionMode::RT&&rt&&rt->active()){const ReflectionSettings reflection{};params.flags|=DI_REFLECTED_EMITTER_SPECULAR;
+        // F13.1: whenever a reflection path sees emissive geometry (RT rays or
+        // their SSR fallback, SSR, a captured probe), DI keeps only the
+        // roughness band of the emitter lobe; the reflection paths own the rest.
+        if(reflectionPathsSeeEmitters(options)){const ReflectionSettings reflection{};params.flags|=DI_REFLECTED_EMITTER_SPECULAR;
             params.emitterSpecularLow=reflection.rtRoughnessLow;params.emitterSpecularHigh=reflection.rtRoughnessHigh;}
         checkParams={f.width,f.height,options.directLighting==DirectLightingMode::ReSTIR?1u:0u,u32(n)};checkAddress=lighting::upload(c,checkParams);
         paramsAddress=lighting::upload(c,params);emitterParams={u32(n),s.slotCapacity(),u32(s.materials().size()),u32(g.vertices().size())};emitterAddress=lighting::upload(c,emitterParams);

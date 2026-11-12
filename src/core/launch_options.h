@@ -450,6 +450,14 @@ struct LaunchOptions {
 bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
                         LaunchOptions& out, std::string& error);
 
+/// F13.1: whether a reflection path can see emissive geometry (RT rays or
+/// their SSR fallback, SSR, a captured probe). Then primary DI keeps only the
+/// roughness band of an emitter's specular lobe and reflections own the rest.
+inline bool reflectionPathsSeeEmitters(const LaunchOptions& o) {
+    return o.reflections == ReflectionMode::RT || o.reflections == ReflectionMode::SSR ||
+           (o.reflections == ReflectionMode::Probes && o.reflectionCaptureProbe);
+}
+
 /// Whether the F13 custom denoiser filters the GI signal (see ddgiDenoise).
 inline bool denoisesGi(const LaunchOptions& o) { return o.gi != GiMode::Off && (o.gi != GiMode::DDGI || o.ddgiDenoise); }
 

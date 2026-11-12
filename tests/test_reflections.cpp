@@ -39,6 +39,20 @@ TEST_CASE("F13 reflection roughness selection is continuous and misses remain ex
     for(float r=0;r<=1.0001f;r+=1.0f/64)CHECK(emitterSpecularDIWeight(r,s)+reflectionRTWeight(r,s)==doctest::Approx(1).epsilon(1e-6));
     CHECK(emitterSpecularDIWeight(.04f,s)==0);CHECK(emitterSpecularDIWeight(.8f,s)==1);
     s.flags&=~REFLECTION_ENABLE_RT;CHECK(reflectionRTWeight(.01f,s)==0);CHECK(emitterSpecularDIWeight(.01f,s)==1);
+    // F13.1 ownership in every mode: DI share + RT probability + fallback
+    // probability * fallback share = 1 (the DI band is the same smoothstep).
+    {ReflectionSettings rt;for(float r=0;r<=1.0001f;r+=1.0f/64){
+        const float band=1-reflectionRTWeight(r,rt);
+        // RT reflections, non-legacy DI with the band.
+        CHECK(band+reflectionRTWeight(r,rt)+(1-reflectionRTWeight(r,rt))*reflectionFallbackEmissionShare(r,true,true,true,rt)==doctest::Approx(1));
+        // SSR or captured probe, DI with the band.
+        CHECK(band+reflectionFallbackEmissionShare(r,false,true,true,rt)==doctest::Approx(1));
+        // DI owns everything (no emitter-capable fallback).
+        CHECK(1+reflectionFallbackEmissionShare(r,false,true,false,rt)==doctest::Approx(1));
+        // Legacy lighting: reflections own everything, RT or not.
+        CHECK(reflectionRTWeight(r,rt)+(1-reflectionRTWeight(r,rt))*reflectionFallbackEmissionShare(r,true,false,true,rt)==doctest::Approx(1));
+        CHECK(reflectionFallbackEmissionShare(r,false,false,false,rt)==1);}
+     CHECK(reflectionFallbackEmissionShare(.04f,false,true,true,rt)==1);CHECK(reflectionFallbackEmissionShare(.8f,false,true,true,rt)==0);}
     s.rtRoughnessHigh=s.rtRoughnessLow;CHECK_FALSE(validReflectionSettings(s));
     auto surface=shiny();surface.roughness=std::numeric_limits<float>::quiet_NaN();CHECK_FALSE(sampleSpecular(surface,{.3,.4}).valid);
     surface=shiny();CHECK_FALSE(sampleSpecular(surface,{1,.4}).valid);

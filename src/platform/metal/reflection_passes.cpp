@@ -38,7 +38,7 @@ std::vector<float> probePFM(const std::filesystem::path& path){std::ifstream in(
     std::vector<u32> words(size_t(width)*height*3);in.read(reinterpret_cast<char*>(words.data()),std::streamsize(words.size()*4));if(!in||in.peek()!=std::char_traits<char>::eof())throw std::runtime_error("PFM payload size mismatch");
     const bool little=scale<0,hostLittle=std::endian::native==std::endian::little;std::vector<float> result(size_t(width)*height*4);
     for(u32 y=0;y<height;++y)for(u32 x=0;x<width;++x){for(u32 c=0;c<3;++c){u32 bits=words[(size_t(height-1-y)*width+x)*3+c];if(little!=hostLittle)bits=(bits>>24)|((bits>>8)&0xff00)|((bits<<8)&0xff0000)|(bits<<24);
-        const float v=std::bit_cast<float>(bits)*std::abs(scale);if(!std::isfinite(v)||v<0)throw std::runtime_error("PFM contains invalid radiance");result[(size_t(y)*width+x)*4+c]=v;}result[(size_t(y)*width+x)*4+3]=1;}
+        const float v=std::bit_cast<float>(bits)*std::abs(scale);if(!std::isfinite(v)||v<0)throw std::runtime_error("PFM contains invalid radiance");result[(size_t(y)*width+x)*4+c]=v;}result[(size_t(y)*width+x)*4+3]=0;}
     return result;
 }
 }
@@ -171,7 +171,7 @@ struct ReflectionPasses::Impl {
         for(u32 face=0;face<6;++face){std::vector<float> rgba;
             if(!options.reflectionProbePath.empty())rgba=probePFM(std::filesystem::path(options.reflectionProbePath)/faces[face]);
             else{rgba.resize(ProbeSide*ProbeSide*4);for(u32 y=0;y<ProbeSide;++y)for(u32 x=0;x<ProbeSide;++x){const auto d=reflectionCubeDirection(face,{(x+.5f)/ProbeSide,(y+.5f)/ProbeSide});const auto L=glm::mix(glm::vec3(.02f,.025f,.03f),glm::vec3(.1f,.12f,.16f),d.y*.5f+.5f);
-                    const size_t at=(size_t(y)*ProbeSide+x)*4;for(u32 k=0;k<3;++k)rgba[at+k]=L[k];rgba[at+3]=1;}}
+                    const size_t at=(size_t(y)*ProbeSide+x)*4;for(u32 k=0;k<3;++k)rgba[at+k]=L[k];rgba[at+3]=0;}} // alpha: no emission (F13.1)
             uploadFace(face,rgba);}
         auto zeroSlice=c.stagingAllocate(16);std::memset(zeroSlice.cpu,0,16);auto* zeroTarget=dummyTexture;c.enqueueUpload([zeroSlice,zeroTarget](MTL4::ComputeCommandEncoder* e){e->copyFromBuffer(zeroSlice.buffer,zeroSlice.offset,16,16,MTL::Size::Make(1,1,1),zeroTarget,0,0,MTL::Origin::Make(0,0,0));});c.flushUploads();
         source=options.reflectionCaptureProbe?(rt?"actual-scene-rt":"actual-static-raster-unshadowed"):options.reflectionProbePath.empty()?"analytic-environment":"cooked-linear-pfm";
@@ -222,6 +222,8 @@ struct ReflectionPasses::Impl {
         // F13.1: non-legacy DI integrates every geometry emitter's specular
         // lobe that RT reflections do not own (all of it outside the RT band).
         if(options.directLighting!=DirectLightingMode::Legacy)params.flags|=REFLECTION_EXCLUDE_DI_EMISSION;
+        // Same condition as DirectLightingPasses' DI_REFLECTED_EMITTER_SPECULAR.
+        if(reflectionPathsSeeEmitters(options))params.flags|=REFLECTION_DI_EMITTER_BAND;
         if(options.debugProbeNoParallax)params.flags|=REFLECTION_DEBUG_NO_PARALLAX;
         paramsAddress=lighting::upload(c,params);probeAddress=lighting::upload(c,probe);
         for(u32 i=0;i<options.reflectionSamples;++i){auto sample=params;sample.seed=options.lightingSeed+i*0x9e3779b9u;sampleAddress[i]=lighting::upload(c,sample);}
@@ -242,7 +244,7 @@ struct ReflectionPasses::Impl {
             if(probeFormat==MTL::PixelFormatRGBA16Float)capture.flags|=REFLECTION_CAPTURE_HALF;
             captureAddress[face]=lighting::upload(c,capture);
             GPUProbeCaptureParams raster{};std::memcpy(raster.viewProjection,glm::value_ptr(vp),64);for(u32 k=0;k<3;++k){raster.capturePosition[k]=probe.capturePosition[k];raster.environment[k]=params.environment[k];}
-            raster.slotCount=store.slotCapacity();raster.materialCount=u32(store.materials().size());raster.lightCount=f.constants.lightCount;raster.sampledLightCount=direct.lightCount();raster.storageFlags=(probeFormat==MTL::PixelFormatRGBA16Float?REFLECTION_CAPTURE_HALF:0u)|(params.flags&REFLECTION_EXCLUDE_DI_EMISSION);rasterCaptureAddress[face]=lighting::upload(c,raster);}
+            raster.slotCount=store.slotCapacity();raster.materialCount=u32(store.materials().size());raster.lightCount=f.constants.lightCount;raster.sampledLightCount=direct.lightCount();raster.storageFlags=probeFormat==MTL::PixelFormatRGBA16Float?REFLECTION_CAPTURE_HALF:0u;rasterCaptureAddress[face]=lighting::upload(c,raster);}
         for(u32 mip=0;mip<ProbeMips;++mip){GPUProbeFilterParams filter{std::max(1u,ProbeSide>>mip),mip,128,0,float(mip)/float(ProbeMips-1),float(ProbeSide),probeFormat==MTL::PixelFormatRGBA16Float?REFLECTION_CAPTURE_HALF:0u,0};
             filterAddress[mip]=lighting::upload(c,filter);validateAddress[mip]=filterAddress[mip];}GPUProbeFilterParams rawCheck{ProbeSide,~0u,0,0,0,float(ProbeSide),probeFormat==MTL::PixelFormatRGBA16Float?REFLECTION_CAPTURE_HALF:0u,u32(options.debugLighting!=0)};rawValidateAddress=lighting::upload(c,rawCheck);
         if(rtReflection)reflectionConsumer->prepare(frame.slot,reflectionRT);if(rtAO)aoConsumer->prepare(frame.slot,rtao);if(rtCapture&&probeNeedsCapture)captureConsumer->prepare(frame.slot,captureRT);

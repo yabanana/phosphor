@@ -43,12 +43,24 @@ inline bool reflectionProbeDirection(GPUReflectionProbe p,float3 point,float3 di
     exit=max(exit,0.0f);corrected=point+direction*exit-diVec(p.capturePosition);
     if(!isfinite(exit)||!all(isfinite(corrected))||dot(corrected,corrected)<1e-20f)return false;corrected=normalize(corrected);return true;
 }
+// F13.1 (CPU mirror reflectionFallbackEmissionShare): share of a geometry
+// emitter's specular lobe that a non-RT reflection path keeps for this receiver.
+inline float reflectionFallbackEmissionShare(constant GPUReflectionParams& p,float roughness){
+    if(!(p.flags&REFLECTION_EXCLUDE_DI_EMISSION))return 1.0f;
+    if((p.flags&REFLECTION_ENABLE_RT)||!(p.flags&REFLECTION_DI_EMITTER_BAND))return 0.0f;
+    return 1.0f-smoothstep(p.rtRoughnessLow,p.rtRoughnessHigh,roughness);}
+// Probe texels carry the captured emission luminance in alpha (F13.1); the
+// emitted part of a filtered texel is estimated with the texel's own chroma.
+inline float reflectionProbeLuminance(float3 c){return dot(c,float3(.2126f,.7152f,.0722f));}
 inline float3 reflectionProbeRadiance(float3 point,float3 direction,float roughness,bool prefiltered,
     constant GPUReflectionParams& p,const device GPUReflectionProbe* probes,texturecube_array<float> atlas,thread uint& path){
     float3 sum=0;float total=0;path=REFLECTION_PATH_ENVIRONMENT;
     if(p.flags&REFLECTION_ENABLE_PROBES)for(uint i=0;i<p.probeCount;++i){const GPUReflectionProbe probe=probes[i];float3 corrected;float weight;
         if(reflectionProbeDirection(probe,point,direction,corrected,weight)){if(p.flags&REFLECTION_DEBUG_NO_PARALLAX)corrected=direction;const float lod=prefiltered?roughness*max(probe.mipCount-1,0.0f):0;
-            float3 L=atlas.sample(kReflectionProbeSampler,corrected,probe.cubeIndex,level(lod)).rgb;if(all(isfinite(L))&&all(L>=0)){sum+=L*weight;total+=weight;}}
+            const float4 texel=atlas.sample(kReflectionProbeSampler,corrected,probe.cubeIndex,level(lod));float3 L=texel.rgb;
+            const float keep=reflectionFallbackEmissionShare(p,roughness),luminance=reflectionProbeLuminance(L);
+            if(keep<1.0f&&luminance>0&&texel.a>0)L-=(1.0f-keep)*L*saturate(texel.a/luminance);
+            if(all(isfinite(L))&&all(L>=0)){sum+=L*weight;total+=weight;}}
     }
     if(total>0){path=REFLECTION_PATH_PROBE;float coverage=saturate(total);return (sum/total)*coverage+reflectionConstantVec(p.environment)*(1-coverage);}
     return reflectionConstantVec(p.environment);
@@ -97,11 +109,13 @@ inline GPUSpecularSample reflectionFallback(GPUDISurface surface,ReflectionDirec
     const auto hit=reflectionSSR(diVec(surface.position),direction.direction,p,depth,surface.roughness);
     if(hit.valid&&surfaces[hit.pixel].valid){const GPUDISurface secondary=surfaces[hit.pixel];out.path=REFLECTION_PATH_SSR;out.hitDistance=hit.distance;
         out.secondarySlot=secondary.instanceSlot;out.secondaryGeneration=secondary.instanceGeneration;
-        // The SSR source already omits the DI-owned emission (pre-compose);
-        // the cached outgoing radiance includes it, so remove it here.
+        // The SSR source omits emission when DI integrates emitters (pre-
+        // compose) and the cached outgoing radiance includes it: both keep
+        // exactly the fallback's share of the hit receiver's emission.
+        const float share=reflectionFallbackEmissionShare(p,surface.roughness);const float3 emission=unpackEmission3(secondary.pad[1]);
         if((p.flags&REFLECTION_ENABLE_CACHE)&&giCacheLookup(hit.point,diVec(secondary.geometricNormal),-direction.direction,gi,cache,L)){out.path=REFLECTION_PATH_CACHE;
-            if(p.flags&REFLECTION_EXCLUDE_DI_EMISSION)L=max(L-unpackEmission3(secondary.pad[1]),0.0f);}
-        else L=baseRadiance.read(uint2(hit.pixel%p.width,hit.pixel/p.width)).rgb;
+            if(p.flags&REFLECTION_EXCLUDE_DI_EMISSION)L=max(L-(1.0f-share)*emission,0.0f);}
+        else{L=baseRadiance.read(uint2(hit.pixel%p.width,hit.pixel/p.width)).rgb;if(p.flags&REFLECTION_EXCLUDE_DI_EMISSION)L+=share*emission;}
     }else L=reflectionProbeRadiance(diVec(surface.position),direction.direction,surface.roughness,false,p,probes,probeAtlas,out.path);
     float3 result=L*direction.weight;if(!all(isfinite(L))||any(L<0)||!all(isfinite(result))||any(result<0)){out.flags|=SPECULAR_SAMPLE_ERROR;result=0;}
     for(uint i=0;i<3;++i)out.radiance[i]=result[i];return out;
