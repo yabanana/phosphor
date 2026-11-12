@@ -29,7 +29,9 @@ class Roles(unittest.TestCase):
 
     def test_ghost_definition_per_phase(self):
         self.assertEqual(self.cases["moving-light-custom"]["roi"]["rois"][0]["ghost_metric"], "error-change")
-        self.assertNotIn("ghost_metric", self.cases["clouds-reconstructed"]["roi"]["rois"][0])
+        for name in ("clouds-reconstructed", "clouds-flight-top-reconstructed", "fog-moving-light", "fog-disocclusion"):
+            for roi in self.cases[name]["roi"]["rois"]:
+                self.assertEqual(roi["ghost_metric"], "error-change", name)
 
     def test_f14_roles_follow_the_plan(self):
         self.assertEqual(self.cases["atmo-zenith"]["reference_role"], "numerical")

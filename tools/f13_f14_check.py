@@ -362,10 +362,10 @@ def make_cases(out,frames,sdk_policy,probe_dir=None):
         if case.get("rois"):
             case["roi"]["rois"]=[{"name":name,"normalized":list(region),"scale":1.0,"require_change":True,"thresholds":dict(THRESHOLDS)}
                                  for name,region in case["rois"]]
-        # Owner decision D4 (2026-11-11): F13 image cases gate the ghost on the
-        # clip-level change of the error; F14 keeps the F8 support ghost.
-        if case["phase"]=="F13":
-            for roi in case["roi"]["rois"]:roi["ghost_metric"]="error-change"
+        # Owner decisions D4 (2026-11-11, F13) and D6 (2026-11-12, F14): image
+        # and volume cases gate the ghost on the clip-level change of the error.
+        # The F8 support ghost reads a static bias times a monotone trend as lag.
+        for roi in case["roi"]["rois"]:roi["ghost_metric"]="error-change"
         case["reference_role"]=reference_role(case)
         if case.get("roi_scale"):
             for roi in case["roi"]["rois"]:roi["scale"]=case["roi_scale"]
