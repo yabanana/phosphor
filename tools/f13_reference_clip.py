@@ -152,6 +152,22 @@ def command_check(args):
     return 0 if passed else 1
 
 
+def render_config(args, regions, scene_sha256):
+    """Every input that changes a converged state image besides the scene state key."""
+    return {"model": reference.MODEL, "secondary_specular": args.secondary_specular,
+            "regularization_scale": args.regularization_scale, "spp": args.spp, "spp_per_pass": args.spp_per_pass,
+            "regions": regions or {}, "window_regions": bool(args.window_regions), "window_margin": args.window_margin,
+            "scene_sha256": scene_sha256}
+
+
+def reusable(report_path, config, resume):
+    """A saved state is reused only when it converged under exactly the requested configuration."""
+    if not (resume and report_path.is_file()):
+        return False
+    saved = json.loads(report_path.read_text())
+    return bool(saved.get("converged")) and saved.get("render_config") == config
+
+
 def command_render(args):
     """Converged reference per distinct state; writes frame-NNNNNN.pfm for every requested frame."""
     root, base = snapshot(args.base)
@@ -165,12 +181,13 @@ def command_render(args):
     groups = {}
     for frame in frames:
         groups.setdefault(key(state(args.scene, base, frame)), []).append(frame)
+    config = render_config(args, regions, reference.scene_digest(root))
     index = []
     block = 0.0  # render seconds since the last recharge break
     for number, (identity, members) in enumerate(groups.items()):
         folder = out / "states" / identity[:16]
         report_path = folder / "reference_report.json"
-        if not (args.resume and report_path.is_file() and json.loads(report_path.read_text()).get("converged")):
+        if not reusable(report_path, config, args.resume):
             if folder.exists():
                 shutil.rmtree(folder)
             data = state(args.scene, base, members[0])
@@ -183,6 +200,7 @@ def command_render(args):
             report = reference.render_frame(context, namespace, folder, None, regions)
             report["state"] = identity
             report["frames"] = members
+            report["render_config"] = config
             report_path.write_text(json.dumps(report, indent=2) + "\n")
             elapsed = time.monotonic() - started
             block += elapsed
@@ -203,7 +221,7 @@ def command_render(args):
             shutil.copyfile(folder / "reference.pfm", target)
     converged = all(row["converged"] for row in index)
     manifest = {"schema": 1, "scene": args.scene, "base_snapshot": str(pathlib.Path(args.base).resolve()),
-                "base_snapshot_sha256": reference.scene_digest(root), "frames": [frames[0], frames[-1]],
+                "base_snapshot_sha256": config["scene_sha256"], "frames": [frames[0], frames[-1]],
                 "states": index, "converged": converged, "model": reference.MODEL,
                 "secondary_specular": args.secondary_specular, "regularization_scale": args.regularization_scale,
                 "regions": regions or {},

@@ -74,5 +74,29 @@ class TextureFree(unittest.TestCase):
             reference.require_texture_free(data)
 
 
+class ResumeIdentity(unittest.TestCase):
+    def config(self, **changes):
+        import argparse
+        args = argparse.Namespace(secondary_specular="regularized", regularization_scale=8.0, spp=4096, spp_per_pass=256,
+                                  window_regions=True, window_margin=8)
+        for name, value in changes.items():
+            setattr(args, name, value)
+        return clip.render_config(args, {"floor": [0, 0, 1, 1]}, "abc")
+
+    def test_reuse_needs_the_same_render_configuration(self):
+        import json
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            report = pathlib.Path(folder) / "reference_report.json"
+            report.write_text(json.dumps({"converged": True, "render_config": self.config()}))
+            self.assertTrue(clip.reusable(report, self.config(), True))
+            self.assertFalse(clip.reusable(report, self.config(), False))
+            for change in ({"regularization_scale": 4.0}, {"secondary_specular": "unregularized"},
+                           {"window_margin": 16}, {"spp": 8192}):
+                self.assertFalse(clip.reusable(report, self.config(**change), True), change)
+            report.write_text(json.dumps({"converged": True}))  # older report without provenance
+            self.assertFalse(clip.reusable(report, self.config(), True))
+
+
 if __name__ == "__main__":
     unittest.main()
