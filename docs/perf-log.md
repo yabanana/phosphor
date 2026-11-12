@@ -1216,3 +1216,34 @@ Findings:
 
 A per-frame pass timeline and an investigation of the RT visibility cost
 are candidates, not activated work.
+
+## F13/F14 closure budget check, c152b99 vs 75c0b6e (2026-11-12, M5 Max)
+
+Same Sponza 1080p protocol as the D2 entry above: every feature, preset
+rays, `--gpu-timing-serial --no-vsync`, 128 warm-up and 256 measured frames.
+The binaries alternate base/new for 4 repetitions with 20 s gaps (sha256
+95777d0b… and 6a84dfb8…; `build/budget-final-20261112/`). The machine was
+not quiet: a virtual machine that is not part of this work used about two
+cores throughout (1-minute load 5.4–7.7), and the battery was charging on
+the 80 W adapter. Every run had 0 GPU allocations.
+
+| rep | c152b99 GPU p50 / p95 | 75c0b6e GPU p50 / p95 | frame p95 base / new |
+|---|---|---|---|
+| 1 | 15.30 / 16.54 | 15.30 / 16.51 | 17.60 / 17.46 |
+| 2 | 15.21 / 16.30 | 15.14 / 16.34 | 17.22 / 17.25 |
+| 3 | 15.57 / 16.67 | 20.91 / 23.37 | 17.60 / 24.40 |
+| 4 | 15.94 / 17.66 | 18.11 / 19.80 | 18.64 / 20.94 |
+
+In repetitions 3 and 4 every pass of the new binary scales together, by
+about 1.5× in repetition 3, including passes whose code did not change: the
+physical sky 0.67 → 1.09 ms and solar RT visibility 0.39 → 0.60 ms. The base
+also drifts up in repetition 4. This is a clock-state change, not a code
+cost, so those pairs are rejected. In the two undisturbed pairs the binaries
+match within 0.04 ms at the p95: the F13.1 emitter ownership, the overflow
+emission attachment, the F13.5 probe box and the DFG table add no
+measurable frame cost.
+
+Both binaries read about 0.3–0.5 ms higher than the quiet-machine D2
+measurement (16.01–16.06 ms). Under this load, GPU p95 is 16.30–16.54 ms in
+the accepted pairs, against the 16.67 ms gate. The absolute gate needs a
+repeat on a quiet machine with the battery not charging.
