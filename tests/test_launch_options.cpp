@@ -1331,3 +1331,10 @@ TEST_CASE("F13.3 native diagnostic flag needs the native denoiser in a benchmark
     o={};CHECK_FALSE(parse(with({"--lighting-denoise","custom","--metalfx-native-diagnostic"}),o,error));
     o={};REQUIRE(parse(with({"--lighting-denoise","metalfx"}),o,error));CHECK_FALSE(o.metalfxNativeDiagnostic);
 }
+
+TEST_CASE("F13.5 no-parallax negative needs an actual probe") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--bench","6","--reflection-scene","probe-box","--render-path","visibility","--frames","4","--reflections","probes","--reflection-capture-probe","--debug-probe-no-parallax"},o,error));
+    CHECK(o.debugProbeNoParallax);
+    o={};CHECK_FALSE(parse({"--bench","6","--reflection-scene","probe-box","--render-path","visibility","--frames","4","--reflections","probes","--debug-probe-no-parallax"},o,error));
+}

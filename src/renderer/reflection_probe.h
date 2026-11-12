@@ -1,5 +1,6 @@
 #pragma once
 #include "renderer/gpu_types.h"
+#include "renderer/mesh_bounds.h"
 #include <glm/glm.hpp>
 #include <optional>
 #include <span>
@@ -14,10 +15,16 @@ struct ReflectionProbeBounds {glm::vec3 minimum,maximum;};
 // Matrices MUST be resolved WORLD matrices for the same capture frame, never
 // SceneStore's identity placeholders. Empty selection means all valid visible
 // meshes. A caller with an intentionally empty static set should use nullopt.
+// The result is the union of the world AABBs of each mesh's local AABB (its
+// eight transformed corners): exact for axis-aligned walls, and the box the
+// probe projects onto (F13.5), so it must not inflate to culling spheres.
 [[nodiscard]] std::optional<ReflectionProbeBounds> reflectionProbeWorldBounds(
-    std::span<const GPUInstance>,std::span<const GPUMeshInfo>,std::span<const float> worldMatrices,
+    std::span<const GPUInstance>,std::span<const MeshLocalBounds>,std::span<const float> worldMatrices,
     std::span<const u32> selection={});
 [[nodiscard]] bool validReflectionProbe(const GPUReflectionProbe&);
+// F13.5: 1 inside the projection box (receivers on its faces included),
+// fading linearly to 0 at blendDistance outside it, where the declared
+// environment takes over. Shader mirror: reflectionProbeDirection.
 [[nodiscard]] float reflectionProbeWeight(const GPUReflectionProbe&,glm::vec3 point);
 [[nodiscard]] std::optional<glm::vec3> reflectionProbeParallax(const GPUReflectionProbe&,glm::vec3 point,glm::vec3 direction);
 [[nodiscard]] glm::vec3 reflectionCubeDirection(u32 face,glm::vec2 uv);

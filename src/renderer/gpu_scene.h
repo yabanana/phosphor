@@ -3,6 +3,7 @@
 #include "core/types.h"
 #include "renderer/meshlet_builder.h"
 #include "renderer/gpu_types.h"
+#include "renderer/mesh_bounds.h"
 
 #include <glm/glm.hpp>
 #include <vector>
@@ -73,6 +74,7 @@ public:
     [[nodiscard]] const std::vector<u8>&            meshletTriangles()  const { return meshletTriangles_; }
     [[nodiscard]] const std::vector<MeshletBounds>& meshletBounds()     const { return meshletBounds_; }
     [[nodiscard]] const std::vector<GPUMeshInfo>&   meshInfos()         const { return meshInfos_; }
+    [[nodiscard]] const std::vector<MeshLocalBounds>& meshLocalBounds() const { return meshBounds_; }
     [[nodiscard]] const std::vector<GPUInstance>&   instances()         const { return instances_; }
     [[nodiscard]] const std::vector<GPUMaterial>&   materials()         const { return materials_; }
     [[nodiscard]] const std::vector<GPULight>&      lights()            const { return lights_; }
@@ -84,6 +86,7 @@ public:
     [[nodiscard]] u32 getMeshCount() const { return static_cast<u32>(meshInfos_.size()); }
 
 private:
+    std::vector<MeshLocalBounds> meshBounds_;      // parallel to meshInfos_
     std::vector<GPUVertex>     vertices_;
     std::vector<u32>           indices_;          // mesh-local indices, offset by GPUMeshInfo
     std::vector<Meshlet>       meshlets_;

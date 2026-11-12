@@ -75,7 +75,12 @@ TEST_CASE("F13 AO oracle uses world radius and cosine visibility with no GI doub
     CHECK(composeSignalLighting(glm::vec3(2),{},glm::vec3(5),glm::vec3(7),glm::vec3(11),.5f,false)==glm::vec3(19.5f));
 }
 TEST_CASE("F13 static reflection probe parallax cube orientation and constant energy"){
-    const auto p=probe();REQUIRE(validReflectionProbe(p));CHECK(reflectionProbeWeight(p,{0,0,0})==1);CHECK(reflectionProbeWeight(p,{2,0,0})==0);
+    const auto p=probe();REQUIRE(validReflectionProbe(p));CHECK(reflectionProbeWeight(p,{0,0,0})==1);
+    // F13.5: the faces keep full weight; the fade (0.5 m) is outside the box.
+    CHECK(reflectionProbeWeight(p,{2,0,0})==1);CHECK(reflectionProbeWeight(p,{0,-1,0})==1);
+    CHECK(reflectionProbeWeight(p,{2.25f,0,0})==doctest::Approx(.5f));CHECK(reflectionProbeWeight(p,{2.5f,0,0})==0);
+    const auto fade=reflectionProbeParallax(p,{2.25f,0,0},{1,0,0});REQUIRE(fade);CHECK(fade->x==doctest::Approx(1)); // no backward projection
+    CHECK(reflectionProbeParallax(p,{0,-1,0},{0,1,0}));
     CHECK_FALSE(reflectionProbeParallax(p,{3,0,0},{0,0,1}));const auto direction=reflectionProbeParallax(p,{1,0,0},{0,0,1});REQUIRE(direction);
     CHECK(direction->x==doctest::Approx(1/std::sqrt(10.0)));CHECK(direction->z==doctest::Approx(3/std::sqrt(10.0)));
     for(u32 face=0;face<6;++face)for(const glm::vec2 uv:{glm::vec2(.2f,.3f),glm::vec2(.7f,.8f),glm::vec2(.5f)}){
@@ -106,10 +111,11 @@ TEST_CASE("F13 static probe hierarchy matches independently flattened world geom
     auto flat=instances;std::memcpy(flat[1].modelMatrix,glm::value_ptr(flatChild),64);
     std::vector<float> flatWorlds(32);for(u32 i=0;i<2;++i)std::memcpy(flatWorlds.data()+16*i,flat[i].modelMatrix,64);
     const std::array<GPUTransformNode,2> flatNodes{};std::vector<u32> flatSelected;reflectionProbeStaticSlots(flat,flatNodes,{},flatSelected);CHECK(flatSelected==selected);
-    std::array<GPUMeshInfo,1> meshes{};meshes[0].boundingSphere[3]=1;
+    std::array<MeshLocalBounds,1> meshes{};meshes[0]={glm::vec3(-1),glm::vec3(1)};
     const auto a=reflectionProbeWorldBounds(instances,meshes,worlds,selected),b=reflectionProbeWorldBounds(flat,meshes,flatWorlds,flatSelected);
     REQUIRE(a);REQUIRE(b);for(u32 k=0;k<3;++k){CHECK(a->minimum[k]==b->minimum[k]);CHECK(a->maximum[k]==b->maximum[k]);}
-    CHECK(a->minimum.x>98);CHECK(a->maximum.x>109); // Nothing belongs near identity/origin.
+    // Exact world AABB: parent cube at x 99..101, child scaled by -2 at 107: 105..109.
+    CHECK(a->minimum.x==doctest::Approx(99));CHECK(a->maximum.x==doctest::Approx(109)); // Nothing near identity/origin.
     std::vector<float> wrong(32);for(u32 i=0;i<2;++i)std::memcpy(wrong.data()+16*i,instances[i].modelMatrix,64);
     const auto placeholder=reflectionProbeWorldBounds(instances,meshes,wrong);REQUIRE(placeholder);CHECK(placeholder->minimum.x<0);
     // Static flag / visibility membership changes need no slot or topology move.
@@ -130,7 +136,7 @@ TEST_CASE("F13 animated ancestor excludes static children from raster and update
     const HierarchyView view{instances,nodes,motions,moving,offsets,children};std::vector<float> first,second;referenceWorlds(view,phases.data(),first);
     phases[1]=-1;referenceWorlds(view,phases.data(),second);
     CHECK(first[12]==13);CHECK(first[16+12]==15);CHECK(second[12]==7);CHECK(second[16+12]==5);
-    std::array<GPUMeshInfo,1> meshes{};meshes[0].boundingSphere[3]=.25f;
+    std::array<MeshLocalBounds,1> meshes{};meshes[0]={glm::vec3(-.25f),glm::vec3(.25f)};
     const auto a=reflectionProbeWorldBounds(instances,meshes,first),b=reflectionProbeWorldBounds(instances,meshes,second);
     REQUIRE(a);REQUIRE(b);CHECK(a->minimum.x>12);CHECK(b->maximum.x<8);
     // Removing MotionComponent restores both memberships without recreating nodes.

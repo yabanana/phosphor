@@ -67,7 +67,7 @@ struct ReflectionPasses::Impl {
     std::array<MTL::Texture*,6> faceViews{};std::array<MTL::Texture*,ProbeMips> mipViews{};
     MTL::Buffer *probeMetadata=nullptr,*probeFault=nullptr,*staticSlots=nullptr,*dummyBuffer=nullptr;
     MTL::PixelFormat probeFormat=MTL::PixelFormatRGBA16Float;rg::Format graphProbeFormat=rg::Format::RGBA16Float;
-    struct Draw {GPUMeshInfo mesh;u32 staticIndex;CullClass cull;};std::vector<Draw> draws;std::vector<u32> staticIDs;std::vector<GPUMeshInfo> geometry;std::vector<float> probeWorlds;
+    struct Draw {GPUMeshInfo mesh;u32 staticIndex;CullClass cull;};std::vector<Draw> draws;std::vector<u32> staticIDs;std::vector<GPUMeshInfo> geometry;std::vector<MeshLocalBounds> geometryBounds;std::vector<float> probeWorlds;
     struct Slot {
         MTL::Buffer *samples=nullptr,*metadata=nullptr,*errors=nullptr,*testSurfaces=nullptr;bool customUsed=false;u32 expected=0;
         bool skipLocalDenoise=false;
@@ -147,15 +147,17 @@ struct ReflectionPasses::Impl {
         referenceWorlds(store,frame.motionSinCos.data(),probeWorlds);
         std::optional<ReflectionProbeBounds> bounds;
         if(options.reflectionCaptureProbe&&!rtCapture){
-            if(!staticIDs.empty())bounds=reflectionProbeWorldBounds(store.instances(),geometry,probeWorlds,staticIDs);
-        }else bounds=reflectionProbeWorldBounds(store.instances(),geometry,probeWorlds);
+            if(!staticIDs.empty())bounds=reflectionProbeWorldBounds(store.instances(),geometryBounds,probeWorlds,staticIDs);
+        }else bounds=reflectionProbeWorldBounds(store.instances(),geometryBounds,probeWorlds);
         const glm::vec3 low=bounds?bounds->minimum:glm::vec3(-10),high=bounds?bounds->maximum:glm::vec3(10),center=(low+high)*.5f;
-        bool changed=!probePlaced;for(u32 i=0;i<3;++i){const float minimum=low[i]-.25f,maximum=high[i]+.25f;
+        // F13.5: the projection box is the geometry box itself; receivers on
+        // its faces keep full weight (the fade is outside, see the shader).
+        bool changed=!probePlaced;for(u32 i=0;i<3;++i){const float minimum=low[i],maximum=high[i];
             changed|=probe.boxMin[i]!=minimum||probe.boxMax[i]!=maximum||probe.capturePosition[i]!=center[i];
             probe.boxMin[i]=minimum;probe.boxMax[i]=maximum;probe.capturePosition[i]=center[i];}
         probePlaced=true;probePlacementDirty=false;return changed;
     }
-    void load(const GpuScene& geometrySource,const SceneStore& store){c.waitIdle();releaseProbe();geometry.assign(geometrySource.meshInfos().begin(),geometrySource.meshInfos().end());buildStatic(store);
+    void load(const GpuScene& geometrySource,const SceneStore& store){c.waitIdle();releaseProbe();geometryBounds.assign(geometrySource.meshLocalBounds().begin(),geometrySource.meshLocalBounds().end());geometry.assign(geometrySource.meshInfos().begin(),geometrySource.meshInfos().end());buildStatic(store);
         rawCube=cube(1,"Raw reflection probe cube array");filteredCube=cube(ProbeMips,"Filtered reflection probe mip array");
         rawArray=c.memory().newTextureView(rawCube,probeFormat,MTL::TextureType2DArray,NS::Range::Make(0,1),NS::Range::Make(0,6),MemoryCategory::RayTracing,"Raw probe array validation view");
         for(u32 face=0;face<6;++face)faceViews[face]=c.memory().newTextureView(rawCube,probeFormat,MTL::TextureType2D,NS::Range::Make(0,1),NS::Range::Make(face,1),MemoryCategory::RayTracing,"Probe capture face view");
@@ -220,6 +222,7 @@ struct ReflectionPasses::Impl {
         // F13.1: non-legacy DI integrates every geometry emitter's specular
         // lobe that RT reflections do not own (all of it outside the RT band).
         if(options.directLighting!=DirectLightingMode::Legacy)params.flags|=REFLECTION_EXCLUDE_DI_EMISSION;
+        if(options.debugProbeNoParallax)params.flags|=REFLECTION_DEBUG_NO_PARALLAX;
         paramsAddress=lighting::upload(c,params);probeAddress=lighting::upload(c,probe);
         for(u32 i=0;i<options.reflectionSamples;++i){auto sample=params;sample.seed=options.lightingSeed+i*0x9e3779b9u;sampleAddress[i]=lighting::upload(c,sample);}
         aoParams={};std::memcpy(aoParams.viewProjection,params.viewProjection,64);std::memcpy(aoParams.inverseViewProjection,params.inverseViewProjection,64);

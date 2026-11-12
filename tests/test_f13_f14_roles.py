@@ -39,6 +39,26 @@ class Roles(unittest.TestCase):
         self.assertIn("ssr", self.cases["rough-emitter-ssr-custom"]["flags"])
         self.assertEqual(self.cases["rough-emitter-raw"]["reference_role"], "control")
 
+    def test_probe_box_cases(self):
+        for name in ("probe-box-t0", "negative-f13-probe-parallax", "probe-box-rt-capture"):
+            case = self.cases[name]
+            self.assertEqual(case["reference_role"], "independent-clip", name)
+            self.assertEqual(len(case["roi"]["rois"]), 4)
+            self.assertTrue(all(r["scale"] == 1.8 and not r["require_change"] for r in case["roi"]["rois"]))
+        t0 = self.cases["probe-box-t0"]["flags"]
+        self.assertEqual(t0[t0.index("--rt") + 1], "off")
+        self.assertTrue(self.cases["negative-f13-probe-parallax"]["expected_clip_failure"])
+        self.assertIn("--debug-probe-no-parallax", self.cases["negative-f13-probe-parallax"]["flags"])
+
+    def test_clip_negative_must_fail(self):
+        case = {"expected_clip_failure": True}
+        passed = {"functional_passed": True, "independent_metrics": {"passed": True, "regions": {"a": {}}}}
+        failed = {"functional_passed": True, "independent_metrics": {"passed": False, "regions": {"a": {}}}}
+        pending = {"functional_passed": True, "independent_metrics": {}}
+        self.assertFalse(runner.gating_passed(passed, "independent-clip", case))
+        self.assertTrue(runner.gating_passed(failed, "independent-clip", case))
+        self.assertFalse(runner.gating_passed(pending, "independent-clip", case))
+
     def test_ghost_definition_per_phase(self):
         self.assertEqual(self.cases["moving-light-custom"]["roi"]["rois"][0]["ghost_metric"], "error-change")
         for name in ("clouds-reconstructed", "clouds-flight-top-reconstructed", "fog-moving-light", "fog-disocclusion"):

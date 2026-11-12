@@ -85,6 +85,25 @@ TEST_CASE("F13.1 rough-emitter fixture: rough conductors facing a visible emitte
     for(const auto& light:frame.lights)CHECK(light.intensity==0);
     f.teardown(ecs,scene);
 }
+TEST_CASE("F13.5 probe-box fixture: a closed emissive room around the camera and roughness strips") {
+    ECS ecs;GpuScene scene;test::NullTextureManager textures;ReflectionValidation f{"probe-box"};f.setup(ecs,scene,textures);
+    const auto camera=f.getDefaultCamera();const glm::vec3 lo(-4,0,-6),hi(4,4,10);
+    CHECK(glm::all(glm::greaterThan(camera.position,lo)));CHECK(glm::all(glm::lessThan(camera.position,hi)));
+    const glm::vec3 centre=(lo+hi)*.5f;u32 walls=0;std::vector<float> roughness;
+    for(auto id:f.entities())if(ecs.hasComponent<MeshInstanceComponent>(id)){
+        const auto& m=std::as_const(ecs).getComponent<MaterialComponent>(id);const auto& t=std::as_const(ecs).getComponent<TransformComponent>(id);
+        if(m.emissiveFactor!=glm::vec3(0)){++walls;CHECK(m.baseColorFactor==glm::vec4(0,0,0,1));
+            // Every emitting face points into the room, toward its centre.
+            CHECK(glm::dot(t.rotation*glm::vec3(0,1,0),centre-t.position)>0);}
+        else{CHECK(m.metallicFactor==1);CHECK(t.position.y==0);roughness.push_back(m.roughnessFactor);}
+    }
+    CHECK(walls==5);CHECK(roughness==std::vector<float>{0.04f,0.3f,0.6f,0.9f});
+    SceneStore store;store.sync(ecs,scene);
+    std::vector<float> worlds;for(const auto& instance:store.instances())worlds.insert(worlds.end(),instance.modelMatrix,instance.modelMatrix+16);
+    const auto bounds=reflectionProbeWorldBounds(store.instances(),scene.meshLocalBounds(),worlds);REQUIRE(bounds);
+    for(int i=0;i<3;++i){CHECK(bounds->minimum[i]==doctest::Approx(lo[i]).epsilon(1e-5));CHECK(bounds->maximum[i]==doctest::Approx(hi[i]).epsilon(1e-5));}
+    f.teardown(ecs,scene);
+}
 TEST_CASE("Opaque wide-emission fixture has an independent constant-radiance reference") {
     ECS ecs;GpuScene scene;test::NullTextureManager textures;ReflectionValidation f{"wide-emission"};f.setup(ecs,scene,textures);
     const auto e=f.emissivePanel();REQUIRE(e!=INVALID_ENTITY);
@@ -100,7 +119,7 @@ TEST_CASE("Opaque wide-emission fixture has an independent constant-radiance ref
     // FrameScene extraction precedes that runtime packing step.
     SceneStore store;store.sync(ecs,scene);
     std::vector<float> worlds;for(const auto& instance:store.instances())worlds.insert(worlds.end(),instance.modelMatrix,instance.modelMatrix+16);
-    const auto bounds=reflectionProbeWorldBounds(store.instances(),scene.meshInfos(),worlds);REQUIRE(bounds);
+    const auto bounds=reflectionProbeWorldBounds(store.instances(),scene.meshLocalBounds(),worlds);REQUIRE(bounds);
     const auto capture=(bounds->minimum+bounds->maximum)*.5f;
     CHECK(capture.z>0.05f);CHECK(capture.z<20); // The emissive front is visible from the probe.
     for(auto id:f.entities())if(id!=e&&ecs.hasComponent<MeshInstanceComponent>(id)) {

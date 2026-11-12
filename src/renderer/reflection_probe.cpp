@@ -1,4 +1,5 @@
 #include "renderer/reflection_probe.h"
+#include <glm/gtc/type_ptr.hpp>
 #include "renderer/cull_math.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
@@ -29,7 +30,7 @@ void reflectionProbeStaticSlots(std::span<const GPUInstance> instances,std::span
     }
 }
 std::optional<ReflectionProbeBounds> reflectionProbeWorldBounds(std::span<const GPUInstance> instances,
-    std::span<const GPUMeshInfo> meshes,std::span<const float> worlds,std::span<const u32> selection) {
+    std::span<const MeshLocalBounds> meshes,std::span<const float> worlds,std::span<const u32> selection) {
     if(worlds.size()!=instances.size()*16)throw std::invalid_argument("Probe world matrix extent mismatch");
     glm::vec3 low(std::numeric_limits<float>::infinity()),high(-std::numeric_limits<float>::infinity());bool any=false;
     const auto add=[&](u32 slot) {
@@ -37,10 +38,14 @@ std::optional<ReflectionProbeBounds> reflectionProbeWorldBounds(std::span<const 
         const auto& instance=instances[slot];if(!(instance.flags&INSTANCE_FLAG_VALID)||!(instance.flags&1u)||instance.meshIndex>=meshes.size())return;
         const auto* world=worlds.data()+size_t(slot)*16;
         if(!std::all_of(world,world+16,[](float x){return std::isfinite(x);}))throw std::invalid_argument("Nonfinite probe world matrix");
-        const auto sphere=cullWorldSphere(world,meshes[instance.meshIndex].boundingSphere);
-        const glm::vec3 center(sphere.x,sphere.y,sphere.z);
-        if(!finite(center)||!std::isfinite(sphere.r)||sphere.r<0)throw std::invalid_argument("Invalid probe world bounds");
-        low=glm::min(low,center-sphere.r);high=glm::max(high,center+sphere.r);any=true;
+        const auto& box=meshes[instance.meshIndex];
+        if(!finite(box.minimum)||!finite(box.maximum)||glm::any(glm::greaterThan(box.minimum,box.maximum)))throw std::invalid_argument("Invalid probe mesh bounds");
+        const glm::mat4 m=glm::make_mat4(world);
+        for(u32 corner=0;corner<8;++corner){
+            const glm::vec3 local(corner&1u?box.maximum.x:box.minimum.x,corner&2u?box.maximum.y:box.minimum.y,corner&4u?box.maximum.z:box.minimum.z);
+            const glm::vec3 p=glm::vec3(m*glm::vec4(local,1));if(!finite(p))throw std::invalid_argument("Invalid probe world bounds");
+            low=glm::min(low,p);high=glm::max(high,p);}
+        any=true;
     };
     if(selection.empty())for(u32 slot=0;slot<instances.size();++slot)add(slot);else for(u32 slot:selection)add(slot);
     return any?std::optional(ReflectionProbeBounds{low,high}):std::nullopt;
@@ -48,11 +53,13 @@ std::optional<ReflectionProbeBounds> reflectionProbeWorldBounds(std::span<const 
 bool validReflectionProbe(const GPUReflectionProbe& p){return p.enabled&&finite(v3(p.boxMin))&&finite(v3(p.boxMax))&&finite(v3(p.capturePosition))&&
     glm::all(glm::greaterThan(v3(p.boxMax),v3(p.boxMin)))&&glm::all(glm::greaterThanEqual(v3(p.capturePosition),v3(p.boxMin)))&&glm::all(glm::lessThanEqual(v3(p.capturePosition),v3(p.boxMax)))&&
     std::isfinite(p.blendDistance)&&p.blendDistance>0&&std::isfinite(p.mipCount)&&p.mipCount>=1&&p.mipCount<=16&&std::floor(p.mipCount)==p.mipCount;}
-float reflectionProbeWeight(const GPUReflectionProbe& p,glm::vec3 x){if(!validReflectionProbe(p)||!finite(x)||glm::any(glm::lessThan(x,v3(p.boxMin)))||glm::any(glm::greaterThan(x,v3(p.boxMax))))return 0;
-    const auto d=glm::min(x-v3(p.boxMin),v3(p.boxMax)-x);return std::clamp(std::min({d.x,d.y,d.z})/p.blendDistance,0.f,1.f);}
+float reflectionProbeWeight(const GPUReflectionProbe& p,glm::vec3 x){if(!validReflectionProbe(p)||!finite(x))return 0;
+    const auto out=glm::max(glm::max(v3(p.boxMin)-x,x-v3(p.boxMax)),glm::vec3(0));
+    return std::clamp(1.f-std::max({out.x,out.y,out.z})/p.blendDistance,0.f,1.f);}
 std::optional<glm::vec3> reflectionProbeParallax(const GPUReflectionProbe& p,glm::vec3 x,glm::vec3 d){
-    if(!validReflectionProbe(p)||!finite(x)||!finite(d)||glm::dot(d,d)<=0||glm::any(glm::lessThan(x,v3(p.boxMin)))||glm::any(glm::greaterThan(x,v3(p.boxMax))))return std::nullopt;
+    if(!validReflectionProbe(p)||!finite(x)||!finite(d)||glm::dot(d,d)<=0||!(reflectionProbeWeight(p,x)>0))return std::nullopt;
     d=glm::normalize(d);float exit=std::numeric_limits<float>::infinity();for(u32 i=0;i<3;++i)if(std::abs(d[i])>1e-8f)exit=std::min(exit,((d[i]>0?p.boxMax[i]:p.boxMin[i])-x[i])/d[i]);
+    exit=std::max(exit,0.f); // outside the box (fade band): no backward projection
     const auto corrected=x+d*exit-v3(p.capturePosition);return std::isfinite(exit)&&glm::dot(corrected,corrected)>1e-20f?std::optional(glm::normalize(corrected)):std::nullopt;
 }
 glm::vec3 reflectionCubeDirection(u32 face,glm::vec2 uv){const auto p=uv*2.f-1.f;switch(face){case 0:return glm::normalize(glm::vec3(1,-p.y,-p.x));case 1:return glm::normalize(glm::vec3(-1,-p.y,p.x));case 2:return glm::normalize(glm::vec3(p.x,1,p.y));case 3:return glm::normalize(glm::vec3(p.x,-1,-p.y));case 4:return glm::normalize(glm::vec3(p.x,-p.y,1));case 5:return glm::normalize(glm::vec3(-p.x,-p.y,-1));default:return {};}}

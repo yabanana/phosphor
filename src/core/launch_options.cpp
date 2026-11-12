@@ -589,6 +589,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if(!needCount(out.denoisedFixturePrewarmMs)||!out.denoisedFixturePrewarmMs||out.denoisedFixturePrewarmMs>120000){error="--denoised-fixture-prewarm-ms: expected 1..120000";return false;}
         } else if (arg == "--denoised-fixture-pre-exposed") {
             out.denoisedFixturePreExposed=true;
+        } else if (arg == "--debug-probe-no-parallax") {
+            out.debugProbeNoParallax=true;
         } else if (arg == "--metalfx-native-diagnostic") {
             out.metalfxNativeDiagnostic=true;
         } else if (arg == "--denoised-fixture-auto-exposure") {
@@ -1177,6 +1179,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if(out.metalfxNativeDiagnostic&&(out.lightingDenoise!=LightingDenoiseMode::MetalFX||!out.denoisedFixture.empty()||!out.benchmark())){
         error="--metalfx-native-diagnostic requires --lighting-denoise metalfx, a benchmark run and no SDK fixture";return false;}
     if((!out.reflectionProbePath.empty() || out.reflectionCaptureProbe) && out.reflections==ReflectionMode::Off){error="Probe controls require --reflections";return false;}
+    if(out.debugProbeNoParallax&&(out.reflectionProbePath.empty()&&!out.reflectionCaptureProbe)){error="--debug-probe-no-parallax requires a captured or cooked probe";return false;}
     if ((out.shadows == ShadowMode::RT || out.directLighting != DirectLightingMode::Legacy || out.gi != GiMode::Off) && !out.rtEnabled) {
         error = "RT sun, local visibility and GI require --rt on"; return false;
     }

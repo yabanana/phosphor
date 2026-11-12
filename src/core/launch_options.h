@@ -387,6 +387,7 @@ struct LaunchOptions {
     // F13.3 spike: run the native SDK on the product inputs in the controlled
     // diagnostic domain (measurement only, never production qualification).
     bool metalfxNativeDiagnostic=false;
+    bool debugProbeNoParallax=false; // F13.5 negative control: direction-only probe lookup
     std::string denoisedFixture,denoisedFixtureOutput;bool denoisedFixturePreExposed=false,denoisedFixtureAutoExposure=false,denoisedFixtureManualExposureControl=false;u32 denoisedFixturePrewarmMs=120000;
     ReflectionMode reflections=ReflectionMode::Off;
     AoMode ao=AoMode::Off;

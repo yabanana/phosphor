@@ -95,6 +95,10 @@ MeshHandle GpuScene::uploadMesh(
     info.boundingSphere[2] = center.z;
     info.boundingSphere[3] = std::sqrt(radiusSq);
     meshInfos_.push_back(info);
+    MeshLocalBounds box{};
+    if (!positions.empty()) box = {positions.front(), positions.front()};
+    for (const auto& p : positions) { box.minimum = glm::min(box.minimum, p); box.maximum = glm::max(box.maximum, p); }
+    meshBounds_.push_back(box);
 
     ++geometryVersion_;
 
@@ -129,6 +133,7 @@ void GpuScene::clear() {
     meshletTriangles_.clear();
     meshletBounds_.clear();
     meshInfos_.clear();
+    meshBounds_.clear();
     instances_.clear();
     materials_.clear();
     lights_.clear();

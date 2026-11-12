@@ -103,7 +103,12 @@ def gating_passed(result,role,case=None):
     """
     case=case or {}
     if not result.get("functional_passed",False):return False
-    if role=="independent-clip" and not result.get("independent_metrics",{}).get("passed",False):return False
+    if role=="independent-clip":
+        metrics=result.get("independent_metrics",{})
+        # A clip negative must be scored and must FAIL against the same clip.
+        if case.get("expected_clip_failure"):
+            if "regions" not in metrics or metrics.get("passed") is not False:return False
+        elif not metrics.get("passed",False):return False
     if role=="full-rate-pair":
         metrics=result.get("control_metrics",{})
         if case.get("expected_pair_failure"):
@@ -181,6 +186,24 @@ def make_cases(out,frames,sdk_policy,probe_dir=None):
     # emitter specular lobe, so the SSR fallback must not see the emission.
     add("rough-emitter-ssr-custom","F13","rough-emitter",[*base_rt,"--reflections","ssr","--ao","off","--lighting-denoise","custom"],
         expected={"reflections":"ssr","ao":"off","denoise_requested":"custom","denoise_effective":"custom"},**emitter_rois)
+    # F13.5 static probe in a closed emissive room (probe-box): the T0 base
+    # preset (no RT, raster capture, legacy lighting) against the independent
+    # clip, its direction-only negative, and the RT capture with ReSTIR-free
+    # brute DI, where DI owns the emitters and the probe must omit them (F13.1).
+    # ROIs per floor strip from the fixture geometry; scale 1.8 = F0*Le of the
+    # brightest wall, 0.9*2.0; static.
+    # ROIs checked against the exported world positions: every pixel on the
+    # floor, inside its strip with a 0.1 m margin.
+    probe_rois={"rois":[("strip-r0.04",(0.02,0.87,0.15,0.98)),("strip-r0.3",(0.35,0.70,0.47,0.95)),
+                        ("strip-r0.6",(0.53,0.70,0.65,0.95)),("strip-r0.9",(0.85,0.87,0.98,0.98))],
+                "roi_scale":1.8,"roi_require_change":False}
+    probe_t0=[*no_rt,"--reflections","probes","--ao","off","--lighting-denoise","custom","--reflection-capture-probe"]
+    probe_expected={"reflections":"probes","ao":"off","denoise_requested":"custom","denoise_effective":"custom"}
+    add("probe-box-t0","F13","probe-box",list(probe_t0),expected=dict(probe_expected),**probe_rois)
+    add("negative-f13-probe-parallax","F13","probe-box",[*probe_t0,"--debug-probe-no-parallax"],expected=dict(probe_expected),
+        expected_clip_failure=True,**probe_rois)
+    add("probe-box-rt-capture","F13","probe-box",[*base_rt,"--reflections","probes","--ao","off","--lighting-denoise","custom",
+        "--reflection-capture-probe"],expected=dict(probe_expected),**probe_rois)
     add("probe-parallax-cooked","F13","probe-parallax",[ *no_rt,"--reflections","probes","--ao","off","--lighting-denoise","custom",
          "--reflection-probe",str(probe_dir or out/"EXTERNAL-COOKED-PROBE-REQUIRED")],needs_probe=True,
         probe_input=str(probe_dir) if probe_dir else None,

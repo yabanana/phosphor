@@ -12,7 +12,7 @@
 
 namespace phosphor {
 namespace {
-constexpr std::array<std::string_view,11> names{"mirror","roughness","ao-cavity","probe-parallax","moving-light","disocclusion","wide-emission","ao-temporal-wall","specular-environment","fog-depths","rough-emitter"};
+constexpr std::array<std::string_view,12> names{"mirror","roughness","ao-cavity","probe-parallax","moving-light","disocclusion","wide-emission","ao-temporal-wall","specular-environment","fog-depths","rough-emitter","probe-box"};
 constexpr float pi=3.14159265358979323846f;
 const glm::quat identity(1,0,0,0);
 glm::quat sunRotation(glm::vec3 towardSun) {
@@ -98,6 +98,27 @@ void ReflectionValidation::setup(ECS& ecs,GpuScene& scene,TextureManager& textur
         ecs.addComponent(sun_,std::move(sunPose));
         LightComponent sunLight;sunLight.type=LightType::Directional;sunLight.intensity=12;sunLight.color={1,1,1};
         ecs.addComponent(sun_,std::move(sunLight));
+        time_=0;lightStep_=0;cameraSegment_=~0u;return;
+    }
+    if(scenario_=="probe-box") {
+        // F13.5 static probe: a closed 8 x 4 x 16 m room of black-body walls,
+        // one colour per face, so every wall's radiance is its emission under
+        // any lighting model and the geometry-fitted probe box is the room.
+        // Four metal floor strips sweep roughness; their reflections only see
+        // the walls and the ceiling (a planar floor never sees itself).
+        constexpr std::array<float,4> rough{0.04f,0.3f,0.6f,0.9f};
+        for(u32 k=0;k<rough.size();++k)
+            roughness_.push_back(mesh(ecs,plane_,{-3.f+2.f*float(k),0,2},{2,1,16},identity,{0.9f,0.9f,0.9f},1,rough[k]));
+        const glm::vec3 black(0);
+        mesh(ecs,plane_,{-4,2,2},{4,1,16},glm::angleAxis(-pi*.5f,glm::vec3(0,0,1)),black,0,1,{2.0f,0.25f,0.25f}); // left, faces +X
+        mesh(ecs,plane_,{4,2,2},{4,1,16},glm::angleAxis(pi*.5f,glm::vec3(0,0,1)),black,0,1,{0.25f,2.0f,0.25f});  // right, faces -X
+        mesh(ecs,plane_,{0,2,-6},{8,1,4},glm::angleAxis(pi*.5f,glm::vec3(1,0,0)),black,0,1,{0.25f,0.25f,2.0f});  // back, faces +Z
+        mesh(ecs,plane_,{0,2,10},{8,1,4},glm::angleAxis(-pi*.5f,glm::vec3(1,0,0)),black,0,1,{1.5f,1.5f,0.2f});  // front, faces -Z
+        mesh(ecs,plane_,{0,4,2},{8,1,16},glm::angleAxis(pi,glm::vec3(0,0,1)),black,0,1,{1,1,1});                  // ceiling, faces -Y
+        sun_=ecs.createEntity();entities_.push_back(sun_);
+        TransformComponent sunPose;sunPose.rotation=sunRotation({-0.35f,0.85f,0.4f});sunPose.updateMatrix();
+        ecs.addComponent(sun_,std::move(sunPose));
+        LightComponent light;light.type=LightType::Directional;light.intensity=0;ecs.addComponent(sun_,std::move(light));
         time_=0;lightStep_=0;cameraSegment_=~0u;return;
     }
     if(scenario_=="rough-emitter") {

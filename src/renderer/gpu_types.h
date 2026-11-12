@@ -770,6 +770,8 @@ PHOSPHOR_GPU_CONSTANT u32 REFLECTION_SINGLE_SAMPLE = 64u; // one sample: the ker
 // geometry emitter on the fallback paths, so the radiance cache and probe
 // captures leave the emission out (RT rays keep it: their share is 1 - DI's).
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_EXCLUDE_DI_EMISSION = 128u;
+// F13.5 negative control: probe lookups ignore the box projection.
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_DEBUG_NO_PARALLAX = 256u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_NONE = 0u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_RT = 1u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_SSR = 2u;

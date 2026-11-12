@@ -33,17 +33,21 @@ inline ReflectionDirection reflectionDirection(GPUDISurface s,float2 u){
 inline float reflectionRTWeight(float roughness,constant GPUReflectionParams& p){return (p.flags&REFLECTION_ENABLE_RT)?1-smoothstep(p.rtRoughnessLow,p.rtRoughnessHigh,roughness):0;}
 
 inline bool reflectionProbeDirection(GPUReflectionProbe p,float3 point,float3 direction,thread float3& corrected,thread float& weight){
-    const float3 lo=diVec(p.boxMin),hi=diVec(p.boxMax);if(!p.enabled||p.blendDistance<=0||any(point<lo)||any(point>hi))return false;
+    // F13.5 (CPU mirror reflectionProbeWeight/Parallax): full weight inside the
+    // geometry-fitted projection box, its faces included, fading to the
+    // environment over blendDistance outside it.
+    const float3 lo=diVec(p.boxMin),hi=diVec(p.boxMax);if(!p.enabled||p.blendDistance<=0)return false;
+    const float3 outside=max(max(lo-point,point-hi),0.0f);weight=saturate(1-max(max(outside.x,outside.y),outside.z)/p.blendDistance);
+    if(!(weight>0))return false;
     float exit=INFINITY;for(uint i=0;i<3;++i)if(abs(direction[i])>1e-8f)exit=min(exit,((direction[i]>0?hi[i]:lo[i])-point[i])/direction[i]);
-    corrected=point+direction*exit-diVec(p.capturePosition);float3 dist=min(point-lo,hi-point);
-    weight=saturate(min(min(dist.x,dist.y),dist.z)/p.blendDistance);
-    if(!isfinite(exit)||!all(isfinite(corrected))||dot(corrected,corrected)<1e-20f)return false;corrected=normalize(corrected);return weight>0;
+    exit=max(exit,0.0f);corrected=point+direction*exit-diVec(p.capturePosition);
+    if(!isfinite(exit)||!all(isfinite(corrected))||dot(corrected,corrected)<1e-20f)return false;corrected=normalize(corrected);return true;
 }
 inline float3 reflectionProbeRadiance(float3 point,float3 direction,float roughness,bool prefiltered,
     constant GPUReflectionParams& p,const device GPUReflectionProbe* probes,texturecube_array<float> atlas,thread uint& path){
     float3 sum=0;float total=0;path=REFLECTION_PATH_ENVIRONMENT;
     if(p.flags&REFLECTION_ENABLE_PROBES)for(uint i=0;i<p.probeCount;++i){const GPUReflectionProbe probe=probes[i];float3 corrected;float weight;
-        if(reflectionProbeDirection(probe,point,direction,corrected,weight)){const float lod=prefiltered?roughness*max(probe.mipCount-1,0.0f):0;
+        if(reflectionProbeDirection(probe,point,direction,corrected,weight)){if(p.flags&REFLECTION_DEBUG_NO_PARALLAX)corrected=direction;const float lod=prefiltered?roughness*max(probe.mipCount-1,0.0f):0;
             float3 L=atlas.sample(kReflectionProbeSampler,corrected,probe.cubeIndex,level(lod)).rgb;if(all(isfinite(L))&&all(L>=0)){sum+=L*weight;total+=weight;}}
     }
     if(total>0){path=REFLECTION_PATH_PROBE;float coverage=saturate(total);return (sum/total)*coverage+reflectionConstantVec(p.environment)*(1-coverage);}
