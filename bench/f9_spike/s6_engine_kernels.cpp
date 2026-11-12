@@ -198,8 +198,9 @@ void engineKernels(::soc::Context& ctx, ::soc::Report& rep) {
         wrongDescriptors += desc[i].mask != (valid ? (i == 5 ? RT_MASK_SHADOW : RT_MASK_ALL) : 0u);
         wrongDescriptors += desc[i].intersectionFunctionTableOffset != 0u;
         if (!valid) {
-            // Dead slots shrink to 1e-4 scale about the origin (F14.2), never mesh 0 at its local bounds.
-            for (u32 f = 0; f < 12; ++f) wrongDescriptors += desc[i].transform[f] != ((f == 0 || f == 4 || f == 8) ? 1e-4f : 0.0f);
+            // Dead slots: 1e-4 scale, parked 100 m below the origin (F14.2), never inside the scene.
+            for (u32 f = 0; f < 12; ++f)
+                wrongDescriptors += desc[i].transform[f] != ((f == 0 || f == 4 || f == 8) ? 1e-4f : f == 10 ? -100.0f : 0.0f);
         } else {
             const u32 expectedOptions = i == 1 ? 8u : 4u;
             wrongDescriptors += desc[i].options != expectedOptions;
