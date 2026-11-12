@@ -1294,3 +1294,70 @@ Verdict: in the three uncontended pairs 75c0b6e reads 15.98–16.03 ms GPU p95,
 consistent per-pass difference is `F13 reflection sample 0`, +0.03 ms at the
 p50 (2.62 → 2.65 ms), from the changes after c152b99 (not isolated further). Frame p95 (serial
 timing) is 16.71–16.79 ms, 0.04–0.12 ms over, as for c152b99 in the D2 entry.
+
+## F14.2 fog source bimodality: dead TLAS slots (2026-11-13, M5 Max)
+
+Follow-up to the fog cost entry above, which left the bimodal froxel source
+unexplained. `--report-frames FILE` (407d9a9) writes the per-frame pass
+timeline. Runs used Sponza 1080p with every feature, `--gpu-timing-serial
+--no-vsync`, and 64 + 128 frames unless noted. Evidence is in
+`build/f14-2-fog-*` and `build/budget-deadslot-*`.
+
+**When.** The source costs about 0.12 ms in frames 64–118 and 1.57 ms from
+frame 119. This holds with the clock frozen at hours 0, 3, 6, 8, 12, 17, 18,
+19 and 21, and with it running. Frame 119 starts phase 1 of the temporal
+script's camera, so in the budget window (128–384) about 43% of frames are
+expensive. At hours 6 and 18 the expensive frames reach 2.1–2.3 ms. The full
+moon sits where the noon sun is, so midnight behaves like noon.
+
+**What.** Diagnostic builds, each reverted:
+
+| change | phase 0 | phase 1 |
+|---|---|---|
+| no visibility rays | 0.086 ms | 0.086 ms |
+| ray length 1000 / 100 / 20 m | 0.117 ms | 1.570 / 1.573 / 1.564 ms |
+| geometry forced opaque | 0.098 ms | 1.543 ms |
+| TLAS rebuilt every frame | 0.117 ms | 1.570 ms |
+| rays only for slices z ≥ 28 in the upper half | 0.085 ms | 1.537 ms |
+| dead TLAS slots shrunk | 0.115 ms | 0.113 ms |
+
+The cost belongs to the far sky froxels: beyond about 171 m and above the
+horizon.
+
+**Why.** 6489 of Sponza's 6592 TLAS slots are dead. `rt_write_instances` wrote
+each as a masked instance of mesh 0's BLAS with an identity transform. That
+BLAS is in glTF-local units with bounds (450–541, 85–211, 152–245), so 6489
+coincident boxes sat 450–540 m from the camera. That is where phase 1's far
+sky froxels send their sun and moon rays, and every such ray culled the
+masked instances one by one.
+
+**Fix (4505ee7).** Dead slots are scaled by 1e-4 and parked 100 m below the
+origin. The rejected placements:
+
+- **Zero transform:** F9 dynamic-churn fails 58/60, because an instance built
+  degenerate is not revived by a refit.
+- **Shrunk at the origin:** that point is on Sponza's floor, so RTAO and
+  reflection rays culled the cluster. RTAO +1.43 ms p50, frame GPU p50
+  +0.56 ms.
+- **10 km below:** the larger TLAS root coarsens its quantized child boxes.
+  Reflections +0.12 ms p50, frame 0.07 ms worse than at 100 m.
+
+Quiet-machine A/B against the identity-slot build, four interleaved pairs,
+128 + 256 frames, 0 GPU allocations:
+
+| build | GPU p50 | GPU p95 | GPU p99 | frame p95 | fog source p95 | RTAO p50 |
+|---|---:|---:|---:|---:|---:|---:|
+| identity dead slots | 15.33–15.37 | 16.46–16.58 | 17.33–17.57 | 17.24–17.39 | 1.57–1.64 | 1.20 |
+| parked dead slots | 14.44–14.47 | 15.37–15.48 | 17.47–17.59 | 16.15–16.21 | 0.12 | 1.05 |
+
+Both builds run about 0.45 ms slower in this window than in the 18:50 quiet
+window, so only same-window comparisons are reported.
+
+- GPU p95 improves by about 1.1 ms, and frame p95 under serial timing is now
+  below 16.67 ms (it was 0.04–0.12 ms over).
+- GPU p99 is unchanged.
+- Reflections cost about 0.04 ms more at the p50, the price of the larger root.
+
+Images are bit-identical to the identity-slot build on Sponza, mirror,
+rough-emitter, probe RT capture, RTAO, fog moving light and day/night. The F9
+matrix passes 60/60.

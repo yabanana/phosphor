@@ -586,7 +586,7 @@ a soglia assoluta (D1), oracolo F9 (D3), F13.3 ridefinito (D7). Budget D2
 rispettato a macchina quieta: p95 GPU 15,98–16,03 ms nelle tre coppie senza
 contesa, alternate con c152b99; una run a 16,86 ms ha la firma di contesa
 esterna (passata del cielo a lavoro costante da 0,676 a 0,770 ms), riprodotta
-su entrambi i binari. Il frame p95 con timing seriale resta 0,04–0,12 ms sopra. Restano solo le verifiche che
+su entrambi i binari. Dopo la correzione degli slot morti della TLAS (2026-11-13) il p95 GPU è 15,37–15,48 ms e anche il frame p95 con timing seriale scende a 16,15–16,21 ms. Restano solo le verifiche che
 richiedono altro hardware: soglie degli altri tier, certificazione T0 fisica. [Chiusura per ID](implementation/F13-F14-CLOSURE-2026-11-12.md).
 
 ## OPT-2 — Shader, pipeline e occupancy [OPT]
@@ -635,9 +635,11 @@ senza imporre il 90% quando aumenta la contesa [R91].
 Accettazione di sviluppo locale M5 per F14.1–F14.4 (2026-11-12): oracoli
 atmosferici, nebbia froxel secondo il piano (densità costante analitica, slicing,
 luce in moto, disocclusione, costo per volume) e coppie a piena frequenza delle
-nuvole 15/15 con D6. L'iniezione DDGI nella nebbia resta l'approssimazione
-documentata a sei orientamenti, non verificata a parte; la bimodalità per frame
-della sorgente RT non è spiegata. F14.4 (2026-11-12): luna e stelle passano
+nuvole 15/15 con D6. L'iniezione DDGI nella nebbia usa la media e il termine
+di primo ordine Henyey-Greenstein delle sei irradianze, esatti fino al primo
+ordine e verificati contro integrali esatti (da6e495). La bimodalità della
+sorgente RT era causata dagli slot morti della TLAS, impilati sulla BLAS della
+mesh 0: corretta (4505ee7), sorgente 0,12 ms in ogni fase e frame più veloce di circa 0,9 ms. F14.4 (2026-11-12): luna e stelle passano
 l'oracolo GPU e la transizione si ripete bit per bit sugli shader di prodotto
 (validazione API, senza archivio, GPU rallentata). La divergenza con
 `MTL_SHADER_VALIDATION` nasce dalla strumentazione degli accessi in memoria di
