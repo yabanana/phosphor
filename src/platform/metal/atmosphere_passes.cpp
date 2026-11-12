@@ -94,6 +94,16 @@ struct AtmospherePasses::Impl {
         bool operator==(const VolumeSignal&)const=default;
     };
     VolumeSignal previousSignal{~u64(0),0,0,0,0,0,0,0,0,false};u64 volumeEpoch=1;
+    // Cloud history domain: discontinuities only. Continuous sun/moon motion,
+    // wind time and scene instance motion are handled by the temporal pass
+    // (wind advection, opaque-depth and position rejection, neighbourhood
+    // clamp); keying them would reset the history every frame of a running
+    // clock and leave the advected reconstruction unused.
+    struct CloudSignal {
+        u64 scene=0,clock=0;u32 physics=0,pipeline=0;
+        bool operator==(const CloudSignal&)const=default;
+    };
+    CloudSignal previousCloudSignal{~u64(0),0,0,0};u64 cloudEpoch=1;
     GiEnvironment environmentValue;std::vector<u64> environmentKey;u64 environmentEpoch=0;
     rg::TextureRef transRef{},multiRef{},skyRef{},sourceRef{},depthRef{},atmosphereOutput{},fogOutput{},cloudRaw{},cloudGuide{},cloudFiltered{},cloudOutput{},outputRef{};
     rg::BufferRef counterRef{},fogFreshRef{},fogFilteredRef{},fogIntegratedRef{},fogHistoryRef{},cloudFreshRef{},cloudFilteredRef{},cloudHistoryRef{},aliasRef{},dummyStateRef{},dummyLightRef{},dummyEmitterRef{};
@@ -260,7 +270,9 @@ struct AtmospherePasses::Impl {
         if(options.clouds){
             const u32 divisor=options.cloudFullRate?1u:options.forceApple9?4u:2u;cloudWidth=(f.width+divisor-1)/divisor;cloudHeight=(f.height+divisor-1)/divisor;
             const u64 pixels=u64((f.backingWidth+divisor-1)/divisor)*((f.backingHeight+divisor-1)/divisor);reserveCloud(std::max(pixels,u64(cloudWidth)*cloudHeight));
-            auto decision=cloudHistory.begin(f.view,{cloudWidth,cloudHeight,f.width,f.height},volumeEpoch,reset,reset||options.cloudFullRate);
+            const CloudSignal cloudSignal{f.scene,celestial.epoch,physicalUpdate.parameterRevision,pipelineGeneration};
+            if(previousCloudSignal!=cloudSignal){previousCloudSignal=cloudSignal;++cloudEpoch;}
+            auto decision=cloudHistory.begin(f.view,{cloudWidth,cloudHeight,f.width,f.height},cloudEpoch,reset,reset||options.cloudFullRate);
             hadCloudHistory=hadCloudHistory&&!decision.reset&&!options.cloudFullRate;
             cloudParams={};std::memcpy(cloudParams.inverseViewProjection,glm::value_ptr(inverse),64);std::memcpy(cloudParams.previousViewProjection,cloudHistory.get(f.view).previousViewProjection.data(),64);
             copy3(cloudParams.cameraPosition,glm::dvec3(glm::make_vec3(f.constants.cameraPosition)));copy3(cloudParams.wind,clouds.wind);
