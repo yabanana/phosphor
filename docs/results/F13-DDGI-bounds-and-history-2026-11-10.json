@@ -1,0 +1,586 @@
+{
+  "clock_controls": {
+    "count": 4,
+    "evidence": {
+      "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-tight-grid/clock-and-history-v2/summary.json",
+      "sha256": "5bc51f46ef9b695ad1a0ce8b545cd08a8f117ff73d069d58d65326862d739422"
+    },
+    "numeric_passed": true,
+    "passed": true
+  },
+  "ctest": {
+    "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-tight-grid/verified-ctest.log",
+    "sha256": "2e74f8448af2b59e2b3d13af750271f4d049e9e395b5a3794ec99af210f7217d"
+  },
+  "environment_control": {
+    "max": 125.7616,
+    "mean": 63.4852,
+    "min": 46.421,
+    "p50": 60.5758,
+    "p95": 86.9328,
+    "p99": 112.4607
+  },
+  "exact_visibility_control": {
+    "before": {
+      "mean": [
+        0.004283546004444361,
+        0.003181256353855133,
+        0.0017929552122950554
+      ],
+      "relative_rmse": 28.13618630838763,
+      "rms": 0.004943820647895336,
+      "zeros": 0
+    },
+    "continuous": {
+      "mean": [
+        0.0003009251959156245,
+        0.0002622132597025484,
+        0.00016679015243425965
+      ],
+      "relative_rmse": 1.250891424991249,
+      "rms": 0.00034419307485222816,
+      "zeros": 0
+    },
+    "visibility": {
+      "mean": [
+        0.00021744547120761126,
+        0.0001988596486626193,
+        0.0001310804218519479
+      ],
+      "relative_rmse": 0.9832601613637006,
+      "rms": 0.0003135433653369546,
+      "zeros": 492
+    }
+  },
+  "functional": {
+    "count": 13,
+    "evidence": {
+      "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-tight-grid/functional/summary.json",
+      "sha256": "dfd79470d5173f02f147bf1edfab6523e5504c8dc961a7aed3c532b7de4479a1"
+    },
+    "passed": true
+  },
+  "gpu_captures": {
+    "118": {
+      "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-tight-grid/final-v2/frame-000118/renderer.log.status.json",
+      "sha256": "bddb840c08189cac3e9be79ae05994a9962cfe749d4f82223c0a8956656e2dc3"
+    },
+    "119": {
+      "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-tight-grid/final-v2/frame-000119/renderer.log.status.json",
+      "sha256": "77b11b9759d51f33b0507830f4a5c7c5da5ebe0e3a34cfaa7e4ceea89dc62920"
+    },
+    "120": {
+      "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-tight-grid/final-v2/frame-000120/renderer.log.status.json",
+      "sha256": "c960c7c97bf6b4fe03950bef4f10d3c387a58ba2102772687d23cf3cf99bcbb6"
+    },
+    "239": {
+      "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-tight-grid/final-v2/frame-000239/renderer.log.status.json",
+      "sha256": "01eca3117dc767bcc6f233679cbe07d60985080de7ca90402a41dadf6e8eb803"
+    },
+    "240": {
+      "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-tight-grid/final-v2/frame-000240/renderer.log.status.json",
+      "sha256": "7d247caf1d7fd72bf645755ab336cfb0df492303b3b3059a67948c709312e969"
+    }
+  },
+  "metal3_sdk": [
+    {
+      "case": "constant",
+      "exit": 0,
+      "summary": {
+        "case": "constant",
+        "encoded_frames": 96,
+        "max_steady_error": 0.00390625,
+        "passed": true,
+        "phase_accepted": false,
+        "steady_frames": 80
+      },
+      "validation_error": false
+    },
+    {
+      "case": "wide",
+      "exit": 1,
+      "summary": {
+        "case": "wide",
+        "encoded_frames": 96,
+        "max_steady_error": 0.0517578125,
+        "passed": false,
+        "phase_accepted": false,
+        "steady_frames": 80
+      },
+      "validation_error": false
+    }
+  ],
+  "metal3_source": {
+    "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-sdk-hdr-metal3/sdk_hdr_metal3.mm",
+    "sha256": "ca97dad192beea4d325d52258f558d633db22c6b575d7380aea32c6fa997cb9f"
+  },
+  "performance": {
+    "replicas": [
+      {
+        "baseline_drift": 1.383499007348526e-05,
+        "candidate_budget_passed": false,
+        "p50_reduction": -0.08899814612415446,
+        "valid": true
+      },
+      {
+        "baseline_drift": 0.013437450597608128,
+        "candidate_budget_passed": false,
+        "p50_reduction": -0.09071919102650039,
+        "valid": true
+      },
+      {
+        "baseline_drift": 0.0070717952626072455,
+        "candidate_budget_passed": false,
+        "p50_reduction": -0.11449753238448723,
+        "valid": true
+      }
+    ]
+  },
+  "performance_runs": {
+    "1-A": {
+      "allocations": 0,
+      "frame": {
+        "max": 123.858,
+        "mean": 63.1777,
+        "min": 50.5167,
+        "p50": 61.5064,
+        "p95": 74.2716,
+        "p99": 95.8375
+      },
+      "gpu": {
+        "max": 119.9076,
+        "mean": 59.8599,
+        "min": 49.334,
+        "p50": 57.8244,
+        "p95": 72.6152,
+        "p99": 94.2337
+      },
+      "pipelines": {
+        "archiveHits": 135,
+        "archiveMissRate": 0.0,
+        "archiveMisses": 0,
+        "archiveUnavailable": 0,
+        "compileMs": 28.16,
+        "compileMsMax": 6.619,
+        "compilerCalls": 12,
+        "failures": 0,
+        "fallbackDraws": 0,
+        "fallbacksServed": 0,
+        "reloadFailures": 0,
+        "reloads": 0,
+        "renderThreadCompileMs": 0.0,
+        "renderThreadCompiles": 0,
+        "requests": 147,
+        "swaps": 147
+      },
+      "temporal": {
+        "F13 denoise 1 temporal": 2.035,
+        "F13 denoise 2 temporal": 1.977,
+        "F13 denoise 3 temporal": 1.6538
+      }
+    },
+    "1-A2": {
+      "allocations": 0,
+      "frame": {
+        "max": 73.0314,
+        "mean": 61.2715,
+        "min": 52.4298,
+        "p50": 61.0317,
+        "p95": 66.35,
+        "p99": 70.0583
+      },
+      "gpu": {
+        "max": 69.5165,
+        "mean": 58.0831,
+        "min": 50.7052,
+        "p50": 57.8252,
+        "p95": 62.3615,
+        "p99": 66.8723
+      },
+      "pipelines": {
+        "archiveHits": 135,
+        "archiveMissRate": 0.0,
+        "archiveMisses": 0,
+        "archiveUnavailable": 0,
+        "compileMs": 32.106,
+        "compileMsMax": 7.819,
+        "compilerCalls": 12,
+        "failures": 0,
+        "fallbackDraws": 0,
+        "fallbacksServed": 0,
+        "reloadFailures": 0,
+        "reloads": 0,
+        "renderThreadCompileMs": 0.0,
+        "renderThreadCompiles": 0,
+        "requests": 147,
+        "swaps": 147
+      },
+      "temporal": {
+        "F13 denoise 1 temporal": 2.0021,
+        "F13 denoise 2 temporal": 1.9104,
+        "F13 denoise 3 temporal": 1.5754
+      }
+    },
+    "1-B": {
+      "allocations": 0,
+      "frame": {
+        "max": 86.1445,
+        "mean": 66.7421,
+        "min": 54.1643,
+        "p50": 66.382,
+        "p95": 73.2064,
+        "p99": 83.7655
+      },
+      "gpu": {
+        "max": 84.3919,
+        "mean": 63.7791,
+        "min": 52.3757,
+        "p50": 62.9711,
+        "p95": 70.7258,
+        "p99": 79.9952
+      },
+      "pipelines": {
+        "archiveHits": 134,
+        "archiveMissRate": 0.0,
+        "archiveMisses": 0,
+        "archiveUnavailable": 0,
+        "compileMs": 19.275,
+        "compileMsMax": 4.637,
+        "compilerCalls": 13,
+        "failures": 0,
+        "fallbackDraws": 0,
+        "fallbacksServed": 0,
+        "reloadFailures": 0,
+        "reloads": 0,
+        "renderThreadCompileMs": 0.0,
+        "renderThreadCompiles": 0,
+        "requests": 147,
+        "swaps": 147
+      },
+      "temporal": {
+        "F13 denoise 1 temporal": 1.9332,
+        "F13 denoise 2 temporal": 1.7634,
+        "F13 denoise 3 temporal": 1.5379
+      }
+    },
+    "2-A": {
+      "allocations": 0,
+      "frame": {
+        "max": 82.0083,
+        "mean": 56.8143,
+        "min": 49.0572,
+        "p50": 55.9552,
+        "p95": 62.8608,
+        "p99": 74.7862
+      },
+      "gpu": {
+        "max": 80.3426,
+        "mean": 55.2739,
+        "min": 47.8244,
+        "p50": 54.4002,
+        "p95": 61.3441,
+        "p99": 73.3907
+      },
+      "pipelines": {
+        "archiveHits": 135,
+        "archiveMissRate": 0.0,
+        "archiveMisses": 0,
+        "archiveUnavailable": 0,
+        "compileMs": 27.693,
+        "compileMsMax": 6.644,
+        "compilerCalls": 12,
+        "failures": 0,
+        "fallbackDraws": 0,
+        "fallbacksServed": 0,
+        "reloadFailures": 0,
+        "reloads": 0,
+        "renderThreadCompileMs": 0.0,
+        "renderThreadCompiles": 0,
+        "requests": 147,
+        "swaps": 147
+      },
+      "temporal": {
+        "F13 denoise 1 temporal": 1.9502,
+        "F13 denoise 2 temporal": 1.7693,
+        "F13 denoise 3 temporal": 1.4847
+      }
+    },
+    "2-A2": {
+      "allocations": 0,
+      "frame": {
+        "max": 74.2612,
+        "mean": 56.9929,
+        "min": 50.4869,
+        "p50": 56.5895,
+        "p95": 62.6801,
+        "p99": 68.5098
+      },
+      "gpu": {
+        "max": 72.76,
+        "mean": 55.5141,
+        "min": 49.1538,
+        "p50": 55.1312,
+        "p95": 61.288,
+        "p99": 67.0268
+      },
+      "pipelines": {
+        "archiveHits": 135,
+        "archiveMissRate": 0.0,
+        "archiveMisses": 0,
+        "archiveUnavailable": 0,
+        "compileMs": 27.69,
+        "compileMsMax": 6.595,
+        "compilerCalls": 12,
+        "failures": 0,
+        "fallbackDraws": 0,
+        "fallbacksServed": 0,
+        "reloadFailures": 0,
+        "reloads": 0,
+        "renderThreadCompileMs": 0.0,
+        "renderThreadCompiles": 0,
+        "requests": 147,
+        "swaps": 147
+      },
+      "temporal": {
+        "F13 denoise 1 temporal": 1.9322,
+        "F13 denoise 2 temporal": 1.7738,
+        "F13 denoise 3 temporal": 1.4788
+      }
+    },
+    "2-B": {
+      "allocations": 0,
+      "frame": {
+        "max": 115.7375,
+        "mean": 61.8812,
+        "min": 53.0638,
+        "p50": 61.3349,
+        "p95": 67.1749,
+        "p99": 81.3422
+      },
+      "gpu": {
+        "max": 112.9576,
+        "mean": 60.1543,
+        "min": 50.0044,
+        "p50": 59.734,
+        "p95": 65.5469,
+        "p99": 79.8822
+      },
+      "pipelines": {
+        "archiveHits": 134,
+        "archiveMissRate": 0.0,
+        "archiveMisses": 0,
+        "archiveUnavailable": 0,
+        "compileMs": 30.642,
+        "compileMsMax": 7.268,
+        "compilerCalls": 13,
+        "failures": 0,
+        "fallbackDraws": 0,
+        "fallbacksServed": 0,
+        "reloadFailures": 0,
+        "reloads": 0,
+        "renderThreadCompileMs": 0.0,
+        "renderThreadCompiles": 0,
+        "requests": 147,
+        "swaps": 147
+      },
+      "temporal": {
+        "F13 denoise 1 temporal": 1.9017,
+        "F13 denoise 2 temporal": 1.6494,
+        "F13 denoise 3 temporal": 1.4426
+      }
+    },
+    "3-A": {
+      "allocations": 0,
+      "frame": {
+        "max": 93.9062,
+        "mean": 60.7107,
+        "min": 50.5778,
+        "p50": 60.8148,
+        "p95": 66.0879,
+        "p99": 82.0882
+      },
+      "gpu": {
+        "max": 92.1276,
+        "mean": 57.9356,
+        "min": 48.983,
+        "p50": 57.7364,
+        "p95": 62.3996,
+        "p99": 80.6409
+      },
+      "pipelines": {
+        "archiveHits": 135,
+        "archiveMissRate": 0.0,
+        "archiveMisses": 0,
+        "archiveUnavailable": 0,
+        "compileMs": 27.239,
+        "compileMsMax": 6.603,
+        "compilerCalls": 12,
+        "failures": 0,
+        "fallbackDraws": 0,
+        "fallbacksServed": 0,
+        "reloadFailures": 0,
+        "reloads": 0,
+        "renderThreadCompileMs": 0.0,
+        "renderThreadCompiles": 0,
+        "requests": 147,
+        "swaps": 147
+      },
+      "temporal": {
+        "F13 denoise 1 temporal": 2.0173,
+        "F13 denoise 2 temporal": 1.8677,
+        "F13 denoise 3 temporal": 1.575
+      }
+    },
+    "3-A2": {
+      "allocations": 0,
+      "frame": {
+        "max": 74.2977,
+        "mean": 61.7154,
+        "min": 54.9277,
+        "p50": 61.608,
+        "p95": 65.7829,
+        "p99": 70.4552
+      },
+      "gpu": {
+        "max": 70.5198,
+        "mean": 58.4157,
+        "min": 52.7384,
+        "p50": 58.1447,
+        "p95": 61.9135,
+        "p99": 67.7006
+      },
+      "pipelines": {
+        "archiveHits": 135,
+        "archiveMissRate": 0.0,
+        "archiveMisses": 0,
+        "archiveUnavailable": 0,
+        "compileMs": 34.05,
+        "compileMsMax": 8.053,
+        "compilerCalls": 12,
+        "failures": 0,
+        "fallbackDraws": 0,
+        "fallbacksServed": 0,
+        "reloadFailures": 0,
+        "reloads": 0,
+        "renderThreadCompileMs": 0.0,
+        "renderThreadCompiles": 0,
+        "requests": 147,
+        "swaps": 147
+      },
+      "temporal": {
+        "F13 denoise 1 temporal": 2.0242,
+        "F13 denoise 2 temporal": 1.911,
+        "F13 denoise 3 temporal": 1.5985
+      }
+    },
+    "3-B": {
+      "allocations": 0,
+      "frame": {
+        "max": 91.7375,
+        "mean": 67.9169,
+        "min": 57.1894,
+        "p50": 67.5892,
+        "p95": 77.4334,
+        "p99": 85.9652
+      },
+      "gpu": {
+        "max": 87.8067,
+        "mean": 65.0539,
+        "min": 55.4615,
+        "p50": 64.5746,
+        "p95": 74.2828,
+        "p99": 83.4191
+      },
+      "pipelines": {
+        "archiveHits": 134,
+        "archiveMissRate": 0.0,
+        "archiveMisses": 0,
+        "archiveUnavailable": 0,
+        "compileMs": 37.149,
+        "compileMsMax": 8.202,
+        "compilerCalls": 13,
+        "failures": 0,
+        "fallbackDraws": 0,
+        "fallbacksServed": 0,
+        "reloadFailures": 0,
+        "reloads": 0,
+        "renderThreadCompileMs": 0.0,
+        "renderThreadCompiles": 0,
+        "requests": 147,
+        "swaps": 147
+      },
+      "temporal": {
+        "F13 denoise 1 temporal": 1.9603,
+        "F13 denoise 2 temporal": 1.8208,
+        "F13 denoise 3 temporal": 1.5643
+      }
+    }
+  },
+  "phase_accepted": false,
+  "quality": {
+    "before": {
+      "mean": [
+        0.004283545887423301,
+        0.0031812542772723753,
+        0.0017929556134312907
+      ],
+      "relative_rmse": 28.13618630838763,
+      "rms": 0.004943820684939023
+    },
+    "tight": {
+      "mean": [
+        6.8852602211528195e-06,
+        8.82200076805532e-06,
+        7.498054744399485e-06
+      ],
+      "relative_rmse": 0.98800676396691,
+      "rms": 3.7418502506600383e-05
+    }
+  },
+  "restir_control": {
+    "mean": [
+      6.87054352965788e-06,
+      8.042262379603926e-06,
+      6.562885118910344e-06
+    ],
+    "phase_accepted": false,
+    "relative_rmse": 1.0762939443722028,
+    "rms": 9.083776967599988e-05,
+    "scope": "conditional primary material transport diagnostic"
+  },
+  "sampling_controls": {
+    "continuous": {
+      "mean": [
+        0.00030092524072600213,
+        0.0002622130227850998,
+        0.00016679013768043185
+      ],
+      "relative_rmse": 1.250891424991249,
+      "rms": 0.00034419309323334077
+    },
+    "hemisphere": {
+      "mean": [
+        0.0003322227571717444,
+        0.00028248508841954845,
+        0.00017526721861986042
+      ],
+      "relative_rmse": 1.6057516102272347,
+      "rms": 0.000391696302818338
+    },
+    "latitude": {
+      "mean": [
+        0.0003458116567488882,
+        0.0003059423802795891,
+        0.00019823460452646677
+      ],
+      "relative_rmse": 1.6554253699670518,
+      "rms": 0.00041851590324196793
+    }
+  },
+  "volpath": {
+    "converged": false,
+    "minimum_seed_rms": 0.00017510928082943494,
+    "seed_nrmse": 0.0715291911925481,
+    "spp": 65536
+  }
+}

@@ -1,0 +1,887 @@
+{
+  "conditional_reference": {
+    "candidate_relative_rmse": 28.136186230875563,
+    "candidate_rms": 0.004943820684939023,
+    "phase_accepted": false,
+    "reference_rms": 0.0001755897183964988,
+    "scope": "conditional primary material diagnostic, not full independent material qualification",
+    "seed_nrmse": 0.01005819013836537
+  },
+  "cpu_material_parity": {
+    "evidence": {
+      "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-llvm-validation/repo-check/results.json",
+      "sha256": "37828741dd14271b10f5b428249a7dcce0f29564807071e62bbaee6430c410cb"
+    },
+    "passed": true,
+    "values": 540225
+  },
+  "ctest": {
+    "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-f9-refinement/checks/final-ctest.log",
+    "sha256": "9794cdae51347f06ca53e9ff68d4fa891fe57e90c83bda7d046b6c4d2bf31b79"
+  },
+  "f14": {
+    "cases": 9,
+    "evidence": {
+      "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-f9-refinement/checks/volumes-stable/summary.json",
+      "sha256": "e6043b0cd0409b5f723409b421b84f6a89e7c790e1fc4d468a3af4eeec856ea0"
+    },
+    "functional_passed": true,
+    "numeric_passed": true
+  },
+  "f9": [
+    {
+      "name": "native-bench1",
+      "passed": true
+    },
+    {
+      "name": "native-bench5",
+      "passed": true
+    },
+    {
+      "name": "native-bench7",
+      "passed": true
+    },
+    {
+      "name": "native-bench8",
+      "passed": false
+    },
+    {
+      "name": "native-sponza-full",
+      "passed": true
+    },
+    {
+      "name": "native-visibility-bench1",
+      "passed": true
+    },
+    {
+      "name": "native-visibility-bench4",
+      "passed": true
+    },
+    {
+      "name": "native-probe-primary",
+      "passed": true
+    },
+    {
+      "name": "native-probe-shadow",
+      "passed": true
+    },
+    {
+      "name": "native-probe-ao",
+      "passed": true
+    },
+    {
+      "name": "native-probe-diffuse",
+      "passed": true
+    },
+    {
+      "name": "native-debug-view-indexed",
+      "passed": true
+    },
+    {
+      "name": "native-debug-view-mesh",
+      "passed": true
+    },
+    {
+      "name": "native-proxy-sponza",
+      "passed": true
+    },
+    {
+      "name": "native-deform",
+      "passed": true
+    },
+    {
+      "name": "native-deform-inflight",
+      "passed": true
+    },
+    {
+      "name": "native-proxy-transition-mask",
+      "passed": true
+    },
+    {
+      "name": "native-proxy-transition-emissive",
+      "passed": true
+    },
+    {
+      "name": "native-proxy-transition-reassign",
+      "passed": true
+    },
+    {
+      "name": "native-proxy-transition-full-upload",
+      "passed": true
+    },
+    {
+      "name": "native-flight-1",
+      "passed": true
+    },
+    {
+      "name": "native-flight-2",
+      "passed": true
+    },
+    {
+      "name": "native-flight-3",
+      "passed": true
+    },
+    {
+      "name": "native-dynamic-churn",
+      "passed": true
+    },
+    {
+      "name": "native-switch-resize",
+      "passed": true
+    },
+    {
+      "name": "native-periodic-rebuild",
+      "passed": true
+    },
+    {
+      "name": "native-negative-transform",
+      "passed": true
+    },
+    {
+      "name": "native-negative-mask",
+      "passed": true
+    },
+    {
+      "name": "native-negative-blas",
+      "passed": true
+    },
+    {
+      "name": "native-negative-blas-multimesh",
+      "passed": true
+    },
+    {
+      "name": "apple9-bench1",
+      "passed": true
+    },
+    {
+      "name": "apple9-bench5",
+      "passed": true
+    },
+    {
+      "name": "apple9-bench7",
+      "passed": true
+    },
+    {
+      "name": "apple9-bench8",
+      "passed": false
+    },
+    {
+      "name": "apple9-sponza-full",
+      "passed": true
+    },
+    {
+      "name": "apple9-visibility-bench1",
+      "passed": true
+    },
+    {
+      "name": "apple9-visibility-bench4",
+      "passed": true
+    },
+    {
+      "name": "apple9-probe-primary",
+      "passed": true
+    },
+    {
+      "name": "apple9-probe-shadow",
+      "passed": true
+    },
+    {
+      "name": "apple9-probe-ao",
+      "passed": true
+    },
+    {
+      "name": "apple9-probe-diffuse",
+      "passed": true
+    },
+    {
+      "name": "apple9-debug-view-indexed",
+      "passed": true
+    },
+    {
+      "name": "apple9-debug-view-mesh",
+      "passed": true
+    },
+    {
+      "name": "apple9-proxy-sponza",
+      "passed": true
+    },
+    {
+      "name": "apple9-deform",
+      "passed": true
+    },
+    {
+      "name": "apple9-deform-inflight",
+      "passed": true
+    },
+    {
+      "name": "apple9-proxy-transition-mask",
+      "passed": true
+    },
+    {
+      "name": "apple9-proxy-transition-emissive",
+      "passed": true
+    },
+    {
+      "name": "apple9-proxy-transition-reassign",
+      "passed": true
+    },
+    {
+      "name": "apple9-proxy-transition-full-upload",
+      "passed": true
+    },
+    {
+      "name": "apple9-flight-1",
+      "passed": true
+    },
+    {
+      "name": "apple9-flight-2",
+      "passed": true
+    },
+    {
+      "name": "apple9-flight-3",
+      "passed": true
+    },
+    {
+      "name": "apple9-dynamic-churn",
+      "passed": true
+    },
+    {
+      "name": "apple9-switch-resize",
+      "passed": true
+    },
+    {
+      "name": "apple9-periodic-rebuild",
+      "passed": true
+    },
+    {
+      "name": "apple9-negative-transform",
+      "passed": true
+    },
+    {
+      "name": "apple9-negative-mask",
+      "passed": true
+    },
+    {
+      "name": "apple9-negative-blas",
+      "passed": true
+    },
+    {
+      "name": "apple9-negative-blas-multimesh",
+      "passed": true
+    }
+  ],
+  "f9_protocol": {
+    "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-f9-refinement/matrix/protocol.json",
+    "sha256": "93d92c5ef9d68741bc76a436c40ea9c74ae75503141e9cc3ad6ca51503a01e42"
+  },
+  "frozen_witness": {
+    "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-f9-refinement/repo-fixture/result.log",
+    "sha256": "c2becca48db44b41ed9334087b7cf24b3982bc70eb9162776b076324c45c637d"
+  },
+  "functional": {
+    "cases": 13,
+    "evidence": {
+      "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-f9-refinement/checks/functional/summary.json",
+      "sha256": "8c4eed5e09efcbe872d95d141aa6e72b2caf86fc92676b742635046234dfabd2"
+    },
+    "passed": true
+  },
+  "llvm_dependency": {
+    "bottle": {
+      "cellar": ":any",
+      "sha256": "e6e9ba39ea98d6455d5cff8d53df12b34a4a99e163ff60d4efabcfc5643f0458",
+      "url": "https://ghcr.io/v2/homebrew/core/llvm/20/blobs/sha256:e6e9ba39ea98d6455d5cff8d53df12b34a4a99e163ff60d4efabcfc5643f0458"
+    },
+    "formula": "llvm@20",
+    "installed_globally": false,
+    "local_changes": [
+      "resolve zstd dependency to existing /opt/homebrew/opt/zstd/lib/libzstd.1.dylib",
+      "ad-hoc sign local library"
+    ],
+    "local_library_sha256": "0b88ea35889bf8301a68f806a9a3bb5ca3cdbc1a1590f658638e924ffc7471ba",
+    "verified_archive_sha256": "e6e9ba39ea98d6455d5cff8d53df12b34a4a99e163ff60d4efabcfc5643f0458",
+    "version": "20.1.8"
+  },
+  "perf": {
+    "replicas": [
+      {
+        "baseline_drift": 0.008750075391688702,
+        "candidate_budget_passed": false,
+        "p50_reduction": -0.00680341848479471,
+        "valid": true
+      },
+      {
+        "baseline_drift": 0.01266527292540684,
+        "candidate_budget_passed": false,
+        "p50_reduction": -0.007361723684393917,
+        "valid": true
+      },
+      {
+        "baseline_drift": 0.0357693264818753,
+        "candidate_budget_passed": false,
+        "p50_reduction": 0.007839363071198813,
+        "valid": true
+      }
+    ]
+  },
+  "perf_runs": {
+    "1-A": {
+      "allocations": 0,
+      "frame": {
+        "max": 46.8655,
+        "mean": 22.8913,
+        "min": 21.3121,
+        "p50": 22.3599,
+        "p95": 24.6536,
+        "p99": 25.003
+      },
+      "gpu": {
+        "max": 24.0531,
+        "mean": 21.8789,
+        "min": 20.577,
+        "p50": 21.5541,
+        "p95": 23.6046,
+        "p99": 23.966
+      },
+      "pipelines": {
+        "archiveHits": 135,
+        "archiveMissRate": 0.0,
+        "archiveMisses": 0,
+        "archiveUnavailable": 0,
+        "compileMs": 22.684,
+        "compileMsMax": 5.117,
+        "compilerCalls": 12,
+        "failures": 0,
+        "fallbackDraws": 0,
+        "fallbacksServed": 0,
+        "reloadFailures": 0,
+        "reloads": 0,
+        "renderThreadCompileMs": 0.0,
+        "renderThreadCompiles": 0,
+        "requests": 147,
+        "swaps": 147
+      },
+      "temporal": {
+        "F13 denoise 1 temporal": 0.8732,
+        "F13 denoise 2 temporal": 1.0922,
+        "F13 denoise 3 temporal": 0.8433
+      }
+    },
+    "1-A2": {
+      "allocations": 0,
+      "frame": {
+        "max": 24.1189,
+        "mean": 22.3677,
+        "min": 21.2259,
+        "p50": 22.2728,
+        "p95": 23.6108,
+        "p99": 23.993
+      },
+      "gpu": {
+        "max": 23.1454,
+        "mean": 21.4864,
+        "min": 20.4884,
+        "p50": 21.3655,
+        "p95": 22.6523,
+        "p99": 22.9527
+      },
+      "pipelines": {
+        "archiveHits": 135,
+        "archiveMissRate": 0.0,
+        "archiveMisses": 0,
+        "archiveUnavailable": 0,
+        "compileMs": 19.29,
+        "compileMsMax": 4.516,
+        "compilerCalls": 12,
+        "failures": 0,
+        "fallbackDraws": 0,
+        "fallbacksServed": 0,
+        "reloadFailures": 0,
+        "reloads": 0,
+        "renderThreadCompileMs": 0.0,
+        "renderThreadCompiles": 0,
+        "requests": 147,
+        "swaps": 147
+      },
+      "temporal": {
+        "F13 denoise 1 temporal": 0.8583,
+        "F13 denoise 2 temporal": 1.0821,
+        "F13 denoise 3 temporal": 0.8318
+      }
+    },
+    "1-B": {
+      "allocations": 0,
+      "frame": {
+        "max": 24.2722,
+        "mean": 22.4455,
+        "min": 21.3721,
+        "p50": 22.4486,
+        "p95": 23.4876,
+        "p99": 23.8202
+      },
+      "gpu": {
+        "max": 23.0163,
+        "mean": 21.6204,
+        "min": 20.5847,
+        "p50": 21.6058,
+        "p95": 22.6879,
+        "p99": 22.8745
+      },
+      "pipelines": {
+        "archiveHits": 135,
+        "archiveMissRate": 0.0,
+        "archiveMisses": 0,
+        "archiveUnavailable": 0,
+        "compileMs": 23.355,
+        "compileMsMax": 5.168,
+        "compilerCalls": 12,
+        "failures": 0,
+        "fallbackDraws": 0,
+        "fallbacksServed": 0,
+        "reloadFailures": 0,
+        "reloads": 0,
+        "renderThreadCompileMs": 0.0,
+        "renderThreadCompiles": 0,
+        "requests": 147,
+        "swaps": 147
+      },
+      "temporal": {
+        "F13 denoise 1 temporal": 0.8591,
+        "F13 denoise 2 temporal": 1.0857,
+        "F13 denoise 3 temporal": 0.8346
+      }
+    },
+    "2-A": {
+      "allocations": 0,
+      "frame": {
+        "max": 24.096,
+        "mean": 22.3041,
+        "min": 21.1183,
+        "p50": 22.3041,
+        "p95": 23.4648,
+        "p99": 23.7413
+      },
+      "gpu": {
+        "max": 22.7646,
+        "mean": 21.4323,
+        "min": 20.416,
+        "p50": 21.3813,
+        "p95": 22.5549,
+        "p99": 22.7302
+      },
+      "pipelines": {
+        "archiveHits": 135,
+        "archiveMissRate": 0.0,
+        "archiveMisses": 0,
+        "archiveUnavailable": 0,
+        "compileMs": 19.709,
+        "compileMsMax": 4.623,
+        "compilerCalls": 12,
+        "failures": 0,
+        "fallbackDraws": 0,
+        "fallbacksServed": 0,
+        "reloadFailures": 0,
+        "reloads": 0,
+        "renderThreadCompileMs": 0.0,
+        "renderThreadCompiles": 0,
+        "requests": 147,
+        "swaps": 147
+      },
+      "temporal": {
+        "F13 denoise 1 temporal": 0.8546,
+        "F13 denoise 2 temporal": 1.0783,
+        "F13 denoise 3 temporal": 0.8318
+      }
+    },
+    "2-A2": {
+      "allocations": 0,
+      "frame": {
+        "max": 23.7404,
+        "mean": 22.4858,
+        "min": 21.3902,
+        "p50": 22.5893,
+        "p95": 23.4132,
+        "p99": 23.6104
+      },
+      "gpu": {
+        "max": 22.6981,
+        "mean": 21.5442,
+        "min": 20.5141,
+        "p50": 21.6521,
+        "p95": 22.4482,
+        "p99": 22.5585
+      },
+      "pipelines": {
+        "archiveHits": 135,
+        "archiveMissRate": 0.0,
+        "archiveMisses": 0,
+        "archiveUnavailable": 0,
+        "compileMs": 20.927,
+        "compileMsMax": 5.056,
+        "compilerCalls": 12,
+        "failures": 0,
+        "fallbackDraws": 0,
+        "fallbacksServed": 0,
+        "reloadFailures": 0,
+        "reloads": 0,
+        "renderThreadCompileMs": 0.0,
+        "renderThreadCompiles": 0,
+        "requests": 147,
+        "swaps": 147
+      },
+      "temporal": {
+        "F13 denoise 1 temporal": 0.8599,
+        "F13 denoise 2 temporal": 1.0809,
+        "F13 denoise 3 temporal": 0.8354
+      }
+    },
+    "2-B": {
+      "allocations": 0,
+      "frame": {
+        "max": 24.8284,
+        "mean": 22.5289,
+        "min": 21.1718,
+        "p50": 22.678,
+        "p95": 24.1434,
+        "p99": 24.4569
+      },
+      "gpu": {
+        "max": 23.8135,
+        "mean": 21.6497,
+        "min": 20.4512,
+        "p50": 21.6751,
+        "p95": 23.1582,
+        "p99": 23.5141
+      },
+      "pipelines": {
+        "archiveHits": 135,
+        "archiveMissRate": 0.0,
+        "archiveMisses": 0,
+        "archiveUnavailable": 0,
+        "compileMs": 28.941,
+        "compileMsMax": 7.201,
+        "compilerCalls": 12,
+        "failures": 0,
+        "fallbackDraws": 0,
+        "fallbacksServed": 0,
+        "reloadFailures": 0,
+        "reloads": 0,
+        "renderThreadCompileMs": 0.0,
+        "renderThreadCompiles": 0,
+        "requests": 147,
+        "swaps": 147
+      },
+      "temporal": {
+        "F13 denoise 1 temporal": 0.8607,
+        "F13 denoise 2 temporal": 1.0818,
+        "F13 denoise 3 temporal": 0.8368
+      }
+    },
+    "3-A": {
+      "allocations": 0,
+      "frame": {
+        "max": 25.402,
+        "mean": 23.7371,
+        "min": 21.5939,
+        "p50": 23.883,
+        "p95": 24.8265,
+        "p99": 25.1597
+      },
+      "gpu": {
+        "max": 24.4186,
+        "mean": 22.7313,
+        "min": 20.6543,
+        "p50": 22.9051,
+        "p95": 23.7943,
+        "p99": 24.2056
+      },
+      "pipelines": {
+        "archiveHits": 135,
+        "archiveMissRate": 0.0,
+        "archiveMisses": 0,
+        "archiveUnavailable": 0,
+        "compileMs": 18.698,
+        "compileMsMax": 4.434,
+        "compilerCalls": 12,
+        "failures": 0,
+        "fallbackDraws": 0,
+        "fallbacksServed": 0,
+        "reloadFailures": 0,
+        "reloads": 0,
+        "renderThreadCompileMs": 0.0,
+        "renderThreadCompiles": 0,
+        "requests": 147,
+        "swaps": 147
+      },
+      "temporal": {
+        "F13 denoise 1 temporal": 0.8926,
+        "F13 denoise 2 temporal": 1.1125,
+        "F13 denoise 3 temporal": 0.8753
+      }
+    },
+    "3-A2": {
+      "allocations": 0,
+      "frame": {
+        "max": 28.7725,
+        "mean": 22.9921,
+        "min": 21.3206,
+        "p50": 23.0928,
+        "p95": 23.9725,
+        "p99": 24.2732
+      },
+      "gpu": {
+        "max": 23.2278,
+        "mean": 21.9927,
+        "min": 20.4675,
+        "p50": 22.0858,
+        "p95": 22.9715,
+        "p99": 23.1305
+      },
+      "pipelines": {
+        "archiveHits": 135,
+        "archiveMissRate": 0.0,
+        "archiveMisses": 0,
+        "archiveUnavailable": 0,
+        "compileMs": 18.338,
+        "compileMsMax": 4.448,
+        "compilerCalls": 12,
+        "failures": 0,
+        "fallbackDraws": 0,
+        "fallbacksServed": 0,
+        "reloadFailures": 0,
+        "reloads": 0,
+        "renderThreadCompileMs": 0.0,
+        "renderThreadCompiles": 0,
+        "requests": 147,
+        "swaps": 147
+      },
+      "temporal": {
+        "F13 denoise 1 temporal": 0.8808,
+        "F13 denoise 2 temporal": 1.0953,
+        "F13 denoise 3 temporal": 0.851
+      }
+    },
+    "3-B": {
+      "allocations": 0,
+      "frame": {
+        "max": 25.0401,
+        "mean": 23.2419,
+        "min": 21.8005,
+        "p50": 23.3364,
+        "p95": 24.4607,
+        "p99": 24.9093
+      },
+      "gpu": {
+        "max": 24.0982,
+        "mean": 22.2613,
+        "min": 20.868,
+        "p50": 22.3191,
+        "p95": 23.4935,
+        "p99": 23.9213
+      },
+      "pipelines": {
+        "archiveHits": 135,
+        "archiveMissRate": 0.0,
+        "archiveMisses": 0,
+        "archiveUnavailable": 0,
+        "compileMs": 21.342,
+        "compileMsMax": 5.04,
+        "compilerCalls": 12,
+        "failures": 0,
+        "fallbackDraws": 0,
+        "fallbacksServed": 0,
+        "reloadFailures": 0,
+        "reloads": 0,
+        "renderThreadCompileMs": 0.0,
+        "renderThreadCompiles": 0,
+        "requests": 147,
+        "swaps": 147
+      },
+      "temporal": {
+        "F13 denoise 1 temporal": 0.8821,
+        "F13 denoise 2 temporal": 1.101,
+        "F13 denoise 3 temporal": 0.8584
+      }
+    }
+  },
+  "phase_accepted": false,
+  "physical_ao": {
+    "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-f9-refinement/checks/physical-ao/results.json",
+    "sha256": "ac8d0cc9dbb6800a4c9a2a39cd3025dd2c89107c22bc5a4ac2c5c07766a4cc67"
+  },
+  "profile": {
+    "crash": "GPUToolsPlatformSupport GTDependencyTracker_processDataSource, null SIGSEGV",
+    "tested_original_and_no_alias": true,
+    "valid_counters_obtained": false
+  },
+  "reference": {
+    "adapter_sha256": "4bc913c7d1113a754b2bfc22006a07b77480c9c4ad15f30fe9ed7f41ec2179ee",
+    "camera_check": {
+      "direction_error": 1.0328040400686689e-07,
+      "origin_error": 2.100259948178973e-07,
+      "passed": true
+    },
+    "candidate_read": false,
+    "converged": true,
+    "crop_xywh": [
+      48,
+      24,
+      32,
+      24
+    ],
+    "frame": 119,
+    "limits_sha256": "0a76cc37ca890813d2e0c44b1b59ab9bd8ff1cb659e9d304d24ae464e3e0b435",
+    "max_spp": 4194304,
+    "model_differences": [
+      "Primary textured materials: CPU base-level bilinear sampling versus GPU derivative-based mip/anisotropic sampling; parity unverified"
+    ],
+    "phase_accepted": false,
+    "position_sidecar_sha256": "afe26655ec3da87a9fe13dee39a323446b09172dc9373e3cd5bb59e153053ebd",
+    "positions_sha256": "62b8a205c48539bbde45fae4ac5d0d9fca6ae091eb647b74164ace8ebfff0c2f",
+    "primary_material_parity_verified": false,
+    "receivers": {
+      "max_position_error_m": 4.202127456665039e-05,
+      "mismatches": 0,
+      "misses": 0,
+      "passed": true,
+      "pixels": 768,
+      "position_cap_m": 0.0001
+    },
+    "records": [
+      {
+        "converged": false,
+        "minimum_seed_rms": 0.0002633930067966656,
+        "seed_nrmse": 1.3329200404950254,
+        "spp": 64
+      },
+      {
+        "converged": false,
+        "minimum_seed_rms": 0.00022879093904937172,
+        "seed_nrmse": 0.943111095546547,
+        "spp": 256
+      },
+      {
+        "converged": false,
+        "minimum_seed_rms": 0.00018974085274793765,
+        "seed_nrmse": 0.5988509218079905,
+        "spp": 1024
+      },
+      {
+        "converged": false,
+        "minimum_seed_rms": 0.00017713437256442204,
+        "seed_nrmse": 0.30886803883045255,
+        "spp": 4096
+      },
+      {
+        "converged": false,
+        "minimum_seed_rms": 0.00017703687446358874,
+        "seed_nrmse": 0.1652848477475425,
+        "spp": 16384
+      },
+      {
+        "converged": false,
+        "minimum_seed_rms": 0.00017621782436519614,
+        "seed_nrmse": 0.08150882780047106,
+        "spp": 65536
+      },
+      {
+        "converged": false,
+        "minimum_seed_rms": 0.0001765227122098532,
+        "seed_nrmse": 0.03884758023053993,
+        "spp": 262144
+      },
+      {
+        "converged": false,
+        "minimum_seed_rms": 0.00017608196975520585,
+        "seed_nrmse": 0.02054896765796572,
+        "spp": 1048576
+      },
+      {
+        "converged": true,
+        "minimum_seed_rms": 0.00017621945473187618,
+        "seed_nrmse": 0.009883022532382936,
+        "spp": 4194304
+      }
+    ],
+    "reference": {
+      "convergence_relative_rmse": 0.02,
+      "convergence_rule": "independent-seed references at the same SPP must agree within gate on combined interior and every ROI; previous checkpoints retained; mean of final two seeds is reference",
+      "depth_check": "compare depth8 and unlimited with identical seed/SPP; report truncation, do not silently call depth8 full transport",
+      "direct_depth": 2,
+      "full_depth": -1,
+      "renderer": "Mitsuba 3.9.1 scalar_rgb CPU",
+      "rr_depth": 5,
+      "seeds": [
+        1234,
+        5678
+      ],
+      "spp_checkpoints": [
+        64,
+        256,
+        1024,
+        4096,
+        16384,
+        65536
+      ],
+      "validation": [
+        "camera rays and near clip",
+        "PLY winding and world transforms",
+        "emitter area and Le; no duplicate extracted triangles",
+        "UV repeat and half-filter arithmetic",
+        "zero-indirect fixture and emission linearity",
+        "native constant texture specialization only for exact constant semantics"
+      ]
+    },
+    "reference_accepted": false,
+    "renderer": "Mitsuba",
+    "runner_sha256": "73554a47c4b14178dee340375ba2107cbee97c6a92a7b4fc878132c5362c9a6f",
+    "schema": 1,
+    "scope": "sparse centre-sampled surface indirect diffuse control",
+    "snapshot_sha256": "18bffca641bcd4f32afe7134d39bda26e3843549963da811b02c1278ee35ed21",
+    "spp_checkpoints": [
+      64,
+      256,
+      1024,
+      4096,
+      16384,
+      65536,
+      262144,
+      1048576,
+      4194304
+    ],
+    "variant": "llvm_ad_rgb",
+    "version": "3.9.1"
+  },
+  "reference_sources": {
+    "adapter-source.py": {
+      "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-converged-cpu/frame-000119/adapter-source.py",
+      "sha256": "4bc913c7d1113a754b2bfc22006a07b77480c9c4ad15f30fe9ed7f41ec2179ee"
+    },
+    "runner-source.py": {
+      "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-converged-cpu/frame-000119/runner-source.py",
+      "sha256": "73554a47c4b14178dee340375ba2107cbee97c6a92a7b4fc878132c5362c9a6f"
+    }
+  },
+  "sponza_image_comparison": [
+    {
+      "frame": 118,
+      "normalized_max": 5.238751004286092e-05
+    },
+    {
+      "frame": 119,
+      "normalized_max": 0.00020106355771689867
+    },
+    {
+      "frame": 120,
+      "normalized_max": 0.00018794169674565838
+    },
+    {
+      "frame": 239,
+      "normalized_max": 0.00034576870820371105
+    },
+    {
+      "frame": 240,
+      "normalized_max": 0.0005133509682866465
+    }
+  ]
+}

@@ -12,6 +12,10 @@ struct VolumeOracleSettings {
     double skyAbsolute=0.02,skyRelative=0.25;
     double fogAbsolute=2e-5,fogRelative=2e-4;
     double solarAbsolute=0.01,solarRelative=2e-4;
+    // Lunar HDR arithmetic gets the solar relative budget and a smaller zero-radiance floor.
+    double lunarAbsolute=0.001,lunarRelative=2e-4;
+    // Float angular mapping and the Gaussian can amplify error on narrow stellar footprints.
+    double starAbsolute=2e-9,starRelative=0.005;
 };
 struct VolumeOracleCase {
     std::string kind;

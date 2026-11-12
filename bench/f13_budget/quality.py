@@ -36,7 +36,7 @@ with gpu_lock(Path('/tmp/phosphor-gpu-verification.lock')):
    (out).mkdir(parents=True,exist_ok=True)
    (out/'command.json').write_text(json.dumps({'command':cmd,'environment':{k:v for k,v in env.items() if k.startswith(('PHOSPHOR_DIAGNOSTIC','MTL_DEBUG','MTL_SHADER'))}},indent=2))
    status=run_checked(cmd,out/'renderer.log',env=env,timeout=180,
-      required=[r'F13 atrous backend: '+('reference' if reference=='1' else r'tiled strides 1/2, reference 4\+'),
+      required=[r'F13 atrous backend: '+('reference' if reference=='1' else r'tiled strides 1/2, shared guides 4'),
                 r'F14 aerial quadrature: '+('reference' if aerial=='1' else 'distance-adaptive')])
    result={'name':label+'-'+variant,'status':status['passed'],'failures':status['failures']}
    if not status['passed']:

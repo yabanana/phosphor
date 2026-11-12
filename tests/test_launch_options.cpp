@@ -1233,3 +1233,108 @@ TEST_CASE("F13 physical AO proof selects real custom visibility without other tr
     CHECK_FALSE(parse({"--render-path","visibility","--ao","gtao","--capture-linear-signal","ao-filtered"},o,error));
     CHECK_FALSE(parse({"--bench","6","--reflection-scene","ao-temporal-wall","--render-path","visibility","--rt","on","--ao","rtao","--ao-radius","1","--lighting-denoise","custom"},o,error));
 }
+
+TEST_CASE("F14.1 extreme atmosphere parameter controls") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--atmosphere","on","--atmo-scattering-scale","8","--atmo-ozone-scale","0","--atmo-mie-g","0.95","--atmo-ground-albedo","1"},o,error));
+    CHECK(o.atmoScatteringScale==8);CHECK(o.atmoOzoneScale==0);CHECK(o.atmoMieG==doctest::Approx(.95f));CHECK(o.atmoGroundAlbedo==1);
+    LaunchOptions d;REQUIRE(parse({"--atmosphere","on"},d,error));CHECK(d.atmoScatteringScale==1);CHECK(d.atmoMieG<-1);CHECK(d.atmoGroundAlbedo<0);
+    LaunchOptions bad;CHECK_FALSE(parse({"--atmo-scattering-scale","2"},bad,error));                     // needs the atmosphere
+    CHECK_FALSE(parse({"--atmosphere","on","--atmo-scattering-scale","0"},bad,error));
+    CHECK_FALSE(parse({"--atmosphere","on","--atmo-mie-g","0.995"},bad,error));
+    CHECK_FALSE(parse({"--atmosphere","on","--atmo-ground-albedo","1.5"},bad,error));
+}
+
+TEST_CASE("F14 moon corruption is selectable only with atmosphere diagnostics") {
+    LaunchOptions o;
+    std::string error;
+    REQUIRE(parse({"--atmosphere","on","--debug-lighting","1","--debug-volume-corrupt","moon"},o,error));
+    CHECK(o.debugVolumeCorrupt==5);
+    CHECK_FALSE(parse({"--atmosphere","on","--debug-volume-corrupt","moon"},o,error));
+    CHECK_FALSE(parse({"--fog","on","--debug-lighting","1","--debug-volume-corrupt","moon"},o,error));
+}
+
+TEST_CASE("F13.6 reflection regularisation scale option") {
+    LaunchOptions o;std::string error;REQUIRE(parse({"--reflection-regularization-scale","4"},o,error));CHECK(o.reflectionRegularizationScale==4);
+    LaunchOptions d;REQUIRE(parse({},d,error));CHECK(d.reflectionRegularizationScale==8); // D5
+    LaunchOptions one;REQUIRE(parse({"--reflection-regularization-scale","1"},one,error));CHECK(one.reflectionRegularizationScale==1);
+    LaunchOptions bad;CHECK_FALSE(parse({"--reflection-regularization-scale","0.5"},bad,error));
+}
+
+TEST_CASE("F13/F14 budget defaults are the measured ones") {
+    LaunchOptions o;std::string error;REQUIRE(parse({},o,error));
+    CHECK(o.specularAtrousIterations==2);CHECK(o.ssrRoughSteps==16);CHECK(o.aoRays==0);CHECK(o.aoAtrousIterations==2); // D2: preset RTAO rays
+    CHECK(o.specularMaxHistory==128);CHECK(o.reflectionBoostSamples==8);CHECK(o.reflectionBoostFrames==8);CHECK(o.reflectionBoostRoughness==0.2f);
+    LaunchOptions nb;REQUIRE(parse({"--reflection-boost-samples","1","--reflection-boost-frames","0","--reflection-boost-roughness","0.5"},nb,error));CHECK(nb.reflectionBoostSamples==1);CHECK(nb.reflectionBoostFrames==0);
+    CHECK_FALSE(parse({"--reflection-boost-samples","9"},nb,error));CHECK_FALSE(parse({"--reflection-boost-roughness","2"},nb,error));LaunchOptions mh;REQUIRE(parse({"--specular-max-history","32"},mh,error));CHECK(mh.specularMaxHistory==32);
+    CHECK_FALSE(parse({"--specular-max-history","300"},mh,error));
+    LaunchOptions ao3;REQUIRE(parse({"--ao-atrous-iterations","3"},ao3,error));CHECK(ao3.aoAtrousIterations==3);
+    LaunchOptions badAo;CHECK_FALSE(parse({"--ao-atrous-iterations","0"},badAo,error));CHECK_FALSE(parse({"--ao-atrous-iterations","6"},badAo,error));
+    LaunchOptions w;REQUIRE(parse({"--ssr-rough-steps","64","--ao-rays","4","--specular-atrous-iterations","3"},w,error));
+    CHECK(w.ssrRoughSteps==64);CHECK(w.aoRays==4);CHECK(w.specularAtrousIterations==3);
+    LaunchOptions bad;CHECK_FALSE(parse({"--ao-rays","0"},bad,error));CHECK_FALSE(parse({"--ssr-rough-steps","1"},bad,error));
+    // DDGI irradiance is deterministic per pixel: denoised only on request; stochastic GI always.
+    CHECK_FALSE(o.ddgiDenoise);CHECK_FALSE(denoisesGi(o));
+    const std::vector<const char*> gi={"--render-path","visibility","--rt","on","--lighting","restir","--lighting-denoise","custom","--gi"};
+    auto with=[&](std::vector<const char*> extra){auto args=gi;args.insert(args.end(),extra.begin(),extra.end());return args;};
+    LaunchOptions on;REQUIRE(parse(with({"ddgi","--ddgi-denoise","on"}),on,error));CHECK(denoisesGi(on));
+    LaunchOptions ddgi;REQUIRE(parse(with({"ddgi"}),ddgi,error));CHECK_FALSE(denoisesGi(ddgi));
+    LaunchOptions cache;REQUIRE(parse(with({"cache"}),cache,error));CHECK(denoisesGi(cache));
+    CHECK_FALSE(parse({"--ddgi-denoise","maybe"},bad,error));
+}
+
+TEST_CASE("F14.2/F14.3 validation controls keep product defaults") {
+    LaunchOptions d;std::string error;REQUIRE(parse({"--fog","on","--clouds","on"},d,error));
+    CHECK(d.fogDensity<0);CHECK(d.fogHeightFalloff<0);CHECK(d.fogFar<0);CHECK(d.fogHistory);CHECK(d.fogLocalSamples==0);CHECK(d.fogGrid[0]==0);
+    CHECK(d.fogFixtureFalloff<0);CHECK(d.cameraClimb==0);CHECK(d.cameraPitch<-999);CHECK(d.cameraYawRate==0);CHECK(d.cameraAimSun<-999);
+    CHECK(d.cloudMarchSteps==0);
+    LaunchOptions s;REQUIRE(parse({"--clouds","on","--cloud-full-rate","--cloud-march-steps","512"},s,error));CHECK(s.cloudMarchSteps==512);
+    LaunchOptions sb;CHECK_FALSE(parse({"--clouds","on","--cloud-march-steps","513"},sb,error));CHECK_FALSE(parse({"--cloud-march-steps","64"},sb,error));
+    LaunchOptions f;REQUIRE(parse({"--fog","on","--fog-density","0.05","--fog-height-falloff","0","--fog-far","250","--fog-history","off",
+                                   "--fog-local-samples","16","--fog-grid","96x54x64"},f,error));
+    CHECK(f.fogDensity==doctest::Approx(.05f));CHECK(f.fogHeightFalloff==0);CHECK(f.fogFar==250);CHECK_FALSE(f.fogHistory);CHECK(f.fogLocalSamples==16);
+    CHECK(f.fogGrid[0]==96);CHECK(f.fogGrid[1]==54);CHECK(f.fogGrid[2]==64);
+    LaunchOptions bad;
+    CHECK_FALSE(parse({"--fog-density","0.05"},bad,error));                       // needs fog
+    CHECK_FALSE(parse({"--fog","on","--fog-grid","64x36x200"},bad,error));         // integration bound 128
+    CHECK_FALSE(parse({"--fog","on","--fog-grid","64x36"},bad,error));
+    CHECK_FALSE(parse({"--fog","on","--fog-local-samples","17"},bad,error));
+    CHECK_FALSE(parse({"--fog","on","--fog-history","maybe"},bad,error));
+    LaunchOptions h;REQUIRE(parse({"--fog","on","--volume-oracle","o","--debug-lighting","1","--fog-height-fixture","0.05"},h,error));
+    CHECK(h.fogFixtureFalloff==doctest::Approx(.05f));
+    CHECK_FALSE(parse({"--fog","on","--volume-oracle","o","--debug-lighting","1","--fog-height-fixture","0.05","--fog-homogeneous"},bad,error));
+    CHECK_FALSE(parse({"--fog","on","--fog-height-fixture","0.05"},bad,error));     // needs the oracle
+    LaunchOptions stale;REQUIRE(parse({"--fog","on","--debug-lighting","1","--debug-volume-corrupt","stale-fog"},stale,error));
+    CHECK(stale.debugVolumeCorrupt==6); // VOLUME_CORRUPT_STALE_FOG
+    CHECK_FALSE(parse({"--fog","on","--fog-history","off","--debug-lighting","1","--debug-volume-corrupt","stale-fog"},bad,error));
+    LaunchOptions edge;REQUIRE(parse({"--clouds","on","--debug-lighting","1","--debug-volume-corrupt","cloud-edge"},edge,error));
+    CHECK(edge.debugVolumeCorrupt==7); // VOLUME_CORRUPT_CLOUD_EDGE
+    CHECK_FALSE(parse({"--clouds","on","--debug-lighting","1","--debug-volume-corrupt","cloud-motion"},bad,error)); // removed control
+    CHECK_FALSE(parse({"--clouds","on","--cloud-full-rate","--debug-lighting","1","--debug-volume-corrupt","cloud-edge"},bad,error));
+    LaunchOptions cam;REQUIRE(parse({"--frames","10","--clouds","on","--planet-camera-height","1000","--camera-climb","700","--camera-pitch","0","--camera-yaw-rate","60"},cam,error));
+    CHECK(cam.cameraClimb==700);CHECK(cam.cameraPitch==0);CHECK(cam.cameraYawRate==60);
+    LaunchOptions sun;REQUIRE(parse({"--frames","10","--atmosphere","on","--clouds","on","--camera-aim-sun","8"},sun,error));CHECK(sun.cameraAimSun==8);
+    CHECK_FALSE(parse({"--clouds","on","--camera-pitch","10"},bad,error));                         // benchmark only
+    CHECK_FALSE(parse({"--frames","10","--clouds","on","--camera-climb","10"},bad,error));          // needs the planetary height
+    CHECK_FALSE(parse({"--frames","10","--clouds","on","--camera-aim-sun","8"},bad,error));         // needs the atmosphere
+    CHECK_FALSE(parse({"--frames","10","--atmosphere","on","--camera-aim-sun","8","--camera-pitch","3"},bad,error));
+    LaunchOptions t;REQUIRE(parse({"--frames","10","--clouds","on","--capture-linear-sequence","seq","--capture-linear-signal","cloud-transmittance"},t,error));
+    CHECK(t.captureLinearSignal==11);
+    CHECK_FALSE(parse({"--frames","10","--fog","on","--capture-linear-sequence","seq","--capture-linear-signal","cloud-transmittance"},bad,error));
+}
+
+TEST_CASE("F13.3 native diagnostic flag needs the native denoiser in a benchmark") {
+    LaunchOptions o;std::string error;
+    auto with=[](std::initializer_list<const char*> extra){std::vector<const char*> a{"--bench","6","--reflection-scene","roughness","--render-path","visibility","--frames","4"};
+        a.insert(a.end(),extra);return a;};
+    REQUIRE(parse(with({"--lighting-denoise","metalfx","--metalfx-native-diagnostic"}),o,error));CHECK(o.metalfxNativeDiagnostic);
+    o={};CHECK_FALSE(parse(with({"--lighting-denoise","custom","--metalfx-native-diagnostic"}),o,error));
+    o={};REQUIRE(parse(with({"--lighting-denoise","metalfx"}),o,error));CHECK_FALSE(o.metalfxNativeDiagnostic);
+}
+
+TEST_CASE("F13.5 no-parallax negative needs an actual probe") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--bench","6","--reflection-scene","probe-box","--render-path","visibility","--frames","4","--reflections","probes","--reflection-capture-probe","--debug-probe-no-parallax"},o,error));
+    CHECK(o.debugProbeNoParallax);
+    o={};CHECK_FALSE(parse({"--bench","6","--reflection-scene","probe-box","--render-path","visibility","--frames","4","--reflections","probes","--debug-probe-no-parallax"},o,error));
+}

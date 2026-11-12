@@ -35,7 +35,24 @@ TEST_CASE("F13 reflection solid-angle reference agrees with independent rough me
 TEST_CASE("F13 reflection roughness selection is continuous and misses remain explicit"){
     ReflectionSettings s;REQUIRE(validReflectionSettings(s));CHECK(reflectionRTWeight(s.rtRoughnessLow,s)==1);CHECK(reflectionRTWeight(s.rtRoughnessHigh,s)==0);
     CHECK(reflectionRTWeight((s.rtRoughnessLow+s.rtRoughnessHigh)*.5f,s)==doctest::Approx(.5));
-    s.flags&=~REFLECTION_ENABLE_RT;CHECK(reflectionRTWeight(.01f,s)==0);
+    // Geometry-backed emitter specular: DI share + RT reflection probability = 1.
+    for(float r=0;r<=1.0001f;r+=1.0f/64)CHECK(emitterSpecularDIWeight(r,s)+reflectionRTWeight(r,s)==doctest::Approx(1).epsilon(1e-6));
+    CHECK(emitterSpecularDIWeight(.04f,s)==0);CHECK(emitterSpecularDIWeight(.8f,s)==1);
+    s.flags&=~REFLECTION_ENABLE_RT;CHECK(reflectionRTWeight(.01f,s)==0);CHECK(emitterSpecularDIWeight(.01f,s)==1);
+    // F13.1 ownership in every mode: DI share + RT probability + fallback
+    // probability * fallback share = 1 (the DI band is the same smoothstep).
+    {ReflectionSettings rt;for(float r=0;r<=1.0001f;r+=1.0f/64){
+        const float band=1-reflectionRTWeight(r,rt);
+        // RT reflections, non-legacy DI with the band.
+        CHECK(band+reflectionRTWeight(r,rt)+(1-reflectionRTWeight(r,rt))*reflectionFallbackEmissionShare(r,true,true,true,rt)==doctest::Approx(1));
+        // SSR or captured probe, DI with the band.
+        CHECK(band+reflectionFallbackEmissionShare(r,false,true,true,rt)==doctest::Approx(1));
+        // DI owns everything (no emitter-capable fallback).
+        CHECK(1+reflectionFallbackEmissionShare(r,false,true,false,rt)==doctest::Approx(1));
+        // Legacy lighting: reflections own everything, RT or not.
+        CHECK(reflectionRTWeight(r,rt)+(1-reflectionRTWeight(r,rt))*reflectionFallbackEmissionShare(r,true,false,true,rt)==doctest::Approx(1));
+        CHECK(reflectionFallbackEmissionShare(r,false,false,false,rt)==1);}
+     CHECK(reflectionFallbackEmissionShare(.04f,false,true,true,rt)==1);CHECK(reflectionFallbackEmissionShare(.8f,false,true,true,rt)==0);}
     s.rtRoughnessHigh=s.rtRoughnessLow;CHECK_FALSE(validReflectionSettings(s));
     auto surface=shiny();surface.roughness=std::numeric_limits<float>::quiet_NaN();CHECK_FALSE(sampleSpecular(surface,{.3,.4}).valid);
     surface=shiny();CHECK_FALSE(sampleSpecular(surface,{1,.4}).valid);
@@ -72,7 +89,12 @@ TEST_CASE("F13 AO oracle uses world radius and cosine visibility with no GI doub
     CHECK(composeSignalLighting(glm::vec3(2),{},glm::vec3(5),glm::vec3(7),glm::vec3(11),.5f,false)==glm::vec3(19.5f));
 }
 TEST_CASE("F13 static reflection probe parallax cube orientation and constant energy"){
-    const auto p=probe();REQUIRE(validReflectionProbe(p));CHECK(reflectionProbeWeight(p,{0,0,0})==1);CHECK(reflectionProbeWeight(p,{2,0,0})==0);
+    const auto p=probe();REQUIRE(validReflectionProbe(p));CHECK(reflectionProbeWeight(p,{0,0,0})==1);
+    // F13.5: the faces keep full weight; the fade (0.5 m) is outside the box.
+    CHECK(reflectionProbeWeight(p,{2,0,0})==1);CHECK(reflectionProbeWeight(p,{0,-1,0})==1);
+    CHECK(reflectionProbeWeight(p,{2.25f,0,0})==doctest::Approx(.5f));CHECK(reflectionProbeWeight(p,{2.5f,0,0})==0);
+    const auto fade=reflectionProbeParallax(p,{2.25f,0,0},{1,0,0});REQUIRE(fade);CHECK(fade->x==doctest::Approx(1)); // no backward projection
+    CHECK(reflectionProbeParallax(p,{0,-1,0},{0,1,0}));
     CHECK_FALSE(reflectionProbeParallax(p,{3,0,0},{0,0,1}));const auto direction=reflectionProbeParallax(p,{1,0,0},{0,0,1});REQUIRE(direction);
     CHECK(direction->x==doctest::Approx(1/std::sqrt(10.0)));CHECK(direction->z==doctest::Approx(3/std::sqrt(10.0)));
     for(u32 face=0;face<6;++face)for(const glm::vec2 uv:{glm::vec2(.2f,.3f),glm::vec2(.7f,.8f),glm::vec2(.5f)}){
@@ -103,10 +125,11 @@ TEST_CASE("F13 static probe hierarchy matches independently flattened world geom
     auto flat=instances;std::memcpy(flat[1].modelMatrix,glm::value_ptr(flatChild),64);
     std::vector<float> flatWorlds(32);for(u32 i=0;i<2;++i)std::memcpy(flatWorlds.data()+16*i,flat[i].modelMatrix,64);
     const std::array<GPUTransformNode,2> flatNodes{};std::vector<u32> flatSelected;reflectionProbeStaticSlots(flat,flatNodes,{},flatSelected);CHECK(flatSelected==selected);
-    std::array<GPUMeshInfo,1> meshes{};meshes[0].boundingSphere[3]=1;
+    std::array<MeshLocalBounds,1> meshes{};meshes[0]={glm::vec3(-1),glm::vec3(1)};
     const auto a=reflectionProbeWorldBounds(instances,meshes,worlds,selected),b=reflectionProbeWorldBounds(flat,meshes,flatWorlds,flatSelected);
     REQUIRE(a);REQUIRE(b);for(u32 k=0;k<3;++k){CHECK(a->minimum[k]==b->minimum[k]);CHECK(a->maximum[k]==b->maximum[k]);}
-    CHECK(a->minimum.x>98);CHECK(a->maximum.x>109); // Nothing belongs near identity/origin.
+    // Exact world AABB: parent cube at x 99..101, child scaled by -2 at 107: 105..109.
+    CHECK(a->minimum.x==doctest::Approx(99));CHECK(a->maximum.x==doctest::Approx(109)); // Nothing near identity/origin.
     std::vector<float> wrong(32);for(u32 i=0;i<2;++i)std::memcpy(wrong.data()+16*i,instances[i].modelMatrix,64);
     const auto placeholder=reflectionProbeWorldBounds(instances,meshes,wrong);REQUIRE(placeholder);CHECK(placeholder->minimum.x<0);
     // Static flag / visibility membership changes need no slot or topology move.
@@ -127,38 +150,35 @@ TEST_CASE("F13 animated ancestor excludes static children from raster and update
     const HierarchyView view{instances,nodes,motions,moving,offsets,children};std::vector<float> first,second;referenceWorlds(view,phases.data(),first);
     phases[1]=-1;referenceWorlds(view,phases.data(),second);
     CHECK(first[12]==13);CHECK(first[16+12]==15);CHECK(second[12]==7);CHECK(second[16+12]==5);
-    std::array<GPUMeshInfo,1> meshes{};meshes[0].boundingSphere[3]=.25f;
+    std::array<MeshLocalBounds,1> meshes{};meshes[0]={glm::vec3(-.25f),glm::vec3(.25f)};
     const auto a=reflectionProbeWorldBounds(instances,meshes,first),b=reflectionProbeWorldBounds(instances,meshes,second);
     REQUIRE(a);REQUIRE(b);CHECK(a->minimum.x>12);CHECK(b->maximum.x<8);
     // Removing MotionComponent restores both memberships without recreating nodes.
     reflectionProbeStaticSlots(instances,nodes,{},selected);CHECK(selected==std::vector<u32>{0,1});
 }
 
-TEST_CASE("F13 probe BRDF fit stays physical without concealing invalid weights"){
-    for(float roughness:{.5f,1.f})for(float nv:{.05f,.5f,1.f})for(float f0:{0.f,1.f}) {
+TEST_CASE("F13.5 tabulated split-sum DFG matches the independent BRDF quadrature"){
+    // Two references independent of the Hammersley table: the uniform
+    // solid-angle grid (reflectionReference, roughness >= 0.3 where the grid
+    // resolves the lobe) and stratified GGX importance sampling through
+    // sampleSpecular (all roughness). Unit radiance gives f0*A + B.
+    double worst=0;
+    for(float roughness:{.04f,.1f,.3f,.5f,.6f,.9f,1.f})for(float nv:{.1f,.3f,.47f,.8f,1.f})for(float f0:{0.f,.5f,1.f}) {
         auto s=shiny();s.roughness=roughness;s.albedo[0]=s.albedo[1]=s.albedo[2]=f0;
         s.viewDirection[0]=std::sqrt(1-nv*nv);s.viewDirection[2]=nv;
-        const auto bounded=reflectionProbeContribution(s,glm::vec3(1));
-        const auto reference=reflectionReference(s,256,512,white);
-        // Uniform solid-angle GGX quadrature is independent of the split-sum
-        // fit. Projecting a finite fit onto [0,1] cannot increase its absolute
-        // error against this physical integral; it is not an exact-fit claim.
-        const glm::vec4 r=roughness*glm::vec4(-1,-.0275f,-.572f,.022f)+glm::vec4(1,.0425f,1.04f,-.04f);
-        const float a=std::min(r.x*r.x,std::exp2(-9.28f*nv))*r.x+r.y;
-        const float raw=f0*(-1.04f*a+r.z)+(1.04f*a+r.w);
-        REQUIRE(reference.x>=0);REQUIRE(reference.x<=1);
-        CHECK(bounded.x>=0);CHECK(bounded.x<=1);
-        CHECK(std::abs(double(bounded.x)-reference.x)<=std::abs(double(raw)-reference.x)+1e-6);
-        if(roughness==1&&f0==0){CHECK(raw==doctest::Approx(-.0024f));CHECK(bounded.x==0);CHECK(reference.x>0);}
-        // A deliberately limited fit remains detectably approximate at rough
-        // normal incidence, rather than claiming all clamps solve its error.
-        if(roughness==1&&f0==1&&nv==1){
-            CHECK(reference.x==doctest::Approx(1-std::log(2.0)).epsilon(1e-5));
-            CHECK(bounded.x==doctest::Approx(.45f));
-        }
+        const auto lookup=reflectionProbeContribution(s,glm::vec3(1));CHECK(lookup.x>=0);CHECK(lookup.x<=1);
+        double sampled=0;constexpr u32 side=256;
+        for(u32 i=0;i<side;++i)for(u32 j=0;j<side;++j){const auto d=sampleSpecular(s,{(i+.5)/side,(j+.5)/side});if(d.valid)sampled+=d.weight.x;}
+        sampled/=double(side)*side;
+        CAPTURE(roughness);CAPTURE(nv);CAPTURE(f0);CAPTURE(lookup.x);CAPTURE(sampled);
+        CHECK(std::abs(double(lookup.x)-sampled)<=6e-3);worst=std::max(worst,std::abs(double(lookup.x)-sampled));
+        if(roughness>=.3f){const auto grid=reflectionReference(s,512,1024,white);CHECK(std::abs(double(lookup.x)-grid.x)<=6e-3);}
     }
-    auto corrupt=shiny();corrupt.albedo[0]=std::numeric_limits<float>::quiet_NaN();
-    CHECK_FALSE(std::isfinite(reflectionProbeContribution(corrupt,glm::vec3(1)).x));
+    MESSAGE("worst |DFG table - importance sampling| "<<worst);
+    // White rough conductor at normal incidence: 1 - ln 2, as the existing closed control.
+    auto s=shiny();CHECK(reflectionProbeContribution(s,glm::vec3(1)).x==doctest::Approx(1-std::log(2.0)).epsilon(5e-3));
+    // Invalid source radiance stays visible; the table never yields a nonfinite weight.
+    CHECK(reflectionProbeContribution(s,glm::vec3(-1)).x==0);
 }
 
 TEST_CASE("Probe storage rejects the complete out-of-range physical sum before HALF conversion") {

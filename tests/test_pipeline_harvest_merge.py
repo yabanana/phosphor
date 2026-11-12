@@ -1,6 +1,10 @@
 import importlib.util
 from pathlib import Path
 import unittest
+import json
+import subprocess
+import sys
+import tempfile
 
 spec = importlib.util.spec_from_file_location("merge_pipeline_harvests", Path(__file__).resolve().parents[1] / "tools/merge_pipeline_harvests.py")
 module = importlib.util.module_from_spec(spec)
@@ -8,6 +12,27 @@ spec.loader.exec_module(module)
 
 
 class HarvestMerge(unittest.TestCase):
+    def test_replacement_requires_actual_new_compute_records_and_preserves_linkage(self):
+        functions={"library_function_descriptors":[{"label":"d","library":"lib","name":"denoise_temporal"},
+            {"label":"r","library":"lib","name":"trace"}],
+            "specialized_function_descriptors":[{"label":"s","function_descriptor":"fnd:d","constant_values":[{"id":{"data":40},"value":{"data":2}}]}]}
+        old={"libraries":[{"label":"lib","path":"@PHOSPHOR_METALLIB@"}],"function_descriptors":functions,
+             "pipeline_descriptors":{"compute_pipeline_descriptors":[{"compute_function_descriptor":"fnd:d"},
+                {"compute_function_descriptor":"fnd:r","static_linking_descriptor":{"function_descriptors":["fnd:r"]}}]}}
+        new=json.loads(json.dumps(old));new["pipeline_descriptors"]["compute_pipeline_descriptors"]=[{"compute_function_descriptor":"fnd:s"}]
+        with tempfile.TemporaryDirectory() as directory:
+            folder=Path(directory);left=folder/"old.json";right=folder/"new.json";output=folder/"out.json"
+            left.write_text(json.dumps(old));right.write_text(json.dumps(new))
+            command=[sys.executable,str(Path(module.__file__)),"--output",str(output),"--replace-compute","denoise_temporal",str(left),str(right)]
+            result=subprocess.run(command,capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+            records=json.loads(output.read_text())["pipeline_descriptors"]["compute_pipeline_descriptors"]
+            self.assertEqual(records,[old["pipeline_descriptors"]["compute_pipeline_descriptors"][1],new["pipeline_descriptors"]["compute_pipeline_descriptors"][0]])
+            command[command.index("denoise_temporal")]="unharvested"
+            result=subprocess.run(command,capture_output=True,text=True)
+            self.assertNotEqual(result.returncode,0)
+            self.assertIn("missing actual harvested descriptors",result.stderr)
+
     def test_changed_library_id_reuses_same_function_label(self):
         def corpus(lib, name="trace"):
             return {"libraries": [{"label": lib, "path": "/build/phosphor.metallib"}], "function_descriptors": {"library_function_descriptors": [{"label": "f", "library": lib, "name": name}]}}

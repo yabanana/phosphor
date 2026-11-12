@@ -11,10 +11,16 @@ class DenoisePasses {
 public:
     DenoisePasses(MetalContext&,PipelineCache&,const LaunchOptions&);
     ~DenoisePasses();
-    void prepareFrame(const ShadowPasses::Frame&,u64 signalEpoch,const std::array<u64,4>& currentRevisions);
+    void prepareFrame(const ShadowPasses::Frame&,u64 signalEpoch,const std::array<u64,4>& currentRevisions,
+                      bool useDirectLighting,
+                      u32 softSignals=0,bool softChange=false,bool stationary=false);
     void invalidateAll(const char* reason);
+    /// Frames the signal's history of the current view holds, counting this one (1 = reset now).
+    [[nodiscard]] u32 historyFrames(u32 signal)const;
     rg::TextureRef addSignal(rg::RenderGraph&,u32 signal,rg::TextureRef raw,rg::TextureRef motion,
                             rg::BufferRef surfaces,rg::BufferRef specularMetadata={});
+    std::array<rg::TextureRef,3> addDiffuseSignals(rg::RenderGraph&,std::array<rg::TextureRef,3> raw,
+                                                rg::TextureRef motion,rg::BufferRef surfaces,bool useDirectLighting);
     void bindFrame(MetalGraphExecutor&);
     [[nodiscard]] u64 version() const;
     [[nodiscard]] bool check(u32 slot) const;

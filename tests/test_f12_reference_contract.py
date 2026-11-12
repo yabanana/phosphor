@@ -43,6 +43,45 @@ class ReferenceContract(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,"visibility/shadow roles"):
                     reference.render(args)
 
+    def test_primary_uv_derivative_matches_perspective_finite_difference(self):
+        import math
+        camera={"position":[0,0,0],"direction":[0,0,-1],"up":[0,1,0],
+                "width":128,"height":72,"fov_y_radians":math.pi/3}
+        vertices=[[-1,-1,-2],[2,-1,-5],[0,2,-3]]
+        uv=[[0,0],[1,0],[.2,1]]
+        pixel=[62.5,34.5]
+        value,dx,dy=reference.primary_uv_footprint(camera,vertices,uv,pixel)
+        step=1e-3
+        for axis,expected in enumerate([dx,dy]):
+            low=pixel.copy();high=pixel.copy();low[axis]-=step;high[axis]+=step
+            a=reference.primary_uv_footprint(camera,vertices,uv,low)[0]
+            b=reference.primary_uv_footprint(camera,vertices,uv,high)[0]
+            for c in range(2):self.assertAlmostEqual((b[c]-a[c])/(2*step),expected[c],places=9)
+        permuted=reference.primary_uv_footprint(camera,list(reversed(vertices)),list(reversed(uv)),pixel)
+        for actual,expected in zip(permuted,[value,dx,dy]):
+            for a,b in zip(actual,expected):self.assertAlmostEqual(a,b,places=12)
+        with self.assertRaisesRegex(ValueError,"degenerate projected"):
+            reference.primary_uv_footprint(camera,[vertices[0]]*3,uv,pixel)
+
+    def test_mip_resources_validate_extent_and_paths(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=pathlib.Path(folder)
+            texture={"id":0,"width":2,"height":2,"rgb":"base.pfm","alpha":"base.pfm",
+                     "mip_chain_complete":True,
+                     "mips":[{"level":1,"width":1,"height":1,"rgb":"mip.pfm","alpha":"mip.pfm"}]}
+            data={"schema":1,"linear":True,"instances":[],"meshes":[],"textures":[texture],
+                  "materials":[],"sampled_lights":[]}
+            def write(): (root/"scene.json").write_text(json.dumps(data))
+            (root/"base.pfm").write_bytes(b"fixture")
+            write()
+            with self.assertRaisesRegex(ValueError,"missing exact"): reference.snapshot(root)
+            (root/"mip.pfm").write_bytes(b"fixture")
+            reference.snapshot(root)
+            texture["mips"][0]["width"]=2;write()
+            with self.assertRaisesRegex(ValueError,"mip extent"): reference.snapshot(root)
+            texture["mips"][0]["width"]=1;texture["mips"][0]["rgb"]="../escape.pfm";write()
+            with self.assertRaisesRegex(ValueError,"escaped"): reference.snapshot(root)
+
     def test_triangle_dedup_uses_material_metadata_provenance(self):
         standalone={"type":6,"flags":0,"material":reference.INVALID}
         extracted={"type":6,"flags":2,"material":0}

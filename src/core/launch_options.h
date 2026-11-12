@@ -344,8 +344,50 @@ struct LaunchOptions {
     // F10-F12: writing presets only; numerical adoption requires tester evidence.
     bool atmosphere=false,fog=false,clouds=false,cloudFullRate=false;
     float atmoDayLength=1200,atmoStartHour=12,planetCameraHeight=-1;
+    // F14.1 extreme-parameter validation: scale the default Hillaire medium.
+    // Unset (<0 for g/albedo) keeps the defaults; the oracle reads the actual GPU block.
+    float atmoScatteringScale=1,atmoOzoneScale=1,atmoMieG=-2,atmoGroundAlbedo=-1;
+    // F13.6 declared path regularisation of the reflection light connection,
+    // alpha' = max(alpha_secondary, k * alpha_camera). Owner decision D5
+    // (2026-11-11): k = 8, the smallest scale whose roughness fixture passes
+    // against its independent clip on every seed (k = 4 did not).
+    float reflectionRegularizationScale=8;
+    u32 specularAtrousIterations=2; // capped by the denoiser's a-trous iterations; 2 measured: -1.5 ms, fixtures unchanged
+    // Capped likewise; fewer than the denoiser's disables the batched diffuse
+    // final stride. 2 measured: ao-cavity-rtao p95 0.0101 -> 0.0070 (less blur).
+    u32 aoAtrousIterations=2;
+    // History cap of the soft (specular) signal, reached only in stationary frames.
+    u32 specularMaxHistory=128;
+    // RT reflection samples per near-specular pixel (roughness below
+    // reflectionBoostRoughness) during the first frames of a specular history
+    // (single-sample custom path); 1 disables the boost. 8x8 below 0.2 measured:
+    // every F13 fixture improves, Sponza GPU p95 unchanged, p99 +0.5 ms.
+    u32 reflectionBoostSamples=8,reflectionBoostFrames=8;float reflectionBoostRoughness=0.2f;
+    // ssrRoughSteps: budget default measured on Sponza 1080p and the F13
+    // fixtures (0 = 64 SSR steps). aoRays 0 = the preset's RTAO rays (4, or 2
+    // reduced): owner decision D2 keeps the ray budgets, so the budget closure
+    // does not lower them.
+    u32 ssrRoughSteps=16,aoRays=0;
+    // DDGI irradiance is a deterministic probe interpolation per pixel (no
+    // Monte Carlo noise), so the custom denoiser leaves it unfiltered unless
+    // --ddgi-denoise on; stochastic GI (cache, ReSTIR) is always denoised.
+    bool ddgiDenoise=false;
     u32 timeJumpEveryN=0,debugVolumeCorrupt=0;
+    // F14.2/F14.3 validation controls; unset values keep the product defaults.
+    // fogDensity/fogHeightFalloff < 0 keep FogSettings; fogFixtureFalloff >= 0
+    // selects the analytic height fixture (--fog-height-fixture K).
+    float fogDensity=-1,fogHeightFalloff=-1,fogFar=-1,fogFixtureFalloff=-1;
+    bool fogHistory=true;u32 fogLocalSamples=0;u32 fogGrid[3]{0,0,0};
+    // Camera controls for non-scripted fixtures: climb (m/s) from
+    // --planet-camera-height, absolute pitch, yaw rate (deg/s) and aiming at
+    // the sun with a pitch offset (deg; the sun lies that far below centre).
+    float cameraClimb=0,cameraPitch=-1000,cameraYawRate=0,cameraAimSun=-1000;
+    u32 cloudMarchSteps=0; // F14.3 validation control: view-ray steps (0 keeps CloudSettings)
     std::string volumeOracle;bool fogHomogeneous=false,atmoFreezeClock=false;
+    // F13.3 spike: run the native SDK on the product inputs in the controlled
+    // diagnostic domain (measurement only, never production qualification).
+    bool metalfxNativeDiagnostic=false;
+    bool debugProbeNoParallax=false; // F13.5 negative control: direction-only probe lookup
     std::string denoisedFixture,denoisedFixtureOutput;bool denoisedFixturePreExposed=false,denoisedFixtureAutoExposure=false,denoisedFixtureManualExposureControl=false;u32 denoisedFixturePrewarmMs=120000;
     ReflectionMode reflections=ReflectionMode::Off;
     AoMode ao=AoMode::Off;
@@ -367,7 +409,7 @@ struct LaunchOptions {
     bool giProbeAnchor=false;
     float giAnchor[3]{},giSpacing=0;
     u32 giGrid[3]{};
-    u32 exportReferenceFrame=0, captureLinearFrame=0, captureLinearSignal=0; // 0 HDR, 1 indirect diffuse, 2 direct; tester reserves 3 shadow, 4 world position, 5 world normal; 6 specular, 7 AO, 8 filtered indirect diffuse Lo, 9 filtered AO visibility, 10 filtered specular Lo
+    u32 exportReferenceFrame=0, captureLinearFrame=0, captureLinearSignal=0; // 0 HDR, 1 indirect diffuse, 2 direct; tester reserves 3 shadow, 4 world position, 5 world normal; 6 specular, 7 AO, 8 filtered indirect diffuse Lo, 9 filtered AO visibility, 10 filtered specular Lo, 11 composed cloud transmittance
     // F7/F8 renderer, temporal reconstruction, capture and bounded diagnostics.
     std::string scenePath;
     bool visibility = false, materialBinning = false; // measured baseline; specialization stays opt-in
@@ -407,5 +449,16 @@ struct LaunchOptions {
 /// `benchCount` bounds the accepted --bench values.
 bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
                         LaunchOptions& out, std::string& error);
+
+/// F13.1: whether a reflection path can see emissive geometry (RT rays or
+/// their SSR fallback, SSR, a captured probe). Then primary DI keeps only the
+/// roughness band of an emitter's specular lobe and reflections own the rest.
+inline bool reflectionPathsSeeEmitters(const LaunchOptions& o) {
+    return o.reflections == ReflectionMode::RT || o.reflections == ReflectionMode::SSR ||
+           (o.reflections == ReflectionMode::Probes && o.reflectionCaptureProbe);
+}
+
+/// Whether the F13 custom denoiser filters the GI signal (see ddgiDenoise).
+inline bool denoisesGi(const LaunchOptions& o) { return o.gi != GiMode::Off && (o.gi != GiMode::DDGI || o.ddgiDenoise); }
 
 } // namespace phosphor

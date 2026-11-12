@@ -14,6 +14,11 @@ bool validReflectionSettings(const ReflectionSettings& s){return std::isfinite(s
     s.rtRoughnessLow>=0&&s.rtRoughnessHigh>s.rtRoughnessLow&&s.rtRoughnessHigh<=1&&s.ssrSteps>=2&&s.ssrSteps<=512&&s.ssrBinarySteps<=16;}
 float reflectionRTWeight(float r,const ReflectionSettings& s){if(!(s.flags&REFLECTION_ENABLE_RT)||!std::isfinite(r))return 0;
     const float x=std::clamp((r-s.rtRoughnessLow)/(s.rtRoughnessHigh-s.rtRoughnessLow),0.f,1.f);return 1-x*x*(3-2*x);}
+float emitterSpecularDIWeight(float r,const ReflectionSettings& s){if(!(s.flags&REFLECTION_ENABLE_RT))return 1;if(!std::isfinite(r))return 0;
+    const float x=std::clamp((r-s.rtRoughnessLow)/(s.rtRoughnessHigh-s.rtRoughnessLow),0.f,1.f);return x*x*(3-2*x);}
+float reflectionFallbackEmissionShare(float r,bool rtActive,bool diIntegratesEmitters,bool band,const ReflectionSettings& s){
+    if(!diIntegratesEmitters)return 1;if(rtActive||!band)return 0;if(!std::isfinite(r))return 0;
+    const float x=std::clamp((r-s.rtRoughnessLow)/(s.rtRoughnessHigh-s.rtRoughnessLow),0.f,1.f);return 1-x*x*(3-2*x);}
 glm::dvec3 specularBRDF(const GPUDISurface& s,glm::dvec3 wi){
     auto n=v3(s.shadingNormal),v=v3(s.viewDirection);if(!s.valid||!finite(n)||!finite(v)||!finite(wi)||glm::dot(n,n)<=0||glm::dot(v,v)<=0||glm::dot(wi,wi)<=0)return {};
     n=glm::normalize(n);v=glm::normalize(v);wi=glm::normalize(wi);const double nl=glm::dot(n,wi),nv=glm::dot(n,v);

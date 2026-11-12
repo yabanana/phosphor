@@ -1056,3 +1056,241 @@ selected and no later phase is entered.
 
 Evidence and limits: [follow-up](implementation/F13-F14-BUDGET-CLOSURE-2026-10-08.md),
 [ledger](results/F13-F14-budget-followup-M5Max-2026-10-08.json).
+
+## 2026-11-05 — F13/F14 dynamic Sponza follow-up (M5 Max; phase gates open)
+
+Full native1080p Sponza, dynamic camera/64s solar cycle, mesh visibility,
+ReSTIR DI, solar RT, dense DDGI16×8×16/64rays, RT reflections/RTAO,
+custom denoising and atmosphere/fog/clouds. 128warmup+256measured frames,
+serial GPU timing, no UI/vsync/validation/capture, AC power, DwarfStar inactive.
+Same-binary generic/unbatched/reference-stride4 controls retain all sample,
+filter and rejection thresholds. Compatible compiler/AOT32023.921 results:
+
+| A/B/A replica | Baseline p50 drift | GPU p50 reduction | Candidate GPU p50 / p95 / p99 ms |
+|---|---:|---:|---|
+| 1 | 4.40% | 10.59% | 28.5974 / 29.3456 / 29.6170 |
+| 2 | 1.48% | 13.05% | 29.3388 / 30.8008 / 30.9929 |
+| 3 | 0.34% | 10.53% | 29.8226 / 30.9616 / 31.1401 |
+
+All nine runs have zero steady GPU allocations and zero archive misses or
+unavailable requests. An additional runtime-compiler series has three valid
+11.95–13.47% reductions; it is kept distinct from the accepted archive series.
+**Every candidate still fails 1000/60ms.** These are measured cost reductions,
+not a 60fps or full phase acceptance claim. The later native-lifetime guard
+extension is not called by this custom workload (zero native requests/encodes).
+
+Six384-frame API/shader clips pass the unchanged5e-5 equivalence cap (worst
+1.36190e-6); all three camera cuts have actual completed GPU reset witnesses.
+The dynamic-sun sequence conservatively resets lighting history every frame.
+Independent broad GGX/GI references and the native HDR1% gate remain open;
+current-runtime F9 failures reproduce on the unmodified baseline. Full methods,
+rejected trials, raw locations and per-run hashes: [follow-up](implementation/F13-F14-DYNAMIC-SPONZA-2026-11-05.md)
+and [ledger](results/F13-F14-dynamic-Sponza-M5Max-2026-11-05.json). No F15.
+
+## 2026-11-10 — Empty local estimator on dynamic Sponza (F13/F14)
+
+M5 Max, macOS 27.3 (26C5035r), active AOT archive. Full 1080p workload with
+128 warmup and 256 measured frames. The scene has zero sampled local emitters,
+so the optimized graph reuses its zero texture and drops the local estimator
+passes. Three valid A/B/A replicas reduce GPU p50 by 15.30%, 11.85% and 15.86%.
+Candidate GPU p95 is 24.8613, 27.3878 and 25.6337 ms. All nine runs have zero
+steady GPU allocations. The 16.67 ms gate remains open. The separate temporal
+arithmetic experiment was removed after inconclusive performance results.
+See the [dynamic Sponza follow-up](implementation/F13-F14-DYNAMIC-SPONZA-2026-11-10.md)
+for the unchanged image checks, reference receiver validation and raw paths.
+
+### Empty DI denoiser follow-up
+
+Bypassing the filter when local radiance is identically zero reduces GPU p50
+by a further 3.98–5.88% in three valid A/B/A replicas. GPU p95 is 23.4450,
+23.6283 and 23.4732 ms at 1080p. Every run retains the full scene and the same
+ray budgets, with zero steady GPU allocations. Six validation runs stay within
+the original image gate. A separate 40-frame scene-switch sequence verifies
+DI history invalidation and recovery. The 16.67 ms gate remains open.
+
+### Share the final GI and AO filter pass
+
+Against the preceding zero-DI-denoising binary, two valid 1080p A/B/A
+pairs reduce GPU p50 by 5.91% and 5.23%. The shared stride takes about
+1.07 ms at p50, down from 2.14 ms summed across the separate GI and AO passes.
+Full GPU p95 is 22.6877 and 23.1716 ms. A third pair is rejected at 6.82%
+baseline drift. Every run has zero steady GPU allocations and AOT misses.
+The 16.67 ms gate remains open.
+
+## 2026-11-11 — F13/F14 closure budget, Sponza 1080p full path (phase/f13-f14-closure)
+
+M5 Max, macOS 27.3, toolchain 32023.922, built with the factory flag on and
+shader debug info off. The full path runs RT shadows, ReSTIR DI, DDGI 16x8x16,
+RT reflections, RTAO, the custom denoiser, atmosphere, fog, clouds and post.
+Each run uses `--gpu-timing-serial` with 128 warm-up and 256 measured frames.
+Binaries run interleaved, separated by 20 s, under the same toolchain and
+options. Raw runs are in `build/regress-20261111/budget-final{,2}/`.
+
+| binary | GPU p50 | GPU p95 | frame p95 | runs |
+|---|---:|---:|---:|---|
+| base 2b285df | 21.46 | 22.43 / 23.09 | 23.17 / 24.18 | 2 clean (1 disturbed) |
+| 954034b | 17.33–17.84 | 18.58–19.30 | 19.37–20.15 | 5 clean |
+| 42adefd (HEAD) | 13.63–14.27 | 14.91–15.39 | 15.74–16.36 | 5 clean |
+
+Every run has zero steady GPU allocations. In one disturbed window all
+binaries were 2–4 ms slower: rep 2 of the first battery moved 954034b
+18.61 → 21.74 ms and HEAD to 17.36 ms. That window is excluded and reported
+here. Three more interleaved repetitions with the load logged reproduce the
+clean numbers.
+
+The 16.67 ms gate is met at native 1080p on this M5 Max. GPU p95 has about
+1.3 ms of margin; frame p95 has 0.3–0.9 ms. The gain comes from removing
+check passes and the reflection reduction, two specular and two AO strides,
+the shorter rough SSR march, two RTAO rays, the compact denoise history and
+unfiltered DDGI. `docs/opt-log.md` lists each change and its fixture checks.
+This is development evidence on one device, not certification for other
+devices.
+
+### Correction after owner decision D2 (same ray budgets), HEAD c152b99
+
+The table above was measured at 42adefd, whose default had cut RTAO from
+4 rays to 2. D2 keeps ray budgets, so c152b99 restores the preset's 4 rays
+(RTAO 1.18 ms at p50). HEAD also has the F13.6 quality changes: stationary
+history, the near-specular boost and k = 8. The measurement is interleaved
+with 954034b, three repetitions, with the load logged; the machine carried
+light Xcode, Rust and ANE activity (`build/regress-20261111/budget-d2/`).
+
+| binary | GPU p50 | GPU p95 | GPU p99 | frame p95 |
+|---|---:|---:|---:|---:|
+| 954034b | 17.31–18.26 | 18.57–18.72 | 18.64–18.99 | 19.32–19.67 |
+| c152b99 | 14.82–14.90 | 16.01–16.06 | 16.83–16.87 | 16.73–16.89 |
+
+GPU p95, the metric this budget has used throughout, meets 16.67 ms with
+about 0.6 ms of margin. Frame p95 (serial GPU timing) and GPU p99 are
+0.1–0.2 ms over. The p99 includes the frames after camera cuts that use
+the near-specular boost. There are zero steady GPU allocations.
+
+## F14.2 froxel fog cost per volume (2026-11-12, M5 Max, HEAD 79777cb)
+
+Measurement only, not a quality gate. Binary sha256 9ec0d6a8…, native
+1080p, `--gpu-timing-serial --no-vsync`, 128 warm-up and 256 measured
+frames. Order per repetition is A/B/A (the default first and last), three
+repetitions, 20 s gaps, load logged (1-minute load 1.3–4.6). The reference
+clip render was paused, so the machine was quiet. Every run had 0 GPU
+allocations. Values are medians over runs, in ms
+(`build/f14-fog-cost-20261112/`, script and table in the session
+scratchpad).
+
+Sponza: full preset with ReSTIR, DDGI, RT reflections, RTAO, clouds, the
+temporal camera script and a 64 s day; 0 local lights. Fixture: the F13
+`moving-light` scene in dense fog (0.05/m), 12 local lights.
+
+| configuration | source min | source p50 | source mean | source p95 | composition p50 | frame GPU p50 | frame GPU p95 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Sponza default (64×36×32, 500 m) | 0.099 | 0.105 | 0.730 | 1.572 | 0.093 | 15.13 | 16.23 |
+| Sponza grid 32×18×16 | 0.050 | 0.054 | 0.526 | 2.164 | 0.083 | 14.47 | 16.74 |
+| Sponza grid 128×72×64 | 1.512 | 2.011 | 1.991 | 2.148 | 0.184 | 16.50 | 17.37 |
+| Sponza range 120 m | 0.111 | 0.118 | 0.118 | 0.125 | 0.093 | 14.39 | 15.21 |
+| Sponza range 2000 m | 0.980 | 1.421 | 1.426 | 1.583 | 0.093 | 15.78 | 16.74 |
+| fixture, 1 local sample | 0.085 | 0.092 | 0.095 | 0.115 | 0.090 | 12.50 | 13.15 |
+| fixture, 4 local samples | 0.135 | 0.143 | 0.144 | 0.157 | 0.090 | 12.54 | 13.19 |
+| fixture, 16 local samples | 0.336 | 0.342 | 0.343 | 0.355 | 0.090 | 12.74 | 13.35 |
+
+"Source" is the `Froxel source with independent RT visibility` pass.
+- Temporal reuse, integration and snapshot stay at or below 0.06 ms at the
+  p50 for 64×36×32 and below. With 128×72×64 the temporal pass costs 0.094
+  and integration 0.056.
+- Composition scales with the grid only: 0.093 → 0.184 ms at 8× the cells.
+
+Findings:
+- **The froxel source dominates and is bimodal on Sponza.** Cheap frames
+  cost about 0.1 ms. Expensive frames cost 1.5–2.2 ms. The share of
+  expensive frames depends on the configuration:
+  - none at a 120 m range;
+  - about 40% at the default and about 20% at 32×18×16;
+  - all frames at a 2000 m range and at 128×72×64.
+
+  The cost is the per-froxel RT visibility ray (sun, moon, local lights).
+  The report has no per-frame pass times, so which camera pose or froxel
+  population triggers the expensive state has not been isolated. Cell count
+  alone does not explain it: 32×18×16 has a higher p95 than the default.
+- At the default, the expensive frames move Sponza's frame GPU p95 by about
+  1 ms (16.23 at 500 m against 15.21 at 120 m).
+- Local light samples cost about 0.017 ms per extra sample per froxel at
+  64×36×32: +0.05 ms for 4, +0.25 ms for 16.
+
+A per-frame pass timeline and an investigation of the RT visibility cost
+are candidates, not activated work.
+
+## F13/F14 closure budget check, c152b99 vs 75c0b6e (2026-11-12, M5 Max)
+
+Same Sponza 1080p protocol as the D2 entry above: every feature, preset
+rays, `--gpu-timing-serial --no-vsync`, 128 warm-up and 256 measured frames.
+The binaries alternate base/new for 4 repetitions with 20 s gaps (sha256
+95777d0b… and 6a84dfb8…; `build/budget-final-20261112/`). The machine was
+not quiet: a virtual machine that is not part of this work used about two
+cores throughout (1-minute load 5.4–7.7), and the battery was charging on
+the 80 W adapter. Every run had 0 GPU allocations.
+
+| rep | c152b99 GPU p50 / p95 | 75c0b6e GPU p50 / p95 | frame p95 base / new |
+|---|---|---|---|
+| 1 | 15.30 / 16.54 | 15.30 / 16.51 | 17.60 / 17.46 |
+| 2 | 15.21 / 16.30 | 15.14 / 16.34 | 17.22 / 17.25 |
+| 3 | 15.57 / 16.67 | 20.91 / 23.37 | 17.60 / 24.40 |
+| 4 | 15.94 / 17.66 | 18.11 / 19.80 | 18.64 / 20.94 |
+
+In repetitions 3 and 4 every pass of the new binary scales together, by
+about 1.5× in repetition 3, including passes whose code did not change: the
+physical sky 0.67 → 1.09 ms and solar RT visibility 0.39 → 0.60 ms. The base
+also drifts up in repetition 4. This is a clock-state change, not a code
+cost, so those pairs are rejected. In the two undisturbed pairs the binaries
+match within 0.04 ms at the p95: the F13.1 emitter ownership, the overflow
+emission attachment, the F13.5 probe box and the DFG table add no
+measurable frame cost.
+
+Both binaries read about 0.3–0.5 ms higher than the quiet-machine D2
+measurement (16.01–16.06 ms). Under this load, GPU p95 is 16.30–16.54 ms in
+the accepted pairs, against the 16.67 ms gate. The absolute gate needs a
+repeat on a quiet machine with the battery not charging.
+
+### Absolute repeats of 75c0b6e (same day)
+
+Three runs of the final binary alone, same protocol, 20 s gaps, load logged.
+
+| window | GPU p50 | GPU p95 | other load | verdict |
+|---|---|---|---|---|
+| A (`build/budget-abs-20261112/`) | 15.24–15.32 | 16.69 / 16.42 / 16.48 | the corpus runner's metric pass (one CPU core, large arrays); battery charging | 2 of 3 under 16.67 ms, run 1 over by 0.02 ms |
+| B (`build/budget-abs2-20261112/`) | 16.16–16.33 | 19.03 / 19.07 / 17.87 | another project's sustained native GPU test, `mediaanalysisd`, Neural Engine service at about 99% CPU; battery charging | rejected: shared GPU |
+
+The physical sky pass reads 0.666–0.672 ms in both windows, as on the quiet
+D2 day (0.667–0.670 ms), so the clock state did not change. The extra time
+sits in the memory-bound passes: `F13 reflection sample 0` is 2.62 ms quiet,
+2.75–2.78 ms in window A and 2.86–2.93 ms in window B. The interleaved pairs
+above show the same environment cost on c152b99. The absolute gate for
+75c0b6e is therefore not yet measured on a quiet machine: what is measured is
+parity with c152b99 (within 0.04 ms) and c152b99 at 16.01–16.06 ms quiet.
+
+### Quiet-machine pairs (same day, 18:50–19:00)
+
+The run started only after two minutes with no other project's GPU or cargo
+job, the battery past charging and a 1-minute load under 3
+(`build/budget-quiet-20261112/`, order base/new). The physical sky pass does
+the same work every frame, so its p95 is a contention sentinel: it reads
+0.674–0.677 ms in every clean run.
+
+| rep | c152b99 GPU p50 / p95 | 75c0b6e GPU p50 / p95 | sky p95 base / new |
+|---|---|---|---|
+| 1 | 14.84 / 15.98 | 14.88 / 15.98 | 0.677 / 0.676 |
+| 2 | 14.82 / 15.96 | 14.86 / 16.03 | 0.676 / 0.676 |
+| 3 | 14.86 / 15.96 | 14.86 / 15.99 | 0.676 / 0.674 |
+| 4 | 14.87 / 15.99 | 15.03 / **16.86** | 0.677 / **0.770** (max 1.11) |
+
+Run 4 of 75c0b6e has the p50 of the others but the p95 of many unrelated
+passes rises together (denoise 2 temporal 1.28 → 1.67 ms, DDGI max 0.79 ms
+against 0.33), and so does the constant-work sky pass: a few frames were
+slowed from outside. A reversed-order repeat (new/base, under `caffeinate`,
+`build/budget-quiet2-20261112/`) reproduces the signature on both binaries:
+WindowServer held about 42% CPU, the sky p95 read 0.76–1.08 ms, and GPU p95
+was 16.55–17.30 ms for c152b99 and 16.99–17.41 ms for 75c0b6e. The source of
+the run-4 burst itself was not identified (top process corebrightnessd at 6%).
+
+Verdict: in the three uncontended pairs 75c0b6e reads 15.98–16.03 ms GPU p95,
+0.64–0.69 ms under the 16.67 ms gate, within 0.07 ms of c152b99. The only
+consistent per-pass difference is `F13 reflection sample 0`, +0.03 ms at the
+p50 (2.62 → 2.65 ms), from the changes after c152b99 (not isolated further). Frame p95 (serial
+timing) is 16.71–16.79 ms, 0.04–0.12 ms over, as for c152b99 in the D2 entry.

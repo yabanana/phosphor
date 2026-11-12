@@ -52,7 +52,9 @@ kernel void ao_gtao(constant GPUAOParams& p [[buffer(0)]],const device GPUDISurf
         const uint slices=clamp(p.slices,1u,16u),steps=clamp(p.steps,1u,32u);const float rotation=giRandom(seed);
         for(uint slice=0;slice<slices;++slice){const float phi=M_PI_F*(float(slice)+rotation)/float(slices);const float3 axis=t*cos(phi)+b*sin(phi);
             const float4 clip=reflectionMatrix(p.viewProjection)*float4(point+axis,1),center=reflectionMatrix(p.viewProjection)*float4(point,1);
-            float2 screen=(clip.xy/max(clip.w,1e-8f)-center.xy/max(center.w,1e-8f))*float2(p.width*.5f,-p.height*.5f);
+            // float(): negating the unsigned height first wraps it to ~2^32 and
+            // collapses every slice onto the screen's vertical axis.
+            float2 screen=(clip.xy/max(clip.w,1e-8f)-center.xy/max(center.w,1e-8f))*float2(float(p.width)*.5f,-float(p.height)*.5f);
             if(dot(screen,screen)<1e-12f)screen=float2(cos(phi),sin(phi));else screen=normalize(screen);
             float positive=M_PI_F,negative=M_PI_F;
             for(uint side=0;side<2;++side){float horizonCos=-1.0f,horizonDistance=0;

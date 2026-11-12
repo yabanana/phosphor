@@ -53,7 +53,7 @@ def intersect(tris, origin, direction, max_t=1e30):
 
 
 def ray(camera, x, y):
-    forward=np.asarray(camera['direction']);forward/=np.linalg.norm(forward)
+    forward=np.asarray(camera['direction'],dtype=float);forward=forward/np.linalg.norm(forward)
     right=np.cross(forward,camera['up']);right/=np.linalg.norm(right);up=np.cross(right,forward)
     sx=(2*x/camera['width']-1)*camera['width']/camera['height']*math.tan(camera['fov_y_radians']/2)
     sy=(1-2*y/camera['height'])*math.tan(camera['fov_y_radians']/2)

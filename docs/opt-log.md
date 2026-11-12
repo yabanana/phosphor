@@ -2072,3 +2072,157 @@ The initial metadata-bit collision was caught by pixel comparison and fixed
 before acceptance. The original wider-stride kernel remains selected. Three
 of six frozen A/B/A pairs pass drift and show25.73–31.40% lower GPU p50;
 all failures and other pairs are retained. The60fps gate is still open.
+
+## 2026-11-05 — Selected F13 cost experiments on dynamic Sponza
+
+Targeted work within the owner's F13/F14 closure request; no OPT catalog or
+later phase is activated. The baseline shows denoise around half the complete
+1080p GPU span. All resolution/ray/tap/quality budgets remain unchanged.
+
+| Experiment | Result | Disposition |
+|---|---|---|
+| Cache stride4 guides only (13.5KiB) | Image equivalence passes; first timing series drifts6.14% against5% cap | Timing inconclusive; retained. Guide path is included in the subsequently measured combined candidate. |
+| Increase generic temporal/checker groups8→32 | Valid3.46% drift; full frame regresses2.61% | Rejected and removed. |
+| Per-signal kernel constant40 | Valid0.24% drift; full-frame p50 improves4.04%; image cap passes | Selected for combined candidate. |
+| Share final DI/GI/AO geometry weights | Valid0.67% drift; full-frame p50 improves7.00%;128-frame worst normalized error8.48e-8 | Selected for combined candidate; histories and signal variance/color weights stay separate. |
+| Combined specialization/guide cache/diffuse final pass | Three valid runtime pairs improve11.95–13.47%; three valid compatible-AOT pairs improve10.53–13.05% | Measured candidate retained on the review branch; full closure/merge still gated. |
+
+The final three-view384-frame equivalence corpus passes unchanged caps, including
+camera cuts and forced Apple9 capabilities on M5. Compatible runtime/AOT32-frame
+outputs are bit-identical. No new general batching/scheduling system is added.
+Native HDR, the16.67ms target, independent dynamic references and reproduced
+current-runtime F9 failures remain open; no tolerance is widened to pass them.
+Details and all raw trial paths: [dynamic Sponza follow-up](implementation/F13-F14-DYNAMIC-SPONZA-2026-11-05.md).
+
+## 2026-11-10 — Local estimator and temporal filter experiments
+
+The exact temporal arithmetic experiment preserves every pixel but its
+full-frame p50 changes range from a 0.68% regression to a 0.87% improvement.
+The experiment is removed. On Sponza the empty local-light estimator can use
+zero radiance directly while retaining the guide graph and view invalidation.
+That change preserves image equality and saves 11.85–15.86% GPU p50 across three
+valid 1080p A/B/A pairs. GPU p95 remains 24.86–27.39 ms. The measurements and
+retained failures are in the [follow-up](implementation/F13-F14-DYNAMIC-SPONZA-2026-11-10.md).
+
+The follow-up bypasses denoising of the exactly zero local signal. It preserves
+scene-switch output and resets DI history on reintroduction. Three valid
+A/B/A pairs reduce GPU p50 a further 3.98–5.88%, with GPU p95 23.45–23.63 ms.
+The independent diffuse estimator pilot still fails the 2% convergence gate
+at 1,024 spp. The retained evidence is in the
+[dynamic Sponza follow-up](implementation/F13-F14-DYNAMIC-SPONZA-2026-11-10.md#follow-up-on-the-preliminary-gates).
+
+The final diffuse stride now shares geometric weights between GI and AO even
+when the local DI signal is absent. AOT specializes the two resource layouts,
+with separate histories and radiance weights. Two valid A/B/A replicas reduce
+GPU p50 by 5.23–5.91%. The 16.67 ms frame target remains open. The
+[follow-up](implementation/F13-F14-DYNAMIC-SPONZA-2026-11-10.md#shared-final-diffuse-denoising-pass)
+records the discarded timing pair and image checks.
+
+### Rejected variance storage and normal-power trials
+
+Three valid full-preset A/B/A pairs each fail to show a repeatable gain:
+R32Float spatial variance gives +0.22%, +0.20%, −2.23% GPU p50; six squarings
+for the default normal exponent give +0.32%, −3.42%, −0.15%.
+Both changes were removed and the baseline rebuilt and retested (nine CTest
+groups). Frozen evidence and the independent reference-domain finding are in
+the [follow-up](implementation/F13-F14-DYNAMIC-SPONZA-2026-11-10.md#reference-material-domain-and-rejected-cost-experiments).
+
+### F13/F14 closure budget (2026-11-11, phase/f13-f14-closure)
+
+Sponza 1080p full path, protocol of the budget closure (`--gpu-timing-serial`,
+256 frames after 128 warm-up), M5 Max, toolchain 32023.922. Baseline binary
+2b285df built with the same options. Quality is judged on the frozen D4 ROI
+configs against the independent F13 clips; F8/F14 gates are unchanged.
+
+- **Check passes only with `--debug-lighting`** (7c2f285). Three A/B/A pairs:
+  GPU p50 22.02/22.10 → 20.16 ms, p95 24.5/24.3 → 21.62 ms. Adopted, pixels
+  unchanged.
+- **Lobe-bounded specular filter and per-pixel specular history** (dc6f3bb).
+  These are quality changes. They cost about 0.65 ms of denoise on Sponza
+  (8.8 → 9.45 ms).
+- **Two specular a-trous strides instead of three** (e31c9bf). One run per
+  variant, base repeated: p95 22.3 → 20.8 ms. Fixture metrics are identical
+  to four decimals. Adopted.
+- **SSR march down to 16 steps on rough lobes** (e31c9bf). Reflection sample
+  pass 2.93 → 2.24 ms, p95 −0.5 ms. Mirror floor 0.0244 → 0.0247. Adopted.
+- **Two RTAO rays** (e31c9bf). RTAO 1.19 → 0.64 ms; ao-cavity-rtao p95
+  0.0091 → 0.0101. Adopted. Combined with the two changes above:
+  p50 17.36 ms, p95 18.57 ms.
+- **Rejected: soft-change test from the history's temporal variance.**
+  moving-light-custom p95 0.0531 → 0.0634 fails, and disocclusion
+  0.0573 → 0.0598. Removed.
+- **Rejected earlier: deterministic sun-disk BRDF at secondary hits.**
+  Roughness is unchanged, at an extra quadrature cost. Never committed.
+
+The 16.67 ms target remained open after these, about 1.9 ms over at p95.
+
+Second round, measured interleaved base 2b285df / 954034b / 5cd7aab, three
+repetitions each; the same binary agrees within 0.05 ms at p95
+(`build/regress-20261111/budget-compact/`). GPU p50/p95 medians:
+base 21.90/22.68, 954034b 17.45/18.62, 5cd7aab 16.42/17.68 ms; 0 GPU
+allocations. The other load on the machine was CPU-only test binaries with
+no Metal loaded.
+
+- **One reflection sample stores its reduced record directly** (96d1507).
+  The `F13 independent raw specular reduction` pass (0.394 ms) and two
+  scratch textures are gone. Bit-identical under API validation: mirror,
+  moving-light, roughness custom 300/300 frames; Sponza 12/12 at 1 and
+  3 samples. Adopted.
+- **Compact denoise history** (5cd7aab). A buffer header plus a 64-byte
+  record replaces the 112-byte one; the 16-byte extension is specular-only.
+  Temporal passes per signal: GI 0.844 → 0.681, AO 0.824 → 0.659,
+  specular 1.514 → 1.286 ms. About 0.55 ms in total, less than the 1 ms the
+  byte count suggested: the temporal passes are not purely bandwidth-bound.
+  Bit-identical on the same cases plus disocclusion and
+  `--debug-history-corrupt`; the history negatives still fail. Adopted.
+- **Bit-identity needs API validation only.** Under `MTL_SHADER_VALIDATION`
+  the RT reflection fixtures differ run to run, HEAD against itself
+  included (299/300 frames, up to 1.8% relative).
+
+After that round the target was still open, about 1.0 ms over at p95.
+
+Third round (same protocol, same binary, flag A/B interleaved x3; the
+machine carried CPU compile load, so frame times are relative only):
+
+- **DDGI irradiance left unfiltered** (71bfed3, `--ddgi-denoise on|off`).
+  DDGI's per-pixel irradiance is a deterministic probe interpolation, so
+  there is no Monte Carlo noise for the denoiser to remove. The F12 Cornell
+  oracle already showed raw 16x8x16 at 23.31% worst-ROI NRMSE against 24.19%
+  filtered. The GI temporal pass and two strides (1.66 ms) are gone. AO's
+  stride 4 alone costs what the shared GI+AO stride did (1.09 ms).
+  Fixtures are unchanged to four decimals, except mirror floor-front p95
+  0.0247 → 0.0251. Adopted. Reproducing the frozen F12 filtered DDGI case
+  needs `--ddgi-denoise on`.
+- **Two AO strides** (42adefd, `--ao-atrous-iterations`). The denoise
+  passes drop 5.75 → 4.65 ms. ao-cavity-rtao gets closer to its reference:
+  p95 0.0101 → 0.0070, flicker 0.0002 → 0.0004. ao-cavity-gtao is unchanged
+  (0.0807 → 0.0805; its bias remains open). Adopted.
+- **Measured but not done: guide4 overfetch.** The stride-4 pass loads
+  576 96-byte receivers per 64 pixels. A compact per-frame guide texture
+  would cut that, but with stride 4 gone from every Sponza signal nothing
+  is left to gain there.
+
+Quality round after the budget (F13.6), measured against the independent
+clips with the D4 ROI config:
+
+- **Stationary specular history** (c0527d6). If neither content nor camera
+  changed, the history is a running mean up to 128 samples, replacing the
+  0.08 EMA floor. roughness k=4 p95 0.1135 → 0.0707; mirror flicker halves.
+  Moving content is bit-identical.
+- **Near-specular boost after a reset** (ee21dce). For 8 frames after a
+  reset, pixels below roughness 0.2 take 8 RT samples, and the mean is
+  weighted by sample count. Every fixture improves. Boosting the whole RT
+  band (roughness 0.4) was rejected: Sponza p95 15.4 → 16.5 ms, p99 20 ms.
+  The restricted version leaves p95 unchanged and adds 0.5 ms at p99.
+- **Declared regularisation k = 8** (aec6ddc, owner decision D5).
+  roughness-custom p95 0.031–0.039 over three seeds against a k = 8 clip.
+  The other fixtures are unchanged.
+- **RTAO rays back to the preset's 4** (c152b99, owner decision D2: same ray
+  budgets). The two-ray default of e31c9bf is withdrawn. ao-cavity-rtao p95
+  0.0070 → 0.0050. The SSR rough-lobe march (16 steps) is not a ray budget
+  and stays.
+
+Final quiet measurement, interleaved (`docs/perf-log.md`, 2026-11-11):
+HEAD 42adefd GPU p95 14.91–15.39 ms, frame p95 15.74–16.36 ms in five clean
+runs, against 22.4–23.1 ms for 2b285df. The 16.67 ms gate is met on this
+M5 Max.

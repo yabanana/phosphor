@@ -1,24 +1,17 @@
 #include "restir_common.h"
+#include "reflection_reduce.h"
+#include "renderer/emission_pack.h"
 kernel void reflection_counter_clear(device atomic_uint* counts [[buffer(0)]],uint tid [[thread_position_in_grid]]){
     if(tid<16)atomic_store_explicit(counts+tid,0u,memory_order_relaxed);
 }
-// Metadata is per-sample, each block stridePixels long. Average contributions,
-// not already-denoised signals. Mixed paths report hitDistance0 (unknown), no
-// fabricated mean geometry point. Every raw finite/error condition is recorded
-// BEFORE replacing bad numerical output with black.
+// Metadata is per-sample, each block stridePixels long (reflection_reduce.h).
 kernel void reflection_reduce(constant GPUReflectionReduceParams& p [[buffer(0)]],const device GPUSpecularSample* samples [[buffer(1)]],
     device GPUSpecularSample* metadata [[buffer(2)]],device atomic_uint* counts [[buffer(3)]],texture2d<float,access::write> radiance [[texture(0)]],
     texture2d<float,access::write> distance [[texture(1)]],uint tid [[thread_position_in_grid]]){
-    if(tid>=p.width*p.height)return;GPUSpecularSample out{};out.secondarySlot=~0u;float3 sum=0;float hitDistance=0;bool selected=false,mixed=false,error=false;
-    const uint count=clamp(p.samples,1u,8u);for(uint i=0;i<count;++i){const GPUSpecularSample s=samples[i*p.stridePixels+tid];const float3 L(s.radiance[0],s.radiance[1],s.radiance[2]);
-        const bool bad=(s.flags&SPECULAR_SAMPLE_ERROR)||!all(isfinite(L))||any(L<0)||!isfinite(s.hitDistance)||s.hitDistance<0;
-        error|=bad;if(!bad)sum+=L/float(count);
-        if(s.flags&SPECULAR_SAMPLE_VALID){if(!selected){out=s;selected=true;}else mixed|=out.path!=s.path||out.secondarySlot!=s.secondarySlot||out.secondaryGeneration!=s.secondaryGeneration;
-            hitDistance+=s.hitDistance/float(count);}}
-    error|=!all(isfinite(sum));if(error){atomic_fetch_add_explicit(counts+1,1u,memory_order_relaxed);sum=0;out.flags|=SPECULAR_SAMPLE_ERROR;}
-    if(mixed){out.flags|=SPECULAR_SAMPLE_MIXED;out.secondarySlot=~0u;out.secondaryGeneration=0;out.hitDistance=0;}else out.hitDistance=hitDistance;
-    for(uint i=0;i<3;++i)out.radiance[i]=sum[i];metadata[tid]=out;const uint2 pixel(tid%p.width,tid/p.width);
-    radiance.write(float4(sum,1),pixel);distance.write(float4(out.hitDistance),pixel);
+    if(tid>=p.width*p.height)return;auto r=reflectionReduceBegin();
+    const uint count=clamp(p.samples,1u,8u);for(uint i=0;i<count;++i)reflectionReduceAdd(r,samples[i*p.stridePixels+tid],count);
+    const GPUSpecularSample out=reflectionReduceEnd(r,counts);metadata[tid]=out;const uint2 pixel(tid%p.width,tid/p.width);
+    radiance.write(float4(out.radiance[0],out.radiance[1],out.radiance[2],1),pixel);distance.write(float4(out.hitDistance),pixel);
 }
 // Clears inactive raw signals; metadata is not touched for disabled specular.
 kernel void reflection_signal_zero(constant GPUReflectionComposeParams& p [[buffer(0)]],device GPUSpecularSample* metadata [[buffer(1)]],texture2d<float,access::write> specular [[texture(0)]],
@@ -55,13 +48,15 @@ kernel void reflection_probe_ready(constant GPUReflectionProbe& source [[buffer(
     out.enabled=source.enabled&&!fault[1];
     metadata[0]=out;
 }
-kernel void denoise_history_corrupt_safe(constant GPUDenoiseParams& p [[buffer(0)]],device GPUDenoiseHistory* history [[buffer(1)]],uint tid [[thread_position_in_grid]]){
-    if(!(p.flags&DENOISE_RESET)&&tid<p.width*p.height&&history[tid].valid)history[tid].viewID^=1u;
+// The view ID lives in the history buffer header (offset 0), shared by every
+// pixel: flipping it rejects every valid history, as a per-pixel flip did.
+kernel void denoise_history_corrupt_safe(constant GPUDenoiseParams& p [[buffer(0)]],device GPUDenoiseHistoryHeader* header [[buffer(1)]],uint tid [[thread_position_in_grid]]){
+    if(!(p.flags&DENOISE_RESET)&&tid==0)header[0].viewID^=1u;
 }
 // Output-history domain negative. The independent denoise_check observes the
 // real view mismatch; no synthetic error flag or counter is injected here.
-kernel void denoise_next_foreign_view(constant GPUDenoiseParams& p [[buffer(0)]],device GPUDenoiseHistory* history [[buffer(1)]],uint tid [[thread_position_in_grid]]){
-    if(tid<p.width*p.height&&history[tid].valid)history[tid].viewID^=1u;
+kernel void denoise_next_foreign_view(constant GPUDenoiseParams& p [[buffer(0)]],device GPUDenoiseHistoryHeader* header [[buffer(1)]],uint tid [[thread_position_in_grid]]){
+    if(tid==0)header[0].viewID^=1u;
 }
 // Codes2/3 operate on F13-owned copies. Original Direct/F8 guides and motion
 // remain intact. Only valid receiver pixels are poisoned; background is copied.
@@ -110,11 +105,13 @@ kernel void reflection_composite(constant GPUReflectionComposeParams& p [[buffer
     texture2d<float,access::read> specular [[texture(5)]],texture2d<float,access::read> ao [[texture(6)]],texture2d<float,access::write> output [[texture(7)]],uint tid [[thread_position_in_grid]]){
     if(tid>=p.backingWidth*p.backingHeight)return;const uint2 pixel(tid%p.backingWidth,tid/p.backingWidth);float3 color=base.read(pixel).rgb;
     if(all(pixel<uint2(p.width,p.height))){const GPUDISurface s=surfaces[pixel.y*p.width+pixel.x];
-        if(s.valid){if(p.flags&REFLECT_COMPOSE_DI)color+=diSelected.read(pixel).rgb;
+        if(s.valid){if(p.flags&REFLECT_COMPOSE_EXCLUDE_EMISSION)color=max(color-unpackEmission3(s.pad[1]),0.0f);
+            if(p.flags&REFLECT_COMPOSE_DI)color+=diSelected.read(pixel).rgb;
             if(p.flags&REFLECT_COMPOSE_GI)color+=giSelected.read(pixel).rgb*diVec(s.albedo)*(1-s.metallic)/M_PI_F;
             if(p.flags&REFLECT_COMPOSE_SPEC)color+=specular.read(pixel).rgb;
             if(!(p.flags&REFLECT_COMPOSE_GI)){const float3 n=normalize(diVec(s.shadingNormal));
-                const float3 sky(.30f,.36f,.45f),ground(.10f,.09f,.08f);const float3 ambient=mix(ground,sky,n.y*.5f+.5f)*diVec(s.albedo)*(1-s.metallic)*as_type<float>(s.pad[0]);
+                // Declared isotropic environment (Lo = albedo * L), not the legacy gradient.
+                (void)n;const float3 ambient=float3(p.environment[0],p.environment[1],p.environment[2])*diVec(s.albedo)*(1-s.metallic)*as_type<float>(s.pad[0]);
                 color+=ambient*((p.flags&REFLECT_COMPOSE_AO)?saturate(ao.read(pixel).x):1.0f);}}
     }
     if(!all(isfinite(color))||any(color<-.00001f)||(p.pad[0]&&any(color>65504.0f))){atomic_fetch_add_explicit(counts+4,1u,memory_order_relaxed);color=0;}

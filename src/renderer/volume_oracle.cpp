@@ -46,6 +46,21 @@ glm::dvec3 skyReference(const GPUAtmosphereParams& p,u32 x,u32 y){const auto a=p
         return glm::exp(-tau)*(m.rayleigh+m.mie)*(vec(p.sunIrradiance)*multiple(point,sun)+vec(p.moonIrradiance)*multiple(point,moon));},path.begin,path.end);
     return L;
 }
+glm::dvec3 lunarReference(const GPUAtmosphereParams& p,u32 ray) {
+    if(ray!=0||!(p.flags&ATMOSPHERE_ENABLE_MOON)||p.moonPhase<=1e-6f)return glm::dvec3(0);
+    // At disk centre the visible normal points back along the lunar direction.
+    const double lambert=std::max(0.0,-glm::dot(glm::normalize(vec(p.moonDirection)),vec(p.sunDirection)));
+    const double diskIntegral=(2.0/3.0)*pi*std::pow(std::sin(double(p.moonAngularRadius)),2);
+    return (vec(p.moonIrradiance)/double(p.moonPhase))*(lambert/diskIntegral);
+}
+double starReference(const GPUAtmosphereParams& p,u32 index) {
+    if(!(p.flags&ATMOSPHERE_ENABLE_STARS))return 0;
+    const double y=0.2+0.1*(index/VOLUME_STAR_GRID_SIDE);
+    const double azimuth=(2*pi/VOLUME_STAR_GRID_SIDE)*(index%VOLUME_STAR_GRID_SIDE+0.5);
+    const double horizontal=std::sqrt(1-y*y);
+    const glm::dvec3 ray(horizontal*std::cos(azimuth),y,horizontal*std::sin(azimuth));
+    return p.starIntensity*proceduralStarRadiance(ray,p.starRotation,pi/p.outputHeight);
+}
 double fogDistance(const GPUFogParams& p,u32 index){const u32 x=index%p.gridX,y=(index/p.gridX)%p.gridY,z=index/(p.gridX*p.gridY);
     const glm::vec2 ndc((float(x)+0.5f)*2/float(p.gridX)-1,1-(float(y)+0.5f)*2/float(p.gridY));
     const glm::vec4 h=glm::make_mat4(p.inverseViewProjection)*glm::vec4(ndc,1,1);const glm::vec3 camera(p.cameraPosition[0],p.cameraPosition[1],p.cameraPosition[2]);
@@ -68,6 +83,10 @@ std::vector<VolumeOracleCase> evaluateVolumeOracle(const VolumeOracleInput& in,s
             const auto answer=fogHomogeneous(in.diagnostics.fixtureExtinction,vec(in.diagnostics.fixtureSource),fogDistance(in.fog,r.x));expected=answer.radiance;T=answer.transmittance;break;}
         case VOLUME_NUMERIC_SOLAR:c.kind="solar_disk";c.expectedEpoch=p.skyRevision;c.absoluteTolerance=tolerances.solarAbsolute;c.relativeTolerance=tolerances.solarRelative;
             expected=r.x==0?vec(p.sunIrradiance)/(pi*std::pow(std::sin(double(p.sunAngularRadius)),2)):glm::dvec3(0);break;
+        case VOLUME_NUMERIC_LUNAR:c.kind="lunar_disk";c.expectedEpoch=p.skyRevision;c.absoluteTolerance=tolerances.lunarAbsolute;c.relativeTolerance=tolerances.lunarRelative;
+            expected=lunarReference(p,r.x);break;
+        case VOLUME_NUMERIC_STARS:c.kind="star_field";c.expectedEpoch=p.skyRevision;c.absoluteTolerance=tolerances.starAbsolute;c.relativeTolerance=tolerances.starRelative;
+            expected=glm::dvec3(starReference(p,r.x));break;
         default:throw std::invalid_argument("unknown volume oracle record");}
         for(u32 i=0;i<3;++i)c.expected[i]=expected[i];c.expected[3]=T;c.passed=c.actualEpoch==c.expectedEpoch;
         for(u32 i=0;i<4;++i){const double error=std::abs(c.actual[i]-c.expected[i]),relative=error/std::max(std::abs(c.expected[i]),1e-8);

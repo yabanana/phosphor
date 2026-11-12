@@ -32,7 +32,7 @@ struct GiPasses::Impl {
     MTL::Buffer *states=nullptr,*cache=nullptr;std::array<MTL::Buffer*,4> histories{};
     MTL::Texture *previousIrr=nullptr,*nextIrr=nullptr,*previousDist=nullptr,*nextDist=nullptr;
     u32 probeCount=0,rayCount=0,irrWidth=0,irrHeight=0,distWidth=0,distHeight=0;
-    u64 pixels=0,graphVersion=1,sceneRevision=1,materialRevision=1;u32 geometryGeneration=1,radianceGeneration=1;struct GeometrySignal {u64 scene,geometry,rtGeometry;bool operator==(const GeometrySignal&)const=default;};GeometrySignal lastGeometry{~u64{0},0,0};struct Signal {u64 scene,geometry,materials,rtGeometry;u64 lights;bool operator==(const Signal&)const=default;};Signal lastSignal{~u64{0},0,0,0,0};
+    u64 pixels=0,graphVersion=1,sceneRevision=1,materialRevision=1;u32 geometryGeneration=1,radianceGeneration=1;struct GeometrySignal {u64 scene,geometry,rtGeometry;bool operator==(const GeometrySignal&)const=default;};GeometrySignal lastGeometry{~u64{0},0,0};using Signal=GiRadianceState;Signal lastSignal{~u64{0},0,0,0,0,0};
     bool atlasValid=false;HistoryRegistry history;
     rg::BufferRef stateRef{},cacheRef{},raysRef{},cacheCandidatesRef{},freshRef{},temporalRef{},spatialRef{},historyRef{};
     rg::TextureRef previousIrrRef{},nextIrrRef{},previousDistRef{},nextDistRef{},output{},referenceDiffuse{};
@@ -58,7 +58,8 @@ struct GiPasses::Impl {
         std::vector<float> worlds;float phase[SCENE_MOTION_CLASSES*2];motionSinCosTable(0,phase);referenceWorlds(s,phase,worlds);
         u32 worldSlot=0;for(const auto& i:s.instances()) { const u32 slot=worldSlot++;if((i.flags&INSTANCE_FLAG_VALID)&&i.meshIndex<g.meshInfos().size()) {
             const auto sphere=cullWorldSphere(worlds.data()+size_t(slot)*16,g.meshInfos()[i.meshIndex].boundingSphere);
-            low=glm::min(low,glm::vec3(sphere.x,sphere.y,sphere.z)-sphere.r);high=glm::max(high,glm::vec3(sphere.x,sphere.y,sphere.z)+sphere.r);any=true;
+            const auto [meshLow,meshHigh]=probeMeshWorldBounds(g.meshInfos()[i.meshIndex],g.vertices(),g.indices(),worlds.data()+size_t(slot)*16);
+            low=glm::min(low,meshLow);high=glm::max(high,meshHigh);any=true;
             u32 root=slot;while(s.nodes()[root].depth && s.nodes()[root].parentSlot<s.slotCapacity())root=s.nodes()[root].parentSlot;
             if(std::find(s.motionSlots().begin(),s.motionSlots().end(),root)!=s.motionSlots().end()) {
                 const auto& m=s.motions()[root];const glm::vec3 center(m.centre[0],m.centre[1]+m.height,m.centre[2]);
@@ -77,7 +78,7 @@ struct GiPasses::Impl {
         previousIrr=lighting::texture(c,irrWidth,irrHeight,MTL::PixelFormatRGBA32Float,"DDGI previous irradiance");nextIrr=lighting::texture(c,irrWidth,irrHeight,MTL::PixelFormatRGBA32Float,"DDGI next irradiance");
         previousDist=lighting::texture(c,distWidth,distHeight,MTL::PixelFormatRG32Float,"DDGI previous distance moments");nextDist=lighting::texture(c,distWidth,distHeight,MTL::PixelFormatRG32Float,"DDGI next distance moments");
         for(auto& f:slots){f.rays=lighting::buffer(c,rayCount*sizeof(GPUProbeRay),"DDGI radiance distance rays");f.cacheCandidates=lighting::buffer(c,rayCount*sizeof(GPUGiReservoir),"DDGI cache radiance candidates");}
-        atlasValid=false;++sceneRevision;++materialRevision;++geometryGeneration;++radianceGeneration;++graphVersion;lastGeometry={~u64{0},0,0};lastSignal={~u64{0},0,0,0,0};for(u32 v=0;v<4;++v)history.invalidate(v,"GI scene load");
+        atlasValid=false;++sceneRevision;++materialRevision;++geometryGeneration;++radianceGeneration;++graphVersion;lastGeometry={~u64{0},0,0};lastSignal={~u64{0},0,0,0,0,0};for(u32 v=0;v<4;++v)history.invalidate(v,"GI scene load");
     }
     // DDGI consumes probe atlases, never per-pixel reservoirs. A single
     // element keeps unused argument bindings valid in the independent checker;
@@ -91,16 +92,17 @@ struct GiPasses::Impl {
         const u64 allLightEpoch=lightingEpoch.update(lights,environment,direct.lightRevision());
         const GeometrySignal geometry{f.scene,sceneRevision,rt.geometryRevision()};
         if(!(geometry==lastGeometry)){++geometryGeneration;lastGeometry=geometry;}
-        const Signal signal{f.scene,sceneRevision,materialRevision,rt.geometryRevision(),allLightEpoch};
-        if(!(signal==lastSignal)){++radianceGeneration;lastSignal=signal;atlasValid=false;}
+        const Signal signal{f.scene,sceneRevision,materialRevision,rt.geometryRevision(),allLightEpoch,direct.lightRevision()};
+        const bool continuousSky=options.gi==GiMode::DDGI&&signal.continuousFrom(lastSignal,environment,f.reset);
+        if(!(signal==lastSignal)){++radianceGeneration;lastSignal=signal;if(!continuousSky)atlasValid=false;}
         const auto decision=history.begin(f.view,{f.width,f.height,f.backingWidth,f.backingHeight},radianceGeneration,f.cut,f.reset);
         params=oracle->parameters(f.index,geometryGeneration);params.width=f.width;params.height=f.height;
         params.slotCount=s.slotCapacity();params.meshCount=g.getMeshCount();params.materialCount=s.materials().size();params.lightCount=f.constants.lightCount;
         params.mode=options.gi==GiMode::DDGI?GI_MODE_DDGI:options.gi==GiMode::Cache?GI_MODE_CACHE:GI_MODE_RESTIR;
         params.debugFlags=options.debugGiNoVisibility?GI_DEBUG_NO_VISIBILITY:0u;
-        // Radiometric reset clears atlas/cache/history, while geometric
-        // generation alone owns classification and relocation offsets.
-        params.reset=(!atlasValid||decision.reset)?1u:0u;
+        // World-space DDGI atlases survive camera cuts and pixel-extent changes.
+        // Explicit resets and changed scene/light content still invalidate them.
+        params.reset=(!atlasValid||f.reset||(options.gi!=GiMode::DDGI&&decision.reset))?1u:0u;
         params.cacheCapacity=16384;params.cacheProbeLimit=8;params.cacheMaxAge=60;params.cacheGeneration=radianceGeneration;
         params.geometryRevision=sceneRevision;params.lightRevision=u32(allLightEpoch);params.materialRevision=materialRevision;
         params.viewRevision=(f.view<<28)|(u32(history.get(f.view).generation)&0x0fffffffu);

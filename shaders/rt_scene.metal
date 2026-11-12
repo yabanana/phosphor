@@ -185,12 +185,14 @@ kernel void rt_generate_secondary(device GPURtRay* rays [[buffer(1)]], constant 
 kernel void rt_trace_rays(instance_acceleration_structure as [[buffer(0)]], const device GPURtRay* rays [[buffer(1)]],
                            device GPURtHit* hits [[buffer(2)]], constant GPURtProbeParams& p [[buffer(3)]],
                            intersection_function_table<triangle_data, instancing> ift [[buffer(4)]],
-                           const device GPUInstance* instances [[buffer(5)]], device atomic_uint* counters [[buffer(9)]],
+                           const device GPUInstance* instances [[buffer(5)]],
+                           const device GPURtMesh* meshes [[buffer(6)]],const device GPUVertex* vertices [[buffer(7)]],
+                           const device uint* indices [[buffer(8)]],device atomic_uint* counters [[buffer(9)]],
                            uint tid [[thread_position_in_grid]], uint lane [[thread_index_in_simdgroup]]) {
     RtPayload payload{};
     GPURtHit hit = rtMiss(-2.0f);
     if (tid < p.rayCount) {
-        hit = rtTrace(rays[tid], as, ift, instances, p.slotCount, payload);
+        hit = rtTraceSurface(rays[tid], as, ift, instances, p.slotCount, payload, meshes, vertices, indices, p.meshCount);
         hits[tid] = hit;
     }
     const uint rayCount = simd_sum(uint(tid < p.rayCount && hit.t != -2.0f));

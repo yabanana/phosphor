@@ -1,0 +1,155 @@
+{
+  "phase_accepted": false,
+  "material_audits": [
+    {
+      "frame": 118,
+      "textures": 73,
+      "levels_including_base": 755,
+      "base_texels_unchanged": true,
+      "snapshot_sha": "f1dce4d61b197033261af55a42980e2e9fbf23897957f2ece98e548a0d6bf0fb",
+      "filtered_gi_normalized_max_change": 0.0,
+      "audit": {
+        "frame": 118,
+        "diagnostic_only": true,
+        "reference_accepted": false,
+        "pixels": 768,
+        "matched_geometry": 732,
+        "max_diffuse_absolute_error": 0.27654086515889653,
+        "p95_diffuse_absolute_error": 0.11417076545880056,
+        "pixels_with_diffuse_error_over_1e_3": 719
+      }
+    },
+    {
+      "frame": 119,
+      "textures": 73,
+      "levels_including_base": 755,
+      "base_texels_unchanged": true,
+      "snapshot_sha": "18bffca641bcd4f32afe7134d39bda26e3843549963da811b02c1278ee35ed21",
+      "filtered_gi_normalized_max_change": 0.0,
+      "audit": {
+        "frame": 119,
+        "diagnostic_only": true,
+        "reference_accepted": false,
+        "pixels": 768,
+        "matched_geometry": 768,
+        "max_diffuse_absolute_error": 0.14807670178278923,
+        "p95_diffuse_absolute_error": 0.07417682400155545,
+        "pixels_with_diffuse_error_over_1e_3": 768
+      }
+    },
+    {
+      "frame": 120,
+      "textures": 73,
+      "levels_including_base": 755,
+      "base_texels_unchanged": true,
+      "snapshot_sha": "dc7581d090066d38efb981a1a8cb3d5691ac60100f1ba43019fd12032c605742",
+      "filtered_gi_normalized_max_change": 0.0,
+      "audit": {
+        "frame": 120,
+        "diagnostic_only": true,
+        "reference_accepted": false,
+        "pixels": 768,
+        "matched_geometry": 768,
+        "max_diffuse_absolute_error": 0.19260517664313703,
+        "p95_diffuse_absolute_error": 0.07119352460366528,
+        "pixels_with_diffuse_error_over_1e_3": 765
+      }
+    },
+    {
+      "frame": 239,
+      "textures": 73,
+      "levels_including_base": 755,
+      "base_texels_unchanged": true,
+      "snapshot_sha": "6d0f6ac8501a01112389af40d82da96da2654d4590ed9251f07f17cd61429e1f",
+      "filtered_gi_normalized_max_change": 0.0,
+      "audit": {
+        "frame": 239,
+        "diagnostic_only": true,
+        "reference_accepted": false,
+        "pixels": 768,
+        "matched_geometry": 738,
+        "max_diffuse_absolute_error": 0.2603846969053106,
+        "p95_diffuse_absolute_error": 0.10567986918136761,
+        "pixels_with_diffuse_error_over_1e_3": 731
+      }
+    },
+    {
+      "frame": 240,
+      "textures": 73,
+      "levels_including_base": 755,
+      "base_texels_unchanged": true,
+      "snapshot_sha": "62b18aaa95aa0c4eab824ca8919a7f84bcbba920d818ce3190963461d135f794",
+      "filtered_gi_normalized_max_change": 0.0,
+      "audit": {
+        "frame": 240,
+        "diagnostic_only": true,
+        "reference_accepted": false,
+        "pixels": 768,
+        "matched_geometry": 739,
+        "max_diffuse_absolute_error": 0.23469753683319702,
+        "p95_diffuse_absolute_error": 0.10631477687309299,
+        "pixels_with_diffuse_error_over_1e_3": 730
+      }
+    }
+  ],
+  "lod0_control": {
+    "frame": 119,
+    "diagnostic_only": true,
+    "reference_accepted": false,
+    "pixels": 768,
+    "matched_geometry": 768,
+    "max_diffuse_absolute_error": 0.0003129237673312468,
+    "p95_diffuse_absolute_error": 0.00017917535077900177,
+    "pixels_with_diffuse_error_over_1e_3": 0
+  },
+  "standalone_sdk": [
+    {
+      "case": "constant",
+      "encoded_frames": 96,
+      "steady_frames": 80,
+      "max_steady_error": 0.00390625,
+      "passed": true,
+      "phase_accepted": false,
+      "raw_exit": 0,
+      "input_readback": {
+        "packed_color": [
+          0.5,
+          0.25,
+          0.125
+        ],
+        "pre_exposure": 1,
+        "input_readback_passed": true
+      },
+      "binary_sha": "280e883605eee4fd3febca296bea1c27ec7b1382d202cbda5c7a454f63456b39",
+      "source_sha": "25f429d49d0dc3ccd52c1d46689e845ce022d738a1b61b4b322bb859beff0b08"
+    },
+    {
+      "case": "wide",
+      "encoded_frames": 96,
+      "steady_frames": 80,
+      "max_steady_error": 0.0517578125,
+      "passed": false,
+      "phase_accepted": false,
+      "raw_exit": 1,
+      "input_readback": {
+        "packed_color": [
+          5760,
+          2,
+          1
+        ],
+        "pre_exposure": 0.015625,
+        "input_readback_passed": true
+      },
+      "binary_sha": "280e883605eee4fd3febca296bea1c27ec7b1382d202cbda5c7a454f63456b39",
+      "source_sha": "25f429d49d0dc3ccd52c1d46689e845ce022d738a1b61b4b322bb859beff0b08"
+    }
+  ],
+  "ctest": {
+    "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-material-witness/final-ctest.log",
+    "sha256": "a1cfb580fdd8666152255bef057c1aa2438ce12f20442847bc4f642ce2d13640"
+  },
+  "package": {
+    "path": "/Users/danielsan/.codex/worktrees/f10-f12-development/phosphor/build/f13-f14-sdk-hdr-reduction/metalfx-hdr-reproduction-verified.zip",
+    "sha256": "913dbaddb31f1abb10e06d27485e5f4d583cea3820feac20e7a4ed1abb41ee88"
+  }
+}

@@ -171,7 +171,7 @@ kernel void light_cluster_shade(constant GPUDIParams& p [[buffer(0)]],
             if(!diLightFinite(lights[lightIndex]))atomic_fetch_add_explicit(signalErrors+3,1u,memory_order_relaxed);
             const DISample sample = diSampleTexturedLight(lights[lightIndex], lightIndex, uv,
                                                           diVec(surface.position), emitters, materials, textures);
-            const float3 contribution=diBRDF(surface,sample);diRecordNonfinite(contribution,signalErrors,0u);
+            const float3 contribution=diBRDFWeighted(surface,sample,diEmitterSpecularWeight(p,lights[lightIndex],surface));diRecordNonfinite(contribution,signalErrors,0u);
             if (sample.valid && sample.pdfArea > 0) {value += contribution / sample.pdfArea;diRecordNonfinite(value,signalErrors,2u);}
         }
     }
@@ -215,7 +215,7 @@ kernel void light_cluster_shade_rt(constant GPUDIParams& p [[buffer(0)]],
             if(!diLightFinite(lights[lightIndex]))atomic_fetch_add_explicit(signalErrors+3,1u,memory_order_relaxed);
             const DISample sample = diSampleTexturedLight(lights[lightIndex], lightIndex, uv,
                                                           diVec(surface.position), emitters, materials, textures);
-            const float3 contribution = diBRDF(surface, sample);diRecordNonfinite(contribution,signalErrors,0u);
+            const float3 contribution = diBRDFWeighted(surface, sample, diEmitterSpecularWeight(p, lights[lightIndex], surface));diRecordNonfinite(contribution,signalErrors,0u);
             if (sample.valid && sample.pdfArea > 0 && (!(p.flags & DI_ENABLE_VISIBILITY) || !any(contribution > 0) ||
                 diEndpointVisible(surface, sample, tlas, ift, instances, p.slotCount))) {value += contribution / sample.pdfArea;diRecordNonfinite(value,signalErrors,2u);}
         }

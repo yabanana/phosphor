@@ -1,4 +1,5 @@
 #include "reflection_common.h"
+#include "renderer/dfg_table.h"
 
 // Actual base-compatible STATIC scene capture. Host draws the full selected
 // static instance list for EACH face with a depth attachment; no camera cull
@@ -47,7 +48,9 @@ fragment float4 reflection_probe_capture_fs(ProbeVertexOut in [[stage_in]],bool 
     // Validate the TOTAL physical sum before the attachment's narrowing store.
     // Negative alpha survives black repair and disables GPU probe publication.
     const bool finite=reflectionProbeStorageAccepts(result.x,result.y,result.z,p.storageFlags);
-    return float4(finite?result:float3(0),finite?1.0f:-1.0f);
+    // Alpha: emission luminance (F13.1), never negative; -1 marks a rejected texel.
+    const float emitted=max(reflectionProbeLuminance(emission),0.0f),alpha=(p.storageFlags&REFLECTION_CAPTURE_HALF)?min(emitted,65504.0f):emitted;
+    return float4(finite?result:float3(0),finite&&isfinite(alpha)?alpha:-1.0f);
 }
 
 inline float3 reflectionCubeDirection(uint face,float2 uv){const float2 p=uv*2-1;switch(face){case 0:return normalize(float3(1,-p.y,-p.x));case 1:return normalize(float3(-1,-p.y,p.x));case 2:return normalize(float3(p.x,1,p.y));case 3:return normalize(float3(p.x,-1,-p.y));case 4:return normalize(float3(p.x,-p.y,1));default:return normalize(float3(-p.x,-p.y,-1));}}
@@ -58,25 +61,28 @@ inline float reflectionRadicalInverse(uint v){v=(v<<16)|(v>>16);v=((v&0x55555555
 kernel void reflection_probe_prefilter(constant GPUProbeFilterParams& p [[buffer(0)]],texturecube_array<float> raw [[texture(0)]],
     texture2d_array<float,access::write> filtered [[texture(1)]],uint3 pixel [[thread_position_in_grid]]){
     if(pixel.x>=p.side||pixel.y>=p.side||pixel.z>=6)return;const float3 n=reflectionCubeDirection(pixel.z,(float2(pixel.xy)+.5f)/float(p.side));float3 L=0;float weight=0;
-    if(p.roughness<=0){L=raw.sample(kReflectionProbeSampler,n,p.cubeIndex,level(0)).rgb;weight=1;}
+    float emitted=0;
+    if(p.roughness<=0){const float4 t=raw.sample(kReflectionProbeSampler,n,p.cubeIndex,level(0));L=t.rgb;emitted=t.a;weight=1;}
     else{const float3 t=reflectionTangent(n),b=cross(n,t);const float a=max(p.roughness*p.roughness,.002f),a2=a*a;
         const uint count=clamp(p.sampleCount,1u,4096u);
         for(uint i=0;i<count;++i){float u=(float(i)+.5f)/float(count),v=reflectionRadicalInverse(i),c=sqrt((1-u)/(1+(a2-1)*u)),r=sqrt(max(0.0f,1-c*c)),phi=2*M_PI_F*v;
-            const float3 h=t*(r*cos(phi))+b*(r*sin(phi))+n*c,l=reflect(-n,h);const float nl=max(0.0f,dot(n,l));L+=raw.sample(kReflectionProbeSampler,l,p.cubeIndex,level(0)).rgb*nl;weight+=nl;}}
-    const float3 value=weight>0?L/weight:float3(0);
-    const bool valid=reflectionProbeStorageAccepts(value.x,value.y,value.z,p.storageFlags);
-    filtered.write(float4(valid?value:float3(0),valid?1.0f:-1.0f),pixel.xy,6*p.cubeIndex+pixel.z);
+            const float3 h=t*(r*cos(phi))+b*(r*sin(phi))+n*c,l=reflect(-n,h);const float nl=max(0.0f,dot(n,l));const float4 t=raw.sample(kReflectionProbeSampler,l,p.cubeIndex,level(0));L+=t.rgb*nl;emitted+=t.a*nl;weight+=nl;}}
+    const float3 value=weight>0?L/weight:float3(0);const float alpha=weight>0?emitted/weight:0.0f;
+    // A rejected raw texel (alpha -1) cannot pass: raw validation disables the probe.
+    const bool valid=reflectionProbeStorageAccepts(value.x,value.y,value.z,p.storageFlags)&&isfinite(alpha)&&alpha>=0;
+    filtered.write(float4(valid?value:float3(0),valid?alpha:-1.0f),pixel.xy,6*p.cubeIndex+pixel.z);
 }
 // Deterministic prefiltered-probe fallback uses split-sum receiver BRDF. It is
 // a separate mode, not a prefilter applied AGAIN to an already GGX sampled ray.
 kernel void reflection_probe_only(constant GPUReflectionParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
-    device GPUSpecularSample* metadata [[buffer(17)]],const device GPUReflectionProbe* probes [[buffer(18)]],texturecube_array<float> atlas [[texture(2)]],
+    device GPUSpecularSample* metadata [[buffer(17)]],const device GPUReflectionProbe* probes [[buffer(18)]],device atomic_uint* counts [[buffer(19)]],texturecube_array<float> atlas [[texture(2)]],
     texture2d<float,access::write> output [[texture(5)]],texture2d<float,access::write> distance [[texture(6)]],uint tid [[thread_position_in_grid]]){
     if(tid>=p.width*p.height)return;const GPUDISurface s=surfaces[tid];GPUSpecularSample sample=reflectionEmpty();float3 result=0;
     if(s.valid){const float3 n=normalize(diVec(s.shadingNormal)),v=normalize(diVec(s.viewDirection)),r=reflect(-v,n);uint path;
         const float3 L=reflectionProbeRadiance(diVec(s.position),r,s.roughness,true,p,probes,atlas,path),f0=mix(float3(.04f),diVec(s.albedo),s.metallic);
-        const float4 c0(-1,-.0275f,-.572f,.022f),c1(1,.0425f,1.04f,-.04f),fit=s.roughness*c0+c1;
-        const float a004=min(fit.x*fit.x,exp2(-9.28f*max(0.0f,dot(n,v))))*fit.x+fit.y;const float2 ab=float2(-1.04f,1.04f)*a004+fit.zw;
+        // F13.5: tabulated split-sum DFG of the engine BRDF (tools/dfg_table.py);
+        // the former analytic mobile fit was 14% low at roughness 0.3-0.6.
+        const float nv=max(0.0f,dot(n,v));const float2 ab(dfgTableLookup(nv,s.roughness,0u),dfgTableLookup(nv,s.roughness,1u));
         // The analytic fit can leave the physical [0,1] BRDF-integral domain
         // (roughness=1 gives B=-.0024 for black metal). Bound ONLY the finite
         // approximation weight, never radiance or invalid numerical input.
@@ -85,5 +91,7 @@ kernel void reflection_probe_only(constant GPUReflectionParams& p [[buffer(0)]],
         sample.flags=SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_PREFILTERED;
         if(!finiteFit||!all(isfinite(L))||any(L<0)||!all(isfinite(result))||any(result<0))sample.flags|=SPECULAR_SAMPLE_ERROR;
         sample.path=path;for(uint i=0;i<3;++i){sample.direction[i]=r[i];sample.radiance[i]=result[i];}}
-    metadata[tid]=sample;const uint2 pixel(tid%p.width,tid/p.width);output.write(float4(result,1),pixel);distance.write(float4(0),pixel);
+    // The record carries result and distance 0, the values written before the
+    // shared store (multi-sample reduction reads them back from the record).
+    sample.hitDistance=0;reflectionStoreSample(p.flags,tid,p.width,sample,metadata,counts,output,distance);
 }

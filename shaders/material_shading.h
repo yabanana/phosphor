@@ -36,6 +36,7 @@ struct ShadingResult {
     float metallic;
     float occlusion;
     float alpha;
+    float3 emission; // the emissive term already included in color (F13.1)
 };
 
 // --- BRDF --------------------------------------------------------------------
@@ -85,6 +86,40 @@ static float3 evaluateLight(float3 N, float3 V, float3 L, float3 radiance, float
     return (diffuse + specular) * radiance * NdotL;
 }
 
+// F13: the sun is a disk of uniform radiance and angular radius r (the same
+// disk shadows, reflections and the reference use). Returns the irradiance-
+// normalised specular term, (1/Omega) * integral over the disk of f_s cos.
+// Where the GGX lobe is wide or far from the reflected disk, the point
+// evaluation already equals the integral; elsewhere a deterministic uniform
+// solid-angle quadrature (golden-angle spiral) is used at the pixel centre.
+static float3 sunDiskSpecular(float3 N, float3 V, float3 L, float3 albedo, float metallic, float roughness,
+                              float angularRadius) {
+    const float a = max(roughness * roughness, 0.002);
+    const float NdotV = max(dot(N, V), 1e-4);
+    const float3 f0 = mix(float3(0.04), albedo, metallic);
+    const float3 R = reflect(-V, N);
+    const float separation = acos(clamp(dot(R, L), -1.0f, 1.0f));
+    const bool narrow = a < 0.05f && separation < 4.0f * angularRadius + 16.0f * a;
+    const uint count = !narrow ? 1u : (a < 2.0f * angularRadius ? 128u : 32u);
+    const float3 t = normalize(cross(abs(L.z) < 0.999f ? float3(0, 0, 1) : float3(0, 1, 0), L)), b = cross(L, t);
+    const float oneMinusCos = 1.0f - cos(angularRadius);
+    float3 sum = float3(0.0);
+    for (uint k = 0; k < count; ++k) {
+        float3 Lk = L;
+        if (count > 1u) {
+            const float z = 1.0f - (float(k) + 0.5f) / float(count) * oneMinusCos, s = sqrt(max(0.0f, 1.0f - z * z));
+            const float phi = 2.39996323f * float(k);
+            Lk = t * (s * cos(phi)) + b * (s * sin(phi)) + L * z;
+        }
+        const float NdotL = saturate(dot(N, Lk));
+        if (NdotL <= 0.0f) continue;
+        const float3 H = normalize(V + Lk);
+        sum += D_GGX(saturate(dot(N, H)), a) * V_SmithGGXCorrelated(NdotV, NdotL, a) *
+               F_Schlick(f0, saturate(dot(V, H))) * NdotL;
+    }
+    return sum / float(count);
+}
+
 static float distanceAttenuation(float dist, float range) {
     // Inverse square with a smooth window to zero at `range`.
     const float r = dist / max(range, 1e-3);
@@ -123,7 +158,8 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
                                   bool alphaTest = true, float sunVisibility = 1.0f, uint shadowLight = ~0u,
                                   bool replaceLocal = false, float3 localDirect = float3(0),
                                   bool useGI = false, float3 indirectIrradiance = float3(0),
-                                  bool omitSpecularAmbient = false, bool physicalGI = false, bool externalDiffuse = false) {
+                                  bool omitSpecularAmbient = false, bool physicalGI = false, bool externalDiffuse = false,
+                                  float3 environment = float3(0), float sunAngularRadius = 0.0f) {
     const device GPUMaterial &m = materials[in.materialIndex];
 
     const half4 baseTex = sampleOr(textures, m.baseColorTex, in.uv, half4(1.0h), in.uvDx, in.uvDy);
@@ -198,7 +234,15 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         }
         if (!isDirectional && replaceLocal) continue;
         const float visibility = i == shadowLight ? sunVisibility : 1.0f;
-        color += evaluateLight(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, roughness) * visibility;
+        if (physicalGI && isDirectional && i == shadowLight && sunAngularRadius > 0.0f) {
+            // Diffuse at the disk centre (exact to O(r^2)), specular over the disk.
+            const float NdotL = saturate(dot(N, L));
+            const float3 F = F_Schlick(mix(float3(0.04), baseColor.rgb, metallic), saturate(dot(V, normalize(V + L))));
+            const float3 diffuse = NdotL > 0.0f ? (1.0 - F) * (1.0 - metallic) * baseColor.rgb / M_PI_F * NdotL : float3(0.0);
+            color += (diffuse + sunDiskSpecular(N, V, L, baseColor.rgb, metallic, roughness, sunAngularRadius)) *
+                     lightColor * attenuation * visibility;
+        } else
+            color += evaluateLight(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, roughness) * visibility;
     }
 
     if (replaceLocal && !externalDiffuse) color += localDirect;
@@ -208,16 +252,20 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     const float NdotV = max(dot(N, V), 1e-4);
     const float3 f0 = mix(float3(0.04), baseColor.rgb, metallic);
     const float3 specularDir = normalize(mix(reflect(-V, N), N, roughness * roughness));
-    const float3 ambientDiffuse = hemisphere(N) * baseColor.rgb * (1.0 - metallic);
-    const float3 ambientSpecular = hemisphere(specularDir) * envBRDFApprox(f0, roughness, NdotV);
+    // F13 path (physicalGI): the scene's single declared isotropic environment,
+    // the same radiance GI and reflection misses see; legacy keeps the gradient.
+    const float3 ambientDiffuse = (physicalGI ? environment : hemisphere(N)) * baseColor.rgb * (1.0 - metallic);
+    const float3 ambientSpecular = (physicalGI ? environment : hemisphere(specularDir)) * envBRDFApprox(f0, roughness, NdotV);
     // F13 assembles these positive signals once outside this residual base.
     // Never subtract full-float lighting from a quantized summed color later.
     if(!externalDiffuse)color += (useGI ? indirectIrradiance * baseColor.rgb * (1.0f - metallic) / M_PI_F * (physicalGI?1.0f:occlusion) : ambientDiffuse * occlusion);
     if(!omitSpecularAmbient)color += ambientSpecular * occlusion;
 
-    color += float3(m.emissive[0], m.emissive[1], m.emissive[2]) * float3(emTex.rgb);
+    const float3 emission = float3(m.emissive[0], m.emissive[1], m.emissive[2]) * float3(emTex.rgb);
+    color += emission;
 
     out.color = color;
+    out.emission = emission;
     out.normal = N;
     out.baseColor = baseColor.rgb;
     out.diffuseAlbedo = baseColor.rgb * (1.0f - metallic);

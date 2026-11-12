@@ -30,7 +30,9 @@ RtCpuTexture rtMakeCpuTexture(std::span<const u8> rgba, u32 width, u32 height, b
 double rtSampleAlpha(const RtCpuTexture& texture, double u, double v, double lod);
 
 struct RtCheckResult {
-    u64 checked = 0, failures = 0, ambiguous = 0, edgeTies = 0, unsupported = 0, skipped = 0;
+    // edgeExclusions: rays accepted by the D3 edge rule (see RtReference::check),
+    // capped per check() call at max(1, checked/1000); more is a failure.
+    u64 checked = 0, failures = 0, ambiguous = 0, edgeTies = 0, edgeExclusions = 0, unsupported = 0, skipped = 0;
     std::string firstError;
     [[nodiscard]] bool ok() const { return checked > 0 && failures == 0 && unsupported == 0; }
 };

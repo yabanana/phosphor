@@ -103,7 +103,7 @@ kernel void gi_candidates(instance_acceleration_structure as [[buffer(0)]],
     float3 origin=rtOffsetRay(point.xyz,n);GPURtRay ray{};
     ray.ox=origin.x;ray.oy=origin.y;ray.oz=origin.z;ray.dx=wi.x;ray.dy=wi.y;ray.dz=wi.z;
     ray.tmax=p.maxDistance;ray.mask=RT_MASK_INDIRECT;ray.type=RT_PROBE_DIFFUSE;RtPayload payload{};
-    GPURtHit hit=rtTrace(ray,as,ift,instances,p.slotCount,payload);
+    GPURtHit hit=rtTraceSurface(ray,as,ift,instances,p.slotCount,payload,meshes,vertices,indices,p.meshCount);
     float3 y=point.xyz+wi*p.maxDistance,ny=-wi,L(0.0f); // direct environment excluded
     GiMaterial material;
     bool valid=true;

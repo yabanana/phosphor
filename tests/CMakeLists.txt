@@ -73,6 +73,7 @@ add_executable(phosphor_tests
     test_tlsf.cpp
     test_transform_math.cpp
     test_temporal.cpp
+    test_emission_pack.cpp
     test_visibility_math.cpp
     test_worker_pool.cpp
 )
@@ -90,9 +91,13 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME pipeline_harvest_merge COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_pipeline_harvest_merge.py)
     add_test(NAME f12_reference_contract COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_f12_reference_contract.py)
     add_test(NAME f13_temporal_light_metrics COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_temporal_light_metrics.py)
+    add_test(NAME f13_reference_clip COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_f13_reference_clip.py)
+    add_test(NAME f13_f14_roles COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_f13_f14_roles.py)
+    add_test(NAME battery_pause COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_battery_pause.py)
     add_test(NAME f13_metalfx_fixture_runner COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_metalfx_fixture_runner.py)
     add_test(NAME f13_wide_emissive_check COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_wide_emissive_check.py)
     add_test(NAME f13_native_radiometry_policy COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_native_radiometry_policy.py)
     add_test(NAME f14_volume_snapshot_check COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_volume_snapshot_check.py)
+    add_test(NAME f13_probe_pfm_author COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_probe_pfm_author.py)
     add_test(NAME f13_physical_ao_temporal_control COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_f13_ao_temporal_check.py)
 endif()

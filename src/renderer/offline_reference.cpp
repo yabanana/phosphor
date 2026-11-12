@@ -33,11 +33,29 @@ ReferenceExportResult validateReferenceScene(const OfflineReferenceScene& s) {
     const float cross[3]{c.direction[1]*c.up[2]-c.direction[2]*c.up[1],
         c.direction[2]*c.up[0]-c.direction[0]*c.up[2],c.direction[0]*c.up[1]-c.direction[1]*c.up[0]};
     if(norm2(cross)<1e-12f) return fail("parallel reference camera axes");
+    if(!s.primarySurfaces.empty()&&s.primarySurfaces.size()!=size_t(c.width)*c.height)
+        return fail("primary witness extent differs from reference camera");
+    for(const auto& surface:s.primarySurfaces)if(surface.valid) {
+        if(surface.instanceSlot>=s.worldInstances.size()||
+           !(s.worldInstances[surface.instanceSlot].flags&INSTANCE_FLAG_VALID)||
+           surface.instanceGeneration!=s.worldInstances[surface.instanceSlot].generation||
+           !finite(surface.position,3)||!finite(surface.albedo,3)||
+           !std::isfinite(surface.metallic)||!std::isfinite(surface.roughness))
+            return fail("invalid primary material witness");
+    }
     std::unordered_map<u32,const ReferenceTexture*> textures;
     for(const auto& t:s.textures) {
         if(!t.width||!t.height||t.width>32768||t.height>32768 ||
             t.rgba.size()!=size_t(t.width)*t.height*4 || !finite(t.rgba.data(),t.rgba.size()) ||
             !textures.emplace(t.index,&t).second) return fail("invalid or duplicated reference texture");
+        u32 width=t.width,height=t.height;
+        for(const auto& mip:t.mips) {
+            if(width==1&&height==1)return fail("reference mip chain exceeds 1x1");
+            width=std::max(1u,width/2);height=std::max(1u,height/2);
+            if(mip.width!=width||mip.height!=height||mip.rgba.size()!=size_t(width)*height*4||
+               !finite(mip.rgba.data(),mip.rgba.size()))return fail("invalid reference mip level");
+        }
+        if(!t.mips.empty()&&(width!=1||height!=1))return fail("incomplete reference mip chain");
     }
     for(const auto& m:s.materials) {
         if(!finite(m.baseColor,4)||!finite(m.emissive,3)||!std::isfinite(m.metallic)||
@@ -149,6 +167,30 @@ ReferenceExportResult exportOfflineReference(const OfflineReferenceScene& s,cons
             result.ok=false;return result;
         }
     }
+    for(const auto& t:s.textures)for(size_t level=0;level<t.mips.size();++level) {
+        const auto& mip=t.mips[level];std::vector<float> rgb(size_t(mip.width)*mip.height*3),alpha(rgb.size());
+        for(size_t pixel=0;pixel<size_t(mip.width)*mip.height;++pixel)for(size_t c=0;c<3;++c){
+            rgb[pixel*3+c]=mip.rgba[pixel*4+c];alpha[pixel*3+c]=mip.rgba[pixel*4+3];}
+        const auto suffix=std::to_string(t.index)+"_mip"+std::to_string(level+1)+".pfm";
+        if(!writeLinearPfm(staging/("texture_"+suffix),mip.width,mip.height,rgb,result.error)||
+           !writeLinearPfm(staging/("alpha_"+suffix),mip.width,mip.height,alpha,result.error)){
+            result.ok=false;return result;}
+    }
+    if(!s.primarySurfaces.empty()) {
+        std::ofstream witness(staging/"primary-surfaces.json");
+        witness<<std::setprecision(std::numeric_limits<float>::max_digits10)
+               <<"{\"schema\":1,\"kind\":\"gpu-primary-material-witness\",\"independent\":false,\"frame\":"<<s.frame
+               <<",\"width\":"<<s.camera.width<<",\"height\":"<<s.camera.height<<",\"pixels\":[";
+        for(size_t index=0;index<s.primarySurfaces.size();++index){
+            if(index)witness<<',';const auto& v=s.primarySurfaces[index];
+            if(!v.valid){witness<<"null";continue;}
+            witness<<"{\"slot\":"<<v.instanceSlot<<",\"generation\":"<<v.instanceGeneration
+                   <<",\"material\":"<<s.worldInstances[v.instanceSlot].materialIndex<<",\"position\":";
+            numberArray(witness,v.position,3);witness<<",\"albedo\":";numberArray(witness,v.albedo,3);
+            witness<<",\"metallic\":"<<v.metallic<<",\"roughness\":"<<v.roughness<<'}';
+        }
+        witness<<"]}";witness.close();if(!witness)return fail("primary material witness write failed");
+    }
     std::ofstream out(staging/"scene.json");
     if(!out) return fail("cannot open reference manifest");
     out<<std::setprecision(std::numeric_limits<float>::max_digits10);
@@ -161,10 +203,16 @@ ReferenceExportResult exportOfflineReference(const OfflineReferenceScene& s,cons
     numberArray(out,s.camera.jitterPixels,2);
     out<<",\"projection\":\"perspective_reverse_z_infinite\"},\"sky\":";numberArray(out,s.skyRadiance,3);
     out<<",\"sun_angular_radius\":"<<s.sunAngularRadius;
+    if(!s.primarySurfaces.empty())out<<",\"primary_material_witness\":\"primary-surfaces.json\"";
     out<<",\"textures\":[";
     for(size_t k=0;k<s.textures.size();++k) {if(k) out<<',';const auto& t=s.textures[k];
         out<<"{\"id\":"<<t.index<<",\"width\":"<<t.width<<",\"height\":"<<t.height<<",\"rgb\":\"texture_"<<t.index
-           <<".pfm\",\"alpha\":\"alpha_"<<t.index<<".pfm\"}";}
+           <<".pfm\",\"alpha\":\"alpha_"<<t.index<<".pfm\",\"source_srgb\":"<<(t.sourceSrgb?"true":"false")
+           <<",\"mip_chain_complete\":"<<((!t.mips.empty()||(t.width==1&&t.height==1))?"true":"false")<<",\"mips\":[";
+        for(size_t level=0;level<t.mips.size();++level){if(level)out<<',';const auto& m=t.mips[level];
+            out<<"{\"level\":"<<level+1<<",\"width\":"<<m.width<<",\"height\":"<<m.height
+               <<",\"rgb\":\"texture_"<<t.index<<"_mip"<<level+1<<".pfm\",\"alpha\":\"alpha_"<<t.index<<"_mip"<<level+1<<".pfm\"}";}
+        out<<"]}";}
     out<<"],\"materials\":[";
     for(size_t k=0;k<s.materials.size();++k) {if(k) out<<',';const auto& m=s.materials[k];
         out<<"{\"base\":";numberArray(out,m.baseColor,4);out<<",\"emissive\":";numberArray(out,m.emissive,3);

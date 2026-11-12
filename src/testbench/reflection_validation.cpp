@@ -12,7 +12,7 @@
 
 namespace phosphor {
 namespace {
-constexpr std::array<std::string_view,9> names{"mirror","roughness","ao-cavity","probe-parallax","moving-light","disocclusion","wide-emission","ao-temporal-wall","specular-environment"};
+constexpr std::array<std::string_view,12> names{"mirror","roughness","ao-cavity","probe-parallax","moving-light","disocclusion","wide-emission","ao-temporal-wall","specular-environment","fog-depths","rough-emitter","probe-box"};
 constexpr float pi=3.14159265358979323846f;
 const glm::quat identity(1,0,0,0);
 glm::quat sunRotation(glm::vec3 towardSun) {
@@ -80,6 +80,59 @@ void ReflectionValidation::setup(ECS& ecs,GpuScene& scene,TextureManager& textur
         anchorMaterial.occlusionTexIndex=textures.getDefaultBlack();anchorMaterial.occlusionStrength=1;
         sun_=ecs.createEntity();entities_.push_back(sun_);
         TransformComponent sunPose;sunPose.updateMatrix();ecs.addComponent(sun_,std::move(sunPose));
+        LightComponent light;light.type=LightType::Directional;light.intensity=0;ecs.addComponent(sun_,std::move(light));
+        time_=0;lightStep_=0;cameraSegment_=~0u;return;
+    }
+    if(scenario_=="fog-depths") {
+        // F14.2 slicing fixture: a 2 km floor seen from eye height toward the
+        // horizon plus walls at increasing distances, so every froxel depth
+        // band from below 1 m to beyond the 500 m fog range has pixels.
+        mesh(ecs,plane_,{0,0,-900},{2000,1,2000},identity,{0.5f,0.5f,0.5f},0,1);
+        mesh(ecs,cube_,{-0.32f,1.55f,-0.7f},{0.2f,0.2f,0.2f},identity,{0.7f,0.6f,0.5f},0,1);   // ~0.7 m
+        mesh(ecs,cube_,{1.2f,0.6f,-3.5f},{0.8f,1.2f,0.8f},identity,{0.6f,0.6f,0.6f},0,1);     // ~3.5 m
+        mesh(ecs,cube_,{-4,2,-15},{3,4,1},identity,{0.6f,0.55f,0.5f},0,1);                    // ~15 m
+        mesh(ecs,cube_,{10,6,-60},{12,12,2},identity,{0.55f,0.6f,0.6f},0,1);                  // ~60 m
+        mesh(ecs,cube_,{-40,15,-220},{50,30,4},identity,{0.5f,0.5f,0.55f},0,1);               // ~220 m
+        sun_=ecs.createEntity();entities_.push_back(sun_);
+        TransformComponent sunPose;sunPose.rotation=sunRotation({-0.35f,0.85f,0.4f});sunPose.updateMatrix();
+        ecs.addComponent(sun_,std::move(sunPose));
+        LightComponent sunLight;sunLight.type=LightType::Directional;sunLight.intensity=12;sunLight.color={1,1,1};
+        ecs.addComponent(sun_,std::move(sunLight));
+        time_=0;lightStep_=0;cameraSegment_=~0u;return;
+    }
+    if(scenario_=="probe-box") {
+        // F13.5 static probe: a closed 8 x 4 x 16 m room of black-body walls,
+        // one colour per face, so every wall's radiance is its emission under
+        // any lighting model and the geometry-fitted probe box is the room.
+        // Four metal floor strips sweep roughness; their reflections only see
+        // the walls and the ceiling (a planar floor never sees itself).
+        constexpr std::array<float,4> rough{0.04f,0.3f,0.6f,0.9f};
+        for(u32 k=0;k<rough.size();++k)
+            roughness_.push_back(mesh(ecs,plane_,{-3.f+2.f*float(k),0,2},{2,1,16},identity,{0.9f,0.9f,0.9f},1,rough[k]));
+        const glm::vec3 black(0);
+        mesh(ecs,plane_,{-4,2,2},{4,1,16},glm::angleAxis(-pi*.5f,glm::vec3(0,0,1)),black,0,1,{2.0f,0.25f,0.25f}); // left, faces +X
+        mesh(ecs,plane_,{4,2,2},{4,1,16},glm::angleAxis(pi*.5f,glm::vec3(0,0,1)),black,0,1,{0.25f,2.0f,0.25f});  // right, faces -X
+        mesh(ecs,plane_,{0,2,-6},{8,1,4},glm::angleAxis(pi*.5f,glm::vec3(1,0,0)),black,0,1,{0.25f,0.25f,2.0f});  // back, faces +Z
+        mesh(ecs,plane_,{0,2,10},{8,1,4},glm::angleAxis(-pi*.5f,glm::vec3(1,0,0)),black,0,1,{1.5f,1.5f,0.2f});  // front, faces -Z
+        mesh(ecs,plane_,{0,4,2},{8,1,16},glm::angleAxis(pi,glm::vec3(0,0,1)),black,0,1,{1,1,1});                  // ceiling, faces -Y
+        sun_=ecs.createEntity();entities_.push_back(sun_);
+        TransformComponent sunPose;sunPose.rotation=sunRotation({-0.35f,0.85f,0.4f});sunPose.updateMatrix();
+        ecs.addComponent(sun_,std::move(sunPose));
+        LightComponent light;light.type=LightType::Directional;light.intensity=0;ecs.addComponent(sun_,std::move(light));
+        time_=0;lightStep_=0;cameraSegment_=~0u;return;
+    }
+    if(scenario_=="rough-emitter") {
+        // F13.1 single count: an on-screen emitter seen by rough conductors.
+        // Two metal floor strips (roughness 0.3: mixed RT/fallback band, 0.5:
+        // fallback only) reflect an upright black-body panel that faces the
+        // camera, so screen-space rays reach it. No sun: the panel is the only
+        // light besides the declared environment.
+        mesh(ecs,plane_,{-3,0,0},{6,1,12},identity,{0.9f,0.9f,0.9f},1,0.3f);
+        mesh(ecs,plane_,{3,0,0},{6,1,12},identity,{0.9f,0.9f,0.9f},1,0.5f);
+        panel_=mesh(ecs,plane_,{0,0.9f,-1.5f},{3.2f,1,0.9f},glm::angleAxis(pi*.5f,glm::vec3(1,0,0)),{0,0,0},0,1,{2.5f,2.5f,2.5f});
+        sun_=ecs.createEntity();entities_.push_back(sun_);
+        TransformComponent sunPose;sunPose.rotation=sunRotation({-0.35f,0.85f,0.4f});sunPose.updateMatrix();
+        ecs.addComponent(sun_,std::move(sunPose));
         LightComponent light;light.type=LightType::Directional;light.intensity=0;ecs.addComponent(sun_,std::move(light));
         time_=0;lightStep_=0;cameraSegment_=~0u;return;
     }
@@ -157,6 +210,7 @@ void ReflectionValidation::teardown(ECS& ecs,GpuScene&) {
 }
 CameraSetup ReflectionValidation::getDefaultCamera()const {
     if(scenario_=="wide-emission")return {{0,0,4},{0,0,0},4,false};
+    if(scenario_=="fog-depths")return {{0,1.7f,0},{0,1.7f,-1},1,false};
     if(aoTemporalControl()||scenario_=="specular-environment")return {{0,0,3},{0,0,0},3,false};
     return {{0,2.2f,7},{0,1.1f,0},7,false};
 }

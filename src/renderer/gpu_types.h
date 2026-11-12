@@ -562,8 +562,10 @@ PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowCacheTile) == 48, "GPUShadowCacheTile lay
 PHOSPHOR_GPU_CONSTANT u32 RESOLVE_EXTERNAL_DIFFUSE = 1u<<5;
 struct GPUResolveLightingParams {
     u32 flags, sunIndex, width, height; // bits: sun visibility, replace local DI, indirect irradiance
+    float environment[3];               // declared isotropic environment radiance (bit16 = F13 path)
+    float sunAngularRadius;             // disk of the shadow-casting directional light (F13 path)
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUResolveLightingParams) == 16, "GPUResolveLightingParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUResolveLightingParams) == 32, "GPUResolveLightingParams layout");
 // F11: local-light sampling. Area emission is radiance (W/(m^2 sr));
 // point/spot emission is intensity (W/sr). Distances are world-space metres.
 PHOSPHOR_GPU_CONSTANT u32 DI_LIGHT_RECTANGLE = 3u;
@@ -578,6 +580,12 @@ PHOSPHOR_GPU_CONSTANT u32 DI_ENABLE_TEMPORAL = 2u;
 PHOSPHOR_GPU_CONSTANT u32 DI_ENABLE_SPATIAL = 4u;
 PHOSPHOR_GPU_CONSTANT u32 DI_ENABLE_VISIBILITY = 8u;
 PHOSPHOR_GPU_CONSTANT u32 DI_USE_STBN = 16u;
+// F13.6: RT reflections also see geometry-backed emitters (DI_LIGHT_TRIANGLE).
+// Their specular lobe is then split by the reflection RT probability: DI keeps
+// smoothstep(low, high, roughness), the RT path (taken with the complementary
+// probability) adds the emission it hits. Analytic and punctual lights keep
+// their full DI specular: no reflection ray can hit them.
+PHOSPHOR_GPU_CONSTANT u32 DI_REFLECTED_EMITTER_SPECULAR = 32u;
 PHOSPHOR_GPU_CONSTANT u32 DI_ERROR_WEIGHT = 1u;
 PHOSPHOR_GPU_CONSTANT u32 DI_ERROR_ALIAS = 2u;
 PHOSPHOR_GPU_CONSTANT u32 DI_ERROR_TARGET = 4u;
@@ -633,6 +641,8 @@ struct GPUDISurface {
     u32 materialRevision;
     float viewDirection[3];
     u32 instanceSlot;
+    // pad[0]: material occlusion (float bits); pad[1]: resolve emission
+    // packed by renderer/emission_pack.h (F13.1), 0 where no guide carries it.
     u32 instanceGeneration, valid, pad[2];
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUDISurface) == 96, "GPUDISurface layout");
@@ -644,8 +654,9 @@ struct GPUDIParams {
     u32 maxHistoryAge, stbnWidth, stbnHeight, stbnFrames;
     float depthRelativeThreshold, normalThreshold, targetFloor, pad0;
     u32 stbnDimensions, stbnSeed, slotCount, pad1; // pad1!=0 forces full-light brute iteration in cluster shade
+    float emitterSpecularLow, emitterSpecularHigh; u32 pad2, pad3; // = ReflectionSettings rtRoughnessLow/High
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUDIParams) == 96, "GPUDIParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDIParams) == 112, "GPUDIParams layout");
 
 struct GPULightCluster {
     u32 count, overflow, pad[2]; // overflow selects full local-light iteration
@@ -754,6 +765,16 @@ PHOSPHOR_GPU_CONSTANT u32 REFLECTION_ENABLE_CACHE = 4u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_ENABLE_PROBES = 8u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_ENABLE_GI = 16u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_CAPTURE_HALF = 32u; // reject total radiance outside HALF before conversion
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_SINGLE_SAMPLE = 64u; // one sample: the kernel stores the reduced record, signal and distance
+// F13.1 single count of geometry emitters. EXCLUDE: non-legacy DI integrates
+// emitters (the SSR source carries none). BAND: DI owns only
+// smoothstep(rtRoughnessLow, rtRoughnessHigh, roughness) of their specular
+// lobe and the reflection paths own the rest; without BAND, DI owns all of it.
+// reflectionFallbackEmissionShare() is the share a non-RT path adds back.
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_EXCLUDE_DI_EMISSION = 128u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_DI_EMITTER_BAND = 512u;
+// F13.5 negative control: probe lookups ignore the box projection.
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_DEBUG_NO_PARALLAX = 256u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_NONE = 0u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_RT = 1u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_SSR = 2u;
@@ -769,6 +790,16 @@ PHOSPHOR_GPU_CONSTANT u32 DENOISE_SIGNAL_SPECULAR = 2u;
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_SIGNAL_AO = 3u;
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_RESET = 1u;
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_CLAMP_HISTORY = 2u;
+PHOSPHOR_GPU_CONSTANT u32 DENOISE_CURRENT_VIEW_DEPTH = 8u;
+// F13.6: the scene changed continuously this frame (geometry or light motion)
+// while the signal's hard content key did not. History survives per pixel
+// unless it leaves the current neighbourhood (clampSigma * sigma, plus a 2%
+// relative margin); kept histories adapt with at least twice temporalAlpha.
+PHOSPHOR_GPU_CONSTANT u32 DENOISE_SOFT_CHANGE = 16u;
+// F13.6: neither the content nor this view's camera changed since the previous
+// frame. A soft signal's history then accumulates as a running mean (alpha =
+// 1/length, up to maxHistory) instead of the temporalAlpha floor.
+PHOSPHOR_GPU_CONSTANT u32 DENOISE_STATIONARY = 32u;
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_HISTORY_STOCHASTIC = 2u; // history flags: bit0 remains a numerical error
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_DIAGNOSTIC_ENDPOINTS = 4u; // opt-in old endpoint rejection for the quality negative
 
@@ -780,8 +811,9 @@ struct GPUReflectionParams {
     u32 slotCount, meshCount, materialCount, lightCount;
     u32 ssrSteps, ssrBinarySteps, probeCount, seed;
     float environment[3], maxProbeMip;
+    float regularizationScale; u32 ssrRoughSteps, boostSamples; float boostRoughness; // k: alpha' = max(alpha_secondary, k*alpha_camera); SSR steps at roughness 1; samples after a reset below boostRoughness
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionParams) == 288, "GPUReflectionParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionParams) == 304, "GPUReflectionParams layout");
 struct GPUSpecularSample {
     float radiance[3], hitDistance; // weighted outgoing Lo; 0 distance for environment/miss
     float direction[3], proposalSolidAngle;
@@ -820,18 +852,35 @@ struct GPUDenoiseParams {
     float roughnessThreshold, hitDistanceThreshold, luminancePhi, normalPhi;
     u32 maxHistory, atrousStep, minHistoryForVariance, pad0;
     float varianceFloor, clampSigma, planeThreshold, pad1;
+    float currentViewDepthRow[4]; // world point -> current positive view depth (negated dot)
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseParams) == 96, "GPUDenoiseParams layout");
-struct GPUDenoiseHistory {
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseParams) == 112, "GPUDenoiseParams layout");
+// F13 denoise history, split by access (budget closure). Each view/signal
+// history buffer is [header][capacity records][capacity specular extensions,
+// specular signal only]; denoise_history_layout.h packs the record state word
+// and gives the offsets. The logical history (CPU DenoiseHistory, MSL
+// DenoiseHistory) keeps every field; nothing that a later frame reads is lost.
+// Header: the per-frame domain identity, identical for every pixel one temporal
+// dispatch writes (its thread 0 stores it).
+struct GPUDenoiseHistoryHeader {
+    u32 signal, viewID, historyEpoch, signalRevision;
+    u32 pad[12]; // 64 bytes keep the records 64-byte aligned
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseHistoryHeader) == 64, "GPUDenoiseHistoryHeader layout");
+// Per-pixel state. The variance is not stored: the temporal pass writes it to
+// the moments texture, and a record it marks valid always had a finite
+// variance >= varianceFloor > 0 (the only property a later frame tested).
+struct GPUDenoiseHistoryRecord {
     float color[3], firstMoment;
-    float secondMoment, variance; u32 length, signal;
+    float secondMoment; u32 state, slot, instanceGeneration; // state: length | flags | path | valid
     float normal[3], depth;
-    u32 slot, instanceGeneration, materialRevision, signalRevision;
-    u32 viewID, historyEpoch, valid, flags;
-    float position[3], roughness;
-    float hitDistance; u32 path, secondarySlot, secondaryGeneration;
+    float position[3]; u32 materialRevision;
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseHistory) == 112, "GPUDenoiseHistory layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseHistoryRecord) == 64, "GPUDenoiseHistoryRecord layout");
+struct GPUDenoiseSpecularHistory {
+    float roughness, hitDistance; u32 secondarySlot, secondaryGeneration;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseSpecularHistory) == 16, "GPUDenoiseSpecularHistory layout");
 
 // F14: ALL positions/radii/heights/distances are WORLD METRES; extinction and
 // scattering coefficients are m^-1. RGB radiance and irradiance remain linear
@@ -921,11 +970,31 @@ struct GPUVolumeCounters {
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUVolumeCounters) == 32, "GPUVolumeCounters layout");
 PHOSPHOR_GPU_CONSTANT u32 VOLUME_CORRUPT_OMIT_LUT = 4u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_CORRUPT_MOON = 5u;
+// F14.2 negative: froxel history survives volume-epoch changes and resets
+// (moving lights, clock jumps); only the geometric rejection remains.
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_CORRUPT_STALE_FOG = 6u;
+// F14.3 negative: cloud history reprojected outside the screen wraps to the
+// opposite edge and skips every rejection (bounds, position, opaque depth,
+// neighbourhood clamp).
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_CORRUPT_CLOUD_EDGE = 7u;
 PHOSPHOR_GPU_CONSTANT u32 VOLUME_NUMERIC_TRANS = 0u;
 PHOSPHOR_GPU_CONSTANT u32 VOLUME_NUMERIC_MULTI = 1u;
 PHOSPHOR_GPU_CONSTANT u32 VOLUME_NUMERIC_SKY = 2u;
 PHOSPHOR_GPU_CONSTANT u32 VOLUME_NUMERIC_FOG = 3u;
 PHOSPHOR_GPU_CONSTANT u32 VOLUME_NUMERIC_SOLAR = 4u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_NUMERIC_LUNAR = 5u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_NUMERIC_STARS = 6u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_DISK_RAYS = 3u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_STAR_GRID_SIDE = 8u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_STAR_RAYS = VOLUME_STAR_GRID_SIDE*VOLUME_STAR_GRID_SIDE;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_CELESTIAL_RAYS = 2u*VOLUME_DISK_RAYS+VOLUME_STAR_RAYS;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_LUT_SAMPLES = 5u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_FOG_SAMPLES = 3u;
+// F14.2 slicing probe: a stratified grid of output pixels read around the fog
+// composition (input radiance, depth, output radiance), offset every frame.
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_FOG_APPLY_X = 32u, VOLUME_FOG_APPLY_Y = 18u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_FOG_APPLY_SAMPLES = VOLUME_FOG_APPLY_X*VOLUME_FOG_APPLY_Y;
 struct GPUVolumeDiagnosticParams {
     u32 transWidth,transHeight,multiWidth,multiHeight;
     u32 skyWidth,skyHeight,fogX,fogY;
@@ -933,8 +1002,17 @@ struct GPUVolumeDiagnosticParams {
     u32 expectedSkyRevision,sampleCount,corruption,homogeneous;
     float fixtureExtinction,fixtureSource[3];
     u32 fogIndices[3],stampKind;
+    // Fixture extinction sigma(y) = fixtureExtinction * exp(-falloff * y),
+    // source = sigma * fixtureSource / fixtureExtinction (constant albedo ratio).
+    float fixtureHeightFalloff;
+    u32 applyWidth,applyHeight,applyOffset;
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUVolumeDiagnosticParams)==96,"GPUVolumeDiagnosticParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUVolumeDiagnosticParams)==112,"GPUVolumeDiagnosticParams layout");
+struct GPUFogApplySample {
+    u32 x,y;float depth,pad;
+    float before[4],after[4];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUFogApplySample)==48,"GPUFogApplySample layout");
 struct GPUVolumeNumericSample {
     float value[4];
     u32 kind,x,y,producedRevision;
@@ -943,14 +1021,19 @@ PHOSPHOR_STATIC_ASSERT(sizeof(GPUVolumeNumericSample)==32,"GPUVolumeNumericSampl
 
 PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_ERROR = 1u<<31;
 PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_MIXED = 4u;
+// Samples averaged into a boosted record (bits 16-23; 0 = one sample). The
+// stationary specular history weights each frame by it.
+PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_COUNT_SHIFT = 16u, SPECULAR_SAMPLE_COUNT_MASK = 0xffu;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_GI = 1u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_CUSTOM = 2u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_DI = 4u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_SPEC = 8u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_AO = 16u;
+// SSR source only: remove the receiver's packed emission (F13.1 single count).
+PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_EXCLUDE_EMISSION = 32u;
 struct GPUReflectionReduceParams {u32 width,height,samples,stridePixels;};
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionReduceParams)==16,"GPUReflectionReduceParams layout");
-struct GPUReflectionComposeParams {u32 width,height,backingWidth,backingHeight;u32 flags,pad[3];};
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionComposeParams)==32,"GPUReflectionComposeParams layout");
+struct GPUReflectionComposeParams {u32 width,height,backingWidth,backingHeight;u32 flags,pad[3];float environment[3];u32 pad2;};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionComposeParams)==48,"GPUReflectionComposeParams layout");
 
 } // namespace phosphor

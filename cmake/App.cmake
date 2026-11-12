@@ -26,8 +26,18 @@ target_link_libraries(imgui PUBLIC SDL3::SDL3)
 # --- Metal toolchain check ---
 # Since Xcode 26 the Metal compiler ships as a separate component; fail at
 # configure time with the fix instead of halfway through the build.
+set(PHOSPHOR_METAL_TOOLCHAIN_DIR "" CACHE PATH "Optional official Metal.xctoolchain directory")
+if(PHOSPHOR_METAL_TOOLCHAIN_DIR)
+    set(PHOSPHOR_METAL_COMMAND "${PHOSPHOR_METAL_TOOLCHAIN_DIR}/usr/bin/metal")
+    set(PHOSPHOR_METALLIB_COMMAND "${PHOSPHOR_METAL_TOOLCHAIN_DIR}/usr/bin/metallib")
+    set(PHOSPHOR_METAL_ARCH_COMMAND "${PHOSPHOR_METAL_TOOLCHAIN_DIR}/usr/bin/metal-arch")
+else()
+    set(PHOSPHOR_METAL_COMMAND xcrun -sdk macosx metal)
+    set(PHOSPHOR_METALLIB_COMMAND xcrun -sdk macosx metallib)
+    set(PHOSPHOR_METAL_ARCH_COMMAND xcrun metal-arch)
+endif()
 execute_process(
-    COMMAND xcrun -sdk macosx metal --version
+    COMMAND ${PHOSPHOR_METAL_COMMAND} --version
     RESULT_VARIABLE _metal_rc
     OUTPUT_QUIET ERROR_QUIET
 )
@@ -61,10 +71,12 @@ set(PHOSPHOR_SHADER_HEADERS
     ${CMAKE_SOURCE_DIR}/src/renderer/visibility_layout.h
     ${CMAKE_SOURCE_DIR}/src/renderer/visibility_math.h
     ${CMAKE_SOURCE_DIR}/src/renderer/gpu_types.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/denoise_history_layout.h
     ${CMAKE_SOURCE_DIR}/src/renderer/metalfx_denoise_layout.h
     ${CMAKE_SOURCE_DIR}/src/renderer/metalfx_denoise_fixture_layout.h
     ${CMAKE_SOURCE_DIR}/src/renderer/visibility_layout.h
     ${CMAKE_SOURCE_DIR}/shaders/reflection_common.h
+    ${CMAKE_SOURCE_DIR}/shaders/reflection_reduce.h
     ${CMAKE_SOURCE_DIR}/src/renderer/reflection_probe_storage.h
     ${CMAKE_SOURCE_DIR}/shaders/atmosphere_common.h
     ${CMAKE_SOURCE_DIR}/src/renderer/atmosphere_bindings.h
@@ -109,7 +121,7 @@ foreach(shader IN LISTS PHOSPHOR_METAL_SHADERS)
     add_custom_command(
         OUTPUT ${air}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${PHOSPHOR_SHADER_OUT}
-        COMMAND xcrun -sdk macosx metal ${PHOSPHOR_METAL_FLAGS} -c ${shader} -o ${air}
+        COMMAND ${PHOSPHOR_METAL_COMMAND} ${PHOSPHOR_METAL_FLAGS} -c ${shader} -o ${air}
         DEPENDS ${shader} ${PHOSPHOR_SHADER_HEADERS}
                 ${PHOSPHOR_VARIANTS_MSL_HEADER} phosphor_variants
         COMMENT "Compiling Metal shader ${name}.metal"
@@ -120,7 +132,7 @@ endforeach()
 
 add_custom_command(
     OUTPUT ${PHOSPHOR_METALLIB}
-    COMMAND xcrun -sdk macosx metallib ${PHOSPHOR_AIR_FILES} -o ${PHOSPHOR_METALLIB}
+    COMMAND ${PHOSPHOR_METALLIB_COMMAND} ${PHOSPHOR_AIR_FILES} -o ${PHOSPHOR_METALLIB}
     DEPENDS ${PHOSPHOR_AIR_FILES}
     COMMENT "Linking phosphor.metallib"
     VERBATIM
@@ -150,7 +162,7 @@ foreach(shader IN LISTS PHOSPHOR_METAL_SHADERS)
     add_custom_command(
         OUTPUT ${air}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${PHOSPHOR_PROBE_OUT}
-        COMMAND xcrun -sdk macosx metal ${PHOSPHOR_METAL_FLAGS} -DPHOSPHOR_HOT_RELOAD_PROBE=1 -c ${shader} -o ${air}
+        COMMAND ${PHOSPHOR_METAL_COMMAND} ${PHOSPHOR_METAL_FLAGS} -DPHOSPHOR_HOT_RELOAD_PROBE=1 -c ${shader} -o ${air}
         DEPENDS ${shader} ${PHOSPHOR_SHADER_OUT}/${name}.air
         COMMENT "Compiling hot-reload probe shader ${name}.metal"
         VERBATIM
@@ -159,7 +171,7 @@ foreach(shader IN LISTS PHOSPHOR_METAL_SHADERS)
 endforeach()
 add_custom_command(
     OUTPUT ${PHOSPHOR_PROBE_METALLIB}
-    COMMAND xcrun -sdk macosx metallib ${PHOSPHOR_PROBE_AIR_FILES} -o ${PHOSPHOR_PROBE_METALLIB}
+    COMMAND ${PHOSPHOR_METALLIB_COMMAND} ${PHOSPHOR_PROBE_AIR_FILES} -o ${PHOSPHOR_PROBE_METALLIB}
     DEPENDS ${PHOSPHOR_PROBE_AIR_FILES}
     COMMENT "Linking hot-reload-probe.metallib"
     VERBATIM
@@ -237,6 +249,9 @@ target_compile_definitions(phosphor PRIVATE
     "PHOSPHOR_SHADER_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}/shaders\""
     "PHOSPHOR_RENDERER_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}/src/renderer\""
 )
+if(PHOSPHOR_METAL_TOOLCHAIN_DIR)
+    target_compile_definitions(phosphor PRIVATE "PHOSPHOR_METAL_TOOLCHAIN_DIR=\"${PHOSPHOR_METAL_TOOLCHAIN_DIR}\"")
+endif()
 if(PHOSPHOR_METAL_VALIDATION)
     # main() enables the Metal API validation layer in Debug builds.
     target_compile_definitions(phosphor PRIVATE $<$<CONFIG:Debug>:PHOSPHOR_METAL_VALIDATION=1>)

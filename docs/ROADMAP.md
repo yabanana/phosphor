@@ -570,12 +570,24 @@ M3. [Consegna](F9_HANDOFF.md), [dati](results/F9-M5Max-2026-10-07.json).
 
 **Integrazione 2026-10-07:** sorgente implementata nella baseline sperimentale F10–F14, con verifiche M5 circoscritte. Le caselle restano aperte dove i criteri complessivi non sono chiusi: [risultati, costi e residui per ID](F10_F14_HANDOFF.md). Nessuna certificazione fisica T0 o chiusura implicita delle OPT.
 
-- [ ] F13.1 Riflessioni RT per roughness bassa, fallback su radiance cache e SSR (T0)
-- [ ] F13.2 RTAO (T1+) / GTAO (T0)
-- [ ] F13.3 **MetalFX denoised upscaler** (Apple9) collegato ai canali di F7.6 — **parziale, nativo di produzione non promosso**: adapter e fixture SDK reali disponibili; radiometria scene-linear/HDR non qualificata, incluso il controllo wide-HDR finale fuori soglia. In produzione viene scelto il custom Float32 prima del grafo; esecuzione nativa limitata alle fixture diagnostiche esplicite. Vedi [policy radiometrica](implementation/F13-RADIOMETRY-POLICY.md) e [follow-up lifetime/budget](implementation/F13-F14-BUDGET-CLOSURE-2026-10-08.md): il leak del record HUD viene recuperato sul preciso binario verificato; HDR nativo e budget restano aperti.
-- [ ] F13.4 Denoiser custom leggero per T0 (temporal + atrous) quando il denoiser MetalFX non è usato
-- [ ] F13.5 Probe di riflessione statiche filtrate per T0
-- [ ] F13.6 **Qualità temporale di luce e denoise**: estendere F8.7 con luci ed emissive in movimento, variazioni di GI, riflessi a diverse roughness e superfici appena disoccluse; verificare motion vector, rejection/invalidation della storia e recupero dopo camera cut, con confronto al riferimento di F12.5 e soglie per tier
+**Verifica 2026-11-05:** corretta la profondità storica con camera in moto e verificati tag GPU, camera cut e kernel ottimizzati su Sponza dinamica. I gate HDR nativo e 16,67 ms restano falliti; i confronti numerici delle ottimizzazioni non sostituiscono il riferimento dinamico indipendente. [Evidenze e residui](implementation/F13-F14-DYNAMIC-SPONZA-2026-11-05.md).
+
+- [x] F13.1 Riflessioni RT per roughness bassa, fallback su radiance cache e SSR (T0)
+- [x] F13.2 RTAO (T1+) / GTAO (T0)
+- [x] F13.3 **MetalFX denoised upscaler** (Apple9) collegato ai canali di F7.6 — **scopo ridefinito dal proprietario (D7, 2026-11-12)**: adapter e fixture SDK reali, criterio radiometrico D1, vita dello scaler verificata sull'immagine MetalFX attuale; il nativo, misurato sugli input reali contro la clip indipendente `roughness` (`--metalfx-native-diagnostic`), è respinto per qualità (p95 0,174 contro 0,06, flicker 0,035) e in produzione viene scelto il custom Float32 prima del grafo. Una versione successiva di MetalFX riapre l'ammissione solo superando lo stesso confronto. Vedi [policy radiometrica](implementation/F13-RADIOMETRY-POLICY.md) e [follow-up lifetime/budget](implementation/F13-F14-BUDGET-CLOSURE-2026-10-08.md).
+- [x] F13.4 Denoiser custom leggero per T0 (temporal + atrous) quando il denoiser MetalFX non è usato
+- [x] F13.5 Probe di riflessione statiche filtrate per T0 — chiuso per T0; la cattura RT (`probe-box-rt-capture`, fuori da T0) resta oltre il limite a roughness 0,9 per l'orizzonte della probe prefiltrata
+- [x] F13.6 **Qualità temporale di luce e denoise**: estendere F8.7 con luci ed emissive in movimento, variazioni di GI, riflessi a diverse roughness e superfici appena disoccluse; verificare motion vector, rejection/invalidation della storia e recupero dopo camera cut, con confronto al riferimento di F12.5 e soglie per tier — accettato su M5; le soglie per gli altri tier restano `EXTERNAL_VALIDATION_PENDING`
+
+Accettazione di sviluppo locale M5 (2026-11-12, branch `phase/f13-f14-closure`):
+corpus finale di 83 casi sul binario 75c0b6e, clip indipendenti con metrica
+ghost sull'errore che cambia (D4/D6) e regolarizzazione k = 8 (D5), radiometria
+a soglia assoluta (D1), oracolo F9 (D3), F13.3 ridefinito (D7). Budget D2
+rispettato a macchina quieta: p95 GPU 15,98–16,03 ms nelle tre coppie senza
+contesa, alternate con c152b99; una run a 16,86 ms ha la firma di contesa
+esterna (passata del cielo a lavoro costante da 0,676 a 0,770 ms), riprodotta
+su entrambi i binari. Il frame p95 con timing seriale resta 0,04–0,12 ms sopra. I residui restano espliciti: cattura RT della
+probe a roughness 0,9, soglie degli altri tier, certificazione T0 fisica. [Chiusura per ID](implementation/F13-F14-CLOSURE-2026-11-12.md).
 
 ## OPT-2 — Shader, pipeline e occupancy [OPT]
 
@@ -614,11 +626,22 @@ senza imporre il 90% quando aumenta la contesa [R91].
 
 **Integrazione 2026-10-07:** sorgente implementata nella baseline sperimentale F10–F14, con verifiche M5 circoscritte. Le caselle restano aperte dove i criteri complessivi non sono chiusi: [risultati, costi e residui per ID](F10_F14_HANDOFF.md). Nessuna certificazione fisica T0 o chiusura implicita delle OPT.
 
-- [ ] F14.1 Atmosfera fisica (Hillaire): LUT di trasmittanza, multi-scattering, sky-view
-- [ ] F14.2 Nebbia volumetrica froxel con scattering di luci e ombre, integrata con la GI
-- [ ] F14.3 **Nuvole volumetriche** raymarched (approccio stile Nubis) con ricostruzione temporale a bassa risoluzione
+- [x] F14.1 Atmosfera fisica (Hillaire): LUT di trasmittanza, multi-scattering, sky-view
+- [x] F14.2 Nebbia volumetrica froxel con scattering di luci e ombre, integrata con la GI
+- [x] F14.3 **Nuvole volumetriche** raymarched (approccio stile Nubis) con ricostruzione temporale a bassa risoluzione
 - [ ] F14.4 Ciclo giorno/notte, luna e stelle
 - [ ] F14.5 **[CANDIDATO]** **[EDGE]** Meteo dinamico: pioggia (particelle + superfici bagnate), neve con accumulo, fulmini come luci ReSTIR
+
+Accettazione di sviluppo locale M5 per F14.1–F14.3 (2026-11-12): oracoli
+atmosferici, nebbia froxel secondo il piano (densità costante analitica, slicing,
+luce in moto, disocclusione, costo per volume) e coppie a piena frequenza delle
+nuvole 15/15 con D6. L'iniezione DDGI nella nebbia resta l'approssimazione
+documentata a sei orientamenti, non verificata a parte; la bimodalità per frame
+della sorgente RT non è spiegata. F14.4 resta aperto: luna e stelle passano
+l'oracolo GPU e gli shader di prodotto si ripetono bit per bit, ma con
+`MTL_SHADER_VALIDATION` e `--volume-oracle` il kernel DI di visibilità RT non è
+deterministico a parità di input (448bca7). F14.5 non è attivato.
+[Chiusura per ID](implementation/F13-F14-CLOSURE-2026-11-12.md).
 
 ---
 

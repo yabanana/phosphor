@@ -26,7 +26,7 @@ The [showcase](SHOWCASE.md) uses a procedural scene. The original Vulkan rendere
 
 ## Status and roadmap
 
-F9 is integrated. F10–F14 provide an **experimental renderer baseline** with scoped M5 Max validation. The [integration handoff](F10_F14_HANDOFF.md) and [budget follow-up](implementation/F13-F14-BUDGET-CLOSURE-2026-10-08.md) document quality, hardware and performance evidence. Production lighting uses the custom denoising fallback while native MetalFX HDR remains guarded. Broad dynamic reflection quality and the full-scene 1080p/60 fps budget remain open. Current renderer work stays within F14.
+F9 is integrated. F10–F14 provide an **experimental renderer baseline** with scoped M5 Max validation. The [integration handoff](F10_F14_HANDOFF.md) and [budget follow-up](implementation/F13-F14-BUDGET-CLOSURE-2026-10-08.md) document quality, hardware and performance evidence. The [F13/F14 closure](implementation/F13-F14-CLOSURE-2026-11-12.md) accepts F13.1–F13.6 and F14.1–F14.3 for development on M5 Max against independent reference clips, and measures full Sponza at native 1080p within 16.67 ms GPU p95. Production lighting uses the custom denoiser: native MetalFX was measured on the real inputs and rejected for quality. F14.4 stays open for a repeatability gap under shader validation. Current renderer work stays within F14.
 
 The implementation roadmap — F0–F41 and OPT-0…OPT-15, organized by dependencies
 in seven eras — is in [`docs/ROADMAP.md`](../docs/ROADMAP.md) (Italian).

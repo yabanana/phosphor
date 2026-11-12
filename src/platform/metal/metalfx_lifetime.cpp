@@ -174,7 +174,11 @@ void* denoisedTimingRecord(MTL4FX::TemporalDenoisedScaler* scaler) {
 #ifdef __APPLE__
     // Pin the actual loaded image, not CFBundleVersion alone: Apple can reuse
     // a marketing version across OS builds with different dealloc code.
-    static constexpr unsigned char verifiedUUID[16]={0xea,0xb6,0x8c,0xbc,0x37,0x6a,0x37,0x91,0xbd,0x74,0xb0,0x94,0xfa,0x13,0xad,0x4e};
+    static constexpr unsigned char verifiedUUIDs[][16]={
+        {0xea,0xb6,0x8c,0xbc,0x37,0x6a,0x37,0x91,0xbd,0x74,0xb0,0x94,0xfa,0x13,0xad,0x4e},
+        {0x8a,0x5d,0xfa,0x85,0xcd,0x09,0x37,0xd8,0x82,0xbb,0x7d,0x88,0x6a,0xc4,0xf2,0x94},
+        {0x97,0x9e,0xd5,0x1c,0x1d,0xf5,0x3d,0xc5,0x94,0x8f,0x7b,0xe4,0x50,0x57,0x41,0xb3},
+    };
     if(const char* value=std::getenv("PHOSPHOR_METALFX_DENOISED_PLAIN_RELEASE");value&&std::strcmp(value,"1")==0)return nullptr;
     const Class cls=object_getClass(reinterpret_cast<id>(scaler));
     if(!cls||std::strcmp(class_getName(cls),"_M4FXTemporalDenoisingScalingEffect")!=0)return nullptr;
@@ -186,7 +190,8 @@ void* denoisedTimingRecord(MTL4FX::TemporalDenoisedScaler* scaler) {
     const auto* command=reinterpret_cast<const load_command*>(header+1);bool verified=false;
     for(uint32_t i=0;i<header->ncmds;++i) {
         if(command->cmd==LC_UUID&&command->cmdsize>=sizeof(uuid_command))
-            verified=std::memcmp(reinterpret_cast<const uuid_command*>(command)->uuid,verifiedUUID,16)==0;
+            for(const auto& uuid:verifiedUUIDs)
+                verified|=std::memcmp(reinterpret_cast<const uuid_command*>(command)->uuid,uuid,sizeof(uuid))==0;
         command=reinterpret_cast<const load_command*>(reinterpret_cast<const char*>(command)+command->cmdsize);
     }
     if(!verified)return nullptr;

@@ -147,7 +147,7 @@ work before adopting the GTAO preset.
 
 gpu_types.h is the single scalar-only definition. GPUReflectionParams288 B,
 GPUSpecularSample48 B, GPUAOParams176 B, GPUReflectionProbe64 B,
-GPUProbeCaptureParams112 B, GPUProbeFilterParams32 B, GPUDenoiseParams96 B,
+GPUProbeCaptureParams112 B, GPUProbeFilterParams32 B, GPUDenoiseParams112 B,
 GPUDenoiseHistory112 B. Signal IDs: DI0,GI1,SPECULAR2,AO3. Reflection paths:
 NONE0,RT1,SSR2,CACHE3,PROBE4,ENVIRONMENT5.
 
@@ -161,9 +161,17 @@ NONE0,RT1,SSR2,CACHE3,PROBE4,ENVIRONMENT5.
 | ao_rtao | above +TLAS2,ownIFT3,instances4 | visibilityOUT1 | width*height1D |
 | denoise_temporal | denoiseParams0,surfaces1,previousHistory2,optionalSpecMetadata3,nextHistoryOUT4 | raw0,motion1,temporalOUT2,momentsOUT3 | width*height1D |
 | denoise_atrous | params0,surfaces1,optionalSpecMetadata3 | previousFilter0,moments1,nextFilterOUT2 | width*height1D |
+| denoise_atrous_guide4 | same as denoise_atrous | same as denoise_atrous | 8×8 groups, stride4 |
+| denoise_atrous_diffuse4 | params0,surfaces1 | DI/GI/AO inputs0–2,moments3–5,outputs6–8 | 8×8 groups, stride4 |
 | denoise_corrupt_history_view | params0,historyRW1 | none | width*height1D |
 | denoise_check | params0,nextHistory1,atomicCounts2 | output0 | width*height1D |
 | reflection_probe_prefilter | filterParams0 | rawCubeArray0,destinationMip2DArrayViewOUT1 | side*side*6 |
+
+The current-view depth row in GPUDenoiseParams transforms historical world
+positions before depth rejection; old-camera depth is not compared directly
+with the current camera. Kernel constant40 selects DI0/GI1/SPECULAR2/AO3;
+0xffffffff is the diagnostic runtime-signal specialization. Diffuse batching
+shares geometry work only; each signal keeps its own moments/output/history.
 
 Raster capture `reflection_probe_capture_vs/fs`: captureParams0,vertices1,
 instances2,materials3,GPULights4,DITextureHandles5,fullStaticSlots6,sampled7,

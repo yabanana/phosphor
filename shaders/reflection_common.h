@@ -3,6 +3,8 @@
 #include "light_visibility.h"
 #include "surface_geometry.h"
 #include "renderer/reflection_probe_storage.h"
+#include "reflection_reduce.h"
+#include "renderer/emission_pack.h"
 constexpr sampler kReflectionProbeSampler(filter::linear,mip_filter::linear,address::clamp_to_edge);
 inline float4x4 reflectionMatrix(constant float* m){return float4x4(float4(m[0],m[1],m[2],m[3]),float4(m[4],m[5],m[6],m[7]),float4(m[8],m[9],m[10],m[11]),float4(m[12],m[13],m[14],m[15]));}
 inline float3 reflectionConstantVec(constant float* p){return float3(p[0],p[1],p[2]);}
@@ -31,18 +33,34 @@ inline ReflectionDirection reflectionDirection(GPUDISurface s,float2 u){
 inline float reflectionRTWeight(float roughness,constant GPUReflectionParams& p){return (p.flags&REFLECTION_ENABLE_RT)?1-smoothstep(p.rtRoughnessLow,p.rtRoughnessHigh,roughness):0;}
 
 inline bool reflectionProbeDirection(GPUReflectionProbe p,float3 point,float3 direction,thread float3& corrected,thread float& weight){
-    const float3 lo=diVec(p.boxMin),hi=diVec(p.boxMax);if(!p.enabled||p.blendDistance<=0||any(point<lo)||any(point>hi))return false;
+    // F13.5 (CPU mirror reflectionProbeWeight/Parallax): full weight inside the
+    // geometry-fitted projection box, its faces included, fading to the
+    // environment over blendDistance outside it.
+    const float3 lo=diVec(p.boxMin),hi=diVec(p.boxMax);if(!p.enabled||p.blendDistance<=0)return false;
+    const float3 outside=max(max(lo-point,point-hi),0.0f);weight=saturate(1-max(max(outside.x,outside.y),outside.z)/p.blendDistance);
+    if(!(weight>0))return false;
     float exit=INFINITY;for(uint i=0;i<3;++i)if(abs(direction[i])>1e-8f)exit=min(exit,((direction[i]>0?hi[i]:lo[i])-point[i])/direction[i]);
-    corrected=point+direction*exit-diVec(p.capturePosition);float3 dist=min(point-lo,hi-point);
-    weight=saturate(min(min(dist.x,dist.y),dist.z)/p.blendDistance);
-    if(!isfinite(exit)||!all(isfinite(corrected))||dot(corrected,corrected)<1e-20f)return false;corrected=normalize(corrected);return weight>0;
+    exit=max(exit,0.0f);corrected=point+direction*exit-diVec(p.capturePosition);
+    if(!isfinite(exit)||!all(isfinite(corrected))||dot(corrected,corrected)<1e-20f)return false;corrected=normalize(corrected);return true;
 }
+// F13.1 (CPU mirror reflectionFallbackEmissionShare): share of a geometry
+// emitter's specular lobe that a non-RT reflection path keeps for this receiver.
+inline float reflectionFallbackEmissionShare(constant GPUReflectionParams& p,float roughness){
+    if(!(p.flags&REFLECTION_EXCLUDE_DI_EMISSION))return 1.0f;
+    if((p.flags&REFLECTION_ENABLE_RT)||!(p.flags&REFLECTION_DI_EMITTER_BAND))return 0.0f;
+    return 1.0f-smoothstep(p.rtRoughnessLow,p.rtRoughnessHigh,roughness);}
+// Probe texels carry the captured emission luminance in alpha (F13.1); the
+// emitted part of a filtered texel is estimated with the texel's own chroma.
+inline float reflectionProbeLuminance(float3 c){return dot(c,float3(.2126f,.7152f,.0722f));}
 inline float3 reflectionProbeRadiance(float3 point,float3 direction,float roughness,bool prefiltered,
     constant GPUReflectionParams& p,const device GPUReflectionProbe* probes,texturecube_array<float> atlas,thread uint& path){
     float3 sum=0;float total=0;path=REFLECTION_PATH_ENVIRONMENT;
     if(p.flags&REFLECTION_ENABLE_PROBES)for(uint i=0;i<p.probeCount;++i){const GPUReflectionProbe probe=probes[i];float3 corrected;float weight;
-        if(reflectionProbeDirection(probe,point,direction,corrected,weight)){const float lod=prefiltered?roughness*max(probe.mipCount-1,0.0f):0;
-            float3 L=atlas.sample(kReflectionProbeSampler,corrected,probe.cubeIndex,level(lod)).rgb;if(all(isfinite(L))&&all(L>=0)){sum+=L*weight;total+=weight;}}
+        if(reflectionProbeDirection(probe,point,direction,corrected,weight)){if(p.flags&REFLECTION_DEBUG_NO_PARALLAX)corrected=direction;const float lod=prefiltered?roughness*max(probe.mipCount-1,0.0f):0;
+            const float4 texel=atlas.sample(kReflectionProbeSampler,corrected,probe.cubeIndex,level(lod));float3 L=texel.rgb;
+            const float keep=reflectionFallbackEmissionShare(p,roughness),luminance=reflectionProbeLuminance(L);
+            if(keep<1.0f&&luminance>0&&texel.a>0)L-=(1.0f-keep)*L*saturate(texel.a/luminance);
+            if(all(isfinite(L))&&all(L>=0)){sum+=L*weight;total+=weight;}}
     }
     if(total>0){path=REFLECTION_PATH_PROBE;float coverage=saturate(total);return (sum/total)*coverage+reflectionConstantVec(p.environment)*(1-coverage);}
     return reflectionConstantVec(p.environment);
@@ -60,10 +78,13 @@ inline bool reflectionSSRPoint(float3 origin,float3 direction,float distance,con
     hit.point=world.xyz/world.w;hit.pixel=pixel.y*p.width+pixel.x;hit.distance=length(hit.point-origin);
     delta=-(reflectionMatrix(p.view)*float4(point,1)).z+(reflectionMatrix(p.view)*float4(hit.point,1)).z;return isfinite(delta);
 }
-inline ReflectionSSRHit reflectionSSR(float3 origin,float3 direction,constant GPUReflectionParams& p,texture2d<float,access::read> depth){
+inline ReflectionSSRHit reflectionSSR(float3 origin,float3 direction,constant GPUReflectionParams& p,texture2d<float,access::read> depth,float roughness=0.0f){
     ReflectionSSRHit hit{};hit.pixel=~0u;float previous=0;bool front=false;
     if(!(p.flags&REFLECTION_ENABLE_SSR))return hit;
-    const uint count=clamp(p.ssrSteps,2u,512u);
+    // Rough lobes reflect a blurred image: march fewer steps above the RT band
+    // (ssrRoughSteps at roughness 1, 0 keeps the full count everywhere).
+    const uint full=clamp(p.ssrSteps,2u,512u);
+    const uint count=p.ssrRoughSteps?uint(mix(float(full),float(clamp(p.ssrRoughSteps,2u,full)),smoothstep(p.rtRoughnessHigh,1.0f,roughness))+.5f):full;
     for(uint step=1;step<=count;++step){float f=float(step)/float(count),distance=p.maxDistance*f*f,delta;
         ReflectionSSRHit candidate{};if(!reflectionSSRPoint(origin,direction,distance,p,depth,candidate,delta)){previous=distance;front=false;continue;}
         if(front&&delta>=0){float low=previous,high=distance;for(uint j=0;j<min(p.ssrBinarySteps,16u);++j){float m=(low+high)*.5f,md;ReflectionSSRHit mid;
@@ -85,11 +106,16 @@ inline GPUSpecularSample reflectionFallback(GPUDISurface surface,ReflectionDirec
     if(!direction.valid)return out;
     for(uint i=0;i<3;++i)out.direction[i]=direction.direction[i];out.proposalSolidAngle=direction.pdf;
     if(!any(direction.weight>0))return out;float3 L;
-    const auto hit=reflectionSSR(diVec(surface.position),direction.direction,p,depth);
+    const auto hit=reflectionSSR(diVec(surface.position),direction.direction,p,depth,surface.roughness);
     if(hit.valid&&surfaces[hit.pixel].valid){const GPUDISurface secondary=surfaces[hit.pixel];out.path=REFLECTION_PATH_SSR;out.hitDistance=hit.distance;
         out.secondarySlot=secondary.instanceSlot;out.secondaryGeneration=secondary.instanceGeneration;
-        if((p.flags&REFLECTION_ENABLE_CACHE)&&giCacheLookup(hit.point,diVec(secondary.geometricNormal),-direction.direction,gi,cache,L))out.path=REFLECTION_PATH_CACHE;
-        else L=baseRadiance.read(uint2(hit.pixel%p.width,hit.pixel/p.width)).rgb;
+        // The SSR source omits emission when DI integrates emitters (pre-
+        // compose) and the cached outgoing radiance includes it: both keep
+        // exactly the fallback's share of the hit receiver's emission.
+        const float share=reflectionFallbackEmissionShare(p,surface.roughness);const float3 emission=unpackEmission3(secondary.pad[1]);
+        if((p.flags&REFLECTION_ENABLE_CACHE)&&giCacheLookup(hit.point,diVec(secondary.geometricNormal),-direction.direction,gi,cache,L)){out.path=REFLECTION_PATH_CACHE;
+            if(p.flags&REFLECTION_EXCLUDE_DI_EMISSION)L=max(L-(1.0f-share)*emission,0.0f);}
+        else{L=baseRadiance.read(uint2(hit.pixel%p.width,hit.pixel/p.width)).rgb;if(p.flags&REFLECTION_EXCLUDE_DI_EMISSION)L+=share*emission;}
     }else L=reflectionProbeRadiance(diVec(surface.position),direction.direction,surface.roughness,false,p,probes,probeAtlas,out.path);
     float3 result=L*direction.weight;if(!all(isfinite(L))||any(L<0)||!all(isfinite(result))||any(result<0)){out.flags|=SPECULAR_SAMPLE_ERROR;result=0;}
     for(uint i=0;i<3;++i)out.radiance[i]=result[i];return out;

@@ -12,6 +12,25 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"tools"))
 from metalfx_denoise_fixture_check import constant_oracle,impulse_oracle,guide_oracle,leaks_at_exit,frozen_prewarm_budget,make_cases,frozen_auto_exposure_experiment,exposure_mode_oracle,frozen_manual_exposure_control,MANUAL_EXPOSURE_REQUESTED_FP32,MANUAL_EXPOSURE_R16
 import metalfx_denoise_fixture_check as runner
 
+
+class OwnerCriterionD1(unittest.TestCase):
+    def test_frozen_wide_profile_passes_and_floor_applies(self):
+        m=MANUAL_EXPOSURE_R16
+        self.assertLessEqual(runner.d1_excess(368640,368640*.93,m),1)
+        self.assertLessEqual(runner.d1_excess(64,64*1.0518,m),1)
+        self.assertGreater(runner.d1_excess(64,64*1.10,m),1)
+        white=1/m
+        self.assertGreater(runner.d1_excess(white,white*1.02,m),1)
+        self.assertGreater(runner.d1_excess(4.5*white,9*white,m),1)
+        self.assertEqual(runner.d1_excess(1,float("nan"),m),math.inf)
+
+    def test_constant_oracle_uses_d1_only_with_exposure(self):
+        from array import array
+        target=[368640,128,64];restored=array("d",[368640*.93,128*1.0146,64*1.0518]);sdk=array("d",[v/64 for v in restored])
+        self.assertFalse(runner.constant_oracle(sdk,restored,target,1/64)["passed"])
+        result=runner.constant_oracle(sdk,restored,target,1/64,MANUAL_EXPOSURE_R16)
+        self.assertTrue(result["passed"]);self.assertEqual(result["criterion"],"D1")
+
 class SDKNumpyEquivalenceTests(unittest.TestCase):
     def both(self,call):
         numpy=runner._NUMPY

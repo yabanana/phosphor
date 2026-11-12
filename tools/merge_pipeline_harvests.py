@@ -55,14 +55,29 @@ def normalize_library(corpus, label):
     return corpus
 
 
+def compute_name(corpus, pipeline):
+    descriptors=corpus["function_descriptors"]
+    functions={f["label"]:f["name"] for f in descriptors["library_function_descriptors"]}
+    for f in descriptors.get("specialized_function_descriptors",[]):
+        functions[f["label"]]=functions[f["function_descriptor"].removeprefix("fnd:")]
+    return functions[pipeline["compute_function_descriptor"].removeprefix("fnd:")]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--replace-compute",action="append",default=[],help="replace named compute kernels from the first corpus with newly harvested records")
     parser.add_argument("inputs", type=Path, nargs="+")
     args = parser.parse_args()
+    corpora=[json.loads(path.read_text()) for path in args.inputs]
+    if args.replace_compute:
+        names=set(args.replace_compute)
+        replacements={compute_name(c,p) for c in corpora[1:] for p in c["pipeline_descriptors"]["compute_pipeline_descriptors"]}
+        if not names<=replacements:raise ValueError("replacement kernels missing actual harvested descriptors: "+str(names-replacements))
+        baseline=corpora[0]
+        baseline["pipeline_descriptors"]["compute_pipeline_descriptors"]=[p for p in baseline["pipeline_descriptors"]["compute_pipeline_descriptors"] if compute_name(baseline,p) not in names]
     result, library_label = {}, None
-    for path in args.inputs:
-        corpus = json.loads(path.read_text())
+    for corpus in corpora:
         if library_label is None:
             library_label = corpus["libraries"][0]["label"]
         result = merge(result, normalize_library(corpus, library_label))

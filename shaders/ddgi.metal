@@ -30,7 +30,7 @@ kernel void ddgi_trace(instance_acceleration_structure as [[buffer(0)]],
     ray.dx=direction.x;ray.dy=direction.y;ray.dz=direction.z;
     ray.tmax=p.maxDistance;ray.mask=RT_MASK_INDIRECT;ray.type=RT_PROBE_DIFFUSE;
     RtPayload payload{};
-    GPURtHit hit=rtTrace(ray,as,ift,instances,p.slotCount,payload);
+    GPURtHit hit=rtTraceSurface(ray,as,ift,instances,p.slotCount,payload,meshes,vertices,indices,p.meshCount);
     GPUProbeRay output{};output.direction[0]=direction.x;output.direction[1]=direction.y;output.direction[2]=direction.z;
     output.distance=p.maxDistance;
     float3 L(0.0f); // no direct environment in the INDIRECT atlas

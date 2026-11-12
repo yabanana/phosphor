@@ -218,6 +218,7 @@ RtCheckResult RtChecker::check(std::span<const GPURtRay> rays, std::span<const G
             if (strict.ok && loose.ok) {
                 ++result.checked;
                 result.edgeTies += strict.edgeTie || loose.edgeTie;
+                result.edgeExclusions += strict.edgeExcluded || loose.edgeExcluded;
             } else if (uncertain && (strict.ok || loose.ok)) {
                 ++result.ambiguous; // At least one complete named-hit check passed.
             } else {
@@ -230,6 +231,8 @@ RtCheckResult RtChecker::check(std::span<const GPURtRay> rays, std::span<const G
         }
     }
     if (result.checked == 0 && result.failures == 0) fail("RT check had no unambiguous supported rays");
+    if (result.edgeExclusions > std::max<u64>(1, result.checked / 1000))
+        fail("RT check: " + std::to_string(result.edgeExclusions) + " edge-excluded rays exceed the cap of max(1, checked/1000)");
     return result;
 }
 

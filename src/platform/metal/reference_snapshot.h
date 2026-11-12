@@ -1,5 +1,6 @@
 #pragma once
 #include "platform/metal/shadow_passes.h"
+#include "renderer/gi_lighting_epoch.h"
 #include "renderer/offline_reference.h"
 namespace phosphor {
 class MetalTextureManager;class DirectLightingPasses;
@@ -10,7 +11,8 @@ public:
     ReferenceSnapshot(MetalContext&,SceneRenderer&,const std::string& destination, u64 captureFrame=0, AccelerationStructures* rt=nullptr);
     ~ReferenceSnapshot();
     void loadScene(const GpuScene&,const SceneStore&,const MetalTextureManager&);
-    void prepareFrame(const ShadowPasses::Frame&,ReferenceCamera,std::span<const GPULight>,const SceneStore&,DirectLightingPasses*);
+    void prepareFrame(const ShadowPasses::Frame&,ReferenceCamera,std::span<const GPULight>,const GiEnvironment&,
+                      const SceneStore&,DirectLightingPasses*);
     void addToGraph(rg::RenderGraph&);
     void bindFrame(MetalGraphExecutor&);
     void consume(u32 slot); // AFTER completion, BEFORE reload/teardown

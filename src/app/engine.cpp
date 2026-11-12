@@ -87,6 +87,15 @@
 #endif
 
 namespace phosphor {
+namespace {
+// F13: the scene's single declared isotropic environment. The atmosphere owns
+// it when present; the specular-environment fixture declares its constant
+// infinite environment; every other scene is black outside its geometry.
+GiEnvironment declaredEnvironment(const AtmospherePasses* atmosphere,const LaunchOptions& options){
+    if(atmosphere)return atmosphere->environment();
+    GiEnvironment e{};if(options.reflectionScene=="specular-environment")e.skyRadiance={.03f,.035f,.045f};return e;
+}
+}
 
 namespace {
 
@@ -340,6 +349,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     if(options_.lightingDenoise==LightingDenoiseMode::MetalFX||!options_.denoisedFixture.empty()) {
         MetalfxDenoise::Options config;config.enabled=true;config.views=options_.temporalViews;
         config.specularHitDistance=options_.reflections!=ReflectionMode::Off;
+        if(options_.metalfxNativeDiagnostic)config.radiometricDomain=metalfx_denoise::RadiometricDomain::ControlledFixtureDiagnostic;
         MetalfxDenoise::Factory factory;
 #ifdef PHOSPHOR_METALFX_DENOISED_GATEWAY_AVAILABLE
         factory.request=[this](auto* desc){return pipelines_->requestTemporalDenoisedScaler(desc);};
@@ -360,8 +370,26 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     if(!options_.captureLinear.empty()||!options_.captureLinearSequence.empty()) {
         LinearCapture::Config capture;capture.path=options_.captureLinear;capture.sequence=options_.captureLinearSequence;
         capture.frame=options_.captureLinearFrame;capture.every=options_.captureEvery;capture.scalar=options_.captureLinearSignal==3||options_.captureLinearSignal==7||options_.captureLinearSignal==9;
-        if(options_.reflectionScene=="ao-temporal-wall"&&options_.captureLinearSignal==9)
+        // Denoise history checkpoints exist only where the independent checks
+        // are encoded (--debug-lighting, always passed by the F13/F14 runner);
+        // product captures carry no history metadata.
+        if(!options_.debugLighting){}
+        else if(options_.reflectionScene=="ao-temporal-wall"&&options_.captureLinearSignal==9)
             capture.completedMetadata=[this](u32 slot){return reflections_->completedAOCheckpoint(slot);};
+        else if(options_.temporalScript&&options_.lightingDenoise!=LightingDenoiseMode::Off)
+            capture.completedMetadata=[this](u32 slot){
+                nlohmann::json signals=nlohmann::json::object();
+                for(const auto& [enabled,signal]:std::array<std::pair<bool,u32>,4>{{
+                    {options_.directLighting!=DirectLightingMode::Legacy,DENOISE_SIGNAL_DI},
+                    {denoisesGi(options_),DENOISE_SIGNAL_GI},
+                    {options_.reflections!=ReflectionMode::Off,DENOISE_SIGNAL_SPECULAR},
+                    {options_.ao!=AoMode::Off,DENOISE_SIGNAL_AO}}})
+                    if(enabled){
+                        const auto checkpoint=reflections_->completedSignalCheckpoint(slot,signal);
+                        if(!checkpoint.empty())signals[std::to_string(signal)]=nlohmann::json::parse(checkpoint);
+                    }
+                return signals.dump();
+            };
         linearCapture_=std::make_unique<LinearCapture>(*context_,*pipelines_,std::move(capture));
     }
     ecs_        = std::make_unique<ECS>();
@@ -995,8 +1023,9 @@ void Engine::finishBenchmark() {
                     r.proxyMode.c_str(), static_cast<unsigned long long>(r.proxyTriangles),
                     static_cast<unsigned long long>(r.fullTriangles));
         if (options_.debugRt)
-            std::printf("RT checks %u failures %u | %s\n", rtChecks_, rtFailures_,
-                        rtChecks_ && !rtFailures_ ? "PASS" : "FAIL");
+            std::printf("RT checks %u failures %u | %s | edge-excluded rays %llu of %llu\n", rtChecks_, rtFailures_,
+                        rtChecks_ && !rtFailures_ ? "PASS" : "FAIL", static_cast<unsigned long long>(rtEdgeExcluded_),
+                        static_cast<unsigned long long>(rtCheckedRays_));
     }
     if (report.scene.present) std::printf("%s\n", formatSceneLine(report.scene).c_str());
     if (gpuSceneChecks_ > 0) {
@@ -1375,6 +1404,32 @@ bool Engine::frame(float dt) {
         } else {
             camera_->updateFPS(*input_, dt);
         }
+        // F14.2/F14.3 camera controls: stateless per frame from the fixture's
+        // default aim (no accumulation), never on a scripted camera.
+        if (options_.cameraPitch > -1000 || options_.cameraYawRate != 0 || options_.cameraAimSun > -1000) {
+            if (scripted || options_.temporalScript)
+                throw std::invalid_argument("F14 camera controls require a non-scripted fixture camera");
+            const auto base = activeBench_->getDefaultCamera();
+            glm::vec3 dir = base.target - base.position;
+            dir = glm::length(dir) > 1e-6f ? glm::normalize(dir) : glm::vec3(0, 0, -1);
+            double yaw = std::atan2(double(dir.z), double(dir.x)), pitch = std::asin(std::clamp(double(dir.y), -1.0, 1.0));
+            if (options_.cameraAimSun > -1000) {
+                // The same clock the atmosphere samples this frame (scene time after this step).
+                DayNightSettings settings;
+                settings.dayLengthSeconds = options_.atmoDayLength;
+                settings.startDayFraction = double(options_.atmoStartHour) / 24;
+                DayNightClock clock(settings);
+                const auto sun = clock.sample(atmosphereClockSeconds(sceneTime_ + dt, presentedFrames_, options_.atmoDayLength,
+                                                                     options_.timeJumpEveryN, options_.atmoFreezeClock)).sunDirection;
+                yaw = std::atan2(sun.z, sun.x);
+                pitch = std::asin(std::clamp(sun.y, -1.0, 1.0)) + glm::radians(double(options_.cameraAimSun));
+            } else if (options_.cameraPitch > -1000)
+                pitch = glm::radians(double(options_.cameraPitch));
+            yaw += glm::radians(double(options_.cameraYawRate)) * (sceneTime_ + dt);
+            orbitMode_ = false;
+            camera_->setPosition(base.position);
+            camera_->setYawPitch(float(glm::degrees(yaw)), float(glm::degrees(std::clamp(pitch, -glm::radians(85.0), glm::radians(85.0)))));
+        }
     }
     camera_->setAspect(static_cast<float>(context_->width()) / static_cast<float>(std::max(context_->height(), 1u)));
     camera_->updateMatrices();
@@ -1455,7 +1510,7 @@ bool Engine::frame(float dt) {
     const u32 width = static_cast<u32>(target->width()), height = static_cast<u32>(target->height());
     currentView_ = post_ ? static_cast<u32>(presentedFrames_ % options_.temporalViews) : 0;
     const glm::vec3 offset(float(currentView_) * 2.0f, 0, 0);
-    if(options_.planetCameraHeight>=0){auto position=camera_->getPosition();position.y=options_.planetCameraHeight;camera_->setPosition(position);camera_->updateMatrices();}
+    if(options_.planetCameraHeight>=0){auto position=camera_->getPosition();position.y=float(double(options_.planetCameraHeight)+double(options_.cameraClimb)*sceneTime_);camera_->setPosition(position);camera_->updateMatrices();}
     const glm::mat4 view = camera_->getView() * glm::translate(glm::mat4(1), -offset);
     const glm::mat4 unjittered = camera_->getProjection() * view;
     const glm::vec3 camPos = camera_->getPosition() + offset;
@@ -1591,6 +1646,12 @@ bool Engine::frame(float dt) {
         mesh_->prepareFrame(*store_, *gpuScene_, mp);
         if (mesh_->usingFallbackPipeline()) frameFlags_ |= FrameFallbackDraw;
     }
+    if (visibility_) {
+        // F13 path: pixels without geometry show the declared environment
+        // (black without an atmosphere), the same radiance every miss sees.
+        const GiEnvironment declared=declaredEnvironment(atmosphere_.get(),options_);
+        visibility_->setBackground(reflections_&&reflections_->ready()?declared.skyRadiance:std::array<float,3>{0.02f,0.025f,0.035f});
+    }
     if (visibility_)
         visibility_->prepareFrame(
             frame.slot, renderWidth, renderHeight, renderBackingWidth_, renderBackingHeight_, *store_,
@@ -1650,7 +1711,7 @@ bool Engine::frame(float dt) {
         if(gi_)gi_->prepareFrame(*gpuScene_,*store_,lights_,sf);
         if(store_->stats().structure||store_->stats().fullInstances||store_->stats().fullNodes||!store_->instanceDeltas().empty()||!store_->nodeDeltas().empty()||!store_->motionSlots().empty()||!store_->dirtyRoots().empty())++surfaceGeometryEpoch_;
         if(store_->stats().fullMaterials||!store_->materialDeltas().empty())++surfaceMaterialEpoch_;
-        const GiEnvironment environment=atmosphere_?atmosphere_->environment():GiEnvironment{};
+        const GiEnvironment environment=declaredEnvironment(atmosphere_.get(),options_);
         const auto lightEpoch=surfaceLightingEpoch_.update(lights_,environment,directLighting_?directLighting_->lightRevision():0);
         const SurfaceSignal signal{sceneEpoch_,surfaceGeometryEpoch_,surfaceMaterialEpoch_,rt_?rt_->geometryRevision():gpuScene_->geometryVersion(),lightEpoch,pipelines_->generation()};
         if(!(signal==previousSurfaceSignal_)){++surfaceSignalEpoch_;previousSurfaceSignal_=signal;}
@@ -1663,11 +1724,11 @@ bool Engine::frame(float dt) {
             denoised_->prepareFrame(df);
         }
         const bool custom=options_.lightingDenoise==LightingDenoiseMode::Custom || (denoised_&&!denoised_->ready());
-        if(reflections_&&reflections_->ready())reflections_->prepareFrame(*store_,sf,custom,surfaceSignalEpoch_);
+        if(reflections_&&reflections_->ready()){reflections_->setEnvironment(environment.skyRadiance);reflections_->prepareFrame(*store_,sf,custom,surfaceSignalEpoch_);}
         if(atmosphere_)atmosphere_->prepareFrame(sf,surfaceGeometryEpoch_,surfaceMaterialEpoch_);
         const u32 flags=(options_.shadows!=ShadowMode::Off?1u:0u) | (options_.directLighting!=DirectLightingMode::Legacy?2u:0u) | (options_.gi!=GiMode::Off?4u:0u) |
                         (options_.reflections!=ReflectionMode::Off && reflections_&&reflections_->ready()?8u:0u) | (reflections_&&reflections_->ready()?16u|RESOLVE_EXTERNAL_DIFFUSE:0u);
-        visibility_->prepareLighting(flags,shadows_->sunIndex());
+        visibility_->prepareLighting(flags,shadows_->sunIndex(),environment.skyRadiance,environment.sunAngularRadius);
     }
     if(referenceSnapshot_) {
         ShadowPasses::Frame ref;ref.slot=frame.slot;ref.index=frame.index;ref.width=renderWidth;ref.height=renderHeight;ref.constants=constants;
@@ -1675,7 +1736,8 @@ bool Engine::frame(float dt) {
         std::memcpy(camera.direction,glm::value_ptr(front),12);std::memcpy(camera.up,glm::value_ptr(up),12);camera.width=renderWidth;camera.height=renderHeight;
         camera.fovYRadians=camera_->getFovY();camera.nearPlane=camera_->getNear();camera.farPlane=0;
         camera.jitterPixels[0]=temporal.jitter[0];camera.jitterPixels[1]=temporal.jitter[1];
-        referenceSnapshot_->prepareFrame(ref,camera,lights_,*store_,directLighting_.get());
+        const GiEnvironment environment=atmosphere_?atmosphere_->environment():GiEnvironment{};
+        referenceSnapshot_->prepareFrame(ref,camera,lights_,environment,*store_,directLighting_.get());
     }
     if(linearCapture_) {
         std::string metadata;
@@ -1690,6 +1752,16 @@ bool Engine::frame(float dt) {
             for(const auto& entry:std::array<std::pair<const char*,const char*>,4>{{{"source_sha","PHOSPHOR_SOURCE_SHA"},{"binary_sha","PHOSPHOR_BINARY_SHA"},{"metallib_sha","PHOSPHOR_METALLIB_SHA"},{"manifest_sha","PHOSPHOR_MANIFEST_SHA"}}}) {
                 const auto* value=std::getenv(entry.second);document["provenance"][entry.first]=value?nlohmann::json(value):nlohmann::json(nullptr);
             }
+            metadata=document.dump();
+        } else if(options_.temporalScript) {
+            std::array<float,16> viewMatrix{},projectionMatrix{};
+            std::memcpy(viewMatrix.data(),constants.view,sizeof(constants.view));
+            std::memcpy(projectionMatrix.data(),&unjittered[0][0],sizeof(float)*16);
+            nlohmann::json document={{"schema","phosphor.dynamic-lighting-capture.v1"},{"frame",frame.index},
+                {"view",currentView_},{"signal",options_.captureLinearSignal},{"width",renderWidth},{"height",renderHeight},
+                {"scene_time",sceneTime_},{"camera_cut",viewCameraCut},{"scene_epoch",sceneEpoch_},
+                {"signal_epoch",surfaceSignalEpoch_},{"shader_generation",pipelines_->generation()},
+                {"camera",{{"position",{camPos.x,camPos.y,camPos.z}},{"view",viewMatrix},{"unjittered_view_projection",projectionMatrix}}}};
             metadata=document.dump();
         }
         linearCapture_->prepareFrame(frame.slot,frame.index,renderWidth,renderHeight,metadata);
@@ -2154,10 +2226,12 @@ bool Engine::checkRayTracing(u32 slot) {
     rtCheckedRays_ += result.checked;
     rtAmbiguous_ += result.ambiguous;
     rtUnsupported_ += result.unsupported;
-    std::printf("RT check frame %llu | checked %llu ambiguous %llu skipped %llu unsupported %llu | "
+    rtEdgeExcluded_ += result.edgeExclusions;
+    std::printf("RT check frame %llu | checked %llu ambiguous %llu edge-excluded %llu skipped %llu unsupported %llu | "
                 "failures %llu opaque-alpha %u invalid-mesh %u | %s%s%s\n",
                 static_cast<unsigned long long>(readback.frame), static_cast<unsigned long long>(result.checked),
-                static_cast<unsigned long long>(result.ambiguous), static_cast<unsigned long long>(result.skipped),
+                static_cast<unsigned long long>(result.ambiguous), static_cast<unsigned long long>(result.edgeExclusions),
+                static_cast<unsigned long long>(result.skipped),
                 static_cast<unsigned long long>(result.unsupported), static_cast<unsigned long long>(result.failures),
                 counters.opaqueAlphaTests, counters.invalidMesh, passed ? "PASS" : "FAIL",
                 result.firstError.empty() ? "" : ": ", result.firstError.c_str());
@@ -2250,7 +2324,8 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
                                                        options_.captureLinearSignal==4?shadows_->worldPosition():
                                                        options_.captureLinearSignal==5?shadows_->geometricNormal():
                                                        options_.captureLinearSignal==6?reflections_->rawSpecular():
-                                                       options_.captureLinearSignal==7?reflections_->rawAO():options_.captureLinearSignal==8?reflections_->filteredIndirectDiffuse():options_.captureLinearSignal==9?reflections_->filteredAO():options_.captureLinearSignal==10?reflections_->filteredSpecular():visibility_->color());
+                                                       options_.captureLinearSignal==7?reflections_->rawAO():options_.captureLinearSignal==8?reflections_->filteredIndirectDiffuse():options_.captureLinearSignal==9?reflections_->filteredAO():options_.captureLinearSignal==10?reflections_->filteredSpecular():
+                                                       options_.captureLinearSignal==11?atmosphere_->readResources().cloudTransmittance:visibility_->color());
             color = post_ ? post_->addToGraph(frameGraph_, *visibility_, drawableRef_, graphKey_.outputFormat,reconstructed)
                           : visibility_->addPresent(frameGraph_, drawableRef_);
             visibility_->addChecks(frameGraph_,post_?post_->exposureInput():visibility_->color());

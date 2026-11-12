@@ -15,6 +15,7 @@ struct GPUVisibilityParams {
     float exposure, mipBias;
     u32 binning, pad;
     u32 outputWidth, outputHeight, pad2, pad3;
+    float background[3]; u32 pad4; // radiance of pixels without geometry
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUVisibilityParams) == 64, "visibility parameters");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUVisibilityParams) == 80, "visibility parameters");
 } // namespace phosphor

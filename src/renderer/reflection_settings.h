@@ -10,6 +10,19 @@ struct ReflectionSettings {
 };
 [[nodiscard]] bool validReflectionSettings(const ReflectionSettings&);
 [[nodiscard]] float reflectionRTWeight(float roughness, const ReflectionSettings&);
+// F13.6 single count of geometry-backed emitters: the share of their specular
+// lobe that primary DI keeps when RT reflections are active (shader mirror:
+// diEmitterSpecularWeight). It is exactly 1 - reflectionRTWeight.
+[[nodiscard]] float emitterSpecularDIWeight(float roughness, const ReflectionSettings&);
+// F13.1: share of a geometry emitter's specular lobe that a NON-RT reflection
+// path (SSR hit, radiance cache, probe) adds for a receiver of this roughness.
+// diIntegratesEmitters = non-legacy DI; band = DI owns only the roughness band.
+// With RT reflections the RT rays own the low band and every fallback adds 0.
+// Shader mirror: reflectionFallbackEmissionShare. For every mode the DI share
+// plus the reflection share (RT probability times one plus the fallback
+// probability times this) is one.
+[[nodiscard]] float reflectionFallbackEmissionShare(float roughness, bool rtActive, bool diIntegratesEmitters, bool band,
+                                                    const ReflectionSettings&);
 struct SpecularDirection { glm::dvec3 direction{}, weight{}; double pdf = 0; bool valid = false; };
 // GGX NDF importance sampling, not a falsely labelled VNDF. Rejected reflected
 // hemispheres contribute black proposals, never resample until accepted.

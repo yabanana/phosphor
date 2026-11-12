@@ -26,12 +26,36 @@ inline FXFixtureHistoryPolicy fxFixtureHistoryPolicy(u32 scenario,u64 frame,u32 
     result.steady=frame%48u>=8u&&(!channels||frame%period>=8u);
     return result;
 }
+// Owner decision D1 (2026-11-10, closure brief section 4): the MetalFX SDK
+// carries an absolute error floor of about 1e-4..3e-4 of exposure white, so a
+// pure 1% relative cap is unreachable for dark channels and for channels far
+// above white. A channel with physical target t and exposure scale e (physical
+// -> exposed, white = 1) passes when
+//   x = t*e <= 4:  |restored - t| <= max(0.01*t, 5e-4/e)
+//   x > 4:         |sdr(restored*e) - sdr(x)| <= 2/255
+// where sdr is the product display transform (Narkowicz ACES fit of
+// post.metal, then the sRGB transfer the swapchain applies).
+inline double fxProductSdr(double x) {
+    x = std::max(x, 0.0);
+    const double a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+    const double t = std::clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+    return t <= 0.0031308 ? 12.92 * t : 1.055 * std::pow(t, 1.0 / 2.4) - 0.055;
+}
+// Returns the error over its allowance (<= 1 passes).
+inline double fxD1Excess(double target, double restored, double exposureScale) {
+    if (!std::isfinite(target) || !std::isfinite(restored) || !(exposureScale > 0) || !std::isfinite(exposureScale))
+        return std::numeric_limits<double>::infinity();
+    const double x = target * exposureScale;
+    if (x <= 4.0) return std::abs(restored - target) / std::max(0.01 * std::abs(target), 5e-4 / exposureScale);
+    return std::abs(fxProductSdr(restored * exposureScale) - fxProductSdr(x)) / (2.0 / 255.0);
+}
 struct FXConstantComparison {
-    bool finite=true,preExposed=false,physical=false,restored=false;
-    double preExposedRelativeError=0,physicalRelativeError=0,restoredRelativeError=0;
+    bool finite=true,preExposed=false,physical=false,restored=false,restoredD1=false;
+    double preExposedRelativeError=0,physicalRelativeError=0,restoredRelativeError=0,restoredD1Excess=0;
 };
 inline FXConstantComparison compareFXConstant(std::span<const float> sdk,std::span<const float> restored,
-                                               std::array<float,3> physical,float preExposure,double tolerance=0.01) {
+                                               std::array<float,3> physical,float preExposure,double tolerance=0.01,
+                                               double exposureScale=0) {
     if(sdk.empty()||sdk.size()%3||sdk.size()!=restored.size()||!std::isfinite(preExposure)||preExposure<=0||
        !std::isfinite(tolerance)||tolerance<=0||!std::all_of(physical.begin(),physical.end(),[](float v){return std::isfinite(v)&&v>=0;}))
         throw std::invalid_argument("invalid SDK constant oracle arrays");
@@ -42,10 +66,12 @@ inline FXConstantComparison compareFXConstant(std::span<const float> sdk,std::sp
         r.preExposedRelativeError=std::max(r.preExposedRelativeError,std::abs(double(sdk[i])/preExposure-target)/scale);
         r.physicalRelativeError=std::max(r.physicalRelativeError,std::abs(double(sdk[i])-target)/scale);
         r.restoredRelativeError=std::max(r.restoredRelativeError,std::abs(double(restored[i])-target)/scale);
+        if(exposureScale>0)r.restoredD1Excess=std::max(r.restoredD1Excess,fxD1Excess(target,restored[i],exposureScale));
     }
     r.preExposed=r.finite&&r.preExposedRelativeError<=tolerance;
     r.physical=r.finite&&r.physicalRelativeError<=tolerance;
     r.restored=r.finite&&r.restoredRelativeError<=tolerance;
+    r.restoredD1=r.finite&&exposureScale>0&&r.restoredD1Excess<=1.0;
     return r; // Hypotheses are reported; this function never changes SDK policy.
 }
 struct FXMetamorphicComparison {

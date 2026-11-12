@@ -118,6 +118,30 @@ static AtmoIntegral atmoIntegrate(float3 world,float3 ray,constant GPUAtmosphere
     return out;
 }
 static void atmoBasis(float3 up,thread float3& east,thread float3& north){east=normalize(cross(abs(up.z)<0.9f?float3(0,0,1):float3(1,0,0),up));north=cross(up,east);}
+static float3 atmoLunarDisk(float3 ray,constant GPUAtmosphereParams& p) {
+    const float3 moon=atmoVec(p.moonDirection);
+    if(!(p.flags&ATMOSPHERE_ENABLE_MOON)||p.moonPhase<=1e-6f||dot(ray,moon)<cos(p.moonAngularRadius))return 0;
+    float3 east,north;atmoBasis(moon,east,north);
+    const float sine=sin(p.moonAngularRadius);
+    const float2 disk=float2(dot(ray,east),dot(ray,north))/sine;
+    const float limb=sqrt(max(0.0f,1-dot(disk,disk)));
+    const float3 normal=east*disk.x+north*disk.y-moon*limb;
+    return (atmoVec(p.moonIrradiance)/p.moonPhase)*max(0.0f,dot(normal,atmoVec(p.sunDirection)))/
+        ((2.0f/3.0f)*M_PI_F*pow(sine,2.0f));
+}
+static float atmoStars(float3 direction,constant GPUAtmosphereParams& p) {
+    if(!(p.flags&ATMOSPHERE_ENABLE_STARS))return 0;
+    const float footprint=M_PI_F/float(p.outputHeight);
+    const float u=fract(atan2(direction.z,direction.x)/(2*M_PI_F)+p.starRotation/(2*M_PI_F))*256,
+                v=acos(clamp(direction.y,-1.0f,1.0f))/M_PI_F*128;
+    const int ix=int(floor(u)),iy=int(floor(v));float result=0;
+    for(int y=-1;y<=1;++y)for(int x=-1;x<=1;++x){const int cx=ix+x,cy=iy+y;if(cy<0||cy>=128)continue;
+        const uint h=volumeHash(uint(cx)&255u,uint(cy),0,0x51a7u);if((h&127u)!=0)continue;
+        const float px=float(cx)+volumeRandom(volumeHash(h,1,0,0x51a7u)),py=float(cy)+volumeRandom(volumeHash(h,2,0,0x51a7u));
+        const float dx=(u-px)*2*M_PI_F/256*max(0.02f,sin(v*M_PI_F/128)),dy=(v-py)*M_PI_F/128,radius=max(footprint,0.00035f);
+        result+=(0.25f+volumeRandom(h)*2)*exp(-(dx*dx+dy*dy)/(2*radius*radius));}
+    return p.starIntensity*result;
+}
 static float atmoHorizon(float height,float bottom){return acos(-sqrt(max(0.0f,(height-bottom)*(height+bottom)))/max(height,1e-6f));}
 static float3 atmoSkyDirection(float2 uv,float3 up,float height,constant GPUAtmosphereParams& p) {
     const float horizon=atmoHorizon(height,p.bottomRadius);

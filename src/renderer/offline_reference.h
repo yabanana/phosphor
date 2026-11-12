@@ -10,9 +10,15 @@ namespace phosphor {
 // Capture linear texels before device-only upload or through a completed same-
 // frame readback. RGB of sRGB textures MUST already be decoded, alpha is linear.
 // No texture may be silently replaced with white/default during reference export.
+struct ReferenceMip {
+    u32 width=0,height=0;
+    std::vector<float> rgba;
+};
 struct ReferenceTexture {
     u32 index = 0, width = 0, height = 0;
     std::vector<float> rgba;
+    std::vector<ReferenceMip> mips; // Additional device mip levels, starting at level 1.
+    bool sourceSrgb=false;
 };
 struct ReferenceCamera {
     float position[3]{}, direction[3]{0,0,-1}, up[3]{0,1,0};
@@ -41,6 +47,7 @@ struct OfflineReferenceScene {
     std::span<const GPULight> lights;
     std::span<const ReferenceAreaLight> sampledLights;
     std::span<const ReferenceTexture> textures;
+    std::span<const GPUDISurface> primarySurfaces; // Completed GPU witnesses, not independent ground truth.
     ReferenceCamera camera;
     float skyRadiance[3]{};
     float sunAngularRadius = 0; // same configured physical disk as F10, radians

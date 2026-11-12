@@ -92,18 +92,25 @@ kernel void clouds_temporal(constant GPUCloudParams& p [[buffer(0)]],device GPUC
     h.viewID=p.viewID;h.generation=p.generation;h.samples=1;h.valid=depths.x>0&&raw.w<1&&all(isfinite(raw));bool accepted=false;
     if((p.flags&VOLUME_HISTORY_VALID)&&h.valid){const float3 oldPoint=point-atmoVec(p.wind)*(p.timeSeconds-p.previousTimeSeconds);
         const float4 clip=atmoMatrix(p.previousViewProjection)*float4(oldPoint,1);const float2 uv=clip.xy/max(clip.w,1e-6f)*float2(0.5f,-0.5f)+0.5f;
-        if(clip.w>0&&all(uv>=0)&&all(uv<1)){const uint2 at=uint2(uv*float2(p.width,p.height));GPUCloudHistory old=previous[at.y*p.width+at.x];
+        // Negative control, no edge rejection at all: an off-screen
+        // reprojection wraps (repeat addressing, the opposite screen edge) and
+        // skips the screen-bounds, world-position, opaque-depth and
+        // neighbourhood tests. Removing the screen-bounds test alone is
+        // invisible: the position test still rejects (measured 2026-11-12).
+        const bool edgeFault=p.corruption==VOLUME_CORRUPT_CLOUD_EDGE&&clip.w>0&&!(all(uv>=0)&&all(uv<1));
+        if(clip.w>0&&(edgeFault||(all(uv>=0)&&all(uv<1)))){const uint2 at=min(uint2((edgeFault?fract(uv):uv)*float2(p.width,p.height)),uint2(p.width-1,p.height-1));GPUCloudHistory old=previous[at.y*p.width+at.x];
             if(p.corruption==VOLUME_CORRUPT_HISTORY)old.generation^=1u;
             const bool identity=old.viewID==p.viewID&&old.generation==p.generation;
             accepted=old.valid&&(identity||p.corruption==VOLUME_CORRUPT_HISTORY)&&old.samples>0&&old.samples<=64&&
                 all(isfinite(float4(old.radiance[0],old.radiance[1],old.radiance[2],old.transmittance)))&&
-                length(float3(old.worldPosition[0],old.worldPosition[1],old.worldPosition[2])-oldPoint)<=p.positionThreshold&&
-                abs(old.opaqueDistance-depths.y)<=p.depthRelativeThreshold*max(1.0f,depths.y);
+                (edgeFault||(length(float3(old.worldPosition[0],old.worldPosition[1],old.worldPosition[2])-oldPoint)<=p.positionThreshold&&
+                abs(old.opaqueDistance-depths.y)<=p.depthRelativeThreshold*max(1.0f,depths.y)));
             if(accepted){if(!identity)volumeCount(counters,2,1);float4 low=raw,high=raw;
                 for(int y=-1;y<=1;++y)for(int x=-1;x<=1;++x){const int2 q=int2(pixel)+int2(x,y);if(any(q<0)||any(q>=int2(p.width,p.height)))continue;
                     const float2 d=guide.read(uint2(q)).xy;if(d.x<=0||abs(d.y-depths.y)>p.depthRelativeThreshold*max(1.0f,depths.y))continue;
                     const float4 value=current.read(uint2(q));low=min(low,value);high=max(high,value);}
-                const float4 value=mix(raw,clamp(float4(old.radiance[0],old.radiance[1],old.radiance[2],old.transmittance),low,high),p.historyWeight);
+                const float4 history=float4(old.radiance[0],old.radiance[1],old.radiance[2],old.transmittance);
+                const float4 value=mix(raw,edgeFault?history:clamp(history,low,high),p.historyWeight);
                 h.radiance[0]=value.x;h.radiance[1]=value.y;h.radiance[2]=value.z;h.transmittance=value.w;h.samples=min(old.samples+1u,clamp(p.maxHistorySamples,1u,64u));}
         }
         volumeCount(counters,accepted?6u:7u,1u);
@@ -114,7 +121,8 @@ kernel void clouds_apply(constant GPUCloudParams& p [[buffer(0)]],constant GPUAt
     device atomic_uint* counters [[buffer(15)]],
     texture2d<float,access::read> depth [[texture(0)]],texture2d<float> transmittance [[texture(1)]],texture2d<float> multiscattering [[texture(2)]],
     texture2d<float,access::read> cloud [[texture(3)]],texture2d<float,access::read> guide [[texture(4)]],
-    texture2d<float,access::write> output [[texture(5)]],texture2d<float,access::read> scene [[texture(6)]],uint2 pixel [[thread_position_in_grid]]) {
+    texture2d<float,access::write> output [[texture(5)]],texture2d<float,access::read> scene [[texture(6)]],
+    texture2d<float,access::write> exportedTransmittance [[texture(7)]],uint2 pixel [[thread_position_in_grid]]) {
     if(pixel.x>=p.outputWidth||pixel.y>=p.outputHeight)return;
     const float opaque=atmoOpaqueDistance(pixel,uint2(p.outputWidth,p.outputHeight),depth,p.inverseViewProjection,atmoVec(p.cameraPosition),p.maxDistance);
     const float2 coordinate=(float2(pixel)+0.5f)/float2(p.outputWidth,p.outputHeight)*float2(p.width,p.height)-0.5f;
@@ -126,6 +134,7 @@ kernel void clouds_apply(constant GPUCloudParams& p [[buffer(0)]],constant GPUAt
         const float opacityWeight=w*(1-saturate(sample.w));centroid+=opacityWeight*d.x;opacityWeights+=opacityWeight;}
     if(weights>1e-6f)value/=weights;else value=float4(0,0,0,1); // valid transparent fallback at disocclusion/thin depth edges
     const float Tcloud=saturate(value.w);const float3 sceneAtmosphere=scene.read(pixel).rgb;
+    if(p.flags&CLOUD_EXPORT_TRANSMITTANCE)exportedTransmittance.write(float4(Tcloud,Tcloud,Tcloud,1),pixel);
     float3 color=Tcloud*sceneAtmosphere+value.rgb;
     if((p.flags&CLOUD_SCENE_HAS_ATMOSPHERE)&&opacityWeights>1e-6f){
         centroid=min(opaque,centroid/opacityWeights);

@@ -142,7 +142,7 @@ private:
     std::unique_ptr<RtVisibilityChecker> rtVisibility_;
     u64 rtCheckerGeometry_ = ~u64{0};
     u32 rtChecks_ = 0, rtFailures_ = 0;
-    u64 rtCheckedRays_ = 0, rtAmbiguous_ = 0, rtUnsupported_ = 0;
+    u64 rtCheckedRays_ = 0, rtAmbiguous_ = 0, rtUnsupported_ = 0, rtEdgeExcluded_ = 0;
     u64 rtVisibilityCompared_ = 0, rtVisibilityMismatches_ = 0;
     std::vector<GPURtRay> rtCheckRays_;
     std::vector<GPURtHit> rtCheckHits_;

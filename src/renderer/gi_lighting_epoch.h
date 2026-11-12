@@ -8,6 +8,16 @@ struct GiEnvironment {
     std::array<float,3> skyRadiance{};
     float sunAngularRadius=0.00465f;
     u64 externalRevision=0;
+    bool continuousCelestialUpdate=false; // Producer attests clock continuity; not an arbitrary light edit.
+};
+struct GiRadianceState {
+    u64 scene=0,geometry=0,materials=0,rtGeometry=0,lights=0;
+    u32 sampled=0;
+    bool operator==(const GiRadianceState&) const = default;
+    [[nodiscard]] bool continuousFrom(const GiRadianceState& before,const GiEnvironment& environment,bool reset) const {
+        return environment.continuousCelestialUpdate&&!reset&&scene==before.scene&&
+            geometry==before.geometry&&materials==before.materials&&rtGeometry==before.rtGeometry&&sampled==before.sampled;
+    }
 };
 // Collision-free exact semantic tuple. Directional lights belong to the GI
 // radiance domain even though F11's sampled local list deliberately omits them.

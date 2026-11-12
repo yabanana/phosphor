@@ -69,8 +69,18 @@ std::vector<ReferenceTexture> MetalTextureManager::referenceTextures() const {
     std::vector<ReferenceTexture> result;result.reserve(cpuTextures_.size());
     for(u32 i=0;i<cpuTextures_.size();++i) {
         if(cpuTextures_[i].mips.empty())throw std::logic_error("Reference export texture has no base mip");
-        const auto& mip=cpuTextures_[i].mips.front();ReferenceTexture t;t.index=i;t.width=mip.width;t.height=mip.height;t.rgba.resize(mip.rgba8.size());
-        for(size_t k=0;k<mip.rgba8.size();++k){float x=float(mip.rgba8[k])/255.0f;if(srgb_[i] && k%4!=3)x=x<=0.04045f?x/12.92f:std::pow((x+0.055f)/1.055f,2.4f);t.rgba[k]=x;}
+        ReferenceTexture t;t.index=i;t.sourceSrgb=srgb_[i];
+        if(cpuTextures_[i].mips.size()!=textures_[i]->mipmapLevelCount())
+            throw std::logic_error("Reference export requires the complete device mip chain");
+        for(size_t level=0;level<cpuTextures_[i].mips.size();++level) {
+            const auto& mip=cpuTextures_[i].mips[level];
+            ReferenceMip decoded;decoded.width=mip.width;decoded.height=mip.height;decoded.rgba.resize(mip.rgba8.size());
+            for(size_t k=0;k<mip.rgba8.size();++k){float x=float(mip.rgba8[k])/255.0f;
+                if(srgb_[i] && k%4!=3)x=x<=0.04045f?x/12.92f:std::pow((x+0.055f)/1.055f,2.4f);
+                decoded.rgba[k]=x;}
+            if(level==0){t.width=decoded.width;t.height=decoded.height;t.rgba=std::move(decoded.rgba);}
+            else t.mips.push_back(std::move(decoded));
+        }
         result.push_back(std::move(t));
     }
     return result;

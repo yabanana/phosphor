@@ -345,8 +345,10 @@ struct MetalfxDenoiseFixture::Impl {
             bool finite=std::all_of(data,data+count*2,[](float value){return std::isfinite(value)&&value>=0;});
             const bool channelPass=channels(s,samples)&&channels(s,samples+4,true);bool constantPass=true;FXConstantComparison constant{};
             if(s.tag.scenario==FX_FIXTURE_CONSTANT||s.tag.scenario==FX_FIXTURE_LIFECYCLE||s.tag.scenario==FX_FIXTURE_WIDE_HDR) {
-                constant=compareFXConstant(sdkImage,physicalImage,{s.tag.color[0],s.tag.color[1],s.tag.color[2]},s.tag.preExposure);
-                constantPass=!s.steady||constant.restored;
+                // D1: exposure scale = physical -> exposed (the SDK's manual exposure).
+                constant=compareFXConstant(sdkImage,physicalImage,{s.tag.color[0],s.tag.color[1],s.tag.color[2]},s.tag.preExposure,0.01,
+                                           options.manualExposureControl?double(manualProvided):1.0);
+                constantPass=!s.steady||constant.restoredD1;
             }
             if(s.steady&&s.tag.scenario==FX_FIXTURE_IMPULSE) {
                 auto& pair=pairs[s.view];if(pair.width!=s.tag.outputWidth||pair.height!=s.tag.outputHeight){pair={};pair.width=s.tag.outputWidth;pair.height=s.tag.outputHeight;}
@@ -370,7 +372,8 @@ struct MetalfxDenoiseFixture::Impl {
                <<",\"input_signal_epoch\":"<<s.inputSignalEpoch<<",\"source_signal_epoch\":"<<s.signalEpoch
                <<",\"channels_wrap\":"<<(s.channelsWrap?"true":"false")<<",\"sdk_reset_submitted\":"<<(s.sdkResetSubmitted?"true":"false")
                <<",\"sdk_encode_delta\":"<<s.sdkEncodeDelta<<",\"history_hint_passed\":"<<(historyPass?"true":"false")
-               <<",\"restored_passed\":"<<(constant.restored?"true":"false")<<",\"sdk_preexposed_hypothesis\":"<<(constant.preExposed?"true":"false")
+               <<",\"restored_passed\":"<<(constant.restored?"true":"false")<<",\"restored_d1_passed\":"<<(constant.restoredD1?"true":"false")
+               <<",\"restored_d1_excess\":"<<number(constant.restoredD1Excess)<<",\"sdk_preexposed_hypothesis\":"<<(constant.preExposed?"true":"false")
                <<",\"sdk_physical_hypothesis\":"<<(constant.physical?"true":"false")<<",\"restored_relative_error\":"<<number(constant.restoredRelativeError)
                <<",\"input_width\":"<<s.tag.width<<",\"input_height\":"<<s.tag.height<<",\"output_width\":"<<s.tag.outputWidth<<",\"output_height\":"<<s.tag.outputHeight
                <<",\"phase\":"<<s.tag.phase<<",\"constant_physical\":["<<s.tag.color[0]<<','<<s.tag.color[1]<<','<<s.tag.color[2]<<"],\"input_samples\":[";

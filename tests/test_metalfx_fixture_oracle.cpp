@@ -36,6 +36,21 @@ TEST_CASE("F13 SDK constant oracle distinguishes actual output-unit hypotheses")
     auto poison=scaled;poison[0]=std::numeric_limits<float>::infinity();
     CHECK_FALSE(compareFXConstant(poison,physical,physical,1.f/64).finite);
 }
+TEST_CASE("F13.3 owner criterion D1: absolute floor up to 4x white, SDR above") {
+    const double m=.5/(368640.0/64.0); // frozen wide-HDR manual exposure: red 32x, green 0.011x, blue 0.0056x white
+    // Measured frozen-fixture profile (closure brief 2.2): red -7%, green +1.46%, blue +5.18%.
+    CHECK(fxD1Excess(368640,368640*.93,m)<=1);CHECK(fxD1Excess(128,128*1.0146,m)<=1);CHECK(fxD1Excess(64,64*1.0518,m)<=1);
+    CHECK(fxD1Excess(64,64*1.10,m)>1);                       // floor 5e-4 white = 5.76: 10% of 64 exceeds it
+    const double white=1/m;
+    CHECK(fxD1Excess(white,white*1.005,m)<=1);CHECK(fxD1Excess(white,white*1.02,m)>1); // 1% applies near white
+    CHECK(fxD1Excess(4*white,4*white*1.009,m)<=1);CHECK(fxD1Excess(4*white,4*white*1.011,m)>1);
+    CHECK(fxD1Excess(4.5*white,9*white,m)>1);               // above 4x: 2/255 after the SDR transform
+    CHECK(fxD1Excess(6*white,6*white*1.02,m)<=1);
+    CHECK(std::isinf(fxD1Excess(1,std::numeric_limits<double>::quiet_NaN(),m)));
+    const std::array<float,3> phys{368640,128,64},out{368640*.93f,128*1.0146f,64*1.0518f},sdk{out[0]/64,out[1]/64,out[2]/64};
+    const auto r=compareFXConstant(sdk,out,phys,1.f/64,.01,m);CHECK_FALSE(r.restored);CHECK(r.restoredD1);
+    CHECK_FALSE(compareFXConstant(sdk,out,phys,1.f/64).restoredD1); // no exposure scale: D1 not evaluated
+}
 TEST_CASE("F13 impulse metamorphic oracle does not require identity or unit energy") {
     // Independent authored blurred impulse: sum1.25, not the source energy1.
     const std::array<float,5> blurred{.1f,.2f,.65f,.2f,.1f},scaled{.0015625f,.003125f,.01015625f,.003125f,.0015625f};

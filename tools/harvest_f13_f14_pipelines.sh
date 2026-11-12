@@ -17,8 +17,10 @@ else
     trap 'rm -rf "$work"' EXIT
 fi
 corpora=("$destination")
-for mode in surface-rt surface-apple9 denoised-request volumes-full volumes-csm; do
+for mode in surface-generic surface-rt surface-apple9 denoised-request volumes-full volumes-csm; do
+    diagnostic=()
     case "$mode" in
+      surface-generic) flags=(--rt on --shadows rt --lighting restir --gi restir --reflections rt --ao rtao --lighting-denoise custom) ; diagnostic=(env PHOSPHOR_DIAGNOSTIC_DENOISE_GENERIC=1) ;;
       surface-rt) flags=(--rt on --shadows rt --lighting restir --gi restir --reflections rt --ao rtao --lighting-denoise custom --reflection-capture-probe) ;;
       surface-apple9) flags=(--force-family apple9 --rt off --shadows off --lighting legacy --gi off --reflections probes --ao gtao --lighting-denoise custom --reflection-capture-probe) ;;
       denoised-request) flags=(--rt on --shadows rt --lighting brute --gi ddgi --reflections rt --ao rtao --lighting-denoise metalfx) ;;
@@ -27,7 +29,7 @@ for mode in surface-rt surface-apple9 denoised-request volumes-full volumes-csm;
     esac
     # A source signal capture explicitly waits for final PSOs before graph
     # construction. This is harvesting, never a steady-state performance run.
-    "$app" --harvest-pipelines "$work/$mode.json" --bench 6 --reflection-scene roughness --frames 2 --warmup 0 \
+    ${diagnostic[@]+"${diagnostic[@]}"} "$app" --harvest-pipelines "$work/$mode.json" --bench 6 --reflection-scene roughness --frames 2 --warmup 0 \
         --no-ui --offscreen --render-path visibility --post --upscaler native --debug-lighting 1 \
         --capture-linear-signal specular --capture-linear "$work/$mode.pfm" --capture-linear-frame 1 \
         "${flags[@]}" >"$work/$mode.log" 2>&1 || { tail -30 "$work/$mode.log" >&2; exit 1; }
@@ -37,7 +39,10 @@ done
 # Requested SDK mode can report custom MissingFactory. This script cannot
 # reconcile the owned gateway or certify SDK output units/lifetime. Engine MSL
 # descriptors are harvested; external SDK implementation stays framework-owned.
-python3 "$repo_dir/tools/merge_pipeline_harvests.py" --output "$work/merged.json" "${corpora[@]}"
+python3 "$repo_dir/tools/merge_pipeline_harvests.py" --output "$work/merged.json" \
+    --replace-compute denoise_temporal --replace-compute denoise_atrous --replace-compute denoise_check \
+    --replace-compute denoise_atrous_tile1 --replace-compute denoise_atrous_tile2 \
+    --replace-compute denoise_atrous_diffuse4 "${corpora[@]}"
 [[ -s "$work/merged.json" ]] || exit 1
 jq -S . "$work/merged.json" >"$work/final.json"
 mv "$work/final.json" "$destination"
