@@ -42,11 +42,11 @@ the Metal host code using [the Linux build instructions](docs/RENDERER.md#buildi
 | --- | --- |
 | GPU-driven rendering | GPU scene and culling, mesh shaders and indirect draws, visibility buffer, HDR/EDR, and the F8 MetalFX temporal path |
 | Ray tracing | BLAS/TLAS maintenance and diagnostic rays exercised on M5 Max |
-| Lighting and atmosphere | Experimental shadows, ReSTIR DI, GI, reflections, denoising, atmosphere, fog, and clouds |
-| Open validation | Physical M3/M4 measurements, dynamic reflection quality, native MetalFX wide-HDR admission, and the full-scene 1080p/60 fps budget |
+| Lighting and atmosphere | Shadows, ReSTIR DI, GI, reflections, AO, denoising, atmosphere, fog, and clouds; F13 and F14.1–F14.3 accepted for development on M5 Max, full Sponza 1080p within 16.67 ms GPU p95 |
+| Open validation | Physical M3/M4 measurements, F14.4 repeatability under shader validation, RT-captured probes at high roughness, and native MetalFX (measured and rejected for quality; the custom denoiser ships) |
 
 The [F10–F14 integration report](docs/F10_F14_HANDOFF.md),
-[budget follow-up](docs/implementation/F13-F14-BUDGET-CLOSURE-2026-10-08.md),
+[F13/F14 closure](docs/implementation/F13-F14-CLOSURE-2026-11-12.md),
 and [performance log](docs/perf-log.md) identify the workload and hardware
 behind each result. The [roadmap](docs/ROADMAP.md) tracks future work. The
 original Vulkan renderer is archived under [legacy/vulkan](legacy/vulkan/README.md).
