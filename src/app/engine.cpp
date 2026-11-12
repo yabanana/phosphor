@@ -1403,6 +1403,32 @@ bool Engine::frame(float dt) {
         } else {
             camera_->updateFPS(*input_, dt);
         }
+        // F14.2/F14.3 camera controls: stateless per frame from the fixture's
+        // default aim (no accumulation), never on a scripted camera.
+        if (options_.cameraPitch > -1000 || options_.cameraYawRate != 0 || options_.cameraAimSun > -1000) {
+            if (scripted || options_.temporalScript)
+                throw std::invalid_argument("F14 camera controls require a non-scripted fixture camera");
+            const auto base = activeBench_->getDefaultCamera();
+            glm::vec3 dir = base.target - base.position;
+            dir = glm::length(dir) > 1e-6f ? glm::normalize(dir) : glm::vec3(0, 0, -1);
+            double yaw = std::atan2(double(dir.z), double(dir.x)), pitch = std::asin(std::clamp(double(dir.y), -1.0, 1.0));
+            if (options_.cameraAimSun > -1000) {
+                // The same clock the atmosphere samples this frame (scene time after this step).
+                DayNightSettings settings;
+                settings.dayLengthSeconds = options_.atmoDayLength;
+                settings.startDayFraction = double(options_.atmoStartHour) / 24;
+                DayNightClock clock(settings);
+                const auto sun = clock.sample(atmosphereClockSeconds(sceneTime_ + dt, presentedFrames_, options_.atmoDayLength,
+                                                                     options_.timeJumpEveryN, options_.atmoFreezeClock)).sunDirection;
+                yaw = std::atan2(sun.z, sun.x);
+                pitch = std::asin(std::clamp(sun.y, -1.0, 1.0)) + glm::radians(double(options_.cameraAimSun));
+            } else if (options_.cameraPitch > -1000)
+                pitch = glm::radians(double(options_.cameraPitch));
+            yaw += glm::radians(double(options_.cameraYawRate)) * (sceneTime_ + dt);
+            orbitMode_ = false;
+            camera_->setPosition(base.position);
+            camera_->setYawPitch(float(glm::degrees(yaw)), float(glm::degrees(std::clamp(pitch, -glm::radians(85.0), glm::radians(85.0)))));
+        }
     }
     camera_->setAspect(static_cast<float>(context_->width()) / static_cast<float>(std::max(context_->height(), 1u)));
     camera_->updateMatrices();
@@ -1483,7 +1509,7 @@ bool Engine::frame(float dt) {
     const u32 width = static_cast<u32>(target->width()), height = static_cast<u32>(target->height());
     currentView_ = post_ ? static_cast<u32>(presentedFrames_ % options_.temporalViews) : 0;
     const glm::vec3 offset(float(currentView_) * 2.0f, 0, 0);
-    if(options_.planetCameraHeight>=0){auto position=camera_->getPosition();position.y=options_.planetCameraHeight;camera_->setPosition(position);camera_->updateMatrices();}
+    if(options_.planetCameraHeight>=0){auto position=camera_->getPosition();position.y=float(double(options_.planetCameraHeight)+double(options_.cameraClimb)*sceneTime_);camera_->setPosition(position);camera_->updateMatrices();}
     const glm::mat4 view = camera_->getView() * glm::translate(glm::mat4(1), -offset);
     const glm::mat4 unjittered = camera_->getProjection() * view;
     const glm::vec3 camPos = camera_->getPosition() + offset;
@@ -2297,7 +2323,8 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
                                                        options_.captureLinearSignal==4?shadows_->worldPosition():
                                                        options_.captureLinearSignal==5?shadows_->geometricNormal():
                                                        options_.captureLinearSignal==6?reflections_->rawSpecular():
-                                                       options_.captureLinearSignal==7?reflections_->rawAO():options_.captureLinearSignal==8?reflections_->filteredIndirectDiffuse():options_.captureLinearSignal==9?reflections_->filteredAO():options_.captureLinearSignal==10?reflections_->filteredSpecular():visibility_->color());
+                                                       options_.captureLinearSignal==7?reflections_->rawAO():options_.captureLinearSignal==8?reflections_->filteredIndirectDiffuse():options_.captureLinearSignal==9?reflections_->filteredAO():options_.captureLinearSignal==10?reflections_->filteredSpecular():
+                                                       options_.captureLinearSignal==11?atmosphere_->readResources().cloudTransmittance:visibility_->color());
             color = post_ ? post_->addToGraph(frameGraph_, *visibility_, drawableRef_, graphKey_.outputFormat,reconstructed)
                           : visibility_->addPresent(frameGraph_, drawableRef_);
             visibility_->addChecks(frameGraph_,post_?post_->exposureInput():visibility_->color());

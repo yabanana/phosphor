@@ -106,6 +106,7 @@ struct AtmospherePasses::Impl {
     CloudSignal previousCloudSignal{~u64(0),0,0,0};u64 cloudEpoch=1;
     GiEnvironment environmentValue;std::vector<u64> environmentKey;u64 environmentEpoch=0;
     rg::TextureRef transRef{},multiRef{},skyRef{},sourceRef{},depthRef{},atmosphereOutput{},fogOutput{},cloudRaw{},cloudGuide{},cloudFiltered{},cloudOutput{},outputRef{};
+    rg::TextureRef fogInput{},cloudTransmittance{};
     rg::BufferRef counterRef{},fogFreshRef{},fogFilteredRef{},fogIntegratedRef{},fogHistoryRef{},cloudFreshRef{},cloudFilteredRef{},cloudHistoryRef{},aliasRef{},dummyStateRef{},dummyLightRef{},dummyEmitterRef{};
 
     static DayNightSettings celestialSettings(const LaunchOptions& o) {
@@ -120,6 +121,12 @@ struct AtmospherePasses::Impl {
         atmosphere.rayleighScattering*=double(o.atmoScatteringScale);atmosphere.mieScattering*=double(o.atmoScatteringScale);
         atmosphere.mieAbsorption*=double(o.atmoScatteringScale);atmosphere.ozoneAbsorption*=double(o.atmoOzoneScale);
         if(o.atmoMieG>-2)atmosphere.mieG=o.atmoMieG;if(o.atmoGroundAlbedo>=0)atmosphere.groundAlbedo=glm::dvec3(o.atmoGroundAlbedo);
+        // F14.2 validation controls (unset keeps the product fog).
+        if(o.fogDensity>0){fog.densityAtBase=o.fogDensity;fog.maxDensity=std::max(fog.maxDensity,double(o.fogDensity));}
+        if(o.fogHeightFalloff>=0)fog.heightFalloff=o.fogHeightFalloff;if(o.fogFar>0)fog.farDistance=o.fogFar;
+        if(o.fogLocalSamples)fog.maxLocalLights=o.fogLocalSamples;
+        if(o.fogGrid[0]){fog.gridX=o.fogGrid[0];fog.gridY=o.fogGrid[1];fog.gridZ=o.fogGrid[2];}
+        if(o.cloudMarchSteps)clouds.marchSteps=o.cloudMarchSteps; // F14.3 validation control
         validateAtmosphere(atmosphere);validateFog(fog);validateClouds(clouds);
         const char* names[]={"volume_clear_counters","atmosphere_transmittance","atmosphere_multiscattering","atmosphere_sky_view","atmosphere_apply",
                              "fog_inject","fog_temporal","fog_integrate","fog_apply","clouds_march","clouds_temporal","clouds_apply"};
@@ -129,7 +136,8 @@ struct AtmospherePasses::Impl {
             if(!o.debugLighting)throw std::invalid_argument("Volume oracle requires --debug-lighting N");
             if(o.fogHomogeneous&&(!o.fog||o.volumeOracle.empty()))throw std::invalid_argument("Homogeneous fog requires fog and a volume oracle directory");
             if(o.debugVolumeCorrupt==VOLUME_CORRUPT_HISTORY&&!o.fog&&(!o.clouds||o.cloudFullRate))throw std::invalid_argument("Foreign-history control needs fog or low-rate clouds");
-            diagnostics=std::make_unique<VolumeDiagnostics>(c,p,VolumeDiagnostics::Config{o.volumeOracle,o.debugLighting,o.fogHomogeneous,o.debugVolumeCorrupt});
+            const bool fixture=o.fogHomogeneous||o.fogFixtureFalloff>0;
+            diagnostics=std::make_unique<VolumeDiagnostics>(c,p,VolumeDiagnostics::Config{o.volumeOracle,o.debugLighting,fixture,o.debugVolumeCorrupt,o.fogFixtureFalloff>0?o.fogFixtureFalloff:0.0f});
         }
         try {if(active){
             transmittance=lutTexture(c,atmosphere.transmittanceWidth,atmosphere.transmittanceHeight,"Atmosphere transmittance SI LUT");
@@ -243,7 +251,10 @@ struct AtmospherePasses::Impl {
         if(previousSignal!=signal){previousSignal=signal;++volumeEpoch;}
         const bool reset=f.cut||f.reset||celestial.reset;
         if(options.fog){
-            auto fogDecision=fogHistory.begin(f.view,{fog.gridX,fog.gridY,f.width,f.height},volumeEpoch,reset,reset);
+            // Negative control: a stale froxel history ignores epoch changes and resets.
+            const bool staleFog=diagnostics&&diagnostics->corruption()==VOLUME_CORRUPT_STALE_FOG;
+            auto fogDecision=staleFog?fogHistory.begin(f.view,{fog.gridX,fog.gridY,f.width,f.height},1,false,false):
+                                      fogHistory.begin(f.view,{fog.gridX,fog.gridY,f.width,f.height},volumeEpoch,reset,reset);
             hadFogHistory=hadFogHistory&&!fogDecision.reset&&!(diagnostics&&diagnostics->homogeneousFog());
             fogParams={};std::memcpy(fogParams.inverseViewProjection,glm::value_ptr(inverse),64);std::memcpy(fogParams.view,f.constants.view,64);
             std::memcpy(fogParams.previousViewProjection,fogHistory.get(f.view).previousViewProjection.data(),64);std::memcpy(fogParams.previousView,views[f.view].fogPreviousView.data(),64);
@@ -260,7 +271,8 @@ struct AtmospherePasses::Impl {
             fogParams.generation=u32(fogDecision.generation);fogParams.previousViewID=f.view;
             fogParams.flags=(!fogDecision.reset?VOLUME_HISTORY_VALID:0u)|(fogUsesRt?VOLUME_SHADOW_RT:shadows?VOLUME_SHADOW_CSM:0u)|
                              (gi?VOLUME_ENABLE_GI:0u)|(fogParams.lightCount?VOLUME_ENABLE_LOCAL_LIGHTS:0u);
-            if(diagnostics&&diagnostics->homogeneousFog()){fogParams.heightFalloff=0;fogParams.densityAtBase=0.01f;fogParams.flags&=~VOLUME_HISTORY_VALID;}
+            if(!options.fogHistory){fogParams.flags&=~VOLUME_HISTORY_VALID;hadFogHistory=false;} // full-rate control without froxel history
+            if(diagnostics&&diagnostics->homogeneousFog()){fogParams.heightFalloff=options.fogFixtureFalloff>0?options.fogFixtureFalloff:0.0f;fogParams.heightBase=0;fogParams.densityAtBase=0.01f;fogParams.flags&=~VOLUME_HISTORY_VALID;}
             if(diagnostics&&diagnosticSelected&&diagnostics->corruption()==VOLUME_CORRUPT_HISTORY&&hadFogHistory){fogParams.corruption=VOLUME_CORRUPT_HISTORY;diagnosticArmed=true;}
             fogAddress=lighting::upload(c,fogParams);reserveAlias(fogParams.lightCount);
             auto* aliases=static_cast<GPUAliasEntry*>(slot.alias->contents());const u32 count=std::max(fogParams.lightCount,1u);
@@ -286,6 +298,8 @@ struct AtmospherePasses::Impl {
             cloudParams.marchSteps=clouds.marchSteps;cloudParams.lightSteps=clouds.lightSteps;cloudParams.seed=clouds.seed;cloudParams.generation=u32(decision.generation);
             cloudParams.frameIndex=u32(f.index);cloudParams.viewID=f.view;cloudParams.flags=!options.cloudFullRate&&!decision.reset?VOLUME_HISTORY_VALID:0u;
             if(options.atmosphere)cloudParams.flags|=CLOUD_SCENE_HAS_ATMOSPHERE;
+            if(options.captureLinearSignal==11)cloudParams.flags|=CLOUD_EXPORT_TRANSMITTANCE;
+            if(diagnostics&&diagnostics->corruption()==VOLUME_CORRUPT_CLOUD_EDGE)cloudParams.corruption=diagnostics->corruption();
             if(diagnostics&&diagnosticSelected&&diagnostics->corruption()==VOLUME_CORRUPT_HISTORY&&hadCloudHistory){cloudParams.corruption=VOLUME_CORRUPT_HISTORY;diagnosticArmed=true;}
             cloudAddress=lighting::upload(c,cloudParams);
         }
@@ -358,7 +372,7 @@ struct AtmospherePasses::Impl {
         if(options.clouds)addClouds(graph);
         if(options.fog)addFog(graph);
         if(diagnostics){VolumeDiagnostics::Sources input;input.transmittance=transRef;input.multiple=multiRef;input.sky=skyRef;input.counters=counterRef;
-            if(options.fog){input.fogCells=fogFilteredRef;input.fogIntegrated=fogIntegratedRef;}
+            if(options.fog){input.fogCells=fogFilteredRef;input.fogIntegrated=fogIntegratedRef;input.fogApplyInput=fogInput;input.fogApplyOutput=fogOutput;input.depth=depthRef;}
             diagnostics->collect(graph,input);}
         return outputRef;
     }
@@ -380,8 +394,11 @@ struct AtmospherePasses::Impl {
             graph.addPass("Cloud history snapshot",PassType::Blit,[&](PassBuilder& b){b.read(cloudFilteredRef,Usage::CopySrc,StageBlit);cloudHistoryRef=b.write(cloudHistoryRef,Usage::CopyDst,StageBlit);},[this](PassContext& ctx){auto* e=static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder());e->copyFromBuffer(slots[frame.slot].cloudFiltered,0,views[frame.view].cloud,0,u64(cloudWidth)*cloudHeight*sizeof(GPUCloudHistory));cloudHistory.read(frame.view,frame.index+1);cloudHistory.write(frame.view,frame.index+1,frame.constants.viewProjection);views[frame.view].cloudPreviousTime=celestial.seconds;});
             cloudInput=cloudFiltered;
         }
-        const TextureRef input=outputRef,cloud=cloudInput,guide=cloudGuide;
-        graph.addPass("Cloud depth-aware physical composition",PassType::Compute,[&,input,cloud,guide](PassBuilder& b){for(auto r:{input,cloud,guide,depthRef,transRef,multiRef})b.read(r,Usage::ShaderRead,StageDispatch);counterAccess(b);cloudOutput=b.createTexture("Cloud physical RGBA32 HDR",{Format::RGBA32Float,frame.width,frame.height});cloudOutput=b.write(cloudOutput,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("clouds_apply");},[this,input,cloud,guide](PassContext& ctx){physicalSource(ctx,input);auto* t=slots[frame.slot].tables[CloudApply];cloudBindings(t);texture(t,ctx,depthRef,0);texture(t,ctx,transRef,1);texture(t,ctx,multiRef,2);texture(t,ctx,cloud,3);texture(t,ctx,guide,4);texture(t,ctx,cloudOutput,5);texture(t,ctx,input,6);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,handles[CloudApply],t,frame.width,frame.height);});outputRef=cloudOutput;
+        const TextureRef input=outputRef,cloud=cloudInput,guide=cloudGuide;const bool exportT=options.captureLinearSignal==11;cloudTransmittance={};
+        graph.addPass("Cloud depth-aware physical composition",PassType::Compute,[&,input,cloud,guide](PassBuilder& b){for(auto r:{input,cloud,guide,depthRef,transRef,multiRef})b.read(r,Usage::ShaderRead,StageDispatch);counterAccess(b);cloudOutput=b.createTexture("Cloud physical RGBA32 HDR",{Format::RGBA32Float,frame.width,frame.height});cloudOutput=b.write(cloudOutput,Usage::ShaderWrite,StageDispatch);
+            if(exportT){cloudTransmittance=b.createTexture("Composed cloud transmittance (capture)",{Format::RGBA32Float,frame.width,frame.height});cloudTransmittance=b.write(cloudTransmittance,Usage::ShaderWrite,StageDispatch);}
+            b.setProfileShaders("clouds_apply");},[this,input,cloud,guide,exportT](PassContext& ctx){physicalSource(ctx,input);auto* t=slots[frame.slot].tables[CloudApply];cloudBindings(t);texture(t,ctx,depthRef,0);texture(t,ctx,transRef,1);texture(t,ctx,multiRef,2);texture(t,ctx,cloud,3);texture(t,ctx,guide,4);texture(t,ctx,cloudOutput,5);texture(t,ctx,input,6);
+            texture(t,ctx,exportT?cloudTransmittance:cloudOutput,7);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,handles[CloudApply],t,frame.width,frame.height);});outputRef=cloudOutput;
     }
     void addFog(rg::RenderGraph& graph) {
         using namespace rg;
@@ -398,7 +415,7 @@ struct AtmospherePasses::Impl {
         graph.addPass("Froxel temporal source",PassType::Compute,[&](PassBuilder& b){b.read(fogFreshRef,Usage::ShaderRead,StageDispatch);b.read(fogHistoryRef,Usage::ShaderRead,StageDispatch);counterAccess(b);fogFilteredRef=b.write(fogFilteredRef,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("fog_temporal");},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[FogTemporal];t->setAddress(fogAddress,0);t->setAddress(slots[frame.slot].fogFiltered->gpuAddress(),1);t->setAddress(slots[frame.slot].fogFresh->gpuAddress(),2);t->setAddress(views[frame.view].fog->gpuAddress(),16);t->setAddress(slots[frame.slot].counter->gpuAddress(),15);dispatch3D(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,handles[FogTemporal],t,fog.gridX,fog.gridY,fog.gridZ);});
         graph.addPass("Froxel exponential front-to-back integration",PassType::Compute,[&](PassBuilder& b){b.read(fogFilteredRef,Usage::ShaderRead,StageDispatch);fogIntegratedRef=b.write(fogIntegratedRef,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("fog_integrate");},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[FogIntegrate];t->setAddress(fogAddress,0);t->setAddress(slots[frame.slot].fogIntegrated->gpuAddress(),1);t->setAddress(slots[frame.slot].fogFiltered->gpuAddress(),2);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,handles[FogIntegrate],t,fog.gridX,fog.gridY);});
         graph.addPass("Froxel history snapshot",PassType::Blit,[&](PassBuilder& b){b.read(fogFilteredRef,Usage::CopySrc,StageBlit);fogHistoryRef=b.write(fogHistoryRef,Usage::CopyDst,StageBlit);},[this](PassContext& ctx){auto* e=static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder());e->copyFromBuffer(slots[frame.slot].fogFiltered,0,views[frame.view].fog,0,fogCells*sizeof(GPUFogCell));fogHistory.read(frame.view,frame.index+1);fogHistory.write(frame.view,frame.index+1,frame.constants.viewProjection);std::copy_n(frame.constants.view,16,views[frame.view].fogPreviousView.begin());});
-        const TextureRef input=outputRef;
+        const TextureRef input=outputRef;fogInput=input;
         graph.addPass("Near-volume physical fog composition",PassType::Compute,[&,input](PassBuilder& b){b.read(fogFilteredRef,Usage::ShaderRead,StageDispatch);b.read(fogIntegratedRef,Usage::ShaderRead,StageDispatch);b.read(input,Usage::ShaderRead,StageDispatch);b.read(depthRef,Usage::ShaderRead,StageDispatch);fogOutput=b.createTexture("Fog physical RGBA32 HDR",{Format::RGBA32Float,frame.width,frame.height});fogOutput=b.write(fogOutput,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("fog_apply");},[this,input](PassContext& ctx){physicalSource(ctx,input);auto* t=slots[frame.slot].tables[FogApply];t->setAddress(fogAddress,0);t->setAddress(slots[frame.slot].fogIntegrated->gpuAddress(),1);t->setAddress(slots[frame.slot].fogFiltered->gpuAddress(),2);texture(t,ctx,input,2);texture(t,ctx,depthRef,3);texture(t,ctx,fogOutput,4);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,handles[FogApply],t,frame.width,frame.height);});outputRef=fogOutput;
     }
     void bind(MetalGraphExecutor& executor) {
@@ -430,7 +447,7 @@ float AtmospherePasses::exposureEv100()const{return float(impl_->celestial.expos
 AtmospherePasses::ReadResources AtmospherePasses::readResources()const {
     ReadResources out;out.transmittance=impl_->transmittance;out.multiscattering=impl_->multiscattering;out.sky=impl_->views.at(impl_->frame.view).sky;
     out.transmittanceRef=impl_->transRef;out.multiscatteringRef=impl_->multiRef;out.skyRef=impl_->skyRef;out.output=impl_->outputRef;
-    out.atmosphere=impl_->atmosphereParams;out.fog=impl_->fogParams;out.clouds=impl_->cloudParams;return out;
+    out.atmosphere=impl_->atmosphereParams;out.fog=impl_->fogParams;out.clouds=impl_->cloudParams;out.cloudTransmittance=impl_->cloudTransmittance;return out;
 }
 bool AtmospherePasses::check(u32 slot)const{return impl_->checkSlot(slot);}
 bool AtmospherePasses::consumeDiagnostics(u32 slot){return !impl_->diagnostics||impl_->diagnostics->consume(slot);}

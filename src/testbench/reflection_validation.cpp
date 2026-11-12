@@ -12,7 +12,7 @@
 
 namespace phosphor {
 namespace {
-constexpr std::array<std::string_view,9> names{"mirror","roughness","ao-cavity","probe-parallax","moving-light","disocclusion","wide-emission","ao-temporal-wall","specular-environment"};
+constexpr std::array<std::string_view,10> names{"mirror","roughness","ao-cavity","probe-parallax","moving-light","disocclusion","wide-emission","ao-temporal-wall","specular-environment","fog-depths"};
 constexpr float pi=3.14159265358979323846f;
 const glm::quat identity(1,0,0,0);
 glm::quat sunRotation(glm::vec3 towardSun) {
@@ -81,6 +81,23 @@ void ReflectionValidation::setup(ECS& ecs,GpuScene& scene,TextureManager& textur
         sun_=ecs.createEntity();entities_.push_back(sun_);
         TransformComponent sunPose;sunPose.updateMatrix();ecs.addComponent(sun_,std::move(sunPose));
         LightComponent light;light.type=LightType::Directional;light.intensity=0;ecs.addComponent(sun_,std::move(light));
+        time_=0;lightStep_=0;cameraSegment_=~0u;return;
+    }
+    if(scenario_=="fog-depths") {
+        // F14.2 slicing fixture: a 2 km floor seen from eye height toward the
+        // horizon plus walls at increasing distances, so every froxel depth
+        // band from below 1 m to beyond the 500 m fog range has pixels.
+        mesh(ecs,plane_,{0,0,-900},{2000,1,2000},identity,{0.5f,0.5f,0.5f},0,1);
+        mesh(ecs,cube_,{-0.32f,1.55f,-0.7f},{0.2f,0.2f,0.2f},identity,{0.7f,0.6f,0.5f},0,1);   // ~0.7 m
+        mesh(ecs,cube_,{1.2f,0.6f,-3.5f},{0.8f,1.2f,0.8f},identity,{0.6f,0.6f,0.6f},0,1);     // ~3.5 m
+        mesh(ecs,cube_,{-4,2,-15},{3,4,1},identity,{0.6f,0.55f,0.5f},0,1);                    // ~15 m
+        mesh(ecs,cube_,{10,6,-60},{12,12,2},identity,{0.55f,0.6f,0.6f},0,1);                  // ~60 m
+        mesh(ecs,cube_,{-40,15,-220},{50,30,4},identity,{0.5f,0.5f,0.55f},0,1);               // ~220 m
+        sun_=ecs.createEntity();entities_.push_back(sun_);
+        TransformComponent sunPose;sunPose.rotation=sunRotation({-0.35f,0.85f,0.4f});sunPose.updateMatrix();
+        ecs.addComponent(sun_,std::move(sunPose));
+        LightComponent sunLight;sunLight.type=LightType::Directional;sunLight.intensity=12;sunLight.color={1,1,1};
+        ecs.addComponent(sun_,std::move(sunLight));
         time_=0;lightStep_=0;cameraSegment_=~0u;return;
     }
     mesh(ecs,plane_,{0,0,0},{12,1,12},identity,{0.65f,0.65f,0.65f},0,0.8f);
@@ -157,6 +174,7 @@ void ReflectionValidation::teardown(ECS& ecs,GpuScene&) {
 }
 CameraSetup ReflectionValidation::getDefaultCamera()const {
     if(scenario_=="wide-emission")return {{0,0,4},{0,0,0},4,false};
+    if(scenario_=="fog-depths")return {{0,1.7f,0},{0,1.7f,-1},1,false};
     if(aoTemporalControl()||scenario_=="specular-environment")return {{0,0,3},{0,0,0},3,false};
     return {{0,2.2f,7},{0,1.1f,0},7,false};
 }

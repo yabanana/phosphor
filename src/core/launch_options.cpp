@@ -5,6 +5,7 @@
 
 #include <charconv>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string_view>
@@ -594,6 +595,33 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.denoisedFixtureManualExposureControl=true;
         } else if (arg == "--fog-homogeneous") {
             out.fogHomogeneous=true;
+        } else if (arg == "--fog-height-fixture") {
+            if(!needFloat(out.fogFixtureFalloff)||!(out.fogFixtureFalloff>0&&out.fogFixtureFalloff<=1)){error="--fog-height-fixture: falloff per metre in (0,1]";return false;}
+        } else if (arg == "--fog-density") {
+            if(!needFloat(out.fogDensity)||!(out.fogDensity>0&&out.fogDensity<=1)){error="--fog-density: extinction per metre in (0,1]";return false;}
+        } else if (arg == "--fog-height-falloff") {
+            if(!needFloat(out.fogHeightFalloff)||!(out.fogHeightFalloff>=0&&out.fogHeightFalloff<=1)){error="--fog-height-falloff: per metre in [0,1]";return false;}
+        } else if (arg == "--fog-far") {
+            if(!needFloat(out.fogFar)||!(out.fogFar>1&&out.fogFar<=10000)){error="--fog-far: metres in (1,10000]";return false;}
+        } else if (arg == "--cloud-march-steps") {
+            if(!needCount(out.cloudMarchSteps)||out.cloudMarchSteps<1||out.cloudMarchSteps>512){error="--cloud-march-steps: expected 1..512";return false;}
+        } else if (arg == "--fog-history") {
+            auto v=needValue();if(!v)return false;if(*v!="on"&&*v!="off"){error="--fog-history: expected on or off";return false;}out.fogHistory=*v=="on";
+        } else if (arg == "--fog-local-samples") {
+            if(!needCount(out.fogLocalSamples)||out.fogLocalSamples<1||out.fogLocalSamples>16){error="--fog-local-samples: expected 1..16";return false;}
+        } else if (arg == "--fog-grid") {
+            auto v=needValue();if(!v)return false;unsigned x=0,y=0,z=0;char a=0,b=0,tail=0;
+            if(std::sscanf(std::string(*v).c_str(),"%u%c%u%c%u%c",&x,&a,&y,&b,&z,&tail)!=5||a!='x'||b!='x'||x<2||y<2||z<2||x>256||y>256||z>128){
+                error="--fog-grid: expected XxYxZ with X,Y in 2..256 and Z in 2..128";return false;}
+            out.fogGrid[0]=x;out.fogGrid[1]=y;out.fogGrid[2]=z;
+        } else if (arg == "--camera-climb") {
+            if(!needFloat(out.cameraClimb)||!std::isfinite(out.cameraClimb)||std::abs(out.cameraClimb)>10000){error="--camera-climb: m/s in [-10000,10000]";return false;}
+        } else if (arg == "--camera-pitch") {
+            if(!needFloat(out.cameraPitch)||!(std::abs(out.cameraPitch)<=85)){error="--camera-pitch: degrees in [-85,85]";return false;}
+        } else if (arg == "--camera-yaw-rate") {
+            if(!needFloat(out.cameraYawRate)||!(std::abs(out.cameraYawRate)<=720)){error="--camera-yaw-rate: degrees per second in [-720,720]";return false;}
+        } else if (arg == "--camera-aim-sun") {
+            if(!needFloat(out.cameraAimSun)||!(std::abs(out.cameraAimSun)<=60)){error="--camera-aim-sun: pitch offset degrees in [-60,60]";return false;}
         } else if (arg == "--volume-oracle") {
             auto v=needValue();if(!v||v->empty()||v->starts_with("--")){error="--volume-oracle: expected output directory";return false;}out.volumeOracle=*v;
         } else if (arg == "--debug-volume-corrupt") {
@@ -601,7 +629,9 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if(*v=="units")out.debugVolumeCorrupt=1;else if(*v=="history")out.debugVolumeCorrupt=2;
             else if(*v=="light")out.debugVolumeCorrupt=3;else if(*v=="lut")out.debugVolumeCorrupt=4;
             else if(*v=="moon")out.debugVolumeCorrupt=VOLUME_CORRUPT_MOON;
-            else{error="--debug-volume-corrupt: expected units, history, light, lut or moon";return false;}
+            else if(*v=="stale-fog")out.debugVolumeCorrupt=VOLUME_CORRUPT_STALE_FOG;
+            else if(*v=="cloud-edge")out.debugVolumeCorrupt=VOLUME_CORRUPT_CLOUD_EDGE;
+            else{error="--debug-volume-corrupt: expected units, history, light, lut, moon, stale-fog or cloud-edge";return false;}
         } else if (arg == "--debug-reflection-corrupt") {
             auto v=needValue();if(!v)return false;
             if(*v=="history")out.debugReflectionCorrupt=1;else if(*v=="motion")out.debugReflectionCorrupt=2;else if(*v=="normal")out.debugReflectionCorrupt=3;
@@ -619,6 +649,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             else if(*v=="shadow-normal")out.captureLinearSignal=5;
             else if(*v=="specular")out.captureLinearSignal=6;else if(*v=="ao")out.captureLinearSignal=7;
             else if(*v=="indirect-diffuse-filtered")out.captureLinearSignal=8;else if(*v=="ao-filtered")out.captureLinearSignal=9;else if(*v=="specular-filtered")out.captureLinearSignal=10;
+            else if(*v=="cloud-transmittance")out.captureLinearSignal=11;
             else{error="--capture-linear-signal: expected hdr, indirect-diffuse, indirect-diffuse-filtered, direct, shadow, shadow-position, shadow-normal, specular, specular-filtered, ao or ao-filtered";return false;}
         } else if (arg == "--export-reference-frame") {
             if(!needCount(out.exportReferenceFrame))return false;
@@ -1123,9 +1154,18 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if(out.debugVolumeCorrupt==2&&(!out.atmoFreezeClock||out.fogHomogeneous)){error="Volume history control requires --atmo-freeze-clock and a non-homogeneous-fixture history path";return false;}
     if(out.debugVolumeCorrupt==3&&!out.fog){error="Volume light control requires --fog on";return false;}
     if(out.debugVolumeCorrupt==VOLUME_CORRUPT_MOON&&!out.atmosphere){error="Volume moon control requires --atmosphere on";return false;}
+    if(out.debugVolumeCorrupt==VOLUME_CORRUPT_STALE_FOG&&(!out.fog||!out.fogHistory||out.fogHomogeneous||out.fogFixtureFalloff>=0)){error="Stale fog control requires --fog on with its history and no analytic fixture";return false;}
+    if(out.debugVolumeCorrupt==VOLUME_CORRUPT_CLOUD_EDGE&&(!out.clouds||out.cloudFullRate)){error="Cloud edge control requires reconstructed clouds";return false;}
+    if(out.fogFixtureFalloff>=0&&(out.fogHomogeneous||!out.fog||out.volumeOracle.empty())){error="Height fog fixture requires --fog on and --volume-oracle, without --fog-homogeneous";return false;}
+    if((out.fogDensity>=0||out.fogHeightFalloff>=0||out.fogFar>=0||!out.fogHistory||out.fogLocalSamples||out.fogGrid[0])&&!out.fog){error="Fog controls require --fog on";return false;}
+    if((out.cameraClimb!=0||out.cameraPitch>-1000||out.cameraYawRate!=0||out.cameraAimSun>-1000)&&(!out.benchmark()||!(out.atmosphere||out.fog||out.clouds))){error="Camera controls require --frames and F14";return false;}
+    if(out.cameraClimb!=0&&out.planetCameraHeight<0){error="--camera-climb requires --planet-camera-height";return false;}
+    if(out.cameraAimSun>-1000&&(out.cameraPitch>-1000||!out.atmosphere)){error="--camera-aim-sun requires --atmosphere on and excludes --camera-pitch";return false;}
+    if(out.captureLinearSignal==11&&(!out.clouds||(out.captureLinearSequence.empty()&&out.captureLinear.empty()))){error="Cloud transmittance capture requires --clouds on and a linear capture";return false;}
     if(out.debugReflectionCorrupt&&(!out.debugLighting||!(out.reflections!=ReflectionMode::Off||out.ao!=AoMode::Off||out.lightingDenoise!=LightingDenoiseMode::Off))){error="Reflection control requires F13 and --debug-lighting N";return false;}
     if(out.debugReflectionCorrupt==1&&(out.lightingDenoise!=LightingDenoiseMode::Custom||!(out.reflections!=ReflectionMode::Off||out.ao!=AoMode::Off||out.directLighting!=DirectLightingMode::Legacy||out.gi!=GiMode::Off))){error="Reflection history control requires custom denoise and an active signal";return false;}
     if(out.cloudFullRate&&!out.clouds){error="--cloud-full-rate requires --clouds on";return false;}
+    if(out.cloudMarchSteps&&!out.clouds){error="--cloud-march-steps requires --clouds on";return false;}
     if(lighting && out.temporalUpscale){error="Physical Float32 lighting HDR requires native or F13 denoised reconstruction; standard temporal ABI is RGBA16";return false;}
     if(out.planetCameraHeight>=0&&!out.atmosphere&&!out.fog&&!out.clouds){error="Planetary camera control requires F14";return false;}
     if((out.atmoScatteringScale!=1||out.atmoOzoneScale!=1||out.atmoMieG>-2||out.atmoGroundAlbedo>=0)&&!out.atmosphere){

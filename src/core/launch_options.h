@@ -373,6 +373,16 @@ struct LaunchOptions {
     // --ddgi-denoise on; stochastic GI (cache, ReSTIR) is always denoised.
     bool ddgiDenoise=false;
     u32 timeJumpEveryN=0,debugVolumeCorrupt=0;
+    // F14.2/F14.3 validation controls; unset values keep the product defaults.
+    // fogDensity/fogHeightFalloff < 0 keep FogSettings; fogFixtureFalloff >= 0
+    // selects the analytic height fixture (--fog-height-fixture K).
+    float fogDensity=-1,fogHeightFalloff=-1,fogFar=-1,fogFixtureFalloff=-1;
+    bool fogHistory=true;u32 fogLocalSamples=0;u32 fogGrid[3]{0,0,0};
+    // Camera controls for non-scripted fixtures: climb (m/s) from
+    // --planet-camera-height, absolute pitch, yaw rate (deg/s) and aiming at
+    // the sun with a pitch offset (deg; the sun lies that far below centre).
+    float cameraClimb=0,cameraPitch=-1000,cameraYawRate=0,cameraAimSun=-1000;
+    u32 cloudMarchSteps=0; // F14.3 validation control: view-ray steps (0 keeps CloudSettings)
     std::string volumeOracle;bool fogHomogeneous=false,atmoFreezeClock=false;
     std::string denoisedFixture,denoisedFixtureOutput;bool denoisedFixturePreExposed=false,denoisedFixtureAutoExposure=false,denoisedFixtureManualExposureControl=false;u32 denoisedFixturePrewarmMs=120000;
     ReflectionMode reflections=ReflectionMode::Off;
@@ -395,7 +405,7 @@ struct LaunchOptions {
     bool giProbeAnchor=false;
     float giAnchor[3]{},giSpacing=0;
     u32 giGrid[3]{};
-    u32 exportReferenceFrame=0, captureLinearFrame=0, captureLinearSignal=0; // 0 HDR, 1 indirect diffuse, 2 direct; tester reserves 3 shadow, 4 world position, 5 world normal; 6 specular, 7 AO, 8 filtered indirect diffuse Lo, 9 filtered AO visibility, 10 filtered specular Lo
+    u32 exportReferenceFrame=0, captureLinearFrame=0, captureLinearSignal=0; // 0 HDR, 1 indirect diffuse, 2 direct; tester reserves 3 shadow, 4 world position, 5 world normal; 6 specular, 7 AO, 8 filtered indirect diffuse Lo, 9 filtered AO visibility, 10 filtered specular Lo, 11 composed cloud transmittance
     // F7/F8 renderer, temporal reconstruction, capture and bounded diagnostics.
     std::string scenePath;
     bool visibility = false, materialBinning = false; // measured baseline; specialization stays opt-in

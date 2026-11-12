@@ -1282,3 +1282,43 @@ TEST_CASE("F13/F14 budget defaults are the measured ones") {
     LaunchOptions cache;REQUIRE(parse(with({"cache"}),cache,error));CHECK(denoisesGi(cache));
     CHECK_FALSE(parse({"--ddgi-denoise","maybe"},bad,error));
 }
+
+TEST_CASE("F14.2/F14.3 validation controls keep product defaults") {
+    LaunchOptions d;std::string error;REQUIRE(parse({"--fog","on","--clouds","on"},d,error));
+    CHECK(d.fogDensity<0);CHECK(d.fogHeightFalloff<0);CHECK(d.fogFar<0);CHECK(d.fogHistory);CHECK(d.fogLocalSamples==0);CHECK(d.fogGrid[0]==0);
+    CHECK(d.fogFixtureFalloff<0);CHECK(d.cameraClimb==0);CHECK(d.cameraPitch<-999);CHECK(d.cameraYawRate==0);CHECK(d.cameraAimSun<-999);
+    CHECK(d.cloudMarchSteps==0);
+    LaunchOptions s;REQUIRE(parse({"--clouds","on","--cloud-full-rate","--cloud-march-steps","512"},s,error));CHECK(s.cloudMarchSteps==512);
+    LaunchOptions sb;CHECK_FALSE(parse({"--clouds","on","--cloud-march-steps","513"},sb,error));CHECK_FALSE(parse({"--cloud-march-steps","64"},sb,error));
+    LaunchOptions f;REQUIRE(parse({"--fog","on","--fog-density","0.05","--fog-height-falloff","0","--fog-far","250","--fog-history","off",
+                                   "--fog-local-samples","16","--fog-grid","96x54x64"},f,error));
+    CHECK(f.fogDensity==doctest::Approx(.05f));CHECK(f.fogHeightFalloff==0);CHECK(f.fogFar==250);CHECK_FALSE(f.fogHistory);CHECK(f.fogLocalSamples==16);
+    CHECK(f.fogGrid[0]==96);CHECK(f.fogGrid[1]==54);CHECK(f.fogGrid[2]==64);
+    LaunchOptions bad;
+    CHECK_FALSE(parse({"--fog-density","0.05"},bad,error));                       // needs fog
+    CHECK_FALSE(parse({"--fog","on","--fog-grid","64x36x200"},bad,error));         // integration bound 128
+    CHECK_FALSE(parse({"--fog","on","--fog-grid","64x36"},bad,error));
+    CHECK_FALSE(parse({"--fog","on","--fog-local-samples","17"},bad,error));
+    CHECK_FALSE(parse({"--fog","on","--fog-history","maybe"},bad,error));
+    LaunchOptions h;REQUIRE(parse({"--fog","on","--volume-oracle","o","--debug-lighting","1","--fog-height-fixture","0.05"},h,error));
+    CHECK(h.fogFixtureFalloff==doctest::Approx(.05f));
+    CHECK_FALSE(parse({"--fog","on","--volume-oracle","o","--debug-lighting","1","--fog-height-fixture","0.05","--fog-homogeneous"},bad,error));
+    CHECK_FALSE(parse({"--fog","on","--fog-height-fixture","0.05"},bad,error));     // needs the oracle
+    LaunchOptions stale;REQUIRE(parse({"--fog","on","--debug-lighting","1","--debug-volume-corrupt","stale-fog"},stale,error));
+    CHECK(stale.debugVolumeCorrupt==6); // VOLUME_CORRUPT_STALE_FOG
+    CHECK_FALSE(parse({"--fog","on","--fog-history","off","--debug-lighting","1","--debug-volume-corrupt","stale-fog"},bad,error));
+    LaunchOptions edge;REQUIRE(parse({"--clouds","on","--debug-lighting","1","--debug-volume-corrupt","cloud-edge"},edge,error));
+    CHECK(edge.debugVolumeCorrupt==7); // VOLUME_CORRUPT_CLOUD_EDGE
+    CHECK_FALSE(parse({"--clouds","on","--debug-lighting","1","--debug-volume-corrupt","cloud-motion"},bad,error)); // removed control
+    CHECK_FALSE(parse({"--clouds","on","--cloud-full-rate","--debug-lighting","1","--debug-volume-corrupt","cloud-edge"},bad,error));
+    LaunchOptions cam;REQUIRE(parse({"--frames","10","--clouds","on","--planet-camera-height","1000","--camera-climb","700","--camera-pitch","0","--camera-yaw-rate","60"},cam,error));
+    CHECK(cam.cameraClimb==700);CHECK(cam.cameraPitch==0);CHECK(cam.cameraYawRate==60);
+    LaunchOptions sun;REQUIRE(parse({"--frames","10","--atmosphere","on","--clouds","on","--camera-aim-sun","8"},sun,error));CHECK(sun.cameraAimSun==8);
+    CHECK_FALSE(parse({"--clouds","on","--camera-pitch","10"},bad,error));                         // benchmark only
+    CHECK_FALSE(parse({"--frames","10","--clouds","on","--camera-climb","10"},bad,error));          // needs the planetary height
+    CHECK_FALSE(parse({"--frames","10","--clouds","on","--camera-aim-sun","8"},bad,error));         // needs the atmosphere
+    CHECK_FALSE(parse({"--frames","10","--atmosphere","on","--camera-aim-sun","8","--camera-pitch","3"},bad,error));
+    LaunchOptions t;REQUIRE(parse({"--frames","10","--clouds","on","--capture-linear-sequence","seq","--capture-linear-signal","cloud-transmittance"},t,error));
+    CHECK(t.captureLinearSignal==11);
+    CHECK_FALSE(parse({"--frames","10","--fog","on","--capture-linear-sequence","seq","--capture-linear-signal","cloud-transmittance"},bad,error));
+}

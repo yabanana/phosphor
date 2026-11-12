@@ -159,6 +159,140 @@ def temporal_record(record):
     reused=record.get("gpu_counters",{}).get("history_reused",0)
     return clock["frozen_base"] and natural and reused>0
 
+# F14.2 slicing: froxel view-depth bands (metres) and the declared caps. The
+# implementation gate reuses the homogeneous-fog tolerance; the discretisation
+# cap bounds the declared froxel algorithm against the continuous medium.
+FOG_SLICING_BANDS=((0.0,1.0),(1.0,5.0),(5.0,25.0),(25.0,125.0),(125.0,math.inf))
+FOG_SLICING_GATES={"implementation":VOLUME_GATES["homogeneous_fog"],"discretisation_relative":0.01,"minimum_band_samples":100}
+
+def _mat(words,offset):return [words[offset+i] for i in range(16)]
+def _apply(m,v):return [sum(m[4*c+r]*v[c] for c in range(4)) for r in range(4)]
+def _pixel_ray(x,y,width,height,inverse,camera):
+    ndc=[(x+.5)*2/width-1,1-(y+.5)*2/height,1,1];h=_apply(inverse,ndc)
+    if not math.isfinite(h[3]) or abs(h[3])<1e-20:raise ValueError("invalid inverse projection")
+    d=[h[i]/h[3]-camera[i] for i in range(3)];n=math.sqrt(sum(v*v for v in d))
+    if not n>0:raise ValueError("degenerate pixel ray")
+    return [v/n for v in d]
+
+def fog_slicing_sample(params,row,sigma0,falloff,ratio):
+    """Return (band index, continuous E, froxel model M) for one probe row.
+
+    E integrates sigma(y)=sigma0*exp(-falloff*y) exactly along the pixel ray over
+    the declared medium [near, min(depth, far)] in view depth, with a constant
+    source/extinction ratio J: L = J (1 - T) + T L0. M is the declared froxel
+    algorithm: bilinear over the four column-centre rays, each integrated
+    slice by slice with the extinction of the slice centre (exponential
+    slices); for a constant ratio only the column optical depth matters.
+    """
+    x,y,depth=row[0],row[1],row[2];before=row[3:6]
+    width,height=params["width"],params["height"];gx,gy,gz=params["grid"]
+    inverse,view,camera,near,far=params["inverse"],params["view"],params["camera"],params["near"],params["far"]
+    ray=_pixel_ray(x,y,width,height,inverse,camera)
+    cosine=-sum(view[4*c+2]*ray[c] for c in range(3))
+    if not cosine>1e-5:raise ValueError("pixel ray behind the view plane")
+    if 0<depth<=1:
+        ndc=[(x+.5)*2/width-1,1-(y+.5)*2/height,depth,1];h=_apply(inverse,ndc)
+        distance=min(far/cosine,math.sqrt(sum((h[i]/h[3]-camera[i])**2 for i in range(3))))
+    else:distance=far/cosine
+    view_depth=min(far,distance*cosine)
+    band=next(i for i,(lo,hi) in enumerate(FOG_SLICING_BANDS) if lo<=view_depth<hi) if view_depth<far else len(FOG_SLICING_BANDS)
+    def continuous():
+        if view_depth<=near:return 0.0
+        t0,t1=near/cosine,view_depth/cosine;rate=falloff*ray[1]
+        scale=sigma0*math.exp(-falloff*camera[1])
+        if abs(rate)<1e-12:return scale*(t1-t0)
+        return scale*(math.exp(-rate*t0)-math.exp(-rate*t1))/rate
+    def column_depth(cx,cy):
+        if view_depth<=near:return 0.0
+        cray=_pixel_ray(cx,cy,gx,gy,inverse,camera);ccos=max(1e-5,-sum(view[4*c+2]*cray[c] for c in range(3)))
+        z=min(int(math.log(view_depth/near)/math.log(far/near)*gz),gz-1)
+        def edge(i):return near*(far/near)**(i/gz)
+        tau=0.0
+        for i in range(z+1):
+            end=edge(i+1) if i<z else view_depth
+            sigma=sigma0
+            if falloff>0:
+                centre=near*(far/near)**((i+.5)/gz);sigma=sigma0*math.exp(max(-80.0,min(80.0,-falloff*(camera[1]+cray[1]*centre/ccos))))
+            tau+=sigma*max(0.0,end-edge(i))/ccos
+        return tau
+    u=(x+.5)/width*gx-.5;v=(y+.5)/height*gy-.5;bx,by=math.floor(u),math.floor(v);fx,fy=u-bx,v-by
+    model=[0.0,0.0,0.0];weight_t=0.0
+    for corner in range(4):
+        ix,iy=corner&1,corner>>1
+        cx=min(max(bx+ix,0),gx-1);cy=min(max(by+iy,0),gy-1)
+        w=(fx if ix else 1-fx)*(fy if iy else 1-fy);t=math.exp(-column_depth(cx,cy))
+        for k in range(3):model[k]+=w*ratio[k]*(1-t)
+        weight_t+=w*t
+    model=[model[k]+weight_t*before[k] for k in range(3)]
+    t=math.exp(-continuous());exact=[ratio[k]*(1-t)+t*before[k] for k in range(3)]
+    return band,exact,model
+
+def fog_slicing_evidence(paths,falloff):
+    """Per-band slicing evidence from the actual composition probe rows."""
+    gates=FOG_SLICING_GATES;impl=gates["implementation"];cap=gates["discretisation_relative"]
+    bands=[{"samples":0,"max_measured_relative":0.0,"max_discretisation_relative":0.0,"max_implementation_error":0.0,"failures":0}
+           for _ in range(len(FOG_SLICING_BANDS)+1)]
+    errors=[];seen=set()
+    for path in paths:
+        record=json.loads(Path(path).read_text());probe=record.get("fog_apply")
+        if not probe or probe.get("schema")!="phosphor.fog-apply-probe.v1":raise ValueError(path.name+": missing fog composition probe")
+        words=record["parameter_blocks"]["fog"];f=volume_words(words,112)
+        if abs(probe.get("fixture_height_falloff_m_inv",-1)-falloff)>1e-9 or abs(f[75]-falloff)>1e-9 or f[80]!=0:
+            raise ValueError(path.name+": fixture falloff differs from the declared case")
+        settings=record["settings"];sigma0=settings["fixture_extinction_m_inv"];source=settings["fixture_source"]
+        if abs(sigma0-.01)>2e-8 or any(abs(a-b)>2e-8 for a,b in zip(source,(.01,.02,.03))):raise ValueError("fixture differs from predeclared source/extinction")
+        ratio=[v/sigma0 for v in source];falloff_actual=f[75]
+        params={"width":probe["width"],"height":probe["height"],"grid":words[64:67],"inverse":_mat(f,0),"view":_mat(f,16),
+                "camera":list(f[92:95]),"near":f[72],"far":f[73]}
+        if params["width"]!=words[68] or params["height"]!=words[69]:raise ValueError("probe extent differs from the fog output extent")
+        for row in probe["samples"]:
+            if len(row)!=9 or not all(numeric(v) for v in row):raise ValueError("incomplete probe row")
+            if row[0]<0 or row[1]<0 or row[0]>=params["width"] or row[1]>=params["height"]:raise ValueError("probe pixel outside the output")
+            seen.add((row[0],row[1]))
+            band,exact,model=fog_slicing_sample(params,row,sigma0,falloff_actual,ratio);entry=bands[band];entry["samples"]+=1
+            after=row[6:9];bad=False
+            for a,e,m in zip(after,exact,model):
+                implementation=abs(a-m);entry["max_implementation_error"]=max(entry["max_implementation_error"],implementation/(impl["absolute"]+impl["relative"]*abs(m)))
+                floor=max(abs(e),1e-3);measured=abs(a-e)/floor;discretisation=abs(m-e)/floor
+                entry["max_measured_relative"]=max(entry["max_measured_relative"],measured)
+                entry["max_discretisation_relative"]=max(entry["max_discretisation_relative"],discretisation)
+                bad|=implementation>impl["absolute"]+impl["relative"]*abs(m) or measured>cap+impl["absolute"]/floor or discretisation>cap
+            entry["failures"]+=bad
+    for index,entry in enumerate(bands):
+        lo,hi=FOG_SLICING_BANDS[index] if index<len(FOG_SLICING_BANDS) else (None,None)
+        name="beyond-far" if lo is None else f"{lo:g}m-far" if hi==math.inf else f"{lo:g}-{hi:g}m"
+        entry["band"]=name
+        if entry["samples"]<gates["minimum_band_samples"]:errors.append(f"slicing band {name} has {entry['samples']} samples (<{gates['minimum_band_samples']})")
+        if entry["failures"]:errors.append(f"slicing band {name}: {entry['failures']} samples outside the declared gates")
+    return {"passed":not errors,"errors":errors,"bands":bands,"distinct_pixels":len(seen),"gates":gates,"falloff_m_inv":falloff}
+
+def camera_geometry_evidence(paths,spec):
+    """Per-frame camera checks from the submitted atmosphere block (words
+    0-3 planet centre/radius, 24-26 sun, 40-42 camera, 44-59 inverse VP)."""
+    errors=[];report={}
+    rows=[]
+    for path in paths:
+        record=json.loads(Path(path).read_text());p=volume_words(record["parameter_blocks"]["submitted_atmosphere"],96)
+        camera=p[40:43];centre=p[0:3];radius=p[3]
+        altitude=math.sqrt(sum((a-b)**2 for a,b in zip(camera,centre)))-radius
+        inverse=list(p[44:60]);h=_apply(inverse,[0,0,1,1]);forward=[h[i]/h[3]-camera[i] for i in range(3)]
+        n=math.sqrt(sum(v*v for v in forward));forward=[v/n for v in forward];sun=p[24:27];sn=math.sqrt(sum(v*v for v in sun))
+        angle=math.degrees(math.acos(max(-1.0,min(1.0,sum(a*b/sn for a,b in zip(forward,sun))))))
+        rows.append((record["frame"],altitude,angle,(sun[1]/sn)))
+    if "flight_altitude" in spec:
+        f=spec["flight_altitude"];below=sum(r[1]<f["below"] for r in rows);above=sum(r[1]>f["above"] for r in rows);inside=len(rows)-below-above
+        report["flight_altitude"]={"frames_below":below,"frames_inside":inside,"frames_above":above,
+                                   "first_m":rows[0][1] if rows else None,"last_m":rows[-1][1] if rows else None}
+        counts={"below":below,"inside":inside,"above":above}
+        if any(counts[k]<f["minimum_frames"] for k in f.get("require",("below","inside","above"))):
+            errors.append("flight does not cross the declared cloud-layer boundary")
+        if any(b[1]<a[1] for a,b in zip(rows,rows[1:])):errors.append("flight altitude is not monotonic")
+    if "backlit_sun" in spec:
+        b=spec["backlit_sun"];worst=max(abs(r[2]-b["offset_degrees"]) for r in rows) if rows else math.inf
+        report["backlit_sun"]={"max_offset_error_degrees":worst,"sun_elevation_degrees":[math.degrees(math.asin(rows[0][3])),math.degrees(math.asin(rows[-1][3]))] if rows else None}
+        if worst>b["tolerance_degrees"]:errors.append("sun is not at the declared offset from the view centre")
+    return {"passed":not errors,"errors":errors,**report}
+
 def native_volume_evidence(case,binary_hash,manifest_hash,source_sha):
     paths=sorted(Path(case["volume_oracle"]).glob("frame-*-view-*.json"));errors=[];failed_snapshots=0;armed=0;checks=0;kinds=set();solar_wide=0;history_exercised=0
     if not paths:return {"passed":False,"pending":"zero actual native F14 readback snapshots"}
@@ -187,5 +321,22 @@ def native_volume_evidence(case,binary_hash,manifest_hash,source_sha):
     if negative and (not armed or not failed_snapshots):errors.append("negative never armed/exercised a real failed numerical/epoch/device-counter check")
     if case.get("require_volume_history_reuse") and not history_exercised:errors.append("no naturally eligible frozen-clock volume history was reused")
     if not negative and case.get("name") in ("atmo-zenith","atmo-space") and not solar_wide:errors.append("no actual solar output exceeded half range in declared wide-HDR case")
-    return {"passed":not errors,"errors":errors,"actual_snapshots":len(paths),"actual_component_checks":checks,
+    slicing=None
+    if case.get("numerical_oracle") in ("fog-slicing","fog-slicing-height"):
+        try:
+            slicing=fog_slicing_evidence(paths,case.get("fog_fixture_falloff",0.0))
+            errors.extend(slicing["errors"])
+        except (OSError,ValueError,TypeError,KeyError,IndexError,OverflowError) as error:errors.append("fog slicing: "+str(error))
+    geometry=None
+    if case.get("camera_geometry"):
+        try:
+            geometry=camera_geometry_evidence(paths,case["camera_geometry"]);errors.extend(geometry["errors"])
+        except (OSError,ValueError,TypeError,KeyError,IndexError,ZeroDivisionError) as error:errors.append("camera geometry: "+str(error))
+    history_reused=0
+    for path in paths:
+        try:history_reused+=json.loads(path.read_text()).get("gpu_counters",{}).get("history_reused",0)
+        except (OSError,ValueError):pass
+    if case.get("require_history_reuse_frames") and history_reused<=0:errors.append("temporal history was never reused in a case that declares it")
+    return {"passed":not errors,"errors":errors,"actual_snapshots":len(paths),"actual_component_checks":checks,"history_reused_total":history_reused,
+        **({"fog_slicing":slicing} if slicing is not None else {}),**({"camera_geometry":geometry} if geometry is not None else {}),
         "failed_snapshots":failed_snapshots,"armed_snapshots":armed,"solar_wide_snapshots":solar_wide,"history_exercised_snapshots":history_exercised,"kinds":sorted(kinds),"certification":False}

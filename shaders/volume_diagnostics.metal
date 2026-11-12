@@ -10,8 +10,11 @@ kernel void volume_homogeneous_fog(constant GPUFogParams& p [[buffer(0)]],consta
     const float3 camera=atmoVec(p.cameraPosition),ray=atmoPixelRay(cell.xy,uint2(p.gridX,p.gridY),p.inverseViewProjection,camera);
     const float z=p.nearDistance*pow(p.farDistance/p.nearDistance,(float(cell.z)+0.5f)/float(p.gridZ));
     const float cosine=max(1e-5f,-(atmoMatrix(p.view)*float4(ray,0)).z);const float3 point=camera+ray*(z/cosine);
-    GPUFogCell value{};value.extinction=d.fixtureExtinction*(d.corruption==VOLUME_CORRUPT_UNITS?1000.0f:1.0f);
-    float3 source=float3(d.fixtureSource[0],d.fixtureSource[1],d.fixtureSource[2]);
+    // Height fixture: sigma(y) = sigma0 exp(-k y) at the cell centre with the
+    // same source/extinction ratio, so L = J (1 - T) + T L0 stays exact.
+    const float height=d.fixtureHeightFalloff>0?exp(clamp(-d.fixtureHeightFalloff*point.y,-80.0f,80.0f)):1.0f;
+    GPUFogCell value{};value.extinction=d.fixtureExtinction*height*(d.corruption==VOLUME_CORRUPT_UNITS?1000.0f:1.0f);
+    float3 source=float3(d.fixtureSource[0],d.fixtureSource[1],d.fixtureSource[2])*height;
     if(d.corruption==VOLUME_CORRUPT_UNITS)source*=1000;if(d.corruption==VOLUME_CORRUPT_LIGHT)source*=8;
     value.source[0]=source.x;value.source[1]=source.y;value.source[2]=source.z;
     value.worldPosition[0]=point.x;value.worldPosition[1]=point.y;value.worldPosition[2]=point.z;value.viewDepth=z;
@@ -65,4 +68,17 @@ kernel void volume_celestial_probe(constant GPUAtmosphereParams& p [[buffer(0)]]
         radiance=float3(atmoStars(float3(horizontal*cos(azimuth),y,horizontal*sin(azimuth)),p));
     }
     output.write(float4(radiance,1),uint2(i,0));
+}
+kernel void volume_fog_apply_probe(constant GPUVolumeDiagnosticParams& p [[buffer(17)]],device GPUFogApplySample* samples [[buffer(18)]],
+    texture2d<float,access::read> before [[texture(0)]],texture2d<float,access::read> after [[texture(1)]],
+    texture2d<float,access::read> depth [[texture(2)]],uint i [[thread_position_in_grid]]) {
+    if(i>=VOLUME_FOG_APPLY_SAMPLES||!p.applyWidth||!p.applyHeight)return;
+    // Stratified grid; the offset rasters through each cell, one step per frame.
+    const uint cellW=max(1u,p.applyWidth/VOLUME_FOG_APPLY_X),cellH=max(1u,p.applyHeight/VOLUME_FOG_APPLY_Y);
+    const uint ox=p.applyOffset%cellW,oy=(p.applyOffset/cellW)%cellH;
+    const uint2 pixel=min(uint2((i%VOLUME_FOG_APPLY_X)*cellW+ox,(i/VOLUME_FOG_APPLY_X)*cellH+oy),uint2(p.applyWidth-1,p.applyHeight-1));
+    GPUFogApplySample s{};s.x=pixel.x;s.y=pixel.y;s.depth=depth.read(pixel).x;
+    const float4 b=before.read(pixel),a=after.read(pixel);
+    for(uint k=0;k<4;++k){s.before[k]=b[k];s.after[k]=a[k];}
+    samples[i]=s;
 }

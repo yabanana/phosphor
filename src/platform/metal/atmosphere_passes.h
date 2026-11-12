@@ -14,6 +14,7 @@ class AtmospherePasses {
     struct ReadResources {
         MTL::Texture *transmittance=nullptr,*multiscattering=nullptr,*sky=nullptr;
         rg::TextureRef transmittanceRef{},multiscatteringRef{},skyRef{},output{};
+        rg::TextureRef cloudTransmittance{}; // valid only with capture signal 11 (cloud transmittance)
         GPUAtmosphereParams atmosphere{};
         GPUFogParams fog{};
         GPUCloudParams clouds{};

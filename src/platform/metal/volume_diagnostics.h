@@ -8,10 +8,13 @@ namespace phosphor {
 class MetalGraphExecutor;
 class VolumeDiagnostics {
   public:
-    struct Config {std::string path;u32 every=1;bool homogeneousFog=false;u32 corruption=0;};
+    // homogeneousFog: an analytic fixture replaces the froxel injection;
+    // fixtureFalloff > 0 makes its extinction decay with height.
+    struct Config {std::string path;u32 every=1;bool homogeneousFog=false;u32 corruption=0;float fixtureFalloff=0;};
     struct Sources {
         rg::TextureRef transmittance{},multiple{},sky{};
         rg::BufferRef fogCells{},fogIntegrated{},counters{};
+        rg::TextureRef fogApplyInput{},fogApplyOutput{},depth{}; // F14.2 slicing probe (fixture only)
     };
     VolumeDiagnostics(MetalContext&,PipelineCache&,Config);
     ~VolumeDiagnostics();

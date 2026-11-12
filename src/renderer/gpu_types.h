@@ -960,6 +960,13 @@ struct GPUVolumeCounters {
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUVolumeCounters) == 32, "GPUVolumeCounters layout");
 PHOSPHOR_GPU_CONSTANT u32 VOLUME_CORRUPT_OMIT_LUT = 4u;
 PHOSPHOR_GPU_CONSTANT u32 VOLUME_CORRUPT_MOON = 5u;
+// F14.2 negative: froxel history survives volume-epoch changes and resets
+// (moving lights, clock jumps); only the geometric rejection remains.
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_CORRUPT_STALE_FOG = 6u;
+// F14.3 negative: cloud history reprojected outside the screen wraps to the
+// opposite edge and skips every rejection (bounds, position, opaque depth,
+// neighbourhood clamp).
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_CORRUPT_CLOUD_EDGE = 7u;
 PHOSPHOR_GPU_CONSTANT u32 VOLUME_NUMERIC_TRANS = 0u;
 PHOSPHOR_GPU_CONSTANT u32 VOLUME_NUMERIC_MULTI = 1u;
 PHOSPHOR_GPU_CONSTANT u32 VOLUME_NUMERIC_SKY = 2u;
@@ -973,6 +980,10 @@ PHOSPHOR_GPU_CONSTANT u32 VOLUME_STAR_RAYS = VOLUME_STAR_GRID_SIDE*VOLUME_STAR_G
 PHOSPHOR_GPU_CONSTANT u32 VOLUME_CELESTIAL_RAYS = 2u*VOLUME_DISK_RAYS+VOLUME_STAR_RAYS;
 PHOSPHOR_GPU_CONSTANT u32 VOLUME_LUT_SAMPLES = 5u;
 PHOSPHOR_GPU_CONSTANT u32 VOLUME_FOG_SAMPLES = 3u;
+// F14.2 slicing probe: a stratified grid of output pixels read around the fog
+// composition (input radiance, depth, output radiance), offset every frame.
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_FOG_APPLY_X = 32u, VOLUME_FOG_APPLY_Y = 18u;
+PHOSPHOR_GPU_CONSTANT u32 VOLUME_FOG_APPLY_SAMPLES = VOLUME_FOG_APPLY_X*VOLUME_FOG_APPLY_Y;
 struct GPUVolumeDiagnosticParams {
     u32 transWidth,transHeight,multiWidth,multiHeight;
     u32 skyWidth,skyHeight,fogX,fogY;
@@ -980,8 +991,17 @@ struct GPUVolumeDiagnosticParams {
     u32 expectedSkyRevision,sampleCount,corruption,homogeneous;
     float fixtureExtinction,fixtureSource[3];
     u32 fogIndices[3],stampKind;
+    // Fixture extinction sigma(y) = fixtureExtinction * exp(-falloff * y),
+    // source = sigma * fixtureSource / fixtureExtinction (constant albedo ratio).
+    float fixtureHeightFalloff;
+    u32 applyWidth,applyHeight,applyOffset;
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUVolumeDiagnosticParams)==96,"GPUVolumeDiagnosticParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUVolumeDiagnosticParams)==112,"GPUVolumeDiagnosticParams layout");
+struct GPUFogApplySample {
+    u32 x,y;float depth,pad;
+    float before[4],after[4];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUFogApplySample)==48,"GPUFogApplySample layout");
 struct GPUVolumeNumericSample {
     float value[4];
     u32 kind,x,y,producedRevision;
