@@ -382,11 +382,12 @@ kernel void material_lighting_guides(
     texture2d<float,access::write> motion [[texture(7)]],
     texture2d<float,access::write> fallbackShading [[texture(8)]],
     texture2d<float,access::write> fallbackAlbedo [[texture(9)]],
-    texture2d<float,access::write> fallbackOcclusion [[texture(10)]],uint2 pixel [[thread_position_in_grid]]) {
+    texture2d<float,access::write> fallbackOcclusion [[texture(10)]],
+    texture2d<uint,access::write> fallbackEmission [[texture(11)]],uint2 pixel [[thread_position_in_grid]]) {
     if(any(pixel>=uint2(p.width,p.height)))return;
     const uint index=pixel.y*p.width+pixel.x;
     output[index]=GPUDISurface{};motion.write(float4(0),pixel);
-    fallbackShading.write(float4(0),pixel);fallbackAlbedo.write(float4(0),pixel);fallbackOcclusion.write(float4(1),pixel);
+    fallbackShading.write(float4(0),pixel);fallbackAlbedo.write(float4(0),pixel);fallbackOcclusion.write(float4(1),pixel);fallbackEmission.write(uint4(0),pixel);
     const uint id=visibility.read(pixel).x;
     if(id==VISIBILITY_BACKGROUND || visibilityCluster(id)>=2u*p.candidateCapacity || !geometry[index].valid)return;
     const GPUMeshletCandidate candidate = candidateOf(id, p, a, b);

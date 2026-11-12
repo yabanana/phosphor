@@ -1,5 +1,6 @@
 // Indexed forward reference. The visibility resolve shares material semantics.
 #include "material_shading.h"
+#include "renderer/emission_pack.h"
 #include "temporal_motion.h"
 
 struct VertexOut {
@@ -263,6 +264,7 @@ struct DIReceiverOutput {
     half4 albedo [[color(1)]];
     float2 motion [[color(2)]];
     half occlusion [[color(3)]];
+    uint emission [[color(4)]]; // F13.1: GPUDISurface::pad[1] of indexed overflow receivers
 };
 fragment DIReceiverOutput forward_di_receiver_fs(SurfaceVertexOut in [[stage_in]],bool frontFacing [[front_facing]],
     constant FrameConstants& frame [[buffer(0)]],const device GPUMaterial* materials [[buffer(3)]],
@@ -273,5 +275,6 @@ fragment DIReceiverOutput forward_di_receiver_fs(SurfaceVertexOut in [[stage_in]
     const auto value=shadeSurface(surface,frame,materials,lights,textures,true);
     if(value.alpha<materials[in.materialIndex].alphaCutoff)discard_fragment();
     return {half4(half3(value.normal),half(value.roughness)),half4(half3(value.baseColor),half(value.metallic)),
-            temporalMotion(in.unjitteredClip,in.previousClip,temporal,in.historyValid!=0),half(value.occlusion)};
+            temporalMotion(in.unjitteredClip,in.previousClip,temporal,in.historyValid!=0),half(value.occlusion),
+            packEmission(value.emission.x,value.emission.y,value.emission.z)};
 }

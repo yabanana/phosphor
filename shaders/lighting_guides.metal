@@ -70,7 +70,7 @@ kernel void di_receiver_pack(constant FrameConstants& frame [[buffer(0)]],consta
     device GPUDISurface* surfaces [[buffer(2)]],texture2d<float,access::read> world [[texture(5)]],
     texture2d<float,access::read> geometric [[texture(6)]],texture2d<uint,access::read> keys [[texture(10)]],
     texture2d<float,access::read> shading [[texture(11)]],texture2d<float,access::read> albedo [[texture(12)]],texture2d<float,access::read> occlusion [[texture(13)]],
-    uint2 pixel [[thread_position_in_grid]]) {
+    texture2d<uint,access::read> emission [[texture(14)]],uint2 pixel [[thread_position_in_grid]]) {
     if(any(pixel>=uint2(p.width,p.height)))return;const uint4 key=keys.read(pixel);if(key.x==~0u)return;
     const float4 pos=world.read(pixel),g=geometric.read(pixel),s=shading.read(pixel),a=albedo.read(pixel);
     if(dot(s.xyz,s.xyz)<=0)return;
@@ -78,6 +78,7 @@ kernel void di_receiver_pack(constant FrameConstants& frame [[buffer(0)]],consta
     for(uint c=0;c<3;++c){out.position[c]=pos[c];out.geometricNormal[c]=normalize(g.xyz)[c];out.shadingNormal[c]=normalize(s.xyz)[c];out.albedo[c]=a[c];out.viewDirection[c]=v[c];}
     out.depth=-(guideMatrix(frame.view)*float4(pos.xyz,1)).z;out.roughness=s.w;out.metallic=a.w;
     out.materialRevision=p.historyEpoch;out.instanceSlot=key.x;out.instanceGeneration=key.y;out.pad[0]=as_type<uint>(occlusion.read(pixel).x);out.valid=pos.w>0 && g.w>0 && dot(s.xyz,s.xyz)>0;
+    out.pad[1]=emission.read(pixel).x; // F13.1: resolve emission (GPUDISurface::pad[1])
     surfaces[pixel.y*p.width+pixel.x]=out;
 }
 

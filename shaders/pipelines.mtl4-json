@@ -1825,6 +1825,16 @@
         "label": "2500CBD132543DD010FFED2C4460F09FFB1A52B550EC34EDB0B6B0715057F965",
         "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
         "name": "fog_inject_rt"
+      },
+      {
+        "label": "CD0D3D9FE0A2A77C15184810DB954E1810BBE8E41C968CF9F811002BDB4E43B7",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "forward_surface_vs"
+      },
+      {
+        "label": "1925D6E7BD2ACEADE22FDD3E7BBBA03E0E262BDBFFD93C5239C15CC6251F9215",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "forward_di_receiver_fs"
       }
     ],
     "specialized_function_descriptors": [
@@ -7143,6 +7153,10 @@
         ],
         "function_descriptor": "fnd:AF684CF4B1382F928B3C2265573D39A40643B2A12738AFFB5AE8A216F1436844",
         "label": "136E35809F11E8212AD931B433F9ADE06699517454E1A6D70A2B5177AFD62E4F"
+      },
+      {
+        "function_descriptor": "fnd:1925D6E7BD2ACEADE22FDD3E7BBBA03E0E262BDBFFD93C5239C15CC6251F9215",
+        "label": "9CBF65A28FD370CFE190230F63402AA242AF4EE584A60CFCD4ACAC85D2FCA1F2"
       }
     ]
   },
@@ -13698,25 +13712,6 @@
       {
         "color_attachments": [
           {
-            "pixel_format": "RGBA16Float"
-          },
-          {
-            "pixel_format": "RGBA16Float"
-          },
-          {
-            "pixel_format": "RG32Float"
-          },
-          {
-            "pixel_format": "R16Float"
-          }
-        ],
-        "fragment_function_descriptor": "fnd:3F269DD2F2DA9C5775F9E0A7C56D63192531165F7C6FD64A395A8DC70C7E95A6",
-        "support_indirect_command_buffers": "Enabled",
-        "vertex_function_descriptor": "fnd:27515B4909F0246EF4946EC136C28E6BEA93C546C139A4A39E19A33A5EE5E235"
-      },
-      {
-        "color_attachments": [
-          {
             "pixel_format": "BGRA8Unorm_sRGB"
           }
         ],
@@ -14315,25 +14310,6 @@
       {
         "color_attachments": [
           {
-            "pixel_format": "RGBA16Float"
-          },
-          {
-            "pixel_format": "RGBA16Float"
-          },
-          {
-            "pixel_format": "RG32Float"
-          },
-          {
-            "pixel_format": "R16Float"
-          }
-        ],
-        "fragment_function_descriptor": "fnd:AC108D4A4896EE5ABAE0A5E2D36370BFC5895A0B43304A68A053E843F4D846C6",
-        "support_indirect_command_buffers": "Enabled",
-        "vertex_function_descriptor": "fnd:BA23A7E99A0A0CCA692D87617B46A0A6579BC013A05547E8E18076348506B1BD"
-      },
-      {
-        "color_attachments": [
-          {
             "pixel_format": "RGBA32Float"
           }
         ],
@@ -14785,6 +14761,28 @@
         "fragment_function_descriptor": "fnd:3D9E7741BE3AF557645C2C3FAE542AAD15F10F25A01A3B56221200A2B2892EB2",
         "support_indirect_command_buffers": "Enabled",
         "vertex_function_descriptor": "fnd:25E8D6F35A7F10C3FFC24D88DD49618C0057D288AF859475309954280AAF51EB"
+      },
+      {
+        "color_attachments": [
+          {
+            "pixel_format": "RGBA16Float"
+          },
+          {
+            "pixel_format": "RGBA16Float"
+          },
+          {
+            "pixel_format": "RG32Float"
+          },
+          {
+            "pixel_format": "R16Float"
+          },
+          {
+            "pixel_format": "R32Uint"
+          }
+        ],
+        "fragment_function_descriptor": "fnd:9CBF65A28FD370CFE190230F63402AA242AF4EE584A60CFCD4ACAC85D2FCA1F2",
+        "support_indirect_command_buffers": "Enabled",
+        "vertex_function_descriptor": "fnd:CD0D3D9FE0A2A77C15184810DB954E1810BBE8E41C968CF9F811002BDB4E43B7"
       }
     ],
     "tile_render_pipeline_descriptors": [
