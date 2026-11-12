@@ -1164,3 +1164,55 @@ GPU p95, the metric this budget has used throughout, meets 16.67 ms with
 about 0.6 ms of margin. Frame p95 (serial GPU timing) and GPU p99 are
 0.1–0.2 ms over. The p99 includes the frames after camera cuts that use
 the near-specular boost. There are zero steady GPU allocations.
+
+## F14.2 froxel fog cost per volume (2026-11-12, M5 Max, HEAD 79777cb)
+
+Measurement only, not a quality gate. Binary sha256 9ec0d6a8…, native
+1080p, `--gpu-timing-serial --no-vsync`, 128 warm-up and 256 measured
+frames. Order per repetition is A/B/A (the default first and last), three
+repetitions, 20 s gaps, load logged (1-minute load 1.3–4.6). The reference
+clip render was paused, so the machine was quiet. Every run had 0 GPU
+allocations. Values are medians over runs, in ms
+(`build/f14-fog-cost-20261112/`, script and table in the session
+scratchpad).
+
+Sponza: full preset with ReSTIR, DDGI, RT reflections, RTAO, clouds, the
+temporal camera script and a 64 s day; 0 local lights. Fixture: the F13
+`moving-light` scene in dense fog (0.05/m), 12 local lights.
+
+| configuration | source min | source p50 | source mean | source p95 | composition p50 | frame GPU p50 | frame GPU p95 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Sponza default (64×36×32, 500 m) | 0.099 | 0.105 | 0.730 | 1.572 | 0.093 | 15.13 | 16.23 |
+| Sponza grid 32×18×16 | 0.050 | 0.054 | 0.526 | 2.164 | 0.083 | 14.47 | 16.74 |
+| Sponza grid 128×72×64 | 1.512 | 2.011 | 1.991 | 2.148 | 0.184 | 16.50 | 17.37 |
+| Sponza range 120 m | 0.111 | 0.118 | 0.118 | 0.125 | 0.093 | 14.39 | 15.21 |
+| Sponza range 2000 m | 0.980 | 1.421 | 1.426 | 1.583 | 0.093 | 15.78 | 16.74 |
+| fixture, 1 local sample | 0.085 | 0.092 | 0.095 | 0.115 | 0.090 | 12.50 | 13.15 |
+| fixture, 4 local samples | 0.135 | 0.143 | 0.144 | 0.157 | 0.090 | 12.54 | 13.19 |
+| fixture, 16 local samples | 0.336 | 0.342 | 0.343 | 0.355 | 0.090 | 12.74 | 13.35 |
+
+"Source" is the `Froxel source with independent RT visibility` pass.
+- Temporal reuse, integration and snapshot stay at or below 0.06 ms at the
+  p50 for 64×36×32 and below. With 128×72×64 the temporal pass costs 0.094
+  and integration 0.056.
+- Composition scales with the grid only: 0.093 → 0.184 ms at 8× the cells.
+
+Findings:
+- **The froxel source dominates and is bimodal on Sponza.** Cheap frames
+  cost about 0.1 ms. Expensive frames cost 1.5–2.2 ms. The share of
+  expensive frames depends on the configuration:
+  - none at a 120 m range;
+  - about 40% at the default and about 20% at 32×18×16;
+  - all frames at a 2000 m range and at 128×72×64.
+
+  The cost is the per-froxel RT visibility ray (sun, moon, local lights).
+  The report has no per-frame pass times, so which camera pose or froxel
+  population triggers the expensive state has not been isolated. Cell count
+  alone does not explain it: 32×18×16 has a higher p95 than the default.
+- At the default, the expensive frames move Sponza's frame GPU p95 by about
+  1 ms (16.23 at 500 m against 15.21 at 120 m).
+- Local light samples cost about 0.017 ms per extra sample per froxel at
+  64×36×32: +0.05 ms for 4, +0.25 ms for 16.
+
+A per-frame pass timeline and an investigation of the RT visibility cost
+are candidates, not activated work.
