@@ -579,10 +579,11 @@ M3. [Consegna](F9_HANDOFF.md), [dati](results/F9-M5Max-2026-10-07.json).
 Accettazione di sviluppo locale M5 (2026-11-12, branch `phase/f13-f14-closure`):
 corpus finale di 83 casi sul binario 75c0b6e, clip indipendenti con metrica
 ghost sull'errore che cambia (D4/D6) e regolarizzazione k = 8 (D5), radiometria
-a soglia assoluta (D1), oracolo F9 (D3), F13.3 ridefinito (D7). Budget D2 per
-parità: il binario finale è entro 0,04 ms da c152b99, misurato a macchina
-quieta a 16,01–16,06 ms di p95 GPU; la misura diretta a macchina quieta del
-binario finale manca ancora. I residui restano espliciti: cattura RT della
+a soglia assoluta (D1), oracolo F9 (D3), F13.3 ridefinito (D7). Budget D2
+rispettato a macchina quieta: p95 GPU 15,98–16,03 ms nelle tre coppie senza
+contesa, alternate con c152b99; una run a 16,86 ms ha la firma di contesa
+esterna (passata del cielo a lavoro costante da 0,676 a 0,770 ms), riprodotta
+su entrambi i binari. Il frame p95 con timing seriale resta 0,04–0,12 ms sopra. I residui restano espliciti: cattura RT della
 probe a roughness 0,9, soglie degli altri tier, certificazione T0 fisica. [Chiusura per ID](implementation/F13-F14-CLOSURE-2026-11-12.md).
 
 ## OPT-2 — Shader, pipeline e occupancy [OPT]

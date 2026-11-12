@@ -1264,3 +1264,33 @@ sits in the memory-bound passes: `F13 reflection sample 0` is 2.62 ms quiet,
 above show the same environment cost on c152b99. The absolute gate for
 75c0b6e is therefore not yet measured on a quiet machine: what is measured is
 parity with c152b99 (within 0.04 ms) and c152b99 at 16.01–16.06 ms quiet.
+
+### Quiet-machine pairs (same day, 18:50–19:00)
+
+The run started only after two minutes with no other project's GPU or cargo
+job, the battery past charging and a 1-minute load under 3
+(`build/budget-quiet-20261112/`, order base/new). The physical sky pass does
+the same work every frame, so its p95 is a contention sentinel: it reads
+0.674–0.677 ms in every clean run.
+
+| rep | c152b99 GPU p50 / p95 | 75c0b6e GPU p50 / p95 | sky p95 base / new |
+|---|---|---|---|
+| 1 | 14.84 / 15.98 | 14.88 / 15.98 | 0.677 / 0.676 |
+| 2 | 14.82 / 15.96 | 14.86 / 16.03 | 0.676 / 0.676 |
+| 3 | 14.86 / 15.96 | 14.86 / 15.99 | 0.676 / 0.674 |
+| 4 | 14.87 / 15.99 | 15.03 / **16.86** | 0.677 / **0.770** (max 1.11) |
+
+Run 4 of 75c0b6e has the p50 of the others but the p95 of many unrelated
+passes rises together (denoise 2 temporal 1.28 → 1.67 ms, DDGI max 0.79 ms
+against 0.33), and so does the constant-work sky pass: a few frames were
+slowed from outside. A reversed-order repeat (new/base, under `caffeinate`,
+`build/budget-quiet2-20261112/`) reproduces the signature on both binaries:
+WindowServer held about 42% CPU, the sky p95 read 0.76–1.08 ms, and GPU p95
+was 16.55–17.30 ms for c152b99 and 16.99–17.41 ms for 75c0b6e. The source of
+the run-4 burst itself was not identified (top process corebrightnessd at 6%).
+
+Verdict: in the three uncontended pairs 75c0b6e reads 15.98–16.03 ms GPU p95,
+0.64–0.69 ms under the 16.67 ms gate, within 0.07 ms of c152b99. The only
+consistent per-pass difference is `F13 reflection sample 0`, +0.03 ms at the
+p50 (2.62 → 2.65 ms), from the changes after c152b99 (not isolated further). Frame p95 (serial
+timing) is 16.71–16.79 ms, 0.04–0.12 ms over, as for c152b99 in the D2 entry.
