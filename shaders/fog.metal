@@ -1,5 +1,6 @@
 #include "atmosphere_common.h"
 #include "gi_common.h"
+#include "renderer/fog_gi.h"
 
 static float fogSlice(float normalized,constant GPUFogParams& p){return p.nearDistance*pow(p.farDistance/p.nearDistance,saturate(normalized));}
 static uint fogIndex(uint3 c,constant GPUFogParams& p){return (c.z*p.gridY+c.y)*p.gridX+c.x;}
@@ -27,13 +28,15 @@ static float fogRtVisibility(float3 point,float3 wi,float distance,instance_acce
     RtPayload payload{};const auto hit=rtTrace(ray,as,ift,instances,p.slotCount,payload);volumeCount(counters,3,1);
     if(hit.t==-2)volumeCount(counters,0,1);return hit.hit?0.0f:1.0f;
 }
-static float3 fogGi(float3 point,constant GPUProbeGridParams& p,const device GPUProbeState* states,texture2d<float> irradiance,texture2d<float> moments) {
+static float3 fogGi(float3 point,float3 ray,float anisotropy,constant GPUProbeGridParams& p,const device GPUProbeState* states,texture2d<float> irradiance,texture2d<float> moments) {
     if(p.countX<2||p.countY<2||p.countZ<2)return 0;
-    float3 sum=0;
-    for(uint axis=0;axis<6;++axis){float3 normal=0;normal[axis/2]=(axis&1u)?-1.0f:1.0f;sum+=giIrradiance(point,normal,p,states,irradiance,moments,true);}
-    // Six diffuse irradiance orientations approximate isotropic incident
-    // radiance: E/pi for isotropic light. No surface cosine belongs to fog.
-    return sum/(6*M_PI_F);
+    float3 e[6];
+    for(uint axis=0;axis<6;++axis){float3 normal=0;normal[axis/2]=(axis&1u)?-1.0f:1.0f;e[axis]=giIrradiance(point,normal,p,states,irradiance,moments,true);}
+    // F14.2: order-0 mean plus the Henyey-Greenstein order-1 term of the DDGI
+    // field (renderer/fog_gi.h, exact up to order 1). No surface cosine belongs to fog.
+    float3 L;
+    for(uint c=0;c<3;++c)L[c]=fogGiInScatter(e[0][c],e[1][c],e[2][c],e[3][c],e[4][c],e[5][c],ray.x,ray.y,ray.z,anisotropy);
+    return L;
 }
 static DISample fogLocalSample(float3 point,const device GPUSampledLight* lights,const device GPUAliasEntry* alias,
     const device GPUEmissiveSurface* emitters,const device GPUMaterial* materials,const device DITextureHandle* textures,
@@ -70,7 +73,7 @@ kernel void fog_inject(FOG_COMMON_ARGS,constant GPUShadowParams& shadows [[buffe
         const float visibility=(p.flags&VOLUME_SHADOW_CSM)?fogCsm(point,shadows,csm0,csm1,csm2,csm3):1.0f;
         incident+=atmoVec(p.sunIrradiance)*atmoTransmittance(point,sun,atmosphere,transmittance)*atmoHgPhase(dot(ray,sun),p.anisotropy)*visibility;
         incident+=atmoVec(p.moonIrradiance)*atmoTransmittance(point,moon,atmosphere,transmittance)*atmoHgPhase(dot(ray,moon),p.anisotropy);
-        if(p.flags&VOLUME_ENABLE_GI)incident+=fogGi(point,probes,states,irradiance,moments);
+        if(p.flags&VOLUME_ENABLE_GI)incident+=fogGi(point,ray,p.anisotropy,probes,states,irradiance,moments);
         if((p.flags&VOLUME_ENABLE_LOCAL_LIGHTS)&&p.lightCount){uint seed=giHash(fogIndex(cell,p)^p.frameIndex*7919u);const uint samples=clamp(p.maxLocalLights,1u,16u);
             for(uint i=0;i<samples;++i){float proposal;const DISample sample=fogLocalSample(point,lights,alias,emitters,materials,textures,p,seed,proposal);
                 if(sample.valid&&proposal>0)incident+=diIncident(sample)*atmoHgPhase(dot(ray,sample.wi),p.anisotropy)/(proposal*float(samples));}}
@@ -87,7 +90,7 @@ kernel void fog_inject_rt(FOG_COMMON_ARGS,const device GPUInstance* instances [[
         const float3 lunar=atmoVec(p.moonIrradiance)*atmoTransmittance(point,moon,atmosphere,transmittance);
         if(any(solar>0))incident+=solar*atmoHgPhase(dot(ray,sun),p.anisotropy)*fogRtVisibility(point,sun,p.maxTraceDistance,tlas,ift,instances,p,counters);
         if(any(lunar>0))incident+=lunar*atmoHgPhase(dot(ray,moon),p.anisotropy)*fogRtVisibility(point,moon,p.maxTraceDistance,tlas,ift,instances,p,counters);
-        if(p.flags&VOLUME_ENABLE_GI)incident+=fogGi(point,probes,states,irradiance,moments);
+        if(p.flags&VOLUME_ENABLE_GI)incident+=fogGi(point,ray,p.anisotropy,probes,states,irradiance,moments);
         if((p.flags&VOLUME_ENABLE_LOCAL_LIGHTS)&&p.lightCount){uint seed=giHash(fogIndex(cell,p)^p.frameIndex*7919u);const uint samples=clamp(p.maxLocalLights,1u,16u);
             for(uint i=0;i<samples;++i){float proposal;const DISample sample=fogLocalSample(point,lights,alias,emitters,materials,textures,p,seed,proposal);
                 if(sample.valid&&proposal>0)incident+=diIncident(sample)*atmoHgPhase(dot(ray,sample.wi),p.anisotropy)*
