@@ -629,18 +629,23 @@ senza imporre il 90% quando aumenta la contesa [R91].
 - [x] F14.1 Atmosfera fisica (Hillaire): LUT di trasmittanza, multi-scattering, sky-view
 - [x] F14.2 Nebbia volumetrica froxel con scattering di luci e ombre, integrata con la GI
 - [x] F14.3 **Nuvole volumetriche** raymarched (approccio stile Nubis) con ricostruzione temporale a bassa risoluzione
-- [ ] F14.4 Ciclo giorno/notte, luna e stelle
+- [x] F14.4 Ciclo giorno/notte, luna e stelle — accettato su M5: transizione ripetibile bit per bit sugli shader di prodotto; la divergenza osservata con `MTL_SHADER_VALIDATION` è un difetto della strumentazione di Metal, riprodotto fuori dal motore (spike F14-K2)
 - [ ] F14.5 **[CANDIDATO]** **[EDGE]** Meteo dinamico: pioggia (particelle + superfici bagnate), neve con accumulo, fulmini come luci ReSTIR
 
-Accettazione di sviluppo locale M5 per F14.1–F14.3 (2026-11-12): oracoli
+Accettazione di sviluppo locale M5 per F14.1–F14.4 (2026-11-12): oracoli
 atmosferici, nebbia froxel secondo il piano (densità costante analitica, slicing,
 luce in moto, disocclusione, costo per volume) e coppie a piena frequenza delle
 nuvole 15/15 con D6. L'iniezione DDGI nella nebbia resta l'approssimazione
 documentata a sei orientamenti, non verificata a parte; la bimodalità per frame
-della sorgente RT non è spiegata. F14.4 resta aperto: luna e stelle passano
-l'oracolo GPU e gli shader di prodotto si ripetono bit per bit, ma con
-`MTL_SHADER_VALIDATION` e `--volume-oracle` il kernel DI di visibilità RT non è
-deterministico a parità di input (448bca7). F14.5 non è attivato.
+della sorgente RT non è spiegata. F14.4 (2026-11-12): luna e stelle passano
+l'oracolo GPU e la transizione si ripete bit per bit sugli shader di prodotto
+(validazione API, senza archivio, GPU rallentata). La divergenza con
+`MTL_SHADER_VALIDATION` nasce dalla strumentazione degli accessi in memoria di
+Metal, che su kernel con un ciclo di raggi RT corrompe interi SIMD group anche
+quando cambia solo codice mai eseguito: riprodotta sul kernel DI del motore fuori
+dal frame (spike F14-K2, sonda da rieseguire a ogni aggiornamento di OS/Xcode).
+[Analisi](implementation/F14.4-VALIDATION-NONDETERMINISM-2026-11-12.md).
+F14.5 non è attivato.
 [Chiusura per ID](implementation/F13-F14-CLOSURE-2026-11-12.md).
 
 ---

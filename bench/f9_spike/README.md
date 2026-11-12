@@ -150,3 +150,25 @@ mips (texels within 2/255 of the cutoff reported as ambiguous), analytic
 holes, explicit LOD 2, function-invocation counts (0 on opaque geometry),
 shadow leaks through opaque occluders.  LOD study (CPU): raster-like
 derivative LOD vs LOD 0 vs ray-cone LOD.
+
+## F14-K2 — engine DI shading kernel under shader validation (`F14-K2`, `s8_engine_di.cpp`)
+
+Runs the engine's brute-force DI kernel `light_cluster_shade_rt` (compiled
+from `shaders/light_cluster.metal`) on synthetic engine-shaped inputs, eight
+frames × twelve repeats on identical inputs, and counts repeats that differ
+bit for bit from the first.  Without shader validation it must report 0.
+With `MTL_SHADER_VALIDATION=1` it reports the Metal memory-access
+instrumentation defect behind the F14.4 validation nondeterminism
+([analysis](../../docs/implementation/F14.4-VALIDATION-NONDETERMINISM-2026-11-12.md)).
+Rerun it after OS/Xcode updates.
+
+    MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 build/release/f9_spike --only F14-K2
+    F14_KERNEL=k_cfg F14_CFG=8 MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 build/release/f9_spike --only F14-K2
+
+`F14_KERNEL=k_cfg` selects a copy of the kernel with one function-constant
+bit per construct (`F14_CFG`: 1 textured sample, 2 BRDF, 4 noise, 8 error
+atomics, 16 texture output, 32 engine endpoint ray, 64 zero-contribution
+short cut, 128 pdf); `F14_CFG=8` is the smallest diverging configuration.
+`F14_GROUP` overrides the threadgroup width (engine: 8), `F14_NO_FAST_MATH=1`
+compiles without fast math, and `F14_DUMP=1` prints the first differing
+threads.
