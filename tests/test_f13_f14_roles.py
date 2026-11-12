@@ -27,6 +27,18 @@ class Roles(unittest.TestCase):
         self.assertEqual(self.cases["mirror-ssr"]["reference_role"], "control")
         self.assertEqual(self.cases["ao-cavity-gtao"]["reference_role"], "independent-clip")
 
+    def test_rough_emitter_cases_gate_on_the_clip(self):
+        for name in ("rough-emitter-custom", "rough-emitter-ssr-custom"):
+            case = self.cases[name]
+            self.assertEqual(case["reference_role"], "independent-clip", name)
+            self.assertEqual([r["name"] for r in case["roi"]["rois"]], ["floor-r0.3", "floor-r0.5"])
+            self.assertTrue(all(r["scale"] == 2.0 and r["ghost_metric"] == "error-change" and not r["require_change"]
+                                for r in case["roi"]["rois"]))
+        # Cloud ROIs keep requiring a reference change.
+        self.assertTrue(all(r["require_change"] for r in self.cases["clouds-backlit-reconstructed"]["roi"]["rois"]))
+        self.assertIn("ssr", self.cases["rough-emitter-ssr-custom"]["flags"])
+        self.assertEqual(self.cases["rough-emitter-raw"]["reference_role"], "control")
+
     def test_ghost_definition_per_phase(self):
         self.assertEqual(self.cases["moving-light-custom"]["roi"]["rois"][0]["ghost_metric"], "error-change")
         for name in ("clouds-reconstructed", "clouds-flight-top-reconstructed", "fog-moving-light", "fog-disocclusion"):

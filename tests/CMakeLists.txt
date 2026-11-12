@@ -73,6 +73,7 @@ add_executable(phosphor_tests
     test_tlsf.cpp
     test_transform_math.cpp
     test_temporal.cpp
+    test_emission_pack.cpp
     test_visibility_math.cpp
     test_worker_pool.cpp
 )

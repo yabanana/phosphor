@@ -81,7 +81,7 @@ def state(scene, base, frame):
         emission = [0.0, 0.0, 0.0] if step == 1 else [0.2, 0.5, 8.0] if step == 2 else [8.0, 0.4, 0.2]
         data["materials"][PANEL_MATERIAL]["emissive"] = emission
         data["lights"][0]["intensity"] = 6.0 if step == 1 else 12.0
-    elif scene not in ("mirror", "roughness"):  # static fixtures: the base state for every frame
+    elif scene not in ("mirror", "roughness", "rough-emitter"):  # static fixtures: the base state for every frame
         raise ValueError(f"no script for fixture {scene}")
     return data
 

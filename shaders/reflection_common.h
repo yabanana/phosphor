@@ -4,6 +4,7 @@
 #include "surface_geometry.h"
 #include "renderer/reflection_probe_storage.h"
 #include "reflection_reduce.h"
+#include "renderer/emission_pack.h"
 constexpr sampler kReflectionProbeSampler(filter::linear,mip_filter::linear,address::clamp_to_edge);
 inline float4x4 reflectionMatrix(constant float* m){return float4x4(float4(m[0],m[1],m[2],m[3]),float4(m[4],m[5],m[6],m[7]),float4(m[8],m[9],m[10],m[11]),float4(m[12],m[13],m[14],m[15]));}
 inline float3 reflectionConstantVec(constant float* p){return float3(p[0],p[1],p[2]);}
@@ -92,7 +93,10 @@ inline GPUSpecularSample reflectionFallback(GPUDISurface surface,ReflectionDirec
     const auto hit=reflectionSSR(diVec(surface.position),direction.direction,p,depth,surface.roughness);
     if(hit.valid&&surfaces[hit.pixel].valid){const GPUDISurface secondary=surfaces[hit.pixel];out.path=REFLECTION_PATH_SSR;out.hitDistance=hit.distance;
         out.secondarySlot=secondary.instanceSlot;out.secondaryGeneration=secondary.instanceGeneration;
-        if((p.flags&REFLECTION_ENABLE_CACHE)&&giCacheLookup(hit.point,diVec(secondary.geometricNormal),-direction.direction,gi,cache,L))out.path=REFLECTION_PATH_CACHE;
+        // The SSR source already omits the DI-owned emission (pre-compose);
+        // the cached outgoing radiance includes it, so remove it here.
+        if((p.flags&REFLECTION_ENABLE_CACHE)&&giCacheLookup(hit.point,diVec(secondary.geometricNormal),-direction.direction,gi,cache,L)){out.path=REFLECTION_PATH_CACHE;
+            if(p.flags&REFLECTION_EXCLUDE_DI_EMISSION)L=max(L-unpackEmission3(secondary.pad[1]),0.0f);}
         else L=baseRadiance.read(uint2(hit.pixel%p.width,hit.pixel/p.width)).rgb;
     }else L=reflectionProbeRadiance(diVec(surface.position),direction.direction,surface.roughness,false,p,probes,probeAtlas,out.path);
     float3 result=L*direction.weight;if(!all(isfinite(L))||any(L<0)||!all(isfinite(result))||any(result<0)){out.flags|=SPECULAR_SAMPLE_ERROR;result=0;}

@@ -36,6 +36,7 @@ struct ShadingResult {
     float metallic;
     float occlusion;
     float alpha;
+    float3 emission; // the emissive term already included in color (F13.1)
 };
 
 // --- BRDF --------------------------------------------------------------------
@@ -260,9 +261,11 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     if(!externalDiffuse)color += (useGI ? indirectIrradiance * baseColor.rgb * (1.0f - metallic) / M_PI_F * (physicalGI?1.0f:occlusion) : ambientDiffuse * occlusion);
     if(!omitSpecularAmbient)color += ambientSpecular * occlusion;
 
-    color += float3(m.emissive[0], m.emissive[1], m.emissive[2]) * float3(emTex.rgb);
+    const float3 emission = float3(m.emissive[0], m.emissive[1], m.emissive[2]) * float3(emTex.rgb);
+    color += emission;
 
     out.color = color;
+    out.emission = emission;
     out.normal = N;
     out.baseColor = baseColor.rgb;
     out.diffuseAlbedo = baseColor.rgb * (1.0f - metallic);

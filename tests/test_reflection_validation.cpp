@@ -67,6 +67,24 @@ TEST_CASE("F13 emissive step and camera cut are tracked and deterministic") {
     REQUIRE(camera.scriptedCamera(4.1,p,t,cut));CHECK_FALSE(cut);
 }
 
+TEST_CASE("F13.1 rough-emitter fixture: rough conductors facing a visible emitter, no sun") {
+    ECS ecs;GpuScene scene;test::NullTextureManager textures;ReflectionValidation f{"rough-emitter"};f.setup(ecs,scene,textures);
+    const auto e=f.emissivePanel();REQUIRE(e!=INVALID_ENTITY);
+    const auto& m=std::as_const(ecs).getComponent<MaterialComponent>(e);
+    CHECK(m.emissiveFactor==glm::vec3(2.5f));CHECK(m.baseColorFactor==glm::vec4(0,0,0,1));CHECK_FALSE(m.doubleSided);
+    const auto& panel=std::as_const(ecs).getComponent<TransformComponent>(e);const auto camera=f.getDefaultCamera();
+    // The emitting side (+Y rotated about X) faces the camera, in front of it.
+    const glm::vec3 normal=panel.rotation*glm::vec3(0,1,0);
+    CHECK(glm::dot(normal,camera.position-panel.position)>0);CHECK(panel.position.z<camera.position.z);
+    std::vector<float> roughness;
+    for(auto id:f.entities())if(id!=e&&ecs.hasComponent<MeshInstanceComponent>(id)){
+        const auto& floor=std::as_const(ecs).getComponent<MaterialComponent>(id);
+        CHECK(floor.metallicFactor==1);CHECK(floor.emissiveFactor==glm::vec3(0));roughness.push_back(floor.roughnessFactor);}
+    std::sort(roughness.begin(),roughness.end());CHECK(roughness==std::vector<float>{0.3f,0.5f});
+    FrameScene frame;extractFrameScene(ecs,scene,frame);REQUIRE(frame.instances.size()==3);
+    for(const auto& light:frame.lights)CHECK(light.intensity==0);
+    f.teardown(ecs,scene);
+}
 TEST_CASE("Opaque wide-emission fixture has an independent constant-radiance reference") {
     ECS ecs;GpuScene scene;test::NullTextureManager textures;ReflectionValidation f{"wide-emission"};f.setup(ecs,scene,textures);
     const auto e=f.emissivePanel();REQUIRE(e!=INVALID_ENTITY);

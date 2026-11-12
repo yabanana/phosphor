@@ -1,4 +1,5 @@
 #include "material_shading.h"
+#include "renderer/emission_pack.h"
 #include "temporal_motion.h"
 #include "renderer/visibility_math.h"
 #include "renderer/visibility_layout.h"
@@ -441,6 +442,7 @@ kernel void material_lighting_guides(
     }
     guide.depth=geometric.viewDepth;guide.roughness=value.roughness;guide.metallic=value.metallic;
     guide.materialRevision=di.historyEpoch;guide.instanceSlot=candidate.slot;guide.instanceGeneration=instance.generation;guide.valid=1;guide.pad[0]=as_type<uint>(value.occlusion);
+    guide.pad[1]=packEmission(value.emission.x,value.emission.y,value.emission.z);
     output[index]=guide;
     const float3 objectPoint=float3(v0.px,v0.py,v0.pz)*weights.x+float3(v1.px,v1.py,v1.pz)*weights.y+float3(v2.px,v2.py,v2.pz)*weights.z;
     const device GPUInstance& old=previousInstances[candidate.slot];

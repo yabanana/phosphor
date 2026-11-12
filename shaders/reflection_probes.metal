@@ -43,7 +43,8 @@ fragment float4 reflection_probe_capture_fs(ProbeVertexOut in [[stage_in]],bool 
     for(uint i=0;i<p.sampledLightCount;++i)for(uint y=0;y<4;++y)for(uint x=0;x<4;++x){DISample sample=diSampleTexturedLight(sampled[i],i,(float2(x,y)+.5f)/4.0f,in.world,emitters,materials,textures);
         if(sample.valid&&sample.pdfArea>0)result+=diBRDF(s,sample)/(16*sample.pdfArea);}
     float3 emission=float3(m.emissive[0],m.emissive[1],m.emissive[2]);if(m.emissiveTex!=INVALID_TEXTURE_INDEX)emission*=float3(half3(textures[m.emissiveTex].tex.sample(kGiMaterialSampler,in.uv,gradient2d(dx,dy)).rgb));
-    result+=emission+reflectionConstantVec(p.environment)*base*(1-s.metallic);
+    if(!(p.storageFlags&REFLECTION_EXCLUDE_DI_EMISSION))result+=emission; // F13.1: DI owns it
+    result+=reflectionConstantVec(p.environment)*base*(1-s.metallic);
     // Validate the TOTAL physical sum before the attachment's narrowing store.
     // Negative alpha survives black repair and disables GPU probe publication.
     const bool finite=reflectionProbeStorageAccepts(result.x,result.y,result.z,p.storageFlags);

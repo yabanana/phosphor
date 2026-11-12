@@ -40,11 +40,11 @@ inline float3 reflectionSecondary(GPURtHit hit,float3 direction,
     const device DITextureHandle* textures,const device GPULight* lights,const device GPUSampledLight* sampled,
     const device GPUEmissiveSurface* emitters,constant GPUProbeGridParams& gi,const device GPUProbeState* states,
     constant GPUProbeTraceExtra& extra,texture2d<float> irradiance,texture2d<float> moments,thread uint& seed,thread bool& numericError,
-    float minRoughness=0.0f){
+    float minRoughness=0.0f,bool includeEmission=true){
     float3 point,normal,emission;GPUDISurface surface;
     if(!rtSurface(hit,instances,meshes,vertices,indices,p.slotCount,p.meshCount,point,normal)||
         !reflectionMaterial(hit,point,normal,-direction,p,instances,meshes,vertices,indices,materials,textures,surface,emission,numericError))return 0;
-    float3 result=max(emission,0.0f);const float3 n=diVec(surface.shadingNormal),geometric=diVec(surface.geometricNormal);
+    float3 result=includeEmission?max(emission,0.0f):float3(0);const float3 n=diVec(surface.shadingNormal),geometric=diVec(surface.geometricNormal);
     // Path regularisation (declared in the F13 reference): the light connection
     // at the vertex after a sampled specular lobe uses at least that lobe's
     // roughness, alpha = max(alpha_secondary, alpha_camera). It bounds the
@@ -132,7 +132,8 @@ kernel void reflection_capture_rt(constant GPUReflectionParams& p [[buffer(0)]],
     const float4 near=reflectionMatrix(p.inverseViewProjection)*float4(ndc,1,1);const float3 origin=reflectionConstantVec(p.cameraPosition),direction=normalize(near.xyz/near.w-origin);
     GPURtRay ray{};ray.ox=origin.x;ray.oy=origin.y;ray.oz=origin.z;ray.dx=direction.x;ray.dy=direction.y;ray.dz=direction.z;ray.tmax=p.maxDistance;ray.mask=RT_MASK_INDIRECT;ray.type=RT_PROBE_DIFFUSE;
     RtPayload payload{};const auto hit=rtTraceSurface(ray,as,ift,instances,p.slotCount,payload,meshes,vertices,indices,p.meshCount);uint seed=giHash(tid^p.seed);bool numericError=false;const float3 L=hit.hit?
-        reflectionSecondary(hit,direction,as,ift,p,instances,meshes,vertices,indices,materials,textures,lights,sampled,emitters,gi,states,extra,irradiance,moments,seed,numericError):reflectionConstantVec(p.environment);
+        reflectionSecondary(hit,direction,as,ift,p,instances,meshes,vertices,indices,materials,textures,lights,sampled,emitters,gi,states,extra,irradiance,moments,seed,numericError,
+            0.0f,!(p.flags&REFLECTION_EXCLUDE_DI_EMISSION)):reflectionConstantVec(p.environment);
     const bool valid=!numericError&&reflectionProbeStorageAccepts(L.x,L.y,L.z,p.flags);
     output.write(float4(valid?L:float3(0),valid?1.0f:-1.0f),pixel);
 }

@@ -160,16 +160,27 @@ def make_cases(out,frames,sdk_policy,probe_dir=None):
         [*no_rt,"--reflections","probes","--ao","off","--lighting-denoise","off","--reflection-capture-probe"],probe_capture=True,
         expected={"reflections":"probes","ao":"off","denoise_requested":"off","denoise_effective":"off",
                   "probe_source":"actual-static-raster-unshadowed"})
-    for scene in ("mirror","roughness","moving-light","disocclusion"):
+    # F13.1 rough-emitter ROIs: the panel's glossy reflection on each floor
+    # strip (roughness 0.3 left, 0.5 right; the seam at x=0 projects to the
+    # image centre), placed from the fixture geometry before any error was
+    # read. Scale 2.0 = the conductor bound F0*Le = 0.9*2.5 = 2.25, rounded down.
+    # The fixture is static, like mirror and roughness: no change to require.
+    emitter_rois={"rois":[("floor-r0.3",(0.38,0.60,0.49,0.97)),("floor-r0.5",(0.51,0.60,0.64,0.97))],"roi_scale":2.0,"roi_require_change":False}
+    for scene in ("mirror","roughness","moving-light","disocclusion","rough-emitter"):
         for variant,denoise,samples in (("raw","off",1),("custom","custom",1),("rt8-control","off",8)):
             name=f"{scene}-{variant}"
             add(name,"F13",scene,[*base_rt,"--reflections","rt","--reflection-samples",str(samples),
                 "--ao","off","--lighting-denoise",denoise],
                 expected={"reflections":"rt","ao":"off","denoise_requested":denoise,"denoise_effective":denoise},
                 quality_pair=scene+"-rt8-control" if variant=="custom" else None,
-                reference_kind="HIGHER_SAMPLE_CONTROL_NOT_INDEPENDENT_OR_CONVERGED" if variant=="rt8-control" else None)
+                reference_kind="HIGHER_SAMPLE_CONTROL_NOT_INDEPENDENT_OR_CONVERGED" if variant=="rt8-control" else None,
+                **(emitter_rois if scene=="rough-emitter" else {}))
     add("mirror-ssr","F13","mirror",[ *no_rt,"--reflections","ssr","--ao","off","--lighting-denoise","custom"],
         expected={"reflections":"ssr","ao":"off","denoise_requested":"custom","denoise_effective":"custom"})
+    # F13.1 single count with screen-space reflections: DI owns the whole
+    # emitter specular lobe, so the SSR fallback must not see the emission.
+    add("rough-emitter-ssr-custom","F13","rough-emitter",[*base_rt,"--reflections","ssr","--ao","off","--lighting-denoise","custom"],
+        expected={"reflections":"ssr","ao":"off","denoise_requested":"custom","denoise_effective":"custom"},**emitter_rois)
     add("probe-parallax-cooked","F13","probe-parallax",[ *no_rt,"--reflections","probes","--ao","off","--lighting-denoise","custom",
          "--reflection-probe",str(probe_dir or out/"EXTERNAL-COOKED-PROBE-REQUIRED")],needs_probe=True,
         probe_input=str(probe_dir) if probe_dir else None,
@@ -360,8 +371,8 @@ def make_cases(out,frames,sdk_policy,probe_dir=None):
         case["roi"]=default_roi(case["scene"],frames)
         if case.get("extra_events"):case["roi"]["events"]=sorted(case["roi"]["events"]+case["extra_events"],key=lambda e:e["frame"])
         if case.get("rois"):
-            case["roi"]["rois"]=[{"name":name,"normalized":list(region),"scale":1.0,"require_change":True,"thresholds":dict(THRESHOLDS)}
-                                 for name,region in case["rois"]]
+            case["roi"]["rois"]=[{"name":name,"normalized":list(region),"scale":1.0,"require_change":case.get("roi_require_change",True),
+                                  "thresholds":dict(THRESHOLDS)} for name,region in case["rois"]]
         # Owner decisions D4 (2026-11-11, F13) and D6 (2026-11-12, F14): image
         # and volume cases gate the ghost on the clip-level change of the error.
         # The F8 support ghost reads a static bias times a monotone trend as lag.

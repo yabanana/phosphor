@@ -217,6 +217,9 @@ struct ReflectionPasses::Impl {
         if(options.reflectionScene=="specular-environment")params.flags=0;
         if(rtReflection)params.flags|=REFLECTION_ENABLE_RT;if(gi&&options.gi!=GiMode::Off)params.flags|=REFLECTION_ENABLE_GI|REFLECTION_ENABLE_CACHE;
         if(options.reflectionSamples==1)params.flags|=REFLECTION_SINGLE_SAMPLE;
+        // F13.1: non-legacy DI integrates every geometry emitter's specular
+        // lobe that RT reflections do not own (all of it outside the RT band).
+        if(options.directLighting!=DirectLightingMode::Legacy)params.flags|=REFLECTION_EXCLUDE_DI_EMISSION;
         paramsAddress=lighting::upload(c,params);probeAddress=lighting::upload(c,probe);
         for(u32 i=0;i<options.reflectionSamples;++i){auto sample=params;sample.seed=options.lightingSeed+i*0x9e3779b9u;sampleAddress[i]=lighting::upload(c,sample);}
         aoParams={};std::memcpy(aoParams.viewProjection,params.viewProjection,64);std::memcpy(aoParams.inverseViewProjection,params.inverseViewProjection,64);
@@ -228,14 +231,15 @@ struct ReflectionPasses::Impl {
         if(gi&&options.gi!=GiMode::Off)composeParams.flags|=REFLECT_COMPOSE_GI;if(custom)composeParams.flags|=REFLECT_COMPOSE_CUSTOM;
         if(options.directLighting!=DirectLightingMode::Legacy)composeParams.flags|=REFLECT_COMPOSE_DI;
         if(options.reflections!=ReflectionMode::Off)composeParams.flags|=REFLECT_COMPOSE_SPEC;if(options.ao!=AoMode::Off)composeParams.flags|=REFLECT_COMPOSE_AO;composeParams.pad[0]=0;composeAddress=lighting::upload(c,composeParams);
-        preComposeParams=composeParams;preComposeParams.flags&=REFLECT_COMPOSE_DI|REFLECT_COMPOSE_GI;preComposeAddress=lighting::upload(c,preComposeParams);
+        preComposeParams=composeParams;preComposeParams.flags&=REFLECT_COMPOSE_DI|REFLECT_COMPOSE_GI;
+        if(preComposeParams.flags&REFLECT_COMPOSE_DI)preComposeParams.flags|=REFLECT_COMPOSE_EXCLUDE_EMISSION;preComposeAddress=lighting::upload(c,preComposeParams);
         GPUProbeGridParams dummy{};dummy.reset=1;giDummyAddress=lighting::upload(c,dummy);GPUProbeTraceExtra extra{};extra.sampledLightCount=direct.lightCount();extra.frameSeed=options.lightingSeed;extra.sunAngularRadius=.00465f;extraDummyAddress=lighting::upload(c,extra);
         for(u32 face=0;face<6;++face){const auto vp=reflectionProbeViewProjection(probe,face,.05f,settings.maxDistance),inv=glm::inverse(vp);auto capture=params;
             std::memcpy(capture.viewProjection,glm::value_ptr(vp),64);std::memcpy(capture.inverseViewProjection,glm::value_ptr(inv),64);for(u32 k=0;k<3;++k)capture.cameraPosition[k]=probe.capturePosition[k];capture.width=capture.height=ProbeSide;
             if(probeFormat==MTL::PixelFormatRGBA16Float)capture.flags|=REFLECTION_CAPTURE_HALF;
             captureAddress[face]=lighting::upload(c,capture);
             GPUProbeCaptureParams raster{};std::memcpy(raster.viewProjection,glm::value_ptr(vp),64);for(u32 k=0;k<3;++k){raster.capturePosition[k]=probe.capturePosition[k];raster.environment[k]=params.environment[k];}
-            raster.slotCount=store.slotCapacity();raster.materialCount=u32(store.materials().size());raster.lightCount=f.constants.lightCount;raster.sampledLightCount=direct.lightCount();raster.storageFlags=probeFormat==MTL::PixelFormatRGBA16Float?REFLECTION_CAPTURE_HALF:0u;rasterCaptureAddress[face]=lighting::upload(c,raster);}
+            raster.slotCount=store.slotCapacity();raster.materialCount=u32(store.materials().size());raster.lightCount=f.constants.lightCount;raster.sampledLightCount=direct.lightCount();raster.storageFlags=(probeFormat==MTL::PixelFormatRGBA16Float?REFLECTION_CAPTURE_HALF:0u)|(params.flags&REFLECTION_EXCLUDE_DI_EMISSION);rasterCaptureAddress[face]=lighting::upload(c,raster);}
         for(u32 mip=0;mip<ProbeMips;++mip){GPUProbeFilterParams filter{std::max(1u,ProbeSide>>mip),mip,128,0,float(mip)/float(ProbeMips-1),float(ProbeSide),probeFormat==MTL::PixelFormatRGBA16Float?REFLECTION_CAPTURE_HALF:0u,0};
             filterAddress[mip]=lighting::upload(c,filter);validateAddress[mip]=filterAddress[mip];}GPUProbeFilterParams rawCheck{ProbeSide,~0u,0,0,0,float(ProbeSide),probeFormat==MTL::PixelFormatRGBA16Float?REFLECTION_CAPTURE_HALF:0u,u32(options.debugLighting!=0)};rawValidateAddress=lighting::upload(c,rawCheck);
         if(rtReflection)reflectionConsumer->prepare(frame.slot,reflectionRT);if(rtAO)aoConsumer->prepare(frame.slot,rtao);if(rtCapture&&probeNeedsCapture)captureConsumer->prepare(frame.slot,captureRT);
@@ -327,7 +331,8 @@ struct ReflectionPasses::Impl {
         const auto hdrDescriptor=graph.resources().at(residual.resource).texture;
         if(hdrDescriptor.format!=Format::RGBA16Float&&hdrDescriptor.format!=Format::RGBA32Float)throw std::invalid_argument("F13 base must be linear floating HDR");
         outputHalf=false;composeParams.pad[0]=0;composeAddress=lighting::upload(c,composeParams);
-        preComposeParams=composeParams;preComposeParams.flags&=REFLECT_COMPOSE_DI|REFLECT_COMPOSE_GI;preComposeAddress=lighting::upload(c,preComposeParams);
+        preComposeParams=composeParams;preComposeParams.flags&=REFLECT_COMPOSE_DI|REFLECT_COMPOSE_GI;
+        if(preComposeParams.flags&REFLECT_COMPOSE_DI)preComposeParams.flags|=REFLECT_COMPOSE_EXCLUDE_EMISSION;preComposeAddress=lighting::upload(c,preComposeParams);
         errorsRef=graph.importBuffer("F13 completed signal error words",{64},ImportPerFrame|ImportOutput);
         dummyRef=graph.importBuffer("F13 disabled GI safe buffer",{dummyBuffer->length()},ImportContentsDefined);
         dummyTexRef=graph.importTexture("F13 disabled GI zero texture",{Format::RGBA32Float,1,1},ImportContentsDefined);

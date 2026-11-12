@@ -641,6 +641,8 @@ struct GPUDISurface {
     u32 materialRevision;
     float viewDirection[3];
     u32 instanceSlot;
+    // pad[0]: material occlusion (float bits); pad[1]: resolve emission
+    // packed by renderer/emission_pack.h (F13.1), 0 where no guide carries it.
     u32 instanceGeneration, valid, pad[2];
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUDISurface) == 96, "GPUDISurface layout");
@@ -764,6 +766,10 @@ PHOSPHOR_GPU_CONSTANT u32 REFLECTION_ENABLE_PROBES = 8u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_ENABLE_GI = 16u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_CAPTURE_HALF = 32u; // reject total radiance outside HALF before conversion
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_SINGLE_SAMPLE = 64u; // one sample: the kernel stores the reduced record, signal and distance
+// F13.1 single count: primary DI integrates the specular lobe of every
+// geometry emitter on the fallback paths, so the radiance cache and probe
+// captures leave the emission out (RT rays keep it: their share is 1 - DI's).
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_EXCLUDE_DI_EMISSION = 128u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_NONE = 0u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_RT = 1u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_SSR = 2u;
@@ -1018,6 +1024,8 @@ PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_CUSTOM = 2u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_DI = 4u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_SPEC = 8u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_AO = 16u;
+// SSR source only: remove the receiver's packed emission (F13.1 single count).
+PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_EXCLUDE_EMISSION = 32u;
 struct GPUReflectionReduceParams {u32 width,height,samples,stridePixels;};
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionReduceParams)==16,"GPUReflectionReduceParams layout");
 struct GPUReflectionComposeParams {u32 width,height,backingWidth,backingHeight;u32 flags,pad[3];float environment[3];u32 pad2;};

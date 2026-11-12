@@ -12,7 +12,7 @@
 
 namespace phosphor {
 namespace {
-constexpr std::array<std::string_view,10> names{"mirror","roughness","ao-cavity","probe-parallax","moving-light","disocclusion","wide-emission","ao-temporal-wall","specular-environment","fog-depths"};
+constexpr std::array<std::string_view,11> names{"mirror","roughness","ao-cavity","probe-parallax","moving-light","disocclusion","wide-emission","ao-temporal-wall","specular-environment","fog-depths","rough-emitter"};
 constexpr float pi=3.14159265358979323846f;
 const glm::quat identity(1,0,0,0);
 glm::quat sunRotation(glm::vec3 towardSun) {
@@ -98,6 +98,21 @@ void ReflectionValidation::setup(ECS& ecs,GpuScene& scene,TextureManager& textur
         ecs.addComponent(sun_,std::move(sunPose));
         LightComponent sunLight;sunLight.type=LightType::Directional;sunLight.intensity=12;sunLight.color={1,1,1};
         ecs.addComponent(sun_,std::move(sunLight));
+        time_=0;lightStep_=0;cameraSegment_=~0u;return;
+    }
+    if(scenario_=="rough-emitter") {
+        // F13.1 single count: an on-screen emitter seen by rough conductors.
+        // Two metal floor strips (roughness 0.3: mixed RT/fallback band, 0.5:
+        // fallback only) reflect an upright black-body panel that faces the
+        // camera, so screen-space rays reach it. No sun: the panel is the only
+        // light besides the declared environment.
+        mesh(ecs,plane_,{-3,0,0},{6,1,12},identity,{0.9f,0.9f,0.9f},1,0.3f);
+        mesh(ecs,plane_,{3,0,0},{6,1,12},identity,{0.9f,0.9f,0.9f},1,0.5f);
+        panel_=mesh(ecs,plane_,{0,0.9f,-1.5f},{3.2f,1,0.9f},glm::angleAxis(pi*.5f,glm::vec3(1,0,0)),{0,0,0},0,1,{2.5f,2.5f,2.5f});
+        sun_=ecs.createEntity();entities_.push_back(sun_);
+        TransformComponent sunPose;sunPose.rotation=sunRotation({-0.35f,0.85f,0.4f});sunPose.updateMatrix();
+        ecs.addComponent(sun_,std::move(sunPose));
+        LightComponent light;light.type=LightType::Directional;light.intensity=0;ecs.addComponent(sun_,std::move(light));
         time_=0;lightStep_=0;cameraSegment_=~0u;return;
     }
     mesh(ecs,plane_,{0,0,0},{12,1,12},identity,{0.65f,0.65f,0.65f},0,0.8f);
