@@ -2,8 +2,11 @@
 
 Current follow-up: [F13/F14 closure, 2026-11-12](implementation/F13-F14-CLOSURE-2026-11-12.md): F13.1–F13.6 and F14.1–F14.3 accepted for development on M5, F14.4 open (validation nondeterminism), budget met on a quiet machine (GPU p95 15.98–16.03 ms). Earlier: [dynamic Sponza, 2026-11-05](implementation/F13-F14-DYNAMIC-SPONZA-2026-11-05.md). Moving-camera depth rejection is corrected; exact-math denoise cost reductions and actual camera/cut/history witnesses are verified. Native HDR, the 60fps budget and independent dynamic lighting qualification remain open. Current-runtime F9 failures reproduced on the unmodified baseline are retained. The [2026-10-08 qualification](implementation/F13-QUALIFICATION-2026-10-08.md) corrected the earlier static specular-noise defect.
 
-The renderer implementations and diagnostic tools are integrated in
-`codex/lighting-integration`, on top of F9/PR18. This is an **experimental
+The renderer implementations and diagnostic tools landed on `main` in
+[PR #19](https://github.com/yabanana/phosphor/pull/19), on top of F9/PR18.
+Use the [renderer reference](RENDERER.md) for current commands and the
+[budget follow-up](implementation/F13-F14-BUDGET-CLOSURE-2026-10-08.md) for
+the subsequent scope and measurements. This is an **experimental
 development baseline**, not completion of every phase exit criterion.
 The owner stop remains F14: no F15 or new OPT implementation is activated.
 

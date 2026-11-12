@@ -1,5 +1,8 @@
 # Phosphor — Roadmap implementativa 2026–2027 (e oltre)
 
+Per lo stato pubblico del renderer, i comandi e le verifiche riproducibili,
+vedi il [riferimento del renderer](RENDERER.md) e il [devlog Metal 4](devlog/2026-11-11-metal4.md).
+
 Piano operativo per portare Phosphor dalle fondamenta Metal 4 (F0, completata)
 a un **engine AAA nativo per Apple Silicon, bleeding edge e ottimizzato fino
 all'ultimo byte di banda**, con editor, runtime/ECS, contenuti della comunità,
