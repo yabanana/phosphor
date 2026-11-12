@@ -1,4 +1,5 @@
 #include "reflection_common.h"
+#include "renderer/dfg_table.h"
 
 // Actual base-compatible STATIC scene capture. Host draws the full selected
 // static instance list for EACH face with a depth attachment; no camera cull
@@ -79,8 +80,9 @@ kernel void reflection_probe_only(constant GPUReflectionParams& p [[buffer(0)]],
     if(tid>=p.width*p.height)return;const GPUDISurface s=surfaces[tid];GPUSpecularSample sample=reflectionEmpty();float3 result=0;
     if(s.valid){const float3 n=normalize(diVec(s.shadingNormal)),v=normalize(diVec(s.viewDirection)),r=reflect(-v,n);uint path;
         const float3 L=reflectionProbeRadiance(diVec(s.position),r,s.roughness,true,p,probes,atlas,path),f0=mix(float3(.04f),diVec(s.albedo),s.metallic);
-        const float4 c0(-1,-.0275f,-.572f,.022f),c1(1,.0425f,1.04f,-.04f),fit=s.roughness*c0+c1;
-        const float a004=min(fit.x*fit.x,exp2(-9.28f*max(0.0f,dot(n,v))))*fit.x+fit.y;const float2 ab=float2(-1.04f,1.04f)*a004+fit.zw;
+        // F13.5: tabulated split-sum DFG of the engine BRDF (tools/dfg_table.py);
+        // the former analytic mobile fit was 14% low at roughness 0.3-0.6.
+        const float nv=max(0.0f,dot(n,v));const float2 ab(dfgTableLookup(nv,s.roughness,0u),dfgTableLookup(nv,s.roughness,1u));
         // The analytic fit can leave the physical [0,1] BRDF-integral domain
         // (roughness=1 gives B=-.0024 for black metal). Bound ONLY the finite
         // approximation weight, never radiance or invalid numerical input.

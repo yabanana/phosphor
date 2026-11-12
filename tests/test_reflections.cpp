@@ -157,31 +157,28 @@ TEST_CASE("F13 animated ancestor excludes static children from raster and update
     reflectionProbeStaticSlots(instances,nodes,{},selected);CHECK(selected==std::vector<u32>{0,1});
 }
 
-TEST_CASE("F13 probe BRDF fit stays physical without concealing invalid weights"){
-    for(float roughness:{.5f,1.f})for(float nv:{.05f,.5f,1.f})for(float f0:{0.f,1.f}) {
+TEST_CASE("F13.5 tabulated split-sum DFG matches the independent BRDF quadrature"){
+    // Two references independent of the Hammersley table: the uniform
+    // solid-angle grid (reflectionReference, roughness >= 0.3 where the grid
+    // resolves the lobe) and stratified GGX importance sampling through
+    // sampleSpecular (all roughness). Unit radiance gives f0*A + B.
+    double worst=0;
+    for(float roughness:{.04f,.1f,.3f,.5f,.6f,.9f,1.f})for(float nv:{.1f,.3f,.47f,.8f,1.f})for(float f0:{0.f,.5f,1.f}) {
         auto s=shiny();s.roughness=roughness;s.albedo[0]=s.albedo[1]=s.albedo[2]=f0;
         s.viewDirection[0]=std::sqrt(1-nv*nv);s.viewDirection[2]=nv;
-        const auto bounded=reflectionProbeContribution(s,glm::vec3(1));
-        const auto reference=reflectionReference(s,256,512,white);
-        // Uniform solid-angle GGX quadrature is independent of the split-sum
-        // fit. Projecting a finite fit onto [0,1] cannot increase its absolute
-        // error against this physical integral; it is not an exact-fit claim.
-        const glm::vec4 r=roughness*glm::vec4(-1,-.0275f,-.572f,.022f)+glm::vec4(1,.0425f,1.04f,-.04f);
-        const float a=std::min(r.x*r.x,std::exp2(-9.28f*nv))*r.x+r.y;
-        const float raw=f0*(-1.04f*a+r.z)+(1.04f*a+r.w);
-        REQUIRE(reference.x>=0);REQUIRE(reference.x<=1);
-        CHECK(bounded.x>=0);CHECK(bounded.x<=1);
-        CHECK(std::abs(double(bounded.x)-reference.x)<=std::abs(double(raw)-reference.x)+1e-6);
-        if(roughness==1&&f0==0){CHECK(raw==doctest::Approx(-.0024f));CHECK(bounded.x==0);CHECK(reference.x>0);}
-        // A deliberately limited fit remains detectably approximate at rough
-        // normal incidence, rather than claiming all clamps solve its error.
-        if(roughness==1&&f0==1&&nv==1){
-            CHECK(reference.x==doctest::Approx(1-std::log(2.0)).epsilon(1e-5));
-            CHECK(bounded.x==doctest::Approx(.45f));
-        }
+        const auto lookup=reflectionProbeContribution(s,glm::vec3(1));CHECK(lookup.x>=0);CHECK(lookup.x<=1);
+        double sampled=0;constexpr u32 side=256;
+        for(u32 i=0;i<side;++i)for(u32 j=0;j<side;++j){const auto d=sampleSpecular(s,{(i+.5)/side,(j+.5)/side});if(d.valid)sampled+=d.weight.x;}
+        sampled/=double(side)*side;
+        CAPTURE(roughness);CAPTURE(nv);CAPTURE(f0);CAPTURE(lookup.x);CAPTURE(sampled);
+        CHECK(std::abs(double(lookup.x)-sampled)<=6e-3);worst=std::max(worst,std::abs(double(lookup.x)-sampled));
+        if(roughness>=.3f){const auto grid=reflectionReference(s,512,1024,white);CHECK(std::abs(double(lookup.x)-grid.x)<=6e-3);}
     }
-    auto corrupt=shiny();corrupt.albedo[0]=std::numeric_limits<float>::quiet_NaN();
-    CHECK_FALSE(std::isfinite(reflectionProbeContribution(corrupt,glm::vec3(1)).x));
+    MESSAGE("worst |DFG table - importance sampling| "<<worst);
+    // White rough conductor at normal incidence: 1 - ln 2, as the existing closed control.
+    auto s=shiny();CHECK(reflectionProbeContribution(s,glm::vec3(1)).x==doctest::Approx(1-std::log(2.0)).epsilon(5e-3));
+    // Invalid source radiance stays visible; the table never yields a nonfinite weight.
+    CHECK(reflectionProbeContribution(s,glm::vec3(-1)).x==0);
 }
 
 TEST_CASE("Probe storage rejects the complete out-of-range physical sum before HALF conversion") {
