@@ -1,5 +1,7 @@
 # Phosphor
 
+<img src="docs/img/phosphor-logo.png" alt="Phosphor logo" width="224">
+
 Phosphor is a native Metal 4 renderer for Apple silicon, written in C++20 and
 Metal Shading Language. It uses GPU-driven mesh submission and a visibility
 buffer, with experimental ray-traced lighting, reflections, and volumetric
