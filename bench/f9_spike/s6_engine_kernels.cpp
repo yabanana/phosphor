@@ -65,6 +65,10 @@ struct Kernels {
             table->setAddress(probe->gpuAddress(), 3);
             table->setResource(ift->gpuResourceID(), 4);
             table->setAddress(instances->gpuAddress(), 5);
+            // Surface refinement (5592114) reads meshes6, vertices7, RT indices8.
+            table->setAddress(meshes->gpuAddress(), 6);
+            table->setAddress(geometry.vertices->gpuAddress(), 7);
+            table->setAddress(geometry.indices->gpuAddress(), 8);
             table->setAddress(counters->gpuAddress(), 9);
             dispatch(e, trace, kRays);
         });
@@ -194,7 +198,8 @@ void engineKernels(::soc::Context& ctx, ::soc::Report& rep) {
         wrongDescriptors += desc[i].mask != (valid ? (i == 5 ? RT_MASK_SHADOW : RT_MASK_ALL) : 0u);
         wrongDescriptors += desc[i].intersectionFunctionTableOffset != 0u;
         if (!valid) {
-            for (u32 f = 0; f < 12; ++f) wrongDescriptors += desc[i].transform[f] != ((f == 0 || f == 4 || f == 8) ? 1.0f : 0.0f);
+            // Dead slots shrink to 1e-4 scale about the origin (F14.2), never mesh 0 at its local bounds.
+            for (u32 f = 0; f < 12; ++f) wrongDescriptors += desc[i].transform[f] != ((f == 0 || f == 4 || f == 8) ? 1e-4f : 0.0f);
         } else {
             const u32 expectedOptions = i == 1 ? 8u : 4u;
             wrongDescriptors += desc[i].options != expectedOptions;

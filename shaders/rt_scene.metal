@@ -28,7 +28,12 @@ kernel void rt_write_instances(const device GPUInstance* instances [[buffer(0)]]
                                 uint tid [[thread_position_in_grid]], uint lane [[thread_index_in_simdgroup]]) {
     uint active = 0u, masked = 0u, invalidMesh = 0u;
     // Host precondition: meshCount > 0, mesh 0 has a valid placeholder BLAS.
-    // The masked identity descriptor must be well formed even for dead slots.
+    // Dead slots keep a masked, well-formed descriptor (slot == user ID) scaled
+    // by 1e-4 about the origin. With an identity transform every dead slot put
+    // mesh 0's BLAS at its local bounds, thousands of coincident masked
+    // instances that each ray crossing that box had to cull (F14.2: Sponza's
+    // fog source, 1.5 ms). A zero transform is not allowed: an instance built
+    // degenerate is not revived by a later refit (F9 dynamic-churn fails).
     if (tid < p.slotCount && p.meshCount > 0u) {
         const device GPUInstance& instance = instances[tid];
         const bool live = (instance.flags & INSTANCE_FLAG_VALID) != 0u;
@@ -42,7 +47,7 @@ kernel void rt_write_instances(const device GPUInstance* instances [[buffer(0)]]
         transformValid &= isfinite(det) && abs(det) > 1e-20f;
         const bool valid = live && meshValid && materialValid && transformValid;
         GPURtInstanceDesc d{};
-        d.transform[0] = d.transform[4] = d.transform[8] = 1.0f;
+        d.transform[0] = d.transform[4] = d.transform[8] = 1e-4f;
         d.userID = tid; // descriptor index == stable scene slot == user ID
         uint meshIndex = 0u;
         if (valid) {
