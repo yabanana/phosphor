@@ -78,8 +78,11 @@ const std::vector<MaterialScenarioSpec>& specs() {
 }
 }
 
-MaterialValidation::MaterialValidation(std::string scenario) : scenario_(std::move(scenario)) {
+MaterialValidation::MaterialValidation(std::string scenario, u32 toggleEvery)
+    : scenario_(std::move(scenario)), toggleEvery_(toggleEvery) {
     if (!validScenario(scenario_)) throw std::invalid_argument("Unknown material validation scenario: " + scenario_);
+    if (toggleEvery_ > 0 && !spec(scenario_).hasSpecularGrid())
+        throw std::invalid_argument("material toggling needs a specular grid scenario");
     name_ = "Material validation: " + scenario_;
 }
 bool MaterialValidation::validScenario(std::string_view scenario) {
@@ -150,6 +153,22 @@ void MaterialValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& textur
         light.intensity = s.sunIrradiance;
         ecs.addComponent(sun_, std::move(light));
     }
+}
+
+void MaterialValidation::update(float, ECS& ecs) {
+    if (toggleEvery_ == 0 || spheres_.empty()) return;
+    if (++updates_ % toggleEvery_ != 0) return;
+    const u32 event = updates_ / toggleEvery_; // 1, 2, 3 ...
+    auto edited = [&](u32 index, auto&& change) {
+        auto& m = ecs.getComponent<MaterialComponent>(spheres_[index]); // mutable access marks the change
+        auto d = std::make_shared<MaterialDescription>(*m.extension);
+        change(*d->specular);
+        m.extension = std::move(d);
+    };
+    // Odd events: the feature sphere becomes active (ior 1.33), even events neutral again.
+    edited(toggleFeatureSphere(), [&](SpecularBlock& b) { b.ior = event % 2 == 1 ? 1.33f : 1.5f; });
+    // The parameter sphere alternates its weight 0.5 / 0.6 (a record rewrite without a bit change).
+    edited(toggleParameterSphere(), [&](SpecularBlock& b) { b.specularFactor = event % 2 == 1 ? 0.6f : 0.5f; });
 }
 
 void MaterialValidation::teardown(ECS& ecs, GpuScene&) {

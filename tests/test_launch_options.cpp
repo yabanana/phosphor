@@ -1405,3 +1405,22 @@ TEST_CASE("F15 launch option --material-overrides is refused at parse time until
     CHECK_FALSE(parse({"--material-overrides", ""}, o, error));
     CHECK_FALSE(parse({"--material-overrides", "--frames"}, o, error));
 }
+
+TEST_CASE("launch options: F15.1 --material-toggle-every needs a specular grid scenario") {
+    LaunchOptions o;
+    std::string error;
+    const std::vector<const char*> base{"--scene", "procedural", "--bench", "2", "--material-scenario", "specular-grid-sun",
+                                        "--render-path", "visibility", "--reflections", "ssr", "--post", "--upscaler", "native"};
+    auto with = [&](std::vector<const char*> extra, const char* scenario) {
+        std::vector<const char*> args = base;
+        args[5] = scenario;
+        args.insert(args.end(), extra.begin(), extra.end());
+        return parse(args, o, error);
+    };
+    CHECK(with({"--material-toggle-every", "30"}, "specular-grid-sun"));
+    CHECK(o.materialToggleEvery == 30);
+    CHECK_FALSE(with({"--material-toggle-every", "30"}, "base-grid-sun"));
+    CHECK(error.find("specular grid") != std::string::npos);
+    LaunchOptions fresh;
+    CHECK(fresh.materialToggleEvery == 0);
+}

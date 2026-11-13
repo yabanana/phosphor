@@ -55,7 +55,7 @@ std::unique_ptr<TestBench> createTestBench(TestBenchType type, const TestBenchPa
     switch (type) {
         case TestBenchType::TorusDemo:   return std::make_unique<TorusDemo>();
         case TestBenchType::PBRGrid:
-            if(!params.materialScenario.empty())return std::make_unique<MaterialValidation>(params.materialScenario);
+            if(!params.materialScenario.empty())return std::make_unique<MaterialValidation>(params.materialScenario, params.materialToggleEvery);
             return std::make_unique<PBRGrid>();
         case TestBenchType::StressTest:  return std::make_unique<StressTest>();
         case TestBenchType::SceneViewer:

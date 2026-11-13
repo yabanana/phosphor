@@ -411,6 +411,7 @@ struct LaunchOptions {
     u32 debugLighting = 0, debugLightingCorrupt = 0, debugGiCorrupt=0;
     bool debugGiNoVisibility=false; // Physical quality negative; invariant checks stay enabled.
     std::string exportReference, captureLinear, captureLinearSequence, lightingScene,reflectionScene,materialScene;
+    u32 materialToggleEvery = 0; // --material-toggle-every N: specular grids edit/toggle their extension every N frames
     bool giProbeAnchor=false;
     float giAnchor[3]{},giSpacing=0;
     u32 giGrid[3]{};

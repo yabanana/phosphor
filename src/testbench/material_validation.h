@@ -37,7 +37,10 @@ struct MaterialScenarioSpec {
 
 class MaterialValidation final : public TestBench {
 public:
-    explicit MaterialValidation(std::string scenario);
+    // `toggleEvery` (F15.1, specular grids only): every N updates the extension of the two probe spheres
+    // is edited (a parameter change on one, a feature toggle on the other: a counted record rewrite,
+    // never a reallocation); 0 = static scene.
+    explicit MaterialValidation(std::string scenario, u32 toggleEvery = 0);
     [[nodiscard]] static bool validScenario(std::string_view scenario);
     [[nodiscard]] static std::span<const std::string_view> scenarios();
     // Declared constants of a scenario (throws std::invalid_argument when unknown).
@@ -47,7 +50,7 @@ public:
     [[nodiscard]] static float environmentRadiance(std::string_view scenario);
 
     void setup(ECS&, GpuScene&, TextureManager&) override;
-    void update(float, ECS&) override {}
+    void update(float, ECS&) override;
     void teardown(ECS&, GpuScene&) override;
     [[nodiscard]] const char* getName() const override { return name_.c_str(); }
     [[nodiscard]] const char* assetSource() const override { return "procedural-material-validation-v2"; }
@@ -56,6 +59,11 @@ public:
     [[nodiscard]] std::string_view scenario() const { return scenario_; }
     [[nodiscard]] std::span<const EntityID> spheres() const { return spheres_; } // row-major: row * columns + column
     [[nodiscard]] EntityID sun() const { return sun_; }
+
+    // Probe spheres of the toggle test (row-major index): the neutral sphere whose feature bit flips
+    // and the sphere whose specularFactor alternates.
+    [[nodiscard]] static u32 toggleFeatureSphere() { return 0 * 5 + 3; }
+    [[nodiscard]] static u32 toggleParameterSphere() { return 1 * 5 + 2; }
 
     static constexpr float SphereRadius = 0.4f;
     static constexpr float Spacing = 1.0f;
@@ -66,6 +74,7 @@ public:
 
 private:
     std::string scenario_, name_;
+    u32 toggleEvery_ = 0, updates_ = 0;
     std::vector<EntityID> spheres_;
     EntityID sun_ = INVALID_ENTITY;
 };

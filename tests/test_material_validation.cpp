@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 #include "testbench/material_validation.h"
 #include "renderer/gpu_scene.h"
+#include "renderer/scene_store.h"
 #include "renderer/scene_extract.h"
 #include "scene/components.h"
 #include "scene/ecs.h"
@@ -236,4 +237,60 @@ TEST_CASE("F15.1 specular grid spheres carry the extension of their row and colu
             CHECK((featureMask(*m.extension) != 0) == !neutral);
         }
     f.teardown(ecs, scene);
+}
+
+TEST_CASE("F15.1 --material-toggle-every edits one sphere's weight and flips another's feature bit without reallocating") {
+    CHECK_THROWS(MaterialValidation{"base-grid-sun", 4});
+    ECS ecs;
+    GpuScene scene;
+    test::NullTextureManager textures;
+    MaterialValidation f{"specular-grid-sun", 4};
+    f.setup(ecs, scene, textures);
+    SceneStore store;
+    store.sync(ecs, scene);
+    ecs.endFrame();
+    const u32 groups = store.extensionGroups(), capacity = store.extensionGroupCapacity();
+    const u64 structure = store.structureVersion();
+    const EntityID featureSphere = f.spheres()[MaterialValidation::toggleFeatureSphere()];
+    const EntityID parameterSphere = f.spheres()[MaterialValidation::toggleParameterSphere()];
+    CHECK((store.materials()[store.materialIndexOf(featureSphere)].flags >> MATERIAL_FEATURE_SHIFT) == 0); // neutral
+    CHECK(store.materials()[store.materialIndexOf(featureSphere)].extensionIndex == MATERIAL_EXTENSION_INVALID);
+    const u32 factorWord = 1; // GPUMaterialExt0::specularFactor
+    const float baseWeight = [&] {
+        float v;
+        const auto& rec = store.extensions()[store.materials()[store.materialIndexOf(parameterSphere)].extensionIndex];
+        std::memcpy(&v, &rec.w[factorWord], 4);
+        return v;
+    }();
+    CHECK(baseWeight == 0.5f);
+
+    for (u32 frame = 1; frame <= 3; ++frame) { // updates 1..3: nothing yet
+        f.update(0.0f, ecs);
+        store.sync(ecs, scene);
+        CHECK_FALSE(store.materialsChanged());
+        CHECK(store.verifyAgainstEcs(ecs, scene).empty());
+        ecs.endFrame();
+    }
+    f.update(0.0f, ecs); // event 1: feature on, weight 0.6
+    store.sync(ecs, scene);
+    CHECK(store.materialsChanged());
+    CHECK((store.materials()[store.materialIndexOf(featureSphere)].flags >> MATERIAL_FEATURE_SHIFT) ==
+          MATERIAL_FEATURE_SPECULAR_IOR);
+    const u32 group = store.materials()[store.materialIndexOf(featureSphere)].extensionIndex;
+    CHECK(group != MATERIAL_EXTENSION_INVALID);
+    CHECK(store.extensionGroupCapacity() == capacity); // a free group of the slack: no reallocation
+    CHECK(store.extensionGroups() == groups + 1);
+    CHECK(store.structureVersion() == structure);
+    CHECK(store.verifyAgainstEcs(ecs, scene).empty());
+    ecs.endFrame();
+    for (u32 i = 0; i < 4; ++i) { // event 2: the feature goes off again, the group stays
+        f.update(0.0f, ecs);
+        store.sync(ecs, scene);
+        ecs.endFrame();
+    }
+    CHECK((store.materials()[store.materialIndexOf(featureSphere)].flags >> MATERIAL_FEATURE_SHIFT) == 0);
+    CHECK(store.materials()[store.materialIndexOf(featureSphere)].extensionIndex == group);
+    CHECK(store.structureVersion() == structure);
+    CHECK(store.verifyAgainstEcs(ecs, scene).empty());
+    CHECK(store.featureUnion() == MATERIAL_FEATURE_SPECULAR_IOR);
 }

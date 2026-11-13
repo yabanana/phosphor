@@ -87,6 +87,7 @@ public:
 struct TestBenchParams {
     std::string scenePath;
     std::string lightingScenario,reflectionScenario,materialScenario;
+    u32 materialToggleEvery = 0; // F15.1: specular grids edit/toggle the extension every N frames (0 = never)
     u32 localLightCount = 1024;
     bool areaLights = false, stationaryLights = false;
     u32   instances         = 0;     // --instances
