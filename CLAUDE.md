@@ -362,3 +362,18 @@ measurements or introduce another routine owner-approval gate before coding.
   macros, `u32`-style aliases from `core/types.h`.
 - New portable logic gets doctest coverage in `tests/`.
 - User-facing docs and research are partly in Italian; code and comments in English.
+
+## Agent skills
+
+Vendored engineering skills live in `.claude/skills/` (`README.md` there;
+`.claude/` is excluded locally, so add files there with `git add -f`).
+
+### Issue tracker
+
+Local markdown under `.scratch/<phase>/` (spec, wayfinder map, decision and
+implementation tickets), versioned in git. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root, created lazily.
+See `docs/agents/domain.md`.
