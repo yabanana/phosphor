@@ -190,6 +190,51 @@ struct GPUMaterialExtRecord {
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUMaterialExtRecord) == 80, "GPUMaterialExtRecord layout");
 
+// ---------------------------------------------------------------------------
+// F15.1 (ticket 06): the per-pixel lobe guide (decision 07: "an additional
+// guide buffer allocated and read only when the scene feature union is
+// non-empty").  The producers of the DI surfaces (material lighting guides
+// kernel, indexed overflow receivers) write one record per pixel with the
+// RESOLVED feature parameters (textures sampled, layers blended, instance
+// scale applied) of the pixel's material; DI, the specular transport, the
+// composite and the denoiser read it (tickets 07/08 onwards).  Base
+// parameters (albedo, metallic, roughness, shading normal) stay in
+// GPUDISurface.  The layout of EVERY F15 feature is frozen here; packing and
+// unpacking live in renderer/lobe_guide_pack.h.
+//
+// Rules: `features` holds the feature bits of the pixel's material that the
+// producer resolved (0 = base material: every other word is 0); the words of
+// a feature whose bit is clear are 0.  Half fields hold IEEE binary16 bits
+// (low half = first named value); oct fields hold a unit vector in WORLD
+// space, octahedral snorm16x2 (low half = x).
+// ---------------------------------------------------------------------------
+PHOSPHOR_GPU_CONSTANT u32 LOBE_GUIDE_FEATURE_MASK = 0xFFFFu;   // features: MATERIAL_FEATURE_* bits
+PHOSPHOR_GPU_CONSTANT u32 LOBE_GUIDE_FLAG_SUBSURFACE_VOLUMETRIC = 1u << 16; // GPUMaterialExt2::mode == 1
+
+struct GPULobeGuide {
+    u32   features;               // MATERIAL_FEATURE_* (bits 0..15) | LOBE_GUIDE_FLAG_* (bits 16..31)
+    float ior;                    // KHR_materials_ior (0 = special mode); also the transmission/volume IOR
+    u32   specularFactorCoat;     // half2: specularFactor, clearcoatFactor
+    u32   specularColorRG;        // half2: specularColor r, g
+    u32   specularColorBCoatRoughness; // half2: specularColor b, clearcoatRoughness
+    u32   clearcoatNormal;        // oct: coat normal (the shading normal without a coat normal texture)
+    u32   sheenColorRG;           // half2: sheenColor r, g
+    u32   sheenColorBRoughness;   // half2: sheenColor b, sheenRoughness
+    u32   anisotropyDirection;    // oct: anisotropy direction (tangent frame rotated by the rotation/texture), orthogonal to N
+    u32   anisotropyIridescence;  // half2: anisotropyStrength, iridescenceFactor
+    u32   iridescence;            // half2: iridescenceIor, iridescenceThickness (nm, resolved from min/max/texture)
+    u32   transmissionThickness;  // half2: transmissionFactor, volume thickness in WORLD units (mesh thickness * instance scale)
+    u32   attenuationRG;          // half2: attenuationColor r, g
+    u32   attenuationBDistance;   // half2: attenuationColor b, attenuationDistance (world units, +inf = none)
+    u32   subsurfaceWeightRadius; // half2: subsurface weight, radius (metres)
+    u32   subsurfaceColorRG;      // half2: subsurface colour r, g
+    u32   subsurfaceColorBAnisotropy; // half2: subsurface colour b, anisotropy
+    u32   subsurfaceScaleRG;      // half2: radiusScale r, g
+    u32   subsurfaceScaleB;       // half2: radiusScale b, 0
+    u32   reserved;               // 0
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPULobeGuide) == 80, "GPULobeGuide layout");
+
 struct GPUMeshInfo {
     u32 meshletCount;
     u32 meshletOffset;     // into the global meshlet buffer
