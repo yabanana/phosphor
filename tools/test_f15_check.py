@@ -347,7 +347,8 @@ class RunnerLogic(unittest.TestCase):
                 for flag in ("--capture-linear", "--export-reference", "--reflections", "--resolution"):
                     self.assertIn(flag, capture)
                 self.assertIn(" ".join(capture), text)
-                self.assertIn("f15_reference.py", " ".join(commands["reference"]))
+                self.assertTrue("f15_reference.py" in " ".join(commands["reference"]) or
+                                "f15_transmission_reference.py" in " ".join(commands["reference"]))
             for key in ("commit", "os", "sdk_version", "power", "tool_sha256", "seed", "thresholds"):
                 self.assertIn(key, plan)
             self.assertIn("f15_common.py", plan["tool_sha256"])
@@ -912,7 +913,10 @@ class RunnerLogic(unittest.TestCase):
         block = source[source.index("kScenarios{"):source.index("};", source.index("kScenarios{"))]
         # the two clip fixtures of ticket 08 belong to tools/f15_clip_check.py, not to this reference runner
         clip_only = {"specular-grid-edit", "specular-grid-rough"}
-        self.assertEqual(sorted(set(re.findall(r'"([a-z0-9-]+)"', block)) - clip_only),
+        # ticket 13: the transmission scenarios are the separate bench class TransmissionValidation
+        transmission = (HERE.parent / "src" / "testbench" / "transmission_validation.cpp").read_text()
+        names = transmission[transmission.index("kAll{"):transmission.index("};", transmission.index("kAll{"))]
+        self.assertEqual(sorted((set(re.findall(r'"([a-z0-9-]+)"', block)) - clip_only) | set(re.findall(r'"([a-z0-9-]+)"', names))),
                          sorted({check.bench_scenario(name) for name in check.SCENARIOS}))
 
     def test_declared_gate_bounds(self):

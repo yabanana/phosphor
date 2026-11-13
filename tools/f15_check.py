@@ -74,6 +74,19 @@ reference ray casting):
   (the double-counted control gains energy and must fail them).
   Negative controls (each must fail its gate): transmission ignored, colour ignored, lobe on the front hemisphere
   (back lights ignored), diffuse not reduced by w (energy), no Fresnel weight on the transmitted part (not in the declared keys).
+- Transmission + volume (F15.3, ticket 13): the `transmission-*` keys (bench class TransmissionValidation: glass spheres, slabs and
+  panes in front of an emissive checkerboard or emissive panels under a constant environment) against the Mitsuba 3.9.1
+  path-traced ground truth of tools/f15_transmission_reference.py (pixel-centre rays, roughdielectric / dielectric + a homogeneous
+  absorbing medium, the glTF thin-walled interface; every model decision is in that module's docstring).  The engine image is
+  the LINEAR HDR signal averaged over the last 32 frames (`--capture-linear-accumulate 32`: the transport is one stochastic sample
+  per pixel).  Gate "transmission" (decision 11): per glass object on the glass mask (silhouette band of 2 px excluded), mean
+  relative luminance error <= 5 % and p95 <= 15 %, with the absolute floor 0.05 * mean_ROI(reference).  Every key is "pending":
+  ticket 13 (asserted to FAIL: the engine ignores transmission) and its image must PASS the gate against `transmission-ignored`
+  (the opaque Appendix B dielectric: red for the right reason).  Negative controls (each must fail the gate): transmission
+  ignored, base colour tint ignored, volume attenuation ignored, ior ignored (no refraction bend), thin-walled treated as a
+  volume, back faces of the closed glass mesh rejected (today's `reflections.metal` rule), emitter radiance counted twice, the
+  glass behind the front glass black.  `transmission-rtoff` is the declared `--rt off` model (probes / environment along the
+  refracted ray, closed form from the DFG table) with the same bound.
 - declared (base-grid-env-resolve; also furnace-resolve next to its furnace
   gate): the engine image against the independent declared-environment model of
   tools/f15_reference.py (DFG table, ADR-0006): per sphere mean relative error
@@ -147,9 +160,15 @@ THRESHOLDS = {
     # Declared-environment model (orchestrator, review 2026-11-13): fixed before any comparison.
     "declared": {"mean_per_sphere": 0.005, "p99_per_sphere": 0.01,
                  "model": "tools/f15_reference.py declared environment model (DFG table of src/renderer/dfg_table.h)"},
+    # F15.3 ticket 13 (decision 11): transmission vs Mitsuba ground truth on the glass mask, static accumulation, per glass object.
+    "transmission": {"mean_per_object": 0.05, "p95_per_object": 0.15, "floor": "0.05 * mean over the whole glass ROI of the reference",
+                     "mask": "primary hit on a glass instance, silhouette band of 2 px excluded"},
     "source": ".scratch/f15/decisions/11-reference-method-and-thresholds.md (incl. review amendments)",
 }
 FRAMES, RESOLUTION = 128, "1280x720"
+ACCUMULATE = 32   # frames averaged by --capture-linear-accumulate for the stochastic transmission transport (frames 96..127)
+REFERENCE_SPP = 1024  # Mitsuba samples per glass-mask pixel
+TRANSMISSION_KINDS = ("transmission", "transmission-declared")
 
 ANISO_DIRECT_CONTROLS = ["aniso-ignored", "aniso-rotation-flipped", "aniso-bitangent-flipped", "aniso-alpha-swapped",
                          "aniso-d-normalised-by-ab"]
@@ -481,6 +500,56 @@ SCENARIOS = {
                                         "controls": ["transmission-double-counted"], "declared": THIN_FURNACE_DECLARED_CONTROLS,
                                         "terms": "constant environment radiance 1, white base and transmission colour, no sun, "
                                                  "deterministic resolve terms on the thin subsurface grid"},
+    # F15.3 (ticket 13): KHR_materials_transmission + KHR_materials_volume, ray-traced (decision 09, ADR-0004).  Written
+    # test-first: today's engine ignores transmission and renders the glass as an opaque dielectric, so every key is
+    # "pending" (asserted to FAIL) and its engine image must pass the gate against `transmission-ignored`.  All RT keys
+    # trace the glass with RT whatever the reflection band (--rt on --reflections rt); the engine image is the mean of
+    # frames 96..127 (--capture-linear-accumulate).  Only the controls that change the fixture are listed (a control
+    # identical to the reference would be non-discriminating: e.g. `transmission-not-tinted` needs a tinted base).
+    "transmission-roughness-ior": {"kind": "transmission", "pending": "ticket 13", "pending_matches": "transmission-ignored",
+                                   "rt": True, "reflections": "rt", "accumulate": ACCUMULATE,
+                                   "controls": ["transmission-ignored", "ior-ignored"],
+                                   "terms": "constant environment 0.5 + emissive checkerboard behind 12 clear volume spheres "
+                                            "(roughness {0, .1, .3, .6} x ior {1.33, 1.5, 2.0}), RT glass transport"},
+    "transmission-attenuation": {"kind": "transmission", "pending": "ticket 13", "pending_matches": "transmission-ignored",
+                                 "rt": True, "reflections": "rt", "accumulate": ACCUMULATE,
+                                 "controls": ["transmission-ignored", "volume-ignored", "ior-ignored"],
+                                 "terms": "constant environment 0.5 + emissive checkerboard behind 6 absorbing volume spheres "
+                                          "(attenuation colour x distance), RT glass transport"},
+    "transmission-factor-tint": {"kind": "transmission", "pending": "ticket 13", "pending_matches": "transmission-ignored",
+                                 "rt": True, "reflections": "rt", "accumulate": ACCUMULATE,
+                                 "controls": ["transmission-ignored", "transmission-not-tinted", "volume-ignored", "ior-ignored",
+                                              "thin-as-volume"],
+                                 "terms": "constant environment 0.5 + emissive checkerboard behind thin panes and volume slabs "
+                                          "(factor {1, .5} x tint), RT glass transport"},
+    "transmission-thin-volume": {"kind": "transmission", "pending": "ticket 13", "pending_matches": "transmission-ignored",
+                                 "rt": True, "reflections": "rt", "accumulate": ACCUMULATE,
+                                 "controls": ["transmission-ignored", "volume-ignored", "ior-ignored", "thin-as-volume"],
+                                 "terms": "constant environment 0.5 + emissive checkerboard behind a thin-walled sphere, a clear "
+                                          "and an absorbing volume sphere, RT glass transport"},
+    "transmission-single-sided": {"kind": "transmission", "pending": "ticket 13", "pending_matches": "transmission-ignored",
+                                  "rt": True, "reflections": "rt", "accumulate": ACCUMULATE,
+                                  "controls": ["transmission-ignored", "backface-rejected", "ior-ignored", "volume-ignored"],
+                                  "terms": "constant environment 0.5 + emissive checkerboard behind SINGLE-SIDED closed glass "
+                                           "meshes (lens sphere, rotated cube, absorbing sphere), RT glass transport"},
+    "transmission-glass-behind-glass": {"kind": "transmission", "pending": "ticket 13", "pending_matches": "transmission-ignored",
+                                        "rt": True, "reflections": "rt", "accumulate": ACCUMULATE,
+                                        "controls": ["transmission-ignored", "back-glass-black", "ior-ignored", "volume-ignored"],
+                                        "terms": "constant environment 0.5 + emissive checkerboard behind overlapping glass "
+                                                 "(sphere behind sphere, pane in front of a sphere), RT glass transport"},
+    "transmission-emissive-panel": {"kind": "transmission", "pending": "ticket 13", "pending_matches": "transmission-ignored",
+                                    "rt": True, "reflections": "rt", "accumulate": ACCUMULATE, "lighting": "restir",
+                                    "visibility": "rays",
+                                    "controls": ["transmission-ignored", "emitter-double-counted", "transmission-not-tinted"],
+                                    "terms": "constant environment 0.5 + two emissive panels (radiance 3) behind a clear and a "
+                                             "tinted thin pane, ReSTIR DI with RT visibility (--lighting restir --rt on): the "
+                                             "panel radiance is counted once (transport), not again by DI"},
+    # The declared --rt off model: no backdrop (probes/environment only), the probe path with the analytic constant probe.
+    "transmission-rtoff": {"kind": "transmission-declared", "pending": "ticket 13", "pending_matches": "declared-transmission-ignored",
+                           "reflections": "probes", "denoise": "off",
+                           "controls": ["declared-transmission-ignored", "declared-not-tinted", "declared-volume-ignored"],
+                           "terms": "constant environment 0.5 only (no backdrop), --rt off probe path: the declared model "
+                                    "L ((1 - E)((1 - t) base + t tint T) + E) of tools/f15_transmission_reference.py"},
     "specular-grid-point@clustered": {"kind": "direct", "lighting": "clustered", "visibility": "rays", "denoise": "off",
                                       "terminator_band": 2,
                                       "controls": ["specular-ignored", "f90-one", "specular-weight-not-on-f0"],
@@ -550,7 +619,8 @@ def build_manifest(binary, metallib, scenarios, seed):
     git = lambda *a: command_text(["git", "-C", str(REPO), *a])  # noqa: E731
     power = command_text(["pmset", "-g", "batt"]) or ""
     tools = {name: sha256_file(REPO / "tools" / name) for name in
-             ("f15_check.py", "f15_reference.py", "f15_common.py", "f12_reference.py", "run_checked.py")}
+             ("f15_check.py", "f15_reference.py", "f15_transmission_reference.py", "f15_common.py", "f12_reference.py",
+              "run_checked.py")}
     return {"schema": 1, "created_utc": datetime.now(timezone.utc).isoformat(),
             "commit": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain")),
             "binary": str(binary), "binary_sha256": sha256_file(binary) if binary.is_file() else None,
@@ -583,6 +653,7 @@ def capture_command(binary, name, folder, seed=1):
             "--post", "--upscaler", "native", "--resolution", RESOLUTION, "--frames", str(FRAMES),
             "--warmup", "0", "--fixed-timestep", "--no-ui", "--no-vsync", "--no-gpu-timing", "--debug-lighting", "1",
             "--capture-linear", str(folder / "engine.pfm"), "--capture-linear-frame", last,
+            *(["--capture-linear-accumulate", str(SCENARIOS[name]["accumulate"])] if SCENARIOS[name].get("accumulate") else []),
             "--capture-linear-signal", "hdr",
             "--export-reference", str(folder / "snapshot"), "--export-reference-frame", last,
             "--report", str(folder / "report.json")]
@@ -597,6 +668,14 @@ def scenario_controls(name):
 
 
 def reference_command(name, folder):
+    if SCENARIOS[name]["kind"] in TRANSMISSION_KINDS:
+        declared = SCENARIOS[name]["kind"] == "transmission-declared"
+        command = ["uv", "run", "--offline", "--no-project", "--python", "3.13", "--with", "mitsuba==3.9.1",
+                   "--with", "numpy", "python", "-I", str(REPO / "tools" / "f15_transmission_reference.py"),
+                   "declared" if declared else "render", str(folder / "snapshot"), "--out", str(folder / "reference")]
+        if not declared:
+            command += ["--spp", str(SCENARIOS[name].get("spp", REFERENCE_SPP))]
+        return command + ["--controls", *SCENARIOS[name]["controls"]]
     controls, declared = scenario_controls(name)
     command = ["uv", "run", "--offline", "--no-project", "--python", "3.13", "--with", "mitsuba==3.9.1",
                "--with", "numpy", "python", "-I", str(REPO / "tools" / "f15_reference.py"), "render",
@@ -743,7 +822,31 @@ def evaluate_furnace_transport(np, candidate, reference, masks, spheres):
     return result
 
 
+def evaluate_transmission(np, candidate, reference, masks, objects):
+    """Decision 11 transmission bound, per glass object on the glass mask: mean and p95 of the relative luminance error
+    (absolute floor 0.05 * mean over the whole ROI of the reference).  `objects` are the reference report's glass objects."""
+    gate = THRESHOLDS["transmission"]
+    roi = masks["roi"]
+    error, floor = relative_error(np, candidate, reference, roi)
+    instance = masks["sphere"][roi]
+    table = []
+    for o in objects:
+        pick = instance == o["instance"]
+        label = {"instance": o["instance"], "label": o.get("label", ""), "metallic": 0.0, "roughness": o.get("roughness", 0.0)}
+        if not pick.any():
+            table.append({**label, "pixels": 0, "pass": False})
+            continue
+        e = error[pick]
+        mean, p95 = float(e.mean()), float(np.percentile(e, 95))
+        table.append({**label, "pixels": int(pick.sum()), "mean": mean, "p95": p95,
+                      "pass": bool(mean <= gate["mean_per_object"] and p95 <= gate["p95_per_object"])})
+    return {"kind": "transmission", "floor": floor, "objects": table, "pass": all(t["pass"] for t in table),
+            "worst_mean": max(t.get("mean", 0.0) for t in table), "worst_p95": max(t.get("p95", 0.0) for t in table)}
+
+
 def evaluate(np, kind, candidate, reference, masks, spheres, band=1):
+    if kind in TRANSMISSION_KINDS:
+        return evaluate_transmission(np, candidate, reference, masks, spheres)
     if kind == "direct":
         return evaluate_direct(np, candidate, reference, masks, spheres, band)
     if kind == "furnace":
@@ -786,7 +889,9 @@ def control_verdicts(np, kind, reference, controls, masks, spheres, required, ba
 
 
 def summarize(result):
-    keep = {k: v for k, v in result.items() if k not in ("spheres", "rows")}
+    keep = {k: v for k, v in result.items() if k not in ("spheres", "rows", "objects")}
+    if "objects" in result:
+        keep["objects_failing"] = [t.get("label") or t["instance"] for t in result["objects"] if not t["pass"]]
     if "rows" in result:
         keep["rows_failing"] = [k for k, v in result["rows"].items() if not v["pass"]]
     if result["kind"] in ("environment", "declared"):
@@ -832,9 +937,87 @@ def judge(np, kind, candidate, reference, masks, spheres, controls, mode):
     return result, verdicts, expectation(kind, mode, result)
 
 
+def cached_transmission_reference_usable(reference_dir, snapshot_dir, controls, spp):
+    """A cached transmission reference is reused only when it was rendered from THIS snapshot by THIS tool with the same
+    sample count and holds every requested control file."""
+    from f12_reference import scene_digest
+    meta_path = reference_dir / "reference.json"
+    if not meta_path.is_file():
+        return False
+    try:
+        meta = json.loads(meta_path.read_text())
+        if meta.get("snapshot_sha256") != scene_digest(pathlib.Path(snapshot_dir).resolve()):
+            return False
+        if meta.get("tool_sha256") != sha256_file(REPO / "tools" / "f15_transmission_reference.py"):
+            return False
+        if meta.get("kind") == "mitsuba" and meta.get("spp") != spp:
+            return False
+        files = [reference_dir / "reference.pfm", reference_dir / "masks.npz"]
+        if not set(controls) <= set(meta.get("controls", {})):
+            return False
+        files += [reference_dir / meta["controls"][c]["file"] for c in controls]
+        return all(f.is_file() for f in files)
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def evaluate_transmission_scenario(np, name, folder, mode):
+    """One `transmission-*` key: the engine image against the Mitsuba (or declared) reference on the glass mask, the
+    pending_matches twin and every negative control (all rendered by tools/f15_transmission_reference.py)."""
+    from f12_reference import read_pfm
+    import f15_transmission_reference as tref
+
+    spec = SCENARIOS[name]
+    declared = spec["kind"] == "transmission-declared"
+    controls = list(spec["controls"])
+    spp = spec.get("spp", REFERENCE_SPP)
+    reference_dir = folder / "reference"
+    if not cached_transmission_reference_usable(reference_dir, folder / "snapshot", controls, spp):
+        if (reference_dir / "reference.json").is_file():
+            print(f"{name}: the cached reference does not match this snapshot, tool or controls; re-rendering", file=sys.stderr)
+        arguments = ["declared" if declared else "render", str(folder / "snapshot"), "--out", str(reference_dir)]
+        if not declared:
+            arguments += ["--spp", str(spp)]
+        code = tref.main(arguments + ["--controls", *controls])
+        if code:
+            raise RuntimeError(f"{name}: reference render failed ({code})")
+    report = json.loads((reference_dir / "reference.json").read_text())
+    reference = read_pfm(reference_dir / "reference.pfm")
+    candidate = read_pfm(folder / "engine.pfm")
+    if candidate.shape != reference.shape:
+        raise RuntimeError(f"{name}: engine capture {candidate.shape} and reference {reference.shape} differ in size")
+    masks = dict(np.load(reference_dir / "masks.npz"))
+    objects = report["objects"]
+    images = {c: read_pfm(reference_dir / report["controls"][c]["file"]) for c in controls}
+    result = evaluate_transmission(np, candidate, reference, masks, objects)
+    verdicts = control_verdicts(np, spec["kind"], reference, images, masks, objects, controls)
+    expected = expectation(spec["kind"], mode, result, spec.get("always_green", False), spec.get("pending"))
+    twins = []
+    if spec.get("pending_matches") in images:
+        twin = evaluate_transmission(np, candidate, images[spec["pending_matches"]], masks, objects)
+        expected = {**expected, "matches_control": spec["pending_matches"], "control_gate": summarize(twin),
+                    "met": expected["met"] and twin["pass"]}
+        twins.append(twin["pass"])
+    entry = {"scenario": name, "kind": spec["kind"], "terms": spec["terms"], "reference_terms": report["terms"],
+             "reference_maximum_radiance": report["maximum_radiance"], "quadrature_mask_pixels": 0,
+             "roi_pixels": report["roi_pixels"], "snapshot_sha256": report["snapshot_sha256"], "result": result,
+             "expectation": expected, "controls": verdicts, "pending": spec.get("pending"),
+             "reference_settings": {k: report.get(k) for k in ("spp", "max_depth", "erosion_pixels", "engine_crossings", "kind")},
+             "reference_noise": None if declared else report["reference"].get("noise"),
+             "control_noise": {} if declared else {c: report["controls"][c].get("noise") for c in controls}}
+    entry["discriminating"] = all(v["fails_gate"] for v in verdicts.values())
+    entry["gates_pass"] = result["pass"]
+    entry["pending_matches_met"] = all(twins)
+    entry["expectation_met"] = expected["met"]
+    return entry
+
+
 def evaluate_scenario(np, name, folder, mode):
     from f12_reference import read_pfm
     import f15_reference
+
+    if SCENARIOS[name]["kind"] in TRANSMISSION_KINDS:
+        return evaluate_transmission_scenario(np, name, folder, mode)
 
     spec = SCENARIOS[name]
     literal_controls, declared_controls = scenario_controls(name)
@@ -942,6 +1125,12 @@ def result_lines(r):
         lines += ["", "| metallic | roughness | mean | p95 | pass |", "|---|---|---|---|---|"]
         for t in r["spheres"]:
             lines.append(f"| {t['metallic']} | {t['roughness']} | {t.get('mean', 0):.4f} | {t.get('p95', 0):.4f} | {t['pass']} |")
+    elif r["kind"] == "transmission":
+        lines += ["", f"worst object mean {r['worst_mean']:.4f} (limit {THRESHOLDS['transmission']['mean_per_object']}), "
+                      f"worst p95 {r['worst_p95']:.4f} (limit {THRESHOLDS['transmission']['p95_per_object']}), floor {r['floor']:.4f}", "",
+                  "| object | pixels | mean | p95 | pass |", "|---|---|---|---|---|"]
+        for t in r["objects"]:
+            lines.append(f"| {t['label']} | {t['pixels']} | {t.get('mean', 0):.4f} | {t.get('p95', 0):.4f} | {t['pass']} |")
     elif r["kind"] == "declared":
         lines += ["", f"worst sphere mean {r['worst_mean']:.5f} (limit {THRESHOLDS['declared']['mean_per_sphere']}), "
                       f"worst p99 {r['worst_p99']:.5f} (limit {THRESHOLDS['declared']['p99_per_sphere']})", "",
