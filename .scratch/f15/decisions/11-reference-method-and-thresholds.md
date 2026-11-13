@@ -77,3 +77,12 @@ Thresholds (fixed now, before any comparison):
   fixture).
 - Before ticket 03, the base fixtures at intermediate metallic and the furnace
   are expected to fail (test-first red state).
+
+- ROI amendment from the first GPU run (2026-11-13, before any gate was
+  relaxed or any engine change): the direct ROI also excludes the shadow
+  terminator band (lit pixels with an unlit 8-neighbour of the same sphere),
+  a shading discontinuity like the silhouette. Evidence: one pixel of the
+  metallic-1 row (sphere 31, pixel 644,98) was lit in the reference (0.096)
+  and unlit in the engine, an isolated N·L sign flip from normal
+  interpolation; thresholds unchanged. After the rule the metallic 0 and 1
+  rows pass with max 0.69 % / 0.43 % and the intermediate rows still fail.

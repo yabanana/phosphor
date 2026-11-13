@@ -107,6 +107,17 @@ def make_bench_snapshot(folder, name, width, height):
 
 
 class RunnerLogic(unittest.TestCase):
+    def test_terminator_band_excludes_only_lit_pixels_next_to_unlit_ones_of_the_same_sphere(self):
+        # Two spheres side by side; sphere 1 lit on its left half, sphere 2 fully lit.
+        lit = np.array([[1, 1, 0, 0, 1, 1],
+                        [1, 1, 0, 0, 1, 1]], dtype=bool)
+        sphere = np.array([[1, 1, 1, 1, 2, 2],
+                           [1, 1, 1, 1, 2, 2]], dtype=np.int32)
+        band = check.terminator_band(np, lit, sphere)
+        expected = np.array([[0, 1, 0, 0, 0, 0],
+                             [0, 1, 0, 0, 0, 0]], dtype=bool)
+        np.testing.assert_array_equal(band, expected)
+
     def test_plan_mode_prints_exact_capture_commands(self):
         with tempfile.TemporaryDirectory() as tmp:
             buffer = io.StringIO()

@@ -171,10 +171,30 @@ def relative_error(np, candidate, reference, roi):
     return error.max(axis=-1), floor
 
 
+def terminator_band(np, lit, sphere):
+    """Lit pixels with an unlit 8-neighbour of the same sphere: the shadow
+    terminator, where N.L changes sign inside one pixel and interpolated normals
+    of two independent implementations may disagree on the sign (a shading
+    discontinuity, excluded like the silhouette; decision 11 ROI rule)."""
+    padded_lit = np.pad(lit, 1, constant_values=True)
+    padded_sphere = np.pad(sphere, 1, constant_values=-1)
+    band = np.zeros_like(lit)
+    h, w = lit.shape
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            if dy == 0 and dx == 0:
+                continue
+            n_lit = padded_lit[1 + dy:1 + dy + h, 1 + dx:1 + dx + w]
+            n_sphere = padded_sphere[1 + dy:1 + dy + h, 1 + dx:1 + dx + w]
+            band |= lit & ~n_lit & (n_sphere == sphere)
+    return band
+
+
 def evaluate_direct(np, candidate, reference, masks, spheres):
-    """Per metallic row: p99 and max (outside the quadrature mask) over lit ROI pixels."""
+    """Per metallic row: p99 and max (outside the quadrature mask) over lit ROI
+    pixels, the shadow terminator excluded (see terminator_band)."""
     gate = THRESHOLDS["direct"]
-    lit = masks["roi"] & masks["lit"]
+    lit = masks["roi"] & masks["lit"] & ~terminator_band(np, masks["lit"], masks["sphere"])
     error_all, floor = relative_error(np, candidate, reference, lit)
     narrow = masks["narrow"][lit]
     sphere = masks["sphere"][lit]
