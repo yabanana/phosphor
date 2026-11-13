@@ -117,7 +117,7 @@ std::vector<TransmissionScenarioSpec> specs() {
         s.cameraDistance = 4.5f;
         all.push_back(std::move(s));
     }
-    // 5. SINGLE-SIDED closed meshes (doubleSided = false, the default): a lens sphere, a rotated cube and an absorbing
+    // 5. SINGLE-SIDED closed meshes (doubleSided = false, the default): a lens sphere, a yawed cube and an absorbing
     // sphere.  The exit surface of each is a back face of its own mesh: today's back-face rejection never finds it.
     {
         TransmissionScenarioSpec s;
@@ -128,7 +128,7 @@ std::vector<TransmissionScenarioSpec> specs() {
         cube.center = {0.0f, 1.0f, 0.0f};
         cube.scale = {0.8f, 0.8f, 0.8f};
         cube.yawDegrees = 25.0f;
-        cube.pitchDegrees = 15.0f;
+        cube.pitchDegrees = 0.0f; // no top face: its mirror reflection of the checkerboard is not part of the opaque control's p95 (measured 17 %)
         cube.thickness = 1.0f;
         s.glass.push_back(cube);
         GlassObject absorbing = sphere({1.3f, 1.0f, 0.0f}, 0.0f, 1.5f, 0.8f);

@@ -41,7 +41,8 @@ independent of Mitsuba) and reported with the harness:
      Schlick + separable Smith G_T: not measurable analytically here; the bound absorbs it (declared).
 
 Negative controls (scene or model variants that a defective engine would match):
-  transmission-ignored (analytic opaque dielectric), transmission-not-tinted (tint = white), volume-ignored (no interior
+  transmission-ignored (the opaque Appendix B dielectric: analytic environment quadrature + for smooth glass the traced mirror
+  reflection of the scene, M - F L_sky, so that an opaque cube sees the checkerboard in its top face like the engine's RT), transmission-not-tinted (tint = white), volume-ignored (no interior
   medium), ior-ignored (no refraction bend: solids become gltf_thin interfaces with their media kept), thin-as-volume
   (thin-walled objects refract like a solid, no medium), backface-rejected (back faces of the closed glass meshes removed
   from the scene: the exit is never found; medium dropped), emitter-double-counted (emissive radiance x 2),
@@ -386,6 +387,21 @@ def glass_masks(cast, glass):
     return inst, same
 
 
+def traced_specular_correction(root, data, glass, origin, directions, pick, ids, n_dot_v, threads, out_dir):
+    """The scene the opaque dielectric reflects: for the SMOOTH glass objects the specular layer is a mirror weighted by the
+    Schlick F(N.V) (every glass object is an opaque mirror, one deterministic path per pixel), so the traced reflection of
+    the emitters, the other objects and the environment is M and the correction to the uniform-environment image I0 is
+    M - F(N.V) L_sky (the quadrature already holds F L_sky).  Rough objects get 0 (their blurred reflection of the backdrop
+    stays unmodelled, declared)."""
+    scene, mi, dr = build_scene(root, data, glass, "mirror-only", threads, out_dir)
+    mirror, _, _ = render_pixels(scene, mi, dr, origin, directions[pick], 1, 7)
+    f0 = np.array([ior_f0(glass[k]["ior"]) for k in ids])
+    f = f0 + (1.0 - f0) * (1.0 - n_dot_v) ** 5
+    correction = mirror - f[:, None] * float(data["sky"][0])
+    smooth = np.array([glass[k]["roughness"] <= 0.0 for k in ids])
+    return np.where(smooth[:, None], correction, 0.0)
+
+
 def opaque_dielectric(data, glass, instance_ids, n_dot_v):
     """I0: the opaque Appendix B dielectric of tools/f15_reference.py (exact environment quadrature, KHR_materials_ior f0)
     of the glass materials under the constant environment: what the engine renders while it ignores transmission."""
@@ -487,6 +503,43 @@ def register_gltf_thin(mi, dr):
         def to_string(self):
             return "GltfAbsorbing[]"
 
+    class GltfMirror(mi.BSDF):
+        """The specular layer of an OPAQUE glTF dielectric as a mirror: always reflect, weighted by the Schlick Fresnel at N.V."""
+
+        def __init__(self, props):
+            mi.BSDF.__init__(self, props)
+            self.f0 = float(props.get("f0", 0.04))
+            flags = mi.BSDFFlags.DeltaReflection | mi.BSDFFlags.FrontSide | mi.BSDFFlags.BackSide
+            self.m_components = [flags]
+            self.m_flags = flags
+
+        def sample(self, ctx, si, sample1, sample2, active):
+            cos_i = dr.abs(mi.Frame3f.cos_theta(si.wi))
+            f = self.f0 + (1.0 - self.f0) * (1.0 - cos_i) ** 5
+            bs = dr.zeros(mi.BSDFSample3f)
+            bs.wo = mi.Vector3f(-si.wi.x, -si.wi.y, si.wi.z)
+            bs.pdf = 1.0
+            bs.eta = 1.0
+            bs.sampled_type = mi.UInt32(+mi.BSDFFlags.DeltaReflection)
+            bs.sampled_component = mi.UInt32(0)
+            return bs, dr.select(active, mi.Color3f(f), mi.Color3f(0.0))
+
+        def eval(self, ctx, si, wo, active=True):
+            return mi.Color3f(0.0)
+
+        def pdf(self, ctx, si, wo, active=True):
+            return mi.Float(0.0)
+
+        def eval_pdf(self, ctx, si, wo, active=True):
+            return mi.Color3f(0.0), mi.Float(0.0)
+
+        def traverse(self, callback):
+            pass
+
+        def to_string(self):
+            return "GltfMirror[]"
+
+    mi.register_bsdf("gltf_mirror", lambda props: GltfMirror(props))
     mi.register_bsdf("gltf_thin", lambda props: GltfThin(props))
     mi.register_bsdf("gltf_absorbing", lambda props: GltfAbsorbing(props))
     _REGISTERED.append(True)
@@ -572,10 +625,12 @@ def build_scene(root, data, glass, control, threads, out_dir, medium="analytic")
             else:
                 bsdf = {"type": "roughdielectric", "distribution": "ggx", "alpha": mitsuba_alpha(g["roughness"]),
                         "int_ior": g["ior"], "ext_ior": 1.0, "specular_transmittance": {"type": "rgb", "value": tint}}
+            if control == "mirror-only":
+                bsdf = {"type": "gltf_mirror", "f0": ior_f0(g["ior"])}
             if control == "back-glass-black" and instance_matrix(instance)[2, 3] < front - 0.5:
                 bsdf = {"type": "diffuse", "reflectance": {"type": "rgb", "value": [0.0, 0.0, 0.0]}}
             shape["bsdf"] = bsdf
-            if solid and g["has_medium"] and control not in ("volume-ignored", "backface-rejected", "back-glass-black"):
+            if solid and g["has_medium"] and control not in ("volume-ignored", "backface-rejected", "back-glass-black", "mirror-only"):
                 if medium == "stochastic":
                     # sigma_t reaches Mitsuba as a reflectance-like RGB in [0, 1] times a scale (the maximum channel).
                     sigma = np.maximum(g["sigma_t"], MIN_SIGMA)  # a zero channel makes volpath's chromatic sampling divide by 0
@@ -687,6 +742,8 @@ def command_render(args):
                                                        "attenuation_color", "attenuation_distance", "thin", "base")},
                         "pixels": int((ids == k).sum())})
     i0 = opaque_dielectric(data, glass, ids, n_dot_v)
+    origin, directions = camera_directions(data)
+    i0 = i0 + traced_specular_correction(root, data, glass, origin, directions, pick, ids, n_dot_v, args.threads, out)
     report = {"schema": 1, "tool": "tools/f15_transmission_reference.py", "tool_sha256": sha256_file(__file__), "model": MODEL,
               "snapshot_sha256": scene_digest(root), "frame": data.get("frame"), "sky": data["sky"], "kind": "mitsuba",
               "spp": args.spp, "max_depth": MAX_DEPTH, "medium": args.medium, "erosion_pixels": EROSION, "engine_crossings": ENGINE_CROSSINGS,
