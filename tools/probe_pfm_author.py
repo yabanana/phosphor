@@ -43,11 +43,13 @@ def analytic_gradient(d):
     return tuple(a + (b - a) * w for a, b in zip(low, high))
 
 
-def write_pfm(path, rows):
-    """rows: top-down list of rows of (r, g, b)."""
+def write_pfm(path, rows, row_order="bottom-up"):
+    """rows: top-down list of rows of (r, g, b). PFM stores the bottom row
+    first; row_order="top-down" writes the common row-order bug on purpose
+    (negative control input)."""
     with open(path, "wb") as f:
         f.write(b"PF\n%d %d\n-1.0\n" % (SIDE, SIDE))
-        for row in reversed(rows):  # PFM stores the bottom row first
+        for row in (reversed(rows) if row_order == "bottom-up" else rows):
             f.write(b"".join(struct.pack("<3f", *texel) for texel in row))
 
 
@@ -55,6 +57,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--pattern", choices=("analytic-gradient",), default="analytic-gradient")
+    parser.add_argument("--row-order", choices=("bottom-up", "top-down"), default="bottom-up",
+                        help="top-down writes rows in the wrong PFM order (negative control input)")
     args = parser.parse_args(argv)
     args.out.mkdir(parents=True, exist_ok=False)
     digests = {}
@@ -64,10 +68,10 @@ def main(argv=None):
             t = (y + 0.5) / SIDE * 2.0 - 1.0
             rows.append([analytic_gradient(face_direction(face, (x + 0.5) / SIDE * 2.0 - 1.0, t)) for x in range(SIDE)])
         path = args.out / (face + ".pfm")
-        write_pfm(path, rows)
+        write_pfm(path, rows, args.row_order)
         digests[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
     (args.out / "probe-author.json").write_text(json.dumps(
-        {"schema": 1, "writer": "tools/probe_pfm_author.py", "pattern": args.pattern, "side": SIDE,
+        {"schema": 1, "writer": "tools/probe_pfm_author.py", "pattern": args.pattern, "row_order": args.row_order, "side": SIDE,
          "convention": "Metal cube faces px nx py ny pz nz, t top-down, PFM bottom-up", "sha256": digests}, indent=1) + "\n")
     print("authored", args.pattern, "probe at", args.out)
 

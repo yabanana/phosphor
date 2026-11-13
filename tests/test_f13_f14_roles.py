@@ -15,7 +15,7 @@ class Roles(unittest.TestCase):
             self.cases = {c["name"]: c for c in runner.make_cases(pathlib.Path(tmp), 300, "fallback")}
 
     def test_every_case_has_a_declared_role(self):
-        allowed = {"independent-clip", "numerical", "full-rate-pair", "repeatability-pair", "control", "functional"}
+        allowed = {"independent-clip", "numerical", "full-rate-pair", "repeatability-pair", "control", "functional", "cross-check"}
         for name, case in self.cases.items():
             self.assertIn(case["reference_role"], allowed, name)
 
@@ -92,6 +92,14 @@ class Roles(unittest.TestCase):
         self.assertFalse(runner.gating_passed({"functional_passed": False}, "control"))
         self.assertFalse(runner.gating_passed(dict(ok), "repeatability-pair"))
         self.assertTrue(runner.gating_passed(dict(ok, repeatability={"passed": True}), "repeatability-pair"))
+        # Cross-check (F13.5 cooked probe): passes only on a computed in-tolerance
+        # comparison; its negative only on a computed out-of-tolerance one.
+        self.assertFalse(runner.gating_passed(dict(ok), "cross-check"))
+        self.assertTrue(runner.gating_passed(dict(ok, cross_check={"passed": True, "max_abs_difference": 0.0}), "cross-check"))
+        negative = {"expected_cross_check_failure": True}
+        self.assertFalse(runner.gating_passed(dict(ok, cross_check={"passed": False, "error": "x"}), "cross-check", negative))
+        self.assertTrue(runner.gating_passed(dict(ok, cross_check={"passed": False, "max_abs_difference": 0.08}), "cross-check", negative))
+        self.assertFalse(runner.gating_passed(dict(ok, cross_check={"passed": True, "max_abs_difference": 0.0}), "cross-check", negative))
 
     def test_f14_2_and_f14_3_cases_follow_the_plan(self):
         c = self.cases
@@ -177,6 +185,38 @@ class Roles(unittest.TestCase):
             r = runner.repeatability(a, b, 3)
             self.assertFalse(r["passed"]); self.assertEqual(r["differing_frames"], ["frame-000002.pfm"])
             self.assertAlmostEqual(r["max_abs_difference"], 0.5)
+
+
+    def test_cooked_probe_is_a_cross_check_with_a_flipped_negative(self):
+        c = self.cases
+        self.assertEqual(c["probe-parallax-analytic"]["reference_role"], "control")
+        for name in ("probe-parallax-cooked", "negative-f13-probe-cooked-rows"):
+            self.assertEqual(c[name]["reference_role"], "cross-check", name)
+            self.assertEqual(c[name]["cross_check_of"], "probe-parallax-analytic")
+        self.assertTrue(c["negative-f13-probe-cooked-rows"]["expected_cross_check_failure"])
+        self.assertEqual(c["probe-parallax-cooked"]["probe_author"], "bottom-up")
+        self.assertEqual(c["negative-f13-probe-cooked-rows"]["probe_author"], "top-down")
+        # The twin differs from the cooked run only by the cooked input.
+        cooked = c["probe-parallax-cooked"]["flags"]
+        i = cooked.index("--reflection-probe")
+        self.assertEqual(cooked[:i] + cooked[i + 2:], c["probe-parallax-analytic"]["flags"])
+
+    def test_cross_check_measures_every_frame(self):
+        import struct
+        with tempfile.TemporaryDirectory() as tmp:
+            a, b = pathlib.Path(tmp, "a"), pathlib.Path(tmp, "b"); a.mkdir(); b.mkdir()
+            def write(folder, name, value):
+                (folder / name).write_bytes(b"PF\n1 1\n-1\n" + struct.pack("<fff", value, value, value))
+            for i in range(3):
+                write(a, f"frame-{i:06d}.pfm", 1.0); write(b, f"frame-{i:06d}.pfm", 1.0 + 5e-5)
+            r = runner.cross_check(a, b, 3)
+            self.assertTrue(r["passed"]); self.assertLessEqual(r["max_abs_difference"], 1e-4)
+            write(b, "frame-000001.pfm", 1.25)
+            r = runner.cross_check(a, b, 3)
+            self.assertFalse(r["passed"]); self.assertEqual(r["worst_frame"], "frame-000001.pfm")
+            self.assertAlmostEqual(r["max_abs_difference"], 0.25)
+            with self.assertRaises(ValueError):
+                runner.cross_check(a, b, 4)
 
 
 if __name__ == "__main__":

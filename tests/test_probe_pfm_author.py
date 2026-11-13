@@ -48,6 +48,17 @@ class Files(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 author.main(["--out", str(out)])
 
+    def test_top_down_row_order_is_the_flipped_negative(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            good, bad = pathlib.Path(tmp) / "good", pathlib.Path(tmp) / "bad"
+            author.main(["--out", str(good)])
+            author.main(["--out", str(bad), "--row-order", "top-down"])
+            head = len(b"PF\n64 64\n-1.0\n")
+            a, b = (good / "px.pfm").read_bytes()[head:], (bad / "px.pfm").read_bytes()[head:]
+            row = 64 * 12
+            self.assertEqual(a[:row], b[63 * row:])  # same rows, opposite order
+            self.assertNotEqual(a, b)
+
 
 if __name__ == "__main__":
     unittest.main()
