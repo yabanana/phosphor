@@ -102,4 +102,22 @@ PHOSPHOR_LOBE_FN float transmissionMicrofacetWeight(float iN, float oN, float iH
     return PHOSPHOR_LOBE_ABS(iH) * g / d;
 }
 
+/// Smith G1 of the GGX distribution without the facet test (|cosN| the cosine to the macro normal): 2 |c| / (|c| + sqrt(a^2 + (1 - a^2) c^2)).
+PHOSPHOR_LOBE_FN float transmissionG1Plain(float cosN, float alpha) {
+    const float c = PHOSPHOR_LOBE_ABS(cosN);
+    const float a2 = alpha * alpha;
+    return 2.0f * c / transmissionMax(c + PHOSPHOR_LOBE_SQRT(a2 + (1.0f - a2) * c * c), 1.0e-12f);
+}
+
+/// KHR_materials_transmission thin-walled specular_btdf (README, non-normative): the GGX D of the half vector H_T = normalize(V + L')
+/// with L' the light mirrored to the front side, times the SEPARABLE Smith G_T / (4 |N.L| N.V) (= nu_T): the value of f_t without the Fresnel
+/// factor, the tint and the cosine.  `nlAbs` = |N.L|, `nv` = N.V, `nh` = N.H_T (all > 0, else 0).
+PHOSPHOR_LOBE_FN float transmissionThinBtdf(float nlAbs, float nv, float nh, float alpha) {
+    if (!(nlAbs > 0.0f && nv > 0.0f && nh > 0.0f)) return 0.0f;
+    const float a2 = alpha * alpha;
+    const float d = nh * nh * (a2 - 1.0f) + 1.0f;
+    const float D = a2 / (3.14159265358979323846f * d * d);
+    return D * transmissionG1Plain(nlAbs, alpha) * transmissionG1Plain(nv, alpha) / (4.0f * nlAbs * nv);
+}
+
 } // namespace phosphor

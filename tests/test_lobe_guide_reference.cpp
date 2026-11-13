@@ -2,7 +2,9 @@
 #include <doctest/doctest.h>
 #include "renderer/lobe_guide_reference.h"
 
+#include <cmath>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 using namespace phosphor;
@@ -89,9 +91,9 @@ TEST_CASE("lobe guide reference: resolved parameters of ior/specular") {
     // A base material, a union without the bit and a feature the resolve does not resolve yet: features 0.
     CHECK(expectedLobeParams(GPUMaterial{}, ext, MATERIAL_FEATURE_SPECULAR_IOR).params.features == 0);
     CHECK(expectedLobeParams(extendedMaterial(0), ext, 0).params.features == 0);
-    GPUMaterial transmissive{};
-    transmissive.flags = MATERIAL_FEATURE_TRANSMISSION << MATERIAL_FEATURE_SHIFT;
-    CHECK(expectedLobeParams(transmissive, ext, MATERIAL_FEATURES_ALL).params.features == 0);
+    GPUMaterial layered{};
+    layered.flags = MATERIAL_FEATURE_LAYERS << MATERIAL_FEATURE_SHIFT;
+    CHECK(expectedLobeParams(layered, ext, MATERIAL_FEATURES_ALL).params.features == 0);
     // Textures make the parameters unverifiable on the CPU.
     const GPUMaterialExtRecord textured[1] = {record0(1.5f, 1.0f, 1.0f, 1.0f, 1.0f, INVALID_TEXTURE_INDEX, 5u)};
     CHECK(expectedLobeParams(extendedMaterial(0), textured, MATERIAL_FEATURE_SPECULAR_IOR).unverified);
@@ -451,4 +453,59 @@ TEST_CASE("lobe guide reference: resolved weight and colour of thin subsurface, 
     bool valid = true;
     CHECK(expectedLobeParams(subsurfaceMaterial(15), ext, MATERIAL_FEATURE_SUBSURFACE, &valid).unverified);
     CHECK_FALSE(valid);
+}
+
+// F15.1 (ticket 13): transmission and volume.  Record 0 carries the ior (shared), record 1 the factor, the mesh-local thickness and the medium;
+// the thickness is multiplied by the instance scale, a volume without transmission is not published, textures make the record unverifiable.
+namespace {
+GPUMaterialExtRecord transmissionRecord(float factor, float thickness, float r, float g, float b, float distance,
+                                        u32 factorTex = INVALID_TEXTURE_INDEX, u32 thicknessTex = INVALID_TEXTURE_INDEX) {
+    GPUMaterialExt1 e{};
+    e.anisotropyTex = e.iridescenceFactorTex = e.iridescenceThicknessTex = INVALID_TEXTURE_INDEX;
+    e.transmissionFactor = factor;
+    e.transmissionTex = factorTex;
+    e.volumeThickness = thickness;
+    e.volumeThicknessTex = thicknessTex;
+    e.attenuationColor[0] = r; e.attenuationColor[1] = g; e.attenuationColor[2] = b;
+    e.attenuationDistance = distance;
+    GPUMaterialExtRecord rec{};
+    std::memcpy(&rec, &e, sizeof(e));
+    return rec;
+}
+GPUMaterial glassMaterial(u32 extensionIndex, u32 bits) {
+    GPUMaterial m{};
+    m.flags = bits << MATERIAL_FEATURE_SHIFT;
+    m.extensionIndex = extensionIndex;
+    return m;
+}
+} // namespace
+
+TEST_CASE("lobe guide reference: resolved factor, world thickness and medium of transmission and volume") {
+    const float inf = std::numeric_limits<float>::infinity();
+    const GPUMaterialExtRecord ext[8] = {record0(2.0f, 1.0f, 1.0f, 1.0f, 1.0f), transmissionRecord(0.75f, 0.8f, 0.5f, 0.75f, 1.0f, 0.6f),
+                                         record0(1.5f, 1.0f, 1.0f, 1.0f, 1.0f), transmissionRecord(1.0f, 1.0f, 1.0f, 1.0f, 1.0f, inf),
+                                         record0(1.5f, 1.0f, 1.0f, 1.0f, 1.0f), transmissionRecord(1.0f, 0.5f, 1.0f, 1.0f, 1.0f, inf, 5u),
+                                         record0(1.5f, 1.0f, 1.0f, 1.0f, 1.0f), transmissionRecord(1.0f, 0.5f, 1.0f, 1.0f, 1.0f, inf, INVALID_TEXTURE_INDEX, 6u)};
+    const u32 both = MATERIAL_FEATURE_TRANSMISSION | MATERIAL_FEATURE_VOLUME;
+    auto e = expectedLobeParams(glassMaterial(0, both), ext, both, nullptr, 0.5f);
+    CHECK(e.params.features == both);
+    CHECK(e.params.ior == 2.0f);
+    CHECK(e.params.transmissionFactor == 0.75f);
+    CHECK(e.params.volumeThickness == doctest::Approx(0.4f)); // 0.8 mesh-local x 0.5 instance scale
+    CHECK(e.params.attenuationColor[0] == 0.5f);
+    CHECK(e.params.attenuationDistance == 0.6f);
+    CHECK_FALSE(e.unverified);
+    // Without the volume bit only the factor and the ior are published; a volume alone has no effect.
+    e = expectedLobeParams(glassMaterial(0, MATERIAL_FEATURE_TRANSMISSION), ext, both);
+    CHECK(e.params.features == MATERIAL_FEATURE_TRANSMISSION);
+    CHECK(e.params.volumeThickness == 0.0f);
+    e = expectedLobeParams(glassMaterial(0, MATERIAL_FEATURE_VOLUME), ext, both);
+    CHECK(e.params.features == 0);
+    // +inf attenuation distance survives the packing (half infinity).
+    const auto packed = unpackLobeGuide(packLobeGuide(expectedLobeParams(glassMaterial(2, both), ext, both).params));
+    CHECK(std::isinf(packed.attenuationDistance));
+    // Texture-dependent factor or thickness: not verifiable; a union without the bit resolves nothing.
+    CHECK(expectedLobeParams(glassMaterial(4, both), ext, both).unverified);
+    CHECK(expectedLobeParams(glassMaterial(6, both), ext, both).unverified);
+    CHECK(expectedLobeParams(glassMaterial(0, both), ext, MATERIAL_FEATURE_SPECULAR_IOR).params.features == 0);
 }

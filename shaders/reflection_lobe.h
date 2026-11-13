@@ -58,6 +58,15 @@ struct ReflectionLobe {
     bool thin;
     BsdfThin thinParams;
     float diffuseRoughness; // roughness of the diffuse complement in the composite (bsdfAnisoDiffuseRoughness), the base roughness without anisotropy
+    // F15.1 (ticket 13): KHR_materials_transmission (+ volume) with ior >= 1 (ior 0 is the permanent Fresnel = 1 mode: nothing transmits).  The
+    // transport chooses reflection or refraction per sample (pReflect = transmissionSelect of the albedo weights at N.V); the reflected lobes keep
+    // today's estimator divided by pReflect, the refraction takes (1 - F) t (1 - metallic) tint through the sampled microfacet divided by 1 - pReflect.
+    bool trans;
+    bool sampleRefract;      // this sample refracts (set by the transport's branch choice)
+    float transFactor, transIor, transThickness; // t, the ior of the medium and of the Fresnel split, the volume thickness hint in world units
+    float3 transAttenuationColor;
+    float transAttenuationDistance;
+    float pReflect;
 };
 inline ReflectionLobe reflectionLoadLobe(uint flags, uint validFlag, const device GPULobeGuide* guides, uint index, GPUDISurface s) {
     ReflectionLobe l{};
@@ -101,6 +110,22 @@ inline ReflectionLobe reflectionLoadLobe(uint flags, uint validFlag, const devic
                     l.anisoDirection = ad;
                     l.envRoughness = bsdfAnisoEnvRoughness(s.roughness, l.anisoStrength);
                     l.diffuseRoughness = bsdfAnisoDiffuseRoughness(s.roughness, l.anisoStrength);
+                }
+            }
+            if ((kMaterialFeatures & MATERIAL_FEATURE_TRANSMISSION) != 0u && (g.features & MATERIAL_FEATURE_TRANSMISSION) != 0u &&
+                u.transmissionFactor > 0.0f && u.ior >= 1.0f) {
+                float3 n = diVec(s.shadingNormal), v = diVec(s.viewDirection);
+                if (s.valid && all(isfinite(n)) && all(isfinite(v)) && dot(n, n) > 0 && dot(v, v) > 0) {
+                    n = normalize(n); v = normalize(v);
+                    l.trans = true;
+                    l.transFactor = u.transmissionFactor;
+                    l.transIor = u.ior;
+                    l.transThickness = (g.features & MATERIAL_FEATURE_VOLUME) != 0u ? u.volumeThickness : 0.0f;
+                    l.transAttenuationColor = float3(u.attenuationColor[0], u.attenuationColor[1], u.attenuationColor[2]);
+                    l.transAttenuationDistance = u.attenuationDistance;
+                    const float fe = bsdfMax3(bsdfSpecFresnel(l.spec, saturate(dot(n, v))));
+                    const float tw = (1.0f - fe) * l.transFactor * (1.0f - saturate(s.metallic)) * bsdfMax3(max(diVec(s.albedo), 0.0f));
+                    l.pReflect = phosphor::transmissionSelect(fe, tw);
                 }
             }
             if ((kMaterialFeatures & MATERIAL_FEATURE_CLEARCOAT) != 0u && (g.features & MATERIAL_FEATURE_CLEARCOAT) != 0u) {

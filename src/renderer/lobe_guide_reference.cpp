@@ -8,14 +8,16 @@
 namespace phosphor {
 
 LobeGuideExpectation expectedLobeParams(const GPUMaterial& material, std::span<const GPUMaterialExtRecord> extensions,
-                                        u32 featureUnion, bool* extensionsValid) {
+                                        u32 featureUnion, bool* extensionsValid, float instanceScale) {
     LobeGuideExpectation r{};
     if (extensionsValid) *extensionsValid = true;
     // The same expression as shadeSurface: the material's feature bits, the scene union (the value of the
     // MATERIAL_FEATURES constant) and the features the resolve resolves.
     const u32 features = (material.flags >> MATERIAL_FEATURE_SHIFT) & featureUnion & LOBE_GUIDE_RESOLVED_FEATURES;
     r.params.features = features;
-    if (features & (MATERIAL_FEATURE_SPECULAR_IOR | MATERIAL_FEATURE_CLEARCOAT | MATERIAL_FEATURE_SHEEN)) {
+    // A volume without transmission has no effect: the bit is not published (shadeSurface); transmission and volume carry the ior.
+    if (!(features & MATERIAL_FEATURE_TRANSMISSION)) r.params.features &= ~MATERIAL_FEATURE_VOLUME;
+    if (features & (MATERIAL_FEATURE_SPECULAR_IOR | MATERIAL_FEATURE_CLEARCOAT | MATERIAL_FEATURE_SHEEN | MATERIAL_FEATURE_TRANSMISSION)) {
         if (material.extensionIndex == MATERIAL_EXTENSION_INVALID || size_t(material.extensionIndex) >= extensions.size()) {
             if (extensionsValid) *extensionsValid = false;
             r.unverified = true;
@@ -23,6 +25,7 @@ LobeGuideExpectation expectedLobeParams(const GPUMaterial& material, std::span<c
         }
         GPUMaterialExt0 e0;
         std::memcpy(&e0, &extensions[material.extensionIndex], sizeof(e0));
+        if (features & MATERIAL_FEATURE_TRANSMISSION) r.params.ior = e0.ior; // the ior of the Fresnel split and of the medium (neutral 1.5 by default)
         if (features & MATERIAL_FEATURE_SPECULAR_IOR) {
             r.params.ior = e0.ior;
             // Without a texture the GPU multiplies by the half 1.0 fallback: exact.
@@ -81,6 +84,26 @@ LobeGuideExpectation expectedLobeParams(const GPUMaterial& material, std::span<c
         r.params.iridescenceIor = e1.iridescenceIor;
         r.params.iridescenceThickness = thickness;
         if (e1.iridescenceFactorTex != INVALID_TEXTURE_INDEX || e1.iridescenceThicknessTex != INVALID_TEXTURE_INDEX) r.unverified = true;
+    }
+    if (features & MATERIAL_FEATURE_TRANSMISSION) {
+        // Record 1 (GPUMaterialExt1).  shadeSurface: t = saturate(factor * tex.r) (the half 1.0 fallback without a texture), and with the
+        // volume bit the thickness (mesh-local x tex.g x the instance scale), the attenuation colour and distance.
+        if (material.extensionIndex == MATERIAL_EXTENSION_INVALID || size_t(material.extensionIndex) + 1 >= extensions.size()) {
+            if (extensionsValid) *extensionsValid = false;
+            r.unverified = true;
+            return r;
+        }
+        GPUMaterialExt1 e1;
+        std::memcpy(&e1, &extensions[material.extensionIndex + 1], sizeof(e1));
+        const float t = e1.transmissionFactor * 1.0f;
+        r.params.transmissionFactor = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+        if (e1.transmissionTex != INVALID_TEXTURE_INDEX) r.unverified = true;
+        if (r.params.features & MATERIAL_FEATURE_VOLUME) {
+            r.params.volumeThickness = e1.volumeThickness * 1.0f * instanceScale;
+            for (int c = 0; c < 3; ++c) r.params.attenuationColor[c] = e1.attenuationColor[c];
+            r.params.attenuationDistance = e1.attenuationDistance;
+            if (e1.volumeThicknessTex != INVALID_TEXTURE_INDEX) r.unverified = true;
+        }
     }
     if (features & MATERIAL_FEATURE_SUBSURFACE) {
         // Record 2 (GPUMaterialExt2).  shadeSurface publishes the bit for the thin mode (mode 0) only: weight = saturate(w * tex.a), colour =
@@ -156,7 +179,11 @@ LobeGuideCheckResult checkLobeGuide(const LobeGuideCheckInput& in) {
         }
         const u32 materialIndex = in.instances[s.instanceSlot].materialIndex;
         bool extOk = true;
-        const LobeGuideExpectation e = expectedLobeParams(in.materials[materialIndex], in.extensions, in.featureUnion, &extOk);
+        // The thinnest axis of the instance (KHR_materials_volume thickness is mesh-local), as the shaders compute it.
+        const float* m = in.instances[s.instanceSlot].modelMatrix;
+        auto column = [&](int c) { return std::sqrt(m[4 * c] * m[4 * c] + m[4 * c + 1] * m[4 * c + 1] + m[4 * c + 2] * m[4 * c + 2]); };
+        const float scale = std::fmin(column(0), std::fmin(column(1), column(2)));
+        const LobeGuideExpectation e = expectedLobeParams(in.materials[materialIndex], in.extensions, in.featureUnion, &extOk, scale);
         if (!extOk) {
             note(r, format("pixel (%u,%u): material %u has an extension group outside the mirror", x, y, materialIndex));
             continue;

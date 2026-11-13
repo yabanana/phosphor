@@ -138,6 +138,7 @@ static void resolveVisibilityPixel(constant FrameConstants &frame, const device 
     surface.uvDy = (uv0 * bary.dy[0] + uv1 * bary.dy[1] + uv2 * bary.dy[2]) * bias;
     surface.materialIndex = instance.materialIndex;
     surface.mirrored = (instance.flags & INSTANCE_FLAG_MIRRORED) != 0;
+    surface.volumeScale = min(length(model[0].xyz), min(length(model[1].xyz), length(model[2].xyz))); // ticket 13: the thickness hint in world units
     const float3 eye = float3(frame.cameraPosition[0], frame.cameraPosition[1], frame.cameraPosition[2]);
     surface.frontFacing = dot(cross(w1.xyz - w0.xyz, w2.xyz - w0.xyz), eye - surface.worldPos) > 0;
     const ShadingResult value = reuse ? cached : shadeSurface(surface, frame, materials, lights, textures, false,
@@ -167,8 +168,12 @@ static void resolveVisibilityPixel(constant FrameConstants &frame, const device 
     }
     motion.write(float4(velocity, 0, 0), pixel);
     cached.alpha = length(velocity);
+    // F15.1 (ticket 13): a transmissive pixel shows a refracted image that moves differently from the glass surface (the motion vector follows
+    // the surface), so MetalFX temporal must not trust its history: reactive like a cut-out, no kMaterialFeatures dependence.
+    const uint reactiveFlags = materials[instance.materialIndex].flags;
     const float reactiveValue = !validHistory                                          ? 1.0f
-                                : materials[instance.materialIndex].alphaCutoff > 0.0f ? 0.75f
+                                : (materials[instance.materialIndex].alphaCutoff > 0.0f ||
+                                   (reactiveFlags & (MATERIAL_FEATURE_TRANSMISSION << MATERIAL_FEATURE_SHIFT)) != 0u) ? 0.75f
                                                                                        : 0.0f;
     reactive.write(float4(reactiveValue), pixel);
 }
@@ -437,6 +442,7 @@ kernel void material_lighting_guides(
     surface.uvDy = (uv0 * bary.dy[0] + uv1 * bary.dy[1] + uv2 * bary.dy[2]) * bias;
     surface.materialIndex = instance.materialIndex;
     surface.mirrored = (instance.flags & INSTANCE_FLAG_MIRRORED) != 0;
+    surface.volumeScale = min(length(model[0].xyz), min(length(model[1].xyz), length(model[2].xyz))); // ticket 13: the thickness hint in world units
     const float3 eye = float3(frame.cameraPosition[0], frame.cameraPosition[1], frame.cameraPosition[2]);
     surface.frontFacing = dot(cross(w1.xyz - w0.xyz, w2.xyz - w0.xyz), eye - surface.worldPos) > 0;
     const ShadingResult value=shadeSurface(surface,frame,materials,lights,textures,false);

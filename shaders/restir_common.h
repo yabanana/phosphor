@@ -178,6 +178,11 @@ struct DILobe {
     // shading); the visibility ray already leaves from the light's side (diEndpointVisible flips the geometric normal towards the light).
     bool thin;
     BsdfThin thinParams;
+    // F15.1 (ticket 13): KHR_materials_transmission.  The diffuse base is mixed by 1 - t; a thin-walled surface (no volume thickness) also takes the
+    // delta lights behind it through the glTF thin BTDF (the area emitters behind it belong to the transport's straight/refracted rays).
+    bool trans;
+    float transFactor;
+    bool transThin;
 };
 inline DILobe DI_FN(diLoadLobe)(constant GPUDIParams& p, const device GPULobeGuide* guides, uint index) {
     DILobe l{};
@@ -214,6 +219,11 @@ inline DILobe DI_FN(diLoadLobe)(constant GPUDIParams& p, const device GPULobeGui
                 l.thinParams.weight = u.subsurfaceWeight;
                 l.thinParams.color = float3(u.subsurfaceColor[0], u.subsurfaceColor[1], u.subsurfaceColor[2]);
                 l.thin = bsdfThinActive(l.thinParams);
+            }
+            if ((kMaterialFeatures & MATERIAL_FEATURE_TRANSMISSION) != 0u && (g.features & MATERIAL_FEATURE_TRANSMISSION) != 0u && u.transmissionFactor > 0.0f) {
+                l.trans = true;
+                l.transFactor = u.transmissionFactor;
+                l.transThin = !((g.features & MATERIAL_FEATURE_VOLUME) != 0u && u.volumeThickness > 0.0f);
             }
         }
     }
@@ -253,6 +263,7 @@ inline float3 DI_FN(diBRDFLobe)(GPUDISurface surface, DISample s, float specular
                                     albedo, metallic)
                 : bsdfSpecEval(spec, nl, nv, nh, vh, albedo, metallic, bsdfAlpha(surface.roughness));
             if ((kMaterialFeatures & MATERIAL_FEATURE_SUBSURFACE) != 0u && lobe.thin) lobes.diffuse *= bsdfThinReflectScale(lobe.thinParams);
+            if ((kMaterialFeatures & MATERIAL_FEATURE_TRANSMISSION) != 0u && lobe.trans) lobes.diffuse *= 1.0f - lobe.transFactor; // ticket 13
             result = (lobes.diffuse + specularWeight * lobes.specular) * incident * nl;
             // F15.1 (ticket 10): the sheen layer between the material and the coat.  The transport does not sample sheen: the
             // emitter share of the sheen lobe is 1 (DI owns it), the material keeps its own emitter weights; the albedo
@@ -267,6 +278,12 @@ inline float3 DI_FN(diBRDFLobe)(GPUDISurface surface, DISample s, float specular
             const float nls = dot(n, s.wi);
             if (nls < 0 && dot(v + s.wi, v + s.wi) > 1e-20f)
                 result = bsdfThinTransmitted(lobe.thinParams, saturate(dot(v, normalize(v + s.wi))), saturate(surface.metallic)) * incident * (-nls);
+        }
+        // Ticket 13: a DELTA light behind a thin-walled transmissive surface lights it through the glTF thin BTDF (bsdfThinGlassTransmitted).
+        if ((kMaterialFeatures & MATERIAL_FEATURE_TRANSMISSION) != 0u && lobe.trans && lobe.transThin && s.delta && dot(n, s.wi) < 0) {
+            const BsdfDielectricSpec spec = bsdfSpecularParams(lobe.ior, lobe.specularFactor, lobe.specularColor);
+            result = bsdfThinGlassTransmitted(spec, lobe.transFactor, saturate(surface.metallic), max(diVec(surface.albedo), 0.0f), n, v, s.wi,
+                                              bsdfAlpha(surface.roughness)) * incident;
         }
         if ((kMaterialFeatures & MATERIAL_FEATURE_CLEARCOAT) != 0u && lobe.coat) {
             float3 nc = lobe.coatNormal;

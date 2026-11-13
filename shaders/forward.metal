@@ -94,6 +94,7 @@ struct SurfaceVertexOut {
     float4 previousClip;
     uint historyValid [[flat]];
     uint instanceSlot [[flat]];
+    float volumeScale [[flat]]; // F15.1 (ticket 13): min column norm of the model matrix (KHR_materials_volume thickness in world units)
 };
 
 vertex SurfaceVertexOut forward_surface_vs(uint vertexId [[vertex_id]], uint instanceId [[instance_id]],
@@ -127,6 +128,7 @@ vertex SurfaceVertexOut forward_surface_vs(uint vertexId [[vertex_id]], uint ins
     out.previousClip = out.unjitteredClip;
     out.historyValid = 0;
     out.instanceSlot = visible[instanceId];
+    out.volumeScale = min(length(model[0].xyz), min(length(model[1].xyz), length(model[2].xyz)));
     if (temporal.historyValid) {
         const device GPUInstance &old = previous[visible[instanceId]];
         out.historyValid = old.generation == gi.generation && (old.flags & INSTANCE_FLAG_VALID);
@@ -188,7 +190,8 @@ fragment ForwardSurfaceOutput forward_surface_fs(SurfaceVertexOut in [[stage_in]
                          dfdy(in.uv) * exp2(temporal.mipBias),
                          in.materialIndex,
                          in.mirrored,
-                         frontFacing};
+                         frontFacing,
+                         in.volumeScale};
     const ShadingResult value = shadeSurface(surface, frame, materials, lights, textures);
     if (value.alpha < materials[in.materialIndex].alphaCutoff)
         discard_fragment();
@@ -202,7 +205,7 @@ fragment ForwardSurfaceOutput forward_surface_fs(SurfaceVertexOut in [[stage_in]
     out.diffuseAlbedo = half4(half3(value.diffuseAlbedo), 1.0h);
     out.specularAlbedo = half4(half3(value.specularAlbedo), 1.0h);
     out.motion = half2(temporalMotion(in.unjitteredClip, in.previousClip, temporal, in.historyValid != 0));
-    out.reactive = in.historyValid == 0 ? 1.0h : materials[in.materialIndex].alphaCutoff > 0 ? 0.75h : 0.0h;
+    out.reactive = in.historyValid == 0 ? 1.0h : (materials[in.materialIndex].alphaCutoff > 0 || (materials[in.materialIndex].flags & (MATERIAL_FEATURE_TRANSMISSION << MATERIAL_FEATURE_SHIFT)) != 0) ? 0.75h : 0.0h;
     return out;
 }
 // ICB pipelines inherit buffers. Lighting textures use the same direct
@@ -238,7 +241,8 @@ fragment ForwardLitSurfaceOutput forward_surface_lit_fs(SurfaceVertexOut in [[st
                          dfdy(in.uv) * exp2(temporal.mipBias),
                          in.materialIndex,
                          in.mirrored,
-                         frontFacing};
+                         frontFacing,
+                         in.volumeScale};
     const ShadingResult value = shadeSurface(surface, frame, materials, lights, textures, true,
         (lighting.flags & 1u) ? lightingTextures[0].tex.read(uint2(in.position.xy)).x : 1.0f, lighting.sunIndex,
         (lighting.flags & 2u) != 0, (lighting.flags & 2u) ? lightingTextures[1].tex.read(uint2(in.position.xy)).xyz : float3(0),
@@ -255,7 +259,7 @@ fragment ForwardLitSurfaceOutput forward_surface_lit_fs(SurfaceVertexOut in [[st
     out.diffuseAlbedo = half4(half3(value.diffuseAlbedo), 1.0h);
     out.specularAlbedo = half4(half3(value.specularAlbedo), 1.0h);
     out.motion = half2(temporalMotion(in.unjitteredClip, in.previousClip, temporal, in.historyValid != 0));
-    out.reactive = in.historyValid == 0 ? 1.0h : materials[in.materialIndex].alphaCutoff > 0 ? 0.75h : 0.0h;
+    out.reactive = in.historyValid == 0 ? 1.0h : (materials[in.materialIndex].alphaCutoff > 0 || (materials[in.materialIndex].flags & (MATERIAL_FEATURE_TRANSMISSION << MATERIAL_FEATURE_SHIFT)) != 0) ? 0.75h : 0.0h;
     return out;
 }
 
@@ -271,7 +275,7 @@ static ShadingResult diReceiverResolve(SurfaceVertexOut in, bool frontFacing, co
     const device GPUMaterial* materials, const device GPULight* lights, const device TextureHandle* textures,
     constant GPUTemporalParams& temporal) {
     SurfaceInput surface{in.worldPos,in.normal,in.tangent,in.uv,dfdx(in.uv)*exp2(temporal.mipBias),
-                         dfdy(in.uv)*exp2(temporal.mipBias),in.materialIndex,in.mirrored,frontFacing};
+                         dfdy(in.uv)*exp2(temporal.mipBias),in.materialIndex,in.mirrored,frontFacing,in.volumeScale};
     const auto value=shadeSurface(surface,frame,materials,lights,textures,true);
     if(value.alpha<materials[in.materialIndex].alphaCutoff)discard_fragment();
     return value;

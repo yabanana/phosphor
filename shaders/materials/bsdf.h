@@ -13,6 +13,7 @@
 #include "renderer/dfg_table.h"
 #include "renderer/sheen_table.h"
 #include "renderer/lobe_select.h"
+#include "renderer/transmission_math.h"
 using namespace metal;
 
 // GGX (Trowbridge-Reitz) normal distribution; alpha = roughness^2.
@@ -535,4 +536,38 @@ inline float bsdfThinEnvRatio(float NdotV) { return 1.0f - 0.16f * clamp(NdotV, 
 // `diffuseWeight` is the declared 1 - E_d of the front diffuse (before the (1 - w) scaling).
 inline float3 bsdfThinEnvWeight(BsdfThin t, float metallic, float diffuseWeight, float NdotV) {
     return (t.weight * (1.0f - metallic) * diffuseWeight * bsdfThinEnvRatio(NdotV)) * t.color;
+}
+
+// ---------------------------------------------------------------------------
+// F15.1 (ticket 13): KHR_materials_transmission + KHR_materials_volume.  glTF layering (research/khr-materials.md section 5):
+//   dielectric = fresnel_mix(ior, base = mix(diffuse(baseColor), specular_btdf * baseColor, t), layer = specular_brdf)
+// so the reflected lobes and the Fresnel layer stay as they are, the diffuse term is scaled by 1 - t (every primary path) and the
+// transmitted lobe adds (1 - max F) t (1 - metallic) baseColor f_t.  Thin-walled (thicknessFactor 0, "two surfaces back to back"):
+// f_t is the README's specular_btdf of the light mirrored to the front side (transmissionThinBtdf), lit by lights behind the surface.
+// A closed volume refracts: its transmitted radiance is traced (RT) or declared (probes/environment along the refracted direction, with
+// the path length = the volume thickness hint; decision 09).  Separable Smith G everywhere (glTF's G_T, Mitsuba's roughdielectric).
+// ---------------------------------------------------------------------------
+// f_t |N.L| for one light behind the surface (N.L < 0) of a thin-walled transmissive material, without the radiance: (1 - max F(V.H_T))
+// t (1 - metallic) tint f_t(V, L) |N.L|.  `spec` is the dielectric Fresnel of the layer (ior/specular).
+inline float3 bsdfThinGlassTransmitted(BsdfDielectricSpec spec, float t, float metallic, float3 tint, float3 N, float3 V, float3 L, float alpha) {
+    const float nlAbs = -dot(N, L), nv = dot(N, V);
+    if (!(nlAbs > 0.0f && nv > 0.0f)) return float3(0.0f);
+    const float3 Lm = L + (2.0f * nlAbs) * N; // L mirrored through the surface
+    if (!(dot(V + Lm, V + Lm) > 1e-20f)) return float3(0.0f);
+    const float3 H = normalize(V + Lm);
+    const float nh = dot(N, H), vh = dot(V, H);
+    if (!(nh > 0.0f && vh > 0.0f)) return float3(0.0f);
+    const float F = bsdfMax3(bsdfSpecFresnel(spec, saturate(vh)));
+    return ((1.0f - F) * t * (1.0f - metallic) * phosphor::transmissionThinBtdf(nlAbs, nv, nh, alpha) * nlAbs) * tint;
+}
+// The thin-walled transmitted radiance weight of the declared environment/probe term: (1 - max E) t (1 - metallic) tint T, the
+// (1 - E) = `diffuseWeight` of the layer (bsdfSpecEnv*.diffuseWeight, before the 1 - t scaling) and T the volume absorption.
+inline float3 bsdfTransmissionEnvWeight(float t, float metallic, float diffuseWeight, float3 tint, float3 absorption) {
+    return (t * (1.0f - metallic) * diffuseWeight) * tint * absorption;
+}
+// exp(-sigma_t * length) per channel over the volume thickness hint (decision 09: the only path length without RT); 1 without a medium.
+inline float3 bsdfVolumeAbsorption(float3 attenuationColor, float attenuationDistance, float length) {
+    return float3(phosphor::transmissionBeerLambert(attenuationColor.x, attenuationDistance, length),
+                  phosphor::transmissionBeerLambert(attenuationColor.y, attenuationDistance, length),
+                  phosphor::transmissionBeerLambert(attenuationColor.z, attenuationDistance, length));
 }

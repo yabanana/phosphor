@@ -27,6 +27,9 @@ struct SurfaceInput {
     uint materialIndex;
     uint mirrored;
     bool frontFacing;
+    // F15.1 (ticket 13): the instance scale along its thinnest axis (min column norm of the model matrix): KHR_materials_volume's
+    // thicknessFactor is mesh-local, the lobe guide and the declared --rt off model carry the world thickness.  1 where unknown.
+    float volumeScale = 1.0f;
 };
 struct ShadingResult {
     float3 color;
@@ -108,7 +111,7 @@ static float3 sunDiskSpecular(float3 N, float3 V, float3 L, float3 albedo, float
 // F15.1: the same two functions for a material with KHR_materials_ior/specular (bsdf.h, section
 // "KHR_materials_ior + KHR_materials_specular"); the base versions above stay untouched.
 static float3 evaluateLightSpec(float3 N, float3 V, float3 L, float3 radiance, float3 albedo, float metallic,
-                                float roughness, BsdfDielectricSpec spec, BsdfIrid irid = bsdfIridNone()) {
+                                float roughness, BsdfDielectricSpec spec, BsdfIrid irid = bsdfIridNone(), float diffuseScale = 1.0f) {
     const float3 H = normalize(V + L);
     const float NdotL = saturate(dot(N, L));
     const float NdotV = max(dot(N, V), 1e-4);
@@ -120,7 +123,7 @@ static float3 evaluateLightSpec(float3 N, float3 V, float3 L, float3 radiance, f
     // F15.1 (ticket 12): with a film the Fresnel is evaluated at this sample's V.H (bsdfSpecEvalIrid; no film = bsdfSpecEval's expression).
     const float a = bsdfAlpha(roughness);
     const BsdfBaseLobes lobes = bsdfSpecEvalIrid(spec, irid, bsdfDGGX(NdotH, a) * bsdfVSmithGGXCorrelated(NdotV, NdotL, a), VdotH, albedo, metallic);
-    return (lobes.diffuse + lobes.specular) * radiance * NdotL;
+    return (lobes.diffuse * diffuseScale + lobes.specular) * radiance * NdotL; // ticket 13: the diffuse base of a transmissive material is mixed by 1 - t
 }
 
 static float3 sunDiskSpecularSpec(float3 N, float3 V, float3 L, float3 albedo, float metallic, float roughness,
@@ -184,7 +187,7 @@ static float3 sunThinDiffuse(float3 N, float3 V, float3 L, float3 albedo, float 
 // F15.1 (ticket 11): KHR_materials_anisotropy.  The ior/specular dielectric (or the metal) with the anisotropic D V of bsdf.h in place
 // of the isotropic GGX; the same two functions as evaluateLightSpec / sunDiskSpecularSpec otherwise.
 static float3 evaluateLightAniso(float3 N, float3 V, float3 L, float3 radiance, float3 albedo, float metallic,
-                                 BsdfDielectricSpec spec, BsdfAniso an, BsdfIrid irid = bsdfIridNone()) {
+                                 BsdfDielectricSpec spec, BsdfAniso an, BsdfIrid irid = bsdfIridNone(), float diffuseScale = 1.0f) {
     const float3 H = normalize(V + L);
     const float NdotL = saturate(dot(N, L));
     const float NdotV = max(dot(N, V), 1e-4);
@@ -194,7 +197,7 @@ static float3 evaluateLightAniso(float3 N, float3 V, float3 L, float3 radiance, 
         return float3(0.0);
     }
     const BsdfBaseLobes lobes = bsdfSpecEvalIrid(spec, irid, bsdfAnisoDV(an, V, L, H, NdotL, NdotV, NdotH), VdotH, albedo, metallic);
-    return (lobes.diffuse + lobes.specular) * radiance * NdotL;
+    return (lobes.diffuse * diffuseScale + lobes.specular) * radiance * NdotL;
 }
 // Sun disk of an anisotropic lobe: the disk rule keys on the NARROWEST axis alpha_b = alpha and on the reflection axis of the
 // isotropic lobe about N (the anisotropic lobe is only wider along T'): alpha >= 0.05 evaluates the lobe at the disk centre (the
@@ -238,8 +241,8 @@ inline float coatAttenuation(CoatParams coat, float3 V) {
     return 1.0f - coat.factor * bsdfCoatFresnel(abs(dot(coat.normal, V)));
 }
 static float3 evaluateLightCoat(float3 N, float3 V, float3 L, float3 radiance, float3 albedo, float metallic, float roughness,
-                                BsdfDielectricSpec spec, CoatParams coat, BsdfIrid irid = bsdfIridNone()) {
-    float3 result = evaluateLightSpec(N, V, L, radiance, albedo, metallic, roughness, spec, irid) * coatAttenuation(coat, V);
+                                BsdfDielectricSpec spec, CoatParams coat, BsdfIrid irid = bsdfIridNone(), float diffuseScale = 1.0f) {
+    float3 result = evaluateLightSpec(N, V, L, radiance, albedo, metallic, roughness, spec, irid, diffuseScale) * coatAttenuation(coat, V);
     const float ncl = saturate(dot(coat.normal, L));
     if (ncl > 0.0f) {
         const float3 H = normalize(V + L);
@@ -274,6 +277,30 @@ static float sunDiskCoat(float3 V, float3 L, float angularRadius, CoatParams coa
         if (ncl <= 0.0f) continue;
         const float3 H = normalize(V + Lk);
         sum += weight * bsdfCoatSpecular(ncl, ncv, saturate(dot(Nc, H)), a) * ncl;
+    }
+    return sum / float(count);
+}
+
+// F15.1 (ticket 13): the thin-walled transmitted term of the sun disk (a light behind a transmissive surface), irradiance-normalised:
+// (1 / Omega) * integral over the disk of f_t |N.L| (bsdfThinGlassTransmitted without the radiance).  The lobe peaks at L = -V (straight
+// through): the disk rule of sunDiskSpecular with that axis.
+static float3 sunDiskThinGlass(float3 N, float3 V, float3 L, float3 tint, float metallic, float t, float roughness, float angularRadius,
+                               BsdfDielectricSpec spec) {
+    const float a = bsdfAlpha(roughness);
+    const float separation = acos(clamp(dot(-V, L), -1.0f, 1.0f));
+    const bool narrow = a < 0.05f && separation < 4.0f * angularRadius + 16.0f * a;
+    const uint count = !narrow ? 1u : (a < 2.0f * angularRadius ? 128u : 32u);
+    const float3 tt = normalize(cross(abs(L.z) < 0.999f ? float3(0, 0, 1) : float3(0, 1, 0), L)), b = cross(L, tt);
+    const float oneMinusCos = 1.0f - cos(angularRadius);
+    float3 sum = float3(0.0);
+    for (uint k = 0; k < count; ++k) {
+        float3 Lk = L;
+        if (count > 1u) {
+            const float z = 1.0f - (float(k) + 0.5f) / float(count) * oneMinusCos, s = sqrt(max(0.0f, 1.0f - z * z));
+            const float phi = 2.39996323f * float(k);
+            Lk = tt * (s * cos(phi)) + b * (s * sin(phi)) + L * z;
+        }
+        sum += bsdfThinGlassTransmitted(spec, t, metallic, tint, N, V, Lk, a);
     }
     return sum / float(count);
 }
@@ -382,14 +409,33 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     // dielectric (f0 0.04, f90 1) through the extended path; the film replaces the Fresnel of the specular lobe (bsdf.h).
     const bool iridOn = (kMaterialFeatures & MATERIAL_FEATURE_IRIDESCENCE) != 0u &&
                         (m.flags & (MATERIAL_FEATURE_IRIDESCENCE << MATERIAL_FEATURE_SHIFT)) != 0u;
-    const bool useSpec = specExt || coatOn || anisoOn || iridOn;
+    // F15.1 (ticket 13): KHR_materials_transmission (+ volume), same gating.  A transmissive material without the ior/specular block keeps the
+    // default dielectric (ior 1.5: f0 0.04, f90 1) through the extended path; the diffuse base is mixed by 1 - t, the volume decides
+    // thin-walled (thickness 0) or refracting (thickness > 0: RT traces it, probes/environment declare it).
+    const bool transOn = (kMaterialFeatures & MATERIAL_FEATURE_TRANSMISSION) != 0u &&
+                         (m.flags & (MATERIAL_FEATURE_TRANSMISSION << MATERIAL_FEATURE_SHIFT)) != 0u;
+    const bool volOn = transOn && (kMaterialFeatures & MATERIAL_FEATURE_VOLUME) != 0u &&
+                       (m.flags & (MATERIAL_FEATURE_VOLUME << MATERIAL_FEATURE_SHIFT)) != 0u;
+    const bool useSpec = specExt || coatOn || anisoOn || iridOn || transOn;
     // F15.1 (ticket 10): KHR_materials_sheen, same gating.  A sheen-only material keeps the base dielectric path below.
     const bool sheenOn = (kMaterialFeatures & MATERIAL_FEATURE_SHEEN) != 0u &&
                          (m.flags & (MATERIAL_FEATURE_SHEEN << MATERIAL_FEATURE_SHIFT)) != 0u;
     GPUMaterialExt0 e0{};
     if (specExt || coatOn || sheenOn) e0 = *reinterpret_cast<const device GPUMaterialExt0*>(frame.materialExtensions + m.extensionIndex);
     GPUMaterialExt1 e1{};
-    if (anisoOn || iridOn) e1 = *reinterpret_cast<const device GPUMaterialExt1*>(frame.materialExtensions + m.extensionIndex + 1u);
+    if (anisoOn || iridOn || transOn) e1 = *reinterpret_cast<const device GPUMaterialExt1*>(frame.materialExtensions + m.extensionIndex + 1u);
+    // t = saturate(factor x texture.r); the volume thickness (mesh-local x the instance scale = world) and the Beer-Lambert medium.
+    float transFactor = 0.0f, volThickness = 0.0f, volAttenuationDistance = INFINITY;
+    float3 volAttenuationColor = float3(1.0f);
+    if (transOn) {
+        transFactor = saturate(e1.transmissionFactor * float(sampleOr(textures, e1.transmissionTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).r));
+        if (volOn) {
+            volThickness = e1.volumeThickness * float(sampleOr(textures, e1.volumeThicknessTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).g) * in.volumeScale;
+            volAttenuationColor = float3(e1.attenuationColor[0], e1.attenuationColor[1], e1.attenuationColor[2]);
+            volAttenuationDistance = e1.attenuationDistance;
+        }
+    }
+    const float diffuseT = 1.0f - transFactor; // the diffuse base weight of the transmissive mix
     // Thickness = mix(min, max, texture.g) (the maximum without a texture: min (1 - t) + max t is exact at t = 1); thickness 0 disables the
     // film (strength 0 = the base model, the orchestrator's interpretation of the unspecified d = 0).
     BsdfIrid irid = bsdfIridNone();
@@ -473,6 +519,7 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
 
     const float3 camPos = float3(frame.cameraPosition[0], frame.cameraPosition[1], frame.cameraPosition[2]);
     const float3 V = normalize(camPos - in.worldPos);
+    const bool transThin = transOn && transFactor > 0.0f && !(volThickness > 0.0f); // thin-walled: two surfaces back to back, no bend
     // The lobe is resolved when a tangent frame exists; a primitive without tangents resolves it as strength 0 (the isotropic lobe).
     const bool anisoActive = anisoOn && anisoStrength > 0.0f && dot(anisoDir, anisoDir) > 1e-12f;
     const BsdfAniso aniso = bsdfAnisoFrame(N, anisoDir, roughness, anisoStrength);
@@ -505,6 +552,15 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         }
         if (!isDirectional && replaceLocal) continue;
         const float visibility = i == shadowLight ? sunVisibility : 1.0f;
+        // F15.1 (ticket 13): a light BEHIND a thin-walled transmissive surface lights it through the transmitted lobe (delta lights only: the area
+        // emitters a refracted or straight ray hits belong to the transport, decision 09).  The visible face keeps the front-hemisphere terms below.
+        if (transThin && dot(N, L) < 0.0f) {
+            if (physicalGI && isDirectional && i == shadowLight && sunAngularRadius > 0.0f)
+                color += sunDiskThinGlass(N, V, L, baseColor.rgb, metallic, transFactor, roughness, sunAngularRadius, spec) * lightColor * attenuation * visibility;
+            else
+                color += bsdfThinGlassTransmitted(spec, transFactor, metallic, baseColor.rgb, N, V, L, bsdfAlpha(roughness)) * lightColor * attenuation * visibility;
+            continue;
+        }
         if (thinResolved) {
             // F15.1 (ticket 16): lights on the back hemisphere light the visible face through the transmitted lobe (no N.L clamp to the front).
             if (physicalGI && isDirectional && i == shadowLight && sunAngularRadius > 0.0f)
@@ -521,7 +577,7 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
             if (useSpec) {
                 const float sunVH = saturate(dot(V, normalize(V + L)));
                 const float3 Fd = bsdfSpecFresnel(spec, sunVH);
-                const float3 diffuse = NdotL > 0.0f ? bsdfSpecDiffuseIrid(spec, irid, Fd, metallic, baseColor.rgb, sunVH) * NdotL : float3(0.0);
+                const float3 diffuse = NdotL > 0.0f ? bsdfSpecDiffuseIrid(spec, irid, Fd, metallic, baseColor.rgb, sunVH) * NdotL * diffuseT : float3(0.0);
                 float3 sunSum = diffuse + (anisoActive ? sunDiskSpecularAniso(N, V, L, baseColor.rgb, metallic, sunAngularRadius, spec, aniso, irid)
                                                        : sunDiskSpecularSpec(N, V, L, baseColor.rgb, metallic, roughness, sunAngularRadius, spec, irid));
                 if (sheenOn) sunSum = sheenLayerLight(sunSum, N, V, L, sheen, frame.sheenTable);
@@ -536,22 +592,22 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
             }
         } else if (sheenOn) {
             // The material under the sheen (ior/specular when present), the sheen layer, then the coat above (decision 06).
-            float3 value = anisoActive ? evaluateLightAniso(N, V, L, float3(1.0f), baseColor.rgb, metallic, spec, aniso, irid)
-                         : useSpec ? evaluateLightSpec(N, V, L, float3(1.0f), baseColor.rgb, metallic, roughness, spec, irid)
+            float3 value = anisoActive ? evaluateLightAniso(N, V, L, float3(1.0f), baseColor.rgb, metallic, spec, aniso, irid, diffuseT)
+                         : useSpec ? evaluateLightSpec(N, V, L, float3(1.0f), baseColor.rgb, metallic, roughness, spec, irid, diffuseT)
                                    : evaluateLight(N, V, L, float3(1.0f), baseColor.rgb, metallic, roughness);
             value = sheenLayerLight(value, N, V, L, sheen, frame.sheenTable);
             if (coatOn) value = value * coatAttenuation(coat, V) + coatLobeLight(V, L, coat);
             color += value * lightColor * attenuation * visibility;
         } else if (anisoActive && coatOn) {
-            const float3 value = evaluateLightAniso(N, V, L, float3(1.0f), baseColor.rgb, metallic, spec, aniso, irid) * coatAttenuation(coat, V) +
+            const float3 value = evaluateLightAniso(N, V, L, float3(1.0f), baseColor.rgb, metallic, spec, aniso, irid, diffuseT) * coatAttenuation(coat, V) +
                                  coatLobeLight(V, L, coat);
             color += value * lightColor * attenuation * visibility;
         } else if (anisoActive)
-            color += evaluateLightAniso(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, spec, aniso, irid) * visibility;
+            color += evaluateLightAniso(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, spec, aniso, irid, diffuseT) * visibility;
         else if (coatOn)
-            color += evaluateLightCoat(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, roughness, spec, coat, irid) * visibility;
-        else if (specExt || bsdfIridActive(irid))
-            color += evaluateLightSpec(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, roughness, spec, irid) * visibility;
+            color += evaluateLightCoat(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, roughness, spec, coat, irid, diffuseT) * visibility;
+        else if (specExt || transOn || bsdfIridActive(irid))
+            color += evaluateLightSpec(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, roughness, spec, irid, diffuseT) * visibility;
         else
             color += evaluateLight(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, roughness) * visibility;
     }
@@ -576,6 +632,19 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
                                                 NdotV, frame.dfgTable);
         envDiffuse = env.diffuseWeight;
         envSpecularWeight = env.specular;
+    }
+    // F15.1 (ticket 13): the diffuse base of a transmissive material is mixed by 1 - t; the transmitted lobe takes (1 - E) t (1 - metallic) tint T
+    // of the radiance along the refracted direction (declared: the environment, or the legacy hemisphere along the refraction of V through N,
+    // with the volume absorption over the thickness hint, decision 09).  Added below where the resolve owns the ambient specular, i.e. where
+    // the specular transport (which traces or fetches the refracted radiance itself) does not run.
+    float3 transWeight = float3(0.0f);
+    float3 transDirection = -V;
+    if (transOn && transFactor > 0.0f) {
+        const float3 absorption = volThickness > 0.0f ? bsdfVolumeAbsorption(volAttenuationColor, volAttenuationDistance, volThickness) : float3(1.0f);
+        transWeight = bsdfTransmissionEnvWeight(transFactor, metallic, envDiffuse, baseColor.rgb, absorption);
+        const float3 refracted = refract(-V, N, 1.0f / max(lobeIor, 1.0f));
+        if (lobeIor >= 1.0f && volThickness > 0.0f && dot(refracted, refracted) > 0.0f) transDirection = normalize(refracted);
+        envDiffuse *= diffuseT;
     }
     // F15.1 (ticket 09): the coat term of the environment, (1 - c F_c) material + c F_c clamp(A_c + B_c, 0, 1) at the coat roughness.
     float coatAtt = 1.0f;
@@ -619,6 +688,7 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
                                                        : (physicalGI ? environment : hemisphere(-N)) * thinWeight * occlusion;
     if(!externalDiffuse && sheenOn)color += sheenEnvironment * coatAtt * (useGI ? (physicalGI?1.0f:occlusion) : occlusion);
     if(!omitSpecularAmbient)color += ambientSpecular * occlusion;
+    if (!omitSpecularAmbient && transOn && transFactor > 0.0f && lobeIor >= 1.0f) color += (physicalGI ? environment : hemisphere(transDirection)) * transWeight;
 
     // The emission under a coat is attenuated like the material (the DI emitter share stays uncoated: declared).
     const float3 emission = float3(m.emissive[0], m.emissive[1], m.emissive[2]) * float3(emTex.rgb) * coatAtt;
@@ -652,6 +722,19 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         out.lobes.subsurfaceColor[0] = thin.color.x;
         out.lobes.subsurfaceColor[1] = thin.color.y;
         out.lobes.subsurfaceColor[2] = thin.color.z;
+    }
+    // F15.1 (ticket 13): the volume bit travels with the transmission bit only ("a volume without transmission has no effect"); the factor, the
+    // world thickness (mesh-local x instance scale) and the medium.
+    if (!transOn) out.lobes.features &= ~(MATERIAL_FEATURE_TRANSMISSION | MATERIAL_FEATURE_VOLUME);
+    else if (!volOn) out.lobes.features &= ~MATERIAL_FEATURE_VOLUME;
+    if (transOn) {
+        out.lobes.transmissionFactor = transFactor;
+        if (volOn) {
+            out.lobes.volumeThickness = volThickness;
+            for (uint c = 0; c < 3; ++c) out.lobes.attenuationColor[c] = volAttenuationColor[c];
+            out.lobes.attenuationDistance = volAttenuationDistance;
+        }
+        out.lobes.ior = lobeIor;
     }
     if (specExt) {
         out.lobes.ior = lobeIor;
@@ -702,6 +785,11 @@ static GPULobeGuide lobeGuideRecord(ShadingResult value, uint diFlags) {
     // Ticket 16: a thin subsurface pixel stores a weight shifted by 0.25 (a transmission colour channel would not move for a zero channel).
     if ((diFlags & DI_LOBE_GUIDE_CORRUPT) != 0u && (value.lobes.features & MATERIAL_FEATURE_SUBSURFACE) != 0u)
         value.lobes.subsurfaceWeight += 0.25f;
+    // Ticket 13: a transmissive pixel stores a factor shifted by 0.25 (and a volume pixel its thickness).
+    if ((diFlags & DI_LOBE_GUIDE_CORRUPT) != 0u && (value.lobes.features & MATERIAL_FEATURE_TRANSMISSION) != 0u)
+        value.lobes.transmissionFactor += 0.25f;
+    if ((diFlags & DI_LOBE_GUIDE_CORRUPT) != 0u && (value.lobes.features & MATERIAL_FEATURE_VOLUME) != 0u)
+        value.lobes.volumeThickness += 0.25f;
     // Ticket 11: an anisotropic pixel stores its shading normal as the lobe direction (outside the tangent plane).
     if ((diFlags & DI_LOBE_GUIDE_CORRUPT) != 0u && (value.lobes.features & MATERIAL_FEATURE_ANISOTROPY) != 0u) {
         value.lobes.anisotropyDirection[0] = value.normal.x;

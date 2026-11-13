@@ -127,3 +127,39 @@ TEST_CASE("interface estimator: leaving glass reflects totally beyond the critic
     CHECK(refract / 20000 < 0.01);
     CHECK(reflect / 20000 == doctest::Approx(1.0).epsilon(0.01));
 }
+
+TEST_CASE("thin-walled BTDF: the directional integral equals the D(h) sampled Walter weight of the mirrored reflection") {
+    // int f_t |N.L| dL over the back hemisphere (Monte Carlo, uniform directions) against E_D[|i.h| G / (|i.n||h.n|)] of the reflection
+    // through the same half vectors: the thin BTDF IS the separable-Smith GGX reflection of the mirrored light.
+    Rng rng;
+    for (double alpha : {0.1, 0.3, 0.6})
+        for (double cosV : {1.0, 0.7, 0.4}) {
+            const V3 v = normalize(V3{std::sqrt(1.0 - cosV * cosV), 0.0, cosV});
+            double directional = 0;
+            const int n = 400000;
+            for (int k = 0; k < n; ++k) {
+                const double u = rng.next(), w = rng.next(), z = u, r = std::sqrt(1.0 - z * z), phi = 2.0 * M_PI * w;
+                const V3 lm{r * std::cos(phi), r * std::sin(phi), z}; // mirrored light, front hemisphere (uniform: pdf 1 / 2 pi)
+                const V3 h = normalize(v + lm);
+                directional += transmissionThinBtdf(float(lm[2]), float(v[2]), float(h[2]), float(alpha)) * lm[2] * 2.0 * M_PI;
+            }
+            directional /= n;
+            double walter = 0;
+            for (int k = 0; k < n; ++k) {
+                const Sample s = [&] {
+                    // reflection only: force the branch by sampling like interfaceSample with F = 1
+                    const double u = rng.next(), q = rng.next();
+                    const double c = std::sqrt((1.0 - u) / (1.0 + (alpha * alpha - 1.0) * u)), rr = std::sqrt(std::max(0.0, 1.0 - c * c)), phi = 2.0 * M_PI * q;
+                    const V3 h{rr * std::cos(phi), rr * std::sin(phi), c};
+                    const double iH = dot(v, h);
+                    if (!(iH > 0.0)) return Sample{0.0, false, {0, 0, 1}};
+                    const V3 o = 2.0 * iH * h + (-v);
+                    if (!(o[2] > 0.0)) return Sample{0.0, false, o};
+                    return Sample{transmissionMicrofacetWeight(float(v[2]), float(o[2]), float(iH), float(dot(o, h)), float(h[2]), float(alpha)), false, o};
+                }();
+                walter += s.weight;
+            }
+            walter /= n;
+            CHECK(directional == doctest::Approx(walter).epsilon(0.03));
+        }
+}

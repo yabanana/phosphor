@@ -9,8 +9,8 @@
 // DI surfaces can be compared bit for bit (--debug-lobe-guide).  Portable
 // (phosphor_core): no Metal.
 //
-// Scope = LOBE_GUIDE_RESOLVED_FEATURES (KHR_materials_ior/specular, KHR_materials_clearcoat, KHR_materials_sheen and
-// KHR_materials_anisotropy).  A
+// Scope = LOBE_GUIDE_RESOLVED_FEATURES (KHR_materials_ior/specular, clearcoat, sheen, anisotropy, iridescence, the thin
+// subsurface mode, transmission and volume).  A
 // pixel whose resolved fields depend on a texture (the material references a
 // texture for one of them) is `unverified`: its record is not compared.
 // ---------------------------------------------------------------------------
@@ -40,9 +40,10 @@ struct LobeGuideExpectation {
 /// The parameters shadeSurface resolves for `material` in a scene whose feature
 /// union is `featureUnion`, from the CPU mirror of the extension buffer.
 /// `extensionsValid` is set to false when the material's extension group is out of range.
+/// `instanceScale` = min column norm of the instance's model matrix (the world factor of KHR_materials_volume's mesh-local thickness).
 [[nodiscard]] LobeGuideExpectation expectedLobeParams(const GPUMaterial& material,
                                                       std::span<const GPUMaterialExtRecord> extensions,
-                                                      u32 featureUnion, bool* extensionsValid = nullptr);
+                                                      u32 featureUnion, bool* extensionsValid = nullptr, float instanceScale = 1.0f);
 
 struct LobeGuideCheckInput {
     u32 width = 0, height = 0;                       // DI surface extent (guide index = y * width + x)
