@@ -479,7 +479,7 @@ class SpecularIorModel(unittest.TestCase):
         self.assertAlmostEqual(ior, 1.33, places=6)
         self.assertEqual((spec, color), (0.5, [2.0, 1.0, 0.25]))
         self.assertIsNone(ref.material_specular(data, data["materials"][1]))
-        data["materials"][0]["feature_bits"] = 4  # sheen is outside the declared model
+        data["materials"][0]["feature_bits"] = 8  # anisotropy is outside the declared model
         with self.assertRaises(ValueError):
             ref.material_specular(data, data["materials"][0])
         data["materials"][0]["feature_bits"] = 3  # ior/specular + clearcoat is inside it (ticket 09)
@@ -739,7 +739,7 @@ class ClearcoatModel(unittest.TestCase):
         zero = [[0] * 20] * 3
         data = {"materials": [{"feature_bits": 2, "extension_index": 0}, {"feature_bits": 0},
                               {"feature_bits": 2, "extension_index": 4}, {"feature_bits": 2, "extension_index": 8},
-                              {"feature_bits": 6, "extension_index": 0}],
+                              {"feature_bits": 10, "extension_index": 0}],
                 "material_extensions": {"version": 1, "records_per_material": 4,
                                         "records": [words(0.5, 0.25, 0.75)] + zero +
                                                    [words(1.0, 0.1, 1.0, (3, ref.INVALID, ref.INVALID))] + zero +
@@ -750,7 +750,7 @@ class ClearcoatModel(unittest.TestCase):
         for index in (2, 3):  # a coat factor/roughness texture (word 10) or a coat normal texture (word 12)
             with self.assertRaises(ValueError):
                 ref.material_clearcoat(data, data["materials"][index])
-        with self.assertRaises(ValueError):  # sheen (bit 4 in feature bits 6) is outside the declared model
+        with self.assertRaises(ValueError):  # anisotropy (bit 8 in feature bits 10) is outside the declared model
             ref.material_clearcoat(data, data["materials"][4])
         self.assertTrue(ref.uses_clearcoat(data) and not ref.uses_specular_extension(data))
         data["materials"][4]["feature_bits"] = 3
@@ -966,6 +966,422 @@ class RayCastedSnapshot(unittest.TestCase):
             data["lights"][0] = {**point, "color": [1, 0.5, 1]}
             with self.assertRaises(ValueError):
                 ref.require_declared_scene(data)
+
+
+def sheen_dict(color, roughness, variant="spec", count=1):
+    """Per-pixel sheen arrays of `count` identical pixels (see ref.sheen_arrays)."""
+    return {"color": np.tile(np.asarray(color, dtype=np.float64), (count, 1)), "roughness": np.full(count, roughness),
+            "variant": variant}
+
+
+class SheenModel(unittest.TestCase):
+    """KHR_materials_sheen (ticket 10) against hand values of the notes (research/khr-materials.md section 3), analytic
+    bounds, an independent wi-space grid and the committed table; never against the shader."""
+
+    def setUp(self):
+        self.n = np.array([[0.0, 0.0, 1.0]])
+        self.v = np.array([unit(0.6, 0.1, 0.5)])
+        self.l = np.array([unit(-0.7, 0.2, 0.3)])
+        self.base = np.array([[0.1, 0.1, 0.1]])
+
+    def test_alpha_and_roughness_clamp(self):
+        self.assertAlmostEqual(float(ref.sheen_alpha(0.5)), 0.25)
+        self.assertAlmostEqual(float(ref.sheen_alpha(0.0)), 0.07 ** 2)
+        self.assertAlmostEqual(float(ref.sheen_alpha(2.0)), 1.0)
+        self.assertAlmostEqual(float(ref.sheen_alpha(0.5, "roughness-linear")), 0.5)
+        self.assertEqual(ref.SHEEN_FEATURE_BIT, 4)  # MaterialFeature::Sheen = 1 << 2
+
+    def test_charlie_distribution_hand_values(self):
+        # sin(theta_h) = 1 (N.H = 0): D = (2 + 1/alpha) / (2 pi); alpha 0.25 -> 6 / (2 pi).
+        self.assertAlmostEqual(float(ref.charlie_d(0.0, 0.25)), 6.0 / (2 * math.pi), places=12)
+        # N.H = 0.6: sin = 0.8, D = (2 + 4) 0.8^4 / (2 pi).
+        self.assertAlmostEqual(float(ref.charlie_d(0.6, 0.25)), 6.0 * 0.8 ** 4 / (2 * math.pi), places=12)
+        # Peaked at the horizon: D at N.H = 1 is 0 (a fuzz lobe), monotonic towards N.H = 0.
+        values = ref.charlie_d(np.linspace(0.0, 1.0, 11), 0.25)
+        self.assertTrue(np.all(np.diff(values) < 0))
+        self.assertEqual(float(values[-1]), 0.0)
+
+    def test_visibility_hand_values(self):
+        # alpha_g = 1 ((1 - alpha)^2 = 0: the first coefficient column); Lambda(0.5) = exp(l(0.5)).
+        l_half = 21.5473 / (1 + 3.82987 * 0.5 ** 0.19823) + -1.97760 * 0.5 + -4.32054
+        self.assertAlmostEqual(float(ref.charlie_lambda(0.5, 1.0)), math.exp(l_half), places=9)
+        # cos = 1 (>= 0.5): exp(2 l(0.5) - l(0)), l(0) = a + e.
+        l_zero = 21.5473 + -4.32054
+        self.assertAlmostEqual(float(ref.charlie_lambda(1.0, 1.0)), math.exp(2 * l_half - l_zero), places=9)
+        lam_v, lam_l = float(ref.charlie_lambda(0.5, 1.0)), float(ref.charlie_lambda(0.8, 1.0))
+        self.assertAlmostEqual(float(ref.charlie_visibility(0.5, 0.8, 1.0)),
+                               1.0 / ((1 + lam_v + lam_l) * 4 * 0.5 * 0.8), places=12)
+        # The cheaper Ashikhmin visibility of the notes: 1 / (4 (NL + NV - NL NV)).
+        self.assertAlmostEqual(float(ref.charlie_visibility(0.5, 0.8, 1.0, "ashikhmin-visibility")),
+                               1.0 / (4 * (0.8 + 0.5 - 0.4)), places=12)
+        # Reciprocal in (N.V, N.L).
+        self.assertAlmostEqual(float(ref.charlie_visibility(0.3, 0.9, 0.25)),
+                               float(ref.charlie_visibility(0.9, 0.3, 0.25)), places=12)
+
+    def test_albedo_matches_an_independent_grid_and_the_committed_table(self):
+        # An independent product grid in (cos theta_i, phi_i) with the vectors wo, wi (no shared code with the
+        # reference quadrature) and the engine header (tools/sheen_table.py, half-vector quadrature).
+        def grid(mu, roughness, n_cos=800, n_phi=400):
+            alpha = roughness ** 2
+            x, w = np.polynomial.legendre.leggauss(n_cos)
+            cos_i, w = 0.5 * (x + 1.0), 0.5 * w
+            phi = (np.arange(n_phi) + 0.5) * 2 * math.pi / n_phi
+            sin_i = np.sqrt(1 - cos_i ** 2)
+            wo = np.array([math.sqrt(1 - mu * mu), 0.0, mu])
+            wi = np.stack([sin_i[:, None] * np.cos(phi)[None, :], sin_i[:, None] * np.sin(phi)[None, :],
+                           np.broadcast_to(cos_i[:, None], (n_cos, n_phi))], -1)
+            h = wi + wo
+            h /= np.linalg.norm(h, axis=-1, keepdims=True)
+            d = (2 + 1 / alpha) * np.sqrt(1 - h[..., 2] ** 2) ** (1 / alpha) / (2 * math.pi)
+            lam = ref.charlie_lambda(cos_i[:, None], alpha)
+            v = 1 / ((1 + ref.charlie_lambda(mu, alpha) + lam) * 4 * mu * cos_i[:, None])
+            return float(np.sum((d * v * cos_i[:, None]).mean(axis=1) * 2 * math.pi * w))
+
+        for roughness, mu in ((0.3, 0.3), (0.5, 0.5), (0.75, 0.9), (1.0, 0.25), (0.1, 0.2)):
+            got = float(ref.sheen_albedo(np.array([mu]), np.array([roughness]))[0])
+            self.assertAlmostEqual(got, min(grid(mu, roughness), 1.0), delta=1.5e-3, msg=(roughness, mu))
+            table = float(ref.sheen_lookup(np.array([mu]), np.array([roughness]))[0])
+            self.assertAlmostEqual(got, table, delta=2.5e-3, msg=(roughness, mu))
+
+    def test_albedo_is_clamped_and_monotonic_in_the_expected_directions(self):
+        mus = np.linspace(0.02, 1.0, 25)
+        for roughness in (0.07, 0.3, 1.0):
+            e = ref.sheen_albedo(mus, np.full(25, roughness))
+            self.assertLessEqual(float(e.max()), ref.SHEEN_E_CLAMP)
+            self.assertGreaterEqual(float(e.min()), 0.0)
+            self.assertTrue(np.all(np.diff(e) <= 1e-12))  # a fuzz lobe: brighter towards grazing views
+        # The table clamps to 1 where the Charlie albedo exceeds it (narrow lobe, grazing view).
+        self.assertEqual(float(ref.sheen_albedo(np.array([0.01]), np.array([0.07]))[0]), 1.0)
+
+    def test_scaling_forms(self):
+        sheen = sheen_dict([1.0, 0.5, 0.25], 0.5)
+        e_v, e_l = np.array([0.3]), np.array([0.6])
+        # min(1 - max3 E(V), 1 - max3 E(L)) with max3 = 1.
+        self.assertAlmostEqual(float(ref.sheen_scaling(sheen, e_v, e_l)[0]), 0.4)
+        self.assertAlmostEqual(float(ref.sheen_scaling(sheen, e_l, e_v)[0]), 0.4)  # symmetric in V and L
+        self.assertAlmostEqual(float(ref.sheen_scaling(sheen, e_v)[0]), 0.7)         # cheap form (environment)
+        dim = sheen_dict([0.2, 0.5, 0.25], 0.5)
+        self.assertAlmostEqual(float(ref.sheen_scaling(dim, e_v, e_l)[0]), 1 - 0.5 * 0.6)  # max3 = 0.5
+        self.assertAlmostEqual(float(ref.sheen_scaling(sheen_dict([1, 1, 1], 0.5, "unscaled-base"), e_v, e_l)[0]), 1.0)
+        self.assertAlmostEqual(float(ref.sheen_scaling(sheen_dict([1, 1, 1], 0.5, "cheap-scaling"), e_v, e_l)[0]), 0.7)
+
+    def test_zero_sheen_colour_is_the_plain_material(self):
+        zero = sheen_dict([0, 0, 0], 0.5)
+        for metallic in (0.0, 1.0):
+            m = np.array([metallic])
+            np.testing.assert_allclose(
+                ref.bsdf(self.base, m, np.array([0.6]), self.n, self.v, self.l, sheen=zero),
+                ref.bsdf(self.base, m, np.array([0.6]), self.n, self.v, self.l), rtol=1e-14)
+        ignored = sheen_dict([1, 0.5, 0.25], 0.5, "ignored")
+        np.testing.assert_allclose(
+            ref.bsdf(self.base, np.array([0.0]), np.array([0.6]), self.n, self.v, self.l, sheen=ignored),
+            ref.bsdf(self.base, np.array([0.0]), np.array([0.6]), self.n, self.v, self.l), rtol=1e-14)
+
+    def test_layering_formula_at_one_geometry(self):
+        # f = S D V + f_material min(1 - max3 E(V), 1 - max3 E(L)), checked with hand-evaluated D, V, E.
+        sheen = sheen_dict([1.0, 0.5, 0.25], 0.5)
+        n, v, l = self.n[0], self.v[0], self.l[0]
+        h = unit(*(v + l))
+        nv, nl, nh = float(v @ n), float(l @ n), float(h @ n)
+        d = (2 + 4) * (1 - nh * nh) ** 2 / (2 * math.pi)
+        vis = float(ref.charlie_visibility(nv, nl, 0.25))
+        e_v = float(ref.sheen_albedo(np.array([nv]), np.array([0.5]))[0])
+        e_l = float(ref.sheen_albedo(np.array([nl]), np.array([0.5]))[0])
+        scale = min(1 - e_v, 1 - e_l)
+        for metallic in (0.0, 1.0):
+            m = np.array([metallic])
+            material = ref.bsdf(self.base, m, np.array([0.6]), self.n, self.v, self.l)[0]
+            got = ref.bsdf(self.base, m, np.array([0.6]), self.n, self.v, self.l, sheen=sheen)[0]
+            np.testing.assert_allclose(got, np.array([1.0, 0.5, 0.25]) * d * vis + material * scale, rtol=1e-12)
+
+    def test_light_below_the_horizon_reflects_nothing(self):
+        below = np.array([unit(0.0, 0.8, -0.2)])
+        got = ref.bsdf(self.base, np.array([0.0]), np.array([0.4]), self.n, self.v, below,
+                       sheen=sheen_dict([1, 1, 1], 0.4))
+        self.assertTrue(np.all(got == 0))
+
+    def test_directional_albedo_of_the_full_layer_never_exceeds_one(self):
+        # White furnace of the BSDF itself: integral of (f_sheen + f_metal scaling) cos over wi <= 1 for a white,
+        # rough metal under a white sheen (the base is energy conserving, the scaling removes what the sheen takes).
+        # The unscaled control gains energy.  Independent midpoint grid over wi.
+        n_t, n_p = 300, 160
+        theta = (np.arange(n_t) + 0.5) * (0.5 * math.pi / n_t)
+        phi = (np.arange(n_p) + 0.5) * (2 * math.pi / n_p)
+        wi = np.stack([np.sin(theta)[:, None] * np.cos(phi)[None, :], np.sin(theta)[:, None] * np.sin(phi)[None, :],
+                       np.broadcast_to(np.cos(theta)[:, None], (n_t, n_p))], -1).reshape(-1, 3)
+        weight = (np.sin(theta)[:, None] * np.ones((1, n_p)) * (0.5 * math.pi / n_t) * (2 * math.pi / n_p)).reshape(-1)
+        white = np.ones((len(wi), 3))
+        for roughness in (0.2, 0.5, 1.0):
+            for mu in (1.0, 0.6, 0.25):
+                v = np.tile(np.array([math.sqrt(1 - mu * mu), 0.0, mu]), (len(wi), 1))
+                nn = np.tile(np.array([0.0, 0.0, 1.0]), (len(wi), 1))
+                totals = {}
+                for variant in ("spec", "unscaled-base"):
+                    sheen = sheen_dict([1, 1, 1], roughness, variant, count=len(wi))
+                    f = ref.bsdf(white, np.ones(len(wi)), np.full(len(wi), 0.5), nn, v, wi, sheen=sheen)
+                    totals[variant] = float(np.sum(f[:, 0] * wi[:, 2] * weight))
+                self.assertLessEqual(totals["spec"], 1.0 + 4e-3, (roughness, mu))
+                self.assertGreater(totals["unscaled-base"], totals["spec"] + 0.01, (roughness, mu))
+
+    def test_environment_furnace_bound_and_unscaled_control(self):
+        # White metal under a white sheen in a uniform environment of 1: never above 1; unscaled gains energy.
+        white = np.ones((1, 3))
+        for roughness in (0.1, 0.5, 1.0):
+            for mu in (1.0, 0.5, 0.2):
+                material = ref.environment_radiance(white, np.array([1.0]), np.array([0.5]), np.array([mu]), 1.0)
+                out = ref.sheen_environment(material, np.array([mu]), sheen_dict([1, 1, 1], roughness), 1.0)
+                self.assertLessEqual(float(out.max()), 1.0 + 1e-3, (roughness, mu))
+                gain = ref.sheen_environment(material, np.array([mu]),
+                                             sheen_dict([1, 1, 1], roughness, "unscaled-base"), 1.0)
+                self.assertGreaterEqual(float(gain.max()), float(out.max()))
+        material = ref.environment_radiance(white, np.array([1.0]), np.array([0.5]), np.array([0.3]), 1.0)
+        gain = ref.sheen_environment(material, np.array([0.3]), sheen_dict([1, 1, 1], 0.5, "unscaled-base"), 1.0)
+        self.assertGreater(float(gain.max()), 1.05)
+
+    def test_exact_environment_formula(self):
+        mu, radiance = np.array([0.5]), 0.5
+        material = ref.environment_radiance(self.base, np.array([0.0]), np.array([0.7]), mu, radiance)
+        sheen = sheen_dict([1.0, 0.5, 0.25], 0.5)
+        e = float(ref.sheen_albedo(mu, np.array([0.5]))[0])
+        got = ref.sheen_environment(material, mu, sheen, radiance)
+        np.testing.assert_allclose(got, material * (1 - e) + np.array([1.0, 0.5, 0.25]) * e * radiance, rtol=1e-12)
+
+    def test_controls_move_the_images_in_the_documented_direction(self):
+        # Direct light at a back-lit geometry: ignored < spec (sheen is added), unscaled > spec (base keeps energy),
+        # cheap-scaling > spec (its scaling is the larger one when E(N.L) > E(N.V)), Ashikhmin and linear roughness differ.
+        colour = [1.0, 0.5, 0.25]
+        v = np.array([unit(0.8, 0.0, 0.6)])
+        l = np.array([unit(0.9, 0.1, 0.2)])  # same side, N.L 0.2 < N.V 0.6: E(L) > E(V), forward-scatter fuzz
+
+        def f(variant):
+            return ref.bsdf(self.base, np.array([0.0]), np.array([0.7]), self.n, v, l,
+                            sheen=sheen_dict(colour, 0.5, variant))[0]
+
+        spec = f("spec")
+        self.assertTrue(np.all(f("ignored") < spec))
+        self.assertTrue(np.all(f("unscaled-base") > spec))
+        self.assertTrue(np.all(f("cheap-scaling") > spec))
+        self.assertGreater(float(np.abs(f("ashikhmin-visibility") - spec).max() / spec.max()), 0.05)
+        self.assertGreater(float(np.abs(f("roughness-linear") - spec).max() / spec.max()), 0.02)
+        # With N.V grazing and N.L large the min form picks the view factor: cheap-scaling equals spec.
+        v2 = np.array([unit(0.9, 0.0, 0.2)])
+        l2 = np.array([unit(0.1, 0.1, 1.0)])
+        same = [ref.bsdf(self.base, np.array([0.0]), np.array([0.7]), self.n, v2, l2,
+                         sheen=sheen_dict(colour, 0.5, k))[0] for k in ("spec", "cheap-scaling")]
+        np.testing.assert_allclose(same[0], same[1], rtol=1e-12)
+
+    def test_sheen_sits_below_the_coat(self):
+        # The coat attenuates the whole sheen + material value: f = (1 - c F_c) (f_sheen + f scale) + c F_c D Vis.
+        sheen = sheen_dict([1.0, 0.5, 0.25], 0.5)
+        coat = coat_dict(0.6, 0.3)
+        m, rough = np.array([0.0]), np.array([0.6])
+        layered = ref.bsdf(self.base, m, rough, self.n, self.v, self.l, sheen=sheen)[0]
+        attenuation, coat_value = ref.coat_lobe(coat, self.n, self.v, self.l)
+        got = ref.bsdf(self.base, m, rough, self.n, self.v, self.l, coat=coat, sheen=sheen)[0]
+        np.testing.assert_allclose(got, attenuation[0] * layered + coat_value[0], rtol=1e-12)
+        # Exact environment: the coat form of the sheen-included material.
+        mu = np.array([0.5])
+        material = ref.sheen_environment(ref.environment_radiance(self.base, m, rough, mu, 0.5), mu, sheen, 0.5)
+        fc = 0.04 + 0.96 * 0.5 ** 5
+        albedo = float(ref.coat_albedo(mu, np.array([0.3]))[0][0])
+        np.testing.assert_allclose(ref.environment_coat(material, mu, coat, 0.5)[0],
+                                   (1 - 0.6 * fc) * material[0] + 0.6 * fc * albedo * 0.5, rtol=1e-12)
+
+    def test_sun_disk_point_evaluation_matches_the_disk_average(self):
+        # The wide sheen lobe is point-evaluated at the disk centre; the average of the full BSDF over a 4000-sample
+        # disk agrees within 0.5 % (sheen roughness 0.1 is the narrowest fixture lobe, scaling and lobe vary slowly).
+        radius = 0.00465
+        toward = unit(-0.8, 0.35, -0.3)
+        n = np.array([unit(-0.55, 0.25, 0.8)])
+        v = np.array([[0.0, 0.0, 1.0]])
+        for roughness in (0.1, 0.5):
+            sheen = sheen_dict([1.0, 0.5, 0.25], roughness)
+            got, narrow = ref.sun_radiance(self.base, np.array([0.0]), np.array([0.7]), n, v, toward, np.ones(3), radius,
+                                           sheen=sheen)
+            self.assertFalse(bool(narrow[0]))
+            total = np.zeros(3)
+            samples = ref.sun_disk_samples(toward, radius, 4000)
+            for sample in samples:
+                lk = np.broadcast_to(sample, (1, 3))
+                total += ref.bsdf(self.base, np.array([0.0]), np.array([0.7]), n, v, lk, sheen=sheen)[0] * \
+                    max(0.0, float(n[0] @ sample))
+            total /= len(samples)
+            np.testing.assert_allclose(got[0], total, rtol=5e-3)
+            # A zero sheen colour reduces the sun to the plain material.
+            plain, _ = ref.sun_radiance(self.base, np.array([0.0]), np.array([0.7]), n, v, toward, np.ones(3), radius)
+            none, _ = ref.sun_radiance(self.base, np.array([0.0]), np.array([0.7]), n, v, toward, np.ones(3), radius,
+                                       sheen=sheen_dict([0, 0, 0], roughness))
+            np.testing.assert_allclose(plain, none, rtol=1e-14)
+
+    def test_point_light_uses_the_sheen_bsdf_at_the_light_direction(self):
+        light = {"position": [-1.5, 0.3, 0.4], "intensity": 50.0, "range": 100.0, "color": [1.0, 1.0, 1.0]}
+        sheen = sheen_dict([1.0, 0.5, 0.25], 0.3)
+        got, lit = ref.point_radiance(self.base, np.array([0.0]), np.array([0.7]), self.n, self.v, np.zeros((1, 3)),
+                                      light, sheen=sheen)
+        delta = np.array(light["position"])
+        l = (delta / np.linalg.norm(delta))[None, :]
+        incident = 50.0 * float(ref.point_window(np.linalg.norm(delta), 100.0)) / float(delta @ delta)
+        expected = ref.bsdf(self.base, np.array([0.0]), np.array([0.7]), self.n, self.v, l, sheen=sheen)[0] * \
+            float(l[0] @ self.n[0]) * incident
+        np.testing.assert_allclose(got[0], expected, rtol=1e-12)
+        self.assertTrue(bool(lit[0]))
+
+    def test_declared_environment_hand_value_and_controls(self):
+        mu, rough = np.array([0.5]), np.array([0.7])
+        sheen = sheen_dict([1.0, 0.5, 0.25], 0.5)
+        plain = ref.declared_environment_radiance(self.base, np.array([0.0]), rough, mu, 1.0)
+        got = ref.declared_environment_radiance(self.base, np.array([0.0]), rough, mu, 2.0, sheen=sheen)
+        e = float(ref.sheen_lookup(mu, np.array([0.5]))[0])
+        np.testing.assert_allclose(got, (plain * (1 - e) + np.array([1.0, 0.5, 0.25]) * e) * 2.0, rtol=1e-12)
+        good = ref.declared_environment_radiance(self.base, np.array([0.0]), rough, mu, 1.0, sheen=sheen)
+        for name, variant in ref.SHEEN_DECLARED_CONTROLS.items():
+            wrong = ref.declared_environment_radiance(self.base, np.array([0.0]), rough, mu, 1.0, variant, sheen=sheen)
+            self.assertGreater(float(np.abs(wrong - good).max() / good.max()), 0.01, name)
+        ignored = ref.declared_environment_radiance(self.base, np.array([0.0]), rough, mu, 1.0,
+                                                    ref.SHEEN_DECLARED_CONTROLS["declared-sheen-ignored"], sheen=sheen)
+        np.testing.assert_allclose(ignored, plain, rtol=1e-14)
+        with self.assertRaises(ValueError):  # no table exists for the Ashikhmin visibility
+            ref.declared_environment_radiance(self.base, np.array([0.0]), rough, mu, 1.0,
+                                              {**ref.DECLARED, "sheen": "ashikhmin-visibility"}, sheen=sheen)
+        # Coat above the sheen in the declared model: (1 - c F_c) declared_sheen_material + c F_c clamp(A_c + B_c).
+        coat = coat_dict(0.5, 0.4)
+        coated = ref.declared_environment_radiance(self.base, np.array([0.0]), rough, mu, 1.0, coat=coat, sheen=sheen)
+        a, b = ref.dfg_lookup(mu, ref.clamp_roughness(np.array([0.4])))
+        fc = 0.04 + 0.96 * 0.5 ** 5
+        np.testing.assert_allclose(coated, (1 - 0.5 * fc) * good + 0.5 * fc * float(np.clip(a + b, 0, 1)[0]), rtol=1e-12)
+
+    def test_declared_and_exact_sheen_terms_agree(self):
+        # The same sheen layer over a black base: the declared model (engine table) equals the quadrature within 2.5e-3.
+        zero = np.zeros((1, 3))
+        for roughness in (0.1, 0.5, 1.0):
+            for mu in (0.9, 0.5, 0.25):
+                sheen = sheen_dict([1.0, 0.5, 0.25], roughness)
+                declared = ref.declared_sheen_environment(zero, np.array([mu]), sheen, ref.DECLARED)
+                exact = ref.sheen_environment(zero, np.array([mu]), sheen, 1.0)
+                np.testing.assert_allclose(declared, exact, atol=2.5e-3, err_msg=str((roughness, mu)))
+
+    def test_sheen_lookup_rule_on_a_synthetic_header(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "sheen_table.h"
+            values = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 0.1, 0.3, 0.5]  # rows = roughness 0, 0.5, 1; columns = N.V 0, 0.5, 1
+            path.write_text("PHOSPHOR_GPU_CONSTANT u32 SheenTableSize = 3;\nPHOSPHOR_GPU_CONSTANT float SheenTable[9] = {\n    " +
+                            ", ".join(f"{v:.8e}f" for v in values) + "\n};\n")
+            self.assertEqual(ref.load_sheen_table(path)[0], 3)
+            self.assertAlmostEqual(float(ref.sheen_lookup(np.array([1.0]), np.array([0.5]), path)[0]), 1.0)
+            self.assertAlmostEqual(float(ref.sheen_lookup(np.array([0.25]), np.array([0.0]), path)[0]), 0.1)
+            self.assertAlmostEqual(float(ref.sheen_lookup(np.array([0.5]), np.array([0.25]), path)[0]), 0.5)
+            clamped = ref.sheen_lookup(np.array([-0.5, 2.0]), np.array([3.0, -1.0]), path)  # clamp like the C++ lookup
+            self.assertAlmostEqual(float(clamped[0]), 0.1)   # row 2 (roughness 1), column 0
+            self.assertAlmostEqual(float(clamped[1]), 0.4)   # row 0, column 2
+
+    def test_record_word_decoding_and_texture_refusal(self):
+        def words(color, roughness, textures=(ref.INVALID, ref.INVALID)):
+            f = lambda x: int.from_bytes(struct.pack("<f", x), "little")  # noqa: E731
+            w = [0] * 20
+            w[5] = w[6] = ref.INVALID
+            w[10:13] = [ref.INVALID] * 3
+            w[13:16] = [f(c) for c in color]
+            w[16] = f(roughness)
+            w[17:19] = textures
+            return w
+
+        zero = [[0] * 20] * 3
+        data = {"materials": [{"feature_bits": 4, "extension_index": 0}, {"feature_bits": 0},
+                              {"feature_bits": 4, "extension_index": 4}, {"feature_bits": 4, "extension_index": 8},
+                              {"feature_bits": 12, "extension_index": 12}, {"feature_bits": 6, "extension_index": 16}],
+                "material_extensions": {"version": 1, "records_per_material": 4,
+                                        "records": [words((1.0, 0.5, 0.25), 0.3)] + zero +
+                                                   [words((1.0, 0.5, 0.25), 0.3, (3, ref.INVALID))] + zero +
+                                                   [words((1.0, 0.5, 0.25), 0.3, (ref.INVALID, 9))] + zero +
+                                                   [words((1.0, 0.5, 0.25), 0.3)] + zero +
+                                                   [words((0.5, 0.5, 0.5), 0.75)] + zero}}
+        color, roughness = ref.material_sheen(data, data["materials"][0])
+        self.assertEqual((color, round(roughness, 6)), ([1.0, 0.5, 0.25], 0.3))
+        self.assertIsNone(ref.material_sheen(data, data["materials"][1]))
+        for index in (2, 3):  # sheenColorTexture (word 17) or sheenRoughnessTexture (word 18)
+            with self.assertRaises(ValueError):
+                ref.material_sheen(data, data["materials"][index])
+        with self.assertRaises(ValueError):  # anisotropy (bit 8) is outside the declared model
+            ref.material_sheen(data, data["materials"][4])
+        self.assertEqual(ref.material_sheen(data, data["materials"][5])[0], [0.5, 0.5, 0.5])  # coat + sheen is inside it
+        self.assertTrue(ref.uses_sheen(data))
+        self.assertIsNone(ref.material_specular(data, data["materials"][0]))  # sheen-only: neutral specular block
+        self.assertIsNone(ref.material_clearcoat(data, data["materials"][0]))
+
+
+@unittest.skipUnless(HAVE_MITSUBA, "mitsuba not installed")
+class SheenSnapshot(unittest.TestCase):
+    """A one-sphere snapshot whose material carries KHR_materials_sheen in record 0 (the exporter's keys)."""
+
+    def sheen_snapshot(self, directory, sky, sun, colour, roughness, base=(0.1, 0.1, 0.1), base_roughness=0.7):
+        root = RayCastedSnapshot("snapshot").snapshot(directory, sky, sun, 0.0, base_roughness, list(base))
+        path = pathlib.Path(root) / "scene.json"
+        data = json.loads(path.read_text())
+        f = lambda x: int.from_bytes(struct.pack("<f", x), "little")  # noqa: E731
+        record0 = [0] * 20
+        for k in (5, 6, 10, 11, 12, 17, 18):
+            record0[k] = ref.INVALID
+        record0[13:16] = [f(c) for c in colour]
+        record0[16] = f(roughness)
+        data["materials"][0].update(feature_bits=4, extension_index=0, flags=256)
+        data["material_extensions"] = {"version": 1, "records_per_material": 4,
+                                       "records": [record0, [0] * 20, [0] * 20, [0] * 20]}
+        path.write_text(json.dumps(data))
+        return root
+
+    def test_render_sun_environment_and_controls(self):
+        from f12_reference import snapshot as load
+        toward = unit(-0.8, 0.35, -0.3)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.sheen_snapshot(tmp, 0.5, (toward, 3.0), (1.0, 0.5, 0.25), 0.5)
+            root, data = load(root)
+            self.assertTrue(ref.uses_sheen(data) and not ref.uses_specular_extension(data))
+            cast = ref.cast_primary_rays(root, data, 2)
+            images = {}
+            for name in ("spec", "ignored", "unscaled-base", "ashikhmin-visibility", "roughness-linear", "cheap-scaling"):
+                model = ref.control_model("sheen-" + name, ref.APPENDIX_B) if name != "spec" else ref.APPENDIX_B
+                image, masks, spheres, terms = ref.render_frame(root, data, model, cast=cast)
+                images[name] = image
+            self.assertEqual(terms, ["sun-disk", "environment-quadrature"])
+            self.assertEqual(spheres[0]["sheen_color"], [1.0, 0.5, 0.25])
+            self.assertAlmostEqual(spheres[0]["sheen_roughness"], 0.5, places=6)
+            self.assertEqual(spheres[0]["group"], "metallic 0 sheen 1,0.5,0.25")
+            roi = masks["roi"]
+            for name in ("ignored", "unscaled-base", "ashikhmin-visibility", "roughness-linear", "cheap-scaling"):
+                difference = np.abs(images[name][roi] - images["spec"][roi]).max()
+                self.assertGreater(float(difference), 1e-3, name)
+            # The declared model on the same cast is a split-sum model: close to the exact image, not equal to it.
+            declared, *_ = ref.render_frame(root, data, ref.APPENDIX_B, cast=cast, environment=ref.DECLARED)
+            self.assertLess(float(np.abs(declared[roi] - images["spec"][roi]).max() / images["spec"][roi].max()), 0.08)
+
+    def test_command_writes_controls_and_declared_controls(self):
+        toward = unit(-0.8, 0.35, -0.3)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.sheen_snapshot(tmp, 0.5, (toward, 3.0), (1.0, 0.5, 0.25), 0.5)
+            out = pathlib.Path(tmp) / "out"
+            code = ref.main(["render", str(root), "--out", str(out), "--controls", "sheen-ignored",
+                             "sheen-cheap-scaling", "--declared-controls", "declared-sheen-ignored",
+                             "declared-sheen-unscaled-base"])
+            self.assertEqual(code, 0)
+            report = json.loads((out / "reference.json").read_text())
+            self.assertEqual(sorted(report["controls"]), ["sheen-cheap-scaling", "sheen-ignored"])
+            self.assertEqual(report["controls"]["sheen-ignored"]["model_variant"]["sheen"], "ignored")
+            self.assertEqual(sorted(report["declared"]["controls"]),
+                             ["declared-sheen-ignored", "declared-sheen-unscaled-base"])
+            self.assertIn("sheen", report["model"])
+
+    def test_textured_sheen_is_refused(self):
+        from f12_reference import snapshot as load
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.sheen_snapshot(tmp, 0.5, None, (1.0, 1.0, 1.0), 0.5)
+            path = pathlib.Path(root) / "scene.json"
+            data = json.loads(path.read_text())
+            data["material_extensions"]["records"][0][17] = 3
+            path.write_text(json.dumps(data))
+            root, data = load(root)
+            with self.assertRaises(ValueError):
+                ref.require_declared_scene(data)
+            self.assertEqual(ref.main(["render", str(root), "--out", str(pathlib.Path(tmp) / "out")]), 2)
 
 
 if __name__ == "__main__":
