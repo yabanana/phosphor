@@ -93,3 +93,16 @@ volume attenuation and volumetric subsurface scattering.
 pipelines and images must stay identical: `tools/visual_check.sh` 0 pixels and
 the D2 gate (Sponza native 1080p, every feature, GPU p95 ≤ 16.67 ms; last
 measured 15.37–15.48 ms after `4505ee7`) within noise, A/B/A on a quiet machine.
+
+## Round 2 — owner-level choices and review pass (2026-11-13)
+
+- Owner (AskUserQuestion): transmission = RT in F15, raster in F16
+  (ADR-0004); subsurface = OpenPBR semantics + draft KHR_materials_scatter
+  (ADR-0005).
+- Owner direction: Phosphor is a separate product; F15 considers only Phosphor;
+  Track Studio is paused (ADR-0001 addendum).
+- Review pass: the F13 denoiser does not demodulate by albedo (roughness
+  edge-stopping on BRDF-weighted radiance) → the lobe guide supplies the
+  effective transport roughness; ticket 04 split (plumbing / lobe guide) to fit
+  one context each; Mitsuba 3.9.1 verified offline; glTF §3.2 rule verified;
+  `GPUMaterial` padding unused; kernel buffer slots available (max used 19).
