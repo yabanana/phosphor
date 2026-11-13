@@ -80,6 +80,7 @@ add_executable(phosphor_tests
     test_temporal.cpp
     test_emission_pack.cpp
     test_lobe_guide_pack.cpp
+    test_lobe_guide_reference.cpp
     test_visibility_math.cpp
     test_worker_pool.cpp
 )

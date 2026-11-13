@@ -72,6 +72,7 @@ add_library(phosphor_core STATIC
     src/renderer/history_registry.cpp
     src/renderer/exposure.cpp
     src/renderer/gpu_scene.cpp
+    src/renderer/lobe_guide_reference.cpp
     src/renderer/material_description.cpp
     src/renderer/material_description_io.cpp
     src/renderer/material_extension_pack.cpp

@@ -1429,3 +1429,32 @@ TEST_CASE("launch options: F15.1 --material-toggle-every needs a specular grid s
     LaunchOptions fresh;
     CHECK(fresh.materialToggleEvery == 0);
 }
+
+TEST_CASE("launch options: --debug-lobe-guide (F15.1)") {
+    LaunchOptions o;
+    std::string e;
+    const std::vector<const char*> base = {"--render-path", "visibility", "--geometry-path", "mesh", "--reflections", "ssr"};
+    auto with = [&](std::vector<const char*> extra) {
+        std::vector<const char*> args = base;
+        args.insert(args.end(), extra.begin(), extra.end());
+        o = LaunchOptions{};
+        return parse(args, o, e);
+    };
+    CHECK(with({}));
+    CHECK(o.debugLobeGuide == 0);
+    REQUIRE(with({"--debug-lobe-guide", "4", "--debug-lobe-guide-corrupt", "--debug-lobe-guide-dump", "guide.bin"}));
+    CHECK(o.debugLobeGuide == 4);
+    CHECK(o.debugLobeGuideCorrupt);
+    CHECK(o.debugLobeGuideDump == "guide.bin");
+    // The control and the dump need the check.
+    CHECK_FALSE(with({"--debug-lobe-guide-corrupt"}));
+    CHECK_FALSE(with({"--debug-lobe-guide-dump", "guide.bin"}));
+    CHECK_FALSE(with({"--debug-lobe-guide-dump"}));
+    CHECK_FALSE(with({"--debug-lobe-guide", "-1"}));
+    // The producers exist only on the visibility + mesh path with direct-lighting passes.
+    LaunchOptions plain;
+    CHECK_FALSE(parse({"--debug-lobe-guide", "1"}, plain, e));
+    CHECK(e.find("--debug-lobe-guide") != std::string::npos);
+    CHECK_FALSE(parse({"--render-path", "visibility", "--geometry-path", "mesh", "--shadows", "csm", "--debug-lobe-guide", "1"},
+                      plain, e));
+}

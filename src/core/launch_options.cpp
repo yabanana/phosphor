@@ -677,6 +677,14 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.exportReference = *v;
         } else if (arg == "--debug-lighting") {
             if (!needCount(out.debugLighting)) return false;
+        } else if (arg == "--debug-lobe-guide") {
+            if (!needCount(out.debugLobeGuide)) return false;
+        } else if (arg == "--debug-lobe-guide-corrupt") {
+            out.debugLobeGuideCorrupt = true;
+        } else if (arg == "--debug-lobe-guide-dump") {
+            auto v = needValue();
+            if (!v || v->empty() || v->starts_with("--")) { error = "--debug-lobe-guide-dump: expected a file path"; return false; }
+            out.debugLobeGuideDump = std::string(*v);
         } else if (arg == "--debug-gi-no-visibility") {
             out.debugGiNoVisibility=true;
         } else if (arg == "--debug-gi-corrupt") {
@@ -1256,6 +1264,18 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
         error = "Lighting corruption requires an enabled lighting path and --debug-lighting N"; return false;
     }
     if (out.debugLighting && !lighting) { error = "--debug-lighting requires F10-F12 lighting"; return false; }
+    // F15.1: the lobe guide is produced by the direct-lighting passes (visibility + mesh path).
+    if ((out.debugLobeGuideCorrupt || !out.debugLobeGuideDump.empty()) && !out.debugLobeGuide) {
+        error = "--debug-lobe-guide-corrupt / --debug-lobe-guide-dump require --debug-lobe-guide N"; return false;
+    }
+    if (out.debugLobeGuide &&
+        (!out.visibility || out.geometryPath != GeometryPath::Mesh ||
+         !(out.directLighting != DirectLightingMode::Legacy || out.gi != GiMode::Off || out.reflections != ReflectionMode::Off ||
+           out.ao != AoMode::Off || out.lightingDenoise != LightingDenoiseMode::Off || out.fog))) {
+        error = "--debug-lobe-guide requires --render-path visibility, --geometry-path mesh and a lighting path with "
+                "direct-lighting passes (--lighting not legacy, or GI, reflections, AO, denoise or fog)";
+        return false;
+    }
     // F9: diagnostics must never appear accepted when their graph is absent.
     if (!out.rtEnabled && (rtSettingsSpecified || out.rtProxyManifest || out.debugView == MeshletDebugView::RT)) {
         error = "RT settings / --debug-view rt require --rt on";

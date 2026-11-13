@@ -142,6 +142,13 @@ namespace phosphor {
 //   --debug-gpu-scene-corrupt KIND  negative control of the check above:
 //                      delta, plane, command or touch (one deliberate
 //                      corruption that the check must report)
+//   --debug-lobe-guide N  F15.1 self-check: every N frames the per-pixel lobe
+//                      guide and the DI surfaces are read back and the guide is
+//                      compared bit for bit with the CPU reconstruction (prints
+//                      a LOBE-GUIDE line, exit code 1 on FAIL; 0 = off; needs
+//                      the visibility + mesh path with direct-lighting passes)
+//   --debug-lobe-guide-corrupt  negative control of the check above
+//   --debug-lobe-guide-dump FILE  raw guide bytes of the last checked frame
 //   --geometry-path indexed|mesh  F6.3: the scene is drawn with indexed draws
 //                      (the F5 reference, default) or with object + mesh
 //                      shaders over meshlets (needs --gpu-driven on)
@@ -408,6 +415,13 @@ struct LaunchOptions {
     u32 shadowMapResolution = 2048, lightingSeed = 1;
     u32 lightingCandidates = 8, lightingSpatialSamples = 4, giRays = 64;
     u32 debugLighting = 0, debugLightingCorrupt = 0, debugGiCorrupt=0;
+    // F15.1 (ticket 06): --debug-lobe-guide N reads back the lobe guide and the DI surfaces every N frames and
+    // compares the guide with its CPU reconstruction (LOBE-GUIDE line, exit 1 on FAIL); --debug-lobe-guide-corrupt
+    // is its negative control (producers add 0.25 to the ior of extended pixels); --debug-lobe-guide-dump FILE writes
+    // the raw guide bytes of the last checked frame.
+    u32 debugLobeGuide = 0;
+    bool debugLobeGuideCorrupt = false;
+    std::string debugLobeGuideDump;
     bool debugGiNoVisibility=false; // Physical quality negative; invariant checks stay enabled.
     std::string exportReference, captureLinear, captureLinearSequence, lightingScene,reflectionScene,materialScene;
     u32 materialToggleEvery = 0; // --material-toggle-every N: specular grids edit/toggle their extension every N frames

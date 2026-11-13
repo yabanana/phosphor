@@ -210,6 +210,9 @@ PHOSPHOR_STATIC_ASSERT(sizeof(GPUMaterialExtRecord) == 80, "GPUMaterialExtRecord
 // ---------------------------------------------------------------------------
 PHOSPHOR_GPU_CONSTANT u32 LOBE_GUIDE_FEATURE_MASK = 0xFFFFu;   // features: MATERIAL_FEATURE_* bits
 PHOSPHOR_GPU_CONSTANT u32 LOBE_GUIDE_FLAG_SUBSURFACE_VOLUMETRIC = 1u << 16; // GPUMaterialExt2::mode == 1
+// Features whose parameters the resolve (shadeSurface) resolves into LobeParams today; the producers
+// write `material bits & kMaterialFeatures & this`.  Later lobe tickets extend it.
+PHOSPHOR_GPU_CONSTANT u32 LOBE_GUIDE_RESOLVED_FEATURES = MATERIAL_FEATURE_SPECULAR_IOR;
 
 struct GPULobeGuide {
     u32   features;               // MATERIAL_FEATURE_* (bits 0..15) | LOBE_GUIDE_FLAG_* (bits 16..31)
@@ -755,6 +758,11 @@ PHOSPHOR_GPU_CONSTANT u32 DI_ENABLE_TEMPORAL = 2u;
 PHOSPHOR_GPU_CONSTANT u32 DI_ENABLE_SPATIAL = 4u;
 PHOSPHOR_GPU_CONSTANT u32 DI_ENABLE_VISIBILITY = 8u;
 PHOSPHOR_GPU_CONSTANT u32 DI_USE_STBN = 16u;
+// F15.1 (ticket 06): the lobe guide buffer exists and its records for this frame were written by a
+// specialised producer (not by a base-pipeline fallback while compiling); consumers read it only
+// then.  DI_LOBE_GUIDE_CORRUPT is the negative control of --debug-lobe-guide (+0.25 on ior).
+PHOSPHOR_GPU_CONSTANT u32 DI_LOBE_GUIDE_VALID = 64u;
+PHOSPHOR_GPU_CONSTANT u32 DI_LOBE_GUIDE_CORRUPT = 128u;
 // F13.6: RT reflections also see geometry-backed emitters (DI_LIGHT_TRIANGLE).
 // Their specular lobe is then split by the reflection RT probability: DI keeps
 // smoothstep(low, high, roughness), the RT path (taken with the complementary
