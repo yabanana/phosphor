@@ -53,8 +53,13 @@ struct MaterialScenarioSpec {
     // STRONGLY (feature sphere: ior 1.5 and 2.4; parameter sphere: specularColor 1 and 25, f0 clamped to 1), so that a history kept across the edit is visible at the F13.6 recovery threshold.  The default edit is the
     // small one of ticket 05 (ior 1.33 / weight 0.6).
     bool strongEdit = false;
+    // F15.3 (ticket 10) sheen grids: KHR_materials_sheen colour per row (a zero colour carries no extension, the neutral
+    // material) and sheen roughness per column; `roughness` then holds the (constant) base roughness of each column.
+    std::vector<glm::vec3> sheenColor;
+    std::vector<float>     sheenRoughness;
     [[nodiscard]] bool hasSpecularGrid() const { return !ior.empty(); }
     [[nodiscard]] bool hasClearcoatGrid() const { return !clearcoatFactor.empty(); }
+    [[nodiscard]] bool hasSheenGrid() const { return !sheenColor.empty(); }
 };
 
 class MaterialValidation final : public TestBench {

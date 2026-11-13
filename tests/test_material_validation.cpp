@@ -7,6 +7,7 @@
 #include "scene/ecs.h"
 #include "null_texture_manager.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <fstream>
 #include <regex>
@@ -16,12 +17,13 @@
 using namespace phosphor;
 
 TEST_CASE("F15.3 material scenarios are exactly the nine declared names") {
-    CHECK(MaterialValidation::scenarios().size() == 19);
+    CHECK(MaterialValidation::scenarios().size() == 24);
     for (auto name : {"base-grid-sun", "base-grid-env", "base-grid-env-resolve", "furnace-base", "furnace-resolve",
                       "roughness-extremes", "roughness-extremes-sun", "specular-grid-sun", "specular-grid-env-resolve", "specular-grid-point",
                       "specular-grid-env", "furnace-specular", "clearcoat-grid-sun", "clearcoat-grid-env-resolve",
                       "clearcoat-grid-env", "clearcoat-grid-point", "furnace-clearcoat",
-                      "specular-grid-edit", "specular-grid-rough"})
+                      "specular-grid-edit", "specular-grid-rough", "sheen-grid-sun", "sheen-grid-env-resolve",
+                      "sheen-grid-env", "sheen-grid-point", "furnace-sheen"})
         CHECK(MaterialValidation::validScenario(name));
     CHECK_FALSE(MaterialValidation::validScenario("unknown"));
     CHECK_THROWS(MaterialValidation{"unknown"});
@@ -503,4 +505,121 @@ TEST_CASE("F15.1 the clip fixture's toggle is the strong edit: ior 2.4 on the fe
     CHECK(rough.sun);
     CHECK(rough.ior == MaterialValidation::spec("specular-grid-env").ior);
     f.teardown(ecs, scene);
+}
+
+TEST_CASE("F15.3 sheen grids declare sheen colour x sheen roughness over a dark rough base (tools/test_f15_check.py mirrors them)") {
+    for (auto name : {"sheen-grid-sun", "sheen-grid-env-resolve", "sheen-grid-env", "sheen-grid-point", "furnace-sheen"}) {
+        const auto& s = MaterialValidation::spec(name);
+        REQUIRE(s.hasSheenGrid());
+        CHECK_FALSE(s.hasSpecularGrid());
+        CHECK_FALSE(s.hasClearcoatGrid());
+        REQUIRE(s.sheenColor.size() == s.metallic.size());
+        REQUIRE(s.sheenRoughness.size() == s.roughness.size());
+        CHECK(s.sheenColor == std::vector<glm::vec3>{glm::vec3(0.0f), glm::vec3(1.0f), glm::vec3(1.0f, 0.5f, 0.25f),
+                                                     glm::vec3(0.25f, 0.5f, 1.0f)});
+        CHECK(s.sheenRoughness == std::vector<float>{0.1f, 0.3f, 0.5f, 0.75f, 1.0f});
+        CHECK(s.metallic == std::vector<float>(4, 0.0f));
+        CHECK(s.roughness == std::vector<float>(5, 0.7f)); // the base roughness, constant over the columns
+        CHECK(s.sheenRoughness.front() >= 0.07f);          // above the declared lower bound of the Charlie lobe
+        for (float r : s.sheenRoughness) CHECK(r <= 1.0f);
+    }
+    const auto& sun = MaterialValidation::spec("sheen-grid-sun");
+    CHECK(sun.sun);
+    CHECK(sun.environment == 0.0f);
+    CHECK(sun.sunIrradiance == 3.0f);
+    CHECK(sun.baseColor == glm::vec3(0.1f)); // dark base: the sheen is the visible feature
+    const glm::vec3 expected = glm::normalize(glm::vec3(-0.8f, 0.35f, -0.3f));
+    CHECK(glm::length(sun.towardSun - expected) < 1e-6f);
+    const auto& resolve = MaterialValidation::spec("sheen-grid-env-resolve");
+    const auto& transport = MaterialValidation::spec("sheen-grid-env");
+    CHECK_FALSE(resolve.sun);
+    CHECK(resolve.environment == 0.5f);
+    CHECK(MaterialValidation::environmentRadiance("sheen-grid-env-resolve") == 0.5f);
+    CHECK(transport.environment == 0.5f);
+    CHECK(transport.baseColor == resolve.baseColor);
+    CHECK(transport.sheenColor == resolve.sheenColor);
+    const auto& furnace = MaterialValidation::spec("furnace-sheen");
+    CHECK_FALSE(furnace.sun);
+    CHECK(furnace.environment == 1.0f);
+    CHECK(furnace.baseColor == glm::vec3(1.0f));
+    for (auto name : {"base-grid-sun", "specular-grid-sun", "clearcoat-grid-sun", "furnace-clearcoat"})
+        CHECK_FALSE(MaterialValidation::spec(name).hasSheenGrid());
+    CHECK(MaterialValidation{"sheen-grid-sun"}.getDefaultCamera().position == glm::vec3(0.0f, 1.5f, 5.5f));
+}
+
+TEST_CASE("F15.3 sheen grid spheres carry the sheen of their row and column; the zero-colour row carries no feature") {
+    ECS ecs;
+    GpuScene scene;
+    test::NullTextureManager textures;
+    MaterialValidation f{"sheen-grid-sun"};
+    f.setup(ecs, scene, textures);
+    const auto& s = MaterialValidation::spec("sheen-grid-sun");
+    for (u32 row = 0; row < s.metallic.size(); ++row)
+        for (u32 col = 0; col < s.roughness.size(); ++col) {
+            const EntityID e = f.spheres()[row * s.roughness.size() + col];
+            const auto& m = std::as_const(ecs).getComponent<MaterialComponent>(e);
+            CHECK(m.baseColorTexIndex == INVALID_TEXTURE_INDEX);
+            CHECK(m.metallicFactor == s.metallic[row]);
+            CHECK(m.roughnessFactor == s.roughness[col]);
+            if (row == 0) { // sheen colour 0: the layer is disabled, the neutral material, no extension at all
+                CHECK((!m.extension || featureMask(*m.extension) == 0));
+                continue;
+            }
+            REQUIRE(m.extension);
+            REQUIRE(m.extension->sheen);
+            CHECK(m.extension->sheen->color == std::array<float, 3>{s.sheenColor[row].x, s.sheenColor[row].y, s.sheenColor[row].z});
+            CHECK(m.extension->sheen->roughness == s.sheenRoughness[col]);
+            CHECK_FALSE(m.extension->sheen->colorTexture.present());
+            CHECK_FALSE(m.extension->sheen->roughnessTexture.present());
+            CHECK_FALSE(m.extension->specular);
+            CHECK_FALSE(m.extension->clearcoat);
+            CHECK(featureMask(*m.extension) == MATERIAL_FEATURE_SHEEN);
+        }
+    SceneStore store;
+    store.sync(ecs, scene);
+    CHECK(store.verifyAgainstEcs(ecs, scene).empty());
+    CHECK(store.featureUnion() == MATERIAL_FEATURE_SHEEN);
+    // The record words the reference reads (GPUMaterialExt0 word offsets 13-15: sheenColor, 16: sheenRoughness,
+    // 17 and 18: the two texture words).
+    const u32 row = 2, col = 2;
+    const EntityID e = f.spheres()[row * s.roughness.size() + col];
+    const auto& rec = store.extensions()[store.materials()[store.materialIndexOf(e)].extensionIndex];
+    float color[3], roughness;
+    std::memcpy(color, &rec.w[13], 12);
+    std::memcpy(&roughness, &rec.w[16], 4);
+    CHECK(color[0] == 1.0f);
+    CHECK(color[1] == 0.5f);
+    CHECK(color[2] == 0.25f);
+    CHECK(roughness == 0.5f);
+    CHECK(rec.w[17] == INVALID_TEXTURE_INDEX);
+    CHECK(rec.w[18] == INVALID_TEXTURE_INDEX);
+    f.teardown(ecs, scene);
+}
+
+TEST_CASE("F15.3 sheen-grid-point: the sheen grid lit by one point light from behind the grid") {
+    const auto& sun = MaterialValidation::spec("sheen-grid-sun");
+    const auto& point = MaterialValidation::spec("sheen-grid-point");
+    CHECK(point.sheenColor == sun.sheenColor);
+    CHECK(point.sheenRoughness == sun.sheenRoughness);
+    CHECK(point.baseColor == sun.baseColor);
+    CHECK_FALSE(point.sun);
+    CHECK(point.environment == 0.0f);
+    REQUIRE(point.pointLights.size() == 1);
+    const MaterialPointLight light = point.pointLights[0];
+    CHECK(light.intensity == 250.0f);
+    CHECK(light.range == 100.0f);
+    const glm::vec3 camera = MaterialValidation{"sheen-grid-point"}.getDefaultCamera().position;
+    const glm::vec3 centre(0.0f, 1.5f, 0.0f); // four rows: the grid centre is at y = 1.5
+    CHECK(camera.y == doctest::Approx(centre.y));
+    const float vl = glm::dot(glm::normalize(camera - centre), glm::normalize(light.position - centre));
+    CHECK(vl < -0.4f);
+    CHECK(vl > -0.6f);
+    CHECK(light.position.z < -MaterialValidation::SphereRadius);
+    CHECK(glm::length(light.position - centre) == doctest::Approx(9.0f));
+    for (u32 row = 0; row < point.metallic.size(); ++row)
+        for (u32 col = 0; col < point.roughness.size(); ++col) {
+            const float d = glm::length(light.position - MaterialValidation::sphereCenter(point, col, row));
+            const float r = d / light.range, window = (1.0f - r * r * r * r) * (1.0f - r * r * r * r);
+            CHECK(window > 0.9995f);
+        }
 }

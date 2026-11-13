@@ -75,6 +75,19 @@ for _name, _sun, _env, _base, _point in (("clearcoat-grid-sun", 3.0, 0.0, COPPER
                         point=_point)
 
 
+# F15.3 (ticket 10): the sheen grids (mirrors MaterialValidation: rows = sheen colour, columns = sheen roughness, over a
+# dark rough dielectric base: grey 0.1, roughness 0.7).
+SHEEN = dict(color=[[0, 0, 0], [1, 1, 1], [1, 0.5, 0.25], [0.25, 0.5, 1]], roughness=[0.1, 0.3, 0.5, 0.75, 1.0])
+SHEEN_POINT_LIGHT = {**POINT_LIGHT, "position": [-5.85, 6.45, -4.68]}  # grid centre y = 1.5
+for _name, _sun, _env, _base, _point in (("sheen-grid-sun", 3.0, 0.0, [0.1] * 3, False),
+                                         ("sheen-grid-env-resolve", 0.0, 0.5, [0.1] * 3, False),
+                                         ("sheen-grid-env", 0.0, 0.5, [0.1] * 3, False),
+                                         ("sheen-grid-point", 0.0, 0.0, [0.1] * 3, True),
+                                         ("furnace-sheen", 0.0, 1.0, [1, 1, 1], False)):
+    SPECS[_name] = dict(roughness=[0.7] * 5, metallic=[0.0] * 4, base=_base, sun=_sun, env=_env, sheen=SHEEN,
+                        point=SHEEN_POINT_LIGHT if _point else False)
+
+
 def write_sphere_ply(path, radius=0.4, slices=64, stacks=32):
     verts, faces = [], []
     for st in range(stacks + 1):
@@ -129,6 +142,17 @@ def make_bench_snapshot(folder, name, width, height):
                               bit(factor), bit(rough), bit(1.0), ref.INVALID, ref.INVALID, ref.INVALID] + [0] * 7)
                     materials[-1].update(feature_bits=bits, flags=bits << 8, extension_index=len(records))
                     records += [words, [0] * 20, [0] * 20, [0] * 20]
+            if "sheen" in spec:
+                color, rough = spec["sheen"]["color"][row], spec["sheen"]["roughness"][col]
+                if any(color):  # a zero sheen colour disables the layer: no feature bit, no extension
+                    bit = lambda v: int.from_bytes(struct.pack("<f", v), "little")  # noqa: E731
+                    words = [0] * 20
+                    for k in (5, 6, 10, 11, 12, 17, 18):
+                        words[k] = ref.INVALID
+                    words[13:16] = [bit(c) for c in color]
+                    words[16] = bit(rough)
+                    materials[-1].update(feature_bits=4, flags=4 << 8, extension_index=len(records))
+                    records += [words, [0] * 20, [0] * 20, [0] * 20]
             instances.append({"slot": len(instances), "generation": 1, "flags": 7, "mesh": 0,
                               "material": len(materials) - 1, "world": world})
     distance = 5.5 if cols > 2 else 4.0
@@ -143,7 +167,7 @@ def make_bench_snapshot(folder, name, width, height):
         data["lights"].append({"type": 0, "position": [0, 0, 0], "direction": list(-TOWARD_SUN), "color": [1, 1, 1],
                                "intensity": spec["sun"], "range": 0, "inner": 0, "outer": 0})
     if spec.get("point"):
-        data["lights"].append(POINT_LIGHT)
+        data["lights"].append(POINT_LIGHT if spec["point"] is True else spec["point"])
     (folder / "snapshot" / "scene.json").write_text(json.dumps(data))
     return folder
 
@@ -314,6 +338,63 @@ class RunnerLogic(unittest.TestCase):
             self.assertEqual(check.SCENARIOS[key]["kind"], "direct")
             for name in ("coat-ignored", "coat-f0-from-ior", "coat-fresnel-vh", "coat-base-unattenuated"):
                 self.assertIn(name, check.SCENARIOS[key]["controls"])
+
+    def test_sheen_keys_are_pending_and_name_the_control_that_models_the_current_engine(self):
+        keys = ["sheen-grid-sun", "sheen-grid-env-resolve", "sheen-grid-env", "sheen-grid-env@probes", "sheen-grid-point",
+                "sheen-grid-point@restir", "sheen-grid-point@clustered", "furnace-sheen", "furnace-sheen@resolve"]
+        with tempfile.TemporaryDirectory() as tmp:
+            with contextlib.redirect_stdout(io.StringIO()):
+                args = ["--out", tmp, "--binary", "build/release/phosphor"]
+                for key in keys:
+                    args += ["--only", key]
+                self.assertEqual(check.main(args), 0)
+            commands = json.loads((pathlib.Path(tmp) / "plan.json").read_text())["commands"]
+        expected = {"sheen-grid-sun": ("sheen-grid-sun", "legacy", "off", "ssr", "custom", "none"),
+                    "sheen-grid-env-resolve": ("sheen-grid-env-resolve", "legacy", "off", "off", "custom", "none"),
+                    "sheen-grid-env": ("sheen-grid-env", "legacy", "off", "ssr", "custom", "none"),
+                    "sheen-grid-env@probes": ("sheen-grid-env", "legacy", "off", "probes", "off", "none"),
+                    "sheen-grid-point": ("sheen-grid-point", "legacy", "off", "ssr", "custom", "none"),
+                    "sheen-grid-point@restir": ("sheen-grid-point", "restir", "on", "ssr", "off", "rays"),
+                    "sheen-grid-point@clustered": ("sheen-grid-point", "clustered", "on", "ssr", "off", "rays"),
+                    "furnace-sheen": ("furnace-sheen", "legacy", "off", "ssr", "custom", "none"),
+                    "furnace-sheen@resolve": ("furnace-sheen", "legacy", "off", "off", "custom", "none")}
+        for key, (bench, lighting, rt, reflections, denoise, visibility) in expected.items():
+            capture, reference = commands[key]["capture"], commands[key]["reference"]
+            self.assertEqual(capture[capture.index("--material-scenario") + 1], bench, key)
+            self.assertEqual(capture[capture.index("--lighting") + 1], lighting, key)
+            self.assertEqual(capture[capture.index("--rt") + 1], rt, key)
+            self.assertEqual(capture[capture.index("--reflections") + 1], reflections, key)
+            self.assertEqual(capture[capture.index("--lighting-denoise") + 1], denoise, key)
+            self.assertEqual(reference[reference.index("--visibility") + 1], visibility, key)
+            spec = check.SCENARIOS[key]
+            literal, declared = check.scenario_controls(key)
+            for name in literal + declared:
+                self.assertIn(name, reference, key)
+            if key.startswith("sheen"):
+                self.assertEqual(spec["pending"], "ticket 10", key)
+                self.assertIn(spec["pending_matches"], literal + declared, key)
+        # Every sheen control the reference offers is a known control name, every pending_matches is a sheen-ignored twin.
+        for key in keys:
+            literal, declared = check.scenario_controls(key)
+            for name in literal:
+                self.assertIn(name, ref.SHEEN_CONTROLS, key)
+            for name in declared:
+                self.assertIn(name, ref.SHEEN_DECLARED_CONTROLS, key)
+            if "pending" in check.SCENARIOS[key]:
+                self.assertIn(check.SCENARIOS[key]["pending_matches"], ("sheen-ignored", "declared-sheen-ignored"), key)
+        # The furnace bound is an upper bound the sheen-less engine meets: only the declared gate is pending.
+        self.assertTrue(check.SCENARIOS["furnace-sheen"]["always_green"])
+        self.assertNotIn("pending", check.SCENARIOS["furnace-sheen"])
+        resolve = check.SCENARIOS["furnace-sheen@resolve"]
+        self.assertEqual((resolve["pending"], resolve["pending_gate"]), ("ticket 10", "declared"))
+        self.assertEqual(check.SCENARIOS["sheen-grid-env-resolve"]["kind"], "declared")
+        self.assertEqual(check.SCENARIOS["sheen-grid-env@probes"]["kind"], "declared")
+        self.assertEqual(check.SCENARIOS["sheen-grid-env"]["kind"], "environment")
+        # The five direct controls (the environment forms share the cheap scaling: no cheap-scaling control there).
+        for key in ("sheen-grid-sun", "sheen-grid-point", "sheen-grid-point@restir", "sheen-grid-point@clustered"):
+            self.assertEqual(check.SCENARIOS[key]["kind"], "direct")
+            self.assertEqual(sorted(check.SCENARIOS[key]["controls"]), sorted(ref.SHEEN_CONTROLS), key)
+        self.assertNotIn("sheen-cheap-scaling", check.SCENARIOS["sheen-grid-env"]["controls"])
 
     def test_pending_matches_must_also_hold_in_green_mode(self):
         failing = {"kind": "direct", "pass": False, "rows": {}}
@@ -796,6 +877,76 @@ class BenchMirror(unittest.TestCase):
             self.assertEqual(check.verdict([entry], "red"), ("EXPECTED_RED_CONFIRMED", 0))
         wrong = self.scenario(key, ref.CONTROLS["coat-base-unattenuated"], "red", tag="-wrong")
         self.assertFalse(wrong["result"]["pass"])  # an engine that adds the coat on top of the full base gains energy
+        self.assertEqual(check.verdict([wrong], "red")[1], check.EXIT_UNEXPECTED)
+
+    # --- F15.3 (ticket 10): the sheen harness, same method as the clearcoat one (the "engine" images are reference
+    # renders of the model the engine will have (sheen) or has today (sheen-ignored)).
+
+    SHEEN_KEYS = ("sheen-grid-sun", "sheen-grid-env-resolve", "sheen-grid-env", "sheen-grid-env@probes",
+                  "sheen-grid-point", "furnace-sheen@resolve")
+    SHEEN_DECLARED_KEYS = ("sheen-grid-env-resolve", "sheen-grid-env@probes", "furnace-sheen@resolve")
+
+    def sheen_engine(self, key, ignored):
+        declared = key in self.SHEEN_DECLARED_KEYS
+        model = ref.control_model("sheen-ignored", ref.APPENDIX_B) if ignored else ref.APPENDIX_B
+        environment = None
+        if declared:
+            environment = ref.SHEEN_DECLARED_CONTROLS["declared-sheen-ignored"] if ignored else ref.DECLARED
+        return model, environment
+
+    def sheen_entry(self, key, ignored, tag):
+        model, environment = self.sheen_engine(key, ignored)
+        return self.scenario(check.bench_scenario(key), model, "green", environment=environment, tag="-" + key + tag,
+                             key=key)
+
+    def test_sheen_keys_are_red_for_the_right_reason_with_a_sheen_blind_engine(self):
+        for key in self.SHEEN_KEYS:
+            entry = self.sheen_entry(key, True, "-blind")
+            self.assertTrue(entry["discriminating"], (key, json.dumps(entry["controls"], indent=1)))
+            self.assertFalse(entry["gates_pass"], key)          # pending: the gate FAILS
+            self.assertTrue(entry["pending_matches_met"], key)  # ... and the engine image matches the sheen-ignored control
+            self.assertEqual(entry["pending"], "ticket 10")
+            self.assertEqual(check.verdict([entry], "green"), ("GREEN", check.EXIT_OK), key)
+
+    def test_sheen_keys_go_red_in_green_mode_once_the_engine_implements_the_sheen(self):
+        for key in self.SHEEN_KEYS:
+            entry = self.sheen_entry(key, False, "-sheen")
+            self.assertTrue(entry["gates_pass"], (key, json.dumps(check.summarize(entry["result"]))))
+            self.assertFalse(entry["pending_matches_met"], key)
+            self.assertEqual(check.verdict([entry], "green")[1], check.EXIT_UNEXPECTED, key)
+
+    def test_sheen_controls_each_fail_their_gate(self):
+        for key in self.SHEEN_KEYS:
+            entry = self.sheen_entry(key, False, "-ctl")
+            controls = entry["declared"]["controls"] if entry["kind"] == "furnace" else entry["controls"]
+            if entry["kind"] == "furnace":
+                controls = {**entry["controls"], **controls}
+            wanted = set(check.SCENARIOS[key]["controls"]) | set(check.SCENARIOS[key].get("declared", []))
+            self.assertEqual(set(controls), wanted, key)
+            for name, verdict in controls.items():
+                self.assertTrue(verdict["fails_gate"], (key, name, verdict))
+
+    def test_every_direct_sheen_control_alone_fails_the_direct_gate_as_an_engine_image(self):
+        # An engine that implemented one of the wrong models (Ashikhmin visibility, linear roughness, view-only
+        # scaling, no scaling) must not pass the sheen gate.
+        for control in ref.SHEEN_CONTROLS:
+            if control == "sheen-ignored":
+                continue
+            entry = self.scenario("sheen-grid-sun", ref.control_model(control, ref.APPENDIX_B), "green",
+                                  tag="-" + control, key="sheen-grid-sun")
+            self.assertFalse(entry["result"]["pass"], control)
+
+    def test_furnace_sheen_bound_holds_for_the_model_and_the_unscaled_base_breaks_it(self):
+        key = "furnace-sheen"
+        for ignored in (False, True):
+            model, _ = self.sheen_engine(key, ignored)
+            entry = self.scenario(key, model, "red", tag=f"-{ignored}")
+            self.assertTrue(entry["result"]["pass"], (ignored, entry["result"]["max_sphere_mean"]))
+            self.assertTrue(entry["expectation"]["asserted"] and entry["expectation"]["met"])
+            self.assertTrue(entry["controls"]["sheen-unscaled-base"]["fails_gate"])
+            self.assertEqual(check.verdict([entry], "red"), ("EXPECTED_RED_CONFIRMED", 0))
+        wrong = self.scenario(key, ref.control_model("sheen-unscaled-base", ref.APPENDIX_B), "red", tag="-wrong")
+        self.assertFalse(wrong["result"]["pass"])  # an engine that adds the sheen on top of the full base gains energy
         self.assertEqual(check.verdict([wrong], "red")[1], check.EXIT_UNEXPECTED)
 
     def test_cached_reference_is_reused_only_for_the_same_snapshot(self):

@@ -14,13 +14,15 @@
 namespace phosphor {
 namespace {
 // The names are mirrored by tools/f15_check.py SCENARIOS (tests/test_material_validation.cpp compares both).
-constexpr std::array<std::string_view, 19> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
+constexpr std::array<std::string_view, 24> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
                                                       "furnace-base",   "furnace-resolve",     "roughness-extremes",
                                                       "roughness-extremes-sun", "specular-grid-sun",
                                                       "specular-grid-env-resolve", "specular-grid-point", "specular-grid-env", "furnace-specular",
                                                       "clearcoat-grid-sun", "clearcoat-grid-env-resolve", "clearcoat-grid-env",
                                                       "clearcoat-grid-point", "furnace-clearcoat",
-                                                      "specular-grid-edit", "specular-grid-rough"};
+                                                      "specular-grid-edit", "specular-grid-rough",
+                                                      "sheen-grid-sun", "sheen-grid-env-resolve", "sheen-grid-env",
+                                                      "sheen-grid-point", "furnace-sheen"};
 constexpr float pi = 3.14159265358979323846f;
 
 glm::quat orientLight(glm::vec3 towardLight) {
@@ -77,6 +79,20 @@ const std::vector<MaterialScenarioSpec>& specs() {
     static const glm::vec3 coatGridCentre(0.0f, 2.5f, 0.0f);
     static const MaterialPointLight coatBackLight{coatGridCentre + 9.0f * glm::normalize(glm::vec3(-0.65f, 0.55f, -0.52f)),
                                                   250.0f, 100.0f};
+    // F15.3 (ticket 10): KHR_materials_sheen on texture-free spheres.  Rows are the sheen colour (0 = no sheen, the neutral
+    // material; white; an orange and a blue to see the colour of the fuzz and the max3 albedo scaling), columns are the
+    // sheen roughness 0.1 ... 1 (alpha_g = r^2 from 0.01 to 1).  The base is a dark, rough dielectric (grey 0.1,
+    // roughness 0.7) so the sheen is the visible feature; the grid is lit from the side and slightly from behind (the
+    // base-grid rig), where the Charlie lobe (which peaks at grazing half vectors) is strongest.
+    static const std::vector<glm::vec3> sheenColors{glm::vec3(0.0f), glm::vec3(1.0f), glm::vec3(1.0f, 0.5f, 0.25f),
+                                                    glm::vec3(0.25f, 0.5f, 1.0f)};
+    static const std::vector<float> sheenRoughnesses{0.1f, 0.3f, 0.5f, 0.75f, 1.0f};
+    static const std::vector<float> sheenBaseRoughness(5, 0.7f);
+    static const std::vector<float> sheenMetallic(4, 0.0f);
+    static const glm::vec3 sheenBase(0.1f);
+    static const glm::vec3 sheenGridCentre(0.0f, 1.5f, 0.0f);
+    static const MaterialPointLight sheenBackLight{sheenGridCentre + 9.0f * glm::normalize(glm::vec3(-0.65f, 0.55f, -0.52f)),
+                                                   250.0f, 100.0f};
     static const std::vector<MaterialScenarioSpec> all{
         {"base-grid-sun", roughness, metallic, copper, true, 3.0f, towardSun, 0.0f},
         {"base-grid-env", roughness, metallic, copper, false, 0.0f, towardSun, 0.5f},
@@ -135,6 +151,22 @@ const std::vector<MaterialScenarioSpec>& specs() {
         // reuse domain of visibility_adaptive, with every extension of the grid, lit by the sun (plain resolve).
         {"specular-grid-rough", std::vector<float>(5, 0.85f), std::vector<float>(5, 0.0f), copper, true, 3.0f, towardSun,
          0.0f, specIor, specFactor, specColor},
+        // F15.3 (ticket 10) sheen grids.  Sun only: the direct gate (Charlie lobe and albedo scaling, point-evaluated disk).
+        {"sheen-grid-sun", sheenBaseRoughness, sheenMetallic, sheenBase, true, 3.0f, towardSun, 0.0f, {}, {}, {}, {}, {}, {}, {},
+         false, sheenColors, sheenRoughnesses},
+        // Environment only, deterministic resolve (--reflections off --lighting-denoise custom): the declared sheen term.
+        {"sheen-grid-env-resolve", sheenBaseRoughness, sheenMetallic, sheenBase, false, 0.0f, towardSun, 0.5f, {}, {}, {}, {},
+         {}, {}, {}, false, sheenColors, sheenRoughnesses},
+        // The same scene with the specular transport on: sheen is not sampled, the environment term comes from the composition.
+        {"sheen-grid-env", sheenBaseRoughness, sheenMetallic, sheenBase, false, 0.0f, towardSun, 0.5f, {}, {}, {}, {}, {}, {},
+         {}, false, sheenColors, sheenRoughnesses},
+        // One point light only (no sun, environment 0), side-lit from behind like the other grids.
+        {"sheen-grid-point", sheenBaseRoughness, sheenMetallic, sheenBase, false, 0.0f, towardSun, 0.0f, {}, {}, {},
+         {sheenBackLight}, {}, {}, {}, false, sheenColors, sheenRoughnesses},
+        // Furnace over sheen materials: base albedo 1 under a uniform environment of radiance 1 (the runner also captures it
+        // without the transport).
+        {"furnace-sheen", sheenBaseRoughness, sheenMetallic, glm::vec3(1.0f), false, 0.0f, towardSun, 1.0f, {}, {}, {}, {}, {},
+         {}, {}, false, sheenColors, sheenRoughnesses},
     };
     return all;
 }
@@ -209,6 +241,14 @@ void MaterialValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& textur
                     }
                     material.extension = std::move(description);
                 }
+            }
+            if (s.hasSheenGrid() && s.sheenColor[row] != glm::vec3(0.0f)) {
+                auto description = std::make_shared<MaterialDescription>();
+                description->sheen.emplace();
+                const glm::vec3 c = s.sheenColor[row];
+                description->sheen->color     = {c.x, c.y, c.z};
+                description->sheen->roughness = s.sheenRoughness[column];
+                material.extension = std::move(description);
             }
             material.baseColorFactor = glm::vec4(s.baseColor, 1.0f);
             material.metallicFactor = s.metallic[row];

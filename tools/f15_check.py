@@ -41,6 +41,15 @@ reference ray casting):
   image until then): every gate passes.  The furnace bound is an upper bound that a coat redistributes energy under,
   so the furnace gates are asserted green in every mode.  Negative controls (each must fail its gate): coat ignored, coat F0
   from the material ior (the Sample Renderer deviation), coat Fresnel at V.H, base not scaled by 1 - c F_c.
+- Sheen (F15.3, ticket 10): sheen-grid-sun / -env-resolve / -env (+ @probes) / -point (legacy, @restir, @clustered)
+  and furnace-sheen (+ @resolve) against the independent KHR_materials_sheen model of tools/f15_reference.py (Charlie D
+  and V, base scaled by the albedo scaling, E from the reference's own quadrature; the declared environment model reads
+  the engine table src/renderer/sheen_table.h generated and checked by tools/sheen_table.py).  The engine side lands with
+  ticket 10, so every gate the current engine can fail is "pending" exactly like the clearcoat grids (asserted to FAIL;
+  `pending_matches` = sheen-ignored or its declared twin must PASS); the furnace bound is an upper bound that the
+  sheen-less engine satisfies, so the furnace gates stay asserted green (only the declared gate of furnace-sheen@resolve
+  is pending).  Negative controls (each must fail its gate): sheen ignored, base not scaled by the albedo scaling,
+  Ashikhmin visibility, alpha = roughness, view-only scaling for direct light (direct keys only).
 - declared (base-grid-env-resolve; also furnace-resolve next to its furnace
   gate): the engine image against the independent declared-environment model of
   tools/f15_reference.py (DFG table, ADR-0006): per sphere mean relative error
@@ -237,6 +246,67 @@ SCENARIOS = {
                                   "declared": ["declared-coat-ignored", "declared-coat-base-unattenuated"],
                                   "terms": "constant environment radiance 1, albedo 1, no sun, deterministic resolve terms "
                                            "on the coat grid"},
+    # F15.3 (ticket 10): KHR_materials_sheen.  Rows are the sheen colour {0, white, orange, blue}, columns the sheen
+    # roughness {0.1, 0.3, 0.5, 0.75, 1} over a dark rough dielectric (grey 0.1, roughness 0.7).  Direct grids group their
+    # rows by (metallic, sheen colour).  The engine ignores the sheen layer until ticket 10, so every gate it can fail is
+    # "pending" and the engine image must PASS it against the sheen-ignored reference ("pending_matches").  The sun and
+    # point controls include the view-only scaling (`sheen-cheap-scaling`): for direct light the reference uses the
+    # notes' min(E(N.V), E(N.L)) form, which differs from the cheap form near the terminator; the environment forms use the
+    # cheap form for both, so that control has no environment key.  Sun: the Charlie lobe and the scaling are
+    # point-evaluated at the disk centre (documented in the reference).
+    "sheen-grid-sun": {"kind": "direct", "pending": "ticket 10", "pending_matches": "sheen-ignored",
+                       "controls": ["sheen-ignored", "sheen-unscaled-base", "sheen-ashikhmin-visibility",
+                                    "sheen-roughness-linear", "sheen-cheap-scaling"],
+                       "terms": "sun disk only (environment 0, no shadows, no GI) on the sheen colour x sheen roughness grid"},
+    "sheen-grid-env-resolve": {"kind": "declared", "pending": "ticket 10", "pending_matches": "declared-sheen-ignored",
+                               "reflections": "off",
+                               "controls": ["declared-sheen-ignored", "declared-sheen-unscaled-base",
+                                            "declared-sheen-roughness-linear"],
+                               "terms": "constant environment only (radiance 0.5, no sun) on the sheen grid, deterministic "
+                                        "resolve terms (--reflections off --lighting-denoise custom)"},
+    "sheen-grid-env": {"kind": "environment", "pending": "ticket 10", "pending_matches": "sheen-ignored",
+                       "controls": ["sheen-ignored", "sheen-unscaled-base", "sheen-ashikhmin-visibility",
+                                    "sheen-roughness-linear"],
+                       "terms": "constant environment only (radiance 0.5, no sun), SSR specular transport (sheen is not "
+                                "sampled: the environment term of the composition), on the sheen grid"},
+    # The probe path with the built-in analytic probe (a constant environment, no captured probe): the composition's
+    # sheen term on the probe-lit path.  A fixture with a captured probe is open (see the ticket 10 comments).
+    "sheen-grid-env@probes": {"kind": "declared", "pending": "ticket 10", "pending_matches": "declared-sheen-ignored",
+                              "reflections": "probes", "denoise": "off",
+                              "controls": ["declared-sheen-ignored", "declared-sheen-unscaled-base",
+                                           "declared-sheen-roughness-linear"],
+                              "terms": "constant environment only (radiance 0.5, no sun), probe path (--reflections probes, "
+                                       "analytic constant probe, unfiltered), on the sheen grid"},
+    "sheen-grid-point": {"kind": "direct", "pending": "ticket 10", "pending_matches": "sheen-ignored",
+                         "lighting": "legacy", "visibility": "none",
+                         "controls": ["sheen-ignored", "sheen-unscaled-base", "sheen-ashikhmin-visibility",
+                                      "sheen-roughness-linear", "sheen-cheap-scaling"],
+                         "terms": "one point light only (no sun, environment 0, no GI), resolve local lights "
+                                  "(--lighting legacy), on the sheen grid"},
+    "sheen-grid-point@restir": {"kind": "direct", "pending": "ticket 10", "pending_matches": "sheen-ignored",
+                                "lighting": "restir", "visibility": "rays", "denoise": "off", "terminator_band": 2,
+                                "controls": ["sheen-ignored", "sheen-unscaled-base", "sheen-ashikhmin-visibility",
+                                             "sheen-roughness-linear", "sheen-cheap-scaling"],
+                                "terms": "one point light only, ReSTIR DI with RT visibility (--lighting restir --rt on), "
+                                         "unfiltered (--lighting-denoise off), on the sheen grid"},
+    "sheen-grid-point@clustered": {"kind": "direct", "pending": "ticket 10", "pending_matches": "sheen-ignored",
+                                   "lighting": "clustered", "visibility": "rays", "denoise": "off", "terminator_band": 2,
+                                   "controls": ["sheen-ignored", "sheen-unscaled-base", "sheen-ashikhmin-visibility",
+                                                "sheen-roughness-linear", "sheen-cheap-scaling"],
+                                   "terms": "one point light only, clustered DI with RT visibility (--lighting clustered "
+                                            "--rt on), unfiltered (--lighting-denoise off), on the sheen grid"},
+    # Furnace over sheen materials (base albedo 1, environment 1): an upper bound that the sheen-less engine satisfies
+    # trivially, asserted green in every mode (the unscaled-base control must fail it); only the declared gate of the
+    # deterministic resolve is pending (a sheen redistributes energy: S E + base (1 - max3(S) E) differs from the plain base).
+    "furnace-sheen": {"kind": "furnace-transport", "always_green": True, "controls": ["sheen-unscaled-base"],
+                      "terms": "constant environment radiance 1, base albedo 1, no sun, stochastic specular transport on the "
+                               "sheen grid"},
+    "furnace-sheen@resolve": {"kind": "furnace", "always_green": True, "reflections": "off",
+                              "pending": "ticket 10", "pending_gate": "declared",
+                              "pending_matches": "declared-sheen-ignored", "controls": ["sheen-unscaled-base"],
+                              "declared": ["declared-sheen-ignored", "declared-sheen-unscaled-base"],
+                              "terms": "constant environment radiance 1, base albedo 1, no sun, deterministic resolve terms "
+                                       "on the sheen grid"},
     "specular-grid-point@clustered": {"kind": "direct", "lighting": "clustered", "visibility": "rays", "denoise": "off",
                                       "terminator_band": 2,
                                       "controls": ["specular-ignored", "f90-one", "specular-weight-not-on-f0"],
