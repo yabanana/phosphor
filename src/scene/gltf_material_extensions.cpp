@@ -73,19 +73,26 @@ public:
             return warn(key, "expected a textureInfo with an index");
         const int index = v.Get("index").GetNumberAsInt();
         if (index < 0) return warn(key, "negative texture index");
+        const u32 resolved = resolve_(index, sRGB);
+        if (resolved == INVALID_TEXTURE_INDEX)
+            return warn(key, "texture index " + std::to_string(index) + " does not resolve to an image; no texture");
         ref.colorSpace = sRGB ? TextureColorSpace::SRGB : TextureColorSpace::Linear;
-        ref.index      = resolve_(index, sRGB);
-        ref.texCoord   = v.Has("texCoord") && v.Get("texCoord").IsNumber()
-                             ? static_cast<u32>(std::max(0, v.Get("texCoord").GetNumberAsInt()))
-                             : 0u;
+        ref.index      = resolved;
+        ref.texCoord   = 0u;
+        if (v.Has("texCoord") && v.Get("texCoord").IsNumber()) {
+            const int texCoord = v.Get("texCoord").GetNumberAsInt();
+            if (texCoord < 0) warn(key, "negative texCoord " + std::to_string(texCoord) + "; UV set 0 is used");
+            ref.texCoord = static_cast<u32>(std::max(0, texCoord));
+        }
         if (v.Has("extensions") && v.Get("extensions").IsObject() &&
             v.Get("extensions").Has(EXT_TEXTURE_TRANSFORM))
-            applyTransform(v.Get("extensions").Get(EXT_TEXTURE_TRANSFORM), ref);
+            applyTransform(v.Get("extensions").Get(EXT_TEXTURE_TRANSFORM), ref, key, &warnings_, ext_);
         if (scale && v.Has("scale") && v.Get("scale").IsNumber())
             *scale = static_cast<float>(v.Get("scale").GetNumberAsDouble());
     }
 
-    static void applyTransform(const Value& t, MaterialTextureRef& ref) {
+    static void applyTransform(const Value& t, MaterialTextureRef& ref, const char* slot = nullptr,
+                               std::vector<std::string>* warnings = nullptr, const char* ext = "") {
         if (!t.IsObject()) return;
         UvTransform xf;
         auto pair = [&](const char* key, std::array<float, 2>& out) {
@@ -100,8 +107,13 @@ public:
             xf.rotation = static_cast<float>(t.Get("rotation").GetNumberAsDouble());
         if (!xf.isIdentity()) ref.transform = xf;
         // The extension's texCoord, when present, overrides the textureInfo's.
-        if (t.Has("texCoord") && t.Get("texCoord").IsNumber())
-            ref.texCoord = static_cast<u32>(std::max(0, t.Get("texCoord").GetNumberAsInt()));
+        if (t.Has("texCoord") && t.Get("texCoord").IsNumber()) {
+            const int texCoord = t.Get("texCoord").GetNumberAsInt();
+            if (texCoord < 0 && warnings)
+                warnings->push_back(std::string(ext) + "." + (slot ? slot : "texture") + ": negative texCoord " +
+                                    std::to_string(texCoord) + " in KHR_texture_transform; UV set 0 is used");
+            ref.texCoord = static_cast<u32>(std::max(0, texCoord));
+        }
     }
 
 private:
@@ -115,13 +127,23 @@ private:
 };
 
 template <typename Info>
-void coreTexture(const Info& info, MaterialTextureRef& ref, bool sRGB, const GltfTextureResolver& resolve) {
+void coreTexture(const Info& info, MaterialTextureRef& ref, bool sRGB, const GltfTextureResolver& resolve,
+                 const char* slot, std::vector<std::string>& warnings) {
     if (info.index < 0) return;
+    const u32 resolved = resolve(info.index, sRGB);
+    if (resolved == INVALID_TEXTURE_INDEX) {
+        warnings.push_back(std::string(slot) + ": texture index " + std::to_string(info.index) +
+                           " does not resolve to an image; no texture");
+        return;
+    }
     ref.colorSpace = sRGB ? TextureColorSpace::SRGB : TextureColorSpace::Linear;
-    ref.index      = resolve(info.index, sRGB);
+    ref.index      = resolved;
+    if (info.texCoord < 0)
+        warnings.push_back(std::string(slot) + ": negative texCoord " + std::to_string(info.texCoord) +
+                           "; UV set 0 is used");
     ref.texCoord   = static_cast<u32>(std::max(0, info.texCoord));
     const auto it  = info.extensions.find(EXT_TEXTURE_TRANSFORM);
-    if (it != info.extensions.end()) Reader::applyTransform(it->second, ref);
+    if (it != info.extensions.end()) Reader::applyTransform(it->second, ref, slot, &warnings, "material");
 }
 
 float meanFreePathFor(float attenuationDistance, float attenuationColor) {
@@ -146,14 +168,15 @@ GltfMaterialParse parseGltfMaterial(const tinygltf::Material& material, const Gl
         b.baseColor[i] = static_cast<float>(pbr.baseColorFactor[i]);
     b.metallic  = static_cast<float>(pbr.metallicFactor);
     b.roughness = static_cast<float>(pbr.roughnessFactor);
-    coreTexture(pbr.baseColorTexture, b.baseColorTexture, true, resolve);
-    coreTexture(pbr.metallicRoughnessTexture, b.metallicRoughnessTexture, false, resolve);
-    coreTexture(material.normalTexture, b.normalTexture, false, resolve);
+    coreTexture(pbr.baseColorTexture, b.baseColorTexture, true, resolve, "baseColorTexture", info.warnings);
+    coreTexture(pbr.metallicRoughnessTexture, b.metallicRoughnessTexture, false, resolve, "metallicRoughnessTexture",
+                info.warnings);
+    coreTexture(material.normalTexture, b.normalTexture, false, resolve, "normalTexture", info.warnings);
     if (material.normalTexture.index >= 0) b.normalScale = static_cast<float>(material.normalTexture.scale);
-    coreTexture(material.occlusionTexture, b.occlusionTexture, false, resolve);
+    coreTexture(material.occlusionTexture, b.occlusionTexture, false, resolve, "occlusionTexture", info.warnings);
     if (material.occlusionTexture.index >= 0)
         b.occlusionStrength = static_cast<float>(material.occlusionTexture.strength);
-    coreTexture(material.emissiveTexture, b.emissiveTexture, true, resolve);
+    coreTexture(material.emissiveTexture, b.emissiveTexture, true, resolve, "emissiveTexture", info.warnings);
     for (size_t i = 0; i < 3 && i < material.emissiveFactor.size(); ++i)
         b.emissive[i] = static_cast<float>(material.emissiveFactor[i]);
     b.alphaCutoff = material.alphaMode == "MASK" ? static_cast<float>(material.alphaCutoff) : 0.0f;
@@ -182,6 +205,10 @@ GltfMaterialParse parseGltfMaterial(const tinygltf::Material& material, const Gl
     if (const Value* v = find(EXT_EMISSIVE); objectOrWarn(v, EXT_EMISSIVE)) {
         float strength = 1.0f;
         reader(*v, EXT_EMISSIVE).number("emissiveStrength", strength);
+        if (strength < 0.0f)
+            info.warnings.push_back(std::string(EXT_EMISSIVE) + ".emissiveStrength: negative value " +
+                                    std::to_string(strength) + " kept in the description (schema minimum is 0); "
+                                    "the GPU emissive is clamped to 0");
         for (float& e : b.emissive) e *= strength;
         info.emissiveStrengthUsed = true;
     }

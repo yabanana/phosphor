@@ -726,3 +726,27 @@ TEST_CASE("support report: base, features and glTF encodings are reported apart"
     CHECK(detail.find("features: clearcoat=unsupported") != std::string::npos);
     CHECK(detail.find("encodings: emissive_strength=implemented") != std::string::npos);
 }
+
+TEST_CASE("glTF materials: unresolvable textures and out-of-range values are noted, not applied") {
+    const tinygltf::Model model = modelWithMaterial(R"({"pbrMetallicRoughness":{"baseColorTexture":{"index":2,"texCoord":-3}},
+        "emissiveTexture":{"index":5},
+        "extensions":{"KHR_materials_sheen":{"sheenColorFactor":[1,1,1],"sheenColorTexture":{"index":4,"texCoord":-1}},
+        "KHR_materials_emissive_strength":{"emissiveStrength":-1}},"emissiveFactor":[1,1,1]})");
+    // Textures 0..3 exist; 4 and 5 do not.
+    const auto p = parseGltfMaterial(model.materials.at(0), [](int index, bool) {
+        return index < 4 ? static_cast<u32>(index + 100) : INVALID_TEXTURE_INDEX;
+    });
+    CHECK(p.description.base.baseColorTexture.index == 102u);
+    CHECK(p.description.base.baseColorTexture.texCoord == 0u); // negative texCoord read as UV set 0
+    CHECK(anyWarning(p, "baseColorTexture: negative texCoord -3"));
+    CHECK_FALSE(p.description.base.emissiveTexture.present());
+    CHECK(anyWarning(p, "emissiveTexture: texture index 5"));
+    REQUIRE(p.description.sheen.has_value());
+    CHECK_FALSE(p.description.sheen->colorTexture.present());
+    CHECK(anyWarning(p, "sheenColorTexture: texture index 4"));
+    // The authored negative strength stays in the description.
+    CHECK(p.description.base.emissive[0] == doctest::Approx(-1.0f));
+    CHECK(anyWarning(p, "emissiveStrength: negative"));
+    // The warnings reach the support report.
+    CHECK(buildSupportReport(p.description, p.info).warnings.size() == p.info.warnings.size());
+}

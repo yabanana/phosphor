@@ -499,3 +499,87 @@ TEST_CASE("glTF loader: a required extension whose feature is not rendered refus
         CHECK(scene.getMeshCount() == 0);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Review (ticket 04): out-of-range input and once-per-material parsing.
+// ---------------------------------------------------------------------------
+namespace {
+bool anyContains(const std::vector<std::string>& list, const std::string& needle) {
+    for (const auto& s : list)
+        if (s.find(needle) != std::string::npos) return true;
+    return false;
+}
+} // namespace
+
+TEST_CASE("glTF loader: a negative emissiveStrength keeps the authored value but the GPU emissive is clamped to 0") {
+    auto model = nlohmann::json::parse(quadWithoutNormalsOrTangents(
+        R"({"name":"neg","emissiveFactor":[1,0.5,0],"extensions":{"KHR_materials_emissive_strength":{"emissiveStrength":-2}}})"));
+    model["extensionsUsed"] = {"KHR_materials_emissive_strength"};
+    GpuScene scene;
+    REQUIRE(loadModelJson(model, scene, "phosphor_f15_negative_emissive.gltf"));
+    // description: authored -2 * (1, 0.5, 0)
+    CHECK(scene.materialDescriptions()[0].base.emissive[0] == doctest::Approx(-2.0f));
+    CHECK(scene.materialDescriptions()[0].base.emissive[1] == doctest::Approx(-1.0f));
+    // GPU: never negative
+    for (float e : scene.materials()[0].emissive) CHECK(e == 0.0f);
+    CHECK(anyContains(scene.materialSupport()[0].warnings, "emissiveStrength"));
+}
+
+TEST_CASE("glTF loader: a negative texCoord is a warning listed in the support report") {
+    auto model = nlohmann::json::parse(quadWithoutNormalsOrTangents(
+        R"({"name":"neg","pbrMetallicRoughness":{"baseColorTexture":{"index":0,"texCoord":-1}}})"));
+    model["textures"] = nlohmann::json::array({nlohmann::json{{"source", 0}}});
+    model["images"]   = nlohmann::json::array({nlohmann::json{{"uri", kTinyPng}}});
+    GpuScene scene;
+    REQUIRE(loadModelJson(model, scene, "phosphor_f15_negative_texcoord.gltf"));
+    CHECK(anyContains(scene.materialSupport()[0].warnings, "negative texCoord"));
+    CHECK(scene.materialDescriptions()[0].base.baseColorTexture.texCoord == 0u);
+}
+
+TEST_CASE("glTF loader: a texture index out of range is no texture, with a warning") {
+    // textures[] has one entry; index 7 does not exist (core slot and extension slot).
+    auto model = nlohmann::json::parse(quadWithoutNormalsOrTangents(
+        R"({"name":"oob","pbrMetallicRoughness":{"baseColorTexture":{"index":7}},
+            "extensions":{"KHR_materials_clearcoat":{"clearcoatFactor":1,"clearcoatTexture":{"index":9}}}})"));
+    model["textures"] = nlohmann::json::array({nlohmann::json{{"source", 0}}});
+    model["images"]   = nlohmann::json::array({nlohmann::json{{"uri", kTinyPng}}});
+    GpuScene scene;
+    NullTextureManager textures;
+    textures.createDefaultTextures();
+    const auto path = std::filesystem::temp_directory_path() / "phosphor_f15_oob_texture.gltf";
+    { std::ofstream out(path); out << model; }
+    ECS ecs;
+    GltfLoader loader(scene, textures, ecs);
+    REQUIRE(loader.loadFromFile(path.string()));
+    std::filesystem::remove(path);
+    const auto& d = scene.materialDescriptions()[0];
+    CHECK_FALSE(d.base.baseColorTexture.present());
+    REQUIRE(d.clearcoat.has_value());
+    CHECK_FALSE(d.clearcoat->factorTexture.present());
+    // The GPU record binds the documented default of the slot.
+    CHECK(scene.materials()[0].baseColorTex == textures.getDefaultWhite());
+    CHECK(anyContains(scene.materialSupport()[0].warnings, "baseColorTexture"));
+    CHECK(anyContains(scene.materialSupport()[0].warnings, "clearcoatTexture"));
+}
+
+TEST_CASE("glTF loader: each material is parsed once, however many primitives use it") {
+    auto model = nlohmann::json::parse(quadWithoutNormalsOrTangents(R"({"name":"shared"})"));
+    auto primitive = model["meshes"][0]["primitives"][0];
+    model["meshes"][0]["primitives"].push_back(primitive);
+    model["meshes"][0]["primitives"].push_back(primitive);
+    model["materials"].push_back(nlohmann::json::parse(R"({"name":"unused"})"));
+    model["nodes"].push_back({{"mesh", 0}});
+    model["scenes"][0]["nodes"].push_back(1);
+    const auto path = std::filesystem::temp_directory_path() / "phosphor_f15_parse_once.gltf";
+    { std::ofstream out(path); out << model; }
+    GpuScene scene;
+    NullTextureManager textures;
+    textures.createDefaultTextures();
+    ECS ecs;
+    GltfLoader loader(scene, textures, ecs);
+    REQUIRE(loader.loadFromFile(path.string()));
+    std::filesystem::remove(path);
+    CHECK(loader.createdEntities().size() == 6); // two nodes x three primitives
+    CHECK(scene.materials().size() == 1);
+    CHECK(loader.materialParseCount() == 1);
+}

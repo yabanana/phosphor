@@ -27,7 +27,9 @@ namespace phosphor {
 
 /// Maps a glTF texture index to a bindless texture index (the loader loads and
 /// caches the image; tests pass an identity function).  `sRGB` selects the
-/// colour space the specification defines for the slot.
+/// colour space the specification defines for the slot.  Returning
+/// INVALID_TEXTURE_INDEX means the texture cannot be resolved (index out of
+/// range, no image): the slot stays empty and a warning is recorded.
 using GltfTextureResolver = std::function<u32(int gltfTexture, bool sRGB)>;
 
 struct GltfMaterialParse {
@@ -38,8 +40,9 @@ struct GltfMaterialParse {
 /// Convert one glTF material.  Textures are resolved base slots first
 /// (baseColor, metallicRoughness, normal, occlusion, emissive), then the
 /// extension slots.  Out-of-range values are kept as authored (validate()
-/// reports them); malformed extension JSON is skipped with a warning in
-/// `info.warnings`.
+/// reports them); malformed extension JSON, a negative emissiveStrength or
+/// texCoord and unresolvable texture indices are noted in `info.warnings`
+/// (a negative texCoord is read as UV set 0, an unresolvable texture as none).
 [[nodiscard]] GltfMaterialParse parseGltfMaterial(const tinygltf::Material& material,
                                                   const GltfTextureResolver& resolve);
 

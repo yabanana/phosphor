@@ -2,6 +2,7 @@
 
 #include "core/types.h"
 #include "renderer/gpu_scene.h"
+#include "scene/gltf_material_extensions.h"
 #include <glm/glm.hpp>
 #include <string>
 #include <unordered_map>
@@ -36,12 +37,17 @@ public:
     [[nodiscard]] std::span<const EntityID> createdEntities() const { return createdEntities_; }
     /// Why the last loadFromFile() failed (empty after a success).
     [[nodiscard]] const std::string& lastError() const { return lastError_; }
+    /// How many glTF materials were parsed in the last load: each material is
+    /// parsed once, however many primitives use it.
+    [[nodiscard]] size_t materialParseCount() const { return materialParseCount_; }
 
 private:
     void processNode(const tinygltf::Model& model, const tinygltf::Node& node,
                      glm::mat4 parentTransform);
     MeshHandle processPrimitive(const tinygltf::Model& model, int meshIndex, size_t primitiveIndex);
     u32  processMaterial(const tinygltf::Model& model, const tinygltf::Material& material);
+    /// Parsed description of glTF material `index`, cached per file.
+    const GltfMaterialParse& parsedMaterial(const tinygltf::Model& model, int index);
     u32  processTexture(const tinygltf::Model& model, int textureIndex, bool sRGB);
 
     GpuScene&       gpuScene_;
@@ -54,6 +60,8 @@ private:
     std::unordered_map<u64, MeshHandle> meshCache_;
     std::vector<EntityID> createdEntities_;
     std::unordered_map<int, u32>        materialCache_;
+    std::unordered_map<int, GltfMaterialParse> parsedMaterials_;
+    size_t                              materialParseCount_ = 0;
     std::unordered_map<u64, u32>        textureCache_;
 };
 
