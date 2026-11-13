@@ -479,9 +479,282 @@ class SpecularIorModel(unittest.TestCase):
         self.assertAlmostEqual(ior, 1.33, places=6)
         self.assertEqual((spec, color), (0.5, [2.0, 1.0, 0.25]))
         self.assertIsNone(ref.material_specular(data, data["materials"][1]))
-        data["materials"][0]["feature_bits"] = 3  # clearcoat is outside the declared model
+        data["materials"][0]["feature_bits"] = 4  # sheen is outside the declared model
         with self.assertRaises(ValueError):
             ref.material_specular(data, data["materials"][0])
+        data["materials"][0]["feature_bits"] = 3  # ior/specular + clearcoat is inside it (ticket 09)
+        self.assertEqual(ref.material_specular(data, data["materials"][0])[1], 0.5)
+
+
+def coat_dict(factor, roughness, ior=1.5, variant="spec", count=1):
+    """Per-pixel coat arrays of `count` identical pixels (see ref.coat_arrays)."""
+    return {"factor": np.full(count, float(factor)), "roughness": np.full(count, float(roughness)),
+            "f0_ior": np.full(count, float(ref.ior_factor(ior))), "variant": variant}
+
+
+class ClearcoatModel(unittest.TestCase):
+    """KHR_materials_clearcoat (ticket 09) against hand values of the ratified text (research/khr-materials.md
+    section 2), against analytic bounds and against independent Monte Carlo; never against the shader."""
+
+    def setUp(self):
+        self.n = np.array([[0.0, 0.0, 1.0]])
+        self.v = np.array([unit(0.3, 0.1, 1.0)])
+        self.l = np.array([unit(-0.5, 0.2, 0.7)])
+        self.base = np.array([[0.8, 0.35, 0.15]])
+
+    @staticmethod
+    def d_vis(n, v, l, alpha):
+        h = unit(*(v + l))
+        nl, nv, nh = l @ n, v @ n, h @ n
+        d = alpha ** 2 / (math.pi * (nh * nh * (alpha ** 2 - 1) + 1) ** 2)
+        vis = 1 / (2 * (nv * math.sqrt(alpha ** 2 + (1 - alpha ** 2) * nl ** 2) +
+                        nl * math.sqrt(alpha ** 2 + (1 - alpha ** 2) * nv ** 2)))
+        return d * vis
+
+    def test_coat_fresnel_hand_values(self):
+        # F_c = 0.04 + 0.96 (1 - |V.Nc|)^5: head-on 0.04, |V.Nc| = 0.5 -> 0.04 + 0.96 / 32 = 0.07, grazing 1.
+        n = np.array([[0.0, 0.0, 1.0]] * 3)
+        v = np.array([[0.0, 0.0, 1.0], list(unit(math.sqrt(0.75), 0.0, 0.5)), [1.0, 0.0, 0.0]])
+        got = ref.coat_fresnel(coat_dict(1.0, 0.1, count=3), n, v)
+        np.testing.assert_allclose(got, [0.04, 0.07, 1.0], atol=1e-12)
+        self.assertAlmostEqual(ref.COAT_F0, 0.04, places=12)  # ((1 - 1.5) / (1 + 1.5))^2
+        # The fresnel_coat function uses |V.Nc|: a back-facing view of the coat gives the same value.
+        np.testing.assert_allclose(ref.coat_fresnel(coat_dict(1.0, 0.1), n[:1], -v[1:2]), [0.07], atol=1e-12)
+
+    def test_coated_bsdf_follows_the_layering_formula(self):
+        # f = (1 - c F_c) f_material + c F_c D Vis (a_c = r_c^2), checked at one geometry for each material.
+        c, rc = 0.6, 0.3
+        fc = 0.04 + 0.96 * (1 - float(self.v[0] @ self.n[0])) ** 5
+        coat_value = self.d_vis(self.n[0], self.v[0], self.l[0], rc ** 2)
+        for metallic in (0.0, 0.5, 1.0):
+            m = np.array([metallic])
+            material = ref.bsdf(self.base, m, np.array([0.6]), self.n, self.v, self.l)[0]
+            got = ref.bsdf(self.base, m, np.array([0.6]), self.n, self.v, self.l, coat=coat_dict(c, rc))[0]
+            np.testing.assert_allclose(got, (1 - c * fc) * material + c * fc * coat_value, rtol=1e-12)
+
+    def test_the_coat_fresnel_does_not_depend_on_the_light_direction(self):
+        # |V.Nc| only: two light directions give the same attenuation, unlike a Fresnel on V.H.
+        other = np.array([unit(-0.8, 0.3, 0.15)])  # side-lit from behind: V.H far from V.N
+        a1, v1 = ref.coat_lobe(coat_dict(1.0, 0.3), self.n, self.v, self.l)
+        a2, v2 = ref.coat_lobe(coat_dict(1.0, 0.3), self.n, self.v, other)
+        np.testing.assert_allclose(a1, a2, rtol=1e-14)
+        self.assertNotAlmostEqual(float(v1[0]), float(v2[0]), places=6)
+        b1, _ = ref.coat_lobe(coat_dict(1.0, 0.3, variant="fresnel-vh"), self.n, self.v, self.l)
+        b2, _ = ref.coat_lobe(coat_dict(1.0, 0.3, variant="fresnel-vh"), self.n, self.v, other)
+        self.assertGreater(abs(float(b1[0] - b2[0])), 1e-3)
+
+    def test_zero_coat_reduces_exactly_to_the_current_model(self):
+        zero = coat_dict(0.0, 0.5)
+        for metallic in (0.0, 0.5, 1.0):
+            m = np.array([metallic])
+            np.testing.assert_allclose(ref.bsdf(self.base, m, np.array([0.4]), self.n, self.v, self.l, coat=zero),
+                                       ref.bsdf(self.base, m, np.array([0.4]), self.n, self.v, self.l), rtol=1e-14)
+        sun, narrow = ref.sun_radiance(self.base, np.array([0.0]), np.array([0.4]), self.n, self.v, unit(-0.5, 0.2, 0.7),
+                                       np.ones(3), 0.00465, coat=coat_dict(0.0, 0.0))
+        plain, plain_narrow = ref.sun_radiance(self.base, np.array([0.0]), np.array([0.4]), self.n, self.v,
+                                               unit(-0.5, 0.2, 0.7), np.ones(3), 0.00465)
+        np.testing.assert_allclose(sun, plain, rtol=1e-14)
+        self.assertEqual(bool(narrow[0]), bool(plain_narrow[0]))
+        mu, rough = np.array([0.5]), np.array([0.4])
+        material = ref.environment_radiance(self.base, np.array([0.0]), rough, mu, 0.5)
+        np.testing.assert_allclose(ref.environment_coat(material, mu, zero, 0.5), material, rtol=1e-14)
+        declared = ref.declared_environment_radiance(self.base, np.array([0.0]), rough, mu, 0.5)
+        np.testing.assert_allclose(ref.declared_environment_radiance(self.base, np.array([0.0]), rough, mu, 0.5,
+                                                                     coat=zero), declared, rtol=1e-14)
+        # The "ignored" control is the same reduction for a non-zero coat.
+        ignored = coat_dict(1.0, 0.1, variant="ignored")
+        np.testing.assert_allclose(ref.bsdf(self.base, np.array([0.0]), rough, self.n, self.v, self.l, coat=ignored),
+                                   ref.bsdf(self.base, np.array([0.0]), rough, self.n, self.v, self.l), rtol=1e-14)
+
+    def test_the_coat_term_has_its_own_cosine_mask(self):
+        # Light below the horizon of the (shading) normal: neither the coat term nor the base reflect.
+        below = np.array([unit(0.0, 0.8, -0.2)])
+        got = ref.bsdf(self.base, np.array([0.0]), np.array([0.4]), self.n, self.v, below, coat=coat_dict(1.0, 0.2))
+        self.assertTrue(np.all(got == 0))
+
+    def test_coat_only_albedo_is_bounded_and_matches_monte_carlo(self):
+        # E_coat(mu, a_c) = integral of D Vis cos (Fresnel 1) <= 1 at every mu and roughness (energy conservation of
+        # the single-scatter GGX lobe), against an independent wi-space cosine Monte Carlo.
+        mus = np.linspace(0.05, 1.0, 20)
+        for roughness in (0.0, 0.05, 0.15, 0.4, 1.0):
+            albedo, weighted = ref.coat_albedo(mus, np.full(20, roughness))
+            self.assertLessEqual(float(albedo.max()), 1.0 + 1e-3, roughness)
+            self.assertGreater(float(albedo.min()), 0.0)
+            np.testing.assert_array_less(weighted, albedo + 1e-12)  # B = the w-weighted part of A + B
+        helper = EnvironmentQuadrature()
+        for roughness, mu in ((0.4, 0.6), (1.0, 0.3), (0.15, 0.9)):
+            albedo, _ = ref.coat_albedo(np.array([mu]), np.array([roughness]))
+            estimate = helper.independent_directional_albedo(roughness, mu)
+            self.assertLess(abs(float(albedo[0]) - estimate) / estimate, 0.015, (roughness, mu))
+
+    def test_white_metal_under_a_coat_never_gains_energy_in_the_furnace(self):
+        # A white metal conserves energy (<= 1); the coat mixes it with E_coat <= 1 by c F_c: still <= 1.
+        white = np.ones((1, 3))
+        for roughness in (0.0, 0.15, 1.0):
+            for factor in (0.25, 0.5, 1.0):
+                for mu in (1.0, 0.5, 0.1):
+                    material = ref.environment_radiance(white, np.array([1.0]), np.array([0.6]), np.array([mu]), 1.0)
+                    out = ref.environment_coat(material, np.array([mu]), coat_dict(factor, roughness), 1.0)
+                    self.assertLessEqual(float(out.max()), 1.0 + 1e-3, (roughness, factor, mu))
+        # The unattenuated control adds the coat ON TOP of the full base: it gains energy.
+        material = ref.environment_radiance(white, np.array([1.0]), np.array([0.1]), np.array([0.3]), 1.0)
+        gain = ref.environment_coat(material, np.array([0.3]), coat_dict(1.0, 0.15, variant="base-unattenuated"), 1.0)
+        self.assertGreater(float(gain.max()), 1.0 + 0.01)
+
+    def test_exact_environment_formula_and_hand_value(self):
+        mu = np.array([0.5])
+        rough = np.array([0.6])
+        coat = coat_dict(0.5, 0.4)
+        material = ref.environment_radiance(self.base, np.array([0.0]), rough, mu, 0.5)
+        got = ref.environment_coat(material, mu, coat, 0.5)
+        fc = 0.04 + 0.96 * 0.5 ** 5
+        albedo, _ = ref.coat_albedo(mu, np.array([0.4]))
+        np.testing.assert_allclose(got, (1 - 0.5 * fc) * material + 0.5 * fc * float(albedo[0]) * 0.5, rtol=1e-12)
+
+    def test_the_controls_move_the_environment_in_the_documented_direction(self):
+        mu = np.array([0.4])
+        rough = np.array([0.6])
+        material = ref.environment_radiance(self.base, np.array([0.0]), rough, mu, 0.5)
+
+        def under(variant, ior=1.5):
+            return ref.environment_coat(material, mu, coat_dict(1.0, 0.15, ior=ior, variant=variant), 0.5)
+
+        spec = under("spec")
+        self.assertTrue(np.all(under("ignored") < spec))                         # no coat: darker than the coated copper
+        self.assertTrue(np.all(under("base-unattenuated") > spec))               # base not darkened: more energy
+        self.assertTrue(np.all(under("f0-from-ior", 2.4) > under("spec", 2.4)))   # F0 0.17 instead of 0.04: more coat
+        self.assertTrue(np.all(under("f0-from-ior", 1.0) < under("spec", 1.0)))   # F0 0: less coat
+        np.testing.assert_allclose(under("f0-from-ior", 1.5), spec, rtol=1e-12)   # same at ior 1.5
+        self.assertGreater(float(np.abs(under("fresnel-vh") - spec).max()), 1e-4)  # the V.H integral differs
+
+    def test_declared_environment_hand_value_and_controls(self):
+        mu, rough = np.array([0.5]), np.array([0.6])
+        coat = coat_dict(0.5, 0.4)
+        base = ref.declared_environment_radiance(self.base, np.array([0.0]), rough, mu, 1.0)
+        got = ref.declared_environment_radiance(self.base, np.array([0.0]), rough, mu, 2.0, coat=coat)
+        a, b = ref.dfg_lookup(mu, ref.clamp_roughness(np.array([0.4])))
+        fc = 0.04 + 0.96 * 0.5 ** 5
+        expected = ((1 - 0.5 * fc) * base + 0.5 * fc * float(np.clip(a + b, 0, 1)[0])) * 2.0
+        np.testing.assert_allclose(got, expected, rtol=1e-12)
+        full = coat_dict(1.0, 0.15, ior=2.4)
+        good = ref.declared_environment_radiance(self.base, np.array([0.0]), rough, mu, 1.0, ref.DECLARED, coat=full)
+        for name, variant in ref.COAT_DECLARED_CONTROLS.items():
+            wrong = ref.declared_environment_radiance(self.base, np.array([0.0]), rough, mu, 1.0, variant, coat=full)
+            self.assertGreater(float(np.abs(wrong - good).max() / good.max()), 0.01, name)
+        ignored = ref.declared_environment_radiance(self.base, np.array([0.0]), rough, mu, 1.0,
+                                                    ref.COAT_DECLARED_CONTROLS["declared-coat-ignored"], coat=full)
+        np.testing.assert_allclose(ignored, ref.declared_environment_radiance(self.base, np.array([0.0]), rough, mu, 1.0),
+                                   rtol=1e-14)
+        with self.assertRaises(ValueError):  # no V.H in a split-sum model: no declared fresnel-vh control
+            ref.declared_environment_radiance(self.base, np.array([0.0]), rough, mu, 1.0,
+                                              {**ref.DECLARED, "coat": "fresnel-vh"}, coat=full)
+
+    def test_the_material_under_the_coat_is_the_full_extended_material(self):
+        dielectric = {"f0": ref.specular_f0(np.array([2.4]), np.array([[1.0, 1.0, 1.0]])), "weight": np.array([0.5]),
+                      "variant": "extension"}
+        m, rough = np.array([0.0]), np.array([0.35])
+        c, rc = 0.7, 0.2
+        material = ref.bsdf(self.base, m, rough, self.n, self.v, self.l, ref.SPECULAR_EXT, dielectric)[0]
+        fc = 0.04 + 0.96 * (1 - float(self.v[0] @ self.n[0])) ** 5
+        coat_value = self.d_vis(self.n[0], self.v[0], self.l[0], rc ** 2)
+        got = ref.bsdf(self.base, m, rough, self.n, self.v, self.l, ref.SPECULAR_EXT, dielectric, coat_dict(c, rc))[0]
+        np.testing.assert_allclose(got, (1 - c * fc) * material + c * fc * coat_value, rtol=1e-12)
+
+    def test_controls_differ_in_the_documented_direction_for_a_light(self):
+        # Direct light at one geometry: base-unattenuated > spec, f0-from-ior moves with the material ior only,
+        # fresnel-vh equals the model where H = N (V.H = V.N) and differs elsewhere.
+        rough = np.array([0.6])
+        m = np.array([0.0])
+
+        def f(variant, ior=1.5, l=self.l, v=self.v):
+            return ref.bsdf(self.base, m, rough, self.n, v, l, ref.SPECULAR_EXT, None,
+                            coat_dict(1.0, 0.05, ior=ior, variant=variant))[0]
+
+        spec = f("spec")
+        self.assertTrue(np.all(f("base-unattenuated") > spec))
+        np.testing.assert_allclose(f("f0-from-ior", 1.5), spec, rtol=1e-12)
+        back = np.array([unit(-0.8, 0.3, 0.15)])  # side-lit from behind: V.H differs from V.N
+        self.assertGreater(abs(float(f("fresnel-vh", l=back)[0] - f("spec", l=back)[0])), 2e-4)
+        mirror_l = np.array([unit(-0.3, -0.1, 1.0)])  # mirror of v about n = z: H = N
+        np.testing.assert_allclose(f("fresnel-vh", l=mirror_l), f("spec", l=mirror_l), rtol=1e-12)
+
+    def test_point_light_uses_the_coated_bsdf_at_the_light_direction(self):
+        light = {"position": [-1.0, 0.4, 1.4], "intensity": 50.0, "range": 100.0, "color": [1.0, 1.0, 1.0]}
+        position = np.zeros((1, 3))
+        coat = coat_dict(0.8, 0.1)
+        got, lit = ref.point_radiance(self.base, np.array([0.0]), np.array([0.5]), self.n, self.v, position, light,
+                                      coat=coat)
+        delta = np.array(light["position"])
+        l = (delta / np.linalg.norm(delta))[None, :]
+        incident = 50.0 * float(ref.point_window(np.linalg.norm(delta), 100.0)) / float(delta @ delta)
+        expected = ref.bsdf(self.base, np.array([0.0]), np.array([0.5]), self.n, self.v, l, coat=coat)[0] * \
+            float(l[0] @ self.n[0]) * incident
+        np.testing.assert_allclose(got[0], expected, rtol=1e-12)
+        self.assertTrue(bool(lit[0]))
+
+    def test_sun_coat_lobe_has_its_own_alpha_axis_and_mask(self):
+        # A rough base (roughness 0.6) under a smooth coat (roughness 0): the base lobe is wide (no narrow pixel), the
+        # coat lobe is narrow near the mirror direction, so the union mask holds those pixels.
+        n = np.array([[0.0, 0.0, 1.0]] * 3)
+        toward = unit(0.0, 0.3, 1.0)
+        v = np.array([unit(0.0, -0.3, 1.0), unit(0.0, -0.3, 1.0), unit(0.0, 0.9, 1.0)])
+        base = np.ones((3, 3))
+        metallic = np.zeros(3)
+        rough = np.full(3, 0.6)
+        coat = coat_dict(1.0, 0.0, count=3)
+        _, plain_narrow = ref.sun_radiance(base, metallic, rough, n, v, toward, np.ones(3), 0.00465)
+        radiance, narrow = ref.sun_radiance(base, metallic, rough, n, v, toward, np.ones(3), 0.00465, coat=coat)
+        self.assertFalse(plain_narrow.any())
+        self.assertEqual(narrow.tolist(), [True, True, False])
+        # The mirror-aligned pixel matches a 20000-sample quadrature of the coated BSDF (the base part is smooth).
+        samples = ref.sun_disk_samples(toward, 0.00465, 20000)
+        total = np.zeros(3)
+        for sample in samples:
+            lk = np.broadcast_to(sample, (1, 3))
+            total += ref.bsdf(base[:1], metallic[:1], rough[:1], n[:1], v[:1], lk, coat=coat_dict(1.0, 0.0))[0] * \
+                max(0.0, sample[2])
+        total /= len(samples)
+        np.testing.assert_allclose(radiance[0], total, rtol=0.02)
+
+    def test_the_union_mask_keeps_the_base_lobe_when_the_coat_is_wide(self):
+        n = np.array([[0.0, 0.0, 1.0]])
+        toward = unit(0.0, 0.3, 1.0)
+        v = np.array([unit(0.0, -0.3, 1.0)])
+        _, base_narrow = ref.sun_radiance(np.ones((1, 3)), np.zeros(1), np.array([0.1]), n, v, toward, np.ones(3), 0.00465)
+        _, union = ref.sun_radiance(np.ones((1, 3)), np.zeros(1), np.array([0.1]), n, v, toward, np.ones(3), 0.00465,
+                                    coat=coat_dict(1.0, 1.0))
+        self.assertTrue(bool(base_narrow[0]) and bool(union[0]))
+
+    def test_record_word_decoding_and_texture_refusal(self):
+        def words(factor, roughness, scale=1.0, tex=(ref.INVALID, ref.INVALID, ref.INVALID)):
+            w = [0] * 20
+            for k, x in ((0, 1.5), (1, 1.0), (2, 1.0), (3, 1.0), (4, 1.0)):
+                w[k] = int.from_bytes(struct.pack("<f", x), "little")
+            w[5] = w[6] = ref.INVALID
+            for k, x in ((7, factor), (8, roughness), (9, scale)):
+                w[k] = int.from_bytes(struct.pack("<f", x), "little")
+            w[10], w[11], w[12] = tex
+            return w
+
+        zero = [[0] * 20] * 3
+        data = {"materials": [{"feature_bits": 2, "extension_index": 0}, {"feature_bits": 0},
+                              {"feature_bits": 2, "extension_index": 4}, {"feature_bits": 2, "extension_index": 8},
+                              {"feature_bits": 6, "extension_index": 0}],
+                "material_extensions": {"version": 1, "records_per_material": 4,
+                                        "records": [words(0.5, 0.25, 0.75)] + zero +
+                                                   [words(1.0, 0.1, 1.0, (3, ref.INVALID, ref.INVALID))] + zero +
+                                                   [words(1.0, 0.1, 1.0, (ref.INVALID, ref.INVALID, 7))] + zero}}
+        self.assertEqual(ref.material_clearcoat(data, data["materials"][0]), (0.5, 0.25, 0.75))
+        self.assertIsNone(ref.material_clearcoat(data, data["materials"][1]))
+        self.assertIsNone(ref.material_specular(data, data["materials"][0]))  # coat-only: neutral specular block
+        for index in (2, 3):  # a coat factor/roughness texture (word 10) or a coat normal texture (word 12)
+            with self.assertRaises(ValueError):
+                ref.material_clearcoat(data, data["materials"][index])
+        with self.assertRaises(ValueError):  # sheen (bit 4 in feature bits 6) is outside the declared model
+            ref.material_clearcoat(data, data["materials"][4])
+        self.assertTrue(ref.uses_clearcoat(data) and not ref.uses_specular_extension(data))
+        data["materials"][4]["feature_bits"] = 3
+        self.assertEqual(ref.material_specular(data, data["materials"][4])[0], 1.5)
 
 
 class RayCastedSnapshot(unittest.TestCase):

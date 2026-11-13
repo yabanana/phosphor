@@ -29,6 +29,24 @@ The extension values come from the snapshot's `material_extensions` records (the
 word offsets of src/renderer/gpu_types.h GPUMaterialExt0).  Environment: the declared split-sum model with
 E_d = f0_scaled * A + f90 * B (f0_scaled = f0 * specular, f90 = specular).
 
+KHR_materials_clearcoat (F15.3, ticket 09) is implemented from the ratified text (research/khr-materials.md
+section 2), again in the layering form the shader does not use.  With c = clearcoatFactor, the coat normal Nc
+(the shading normal: the fixtures carry no coat normal texture) and a_c = max(clearcoatRoughness^2, 0.002):
+  F_c    = 0.04 + 0.96 (1 - |V.Nc|)^5          (coat IOR fixed at 1.5; V.Nc, not V.H, the specification's
+                                                 deliberate simplification)
+  f      = (1 - c F_c) f_material + c F_c D(Nc.H, a_c) Vis(Nc.V, Nc.L, a_c)       (coat term: no Fresnel inside)
+  L_out  = (1 - c F_c) L_material + c F_c L_coat,  emission would be darkened by the same 1 - c F_c (none here)
+  - the base keeps its own cosine max(N.L, 0), the coat term its own max(Nc.L, 0);
+  - roughness clamps are the base ones: clearcoatRoughness in [0.04, 1], a_c = max(r_c^2, 0.002), Nc.V >= 1e-4;
+  - "f_material" is the full extended material (ior/specular dielectric or metal), unchanged underneath;
+  - sun disk: the coat lobe follows the declared disk rule with ITS OWN alpha and reflection axis (own sample
+    count); the quadrature mask is the union of both lobes' masks;
+  - exact environment: (1 - c F_c(mu)) * L_material + c F_c(mu) * E_coat(mu, a_c) * L, E_coat the directional
+    albedo of D * Vis (Fresnel 1, the quadrature of `_spec_integrals`, A + B);
+  - declared environment (split sum, DFG table): (1 - c F_c(mu)) * declared_material + c F_c(mu) *
+    clamp(A + B, 0, 1) * L at the coat roughness (A, B of `dfg_lookup`);
+  - point lights: the BSDF above at the light direction.
+
 Declared engine conventions (every item is part of the JSON report):
 - roughness clamped to [0.04, 1], alpha = max(roughness^2, 0.002), N.V >= 1e-4.
 - Sun: a disk of uniform radiance and angular radius r (the snapshot's
@@ -95,9 +113,15 @@ MODEL = {
            "uniform-solid-angle spiral (engine sunDiskSpecular rule); narrow pixels form the quadrature mask",
     "environment": "exact hemisphere quadrature of BSDF * cos * L_env (constant isotropic), not a split-sum fit",
     "camera": "pixel-centre rays, no reconstruction filter",
+    "clearcoat": "KHR_materials_clearcoat: F_c = 0.04 + 0.96 (1 - |V.Nc|)^5, f = (1 - c F_c) f_material + c F_c D Vis "
+                 "(a_c = max(clearcoatRoughness^2, 0.002), roughness in [0.04, 1], Nc = shading normal); sun coat lobe "
+                 "with its own alpha, axis and sample count (mask = union); exact environment (1 - c F_c) L + c F_c E_coat "
+                 "L_env",
     "shadows": "none",
     "declared_environment": "(1 - metallic) * baseColor * (1 - (0.04 A + B)) + clamp(f0 A + B, 0, 1), (A, B) from the "
-                            "engine DFG table (bilinear), f0 = mix(0.04, baseColor, metallic), roughness in [0.04, 1]",
+                            "engine DFG table (bilinear), f0 = mix(0.04, baseColor, metallic), roughness in [0.04, 1]; "
+                            "clearcoat: (1 - c F_c(mu)) * that + c F_c(mu) * clamp(A_c + B_c, 0, 1), (A_c, B_c) at the "
+                            "coat roughness",
 }
 
 # The declared model plus the deliberately wrong variants used as negative controls.
@@ -113,7 +137,14 @@ CONTROLS = {
     "specular-ignored": {**APPENDIX_B, "dielectric": "ignored"},          # the extension is not applied (f0 0.04)
     "f90-one": {**APPENDIX_B, "dielectric": "f90-one"},                    # f90 forced to 1 instead of the weight
     "specular-weight-not-on-f0": {**APPENDIX_B, "dielectric": "f0-unweighted"},  # f0 keeps no specular weight
+    # F15.3 (ticket 09) negative controls of the clearcoat grids; they sit on the ior/specular model (the
+    # fixtures combine both) and only change the coat.
+    "coat-ignored": {**SPECULAR_EXT, "coat": "ignored"},                  # c = 0: no coat at all
+    "coat-f0-from-ior": {**SPECULAR_EXT, "coat": "f0-from-ior"},          # Sample Renderer: coat F0 from the material ior
+    "coat-fresnel-vh": {**SPECULAR_EXT, "coat": "fresnel-vh"},            # F_c at V.H per light sample, not |V.Nc|
+    "coat-base-unattenuated": {**SPECULAR_EXT, "coat": "base-unattenuated"},  # base not scaled by 1 - c F_c
 }
+COAT_VARIANTS = ("spec", "ignored", "f0-from-ior", "fresnel-vh", "base-unattenuated")
 
 
 # --- BSDF -----------------------------------------------------------------
@@ -196,6 +227,112 @@ def take(dielectric, sel):
     return {"f0": dielectric["f0"][sel], "weight": dielectric["weight"][sel], "variant": dielectric["variant"]}
 
 
+# --- KHR_materials_clearcoat --------------------------------------------------
+
+COAT_IOR = 1.5
+COAT_F0 = ((1.0 - COAT_IOR) / (1.0 + COAT_IOR)) ** 2  # 0.04, fixed by the ratified text
+
+
+def take_coat(coat, sel):
+    """The per-pixel arrays of `coat` restricted to the pixel indices `sel` (None stays None)."""
+    if coat is None:
+        return None
+    return {"factor": coat["factor"][sel], "roughness": coat["roughness"][sel], "f0_ior": coat["f0_ior"][sel],
+            "variant": coat["variant"]}
+
+
+def coat_weight(coat):
+    """The coat factor c per pixel (the `ignored` control removes the coat: c = 0)."""
+    if coat["variant"] == "ignored":
+        return np.zeros_like(coat["factor"])
+    return coat["factor"]
+
+
+def coat_fresnel(coat, nc, v, h=None):
+    """F_c per pixel.  Specification: F0 = 0.04 (coat IOR 1.5), Schlick on |V.Nc|.  Controls: `f0-from-ior` takes F0
+    from the material ior (the Sample Renderer deviation), `fresnel-vh` evaluates Schlick on V.H (needs `h`)."""
+    f0 = coat["f0_ior"] if coat["variant"] == "f0-from-ior" else COAT_F0
+    x = dot(v, h) if (coat["variant"] == "fresnel-vh" and h is not None) else np.abs(dot(nc, v))
+    return f0 + (1.0 - f0) * (1.0 - np.clip(x, 0.0, 1.0)) ** 5
+
+
+def coat_attenuation(coat, c, fc):
+    """1 - c F_c: the factor of the material under the coat (the `base-unattenuated` control keeps 1)."""
+    return np.ones_like(fc) if coat["variant"] == "base-unattenuated" else 1.0 - c * fc
+
+
+def coat_lobe(coat, n, v, l):
+    """(attenuation (n,), coat BSDF value (n,) without cosine) at light direction `l` per pixel; the coat normal is
+    the shading normal n (no coat normal texture in the fixtures).  The coat value is c F_c D Vis with the coat's own
+    cosine max(Nc.L, 0) as its validity mask; the caller multiplies it by that cosine."""
+    c = coat_weight(coat)
+    h = normalize(v + l)
+    fc = coat_fresnel(coat, n, v, h)
+    alpha = effective_alpha(coat["roughness"])
+    nl = dot(n, l)
+    nv = np.maximum(np.abs(dot(n, v)), MIN_NDOTV)
+    nh = np.clip(dot(n, h), 0.0, 1.0)
+    value = np.where(nl > 0, c * fc * ggx_d(nh, alpha) * smith_vis(nv, np.maximum(nl, 0.0), alpha), 0.0)
+    return coat_attenuation(coat, c, fc), value
+
+
+_COAT_ALBEDO = {}
+
+
+def coat_albedo_table(roughness):
+    """(mu grid, A, B) of the coat lobe D * Vis alone: the quadratures of `_spec_integrals` (A with weight 1 - w,
+    B with the Schlick weight w of V.H), so E_coat = A + B is the albedo of D * Vis (Fresnel 1)."""
+    alpha = float(effective_alpha(roughness))
+    key = round(alpha, 12)
+    if key not in _COAT_ALBEDO:
+        mus = np.linspace(MIN_NDOTV, 1.0, MU_NODES)
+        a = np.empty(MU_NODES)
+        b = np.empty(MU_NODES)
+        for i, mu in enumerate(mus):
+            a[i], b[i] = _spec_integrals(float(mu), alpha, APPENDIX_B)
+        _COAT_ALBEDO[key] = (mus, a, b)
+    return _COAT_ALBEDO[key]
+
+
+def coat_albedo(mu, roughness):
+    """(E_coat, B) per pixel (interpolated over N.V) for per-pixel coat roughness values: E_coat = A + B is the
+    directional albedo of D * Vis, B its Schlick-weighted part (needed by the `fresnel-vh` control)."""
+    mu = np.clip(mu, MIN_NDOTV, 1.0)
+    albedo = np.empty(len(mu))
+    weighted = np.empty(len(mu))
+    rough = np.asarray(roughness, dtype=np.float64)
+    for r in np.unique(rough):
+        sel = rough == r
+        mus, a, b = coat_albedo_table(r)
+        albedo[sel] = np.interp(mu[sel], mus, a + b)
+        weighted[sel] = np.interp(mu[sel], mus, b)
+    return albedo, weighted
+
+
+def coat_fresnel_mu(coat, mu):
+    """F_c(mu) with mu = |V.Nc| (the environment forms): F0 0.04, or the material-ior F0 of the control."""
+    f0 = coat["f0_ior"] if coat["variant"] == "f0-from-ior" else COAT_F0
+    return f0 + (1.0 - f0) * (1.0 - np.clip(mu, 0.0, 1.0)) ** 5
+
+
+def environment_coat(material, n_dot_v, coat, radiance):
+    """Exact-quadrature environment radiance under the coat: `material` is the (n, 3) radiance of the material
+    alone (environment_radiance, already multiplied by `radiance`); the result is
+    (1 - c F_c(mu)) * material + c F_c(mu) * E_coat(mu, a_c) * radiance.  Control `fresnel-vh`: the coat term
+    integrates Schlick on V.H, c * (f0 (A + B) + (1 - f0) B) * radiance, the attenuation stays at |V.Nc|."""
+    c = coat_weight(coat)
+    mu = np.clip(n_dot_v, MIN_NDOTV, 1.0)
+    fc = coat_fresnel_mu(coat, mu)
+    albedo, weighted = coat_albedo(mu, coat["roughness"])
+    if coat["variant"] == "fresnel-vh":
+        coat_term = c * (COAT_F0 * albedo + (1.0 - COAT_F0) * weighted)
+    else:
+        coat_term = c * fc * albedo
+    return coat_attenuation(coat, c, fc)[:, None] * material + (coat_term * radiance)[:, None]
+
+
+
+
 def lobe_weights(base, metallic, v_dot_h, model=APPENDIX_B, dielectric=None):
     """(diffuse multiplier per channel, specular multiplier per channel) at one V.H.
 
@@ -220,8 +357,11 @@ def lobe_weights(base, metallic, v_dot_h, model=APPENDIX_B, dielectric=None):
     return diffuse, specular
 
 
-def bsdf(base, metallic, roughness, n, v, l, model=APPENDIX_B, dielectric=None):
-    """BSDF value f (without the cosine) for world unit vectors; (n, 3) arrays or broadcastable."""
+def bsdf(base, metallic, roughness, n, v, l, model=APPENDIX_B, dielectric=None, coat=None):
+    """BSDF value f (without the cosine) for world unit vectors; (n, 3) arrays or broadcastable.
+
+    `coat` (F15.3, per-pixel {"factor", "roughness", "f0_ior", "variant"} of KHR_materials_clearcoat): the coated
+    value (1 - c F_c) f_material + c F_c D Vis (see the module docstring); the coat term has its own cosine mask."""
     alpha = effective_alpha(roughness, model)
     n_dot_l = dot(n, l)
     n_dot_v = np.maximum(dot(n, v), MIN_NDOTV)
@@ -230,8 +370,11 @@ def bsdf(base, metallic, roughness, n, v, l, model=APPENDIX_B, dielectric=None):
     v_dot_h = dot(v, h)
     diffuse_w, specular_w = lobe_weights(base, metallic, v_dot_h, model, dielectric)
     spec = (ggx_d(n_dot_h, alpha) * smith_vis(n_dot_v, np.maximum(n_dot_l, 0.0), alpha))[..., None]
-    value = diffuse_w * base / math.pi + specular_w * spec
-    return np.where((n_dot_l > 0)[..., None], value, 0.0)
+    value = np.where((n_dot_l > 0)[..., None], diffuse_w * base / math.pi + specular_w * spec, 0.0)
+    if coat is None:
+        return value
+    attenuation, coat_value = coat_lobe(coat, n, v, l)
+    return attenuation[..., None] * value + coat_value[..., None]
 
 
 # --- sun disk ---------------------------------------------------------------
@@ -263,8 +406,13 @@ def sun_disk_samples(l, radius, count):
     return t[None, :] * (s * np.cos(phi))[:, None] + b[None, :] * (s * np.sin(phi))[:, None] + l[None, :] * z[:, None]
 
 
-def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius, model=APPENDIX_B, dielectric=None):
-    """Outgoing radiance per pixel from the sun disk; returns (radiance (n,3), narrow (n,))."""
+def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius, model=APPENDIX_B, dielectric=None,
+                 coat=None):
+    """Outgoing radiance per pixel from the sun disk; returns (radiance (n,3), narrow (n,)).
+
+    `coat` (F15.3): the material terms are scaled by 1 - c F_c (F_c at |V.Nc|, or per disk sample at V.H in the
+    `fresnel-vh` control) and the coat lobe adds c F_c D Vis cos averaged over its own disk rule (alpha, reflection
+    axis and sample count of the coat roughness); `narrow` is the union of both lobes' masks."""
     n_pixels = n.shape[0]
     l = np.asarray(toward_sun, dtype=np.float64)
     l = l / np.linalg.norm(l)
@@ -276,6 +424,10 @@ def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius
     h_c = normalize(v + l)
     diffuse_w, _ = lobe_weights(base, metallic, dot(v, h_c), model, dielectric)
     total = np.where((n_dot_l > 0)[..., None], diffuse_w * base / math.pi * n_dot_l[..., None], 0.0)
+    coat_c = None
+    if coat is not None:
+        coat_c = coat_weight(coat)
+        total = total * coat_attenuation(coat, coat_c, coat_fresnel(coat, n, v, h_c))[:, None]
     # Specular: mean of f_spec cos over the samples (count = 1 reduces to the point evaluation).
     spec_sum = np.zeros((n_pixels, 3))
     for c in np.unique(count):
@@ -288,8 +440,30 @@ def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius
             nh = np.clip(dot(n[sel], h), 0.0, 1.0)
             _, specular_w = lobe_weights(base[sel], metallic[sel], dot(v[sel], h), model, take(dielectric, sel))
             term = (ggx_d(nh, alpha[sel]) * smith_vis(n_dot_v[sel], nl, alpha[sel]) * nl)[:, None] * specular_w
+            if coat is not None:
+                sub = take_coat(coat, sel)
+                term = term * coat_attenuation(sub, coat_c[sel], coat_fresnel(sub, n[sel], v[sel], h))[:, None]
             spec_sum[sel] += np.where((nl > 0)[:, None], term, 0.0) / int(c)
-    return (total + spec_sum) * np.asarray(irradiance, dtype=np.float64), narrow
+    result = total + spec_sum
+    if coat is not None:
+        # The coat lobe: its own roughness drives the disk rule (axis = reflection about Nc = n, own alpha).
+        count_c, narrow_c = sun_quadrature(n, v, l, coat["roughness"], radius, model)
+        alpha_c = effective_alpha(coat["roughness"], model)
+        coat_sum = np.zeros(n_pixels)
+        for c in np.unique(count_c):
+            sel = np.flatnonzero(count_c == c)
+            sub = take_coat(coat, sel)
+            for sample in sun_disk_samples(l, radius, int(c)):
+                lk = np.broadcast_to(sample, (sel.size, 3))
+                nl = np.clip(dot(n[sel], lk), 0.0, 1.0)
+                h = normalize(v[sel] + lk)
+                nh = np.clip(dot(n[sel], h), 0.0, 1.0)
+                fc = coat_fresnel(sub, n[sel], v[sel], h)
+                term = coat_c[sel] * fc * ggx_d(nh, alpha_c[sel]) * smith_vis(n_dot_v[sel], nl, alpha_c[sel]) * nl
+                coat_sum[sel] += np.where(nl > 0, term, 0.0) / int(c)
+        result = result + coat_sum[:, None]
+        narrow = narrow | narrow_c
+    return result * np.asarray(irradiance, dtype=np.float64), narrow
 
 
 # --- point lights ------------------------------------------------------------
@@ -299,7 +473,8 @@ def point_window(distance, light_range):
     return np.clip(1.0 - ratio ** 4, 0.0, 1.0) ** 2
 
 
-def point_radiance(base, metallic, roughness, n, v, position, light, model=APPENDIX_B, dielectric=None, visible=None):
+def point_radiance(base, metallic, roughness, n, v, position, light, model=APPENDIX_B, dielectric=None, visible=None,
+                   coat=None):
     """Outgoing radiance per pixel from one white delta point light; returns (radiance (n,3), lit (n,))."""
     delta = np.asarray(light["position"], dtype=np.float64)[None, :] - position
     distance = np.linalg.norm(delta, axis=1)
@@ -307,7 +482,7 @@ def point_radiance(base, metallic, roughness, n, v, position, light, model=APPEN
     geometry = point_window(distance, light["range"]) / np.maximum(distance * distance, 1e-4)
     incident = np.asarray(light["color"], dtype=np.float64)[None, :] * float(light["intensity"]) * geometry[:, None]
     n_dot_l = np.clip(dot(n, l), 0.0, 1.0)
-    value = bsdf(base, metallic, roughness, n, v, l, model, dielectric) * n_dot_l[:, None] * incident
+    value = bsdf(base, metallic, roughness, n, v, l, model, dielectric, coat) * n_dot_l[:, None] * incident
     lit = dot(n, l) > 0
     if visible is not None:
         value = value * visible[:, None]
@@ -440,7 +615,7 @@ _DFG = {}
 # 1 - max(E_dielectric) of its own specular lobe ("extension", the engine's state). "composite-base" (the weight
 # 1 - E(0.04) of the base model, the engine's state before ticket 08) is kept as a negative control.
 DECLARED = {"albedo": "dfg-table", "diffuse": "one-minus-dielectric-albedo", "dielectric": "extension",
-            "extension_diffuse": "extension"}
+            "extension_diffuse": "extension", "coat": "spec"}
 # Deliberately wrong variants that the declared-model gate must reject.
 DECLARED_CONTROLS = {
     "declared-diffuse-unweighted": {**DECLARED, "diffuse": "unweighted"},            # no (1 - E) weight
@@ -456,7 +631,14 @@ SPECULAR_DECLARED_CONTROLS = {
     # The composite weighting the environment diffuse of an extended pixel with the base model (ticket 08 closes it).
     "declared-extension-diffuse-base": {**DECLARED, "extension_diffuse": "composite-base"},
 }
-ALL_DECLARED_CONTROLS = {**DECLARED_CONTROLS, **SPECULAR_DECLARED_CONTROLS}
+# F15.3 (ticket 09): negative controls of the clearcoat grids of the deterministic resolve.  The split-sum model has
+# no V.H, so `coat-fresnel-vh` has no declared counterpart.
+COAT_DECLARED_CONTROLS = {
+    "declared-coat-ignored": {**DECLARED, "coat": "ignored"},
+    "declared-coat-f0-from-ior": {**DECLARED, "coat": "f0-from-ior"},
+    "declared-coat-base-unattenuated": {**DECLARED, "coat": "base-unattenuated"},
+}
+ALL_DECLARED_CONTROLS = {**DECLARED_CONTROLS, **SPECULAR_DECLARED_CONTROLS, **COAT_DECLARED_CONTROLS}
 
 
 def load_dfg_table(path=DFG_HEADER):
@@ -501,11 +683,31 @@ def karis_ab(n_dot_v, roughness):
     return -1.04 * a004 + r[2], 1.04 * a004 + r[3]
 
 
-def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, variant=DECLARED, dielectric=None):
+def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, variant=DECLARED, dielectric=None,
+                                  coat=None):
     """Outgoing radiance (n, 3) of the engine's declared environment model (see the module docstring).
 
     `dielectric` (F15.1): per-pixel {"f0", "weight"} of KHR_materials_ior/specular (variant["dielectric"] picks the
-    model or one of its wrong controls): E_d = f0_scaled * A + f90 * B per lobe, diffuse weight 1 - max(E_d)."""
+    model or one of its wrong controls): E_d = f0_scaled * A + f90 * B per lobe, diffuse weight 1 - max(E_d).
+    `coat` (F15.3, per-pixel {"factor", "roughness", "f0_ior", "variant"} of KHR_materials_clearcoat): the declared
+    coat model (1 - c F_c(mu)) * declared_material + c F_c(mu) * clamp(A_c + B_c, 0, 1), (A_c, B_c) = dfg_lookup at
+    the coat roughness; variant["coat"] names the control (`ignored`, `f0-from-ior`, `base-unattenuated`)."""
+    material = _declared_material_radiance(base, metallic, roughness, n_dot_v, variant, dielectric)
+    if coat is not None:
+        coat = {**coat, "variant": variant.get("coat", "spec")}
+        if coat["variant"] == "fresnel-vh":
+            raise ValueError("the declared split-sum model has no V.H: no fresnel-vh control")
+        c = coat_weight(coat)
+        mu = np.maximum(np.asarray(n_dot_v, dtype=np.float64), MIN_NDOTV)
+        a_c, b_c = dfg_lookup(mu, clamp_roughness(coat["roughness"]))
+        fc = coat_fresnel_mu(coat, mu)
+        material = (coat_attenuation(coat, c, fc)[:, None] * material +
+                    (c * fc * np.clip(a_c + b_c, 0.0, 1.0))[:, None])
+    return material * radiance
+
+
+def _declared_material_radiance(base, metallic, roughness, n_dot_v, variant, dielectric):
+    """The declared model of the material alone for unit environment radiance (see declared_environment_radiance)."""
     mu = np.maximum(np.asarray(n_dot_v, dtype=np.float64), MIN_NDOTV)
     rough = clamp_roughness(roughness)
     a, b = karis_ab(mu, rough) if variant["albedo"] == "karis-fit" else dfg_lookup(mu, rough)
@@ -524,7 +726,7 @@ def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, 
             diffuse_weight = 1.0 - np.clip(DIELECTRIC_F0 * a + b, 0.0, 1.0)
         else:
             diffuse_weight = 1.0 - np.max(e_d, axis=-1, keepdims=True)
-        return ((1 - m) * base * diffuse_weight + (1 - m) * e_d + m * e_m) * radiance
+        return (1 - m) * base * diffuse_weight + (1 - m) * e_d + m * e_m
     f0 = DIELECTRIC_F0 * (1 - m) + base * m
     specular = np.clip(f0 * a + b, 0.0, 1.0)
     if variant["diffuse"] == "unweighted":
@@ -533,7 +735,7 @@ def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, 
         weight = 1.0 - np.clip(f0 * a + b, 0.0, 1.0)
     else:
         weight = 1.0 - np.clip(DIELECTRIC_F0 * a + b, 0.0, 1.0)
-    return ((1 - m) * base * weight + specular) * radiance
+    return (1 - m) * base * weight + specular
 
 
 # --- ray casting ------------------------------------------------------------
@@ -619,6 +821,7 @@ def cast_primary_rays(root, data, threads):
 # --- frame ------------------------------------------------------------------
 
 SPECULAR_FEATURE_BIT = 1  # MaterialFeature::SpecularIor
+CLEARCOAT_FEATURE_BIT = 2  # MaterialFeature::Clearcoat
 EXTENSION_RECORD_WORDS = 20
 
 
@@ -628,32 +831,59 @@ def f32(word):
     return struct.unpack("<f", struct.pack("<I", int(word) & 0xFFFFFFFF))[0]
 
 
-def material_specular(data, material):
-    """(ior, specularFactor, specularColor[3]) of a material from the snapshot's extension records, or None when
-    the material has no KHR_materials_ior/specular feature bit.  Raises when it has other features or textures."""
+def material_extension_words(data, material):
+    """The 20 words of record 0 of a material with the ior/specular and/or clearcoat feature bits; raises when it has
+    other features.  None when the material has no feature bit."""
     bits = int(material.get("feature_bits", 0))
     if bits == 0:
         return None
-    if bits & ~SPECULAR_FEATURE_BIT:
-        raise ValueError(f"material feature bits {bits:#x} are outside the declared ior/specular model")
-    records = data["material_extensions"]["records"]
-    index = int(material["extension_index"])
-    words = records[index]
+    if bits & ~(SPECULAR_FEATURE_BIT | CLEARCOAT_FEATURE_BIT):
+        raise ValueError(f"material feature bits {bits:#x} are outside the declared ior/specular/clearcoat model")
+    words = data["material_extensions"]["records"][int(material["extension_index"])]
     if len(words) != EXTENSION_RECORD_WORDS:
         raise ValueError("a material extension record must hold 20 words")
+    return words
+
+
+def material_specular(data, material):
+    """(ior, specularFactor, specularColor[3]) of a material from the snapshot's extension records, or None when
+    the material has no KHR_materials_ior/specular feature bit.  Raises when it has other features or textures.
+    A clearcoat-only material has the neutral block (the engine ignores the record words without the bit)."""
+    words = material_extension_words(data, material)
+    if words is None or not int(material.get("feature_bits", 0)) & SPECULAR_FEATURE_BIT:
+        if words is not None and (int(words[5]) != INVALID or int(words[6]) != INVALID):
+            raise ValueError("a specular texture is set; the reference is texture-free")
+        return None
     if int(words[5]) != INVALID or int(words[6]) != INVALID:
         raise ValueError("a specular texture is set; the reference is texture-free")
     # GPUMaterialExt0 words 0 (ior), 1 (specularFactor), 2-4 (specularColor).
     return f32(words[0]), f32(words[1]), [f32(words[2]), f32(words[3]), f32(words[4])]
 
 
+def material_clearcoat(data, material):
+    """(clearcoatFactor, clearcoatRoughness, clearcoatNormalScale) from word offsets 7, 8, 9 of GPUMaterialExt0, or
+    None without the clearcoat feature bit.  Raises when a clear-coat texture (words 10, 11, 12: factor, roughness,
+    normal) is set: the reference is texture-free, and the coat normal is the shading normal."""
+    words = material_extension_words(data, material)
+    if words is None or not int(material.get("feature_bits", 0)) & CLEARCOAT_FEATURE_BIT:
+        return None
+    if any(int(words[k]) != INVALID for k in (10, 11, 12)):
+        raise ValueError("a clear-coat texture is set; the reference is texture-free")
+    return f32(words[7]), f32(words[8]), f32(words[9])
+
+
 def uses_specular_extension(data):
     return any(int(m.get("feature_bits", 0)) & SPECULAR_FEATURE_BIT for m in data["materials"])
+
+
+def uses_clearcoat(data):
+    return any(int(m.get("feature_bits", 0)) & CLEARCOAT_FEATURE_BIT for m in data["materials"])
 
 
 def sphere_table(data):
     out = []
     uses = uses_specular_extension(data)
+    uses_coat = uses_clearcoat(data)
     for k, inst in enumerate(data["instances"]):
         material = data["materials"][inst["material"]]
         entry = {"instance": k, "slot": inst["slot"], "base": material["base"][:3],
@@ -665,6 +895,11 @@ def sphere_table(data):
             entry.update(ior=spec[0], specular=spec[1], specular_color=spec[2],
                          group=f"metallic {entry['metallic']:g} specular {spec[1]:g} colour "
                                f"{spec[2][0]:g},{spec[2][1]:g},{spec[2][2]:g}")
+        if uses_coat:
+            coat = material_clearcoat(data, material) or (0.0, 0.0, 1.0)
+            ior = spec[0] if spec is not None else 1.5
+            entry.update(coat=coat[0], coat_roughness=coat[1], coat_normal_scale=coat[2],
+                         group=f"metallic {entry['metallic']:g} ior {ior:g} coat {coat[0]:g}")
         out.append(entry)
     return out
 
@@ -680,10 +915,21 @@ def dielectric_arrays(spheres, instance_of_pixel, variant):
     return {"f0": f0[instance_of_pixel], "weight": weight[instance_of_pixel], "variant": variant}
 
 
+def coat_arrays(spheres, instance_of_pixel, variant):
+    """Per-pixel {"factor", "roughness", "f0_ior", "variant"} of KHR_materials_clearcoat (factor 0 where a sphere has
+    no coat); `f0_ior` is the F0 of the material ior, used by the `f0-from-ior` control only."""
+    factor = np.array([s.get("coat", 0.0) for s in spheres], dtype=np.float64)
+    roughness = np.array([s.get("coat_roughness", 0.0) for s in spheres], dtype=np.float64)
+    f0 = np.array([float(ior_factor(s.get("ior", DIELECTRIC_IOR))) for s in spheres], dtype=np.float64)
+    return {"factor": factor[instance_of_pixel], "roughness": roughness[instance_of_pixel],
+            "f0_ior": f0[instance_of_pixel], "variant": variant}
+
+
 def require_declared_scene(data):
     for instance in data["instances"]:
         material = data["materials"][instance["material"]]
-        material_specular(data, material)  # only the ior/specular feature, without textures
+        material_specular(data, material)  # only the ior/specular and clearcoat features, without textures
+        material_clearcoat(data, material)
         if any(index != INVALID for index in material["textures"]):
             raise ValueError("instanced material samples a texture; the Appendix B reference is texture-free")
         if any(v > 0 for v in material["emissive"]) or material["alpha_cutoff"] > 0:
@@ -728,6 +974,10 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
     # F15.1: KHR_materials_ior/specular of the scene (the model dicts name the dielectric variant).
     variant = model.get("dielectric", "base")
     sun_dielectric = None if variant == "base" else dielectric_arrays(spheres, inst[pick], variant)
+    # F15.3: KHR_materials_clearcoat of the scene (None without any coat: the older scenes are unchanged).
+    has_coat = uses_clearcoat(data)
+    coat = coat_arrays(spheres, inst[pick], model.get("coat", "spec")) if has_coat else None
+    env_coat = coat_arrays(spheres, inst[pick], (environment or {}).get("coat", "spec")) if has_coat else None
     env_variant = (environment or {}).get("dielectric", "extension")
     env_dielectric = (dielectric_arrays(spheres, inst[pick], env_variant)
                       if environment is not None and uses_specular_extension(data) else None)
@@ -741,7 +991,7 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
     for k, light in enumerate(points):
         visible = None if visibility is None else visibility[k]
         value, light_lit = point_radiance(base, metallic, roughness, n, v, position[pick], light, model, sun_dielectric,
-                                          visible)
+                                          visible, coat)
         radiance += value
         lit = lit | light_lit
         terms.append("point-light-shadowed" if visible is not None else "point-light")
@@ -751,17 +1001,18 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
         if sun_radius <= 0:
             raise ValueError("a sun requires a positive angular radius")
         sun, narrow = sun_radiance(base, metallic, roughness, n, v, toward, irradiance, sun_radius, model,
-                                   sun_dielectric)
+                                   sun_dielectric, coat)
         radiance += sun
         lit = lit | (dot(n, np.broadcast_to(toward, n.shape)) > 0)
         terms.append("sun-disk")
     if sky > 0:
         if environment is None:
-            radiance += environment_radiance(base, metallic, roughness, dot(n, v), sky, model, sun_dielectric)
+            material = environment_radiance(base, metallic, roughness, dot(n, v), sky, model, sun_dielectric)
+            radiance += material if coat is None else environment_coat(material, dot(n, v), coat, sky)
             terms.append("environment-quadrature")
         else:
             radiance += declared_environment_radiance(base, metallic, roughness, dot(n, v), sky, environment,
-                                                      env_dielectric)
+                                                      env_dielectric, env_coat)
             terms.append("environment-declared")
     image = np.full((height * width, 3), sky, dtype=np.float64)  # pixels without geometry show the environment
     image[pick] = radiance
@@ -795,7 +1046,7 @@ def command_render(args):
     out.mkdir(parents=True, exist_ok=True)
     cast = cast_primary_rays(root, data, args.threads)
     visibility = point_light_visibility(root, data, cast, args.threads) if args.visibility == "rays" else None
-    main_model = SPECULAR_EXT if uses_specular_extension(data) else APPENDIX_B
+    main_model = SPECULAR_EXT if uses_specular_extension(data) or uses_clearcoat(data) else APPENDIX_B
     controls = {"": main_model, **{name: CONTROLS[name] for name in args.controls}}
     report = {"schema": 1, "tool": "tools/f15_reference.py", "tool_sha256": sha256_file(__file__), "model": MODEL,
               "snapshot_sha256": scene_digest(root), "frame": data.get("frame"),
