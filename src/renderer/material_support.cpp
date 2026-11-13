@@ -28,14 +28,20 @@ const char* inputLabelName(InputLabel label) {
 }
 
 const MaterialSupportTable& currentSupportTable() {
-    // F15.1: only the base model, the folded emissive strength and the baked
-    // uniform texture transform are rendered.  Each later ticket flips its
-    // feature here (and names its approximation).
+    // F15.1: the base model, the folded emissive strength, the baked uniform
+    // texture transform and (ticket 05) ior + specular are rendered.  Each later
+    // ticket flips its feature here (and names its approximation).
     static const MaterialSupportTable table = [] {
         MaterialSupportTable t;
         t.base.level                    = SupportLevel::Implemented;
         t.emissiveStrength.level        = SupportLevel::Implemented;
         t.textureTransformUniform.level = SupportLevel::Implemented;
+        // F15.1 (ticket 05): ior + specular shade the resolve and forward paths (direct sun and
+        // analytic lights, environment, GI diffuse weight); direct-light sampling (ReSTIR DI) and the
+        // specular transport (reflections) still evaluate the base model until tickets 07/08.
+        FeatureSupportEntry& specular = t.features[static_cast<u32>(MaterialFeature::SpecularIor)];
+        specular.level                = SupportLevel::Approximated;
+        specular.approximation        = "di_and_specular_transport_use_base_model";
         return t;
     }();
     return table;

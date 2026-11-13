@@ -546,6 +546,8 @@ TEST_CASE("glTF extensions: required extensions must be rendered, not merely par
             {"KHR_materials_scatter", MaterialFeature::Subsurface}};
         for (const Case& c : cases) {
             MaterialSupportTable table = currentSupportTable();
+            // (ior/specular are approximated since F15.1 ticket 05: reset the entry under test)
+            table.features[static_cast<size_t>(c.feature)].level = SupportLevel::Unsupported;
             CHECK_FALSE(isExtensionRendered(c.name, table));
             table.features[static_cast<size_t>(c.feature)].level = SupportLevel::Implemented;
             CHECK_MESSAGE(isExtensionRendered(c.name, table), c.name);

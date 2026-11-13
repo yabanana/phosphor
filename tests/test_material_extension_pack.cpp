@@ -185,3 +185,25 @@ TEST_CASE("extension records: feature flags are the feature mask shifted by 8") 
     m.flags = MATERIAL_FLAG_DOUBLE_SIDED | featureFlags(d);
     CHECK(materialFeatureBits(m) == 3u);
 }
+
+#include "renderer/material_support.h"
+
+TEST_CASE("support report: ior/specular is approximated with a named approximation, others stay unsupported") {
+    const MaterialSupportTable& t = currentSupportTable();
+    const FeatureSupportEntry& s = t.features[static_cast<u32>(MaterialFeature::SpecularIor)];
+    CHECK(s.level == SupportLevel::Approximated);
+    CHECK(std::string(s.approximation) == "di_and_specular_transport_use_base_model");
+    for (u32 f = 1; f < MATERIAL_FEATURE_COUNT; ++f) CHECK(t.features[f].level == SupportLevel::Unsupported);
+
+    MaterialDescription d;
+    d.specular.emplace();
+    d.specular->ior = 1.33f;
+    MaterialSourceInfo info;
+    info.extensions = {"KHR_materials_ior"};
+    const MaterialSupportReport r = buildSupportReport(d, info);
+    REQUIRE(r.features.size() == 1);
+    CHECK(r.features[0].feature == "specular_ior");
+    CHECK(r.features[0].level == SupportLevel::Approximated);
+    CHECK(r.features[0].approximation == "di_and_specular_transport_use_base_model");
+    CHECK(formatSupportSummary({r}, {}).find("approximated=1") != std::string::npos);
+}
