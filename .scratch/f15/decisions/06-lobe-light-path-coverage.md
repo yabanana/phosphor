@@ -66,3 +66,17 @@ Owner decisions and review findings (2026-11-13, second pass):
   runs.
 - The indexed overflow fallback produces the lobe guide and the subsurface
   irradiance target like the meshlet path (forced-overflow captures).
+- Amendment (2026-11-13, ticket 11 harness): environment term of anisotropy.
+  The Sample Renderer's bent normal changes only the fetch direction, so a
+  constant environment cannot gate it. The declared model keeps the bent
+  normal for the fetch direction and evaluates the split-sum DFG term at the
+  effective roughness alpha_eff = sqrt((alpha_t^2 + alpha_b^2) / 2), not at
+  the material roughness.
+  - Against the exact anisotropic quadrature on the fixture:
+    - dielectric: 1.5–3.5 %;
+    - metal, strength 0.5: 2.3–3.4 %;
+    - metal, strength 1: 6.4–7.0 %.
+  - The physical gate stays the transport's (anisotropic VNDF sampling)
+    against the exact quadrature.
+  - A non-constant-environment fixture with an analytic reference, to gate
+    the bent-normal fetch, is open (ticket 22 or a later fixture).
