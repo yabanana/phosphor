@@ -87,6 +87,19 @@ reference ray casting):
   volume, back faces of the closed glass mesh rejected (today's `reflections.metal` rule), emitter radiance counted twice, the
   glass behind the front glass black.  `transmission-rtoff` is the declared `--rt off` model (probes / environment along the
   refracted ray, closed form from the DFG table) with the same bound.
+- Volumetric subsurface (F15.3, ticket 17): subsurface-volumetric-sun / -radius / -subpixel (+ the capture-only -subpixel-off) / -backlit
+  against the independent ground truth of tools/f15_subsurface_reference.py (Mitsuba 3.9.1 `volpath` random walk of a homogeneous medium
+  inside a rough dielectric boundary; OpenPBR parameters mapped through the draft's Kulla-Conty inversion; the reference of a piece with
+  weight w is (1 - w) base model + w random walk).  Gate kinds: `subsurface` = the decision-11 bound on the piece mask (per piece: mean
+  relative LUMINANCE error <= 10 %, p95 <= 25 %, absolute floor 5 % of the piece's mean reference luminance), `radius-monotonic` = the
+  declared terminator statistic (mean luminance of the geometrically unlit ROI pixels over the mean of the lit ones: the light the
+  medium carries across the terminator) must increase at every step of the radius sweep (no reversal beyond 0.01, and an increase of at
+  least 0.01 wherever the ground truth increases by that much), `equal` = the engine capture equals the engine capture of the pair scene
+  without any block (sub-pixel radius = subsurface off), `subsurface-report` = measured and reported, never gated (back-lit thick pieces:
+  declared limit of screen-space diffusion).  Until the engine side lands (ticket 17) the gated keys carry "pending": "ticket 17" with
+  `pending_matches` = subsurface-off (a volumetric block falls back to the base model today).  Negative controls: subsurface-off,
+  diffusion-off (the colour replaces the diffuse albedo, no diffusion), radius-ignored (the median radius everywhere), subsurface-leak
+  (a sub-pixel radius that is not skipped).
 - declared (base-grid-env-resolve; also furnace-resolve next to its furnace
   gate): the engine image against the independent declared-environment model of
   tools/f15_reference.py (DFG table, ADR-0006): per sphere mean relative error
@@ -163,8 +176,15 @@ THRESHOLDS = {
     # F15.3 ticket 13 (decision 11): transmission vs Mitsuba ground truth on the glass mask, static accumulation, per glass object.
     "transmission": {"mean_per_object": 0.05, "p95_per_object": 0.15, "floor": "0.05 * mean over the whole glass ROI of the reference",
                      "mask": "primary hit on a glass instance, silhouette band of 2 px excluded"},
+    # F15.3 (ticket 17), decision 11: subsurface vs random-walk ground truth on the piece mask.
+    "subsurface": {"mean": 0.10, "p95": 0.25, "floor_fraction": 0.05,
+                   "metric": "relative LUMINANCE error |Y_a - Y_b| / max(Y_b, 0.05 * mean_piece(Y_b)), Rec.709 weights, per piece ROI"},
+    "radius_sweep": {"tolerance": 0.01,
+                     "statistic": "terminator bleed = mean Y over the geometrically unlit ROI pixels of a piece / mean Y over its lit ROI pixels"},
+    "equal": {"max_relative_luminance_error": 0.002, "min_mean_luminance": 1e-3},
     "source": ".scratch/f15/decisions/11-reference-method-and-thresholds.md (incl. review amendments)",
 }
+LUMA_WEIGHTS = (0.2126, 0.7152, 0.0722)
 FRAMES, RESOLUTION = 128, "1280x720"
 ACCUMULATE = 32   # frames averaged by --capture-linear-accumulate for the stochastic transmission transport (frames 96..127)
 REFERENCE_SPP = 1024  # Mitsuba samples per glass-mask pixel
@@ -189,6 +209,9 @@ THIN_DECLARED_CONTROLS = ["declared-transmission-ignored", "declared-transmissio
 # environment the declared front-only control (transmitted weight = the diffuse weight it replaces) is the image of the ignored
 # control (measured: identical), so the furnace keeps the two controls that differ.
 THIN_FURNACE_DECLARED_CONTROLS = ["declared-transmission-ignored", "declared-transmission-double-counted"]
+
+VOLUMETRIC_BOUND_CONTROLS = ["subsurface-off", "diffusion-off", "radius-ignored"]
+VOLUMETRIC_SWEEP_CONTROLS = ["subsurface-off", "diffusion-off", "radius-ignored"]
 
 SCENARIOS = {
     "base-grid-sun": {"kind": "direct", "controls": ["alpha-roughness", "fresnel-off", "engine-f0-blend"],
@@ -556,6 +579,30 @@ SCENARIOS = {
                                       "terms": "one point light only, clustered DI with RT visibility "
                                                "(--lighting clustered --rt on), unfiltered (--lighting-denoise off), "
                                                "on the ior x specular grid"},
+    # F15.3 (ticket 17): the volumetric subsurface mode.  The reference is the Mitsuba random walk (tools/f15_subsurface_reference.py), not
+    # the Appendix B model: "reference": "subsurface".  Captures run with --reflections off (deterministic resolve terms: the neighbours'
+    # glow must not appear in SSR reflections).  The gated keys are "pending": "ticket 17" with the subsurface-off control as the image
+    # of today's engine (a volumetric block falls back to the base model); the sub-pixel key is a regression guard (equal today).
+    "subsurface-volumetric-sun": {"kind": "subsurface", "reference": "subsurface", "reflections": "off",
+                                  "pending": "ticket 17", "pending_matches": "subsurface-off",
+                                  "controls": VOLUMETRIC_BOUND_CONTROLS,
+                                  "terms": "sun only from the side (environment 0, no shadows, no GI) on skin and jade spheres, weight {0, 0.5, 1} at the "
+                                           "nominal radius 0.08 m and radius x0.5 / x1 / x2 at weight 1"},
+    "subsurface-volumetric-radius": {"kind": "radius-monotonic", "reference": "subsurface", "reflections": "off",
+                                     "pending": "ticket 17", "pending_matches": "subsurface-off",
+                                     "twin_kind": "radius-statistic-match",
+                                     "controls": VOLUMETRIC_SWEEP_CONTROLS,
+                                     "terms": "sun only from the side on skin and jade spheres of weight 1, radius x0.25 / x0.5 / x1 / x2 / x3 of 0.08 m"},
+    "subsurface-volumetric-subpixel": {"kind": "equal", "reference": "subsurface", "reflections": "off",
+                                       "reference_args": ["--no-ground-truth"],
+                                       "pair": "subsurface-volumetric-subpixel-off", "controls": ["subsurface-leak"],
+                                       "terms": "sun only from the side on spheres with weight {1, 0.5} and a sub-pixel radius (<= 0.002 m), subsurface colour = base "
+                                                "colour; must equal the engine capture of the same scene without any block"},
+    "subsurface-volumetric-subpixel-off": {"kind": "equal", "capture_only": True, "reflections": "off", "controls": [],
+                                           "terms": "the sub-pixel scene without any subsurface block (the pair of the key above; capture only)"},
+    "subsurface-volumetric-backlit": {"kind": "subsurface-report", "reference": "subsurface", "reflections": "off", "controls": [],
+                                      "terms": "sun BEHIND thick weight-1 spheres (radius 0.08 and 0.16 m): measured and reported, not gated "
+                                               "(declared limit of screen-space diffusion)"},
 }
 # Red-state expectations (before ticket 03): direct metallic rows 0 and 1 pass, intermediate rows fail.
 GPU_PROCESS = re.compile(r"^(phosphor|soc_bench|f\d+_spike)$")
@@ -619,7 +666,8 @@ def build_manifest(binary, metallib, scenarios, seed):
     git = lambda *a: command_text(["git", "-C", str(REPO), *a])  # noqa: E731
     power = command_text(["pmset", "-g", "batt"]) or ""
     tools = {name: sha256_file(REPO / "tools" / name) for name in
-             ("f15_check.py", "f15_reference.py", "f15_transmission_reference.py", "f15_common.py", "f12_reference.py",
+             ("f15_check.py", "f15_reference.py", "f15_transmission_reference.py", "f15_subsurface_reference.py", "f15_common.py",
+              "f12_reference.py",
               "run_checked.py")}
     return {"schema": 1, "created_utc": datetime.now(timezone.utc).isoformat(),
             "commit": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain")),
@@ -667,6 +715,19 @@ def scenario_controls(name):
     return list(spec["controls"]), list(spec.get("declared", []))
 
 
+def reference_script(name):
+    """The independent reference tool of one scenario: the Appendix B model, (ticket 13) the transmission ground truth or
+    (ticket 17) the volumetric random walk."""
+    if SCENARIOS[name]["kind"] in TRANSMISSION_KINDS:
+        return "f15_transmission_reference.py"
+    return "f15_subsurface_reference.py" if SCENARIOS[name].get("reference") == "subsurface" else "f15_reference.py"
+
+
+def reference_arguments(name):
+    """Extra arguments of the reference tool of one scenario (the sub-pixel key does not read the random-walk ground truth)."""
+    return list(SCENARIOS[name].get("reference_args", []))
+
+
 def reference_command(name, folder):
     if SCENARIOS[name]["kind"] in TRANSMISSION_KINDS:
         declared = SCENARIOS[name]["kind"] == "transmission-declared"
@@ -678,12 +739,12 @@ def reference_command(name, folder):
         return command + ["--controls", *SCENARIOS[name]["controls"]]
     controls, declared = scenario_controls(name)
     command = ["uv", "run", "--offline", "--no-project", "--python", "3.13", "--with", "mitsuba==3.9.1",
-               "--with", "numpy", "python", "-I", str(REPO / "tools" / "f15_reference.py"), "render",
+               "--with", "numpy", "python", "-I", str(REPO / "tools" / reference_script(name)), "render",
                str(folder / "snapshot"), "--out", str(folder / "reference"),
                "--visibility", SCENARIOS[name].get("visibility", "none"), "--controls", *controls]
     if declared:
         command += ["--declared-controls", *declared]
-    return command
+    return command + reference_arguments(name)
 
 
 # --- statistics (pure numpy) --------------------------------------------------
@@ -844,11 +905,138 @@ def evaluate_transmission(np, candidate, reference, masks, objects):
     pooled = {"pixels": int(error.size), "mean": float(error.mean()), "p95": float(np.percentile(error, 95))} if error.size else {}
     return {"kind": "transmission", "floor": floor, "pooled_not_gated": pooled, "objects": table, "pass": all(t["pass"] for t in table),
             "worst_mean": max(t.get("mean", 0.0) for t in table), "worst_p95": max(t.get("p95", 0.0) for t in table)}
+def luminance(np, image):
+    return image[..., 0] * LUMA_WEIGHTS[0] + image[..., 1] * LUMA_WEIGHTS[1] + image[..., 2] * LUMA_WEIGHTS[2]
+
+
+def piece_roi(masks, instance):
+    return masks["roi"] & (masks["sphere"] == instance)
+
+
+def luminance_error(np, candidate, reference, roi, floor_fraction):
+    """Per-pixel relative luminance error over a ROI with the absolute floor of decision 11 (floor = fraction * mean_ROI(reference Y))."""
+    ya, yb = luminance(np, candidate)[roi], luminance(np, reference)[roi]
+    floor = floor_fraction * float(yb.mean())
+    denominator = np.maximum(np.maximum(yb, floor), np.finfo(yb.dtype).tiny)
+    with np.errstate(over="ignore"):
+        return np.abs(ya - yb) / denominator, floor
+
+
+def evaluate_subsurface(np, candidate, reference, masks, spheres, gated=True):
+    """Ticket 17, decision 11: per PIECE (every sphere of the scene, the neutral weight-0 ones included) the mean and p95 of the relative
+    luminance error over the piece's ROI against the random-walk ground truth; the gate is every piece mean <= 10 % and p95 <= 25 %.
+    `gated` False (the back-lit report) measures the same numbers and passes."""
+    gate = THRESHOLDS["subsurface"]
+    pieces = []
+    for s in spheres:
+        roi = piece_roi(masks, s["instance"])
+        if not roi.any():
+            pieces.append({"instance": s["instance"], "weight": s.get("weight", 0.0), "pixels": 0, "pass": False})
+            continue
+        error, floor = luminance_error(np, candidate, reference, roi, gate["floor_fraction"])
+        ya, yb = luminance(np, candidate)[roi], luminance(np, reference)[roi]
+        mean, p95 = float(error.mean()), float(np.percentile(error, 95))
+        pieces.append({"instance": s["instance"], "weight": s.get("weight", 0.0), "radius": s.get("radius"),
+                       "group": s.get("series"), "pixels": int(roi.sum()), "mean": mean, "p95": p95, "floor": floor,
+                       "candidate_mean_luminance": float(ya.mean()), "reference_mean_luminance": float(yb.mean()),
+                       "pass": bool(mean <= gate["mean"] and p95 <= gate["p95"])})
+    passed = all(piece["pass"] for piece in pieces)
+    return {"kind": "subsurface" if gated else "subsurface-report", "gated": gated, "pieces": pieces,
+            "worst_mean": max(piece.get("mean", 0.0) for piece in pieces), "worst_p95": max(piece.get("p95", 0.0) for piece in pieces),
+            "limits": {"mean": gate["mean"], "p95": gate["p95"]}, "pass": passed if gated else True,
+            "bound_met": passed}
+
+
+def terminator_bleed(np, image, masks, instance):
+    """The declared terminator statistic of one piece: mean luminance of its geometrically unlit ROI pixels over the mean luminance of
+    its lit ROI pixels (0 for a base model without light across the terminator, growing with the radius); None without either set."""
+    roi = piece_roi(masks, instance)
+    y = luminance(np, image)
+    lit, unlit = roi & masks["lit"].astype(bool), roi & ~masks["lit"].astype(bool)
+    if not lit.any() or not unlit.any() or float(y[lit].mean()) <= 0.0:
+        return None
+    return float(y[unlit].mean() / y[lit].mean())
+
+
+def evaluate_radius_monotonic(np, candidate, reference, masks, spheres):
+    """Ticket 17: along every sweep series (pieces that differ only in radius, ordered by radius) the terminator bleed of the CANDIDATE must
+    never fall by more than the tolerance and must rise by at least the tolerance at every step where the ground truth does.  A flat
+    candidate against a flat reference passes (the engine image of a model without diffusion matches the subsurface-off control);
+    a flat candidate against a rising ground truth fails (radius ignored)."""
+    tolerance = THRESHOLDS["radius_sweep"]["tolerance"]
+    groups = {}
+    for s in spheres:
+        if s.get("series") is not None:
+            groups.setdefault(s["series"], []).append(s)
+    series = []
+    for label, members in groups.items():
+        members = sorted(members, key=lambda m: m["radius"])
+        cand = [terminator_bleed(np, candidate, masks, m["instance"]) for m in members]
+        ref = [terminator_bleed(np, reference, masks, m["instance"]) for m in members]
+        steps = []
+        for i in range(len(members) - 1):
+            if None in (cand[i], cand[i + 1], ref[i], ref[i + 1]):
+                steps.append({"pass": False, "note": "a piece has no lit or no unlit ROI pixels"})
+                continue
+            dc, dr = cand[i + 1] - cand[i], ref[i + 1] - ref[i]
+            ok = dc >= -tolerance and (dr < tolerance or dc >= tolerance)
+            steps.append({"radius_from": members[i]["radius"], "radius_to": members[i + 1]["radius"], "candidate_step": dc,
+                          "reference_step": dr, "reference_rises": bool(dr >= tolerance), "pass": bool(ok)})
+        series.append({"series": label, "radii": [m["radius"] for m in members], "candidate": cand, "reference": ref, "steps": steps,
+                       "pass": all(step["pass"] for step in steps)})
+    reference_monotonic = bool(series) and all(step.get("reference_rises") for item in series for step in item["steps"])
+    return {"kind": "radius-monotonic", "tolerance": tolerance, "series": series, "pass": bool(series) and all(x["pass"] for x in series),
+            "reference_monotonic": reference_monotonic, "statistic": THRESHOLDS["radius_sweep"]["statistic"]}
+
+
+def evaluate_radius_statistic_match(np, candidate, reference, masks, spheres):
+    """The twin of the sweep gate (`pending_matches`): the candidate's terminator bleed equals the control's within the tolerance on every
+    piece, i.e. the engine image is the image of the model the control describes (subsurface off: no light across the terminator)."""
+    tolerance = THRESHOLDS["radius_sweep"]["tolerance"]
+    pieces = []
+    for s in spheres:
+        if s.get("series") is None:
+            continue
+        c, r = terminator_bleed(np, candidate, masks, s["instance"]), terminator_bleed(np, reference, masks, s["instance"])
+        pieces.append({"instance": s["instance"], "candidate": c, "reference": r,
+                       "pass": c is not None and r is not None and abs(c - r) <= tolerance})
+    return {"kind": "radius-statistic-match", "tolerance": tolerance, "pieces": pieces,
+            "pass": bool(pieces) and all(piece["pass"] for piece in pieces)}
+
+
+def evaluate_equal(np, candidate, reference, masks, spheres):
+    """Ticket 17 sub-pixel: per piece the maximum relative luminance error of the candidate against the engine capture of the pair scene
+    (no block) over the ROI stays at floating-point noise, and the candidate is not an empty image."""
+    gate = THRESHOLDS["equal"]
+    pieces = []
+    for s in spheres:
+        roi = piece_roi(masks, s["instance"])
+        if not roi.any():
+            pieces.append({"instance": s["instance"], "pixels": 0, "pass": False})
+            continue
+        error, floor = luminance_error(np, candidate, reference, roi, THRESHOLDS["subsurface"]["floor_fraction"])
+        mean_luminance = float(luminance(np, candidate)[roi].mean())
+        pieces.append({"instance": s["instance"], "weight": s.get("weight", 0.0), "radius": s.get("radius"), "pixels": int(roi.sum()),
+                       "max": float(error.max()), "mean": float(error.mean()), "mean_luminance": mean_luminance,
+                       "pass": bool(float(error.max()) <= gate["max_relative_luminance_error"] and
+                                    mean_luminance >= gate["min_mean_luminance"])})
+    return {"kind": "equal", "pieces": pieces, "worst_max": max(piece.get("max", 0.0) for piece in pieces),
+            "limit": gate["max_relative_luminance_error"], "pass": all(piece["pass"] for piece in pieces)}
 
 
 def evaluate(np, kind, candidate, reference, masks, spheres, band=1):
     if kind in TRANSMISSION_KINDS:
         return evaluate_transmission(np, candidate, reference, masks, spheres)
+    if kind == "subsurface":
+        return evaluate_subsurface(np, candidate, reference, masks, spheres)
+    if kind == "subsurface-report":
+        return evaluate_subsurface(np, candidate, reference, masks, spheres, gated=False)
+    if kind == "radius-monotonic":
+        return evaluate_radius_monotonic(np, candidate, reference, masks, spheres)
+    if kind == "radius-statistic-match":
+        return evaluate_radius_statistic_match(np, candidate, reference, masks, spheres)
+    if kind == "equal":
+        return evaluate_equal(np, candidate, reference, masks, spheres)
     if kind == "direct":
         return evaluate_direct(np, candidate, reference, masks, spheres, band)
     if kind == "furnace":
@@ -891,9 +1079,13 @@ def control_verdicts(np, kind, reference, controls, masks, spheres, required, ba
 
 
 def summarize(result):
-    keep = {k: v for k, v in result.items() if k not in ("spheres", "rows", "objects")}
+    keep = {k: v for k, v in result.items() if k not in ("spheres", "rows", "objects", "pieces", "series")}
     if "objects" in result:
         keep["objects_failing"] = [t.get("label") or t["instance"] for t in result["objects"] if not t["pass"]]
+    if "pieces" in result:
+        keep["pieces_failing"] = [p["instance"] for p in result["pieces"] if not p["pass"]]
+    if "series" in result:
+        keep["series_failing"] = [x["series"] for x in result["series"] if not x["pass"]]
     if "rows" in result:
         keep["rows_failing"] = [k for k, v in result["rows"].items() if not v["pass"]]
     if result["kind"] in ("environment", "declared"):
@@ -1025,6 +1217,10 @@ def evaluate_scenario(np, name, folder, mode):
     literal_controls, declared_controls = scenario_controls(name)
     reference_dir = folder / "reference"
     visibility = spec.get("visibility", "none")
+    if spec.get("reference") == "subsurface":
+        import f15_subsurface_reference as reference_tool
+    else:
+        reference_tool = f15_reference
     if not cached_reference_usable(reference_dir, folder / "snapshot", literal_controls, declared_controls,
                                    visibility):
         if (reference_dir / "reference.json").is_file():
@@ -1034,12 +1230,15 @@ def evaluate_scenario(np, name, folder, mode):
                      "--controls", *literal_controls]
         if declared_controls:
             arguments += ["--declared-controls", *declared_controls]
-        code = f15_reference.main(arguments)
+        code = reference_tool.main(arguments + reference_arguments(name))
         if code:
             raise RuntimeError(f"{name}: reference render failed ({code})")
     report = json.loads((reference_dir / "reference.json").read_text())
     reference = read_pfm(reference_dir / "reference.pfm")
     candidate = read_pfm(folder / "engine.pfm")
+    if spec.get("pair"):
+        # An `equal` key compares the engine capture with the engine capture of its pair scene (same geometry, no block).
+        reference = read_pfm(folder.parent / spec["pair"] / "engine.pfm")
     if candidate.shape != reference.shape:
         raise RuntimeError(f"{name}: engine capture {candidate.shape} and reference {reference.shape} differ in size")
     masks = dict(np.load(reference_dir / "masks.npz"))
@@ -1066,7 +1265,8 @@ def evaluate_scenario(np, name, folder, mode):
         if spec.get("pending_matches") in controls and not declared_only:
             # Red for the right reason: before its ticket the engine must pass the gate against the
             # control that models the missing piece (e.g. DI evaluating the base BRDF).
-            twin = evaluate(np, spec["kind"], candidate, controls[spec["pending_matches"]], masks, spheres, band)
+            twin = evaluate(np, spec.get("twin_kind", spec["kind"]), candidate, controls[spec["pending_matches"]], masks, spheres,
+                            band)
             expected = {**expected, "matches_control": spec["pending_matches"], "control_gate": summarize(twin),
                         "met": expected["met"] and twin["pass"]}
             twins.append(twin["pass"])
@@ -1092,7 +1292,9 @@ def evaluate_scenario(np, name, folder, mode):
                                  "dfg_table_sha256": declared_report.get("dfg_table_sha256")}
         checks.append((all(v["fails_gate"] for v in verdicts.values()), result["pass"]))
 
-    entry["discriminating"] = all(d for d, _ in checks)
+    # A radius sweep whose ground truth does not rise at every step cannot tell a sweep-blind engine apart: the fixture is redesigned.
+    reference_ok = entry.get("result", {}).get("reference_monotonic", True)
+    entry["discriminating"] = all(d for d, _ in checks) and reference_ok
     entry["gates_pass"] = all(p for _, p in checks)
     entry["pending"] = spec.get("pending")
     entry["pending_matches_met"] = all(twins)  # the engine image passes the gate against its pending_matches control
@@ -1123,6 +1325,27 @@ def result_lines(r):
         for k, row in r["rows"].items():
             lines.append(f"| {k} | {row['pixels']} | {row.get('mean', 0):.4f} | {row.get('p95', 0):.4f} | "
                          f"{row.get('p99', 0):.4f} | {row.get('max_outside_mask', 0):.4f} | {row['pass']} |")
+    elif r["kind"] in ("subsurface", "subsurface-report"):
+        lines += ["", f"worst piece mean {r['worst_mean']:.4f} (limit {r['limits']['mean']}), worst p95 {r['worst_p95']:.4f} "
+                      f"(limit {r['limits']['p95']}){'' if r['gated'] else '; not gated (reported)'}", "",
+                  "| piece | weight | radius | pixels | mean | p95 | candidate Y | reference Y | pass |", "|---|---|---|---|---|---|---|---|---|"]
+        for t in r["pieces"]:
+            lines.append(f"| {t['instance']} | {t.get('weight', 0):g} | {t.get('radius') or 0:g} | {t['pixels']} | {t.get('mean', 0):.4f} | "
+                         f"{t.get('p95', 0):.4f} | {t.get('candidate_mean_luminance', 0):.4f} | "
+                         f"{t.get('reference_mean_luminance', 0):.4f} | {t['pass']} |")
+    elif r["kind"] == "radius-monotonic":
+        lines += ["", f"statistic: {r['statistic']}; tolerance {r['tolerance']}; ground truth rises at every step: "
+                      f"{r['reference_monotonic']}", "", "| series | radii | candidate | reference | pass |", "|---|---|---|---|---|"]
+        for x in r["series"]:
+            fmt = lambda values: ", ".join("-" if v is None else f"{v:.4f}" for v in values)  # noqa: E731
+            lines.append(f"| {x['series']} | {', '.join(f'{v:g}' for v in x['radii'])} | {fmt(x['candidate'])} | {fmt(x['reference'])} | "
+                         f"{x['pass']} |")
+    elif r["kind"] == "equal":
+        lines += ["", f"worst per-piece max relative luminance error {r['worst_max']:.6f} (limit {r['limit']})", "",
+                  "| piece | weight | radius | pixels | max | mean | mean Y | pass |", "|---|---|---|---|---|---|---|---|"]
+        for t in r["pieces"]:
+            lines.append(f"| {t['instance']} | {t.get('weight', 0):g} | {t.get('radius') or 0:g} | {t['pixels']} | {t.get('max', 0):.6f} | "
+                         f"{t.get('mean', 0):.6f} | {t.get('mean_luminance', 0):.4f} | {t['pass']} |")
     elif r["kind"] == "environment":
         lines += ["", "| metallic | roughness | mean | p95 | pass |", "|---|---|---|---|---|"]
         for t in r["spheres"]:
@@ -1232,6 +1455,7 @@ def run(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)  # SystemExit(2) on a usage error
     names = args.only or list(SCENARIOS)
+    names = names + [SCENARIOS[n]["pair"] for n in names if SCENARIOS[n].get("pair") and SCENARIOS[n]["pair"] not in names]
     out = args.out.resolve()
     binary = args.binary.resolve()
     metallib = binary.parent / "shaders" / "phosphor.metallib"
@@ -1254,7 +1478,7 @@ def run(argv=None):
         run_captures(parser, args, names, out, binary)
 
     import numpy as np
-    entries = [evaluate_scenario(np, n, out / n, args.expect) for n in names]
+    entries = [evaluate_scenario(np, n, out / n, args.expect) for n in names if not SCENARIOS[n].get("capture_only")]
     status, code = verdict(entries, args.expect)
     manifest["state"] = status
     document = {**manifest, "mode": args.expect, "status": status, "scenarios": entries}

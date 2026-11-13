@@ -66,7 +66,7 @@ np = np_module()
 
 GROUND_TRUTH_VERSION = 2
 DEFAULT_THREADS = int(os.environ.get("F15_REFERENCE_THREADS", min(4, os.cpu_count() or 1)))
-DEFAULT_SPP = int(os.environ.get("F15_SUBSURFACE_SPP", 4096))      # per grey render (two halves of spp / 2)
+DEFAULT_SPP = int(os.environ.get("F15_SUBSURFACE_SPP", 2048))      # per grey render (two halves of spp / 2)
 DEFAULT_POOL = int(os.environ.get("F15_SUBSURFACE_POOL", 5))       # odd window of the interior pooling
 DEFAULT_DEPTH = 100000                                             # path depth bound (volpath counts surface and medium events)
 RR_DEPTH = 64
@@ -398,7 +398,7 @@ def command_render(args):
     started = time.time()
     sss, halves = {}, {}
     nominal = nominal_radius(blocks) if blocks else 0.0
-    need = {"reference": {k: blocks[k]["radius"] for k in blocks}}
+    need = {} if args.no_ground_truth else {"reference": {k: blocks[k]["radius"] for k in blocks}}
     if "radius-ignored" in args.controls:
         need["radius-ignored"] = {k: nominal for k in blocks}
     if "subsurface-leak" in args.controls:
@@ -429,6 +429,7 @@ def command_render(args):
                                "spp_per_grey_render": args.spp, "halves": 2, "pool_window": args.pool, "boundary_ior": BOUNDARY_IOR,
                                "boundary": "roughdielectric ggx, alpha = clamp-aware roughness^2 of the material",
                                "nominal_radius": nominal, "leak_radius": LEAK_RADIUS,
+                               "ground_truth_rendered": not args.no_ground_truth,
                                "residual_noise_per_piece": {str(k): v for k, v in noise.items()},
                                "seconds": round(time.time() - started, 1)},
               "snapshot_sha256": scene_digest(root), "frame": data.get("frame"), "sun_angular_radius": data.get("sun_angular_radius"),
@@ -465,6 +466,9 @@ def main(argv=None):
     p.add_argument("--threads", type=int, default=DEFAULT_THREADS)
     p.add_argument("--spp", type=int, default=DEFAULT_SPP, help="samples per grey render (split in two halves)")
     p.add_argument("--pool", type=int, default=DEFAULT_POOL, help="odd pooling window over the piece interior (1 = none)")
+    p.add_argument("--no-ground-truth", action="store_true",
+                   help="skip the random walk of the reference itself (reference.pfm = the base model; the masks and the controls that "
+                        "need renders are still produced): for keys whose gate does not read the ground truth (the sub-pixel pair)")
     p.add_argument("--cache-dir", default=None, help="cache of the per-piece renders (default $F15_REFERENCE_CACHE or build/f15-reference-cache)")
     p.set_defaults(function=command_render)
     args = parser.parse_args(argv)

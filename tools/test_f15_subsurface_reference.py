@@ -360,5 +360,24 @@ class MitsubaConventions(unittest.TestCase):
             self.assertGreater(float(np.abs(read_pfm(out / "control-subsurface-leak.pfm")[piece] - reference[piece]).mean()), 1e-3)
 
 
+    def test_no_ground_truth_skips_the_random_walk_of_the_reference_but_keeps_the_leak_control(self):
+        from f12_reference import read_pfm
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_snapshot(pathlib.Path(tmp), [dict(position=(0.0, 0, 0), block={**SKIN, "radius": 0.0005})], SUN, width=160,
+                                 height=90)
+            out = pathlib.Path(tmp) / "out"
+            code = sss.main(["render", str(root), "--out", str(out), "--controls", "subsurface-leak", "--spp", "32", "--pool", "3",
+                             "--threads", "2", "--cache-dir", str(pathlib.Path(tmp) / "cache"), "--no-ground-truth"])
+            self.assertEqual(code, 0)
+            report = json.loads((out / "reference.json").read_text())
+            self.assertFalse(report["ground_truth"]["ground_truth_rendered"])
+            reference = read_pfm(out / "reference.pfm")
+            leak = read_pfm(out / "control-subsurface-leak.pfm")
+            masks = np.load(out / "masks.npz")
+            piece = masks["roi"] & (masks["sphere"] == 0)
+            self.assertGreater(float(np.abs(leak[piece] - reference[piece]).mean()), 1e-3)
+            self.assertEqual(len(list((pathlib.Path(tmp) / "cache").glob("piece-*.npz"))), 3)  # the leak control only: three channels
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

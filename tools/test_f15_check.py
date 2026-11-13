@@ -347,8 +347,7 @@ class RunnerLogic(unittest.TestCase):
                 for flag in ("--capture-linear", "--export-reference", "--reflections", "--resolution"):
                     self.assertIn(flag, capture)
                 self.assertIn(" ".join(capture), text)
-                self.assertTrue("f15_reference.py" in " ".join(commands["reference"]) or
-                                "f15_transmission_reference.py" in " ".join(commands["reference"]))
+                self.assertIn(check.reference_script(name), " ".join(commands["reference"]))
             for key in ("commit", "os", "sdk_version", "power", "tool_sha256", "seed", "thresholds"):
                 self.assertIn(key, plan)
             self.assertIn("f15_common.py", plan["tool_sha256"])
@@ -1496,6 +1495,285 @@ class BenchMirror(unittest.TestCase):
         self.assertFalse(check.cached_reference_usable(folder / "reference", folder / "snapshot", ["fresnel-off"], declared))
         (folder / "reference" / "control-declared-karis-fit.pfm").unlink()
         self.assertFalse(usable())
+
+
+class VolumetricSubsurfaceRunner(unittest.TestCase):
+    """Ticket 17: the gate kinds `subsurface`, `radius-monotonic`, `equal`, `subsurface-report` and the pending machinery of the keys, on
+    synthetic discs (numpy only): lit half, a bleed into the unlit half that grows with the radius.  The ground truth of the real keys is
+    the Mitsuba random walk of tools/f15_subsurface_reference.py (tested there)."""
+
+    RADII = [0.02, 0.04, 0.08, 0.16, 0.24]
+    SERIES = ["skin", "jade"]
+    SIZE = 24
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def layout(self):
+        """masks, spheres of 2 series x 5 radii: discs on a grid, `lit` = the left 70 % of every disc."""
+        r, n = self.SIZE, 10
+        height, width = 3 * r, (n + 1) * r
+        sphere = np.full((height, width), -1, dtype=np.int32)
+        lit = np.zeros((height, width), dtype=bool)
+        yy, xx = np.mgrid[0:height, 0:width]
+        spheres = []
+        for k in range(n):
+            cx, cy = (k + 1) * r - r // 2, height // 2
+            inside = (xx - cx) ** 2 + (yy - cy) ** 2 <= (r * 0.45) ** 2
+            sphere[inside] = k
+            lit |= inside & (xx < cx + 0.2 * r * 0.45)
+            series, radius = self.SERIES[k // 5], self.RADII[k % 5]
+            spheres.append({"instance": k, "slot": k, "base": [0.8] * 3, "metallic": 0.0, "roughness": 0.7, "weight": 1.0,
+                            "radius": radius, "series": series, "group": "weight 1"})
+        roi = sphere >= 0
+        inner = roi.copy()
+        for axis, shift in ((0, 1), (0, -1), (1, 1), (1, -1)):
+            inner &= np.roll(sphere, shift, axis=axis) == sphere
+        return {"roi": inner, "sphere": sphere, "narrow": np.zeros_like(inner), "lit": lit}, spheres
+
+    def image(self, masks, lit_value, bleed):
+        """Luminance image: lit pixels `lit_value`, unlit ones the callable bleed(piece index)."""
+        image = np.zeros(masks["roi"].shape + (3,), dtype=np.float32)
+        for k in range(10):
+            piece = masks["sphere"] == k
+            image[piece & masks["lit"]] = lit_value
+            image[piece & ~masks["lit"]] = bleed(k)
+        return image
+
+    def truth(self, masks):
+        return self.image(masks, 0.6, lambda k: 0.04 * (k % 5 + 1))  # bleed 0.04 ... 0.20: rises with the radius
+
+    def off(self, masks):
+        return self.image(masks, 0.7, lambda k: 0.0)
+
+    def test_bound_gate_passes_the_truth_and_its_noise_and_fails_the_base_model_and_every_control(self):
+        masks, spheres = self.layout()
+        truth = self.truth(masks)
+        self.assertTrue(check.evaluate(np, "subsurface", truth, truth, masks, spheres)["pass"])
+        noisy = truth * np.float32(1.04)  # a uniform 4 % error: inside the bound
+        self.assertTrue(check.evaluate(np, "subsurface", noisy, truth, masks, spheres)["pass"])
+        off = check.evaluate(np, "subsurface", self.off(masks), truth, masks, spheres)
+        self.assertFalse(off["pass"])
+        self.assertEqual(off["pieces_failing"] if "pieces_failing" in off else None, None)  # summarize adds it, evaluate does not
+        self.assertTrue(all(not piece["pass"] for piece in off["pieces"]))
+        self.assertGreater(off["worst_mean"], 0.2)
+        # One piece at 12 % mean error fails the whole gate (every piece must pass); the p95 bound alone also fails.
+        bad = truth.copy()
+        piece = masks["roi"] & (masks["sphere"] == 3)
+        bad[piece] = truth[piece] * np.float32(1.12)
+        result = check.evaluate(np, "subsurface", bad, truth, masks, spheres)
+        self.assertFalse(result["pass"])
+        self.assertEqual(check.summarize(result)["pieces_failing"], [3])
+        spiky = truth.copy()
+        pixels = np.flatnonzero(piece.reshape(-1))
+        spiky.reshape(-1, 3)[pixels[: len(pixels) // 10]] *= 1.5  # 10 % of the pixels 50 % off: mean 5 %, p95 50 %
+        spiky_result = check.evaluate(np, "subsurface", spiky, truth, masks, spheres)
+        self.assertFalse(spiky_result["pass"])
+        self.assertLess(spiky_result["pieces"][3]["mean"], 0.10)
+        self.assertGreater(spiky_result["pieces"][3]["p95"], 0.25)
+
+    def test_the_absolute_floor_protects_dark_pixels_but_not_a_missing_bleed(self):
+        masks, spheres = self.layout()
+        truth = self.truth(masks)
+        # The error floor is 5 % of the piece's mean luminance: 0.001 on a 0.02 bleed (a quarter of the floor 0.0..) is harmless...
+        nearly = truth.copy()
+        nearly[(masks["sphere"] == 0) & ~masks["lit"]] += 0.001
+        self.assertTrue(check.evaluate(np, "subsurface", nearly, truth, masks, spheres)["pass"])
+        # ... but a bleed of 0 against 0.2 is an error of 1 on those pixels.
+        gone = truth.copy()
+        gone[(masks["sphere"] == 4) & ~masks["lit"]] = 0.0
+        self.assertFalse(check.evaluate(np, "subsurface", gone, truth, masks, spheres)["pass"])
+
+    def test_report_kind_measures_the_same_numbers_and_never_fails(self):
+        masks, spheres = self.layout()
+        truth = self.truth(masks)
+        gated = check.evaluate(np, "subsurface", self.off(masks), truth, masks, spheres)
+        report = check.evaluate(np, "subsurface-report", self.off(masks), truth, masks, spheres)
+        self.assertTrue(report["pass"] and not report["gated"] and not report["bound_met"])
+        self.assertEqual([p["mean"] for p in report["pieces"]], [p["mean"] for p in gated["pieces"]])
+
+    def test_terminator_statistic_and_the_monotonic_check(self):
+        masks, spheres = self.layout()
+        truth = self.truth(masks)
+        bleed = [check.terminator_bleed(np, truth, masks, k) for k in range(5)]
+        np.testing.assert_allclose(bleed, [0.04 * (k + 1) / 0.6 for k in range(5)], rtol=1e-5)  # unlit mean / lit mean
+        self.assertEqual(check.terminator_bleed(np, self.off(masks), masks, 0), 0.0)
+        self.assertTrue(check.evaluate(np, "radius-monotonic", truth, truth, masks, spheres)["pass"])
+        # An engine whose bleed rises like the truth's but smaller still passes (the check is about the response, not the magnitude).
+        weaker = self.image(masks, 0.6, lambda k: 0.02 * (k % 5 + 1))
+        self.assertTrue(check.evaluate(np, "radius-monotonic", weaker, truth, masks, spheres)["pass"])
+        # Flat (radius ignored) against the rising truth fails; flat against flat passes (the pending twin).
+        flat = self.image(masks, 0.6, lambda k: 0.1)
+        self.assertFalse(check.evaluate(np, "radius-monotonic", flat, truth, masks, spheres)["pass"])
+        self.assertTrue(check.evaluate(np, "radius-monotonic", self.off(masks), self.off(masks), masks, spheres)["pass"])
+        # A reversal beyond the tolerance fails even where the truth is flat.
+        reversed_ = self.image(masks, 0.6, lambda k: 0.04 * (5 - k % 5))
+        self.assertFalse(check.evaluate(np, "radius-monotonic", reversed_, truth, masks, spheres)["pass"])
+        # A series whose ground truth does not rise at every step is reported as a non-discriminating fixture.
+        self.assertTrue(check.evaluate(np, "radius-monotonic", truth, truth, masks, spheres)["reference_monotonic"])
+        self.assertFalse(check.evaluate(np, "radius-monotonic", flat, flat, masks, spheres)["reference_monotonic"])
+        result = check.evaluate(np, "radius-monotonic", flat, truth, masks, spheres)
+        self.assertEqual(sorted(check.summarize(result)["series_failing"]), ["jade", "skin"])
+        self.assertEqual(len(result["series"][0]["steps"]), 4)
+
+    def test_equal_kind_accepts_floating_point_noise_and_rejects_diffusion_or_an_empty_image(self):
+        masks, spheres = self.layout()
+        pair = self.truth(masks)
+        self.assertTrue(check.evaluate(np, "equal", pair, pair, masks, spheres)["pass"])
+        self.assertTrue(check.evaluate(np, "equal", pair * np.float32(1.0 + 5e-4), pair, masks, spheres)["pass"])
+        self.assertFalse(check.evaluate(np, "equal", pair * np.float32(1.01), pair, masks, spheres)["pass"])
+        self.assertFalse(check.evaluate(np, "equal", self.off(masks), pair, masks, spheres)["pass"])
+        black = np.zeros_like(pair)
+        self.assertFalse(check.evaluate(np, "equal", black, black, masks, spheres)["pass"])  # equal but empty
+
+    # --- the keys ---------------------------------------------------------------------------------------------------------------
+
+    def write_folder(self, key, engine, reference, controls, masks, spheres):
+        from f12_reference import scene_digest
+        folder = pathlib.Path(self.tmp.name) / key
+        (folder / "snapshot").mkdir(parents=True)
+        (folder / "snapshot" / "scene.json").write_text("{}")
+        out = folder / "reference"
+        out.mkdir()
+        write_pfm(folder / "engine.pfm", engine)
+        write_pfm(out / "reference.pfm", reference)
+        np.savez_compressed(out / "masks.npz", **masks)
+        meta = {"schema": 1, "terms": ["sun-delta-mitsuba-volpath"], "maximum_radiance": 1.0, "quadrature_mask_pixels": 0,
+                "roi_pixels": int(masks["roi"].sum()), "spheres": spheres, "visibility": "none", "controls": {},
+                "snapshot_sha256": scene_digest(folder / "snapshot")}
+        for name, image in controls.items():
+            write_pfm(out / f"control-{name}.pfm", image)
+            meta["controls"][name] = {"model_variant": name, "file": f"control-{name}.pfm"}
+        (out / "reference.json").write_text(json.dumps(meta))
+        return folder
+
+    def controls_of(self, masks):
+        return {"subsurface-off": self.off(masks),
+                "diffusion-off": self.image(masks, 0.5, lambda k: 0.0),
+                "radius-ignored": self.image(masks, 0.6, lambda k: 0.12)}
+
+    def test_the_bound_and_sweep_keys_are_red_for_the_right_reason_until_the_engine_lands(self):
+        masks, spheres = self.layout()
+        truth = self.truth(masks)
+        controls = self.controls_of(masks)
+        for key in ("subsurface-volumetric-sun", "subsurface-volumetric-radius"):
+            spec = check.SCENARIOS[key]
+            self.assertEqual((spec["pending"], spec["pending_matches"], spec["reference"]), ("ticket 17", "subsurface-off", "subsurface"))
+            # Today's engine = the subsurface-off control: every gate fails, the twin passes, every control discriminates -> GREEN.
+            today = self.write_folder(key + "-today", controls["subsurface-off"], truth, controls, masks, spheres)
+            entry = check.evaluate_scenario(np, key, today, "green")
+            self.assertFalse(entry["gates_pass"], key)
+            self.assertTrue(entry["pending_matches_met"], key)
+            self.assertTrue(entry["discriminating"], key)
+            self.assertEqual(entry["expectation"]["matches_control"], "subsurface-off")
+            self.assertEqual(check.verdict([entry], "green"), ("GREEN", 0), key)
+            self.assertTrue(all(v["fails_gate"] for v in entry["controls"].values()), key)
+            # The engine that implements the mode passes the gate: a pending key must FAIL, so the verdict turns red (the runner keys
+            # lose "pending" in the ticket that implements it).
+            done = self.write_folder(key + "-done", truth, truth, controls, masks, spheres)
+            entry = check.evaluate_scenario(np, key, done, "green")
+            self.assertTrue(entry["gates_pass"], key)
+            self.assertEqual(check.verdict([entry], "green")[1], check.EXIT_UNEXPECTED, key)
+            # An engine that is neither the base model nor the truth is not "red for the right reason".
+            other = self.write_folder(key + "-other", controls["radius-ignored"], truth, controls, masks, spheres)
+            entry = check.evaluate_scenario(np, key, other, "green")
+            self.assertFalse(entry["pending_matches_met"], key)
+            self.assertEqual(check.verdict([entry], "green")[1], check.EXIT_UNEXPECTED, key)
+
+    def test_statistic_match_twin_distinguishes_the_base_model_from_a_flat_bleed(self):
+        masks, spheres = self.layout()
+        off = self.off(masks)
+        self.assertTrue(check.evaluate(np, "radius-statistic-match", off, off, masks, spheres)["pass"])
+        self.assertFalse(check.evaluate(np, "radius-statistic-match", self.image(masks, 0.6, lambda k: 0.12), off, masks, spheres)["pass"])
+        self.assertEqual(check.SCENARIOS["subsurface-volumetric-radius"]["twin_kind"], "radius-statistic-match")
+
+    def test_a_sweep_fixture_whose_truth_does_not_rise_is_non_discriminating(self):
+        masks, spheres = self.layout()
+        flat = self.image(masks, 0.6, lambda k: 0.1)
+        controls = self.controls_of(masks)
+        folder = self.write_folder("flat-truth", controls["subsurface-off"], flat, controls, masks, spheres)
+        entry = check.evaluate_scenario(np, "subsurface-volumetric-radius", folder, "green")
+        self.assertFalse(entry["discriminating"])
+        self.assertEqual(check.verdict([entry], "green")[1], check.EXIT_NON_DISCRIMINATING)
+
+    def test_subpixel_pair_key_compares_two_engine_captures(self):
+        masks, spheres = self.layout()
+        pair_image = self.truth(masks)
+        spec = check.SCENARIOS["subsurface-volumetric-subpixel"]
+        self.assertEqual(spec["pair"], "subsurface-volumetric-subpixel-off")
+        self.assertTrue(check.SCENARIOS[spec["pair"]]["capture_only"])
+        self.assertNotIn("pending", spec)
+        controls = {"subsurface-leak": self.image(masks, 0.6, lambda k: 0.05)}
+        for name, engine, expect in (("same", pair_image, True), ("fp", pair_image * np.float32(1.0 + 1e-4), True),
+                                     ("diffused", self.image(masks, 0.6, lambda k: 0.06), False)):
+            root = pathlib.Path(self.tmp.name) / f"pair-{name}"
+            root.mkdir()
+            self.write_folder_in(root, "subsurface-volumetric-subpixel", engine, pair_image, controls, masks, spheres)
+            (root / "subsurface-volumetric-subpixel-off").mkdir()
+            write_pfm(root / "subsurface-volumetric-subpixel-off" / "engine.pfm", pair_image)
+            entry = check.evaluate_scenario(np, "subsurface-volumetric-subpixel", root / "subsurface-volumetric-subpixel", "green")
+            self.assertEqual(entry["gates_pass"], expect, name)
+            self.assertTrue(entry["discriminating"], name)  # the leak control (a different image) fails the equality gate
+            self.assertTrue(entry["controls"]["subsurface-leak"]["fails_gate"], name)
+
+    def write_folder_in(self, root, key, engine, reference, controls, masks, spheres):
+        from f12_reference import scene_digest
+        folder = root / key
+        (folder / "snapshot").mkdir(parents=True)
+        (folder / "snapshot" / "scene.json").write_text("{}")
+        out = folder / "reference"
+        out.mkdir()
+        write_pfm(folder / "engine.pfm", engine)
+        write_pfm(out / "reference.pfm", reference)
+        np.savez_compressed(out / "masks.npz", **masks)
+        meta = {"schema": 1, "terms": ["sun-delta-mitsuba-volpath"], "maximum_radiance": 1.0, "quadrature_mask_pixels": 0,
+                "roi_pixels": int(masks["roi"].sum()), "spheres": spheres, "visibility": "none", "controls": {},
+                "snapshot_sha256": scene_digest(folder / "snapshot")}
+        for name, image in controls.items():
+            write_pfm(out / f"control-{name}.pfm", image)
+            meta["controls"][name] = {"model_variant": name, "file": f"control-{name}.pfm"}
+        (out / "reference.json").write_text(json.dumps(meta))
+
+    def test_backlit_report_key_is_never_gated_or_pending(self):
+        masks, spheres = self.layout()
+        spec = check.SCENARIOS["subsurface-volumetric-backlit"]
+        self.assertEqual(spec["kind"], "subsurface-report")
+        self.assertNotIn("pending", spec)
+        self.assertEqual(spec["controls"], [])
+        truth = self.truth(masks)
+        folder = self.write_folder("backlit", self.off(masks), truth, {}, masks, spheres)
+        entry = check.evaluate_scenario(np, "subsurface-volumetric-backlit", folder, "green")
+        self.assertTrue(entry["gates_pass"])
+        self.assertFalse(entry["result"]["bound_met"])  # measured: the base model is far from the thick back-lit truth
+        self.assertEqual(check.verdict([entry], "green"), ("GREEN", 0))
+
+    def test_plan_lists_the_pair_partner_and_the_subsurface_reference_tool(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with contextlib.redirect_stdout(io.StringIO()) as buffer:
+                code = check.main(["--out", tmp, "--binary", "build/release/phosphor", "--only", "subsurface-volumetric-subpixel"])
+            self.assertEqual(code, 0)
+            plan = json.loads((pathlib.Path(tmp) / "plan.json").read_text())
+            self.assertEqual(sorted(plan["commands"]), ["subsurface-volumetric-subpixel", "subsurface-volumetric-subpixel-off"])
+            command = " ".join(plan["commands"]["subsurface-volumetric-subpixel"]["reference"])
+            self.assertIn("f15_subsurface_reference.py", command)
+            self.assertIn("subsurface-leak", command)
+            self.assertIn("--reflections", plan["commands"]["subsurface-volumetric-sun" if False else "subsurface-volumetric-subpixel"]["capture"])
+
+    def test_every_volumetric_key_and_its_declared_controls(self):
+        keys = [k for k in check.SCENARIOS if k.startswith("subsurface-volumetric")]
+        self.assertEqual(sorted(keys), ["subsurface-volumetric-backlit", "subsurface-volumetric-radius", "subsurface-volumetric-subpixel",
+                                        "subsurface-volumetric-subpixel-off", "subsurface-volumetric-sun"])
+        import f15_subsurface_reference as tool
+        for key in keys:
+            spec = check.SCENARIOS[key]
+            for control in spec["controls"]:
+                self.assertIn(control, tool.CONTROLS, key)
+            self.assertEqual(spec.get("reflections"), "off", key)
+        self.assertEqual(check.SCENARIOS["subsurface-volumetric-sun"]["kind"], "subsurface")
+        self.assertEqual(check.SCENARIOS["subsurface-volumetric-radius"]["kind"], "radius-monotonic")
+        self.assertEqual(check.THRESHOLDS["subsurface"]["mean"], 0.10)
+        self.assertEqual(check.THRESHOLDS["subsurface"]["p95"], 0.25)
 
 
 if __name__ == "__main__":
