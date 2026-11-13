@@ -220,9 +220,12 @@ else
     rm -f "$stale_dir/material_shading.h.bak"
     target=$(sed -nE 's/^CMAKE_OSX_DEPLOYMENT_TARGET:[A-Z]+=(.*)$/\1/p' "$build_dir/CMakeCache.txt")
     airs=()
+    # Like App.cmake: the sources material_passes.metal includes (forward, visibility resolve and, since F15
+    # ticket 07, the lobe-guide DI kernels) are compiled only through it.
+    included=" $(sed -nE 's/^#include "([a-z_]+\.metal)".*/\1/p' "$stale_dir/material_passes.metal" | tr '\n' ' ')"
     for src in "$stale_dir/material_passes.metal" "$stale_dir"/*.metal; do
         name=$(basename "$src")
-        [[ $name == forward.metal || $name == visibility_resolve.metal ]] && continue
+        [[ $included == *" $name "* ]] && continue
         [[ $name == material_passes.metal && ${#airs[@]} -gt 0 ]] && continue
         xcrun -sdk macosx metal -std=metal4.0 "-mmacosx-version-min=${target:-26.0}" \
             -I "$repo_dir/src" -I "$build_dir/generated" -Wall -fpreserve-invariance -c "$src" -o "${src%.metal}.air" >"$src.log" 2>&1 \
