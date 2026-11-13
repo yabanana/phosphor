@@ -1207,7 +1207,11 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if(out.captureLinearSignal==6 && out.reflections==ReflectionMode::Off){error="Specular capture requires --reflections";return false;}
     if(out.captureLinearSignal==7 && out.ao==AoMode::Off){error="AO capture requires --ao";return false;}
     if(!out.materialScene.empty() && (!out.bench||*out.bench!=1||!out.lightingScene.empty()||!out.reflectionScene.empty())){error="--material-scenario requires --bench 2 and exclusive scene fixture";return false;}
-    if(!out.materialScene.empty() && out.reflections!=ReflectionMode::SSR){error="--material-scenario requires --reflections ssr (declared environment composite path)";return false;}
+    // F15.3: the declared environment reaches the image through the reflection
+    // composite (--reflections ssr, stochastic transport) or, with reflections
+    // off, through the resolve's own deterministic environment terms.
+    if(!out.materialScene.empty() && out.reflections!=ReflectionMode::SSR && out.reflections!=ReflectionMode::Off){error="--material-scenario requires --reflections ssr or off (declared environment)";return false;}
+    if(!out.materialScene.empty() && out.reflections==ReflectionMode::Off && out.lightingDenoise==LightingDenoiseMode::Off){error="--material-scenario with --reflections off requires --lighting-denoise custom (lit resolve)";return false;}
     if(!out.lightingScene.empty() && (!out.bench || *out.bench!=5)){error="--lighting-scene requires --bench 6";return false;}
     if(!out.captureLinear.empty() && !out.captureLinearSequence.empty()){error="Choose single linear capture or linear sequence";return false;}
     if((!out.captureLinear.empty() || !out.captureLinearSequence.empty()) && (!out.visibility || !out.benchmark())){error="Linear capture requires --render-path visibility and --frames";return false;}

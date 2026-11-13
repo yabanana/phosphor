@@ -1611,6 +1611,7 @@ bool Engine::frame(float dt) {
     constants.debugMode  = static_cast<u32>(settings_.debugMode);
     constants.exposure = effectiveExposure;
     constants.frameIndex = static_cast<u32>(frame.index);
+    constants.dfgTable = renderer_->dfgTableAddress(); // F15 (FrameConstants::dfgTable)
 
 
     // Capture the last frame of a run (or the first frame when interactive).
@@ -1742,7 +1743,10 @@ bool Engine::frame(float dt) {
         if(reflections_&&reflections_->ready()){reflections_->setEnvironment(environment.skyRadiance);reflections_->prepareFrame(*store_,sf,custom,surfaceSignalEpoch_);}
         if(atmosphere_)atmosphere_->prepareFrame(sf,surfaceGeometryEpoch_,surfaceMaterialEpoch_);
         const u32 flags=(options_.shadows!=ShadowMode::Off?1u:0u) | (options_.directLighting!=DirectLightingMode::Legacy?2u:0u) | (options_.gi!=GiMode::Off?4u:0u) |
-                        (options_.reflections!=ReflectionMode::Off && reflections_&&reflections_->ready()?8u:0u) | (reflections_&&reflections_->ready()?16u|RESOLVE_EXTERNAL_DIFFUSE:0u);
+                        (options_.reflections!=ReflectionMode::Off && reflections_&&reflections_->ready()?8u:0u) | (reflections_&&reflections_->ready()?16u|RESOLVE_EXTERNAL_DIFFUSE:0u) |
+                        // F15.3: a material scenario without the reflection composite has the
+                        // resolve evaluate its declared environment (deterministic furnace).
+                        (!options_.materialScene.empty() && !(reflections_&&reflections_->ready())?16u:0u);
         visibility_->prepareLighting(flags,shadows_->sunIndex(),environment.skyRadiance,environment.sunAngularRadius);
     }
     if(referenceSnapshot_) {

@@ -1,5 +1,6 @@
 #pragma once
 #include "gi_cache_common.h"
+#include "materials/bsdf.h"
 #include "light_visibility.h"
 #include "surface_geometry.h"
 #include "renderer/reflection_probe_storage.h"

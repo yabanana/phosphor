@@ -107,6 +107,19 @@ def make_bench_snapshot(folder, name, width, height):
 
 
 class RunnerLogic(unittest.TestCase):
+    def test_transport_furnace_gates_the_sphere_mean_and_the_resolve_furnace_every_pixel(self):
+        # One sphere of 4 pixels: a single noisy pixel above 1.005, mean below it.
+        candidate = np.array([[[1.02] * 3, [0.99] * 3], [[0.995] * 3, [0.99] * 3]], dtype=np.float32)
+        masks = {"roi": np.ones((2, 2), dtype=bool), "sphere": np.full((2, 2), 7, dtype=np.int32)}
+        spheres = [{"instance": 7, "metallic": 1.0, "roughness": 0.1}]
+        reference = np.ones_like(candidate)
+        transport = check.evaluate(np, "furnace-transport", candidate, reference, masks, spheres)
+        resolve = check.evaluate(np, "furnace", candidate, reference, masks, spheres)
+        self.assertTrue(transport["pass"])           # mean 0.99875 <= 1.005
+        self.assertFalse(resolve["pass"])            # max pixel 1.02 > 1.005
+        hot = candidate + 0.01                       # mean 1.00875 > 1.005: energy gain
+        self.assertFalse(check.evaluate(np, "furnace-transport", hot, reference, masks, spheres)["pass"])
+
     def test_terminator_band_excludes_only_lit_pixels_next_to_unlit_ones_of_the_same_sphere(self):
         # Two spheres side by side; sphere 1 lit on its left half, sphere 2 fully lit.
         lit = np.array([[1, 1, 0, 0, 1, 1],

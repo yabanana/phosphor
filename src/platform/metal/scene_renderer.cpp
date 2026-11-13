@@ -1,4 +1,5 @@
 #include "platform/metal/scene_renderer.h"
+#include "renderer/dfg_table.h"
 #include "core/log.h"
 #include "core/profile.h"
 #include "pipeline/forward_variants.h"
@@ -106,6 +107,9 @@ SceneRenderer::SceneRenderer(MetalContext& context, PipelineCache& pipelines, u3
     drawGateOpen_ = context_.memory().newBuffer(16, MTL::ResourceStorageModeShared, MemoryCategory::Scene, "Draw gate (open)");
     *static_cast<u32*>(drawGateOpen_->contents()) = 1u;
     drawGate_ = drawGateOpen_->gpuAddress();
+    // F15: the DFG table as a buffer; written once, never modified (no frame upload).
+    dfgTable_ = context_.memory().newBuffer(sizeof(DfgTable), MTL::ResourceStorageModeShared, MemoryCategory::Scene, "DFG table");
+    std::memcpy(dfgTable_->contents(), DfgTable, sizeof(DfgTable));
 }
 
 SceneRenderer::~SceneRenderer() {
@@ -114,6 +118,7 @@ SceneRenderer::~SceneRenderer() {
     for (MTL4::ArgumentTable* t : {arguments_, updateTable_, transformTable_, cullTable_, drawTable_}) t->release();
     depthState_->release();
     context_.memory().release(drawGateOpen_, MemoryCategory::Scene);
+    context_.memory().release(dfgTable_, MemoryCategory::Scene);
 }
 
 void SceneRenderer::requestAllVariants() {

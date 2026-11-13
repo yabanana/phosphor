@@ -86,3 +86,13 @@ Thresholds (fixed now, before any comparison):
   and unlit in the engine, an isolated N·L sign flip from normal
   interpolation; thresholds unchanged. After the rule the metallic 0 and 1
   rows pass with max 0.69 % / 0.43 % and the intermediate rows still fail.
+- Furnace amendment from the first green run (2026-11-13, ticket 03): the
+  per-pixel bound (no pixel above 1.005) applies to a deterministic evaluation,
+  now `furnace-resolve` (`--reflections off`: the resolve computes the declared
+  environment terms itself; measured max 1.00000). `furnace-base` runs the
+  stochastic F13 specular transport, whose per-pixel maxima are estimator
+  noise: a pure-metal sphere, which cannot gain energy, reaches 1.013 / 1.017 /
+  1.019 with seeds 1/2/3 while its mean is 0.9997, and only 6 of ~32 pixels
+  above 1.005 recur across the three seeds. Its gate is the per-sphere mean
+  (energy in expectation) at the same bound 1.005 (measured max 1.00001); the
+  per-pixel maximum is reported. The bound value is unchanged.

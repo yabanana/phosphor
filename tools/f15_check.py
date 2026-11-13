@@ -60,6 +60,11 @@ THRESHOLDS = {
     "direct": {"p99": 0.01, "max_outside_quadrature_mask": 0.03},
     "environment": {"mean_per_sphere": 0.05},
     "furnace": {"max_pixel": 1.005, "energy_loss": "recorded, not gated"},
+    # Stochastic transport (furnace-base): the gate is the per-sphere mean, i.e. the
+    # energy in expectation; per-pixel maxima are estimator noise there (decision 11
+    # amendment: a pure-metal sphere, which cannot gain energy, reaches 1.013-1.019
+    # across three seeds). The per-pixel bound stays on the deterministic furnace-resolve.
+    "furnace_transport": {"mean_per_sphere": 1.005},
     "source": ".scratch/f15/decisions/11-reference-method-and-thresholds.md (incl. review amendments)",
 }
 FRAMES, RESOLUTION = 128, "1280x720"
@@ -69,8 +74,10 @@ SCENARIOS = {
                       "terms": "sun disk only (environment 0, no shadows, no GI, reflections source off)"},
     "base-grid-env": {"kind": "environment", "controls": ["alpha-roughness", "fresnel-off"],
                       "terms": "constant environment only (radiance 0.5, no sun)"},
-    "furnace-base": {"kind": "furnace", "controls": ["diffuse-unweighted"],
-                     "terms": "constant environment radiance 1, albedo 1, no sun"},
+    "furnace-base": {"kind": "furnace-transport", "controls": ["diffuse-unweighted"],
+                     "terms": "constant environment radiance 1, albedo 1, no sun, stochastic specular transport"},
+    "furnace-resolve": {"kind": "furnace", "controls": ["diffuse-unweighted"], "reflections": "off",
+                        "terms": "constant environment radiance 1, albedo 1, no sun, deterministic resolve terms"},
     "roughness-extremes": {"kind": "environment", "controls": ["alpha-roughness"],
                            "terms": "sun disk plus constant environment 0.3; only the environment criterion gates"},
 }
@@ -145,7 +152,7 @@ def capture_command(binary, name, folder, seed=1):
     last = str(FRAMES - 1)
     return [str(binary), "--scene", "procedural", "--bench", "2", "--material-scenario", name,
             "--render-path", "visibility", "--geometry-path", "mesh", "--rt", "off", "--shadows", "off",
-            "--lighting", "legacy", "--gi", "off", "--reflections", "ssr", "--ao", "off",
+            "--lighting", "legacy", "--gi", "off", "--reflections", SCENARIOS[name].get("reflections", "ssr"), "--ao", "off",
             "--lighting-denoise", "custom", "--reflection-samples", "8", "--lighting-seed", str(seed),
             "--post", "--upscaler", "native", "--resolution", RESOLUTION, "--frames", str(FRAMES),
             "--warmup", "0", "--fixed-timestep", "--no-ui", "--no-vsync", "--no-gpu-timing", "--debug-lighting", "1",
@@ -260,11 +267,23 @@ def evaluate_furnace(np, candidate, reference, masks, spheres):
             "reference_max_pixel": float(reference[roi].max())}
 
 
+def evaluate_furnace_transport(np, candidate, reference, masks, spheres):
+    """Stochastic transport: gate on the per-sphere mean (energy in expectation)."""
+    result = evaluate_furnace(np, candidate, reference, masks, spheres)
+    limit = THRESHOLDS["furnace_transport"]["mean_per_sphere"]
+    means = [s["mean"] for s in result["spheres"] if s.get("pixels")]
+    result.update({"kind": "furnace-transport", "limit": limit, "max_sphere_mean": max(means),
+                   "pass": max(means) <= limit})
+    return result
+
+
 def evaluate(np, kind, candidate, reference, masks, spheres):
     if kind == "direct":
         return evaluate_direct(np, candidate, reference, masks, spheres)
     if kind == "furnace":
         return evaluate_furnace(np, candidate, reference, masks, spheres)
+    if kind == "furnace-transport":
+        return evaluate_furnace_transport(np, candidate, reference, masks, spheres)
     return evaluate_environment(np, candidate, reference, masks, spheres)
 
 
@@ -272,7 +291,7 @@ def expectation(kind, mode, result):
     """Red-state assertions of ticket 02; None when a fixture is measured but not predicted."""
     if mode == "green":
         return {"asserted": True, "expected_pass": True, "met": result["pass"]}
-    if kind == "furnace":
+    if kind in ("furnace", "furnace-transport"):
         return {"asserted": True, "expected_pass": False, "met": not result["pass"]}
     if kind == "direct":
         rows = {}
@@ -373,7 +392,9 @@ def markdown(manifest, entries, status):
             for t in r["spheres"]:
                 lines.append(f"| {t['metallic']} | {t['roughness']} | {t.get('mean', 0):.4f} | {t.get('p95', 0):.4f} | {t['pass']} |")
         else:
-            lines += ["", f"max pixel {r['max_pixel']:.5f} (limit {r['limit']}), reference max {r['reference_max_pixel']:.5f}", "",
+            gate = (f"max sphere mean {r['max_sphere_mean']:.5f} (limit {r['limit']}, energy in expectation), max pixel {r['max_pixel']:.5f}"
+                    if r["kind"] == "furnace-transport" else f"max pixel {r['max_pixel']:.5f} (limit {r['limit']})")
+            lines += ["", f"{gate}, reference max {r['reference_max_pixel']:.5f}", "",
                       "| metallic | roughness | max | mean | energy loss | reference loss |", "|---|---|---|---|---|---|"]
             for t in r["spheres"]:
                 lines.append(f"| {t.get('metallic')} | {t.get('roughness')} | {t.get('max', 0):.4f} | {t.get('mean', 0):.4f} | "

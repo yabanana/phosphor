@@ -1355,7 +1355,10 @@ TEST_CASE("F15.3 material scenarios select bench 2 with the declared environment
     CHECK_FALSE(parse({"--bench","6","--material-scenario","furnace-base","--render-path","visibility","--reflections","ssr"},o,error));
     CHECK_FALSE(parse({"--bench","2","--material-scenario","nope","--render-path","visibility","--reflections","ssr"},o,error));
     CHECK(error.find("unknown")!=std::string::npos);
-    CHECK_FALSE(parse({"--bench","2","--material-scenario","furnace-base","--render-path","visibility"},o,error)); // needs --reflections ssr
+    CHECK_FALSE(parse({"--bench","2","--material-scenario","furnace-base","--render-path","visibility"},o,error)); // reflections off needs the lit resolve
+    // Deterministic environment terms: reflections off with the lit resolve.
+    CHECK(parse({"--bench","2","--material-scenario","furnace-resolve","--render-path","visibility","--reflections","off","--lighting-denoise","custom"},o,error));
+    CHECK_FALSE(parse({"--bench","2","--material-scenario","furnace-resolve","--render-path","visibility","--reflections","rt","--rt","on"},o,error));
 }
 
 TEST_CASE("F15.3 the runner's exact capture command line is accepted") {

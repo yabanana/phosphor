@@ -13,8 +13,8 @@
 
 namespace phosphor {
 namespace {
-constexpr std::array<std::string_view, 4> kScenarios{"base-grid-sun", "base-grid-env", "furnace-base",
-                                                     "roughness-extremes"};
+constexpr std::array<std::string_view, 5> kScenarios{"base-grid-sun", "base-grid-env", "furnace-base",
+                                                     "furnace-resolve", "roughness-extremes"};
 constexpr float pi = 3.14159265358979323846f;
 
 glm::quat orientLight(glm::vec3 towardLight) {
@@ -41,6 +41,9 @@ const std::vector<MaterialScenarioSpec>& specs() {
         {"base-grid-sun", roughness, metallic, copper, true, 3.0f, towardSun, 0.0f},
         {"base-grid-env", roughness, metallic, copper, false, 0.0f, towardSun, 0.5f},
         {"furnace-base", roughness, metallic, glm::vec3(1.0f), false, 0.0f, towardSun, 1.0f},
+        // Same scene without the specular transport: the resolve evaluates the
+        // declared environment deterministically (run with --reflections off).
+        {"furnace-resolve", roughness, metallic, glm::vec3(1.0f), false, 0.0f, towardSun, 1.0f},
         // Roughness 0 is the declared clamp (0.04); 1 is the upper bound.
         {"roughness-extremes", {0.0f, 1.0f}, {0.0f, 0.5f, 1.0f}, copper, true, 3.0f, towardSun, 0.3f},
     };

@@ -130,6 +130,8 @@ public:
     [[nodiscard]] MTL::GPUAddress frameConstantsAddress() const { return frameConstants_; }
     [[nodiscard]] MTL::GPUAddress lightsAddress() const { return lightsAddress_; }
     [[nodiscard]] MTL::GPUAddress textureTableAddress() const { return textureTable_; }
+    /// F15: the DFG table as a buffer (FrameConstants::dfgTable).
+    [[nodiscard]] MTL::GPUAddress dfgTableAddress() const { return dfgTable_->gpuAddress(); }
     [[nodiscard]] MTL::Buffer* vertexBuffer() const { return vertexBuffer_; }
     [[nodiscard]] MTL::Buffer* meshBuffer() const { return meshBuffer_; }
     [[nodiscard]] u32 forwardVariantIndex() const { return variantIndex_; }
@@ -198,6 +200,7 @@ private:
     GpuDrivenMode   graphMode_ = GpuDrivenMode::Off;
     // F6: draw gate (setDrawGate), constant-1 default.
     MTL::Buffer*    drawGateOpen_ = nullptr;
+    MTL::Buffer*    dfgTable_ = nullptr; // F15: shared, written once at creation
     MTL::GPUAddress drawGate_     = 0;
     MTL::GPUAddress frameConstants_ = 0;
     MTL::GPUAddress lightsAddress_  = 0;

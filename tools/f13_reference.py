@@ -9,8 +9,9 @@ convergence. Mitsuba 3 (llvm_ad_rgb) supplies ray casting and emitter
 sampling; the BRDF and the path integrator below are this file's own.
 
 Declared reference model (every item is part of the report):
-- Material: Lambert (1-F)(1-metallic)albedo/pi plus GGX with height-correlated
-  Smith visibility and Schlick Fresnel, f0 = mix(0.04, albedo, metallic),
+- Material (glTF Appendix B, ADR-0006): Lambert (1-F(0.04))(1-metallic)albedo/pi
+  plus GGX with height-correlated Smith visibility and Schlick Fresnel,
+  f0 = mix(0.04, albedo, metallic),
   roughness clamped to [0.04, 1], alpha = max(roughness^2, 0.002).
 - Camera: one ray through each pixel centre, no reconstruction filter.
 - Transport: full material at the camera vertex with both lobes continued;
@@ -45,7 +46,7 @@ MIN_ROUGHNESS, MIN_ALPHA, DIELECTRIC_F0, MIN_NDOTV = 0.04, 0.002, 0.04, 1e-4
 SEEDS = (1234, 5678)
 CONVERGENCE = 0.02
 MODEL = {
-    "material": "Lambert(1-F)(1-metallic) + GGX height-correlated Smith + Schlick; roughness>=0.04, alpha>=0.002",
+    "material": "glTF Appendix B: Lambert(1-F(0.04))(1-metallic) + GGX height-correlated Smith + Schlick(mix(0.04, albedo, metallic)); roughness>=0.04, alpha>=0.002",
     "camera": "pixel-centre rays, no reconstruction filter",
     "transport": "full material at camera vertex and at the first hit after its specular lobe; diffuse reduction deeper",
     "excluded": ["caustics through a specular bounce", "specular inter-reflection beyond one bounce"],
@@ -195,7 +196,9 @@ class Context:
         f0 = material["albedo"] * material["metallic"] + DIELECTRIC_F0 * (1 - material["metallic"])
         fresnel = f0 + (1 - f0) * (1 - vh) ** 5
         valid = (wi.z > 0) & (length > 1e-10)
-        diffuse = dr.select(valid, (1 - fresnel) * (1 - material["metallic"]) * material["albedo"] * (nl / math.pi), 0)
+        # glTF Appendix B (ADR-0006): the diffuse lobe is weighted by the dielectric Fresnel only.
+        dielectric = 0.04 + (1 - 0.04) * (1 - vh) ** 5
+        diffuse = dr.select(valid, (1 - dielectric) * (1 - material["metallic"]) * material["albedo"] * (nl / math.pi), 0)
         specular = dr.select(valid, fresnel * (distribution * visibility * nl), 0)
         g1 = 2 * nv / (nv + dr.sqrt(a2 + (1 - a2) * nv * nv))
         pdf = dr.select(valid, g1 * distribution / (4 * nv), 0)

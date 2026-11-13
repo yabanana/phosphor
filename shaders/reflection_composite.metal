@@ -106,12 +106,14 @@ kernel void reflection_composite(constant GPUReflectionComposeParams& p [[buffer
     if(tid>=p.backingWidth*p.backingHeight)return;const uint2 pixel(tid%p.backingWidth,tid/p.backingWidth);float3 color=base.read(pixel).rgb;
     if(all(pixel<uint2(p.width,p.height))){const GPUDISurface s=surfaces[pixel.y*p.width+pixel.x];
         if(s.valid){if(p.flags&REFLECT_COMPOSE_EXCLUDE_EMISSION)color=max(color-unpackEmission3(s.pad[1]),0.0f);
+            // ADR-0006: the base diffuse receives 1 - E of the dielectric specular layer.
+            const float envDiffuse=bsdfEnvDiffuseWeight(s.roughness,max(dot(normalize(diVec(s.shadingNormal)),normalize(diVec(s.viewDirection))),1e-4f),phosphor::DfgTable);
             if(p.flags&REFLECT_COMPOSE_DI)color+=diSelected.read(pixel).rgb;
-            if(p.flags&REFLECT_COMPOSE_GI)color+=giSelected.read(pixel).rgb*diVec(s.albedo)*(1-s.metallic)/M_PI_F;
+            if(p.flags&REFLECT_COMPOSE_GI)color+=giSelected.read(pixel).rgb*diVec(s.albedo)*(1-s.metallic)*envDiffuse/M_PI_F;
             if(p.flags&REFLECT_COMPOSE_SPEC)color+=specular.read(pixel).rgb;
             if(!(p.flags&REFLECT_COMPOSE_GI)){const float3 n=normalize(diVec(s.shadingNormal));
                 // Declared isotropic environment (Lo = albedo * L), not the legacy gradient.
-                (void)n;const float3 ambient=float3(p.environment[0],p.environment[1],p.environment[2])*diVec(s.albedo)*(1-s.metallic)*as_type<float>(s.pad[0]);
+                (void)n;const float3 ambient=float3(p.environment[0],p.environment[1],p.environment[2])*diVec(s.albedo)*(1-s.metallic)*envDiffuse*as_type<float>(s.pad[0]);
                 color+=ambient*((p.flags&REFLECT_COMPOSE_AO)?saturate(ao.read(pixel).x):1.0f);}}
     }
     if(!all(isfinite(color))||any(color<-.00001f)||(p.pad[0]&&any(color>65504.0f))){atomic_fetch_add_explicit(counts+4,1u,memory_order_relaxed);color=0;}

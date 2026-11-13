@@ -108,7 +108,7 @@ kernel void reflection_rt(constant GPUReflectionParams& p [[buffer(0)]],const de
         sample.flags=SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_STOCHASTIC;sample.proposalSolidAngle=dir.pdf;for(uint i=0;i<3;++i)sample.direction[i]=dir.direction[i];
         bool numericError=dir.error;
         // Declared regularisation (F13 reference): alpha' >= k * alpha_camera.
-        const float floorRoughness=sqrt(min(1.0f,max(p.regularizationScale,1.0f)*max(s.roughness*s.roughness,.002f)));
+        const float floorRoughness=sqrt(min(1.0f,max(p.regularizationScale,1.0f)*bsdfAlpha(s.roughness)));
         if(hit.hit){L=reflectionSecondary(hit,dir.direction,as,ift,p,instances,meshes,vertices,indices,materials,textures,lights,sampled,emitters,gi,states,extra,irradiance,moments,seed,numericError,floorRoughness);
             sample.path=REFLECTION_PATH_RT;sample.hitDistance=length(origin+dir.direction*hit.t-diVec(s.position));sample.secondarySlot=hit.slot;sample.secondaryGeneration=hit.generation;}
         else L=reflectionProbeRadiance(diVec(s.position),dir.direction,s.roughness,false,p,probes,atlas,sample.path);

@@ -180,8 +180,18 @@ struct FrameConstants {
     u32 debugMode;
     float exposure;
     u32 frameIndex;
+    // F15: GPU address of the DFG table buffer (renderer/dfg_table.h values,
+    // owned by SceneRenderer). Fragment functions must read the table through
+    // it: MTL_SHADER_VALIDATION corrupts their reads of program-scope constant
+    // arrays (measured 2026-11-13, see shaders/materials/bsdf.h).
+#if defined(__METAL_VERSION__)
+    const constant float* dfgTable;
+#else
+    u64 dfgTable;
+#endif
+    u32 framePad[2];
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(FrameConstants) == 160, "FrameConstants layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(FrameConstants) == 176, "FrameConstants layout");
 
 // ---------------------------------------------------------------------------
 // F5: persistent GPU scene (renderer/scene_store.h, renderer/gpu_scene_layout.h)

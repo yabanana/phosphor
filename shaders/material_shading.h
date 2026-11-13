@@ -205,8 +205,8 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         if (physicalGI && isDirectional && i == shadowLight && sunAngularRadius > 0.0f) {
             // Diffuse at the disk centre (exact to O(r^2)), specular over the disk.
             const float NdotL = saturate(dot(N, L));
-            const float3 F = bsdfFSchlick(bsdfBaseF0(baseColor.rgb, metallic), saturate(dot(V, normalize(V + L))));
-            const float3 diffuse = NdotL > 0.0f ? bsdfBaseDiffuse(F, metallic, baseColor.rgb) * NdotL : float3(0.0);
+            const float3 Fd = bsdfDielectricFresnel(saturate(dot(V, normalize(V + L))));
+            const float3 diffuse = NdotL > 0.0f ? bsdfBaseDiffuse(Fd, metallic, baseColor.rgb) * NdotL : float3(0.0);
             color += (diffuse + sunDiskSpecular(N, V, L, baseColor.rgb, metallic, roughness, sunAngularRadius)) *
                      lightColor * attenuation * visibility;
         } else
@@ -222,11 +222,12 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     const float3 specularDir = normalize(mix(reflect(-V, N), N, roughness * roughness));
     // F13 path (physicalGI): the scene's single declared isotropic environment,
     // the same radiance GI and reflection misses see; legacy keeps the gradient.
-    const float3 ambientDiffuse = (physicalGI ? environment : hemisphere(N)) * baseColor.rgb * (1.0 - metallic);
-    const float3 ambientSpecular = (physicalGI ? environment : hemisphere(specularDir)) * bsdfEnvSpecularApprox(f0, roughness, NdotV);
+    const float envDiffuse = bsdfEnvDiffuseWeight(roughness, NdotV, frame.dfgTable); // ADR-0006
+    const float3 ambientDiffuse = (physicalGI ? environment : hemisphere(N)) * baseColor.rgb * (1.0 - metallic) * envDiffuse;
+    const float3 ambientSpecular = (physicalGI ? environment : hemisphere(specularDir)) * bsdfEnvSpecular(f0, roughness, NdotV, frame.dfgTable);
     // F13 assembles these positive signals once outside this residual base.
     // Never subtract full-float lighting from a quantized summed color later.
-    if(!externalDiffuse)color += (useGI ? indirectIrradiance * baseColor.rgb * (1.0f - metallic) / M_PI_F * (physicalGI?1.0f:occlusion) : ambientDiffuse * occlusion);
+    if(!externalDiffuse)color += (useGI ? indirectIrradiance * baseColor.rgb * (1.0f - metallic) * envDiffuse / M_PI_F * (physicalGI?1.0f:occlusion) : ambientDiffuse * occlusion);
     if(!omitSpecularAmbient)color += ambientSpecular * occlusion;
 
     const float3 emission = float3(m.emissive[0], m.emissive[1], m.emissive[2]) * float3(emTex.rgb);
@@ -236,7 +237,7 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     out.emission = emission;
     out.normal = N;
     out.baseColor = baseColor.rgb;
-    out.diffuseAlbedo = baseColor.rgb * (1.0f - metallic);
+    out.diffuseAlbedo = baseColor.rgb * (1.0f - metallic) * envDiffuse;
     out.specularAlbedo = bsdfFSchlick(f0, NdotV);
     out.roughness = roughness;
     out.metallic = metallic;

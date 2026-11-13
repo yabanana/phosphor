@@ -63,7 +63,7 @@ kernel void reflection_probe_prefilter(constant GPUProbeFilterParams& p [[buffer
     if(pixel.x>=p.side||pixel.y>=p.side||pixel.z>=6)return;const float3 n=reflectionCubeDirection(pixel.z,(float2(pixel.xy)+.5f)/float(p.side));float3 L=0;float weight=0;
     float emitted=0;
     if(p.roughness<=0){const float4 t=raw.sample(kReflectionProbeSampler,n,p.cubeIndex,level(0));L=t.rgb;emitted=t.a;weight=1;}
-    else{const float3 t=reflectionTangent(n),b=cross(n,t);const float a=max(p.roughness*p.roughness,.002f),a2=a*a;
+    else{const float3 t=reflectionTangent(n),b=cross(n,t);const float a=bsdfAlpha(p.roughness),a2=a*a;
         const uint count=clamp(p.sampleCount,1u,4096u);
         for(uint i=0;i<count;++i){float u=(float(i)+.5f)/float(count),v=reflectionRadicalInverse(i),c=sqrt((1-u)/(1+(a2-1)*u)),r=sqrt(max(0.0f,1-c*c)),phi=2*M_PI_F*v;
             const float3 h=t*(r*cos(phi))+b*(r*sin(phi))+n*c,l=reflect(-n,h);const float nl=max(0.0f,dot(n,l));const float4 t=raw.sample(kReflectionProbeSampler,l,p.cubeIndex,level(0));L+=t.rgb*nl;emitted+=t.a*nl;weight+=nl;}}
@@ -84,15 +84,14 @@ kernel void reflection_probe_only(constant GPUReflectionParams& p [[buffer(0)]],
         // probe up along the GGX dominant direction instead (Frostbite 2014,
         // 4.9.3), which bends toward the normal as roughness grows.
         const float da=s.roughness*s.roughness,dk=(1-da)*(sqrt(1-da)+da);const float3 dominant=normalize(mix(n,r,dk));
-        const float3 L=reflectionProbeRadiance(diVec(s.position),dominant,s.roughness,true,p,probes,atlas,path),f0=mix(float3(.04f),diVec(s.albedo),s.metallic);
+        const float3 L=reflectionProbeRadiance(diVec(s.position),dominant,s.roughness,true,p,probes,atlas,path),f0=bsdfBaseF0(diVec(s.albedo),s.metallic);
         // F13.5: tabulated split-sum DFG of the engine BRDF (tools/dfg_table.py);
         // the former analytic mobile fit was 14% low at roughness 0.3-0.6.
-        const float nv=max(0.0f,dot(n,v));const float2 ab(dfgTableLookup(nv,s.roughness,0u),dfgTableLookup(nv,s.roughness,1u));
-        // The analytic fit can leave the physical [0,1] BRDF-integral domain
-        // (roughness=1 gives B=-.0024 for black metal). Bound ONLY the finite
-        // approximation weight, never radiance or invalid numerical input.
-        const float3 fitWeight=f0*ab.x+ab.y;const bool finiteFit=all(isfinite(fitWeight));
-        result=L*(finiteFit?clamp(fitWeight,0.0f,1.0f):fitWeight);
+        // The table can leave the physical [0,1] BRDF-integral domain (roughness=1
+        // gives B=-.0024 for black metal): bsdfEnvSpecular bounds ONLY a finite
+        // weight, never radiance or invalid numerical input (shared module, F15).
+        const float nv=max(0.0f,dot(n,v));const float3 fitWeight=bsdfEnvSpecular(f0,s.roughness,nv,phosphor::DfgTable);const bool finiteFit=all(isfinite(fitWeight));
+        result=L*fitWeight;
         sample.flags=SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_PREFILTERED;
         if(!finiteFit||!all(isfinite(L))||any(L<0)||!all(isfinite(result))||any(result<0))sample.flags|=SPECULAR_SAMPLE_ERROR;
         sample.path=path;for(uint i=0;i<3;++i){sample.direction[i]=r[i];sample.radiance[i]=result[i];}}

@@ -9,9 +9,9 @@
 #include <utility>
 using namespace phosphor;
 
-TEST_CASE("F15.3 material scenarios are exactly the four declared names") {
-    CHECK(MaterialValidation::scenarios().size() == 4);
-    for (auto name : {"base-grid-sun", "base-grid-env", "furnace-base", "roughness-extremes"})
+TEST_CASE("F15.3 material scenarios are exactly the five declared names") {
+    CHECK(MaterialValidation::scenarios().size() == 5);
+    for (auto name : {"base-grid-sun", "base-grid-env", "furnace-base", "furnace-resolve", "roughness-extremes"})
         CHECK(MaterialValidation::validScenario(name));
     CHECK_FALSE(MaterialValidation::validScenario("unknown"));
     CHECK_THROWS(MaterialValidation{"unknown"});
@@ -113,4 +113,14 @@ TEST_CASE("F15.3 declared scenario numbers are pinned (tools/test_f15_check.py m
     MaterialValidation fixture{"base-grid-sun"};
     CHECK(fixture.getDefaultCamera().position == glm::vec3(0.0f, 2.0f, 5.5f));
     CHECK(MaterialValidation{"roughness-extremes"}.getDefaultCamera().position == glm::vec3(0.0f, 1.0f, 4.0f));
+}
+
+TEST_CASE("F15.3 the deterministic furnace declares the same scene as the transport furnace") {
+    const auto& transport = MaterialValidation::spec("furnace-base");
+    const auto& resolve = MaterialValidation::spec("furnace-resolve");
+    CHECK(resolve.roughness == transport.roughness);
+    CHECK(resolve.metallic == transport.metallic);
+    CHECK(resolve.baseColor == transport.baseColor);
+    CHECK_FALSE(resolve.sun);
+    CHECK(MaterialValidation::environmentRadiance("furnace-resolve") == 1.0f);
 }
