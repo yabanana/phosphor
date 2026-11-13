@@ -63,6 +63,11 @@ independent spectral (Airy, CIE) evaluation in tools/test_f15_reference.py; the 
 documents the composition with the base Fresnel, the per-light-sample V.H rule, the exact and the declared environment and the
 controls.
 
+KHR_materials_diffuse_transmission (RC) / subsurface thin mode (F15.3, ticket 16) is implemented from the RC text
+(research/khr-materials.md section 10.1) and ADR-0005/decision 10 (thin mode = diffuse transmission lobe); the section
+"Subsurface thin mode / diffuse transmission" below states the hemisphere convention, the Fresnel weighting of the transmitted
+lobe, the exact and the declared environment and the controls.
+
 Declared engine conventions (every item is part of the JSON report):
 - roughness clamped to [0.04, 1], alpha = max(roughness^2, 0.002), N.V >= 1e-4.
 - Sun: a disk of uniform radiance and angular radius r (the snapshot's
@@ -152,6 +157,12 @@ MODEL = {
                    "cos(theta1) = V.H per light sample; in the exact environment quadrature F_irid is evaluated inside the "
                    "integral at each V.H; declared environment: F_irid at N.V as a constant in the split sum (A + B), diffuse "
                    "1 - max of the specular albedo",
+    "thin-subsurface": "KHR_materials_diffuse_transmission / subsurface thin mode: base = mix(diffuse_brdf(baseColor), "
+                       "diffuse_btdf(color), w) under fresnel_mix: reflected diffuse (1 - w) (1 - F(V.H)) baseColor / pi for N.L > 0, "
+                       "transmitted (1 - metallic) w (1 - F(V.H)) color / pi |N.L| for N.L < 0 (thin-walled, same point, no "
+                       "refraction, H = normalize(V + L) of the literal fresnel_mix); specular lobes unchanged; sun at the disk "
+                       "centre; exact environment (1 - w) Cd + w T with T the back-hemisphere quadrature; declared environment "
+                       "transmitted weight (1 - E_d(N.V)) (1 - 0.16 N.V); GI at -N is engine-only (no GI in the fixtures)",
     "shadows": "none",
     "declared_environment": "(1 - metallic) * baseColor * (1 - (0.04 A + B)) + clamp(f0 A + B, 0, 1), (A, B) from the "
                             "engine DFG table (bilinear), f0 = mix(0.04, baseColor, metallic), roughness in [0.04, 1]; "
@@ -213,7 +224,15 @@ IRID_CONTROLS = {
     "iridescence-thickness-min": {"irid": "thickness-min"},          # the minimum thickness used instead of the maximum
     "iridescence-diffuse-unweighted": {"irid": "diffuse-unweighted"},  # diffuse not scaled by 1 - max F_irid: gains energy
 }
-ALL_CONTROLS = sorted({**CONTROLS, **SHEEN_CONTROLS, **ANISO_CONTROLS, **IRID_CONTROLS})
+# F15.3 (ticket 16) negative controls of the thin-subsurface grids (deltas on the scene's main model, Appendix B).
+THIN_CONTROLS = {
+    "transmission-ignored": {"thin": "ignored"},                     # weight 0: the base model (the engine before ticket 16)
+    "transmission-untinted": {"thin": "untinted"},                   # the transmission colour ignored (white)
+    "transmission-front-only": {"thin": "front-only"},               # the BTDF evaluated on the FRONT hemisphere: back lights ignored
+    "transmission-double-counted": {"thin": "double-counted"},       # diffuse reflection not reduced by w: gains energy
+    "transmission-fresnel-ignored": {"thin": "fresnel-ignored"},     # transmitted part not weighted by 1 - F(V.H)
+}
+ALL_CONTROLS = sorted({**CONTROLS, **SHEEN_CONTROLS, **ANISO_CONTROLS, **IRID_CONTROLS, **THIN_CONTROLS})
 
 
 def control_model(name, main_model):
@@ -225,6 +244,8 @@ def control_model(name, main_model):
         return {**main_model, **ANISO_CONTROLS[name]}
     if name in IRID_CONTROLS:
         return {**main_model, **IRID_CONTROLS[name]}
+    if name in THIN_CONTROLS:
+        return {**main_model, **THIN_CONTROLS[name]}
     return CONTROLS[name]
 
 
@@ -922,6 +943,140 @@ def irid_lobe_weights(base, metallic, v_dot_h, irid, model=APPENDIX_B):
     return diffuse, specular
 
 
+# --- Subsurface thin mode / diffuse transmission (F15.3, ticket 16) -------------------------------------------------------
+#
+# Source: KHR_materials_diffuse_transmission (Release Candidate), research/khr-materials.md section 10.1, normative text
+#   dielectric_brdf = fresnel_mix(ior = 1.5,
+#       base  = mix(diffuse_brdf(color = baseColor), diffuse_btdf(color = diffuseTransmissionColor), diffuseTransmission),
+#       layer = specular_brdf(alpha = roughness^2))
+#   diffuse_brdf(c) = c / pi if V and L are on the same hemisphere of N, else 0;   diffuse_btdf(c) = c / pi if on opposite ones.
+# Phosphor's thin mode (ADR-0005, decision 10) maps weight -> diffuseTransmission and the subsurface colour ->
+# diffuseTransmissionColor (the loader maps both glTF encodings and the description file to the same SubsurfaceBlock).
+#
+# Conventions and interpretations (every one is reported to the orchestrator):
+# * Hemispheres: relative to the interpolated SHADING normal N; the camera side (N.V > 0 for a visible pixel) is the front, "back"
+#   is the -N side.  Thin-walled: the transmitted ray leaves at the same point, no refraction, no offset, no thickness; a light with
+#   N.L < 0 lights the front surface through the diffuse BTDF.
+# * fresnel_mix is the Appendix B form f = (1 - F) base + F layer with F = Schlick(f0 = 0.04, |V.H|) and H = normalize(V + L) of the
+#   literal text, ALSO for the transmitted lobe (the RC says "the specular reflection BSDF and Fresnel weighting are not affected";
+#   the glTF Sample Renderer does the same: one F at V.H of V and L multiplies the whole base).  For L on the back hemisphere
+#   V.H = sqrt((1 + V.L) / 2) < 0.71, so the transmitted lobe is attenuated by (1 - F) with F up to 1 at V = -L (a light straight
+#   behind the camera ray transmits nothing: the albedo T(1) is 0.8075).  A degenerate H (|V + L|^2 <= 1e-20) gives 0 (engine rule).
+#   ORCHESTRATOR: confirm this literal reading (alternative: (1 - F(N.V)), which the text does not say).
+# * Reflected part:  f_r = (1 - w) (1 - metallic) (1 - F(V.H)) baseColor / pi   for N.L > 0 (the specular lobe is unchanged);
+#   transmitted part: f_t = w (1 - metallic) (1 - F(V.H)) color / pi             for N.L < 0, radiance f_t |N.L| E.  Metals carry no
+#   diffuse lobe, so no transmission.  The transmission colour is NOT multiplied by baseColor or by w twice (the README's
+#   text/formula inconsistency of the colour factor is resolved as in research section 10.1: formula wins, the mix carries w once).
+# * Sun: the diffuse and the transmitted term are point-evaluated at the disk centre (smooth; the engine's diffuse rule).
+# * Environment (constant L): exact = (1 - w) c Cd(N.V) + w color T(N.V) + F0 A + B with Cd the front diffuse integral of
+#   environment_table and T the back-hemisphere one (`thin_transmission_table`, the same (1 - F(V.H)) cos / pi integrand over L with
+#   N.L < 0: T(1) = 0.8075, T(0) = 0.933).  T <= Cd everywhere (ratio 1 at grazing, 0.841 at N.V = 1), so reflected + transmitted never
+#   exceeds the unextended model: "energy moved, not added".  Declared (engine) model: the transmitted weight is the declared
+#   front diffuse weight times the ratio r(mu) = T / Cd ~ 1 - 0.16 mu (`THIN_RATIO_SLOPE`; fit error 1.4e-3, tested), i.e.
+#   w color (1 - E_d(mu)) (1 - 0.16 mu) with E_d = clamp(0.04 A + B, 0, 1), and the declared front diffuse is scaled by (1 - w).
+# * The GI term at -N (decision 06) and the secondary-hit base reduction are engine-only: the fixtures carry no GI, no RT hits.
+# * Shadow rays of the point-light DI keys start on the side of the light (offset 1e-4 * sign(N.L) * N): a thin carrier does not
+#   occlude its own transmitted light.
+# * Refused (ValueError): volumetric mode (ticket 17), subsurface textures, non-zero anisotropy (the draft's forward/backward
+#   scatter split is not modelled), any other feature bit.  Radius/radiusScale are volumetric-only and ignored in thin mode.
+
+SUBSURFACE_FEATURE_BIT = 128  # MaterialFeature::Subsurface
+SUBSURFACE_RECORD = 2         # GPUMaterialExt2: mode 0, weight 1, colour 2-4, radius 5, radiusScale 6-8, anisotropy 9, textures 10-12
+THIN_VARIANTS = ("spec", "ignored", "untinted", "front-only", "double-counted", "fresnel-ignored")
+THIN_RATIO_SLOPE = 0.16
+
+
+def take_thin(thin, sel):
+    """The per-pixel arrays of `thin` restricted to the pixel indices `sel` (None stays None)."""
+    if thin is None:
+        return None
+    return {k: (v[sel] if isinstance(v, np.ndarray) else v) for k, v in thin.items()}
+
+
+def thin_weight(thin):
+    """w per pixel (0 under `ignored`)."""
+    return np.zeros_like(thin["weight"]) if thin["variant"] == "ignored" else thin["weight"]
+
+
+def thin_color(thin):
+    """Transmission colour (n, 3) (white under `untinted`)."""
+    return np.ones_like(thin["color"]) if thin["variant"] == "untinted" else thin["color"]
+
+
+def thin_reflect_scale(thin):
+    """Factor of the reflected diffuse: 1 - w (1 under `double-counted`: the energy is not taken away)."""
+    return np.ones_like(thin["weight"]) if thin["variant"] == "double-counted" else 1.0 - thin_weight(thin)
+
+
+def thin_transmitted(thin, metallic, n, v, l, model=APPENDIX_B):
+    """Transmitted radiance factor f_t |N.L| (n, 3) of the thin lobe for unit incident radiance (see the section comment).
+
+    `front-only` (control): the same lobe evaluated on the FRONT hemisphere (cosine max(N.L, 0)): back lights are ignored and a
+    front light gets an extra w color / pi term.  `fresnel-ignored` (control): no 1 - F(V.H) factor."""
+    n_dot_l = dot(n, l)
+    h = normalize(v + l)
+    degenerate = dot(v + l, v + l) <= 1e-20
+    f = DIELECTRIC_F0 + (1.0 - DIELECTRIC_F0) * schlick_weight(dot(v, h), model)
+    fresnel = np.ones_like(f) if thin["variant"] == "fresnel-ignored" else 1.0 - f
+    cosine = np.clip(n_dot_l, 0.0, 1.0) if thin["variant"] == "front-only" else np.clip(-n_dot_l, 0.0, 1.0)
+    m = np.clip(np.asarray(metallic, dtype=np.float64), 0.0, 1.0)
+    value = np.where(degenerate, 0.0, (1.0 - m) * thin_weight(thin) * fresnel * cosine / math.pi)
+    return value[..., None] * thin_color(thin)
+
+
+def thin_lit(thin, n, l):
+    """Pixels a light of direction `l` reaches through any lobe of the thin material: the front ones (N.L > 0) and, where w > 0, the
+    back ones (N.L < 0)."""
+    n_dot_l = dot(n, l)
+    return (n_dot_l > 0) | ((n_dot_l < 0) & (thin_weight(thin) > 0))
+
+
+_THIN_TABLE = {}
+_THIN_QUADRATURE = (192, 192)
+
+
+def thin_transmission_table():
+    """(mu grid, T) with T(mu) = integral over the BACK hemisphere of (1 - F(V.H)) |N.L| / pi dL, F = Schlick(0.04, V.H), for V at
+    cos(theta) = mu from N: the exact transmitted albedo of unit weight and colour in a constant environment."""
+    if "t" not in _THIN_TABLE:
+        mus = np.linspace(MIN_NDOTV, 1.0, MU_NODES)
+        x, wgt = np.polynomial.legendre.leggauss(_THIN_QUADRATURE[0])
+        cos_l = 0.5 * (x + 1.0)
+        wgt = 0.5 * wgt
+        phi = (np.arange(_THIN_QUADRATURE[1]) + 0.5) * (2 * math.pi / _THIN_QUADRATURE[1])
+        sin_l = np.sqrt(1 - cos_l ** 2)
+        values = np.empty(MU_NODES)
+        for i, mu in enumerate(mus):
+            v_dot_l = sin_l[:, None] * np.cos(phi)[None, :] * math.sqrt(max(0.0, 1 - mu * mu)) - cos_l[:, None] * mu
+            v_dot_h = np.sqrt(np.clip((1 + v_dot_l) / 2, 0.0, 1.0))
+            f = DIELECTRIC_F0 + (1 - DIELECTRIC_F0) * (1.0 - v_dot_h) ** 5
+            values[i] = float(np.sum(((1.0 - f) * cos_l[:, None] / math.pi).mean(axis=1) * 2 * math.pi * wgt))
+        _THIN_TABLE["t"] = (mus, values)
+    return _THIN_TABLE["t"]
+
+
+def thin_ratio(mu):
+    """The declared ratio of the transmitted to the front diffuse weight, 1 - 0.16 mu (exact: T / Cd, fit error 1.4e-3)."""
+    return 1.0 - THIN_RATIO_SLOPE * np.clip(np.asarray(mu, dtype=np.float64), 0.0, 1.0)
+
+
+def declared_thin_environment(material, metallic, base, roughness, n_dot_v, thin):
+    """The declared thin-subsurface model for unit radiance (decision 06): `material` is the declared base radiance
+    (1 - m) c (1 - E_d) + E.  The reflected diffuse is scaled by (1 - w) and the transmitted lobe adds
+        (1 - m) w color (1 - E_d(mu)) r(mu),   r(mu) = 1 - 0.16 mu,  E_d = clamp(0.04 A + B, 0, 1)  (A, B at the material roughness),
+    so it never exceeds the diffuse weight it replaces (energy moved, not added).  Controls: `front-only` r = 1 (the transmitted
+    weight equals the front diffuse's), `untinted`, `double-counted`, `ignored`."""
+    mu = np.maximum(np.asarray(n_dot_v, dtype=np.float64), MIN_NDOTV)
+    a, b = dfg_lookup(mu, clamp_roughness(roughness))
+    weight = np.clip(DIELECTRIC_F0 * a + b, 0.0, 1.0)[:, None]
+    m = np.asarray(metallic, dtype=np.float64)[:, None]
+    w = thin_weight(thin)[:, None]
+    ratio = np.ones_like(weight) if thin["variant"] == "front-only" else thin_ratio(mu)[:, None]
+    transmitted = w * thin_color(thin) * (1.0 - weight) * ratio
+    removed = (1.0 - thin_reflect_scale(thin))[:, None] * base * (1.0 - weight)
+    return material + (1.0 - m) * (transmitted - removed)
+
+
 def lobe_weights(base, metallic, v_dot_h, model=APPENDIX_B, dielectric=None, irid=None):
     """(diffuse multiplier per channel, specular multiplier per channel) at one V.H.
 
@@ -949,7 +1104,8 @@ def lobe_weights(base, metallic, v_dot_h, model=APPENDIX_B, dielectric=None, iri
     return diffuse, specular
 
 
-def bsdf(base, metallic, roughness, n, v, l, model=APPENDIX_B, dielectric=None, coat=None, sheen=None, aniso=None, irid=None):
+def bsdf(base, metallic, roughness, n, v, l, model=APPENDIX_B, dielectric=None, coat=None, sheen=None, aniso=None, irid=None,
+         thin=None):
     """BSDF value f (without the cosine) for world unit vectors; (n, 3) arrays or broadcastable.
 
     `sheen` (F15.3, ticket 10, per-pixel {"color", "roughness", "variant"} of KHR_materials_sheen): the material under
@@ -957,7 +1113,9 @@ def bsdf(base, metallic, roughness, n, v, l, model=APPENDIX_B, dielectric=None, 
     `coat` (F15.3, per-pixel {"factor", "roughness", "f0_ior", "variant"} of KHR_materials_clearcoat): the coated
     value (1 - c F_c) f_material + c F_c D Vis (see the module docstring); the coat term has its own cosine mask.
     The coat sits above the sheen: the coat attenuates the whole sheen + material value.
-    `aniso` (F15.3, ticket 11, per-pixel dict of the anisotropy section): the specular D V is the anisotropic lobe."""
+    `aniso` (F15.3, ticket 11, per-pixel dict of the anisotropy section): the specular D V is the anisotropic lobe.
+    `thin` (F15.3, ticket 16, per-pixel dict of the thin-subsurface section): the reflected diffuse is scaled by 1 - w; the
+    transmitted lobe (N.L < 0) is NOT part of this value (see thin_transmitted: it has its own cosine)."""
     alpha = effective_alpha(roughness, model)
     n_dot_l = dot(n, l)
     n_dot_v = np.maximum(dot(n, v), MIN_NDOTV)
@@ -965,6 +1123,8 @@ def bsdf(base, metallic, roughness, n, v, l, model=APPENDIX_B, dielectric=None, 
     n_dot_h = np.clip(dot(n, h), 0.0, 1.0)
     v_dot_h = dot(v, h)
     diffuse_w, specular_w = lobe_weights(base, metallic, v_dot_h, model, dielectric, irid)
+    if thin is not None:
+        diffuse_w = diffuse_w * thin_reflect_scale(thin)[..., None]
     if aniso is None:
         spec = (ggx_d(n_dot_h, alpha) * smith_vis(n_dot_v, np.maximum(n_dot_l, 0.0), alpha))[..., None]
     else:  # F15.3 (ticket 11): the anisotropic lobe replaces D V (Fresnel and the diffuse weighting are unchanged)
@@ -1008,7 +1168,7 @@ def sun_disk_samples(l, radius, count):
 
 
 def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius, model=APPENDIX_B, dielectric=None,
-                 coat=None, sheen=None, aniso=None, irid=None):
+                 coat=None, sheen=None, aniso=None, irid=None, thin=None):
     """Outgoing radiance per pixel from the sun disk; returns (radiance (n,3), narrow (n,)).
 
     `sheen` (F15.3, ticket 10): the material terms are scaled by the albedo scaling at the disk centre and the sheen
@@ -1028,7 +1188,11 @@ def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius
     n_dot_l = np.clip(dot(n, np.broadcast_to(l, n.shape)), 0.0, 1.0)
     h_c = normalize(v + l)
     diffuse_w, _ = lobe_weights(base, metallic, dot(v, h_c), model, dielectric, irid)
+    if thin is not None:
+        diffuse_w = diffuse_w * thin_reflect_scale(thin)[..., None]
     total = np.where((n_dot_l > 0)[..., None], diffuse_w * base / math.pi * n_dot_l[..., None], 0.0)
+    if thin is not None:  # F15.3 (ticket 16): the transmitted lobe at the disk centre (smooth, like the diffuse term)
+        total = total + thin_transmitted(thin, metallic, n, v, np.broadcast_to(l, n.shape), model)
     coat_c = None
     if coat is not None:
         coat_c = coat_weight(coat)
@@ -1092,7 +1256,7 @@ def point_window(distance, light_range):
 
 
 def point_radiance(base, metallic, roughness, n, v, position, light, model=APPENDIX_B, dielectric=None, visible=None,
-                   coat=None, sheen=None, aniso=None, irid=None):
+                   coat=None, sheen=None, aniso=None, irid=None, thin=None):
     """Outgoing radiance per pixel from one white delta point light; returns (radiance (n,3), lit (n,))."""
     delta = np.asarray(light["position"], dtype=np.float64)[None, :] - position
     distance = np.linalg.norm(delta, axis=1)
@@ -1100,8 +1264,11 @@ def point_radiance(base, metallic, roughness, n, v, position, light, model=APPEN
     geometry = point_window(distance, light["range"]) / np.maximum(distance * distance, 1e-4)
     incident = np.asarray(light["color"], dtype=np.float64)[None, :] * float(light["intensity"]) * geometry[:, None]
     n_dot_l = np.clip(dot(n, l), 0.0, 1.0)
-    value = bsdf(base, metallic, roughness, n, v, l, model, dielectric, coat, sheen, aniso, irid) * n_dot_l[:, None] * incident
+    value = bsdf(base, metallic, roughness, n, v, l, model, dielectric, coat, sheen, aniso, irid, thin) * n_dot_l[:, None] * incident
     lit = dot(n, l) > 0
+    if thin is not None:  # F15.3 (ticket 16): lights behind the surface light it through the transmitted lobe
+        value = value + thin_transmitted(thin, metallic, n, v, l, model) * incident
+        lit = thin_lit(thin, n, l)
     if visible is not None:
         value = value * visible[:, None]
         lit = lit & visible
@@ -1281,7 +1448,7 @@ def irid_environment_value(base, metallic, mu, alpha, a, b, cd, irid):
 
 
 def environment_radiance(base, metallic, roughness, n_dot_v, radiance, model=APPENDIX_B, dielectric=None, aniso_env=None,
-                         irid_env=None):
+                         irid_env=None, thin_env=None):
     """Outgoing radiance (n, 3) under a constant isotropic environment of radiance `radiance`.
 
     `dielectric` (F15.1, per-pixel {"f0", "weight", "variant"} of KHR_materials_ior/specular): the exact quadrature of
@@ -1323,6 +1490,15 @@ def environment_radiance(base, metallic, roughness, n_dot_v, radiance, model=APP
             result[sel] = (1 - m) * c * cu + f0 * a + b
             continue
         diffuse = c * (cu if model["weighting"] == "unweighted-diffuse" else cd)
+        if thin_env is not None:  # F15.3 (ticket 16): (1 - w) c Cd + w color T, T the back-hemisphere quadrature
+            t = take_thin(thin_env, sel)
+            mus, table = thin_transmission_table()
+            albedo = np.interp(mu[sel], mus, table)[:, None]
+            if t["variant"] == "front-only":
+                albedo = cd
+            elif t["variant"] == "fresnel-ignored":
+                albedo = np.ones_like(cd)
+            diffuse = thin_reflect_scale(t)[:, None] * diffuse + thin_weight(t)[:, None] * thin_color(t) * albedo
         dielectric_value = diffuse + DIELECTRIC_F0 * a + b
         metal = c * a + b
         result[sel] = (1 - m) * dielectric_value + m * metal
@@ -1347,7 +1523,8 @@ _DFG = {}
 # 1 - max(E_dielectric) of its own specular lobe ("extension", the engine's state). "composite-base" (the weight
 # 1 - E(0.04) of the base model, the engine's state before ticket 08) is kept as a negative control.
 DECLARED = {"albedo": "dfg-table", "diffuse": "one-minus-dielectric-albedo", "dielectric": "extension",
-            "extension_diffuse": "extension", "coat": "spec", "sheen": "spec", "aniso": "spec", "irid": "spec"}
+            "extension_diffuse": "extension", "coat": "spec", "sheen": "spec", "aniso": "spec", "irid": "spec",
+            "thin": "spec"}
 # Deliberately wrong variants that the declared-model gate must reject.
 DECLARED_CONTROLS = {
     "declared-diffuse-unweighted": {**DECLARED, "diffuse": "unweighted"},            # no (1 - E) weight
@@ -1392,8 +1569,17 @@ IRID_DECLARED_CONTROLS = {
     "declared-iridescence-film-ior-default": {**DECLARED, "irid": "film-ior-default"},
     "declared-iridescence-diffuse-unweighted": {**DECLARED, "irid": "diffuse-unweighted"},
 }
+# F15.3 (ticket 16): negative controls of the thin-subsurface grids of the deterministic resolve.  The declared model has no
+# Fresnel at V.H for the transmitted lobe (the ratio 1 - 0.16 N.V stands for it), so `fresnel-ignored` has no declared twin.
+THIN_DECLARED_CONTROLS = {
+    "declared-transmission-ignored": {**DECLARED, "thin": "ignored"},                 # the engine before ticket 16
+    "declared-transmission-untinted": {**DECLARED, "thin": "untinted"},
+    "declared-transmission-front-only": {**DECLARED, "thin": "front-only"},           # ratio 1: transmitted weight = front diffuse's
+    "declared-transmission-double-counted": {**DECLARED, "thin": "double-counted"},
+}
 ALL_DECLARED_CONTROLS = {**DECLARED_CONTROLS, **SPECULAR_DECLARED_CONTROLS, **COAT_DECLARED_CONTROLS,
-                         **SHEEN_DECLARED_CONTROLS, **ANISO_DECLARED_CONTROLS, **IRID_DECLARED_CONTROLS}
+                         **SHEEN_DECLARED_CONTROLS, **ANISO_DECLARED_CONTROLS, **IRID_DECLARED_CONTROLS,
+                         **THIN_DECLARED_CONTROLS}
 
 
 def load_dfg_table(path=DFG_HEADER):
@@ -1489,7 +1675,7 @@ def karis_ab(n_dot_v, roughness):
 
 
 def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, variant=DECLARED, dielectric=None,
-                                  coat=None, sheen=None, aniso=None, irid=None):
+                                  coat=None, sheen=None, aniso=None, irid=None, thin=None):
     """Outgoing radiance (n, 3) of the engine's declared environment model (see the module docstring).
 
     `irid` (F15.3, ticket 12, per-pixel dict of the iridescence section; variant["irid"] names the control): the iridescent pixels
@@ -1504,7 +1690,8 @@ def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, 
     above that sum.
     `aniso` (F15.3, ticket 11, per-pixel {"strength", ...}): the split sum runs at the effective isotropic roughness
     sqrt(alpha_eff) of `declared_aniso_alpha` (variant["aniso"] names the fit or the control); the bent-normal radiance fetch
-    of the Sample Renderer has no effect in a constant environment."""
+    of the Sample Renderer has no effect in a constant environment.
+    `thin` (F15.3, ticket 16, per-pixel {"weight", "color", "variant"}): declared_thin_environment."""
     if aniso is not None:
         alpha = effective_alpha(roughness)
         at, ab = aniso_alphas(alpha, aniso["strength"])
@@ -1513,6 +1700,8 @@ def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, 
     material = _declared_material_radiance(base, metallic, roughness, n_dot_v, variant, dielectric)
     if irid is not None:
         material = declared_irid_environment(material, base, metallic, roughness, n_dot_v, irid)
+    if thin is not None:  # F15.3 (ticket 16)
+        material = declared_thin_environment(material, metallic, base, roughness, n_dot_v, thin)
     if sheen is not None:
         material = declared_sheen_environment(material, n_dot_v, sheen, variant)
     if coat is not None:
@@ -1774,9 +1963,9 @@ def material_extension_words(data, material):
     bits = int(material.get("feature_bits", 0))
     if bits == 0:
         return None
-    if bits != IRIDESCENCE_FEATURE_BIT and bits & ~(SPECULAR_FEATURE_BIT | CLEARCOAT_FEATURE_BIT | SHEEN_FEATURE_BIT | ANISOTROPY_FEATURE_BIT):
+    if bits not in (IRIDESCENCE_FEATURE_BIT, SUBSURFACE_FEATURE_BIT) and bits & ~(SPECULAR_FEATURE_BIT | CLEARCOAT_FEATURE_BIT | SHEEN_FEATURE_BIT | ANISOTROPY_FEATURE_BIT):
         raise ValueError(f"material feature bits {bits:#x} are outside the declared "
-                         "ior/specular/clearcoat/sheen/anisotropy/iridescence model")
+                         "ior/specular/clearcoat/sheen/anisotropy/iridescence/thin-subsurface model")
     words = data["material_extensions"]["records"][int(material["extension_index"])]
     if len(words) != EXTENSION_RECORD_WORDS:
         raise ValueError("a material extension record must hold 20 words")
@@ -1858,6 +2047,34 @@ def material_iridescence(data, material):
     return f32(words[3]), f32(words[4]), f32(words[5]), f32(words[6])
 
 
+def material_subsurface(data, material):
+    """(weight, colour[3]) of the thin subsurface block from record 2 (GPUMaterialExt2) of the material's extension group
+    (words 1 weight, 2-4 colour), or None without the subsurface feature bit.  Raises on volumetric mode (word 0 = 1: ticket 17),
+    on a texture (words 10-12), on a non-zero anisotropy (word 9) and on any other feature bit."""
+    bits = int(material.get("feature_bits", 0))
+    if not bits & SUBSURFACE_FEATURE_BIT:
+        return None
+    if bits & ~SUBSURFACE_FEATURE_BIT:
+        raise ValueError("subsurface combined with another material feature is outside the declared model")
+    words = data["material_extensions"]["records"][int(material["extension_index"]) + SUBSURFACE_RECORD]
+    if len(words) != EXTENSION_RECORD_WORDS:
+        raise ValueError("a material extension record must hold 20 words")
+    if int(words[0]) != 0:
+        raise ValueError("volumetric subsurface is outside the thin-mode model (ticket 17)")
+    if any(int(words[k]) != INVALID for k in (10, 11, 12)):
+        raise ValueError("a subsurface texture is set; the reference is texture-free")
+    if f32(words[9]) != 0.0:
+        raise ValueError("a non-zero subsurface anisotropy is outside the thin-mode model (the draft's scatter split is not modelled)")
+    weight, color = f32(words[1]), [f32(words[2]), f32(words[3]), f32(words[4])]
+    if not (0.0 <= weight <= 1.0) or any(c < 0.0 for c in color):
+        raise ValueError("subsurface weight outside [0, 1] or a negative colour")
+    return weight, color
+
+
+def uses_subsurface(data):
+    return any(int(m.get("feature_bits", 0)) & SUBSURFACE_FEATURE_BIT for m in data["materials"])
+
+
 def uses_iridescence(data):
     return any(int(m.get("feature_bits", 0)) & IRIDESCENCE_FEATURE_BIT for m in data["materials"])
 
@@ -1885,6 +2102,7 @@ def sphere_table(data):
     uses_sheen_scene = uses_sheen(data)
     uses_aniso = uses_anisotropy(data)
     uses_irid = uses_iridescence(data)
+    uses_thin = uses_subsurface(data)
     for k, inst in enumerate(data["instances"]):
         material = data["materials"][inst["material"]]
         entry = {"instance": k, "slot": inst["slot"], "base": material["base"][:3],
@@ -1916,8 +2134,19 @@ def sphere_table(data):
             irid = material_iridescence(data, material) or (0.0, 1.3, 100.0, 400.0)
             entry.update(iridescence=irid[0], iridescence_ior=irid[1], thickness_min=irid[2], thickness=irid[3],
                          group=f"metallic {entry['metallic']:g} iridescence {irid[0]:g} ior {irid[1]:g}")
+        if uses_thin:
+            thin = material_subsurface(data, material) or (0.0, [1.0, 1.0, 1.0])
+            entry.update(thin_weight=thin[0], thin_color=thin[1],
+                         group=f"metallic {entry['metallic']:g} thin weight {thin[0]:g}")
         out.append(entry)
     return out
+
+
+def thin_arrays(spheres, instance_of_pixel, variant):
+    """Per-pixel {"weight", "color", "variant"} of the thin subsurface block (weight 0 where a sphere has none)."""
+    weight = np.array([s.get("thin_weight", 0.0) for s in spheres], dtype=np.float64)
+    color = np.array([s.get("thin_color", [1.0, 1.0, 1.0]) for s in spheres], dtype=np.float64)
+    return {"weight": weight[instance_of_pixel], "color": color[instance_of_pixel], "variant": variant}
 
 
 def irid_arrays(spheres, instance_of_pixel, n_dot_v, variant):
@@ -1975,6 +2204,7 @@ def require_declared_scene(data):
         material_sheen(data, material)
         material_anisotropy(data, material)
         material_iridescence(data, material)
+        material_subsurface(data, material)
         if any(index != INVALID for index in material["textures"]):
             raise ValueError("instanced material samples a texture; the Appendix B reference is texture-free")
         if any(v > 0 for v in material["emissive"]) or material["alpha_cutoff"] > 0:
@@ -2039,6 +2269,11 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
     if uses_iridescence(data):
         irid = irid_arrays(spheres, inst[pick], dot(n, v), model.get("irid", "spec"))
         env_irid = irid_arrays(spheres, inst[pick], dot(n, v), (environment or {}).get("irid", "spec"))
+    # F15.3 (ticket 16): the thin subsurface block of the scene (None without any).
+    thin = env_thin = None
+    if uses_subsurface(data):
+        thin = thin_arrays(spheres, inst[pick], model.get("thin", "spec"))
+        env_thin = thin_arrays(spheres, inst[pick], (environment or {}).get("thin", "spec"))
     env_variant = (environment or {}).get("dielectric", "extension")
     env_dielectric = (dielectric_arrays(spheres, inst[pick], env_variant)
                       if environment is not None and uses_specular_extension(data) else None)
@@ -2052,7 +2287,7 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
     for k, light in enumerate(points):
         visible = None if visibility is None else visibility[k]
         value, light_lit = point_radiance(base, metallic, roughness, n, v, position[pick], light, model, sun_dielectric,
-                                          visible, coat, sheen, aniso, irid)
+                                          visible, coat, sheen, aniso, irid, thin)
         radiance += value
         lit = lit | light_lit
         terms.append("point-light-shadowed" if visible is not None else "point-light")
@@ -2062,21 +2297,23 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
         if sun_radius <= 0:
             raise ValueError("a sun requires a positive angular radius")
         sun, narrow = sun_radiance(base, metallic, roughness, n, v, toward, irradiance, sun_radius, model,
-                                   sun_dielectric, coat, sheen, aniso, irid)
+                                   sun_dielectric, coat, sheen, aniso, irid, thin)
         radiance += sun
-        lit = lit | (dot(n, np.broadcast_to(toward, n.shape)) > 0)
+        toward_all = np.broadcast_to(toward, n.shape)
+        lit = lit | (dot(n, toward_all) > 0) | (thin_lit(thin, n, toward_all) if thin is not None else False)
         terms.append("sun-disk")
     if sky > 0:
         if environment is None:
             aniso_env = None if aniso is None else aniso_environment_inputs(aniso, roughness, n, v)
-            material = environment_radiance(base, metallic, roughness, dot(n, v), sky, model, sun_dielectric, aniso_env, irid)
+            material = environment_radiance(base, metallic, roughness, dot(n, v), sky, model, sun_dielectric, aniso_env, irid,
+                                            thin)
             if sheen is not None:
                 material = sheen_environment(material, dot(n, v), sheen, sky)
             radiance += material if coat is None else environment_coat(material, dot(n, v), coat, sky)
             terms.append("environment-quadrature")
         else:
             radiance += declared_environment_radiance(base, metallic, roughness, dot(n, v), sky, environment,
-                                                      env_dielectric, env_coat, env_sheen, env_aniso, env_irid)
+                                                      env_dielectric, env_coat, env_sheen, env_aniso, env_irid, env_thin)
             terms.append("environment-declared")
     image = np.full((height * width, 3), sky, dtype=np.float64)  # pixels without geometry show the environment
     image[pick] = radiance
@@ -2100,8 +2337,15 @@ def point_light_visibility(root, data, cast, threads):
     """Per point light, the shadow-ray visibility of the valid primary hits (pixel order of render_frame)."""
     valid, position, normal, _, _ = cast
     pick = np.flatnonzero(valid.reshape(-1))
-    return [shadow_visibility(root, data, position[pick], normalize(normal[pick]), light["position"], threads)
-            for light in data["lights"] if light["type"] == 1]
+    thin = uses_subsurface(data)  # a thin carrier does not occlude its own transmitted light: rays start on the light's side
+    out = []
+    for light in (light for light in data["lights"] if light["type"] == 1):
+        n = normalize(normal[pick])
+        if thin:
+            toward = np.asarray(light["position"], dtype=np.float64)[None, :] - position[pick]
+            n = np.where((dot(n, toward) < 0)[:, None], -n, n)
+        out.append(shadow_visibility(root, data, position[pick], n, light["position"], threads))
+    return out
 
 
 def command_render(args):

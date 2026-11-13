@@ -2378,5 +2378,421 @@ class IridescenceSnapshot(unittest.TestCase):
             self.assertEqual(ref.main(["render", str(root), "--out", str(pathlib.Path(tmp) / "out")]), 2)
 
 
+def thin_pixels(count, weight=0.5, color=(1.0, 1.0, 1.0), variant="spec"):
+    """A per-pixel thin-subsurface dict of `count` identical pixels."""
+    return {"weight": np.full(count, float(weight)), "color": np.tile(np.asarray(color, dtype=np.float64), (count, 1)),
+            "variant": variant}
+
+
+def schlick_dielectric(v_dot_h):
+    return 0.04 + 0.96 * (1.0 - v_dot_h) ** 5
+
+
+class ThinSubsurfaceModel(unittest.TestCase):
+    """KHR_materials_diffuse_transmission / subsurface thin mode (ticket 16)."""
+
+    BASE = np.array([[0.3, 0.5, 0.8]])
+    WARM = (1.0, 0.55, 0.25)
+
+    def setUp(self):
+        self.n = np.array([[0.0, 0.0, 1.0]])
+        self.v = np.array([unit(0.3, 0.1, 1.0)])
+        self.front = np.array([unit(-0.5, 0.2, 0.7)])
+        self.back = np.array([unit(-0.5, 0.2, -0.7)])
+
+    def transmitted(self, light, weight=0.5, color=WARM, variant="spec", metallic=0.0):
+        return ref.thin_transmitted(thin_pixels(1, weight, color, variant), np.array([metallic]), self.n, self.v, light)[0]
+
+    def test_transmitted_hand_value_of_the_literal_fresnel_mix(self):
+        # f_t |N.L| = (1 - m) w (1 - F(V.H)) color / pi |N.L| with H = normalize(V + L) of the text.
+        l = self.back[0]
+        v = self.v[0]
+        h = (v + l) / np.linalg.norm(v + l)
+        expected = 0.5 * (1.0 - schlick_dielectric(float(v @ h))) * np.array(self.WARM) / math.pi * 0.7 / np.linalg.norm([0.5, 0.2, 0.7])
+        np.testing.assert_allclose(self.transmitted(self.back), expected, rtol=1e-12)
+        # V.H of a back light is sqrt((1 + V.L) / 2) < 0.71 (the identity the section comment relies on).
+        self.assertAlmostEqual(float(v @ h), math.sqrt((1.0 + float(v @ l)) / 2.0), places=12)
+        # A light straight behind the camera ray (V = -L) transmits nothing: F = 1 (the degenerate H is 0 by the engine rule).
+        v_back = np.array([unit(0.0, 0.0, 1.0)])
+        l_back = np.array([unit(0.0, 0.0, -1.0)])
+        value = ref.thin_transmitted(thin_pixels(1), np.array([0.0]), self.n, v_back, l_back)
+        np.testing.assert_array_equal(value, np.zeros((1, 3)))
+
+    def test_hemisphere_convention_and_metals(self):
+        np.testing.assert_array_equal(self.transmitted(self.front), np.zeros(3))      # a front light: no transmitted term
+        self.assertGreater(float(self.transmitted(self.back).min()), 0.0)
+        np.testing.assert_array_equal(self.transmitted(self.back, metallic=1.0), np.zeros(3))  # metals have no diffuse lobe
+        half = self.transmitted(self.back, metallic=0.5)
+        np.testing.assert_allclose(half, 0.5 * self.transmitted(self.back), rtol=1e-12)
+        # The reflected value does not light a back light at all (the base BRDF is 0 for N.L <= 0).
+        value = ref.bsdf(self.BASE, np.array([0.0]), np.array([0.5]), self.n, self.v, self.back, thin=thin_pixels(1, 0.5))
+        np.testing.assert_array_equal(value, np.zeros((1, 3)))
+
+    def test_reflected_part_is_reduced_by_w_and_the_specular_lobe_is_unchanged(self):
+        rough = np.array([0.5])
+        m = np.array([0.0])
+        base_value = ref.bsdf(self.BASE, m, rough, self.n, self.v, self.front)
+        for w in (0.0, 0.25, 0.5, 1.0):
+            value = ref.bsdf(self.BASE, m, rough, self.n, self.v, self.front, thin=thin_pixels(1, w))
+            h = (self.v[0] + self.front[0]) / np.linalg.norm(self.v[0] + self.front[0])
+            diffuse = (1.0 - schlick_dielectric(float(self.v[0] @ h))) * self.BASE / math.pi
+            np.testing.assert_allclose(base_value - value, w * diffuse, rtol=1e-10, atol=1e-14)
+        # The colour of the transmission never reaches the reflected part.
+        np.testing.assert_array_equal(ref.bsdf(self.BASE, m, rough, self.n, self.v, self.front, thin=thin_pixels(1, 0.5, self.WARM)),
+                                      ref.bsdf(self.BASE, m, rough, self.n, self.v, self.front, thin=thin_pixels(1, 0.5, (0.1, 0.9, 0.2))))
+
+    def test_weight_zero_reduces_exactly_to_the_base_model_for_every_term(self):
+        n = np.tile(self.n, (3, 1))
+        v = np.tile(self.v, (3, 1))
+        l = np.concatenate([self.front, self.back, np.array([unit(0.9, 0.0, 0.1)])])
+        base = np.tile(self.BASE, (3, 1))
+        m = np.array([0.0, 0.3, 1.0])
+        rough = np.array([0.2, 0.5, 0.9])
+        zero = thin_pixels(3, 0.0, self.WARM)
+        np.testing.assert_array_equal(ref.bsdf(base, m, rough, n, v, l), ref.bsdf(base, m, rough, n, v, l, thin=zero))
+        light = {"position": [0.5, 1.0, 3.0], "range": 100.0, "intensity": 50.0, "color": [1, 1, 1]}
+        pos = np.zeros((3, 3))
+        np.testing.assert_array_equal(ref.point_radiance(base, m, rough, n, v, pos, light)[0],
+                                      ref.point_radiance(base, m, rough, n, v, pos, light, thin=zero)[0])
+        toward = unit(-0.5, 0.4, -0.7)
+        np.testing.assert_array_equal(ref.sun_radiance(base, m, rough, n, v, toward, 3.0, 0.00465)[0],
+                                      ref.sun_radiance(base, m, rough, n, v, toward, 3.0, 0.00465, thin=zero)[0])
+        mu = np.array([0.2, 0.6, 1.0])
+        np.testing.assert_array_equal(ref.environment_radiance(base, m, rough, mu, 0.5),
+                                      ref.environment_radiance(base, m, rough, mu, 0.5, thin_env=zero))
+        np.testing.assert_array_equal(ref.declared_environment_radiance(base, m, rough, mu, 0.5, ref.DECLARED),
+                                      ref.declared_environment_radiance(base, m, rough, mu, 0.5, ref.DECLARED, thin=zero))
+        # `lit` of a w = 0 material is the base one (nothing reaches it from behind).
+        self.assertFalse(bool(ref.thin_lit(thin_pixels(1, 0.0), self.n, self.back)[0]))
+        self.assertTrue(bool(ref.thin_lit(thin_pixels(1, 0.25), self.n, self.back)[0]))
+        self.assertTrue(bool(ref.thin_lit(thin_pixels(1, 0.0), self.n, self.front)[0]))
+
+    def test_direct_sun_and_point_terms_add_the_reflected_and_the_transmitted_lobe(self):
+        n, v = np.tile(self.n, (2, 1)), np.tile(self.v, (2, 1))
+        base = np.tile(self.BASE, (2, 1))
+        m, rough = np.zeros(2), np.full(2, 0.7)
+        thin = thin_pixels(2, 0.5, self.WARM)
+        l = np.concatenate([self.front, self.back])
+        # point light: value = bsdf cos + transmitted, at both hemispheres, times the incident radiance
+        light = {"position": [0.0, 0.0, 4.0], "range": 100.0, "intensity": 40.0, "color": [1, 1, 1]}
+        pos = np.zeros((2, 3))
+        got, lit = ref.point_radiance(base, m, rough, n, v, pos, light, thin=thin_pixels(2, 0.5, self.WARM))
+        self.assertTrue(bool(lit.all()))
+        direction = np.array([0.0, 0.0, 1.0])
+        l_front = np.tile(direction, (2, 1))
+        expected = (ref.bsdf(base, m, rough, n, v, l_front, thin=thin) * 1.0 +
+                    ref.thin_transmitted(thin, m, n, v, l_front)) * 40.0 / 16.0 * ref.point_window(4.0, 100.0)
+        np.testing.assert_allclose(got, expected, rtol=1e-12)
+        # the same light behind the surface: the reflected term vanishes, the transmitted one stays
+        behind = {**light, "position": [0.0, 0.0, -4.0]}
+        got, lit = ref.point_radiance(base, m, rough, n, v, pos, behind, thin=thin)
+        expected = ref.thin_transmitted(thin, m, n, v, -l_front) * 40.0 / 16.0 * ref.point_window(4.0, 100.0)
+        np.testing.assert_allclose(got, expected, rtol=1e-12)
+        self.assertTrue(bool(lit.all()))
+        # sun from behind: the disk centre transmitted term times the irradiance
+        toward = unit(-0.5, 0.3, -0.8)
+        sun, _ = ref.sun_radiance(base, m, rough, n, v, toward, 3.0, 0.00465, thin=thin)
+        np.testing.assert_allclose(sun, ref.thin_transmitted(thin, m, n, v, np.broadcast_to(toward, n.shape)) * 3.0, rtol=1e-12)
+
+    def test_controls_move_the_model_in_the_documented_direction(self):
+        w = self.transmitted(self.back, 0.5)
+        np.testing.assert_array_equal(self.transmitted(self.back, variant="ignored"), np.zeros(3))
+        untinted = self.transmitted(self.back, variant="untinted")
+        np.testing.assert_allclose(untinted / untinted[0], np.ones(3), rtol=1e-12)
+        self.assertTrue(bool((untinted >= w - 1e-15).all()))
+        self.assertGreater(float(np.abs(untinted - w).max()), 1e-4)
+        np.testing.assert_array_equal(self.transmitted(self.back, variant="front-only"), np.zeros(3))      # back lights ignored
+        extra = self.transmitted(self.front, variant="front-only")                                          # ... front lights gain it
+        self.assertGreater(float(extra.min()), 0.0)
+        unweighted = self.transmitted(self.back, variant="fresnel-ignored")
+        self.assertTrue(bool((unweighted > w).all()))
+        h = (self.v[0] + self.back[0]) / np.linalg.norm(self.v[0] + self.back[0])
+        np.testing.assert_allclose(unweighted / w, np.full(3, 1.0 / (1.0 - schlick_dielectric(float(self.v[0] @ h)))), rtol=1e-12)
+        # double counted: the reflected diffuse keeps its full weight while the transmitted lobe is added (energy gain)
+        rough, m = np.array([0.5]), np.array([0.0])
+        spec = ref.bsdf(self.BASE, m, rough, self.n, self.v, self.front, thin=thin_pixels(1, 0.5))
+        doubled = ref.bsdf(self.BASE, m, rough, self.n, self.v, self.front, thin=thin_pixels(1, 0.5, variant="double-counted"))
+        plain = ref.bsdf(self.BASE, m, rough, self.n, self.v, self.front)
+        np.testing.assert_array_equal(doubled, plain)
+        self.assertTrue(bool((doubled > spec).all()))
+        # every control and its registration
+        for name, delta in ref.THIN_CONTROLS.items():
+            self.assertEqual(ref.control_model(name, ref.APPENDIX_B), {**ref.APPENDIX_B, **delta})
+            self.assertIn(delta["thin"], ref.THIN_VARIANTS)
+            self.assertIn(name, ref.ALL_CONTROLS)
+        for name, model in ref.THIN_DECLARED_CONTROLS.items():
+            self.assertIn(model["thin"], ref.THIN_VARIANTS)
+            self.assertIn(name, ref.ALL_DECLARED_CONTROLS)
+        self.assertEqual(ref.DECLARED["thin"], "spec")
+
+    def test_exact_transmitted_albedo_matches_an_independent_monte_carlo_and_is_bounded_by_the_front_diffuse_weight(self):
+        mus, table = ref.thin_transmission_table()
+        self.assertAlmostEqual(float(np.interp(1.0, mus, table)), 0.8075, delta=2e-3)  # hand-run value, see the section comment
+        self.assertAlmostEqual(float(np.interp(1e-4, mus, table)), 0.933, delta=2e-3)
+        rng = np.random.default_rng(7)
+        count = 300_000
+        for mu in (0.2, 0.55, 0.9):
+            # cosine-weighted directions over the BACK hemisphere (z < 0): the albedo is E[(1 - F(V.H))]
+            u1, u2 = rng.random(count), rng.random(count)
+            r, phi = np.sqrt(u1), 2.0 * math.pi * u2
+            l = np.stack([r * np.cos(phi), r * np.sin(phi), -np.sqrt(1.0 - u1)], axis=1)
+            v = np.array([math.sqrt(1 - mu * mu), 0.0, mu])
+            h = v + l
+            h /= np.linalg.norm(h, axis=1, keepdims=True)
+            estimate = float((1.0 - schlick_dielectric(np.clip(h @ v, 0.0, 1.0))).mean())
+            self.assertAlmostEqual(estimate, float(np.interp(mu, mus, table)), delta=4e-3, msg=mu)
+        cd = ref.environment_table(0.5)["Cd"]
+        self.assertTrue(bool((table <= cd + 1e-9).all()))  # T <= Cd at every N.V: the thin lobe never adds energy
+        # the declared ratio 1 - 0.16 mu is T / Cd within the published fit error
+        error = np.abs(ref.thin_ratio(mus) - table / cd)
+        self.assertLess(float(error.max()), 2e-3)
+        self.assertEqual(ref.THIN_RATIO_SLOPE, 0.16)
+
+    def test_environment_exact_value_albedo_energy_and_the_control_directions(self):
+        mu = np.array([0.15, 0.5, 1.0])
+        white = np.ones((3, 3))
+        m, rough = np.zeros(3), np.full(3, 0.5)
+        plain = ref.environment_radiance(white, m, rough, mu, 1.0)
+        previous = plain
+        mus, table = ref.thin_transmission_table()
+        for w in (0.25, 0.5, 1.0):
+            thin = thin_pixels(3, w)
+            value = ref.environment_radiance(white, m, rough, mu, 1.0, thin_env=thin)
+            # energy moved, not added: the white albedo never exceeds the unextended model, and falls with w
+            self.assertTrue(bool((value <= previous + 1e-12).all()), w)
+            previous = value
+            cd = ref.environment_table(0.5)["Cd"]
+            expected = plain - w * (np.interp(mu, mus, cd) - np.interp(mu, mus, table))[:, None]
+            np.testing.assert_allclose(value, expected, rtol=1e-6)
+        # colour: only the transmitted share is tinted
+        warm = ref.environment_radiance(white, m, rough, mu, 1.0, thin_env=thin_pixels(3, 1.0, self.WARM))
+        self.assertTrue(bool((warm[:, 0] > warm[:, 1]).all()) and bool((warm[:, 1] > warm[:, 2]).all()))
+        # controls: double counted gains energy (furnace bound exceeded), front-only changes T into Cd, untinted brightens
+        doubled = ref.environment_radiance(white, m, rough, mu, 1.0, thin_env=thin_pixels(3, 0.5, variant="double-counted"))
+        self.assertGreater(float(doubled.max()), 1.05)
+        self.assertTrue(bool((doubled > plain).all()))
+        for variant in ("front-only", "fresnel-ignored", "untinted"):
+            other = ref.environment_radiance(white, m, rough, mu, 1.0, thin_env=thin_pixels(3, 1.0, self.WARM, variant))
+            self.assertGreater(float(np.abs(other - warm).max()), 1e-2, variant)
+        # metals have no diffuse lobe: the metallic 1 rows are unchanged
+        metal = ref.environment_radiance(white, np.ones(3), rough, mu, 1.0, thin_env=thin_pixels(3, 1.0, self.WARM))
+        np.testing.assert_allclose(metal, ref.environment_radiance(white, np.ones(3), rough, mu, 1.0), rtol=1e-12)
+
+    def test_furnace_bound_of_the_declared_model_by_construction_and_the_energy_control(self):
+        mu = np.linspace(0.05, 1.0, 20)
+        n = mu.size
+        white = np.ones((n, 3))
+        for rough in (0.2, 0.5, 0.9):
+            r = np.full(n, rough)
+            plain = ref.declared_environment_radiance(white, np.zeros(n), r, mu, 1.0, ref.DECLARED)
+            for w in (0.25, 0.5, 1.0):
+                value = ref.declared_environment_radiance(white, np.zeros(n), r, mu, 1.0, ref.DECLARED, thin=thin_pixels(n, w))
+                self.assertTrue(bool((value <= plain + 1e-12).all()), (rough, w))
+                self.assertLessEqual(float(value.max()), 1.0 + 1e-9)
+            wrong = ref.declared_environment_radiance(white, np.zeros(n), r, mu, 1.0, ref.THIN_DECLARED_CONTROLS["declared-transmission-double-counted"],
+                                                      thin=thin_pixels(n, 0.5, variant="double-counted"))
+            self.assertGreater(float(wrong.max()), 1.0 + 0.005)
+
+    def test_declared_environment_hand_value_and_its_error_against_the_exact_quadrature(self):
+        base = np.array([[0.3, 0.5, 0.8]])
+        mu, rough, w = np.array([0.7]), np.array([0.5]), 0.5
+        a, b = ref.dfg_lookup(mu, rough)
+        e_d = float(np.clip(0.04 * a + b, 0, 1)[0])
+        expected = (1 - w) * base[0] * (1 - e_d) + w * np.array(self.WARM) * (1 - e_d) * (1 - 0.16 * 0.7) + e_d
+        got = ref.declared_environment_radiance(base, np.array([0.0]), rough, mu, 1.0, ref.DECLARED,
+                                                thin=thin_pixels(1, w, self.WARM))[0]
+        np.testing.assert_allclose(got, expected, rtol=1e-12)
+        # declared against exact, sphere-weighted mean relative error over N.V >= 0.1 (a fit, bounded like the base environment, 5 %)
+        mus = np.linspace(0.1, 1.0, 40)
+        weights = mus / mus.sum()
+        worst = 0.0
+        for rough_value in (0.2, 0.5, 0.9):
+            for weight in (0.25, 0.5, 1.0):
+                args = (np.tile(self.BASE, (mus.size, 1)), np.zeros(mus.size), np.full(mus.size, rough_value), mus, 1.0)
+                thin = thin_pixels(mus.size, weight, self.WARM)
+                exact = ref.environment_radiance(*args, thin_env=thin)
+                declared = ref.declared_environment_radiance(*args, ref.DECLARED, thin=thin)
+                error = float((np.abs(declared - exact).max(axis=1) / np.maximum(exact.max(axis=1), 1e-3) * weights).sum())
+                worst = max(worst, error)
+        print(f"declared vs exact thin-subsurface environment, worst sphere-weighted mean relative error: {worst:.4f}")
+        self.assertLess(worst, 0.05)
+
+    def test_record_word_decoding_refusals_and_uses(self):
+        f = lambda x: int.from_bytes(struct.pack("<f", x), "little")  # noqa: E731
+
+        def record(mode=0, weight=0.5, color=(1.0, 0.5, 0.25), anisotropy=0.0, textures=(ref.INVALID,) * 3):
+            w = [0] * 20
+            w[0], w[1] = mode, f(weight)
+            w[2:5] = [f(c) for c in color]
+            w[5] = f(1.0)
+            w[6:9] = [f(1.0), f(0.5), f(0.25)]
+            w[9] = f(anisotropy)
+            w[10:13] = list(textures)
+            return w
+
+        record0 = [0] * 20
+        for k in (5, 6, 10, 11, 12, 17, 18):
+            record0[k] = ref.INVALID
+        zero = [record0, [0] * 20]
+        groups = [record(),record(mode=1), record(weight=0.9, color=(2.0, 0.0, 0.1)), record(anisotropy=0.4),
+                  record(textures=(3, ref.INVALID, ref.INVALID)), record(textures=(ref.INVALID, ref.INVALID, 4)),
+                  record(weight=1.5), record(color=(-0.1, 0.0, 0.0))]
+        records = []
+        for g in groups:
+            records += zero + [g, [0] * 20]
+        materials = [{"feature_bits": 128, "extension_index": 4 * k} for k in range(len(groups))]
+        materials += [{"feature_bits": 0}, {"feature_bits": 128 | 16, "extension_index": 0}]
+        data = {"materials": materials, "material_extensions": {"version": 1, "records_per_material": 4, "records": records}}
+        weight, color = ref.material_subsurface(data, materials[0])
+        self.assertEqual((weight, color), (0.5, [1.0, 0.5, 0.25]))
+        weight2, color2 = ref.material_subsurface(data, materials[2])                  # a colour above 1 is legal
+        self.assertAlmostEqual(weight2, 0.9, places=6)
+        np.testing.assert_allclose(color2, [2.0, 0.0, 0.1], rtol=1e-7)
+        self.assertIsNone(ref.material_subsurface(data, materials[len(groups)]))
+        for index in range(1, len(groups)):
+            if index == 2:
+                continue
+            with self.assertRaises(ValueError, msg=index):
+                ref.material_subsurface(data, materials[index])
+        with self.assertRaises(ValueError):                    # a combination with iridescence is not modelled
+            ref.material_subsurface(data, materials[len(groups) + 1])
+        self.assertTrue(ref.uses_subsurface(data))
+        self.assertEqual((ref.SUBSURFACE_FEATURE_BIT, ref.SUBSURFACE_RECORD), (128, 2))  # MaterialFeature::Subsurface, GPUMaterialExt2
+        # a subsurface-only material is not mistaken for the other features
+        self.assertIsNone(ref.material_specular(data, materials[0]))
+        self.assertIsNone(ref.material_iridescence(data, materials[0]))
+        self.assertIsNone(ref.material_anisotropy(data, materials[0]))
+
+
+def write_quad_ply(path, half=0.4):
+    """A quad in the z = 0 plane facing +z (two triangles, vertex normals +z)."""
+    verts = [(-half, -half, 0, 0, 0, 1, 0, 0), (half, -half, 0, 0, 0, 1, 1, 0), (half, half, 0, 0, 0, 1, 1, 1),
+             (-half, half, 0, 0, 0, 1, 0, 1)]
+    faces = [(0, 1, 2), (0, 2, 3)]
+    with open(path, "wb") as f:
+        f.write(("ply\nformat binary_little_endian 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\n"
+                 "property float nx\nproperty float ny\nproperty float nz\nproperty float s\nproperty float t\n"
+                 "element face 2\nproperty list uchar uint vertex_indices\nend_header\n").encode())
+        for v in verts:
+            f.write(struct.pack("<8f", *v))
+        for tri in faces:
+            f.write(struct.pack("<B3I", 3, *tri))
+
+
+@unittest.skipUnless(HAVE_MITSUBA, "Mitsuba is required to ray cast the snapshot")
+class ThinSubsurfaceSnapshot(unittest.TestCase):
+    """One sphere (or quad) whose material carries the thin subsurface block in record 2 (the exporter's keys)."""
+
+    def snapshot(self, directory, sky, sun, metallic=0.0, weight=0.5, color=(1.0, 0.55, 0.25), roughness=0.5, point=None, quad=False):
+        root = RayCastedSnapshot("snapshot").snapshot(directory, sky, sun, metallic, roughness, [0.3, 0.5, 0.8])
+        path = pathlib.Path(root) / "scene.json"
+        data = json.loads(path.read_text())
+        f = lambda x: int.from_bytes(struct.pack("<f", x), "little")  # noqa: E731
+        record0 = [0] * 20
+        for k in (5, 6, 10, 11, 12, 17, 18):
+            record0[k] = ref.INVALID
+        record2 = [0] * 20
+        record2[1] = f(weight)
+        record2[2:5] = [f(c) for c in color]
+        record2[10:13] = [ref.INVALID] * 3
+        data["materials"][0].update(feature_bits=128, extension_index=0, flags=128 << 8)
+        data["material_extensions"] = {"version": 1, "records_per_material": 4,
+                                       "records": [record0, [0] * 20, record2, [0] * 20]}
+        if quad:
+            write_quad_ply(pathlib.Path(root) / "mesh_0.ply")
+        if point:
+            data["lights"].append({"type": 1, "position": point, "direction": [0, 0, -1], "color": [1, 1, 1], "intensity": 60.0,
+                                   "range": 100.0, "inner": 0, "outer": 0})
+        path.write_text(json.dumps(data))
+        return root
+
+    def test_sun_behind_lights_the_visible_face_through_the_transmitted_lobe(self):
+        from f12_reference import snapshot as load
+        toward = unit(-0.4, 0.3, -0.85)
+        with tempfile.TemporaryDirectory() as tmp:
+            root, data = load(self.snapshot(tmp, 0.0, (toward, 3.0)))
+            cast = ref.cast_primary_rays(root, data, 2)
+            images = {}
+            for name in ("spec", *ref.THIN_CONTROLS):
+                model = ref.APPENDIX_B if name == "spec" else ref.control_model(name, ref.APPENDIX_B)
+                image, masks, spheres, terms = ref.render_frame(root, data, model, cast=cast)
+                images[name] = image
+            self.assertEqual(terms, ["sun-disk"])
+            self.assertEqual(spheres[0]["thin_weight"], 0.5)
+            self.assertEqual(spheres[0]["group"], "metallic 0 thin weight 0.5")
+            roi = masks["roi"]
+            # the whole visible face of the sphere is lit through the transmitted lobe (w > 0)
+            self.assertGreater(int(masks["lit"][roi].sum()), int(roi.sum()) * 0.95)
+            for name in ref.THIN_CONTROLS:
+                self.assertGreater(float(np.abs(images[name][roi] - images["spec"][roi]).max()), 1e-4, name)
+            # centre pixel: normal +z, V ~ +z: the closed form of the transmitted lobe plus the (unlit) reflected one
+            centre = images["spec"][72, 128]
+            n, v = np.array([[0.0, 0.0, 1.0]]), np.array([[0.0, 0.0, 1.0]])
+            expected = ref.thin_transmitted(thin_pixels(1, 0.5, (1.0, 0.55, 0.25)), np.array([0.0]), n, v,
+                                            np.array([toward]))[0] * 3.0
+            np.testing.assert_allclose(centre, expected, rtol=5e-2)
+            # the control dropping the weight keeps only the rim that the sun reaches from the front: the rest is black
+            self.assertEqual(float(images["transmission-ignored"][roi].min()), 0.0)
+            self.assertGreater(float(images["spec"][roi].min()), 0.0)
+
+    def test_render_environment_declared_and_the_point_light(self):
+        from f12_reference import snapshot as load
+        toward = unit(-0.5, 0.4, -0.7)
+        with tempfile.TemporaryDirectory() as tmp:
+            root, data = load(self.snapshot(tmp, 0.5, (toward, 3.0), point=[-2.0, 1.0, -3.0]))
+            self.assertTrue(ref.uses_subsurface(data) and not ref.uses_specular_extension(data))
+            cast = ref.cast_primary_rays(root, data, 2)
+            image, masks, _, terms = ref.render_frame(root, data, ref.APPENDIX_B, cast=cast)
+            self.assertEqual(terms, ["point-light", "sun-disk", "environment-quadrature"])
+            declared, *_ = ref.render_frame(root, data, ref.APPENDIX_B, cast=cast, environment=ref.DECLARED)
+            blind, *_ = ref.render_frame(root, data, ref.APPENDIX_B, cast=cast,
+                                         environment=ref.THIN_DECLARED_CONTROLS["declared-transmission-ignored"])
+            roi = masks["roi"]
+            self.assertGreater(float(np.abs(declared[roi] - blind[roi]).max()), 1e-3)
+
+    def test_shadow_rays_of_a_thin_carrier_start_on_the_side_of_the_light(self):
+        from f12_reference import snapshot as load
+        with tempfile.TemporaryDirectory() as tmp:
+            root, data = load(self.snapshot(tmp, 0.0, None, quad=True, point=[0.0, 0.0, -5.0]))
+            data["camera"]["position"] = [0, 0, 3]
+            cast = ref.cast_primary_rays(root, data, 2)
+            valid = cast[0]
+            self.assertGreater(int(valid.sum()), 500)
+            behind = ref.point_light_visibility(root, data, cast, 2)[0]
+            self.assertTrue(bool(behind.all()))                  # thin: the quad does not occlude its own transmitted light
+            data["materials"][0].update(feature_bits=0, flags=0)  # a plain (opaque) quad blocks a light behind it
+            plain = ref.point_light_visibility(root, data, cast, 2)[0]
+            self.assertFalse(bool(plain.any()))
+
+    def test_command_writes_controls_and_declared_controls(self):
+        toward = unit(-0.4, 0.3, -0.85)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.snapshot(tmp, 0.5, (toward, 3.0))
+            out = pathlib.Path(tmp) / "out"
+            code = ref.main(["render", str(root), "--out", str(out), "--controls", "transmission-ignored", "transmission-front-only",
+                             "--declared-controls", "declared-transmission-ignored", "declared-transmission-double-counted"])
+            self.assertEqual(code, 0)
+            report = json.loads((out / "reference.json").read_text())
+            self.assertEqual(sorted(report["controls"]), ["transmission-front-only", "transmission-ignored"])
+            self.assertEqual(report["controls"]["transmission-front-only"]["model_variant"]["thin"], "front-only")
+            self.assertEqual(sorted(report["declared"]["controls"]),
+                             ["declared-transmission-double-counted", "declared-transmission-ignored"])
+            self.assertIn("thin-subsurface", report["model"])
+
+    def test_textured_volumetric_and_anisotropic_blocks_are_refused(self):
+        from f12_reference import snapshot as load
+        for word, value in ((10, 3), (0, 1), (9, int.from_bytes(struct.pack("<f", 0.3), "little"))):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = self.snapshot(tmp, 0.5, None)
+                path = pathlib.Path(root) / "scene.json"
+                data = json.loads(path.read_text())
+                data["material_extensions"]["records"][2][word] = value
+                path.write_text(json.dumps(data))
+                root, data = load(root)
+                with self.assertRaises(ValueError, msg=word):
+                    ref.require_declared_scene(data)
+                self.assertEqual(ref.main(["render", str(root), "--out", str(pathlib.Path(tmp) / "out")]), 2)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
