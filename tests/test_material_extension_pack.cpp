@@ -188,7 +188,7 @@ TEST_CASE("extension records: feature flags are the feature mask shifted by 8") 
 
 #include "renderer/material_support.h"
 
-TEST_CASE("support report: ior/specular and clearcoat are approximated with named approximations, others stay unsupported") {
+TEST_CASE("support report: ior/specular, clearcoat and sheen are approximated with named approximations, others stay unsupported") {
     const MaterialSupportTable& t = currentSupportTable();
     const FeatureSupportEntry& s = t.features[static_cast<u32>(MaterialFeature::SpecularIor)];
     CHECK(s.level == SupportLevel::Approximated);
@@ -196,8 +196,13 @@ TEST_CASE("support report: ior/specular and clearcoat are approximated with name
     const FeatureSupportEntry& c = t.features[static_cast<u32>(MaterialFeature::Clearcoat)];
     CHECK(c.level == SupportLevel::Approximated);
     CHECK(std::string(c.approximation) == "secondary_rt_hits_ignore_coat;di_emitters_uncoated");
+    const FeatureSupportEntry& h = t.features[static_cast<u32>(MaterialFeature::Sheen)];
+    CHECK(h.level == SupportLevel::Approximated);
+    CHECK(std::string(h.approximation) ==
+          "lobe_not_sampled_environment_term_in_composition;sun_disk_point_evaluated;secondary_rt_hits_ignore_sheen");
     for (u32 f = 0; f < MATERIAL_FEATURE_COUNT; ++f)
-        if (f != static_cast<u32>(MaterialFeature::SpecularIor) && f != static_cast<u32>(MaterialFeature::Clearcoat))
+        if (f != static_cast<u32>(MaterialFeature::SpecularIor) && f != static_cast<u32>(MaterialFeature::Clearcoat) &&
+            f != static_cast<u32>(MaterialFeature::Sheen))
             CHECK(t.features[f].level == SupportLevel::Unsupported);
 
     MaterialDescription d;

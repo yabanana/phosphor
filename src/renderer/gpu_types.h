@@ -212,7 +212,7 @@ PHOSPHOR_GPU_CONSTANT u32 LOBE_GUIDE_FEATURE_MASK = 0xFFFFu;   // features: MATE
 PHOSPHOR_GPU_CONSTANT u32 LOBE_GUIDE_FLAG_SUBSURFACE_VOLUMETRIC = 1u << 16; // GPUMaterialExt2::mode == 1
 // Features whose parameters the resolve (shadeSurface) resolves into LobeParams today; the producers
 // write `material bits & kMaterialFeatures & this`.  Later lobe tickets extend it.
-PHOSPHOR_GPU_CONSTANT u32 LOBE_GUIDE_RESOLVED_FEATURES = MATERIAL_FEATURE_SPECULAR_IOR | MATERIAL_FEATURE_CLEARCOAT;
+PHOSPHOR_GPU_CONSTANT u32 LOBE_GUIDE_RESOLVED_FEATURES = MATERIAL_FEATURE_SPECULAR_IOR | MATERIAL_FEATURE_CLEARCOAT | MATERIAL_FEATURE_SHEEN;
 
 struct GPULobeGuide {
     u32   features;               // MATERIAL_FEATURE_* (bits 0..15) | LOBE_GUIDE_FLAG_* (bits 16..31)
@@ -358,8 +358,15 @@ struct FrameConstants {
 #else
     u64 materialExtensions;
 #endif
+    // F15.1 (ticket 10): GPU address of the sheen albedo table buffer (renderer/sheen_table.h values, owned by SceneRenderer),
+    // read by fragment functions for the same reason as dfgTable.
+#if defined(__METAL_VERSION__)
+    const constant float* sheenTable;
+#else
+    u64 sheenTable;
+#endif
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(FrameConstants) == 176, "FrameConstants layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(FrameConstants) == 184, "FrameConstants layout");
 
 // ---------------------------------------------------------------------------
 // F5: persistent GPU scene (renderer/scene_store.h, renderer/gpu_scene_layout.h)

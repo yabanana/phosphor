@@ -11,6 +11,7 @@
 // do not fold factors differently without re-checking the exact captures.
 #include <metal_stdlib>
 #include "renderer/dfg_table.h"
+#include "renderer/sheen_table.h"
 #include "renderer/lobe_select.h"
 using namespace metal;
 
@@ -199,4 +200,54 @@ inline float bsdfCoatEnvAlbedo(float coatRoughness, float NcdotV, const constant
                 B = phosphor::dfgTableLookup(table, NcdotV, coatRoughness, 1u);
     const float e = A + B;
     return isfinite(e) ? clamp(e, 0.0f, 1.0f) : e;
+}
+
+// ---------------------------------------------------------------------------
+// F15.1 (ticket 10): KHR_materials_sheen (ratified text and non-normative Charlie notes, research/khr-materials.md section 3).
+//
+//   alpha_g   = r^2, r = sheenRoughness clamped to [0.07, 1] (the declared lower bound of the Charlie lobe)
+//   D_charlie = (2 + 1/alpha_g) sin(theta_h)^(1/alpha_g) / (2 pi)
+//   V_charlie = 1 / ((1 + Lambda(N.V) + Lambda(N.L)) 4 N.V N.L)          (Estevez-Kulla fit of the notes)
+//   f         = S D V + f_material * scaling                              (no Fresnel in the lobe; coat sits above the sum)
+//   scaling   = min(1 - max3(S) E(N.V), 1 - max3(S) E(N.L))   analytic lights and the sun (the notes' exact form)
+//             = 1 - max3(S) E(N.V)                            environment / GI (the notes' indirect form)
+// E(N.V, r) is the Fresnel-free directional albedo of D V N.L, clamped to 1: the table of tools/sheen_table.py
+// (renderer/sheen_table.h).  `table` is FrameConstants::sheenTable in fragment functions (shader validation corrupts their reads
+// of program-scope constant arrays), phosphor::SheenTable in compute kernels without the frame.
+// ---------------------------------------------------------------------------
+inline float bsdfSheenRoughness(float roughness) { return clamp(roughness, 0.07f, 1.0f); }
+
+inline float bsdfSheenL(float x, float alphaG) {
+    const float t = (1.0f - alphaG) * (1.0f - alphaG);
+    const float a = mix(21.5473f, 25.3245f, t), b = mix(3.82987f, 3.32435f, t), c = mix(0.19823f, 0.16801f, t),
+                d = mix(-1.97760f, -1.27393f, t), e = mix(-4.32054f, -4.85967f, t);
+    return a / (1.0f + b * pow(x, c)) + d * x + e;
+}
+inline float bsdfSheenLambda(float cosTheta, float alphaG) {
+    const float x = abs(cosTheta);
+    return x < 0.5f ? exp(bsdfSheenL(x, alphaG)) : exp(2.0f * bsdfSheenL(0.5f, alphaG) - bsdfSheenL(1.0f - x, alphaG));
+}
+inline float bsdfSheenD(float NdotH, float alphaG) {
+    const float inv = 1.0f / alphaG, sin2h = max(1.0f - NdotH * NdotH, 0.0f);
+    return (2.0f + inv) * pow(sin2h, 0.5f * inv) / (2.0f * M_PI_F);
+}
+inline float bsdfSheenV(float NdotV, float NdotL, float alphaG) {
+    return 1.0f / ((1.0f + bsdfSheenLambda(NdotV, alphaG) + bsdfSheenLambda(NdotL, alphaG)) * (4.0f * NdotV * NdotL));
+}
+// The sheen lobe S D V (without the cosine and the incident radiance); NdotL > 0 (the caller masks).
+inline float3 bsdfSheenLobe(float3 color, float roughness, float NdotL, float NdotV, float NdotH) {
+    const float alphaG = bsdfSheenRoughness(roughness) * bsdfSheenRoughness(roughness);
+    return color * (bsdfSheenD(NdotH, alphaG) * bsdfSheenV(max(NdotV, 1e-4f), max(NdotL, 1e-4f), alphaG));
+}
+inline float bsdfSheenE(float roughness, float cosine, const constant float* table) {
+    return phosphor::sheenTableLookup(table, max(cosine, 1e-4f), bsdfSheenRoughness(roughness));
+}
+// 1 - max3(S) E(N.V): the scaling of every indirect term (environment, GI, transport weight).
+inline float bsdfSheenScaleView(float3 color, float roughness, float NdotV, const constant float* table) {
+    return 1.0f - bsdfMax3(color) * bsdfSheenE(roughness, NdotV, table);
+}
+// min(1 - max3(S) E(N.V), 1 - max3(S) E(N.L)): the scaling of an analytic light or the sun.
+inline float bsdfSheenScaleLight(float3 color, float roughness, float NdotV, float NdotL, const constant float* table) {
+    const float m = bsdfMax3(color);
+    return min(1.0f - m * bsdfSheenE(roughness, NdotV, table), 1.0f - m * bsdfSheenE(roughness, NdotL, table));
 }

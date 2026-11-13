@@ -39,7 +39,7 @@ inline float3 reflectionLobeWeight(GPUDISurface s, float3 wi, float pdf, Reflect
     const float nh = saturate(dot(n, h)), vh = saturate(dot(v, h)), a = bsdfAlpha(s.roughness);
     const float3 Fd = bsdfSpecFresnel(lobe.spec, vh);
     const float3 f = bsdfDGGX(nh, a) * bsdfVSmithGGXCorrelated(nv, nl, a) * bsdfSpecLobeColor(Fd, diVec(s.albedo), saturate(s.metallic), vh);
-    return f * nl / pdf;
+    return f * lobe.sheenScale * nl / pdf; // F15.1 ticket 10: the view-only sheen albedo scaling (1 without sheen)
 }
 // GGX half-vector proposal density of one lobe (normal n, alpha a) for the direction wi: D(n.h) n.h / (4 v.h), 0 outside the lobe's hemisphere.
 inline float reflectionLobePdf(float3 n, float3 v, float3 wi, float a) {
@@ -63,7 +63,7 @@ inline float3 reflectionCoatWeight(GPUDISurface s, float3 wi, ReflectionLobe lob
         const float3 h = normalize(v + wi);
         const float nh = saturate(dot(n, h)), vh = saturate(dot(v, h));
         const float3 Fd = bsdfSpecFresnel(lobe.spec, vh);
-        base = (1.0f - lobe.coatFactor * fc) * (bsdfDGGX(nh, ab) * bsdfVSmithGGXCorrelated(nv, nl, ab) *
+        base = (1.0f - lobe.coatFactor * fc) * lobe.sheenScale * (bsdfDGGX(nh, ab) * bsdfVSmithGGXCorrelated(nv, nl, ab) *
                                                 bsdfSpecLobeColor(Fd, diVec(s.albedo), saturate(s.metallic), vh)) * nl;
     }
     const float ncl = dot(nc, wi), ncv = max(dot(nc, v), 1e-4f);

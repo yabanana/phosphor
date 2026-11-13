@@ -36,15 +36,33 @@ struct ReflectionLobe {
     float coatFactor, coatRoughness;
     float3 coatNormal;
     float pCoat;    // probability of sampling the coat lobe
+    // F15.1 (ticket 10): KHR_materials_sheen.  The transport does NOT sample sheen (decision 06): the weight of the sampled base
+    // specular lobe carries the view-only albedo scaling sheenScale = 1 - max3(S) E(N.V), and the composite adds the sheen
+    // environment term S E L(N).  sheenScale is 1 for a pixel without sheen.
+    bool sheen;
+    float3 sheenColor;
+    float sheenRoughness, sheenAlbedo, sheenScale;
 };
 inline ReflectionLobe reflectionLoadLobe(uint flags, uint validFlag, const device GPULobeGuide* guides, uint index, GPUDISurface s) {
     ReflectionLobe l{};
-    if ((kMaterialFeatures & (MATERIAL_FEATURE_SPECULAR_IOR | MATERIAL_FEATURE_CLEARCOAT)) != 0u && (flags & validFlag) != 0u) {
+    l.sheenScale = 1.0f;
+    if ((kMaterialFeatures & LOBE_GUIDE_RESOLVED_FEATURES) != 0u && (flags & validFlag) != 0u) {
         const GPULobeGuide g = guides[index];
-        if ((g.features & (MATERIAL_FEATURE_SPECULAR_IOR | MATERIAL_FEATURE_CLEARCOAT)) != 0u) {
+        if ((g.features & LOBE_GUIDE_RESOLVED_FEATURES) != 0u) {
             const LobeParams u = unpackLobeGuide(g); // neutral ior 1.5 / specular 1 for a clear feature: f0 0.04, f90 1
             l.spec = bsdfSpecularParams(u.ior, u.specularFactor, float3(u.specularColor[0], u.specularColor[1], u.specularColor[2]));
             l.extended = true;
+            if ((kMaterialFeatures & MATERIAL_FEATURE_SHEEN) != 0u && (g.features & MATERIAL_FEATURE_SHEEN) != 0u) {
+                float3 n = diVec(s.shadingNormal), v = diVec(s.viewDirection);
+                if (s.valid && all(isfinite(n)) && all(isfinite(v)) && dot(n, n) > 0 && dot(v, v) > 0) {
+                    n = normalize(n); v = normalize(v);
+                    l.sheen = true;
+                    l.sheenColor = float3(u.sheenColor[0], u.sheenColor[1], u.sheenColor[2]);
+                    l.sheenRoughness = u.sheenRoughness;
+                    l.sheenAlbedo = bsdfSheenE(l.sheenRoughness, dot(n, v), phosphor::SheenTable);
+                    l.sheenScale = 1.0f - bsdfMax3(l.sheenColor) * l.sheenAlbedo;
+                }
+            }
             if ((kMaterialFeatures & MATERIAL_FEATURE_CLEARCOAT) != 0u && (g.features & MATERIAL_FEATURE_CLEARCOAT) != 0u) {
                 const float3 nc = float3(u.clearcoatNormal[0], u.clearcoatNormal[1], u.clearcoatNormal[2]);
                 float3 n = diVec(s.shadingNormal), v = diVec(s.viewDirection);

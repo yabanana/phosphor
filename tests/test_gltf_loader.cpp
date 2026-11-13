@@ -478,15 +478,15 @@ TEST_CASE("glTF loader: an escaping buffer URI fails the load and names the URI"
 
 TEST_CASE("glTF loader: a required extension whose feature is not rendered refuses the asset, an optional one loads") {
     auto model = nlohmann::json::parse(quadWithoutNormalsOrTangents(
-        R"({"extensions":{"KHR_materials_sheen":{"sheenRoughnessFactor":0.5}}})"));
-    model["extensionsUsed"] = {"KHR_materials_sheen"};
+        R"({"extensions":{"KHR_materials_anisotropy":{"anisotropyStrength":0.5}}})"));
+    model["extensionsUsed"] = {"KHR_materials_anisotropy"};
     SUBCASE("optional") {
         GpuScene scene;
-        CHECK(loadModelJson(model, scene, "phosphor_f15_optional_sheen.gltf"));
+        CHECK(loadModelJson(model, scene, "phosphor_f15_optional_anisotropy.gltf"));
     }
     SUBCASE("required") {
-        model["extensionsRequired"] = {"KHR_materials_sheen"};
-        const auto path = std::filesystem::temp_directory_path() / "phosphor_f15_required_sheen.gltf";
+        model["extensionsRequired"] = {"KHR_materials_anisotropy"};
+        const auto path = std::filesystem::temp_directory_path() / "phosphor_f15_required_anisotropy.gltf";
         { std::ofstream out(path); out << model; }
         GpuScene scene;
         NullTextureManager textures;
@@ -495,7 +495,7 @@ TEST_CASE("glTF loader: a required extension whose feature is not rendered refus
         GltfLoader loader(scene, textures, ecs);
         CHECK_FALSE(loader.loadFromFile(path.string()));
         std::filesystem::remove(path);
-        CHECK(loader.lastError().find("KHR_materials_sheen") != std::string::npos);
+        CHECK(loader.lastError().find("KHR_materials_anisotropy") != std::string::npos);
         CHECK(scene.getMeshCount() == 0);
     }
 }

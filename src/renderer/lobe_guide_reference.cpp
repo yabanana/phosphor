@@ -15,7 +15,7 @@ LobeGuideExpectation expectedLobeParams(const GPUMaterial& material, std::span<c
     // MATERIAL_FEATURES constant) and the features the resolve resolves.
     const u32 features = (material.flags >> MATERIAL_FEATURE_SHIFT) & featureUnion & LOBE_GUIDE_RESOLVED_FEATURES;
     r.params.features = features;
-    if (features & (MATERIAL_FEATURE_SPECULAR_IOR | MATERIAL_FEATURE_CLEARCOAT)) {
+    if (features & (MATERIAL_FEATURE_SPECULAR_IOR | MATERIAL_FEATURE_CLEARCOAT | MATERIAL_FEATURE_SHEEN)) {
         if (material.extensionIndex == MATERIAL_EXTENSION_INVALID || size_t(material.extensionIndex) >= extensions.size()) {
             if (extensionsValid) *extensionsValid = false;
             r.unverified = true;
@@ -40,6 +40,13 @@ LobeGuideExpectation expectedLobeParams(const GPUMaterial& material, std::span<c
                 r.unverified = true;
             r.coatNormalChecked = true;
             r.coatNormalIsShading = e0.clearcoatNormalTex == INVALID_TEXTURE_INDEX && material.normalTex == INVALID_TEXTURE_INDEX;
+        }
+        if (features & MATERIAL_FEATURE_SHEEN) {
+            // shadeSurface: sheenColor * tex.rgb, clamp(sheenRoughness * tex.a, 0.07, 1) (the half 1.0 fallback without a texture).
+            for (int c = 0; c < 3; ++c) r.params.sheenColor[c] = e0.sheenColor[c] * 1.0f;
+            const float rough = e0.sheenRoughness * 1.0f;
+            r.params.sheenRoughness = rough < 0.07f ? 0.07f : (rough > 1.0f ? 1.0f : rough);
+            if (e0.sheenColorTex != INVALID_TEXTURE_INDEX || e0.sheenRoughnessTex != INVALID_TEXTURE_INDEX) r.unverified = true;
         }
     }
     return r;

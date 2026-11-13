@@ -200,6 +200,31 @@ static float sunDiskCoat(float3 V, float3 L, float angularRadius, CoatParams coa
     return sum / float(count);
 }
 
+// F15.1 (ticket 10): KHR_materials_sheen.  The sheen layer sits between the material and the coat: f = S D V + f_material scaling
+// (bsdf.h).  `value` is the material term for one light, irradiance-normalised (f cos, without the radiance): the analytic lights
+// and the sun disk centre use the min form of the albedo scaling, the sheen lobe is point-evaluated (the lobe is wide against the sun).
+struct SheenParams {
+    float3 color;    // S
+    float roughness; // clamped [0.07, 1]
+};
+static float3 sheenLayerLight(float3 value, float3 N, float3 V, float3 L, SheenParams sheen, const constant float* table) {
+    const float NdotL = saturate(dot(N, L));
+    if (NdotL <= 0.0f) return float3(0.0);
+    const float3 H = normalize(V + L);
+    const float NdotV = max(dot(N, V), 1e-4f), NdotH = saturate(dot(N, H));
+    const float scale = bsdfSheenScaleLight(sheen.color, sheen.roughness, NdotV, NdotL, table);
+    return value * scale + bsdfSheenLobe(sheen.color, sheen.roughness, NdotL, NdotV, NdotH) * NdotL;
+}
+// The coat lobe alone for one light, irradiance-normalised: c F_c D Vis max(Nc.L, 0) (the same expression as evaluateLightCoat).
+static float coatLobeLight(float3 V, float3 L, CoatParams coat) {
+    const float ncl = saturate(dot(coat.normal, L));
+    if (!(ncl > 0.0f)) return 0.0f;
+    const float3 H = normalize(V + L);
+    const float ncv = max(dot(coat.normal, V), 1e-4f);
+    const float fc = bsdfCoatFresnel(abs(dot(coat.normal, V)));
+    return coat.factor * fc * bsdfCoatSpecular(ncl, ncv, saturate(dot(coat.normal, H)), bsdfAlpha(coat.roughness)) * ncl;
+}
+
 static float distanceAttenuation(float dist, float range) {
     // Inverse square with a smooth window to zero at `range`.
     const float r = dist / max(range, 1e-3);
@@ -272,12 +297,21 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     const bool coatOn = (kMaterialFeatures & MATERIAL_FEATURE_CLEARCOAT) != 0u &&
                         (m.flags & (MATERIAL_FEATURE_CLEARCOAT << MATERIAL_FEATURE_SHIFT)) != 0u;
     const bool useSpec = specExt || coatOn;
+    // F15.1 (ticket 10): KHR_materials_sheen, same gating.  A sheen-only material keeps the base dielectric path below.
+    const bool sheenOn = (kMaterialFeatures & MATERIAL_FEATURE_SHEEN) != 0u &&
+                         (m.flags & (MATERIAL_FEATURE_SHEEN << MATERIAL_FEATURE_SHIFT)) != 0u;
     GPUMaterialExt0 e0{};
-    if (useSpec) e0 = *reinterpret_cast<const device GPUMaterialExt0*>(frame.materialExtensions + m.extensionIndex);
+    if (useSpec || sheenOn) e0 = *reinterpret_cast<const device GPUMaterialExt0*>(frame.materialExtensions + m.extensionIndex);
     CoatParams coat{0.0f, 0.04f, float3(0.0f)};
     if (coatOn) {
         coat.factor = saturate(e0.clearcoatFactor * float(sampleOr(textures, e0.clearcoatFactorTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).r));
         coat.roughness = clamp(e0.clearcoatRoughness * float(sampleOr(textures, e0.clearcoatRoughnessTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).g), 0.04f, 1.0f);
+    }
+    SheenParams sheen{float3(0.0f), 0.07f};
+    if (sheenOn) {
+        sheen.color = float3(e0.sheenColor[0], e0.sheenColor[1], e0.sheenColor[2]) *
+                      float3(sampleOr(textures, e0.sheenColorTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).rgb);
+        sheen.roughness = bsdfSheenRoughness(e0.sheenRoughness * float(sampleOr(textures, e0.sheenRoughnessTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).a));
     }
     if (specExt) {
         const float specularWeight =
@@ -347,14 +381,23 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
                 const float3 Fd = bsdfSpecFresnel(spec, saturate(dot(V, normalize(V + L))));
                 const float3 diffuse = NdotL > 0.0f ? bsdfSpecDiffuse(Fd, metallic, baseColor.rgb) * NdotL : float3(0.0);
                 float3 sunSum = diffuse + sunDiskSpecularSpec(N, V, L, baseColor.rgb, metallic, roughness, sunAngularRadius, spec);
+                if (sheenOn) sunSum = sheenLayerLight(sunSum, N, V, L, sheen, frame.sheenTable);
                 if (coatOn) sunSum = sunSum * coatAttenuation(coat, V) + sunDiskCoat(V, L, sunAngularRadius, coat);
                 color += sunSum * lightColor * attenuation * visibility;
             } else {
                 const float3 Fd = bsdfDielectricFresnel(saturate(dot(V, normalize(V + L))));
                 const float3 diffuse = NdotL > 0.0f ? bsdfBaseDiffuse(Fd, metallic, baseColor.rgb) * NdotL : float3(0.0);
-                color += (diffuse + sunDiskSpecular(N, V, L, baseColor.rgb, metallic, roughness, sunAngularRadius)) *
-                         lightColor * attenuation * visibility;
+                float3 sunSum = diffuse + sunDiskSpecular(N, V, L, baseColor.rgb, metallic, roughness, sunAngularRadius);
+                if (sheenOn) sunSum = sheenLayerLight(sunSum, N, V, L, sheen, frame.sheenTable);
+                color += sunSum * lightColor * attenuation * visibility;
             }
+        } else if (sheenOn) {
+            // The material under the sheen (ior/specular when present), the sheen layer, then the coat above (decision 06).
+            float3 value = useSpec ? evaluateLightSpec(N, V, L, float3(1.0f), baseColor.rgb, metallic, roughness, spec)
+                                   : evaluateLight(N, V, L, float3(1.0f), baseColor.rgb, metallic, roughness);
+            value = sheenLayerLight(value, N, V, L, sheen, frame.sheenTable);
+            if (coatOn) value = value * coatAttenuation(coat, V) + coatLobeLight(V, L, coat);
+            color += value * lightColor * attenuation * visibility;
         } else if (coatOn)
             color += evaluateLightCoat(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, roughness, spec, coat) * visibility;
         else if (specExt)
@@ -392,11 +435,24 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         coatEnvironment = (physicalGI ? environment : hemisphere(coatDir)) *
                           (coat.factor * fc * bsdfCoatEnvAlbedo(coat.roughness, coatNV, frame.dfgTable));
     }
+    // F15.1 (ticket 10): the sheen layer scales every indirect material term by 1 - max3(S) E(N.V, r) and adds its own environment
+    // term S E L(N): L(N) is the GI irradiance / pi (useGI), the declared environment (physicalGI) or the legacy hemisphere at N.
+    // The term travels with the diffuse ambient (the composite adds it when the resolve strips the external diffuse); the coat
+    // attenuates it like the material.
+    float3 sheenEnvironment = float3(0.0);
+    if (sheenOn) {
+        const float E = bsdfSheenE(sheen.roughness, NdotV, frame.sheenTable);
+        const float scale = 1.0f - bsdfMax3(sheen.color) * E;
+        envDiffuse *= scale;
+        envSpecularWeight *= scale;
+        sheenEnvironment = (useGI ? indirectIrradiance / M_PI_F : (physicalGI ? environment : hemisphere(N))) * sheen.color * E;
+    }
     const float3 ambientDiffuse = (physicalGI ? environment : hemisphere(N)) * baseColor.rgb * (1.0 - metallic) * envDiffuse;
     const float3 ambientSpecular = (physicalGI ? environment : hemisphere(specularDir)) * envSpecularWeight + coatEnvironment;
     // F13 assembles these positive signals once outside this residual base.
     // Never subtract full-float lighting from a quantized summed color later.
     if(!externalDiffuse)color += (useGI ? indirectIrradiance * baseColor.rgb * (1.0f - metallic) * envDiffuse / M_PI_F * (physicalGI?1.0f:occlusion) : ambientDiffuse * occlusion);
+    if(!externalDiffuse && sheenOn)color += sheenEnvironment * coatAtt * (useGI ? (physicalGI?1.0f:occlusion) : occlusion);
     if(!omitSpecularAmbient)color += ambientSpecular * occlusion;
 
     // The emission under a coat is attenuated like the material (the DI emitter share stays uncoated: declared).
@@ -410,6 +466,7 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     out.diffuseAlbedo = baseColor.rgb * (1.0f - metallic) * envDiffuse;
     out.specularAlbedo = useSpec ? mix(bsdfSpecFresnel(spec, NdotV), bsdfFSchlick(baseColor.rgb, NdotV), metallic)
                                  : bsdfFSchlick(f0, NdotV);
+    if (sheenOn) out.specularAlbedo *= bsdfSheenScaleView(sheen.color, sheen.roughness, NdotV, frame.sheenTable);
     if (coatOn) out.specularAlbedo = out.specularAlbedo * coatAtt + coat.factor * bsdfCoatFresnel(abs(dot(coat.normal, V)));
     out.roughness = roughness;
     out.metallic = metallic;
@@ -425,6 +482,12 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         out.lobes.specularColor[0] = lobeSpecularColor.x;
         out.lobes.specularColor[1] = lobeSpecularColor.y;
         out.lobes.specularColor[2] = lobeSpecularColor.z;
+    }
+    if (sheenOn) {
+        out.lobes.sheenColor[0] = sheen.color.x;
+        out.lobes.sheenColor[1] = sheen.color.y;
+        out.lobes.sheenColor[2] = sheen.color.z;
+        out.lobes.sheenRoughness = sheen.roughness;
     }
     if (coatOn) {
         out.lobes.clearcoatFactor = coat.factor;

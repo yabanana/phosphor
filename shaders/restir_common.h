@@ -161,13 +161,17 @@ struct DILobe {
     bool coat;
     float coatFactor, coatRoughness;
     float3 coatNormal;
+    // F15.1 (ticket 10): KHR_materials_sheen (roughness already clamped to [0.07, 1] by the producer).
+    bool sheen;
+    float3 sheenColor;
+    float sheenRoughness;
 };
 inline DILobe DI_FN(diLoadLobe)(constant GPUDIParams& p, const device GPULobeGuide* guides, uint index) {
     DILobe l{};
 #ifdef PHOSPHOR_DI_LOBE
-    if ((kMaterialFeatures & (MATERIAL_FEATURE_SPECULAR_IOR | MATERIAL_FEATURE_CLEARCOAT)) != 0u && (p.flags & DI_LOBE_GUIDE_VALID) != 0u) {
+    if ((kMaterialFeatures & LOBE_GUIDE_RESOLVED_FEATURES) != 0u && (p.flags & DI_LOBE_GUIDE_VALID) != 0u) {
         const GPULobeGuide g = guides[index];
-        if ((g.features & (MATERIAL_FEATURE_SPECULAR_IOR | MATERIAL_FEATURE_CLEARCOAT)) != 0u) {
+        if ((g.features & LOBE_GUIDE_RESOLVED_FEATURES) != 0u) {
             const LobeParams u = unpackLobeGuide(g); // neutral values (ior 1.5, specular 1) for a clear feature
             l.ior = u.ior; l.specularFactor = u.specularFactor;
             l.specularColor = float3(u.specularColor[0], u.specularColor[1], u.specularColor[2]);
@@ -176,6 +180,11 @@ inline DILobe DI_FN(diLoadLobe)(constant GPUDIParams& p, const device GPULobeGui
                 l.coat = true;
                 l.coatFactor = u.clearcoatFactor; l.coatRoughness = u.clearcoatRoughness;
                 l.coatNormal = float3(u.clearcoatNormal[0], u.clearcoatNormal[1], u.clearcoatNormal[2]);
+            }
+            if ((kMaterialFeatures & MATERIAL_FEATURE_SHEEN) != 0u && (g.features & MATERIAL_FEATURE_SHEEN) != 0u) {
+                l.sheen = true;
+                l.sheenColor = float3(u.sheenColor[0], u.sheenColor[1], u.sheenColor[2]);
+                l.sheenRoughness = u.sheenRoughness;
             }
         }
     }
@@ -186,7 +195,7 @@ inline DILobe DI_FN(diLoadLobe)(constant GPUDIParams& p, const device GPULobeGui
 // F15.1 (ticket 09): `coatWeight` is the emitter share of the coat lobe (diEmitterCoatWeight; 1 for punctual lights).
 inline float3 DI_FN(diBRDFLobe)(GPUDISurface surface, DISample s, float specularWeight, DILobe lobe, float coatWeight = 1.0f) {
 #ifdef PHOSPHOR_DI_LOBE
-    if ((kMaterialFeatures & (MATERIAL_FEATURE_SPECULAR_IOR | MATERIAL_FEATURE_CLEARCOAT)) != 0u && lobe.extended) {
+    if ((kMaterialFeatures & LOBE_GUIDE_RESOLVED_FEATURES) != 0u && lobe.extended) {
         if (!surface.valid || !s.valid) return float3(0);
         float3 n = diVec(surface.shadingNormal), v = diVec(surface.viewDirection);
         if (!all(isfinite(n)) || !all(isfinite(v)) || !(dot(n, n) > 0 && dot(v, v) > 0)) return float3(0);
@@ -202,6 +211,13 @@ inline float3 DI_FN(diBRDFLobe)(GPUDISurface surface, DISample s, float specular
             const BsdfBaseLobes lobes = bsdfSpecEval(bsdfSpecularParams(lobe.ior, lobe.specularFactor, lobe.specularColor),
                                                      nl, nv, nh, vh, albedo, metallic, bsdfAlpha(surface.roughness));
             result = (lobes.diffuse + specularWeight * lobes.specular) * incident * nl;
+            // F15.1 (ticket 10): the sheen layer between the material and the coat.  The transport does not sample sheen: the
+            // emitter share of the sheen lobe is 1 (DI owns it), the material keeps its own emitter weights; the albedo
+            // scaling is the min form of the notes.
+            if ((kMaterialFeatures & MATERIAL_FEATURE_SHEEN) != 0u && lobe.sheen) {
+                const float scale = bsdfSheenScaleLight(lobe.sheenColor, lobe.sheenRoughness, nv, nl, phosphor::SheenTable);
+                result = result * scale + bsdfSheenLobe(lobe.sheenColor, lobe.sheenRoughness, nl, nv, nh) * incident * nl;
+            }
         }
         if ((kMaterialFeatures & MATERIAL_FEATURE_CLEARCOAT) != 0u && lobe.coat) {
             float3 nc = lobe.coatNormal;

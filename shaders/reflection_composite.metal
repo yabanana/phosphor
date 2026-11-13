@@ -113,19 +113,32 @@ kernel void REFL_KERNEL(reflection_composite)(constant GPUReflectionComposeParam
             const float envNV=max(dot(normalize(diVec(s.shadingNormal)),normalize(diVec(s.viewDirection))),1e-4f);
             float envDiffuse=bsdfEnvDiffuseWeight(s.roughness,envNV,phosphor::DfgTable);
 #ifdef PHOSPHOR_REFL_LOBE
+            float3 sheenTerm=float3(0); // F15.1 (ticket 10): S E (coat attenuation), the environment term of the sheen layer
             // F15.1 (ticket 08): extended pixels receive 1 - max(E_dielectric) of their own specular lobe.
             {const auto lobe=REFL_LOBE(p.flags,REFLECT_COMPOSE_LOBE_GUIDE_VALID,pixel.y*p.width+pixel.x,s);
                 if(lobe.extended)envDiffuse=bsdfSpecEnv(lobe.spec,diVec(s.albedo),saturate(s.metallic),s.roughness,envNV,phosphor::DfgTable).diffuseWeight;
                 // F15.1 (ticket 09): the diffuse under a coat receives 1 - c F_c(|V.Nc|).
-                if(lobe.coat)envDiffuse*=1.0f-lobe.coatFactor*bsdfCoatFresnel(abs(dot(lobe.coatNormal,normalize(diVec(s.viewDirection)))));}
+                float coatAtt=1.0f;
+                if(lobe.coat){coatAtt=1.0f-lobe.coatFactor*bsdfCoatFresnel(abs(dot(lobe.coatNormal,normalize(diVec(s.viewDirection)))));envDiffuse*=coatAtt;}
+                // F15.1 (ticket 10): the diffuse under a sheen layer receives 1 - max3(S) E(N.V) (view-only form); the sheen term
+                // S E L(N) is added below next to the diffuse (GI irradiance / pi, or the declared environment).
+                if(lobe.sheen){envDiffuse*=lobe.sheenScale;sheenTerm=lobe.sheenColor*(lobe.sheenAlbedo*coatAtt);}}
 #endif
             if(p.flags&REFLECT_COMPOSE_DI)color+=diSelected.read(pixel).rgb;
             if(p.flags&REFLECT_COMPOSE_GI)color+=giSelected.read(pixel).rgb*diVec(s.albedo)*(1-s.metallic)*envDiffuse/M_PI_F;
+#ifdef PHOSPHOR_REFL_LOBE
+            if((p.flags&REFLECT_COMPOSE_GI)&&any(sheenTerm>0))color+=giSelected.read(pixel).rgb*sheenTerm/M_PI_F;
+#endif
             if(p.flags&REFLECT_COMPOSE_SPEC)color+=specular.read(pixel).rgb;
             if(!(p.flags&REFLECT_COMPOSE_GI)){const float3 n=normalize(diVec(s.shadingNormal));
                 // Declared isotropic environment (Lo = albedo * L), not the legacy gradient.
                 (void)n;const float3 ambient=float3(p.environment[0],p.environment[1],p.environment[2])*diVec(s.albedo)*(1-s.metallic)*envDiffuse*as_type<float>(s.pad[0]);
-                color+=ambient*((p.flags&REFLECT_COMPOSE_AO)?saturate(ao.read(pixel).x):1.0f);}}
+                const float aoFactor=(p.flags&REFLECT_COMPOSE_AO)?saturate(ao.read(pixel).x):1.0f;
+                color+=ambient*aoFactor;
+#ifdef PHOSPHOR_REFL_LOBE
+                if(any(sheenTerm>0))color+=float3(p.environment[0],p.environment[1],p.environment[2])*sheenTerm*as_type<float>(s.pad[0])*aoFactor;
+#endif
+            }}
     }
     if(!all(isfinite(color))||any(color<-.00001f)||(p.pad[0]&&any(color>65504.0f))){atomic_fetch_add_explicit(counts+4,1u,memory_order_relaxed);color=0;}
     output.write(float4(max(color,0.0f),1),pixel);

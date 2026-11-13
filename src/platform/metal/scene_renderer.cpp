@@ -1,5 +1,6 @@
 #include "platform/metal/scene_renderer.h"
 #include "renderer/dfg_table.h"
+#include "renderer/sheen_table.h"
 #include "core/log.h"
 #include "core/profile.h"
 #include "pipeline/forward_variants.h"
@@ -112,6 +113,9 @@ SceneRenderer::SceneRenderer(MetalContext& context, PipelineCache& pipelines, u3
     // F15: the DFG table as a buffer; written once, never modified (no frame upload).
     dfgTable_ = context_.memory().newBuffer(sizeof(DfgTable), MTL::ResourceStorageModeShared, MemoryCategory::Scene, "DFG table");
     std::memcpy(dfgTable_->contents(), DfgTable, sizeof(DfgTable));
+    // F15.1 (ticket 10): the sheen albedo table, same rules.
+    sheenTable_ = context_.memory().newBuffer(sizeof(SheenTable), MTL::ResourceStorageModeShared, MemoryCategory::Scene, "Sheen table");
+    std::memcpy(sheenTable_->contents(), SheenTable, sizeof(SheenTable));
 }
 
 SceneRenderer::~SceneRenderer() {
@@ -121,6 +125,7 @@ SceneRenderer::~SceneRenderer() {
     depthState_->release();
     context_.memory().release(drawGateOpen_, MemoryCategory::Scene);
     context_.memory().release(dfgTable_, MemoryCategory::Scene);
+    context_.memory().release(sheenTable_, MemoryCategory::Scene);
 }
 
 void SceneRenderer::requestAllVariants() {

@@ -89,9 +89,9 @@ TEST_CASE("lobe guide reference: resolved parameters of ior/specular") {
     // A base material, a union without the bit and a feature the resolve does not resolve yet: features 0.
     CHECK(expectedLobeParams(GPUMaterial{}, ext, MATERIAL_FEATURE_SPECULAR_IOR).params.features == 0);
     CHECK(expectedLobeParams(extendedMaterial(0), ext, 0).params.features == 0);
-    GPUMaterial sheen{};
-    sheen.flags = MATERIAL_FEATURE_SHEEN << MATERIAL_FEATURE_SHIFT;
-    CHECK(expectedLobeParams(sheen, ext, MATERIAL_FEATURES_ALL).params.features == 0);
+    GPUMaterial anisotropic{};
+    anisotropic.flags = MATERIAL_FEATURE_ANISOTROPY << MATERIAL_FEATURE_SHIFT;
+    CHECK(expectedLobeParams(anisotropic, ext, MATERIAL_FEATURES_ALL).params.features == 0);
     // Textures make the parameters unverifiable on the CPU.
     const GPUMaterialExtRecord textured[1] = {record0(1.5f, 1.0f, 1.0f, 1.0f, 1.0f, INVALID_TEXTURE_INDEX, 5u)};
     CHECK(expectedLobeParams(extendedMaterial(0), textured, MATERIAL_FEATURE_SPECULAR_IOR).unverified);
@@ -243,4 +243,47 @@ TEST_CASE("lobe guide reference: the coat normal is compared by angle to the sha
     write(0.6f, 0.0f, 0.8f);
     f.guides[1].specularFactorCoat ^= 1u << 16;
     CHECK_FALSE(checkLobeGuide(f.input).pass());
+}
+
+// F15.1 (ticket 10): the sheen fields (colour as authored, roughness clamped to [0.07, 1]).
+namespace {
+GPUMaterialExtRecord sheenRecord(float r, float g, float b, float roughness, u32 colorTex = INVALID_TEXTURE_INDEX) {
+    GPUMaterialExt0 e{};
+    e.ior = 1.5f; e.specularFactor = 1.0f; e.specularColor[0] = e.specularColor[1] = e.specularColor[2] = 1.0f;
+    e.specularTex = e.specularColorTex = INVALID_TEXTURE_INDEX;
+    e.clearcoatFactorTex = e.clearcoatRoughnessTex = e.clearcoatNormalTex = INVALID_TEXTURE_INDEX;
+    e.sheenColor[0] = r; e.sheenColor[1] = g; e.sheenColor[2] = b; e.sheenRoughness = roughness;
+    e.sheenColorTex = colorTex; e.sheenRoughnessTex = INVALID_TEXTURE_INDEX;
+    GPUMaterialExtRecord rec{};
+    std::memcpy(&rec, &e, sizeof(e));
+    return rec;
+}
+GPUMaterial sheenMaterial(u32 extensionIndex) {
+    GPUMaterial m{};
+    m.flags = MATERIAL_FEATURE_SHEEN << MATERIAL_FEATURE_SHIFT;
+    m.extensionIndex = extensionIndex;
+    return m;
+}
+} // namespace
+
+TEST_CASE("lobe guide reference: resolved parameters of sheen (roughness clamped to [0.07, 1])") {
+    const GPUMaterialExtRecord ext[3] = {sheenRecord(1.0f, 0.5f, 0.25f, 0.3f), sheenRecord(0.5f, 0.5f, 0.5f, 0.0f),
+                                         sheenRecord(0.5f, 0.5f, 0.5f, 0.4f, 5u)};
+    auto e = expectedLobeParams(sheenMaterial(0), ext, MATERIAL_FEATURE_SHEEN);
+    CHECK(e.params.features == MATERIAL_FEATURE_SHEEN);
+    CHECK(e.params.sheenColor[0] == 1.0f);
+    CHECK(e.params.sheenColor[1] == 0.5f);
+    CHECK(e.params.sheenColor[2] == 0.25f);
+    CHECK(e.params.sheenRoughness == 0.3f);
+    CHECK_FALSE(e.unverified);
+    e = expectedLobeParams(sheenMaterial(1), ext, MATERIAL_FEATURE_SHEEN);
+    CHECK(e.params.sheenRoughness == 0.07f);
+    CHECK(expectedLobeParams(sheenMaterial(2), ext, MATERIAL_FEATURE_SHEEN).unverified); // colour texture
+    // A scene union without the bit resolves nothing.
+    CHECK(expectedLobeParams(sheenMaterial(0), ext, MATERIAL_FEATURE_SPECULAR_IOR).params.features == 0);
+    // The packed record round-trips the half-precision sheen fields.
+    const GPULobeGuide g = packLobeGuide(expectedLobeParams(sheenMaterial(0), ext, MATERIAL_FEATURE_SHEEN).params);
+    const LobeParams u = unpackLobeGuide(g);
+    CHECK(u.sheenColor[1] == 0.5f);
+    CHECK(u.sheenRoughness == doctest::Approx(0.3f).epsilon(1e-3));
 }

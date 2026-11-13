@@ -1614,6 +1614,7 @@ bool Engine::frame(float dt) {
     constants.exposure = effectiveExposure;
     constants.frameIndex = static_cast<u32>(frame.index);
     constants.dfgTable = renderer_->dfgTableAddress(); // F15 (FrameConstants::dfgTable)
+    constants.sheenTable = renderer_->sheenTableAddress(); // F15.1 ticket 10 (FrameConstants::sheenTable)
 
 
     // Capture the last frame of a run (or the first frame when interactive).

@@ -136,6 +136,8 @@ public:
     [[nodiscard]] MTL::GPUAddress textureTableAddress() const { return textureTable_; }
     /// F15: the DFG table as a buffer (FrameConstants::dfgTable).
     [[nodiscard]] MTL::GPUAddress dfgTableAddress() const { return dfgTable_->gpuAddress(); }
+    /// F15.1 (ticket 10): the sheen albedo table as a buffer (FrameConstants::sheenTable).
+    [[nodiscard]] MTL::GPUAddress sheenTableAddress() const { return sheenTable_->gpuAddress(); }
     /// F15.1: the material extension buffer (FrameConstants::materialExtensions); 0 without extended materials.
     [[nodiscard]] MTL::GPUAddress materialExtensionsAddress() const {
         return buffers_.extensions() ? buffers_.extensions()->gpuAddress() : 0;
@@ -213,6 +215,7 @@ private:
     // F6: draw gate (setDrawGate), constant-1 default.
     MTL::Buffer*    drawGateOpen_ = nullptr;
     MTL::Buffer*    dfgTable_ = nullptr; // F15: shared, written once at creation
+    MTL::Buffer*    sheenTable_ = nullptr; // F15.1 (ticket 10): shared, written once at creation
     MTL::GPUAddress drawGate_     = 0;
     MTL::GPUAddress frameConstants_ = 0;
     MTL::GPUAddress lightsAddress_  = 0;

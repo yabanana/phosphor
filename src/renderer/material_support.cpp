@@ -53,6 +53,16 @@ const MaterialSupportTable& currentSupportTable() {
         FeatureSupportEntry& clearcoat = t.features[static_cast<u32>(MaterialFeature::Clearcoat)];
         clearcoat.level                = SupportLevel::Approximated;
         clearcoat.approximation        = "secondary_rt_hits_ignore_coat;di_emitters_uncoated";
+        // F15.1 (ticket 10): sheen shades every primary light path: resolve/forward (Charlie D and V on analytic lights and the
+        // sun, the sun lobe point-evaluated at the disk centre; base and environment scaled by the albedo scaling from the
+        // sheen table, the exact min form for lights, the view-only form for the environment), ReSTIR and clustered DI
+        // (target and shading), the transport weight and the composite (the sheen environment term S E L(N) lives in the
+        // composition: GI irradiance / pi, the declared environment without GI).  Declared approximations (decision 06): the
+        // transport does not sample the lobe, captured probes do not light the sheen term (the declared environment does),
+        // secondary RT hits ignore sheen, and the Charlie visibility albedo is clamped to 1 at grazing views of narrow lobes.
+        FeatureSupportEntry& sheen = t.features[static_cast<u32>(MaterialFeature::Sheen)];
+        sheen.level                = SupportLevel::Approximated;
+        sheen.approximation        = "lobe_not_sampled_environment_term_in_composition;sun_disk_point_evaluated;secondary_rt_hits_ignore_sheen";
         return t;
     }();
     return table;
