@@ -42,7 +42,15 @@ struct MaterialScenarioSpec {
     std::vector<glm::vec3> specularColor;  // per row, may exceed 1
     // F15.1 (ticket 07): local point lights (DI lights with --lighting restir|clustered, resolve lights with legacy).
     std::vector<MaterialPointLight> pointLights;
+    // F15.3 (ticket 09) clearcoat grids: KHR_materials_clearcoat factor per row, coat roughness per column
+    // (both empty = no coat).  `baseIor` (optional, per row) puts a KHR_materials_ior block under the coat of
+    // that row, so the "coat F0 from the material ior" control has a sphere that discriminates it.  A row with
+    // factor 0 and no ior carries no extension (the neutral material).
+    std::vector<float> clearcoatFactor;
+    std::vector<float> clearcoatRoughness;
+    std::vector<float> baseIor;
     [[nodiscard]] bool hasSpecularGrid() const { return !ior.empty(); }
+    [[nodiscard]] bool hasClearcoatGrid() const { return !clearcoatFactor.empty(); }
 };
 
 class MaterialValidation final : public TestBench {

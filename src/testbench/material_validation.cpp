@@ -14,10 +14,12 @@
 namespace phosphor {
 namespace {
 // The names are mirrored by tools/f15_check.py SCENARIOS (tests/test_material_validation.cpp compares both).
-constexpr std::array<std::string_view, 12> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
+constexpr std::array<std::string_view, 17> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
                                                       "furnace-base",   "furnace-resolve",     "roughness-extremes",
                                                       "roughness-extremes-sun", "specular-grid-sun",
-                                                      "specular-grid-env-resolve", "specular-grid-point", "specular-grid-env", "furnace-specular"};
+                                                      "specular-grid-env-resolve", "specular-grid-point", "specular-grid-env", "furnace-specular",
+                                                      "clearcoat-grid-sun", "clearcoat-grid-env-resolve", "clearcoat-grid-env",
+                                                      "clearcoat-grid-point", "furnace-clearcoat"};
 constexpr float pi = 3.14159265358979323846f;
 
 glm::quat orientLight(glm::vec3 towardLight) {
@@ -60,6 +62,20 @@ const std::vector<MaterialScenarioSpec>& specs() {
     static const glm::vec3 gridCentre(0.0f, 2.0f, 0.0f);
     static const MaterialPointLight backLight{gridCentre + 9.0f * glm::normalize(glm::vec3(-0.65f, 0.55f, -0.52f)),
                                               250.0f, 100.0f};
+    // F15.3 (ticket 09): KHR_materials_clearcoat on texture-free spheres.  Rows are the coat factor (0 = no coat, the
+    // neutral material; 0.25, 0.5, 1), then coat 1 over a base of ior 2.4 (a different base F0 than the coat's fixed
+    // 0.04: the Sample Renderer deviation "coat F0 from the material ior" is only visible there), then a metal under a
+    // full coat.  Columns are the coat roughness: 0 and 0.05 (alpha 0.002 and 0.0025) and 0.15 (alpha 0.0225) exercise the
+    // sun disk's narrow-lobe quadrature, 0.4 and 1.0 are wide.  The base is dielectric copper at roughness 0.6: a rough
+    // base under a smooth coat, so the coat reflection is the sharp feature the denoiser must keep.
+    static const std::vector<float> coatRoughness{0.0f, 0.05f, 0.15f, 0.4f, 1.0f};
+    static const std::vector<float> coatFactor{0.0f, 0.25f, 0.5f, 1.0f, 1.0f, 1.0f};
+    static const std::vector<float> coatBaseIor{0.0f, 0.0f, 0.0f, 0.0f, 2.4f, 0.0f}; // 0 = no ior block in that row
+    static const std::vector<float> coatBaseRoughness(5, 0.6f);
+    static const std::vector<float> coatMetallic{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+    static const glm::vec3 coatGridCentre(0.0f, 2.5f, 0.0f);
+    static const MaterialPointLight coatBackLight{coatGridCentre + 9.0f * glm::normalize(glm::vec3(-0.65f, 0.55f, -0.52f)),
+                                                  250.0f, 100.0f};
     static const std::vector<MaterialScenarioSpec> all{
         {"base-grid-sun", roughness, metallic, copper, true, 3.0f, towardSun, 0.0f},
         {"base-grid-env", roughness, metallic, copper, false, 0.0f, towardSun, 0.5f},
@@ -94,6 +110,22 @@ const std::vector<MaterialScenarioSpec>& specs() {
         // radiance 1 (the runner also captures it without the transport, deterministic resolve terms).
         {"furnace-specular", specRoughness, specMetallic, glm::vec3(1.0f), false, 0.0f, towardSun, 1.0f, specIor,
          specFactor, specColor},
+        // F15.3 (ticket 09) clearcoat grids.  Sun only: the direct gate (coat lobe in the sun-disk quadrature).
+        {"clearcoat-grid-sun", coatBaseRoughness, coatMetallic, copper, true, 3.0f, towardSun, 0.0f, {}, {}, {}, {},
+         coatFactor, coatRoughness, coatBaseIor},
+        // Environment only, deterministic resolve (--reflections off --lighting-denoise custom): the declared coat term.
+        {"clearcoat-grid-env-resolve", coatBaseRoughness, coatMetallic, copper, false, 0.0f, towardSun, 0.5f, {}, {}, {},
+         {}, coatFactor, coatRoughness, coatBaseIor},
+        // The same scene with the specular transport on: the coat term in the environment, the coat lobe in the transport.
+        {"clearcoat-grid-env", coatBaseRoughness, coatMetallic, copper, false, 0.0f, towardSun, 0.5f, {}, {}, {}, {},
+         coatFactor, coatRoughness, coatBaseIor},
+        // One point light only (no sun, environment 0), side-lit from behind like specular-grid-point.
+        {"clearcoat-grid-point", coatBaseRoughness, coatMetallic, copper, false, 0.0f, towardSun, 0.0f, {}, {}, {},
+         {coatBackLight}, coatFactor, coatRoughness, coatBaseIor},
+        // Furnace over coated materials: albedo 1 under a uniform environment of radiance 1 (the runner also captures it
+        // without the transport).
+        {"furnace-clearcoat", coatBaseRoughness, coatMetallic, glm::vec3(1.0f), false, 0.0f, towardSun, 1.0f, {}, {}, {},
+         {}, coatFactor, coatRoughness, coatBaseIor},
     };
     return all;
 }
@@ -154,6 +186,20 @@ void MaterialValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& textur
                 const glm::vec3 c = s.specularColor[row];
                 description->specular->specularColor = {c.x, c.y, c.z};
                 material.extension = std::move(description);
+            }
+            if (s.hasClearcoatGrid()) {
+                const bool hasIor = !s.baseIor.empty() && s.baseIor[row] > 0.0f;
+                if (s.clearcoatFactor[row] > 0.0f || hasIor) {
+                    auto description = std::make_shared<MaterialDescription>();
+                    description->clearcoat.emplace();
+                    description->clearcoat->factor    = s.clearcoatFactor[row];
+                    description->clearcoat->roughness = s.clearcoatRoughness[column];
+                    if (hasIor) {
+                        description->specular.emplace();
+                        description->specular->ior = s.baseIor[row];
+                    }
+                    material.extension = std::move(description);
+                }
             }
             material.baseColorFactor = glm::vec4(s.baseColor, 1.0f);
             material.metallicFactor = s.metallic[row];

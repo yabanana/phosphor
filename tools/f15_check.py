@@ -35,6 +35,14 @@ reference ray casting):
   reference shadow rays); DI reads the lobe guide (ticket 07), so all three gate like a direct grid.  A scenario
   with a "pending" key would be asserted to FAIL until its ticket lands (`--expect green` then requires that
   failure); none is pending now.
+- Clearcoat (F15.3, ticket 09): clearcoat-grid-sun / -env-resolve / -env / -point (legacy, @restir, @clustered) and
+  furnace-clearcoat (+ @resolve) against the independent KHR_materials_clearcoat model of tools/f15_reference.py.
+  Their engine side lands with ticket 09, so every gate the current engine can fail is "pending": it is asserted
+  to FAIL in every mode and the engine image must PASS that gate against the control that models today's engine
+  (`pending_matches`, coat-ignored or its declared twin); `--expect green` requires both.  The furnace bound is an
+  upper bound that the coat-less engine satisfies, so the furnace gates stay asserted green (only the declared gate
+  of furnace-clearcoat@resolve is pending).  Negative controls (each must fail its gate): coat ignored, coat F0
+  from the material ior (the Sample Renderer deviation), coat Fresnel at V.H, base not scaled by 1 - c F_c.
 - declared (base-grid-env-resolve; also furnace-resolve next to its furnace
   gate): the engine image against the independent declared-environment model of
   tools/f15_reference.py (DFG table, ADR-0006): per sphere mean relative error
@@ -183,6 +191,55 @@ SCENARIOS = {
                                  "declared": ["declared-karis-fit", "declared-extension-diffuse-base"],
                                  "terms": "constant environment radiance 1, albedo 1, no sun, deterministic resolve "
                                           "terms on the ior x specular grid"},
+    # F15.3 (ticket 09): KHR_materials_clearcoat.  Every gate that the engine can fail today is "pending": the engine
+    # ignores the coat until ticket 09, so the gate must FAIL and the engine image must PASS the same gate against
+    # the control that models today's engine ("pending_matches": coat-ignored, or its declared twin).  The coat grid
+    # rows are coat factor {0, 0.25, 0.5, 1}, coat 1 over a base of ior 2.4 (the only row where "coat F0 from the
+    # material ior" differs) and a metal under a full coat; the columns are coat roughness {0, 0.05, 0.15, 0.4, 1}
+    # over a rough dielectric base (roughness 0.6).  Direct grids group their rows by (metallic, ior, coat factor).
+    "clearcoat-grid-sun": {"kind": "direct", "pending": "ticket 09", "pending_matches": "coat-ignored",
+                           "controls": ["coat-ignored", "coat-f0-from-ior", "coat-fresnel-vh", "coat-base-unattenuated"],
+                           "terms": "sun disk only (environment 0, no shadows, no GI) on the coat factor x coat roughness grid"},
+    "clearcoat-grid-env-resolve": {"kind": "declared", "pending": "ticket 09", "pending_matches": "declared-coat-ignored",
+                                   "reflections": "off",
+                                   "controls": ["declared-coat-ignored", "declared-coat-f0-from-ior",
+                                                "declared-coat-base-unattenuated"],
+                                   "terms": "constant environment only (radiance 0.5, no sun) on the coat grid, deterministic "
+                                            "resolve terms (--reflections off --lighting-denoise custom)"},
+    "clearcoat-grid-env": {"kind": "environment", "pending": "ticket 09", "pending_matches": "coat-ignored",
+                           "controls": ["coat-ignored", "coat-f0-from-ior", "coat-base-unattenuated"],
+                           "terms": "constant environment only (radiance 0.5, no sun), SSR specular transport, on the coat grid"},
+    "clearcoat-grid-point": {"kind": "direct", "pending": "ticket 09", "pending_matches": "coat-ignored",
+                             "lighting": "legacy", "visibility": "none",
+                             "controls": ["coat-ignored", "coat-f0-from-ior", "coat-fresnel-vh", "coat-base-unattenuated"],
+                             "terms": "one point light only (no sun, environment 0, no GI), resolve local lights "
+                                      "(--lighting legacy), on the coat grid"},
+    "clearcoat-grid-point@restir": {"kind": "direct", "pending": "ticket 09", "pending_matches": "coat-ignored",
+                                    "lighting": "restir", "visibility": "rays", "denoise": "off", "terminator_band": 2,
+                                    "controls": ["coat-ignored", "coat-f0-from-ior", "coat-fresnel-vh",
+                                                 "coat-base-unattenuated"],
+                                    "terms": "one point light only, ReSTIR DI with RT visibility (--lighting restir --rt on), "
+                                             "unfiltered (--lighting-denoise off), on the coat grid"},
+    "clearcoat-grid-point@clustered": {"kind": "direct", "pending": "ticket 09", "pending_matches": "coat-ignored",
+                                       "lighting": "clustered", "visibility": "rays", "denoise": "off", "terminator_band": 2,
+                                       "controls": ["coat-ignored", "coat-f0-from-ior", "coat-fresnel-vh",
+                                                    "coat-base-unattenuated"],
+                                       "terms": "one point light only, clustered DI with RT visibility (--lighting clustered "
+                                                "--rt on), unfiltered (--lighting-denoise off), on the coat grid"},
+    # Furnace over coated materials (albedo 1, environment 1).  The furnace bound is an UPPER bound that today's engine
+    # (no coat) satisfies trivially, so the engine-pixel gates are asserted green in every mode: they guard the
+    # implementation against energy gain (the unattenuated-base control must fail them).  The declared-model gate of
+    # the deterministic resolve is the one that is red today ("pending_gate": "declared"): a coat redistributes
+    # energy, the declared coat model differs from the uncoated pixels by more than the 0.5 % mean bound.
+    "furnace-clearcoat": {"kind": "furnace-transport", "always_green": True, "controls": ["coat-base-unattenuated"],
+                          "terms": "constant environment radiance 1, albedo 1, no sun, stochastic specular transport on the "
+                                   "coat grid"},
+    "furnace-clearcoat@resolve": {"kind": "furnace", "always_green": True, "reflections": "off",
+                                  "pending": "ticket 09", "pending_gate": "declared",
+                                  "pending_matches": "declared-coat-ignored", "controls": ["coat-base-unattenuated"],
+                                  "declared": ["declared-coat-ignored", "declared-coat-base-unattenuated"],
+                                  "terms": "constant environment radiance 1, albedo 1, no sun, deterministic resolve terms "
+                                           "on the coat grid"},
     "specular-grid-point@clustered": {"kind": "direct", "lighting": "clustered", "visibility": "rays", "denoise": "off",
                                       "terminator_band": 2,
                                       "controls": ["specular-ignored", "f90-one", "specular-weight-not-on-f0"],
@@ -562,6 +619,7 @@ def evaluate_scenario(np, name, folder, mode):
              "quadrature_mask_pixels": report["quadrature_mask_pixels"], "roi_pixels": report["roi_pixels"],
              "snapshot_sha256": report["snapshot_sha256"]}
     checks = []  # (discriminating, gate result)
+    twins = []  # pass/fail of the engine image against the pending_matches control, per gate that has one
 
     if spec["kind"] != "declared":
         band = spec.get("terminator_band", 1)
@@ -571,13 +629,17 @@ def evaluate_scenario(np, name, folder, mode):
             direct = evaluate_direct(np, candidate, reference, masks, spheres)
             result = evaluate_environment(np, candidate, reference, masks, spheres, summarize(direct))
         verdicts = control_verdicts(np, spec["kind"], reference, controls, masks, spheres, literal_controls, band)
-        expected = expectation(spec["kind"], mode, result, spec.get("always_green", False), spec.get("pending"))
-        if spec.get("pending_matches"):
+        # "pending_gate": "declared" keeps the literal gate asserted green (only the declared-model gate is pending).
+        declared_only = spec.get("pending_gate") == "declared"
+        expected = expectation(spec["kind"], mode, result, spec.get("always_green", False),
+                               None if declared_only else spec.get("pending"))
+        if spec.get("pending_matches") in controls and not declared_only:
             # Red for the right reason: before its ticket the engine must pass the gate against the
             # control that models the missing piece (e.g. DI evaluating the base BRDF).
             twin = evaluate(np, spec["kind"], candidate, controls[spec["pending_matches"]], masks, spheres, band)
             expected = {**expected, "matches_control": spec["pending_matches"], "control_gate": summarize(twin),
                         "met": expected["met"] and twin["pass"]}
+            twins.append(twin["pass"])
         entry.update(result=result, expectation=expected, controls=verdicts)
         checks.append((all(v["fails_gate"] for v in verdicts.values()), result["pass"]))
 
@@ -588,6 +650,11 @@ def evaluate_scenario(np, name, folder, mode):
         result = evaluate_declared(np, candidate, declared_reference, masks, spheres)
         verdicts = control_verdicts(np, "declared", declared_reference, controls, masks, spheres, declared_controls)
         expected = expectation("declared", mode, result, spec.get("always_green", False), spec.get("pending"))
+        if spec.get("pending_matches") in controls:
+            twin = evaluate_declared(np, candidate, controls[spec["pending_matches"]], masks, spheres)
+            expected = {**expected, "matches_control": spec["pending_matches"], "control_gate": summarize(twin),
+                        "met": expected["met"] and twin["pass"]}
+            twins.append(twin["pass"])
         if spec["kind"] == "declared":
             entry.update(result=result, expectation=expected, controls=verdicts)
         else:
@@ -598,6 +665,7 @@ def evaluate_scenario(np, name, folder, mode):
     entry["discriminating"] = all(d for d, _ in checks)
     entry["gates_pass"] = all(p for _, p in checks)
     entry["pending"] = spec.get("pending")
+    entry["pending_matches_met"] = all(twins)  # the engine image passes the gate against its pending_matches control
     entry["expectation_met"] = entry["expectation"]["met"] and entry.get("declared", {}).get("expectation", {"met": True})["met"]
     return entry
 
@@ -608,7 +676,9 @@ def verdict(entries, mode):
         return "BLOCKED_NON_DISCRIMINATING_FIXTURE", EXIT_NON_DISCRIMINATING
     if mode == "green":
         # A pending scenario must FAIL (its engine side has not landed); every other one must pass.
-        passes = all(e.get("gates_pass", e["result"]["pass"]) != bool(e.get("pending")) for e in entries)
+        # ... and, with a pending_matches control, must pass the gate against it (red for the right reason).
+        passes = all(e.get("gates_pass", e["result"]["pass"]) != bool(e.get("pending")) and
+                     e.get("pending_matches_met", True) for e in entries)
         return ("GREEN", EXIT_OK) if passes else ("RED", EXIT_UNEXPECTED)
     if all(e.get("expectation_met", e["expectation"]["met"]) for e in entries):
         return "EXPECTED_RED_CONFIRMED", EXIT_OK

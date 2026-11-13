@@ -16,10 +16,11 @@
 using namespace phosphor;
 
 TEST_CASE("F15.3 material scenarios are exactly the nine declared names") {
-    CHECK(MaterialValidation::scenarios().size() == 12);
+    CHECK(MaterialValidation::scenarios().size() == 17);
     for (auto name : {"base-grid-sun", "base-grid-env", "base-grid-env-resolve", "furnace-base", "furnace-resolve",
                       "roughness-extremes", "roughness-extremes-sun", "specular-grid-sun", "specular-grid-env-resolve", "specular-grid-point",
-                      "specular-grid-env", "furnace-specular"})
+                      "specular-grid-env", "furnace-specular", "clearcoat-grid-sun", "clearcoat-grid-env-resolve",
+                      "clearcoat-grid-env", "clearcoat-grid-point", "furnace-clearcoat"})
         CHECK(MaterialValidation::validScenario(name));
     CHECK_FALSE(MaterialValidation::validScenario("unknown"));
     CHECK_THROWS(MaterialValidation{"unknown"});
@@ -339,4 +340,132 @@ TEST_CASE("F15.1 specular-grid-point: the specular grid lit by one point light f
             const float r = d / light.range, window = (1.0f - r * r * r * r) * (1.0f - r * r * r * r);
             CHECK(window > 0.9995f);
         }
+}
+
+TEST_CASE("F15.3 clearcoat grids declare coat factor x coat roughness, an ior row under a full coat and a metal row") {
+    for (auto name : {"clearcoat-grid-sun", "clearcoat-grid-env-resolve", "clearcoat-grid-env", "clearcoat-grid-point",
+                      "furnace-clearcoat"}) {
+        const auto& s = MaterialValidation::spec(name);
+        REQUIRE(s.hasClearcoatGrid());
+        CHECK_FALSE(s.hasSpecularGrid());
+        REQUIRE(s.clearcoatFactor.size() == s.metallic.size());
+        REQUIRE(s.baseIor.size() == s.metallic.size());
+        REQUIRE(s.clearcoatRoughness.size() == s.roughness.size());
+        CHECK(s.clearcoatFactor == std::vector<float>{0.0f, 0.25f, 0.5f, 1.0f, 1.0f, 1.0f});
+        CHECK(s.clearcoatRoughness == std::vector<float>{0.0f, 0.05f, 0.15f, 0.4f, 1.0f});
+        CHECK(s.baseIor == std::vector<float>{0.0f, 0.0f, 0.0f, 0.0f, 2.4f, 0.0f});
+        CHECK(s.metallic == std::vector<float>{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f});
+        CHECK(s.roughness == std::vector<float>(5, 0.6f)); // a rough base under every coat
+        // alpha = roughness^2 < 0.05 for coat roughness 0, 0.05, 0.15: the narrow-lobe disk quadrature.
+        CHECK(s.clearcoatRoughness[2] * s.clearcoatRoughness[2] < 0.05f);
+        CHECK(s.clearcoatRoughness[3] * s.clearcoatRoughness[3] > 0.05f);
+    }
+    const auto& sun = MaterialValidation::spec("clearcoat-grid-sun");
+    CHECK(sun.sun);
+    CHECK(sun.environment == 0.0f);
+    CHECK(sun.sunIrradiance == 3.0f);
+    CHECK(sun.baseColor == glm::vec3(0.8f, 0.35f, 0.15f));
+    const auto& resolve = MaterialValidation::spec("clearcoat-grid-env-resolve");
+    const auto& transport = MaterialValidation::spec("clearcoat-grid-env");
+    CHECK_FALSE(resolve.sun);
+    CHECK(resolve.environment == 0.5f);
+    CHECK(MaterialValidation::environmentRadiance("clearcoat-grid-env-resolve") == 0.5f);
+    CHECK(transport.environment == 0.5f);
+    CHECK(transport.baseColor == resolve.baseColor);
+    CHECK(transport.clearcoatFactor == resolve.clearcoatFactor);
+    const auto& furnace = MaterialValidation::spec("furnace-clearcoat");
+    CHECK_FALSE(furnace.sun);
+    CHECK(furnace.environment == 1.0f);
+    CHECK(furnace.baseColor == glm::vec3(1.0f));
+    // The other scenarios carry no coat.
+    for (auto name : {"base-grid-sun", "specular-grid-sun", "furnace-specular"})
+        CHECK_FALSE(MaterialValidation::spec(name).hasClearcoatGrid());
+}
+
+TEST_CASE("F15.3 clearcoat grid spheres carry the coat of their row and column; neutral rows carry no feature") {
+    ECS ecs;
+    GpuScene scene;
+    test::NullTextureManager textures;
+    MaterialValidation f{"clearcoat-grid-sun"};
+    f.setup(ecs, scene, textures);
+    const auto& s = MaterialValidation::spec("clearcoat-grid-sun");
+    for (u32 row = 0; row < s.metallic.size(); ++row)
+        for (u32 col = 0; col < s.roughness.size(); ++col) {
+            const EntityID e = f.spheres()[row * s.roughness.size() + col];
+            const auto& m = std::as_const(ecs).getComponent<MaterialComponent>(e);
+            CHECK(m.baseColorTexIndex == INVALID_TEXTURE_INDEX);
+            CHECK(m.metallicFactor == s.metallic[row]);
+            CHECK(m.roughnessFactor == s.roughness[col]);
+            if (row == 0) { // coat 0 and no ior block: the neutral material, no extension at all
+                CHECK((!m.extension || featureMask(*m.extension) == 0));
+                continue;
+            }
+            REQUIRE(m.extension);
+            REQUIRE(m.extension->clearcoat);
+            CHECK(m.extension->clearcoat->factor == s.clearcoatFactor[row]);
+            CHECK(m.extension->clearcoat->roughness == s.clearcoatRoughness[col]);
+            CHECK(m.extension->clearcoat->normalScale == 1.0f);
+            CHECK_FALSE(m.extension->clearcoat->factorTexture.present());
+            CHECK_FALSE(m.extension->clearcoat->roughnessTexture.present());
+            CHECK_FALSE(m.extension->clearcoat->normalTexture.present());
+            CHECK((featureMask(*m.extension) & MATERIAL_FEATURE_CLEARCOAT) != 0);
+            if (row == 4) { // the ior 2.4 row: both extensions are active
+                REQUIRE(m.extension->specular);
+                CHECK(m.extension->specular->ior == 2.4f);
+                CHECK(featureMask(*m.extension) == (MATERIAL_FEATURE_CLEARCOAT | MATERIAL_FEATURE_SPECULAR_IOR));
+            } else {
+                CHECK_FALSE(m.extension->specular);
+                CHECK(featureMask(*m.extension) == MATERIAL_FEATURE_CLEARCOAT);
+            }
+        }
+    SceneStore store;
+    store.sync(ecs, scene);
+    CHECK(store.verifyAgainstEcs(ecs, scene).empty());
+    CHECK(store.featureUnion() == (MATERIAL_FEATURE_CLEARCOAT | MATERIAL_FEATURE_SPECULAR_IOR));
+    // The record words the reference reads (GPUMaterialExt0 word offsets 7, 8, 9: factor, roughness, normalScale).
+    const u32 coatRow = 3, coatCol = 2;
+    const EntityID e = f.spheres()[coatRow * s.roughness.size() + coatCol];
+    const auto& rec = store.extensions()[store.materials()[store.materialIndexOf(e)].extensionIndex];
+    float factor, roughness, normalScale;
+    std::memcpy(&factor, &rec.w[7], 4);
+    std::memcpy(&roughness, &rec.w[8], 4);
+    std::memcpy(&normalScale, &rec.w[9], 4);
+    CHECK(factor == 1.0f);
+    CHECK(roughness == 0.15f);
+    CHECK(normalScale == 1.0f);
+    CHECK(rec.w[10] == INVALID_TEXTURE_INDEX);
+    CHECK(rec.w[11] == INVALID_TEXTURE_INDEX);
+    CHECK(rec.w[12] == INVALID_TEXTURE_INDEX);
+    f.teardown(ecs, scene);
+}
+
+TEST_CASE("F15.3 clearcoat-grid-point: the coat grid lit by one point light from behind the grid") {
+    const auto& sun = MaterialValidation::spec("clearcoat-grid-sun");
+    const auto& point = MaterialValidation::spec("clearcoat-grid-point");
+    CHECK(point.clearcoatFactor == sun.clearcoatFactor);
+    CHECK(point.clearcoatRoughness == sun.clearcoatRoughness);
+    CHECK(point.baseIor == sun.baseIor);
+    CHECK_FALSE(point.sun);
+    CHECK(point.environment == 0.0f);
+    REQUIRE(point.pointLights.size() == 1);
+    const MaterialPointLight light = point.pointLights[0];
+    CHECK(light.intensity == 250.0f);
+    CHECK(light.range == 100.0f);
+    const glm::vec3 camera = MaterialValidation{"clearcoat-grid-point"}.getDefaultCamera().position;
+    const glm::vec3 centre(0.0f, 2.5f, 0.0f); // six rows: the grid centre is at y = 2.5
+    CHECK(camera.y == doctest::Approx(centre.y));
+    const float vl = glm::dot(glm::normalize(camera - centre), glm::normalize(light.position - centre));
+    CHECK(vl < -0.4f);
+    CHECK(vl > -0.6f);
+    CHECK(light.position.z < -MaterialValidation::SphereRadius);
+    CHECK(glm::length(light.position - centre) == doctest::Approx(9.0f));
+    for (u32 row = 0; row < point.metallic.size(); ++row)
+        for (u32 col = 0; col < point.roughness.size(); ++col) {
+            const float d = glm::length(light.position - MaterialValidation::sphereCenter(point, col, row));
+            const float r = d / light.range, window = (1.0f - r * r * r * r) * (1.0f - r * r * r * r);
+            CHECK(window > 0.9995f);
+        }
+    // The coat highlight (N = H of the side light) falls on the visible front of the spheres: a coat reflection to see.
+    const glm::vec3 h = glm::normalize(glm::normalize(camera - centre) + glm::normalize(light.position - centre));
+    CHECK(h.z > 0.3f);
 }

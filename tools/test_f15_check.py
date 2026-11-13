@@ -61,6 +61,18 @@ for _name, _sun, _env, _base in (("specular-grid-sun", 3.0, 0.0, COPPER), ("spec
                                  ("specular-grid-env", 0.0, 0.5, COPPER), ("furnace-specular", 0.0, 1.0, [1, 1, 1])):
     SPECS[_name] = dict(roughness=[0.35] * 5, metallic=[row[2] for row in SPEC_ROWS], base=_base, sun=_sun, env=_env,
                         ior=SPEC_IOR, specular=[(row[0], row[1]) for row in SPEC_ROWS])
+# F15.3 (ticket 09): the clearcoat grids (mirrors MaterialValidation: rows = coat factor, then coat 1 over ior 2.4, then a
+# metal under a full coat; columns = coat roughness over a rough dielectric base).
+COAT = dict(factor=[0.0, 0.25, 0.5, 1.0, 1.0, 1.0], roughness=[0.0, 0.05, 0.15, 0.4, 1.0], ior=[0, 0, 0, 0, 2.4, 0])
+POINT_LIGHT = {"type": 1, "position": [-5.85, 7.45, -4.68], "direction": [0, 0, -1], "color": [1, 1, 1],
+               "intensity": 250.0, "range": 100.0, "inner": 0, "outer": 0}
+for _name, _sun, _env, _base, _point in (("clearcoat-grid-sun", 3.0, 0.0, COPPER, False),
+                                         ("clearcoat-grid-env-resolve", 0.0, 0.5, COPPER, False),
+                                         ("clearcoat-grid-env", 0.0, 0.5, COPPER, False),
+                                         ("clearcoat-grid-point", 0.0, 0.0, COPPER, True),
+                                         ("furnace-clearcoat", 0.0, 1.0, [1, 1, 1], False)):
+    SPECS[_name] = dict(roughness=[0.6] * 5, metallic=[0.0] * 5 + [1.0], base=_base, sun=_sun, env=_env, coat=COAT,
+                        point=_point)
 
 
 def write_sphere_ply(path, radius=0.4, slices=64, stacks=32):
@@ -108,6 +120,15 @@ def make_bench_snapshot(folder, name, width, height):
                     words = [int.from_bytes(struct.pack("<f", v), "little") for v in (ior, factor, *color)]
                     materials[-1].update(feature_bits=1, flags=256, extension_index=len(records))
                     records += [words + [ref.INVALID, ref.INVALID] + [0] * 13, [0] * 20, [0] * 20, [0] * 20]
+            if "coat" in spec:
+                factor, rough, ior = spec["coat"]["factor"][row], spec["coat"]["roughness"][col], spec["coat"]["ior"][row]
+                bits = (2 if factor > 0 else 0) | (1 if ior > 0 else 0)
+                if bits:
+                    bit = lambda v: int.from_bytes(struct.pack("<f", v), "little")  # noqa: E731
+                    words = ([bit(ior if ior > 0 else 1.5), bit(1.0), bit(1.0), bit(1.0), bit(1.0), ref.INVALID, ref.INVALID,
+                              bit(factor), bit(rough), bit(1.0), ref.INVALID, ref.INVALID, ref.INVALID] + [0] * 7)
+                    materials[-1].update(feature_bits=bits, flags=bits << 8, extension_index=len(records))
+                    records += [words, [0] * 20, [0] * 20, [0] * 20]
             instances.append({"slot": len(instances), "generation": 1, "flags": 7, "mesh": 0,
                               "material": len(materials) - 1, "world": world})
     distance = 5.5 if cols > 2 else 4.0
@@ -121,6 +142,8 @@ def make_bench_snapshot(folder, name, width, height):
     if spec["sun"] > 0:
         data["lights"].append({"type": 0, "position": [0, 0, 0], "direction": list(-TOWARD_SUN), "color": [1, 1, 1],
                                "intensity": spec["sun"], "range": 0, "inner": 0, "outer": 0})
+    if spec.get("point"):
+        data["lights"].append(POINT_LIGHT)
     (folder / "snapshot" / "scene.json").write_text(json.dumps(data))
     return folder
 
@@ -248,6 +271,60 @@ class RunnerLogic(unittest.TestCase):
         for key in ("specular-grid-env", "specular-grid-env@rt", "specular-grid-env@probes", "furnace-specular",
                     "furnace-specular@resolve"):
             self.assertTrue(check.SCENARIOS[key]["always_green"], key)
+
+    def test_clearcoat_keys_are_pending_and_name_the_control_that_models_the_current_engine(self):
+        keys = ["clearcoat-grid-sun", "clearcoat-grid-env-resolve", "clearcoat-grid-env", "clearcoat-grid-point",
+                "clearcoat-grid-point@restir", "clearcoat-grid-point@clustered", "furnace-clearcoat",
+                "furnace-clearcoat@resolve"]
+        with tempfile.TemporaryDirectory() as tmp:
+            with contextlib.redirect_stdout(io.StringIO()):
+                args = ["--out", tmp, "--binary", "build/release/phosphor"]
+                for key in keys:
+                    args += ["--only", key]
+                self.assertEqual(check.main(args), 0)
+            commands = json.loads((pathlib.Path(tmp) / "plan.json").read_text())["commands"]
+        expected = {"clearcoat-grid-sun": ("clearcoat-grid-sun", "legacy", "off", "ssr", "custom", "none"),
+                    "clearcoat-grid-env-resolve": ("clearcoat-grid-env-resolve", "legacy", "off", "off", "custom", "none"),
+                    "clearcoat-grid-env": ("clearcoat-grid-env", "legacy", "off", "ssr", "custom", "none"),
+                    "clearcoat-grid-point": ("clearcoat-grid-point", "legacy", "off", "ssr", "custom", "none"),
+                    "clearcoat-grid-point@restir": ("clearcoat-grid-point", "restir", "on", "ssr", "off", "rays"),
+                    "clearcoat-grid-point@clustered": ("clearcoat-grid-point", "clustered", "on", "ssr", "off", "rays"),
+                    "furnace-clearcoat": ("furnace-clearcoat", "legacy", "off", "ssr", "custom", "none"),
+                    "furnace-clearcoat@resolve": ("furnace-clearcoat", "legacy", "off", "off", "custom", "none")}
+        for key, (bench, lighting, rt, reflections, denoise, visibility) in expected.items():
+            capture, reference = commands[key]["capture"], commands[key]["reference"]
+            self.assertEqual(capture[capture.index("--material-scenario") + 1], bench, key)
+            self.assertEqual(capture[capture.index("--lighting") + 1], lighting, key)
+            self.assertEqual(capture[capture.index("--rt") + 1], rt, key)
+            self.assertEqual(capture[capture.index("--reflections") + 1], reflections, key)
+            self.assertEqual(capture[capture.index("--lighting-denoise") + 1], denoise, key)
+            self.assertEqual(reference[reference.index("--visibility") + 1], visibility, key)
+            spec = check.SCENARIOS[key]
+            if key.startswith("clearcoat"):
+                self.assertEqual(spec["pending"], "ticket 09", key)
+                self.assertIn(spec["pending_matches"], spec["controls"], key)
+                literal, declared = check.scenario_controls(key)
+                for name in literal + declared:
+                    self.assertIn(name, reference, key)
+                self.assertTrue(spec["pending_matches"] in (literal + declared), key)
+        # The furnace bound is an upper bound the coat-less engine meets: only the declared gate is pending.
+        self.assertTrue(check.SCENARIOS["furnace-clearcoat"]["always_green"])
+        self.assertNotIn("pending", check.SCENARIOS["furnace-clearcoat"])
+        resolve = check.SCENARIOS["furnace-clearcoat@resolve"]
+        self.assertEqual((resolve["pending"], resolve["pending_gate"]), ("ticket 09", "declared"))
+        self.assertEqual(check.SCENARIOS["clearcoat-grid-env-resolve"]["kind"], "declared")
+        self.assertEqual(check.SCENARIOS["clearcoat-grid-env"]["kind"], "environment")
+        for key in ("clearcoat-grid-sun", "clearcoat-grid-point"):
+            self.assertEqual(check.SCENARIOS[key]["kind"], "direct")
+            for name in ("coat-ignored", "coat-f0-from-ior", "coat-fresnel-vh", "coat-base-unattenuated"):
+                self.assertIn(name, check.SCENARIOS[key]["controls"])
+
+    def test_pending_matches_must_also_hold_in_green_mode(self):
+        failing = {"kind": "direct", "pass": False, "rows": {}}
+        base = {"discriminating": True, "gates_pass": False, "pending": "ticket 09", "result": failing,
+                "expectation": {"met": True}}
+        self.assertEqual(check.verdict([{**base, "pending_matches_met": True}], "green"), ("GREEN", check.EXIT_OK))
+        self.assertEqual(check.verdict([{**base, "pending_matches_met": False}], "green")[1], check.EXIT_UNEXPECTED)
 
     def test_terminator_band_width_two_reaches_two_pixels_into_the_lit_side(self):
         lit = np.zeros((7, 9), dtype=bool)
@@ -559,7 +636,7 @@ class BenchMirror(unittest.TestCase):
     def tearDownClass(cls):
         cls.tmp.cleanup()
 
-    def scenario(self, name, engine_model, mode, environment=None, tag=""):
+    def scenario(self, name, engine_model, mode, environment=None, tag="", key=None):
         """Evaluate one scenario against a synthetic engine image: `engine_model` for the sun and the literal
         environment, or `environment` = a declared variant for the engine's declared environment model."""
         folder = pathlib.Path(self.tmp.name) / f"{name}-{mode}{tag}"
@@ -569,7 +646,7 @@ class BenchMirror(unittest.TestCase):
         image, *_ = ref.render_frame(root, data, engine_model, environment=environment)
         write_pfm(folder / "engine.pfm", image)
         with contextlib.redirect_stdout(io.StringIO()):
-            return check.evaluate_scenario(np, name, folder, mode)
+            return check.evaluate_scenario(np, key or name, folder, mode)
 
     def test_current_engine_model_is_red_where_expected(self):
         engine = {"base-grid-sun": ref.CONTROLS["engine-f0-blend"],
@@ -661,6 +738,69 @@ class BenchMirror(unittest.TestCase):
             wrong = self.scenario("specular-grid-env-resolve", ref.APPENDIX_B, "red", environment=variant, tag="-" + control)
             self.assertFalse(wrong["result"]["pass"], control)
             self.assertEqual(check.verdict([wrong], "red")[1], check.EXIT_UNEXPECTED)
+
+    # --- F15.3 (ticket 09): the clearcoat harness.  The "engine" images below are reference renders of the model the
+    # real engine will have (coat) or has today (coat-ignored); the runner must call the second one red-for-the-
+    # right-reason (pending key GREEN) and the first one a pending violation.
+
+    COAT_KEYS = (("clearcoat-grid-sun", False), ("clearcoat-grid-env-resolve", True), ("clearcoat-grid-env", False),
+                 ("clearcoat-grid-point", False), ("furnace-clearcoat@resolve", True))
+
+    def coat_engine(self, key, ignored):
+        """The engine image of the model (coat) or of today's engine (coat ignored), for one runner key."""
+        declared = key in ("clearcoat-grid-env-resolve", "furnace-clearcoat@resolve")
+        model = ref.CONTROLS["coat-ignored"] if ignored else ref.SPECULAR_EXT
+        environment = None
+        if declared:
+            environment = ref.COAT_DECLARED_CONTROLS["declared-coat-ignored"] if ignored else ref.DECLARED
+        return model, environment
+
+    def test_clearcoat_keys_are_red_for_the_right_reason_with_a_coat_blind_engine(self):
+        for key, _ in self.COAT_KEYS:
+            model, environment = self.coat_engine(key, ignored=True)
+            entry = self.scenario(check.bench_scenario(key), model, "green", environment=environment, tag="-" + key + "-blind",
+                                  key=key)
+            self.assertTrue(entry["discriminating"], (key, json.dumps(entry["controls"], indent=1)))
+            self.assertFalse(entry["gates_pass"], key)          # pending: the gate FAILS
+            self.assertTrue(entry["pending_matches_met"], key)  # ... and the engine image matches the coat-ignored control
+            self.assertEqual(entry["pending"], "ticket 09")
+            self.assertEqual(check.verdict([entry], "green"), ("GREEN", check.EXIT_OK), key)
+
+    def test_clearcoat_keys_go_red_in_green_mode_once_the_engine_implements_the_coat(self):
+        # An engine that implements the model passes every gate: a still-pending key then no longer FAILS.
+        for key, _ in self.COAT_KEYS:
+            model, environment = self.coat_engine(key, ignored=False)
+            entry = self.scenario(check.bench_scenario(key), model, "green", environment=environment, tag="-" + key + "-coat",
+                                  key=key)
+            self.assertTrue(entry["gates_pass"], (key, json.dumps(check.summarize(entry["result"]))))
+            self.assertFalse(entry["pending_matches_met"], key)
+            self.assertEqual(check.verdict([entry], "green")[1], check.EXIT_UNEXPECTED, key)
+
+    def test_clearcoat_controls_each_fail_their_gate(self):
+        for key, _ in self.COAT_KEYS:
+            model, environment = self.coat_engine(key, ignored=False)
+            entry = self.scenario(check.bench_scenario(key), model, "green", environment=environment, tag="-" + key + "-ctl",
+                                  key=key)
+            controls = entry["declared"]["controls"] if entry["kind"] == "furnace" else entry["controls"]
+            if entry["kind"] == "furnace":
+                controls = {**entry["controls"], **controls}
+            wanted = set(check.SCENARIOS[key]["controls"]) | set(check.SCENARIOS[key].get("declared", []))
+            self.assertEqual(set(controls), wanted, key)
+            for name, verdict in controls.items():
+                self.assertTrue(verdict["fails_gate"], (key, name, verdict))
+
+    def test_furnace_clearcoat_bound_holds_for_the_model_and_the_unattenuated_base_breaks_it(self):
+        key = "furnace-clearcoat"
+        for ignored in (False, True):
+            model, _ = self.coat_engine(key, ignored)
+            entry = self.scenario(key, model, "red", tag=f"-{ignored}")
+            self.assertTrue(entry["result"]["pass"], ignored)  # the upper bound holds, also for the coat-blind engine
+            self.assertTrue(entry["expectation"]["asserted"] and entry["expectation"]["met"])
+            self.assertTrue(entry["controls"]["coat-base-unattenuated"]["fails_gate"])
+            self.assertEqual(check.verdict([entry], "red"), ("EXPECTED_RED_CONFIRMED", 0))
+        wrong = self.scenario(key, ref.CONTROLS["coat-base-unattenuated"], "red", tag="-wrong")
+        self.assertFalse(wrong["result"]["pass"])  # an engine that adds the coat on top of the full base gains energy
+        self.assertEqual(check.verdict([wrong], "red")[1], check.EXIT_UNEXPECTED)
 
     def test_cached_reference_is_reused_only_for_the_same_snapshot(self):
         entry = self.scenario("base-grid-env-resolve", ref.APPENDIX_B, "green", environment=ref.DECLARED, tag="-cache")
