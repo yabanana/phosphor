@@ -817,6 +817,12 @@ void Engine::finishBenchmark() {
     report.cpuHeapBytesDelta  = static_cast<i64>(heapBytes) - static_cast<i64>(heapBytesAtStart_);
     summarizeSamples(samples_, report);
     report.pipelinesJson = pipe::pipelineStatsJson(pipelines_->stats());
+    // F15.3: support report of the loaded glTF materials (omitted for procedural scenes).
+    for (const auto& materialSupport : gpuScene_->materialSupport()) {
+        if (materialSupport.features.empty()) continue;
+        report.materialsJson = supportToJson(gpuScene_->materialSupport(), gpuScene_->assetUnknownExtensions());
+        break;
+    }
     if(denoisedFixture_)report.denoisedFixtureJson=denoisedFixture_->reportJSON();
     report.gpuTiming        = timestamps_ != nullptr && timestamps_->enabled();
     report.gpuTimingUnfused = options_.gpuTimingUnfused;

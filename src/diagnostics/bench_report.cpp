@@ -353,7 +353,8 @@ std::string reportToJson(const BenchReport& r) {
            (r.pipelinesJson.empty() ? std::string() : ",\n  \"pipelines\": " + r.pipelinesJson) + ",\n" + timing +
            graph + scene + phases + hardware + meshlets + rendering + rtToJson(r.rt) +
            (r.lighting.present ? lightingToJson(r.lighting) : std::string()) +
-           (r.denoisedFixtureJson.empty()?std::string():",\n  \"denoised_fixture\": "+r.denoisedFixtureJson) + "\n}\n";
+           (r.denoisedFixtureJson.empty()?std::string():",\n  \"denoised_fixture\": "+r.denoisedFixtureJson) +
+           (r.materialsJson.empty() ? std::string() : ",\n  \"materials\": " + r.materialsJson) + "\n}\n";
 }
 
 } // namespace phosphor
