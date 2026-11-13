@@ -361,3 +361,125 @@ inline float bsdfAnisoVndfPdf(BsdfAniso an, float3 n, float3 v, float3 wi) {
     const float len = length(float3(an.at * dot(an.t, v), an.ab * dot(an.b, v), nv));
     return bsdfDAniso(nh, dot(an.t, h), dot(an.b, h), an.at, an.ab) / (2.0f * (nv + len));
 }
+
+// ---------------------------------------------------------------------------
+// F15.1 (ticket 12): KHR_materials_iridescence (ratified text and the README's informative GLSL "Iridescence Fresnel",
+// research/khr-materials.md section 8; the Belcour-Barla 2017 analytic thin-film approximation).
+//
+// The film replaces the Fresnel term of the specular lobe:
+//   dielectric: spec colour = mix(F_d, F_irid(f0 of the dielectric), s), diffuse weight = mix(1 - max F_d, 1 - max F_irid, s)
+//               (rgb_mix(base, spec, a) = (1 - max(a)) base + a spec of the README, the layer mixed by the strength s)
+//   metal:      spec colour = mix(F_schlick(baseColor), F_irid(baseColor), s)
+//   material  = mix(dielectric, metal, metallic); D V (isotropic or anisotropic) and the cosine are those of the lobe.
+// F_irid is evaluated at cos(theta1) = V.H of each light sample (analytic lights, sun disk samples, DI target and shading, the
+// sampled V.H of the transport) and, declared (decision 06), once at N.V for the environment, the composite diffuse weight and the
+// probe split sum.  Film ior >= 1, outside ior 1; the base ior of the interface under the film comes from f0 + 0.0001 per channel
+// (kept below 0.9999: a white metal has the finite ior 4e4 and the film is invisible there).
+// Orchestrator decision (2026-11-13): thickness 0 disables the film exactly (strength 0, the base model); positive thicknesses use the
+// specification's function as written (no smoothstep towards the outside ior).  The producers (resolve) already apply that rule: a
+// BsdfIrid with strength 0 selects the base expressions bit for bit.
+// Environment: E_irid = clamp(F_irid(N.V) clamp(A + B, 0, 1), 0, 1) with A, B of the DFG table at the material roughness; the diffuse
+// weight is 1 - max(E_irid) (the same rule as the composite's other extended lobes).
+// ---------------------------------------------------------------------------
+struct BsdfIrid {
+    float strength;   // s = iridescenceFactor x texture (0 where the thickness is 0): 0 = no film
+    float ior;        // film ior, >= 1
+    float thickness;  // nm
+};
+inline BsdfIrid bsdfIridNone() {
+    BsdfIrid i;
+    i.strength = 0.0f;
+    i.ior = 1.3f;
+    i.thickness = 0.0f;
+    return i;
+}
+inline bool bsdfIridActive(BsdfIrid i) { return i.strength > 0.0f; }
+
+// evalSensitivity of the README: the Rec709 sensitivity of an optical path difference (nm) with the per-channel phase shift.  The cosine
+// argument reaches ~120 rad: precise::cos (the fast variant loses its range reduction).
+inline float3 bsdfIridSensitivity(float opd, float3 shift) {
+    const float phase = 2.0f * M_PI_F * opd * 1e-9f;
+    const float3 val = float3(5.4856e-13f, 4.4201e-13f, 5.2481e-13f);
+    const float3 pos = float3(1.6810e+06f, 1.7953e+06f, 2.2084e+06f);
+    const float3 var = float3(4.3278e+09f, 9.3046e+09f, 6.6121e+09f);
+    float3 xyz = val * sqrt(2.0f * M_PI_F * var) * float3(precise::cos(pos.x * phase + shift.x), precise::cos(pos.y * phase + shift.y),
+                                                          precise::cos(pos.z * phase + shift.z)) * exp(-(phase * phase) * var);
+    xyz.x += 9.7470e-14f * sqrt(2.0f * M_PI_F * 4.5282e+09f) * precise::cos(2.2399e+06f * phase + shift.x) * exp(-4.5282e+09f * (phase * phase));
+    xyz /= 1.0685e-7f;
+    // GLSL mat3(...) is column-major: rgb = x c0 + y c1 + z c2.
+    return float3(3.2404542f, -0.9692660f, 0.0556434f) * xyz.x + float3(-1.5371385f, 1.8760108f, -0.2040259f) * xyz.y +
+           float3(-0.4985314f, 0.0415560f, 1.0572252f) * xyz.z;
+}
+
+// The README's iridescent Fresnel (outside ior 1) at cos(theta1) for the base reflectance f0 under the film.  Total internal
+// reflection (only at film ior 1 and grazing exits) returns 1; the result is clamped at 0 from below only (the closed form overshoots 1).
+inline float3 bsdfThinFilm(float cosTheta1, float filmIor, float thickness, float3 baseF0) {
+    const float c1 = clamp(cosTheta1, 0.0f, 1.0f);
+    const float r0 = ((filmIor - 1.0f) / (filmIor + 1.0f)) * ((filmIor - 1.0f) / (filmIor + 1.0f));
+    const float x1 = 1.0f - c1, x1s = x1 * x1;
+    const float R12 = r0 + (1.0f - r0) * (x1s * x1s * x1);
+    const float T121 = 1.0f - R12;
+    const float3 root = sqrt(min(baseF0 + 0.0001f, float3(0.9999f)));
+    const float3 baseIor = (1.0f + root) / (1.0f - root);
+    const float3 R1 = ((baseIor - filmIor) / (baseIor + filmIor)) * ((baseIor - filmIor) / (baseIor + filmIor));
+    const float sinTheta2Sq = (1.0f / (filmIor * filmIor)) * (1.0f - c1 * c1);
+    if (1.0f - sinTheta2Sq < 0.0f) return float3(1.0f);
+    const float cosTheta2 = sqrt(1.0f - sinTheta2Sq);
+    const float x2 = 1.0f - cosTheta2, x2s = x2 * x2;
+    const float3 R23 = R1 + (1.0f - R1) * (x2s * x2s * x2);
+    const float opd = 2.0f * filmIor * thickness * cosTheta2;
+    const float phi12 = filmIor < 1.0f ? M_PI_F : 0.0f, phi21 = M_PI_F - phi12;
+    const float3 phi23 = select(float3(0.0f), float3(M_PI_F), baseIor < float3(filmIor));
+    const float3 phi = phi21 + phi23;
+    const float3 R123 = clamp(R12 * R23, 1e-5f, 0.9999f);
+    const float3 r123 = sqrt(R123);
+    const float3 Rs = (T121 * T121) * R23 / (1.0f - R123);
+    float3 total = R12 + Rs;
+    float3 Cm = Rs - T121;
+    Cm *= r123;
+    total += Cm * (2.0f * bsdfIridSensitivity(opd, phi));
+    Cm *= r123;
+    total += Cm * (2.0f * bsdfIridSensitivity(2.0f * opd, 2.0f * phi));
+    return max(total, 0.0f);
+}
+inline float3 bsdfIridFresnel(BsdfIrid i, float3 f0, float cosTheta) { return bsdfThinFilm(cosTheta, i.ior, i.thickness, f0); }
+
+// Specular lobe colour of an iridescent material at V.H (Fd = bsdfSpecFresnel of the dielectric).  Without a film it is bsdfSpecLobeColor.
+inline float3 bsdfSpecColorIrid(BsdfDielectricSpec s, BsdfIrid irid, float3 Fd, float3 albedo, float metallic, float VdotH) {
+    if (!bsdfIridActive(irid)) return bsdfSpecLobeColor(Fd, albedo, metallic, VdotH);
+    float3 dielectric = Fd, metal = bsdfFSchlick(albedo, VdotH);
+    if (metallic < 1.0f) dielectric = mix(Fd, bsdfIridFresnel(irid, s.f0, VdotH), irid.strength);
+    if (metallic > 0.0f) metal = mix(metal, bsdfIridFresnel(irid, albedo, VdotH), irid.strength);
+    return mix(dielectric, metal, metallic);
+}
+// Diffuse of the dielectric under a film: weight mix(1 - max F_d, 1 - max F_irid, s).
+inline float3 bsdfSpecDiffuseIrid(BsdfDielectricSpec s, BsdfIrid irid, float3 Fd, float metallic, float3 albedo, float VdotH) {
+    if (!bsdfIridActive(irid) || !(metallic < 1.0f)) return bsdfSpecDiffuse(Fd, metallic, albedo);
+    const float w = mix(1.0f - bsdfMax3(Fd), 1.0f - bsdfMax3(bsdfIridFresnel(irid, s.f0, VdotH)), irid.strength);
+    return w * (1.0f - metallic) * albedo / M_PI_F;
+}
+// Same structure as bsdfSpecEval with the film; `dv` = D V of the lobe (isotropic or anisotropic), computed by the caller.
+inline BsdfBaseLobes bsdfSpecEvalIrid(BsdfDielectricSpec s, BsdfIrid irid, float dv, float VdotH, float3 albedo, float metallic) {
+    const float3 Fd = bsdfSpecFresnel(s, VdotH);
+    BsdfBaseLobes out;
+    out.diffuse = bsdfSpecDiffuseIrid(s, irid, Fd, metallic, albedo, VdotH);
+    out.specular = dv * bsdfSpecColorIrid(s, irid, Fd, albedo, metallic, VdotH);
+    return out;
+}
+// Split-sum environment of an iridescent material (film at N.V, see above); bsdfSpecEnv without a film.
+inline BsdfSpecEnv bsdfSpecEnvIrid(BsdfDielectricSpec s, BsdfIrid irid, float3 albedo, float metallic, float roughness, float NdotV,
+                                   const constant float* table) {
+    BsdfSpecEnv e = bsdfSpecEnv(s, albedo, metallic, roughness, NdotV, table);
+    if (!bsdfIridActive(irid)) return e;
+    const float A = phosphor::dfgTableLookup(table, NdotV, roughness, 0u), B = phosphor::dfgTableLookup(table, NdotV, roughness, 1u);
+    const float carry = clamp(A + B, 0.0f, 1.0f);
+    const float3 eDielectric = clamp(bsdfIridFresnel(irid, s.f0, NdotV) * carry, 0.0f, 1.0f);
+    const float3 eMetal = clamp(bsdfIridFresnel(irid, albedo, NdotV) * carry, 0.0f, 1.0f);
+    const float3 metalPlain = clamp(albedo * A + B, 0.0f, 1.0f);
+    const float k = irid.strength;
+    const float diffuse = mix(1.0f - bsdfMax3(e.dielectric), 1.0f - bsdfMax3(eDielectric), k);
+    e.dielectric = mix(e.dielectric, eDielectric, k);
+    e.specular = mix(e.dielectric, mix(metalPlain, eMetal, k), metallic);
+    e.diffuseWeight = diffuse;
+    return e;
+}

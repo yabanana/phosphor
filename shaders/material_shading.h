@@ -108,7 +108,7 @@ static float3 sunDiskSpecular(float3 N, float3 V, float3 L, float3 albedo, float
 // F15.1: the same two functions for a material with KHR_materials_ior/specular (bsdf.h, section
 // "KHR_materials_ior + KHR_materials_specular"); the base versions above stay untouched.
 static float3 evaluateLightSpec(float3 N, float3 V, float3 L, float3 radiance, float3 albedo, float metallic,
-                                float roughness, BsdfDielectricSpec spec) {
+                                float roughness, BsdfDielectricSpec spec, BsdfIrid irid = bsdfIridNone()) {
     const float3 H = normalize(V + L);
     const float NdotL = saturate(dot(N, L));
     const float NdotV = max(dot(N, V), 1e-4);
@@ -117,12 +117,14 @@ static float3 evaluateLightSpec(float3 N, float3 V, float3 L, float3 radiance, f
     if (NdotL <= 0.0) {
         return float3(0.0);
     }
-    const BsdfBaseLobes lobes = bsdfSpecEval(spec, NdotL, NdotV, NdotH, VdotH, albedo, metallic, bsdfAlpha(roughness));
+    // F15.1 (ticket 12): with a film the Fresnel is evaluated at this sample's V.H (bsdfSpecEvalIrid; no film = bsdfSpecEval's expression).
+    const float a = bsdfAlpha(roughness);
+    const BsdfBaseLobes lobes = bsdfSpecEvalIrid(spec, irid, bsdfDGGX(NdotH, a) * bsdfVSmithGGXCorrelated(NdotV, NdotL, a), VdotH, albedo, metallic);
     return (lobes.diffuse + lobes.specular) * radiance * NdotL;
 }
 
 static float3 sunDiskSpecularSpec(float3 N, float3 V, float3 L, float3 albedo, float metallic, float roughness,
-                                  float angularRadius, BsdfDielectricSpec spec) {
+                                  float angularRadius, BsdfDielectricSpec spec, BsdfIrid irid = bsdfIridNone()) {
     const float a = bsdfAlpha(roughness);
     const float NdotV = max(dot(N, V), 1e-4);
     const float3 R = reflect(-V, N);
@@ -144,7 +146,7 @@ static float3 sunDiskSpecularSpec(float3 N, float3 V, float3 L, float3 albedo, f
         const float3 H = normalize(V + Lk);
         const float NdotH = saturate(dot(N, H)), VdotH = saturate(dot(V, H));
         sum += bsdfDGGX(NdotH, a) * bsdfVSmithGGXCorrelated(NdotV, NdotL, a) *
-               bsdfSpecLobeColor(bsdfSpecFresnel(spec, VdotH), albedo, metallic, VdotH) * NdotL;
+               bsdfSpecColorIrid(spec, irid, bsdfSpecFresnel(spec, VdotH), albedo, metallic, VdotH) * NdotL;
     }
     return sum / float(count);
 }
@@ -152,7 +154,7 @@ static float3 sunDiskSpecularSpec(float3 N, float3 V, float3 L, float3 albedo, f
 // F15.1 (ticket 11): KHR_materials_anisotropy.  The ior/specular dielectric (or the metal) with the anisotropic D V of bsdf.h in place
 // of the isotropic GGX; the same two functions as evaluateLightSpec / sunDiskSpecularSpec otherwise.
 static float3 evaluateLightAniso(float3 N, float3 V, float3 L, float3 radiance, float3 albedo, float metallic,
-                                 BsdfDielectricSpec spec, BsdfAniso an) {
+                                 BsdfDielectricSpec spec, BsdfAniso an, BsdfIrid irid = bsdfIridNone()) {
     const float3 H = normalize(V + L);
     const float NdotL = saturate(dot(N, L));
     const float NdotV = max(dot(N, V), 1e-4);
@@ -161,14 +163,14 @@ static float3 evaluateLightAniso(float3 N, float3 V, float3 L, float3 radiance, 
     if (NdotL <= 0.0) {
         return float3(0.0);
     }
-    const BsdfBaseLobes lobes = bsdfSpecEvalAniso(spec, an, V, L, H, NdotL, NdotV, NdotH, VdotH, albedo, metallic);
+    const BsdfBaseLobes lobes = bsdfSpecEvalIrid(spec, irid, bsdfAnisoDV(an, V, L, H, NdotL, NdotV, NdotH), VdotH, albedo, metallic);
     return (lobes.diffuse + lobes.specular) * radiance * NdotL;
 }
 // Sun disk of an anisotropic lobe: the disk rule keys on the NARROWEST axis alpha_b = alpha and on the reflection axis of the
 // isotropic lobe about N (the anisotropic lobe is only wider along T'): alpha >= 0.05 evaluates the lobe at the disk centre (the
 // reference's rule); a narrower lobe near the reflection axis uses the same golden-angle quadrature as the isotropic function.
 static float3 sunDiskSpecularAniso(float3 N, float3 V, float3 L, float3 albedo, float metallic, float angularRadius,
-                                   BsdfDielectricSpec spec, BsdfAniso an) {
+                                   BsdfDielectricSpec spec, BsdfAniso an, BsdfIrid irid = bsdfIridNone()) {
     const float a = an.ab;
     const float NdotV = max(dot(N, V), 1e-4);
     const float3 R = reflect(-V, N);
@@ -190,7 +192,7 @@ static float3 sunDiskSpecularAniso(float3 N, float3 V, float3 L, float3 albedo, 
         const float3 H = normalize(V + Lk);
         const float NdotH = saturate(dot(N, H)), VdotH = saturate(dot(V, H));
         sum += bsdfAnisoDV(an, V, Lk, H, NdotL, NdotV, NdotH) *
-               bsdfSpecLobeColor(bsdfSpecFresnel(spec, VdotH), albedo, metallic, VdotH) * NdotL;
+               bsdfSpecColorIrid(spec, irid, bsdfSpecFresnel(spec, VdotH), albedo, metallic, VdotH) * NdotL;
     }
     return sum / float(count);
 }
@@ -206,8 +208,8 @@ inline float coatAttenuation(CoatParams coat, float3 V) {
     return 1.0f - coat.factor * bsdfCoatFresnel(abs(dot(coat.normal, V)));
 }
 static float3 evaluateLightCoat(float3 N, float3 V, float3 L, float3 radiance, float3 albedo, float metallic, float roughness,
-                                BsdfDielectricSpec spec, CoatParams coat) {
-    float3 result = evaluateLightSpec(N, V, L, radiance, albedo, metallic, roughness, spec) * coatAttenuation(coat, V);
+                                BsdfDielectricSpec spec, CoatParams coat, BsdfIrid irid = bsdfIridNone()) {
+    float3 result = evaluateLightSpec(N, V, L, radiance, albedo, metallic, roughness, spec, irid) * coatAttenuation(coat, V);
     const float ncl = saturate(dot(coat.normal, L));
     if (ncl > 0.0f) {
         const float3 H = normalize(V + L);
@@ -346,14 +348,29 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     // dielectric (f0 0.04, f90 1) through the extended path; anisoActive below says whether the lobe is resolved for this pixel.
     const bool anisoOn = (kMaterialFeatures & MATERIAL_FEATURE_ANISOTROPY) != 0u &&
                          (m.flags & (MATERIAL_FEATURE_ANISOTROPY << MATERIAL_FEATURE_SHIFT)) != 0u;
-    const bool useSpec = specExt || coatOn || anisoOn;
+    // F15.1 (ticket 12): KHR_materials_iridescence, same gating.  An iridescent material without the ior/specular block keeps the default
+    // dielectric (f0 0.04, f90 1) through the extended path; the film replaces the Fresnel of the specular lobe (bsdf.h).
+    const bool iridOn = (kMaterialFeatures & MATERIAL_FEATURE_IRIDESCENCE) != 0u &&
+                        (m.flags & (MATERIAL_FEATURE_IRIDESCENCE << MATERIAL_FEATURE_SHIFT)) != 0u;
+    const bool useSpec = specExt || coatOn || anisoOn || iridOn;
     // F15.1 (ticket 10): KHR_materials_sheen, same gating.  A sheen-only material keeps the base dielectric path below.
     const bool sheenOn = (kMaterialFeatures & MATERIAL_FEATURE_SHEEN) != 0u &&
                          (m.flags & (MATERIAL_FEATURE_SHEEN << MATERIAL_FEATURE_SHIFT)) != 0u;
     GPUMaterialExt0 e0{};
     if (specExt || coatOn || sheenOn) e0 = *reinterpret_cast<const device GPUMaterialExt0*>(frame.materialExtensions + m.extensionIndex);
     GPUMaterialExt1 e1{};
-    if (anisoOn) e1 = *reinterpret_cast<const device GPUMaterialExt1*>(frame.materialExtensions + m.extensionIndex + 1u);
+    if (anisoOn || iridOn) e1 = *reinterpret_cast<const device GPUMaterialExt1*>(frame.materialExtensions + m.extensionIndex + 1u);
+    // Thickness = mix(min, max, texture.g) (the maximum without a texture: min (1 - t) + max t is exact at t = 1); thickness 0 disables the
+    // film (strength 0 = the base model, the orchestrator's interpretation of the unspecified d = 0).
+    BsdfIrid irid = bsdfIridNone();
+    if (iridOn) {
+        const float t = float(sampleOr(textures, e1.iridescenceThicknessTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).g);
+        irid.thickness = e1.iridescenceThicknessMin * (1.0f - t) + e1.iridescenceThicknessMax * t;
+        irid.ior = e1.iridescenceIor;
+        irid.strength = irid.thickness > 0.0f
+                            ? saturate(e1.iridescenceFactor * float(sampleOr(textures, e1.iridescenceFactorTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).r))
+                            : 0.0f;
+    }
     CoatParams coat{0.0f, 0.04f, float3(0.0f)};
     if (coatOn) {
         coat.factor = saturate(e0.clearcoatFactor * float(sampleOr(textures, e0.clearcoatFactorTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).r));
@@ -447,10 +464,11 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
             // Diffuse at the disk centre (exact to O(r^2)), specular over the disk.
             const float NdotL = saturate(dot(N, L));
             if (useSpec) {
-                const float3 Fd = bsdfSpecFresnel(spec, saturate(dot(V, normalize(V + L))));
-                const float3 diffuse = NdotL > 0.0f ? bsdfSpecDiffuse(Fd, metallic, baseColor.rgb) * NdotL : float3(0.0);
-                float3 sunSum = diffuse + (anisoActive ? sunDiskSpecularAniso(N, V, L, baseColor.rgb, metallic, sunAngularRadius, spec, aniso)
-                                                       : sunDiskSpecularSpec(N, V, L, baseColor.rgb, metallic, roughness, sunAngularRadius, spec));
+                const float sunVH = saturate(dot(V, normalize(V + L)));
+                const float3 Fd = bsdfSpecFresnel(spec, sunVH);
+                const float3 diffuse = NdotL > 0.0f ? bsdfSpecDiffuseIrid(spec, irid, Fd, metallic, baseColor.rgb, sunVH) * NdotL : float3(0.0);
+                float3 sunSum = diffuse + (anisoActive ? sunDiskSpecularAniso(N, V, L, baseColor.rgb, metallic, sunAngularRadius, spec, aniso, irid)
+                                                       : sunDiskSpecularSpec(N, V, L, baseColor.rgb, metallic, roughness, sunAngularRadius, spec, irid));
                 if (sheenOn) sunSum = sheenLayerLight(sunSum, N, V, L, sheen, frame.sheenTable);
                 if (coatOn) sunSum = sunSum * coatAttenuation(coat, V) + sunDiskCoat(V, L, sunAngularRadius, coat);
                 color += sunSum * lightColor * attenuation * visibility;
@@ -463,22 +481,22 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
             }
         } else if (sheenOn) {
             // The material under the sheen (ior/specular when present), the sheen layer, then the coat above (decision 06).
-            float3 value = anisoActive ? evaluateLightAniso(N, V, L, float3(1.0f), baseColor.rgb, metallic, spec, aniso)
-                         : useSpec ? evaluateLightSpec(N, V, L, float3(1.0f), baseColor.rgb, metallic, roughness, spec)
+            float3 value = anisoActive ? evaluateLightAniso(N, V, L, float3(1.0f), baseColor.rgb, metallic, spec, aniso, irid)
+                         : useSpec ? evaluateLightSpec(N, V, L, float3(1.0f), baseColor.rgb, metallic, roughness, spec, irid)
                                    : evaluateLight(N, V, L, float3(1.0f), baseColor.rgb, metallic, roughness);
             value = sheenLayerLight(value, N, V, L, sheen, frame.sheenTable);
             if (coatOn) value = value * coatAttenuation(coat, V) + coatLobeLight(V, L, coat);
             color += value * lightColor * attenuation * visibility;
         } else if (anisoActive && coatOn) {
-            const float3 value = evaluateLightAniso(N, V, L, float3(1.0f), baseColor.rgb, metallic, spec, aniso) * coatAttenuation(coat, V) +
+            const float3 value = evaluateLightAniso(N, V, L, float3(1.0f), baseColor.rgb, metallic, spec, aniso, irid) * coatAttenuation(coat, V) +
                                  coatLobeLight(V, L, coat);
             color += value * lightColor * attenuation * visibility;
         } else if (anisoActive)
-            color += evaluateLightAniso(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, spec, aniso) * visibility;
+            color += evaluateLightAniso(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, spec, aniso, irid) * visibility;
         else if (coatOn)
-            color += evaluateLightCoat(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, roughness, spec, coat) * visibility;
-        else if (specExt)
-            color += evaluateLightSpec(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, roughness, spec) * visibility;
+            color += evaluateLightCoat(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, roughness, spec, coat, irid) * visibility;
+        else if (specExt || bsdfIridActive(irid))
+            color += evaluateLightSpec(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, roughness, spec, irid) * visibility;
         else
             color += evaluateLight(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, roughness) * visibility;
     }
@@ -498,8 +516,9 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     float3 envSpecularWeight = bsdfEnvSpecular(f0, roughness, NdotV, frame.dfgTable);
     if (useSpec) { // F15.1: f0 * A + f90 * B per lobe, diffuse weight 1 - max(E_dielectric)
         // F15.1 (ticket 11): the split sum (diffuse weight included) at the effective isotropic roughness of an anisotropic lobe.
-        const BsdfSpecEnv env = bsdfSpecEnv(spec, baseColor.rgb, metallic, anisoActive ? bsdfAnisoEnvRoughness(roughness, anisoStrength) : roughness,
-                                            NdotV, frame.dfgTable);
+        // F15.1 (ticket 12): the film at N.V (bsdfSpecEnvIrid; no film = bsdfSpecEnv).
+        const BsdfSpecEnv env = bsdfSpecEnvIrid(spec, irid, baseColor.rgb, metallic, anisoActive ? bsdfAnisoEnvRoughness(roughness, anisoStrength) : roughness,
+                                                NdotV, frame.dfgTable);
         envDiffuse = env.diffuseWeight;
         envSpecularWeight = env.specular;
     }
@@ -547,6 +566,7 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     out.diffuseAlbedo = baseColor.rgb * (1.0f - metallic) * envDiffuse;
     out.specularAlbedo = useSpec ? mix(bsdfSpecFresnel(spec, NdotV), bsdfFSchlick(baseColor.rgb, NdotV), metallic)
                                  : bsdfFSchlick(f0, NdotV);
+    if (bsdfIridActive(irid)) out.specularAlbedo = bsdfSpecColorIrid(spec, irid, bsdfSpecFresnel(spec, NdotV), baseColor.rgb, metallic, NdotV);
     if (sheenOn) out.specularAlbedo *= bsdfSheenScaleView(sheen.color, sheen.roughness, NdotV, frame.sheenTable);
     if (coatOn) out.specularAlbedo = out.specularAlbedo * coatAtt + coat.factor * bsdfCoatFresnel(abs(dot(coat.normal, V)));
     out.roughness = roughness;
@@ -579,6 +599,11 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         out.lobes.anisotropyDirection[1] = aniso.t.y;
         out.lobes.anisotropyDirection[2] = aniso.t.z;
     }
+    if (iridOn) {
+        out.lobes.iridescenceFactor = irid.strength;
+        out.lobes.iridescenceIor = irid.ior;
+        out.lobes.iridescenceThickness = irid.thickness;
+    }
     if (coatOn) {
         out.lobes.clearcoatFactor = coat.factor;
         out.lobes.clearcoatRoughness = coat.roughness;
@@ -591,12 +616,16 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
 
 // F15.1 (ticket 06): the guide record of a resolved surface (renderer/lobe_guide_pack.h).  DI_LOBE_GUIDE_CORRUPT
 // is the negative control of --debug-lobe-guide: +0.25 on the stored ior of ior/specular pixels and (ticket 10) on the stored
-// sheen roughness of sheen pixels and (ticket 11) the lobe direction of anisotropic pixels (set to the shading normal).
+// sheen roughness of sheen pixels, (ticket 11) the lobe direction of anisotropic pixels (set to the shading normal) and (ticket 12)
+// the film ior of iridescent pixels.
 static GPULobeGuide lobeGuideRecord(ShadingResult value, uint diFlags) {
     if ((diFlags & DI_LOBE_GUIDE_CORRUPT) != 0u && (value.lobes.features & MATERIAL_FEATURE_SPECULAR_IOR) != 0u)
         value.lobes.ior += 0.25f;
     if ((diFlags & DI_LOBE_GUIDE_CORRUPT) != 0u && (value.lobes.features & MATERIAL_FEATURE_SHEEN) != 0u)
         value.lobes.sheenRoughness += 0.25f;
+    // Ticket 12: an iridescent pixel stores a film ior shifted by 0.25 (the half-rounded value differs from the expectation).
+    if ((diFlags & DI_LOBE_GUIDE_CORRUPT) != 0u && (value.lobes.features & MATERIAL_FEATURE_IRIDESCENCE) != 0u)
+        value.lobes.iridescenceIor += 0.25f;
     // Ticket 11: an anisotropic pixel stores its shading normal as the lobe direction (outside the tangent plane).
     if ((diFlags & DI_LOBE_GUIDE_CORRUPT) != 0u && (value.lobes.features & MATERIAL_FEATURE_ANISOTROPY) != 0u) {
         value.lobes.anisotropyDirection[0] = value.normal.x;

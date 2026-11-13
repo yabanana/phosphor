@@ -50,6 +50,9 @@ struct ReflectionLobe {
     float3 anisoDirection;
     float anisoStrength;
     float envRoughness;
+    // F15.1 (ticket 12): KHR_materials_iridescence.  The sample weight uses the thin-film Fresnel at the sampled V.H (bsdfSpecColorIrid);
+    // every split-sum term (probe weight, composite diffuse complement, coat select) uses it at N.V (bsdfSpecEnvIrid).  strength 0 = no film.
+    BsdfIrid irid;
     float diffuseRoughness; // roughness of the diffuse complement in the composite (bsdfAnisoDiffuseRoughness), the base roughness without anisotropy
 };
 inline ReflectionLobe reflectionLoadLobe(uint flags, uint validFlag, const device GPULobeGuide* guides, uint index, GPUDISurface s) {
@@ -74,6 +77,11 @@ inline ReflectionLobe reflectionLoadLobe(uint flags, uint validFlag, const devic
                     l.sheenScale = 1.0f - bsdfMax3(l.sheenColor) * l.sheenAlbedo;
                 }
             }
+            if ((kMaterialFeatures & MATERIAL_FEATURE_IRIDESCENCE) != 0u && (g.features & MATERIAL_FEATURE_IRIDESCENCE) != 0u) {
+                l.irid.strength = u.iridescenceFactor;
+                l.irid.ior = u.iridescenceIor;
+                l.irid.thickness = u.iridescenceThickness;
+            }
             if ((kMaterialFeatures & MATERIAL_FEATURE_ANISOTROPY) != 0u && (g.features & MATERIAL_FEATURE_ANISOTROPY) != 0u) {
                 const float3 ad = float3(u.anisotropyDirection[0], u.anisotropyDirection[1], u.anisotropyDirection[2]);
                 float3 n = diVec(s.shadingNormal), v = diVec(s.viewDirection);
@@ -95,8 +103,8 @@ inline ReflectionLobe reflectionLoadLobe(uint flags, uint validFlag, const devic
                     l.coatFactor = u.clearcoatFactor;
                     l.coatRoughness = u.clearcoatRoughness;
                     l.coatNormal = normalize(nc);
-                    const float baseAlbedo = bsdfMax3(bsdfSpecEnv(l.spec, diVec(s.albedo), saturate(s.metallic), l.envRoughness,
-                                                                  max(dot(n, v), 1e-4f), phosphor::DfgTable).specular);
+                    const float baseAlbedo = bsdfMax3(bsdfSpecEnvIrid(l.spec, l.irid, diVec(s.albedo), saturate(s.metallic), l.envRoughness,
+                                                                      max(dot(n, v), 1e-4f), phosphor::DfgTable).specular);
                     const CoatLobeSelect sel = coatLobeSelect(l.coatFactor, abs(dot(l.coatNormal, v)), baseAlbedo);
                     l.pCoat = sel.pCoat;
                     l.id = sel.significant ? SPECULAR_LOBE_CLEARCOAT : SPECULAR_LOBE_BASE;

@@ -45,7 +45,7 @@ inline float3 reflectionLobeWeight(GPUDISurface s, float3 wi, float pdf, Reflect
     // F15.1 (ticket 11): the anisotropic D V of the primary lobe frame (the same expression as the DI and resolve lobes).
     const float dv = lobe.aniso ? bsdfAnisoDV(reflectionAnisoFrame(s, n, lobe), v, wi, h, nl, nv, nh)
                                 : bsdfDGGX(nh, a) * bsdfVSmithGGXCorrelated(nv, nl, a);
-    const float3 f = dv * bsdfSpecLobeColor(Fd, diVec(s.albedo), saturate(s.metallic), vh);
+    const float3 f = dv * bsdfSpecColorIrid(lobe.spec, lobe.irid, Fd, diVec(s.albedo), saturate(s.metallic), vh); // F15.1 ticket 12: the film at the sampled V.H
     return f * lobe.sheenScale * nl / pdf; // F15.1 ticket 10: the view-only sheen albedo scaling (1 without sheen)
 }
 // GGX half-vector proposal density of one lobe (normal n, alpha a) for the direction wi: D(n.h) n.h / (4 v.h), 0 outside the lobe's hemisphere.
@@ -77,7 +77,7 @@ inline float3 reflectionCoatWeight(GPUDISurface s, float3 wi, ReflectionLobe lob
         const float dv = lobe.aniso ? bsdfAnisoDV(reflectionAnisoFrame(s, n, lobe), v, wi, h, nl, nv, nh)
                                     : bsdfDGGX(nh, ab) * bsdfVSmithGGXCorrelated(nv, nl, ab);
         base = (1.0f - lobe.coatFactor * fc) * lobe.sheenScale * (dv *
-                                                bsdfSpecLobeColor(Fd, diVec(s.albedo), saturate(s.metallic), vh)) * nl;
+                                                bsdfSpecColorIrid(lobe.spec, lobe.irid, Fd, diVec(s.albedo), saturate(s.metallic), vh)) * nl;
     }
     const float ncl = dot(nc, wi), ncv = max(dot(nc, v), 1e-4f);
     if (ncl > 0 && dot(v + wi, v + wi) >= 1e-20f) {

@@ -64,6 +64,24 @@ LobeGuideExpectation expectedLobeParams(const GPUMaterial& material, std::span<c
         r.anisotropyDirectionChecked = true;
         if (e1.anisotropyTex != INVALID_TEXTURE_INDEX) r.unverified = true;
     }
+    if (features & MATERIAL_FEATURE_IRIDESCENCE) {
+        // Record 1 (GPUMaterialExt1).  shadeSurface: thickness = min (1 - t) + max t with t = the thickness texture's g (the half 1.0
+        // fallback without a texture: exactly the maximum); the strength is saturate(factor * tex.r), 0 where the thickness is 0 (the film is
+        // disabled there).
+        if (material.extensionIndex == MATERIAL_EXTENSION_INVALID || size_t(material.extensionIndex) + 1 >= extensions.size()) {
+            if (extensionsValid) *extensionsValid = false;
+            r.unverified = true;
+            return r;
+        }
+        GPUMaterialExt1 e1;
+        std::memcpy(&e1, &extensions[material.extensionIndex + 1], sizeof(e1));
+        const float thickness = e1.iridescenceThicknessMin * (1.0f - 1.0f) + e1.iridescenceThicknessMax * 1.0f;
+        const float f = e1.iridescenceFactor * 1.0f;
+        r.params.iridescenceFactor = thickness > 0.0f ? (f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f)) : 0.0f;
+        r.params.iridescenceIor = e1.iridescenceIor;
+        r.params.iridescenceThickness = thickness;
+        if (e1.iridescenceFactorTex != INVALID_TEXTURE_INDEX || e1.iridescenceThicknessTex != INVALID_TEXTURE_INDEX) r.unverified = true;
+    }
     return r;
 }
 

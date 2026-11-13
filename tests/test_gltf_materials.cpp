@@ -518,16 +518,16 @@ TEST_CASE("glTF materials: uv bake of a worked example") {
 
 TEST_CASE("glTF extensions: required extensions must be rendered, not merely parsed, or the asset is refused") {
     const std::string irid = R"({"asset":{"version":"2.0"},
-        "extensionsUsed":["KHR_materials_iridescence"],"extensionsRequired":["KHR_materials_iridescence"]})";
+        "extensionsUsed":["KHR_materials_transmission"],"extensionsRequired":["KHR_materials_transmission"]})";
     SUBCASE("a required extension whose feature is unsupported today is refused with a reason") {
         const auto bad = unsupportedRequiredExtensions(loadModel(irid));
         REQUIRE(bad.size() == 1);
-        CHECK(bad[0].name == "KHR_materials_iridescence");
+        CHECK(bad[0].name == "KHR_materials_transmission");
         CHECK(bad[0].reason.find("not rendered") != std::string::npos);
     }
     SUBCASE("the same asset loads once the feature is implemented or approximated") {
         MaterialSupportTable table = currentSupportTable();
-        auto& entry = table.features[static_cast<size_t>(MaterialFeature::Iridescence)];
+        auto& entry = table.features[static_cast<size_t>(MaterialFeature::Transmission)];
         entry.level = SupportLevel::Implemented;
         CHECK(unsupportedRequiredExtensions(loadModel(irid), table).empty());
         entry.level = SupportLevel::Approximated;

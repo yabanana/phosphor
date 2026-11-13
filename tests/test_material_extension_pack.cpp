@@ -202,12 +202,17 @@ TEST_CASE("support report: ior/specular, clearcoat and sheen are approximated wi
           "lobe_not_sampled_environment_term_in_composition;sun_disk_point_evaluated;secondary_rt_hits_ignore_sheen");
     for (u32 f = 0; f < MATERIAL_FEATURE_COUNT; ++f)
         if (f != static_cast<u32>(MaterialFeature::SpecularIor) && f != static_cast<u32>(MaterialFeature::Clearcoat) &&
-            f != static_cast<u32>(MaterialFeature::Sheen) && f != static_cast<u32>(MaterialFeature::Anisotropy))
+            f != static_cast<u32>(MaterialFeature::Sheen) && f != static_cast<u32>(MaterialFeature::Anisotropy) &&
+            f != static_cast<u32>(MaterialFeature::Iridescence))
             CHECK(t.features[f].level == SupportLevel::Unsupported);
     const FeatureSupportEntry& an = t.features[static_cast<u32>(MaterialFeature::Anisotropy)];
     CHECK(an.level == SupportLevel::Approximated);
     CHECK(std::string(an.approximation) ==
           "environment_split_sum_at_effective_roughness;secondary_rt_hits_ignore_anisotropy;no_tangents_means_isotropic");
+    const FeatureSupportEntry& ir = t.features[static_cast<u32>(MaterialFeature::Iridescence)];
+    CHECK(ir.level == SupportLevel::Approximated);
+    CHECK(std::string(ir.approximation) ==
+          "environment_film_at_nv_constant_over_lobe;thickness_zero_disables_film;secondary_rt_hits_ignore_iridescence");
 
     MaterialDescription d;
     d.specular.emplace();

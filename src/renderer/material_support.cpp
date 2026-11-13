@@ -74,6 +74,19 @@ const MaterialSupportTable& currentSupportTable() {
         FeatureSupportEntry& anisotropy = t.features[static_cast<u32>(MaterialFeature::Anisotropy)];
         anisotropy.level                = SupportLevel::Approximated;
         anisotropy.approximation        = "environment_split_sum_at_effective_roughness;secondary_rt_hits_ignore_anisotropy;no_tangents_means_isotropic";
+        // F15.1 (ticket 12): iridescence replaces the Fresnel of the specular lobe with the specification's thin-film Fresnel (the
+        // Belcour-Barla closed form of the README, dielectric and metal layers with rgb_mix) at the V.H of every light sample: analytic
+        // lights, each sun-disk sample, ReSTIR and clustered DI (target and shading) and the transport weight at the sampled V.H.
+        // Declared approximations (decision 06): the environment, the composite diffuse weight 1 - max(E_irid) and the probe split sum
+        // evaluate the film once at N.V and hold it constant over the lobe (3.8 % worst on the fixture films against the exact quadrature),
+        // secondary RT hits ignore the film.  Interpretation of the unspecified d = 0 (orchestrator decision 2026-11-13): thickness 0
+        // disables the film exactly (the base model); positive thicknesses use the specification's function as written, without the
+        // smoothstep towards the outside ior of the Sample Viewer.  Combinations with the other lobes are composed (the film only replaces
+        // the Fresnel; the coat ignores the interface between coat and film as the specification says) but not validated; the
+        // factor and thickness textures are not validated against an independent reference yet.
+        FeatureSupportEntry& iridescence = t.features[static_cast<u32>(MaterialFeature::Iridescence)];
+        iridescence.level                = SupportLevel::Approximated;
+        iridescence.approximation        = "environment_film_at_nv_constant_over_lobe;thickness_zero_disables_film;secondary_rt_hits_ignore_iridescence";
         return t;
     }();
     return table;

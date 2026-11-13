@@ -170,6 +170,10 @@ struct DILobe {
     bool aniso;
     float3 anisoDirection;
     float anisoStrength;
+    // F15.1 (ticket 12): KHR_materials_iridescence.  The film (strength, ior, thickness in nm) replaces the Fresnel of the specular lobe at
+    // the V.H of each light sample (target and shading alike).
+    bool irid;
+    BsdfIrid iridParams;
 };
 inline DILobe DI_FN(diLoadLobe)(constant GPUDIParams& p, const device GPULobeGuide* guides, uint index) {
     DILobe l{};
@@ -196,6 +200,12 @@ inline DILobe DI_FN(diLoadLobe)(constant GPUDIParams& p, const device GPULobeGui
                 l.anisoStrength = u.anisotropyStrength;
                 l.anisoDirection = float3(u.anisotropyDirection[0], u.anisotropyDirection[1], u.anisotropyDirection[2]);
             }
+            if ((kMaterialFeatures & MATERIAL_FEATURE_IRIDESCENCE) != 0u && (g.features & MATERIAL_FEATURE_IRIDESCENCE) != 0u) {
+                l.iridParams.strength = u.iridescenceFactor;
+                l.iridParams.ior = u.iridescenceIor;
+                l.iridParams.thickness = u.iridescenceThickness;
+                l.irid = bsdfIridActive(l.iridParams);
+            }
         }
     }
 #endif
@@ -220,7 +230,16 @@ inline float3 DI_FN(diBRDFLobe)(GPUDISurface surface, DISample s, float specular
             const float3 albedo = max(diVec(surface.albedo), 0.0f);
             const BsdfDielectricSpec spec = bsdfSpecularParams(lobe.ior, lobe.specularFactor, lobe.specularColor);
             // F15.1 (ticket 11): the anisotropic D V of the guide's direction replaces the isotropic GGX.
-            const BsdfBaseLobes lobes = ((kMaterialFeatures & MATERIAL_FEATURE_ANISOTROPY) != 0u && lobe.aniso)
+            BsdfBaseLobes lobes;
+            if ((kMaterialFeatures & MATERIAL_FEATURE_IRIDESCENCE) != 0u && lobe.irid) {
+                // F15.1 (ticket 12): the thin-film Fresnel at this sample's V.H with the (anisotropic or isotropic) D V of the lobe.
+                const float a = bsdfAlpha(surface.roughness);
+                const float dv = ((kMaterialFeatures & MATERIAL_FEATURE_ANISOTROPY) != 0u && lobe.aniso)
+                    ? bsdfAnisoDV(bsdfAnisoFrame(n, lobe.anisoDirection, surface.roughness, lobe.anisoStrength), v, s.wi, h, nl, nv, nh)
+                    : bsdfDGGX(nh, a) * bsdfVSmithGGXCorrelated(nv, nl, a);
+                lobes = bsdfSpecEvalIrid(spec, lobe.iridParams, dv, vh, albedo, metallic);
+            } else
+            lobes = ((kMaterialFeatures & MATERIAL_FEATURE_ANISOTROPY) != 0u && lobe.aniso)
                 ? bsdfSpecEvalAniso(spec, bsdfAnisoFrame(n, lobe.anisoDirection, surface.roughness, lobe.anisoStrength), v, s.wi, h, nl, nv, nh, vh,
                                     albedo, metallic)
                 : bsdfSpecEval(spec, nl, nv, nh, vh, albedo, metallic, bsdfAlpha(surface.roughness));

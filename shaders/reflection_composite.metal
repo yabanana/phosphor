@@ -116,7 +116,7 @@ kernel void REFL_KERNEL(reflection_composite)(constant GPUReflectionComposeParam
             float3 sheenTerm=float3(0); // F15.1 (ticket 10): S E (coat attenuation), the environment term of the sheen layer
             // F15.1 (ticket 08): extended pixels receive 1 - max(E_dielectric) of their own specular lobe.
             {const auto lobe=REFL_LOBE(p.flags,REFLECT_COMPOSE_LOBE_GUIDE_VALID,pixel.y*p.width+pixel.x,s);
-                if(lobe.extended)envDiffuse=bsdfSpecEnv(lobe.spec,diVec(s.albedo),saturate(s.metallic),(p.flags&REFLECT_COMPOSE_SPEC)?lobe.diffuseRoughness:lobe.envRoughness,envNV,phosphor::DfgTable).diffuseWeight;
+                if(lobe.extended)envDiffuse=bsdfSpecEnvIrid(lobe.spec,lobe.irid,diVec(s.albedo),saturate(s.metallic),(p.flags&REFLECT_COMPOSE_SPEC)?lobe.diffuseRoughness:lobe.envRoughness,envNV,phosphor::DfgTable).diffuseWeight;
                 // F15.1 (ticket 09): the diffuse under a coat receives 1 - c F_c(|V.Nc|).
                 float coatAtt=1.0f;
                 if(lobe.coat){coatAtt=1.0f-lobe.coatFactor*bsdfCoatFresnel(abs(dot(lobe.coatNormal,normalize(diVec(s.viewDirection)))));envDiffuse*=coatAtt;}

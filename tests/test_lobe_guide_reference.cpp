@@ -89,9 +89,9 @@ TEST_CASE("lobe guide reference: resolved parameters of ior/specular") {
     // A base material, a union without the bit and a feature the resolve does not resolve yet: features 0.
     CHECK(expectedLobeParams(GPUMaterial{}, ext, MATERIAL_FEATURE_SPECULAR_IOR).params.features == 0);
     CHECK(expectedLobeParams(extendedMaterial(0), ext, 0).params.features == 0);
-    GPUMaterial iridescent{};
-    iridescent.flags = MATERIAL_FEATURE_IRIDESCENCE << MATERIAL_FEATURE_SHIFT;
-    CHECK(expectedLobeParams(iridescent, ext, MATERIAL_FEATURES_ALL).params.features == 0);
+    GPUMaterial transmissive{};
+    transmissive.flags = MATERIAL_FEATURE_TRANSMISSION << MATERIAL_FEATURE_SHIFT;
+    CHECK(expectedLobeParams(transmissive, ext, MATERIAL_FEATURES_ALL).params.features == 0);
     // Textures make the parameters unverifiable on the CPU.
     const GPUMaterialExtRecord textured[1] = {record0(1.5f, 1.0f, 1.0f, 1.0f, 1.0f, INVALID_TEXTURE_INDEX, 5u)};
     CHECK(expectedLobeParams(extendedMaterial(0), textured, MATERIAL_FEATURE_SPECULAR_IOR).unverified);
@@ -352,4 +352,54 @@ TEST_CASE("lobe guide reference: the anisotropy direction is compared by angle (
     write(0.0f, 1.0f, 0.0f);
     f.guides[1].anisotropyIridescence ^= 1u; // the strength is compared bit for bit
     CHECK_FALSE(checkLobeGuide(f.input).pass());
+}
+
+// F15.1 (ticket 12): iridescence.  Record 1 carries factor, film ior and the thickness range; without textures the thickness is the
+// maximum, and thickness 0 disables the film (the resolved strength is 0).
+namespace {
+GPUMaterialExtRecord iridescenceRecord(float factor, float ior, float thicknessMin, float thicknessMax,
+                                       u32 factorTex = INVALID_TEXTURE_INDEX, u32 thicknessTex = INVALID_TEXTURE_INDEX) {
+    GPUMaterialExt1 e{};
+    e.anisotropyTex = e.transmissionTex = e.volumeThicknessTex = INVALID_TEXTURE_INDEX;
+    e.iridescenceFactor = factor;
+    e.iridescenceIor = ior;
+    e.iridescenceThicknessMin = thicknessMin;
+    e.iridescenceThicknessMax = thicknessMax;
+    e.iridescenceFactorTex = factorTex;
+    e.iridescenceThicknessTex = thicknessTex;
+    GPUMaterialExtRecord rec{};
+    std::memcpy(&rec, &e, sizeof(e));
+    return rec;
+}
+GPUMaterial iridescentMaterial(u32 extensionIndex) {
+    GPUMaterial m{};
+    m.flags = MATERIAL_FEATURE_IRIDESCENCE << MATERIAL_FEATURE_SHIFT;
+    m.extensionIndex = extensionIndex;
+    return m;
+}
+} // namespace
+
+TEST_CASE("lobe guide reference: resolved factor, ior and thickness of iridescence") {
+    const GPUMaterialExtRecord ext[8] = {GPUMaterialExtRecord{}, iridescenceRecord(0.5f, 1.8f, 100.0f, 1200.0f),
+                                         GPUMaterialExtRecord{}, iridescenceRecord(1.0f, 1.3f, 100.0f, 0.0f), // thickness 0: film off
+                                         GPUMaterialExtRecord{}, iridescenceRecord(1.0f, 1.3f, 100.0f, 400.0f, 5u),
+                                         GPUMaterialExtRecord{}, iridescenceRecord(1.0f, 1.3f, 100.0f, 400.0f, INVALID_TEXTURE_INDEX, 6u)};
+    auto e = expectedLobeParams(iridescentMaterial(0), ext, MATERIAL_FEATURE_IRIDESCENCE);
+    CHECK(e.params.features == MATERIAL_FEATURE_IRIDESCENCE);
+    CHECK(e.params.iridescenceFactor == 0.5f);
+    CHECK(e.params.iridescenceIor == 1.8f);
+    CHECK(e.params.iridescenceThickness == 1200.0f); // the maximum without a thickness texture
+    CHECK_FALSE(e.unverified);
+    CHECK(expectedLobeParams(iridescentMaterial(2), ext, MATERIAL_FEATURE_IRIDESCENCE).params.iridescenceFactor == 0.0f);
+    CHECK(expectedLobeParams(iridescentMaterial(2), ext, MATERIAL_FEATURE_IRIDESCENCE).params.iridescenceThickness == 0.0f);
+    CHECK(expectedLobeParams(iridescentMaterial(4), ext, MATERIAL_FEATURE_IRIDESCENCE).unverified);
+    CHECK(expectedLobeParams(iridescentMaterial(6), ext, MATERIAL_FEATURE_IRIDESCENCE).unverified);
+    CHECK(expectedLobeParams(iridescentMaterial(0), ext, MATERIAL_FEATURE_SPECULAR_IOR).params.features == 0);
+    bool valid = true;
+    CHECK(expectedLobeParams(iridescentMaterial(7), ext, MATERIAL_FEATURE_IRIDESCENCE, &valid).unverified);
+    CHECK_FALSE(valid);
+    const LobeParams u = unpackLobeGuide(packLobeGuide(e.params));
+    CHECK(u.iridescenceFactor == 0.5f);
+    CHECK(u.iridescenceIor == doctest::Approx(1.8f).epsilon(1e-3));
+    CHECK(u.iridescenceThickness == 1200.0f);
 }
