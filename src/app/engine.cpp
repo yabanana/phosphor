@@ -1708,7 +1708,7 @@ bool Engine::frame(float dt) {
     if (shadows_) {
         ShadowPasses::Frame sf;sf.slot=frame.slot;sf.index=frame.index;sf.view=currentView_;sf.scene=sceneEpoch_;
         sf.width=renderWidth;sf.height=renderHeight;sf.backingWidth=renderBackingWidth_;sf.backingHeight=renderBackingHeight_;
-        sf.cut=viewCameraCut;sf.reset=(options_.historyResetEvery && presentedFrames_%options_.historyResetEvery==0) || (atmosphere_&&atmosphere_->clockReset());
+        sf.cut=viewCameraCut;sf.explicitCut=scriptedCut;sf.reset=(options_.historyResetEvery && presentedFrames_%options_.historyResetEvery==0) || (atmosphere_&&atmosphere_->clockReset());
         sf.motionSinCos=motionSinCos_;sf.motionSinCosValid=true;
         sf.constants=constants;sf.nearPlane=camera_->getNear();std::memcpy(sf.unjitteredVP,&unjittered[0][0],64);
         shadows_->prepareFrame(*store_,lights_,sf);

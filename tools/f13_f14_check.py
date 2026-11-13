@@ -313,13 +313,17 @@ def make_cases(out,frames,sdk_policy,probe_dir=None):
     cloudBase=[*volume_base,"--atmosphere","on","--fog","off","--clouds","on"]
     full_frame=[("full-frame",[0.0,0.0,1.0,1.0])]
     flights={
-        # 200 m/s climbs (3.3 m per frame, below the engine's 4 m camera-cut
-        # rule) across the 1500 m base and the 4000 m top, horizon centred. A
-        # 700 m/s climb through the whole layer was a cut every frame.
+        # 200 m/s climbs (3.3 m per frame) across the 1500 m base and the
+        # 4000 m top, horizon centred.
         "flight-base":([*cloudBase,"--day-length","1200","--start-hour","11","--planet-camera-height","1000","--camera-climb","200","--camera-pitch","0"],
                        full_frame,{"flight_altitude":{"below":1500.0,"above":4000.0,"minimum_frames":10,"require":["below","inside"]}}),
         "flight-top":([*cloudBase,"--day-length","1200","--start-hour","11","--planet-camera-height","3500","--camera-climb","200","--camera-pitch","0"],
                       full_frame,{"flight_altitude":{"below":1500.0,"above":4000.0,"minimum_frames":10,"require":["inside","above"]}}),
+        # 700 m/s (11.7 m per frame, beyond the 4 m camera-cut heuristic)
+        # through the whole layer: cloud history must survive continuous
+        # flight; only declared cuts reset it (per-pixel tests do the rest).
+        "flight-fast":([*cloudBase,"--day-length","1200","--start-hour","11","--planet-camera-height","1000","--camera-climb","700","--camera-pitch","0"],
+                       full_frame,{"flight_altitude":{"below":1500.0,"above":4000.0,"minimum_frames":10,"require":["below","inside","above"]}}),
         # Low sun (about 5 degrees) 8 degrees below the image centre; the
         # solar disk itself stays outside every ROI.
         "backlit":([*cloudBase,"--day-length","1200","--start-hour","6.5","--planet-camera-height","2","--camera-aim-sun","8"],
