@@ -43,7 +43,14 @@ Declared engine conventions (every item is part of the JSON report):
   BSDF * cos * L, not a split-sum fit (half-vector parametrisation with the
   GGX CDF, midpoint rule; the table is a function of roughness and N.V only).
 - Camera: one ray through each pixel centre, no reconstruction filter.
-- Shadows: none (the scenarios declare `--shadows off`), no inter-reflection.
+- Shadows: none for the sun (the scenarios declare `--shadows off`), no inter-reflection.
+- Point lights (F15.1, ticket 07): white delta lights of the snapshot (type 1) with the engine's declared
+  falloff, incident radiance = colour * intensity * window^2 / max(d^2, 1e-4) with
+  window = clamp(1 - (d / max(range, 1e-3))^4, 0, 1); the BSDF is evaluated at the light direction.
+  Visibility (`--visibility rays`, the DI runs: DI traces local-light visibility with RT) comes from Mitsuba
+  shadow rays from the hit offset 1e-4 along the shading normal; `--visibility none` (the legacy resolve,
+  whose local lights are unshadowed) skips it.  The `lit` mask holds N.L > 0 and, with rays, the visible
+  pixels, so the runner's terminator band also excludes shadow boundaries.
 
 Second, independent model (`--declared`): the DECLARED environment model of the
 engine (ADR-0006), re-implemented here from its documentation, not translated
@@ -285,6 +292,29 @@ def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius
     return (total + spec_sum) * np.asarray(irradiance, dtype=np.float64), narrow
 
 
+# --- point lights ------------------------------------------------------------
+
+def point_window(distance, light_range):
+    ratio = distance / max(float(light_range), 1e-3)
+    return np.clip(1.0 - ratio ** 4, 0.0, 1.0) ** 2
+
+
+def point_radiance(base, metallic, roughness, n, v, position, light, model=APPENDIX_B, dielectric=None, visible=None):
+    """Outgoing radiance per pixel from one white delta point light; returns (radiance (n,3), lit (n,))."""
+    delta = np.asarray(light["position"], dtype=np.float64)[None, :] - position
+    distance = np.linalg.norm(delta, axis=1)
+    l = delta / distance[:, None]
+    geometry = point_window(distance, light["range"]) / np.maximum(distance * distance, 1e-4)
+    incident = np.asarray(light["color"], dtype=np.float64)[None, :] * float(light["intensity"]) * geometry[:, None]
+    n_dot_l = np.clip(dot(n, l), 0.0, 1.0)
+    value = bsdf(base, metallic, roughness, n, v, l, model, dielectric) * n_dot_l[:, None] * incident
+    lit = dot(n, l) > 0
+    if visible is not None:
+        value = value * visible[:, None]
+        lit = lit & visible
+    return value, lit
+
+
 # --- environment ------------------------------------------------------------
 
 _TABLES = {}
@@ -474,8 +504,8 @@ def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, 
 
 # --- ray casting ------------------------------------------------------------
 
-def cast_primary_rays(root, data, threads):
-    """Pixel-centre primary hits with Mitsuba: (valid, position, shading normal, instance index)."""
+def mitsuba_scene(root, data, threads):
+    """The snapshot meshes as one Mitsuba scene (shape ids `instance_<index>`)."""
     import drjit as dr
     import mitsuba as mi
 
@@ -489,7 +519,35 @@ def cast_primary_rays(root, data, threads):
             "type": "ply", "filename": str(root / data["meshes"][instance["mesh"]]),
             "face_normals": False,
             "to_world": transform(np.asarray(instance["world"], dtype=np.float64).reshape(4, 4, order="F"))}
-    scene = mi.load_dict(description)
+    return mi.load_dict(description)
+
+
+SHADOW_OFFSET = 1e-4
+
+
+def shadow_visibility(root, data, position, normal, target, threads):
+    """1 where the segment from position (offset along normal) to target hits nothing, per row."""
+    import drjit as dr  # noqa: F401  (variant set by mitsuba_scene)
+    import mitsuba as mi
+
+    scene = mitsuba_scene(root, data, threads)
+    origin = position + SHADOW_OFFSET * normal
+    delta = np.asarray(target, dtype=np.float64)[None, :] - origin
+    distance = np.linalg.norm(delta, axis=1)
+    direction = delta / distance[:, None]
+    ray = mi.Ray3f(mi.Point3f(mi.Float(origin[:, 0].copy()), mi.Float(origin[:, 1].copy()), mi.Float(origin[:, 2].copy())),
+                   mi.Vector3f(mi.Float(direction[:, 0].copy()), mi.Float(direction[:, 1].copy()),
+                               mi.Float(direction[:, 2].copy())))
+    ray.maxt = mi.Float((distance * (1.0 - 1e-6)).copy())
+    return ~np.asarray(scene.ray_test(ray))
+
+
+def cast_primary_rays(root, data, threads):
+    """Pixel-centre primary hits with Mitsuba: (valid, position, shading normal, instance index)."""
+    import drjit as dr
+    import mitsuba as mi
+
+    scene = mitsuba_scene(root, data, threads)
     identifiers = np.asarray(dr.reinterpret_array(mi.UInt32, scene.shapes_dr()))
     index_of = {int(i): k for k, (shape, i) in enumerate(zip(scene.shapes(), identifiers))}
     names = [shape.id() for shape in scene.shapes()]
@@ -596,20 +654,30 @@ def require_declared_scene(data):
             raise ValueError("instanced material samples a texture; the Appendix B reference is texture-free")
         if any(v > 0 for v in material["emissive"]) or material["alpha_cutoff"] > 0:
             raise ValueError("emissive or alpha-masked material is outside the declared model")
-    if any(light["type"] != 0 for light in data["lights"]) or len(data["lights"]) > 1:
-        raise ValueError("at most one directional light (the sun) is modelled")
+    if any(light["type"] not in (0, 1) for light in data["lights"]) or \
+            sum(light["type"] == 0 for light in data["lights"]) > 1:
+        raise ValueError("at most one directional light (the sun) and white point lights are modelled")
+    for light in data["lights"]:
+        if light["type"] == 1 and not (light["color"][0] == light["color"][1] == light["color"][2]):
+            raise ValueError("point lights must be white")
     sky = data["sky"]
     if not (sky[0] == sky[1] == sky[2]):
         raise ValueError("the environment must be isotropic and grey")
-    if data["sampled_lights"]:
-        raise ValueError("sampled (area) lights are outside the declared model")
+    points = [light for light in data["lights"] if light["type"] == 1]
+    for sampled in data["sampled_lights"]:
+        # DI lists the delta point lights it samples; anything else (area/emissive) is outside the model.
+        same = [light for light in points if sampled["type"] == 1 and
+                max(abs(a - b) for a, b in zip(sampled["position"], light["position"])) <= 1e-5]
+        if not same:
+            raise ValueError("sampled (area) lights are outside the declared model")
 
 
-def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environment=None):
+def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environment=None, visibility=None):
     """Reference radiance image (h, w, 3) float32 plus masks and the per-sphere table.
 
     `environment` None = exact quadrature of the literal model; a DECLARED variant dict = the engine's declared
-    environment model (the sun term is the same in both)."""
+    environment model (the sun term is the same in both).  `visibility`: None (no shadow rays) or a list with
+    one boolean array per point light (shadow rays, see point_light_visibility)."""
     require_declared_scene(data)
     valid, position, normal, instance, (width, height) = cast or cast_primary_rays(
         root, data, threads or min(8, os.cpu_count() or 1))
@@ -635,7 +703,15 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
     terms = []
     sky = float(data["sky"][0])
     sun_radius = float(data.get("sun_angular_radius", 0.0))
-    for light in data["lights"]:
+    points = [light for light in data["lights"] if light["type"] == 1]
+    for k, light in enumerate(points):
+        visible = None if visibility is None else visibility[k]
+        value, light_lit = point_radiance(base, metallic, roughness, n, v, position[pick], light, model, sun_dielectric,
+                                          visible)
+        radiance += value
+        lit = lit | light_lit
+        terms.append("point-light-shadowed" if visible is not None else "point-light")
+    for light in (light for light in data["lights"] if light["type"] == 0):
         toward = -normalize(np.asarray(light["direction"], dtype=np.float64))
         irradiance = np.asarray(light["color"], dtype=np.float64) * float(light["intensity"])
         if sun_radius <= 0:
@@ -643,7 +719,7 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
         sun, narrow = sun_radiance(base, metallic, roughness, n, v, toward, irradiance, sun_radius, model,
                                    sun_dielectric)
         radiance += sun
-        lit = dot(n, np.broadcast_to(toward, n.shape)) > 0
+        lit = lit | (dot(n, np.broadcast_to(toward, n.shape)) > 0)
         terms.append("sun-disk")
     if sky > 0:
         if environment is None:
@@ -671,19 +747,30 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
     return image.reshape(height, width, 3).astype(np.float32), masks, spheres, terms
 
 
+def point_light_visibility(root, data, cast, threads):
+    """Per point light, the shadow-ray visibility of the valid primary hits (pixel order of render_frame)."""
+    valid, position, normal, _, _ = cast
+    pick = np.flatnonzero(valid.reshape(-1))
+    return [shadow_visibility(root, data, position[pick], normalize(normal[pick]), light["position"], threads)
+            for light in data["lights"] if light["type"] == 1]
+
+
 def command_render(args):
     root, data = snapshot(args.snapshot)
     out = pathlib.Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     cast = cast_primary_rays(root, data, args.threads)
+    visibility = point_light_visibility(root, data, cast, args.threads) if args.visibility == "rays" else None
     main_model = SPECULAR_EXT if uses_specular_extension(data) else APPENDIX_B
     controls = {"": main_model, **{name: CONTROLS[name] for name in args.controls}}
     report = {"schema": 1, "tool": "tools/f15_reference.py", "tool_sha256": sha256_file(__file__), "model": MODEL,
               "snapshot_sha256": scene_digest(root), "frame": data.get("frame"),
               "sun_angular_radius": data.get("sun_angular_radius"), "sky": data["sky"],
-              "lights": data["lights"], "controls": {}, "deterministic": True}
+              "lights": data["lights"], "visibility": args.visibility, "controls": {}, "deterministic": True}
+    if visibility is not None:
+        report["shadowed_hits"] = [int((~v).sum()) for v in visibility]
     for name, model in controls.items():
-        image, masks, spheres, terms = render_frame(root, data, model, cast=cast)
+        image, masks, spheres, terms = render_frame(root, data, model, cast=cast, visibility=visibility)
         stem = "reference" if not name else f"control-{name}"
         write_pfm(out / f"{stem}.pfm", image)
         if not name:
@@ -697,11 +784,13 @@ def command_render(args):
         # The declared environment model on the same cast: the image and its negative controls.
         declared = {"model": DECLARED, "file": "declared.pfm", "dfg_table": str(DFG_HEADER.relative_to(REPO)),
                     "dfg_table_sha256": sha256_file(DFG_HEADER), "controls": {}}
-        image, masks, _, terms = render_frame(root, data, model=main_model, cast=cast, environment=DECLARED)
+        image, masks, _, terms = render_frame(root, data, model=main_model, cast=cast, environment=DECLARED,
+                                              visibility=visibility)
         write_pfm(out / "declared.pfm", image)
         declared["terms"] = terms
         for name in args.declared_controls:
-            image, *_ = render_frame(root, data, model=main_model, cast=cast, environment=ALL_DECLARED_CONTROLS[name])
+            image, *_ = render_frame(root, data, model=main_model, cast=cast, environment=ALL_DECLARED_CONTROLS[name],
+                                     visibility=visibility)
             write_pfm(out / f"control-{name}.pfm", image)
             declared["controls"][name] = {"model_variant": ALL_DECLARED_CONTROLS[name], "file": f"control-{name}.pfm"}
         report["declared"] = declared
@@ -722,6 +811,8 @@ def main(argv=None):
                    help="also render the engine's declared environment model (declared.pfm)")
     p.add_argument("--declared-controls", nargs="*", default=[], choices=sorted(ALL_DECLARED_CONTROLS),
                    help="negative controls of the declared model (implies --declared)")
+    p.add_argument("--visibility", choices=["none", "rays"], default="none",
+                   help="point-light visibility: none (legacy resolve lights) or Mitsuba shadow rays (DI)")
     p.add_argument("--threads", type=int, default=min(8, os.cpu_count() or 1))
     p.set_defaults(function=command_render)
     args = parser.parse_args(argv)

@@ -606,6 +606,72 @@ class RayCastedSnapshot(unittest.TestCase):
             # A lit diffuse-dominated pixel: rough dielectric ~ albedo/pi * E * cos (+ small specular).
             self.assertGreater(float(image[lit].max()), 0.05)
 
+    def test_point_light_shadow_rays_follow_an_occluder(self):
+        # Sphere 0 at the origin, sphere 1 between it and a point light on +x: with shadow rays the lit side of
+        # sphere 0 is black, without them it is lit; the occluder itself stays lit.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.snapshot(tmp, 0.0, None, 0.0, 0.5, [0.8, 0.35, 0.15])
+            data = json.loads((root / "scene.json").read_text())
+            data["instances"].append({**data["instances"][0], "slot": 1,
+                                      "world": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1.2, 0, 0, 1]})
+            data["lights"].append({"type": 1, "position": [3.0, 0.0, 0.0], "direction": [0, 0, -1],
+                                   "color": [1, 1, 1], "intensity": 9.0, "range": 100.0, "inner": 0, "outer": 0})
+            (root / "scene.json").write_text(json.dumps(data))
+            from f12_reference import snapshot as load
+            root, data = load(root)
+            cast = ref.cast_primary_rays(root, data, 2)
+            visibility = ref.point_light_visibility(root, data, cast, 2)
+            self.assertEqual(len(visibility), 1)
+            open_image, open_masks, _, terms = ref.render_frame(root, data, cast=cast)
+            self.assertEqual(terms, ["point-light"])
+            shadow_image, shadow_masks, _, terms = ref.render_frame(root, data, cast=cast, visibility=visibility)
+            self.assertEqual(terms, ["point-light-shadowed"])
+            facing_light = open_masks["roi"] & open_masks["lit"]
+            occluded = facing_light & (open_masks["sphere"] == 0)
+            occluder = facing_light & (open_masks["sphere"] == 1)
+            self.assertGreater(int(occluded.sum()), 50)
+            self.assertGreater(int(occluder.sum()), 50)
+            self.assertGreater(float(open_image[occluded].max()), 0.01)
+            self.assertLess(float(shadow_image[occluded].max()), 1e-6)  # the whole lit side is in the shadow
+            self.assertFalse(bool((shadow_masks["lit"] & occluded).any()))
+            # The occluder is only self-shadowed at its terminator (tessellated facets behind the interpolated
+            # normal: grazing pixels, the band the runner excludes): elsewhere both images are identical.
+            same = np.all(shadow_image[occluder] == open_image[occluder], axis=-1)
+            self.assertGreater(float(same.mean()), 0.85)
+            self.assertLess(float(open_image[occluder][~same].max()), 0.25 * float(open_image[occluder].max()))
+
+    def test_point_light_inverse_square_and_window(self):
+        light = {"type": 1, "position": [0.0, 0.0, 2.0], "color": [1, 1, 1], "intensity": 4.0, "range": 100.0}
+        n = np.array([[0.0, 0.0, 1.0], [0.0, 0.0, -1.0]])
+        v = np.array([[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]])
+        position = np.zeros((2, 3))
+        base = np.array([[0.8, 0.35, 0.15]] * 2)
+        value, lit = ref.point_radiance(base, np.zeros(2), np.full(2, 0.5), n, v, position, light)
+        window = (1 - (2.0 / 100.0) ** 4) ** 2
+        expected = ref.bsdf(base[:1], np.zeros(1), np.full(1, 0.5), n[:1], v[:1], np.array([[0.0, 0.0, 1.0]]))
+        np.testing.assert_allclose(value[0], expected[0] * 4.0 * window / 4.0, rtol=1e-12)
+        self.assertEqual(lit.tolist(), [True, False])
+        np.testing.assert_array_equal(value[1], 0.0)
+        self.assertAlmostEqual(float(ref.point_window(np.array(50.0), 100.0)), (1 - 0.5 ** 4) ** 2)
+        self.assertEqual(float(ref.point_window(np.array(150.0), 100.0)), 0.0)
+
+    def test_point_lights_and_their_sampled_delta_twins_are_in_the_declared_scene(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.snapshot(tmp, 0.0, None, 0.0, 0.5, [0.8, 0.35, 0.15])
+            data = json.loads((root / "scene.json").read_text())
+            point = {"type": 1, "position": [1.0, 2.0, 3.0], "direction": [0, 0, -1], "color": [1, 1, 1],
+                     "intensity": 9.0, "range": 100.0, "inner": 0, "outer": 0}
+            data["lights"].append(point)
+            data["sampled_lights"].append({"type": 1, "position": [1.0, 2.0, 3.0]})
+            ref.require_declared_scene(data)
+            data["sampled_lights"].append({"type": 3, "position": [1.0, 2.0, 3.0]})  # an area light
+            with self.assertRaises(ValueError):
+                ref.require_declared_scene(data)
+            data["sampled_lights"].pop()
+            data["lights"][0] = {**point, "color": [1, 0.5, 1]}
+            with self.assertRaises(ValueError):
+                ref.require_declared_scene(data)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

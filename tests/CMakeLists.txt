@@ -122,7 +122,7 @@ if(UV_EXECUTABLE)
         TIMEOUT 180)
 endif()
 if(UV_EXECUTABLE AND F15_PYTHON_PROBE_RESULT EQUAL 0)
-    foreach(f15_test f15_reference f15_check)
+    foreach(f15_test f15_reference f15_check filter_pipeline_harvest)
         add_test(NAME ${f15_test}_python
             COMMAND ${UV_EXECUTABLE} run --offline --no-project --python 3.13 --with mitsuba==3.9.1 --with numpy
                     python -I ${CMAKE_SOURCE_DIR}/tools/test_${f15_test}.py)

@@ -161,7 +161,7 @@ class RunnerLogic(unittest.TestCase):
             self.assertEqual(sorted(plan["commands"]), sorted(check.SCENARIOS))
             for name, commands in plan["commands"].items():
                 capture = commands["capture"]
-                self.assertEqual(capture[capture.index("--material-scenario") + 1], name)
+                self.assertEqual(capture[capture.index("--material-scenario") + 1], check.bench_scenario(name))
                 self.assertEqual(capture[capture.index("--bench") + 1], "2")
                 for flag in ("--capture-linear", "--export-reference", "--reflections", "--resolution"):
                     self.assertIn(flag, capture)
@@ -193,6 +193,56 @@ class RunnerLogic(unittest.TestCase):
             for name in ("declared-specular-ignored", "declared-f90-one", "declared-specular-weight-not-on-f0"):
                 self.assertIn(name, env["reference"])
             self.assertTrue(check.SCENARIOS["specular-grid-sun"]["always_green"])
+
+    def test_point_light_variants_share_the_bench_scene_and_set_lighting_rt_and_visibility(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = check.main(["--out", tmp, "--binary", "build/release/phosphor", "--only", "specular-grid-point",
+                                   "--only", "specular-grid-point@restir", "--only", "specular-grid-point@clustered"])
+            self.assertEqual(code, 0)
+            plan = json.loads((pathlib.Path(tmp) / "plan.json").read_text())
+            for name, lighting, rt, visibility in (("specular-grid-point", "legacy", "off", "none"),
+                                                   ("specular-grid-point@restir", "restir", "on", "rays"),
+                                                   ("specular-grid-point@clustered", "clustered", "on", "rays")):
+                capture = plan["commands"][name]["capture"]
+                reference = plan["commands"][name]["reference"]
+                self.assertEqual(capture[capture.index("--material-scenario") + 1], "specular-grid-point")
+                self.assertEqual(capture[capture.index("--lighting") + 1], lighting)
+                self.assertEqual(capture[capture.index("--rt") + 1], rt)
+                self.assertEqual(capture[capture.index("--shadows") + 1], "off")
+                self.assertEqual(reference[reference.index("--visibility") + 1], visibility)
+                self.assertEqual(capture[capture.index("--lighting-denoise") + 1],
+                                 "custom" if lighting == "legacy" else "off")
+                for control in ("specular-ignored", "f90-one", "specular-weight-not-on-f0"):
+                    self.assertIn(control, reference)
+        self.assertTrue(check.SCENARIOS["specular-grid-point"]["always_green"])
+        self.assertEqual(check.SCENARIOS["specular-grid-point@restir"]["pending"], "ticket 07")
+
+    def test_terminator_band_width_two_reaches_two_pixels_into_the_lit_side(self):
+        lit = np.zeros((7, 9), dtype=bool)
+        lit[:, 4:] = True  # columns 4.. lit, 0..3 unlit, one sphere
+        sphere = np.zeros((7, 9), dtype=np.int64)
+        one = check.terminator_band(np, lit, sphere)
+        two = check.terminator_band(np, lit, sphere, 2)
+        self.assertEqual(sorted(set(np.nonzero(one)[1].tolist())), [4])
+        self.assertEqual(sorted(set(np.nonzero(two)[1].tolist())), [4, 5])
+        other = np.ones((7, 9), dtype=np.int64)
+        other[:, 4:] = 2  # the unlit pixels belong to another sphere: no band
+        self.assertFalse(check.terminator_band(np, lit, other, 2).any())
+
+    def test_pending_scenario_must_fail_in_every_mode_and_green_requires_it(self):
+        failing = {"kind": "direct", "pass": False, "rows": {}}
+        passing = {"kind": "direct", "pass": True, "rows": {}}
+        for mode in ("red", "green"):
+            self.assertTrue(check.expectation("direct", mode, failing, pending="ticket 07")["met"])
+            self.assertFalse(check.expectation("direct", mode, passing, pending="ticket 07")["met"])
+        ok = {"discriminating": True, "gates_pass": True, "pending": None, "result": passing,
+              "expectation": {"met": True}}
+        pending_failing = {"discriminating": True, "gates_pass": False, "pending": "ticket 07", "result": failing,
+                           "expectation": {"met": True}}
+        pending_passing = {**pending_failing, "gates_pass": True, "result": passing}
+        self.assertEqual(check.verdict([ok, pending_failing], "green"), ("GREEN", check.EXIT_OK))
+        self.assertEqual(check.verdict([ok, pending_passing], "green")[1], check.EXIT_UNEXPECTED)
 
     def test_plan_prints_the_exact_commands_of_the_new_scenarios(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -388,7 +438,8 @@ class RunnerLogic(unittest.TestCase):
         source = (HERE.parent / "src" / "testbench" / "material_validation.cpp").read_text()
         import re
         block = source[source.index("kScenarios{"):source.index("};", source.index("kScenarios{"))]
-        self.assertEqual(sorted(re.findall(r'"([a-z0-9-]+)"', block)), sorted(check.SCENARIOS))
+        self.assertEqual(sorted(re.findall(r'"([a-z0-9-]+)"', block)),
+                         sorted({check.bench_scenario(name) for name in check.SCENARIOS}))
 
     def test_declared_gate_bounds(self):
         masks, spheres = self.synthetic_masks()

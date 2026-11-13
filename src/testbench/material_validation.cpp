@@ -14,10 +14,10 @@
 namespace phosphor {
 namespace {
 // The names are mirrored by tools/f15_check.py SCENARIOS (tests/test_material_validation.cpp compares both).
-constexpr std::array<std::string_view, 9> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
-                                                     "furnace-base",   "furnace-resolve",     "roughness-extremes",
-                                                     "roughness-extremes-sun", "specular-grid-sun",
-                                                     "specular-grid-env-resolve"};
+constexpr std::array<std::string_view, 10> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
+                                                      "furnace-base",   "furnace-resolve",     "roughness-extremes",
+                                                      "roughness-extremes-sun", "specular-grid-sun",
+                                                      "specular-grid-env-resolve", "specular-grid-point"};
 constexpr float pi = 3.14159265358979323846f;
 
 glm::quat orientLight(glm::vec3 towardLight) {
@@ -51,6 +51,15 @@ const std::vector<MaterialScenarioSpec>& specs() {
     static const std::vector<float> specFactor{1.0f, 0.5f, 1.0f, 0.5f, 0.5f};
     static const std::vector<glm::vec3> specColor{glm::vec3(1.0f), glm::vec3(1.0f), glm::vec3(2.0f),
                                                   glm::vec3(2.0f, 1.0f, 0.5f), glm::vec3(2.0f)};
+    // F15.1 (ticket 07): the same grid lit by one point light, side-lit from behind like the sun (V.L about
+    // -0.5 at the grid centre, so Fresnel discriminates f90 and the specular weight).  Spheres may shadow
+    // their neighbours: DI traces that visibility (the reference casts the same shadow rays), the legacy
+    // resolve's local lights are unshadowed (reference without visibility).  9 m from the grid centre,
+    // 250 W/sr gives about the sun's 3 W/m^2; range 100 m keeps the engine's window within 5e-4 of 1
+    // (declared exactly by the reference).
+    static const glm::vec3 gridCentre(0.0f, 2.0f, 0.0f);
+    static const MaterialPointLight backLight{gridCentre + 9.0f * glm::normalize(glm::vec3(-0.65f, 0.55f, -0.52f)),
+                                              250.0f, 100.0f};
     static const std::vector<MaterialScenarioSpec> all{
         {"base-grid-sun", roughness, metallic, copper, true, 3.0f, towardSun, 0.0f},
         {"base-grid-env", roughness, metallic, copper, false, 0.0f, towardSun, 0.5f},
@@ -73,6 +82,10 @@ const std::vector<MaterialScenarioSpec>& specs() {
         // declared split-sum model f0 * A + f90 * B per lobe.
         {"specular-grid-env-resolve", specRoughness, specMetallic, copper, false, 0.0f, towardSun, 0.5f, specIor,
          specFactor, specColor},
+        // One point light only (no sun, environment 0): the resolve's local lights with --lighting legacy,
+        // ReSTIR or clustered DI otherwise (the DI grid of ticket 07).
+        {"specular-grid-point", specRoughness, specMetallic, copper, false, 0.0f, towardSun, 0.0f, specIor,
+         specFactor, specColor, {backLight}},
     };
     return all;
 }
@@ -153,6 +166,20 @@ void MaterialValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& textur
         light.intensity = s.sunIrradiance;
         ecs.addComponent(sun_, std::move(light));
     }
+    for (const MaterialPointLight& point : s.pointLights) {
+        const EntityID e = ecs.createEntity();
+        pointLights_.push_back(e);
+        TransformComponent transform;
+        transform.position = point.position;
+        transform.updateMatrix();
+        ecs.addComponent(e, std::move(transform));
+        LightComponent light;
+        light.type = LightType::Point;
+        light.color = glm::vec3(1.0f);
+        light.intensity = point.intensity;
+        light.range = point.range;
+        ecs.addComponent(e, std::move(light));
+    }
 }
 
 void MaterialValidation::update(float, ECS& ecs) {
@@ -174,6 +201,8 @@ void MaterialValidation::update(float, ECS& ecs) {
 void MaterialValidation::teardown(ECS& ecs, GpuScene&) {
     for (EntityID e : spheres_) ecs.destroyEntity(e);
     if (sun_ != INVALID_ENTITY) ecs.destroyEntity(sun_);
+    for (EntityID e : pointLights_) ecs.destroyEntity(e);
+    pointLights_.clear();
     spheres_.clear();
     sun_ = INVALID_ENTITY;
 }

@@ -96,3 +96,13 @@ Thresholds (fixed now, before any comparison):
   above 1.005 recur across the three seeds. Its gate is the per-sphere mean
   (energy in expectation) at the same bound 1.005 (measured max 1.00001); the
   per-pixel maximum is reported. The bound value is unchanged.
+- DI amendment (2026-11-13, ticket 07 harness): the direct gate of the point-light
+  grid applies to the DI estimator, captured unfiltered (`--lighting-denoise
+  off`). With the custom denoiser the DI image of one delta light deviates from
+  the base model by up to 18 % per pixel on the metal row (sharp highlights
+  blurred). Unfiltered, ReSTIR and clustered DI equal the base model at p99
+  ≤ 0.07 % on every row; the denoiser belongs to ticket 08. RT-visibility
+  scenarios use a 2-pixel terminator band. Evidence: unfiltered, 14 of 15 668
+  lit-ROI pixels were black in the engine and lit in the reference, all exactly
+  2 px from the shadow boundary. The engine's shadow-ray offset on the
+  tessellated facets moves the terminator. Thresholds are unchanged.

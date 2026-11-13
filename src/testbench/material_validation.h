@@ -18,6 +18,14 @@ namespace phosphor {
 //
 // SOURCE ONLY / NOT VERIFIED on a device until the orchestrator runs the
 // captures; see tools/f15_check.py for the exact command lines.
+// F15.1 (ticket 07): a white point light of the declared model (inverse square times the engine's range
+// window; intensity in W/sr, so the irradiance at distance d facing the light is intensity / d^2).
+struct MaterialPointLight {
+    glm::vec3 position{0.0f};
+    float intensity = 0.0f;
+    float range = 100.0f;
+};
+
 struct MaterialScenarioSpec {
     std::string_view name;
     std::vector<float> roughness; // one grid column each (left to right)
@@ -32,6 +40,8 @@ struct MaterialScenarioSpec {
     std::vector<float>     ior;            // per column; 0 is the permanent "Fresnel = 1" mode
     std::vector<float>     specularFactor; // per row, [0, 1]
     std::vector<glm::vec3> specularColor;  // per row, may exceed 1
+    // F15.1 (ticket 07): local point lights (DI lights with --lighting restir|clustered, resolve lights with legacy).
+    std::vector<MaterialPointLight> pointLights;
     [[nodiscard]] bool hasSpecularGrid() const { return !ior.empty(); }
 };
 
@@ -59,6 +69,7 @@ public:
     [[nodiscard]] std::string_view scenario() const { return scenario_; }
     [[nodiscard]] std::span<const EntityID> spheres() const { return spheres_; } // row-major: row * columns + column
     [[nodiscard]] EntityID sun() const { return sun_; }
+    [[nodiscard]] std::span<const EntityID> pointLights() const { return pointLights_; }
 
     // Probe spheres of the toggle test (row-major index): the neutral sphere whose feature bit flips
     // and the sphere whose specularFactor alternates.
@@ -77,6 +88,7 @@ private:
     u32 toggleEvery_ = 0, updates_ = 0;
     std::vector<EntityID> spheres_;
     EntityID sun_ = INVALID_ENTITY;
+    std::vector<EntityID> pointLights_;
 };
 
 } // namespace phosphor

@@ -29,6 +29,11 @@ reference ray casting):
   the direct gate per (metallic, specular weight, colour) group, specular-grid-env-resolve the declared-model
   gate (split-sum f0 * A + f90 * B per lobe), both with the bounds above unchanged.  Negative controls on the
   reference side that must fail: specular extension ignored, f90 forced to 1, specular weight not applied to f0.
+- Point light (F15.1, ticket 07): specular-grid-point is the ior x specular grid lit by one white point light,
+  gated like a direct grid.  Lighting variants share the bench scene ("<bench>@<lighting>" keys): legacy
+  (resolve local lights, reference without visibility), @restir and @clustered (DI with RT visibility,
+  reference shadow rays).  A "pending" variant is asserted to FAIL until its ticket lands (DI reads the
+  base BRDF before ticket 07); `--expect green` then requires that failure, and every other gate to pass.
 - declared (base-grid-env-resolve; also furnace-resolve next to its furnace
   gate): the engine image against the independent declared-environment model of
   tools/f15_reference.py (DFG table, ADR-0006): per sphere mean relative error
@@ -132,6 +137,30 @@ SCENARIOS = {
                                                "declared-specular-weight-not-on-f0"],
                                   "terms": "constant environment only (radiance 0.5, no sun) on the ior x specular grid, "
                                            "deterministic resolve terms (--reflections off --lighting-denoise custom)"},
+    # F15.1 (ticket 07): the ior x specular grid lit by one point light (bench scenario specular-grid-point; a
+    # key "<bench>@<lighting>" is a lighting variant of the same bench scenario).  legacy: the resolve's local
+    # lights, unshadowed (reference without visibility).  restir / clustered: DI lights with RT visibility
+    # (reference shadow rays), captured unfiltered (--lighting-denoise off: the gate measures the DI estimator;
+    # the custom denoiser blurs the sharp highlights by up to 18 % per pixel, measured 2026-11-13, and is
+    # ticket 08's), terminator band 2 px (RT shadow-ray offsets on the tessellated facets).  "pending": DI
+    # evaluates the base BRDF until that ticket lands, so the gate is EXPECTED to fail and the image must pass
+    # against the "pending_matches" control (the base BRDF) instead; remove both keys when the ticket is done.
+    "specular-grid-point": {"kind": "direct", "always_green": True, "lighting": "legacy", "visibility": "none",
+                            "controls": ["specular-ignored", "f90-one", "specular-weight-not-on-f0"],
+                            "terms": "one point light only (no sun, environment 0, no GI), resolve local lights "
+                                     "(--lighting legacy), on the ior x specular grid"},
+    "specular-grid-point@restir": {"kind": "direct", "lighting": "restir", "visibility": "rays", "denoise": "off",
+                                   "terminator_band": 2, "pending_matches": "specular-ignored", "pending": "ticket 07",
+                                   "controls": ["specular-ignored", "f90-one", "specular-weight-not-on-f0"],
+                                   "terms": "one point light only, ReSTIR DI with RT visibility (--lighting restir "
+                                            "--rt on), unfiltered (--lighting-denoise off), on the ior x specular grid"},
+    "specular-grid-point@clustered": {"kind": "direct", "lighting": "clustered", "visibility": "rays", "denoise": "off",
+                                      "terminator_band": 2, "pending_matches": "specular-ignored",
+                                      "pending": "ticket 07",
+                                      "controls": ["specular-ignored", "f90-one", "specular-weight-not-on-f0"],
+                                      "terms": "one point light only, clustered DI with RT visibility "
+                                               "(--lighting clustered --rt on), unfiltered (--lighting-denoise off), "
+                                               "on the ior x specular grid"},
 }
 # Red-state expectations (before ticket 03): direct metallic rows 0 and 1 pass, intermediate rows fail.
 GPU_PROCESS = re.compile(r"^(phosphor|soc_bench|f\d+_spike)$")
@@ -210,13 +239,21 @@ def build_manifest(binary, metallib, scenarios, seed):
 
 # --- commands -----------------------------------------------------------------
 
+def bench_scenario(name):
+    """The bench scenario of a runner key ("<bench>@<lighting>" variants share the bench scene)."""
+    return name.split("@", 1)[0]
+
+
 def capture_command(binary, name, folder, seed=1):
     """The exact single GPU process of one scenario; CPU-side everything else."""
     last = str(FRAMES - 1)
-    return [str(binary), "--scene", "procedural", "--bench", "2", "--material-scenario", name,
-            "--render-path", "visibility", "--geometry-path", "mesh", "--rt", "off", "--shadows", "off",
-            "--lighting", "legacy", "--gi", "off", "--reflections", SCENARIOS[name].get("reflections", "ssr"), "--ao", "off",
-            "--lighting-denoise", "custom", "--reflection-samples", "8", "--lighting-seed", str(seed),
+    lighting = SCENARIOS[name].get("lighting", "legacy")
+    return [str(binary), "--scene", "procedural", "--bench", "2", "--material-scenario", bench_scenario(name),
+            "--render-path", "visibility", "--geometry-path", "mesh", "--rt", "off" if lighting == "legacy" else "on",
+            "--shadows", "off",
+            "--lighting", lighting, "--gi", "off", "--reflections", SCENARIOS[name].get("reflections", "ssr"), "--ao", "off",
+            "--lighting-denoise", SCENARIOS[name].get("denoise", "custom"), "--reflection-samples", "8",
+            "--lighting-seed", str(seed),
             "--post", "--upscaler", "native", "--resolution", RESOLUTION, "--frames", str(FRAMES),
             "--warmup", "0", "--fixed-timestep", "--no-ui", "--no-vsync", "--no-gpu-timing", "--debug-lighting", "1",
             "--capture-linear", str(folder / "engine.pfm"), "--capture-linear-frame", last,
@@ -237,7 +274,8 @@ def reference_command(name, folder):
     controls, declared = scenario_controls(name)
     command = ["uv", "run", "--offline", "--no-project", "--python", "3.13", "--with", "mitsuba==3.9.1",
                "--with", "numpy", "python", "-I", str(REPO / "tools" / "f15_reference.py"), "render",
-               str(folder / "snapshot"), "--out", str(folder / "reference"), "--controls", *controls]
+               str(folder / "snapshot"), "--out", str(folder / "reference"),
+               "--visibility", SCENARIOS[name].get("visibility", "none"), "--controls", *controls]
     if declared:
         command += ["--declared-controls", *declared]
     return command
@@ -252,30 +290,32 @@ def relative_error(np, candidate, reference, roi):
     return error.max(axis=-1), floor
 
 
-def terminator_band(np, lit, sphere):
-    """Lit pixels with an unlit 8-neighbour of the same sphere: the shadow
-    terminator, where N.L changes sign inside one pixel and interpolated normals
-    of two independent implementations may disagree on the sign (a shading
-    discontinuity, excluded like the silhouette; decision 11 ROI rule)."""
-    padded_lit = np.pad(lit, 1, constant_values=True)
-    padded_sphere = np.pad(sphere, 1, constant_values=-1)
+def terminator_band(np, lit, sphere, width=1):
+    """Lit pixels with an unlit pixel of the same sphere within `width` pixels (Chebyshev; width 1 = the
+    8-neighbours): the shadow terminator, where N.L changes sign inside one pixel and interpolated normals
+    of two independent implementations may disagree on the sign (a shading discontinuity, excluded like the
+    silhouette; decision 11 ROI rule).  Width 2 for RT-visibility scenarios (decision 11 amendment
+    2026-11-13: the engine's shadow-ray offset on the tessellated facets moves the shadow terminator by up
+    to 2 pixels)."""
+    padded_lit = np.pad(lit, width, constant_values=True)
+    padded_sphere = np.pad(sphere, width, constant_values=-1)
     band = np.zeros_like(lit)
     h, w = lit.shape
-    for dy in (-1, 0, 1):
-        for dx in (-1, 0, 1):
+    for dy in range(-width, width + 1):
+        for dx in range(-width, width + 1):
             if dy == 0 and dx == 0:
                 continue
-            n_lit = padded_lit[1 + dy:1 + dy + h, 1 + dx:1 + dx + w]
-            n_sphere = padded_sphere[1 + dy:1 + dy + h, 1 + dx:1 + dx + w]
+            n_lit = padded_lit[width + dy:width + dy + h, width + dx:width + dx + w]
+            n_sphere = padded_sphere[width + dy:width + dy + h, width + dx:width + dx + w]
             band |= lit & ~n_lit & (n_sphere == sphere)
     return band
 
 
-def evaluate_direct(np, candidate, reference, masks, spheres):
+def evaluate_direct(np, candidate, reference, masks, spheres, band=1):
     """Per metallic row: p99 and max (outside the quadrature mask) over lit ROI
-    pixels, the shadow terminator excluded (see terminator_band)."""
+    pixels, the shadow terminator excluded (see terminator_band, `band` pixels wide)."""
     gate = THRESHOLDS["direct"]
-    lit = masks["roi"] & masks["lit"] & ~terminator_band(np, masks["lit"], masks["sphere"])
+    lit = masks["roi"] & masks["lit"] & ~terminator_band(np, masks["lit"], masks["sphere"], band)
     error_all, floor = relative_error(np, candidate, reference, lit)
     narrow = masks["narrow"][lit]
     sphere = masks["sphere"][lit]
@@ -373,9 +413,9 @@ def evaluate_furnace_transport(np, candidate, reference, masks, spheres):
     return result
 
 
-def evaluate(np, kind, candidate, reference, masks, spheres):
+def evaluate(np, kind, candidate, reference, masks, spheres, band=1):
     if kind == "direct":
-        return evaluate_direct(np, candidate, reference, masks, spheres)
+        return evaluate_direct(np, candidate, reference, masks, spheres, band)
     if kind == "furnace":
         return evaluate_furnace(np, candidate, reference, masks, spheres)
     if kind == "furnace-transport":
@@ -385,8 +425,11 @@ def evaluate(np, kind, candidate, reference, masks, spheres):
     return evaluate_environment(np, candidate, reference, masks, spheres)
 
 
-def expectation(kind, mode, result, always_green=False):
-    """Red-state assertions of ticket 02; None when a fixture is measured but not predicted."""
+def expectation(kind, mode, result, always_green=False, pending=None):
+    """Red-state assertions of ticket 02; None when a fixture is measured but not predicted.  A `pending`
+    scenario (its engine side lands with that ticket) is asserted to FAIL in every mode."""
+    if pending:
+        return {"asserted": True, "expected_pass": False, "met": not result["pass"], "pending": pending}
     if mode == "green" or always_green:
         return {"asserted": True, "expected_pass": True, "met": result["pass"]}
     if kind == "declared":
@@ -403,11 +446,11 @@ def expectation(kind, mode, result, always_green=False):
     return {"asserted": False, "met": True, "note": "measured, not predicted before ticket 03"}
 
 
-def control_verdicts(np, kind, reference, controls, masks, spheres, required):
+def control_verdicts(np, kind, reference, controls, masks, spheres, required, band=1):
     """Every required control rendered on the reference side must FAIL the gate of its fixture."""
     verdicts = {}
     for name in required:
-        result = evaluate(np, kind, controls[name], reference, masks, spheres)
+        result = evaluate(np, kind, controls[name], reference, masks, spheres, band)
         verdicts[name] = {"fails_gate": not result["pass"], "gate_result": summarize(result)}
     return verdicts
 
@@ -423,9 +466,10 @@ def summarize(result):
 
 # --- evaluation of one scenario ------------------------------------------------
 
-def cached_reference_usable(reference_dir, snapshot_dir, literal_controls, declared_controls):
+def cached_reference_usable(reference_dir, snapshot_dir, literal_controls, declared_controls, visibility="none"):
     """A cached reference is reused only when it was rendered from THIS snapshot (recorded SHA-256 equals the
-    snapshot's digest) and holds every requested control; anything else is re-rendered."""
+    snapshot's digest) with the same point-light visibility and holds every requested control; anything else
+    is re-rendered."""
     from f12_reference import scene_digest
     meta_path = reference_dir / "reference.json"
     if not meta_path.is_file():
@@ -433,6 +477,8 @@ def cached_reference_usable(reference_dir, snapshot_dir, literal_controls, decla
     try:
         meta = json.loads(meta_path.read_text())
         if meta.get("snapshot_sha256") != scene_digest(pathlib.Path(snapshot_dir).resolve()):
+            return False
+        if meta.get("visibility", "none") != visibility:
             return False
         files = [reference_dir / "reference.pfm", reference_dir / "masks.npz"]
         if not set(literal_controls) <= set(meta.get("controls", {})):
@@ -463,11 +509,14 @@ def evaluate_scenario(np, name, folder, mode):
     spec = SCENARIOS[name]
     literal_controls, declared_controls = scenario_controls(name)
     reference_dir = folder / "reference"
-    if not cached_reference_usable(reference_dir, folder / "snapshot", literal_controls, declared_controls):
+    visibility = spec.get("visibility", "none")
+    if not cached_reference_usable(reference_dir, folder / "snapshot", literal_controls, declared_controls,
+                                   visibility):
         if (reference_dir / "reference.json").is_file():
             print(f"{name}: the cached reference does not match this snapshot or its controls; re-rendering",
                   file=sys.stderr)
-        arguments = ["render", str(folder / "snapshot"), "--out", str(reference_dir), "--controls", *literal_controls]
+        arguments = ["render", str(folder / "snapshot"), "--out", str(reference_dir), "--visibility", visibility,
+                     "--controls", *literal_controls]
         if declared_controls:
             arguments += ["--declared-controls", *declared_controls]
         code = f15_reference.main(arguments)
@@ -487,14 +536,21 @@ def evaluate_scenario(np, name, folder, mode):
     checks = []  # (discriminating, gate result)
 
     if spec["kind"] != "declared":
+        band = spec.get("terminator_band", 1)
         controls = {c: read_pfm(reference_dir / report["controls"][c]["file"]) for c in literal_controls}
-        result = evaluate(np, spec["kind"], candidate, reference, masks, spheres)
+        result = evaluate(np, spec["kind"], candidate, reference, masks, spheres, band)
         if name == "roughness-extremes":  # sun + environment: direct statistics reported, environment gates
             direct = evaluate_direct(np, candidate, reference, masks, spheres)
             result = evaluate_environment(np, candidate, reference, masks, spheres, summarize(direct))
-        verdicts = control_verdicts(np, spec["kind"], reference, controls, masks, spheres, literal_controls)
-        entry.update(result=result, expectation=expectation(spec["kind"], mode, result, spec.get("always_green", False)),
-                     controls=verdicts)
+        verdicts = control_verdicts(np, spec["kind"], reference, controls, masks, spheres, literal_controls, band)
+        expected = expectation(spec["kind"], mode, result, spec.get("always_green", False), spec.get("pending"))
+        if spec.get("pending_matches"):
+            # Red for the right reason: before its ticket the engine must pass the gate against the
+            # control that models the missing piece (e.g. DI evaluating the base BRDF).
+            twin = evaluate(np, spec["kind"], candidate, controls[spec["pending_matches"]], masks, spheres, band)
+            expected = {**expected, "matches_control": spec["pending_matches"], "control_gate": summarize(twin),
+                        "met": expected["met"] and twin["pass"]}
+        entry.update(result=result, expectation=expected, controls=verdicts)
         checks.append((all(v["fails_gate"] for v in verdicts.values()), result["pass"]))
 
     if declared_controls:
@@ -503,7 +559,7 @@ def evaluate_scenario(np, name, folder, mode):
         controls = {c: read_pfm(reference_dir / declared_report["controls"][c]["file"]) for c in declared_controls}
         result = evaluate_declared(np, candidate, declared_reference, masks, spheres)
         verdicts = control_verdicts(np, "declared", declared_reference, controls, masks, spheres, declared_controls)
-        expected = expectation("declared", mode, result, spec.get("always_green", False))
+        expected = expectation("declared", mode, result, spec.get("always_green", False), spec.get("pending"))
         if spec["kind"] == "declared":
             entry.update(result=result, expectation=expected, controls=verdicts)
         else:
@@ -513,6 +569,7 @@ def evaluate_scenario(np, name, folder, mode):
 
     entry["discriminating"] = all(d for d, _ in checks)
     entry["gates_pass"] = all(p for _, p in checks)
+    entry["pending"] = spec.get("pending")
     entry["expectation_met"] = entry["expectation"]["met"] and entry.get("declared", {}).get("expectation", {"met": True})["met"]
     return entry
 
@@ -522,7 +579,8 @@ def verdict(entries, mode):
     if any(not e["discriminating"] for e in entries):
         return "BLOCKED_NON_DISCRIMINATING_FIXTURE", EXIT_NON_DISCRIMINATING
     if mode == "green":
-        passes = all(e.get("gates_pass", e["result"]["pass"]) for e in entries)
+        # A pending scenario must FAIL (its engine side has not landed); every other one must pass.
+        passes = all(e.get("gates_pass", e["result"]["pass"]) != bool(e.get("pending")) for e in entries)
         return ("GREEN", EXIT_OK) if passes else ("RED", EXIT_UNEXPECTED)
     if all(e.get("expectation_met", e["expectation"]["met"]) for e in entries):
         return "EXPECTED_RED_CONFIRMED", EXIT_OK

@@ -16,7 +16,7 @@
 using namespace phosphor;
 
 TEST_CASE("F15.3 material scenarios are exactly the nine declared names") {
-    CHECK(MaterialValidation::scenarios().size() == 9);
+    CHECK(MaterialValidation::scenarios().size() == 10);
     for (auto name : {"base-grid-sun", "base-grid-env", "base-grid-env-resolve", "furnace-base", "furnace-resolve",
                       "roughness-extremes", "roughness-extremes-sun", "specular-grid-sun", "specular-grid-env-resolve"})
         CHECK(MaterialValidation::validScenario(name));
@@ -74,7 +74,7 @@ TEST_CASE("F15.3 grid spheres carry exact factors and no textures") {
         FrameScene frame;
         extractFrameScene(ecs, scene, frame);
         CHECK(frame.instances.size() == f.spheres().size());
-        CHECK(frame.lights.size() == (s.sun ? 1u : 0u));
+        CHECK(frame.lights.size() == (s.sun ? 1u : 0u) + s.pointLights.size());
         if (s.sun) {
             // Directional light: the engine's toward-sun vector is the negated travel direction.
             const auto& l = frame.lights.front();
@@ -168,7 +168,8 @@ TEST_CASE("F15.3 the bench and the runner (tools/f15_check.py) list the same sce
     REQUIRE(end != std::string::npos);
     const std::string block = source.substr(start, end - start);
     std::set<std::string> runner;
-    const std::regex key(R"re(\n    "([a-z0-9-]+)": \{)re");
+    // Runner keys are bench scenario names, optionally with an "@lighting" variant suffix.
+    const std::regex key(R"re(\n    "([a-z0-9-]+)(@[a-z]+)?": \{)re");
     for (std::sregex_iterator it(block.begin(), block.end(), key), last; it != last; ++it) runner.insert((*it)[1]);
     std::set<std::string> bench;
     for (auto name : MaterialValidation::scenarios()) bench.insert(std::string(name));
@@ -293,4 +294,35 @@ TEST_CASE("F15.1 --material-toggle-every edits one sphere's weight and flips ano
     CHECK(store.structureVersion() == structure);
     CHECK(store.verifyAgainstEcs(ecs, scene).empty());
     CHECK(store.featureUnion() == MATERIAL_FEATURE_SPECULAR_IOR);
+}
+
+TEST_CASE("F15.1 specular-grid-point: the specular grid lit by one point light from behind the grid") {
+    const auto& sun = MaterialValidation::spec("specular-grid-sun");
+    const auto& point = MaterialValidation::spec("specular-grid-point");
+    CHECK(point.roughness == sun.roughness);
+    CHECK(point.metallic == sun.metallic);
+    CHECK(point.ior == sun.ior);
+    CHECK(point.specularFactor == sun.specularFactor);
+    CHECK(point.specularColor == sun.specularColor);
+    CHECK_FALSE(point.sun);
+    CHECK(point.environment == 0.0f);
+    REQUIRE(point.pointLights.size() == 1);
+    const MaterialPointLight light = point.pointLights[0];
+    CHECK(light.intensity == 250.0f);
+    CHECK(light.range == 100.0f);
+    const glm::vec3 camera = MaterialValidation{"specular-grid-point"}.getDefaultCamera().position;
+    // Side-lit from behind at the grid centre: V.L about -0.5, the light behind the grid plane.
+    const glm::vec3 centre(0.0f, 2.0f, 0.0f);
+    const float vl = glm::dot(glm::normalize(camera - centre), glm::normalize(light.position - centre));
+    CHECK(vl < -0.4f);
+    CHECK(vl > -0.6f);
+    CHECK(light.position.z < -MaterialValidation::SphereRadius);
+    CHECK(glm::length(light.position - centre) == doctest::Approx(9.0f));
+    // The engine's range window stays within 5e-4 of 1 for every sphere (the reference declares it exactly).
+    for (u32 row = 0; row < point.metallic.size(); ++row)
+        for (u32 col = 0; col < point.roughness.size(); ++col) {
+            const float d = glm::length(light.position - MaterialValidation::sphereCenter(point, col, row));
+            const float r = d / light.range, window = (1.0f - r * r * r * r) * (1.0f - r * r * r * r);
+            CHECK(window > 0.9995f);
+        }
 }
