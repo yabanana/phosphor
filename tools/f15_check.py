@@ -840,7 +840,9 @@ def evaluate_transmission(np, candidate, reference, masks, objects):
         mean, p95 = float(e.mean()), float(np.percentile(e, 95))
         table.append({**label, "pixels": int(pick.sum()), "mean": mean, "p95": p95,
                       "pass": bool(mean <= gate["mean_per_object"] and p95 <= gate["p95_per_object"])})
-    return {"kind": "transmission", "floor": floor, "objects": table, "pass": all(t["pass"] for t in table),
+    # Orchestrator decision: the pooled glass-mask statistic of decision 11 is reported for information (not gated).
+    pooled = {"pixels": int(error.size), "mean": float(error.mean()), "p95": float(np.percentile(error, 95))} if error.size else {}
+    return {"kind": "transmission", "floor": floor, "pooled_not_gated": pooled, "objects": table, "pass": all(t["pass"] for t in table),
             "worst_mean": max(t.get("mean", 0.0) for t in table), "worst_p95": max(t.get("p95", 0.0) for t in table)}
 
 
@@ -1126,6 +1128,9 @@ def result_lines(r):
         for t in r["spheres"]:
             lines.append(f"| {t['metallic']} | {t['roughness']} | {t.get('mean', 0):.4f} | {t.get('p95', 0):.4f} | {t['pass']} |")
     elif r["kind"] == "transmission":
+        pooled = r.get("pooled_not_gated") or {}
+        if pooled:
+            lines += ["", f"pooled glass mask (information, not gated): mean {pooled['mean']:.4f}, p95 {pooled['p95']:.4f}, {pooled['pixels']} pixels"]
         lines += ["", f"worst object mean {r['worst_mean']:.4f} (limit {THRESHOLDS['transmission']['mean_per_object']}), "
                       f"worst p95 {r['worst_p95']:.4f} (limit {THRESHOLDS['transmission']['p95_per_object']}), floor {r['floor']:.4f}", "",
                   "| object | pixels | mean | p95 | pass |", "|---|---|---|---|---|"]
