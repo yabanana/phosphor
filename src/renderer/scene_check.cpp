@@ -61,6 +61,17 @@ SceneCheckResult compareScene(const SceneStore& store, const GpuScene& scene, co
         fail(r, "materials differ from the mirror (" + std::to_string(r.materialErrors) + ")");
     }
 
+    // Extension records (F15.1).
+    const auto extensions = store.extensions();
+    if (gpu.extensions.size() < extensions.size() ||
+        (!extensions.empty() && std::memcmp(gpu.extensions.data(), extensions.data(), extensions.size_bytes()) != 0)) {
+        for (size_t i = 0; i < extensions.size() && i < gpu.extensions.size(); ++i) {
+            if (std::memcmp(&gpu.extensions[i], &extensions[i], sizeof(GPUMaterialExtRecord)) != 0) ++r.extensionErrors;
+        }
+        if (gpu.extensions.size() < extensions.size()) ++r.extensionErrors;
+        fail(r, "extension records differ from the mirror (" + std::to_string(r.extensionErrors) + ")");
+    }
+
     if (gpuDriven && (gpu.prefix.size() < size_t(slots) + 1 || gpu.visible.size() < slots)) {
         ++r.listErrors;
         fail(r, "visible list / prefix read-back too small");
@@ -146,12 +157,13 @@ SceneCheckResult compareScene(const SceneStore& store, const GpuScene& scene, co
 }
 
 std::string formatSceneCheck(const SceneCheckResult& r) {
-    char buf[384];
+    char buf[512];
     std::snprintf(buf, sizeof(buf),
-                  "slots %u | instances %s (%u) | matrices %s (%u) | materials %s (%u) | visible %s (%u, band %u) | "
-                  "list %s | args %s (%u) | counters %s | ecs %s | %s",
+                  "slots %u | instances %s (%u) | matrices %s (%u) | materials %s (%u) | extensions %s (%u) | "
+                  "visible %s (%u, band %u) | list %s | args %s (%u) | counters %s | ecs %s | %s",
                   r.slots, r.instanceErrors ? "WRONG" : "ok", r.instanceErrors, r.matrixErrors ? "WRONG" : "ok",
-                  r.matrixErrors, r.materialErrors ? "WRONG" : "ok", r.materialErrors, r.visibleErrors ? "WRONG" : "ok",
+                  r.matrixErrors, r.materialErrors ? "WRONG" : "ok", r.materialErrors, r.extensionErrors ? "WRONG" : "ok",
+                  r.extensionErrors, r.visibleErrors ? "WRONG" : "ok",
                   r.visibleErrors, r.bandDifferences, r.listErrors ? "WRONG" : "ok", r.argErrors ? "WRONG" : "ok",
                   r.argErrors, r.counterErrors ? "WRONG" : "ok", r.ecs.empty() ? "ok" : "WRONG",
                   r.pass ? "PASS" : "FAIL");

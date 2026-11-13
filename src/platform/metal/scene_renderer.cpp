@@ -207,7 +207,10 @@ u64 SceneRenderer::prepareFrame(const SceneStore& store, std::span<const GPULigh
     hierSteps_    = store.maxDepth() == 0 ? 0u : std::min(store.maxDepth() + 1, SCENE_MAX_LEVELS);
     commandCount_ = store.commandCount();
 
-    const MTL::GPUAddress frameConstants = put(&constants, sizeof(constants));
+    // F15.1: the extension buffer may have been (re)allocated by stageFrame above.
+    FrameConstants frameConstantsData = constants;
+    frameConstantsData.materialExtensions = materialExtensionsAddress();
+    const MTL::GPUAddress frameConstants = put(&frameConstantsData, sizeof(frameConstantsData));
     GPULight noLight{};
     const MTL::GPUAddress lightsAddress =
         lights.empty() ? put(&noLight, sizeof(noLight)) : put(lights.data(), lights.size_bytes());
@@ -221,9 +224,9 @@ u64 SceneRenderer::prepareFrame(const SceneStore& store, std::span<const GPULigh
     clear.queues      = kQueues;
     clear.strideBytes = buffers_.queueStride();
     clearParams_ = put(&clear, sizeof(clear));
-    std::array<GPUScatterParams, 4> scatter{};
+    std::array<GPUScatterParams, GpuSceneBuffers::kScatters> scatter{};
     const auto& scatters = buffers_.scatters();
-    for (u32 i = 0; i < 4; ++i) {
+    for (u32 i = 0; i < GpuSceneBuffers::kScatters; ++i) {
         scatter[i].count = scatters[i].count;
         scatter[i].words = 20;
     }
@@ -248,9 +251,27 @@ u64 SceneRenderer::prepareFrame(const SceneStore& store, std::span<const GPULigh
         instanceRecords = put(records.data(), records.size() * sizeof(GPUDeltaRecord));
         scatter[0].count = static_cast<u32>(records.size());
     }
+    // Negative control of the extension buffer (needs a scene with extended materials): a wrong
+    // record for the first record of the buffer; the readback must report it.
+    MTL::GPUAddress extensionRecords = scatters[4].records;
+    if (params.corrupt == SceneCorruption::Extension && !store.extensions().empty() && buffers_.extensions()) {
+        std::vector<GPUDeltaRecord> records(store.extensionDeltas().begin(), store.extensionDeltas().end());
+        auto it = std::find_if(records.begin(), records.end(), [](const GPUDeltaRecord& r) { return r.slot == 0; });
+        if (it == records.end()) {
+            GPUDeltaRecord bad{};
+            bad.slot = 0;
+            std::memcpy(bad.payload, &store.extensions()[0], sizeof(bad.payload));
+            records.push_back(bad);
+            it = records.end() - 1;
+        }
+        // GPUMaterialExt0::pad (word 19): never read by a shader, only the self-check can notice it.
+        it->payload[19] ^= 0x5A5A5A5Au;
+        extensionRecords = put(records.data(), records.size() * sizeof(GPUDeltaRecord));
+        scatter[4].count = static_cast<u32>(records.size());
+    }
     scatterParams_ = put(scatter.data(), sizeof(scatter));
-    scatterRecords_ = {instanceRecords, scatters[1].records, scatters[2].records, scatters[3].records};
-    for (u32 i = 0; i < 4; ++i) scatterCounts_[i] = scatter[i].count;
+    scatterRecords_ = {instanceRecords, scatters[1].records, scatters[2].records, scatters[3].records, extensionRecords};
+    for (u32 i = 0; i < GpuSceneBuffers::kScatters; ++i) scatterCounts_[i] = scatter[i].count;
 
     // Scene transforms: motion table, hierarchy levels, queue 0 (the dirty roots).
     GPUMotionFrame motion{};
@@ -430,11 +451,12 @@ void SceneRenderer::encodeUpdate(MTL4::ComputeCommandEncoder* enc) const {
     enc->setArgumentTable(t);
     enc->dispatchThreads(MTL::Size::Make(32, 1, 1), MTL::Size::Make(32, 1, 1));
     n += 3;
-    // Delta scatters: four destinations, always encoded (count 0 returns).
+    // Delta scatters: five destinations (instances, materials, nodes, motion, extensions),
+    // always encoded (count 0 returns).
     enc->setComputePipelineState(kernel(kScatter_));
     ++n;
     const auto& scatters = buffers_.scatters();
-    for (u32 i = 0; i < 4; ++i) {
+    for (u32 i = 0; i < GpuSceneBuffers::kScatters; ++i) {
         t->setAddress(scatterParams_ + i * sizeof(GPUScatterParams), 0);
         t->setAddress(scatterRecords_[i] ? scatterRecords_[i] : scatterParams_, SB_SCATTER_RECORDS);
         t->setAddress(scatters[i].dst->gpuAddress(), SB_SCATTER_DST);

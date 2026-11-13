@@ -447,7 +447,8 @@ TEST_CASE("launch options: F5 scene switches") {
     for (const auto& [text, kind] : {std::pair<const char*, SceneCorruption>{"delta", SceneCorruption::Delta},
                                      {"plane", SceneCorruption::Plane},
                                      {"command", SceneCorruption::Command},
-                                     {"touch", SceneCorruption::Touch}}) {
+                                     {"touch", SceneCorruption::Touch},
+                                     {"extension", SceneCorruption::Extension}}) {
         REQUIRE(parse({"--debug-gpu-scene-corrupt", text}, o, err));
         CHECK(o.debugGpuSceneCorrupt == kind);
     }

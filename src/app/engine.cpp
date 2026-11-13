@@ -1219,7 +1219,7 @@ void Engine::switchTestBench(TestBenchType type) {
     // F5.1: full build of the persistent scene, uploaded through staging.
     store_->clear();
     store_->sync(*ecs_, *gpuScene_);
-    gpuScene_->sealMaterialLibrary(); // later description edits need SceneStore deltas (F15 ticket 05)
+    gpuScene_->sealMaterialLibrary(); // later description edits reach the GPU through SceneStore deltas (F15.1)
     ecs_->endFrame();
     renderer_->loadScene(*store_);
     if (mesh_) mesh_->loadScene(*store_, *gpuScene_);
@@ -1641,6 +1641,7 @@ bool Engine::frame(float dt) {
     // before the graph so a recompilation sees the new capacities.
     const Clock::time_point s3 = Clock::now();
     const u64 sceneBytes = renderer_->prepareFrame(*store_, lights_, constants, textures_->tableAddress(), sceneParams);
+    constants.materialExtensions = renderer_->materialExtensionsAddress(); // F15.1: after the (re)allocation in prepareFrame
     const bool meshletCheckFrame = mesh_ && options_.debugMeshlets > 0 && (presentedFrames_ + 1) % options_.debugMeshlets == 0;
     if (mesh_) {
         MeshRenderer::FrameParams mp;

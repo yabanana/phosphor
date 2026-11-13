@@ -401,8 +401,9 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             else if (*value == "plane") out.debugGpuSceneCorrupt = SceneCorruption::Plane;
             else if (*value == "command") out.debugGpuSceneCorrupt = SceneCorruption::Command;
             else if (*value == "touch") out.debugGpuSceneCorrupt = SceneCorruption::Touch;
+            else if (*value == "extension") out.debugGpuSceneCorrupt = SceneCorruption::Extension;
             else {
-                error = "--debug-gpu-scene-corrupt: expected delta, plane, command or touch, got '" +
+                error = "--debug-gpu-scene-corrupt: expected delta, plane, command, touch or extension, got '" +
                         std::string(*value) + "'";
                 return false;
             }

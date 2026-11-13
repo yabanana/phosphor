@@ -132,6 +132,10 @@ public:
     [[nodiscard]] MTL::GPUAddress textureTableAddress() const { return textureTable_; }
     /// F15: the DFG table as a buffer (FrameConstants::dfgTable).
     [[nodiscard]] MTL::GPUAddress dfgTableAddress() const { return dfgTable_->gpuAddress(); }
+    /// F15.1: the material extension buffer (FrameConstants::materialExtensions); 0 without extended materials.
+    [[nodiscard]] MTL::GPUAddress materialExtensionsAddress() const {
+        return buffers_.extensions() ? buffers_.extensions()->gpuAddress() : 0;
+    }
     [[nodiscard]] MTL::Buffer* vertexBuffer() const { return vertexBuffer_; }
     [[nodiscard]] MTL::Buffer* meshBuffer() const { return meshBuffer_; }
     [[nodiscard]] u32 forwardVariantIndex() const { return variantIndex_; }
@@ -216,9 +220,9 @@ private:
     u32               hierSteps_   = 0; // hierarchy queue steps encoded (0 .. SCENE_MAX_LEVELS)
     u32               commandCount_ = 0;
     MTL::GPUAddress   clearParams_   = 0;
-    MTL::GPUAddress   scatterParams_ = 0; // 4 x GPUScatterParams
-    std::array<MTL::GPUAddress, 4> scatterRecords_{};
-    std::array<u32, 4>             scatterCounts_{};
+    MTL::GPUAddress   scatterParams_ = 0; // kScatters x GPUScatterParams
+    std::array<MTL::GPUAddress, GpuSceneBuffers::kScatters> scatterRecords_{};
+    std::array<u32, GpuSceneBuffers::kScatters>             scatterCounts_{};
     MTL::GPUAddress   motionFrame_   = 0;
     MTL::GPUAddress   hierParams_    = 0; // SCENE_MAX_LEVELS x GPUHierParams
     MTL::GPUAddress   queue0_        = 0;

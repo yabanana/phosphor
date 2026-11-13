@@ -209,7 +209,7 @@ namespace phosphor {
 /// F5.3 submission of the scene's draws (--gpu-driven).
 enum class GpuDrivenMode : u8 { Off, On };
 /// F5 self-check negative controls (--debug-gpu-scene-corrupt).
-enum class SceneCorruption : u8 { None, Delta, Plane, Command, Touch };
+enum class SceneCorruption : u8 { None, Delta, Plane, Command, Touch, Extension };
 
 /// F6 geometry submission and meshlet culling.
 enum class GeometryPath : u8 { Indexed, Mesh };
