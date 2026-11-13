@@ -6,13 +6,13 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 07, 08
 
-**Status:** ready-for-agent
+**Status:** resolved (2026-11-13; direction-texture fixture and the Khronos side-by-side carried to ticket 22)
 
-- [ ] Anisotropy fixtures (strength, rotation, direction texture) pass decision-11 thresholds; furnace bound holds
-- [ ] Rotation direction and tangent handedness correct on mirrored instances (glTF conventions)
-- [ ] Negative control (rotation sign flipped) fails
-- [ ] AnisotropyStrengthTest, AnisotropyRotationTest, AnisotropyDiscTest side by side
-- [ ] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
+- [x] Anisotropy fixtures (strength, rotation, direction texture) pass decision-11 thresholds; furnace bound holds — strength and rotation fixtures and the furnace pass; the direction-TEXTURE fixture needs textures in the reference → ticket 22
+- [x] Rotation direction and tangent handedness correct on mirrored instances (glTF conventions)
+- [x] Negative control (rotation sign flipped) fails
+- [ ] AnisotropyStrengthTest, AnisotropyRotationTest, AnisotropyDiscTest side by side → ticket 22
+- [x] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
 
 ## Comments
 
@@ -128,3 +128,46 @@ when it adds a transported specular signal (rms fit: furnace 1.0063 > 1.005 at s
 sqrt(alpha_eff) is 0.008 too high against the exact albedo); (3) coat/sheen + anisotropy is implemented (resolve lights, DI, transport
 mixture) but NOT validated (the harness refuses the combination). Carried: AnisotropyStrength/Rotation/DiscTest side by side and the
 direction texture fixture (ticket 22), narrow-lobe sun disk, non-constant environment fixture for the bent normal.
+
+2026-11-13 — orchestrator verification on M5 after integration (engine
+commits a55207d-equivalents, archive regenerated with `--skip-present`).
+Batch log: `build/f15-exact/battery11.log`.
+- `tools/f15_check.py --run --expect green` (`build/f15-check/t11`): GREEN on
+  every key; the iridescence keys are pending until ticket 12.
+  - Direct grids (sun, point, `@restir`, `@clustered`, mirrored): worst p99
+    per group 0.061 % (mirrored 0.017 %). Every control fails; the mirrored
+    fixture adds `aniso-mirror-unaware`.
+  - `aniso-grid-env-resolve` (declared): worst mean 1.1e-5.
+  - `aniso-grid-env` (transport against the exact quadrature): worst sphere
+    mean 1.93 %.
+  - `furnace-aniso`: 1.0022 (bound 1.005); `@resolve`: 1.0.
+- `--debug-lobe-guide 16` on aniso-grid-sun: `pixels 41416 extended 27552 base
+  13864 unverified 0 | PASS`. The direction is compared by angle; the corrupt
+  control sets it to the normal.
+- Guide overflow on aniso-grid-sun: PASS. The direction words differ by at
+  most 0.54 degrees between the visibility resolve and the indexed receivers;
+  every other word is identical.
+- Shader validation: aniso-grid-env with RT reflections and ReSTIR exits
+  clean.
+- Scenes without features: F13 exact captures and visual_check 0 px.
+  archive_check: every local scenario PASS. hitch_check OK. The clip runner
+  meets every expectation.
+- Accepted deviation, recorded as a declared approximation: when the
+  composite adds a transported specular signal, the diffuse complement of an
+  anisotropic pixel uses the roughness fit sqrt((alpha_t + alpha_b) / 2).
+  - The resolve's declared environment and the probe fit keep the rms fit of
+    the decision-06 amendment.
+  - It was chosen after the furnace measured 1.0063 with the rms fit, which
+    is energy gain: the rms complement exceeds 1 - E_true by about 0.008 at
+    strength 1.
+  - It is validated on the fixture only, not proven as a bound in general.
+  - Candidate for a later fix: a tabulated anisotropic directional albedo
+    E(mu, phi, alpha_t, alpha_b). It would also remove the declared model's
+    6-7 % gap on metals at strength 1.
+- Declared:
+  - a primitive without a tangent frame is shaded as strength 0 (glTF
+    requires tangents for anisotropy);
+  - anisotropy combined with coat or sheen is implemented but has no
+    reference (the harness refuses it) → ticket 19;
+  - the narrow-lobe sun disk (alpha < 0.05) and a non-constant environment
+    for the bent normal are not exercised.
