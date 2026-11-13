@@ -13,3 +13,4 @@ Roadmap: F15.1, F15.3
 - [ ] Negative control (coat ignored, or coat F0 from the material ior as in the Sample Renderer) fails the bound
 - [ ] ClearCoatTest and ClearCoatCarPaint side by side under the declared rig; deviations from the Sample Renderer listed
 - [ ] Temporal clip of the coat fixture within the F13.6 contract
+- [ ] Emitter ownership: the DI/RT share of emitter specular for the coat lobe uses the coat roughness (F13 partition extended); an emissive-panel fixture shows no double count against the reference

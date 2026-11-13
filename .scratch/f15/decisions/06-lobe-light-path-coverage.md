@@ -44,3 +44,8 @@ radiance with roughness/normal edge-stopping and does not demodulate by albedo
 roughness the lobe guide supplies, not an albedo. Emissive materials under a
 clearcoat keep their uncoated emission when they act as sampled emitters in DI
 (declared approximation; the camera-visible emission is coated).
+Review pass additions (2026-11-13): (1) refraction samples ignore the
+reflection RT roughness band and are always traced with RT (decision 09);
+(2) emitter ownership extends the F13 partition: the coat lobe's DI/RT emitter
+share uses the coat roughness, and thin-walled transmission gives emitters hit
+by refracted rays to the transport and delta lights to DI.

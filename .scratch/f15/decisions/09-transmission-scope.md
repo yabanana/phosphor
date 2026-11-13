@@ -44,3 +44,13 @@ liquids)?
 
 - 2026-11-13, owner (AskUserQuestion): "RT in F15, raster in F16" — confirmed.
   Recorded as ADR-0004.
+- 2026-11-13, review pass: `reflection_rt` traces RT only inside the
+  roughness band `1 − smoothstep(rtRoughnessLow 0.2, rtRoughnessHigh 0.4)`
+  (`reflections.metal:105`, `reflection_settings.h:8`) and otherwise falls back
+  to SSR/radiance cache/probes. SSR cannot see behind the glass that occupies
+  the pixel, so refracted samples are always traced when RT is on, whatever
+  the roughness; without RT they use probes/environment, never SSR.
+- Emitter ownership (no double count): refracted rays own the emitters they hit
+  (area/emissive triangles); the DI BTDF term of thin-walled transmission
+  covers only delta lights (directional, point, spot), which rays cannot hit —
+  the same partition idea as F13's `DI_REFLECTED_EMITTER_SPECULAR`.
