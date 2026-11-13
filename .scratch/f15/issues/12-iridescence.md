@@ -8,9 +8,9 @@ Roadmap: F15.1, F15.3
 
 **Status:** ready-for-agent
 
-- [ ] Iridescence fixtures (thickness sweep on dielectric and metal, thickness texture, factor) pass decision-11 thresholds against an independent implementation of the specification's code
-- [ ] Thickness 0 disables the effect; furnace bound holds; negative control (film ior ignored) fails
-- [ ] Per-light cost measured; IridescenceDielectricSpheres/MetallicSpheres side by side
+- [x] Iridescence fixtures (thickness sweep on dielectric and metal, factor) pass decision-11 thresholds against an independent implementation of the specification's code (the thickness TEXTURE fixture is carried to ticket 22)
+- [x] Thickness 0 disables the effect; furnace bound holds; negative control (film ior ignored) fails
+- [ ] Per-light cost measured (static cost only, GPU timings are the orchestrator's); IridescenceDielectricSpheres/MetallicSpheres side by side (carried to ticket 22)
 - [ ] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
 
 ## Comments
@@ -120,3 +120,27 @@ side follows them):
 3. Furnace: the literal Appendix B dielectric gains energy at grazing angles
    by itself (sphere mean 1.028), so the gates are the engine-side ones:
    transport mean 1.005 and resolve pixel 1.005, as for the other furnaces.
+
+2026-11-13 - engine side (resolve, DI, transport, composite, probes), verified on M5 Max.
+
+Implementation (`shaders/materials/bsdf.h` section "KHR_materials_iridescence"): `bsdfThinFilm` is the README's code (evalSensitivity with
+`precise::cos`, column-major XYZ to Rec.709, TIR rule, base ior from f0 + 0.0001 below 0.9999); `BsdfIrid {strength, ior, thickness}`;
+dielectric colour `mix(F_d, F_irid(f0), s)` with diffuse weight `mix(1 - max F_d, 1 - max F_irid, s)`, metal `mix(F_schlick, F_irid, s)`
+(`bsdfSpecEvalIrid` evaluates one film per dielectric or metal sample, two only for fractional metallic); environment `bsdfSpecEnvIrid`
+(film at N.V, the orchestrator's `1 - max(E_irid)` diffuse weight). Thickness 0 => strength 0 (resolve, so the guide carries factor 0)
+and the base expressions. D V is passed in by the caller, so ior/specular, anisotropy, sheen and coat compose through their existing
+wrappers (not validated: the reference refuses the combinations).
+Runner: all 8 iridescence keys passed on the first run (`build/f15-check/t12-green`, again after the per-sample film CSE,
+`t12-green2`): `--run --expect green` GREEN (exit 0) over ALL 51 scenarios, every negative control fails its gate; iridescence-grid-sun
+p99 <= 0.0009, @restir/@clustered p99 <= 0.0054, env-resolve worst sphere mean 0.00010 (limit 0.005) / p99 0.00042, furnace transport
+mean max 0.9998 (limit 1.005), furnace@resolve pixel max 1.00027. Captures: 0 archive misses, 0 render-thread compiles.
+Archive: +7 compute descriptors with MATERIAL_FEATURES 16 (410 -> 417).
+Guide: `--debug-lobe-guide 8` PASS 63/63 frames on iridescence-grid-sun (63536 extended pixels), the corrupt control FAILs (63536
+mismatches, exit 1), overflow check PASS (dumps identical). Validation: `MTL_SHADER_VALIDATION=1 MTL_DEBUG_LAYER=1` 1500 frames of
+iridescence-grid-point with ReSTIR + RT reflections + custom denoiser: exit 0, all LIGHTING and LOBE-GUIDE checks PASS.
+Static per-light cost (no timing runs; AIR of `xcrun metal -O2`, tools/air_ops.py counting): one `bsdfThinFilm` = 187 flops, 27
+transcendentals, 11 divides; the base `bsdfSpecEval` = 61 flops, 3 transcendentals, 1 divide; `bsdfSpecEvalIrid` body = 98 flops, 1
+transcendental plus one film per dielectric or metal light sample (two for 0 < metallic < 1): roughly 300 flops against 61, about 5x the ALU of the base
+specular evaluation per light sample, active only for iridescent pixels (strength 0 selects the base expressions). GPU timings: orchestrator.
+Carried: thickness texture fixture and factor texture (ticket 22), IridescenceDielectricSpheres/MetallicSpheres side by side (ticket 22),
+combinations with other lobes (composed, unvalidated), `tools/archive_check.sh` and `tools/hitch_check.sh` (not run, orchestrator).
