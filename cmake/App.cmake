@@ -63,6 +63,7 @@ set(PHOSPHOR_SHADER_HEADERS
     ${CMAKE_SOURCE_DIR}/shaders/forward.metal
     ${CMAKE_SOURCE_DIR}/shaders/visibility_resolve.metal
     ${CMAKE_SOURCE_DIR}/shaders/material_shading.h
+    ${CMAKE_SOURCE_DIR}/shaders/materials/bsdf.h
     ${CMAKE_SOURCE_DIR}/shaders/surface_geometry.h
     ${CMAKE_SOURCE_DIR}/src/renderer/normal_transform.h
     ${CMAKE_SOURCE_DIR}/shaders/temporal_motion.h

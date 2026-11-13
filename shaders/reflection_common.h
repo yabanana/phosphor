@@ -12,19 +12,16 @@ inline float3 reflectionTangent(float3 n){return normalize(cross(abs(n.z)<.999f?
 inline float3 reflectionSpecularBRDF(GPUDISurface s,float3 wi){
     float3 n=normalize(diVec(s.shadingNormal)),v=normalize(diVec(s.viewDirection));float nl=dot(n,wi),nv=dot(n,v);
     if(nl<=0||nv<=0||dot(v+wi,v+wi)<1e-20f)return 0;float3 h=normalize(v+wi);float nh=saturate(dot(n,h)),vh=saturate(dot(v,h));
-    float a=max(s.roughness*s.roughness,.002f),a2=a*a,d=nh*nh*(a2-1)+1,D=a2/(M_PI_F*d*d);
-    float gv=nl*sqrt(nv*nv*(1-a2)+a2),gl=nv*sqrt(nl*nl*(1-a2)+a2);
-    float3 f0=mix(float3(.04f),diVec(s.albedo),saturate(s.metallic)),F=f0+(1-f0)*pow(1-vh,5.0f);
-    return D*(.5f/max(gv+gl,1e-5f))*F;
+    return bsdfBaseSpecular(nl,nv,nh,vh,bsdfBaseF0(diVec(s.albedo),saturate(s.metallic)),bsdfAlpha(s.roughness));
 }
 struct ReflectionDirection {float3 direction,weight;float pdf;bool valid,error;};
 inline ReflectionDirection reflectionDirection(GPUDISurface s,float2 u){
     ReflectionDirection out{};float3 n=diVec(s.shadingNormal),v=diVec(s.viewDirection);
     if(!s.valid)return out;if(!all(isfinite(n))||!all(isfinite(v))||dot(n,n)<=0||dot(v,v)<=0){out.error=true;return out;}
     n=normalize(n);v=normalize(v);float3 t=reflectionTangent(n),b=cross(n,t);
-    float a=max(s.roughness*s.roughness,.002f),a2=a*a,c=sqrt((1-u.x)/(1+(a2-1)*u.x)),r=sqrt(max(0.0f,1-c*c)),phi=2*M_PI_F*u.y;
+    float a=bsdfAlpha(s.roughness),a2=a*a,c=sqrt((1-u.x)/(1+(a2-1)*u.x)),r=sqrt(max(0.0f,1-c*c)),phi=2*M_PI_F*u.y;
     float3 h=t*(r*cos(phi))+b*(r*sin(phi))+n*c;float vh=dot(v,h);if(vh<=0)return out;
-    out.direction=reflect(-v,h);float d=c*c*(a2-1)+1;out.pdf=(a2/(M_PI_F*d*d))*c/(4*vh);
+    out.direction=reflect(-v,h);out.pdf=bsdfDGGX(c,a)*c/(4*vh);
     out.valid=all(isfinite(out.direction))&&isfinite(out.pdf)&&out.pdf>0;if(!out.valid)out.error=true;
     if(out.valid&&dot(n,out.direction)>0){out.weight=reflectionSpecularBRDF(s,out.direction)*dot(n,out.direction)/out.pdf;
         if(!all(isfinite(out.weight))||any(out.weight<0)){out.error=true;out.weight=0;}}

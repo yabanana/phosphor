@@ -5,6 +5,7 @@
 using namespace metal;
 using namespace phosphor;
 #include "surface_geometry.h"
+#include "materials/bsdf.h"
 
 constant bool kHasDirectional = (kLightTypes & 1u) != 0u;
 constant bool kHasPoint = (kLightTypes & 2u) != 0u;
@@ -50,23 +51,6 @@ static half4 sampleOr(const device TextureHandle *table, uint index, float2 uv, 
     return half4(table[index].tex.sample(kMaterialSampler, uv, gradient2d(dx, dy)));
 }
 
-static float D_GGX(float NdotH, float a) {
-    const float a2 = a * a;
-    const float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
-    return a2 / (M_PI_F * d * d);
-}
-
-static float V_SmithGGXCorrelated(float NdotV, float NdotL, float a) {
-    const float a2 = a * a;
-    const float gv = NdotL * sqrt(NdotV * NdotV * (1.0 - a2) + a2);
-    const float gl = NdotV * sqrt(NdotL * NdotL * (1.0 - a2) + a2);
-    return 0.5 / max(gv + gl, 1e-5);
-}
-
-static float3 F_Schlick(float3 f0, float VdotH) {
-    return f0 + (1.0 - f0) * pow(1.0 - VdotH, 5.0);
-}
-
 static float3 evaluateLight(float3 N, float3 V, float3 L, float3 radiance, float3 albedo, float metallic,
                             float roughness) {
     const float3 H = normalize(V + L);
@@ -78,12 +62,9 @@ static float3 evaluateLight(float3 N, float3 V, float3 L, float3 radiance, float
         return float3(0.0);
     }
 
-    const float a = max(roughness * roughness, 0.002);
-    const float3 f0 = mix(float3(0.04), albedo, metallic);
-    const float3 F = F_Schlick(f0, VdotH);
-    const float3 specular = D_GGX(NdotH, a) * V_SmithGGXCorrelated(NdotV, NdotL, a) * F;
-    const float3 diffuse = (1.0 - F) * (1.0 - metallic) * albedo / M_PI_F;
-    return (diffuse + specular) * radiance * NdotL;
+    const BsdfBaseLobes lobes =
+        bsdfBaseEval(NdotL, NdotV, NdotH, VdotH, albedo, metallic, bsdfAlpha(roughness), 1.0f);
+    return (lobes.diffuse + lobes.specular) * radiance * NdotL;
 }
 
 // F13: the sun is a disk of uniform radiance and angular radius r (the same
@@ -94,9 +75,9 @@ static float3 evaluateLight(float3 N, float3 V, float3 L, float3 radiance, float
 // solid-angle quadrature (golden-angle spiral) is used at the pixel centre.
 static float3 sunDiskSpecular(float3 N, float3 V, float3 L, float3 albedo, float metallic, float roughness,
                               float angularRadius) {
-    const float a = max(roughness * roughness, 0.002);
+    const float a = bsdfAlpha(roughness);
     const float NdotV = max(dot(N, V), 1e-4);
-    const float3 f0 = mix(float3(0.04), albedo, metallic);
+    const float3 f0 = bsdfBaseF0(albedo, metallic);
     const float3 R = reflect(-V, N);
     const float separation = acos(clamp(dot(R, L), -1.0f, 1.0f));
     const bool narrow = a < 0.05f && separation < 4.0f * angularRadius + 16.0f * a;
@@ -114,8 +95,7 @@ static float3 sunDiskSpecular(float3 N, float3 V, float3 L, float3 albedo, float
         const float NdotL = saturate(dot(N, Lk));
         if (NdotL <= 0.0f) continue;
         const float3 H = normalize(V + Lk);
-        sum += D_GGX(saturate(dot(N, H)), a) * V_SmithGGXCorrelated(NdotV, NdotL, a) *
-               F_Schlick(f0, saturate(dot(V, H))) * NdotL;
+        sum += bsdfBaseSpecular(NdotL, NdotV, saturate(dot(N, H)), saturate(dot(V, H)), f0, a) * NdotL;
     }
     return sum / float(count);
 }
@@ -125,18 +105,6 @@ static float distanceAttenuation(float dist, float range) {
     const float r = dist / max(range, 1e-3);
     const float window = saturate(1.0 - r * r * r * r);
     return window * window / max(dist * dist, 1e-4);
-}
-
-// Karis, "Physically Based Shading on Mobile" (2014): analytic fit of the
-// split-sum environment BRDF, so ambient light keeps a specular term (and
-// metals stay metallic) without an irradiance/prefiltered-environment map.
-static float3 envBRDFApprox(float3 f0, float roughness, float NdotV) {
-    const float4 c0 = float4(-1.0, -0.0275, -0.572, 0.022);
-    const float4 c1 = float4(1.0, 0.0425, 1.04, -0.04);
-    const float4 r = roughness * c0 + c1;
-    const float a004 = min(r.x * r.x, exp2(-9.28 * NdotV)) * r.x + r.y;
-    const float2 ab = float2(-1.04, 1.04) * a004 + r.zw;
-    return f0 * ab.x + ab.y;
 }
 
 // Hemispheric sky/ground gradient, the only ambient light until the GI of F12.
@@ -237,8 +205,8 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         if (physicalGI && isDirectional && i == shadowLight && sunAngularRadius > 0.0f) {
             // Diffuse at the disk centre (exact to O(r^2)), specular over the disk.
             const float NdotL = saturate(dot(N, L));
-            const float3 F = F_Schlick(mix(float3(0.04), baseColor.rgb, metallic), saturate(dot(V, normalize(V + L))));
-            const float3 diffuse = NdotL > 0.0f ? (1.0 - F) * (1.0 - metallic) * baseColor.rgb / M_PI_F * NdotL : float3(0.0);
+            const float3 F = bsdfFSchlick(bsdfBaseF0(baseColor.rgb, metallic), saturate(dot(V, normalize(V + L))));
+            const float3 diffuse = NdotL > 0.0f ? bsdfBaseDiffuse(F, metallic, baseColor.rgb) * NdotL : float3(0.0);
             color += (diffuse + sunDiskSpecular(N, V, L, baseColor.rgb, metallic, roughness, sunAngularRadius)) *
                      lightColor * attenuation * visibility;
         } else
@@ -250,12 +218,12 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     // Ambient: diffuse for dielectrics only, specular from the hemisphere in
     // the reflected direction, widened towards N as the lobe gets rougher.
     const float NdotV = max(dot(N, V), 1e-4);
-    const float3 f0 = mix(float3(0.04), baseColor.rgb, metallic);
+    const float3 f0 = bsdfBaseF0(baseColor.rgb, metallic);
     const float3 specularDir = normalize(mix(reflect(-V, N), N, roughness * roughness));
     // F13 path (physicalGI): the scene's single declared isotropic environment,
     // the same radiance GI and reflection misses see; legacy keeps the gradient.
     const float3 ambientDiffuse = (physicalGI ? environment : hemisphere(N)) * baseColor.rgb * (1.0 - metallic);
-    const float3 ambientSpecular = (physicalGI ? environment : hemisphere(specularDir)) * envBRDFApprox(f0, roughness, NdotV);
+    const float3 ambientSpecular = (physicalGI ? environment : hemisphere(specularDir)) * bsdfEnvSpecularApprox(f0, roughness, NdotV);
     // F13 assembles these positive signals once outside this residual base.
     // Never subtract full-float lighting from a quantized summed color later.
     if(!externalDiffuse)color += (useGI ? indirectIrradiance * baseColor.rgb * (1.0f - metallic) / M_PI_F * (physicalGI?1.0f:occlusion) : ambientDiffuse * occlusion);
@@ -269,7 +237,7 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     out.normal = N;
     out.baseColor = baseColor.rgb;
     out.diffuseAlbedo = baseColor.rgb * (1.0f - metallic);
-    out.specularAlbedo = F_Schlick(f0, NdotV);
+    out.specularAlbedo = bsdfFSchlick(f0, NdotV);
     out.roughness = roughness;
     out.metallic = metallic;
     out.occlusion = occlusion;

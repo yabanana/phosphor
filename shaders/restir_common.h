@@ -1,6 +1,7 @@
 #pragma once
 #include <metal_stdlib>
 #include "renderer/gpu_types.h"
+#include "materials/bsdf.h"
 using namespace metal;
 using namespace phosphor;
 
@@ -130,15 +131,9 @@ inline float3 diBRDFWeighted(GPUDISurface surface, DISample s, float specularWei
     const float nh = saturate(dot(n, h)), vh = saturate(dot(v, h));
     const float metallic = saturate(surface.metallic);
     const float3 albedo = max(diVec(surface.albedo), 0.0f);
-    const float a = max(surface.roughness * surface.roughness, 0.002f), a2 = a * a;
-    const float d = nh * nh * (a2 - 1.0f) + 1.0f;
-    const float distribution = a2 / (M_PI_F * d * d);
-    const float gv = nl * sqrt(nv * nv * (1.0f - a2) + a2), gl = nv * sqrt(nl * nl * (1.0f - a2) + a2);
-    const float smith = 0.5f / max(gv + gl, 1e-5f);
-    const float3 f0 = mix(float3(0.04f), albedo, metallic);
-    const float3 fresnel = f0 + (1.0f - f0) * pow(1.0f - vh, 5.0f);
-    const float3 result = ((1.0f - fresnel) * (1.0f - metallic) * albedo / M_PI_F +
-                           specularWeight * distribution * smith * fresnel) * diIncident(s) * nl;
+    const BsdfBaseLobes lobes =
+        bsdfBaseEval(nl, nv, nh, vh, albedo, metallic, bsdfAlpha(surface.roughness), specularWeight);
+    const float3 result = (lobes.diffuse + lobes.specular) * diIncident(s) * nl;
     return result; // caller MUST record nonfinite BEFORE any safe-output sanitization
 }
 inline float3 diBRDF(GPUDISurface surface, DISample s) { return diBRDFWeighted(surface, s, 1.0f); }
