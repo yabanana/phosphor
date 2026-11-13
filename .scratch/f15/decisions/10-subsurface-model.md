@@ -39,7 +39,7 @@ independent reference proves it?
   conversion documented in the mapping note (ADR-0001).
 - Reference: Mitsuba 3.9.1 volumetric path tracing with a homogeneous medium
   inside a dielectric boundary (random walk, ground truth). Decision rule fixed
-  now: if the screen-space diffusion misses the ticket 11 bound on the piece
+  now: if the screen-space diffusion misses the decision-11 bound on the piece
   mask, the hybrid RT single-scattering variant is implemented within F15
   (timeboxed, ≤ 2 weeks); otherwise it stays a candidate.
 

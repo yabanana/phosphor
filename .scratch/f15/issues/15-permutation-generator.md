@@ -1,10 +1,10 @@
-# 14: Material permutation generator and budgets
+# 15: Material permutation generator and budgets
 
 Roadmap: F15.2
 
 **What to build:** The app exports feature-class manifests from fixtures and corpus; the generator (extension of `variant_gen`) turns manifests plus a declared list into the class table, MSL constants and pipeline descriptors and updates the archive in a targeted way; per-class tile binning is measured against the union pipeline and adopted by the ≥ 5 % rule; budgets are enforced and reported.
 
-**Blocked by:** 12, 13
+**Blocked by:** 13, 14
 
 **Status:** ready-for-agent
 

@@ -11,8 +11,10 @@ any F15 code is written.
 ## Notes
 
 - 2026-11-13: every decision ticket resolved (owner confirmed 09 and 10);
-  spec in `spec.md`, tracer-bullet tickets 01–17 in `issues/`; awaiting the
-  owner's approval of the plan before any F15 code.
+  spec in `spec.md`, tracer-bullet tickets 01–18 in `issues/` (review pass:
+  ticket 04 split into plumbing + lobe guide, denoiser edge-stopping
+  corrected, Phosphor-only scope per ADR-0001 addendum); awaiting the owner's
+  approval of the plan before any F15 code.
 
 - Roadmap tasks F15.1–F15.4 (`docs/ROADMAP.md`), plan `docs/plans/F15.md`,
   method `docs/plans/METHOD.md`, sequencing `docs/plans/SEQUENCING.md`,
@@ -21,7 +23,8 @@ any F15 code is written.
   research; only owner-level choices go to the owner in one question),
   `research` (primary sources, findings in `.scratch/f15/research/`),
   `prototype` for measured spikes (serial GPU, quiet machine, negative control).
-- Track Studio (`~/Documents/REA_RTB`) is read-only evidence: never modify it.
+- Phosphor only (ADR-0001 addendum): Track Studio is paused; its six chess
+  materials remain a fixture from public assets.
 - Product lighting path = visibility buffer + F13 lighting; forward stays the
   default render path for the legacy benches.
 

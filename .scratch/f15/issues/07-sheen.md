@@ -1,10 +1,10 @@
-# 06: Sheen lobe and sheen albedo table
+# 07: Sheen lobe and sheen albedo table
 
 Roadmap: F15.1, F15.3
 
 **What to build:** `KHR_materials_sheen` renders per decision 06 with the Charlie distribution and visibility and the base scaled by the sheen directional albedo; a Phosphor tool generates the E(μ, roughness) table (with a negative control) instead of importing the Sample Renderer PNG.
 
-**Blocked by:** 04
+**Blocked by:** 05
 
 **Status:** ready-for-agent
 

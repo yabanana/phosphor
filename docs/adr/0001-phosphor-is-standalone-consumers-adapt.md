@@ -14,5 +14,12 @@ they land in Phosphor; Track Studio is never modified from Phosphor work.
 - No Track Studio type, field name or file format appears in Phosphor's schema,
   loader or tests; the Track Studio case is reproduced in Phosphor with the same
   public assets and parameter values.
-- A mapping note (MaterialX Standard Surface inputs to Phosphor's material
-  description) is part of the F15 delivery, so the later port is mechanical.
+- The conversion of the chess fixture's MaterialX values into Phosphor's
+  description is documented with the fixture so it is reproducible.
+
+## Addendum (owner, 2026-11-13)
+
+Phosphor stays a separate product; F15 considers only Phosphor. The owner
+pauses Track Studio's development; F15 does no work for Track Studio and no
+host-API work (the `rea/host-embedding` branch stays outside F15). The six Open
+Chess Set materials remain a Phosphor fixture built from public assets.

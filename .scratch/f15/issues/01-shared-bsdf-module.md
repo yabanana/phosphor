@@ -8,7 +8,7 @@ Roadmap: F15.1 (prefactor)
 
 **Status:** ready-for-agent
 
-- [ ] The three GPU copies call the shared module; no second GGX/Fresnel implementation remains in resolve, DI or reflections (secondary-hit base reduction may keep its own reduced form, documented)
+- [ ] The three GPU copies call the shared module; no second GGX/Fresnel implementation remains in resolve, DI or reflections (the secondary-hit base reduction may keep its reduced form, documented)
 - [ ] `tools/visual_check.sh` 0 pixels against references taken before the change on every bench, API + shader validation clean
 - [ ] F13/F14 corpus runner subset touching DI/reflections green with unchanged numbers; any FP-contraction difference is explained and removed, not tolerated
 - [ ] Sponza D2 preset GPU p95 within noise of the parent commit (A/B/A, quiet machine)

@@ -1,10 +1,10 @@
-# 12: Critical lobe combinations and cross-lobe furnace
+# 13: Critical lobe combinations and cross-lobe furnace
 
 Roadmap: F15.1, F15.3
 
 **What to build:** The layering order of research 01 holds when lobes combine: hand-authored clearcoat + sheen fixture (no Khronos sample has it), iridescence + transmission + volume, anisotropy + clearcoat, specular + sheen, transmission overriding diffuse transmission; furnace across every implemented combination.
 
-**Blocked by:** 05, 06, 07, 08, 09, 10, 11
+**Blocked by:** 06, 07, 08, 09, 10, 11, 12
 
 **Status:** ready-for-agent
 
