@@ -6,14 +6,14 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 07, 08
 
-**Status:** ready-for-agent
+**Status:** resolved (2026-11-13; Khronos side-by-side and coat-normal-texture fixtures carried to ticket 22)
 
-- [ ] Clearcoat grids (factor × roughness, coat normal) pass decision-11 thresholds against the independent reference; furnace bound holds
-- [ ] Rough base + smooth coat: the coat reflection survives the denoiser and matches the reference within the transport bound
-- [ ] Emitter ownership: an emissive-panel fixture shows no double count between DI and the coat lobe's transport
-- [ ] Negative control (coat ignored, or coat F0 from the material ior as in the Sample Renderer) fails the bound
-- [ ] ClearCoatTest and ClearCoatCarPaint side by side under the declared rig; Sample Renderer deviations listed; temporal clip within F13.6
-- [ ] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
+- [x] Clearcoat grids (factor × roughness, coat normal) pass decision-11 thresholds against the independent reference; furnace bound holds
+- [x] Rough base + smooth coat: the coat reflection survives the denoiser and matches the reference within the transport bound
+- [x] Emitter ownership: an emissive-panel fixture shows no double count between DI and the coat lobe's transport
+- [x] Negative control (coat ignored, or coat F0 from the material ior as in the Sample Renderer) fails the bound
+- [ ] ClearCoatTest and ClearCoatCarPaint side by side under the declared rig; Sample Renderer deviations listed; temporal clip within F13.6 — temporal clip done (coat cases of tools/f15_clip_check.py); the Khronos side-by-side → ticket 22
+- [x] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
 
 ## Comments
 
@@ -89,3 +89,58 @@ ownership criterion, the denoiser/lobe-id criterion (the sun and env keys cover 
 base only through the image gate), ClearCoatTest/ClearCoatCarPaint side by side, and the temporal clip (F13.6).
 Archive: +19 descriptors with MATERIAL_FEATURES 3 (compute 330 -> 344, render 178 -> 182, tile 5 -> 6); a
 specialisation by this ticket for other masks (e.g. coat-only scenes) needs its own targeted update.
+
+2026-11-13 — engine side verified on M5. Code 251e231 (Sonnet agent,
+reviewed), runner 027edbd, coat-emitter fixture cfaa7a3, clip cases 575d079.
+Batch logs: `build/f15-exact/battery09.log`, `battery09b.log`,
+`t09/clip2.log`.
+- `tools/f15_check.py --run --expect green` (`build/f15-check/t09`): GREEN on
+  all 25 keys. Every control fails: coat-ignored, coat-f0-from-ior,
+  coat-fresnel-vh, coat-base-unattenuated and the declared ones.
+  - `clearcoat-grid-sun`: worst row p99 0.071 %.
+  - `-point`: 0.081 %; `@restir` and `@clustered`: 0.138 %.
+  - `-env-resolve` (declared): worst mean 2.6e-5.
+  - `-env` (transport): worst sphere mean 2.9 %, against 5 %.
+  - `furnace-clearcoat`: 1.00001; `@resolve`: max pixel 1.0.
+- Rough base under a smooth coat (`tools/f15_clip_check.py` coat cases,
+  `build/f15-clip-t09b`): on the dielectric smooth-coat spheres, the custom
+  denoiser against the 8 spp control gives p95 0.0095 / 0.0090 and flicker
+  0.0091 / 0.0088. The coat reflection survives the denoiser.
+  - Metal rows under the coat (p95 0.08, flicker 0.077) and the whole-grid
+    flicker (0.0216) are diagnostic only: they are the 1 spp
+    strong-specular noise level that ticket 08 also measured on base
+    metals.
+  - The per-frame lobe-key control does NOT discriminate on these spheres:
+    its error is lower than the stable key's. Reported, not gated.
+- Emitter ownership (`tools/f15_coat_emitter_check.py`, coat roughness 0.3
+  and 0.5): MET. The ROI mean ratios against legacy-ssr are brute-ssr
+  1.12 / 1.14, legacy-rt 1.03 / 1.00 and brute-rt 1.15 / 1.14. The
+  double-count control (2.12) fails.
+  - The tolerance is 0.20 because the uncoated `rough-emitter` twin already
+    shows the same +8..16 % DI/SSR difference (F13 behaviour).
+- `--debug-lobe-guide 16` on clearcoat-grid-env: `pixels 52356 extended 43228
+  base 9128 unverified 0 | PASS`. Coat factor and roughness are compared bit
+  for bit; the coat normal by angle.
+- Shader validation: clearcoat-grid-env with RT reflections and ReSTIR exits
+  clean, and so does the F13 mirror DI fixture.
+- Scenes without features: F13 exact captures and visual_check 0 px.
+  archive_check: every local scenario PASS. hitch_check OK. The transport
+  and lobe-guide overflow checks PASS.
+- Transport fixes made during the ticket:
+  - emitter and RT ownership are drawn per lobe in proportion to the coat's
+    share of the BSDF value in the sampled direction;
+  - a sample in the extreme lobe tail (mixture pdf 0) contributes zero
+    instead of an error.
+- Lobe key: the denoiser key is the coat when the coat is significant (at
+  least 3 % of the albedo weight), with edge-stopping roughness
+  min(base, coat). Unit-tested on the CPU mirror.
+- Support report: clearcoat approximated,
+  `secondary_rt_hits_ignore_coat;di_emitters_uncoated` (decision 06).
+- Carried:
+  - ClearCoatTest / ClearCoatCarPaint side by side → ticket 22;
+  - coat-normal-texture fixtures need textures in the reference → ticket 22;
+  - the coat-only union (mask 2) is not archived because no fixture uses it.
+- Process note: the first clip run failed `repeat_identical`. The
+  orchestrator had rebuilt `build/release` while the runner was running,
+  so the two repeats used different binaries. The rerun at a fixed binary
+  passes. Rule: never rebuild a binary under a running verification.
