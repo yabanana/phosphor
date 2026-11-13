@@ -16,11 +16,12 @@
 using namespace phosphor;
 
 TEST_CASE("F15.3 material scenarios are exactly the nine declared names") {
-    CHECK(MaterialValidation::scenarios().size() == 17);
+    CHECK(MaterialValidation::scenarios().size() == 19);
     for (auto name : {"base-grid-sun", "base-grid-env", "base-grid-env-resolve", "furnace-base", "furnace-resolve",
                       "roughness-extremes", "roughness-extremes-sun", "specular-grid-sun", "specular-grid-env-resolve", "specular-grid-point",
                       "specular-grid-env", "furnace-specular", "clearcoat-grid-sun", "clearcoat-grid-env-resolve",
-                      "clearcoat-grid-env", "clearcoat-grid-point", "furnace-clearcoat"})
+                      "clearcoat-grid-env", "clearcoat-grid-point", "furnace-clearcoat",
+                      "specular-grid-edit", "specular-grid-rough"})
         CHECK(MaterialValidation::validScenario(name));
     CHECK_FALSE(MaterialValidation::validScenario("unknown"));
     CHECK_THROWS(MaterialValidation{"unknown"});
@@ -174,7 +175,9 @@ TEST_CASE("F15.3 the bench and the runner (tools/f15_check.py) list the same sce
     const std::regex key(R"re(\n    "([a-z0-9-]+)(@[a-z]+)?": \{)re");
     for (std::sregex_iterator it(block.begin(), block.end(), key), last; it != last; ++it) runner.insert((*it)[1]);
     std::set<std::string> bench;
-    for (auto name : MaterialValidation::scenarios()) bench.insert(std::string(name));
+    // The two clip fixtures of F15.1 ticket 08 belong to tools/f15_clip_check.py, not to the reference runner.
+    for (auto name : MaterialValidation::scenarios())
+        if (std::string_view(name) != "specular-grid-edit" && std::string_view(name) != "specular-grid-rough") bench.insert(std::string(name));
     CHECK(runner == bench);
 }
 
@@ -468,4 +471,36 @@ TEST_CASE("F15.3 clearcoat-grid-point: the coat grid lit by one point light from
     // The coat highlight (N = H of the side light) falls on the visible front of the spheres: a coat reflection to see.
     const glm::vec3 h = glm::normalize(glm::normalize(camera - centre) + glm::normalize(light.position - centre));
     CHECK(h.z > 0.3f);
+}
+
+TEST_CASE("F15.1 the clip fixture's toggle is the strong edit: ior 0 on the feature sphere, specularColor 25 on the parameter sphere") {
+    CHECK(MaterialValidation::spec("specular-grid-edit").strongEdit);
+    CHECK_FALSE(MaterialValidation::spec("specular-grid-env").strongEdit);
+    ECS ecs;
+    GpuScene scene;
+    test::NullTextureManager textures;
+    MaterialValidation f{"specular-grid-edit", 2};
+    f.setup(ecs, scene, textures);
+    const EntityID featureSphere = f.spheres()[MaterialValidation::toggleFeatureSphere()];
+    const EntityID parameterSphere = f.spheres()[MaterialValidation::toggleParameterSphere()];
+    auto block = [&](EntityID e) { return *ecs.getComponent<MaterialComponent>(e).extension->specular; };
+    CHECK(block(featureSphere).ior == 1.5f);
+    CHECK(block(parameterSphere).specularColor == std::array<float, 3>{1.0f, 1.0f, 1.0f});
+    f.update(0.0f, ecs); // update 1: nothing
+    CHECK(block(featureSphere).ior == 1.5f);
+    f.update(0.0f, ecs); // update 2 = event 1
+    CHECK(block(featureSphere).ior == 0.0f);
+    CHECK(block(parameterSphere).specularColor == std::array<float, 3>{25.0f, 25.0f, 25.0f});
+    CHECK(block(parameterSphere).specularFactor == 0.5f); // the weight is not touched by the strong edit
+    f.update(0.0f, ecs);
+    f.update(0.0f, ecs); // event 2: back
+    CHECK(block(featureSphere).ior == 1.5f);
+    CHECK(block(parameterSphere).specularColor == std::array<float, 3>{1.0f, 1.0f, 1.0f});
+    // the rough adaptive fixture: reuse domain of visibility_adaptive (roughness >= 0.75, metallic <= 0.05), every extension of the grid
+    const auto& rough = MaterialValidation::spec("specular-grid-rough");
+    for (float r : rough.roughness) CHECK(r >= 0.75f);
+    for (float m : rough.metallic) CHECK(m <= 0.05f);
+    CHECK(rough.sun);
+    CHECK(rough.ior == MaterialValidation::spec("specular-grid-env").ior);
+    f.teardown(ecs, scene);
 }

@@ -49,6 +49,11 @@ struct MaterialScenarioSpec {
     std::vector<float> clearcoatFactor;
     std::vector<float> clearcoatRoughness;
     std::vector<float> baseIor;
+    // F15.1 (ticket 08) clip fixtures (tools/f15_clip_check.py): --material-toggle-every edits the two probe spheres
+    // STRONGLY (feature sphere: ior 1.5 <-> 0, the Fresnel = 1 mode; parameter sphere: specularColor 1 <-> 25, f0 clamped
+    // to 1), so that a history kept across the edit is visible at the F13.6 recovery threshold.  The default edit is the
+    // small one of ticket 05 (ior 1.33 / weight 0.6).
+    bool strongEdit = false;
     [[nodiscard]] bool hasSpecularGrid() const { return !ior.empty(); }
     [[nodiscard]] bool hasClearcoatGrid() const { return !clearcoatFactor.empty(); }
 };
@@ -57,7 +62,8 @@ class MaterialValidation final : public TestBench {
 public:
     // `toggleEvery` (F15.1, specular grids only): every N updates the extension of the two probe spheres
     // is edited (a parameter change on one, a feature toggle on the other: a counted record rewrite,
-    // never a reallocation); 0 = static scene.
+    // never a reallocation); 0 = static scene.  The edit of event k is visible in the capture of frame
+    // k * N - 1 (the update of frame f runs before frame f is rendered; frames count from 0).
     explicit MaterialValidation(std::string scenario, u32 toggleEvery = 0);
     [[nodiscard]] static bool validScenario(std::string_view scenario);
     [[nodiscard]] static std::span<const std::string_view> scenarios();

@@ -14,12 +14,13 @@
 namespace phosphor {
 namespace {
 // The names are mirrored by tools/f15_check.py SCENARIOS (tests/test_material_validation.cpp compares both).
-constexpr std::array<std::string_view, 17> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
+constexpr std::array<std::string_view, 19> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
                                                       "furnace-base",   "furnace-resolve",     "roughness-extremes",
                                                       "roughness-extremes-sun", "specular-grid-sun",
                                                       "specular-grid-env-resolve", "specular-grid-point", "specular-grid-env", "furnace-specular",
                                                       "clearcoat-grid-sun", "clearcoat-grid-env-resolve", "clearcoat-grid-env",
-                                                      "clearcoat-grid-point", "furnace-clearcoat"};
+                                                      "clearcoat-grid-point", "furnace-clearcoat",
+                                                      "specular-grid-edit", "specular-grid-rough"};
 constexpr float pi = 3.14159265358979323846f;
 
 glm::quat orientLight(glm::vec3 towardLight) {
@@ -126,6 +127,14 @@ const std::vector<MaterialScenarioSpec>& specs() {
         // without the transport).
         {"furnace-clearcoat", coatBaseRoughness, coatMetallic, glm::vec3(1.0f), false, 0.0f, towardSun, 1.0f, {}, {}, {},
          {}, coatFactor, coatRoughness, coatBaseIor},
+        // Clip fixture of ticket 08 (not gated against the reference): the grid and environment of specular-grid-env
+        // with the strong runtime edit of --material-toggle-every (tools/f15_clip_check.py: recovery after an edit).
+        {"specular-grid-edit", specRoughness, specMetallic, copper, false, 0.0f, towardSun, 0.5f, specIor, specFactor,
+         specColor, {}, {}, {}, {}, true},
+        // Adaptive-shading fixture of ticket 08 (tools/f15_clip_check.py): rough (>= 0.75) dielectric spheres, the
+        // reuse domain of visibility_adaptive, with every extension of the grid, lit by the sun (plain resolve).
+        {"specular-grid-rough", std::vector<float>(5, 0.85f), std::vector<float>(5, 0.0f), copper, true, 3.0f, towardSun,
+         0.0f, specIor, specFactor, specColor},
     };
     return all;
 }
@@ -247,9 +256,13 @@ void MaterialValidation::update(float, ECS& ecs) {
         m.extension = std::move(d);
     };
     // Odd events: the feature sphere becomes active (ior 1.33), even events neutral again.
-    edited(toggleFeatureSphere(), [&](SpecularBlock& b) { b.ior = event % 2 == 1 ? 1.33f : 1.5f; });
+    const bool strong = spec(scenario_).strongEdit, odd = event % 2 == 1;
+    edited(toggleFeatureSphere(), [&](SpecularBlock& b) { b.ior = strong ? (odd ? 0.0f : 1.5f) : (odd ? 1.33f : 1.5f); });
     // The parameter sphere alternates its weight 0.5 / 0.6 (a record rewrite without a bit change).
-    edited(toggleParameterSphere(), [&](SpecularBlock& b) { b.specularFactor = event % 2 == 1 ? 0.6f : 0.5f; });
+    edited(toggleParameterSphere(), [&](SpecularBlock& b) {
+        if (strong) b.specularColor = odd ? std::array<float, 3>{25.0f, 25.0f, 25.0f} : std::array<float, 3>{1.0f, 1.0f, 1.0f};
+        else b.specularFactor = odd ? 0.6f : 0.5f;
+    });
 }
 
 void MaterialValidation::teardown(ECS& ecs, GpuScene&) {
