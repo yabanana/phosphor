@@ -20,6 +20,7 @@ add_executable(phosphor_tests
     test_material_description.cpp
     test_gltf_materials.cpp
     test_material_description_io.cpp
+    test_material_extension_pack.cpp
     test_async_probe_reference.cpp
     test_graph_debug_reference.cpp
     test_graph_dump.cpp

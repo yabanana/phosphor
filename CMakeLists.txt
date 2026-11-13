@@ -74,6 +74,7 @@ add_library(phosphor_core STATIC
     src/renderer/gpu_scene.cpp
     src/renderer/material_description.cpp
     src/renderer/material_description_io.cpp
+    src/renderer/material_extension_pack.cpp
     src/renderer/material_support.cpp
     src/renderer/meshlet_builder.cpp
     src/renderer/rt_proxy.cpp

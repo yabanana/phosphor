@@ -18,6 +18,7 @@
 #include <array>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -237,6 +238,19 @@ enum class MaterialFeature : u8 {
 };
 constexpr u32 MATERIAL_FEATURE_COUNT = 9;
 
+// The GPU constants of gpu_types.h mirror the enum (checked here, once).
+static_assert(MATERIAL_FEATURE_SPECULAR_IOR == (1u << static_cast<u32>(MaterialFeature::SpecularIor)) &&
+                  MATERIAL_FEATURE_CLEARCOAT == (1u << static_cast<u32>(MaterialFeature::Clearcoat)) &&
+                  MATERIAL_FEATURE_SHEEN == (1u << static_cast<u32>(MaterialFeature::Sheen)) &&
+                  MATERIAL_FEATURE_ANISOTROPY == (1u << static_cast<u32>(MaterialFeature::Anisotropy)) &&
+                  MATERIAL_FEATURE_IRIDESCENCE == (1u << static_cast<u32>(MaterialFeature::Iridescence)) &&
+                  MATERIAL_FEATURE_TRANSMISSION == (1u << static_cast<u32>(MaterialFeature::Transmission)) &&
+                  MATERIAL_FEATURE_VOLUME == (1u << static_cast<u32>(MaterialFeature::Volume)) &&
+                  MATERIAL_FEATURE_SUBSURFACE == (1u << static_cast<u32>(MaterialFeature::Subsurface)) &&
+                  MATERIAL_FEATURE_LAYERS == (1u << static_cast<u32>(MaterialFeature::Layers)) &&
+                  MATERIAL_FEATURES_ALL == (1u << MATERIAL_FEATURE_COUNT) - 1u,
+              "GPU feature bits out of sync with MaterialFeature");
+
 [[nodiscard]] constexpr u32 featureBit(MaterialFeature f) { return 1u << static_cast<u32>(f); }
 [[nodiscard]] const char* featureName(MaterialFeature f);
 
@@ -248,6 +262,11 @@ constexpr u32 MATERIAL_FEATURE_COUNT = 9;
 /// One bit per active feature (see MaterialFeature).  Core-only materials
 /// give 0.
 [[nodiscard]] u32 featureMask(const MaterialDescription& desc);
+
+/// Shared, immutable reference to a description: the per-entity form of the
+/// extension data (MaterialComponent::extension).  An edit creates a new
+/// description and swaps the pointer through ECS modify access.
+using MaterialDescriptionPtr = std::shared_ptr<const MaterialDescription>;
 
 /// Human-readable problems (empty = valid): ranges per specification and
 /// companion rules (volume needs transmission or a subsurface block, thin or

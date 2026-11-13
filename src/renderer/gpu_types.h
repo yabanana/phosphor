@@ -59,6 +59,30 @@ PHOSPHOR_GPU_CONSTANT u32 INVALID_TEXTURE_INDEX = 0xFFFFFFFFu;
 // material and back faces are lit with the flipped normal.
 PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FLAG_DOUBLE_SIDED = 1u << 0;
 
+// F15.1 (ticket 05): material FEATURE bits live in GPUMaterial::flags from bit
+// MATERIAL_FEATURE_SHIFT: bit (8 + MaterialFeature value) is set while the
+// material has that feature active (renderer/material_description.h keeps the
+// enum; a static_assert there checks these constants).  The same bit positions
+// without the shift form the scene feature union (SceneStore::featureUnion) and
+// the value of the reserved function constant MATERIAL_FEATURES.
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURE_SHIFT        = 8;
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURE_SPECULAR_IOR = 1u << 0;
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURE_CLEARCOAT    = 1u << 1;
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURE_SHEEN        = 1u << 2;
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURE_ANISOTROPY   = 1u << 3;
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURE_IRIDESCENCE  = 1u << 4;
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURE_TRANSMISSION = 1u << 5;
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURE_VOLUME       = 1u << 6;
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURE_SUBSURFACE   = 1u << 7;
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURE_LAYERS       = 1u << 8;
+/// Every feature bit: the value of the all-lobes reference pipeline.
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURES_ALL         = (1u << 9) - 1u;
+/// GPUMaterial::extensionIndex of a material without an extension group.
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_EXTENSION_INVALID    = 0xFFFFFFFFu;
+/// Records of the extension group of one extended material (fixed, so
+/// toggling features never reallocates the group).
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_EXT_RECORDS          = 4;
+
 struct GPUMaterial {
     float baseColor[4];
     float metallic;
@@ -72,10 +96,99 @@ struct GPUMaterial {
     u32 emissiveTex;
     float emissive[3];
     float alphaCutoff;
-    u32 flags;                 // MATERIAL_FLAG_*
-    float pad[2];
+    u32 flags;                 // MATERIAL_FLAG_* | feature bits << MATERIAL_FEATURE_SHIFT
+    u32 extensionIndex;        // first of the MATERIAL_EXT_RECORDS extension records, or MATERIAL_EXTENSION_INVALID
+    u32 pad1;
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUMaterial) == 80, "GPUMaterial layout");
+
+// ---------------------------------------------------------------------------
+// F15.1 (ticket 05): material extension records (decision 07, ADR-0002).
+//
+// A separate GPU buffer of 80-byte records; an extended material owns a group
+// of MATERIAL_EXT_RECORDS consecutive records starting at
+// GPUMaterial::extensionIndex.  The layouts of EVERY F15 feature are frozen
+// here: later lobe tickets only read fields.  Texture fields are bindless
+// indices (INVALID_TEXTURE_INDEX = factor only).  Each record is one
+// GPUDeltaRecord payload.
+// ---------------------------------------------------------------------------
+
+/// Record 0: KHR_materials_ior + KHR_materials_specular, clearcoat, sheen.
+struct GPUMaterialExt0 {
+    float ior;                 // 0 = the permanent special mode (Fresnel evaluates to 1)
+    float specularFactor;
+    float specularColor[3];
+    u32   specularTex;         // A channel
+    u32   specularColorTex;    // RGB (sRGB)
+    float clearcoatFactor;
+    float clearcoatRoughness;
+    float clearcoatNormalScale;
+    u32   clearcoatFactorTex;  // R
+    u32   clearcoatRoughnessTex; // G
+    u32   clearcoatNormalTex;
+    float sheenColor[3];
+    float sheenRoughness;
+    u32   sheenColorTex;       // RGB (sRGB)
+    u32   sheenRoughnessTex;   // A
+    u32   pad;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUMaterialExt0) == 80, "GPUMaterialExt0 layout");
+
+/// Record 1: anisotropy, iridescence, transmission, volume.
+struct GPUMaterialExt1 {
+    float anisotropyStrength;
+    float anisotropyRotation;  // radians, counter-clockwise from the tangent
+    u32   anisotropyTex;       // RGB: direction rg, strength b
+    float iridescenceFactor;
+    float iridescenceIor;
+    float iridescenceThicknessMin; // nm
+    float iridescenceThicknessMax; // nm
+    u32   iridescenceFactorTex;    // R
+    u32   iridescenceThicknessTex; // G
+    float transmissionFactor;
+    u32   transmissionTex;     // R
+    float volumeThickness;
+    u32   volumeThicknessTex;  // G
+    float attenuationColor[3];
+    float attenuationDistance; // +inf: no attenuation
+    u32   pad[3];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUMaterialExt1) == 80, "GPUMaterialExt1 layout");
+
+/// Record 2: subsurface (OpenPBR semantics, ADR-0005).  mode: 0 thin, 1 volumetric.
+struct GPUMaterialExt2 {
+    u32   mode;
+    float weight;
+    float color[3];
+    float radius;              // metres
+    float radiusScale[3];
+    float anisotropy;
+    u32   weightTex;           // A
+    u32   colorTex;            // RGB (sRGB)
+    u32   radiusScaleTex;      // RGB (sRGB)
+    u32   pad[7];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUMaterialExt2) == 80, "GPUMaterialExt2 layout");
+
+/// Record 3: layer stack.  packedMaskChannels: 2 bits per layer (layer i at
+/// bits 2i..2i+1; 0 R, 1 G, 2 B, 3 A).  heightContrast[i] in metres, or -1
+/// when the layer has none (plain mask blend).  Unused layers have material
+/// index MATERIAL_EXTENSION_INVALID.
+struct GPUMaterialExt3 {
+    u32   maskTex;
+    u32   layerCount;          // 0 .. 4
+    u32   layerMaterial[4];
+    u32   packedMaskChannels;
+    float heightContrast[4];
+    u32   pad[9];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUMaterialExt3) == 80, "GPUMaterialExt3 layout");
+
+/// One record of the extension buffer, untyped (the scatter payload).
+struct GPUMaterialExtRecord {
+    u32 w[20];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUMaterialExtRecord) == 80, "GPUMaterialExtRecord layout");
 
 struct GPUMeshInfo {
     u32 meshletCount;
@@ -189,7 +302,14 @@ struct FrameConstants {
 #else
     u64 dfgTable;
 #endif
-    u32 framePad[2];
+    // F15.1 (ticket 05): GPU address of the material extension buffer
+    // (GPUMaterialExtRecord[]); read only by materials whose flags carry
+    // feature bits, so it may stay 0 for scenes without features.
+#if defined(__METAL_VERSION__)
+    const device GPUMaterialExtRecord* materialExtensions;
+#else
+    u64 materialExtensions;
+#endif
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(FrameConstants) == 176, "FrameConstants layout");
 
