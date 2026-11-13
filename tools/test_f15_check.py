@@ -474,7 +474,7 @@ class RunnerLogic(unittest.TestCase):
             self.assertEqual(sorted(check.SCENARIOS[key]["controls"]), sorted(ref.SHEEN_CONTROLS), key)
         self.assertNotIn("sheen-cheap-scaling", check.SCENARIOS["sheen-grid-env"]["controls"])
 
-    def test_aniso_keys_are_pending_and_name_the_control_that_models_the_current_engine(self):
+    def test_aniso_keys_are_planned_with_their_controls_and_no_longer_pending(self):
         keys = ["aniso-grid-sun", "aniso-grid-env-resolve", "aniso-grid-env", "aniso-grid-point", "aniso-grid-point@restir",
                 "aniso-grid-point@clustered", "furnace-aniso", "furnace-aniso@resolve", "aniso-mirrored-sun"]
         with tempfile.TemporaryDirectory() as tmp:
@@ -509,14 +509,11 @@ class RunnerLogic(unittest.TestCase):
                 self.assertIn(name, ref.ANISO_CONTROLS, key)
             for name in declared:
                 self.assertIn(name, ref.ANISO_DECLARED_CONTROLS, key)
-            if not key.startswith("furnace-aniso") or key.endswith("@resolve"):
-                self.assertEqual(spec["pending"], "ticket 11", key)
-                self.assertIn(spec["pending_matches"], literal + declared, key)
-                self.assertIn(spec["pending_matches"], ("aniso-ignored", "declared-aniso-ignored"), key)
+            for field in ("pending", "pending_matches", "pending_gate"):
+                self.assertNotIn(field, spec, key)
         self.assertTrue(check.SCENARIOS["furnace-aniso"]["always_green"])
         self.assertNotIn("pending", check.SCENARIOS["furnace-aniso"])
-        resolve = check.SCENARIOS["furnace-aniso@resolve"]
-        self.assertEqual((resolve["pending"], resolve["pending_gate"]), ("ticket 11", "declared"))
+        self.assertTrue(check.SCENARIOS["furnace-aniso@resolve"]["always_green"])
         self.assertEqual(check.SCENARIOS["aniso-grid-env-resolve"]["kind"], "declared")
         self.assertEqual(check.SCENARIOS["aniso-grid-env"]["kind"], "environment")
         for key in ("aniso-grid-sun", "aniso-grid-point", "aniso-grid-point@restir", "aniso-grid-point@clustered"):
@@ -1147,21 +1144,19 @@ class BenchMirror(unittest.TestCase):
         return self.scenario(check.bench_scenario(key), model, "green", environment=environment, tag="-" + key + tag,
                              key=key)
 
-    def test_aniso_keys_are_red_for_the_right_reason_with_an_anisotropy_blind_engine(self):
-        for key in self.ANISO_KEYS:
-            entry = self.aniso_entry(key, True, "-blind")
-            self.assertTrue(entry["discriminating"], (key, json.dumps(entry["controls"], indent=1)))
-            self.assertFalse(entry["gates_pass"], key)          # pending: the gate FAILS
-            self.assertTrue(entry["pending_matches_met"], key)  # ... and the engine image matches the aniso-ignored control
-            self.assertEqual(entry["pending"], "ticket 11")
-            self.assertEqual(check.verdict([entry], "green"), ("GREEN", check.EXIT_OK), key)
-
-    def test_aniso_keys_go_red_in_green_mode_once_the_engine_implements_the_anisotropy(self):
+    def test_aniso_keys_pass_with_an_engine_that_implements_the_anisotropy(self):
         for key in self.ANISO_KEYS:
             entry = self.aniso_entry(key, False, "-aniso")
+            self.assertTrue(entry["discriminating"], (key, json.dumps(entry["controls"], indent=1)))
             self.assertTrue(entry["gates_pass"], (key, json.dumps(check.summarize(entry["result"]))))
-            self.assertFalse(entry["pending_matches_met"], key)
-            self.assertEqual(check.verdict([entry], "green")[1], check.EXIT_UNEXPECTED, key)
+            self.assertFalse(entry.get("pending"), key)
+            self.assertEqual(check.verdict([entry], "green"), ("GREEN", check.EXIT_OK), key)
+
+    def test_aniso_keys_fail_with_an_anisotropy_blind_engine(self):
+        # The old engine (anisotropy ignored) fails the gate of every key except the furnace bound, an upper bound that it holds.
+        for key in self.ANISO_KEYS:
+            entry = self.aniso_entry(key, True, "-blind")
+            self.assertFalse(entry["gates_pass"], key)
 
     def test_aniso_controls_each_fail_their_gate(self):
         for key in self.ANISO_KEYS:

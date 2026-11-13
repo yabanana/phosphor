@@ -52,9 +52,9 @@ reference ray casting):
   (+ @resolve) and aniso-mirrored-sun against the independent KHR_materials_anisotropy model of tools/f15_reference.py
   (Burley D with alpha_t = mix(alpha, 1, strength^2), the README's height-correlated V, the lobe frame from the mesh tangent
   attribute of the snapshot and the world matrix; exact environment by quadrature of the anisotropic lobe; declared
-  environment = split sum at an effective roughness).  The engine side lands with ticket 11, so every gate the current engine
-  can fail is "pending" exactly like the sheen grids (asserted to FAIL; `pending_matches` = aniso-ignored or its declared
-  twin must PASS); the furnace bound is asserted green (only the declared gate of furnace-aniso@resolve is pending).
+  environment = split sum at an effective roughness).  The engine side landed with F15.1 ticket 11 (the keys were "pending" with
+  the anisotropy-ignored control as the matching image until then): every gate passes; the furnace gates are asserted green in
+  every mode.
   Negative controls (each must fail its gate): anisotropy ignored, rotation flipped, handedness ignored, alpha_t/alpha_b
   swapped, D normalised by alpha_b^2 (energy), world-matrix determinant ignored (mirrored fixture only).
 - Iridescence (F15.3, ticket 12): iridescence-grid-sun / -env-resolve / -env / -point (legacy, @restir, @clustered),
@@ -328,54 +328,51 @@ SCENARIOS = {
     # F15.3 (ticket 11): KHR_materials_anisotropy.  Rows are the strength {0, 0.5, 1} over a copper dielectric and then a
     # copper metal, columns the rotation {0, pi/4, pi/2, -pi/4}, base roughness 0.3, on COMBED spheres (uniform tangent field
     # facing the camera, handedness -1, tangents from the mesh attribute of the snapshot).  Direct grids group their rows by
-    # (metallic, strength).  The engine ignores the anisotropy until ticket 11, so every gate it can fail is "pending" and the
-    # engine image must PASS it against the aniso-ignored reference ("pending_matches").  Direct controls: ignored, rotation
+    # (metallic, strength).  The engine side landed with ticket 11 (the keys were pending until then).  Direct controls: ignored, rotation
     # flipped, handedness ignored (the same lobe as the rotation flip on a mesh of handedness -1: the mirrored fixture
     # separates them), alpha_t / alpha_b swapped, D normalised by alpha_b^2 (gains energy).  The exact environment key uses
     # the same five controls (the per-sphere mean over a combed sphere sees the lobe orientation: measured); the declared
     # environment key (split sum at an effective roughness, see the reference) requires `declared-aniso-ignored` and
     # `-alpha-t` (the declared fit is independent of rotation, handedness and axis swap).
-    "aniso-grid-sun": {"kind": "direct", "pending": "ticket 11", "pending_matches": "aniso-ignored",
+    "aniso-grid-sun": {"kind": "direct", 
                        "controls": ANISO_DIRECT_CONTROLS,
                        "terms": "sun disk only (environment 0, no shadows, no GI) on the strength x rotation grid"},
-    "aniso-grid-env-resolve": {"kind": "declared", "pending": "ticket 11", "pending_matches": "declared-aniso-ignored",
+    "aniso-grid-env-resolve": {"kind": "declared", 
                                "reflections": "off", "controls": ["declared-aniso-ignored", "declared-aniso-alpha-t"],
                                "terms": "constant environment only (radiance 0.5, no sun) on the anisotropy grid, deterministic "
                                         "resolve terms (--reflections off --lighting-denoise custom)"},
-    "aniso-grid-env": {"kind": "environment", "pending": "ticket 11", "pending_matches": "aniso-ignored",
+    "aniso-grid-env": {"kind": "environment", 
                        "controls": ANISO_DIRECT_CONTROLS,
                        "terms": "constant environment only (radiance 0.5, no sun), SSR specular transport (anisotropic VNDF "
                                 "sampling), on the anisotropy grid"},
-    "aniso-grid-point": {"kind": "direct", "pending": "ticket 11", "pending_matches": "aniso-ignored",
+    "aniso-grid-point": {"kind": "direct", 
                          "lighting": "legacy", "visibility": "none", "controls": ANISO_DIRECT_CONTROLS,
                          "terms": "one point light only (no sun, environment 0, no GI), resolve local lights "
                                   "(--lighting legacy), on the anisotropy grid"},
-    "aniso-grid-point@restir": {"kind": "direct", "pending": "ticket 11", "pending_matches": "aniso-ignored",
+    "aniso-grid-point@restir": {"kind": "direct", 
                                 "lighting": "restir", "visibility": "rays", "denoise": "off", "terminator_band": 2,
                                 "controls": ANISO_DIRECT_CONTROLS,
                                 "terms": "one point light only, ReSTIR DI with RT visibility (--lighting restir --rt on), "
                                          "unfiltered (--lighting-denoise off), on the anisotropy grid"},
-    "aniso-grid-point@clustered": {"kind": "direct", "pending": "ticket 11", "pending_matches": "aniso-ignored",
+    "aniso-grid-point@clustered": {"kind": "direct", 
                                    "lighting": "clustered", "visibility": "rays", "denoise": "off", "terminator_band": 2,
                                    "controls": ANISO_DIRECT_CONTROLS,
                                    "terms": "one point light only, clustered DI with RT visibility (--lighting clustered "
                                             "--rt on), unfiltered (--lighting-denoise off), on the anisotropy grid"},
-    # Furnace over anisotropic materials (base albedo 1, environment 1): an upper bound that the anisotropy-blind engine
-    # satisfies trivially, asserted green in every mode (the energy-gaining control must fail it); only the declared gate of
-    # the deterministic resolve is pending (the declared fit lowers the albedo below the isotropic one).
+    # Furnace over anisotropic materials (base albedo 1, environment 1): an upper bound, asserted green in every mode (the
+    # energy-gaining control must fail it).
     "furnace-aniso": {"kind": "furnace-transport", "always_green": True, "controls": ["aniso-d-normalised-by-ab"],
                       "terms": "constant environment radiance 1, base albedo 1, no sun, stochastic specular transport on the "
                                "anisotropy grid"},
     "furnace-aniso@resolve": {"kind": "furnace", "always_green": True, "reflections": "off",
-                              "pending": "ticket 11", "pending_gate": "declared",
-                              "pending_matches": "declared-aniso-ignored", "controls": ["aniso-d-normalised-by-ab"],
+                              "controls": ["aniso-d-normalised-by-ab"],
                               "declared": ["declared-aniso-ignored", "declared-aniso-alpha-t"],
                               "terms": "constant environment radiance 1, base albedo 1, no sun, deterministic resolve terms "
                                        "on the anisotropy grid"},
     # The mirrored carrier fixture (sun only): columns = (plain, mirrored) x (handedness -1, +1) at rotation pi/4.  The
     # mirrored instances carry INSTANCE_FLAG_MIRRORED; the reference puts the lobe on the world image of the model-space
     # bitangent (w sign(det)), so rotation sign, handedness w and the determinant each flip the lobe on their own.
-    "aniso-mirrored-sun": {"kind": "direct", "pending": "ticket 11", "pending_matches": "aniso-ignored",
+    "aniso-mirrored-sun": {"kind": "direct", 
                            "controls": ["aniso-ignored", "aniso-rotation-flipped", "aniso-bitangent-flipped",
                                         "aniso-alpha-swapped", "aniso-mirror-unaware", "aniso-d-normalised-by-ab"],
                            "terms": "sun disk only on plain and mirrored combed spheres of both tangent handedness values"},
