@@ -160,7 +160,7 @@ inline float3 DI_FN(diShadeSelected)(GPUDISurface surface, DILobe lobe, GPUDIRes
     if (!surface.valid || reservoir.lightIndex >= p.lightCount || !diValid(reservoir, lights[reservoir.lightIndex], p)) return float3(0);
     sample = diSampleTexturedLight(lights[reservoir.lightIndex], reservoir.lightIndex,
                                    float2(reservoir.u, reservoir.v), diVec(surface.position), emitters, materials, textures);
-    return DI_FN(diBRDFLobe)(surface, sample, diEmitterSpecularWeight(p, lights[reservoir.lightIndex], surface), lobe) * reservoir.normalization;
+    return DI_FN(diBRDFLobe)(surface, sample, diEmitterSpecularWeight(p, lights[reservoir.lightIndex], surface), lobe, DI_FN(diEmitterCoatWeight)(p, lights[reservoir.lightIndex], lobe)) * reservoir.normalization;
 }
 
 // No RT resources are bound to the explicitly unshadowed fallback PSO.

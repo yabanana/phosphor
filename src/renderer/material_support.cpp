@@ -44,6 +44,15 @@ const MaterialSupportTable& currentSupportTable() {
         FeatureSupportEntry& specular = t.features[static_cast<u32>(MaterialFeature::SpecularIor)];
         specular.level                = SupportLevel::Approximated;
         specular.approximation        = "secondary_rt_hits_use_base_reduction";
+        // F15.1 (ticket 09): clearcoat shades every primary light path: resolve/forward (analytic lights, the sun disk
+        // quadrature of the coat lobe, environment split-sum, emission and base attenuated by 1 - c F_c), ReSTIR and
+        // clustered DI (the coated BSDF in target and shading, the coat lobe's emitter share by the coat roughness),
+        // the transport (one sample chooses the coat or the base lobe by albedo weight, mixture pdf) and the composite,
+        // the denoiser (stable lobe key, sharper roughness).  Declared approximations (decision 06): secondary RT hits
+        // ignore the coat, and emissive materials keep their uncoated emission as sampled DI emitters.
+        FeatureSupportEntry& clearcoat = t.features[static_cast<u32>(MaterialFeature::Clearcoat)];
+        clearcoat.level                = SupportLevel::Approximated;
+        clearcoat.approximation        = "secondary_rt_hits_ignore_coat;di_emitters_uncoated";
         return t;
     }();
     return table;

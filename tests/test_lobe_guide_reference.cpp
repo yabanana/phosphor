@@ -89,9 +89,9 @@ TEST_CASE("lobe guide reference: resolved parameters of ior/specular") {
     // A base material, a union without the bit and a feature the resolve does not resolve yet: features 0.
     CHECK(expectedLobeParams(GPUMaterial{}, ext, MATERIAL_FEATURE_SPECULAR_IOR).params.features == 0);
     CHECK(expectedLobeParams(extendedMaterial(0), ext, 0).params.features == 0);
-    GPUMaterial coat{};
-    coat.flags = MATERIAL_FEATURE_CLEARCOAT << MATERIAL_FEATURE_SHIFT;
-    CHECK(expectedLobeParams(coat, ext, MATERIAL_FEATURES_ALL).params.features == 0);
+    GPUMaterial sheen{};
+    sheen.flags = MATERIAL_FEATURE_SHEEN << MATERIAL_FEATURE_SHIFT;
+    CHECK(expectedLobeParams(sheen, ext, MATERIAL_FEATURES_ALL).params.features == 0);
     // Textures make the parameters unverifiable on the CPU.
     const GPUMaterialExtRecord textured[1] = {record0(1.5f, 1.0f, 1.0f, 1.0f, 1.0f, INVALID_TEXTURE_INDEX, 5u)};
     CHECK(expectedLobeParams(extendedMaterial(0), textured, MATERIAL_FEATURE_SPECULAR_IOR).unverified);
@@ -171,4 +171,76 @@ TEST_CASE("lobe guide reference: a union without the bit expects a zero record")
     const auto r = checkLobeGuide(f.input);
     CHECK_FALSE(r.pass()); // pixel 1 holds a specular record the scene union forbids
     CHECK(r.extended == 0);
+}
+
+// F15.1 (ticket 09): the clearcoat fields.
+namespace {
+GPUMaterialExtRecord coatRecord(float factor, float roughness, u32 factorTex = INVALID_TEXTURE_INDEX, u32 normalTex = INVALID_TEXTURE_INDEX) {
+    GPUMaterialExt0 e{};
+    e.ior = 1.5f; e.specularFactor = 1.0f; e.specularColor[0] = e.specularColor[1] = e.specularColor[2] = 1.0f;
+    e.specularTex = e.specularColorTex = INVALID_TEXTURE_INDEX;
+    e.clearcoatFactor = factor; e.clearcoatRoughness = roughness;
+    e.clearcoatFactorTex = factorTex; e.clearcoatRoughnessTex = INVALID_TEXTURE_INDEX; e.clearcoatNormalTex = normalTex;
+    e.sheenColorTex = e.sheenRoughnessTex = INVALID_TEXTURE_INDEX;
+    GPUMaterialExtRecord rec{};
+    std::memcpy(&rec, &e, sizeof(e));
+    return rec;
+}
+GPUMaterial coatMaterial(u32 extensionIndex, u32 normalTex = INVALID_TEXTURE_INDEX) {
+    GPUMaterial m{};
+    m.flags = MATERIAL_FEATURE_CLEARCOAT << MATERIAL_FEATURE_SHIFT;
+    m.extensionIndex = extensionIndex;
+    m.normalTex = normalTex;
+    return m;
+}
+} // namespace
+
+TEST_CASE("lobe guide reference: resolved parameters of clearcoat (factor saturated, roughness clamped to [0.04, 1])") {
+    const GPUMaterialExtRecord ext[3] = {coatRecord(0.75f, 0.3f), coatRecord(2.0f, 0.0f), coatRecord(0.5f, 0.5f, 4u)};
+    auto e = expectedLobeParams(coatMaterial(0), ext, MATERIAL_FEATURE_CLEARCOAT);
+    CHECK(e.params.features == MATERIAL_FEATURE_CLEARCOAT);
+    CHECK(e.params.clearcoatFactor == 0.75f);
+    CHECK(e.params.clearcoatRoughness == 0.3f);
+    CHECK_FALSE(e.unverified);
+    CHECK(e.coatNormalChecked);
+    CHECK(e.coatNormalIsShading);
+    e = expectedLobeParams(coatMaterial(1), ext, MATERIAL_FEATURE_CLEARCOAT);
+    CHECK(e.params.clearcoatFactor == 1.0f);
+    CHECK(e.params.clearcoatRoughness == 0.04f);
+    CHECK(expectedLobeParams(coatMaterial(2), ext, MATERIAL_FEATURE_CLEARCOAT).unverified); // factor texture
+    // A base normal map (or a coat normal texture) leaves the coat normal unverifiable by angle (unit length only).
+    CHECK_FALSE(expectedLobeParams(coatMaterial(0, 9u), ext, MATERIAL_FEATURE_CLEARCOAT).coatNormalIsShading);
+    const GPUMaterialExtRecord normalTex[1] = {coatRecord(1.0f, 0.2f, INVALID_TEXTURE_INDEX, 6u)};
+    CHECK_FALSE(expectedLobeParams(coatMaterial(0), normalTex, MATERIAL_FEATURE_CLEARCOAT).coatNormalIsShading);
+    // The union gates the feature like the shader.
+    CHECK(expectedLobeParams(coatMaterial(0), ext, MATERIAL_FEATURE_SPECULAR_IOR).params.features == 0);
+}
+
+TEST_CASE("lobe guide reference: the coat normal is compared by angle to the shading normal") {
+    Fixture f;
+    f.materials[1] = coatMaterial(4);
+    f.extensions[4] = coatRecord(1.0f, 0.2f);
+    f.input.featureUnion = MATERIAL_FEATURE_CLEARCOAT;
+    f.surfaces[1].shadingNormal[0] = 0.6f; f.surfaces[1].shadingNormal[1] = 0.0f; f.surfaces[1].shadingNormal[2] = 0.8f;
+    auto write = [&](float nx, float ny, float nz) {
+        LobeParams p = expectedLobeParams(f.materials[1], f.extensions, MATERIAL_FEATURE_CLEARCOAT).params;
+        p.clearcoatNormal[0] = nx; p.clearcoatNormal[1] = ny; p.clearcoatNormal[2] = nz;
+        f.guides[1] = packLobeGuide(p);
+    };
+    f.materials[0] = GPUMaterial{};
+    f.guides[0] = GPULobeGuide{};
+    f.materials[2] = GPUMaterial{}; // slot 2 (pixel 2) is a base material here
+    f.guides[2] = GPULobeGuide{};
+    write(0.6f, 0.0f, 0.8f);
+    CHECK(checkLobeGuide(f.input).pass());
+    write(0.0f, 0.6f, 0.8f); // another direction: 45 degrees off
+    CHECK_FALSE(checkLobeGuide(f.input).pass());
+    write(0.3f, 0.0f, 0.4f); // not a unit vector decodes to a unit vector, equal in direction: passes
+    CHECK(checkLobeGuide(f.input).pass());
+    write(0.0f, 0.0f, 0.0f); // the zero vector decodes to +Z, not the shading normal
+    CHECK_FALSE(checkLobeGuide(f.input).pass());
+    // The factor and the roughness are compared bit for bit.
+    write(0.6f, 0.0f, 0.8f);
+    f.guides[1].specularFactorCoat ^= 1u << 16;
+    CHECK_FALSE(checkLobeGuide(f.input).pass());
 }

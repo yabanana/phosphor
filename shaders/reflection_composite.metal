@@ -114,8 +114,10 @@ kernel void REFL_KERNEL(reflection_composite)(constant GPUReflectionComposeParam
             float envDiffuse=bsdfEnvDiffuseWeight(s.roughness,envNV,phosphor::DfgTable);
 #ifdef PHOSPHOR_REFL_LOBE
             // F15.1 (ticket 08): extended pixels receive 1 - max(E_dielectric) of their own specular lobe.
-            {const auto lobe=REFL_LOBE(p.flags,REFLECT_COMPOSE_LOBE_GUIDE_VALID,pixel.y*p.width+pixel.x);
-                if(lobe.extended)envDiffuse=bsdfSpecEnv(lobe.spec,diVec(s.albedo),saturate(s.metallic),s.roughness,envNV,phosphor::DfgTable).diffuseWeight;}
+            {const auto lobe=REFL_LOBE(p.flags,REFLECT_COMPOSE_LOBE_GUIDE_VALID,pixel.y*p.width+pixel.x,s);
+                if(lobe.extended)envDiffuse=bsdfSpecEnv(lobe.spec,diVec(s.albedo),saturate(s.metallic),s.roughness,envNV,phosphor::DfgTable).diffuseWeight;
+                // F15.1 (ticket 09): the diffuse under a coat receives 1 - c F_c(|V.Nc|).
+                if(lobe.coat)envDiffuse*=1.0f-lobe.coatFactor*bsdfCoatFresnel(abs(dot(lobe.coatNormal,normalize(diVec(s.viewDirection)))));}
 #endif
             if(p.flags&REFLECT_COMPOSE_DI)color+=diSelected.read(pixel).rgb;
             if(p.flags&REFLECT_COMPOSE_GI)color+=giSelected.read(pixel).rgb*diVec(s.albedo)*(1-s.metallic)*envDiffuse/M_PI_F;

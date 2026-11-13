@@ -1,5 +1,6 @@
 #include "renderer/lobe_guide_reference.h"
 
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -14,7 +15,7 @@ LobeGuideExpectation expectedLobeParams(const GPUMaterial& material, std::span<c
     // MATERIAL_FEATURES constant) and the features the resolve resolves.
     const u32 features = (material.flags >> MATERIAL_FEATURE_SHIFT) & featureUnion & LOBE_GUIDE_RESOLVED_FEATURES;
     r.params.features = features;
-    if (features & MATERIAL_FEATURE_SPECULAR_IOR) {
+    if (features & (MATERIAL_FEATURE_SPECULAR_IOR | MATERIAL_FEATURE_CLEARCOAT)) {
         if (material.extensionIndex == MATERIAL_EXTENSION_INVALID || size_t(material.extensionIndex) >= extensions.size()) {
             if (extensionsValid) *extensionsValid = false;
             r.unverified = true;
@@ -22,12 +23,24 @@ LobeGuideExpectation expectedLobeParams(const GPUMaterial& material, std::span<c
         }
         GPUMaterialExt0 e0;
         std::memcpy(&e0, &extensions[material.extensionIndex], sizeof(e0));
-        r.params.ior = e0.ior;
-        // Without a texture the GPU multiplies by the half 1.0 fallback: exact.
-        r.params.specularFactor = e0.specularFactor * 1.0f;
-        for (int c = 0; c < 3; ++c) r.params.specularColor[c] = e0.specularColor[c] * 1.0f;
-        if (e0.specularTex != INVALID_TEXTURE_INDEX || e0.specularColorTex != INVALID_TEXTURE_INDEX)
-            r.unverified = true;
+        if (features & MATERIAL_FEATURE_SPECULAR_IOR) {
+            r.params.ior = e0.ior;
+            // Without a texture the GPU multiplies by the half 1.0 fallback: exact.
+            r.params.specularFactor = e0.specularFactor * 1.0f;
+            for (int c = 0; c < 3; ++c) r.params.specularColor[c] = e0.specularColor[c] * 1.0f;
+            if (e0.specularTex != INVALID_TEXTURE_INDEX || e0.specularColorTex != INVALID_TEXTURE_INDEX)
+                r.unverified = true;
+        }
+        if (features & MATERIAL_FEATURE_CLEARCOAT) {
+            // shadeSurface: saturate(factor * tex.r), clamp(roughness * tex.g, 0.04, 1) (the half 1.0 fallback without a texture).
+            const float f = e0.clearcoatFactor * 1.0f, rough = e0.clearcoatRoughness * 1.0f;
+            r.params.clearcoatFactor = f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f);
+            r.params.clearcoatRoughness = rough < 0.04f ? 0.04f : (rough > 1.0f ? 1.0f : rough);
+            if (e0.clearcoatFactorTex != INVALID_TEXTURE_INDEX || e0.clearcoatRoughnessTex != INVALID_TEXTURE_INDEX)
+                r.unverified = true;
+            r.coatNormalChecked = true;
+            r.coatNormalIsShading = e0.clearcoatNormalTex == INVALID_TEXTURE_INDEX && material.normalTex == INVALID_TEXTURE_INDEX;
+        }
     }
     return r;
 }
@@ -93,11 +106,33 @@ LobeGuideCheckResult checkLobeGuide(const LobeGuideCheckInput& in) {
             ++r.unverified;
             continue;
         }
-        const GPULobeGuide want = packLobeGuide(e.params);
+        GPULobeGuide want = packLobeGuide(e.params);
         if (e.params.features) ++r.extended; else ++r.base;
-        if (std::memcmp(&g, &want, sizeof(g)) != 0) {
+        // The oct-encoded coat normal depends on the geometry (and MSL fast-math divides): compared by angle below.
+        GPULobeGuide got = g;
+        if (e.coatNormalChecked) {
+            const LobeVec3 cn = decodeLobeOct(g.clearcoatNormal);
+            const double len = std::sqrt(double(cn.x) * cn.x + double(cn.y) * cn.y + double(cn.z) * cn.z);
+            if (!(std::fabs(len - 1.0) < 1e-3)) {
+                note(r, format("pixel (%u,%u) material %u: coat normal is not a unit vector (length %g)", x, y, materialIndex, len));
+                continue;
+            }
+            if (e.coatNormalIsShading) {
+                const double d = double(cn.x) * s.shadingNormal[0] + double(cn.y) * s.shadingNormal[1] + double(cn.z) * s.shadingNormal[2];
+                const double sl = std::sqrt(double(s.shadingNormal[0]) * s.shadingNormal[0] + double(s.shadingNormal[1]) * s.shadingNormal[1] +
+                                            double(s.shadingNormal[2]) * s.shadingNormal[2]);
+                const double angle = std::acos(std::fmin(1.0, std::fmax(-1.0, d / (sl > 0.0 ? sl : 1.0))));
+                if (!(angle < 2e-3)) {
+                    note(r, format("pixel (%u,%u) material %u: coat normal differs from the shading normal by %g rad", x, y, materialIndex, angle));
+                    continue;
+                }
+            }
+            got.clearcoatNormal = 0;
+            want.clearcoatNormal = 0;
+        }
+        if (std::memcmp(&got, &want, sizeof(got)) != 0) {
             u32 word = 0;
-            const u32* a = reinterpret_cast<const u32*>(&g);
+            const u32* a = reinterpret_cast<const u32*>(&got);
             const u32* b = reinterpret_cast<const u32*>(&want);
             while (word < sizeof(g) / 4 && a[word] == b[word]) ++word;
             note(r, format("pixel (%u,%u) material %u: word %u got 0x%08x want 0x%08x | ior got %g want %g", x, y,

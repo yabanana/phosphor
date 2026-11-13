@@ -10,7 +10,7 @@
 #ifdef PHOSPHOR_REFL_LOBE
 #define REFL_KERNEL(name) name##_lobe
 #define REFL_GUIDE_PARAM(index) , const device GPULobeGuide* guides [[buffer(index)]]
-#define REFL_LOBE(flags, flag, i) reflectionLoadLobe(flags, flag, guides, i)
+#define REFL_LOBE(flags, flag, i, surface) reflectionLoadLobe(flags, flag, guides, i, surface)
 #define REFL_DIRECTION(s, u, lobe) reflectionDirectionLobe(s, u, lobe)
 // The sampled lobe's (id, axis) key into the sample flags read by the "_lobe" denoiser kernels (denoise.metal, lobe contract).
 #define REFL_TAG(sample, lobe) if (((sample).flags & SPECULAR_SAMPLE_VALID) != 0u) (sample).flags |= specularSampleLobeFlags((lobe).id, (lobe).refract)
@@ -23,25 +23,57 @@
 #ifndef PHOSPHOR_DI_LOBE
 #error "PHOSPHOR_REFL_LOBE needs the lobe-mode restir_common.h (kMaterialFeatures)"
 #endif
-// The specular lobe of one pixel.  Today a single lobe (ior/specular, KHR_materials_specular); ticket 09 (clearcoat)
-// turns this into a lobe set: reflectionDirectionLobe then picks the lobe with probability proportional to its albedo
-// weight and reflectionLobeWeight divides by the mixture pdf over the lobes instead of the single-lobe pdf.
+// The specular lobe set of one pixel: the base specular lobe (ior/specular, KHR_materials_specular) and, ticket 09, the
+// clearcoat lobe.  reflectionLobePick draws the lobe with probability proportional to its albedo weight (renderer/lobe_select.h) and
+// reflectionLobeWeight divides by the mixture pdf over the lobes (one-sample MIS).
 struct ReflectionLobe {
-    bool extended;
-    uint id;       // the sampled lobe (SPECULAR_LOBE_*): 0, the base specular lobe, until ticket 09 samples a second one
-    bool refract;  // the sampled axis: false = reflection (ticket 13 samples refraction)
+    bool extended;  // an ior/specular or clearcoat feature is resolved for this pixel
+    uint id;        // the denoiser key (SPECULAR_LOBE_*): STABLE per pixel, the coat lobe when it is significant (lobe_select.h)
+    bool refract;   // the sampled axis: false = reflection (ticket 13 samples refraction)
     BsdfDielectricSpec spec;
+    bool coat;      // clearcoat resolved
+    bool sampleCoat; // this sample's lobe (set by reflectionLobePick)
+    float coatFactor, coatRoughness;
+    float3 coatNormal;
+    float pCoat;    // probability of sampling the coat lobe
 };
-inline ReflectionLobe reflectionLoadLobe(uint flags, uint validFlag, const device GPULobeGuide* guides, uint index) {
+inline ReflectionLobe reflectionLoadLobe(uint flags, uint validFlag, const device GPULobeGuide* guides, uint index, GPUDISurface s) {
     ReflectionLobe l{};
-    if ((kMaterialFeatures & MATERIAL_FEATURE_SPECULAR_IOR) != 0u && (flags & validFlag) != 0u) {
+    if ((kMaterialFeatures & (MATERIAL_FEATURE_SPECULAR_IOR | MATERIAL_FEATURE_CLEARCOAT)) != 0u && (flags & validFlag) != 0u) {
         const GPULobeGuide g = guides[index];
-        if ((g.features & MATERIAL_FEATURE_SPECULAR_IOR) != 0u) {
-            const LobeParams u = unpackLobeGuide(g);
+        if ((g.features & (MATERIAL_FEATURE_SPECULAR_IOR | MATERIAL_FEATURE_CLEARCOAT)) != 0u) {
+            const LobeParams u = unpackLobeGuide(g); // neutral ior 1.5 / specular 1 for a clear feature: f0 0.04, f90 1
             l.spec = bsdfSpecularParams(u.ior, u.specularFactor, float3(u.specularColor[0], u.specularColor[1], u.specularColor[2]));
             l.extended = true;
+            if ((kMaterialFeatures & MATERIAL_FEATURE_CLEARCOAT) != 0u && (g.features & MATERIAL_FEATURE_CLEARCOAT) != 0u) {
+                const float3 nc = float3(u.clearcoatNormal[0], u.clearcoatNormal[1], u.clearcoatNormal[2]);
+                float3 n = diVec(s.shadingNormal), v = diVec(s.viewDirection);
+                if (s.valid && all(isfinite(n)) && all(isfinite(v)) && dot(n, n) > 0 && dot(v, v) > 0 && all(isfinite(nc)) && dot(nc, nc) > 0) {
+                    n = normalize(n); v = normalize(v);
+                    l.coat = true;
+                    l.coatFactor = u.clearcoatFactor;
+                    l.coatRoughness = u.clearcoatRoughness;
+                    l.coatNormal = normalize(nc);
+                    const float baseAlbedo = bsdfMax3(bsdfSpecEnv(l.spec, diVec(s.albedo), saturate(s.metallic), s.roughness,
+                                                                  max(dot(n, v), 1e-4f), phosphor::DfgTable).specular);
+                    const CoatLobeSelect sel = coatLobeSelect(l.coatFactor, abs(dot(l.coatNormal, v)), baseAlbedo);
+                    l.pCoat = sel.pCoat;
+                    l.id = sel.significant ? SPECULAR_LOBE_CLEARCOAT : SPECULAR_LOBE_BASE;
+                }
+            }
         }
     }
     return l;
+}
+// The lobe of this sample: the coat with probability pCoat (uSelect uniform in [0,1)).
+inline void reflectionLobePick(thread ReflectionLobe& lobe, float uSelect) { lobe.sampleCoat = lobe.coat && uSelect < lobe.pCoat; }
+// The surface as the sampled lobe sees it: the coat lobe has the coat roughness and the coat normal (everything
+// downstream, RT band, emitter share, SSR steps, probe filter, regularisation, then follows the coat roughness).
+inline GPUDISurface reflectionLobeSurface(GPUDISurface s, ReflectionLobe lobe) {
+    if (lobe.coat && lobe.sampleCoat) {
+        s.roughness = lobe.coatRoughness;
+        for (uint i = 0; i < 3; ++i) s.shadingNormal[i] = lobe.coatNormal[i];
+    }
+    return s;
 }
 #endif

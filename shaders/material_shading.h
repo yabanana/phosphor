@@ -149,6 +149,57 @@ static float3 sunDiskSpecularSpec(float3 N, float3 V, float3 L, float3 albedo, f
     return sum / float(count);
 }
 
+// F15.1 (ticket 09): KHR_materials_clearcoat.  The coat lobe c F_c D Vis (bsdf.h) over the layered material: the
+// material terms carry the pixel-wide attenuation 1 - c F_c(|V.Nc|), the coat term its own cosine max(Nc.L, 0).
+struct CoatParams {
+    float factor;    // c
+    float roughness; // clamped [0.04, 1]
+    float3 normal;   // Nc
+};
+inline float coatAttenuation(CoatParams coat, float3 V) {
+    return 1.0f - coat.factor * bsdfCoatFresnel(abs(dot(coat.normal, V)));
+}
+static float3 evaluateLightCoat(float3 N, float3 V, float3 L, float3 radiance, float3 albedo, float metallic, float roughness,
+                                BsdfDielectricSpec spec, CoatParams coat) {
+    float3 result = evaluateLightSpec(N, V, L, radiance, albedo, metallic, roughness, spec) * coatAttenuation(coat, V);
+    const float ncl = saturate(dot(coat.normal, L));
+    if (ncl > 0.0f) {
+        const float3 H = normalize(V + L);
+        const float ncv = max(dot(coat.normal, V), 1e-4f);
+        const float fc = bsdfCoatFresnel(abs(dot(coat.normal, V)));
+        result += (coat.factor * fc * bsdfCoatSpecular(ncl, ncv, saturate(dot(coat.normal, H)), bsdfAlpha(coat.roughness)) * ncl) * radiance;
+    }
+    return result;
+}
+// Irradiance-normalised coat term of the sun disk: the declared disk rule of sunDiskSpecular with the coat's own alpha
+// and reflection axis (about Nc), (1/Omega) * integral of c F_c D Vis max(Nc.L, 0).
+static float sunDiskCoat(float3 V, float3 L, float angularRadius, CoatParams coat) {
+    const float a = bsdfAlpha(coat.roughness);
+    const float3 Nc = coat.normal;
+    const float ncv = max(dot(Nc, V), 1e-4f);
+    const float3 R = reflect(-V, Nc);
+    const float separation = acos(clamp(dot(R, L), -1.0f, 1.0f));
+    const bool narrow = a < 0.05f && separation < 4.0f * angularRadius + 16.0f * a;
+    const uint count = !narrow ? 1u : (a < 2.0f * angularRadius ? 128u : 32u);
+    const float3 t = normalize(cross(abs(L.z) < 0.999f ? float3(0, 0, 1) : float3(0, 1, 0), L)), b = cross(L, t);
+    const float oneMinusCos = 1.0f - cos(angularRadius);
+    const float weight = coat.factor * bsdfCoatFresnel(abs(dot(Nc, V)));
+    float sum = 0.0f;
+    for (uint k = 0; k < count; ++k) {
+        float3 Lk = L;
+        if (count > 1u) {
+            const float z = 1.0f - (float(k) + 0.5f) / float(count) * oneMinusCos, s = sqrt(max(0.0f, 1.0f - z * z));
+            const float phi = 2.39996323f * float(k);
+            Lk = t * (s * cos(phi)) + b * (s * sin(phi)) + L * z;
+        }
+        const float ncl = saturate(dot(Nc, Lk));
+        if (ncl <= 0.0f) continue;
+        const float3 H = normalize(V + Lk);
+        sum += weight * bsdfCoatSpecular(ncl, ncv, saturate(dot(Nc, H)), a) * ncl;
+    }
+    return sum / float(count);
+}
+
 static float distanceAttenuation(float dist, float range) {
     // Inverse square with a smooth window to zero at `range`.
     const float r = dist / max(range, 1e-3);
@@ -216,8 +267,19 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     spec.f90 = 1.0f;
     float lobeIor = LobeNeutralIor, lobeSpecularWeight = 1.0f;
     float3 lobeSpecularColor = float3(1.0f);
+    // F15.1 (ticket 09): KHR_materials_clearcoat, same gating.  A coated material without the ior/specular block
+    // keeps the default dielectric (f0 0.04, f90 1) through the extended path.
+    const bool coatOn = (kMaterialFeatures & MATERIAL_FEATURE_CLEARCOAT) != 0u &&
+                        (m.flags & (MATERIAL_FEATURE_CLEARCOAT << MATERIAL_FEATURE_SHIFT)) != 0u;
+    const bool useSpec = specExt || coatOn;
+    GPUMaterialExt0 e0{};
+    if (useSpec) e0 = *reinterpret_cast<const device GPUMaterialExt0*>(frame.materialExtensions + m.extensionIndex);
+    CoatParams coat{0.0f, 0.04f, float3(0.0f)};
+    if (coatOn) {
+        coat.factor = saturate(e0.clearcoatFactor * float(sampleOr(textures, e0.clearcoatFactorTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).r));
+        coat.roughness = clamp(e0.clearcoatRoughness * float(sampleOr(textures, e0.clearcoatRoughnessTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).g), 0.04f, 1.0f);
+    }
     if (specExt) {
-        const GPUMaterialExt0 e0 = *reinterpret_cast<const device GPUMaterialExt0*>(frame.materialExtensions + m.extensionIndex);
         const float specularWeight =
             e0.specularFactor * float(sampleOr(textures, e0.specularTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).a);
         const float3 specularColor = float3(e0.specularColor[0], e0.specularColor[1], e0.specularColor[2]) *
@@ -232,6 +294,7 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     // the rasteriser's facing is inverted for those instances.
     const bool front = in.frontFacing != (in.mirrored != 0);
     float3 N = normalize(front ? in.normal : -in.normal);
+    const float3 N0 = N; // the shading normal before the base normal map: the coat normal without a coat normal texture
     const float3 T = in.tangent.xyz - N * dot(N, in.tangent.xyz);
     if (dot(T, T) > 1e-8) {
         const float3 Tn = normalize(T);
@@ -239,7 +302,12 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         float3 tn = float3(nTex.xyz) * 2.0 - 1.0;
         tn.xy *= m.normalScale;
         N = normalize(Tn * tn.x + B * tn.y + N * tn.z);
-    }
+        if (coatOn && e0.clearcoatNormalTex != INVALID_TEXTURE_INDEX) {
+            float3 cn = float3(sampleOr(textures, e0.clearcoatNormalTex, in.uv, half4(0.5h, 0.5h, 1.0h, 1.0h), in.uvDx, in.uvDy).xyz) * 2.0 - 1.0;
+            cn.xy *= e0.clearcoatNormalScale;
+            coat.normal = normalize(Tn * cn.x + B * cn.y + N0 * cn.z);
+        } else coat.normal = N0;
+    } else coat.normal = N0;
 
     const float3 camPos = float3(frame.cameraPosition[0], frame.cameraPosition[1], frame.cameraPosition[2]);
     const float3 V = normalize(camPos - in.worldPos);
@@ -275,18 +343,21 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         if (physicalGI && isDirectional && i == shadowLight && sunAngularRadius > 0.0f) {
             // Diffuse at the disk centre (exact to O(r^2)), specular over the disk.
             const float NdotL = saturate(dot(N, L));
-            if (specExt) {
+            if (useSpec) {
                 const float3 Fd = bsdfSpecFresnel(spec, saturate(dot(V, normalize(V + L))));
                 const float3 diffuse = NdotL > 0.0f ? bsdfSpecDiffuse(Fd, metallic, baseColor.rgb) * NdotL : float3(0.0);
-                color += (diffuse + sunDiskSpecularSpec(N, V, L, baseColor.rgb, metallic, roughness, sunAngularRadius, spec)) *
-                         lightColor * attenuation * visibility;
+                float3 sunSum = diffuse + sunDiskSpecularSpec(N, V, L, baseColor.rgb, metallic, roughness, sunAngularRadius, spec);
+                if (coatOn) sunSum = sunSum * coatAttenuation(coat, V) + sunDiskCoat(V, L, sunAngularRadius, coat);
+                color += sunSum * lightColor * attenuation * visibility;
             } else {
                 const float3 Fd = bsdfDielectricFresnel(saturate(dot(V, normalize(V + L))));
                 const float3 diffuse = NdotL > 0.0f ? bsdfBaseDiffuse(Fd, metallic, baseColor.rgb) * NdotL : float3(0.0);
                 color += (diffuse + sunDiskSpecular(N, V, L, baseColor.rgb, metallic, roughness, sunAngularRadius)) *
                          lightColor * attenuation * visibility;
             }
-        } else if (specExt)
+        } else if (coatOn)
+            color += evaluateLightCoat(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, roughness, spec, coat) * visibility;
+        else if (specExt)
             color += evaluateLightSpec(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, roughness, spec) * visibility;
         else
             color += evaluateLight(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, roughness) * visibility;
@@ -303,19 +374,33 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     // the same radiance GI and reflection misses see; legacy keeps the gradient.
     float envDiffuse = bsdfEnvDiffuseWeight(roughness, NdotV, frame.dfgTable); // ADR-0006
     float3 envSpecularWeight = bsdfEnvSpecular(f0, roughness, NdotV, frame.dfgTable);
-    if (specExt) { // F15.1: f0 * A + f90 * B per lobe, diffuse weight 1 - max(E_dielectric)
+    if (useSpec) { // F15.1: f0 * A + f90 * B per lobe, diffuse weight 1 - max(E_dielectric)
         const BsdfSpecEnv env = bsdfSpecEnv(spec, baseColor.rgb, metallic, roughness, NdotV, frame.dfgTable);
         envDiffuse = env.diffuseWeight;
         envSpecularWeight = env.specular;
     }
+    // F15.1 (ticket 09): the coat term of the environment, (1 - c F_c) material + c F_c clamp(A_c + B_c, 0, 1) at the coat roughness.
+    float coatAtt = 1.0f;
+    float3 coatEnvironment = float3(0.0);
+    if (coatOn) {
+        const float coatNV = max(dot(coat.normal, V), 1e-4);
+        const float fc = bsdfCoatFresnel(abs(dot(coat.normal, V)));
+        coatAtt = 1.0f - coat.factor * fc;
+        envDiffuse *= coatAtt;
+        envSpecularWeight *= coatAtt;
+        const float3 coatDir = normalize(mix(reflect(-V, coat.normal), coat.normal, coat.roughness * coat.roughness));
+        coatEnvironment = (physicalGI ? environment : hemisphere(coatDir)) *
+                          (coat.factor * fc * bsdfCoatEnvAlbedo(coat.roughness, coatNV, frame.dfgTable));
+    }
     const float3 ambientDiffuse = (physicalGI ? environment : hemisphere(N)) * baseColor.rgb * (1.0 - metallic) * envDiffuse;
-    const float3 ambientSpecular = (physicalGI ? environment : hemisphere(specularDir)) * envSpecularWeight;
+    const float3 ambientSpecular = (physicalGI ? environment : hemisphere(specularDir)) * envSpecularWeight + coatEnvironment;
     // F13 assembles these positive signals once outside this residual base.
     // Never subtract full-float lighting from a quantized summed color later.
     if(!externalDiffuse)color += (useGI ? indirectIrradiance * baseColor.rgb * (1.0f - metallic) * envDiffuse / M_PI_F * (physicalGI?1.0f:occlusion) : ambientDiffuse * occlusion);
     if(!omitSpecularAmbient)color += ambientSpecular * occlusion;
 
-    const float3 emission = float3(m.emissive[0], m.emissive[1], m.emissive[2]) * float3(emTex.rgb);
+    // The emission under a coat is attenuated like the material (the DI emitter share stays uncoated: declared).
+    const float3 emission = float3(m.emissive[0], m.emissive[1], m.emissive[2]) * float3(emTex.rgb) * coatAtt;
     color += emission;
 
     out.color = color;
@@ -323,8 +408,9 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     out.normal = N;
     out.baseColor = baseColor.rgb;
     out.diffuseAlbedo = baseColor.rgb * (1.0f - metallic) * envDiffuse;
-    out.specularAlbedo = specExt ? mix(bsdfSpecFresnel(spec, NdotV), bsdfFSchlick(baseColor.rgb, NdotV), metallic)
+    out.specularAlbedo = useSpec ? mix(bsdfSpecFresnel(spec, NdotV), bsdfFSchlick(baseColor.rgb, NdotV), metallic)
                                  : bsdfFSchlick(f0, NdotV);
+    if (coatOn) out.specularAlbedo = out.specularAlbedo * coatAtt + coat.factor * bsdfCoatFresnel(abs(dot(coat.normal, V)));
     out.roughness = roughness;
     out.metallic = metallic;
     out.occlusion = occlusion;
@@ -339,6 +425,13 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         out.lobes.specularColor[0] = lobeSpecularColor.x;
         out.lobes.specularColor[1] = lobeSpecularColor.y;
         out.lobes.specularColor[2] = lobeSpecularColor.z;
+    }
+    if (coatOn) {
+        out.lobes.clearcoatFactor = coat.factor;
+        out.lobes.clearcoatRoughness = coat.roughness;
+        out.lobes.clearcoatNormal[0] = coat.normal.x;
+        out.lobes.clearcoatNormal[1] = coat.normal.y;
+        out.lobes.clearcoatNormal[2] = coat.normal.z;
     }
     return out;
 }

@@ -188,12 +188,17 @@ TEST_CASE("extension records: feature flags are the feature mask shifted by 8") 
 
 #include "renderer/material_support.h"
 
-TEST_CASE("support report: ior/specular is approximated with a named approximation, others stay unsupported") {
+TEST_CASE("support report: ior/specular and clearcoat are approximated with named approximations, others stay unsupported") {
     const MaterialSupportTable& t = currentSupportTable();
     const FeatureSupportEntry& s = t.features[static_cast<u32>(MaterialFeature::SpecularIor)];
     CHECK(s.level == SupportLevel::Approximated);
     CHECK(std::string(s.approximation) == "secondary_rt_hits_use_base_reduction");
-    for (u32 f = 1; f < MATERIAL_FEATURE_COUNT; ++f) CHECK(t.features[f].level == SupportLevel::Unsupported);
+    const FeatureSupportEntry& c = t.features[static_cast<u32>(MaterialFeature::Clearcoat)];
+    CHECK(c.level == SupportLevel::Approximated);
+    CHECK(std::string(c.approximation) == "secondary_rt_hits_ignore_coat;di_emitters_uncoated");
+    for (u32 f = 0; f < MATERIAL_FEATURE_COUNT; ++f)
+        if (f != static_cast<u32>(MaterialFeature::SpecularIor) && f != static_cast<u32>(MaterialFeature::Clearcoat))
+            CHECK(t.features[f].level == SupportLevel::Unsupported);
 
     MaterialDescription d;
     d.specular.emplace();

@@ -95,19 +95,30 @@ kernel void REFL_KERNEL(reflection_probe_only)(constant GPUReflectionParams& p [
         const float nv=max(0.0f,dot(n,v));
 #ifdef PHOSPHOR_REFL_LOBE
         // F15.1 (ticket 08): extended pixels weight the probe/environment by the split-sum of their specular lobe.
-        float3 fitWeight=bsdfEnvSpecular(f0,s.roughness,nv,phosphor::DfgTable);
-        {const auto lobe=REFL_LOBE(p.flags,REFLECTION_LOBE_GUIDE_VALID,tid);
+        float3 fitWeight=bsdfEnvSpecular(f0,s.roughness,nv,phosphor::DfgTable);float3 coatResult=0;
+        {const auto lobe=REFL_LOBE(p.flags,REFLECTION_LOBE_GUIDE_VALID,tid,s);
             if(lobe.extended){const float3 e=bsdfSpecEnv(lobe.spec,diVec(s.albedo),saturate(s.metallic),s.roughness,nv,phosphor::DfgTable).specular;if(isfinite(nv)&&isfinite(s.roughness)&&all(isfinite(diVec(s.albedo))))fitWeight=e;}} // invalid input stays visible: the base weight is non-finite then
+        // F15.1 (ticket 09): the coat term of the split sum, (1 - c F_c) material + c F_c clamp(A_c + B_c, 0, 1) at the coat roughness,
+        // the coat radiance filtered at the coat roughness along the coat's dominant direction.
+        {const auto lobe=REFL_LOBE(p.flags,REFLECTION_LOBE_GUIDE_VALID,tid,s);
+            if(lobe.coat){const float3 nc=lobe.coatNormal,rc=reflect(-v,nc);const float fc=bsdfCoatFresnel(abs(dot(nc,v)));
+                const float dac=lobe.coatRoughness*lobe.coatRoughness,dkc=(1-dac)*(sqrt(1-dac)+dac);uint coatPath;
+                const float3 Lc=reflectionProbeRadiance(diVec(s.position),normalize(mix(nc,rc,dkc)),lobe.coatRoughness,true,p,probes,atlas,coatPath);
+                fitWeight*=1.0f-lobe.coatFactor*fc;
+                coatResult=Lc*(lobe.coatFactor*fc*bsdfCoatEnvAlbedo(lobe.coatRoughness,max(dot(nc,v),1e-4f),phosphor::DfgTable));}}
 #else
         const float3 fitWeight=bsdfEnvSpecular(f0,s.roughness,nv,phosphor::DfgTable);
 #endif
 const bool finiteFit=all(isfinite(fitWeight));
         result=L*fitWeight;
+#ifdef PHOSPHOR_REFL_LOBE
+        result+=coatResult;
+#endif
         sample.flags=SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_PREFILTERED;
         if(!finiteFit||!all(isfinite(L))||any(L<0)||!all(isfinite(result))||any(result<0))sample.flags|=SPECULAR_SAMPLE_ERROR;
         sample.path=path;for(uint i=0;i<3;++i){sample.direction[i]=r[i];sample.radiance[i]=result[i];}
 #ifdef PHOSPHOR_REFL_LOBE
-        {const auto taggedLobe=REFL_LOBE(p.flags,REFLECTION_LOBE_GUIDE_VALID,tid);REFL_TAG(sample,taggedLobe);}
+        {const auto taggedLobe=REFL_LOBE(p.flags,REFLECTION_LOBE_GUIDE_VALID,tid,s);REFL_TAG(sample,taggedLobe);}
 #endif
     }
     // The record carries result and distance 0, the values written before the

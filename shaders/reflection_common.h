@@ -41,12 +41,53 @@ inline float3 reflectionLobeWeight(GPUDISurface s, float3 wi, float pdf, Reflect
     const float3 f = bsdfDGGX(nh, a) * bsdfVSmithGGXCorrelated(nv, nl, a) * bsdfSpecLobeColor(Fd, diVec(s.albedo), saturate(s.metallic), vh);
     return f * nl / pdf;
 }
+// GGX half-vector proposal density of one lobe (normal n, alpha a) for the direction wi: D(n.h) n.h / (4 v.h), 0 outside the lobe's hemisphere.
+inline float reflectionLobePdf(float3 n, float3 v, float3 wi, float a) {
+    const float3 h = normalize(v + wi);
+    const float nh = dot(n, h), vh = dot(v, h);
+    return (nh > 0 && vh > 0) ? bsdfDGGX(nh, a) * nh / (4 * vh) : 0.0f;
+}
+// Two-lobe weight: ((1 - c F_c) f_base cos + c F_c D Vis_c cos_c) / (P_c pdf_c + (1 - P_c) pdf_b), the one-sample MIS estimator
+// of the coated specular BSDF.  `s` is the primary surface (base roughness, base normal).
+inline float3 reflectionCoatWeight(GPUDISurface s, float3 wi, ReflectionLobe lobe) {
+    const float3 n = normalize(diVec(s.shadingNormal)), v = normalize(diVec(s.viewDirection)), nc = lobe.coatNormal;
+    const float ab = bsdfAlpha(s.roughness), ac = bsdfAlpha(lobe.coatRoughness);
+    const float pdf = lobe.pCoat * reflectionLobePdf(nc, v, wi, ac) + (1.0f - lobe.pCoat) * reflectionLobePdf(n, v, wi, ab);
+    if (!(pdf > 0)) return 0;
+    float3 total = 0;
+    const float nl = dot(n, wi), nv = dot(n, v), fc = bsdfCoatFresnel(abs(dot(nc, v)));
+    if (nl > 0 && nv > 0 && dot(v + wi, v + wi) >= 1e-20f) {
+        const float3 h = normalize(v + wi);
+        const float nh = saturate(dot(n, h)), vh = saturate(dot(v, h));
+        const float3 Fd = bsdfSpecFresnel(lobe.spec, vh);
+        total += (1.0f - lobe.coatFactor * fc) * (bsdfDGGX(nh, ab) * bsdfVSmithGGXCorrelated(nv, nl, ab) *
+                                                  bsdfSpecLobeColor(Fd, diVec(s.albedo), saturate(s.metallic), vh)) * nl;
+    }
+    const float ncl = dot(nc, wi), ncv = max(dot(nc, v), 1e-4f);
+    if (ncl > 0 && dot(v + wi, v + wi) >= 1e-20f) {
+        const float3 h = normalize(v + wi);
+        total += lobe.coatFactor * fc * bsdfCoatSpecular(ncl, ncv, saturate(dot(nc, h)), ac) * ncl;
+    }
+    return total / pdf;
+}
 // GGX proposal of reflectionDirection (same stream of random numbers, same direction and pdf); the weight of an
-// extended pixel uses the extended lobe colour instead of Schlick(f0), with the same finite-clamp rule.
+// extended pixel uses the extended lobe colour instead of Schlick(f0), with the same finite-clamp rule.  For a coated pixel the
+// direction comes from the lobe picked by reflectionLobePick, and weight and pdf are those of the two-lobe mixture.
 inline ReflectionDirection reflectionDirectionLobe(GPUDISurface s, float2 u, ReflectionLobe lobe) {
-    ReflectionDirection out = reflectionDirection(s, u);
-    if ((kMaterialFeatures & MATERIAL_FEATURE_SPECULAR_IOR) != 0u && lobe.extended && out.valid && !out.error &&
-        dot(normalize(diVec(s.shadingNormal)), out.direction) > 0) {
+    ReflectionDirection out = reflectionDirection(reflectionLobeSurface(s, lobe), u);
+    if (!lobe.extended || !out.valid || out.error) return out;
+    if (lobe.coat) {
+        const float3 nc = lobe.coatNormal, v = normalize(diVec(s.viewDirection)), n = normalize(diVec(s.shadingNormal));
+        // The mixture pdf is evaluated at the recomputed half vector; a sample in the extreme tail of its lobe (n.h rounds to
+        // <= 0) has density 0 in both lobes: it contributes zero to the estimator, it is not an error.
+        const float mixture = lobe.pCoat * reflectionLobePdf(nc, v, out.direction, bsdfAlpha(lobe.coatRoughness)) +
+                              (1.0f - lobe.pCoat) * reflectionLobePdf(n, v, out.direction, bsdfAlpha(s.roughness));
+        if (mixture > 0) {
+            out.pdf = mixture;
+            out.weight = reflectionCoatWeight(s, out.direction, lobe);
+        } else out.weight = 0;
+        if (!all(isfinite(out.weight)) || any(out.weight < 0)) { out.error = true; out.weight = 0; }
+    } else if (dot(normalize(diVec(s.shadingNormal)), out.direction) > 0) {
         out.weight = reflectionLobeWeight(s, out.direction, out.pdf, lobe);
         if (!all(isfinite(out.weight)) || any(out.weight < 0)) { out.error = true; out.weight = 0; }
     }

@@ -20,7 +20,10 @@ struct DenoiseSettings {
 struct DenoiseLobeGuide { float ior=0, clearcoatRoughness=0; };
 // A pixel as the lobe kernels see it: its sample flags (sampled lobe id and axis) and its guide.
 struct DenoiseLobePixel { u32 sampleFlags=0; DenoiseLobeGuide guide{}; };
-// Edge-stopping roughness of the sampled lobe: id 0 the base roughness, id 1 the clearcoat roughness of the guide,
+// Edge-stopping roughness of the pixel's lobe key.  Ticket 09: with a coat the key is STABLE per pixel (renderer/lobe_select.h: the coat
+// when its albedo weight is significant, else the base lobe; the transport mixes the two lobes per sample, so the sampled lobe
+// cannot be the key), and a significant coat takes the SHARPER of the coat and base roughnesses.
+// Id 0 the base roughness, id 1 min(base roughness, the clearcoat roughness of the guide),
 // id 2 (transmission) the base roughness scaled by clamp(2*ior-2, 0, 1) (ticket 13 refines it), id 3 reserved = base.
 [[nodiscard]] float denoiseLobeRoughness(float baseRoughness,u32 lobeKey,const DenoiseLobeGuide&);
 // Spatial guide axis of the sampled lobe: the reflection axis, or for the refract axis the direction refracted at the

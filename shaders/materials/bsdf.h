@@ -11,6 +11,7 @@
 // do not fold factors differently without re-checking the exact captures.
 #include <metal_stdlib>
 #include "renderer/dfg_table.h"
+#include "renderer/lobe_select.h"
 using namespace metal;
 
 // GGX (Trowbridge-Reitz) normal distribution; alpha = roughness^2.
@@ -171,4 +172,31 @@ inline BsdfSpecEnv bsdfSpecEnv(BsdfDielectricSpec s, float3 albedo, float metall
     e.specular = mix(e.dielectric, metal, metallic);
     e.diffuseWeight = 1.0f - bsdfMax3(e.dielectric);
     return e;
+}
+
+// ---------------------------------------------------------------------------
+// F15.1 (ticket 09): KHR_materials_clearcoat (ratified text, research/khr-materials.md section 2).
+//
+//   F_c   = 0.04 + 0.96 (1 - |V.Nc|)^5     (coat IOR fixed at 1.5; the specification uses V.Nc, NOT V.H)
+//   coat  = D(Nc.H, a_c) * Vis(Nc.V, Nc.L, a_c)         (no Fresnel inside the lobe)
+//   f     = (1 - c F_c) f_material + c F_c coat         (the coat term has its own cosine max(Nc.L, 0))
+// The material under the coat is the ior/specular dielectric or the metal of the sections above.  Emission is
+// attenuated by the same (1 - c F_c).  Roughness clamps are the base ones (caller: [0.04, 1]; bsdfAlpha floors
+// alpha).  The coat normal Nc is the shading normal of the coat: its own normal texture, or WITHOUT one the
+// geometric shading normal without the base normal map.
+// ---------------------------------------------------------------------------
+inline float bsdfCoatFresnel(float NcdotV) { return phosphor::lobeCoatFresnel(NcdotV); }
+
+// Coat specular without Fresnel and without the cosine: D * Vis.
+inline float bsdfCoatSpecular(float NcdotL, float NcdotV, float NcdotH, float a) {
+    return bsdfDGGX(NcdotH, a) * bsdfVSmithGGXCorrelated(NcdotV, NcdotL, a);
+}
+
+// Split-sum albedo of the coat lobe D * Vis alone (Fresnel 1): A + B of the DFG table at the coat roughness, bounded
+// to the physical domain like every directional albedo.
+inline float bsdfCoatEnvAlbedo(float coatRoughness, float NcdotV, const constant float* table) {
+    const float A = phosphor::dfgTableLookup(table, NcdotV, coatRoughness, 0u),
+                B = phosphor::dfgTableLookup(table, NcdotV, coatRoughness, 1u);
+    const float e = A + B;
+    return isfinite(e) ? clamp(e, 0.0f, 1.0f) : e;
 }

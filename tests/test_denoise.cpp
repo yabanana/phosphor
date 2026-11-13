@@ -302,6 +302,27 @@ TEST_CASE("F15.1 the edge-stopping roughness follows the sampled lobe"){
     CHECK(h.roughness==doctest::Approx(.04f));CHECK(denoiseCompatible(rs,h,p,lobeSpec(kCoat),&g));
     auto g2=g;g2.clearcoatRoughness=.5f;CHECK_FALSE(denoiseCompatible(rs,h,p,lobeSpec(kCoat),&g2)); // the coat roughness changed beyond the threshold
 }
+TEST_CASE("F15.1 ticket 09: a significant coat takes the sharper of the coat and base roughness"){
+    DenoiseLobeGuide g;g.ior=1.5f;
+    g.clearcoatRoughness=.8f;CHECK(denoiseLobeRoughness(.1f,SPECULAR_LOBE_CLEARCOAT,g)==doctest::Approx(.1f)); // a rough coat over a smooth base: the base lobe is the sharper
+    g.clearcoatRoughness=.1f;CHECK(denoiseLobeRoughness(.8f,SPECULAR_LOBE_CLEARCOAT,g)==doctest::Approx(.1f)); // the smooth coat over a rough base keeps its reflection
+    g.clearcoatRoughness=.3f;CHECK(denoiseLobeRoughness(.3f,SPECULAR_LOBE_CLEARCOAT,g)==doctest::Approx(.3f));
+    CHECK(denoiseLobeRoughness(.8f,0,g)==doctest::Approx(.8f)); // an insignificant coat: the key is the base lobe, the base roughness
+    g.clearcoatRoughness=NAN;CHECK(denoiseLobeRoughness(.8f,SPECULAR_LOBE_CLEARCOAT,g)==doctest::Approx(.8f));
+}
+TEST_CASE("F15.1 ticket 09: the stable key keeps the history of a mixed-sample pixel"){
+    // The transport picks the coat or the base lobe per sample, but the key it records is a pure function of the pixel: the
+    // history of the pixel is accepted frame after frame (no reset), where a per-sample key would reject about half of the frames.
+    const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);auto s=receiver();s.roughness=.8f;
+    DenoiseLobeGuide g;g.ior=1.5f;g.clearcoatRoughness=.05f;
+    DenoiseHistory h{};u32 length=0;
+    for(int frame=0;frame<8;++frame){h=denoiseTemporal(s,glm::vec3(1),h,p,{},{},lobeSpec(kCoat),-1,glm::vec3(0),glm::vec3(-1),&g);length=h.length;}
+    CHECK(length==8);CHECK(h.lobe==specularSampleLobeKey(kCoat));CHECK(h.roughness==doctest::Approx(.05f));
+    // the contrast: alternating sampled keys (the per-sample key) reset the history at every switch
+    h=DenoiseHistory{};
+    for(int frame=0;frame<8;++frame)h=denoiseTemporal(s,glm::vec3(1),h,p,{},{},lobeSpec(frame&1?kCoat:0u),-1,glm::vec3(0),glm::vec3(-1),&g);
+    CHECK(h.length==1);
+}
 TEST_CASE("F15.1 the refract axis follows the refracted direction, not the reflection axis"){
     auto s=receiver();s.shadingNormal[0]=0;s.shadingNormal[1]=0;s.shadingNormal[2]=1;
     const float angle=.5f;s.viewDirection[0]=std::sin(angle);s.viewDirection[1]=0;s.viewDirection[2]=std::cos(angle);

@@ -157,39 +157,64 @@ struct DILobe {
     float ior, specularFactor;
     float3 specularColor;
     bool extended;
+    // F15.1 (ticket 09): KHR_materials_clearcoat.  The coat normal is the guide's (the shading normal without the base normal map).
+    bool coat;
+    float coatFactor, coatRoughness;
+    float3 coatNormal;
 };
 inline DILobe DI_FN(diLoadLobe)(constant GPUDIParams& p, const device GPULobeGuide* guides, uint index) {
     DILobe l{};
 #ifdef PHOSPHOR_DI_LOBE
-    if ((kMaterialFeatures & MATERIAL_FEATURE_SPECULAR_IOR) != 0u && (p.flags & DI_LOBE_GUIDE_VALID) != 0u) {
+    if ((kMaterialFeatures & (MATERIAL_FEATURE_SPECULAR_IOR | MATERIAL_FEATURE_CLEARCOAT)) != 0u && (p.flags & DI_LOBE_GUIDE_VALID) != 0u) {
         const GPULobeGuide g = guides[index];
-        if ((g.features & MATERIAL_FEATURE_SPECULAR_IOR) != 0u) {
-            const LobeParams u = unpackLobeGuide(g);
+        if ((g.features & (MATERIAL_FEATURE_SPECULAR_IOR | MATERIAL_FEATURE_CLEARCOAT)) != 0u) {
+            const LobeParams u = unpackLobeGuide(g); // neutral values (ior 1.5, specular 1) for a clear feature
             l.ior = u.ior; l.specularFactor = u.specularFactor;
             l.specularColor = float3(u.specularColor[0], u.specularColor[1], u.specularColor[2]);
             l.extended = true;
+            if ((kMaterialFeatures & MATERIAL_FEATURE_CLEARCOAT) != 0u && (g.features & MATERIAL_FEATURE_CLEARCOAT) != 0u) {
+                l.coat = true;
+                l.coatFactor = u.clearcoatFactor; l.coatRoughness = u.clearcoatRoughness;
+                l.coatNormal = float3(u.clearcoatNormal[0], u.clearcoatNormal[1], u.clearcoatNormal[2]);
+            }
         }
     }
 #endif
     return l;
 }
 // Same clamps and conventions as diBRDFWeighted; the emitter specular weight scales the specular lobe only.
-inline float3 DI_FN(diBRDFLobe)(GPUDISurface surface, DISample s, float specularWeight, DILobe lobe) {
+// F15.1 (ticket 09): `coatWeight` is the emitter share of the coat lobe (diEmitterCoatWeight; 1 for punctual lights).
+inline float3 DI_FN(diBRDFLobe)(GPUDISurface surface, DISample s, float specularWeight, DILobe lobe, float coatWeight = 1.0f) {
 #ifdef PHOSPHOR_DI_LOBE
-    if ((kMaterialFeatures & MATERIAL_FEATURE_SPECULAR_IOR) != 0u && lobe.extended) {
+    if ((kMaterialFeatures & (MATERIAL_FEATURE_SPECULAR_IOR | MATERIAL_FEATURE_CLEARCOAT)) != 0u && lobe.extended) {
         if (!surface.valid || !s.valid) return float3(0);
         float3 n = diVec(surface.shadingNormal), v = diVec(surface.viewDirection);
         if (!all(isfinite(n)) || !all(isfinite(v)) || !(dot(n, n) > 0 && dot(v, v) > 0)) return float3(0);
         n = normalize(n); v = normalize(v);
         const float nl = saturate(dot(n, s.wi)), nv = max(dot(n, v), 1e-4f);
-        if (!(nl > 0) || dot(v + s.wi, v + s.wi) <= 1e-20f) return float3(0);
-        const float3 h = normalize(v + s.wi);
-        const float nh = saturate(dot(n, h)), vh = saturate(dot(v, h));
-        const float metallic = saturate(surface.metallic);
-        const float3 albedo = max(diVec(surface.albedo), 0.0f);
-        const BsdfBaseLobes lobes = bsdfSpecEval(bsdfSpecularParams(lobe.ior, lobe.specularFactor, lobe.specularColor),
-                                                 nl, nv, nh, vh, albedo, metallic, bsdfAlpha(surface.roughness));
-        return (lobes.diffuse + specularWeight * lobes.specular) * diIncident(s) * nl;
+        const float3 incident = diIncident(s);
+        float3 result = float3(0);
+        if (nl > 0 && dot(v + s.wi, v + s.wi) > 1e-20f) {
+            const float3 h = normalize(v + s.wi);
+            const float nh = saturate(dot(n, h)), vh = saturate(dot(v, h));
+            const float metallic = saturate(surface.metallic);
+            const float3 albedo = max(diVec(surface.albedo), 0.0f);
+            const BsdfBaseLobes lobes = bsdfSpecEval(bsdfSpecularParams(lobe.ior, lobe.specularFactor, lobe.specularColor),
+                                                     nl, nv, nh, vh, albedo, metallic, bsdfAlpha(surface.roughness));
+            result = (lobes.diffuse + specularWeight * lobes.specular) * incident * nl;
+        }
+        if ((kMaterialFeatures & MATERIAL_FEATURE_CLEARCOAT) != 0u && lobe.coat) {
+            float3 nc = lobe.coatNormal;
+            if (!all(isfinite(nc)) || !(dot(nc, nc) > 0)) return float3(0);
+            nc = normalize(nc);
+            const float fc = bsdfCoatFresnel(abs(dot(nc, v))), ncl = saturate(dot(nc, s.wi)), ncv = max(dot(nc, v), 1e-4f);
+            result *= 1.0f - lobe.coatFactor * fc; // the material under the coat (emitter weights stay inside the lobes)
+            if (ncl > 0 && dot(v + s.wi, v + s.wi) > 1e-20f) {
+                const float3 h = normalize(v + s.wi);
+                result += (coatWeight * lobe.coatFactor * fc * bsdfCoatSpecular(ncl, ncv, saturate(dot(nc, h)), bsdfAlpha(lobe.coatRoughness)) * ncl) * incident;
+            }
+        }
+        return result; // caller MUST record nonfinite BEFORE any safe-output sanitization
     }
 #endif
     return diBRDFWeighted(surface, s, specularWeight);
@@ -201,6 +226,15 @@ inline float3 diBRDF(GPUDISurface surface, DISample s) { return diBRDFWeighted(s
 inline float diEmitterSpecularWeight(constant GPUDIParams& p, GPUSampledLight l, GPUDISurface surface) {
     if (!(p.flags & DI_REFLECTED_EMITTER_SPECULAR) || l.type != DI_LIGHT_TRIANGLE) return 1.0f;
     return smoothstep(p.emitterSpecularLow, p.emitterSpecularHigh, surface.roughness);
+}
+// F15.1 (ticket 09): the coat lobe's share of a sampled emitter (decision 06: the coat lobe's DI/RT emitter share uses the
+// coat roughness, the same smoothstep as the base lobe on the surface roughness).
+inline float DI_FN(diEmitterCoatWeight)(constant GPUDIParams& p, GPUSampledLight l, DILobe lobe) {
+#ifdef PHOSPHOR_DI_LOBE
+    if (lobe.coat && (p.flags & DI_REFLECTED_EMITTER_SPECULAR) && l.type == DI_LIGHT_TRIANGLE)
+        return smoothstep(p.emitterSpecularLow, p.emitterSpecularHigh, lobe.coatRoughness);
+#endif
+    return 1.0f;
 }
 inline float DI_FN(diTarget)(GPUDISurface surface, DISample sample, float positiveFloor, DILobe lobe) {
     if (!sample.valid || !isfinite(positiveFloor) || !(positiveFloor > 0)) return 0;

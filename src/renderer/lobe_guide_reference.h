@@ -9,7 +9,7 @@
 // DI surfaces can be compared bit for bit (--debug-lobe-guide).  Portable
 // (phosphor_core): no Metal.
 //
-// Scope = LOBE_GUIDE_RESOLVED_FEATURES (today KHR_materials_ior/specular).  A
+// Scope = LOBE_GUIDE_RESOLVED_FEATURES (KHR_materials_ior/specular and KHR_materials_clearcoat).  A
 // pixel whose resolved fields depend on a texture (the material references a
 // texture for one of them) is `unverified`: its record is not compared.
 // ---------------------------------------------------------------------------
@@ -27,6 +27,10 @@ struct LobeGuideExpectation {
     LobeParams params{};
     /// A resolved field depends on a texture: the record cannot be rebuilt on the CPU.
     bool unverified = false;
+    /// Clearcoat without a coat normal texture: the guide's coat normal is the pixel's shading normal when the base
+    /// material has no normal map either (compared by angle; with a base normal map only its unit length is checked).
+    bool coatNormalIsShading = false;
+    bool coatNormalChecked = false; // the coat normal is compared/validated (clearcoat resolved)
 };
 
 /// The parameters shadeSurface resolves for `material` in a scene whose feature

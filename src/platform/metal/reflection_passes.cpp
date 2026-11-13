@@ -232,7 +232,7 @@ struct ReflectionPasses::Impl {
         if(options.debugProbeNoParallax)params.flags|=REFLECTION_DEBUG_NO_PARALLAX;
         {const u32 mask=store.featureUnion();const pipe::PipelineHandle baseTransport=options.reflections==ReflectionMode::Probes?probeOnly:rtReflection?reflectionRT:reflectionSSR;
             transportServed=baseTransport;composeServed=compose;lobeGuide=false;
-            if(mask&MATERIAL_FEATURE_SPECULAR_IOR){
+            if(mask&LOBE_GUIDE_RESOLVED_FEATURES){
                 const bool transport=options.reflections!=ReflectionMode::Off;pipe::PipelineHandle served=baseTransport;
                 if(transport){if(options.reflections==ReflectionMode::Probes)served=features.serve(p,212,probeOnly,mask,[&]{return lighting::kernel("reflection_probe_only_lobe");});
                     else if(rtReflection)served=features.serve(p,211,reflectionRT,mask,[&]{return lighting::kernel("reflection_rt_lobe",true);});
@@ -282,7 +282,7 @@ struct ReflectionPasses::Impl {
         // alone keeps the temporalAlpha floor.
         auto& camera=lastCamera.at(f.view);const bool sameCamera=cameraKnown.at(f.view)&&std::memcmp(camera.data(),f.unjitteredVP,sizeof(f.unjitteredVP))==0;
         std::memcpy(camera.data(),f.unjitteredVP,sizeof(f.unjitteredVP));cameraKnown.at(f.view)=true;
-        if(custom){denoise.configureLobe((store.featureUnion()&MATERIAL_FEATURE_SPECULAR_IOR)?store.featureUnion():0u,lobeGuide);const std::array<u64,4> revisions{direct.lightRevision(),gi&&options.gi!=GiMode::Off?gi->readResources().parameters.cacheGeneration:0,specularEpoch,geometryEpoch};
+        if(custom){denoise.configureLobe((store.featureUnion()&LOBE_GUIDE_RESOLVED_FEATURES)?store.featureUnion():0u,lobeGuide);const std::array<u64,4> revisions{direct.lightRevision(),gi&&options.gi!=GiMode::Off?gi->readResources().parameters.cacheGeneration:0,specularEpoch,geometryEpoch};
             denoise.prepareFrame(frame,signalEpoch,revisions,options.directLighting!=DirectLightingMode::Legacy&&!slots[f.slot].skipLocalDenoise,
                                  1u<<DENOISE_SIGNAL_SPECULAR,softChange,sameCamera);}
         // F13.6 start-up boost: the first frames of a specular history (after a

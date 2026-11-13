@@ -79,11 +79,13 @@ kernel void REFL_KERNEL(reflection_ssr)(constant GPUReflectionParams& p [[buffer
     texture2d<float,access::write> output [[texture(5)]],texture2d<float,access::write> distance [[texture(6)]],uint tid [[thread_position_in_grid]]){
     if(tid>=p.width*p.height)return;uint seed=giHash(tid^giHash(p.frameIndex)^p.seed);const GPUDISurface s=surfaces[tid];
 #ifdef PHOSPHOR_REFL_LOBE
-    const auto lobe=REFL_LOBE(p.flags,REFLECTION_LOBE_GUIDE_VALID,tid);const auto dir=REFL_DIRECTION(s,float2(giRandom(seed),giRandom(seed)),lobe);
+    auto lobe=REFL_LOBE(p.flags,REFLECTION_LOBE_GUIDE_VALID,tid,s);const float2 u=float2(giRandom(seed),giRandom(seed));
+    if(lobe.coat)reflectionLobePick(lobe,giRandom(seed)); // the coat or the base lobe by albedo weight (one-sample MIS)
+    const auto dir=REFL_DIRECTION(s,u,lobe);const GPUDISurface sl=reflectionLobeSurface(s,lobe);
 #else
-    const auto dir=reflectionDirection(s,float2(giRandom(seed),giRandom(seed)));
+    const auto dir=reflectionDirection(s,float2(giRandom(seed),giRandom(seed)));const GPUDISurface sl=s;
 #endif
-    auto sample=reflectionFallback(s,dir,p,surfaces,cache,gi,probes,baseRadiance,depth,atlas);
+    auto sample=reflectionFallback(sl,dir,p,surfaces,cache,gi,probes,baseRadiance,depth,atlas);
 #ifdef PHOSPHOR_REFL_LOBE
     REFL_TAG(sample,lobe);
 #endif
@@ -105,30 +107,36 @@ kernel void REFL_KERNEL(reflection_rt)(constant GPUReflectionParams& p [[buffer(
     // a specular history reset, surfaces in the RT band take boostSamples
     // independent samples, reduced in registers exactly like reflection_reduce.
     // Sample 0 keeps the single-sample seed, so count 1 is the plain path.
-    const uint count=(p.boostSamples>1u&&(p.flags&REFLECTION_SINGLE_SAMPLE)&&s.valid&&s.roughness<p.boostRoughness)?min(p.boostSamples,8u):1u;
 #ifdef PHOSPHOR_REFL_LOBE
-    const auto lobe=REFL_LOBE(p.flags,REFLECTION_LOBE_GUIDE_VALID,tid);
+    auto lobe=REFL_LOBE(p.flags,REFLECTION_LOBE_GUIDE_VALID,tid,s);
+    // a coated pixel is in the boost band when its sharper lobe is
+    const float boostRoughness=lobe.coat?min(s.roughness,lobe.coatRoughness):s.roughness;
+#else
+    const float boostRoughness=s.roughness;
 #endif
+    const uint count=(p.boostSamples>1u&&(p.flags&REFLECTION_SINGLE_SAMPLE)&&s.valid&&boostRoughness<p.boostRoughness)?min(p.boostSamples,8u):1u;
     auto reduction=reflectionReduceBegin();GPUSpecularSample sample=reflectionEmpty();
     for(uint k=0;k<count;++k){uint seed=giHash(tid^giHash(p.frameIndex)^(p.seed+k*0x9e3779b9u));
 #ifdef PHOSPHOR_REFL_LOBE
-    const auto dir=REFL_DIRECTION(s,float2(giRandom(seed),giRandom(seed)),lobe);sample=reflectionEmpty();
+    const float2 u=float2(giRandom(seed),giRandom(seed));
+    if(lobe.coat)reflectionLobePick(lobe,giRandom(seed)); // the coat or the base lobe by albedo weight (one-sample MIS)
+    const auto dir=REFL_DIRECTION(s,u,lobe);sample=reflectionEmpty();const GPUDISurface sl=reflectionLobeSurface(s,lobe);
 #else
-    const auto dir=reflectionDirection(s,float2(giRandom(seed),giRandom(seed)));sample=reflectionEmpty();
+    const auto dir=reflectionDirection(s,float2(giRandom(seed),giRandom(seed)));sample=reflectionEmpty();const GPUDISurface sl=s;
 #endif
-    if(s.valid&&dir.valid&&any(dir.weight>0)&&giRandom(seed)<reflectionRTWeight(s.roughness,p)){
+    if(s.valid&&dir.valid&&any(dir.weight>0)&&giRandom(seed)<reflectionRTWeight(sl.roughness,p)){
         float3 n=normalize(diVec(s.geometricNormal));if(dot(n,dir.direction)<0)n=-n;const float3 origin=rtOffsetRay(diVec(s.position),n);GPURtRay ray{};
         ray.ox=origin.x;ray.oy=origin.y;ray.oz=origin.z;ray.dx=dir.direction.x;ray.dy=dir.direction.y;ray.dz=dir.direction.z;ray.tmax=p.maxDistance;ray.mask=RT_MASK_INDIRECT;ray.type=RT_PROBE_DIFFUSE;
         RtPayload payload{};const auto hit=rtTraceSurface(ray,as,ift,instances,p.slotCount,payload,meshes,vertices,indices,p.meshCount);float3 L;
         sample.flags=SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_STOCHASTIC;sample.proposalSolidAngle=dir.pdf;for(uint i=0;i<3;++i)sample.direction[i]=dir.direction[i];
         bool numericError=dir.error;
         // Declared regularisation (F13 reference): alpha' >= k * alpha_camera.
-        const float floorRoughness=sqrt(min(1.0f,max(p.regularizationScale,1.0f)*bsdfAlpha(s.roughness)));
+        const float floorRoughness=sqrt(min(1.0f,max(p.regularizationScale,1.0f)*bsdfAlpha(sl.roughness)));
         if(hit.hit){L=reflectionSecondary(hit,dir.direction,as,ift,p,instances,meshes,vertices,indices,materials,textures,lights,sampled,emitters,gi,states,extra,irradiance,moments,seed,numericError,floorRoughness);
             sample.path=REFLECTION_PATH_RT;sample.hitDistance=length(origin+dir.direction*hit.t-diVec(s.position));sample.secondarySlot=hit.slot;sample.secondaryGeneration=hit.generation;}
-        else L=reflectionProbeRadiance(diVec(s.position),dir.direction,s.roughness,false,p,probes,atlas,sample.path);
+        else L=reflectionProbeRadiance(diVec(s.position),dir.direction,sl.roughness,false,p,probes,atlas,sample.path);
         L*=dir.weight;if(!all(isfinite(L))||any(L<0)){numericError=true;L=0;}if(numericError)sample.flags|=SPECULAR_SAMPLE_ERROR;for(uint i=0;i<3;++i)sample.radiance[i]=L[i];
-    }else sample=reflectionFallback(s,dir,p,surfaces,cache,gi,probes,baseRadiance,depth,atlas);
+    }else sample=reflectionFallback(sl,dir,p,surfaces,cache,gi,probes,baseRadiance,depth,atlas);
 #ifdef PHOSPHOR_REFL_LOBE
     REFL_TAG(sample,lobe);
 #endif

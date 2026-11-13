@@ -517,22 +517,22 @@ TEST_CASE("glTF materials: uv bake of a worked example") {
 }
 
 TEST_CASE("glTF extensions: required extensions must be rendered, not merely parsed, or the asset is refused") {
-    const std::string clearcoat = R"({"asset":{"version":"2.0"},
-        "extensionsUsed":["KHR_materials_clearcoat"],"extensionsRequired":["KHR_materials_clearcoat"]})";
+    const std::string sheen = R"({"asset":{"version":"2.0"},
+        "extensionsUsed":["KHR_materials_sheen"],"extensionsRequired":["KHR_materials_sheen"]})";
     SUBCASE("a required extension whose feature is unsupported today is refused with a reason") {
-        const auto bad = unsupportedRequiredExtensions(loadModel(clearcoat));
+        const auto bad = unsupportedRequiredExtensions(loadModel(sheen));
         REQUIRE(bad.size() == 1);
-        CHECK(bad[0].name == "KHR_materials_clearcoat");
+        CHECK(bad[0].name == "KHR_materials_sheen");
         CHECK(bad[0].reason.find("not rendered") != std::string::npos);
     }
     SUBCASE("the same asset loads once the feature is implemented or approximated") {
         MaterialSupportTable table = currentSupportTable();
-        auto& entry = table.features[static_cast<size_t>(MaterialFeature::Clearcoat)];
+        auto& entry = table.features[static_cast<size_t>(MaterialFeature::Sheen)];
         entry.level = SupportLevel::Implemented;
-        CHECK(unsupportedRequiredExtensions(loadModel(clearcoat), table).empty());
+        CHECK(unsupportedRequiredExtensions(loadModel(sheen), table).empty());
         entry.level = SupportLevel::Approximated;
         entry.approximation = "test-approx";
-        CHECK(unsupportedRequiredExtensions(loadModel(clearcoat), table).empty());
+        CHECK(unsupportedRequiredExtensions(loadModel(sheen), table).empty());
     }
     SUBCASE("every material extension maps to its own feature") {
         struct Case { const char* name; MaterialFeature feature; };
@@ -613,9 +613,9 @@ TEST_CASE("support report: summary line, detail and JSON") {
     const std::vector<std::string> assetUnknown = {"KHR_lights_punctual"};
     const std::string line = formatSupportSummary(reports, assetUnknown);
     CHECK(line.rfind("MATERIALS count=2 base=[implemented(2)] ", 0) == 0);
-    CHECK(line.find("implemented=0 approximated=0 unsupported=3") != std::string::npos);
+    CHECK(line.find("implemented=0 approximated=1 unsupported=2") != std::string::npos); // clearcoat is approximated since F15 ticket 09
     CHECK(line.find("encodings=[]") != std::string::npos);
-    CHECK(line.find("clearcoat:unsupported(1)") != std::string::npos);
+    CHECK(line.find("clearcoat:approximated(1)") != std::string::npos);
     CHECK(line.find("subsurface:unsupported(1)") != std::string::npos);
     CHECK(line.find("KHR_lights_punctual") != std::string::npos);
     CHECK(line.find("KHR_materials_dispersion") != std::string::npos);
@@ -627,7 +627,8 @@ TEST_CASE("support report: summary line, detail and JSON") {
     const auto json = nlohmann::json::parse(supportToJson(reports, assetUnknown));
     CHECK(json.at("count") == 2);
     CHECK(json.at("schema") == "phosphor.materials.v2");
-    CHECK(json.at("features").at("unsupported") == 3);
+    CHECK(json.at("features").at("unsupported") == 2);
+    CHECK(json.at("features").at("approximated") == 1);
     CHECK(json.at("features").at("implemented") == 0);
     CHECK(json.at("base").at("implemented") == 2);
     CHECK(json.at("encodings").at("implemented") == 0);
@@ -716,16 +717,16 @@ TEST_CASE("support report: base, features and glTF encodings are reported apart"
     CHECK(report.encodings[1].feature == "texture_transform");
 
     const std::string line = formatSupportSummary({report}, {});
-    CHECK(line.find("features=[clearcoat:unsupported(1)]") != std::string::npos);
+    CHECK(line.find("features=[clearcoat:approximated(1)]") != std::string::npos);
     CHECK(line.find("encodings=[emissive_strength:implemented(1) texture_transform:implemented(1)]") != std::string::npos);
-    CHECK(line.find("implemented=0 approximated=0 unsupported=1") != std::string::npos); // encodings are not features
+    CHECK(line.find("implemented=0 approximated=1 unsupported=0") != std::string::npos); // encodings are not features
 
     const auto json = nlohmann::json::parse(supportToJson({report}, {}));
-    CHECK(json.at("features").at("unsupported") == 1);
+    CHECK(json.at("features").at("approximated") == 1);
     CHECK(json.at("encodings").at("implemented") == 2);
     CHECK(json.at("materials").at(0).at("encodings").at(1).at("source") == "KHR_texture_transform");
     const std::string detail = formatSupportDetail(report);
-    CHECK(detail.find("features: clearcoat=unsupported") != std::string::npos);
+    CHECK(detail.find("features: clearcoat=approximated") != std::string::npos);
     CHECK(detail.find("encodings: emissive_strength=implemented") != std::string::npos);
 }
 

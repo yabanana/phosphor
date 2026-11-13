@@ -5,7 +5,7 @@
 // MATERIAL_FEATURES constant (never referenced by the base kernels: metal-tt cannot lower such a descriptor) and bind the lobe
 // guide (buffer 9 of the temporal kernel, buffer 4 of the atrous kernels).  The lobe contract (decision 06): a pixel's sampled lobe
 // (id, axis: GPUSpecularSample.flags) selects the edge-stopping roughness and the spatial guide axis, neighbours and history with
-// another (id, axis) key are rejected, and the history stores the key.  Today the transport samples lobe 0 / reflect only, so the
+// another (id, axis) key are rejected, and the history stores the key.  The transport keys the pixel (ticket 09: the stable coat-or-base key; reflect only until ticket 13), so the
 // lobe kernels compute the base results; src/renderer/denoise_settings.cpp is the CPU mirror of every rule marked "lobe contract".
 #ifdef PHOSPHOR_DENOISE_LOBE
 #ifndef PHOSPHOR_DI_LOBE
@@ -61,7 +61,7 @@ inline DenoiseLobe denoiseLobeLoad_lobe(constant GPUDenoiseParams& p,const devic
     l.roughness=s.roughness;l.axis=denoiseGuide(s,DENOISE_SIGNAL_SPECULAR);
     if(real!=0u){ // the guide is only read for a sampled lobe other than the base reflection
         const LobeParams u=unpackLobeGuide(guides[index]);const uint id=real&3u;
-        if(id==SPECULAR_LOBE_CLEARCOAT)l.roughness=isfinite(u.clearcoatRoughness)?clamp(u.clearcoatRoughness,0.0f,1.0f):s.roughness;
+        if(id==SPECULAR_LOBE_CLEARCOAT)l.roughness=isfinite(u.clearcoatRoughness)?min(s.roughness,clamp(u.clearcoatRoughness,0.0f,1.0f)):s.roughness; // ticket 09: stable key = significant coat; the sharper lobe sets the edge-stopping roughness
         else if(id==SPECULAR_LOBE_TRANSMISSION)l.roughness=(isfinite(u.ior)&&isfinite(s.roughness))?s.roughness*clamp(2.0f*(u.ior>=1.0f?u.ior:1.5f)-2.0f,0.0f,1.0f):s.roughness;
         if(real&4u){
             const float3 n=diVec(s.shadingNormal),v=diVec(s.viewDirection);

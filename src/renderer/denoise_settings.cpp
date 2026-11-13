@@ -15,7 +15,7 @@ glm::vec3 signalGuide(const GPUDISurface& s,u32 signal){const auto n=signalNorma
 }
 float denoiseLobeRoughness(float base,u32 key,const DenoiseLobeGuide& g){
     switch(key&3u){
-    case SPECULAR_LOBE_CLEARCOAT:return std::isfinite(g.clearcoatRoughness)?std::clamp(g.clearcoatRoughness,0.f,1.f):base;
+    case SPECULAR_LOBE_CLEARCOAT:return std::isfinite(g.clearcoatRoughness)&&std::isfinite(base)?std::min(base,std::clamp(g.clearcoatRoughness,0.f,1.f)):base;
     case SPECULAR_LOBE_TRANSMISSION:return std::isfinite(g.ior)&&std::isfinite(base)?base*std::clamp(2*(g.ior>=1?g.ior:1.5f)-2,0.f,1.f):base;
     default:return base;}
 }
