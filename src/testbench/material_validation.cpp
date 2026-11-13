@@ -33,7 +33,10 @@ const std::vector<MaterialScenarioSpec>& specs() {
     static const std::vector<float> roughness{0.1f, 0.2f, 0.35f, 0.5f, 0.7f, 0.85f, 1.0f};
     static const std::vector<float> metallic{0.0f, 0.25f, 0.5f, 0.75f, 1.0f};
     static const glm::vec3 copper(0.8f, 0.35f, 0.15f);
-    static const glm::vec3 towardSun = glm::normalize(glm::vec3(-0.35f, 0.5f, 0.8f));
+    // Side-lit and slightly from behind (V.L about -0.33): the half vector sits
+    // far from the view direction, so Schlick's (1 - V.H)^5 is non-negligible
+    // and a missing or wrong Fresnel term is visible in the direct grid.
+    static const glm::vec3 towardSun = glm::normalize(glm::vec3(-0.8f, 0.35f, -0.3f));
     static const std::vector<MaterialScenarioSpec> all{
         {"base-grid-sun", roughness, metallic, copper, true, 3.0f, towardSun, 0.0f},
         {"base-grid-env", roughness, metallic, copper, false, 0.0f, towardSun, 0.5f},
