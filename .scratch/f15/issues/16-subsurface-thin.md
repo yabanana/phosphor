@@ -112,3 +112,13 @@ Open / not done:
   is unit-tested only), the draft's anisotropy split, the Track Studio piece mask and the Mitsuba random walk (tickets 17/18/22).
 - Acceptance items 2 and 3 (both encodings produce the same description and image, support report labels) are loader-side and
   were already covered by ticket 04's doctests; the image equality needs the engine.
+
+2026-11-13, orchestrator decision on the harness question:
+- The transmitted lobe is weighted by 1 - F(V.H) with H = normalize(V + L).
+  This is the literal composition of the RC text (fresnel_mix around
+  mix(diffuse_brdf, diffuse_btdf, w)), and the Sample Renderer does the
+  same. Confirmed.
+- The declared environment weight w * color * (1 - E_d) * (1 - 0.16 N.V) is
+  what the engine implements.
+- DI receivers must evaluate lights on the back hemisphere. Their shadow
+  rays leave from the light's side.
