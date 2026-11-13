@@ -1347,3 +1347,25 @@ TEST_CASE("F14.2 --report-frames names the per-frame GPU pass timeline file") {
     LaunchOptions missing;
     CHECK_FALSE(parse({"--report-frames"}, missing, error));
 }
+
+TEST_CASE("F15.3 material scenarios select bench 2 with the declared environment composite path") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--bench","2","--material-scenario","furnace-base","--render-path","visibility","--reflections","ssr","--post","--upscaler","native"},o,error));
+    CHECK(o.materialScene=="furnace-base");
+    CHECK_FALSE(parse({"--bench","6","--material-scenario","furnace-base","--render-path","visibility","--reflections","ssr"},o,error));
+    CHECK_FALSE(parse({"--bench","2","--material-scenario","nope","--render-path","visibility","--reflections","ssr"},o,error));
+    CHECK(error.find("unknown")!=std::string::npos);
+    CHECK_FALSE(parse({"--bench","2","--material-scenario","furnace-base","--render-path","visibility"},o,error)); // needs --reflections ssr
+}
+
+TEST_CASE("F15.3 the runner's exact capture command line is accepted") {
+    // Mirrors tools/f15_check.py capture_command (same flags, paths shortened).
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--scene","procedural","--bench","2","--material-scenario","base-grid-sun","--render-path","visibility",
+                   "--geometry-path","mesh","--rt","off","--shadows","off","--lighting","legacy","--gi","off","--reflections","ssr",
+                   "--ao","off","--lighting-denoise","custom","--reflection-samples","8","--lighting-seed","1","--post","--upscaler",
+                   "native","--resolution","1280x720","--frames","128","--warmup","0","--fixed-timestep","--no-ui","--no-vsync",
+                   "--no-gpu-timing","--debug-lighting","1","--capture-linear","engine.pfm","--capture-linear-frame","127",
+                   "--capture-linear-signal","hdr","--export-reference","snapshot","--export-reference-frame","127","--report","r.json"},o,error));
+    CHECK(error.empty());CHECK(o.materialScene=="base-grid-sun");CHECK(o.captureLinearFrame==127);CHECK(o.exportReference=="snapshot");
+}

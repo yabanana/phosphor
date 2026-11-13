@@ -102,3 +102,14 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME f13_probe_pfm_author COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_probe_pfm_author.py)
     add_test(NAME f13_physical_ao_temporal_control COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_f13_ao_temporal_check.py)
 endif()
+
+# F15.3: the Appendix B reference and its runner need numpy and Mitsuba, which
+# only exist in the local uv cache (offline); registered where uv is available.
+find_program(UV_EXECUTABLE uv)
+if(UV_EXECUTABLE AND APPLE)
+    foreach(f15_test f15_reference f15_check)
+        add_test(NAME ${f15_test}_python
+            COMMAND ${UV_EXECUTABLE} run --offline --no-project --python 3.13 --with mitsuba==3.9.1 --with numpy
+                    python -I ${CMAKE_SOURCE_DIR}/tools/test_${f15_test}.py)
+    endforeach()
+endif()

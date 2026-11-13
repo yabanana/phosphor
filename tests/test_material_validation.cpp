@@ -98,3 +98,19 @@ TEST_CASE("F15.3 spheres are separated and the camera frames the whole grid") {
         CHECK(MaterialValidation::Spacing > 2 * MaterialValidation::SphereRadius);
     }
 }
+
+TEST_CASE("F15.3 declared scenario numbers are pinned (tools/test_f15_check.py mirrors them)") {
+    const auto& sun = MaterialValidation::spec("base-grid-sun");
+    CHECK(sun.roughness == std::vector<float>{0.1f, 0.2f, 0.35f, 0.5f, 0.7f, 0.85f, 1.0f});
+    CHECK(sun.metallic == std::vector<float>{0.0f, 0.25f, 0.5f, 0.75f, 1.0f});
+    CHECK(sun.baseColor == glm::vec3(0.8f, 0.35f, 0.15f));
+    CHECK(sun.sunIrradiance == 3.0f);
+    const glm::vec3 expected = glm::normalize(glm::vec3(-0.8f, 0.35f, -0.3f));
+    CHECK(glm::length(sun.towardSun - expected) < 1e-6f);
+    CHECK(MaterialValidation::spec("base-grid-env").environment == 0.5f);
+    CHECK(MaterialValidation::spec("roughness-extremes").environment == 0.3f);
+    CHECK(MaterialValidation::spec("roughness-extremes").sunIrradiance == 3.0f);
+    MaterialValidation fixture{"base-grid-sun"};
+    CHECK(fixture.getDefaultCamera().position == glm::vec3(0.0f, 2.0f, 5.5f));
+    CHECK(MaterialValidation{"roughness-extremes"}.getDefaultCamera().position == glm::vec3(0.0f, 1.0f, 4.0f));
+}
