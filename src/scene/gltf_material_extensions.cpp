@@ -319,10 +319,42 @@ bool isSupportedGltfExtension(const std::string& name) {
                         [&](const char* k) { return name == k; }) != std::end(kMaterialExtensions);
 }
 
-std::vector<std::string> unsupportedRequiredExtensions(const tinygltf::Model& model) {
-    std::vector<std::string> out;
-    for (const std::string& name : model.extensionsRequired)
-        if (!isSupportedGltfExtension(name)) out.push_back(name);
+bool isExtensionRendered(const std::string& name, const MaterialSupportTable& table) {
+    auto rendered = [](const FeatureSupportEntry& e) { return e.level != SupportLevel::Unsupported; };
+    auto feature = [&](MaterialFeature f) { return rendered(table.features[static_cast<size_t>(f)]); };
+    if (name == EXT_CLEARCOAT) return feature(MaterialFeature::Clearcoat);
+    if (name == EXT_SHEEN) return feature(MaterialFeature::Sheen);
+    if (name == EXT_ANISOTROPY) return feature(MaterialFeature::Anisotropy);
+    if (name == EXT_TRANSMISSION) return feature(MaterialFeature::Transmission);
+    if (name == EXT_VOLUME) return feature(MaterialFeature::Volume);
+    if (name == EXT_IOR || name == EXT_SPECULAR) return feature(MaterialFeature::SpecularIor);
+    if (name == EXT_IRIDESCENCE) return feature(MaterialFeature::Iridescence);
+    if (name == EXT_DIFFUSE_TRANSMISSION || name == EXT_SCATTER) return feature(MaterialFeature::Subsurface);
+    if (name == EXT_EMISSIVE) return rendered(table.emissiveStrength);
+    if (name == EXT_TEXTURE_TRANSFORM) return rendered(table.textureTransformUniform);
+    return false;
+}
+
+std::vector<RequiredExtensionProblem> unsupportedRequiredExtensions(const tinygltf::Model& model,
+                                                                    const MaterialSupportTable& table) {
+    std::vector<RequiredExtensionProblem> out;
+    for (const std::string& name : model.extensionsRequired) {
+        if (!isSupportedGltfExtension(name)) {
+            out.push_back({name, "not understood by this loader"});
+        } else if (!isExtensionRendered(name, table)) {
+            out.push_back({name, "parsed, but its feature is not rendered yet"});
+        } else if (name == EXT_TEXTURE_TRANSFORM) {
+            // Only uniform transforms are baked into UV0.
+            for (size_t i = 0; i < model.materials.size(); ++i) {
+                const auto parsed = parseGltfMaterial(model.materials[i], [](int index, bool) { return static_cast<u32>(index); });
+                if (parsed.info.transformStatus == TextureTransformStatus::NonUniform) {
+                    out.push_back({name, "material " + std::to_string(i) + " ('" + model.materials[i].name +
+                                             "') has a non-uniform transform"});
+                    break;
+                }
+            }
+        }
+    }
     return out;
 }
 

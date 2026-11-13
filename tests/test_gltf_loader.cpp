@@ -474,3 +474,27 @@ TEST_CASE("glTF loader: an escaping buffer URI fails the load and names the URI"
     CHECK(loader.lastError().empty());
     CHECK(scene.getMeshCount() == 1);
 }
+
+TEST_CASE("glTF loader: a required extension whose feature is not rendered refuses the asset, an optional one loads") {
+    auto model = nlohmann::json::parse(quadWithoutNormalsOrTangents(
+        R"({"extensions":{"KHR_materials_clearcoat":{"clearcoatFactor":1}}})"));
+    model["extensionsUsed"] = {"KHR_materials_clearcoat"};
+    SUBCASE("optional") {
+        GpuScene scene;
+        CHECK(loadModelJson(model, scene, "phosphor_f15_optional_clearcoat.gltf"));
+    }
+    SUBCASE("required") {
+        model["extensionsRequired"] = {"KHR_materials_clearcoat"};
+        const auto path = std::filesystem::temp_directory_path() / "phosphor_f15_required_clearcoat.gltf";
+        { std::ofstream out(path); out << model; }
+        GpuScene scene;
+        NullTextureManager textures;
+        textures.createDefaultTextures();
+        ECS ecs;
+        GltfLoader loader(scene, textures, ecs);
+        CHECK_FALSE(loader.loadFromFile(path.string()));
+        std::filesystem::remove(path);
+        CHECK(loader.lastError().find("KHR_materials_clearcoat") != std::string::npos);
+        CHECK(scene.getMeshCount() == 0);
+    }
+}

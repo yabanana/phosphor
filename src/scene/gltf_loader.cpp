@@ -147,8 +147,8 @@ bool GltfLoader::loadFromFile(const std::string& path) {
     // SHOULD NOT be loaded.
     if (const auto required = unsupportedRequiredExtensions(model); !required.empty()) {
         std::string names;
-        for (const auto& n : required) names += (names.empty() ? "" : ", ") + n;
-        lastError_ = "requires unsupported extension(s): " + names;
+        for (const auto& n : required) names += (names.empty() ? "" : ", ") + n.name + " (" + n.reason + ")";
+        lastError_ = "requires extension(s) that cannot be honoured: " + names;
         LOG_ERROR("glTF %s %s; refusing to load", path.c_str(), lastError_.c_str());
         return false;
     }

@@ -468,11 +468,64 @@ TEST_CASE("glTF materials: uv bake of a worked example") {
     CHECK(uvs[1].y == doctest::Approx(0.25f));
 }
 
-TEST_CASE("glTF extensions: required unsupported extensions refuse the asset, optional ones are listed") {
-    SUBCASE("supported required extensions pass") {
+TEST_CASE("glTF extensions: required extensions must be rendered, not merely parsed, or the asset is refused") {
+    const std::string clearcoat = R"({"asset":{"version":"2.0"},
+        "extensionsUsed":["KHR_materials_clearcoat"],"extensionsRequired":["KHR_materials_clearcoat"]})";
+    SUBCASE("a required extension whose feature is unsupported today is refused with a reason") {
+        const auto bad = unsupportedRequiredExtensions(loadModel(clearcoat));
+        REQUIRE(bad.size() == 1);
+        CHECK(bad[0].name == "KHR_materials_clearcoat");
+        CHECK(bad[0].reason.find("not rendered") != std::string::npos);
+    }
+    SUBCASE("the same asset loads once the feature is implemented or approximated") {
+        MaterialSupportTable table = currentSupportTable();
+        auto& entry = table.features[static_cast<size_t>(MaterialFeature::Clearcoat)];
+        entry.level = SupportLevel::Implemented;
+        CHECK(unsupportedRequiredExtensions(loadModel(clearcoat), table).empty());
+        entry.level = SupportLevel::Approximated;
+        entry.approximation = "test-approx";
+        CHECK(unsupportedRequiredExtensions(loadModel(clearcoat), table).empty());
+    }
+    SUBCASE("every material extension maps to its own feature") {
+        struct Case { const char* name; MaterialFeature feature; };
+        const Case cases[] = {
+            {"KHR_materials_clearcoat", MaterialFeature::Clearcoat}, {"KHR_materials_sheen", MaterialFeature::Sheen},
+            {"KHR_materials_anisotropy", MaterialFeature::Anisotropy},
+            {"KHR_materials_transmission", MaterialFeature::Transmission}, {"KHR_materials_volume", MaterialFeature::Volume},
+            {"KHR_materials_ior", MaterialFeature::SpecularIor}, {"KHR_materials_specular", MaterialFeature::SpecularIor},
+            {"KHR_materials_iridescence", MaterialFeature::Iridescence},
+            {"KHR_materials_diffuse_transmission", MaterialFeature::Subsurface},
+            {"KHR_materials_scatter", MaterialFeature::Subsurface}};
+        for (const Case& c : cases) {
+            MaterialSupportTable table = currentSupportTable();
+            CHECK_FALSE(isExtensionRendered(c.name, table));
+            table.features[static_cast<size_t>(c.feature)].level = SupportLevel::Implemented;
+            CHECK_MESSAGE(isExtensionRendered(c.name, table), c.name);
+        }
+    }
+    SUBCASE("emissive strength and a uniform texture transform are rendered today") {
         const auto m = loadModel(R"({"asset":{"version":"2.0"},
-            "extensionsUsed":["KHR_materials_clearcoat","KHR_texture_transform"],
-            "extensionsRequired":["KHR_materials_clearcoat","KHR_texture_transform"]})");
+            "extensionsUsed":["KHR_materials_emissive_strength","KHR_texture_transform"],
+            "extensionsRequired":["KHR_materials_emissive_strength","KHR_texture_transform"],
+            "materials":[{"pbrMetallicRoughness":{"baseColorTexture":{"index":0,
+              "extensions":{"KHR_texture_transform":{"scale":[2,2]}}}}}]})");
+        CHECK(unsupportedRequiredExtensions(m).empty());
+    }
+    SUBCASE("a required KHR_texture_transform with a non-uniform transform is refused") {
+        const auto m = loadModel(R"({"asset":{"version":"2.0"},
+            "extensionsUsed":["KHR_texture_transform"],"extensionsRequired":["KHR_texture_transform"],
+            "materials":[{"name":"mixed","pbrMetallicRoughness":{"baseColorTexture":{"index":0,
+              "extensions":{"KHR_texture_transform":{"scale":[2,2]}}}},"normalTexture":{"index":1}}]})");
+        const auto bad = unsupportedRequiredExtensions(m);
+        REQUIRE(bad.size() == 1);
+        CHECK(bad[0].name == "KHR_texture_transform");
+        CHECK(bad[0].reason.find("non-uniform") != std::string::npos);
+        CHECK(bad[0].reason.find("mixed") != std::string::npos);
+    }
+    SUBCASE("a non-uniform transform is fine when the extension is only optional") {
+        const auto m = loadModel(R"({"asset":{"version":"2.0"},"extensionsUsed":["KHR_texture_transform"],
+            "materials":[{"pbrMetallicRoughness":{"baseColorTexture":{"index":0,
+              "extensions":{"KHR_texture_transform":{"scale":[2,2]}}}},"normalTexture":{"index":1}}]})");
         CHECK(unsupportedRequiredExtensions(m).empty());
     }
     SUBCASE("unsupported required extensions are named") {
@@ -482,7 +535,7 @@ TEST_CASE("glTF extensions: required unsupported extensions refuse the asset, op
                                      R"("],"extensionsRequired":[")" + name + R"("]})");
             const auto bad = unsupportedRequiredExtensions(m);
             REQUIRE_MESSAGE(bad.size() == 1, name);
-            CHECK(bad[0] == name);
+            CHECK(bad[0].name == name);
         }
     }
     SUBCASE("optional unknown extensions are listed, not refused") {

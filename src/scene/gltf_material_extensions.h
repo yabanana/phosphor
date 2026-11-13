@@ -47,10 +47,26 @@ struct GltfMaterialParse {
 /// and KHR_texture_transform).
 [[nodiscard]] bool isSupportedGltfExtension(const std::string& name);
 
+/// One required extension the loader cannot honour, with the reason.
+struct RequiredExtensionProblem {
+    std::string name;
+    std::string reason;
+};
+
+/// Does the renderer currently RENDER the feature this extension encodes
+/// (support level implemented or approximated in `table`), as opposed to only
+/// parsing it?  False for extensions the loader does not know.
+[[nodiscard]] bool isExtensionRendered(const std::string& name,
+                                       const MaterialSupportTable& table = currentSupportTable());
+
 /// glTF 2.0 section 3.2: an asset whose `extensionsRequired` lists an
-/// extension the loader does not support should not be loaded.  Returns the
-/// unsupported required extensions (empty = loadable).
-[[nodiscard]] std::vector<std::string> unsupportedRequiredExtensions(const tinygltf::Model& model);
+/// extension that cannot be honoured should not be loaded.  An extension is
+/// honoured only when its feature is rendered (see isExtensionRendered), and a
+/// required KHR_texture_transform additionally needs every material's
+/// transforms to be uniform (bakeable into UV0).  Returns the problems (empty
+/// = loadable).
+[[nodiscard]] std::vector<RequiredExtensionProblem> unsupportedRequiredExtensions(
+    const tinygltf::Model& model, const MaterialSupportTable& table = currentSupportTable());
 
 /// Optional (`extensionsUsed` but not required) extensions the loader does not
 /// understand, in file order.
