@@ -81,7 +81,7 @@ kernel void REFL_KERNEL(reflection_ssr)(constant GPUReflectionParams& p [[buffer
 #ifdef PHOSPHOR_REFL_LOBE
     auto lobe=REFL_LOBE(p.flags,REFLECTION_LOBE_GUIDE_VALID,tid,s);const float2 u=float2(giRandom(seed),giRandom(seed));
     if(lobe.coat)reflectionLobePick(lobe,giRandom(seed)); // the coat or the base lobe by albedo weight (one-sample MIS)
-    const auto dir=REFL_DIRECTION(s,u,lobe);const GPUDISurface sl=reflectionLobeSurface(s,lobe);
+    const auto dir=REFL_DIRECTION(s,u,lobe);const GPUDISurface sl=lobe.coat?reflectionOwnerSurface(s,lobe,dir.coatShare,giRandom(seed)):s;
 #else
     const auto dir=reflectionDirection(s,float2(giRandom(seed),giRandom(seed)));const GPUDISurface sl=s;
 #endif
@@ -120,7 +120,7 @@ kernel void REFL_KERNEL(reflection_rt)(constant GPUReflectionParams& p [[buffer(
 #ifdef PHOSPHOR_REFL_LOBE
     const float2 u=float2(giRandom(seed),giRandom(seed));
     if(lobe.coat)reflectionLobePick(lobe,giRandom(seed)); // the coat or the base lobe by albedo weight (one-sample MIS)
-    const auto dir=REFL_DIRECTION(s,u,lobe);sample=reflectionEmpty();const GPUDISurface sl=reflectionLobeSurface(s,lobe);
+    const auto dir=REFL_DIRECTION(s,u,lobe);sample=reflectionEmpty();const GPUDISurface sl=lobe.coat?reflectionOwnerSurface(s,lobe,dir.coatShare,giRandom(seed)):s;
 #else
     const auto dir=reflectionDirection(s,float2(giRandom(seed),giRandom(seed)));sample=reflectionEmpty();const GPUDISurface sl=s;
 #endif

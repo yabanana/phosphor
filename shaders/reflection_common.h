@@ -16,7 +16,7 @@ inline float3 reflectionSpecularBRDF(GPUDISurface s,float3 wi){
     if(nl<=0||nv<=0||dot(v+wi,v+wi)<1e-20f)return 0;float3 h=normalize(v+wi);float nh=saturate(dot(n,h)),vh=saturate(dot(v,h));
     return bsdfBaseSpecular(nl,nv,nh,vh,bsdfBaseF0(diVec(s.albedo),saturate(s.metallic)),bsdfAlpha(s.roughness));
 }
-struct ReflectionDirection {float3 direction,weight;float pdf;bool valid,error;};
+struct ReflectionDirection {float3 direction,weight;float pdf;bool valid,error;float coatShare;};
 inline ReflectionDirection reflectionDirection(GPUDISurface s,float2 u){
     ReflectionDirection out{};float3 n=diVec(s.shadingNormal),v=diVec(s.viewDirection);
     if(!s.valid)return out;if(!all(isfinite(n))||!all(isfinite(v))||dot(n,n)<=0||dot(v,v)<=0){out.error=true;return out;}
@@ -48,27 +48,41 @@ inline float reflectionLobePdf(float3 n, float3 v, float3 wi, float a) {
     return (nh > 0 && vh > 0) ? bsdfDGGX(nh, a) * nh / (4 * vh) : 0.0f;
 }
 // Two-lobe weight: ((1 - c F_c) f_base cos + c F_c D Vis_c cos_c) / (P_c pdf_c + (1 - P_c) pdf_b), the one-sample MIS estimator
-// of the coated specular BSDF.  `s` is the primary surface (base roughness, base normal).
-inline float3 reflectionCoatWeight(GPUDISurface s, float3 wi, ReflectionLobe lobe) {
+// of the coated specular BSDF.  `s` is the primary surface (base roughness, base normal).  `coatShare` returns the coat term's
+// share of the BSDF value at this direction (the emitter-ownership lobe is drawn from it, reflectionOwnerSurface).
+inline float3 reflectionCoatWeight(GPUDISurface s, float3 wi, ReflectionLobe lobe, thread float& coatShare) {
     const float3 n = normalize(diVec(s.shadingNormal)), v = normalize(diVec(s.viewDirection)), nc = lobe.coatNormal;
     const float ab = bsdfAlpha(s.roughness), ac = bsdfAlpha(lobe.coatRoughness);
     const float pdf = lobe.pCoat * reflectionLobePdf(nc, v, wi, ac) + (1.0f - lobe.pCoat) * reflectionLobePdf(n, v, wi, ab);
+    coatShare = 0.0f;
     if (!(pdf > 0)) return 0;
-    float3 total = 0;
+    float3 base = 0;
+    float coat = 0;
     const float nl = dot(n, wi), nv = dot(n, v), fc = bsdfCoatFresnel(abs(dot(nc, v)));
     if (nl > 0 && nv > 0 && dot(v + wi, v + wi) >= 1e-20f) {
         const float3 h = normalize(v + wi);
         const float nh = saturate(dot(n, h)), vh = saturate(dot(v, h));
         const float3 Fd = bsdfSpecFresnel(lobe.spec, vh);
-        total += (1.0f - lobe.coatFactor * fc) * (bsdfDGGX(nh, ab) * bsdfVSmithGGXCorrelated(nv, nl, ab) *
-                                                  bsdfSpecLobeColor(Fd, diVec(s.albedo), saturate(s.metallic), vh)) * nl;
+        base = (1.0f - lobe.coatFactor * fc) * (bsdfDGGX(nh, ab) * bsdfVSmithGGXCorrelated(nv, nl, ab) *
+                                                bsdfSpecLobeColor(Fd, diVec(s.albedo), saturate(s.metallic), vh)) * nl;
     }
     const float ncl = dot(nc, wi), ncv = max(dot(nc, v), 1e-4f);
     if (ncl > 0 && dot(v + wi, v + wi) >= 1e-20f) {
         const float3 h = normalize(v + wi);
-        total += lobe.coatFactor * fc * bsdfCoatSpecular(ncl, ncv, saturate(dot(nc, h)), ac) * ncl;
+        coat = lobe.coatFactor * fc * bsdfCoatSpecular(ncl, ncv, saturate(dot(nc, h)), ac) * ncl;
     }
-    return total / pdf;
+    const float baseLuminance = dot(base, float3(.2126f, .7152f, .0722f));
+    coatShare = (coat + baseLuminance) > 0 ? coat / (coat + baseLuminance) : lobe.pCoat;
+    return (base + coat) / pdf;
+}
+// Emitter ownership (decision 06): the coat lobe's DI/RT emitter share uses the coat roughness, the base lobe's the base roughness.
+// The RT-or-fallback decision, the emission share of the fallback and the regularisation floor of one sample use the roughness of
+// an OWNER lobe drawn with the coat's share of the BSDF value at the sampled direction (uOwner uniform in [0,1)); the expected
+// RT-owned fraction is then (f_c g(r_c) + f_b g(r_b)) / (f_c + f_b), each lobe owned by its own roughness (a mixture's RT/DI split
+// would otherwise follow the SAMPLED lobe, not the lobe that carries the value).
+inline GPUDISurface reflectionOwnerSurface(GPUDISurface s, ReflectionLobe lobe, float coatShare, float uOwner) {
+    lobe.sampleCoat = lobe.coat && uOwner < coatShare;
+    return reflectionLobeSurface(s, lobe);
 }
 // GGX proposal of reflectionDirection (same stream of random numbers, same direction and pdf); the weight of an
 // extended pixel uses the extended lobe colour instead of Schlick(f0), with the same finite-clamp rule.  For a coated pixel the
@@ -84,8 +98,8 @@ inline ReflectionDirection reflectionDirectionLobe(GPUDISurface s, float2 u, Ref
                               (1.0f - lobe.pCoat) * reflectionLobePdf(n, v, out.direction, bsdfAlpha(s.roughness));
         if (mixture > 0) {
             out.pdf = mixture;
-            out.weight = reflectionCoatWeight(s, out.direction, lobe);
-        } else out.weight = 0;
+            out.weight = reflectionCoatWeight(s, out.direction, lobe, out.coatShare);
+        } else { out.weight = 0; out.coatShare = 0; }
         if (!all(isfinite(out.weight)) || any(out.weight < 0)) { out.error = true; out.weight = 0; }
     } else if (dot(normalize(diVec(s.shadingNormal)), out.direction) > 0) {
         out.weight = reflectionLobeWeight(s, out.direction, out.pdf, lobe);

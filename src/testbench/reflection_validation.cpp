@@ -3,6 +3,8 @@
 #include "scene/components.h"
 #include "scene/ecs.h"
 #include "scene/procedural.h"
+#include "renderer/material_description.h"
+#include <memory>
 #include "scene/texture_manager.h"
 #include <algorithm>
 #include <array>
@@ -12,7 +14,7 @@
 
 namespace phosphor {
 namespace {
-constexpr std::array<std::string_view,12> names{"mirror","roughness","ao-cavity","probe-parallax","moving-light","disocclusion","wide-emission","ao-temporal-wall","specular-environment","fog-depths","rough-emitter","probe-box"};
+constexpr std::array<std::string_view,13> names{"mirror","roughness","ao-cavity","probe-parallax","moving-light","disocclusion","wide-emission","ao-temporal-wall","specular-environment","fog-depths","rough-emitter","probe-box","coat-emitter"};
 constexpr float pi=3.14159265358979323846f;
 const glm::quat identity(1,0,0,0);
 glm::quat sunRotation(glm::vec3 towardSun) {
@@ -129,6 +131,25 @@ void ReflectionValidation::setup(ECS& ecs,GpuScene& scene,TextureManager& textur
         // light besides the declared environment.
         mesh(ecs,plane_,{-3,0,0},{6,1,12},identity,{0.9f,0.9f,0.9f},1,0.3f);
         mesh(ecs,plane_,{3,0,0},{6,1,12},identity,{0.9f,0.9f,0.9f},1,0.5f);
+        panel_=mesh(ecs,plane_,{0,0.9f,-1.5f},{3.2f,1,0.9f},glm::angleAxis(pi*.5f,glm::vec3(1,0,0)),{0,0,0},0,1,{2.5f,2.5f,2.5f});
+        sun_=ecs.createEntity();entities_.push_back(sun_);
+        TransformComponent sunPose;sunPose.rotation=sunRotation({-0.35f,0.85f,0.4f});sunPose.updateMatrix();
+        ecs.addComponent(sun_,std::move(sunPose));
+        LightComponent light;light.type=LightType::Directional;light.intensity=0;ecs.addComponent(sun_,std::move(light));
+        time_=0;lightStep_=0;cameraSegment_=~0u;return;
+    }
+    if(scenario_=="coat-emitter") {
+        // F15.1 (ticket 09) emitter ownership under a clearcoat: the rough-emitter geometry with two dark dielectric
+        // floor strips (roughness 0.9) under a full clearcoat of roughness 0.3 (mixed RT/fallback band) and 0.5, so the
+        // glossy reflection of the black-body panel is the coat lobe.  The right strip also carries an explicit ior 1.5 /
+        // specular 1 block (the same material) so the feature union equals the archived value 3 of the clearcoat grids.
+        auto strip=[&](float x,float coatRoughness,bool withIor){
+            const auto e=mesh(ecs,plane_,{x,0,0},{6,1,12},identity,{0.02f,0.02f,0.02f},0,0.9f);
+            auto d=std::make_shared<MaterialDescription>();
+            d->clearcoat.emplace();d->clearcoat->factor=1.0f;d->clearcoat->roughness=coatRoughness;
+            if(withIor){d->specular.emplace();d->specular->ior=1.5f;d->specular->specularFactor=1.0f;}
+            ecs.getComponent<MaterialComponent>(e).extension=std::move(d);};
+        strip(-3,0.3f,false);strip(3,0.5f,true);
         panel_=mesh(ecs,plane_,{0,0.9f,-1.5f},{3.2f,1,0.9f},glm::angleAxis(pi*.5f,glm::vec3(1,0,0)),{0,0,0},0,1,{2.5f,2.5f,2.5f});
         sun_=ecs.createEntity();entities_.push_back(sun_);
         TransformComponent sunPose;sunPose.rotation=sunRotation({-0.35f,0.85f,0.4f});sunPose.updateMatrix();
