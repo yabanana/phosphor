@@ -72,6 +72,7 @@ add_library(phosphor_core STATIC
     src/renderer/history_registry.cpp
     src/renderer/exposure.cpp
     src/renderer/gpu_scene.cpp
+    src/renderer/material_description.cpp
     src/renderer/meshlet_builder.cpp
     src/renderer/rt_proxy.cpp
     src/renderer/rt_proxy_transition.cpp
