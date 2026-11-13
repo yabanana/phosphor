@@ -49,3 +49,14 @@ Roadmap: F15.1, F15.3 (prefactor)
   13/13, independent-clip 12/12, numerical 14/14, repeatability-pair 1/1).
   Independent-clip linear RMSE p95 unchanged to 4 decimals except
   metalfx-fallback 0.0309 → 0.0303.
+- 2026-11-13 15:05, Sponza D2 A/B/A base 75924b2 vs HEAD 2e1057a (tickets
+  01–04 + review fixes), `build/f15-d2/head-2e1057a`: GPU p95 pairs
+  15.57/15.42, 15.45/15.65, 15.21/15.87 ms (median delta +0.20 ms) with the
+  sky sentinel disturbed in 5 of 6 runs (p95 0.69–0.81 vs clean 0.674–0.677;
+  WindowServer 40–60 %, Chrome 50 %): not a valid band measurement. Per-pass
+  p50 attribution: deterministic +0.007 ms Material resolve, +0.006 ms
+  material lighting guides, +0.005/+0.003 ms composites (DFG table reads of
+  ticket 03), stochastic reflection pass −0.055…+0.096 ms (noise). Absolute
+  GPU p95 15.42–15.87 ms ≤ 16.67 ms, 0 GPU allocations. Formal band check
+  re-run at closure (ticket 24) on a quiet machine. The earlier 11:3x attempt
+  (Track Studio cargo tests at 1600 % CPU) is discarded.
