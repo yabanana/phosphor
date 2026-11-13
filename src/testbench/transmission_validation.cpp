@@ -55,8 +55,11 @@ std::vector<TransmissionScenarioSpec> specs() {
     {
         TransmissionScenarioSpec s;
         s.name = "transmission-attenuation";
-        const glm::vec3 colour[2] = {{0.3f, 0.7f, 1.0f}, {1.0f, 0.5f, 0.15f}};
-        const float distance[3] = {0.3f, 0.8f, 2.5f};
+        // Moderate absorption: a strongly absorbing smooth sphere (distance 0.3, blue 0.15) makes the glTF Schlick Fresnel differ
+        // from Mitsuba's exact one by 8 % mean / 19 % p95 on the dark pixels (measured, tools/f15_transmission_reference.py
+        // model-differences), so extreme attenuation would gate the Fresnel model, not the volume; here at most 1.2 % / 3.1 %.
+        const glm::vec3 colour[2] = {{0.5f, 0.75f, 1.0f}, {1.0f, 0.65f, 0.4f}};
+        const float distance[3] = {0.6f, 1.2f, 3.0f};
         for (int r = 0; r < 2; ++r)
             for (int c = 0; c < 3; ++c) {
                 GlassObject g = sphere({(float(c) - 1.0f) * 1.2f, 0.4f + 1.2f * float(r), 0.0f}, 0.1f, 1.5f);

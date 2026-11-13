@@ -150,7 +150,7 @@ TEST_CASE("F15.3 ticket 13: declared fixture numbers are pinned (tools/test_f15_
     CHECK(atten.glass.size() == 6);
     std::set<float> distances;
     for (const auto& g : atten.glass) distances.insert(g.attenuationDistance);
-    CHECK(distances == std::set<float>{0.3f, 0.8f, 2.5f});
+    CHECK(distances == std::set<float>{0.6f, 1.2f, 3.0f});
     // Factor x tint: factors 1 and 0.5 on panes (thin) and slabs (volume), a tinted base on the panes only.
     const auto& factor = TransmissionValidation::spec("transmission-factor-tint");
     CHECK(factor.glass.size() == 8);
