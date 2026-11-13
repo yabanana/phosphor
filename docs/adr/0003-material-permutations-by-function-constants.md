@@ -29,3 +29,19 @@ for union 0 the descriptor is returned unchanged, byte for byte.
   (not the generic one, which has no extension lobes; logged) until its
   specialisation compiles; budgets (≤ 64 archived permutations, ≤ 16
   active classes per scene, +≤ 25 % archive build time, 0 hitches) are tracked.
+- Measured deviation (ticket 05, 2026-11-13): the all-lobes pipeline serves
+  only once it has an object. Render pipelines get the cache's flexible
+  fallback object while they compile, compute pipelines (the visibility
+  resolve) get none; when neither the specialisation nor the all-lobes
+  pipeline is available, the scene's base pipeline serves those frames
+  (extension lobes absent, counted as a fallback use;
+  `FeaturePipelines::serve`). Binding the pending compute handle crashed the
+  driver (null pipeline state). Transient after a load or a feature toggle;
+  the toggle test shows the image settles at the next archived or compiled
+  specialisation.
+- Codegen of a specialised pipeline is not guaranteed bit-identical for
+  materials without feature bits: Sponza with one overridden material, forward
+  0 px outside that material, visibility resolve 14 of 5.76 M px at 1 LSB
+  (2026-11-13). Scenes without features keep byte-identical descriptors and
+  images (the guarantee above); within extended scenes the decision-11 gates
+  apply.

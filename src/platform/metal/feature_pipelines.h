@@ -24,7 +24,8 @@ namespace phosphor {
 //     which has no extension lobes).
 // Requests happen on first use per (slot, union) and compile on the cache's
 // workers; the render thread never compiles (O9).  If neither is final yet the
-// cache's own fallback object is used.
+// cache's fallback object is used when it has one (render pipelines); otherwise
+// the base pipeline serves (compute pipelines, which have no fallback object).
 // ---------------------------------------------------------------------------
 class FeaturePipelines {
 public:
@@ -36,11 +37,20 @@ public:
         if (mask == 0) return base;
         const pipe::PipelineHandle spec = handleFor(cache, slot, mask, makeDesc);
         if (cache.isFinal(spec)) return spec;
+        pipe::PipelineHandle all = pipe::INVALID_PIPELINE;
         if (mask != MATERIAL_FEATURES_ALL) {
-            const pipe::PipelineHandle all = handleFor(cache, slot, MATERIAL_FEATURES_ALL, makeDesc);
+            all = handleFor(cache, slot, MATERIAL_FEATURES_ALL, makeDesc);
             if (cache.isFinal(all)) return all;
         }
-        return spec;
+        // Render pipelines get a flexible fallback object while they compile;
+        // compute pipelines get nothing (binding a null compute pipeline crashes
+        // the driver). Until one of the two has an object, the scene's base
+        // pipeline (no extension lobes) serves those frames, counted as a
+        // fallback use (transient after a load or a feature toggle).
+        if (cache.available(spec)) return spec;
+        if (all != pipe::INVALID_PIPELINE && cache.available(all)) return all;
+        cache.noteFallbackUse();
+        return base;
     }
 
     /// Requests issued so far (tests / logs).

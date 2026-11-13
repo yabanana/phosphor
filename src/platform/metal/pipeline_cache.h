@@ -100,6 +100,9 @@ public:
     [[nodiscard]] MTL::RenderPipelineState*  render(pipe::PipelineHandle h) const;
     [[nodiscard]] MTL::ComputePipelineState* compute(pipe::PipelineHandle h) const;
     [[nodiscard]] bool isFinal(pipe::PipelineHandle h) const { return registry_.isFinal(h); }
+    /// True when the handle has an object to bind now (final or a fallback).
+    /// Compute pipelines have no fallback object: until they compile this is false.
+    [[nodiscard]] bool available(pipe::PipelineHandle h) const { return registry_.get(h) != nullptr; }
 
     /// Frame start (render thread): apply finished compilations.  Returns the
     /// number of entries whose object changed.
