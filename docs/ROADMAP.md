@@ -704,6 +704,7 @@ invariata; frame time piatto (nessun picco da aggiornamenti ammortizzati).
 ## F15 — Materiali avanzati e varianti shader [AAA]
 
 - [ ] F15.1 Modello esteso: clearcoat, sheen, anisotropia, trasmissione, iridescenza, subsurface (estensioni glTF `KHR_materials_*`)
+  - Caso Track Studio: trasmissione attraverso la geometria per due materiali dei pedoni e scattering sottosuperficiale per quattro materiali di re e regine. [Dettaglio e criteri di verifica](plans/F15.md#f151--lobi-avanzati).
 - [ ] F15.2 Descrizione dati dei materiali → generatore di permutazioni MSL offline (O11), niente uber-shader
 - [ ] F15.3 Testbench materiali confrontato con i modelli di riferimento Khronos
 - [ ] F15.4 Layered material (blend di strati) per terreni e superfici complesse
