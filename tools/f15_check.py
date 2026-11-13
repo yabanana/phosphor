@@ -37,11 +37,9 @@ reference ray casting):
   failure); none is pending now.
 - Clearcoat (F15.3, ticket 09): clearcoat-grid-sun / -env-resolve / -env / -point (legacy, @restir, @clustered) and
   furnace-clearcoat (+ @resolve) against the independent KHR_materials_clearcoat model of tools/f15_reference.py.
-  Their engine side lands with ticket 09, so every gate the current engine can fail is "pending": it is asserted
-  to FAIL in every mode and the engine image must PASS that gate against the control that models today's engine
-  (`pending_matches`, coat-ignored or its declared twin); `--expect green` requires both.  The furnace bound is an
-  upper bound that the coat-less engine satisfies, so the furnace gates stay asserted green (only the declared gate
-  of furnace-clearcoat@resolve is pending).  Negative controls (each must fail its gate): coat ignored, coat F0
+  The engine side landed with F15.1 ticket 09 (they were "pending" with the coat-ignored control as the matching
+  image until then): every gate passes.  The furnace bound is an upper bound that a coat redistributes energy under,
+  so the furnace gates are asserted green in every mode.  Negative controls (each must fail its gate): coat ignored, coat F0
   from the material ior (the Sample Renderer deviation), coat Fresnel at V.H, base not scaled by 1 - c F_c.
 - declared (base-grid-env-resolve; also furnace-resolve next to its furnace
   gate): the engine image against the independent declared-environment model of
@@ -191,36 +189,36 @@ SCENARIOS = {
                                  "declared": ["declared-karis-fit", "declared-extension-diffuse-base"],
                                  "terms": "constant environment radiance 1, albedo 1, no sun, deterministic resolve "
                                           "terms on the ior x specular grid"},
-    # F15.3 (ticket 09): KHR_materials_clearcoat.  Every gate that the engine can fail today is "pending": the engine
-    # ignores the coat until ticket 09, so the gate must FAIL and the engine image must PASS the same gate against
-    # the control that models today's engine ("pending_matches": coat-ignored, or its declared twin).  The coat grid
+    # F15.3 (ticket 09): KHR_materials_clearcoat.  Written test-first (every gate the coat-blind engine could fail was
+    # "pending" and asserted red with the coat-ignored control as the matching image); the engine side landed with
+    # F15.1 ticket 09, the pending markers are gone and every gate must pass.  The coat grid
     # rows are coat factor {0, 0.25, 0.5, 1}, coat 1 over a base of ior 2.4 (the only row where "coat F0 from the
     # material ior" differs) and a metal under a full coat; the columns are coat roughness {0, 0.05, 0.15, 0.4, 1}
     # over a rough dielectric base (roughness 0.6).  Direct grids group their rows by (metallic, ior, coat factor).
-    "clearcoat-grid-sun": {"kind": "direct", "pending": "ticket 09", "pending_matches": "coat-ignored",
+    "clearcoat-grid-sun": {"kind": "direct",
                            "controls": ["coat-ignored", "coat-f0-from-ior", "coat-fresnel-vh", "coat-base-unattenuated"],
                            "terms": "sun disk only (environment 0, no shadows, no GI) on the coat factor x coat roughness grid"},
-    "clearcoat-grid-env-resolve": {"kind": "declared", "pending": "ticket 09", "pending_matches": "declared-coat-ignored",
+    "clearcoat-grid-env-resolve": {"kind": "declared",
                                    "reflections": "off",
                                    "controls": ["declared-coat-ignored", "declared-coat-f0-from-ior",
                                                 "declared-coat-base-unattenuated"],
                                    "terms": "constant environment only (radiance 0.5, no sun) on the coat grid, deterministic "
                                             "resolve terms (--reflections off --lighting-denoise custom)"},
-    "clearcoat-grid-env": {"kind": "environment", "pending": "ticket 09", "pending_matches": "coat-ignored",
+    "clearcoat-grid-env": {"kind": "environment",
                            "controls": ["coat-ignored", "coat-f0-from-ior", "coat-base-unattenuated"],
                            "terms": "constant environment only (radiance 0.5, no sun), SSR specular transport, on the coat grid"},
-    "clearcoat-grid-point": {"kind": "direct", "pending": "ticket 09", "pending_matches": "coat-ignored",
+    "clearcoat-grid-point": {"kind": "direct",
                              "lighting": "legacy", "visibility": "none",
                              "controls": ["coat-ignored", "coat-f0-from-ior", "coat-fresnel-vh", "coat-base-unattenuated"],
                              "terms": "one point light only (no sun, environment 0, no GI), resolve local lights "
                                       "(--lighting legacy), on the coat grid"},
-    "clearcoat-grid-point@restir": {"kind": "direct", "pending": "ticket 09", "pending_matches": "coat-ignored",
+    "clearcoat-grid-point@restir": {"kind": "direct",
                                     "lighting": "restir", "visibility": "rays", "denoise": "off", "terminator_band": 2,
                                     "controls": ["coat-ignored", "coat-f0-from-ior", "coat-fresnel-vh",
                                                  "coat-base-unattenuated"],
                                     "terms": "one point light only, ReSTIR DI with RT visibility (--lighting restir --rt on), "
                                              "unfiltered (--lighting-denoise off), on the coat grid"},
-    "clearcoat-grid-point@clustered": {"kind": "direct", "pending": "ticket 09", "pending_matches": "coat-ignored",
+    "clearcoat-grid-point@clustered": {"kind": "direct",
                                        "lighting": "clustered", "visibility": "rays", "denoise": "off", "terminator_band": 2,
                                        "controls": ["coat-ignored", "coat-f0-from-ior", "coat-fresnel-vh",
                                                     "coat-base-unattenuated"],
@@ -235,8 +233,7 @@ SCENARIOS = {
                           "terms": "constant environment radiance 1, albedo 1, no sun, stochastic specular transport on the "
                                    "coat grid"},
     "furnace-clearcoat@resolve": {"kind": "furnace", "always_green": True, "reflections": "off",
-                                  "pending": "ticket 09", "pending_gate": "declared",
-                                  "pending_matches": "declared-coat-ignored", "controls": ["coat-base-unattenuated"],
+                                  "controls": ["coat-base-unattenuated"],
                                   "declared": ["declared-coat-ignored", "declared-coat-base-unattenuated"],
                                   "terms": "constant environment radiance 1, albedo 1, no sun, deterministic resolve terms "
                                            "on the coat grid"},

@@ -272,7 +272,7 @@ class RunnerLogic(unittest.TestCase):
                     "furnace-specular@resolve"):
             self.assertTrue(check.SCENARIOS[key]["always_green"], key)
 
-    def test_clearcoat_keys_are_pending_and_name_the_control_that_models_the_current_engine(self):
+    def test_clearcoat_keys_are_planned_with_their_controls_and_no_longer_pending(self):
         keys = ["clearcoat-grid-sun", "clearcoat-grid-env-resolve", "clearcoat-grid-env", "clearcoat-grid-point",
                 "clearcoat-grid-point@restir", "clearcoat-grid-point@clustered", "furnace-clearcoat",
                 "furnace-clearcoat@resolve"]
@@ -300,18 +300,14 @@ class RunnerLogic(unittest.TestCase):
             self.assertEqual(capture[capture.index("--lighting-denoise") + 1], denoise, key)
             self.assertEqual(reference[reference.index("--visibility") + 1], visibility, key)
             spec = check.SCENARIOS[key]
-            if key.startswith("clearcoat"):
-                self.assertEqual(spec["pending"], "ticket 09", key)
-                self.assertIn(spec["pending_matches"], spec["controls"], key)
-                literal, declared = check.scenario_controls(key)
-                for name in literal + declared:
-                    self.assertIn(name, reference, key)
-                self.assertTrue(spec["pending_matches"] in (literal + declared), key)
-        # The furnace bound is an upper bound the coat-less engine meets: only the declared gate is pending.
+            self.assertNotIn("pending", spec, key)
+            self.assertNotIn("pending_matches", spec, key)
+            self.assertNotIn("pending_gate", spec, key)
+            literal, declared = check.scenario_controls(key)
+            for name in literal + declared:
+                self.assertIn(name, reference, key)
         self.assertTrue(check.SCENARIOS["furnace-clearcoat"]["always_green"])
-        self.assertNotIn("pending", check.SCENARIOS["furnace-clearcoat"])
-        resolve = check.SCENARIOS["furnace-clearcoat@resolve"]
-        self.assertEqual((resolve["pending"], resolve["pending_gate"]), ("ticket 09", "declared"))
+        self.assertTrue(check.SCENARIOS["furnace-clearcoat@resolve"]["always_green"])
         self.assertEqual(check.SCENARIOS["clearcoat-grid-env-resolve"]["kind"], "declared")
         self.assertEqual(check.SCENARIOS["clearcoat-grid-env"]["kind"], "environment")
         for key in ("clearcoat-grid-sun", "clearcoat-grid-point"):
@@ -757,25 +753,23 @@ class BenchMirror(unittest.TestCase):
             environment = ref.COAT_DECLARED_CONTROLS["declared-coat-ignored"] if ignored else ref.DECLARED
         return model, environment
 
-    def test_clearcoat_keys_are_red_for_the_right_reason_with_a_coat_blind_engine(self):
-        for key, _ in self.COAT_KEYS:
-            model, environment = self.coat_engine(key, ignored=True)
-            entry = self.scenario(check.bench_scenario(key), model, "green", environment=environment, tag="-" + key + "-blind",
-                                  key=key)
-            self.assertTrue(entry["discriminating"], (key, json.dumps(entry["controls"], indent=1)))
-            self.assertFalse(entry["gates_pass"], key)          # pending: the gate FAILS
-            self.assertTrue(entry["pending_matches_met"], key)  # ... and the engine image matches the coat-ignored control
-            self.assertEqual(entry["pending"], "ticket 09")
-            self.assertEqual(check.verdict([entry], "green"), ("GREEN", check.EXIT_OK), key)
-
-    def test_clearcoat_keys_go_red_in_green_mode_once_the_engine_implements_the_coat(self):
-        # An engine that implements the model passes every gate: a still-pending key then no longer FAILS.
+    def test_clearcoat_keys_pass_with_an_engine_that_implements_the_coat(self):
         for key, _ in self.COAT_KEYS:
             model, environment = self.coat_engine(key, ignored=False)
             entry = self.scenario(check.bench_scenario(key), model, "green", environment=environment, tag="-" + key + "-coat",
                                   key=key)
+            self.assertTrue(entry["discriminating"], (key, json.dumps(entry["controls"], indent=1)))
             self.assertTrue(entry["gates_pass"], (key, json.dumps(check.summarize(entry["result"]))))
-            self.assertFalse(entry["pending_matches_met"], key)
+            self.assertFalse(entry.get("pending"), key)
+            self.assertEqual(check.verdict([entry], "green"), ("GREEN", check.EXIT_OK), key)
+
+    def test_clearcoat_keys_fail_with_a_coat_blind_engine(self):
+        # The old engine (coat ignored) fails the gate of every key but the furnace upper bound of the transport.
+        for key, _ in self.COAT_KEYS:
+            model, environment = self.coat_engine(key, ignored=True)
+            entry = self.scenario(check.bench_scenario(key), model, "green", environment=environment, tag="-" + key + "-blind",
+                                  key=key)
+            self.assertFalse(entry["gates_pass"], key)
             self.assertEqual(check.verdict([entry], "green")[1], check.EXIT_UNEXPECTED, key)
 
     def test_clearcoat_controls_each_fail_their_gate(self):
