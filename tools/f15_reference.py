@@ -53,6 +53,10 @@ documented at the "KHR_materials_sheen" section below.  The Phosphor E table (`t
 checked there; this file integrates E itself (incident hemisphere) for the literal model and reads the engine header
 only for the declared environment model.  Clearcoat sits above the sheen; textured sheen is refused.
 
+KHR_materials_anisotropy (F15.3, ticket 11) is implemented from the ratified text and the README's informative GLSL
+(research/khr-materials.md section 4); the section "KHR_materials_anisotropy" below documents the frame, the interpretation
+choices (tangent source, handedness on mirrored instances, the exact and the declared environment) and the controls.
+
 Declared engine conventions (every item is part of the JSON report):
 - roughness clamped to [0.04, 1], alpha = max(roughness^2, 0.002), N.V >= 1e-4.
 - Sun: a disk of uniform radiance and angular radius r (the snapshot's
@@ -128,6 +132,12 @@ MODEL = {
              "in [0.07, 1], E = Fresnel-free Charlie albedo clamped to 1 (own incident-hemisphere quadrature); sun: "
              "sheen lobe and scaling point-evaluated at the disk centre; coat above the sheen; exact environment "
              "(base (1 - max3(S) E) + S E) L",
+    "anisotropy": "KHR_materials_anisotropy: f_spec = F D_burley V_aniso with alpha_b = alpha, alpha_t = mix(alpha, 1, strength^2), "
+                  "lobe direction T' = cos(rot) T + sin(rot) B (T the Gram-Schmidt of the interpolated mesh tangent against the "
+                  "shading normal, B = cross(N, T) w sign(det of the world matrix)), B' = cross(N, T'); informative height-correlated "
+                  "V (no clamp, equal to Appendix B when isotropic); sun: the disk rule with alpha_min = alpha_b; exact environment "
+                  "by quadrature of the anisotropic lobe (table over N.V and the azimuth of V against T'); declared environment "
+                  "= split sum at an effective roughness (the bent-normal radiance fetch is invisible in a constant environment)",
     "shadows": "none",
     "declared_environment": "(1 - metallic) * baseColor * (1 - (0.04 A + B)) + clamp(f0 A + B, 0, 1), (A, B) from the "
                             "engine DFG table (bilinear), f0 = mix(0.04, baseColor, metallic), roughness in [0.04, 1]; "
@@ -166,14 +176,27 @@ SHEEN_CONTROLS = {
     "sheen-roughness-linear": {"sheen": "roughness-linear"},        # alpha_g = roughness instead of roughness^2
     "sheen-cheap-scaling": {"sheen": "cheap-scaling"},              # direct light with 1 - max3(S) E(N.V) only
 }
-ALL_CONTROLS = sorted({**CONTROLS, **SHEEN_CONTROLS})
+# F15.3 (ticket 11) negative controls of the anisotropy grids (deltas on the scene's main model; the anisotropy fixtures are
+# anisotropy-only, so that is Appendix B).  `bitangent-flipped` (w ignored) and `rotation-flipped` give the same lobe on a
+# mesh whose handedness is -1 everywhere: the mirrored fixture carries both handedness values and mirrored instances.
+ANISO_CONTROLS = {
+    "aniso-ignored": {"aniso": "ignored"},                          # strength 0: the isotropic base model
+    "aniso-rotation-flipped": {"aniso": "rotation-flipped"},        # rotation clockwise instead of counter-clockwise
+    "aniso-bitangent-flipped": {"aniso": "bitangent-flipped"},      # tangent handedness w ignored (B = cross(N, T))
+    "aniso-alpha-swapped": {"aniso": "alpha-swapped"},              # alpha_t and alpha_b exchanged
+    "aniso-mirror-unaware": {"aniso": "mirror-unaware"},            # the determinant of the world matrix ignored
+    "aniso-d-normalised-by-ab": {"aniso": "d-normalised-by-ab"},    # D prefactor 1/(pi alpha_b^2): gains energy
+}
+ALL_CONTROLS = sorted({**CONTROLS, **SHEEN_CONTROLS, **ANISO_CONTROLS})
 
 
 def control_model(name, main_model):
-    """The model of a literal-model control: the sheen controls modify the scene's main model, the older ones are
-    complete model dicts of their own."""
+    """The model of a literal-model control: the sheen and anisotropy controls modify the scene's main model, the older
+    ones are complete model dicts of their own."""
     if name in SHEEN_CONTROLS:
         return {**main_model, **SHEEN_CONTROLS[name]}
+    if name in ANISO_CONTROLS:
+        return {**main_model, **ANISO_CONTROLS[name]}
     return CONTROLS[name]
 
 
@@ -513,6 +536,203 @@ def sheen_environment(material, n_dot_v, sheen, radiance):
     return material * sheen_scaling(sheen, e)[:, None] + sheen_color(sheen) * (e * radiance)[:, None]
 
 
+# --- KHR_materials_anisotropy ----------------------------------------------------
+#
+# Written from the ratified text and the README's informative GLSL (research/khr-materials.md section 4), not from the MSL.
+# With strength s, rotation phi, alpha = max(roughness^2, 0.002) of the base material:
+#   alpha_b = alpha                        (perpendicular to the lobe direction)
+#   alpha_t = mix(alpha, 1, s^2)           (along the lobe direction: the highlight is stretched along it)
+#   D(h)    = 1 / (pi alpha_t alpha_b ((h.t)^2/alpha_t^2 + (h.b)^2/alpha_b^2 + (h.n)^2)^2)          (Burley, normative)
+#   V       = 0.5 / (N.L |(alpha_t T.V, alpha_b B.V, N.V)| + N.V |(alpha_t T.L, alpha_b B.L, N.L)|)   (README, informative)
+#   f_spec  = F D V        (F, the diffuse weighting and the metal/dielectric mix are the base model's, unchanged)
+# The README clamps V to [0, 1]; this reference does NOT (the isotropic limit then equals Appendix B exactly, which the
+# unit tests assert; V > 1 needs N.L ~ 0 with alpha ~ 0.002 and carries no energy).
+#
+# FRAME.  T = the world tangent: the mesh's own TANGENT attribute (PLY properties tangent_x/y/z, handedness_x of the snapshot,
+# mesh version 2) barycentrically interpolated at the hit, transformed by the instance's world matrix as a direction and
+# Gram-Schmidt orthogonalised against the shading normal (so T is exactly in the tangent plane).  B = cross(N, T) * w * det
+# where w = sign of the interpolated handedness and det = the sign of the determinant of the world matrix: the bitangent is
+# the world image of the model-space bitangent cross(N, T) w, so a MIRRORED instance (negative scale, INSTANCE_FLAG_MIRRORED)
+# renders as the mirror image of the same surface (cross(N_w, T_w) alone would flip it).  The lobe direction is the README's
+# T' = cos(rot) T + sin(rot) B (counter-clockwise from T in the T/B plane), B' = cross(N, T'): only T' and B' enter D and V, so
+# the rotation is invisible at 0 and pi/2 for the sign (T' = +-T, +-B), and the handedness only through the sign of sin(rot).
+#
+# SUN.  The disk rule (`sun_quadrature`) keys on the narrowest alpha, alpha_b = alpha, unchanged: alpha >= 0.05 evaluates the
+# lobe at the disk centre (the anisotropic lobe is only wider along T').
+# ENVIRONMENT, exact: the directional albedo of F-weighted D V N.L under a constant radiance depends on N.V, on the azimuth of
+# the view vector in the (T', B') frame and on (alpha_t, alpha_b); `aniso_albedo_table` integrates it by quadrature of the
+# anisotropic half-vector distribution (the D cos(theta_h) CDF of the anisotropic GGX, midpoint rule), the diffuse term is the
+# base model's.  DECLARED environment: the Sample Renderer fetches the radiance along a "bent normal" (the README's IBL
+# guidance) and keeps the isotropic split-sum weights at the material roughness; in a CONSTANT environment the bent normal has no
+# effect, so that method alone is anisotropy-blind there.  The declared model here keeps the bent-normal fetch (invisible) and
+# evaluates the split sum (DFG table) at an effective isotropic roughness r_eff = sqrt(alpha_eff), alpha_eff = `ANISO_FIT`
+# of (alpha_t, alpha_b) (the root mean square): a declared FIT whose error against the exact quadrature is measured and reported
+# (tools/test_f15_reference.py).  Textured anisotropy (anisotropyTexture, word 2) is refused.
+
+ANISOTROPY_FEATURE_BIT = 8  # MaterialFeature::Anisotropy
+ANISOTROPY_RECORD = 1       # GPUMaterialExt1: strength word 0, rotation word 1, texture word 2
+ANISO_VARIANTS = ("spec", "ignored", "rotation-flipped", "bitangent-flipped", "alpha-swapped", "mirror-unaware",
+                  "d-normalised-by-ab")
+ANISO_QUADRATURE = (192, 192)      # (u1 nodes, u2 nodes) of the half-vector quadrature, midpoint rule
+ANISO_MU_NODES, ANISO_PHI_NODES = 65, 33   # table nodes over N.V in [MIN_NDOTV, 1] and the view azimuth in [0, pi/2]
+ANISO_FIT = "rms"                  # alpha_eff = sqrt((alpha_t^2 + alpha_b^2) / 2) of the declared environment
+
+
+def aniso_alphas(alpha, strength, variant="spec"):
+    """(alpha_t, alpha_b) of the README rule; `ignored` (control) forces strength 0, `alpha-swapped` swaps the two."""
+    alpha = np.asarray(alpha, dtype=np.float64)
+    s = np.zeros_like(np.asarray(strength, dtype=np.float64)) if variant == "ignored" else np.asarray(strength, dtype=np.float64)
+    at, ab = alpha + (1.0 - alpha) * s * s, alpha.copy()
+    if variant == "alpha-swapped":
+        at, ab = ab, at
+    return at, ab
+
+
+def take_aniso(aniso, sel):
+    """The per-pixel arrays of `aniso` restricted to the pixel indices `sel` (None stays None)."""
+    if aniso is None:
+        return None
+    return {k: (v[sel] if isinstance(v, np.ndarray) else v) for k, v in aniso.items()}
+
+
+def aniso_axes(aniso, n):
+    """(T', B') unit lobe axes per pixel in the tangent plane of the shading normals `n`: T' = cos(rot) T + sin(rot) B with
+    B = cross(N, T) s_eff, s_eff = w det (the world image of the model-space bitangent); B' = cross(N, T').  Controls:
+    `rotation-flipped` negates the angle, `bitangent-flipped` ignores the handedness w (s_eff = det), `mirror-unaware`
+    ignores the determinant (s_eff = w)."""
+    variant = aniso["variant"]
+    w, det = aniso["w"], aniso["det"]
+    sign = det if variant == "bitangent-flipped" else (w if variant == "mirror-unaware" else w * det)
+    b0 = np.cross(n, aniso["tangent"]) * sign[:, None]
+    rotation = -aniso["rotation"] if variant == "rotation-flipped" else aniso["rotation"]
+    t = normalize(np.cos(rotation)[:, None] * aniso["tangent"] + np.sin(rotation)[:, None] * b0)
+    return t, normalize(np.cross(n, t))
+
+
+def aniso_dv(n, v, l, alpha, aniso):
+    """D V per pixel (no Fresnel, no cosine) of the anisotropic lobe at world unit vectors; n.l <= 0 gives V of N.L = 0."""
+    at, ab = aniso_alphas(alpha, aniso["strength"], aniso["variant"])
+    t, b = aniso_axes(aniso, n)
+    h = normalize(v + l)
+    nh = np.clip(dot(n, h), 0.0, 1.0)
+    th, bh = dot(t, h), dot(b, h)
+    q = (th / at) ** 2 + (bh / ab) ** 2 + nh * nh
+    d = 1.0 / (math.pi * at * ab * q * q)
+    if aniso["variant"] == "d-normalised-by-ab":
+        d = d * at / ab  # control: the prefactor 1/(pi ab^2): gains energy by alpha_t / alpha_b
+    nv = np.maximum(dot(n, v), MIN_NDOTV)
+    nl = np.maximum(dot(n, l), 0.0)
+    ggx_v = nl * np.sqrt((at * dot(t, v)) ** 2 + (ab * dot(b, v)) ** 2 + nv * nv)
+    ggx_l = nv * np.sqrt((at * dot(t, l)) ** 2 + (ab * dot(b, l)) ** 2 + nl * nl)
+    return d * (0.5 / np.maximum(ggx_v + ggx_l, 1e-12))
+
+
+def specular_dv(n, v, l, alpha, aniso=None):
+    """D V per pixel: the base isotropic GGX / Smith product, or the anisotropic lobe."""
+    if aniso is not None:
+        return aniso_dv(n, v, l, alpha, aniso)
+    h = normalize(v + l)
+    return ggx_d(np.clip(dot(n, h), 0.0, 1.0), alpha) * smith_vis(np.maximum(dot(n, v), MIN_NDOTV),
+                                                                  np.maximum(dot(n, l), 0.0), alpha)
+
+
+_ANISO_ALBEDO = {}
+
+
+def _aniso_spec_integrals(mu, phi_v, at, ab, variant="spec"):
+    """(A, B): integrals of D V cos (1 - w) and D V cos w over the incident hemisphere (w the Schlick weight of V.H) for a
+    view at cos(theta) = mu and azimuth phi_v from the lobe axis T' in the (T', B', N) frame.  The anisotropic half-vector
+    distribution D cos(theta_h) is sampled by its CDF (azimuth atan2(ab sin 2 pi u2, at cos 2 pi u2), tan^2 theta_h =
+    u1 / (1 - u1) / (cos^2 / at^2 + sin^2 / ab^2)), integral = mean(V cos_i 4 (wo.h) / cos_h g)."""
+    n1, n2 = ANISO_QUADRATURE
+    u1 = (np.arange(n1) + 0.5) / n1
+    u2 = (np.arange(n2) + 0.5) / n2
+    phi_h = np.arctan2(ab * np.sin(2 * math.pi * u2), at * np.cos(2 * math.pi * u2))
+    tan2 = (u1[:, None] / (1.0 - u1[:, None])) / ((np.cos(phi_h) / at) ** 2 + (np.sin(phi_h) / ab) ** 2)[None, :]
+    cos_h = 1.0 / np.sqrt(1.0 + tan2)
+    sin_h = np.sqrt(np.maximum(0.0, 1.0 - cos_h * cos_h))
+    h = np.stack([sin_h * np.cos(phi_h)[None, :], sin_h * np.sin(phi_h)[None, :], cos_h], axis=-1)
+    sin_v = math.sqrt(max(0.0, 1.0 - mu * mu))
+    wo = np.array([sin_v * math.cos(phi_v), sin_v * math.sin(phi_v), mu])
+    vh = h @ wo
+    wi = 2.0 * vh[..., None] * h - wo
+    valid = (wi[..., 2] > 0) & (vh > 0)
+    wi_z = np.maximum(wi[..., 2], 0.0)
+    ggx_v = wi_z * np.sqrt((at * wo[0]) ** 2 + (ab * wo[1]) ** 2 + mu * mu)
+    ggx_l = mu * np.sqrt((at * wi[..., 0]) ** 2 + (ab * wi[..., 1]) ** 2 + wi_z ** 2)
+    vis = 0.5 / np.maximum(ggx_v + ggx_l, 1e-12)
+    base = np.where(valid, vis * wi_z * 4.0 * vh / cos_h, 0.0)
+    if variant == "d-normalised-by-ab":
+        base = base * at / ab
+    w = schlick_weight(vh)
+    return float(np.mean(base * (1 - w))), float(np.mean(base * w))
+
+
+def aniso_albedo_table(at, ab, variant="spec"):
+    """(mu grid, phi grid, A[mu, phi], B[mu, phi]) of one (alpha_t, alpha_b)."""
+    key = (round(float(at), 12), round(float(ab), 12), variant)
+    if key not in _ANISO_ALBEDO:
+        mus = np.linspace(MIN_NDOTV, 1.0, ANISO_MU_NODES)
+        phis = np.linspace(0.0, 0.5 * math.pi, ANISO_PHI_NODES)
+        a = np.empty((len(mus), len(phis)))
+        b = np.empty_like(a)
+        for i, mu in enumerate(mus):
+            for j, phi in enumerate(phis):
+                a[i, j], b[i, j] = _aniso_spec_integrals(float(mu), float(phi), float(at), float(ab), variant)
+        _ANISO_ALBEDO[key] = (mus, phis, a, b)
+    return _ANISO_ALBEDO[key]
+
+
+def _bilinear(mus, phis, table, mu, phi):
+    """Bilinear interpolation of table[mu, phi] at per-pixel (mu, phi), both clamped to the grid."""
+    x = np.clip((mu - mus[0]) / (mus[-1] - mus[0]), 0.0, 1.0) * (len(mus) - 1)
+    y = np.clip(phi / phis[-1], 0.0, 1.0) * (len(phis) - 1)
+    x0 = np.minimum(np.floor(x).astype(np.int64), len(mus) - 2)
+    y0 = np.minimum(np.floor(y).astype(np.int64), len(phis) - 2)
+    fx, fy = x - x0, y - y0
+    return ((table[x0, y0] * (1 - fx) + table[x0 + 1, y0] * fx) * (1 - fy) +
+            (table[x0, y0 + 1] * (1 - fx) + table[x0 + 1, y0 + 1] * fx) * fy)
+
+
+def aniso_environment_inputs(aniso, roughness, n, v):
+    """Per-pixel {"at", "ab", "phi", "variant"} of the exact environment: the alphas and the azimuth of V in the lobe frame
+    folded into [0, pi/2] (the lobe is even in both axes)."""
+    at, ab = aniso_alphas(effective_alpha(roughness), aniso["strength"], aniso["variant"])
+    t, b = aniso_axes(aniso, n)
+    phi = np.arctan2(np.abs(dot(v, b)), np.abs(dot(v, t)))
+    return {"at": at, "ab": ab, "phi": phi, "variant": aniso["variant"]}
+
+
+def aniso_spec_albedo(mu, env):
+    """(A, B) per pixel from the tables: pixels with alpha_t = alpha_b use the isotropic table of the base model."""
+    mu = np.clip(mu, MIN_NDOTV, 1.0)
+    a = np.empty(len(mu))
+    b = np.empty(len(mu))
+    pairs = np.stack([np.round(env["at"], 12), np.round(env["ab"], 12)], axis=1)
+    for at, ab in np.unique(pairs, axis=0):
+        sel = np.flatnonzero((pairs[:, 0] == at) & (pairs[:, 1] == ab))
+        if at == ab and env["variant"] != "d-normalised-by-ab":
+            t = environment_table(math.sqrt(ab), APPENDIX_B)
+            a[sel], b[sel] = np.interp(mu[sel], t["mu"], t["A"]), np.interp(mu[sel], t["mu"], t["B"])
+            continue
+        mus, phis, ta, tb = aniso_albedo_table(at, ab, env["variant"])
+        a[sel] = _bilinear(mus, phis, ta, mu[sel], env["phi"][sel])
+        b[sel] = _bilinear(mus, phis, tb, mu[sel], env["phi"][sel])
+    return a, b
+
+
+def declared_aniso_alpha(at, ab, kind="spec"):
+    """alpha_eff of the declared environment fit: the root mean square sqrt((alpha_t^2 + alpha_b^2) / 2) (`spec`; of the
+    simple isotropic fits it has the smallest sphere-weighted error against the exact quadrature: 1.1 % mean at strength 0.5,
+    6.6 % at strength 1, measured over N.V >= 0.1 and all azimuths at alpha_b 0.09), the isotropic base alpha_b (`ignored`,
+    the engine before ticket 11) or the stretched alpha_t (`alpha-t`, a control)."""
+    if kind == "ignored":
+        return np.asarray(ab, dtype=np.float64)
+    if kind == "alpha-t":
+        return np.asarray(at, dtype=np.float64)
+    return np.sqrt(0.5 * (np.asarray(at, dtype=np.float64) ** 2 + np.asarray(ab, dtype=np.float64) ** 2))
+
+
 def lobe_weights(base, metallic, v_dot_h, model=APPENDIX_B, dielectric=None):
     """(diffuse multiplier per channel, specular multiplier per channel) at one V.H.
 
@@ -537,14 +757,15 @@ def lobe_weights(base, metallic, v_dot_h, model=APPENDIX_B, dielectric=None):
     return diffuse, specular
 
 
-def bsdf(base, metallic, roughness, n, v, l, model=APPENDIX_B, dielectric=None, coat=None, sheen=None):
+def bsdf(base, metallic, roughness, n, v, l, model=APPENDIX_B, dielectric=None, coat=None, sheen=None, aniso=None):
     """BSDF value f (without the cosine) for world unit vectors; (n, 3) arrays or broadcastable.
 
     `sheen` (F15.3, ticket 10, per-pixel {"color", "roughness", "variant"} of KHR_materials_sheen): the material under
     the sheen layer, f_sheen + f_material scaling (sheen_layer).
     `coat` (F15.3, per-pixel {"factor", "roughness", "f0_ior", "variant"} of KHR_materials_clearcoat): the coated
     value (1 - c F_c) f_material + c F_c D Vis (see the module docstring); the coat term has its own cosine mask.
-    The coat sits above the sheen: the coat attenuates the whole sheen + material value."""
+    The coat sits above the sheen: the coat attenuates the whole sheen + material value.
+    `aniso` (F15.3, ticket 11, per-pixel dict of the anisotropy section): the specular D V is the anisotropic lobe."""
     alpha = effective_alpha(roughness, model)
     n_dot_l = dot(n, l)
     n_dot_v = np.maximum(dot(n, v), MIN_NDOTV)
@@ -552,7 +773,10 @@ def bsdf(base, metallic, roughness, n, v, l, model=APPENDIX_B, dielectric=None, 
     n_dot_h = np.clip(dot(n, h), 0.0, 1.0)
     v_dot_h = dot(v, h)
     diffuse_w, specular_w = lobe_weights(base, metallic, v_dot_h, model, dielectric)
-    spec = (ggx_d(n_dot_h, alpha) * smith_vis(n_dot_v, np.maximum(n_dot_l, 0.0), alpha))[..., None]
+    if aniso is None:
+        spec = (ggx_d(n_dot_h, alpha) * smith_vis(n_dot_v, np.maximum(n_dot_l, 0.0), alpha))[..., None]
+    else:  # F15.3 (ticket 11): the anisotropic lobe replaces D V (Fresnel and the diffuse weighting are unchanged)
+        spec = aniso_dv(n, v, l, alpha, aniso)[..., None]
     value = np.where((n_dot_l > 0)[..., None], diffuse_w * base / math.pi + specular_w * spec, 0.0)
     if sheen is not None:
         value = sheen_layer(value, sheen, n_dot_v, n_dot_l, n_dot_h)
@@ -592,7 +816,7 @@ def sun_disk_samples(l, radius, count):
 
 
 def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius, model=APPENDIX_B, dielectric=None,
-                 coat=None, sheen=None):
+                 coat=None, sheen=None, aniso=None):
     """Outgoing radiance per pixel from the sun disk; returns (radiance (n,3), narrow (n,)).
 
     `sheen` (F15.3, ticket 10): the material terms are scaled by the albedo scaling at the disk centre and the sheen
@@ -628,7 +852,11 @@ def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius
             h = normalize(v[sel] + lk)
             nh = np.clip(dot(n[sel], h), 0.0, 1.0)
             _, specular_w = lobe_weights(base[sel], metallic[sel], dot(v[sel], h), model, take(dielectric, sel))
-            term = (ggx_d(nh, alpha[sel]) * smith_vis(n_dot_v[sel], nl, alpha[sel]) * nl)[:, None] * specular_w
+            if aniso is None:
+                lobe = ggx_d(nh, alpha[sel]) * smith_vis(n_dot_v[sel], nl, alpha[sel])
+            else:  # F15.3 (ticket 11): the disk rule keys on alpha_b = alpha (unchanged), the lobe is anisotropic
+                lobe = aniso_dv(n[sel], v[sel], lk, alpha[sel], take_aniso(aniso, sel))
+            term = (lobe * nl)[:, None] * specular_w
             if coat is not None:
                 sub = take_coat(coat, sel)
                 term = term * coat_attenuation(sub, coat_c[sel], coat_fresnel(sub, n[sel], v[sel], h))[:, None]
@@ -672,7 +900,7 @@ def point_window(distance, light_range):
 
 
 def point_radiance(base, metallic, roughness, n, v, position, light, model=APPENDIX_B, dielectric=None, visible=None,
-                   coat=None, sheen=None):
+                   coat=None, sheen=None, aniso=None):
     """Outgoing radiance per pixel from one white delta point light; returns (radiance (n,3), lit (n,))."""
     delta = np.asarray(light["position"], dtype=np.float64)[None, :] - position
     distance = np.linalg.norm(delta, axis=1)
@@ -680,7 +908,7 @@ def point_radiance(base, metallic, roughness, n, v, position, light, model=APPEN
     geometry = point_window(distance, light["range"]) / np.maximum(distance * distance, 1e-4)
     incident = np.asarray(light["color"], dtype=np.float64)[None, :] * float(light["intensity"]) * geometry[:, None]
     n_dot_l = np.clip(dot(n, l), 0.0, 1.0)
-    value = bsdf(base, metallic, roughness, n, v, l, model, dielectric, coat, sheen) * n_dot_l[:, None] * incident
+    value = bsdf(base, metallic, roughness, n, v, l, model, dielectric, coat, sheen, aniso) * n_dot_l[:, None] * incident
     lit = dot(n, l) > 0
     if visible is not None:
         value = value * visible[:, None]
@@ -760,12 +988,14 @@ def extension_diffuse_table(c0, c1, model=APPENDIX_B):
     return _EXTENSION_DIFFUSE[key]
 
 
-def environment_radiance(base, metallic, roughness, n_dot_v, radiance, model=APPENDIX_B, dielectric=None):
+def environment_radiance(base, metallic, roughness, n_dot_v, radiance, model=APPENDIX_B, dielectric=None, aniso_env=None):
     """Outgoing radiance (n, 3) under a constant isotropic environment of radiance `radiance`.
 
     `dielectric` (F15.1, per-pixel {"f0", "weight", "variant"} of KHR_materials_ior/specular): the exact quadrature of
     the extended dielectric.  F is affine in the Schlick weight (F = c0 + c1 w), so the specular part is
-    c0 * (A + B) + c1 * B per channel and the diffuse part integrates 1 - max(F) (extension_diffuse_table)."""
+    c0 * (A + B) + c1 * B per channel and the diffuse part integrates 1 - max(F) (extension_diffuse_table).
+    `aniso_env` (F15.3, ticket 11, aniso_environment_inputs): A and B come from the anisotropic quadrature tables; the diffuse
+    integrals do not depend on the lobe."""
     n_pixels = len(n_dot_v)
     result = np.zeros((n_pixels, 3))
     mu = np.clip(n_dot_v, MIN_NDOTV, 1.0)
@@ -776,6 +1006,9 @@ def environment_radiance(base, metallic, roughness, n_dot_v, radiance, model=APP
         b = np.interp(mu[sel], t["mu"], t["B"])[:, None]
         cd = np.interp(mu[sel], t["mu"], t["Cd"])[:, None]
         cu = np.interp(mu[sel], t["mu"], t["Cu"])[:, None]
+        if aniso_env is not None:
+            a1, b1 = aniso_spec_albedo(mu[sel], take_aniso(aniso_env, sel))
+            a, b = a1[:, None], b1[:, None]
         m = np.asarray(metallic, dtype=np.float64)[sel, None]
         c = base[sel]
         if dielectric is not None:
@@ -813,7 +1046,7 @@ _DFG = {}
 # 1 - max(E_dielectric) of its own specular lobe ("extension", the engine's state). "composite-base" (the weight
 # 1 - E(0.04) of the base model, the engine's state before ticket 08) is kept as a negative control.
 DECLARED = {"albedo": "dfg-table", "diffuse": "one-minus-dielectric-albedo", "dielectric": "extension",
-            "extension_diffuse": "extension", "coat": "spec", "sheen": "spec"}
+            "extension_diffuse": "extension", "coat": "spec", "sheen": "spec", "aniso": "spec"}
 # Deliberately wrong variants that the declared-model gate must reject.
 DECLARED_CONTROLS = {
     "declared-diffuse-unweighted": {**DECLARED, "diffuse": "unweighted"},            # no (1 - E) weight
@@ -843,8 +1076,15 @@ SHEEN_DECLARED_CONTROLS = {
     "declared-sheen-unscaled-base": {**DECLARED, "sheen": "unscaled-base"},
     "declared-sheen-roughness-linear": {**DECLARED, "sheen": "roughness-linear"},
 }
+# F15.3 (ticket 11): negative controls of the anisotropy grids of the deterministic resolve.  The declared fit is symmetric
+# in the lobe axes and independent of the rotation, so there is no declared rotation / handedness / swap control: those are
+# gated by the exact quadrature and the direct keys.
+ANISO_DECLARED_CONTROLS = {
+    "declared-aniso-ignored": {**DECLARED, "aniso": "ignored"},      # alpha_eff = alpha_b: the engine before ticket 11
+    "declared-aniso-alpha-t": {**DECLARED, "aniso": "alpha-t"},      # alpha_eff = alpha_t: the stretched axis only
+}
 ALL_DECLARED_CONTROLS = {**DECLARED_CONTROLS, **SPECULAR_DECLARED_CONTROLS, **COAT_DECLARED_CONTROLS,
-                         **SHEEN_DECLARED_CONTROLS}
+                         **SHEEN_DECLARED_CONTROLS, **ANISO_DECLARED_CONTROLS}
 
 
 def load_dfg_table(path=DFG_HEADER):
@@ -937,7 +1177,7 @@ def karis_ab(n_dot_v, roughness):
 
 
 def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, variant=DECLARED, dielectric=None,
-                                  coat=None, sheen=None):
+                                  coat=None, sheen=None, aniso=None):
     """Outgoing radiance (n, 3) of the engine's declared environment model (see the module docstring).
 
     `dielectric` (F15.1): per-pixel {"f0", "weight"} of KHR_materials_ior/specular (variant["dielectric"] picks the
@@ -946,7 +1186,15 @@ def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, 
     coat model (1 - c F_c(mu)) * declared_material + c F_c(mu) * clamp(A_c + B_c, 0, 1), (A_c, B_c) = dfg_lookup at
     the coat roughness; variant["coat"] names the control (`ignored`, `f0-from-ior`, `base-unattenuated`).
     `sheen` (F15.3, ticket 10): the material is first put under the sheen (declared_sheen_environment), the coat sits
-    above that sum."""
+    above that sum.
+    `aniso` (F15.3, ticket 11, per-pixel {"strength", ...}): the split sum runs at the effective isotropic roughness
+    sqrt(alpha_eff) of `declared_aniso_alpha` (variant["aniso"] names the fit or the control); the bent-normal radiance fetch
+    of the Sample Renderer has no effect in a constant environment."""
+    if aniso is not None:
+        alpha = effective_alpha(roughness)
+        at, ab = aniso_alphas(alpha, aniso["strength"])
+        alpha_eff = declared_aniso_alpha(at, ab, variant.get("aniso", "spec"))
+        roughness = np.where(alpha_eff == ab, np.asarray(roughness, dtype=np.float64), np.sqrt(alpha_eff))
     material = _declared_material_radiance(base, metallic, roughness, n_dot_v, variant, dielectric)
     if sheen is not None:
         material = declared_sheen_environment(material, n_dot_v, sheen, variant)
@@ -1035,8 +1283,15 @@ def shadow_visibility(root, data, position, normal, target, threads):
     return ~np.asarray(scene.ray_test(ray))
 
 
+class Cast(tuple):
+    """The 5-tuple of cast_primary_rays; `primitive` (h, w) holds the hit triangle index (face order of the PLY file) per
+    pixel, -1 where nothing was hit (None for a cast built by hand)."""
+    primitive = None
+
+
 def cast_primary_rays(root, data, threads):
-    """Pixel-centre primary hits with Mitsuba: (valid, position, shading normal, instance index)."""
+    """Pixel-centre primary hits with Mitsuba: (valid, position, shading normal, instance index) in a Cast (the triangle
+    index is its `primitive` attribute)."""
     import drjit as dr
     import mitsuba as mi
 
@@ -1072,7 +1327,91 @@ def cast_primary_rays(root, data, threads):
     for key, value in index_of.items():
         instance[valid & (shape_id == key)] = int(names[value].split("_")[1])
     valid &= instance >= 0
-    return valid.reshape(height, width), position, normal, instance.reshape(height, width), (width, height)
+    result = Cast((valid.reshape(height, width), position, normal, instance.reshape(height, width), (width, height)))
+    result.primitive = np.where(valid, np.asarray(si.prim_index).astype(np.int64), -1).reshape(height, width)
+    return result
+
+
+# --- surface tangents (KHR_materials_anisotropy) -------------------------------
+
+_PLY = {}
+
+
+def read_ply(path):
+    """(vertex properties {name: float32 array}, faces (n, 3) uint32) of a binary little-endian triangle PLY."""
+    key = str(path)
+    if key not in _PLY:
+        raw = pathlib.Path(path).read_bytes()
+        end = raw.index(b"end_header\n") + len(b"end_header\n")
+        header = raw[:end].decode().splitlines()
+        if "format binary_little_endian 1.0" not in header:
+            raise ValueError(f"{path}: only binary little-endian PLY files are read")
+        count = int(next(line.split()[2] for line in header if line.startswith("element vertex")))
+        faces = int(next(line.split()[2] for line in header if line.startswith("element face")))
+        names = [line.split()[2] for line in header if line.startswith("property float")]
+        vertices = np.frombuffer(raw, dtype=np.dtype([(n, "<f4") for n in names]), count=count, offset=end)
+        face_dtype = np.dtype([("n", "u1"), ("i", "<u4", 3)])
+        table = np.frombuffer(raw, dtype=face_dtype, count=faces, offset=end + vertices.nbytes)
+        if (table["n"] != 3).any():
+            raise ValueError(f"{path}: only triangle faces are read")
+        _PLY[key] = ({n: np.array(vertices[n]) for n in names}, np.array(table["i"]))
+    return _PLY[key]
+
+
+def instance_matrix(instance):
+    """The 4x4 world matrix of a snapshot instance (column-major words)."""
+    return np.asarray(instance["world"], dtype=np.float64).reshape(4, 4, order="F")
+
+
+def surface_tangents(root, data, cast, pick):
+    """(tangent (n, 3), w (n,), det (n,)) per picked pixel: the barycentrically interpolated mesh tangent attribute at the
+    hit transformed by the world matrix as a direction (not yet orthogonalised), the sign of the interpolated handedness and
+    the sign of the world matrix determinant.  The barycentrics come from the hit position in the object space of the hit
+    triangle (affine invariant), the triangle from Mitsuba's primitive index; the mesh must carry tangents (mesh version 2)."""
+    valid, position, _, instance, _ = cast
+    if getattr(cast, "primitive", None) is None:
+        raise ValueError("the cast carries no primitive indices")
+    inst = instance.reshape(-1)[pick]
+    prim = cast.primitive.reshape(-1)[pick]
+    hit = position[pick]
+    tangent = np.zeros((len(pick), 3))
+    w = np.zeros(len(pick))
+    det = np.zeros(len(pick))
+    for k in np.unique(inst):
+        sel = np.flatnonzero(inst == k)
+        item = data["instances"][int(k)]
+        properties, faces = read_ply(root / data["meshes"][item["mesh"]])
+        if "tangent_x" not in properties or "handedness_x" not in properties:
+            raise ValueError("the mesh PLY has no tangent attribute (re-export with mesh version 2)")
+        world = instance_matrix(item)
+        triangle = faces[prim[sel]]
+        position_o = np.stack([properties["x"], properties["y"], properties["z"]], axis=1).astype(np.float64)
+        v = position_o[triangle]  # (m, 3 corners, 3)
+        inverse = np.linalg.inv(world)
+        p = (np.concatenate([hit[sel], np.ones((len(sel), 1))], axis=1) @ inverse.T)[:, :3]
+        e1, e2, d = v[:, 1] - v[:, 0], v[:, 2] - v[:, 0], p - v[:, 0]
+        d11, d12, d22 = dot(e1, e1), dot(e1, e2), dot(e2, e2)
+        d1, d2 = dot(d, e1), dot(d, e2)
+        denominator = d11 * d22 - d12 * d12
+        b1 = (d22 * d1 - d12 * d2) / denominator
+        b2 = (d11 * d2 - d12 * d1) / denominator
+        bary = np.stack([1.0 - b1 - b2, b1, b2], axis=1)
+        t_vertex = np.stack([properties["tangent_x"], properties["tangent_y"], properties["tangent_z"]], axis=1).astype(np.float64)
+        t_object = np.einsum("mc,mcj->mj", bary, t_vertex[triangle])
+        w_value = np.einsum("mc,mc->m", bary, properties["handedness_x"].astype(np.float64)[triangle])
+        tangent[sel] = t_object @ world[:3, :3].T
+        w[sel] = np.where(w_value < 0.0, -1.0, 1.0)
+        det[sel] = np.sign(np.linalg.det(world[:3, :3]))
+    return tangent, w, det
+
+
+def orthogonal_tangent(tangent, n):
+    """Gram-Schmidt of the world tangent against the shading normal; a (near) zero result takes any perpendicular."""
+    t = tangent - dot(tangent, n)[:, None] * n
+    length = np.linalg.norm(t, axis=1, keepdims=True)
+    helper = np.where(np.abs(n[:, 1:2]) < 0.9, np.array([[0.0, 1.0, 0.0]]), np.array([[1.0, 0.0, 0.0]]))
+    fallback = np.cross(n, helper)
+    return normalize(np.where(length > 1e-6, t, fallback))
 
 
 # --- frame ------------------------------------------------------------------
@@ -1094,8 +1433,9 @@ def material_extension_words(data, material):
     bits = int(material.get("feature_bits", 0))
     if bits == 0:
         return None
-    if bits & ~(SPECULAR_FEATURE_BIT | CLEARCOAT_FEATURE_BIT | SHEEN_FEATURE_BIT):
-        raise ValueError(f"material feature bits {bits:#x} are outside the declared ior/specular/clearcoat/sheen model")
+    if bits & ~(SPECULAR_FEATURE_BIT | CLEARCOAT_FEATURE_BIT | SHEEN_FEATURE_BIT | ANISOTROPY_FEATURE_BIT):
+        raise ValueError(f"material feature bits {bits:#x} are outside the declared "
+                         "ior/specular/clearcoat/sheen/anisotropy model")
     words = data["material_extensions"]["records"][int(material["extension_index"])]
     if len(words) != EXTENSION_RECORD_WORDS:
         raise ValueError("a material extension record must hold 20 words")
@@ -1141,6 +1481,28 @@ def material_sheen(data, material):
     return [f32(words[13]), f32(words[14]), f32(words[15])], f32(words[16])
 
 
+def material_anisotropy(data, material):
+    """(strength, rotation) from words 0 and 1 of record 1 (GPUMaterialExt1) of the material's extension group, or None
+    without the anisotropy feature bit.  Raises when the anisotropy texture (word 2) is set: the reference is texture-free
+    (the direction texture is open for the Khronos corpus, ticket 22), and when the material also carries coat or sheen
+    (the combinations are not modelled)."""
+    bits = int(material.get("feature_bits", 0))
+    if not bits & ANISOTROPY_FEATURE_BIT:
+        return None
+    if bits & (CLEARCOAT_FEATURE_BIT | SHEEN_FEATURE_BIT):
+        raise ValueError("anisotropy combined with clearcoat or sheen is outside the declared model")
+    words = data["material_extensions"]["records"][int(material["extension_index"]) + ANISOTROPY_RECORD]
+    if len(words) != EXTENSION_RECORD_WORDS:
+        raise ValueError("a material extension record must hold 20 words")
+    if int(words[2]) != INVALID:
+        raise ValueError("an anisotropy texture is set; the reference is texture-free")
+    return f32(words[0]), f32(words[1])
+
+
+def uses_anisotropy(data):
+    return any(int(m.get("feature_bits", 0)) & ANISOTROPY_FEATURE_BIT for m in data["materials"])
+
+
 def uses_sheen(data):
     return any(int(m.get("feature_bits", 0)) & SHEEN_FEATURE_BIT for m in data["materials"])
 
@@ -1158,6 +1520,7 @@ def sphere_table(data):
     uses = uses_specular_extension(data)
     uses_coat = uses_clearcoat(data)
     uses_sheen_scene = uses_sheen(data)
+    uses_aniso = uses_anisotropy(data)
     for k, inst in enumerate(data["instances"]):
         material = data["materials"][inst["material"]]
         entry = {"instance": k, "slot": inst["slot"], "base": material["base"][:3],
@@ -1180,6 +1543,11 @@ def sphere_table(data):
             entry.update(sheen_color=c, sheen_roughness=sheen[1],
                          group=f"{entry.get('group', 'metallic ' + format(entry['metallic'], 'g'))} sheen "
                                f"{c[0]:g},{c[1]:g},{c[2]:g}")
+        if uses_aniso:
+            aniso = material_anisotropy(data, material) or (0.0, 0.0)
+            det = float(np.sign(np.linalg.det(instance_matrix(inst)[:3, :3])))
+            entry.update(anisotropy=aniso[0], anisotropy_rotation=aniso[1], mirrored=bool(det < 0),
+                         group=f"metallic {entry['metallic']:g} anisotropy {aniso[0]:g}")
         out.append(entry)
     return out
 
@@ -1212,12 +1580,22 @@ def sheen_arrays(spheres, instance_of_pixel, variant):
     return {"color": color[instance_of_pixel], "roughness": roughness[instance_of_pixel], "variant": variant}
 
 
+def aniso_arrays(spheres, instance_of_pixel, surface, n, variant):
+    """Per-pixel anisotropy dict (strength, rotation, orthogonalised world tangent, handedness w, det, variant)."""
+    strength = np.array([s.get("anisotropy", 0.0) for s in spheres], dtype=np.float64)
+    rotation = np.array([s.get("anisotropy_rotation", 0.0) for s in spheres], dtype=np.float64)
+    tangent, w, det = surface
+    return {"strength": strength[instance_of_pixel], "rotation": rotation[instance_of_pixel],
+            "tangent": orthogonal_tangent(tangent, n), "w": w, "det": det, "variant": variant}
+
+
 def require_declared_scene(data):
     for instance in data["instances"]:
         material = data["materials"][instance["material"]]
         material_specular(data, material)  # only the ior/specular and clearcoat features, without textures
         material_clearcoat(data, material)
         material_sheen(data, material)
+        material_anisotropy(data, material)
         if any(index != INVALID for index in material["textures"]):
             raise ValueError("instanced material samples a texture; the Appendix B reference is texture-free")
         if any(v > 0 for v in material["emissive"]) or material["alpha_cutoff"] > 0:
@@ -1247,8 +1625,8 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
     environment model (the sun term is the same in both).  `visibility`: None (no shadow rays) or a list with
     one boolean array per point light (shadow rays, see point_light_visibility)."""
     require_declared_scene(data)
-    valid, position, normal, instance, (width, height) = cast or cast_primary_rays(
-        root, data, threads or min(8, os.cpu_count() or 1))
+    cast = cast or cast_primary_rays(root, data, threads or min(8, os.cpu_count() or 1))
+    valid, position, normal, instance, (width, height) = cast
     spheres = sphere_table(data)
     flat = valid.reshape(-1)
     inst = instance.reshape(-1)
@@ -1270,6 +1648,13 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
     has_sheen = uses_sheen(data)
     sheen = sheen_arrays(spheres, inst[pick], model.get("sheen", "spec")) if has_sheen else None
     env_sheen = sheen_arrays(spheres, inst[pick], (environment or {}).get("sheen", "spec")) if has_sheen else None
+    # F15.3 (ticket 11): KHR_materials_anisotropy of the scene (None without any anisotropy).
+    has_aniso = uses_anisotropy(data)
+    aniso = env_aniso = None
+    if has_aniso:
+        surface = surface_tangents(root, data, cast, pick)
+        aniso = aniso_arrays(spheres, inst[pick], surface, n, model.get("aniso", "spec"))
+        env_aniso = aniso_arrays(spheres, inst[pick], surface, n, (environment or {}).get("aniso", "spec"))
     env_variant = (environment or {}).get("dielectric", "extension")
     env_dielectric = (dielectric_arrays(spheres, inst[pick], env_variant)
                       if environment is not None and uses_specular_extension(data) else None)
@@ -1283,7 +1668,7 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
     for k, light in enumerate(points):
         visible = None if visibility is None else visibility[k]
         value, light_lit = point_radiance(base, metallic, roughness, n, v, position[pick], light, model, sun_dielectric,
-                                          visible, coat, sheen)
+                                          visible, coat, sheen, aniso)
         radiance += value
         lit = lit | light_lit
         terms.append("point-light-shadowed" if visible is not None else "point-light")
@@ -1293,20 +1678,21 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
         if sun_radius <= 0:
             raise ValueError("a sun requires a positive angular radius")
         sun, narrow = sun_radiance(base, metallic, roughness, n, v, toward, irradiance, sun_radius, model,
-                                   sun_dielectric, coat, sheen)
+                                   sun_dielectric, coat, sheen, aniso)
         radiance += sun
         lit = lit | (dot(n, np.broadcast_to(toward, n.shape)) > 0)
         terms.append("sun-disk")
     if sky > 0:
         if environment is None:
-            material = environment_radiance(base, metallic, roughness, dot(n, v), sky, model, sun_dielectric)
+            aniso_env = None if aniso is None else aniso_environment_inputs(aniso, roughness, n, v)
+            material = environment_radiance(base, metallic, roughness, dot(n, v), sky, model, sun_dielectric, aniso_env)
             if sheen is not None:
                 material = sheen_environment(material, dot(n, v), sheen, sky)
             radiance += material if coat is None else environment_coat(material, dot(n, v), coat, sky)
             terms.append("environment-quadrature")
         else:
             radiance += declared_environment_radiance(base, metallic, roughness, dot(n, v), sky, environment,
-                                                      env_dielectric, env_coat, env_sheen)
+                                                      env_dielectric, env_coat, env_sheen, env_aniso)
             terms.append("environment-declared")
     image = np.full((height * width, 3), sky, dtype=np.float64)  # pixels without geometry show the environment
     image[pick] = radiance
@@ -1340,7 +1726,7 @@ def command_render(args):
     out.mkdir(parents=True, exist_ok=True)
     cast = cast_primary_rays(root, data, args.threads)
     visibility = point_light_visibility(root, data, cast, args.threads) if args.visibility == "rays" else None
-    main_model = SPECULAR_EXT if uses_specular_extension(data) or uses_clearcoat(data) else APPENDIX_B  # sheen-only: base
+    main_model = SPECULAR_EXT if uses_specular_extension(data) or uses_clearcoat(data) else APPENDIX_B  # sheen/anisotropy-only: base
     controls = {"": main_model, **{name: control_model(name, main_model) for name in args.controls}}
     report = {"schema": 1, "tool": "tools/f15_reference.py", "tool_sha256": sha256_file(__file__), "model": MODEL,
               "snapshot_sha256": scene_digest(root), "frame": data.get("frame"),

@@ -479,7 +479,7 @@ class SpecularIorModel(unittest.TestCase):
         self.assertAlmostEqual(ior, 1.33, places=6)
         self.assertEqual((spec, color), (0.5, [2.0, 1.0, 0.25]))
         self.assertIsNone(ref.material_specular(data, data["materials"][1]))
-        data["materials"][0]["feature_bits"] = 8  # anisotropy is outside the declared model
+        data["materials"][0]["feature_bits"] = 16  # iridescence is outside the declared model
         with self.assertRaises(ValueError):
             ref.material_specular(data, data["materials"][0])
         data["materials"][0]["feature_bits"] = 3  # ior/specular + clearcoat is inside it (ticket 09)
@@ -739,7 +739,7 @@ class ClearcoatModel(unittest.TestCase):
         zero = [[0] * 20] * 3
         data = {"materials": [{"feature_bits": 2, "extension_index": 0}, {"feature_bits": 0},
                               {"feature_bits": 2, "extension_index": 4}, {"feature_bits": 2, "extension_index": 8},
-                              {"feature_bits": 10, "extension_index": 0}],
+                              {"feature_bits": 18, "extension_index": 0}],
                 "material_extensions": {"version": 1, "records_per_material": 4,
                                         "records": [words(0.5, 0.25, 0.75)] + zero +
                                                    [words(1.0, 0.1, 1.0, (3, ref.INVALID, ref.INVALID))] + zero +
@@ -750,7 +750,7 @@ class ClearcoatModel(unittest.TestCase):
         for index in (2, 3):  # a coat factor/roughness texture (word 10) or a coat normal texture (word 12)
             with self.assertRaises(ValueError):
                 ref.material_clearcoat(data, data["materials"][index])
-        with self.assertRaises(ValueError):  # anisotropy (bit 8 in feature bits 10) is outside the declared model
+        with self.assertRaises(ValueError):  # iridescence (bit 16 in feature bits 18) is outside the declared model
             ref.material_clearcoat(data, data["materials"][4])
         self.assertTrue(ref.uses_clearcoat(data) and not ref.uses_specular_extension(data))
         data["materials"][4]["feature_bits"] = 3
@@ -1288,7 +1288,7 @@ class SheenModel(unittest.TestCase):
         zero = [[0] * 20] * 3
         data = {"materials": [{"feature_bits": 4, "extension_index": 0}, {"feature_bits": 0},
                               {"feature_bits": 4, "extension_index": 4}, {"feature_bits": 4, "extension_index": 8},
-                              {"feature_bits": 12, "extension_index": 12}, {"feature_bits": 6, "extension_index": 16}],
+                              {"feature_bits": 20, "extension_index": 12}, {"feature_bits": 6, "extension_index": 16}],
                 "material_extensions": {"version": 1, "records_per_material": 4,
                                         "records": [words((1.0, 0.5, 0.25), 0.3)] + zero +
                                                    [words((1.0, 0.5, 0.25), 0.3, (3, ref.INVALID))] + zero +
@@ -1301,7 +1301,7 @@ class SheenModel(unittest.TestCase):
         for index in (2, 3):  # sheenColorTexture (word 17) or sheenRoughnessTexture (word 18)
             with self.assertRaises(ValueError):
                 ref.material_sheen(data, data["materials"][index])
-        with self.assertRaises(ValueError):  # anisotropy (bit 8) is outside the declared model
+        with self.assertRaises(ValueError):  # iridescence (bit 16 in feature bits 20) is outside the declared model
             ref.material_sheen(data, data["materials"][4])
         self.assertEqual(ref.material_sheen(data, data["materials"][5])[0], [0.5, 0.5, 0.5])  # coat + sheen is inside it
         self.assertTrue(ref.uses_sheen(data))
@@ -1382,6 +1382,578 @@ class SheenSnapshot(unittest.TestCase):
             with self.assertRaises(ValueError):
                 ref.require_declared_scene(data)
             self.assertEqual(ref.main(["render", str(root), "--out", str(pathlib.Path(tmp) / "out")]), 2)
+
+
+# --- KHR_materials_anisotropy (F15.3, ticket 11) -----------------------------------------------------------------------
+
+def aniso_pixels(strength, rotation, tangent=(1.0, 0.0, 0.0), w=1.0, det=1.0, variant="spec", count=1):
+    """Per-pixel anisotropy arrays of `count` identical pixels (see ref.aniso_arrays)."""
+    return {"strength": np.full(count, float(strength)), "rotation": np.full(count, float(rotation)),
+            "tangent": np.tile(np.asarray(tangent, dtype=np.float64), (count, 1)), "w": np.full(count, float(w)),
+            "det": np.full(count, float(det)), "variant": variant}
+
+
+def readme_d(n_dot_h, t_dot_h, b_dot_h, at, ab):
+    """The README's GLSL D_GGX_anisotropic, written from its text (a different expression than the Burley form)."""
+    a2 = at * ab
+    f = np.array([ab * t_dot_h, at * b_dot_h, a2 * n_dot_h])
+    w2 = a2 / float(f @ f)
+    return a2 * w2 * w2 / math.pi
+
+
+def readme_v(n_dot_l, n_dot_v, b_dot_v, t_dot_v, t_dot_l, b_dot_l, at, ab):
+    """The README's GLSL V_GGX_anisotropic without the final clamp."""
+    ggxv = n_dot_l * np.linalg.norm([at * t_dot_v, ab * b_dot_v, n_dot_v])
+    ggxl = n_dot_v * np.linalg.norm([at * t_dot_l, ab * b_dot_l, n_dot_l])
+    return 0.5 / (ggxv + ggxl)
+
+
+class AnisotropyModel(unittest.TestCase):
+    N = np.array([[0.0, 0.0, 1.0]])
+
+    def axes(self, rotation, **kw):
+        t, b = ref.aniso_axes(aniso_pixels(1.0, rotation, **kw), self.N)
+        return t[0], b[0]
+
+    def test_alpha_rule_is_the_normative_one(self):
+        at, ab = ref.aniso_alphas(np.array([0.09]), np.array([0.5]))
+        self.assertAlmostEqual(float(at[0]), 0.09 + 0.91 * 0.25, places=12)  # mix(alpha, 1, s^2)
+        self.assertAlmostEqual(float(ab[0]), 0.09, places=12)
+        at, ab = ref.aniso_alphas(np.array([0.09]), np.array([1.0]))
+        self.assertAlmostEqual(float(at[0]), 1.0)
+        at, ab = ref.aniso_alphas(np.array([0.09]), np.array([0.0]))
+        self.assertEqual((float(at[0]), float(ab[0])), (0.09, 0.09))
+        # Controls: ignored forces strength 0, swapped exchanges the two.
+        at, ab = ref.aniso_alphas(np.array([0.09]), np.array([1.0]), "ignored")
+        self.assertEqual((float(at[0]), float(ab[0])), (0.09, 0.09))
+        at, ab = ref.aniso_alphas(np.array([0.09]), np.array([1.0]), "alpha-swapped")
+        self.assertEqual((float(at[0]), float(ab[0])), (0.09, 1.0))
+
+    def test_rotated_frame_hand_values(self):
+        s = math.sqrt(0.5)
+        # glTF bitangent = cross(N, T) w: with N = z, T = x, w = +1 it is +y, with w = -1 it is -y.
+        t, b = self.axes(math.pi / 4, w=1.0)
+        np.testing.assert_allclose(t, [s, s, 0], atol=1e-12)          # counter-clockwise from T towards B = +y
+        np.testing.assert_allclose(b, [-s, s, 0], atol=1e-12)         # cross(N, T')
+        t, b = self.axes(math.pi / 4, w=-1.0)
+        np.testing.assert_allclose(t, [s, -s, 0], atol=1e-12)         # B = -y: the lobe turns the other way in world space
+        np.testing.assert_allclose(b, [s, s, 0], atol=1e-12)
+        t, _ = self.axes(math.pi / 2, w=1.0)
+        np.testing.assert_allclose(t, [0, 1, 0], atol=1e-12)
+        t, _ = self.axes(0.0, w=-1.0)
+        np.testing.assert_allclose(t, [1, 0, 0], atol=1e-12)
+        t, _ = self.axes(-math.pi / 4, w=1.0)                          # a negative rotation is clockwise
+        np.testing.assert_allclose(t, [s, -s, 0], atol=1e-12)
+        # A mirrored instance (det -1) carries the world image of the model-space bitangent: w = -1, det = -1 behaves like
+        # w = +1, det = +1 on the world tangent/normal (the model-space frame is mirrored together with the surface).
+        t, _ = self.axes(math.pi / 4, w=-1.0, det=-1.0)
+        np.testing.assert_allclose(t, [s, s, 0], atol=1e-12)
+
+    def test_controls_move_the_frame_as_documented(self):
+        s = math.sqrt(0.5)
+        for variant, expected in (("rotation-flipped", [s, -s, 0]),    # angle negated (w = +1)
+                                  ("bitangent-flipped", [s, s, 0]),    # w ignored: with w = +1 it is the spec frame
+                                  ("mirror-unaware", [s, s, 0])):      # det ignored: with det = 1 it is the spec frame
+            t, _ = self.axes(math.pi / 4, w=1.0, variant=variant)
+            np.testing.assert_allclose(t, [s, -s, 0] if variant == "rotation-flipped" else [s, s, 0], atol=1e-12, err_msg=variant)
+        t, _ = self.axes(math.pi / 4, w=-1.0, variant="bitangent-flipped")  # w ignored: B = +y although w = -1
+        np.testing.assert_allclose(t, [s, s, 0], atol=1e-12)
+        t, _ = self.axes(math.pi / 4, w=-1.0, det=-1.0, variant="mirror-unaware")  # det ignored: B = cross(N, T) w = -y
+        np.testing.assert_allclose(t, [s, -s, 0], atol=1e-12)
+        # The lobe is even in T' and B': the rotation sign does not matter at 0 and pi/2.
+        for rotation in (0.0, math.pi / 2):
+            spec, _ = self.axes(rotation, w=1.0)
+            flipped, _ = self.axes(rotation, w=1.0, variant="rotation-flipped")
+            self.assertAlmostEqual(abs(float(spec @ flipped)), 1.0, places=12)
+
+    def geometry(self):
+        v = unit(0.3, -0.2, 0.9)
+        l = unit(-0.4, 0.35, 0.8)
+        return v, l
+
+    def test_burley_d_and_the_readme_v_agree_with_the_readme_formulas(self):
+        v, l = self.geometry()
+        rotation = 0.6
+        a = aniso_pixels(0.7, rotation, w=1.0)
+        alpha = 0.2
+        at, ab = ref.aniso_alphas(np.array([alpha]), np.array([0.7]))
+        t, b = ref.aniso_axes(a, self.N)
+        h = unit(*(v + l))
+        d_readme = readme_d(h[2], float(h @ t[0]), float(h @ b[0]), float(at[0]), float(ab[0]))
+        v_readme = readme_v(l[2], v[2], float(v @ b[0]), float(v @ t[0]), float(l @ t[0]), float(l @ b[0]),
+                            float(at[0]), float(ab[0]))
+        got = float(ref.aniso_dv(self.N, v[None], l[None], np.array([alpha]), a)[0])
+        self.assertAlmostEqual(got / (d_readme * v_readme), 1.0, places=10)
+
+    def test_isotropic_limit_equals_the_base_model_exactly(self):
+        rng = np.random.default_rng(3)
+        count = 300
+        n = np.tile([0.0, 0.0, 1.0], (count, 1))
+        v = ref.normalize(rng.normal(size=(count, 3)) * [1, 1, 0.3] + [0, 0, 2])
+        l = ref.normalize(rng.normal(size=(count, 3)) * [1, 1, 0.3] + [0, 0, 2])
+        for alpha in (0.002, 0.09, 0.5, 1.0):
+            a = np.full(count, alpha)
+            iso = ref.specular_dv(n, v, l, a)
+            for rotation in (0.0, 0.7):
+                got = ref.aniso_dv(n, v, l, a, aniso_pixels(0.0, rotation, count=count))
+                np.testing.assert_allclose(got, iso, rtol=1e-12)
+            # strength 1 with alpha = 1 is isotropic too (alpha_t = alpha_b = 1)
+        got = ref.aniso_dv(n, v, l, np.full(count, 1.0), aniso_pixels(1.0, 0.4, count=count))
+        np.testing.assert_allclose(got, ref.specular_dv(n, v, l, np.full(count, 1.0)), rtol=1e-12)
+        # The control `ignored` is the isotropic model for any strength, and the whole BSDF follows.
+        base, metallic, rough = np.tile([0.8, 0.35, 0.15], (count, 1)), np.full(count, 0.5), np.full(count, 0.3)
+        plain = ref.bsdf(base, metallic, rough, n, v, l)
+        blind = ref.bsdf(base, metallic, rough, n, v, l, aniso=aniso_pixels(1.0, 0.7, variant="ignored", count=count))
+        np.testing.assert_allclose(blind, plain, rtol=1e-12)
+        zero = ref.bsdf(base, metallic, rough, n, v, l, aniso=aniso_pixels(0.0, 0.7, count=count))
+        np.testing.assert_allclose(zero, plain, rtol=1e-12)
+        stretched = ref.bsdf(base, metallic, rough, n, v, l, aniso=aniso_pixels(1.0, 0.7, count=count))
+        self.assertGreater(float(np.abs(stretched - plain).max()), 1e-3)
+
+    def test_d_is_normalised_over_the_hemisphere_by_an_independent_quadrature(self):
+        # integral of D(h) cos(theta_h) over the hemisphere of half vectors is 1, whatever alpha_t, alpha_b.
+        n_theta, n_phi = 4000, 720
+        theta = (np.arange(n_theta) + 0.5) * (0.5 * math.pi / n_theta)
+        phi = (np.arange(n_phi) + 0.5) * (2 * math.pi / n_phi)
+        cos_t, sin_t = np.cos(theta)[:, None], np.sin(theta)[:, None]
+        for at, ab in ((0.3175, 0.09), (1.0, 0.09), (0.5, 0.2)):
+            q = (sin_t * np.cos(phi)[None, :] / at) ** 2 + (sin_t * np.sin(phi)[None, :] / ab) ** 2 + cos_t ** 2
+            d = 1.0 / (math.pi * at * ab * q * q)
+            total = float(np.sum(d * cos_t * sin_t) * (0.5 * math.pi / n_theta) * (2 * math.pi / n_phi))
+            self.assertAlmostEqual(total, 1.0, delta=2e-3, msg=(at, ab))
+        # The same through the function under test (h in the frame t = x, b = y, n = z).
+        a = aniso_pixels(0.5, 0.0, w=1.0)
+        alpha = np.array([0.09])
+        h_theta = 0.2
+        h = np.array([[math.sin(h_theta) * math.cos(0.7), math.sin(h_theta) * math.sin(0.7), math.cos(h_theta)]])
+        # D V with V cancelled: compare through a direction pair whose half vector is h and whose V is evaluated both ways.
+        v = unit(0.1, 0.2, 0.9)
+        l = 2.0 * float(v @ h[0]) * h[0] - v
+        at, ab = ref.aniso_alphas(alpha, np.array([0.5]))
+        got = float(ref.aniso_dv(self.N, v[None], l[None], alpha, a)[0])
+        d = readme_d(h[0, 2], h[0, 0], h[0, 1], float(at[0]), float(ab[0]))
+        vis = readme_v(l[2], v[2], v[1], v[0], l[0], l[1], float(at[0]), float(ab[0]))
+        self.assertAlmostEqual(got / (d * vis), 1.0, places=9)
+
+    def mc_albedo(self, at, ab, mu, phi, count=400000, seed=11):
+        """Independent Monte Carlo of the integral of D V cos over wi: cosine-hemisphere samples, written in wi space
+        (the reference integrates in half-vector space); returns (estimate, standard error)."""
+        rng = np.random.default_rng(seed)
+        r, a = np.sqrt(rng.random(count)), 2 * math.pi * rng.random(count)
+        wi = np.stack([r * np.cos(a), r * np.sin(a), np.sqrt(np.maximum(0.0, 1.0 - r * r))], axis=1)
+        sin_v = math.sqrt(1 - mu * mu)
+        wo = np.array([sin_v * math.cos(phi), sin_v * math.sin(phi), mu])
+        h = wi + wo
+        h /= np.linalg.norm(h, axis=1, keepdims=True)
+        q = (h[:, 0] / at) ** 2 + (h[:, 1] / ab) ** 2 + h[:, 2] ** 2
+        d = 1.0 / (math.pi * at * ab * q * q)
+        ggxv = wi[:, 2] * np.sqrt((at * wo[0]) ** 2 + (ab * wo[1]) ** 2 + mu * mu)
+        ggxl = mu * np.sqrt((at * wi[:, 0]) ** 2 + (ab * wi[:, 1]) ** 2 + wi[:, 2] ** 2)
+        samples = math.pi * d * 0.5 / (ggxv + ggxl)  # D V cos / pdf, pdf = cos / pi
+        return float(samples.mean()), float(samples.std() / math.sqrt(count))
+
+    def test_directional_albedo_table_matches_an_independent_monte_carlo_and_never_exceeds_one(self):
+        for strength in (0.5, 1.0):
+            alpha = 0.09
+            at, ab = float(ref.aniso_alphas(np.array([alpha]), np.array([strength]))[0][0]), alpha
+            mus, phis, a, b = ref.aniso_albedo_table(at, ab)
+            albedo = a + b  # Fresnel 1: the albedo of D V cos
+            self.assertLessEqual(float(albedo.max()), 1.0 + 1e-3, strength)       # white furnace: no energy gain
+            self.assertGreater(float(albedo.min()), 0.0)
+            for mu, phi in ((0.5, 0.0), (0.5, math.pi / 2), (0.9, math.pi / 4), (0.2, math.pi / 3), (1.0, 0.3)):
+                estimate, error = self.mc_albedo(at, ab, mu, phi)
+                i, j = int(np.argmin(abs(mus - mu))), int(np.argmin(abs(phis - phi)))
+                got = float(ref._bilinear(mus, phis, albedo, np.array([mus[i]]), np.array([phis[j]]))[0])
+                self.assertAlmostEqual(got, estimate, delta=6 * error + 2e-3, msg=(strength, mu, phi))
+        # Rougher everywhere: still bounded.
+        mus, phis, a, b = ref.aniso_albedo_table(1.0, 0.5)
+        self.assertLessEqual(float((a + b).max()), 1.0 + 1e-3)
+
+    def test_environment_albedo_is_symmetric_and_isotropic_pixels_use_the_base_table(self):
+        # Pixel with alpha_t = alpha_b: the base table of environment_table, exactly.
+        env = {"at": np.array([0.09]), "ab": np.array([0.09]), "phi": np.array([0.3]), "variant": "spec"}
+        a, b = ref.aniso_spec_albedo(np.array([0.5]), env)
+        t = ref.environment_table(0.3)
+        self.assertEqual(float(a[0]), float(np.interp(0.5, t["mu"], t["A"])))
+        self.assertEqual(float(b[0]), float(np.interp(0.5, t["mu"], t["B"])))
+        # The anisotropic quadrature at alpha_t = alpha_b (a direct call) reproduces the base quadrature of the same lobe.
+        a1, b1 = ref._aniso_spec_integrals(0.5, 0.7, 0.09, 0.09)
+        self.assertAlmostEqual(a1 + b1, float(np.interp(0.5, t["mu"], t["A"] + t["B"])), delta=2e-3)
+        # Pixel azimuth: 0 and pi/2 along the lobe axes, symmetric under swapping the axes together with the azimuth.
+        a_x, _ = ref._aniso_spec_integrals(0.6, 0.0, 0.5, 0.1)
+        a_y, _ = ref._aniso_spec_integrals(0.6, math.pi / 2, 0.1, 0.5)
+        self.assertAlmostEqual(a_x, a_y, delta=2e-3)
+        # The view azimuth enters: a stretched lobe seen along vs across the stretch differs.
+        a_along, b_along = ref._aniso_spec_integrals(0.4, 0.0, 1.0, 0.09)
+        a_across, b_across = ref._aniso_spec_integrals(0.4, math.pi / 2, 1.0, 0.09)
+        self.assertGreater(abs((a_along + b_along) - (a_across + b_across)), 0.02)
+
+    def test_energy_gaining_control_exceeds_the_furnace_bound(self):
+        at, ab = 1.0, 0.09
+        a, b = ref._aniso_spec_integrals(0.8, 0.5, at, ab, "d-normalised-by-ab")
+        self.assertGreater(a + b, 1.5)                       # D prefactor 1/(pi alpha_b^2): about alpha_t / alpha_b too much
+        a, b = ref._aniso_spec_integrals(0.8, 0.5, at, ab)
+        self.assertLess(a + b, 1.0)
+
+    def test_sun_disk_is_point_evaluated_for_the_wide_anisotropic_lobe(self):
+        # alpha_b 0.09 (>= 0.05): count 1, no quadrature mask.  The lobe at the disk centre equals the disk average within 1 %.
+        radius = 0.00465
+        v = unit(0.25, 0.1, 0.9)
+        toward = unit(-0.45, 0.15, 0.85)  # near the mirror direction of v: the highlight region
+        a = aniso_pixels(1.0, math.pi / 4, w=1.0)
+        alpha = np.array([0.09])
+        count, narrow = ref.sun_quadrature(self.N, v[None], toward, np.array([0.3]), radius)
+        self.assertEqual((int(count[0]), bool(narrow[0])), (1, False))
+        centre = float(ref.aniso_dv(self.N, v[None], toward[None], alpha, a)[0])
+        samples = ref.sun_disk_samples(toward, radius, 4000)
+        values = ref.aniso_dv(np.tile(self.N, (4000, 1)), np.tile(v, (4000, 1)), samples, np.full(4000, 0.09),
+                              aniso_pixels(1.0, math.pi / 4, w=1.0, count=4000))
+        cosines = np.clip(samples[:, 2], 0, 1)
+        average = float((values * cosines).mean()) / float(max(toward[2], 1e-9))
+        self.assertAlmostEqual(average / centre, 1.0, delta=0.01)
+
+    def test_sun_radiance_matches_the_bsdf_at_the_disk_centre_for_a_wide_lobe(self):
+        toward = unit(-0.45, 0.15, 0.85)
+        v = unit(0.25, 0.1, 0.9)
+        base, metallic, rough = np.array([[0.8, 0.35, 0.15]]), np.array([1.0]), np.array([0.3])
+        a = aniso_pixels(1.0, math.pi / 4, w=1.0)
+        radiance, narrow = ref.sun_radiance(base, metallic, rough, self.N, v[None], toward, np.array([3.0] * 3), 0.00465,
+                                            aniso=a)
+        expected = ref.bsdf(base, metallic, rough, self.N, v[None], toward[None], aniso=a) * toward[2] * 3.0
+        np.testing.assert_allclose(radiance, expected, rtol=1e-12)
+        self.assertFalse(bool(narrow[0]))
+
+    def test_point_light_uses_the_same_lobe(self):
+        light = {"position": [0.0, 0.0, 3.0], "color": [1, 1, 1], "intensity": 9.0, "range": 100.0}
+        v = unit(0.3, 0.1, 0.9)
+        base, metallic, rough = np.array([[0.8, 0.35, 0.15]]), np.array([1.0]), np.array([0.3])
+        a = aniso_pixels(1.0, math.pi / 4, w=1.0)
+        value, lit = ref.point_radiance(base, metallic, rough, self.N, v[None], np.array([[0.4, 0.0, 0.0]]), light, aniso=a)
+        l = unit(-0.4, 0.0, 3.0)
+        window = float(ref.point_window(np.linalg.norm([-0.4, 0.0, 3.0]), 100.0))
+        expected = ref.bsdf(base, metallic, rough, self.N, v[None], l[None], aniso=a)[0] * l[2] * 9.0 * window / (0.16 + 9.0)
+        np.testing.assert_allclose(value[0], expected, rtol=1e-10)
+        self.assertTrue(bool(lit[0]))
+
+    def test_exact_environment_is_below_the_isotropic_one_and_energy_bounded(self):
+        # White metal under radiance 1: radiance = albedo <= 1; a stretched lobe loses energy against the isotropic one.
+        mu = np.array([0.7, 0.7])
+        base, metallic, rough = np.ones((2, 3)), np.ones(2), np.full(2, 0.3)
+        env = {"at": np.array([1.0, 0.09]), "ab": np.array([0.09, 0.09]), "phi": np.array([0.4, 0.4]), "variant": "spec"}
+        out = ref.environment_radiance(base, metallic, rough, mu, 1.0, aniso_env=env)
+        self.assertLessEqual(float(out.max()), 1.0 + 1e-3)
+        self.assertLess(float(out[0, 0]), float(out[1, 0]) - 0.05)
+        iso = ref.environment_radiance(base[1:], metallic[1:], rough[1:], mu[1:], 1.0)
+        np.testing.assert_allclose(out[1], iso[0], rtol=1e-12)
+
+    def test_declared_environment_fit_and_its_controls(self):
+        at, ab = 0.3175, 0.09
+        self.assertAlmostEqual(float(ref.declared_aniso_alpha(at, ab)), math.sqrt(0.5 * (at * at + ab * ab)), places=12)
+        self.assertEqual(float(ref.declared_aniso_alpha(at, ab, "ignored")), ab)
+        self.assertEqual(float(ref.declared_aniso_alpha(at, ab, "alpha-t")), at)
+        base, metallic, rough = np.array([[0.8, 0.35, 0.15]] * 2), np.array([0.0, 1.0]), np.full(2, 0.3)
+        mu = np.array([0.6, 0.6])
+        plain = ref.declared_environment_radiance(base, metallic, rough, mu, 0.5)
+        # Strength 0: the declared model is the isotropic one exactly, for every variant of the fit.
+        for kind in ("spec", "ignored", "alpha-t"):
+            zero = ref.declared_environment_radiance(base, metallic, rough, mu, 0.5, {**ref.DECLARED, "aniso": kind},
+                                                     aniso=aniso_pixels(0.0, 0.3, count=2))
+            np.testing.assert_allclose(zero, plain, rtol=1e-12, err_msg=kind)
+        # Strength 1: the fit lowers the metal, `ignored` is today's engine, `alpha-t` lowers it further.
+        spec = ref.declared_environment_radiance(base, metallic, rough, mu, 0.5, ref.DECLARED,
+                                                 aniso=aniso_pixels(1.0, 0.3, count=2))
+        blind = ref.declared_environment_radiance(base, metallic, rough, mu, 0.5, ref.ANISO_DECLARED_CONTROLS["declared-aniso-ignored"],
+                                                  aniso=aniso_pixels(1.0, 0.3, count=2))
+        wide = ref.declared_environment_radiance(base, metallic, rough, mu, 0.5, ref.ANISO_DECLARED_CONTROLS["declared-aniso-alpha-t"],
+                                                 aniso=aniso_pixels(1.0, 0.3, count=2))
+        np.testing.assert_allclose(blind, plain, rtol=1e-12)
+        self.assertLess(float(spec[1, 0]), float(plain[1, 0]) - 0.005)
+        self.assertLess(float(wide[1, 0]), float(spec[1, 0]))
+        # The declared model does not depend on the rotation (the constant environment makes the bent normal invisible).
+        spin = ref.declared_environment_radiance(base, metallic, rough, mu, 0.5, ref.DECLARED,
+                                                 aniso=aniso_pixels(1.0, 1.1, w=-1.0, count=2))
+        np.testing.assert_allclose(spin, spec, rtol=1e-12)
+
+    def test_declared_fit_error_against_the_exact_quadrature_is_published_and_bounded(self):
+        # Sphere-weighted (pdf 2 mu over N.V >= 0.1, uniform view azimuth) mean relative error of A + B at alpha_b 0.09.
+        for strength, bound in ((0.5, 0.02), (1.0, 0.09)):
+            at = float(ref.aniso_alphas(np.array([0.09]), np.array([strength]))[0][0])
+            mus, phis, a, b = ref.aniso_albedo_table(at, 0.09)
+            exact = a + b
+            alpha_eff = float(ref.declared_aniso_alpha(at, 0.09))
+            table = ref.environment_table(math.sqrt(alpha_eff))
+            fit = np.interp(mus, table["mu"], table["A"] + table["B"])[:, None]
+            weight = (2.0 * mus * (mus >= 0.1))[:, None] * np.ones_like(exact)
+            error = float((np.abs(fit - exact) / exact * weight).sum() / weight.sum())
+            self.assertLess(error, bound, strength)
+
+    def test_record_word_decoding_texture_refusal_and_combinations(self):
+        f = lambda x: int.from_bytes(struct.pack("<f", x), "little")  # noqa: E731
+
+        def record0():
+            w = [0] * 20
+            for k in (5, 6, 10, 11, 12, 17, 18):
+                w[k] = ref.INVALID
+            return w
+
+        def record1(strength, rotation, texture=ref.INVALID):
+            w = [0] * 20
+            w[0], w[1], w[2] = f(strength), f(rotation), texture
+            return w
+
+        zero = [[0] * 20] * 2
+        data = {"materials": [{"feature_bits": 8, "extension_index": 0}, {"feature_bits": 0},
+                              {"feature_bits": 8, "extension_index": 4}, {"feature_bits": 10, "extension_index": 8},
+                              {"feature_bits": 12, "extension_index": 12}, {"feature_bits": 16, "extension_index": 16}],
+                "material_extensions": {"version": 1, "records_per_material": 4, "records":
+                                        [record0(), record1(0.5, -0.75)] + zero +
+                                        [record0(), record1(1.0, 0.0, texture=5)] + zero +
+                                        [record0(), record1(1.0, 0.0)] + zero +
+                                        [record0(), record1(1.0, 0.0)] + zero +
+                                        [record0(), record1(1.0, 0.0)] + zero}}
+        strength, rotation = ref.material_anisotropy(data, data["materials"][0])
+        self.assertEqual((strength, rotation), (0.5, -0.75))
+        self.assertIsNone(ref.material_anisotropy(data, data["materials"][1]))
+        self.assertIsNone(ref.material_anisotropy(data, data["materials"][5]))     # a different feature
+        with self.assertRaises(ValueError):                                        # anisotropyTexture is refused
+            ref.material_anisotropy(data, data["materials"][2])
+        for index in (3, 4):                                                       # coat or sheen on top: not modelled
+            with self.assertRaises(ValueError):
+                ref.material_anisotropy(data, data["materials"][index])
+        self.assertTrue(ref.uses_anisotropy(data))
+        self.assertIsNone(ref.material_specular(data, data["materials"][0]))       # anisotropy-only: neutral specular block
+        self.assertIsNone(ref.material_clearcoat(data, data["materials"][0]))
+        self.assertIsNone(ref.material_sheen(data, data["materials"][0]))
+        with self.assertRaises(ValueError):                                        # iridescence stays outside the model
+            ref.material_extension_words(data, data["materials"][5])
+        self.assertEqual(ref.ANISOTROPY_FEATURE_BIT, 8)  # MaterialFeature::Anisotropy
+
+    def test_every_anisotropy_control_is_registered_with_a_declared_model_dict(self):
+        for name, delta in ref.ANISO_CONTROLS.items():
+            self.assertIn(delta["aniso"], ref.ANISO_VARIANTS, name)
+            self.assertIn(name, ref.ALL_CONTROLS)
+            self.assertEqual(ref.control_model(name, ref.APPENDIX_B)["aniso"], delta["aniso"])
+        self.assertEqual(sorted(ref.ANISO_CONTROLS), ["aniso-alpha-swapped", "aniso-bitangent-flipped",
+                                                      "aniso-d-normalised-by-ab", "aniso-ignored",
+                                                      "aniso-mirror-unaware", "aniso-rotation-flipped"])
+        self.assertEqual(sorted(ref.ANISO_DECLARED_CONTROLS), ["declared-aniso-alpha-t", "declared-aniso-ignored"])
+        self.assertIn("anisotropy", ref.MODEL)
+
+
+def comb_ply(path, handedness, radius=0.4, slices=48, stacks=24):
+    """A combed-sphere PLY of snapshot mesh version 2 (the generator of ProceduralMeshes::generateCombedSphere)."""
+    def comb(n):
+        d = n[0]
+        t = [1.0 - d * n[0], -d * n[1], -d * n[2]]
+        length = math.sqrt(sum(c * c for c in t))
+        if length > 1e-3:
+            return [c / length for c in t]
+        c = [n[1] * 0 - n[2] * 1, n[2] * 0 - n[0] * 0, n[0] * 1 - n[1] * 0]  # cross(n, y)
+        length = math.sqrt(sum(x * x for x in c))
+        return [x / length for x in c]
+
+    verts, faces = [], []
+    for st in range(stacks + 1):
+        theta = math.pi * st / stacks
+        for sl in range(slices + 1):
+            phi = 2 * math.pi * sl / slices
+            n = (math.sin(theta) * math.cos(phi), math.cos(theta), math.sin(theta) * math.sin(phi))
+            verts.append((*(c * radius for c in n), *n, sl / slices, st / stacks, *comb(n), handedness))
+    for st in range(stacks):
+        for sl in range(slices):
+            a = st * (slices + 1) + sl
+            b = a + slices + 1
+            faces += [(a, b, a + 1), (a + 1, b, b + 1)]
+    with open(path, "wb") as f:
+        f.write(("ply\nformat binary_little_endian 1.0\nelement vertex %d\nproperty float x\nproperty float y\n"
+                 "property float z\nproperty float nx\nproperty float ny\nproperty float nz\nproperty float s\n"
+                 "property float t\nproperty float tangent_x\nproperty float tangent_y\nproperty float tangent_z\n"
+                 "property float handedness_x\nelement face %d\nproperty list uchar uint vertex_indices\nend_header\n"
+                 % (len(verts), len(faces))).encode())
+        for v in verts:
+            f.write(struct.pack("<12f", *v))
+        for tri in faces:
+            f.write(struct.pack("<B3I", 3, *tri))
+
+
+@unittest.skipUnless(HAVE_MITSUBA, "mitsuba not installed")
+class AnisotropySnapshot(unittest.TestCase):
+    """One combed sphere whose material carries KHR_materials_anisotropy in record 1 (the exporter's keys)."""
+
+    def snapshot(self, directory, sun, strength, rotation, handedness=-1.0, mirrored=False, metallic=1.0, roughness=0.3,
+                 sky=0.0, width=256, height=144, tangents=True):
+        root = pathlib.Path(directory)
+        if tangents:
+            comb_ply(root / "mesh_0.ply", handedness)
+        else:
+            RayCastedSnapshot.write_sphere_ply(root / "mesh_0.ply")
+        world = [-1.0 if mirrored else 1.0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+        f = lambda x: int.from_bytes(struct.pack("<f", x), "little")  # noqa: E731
+        record0 = [0] * 20
+        for k in (5, 6, 10, 11, 12, 17, 18):
+            record0[k] = ref.INVALID
+        record1 = [0] * 20
+        record1[0], record1[1], record1[2] = f(strength), f(rotation), ref.INVALID
+        data = {"schema": 1, "state": "TEST", "linear": True, "units": "metres", "frame": 0, "revisions": [0, 0, 0],
+                "camera": {"position": [0, 0, 3], "direction": [0, 0, -1], "up": [0, 1, 0],
+                           "fov_y_radians": math.radians(60), "near": 0.05, "far": 0, "width": width, "height": height,
+                           "jitter_pixels": [0, 0], "projection": "perspective_reverse_z_infinite"},
+                "sky": [sky] * 3, "sun_angular_radius": 0.00465, "textures": [],
+                "materials": [{"base": [0.8, 0.35, 0.15, 1], "emissive": [0, 0, 0], "metallic": metallic,
+                               "roughness": roughness, "normal_scale": 1, "occlusion_strength": 1, "alpha_cutoff": 0,
+                               "flags": 8 << 8, "feature_bits": 8, "extension_index": 0, "textures": [ref.INVALID] * 5}],
+                "material_extensions": {"version": 1, "records_per_material": 4,
+                                        "records": [record0, record1, [0] * 20, [0] * 20]},
+                "mesh_version": 2 if tangents else 1, "meshes": ["mesh_0.ply"],
+                "instances": [{"slot": 0, "generation": 1, "flags": 7 | (8 if mirrored else 0), "mesh": 0, "material": 0,
+                               "world": world}],
+                "lights": [], "sampled_lights": []}
+        if sun:
+            data["lights"].append({"type": 0, "position": [0, 0, 0], "direction": list(-sun[0]), "color": [1, 1, 1],
+                                   "intensity": sun[1], "range": 0, "inner": 0, "outer": 0})
+        (root / "scene.json").write_text(json.dumps(data))
+        return root
+
+    def test_surface_tangent_at_the_centre_pixel_is_the_mesh_attribute(self):
+        from f12_reference import snapshot as load
+        with tempfile.TemporaryDirectory() as tmp:
+            root, data = load(self.snapshot(tmp, None, 1.0, 0.0, handedness=-1.0))
+            cast = ref.cast_primary_rays(root, data, 2)
+            pick = np.flatnonzero(cast[0].reshape(-1))
+            tangent, w, det = ref.surface_tangents(root, data, cast, pick)
+            centre = int(np.argmin(np.abs(pick - (72 * 256 + 128))))
+            self.assertEqual(int(pick[centre]), 72 * 256 + 128)
+            # The interpolated attribute is only perpendicular to the interpolated normal up to the tessellation (48 x 24).
+            np.testing.assert_allclose(tangent[centre], [1, 0, 0], atol=5e-2)
+            n_centre = ref.normalize(cast[2][pick][centre:centre + 1])
+            # (the pixel centre is half a pixel off the axis: the normal is tilted by about 0.03 rad.)
+            comb = ref.normalize(np.array([[1.0, 0, 0]]) - n_centre[:, :1] * n_centre)
+            np.testing.assert_allclose(ref.orthogonal_tangent(tangent[centre:centre + 1], n_centre)[0], comb[0], atol=1e-2)
+            self.assertEqual((float(w[centre]), float(det[centre])), (-1.0, 1.0))
+            # Everywhere: unit-ish tangent, perpendicular to the normal after orthogonalisation, handedness -1.
+            n = ref.normalize(cast[2][pick])
+            t = ref.orthogonal_tangent(tangent, n)
+            self.assertLess(float(np.abs(ref.dot(t, n)).max()), 1e-9)
+            np.testing.assert_allclose(np.linalg.norm(t, axis=1), 1.0, atol=1e-9)
+            self.assertTrue(bool((w == -1.0).all()) and bool((det == 1.0).all()))
+            # The orthogonalised tangent stays close to the comb direction x projected on the tangent plane (not near the poles).
+            expected = ref.normalize(np.array([1.0, 0, 0]) - n[:, :1] * n)
+            keep = np.abs(n[:, 0]) < 0.9
+            self.assertGreater(float((t[keep] * expected[keep]).sum(axis=1).min()), 0.99)
+
+    def test_mirrored_instance_has_the_determinant_and_the_mirror_image_of_the_surface(self):
+        # A mirrored carrier lit by the mirrored sun renders as the exact horizontal mirror of the plain one (the camera
+        # sits on the mirror plane): the physically correct handedness s_eff = w det.  The control that ignores the
+        # determinant breaks this.
+        from f12_reference import snapshot as load
+        toward = unit(-0.8, 0.35, -0.3)
+        mirrored_toward = np.array([-toward[0], toward[1], toward[2]])
+        images = {}
+        for mirrored in (False, True):
+            with tempfile.TemporaryDirectory() as tmp:
+                sun = (mirrored_toward if mirrored else toward, 3.0)
+                root, data = load(self.snapshot(tmp, sun, 1.0, math.pi / 4, handedness=-1.0, mirrored=mirrored, sky=0.2))
+                cast = ref.cast_primary_rays(root, data, 2)
+                pick = np.flatnonzero(cast[0].reshape(-1))
+                _, _, det = ref.surface_tangents(root, data, cast, pick)
+                self.assertTrue(bool((det == (-1.0 if mirrored else 1.0)).all()))
+                for name, model in (("spec", ref.APPENDIX_B), ("unaware", ref.control_model("aniso-mirror-unaware", ref.APPENDIX_B))):
+                    images[(mirrored, name)] = ref.render_frame(root, data, model, cast=cast)[0]
+        plain, mirrored_image = images[(False, "spec")], images[(True, "spec")]
+        scale = float(plain.max())
+        self.assertGreater(scale, 1.0)
+        np.testing.assert_allclose(mirrored_image, plain[:, ::-1], atol=2e-3 * scale)
+        unaware = images[(True, "unaware")]
+        self.assertGreater(float(np.abs(unaware - plain[:, ::-1]).max()), 0.05 * scale)
+        # The handedness w flips the lobe on its own: w = +1 on the plain instance equals w = -1 with the angle negated.
+        with tempfile.TemporaryDirectory() as tmp:
+            root, data = load(self.snapshot(tmp, (toward, 3.0), 1.0, math.pi / 4, handedness=1.0, sky=0.2))
+            cast = ref.cast_primary_rays(root, data, 2)
+            plus = ref.render_frame(root, data, ref.APPENDIX_B, cast=cast)[0]
+        with tempfile.TemporaryDirectory() as tmp:
+            root, data = load(self.snapshot(tmp, (toward, 3.0), 1.0, -math.pi / 4, handedness=-1.0, sky=0.2))
+            cast = ref.cast_primary_rays(root, data, 2)
+            minus = ref.render_frame(root, data, ref.APPENDIX_B, cast=cast)[0]
+        np.testing.assert_allclose(plus, minus, atol=2e-3 * scale)
+        self.assertGreater(float(np.abs(plus - plain).max()), 0.05 * scale)
+
+    def test_render_controls_declared_and_the_isotropic_limit(self):
+        from f12_reference import snapshot as load
+        toward = unit(-0.8, 0.35, -0.3)
+        with tempfile.TemporaryDirectory() as tmp:
+            root, data = load(self.snapshot(tmp, (toward, 3.0), 0.5, math.pi / 4, sky=0.5))
+            self.assertTrue(ref.uses_anisotropy(data) and not ref.uses_specular_extension(data))
+            cast = ref.cast_primary_rays(root, data, 2)
+            images = {}
+            for name in ("spec", "ignored", "rotation-flipped", "bitangent-flipped", "alpha-swapped", "d-normalised-by-ab"):
+                model = ref.control_model("aniso-" + name, ref.APPENDIX_B) if name != "spec" else ref.APPENDIX_B
+                images[name], masks, spheres, terms = ref.render_frame(root, data, model, cast=cast)
+            self.assertEqual(terms, ["sun-disk", "environment-quadrature"])
+            self.assertEqual(spheres[0]["anisotropy"], 0.5)
+            self.assertAlmostEqual(spheres[0]["anisotropy_rotation"], math.pi / 4, places=6)
+            self.assertFalse(spheres[0]["mirrored"])
+            self.assertEqual(spheres[0]["group"], "metallic 1 anisotropy 0.5")
+            roi = masks["roi"]
+            for name in ("ignored", "rotation-flipped", "bitangent-flipped", "alpha-swapped", "d-normalised-by-ab"):
+                self.assertGreater(float(np.abs(images[name][roi] - images["spec"][roi]).max()), 1e-3, name)
+            # w = -1: ignoring the handedness gives exactly the rotation-flipped lobe (the combed grid cannot tell them apart).
+            np.testing.assert_allclose(images["bitangent-flipped"], images["rotation-flipped"], rtol=1e-12)
+            # Strength 0 is the plain model (no feature bit: the neutral material renders like Appendix B).
+            with tempfile.TemporaryDirectory() as tmp0:
+                root0, data0 = load(self.snapshot(tmp0, (toward, 3.0), 0.0, math.pi / 4, sky=0.5))
+                zero = ref.render_frame(root0, data0, ref.APPENDIX_B, cast=ref.cast_primary_rays(root0, data0, 2))[0]
+                data0["materials"][0].update(feature_bits=0, flags=0)
+                plain = ref.render_frame(root0, data0, ref.APPENDIX_B, cast=ref.cast_primary_rays(root0, data0, 2))[0]
+            np.testing.assert_allclose(zero, plain, rtol=1e-9, atol=1e-12)
+            # The declared model on the same cast: the engine's resolve model, differing from the ignored image.
+            declared, *_ = ref.render_frame(root, data, ref.APPENDIX_B, cast=cast, environment=ref.DECLARED)
+            blind, *_ = ref.render_frame(root, data, ref.APPENDIX_B, cast=cast,
+                                         environment=ref.ANISO_DECLARED_CONTROLS["declared-aniso-ignored"])
+            self.assertGreater(float(np.abs(declared[roi] - blind[roi]).max()), 1e-3)
+
+    def test_command_writes_controls_and_declared_controls(self):
+        toward = unit(-0.8, 0.35, -0.3)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.snapshot(tmp, (toward, 3.0), 1.0, math.pi / 4, sky=0.5)
+            out = pathlib.Path(tmp) / "out"
+            code = ref.main(["render", str(root), "--out", str(out), "--controls", "aniso-ignored", "aniso-mirror-unaware",
+                             "--declared-controls", "declared-aniso-ignored", "declared-aniso-alpha-t"])
+            self.assertEqual(code, 0)
+            report = json.loads((out / "reference.json").read_text())
+            self.assertEqual(sorted(report["controls"]), ["aniso-ignored", "aniso-mirror-unaware"])
+            self.assertEqual(report["controls"]["aniso-ignored"]["model_variant"]["aniso"], "ignored")
+            self.assertEqual(sorted(report["declared"]["controls"]), ["declared-aniso-alpha-t", "declared-aniso-ignored"])
+            self.assertIn("anisotropy", report["model"])
+
+    def test_textured_anisotropy_and_a_mesh_without_tangents_are_refused(self):
+        from f12_reference import snapshot as load
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.snapshot(tmp, None, 1.0, 0.0, sky=0.5)
+            path = pathlib.Path(root) / "scene.json"
+            data = json.loads(path.read_text())
+            data["material_extensions"]["records"][1][2] = 3
+            path.write_text(json.dumps(data))
+            root, data = load(root)
+            with self.assertRaises(ValueError):
+                ref.require_declared_scene(data)
+            self.assertEqual(ref.main(["render", str(root), "--out", str(pathlib.Path(tmp) / "out")]), 2)
+        with tempfile.TemporaryDirectory() as tmp:  # mesh version 1: no tangent attribute to read
+            root, data = load(self.snapshot(tmp, None, 1.0, 0.0, sky=0.5, tangents=False))
+            with self.assertRaises(ValueError):
+                ref.render_frame(root, data, threads=2)
+            self.assertEqual(ref.main(["render", str(root), "--out", str(pathlib.Path(tmp) / "out")]), 2)
+
+    def test_read_ply_parses_the_tangent_properties(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "m.ply"
+            comb_ply(path, -1.0, slices=8, stacks=4)
+            properties, faces = ref.read_ply(path)
+            self.assertEqual(sorted(properties), sorted(["x", "y", "z", "nx", "ny", "nz", "s", "t", "tangent_x", "tangent_y",
+                                                         "tangent_z", "handedness_x"]))
+            self.assertEqual(faces.shape, (2 * 8 * 4, 3))
+            self.assertTrue(bool((properties["handedness_x"] == -1.0).all()))
+            self.assertAlmostEqual(float(np.sqrt(properties["tangent_x"] ** 2 + properties["tangent_y"] ** 2 +
+                                                 properties["tangent_z"] ** 2).min()), 1.0, places=5)
 
 
 if __name__ == "__main__":
