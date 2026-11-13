@@ -165,12 +165,12 @@ coat/sheen/aniso light branches); metals with weight (rule unit-tested only); vo
 2026-11-14 — orchestrator verification on M5 after integration (engine
 99e0d3d-equivalents). Batch log: `build/f15-exact/battery16.log`.
 - `tools/f15_check.py --run --expect green` (`build/f15-check/t16`): GREEN on
-  all 67 keys, every control failing.
+  all 59 keys, every control failing.
   - `subsurface-thin-sun`: worst p99 0.03 %.
   - `-point`: 0; `@restir` and `@clustered`: 0.04 %.
   - `-env-resolve`: worst mean 3.2e-4.
   - `-env` (transport): worst sphere mean 0.98 %.
-  - `furnace-thin-subsurface`: 0.99999; `@resolve`: max pixel 1.0.
+  - `furnace-thin-subsurface`: max sphere mean 0.99999 (gated); max pixel 1.0079 on the stochastic transport (reported, not gated, decision-11 furnace amendment); `@resolve`: max pixel 1.0.
 - `--debug-lobe-guide 16` on subsurface-thin-env: `pixels 20052 extended 14952
   | PASS`. The corrupt control shifts the weight.
 - Shader validation: subsurface-thin-point with ReSTIR and RT reflections
