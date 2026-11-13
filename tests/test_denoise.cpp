@@ -227,3 +227,99 @@ TEST_CASE("F13.6 a specular history cap below the sample count keeps the weight 
     // A single-sample frame under the cap blends normally.
     h=denoiseTemporal(s,glm::vec3(1),h,p,{},{},one);CHECK(h.length==2);CHECK(h.color[0]==doctest::Approx(4));
 }
+
+// F15.1 (ticket 08): the lobe contract of the specular denoiser. The base rule (null lobe pointers) is untouched.
+namespace {
+const u32 kCoat=specularSampleLobeFlags(SPECULAR_LOBE_CLEARCOAT,false),kRefract=specularSampleLobeFlags(SPECULAR_LOBE_TRANSMISSION,true);
+GPUSpecularSample lobeSpec(u32 lobeFlags){auto s=spec();s.flags|=lobeFlags;return s;}
+}
+TEST_CASE("F15.1 specular lobe flags: key packing keeps the sample bits intact"){
+    CHECK(specularSampleLobeKey(0)==0);CHECK(specularSampleLobeKey(SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_STOCHASTIC|SPECULAR_SAMPLE_ERROR|(5u<<SPECULAR_SAMPLE_COUNT_SHIFT))==0);
+    for(u32 id=0;id<4;++id)for(const bool refract:{false,true}){const u32 f=specularSampleLobeFlags(id,refract);
+        CHECK(specularSampleLobeKey(f)==(id|(refract?4u:0u)));CHECK((f&SPECULAR_SAMPLE_LOBE_KEY_MASK)==f);
+        // no overlap with the other sample bits (count bits 16-23, error bit 31, valid/prefiltered/mixed/stochastic bits 0-3)
+        CHECK((f&(SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_PREFILTERED|SPECULAR_SAMPLE_MIXED|SPECULAR_SAMPLE_STOCHASTIC|SPECULAR_SAMPLE_ERROR|(SPECULAR_SAMPLE_COUNT_MASK<<SPECULAR_SAMPLE_COUNT_SHIFT)))==0);}
+    // the history state word carries the key without touching length, flags, path or valid
+    for(u32 lobe=0;lobe<=DENOISE_HISTORY_MAX_LOBE;++lobe){const u32 state=denoisePackState(77,DENOISE_HISTORY_STOCHASTIC,REFLECTION_PATH_ENVIRONMENT,1,lobe);
+        CHECK(denoiseStateLobe(state)==lobe);CHECK(denoiseStateLength(state)==77);CHECK(denoiseStateFlags(state)==DENOISE_HISTORY_STOCHASTIC);
+        CHECK(denoiseStatePath(state)==REFLECTION_PATH_ENVIRONMENT);CHECK(denoiseStateValid(state)==1);}
+}
+TEST_CASE("F15.1 history is rejected across sampled lobe ids and axes, accepted for the same key"){
+    const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);const auto s=receiver();DenoiseLobeGuide guide;guide.ior=1.5f;guide.clearcoatRoughness=.2f;
+    const u32 keys[]={0u,kCoat,kRefract,specularSampleLobeFlags(SPECULAR_LOBE_BASE,true),specularSampleLobeFlags(SPECULAR_LOBE_CLEARCOAT,true)};
+    for(const u32 flags:keys){
+        const auto sample=lobeSpec(flags);const auto h=denoiseTemporal(s,glm::vec3(1),{},p,{},{},sample,-1,glm::vec3(0),glm::vec3(-1),&guide);REQUIRE(h.valid);
+        CHECK(h.lobe==specularSampleLobeKey(flags));
+        CHECK(denoiseCompatible(s,h,p,sample,&guide));
+        for(const u32 other:keys){
+            const bool same=specularSampleLobeKey(other)==specularSampleLobeKey(flags);
+            CHECK(denoiseCompatible(s,h,p,lobeSpec(other),&guide)==same);}
+        // the packed record keeps the key
+        const auto back=denoiseUnpack(denoisePackHeader(h),denoisePackRecord(h),denoisePackSpecular(h));CHECK(back.lobe==h.lobe);CHECK(denoiseCompatible(s,back,p,sample,&guide));
+    }
+    // the chain: accumulation continues across frames of one lobe and restarts at the first frame of another
+    auto h=denoiseTemporal(s,glm::vec3(1),{},p,{},{},lobeSpec(0),-1,glm::vec3(0),glm::vec3(-1),&guide);
+    h=denoiseTemporal(s,glm::vec3(1),h,p,{},{},lobeSpec(0),-1,glm::vec3(0),glm::vec3(-1),&guide);CHECK(h.length==2);
+    h=denoiseTemporal(s,glm::vec3(1),h,p,{},{},lobeSpec(kCoat),-1,glm::vec3(0),glm::vec3(-1),&guide);CHECK(h.length==1);CHECK(h.lobe==specularSampleLobeKey(kCoat));
+    // the base rule (no lobe pointer) ignores the key: byte-identical behaviour for scenes without features
+    const auto base=denoiseTemporal(s,glm::vec3(1),{},p,{},{},lobeSpec(kCoat));CHECK(base.lobe==0);CHECK(denoiseCompatible(s,base,p,lobeSpec(0)));CHECK(denoiseCompatible(s,base,p,lobeSpec(kRefract)));
+    // other signals never carry a lobe
+    const auto di=denoiseParameters({},4,4,DENOISE_SIGNAL_DI,0,1,1,false);const auto hd=denoiseTemporal(s,glm::vec3(1),{},di,{},{},lobeSpec(kCoat),-1,glm::vec3(0),glm::vec3(-1),&guide);
+    CHECK(hd.lobe==0);CHECK(denoiseCompatible(s,hd,di,lobeSpec(kRefract),&guide));
+}
+TEST_CASE("F15.1 neighbours are rejected across sampled lobe ids and axes"){
+    const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);auto a=receiver();a.roughness=.8f;a.viewDirection[2]=1;auto b=a;
+    DenoiseLobeGuide guide;guide.ior=1.5f;guide.clearcoatRoughness=.8f;
+    DenoiseLobePixel base,coat,refract,baseRefract;coat.sampleFlags=kCoat;refract.sampleFlags=kRefract;baseRefract.sampleFlags=specularSampleLobeFlags(SPECULAR_LOBE_BASE,true);
+    for(auto* l:{&base,&coat,&refract,&baseRefract})l->guide=guide;
+    CHECK(denoiseSpatialWeight(a,b,2,2,1,p,&base,&base)>.99f);CHECK(denoiseSpatialWeight(a,b,2,2,1,p,&coat,&coat)>.99f);CHECK(denoiseSpatialWeight(a,b,2,2,1,p,&refract,&refract)>.99f);
+    CHECK(denoiseSpatialWeight(a,b,2,2,1,p,&base,&coat)==0);CHECK(denoiseSpatialWeight(a,b,2,2,1,p,&coat,&base)==0);CHECK(denoiseSpatialWeight(a,b,2,2,1,p,&base,&refract)==0);
+    CHECK(denoiseSpatialWeight(a,b,2,2,1,p,&base,&baseRefract)==0); // same id, other axis
+    CHECK(denoiseSpatialWeight(a,b,2,2,1,p,&coat,&refract)==0);
+    // null lobe pointers: the base rule, identical numbers
+    CHECK(denoiseSpatialWeight(a,b,2,2,1,p)==doctest::Approx(denoiseSpatialWeight(a,b,2,2,1,p,&base,&base)));
+    // DI never uses lobes
+    const auto d=denoiseParameters({},4,4,DENOISE_SIGNAL_DI,0,1,1,false);CHECK(denoiseSpatialWeight(a,b,2,2,1,d,&base,&coat)>.99f);
+}
+TEST_CASE("F15.1 the edge-stopping roughness follows the sampled lobe"){
+    DenoiseLobeGuide guide;guide.ior=1.5f;guide.clearcoatRoughness=.04f;
+    CHECK(denoiseLobeRoughness(.6f,0,guide)==doctest::Approx(.6f));
+    CHECK(denoiseLobeRoughness(.6f,SPECULAR_LOBE_CLEARCOAT,guide)==doctest::Approx(.04f));
+    CHECK(denoiseLobeRoughness(.6f,SPECULAR_LOBE_TRANSMISSION|4u,guide)==doctest::Approx(.6f)); // ior 1.5: factor 1
+    guide.ior=1.25f;CHECK(denoiseLobeRoughness(.6f,SPECULAR_LOBE_TRANSMISSION|4u,guide)==doctest::Approx(.3f));
+    guide.ior=1.0f;CHECK(denoiseLobeRoughness(.6f,SPECULAR_LOBE_TRANSMISSION|4u,guide)==doctest::Approx(0.f));
+    guide.ior=0;CHECK(denoiseLobeRoughness(.6f,SPECULAR_LOBE_TRANSMISSION|4u,guide)==doctest::Approx(.6f)); // special mode: default ior
+    CHECK(denoiseLobeRoughness(.6f,3,guide)==doctest::Approx(.6f));
+    // the weight bound of a pair of reflection axes uses the centre pixel's LOBE roughness: a smooth coat lobe on a rough base
+    // keeps neighbours with a slightly different reflection axis apart, the rough base lobe lets them through.
+    const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);auto a=receiver();a.roughness=.8f;a.viewDirection[2]=1;auto b=a;
+    const float angle=.003f;b.viewDirection[0]=std::sin(angle);b.viewDirection[2]=std::cos(angle);
+    DenoiseLobeGuide g;g.ior=1.5f;g.clearcoatRoughness=.04f;DenoiseLobePixel base,coat;coat.sampleFlags=kCoat;base.guide=coat.guide=g;
+    CHECK(denoiseSpatialWeight(a,b,2,2,1,p,&base,&base)>.99f);
+    CHECK(denoiseSpatialWeight(a,b,2,2,1,p,&coat,&coat)<.4f);
+    // the history stores the lobe roughness and compares the current lobe roughness against it
+    const auto s=receiver();auto rs=s;rs.roughness=.8f;const auto h=denoiseTemporal(rs,glm::vec3(1),{},p,{},{},lobeSpec(kCoat),-1,glm::vec3(0),glm::vec3(-1),&g);
+    CHECK(h.roughness==doctest::Approx(.04f));CHECK(denoiseCompatible(rs,h,p,lobeSpec(kCoat),&g));
+    auto g2=g;g2.clearcoatRoughness=.5f;CHECK_FALSE(denoiseCompatible(rs,h,p,lobeSpec(kCoat),&g2)); // the coat roughness changed beyond the threshold
+}
+TEST_CASE("F15.1 the refract axis follows the refracted direction, not the reflection axis"){
+    auto s=receiver();s.shadingNormal[0]=0;s.shadingNormal[1]=0;s.shadingNormal[2]=1;
+    const float angle=.5f;s.viewDirection[0]=std::sin(angle);s.viewDirection[1]=0;s.viewDirection[2]=std::cos(angle);
+    DenoiseLobeGuide g;g.ior=1.5f;
+    const auto reflect=denoiseLobeAxis(s,0,g),refract=denoiseLobeAxis(s,4,g);
+    // reflect(-V, N) mirrors V about N; the refracted ray continues through the surface: Snell with eta = 1/1.5.
+    CHECK(reflect.x==doctest::Approx(-std::sin(angle)));CHECK(reflect.z==doctest::Approx(std::cos(angle)));
+    CHECK(refract.z<0);CHECK(glm::length(refract)==doctest::Approx(1));
+    CHECK(std::sin(angle)==doctest::Approx(1.5f*std::abs(refract.x)).epsilon(1e-4)); // Snell: sin(theta_i) = ior * sin(theta_t)
+    CHECK(glm::dot(reflect,refract)<.5f);
+    // total internal reflection falls back to the reflection axis
+    DenoiseLobeGuide inverted;inverted.ior=1.0f;auto shallow=s;shallow.viewDirection[0]=std::sin(1.5f);shallow.viewDirection[2]=std::cos(1.5f);
+    CHECK(glm::length(denoiseLobeAxis(shallow,4,inverted))==doctest::Approx(1));
+    // The clip control "reflect axis used for a refract-axis lobe" is a filter with the wrong axis: for the same pair of pixels the two
+    // axes give different weights, so the wrong axis changes the filter (ticket 13 runs the clip control once refraction exists).
+    auto a=s;a.roughness=.04f;auto b=a;const float d=.003f;b.viewDirection[0]=std::sin(angle+d);b.viewDirection[2]=std::cos(angle+d);
+    const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);DenoiseLobePixel viaRefract,viaReflect;viaRefract.sampleFlags=specularSampleLobeFlags(SPECULAR_LOBE_BASE,true);viaRefract.guide=viaReflect.guide=g;
+    const float wRefract=denoiseSpatialWeight(a,b,2,2,1,p,&viaRefract,&viaRefract),wReflect=denoiseSpatialWeight(a,b,2,2,1,p,&viaReflect,&viaReflect);
+    CHECK(wRefract>wReflect*1.3f); // the refracted image moves slower per pixel than the reflected one
+    CHECK(denoiseLobeAxis(a,4,g).x!=denoiseLobeAxis(a,0,g).x);
+}

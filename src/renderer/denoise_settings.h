@@ -15,11 +15,22 @@ struct DenoiseSettings {
 };
 [[nodiscard]] bool validDenoiseSettings(const DenoiseSettings&);
 [[nodiscard]] GPUDenoiseParams denoiseParameters(const DenoiseSettings&,u32 width,u32 height,u32 signal,u32 view,u32 epoch,u32 revision,bool reset);
-[[nodiscard]] bool denoiseCompatible(const GPUDISurface&,const DenoiseHistory&,const GPUDenoiseParams&,const GPUSpecularSample& specular={});
+// F15.1 (ticket 08) lobe contract of the specular denoiser (CPU mirror of the "_lobe" kernels in shaders/denoise.metal).
+// The fields of the pixel's GPULobeGuide the rule reads; a null lobe pointer below selects the base rule bit for bit.
+struct DenoiseLobeGuide { float ior=0, clearcoatRoughness=0; };
+// A pixel as the lobe kernels see it: its sample flags (sampled lobe id and axis) and its guide.
+struct DenoiseLobePixel { u32 sampleFlags=0; DenoiseLobeGuide guide{}; };
+// Edge-stopping roughness of the sampled lobe: id 0 the base roughness, id 1 the clearcoat roughness of the guide,
+// id 2 (transmission) the base roughness scaled by clamp(2*ior-2, 0, 1) (ticket 13 refines it), id 3 reserved = base.
+[[nodiscard]] float denoiseLobeRoughness(float baseRoughness,u32 lobeKey,const DenoiseLobeGuide&);
+// Spatial guide axis of the sampled lobe: the reflection axis, or for the refract axis the direction refracted at the
+// shading normal with eta = 1/ior (ior < 1 means the default 1.5; total internal reflection falls back to the reflection axis).
+[[nodiscard]] glm::vec3 denoiseLobeAxis(const GPUDISurface&,u32 lobeKey,const DenoiseLobeGuide&);
+[[nodiscard]] bool denoiseCompatible(const GPUDISurface&,const DenoiseHistory&,const GPUDenoiseParams&,const GPUSpecularSample& specular={},const DenoiseLobeGuide* lobe=nullptr);
 // neighborhoodMean/Sigma: the current 3x3 raw statistics, used by DENOISE_SOFT_CHANGE.
 [[nodiscard]] DenoiseHistory denoiseTemporal(const GPUDISurface&,glm::vec3 current,const DenoiseHistory&,
     const GPUDenoiseParams&,glm::vec3 neighborhoodLow,glm::vec3 neighborhoodHigh,const GPUSpecularSample& specular={},float neighborhoodVariance=-1,
-    glm::vec3 neighborhoodMean=glm::vec3(0),glm::vec3 neighborhoodSigma=glm::vec3(-1));
+    glm::vec3 neighborhoodMean=glm::vec3(0),glm::vec3 neighborhoodSigma=glm::vec3(-1),const DenoiseLobeGuide* lobe=nullptr);
 [[nodiscard]] float denoiseSpatialWeight(const GPUDISurface&,const GPUDISurface&,float centerLuminance,float neighborLuminance,
-    float variance,const GPUDenoiseParams&);
+    float variance,const GPUDenoiseParams&,const DenoiseLobePixel* lobeA=nullptr,const DenoiseLobePixel* lobeB=nullptr);
 } // namespace phosphor

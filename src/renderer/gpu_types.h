@@ -989,6 +989,12 @@ PHOSPHOR_GPU_CONSTANT u32 DENOISE_SOFT_CHANGE = 16u;
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_STATIONARY = 32u;
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_HISTORY_STOCHASTIC = 2u; // history flags: bit0 remains a numerical error
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_DIAGNOSTIC_ENDPOINTS = 4u; // opt-in old endpoint rejection for the quality negative
+// F15.1 (ticket 08): the "_lobe" specular denoiser kernels run with a valid lobe guide (buffer 9 / 4).
+PHOSPHOR_GPU_CONSTANT u32 DENOISE_LOBE_GUIDE_VALID = 64u;
+// Diagnostics of the lobe contract (PHOSPHOR_DIAGNOSTIC_DENOISE_LOBE=stripes|flip, lobe kernels only): the sampled
+// lobe id the denoiser sees is forced to 1 on vertical stripes 16 px wide (static: neighbours across a stripe edge
+// are rejected), or on the stripes of alternating frames (the history key changes every frame: history rejected).
+PHOSPHOR_GPU_CONSTANT u32 DENOISE_DIAGNOSTIC_LOBE_STRIPES = 128u, DENOISE_DIAGNOSTIC_LOBE_FLIP = 256u;
 
 struct GPUReflectionParams {
     float viewProjection[16], inverseViewProjection[16], view[16];
@@ -1211,6 +1217,15 @@ PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_MIXED = 4u;
 // Samples averaged into a boosted record (bits 16-23; 0 = one sample). The
 // stationary specular history weights each frame by it.
 PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_COUNT_SHIFT = 16u, SPECULAR_SAMPLE_COUNT_MASK = 0xffu;
+// F15.1 (ticket 08): the lobe the transport sampled for this pixel, in spare bits of GPUSpecularSample.flags
+// (bit 31 stays SPECULAR_SAMPLE_ERROR).  bits 8-9: lobe id (0 = base specular, 1 = clearcoat, 2 = transmission,
+// 3 reserved); bit 10: axis (0 = reflect, 1 = refract).  The "_lobe" denoiser kernels reject neighbours and history
+// across a different (id, axis) key and take the edge-stopping roughness and spatial guide axis of the sampled lobe.
+// Today the transport only samples lobe 0 / reflect, so every key is 0.
+PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_LOBE_SHIFT = 8u, SPECULAR_SAMPLE_LOBE_MASK = 3u;
+PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_AXIS_REFRACT = 1u << 10;
+PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_LOBE_KEY_MASK = (3u << 8) | (1u << 10);
+PHOSPHOR_GPU_CONSTANT u32 SPECULAR_LOBE_BASE = 0u, SPECULAR_LOBE_CLEARCOAT = 1u, SPECULAR_LOBE_TRANSMISSION = 2u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_GI = 1u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_CUSTOM = 2u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_DI = 4u;

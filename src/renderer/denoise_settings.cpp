@@ -13,6 +13,19 @@ glm::vec3 signalGuide(const GPUDISurface& s,u32 signal){const auto n=signalNorma
     const auto v=v3(s.viewDirection);if(!finite(n)||!finite(v)||glm::dot(n,n)<=0||glm::dot(v,v)<=0)return {};
     return glm::reflect(-glm::normalize(v),glm::normalize(n));}
 }
+float denoiseLobeRoughness(float base,u32 key,const DenoiseLobeGuide& g){
+    switch(key&3u){
+    case SPECULAR_LOBE_CLEARCOAT:return std::isfinite(g.clearcoatRoughness)?std::clamp(g.clearcoatRoughness,0.f,1.f):base;
+    case SPECULAR_LOBE_TRANSMISSION:return std::isfinite(g.ior)&&std::isfinite(base)?base*std::clamp(2*(g.ior>=1?g.ior:1.5f)-2,0.f,1.f):base;
+    default:return base;}
+}
+glm::vec3 denoiseLobeAxis(const GPUDISurface& s,u32 key,const DenoiseLobeGuide& g){
+    const auto n=v3(s.shadingNormal),v=v3(s.viewDirection);if(!finite(n)||!finite(v)||glm::dot(n,n)<=0||glm::dot(v,v)<=0)return {};
+    const auto nn=glm::normalize(n),vv=glm::normalize(v);const auto reflected=glm::reflect(-vv,nn);
+    if(!(key&4u))return reflected;
+    const float ior=std::isfinite(g.ior)&&g.ior>=1?g.ior:1.5f;const auto t=glm::refract(-vv,nn,1.f/ior);
+    return glm::dot(t,t)>0?glm::normalize(t):reflected;
+}
 bool validDenoiseSettings(const DenoiseSettings& s){return std::isfinite(s.temporalAlpha)&&s.temporalAlpha>0&&s.temporalAlpha<=1&&
     std::isfinite(s.momentsAlpha)&&s.momentsAlpha>0&&s.momentsAlpha<=1&&std::isfinite(s.depthThreshold)&&s.depthThreshold>0&&
     std::isfinite(s.normalThreshold)&&s.normalThreshold>=-1&&s.normalThreshold<=1&&std::isfinite(s.roughnessThreshold)&&s.roughnessThreshold>=0&&
@@ -27,7 +40,7 @@ GPUDenoiseParams denoiseParameters(const DenoiseSettings& s,u32 w,u32 h,u32 sign
     p.roughnessThreshold=s.roughnessThreshold;p.hitDistanceThreshold=s.hitDistanceThreshold;p.luminancePhi=s.luminancePhi;p.normalPhi=s.normalPhi;
     p.maxHistory=s.maxHistory;p.atrousStep=1;p.minHistoryForVariance=4;p.varianceFloor=s.varianceFloor;p.clampSigma=s.clampSigma;p.planeThreshold=s.planeThreshold;return p;
 }
-bool denoiseCompatible(const GPUDISurface& s,const DenoiseHistory& h,const GPUDenoiseParams& p,const GPUSpecularSample& spec){
+bool denoiseCompatible(const GPUDISurface& s,const DenoiseHistory& h,const GPUDenoiseParams& p,const GPUSpecularSample& spec,const DenoiseLobeGuide* lobe){
     if((p.flags&DENOISE_RESET)||!s.valid||!h.valid||!h.length||h.signal!=p.signal||h.viewID!=p.viewID||h.historyEpoch!=p.historyEpoch||
         h.signalRevision!=p.signalRevision||h.slot!=s.instanceSlot||h.instanceGeneration!=s.instanceGeneration||h.materialRevision!=s.materialRevision||
         !std::isfinite(s.depth)||!std::isfinite(h.depth)||s.depth<=0||h.depth<=0||!finite(v3(h.color))||!std::isfinite(h.firstMoment)||
@@ -45,7 +58,9 @@ bool denoiseCompatible(const GPUDISurface& s,const DenoiseHistory& h,const GPUDe
         const bool stochastic=(spec.flags&SPECULAR_SAMPLE_STOCHASTIC)!=0&&!(p.flags&DENOISE_DIAGNOSTIC_ENDPOINTS);
         if(!(spec.flags&SPECULAR_SAMPLE_VALID)||(spec.flags&SPECULAR_SAMPLE_ERROR)||
            stochastic!=bool(h.flags&DENOISE_HISTORY_STOCHASTIC)||!std::isfinite(h.roughness)||!std::isfinite(s.roughness)||
-           std::abs(h.roughness-s.roughness)>p.roughnessThreshold||!std::isfinite(spec.hitDistance)||spec.hitDistance<0)return false;
+           std::abs(h.roughness-(lobe?denoiseLobeRoughness(s.roughness,specularSampleLobeKey(spec.flags),*lobe):s.roughness))>p.roughnessThreshold||!std::isfinite(spec.hitDistance)||spec.hitDistance<0)return false;
+        // F15.1 lobe contract: history accumulated from another sampled lobe (id or axis) is a different signal.
+        if(lobe&&h.lobe!=specularSampleLobeKey(spec.flags))return false;
         // A fresh GGX ray can legitimately hit another object, miss, or have
         // zero contribution. Primary geometry and source revisions above own
         // validity; conditioning accumulation on the random endpoint defeats it.
@@ -55,13 +70,13 @@ bool denoiseCompatible(const GPUDISurface& s,const DenoiseHistory& h,const GPUDe
     return true;
 }
 DenoiseHistory denoiseTemporal(const GPUDISurface& s,glm::vec3 current,const DenoiseHistory& old,const GPUDenoiseParams& p,glm::vec3 low,glm::vec3 high,const GPUSpecularSample& spec,float neighborhoodVariance,
-                                   glm::vec3 mean,glm::vec3 sigma){
+                                   glm::vec3 mean,glm::vec3 sigma,const DenoiseLobeGuide* lobe){
     DenoiseHistory h{};h.signal=p.signal;h.viewID=p.viewID;h.historyEpoch=p.historyEpoch;h.signalRevision=p.signalRevision;
     if(p.signal==DENOISE_SIGNAL_SPECULAR&&(spec.flags&SPECULAR_SAMPLE_STOCHASTIC)&&!(p.flags&DENOISE_DIAGNOSTIC_ENDPOINTS))h.flags|=DENOISE_HISTORY_STOCHASTIC;
     if(!s.valid)return h;
     const auto rawNormal=signalNormal(s,p.signal);if(!finite(current)||!finite(rawNormal)||glm::dot(rawNormal,rawNormal)<=0){h.flags=1;return h;}
     current=glm::max(current,glm::vec3(0));if(p.signal==DENOISE_SIGNAL_AO)current=glm::clamp(current,glm::vec3(0),glm::vec3(1));
-    bool reuse=denoiseCompatible(s,old,p,spec);glm::vec3 previous=v3(old.color);
+    bool reuse=denoiseCompatible(s,old,p,spec,lobe);glm::vec3 previous=v3(old.color);
     if(reuse&&(p.flags&DENOISE_CLAMP_HISTORY)&&finite(low)&&finite(high))previous=glm::clamp(previous,glm::min(low,high),glm::max(low,high));
     // Shader mirror of DENOISE_SOFT_CHANGE: keep history only inside the current neighbourhood.
     if(reuse&&(p.flags&DENOISE_SOFT_CHANGE)&&sigma.x>=0)for(u32 i=0;i<3;++i)
@@ -78,18 +93,24 @@ DenoiseHistory denoiseTemporal(const GPUDISurface& s,glm::vec3 current,const Den
     if(count<p.minHistoryForVariance&&std::isfinite(neighborhoodVariance)&&neighborhoodVariance>=0)h.variance=std::max(h.variance,neighborhoodVariance/count);
     const auto n=glm::normalize(signalNormal(s,p.signal));
     for(u32 i=0;i<3;++i){h.color[i]=color[i];h.position[i]=s.position[i];h.normal[i]=n[i];}
-    h.depth=s.depth;h.roughness=s.roughness;h.slot=s.instanceSlot;h.instanceGeneration=s.instanceGeneration;h.materialRevision=s.materialRevision;
+    h.depth=s.depth;h.roughness=s.roughness;
+    if(lobe&&p.signal==DENOISE_SIGNAL_SPECULAR){h.lobe=specularSampleLobeKey(spec.flags);h.roughness=denoiseLobeRoughness(s.roughness,h.lobe,*lobe);}
+    h.slot=s.instanceSlot;h.instanceGeneration=s.instanceGeneration;h.materialRevision=s.materialRevision;
     h.hitDistance=spec.hitDistance;h.path=spec.path;h.secondarySlot=spec.secondarySlot;h.secondaryGeneration=spec.secondaryGeneration;
     h.valid=finite(color)&&std::isfinite(h.variance)&&finite(n);if(!h.valid)h.flags=1;return h;
 }
-float denoiseSpatialWeight(const GPUDISurface& a,const GPUDISurface& b,float la,float lb,float variance,const GPUDenoiseParams& p){
+float denoiseSpatialWeight(const GPUDISurface& a,const GPUDISurface& b,float la,float lb,float variance,const GPUDenoiseParams& p,const DenoiseLobePixel* lobeA,const DenoiseLobePixel* lobeB){
     if(!a.valid||!b.valid||!std::isfinite(la)||!std::isfinite(lb)||!std::isfinite(variance)||variance<0)return 0;
-    const auto na=signalGuide(a,p.signal),nb=signalGuide(b,p.signal);if(!finite(na)||!finite(nb)||glm::dot(na,na)<=0||glm::dot(nb,nb)<=0)return 0;
+    const bool lobes=lobeA&&lobeB&&p.signal==DENOISE_SIGNAL_SPECULAR;
+    const u32 ka=lobes?specularSampleLobeKey(lobeA->sampleFlags):0u,kb=lobes?specularSampleLobeKey(lobeB->sampleFlags):0u;
+    if(lobes&&ka!=kb)return 0; // F15.1 lobe contract: never filter across sampled lobes
+    const auto na=lobes?denoiseLobeAxis(a,ka,lobeA->guide):signalGuide(a,p.signal),nb=lobes?denoiseLobeAxis(b,kb,lobeB->guide):signalGuide(b,p.signal);if(!finite(na)||!finite(nb)||glm::dot(na,na)<=0||glm::dot(nb,nb)<=0)return 0;
     const float cosine=glm::dot(glm::normalize(na),glm::normalize(nb));const float normal=std::pow(std::max(0.f,cosine),p.normalPhi);
     const float depth=std::exp(-std::abs(a.depth-b.depth)/std::max(1e-6f,p.depthThreshold*std::max(a.depth,b.depth)*p.atrousStep));
     const float color=std::exp(-std::abs(la-lb)/(p.luminancePhi*std::sqrt(std::max(variance,p.varianceFloor))+1e-6f));
-    const float alpha=std::max(a.roughness*a.roughness,0.002f);
-    const float rough=p.signal==DENOISE_SIGNAL_SPECULAR?std::exp(-std::abs(a.roughness-b.roughness)/std::max(p.roughnessThreshold,1e-6f))*
+    const float roughA=lobes?denoiseLobeRoughness(a.roughness,ka,lobeA->guide):a.roughness,roughB=lobes?denoiseLobeRoughness(b.roughness,kb,lobeB->guide):b.roughness;
+    const float alpha=std::max(roughA*roughA,0.002f);
+    const float rough=p.signal==DENOISE_SIGNAL_SPECULAR?std::exp(-std::abs(roughA-roughB)/std::max(p.roughnessThreshold,1e-6f))*
         std::exp(-std::max(0.f,1.f-cosine)/(alpha*alpha)):1;
     return normal*depth*color*rough;
 }
