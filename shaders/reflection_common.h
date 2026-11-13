@@ -30,6 +30,10 @@ inline ReflectionDirection reflectionDirection(GPUDISurface s,float2 u){
     return out;
 }
 #ifdef PHOSPHOR_REFL_LOBE
+// F15.1 (ticket 11): the anisotropic lobe frame of the primary surface (unit n).
+inline BsdfAniso reflectionAnisoFrame(GPUDISurface s, float3 n, ReflectionLobe lobe) {
+    return bsdfAnisoFrame(n, lobe.anisoDirection, s.roughness, lobe.anisoStrength);
+}
 // Sample weight f * cos / pdf of the (single) lobe for the sampled direction; same clamps as reflectionSpecularBRDF.
 inline float3 reflectionLobeWeight(GPUDISurface s, float3 wi, float pdf, ReflectionLobe lobe) {
     const float3 n = normalize(diVec(s.shadingNormal)), v = normalize(diVec(s.viewDirection));
@@ -38,7 +42,10 @@ inline float3 reflectionLobeWeight(GPUDISurface s, float3 wi, float pdf, Reflect
     const float3 h = normalize(v + wi);
     const float nh = saturate(dot(n, h)), vh = saturate(dot(v, h)), a = bsdfAlpha(s.roughness);
     const float3 Fd = bsdfSpecFresnel(lobe.spec, vh);
-    const float3 f = bsdfDGGX(nh, a) * bsdfVSmithGGXCorrelated(nv, nl, a) * bsdfSpecLobeColor(Fd, diVec(s.albedo), saturate(s.metallic), vh);
+    // F15.1 (ticket 11): the anisotropic D V of the primary lobe frame (the same expression as the DI and resolve lobes).
+    const float dv = lobe.aniso ? bsdfAnisoDV(reflectionAnisoFrame(s, n, lobe), v, wi, h, nl, nv, nh)
+                                : bsdfDGGX(nh, a) * bsdfVSmithGGXCorrelated(nv, nl, a);
+    const float3 f = dv * bsdfSpecLobeColor(Fd, diVec(s.albedo), saturate(s.metallic), vh);
     return f * lobe.sheenScale * nl / pdf; // F15.1 ticket 10: the view-only sheen albedo scaling (1 without sheen)
 }
 // GGX half-vector proposal density of one lobe (normal n, alpha a) for the direction wi: D(n.h) n.h / (4 v.h), 0 outside the lobe's hemisphere.
@@ -47,13 +54,17 @@ inline float reflectionLobePdf(float3 n, float3 v, float3 wi, float a) {
     const float nh = dot(n, h), vh = dot(v, h);
     return (nh > 0 && vh > 0) ? bsdfDGGX(nh, a) * nh / (4 * vh) : 0.0f;
 }
+// Proposal density of the BASE lobe: the anisotropic visible-normal density with anisotropy, the GGX half-vector density otherwise.
+inline float reflectionBasePdf(GPUDISurface s, float3 n, float3 v, float3 wi, ReflectionLobe lobe) {
+    return lobe.aniso ? bsdfAnisoVndfPdf(reflectionAnisoFrame(s, n, lobe), n, v, wi) : reflectionLobePdf(n, v, wi, bsdfAlpha(s.roughness));
+}
 // Two-lobe weight: ((1 - c F_c) f_base cos + c F_c D Vis_c cos_c) / (P_c pdf_c + (1 - P_c) pdf_b), the one-sample MIS estimator
 // of the coated specular BSDF.  `s` is the primary surface (base roughness, base normal).  `coatShare` returns the coat term's
 // share of the BSDF value at this direction (the emitter-ownership lobe is drawn from it, reflectionOwnerSurface).
 inline float3 reflectionCoatWeight(GPUDISurface s, float3 wi, ReflectionLobe lobe, thread float& coatShare) {
     const float3 n = normalize(diVec(s.shadingNormal)), v = normalize(diVec(s.viewDirection)), nc = lobe.coatNormal;
     const float ab = bsdfAlpha(s.roughness), ac = bsdfAlpha(lobe.coatRoughness);
-    const float pdf = lobe.pCoat * reflectionLobePdf(nc, v, wi, ac) + (1.0f - lobe.pCoat) * reflectionLobePdf(n, v, wi, ab);
+    const float pdf = lobe.pCoat * reflectionLobePdf(nc, v, wi, ac) + (1.0f - lobe.pCoat) * reflectionBasePdf(s, n, v, wi, lobe);
     coatShare = 0.0f;
     if (!(pdf > 0)) return 0;
     float3 base = 0;
@@ -63,7 +74,9 @@ inline float3 reflectionCoatWeight(GPUDISurface s, float3 wi, ReflectionLobe lob
         const float3 h = normalize(v + wi);
         const float nh = saturate(dot(n, h)), vh = saturate(dot(v, h));
         const float3 Fd = bsdfSpecFresnel(lobe.spec, vh);
-        base = (1.0f - lobe.coatFactor * fc) * lobe.sheenScale * (bsdfDGGX(nh, ab) * bsdfVSmithGGXCorrelated(nv, nl, ab) *
+        const float dv = lobe.aniso ? bsdfAnisoDV(reflectionAnisoFrame(s, n, lobe), v, wi, h, nl, nv, nh)
+                                    : bsdfDGGX(nh, ab) * bsdfVSmithGGXCorrelated(nv, nl, ab);
+        base = (1.0f - lobe.coatFactor * fc) * lobe.sheenScale * (dv *
                                                 bsdfSpecLobeColor(Fd, diVec(s.albedo), saturate(s.metallic), vh)) * nl;
     }
     const float ncl = dot(nc, wi), ncv = max(dot(nc, v), 1e-4f);
@@ -87,15 +100,32 @@ inline GPUDISurface reflectionOwnerSurface(GPUDISurface s, ReflectionLobe lobe, 
 // GGX proposal of reflectionDirection (same stream of random numbers, same direction and pdf); the weight of an
 // extended pixel uses the extended lobe colour instead of Schlick(f0), with the same finite-clamp rule.  For a coated pixel the
 // direction comes from the lobe picked by reflectionLobePick, and weight and pdf are those of the two-lobe mixture.
+// F15.1 (ticket 11): the proposal of the anisotropic base lobe, visible-normal sampling (Heitz 2018).  The density is that of the direction
+// at the recomputed half vector (bsdfAnisoVndfPdf), the same value the coat mixture evaluates; weight and validity follow
+// reflectionDirection (a proposal below the horizon contributes zero to the estimator).
+inline ReflectionDirection reflectionDirectionAniso(GPUDISurface s, float2 u, ReflectionLobe lobe) {
+    ReflectionDirection out{};float3 n=diVec(s.shadingNormal),v=diVec(s.viewDirection);
+    if(!s.valid)return out;if(!all(isfinite(n))||!all(isfinite(v))||dot(n,n)<=0||dot(v,v)<=0){out.error=true;return out;}
+    n=normalize(n);v=normalize(v);
+    const BsdfAniso an=reflectionAnisoFrame(s,n,lobe);
+    const float3 h=bsdfAnisoSampleVndf(an,n,v,u);if(dot(v,h)<=0)return out;
+    out.direction=reflect(-v,h);out.pdf=bsdfAnisoVndfPdf(an,n,v,out.direction);
+    // A sample in the extreme tail of the visible-normal density (n.h or v.h of the recomputed half vector rounds to <= 0) has density 0:
+    // it contributes zero to the estimator (like the rejected proposal of reflectionDirection), it is not an error.
+    if(!all(isfinite(out.direction))||!isfinite(out.pdf)){out.error=true;return out;}
+    out.valid=out.pdf>0;
+    return out;
+}
 inline ReflectionDirection reflectionDirectionLobe(GPUDISurface s, float2 u, ReflectionLobe lobe) {
-    ReflectionDirection out = reflectionDirection(reflectionLobeSurface(s, lobe), u);
+    ReflectionDirection out = (lobe.aniso && !(lobe.coat && lobe.sampleCoat)) ? reflectionDirectionAniso(s, u, lobe)
+                                                                              : reflectionDirection(reflectionLobeSurface(s, lobe), u);
     if (!lobe.extended || !out.valid || out.error) return out;
     if (lobe.coat) {
         const float3 nc = lobe.coatNormal, v = normalize(diVec(s.viewDirection)), n = normalize(diVec(s.shadingNormal));
         // The mixture pdf is evaluated at the recomputed half vector; a sample in the extreme tail of its lobe (n.h rounds to
         // <= 0) has density 0 in both lobes: it contributes zero to the estimator, it is not an error.
         const float mixture = lobe.pCoat * reflectionLobePdf(nc, v, out.direction, bsdfAlpha(lobe.coatRoughness)) +
-                              (1.0f - lobe.pCoat) * reflectionLobePdf(n, v, out.direction, bsdfAlpha(s.roughness));
+                              (1.0f - lobe.pCoat) * reflectionBasePdf(s, n, v, out.direction, lobe);
         if (mixture > 0) {
             out.pdf = mixture;
             out.weight = reflectionCoatWeight(s, out.direction, lobe, out.coatShare);

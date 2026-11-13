@@ -85,7 +85,16 @@ kernel void REFL_KERNEL(reflection_probe_only)(constant GPUReflectionParams& p [
         // grazing angle would gather a lobe half below its own horizon. Look the
         // probe up along the GGX dominant direction instead (Frostbite 2014,
         // 4.9.3), which bends toward the normal as roughness grows.
-        const float da=s.roughness*s.roughness,dk=(1-da)*(sqrt(1-da)+da);const float3 dominant=normalize(mix(n,r,dk));
+        const float da=s.roughness*s.roughness,dk=(1-da)*(sqrt(1-da)+da);
+#ifdef PHOSPHOR_REFL_LOBE
+        // F15.1 (ticket 11): an anisotropic lobe fetches along the README's bent normal (the dominant direction about it).
+        float3 nFetch=n;
+        {const auto fetchLobe=REFL_LOBE(p.flags,REFLECTION_LOBE_GUIDE_VALID,tid,s);
+            if(fetchLobe.aniso)nFetch=bsdfAnisoBentNormal(n,v,bsdfAnisoFrame(n,fetchLobe.anisoDirection,s.roughness,fetchLobe.anisoStrength),s.roughness,fetchLobe.anisoStrength);}
+        const float3 dominant=normalize(mix(nFetch,reflect(-v,nFetch),dk));
+#else
+        const float3 dominant=normalize(mix(n,r,dk));
+#endif
         const float3 L=reflectionProbeRadiance(diVec(s.position),dominant,s.roughness,true,p,probes,atlas,path),f0=bsdfBaseF0(diVec(s.albedo),s.metallic);
         // F13.5: tabulated split-sum DFG of the engine BRDF (tools/dfg_table.py);
         // the former analytic mobile fit was 14% low at roughness 0.3-0.6.
@@ -97,7 +106,7 @@ kernel void REFL_KERNEL(reflection_probe_only)(constant GPUReflectionParams& p [
         // F15.1 (ticket 08): extended pixels weight the probe/environment by the split-sum of their specular lobe.
         float3 fitWeight=bsdfEnvSpecular(f0,s.roughness,nv,phosphor::DfgTable);float3 coatResult=0;
         {const auto lobe=REFL_LOBE(p.flags,REFLECTION_LOBE_GUIDE_VALID,tid,s);
-            if(lobe.extended){const float3 e=bsdfSpecEnv(lobe.spec,diVec(s.albedo),saturate(s.metallic),s.roughness,nv,phosphor::DfgTable).specular;if(isfinite(nv)&&isfinite(s.roughness)&&all(isfinite(diVec(s.albedo))))fitWeight=e*lobe.sheenScale;}} // invalid input stays visible: the base weight is non-finite then
+            if(lobe.extended){const float3 e=bsdfSpecEnv(lobe.spec,diVec(s.albedo),saturate(s.metallic),lobe.envRoughness,nv,phosphor::DfgTable).specular;if(isfinite(nv)&&isfinite(s.roughness)&&all(isfinite(diVec(s.albedo))))fitWeight=e*lobe.sheenScale;}} // invalid input stays visible: the base weight is non-finite then
         // F15.1 (ticket 09): the coat term of the split sum, (1 - c F_c) material + c F_c clamp(A_c + B_c, 0, 1) at the coat roughness,
         // the coat radiance filtered at the coat roughness along the coat's dominant direction.
         {const auto lobe=REFL_LOBE(p.flags,REFLECTION_LOBE_GUIDE_VALID,tid,s);

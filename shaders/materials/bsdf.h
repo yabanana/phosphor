@@ -251,3 +251,113 @@ inline float bsdfSheenScaleLight(float3 color, float roughness, float NdotV, flo
     const float m = bsdfMax3(color);
     return min(1.0f - m * bsdfSheenE(roughness, NdotV, table), 1.0f - m * bsdfSheenE(roughness, NdotL, table));
 }
+
+// ---------------------------------------------------------------------------
+// F15.1 (ticket 11): KHR_materials_anisotropy (ratified text and the README's informative GLSL, research/khr-materials.md section 4).
+//
+//   alpha_b = alpha = max(roughness^2, 0.002)           (perpendicular to the lobe direction)
+//   alpha_t = mix(alpha, 1, strength^2)                 (along the lobe direction T': the highlight is stretched along it)
+//   D(h)    = 1 / (pi alpha_t alpha_b ((h.t)^2/alpha_t^2 + (h.b)^2/alpha_b^2 + (h.n)^2)^2)      (Burley, normative)
+//   V       = 0.5 / (N.L |(alpha_t T.V, alpha_b B.V, N.V)| + N.V |(alpha_t T.L, alpha_b B.L, N.L)|)   (informative; NOT clamped to 1:
+//             the isotropic limit then equals bsdfDGGX * bsdfVSmithGGXCorrelated, glTF Appendix B)
+//   f_spec  = F D V,  F, the diffuse weighting and the metal/dielectric mix are those of bsdfSpecEval.
+// The lobe axes are world unit vectors in the tangent plane of the shading normal: T' = the rotated tangent (or the
+// direction texture), B' = cross(N, T').  The resolve builds them from the mesh tangent (handedness w and the mirrored-instance
+// sign are folded into the vertex tangent's w), the guide carries T' (GPULobeGuide::anisotropyDirection) for DI and the transport.
+//
+// Environment (declared, decision 06 amendment of 2026-11-13): the radiance fetch direction is the README's bent normal; the
+// split sum (DFG table, diffuse weight included) runs at the effective isotropic roughness sqrt(alpha_eff),
+// alpha_eff = sqrt((alpha_t^2 + alpha_b^2) / 2).
+// ---------------------------------------------------------------------------
+struct BsdfAniso {
+    float3 t, b;     // T', B' unit, orthogonal to the shading normal
+    float at, ab;    // alpha_t, alpha_b
+};
+// `tdir` is any vector near the tangent plane of `n` (the guide's quantised direction): Gram-Schmidt against n; a degenerate
+// direction falls back to an arbitrary tangent (the lobe then stays well defined).
+inline BsdfAniso bsdfAnisoFrame(float3 n, float3 tdir, float roughness, float strength) {
+    BsdfAniso a;
+    const float3 t = tdir - n * dot(n, tdir);
+    const float l2 = dot(t, t);
+    a.t = l2 > 1e-12f ? t * rsqrt(l2) : normalize(cross(abs(n.z) < 0.999f ? float3(0, 0, 1) : float3(0, 1, 0), n));
+    a.b = cross(n, a.t);
+    a.ab = bsdfAlpha(roughness);
+    a.at = a.ab + (1.0f - a.ab) * (strength * strength);
+    return a;
+}
+// Burley anisotropic GGX in the README's stable form.
+inline float bsdfDAniso(float NdotH, float TdotH, float BdotH, float at, float ab) {
+    const float a2 = at * ab;
+    const float3 f = float3(ab * TdotH, at * BdotH, a2 * NdotH);
+    const float w2 = a2 / dot(f, f);
+    return a2 * w2 * w2 / M_PI_F;
+}
+inline float bsdfVAniso(float NdotV, float NdotL, float TdotV, float BdotV, float TdotL, float BdotL, float at, float ab) {
+    const float gv = NdotL * length(float3(at * TdotV, ab * BdotV, NdotV));
+    const float gl = NdotV * length(float3(at * TdotL, ab * BdotL, NdotL));
+    return 0.5f / max(gv + gl, 1e-5f);
+}
+// D * V of the anisotropic lobe for unit v, l, h = normalize(v + l); the caller supplies the clamped dot products.
+inline float bsdfAnisoDV(BsdfAniso an, float3 v, float3 l, float3 h, float NdotL, float NdotV, float NdotH) {
+    return bsdfDAniso(NdotH, dot(an.t, h), dot(an.b, h), an.at, an.ab) *
+           bsdfVAniso(NdotV, NdotL, dot(an.t, v), dot(an.b, v), dot(an.t, l), dot(an.b, l), an.at, an.ab);
+}
+// Same structure as bsdfSpecEval with the anisotropic D V.
+inline BsdfBaseLobes bsdfSpecEvalAniso(BsdfDielectricSpec s, BsdfAniso an, float3 v, float3 l, float3 h, float NdotL, float NdotV,
+                                       float NdotH, float VdotH, float3 albedo, float metallic) {
+    const float3 Fd = bsdfSpecFresnel(s, VdotH);
+    BsdfBaseLobes out;
+    out.diffuse = bsdfSpecDiffuse(Fd, metallic, albedo);
+    out.specular = bsdfAnisoDV(an, v, l, h, NdotL, NdotV, NdotH) * bsdfSpecLobeColor(Fd, albedo, metallic, VdotH);
+    return out;
+}
+// Effective isotropic roughness of the split-sum environment term; the base roughness itself without anisotropy.
+inline float bsdfAnisoEnvRoughness(float roughness, float strength) {
+    if (!(strength > 0.0f)) return roughness;
+    const float ab = bsdfAlpha(roughness), at = ab + (1.0f - ab) * (strength * strength);
+    return sqrt(sqrt(0.5f * (at * at + ab * ab)));
+}
+// Roughness of the DIFFUSE complement 1 - max3(E_dielectric) where the specular lobe is TRANSPORTED (the composite): the transport
+// carries the exact anisotropic lobe, so the complement should track its dielectric albedo.  Against the exact quadrature on a sphere
+// (alpha_b 0.09, F0 0.04) the mean alpha (alpha_t + alpha_b) / 2 is within 7 % / 5 % of the albedo at strength 0.5 / 1 where the rms
+// alpha of the split-sum fit is 12 % / 24 % low (a diffuse complement 0.008 too large: the furnace of the transported lobe gains
+// energy beyond its 0.5 % bound).  Only a composite that adds a transported specular signal uses it; the deterministic resolve, the composite without
+// a specular signal and the probe fit keep the declared rms fit (bsdfAnisoEnvRoughness).
+inline float bsdfAnisoDiffuseRoughness(float roughness, float strength) {
+    if (!(strength > 0.0f)) return roughness;
+    const float ab = bsdfAlpha(roughness), at = ab + (1.0f - ab) * (strength * strength);
+    return sqrt(0.5f * (at + ab));
+}
+// The README's bent normal (fetch direction of the environment): towards the plane spanned by v and the stretch direction.
+inline float3 bsdfAnisoBentNormal(float3 n, float3 v, BsdfAniso an, float roughness, float strength) {
+    const float3 bent = cross(cross(an.b, v), an.b);
+    if (!(dot(bent, bent) > 1e-12f)) return n;
+    const float k = 1.0f - strength * (1.0f - roughness), a = (k * k) * (k * k);
+    const float3 m = mix(normalize(bent), n, a);
+    return dot(m, m) > 1e-12f ? normalize(m) : n;
+}
+// Visible-normal sampling (Heitz 2018) of the anisotropic GGX: a visible half vector in world space for the uniform pair u.
+inline float3 bsdfAnisoSampleVndf(BsdfAniso an, float3 n, float3 v, float2 u) {
+    const float3 ve = float3(dot(v, an.t), dot(v, an.b), dot(v, n));
+    const float3 vh = normalize(float3(an.at * ve.x, an.ab * ve.y, ve.z));
+    const float lensq = vh.x * vh.x + vh.y * vh.y;
+    const float3 t1 = lensq > 0.0f ? float3(-vh.y, vh.x, 0.0f) * rsqrt(lensq) : float3(1.0f, 0.0f, 0.0f);
+    const float3 t2 = cross(vh, t1);
+    const float r = sqrt(u.x), phi = 2.0f * M_PI_F * u.y;
+    const float p1 = r * cos(phi);
+    float p2 = r * sin(phi);
+    const float s = 0.5f * (1.0f + vh.z);
+    p2 = (1.0f - s) * sqrt(max(0.0f, 1.0f - p1 * p1)) + s * p2;
+    const float3 nh = p1 * t1 + p2 * t2 + sqrt(max(0.0f, 1.0f - p1 * p1 - p2 * p2)) * vh;
+    const float3 he = normalize(float3(an.at * nh.x, an.ab * nh.y, max(0.0f, nh.z)));
+    return an.t * he.x + an.b * he.y + n * he.z;
+}
+// Solid-angle density of the direction wi reflected about the VNDF half vector: D(h) G1(v) / (4 N.V) = D(h) / (2 (N.V + |(at T.V, ab B.V, N.V)|)).
+// 0 outside the visible hemisphere of h.
+inline float bsdfAnisoVndfPdf(BsdfAniso an, float3 n, float3 v, float3 wi) {
+    const float3 h = normalize(v + wi);
+    const float nh = dot(n, h), vh = dot(v, h), nv = dot(n, v);
+    if (!(nh > 0.0f && vh > 0.0f && nv > 0.0f)) return 0.0f;
+    const float len = length(float3(an.at * dot(an.t, v), an.ab * dot(an.b, v), nv));
+    return bsdfDAniso(nh, dot(an.t, h), dot(an.b, h), an.at, an.ab) / (2.0f * (nv + len));
+}

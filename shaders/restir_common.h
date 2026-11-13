@@ -165,6 +165,11 @@ struct DILobe {
     bool sheen;
     float3 sheenColor;
     float sheenRoughness;
+    // F15.1 (ticket 11): KHR_materials_anisotropy.  The lobe direction T' is the guide's world direction (orthogonal to N up to the
+    // oct quantisation: bsdfAnisoFrame re-orthogonalises), the bitangent B' = cross(N, T') is built where the normal is known.
+    bool aniso;
+    float3 anisoDirection;
+    float anisoStrength;
 };
 inline DILobe DI_FN(diLoadLobe)(constant GPUDIParams& p, const device GPULobeGuide* guides, uint index) {
     DILobe l{};
@@ -185,6 +190,11 @@ inline DILobe DI_FN(diLoadLobe)(constant GPUDIParams& p, const device GPULobeGui
                 l.sheen = true;
                 l.sheenColor = float3(u.sheenColor[0], u.sheenColor[1], u.sheenColor[2]);
                 l.sheenRoughness = u.sheenRoughness;
+            }
+            if ((kMaterialFeatures & MATERIAL_FEATURE_ANISOTROPY) != 0u && (g.features & MATERIAL_FEATURE_ANISOTROPY) != 0u) {
+                l.aniso = true;
+                l.anisoStrength = u.anisotropyStrength;
+                l.anisoDirection = float3(u.anisotropyDirection[0], u.anisotropyDirection[1], u.anisotropyDirection[2]);
             }
         }
     }
@@ -208,8 +218,12 @@ inline float3 DI_FN(diBRDFLobe)(GPUDISurface surface, DISample s, float specular
             const float nh = saturate(dot(n, h)), vh = saturate(dot(v, h));
             const float metallic = saturate(surface.metallic);
             const float3 albedo = max(diVec(surface.albedo), 0.0f);
-            const BsdfBaseLobes lobes = bsdfSpecEval(bsdfSpecularParams(lobe.ior, lobe.specularFactor, lobe.specularColor),
-                                                     nl, nv, nh, vh, albedo, metallic, bsdfAlpha(surface.roughness));
+            const BsdfDielectricSpec spec = bsdfSpecularParams(lobe.ior, lobe.specularFactor, lobe.specularColor);
+            // F15.1 (ticket 11): the anisotropic D V of the guide's direction replaces the isotropic GGX.
+            const BsdfBaseLobes lobes = ((kMaterialFeatures & MATERIAL_FEATURE_ANISOTROPY) != 0u && lobe.aniso)
+                ? bsdfSpecEvalAniso(spec, bsdfAnisoFrame(n, lobe.anisoDirection, surface.roughness, lobe.anisoStrength), v, s.wi, h, nl, nv, nh, vh,
+                                    albedo, metallic)
+                : bsdfSpecEval(spec, nl, nv, nh, vh, albedo, metallic, bsdfAlpha(surface.roughness));
             result = (lobes.diffuse + specularWeight * lobes.specular) * incident * nl;
             // F15.1 (ticket 10): the sheen layer between the material and the coat.  The transport does not sample sheen: the
             // emitter share of the sheen lobe is 1 (DI owns it), the material keeps its own emitter weights; the albedo

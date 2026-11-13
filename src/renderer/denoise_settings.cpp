@@ -19,6 +19,11 @@ float denoiseLobeRoughness(float base,u32 key,const DenoiseLobeGuide& g){
     case SPECULAR_LOBE_TRANSMISSION:return std::isfinite(g.ior)&&std::isfinite(base)?base*std::clamp(2*(g.ior>=1?g.ior:1.5f)-2,0.f,1.f):base;
     default:return base;}
 }
+float denoiseAnisotropicRoughness(float base,float strength){
+    if(!std::isfinite(base)||!std::isfinite(strength))return base;
+    const float ab=std::max(base*base,0.002f),k=std::clamp(strength,0.f,1.f),at=ab+(1.f-ab)*k*k;
+    return std::sqrt(std::min(at,ab));
+}
 glm::vec3 denoiseLobeAxis(const GPUDISurface& s,u32 key,const DenoiseLobeGuide& g){
     const auto n=v3(s.shadingNormal),v=v3(s.viewDirection);if(!finite(n)||!finite(v)||glm::dot(n,n)<=0||glm::dot(v,v)<=0)return {};
     const auto nn=glm::normalize(n),vv=glm::normalize(v);const auto reflected=glm::reflect(-vv,nn);

@@ -49,6 +49,21 @@ LobeGuideExpectation expectedLobeParams(const GPUMaterial& material, std::span<c
             if (e0.sheenColorTex != INVALID_TEXTURE_INDEX || e0.sheenRoughnessTex != INVALID_TEXTURE_INDEX) r.unverified = true;
         }
     }
+    if (features & MATERIAL_FEATURE_ANISOTROPY) {
+        // Record 1 (GPUMaterialExt1).  shadeSurface: saturate(strength * tex.b) (the half 1.0 fallback without a texture); the direction
+        // is the rotated mesh tangent (or the texture direction), orthogonal to the shading normal: compared by angle in checkLobeGuide.
+        if (material.extensionIndex == MATERIAL_EXTENSION_INVALID || size_t(material.extensionIndex) + 1 >= extensions.size()) {
+            if (extensionsValid) *extensionsValid = false;
+            r.unverified = true;
+            return r;
+        }
+        GPUMaterialExt1 e1;
+        std::memcpy(&e1, &extensions[material.extensionIndex + 1], sizeof(e1));
+        const float s = e1.anisotropyStrength * 1.0f;
+        r.params.anisotropyStrength = s < 0.0f ? 0.0f : (s > 1.0f ? 1.0f : s);
+        r.anisotropyDirectionChecked = true;
+        if (e1.anisotropyTex != INVALID_TEXTURE_INDEX) r.unverified = true;
+    }
     return r;
 }
 
@@ -136,6 +151,25 @@ LobeGuideCheckResult checkLobeGuide(const LobeGuideCheckInput& in) {
             }
             got.clearcoatNormal = 0;
             want.clearcoatNormal = 0;
+        }
+        if (e.anisotropyDirectionChecked) {
+            const LobeVec3 ad = decodeLobeOct(g.anisotropyDirection);
+            const double len = std::sqrt(double(ad.x) * ad.x + double(ad.y) * ad.y + double(ad.z) * ad.z);
+            if (!(std::fabs(len - 1.0) < 1e-3)) {
+                note(r, format("pixel (%u,%u) material %u: anisotropy direction is not a unit vector (length %g)", x, y, materialIndex, len));
+                continue;
+            }
+            const double sl = std::sqrt(double(s.shadingNormal[0]) * s.shadingNormal[0] + double(s.shadingNormal[1]) * s.shadingNormal[1] +
+                                        double(s.shadingNormal[2]) * s.shadingNormal[2]);
+            const double d = (double(ad.x) * s.shadingNormal[0] + double(ad.y) * s.shadingNormal[1] + double(ad.z) * s.shadingNormal[2]) /
+                             (sl > 0.0 ? sl : 1.0);
+            if (!(std::fabs(d) < 2e-3)) {
+                note(r, format("pixel (%u,%u) material %u: anisotropy direction is not in the tangent plane (cos to the shading normal %g)", x, y,
+                               materialIndex, d));
+                continue;
+            }
+            got.anisotropyDirection = 0;
+            want.anisotropyDirection = 0;
         }
         if (std::memcmp(&got, &want, sizeof(got)) != 0) {
             u32 word = 0;

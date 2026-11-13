@@ -26,6 +26,12 @@ struct DenoiseLobePixel { u32 sampleFlags=0; DenoiseLobeGuide guide{}; };
 // Id 0 the base roughness, id 1 min(base roughness, the clearcoat roughness of the guide),
 // id 2 (transmission) the base roughness scaled by clamp(2*ior-2, 0, 1) (ticket 13 refines it), id 3 reserved = base.
 [[nodiscard]] float denoiseLobeRoughness(float baseRoughness,u32 lobeKey,const DenoiseLobeGuide&);
+// F15.1 (ticket 11): edge-stopping roughness of an anisotropic pixel = the roughness of its SHARPER axis: sqrt(min(alpha_t, alpha_b)) with
+// alpha_b = max(r^2, 0.002) (perpendicular to the lobe direction) and alpha_t = mix(alpha_b, 1, strength^2) >= alpha_b, i.e. the base roughness
+// (up to the alpha floor): the highlight keeps the width of the narrow axis across the bitangent, so the lobe bound of the neighbours and
+// the history roughness test must not widen to the stretched axis or to the effective environment roughness.  The key of an anisotropic
+// pixel is the base lobe (id 0), whose rule already returns this value: the "_lobe" denoiser kernels need no anisotropy code.
+[[nodiscard]] float denoiseAnisotropicRoughness(float baseRoughness,float anisotropyStrength);
 // Spatial guide axis of the sampled lobe: the reflection axis, or for the refract axis the direction refracted at the
 // shading normal with eta = 1/ior (ior < 1 means the default 1.5; total internal reflection falls back to the reflection axis).
 [[nodiscard]] glm::vec3 denoiseLobeAxis(const GPUDISurface&,u32 lobeKey,const DenoiseLobeGuide&);

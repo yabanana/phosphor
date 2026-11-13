@@ -89,9 +89,9 @@ TEST_CASE("lobe guide reference: resolved parameters of ior/specular") {
     // A base material, a union without the bit and a feature the resolve does not resolve yet: features 0.
     CHECK(expectedLobeParams(GPUMaterial{}, ext, MATERIAL_FEATURE_SPECULAR_IOR).params.features == 0);
     CHECK(expectedLobeParams(extendedMaterial(0), ext, 0).params.features == 0);
-    GPUMaterial anisotropic{};
-    anisotropic.flags = MATERIAL_FEATURE_ANISOTROPY << MATERIAL_FEATURE_SHIFT;
-    CHECK(expectedLobeParams(anisotropic, ext, MATERIAL_FEATURES_ALL).params.features == 0);
+    GPUMaterial iridescent{};
+    iridescent.flags = MATERIAL_FEATURE_IRIDESCENCE << MATERIAL_FEATURE_SHIFT;
+    CHECK(expectedLobeParams(iridescent, ext, MATERIAL_FEATURES_ALL).params.features == 0);
     // Textures make the parameters unverifiable on the CPU.
     const GPUMaterialExtRecord textured[1] = {record0(1.5f, 1.0f, 1.0f, 1.0f, 1.0f, INVALID_TEXTURE_INDEX, 5u)};
     CHECK(expectedLobeParams(extendedMaterial(0), textured, MATERIAL_FEATURE_SPECULAR_IOR).unverified);
@@ -286,4 +286,70 @@ TEST_CASE("lobe guide reference: resolved parameters of sheen (roughness clamped
     const LobeParams u = unpackLobeGuide(g);
     CHECK(u.sheenColor[1] == 0.5f);
     CHECK(u.sheenRoughness == doctest::Approx(0.3f).epsilon(1e-3));
+}
+
+// F15.1 (ticket 11): anisotropy.  Record 1 carries the strength; the direction depends on the mesh tangent frame and is compared by angle.
+namespace {
+GPUMaterialExtRecord anisotropyRecord(float strength, u32 texture = INVALID_TEXTURE_INDEX) {
+    GPUMaterialExt1 e{};
+    e.anisotropyStrength = strength;
+    e.anisotropyRotation = 0.5f;
+    e.anisotropyTex = texture;
+    e.iridescenceFactorTex = e.iridescenceThicknessTex = e.transmissionTex = e.volumeThicknessTex = INVALID_TEXTURE_INDEX;
+    GPUMaterialExtRecord rec{};
+    std::memcpy(&rec, &e, sizeof(e));
+    return rec;
+}
+GPUMaterial anisotropicMaterial(u32 extensionIndex) {
+    GPUMaterial m{};
+    m.flags = MATERIAL_FEATURE_ANISOTROPY << MATERIAL_FEATURE_SHIFT;
+    m.extensionIndex = extensionIndex;
+    return m;
+}
+} // namespace
+
+TEST_CASE("lobe guide reference: resolved strength of anisotropy, direction checked by angle") {
+    const GPUMaterialExtRecord ext[4] = {GPUMaterialExtRecord{}, anisotropyRecord(0.6f), GPUMaterialExtRecord{}, anisotropyRecord(0.5f, 5u)};
+    auto e = expectedLobeParams(anisotropicMaterial(0), ext, MATERIAL_FEATURE_ANISOTROPY);
+    CHECK(e.params.features == MATERIAL_FEATURE_ANISOTROPY);
+    CHECK(e.params.anisotropyStrength == 0.6f);
+    CHECK(e.anisotropyDirectionChecked);
+    CHECK_FALSE(e.unverified);
+    CHECK(expectedLobeParams(anisotropicMaterial(2), ext, MATERIAL_FEATURE_ANISOTROPY).unverified); // the direction texture
+    CHECK(expectedLobeParams(anisotropicMaterial(0), ext, MATERIAL_FEATURE_SPECULAR_IOR).params.features == 0);
+    // The record of the last group is out of range for the strength record.
+    bool valid = true;
+    CHECK(expectedLobeParams(anisotropicMaterial(3), ext, MATERIAL_FEATURE_ANISOTROPY, &valid).unverified);
+    CHECK_FALSE(valid);
+    const LobeParams u = unpackLobeGuide(packLobeGuide(e.params));
+    CHECK(u.anisotropyStrength == doctest::Approx(0.6f).epsilon(1e-3));
+}
+
+TEST_CASE("lobe guide reference: the anisotropy direction is compared by angle (tangent plane), the strength bit for bit") {
+    Fixture f;
+    f.materials[1] = anisotropicMaterial(4);
+    f.extensions[4] = GPUMaterialExtRecord{};
+    f.extensions[5] = anisotropyRecord(0.6f);
+    f.input.featureUnion = MATERIAL_FEATURE_ANISOTROPY;
+    f.surfaces[1].shadingNormal[0] = 0.6f; f.surfaces[1].shadingNormal[1] = 0.0f; f.surfaces[1].shadingNormal[2] = 0.8f;
+    f.materials[0] = GPUMaterial{};
+    f.guides[0] = GPULobeGuide{};
+    f.materials[2] = GPUMaterial{};
+    f.guides[2] = GPULobeGuide{};
+    auto write = [&](float dx, float dy, float dz) {
+        LobeParams p = expectedLobeParams(f.materials[1], f.extensions, MATERIAL_FEATURE_ANISOTROPY).params;
+        p.anisotropyDirection[0] = dx; p.anisotropyDirection[1] = dy; p.anisotropyDirection[2] = dz;
+        f.guides[1] = packLobeGuide(p);
+    };
+    write(0.0f, 1.0f, 0.0f); // orthogonal to the shading normal
+    CHECK(checkLobeGuide(f.input).pass());
+    write(0.8f, 0.0f, -0.6f); // also in the tangent plane, any rotation passes
+    CHECK(checkLobeGuide(f.input).pass());
+    write(0.6f, 0.0f, 0.8f); // along the shading normal
+    CHECK_FALSE(checkLobeGuide(f.input).pass());
+    write(0.0f, 0.0f, 0.0f); // decodes to +Z: not in the tangent plane
+    CHECK_FALSE(checkLobeGuide(f.input).pass());
+    write(0.0f, 1.0f, 0.0f);
+    f.guides[1].anisotropyIridescence ^= 1u; // the strength is compared bit for bit
+    CHECK_FALSE(checkLobeGuide(f.input).pass());
 }

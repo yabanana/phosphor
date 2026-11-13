@@ -9,7 +9,8 @@
 // DI surfaces can be compared bit for bit (--debug-lobe-guide).  Portable
 // (phosphor_core): no Metal.
 //
-// Scope = LOBE_GUIDE_RESOLVED_FEATURES (KHR_materials_ior/specular, KHR_materials_clearcoat and KHR_materials_sheen).  A
+// Scope = LOBE_GUIDE_RESOLVED_FEATURES (KHR_materials_ior/specular, KHR_materials_clearcoat, KHR_materials_sheen and
+// KHR_materials_anisotropy).  A
 // pixel whose resolved fields depend on a texture (the material references a
 // texture for one of them) is `unverified`: its record is not compared.
 // ---------------------------------------------------------------------------
@@ -31,6 +32,9 @@ struct LobeGuideExpectation {
     /// material has no normal map either (compared by angle; with a base normal map only its unit length is checked).
     bool coatNormalIsShading = false;
     bool coatNormalChecked = false; // the coat normal is compared/validated (clearcoat resolved)
+    /// Anisotropy: the guide's direction depends on the mesh tangent frame (the CPU mirror has no vertices): it is compared by angle
+    /// (a unit vector in the tangent plane of the pixel's shading normal); the strength is compared bit for bit.
+    bool anisotropyDirectionChecked = false;
 };
 
 /// The parameters shadeSurface resolves for `material` in a scene whose feature

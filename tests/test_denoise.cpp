@@ -344,3 +344,23 @@ TEST_CASE("F15.1 the refract axis follows the refracted direction, not the refle
     CHECK(wRefract>wReflect*1.3f); // the refracted image moves slower per pixel than the reflected one
     CHECK(denoiseLobeAxis(a,4,g).x!=denoiseLobeAxis(a,0,g).x);
 }
+
+TEST_CASE("F15.1 ticket 11: an anisotropic pixel is filtered at the roughness of its sharper axis"){
+    DenoiseLobeGuide g;g.ior=1.5f;
+    for(const float r:{.2f,.3f,.6f,1.f})for(const float k:{0.f,.25f,.5f,1.f}){
+        // alpha_t >= alpha_b: the sharper axis is the perpendicular one, the base roughness; the base-lobe key returns the same value.
+        CHECK(denoiseAnisotropicRoughness(r,k)==doctest::Approx(r).epsilon(1e-5));
+        CHECK(denoiseLobeRoughness(r,0,g)==doctest::Approx(denoiseAnisotropicRoughness(r,k)).epsilon(1e-5));
+    }
+    CHECK(denoiseAnisotropicRoughness(.01f,1.f)==doctest::Approx(std::sqrt(.002f)).epsilon(1e-5)); // the alpha floor
+    // The rejected alternative, the effective roughness sqrt(sqrt((alpha_t^2 + alpha_b^2) / 2)), is rougher than the sharp axis for k > 0:
+    const float r=.3f,k=1.f,ab=r*r,at=ab+(1-ab)*k*k,eff=std::sqrt(std::sqrt(.5f*(at*at+ab*ab)));
+    CHECK(eff>denoiseAnisotropicRoughness(r,k)*1.5f);
+    // With the rule the lobe bound of a pair of reflection axes is the one of the sharp axis (a stretched-axis bound would let them through).
+    const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);auto a=receiver();a.roughness=.3f;a.viewDirection[2]=1;auto b=a;
+    const float angle=.12f;b.viewDirection[0]=std::sin(angle);b.viewDirection[2]=std::cos(angle);
+    DenoiseLobePixel base;base.guide=g;
+    const float sharp=denoiseSpatialWeight(a,b,2,2,1,p,&base,&base);
+    auto wide=a;wide.roughness=eff;auto wideB=b;wideB.roughness=eff;
+    CHECK(denoiseSpatialWeight(wide,wideB,2,2,1,p,&base,&base)>sharp);
+}

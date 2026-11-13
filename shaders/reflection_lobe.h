@@ -42,10 +42,21 @@ struct ReflectionLobe {
     bool sheen;
     float3 sheenColor;
     float sheenRoughness, sheenAlbedo, sheenScale;
+    // F15.1 (ticket 11): KHR_materials_anisotropy.  The base specular lobe is sampled by anisotropic visible-normal sampling (the coat
+    // lobe, when present, stays isotropic): the weight is the exact f cos / pdf of that proposal.  anisoDirection is the guide's T'
+    // (frame rebuilt with the primary normal, bsdfAnisoFrame); envRoughness is the roughness of every split-sum term (the effective
+    // isotropic roughness of the lobe, the base roughness without anisotropy).
+    bool aniso;
+    float3 anisoDirection;
+    float anisoStrength;
+    float envRoughness;
+    float diffuseRoughness; // roughness of the diffuse complement in the composite (bsdfAnisoDiffuseRoughness), the base roughness without anisotropy
 };
 inline ReflectionLobe reflectionLoadLobe(uint flags, uint validFlag, const device GPULobeGuide* guides, uint index, GPUDISurface s) {
     ReflectionLobe l{};
     l.sheenScale = 1.0f;
+    l.envRoughness = s.roughness;
+    l.diffuseRoughness = s.roughness;
     if ((kMaterialFeatures & LOBE_GUIDE_RESOLVED_FEATURES) != 0u && (flags & validFlag) != 0u) {
         const GPULobeGuide g = guides[index];
         if ((g.features & LOBE_GUIDE_RESOLVED_FEATURES) != 0u) {
@@ -63,6 +74,18 @@ inline ReflectionLobe reflectionLoadLobe(uint flags, uint validFlag, const devic
                     l.sheenScale = 1.0f - bsdfMax3(l.sheenColor) * l.sheenAlbedo;
                 }
             }
+            if ((kMaterialFeatures & MATERIAL_FEATURE_ANISOTROPY) != 0u && (g.features & MATERIAL_FEATURE_ANISOTROPY) != 0u) {
+                const float3 ad = float3(u.anisotropyDirection[0], u.anisotropyDirection[1], u.anisotropyDirection[2]);
+                float3 n = diVec(s.shadingNormal), v = diVec(s.viewDirection);
+                if (s.valid && all(isfinite(n)) && all(isfinite(v)) && dot(n, n) > 0 && dot(v, v) > 0 && all(isfinite(ad)) && dot(ad, ad) > 0 &&
+                    isfinite(u.anisotropyStrength) && isfinite(s.roughness)) {
+                    l.aniso = true;
+                    l.anisoStrength = u.anisotropyStrength;
+                    l.anisoDirection = ad;
+                    l.envRoughness = bsdfAnisoEnvRoughness(s.roughness, l.anisoStrength);
+                    l.diffuseRoughness = bsdfAnisoDiffuseRoughness(s.roughness, l.anisoStrength);
+                }
+            }
             if ((kMaterialFeatures & MATERIAL_FEATURE_CLEARCOAT) != 0u && (g.features & MATERIAL_FEATURE_CLEARCOAT) != 0u) {
                 const float3 nc = float3(u.clearcoatNormal[0], u.clearcoatNormal[1], u.clearcoatNormal[2]);
                 float3 n = diVec(s.shadingNormal), v = diVec(s.viewDirection);
@@ -72,7 +95,7 @@ inline ReflectionLobe reflectionLoadLobe(uint flags, uint validFlag, const devic
                     l.coatFactor = u.clearcoatFactor;
                     l.coatRoughness = u.clearcoatRoughness;
                     l.coatNormal = normalize(nc);
-                    const float baseAlbedo = bsdfMax3(bsdfSpecEnv(l.spec, diVec(s.albedo), saturate(s.metallic), s.roughness,
+                    const float baseAlbedo = bsdfMax3(bsdfSpecEnv(l.spec, diVec(s.albedo), saturate(s.metallic), l.envRoughness,
                                                                   max(dot(n, v), 1e-4f), phosphor::DfgTable).specular);
                     const CoatLobeSelect sel = coatLobeSelect(l.coatFactor, abs(dot(l.coatNormal, v)), baseAlbedo);
                     l.pCoat = sel.pCoat;

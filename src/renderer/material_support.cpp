@@ -63,6 +63,17 @@ const MaterialSupportTable& currentSupportTable() {
         FeatureSupportEntry& sheen = t.features[static_cast<u32>(MaterialFeature::Sheen)];
         sheen.level                = SupportLevel::Approximated;
         sheen.approximation        = "lobe_not_sampled_environment_term_in_composition;sun_disk_point_evaluated;secondary_rt_hits_ignore_sheen";
+        // F15.1 (ticket 11): anisotropy shades every primary light path with the exact anisotropic GGX D and V of the rotated tangent frame
+        // (the vertex tangent's handedness and the mirrored-instance sign give a mirrored instance the exact mirror image): resolve/forward
+        // (analytic lights, the sun disk keyed on the narrow axis alpha_b), ReSTIR and clustered DI (target and shading), and the transport
+        // (anisotropic visible-normal sampling, exact weight).  Declared approximations (decision 06): the environment term keeps the bent
+        // normal for the fetch direction and evaluates the split sum at the effective roughness sqrt(alpha_eff), alpha_eff =
+        // sqrt((alpha_t^2 + alpha_b^2) / 2) (6-7 % above the exact quadrature at strength 1 on a metal), secondary RT hits ignore the
+        // anisotropy, a primitive without tangents resolves it as strength 0, and the narrow-lobe (alpha < 0.05) sun disk and the
+        // anisotropy texture are not validated against an independent reference yet.
+        FeatureSupportEntry& anisotropy = t.features[static_cast<u32>(MaterialFeature::Anisotropy)];
+        anisotropy.level                = SupportLevel::Approximated;
+        anisotropy.approximation        = "environment_split_sum_at_effective_roughness;secondary_rt_hits_ignore_anisotropy;no_tangents_means_isotropic";
         return t;
     }();
     return table;

@@ -517,22 +517,22 @@ TEST_CASE("glTF materials: uv bake of a worked example") {
 }
 
 TEST_CASE("glTF extensions: required extensions must be rendered, not merely parsed, or the asset is refused") {
-    const std::string aniso = R"({"asset":{"version":"2.0"},
-        "extensionsUsed":["KHR_materials_anisotropy"],"extensionsRequired":["KHR_materials_anisotropy"]})";
+    const std::string irid = R"({"asset":{"version":"2.0"},
+        "extensionsUsed":["KHR_materials_iridescence"],"extensionsRequired":["KHR_materials_iridescence"]})";
     SUBCASE("a required extension whose feature is unsupported today is refused with a reason") {
-        const auto bad = unsupportedRequiredExtensions(loadModel(aniso));
+        const auto bad = unsupportedRequiredExtensions(loadModel(irid));
         REQUIRE(bad.size() == 1);
-        CHECK(bad[0].name == "KHR_materials_anisotropy");
+        CHECK(bad[0].name == "KHR_materials_iridescence");
         CHECK(bad[0].reason.find("not rendered") != std::string::npos);
     }
     SUBCASE("the same asset loads once the feature is implemented or approximated") {
         MaterialSupportTable table = currentSupportTable();
-        auto& entry = table.features[static_cast<size_t>(MaterialFeature::Anisotropy)];
+        auto& entry = table.features[static_cast<size_t>(MaterialFeature::Iridescence)];
         entry.level = SupportLevel::Implemented;
-        CHECK(unsupportedRequiredExtensions(loadModel(aniso), table).empty());
+        CHECK(unsupportedRequiredExtensions(loadModel(irid), table).empty());
         entry.level = SupportLevel::Approximated;
         entry.approximation = "test-approx";
-        CHECK(unsupportedRequiredExtensions(loadModel(aniso), table).empty());
+        CHECK(unsupportedRequiredExtensions(loadModel(irid), table).empty());
     }
     SUBCASE("every material extension maps to its own feature") {
         struct Case { const char* name; MaterialFeature feature; };
