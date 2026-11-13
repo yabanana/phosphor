@@ -8,7 +8,7 @@ Roadmap: F15.1, F15.3
 
 **Status:** resolved (2026-11-13; Khronos side-by-side and coat-normal-texture fixtures carried to ticket 22)
 
-- [x] Clearcoat grids (factor × roughness, coat normal) pass decision-11 thresholds against the independent reference; furnace bound holds
+- [x] Clearcoat grids (factor × roughness, coat normal) pass decision-11 thresholds against the independent reference; furnace bound holds — coat normal = the shading normal on the grids; coat-normal TEXTURE fixtures → ticket 22
 - [x] Rough base + smooth coat: the coat reflection survives the denoiser and matches the reference within the transport bound
 - [x] Emitter ownership: an emissive-panel fixture shows no double count between DI and the coat lobe's transport
 - [x] Negative control (coat ignored, or coat F0 from the material ior as in the Sample Renderer) fails the bound
