@@ -459,11 +459,26 @@ inline float3 bsdfSpecDiffuseIrid(BsdfDielectricSpec s, BsdfIrid irid, float3 Fd
     return w * (1.0f - metallic) * albedo / M_PI_F;
 }
 // Same structure as bsdfSpecEval with the film; `dv` = D V of the lobe (isotropic or anisotropic), computed by the caller.
+// The same arithmetic as bsdfSpecDiffuseIrid + bsdfSpecColorIrid with each film evaluated once per sample (the dielectric film feeds the
+// diffuse weight and the specular colour), so a dielectric sample costs one thin-film evaluation, a metal sample one.
 inline BsdfBaseLobes bsdfSpecEvalIrid(BsdfDielectricSpec s, BsdfIrid irid, float dv, float VdotH, float3 albedo, float metallic) {
     const float3 Fd = bsdfSpecFresnel(s, VdotH);
     BsdfBaseLobes out;
-    out.diffuse = bsdfSpecDiffuseIrid(s, irid, Fd, metallic, albedo, VdotH);
-    out.specular = dv * bsdfSpecColorIrid(s, irid, Fd, albedo, metallic, VdotH);
+    if (!bsdfIridActive(irid)) {
+        out.diffuse = bsdfSpecDiffuse(Fd, metallic, albedo);
+        out.specular = dv * bsdfSpecLobeColor(Fd, albedo, metallic, VdotH);
+        return out;
+    }
+    float3 dielectric = Fd, metal = bsdfFSchlick(albedo, VdotH);
+    float diffuseWeight = 1.0f - bsdfMax3(Fd);
+    if (metallic < 1.0f) {
+        const float3 film = bsdfIridFresnel(irid, s.f0, VdotH);
+        dielectric = mix(Fd, film, irid.strength);
+        diffuseWeight = mix(diffuseWeight, 1.0f - bsdfMax3(film), irid.strength);
+    }
+    if (metallic > 0.0f) metal = mix(metal, bsdfIridFresnel(irid, albedo, VdotH), irid.strength);
+    out.diffuse = diffuseWeight * (1.0f - metallic) * albedo / M_PI_F;
+    out.specular = dv * mix(dielectric, metal, metallic);
     return out;
 }
 // Split-sum environment of an iridescent material (film at N.V, see above); bsdfSpecEnv without a film.
