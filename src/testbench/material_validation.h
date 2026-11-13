@@ -73,6 +73,15 @@ struct MaterialScenarioSpec {
     std::vector<float> iridescenceFactor;
     std::vector<float> iridescenceIor;
     std::vector<float> iridescenceThickness;
+    // F15.3 (ticket 16) thin subsurface (diffuse transmission) grids: the subsurface weight per row (0 carries no extension, the
+    // neutral material) and the transmission colour per column (thin mode: SubsurfaceBlock mode Thin, weight, colour; radius,
+    // radiusScale and anisotropy keep their defaults and are ignored by the thin lobe).  `quadCarriers`: the carriers are
+    // single-sided quads in the z = 0 plane facing the camera (side SphereRadius * 2) instead of spheres, so that a light behind
+    // them is not occluded by their own far side (the DI visibility rays of the point-light variants).
+    std::vector<float>     subsurfaceWeight;
+    std::vector<glm::vec3> subsurfaceColor;
+    bool                   quadCarriers = false;
+    [[nodiscard]] bool hasSubsurfaceGrid() const { return !subsurfaceWeight.empty(); }
     [[nodiscard]] bool hasIridescenceGrid() const { return !iridescenceFactor.empty(); }
     [[nodiscard]] bool hasSpecularGrid() const { return !ior.empty(); }
     [[nodiscard]] bool hasAnisotropyGrid() const { return !anisotropyStrength.empty(); }

@@ -65,6 +65,14 @@ reference ray casting):
   gates are asserted green in every mode.  Negative controls (each must fail its
   gate): film ignored, film ior = 1.0, film ior = the default 1.3, N.V instead of V.H, minimum thickness, diffuse not scaled
   by 1 - max F_irid (energy).
+- Thin subsurface / diffuse transmission (F15.3, ticket 16): subsurface-thin-sun / -env-resolve / -env / -point (legacy,
+  @restir, @clustered), furnace-thin-subsurface (+ @resolve) against the independent KHR_materials_diffuse_transmission model of
+  tools/f15_reference.py (reflected (1 - w) and transmitted w * colour Lambert lobes under the literal fresnel_mix, sun at the disk
+  centre, exact environment T <= Cd, declared environment (1 - E_d)(1 - 0.16 N.V); shadow rays start on the side of the light).
+  Every gate the transmission-blind engine can fail is "pending" (asserted to FAIL; `pending_matches` = transmission-ignored or its
+  declared twin must PASS); the furnace transport bound is asserted green (only the declared gate of furnace-thin-subsurface@resolve
+  is pending).  Negative controls (each must fail its gate): transmission ignored, colour ignored, lobe on the front hemisphere
+  (back lights ignored), diffuse not reduced by w (energy), no Fresnel weight on the transmitted part (not in the declared keys).
 - declared (base-grid-env-resolve; also furnace-resolve next to its furnace
   gate): the engine image against the independent declared-environment model of
   tools/f15_reference.py (DFG table, ADR-0006): per sphere mean relative error
@@ -149,6 +157,16 @@ IRID_DIRECT_CONTROLS = ["iridescence-ignored", "iridescence-film-ior-ignored", "
                         "iridescence-at-nv", "iridescence-thickness-min", "iridescence-diffuse-unweighted"]
 IRID_DECLARED_CONTROLS = ["declared-iridescence-ignored", "declared-iridescence-film-ior-ignored",
                           "declared-iridescence-film-ior-default", "declared-iridescence-diffuse-unweighted"]
+
+THIN_SUN_CONTROLS = ["transmission-ignored", "transmission-untinted", "transmission-front-only",
+                     "transmission-double-counted", "transmission-fresnel-ignored"]
+# The point-light carriers (single back light, single-sided quads) have no front-lit pixel: the reflected part is dark, so the
+# double-counted control equals the reference there (the sun and environment keys own it).
+THIN_POINT_CONTROLS = ["transmission-ignored", "transmission-untinted", "transmission-front-only", "transmission-fresnel-ignored"]
+THIN_DECLARED_CONTROLS = ["declared-transmission-ignored", "declared-transmission-untinted", "declared-transmission-front-only",
+                          "declared-transmission-double-counted"]
+# The furnace carries a white transmission colour, so the untinted control equals the reference there.
+THIN_FURNACE_DECLARED_CONTROLS = [c for c in THIN_DECLARED_CONTROLS if c != "declared-transmission-untinted"]
 
 SCENARIOS = {
     "base-grid-sun": {"kind": "direct", "controls": ["alpha-roughness", "fresnel-off", "engine-f0-blend"],
@@ -419,6 +437,51 @@ SCENARIOS = {
                                     "declared": IRID_DECLARED_CONTROLS,
                                     "terms": "constant environment radiance 1, base albedo 1, no sun, deterministic resolve "
                                              "terms on the iridescence grid"},
+    # F15.3 (ticket 16): thin subsurface (diffuse transmission).  Rows are the weight {0, 0.25, 0.5, 1} (no weight-0 row on the
+    # point-light quads: nothing reaches them), columns the transmission colour {white, warm, teal}, over a blue-grey base.  Direct
+    # grids group their rows by (metallic, weight).  The engine renders no transmission until ticket 16, so every gate it can
+    # fail is "pending" and its image must PASS the gate against the transmission-ignored reference ("pending_matches").  Today's
+    # DI receivers return 0 for a light with N.L <= 0 (diBRDFWeighted) and the resolve's lights saturate N.L, so a light behind
+    # the surface contributes nothing; the reference's shadow rays start on the side of the light (a thin carrier does not
+    # occlude its own transmitted light).  The declared environment keys have no fresnel-ignored control (the declared model has
+    # no V.H).  The furnace transport bound is asserted green; only the declared gate of the resolve furnace is pending.
+    "subsurface-thin-sun": {"kind": "direct", "pending": "ticket 16", "pending_matches": "transmission-ignored",
+                            "controls": THIN_SUN_CONTROLS,
+                            "terms": "sun disk only BEHIND the spheres (environment 0, no shadows, no GI) on the weight x colour grid"},
+    "subsurface-thin-env-resolve": {"kind": "declared", "pending": "ticket 16", "pending_matches": "declared-transmission-ignored",
+                                    "reflections": "off", "controls": THIN_DECLARED_CONTROLS,
+                                    "terms": "constant environment only (radiance 0.5, no sun) on the thin subsurface grid, "
+                                             "deterministic resolve terms (--reflections off --lighting-denoise custom)"},
+    "subsurface-thin-env": {"kind": "environment", "pending": "ticket 16", "pending_matches": "transmission-ignored",
+                            "controls": THIN_SUN_CONTROLS,
+                            "terms": "constant environment only (radiance 0.5, no sun), SSR specular transport (the back-side "
+                                     "environment of the composition), on the thin subsurface grid"},
+    "subsurface-thin-point": {"kind": "direct", "pending": "ticket 16", "pending_matches": "transmission-ignored",
+                              "lighting": "legacy", "visibility": "none", "controls": THIN_POINT_CONTROLS,
+                              "terms": "one point light BEHIND single-sided quads only (no sun, environment 0, no GI), resolve "
+                                       "local lights (--lighting legacy)"},
+    "subsurface-thin-point@restir": {"kind": "direct", "pending": "ticket 16", "pending_matches": "transmission-ignored",
+                                     "lighting": "restir", "visibility": "rays", "denoise": "off", "terminator_band": 2,
+                                     "controls": THIN_POINT_CONTROLS,
+                                     "terms": "one point light behind the quads only, ReSTIR DI with RT visibility "
+                                              "(--lighting restir --rt on), unfiltered (--lighting-denoise off)"},
+    "subsurface-thin-point@clustered": {"kind": "direct", "pending": "ticket 16", "pending_matches": "transmission-ignored",
+                                        "lighting": "clustered", "visibility": "rays", "denoise": "off", "terminator_band": 2,
+                                        "controls": THIN_POINT_CONTROLS,
+                                        "terms": "one point light behind the quads only, clustered DI with RT visibility "
+                                                 "(--lighting clustered --rt on), unfiltered (--lighting-denoise off)"},
+    # Furnace over thin materials (white base, white transmission colour, environment 1): an upper bound that the blind engine
+    # satisfies, asserted green in every mode (the double-counted control gains energy and must fail it); only the declared gate
+    # of the deterministic resolve is pending (the declared model moves energy from the diffuse to the transmitted lobe).
+    "furnace-thin-subsurface": {"kind": "furnace-transport", "always_green": True, "controls": ["transmission-double-counted"],
+                                "terms": "constant environment radiance 1, white base and transmission colour, no sun, stochastic "
+                                         "specular transport on the thin subsurface grid"},
+    "furnace-thin-subsurface@resolve": {"kind": "furnace", "always_green": True, "reflections": "off",
+                                        "pending": "ticket 16", "pending_gate": "declared",
+                                        "pending_matches": "declared-transmission-ignored",
+                                        "controls": ["transmission-double-counted"], "declared": THIN_FURNACE_DECLARED_CONTROLS,
+                                        "terms": "constant environment radiance 1, white base and transmission colour, no sun, "
+                                                 "deterministic resolve terms on the thin subsurface grid"},
     "specular-grid-point@clustered": {"kind": "direct", "lighting": "clustered", "visibility": "rays", "denoise": "off",
                                       "terminator_band": 2,
                                       "controls": ["specular-ignored", "f90-one", "specular-weight-not-on-f0"],
@@ -550,7 +613,11 @@ def reference_command(name, folder):
 def relative_error(np, candidate, reference, roi):
     """Per-pixel relative error over the ROI (max over RGB), with the absolute floor of decision 11."""
     floor = THRESHOLDS["floor_fraction"] * float(reference[roi].mean())
-    error = np.abs(candidate[roi] - reference[roi]) / np.maximum(reference[roi], floor)
+    # A reference that is exactly 0 over the whole ROI (a control image of a surface nothing reaches, e.g. a back-lit carrier
+    # without transmission) has floor 0: 0 / 0 is the error 0 of two equal black pixels, a non-zero candidate is infinitely wrong.
+    denominator = np.maximum(np.maximum(reference[roi], floor), np.finfo(reference.dtype).tiny)
+    with np.errstate(over="ignore"):
+        error = np.abs(candidate[roi] - reference[roi]) / denominator
     return error.max(axis=-1), floor
 
 

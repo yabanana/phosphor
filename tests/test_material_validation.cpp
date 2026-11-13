@@ -14,10 +14,11 @@
 #include <set>
 #include <sstream>
 #include <utility>
+#include <glm/gtc/quaternion.hpp>
 using namespace phosphor;
 
 TEST_CASE("F15.3 material scenarios are exactly the nine declared names") {
-    CHECK(MaterialValidation::scenarios().size() == 35);
+    CHECK(MaterialValidation::scenarios().size() == 40);
     for (auto name : {"base-grid-sun", "base-grid-env", "base-grid-env-resolve", "furnace-base", "furnace-resolve",
                       "roughness-extremes", "roughness-extremes-sun", "specular-grid-sun", "specular-grid-env-resolve", "specular-grid-point",
                       "specular-grid-env", "furnace-specular", "clearcoat-grid-sun", "clearcoat-grid-env-resolve",
@@ -25,7 +26,9 @@ TEST_CASE("F15.3 material scenarios are exactly the nine declared names") {
                       "specular-grid-edit", "specular-grid-rough", "sheen-grid-sun", "sheen-grid-env-resolve",
                       "sheen-grid-env", "sheen-grid-point", "furnace-sheen", "aniso-grid-sun", "aniso-grid-env-resolve",
                       "aniso-grid-env", "aniso-grid-point", "furnace-aniso", "aniso-mirrored-sun", "iridescence-grid-sun",
-                      "iridescence-grid-env-resolve", "iridescence-grid-env", "iridescence-grid-point", "furnace-iridescence"})
+                      "iridescence-grid-env-resolve", "iridescence-grid-env", "iridescence-grid-point", "furnace-iridescence",
+                      "subsurface-thin-sun", "subsurface-thin-env-resolve", "subsurface-thin-env", "subsurface-thin-point",
+                      "furnace-thin-subsurface"})
         CHECK(MaterialValidation::validScenario(name));
     CHECK_FALSE(MaterialValidation::validScenario("unknown"));
     CHECK_THROWS(MaterialValidation{"unknown"});
@@ -896,4 +899,166 @@ TEST_CASE("F15.3 iridescence-grid-point: the iridescence grid lit by one point l
             const float r = d / light.range, window = (1.0f - r * r * r * r) * (1.0f - r * r * r * r);
             CHECK(window > 0.9995f);
         }
+}
+
+TEST_CASE("F15.3 thin subsurface grids declare weight rows over transmission colour columns on a blue-grey base (tools/test_f15_check.py mirrors them)") {
+    for (auto name : {"subsurface-thin-sun", "subsurface-thin-env-resolve", "subsurface-thin-env", "subsurface-thin-point",
+                      "furnace-thin-subsurface"}) {
+        const auto& s = MaterialValidation::spec(name);
+        REQUIRE(s.hasSubsurfaceGrid());
+        CHECK_FALSE(s.hasSpecularGrid());
+        CHECK_FALSE(s.hasClearcoatGrid());
+        CHECK_FALSE(s.hasSheenGrid());
+        CHECK_FALSE(s.hasAnisotropyGrid());
+        CHECK_FALSE(s.hasIridescenceGrid());
+        REQUIRE(s.subsurfaceWeight.size() == s.metallic.size());
+        REQUIRE(s.subsurfaceColor.size() == s.roughness.size());
+        for (float m : s.metallic) CHECK(m == 0.0f); // metals carry no diffuse lobe, so no transmission
+    }
+    const std::vector<glm::vec3> colors{glm::vec3(1.0f), glm::vec3(1.0f, 0.55f, 0.25f), glm::vec3(0.1f, 0.7f, 0.6f)};
+    const auto& sun = MaterialValidation::spec("subsurface-thin-sun");
+    CHECK(sun.sun);
+    CHECK(sun.sunIrradiance == 3.0f);
+    CHECK(sun.environment == 0.0f);
+    CHECK(sun.baseColor == glm::vec3(0.3f, 0.5f, 0.8f));
+    CHECK(sun.subsurfaceWeight == std::vector<float>{0.0f, 0.25f, 0.5f, 1.0f});
+    CHECK(sun.subsurfaceColor == colors);
+    CHECK(sun.roughness == std::vector<float>(3, 0.5f));
+    CHECK_FALSE(sun.quadCarriers);
+    // The sun is BEHIND the grid: toward-sun has a negative z, V.L at the grid centre about -0.73.
+    CHECK(glm::length(sun.towardSun - glm::normalize(glm::vec3(-0.55f, 0.4f, -0.73f))) < 1e-6f);
+    const glm::vec3 camera = MaterialValidation{"subsurface-thin-sun"}.getDefaultCamera().position;
+    CHECK(camera == glm::vec3(0.0f, 1.5f, 5.5f));
+    const float vl = glm::dot(glm::normalize(camera - glm::vec3(0.0f, 1.5f, 0.0f)), sun.towardSun);
+    CHECK(vl < -0.7f);
+    CHECK(vl > -0.76f);
+    for (auto name : {"subsurface-thin-env-resolve", "subsurface-thin-env"}) {
+        const auto& s = MaterialValidation::spec(name);
+        CHECK_FALSE(s.sun);
+        CHECK(s.environment == 0.5f);
+        CHECK(s.pointLights.empty());
+        CHECK(s.baseColor == sun.baseColor);
+        CHECK(s.subsurfaceWeight == sun.subsurfaceWeight);
+        CHECK(s.subsurfaceColor == colors);
+    }
+    const auto& furnace = MaterialValidation::spec("furnace-thin-subsurface");
+    CHECK_FALSE(furnace.sun);
+    CHECK(furnace.environment == 1.0f);
+    CHECK(furnace.baseColor == glm::vec3(1.0f));
+    CHECK(furnace.subsurfaceColor == std::vector<glm::vec3>(3, glm::vec3(1.0f))); // white transmission: the tight bound
+    CHECK(furnace.roughness == std::vector<float>{0.2f, 0.5f, 0.9f});
+    CHECK(furnace.subsurfaceWeight == sun.subsurfaceWeight);
+    CHECK(MaterialValidation::environmentRadiance("furnace-thin-subsurface") == 1.0f);
+}
+
+TEST_CASE("F15.3 thin subsurface carriers hold the block of their row and column; the weight-0 row carries no feature") {
+    ECS ecs;
+    GpuScene scene;
+    test::NullTextureManager textures;
+    MaterialValidation f{"subsurface-thin-sun"};
+    f.setup(ecs, scene, textures);
+    const auto& s = MaterialValidation::spec("subsurface-thin-sun");
+    for (u32 row = 0; row < s.metallic.size(); ++row)
+        for (u32 col = 0; col < s.roughness.size(); ++col) {
+            const EntityID e = f.spheres()[row * s.roughness.size() + col];
+            const auto& m = std::as_const(ecs).getComponent<MaterialComponent>(e);
+            CHECK(m.metallicFactor == 0.0f);
+            CHECK(m.roughnessFactor == 0.5f);
+            if (s.subsurfaceWeight[row] == 0.0f) {
+                CHECK_FALSE(m.extension); // the neutral material
+                continue;
+            }
+            REQUIRE(m.extension);
+            REQUIRE(m.extension->subsurface);
+            const auto& block = *m.extension->subsurface;
+            CHECK(block.mode == SubsurfaceMode::Thin);
+            CHECK(block.weight == s.subsurfaceWeight[row]);
+            const glm::vec3 c = s.subsurfaceColor[col];
+            CHECK(block.color == std::array<float, 3>{c.x, c.y, c.z});
+            CHECK(block.anisotropy == 0.0f);
+            CHECK_FALSE(block.weightTexture.present());
+            CHECK_FALSE(block.colorTexture.present());
+            CHECK_FALSE(block.radiusScaleTexture.present());
+            CHECK_FALSE(m.extension->specular);
+            CHECK_FALSE(m.extension->clearcoat);
+            CHECK_FALSE(m.extension->sheen);
+            CHECK_FALSE(m.extension->anisotropy);
+            CHECK_FALSE(m.extension->iridescence);
+            CHECK_FALSE(m.extension->transmission);
+            CHECK(featureMask(*m.extension) == MATERIAL_FEATURE_SUBSURFACE);
+        }
+    SceneStore store;
+    store.sync(ecs, scene);
+    CHECK(store.verifyAgainstEcs(ecs, scene).empty());
+    CHECK(store.featureUnion() == MATERIAL_FEATURE_SUBSURFACE);
+    // The words the reference reads: record 2 (GPUMaterialExt2) word 0 mode, 1 weight, 2-4 colour, 9 anisotropy, 10-12 textures.
+    const u32 row = 2, col = 1; // weight 0.5, warm
+    const EntityID e = f.spheres()[row * s.roughness.size() + col];
+    const u32 group = store.materials()[store.materialIndexOf(e)].extensionIndex;
+    const auto& rec = store.extensions()[group + 2];
+    float weight, r, g, b, anisotropy;
+    std::memcpy(&weight, &rec.w[1], 4);
+    std::memcpy(&r, &rec.w[2], 4);
+    std::memcpy(&g, &rec.w[3], 4);
+    std::memcpy(&b, &rec.w[4], 4);
+    std::memcpy(&anisotropy, &rec.w[9], 4);
+    CHECK(rec.w[0] == 0u); // thin
+    CHECK(weight == 0.5f);
+    CHECK(r == 1.0f);
+    CHECK(g == 0.55f);
+    CHECK(b == 0.25f);
+    CHECK(anisotropy == 0.0f);
+    CHECK(rec.w[10] == INVALID_TEXTURE_INDEX);
+    CHECK(rec.w[11] == INVALID_TEXTURE_INDEX);
+    CHECK(rec.w[12] == INVALID_TEXTURE_INDEX);
+    f.teardown(ecs, scene);
+}
+
+TEST_CASE("F15.3 subsurface-thin-point: single-sided quads facing the camera, lit by one point light BEHIND them") {
+    const auto& point = MaterialValidation::spec("subsurface-thin-point");
+    CHECK(point.quadCarriers);
+    CHECK_FALSE(point.sun);
+    CHECK(point.environment == 0.0f);
+    // No weight-0 row: nothing reaches a quad with no transmission from behind (the gate would have no lit pixels).
+    CHECK(point.subsurfaceWeight == std::vector<float>{0.25f, 0.5f, 1.0f});
+    CHECK(point.subsurfaceColor.size() == 3);
+    REQUIRE(point.pointLights.size() == 1);
+    const MaterialPointLight light = point.pointLights[0];
+    CHECK(light.intensity == 250.0f);
+    CHECK(light.range == 100.0f);
+    const glm::vec3 camera = MaterialValidation{"subsurface-thin-point"}.getDefaultCamera().position;
+    const glm::vec3 centre(0.0f, 1.0f, 0.0f);
+    CHECK(camera.y == doctest::Approx(centre.y));
+    CHECK(glm::length(light.position - centre) == doctest::Approx(9.0f));
+    // The quads face +z (the camera): N.L < 0 for every quad, V.L about -0.73 at the centre.
+    CHECK(light.position.z < 0.0f);
+    const float vl = glm::dot(glm::normalize(camera - centre), glm::normalize(light.position - centre));
+    CHECK(vl < -0.7f);
+    CHECK(vl > -0.76f);
+    for (u32 row = 0; row < point.metallic.size(); ++row)
+        for (u32 col = 0; col < point.roughness.size(); ++col) {
+            const float d = glm::length(light.position - MaterialValidation::sphereCenter(point, col, row));
+            const float r = d / light.range, window = (1.0f - r * r * r * r) * (1.0f - r * r * r * r);
+            CHECK(window > 0.9995f);
+        }
+    ECS ecs;
+    GpuScene scene;
+    test::NullTextureManager textures;
+    MaterialValidation f{"subsurface-thin-point"};
+    f.setup(ecs, scene, textures);
+    CHECK(scene.getMeshCount() == 1u);
+    REQUIRE(f.spheres().size() == 9);
+    for (EntityID e : f.spheres()) {
+        const auto& t = std::as_const(ecs).getComponent<TransformComponent>(e);
+        const glm::vec3 normal = glm::mat3_cast(t.rotation) * glm::vec3(0.0f, 1.0f, 0.0f); // generatePlane: normal +Y
+        CHECK(glm::length(normal - glm::vec3(0.0f, 0.0f, 1.0f)) < 1e-5f);
+        CHECK(glm::dot(normal, glm::normalize(light.position - t.position)) < 0.0f);
+        const auto& m = std::as_const(ecs).getComponent<MaterialComponent>(e);
+        REQUIRE(m.extension);
+        REQUIRE(m.extension->subsurface);
+    }
+    FrameScene frame;
+    extractFrameScene(ecs, scene, frame);
+    CHECK(frame.lights.size() == 1u);
+    f.teardown(ecs, scene);
 }

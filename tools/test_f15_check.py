@@ -120,6 +120,38 @@ for _name, _sun, _env, _base, _point in (("iridescence-grid-sun", 3.0, 0.0, COPP
                         irid=IRID, point=POINT_LIGHT if _point else False)
 
 
+# F15.3 (ticket 16): the thin subsurface scenarios (mirrors MaterialValidation: rows = weight, columns = transmission colour, blue-grey
+# base of roughness 0.5; spheres for the sun / environment scenarios, single-sided quads and one back point light for the point one).
+THIN_COLORS = [[1.0, 1.0, 1.0], [1.0, 0.55, 0.25], [0.1, 0.7, 0.6]]
+THIN_BASE = [0.3, 0.5, 0.8]
+THIN_TOWARD = np.array([-0.55, 0.4, -0.73]) / np.linalg.norm([-0.55, 0.4, -0.73])
+THIN_POINT_LIGHT = {**POINT_LIGHT, "position": [float(c) for c in np.array([0.0, 1.0, 0.0]) + 9.0 * THIN_TOWARD]}
+THIN_WEIGHTS = [0.0, 0.25, 0.5, 1.0]
+for _name, _sun, _env, _base, _weights, _colors, _rough, _point in (
+        ("subsurface-thin-sun", 3.0, 0.0, THIN_BASE, THIN_WEIGHTS, THIN_COLORS, [0.5] * 3, False),
+        ("subsurface-thin-env-resolve", 0.0, 0.5, THIN_BASE, THIN_WEIGHTS, THIN_COLORS, [0.5] * 3, False),
+        ("subsurface-thin-env", 0.0, 0.5, THIN_BASE, THIN_WEIGHTS, THIN_COLORS, [0.5] * 3, False),
+        ("subsurface-thin-point", 0.0, 0.0, THIN_BASE, [0.25, 0.5, 1.0], THIN_COLORS, [0.5] * 3, True),
+        ("furnace-thin-subsurface", 0.0, 1.0, [1, 1, 1], THIN_WEIGHTS, [[1.0, 1.0, 1.0]] * 3, [0.2, 0.5, 0.9], False)):
+    SPECS[_name] = dict(roughness=_rough, metallic=[0.0] * len(_weights), base=_base, sun=_sun, env=_env,
+                        thin=dict(weight=_weights, color=_colors, quad=_point), toward=THIN_TOWARD,
+                        point=THIN_POINT_LIGHT if _point else False)
+
+
+def write_quad_ply(path, half=0.4):
+    """The thin point-light carrier: a quad in the z = 0 plane facing +z (what the bench's rotated generatePlane exports)."""
+    verts = [(-half, -half, 0, 0, 0, 1, 0, 0), (half, -half, 0, 0, 0, 1, 1, 0), (half, half, 0, 0, 0, 1, 1, 1),
+             (-half, half, 0, 0, 0, 1, 0, 1)]
+    with open(path, "wb") as f:
+        f.write(("ply\nformat binary_little_endian 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\n"
+                 "property float nx\nproperty float ny\nproperty float nz\nproperty float s\nproperty float t\n"
+                 "element face 2\nproperty list uchar uint vertex_indices\nend_header\n").encode())
+        for v in verts:
+            f.write(struct.pack("<8f", *v))
+        for tri in ((0, 1, 2), (0, 2, 3)):
+            f.write(struct.pack("<B3I", 3, *tri))
+
+
 def comb_tangent(n, comb=(1.0, 0.0, 0.0)):
     """The tangent of ProceduralMeshes::generateCombedSphere at a vertex of normal n: `comb` projected onto the tangent
     plane; where nothing is left, a unit perpendicular."""
@@ -168,7 +200,10 @@ def make_bench_snapshot(folder, name, width, height):
     folder = pathlib.Path(folder)
     (folder / "snapshot").mkdir(parents=True)
     handed = spec["aniso"]["handedness"] if "aniso" in spec else None
-    write_sphere_ply(folder / "snapshot" / "mesh_0.ply", handedness=-1.0 if handed else None)
+    if spec.get("thin", {}).get("quad"):
+        write_quad_ply(folder / "snapshot" / "mesh_0.ply")
+    else:
+        write_sphere_ply(folder / "snapshot" / "mesh_0.ply", handedness=-1.0 if handed else None)
     meshes = ["mesh_0.ply"]
     if handed and 1.0 in handed:
         write_sphere_ply(folder / "snapshot" / "mesh_1.ply", handedness=1.0)
@@ -220,6 +255,21 @@ def make_bench_snapshot(folder, name, width, height):
                                 bit(spec["irid"]["thickness"][col]), ref.INVALID, ref.INVALID]
                 materials[-1].update(feature_bits=16, flags=16 << 8, extension_index=len(records))
                 records += [record0, record1, [0] * 20, [0] * 20]
+            if "thin" in spec:  # weight 0 carries no feature (the bench adds no extension to that row)
+                weight = spec["thin"]["weight"][row]
+                if weight > 0:
+                    bit = lambda v: int.from_bytes(struct.pack("<f", v), "little")  # noqa: E731
+                    record0 = [0] * 20
+                    for k in (5, 6, 10, 11, 12, 17, 18):
+                        record0[k] = ref.INVALID
+                    record2 = [0] * 20
+                    record2[1] = bit(weight)
+                    record2[2:5] = [bit(c) for c in spec["thin"]["color"][col]]
+                    record2[5] = bit(1.0)
+                    record2[6:9] = [bit(1.0), bit(0.5), bit(0.25)]
+                    record2[10:13] = [ref.INVALID] * 3
+                    materials[-1].update(feature_bits=128, flags=128 << 8, extension_index=len(records))
+                    records += [record0, [0] * 20, record2, [0] * 20]
             mesh = 0
             if "aniso" in spec:
                 a = spec["aniso"]
@@ -247,7 +297,7 @@ def make_bench_snapshot(folder, name, width, height):
             "meshes": meshes, "mesh_version": 2 if handed else 1, "instances": instances, "lights": [], "sampled_lights": [],
             "material_extensions": {"version": 1, "records_per_material": 4, "records": records}}
     if spec["sun"] > 0:
-        data["lights"].append({"type": 0, "position": [0, 0, 0], "direction": list(-TOWARD_SUN), "color": [1, 1, 1],
+        data["lights"].append({"type": 0, "position": [0, 0, 0], "direction": list(-spec.get("toward", TOWARD_SUN)), "color": [1, 1, 1],
                                "intensity": spec["sun"], "range": 0, "inner": 0, "outer": 0})
     if spec.get("point"):
         data["lights"].append(POINT_LIGHT if spec["point"] is True else spec["point"])
@@ -568,6 +618,74 @@ class RunnerLogic(unittest.TestCase):
                     "iridescence-grid-point@clustered"):
             self.assertEqual(sorted(check.SCENARIOS[key]["controls"]), sorted(ref.IRID_CONTROLS), key)
         self.assertEqual(sorted(check.SCENARIOS["iridescence-grid-env-resolve"]["controls"]), sorted(ref.IRID_DECLARED_CONTROLS))
+
+    def test_thin_subsurface_keys_are_pending_and_name_the_control_that_models_the_current_engine(self):
+        keys = ["subsurface-thin-sun", "subsurface-thin-env-resolve", "subsurface-thin-env", "subsurface-thin-point",
+                "subsurface-thin-point@restir", "subsurface-thin-point@clustered", "furnace-thin-subsurface",
+                "furnace-thin-subsurface@resolve"]
+        with tempfile.TemporaryDirectory() as tmp:
+            with contextlib.redirect_stdout(io.StringIO()):
+                args = ["--out", tmp, "--binary", "build/release/phosphor"]
+                for key in keys:
+                    args += ["--only", key]
+                self.assertEqual(check.main(args), 0)
+            commands = json.loads((pathlib.Path(tmp) / "plan.json").read_text())["commands"]
+        expected = {"subsurface-thin-sun": ("subsurface-thin-sun", "legacy", "off", "ssr", "custom", "none"),
+                    "subsurface-thin-env-resolve": ("subsurface-thin-env-resolve", "legacy", "off", "off", "custom", "none"),
+                    "subsurface-thin-env": ("subsurface-thin-env", "legacy", "off", "ssr", "custom", "none"),
+                    "subsurface-thin-point": ("subsurface-thin-point", "legacy", "off", "ssr", "custom", "none"),
+                    "subsurface-thin-point@restir": ("subsurface-thin-point", "restir", "on", "ssr", "off", "rays"),
+                    "subsurface-thin-point@clustered": ("subsurface-thin-point", "clustered", "on", "ssr", "off", "rays"),
+                    "furnace-thin-subsurface": ("furnace-thin-subsurface", "legacy", "off", "ssr", "custom", "none"),
+                    "furnace-thin-subsurface@resolve": ("furnace-thin-subsurface", "legacy", "off", "off", "custom", "none")}
+        for key, (bench, lighting, rt, reflections, denoise, visibility) in expected.items():
+            capture, reference = commands[key]["capture"], commands[key]["reference"]
+            self.assertEqual(capture[capture.index("--material-scenario") + 1], bench, key)
+            self.assertEqual(capture[capture.index("--lighting") + 1], lighting, key)
+            self.assertEqual(capture[capture.index("--rt") + 1], rt, key)
+            self.assertEqual(capture[capture.index("--reflections") + 1], reflections, key)
+            self.assertEqual(capture[capture.index("--lighting-denoise") + 1], denoise, key)
+            self.assertEqual(reference[reference.index("--visibility") + 1], visibility, key)
+            literal, declared = check.scenario_controls(key)
+            for name in literal + declared:
+                self.assertIn(name, reference, key)
+            spec = check.SCENARIOS[key]
+            for name in literal:
+                self.assertIn(name, ref.THIN_CONTROLS, key)
+            for name in declared:
+                self.assertIn(name, ref.THIN_DECLARED_CONTROLS, key)
+            if key != "furnace-thin-subsurface":
+                self.assertEqual(spec["pending"], "ticket 16", key)
+                self.assertIn(spec["pending_matches"], literal + declared, key)
+                self.assertIn(spec["pending_matches"], ("transmission-ignored", "declared-transmission-ignored"), key)
+        self.assertTrue(check.SCENARIOS["furnace-thin-subsurface"]["always_green"])
+        self.assertNotIn("pending", check.SCENARIOS["furnace-thin-subsurface"])
+        resolve = check.SCENARIOS["furnace-thin-subsurface@resolve"]
+        self.assertEqual((resolve["pending"], resolve["pending_gate"]), ("ticket 16", "declared"))
+        self.assertEqual(check.SCENARIOS["subsurface-thin-env-resolve"]["kind"], "declared")
+        self.assertEqual(check.SCENARIOS["subsurface-thin-env"]["kind"], "environment")
+        for key in ("subsurface-thin-sun", "subsurface-thin-env"):
+            self.assertEqual(sorted(check.SCENARIOS[key]["controls"]), sorted(ref.THIN_CONTROLS), key)
+        # the point-light carriers have no front-lit pixel: the double-counted control cannot differ there
+        for key in ("subsurface-thin-point", "subsurface-thin-point@restir", "subsurface-thin-point@clustered"):
+            self.assertEqual(sorted(check.SCENARIOS[key]["controls"]),
+                             sorted(set(ref.THIN_CONTROLS) - {"transmission-double-counted"}), key)
+        self.assertEqual(sorted(check.SCENARIOS["subsurface-thin-env-resolve"]["controls"]), sorted(ref.THIN_DECLARED_CONTROLS))
+
+    def test_a_reference_that_is_black_over_the_whole_roi_compares_equal_to_a_black_image_and_not_to_a_lit_one(self):
+        roi = np.ones((2, 2), dtype=bool)
+        black = np.zeros((2, 2, 3), dtype=np.float32)
+        error, floor = check.relative_error(np, black, black, roi)
+        self.assertEqual(floor, 0.0)
+        np.testing.assert_array_equal(error, np.zeros(4))      # 0 / 0 is no error, never NaN
+        lit = np.full((2, 2, 3), 0.01, dtype=np.float32)
+        error, _ = check.relative_error(np, lit, black, roi)
+        self.assertTrue(bool(np.all(error > 1e30)))            # a lit pixel where the reference is black is infinitely wrong
+        # the ordinary floor rule is unchanged
+        reference = np.full((2, 2, 3), 0.5, dtype=np.float32)
+        error, floor = check.relative_error(np, reference * 1.1, reference, roi)
+        self.assertAlmostEqual(floor, 0.025)
+        np.testing.assert_allclose(error, np.full(4, 0.1), rtol=1e-5)
 
     def test_pending_matches_must_also_hold_in_green_mode(self):
         failing = {"kind": "direct", "pass": False, "rows": {}}
@@ -1274,6 +1392,76 @@ class BenchMirror(unittest.TestCase):
             self.assertEqual(check.verdict([entry], "red"), ("EXPECTED_RED_CONFIRMED", 0))
         wrong = self.scenario(key, ref.control_model("iridescence-diffuse-unweighted", ref.APPENDIX_B), "red", tag="-wrong")
         self.assertFalse(wrong["result"]["pass"])  # an engine that does not scale the diffuse by 1 - max F_irid gains energy
+        self.assertEqual(check.verdict([wrong], "red")[1], check.EXIT_UNEXPECTED)
+
+    # --- F15.3 (ticket 16): the thin subsurface harness, same method as the iridescence one.
+
+    THIN_KEYS = ("subsurface-thin-sun", "subsurface-thin-env-resolve", "subsurface-thin-env", "subsurface-thin-point",
+                 "furnace-thin-subsurface@resolve")
+    THIN_DECLARED_KEYS = ("subsurface-thin-env-resolve", "furnace-thin-subsurface@resolve")
+
+    def thin_entry(self, key, ignored, tag):
+        declared = key in self.THIN_DECLARED_KEYS
+        model = ref.control_model("transmission-ignored", ref.APPENDIX_B) if ignored else ref.APPENDIX_B
+        environment = None
+        if declared:
+            environment = ref.THIN_DECLARED_CONTROLS["declared-transmission-ignored"] if ignored else ref.DECLARED
+        return self.scenario(check.bench_scenario(key), model, "green", environment=environment, tag="-" + key + tag, key=key)
+
+    def test_thin_subsurface_keys_are_red_for_the_right_reason_with_a_transmission_blind_engine(self):
+        for key in self.THIN_KEYS:
+            entry = self.thin_entry(key, True, "-blind")
+            self.assertTrue(entry["discriminating"], (key, json.dumps(entry["controls"], indent=1)))
+            self.assertFalse(entry["gates_pass"], key)          # pending: the gate FAILS
+            self.assertTrue(entry["pending_matches_met"], key)  # ... and the engine image matches the transmission-ignored control
+            self.assertEqual(entry["pending"], "ticket 16")
+            self.assertEqual(check.verdict([entry], "green"), ("GREEN", check.EXIT_OK), key)
+
+    def test_thin_subsurface_keys_go_red_in_green_mode_once_the_engine_implements_the_lobe(self):
+        for key in self.THIN_KEYS:
+            entry = self.thin_entry(key, False, "-lobe")
+            self.assertTrue(entry["gates_pass"], (key, json.dumps(check.summarize(entry["result"]))))
+            self.assertFalse(entry["pending_matches_met"], key)
+            self.assertEqual(check.verdict([entry], "green")[1], check.EXIT_UNEXPECTED, key)
+
+    def test_thin_subsurface_controls_each_fail_their_gate(self):
+        for key in self.THIN_KEYS:
+            entry = self.thin_entry(key, False, "-ctl")
+            controls = entry["declared"]["controls"] if entry["kind"] == "furnace" else entry["controls"]
+            if entry["kind"] == "furnace":
+                controls = {**entry["controls"], **controls}
+            wanted = set(check.SCENARIOS[key]["controls"]) | set(check.SCENARIOS[key].get("declared", []))
+            self.assertEqual(set(controls), wanted, key)
+            for name, verdict in controls.items():
+                self.assertTrue(verdict["fails_gate"], (key, name, verdict))
+
+    def test_every_thin_subsurface_control_alone_fails_the_direct_gates_it_is_listed_for_as_an_engine_image(self):
+        for key, controls in (("subsurface-thin-sun", check.THIN_SUN_CONTROLS), ("subsurface-thin-env", check.THIN_SUN_CONTROLS),
+                              ("subsurface-thin-point", check.THIN_POINT_CONTROLS)):
+            for control in controls:
+                entry = self.scenario(check.bench_scenario(key), ref.control_model(control, ref.APPENDIX_B), "green",
+                                      tag="-" + key + "-" + control, key=key)
+                self.assertFalse(entry["result"]["pass"], (key, control))
+
+    def test_every_declared_thin_subsurface_control_alone_fails_the_declared_gate_as_an_engine_image(self):
+        for control, variant in ref.THIN_DECLARED_CONTROLS.items():
+            entry = self.scenario("subsurface-thin-env-resolve", ref.APPENDIX_B, "green", environment=variant, tag="-" + control,
+                                  key="subsurface-thin-env-resolve")
+            self.assertFalse(entry["result"]["pass"], control)
+
+    def test_furnace_thin_subsurface_bound_holds_for_the_declared_model_and_the_energy_control_breaks_it(self):
+        key = "furnace-thin-subsurface"
+        # As for the other furnaces the engine emulation is the energy-conserving declared model: the transmitted weight never
+        # exceeds the diffuse weight it replaces, so the white albedo stays at the base model's (<= 1).
+        for ignored in (False, True):
+            environment = ref.THIN_DECLARED_CONTROLS["declared-transmission-ignored"] if ignored else ref.DECLARED
+            entry = self.scenario(key, ref.APPENDIX_B, "red", environment=environment, tag=f"-{ignored}")
+            self.assertTrue(entry["result"]["pass"], (ignored, entry["result"]["max_sphere_mean"]))
+            self.assertTrue(entry["expectation"]["asserted"] and entry["expectation"]["met"])
+            self.assertTrue(entry["controls"]["transmission-double-counted"]["fails_gate"])
+            self.assertEqual(check.verdict([entry], "red"), ("EXPECTED_RED_CONFIRMED", 0))
+        wrong = self.scenario(key, ref.control_model("transmission-double-counted", ref.APPENDIX_B), "red", tag="-wrong")
+        self.assertFalse(wrong["result"]["pass"])  # an engine that does not reduce the diffuse by w gains energy
         self.assertEqual(check.verdict([wrong], "red")[1], check.EXIT_UNEXPECTED)
 
     def test_cached_reference_is_reused_only_for_the_same_snapshot(self):

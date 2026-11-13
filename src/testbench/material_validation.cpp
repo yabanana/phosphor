@@ -14,7 +14,7 @@
 namespace phosphor {
 namespace {
 // The names are mirrored by tools/f15_check.py SCENARIOS (tests/test_material_validation.cpp compares both).
-constexpr std::array<std::string_view, 35> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
+constexpr std::array<std::string_view, 40> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
                                                       "furnace-base",   "furnace-resolve",     "roughness-extremes",
                                                       "roughness-extremes-sun", "specular-grid-sun",
                                                       "specular-grid-env-resolve", "specular-grid-point", "specular-grid-env", "furnace-specular",
@@ -26,7 +26,9 @@ constexpr std::array<std::string_view, 35> kScenarios{"base-grid-sun",  "base-gr
                                                       "aniso-grid-sun", "aniso-grid-env-resolve", "aniso-grid-env",
                                                       "aniso-grid-point", "furnace-aniso", "aniso-mirrored-sun",
                                                       "iridescence-grid-sun", "iridescence-grid-env-resolve", "iridescence-grid-env",
-                                                      "iridescence-grid-point", "furnace-iridescence"};
+                                                      "iridescence-grid-point", "furnace-iridescence",
+                                                      "subsurface-thin-sun", "subsurface-thin-env-resolve", "subsurface-thin-env",
+                                                      "subsurface-thin-point", "furnace-thin-subsurface"};
 constexpr float pi = 3.14159265358979323846f;
 
 glm::quat orientLight(glm::vec3 towardLight) {
@@ -131,6 +133,26 @@ const std::vector<MaterialScenarioSpec>& specs() {
     static const glm::vec3 iridGridCentre(0.0f, 2.5f, 0.0f);
     static const MaterialPointLight iridBackLight{iridGridCentre + 9.0f * glm::normalize(glm::vec3(-0.65f, 0.55f, -0.52f)),
                                                   250.0f, 100.0f};
+    // F15.3 (ticket 16): the thin subsurface (diffuse transmission) lobe.  Rows are the weight {0 (no extension, the neutral
+    // material), 0.25, 0.5, 1}, columns the transmission colour {white, warm, teal}, over a blue-grey base (so the reflected and the
+    // transmitted colour are told apart) of roughness 0.5.  The sun sits BEHIND the spheres (V.L about -0.73 at the grid centre):
+    // the visible face is lit through the transmitted lobe, a crescent on the upper left from the front (the reflected lobe,
+    // reduced by 1 - w).  Spheres are used for the sun and environment scenarios (N.V from 0 to 1 for the environment tables); the
+    // point-light scenario uses single-sided quads (no self-occlusion of the DI shadow rays) and has no weight-0 row (a row that
+    // nothing reaches would have no lit pixels; the sun scenario carries the neutral row).
+    static const std::vector<float> thinRoughness(3, 0.5f);
+    static const std::vector<float> thinMetallic4(4, 0.0f);
+    static const std::vector<float> thinMetallic3(3, 0.0f);
+    static const std::vector<float> thinWeights4{0.0f, 0.25f, 0.5f, 1.0f};
+    static const std::vector<float> thinWeights3{0.25f, 0.5f, 1.0f};
+    static const std::vector<glm::vec3> thinColors{glm::vec3(1.0f), glm::vec3(1.0f, 0.55f, 0.25f), glm::vec3(0.1f, 0.7f, 0.6f)};
+    static const std::vector<glm::vec3> thinWhite(3, glm::vec3(1.0f));
+    static const std::vector<float> thinFurnaceRoughness{0.2f, 0.5f, 0.9f};
+    static const glm::vec3 thinBase(0.3f, 0.5f, 0.8f);
+    static const glm::vec3 thinSun = glm::normalize(glm::vec3(-0.55f, 0.4f, -0.73f));
+    static const glm::vec3 thinPointCentre(0.0f, 1.0f, 0.0f);
+    static const MaterialPointLight thinBackLight{thinPointCentre + 9.0f * glm::normalize(glm::vec3(-0.55f, 0.4f, -0.73f)), 250.0f,
+                                                  100.0f};
     static const std::vector<MaterialScenarioSpec> all{
         {"base-grid-sun", roughness, metallic, copper, true, 3.0f, towardSun, 0.0f},
         {"base-grid-env", roughness, metallic, copper, false, 0.0f, towardSun, 0.5f},
@@ -239,6 +261,28 @@ const std::vector<MaterialScenarioSpec>& specs() {
         // Furnace over iridescent materials: base albedo 1 under a uniform environment of radiance 1 (also without the transport).
         {"furnace-iridescence", iridRoughness, iridMetallic, glm::vec3(1.0f), false, 0.0f, towardSun, 1.0f, {}, {}, {}, {}, {}, {}, {},
          false, {}, {}, {}, {}, {}, {}, iridFactor, iridIor, iridThickness},
+        // F15.3 (ticket 16) thin subsurface.  Sun behind the spheres only: the direct gate (reflected (1 - w) and transmitted lobe
+        // at the disk centre).
+        {.name = "subsurface-thin-sun", .roughness = thinRoughness, .metallic = thinMetallic4, .baseColor = thinBase, .sun = true,
+         .sunIrradiance = 3.0f, .towardSun = thinSun, .environment = 0.0f, .subsurfaceWeight = thinWeights4,
+         .subsurfaceColor = thinColors},
+        // Environment only, deterministic resolve (--reflections off --lighting-denoise custom): the declared transmitted weight.
+        {.name = "subsurface-thin-env-resolve", .roughness = thinRoughness, .metallic = thinMetallic4, .baseColor = thinBase,
+         .towardSun = thinSun, .environment = 0.5f, .subsurfaceWeight = thinWeights4, .subsurfaceColor = thinColors},
+        // The same scene with the specular transport on: the back-side environment of the composition (exact quadrature gate).
+        {.name = "subsurface-thin-env", .roughness = thinRoughness, .metallic = thinMetallic4, .baseColor = thinBase,
+         .towardSun = thinSun, .environment = 0.5f, .subsurfaceWeight = thinWeights4, .subsurfaceColor = thinColors},
+        // One point light BEHIND single-sided quads only (no sun, environment 0): the resolve's local lights with --lighting legacy,
+        // ReSTIR or clustered DI otherwise.  DI receivers skip lights with N.L <= 0 today (diBRDFWeighted).
+        {.name = "subsurface-thin-point", .roughness = thinRoughness, .metallic = thinMetallic3, .baseColor = thinBase,
+         .towardSun = thinSun, .environment = 0.0f, .pointLights = {thinBackLight}, .subsurfaceWeight = thinWeights3,
+         .subsurfaceColor = thinColors, .quadCarriers = true},
+        // Furnace over thin materials: white base, white transmission colour, albedo 1 under a uniform environment of radiance 1
+        // (reflected + transmitted <= 1: energy moved, not added); columns vary the base roughness (the runner also captures it
+        // without the transport).
+        {.name = "furnace-thin-subsurface", .roughness = thinFurnaceRoughness, .metallic = thinMetallic4,
+         .baseColor = glm::vec3(1.0f), .towardSun = thinSun, .environment = 1.0f, .subsurfaceWeight = thinWeights4,
+         .subsurfaceColor = thinWhite},
     };
     return all;
 }
@@ -274,7 +318,10 @@ void MaterialValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& textur
     const auto& s = spec(scenario_);
     // The anisotropy grids use combed spheres (one mesh per tangent handedness: -1 the engine's UV sphere convention).
     auto upload = [&](float handedness) {
-        const auto sphere = s.hasAnisotropyGrid()
+        // F15.3 (ticket 16): the thin point-light fixture uses single-sided quads (generatePlane lies in XZ with normal +Y; the
+        // instance is rotated by +90 degrees about X so the normal faces the camera).
+        const auto sphere = s.quadCarriers ? ProceduralMeshes::generatePlane(2.0f * SphereRadius, 2.0f * SphereRadius, 8, 8)
+            : s.hasAnisotropyGrid()
             ? ProceduralMeshes::generateCombedSphere(SphereRadius, SphereSlices, SphereStacks, glm::vec3(1.0f, 0.0f, 0.0f), handedness)
             : ProceduralMeshes::generateSphere(SphereRadius, SphereSlices, SphereStacks);
         return scene.uploadMesh(sphere.positions, sphere.normals, sphere.tangents, sphere.uvs, sphere.indices);
@@ -289,6 +336,7 @@ void MaterialValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& textur
             spheres_.push_back(e);
             TransformComponent transform;
             transform.position = sphereCenter(s, column, row);
+            if (s.quadCarriers) transform.rotation = glm::angleAxis(0.5f * pi, glm::vec3(1.0f, 0.0f, 0.0f));
             if (!s.mirroredColumn.empty() && s.mirroredColumn[column]) transform.scale = glm::vec3(-1.0f, 1.0f, 1.0f);
             transform.updateMatrix();
             ecs.addComponent(e, std::move(transform));
@@ -336,6 +384,15 @@ void MaterialValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& textur
                 description->anisotropy.emplace();
                 description->anisotropy->strength = s.anisotropyStrength[row];
                 description->anisotropy->rotation = s.anisotropyRotation[column];
+                material.extension = std::move(description);
+            }
+            if (s.hasSubsurfaceGrid() && s.subsurfaceWeight[row] > 0.0f) {
+                auto description = std::make_shared<MaterialDescription>();
+                description->subsurface.emplace();
+                description->subsurface->mode   = SubsurfaceMode::Thin;
+                description->subsurface->weight = s.subsurfaceWeight[row];
+                const glm::vec3 c = s.subsurfaceColor[column];
+                description->subsurface->color = {c.x, c.y, c.z};
                 material.extension = std::move(description);
             }
             if (s.hasIridescenceGrid()) {

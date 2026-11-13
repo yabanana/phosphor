@@ -120,6 +120,7 @@ from f15_common import sha256_file  # noqa: E402
 
 np = np_module()
 
+DEFAULT_THREADS = int(os.environ.get("F15_REFERENCE_THREADS", min(8, os.cpu_count() or 1)))  # Mitsuba ray-cast threads (env override)
 MIN_ROUGHNESS, MIN_ALPHA, MIN_NDOTV = 0.04, 0.002, 1e-4
 DIELECTRIC_IOR = 1.5
 DIELECTRIC_F0 = ((1 - DIELECTRIC_IOR) / (1 + DIELECTRIC_IOR)) ** 2  # 0.04
@@ -2234,7 +2235,7 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
     environment model (the sun term is the same in both).  `visibility`: None (no shadow rays) or a list with
     one boolean array per point light (shadow rays, see point_light_visibility)."""
     require_declared_scene(data)
-    cast = cast or cast_primary_rays(root, data, threads or min(8, os.cpu_count() or 1))
+    cast = cast or cast_primary_rays(root, data, threads or DEFAULT_THREADS)
     valid, position, normal, instance, (width, height) = cast
     spheres = sphere_table(data)
     flat = valid.reshape(-1)
@@ -2406,7 +2407,7 @@ def main(argv=None):
                    help="negative controls of the declared model (implies --declared)")
     p.add_argument("--visibility", choices=["none", "rays"], default="none",
                    help="point-light visibility: none (legacy resolve lights) or Mitsuba shadow rays (DI)")
-    p.add_argument("--threads", type=int, default=min(8, os.cpu_count() or 1))
+    p.add_argument("--threads", type=int, default=DEFAULT_THREADS)
     p.set_defaults(function=command_render)
     args = parser.parse_args(argv)
     try:
