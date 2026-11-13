@@ -546,7 +546,9 @@ class RunnerLogic(unittest.TestCase):
         source = (HERE.parent / "src" / "testbench" / "material_validation.cpp").read_text()
         import re
         block = source[source.index("kScenarios{"):source.index("};", source.index("kScenarios{"))]
-        self.assertEqual(sorted(re.findall(r'"([a-z0-9-]+)"', block)),
+        # the two clip fixtures of ticket 08 belong to tools/f15_clip_check.py, not to this reference runner
+        clip_only = {"specular-grid-edit", "specular-grid-rough"}
+        self.assertEqual(sorted(set(re.findall(r'"([a-z0-9-]+)"', block)) - clip_only),
                          sorted({check.bench_scenario(name) for name in check.SCENARIOS}))
 
     def test_declared_gate_bounds(self):
