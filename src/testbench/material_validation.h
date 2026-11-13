@@ -81,6 +81,18 @@ struct MaterialScenarioSpec {
     std::vector<float>     subsurfaceWeight;
     std::vector<glm::vec3> subsurfaceColor;
     bool                   quadCarriers = false;
+    // F15.3 (ticket 17) volumetric subsurface grids (SubsurfaceMode::Volumetric, OpenPBR semantics of ADR-0005): the subsurface
+    // weight and radius (metres) per COLUMN (weight 0 carries no extension, the neutral material), the multiple-scattering
+    // colour, radiusScale (the per-channel mean free path is radius * radiusScale) and the Henyey-Greenstein anisotropy per ROW.  A
+    // volumetric block needs a volume block (validate()): every piece carries one of thickness = the sphere diameter and neutral
+    // attenuation (it marks the object as a solid, nothing else).  `cameraDistance` > 0 overrides the camera rule below.
+    std::vector<float>     volumetricWeight;
+    std::vector<float>     volumetricRadius;
+    std::vector<glm::vec3> volumetricColor;
+    std::vector<glm::vec3> volumetricRadiusScale;
+    std::vector<float>     volumetricAnisotropy;
+    float                  cameraDistance = 0.0f;
+    [[nodiscard]] bool hasVolumetricGrid() const { return !volumetricWeight.empty(); }
     [[nodiscard]] bool hasSubsurfaceGrid() const { return !subsurfaceWeight.empty(); }
     [[nodiscard]] bool hasIridescenceGrid() const { return !iridescenceFactor.empty(); }
     [[nodiscard]] bool hasSpecularGrid() const { return !ior.empty(); }

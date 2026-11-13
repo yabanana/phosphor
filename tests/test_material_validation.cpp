@@ -19,7 +19,7 @@
 using namespace phosphor;
 
 TEST_CASE("F15.3 material scenarios are exactly the nine declared names") {
-    CHECK(MaterialValidation::scenarios().size() == 40);
+    CHECK(MaterialValidation::scenarios().size() == 45);
     for (auto name : {"base-grid-sun", "base-grid-env", "base-grid-env-resolve", "furnace-base", "furnace-resolve",
                       "roughness-extremes", "roughness-extremes-sun", "specular-grid-sun", "specular-grid-env-resolve", "specular-grid-point",
                       "specular-grid-env", "furnace-specular", "clearcoat-grid-sun", "clearcoat-grid-env-resolve",
@@ -29,7 +29,8 @@ TEST_CASE("F15.3 material scenarios are exactly the nine declared names") {
                       "aniso-grid-env", "aniso-grid-point", "furnace-aniso", "aniso-mirrored-sun", "iridescence-grid-sun",
                       "iridescence-grid-env-resolve", "iridescence-grid-env", "iridescence-grid-point", "furnace-iridescence",
                       "subsurface-thin-sun", "subsurface-thin-env-resolve", "subsurface-thin-env", "subsurface-thin-point",
-                      "furnace-thin-subsurface"})
+                      "furnace-thin-subsurface", "subsurface-volumetric-sun", "subsurface-volumetric-radius",
+                      "subsurface-volumetric-subpixel", "subsurface-volumetric-subpixel-off", "subsurface-volumetric-backlit"})
         CHECK(MaterialValidation::validScenario(name));
     CHECK_FALSE(MaterialValidation::validScenario("unknown"));
     CHECK_THROWS(MaterialValidation{"unknown"});
@@ -1064,4 +1065,150 @@ TEST_CASE("F15.3 subsurface-thin-point: single-sided quads facing the camera, li
     extractFrameScene(ecs, scene, frame);
     CHECK(frame.lights.size() == 1u);
     f.teardown(ecs, scene);
+}
+
+TEST_CASE("F15.3 volumetric subsurface grids declare weight/radius columns over skin and jade rows (tools/test_f15_check.py mirrors them)") {
+    const auto& sun = MaterialValidation::spec("subsurface-volumetric-sun");
+    REQUIRE(sun.hasVolumetricGrid());
+    CHECK(sun.sun);
+    CHECK(sun.environment == 0.0f);
+    CHECK(sun.sunIrradiance == 3.0f);
+    CHECK(sun.baseColor == glm::vec3(0.8f));
+    CHECK(sun.roughness == std::vector<float>(5, 0.7f));
+    CHECK(sun.metallic == std::vector<float>(2, 0.0f));
+    CHECK(sun.volumetricWeight == std::vector<float>{0.0f, 0.5f, 1.0f, 1.0f, 1.0f});
+    CHECK(sun.volumetricRadius == std::vector<float>{0.08f, 0.08f, 0.04f, 0.08f, 0.16f});
+    CHECK(sun.volumetricColor == std::vector<glm::vec3>{glm::vec3(0.85f, 0.55f, 0.45f), glm::vec3(0.30f, 0.70f, 0.45f)});
+    CHECK(sun.volumetricRadiusScale == std::vector<glm::vec3>{glm::vec3(1.0f, 0.5f, 0.25f), glm::vec3(0.5f, 1.0f, 0.7f)});
+    CHECK(sun.volumetricAnisotropy == std::vector<float>{0.0f, 0.3f});
+    REQUIRE(sun.volumetricWeight.size() == sun.roughness.size());
+    REQUIRE(sun.volumetricColor.size() == sun.metallic.size());
+    // Side light: the sun is nearly perpendicular to the view, slightly toward the camera; the terminator crosses the disc.
+    CHECK(sun.towardSun.x < -0.85f);
+    CHECK(sun.towardSun.z > 0.3f);
+    CHECK(glm::length(sun.towardSun) == doctest::Approx(1.0f));
+    // The radius sweep shares columns 2-4 with the bound scene (the reference render is cached across both) and adds the extremes.
+    const auto& sweep = MaterialValidation::spec("subsurface-volumetric-radius");
+    CHECK(sweep.volumetricWeight == std::vector<float>(5, 1.0f));
+    CHECK(sweep.volumetricRadius == std::vector<float>{0.02f, 0.24f, 0.04f, 0.08f, 0.16f});
+    for (size_t c = 2; c < 5; ++c) {
+        CHECK(sweep.volumetricRadius[c] == sun.volumetricRadius[c]);
+        CHECK(sweep.volumetricWeight[c] == sun.volumetricWeight[c]);
+    }
+    CHECK(sweep.volumetricColor == sun.volumetricColor);
+    CHECK(sweep.volumetricRadiusScale == sun.volumetricRadiusScale);
+    CHECK(sweep.volumetricAnisotropy == sun.volumetricAnisotropy);
+    CHECK(sweep.towardSun == sun.towardSun);
+    CHECK(sweep.roughness == sun.roughness);
+    CHECK(sweep.baseColor == sun.baseColor);
+    // Sub-pixel pair: identical scenes, the second without any block; the colour equals the base colour; the radius is sub-pixel
+    // (mean free path <= 0.002 m = 0.23 px at the 5.5 m camera: pixel footprint 2 * 5.5 * tan(30 deg) / 720 = 0.0088 m).
+    const auto& sub = MaterialValidation::spec("subsurface-volumetric-subpixel");
+    const auto& off = MaterialValidation::spec("subsurface-volumetric-subpixel-off");
+    CHECK_FALSE(off.hasVolumetricGrid());
+    CHECK(sub.roughness == off.roughness);
+    CHECK(sub.metallic == off.metallic);
+    CHECK(sub.baseColor == off.baseColor);
+    CHECK(sub.towardSun == off.towardSun);
+    CHECK(sub.sunIrradiance == off.sunIrradiance);
+    CHECK(sub.volumetricColor == std::vector<glm::vec3>{sub.baseColor});
+    CHECK(sub.volumetricWeight == std::vector<float>{1.0f, 1.0f, 0.5f, 0.5f});
+    const float pixel = 2.0f * 5.5f * std::tan(glm::radians(30.0f)) / 720.0f;
+    for (float radius : sub.volumetricRadius)
+        for (float scale : {sub.volumetricRadiusScale[0].x, sub.volumetricRadiusScale[0].y, sub.volumetricRadiusScale[0].z})
+            CHECK(radius * scale < 0.5f * pixel);
+    // Back-lit: the sun behind the spheres, thick (radius up to 0.16 m on 0.4 m spheres).
+    const auto& back = MaterialValidation::spec("subsurface-volumetric-backlit");
+    CHECK(back.towardSun.z < -0.9f);
+    CHECK(back.volumetricWeight == std::vector<float>(2, 1.0f));
+    CHECK(MaterialValidation{"subsurface-volumetric-backlit"}.getDefaultCamera().position.z == 4.0f);
+    CHECK(MaterialValidation{"subsurface-volumetric-sun"}.getDefaultCamera().position == glm::vec3(0.0f, 0.5f, 5.5f));
+}
+
+TEST_CASE("F15.3 volumetric carriers hold the block of their column and row, a volume of the sphere diameter, nothing else") {
+    ECS ecs;
+    GpuScene scene;
+    test::NullTextureManager textures;
+    MaterialValidation f{"subsurface-volumetric-sun"};
+    f.setup(ecs, scene, textures);
+    const auto& s = MaterialValidation::spec("subsurface-volumetric-sun");
+    REQUIRE(f.spheres().size() == s.metallic.size() * s.roughness.size());
+    for (u32 row = 0; row < s.metallic.size(); ++row)
+        for (u32 col = 0; col < s.roughness.size(); ++col) {
+            const EntityID e = f.spheres()[row * s.roughness.size() + col];
+            const auto& m = std::as_const(ecs).getComponent<MaterialComponent>(e);
+            CHECK(m.metallicFactor == 0.0f);
+            CHECK(m.roughnessFactor == 0.7f);
+            if (s.volumetricWeight[col] == 0.0f) {
+                CHECK_FALSE(m.extension); // the neutral material
+                continue;
+            }
+            REQUIRE(m.extension);
+            REQUIRE(m.extension->subsurface);
+            REQUIRE(m.extension->volume);
+            const auto& block = *m.extension->subsurface;
+            CHECK(block.mode == SubsurfaceMode::Volumetric);
+            CHECK(block.weight == s.volumetricWeight[col]);
+            CHECK(block.radius == s.volumetricRadius[col]);
+            const glm::vec3 c = s.volumetricColor[row], scale = s.volumetricRadiusScale[row];
+            CHECK(block.color == std::array<float, 3>{c.x, c.y, c.z});
+            CHECK(block.radiusScale == std::array<float, 3>{scale.x, scale.y, scale.z});
+            CHECK(block.anisotropy == s.volumetricAnisotropy[row]);
+            CHECK_FALSE(block.weightTexture.present());
+            CHECK_FALSE(block.colorTexture.present());
+            CHECK_FALSE(block.radiusScaleTexture.present());
+            CHECK(m.extension->volume->thickness == doctest::Approx(0.8f));
+            CHECK(m.extension->volume->attenuationColor == std::array<float, 3>{1.0f, 1.0f, 1.0f});
+            CHECK(std::isinf(m.extension->volume->attenuationDistance));
+            CHECK_FALSE(m.extension->transmission);
+            CHECK_FALSE(m.extension->specular);
+            CHECK(validate(*m.extension).empty());
+            CHECK(featureMask(*m.extension) == (MATERIAL_FEATURE_SUBSURFACE | MATERIAL_FEATURE_VOLUME));
+        }
+    SceneStore store;
+    store.sync(ecs, scene);
+    CHECK(store.verifyAgainstEcs(ecs, scene).empty());
+    CHECK(store.featureUnion() == (MATERIAL_FEATURE_SUBSURFACE | MATERIAL_FEATURE_VOLUME));
+    // The words the reference reads: record 2 (GPUMaterialExt2) word 0 mode 1, 1 weight, 2-4 colour, 5 radius, 6-8 scale, 9 anisotropy;
+    // record 1 word 11 the volume thickness.
+    const u32 row = 1, col = 3; // jade, weight 1, radius 0.08
+    const EntityID e = f.spheres()[row * s.roughness.size() + col];
+    const u32 group = store.materials()[store.materialIndexOf(e)].extensionIndex;
+    auto word = [&](u32 record, u32 index) {
+        float v;
+        std::memcpy(&v, &store.extensions()[group + record].w[index], 4);
+        return v;
+    };
+    CHECK(store.extensions()[group + 2].w[0] == 1u); // volumetric
+    CHECK(word(2, 1) == 1.0f);
+    CHECK(word(2, 2) == 0.30f);
+    CHECK(word(2, 3) == 0.70f);
+    CHECK(word(2, 4) == 0.45f);
+    CHECK(word(2, 5) == 0.08f);
+    CHECK(word(2, 6) == 0.5f);
+    CHECK(word(2, 7) == 1.0f);
+    CHECK(word(2, 8) == 0.7f);
+    CHECK(word(2, 9) == 0.3f);
+    CHECK(word(1, 11) == doctest::Approx(0.8f));
+    CHECK(std::isinf(word(1, 16)));
+    f.teardown(ecs, scene);
+}
+
+TEST_CASE("F15.3 the sub-pixel pair differs only by the block, the grids frame every sphere") {
+    for (auto name : {"subsurface-volumetric-subpixel", "subsurface-volumetric-subpixel-off"}) {
+        ECS ecs;
+        GpuScene scene;
+        test::NullTextureManager textures;
+        MaterialValidation f{name};
+        f.setup(ecs, scene, textures);
+        const bool withBlock = std::string_view(name) == "subsurface-volumetric-subpixel";
+        REQUIRE(f.spheres().size() == 4);
+        for (EntityID e : f.spheres()) {
+            const auto& m = std::as_const(ecs).getComponent<MaterialComponent>(e);
+            CHECK(m.baseColorFactor == glm::vec4(0.8f, 0.8f, 0.8f, 1.0f));
+            CHECK(m.roughnessFactor == 0.7f);
+            CHECK(static_cast<bool>(m.extension) == withBlock);
+        }
+        f.teardown(ecs, scene);
+    }
 }

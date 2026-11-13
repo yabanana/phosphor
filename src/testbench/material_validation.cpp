@@ -15,7 +15,7 @@
 namespace phosphor {
 namespace {
 // The names are mirrored by tools/f15_check.py SCENARIOS (tests/test_material_validation.cpp compares both).
-constexpr std::array<std::string_view, 40> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
+constexpr std::array<std::string_view, 45> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
                                                       "furnace-base",   "furnace-resolve",     "roughness-extremes",
                                                       "roughness-extremes-sun", "specular-grid-sun",
                                                       "specular-grid-env-resolve", "specular-grid-point", "specular-grid-env", "furnace-specular",
@@ -29,7 +29,10 @@ constexpr std::array<std::string_view, 40> kScenarios{"base-grid-sun",  "base-gr
                                                       "iridescence-grid-sun", "iridescence-grid-env-resolve", "iridescence-grid-env",
                                                       "iridescence-grid-point", "furnace-iridescence",
                                                       "subsurface-thin-sun", "subsurface-thin-env-resolve", "subsurface-thin-env",
-                                                      "subsurface-thin-point", "furnace-thin-subsurface"};
+                                                      "subsurface-thin-point", "furnace-thin-subsurface",
+                                                      "subsurface-volumetric-sun", "subsurface-volumetric-radius",
+                                                      "subsurface-volumetric-subpixel", "subsurface-volumetric-subpixel-off",
+                                                      "subsurface-volumetric-backlit"};
 constexpr float pi = 3.14159265358979323846f;
 
 glm::quat orientLight(glm::vec3 towardLight) {
@@ -154,6 +157,42 @@ const std::vector<MaterialScenarioSpec>& specs() {
     static const glm::vec3 thinPointCentre(0.0f, 1.0f, 0.0f);
     static const MaterialPointLight thinBackLight{thinPointCentre + 9.0f * glm::normalize(glm::vec3(-0.55f, 0.4f, -0.73f)), 250.0f,
                                                   100.0f};
+    // F15.3 (ticket 17): the volumetric subsurface mode (screen-space diffusion).  Texture-free spheres of radius 0.4 m on a
+    // light grey base (0.8) of roughness 0.7 (a wide boundary lobe: the Mitsuba ground truth converges in minutes, not hours), lit
+    // by a sun from the SIDE (toward the sun (-0.9, 0.25, 0.35): the terminator crosses the visible disc to the right of its
+    // centre).  Rows are the material: skin-like (multiple-scattering colour (0.85, 0.55, 0.45), radiusScale (1, 0.5, 0.25),
+    // isotropic) and jade-like (0.30, 0.70, 0.45), (0.5, 1, 0.7), g = 0.3; columns the (weight, radius): {0 (neutral), 0.5 @ 0.08 m,
+    // 1 @ 0.04 m, 1 @ 0.08 m, 1 @ 0.16 m}, i.e. weight {0, 0.5, 1} at the nominal radius 0.08 m and the radius sweep x0.5 / x1 / x2
+    // at weight 1.  The radius sweep scene shares columns 2-4 with it (identical pieces: the reference render is cached across both)
+    // and adds x0.25 and x3.  The mean free path of the dominant (green) channel at the nominal radius is 0.04 m (4.5 px at the
+    // 5.5 m camera).
+    static const std::vector<float> volRoughness(5, 0.7f);
+    static const std::vector<float> volMetallic2(2, 0.0f);
+    static const std::vector<float> volWeights{0.0f, 0.5f, 1.0f, 1.0f, 1.0f};
+    static const std::vector<float> volRadii{0.08f, 0.08f, 0.04f, 0.08f, 0.16f};
+    static const std::vector<float> volSweepRadii{0.02f, 0.24f, 0.04f, 0.08f, 0.16f};
+    static const std::vector<float> volSweepWeights(5, 1.0f);
+    static const std::vector<glm::vec3> volColors{glm::vec3(0.85f, 0.55f, 0.45f), glm::vec3(0.30f, 0.70f, 0.45f)};
+    static const std::vector<glm::vec3> volScales{glm::vec3(1.0f, 0.5f, 0.25f), glm::vec3(0.5f, 1.0f, 0.7f)};
+    static const std::vector<float> volAnisotropy{0.0f, 0.3f};
+    static const glm::vec3 volBase(0.8f);
+    static const glm::vec3 volSun = glm::normalize(glm::vec3(-0.9f, 0.25f, 0.35f));
+    // Sub-pixel fixture: weight {1, 1, 0.5, 0.5} x radius {0.0005, 0.002, 0.0005, 0.002} m (the mean free path is at most 0.002 m =
+    // 0.23 px at the 5.5 m camera), subsurface colour = the base colour (so the "diffusion skipped" image IS the base model), g = 0.
+    // `-off` is the identical scene without any block: the runner compares the two engine captures.
+    static const std::vector<float> subRoughness(4, 0.7f);
+    static const std::vector<float> subMetallic1(1, 0.0f);
+    static const std::vector<float> subWeights{1.0f, 1.0f, 0.5f, 0.5f};
+    static const std::vector<float> subRadii{0.0005f, 0.002f, 0.0005f, 0.002f};
+    static const std::vector<glm::vec3> subColors{volBase};
+    static const std::vector<glm::vec3> subScales{glm::vec3(1.0f, 0.5f, 0.25f)};
+    static const std::vector<float> subAnisotropy{0.0f};
+    // Back-lit thick fixture: the sun BEHIND the spheres (V.L about -0.96), weight 1, radius {0.08, 0.16} m, both materials.  Measured
+    // and reported, not gated: screen-space diffusion cannot carry light through a thick volume (a declared limit).
+    static const std::vector<float> backRoughness(2, 0.7f);
+    static const std::vector<float> backWeights(2, 1.0f);
+    static const std::vector<float> backRadii{0.08f, 0.16f};
+    static const glm::vec3 backSun = glm::normalize(glm::vec3(0.15f, 0.25f, -0.96f));
     static const std::vector<MaterialScenarioSpec> all{
         {"base-grid-sun", roughness, metallic, copper, true, 3.0f, towardSun, 0.0f},
         {"base-grid-env", roughness, metallic, copper, false, 0.0f, towardSun, 0.5f},
@@ -284,6 +323,27 @@ const std::vector<MaterialScenarioSpec>& specs() {
         {.name = "furnace-thin-subsurface", .roughness = thinFurnaceRoughness, .metallic = thinMetallic4,
          .baseColor = glm::vec3(1.0f), .towardSun = thinSun, .environment = 1.0f, .subsurfaceWeight = thinWeights4,
          .subsurfaceColor = thinWhite},
+        // F15.3 (ticket 17) volumetric subsurface.  Sun only (environment 0): the gate against the Mitsuba volumetric random walk.
+        {.name = "subsurface-volumetric-sun", .roughness = volRoughness, .metallic = volMetallic2, .baseColor = volBase, .sun = true,
+         .sunIrradiance = 3.0f, .towardSun = volSun, .environment = 0.0f, .volumetricWeight = volWeights, .volumetricRadius = volRadii,
+         .volumetricColor = volColors, .volumetricRadiusScale = volScales, .volumetricAnisotropy = volAnisotropy},
+        // The radius sweep (weight 1, radius x0.25 / x0.5 / x1 / x2 / x3 of the nominal 0.08 m; columns 2-4 equal the scene above).
+        {.name = "subsurface-volumetric-radius", .roughness = volRoughness, .metallic = volMetallic2, .baseColor = volBase, .sun = true,
+         .sunIrradiance = 3.0f, .towardSun = volSun, .environment = 0.0f, .volumetricWeight = volSweepWeights,
+         .volumetricRadius = volSweepRadii, .volumetricColor = volColors, .volumetricRadiusScale = volScales,
+         .volumetricAnisotropy = volAnisotropy},
+        // Sub-pixel radius: must equal the scene without any block (the next one).
+        {.name = "subsurface-volumetric-subpixel", .roughness = subRoughness, .metallic = subMetallic1, .baseColor = volBase,
+         .sun = true, .sunIrradiance = 3.0f, .towardSun = volSun, .environment = 0.0f, .volumetricWeight = subWeights,
+         .volumetricRadius = subRadii, .volumetricColor = subColors, .volumetricRadiusScale = subScales,
+         .volumetricAnisotropy = subAnisotropy},
+        {.name = "subsurface-volumetric-subpixel-off", .roughness = subRoughness, .metallic = subMetallic1, .baseColor = volBase,
+         .sun = true, .sunIrradiance = 3.0f, .towardSun = volSun, .environment = 0.0f},
+        // Back-lit thick spheres: measured and reported, not gated.
+        {.name = "subsurface-volumetric-backlit", .roughness = backRoughness, .metallic = volMetallic2, .baseColor = volBase,
+         .sun = true, .sunIrradiance = 3.0f, .towardSun = backSun, .environment = 0.0f, .volumetricWeight = backWeights,
+         .volumetricRadius = backRadii, .volumetricColor = volColors, .volumetricRadiusScale = volScales,
+         .volumetricAnisotropy = volAnisotropy, .cameraDistance = 4.0f},
     };
     return all;
 }
@@ -398,6 +458,21 @@ void MaterialValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& textur
                 description->subsurface->color = {c.x, c.y, c.z};
                 material.extension = std::move(description);
             }
+            if (s.hasVolumetricGrid() && s.volumetricWeight[column] > 0.0f) {
+                auto description = std::make_shared<MaterialDescription>();
+                description->subsurface.emplace();
+                auto& block = *description->subsurface;
+                block.mode   = SubsurfaceMode::Volumetric;
+                block.weight = s.volumetricWeight[column];
+                const glm::vec3 c = s.volumetricColor[row], scale = s.volumetricRadiusScale[row];
+                block.color       = {c.x, c.y, c.z};
+                block.radius      = s.volumetricRadius[column];
+                block.radiusScale = {scale.x, scale.y, scale.z};
+                block.anisotropy  = s.volumetricAnisotropy[row];
+                description->volume.emplace(); // a solid: thickness = the sphere diameter, neutral attenuation
+                description->volume->thickness = 2.0f * SphereRadius;
+                material.extension = std::move(description);
+            }
             if (s.hasIridescenceGrid()) {
                 auto description = std::make_shared<MaterialDescription>();
                 description->iridescence.emplace();
@@ -475,7 +550,7 @@ CameraSetup MaterialValidation::getDefaultCamera() const {
     // distance keeps the whole grid plus a margin in view.
     const auto& s = spec(scenario_);
     const float centreY = 0.5f * Spacing * float(s.metallic.size() - 1);
-    const float distance = s.roughness.size() > 2 ? 5.5f : 4.0f;
+    const float distance = s.cameraDistance > 0.0f ? s.cameraDistance : (s.roughness.size() > 2 ? 5.5f : 4.0f);
     return {{0.0f, centreY, distance}, {0.0f, centreY, 0.0f}, distance, false};
 }
 } // namespace phosphor
