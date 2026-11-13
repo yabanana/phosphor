@@ -2010,6 +2010,66 @@
         "label": "CA9497D4DEBAFFCEA47E9A8DF1AAFA4EB23C8B0418029197E2A0AF85D9427FC1",
         "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
         "name": "denoise_atrous_tile1_lobe"
+      },
+      {
+        "label": "F13CE912EFD5C91BE943508B1B8EA3D9DB092510F9D2C813BB92C75DFF90B30D",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "forward_di_receiver_guide_fs"
+      },
+      {
+        "label": "9E63DE10366FD28455457060B39CCDA119624A2059C19C8B310D8FD1CF682AEB",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "forward_fs"
+      },
+      {
+        "label": "FA0726134A6F359D969AB6F602AB938863023E044A16763EC822F4C1DDD6C396",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "light_cluster_shade_lobe"
+      },
+      {
+        "label": "12A86C468357A1F45BD1A4D24AC40495769D80468889B33716DB821E7B7B4690",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "visibility_tile"
+      },
+      {
+        "label": "96EF43C7426422C3B7111AFA7585218E13E6C398B7CC5B85C5C0D32D980943D2",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "forward_surface_lit_fs"
+      },
+      {
+        "label": "5403566C447A41F535EFE2B7F7257ED72AAADD1538FFD310DA00B53267B2AF58",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "visibility_lit_resolve"
+      },
+      {
+        "label": "A648F611DE4A2E66A2E8C60CEDA2924CB4F6933FCC4655DEB6DFAA4E084976A7",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "material_lighting_guides"
+      },
+      {
+        "label": "C870EAC765008EB6FFA851B034C4CAE866E950F644F722D64BD384B1986900E4",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "restir_di_spatial_lobe"
+      },
+      {
+        "label": "12ECB6A7B5811DDC3F9944B0B04DE1D3C7711E27122EB0D3DBCFDF21A30ABBE6",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "restir_di_temporal_lobe"
+      },
+      {
+        "label": "7D1E8EC5FF1621A7D79776E5EF72534609CD8E5971DEDB7100886299AE6BAA6C",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "restir_di_candidates_lobe"
+      },
+      {
+        "label": "ED6D0CE889F53C1932BF2004C0EF736961DB66C18E06D5704724243D0FED65FA",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "restir_di_shade_rt_lobe"
+      },
+      {
+        "label": "0DBD90A5BA32480E4CFDC7755C20B8451E1ADC838AD9617D2510E2E8735439C7",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "light_cluster_shade_rt_lobe"
       }
     ],
     "specialized_function_descriptors": [
@@ -9030,6 +9090,378 @@
         ],
         "function_descriptor": "fnd:A5D09E1EDAF65070ACCB90AB4017E6CE49503C1A598206C3AED478BE1DEF9E25",
         "label": "68279951885295D6BABE3B0DD5A5CF39FAA791A6AA6F5C0F138BFAE941426513"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 4
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:A648F611DE4A2E66A2E8C60CEDA2924CB4F6933FCC4655DEB6DFAA4E084976A7",
+        "label": "5F53B5F53DA9FAA27374BC9560DFB7E0BA950FF619CC0C9A6C572342AFEC0836"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 4
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:5403566C447A41F535EFE2B7F7257ED72AAADD1538FFD310DA00B53267B2AF58",
+        "label": "91DF1C2E05D130E480188B11ED993C5C3FA7EDC035C7C50014C2062800F47E1E"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 21
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 1
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 4
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:5403566C447A41F535EFE2B7F7257ED72AAADD1538FFD310DA00B53267B2AF58",
+        "label": "9CD9878B1BEEDE94E784F610F7D5A92FF709CCC51FA7823153DFA242C162E270"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 4
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:96EF43C7426422C3B7111AFA7585218E13E6C398B7CC5B85C5C0D32D980943D2",
+        "label": "10809807BB07841288327708306BEA26813DEA5D2A7A4FF29252F1E872A24869"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 21
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 2
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 4
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:5403566C447A41F535EFE2B7F7257ED72AAADD1538FFD310DA00B53267B2AF58",
+        "label": "1143D846285E212AC35285019A6CABD517C502FEA5CB46B79E6C9FB3083ADDCA"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 0
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 1
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 1
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": false
+            },
+            "value_type": "ConstantBool"
+          },
+          {
+            "id": {
+              "data": 2
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 0
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 4
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:9E63DE10366FD28455457060B39CCDA119624A2059C19C8B310D8FD1CF682AEB",
+        "label": "CB71DE88D358F5035033944189498061BCD0DE8A9AB02AFB36B6A86C3F1D2DB0"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 21
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 3
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 4
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:5403566C447A41F535EFE2B7F7257ED72AAADD1538FFD310DA00B53267B2AF58",
+        "label": "C6050CD71048577A9C7C01F09AB9826B36F6081D2AA6D86E845BE2341B5D3A3F"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 4
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:F13CE912EFD5C91BE943508B1B8EA3D9DB092510F9D2C813BB92C75DFF90B30D",
+        "label": "BDB1AA12179252C834B6D09BAB19A6FEC117008D04A66BBDB131582DE0035F2D"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 21
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 0
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 4
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:5403566C447A41F535EFE2B7F7257ED72AAADD1538FFD310DA00B53267B2AF58",
+        "label": "47EECB254743ECA06DAD46DC185E732C28DA748121B1345FA96ACD87265E0AC8"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 4
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:FA0726134A6F359D969AB6F602AB938863023E044A16763EC822F4C1DDD6C396",
+        "label": "A332C63CEAA1C55CBD77185BBC9C885A29C32D115B2CEAAFFB731FF395F1D68A"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 4
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:12A86C468357A1F45BD1A4D24AC40495769D80468889B33716DB821E7B7B4690",
+        "label": "1B972ADAC6693CD9EB6B8353099CD421475CB28BDF9F879322F0639316F9830A"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 0
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 2
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 1
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": false
+            },
+            "value_type": "ConstantBool"
+          },
+          {
+            "id": {
+              "data": 2
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 0
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 4
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:9E63DE10366FD28455457060B39CCDA119624A2059C19C8B310D8FD1CF682AEB",
+        "label": "04B3A735C17D0209BAACABAC3CECA0BC498BA5F8C50068BD18FAFE4C51736E89"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 4
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:ED6D0CE889F53C1932BF2004C0EF736961DB66C18E06D5704724243D0FED65FA",
+        "label": "1874028CB5B95542BCF6A920FB650145FBBD3E76845F358D1DFC5BF5C5C90747"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 4
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:C870EAC765008EB6FFA851B034C4CAE866E950F644F722D64BD384B1986900E4",
+        "label": "1124B64142475CCF4FB7EC659E44E8225057777A541442A9D5639FFF124E3EC3"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 4
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:12ECB6A7B5811DDC3F9944B0B04DE1D3C7711E27122EB0D3DBCFDF21A30ABBE6",
+        "label": "2F1F5FC507335E51246A6C411A28CA9D12C21B0D9756E8F6224EF342003E00A3"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 4
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:7D1E8EC5FF1621A7D79776E5EF72534609CD8E5971DEDB7100886299AE6BAA6C",
+        "label": "52A882FA990000BB0705F817A051DA3D5C46631F118ADDE3D28F1D8DF018788C"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 4
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:0DBD90A5BA32480E4CFDC7755C20B8451E1ADC838AD9617D2510E2E8735439C7",
+        "label": "7193370D10F567907E9A1BE0D4E8D816C9C8E52504E4B50435B2D11C8BCC14CC"
       }
     ]
   },
@@ -12088,6 +12520,112 @@
           0,
           0
         ]
+      },
+      {
+        "compute_function_descriptor": "fnd:47EECB254743ECA06DAD46DC185E732C28DA748121B1345FA96ACD87265E0AC8",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:C6050CD71048577A9C7C01F09AB9826B36F6081D2AA6D86E845BE2341B5D3A3F",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:9CD9878B1BEEDE94E784F610F7D5A92FF709CCC51FA7823153DFA242C162E270",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:1143D846285E212AC35285019A6CABD517C502FEA5CB46B79E6C9FB3083ADDCA",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:91DF1C2E05D130E480188B11ED993C5C3FA7EDC035C7C50014C2062800F47E1E",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:5F53B5F53DA9FAA27374BC9560DFB7E0BA950FF619CC0C9A6C572342AFEC0836",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:A332C63CEAA1C55CBD77185BBC9C885A29C32D115B2CEAAFFB731FF395F1D68A",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:52A882FA990000BB0705F817A051DA3D5C46631F118ADDE3D28F1D8DF018788C",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:2F1F5FC507335E51246A6C411A28CA9D12C21B0D9756E8F6224EF342003E00A3",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:1124B64142475CCF4FB7EC659E44E8225057777A541442A9D5639FFF124E3EC3",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:1874028CB5B95542BCF6A920FB650145FBBD3E76845F358D1DFC5BF5C5C90747",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ],
+        "static_linking_descriptor": {
+          "function_descriptors": [
+            "fnd:E023CB68DF92540F1E8C1ACA365BC34300CB2582DD6DDECC6C8D78DD8BAAA498"
+          ]
+        }
+      },
+      {
+        "compute_function_descriptor": "fnd:7193370D10F567907E9A1BE0D4E8D816C9C8E52504E4B50435B2D11C8BCC14CC",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ],
+        "static_linking_descriptor": {
+          "function_descriptors": [
+            "fnd:E023CB68DF92540F1E8C1ACA365BC34300CB2582DD6DDECC6C8D78DD8BAAA498"
+          ]
+        }
       }
     ],
     "mesh_render_pipeline_descriptors": [
@@ -17401,6 +17939,73 @@
         "fragment_function_descriptor": "fnd:8157D5ABA03FCA6A7DCB46C3E9A1E349940FEBB8281D1957C40540D16A404A48",
         "support_indirect_command_buffers": "Enabled",
         "vertex_function_descriptor": "fnd:1D5ABE09B1B4136ECD5349FD66A4E928BB8B121310BAEAED98E6714C81C017CE"
+      },
+      {
+        "color_attachments": [
+          {
+            "pixel_format": "BGRA8Unorm_sRGB"
+          }
+        ],
+        "fragment_function_descriptor": "fnd:CB71DE88D358F5035033944189498061BCD0DE8A9AB02AFB36B6A86C3F1D2DB0",
+        "support_indirect_command_buffers": "Enabled",
+        "vertex_function_descriptor": "fnd:1D5ABE09B1B4136ECD5349FD66A4E928BB8B121310BAEAED98E6714C81C017CE"
+      },
+      {
+        "color_attachments": [
+          {
+            "pixel_format": "RGBA32Float"
+          },
+          {
+            "pixel_format": "RGBA16Float"
+          },
+          {
+            "pixel_format": "RGBA16Float"
+          },
+          {
+            "pixel_format": "RGBA16Float"
+          },
+          {
+            "pixel_format": "RG16Float"
+          },
+          {
+            "pixel_format": "R8Unorm"
+          }
+        ],
+        "fragment_function_descriptor": "fnd:10809807BB07841288327708306BEA26813DEA5D2A7A4FF29252F1E872A24869",
+        "support_indirect_command_buffers": "Enabled",
+        "vertex_function_descriptor": "fnd:FCA580BF0A1AC4E637D946A426E780DFE1AADF82BAB8C30C0B64B59E0633F8D5"
+      },
+      {
+        "color_attachments": [
+          {
+            "pixel_format": "RGBA16Float"
+          },
+          {
+            "pixel_format": "RGBA16Float"
+          },
+          {
+            "pixel_format": "RG32Float"
+          },
+          {
+            "pixel_format": "R16Float"
+          },
+          {
+            "pixel_format": "R32Uint"
+          }
+        ],
+        "fragment_function_descriptor": "fnd:BDB1AA12179252C834B6D09BAB19A6FEC117008D04A66BBDB131582DE0035F2D",
+        "support_indirect_command_buffers": "Enabled",
+        "vertex_function_descriptor": "fnd:FCA580BF0A1AC4E637D946A426E780DFE1AADF82BAB8C30C0B64B59E0633F8D5"
+      },
+      {
+        "color_attachments": [
+          {
+            "pixel_format": "BGRA8Unorm_sRGB"
+          }
+        ],
+        "fragment_function_descriptor": "fnd:04B3A735C17D0209BAACABAC3CECA0BC498BA5F8C50068BD18FAFE4C51736E89",
+        "support_indirect_command_buffers": "Enabled",
+        "vertex_function_descriptor": "fnd:1D5ABE09B1B4136ECD5349FD66A4E928BB8B121310BAEAED98E6714C81C017CE"
       }
     ],
     "tile_render_pipeline_descriptors": [
@@ -17487,6 +18092,20 @@
         ],
         "threadgroup_size_matches_tile_size": true,
         "tile_function_descriptor": "fnd:A8AA88A93ED2C7C0BA4D4085408263EE971BD329D14859CA16CECA29EEFF195F"
+      },
+      {
+        "color_attachments": [
+          {
+            "pixel_format": "R32Uint"
+          }
+        ],
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ],
+        "threadgroup_size_matches_tile_size": true,
+        "tile_function_descriptor": "fnd:1B972ADAC6693CD9EB6B8353099CD421475CB28BDF9F879322F0639316F9830A"
       }
     ]
   },
