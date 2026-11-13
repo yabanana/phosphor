@@ -84,6 +84,7 @@ add_executable(phosphor_tests
     test_lobe_guide_pack.cpp
     test_lobe_guide_reference.cpp
     test_lobe_select.cpp
+    test_transmission_math.cpp
     test_visibility_math.cpp
     test_worker_pool.cpp
 )
