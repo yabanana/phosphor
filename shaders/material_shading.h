@@ -100,6 +100,50 @@ static float3 sunDiskSpecular(float3 N, float3 V, float3 L, float3 albedo, float
     return sum / float(count);
 }
 
+// F15.1: the same two functions for a material with KHR_materials_ior/specular (bsdf.h, section
+// "KHR_materials_ior + KHR_materials_specular"); the base versions above stay untouched.
+static float3 evaluateLightSpec(float3 N, float3 V, float3 L, float3 radiance, float3 albedo, float metallic,
+                                float roughness, BsdfDielectricSpec spec) {
+    const float3 H = normalize(V + L);
+    const float NdotL = saturate(dot(N, L));
+    const float NdotV = max(dot(N, V), 1e-4);
+    const float NdotH = saturate(dot(N, H));
+    const float VdotH = saturate(dot(V, H));
+    if (NdotL <= 0.0) {
+        return float3(0.0);
+    }
+    const BsdfBaseLobes lobes = bsdfSpecEval(spec, NdotL, NdotV, NdotH, VdotH, albedo, metallic, bsdfAlpha(roughness));
+    return (lobes.diffuse + lobes.specular) * radiance * NdotL;
+}
+
+static float3 sunDiskSpecularSpec(float3 N, float3 V, float3 L, float3 albedo, float metallic, float roughness,
+                                  float angularRadius, BsdfDielectricSpec spec) {
+    const float a = bsdfAlpha(roughness);
+    const float NdotV = max(dot(N, V), 1e-4);
+    const float3 R = reflect(-V, N);
+    const float separation = acos(clamp(dot(R, L), -1.0f, 1.0f));
+    const bool narrow = a < 0.05f && separation < 4.0f * angularRadius + 16.0f * a;
+    const uint count = !narrow ? 1u : (a < 2.0f * angularRadius ? 128u : 32u);
+    const float3 t = normalize(cross(abs(L.z) < 0.999f ? float3(0, 0, 1) : float3(0, 1, 0), L)), b = cross(L, t);
+    const float oneMinusCos = 1.0f - cos(angularRadius);
+    float3 sum = float3(0.0);
+    for (uint k = 0; k < count; ++k) {
+        float3 Lk = L;
+        if (count > 1u) {
+            const float z = 1.0f - (float(k) + 0.5f) / float(count) * oneMinusCos, s = sqrt(max(0.0f, 1.0f - z * z));
+            const float phi = 2.39996323f * float(k);
+            Lk = t * (s * cos(phi)) + b * (s * sin(phi)) + L * z;
+        }
+        const float NdotL = saturate(dot(N, Lk));
+        if (NdotL <= 0.0f) continue;
+        const float3 H = normalize(V + Lk);
+        const float NdotH = saturate(dot(N, H)), VdotH = saturate(dot(V, H));
+        sum += bsdfDGGX(NdotH, a) * bsdfVSmithGGXCorrelated(NdotV, NdotL, a) *
+               bsdfSpecLobeColor(bsdfSpecFresnel(spec, VdotH), albedo, metallic, VdotH) * NdotL;
+    }
+    return sum / float(count);
+}
+
 static float distanceAttenuation(float dist, float range) {
     // Inverse square with a smooth window to zero at `range`.
     const float r = dist / max(range, 1e-3);
@@ -158,6 +202,22 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     const float metallic = saturate(m.metallic * float(mrTex.b));
     const float occlusion = mix(1.0, float(aoTex.r), m.occlusionStrength);
 
+    // F15.1: KHR_materials_ior + KHR_materials_specular.  Compiled only when the scene's feature
+    // union has the bit (kMaterialFeatures, undefined => 0) and run only for materials that carry it.
+    const bool specExt = (kMaterialFeatures & MATERIAL_FEATURE_SPECULAR_IOR) != 0u &&
+                         (m.flags & (MATERIAL_FEATURE_SPECULAR_IOR << MATERIAL_FEATURE_SHIFT)) != 0u;
+    BsdfDielectricSpec spec;
+    spec.f0 = float3(0.04f);
+    spec.f90 = 1.0f;
+    if (specExt) {
+        const GPUMaterialExt0 e0 = *reinterpret_cast<const device GPUMaterialExt0*>(frame.materialExtensions + m.extensionIndex);
+        const float specularWeight =
+            e0.specularFactor * float(sampleOr(textures, e0.specularTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).a);
+        const float3 specularColor = float3(e0.specularColor[0], e0.specularColor[1], e0.specularColor[2]) *
+                                     float3(sampleOr(textures, e0.specularColorTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).rgb);
+        spec = bsdfSpecularParams(e0.ior, specularWeight, specularColor);
+    }
+
     // Two-sided lighting.  A mirrored model matrix reverses the winding, so
     // the rasteriser's facing is inverted for those instances.
     const bool front = in.frontFacing != (in.mirrored != 0);
@@ -205,11 +265,20 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         if (physicalGI && isDirectional && i == shadowLight && sunAngularRadius > 0.0f) {
             // Diffuse at the disk centre (exact to O(r^2)), specular over the disk.
             const float NdotL = saturate(dot(N, L));
-            const float3 Fd = bsdfDielectricFresnel(saturate(dot(V, normalize(V + L))));
-            const float3 diffuse = NdotL > 0.0f ? bsdfBaseDiffuse(Fd, metallic, baseColor.rgb) * NdotL : float3(0.0);
-            color += (diffuse + sunDiskSpecular(N, V, L, baseColor.rgb, metallic, roughness, sunAngularRadius)) *
-                     lightColor * attenuation * visibility;
-        } else
+            if (specExt) {
+                const float3 Fd = bsdfSpecFresnel(spec, saturate(dot(V, normalize(V + L))));
+                const float3 diffuse = NdotL > 0.0f ? bsdfSpecDiffuse(Fd, metallic, baseColor.rgb) * NdotL : float3(0.0);
+                color += (diffuse + sunDiskSpecularSpec(N, V, L, baseColor.rgb, metallic, roughness, sunAngularRadius, spec)) *
+                         lightColor * attenuation * visibility;
+            } else {
+                const float3 Fd = bsdfDielectricFresnel(saturate(dot(V, normalize(V + L))));
+                const float3 diffuse = NdotL > 0.0f ? bsdfBaseDiffuse(Fd, metallic, baseColor.rgb) * NdotL : float3(0.0);
+                color += (diffuse + sunDiskSpecular(N, V, L, baseColor.rgb, metallic, roughness, sunAngularRadius)) *
+                         lightColor * attenuation * visibility;
+            }
+        } else if (specExt)
+            color += evaluateLightSpec(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, roughness, spec) * visibility;
+        else
             color += evaluateLight(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, roughness) * visibility;
     }
 
@@ -222,9 +291,15 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     const float3 specularDir = normalize(mix(reflect(-V, N), N, roughness * roughness));
     // F13 path (physicalGI): the scene's single declared isotropic environment,
     // the same radiance GI and reflection misses see; legacy keeps the gradient.
-    const float envDiffuse = bsdfEnvDiffuseWeight(roughness, NdotV, frame.dfgTable); // ADR-0006
+    float envDiffuse = bsdfEnvDiffuseWeight(roughness, NdotV, frame.dfgTable); // ADR-0006
+    float3 envSpecularWeight = bsdfEnvSpecular(f0, roughness, NdotV, frame.dfgTable);
+    if (specExt) { // F15.1: f0 * A + f90 * B per lobe, diffuse weight 1 - max(E_dielectric)
+        const BsdfSpecEnv env = bsdfSpecEnv(spec, baseColor.rgb, metallic, roughness, NdotV, frame.dfgTable);
+        envDiffuse = env.diffuseWeight;
+        envSpecularWeight = env.specular;
+    }
     const float3 ambientDiffuse = (physicalGI ? environment : hemisphere(N)) * baseColor.rgb * (1.0 - metallic) * envDiffuse;
-    const float3 ambientSpecular = (physicalGI ? environment : hemisphere(specularDir)) * bsdfEnvSpecular(f0, roughness, NdotV, frame.dfgTable);
+    const float3 ambientSpecular = (physicalGI ? environment : hemisphere(specularDir)) * envSpecularWeight;
     // F13 assembles these positive signals once outside this residual base.
     // Never subtract full-float lighting from a quantized summed color later.
     if(!externalDiffuse)color += (useGI ? indirectIrradiance * baseColor.rgb * (1.0f - metallic) * envDiffuse / M_PI_F * (physicalGI?1.0f:occlusion) : ambientDiffuse * occlusion);
@@ -238,7 +313,8 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     out.normal = N;
     out.baseColor = baseColor.rgb;
     out.diffuseAlbedo = baseColor.rgb * (1.0f - metallic) * envDiffuse;
-    out.specularAlbedo = bsdfFSchlick(f0, NdotV);
+    out.specularAlbedo = specExt ? mix(bsdfSpecFresnel(spec, NdotV), bsdfFSchlick(baseColor.rgb, NdotV), metallic)
+                                 : bsdfFSchlick(f0, NdotV);
     out.roughness = roughness;
     out.metallic = metallic;
     out.occlusion = occlusion;

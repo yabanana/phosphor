@@ -96,3 +96,79 @@ inline float3 bsdfEnvSpecular(float3 f0, float roughness, float NdotV, const con
 inline float bsdfEnvDiffuseWeight(float roughness, float NdotV, const constant float* table) {
     return 1.0f - bsdfEnvSpecular(float3(0.04f), roughness, NdotV, table).x;
 }
+
+// ---------------------------------------------------------------------------
+// F15.1 (ticket 05): KHR_materials_ior + KHR_materials_specular.
+//
+// glTF flattened form (.scratch/f15/research/khr-materials.md section 9; the
+// ratified text of KHR_materials_specular with KHR_materials_ior, outside IOR 1):
+//   dielectric_f0  = min(((ior - 1) / (ior + 1))^2 * specularColor, 1) * specular
+//   dielectric_f90 = specular                      (f90 is NOT 1)
+//   F_d            = f0 + (f90 - f0) * (1 - V.H)^5
+//   dielectric     = F_d * specular_brdf + (1 - max(F_d)) * diffuse
+//   material       = mix(dielectric, metal, metallic); the metal lobe is unchanged
+// ior = 0 is the permanent special mode: the effective IOR is +infinity, the
+// ((ior - 1) / (ior + 1))^2 factor is 1 (so with specular 1 and colour <= 1 the
+// Fresnel term evaluates to 1 in every direction).
+// The block is only compiled for scenes whose feature union has the bit
+// (kMaterialFeatures) and only runs for materials whose flags carry it; at the
+// neutral values the feature bit is clear and the base path above runs unchanged.
+// ---------------------------------------------------------------------------
+struct BsdfDielectricSpec {
+    float3 f0;
+    float f90;
+};
+
+inline float bsdfMax3(float3 v) { return max(v.x, max(v.y, v.z)); }
+
+inline BsdfDielectricSpec bsdfSpecularParams(float ior, float specularFactor, float3 specularColor) {
+    const float r = (ior - 1.0f) / (ior + 1.0f);
+    const float iorTerm = ior == 0.0f ? 1.0f : r * r;
+    BsdfDielectricSpec s;
+    s.f0 = min(iorTerm * specularColor, float3(1.0f)) * specularFactor; // clamp BEFORE the weight
+    s.f90 = specularFactor;
+    return s;
+}
+
+inline float3 bsdfSpecFresnel(BsdfDielectricSpec s, float VdotH) {
+    return s.f0 + (float3(s.f90) - s.f0) * pow(1.0f - VdotH, 5.0f);
+}
+
+// Diffuse weight of the dielectric: 1 - max(F_d) (colour-safe, per the specification).
+inline float3 bsdfSpecDiffuse(float3 Fd, float metallic, float3 albedo) {
+    return (1.0f - bsdfMax3(Fd)) * (1.0f - metallic) * albedo / M_PI_F;
+}
+
+// Specular lobe colour: mix(dielectric F_d, metal F(baseColor), metallic).
+inline float3 bsdfSpecLobeColor(float3 Fd, float3 albedo, float metallic, float VdotH) {
+    return mix(Fd, bsdfFSchlick(albedo, VdotH), metallic);
+}
+
+inline BsdfBaseLobes bsdfSpecEval(BsdfDielectricSpec s, float NdotL, float NdotV, float NdotH, float VdotH, float3 albedo,
+                                  float metallic, float a) {
+    const float3 Fd = bsdfSpecFresnel(s, VdotH);
+    BsdfBaseLobes out;
+    out.diffuse = bsdfSpecDiffuse(Fd, metallic, albedo);
+    out.specular = bsdfDGGX(NdotH, a) * bsdfVSmithGGXCorrelated(NdotV, NdotL, a) * bsdfSpecLobeColor(Fd, albedo, metallic, VdotH);
+    return out;
+}
+
+// Split-sum environment weights per lobe: E = f0 * A + f90 * B (DFG table), each clamped to the
+// physical [0, 1] domain.  Dielectric lobe, metal lobe (f0 = baseColor, f90 = 1) and the diffuse
+// weight 1 - max(E_dielectric).
+struct BsdfSpecEnv {
+    float3 specular;      // mix(E_dielectric, E_metal, metallic)
+    float3 dielectric;    // E_dielectric
+    float diffuseWeight;  // 1 - max(E_dielectric)
+};
+inline BsdfSpecEnv bsdfSpecEnv(BsdfDielectricSpec s, float3 albedo, float metallic, float roughness, float NdotV,
+                               const constant float* table) {
+    const float A = phosphor::dfgTableLookup(table, NdotV, roughness, 0u),
+                B = phosphor::dfgTableLookup(table, NdotV, roughness, 1u);
+    BsdfSpecEnv e;
+    e.dielectric = clamp(s.f0 * A + s.f90 * B, 0.0f, 1.0f);
+    const float3 metal = clamp(albedo * A + B, 0.0f, 1.0f);
+    e.specular = mix(e.dielectric, metal, metallic);
+    e.diffuseWeight = 1.0f - bsdfMax3(e.dielectric);
+    return e;
+}

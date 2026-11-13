@@ -260,8 +260,10 @@ kernel void visibility_adaptive(
         const auto instance = instances[candidate.slot];
         const device auto &material = materials[instance.materialIndex];
         const uint primitive = meshlets[candidate.meshlet].triangleOffset + visibilityTriangle(firstID) * 3u;
+        // F15.1: materials with feature bits are never reused (their lobes are not part of the
+        // base-model similarity test).
         coarse = material.roughness >= 0.75f && material.metallic <= 0.05f && material.alphaCutoff == 0 &&
-                 materialClass(material, p) == 0u;
+                 materialClass(material, p) == 0u && (material.flags >> MATERIAL_FEATURE_SHIFT) == 0u;
         float lo = INFINITY, hi = 0;
         for (uint y = 0; y < 2; ++y)
             for (uint x = 0; x < 2; ++x) {
