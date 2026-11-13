@@ -3,6 +3,7 @@
 #include "scene/ecs.h"
 #include "scene/components.h"
 #include "scene/gltf_loader.h"
+#include "renderer/material_description.h"
 
 #include <doctest/doctest.h>
 #include <json.hpp>
@@ -223,4 +224,100 @@ TEST_CASE("glTF texture reuse keeps sRGB and linear interpretations distinct") {
     REQUIRE(material.baseColorTex != material.normalTex);
     CHECK(textures.uploads[material.baseColorTex].sRGB);
     CHECK_FALSE(textures.uploads[material.normalTex].sRGB);
+}
+
+namespace {
+bool loadModelJson(const nlohmann::json& model, GpuScene& scene, const char* name) {
+    const auto path = std::filesystem::temp_directory_path() / name;
+    { std::ofstream out(path); out << model; }
+    NullTextureManager textures;
+    textures.createDefaultTextures();
+    ECS ecs;
+    GltfLoader loader(scene, textures, ecs);
+    const bool ok = loader.loadFromFile(path.string());
+    std::filesystem::remove(path);
+    return ok;
+}
+const char* kTinyPng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==";
+} // namespace
+
+TEST_CASE("glTF loader (F15): materials keep description, name and support report; core-only mask is empty") {
+    auto model = nlohmann::json::parse(quadWithoutNormalsOrTangents(
+        R"({"name":"plain","pbrMetallicRoughness":{"baseColorFactor":[1,0,0,1]}})"));
+    GpuScene scene;
+    REQUIRE(loadModelJson(model, scene, "phosphor_f15_core_only.gltf"));
+    REQUIRE(scene.materials().size() == 1);
+    REQUIRE(scene.materialDescriptions().size() == 1);
+    CHECK(featureMask(scene.materialDescriptions()[0]) == 0);
+    CHECK(scene.materialNames()[0] == "plain");
+    CHECK(scene.findMaterial("plain") == std::optional<u32>(0u));
+    CHECK_FALSE(scene.findMaterial("nope").has_value());
+    CHECK(scene.materialDescriptions()[0].base.baseColor[0] == 1.0f);
+    REQUIRE(scene.materialSupport()[0].features.size() == 1);
+}
+
+TEST_CASE("glTF loader (F15): extension materials are described and emissive strength is folded") {
+    auto model = nlohmann::json::parse(quadWithoutNormalsOrTangents(
+        R"({"name":"coat","emissiveFactor":[1,0.5,0],"extensions":{"KHR_materials_clearcoat":{"clearcoatFactor":1},
+            "KHR_materials_emissive_strength":{"emissiveStrength":4}}})"));
+    model["extensionsUsed"] = {"KHR_materials_clearcoat", "KHR_materials_emissive_strength", "KHR_lights_punctual"};
+    GpuScene scene;
+    REQUIRE(loadModelJson(model, scene, "phosphor_f15_ext.gltf"));
+    CHECK(featureMask(scene.materialDescriptions()[0]) == featureBit(MaterialFeature::Clearcoat));
+    CHECK(scene.materials()[0].emissive[0] == doctest::Approx(4.0f));
+    CHECK(scene.materials()[0].emissive[1] == doctest::Approx(2.0f));
+    REQUIRE(scene.assetUnknownExtensions().size() == 1);
+    CHECK(scene.assetUnknownExtensions()[0] == "KHR_lights_punctual");
+}
+
+TEST_CASE("glTF loader (F15): extensionsRequired with an unsupported extension is refused") {
+    auto model = nlohmann::json::parse(quadWithoutNormalsOrTangents(R"({"name":"m"})"));
+    model["extensionsUsed"]     = {"KHR_materials_unlit"};
+    model["extensionsRequired"] = {"KHR_materials_unlit"};
+    GpuScene scene;
+    CHECK_FALSE(loadModelJson(model, scene, "phosphor_f15_required.gltf"));
+    CHECK(scene.getMeshCount() == 0);
+}
+
+TEST_CASE("glTF loader (F15): a uniform KHR_texture_transform is baked into UV0") {
+    auto model = nlohmann::json::parse(quadWithoutNormalsOrTangents(
+        R"({"pbrMetallicRoughness":{"baseColorTexture":{"index":0,"extensions":{"KHR_texture_transform":{"offset":[0.5,0.25],"scale":[2,3]}}}}})"));
+    model["textures"] = nlohmann::json::array({nlohmann::json{{"source", 0}}});
+    model["images"]   = nlohmann::json::array({nlohmann::json{{"uri", kTinyPng}}});
+    GpuScene scene;
+    REQUIRE(loadModelJson(model, scene, "phosphor_f15_uv_bake.gltf"));
+    REQUIRE(scene.vertices().size() == 4);
+    // Quad UVs (0,1) (1,1) (1,0) (0,0); uv' = offset + scale * uv.
+    int seen = 0;
+    for (const GPUVertex& v : scene.vertices()) {
+        if (v.px == -1 && v.py == -1) { CHECK(v.u == doctest::Approx(0.5f)); CHECK(v.v == doctest::Approx(3.25f)); ++seen; }
+        if (v.px == 1 && v.py == -1)  { CHECK(v.u == doctest::Approx(2.5f)); CHECK(v.v == doctest::Approx(3.25f)); ++seen; }
+        if (v.px == 1 && v.py == 1)   { CHECK(v.u == doctest::Approx(2.5f)); CHECK(v.v == doctest::Approx(0.25f)); ++seen; }
+        if (v.px == -1 && v.py == 1)  { CHECK(v.u == doctest::Approx(0.5f)); CHECK(v.v == doctest::Approx(0.25f)); ++seen; }
+    }
+    CHECK(seen == 4);
+}
+
+TEST_CASE("glTF loader (F15): a non-uniform transform leaves UVs untouched and is reported unsupported") {
+    auto model = nlohmann::json::parse(quadWithoutNormalsOrTangents(
+        R"({"pbrMetallicRoughness":{"baseColorTexture":{"index":0,"extensions":{"KHR_texture_transform":{"scale":[2,2]}}}},
+            "normalTexture":{"index":0}})"));
+    model["textures"] = nlohmann::json::array({nlohmann::json{{"source", 0}}});
+    model["images"]   = nlohmann::json::array({nlohmann::json{{"uri", kTinyPng}}});
+    GpuScene scene;
+    REQUIRE(loadModelJson(model, scene, "phosphor_f15_uv_nonuniform.gltf"));
+    for (const GPUVertex& v : scene.vertices()) CHECK((v.u == 0.0f || v.u == 1.0f));
+    bool unsupported = false;
+    for (const auto& f : scene.materialSupport()[0].features)
+        if (f.feature == "texture_transform") unsupported = f.level == SupportLevel::Unsupported;
+    CHECK(unsupported);
+}
+
+TEST_CASE("glTF loader (F15): image URIs outside the asset directory are refused") {
+    auto model = nlohmann::json::parse(quadWithoutNormalsOrTangents(
+        R"({"pbrMetallicRoughness":{"baseColorTexture":{"index":0}}})"));
+    model["textures"] = nlohmann::json::array({nlohmann::json{{"source", 0}}});
+    model["images"]   = nlohmann::json::array({nlohmann::json{{"uri", "../escape.png"}}});
+    GpuScene scene;
+    CHECK_FALSE(loadModelJson(model, scene, "phosphor_f15_uri_escape.gltf"));
 }

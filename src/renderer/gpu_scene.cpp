@@ -1,6 +1,7 @@
 #include "renderer/gpu_scene.h"
 #include "core/log.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 
@@ -118,11 +119,64 @@ void GpuScene::updateLights(const std::vector<GPULight>& lights) {
 
 void GpuScene::updateMaterials(const std::vector<GPUMaterial>& materials) {
     materials_ = materials;
+    // The library was replaced: descriptions of the old one no longer apply.
+    materialDescriptions_.assign(materials_.size(), MaterialDescription{});
+    materialNames_.assign(materials_.size(), std::string{});
+    materialSupport_.assign(materials_.size(), MaterialSupportReport{});
+    materialByName_.clear();
 }
 
 u32 GpuScene::addMaterial(const GPUMaterial& material) {
     materials_.push_back(material);
+    materialDescriptions_.emplace_back();
+    materialNames_.emplace_back();
+    materialSupport_.emplace_back();
     return static_cast<u32>(materials_.size() - 1);
+}
+
+u32 GpuScene::addMaterial(const GPUMaterial& material, MaterialDescription description, std::string name,
+                          MaterialSupportReport support) {
+    materials_.push_back(material);
+    const u32 index = static_cast<u32>(materials_.size() - 1);
+    if (!name.empty()) materialByName_.emplace(name, index); // first one wins
+    materialDescriptions_.push_back(std::move(description));
+    materialNames_.push_back(std::move(name));
+    materialSupport_.push_back(std::move(support));
+    return index;
+}
+
+std::optional<u32> GpuScene::findMaterial(const std::string& name) const {
+    const auto it = materialByName_.find(name);
+    if (it == materialByName_.end()) return std::nullopt;
+    return it->second;
+}
+
+void GpuScene::addAssetUnknownExtensions(const std::vector<std::string>& names) {
+    for (const std::string& n : names)
+        if (std::find(assetUnknownExtensions_.begin(), assetUnknownExtensions_.end(), n) == assetUnknownExtensions_.end())
+            assetUnknownExtensions_.push_back(n);
+}
+
+bool GpuScene::setMaterialDescription(u32 index, const MaterialDescription& d) {
+    if (index >= materials_.size()) return false;
+    GPUMaterial& g = materials_[index];
+    const BaseMaterial& b = d.base;
+    for (size_t i = 0; i < 4; ++i) g.baseColor[i] = b.baseColor[i];
+    g.metallic          = b.metallic;
+    g.roughness         = b.roughness;
+    g.normalScale       = b.normalScale;
+    g.occlusionStrength = b.occlusionStrength;
+    for (size_t i = 0; i < 3; ++i) g.emissive[i] = b.emissive[i];
+    g.alphaCutoff = b.alphaCutoff;
+    g.flags = b.doubleSided ? (g.flags | MATERIAL_FLAG_DOUBLE_SIDED) : (g.flags & ~MATERIAL_FLAG_DOUBLE_SIDED);
+    // Slots without a resolved texture keep the loader's default texture.
+    if (b.baseColorTexture.index != INVALID_TEXTURE_INDEX) g.baseColorTex = b.baseColorTexture.index;
+    if (b.metallicRoughnessTexture.index != INVALID_TEXTURE_INDEX) g.metallicRoughnessTex = b.metallicRoughnessTexture.index;
+    if (b.normalTexture.index != INVALID_TEXTURE_INDEX) g.normalTex = b.normalTexture.index;
+    if (b.occlusionTexture.index != INVALID_TEXTURE_INDEX) g.occlusionTex = b.occlusionTexture.index;
+    if (b.emissiveTexture.index != INVALID_TEXTURE_INDEX) g.emissiveTex = b.emissiveTexture.index;
+    materialDescriptions_[index] = d;
+    return true;
 }
 
 void GpuScene::clear() {
@@ -136,6 +190,11 @@ void GpuScene::clear() {
     meshBounds_.clear();
     instances_.clear();
     materials_.clear();
+    materialDescriptions_.clear();
+    materialNames_.clear();
+    materialSupport_.clear();
+    materialByName_.clear();
+    assetUnknownExtensions_.clear();
     lights_.clear();
     sampledLights_.clear();
     ++geometryVersion_;

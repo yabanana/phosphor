@@ -7,6 +7,7 @@
 #include <tiny_gltf.h>
 
 #include "scene/gltf_loader.h"
+#include "scene/gltf_material_extensions.h"
 #include "scene/mesh_processing.h"
 #include "scene/texture_manager.h"
 #include "scene/ecs.h"
@@ -123,6 +124,25 @@ bool GltfLoader::loadFromFile(const std::string& path) {
     const size_t slash = path.find_last_of("/\\");
     baseDir_ = slash == std::string::npos ? std::string{} : path.substr(0, slash + 1);
 
+    // glTF 2.0 section 3.2: an asset requiring an extension we do not support
+    // SHOULD NOT be loaded.
+    if (const auto required = unsupportedRequiredExtensions(model); !required.empty()) {
+        std::string names;
+        for (const auto& n : required) names += (names.empty() ? "" : ", ") + n;
+        LOG_ERROR("glTF %s requires unsupported extension(s): %s; refusing to load", path.c_str(), names.c_str());
+        return false;
+    }
+    // Image URIs resolve only inside the asset directory.
+    for (const auto& image : model.images) {
+        std::string uriError;
+        if (!image.uri.empty() && !isImageUriContained(baseDir_, image.uri, uriError)) {
+            LOG_ERROR("glTF %s: %s; refusing to load", path.c_str(), uriError.c_str());
+            return false;
+        }
+    }
+    const auto unknownOptional = unknownOptionalExtensions(model);
+    gpuScene_.addAssetUnknownExtensions(unknownOptional);
+
     // Clear per-file caches
     meshCache_.clear();
     createdEntities_.clear();
@@ -143,6 +163,10 @@ bool GltfLoader::loadFromFile(const std::string& path) {
 
     // Flush uploaded mesh data to the GPU
     gpuScene_.flushMeshData();
+
+    LOG_INFO("%s", formatSupportSummary(gpuScene_.materialSupport(), gpuScene_.assetUnknownExtensions()).c_str());
+    for (const auto& report : gpuScene_.materialSupport())
+        if (!report.features.empty()) LOG_DEBUG("%s", formatSupportDetail(report).c_str());
 
     LOG_INFO("Loaded glTF: %s (%zu meshes, %zu materials, %zu textures)",
              path.c_str(), model.meshes.size(), model.materials.size(),
@@ -260,6 +284,17 @@ MeshHandle GltfLoader::processPrimitive(const tinygltf::Model& model,
         hasUVs = geom.uvs.size() == vertexCount;
     }
     if (!hasUVs) geom.uvs.assign(vertexCount, glm::vec2{0.0f});
+
+    // KHR_texture_transform: when every texture of the primitive's material
+    // shares one transform on UV0 it is baked into UV0 (affine maps commute
+    // with interpolation); otherwise the support report marks it unsupported
+    // and UVs stay untouched.
+    if (hasUVs && prim.material >= 0 && prim.material < static_cast<int>(model.materials.size())) {
+        const auto parsed = parseGltfMaterial(model.materials[static_cast<size_t>(prim.material)],
+                                              [](int index, bool) { return static_cast<u32>(index); });
+        const auto analysis = analyzeTextureTransforms(parsed.description);
+        if (analysis.status == TextureTransformStatus::Uniform) bakeUvTransform(analysis.transform, geom.uvs);
+    }
 
     // Indices (generate sequential ones for non-indexed primitives)
     if (prim.indices >= 0) {
@@ -385,6 +420,19 @@ u32 GltfLoader::processMaterial(const tinygltf::Model& model,
         static_cast<float>(material.emissiveFactor[2])
     };
 
+    // F15: description of the material (extensions, texture slots).  Texture
+    // slots resolve through the same cache as above; extension textures load
+    // after the core ones.  KHR_materials_emissive_strength is folded in.
+    GltfMaterialParse parsed = parseGltfMaterial(material, [&](int index, bool sRGB) {
+        return processTexture(model, index, sRGB);
+    });
+    if (parsed.info.emissiveStrengthUsed) {
+        mc.emissiveFactor = glm::vec3{parsed.description.base.emissive[0], parsed.description.base.emissive[1],
+                                      parsed.description.base.emissive[2]};
+    }
+    for (const std::string& w : parsed.info.warnings)
+        LOG_WARN("glTF material '%s': %s", material.name.c_str(), w.c_str());
+
     // Alpha cutoff
     mc.alphaCutoff = material.alphaMode == "MASK" ? static_cast<float>(material.alphaCutoff) : 0.0f;
     if (material.alphaMode == "BLEND") {
@@ -413,7 +461,9 @@ u32 GltfLoader::processMaterial(const tinygltf::Model& model,
     gpu.alphaCutoff  = mc.alphaCutoff;
     gpu.flags        = mc.doubleSided ? MATERIAL_FLAG_DOUBLE_SIDED : 0u;
 
-    const u32 materialIndex = gpuScene_.addMaterial(gpu);
+    MaterialSupportReport support = buildSupportReport(parsed.description, parsed.info);
+    const u32 materialIndex = gpuScene_.addMaterial(gpu, std::move(parsed.description), material.name,
+                                                    std::move(support));
     materialCache_[matIdx] = materialIndex;
 
     return materialIndex;

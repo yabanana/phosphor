@@ -4,8 +4,13 @@
 #include "renderer/meshlet_builder.h"
 #include "renderer/gpu_types.h"
 #include "renderer/mesh_bounds.h"
+#include "renderer/material_description.h"
+#include "renderer/material_support.h"
 
 #include <glm/glm.hpp>
+#include <optional>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace phosphor {
@@ -54,6 +59,29 @@ public:
     /// Instances whose entity has no MaterialComponent index this library.
     u32 addMaterial(const GPUMaterial& material);
 
+    /// F15.1: append one material together with its description, name and
+    /// support report (kept in vectors parallel to the library).
+    u32 addMaterial(const GPUMaterial& material, MaterialDescription description, std::string name,
+                    MaterialSupportReport support);
+
+    /// F15.1: replace the description of a material and refresh the GPU base
+    /// record fields it describes (parameters and valid texture indices; the
+    /// flags other than double-sided are kept).  Returns false when `index` is
+    /// out of range.
+    bool setMaterialDescription(u32 index, const MaterialDescription& description);
+
+    /// Description, name and support report of material `index` (parallel to
+    /// materials(); default-constructed for materials added without them).
+    [[nodiscard]] const std::vector<MaterialDescription>&  materialDescriptions() const { return materialDescriptions_; }
+    [[nodiscard]] const std::vector<std::string>&          materialNames() const { return materialNames_; }
+    [[nodiscard]] const std::vector<MaterialSupportReport>& materialSupport() const { return materialSupport_; }
+    /// Index of the first material with this name.
+    [[nodiscard]] std::optional<u32> findMaterial(const std::string& name) const;
+
+    /// glTF `extensionsUsed` entries of loaded assets that are not understood.
+    void addAssetUnknownExtensions(const std::vector<std::string>& names);
+    [[nodiscard]] const std::vector<std::string>& assetUnknownExtensions() const { return assetUnknownExtensions_; }
+
     /// Kept for source compatibility with loaders: geometry is flushed by the
     /// backend when geometryVersion() changes, so this is a no-op.
     void flushMeshData() {}
@@ -97,6 +125,11 @@ private:
 
     std::vector<GPUInstance>   instances_;
     std::vector<GPUMaterial>   materials_;
+    std::vector<MaterialDescription>   materialDescriptions_; // parallel to materials_
+    std::vector<std::string>           materialNames_;        // parallel to materials_
+    std::vector<MaterialSupportReport> materialSupport_;      // parallel to materials_
+    std::unordered_map<std::string, u32> materialByName_;     // first material of each name
+    std::vector<std::string>           assetUnknownExtensions_;
     std::vector<GPULight>      lights_;
     std::vector<GPUSampledLight> sampledLights_;
 
