@@ -139,11 +139,15 @@ ReferenceExportResult exportOfflineReference(const OfflineReferenceScene& s,cons
         if(!out) return fail("cannot open reference PLY");
         out<<"ply\nformat binary_little_endian 1.0\nelement vertex "<<vertices
            <<"\nproperty float x\nproperty float y\nproperty float z\nproperty float nx\nproperty float ny\nproperty float nz\n"
-           <<"property float s\nproperty float t\nelement face "<<mesh.indexCount/3
+           <<"property float s\nproperty float t\n"
+           // F15.3 (ticket 11, mesh version 2): the mesh's own tangent attribute.  The postfixed names make Mitsuba load
+           // them silently as vertex attributes (vertex_tangent, vertex_handedness); readers take them from the file.
+           <<"property float tangent_x\nproperty float tangent_y\nproperty float tangent_z\nproperty float handedness_x\n"
+           <<"element face "<<mesh.indexCount/3
            <<"\nproperty list uchar uint vertex_indices\nend_header\n";
         for(u32 v=0;v<vertices;++v) {
             const auto& a=s.vertices[mesh.vertexOffset+v];
-            for(float value:{a.px,a.py,a.pz,a.nx,a.ny,a.nz,a.u,a.v}) little(out,std::bit_cast<u32>(value));
+            for(float value:{a.px,a.py,a.pz,a.nx,a.ny,a.nz,a.u,a.v,a.tx,a.ty,a.tz,a.tw}) little(out,std::bit_cast<u32>(value));
         }
         for(u32 k=0;k<mesh.indexCount;k+=3) {out.put(char(3));for(u32 v=0;v<3;++v) little(out,s.indices[mesh.indexOffset+k+v]);}
         if(!out) return fail("failed reference PLY write");
@@ -241,7 +245,7 @@ ReferenceExportResult exportOfflineReference(const OfflineReferenceScene& s,cons
     for(size_t k=0;k<s.materialExtensions.size();++k) {if(k) out<<',';out<<'[';
         for(u32 w=0;w<20;++w) {if(w) out<<',';out<<s.materialExtensions[k].w[w];}
         out<<']';}
-    out<<"]},\"meshes\":[";
+    out<<"]},\"mesh_version\":"<<REFERENCE_MESH_VERSION<<",\"meshes\":[";
     for(size_t k=0;k<s.meshes.size();++k) {if(k) out<<',';out<<"\"mesh_"<<k<<".ply\"";}
     out<<"],\"instances\":[";bool first=true;
     for(size_t k=0;k<s.worldInstances.size();++k) {const auto& i=s.worldInstances[k];if(!(i.flags&INSTANCE_FLAG_VALID)||!(i.flags&3u)) continue;

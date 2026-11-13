@@ -44,6 +44,11 @@ struct ReferenceAreaLight {
 // (gpu_types.h GPUMaterialExt0..3), so the reader sees exactly what the shader reads.
 constexpr u32 REFERENCE_MATERIAL_EXTENSION_VERSION = 1;
 
+// F15.3 (ticket 11): version of the mesh files of the snapshot ("mesh_version" in scene.json).  1 = PLY vertices with
+// position, normal and UV (s, t); 2 adds the mesh tangent attribute (tangent_x/y/z, handedness_x = GPUVertex tx, ty, tz,
+// tw), which KHR_materials_anisotropy needs.  Readers of v1 fields are unaffected (extra properties are ignored).
+constexpr u32 REFERENCE_MESH_VERSION = 2;
+
 struct OfflineReferenceScene {
     std::span<const GPUVertex> vertices;
     std::span<const u32> indices;
