@@ -46,8 +46,11 @@ TOWARD_SUN = np.array([-0.8, 0.35, -0.3]) / np.linalg.norm([-0.8, 0.35, -0.3])
 SPECS = {
     "base-grid-sun": dict(roughness=ROUGHNESS, metallic=METALLIC, base=COPPER, sun=3.0, env=0.0),
     "base-grid-env": dict(roughness=ROUGHNESS, metallic=METALLIC, base=COPPER, sun=0.0, env=0.5),
+    "base-grid-env-resolve": dict(roughness=ROUGHNESS, metallic=METALLIC, base=COPPER, sun=0.0, env=0.5),
     "furnace-base": dict(roughness=ROUGHNESS, metallic=METALLIC, base=[1, 1, 1], sun=0.0, env=1.0),
+    "furnace-resolve": dict(roughness=ROUGHNESS, metallic=METALLIC, base=[1, 1, 1], sun=0.0, env=1.0),
     "roughness-extremes": dict(roughness=[0.0, 1.0], metallic=[0.0, 0.5, 1.0], base=COPPER, sun=3.0, env=0.3),
+    "roughness-extremes-sun": dict(roughness=[0.0, 1.0], metallic=[0.0, 0.5, 1.0], base=COPPER, sun=3.0, env=0.0),
 }
 
 
@@ -151,6 +154,35 @@ class RunnerLogic(unittest.TestCase):
                 self.assertIn("f15_reference.py", " ".join(commands["reference"]))
             for key in ("commit", "os", "sdk_version", "power", "tool_sha256", "seed", "thresholds"):
                 self.assertIn(key, plan)
+            self.assertIn("f15_common.py", plan["tool_sha256"])
+
+    def test_plan_prints_the_exact_commands_of_the_new_scenarios(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                code = check.main(["--out", tmp, "--binary", "build/release/phosphor", "--only", "base-grid-env-resolve",
+                                   "--only", "roughness-extremes-sun"])
+            self.assertEqual(code, 0)
+            plan = json.loads((pathlib.Path(tmp) / "plan.json").read_text())
+            resolve = plan["commands"]["base-grid-env-resolve"]["capture"]
+            self.assertEqual(resolve[resolve.index("--reflections") + 1], "off")
+            self.assertEqual(resolve[resolve.index("--lighting-denoise") + 1], "custom")
+            self.assertEqual(resolve[resolve.index("--material-scenario") + 1], "base-grid-env-resolve")
+            sun = plan["commands"]["roughness-extremes-sun"]["capture"]
+            self.assertEqual(sun[sun.index("--material-scenario") + 1], "roughness-extremes-sun")
+            self.assertEqual(sun[sun.index("--reflections") + 1], "ssr")
+            reference = plan["commands"]["base-grid-env-resolve"]["reference"]
+            self.assertIn("--declared-controls", reference)
+            for name in ref.DECLARED_CONTROLS:
+                self.assertIn(name, reference)
+            self.assertNotIn("--declared-controls", plan["commands"]["roughness-extremes-sun"]["reference"])
+            self.assertIn("furnace-resolve", check.SCENARIOS)
+            self.assertIn("--declared-controls", check.reference_command("furnace-resolve", pathlib.Path("x")))
+            for line in buffer.getvalue().splitlines():
+                if line.startswith("#"):
+                    continue
+                self.assertTrue(line.startswith(("build/release/phosphor", str(pathlib.Path("build/release/phosphor").resolve())))
+                                or line.startswith("uv ") or line.startswith("NOT_EXECUTED"), line)
 
     def test_process_guard_and_lock(self):
         ps = "  1 /sbin/launchd\n 4242 /Users/x/build/release/phosphor\n 77 /usr/bin/python3\n 88 f13_spike\n 99 soc_bench\n"
@@ -178,8 +210,164 @@ class RunnerLogic(unittest.TestCase):
                                        "--gpu-lock", str(pathlib.Path(tmp) / "l")])
             finally:
                 check.running_gpu_processes = original
-            self.assertEqual(code, 4)
+            self.assertEqual(code, check.EXIT_GPU_BUSY)
             self.assertIn("refusing to start", err.getvalue())
+
+    def test_exit_codes_are_distinct_and_documented(self):
+        codes = [check.EXIT_OK, check.EXIT_UNEXPECTED, check.EXIT_USAGE, check.EXIT_NON_DISCRIMINATING,
+                 check.EXIT_GPU_BUSY, check.EXIT_INTERNAL, check.EXIT_CAPTURE_FAILED]
+        self.assertEqual(codes, [0, 1, 2, 3, 4, 5, 6])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as raised:
+            check.main(["--help"])
+        self.assertEqual(raised.exception.code, 0)
+        help_text = out.getvalue()
+        for code, words in ((0, "expected state confirmed"), (1, "unexpected gate result"), (2, "usage error"),
+                            (3, "non-discriminating"), (4, "GPU busy"), (5, "internal error"), (6, "capture failed")):
+            self.assertRegex(help_text, rf"\n\s+{code}\s+.*{words}", (code, words))
+
+    def test_usage_errors_exit_2(self):
+        for argv in (["--only", "nope"], ["--expect", "blue"], ["--run", "--evaluate"]):
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+                check.main(argv)
+            self.assertEqual(raised.exception.code, check.EXIT_USAGE, argv)
+        with tempfile.TemporaryDirectory() as tmp:  # --run without a renderer
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+                check.main(["--run", "--binary", str(pathlib.Path(tmp) / "absent"), "--out", tmp])
+            self.assertEqual(raised.exception.code, check.EXIT_USAGE)
+
+    def run_with(self, tmp, argv, busy_sequence, captures):
+        """Run --run with the GPU guard and the capture replaced; returns (exit code, guard calls, capture names)."""
+        binary = pathlib.Path(tmp) / "phosphor"
+        binary.write_bytes(b"x")
+        guard_calls = []
+        captured = []
+
+        def guard(*_a, **_k):
+            guard_calls.append(1)
+            return busy_sequence[min(len(guard_calls) - 1, len(busy_sequence) - 1)]
+
+        def capture(command, log, timeout):
+            captured.append(command[command.index("--material-scenario") + 1])
+            return captures(len(captured))
+
+        saved = (check.running_gpu_processes, check.capture, check.time.sleep)
+        check.running_gpu_processes, check.capture, check.time.sleep = guard, capture, lambda *_: None
+        try:
+            with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+                code = check.main(["--run", "--binary", str(binary), "--out", str(pathlib.Path(tmp) / "o"),
+                                   "--gpu-lock", str(pathlib.Path(tmp) / "l"), *argv])
+        finally:
+            check.running_gpu_processes, check.capture, check.time.sleep = saved
+        return code, guard_calls, captured
+
+    def test_gpu_guard_runs_before_every_capture(self):
+        ok = lambda _n: {"passed": True, "failures": []}  # noqa: E731
+        with tempfile.TemporaryDirectory() as tmp:
+            # Free for the first scenario, busy for the second: exit 4 after exactly one capture.
+            code, guards, captured = self.run_with(tmp, ["--only", "base-grid-sun", "--only", "base-grid-env"],
+                                                   [[], ["999:phosphor"]], ok)
+            self.assertEqual(code, check.EXIT_GPU_BUSY)
+            self.assertEqual(captured, ["base-grid-sun"])
+            self.assertEqual(len(guards), 2)  # one guard call before each capture attempt
+        with tempfile.TemporaryDirectory() as tmp:
+            code, guards, captured = self.run_with(tmp, ["--only", "base-grid-sun"], [["999:phosphor"]], ok)
+            self.assertEqual((code, captured, len(guards)), (check.EXIT_GPU_BUSY, [], 1))  # busy before the first
+
+    def test_capture_failure_exits_6_and_stops(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            code, _, captured = self.run_with(tmp, ["--only", "base-grid-sun", "--only", "base-grid-env"], [[]],
+                                              lambda _n: {"passed": False, "failures": ["boom"]})
+            self.assertEqual(code, check.EXIT_CAPTURE_FAILED)
+            self.assertEqual(captured, ["base-grid-sun"])
+
+    def test_output_folders_are_checked_before_the_capture_loop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stale = pathlib.Path(tmp) / "o" / "base-grid-env"
+            stale.mkdir(parents=True)
+            (stale / "leftover.txt").write_text("x")
+            with self.assertRaises(SystemExit) as raised:
+                self.run_with(tmp, ["--only", "base-grid-sun", "--only", "base-grid-env"], [[]],
+                              lambda _n: {"passed": True, "failures": []})
+            self.assertEqual(raised.exception.code, check.EXIT_USAGE)
+            self.assertFalse((pathlib.Path(tmp) / "o" / "base-grid-sun").exists())  # nothing was started
+
+    def test_any_exception_is_an_internal_error_not_a_gate_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original = check.evaluate_scenario
+            check.evaluate_scenario = lambda *a, **k: (_ for _ in ()).throw(KeyError("boom"))
+            try:
+                with contextlib.redirect_stderr(io.StringIO()):
+                    code = check.main(["--evaluate", "--out", tmp, "--only", "base-grid-sun"])
+            finally:
+                check.evaluate_scenario = original
+            self.assertEqual(code, check.EXIT_INTERNAL)
+
+    def test_lock_held_by_another_verification_exits_4(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lock = pathlib.Path(tmp) / "l"
+            binary = pathlib.Path(tmp) / "phosphor"
+            binary.write_bytes(b"x")
+            with check.gpu_lock(lock), contextlib.redirect_stderr(io.StringIO()):
+                code = check.main(["--run", "--binary", str(binary), "--out", str(pathlib.Path(tmp) / "o"),
+                                   "--gpu-lock", str(lock)])
+            self.assertEqual(code, check.EXIT_GPU_BUSY)
+
+    def test_verdict_exit_codes(self):
+        def entry(discriminating=True, met=True, passed=False):
+            return {"discriminating": discriminating, "expectation": {"met": met}, "result": {"pass": passed}}
+        self.assertEqual(check.verdict([entry(False)], "red")[1], check.EXIT_NON_DISCRIMINATING)
+        self.assertEqual(check.verdict([entry(met=False)], "red")[1], check.EXIT_UNEXPECTED)
+        self.assertEqual(check.verdict([entry()], "red")[1], check.EXIT_OK)
+        # A declared-model gate failing next to a passing literal gate is a RED green-mode verdict.
+        both = {"discriminating": True, "expectation": {"met": True}, "result": {"pass": True}, "gates_pass": False}
+        self.assertEqual(check.verdict([both], "green"), ("RED", check.EXIT_UNEXPECTED))
+
+    def test_sw_vers_parsing_is_robust(self):
+        full = "ProductName:\t\tmacOS\nProductVersion:\t\t27.3\nBuildVersion:\t\t26D1\n"
+        self.assertEqual(check.parse_sw_vers(full), {"ProductName": "macOS", "ProductVersion": "27.3", "BuildVersion": "26D1"})
+        self.assertEqual(check.os_description(check.parse_sw_vers(full)), "macOS 27.3 (26D1)")
+        for odd in (None, "", "\n\n", "single line without a colon", "ProductName: macOS"):
+            self.assertIsInstance(check.parse_sw_vers(odd), dict)
+        self.assertEqual(check.os_description(check.parse_sw_vers(None)), "")
+        self.assertEqual(check.os_description(check.parse_sw_vers("ProductName: macOS")), "macOS")
+        self.assertEqual(check.parse_sw_vers("Key: a: b")["Key"], "a: b")
+        # The markdown header tolerates a manifest without OS information.
+        text = check.markdown({"commit": "c", "binary_sha256": "b", "os": None}, [], "S")
+        self.assertIn("# F15.3 material validation: S", text)
+
+    def test_one_sha256_helper_serves_both_tools(self):
+        import f15_common
+        self.assertIs(check.sha256_file, f15_common.sha256_file)
+        self.assertIs(ref.sha256_file, f15_common.sha256_file)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "x"
+            path.write_bytes(b"abc")
+            self.assertEqual(f15_common.sha256_file(path),
+                             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")  # FIPS 180-2 vector
+
+    def test_scenario_names_match_the_bench(self):
+        source = (HERE.parent / "src" / "testbench" / "material_validation.cpp").read_text()
+        import re
+        block = source[source.index("kScenarios{"):source.index("};", source.index("kScenarios{"))]
+        self.assertEqual(sorted(re.findall(r'"([a-z0-9-]+)"', block)), sorted(check.SCENARIOS))
+
+    def test_declared_gate_bounds(self):
+        masks, spheres = self.synthetic_masks()
+        reference = np.full((40, 40, 3), 0.5, dtype=np.float32)
+        ok = reference * 1.004  # 0.4 % everywhere: mean <= 0.5 %, p99 <= 1 %
+        self.assertTrue(check.evaluate_declared(np, ok, reference, masks, spheres)["pass"])
+        high_mean = reference * 1.006  # mean 0.6 % > 0.5 %
+        self.assertFalse(check.evaluate_declared(np, high_mean, reference, masks, spheres)["pass"])
+        outliers = reference.copy()
+        outliers[:2, :20] *= 1.03  # 40 of 800 pixels of sphere 0 at 3 %: mean 0.15 %, p99 3 %
+        result = check.evaluate_declared(np, outliers, reference, masks, spheres)
+        self.assertFalse(result["spheres"][0]["pass"])
+        self.assertLessEqual(result["spheres"][0]["mean"], 0.005)
+        self.assertGreater(result["spheres"][0]["p99"], 0.01)
+        self.assertTrue(result["spheres"][1]["pass"])
+        self.assertEqual(check.THRESHOLDS["declared"]["mean_per_sphere"], 0.005)
+        self.assertEqual(check.THRESHOLDS["declared"]["p99_per_sphere"], 0.01)
 
     def synthetic_masks(self, n=40):
         sphere = np.zeros((n, n), dtype=np.int32)
@@ -251,12 +439,14 @@ class BenchMirror(unittest.TestCase):
     def tearDownClass(cls):
         cls.tmp.cleanup()
 
-    def scenario(self, name, engine_model, mode):
-        folder = pathlib.Path(self.tmp.name) / f"{name}-{mode}"
+    def scenario(self, name, engine_model, mode, environment=None, tag=""):
+        """Evaluate one scenario against a synthetic engine image: `engine_model` for the sun and the literal
+        environment, or `environment` = a declared variant for the engine's declared environment model."""
+        folder = pathlib.Path(self.tmp.name) / f"{name}-{mode}{tag}"
         make_bench_snapshot(folder, name, self.WIDTH, self.HEIGHT)
         from f12_reference import snapshot as load
         root, data = load(folder / "snapshot")
-        image, *_ = ref.render_frame(root, data, engine_model)
+        image, *_ = ref.render_frame(root, data, engine_model, environment=environment)
         write_pfm(folder / "engine.pfm", image)
         with contextlib.redirect_stdout(io.StringIO()):
             return check.evaluate_scenario(np, name, folder, mode)
@@ -284,6 +474,76 @@ class BenchMirror(unittest.TestCase):
             self.assertTrue(entry["result"]["pass"], entry["scenario"])
             self.assertTrue(entry["discriminating"], (entry["scenario"], entry["controls"]))
         self.assertEqual(check.verdict(entries, "green"), ("GREEN", 0))
+
+    def test_declared_environment_gate_passes_the_declared_model_and_rejects_every_control(self):
+        entries = [self.scenario(name, ref.APPENDIX_B, "green", environment=ref.DECLARED)
+                   for name in ("base-grid-env-resolve", "furnace-resolve")]
+        for entry in entries:
+            gate = entry["result"] if entry["kind"] == "declared" else entry["declared"]["result"]
+            self.assertTrue(gate["pass"], (entry["scenario"], json.dumps(check.summarize(gate))))
+            self.assertLess(gate["worst_mean"], 1e-4)  # the same model on the same rays
+            controls = entry["controls"] if entry["kind"] == "declared" else entry["declared"]["controls"]
+            self.assertEqual(sorted(controls), sorted(ref.DECLARED_CONTROLS))
+            for name, verdict in controls.items():
+                self.assertTrue(verdict["fails_gate"], (entry["scenario"], name, verdict))
+            self.assertTrue(entry["discriminating"], entry["scenario"])
+            self.assertTrue(entry["gates_pass"], entry["scenario"])
+        # The deterministic furnace keeps its literal gate: the declared model never exceeds 1.
+        self.assertTrue(entries[1]["result"]["pass"], entries[1]["result"]["max_pixel"])
+        self.assertEqual(check.verdict(entries, "green"), ("GREEN", 0))
+
+    def test_each_declared_control_alone_fails_the_declared_gate_as_an_engine_image(self):
+        # An engine that implemented a wrong model must not pass the declared gate.
+        for control, variant in ref.DECLARED_CONTROLS.items():
+            entry = self.scenario("base-grid-env-resolve", ref.APPENDIX_B, "green", environment=variant, tag="-" + control)
+            self.assertFalse(entry["result"]["pass"], control)
+            self.assertEqual(check.verdict([entry], "green")[1], check.EXIT_UNEXPECTED)
+
+    def test_new_direct_scenario_is_green_and_its_controls_discriminate(self):
+        entry = self.scenario("roughness-extremes-sun", ref.APPENDIX_B, "green")
+        self.assertTrue(entry["result"]["pass"], json.dumps(check.summarize(entry["result"])))
+        for name, verdict in entry["controls"].items():
+            self.assertTrue(verdict["fails_gate"], (name, verdict))
+        self.assertTrue(entry["discriminating"])
+        # The current engine model (F0-blended diffuse weight) is red on the intermediate metallic row only.
+        red = self.scenario("roughness-extremes-sun", ref.CONTROLS["engine-f0-blend"], "green", tag="-red")
+        self.assertTrue(red["result"]["rows"]["0.0"]["pass"] and red["result"]["rows"]["1.0"]["pass"])
+        self.assertFalse(red["result"]["rows"]["0.5"]["pass"])
+
+    def test_cached_reference_is_reused_only_for_the_same_snapshot(self):
+        entry = self.scenario("base-grid-env-resolve", ref.APPENDIX_B, "green", environment=ref.DECLARED, tag="-cache")
+        folder = pathlib.Path(self.tmp.name) / "base-grid-env-resolve-green-cache"
+        literal, declared = check.scenario_controls("base-grid-env-resolve")
+        usable = lambda: check.cached_reference_usable(folder / "reference", folder / "snapshot", literal, declared)  # noqa: E731
+        self.assertTrue(usable())
+        self.assertEqual(json.loads((folder / "reference" / "reference.json").read_text())["snapshot_sha256"],
+                         entry["snapshot_sha256"])
+        # A re-evaluation reuses it: the reference tool is not called.
+        calls = []
+        original = ref.main
+        ref.main = lambda *a, **k: calls.append(a) or 0
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                check.evaluate_scenario(np, "base-grid-env-resolve", folder, "green")
+            self.assertEqual(calls, [])
+            # Change the snapshot: the recorded SHA-256 no longer matches, the reference is not reused.
+            scene = folder / "snapshot" / "scene.json"
+            data = json.loads(scene.read_text())
+            data["sky"] = [0.25] * 3
+            scene.write_text(json.dumps(data))
+            self.assertFalse(usable())
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                check.evaluate_scenario(np, "base-grid-env-resolve", folder, "green")
+            self.assertEqual(len(calls), 1)  # re-rendered (the stub returned 0 and the old files were read)
+        finally:
+            ref.main = original
+        # A missing control file or an unrequested control also defeats the cache.
+        data["sky"] = [0.5] * 3
+        scene.write_text(json.dumps(data))
+        self.assertTrue(usable())
+        self.assertFalse(check.cached_reference_usable(folder / "reference", folder / "snapshot", ["fresnel-off"], declared))
+        (folder / "reference" / "control-declared-karis-fit.pfm").unlink()
+        self.assertFalse(usable())
 
 
 if __name__ == "__main__":

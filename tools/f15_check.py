@@ -11,10 +11,13 @@ Mitsuba and numpy:
 
   uv run --offline --no-project --python 3.13 --with mitsuba==3.9.1 --with numpy python -I tools/f15_check.py ...
 
+Exit codes are distinct (0 ok, 1 unexpected gate result, 2 usage, 3 non-discriminating
+control, 4 GPU busy, 5 internal error, 6 capture failed): see the --help epilog.
+
 Gates (relative error = |a - b| / max(b, 0.05 * mean_ROI(b)), per pixel, the
 maximum over RGB; ROI = sphere pixels without the silhouette, from the
 reference ray casting):
-- direct (base-grid-sun): per metallic row, p99 <= 1 % and max <= 3 % over the
+- direct (base-grid-sun, roughness-extremes-sun): per metallic row, p99 <= 1 % and max <= 3 % over the
   lit ROI, the max outside the declared sun-quadrature mask (narrow lobes).
 - environment (base-grid-env, roughness-extremes): mean <= 5 % per sphere; the
   per-sphere table is published.  roughness-extremes holds sun and
@@ -22,6 +25,12 @@ reference ray casting):
   reported.
 - furnace (furnace-base): no engine pixel above 1.0 + 0.5 %; energy loss per
   sphere is recorded, not gated.
+- declared (base-grid-env-resolve; also furnace-resolve next to its furnace
+  gate): the engine image against the independent declared-environment model of
+  tools/f15_reference.py (DFG table, ADR-0006): per sphere mean relative error
+  <= 0.5 % and per-pixel p99 <= 1 % (the absolute floor rule above).  Its
+  negative controls (diffuse unweighted, Karis fit instead of the table,
+  diffuse weighted by the metallic-blended F0 Fresnel) must all fail it.
 Design note: the environment gate cannot see a missing diffuse Fresnel weighting
 (it moves a sphere mean by at most about 4.5 %, below the 5 % bound, measured with
 the reference's `diffuse-unweighted` control), so that defect is owned by the
@@ -40,7 +49,6 @@ measured, not predicted.  `--expect green` requires every gate to pass.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import pathlib
@@ -48,11 +56,33 @@ import re
 import subprocess
 import sys
 import time
+import traceback
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "tools"))
+from f15_common import sha256_file  # noqa: E402
+
+EXIT_OK, EXIT_UNEXPECTED, EXIT_USAGE, EXIT_NON_DISCRIMINATING, EXIT_GPU_BUSY, EXIT_INTERNAL, EXIT_CAPTURE_FAILED = range(7)
+EXIT_CODES_HELP = """exit codes:
+  0  expected state confirmed (red: the documented red state; green: every gate passes)
+  1  unexpected gate result
+  2  usage error (also argparse errors, a missing renderer, a non-empty output folder)
+  3  a negative control does not fail its gate (non-discriminating fixture)
+  4  GPU busy: another GPU job runs or the verification lock is held
+  5  internal error (any exception inside this tool)
+  6  scenario capture failed
+"""
+
+
+class GpuBusy(RuntimeError):
+    """Another cooperating GPU verification owns the lock, or another GPU job is running."""
+
+
+class CaptureFailed(RuntimeError):
+    """A scenario capture process failed."""
+
 
 THRESHOLDS = {
     "relative_error": "abs(a - b) / max(b, floor_fraction * mean_ROI(b)), per pixel, maximum over RGB",
@@ -65,6 +95,9 @@ THRESHOLDS = {
     # amendment: a pure-metal sphere, which cannot gain energy, reaches 1.013-1.019
     # across three seeds). The per-pixel bound stays on the deterministic furnace-resolve.
     "furnace_transport": {"mean_per_sphere": 1.005},
+    # Declared-environment model (orchestrator, review 2026-11-13): fixed before any comparison.
+    "declared": {"mean_per_sphere": 0.005, "p99_per_sphere": 0.01,
+                 "model": "tools/f15_reference.py declared environment model (DFG table of src/renderer/dfg_table.h)"},
     "source": ".scratch/f15/decisions/11-reference-method-and-thresholds.md (incl. review amendments)",
 }
 FRAMES, RESOLUTION = 128, "1280x720"
@@ -77,7 +110,13 @@ SCENARIOS = {
     "furnace-base": {"kind": "furnace-transport", "controls": ["diffuse-unweighted"],
                      "terms": "constant environment radiance 1, albedo 1, no sun, stochastic specular transport"},
     "furnace-resolve": {"kind": "furnace", "controls": ["diffuse-unweighted"], "reflections": "off",
+                        "declared": ["declared-diffuse-unweighted", "declared-karis-fit", "declared-diffuse-f0-fresnel"],
                         "terms": "constant environment radiance 1, albedo 1, no sun, deterministic resolve terms"},
+    "base-grid-env-resolve": {"kind": "declared", "controls": ["declared-diffuse-unweighted", "declared-karis-fit", "declared-diffuse-f0-fresnel"], "reflections": "off",
+                              "terms": "constant environment only (radiance 0.5, no sun), deterministic resolve terms "
+                                       "(--reflections off --lighting-denoise custom)"},
+    "roughness-extremes-sun": {"kind": "direct", "controls": ["alpha-roughness", "fresnel-off", "engine-f0-blend"],
+                               "terms": "sun disk only (environment 0, no shadows, no GI) on the roughness extremes 0 and 1"},
     "roughness-extremes": {"kind": "environment", "controls": ["alpha-roughness"],
                            "terms": "sun disk plus constant environment 0.3; only the environment criterion gates"},
 }
@@ -94,7 +133,7 @@ def gpu_lock(path):
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise RuntimeError("another cooperating Phosphor GPU verification owns the lock")
+            raise GpuBusy("another cooperating Phosphor GPU verification owns the lock")
         try:
             yield
         finally:
@@ -113,14 +152,6 @@ def running_gpu_processes(ps_output=None):
     return found
 
 
-def sha(path):
-    digest = hashlib.sha256()
-    with pathlib.Path(path).open("rb") as stream:
-        for block in iter(lambda: stream.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
 def command_text(command):
     try:
         return subprocess.run(command, capture_output=True, text=True, timeout=30).stdout.strip()
@@ -128,18 +159,37 @@ def command_text(command):
         return None
 
 
+def parse_sw_vers(text):
+    """`sw_vers` output ("Key:\tvalue" lines) as a dict; tolerant of None, blank, short or odd output."""
+    info = {}
+    for line in (text or "").splitlines():
+        key, separator, value = line.partition(":")
+        if separator and key.strip():
+            info[key.strip()] = value.strip()
+    return info
+
+
+def os_description(info):
+    """One line such as `macOS 27.3 (26D1)`; empty when sw_vers told us nothing."""
+    parts = [info.get("ProductName"), info.get("ProductVersion")]
+    text = " ".join(p for p in parts if p)
+    if info.get("BuildVersion"):
+        text += f" ({info['BuildVersion']})"
+    return text.strip()
+
+
 def build_manifest(binary, metallib, scenarios, seed):
     git = lambda *a: command_text(["git", "-C", str(REPO), *a])  # noqa: E731
     power = command_text(["pmset", "-g", "batt"]) or ""
-    tools = {name: sha(REPO / "tools" / name) for name in
-             ("f15_check.py", "f15_reference.py", "f12_reference.py", "run_checked.py")}
+    tools = {name: sha256_file(REPO / "tools" / name) for name in
+             ("f15_check.py", "f15_reference.py", "f15_common.py", "f12_reference.py", "run_checked.py")}
     return {"schema": 1, "created_utc": datetime.now(timezone.utc).isoformat(),
             "commit": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain")),
-            "binary": str(binary), "binary_sha256": sha(binary) if binary.is_file() else None,
-            "metallib_sha256": sha(metallib) if metallib.is_file() else None,
+            "binary": str(binary), "binary_sha256": sha256_file(binary) if binary.is_file() else None,
+            "metallib_sha256": sha256_file(metallib) if metallib.is_file() else None,
             "tool_sha256": tools, "seed": seed, "reference_seed": None,
             "reference_note": "the Appendix B reference is deterministic (no random numbers)",
-            "os": command_text(["sw_vers"]), "sdk_version": command_text(["xcrun", "--show-sdk-version"]),
+            "os": parse_sw_vers(command_text(["sw_vers"])), "sdk_version": command_text(["xcrun", "--show-sdk-version"]),
             "power": {"pmset_batt": power, "on_ac": "AC Power" in power},
             "frames": FRAMES, "resolution": RESOLUTION, "thresholds": THRESHOLDS,
             "scenarios": {name: SCENARIOS[name] for name in scenarios}}
@@ -162,11 +212,22 @@ def capture_command(binary, name, folder, seed=1):
             "--report", str(folder / "report.json")]
 
 
+def scenario_controls(name):
+    """(literal-model controls, declared-model controls) the reference must render for one scenario."""
+    spec = SCENARIOS[name]
+    if spec["kind"] == "declared":
+        return [], list(spec["controls"])
+    return list(spec["controls"]), list(spec.get("declared", []))
+
+
 def reference_command(name, folder):
-    controls = SCENARIOS[name]["controls"]
-    return ["uv", "run", "--offline", "--no-project", "--python", "3.13", "--with", "mitsuba==3.9.1",
-            "--with", "numpy", "python", "-I", str(REPO / "tools" / "f15_reference.py"), "render",
-            str(folder / "snapshot"), "--out", str(folder / "reference"), "--controls", *controls]
+    controls, declared = scenario_controls(name)
+    command = ["uv", "run", "--offline", "--no-project", "--python", "3.13", "--with", "mitsuba==3.9.1",
+               "--with", "numpy", "python", "-I", str(REPO / "tools" / "f15_reference.py"), "render",
+               str(folder / "snapshot"), "--out", str(folder / "reference"), "--controls", *controls]
+    if declared:
+        command += ["--declared-controls", *declared]
+    return command
 
 
 # --- statistics (pure numpy) --------------------------------------------------
@@ -246,6 +307,27 @@ def evaluate_environment(np, candidate, reference, masks, spheres, direct_info=N
     return out
 
 
+def evaluate_declared(np, candidate, reference, masks, spheres):
+    """Per sphere: mean and p99 of the relative error against the declared-environment model."""
+    gate = THRESHOLDS["declared"]
+    roi = masks["roi"]
+    error, floor = relative_error(np, candidate, reference, roi)
+    sphere = masks["sphere"][roi]
+    table = []
+    for s in spheres:
+        pick = sphere == s["instance"]
+        if not pick.any():
+            table.append({**{k: s[k] for k in ("instance", "metallic", "roughness")}, "pixels": 0, "pass": False})
+            continue
+        e = error[pick]
+        mean, p99 = float(e.mean()), float(np.percentile(e, 99))
+        table.append({"instance": s["instance"], "metallic": s["metallic"], "roughness": s["roughness"],
+                      "pixels": int(pick.sum()), "mean": mean, "p99": p99,
+                      "pass": bool(mean <= gate["mean_per_sphere"] and p99 <= gate["p99_per_sphere"])})
+    return {"kind": "declared", "floor": floor, "spheres": table, "pass": all(t["pass"] for t in table),
+            "worst_mean": max(t.get("mean", 0.0) for t in table), "worst_p99": max(t.get("p99", 0.0) for t in table)}
+
+
 def evaluate_furnace(np, candidate, reference, masks, spheres):
     limit = THRESHOLDS["furnace"]["max_pixel"]
     roi = masks["roi"]
@@ -284,6 +366,8 @@ def evaluate(np, kind, candidate, reference, masks, spheres):
         return evaluate_furnace(np, candidate, reference, masks, spheres)
     if kind == "furnace-transport":
         return evaluate_furnace_transport(np, candidate, reference, masks, spheres)
+    if kind == "declared":
+        return evaluate_declared(np, candidate, reference, masks, spheres)
     return evaluate_environment(np, candidate, reference, masks, spheres)
 
 
@@ -291,6 +375,8 @@ def expectation(kind, mode, result):
     """Red-state assertions of ticket 02; None when a fixture is measured but not predicted."""
     if mode == "green":
         return {"asserted": True, "expected_pass": True, "met": result["pass"]}
+    if kind == "declared":
+        return {"asserted": False, "met": True, "note": "declared-model gate: measured, asserted in green mode only"}
     if kind in ("furnace", "furnace-transport"):
         return {"asserted": True, "expected_pass": False, "met": not result["pass"]}
     if kind == "direct":
@@ -316,22 +402,61 @@ def summarize(result):
     keep = {k: v for k, v in result.items() if k not in ("spheres", "rows")}
     if "rows" in result:
         keep["rows_failing"] = [k for k, v in result["rows"].items() if not v["pass"]]
-    if result["kind"] == "environment":
+    if result["kind"] in ("environment", "declared"):
         keep["spheres_failing"] = sum(1 for t in result["spheres"] if not t["pass"])
     return keep
 
 
 # --- evaluation of one scenario ------------------------------------------------
 
+def cached_reference_usable(reference_dir, snapshot_dir, literal_controls, declared_controls):
+    """A cached reference is reused only when it was rendered from THIS snapshot (recorded SHA-256 equals the
+    snapshot's digest) and holds every requested control; anything else is re-rendered."""
+    from f12_reference import scene_digest
+    meta_path = reference_dir / "reference.json"
+    if not meta_path.is_file():
+        return False
+    try:
+        meta = json.loads(meta_path.read_text())
+        if meta.get("snapshot_sha256") != scene_digest(pathlib.Path(snapshot_dir).resolve()):
+            return False
+        files = [reference_dir / "reference.pfm", reference_dir / "masks.npz"]
+        if not set(literal_controls) <= set(meta.get("controls", {})):
+            return False
+        files += [reference_dir / meta["controls"][c]["file"] for c in literal_controls]
+        if declared_controls:
+            declared = meta.get("declared")
+            if not declared or not set(declared_controls) <= set(declared.get("controls", {})):
+                return False
+            files += [reference_dir / declared["file"]] + [reference_dir / declared["controls"][c]["file"]
+                                                           for c in declared_controls]
+        return all(f.is_file() for f in files)
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def judge(np, kind, candidate, reference, masks, spheres, controls, mode):
+    """One gate with its negative controls: result, verdicts, expectation."""
+    result = evaluate(np, kind, candidate, reference, masks, spheres)
+    verdicts = control_verdicts(np, kind, reference, controls, masks, spheres, list(controls))
+    return result, verdicts, expectation(kind, mode, result)
+
+
 def evaluate_scenario(np, name, folder, mode):
     from f12_reference import read_pfm
     import f15_reference
 
     spec = SCENARIOS[name]
+    literal_controls, declared_controls = scenario_controls(name)
     reference_dir = folder / "reference"
-    if not (reference_dir / "reference.json").is_file():
-        code = f15_reference.main(["render", str(folder / "snapshot"), "--out", str(reference_dir),
-                                   "--controls", *spec["controls"]])
+    if not cached_reference_usable(reference_dir, folder / "snapshot", literal_controls, declared_controls):
+        if (reference_dir / "reference.json").is_file():
+            print(f"{name}: the cached reference does not match this snapshot or its controls; re-rendering",
+                  file=sys.stderr)
+        arguments = ["render", str(folder / "snapshot"), "--out", str(reference_dir), "--controls", *literal_controls]
+        if declared_controls:
+            arguments += ["--declared-controls", *declared_controls]
+        code = f15_reference.main(arguments)
         if code:
             raise RuntimeError(f"{name}: reference render failed ({code})")
     report = json.loads((reference_dir / "reference.json").read_text())
@@ -341,71 +466,124 @@ def evaluate_scenario(np, name, folder, mode):
         raise RuntimeError(f"{name}: engine capture {candidate.shape} and reference {reference.shape} differ in size")
     masks = dict(np.load(reference_dir / "masks.npz"))
     spheres = report["spheres"]
-    controls = {c: read_pfm(reference_dir / report["controls"][c]["file"]) for c in spec["controls"]}
-    result = evaluate(np, spec["kind"], candidate, reference, masks, spheres)
-    if name == "roughness-extremes":  # sun + environment: direct statistics reported, environment gates
-        direct = evaluate_direct(np, candidate, reference, masks, spheres)
-        result = evaluate_environment(np, candidate, reference, masks, spheres, summarize(direct))
-    verdicts = control_verdicts(np, spec["kind"], reference, controls, masks, spheres, spec["controls"])
-    expected = expectation(spec["kind"], mode, result)
-    return {"scenario": name, "kind": spec["kind"], "terms": spec["terms"], "reference_terms": report["terms"],
-            "reference_maximum_radiance": report["maximum_radiance"], "quadrature_mask_pixels": report["quadrature_mask_pixels"],
-            "roi_pixels": report["roi_pixels"], "snapshot_sha256": report["snapshot_sha256"], "result": result,
-            "expectation": expected, "controls": verdicts,
-            "discriminating": all(v["fails_gate"] for v in verdicts.values())}
+    entry = {"scenario": name, "kind": spec["kind"], "terms": spec["terms"], "reference_terms": report["terms"],
+             "reference_maximum_radiance": report["maximum_radiance"],
+             "quadrature_mask_pixels": report["quadrature_mask_pixels"], "roi_pixels": report["roi_pixels"],
+             "snapshot_sha256": report["snapshot_sha256"]}
+    checks = []  # (discriminating, gate result)
+
+    if spec["kind"] != "declared":
+        controls = {c: read_pfm(reference_dir / report["controls"][c]["file"]) for c in literal_controls}
+        result = evaluate(np, spec["kind"], candidate, reference, masks, spheres)
+        if name == "roughness-extremes":  # sun + environment: direct statistics reported, environment gates
+            direct = evaluate_direct(np, candidate, reference, masks, spheres)
+            result = evaluate_environment(np, candidate, reference, masks, spheres, summarize(direct))
+        verdicts = control_verdicts(np, spec["kind"], reference, controls, masks, spheres, literal_controls)
+        entry.update(result=result, expectation=expectation(spec["kind"], mode, result), controls=verdicts)
+        checks.append((all(v["fails_gate"] for v in verdicts.values()), result["pass"]))
+
+    if declared_controls:
+        declared_report = report["declared"]
+        declared_reference = read_pfm(reference_dir / declared_report["file"])
+        controls = {c: read_pfm(reference_dir / declared_report["controls"][c]["file"]) for c in declared_controls}
+        result = evaluate_declared(np, candidate, declared_reference, masks, spheres)
+        verdicts = control_verdicts(np, "declared", declared_reference, controls, masks, spheres, declared_controls)
+        expected = expectation("declared", mode, result)
+        if spec["kind"] == "declared":
+            entry.update(result=result, expectation=expected, controls=verdicts)
+        else:
+            entry["declared"] = {"result": result, "expectation": expected, "controls": verdicts,
+                                 "dfg_table_sha256": declared_report.get("dfg_table_sha256")}
+        checks.append((all(v["fails_gate"] for v in verdicts.values()), result["pass"]))
+
+    entry["discriminating"] = all(d for d, _ in checks)
+    entry["gates_pass"] = all(p for _, p in checks)
+    entry["expectation_met"] = entry["expectation"]["met"] and entry.get("declared", {}).get("expectation", {"met": True})["met"]
+    return entry
 
 
 def verdict(entries, mode):
     """(status, exit code): blocking non-discrimination first, then the expectation."""
     if any(not e["discriminating"] for e in entries):
-        return "BLOCKED_NON_DISCRIMINATING_FIXTURE", 3
+        return "BLOCKED_NON_DISCRIMINATING_FIXTURE", EXIT_NON_DISCRIMINATING
     if mode == "green":
-        return ("GREEN", 0) if all(e["result"]["pass"] for e in entries) else ("RED", 1)
-    if all(e["expectation"]["met"] for e in entries):
-        return "EXPECTED_RED_CONFIRMED", 0
-    return "UNEXPECTED_RESULT", 1
+        passes = all(e.get("gates_pass", e["result"]["pass"]) for e in entries)
+        return ("GREEN", EXIT_OK) if passes else ("RED", EXIT_UNEXPECTED)
+    if all(e.get("expectation_met", e["expectation"]["met"]) for e in entries):
+        return "EXPECTED_RED_CONFIRMED", EXIT_OK
+    return "UNEXPECTED_RESULT", EXIT_UNEXPECTED
+
+
+def result_lines(r):
+    """Markdown table of one gate result."""
+    lines = []
+    if r["kind"] == "direct":
+        lines += ["", "| metallic | pixels | mean | p95 | p99 | max outside mask | pass |", "|---|---|---|---|---|---|---|"]
+        for k, row in r["rows"].items():
+            lines.append(f"| {k} | {row['pixels']} | {row.get('mean', 0):.4f} | {row.get('p95', 0):.4f} | "
+                         f"{row.get('p99', 0):.4f} | {row.get('max_outside_mask', 0):.4f} | {row['pass']} |")
+    elif r["kind"] == "environment":
+        lines += ["", "| metallic | roughness | mean | p95 | pass |", "|---|---|---|---|---|"]
+        for t in r["spheres"]:
+            lines.append(f"| {t['metallic']} | {t['roughness']} | {t.get('mean', 0):.4f} | {t.get('p95', 0):.4f} | {t['pass']} |")
+    elif r["kind"] == "declared":
+        lines += ["", f"worst sphere mean {r['worst_mean']:.5f} (limit {THRESHOLDS['declared']['mean_per_sphere']}), "
+                      f"worst p99 {r['worst_p99']:.5f} (limit {THRESHOLDS['declared']['p99_per_sphere']})", "",
+                  "| metallic | roughness | mean | p99 | pass |", "|---|---|---|---|---|"]
+        for t in r["spheres"]:
+            lines.append(f"| {t['metallic']} | {t['roughness']} | {t.get('mean', 0):.5f} | {t.get('p99', 0):.5f} | {t['pass']} |")
+    else:
+        gate = (f"max sphere mean {r['max_sphere_mean']:.5f} (limit {r['limit']}, energy in expectation), max pixel {r['max_pixel']:.5f}"
+                if r["kind"] == "furnace-transport" else f"max pixel {r['max_pixel']:.5f} (limit {r['limit']})")
+        lines += ["", f"{gate}, reference max {r['reference_max_pixel']:.5f}", "",
+                  "| metallic | roughness | max | mean | energy loss | reference loss |", "|---|---|---|---|---|---|"]
+        for t in r["spheres"]:
+            lines.append(f"| {t.get('metallic')} | {t.get('roughness')} | {t.get('max', 0):.4f} | {t.get('mean', 0):.4f} | "
+                         f"{t.get('energy_loss', 0):.4f} | {t.get('reference_energy_loss', 0):.4f} |")
+    return lines
+
+
+def control_text(controls):
+    return ", ".join(f"{k}: {'fails' if v['fails_gate'] else 'PASSES (non-discriminating)'}" for k, v in controls.items())
 
 
 def markdown(manifest, entries, status):
+    os_text = os_description(manifest.get("os") or {})
     lines = [f"# F15.3 material validation: {status}", "",
-             f"commit `{manifest.get('commit')}`, binary `{manifest.get('binary_sha256')}`, "
-             f"{manifest.get('os', '').splitlines()[1] if manifest.get('os') else ''}", "",
-             "| scenario | gate | expectation | negative controls |", "|---|---|---|---|"]
+             f"commit `{manifest.get('commit')}`, binary `{manifest.get('binary_sha256')}`, {os_text}", "",
+             "| scenario | gate | declared-model gate | expectation | negative controls |", "|---|---|---|---|---|"]
     for e in entries:
-        controls = ", ".join(f"{k}: {'fails' if v['fails_gate'] else 'PASSES (non-discriminating)'}"
-                             for k, v in e["controls"].items())
         ex = e["expectation"]
-        lines.append(f"| {e['scenario']} | {'pass' if e['result']['pass'] else 'FAIL'} | "
-                     f"{'met' if ex['met'] else 'NOT met'}{'' if ex.get('asserted') else ' (not asserted)'} | {controls} |")
+        declared = e.get("declared")
+        declared_cell = "-" if not declared else ("pass" if declared["result"]["pass"] else "FAIL")
+        controls = control_text(e["controls"])
+        if declared:
+            controls += "; declared: " + control_text(declared["controls"])
+        lines.append(f"| {e['scenario']} | {'pass' if e['result']['pass'] else 'FAIL'} | {declared_cell} | "
+                     f"{'met' if e.get('expectation_met', ex['met']) else 'NOT met'}"
+                     f"{'' if ex.get('asserted') else ' (not asserted)'} | {controls} |")
     for e in entries:
-        r = e["result"]
         lines += ["", f"## {e['scenario']} ({e['kind']})", f"Image contains: {e['terms']}.",
                   f"Reference terms: {', '.join(e['reference_terms'])}; ROI pixels {e['roi_pixels']}; "
                   f"quadrature mask pixels {e['quadrature_mask_pixels']}."]
-        if r["kind"] == "direct":
-            lines += ["", "| metallic | pixels | mean | p95 | p99 | max outside mask | pass |", "|---|---|---|---|---|---|---|"]
-            for k, row in r["rows"].items():
-                lines.append(f"| {k} | {row['pixels']} | {row.get('mean', 0):.4f} | {row.get('p95', 0):.4f} | "
-                             f"{row.get('p99', 0):.4f} | {row.get('max_outside_mask', 0):.4f} | {row['pass']} |")
-        elif r["kind"] == "environment":
-            lines += ["", "| metallic | roughness | mean | p95 | pass |", "|---|---|---|---|---|"]
-            for t in r["spheres"]:
-                lines.append(f"| {t['metallic']} | {t['roughness']} | {t.get('mean', 0):.4f} | {t.get('p95', 0):.4f} | {t['pass']} |")
-        else:
-            gate = (f"max sphere mean {r['max_sphere_mean']:.5f} (limit {r['limit']}, energy in expectation), max pixel {r['max_pixel']:.5f}"
-                    if r["kind"] == "furnace-transport" else f"max pixel {r['max_pixel']:.5f} (limit {r['limit']})")
-            lines += ["", f"{gate}, reference max {r['reference_max_pixel']:.5f}", "",
-                      "| metallic | roughness | max | mean | energy loss | reference loss |", "|---|---|---|---|---|---|"]
-            for t in r["spheres"]:
-                lines.append(f"| {t.get('metallic')} | {t.get('roughness')} | {t.get('max', 0):.4f} | {t.get('mean', 0):.4f} | "
-                             f"{t.get('energy_loss', 0):.4f} | {t.get('reference_energy_loss', 0):.4f} |")
+        lines += result_lines(e["result"])
+        if e.get("declared"):
+            lines += ["", f"### {e['scenario']}: declared environment model (DFG table)"]
+            lines += result_lines(e["declared"]["result"])
     return "\n".join(lines) + "\n"
 
 
 # --- main ---------------------------------------------------------------------
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+def capture(command, log, timeout):
+    """One renderer process through run_checked (tests replace this)."""
+    from run_checked import run_checked
+    return run_checked(command, log, timeout=timeout)
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(description=__doc__, epilog=EXIT_CODES_HELP,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--binary", type=pathlib.Path, default=REPO / "build/release/phosphor")
     parser.add_argument("--out", type=pathlib.Path, default=REPO / "build/f15-material")
     parser.add_argument("--only", action="append", default=[], choices=sorted(SCENARIOS))
@@ -416,7 +594,33 @@ def main(argv=None):
     parser.add_argument("--gpu-lock", type=pathlib.Path, default=pathlib.Path("/tmp/phosphor-gpu-verification.lock"))
     parser.add_argument("--timeout", type=float, default=300)
     parser.add_argument("--seed", type=int, default=1)
-    args = parser.parse_args(argv)
+    return parser
+
+
+def run_captures(parser, args, names, out, binary):
+    """Serial captures under the lock; the GPU guard runs before EVERY capture."""
+    if not binary.is_file():
+        parser.error("--run requires an existing compiled renderer; this runner never builds")
+    folders = {n: out / n for n in names}
+    for n, folder in folders.items():  # before anything starts: a stale folder is a usage error
+        if folder.exists() and any(folder.iterdir()):
+            parser.error(f"{folder} is not empty: choose a new --out")
+    with gpu_lock(args.gpu_lock):
+        for position, n in enumerate(names):
+            busy = running_gpu_processes()
+            if busy:
+                raise GpuBusy(f"refusing to start {n}: other GPU jobs are running: {', '.join(busy)}")
+            folders[n].mkdir(parents=True, exist_ok=True)
+            status = capture(capture_command(binary, n, folders[n], args.seed), folders[n] / "engine.log", args.timeout)
+            if not status["passed"]:
+                raise CaptureFailed(f"{n}: capture failed: {status['failures']}")
+            if position + 1 < len(names):
+                time.sleep(2)  # serial and quiet between GPU jobs
+
+
+def run(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)  # SystemExit(2) on a usage error
     names = args.only or list(SCENARIOS)
     out = args.out.resolve()
     binary = args.binary.resolve()
@@ -434,28 +638,10 @@ def main(argv=None):
             print(" ".join(plan["commands"][n]["capture"]))
             print(" ".join(plan["commands"][n]["reference"]))
         print(f"NOT_EXECUTED: planned {len(names)} F15.3 scenarios, plan at {out / 'plan.json'}")
-        return 0
+        return EXIT_OK
 
     if args.run:
-        if not binary.is_file():
-            parser.error("--run requires an existing compiled renderer; this runner never builds")
-        from run_checked import run_checked
-        with gpu_lock(args.gpu_lock):
-            busy = running_gpu_processes()
-            if busy:
-                print(f"refusing to start: other GPU jobs are running: {', '.join(busy)}", file=sys.stderr)
-                return 4
-            for n in names:
-                folder = out / n
-                if folder.exists() and any(folder.iterdir()):
-                    parser.error(f"{folder} is not empty: choose a new --out")
-                folder.mkdir(parents=True, exist_ok=True)
-                status = run_checked(capture_command(binary, n, folder, args.seed), folder / "engine.log",
-                                     timeout=args.timeout)
-                if not status["passed"]:
-                    print(f"{n}: capture failed: {status['failures']}", file=sys.stderr)
-                    return 2
-                time.sleep(2)  # serial and quiet between GPU jobs
+        run_captures(parser, args, names, out, binary)
 
     import numpy as np
     entries = [evaluate_scenario(np, n, out / n, args.expect) for n in names]
@@ -468,6 +654,23 @@ def main(argv=None):
     print(markdown(manifest, entries, status))
     print(f"{status} (exit {code})")
     return code
+
+
+def main(argv=None):
+    """Run and map every failure to its documented exit code (see EXIT_CODES_HELP)."""
+    try:
+        return run(argv)
+    except SystemExit:
+        raise  # argparse: usage error (2) or --help (0)
+    except GpuBusy as error:
+        print(f"GPU busy: {error}", file=sys.stderr)
+        return EXIT_GPU_BUSY
+    except CaptureFailed as error:
+        print(str(error), file=sys.stderr)
+        return EXIT_CAPTURE_FAILED
+    except Exception:  # noqa: BLE001 - every other failure is an internal error, never a gate result
+        traceback.print_exc()
+        return EXIT_INTERNAL
 
 
 if __name__ == "__main__":
