@@ -42,3 +42,8 @@ independent reference proves it?
   now: if the screen-space diffusion misses the ticket 11 bound on the piece
   mask, the hybrid RT single-scattering variant is implemented within F15
   (timeboxed, ≤ 2 weeks); otherwise it stays a candidate.
+
+## Comments
+
+- 2026-11-13, owner (AskUserQuestion): "OpenPBR + bozza KHR" — confirmed.
+  Recorded as ADR-0005.

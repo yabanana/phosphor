@@ -10,6 +10,10 @@ any F15 code is written.
 
 ## Notes
 
+- 2026-11-13: every decision ticket resolved (owner confirmed 09 and 10);
+  spec in `spec.md`, tracer-bullet tickets 01–17 in `issues/`; awaiting the
+  owner's approval of the plan before any F15 code.
+
 - Roadmap tasks F15.1–F15.4 (`docs/ROADMAP.md`), plan `docs/plans/F15.md`,
   method `docs/plans/METHOD.md`, sequencing `docs/plans/SEQUENCING.md`,
   hardware policy `docs/plans/HARDWARE_VALIDATION.md`, `CLAUDE.md`.
@@ -33,9 +37,10 @@ any F15 code is written.
 - [Permutation mechanism](decisions/08-permutation-mechanism.md): function-constant feature classes from offline manifests; union specialisation default, binning by ≥5 % rule; budget 64/16/+25 %/0 hitches; exact equality vs generic
 - [Real-time transmission and SSS](decisions/04-realtime-transmission-sss.md): pyramid vs RT refraction, Burley screen-space SSS vs hybrid; costs and fit recorded
 - [Lobe × light-path coverage](decisions/06-lobe-light-path-coverage.md): primary surface exact for direct light and transport, secondary hits base reduction, shared MSL BSDF module, declared approximations table
-- [Transmission and F16 boundary](decisions/09-transmission-scope.md): RT refraction in the specular transport, probes fallback, opaque shadows; raster transparency stays in F16 (owner confirmation)
-- [Subsurface model](decisions/10-subsurface-model.md): OpenPBR semantics; Phosphor description file + draft KHR_materials_scatter + RC diffuse_transmission inputs (owner confirmation); Burley screen-space; hybrid RT if bound missed
+- [Transmission and F16 boundary](decisions/09-transmission-scope.md): RT refraction in the specular transport, probes fallback, opaque shadows; raster transparency stays in F16 (owner confirmed, ADR-0004)
+- [Subsurface model](decisions/10-subsurface-model.md): OpenPBR semantics; Phosphor description file + draft KHR_materials_scatter + RC diffuse_transmission inputs (owner confirmed, ADR-0005); Burley screen-space; hybrid RT if bound missed
 - [Reference method and thresholds](decisions/11-reference-method-and-thresholds.md): fixtures, independent references, thresholds fixed before comparison, discrimination rule
+- [F15.4 fixture and real-world cost](decisions/12-layered-fixture.md): procedural terrain patch + 4 CC0 materials + generated RGBA mask + cavity finish; resolve cost per active-layer count
 
 ## Not yet specified
 

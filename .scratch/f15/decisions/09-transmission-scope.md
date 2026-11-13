@@ -35,7 +35,12 @@ liquids)?
   from the visibility pass and a separate lit transparent pass — F16
   infrastructure — while the RT path reuses existing, validated machinery
   (METHOD: first path correct with existing tools). Owner confirmation
-  requested because it fixes the F15/F16 boundary (ADR-0004 after approval).
+  requested because it fixes the F15/F16 boundary (ADR-0004).
 - Reference: Mitsuba 3.9.1 rough dielectric + homogeneous absorbing medium on
   the same snapshot (independent ground truth), converged accumulation of the
   engine image; thresholds in ticket 11.
+
+## Comments
+
+- 2026-11-13, owner (AskUserQuestion): "RT in F15, raster in F16" — confirmed.
+  Recorded as ADR-0004.
