@@ -6,9 +6,13 @@
 # Every scenario runs bench 1 under Metal API + shader validation with an
 # explicit --pipeline-archive, parses the app's PIPELINES line (requests,
 # archive hits / misses / unavailable, compiler calls), compares the capture
-# with the visual_check reference (0 pixels may differ: a miss or an
-# unavailable archive only changes HOW a pipeline is obtained, never the
-# image) and counts unexpected log lines (must be 0).
+# with a baseline captured in the SAME mode without any archive (0 pixels
+# may differ: a miss or an unavailable archive only changes HOW a pipeline is
+# obtained, never the image) and counts unexpected log lines (must be 0).
+# The visual_check reference (taken under shader validation) is compared
+# with that baseline for information only: shader-validation instrumentation
+# may change a few pixels by one LSB (measured F15, 2026-11-13: bench 1,
+# 12 px, max delta 1; docs/research/2026-11-13-f15-shader-validation-constant-arrays.md).
 #
 # Scenarios (all archives are built here with metal-tt from the build's
 # substituted pipelines script, $build/shaders/pipelines.mtl4-json):
@@ -55,6 +59,12 @@ for f in "$script_json" "$metallib" "$full_archive" "$ref_dir/bench1.png"; do
 done
 rm -rf "$out_dir"
 mkdir -p "$out_dir"
+# Same-mode baseline: API validation only, no archive (every pipeline compiled).
+baseline="$out_dir/baseline-noarchive.png"
+MTL_DEBUG_LAYER=1 MTL_DEBUG_LAYER_WARNING_MODE=nslog \
+    "$app" --bench 1 --warmup "$warmup" --frames 1 --no-ui --fixed-timestep --no-pipeline-archive \
+    --capture "$baseline" >"$out_dir/baseline-noarchive.log" 2>&1 || { echo "error: baseline capture failed" >&2; exit 2; }
+echo "baseline vs visual_check reference (cross-mode, information only): $("$diff_tool" "$ref_dir/bench1.png" "$baseline" 2>&1 | tail -1)"
 # Absolute paths: metal-tt resolves the library path in the script.
 metallib=$(cd "$(dirname "$metallib")" && pwd)/$(basename "$metallib")
 
@@ -104,7 +114,7 @@ run_case() {
     [[ $allow_warn == 1 ]] && ignore="$ignore|^\[WARN\].*[Aa]rchive"
     messages=$(grep -Ev "$ignore" "$log" | grep -c . || true)
     diff_ok=1
-    pixels=$("$diff_tool" "$ref_dir/bench1.png" "$capture" --diff "$out_dir/$name-diff.png" 2>&1) || diff_ok=0
+    pixels=$("$diff_tool" "$baseline" "$capture" --diff "$out_dir/$name-diff.png" 2>&1) || diff_ok=0
 }
 
 # verdict NAME DETAILS [failure reasons...]: prints PASS/FAIL for the last run.
@@ -113,7 +123,7 @@ verdict() {
     [[ $status -eq 0 ]] || problems+=("exit status $status")
     [[ $messages -eq 0 ]] || problems+=("$messages unexpected log lines (see $out_dir/$name.log)")
     [[ $requests != '?' ]] || problems+=("no PIPELINES line in the log")
-    [[ $diff_ok -eq 1 ]] || problems+=("capture differs from the reference: $pixels")
+    [[ $diff_ok -eq 1 ]] || problems+=("capture differs from the same-mode no-archive baseline: $pixels")
     local summary="requests $requests hits $hits misses $misses unavailable $unavailable compiler calls $compiler_calls; $details"
     if [[ ${#problems[@]} -eq 0 ]]; then
         echo "$name: PASS ($summary)"
@@ -200,6 +210,8 @@ stale_dir="$out_dir/stale"
 mkdir -p "$stale_dir"
 cp "$repo_dir"/shaders/*.metal "$stale_dir/"
 cp "$repo_dir"/shaders/*.h "$stale_dir/"
+# Shader headers in subdirectories (F15: shaders/materials/).
+for sub in "$repo_dir"/shaders/*/; do cp -R "${sub%/}" "$stale_dir/"; done
 if ! sed -i.bak 's/float3(0\.30, 0\.36, 0\.45)/float3(0.31, 0.36, 0.45)/' "$stale_dir/material_shading.h" \
     || cmp -s "$stale_dir/material_shading.h" "$repo_dir/shaders/material_shading.h"; then
     echo "d-stale: FAIL (could not modify the material constant; update this script)"
