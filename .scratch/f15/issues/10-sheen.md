@@ -8,9 +8,9 @@ Roadmap: F15.1, F15.3
 
 **Status:** ready-for-agent
 
-- [ ] Table generator reproducible and checked against an independent numerical integration; a corrupted table fails the check
+- [x] Table generator reproducible and checked against an independent numerical integration; a corrupted table fails the check
 - [ ] Sheen grid (colour × roughness) passes decision-11 thresholds under constant environment and under a probe-lit fixture; furnace bound holds
-- [ ] Negative control (no albedo scaling) exceeds the furnace bound
+- [x] Negative control (no albedo scaling) exceeds the furnace bound
 - [ ] SheenTestGrid and one Tier B sheen model side by side
 - [ ] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
 
@@ -95,3 +95,30 @@ Dropped, limited or open:
 - Not built: coat + sheen fixture, SheenTestGrid / Tier B sheen model side by side, texture-driven sheen, the denoiser
   lobe-id criterion for the sheen environment term; `tools/archive_check.sh` and `tools/hitch_check.sh` not run here;
   the GPU allocation count of measured frames is unchanged by a harness and not re-measured.
+
+2026-11-13 (engine) - KHR_materials_sheen implemented (F15.1); the runner is green on all keys.
+Commits: table layout fix, engine, runner keys not pending, archive update (see `git log --grep "ticket 10"`).
+
+What the engine does (decision 06; `bsdf.h`, `material_shading.h`, `restir_common.h`, `reflection_*`):
+- Charlie D, the notes' lambda fit V, lobe S D V, roughness clamped to [0.07, 1] (stored clamped in the lobe guide).
+- Analytic lights and the sun: base (ior/specular included) scaled by min(1 - m E(N.V), 1 - m E(N.L)); sheen lobe point-evaluated
+  (the sun at the disk centre); coat above the sheen. ReSTIR / clustered DI: the same in target and shading (the emitter
+  share of the sheen lobe is 1: the transport does not sample sheen).
+- Environment / GI / transport: the base specular weight of the sampled lobe and the diffuse weight carry 1 - m E(N.V); the sheen
+  term S E L(N) is added next to the diffuse ambient: resolve (declared environment or legacy hemisphere at N, GI irradiance / pi
+  with GI) or, when the composite owns the diffuse, the composite (giSelected / pi with GI, the declared environment `p.environment`
+  without GI, times AO like the diffuse). Probe path: split-sum weight scaled; captured probes do NOT light the sheen term
+  (declared in the support table; a captured-probe fixture with an analytic reference is still open).
+- Secondary RT hits ignore sheen (declared). Support table: approximated, "lobe_not_sampled_environment_term_in_composition;
+  sun_disk_point_evaluated;secondary_rt_hits_ignore_sheen".
+
+Finding fixed on the way: the harness table (uniform N.V axis, values clamped to 1) interpolated E across the clamp kink near
+N.V 0.05 with errors of 0.03-0.05, which made the min-form light scaling of the dim terminator pixels differ from the reference
+by up to 0.2 (gate 0.03) in the legacy sun and point grids. The table now stores the unclamped E at N.V = (i/63)^2 and roughness
+0.07 + 0.93 j/63, and the lookup clamps after interpolating (max error 0.002 between nodes, unit test); the reference's own
+albedo table had the same kink (0.011 off against a 2048 x 1024 integration) and was fixed the same way. The reference's incident
+quadrature (512 x 128) is still inaccurate for N.V below 0.005 at sheen roughness >= 0.3 (E 0.81 against 0.876 at N.V 0.001): the
+pixels it touches lie in the excluded terminator band today; a finer quadrature is open if a fixture ever needs it.
+Archive: +8 compute descriptors (371 -> 379), the nine sheen captures show 0 misses and 0 render-thread compiles.
+Open: SheenTestGrid / Tier B model (ticket 22), captured-probe sheen fixture, coat + sheen fixture, textured sheen on GPU (CPU guide
+expectation marks textured sheen unverified), `archive_check.sh` / `hitch_check.sh` not run here.

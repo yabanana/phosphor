@@ -500,9 +500,12 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
 }
 
 // F15.1 (ticket 06): the guide record of a resolved surface (renderer/lobe_guide_pack.h).  DI_LOBE_GUIDE_CORRUPT
-// is the negative control of --debug-lobe-guide: +0.25 on the stored ior of extended pixels.
+// is the negative control of --debug-lobe-guide: +0.25 on the stored ior of ior/specular pixels and (ticket 10) on the stored
+// sheen roughness of sheen pixels.
 static GPULobeGuide lobeGuideRecord(ShadingResult value, uint diFlags) {
     if ((diFlags & DI_LOBE_GUIDE_CORRUPT) != 0u && (value.lobes.features & MATERIAL_FEATURE_SPECULAR_IOR) != 0u)
         value.lobes.ior += 0.25f;
+    if ((diFlags & DI_LOBE_GUIDE_CORRUPT) != 0u && (value.lobes.features & MATERIAL_FEATURE_SHEEN) != 0u)
+        value.lobes.sheenRoughness += 0.25f;
     return packLobeGuide(value.lobes);
 }

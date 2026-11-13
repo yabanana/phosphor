@@ -767,7 +767,7 @@ PHOSPHOR_GPU_CONSTANT u32 DI_ENABLE_VISIBILITY = 8u;
 PHOSPHOR_GPU_CONSTANT u32 DI_USE_STBN = 16u;
 // F15.1 (ticket 06): the lobe guide buffer exists and its records for this frame were written by a
 // specialised producer (not by a base-pipeline fallback while compiling); consumers read it only
-// then.  DI_LOBE_GUIDE_CORRUPT is the negative control of --debug-lobe-guide (+0.25 on ior).
+// then.  DI_LOBE_GUIDE_CORRUPT is the negative control of --debug-lobe-guide (+0.25 on ior, and on the sheen roughness of sheen pixels).
 PHOSPHOR_GPU_CONSTANT u32 DI_LOBE_GUIDE_VALID = 64u;
 PHOSPHOR_GPU_CONSTANT u32 DI_LOBE_GUIDE_CORRUPT = 128u;
 // The lobe guide buffer is allocated and bound (di_receiver_pack clears the record of surfaces it invalidates).
