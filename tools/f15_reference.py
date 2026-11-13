@@ -1774,7 +1774,7 @@ def material_extension_words(data, material):
     bits = int(material.get("feature_bits", 0))
     if bits == 0:
         return None
-    if bits & ~(SPECULAR_FEATURE_BIT | CLEARCOAT_FEATURE_BIT | SHEEN_FEATURE_BIT | ANISOTROPY_FEATURE_BIT | IRIDESCENCE_FEATURE_BIT):
+    if bits != IRIDESCENCE_FEATURE_BIT and bits & ~(SPECULAR_FEATURE_BIT | CLEARCOAT_FEATURE_BIT | SHEEN_FEATURE_BIT | ANISOTROPY_FEATURE_BIT):
         raise ValueError(f"material feature bits {bits:#x} are outside the declared "
                          "ior/specular/clearcoat/sheen/anisotropy/iridescence model")
     words = data["material_extensions"]["records"][int(material["extension_index"])]
