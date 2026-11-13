@@ -398,7 +398,7 @@ class RunnerLogic(unittest.TestCase):
             for name in ("coat-ignored", "coat-f0-from-ior", "coat-fresnel-vh", "coat-base-unattenuated"):
                 self.assertIn(name, check.SCENARIOS[key]["controls"])
 
-    def test_sheen_keys_are_pending_and_name_the_control_that_models_the_current_engine(self):
+    def test_sheen_keys_are_planned_with_their_controls_and_no_longer_pending(self):
         keys = ["sheen-grid-sun", "sheen-grid-env-resolve", "sheen-grid-env", "sheen-grid-env@probes", "sheen-grid-point",
                 "sheen-grid-point@restir", "sheen-grid-point@clustered", "furnace-sheen", "furnace-sheen@resolve"]
         with tempfile.TemporaryDirectory() as tmp:
@@ -426,26 +426,21 @@ class RunnerLogic(unittest.TestCase):
             self.assertEqual(capture[capture.index("--lighting-denoise") + 1], denoise, key)
             self.assertEqual(reference[reference.index("--visibility") + 1], visibility, key)
             spec = check.SCENARIOS[key]
+            self.assertNotIn("pending", spec, key)
+            self.assertNotIn("pending_matches", spec, key)
+            self.assertNotIn("pending_gate", spec, key)
             literal, declared = check.scenario_controls(key)
             for name in literal + declared:
                 self.assertIn(name, reference, key)
-            if key.startswith("sheen"):
-                self.assertEqual(spec["pending"], "ticket 10", key)
-                self.assertIn(spec["pending_matches"], literal + declared, key)
-        # Every sheen control the reference offers is a known control name, every pending_matches is a sheen-ignored twin.
+        # Every sheen control the reference offers is a known control name.
         for key in keys:
             literal, declared = check.scenario_controls(key)
             for name in literal:
                 self.assertIn(name, ref.SHEEN_CONTROLS, key)
             for name in declared:
                 self.assertIn(name, ref.SHEEN_DECLARED_CONTROLS, key)
-            if "pending" in check.SCENARIOS[key]:
-                self.assertIn(check.SCENARIOS[key]["pending_matches"], ("sheen-ignored", "declared-sheen-ignored"), key)
-        # The furnace bound is an upper bound the sheen-less engine meets: only the declared gate is pending.
         self.assertTrue(check.SCENARIOS["furnace-sheen"]["always_green"])
-        self.assertNotIn("pending", check.SCENARIOS["furnace-sheen"])
-        resolve = check.SCENARIOS["furnace-sheen@resolve"]
-        self.assertEqual((resolve["pending"], resolve["pending_gate"]), ("ticket 10", "declared"))
+        self.assertTrue(check.SCENARIOS["furnace-sheen@resolve"]["always_green"])
         self.assertEqual(check.SCENARIOS["sheen-grid-env-resolve"]["kind"], "declared")
         self.assertEqual(check.SCENARIOS["sheen-grid-env@probes"]["kind"], "declared")
         self.assertEqual(check.SCENARIOS["sheen-grid-env"]["kind"], "environment")
@@ -1010,21 +1005,19 @@ class BenchMirror(unittest.TestCase):
         return self.scenario(check.bench_scenario(key), model, "green", environment=environment, tag="-" + key + tag,
                              key=key)
 
-    def test_sheen_keys_are_red_for_the_right_reason_with_a_sheen_blind_engine(self):
-        for key in self.SHEEN_KEYS:
-            entry = self.sheen_entry(key, True, "-blind")
-            self.assertTrue(entry["discriminating"], (key, json.dumps(entry["controls"], indent=1)))
-            self.assertFalse(entry["gates_pass"], key)          # pending: the gate FAILS
-            self.assertTrue(entry["pending_matches_met"], key)  # ... and the engine image matches the sheen-ignored control
-            self.assertEqual(entry["pending"], "ticket 10")
-            self.assertEqual(check.verdict([entry], "green"), ("GREEN", check.EXIT_OK), key)
-
-    def test_sheen_keys_go_red_in_green_mode_once_the_engine_implements_the_sheen(self):
+    def test_sheen_keys_pass_with_an_engine_that_implements_the_sheen(self):
         for key in self.SHEEN_KEYS:
             entry = self.sheen_entry(key, False, "-sheen")
+            self.assertTrue(entry["discriminating"], (key, json.dumps(entry["controls"], indent=1)))
             self.assertTrue(entry["gates_pass"], (key, json.dumps(check.summarize(entry["result"]))))
-            self.assertFalse(entry["pending_matches_met"], key)
-            self.assertEqual(check.verdict([entry], "green")[1], check.EXIT_UNEXPECTED, key)
+            self.assertFalse(entry.get("pending"), key)
+            self.assertEqual(check.verdict([entry], "green"), ("GREEN", check.EXIT_OK), key)
+
+    def test_sheen_keys_fail_with_a_sheen_blind_engine(self):
+        # The old engine (sheen ignored) fails the gate of every key (the furnace bound is an upper bound: it holds).
+        for key in self.SHEEN_KEYS:
+            entry = self.sheen_entry(key, True, "-blind")
+            self.assertFalse(entry["gates_pass"], key)
 
     def test_sheen_controls_each_fail_their_gate(self):
         for key in self.SHEEN_KEYS:
