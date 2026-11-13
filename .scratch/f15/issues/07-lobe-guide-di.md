@@ -6,12 +6,12 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 06
 
-**Status:** ready-for-agent
+**Status:** resolved (2026-11-13)
 
-- [ ] ior/specular grids pass decision-11 thresholds with `--lighting restir` and `clustered`
-- [ ] Negative control: DI reading the base BRDF instead of the guide fails the DI grid bound
-- [ ] Scenes without features unchanged (visual_check 0 px)
-- [ ] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
+- [x] ior/specular grids pass decision-11 thresholds with `--lighting restir` and `clustered`
+- [x] Negative control: DI reading the base BRDF instead of the guide fails the DI grid bound
+- [x] Scenes without features unchanged (visual_check 0 px)
+- [x] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
 
 ## Comments
 
@@ -29,3 +29,36 @@ runner keys `specular-grid-point`, `@restir`, `@clustered`).
 - The DI gate runs unfiltered, with a 2-pixel terminator band (decision 11 DI
   amendment). The denoised DI deviates from the base model by up to 18 % per
   pixel on metals; that is ticket 08.
+
+2026-11-13 — implementation and M5 verification. Code: 4f9e2ed (Sonnet agent,
+reviewed), archive 3d3ed78, consistency fix de9483d, archive_check fix (this
+batch). Batch log: `build/f15-exact/battery07.log`.
+- `tools/f15_check.py --run --expect green` (`build/f15-check/t07`): GREEN on
+  all 12 keys.
+  - `specular-grid-point@restir`: worst p99 0.058 %, worst max 0.127 %.
+  - `@clustered`: the same values.
+  - Every reference control fails, on all keys.
+- Negative controls:
+  - Before this ticket, `t07pre3`: the base-BRDF DI fails the bound and passes
+    against the `specular-ignored` control.
+  - Live, `build/f15-check/t07neg`: with `--debug-lobe-guide-corrupt` (+0.25 on
+    the guide's ior) the same gate fails, worst p99 517 %, RED. DI really
+    reads the guide.
+- Scenes without features:
+  - F13 exact captures (5 cases) 0 px against base03;
+  - visual_check 8/8 at 0 px.
+- Archive: +14 compute (the 7 `_lobe` kernels at 1 and 511).
+  - archive_check: every local scenario PASS after this batch's script fix
+    (the stale scenario compiled the `_lobe` sources twice).
+  - hitch_check: 0 hitches, 0 render-thread compiles.
+  - RT shade pipelines are compiled and never archived (pre-existing policy):
+    a ReSTIR run makes 8 compiler calls, 6 base RT plus 2 lobe RT, on
+    workers.
+- Deviations:
+  - Guide-aware DI kernels are separate `_lobe` entry points included from
+    `material_passes.metal`: metal-tt cannot lower constant-free descriptors
+    of a kernel that references constant 22.
+  - The ReSTIR passes switch together (one BSDF per frame) and only the
+    active estimator's variants are requested (de9483d).
+  - The DI gate is unfiltered (decision 11 DI amendment); the denoised DI
+    is ticket 08.
