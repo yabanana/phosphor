@@ -31,3 +31,15 @@ Roadmap: F15.3
   Fresnel while the specular lobe goes to 1); the engine's split-sum weighting
   `1 − E_spec` keeps the furnace bound, the reference maximum is reported, not
   gated.
+- 2026-11-13 (orchestrator): code review (standards + spec axes, fresh
+  reviewers) of tickets 01/02/04; every finding fixed by a Sonnet implementer
+  (12 commits, integrated 15:00) or closed in ticket 03 (shared-module
+  duplicates). Verified on M5 after integration: build, ctest 15/15
+  (phosphor_tests 768 cases), F13-path exact captures byte-identical to the
+  post-ticket-03 baseline, visual_check 8/8 at 0 px vs
+  `build/reference-f15-appB`, `tools/f15_check.py --run --expect green` →
+  GREEN on 7 scenarios incl. `base-grid-env-resolve` and
+  `roughness-extremes-sun`; declared-model gates: worst sphere mean 0.009 %
+  (bound 0.5 %), worst p99 0.037 % (bound 1 %), the three declared controls
+  (diffuse unweighted, Karis fit, F0-blended diffuse weight) fail. Captures
+  `build/f15-check/review`.
