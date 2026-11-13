@@ -32,8 +32,9 @@ reference ray casting):
 - Point light (F15.1, ticket 07): specular-grid-point is the ior x specular grid lit by one white point light,
   gated like a direct grid.  Lighting variants share the bench scene ("<bench>@<lighting>" keys): legacy
   (resolve local lights, reference without visibility), @restir and @clustered (DI with RT visibility,
-  reference shadow rays).  A "pending" variant is asserted to FAIL until its ticket lands (DI reads the
-  base BRDF before ticket 07); `--expect green` then requires that failure, and every other gate to pass.
+  reference shadow rays); DI reads the lobe guide (ticket 07), so all three gate like a direct grid.  A scenario
+  with a "pending" key would be asserted to FAIL until its ticket lands (`--expect green` then requires that
+  failure); none is pending now.
 - declared (base-grid-env-resolve; also furnace-resolve next to its furnace
   gate): the engine image against the independent declared-environment model of
   tools/f15_reference.py (DFG table, ADR-0006): per sphere mean relative error
@@ -142,21 +143,20 @@ SCENARIOS = {
     # lights, unshadowed (reference without visibility).  restir / clustered: DI lights with RT visibility
     # (reference shadow rays), captured unfiltered (--lighting-denoise off: the gate measures the DI estimator;
     # the custom denoiser blurs the sharp highlights by up to 18 % per pixel, measured 2026-11-13, and is
-    # ticket 08's), terminator band 2 px (RT shadow-ray offsets on the tessellated facets).  "pending": DI
-    # evaluates the base BRDF until that ticket lands, so the gate is EXPECTED to fail and the image must pass
-    # against the "pending_matches" control (the base BRDF) instead; remove both keys when the ticket is done.
+    # ticket 08's), terminator band 2 px (RT shadow-ray offsets on the tessellated facets).  Before ticket 07
+    # these two variants carried "pending" / "pending_matches" (DI evaluated the base BRDF, so the gate failed and
+    # the image matched the specular-ignored control); DI now reads the lobe guide and they must pass.
     "specular-grid-point": {"kind": "direct", "always_green": True, "lighting": "legacy", "visibility": "none",
                             "controls": ["specular-ignored", "f90-one", "specular-weight-not-on-f0"],
                             "terms": "one point light only (no sun, environment 0, no GI), resolve local lights "
                                      "(--lighting legacy), on the ior x specular grid"},
     "specular-grid-point@restir": {"kind": "direct", "lighting": "restir", "visibility": "rays", "denoise": "off",
-                                   "terminator_band": 2, "pending_matches": "specular-ignored", "pending": "ticket 07",
+                                   "terminator_band": 2,
                                    "controls": ["specular-ignored", "f90-one", "specular-weight-not-on-f0"],
                                    "terms": "one point light only, ReSTIR DI with RT visibility (--lighting restir "
                                             "--rt on), unfiltered (--lighting-denoise off), on the ior x specular grid"},
     "specular-grid-point@clustered": {"kind": "direct", "lighting": "clustered", "visibility": "rays", "denoise": "off",
-                                      "terminator_band": 2, "pending_matches": "specular-ignored",
-                                      "pending": "ticket 07",
+                                      "terminator_band": 2,
                                       "controls": ["specular-ignored", "f90-one", "specular-weight-not-on-f0"],
                                       "terms": "one point light only, clustered DI with RT visibility "
                                                "(--lighting clustered --rt on), unfiltered (--lighting-denoise off), "

@@ -216,7 +216,9 @@ class RunnerLogic(unittest.TestCase):
                 for control in ("specular-ignored", "f90-one", "specular-weight-not-on-f0"):
                     self.assertIn(control, reference)
         self.assertTrue(check.SCENARIOS["specular-grid-point"]["always_green"])
-        self.assertEqual(check.SCENARIOS["specular-grid-point@restir"]["pending"], "ticket 07")
+        for key in ("specular-grid-point@restir", "specular-grid-point@clustered"):
+            self.assertNotIn("pending", check.SCENARIOS[key])
+            self.assertNotIn("pending_matches", check.SCENARIOS[key])
 
     def test_terminator_band_width_two_reaches_two_pixels_into_the_lit_side(self):
         lit = np.zeros((7, 9), dtype=bool)

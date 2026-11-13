@@ -37,11 +37,12 @@ const MaterialSupportTable& currentSupportTable() {
         t.emissiveStrength.level        = SupportLevel::Implemented;
         t.textureTransformUniform.level = SupportLevel::Implemented;
         // F15.1 (ticket 05): ior + specular shade the resolve and forward paths (direct sun and
-        // analytic lights, environment, GI diffuse weight); direct-light sampling (ReSTIR DI) and the
-        // specular transport (reflections) still evaluate the base model until tickets 07/08.
+        // analytic lights, environment, GI diffuse weight); ticket 07: ReSTIR DI and clustered DI read the lobe
+        // guide too; the specular transport (reflections) and the composite diffuse still use the base model until
+        // ticket 08.
         FeatureSupportEntry& specular = t.features[static_cast<u32>(MaterialFeature::SpecularIor)];
         specular.level                = SupportLevel::Approximated;
-        specular.approximation        = "di_transport_and_composite_diffuse_use_base_model";
+        specular.approximation        = "transport_and_composite_diffuse_use_base_model";
         return t;
     }();
     return table;

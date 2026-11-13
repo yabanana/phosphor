@@ -2,6 +2,20 @@
 #include <metal_stdlib>
 #include "renderer/gpu_types.h"
 #include "materials/bsdf.h"
+#include "renderer/lobe_guide_pack.h"
+// F15.1 (ticket 07): the lobe-guide kernels are separate entry points ("<name>_lobe", compiled by
+// restir_di_lobe.metal / light_cluster_lobe.metal with PHOSPHOR_DI_LOBE, linked into the first material module) that always carry the reserved function
+// constant MATERIAL_FEATURES (22, shaders/variants.def).  Everything else, the base kernels included, never
+// references the constant: a compute function with an unresolved constant cannot be lowered into the pipeline archive
+// (metal-tt, measured), so the base DI descriptors stay constant-free and archived.
+#ifdef PHOSPHOR_DI_LOBE
+#define DI_KERNEL(name) name##_lobe
+#define DI_FN(name) name##_lobe // helpers whose body differs between the two modes: distinct symbols (no ODR merge)
+#include "pipeline/forward_variants.generated.metal.h" // kMaterialFeatures (constant 22); shared with the material module
+#else
+#define DI_KERNEL(name) name
+#define DI_FN(name) name
+#endif
 using namespace metal;
 using namespace phosphor;
 
@@ -136,6 +150,50 @@ inline float3 diBRDFWeighted(GPUDISurface surface, DISample s, float specularWei
     const float3 result = (lobes.diffuse + lobes.specular) * diIncident(s) * nl;
     return result; // caller MUST record nonfinite BEFORE any safe-output sanitization
 }
+// F15.1 (ticket 07): lobe parameters of the destination pixel read from the lobe guide.  `extended` is false for
+// base pixels and, in the base kernels (no PHOSPHOR_DI_LOBE), always: the lobe code is not compiled in, so scenes
+// without features keep the base expressions bit for bit.
+struct DILobe {
+    float ior, specularFactor;
+    float3 specularColor;
+    bool extended;
+};
+inline DILobe DI_FN(diLoadLobe)(constant GPUDIParams& p, const device GPULobeGuide* guides, uint index) {
+    DILobe l{};
+#ifdef PHOSPHOR_DI_LOBE
+    if ((kMaterialFeatures & MATERIAL_FEATURE_SPECULAR_IOR) != 0u && (p.flags & DI_LOBE_GUIDE_VALID) != 0u) {
+        const GPULobeGuide g = guides[index];
+        if ((g.features & MATERIAL_FEATURE_SPECULAR_IOR) != 0u) {
+            const LobeParams u = unpackLobeGuide(g);
+            l.ior = u.ior; l.specularFactor = u.specularFactor;
+            l.specularColor = float3(u.specularColor[0], u.specularColor[1], u.specularColor[2]);
+            l.extended = true;
+        }
+    }
+#endif
+    return l;
+}
+// Same clamps and conventions as diBRDFWeighted; the emitter specular weight scales the specular lobe only.
+inline float3 DI_FN(diBRDFLobe)(GPUDISurface surface, DISample s, float specularWeight, DILobe lobe) {
+#ifdef PHOSPHOR_DI_LOBE
+    if ((kMaterialFeatures & MATERIAL_FEATURE_SPECULAR_IOR) != 0u && lobe.extended) {
+        if (!surface.valid || !s.valid) return float3(0);
+        float3 n = diVec(surface.shadingNormal), v = diVec(surface.viewDirection);
+        if (!all(isfinite(n)) || !all(isfinite(v)) || !(dot(n, n) > 0 && dot(v, v) > 0)) return float3(0);
+        n = normalize(n); v = normalize(v);
+        const float nl = saturate(dot(n, s.wi)), nv = max(dot(n, v), 1e-4f);
+        if (!(nl > 0) || dot(v + s.wi, v + s.wi) <= 1e-20f) return float3(0);
+        const float3 h = normalize(v + s.wi);
+        const float nh = saturate(dot(n, h)), vh = saturate(dot(v, h));
+        const float metallic = saturate(surface.metallic);
+        const float3 albedo = max(diVec(surface.albedo), 0.0f);
+        const BsdfBaseLobes lobes = bsdfSpecEval(bsdfSpecularParams(lobe.ior, lobe.specularFactor, lobe.specularColor),
+                                                 nl, nv, nh, vh, albedo, metallic, bsdfAlpha(surface.roughness));
+        return (lobes.diffuse + specularWeight * lobes.specular) * diIncident(s) * nl;
+    }
+#endif
+    return diBRDFWeighted(surface, s, specularWeight);
+}
 inline float3 diBRDF(GPUDISurface surface, DISample s) { return diBRDFWeighted(surface, s, 1.0f); }
 // Share of a light's specular lobe that primary DI owns (DI_REFLECTED_EMITTER_SPECULAR).
 // Same smoothstep as reflectionRTWeight on the same packed roughness, so the
@@ -144,9 +202,9 @@ inline float diEmitterSpecularWeight(constant GPUDIParams& p, GPUSampledLight l,
     if (!(p.flags & DI_REFLECTED_EMITTER_SPECULAR) || l.type != DI_LIGHT_TRIANGLE) return 1.0f;
     return smoothstep(p.emitterSpecularLow, p.emitterSpecularHigh, surface.roughness);
 }
-inline float diTarget(GPUDISurface surface, DISample sample, float positiveFloor) {
+inline float DI_FN(diTarget)(GPUDISurface surface, DISample sample, float positiveFloor, DILobe lobe) {
     if (!sample.valid || !isfinite(positiveFloor) || !(positiveFloor > 0)) return 0;
-    const float3 value=diBRDF(surface,sample);
+    const float3 value=DI_FN(diBRDFLobe)(surface,sample,1.0f,lobe);
     if(!all(isfinite(value)))return as_type<float>(0x7fc00000u);
     return max(diLuminance(value),positiveFloor);
 }
@@ -223,10 +281,10 @@ inline bool diCompatible(GPUDISurface a, GPUDISurface b, constant GPUDIParams& p
     const float tolerance = p.depthRelativeThreshold * max(a.depth, b.depth);
     return abs(a.depth - b.depth) <= tolerance && abs(dot(bp - ap, normalize(an))) <= tolerance;
 }
-inline bool diMerge(thread GPUDIReservoir& r, GPUDIReservoir source, GPUDISurface destination,
+inline bool DI_FN(diMerge)(thread GPUDIReservoir& r, GPUDIReservoir source, GPUDISurface destination,
                      GPUSampledLight light, constant GPUDIParams& p, float random, bool advanceAge,
                      const device GPUEmissiveSurface* emitters,
-                     const device GPUMaterial* materials, const device DITextureHandle* textures) {
+                     const device GPUMaterial* materials, const device DITextureHandle* textures, DILobe lobe) {
     const bool zero = diZeroProposal(source,p);
     if (!zero && !diReusable(source, light, p)) return false;
     // Bounds the complete history chain independently of which endpoint wins.
@@ -241,7 +299,7 @@ inline bool diMerge(thread GPUDIReservoir& r, GPUDIReservoir source, GPUDISurfac
     }
     const DISample sample = diSampleTexturedLight(light, source.lightIndex, float2(source.u, source.v),
                                                  diVec(destination.position), emitters, materials, textures);
-    source.target = diTarget(destination, sample, p.targetFloor);
+    source.target = DI_FN(diTarget)(destination, sample, p.targetFloor, lobe);
     const bool accepted = diStream(r, source, source.target * source.normalization * float(m), m, random);
     if (accepted) r.age = mergedAge; // A fresh selection must not rejuvenate old mass.
     return accepted;

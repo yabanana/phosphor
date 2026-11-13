@@ -11,8 +11,10 @@ using namespace phosphor;
 // current->previous in INPUT PIXELS, +Y down, same F8 temporalMotion contract.
 // Spatial only reads finalized temporal buffer4; never in-place output7.
 // History is temporal output, not spatial output (avoid feedback correlations).
-// All kernels additionally bind emissive records12/materials13/texture handles14.
-kernel void restir_di_candidates(constant GPUDIParams& p [[buffer(0)]],
+// All kernels additionally bind emissive records12/materials13/texture handles14 and, when the scene has material
+// features, the lobe guide at 16 (F15.1: the BRDF of the pixel being shaded; every target is evaluated at the
+// destination surface, so only the current pixel needs it).
+kernel void DI_KERNEL(restir_di_candidates)(constant GPUDIParams& p [[buffer(0)]],
                                  const device GPUDISurface* surfaces [[buffer(1)]],
                                  const device GPUSampledLight* lights [[buffer(2)]],
                                  const device GPUAliasEntry* alias [[buffer(3)]],
@@ -21,10 +23,12 @@ kernel void restir_di_candidates(constant GPUDIParams& p [[buffer(0)]],
                                  const device GPUEmissiveSurface* emitters [[buffer(12)]],
                                  const device GPUMaterial* materials [[buffer(13)]],
                                  const device DITextureHandle* textures [[buffer(14)]],
+                                 const device GPULobeGuide* lobeGuides [[buffer(16)]],
                                  uint tid [[thread_position_in_grid]]) {
     if (tid >= p.width * p.height) return;
     GPUDIReservoir r = diEmpty(p);
     const GPUDISurface surface = surfaces[tid];
+    const DILobe lobe = surface.valid ? DI_FN(diLoadLobe)(p, lobeGuides, tid) : DILobe{};
     const uint2 pixel(tid % p.width, tid / p.width);
     if (surface.valid && p.lightCount && p.targetFloor > 0 && isfinite(p.targetFloor)) {
         // Fixed dimension allocation: candidate i -> [5i,5i+4], max 8.
@@ -48,7 +52,7 @@ kernel void restir_di_candidates(constant GPUDIParams& p [[buffer(0)]],
             GPUDIReservoir candidate = diEmpty(p);
             candidate.lightIndex = selectedEntry.lightIndex; candidate.lightID = light.id; candidate.lightGeneration = light.generation;
             candidate.u = uv.x; candidate.v = uv.y;
-            candidate.target = diTarget(surface, sample, p.targetFloor);
+            candidate.target = DI_FN(diTarget)(surface, sample, p.targetFloor, lobe);
             if(!isfinite(candidate.target)){r.pad[0]|=DI_ERROR_TARGET;continue;}
             const float proposal = selectedEntry.selectionPdf * sample.pdfArea;
             const float weight = sample.valid && proposal > 0 ? candidate.target / proposal : 0;
@@ -62,7 +66,7 @@ kernel void restir_di_candidates(constant GPUDIParams& p [[buffer(0)]],
     output[tid] = r;
 }
 
-kernel void restir_di_temporal(constant GPUDIParams& p [[buffer(0)]],
+kernel void DI_KERNEL(restir_di_temporal)(constant GPUDIParams& p [[buffer(0)]],
                                const device GPUDISurface* surfaces [[buffer(1)]],
                                const device GPUSampledLight* lights [[buffer(2)]],
                                const device GPUDIReservoir* candidates [[buffer(4)]],
@@ -74,9 +78,11 @@ kernel void restir_di_temporal(constant GPUDIParams& p [[buffer(0)]],
                                const device GPUMaterial* materials [[buffer(13)]],
                                const device DITextureHandle* textures [[buffer(14)]],
                                texture2d<float, access::read> motion [[texture(0)]],
-                               uint tid [[thread_position_in_grid]]) {
+                               const device GPULobeGuide* lobeGuides [[buffer(16)]],
+                                 uint tid [[thread_position_in_grid]]) {
     if (tid >= p.width * p.height) return;
     const GPUDISurface surface = surfaces[tid];
+    const DILobe lobe = surface.valid ? DI_FN(diLoadLobe)(p, lobeGuides, tid) : DILobe{};
     const uint2 pixel(tid % p.width, tid / p.width);
     GPUDIReservoir r = candidates[tid];
     // Validity/epoch belongs to the VIEW/SIGNAL, and resize/cut/reset must set
@@ -93,8 +99,8 @@ kernel void restir_di_temporal(constant GPUDIParams& p [[buffer(0)]],
                 (zero || diReusable(old, lights[old.lightIndex], p))) {
                 // Candidate reservoir is already finalized. Restore its stream
                 // weightSum and merge directly, recomputing normalization once.
-                diMerge(r, old, surface, zero?GPUSampledLight{}:lights[old.lightIndex], p, diRandom(pixel, 48u, p, ranks), true,
-                         emitters, materials, textures);
+                DI_FN(diMerge)(r, old, surface, zero?GPUSampledLight{}:lights[old.lightIndex], p, diRandom(pixel, 48u, p, ranks), true,
+                         emitters, materials, textures, lobe);
             }
         }
     }
@@ -103,7 +109,7 @@ kernel void restir_di_temporal(constant GPUDIParams& p [[buffer(0)]],
     output[tid] = r;
 }
 
-kernel void restir_di_spatial(constant GPUDIParams& p [[buffer(0)]],
+kernel void DI_KERNEL(restir_di_spatial)(constant GPUDIParams& p [[buffer(0)]],
                               const device GPUDISurface* surfaces [[buffer(1)]],
                               const device GPUSampledLight* lights [[buffer(2)]],
                               const device GPUDIReservoir* temporal [[buffer(4)]],
@@ -112,9 +118,11 @@ kernel void restir_di_spatial(constant GPUDIParams& p [[buffer(0)]],
                               const device GPUEmissiveSurface* emitters [[buffer(12)]],
                               const device GPUMaterial* materials [[buffer(13)]],
                               const device DITextureHandle* textures [[buffer(14)]],
-                              uint tid [[thread_position_in_grid]]) {
+                              const device GPULobeGuide* lobeGuides [[buffer(16)]],
+                                 uint tid [[thread_position_in_grid]]) {
     if (tid >= p.width * p.height) return;
     const GPUDISurface surface = surfaces[tid];
+    const DILobe lobe = surface.valid ? DI_FN(diLoadLobe)(p, lobeGuides, tid) : DILobe{};
     const uint2 pixel(tid % p.width, tid / p.width);
     GPUDIReservoir r = temporal[tid];
     uint seen[4];
@@ -135,8 +143,8 @@ kernel void restir_di_spatial(constant GPUDIParams& p [[buffer(0)]],
             const GPUDIReservoir source = temporal[index];
             const bool zero=diZeroProposal(source,p);
             if ((zero || source.lightIndex < p.lightCount) && diCompatible(surface, surfaces[index], p, false))
-                diMerge(r, source, surface, zero?GPUSampledLight{}:lights[source.lightIndex], p, diRandom(pixel, dim + 2u, p, ranks), false,
-                         emitters, materials, textures);
+                DI_FN(diMerge)(r, source, surface, zero?GPUSampledLight{}:lights[source.lightIndex], p, diRandom(pixel, dim + 2u, p, ranks), false,
+                         emitters, materials, textures, lobe);
         }
     }
     if (!surface.valid) r = diEmpty(p);
@@ -144,7 +152,7 @@ kernel void restir_di_spatial(constant GPUDIParams& p [[buffer(0)]],
     output[tid] = r;
 }
 
-inline float3 diShadeSelected(GPUDISurface surface, GPUDIReservoir reservoir,
+inline float3 DI_FN(diShadeSelected)(GPUDISurface surface, DILobe lobe, GPUDIReservoir reservoir,
                                const device GPUSampledLight* lights, constant GPUDIParams& p,
                                const device GPUEmissiveSurface* emitters,
                                const device GPUMaterial* materials, const device DITextureHandle* textures,
@@ -152,11 +160,11 @@ inline float3 diShadeSelected(GPUDISurface surface, GPUDIReservoir reservoir,
     if (!surface.valid || reservoir.lightIndex >= p.lightCount || !diValid(reservoir, lights[reservoir.lightIndex], p)) return float3(0);
     sample = diSampleTexturedLight(lights[reservoir.lightIndex], reservoir.lightIndex,
                                    float2(reservoir.u, reservoir.v), diVec(surface.position), emitters, materials, textures);
-    return diBRDFWeighted(surface, sample, diEmitterSpecularWeight(p, lights[reservoir.lightIndex], surface)) * reservoir.normalization;
+    return DI_FN(diBRDFLobe)(surface, sample, diEmitterSpecularWeight(p, lights[reservoir.lightIndex], surface), lobe) * reservoir.normalization;
 }
 
 // No RT resources are bound to the explicitly unshadowed fallback PSO.
-kernel void restir_di_shade(constant GPUDIParams& p [[buffer(0)]],
+kernel void DI_KERNEL(restir_di_shade)(constant GPUDIParams& p [[buffer(0)]],
                             const device GPUDISurface* surfaces [[buffer(1)]],
                             const device GPUSampledLight* lights [[buffer(2)]],
                             const device GPUDIReservoir* reservoirs [[buffer(3)]],
@@ -165,10 +173,11 @@ kernel void restir_di_shade(constant GPUDIParams& p [[buffer(0)]],
                             const device DITextureHandle* textures [[buffer(14)]],
                             device atomic_uint* signalErrors [[buffer(15)]],
                             texture2d<float, access::write> localDirect [[texture(0)]],
-                            uint tid [[thread_position_in_grid]]) {
+                            const device GPULobeGuide* lobeGuides [[buffer(16)]],
+                                 uint tid [[thread_position_in_grid]]) {
     if (tid >= p.width * p.height) return;
     DISample sample{};
-    const float3 value = diShadeSelected(surfaces[tid], reservoirs[tid], lights, p, emitters, materials, textures, sample);
+    const float3 value = DI_FN(diShadeSelected)(surfaces[tid], surfaces[tid].valid ? DI_FN(diLoadLobe)(p, lobeGuides, tid) : DILobe{}, reservoirs[tid], lights, p, emitters, materials, textures, sample);
     diRecordNonfinite(value,signalErrors,1u);
     localDirect.write(float4(all(isfinite(value)) ? value : float3(0), 1), uint2(tid % p.width, tid / p.width));
 }
@@ -176,7 +185,7 @@ kernel void restir_di_shade(constant GPUDIParams& p [[buffer(0)]],
 // F10.3: shade PSO owns ITS OWN IFT linked to rt_alpha_generic. Binding it to
 // another consumer's PSO is invalid even when function names are identical.
 // params0/surfaces1/lights2/reservoir3/instances4/TLAS5/IFT6, output texture0.
-kernel void restir_di_shade_rt(constant GPUDIParams& p [[buffer(0)]],
+kernel void DI_KERNEL(restir_di_shade_rt)(constant GPUDIParams& p [[buffer(0)]],
                                const device GPUDISurface* surfaces [[buffer(1)]],
                                const device GPUSampledLight* lights [[buffer(2)]],
                                const device GPUDIReservoir* reservoirs [[buffer(3)]],
@@ -188,11 +197,12 @@ kernel void restir_di_shade_rt(constant GPUDIParams& p [[buffer(0)]],
                                const device DITextureHandle* textures [[buffer(14)]],
                             device atomic_uint* signalErrors [[buffer(15)]],
                                texture2d<float, access::write> localDirect [[texture(0)]],
-                               uint tid [[thread_position_in_grid]]) {
+                               const device GPULobeGuide* lobeGuides [[buffer(16)]],
+                                 uint tid [[thread_position_in_grid]]) {
     if (tid >= p.width * p.height) return;
     const GPUDISurface surface = surfaces[tid];
     DISample sample{};
-    float3 value = diShadeSelected(surface, reservoirs[tid], lights, p, emitters, materials, textures, sample);
+    float3 value = DI_FN(diShadeSelected)(surface, surface.valid ? DI_FN(diLoadLobe)(p, lobeGuides, tid) : DILobe{}, reservoirs[tid], lights, p, emitters, materials, textures, sample);
     diRecordNonfinite(value,signalErrors,0u);
     if ((p.flags & DI_ENABLE_VISIBILITY) && sample.valid && any(value > 0) &&
         !diEndpointVisible(surface, sample, tlas, ift, instances, p.slotCount)) value = float3(0);

@@ -56,10 +56,16 @@ file(GLOB PHOSPHOR_METAL_SHADERS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*
 list(REMOVE_ITEM PHOSPHOR_METAL_SHADERS
     ${CMAKE_SOURCE_DIR}/shaders/forward.metal
     ${CMAKE_SOURCE_DIR}/shaders/visibility_resolve.metal
-    ${CMAKE_SOURCE_DIR}/shaders/material_passes.metal)
+    ${CMAKE_SOURCE_DIR}/shaders/material_passes.metal
+    ${CMAKE_SOURCE_DIR}/shaders/restir_di_lobe.metal
+    ${CMAKE_SOURCE_DIR}/shaders/light_cluster_lobe.metal)
 list(PREPEND PHOSPHOR_METAL_SHADERS ${CMAKE_SOURCE_DIR}/shaders/material_passes.metal)
 # Headers the shaders include (C++/MSL shared): an edit recompiles every shader.
 set(PHOSPHOR_SHADER_HEADERS
+    ${CMAKE_SOURCE_DIR}/shaders/restir_di.metal
+    ${CMAKE_SOURCE_DIR}/shaders/light_cluster.metal
+    ${CMAKE_SOURCE_DIR}/shaders/restir_di_lobe.metal
+    ${CMAKE_SOURCE_DIR}/shaders/light_cluster_lobe.metal
     ${CMAKE_SOURCE_DIR}/shaders/forward.metal
     ${CMAKE_SOURCE_DIR}/shaders/visibility_resolve.metal
     ${CMAKE_SOURCE_DIR}/shaders/material_shading.h

@@ -16,6 +16,7 @@ inline float3 emitterWorldPoint(GPUInstance instance, float3 point) {
 // Scene transforms and BEFORE clusters/candidates; no camera-culling input.
 // params0, full-scene emitter records1, scene instances2, materials3,
 // source sampled lights4, destination sampled lights5. No allocation here.
+#ifndef PHOSPHOR_DI_LOBE // the lobe TU holds the shading kernels only
 kernel void light_emissive_update(constant GPUEmissiveUpdateParams& p [[buffer(0)]],
                                   device GPUEmissiveSurface* records [[buffer(1)]],
                                   const device GPUInstance* instances [[buffer(2)]],
@@ -73,6 +74,7 @@ kernel void light_emissive_update(constant GPUEmissiveUpdateParams& p [[buffer(0
     destination[tid] = light;
 }
 
+#endif
 inline float3 clusterViewPoint(constant GPULightClusterParams& p, float3 world) {
     const constant float* m = p.view;
     return float3(m[0], m[1], m[2]) * world.x + float3(m[4], m[5], m[6]) * world.y +
@@ -107,6 +109,7 @@ inline bool clusterLightIntersects(constant GPULightClusterParams& p, uint index
 // truncation or ordering race. Overflow means the shading pass loops ALL
 // lights, not the first capacity entries. Host validates products/buffer sizes.
 // params0, local lights1, cells2, cell-major light indices3.
+#ifndef PHOSPHOR_DI_LOBE // the lobe TU holds the shading kernels only
 kernel void light_cluster_build(constant GPULightClusterParams& p [[buffer(0)]],
                                 const device GPUSampledLight* lights [[buffer(1)]],
                                 device GPULightCluster* cells [[buffer(2)]],
@@ -123,6 +126,7 @@ kernel void light_cluster_build(constant GPULightClusterParams& p [[buffer(0)]],
     cells[cell] = out;
 }
 
+#endif
 inline uint clusterCell(constant GPULightClusterParams& p, float3 world) {
     const float3 v = clusterViewPoint(p, world);
     const float depth = -v.z;
@@ -140,7 +144,7 @@ inline uint clusterCell(constant GPULightClusterParams& p, float3 world) {
 // once, with its inverse AREA density. No energy clamp, no hidden light cap.
 // params0,surfaces1,lights2,cluster params3,cells4,indices5,STBN ranks6;
 // output texture0 = local direct contribution only.
-kernel void light_cluster_shade(constant GPUDIParams& p [[buffer(0)]],
+kernel void DI_KERNEL(light_cluster_shade)(constant GPUDIParams& p [[buffer(0)]],
                                 const device GPUDISurface* surfaces [[buffer(1)]],
                                 const device GPUSampledLight* lights [[buffer(2)]],
                                 constant GPULightClusterParams& clusters [[buffer(3)]],
@@ -152,9 +156,11 @@ kernel void light_cluster_shade(constant GPUDIParams& p [[buffer(0)]],
                                 const device DITextureHandle* textures [[buffer(14)]],
                                 device atomic_uint* signalErrors [[buffer(15)]],
                                 texture2d<float, access::write> localDirect [[texture(0)]],
+                                const device GPULobeGuide* lobeGuides [[buffer(16)]], // F15.1
                                 uint tid [[thread_position_in_grid]]) {
     if (tid >= p.width * p.height) return;
     const GPUDISurface surface = surfaces[tid];
+    const DILobe lobe = surface.valid ? DI_FN(diLoadLobe)(p, lobeGuides, tid) : DILobe{};
     const uint2 pixel(tid % p.width, tid / p.width);
     float3 value(0);
     if (surface.valid) {
@@ -171,7 +177,7 @@ kernel void light_cluster_shade(constant GPUDIParams& p [[buffer(0)]],
             if(!diLightFinite(lights[lightIndex]))atomic_fetch_add_explicit(signalErrors+3,1u,memory_order_relaxed);
             const DISample sample = diSampleTexturedLight(lights[lightIndex], lightIndex, uv,
                                                           diVec(surface.position), emitters, materials, textures);
-            const float3 contribution=diBRDFWeighted(surface,sample,diEmitterSpecularWeight(p,lights[lightIndex],surface));diRecordNonfinite(contribution,signalErrors,0u);
+            const float3 contribution=DI_FN(diBRDFLobe)(surface,sample,diEmitterSpecularWeight(p,lights[lightIndex],surface),lobe);diRecordNonfinite(contribution,signalErrors,0u);
             if (sample.valid && sample.pdfArea > 0) {value += contribution / sample.pdfArea;diRecordNonfinite(value,signalErrors,2u);}
         }
     }
@@ -183,7 +189,7 @@ kernel void light_cluster_shade(constant GPUDIParams& p [[buffer(0)]],
 // Every contributing light gets its own any-hit ray, intentionally expensive
 // but correct. This PSO owns its IFT; it never borrows the ReSTIR shade IFT.
 // Above ABI plus instances7/TLAS8/IFT9.
-kernel void light_cluster_shade_rt(constant GPUDIParams& p [[buffer(0)]],
+kernel void DI_KERNEL(light_cluster_shade_rt)(constant GPUDIParams& p [[buffer(0)]],
                                    const device GPUDISurface* surfaces [[buffer(1)]],
                                    const device GPUSampledLight* lights [[buffer(2)]],
                                    constant GPULightClusterParams& clusters [[buffer(3)]],
@@ -198,9 +204,11 @@ kernel void light_cluster_shade_rt(constant GPUDIParams& p [[buffer(0)]],
                                    const device DITextureHandle* textures [[buffer(14)]],
                                 device atomic_uint* signalErrors [[buffer(15)]],
                                    texture2d<float, access::write> localDirect [[texture(0)]],
-                                   uint tid [[thread_position_in_grid]]) {
+                                   const device GPULobeGuide* lobeGuides [[buffer(16)]], // F15.1
+                                uint tid [[thread_position_in_grid]]) {
     if (tid >= p.width * p.height) return;
     const GPUDISurface surface = surfaces[tid];
+    const DILobe lobe = surface.valid ? DI_FN(diLoadLobe)(p, lobeGuides, tid) : DILobe{};
     const uint2 pixel(tid % p.width, tid / p.width);
     float3 value(0);
     if (surface.valid) {
@@ -215,7 +223,7 @@ kernel void light_cluster_shade_rt(constant GPUDIParams& p [[buffer(0)]],
             if(!diLightFinite(lights[lightIndex]))atomic_fetch_add_explicit(signalErrors+3,1u,memory_order_relaxed);
             const DISample sample = diSampleTexturedLight(lights[lightIndex], lightIndex, uv,
                                                           diVec(surface.position), emitters, materials, textures);
-            const float3 contribution = diBRDFWeighted(surface, sample, diEmitterSpecularWeight(p, lights[lightIndex], surface));diRecordNonfinite(contribution,signalErrors,0u);
+            const float3 contribution = DI_FN(diBRDFLobe)(surface, sample, diEmitterSpecularWeight(p, lights[lightIndex], surface), lobe);diRecordNonfinite(contribution,signalErrors,0u);
             if (sample.valid && sample.pdfArea > 0 && (!(p.flags & DI_ENABLE_VISIBILITY) || !any(contribution > 0) ||
                 diEndpointVisible(surface, sample, tlas, ift, instances, p.slotCount))) {value += contribution / sample.pdfArea;diRecordNonfinite(value,signalErrors,2u);}
         }

@@ -5,3 +5,8 @@
 // samplers and function constants. See docs/plans/F7-F8-EXECUTION.md.
 #include "forward.metal"
 #include "visibility_resolve.metal"
+// F15.1 (ticket 07): the lobe-guide DI kernels (specialised by MATERIAL_FEATURES) join this module, like forward and
+// resolve, for the same metal-tt relocation hazard.  Their shared helpers have distinct "_lobe" symbols (DI_FN in
+// restir_common.h): same-named inline functions with different bodies in two modules would be merged at link time.
+#include "restir_di_lobe.metal"
+#include "light_cluster_lobe.metal"
