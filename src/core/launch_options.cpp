@@ -1224,9 +1224,9 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if(!out.materialScene.empty() && (!out.bench||*out.bench!=1||!out.lightingScene.empty()||!out.reflectionScene.empty())){error="--material-scenario requires --bench 2 and exclusive scene fixture";return false;}
     // F15.3: the declared environment reaches the image through the reflection transport (--reflections ssr, rt or
     // probes: no captured probe, so the environment weight; F15.1 ticket 08) or, with reflections off, through the
-    // resolve's own deterministic environment terms.  --adaptive-shading (F15.1 ticket 08: reuse must leave feature pixels identical) runs the
-    // plain resolve of the fixture, which has no declared environment: it only compares two renders of the same scene.
-    if(!out.materialScene.empty() && out.reflections==ReflectionMode::Off && out.lightingDenoise==LightingDenoiseMode::Off && !out.adaptiveShading){error="--material-scenario with --reflections off requires --lighting-denoise custom (lit resolve)";return false;}
+    // resolve's own deterministic environment terms.  A scenario without environment (sun/point lights only) has nothing the plain resolve would miss: it runs with
+    // --reflections off --lighting-denoise off (F15.1 ticket 08: --adaptive-shading compares two plain-resolve renders).
+    if(!out.materialScene.empty() && out.reflections==ReflectionMode::Off && out.lightingDenoise==LightingDenoiseMode::Off && MaterialValidation::environmentRadiance(out.materialScene)>0.0f){error="--material-scenario with --reflections off requires --lighting-denoise custom (lit resolve)";return false;}
     if(!out.lightingScene.empty() && (!out.bench || *out.bench!=5)){error="--lighting-scene requires --bench 6";return false;}
     if(!out.captureLinear.empty() && !out.captureLinearSequence.empty()){error="Choose single linear capture or linear sequence";return false;}
     if((!out.captureLinear.empty() || !out.captureLinearSequence.empty()) && (!out.visibility || !out.benchmark())){error="Linear capture requires --render-path visibility and --frames";return false;}

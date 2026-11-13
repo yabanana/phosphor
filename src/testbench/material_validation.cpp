@@ -257,7 +257,7 @@ void MaterialValidation::update(float, ECS& ecs) {
     };
     // Odd events: the feature sphere becomes active (ior 1.33), even events neutral again.
     const bool strong = spec(scenario_).strongEdit, odd = event % 2 == 1;
-    edited(toggleFeatureSphere(), [&](SpecularBlock& b) { b.ior = strong ? (odd ? 0.0f : 1.5f) : (odd ? 1.33f : 1.5f); });
+    edited(toggleFeatureSphere(), [&](SpecularBlock& b) { b.ior = strong ? (odd ? 2.4f : 1.5f) : (odd ? 1.33f : 1.5f); });
     // The parameter sphere alternates its weight 0.5 / 0.6 (a record rewrite without a bit change).
     edited(toggleParameterSphere(), [&](SpecularBlock& b) {
         if (strong) b.specularColor = odd ? std::array<float, 3>{25.0f, 25.0f, 25.0f} : std::array<float, 3>{1.0f, 1.0f, 1.0f};

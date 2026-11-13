@@ -50,8 +50,7 @@ struct MaterialScenarioSpec {
     std::vector<float> clearcoatRoughness;
     std::vector<float> baseIor;
     // F15.1 (ticket 08) clip fixtures (tools/f15_clip_check.py): --material-toggle-every edits the two probe spheres
-    // STRONGLY (feature sphere: ior 1.5 <-> 0, the Fresnel = 1 mode; parameter sphere: specularColor 1 <-> 25, f0 clamped
-    // to 1), so that a history kept across the edit is visible at the F13.6 recovery threshold.  The default edit is the
+    // STRONGLY (feature sphere: ior 1.5 and 2.4; parameter sphere: specularColor 1 and 25, f0 clamped to 1), so that a history kept across the edit is visible at the F13.6 recovery threshold.  The default edit is the
     // small one of ticket 05 (ior 1.33 / weight 0.6).
     bool strongEdit = false;
     [[nodiscard]] bool hasSpecularGrid() const { return !ior.empty(); }

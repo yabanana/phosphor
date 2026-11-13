@@ -473,7 +473,7 @@ TEST_CASE("F15.3 clearcoat-grid-point: the coat grid lit by one point light from
     CHECK(h.z > 0.3f);
 }
 
-TEST_CASE("F15.1 the clip fixture's toggle is the strong edit: ior 0 on the feature sphere, specularColor 25 on the parameter sphere") {
+TEST_CASE("F15.1 the clip fixture's toggle is the strong edit: ior 2.4 on the feature sphere, specularColor 25 on the parameter sphere") {
     CHECK(MaterialValidation::spec("specular-grid-edit").strongEdit);
     CHECK_FALSE(MaterialValidation::spec("specular-grid-env").strongEdit);
     ECS ecs;
@@ -489,7 +489,7 @@ TEST_CASE("F15.1 the clip fixture's toggle is the strong edit: ior 0 on the feat
     f.update(0.0f, ecs); // update 1: nothing
     CHECK(block(featureSphere).ior == 1.5f);
     f.update(0.0f, ecs); // update 2 = event 1
-    CHECK(block(featureSphere).ior == 0.0f);
+    CHECK(block(featureSphere).ior == 2.4f);
     CHECK(block(parameterSphere).specularColor == std::array<float, 3>{25.0f, 25.0f, 25.0f});
     CHECK(block(parameterSphere).specularFactor == 0.5f); // the weight is not touched by the strong edit
     f.update(0.0f, ecs);
