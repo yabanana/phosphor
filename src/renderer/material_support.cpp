@@ -87,6 +87,16 @@ const MaterialSupportTable& currentSupportTable() {
         FeatureSupportEntry& iridescence = t.features[static_cast<u32>(MaterialFeature::Iridescence)];
         iridescence.level                = SupportLevel::Approximated;
         iridescence.approximation        = "environment_film_at_nv_constant_over_lobe;thickness_zero_disables_film;secondary_rt_hits_ignore_iridescence";
+        // F15.1 (ticket 16): the subsurface feature in THIN mode (KHR_materials_diffuse_transmission, the draft scatter without a volume, the
+        // description file): the Lambert BTDF of lights behind the surface (analytic lights, the sun disk centre, ReSTIR and clustered DI in
+        // target and shading with visibility rays leaving from the light's side), the back-side environment (declared weight
+        // w color (1 - E_d) (1 - 0.16 N.V), exact within 3 % of the quadrature), and the composite.  Declared approximations (decision 06):
+        // the GI irradiance of the visible pixel stands for the irradiance at -N (no probe lookup at -N), secondary RT hits ignore the
+        // transmission, the draft's anisotropic scatter split and the weight/colour textures are not validated against an independent
+        // reference, and combinations with other lobes are not validated.  The volumetric mode is ticket 17 (unsupported).
+        FeatureSupportEntry& subsurface = t.features[static_cast<u32>(MaterialFeature::Subsurface)];
+        subsurface.level                = SupportLevel::Approximated;
+        subsurface.approximation        = "thin_mode_only;gi_irradiance_at_n_stands_for_minus_n;secondary_rt_hits_ignore_transmission";
         return t;
     }();
     return table;
@@ -175,7 +185,8 @@ MaterialSupportReport buildSupportReport(const MaterialDescription& desc, const 
         std::string source;
         InputLabel  label = InputLabel::Ratified;
         describeSource(f, desc, info, source, label);
-        r.features.push_back(entry(featureName(f), table.features[i], source, label));
+        const bool volumetric = f == MaterialFeature::Subsurface && desc.subsurface && desc.subsurface->mode == SubsurfaceMode::Volumetric;
+        r.features.push_back(entry(featureName(f), volumetric ? table.subsurfaceVolumetric : table.features[i], source, label));
     }
     // glTF encodings that carry no material feature of their own.
     if (info.emissiveStrengthUsed)

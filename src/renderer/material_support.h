@@ -36,6 +36,7 @@ struct FeatureSupportEntry {
 
 struct MaterialSupportTable {
     FeatureSupportEntry features[MATERIAL_FEATURE_COUNT];
+    FeatureSupportEntry subsurfaceVolumetric; // the volumetric mode of the subsurface feature (features[Subsurface] is the thin mode)
     FeatureSupportEntry base;               // glTF core metallic-roughness
     FeatureSupportEntry emissiveStrength;   // KHR_materials_emissive_strength (folded)
     FeatureSupportEntry textureTransformUniform; // baked into UV0 when uniform per material

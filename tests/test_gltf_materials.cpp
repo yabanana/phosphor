@@ -309,7 +309,7 @@ TEST_CASE("glTF materials: KHR_materials_diffuse_transmission (release candidate
             found = true;
             CHECK(f.label == InputLabel::ReleaseCandidate);
             CHECK(f.source == "KHR_materials_diffuse_transmission");
-            CHECK(f.level == SupportLevel::Unsupported);
+            CHECK(f.level == SupportLevel::Approximated);
         }
     CHECK(found);
 }
@@ -613,22 +613,23 @@ TEST_CASE("support report: summary line, detail and JSON") {
     const std::vector<std::string> assetUnknown = {"KHR_lights_punctual"};
     const std::string line = formatSupportSummary(reports, assetUnknown);
     CHECK(line.rfind("MATERIALS count=2 base=[implemented(2)] ", 0) == 0);
-    CHECK(line.find("implemented=0 approximated=1 unsupported=2") != std::string::npos); // clearcoat is approximated since F15 ticket 09
+    CHECK(line.find("implemented=0 approximated=2 unsupported=1") != std::string::npos); // clearcoat (ticket 09) and thin subsurface (ticket 16) are approximated
     CHECK(line.find("encodings=[]") != std::string::npos);
     CHECK(line.find("clearcoat:approximated(1)") != std::string::npos);
-    CHECK(line.find("subsurface:unsupported(1)") != std::string::npos);
+    CHECK(line.find("subsurface:approximated(1)") != std::string::npos);
     CHECK(line.find("KHR_lights_punctual") != std::string::npos);
     CHECK(line.find("KHR_materials_dispersion") != std::string::npos);
 
     const std::string detail = formatSupportDetail(reports[0]);
     CHECK(detail.find("'paint'") != std::string::npos);
-    CHECK(detail.find("subsurface=unsupported[draft]") != std::string::npos);
+    CHECK(detail.find("subsurface=approximated(thin_mode_only;") != std::string::npos);
+    CHECK(detail.find("[draft]") != std::string::npos);
 
     const auto json = nlohmann::json::parse(supportToJson(reports, assetUnknown));
     CHECK(json.at("count") == 2);
     CHECK(json.at("schema") == "phosphor.materials.v2");
-    CHECK(json.at("features").at("unsupported") == 2);
-    CHECK(json.at("features").at("approximated") == 1);
+    CHECK(json.at("features").at("unsupported") == 1);
+    CHECK(json.at("features").at("approximated") == 2);
     CHECK(json.at("features").at("implemented") == 0);
     CHECK(json.at("base").at("implemented") == 2);
     CHECK(json.at("encodings").at("implemented") == 0);
@@ -639,11 +640,24 @@ TEST_CASE("support report: summary line, detail and JSON") {
     for (const auto& f : json.at("materials").at(0).at("features"))
         if (f.at("feature") == "subsurface") {
             CHECK(f.at("label") == "draft");
-            CHECK(f.at("support") == "unsupported");
+            CHECK(f.at("support") == "approximated");
             sawDraft = true;
         }
     CHECK(sawDraft);
     CHECK(json.at("asset_unknown_extensions").at(0) == "KHR_lights_punctual");
+}
+
+TEST_CASE("support report: the volumetric subsurface mode stays unsupported while the thin mode is approximated") {
+    const auto thin = parseOne(R"({"extensions":{"KHR_materials_diffuse_transmission":{"diffuseTransmissionFactor":0.5}}})");
+    const auto thinReport = buildSupportReport(thin.description, thin.info);
+    REQUIRE(thinReport.features.size() == 1);
+    CHECK(thinReport.features[0].level == SupportLevel::Approximated);
+    CHECK(thinReport.features[0].label == InputLabel::ReleaseCandidate);
+    MaterialDescription volumetric = thin.description;
+    volumetric.subsurface->mode = SubsurfaceMode::Volumetric;
+    const auto volumetricReport = buildSupportReport(volumetric, thin.info);
+    REQUIRE(volumetricReport.features.size() == 1);
+    CHECK(volumetricReport.features[0].level == SupportLevel::Unsupported);
 }
 
 TEST_CASE("support report: an approximated feature carries its named approximation") {

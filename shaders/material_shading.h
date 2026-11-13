@@ -151,6 +151,36 @@ static float3 sunDiskSpecularSpec(float3 N, float3 V, float3 L, float3 albedo, f
     return sum / float(count);
 }
 
+// F15.1 (ticket 16): subsurface thin mode (bsdf.h).  A light on the FRONT hemisphere sees the reflected lobes with the diffuse scaled
+// by 1 - w; a light on the BACK hemisphere lights the visible face through the transmitted lobe w (1 - F(V.H)) color / pi |N.L|.
+// `spec` is the dielectric of the extended path (the default f0 0.04, f90 1 for a thin-only material).
+static float3 evaluateLightThin(float3 N, float3 V, float3 L, float3 radiance, float3 albedo, float metallic, float roughness,
+                                BsdfDielectricSpec spec, BsdfThin thin) {
+    const float3 H = normalize(V + L);
+    const float NdotLs = dot(N, L);
+    const float NdotV = max(dot(N, V), 1e-4);
+    if (NdotLs > 0.0f) {
+        const float NdotL = saturate(NdotLs);
+        const float NdotH = saturate(dot(N, H));
+        const float VdotH = saturate(dot(V, H));
+        const float a = bsdfAlpha(roughness);
+        const BsdfBaseLobes lobes = bsdfSpecEval(spec, NdotL, NdotV, NdotH, VdotH, albedo, metallic, a);
+        return (lobes.diffuse * bsdfThinReflectScale(thin) + lobes.specular) * radiance * NdotL;
+    }
+    if (NdotLs < 0.0f && dot(V + L, V + L) > 1e-20f)
+        return bsdfThinTransmitted(thin, saturate(dot(V, H)), metallic) * radiance * (-NdotLs);
+    return float3(0.0);
+}
+// The sun of a thin material: reflected and transmitted terms at the disk centre (the diffuse rule), the specular lobe over the disk.
+static float3 sunThinDiffuse(float3 N, float3 V, float3 L, float3 albedo, float metallic, BsdfDielectricSpec spec, BsdfThin thin) {
+    const float NdotLs = dot(N, L);
+    if (!(dot(V + L, V + L) > 1e-20f)) return float3(0.0);
+    const float VdotH = saturate(dot(V, normalize(V + L)));
+    if (NdotLs > 0.0f) return bsdfSpecDiffuse(bsdfSpecFresnel(spec, VdotH), metallic, albedo) * bsdfThinReflectScale(thin) * NdotLs;
+    if (NdotLs < 0.0f) return bsdfThinTransmitted(thin, VdotH, metallic) * (-NdotLs);
+    return float3(0.0);
+}
+
 // F15.1 (ticket 11): KHR_materials_anisotropy.  The ior/specular dielectric (or the metal) with the anisotropic D V of bsdf.h in place
 // of the isotropic GGX; the same two functions as evaluateLightSpec / sunDiskSpecularSpec otherwise.
 static float3 evaluateLightAniso(float3 N, float3 V, float3 L, float3 radiance, float3 albedo, float metallic,
@@ -371,6 +401,21 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
                             ? saturate(e1.iridescenceFactor * float(sampleOr(textures, e1.iridescenceFactorTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).r))
                             : 0.0f;
     }
+    // F15.1 (ticket 16): subsurface thin mode (record 2, mode 0), same gating.  Volumetric mode (ticket 17) is not resolved here: the
+    // pixel keeps the base model and publishes no subsurface feature.  weight = saturate(w x texture.a), colour = color x texture.rgb.
+    BsdfThin thin = bsdfThinNone();
+    const bool thinOn = (kMaterialFeatures & MATERIAL_FEATURE_SUBSURFACE) != 0u &&
+                        (m.flags & (MATERIAL_FEATURE_SUBSURFACE << MATERIAL_FEATURE_SHIFT)) != 0u;
+    bool thinResolved = false;
+    if (thinOn) {
+        const GPUMaterialExt2 e2 = *reinterpret_cast<const device GPUMaterialExt2*>(frame.materialExtensions + m.extensionIndex + 2u);
+        if (e2.mode == 0u) {
+            thinResolved = true;
+            thin.weight = saturate(e2.weight * float(sampleOr(textures, e2.weightTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).a));
+            thin.color = float3(e2.color[0], e2.color[1], e2.color[2]) *
+                         float3(sampleOr(textures, e2.colorTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).rgb);
+        }
+    }
     CoatParams coat{0.0f, 0.04f, float3(0.0f)};
     if (coatOn) {
         coat.factor = saturate(e0.clearcoatFactor * float(sampleOr(textures, e0.clearcoatFactorTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).r));
@@ -460,6 +505,16 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         }
         if (!isDirectional && replaceLocal) continue;
         const float visibility = i == shadowLight ? sunVisibility : 1.0f;
+        if (thinResolved) {
+            // F15.1 (ticket 16): lights on the back hemisphere light the visible face through the transmitted lobe (no N.L clamp to the front).
+            if (physicalGI && isDirectional && i == shadowLight && sunAngularRadius > 0.0f)
+                color += (sunThinDiffuse(N, V, L, baseColor.rgb, metallic, spec, thin) +
+                          sunDiskSpecularSpec(N, V, L, baseColor.rgb, metallic, roughness, sunAngularRadius, spec)) *
+                         lightColor * attenuation * visibility;
+            else
+                color += evaluateLightThin(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, roughness, spec, thin) * visibility;
+            continue;
+        }
         if (physicalGI && isDirectional && i == shadowLight && sunAngularRadius > 0.0f) {
             // Diffuse at the disk centre (exact to O(r^2)), specular over the disk.
             const float NdotL = saturate(dot(N, L));
@@ -547,11 +602,21 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         envSpecularWeight *= scale;
         sheenEnvironment = (useGI ? indirectIrradiance / M_PI_F : (physicalGI ? environment : hemisphere(N))) * sheen.color * E;
     }
+    // F15.1 (ticket 16): the front diffuse weight is scaled by 1 - w and the transmitted lobe takes w color (1 - E_d) (1 - 0.16 N.V) of the
+    // radiance at -N: the declared environment (physicalGI), the legacy hemisphere at -N, or (GI) the irradiance of this pixel, which stands
+    // for E(-N) (declared approximation: no probe lookup at -N).  The term travels with the diffuse ambient.
+    float3 thinWeight = float3(0.0);
+    if (thinResolved) {
+        thinWeight = bsdfThinEnvWeight(thin, metallic, envDiffuse, NdotV);
+        envDiffuse *= bsdfThinReflectScale(thin);
+    }
     const float3 ambientDiffuse = (physicalGI ? environment : hemisphere(N)) * baseColor.rgb * (1.0 - metallic) * envDiffuse;
     const float3 ambientSpecular = (physicalGI ? environment : hemisphere(specularDir)) * envSpecularWeight + coatEnvironment;
     // F13 assembles these positive signals once outside this residual base.
     // Never subtract full-float lighting from a quantized summed color later.
     if(!externalDiffuse)color += (useGI ? indirectIrradiance * baseColor.rgb * (1.0f - metallic) * envDiffuse / M_PI_F * (physicalGI?1.0f:occlusion) : ambientDiffuse * occlusion);
+    if(!externalDiffuse && thinResolved)color += useGI ? indirectIrradiance * thinWeight / M_PI_F * (physicalGI?1.0f:occlusion)
+                                                       : (physicalGI ? environment : hemisphere(-N)) * thinWeight * occlusion;
     if(!externalDiffuse && sheenOn)color += sheenEnvironment * coatAtt * (useGI ? (physicalGI?1.0f:occlusion) : occlusion);
     if(!omitSpecularAmbient)color += ambientSpecular * occlusion;
 
@@ -563,7 +628,7 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     out.emission = emission;
     out.normal = N;
     out.baseColor = baseColor.rgb;
-    out.diffuseAlbedo = baseColor.rgb * (1.0f - metallic) * envDiffuse;
+    out.diffuseAlbedo = baseColor.rgb * (1.0f - metallic) * envDiffuse + thinWeight;
     out.specularAlbedo = useSpec ? mix(bsdfSpecFresnel(spec, NdotV), bsdfFSchlick(baseColor.rgb, NdotV), metallic)
                                  : bsdfFSchlick(f0, NdotV);
     if (bsdfIridActive(irid)) out.specularAlbedo = bsdfSpecColorIrid(spec, irid, bsdfSpecFresnel(spec, NdotV), baseColor.rgb, metallic, NdotV);
@@ -580,6 +645,14 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     // An anisotropy bit without a resolved lobe (no tangent frame, or a texture strength of 0) is not published: the guide then
     // describes the isotropic lobe, as the resolve shaded it.
     if (anisoOn && !anisoActive) out.lobes.features &= ~MATERIAL_FEATURE_ANISOTROPY;
+    // The subsurface bit is published for the thin mode only (volumetric: ticket 17).
+    if (thinOn && !thinResolved) out.lobes.features &= ~MATERIAL_FEATURE_SUBSURFACE;
+    if (thinResolved) {
+        out.lobes.subsurfaceWeight = thin.weight;
+        out.lobes.subsurfaceColor[0] = thin.color.x;
+        out.lobes.subsurfaceColor[1] = thin.color.y;
+        out.lobes.subsurfaceColor[2] = thin.color.z;
+    }
     if (specExt) {
         out.lobes.ior = lobeIor;
         out.lobes.specularFactor = lobeSpecularWeight;
@@ -617,7 +690,7 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
 // F15.1 (ticket 06): the guide record of a resolved surface (renderer/lobe_guide_pack.h).  DI_LOBE_GUIDE_CORRUPT
 // is the negative control of --debug-lobe-guide: +0.25 on the stored ior of ior/specular pixels and (ticket 10) on the stored
 // sheen roughness of sheen pixels, (ticket 11) the lobe direction of anisotropic pixels (set to the shading normal) and (ticket 12)
-// the film ior of iridescent pixels.
+// the film ior of iridescent pixels and (ticket 16) the weight of thin subsurface pixels.
 static GPULobeGuide lobeGuideRecord(ShadingResult value, uint diFlags) {
     if ((diFlags & DI_LOBE_GUIDE_CORRUPT) != 0u && (value.lobes.features & MATERIAL_FEATURE_SPECULAR_IOR) != 0u)
         value.lobes.ior += 0.25f;
@@ -626,6 +699,9 @@ static GPULobeGuide lobeGuideRecord(ShadingResult value, uint diFlags) {
     // Ticket 12: an iridescent pixel stores a film ior shifted by 0.25 (the half-rounded value differs from the expectation).
     if ((diFlags & DI_LOBE_GUIDE_CORRUPT) != 0u && (value.lobes.features & MATERIAL_FEATURE_IRIDESCENCE) != 0u)
         value.lobes.iridescenceIor += 0.25f;
+    // Ticket 16: a thin subsurface pixel stores a weight shifted by 0.25 (a transmission colour channel would not move for a zero channel).
+    if ((diFlags & DI_LOBE_GUIDE_CORRUPT) != 0u && (value.lobes.features & MATERIAL_FEATURE_SUBSURFACE) != 0u)
+        value.lobes.subsurfaceWeight += 0.25f;
     // Ticket 11: an anisotropic pixel stores its shading normal as the lobe direction (outside the tangent plane).
     if ((diFlags & DI_LOBE_GUIDE_CORRUPT) != 0u && (value.lobes.features & MATERIAL_FEATURE_ANISOTROPY) != 0u) {
         value.lobes.anisotropyDirection[0] = value.normal.x;

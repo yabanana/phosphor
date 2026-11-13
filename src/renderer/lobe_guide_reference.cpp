@@ -82,6 +82,25 @@ LobeGuideExpectation expectedLobeParams(const GPUMaterial& material, std::span<c
         r.params.iridescenceThickness = thickness;
         if (e1.iridescenceFactorTex != INVALID_TEXTURE_INDEX || e1.iridescenceThicknessTex != INVALID_TEXTURE_INDEX) r.unverified = true;
     }
+    if (features & MATERIAL_FEATURE_SUBSURFACE) {
+        // Record 2 (GPUMaterialExt2).  shadeSurface publishes the bit for the thin mode (mode 0) only: weight = saturate(w * tex.a), colour =
+        // color * tex.rgb (the half 1.0 fallback without a texture).  A volumetric material keeps the base model and clears the bit.
+        if (material.extensionIndex == MATERIAL_EXTENSION_INVALID || size_t(material.extensionIndex) + 2 >= extensions.size()) {
+            if (extensionsValid) *extensionsValid = false;
+            r.unverified = true;
+            return r;
+        }
+        GPUMaterialExt2 e2;
+        std::memcpy(&e2, &extensions[material.extensionIndex + 2], sizeof(e2));
+        if (e2.mode != 0u) {
+            r.params.features &= ~MATERIAL_FEATURE_SUBSURFACE;
+        } else {
+            const float w = e2.weight * 1.0f;
+            r.params.subsurfaceWeight = w < 0.0f ? 0.0f : (w > 1.0f ? 1.0f : w);
+            for (int c = 0; c < 3; ++c) r.params.subsurfaceColor[c] = e2.color[c] * 1.0f;
+            if (e2.weightTex != INVALID_TEXTURE_INDEX || e2.colorTex != INVALID_TEXTURE_INDEX) r.unverified = true;
+        }
+    }
     return r;
 }
 

@@ -498,3 +498,41 @@ inline BsdfSpecEnv bsdfSpecEnvIrid(BsdfDielectricSpec s, BsdfIrid irid, float3 a
     e.diffuseWeight = diffuse;
     return e;
 }
+
+// ---------------------------------------------------------------------------
+// F15.1 (ticket 16): subsurface, THIN mode = KHR_materials_diffuse_transmission (RC text, research/khr-materials.md section 10.1;
+// OpenPBR thin-walled mapping of ADR-0005).  The dielectric base is mix(diffuse_brdf(baseColor), diffuse_btdf(color), w) under the
+// Fresnel mix of Appendix B, so with F = Schlick(0.04, V.H), H = normalize(V + L) (the literal text, ALSO for the transmitted lobe;
+// orchestrator decision 2026-11-13):
+//   N.L > 0 (reflected):    (1 - w) (1 - metallic) (1 - F) baseColor / pi        (the specular lobe is untouched)
+//   N.L < 0 (transmitted):  w       (1 - metallic) (1 - F) color / pi |N.L|     (thin-walled: same point, no refraction, no offset)
+// Hemispheres are relative to the shading normal facing the camera; metals carry no transmission; a degenerate H (V = -L) gives 0.
+// Environment (declared, decision 06): the front diffuse weight c (1 - E_d) is scaled by (1 - w) and the transmitted lobe adds
+//   w color (1 - metallic) (1 - E_d(N.V)) (1 - 0.16 N.V)  times the radiance at -N (back-side environment),
+// E_d = clamp(0.04 A + B, 0, 1) = bsdfEnvDiffuseWeight's complement; the ratio 1 - 0.16 mu is the fit of T / Cd (tools/f15_reference.py,
+// error 1.4e-3), so the transmitted weight never exceeds the diffuse weight it replaces (energy moved, not added).
+// ---------------------------------------------------------------------------
+struct BsdfThin {
+    float weight;   // w = subsurface weight (0 = no transmission)
+    float3 color;   // transmission colour
+};
+inline BsdfThin bsdfThinNone() {
+    BsdfThin t;
+    t.weight = 0.0f;
+    t.color = float3(0.0f);
+    return t;
+}
+inline bool bsdfThinActive(BsdfThin t) { return t.weight > 0.0f; }
+// Scale of every reflected diffuse term.
+inline float bsdfThinReflectScale(BsdfThin t) { return 1.0f - t.weight; }
+// f_t of one back-hemisphere light for V.H (without |N.L| and the radiance).
+inline float3 bsdfThinTransmitted(BsdfThin t, float VdotH, float metallic) {
+    return (t.weight * (1.0f - metallic) * (1.0f - bsdfDielectricFresnel(VdotH).x) / M_PI_F) * t.color;
+}
+// The declared environment ratio r(mu) = 1 - 0.16 mu of the transmitted weight to the front diffuse weight.
+inline float bsdfThinEnvRatio(float NdotV) { return 1.0f - 0.16f * clamp(NdotV, 0.0f, 1.0f); }
+// Transmitted environment/GI weight (multiplies the radiance or irradiance / pi at -N): w color (1 - metallic) (1 - E_d) r(N.V).
+// `diffuseWeight` is the declared 1 - E_d of the front diffuse (before the (1 - w) scaling).
+inline float3 bsdfThinEnvWeight(BsdfThin t, float metallic, float diffuseWeight, float NdotV) {
+    return (t.weight * (1.0f - metallic) * diffuseWeight * bsdfThinEnvRatio(NdotV)) * t.color;
+}

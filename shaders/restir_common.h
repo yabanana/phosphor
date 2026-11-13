@@ -174,6 +174,10 @@ struct DILobe {
     // the V.H of each light sample (target and shading alike).
     bool irid;
     BsdfIrid iridParams;
+    // F15.1 (ticket 16): subsurface thin mode.  Lights on the back hemisphere light the pixel through the transmitted lobe (target and
+    // shading); the visibility ray already leaves from the light's side (diEndpointVisible flips the geometric normal towards the light).
+    bool thin;
+    BsdfThin thinParams;
 };
 inline DILobe DI_FN(diLoadLobe)(constant GPUDIParams& p, const device GPULobeGuide* guides, uint index) {
     DILobe l{};
@@ -205,6 +209,11 @@ inline DILobe DI_FN(diLoadLobe)(constant GPUDIParams& p, const device GPULobeGui
                 l.iridParams.ior = u.iridescenceIor;
                 l.iridParams.thickness = u.iridescenceThickness;
                 l.irid = bsdfIridActive(l.iridParams);
+            }
+            if ((kMaterialFeatures & MATERIAL_FEATURE_SUBSURFACE) != 0u && (g.features & MATERIAL_FEATURE_SUBSURFACE) != 0u) {
+                l.thinParams.weight = u.subsurfaceWeight;
+                l.thinParams.color = float3(u.subsurfaceColor[0], u.subsurfaceColor[1], u.subsurfaceColor[2]);
+                l.thin = bsdfThinActive(l.thinParams);
             }
         }
     }
@@ -243,6 +252,7 @@ inline float3 DI_FN(diBRDFLobe)(GPUDISurface surface, DISample s, float specular
                 ? bsdfSpecEvalAniso(spec, bsdfAnisoFrame(n, lobe.anisoDirection, surface.roughness, lobe.anisoStrength), v, s.wi, h, nl, nv, nh, vh,
                                     albedo, metallic)
                 : bsdfSpecEval(spec, nl, nv, nh, vh, albedo, metallic, bsdfAlpha(surface.roughness));
+            if ((kMaterialFeatures & MATERIAL_FEATURE_SUBSURFACE) != 0u && lobe.thin) lobes.diffuse *= bsdfThinReflectScale(lobe.thinParams);
             result = (lobes.diffuse + specularWeight * lobes.specular) * incident * nl;
             // F15.1 (ticket 10): the sheen layer between the material and the coat.  The transport does not sample sheen: the
             // emitter share of the sheen lobe is 1 (DI owns it), the material keeps its own emitter weights; the albedo
@@ -251,6 +261,12 @@ inline float3 DI_FN(diBRDFLobe)(GPUDISurface surface, DISample s, float specular
                 const float scale = bsdfSheenScaleLight(lobe.sheenColor, lobe.sheenRoughness, nv, nl, phosphor::SheenTable);
                 result = result * scale + bsdfSheenLobe(lobe.sheenColor, lobe.sheenRoughness, nl, nv, nh) * incident * nl;
             }
+        }
+        // Ticket 16: a light behind the surface (N.L < 0) lights it through the transmitted lobe, weighted by 1 - F(V.H) and |N.L|.
+        if ((kMaterialFeatures & MATERIAL_FEATURE_SUBSURFACE) != 0u && lobe.thin) {
+            const float nls = dot(n, s.wi);
+            if (nls < 0 && dot(v + s.wi, v + s.wi) > 1e-20f)
+                result = bsdfThinTransmitted(lobe.thinParams, saturate(dot(v, normalize(v + s.wi))), saturate(surface.metallic)) * incident * (-nls);
         }
         if ((kMaterialFeatures & MATERIAL_FEATURE_CLEARCOAT) != 0u && lobe.coat) {
             float3 nc = lobe.coatNormal;

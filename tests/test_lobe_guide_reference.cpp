@@ -403,3 +403,52 @@ TEST_CASE("lobe guide reference: resolved factor, ior and thickness of iridescen
     CHECK(u.iridescenceIor == doctest::Approx(1.8f).epsilon(1e-3));
     CHECK(u.iridescenceThickness == 1200.0f);
 }
+
+// F15.1 (ticket 16): subsurface, thin mode.  Record 2 carries mode, weight and colour; the bit is published for mode 0 only (the
+// volumetric mode keeps the base model until ticket 17), the weight is saturated and textures make the expectation unverified.
+namespace {
+GPUMaterialExtRecord subsurfaceRecord(u32 mode, float weight, float r, float g, float b, u32 weightTex = INVALID_TEXTURE_INDEX,
+                                      u32 colorTex = INVALID_TEXTURE_INDEX) {
+    GPUMaterialExt2 e{};
+    e.mode = mode;
+    e.weight = weight;
+    e.color[0] = r; e.color[1] = g; e.color[2] = b;
+    e.weightTex = weightTex;
+    e.colorTex = colorTex;
+    e.radiusScaleTex = INVALID_TEXTURE_INDEX;
+    GPUMaterialExtRecord rec{};
+    std::memcpy(&rec, &e, sizeof(e));
+    return rec;
+}
+GPUMaterial subsurfaceMaterial(u32 extensionIndex) {
+    GPUMaterial m{};
+    m.flags = MATERIAL_FEATURE_SUBSURFACE << MATERIAL_FEATURE_SHIFT;
+    m.extensionIndex = extensionIndex;
+    return m;
+}
+} // namespace
+
+TEST_CASE("lobe guide reference: resolved weight and colour of thin subsurface, volumetric mode and textures") {
+    // Extension groups of 4 records; the subsurface record is the third of each group.
+    std::vector<GPUMaterialExtRecord> ext(16);
+    ext[2]  = subsurfaceRecord(0u, 0.5f, 1.0f, 0.55f, 0.25f);
+    ext[6]  = subsurfaceRecord(1u, 0.5f, 1.0f, 1.0f, 1.0f);              // volumetric
+    ext[10] = subsurfaceRecord(0u, 1.5f, 0.1f, 0.7f, 0.6f);               // weight saturates
+    ext[14] = subsurfaceRecord(0u, 0.5f, 1.0f, 1.0f, 1.0f, 3u);           // weight texture
+    auto e = expectedLobeParams(subsurfaceMaterial(0), ext, MATERIAL_FEATURE_SUBSURFACE);
+    CHECK(e.params.features == MATERIAL_FEATURE_SUBSURFACE);
+    CHECK(e.params.subsurfaceWeight == 0.5f);
+    CHECK(e.params.subsurfaceColor[1] == 0.55f);
+    CHECK_FALSE(e.unverified);
+    const LobeParams u = unpackLobeGuide(packLobeGuide(e.params));
+    CHECK(u.subsurfaceWeight == 0.5f);
+    CHECK(u.subsurfaceColor[0] == 1.0f);
+    CHECK(u.subsurfaceColor[2] == 0.25f);
+    CHECK(expectedLobeParams(subsurfaceMaterial(4), ext, MATERIAL_FEATURE_SUBSURFACE).params.features == 0u); // volumetric: base model
+    CHECK(expectedLobeParams(subsurfaceMaterial(8), ext, MATERIAL_FEATURE_SUBSURFACE).params.subsurfaceWeight == 1.0f);
+    CHECK(expectedLobeParams(subsurfaceMaterial(12), ext, MATERIAL_FEATURE_SUBSURFACE).unverified);
+    CHECK(expectedLobeParams(subsurfaceMaterial(0), ext, MATERIAL_FEATURE_SPECULAR_IOR).params.features == 0u);
+    bool valid = true;
+    CHECK(expectedLobeParams(subsurfaceMaterial(15), ext, MATERIAL_FEATURE_SUBSURFACE, &valid).unverified);
+    CHECK_FALSE(valid);
+}

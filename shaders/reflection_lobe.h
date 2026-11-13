@@ -53,6 +53,10 @@ struct ReflectionLobe {
     // F15.1 (ticket 12): KHR_materials_iridescence.  The sample weight uses the thin-film Fresnel at the sampled V.H (bsdfSpecColorIrid);
     // every split-sum term (probe weight, composite diffuse complement, coat select) uses it at N.V (bsdfSpecEnvIrid).  strength 0 = no film.
     BsdfIrid irid;
+    // F15.1 (ticket 16): subsurface thin mode.  The composite scales the front diffuse by 1 - w and adds the transmitted environment/GI term
+    // (bsdfThinEnvWeight; GI: the pixel's irradiance stands for E(-N), declared).  The specular transport is unchanged.
+    bool thin;
+    BsdfThin thinParams;
     float diffuseRoughness; // roughness of the diffuse complement in the composite (bsdfAnisoDiffuseRoughness), the base roughness without anisotropy
 };
 inline ReflectionLobe reflectionLoadLobe(uint flags, uint validFlag, const device GPULobeGuide* guides, uint index, GPUDISurface s) {
@@ -81,6 +85,11 @@ inline ReflectionLobe reflectionLoadLobe(uint flags, uint validFlag, const devic
                 l.irid.strength = u.iridescenceFactor;
                 l.irid.ior = u.iridescenceIor;
                 l.irid.thickness = u.iridescenceThickness;
+            }
+            if ((kMaterialFeatures & MATERIAL_FEATURE_SUBSURFACE) != 0u && (g.features & MATERIAL_FEATURE_SUBSURFACE) != 0u) {
+                l.thinParams.weight = u.subsurfaceWeight;
+                l.thinParams.color = float3(u.subsurfaceColor[0], u.subsurfaceColor[1], u.subsurfaceColor[2]);
+                l.thin = bsdfThinActive(l.thinParams);
             }
             if ((kMaterialFeatures & MATERIAL_FEATURE_ANISOTROPY) != 0u && (g.features & MATERIAL_FEATURE_ANISOTROPY) != 0u) {
                 const float3 ad = float3(u.anisotropyDirection[0], u.anisotropyDirection[1], u.anisotropyDirection[2]);

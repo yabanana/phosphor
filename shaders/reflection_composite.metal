@@ -114,6 +114,7 @@ kernel void REFL_KERNEL(reflection_composite)(constant GPUReflectionComposeParam
             float envDiffuse=bsdfEnvDiffuseWeight(s.roughness,envNV,phosphor::DfgTable);
 #ifdef PHOSPHOR_REFL_LOBE
             float3 sheenTerm=float3(0); // F15.1 (ticket 10): S E (coat attenuation), the environment term of the sheen layer
+            float3 thinTerm=float3(0); // F15.1 (ticket 16): w color (1 - metallic) (1 - E_d) (1 - 0.16 N.V), the transmitted diffuse (radiance / pi at -N)
             // F15.1 (ticket 08): extended pixels receive 1 - max(E_dielectric) of their own specular lobe.
             {const auto lobe=REFL_LOBE(p.flags,REFLECT_COMPOSE_LOBE_GUIDE_VALID,pixel.y*p.width+pixel.x,s);
                 if(lobe.extended)envDiffuse=bsdfSpecEnvIrid(lobe.spec,lobe.irid,diVec(s.albedo),saturate(s.metallic),(p.flags&REFLECT_COMPOSE_SPEC)?lobe.diffuseRoughness:lobe.envRoughness,envNV,phosphor::DfgTable).diffuseWeight;
@@ -122,12 +123,15 @@ kernel void REFL_KERNEL(reflection_composite)(constant GPUReflectionComposeParam
                 if(lobe.coat){coatAtt=1.0f-lobe.coatFactor*bsdfCoatFresnel(abs(dot(lobe.coatNormal,normalize(diVec(s.viewDirection)))));envDiffuse*=coatAtt;}
                 // F15.1 (ticket 10): the diffuse under a sheen layer receives 1 - max3(S) E(N.V) (view-only form); the sheen term
                 // S E L(N) is added below next to the diffuse (GI irradiance / pi, or the declared environment).
-                if(lobe.sheen){envDiffuse*=lobe.sheenScale;sheenTerm=lobe.sheenColor*(lobe.sheenAlbedo*coatAtt);}}
+                if(lobe.sheen){envDiffuse*=lobe.sheenScale;sheenTerm=lobe.sheenColor*(lobe.sheenAlbedo*coatAtt);}
+                // F15.1 (ticket 16): thin subsurface: the front diffuse keeps 1 - w, the transmitted part takes the weight it released.
+                if(lobe.thin){thinTerm=bsdfThinEnvWeight(lobe.thinParams,saturate(s.metallic),envDiffuse,envNV);envDiffuse*=bsdfThinReflectScale(lobe.thinParams);}}
 #endif
             if(p.flags&REFLECT_COMPOSE_DI)color+=diSelected.read(pixel).rgb;
             if(p.flags&REFLECT_COMPOSE_GI)color+=giSelected.read(pixel).rgb*diVec(s.albedo)*(1-s.metallic)*envDiffuse/M_PI_F;
 #ifdef PHOSPHOR_REFL_LOBE
             if((p.flags&REFLECT_COMPOSE_GI)&&any(sheenTerm>0))color+=giSelected.read(pixel).rgb*sheenTerm/M_PI_F;
+            if((p.flags&REFLECT_COMPOSE_GI)&&any(thinTerm>0))color+=giSelected.read(pixel).rgb*thinTerm/M_PI_F; // E(-N) ~ E(N) (declared)
 #endif
             if(p.flags&REFLECT_COMPOSE_SPEC)color+=specular.read(pixel).rgb;
             if(!(p.flags&REFLECT_COMPOSE_GI)){const float3 n=normalize(diVec(s.shadingNormal));
@@ -137,6 +141,7 @@ kernel void REFL_KERNEL(reflection_composite)(constant GPUReflectionComposeParam
                 color+=ambient*aoFactor;
 #ifdef PHOSPHOR_REFL_LOBE
                 if(any(sheenTerm>0))color+=float3(p.environment[0],p.environment[1],p.environment[2])*sheenTerm*as_type<float>(s.pad[0])*aoFactor;
+                if(any(thinTerm>0))color+=float3(p.environment[0],p.environment[1],p.environment[2])*thinTerm*as_type<float>(s.pad[0])*aoFactor;
 #endif
             }}
     }
