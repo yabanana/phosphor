@@ -120,6 +120,9 @@ public:
     /// constant 1, every bucket drawn).  The mesh path passes its overflow
     /// word, so the ICB stays empty unless the meshlet candidates overflowed.
     void setTemporalInputs(MTL::GPUAddress previousInstances, MTL::GPUAddress temporalParams);
+    /// F15.1 (ticket 06): the lobe guide buffer and the frame's GPUDIParams, read by the indexed overflow
+    /// receivers of scenes with material features (forward_di_receiver_guide_fs).
+    void setLobeGuideInputs(MTL::GPUAddress guide, MTL::GPUAddress diParams);
     void setLightingInputs(MTL::GPUAddress params, MTL::Texture* sun, MTL::Texture* local, MTL::Texture* gi);
     [[nodiscard]] MTL::Buffer* indexBuffer() const { return indexBuffer_; }
     void setDrawGate(MTL::GPUAddress gate) { drawGate_ = gate; }

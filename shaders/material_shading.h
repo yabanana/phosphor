@@ -1,6 +1,7 @@
 #pragma once
 #include <metal_stdlib>
 #include "renderer/gpu_types.h"
+#include "renderer/lobe_guide_pack.h"
 #include "pipeline/forward_variants.generated.metal.h"
 using namespace metal;
 using namespace phosphor;
@@ -38,6 +39,10 @@ struct ShadingResult {
     float occlusion;
     float alpha;
     float3 emission; // the emissive term already included in color (F13.1)
+    // F15.1 (ticket 06): the resolved feature parameters the lobe guide stores (renderer/lobe_guide_pack.h);
+    // zero for base materials and whenever kMaterialFeatures has no resolved feature.  One source for the
+    // visibility resolve, the guide kernel and the indexed receivers.
+    LobeParams lobes;
 };
 
 // --- BRDF --------------------------------------------------------------------
@@ -209,6 +214,8 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     BsdfDielectricSpec spec;
     spec.f0 = float3(0.04f);
     spec.f90 = 1.0f;
+    float lobeIor = LobeNeutralIor, lobeSpecularWeight = 1.0f;
+    float3 lobeSpecularColor = float3(1.0f);
     if (specExt) {
         const GPUMaterialExt0 e0 = *reinterpret_cast<const device GPUMaterialExt0*>(frame.materialExtensions + m.extensionIndex);
         const float specularWeight =
@@ -216,6 +223,9 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         const float3 specularColor = float3(e0.specularColor[0], e0.specularColor[1], e0.specularColor[2]) *
                                      float3(sampleOr(textures, e0.specularColorTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).rgb);
         spec = bsdfSpecularParams(e0.ior, specularWeight, specularColor);
+        lobeIor = e0.ior;
+        lobeSpecularWeight = specularWeight;
+        lobeSpecularColor = specularColor;
     }
 
     // Two-sided lighting.  A mirrored model matrix reverses the winding, so
@@ -318,5 +328,25 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     out.roughness = roughness;
     out.metallic = metallic;
     out.occlusion = occlusion;
+    // F15.1: only the features the resolve resolves today (LOBE_GUIDE_RESOLVED_FEATURES) and the scene's
+    // union reach the guide; every other LobeParams field stays 0 (packLobeGuide ignores clear features).
+    out.lobes.features = (kMaterialFeatures != 0u)
+                             ? ((m.flags >> MATERIAL_FEATURE_SHIFT) & kMaterialFeatures & LOBE_GUIDE_RESOLVED_FEATURES)
+                             : 0u;
+    if (specExt) {
+        out.lobes.ior = lobeIor;
+        out.lobes.specularFactor = lobeSpecularWeight;
+        out.lobes.specularColor[0] = lobeSpecularColor.x;
+        out.lobes.specularColor[1] = lobeSpecularColor.y;
+        out.lobes.specularColor[2] = lobeSpecularColor.z;
+    }
     return out;
+}
+
+// F15.1 (ticket 06): the guide record of a resolved surface (renderer/lobe_guide_pack.h).  DI_LOBE_GUIDE_CORRUPT
+// is the negative control of --debug-lobe-guide: +0.25 on the stored ior of extended pixels.
+static GPULobeGuide lobeGuideRecord(ShadingResult value, uint diFlags) {
+    if ((diFlags & DI_LOBE_GUIDE_CORRUPT) != 0u && (value.lobes.features & MATERIAL_FEATURE_SPECULAR_IOR) != 0u)
+        value.lobes.ior += 0.25f;
+    return packLobeGuide(value.lobes);
 }

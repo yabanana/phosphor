@@ -266,15 +266,44 @@ struct DIReceiverOutput {
     half occlusion [[color(3)]];
     uint emission [[color(4)]]; // F13.1: GPUDISurface::pad[1] of indexed overflow receivers
 };
-fragment DIReceiverOutput forward_di_receiver_fs(SurfaceVertexOut in [[stage_in]],bool frontFacing [[front_facing]],
-    constant FrameConstants& frame [[buffer(0)]],const device GPUMaterial* materials [[buffer(3)]],
-    const device GPULight* lights [[buffer(4)]],const device TextureHandle* textures [[buffer(5)]],
-    constant GPUTemporalParams& temporal [[buffer(8)]]) {
+// The shared body of the receiver fragment functions.
+static ShadingResult diReceiverResolve(SurfaceVertexOut in, bool frontFacing, constant FrameConstants& frame,
+    const device GPUMaterial* materials, const device GPULight* lights, const device TextureHandle* textures,
+    constant GPUTemporalParams& temporal) {
     SurfaceInput surface{in.worldPos,in.normal,in.tangent,in.uv,dfdx(in.uv)*exp2(temporal.mipBias),
                          dfdy(in.uv)*exp2(temporal.mipBias),in.materialIndex,in.mirrored,frontFacing};
     const auto value=shadeSurface(surface,frame,materials,lights,textures,true);
     if(value.alpha<materials[in.materialIndex].alphaCutoff)discard_fragment();
+    return value;
+}
+static DIReceiverOutput diReceiverOutput(SurfaceVertexOut in, ShadingResult value, constant GPUTemporalParams& temporal) {
     return {half4(half3(value.normal),half(value.roughness)),half4(half3(value.baseColor),half(value.metallic)),
             temporalMotion(in.unjitteredClip,in.previousClip,temporal,in.historyValid!=0),half(value.occlusion),
             packEmission(value.emission.x,value.emission.y,value.emission.z)};
+}
+fragment DIReceiverOutput forward_di_receiver_fs(SurfaceVertexOut in [[stage_in]],bool frontFacing [[front_facing]],
+    constant FrameConstants& frame [[buffer(0)]],const device GPUMaterial* materials [[buffer(3)]],
+    const device GPULight* lights [[buffer(4)]],const device TextureHandle* textures [[buffer(5)]],
+    constant GPUTemporalParams& temporal [[buffer(8)]]) {
+    const auto value=diReceiverResolve(in,frontFacing,frame,materials,lights,textures,temporal);
+    return diReceiverOutput(in,value,temporal);
+}
+
+// F15.1 (ticket 06): the receiver of scenes with material features.  It also writes the lobe guide record of
+// its pixel (index = DI surface width), so it must run only for the VISIBLE fragment of the pixel:
+// [[early_fragment_tests]] runs the (equal, no-write) depth test before the function, so a fragment that fails
+// it executes nothing and writes nothing; the alpha discard precedes the write, so a discarded fragment never
+// writes either.  The buffer is a raster order group: fragments at equal depth (coplanar overlap) resolve in
+// primitive order like the colour attachments (last wins).  The function writes no depth or coverage, which
+// early tests require.  A separate entry point keeps forward_di_receiver_fs (scenes without features) unchanged.
+[[early_fragment_tests]]
+fragment DIReceiverOutput forward_di_receiver_guide_fs(SurfaceVertexOut in [[stage_in]],bool frontFacing [[front_facing]],
+    constant FrameConstants& frame [[buffer(0)]],const device GPUMaterial* materials [[buffer(3)]],
+    const device GPULight* lights [[buffer(4)]],const device TextureHandle* textures [[buffer(5)]],
+    constant GPUTemporalParams& temporal [[buffer(8)]],
+    device GPULobeGuide* lobeGuide [[buffer(11), raster_order_group(0)]],
+    constant GPUDIParams& di [[buffer(12)]]) {
+    const auto value=diReceiverResolve(in,frontFacing,frame,materials,lights,textures,temporal);
+    if(kMaterialFeatures!=0u)lobeGuide[uint(in.position.y)*di.width+uint(in.position.x)]=lobeGuideRecord(value,di.flags);
+    return diReceiverOutput(in,value,temporal);
 }

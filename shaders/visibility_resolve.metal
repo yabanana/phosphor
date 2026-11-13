@@ -380,7 +380,9 @@ kernel void material_lighting_guides(
     const device GPUMeshletCandidate *b [[buffer(10)]], constant GPUVisibilityParams &p [[buffer(11)]],
     const device GPUInstance *previousInstances [[buffer(14)]], constant GPUTemporalParams &temporal [[buffer(15)]],
     device GPUDISurface* output [[buffer(16)]], const device GPUShadowSurface* geometry [[buffer(17)]],
-    constant GPUDIParams& di [[buffer(18)]], texture2d<uint,access::read> visibility [[texture(0)]],
+    constant GPUDIParams& di [[buffer(18)]],
+    device GPULobeGuide* lobeGuide [[buffer(19)]], // F15.1: bound and used only when kMaterialFeatures != 0
+    texture2d<uint,access::read> visibility [[texture(0)]],
     texture2d<float,access::write> motion [[texture(7)]],
     texture2d<float,access::write> fallbackShading [[texture(8)]],
     texture2d<float,access::write> fallbackAlbedo [[texture(9)]],
@@ -389,6 +391,7 @@ kernel void material_lighting_guides(
     if(any(pixel>=uint2(p.width,p.height)))return;
     const uint index=pixel.y*p.width+pixel.x;
     output[index]=GPUDISurface{};motion.write(float4(0),pixel);
+    if(kMaterialFeatures!=0u)lobeGuide[index]=GPULobeGuide{};
     fallbackShading.write(float4(0),pixel);fallbackAlbedo.write(float4(0),pixel);fallbackOcclusion.write(float4(1),pixel);fallbackEmission.write(uint4(0),pixel);
     const uint id=visibility.read(pixel).x;
     if(id==VISIBILITY_BACKGROUND || visibilityCluster(id)>=2u*p.candidateCapacity || !geometry[index].valid)return;
@@ -447,6 +450,7 @@ kernel void material_lighting_guides(
     guide.materialRevision=di.historyEpoch;guide.instanceSlot=candidate.slot;guide.instanceGeneration=instance.generation;guide.valid=1;guide.pad[0]=as_type<uint>(value.occlusion);
     guide.pad[1]=packEmission(value.emission.x,value.emission.y,value.emission.z);
     output[index]=guide;
+    if(kMaterialFeatures!=0u)lobeGuide[index]=lobeGuideRecord(value,di.flags);
     const float3 objectPoint=float3(v0.px,v0.py,v0.pz)*weights.x+float3(v1.px,v1.py,v1.pz)*weights.y+float3(v2.px,v2.py,v2.pz)*weights.z;
     const device GPUInstance& old=previousInstances[candidate.slot];
     const bool valid=temporal.historyValid && old.generation==instance.generation && (old.flags&INSTANCE_FLAG_VALID);

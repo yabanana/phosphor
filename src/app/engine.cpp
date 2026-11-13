@@ -1644,6 +1644,7 @@ bool Engine::frame(float dt) {
     const u64 sceneBytes = renderer_->prepareFrame(*store_, lights_, constants, textures_->tableAddress(), sceneParams);
     constants.materialExtensions = renderer_->materialExtensionsAddress(); // F15.1: after the (re)allocation in prepareFrame
     const bool meshletCheckFrame = mesh_ && options_.debugMeshlets > 0 && (presentedFrames_ + 1) % options_.debugMeshlets == 0;
+    const bool lobeGuideCheckFrame = directLighting_ && options_.debugLobeGuide > 0 && (presentedFrames_ + 1) % options_.debugLobeGuide == 0;
     if (mesh_) {
         MeshRenderer::FrameParams mp;
         mp.slot   = frame.slot;
@@ -1901,6 +1902,12 @@ bool Engine::frame(float dt) {
         if (st.structure) ++ss.structureChanges;
     }
     if (checkScene && !checkGpuScene(frame.slot)) exitCode_ = 1;
+    if (lobeGuideCheckFrame) {
+        // F15.1 (ticket 06): the guide and the DI surfaces of this frame against their CPU reconstruction.
+        PH_ZONE("Lobe guide check");
+        context_->waitIdle();
+        if (!directLighting_->checkLobeGuide(frame.slot, *store_)) exitCode_ = 1;
+    }
     if (rtCheckFrame && !checkRayTracing(frame.slot)) exitCode_ = 1;
     if (visibility_ && options_.debugVisibility) {
         context_->waitIdle();

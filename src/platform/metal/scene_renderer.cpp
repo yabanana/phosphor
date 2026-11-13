@@ -35,7 +35,9 @@ enum Binding : NS::UInteger {
     BindVisible = FORWARD_BIND_VISIBLE,
     BindLightingParams = 9,
     BindLightingTextures = 10,
-    BindCount = 11,
+    BindLobeGuide = 11,       // F15.1: forward_di_receiver_guide_fs (device write), see shaders/forward.metal
+    BindLobeGuideParams = 12, // GPUDIParams of the frame (DI surface width, flags)
+    BindCount = 13,
 };
 
 constexpr u32 kQueues = SCENE_MAX_LEVELS - 1;
@@ -426,6 +428,10 @@ void SceneRenderer::setLightingInputs(MTL::GPUAddress params, MTL::Texture* sun,
     std::memcpy(slice.cpu, handles, sizeof(handles));
     arguments_->setAddress(params, BindLightingParams);
     arguments_->setAddress(slice.gpu, BindLightingTextures);
+}
+void SceneRenderer::setLobeGuideInputs(MTL::GPUAddress guide, MTL::GPUAddress diParams) {
+    arguments_->setAddress(guide, BindLobeGuide);
+    arguments_->setAddress(diParams, BindLobeGuideParams);
 }
 void SceneRenderer::setTemporalInputs(MTL::GPUAddress previousInstances, MTL::GPUAddress temporalParams) {
     arguments_->setAddress(previousInstances, 7);
