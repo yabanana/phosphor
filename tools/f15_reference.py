@@ -57,6 +57,12 @@ KHR_materials_anisotropy (F15.3, ticket 11) is implemented from the ratified tex
 (research/khr-materials.md section 4); the section "KHR_materials_anisotropy" below documents the frame, the interpretation
 choices (tangent source, handedness on mirrored instances, the exact and the declared environment) and the controls.
 
+KHR_materials_iridescence (F15.3, ticket 12) is implemented from the ratified text (research/khr-materials.md section 8): the
+thin-film Fresnel function of the specification is transcribed here from that text, never from the MSL, and checked by an
+independent spectral (Airy, CIE) evaluation in tools/test_f15_reference.py; the section "KHR_materials_iridescence" below
+documents the composition with the base Fresnel, the per-light-sample V.H rule, the exact and the declared environment and the
+controls.
+
 Declared engine conventions (every item is part of the JSON report):
 - roughness clamped to [0.04, 1], alpha = max(roughness^2, 0.002), N.V >= 1e-4.
 - Sun: a disk of uniform radiance and angular radius r (the snapshot's
@@ -138,6 +144,14 @@ MODEL = {
                   "V (no clamp, equal to Appendix B when isotropic); sun: the disk rule with alpha_min = alpha_b; exact environment "
                   "by quadrature of the anisotropic lobe (table over N.V and the azimuth of V against T'); declared environment "
                   "= split sum at an effective roughness (the bent-normal radiance fetch is invisible in a constant environment)",
+    "iridescence": "KHR_materials_iridescence: thin-film Fresnel of the specification (Belcour-Barla analytic form, "
+                   "sensitivity / phase / XYZ-to-Rec709 evaluation, outside ior 1, film ior = iridescenceIor, base_f0 = 0.04 "
+                   "for the dielectric and baseColor for the metal) replaces the Schlick Fresnel with weight "
+                   "s = iridescenceFactor (thickness 0 disables the film): dielectric spec = (1 - s) F_schlick + s F_irid, "
+                   "diffuse = (1 - s) (1 - F_schlick) + s (1 - max F_irid); metal spec = (1 - s) F_schlick + s F_irid; "
+                   "cos(theta1) = V.H per light sample; in the exact environment quadrature F_irid is evaluated inside the "
+                   "integral at each V.H; declared environment: F_irid at N.V as a constant in the split sum (A + B), diffuse "
+                   "1 - max of the specular albedo",
     "shadows": "none",
     "declared_environment": "(1 - metallic) * baseColor * (1 - (0.04 A + B)) + clamp(f0 A + B, 0, 1), (A, B) from the "
                             "engine DFG table (bilinear), f0 = mix(0.04, baseColor, metallic), roughness in [0.04, 1]; "
@@ -187,7 +201,19 @@ ANISO_CONTROLS = {
     "aniso-mirror-unaware": {"aniso": "mirror-unaware"},            # the determinant of the world matrix ignored
     "aniso-d-normalised-by-ab": {"aniso": "d-normalised-by-ab"},    # D prefactor 1/(pi alpha_b^2): gains energy
 }
-ALL_CONTROLS = sorted({**CONTROLS, **SHEEN_CONTROLS, **ANISO_CONTROLS})
+# F15.3 (ticket 12) negative controls of the iridescence grids (deltas on the scene's main model; the iridescence fixtures are
+# iridescence-only, so that is Appendix B).  `thickness-max` of the ticket text (thickness = maximum whatever the texture) is the
+# specification itself on texture-free fixtures (thickness = mix(min, max, 1) = max): it cannot fail there and is OPEN for the
+# textured case (ticket 22); `thickness-min` is its texture-free counterpart (the minimum used as the thickness).
+IRID_CONTROLS = {
+    "iridescence-ignored": {"irid": "ignored"},                      # factor 0: the base model (the engine before ticket 12)
+    "iridescence-film-ior-ignored": {"irid": "film-ior-ignored"},    # film ior = outside ior 1.0 (no index contrast on top)
+    "iridescence-film-ior-default": {"irid": "film-ior-default"},    # film ior = the default 1.3 whatever the material says
+    "iridescence-at-nv": {"irid": "at-nv"},                          # N.V instead of V.H per light sample (Sample Renderer)
+    "iridescence-thickness-min": {"irid": "thickness-min"},          # the minimum thickness used instead of the maximum
+    "iridescence-diffuse-unweighted": {"irid": "diffuse-unweighted"},  # diffuse not scaled by 1 - max F_irid: gains energy
+}
+ALL_CONTROLS = sorted({**CONTROLS, **SHEEN_CONTROLS, **ANISO_CONTROLS, **IRID_CONTROLS})
 
 
 def control_model(name, main_model):
@@ -197,6 +223,8 @@ def control_model(name, main_model):
         return {**main_model, **SHEEN_CONTROLS[name]}
     if name in ANISO_CONTROLS:
         return {**main_model, **ANISO_CONTROLS[name]}
+    if name in IRID_CONTROLS:
+        return {**main_model, **IRID_CONTROLS[name]}
     return CONTROLS[name]
 
 
@@ -736,13 +764,174 @@ def declared_aniso_alpha(at, ab, kind="spec"):
     return np.sqrt(0.5 * (np.asarray(at, dtype=np.float64) ** 2 + np.asarray(ab, dtype=np.float64) ** 2))
 
 
-def lobe_weights(base, metallic, v_dot_h, model=APPENDIX_B, dielectric=None):
+# --- KHR_materials_iridescence -------------------------------------------------
+#
+# Source: the ratified text and the README's informative GLSL (research/khr-materials.md section 8), transcribed below into numpy.
+# * strength s = iridescenceFactor (x iridescenceTexture.r: textures are refused), thickness = mix(min, max, thicknessTexture.g)
+#   in nm = the MAXIMUM when there is no thickness texture; the Minimum may exceed the Maximum.
+# * Thickness 0 disables the film (convention of the viewers and of the ticket: the closed form at d = 0 is close to, not equal to,
+#   the Schlick Fresnel; the strength is forced to 0 there so the material is EXACTLY the base model, asserted in the tests).
+# * Composition (README "iridescent_dielectric_layer" / "iridescent_conductor_layer", outside ior 1, base ior 1.5 so base_f0 = 0.04):
+#     dielectric: mix(fresnel_mix(base, specular), rgb_mix(base, specular, F_irid), s), rgb_mix(b, sp, a) = (1 - max(a)) b + a sp
+#                 -> spec weight (1 - s) F_schlick + s F_irid (per channel), diffuse weight (1 - s) (1 - F_schlick) + s (1 - max F_irid)
+#     metal:      mix(conductor_fresnel(base_f0, specular), specular * F_irid(base_f0 = baseColor), s)
+#   F_irid = thin-film Fresnel evaluated at cos(theta1) = V.H of the light sample (direct sun: the disk rule keys on alpha,
+#   unchanged, so the V.H of every disk sample; point lights: V.H of the light direction).
+# * Exact environment: the quadrature integrates F_irid INSIDE the integral at each V.H (decision 06: the declared
+#   engine model evaluates it ONCE at N.V; the exact reference is the one that integrates at V.H).  Implemented through
+#   histograms of the quadrature weights over V.H (shared by every material of one alpha): integral = histogram . F(bin).
+#   DECLARED environment (decision 06 "thin-film Fresnel at N.V"): the split sum with F_irid(N.V) constant over the lobe,
+#   specular albedo F_irid(N.V) clamp(A + B, 0, 1) at the material roughness, diffuse weight 1 - max of that albedo (the rule
+#   the F13 composite applies to every extended lobe, "extension_diffuse").
+# * Refused: textures (words 7, 8: the thickness texture case is OPEN for ticket 22), combinations with other features.
+
+IRIDESCENCE_FEATURE_BIT = 16   # MaterialFeature::Iridescence
+IRIDESCENCE_RECORD = 1         # GPUMaterialExt1: factor word 3, ior 4, thicknessMin 5, thicknessMax 6, factor tex 7, thickness tex 8
+IRID_OUTSIDE_IOR = 1.0
+IRID_DEFAULT_IOR = 1.3
+IRID_VARIANTS = ("spec", "ignored", "film-ior-ignored", "film-ior-default", "at-nv", "thickness-min", "diffuse-unweighted")
+IRID_BINS = 2048               # V.H bins of the environment histograms (linear splitting)
+IRID_MU_NODES = 129            # N.V nodes of the iridescent environment tables
+
+# The specification's constants, verbatim (evalSensitivity and XYZ_TO_REC709).
+_SENS_VAL = np.array([5.4856e-13, 4.4201e-13, 5.2481e-13])
+_SENS_POS = np.array([1.6810e+06, 1.7953e+06, 2.2084e+06])
+_SENS_VAR = np.array([4.3278e+09, 9.3046e+09, 6.6121e+09])
+# GLSL mat3(...) is column-major: rgb = x * (3.2404542, -0.9692660, 0.0556434) + y * (-1.5371385, 1.8760108, -0.2040259) + z * (...)
+_XYZ_TO_REC709 = np.array([[3.2404542, -1.5371385, -0.4985314],
+                           [-0.9692660, 1.8760108, 0.0415560],
+                           [0.0556434, -0.2040259, 1.0572252]])
+
+
+def ior_to_fresnel0(transmitted, incident):
+    """IorToFresnel0 of the README: ((transmitted - incident) / (transmitted + incident))^2."""
+    return ((transmitted - incident) / (transmitted + incident)) ** 2
+
+
+def fresnel0_to_ior(f0):
+    """Fresnel0ToIor of the README: (1 + sqrt(f0)) / (1 - sqrt(f0))."""
+    root = np.sqrt(f0)
+    return (1.0 + root) / (1.0 - root)
+
+
+def schlick_f(f0, cos_theta):
+    """F_Schlick of the README: f0 + (1 - f0) (1 - cos)^5."""
+    return f0 + (1.0 - f0) * (1.0 - cos_theta) ** 5
+
+
+def eval_sensitivity(opd, shift):
+    """evalSensitivity(OPD, shift) of the README: the Rec709 RGB sensitivity of an optical path difference `opd` (nm, (n,))
+    with the per-channel phase `shift` ((n, 3)); the matrix product is the GLSL `XYZ_TO_REC709 * xyz`."""
+    phase = (2.0 * math.pi * np.asarray(opd, dtype=np.float64) * 1e-9)[..., None]
+    xyz = _SENS_VAL * np.sqrt(2.0 * math.pi * _SENS_VAR) * np.cos(_SENS_POS * phase + shift) * np.exp(-(phase * phase) * _SENS_VAR)
+    xyz[..., 0] += (9.7470e-14 * math.sqrt(2.0 * math.pi * 4.5282e+09) * np.cos(2.2399e+06 * phase[..., 0] + shift[..., 0]) *
+                    np.exp(-4.5282e+09 * phase[..., 0] ** 2))
+    xyz = xyz / 1.0685e-7
+    return xyz @ _XYZ_TO_REC709.T
+
+
+def thin_film_fresnel(cos_theta1, film_ior, thickness, base_f0, outside_ior=IRID_OUTSIDE_IOR, phase_shifts=True):
+    """The specification's iridescent Fresnel (README "Iridescence Fresnel", Belcour-Barla 2017): (n, 3).
+
+    cos_theta1 (n,) in [0, 1]; film_ior (n,); thickness (n,) in nm; base_f0 (n, 3).  The base ior comes from f0 + 0.0001 (the
+    README), kept below 0.9999 so that a white metal (f0 = 1) gives the finite ior 4e4 instead of a division by zero.
+    `phase_shifts` False is the test-only wrong model whose reflection phases are all zero."""
+    cos1 = np.clip(np.asarray(cos_theta1, dtype=np.float64), 0.0, 1.0)
+    film = np.asarray(film_ior, dtype=np.float64)
+    base_f0 = np.asarray(base_f0, dtype=np.float64)
+    r0 = ior_to_fresnel0(film, outside_ior)
+    r12 = schlick_f(r0, cos1)
+    r21 = r12
+    t121 = 1.0 - r12
+    base_ior = fresnel0_to_ior(np.minimum(base_f0 + 0.0001, 0.9999))
+    r1 = ior_to_fresnel0(base_ior, film[..., None])
+    sin_theta2_sq = (outside_ior / film) ** 2 * (1.0 - cos1 * cos1)
+    cos_theta2_sq = 1.0 - sin_theta2_sq
+    total_reflection = cos_theta2_sq < 0.0
+    cos2 = np.sqrt(np.maximum(cos_theta2_sq, 0.0))
+    r23 = schlick_f(r1, cos2[..., None])
+    opd = 2.0 * film * np.asarray(thickness, dtype=np.float64) * cos2
+    phi12 = np.where(film < outside_ior, math.pi, 0.0)
+    phi21 = math.pi - phi12
+    phi23 = np.where(base_ior < film[..., None], math.pi, 0.0)
+    phi = phi21[..., None] + phi23
+    if not phase_shifts:
+        phi = np.zeros_like(phi)
+    r123 = np.clip(r12[..., None] * r23, 1e-5, 0.9999)
+    root123 = np.sqrt(r123)
+    rs = (t121 * t121)[..., None] * r23 / (1.0 - r123)
+    c0 = r21[..., None] + rs
+    total = c0
+    cm = rs - t121[..., None]
+    for m in (1, 2):
+        cm = cm * root123
+        total = total + cm * (2.0 * eval_sensitivity(m * opd, m * phi))
+    return np.where(total_reflection[..., None], 1.0, np.maximum(total, 0.0))
+
+
+def take_irid(irid, sel):
+    """The per-pixel arrays of `irid` restricted to the pixel indices `sel` (None stays None)."""
+    if irid is None:
+        return None
+    return {k: (v[sel] if isinstance(v, np.ndarray) else v) for k, v in irid.items()}
+
+
+def irid_film_ior(irid):
+    """Film ior per pixel under the variant (controls: the outside ior 1.0, or the default 1.3)."""
+    variant = irid["variant"]
+    if variant == "film-ior-ignored":
+        return np.full_like(irid["ior"], IRID_OUTSIDE_IOR)
+    if variant == "film-ior-default":
+        return np.full_like(irid["ior"], IRID_DEFAULT_IOR)
+    return irid["ior"]
+
+
+def irid_thickness(irid):
+    """Thickness (nm) per pixel: thickness = mix(min, max, 1) = max without a thickness texture (control: the minimum)."""
+    return irid["thickness_min"] if irid["variant"] == "thickness-min" else irid["thickness"]
+
+
+def irid_strength(irid):
+    """s per pixel: iridescenceFactor, 0 under `ignored`, and 0 where the thickness is 0 (the film is disabled)."""
+    s = np.zeros_like(irid["strength"]) if irid["variant"] == "ignored" else irid["strength"]
+    return np.where(irid_thickness(irid) > 0.0, s, 0.0)
+
+
+def irid_fresnel(irid, base_f0, cos_theta1):
+    """F_irid (n, 3) of the pixels at `cos_theta1` (V.H per light sample; the `at-nv` control uses N.V)."""
+    cos1 = irid["nv"] if irid["variant"] == "at-nv" else cos_theta1
+    return thin_film_fresnel(cos1, irid_film_ior(irid), irid_thickness(irid), base_f0)
+
+
+def irid_lobe_weights(base, metallic, v_dot_h, irid, model=APPENDIX_B):
+    """(diffuse multiplier per channel, specular multiplier per channel) of an iridescent material at one V.H (see above)."""
+    if model["weighting"] != "appendix-b":
+        raise ValueError("iridescence is modelled on the Appendix B weighting only")
+    w = schlick_weight(v_dot_h, model)[..., None]
+    m = np.asarray(metallic, dtype=np.float64)[..., None]
+    s = irid_strength(irid)[..., None]
+    f_dielectric = DIELECTRIC_F0 + (1 - DIELECTRIC_F0) * w
+    f_metal = base + (1 - base) * w
+    cos1 = np.asarray(v_dot_h, dtype=np.float64)
+    film_dielectric = irid_fresnel(irid, np.full(base.shape, DIELECTRIC_F0), cos1)
+    film_metal = irid_fresnel(irid, base, cos1)
+    film_weight = np.ones_like(f_dielectric) if irid["variant"] == "diffuse-unweighted" else \
+        1.0 - np.max(film_dielectric, axis=-1, keepdims=True)
+    diffuse = (1 - m) * ((1 - s) * (1.0 - f_dielectric) + s * film_weight)
+    specular = (1 - m) * ((1 - s) * f_dielectric + s * film_dielectric) + m * ((1 - s) * f_metal + s * film_metal)
+    return diffuse, specular
+
+
+def lobe_weights(base, metallic, v_dot_h, model=APPENDIX_B, dielectric=None, irid=None):
     """(diffuse multiplier per channel, specular multiplier per channel) at one V.H.
 
     f = diffuse_multiplier * base/pi-style term + specular_multiplier * D * Vis; the
     diffuse multiplier already contains (1 - metallic) and the Fresnel weighting.
     `dielectric` (F15.1): per-pixel {"f0" (n,3), "weight" (n,), "variant"} of KHR_materials_ior/specular.
+    `irid` (F15.3, ticket 12): per-pixel dict of the iridescence section (the thin-film Fresnel replaces Schlick).
     """
+    if irid is not None:
+        return irid_lobe_weights(base, metallic, v_dot_h, irid, model)
     w = schlick_weight(v_dot_h, model)[..., None]
     m = np.asarray(metallic, dtype=np.float64)[..., None]
     if dielectric is not None:
@@ -760,7 +949,7 @@ def lobe_weights(base, metallic, v_dot_h, model=APPENDIX_B, dielectric=None):
     return diffuse, specular
 
 
-def bsdf(base, metallic, roughness, n, v, l, model=APPENDIX_B, dielectric=None, coat=None, sheen=None, aniso=None):
+def bsdf(base, metallic, roughness, n, v, l, model=APPENDIX_B, dielectric=None, coat=None, sheen=None, aniso=None, irid=None):
     """BSDF value f (without the cosine) for world unit vectors; (n, 3) arrays or broadcastable.
 
     `sheen` (F15.3, ticket 10, per-pixel {"color", "roughness", "variant"} of KHR_materials_sheen): the material under
@@ -775,7 +964,7 @@ def bsdf(base, metallic, roughness, n, v, l, model=APPENDIX_B, dielectric=None, 
     h = normalize(v + l)
     n_dot_h = np.clip(dot(n, h), 0.0, 1.0)
     v_dot_h = dot(v, h)
-    diffuse_w, specular_w = lobe_weights(base, metallic, v_dot_h, model, dielectric)
+    diffuse_w, specular_w = lobe_weights(base, metallic, v_dot_h, model, dielectric, irid)
     if aniso is None:
         spec = (ggx_d(n_dot_h, alpha) * smith_vis(n_dot_v, np.maximum(n_dot_l, 0.0), alpha))[..., None]
     else:  # F15.3 (ticket 11): the anisotropic lobe replaces D V (Fresnel and the diffuse weighting are unchanged)
@@ -819,7 +1008,7 @@ def sun_disk_samples(l, radius, count):
 
 
 def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius, model=APPENDIX_B, dielectric=None,
-                 coat=None, sheen=None, aniso=None):
+                 coat=None, sheen=None, aniso=None, irid=None):
     """Outgoing radiance per pixel from the sun disk; returns (radiance (n,3), narrow (n,)).
 
     `sheen` (F15.3, ticket 10): the material terms are scaled by the albedo scaling at the disk centre and the sheen
@@ -838,7 +1027,7 @@ def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius
     # Diffuse: centre of the disk.
     n_dot_l = np.clip(dot(n, np.broadcast_to(l, n.shape)), 0.0, 1.0)
     h_c = normalize(v + l)
-    diffuse_w, _ = lobe_weights(base, metallic, dot(v, h_c), model, dielectric)
+    diffuse_w, _ = lobe_weights(base, metallic, dot(v, h_c), model, dielectric, irid)
     total = np.where((n_dot_l > 0)[..., None], diffuse_w * base / math.pi * n_dot_l[..., None], 0.0)
     coat_c = None
     if coat is not None:
@@ -854,7 +1043,7 @@ def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius
             nl = np.clip(dot(n[sel], lk), 0.0, 1.0)
             h = normalize(v[sel] + lk)
             nh = np.clip(dot(n[sel], h), 0.0, 1.0)
-            _, specular_w = lobe_weights(base[sel], metallic[sel], dot(v[sel], h), model, take(dielectric, sel))
+            _, specular_w = lobe_weights(base[sel], metallic[sel], dot(v[sel], h), model, take(dielectric, sel), take_irid(irid, sel))
             if aniso is None:
                 lobe = ggx_d(nh, alpha[sel]) * smith_vis(n_dot_v[sel], nl, alpha[sel])
             else:  # F15.3 (ticket 11): the disk rule keys on alpha_b = alpha (unchanged), the lobe is anisotropic
@@ -903,7 +1092,7 @@ def point_window(distance, light_range):
 
 
 def point_radiance(base, metallic, roughness, n, v, position, light, model=APPENDIX_B, dielectric=None, visible=None,
-                   coat=None, sheen=None, aniso=None):
+                   coat=None, sheen=None, aniso=None, irid=None):
     """Outgoing radiance per pixel from one white delta point light; returns (radiance (n,3), lit (n,))."""
     delta = np.asarray(light["position"], dtype=np.float64)[None, :] - position
     distance = np.linalg.norm(delta, axis=1)
@@ -911,7 +1100,7 @@ def point_radiance(base, metallic, roughness, n, v, position, light, model=APPEN
     geometry = point_window(distance, light["range"]) / np.maximum(distance * distance, 1e-4)
     incident = np.asarray(light["color"], dtype=np.float64)[None, :] * float(light["intensity"]) * geometry[:, None]
     n_dot_l = np.clip(dot(n, l), 0.0, 1.0)
-    value = bsdf(base, metallic, roughness, n, v, l, model, dielectric, coat, sheen, aniso) * n_dot_l[:, None] * incident
+    value = bsdf(base, metallic, roughness, n, v, l, model, dielectric, coat, sheen, aniso, irid) * n_dot_l[:, None] * incident
     lit = dot(n, l) > 0
     if visible is not None:
         value = value * visible[:, None]
@@ -991,7 +1180,108 @@ def extension_diffuse_table(c0, c1, model=APPENDIX_B):
     return _EXTENSION_DIFFUSE[key]
 
 
-def environment_radiance(base, metallic, roughness, n_dot_v, radiance, model=APPENDIX_B, dielectric=None, aniso_env=None):
+_IRID_HIST = {}
+
+
+def _vh_histogram(vh, weight):
+    """Linear-splitting histogram of `weight` over V.H in [0, 1] (IRID_BINS bins): sum_k hist[k] F(k / (bins - 1)) is the
+    quadrature of F(V.H) weight."""
+    x = np.clip(vh.reshape(-1), 0.0, 1.0) * (IRID_BINS - 1)
+    i0 = np.minimum(np.floor(x).astype(np.int64), IRID_BINS - 2)
+    f = x - i0
+    w = weight.reshape(-1)
+    return np.bincount(i0, w * (1 - f), minlength=IRID_BINS) + np.bincount(i0 + 1, w * f, minlength=IRID_BINS)
+
+
+def irid_histograms(alpha):
+    """(mus, spec_hist (mu, bins), diffuse_hist (mu, bins), cu (mu,)) of the environment quadrature of one alpha, the weights of
+    `_spec_integrals` (D Vis cos over the GGX half-vector CDF) and of `_diffuse_integral` (cos / pi, Gauss-Legendre in cos) binned by
+    V.H: the quadrature of any F(V.H) is a dot product with these (the Schlick weight (1 - w) A and w B split is the special case)."""
+    key = round(float(alpha), 12)
+    if key not in _IRID_HIST:
+        mus = np.linspace(MIN_NDOTV, 1.0, IRID_MU_NODES)
+        u = (np.arange(U_NODES) + 0.5) / U_NODES
+        phi = (np.arange(PHI_NODES) + 0.5) * (2 * math.pi / PHI_NODES)
+        cos_h = np.sqrt((1 - u) / (1 + (alpha * alpha - 1) * u))
+        sin_h = np.sqrt(np.maximum(0.0, 1 - cos_h ** 2))
+        x, gwt = np.polynomial.legendre.leggauss(DIFFUSE_MU_NODES)
+        cos_i = 0.5 * (x + 1.0)
+        gwt = 0.5 * gwt
+        phi_d = (np.arange(DIFFUSE_PHI_NODES) + 0.5) * (2 * math.pi / DIFFUSE_PHI_NODES)
+        sin_i = np.sqrt(1 - cos_i ** 2)
+        spec = np.empty((len(mus), IRID_BINS))
+        diffuse = np.empty((len(mus), IRID_BINS))
+        cu = np.empty(len(mus))
+        for k, mu in enumerate(mus):
+            wo = np.array([math.sqrt(max(0.0, 1 - mu * mu)), 0.0, mu])
+            vh = sin_h[:, None] * np.cos(phi)[None, :] * wo[0] + cos_h[:, None] * wo[2]
+            wi_z = 2 * vh * cos_h[:, None] - wo[2]
+            valid = (wi_z > 0) & (vh > 0)
+            vis = smith_vis(mu, np.maximum(wi_z, 0.0), alpha)
+            weight = np.where(valid, vis * wi_z * 4 * vh / cos_h[:, None], 0.0) / (U_NODES * PHI_NODES)
+            spec[k] = _vh_histogram(vh, weight)
+            wi_dot_wo = sin_i[:, None] * np.cos(phi_d)[None, :] * wo[0] + cos_i[:, None] * wo[2]
+            vh_d = np.sqrt(np.clip((1 + wi_dot_wo) / 2, 0.0, 1.0))
+            weight_d = np.broadcast_to((cos_i * 2 * math.pi * gwt / math.pi / DIFFUSE_PHI_NODES)[:, None], vh_d.shape)
+            diffuse[k] = _vh_histogram(vh_d, weight_d)
+            cu[k] = diffuse[k].sum()
+        _IRID_HIST[key] = (mus, spec, diffuse, cu)
+    return _IRID_HIST[key]
+
+
+_IRID_TABLE = {}
+
+
+def irid_environment_table(alpha, film_ior, thickness, f0, variant):
+    """(mus, spec (mu, 3), diffuse (mu,)): the exact directional integrals of the thin-film Fresnel over N.V for one film
+    (alpha, film ior, thickness nm, base f0 (3,)): spec = integral of D Vis cos F_irid(V.H), diffuse = integral of
+    (1 - max F_irid(V.H)) cos / pi (`diffuse-unweighted`: cos / pi alone)."""
+    key = (round(float(alpha), 12), round(float(film_ior), 9), round(float(thickness), 9), tuple(np.round(f0, 12)), variant)
+    if key not in _IRID_TABLE:
+        mus, spec_hist, diffuse_hist, cu = irid_histograms(alpha)
+        bins = np.linspace(0.0, 1.0, IRID_BINS)
+        film = thin_film_fresnel(bins, np.full(IRID_BINS, film_ior), np.full(IRID_BINS, thickness),
+                                 np.broadcast_to(np.asarray(f0, dtype=np.float64), (IRID_BINS, 3)))
+        diffuse = cu if variant == "diffuse-unweighted" else diffuse_hist @ (1.0 - film.max(axis=-1))
+        _IRID_TABLE[key] = (mus, spec_hist @ film, diffuse)
+    return _IRID_TABLE[key]
+
+
+def irid_environment_value(base, metallic, mu, alpha, a, b, cd, irid):
+    """Exact environment value (n, 3) for unit radiance of iridescent pixels sharing one alpha (a, b, cd: the base tables'
+    A, B and diffuse (n, 1) at the pixels' N.V).  `at-nv` (control and declared model alike) evaluates F_irid once at N.V:
+    spec F (A + B), diffuse (1 - max F) integral of cos / pi without the Fresnel (the F_irid constant over the lobe)."""
+    n = len(mu)
+    s = irid_strength(irid)[:, None]
+    m = np.asarray(metallic, dtype=np.float64)[:, None]
+    film_ior, thickness = irid_film_ior(irid), irid_thickness(irid)
+    spec_d, spec_m = np.empty((n, 3)), np.empty((n, 3))
+    diff_d = np.empty((n, 1))
+    if irid["variant"] == "at-nv":
+        fd = thin_film_fresnel(irid["nv"], film_ior, thickness, np.full((n, 3), DIELECTRIC_F0))
+        fm = thin_film_fresnel(irid["nv"], film_ior, thickness, base)
+        _, _, _, cu_t = irid_histograms(alpha)
+        cu = np.interp(mu, np.linspace(MIN_NDOTV, 1.0, IRID_MU_NODES), cu_t)[:, None]
+        spec_d, spec_m = fd * (a + b), fm * (a + b)
+        diff_d = (1.0 - fd.max(axis=-1, keepdims=True)) * cu
+    else:
+        pairs = np.concatenate([film_ior[:, None], thickness[:, None], base], axis=1)
+        for key in np.unique(np.round(pairs, 9), axis=0):
+            pick = np.flatnonzero(np.all(np.round(pairs, 9) == key, axis=1))
+            for target, f0 in ((spec_d, np.full(3, DIELECTRIC_F0)), (spec_m, key[2:])):
+                mus, spec, diffuse = irid_environment_table(alpha, key[0], key[1], f0, irid["variant"])
+                for c in range(3):
+                    target[pick, c] = np.interp(mu[pick], mus, spec[:, c])
+            mus, _, diffuse = irid_environment_table(alpha, key[0], key[1], np.full(3, DIELECTRIC_F0), irid["variant"])
+            diff_d[pick, 0] = np.interp(mu[pick], mus, diffuse)
+    f_d_schlick = DIELECTRIC_F0 * a + b
+    dielectric = (1 - s) * (base * cd + f_d_schlick) + s * (base * diff_d + spec_d)
+    metal = (1 - s) * (base * a + b) + s * spec_m
+    return (1 - m) * dielectric + m * metal
+
+
+def environment_radiance(base, metallic, roughness, n_dot_v, radiance, model=APPENDIX_B, dielectric=None, aniso_env=None,
+                         irid_env=None):
     """Outgoing radiance (n, 3) under a constant isotropic environment of radiance `radiance`.
 
     `dielectric` (F15.1, per-pixel {"f0", "weight", "variant"} of KHR_materials_ior/specular): the exact quadrature of
@@ -1036,6 +1326,14 @@ def environment_radiance(base, metallic, roughness, n_dot_v, radiance, model=APP
         dielectric_value = diffuse + DIELECTRIC_F0 * a + b
         metal = c * a + b
         result[sel] = (1 - m) * dielectric_value + m * metal
+        if irid_env is not None:  # F15.3 (ticket 12): the pixels whose film is active integrate the thin-film Fresnel
+            sub = take_irid(irid_env, sel)
+            active = np.flatnonzero(irid_strength(sub) > 0.0)
+            if active.size:
+                part = take_irid(sub, active)
+                result[sel[active]] = irid_environment_value(c[active], m[active, 0], mu[sel][active],
+                                                             float(effective_alpha(r, model)), a[active], b[active],
+                                                             cd[active], part)
     return result * radiance
 
 
@@ -1049,7 +1347,7 @@ _DFG = {}
 # 1 - max(E_dielectric) of its own specular lobe ("extension", the engine's state). "composite-base" (the weight
 # 1 - E(0.04) of the base model, the engine's state before ticket 08) is kept as a negative control.
 DECLARED = {"albedo": "dfg-table", "diffuse": "one-minus-dielectric-albedo", "dielectric": "extension",
-            "extension_diffuse": "extension", "coat": "spec", "sheen": "spec", "aniso": "spec"}
+            "extension_diffuse": "extension", "coat": "spec", "sheen": "spec", "aniso": "spec", "irid": "spec"}
 # Deliberately wrong variants that the declared-model gate must reject.
 DECLARED_CONTROLS = {
     "declared-diffuse-unweighted": {**DECLARED, "diffuse": "unweighted"},            # no (1 - E) weight
@@ -1086,8 +1384,16 @@ ANISO_DECLARED_CONTROLS = {
     "declared-aniso-ignored": {**DECLARED, "aniso": "ignored"},      # alpha_eff = alpha_b: the engine before ticket 11
     "declared-aniso-alpha-t": {**DECLARED, "aniso": "alpha-t"},      # alpha_eff = alpha_t: the stretched axis only
 }
+# F15.3 (ticket 12): negative controls of the iridescence grids of the deterministic resolve.  The split-sum model evaluates
+# the film at N.V by construction (decision 06), so `at-nv` has no declared counterpart.
+IRID_DECLARED_CONTROLS = {
+    "declared-iridescence-ignored": {**DECLARED, "irid": "ignored"},                  # the engine before ticket 12
+    "declared-iridescence-film-ior-ignored": {**DECLARED, "irid": "film-ior-ignored"},
+    "declared-iridescence-film-ior-default": {**DECLARED, "irid": "film-ior-default"},
+    "declared-iridescence-diffuse-unweighted": {**DECLARED, "irid": "diffuse-unweighted"},
+}
 ALL_DECLARED_CONTROLS = {**DECLARED_CONTROLS, **SPECULAR_DECLARED_CONTROLS, **COAT_DECLARED_CONTROLS,
-                         **SHEEN_DECLARED_CONTROLS, **ANISO_DECLARED_CONTROLS}
+                         **SHEEN_DECLARED_CONTROLS, **ANISO_DECLARED_CONTROLS, **IRID_DECLARED_CONTROLS}
 
 
 def load_dfg_table(path=DFG_HEADER):
@@ -1183,8 +1489,11 @@ def karis_ab(n_dot_v, roughness):
 
 
 def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, variant=DECLARED, dielectric=None,
-                                  coat=None, sheen=None, aniso=None):
+                                  coat=None, sheen=None, aniso=None, irid=None):
     """Outgoing radiance (n, 3) of the engine's declared environment model (see the module docstring).
+
+    `irid` (F15.3, ticket 12, per-pixel dict of the iridescence section; variant["irid"] names the control): the iridescent pixels
+    use declared_irid_environment (the split sum with the thin-film Fresnel at N.V).
 
     `dielectric` (F15.1): per-pixel {"f0", "weight"} of KHR_materials_ior/specular (variant["dielectric"] picks the
     model or one of its wrong controls): E_d = f0_scaled * A + f90 * B per lobe, diffuse weight 1 - max(E_d).
@@ -1202,6 +1511,8 @@ def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, 
         alpha_eff = declared_aniso_alpha(at, ab, variant.get("aniso", "spec"))
         roughness = np.where(alpha_eff == ab, np.asarray(roughness, dtype=np.float64), np.sqrt(alpha_eff))
     material = _declared_material_radiance(base, metallic, roughness, n_dot_v, variant, dielectric)
+    if irid is not None:
+        material = declared_irid_environment(material, base, metallic, roughness, n_dot_v, irid)
     if sheen is not None:
         material = declared_sheen_environment(material, n_dot_v, sheen, variant)
     if coat is not None:
@@ -1215,6 +1526,30 @@ def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, 
         material = (coat_attenuation(coat, c, fc)[:, None] * material +
                     (c * fc * np.clip(a_c + b_c, 0.0, 1.0))[:, None])
     return material * radiance
+
+
+def declared_irid_environment(material, base, metallic, roughness, n_dot_v, irid):
+    """The declared iridescence model for unit radiance (decision 06): pixels whose film is active use the split sum with the
+    thin-film Fresnel evaluated ONCE at N.V and held constant over the lobe, E_irid = clamp(F_irid(N.V) clamp(A + B, 0, 1), 0, 1)
+    (A, B at the material roughness, `dfg_lookup`); diffuse weight 1 - max(E_irid) (the composite's rule for an extended lobe).
+        dielectric = (1 - s) (c (1 - E_s) + E_s) + s (c (1 - max E_irid) + E_irid),   E_s = clamp(0.04 A + B, 0, 1)
+        metal      = (1 - s) clamp(c A + B, 0, 1) + s E_irid(base_f0 = c)
+    `material` keeps the pixels whose strength is 0 (the declared model of the base)."""
+    mu = np.maximum(np.asarray(n_dot_v, dtype=np.float64), MIN_NDOTV)
+    a, b = dfg_lookup(mu, clamp_roughness(roughness))
+    a, b = a[:, None], b[:, None]
+    s = irid_strength(irid)[:, None]
+    m = np.asarray(metallic, dtype=np.float64)[:, None]
+    film, thickness = irid_film_ior(irid), irid_thickness(irid)
+    carry = np.clip(a + b, 0.0, 1.0)
+    e_d = np.clip(thin_film_fresnel(mu, film, thickness, np.full(base.shape, DIELECTRIC_F0)) * carry, 0.0, 1.0)
+    e_m = np.clip(thin_film_fresnel(mu, film, thickness, base) * carry, 0.0, 1.0)
+    e_ds = np.clip(DIELECTRIC_F0 * a + b, 0.0, 1.0)
+    e_ms = np.clip(base * a + b, 0.0, 1.0)
+    weight = np.ones_like(a) if irid["variant"] == "diffuse-unweighted" else 1.0 - np.max(e_d, axis=-1, keepdims=True)
+    dielectric = (1 - s) * (base * (1 - e_ds) + e_ds) + s * (base * weight + e_d)
+    metal = (1 - s) * e_ms + s * e_m
+    return np.where(s > 0.0, (1 - m) * dielectric + m * metal, material)
 
 
 def _declared_material_radiance(base, metallic, roughness, n_dot_v, variant, dielectric):
@@ -1439,9 +1774,9 @@ def material_extension_words(data, material):
     bits = int(material.get("feature_bits", 0))
     if bits == 0:
         return None
-    if bits & ~(SPECULAR_FEATURE_BIT | CLEARCOAT_FEATURE_BIT | SHEEN_FEATURE_BIT | ANISOTROPY_FEATURE_BIT):
+    if bits & ~(SPECULAR_FEATURE_BIT | CLEARCOAT_FEATURE_BIT | SHEEN_FEATURE_BIT | ANISOTROPY_FEATURE_BIT | IRIDESCENCE_FEATURE_BIT):
         raise ValueError(f"material feature bits {bits:#x} are outside the declared "
-                         "ior/specular/clearcoat/sheen/anisotropy model")
+                         "ior/specular/clearcoat/sheen/anisotropy/iridescence model")
     words = data["material_extensions"]["records"][int(material["extension_index"])]
     if len(words) != EXTENSION_RECORD_WORDS:
         raise ValueError("a material extension record must hold 20 words")
@@ -1505,6 +1840,28 @@ def material_anisotropy(data, material):
     return f32(words[0]), f32(words[1])
 
 
+def material_iridescence(data, material):
+    """(iridescenceFactor, iridescenceIor, thicknessMinimum, thicknessMaximum) from words 3-6 of record 1 (GPUMaterialExt1) of the
+    material's extension group, or None without the iridescence feature bit.  Raises when the factor or thickness texture (words 7
+    and 8) is set (the reference is texture-free: the thickness texture case is open for ticket 22) and when the material carries
+    another feature (the combinations are not modelled)."""
+    bits = int(material.get("feature_bits", 0))
+    if not bits & IRIDESCENCE_FEATURE_BIT:
+        return None
+    if bits & ~IRIDESCENCE_FEATURE_BIT:
+        raise ValueError("iridescence combined with another material feature is outside the declared model")
+    words = data["material_extensions"]["records"][int(material["extension_index"]) + IRIDESCENCE_RECORD]
+    if len(words) != EXTENSION_RECORD_WORDS:
+        raise ValueError("a material extension record must hold 20 words")
+    if int(words[7]) != INVALID or int(words[8]) != INVALID:
+        raise ValueError("an iridescence or thickness texture is set; the reference is texture-free")
+    return f32(words[3]), f32(words[4]), f32(words[5]), f32(words[6])
+
+
+def uses_iridescence(data):
+    return any(int(m.get("feature_bits", 0)) & IRIDESCENCE_FEATURE_BIT for m in data["materials"])
+
+
 def uses_anisotropy(data):
     return any(int(m.get("feature_bits", 0)) & ANISOTROPY_FEATURE_BIT for m in data["materials"])
 
@@ -1527,6 +1884,7 @@ def sphere_table(data):
     uses_coat = uses_clearcoat(data)
     uses_sheen_scene = uses_sheen(data)
     uses_aniso = uses_anisotropy(data)
+    uses_irid = uses_iridescence(data)
     for k, inst in enumerate(data["instances"]):
         material = data["materials"][inst["material"]]
         entry = {"instance": k, "slot": inst["slot"], "base": material["base"][:3],
@@ -1554,8 +1912,22 @@ def sphere_table(data):
             det = float(np.sign(np.linalg.det(instance_matrix(inst)[:3, :3])))
             entry.update(anisotropy=aniso[0], anisotropy_rotation=aniso[1], mirrored=bool(det < 0),
                          group=f"metallic {entry['metallic']:g} anisotropy {aniso[0]:g}")
+        if uses_irid:
+            irid = material_iridescence(data, material) or (0.0, 1.3, 100.0, 400.0)
+            entry.update(iridescence=irid[0], iridescence_ior=irid[1], thickness_min=irid[2], thickness=irid[3],
+                         group=f"metallic {entry['metallic']:g} iridescence {irid[0]:g} ior {irid[1]:g}")
         out.append(entry)
     return out
+
+
+def irid_arrays(spheres, instance_of_pixel, n_dot_v, variant):
+    """Per-pixel iridescence dict (strength, film ior, thickness = the maximum, thickness minimum, N.V, variant); strength 0
+    where a sphere has no film."""
+    def column(key, default):
+        return np.array([s.get(key, default) for s in spheres], dtype=np.float64)[instance_of_pixel]
+    return {"strength": column("iridescence", 0.0), "ior": column("iridescence_ior", 1.3),
+            "thickness": column("thickness", 400.0), "thickness_min": column("thickness_min", 100.0),
+            "nv": np.clip(np.asarray(n_dot_v, dtype=np.float64), MIN_NDOTV, 1.0), "variant": variant}
 
 
 def dielectric_arrays(spheres, instance_of_pixel, variant):
@@ -1602,6 +1974,7 @@ def require_declared_scene(data):
         material_clearcoat(data, material)
         material_sheen(data, material)
         material_anisotropy(data, material)
+        material_iridescence(data, material)
         if any(index != INVALID for index in material["textures"]):
             raise ValueError("instanced material samples a texture; the Appendix B reference is texture-free")
         if any(v > 0 for v in material["emissive"]) or material["alpha_cutoff"] > 0:
@@ -1661,6 +2034,11 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
         surface = surface_tangents(root, data, cast, pick)
         aniso = aniso_arrays(spheres, inst[pick], surface, n, model.get("aniso", "spec"))
         env_aniso = aniso_arrays(spheres, inst[pick], surface, n, (environment or {}).get("aniso", "spec"))
+    # F15.3 (ticket 12): KHR_materials_iridescence of the scene (None without any film).
+    irid = env_irid = None
+    if uses_iridescence(data):
+        irid = irid_arrays(spheres, inst[pick], dot(n, v), model.get("irid", "spec"))
+        env_irid = irid_arrays(spheres, inst[pick], dot(n, v), (environment or {}).get("irid", "spec"))
     env_variant = (environment or {}).get("dielectric", "extension")
     env_dielectric = (dielectric_arrays(spheres, inst[pick], env_variant)
                       if environment is not None and uses_specular_extension(data) else None)
@@ -1674,7 +2052,7 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
     for k, light in enumerate(points):
         visible = None if visibility is None else visibility[k]
         value, light_lit = point_radiance(base, metallic, roughness, n, v, position[pick], light, model, sun_dielectric,
-                                          visible, coat, sheen, aniso)
+                                          visible, coat, sheen, aniso, irid)
         radiance += value
         lit = lit | light_lit
         terms.append("point-light-shadowed" if visible is not None else "point-light")
@@ -1684,21 +2062,21 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
         if sun_radius <= 0:
             raise ValueError("a sun requires a positive angular radius")
         sun, narrow = sun_radiance(base, metallic, roughness, n, v, toward, irradiance, sun_radius, model,
-                                   sun_dielectric, coat, sheen, aniso)
+                                   sun_dielectric, coat, sheen, aniso, irid)
         radiance += sun
         lit = lit | (dot(n, np.broadcast_to(toward, n.shape)) > 0)
         terms.append("sun-disk")
     if sky > 0:
         if environment is None:
             aniso_env = None if aniso is None else aniso_environment_inputs(aniso, roughness, n, v)
-            material = environment_radiance(base, metallic, roughness, dot(n, v), sky, model, sun_dielectric, aniso_env)
+            material = environment_radiance(base, metallic, roughness, dot(n, v), sky, model, sun_dielectric, aniso_env, irid)
             if sheen is not None:
                 material = sheen_environment(material, dot(n, v), sheen, sky)
             radiance += material if coat is None else environment_coat(material, dot(n, v), coat, sky)
             terms.append("environment-quadrature")
         else:
             radiance += declared_environment_radiance(base, metallic, roughness, dot(n, v), sky, environment,
-                                                      env_dielectric, env_coat, env_sheen, env_aniso)
+                                                      env_dielectric, env_coat, env_sheen, env_aniso, env_irid)
             terms.append("environment-declared")
     image = np.full((height * width, 3), sky, dtype=np.float64)  # pixels without geometry show the environment
     image[pick] = radiance

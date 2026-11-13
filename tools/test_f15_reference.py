@@ -1713,7 +1713,7 @@ class AnisotropyModel(unittest.TestCase):
         zero = [[0] * 20] * 2
         data = {"materials": [{"feature_bits": 8, "extension_index": 0}, {"feature_bits": 0},
                               {"feature_bits": 8, "extension_index": 4}, {"feature_bits": 10, "extension_index": 8},
-                              {"feature_bits": 12, "extension_index": 12}, {"feature_bits": 16, "extension_index": 16}],
+                              {"feature_bits": 12, "extension_index": 12}, {"feature_bits": 16, "extension_index": 16}, {"feature_bits": 32, "extension_index": 16}],
                 "material_extensions": {"version": 1, "records_per_material": 4, "records":
                                         [record0(), record1(0.5, -0.75)] + zero +
                                         [record0(), record1(1.0, 0.0, texture=5)] + zero +
@@ -1733,8 +1733,8 @@ class AnisotropyModel(unittest.TestCase):
         self.assertIsNone(ref.material_specular(data, data["materials"][0]))       # anisotropy-only: neutral specular block
         self.assertIsNone(ref.material_clearcoat(data, data["materials"][0]))
         self.assertIsNone(ref.material_sheen(data, data["materials"][0]))
-        with self.assertRaises(ValueError):                                        # iridescence stays outside the model
-            ref.material_extension_words(data, data["materials"][5])
+        with self.assertRaises(ValueError):                                        # an unknown feature stays outside the model
+            ref.material_extension_words(data, data["materials"][6])
         self.assertEqual(ref.ANISOTROPY_FEATURE_BIT, 8)  # MaterialFeature::Anisotropy
 
     def test_every_anisotropy_control_is_registered_with_a_declared_model_dict(self):
@@ -1963,6 +1963,419 @@ class AnisotropySnapshot(unittest.TestCase):
             self.assertTrue(bool((properties["handedness_x"] == -1.0).all()))
             self.assertAlmostEqual(float(np.sqrt(properties["tangent_x"] ** 2 + properties["tangent_y"] ** 2 +
                                                  properties["tangent_z"] ** 2).min()), 1.0, places=5)
+
+
+def irid_pixels(count, strength=1.0, ior=1.3, thickness=400.0, thickness_min=100.0, nv=0.6, variant="spec"):
+    """A per-pixel iridescence dict of `count` identical (or broadcast) pixels."""
+    def column(x):
+        return np.broadcast_to(np.asarray(x, dtype=np.float64), (count,)).copy()
+    return {"strength": column(strength), "ior": column(ior), "thickness": column(thickness),
+            "thickness_min": column(thickness_min), "nv": column(nv), "variant": variant}
+
+
+# --- an independent SPECTRAL evaluation of a thin film (no Belcour-Barla approximation, no phase table of the README) -----
+# Airy summation with the exact unpolarised Fresnel amplitudes of an air | film | base stack, integrated against the CIE 1931
+# colour matching functions (Wyman-Sloan-Shirley multi-lobe fit) under an equal-energy illuminant, mapped to linear Rec709 and
+# divided by the white of the equal-energy spectrum.  The base ior is the README's real ior of the base f0 (extinction 0).
+
+def _lobe(l, mu, s1, s2):
+    return np.exp(-0.5 * ((l - mu) / np.where(l < mu, s1, s2)) ** 2)
+
+
+def _cie(l):
+    x = 1.056 * _lobe(l, 599.8, 37.9, 31.0) + 0.362 * _lobe(l, 442.0, 16.0, 26.7) - 0.065 * _lobe(l, 501.1, 20.4, 26.2)
+    y = 0.821 * _lobe(l, 568.8, 46.9, 40.5) + 0.286 * _lobe(l, 530.9, 16.3, 31.1)
+    z = 1.217 * _lobe(l, 437.0, 11.8, 36.0) + 0.681 * _lobe(l, 459.0, 26.0, 13.8)
+    return np.stack([x, y, z], -1)
+
+
+_SRGB_FROM_XYZ = np.array([[3.2404542, -1.5371385, -0.4985314], [-0.9692660, 1.8760108, 0.0415560],
+                           [0.0556434, -0.2040259, 1.0572252]])
+_WAVELENGTHS = np.arange(360.0, 831.0, 1.0)
+_CMF = _cie(_WAVELENGTHS)
+_WHITE = _SRGB_FROM_XYZ @ (_CMF.sum(0) / _CMF[:, 1].sum())
+
+
+def _amplitudes(n1, n2, c1):
+    s2 = n1 / n2 * np.sqrt(1 - c1 ** 2)
+    c2 = np.sqrt(np.maximum(1 - s2 ** 2, 0.0))
+    rs = (n1 * c1 - n2 * c2) / (n1 * c1 + n2 * c2)
+    rp = (n2 * c1 - n1 * c2) / (n2 * c1 + n1 * c2)
+    return rs, rp, c2
+
+
+def spectral_thin_film(cos1, film_ior, thickness, f0):
+    base_ior = (1 + np.sqrt(np.minimum(np.asarray(f0) + 1e-4, 0.9999))) / (1 - np.sqrt(np.minimum(np.asarray(f0) + 1e-4, 0.9999)))
+    r12s, r12p, c2 = _amplitudes(1.0, film_ior, cos1)
+    rgb = np.empty(3)
+    for channel in range(3):
+        r23s, r23p, _ = _amplitudes(film_ior, base_ior[channel], c2)
+        delta = 4 * math.pi * film_ior * thickness * c2 / _WAVELENGTHS
+        spectrum = 0.0
+        for r12, r23 in ((r12s, r23s), (r12p, r23p)):
+            e = np.exp(1j * delta)
+            spectrum = spectrum + 0.5 * np.abs((r12 + r23 * e) / (1 + r12 * r23 * e)) ** 2
+        xyz = (spectrum[:, None] * _CMF).sum(0) / _CMF[:, 1].sum()
+        rgb[channel] = (_SRGB_FROM_XYZ @ xyz)[channel] / _WHITE[channel]
+    return rgb
+
+
+class IridescenceModel(unittest.TestCase):
+    """KHR_materials_iridescence (ticket 12): the thin-film Fresnel of the specification, its composition and the environment."""
+
+    FILMS = [(f0, ior, d, c) for f0 in ([0.04] * 3, [0.95, 0.64, 0.54]) for ior in (1.3, 1.8)
+             for d in (100.0, 200.0, 400.0, 600.0, 800.0, 1200.0) for c in (1.0, 0.7, 0.4)]
+
+    def film(self, c, ior, d, f0, **kw):
+        return ref.thin_film_fresnel(np.array([c]), np.array([float(ior)]), np.array([float(d)]), np.array([f0], dtype=float), **kw)[0]
+
+    def test_transcription_agrees_with_an_independent_spectral_evaluation(self):
+        # The README closed form is an APPROXIMATION of the spectral reflectance: the check is statistical (mean 0.016 measured,
+        # max 0.14 at the red channel of a dielectric near the white-point scaling), and a sign / phase mistake breaks it.
+        errors = []
+        for f0, ior, d, c in self.FILMS:
+            errors.append(np.abs(self.film(c, ior, d, f0) - spectral_thin_film(c, ior, d, f0)))
+        errors = np.array(errors)
+        self.assertLess(float(errors.mean()), 0.025)
+        self.assertLess(float(errors.max()), 0.17)
+        # Negative control: reflection phases all zero (a mistake in phi12/phi23) must be visibly further away.
+        wrong = np.array([np.abs(self.film(c, ior, d, f0, phase_shifts=False) - spectral_thin_film(c, ior, d, f0))
+                          for f0, ior, d, c in self.FILMS])
+        self.assertGreater(float(wrong.mean()), 2.0 * float(errors.mean()))
+        self.assertGreater(float(wrong.max()), float(errors.max()))
+
+    def test_hand_values(self):
+        # film ior equal to the base ior of the dielectric (f0 + 0.0001): R23 = 0, no interference, F = R12 = Schlick(R0, cos1).
+        base_ior = (1 + math.sqrt(0.0401)) / (1 - math.sqrt(0.0401))
+        for c in (1.0, 0.5):
+            r0 = ((base_ior - 1) / (base_ior + 1)) ** 2
+            expected = r0 + (1 - r0) * (1 - c) ** 5
+            for d in (0.0, 250.0, 1000.0):
+                np.testing.assert_allclose(self.film(c, base_ior, d, [0.04] * 3), expected, atol=0.01)
+        # Total internal reflection returns 1 (film ior below the outside ior: outside 1.5, film 1.0, grazing).
+        total = ref.thin_film_fresnel(np.array([0.3]), np.array([1.0]), np.array([300.0]), np.full((1, 3), 0.04), outside_ior=1.5)
+        np.testing.assert_array_equal(total, np.ones((1, 3)))
+        # White metal: base ior ~ 4e4 makes the film invisible, F = 1.
+        np.testing.assert_allclose(self.film(0.7, 1.8, 400.0, [1.0] * 3), 1.0, atol=1e-3)
+        # The README constants are the transcribed ones (spot check of the first lobe and of the matrix).
+        self.assertAlmostEqual(float(ref._XYZ_TO_REC709[0, 0]), 3.2404542)
+        self.assertAlmostEqual(float(ref._XYZ_TO_REC709[1, 0]), -0.9692660)
+        self.assertAlmostEqual(float(ref._XYZ_TO_REC709[2, 2]), 1.0572252)
+        # Zero-thickness evaluation of the closed form is close to (not equal to) the plain Fresnel: why the rule is a convention.
+        np.testing.assert_allclose(self.film(1.0, 1.3, 0.0, [0.95, 0.64, 0.54]), [0.95, 0.64, 0.54], atol=0.02)
+
+    def test_continuity_in_thickness_and_angle(self):
+        c = np.linspace(0.02, 1.0, 400)
+        for f0 in ([0.04] * 3, [0.95, 0.64, 0.54]):
+            f = ref.thin_film_fresnel(c, np.full(400, 1.8), np.full(400, 600.0), np.broadcast_to(np.array(f0), (400, 3)))
+            self.assertLess(float(np.abs(np.diff(f, axis=0)).max()), 0.03)
+            d = np.linspace(0.0, 1500.0, 600)
+            g = ref.thin_film_fresnel(np.full(600, 0.8), np.full(600, 1.3), d, np.broadcast_to(np.array(f0), (600, 3)))
+            self.assertLess(float(np.abs(np.diff(g, axis=0)).max()), 0.03)
+            self.assertTrue(bool(np.all(f >= 0)))
+
+    def test_thickness_zero_and_factor_zero_reduce_exactly_to_the_base_model(self):
+        n = 5
+        rng = np.random.default_rng(3)
+        normal = np.tile([0.0, 0.0, 1.0], (n, 1))
+        v = ref.normalize(rng.normal(size=(n, 3)) + [0, 0, 3])
+        l = ref.normalize(rng.normal(size=(n, 3)) + [0, 0, 2])
+        base = rng.uniform(0.1, 0.9, (n, 3))
+        metallic = np.array([0.0, 1.0, 0.0, 1.0, 0.0])
+        rough = np.full(n, 0.3)
+        plain = ref.bsdf(base, metallic, rough, normal, v, l)
+        for kwargs in (dict(thickness=0.0), dict(strength=0.0)):
+            film = irid_pixels(n, nv=np.clip(ref.dot(normal, v), 1e-4, 1), **kwargs)
+            np.testing.assert_array_equal(ref.bsdf(base, metallic, rough, normal, v, l, irid=film), plain)
+        # ... and the controls that read another thickness do see the film at thickness 0.
+        film = irid_pixels(n, thickness=0.0, thickness_min=100.0, variant="thickness-min", nv=np.clip(ref.dot(normal, v), 1e-4, 1))
+        self.assertGreater(float(np.abs(ref.bsdf(base, metallic, rough, normal, v, l, irid=film) - plain).max()), 1e-4)
+        # The film without a thickness texture takes the MAXIMUM; `thickness-max` of the ticket cannot differ on texture-free data.
+        film = irid_pixels(n, thickness=400.0, thickness_min=100.0, nv=np.clip(ref.dot(normal, v), 1e-4, 1))
+        np.testing.assert_array_equal(ref.irid_thickness(film), np.full(n, 400.0))
+
+    def test_composition_with_the_base_fresnel_follows_the_specification(self):
+        # dielectric: (1 - s) F_schlick + s F_irid on the specular weight, (1 - s)(1 - F_schlick) + s (1 - max F_irid) on the diffuse.
+        base = np.array([[0.8, 0.35, 0.15]])
+        vh = np.array([0.7])
+        film = irid_pixels(1, strength=0.5, ior=1.8, thickness=600.0)
+        diffuse, specular = ref.lobe_weights(base, np.array([0.0]), vh, ref.APPENDIX_B, None, film)
+        f_irid = self.film(0.7, 1.8, 600.0, [0.04] * 3)
+        f_schlick = 0.04 + 0.96 * 0.3 ** 5
+        np.testing.assert_allclose(specular[0], 0.5 * f_schlick + 0.5 * f_irid, rtol=1e-12)
+        np.testing.assert_allclose(diffuse[0], 0.5 * (1 - f_schlick) + 0.5 * (1 - f_irid.max()), rtol=1e-12)
+        # metal: (1 - s) F_schlick(base) + s F_irid(base_f0 = baseColor), no diffuse.
+        diffuse, specular = ref.lobe_weights(base, np.array([1.0]), vh, ref.APPENDIX_B, None, film)
+        np.testing.assert_allclose(diffuse[0], 0.0)
+        np.testing.assert_allclose(specular[0], 0.5 * (base[0] + (1 - base[0]) * 0.3 ** 5) +
+                                   0.5 * self.film(0.7, 1.8, 600.0, base[0]), rtol=1e-12)
+        # The light-sample angle is V.H: the at-nv control reads N.V instead.
+        wrong = irid_pixels(1, strength=0.5, ior=1.8, thickness=600.0, nv=0.4, variant="at-nv")
+        _, spec_wrong = ref.lobe_weights(base, np.array([0.0]), vh, ref.APPENDIX_B, None, wrong)
+        np.testing.assert_allclose(spec_wrong[0], 0.5 * f_schlick + 0.5 * self.film(0.4, 1.8, 600.0, [0.04] * 3), rtol=1e-12)
+        diffuse, specular = ref.lobe_weights(base, np.array([0.0]), vh, ref.APPENDIX_B, None, film)
+        self.assertGreater(float(np.abs(spec_wrong - specular).max()), 1e-3)
+
+    def test_controls_move_the_model_in_the_documented_direction(self):
+        base = np.array([[0.8, 0.35, 0.15]] * 2)
+        metallic = np.array([0.0, 1.0])
+        vh = np.array([0.7, 0.7])
+        reference = ref.lobe_weights(base, metallic, vh, ref.APPENDIX_B, None, irid_pixels(2, ior=1.8, nv=0.4))
+        for variant in ("ignored", "film-ior-ignored", "film-ior-default", "at-nv", "thickness-min"):
+            other = ref.lobe_weights(base, metallic, vh, ref.APPENDIX_B, None, irid_pixels(2, ior=1.8, nv=0.4, variant=variant))
+            self.assertGreater(float(np.abs(other[1] - reference[1]).max()), 1e-3, variant)
+        # film-ior-default is the spec where the material says 1.3.
+        same = ref.lobe_weights(base, metallic, vh, ref.APPENDIX_B, None, irid_pixels(2, ior=1.3, nv=0.4))
+        other = ref.lobe_weights(base, metallic, vh, ref.APPENDIX_B, None, irid_pixels(2, ior=1.3, nv=0.4, variant="film-ior-default"))
+        np.testing.assert_array_equal(same[1], other[1])
+        # diffuse-unweighted keeps the specular and raises the dielectric diffuse weight.
+        wrong = ref.lobe_weights(base, metallic, vh, ref.APPENDIX_B, None, irid_pixels(2, ior=1.8, nv=0.4, variant="diffuse-unweighted"))
+        np.testing.assert_array_equal(wrong[1], reference[1])
+        self.assertGreater(float(wrong[0][0, 0]), float(reference[0][0, 0]))
+        self.assertTrue(set(ref.IRID_CONTROLS) <= set(ref.ALL_CONTROLS))
+        self.assertTrue(set(ref.IRID_DECLARED_CONTROLS) <= set(ref.ALL_DECLARED_CONTROLS))
+        for name, delta in ref.IRID_CONTROLS.items():
+            self.assertEqual(ref.control_model(name, ref.APPENDIX_B)["irid"], delta["irid"])
+            self.assertIn(delta["irid"], ref.IRID_VARIANTS)
+        for name, model in ref.IRID_DECLARED_CONTROLS.items():
+            self.assertIn(model["irid"], ref.IRID_VARIANTS)
+        self.assertEqual(ref.DECLARED["irid"], "spec")
+
+    def test_exact_environment_matches_an_independent_wi_space_monte_carlo(self):
+        # Copper metal, film ior 1.8, 600 nm, factor 1: integral of D Vis F_irid(V.H) cos over the hemisphere, by uniform
+        # hemisphere sampling of wi (independent of the half-vector histogram quadrature).
+        rng = np.random.default_rng(11)
+        count = 400000
+        alpha = float(ref.effective_alpha(0.3))
+        copper = np.array([0.95, 0.64, 0.54])
+        for mu in (0.9, 0.5, 0.2):
+            wo = np.array([math.sqrt(1 - mu * mu), 0.0, mu])
+            z = rng.uniform(0.0, 1.0, count)
+            phi = rng.uniform(0.0, 2 * math.pi, count)
+            wi = np.stack([np.sqrt(1 - z * z) * np.cos(phi), np.sqrt(1 - z * z) * np.sin(phi), z], axis=1)
+            h = ref.normalize(wi + wo)
+            f = ref.thin_film_fresnel(np.sum(h * wo, axis=1), np.full(count, 1.8), np.full(count, 600.0),
+                                      np.broadcast_to(copper, (count, 3)))
+            lobe = ref.ggx_d(h[:, 2], alpha) * ref.smith_vis(mu, wi[:, 2], alpha)
+            samples = f * (lobe * wi[:, 2])[:, None] * (2 * math.pi)
+            estimate, sigma = samples.mean(axis=0), samples.std(axis=0) / math.sqrt(count)
+            table = ref.irid_environment_table(alpha, 1.8, 600.0, copper, "spec")
+            exact = np.array([np.interp(mu, table[0], table[1][:, c]) for c in range(3)])
+            np.testing.assert_allclose(exact, estimate, atol=6 * float(sigma.max()) + 2e-3)
+
+    def test_environment_value_reduces_to_the_base_without_a_film_and_is_the_spec_at_full_strength(self):
+        n = 4
+        base = np.tile([0.8, 0.35, 0.15], (n, 1))
+        metallic = np.array([0.0, 1.0, 0.0, 1.0])
+        rough = np.full(n, 0.3)
+        mu = np.array([0.9, 0.6, 0.3, 0.1])
+        plain = ref.environment_radiance(base, metallic, rough, mu, 1.0)
+        for kwargs in (dict(thickness=0.0), dict(strength=0.0), dict(variant="ignored")):
+            film = irid_pixels(n, nv=mu, **kwargs)
+            np.testing.assert_array_equal(ref.environment_radiance(base, metallic, rough, mu, 1.0, irid_env=film), plain)
+            np.testing.assert_array_equal(
+                ref.declared_environment_radiance(base, metallic, rough, mu, 1.0, ref.DECLARED, irid=film),
+                ref.declared_environment_radiance(base, metallic, rough, mu, 1.0, ref.DECLARED))
+        film = irid_pixels(n, nv=mu)
+        full = ref.environment_radiance(base, metallic, rough, mu, 1.0, irid_env=film)
+        half = ref.environment_radiance(base, metallic, rough, mu, 1.0, irid_env=irid_pixels(n, strength=0.5, nv=mu))
+        np.testing.assert_allclose(half, 0.5 * (full + plain), rtol=1e-9)  # the strength is a linear mix
+        self.assertGreater(float(np.abs(full - plain).max()), 0.01)
+
+    def test_furnace_bound_of_the_exact_quadrature_and_the_energy_control(self):
+        # White base, radiance 1: the albedo may not exceed the base model's own (the literal Appendix B dielectric gains ~1 %
+        # at roughness 0.3, a property of the specification, measured on the plain rows).
+        mu = np.linspace(0.15, 1.0, 12)
+        n = mu.size
+        rough = np.full(n, 0.3)
+        white = np.ones((n, 3))
+        for metallic in (0.0, 1.0):
+            m = np.full(n, metallic)
+            plain = ref.environment_radiance(white, m, rough, mu, 1.0)
+            ceiling = np.maximum(1.0, plain.max(axis=1)) + 0.05  # per N.V node; measured excess of the film over the plain model <= 0.035 (see the ticket record)
+            for ior, thickness in ((1.3, 200.0), (1.3, 600.0), (1.8, 400.0), (1.8, 1200.0)):
+                value = ref.environment_radiance(white, m, rough, mu, 1.0, irid_env=irid_pixels(n, ior=ior, thickness=thickness, nv=mu))
+                self.assertTrue(bool((value.max(axis=1) <= ceiling).all()), (metallic, ior, thickness, value.max(axis=1) - ceiling))
+            if metallic == 0.0:
+                wrong = ref.environment_radiance(white, m, rough, mu, 1.0, irid_env=irid_pixels(n, ior=1.8, thickness=400.0, nv=mu,
+                                                                                            variant="diffuse-unweighted"))
+                self.assertGreater(float(wrong.max()), 1.05)  # gains energy: the furnace control
+
+    def test_declared_environment_hand_value_and_its_error_against_the_exact_quadrature(self):
+        n = 1
+        base = np.array([[0.8, 0.35, 0.15]])
+        mu = np.array([0.7])
+        rough = np.array([0.3])
+        film = irid_pixels(n, strength=0.5, ior=1.8, thickness=400.0, nv=mu)
+        a, b = ref.dfg_lookup(mu, rough)
+        carry = float(np.clip(a + b, 0, 1)[0])
+        e_irid = np.clip(self.film(0.7, 1.8, 400.0, [0.04] * 3) * carry, 0, 1)
+        e_schlick = float(np.clip(0.04 * a + b, 0, 1)[0])
+        expected = 0.5 * (base[0] * (1 - e_schlick) + e_schlick) + 0.5 * (base[0] * (1 - e_irid.max()) + e_irid)
+        got = ref.declared_environment_radiance(base, np.array([0.0]), rough, mu, 1.0, ref.DECLARED, irid=film)[0]
+        np.testing.assert_allclose(got, expected, rtol=1e-12)
+        # The declared and the exact images agree to a few percent on the fixture's films (sphere-weighted mean over N.V >= 0.1);
+        # the bound is a regression guard for the declared FIT of the film at N.V (`declared_irid_environment`), not a gate.
+        mus = np.linspace(0.1, 1.0, 40)
+        weights = mus / mus.sum()  # a sphere seen from the camera: the pixel density in N.V is proportional to N.V
+        worst = 0.0
+        for metallic in (0.0, 1.0):
+            for ior in (1.3, 1.8):
+                for thickness in (200.0, 400.0, 600.0, 800.0, 1200.0):
+                    m = np.full(mus.size, metallic)
+                    pixels = irid_pixels(mus.size, ior=ior, thickness=thickness, nv=mus)
+                    args = (np.tile([0.8, 0.35, 0.15], (mus.size, 1)), m, np.full(mus.size, 0.3), mus, 0.5)
+                    exact = ref.environment_radiance(*args, irid_env=pixels)
+                    declared = ref.declared_environment_radiance(*args, ref.DECLARED, irid=pixels)
+                    error = float((np.abs(declared - exact).max(axis=1) / np.maximum(exact.max(axis=1), 1e-3) * weights).sum())
+                    worst = max(worst, error)
+        print(f"declared vs exact iridescent environment, worst sphere-weighted mean relative error: {worst:.4f}")
+        self.assertLess(worst, 0.25)
+
+    def test_sun_radiance_at_the_disk_centre_is_the_bsdf(self):
+        n = 3
+        normal = np.tile([0.0, 0.0, 1.0], (n, 1))
+        v = ref.normalize(np.array([[0.2, 0.1, 1.0], [-0.3, 0.2, 1.0], [0.0, 0.5, 1.0]]))
+        base = np.tile([0.8, 0.35, 0.15], (n, 1))
+        metallic = np.array([0.0, 1.0, 1.0])
+        rough = np.full(n, 0.3)
+        toward = unit(-0.4, 0.3, 0.8)
+        film = irid_pixels(n, ior=1.8, thickness=600.0, nv=np.clip(ref.dot(normal, v), 1e-4, 1))
+        sun, narrow = ref.sun_radiance(base, metallic, rough, normal, v, toward, np.array([3.0] * 3), 0.00465, irid=film)
+        self.assertFalse(bool(narrow.any()))
+        direct = ref.bsdf(base, metallic, rough, normal, v, np.tile(toward, (n, 1)), irid=film) * (toward[2] * 3.0)
+        np.testing.assert_allclose(sun, direct, rtol=1e-9)
+        point, _ = ref.point_radiance(base, metallic, rough, normal, v, np.zeros((n, 3)),
+                                      {"position": [-4.0, 3.0, 8.0], "intensity": 100.0, "range": 100.0, "color": [1, 1, 1]}, irid=film)
+        self.assertTrue(bool((point > 0).all()))
+
+    def test_record_word_decoding_texture_refusal_and_combinations(self):
+        f = lambda x: int.from_bytes(struct.pack("<f", x), "little")  # noqa: E731
+
+        def record0():
+            w = [0] * 20
+            for k in (5, 6, 10, 11, 12, 17, 18):
+                w[k] = ref.INVALID
+            return w
+
+        def record1(factor, ior, tmin, tmax, tex=ref.INVALID, thickness_tex=ref.INVALID):
+            w = [0] * 20
+            w[2] = ref.INVALID
+            w[3], w[4], w[5], w[6], w[7], w[8] = f(factor), f(ior), f(tmin), f(tmax), tex, thickness_tex
+            return w
+
+        zero = [[0] * 20] * 2
+        data = {"materials": [{"feature_bits": 16, "extension_index": 0}, {"feature_bits": 0},
+                              {"feature_bits": 16, "extension_index": 4}, {"feature_bits": 16, "extension_index": 8},
+                              {"feature_bits": 24, "extension_index": 12}, {"feature_bits": 8, "extension_index": 12}],
+                "material_extensions": {"version": 1, "records_per_material": 4, "records":
+                                        [record0(), record1(0.75, 1.8, 100.0, 650.0)] + zero +
+                                        [record0(), record1(1.0, 1.3, 100.0, 400.0, tex=2)] + zero +
+                                        [record0(), record1(1.0, 1.3, 100.0, 400.0, thickness_tex=3)] + zero +
+                                        [record0(), record1(1.0, 1.3, 100.0, 400.0)] + zero}}
+        np.testing.assert_allclose(ref.material_iridescence(data, data["materials"][0]), (0.75, 1.8, 100.0, 650.0), rtol=1e-7)
+        self.assertIsNone(ref.material_iridescence(data, data["materials"][1]))
+        self.assertIsNone(ref.material_iridescence(data, data["materials"][5]))      # a different feature
+        for index in (2, 3):                                                          # factor / thickness texture: refused
+            with self.assertRaises(ValueError):
+                ref.material_iridescence(data, data["materials"][index])
+        with self.assertRaises(ValueError):                                           # combined with anisotropy: not modelled
+            ref.material_iridescence(data, data["materials"][4])
+        self.assertTrue(ref.uses_iridescence(data))
+        self.assertIsNone(ref.material_specular(data, data["materials"][0]))
+        self.assertIsNone(ref.material_anisotropy(data, data["materials"][0]))
+        self.assertEqual(ref.IRIDESCENCE_FEATURE_BIT, 16)  # MaterialFeature::Iridescence
+        self.assertEqual(ref.IRIDESCENCE_RECORD, 1)
+
+
+class IridescenceSnapshot(unittest.TestCase):
+    """One sphere whose material carries KHR_materials_iridescence in record 1 (the exporter's keys)."""
+
+    def snapshot(self, directory, sky, sun, metallic, factor=1.0, ior=1.8, thickness=600.0, thickness_min=100.0, roughness=0.3,
+                 point=None):
+        root = RayCastedSnapshot("snapshot").snapshot(directory, sky, sun, metallic, roughness, [0.8, 0.35, 0.15])
+        path = pathlib.Path(root) / "scene.json"
+        data = json.loads(path.read_text())
+        f = lambda x: int.from_bytes(struct.pack("<f", x), "little")  # noqa: E731
+        record0 = [0] * 20
+        for k in (5, 6, 10, 11, 12, 17, 18):
+            record0[k] = ref.INVALID
+        record1 = [0] * 20
+        record1[2] = ref.INVALID
+        record1[3:9] = [f(factor), f(ior), f(thickness_min), f(thickness), ref.INVALID, ref.INVALID]
+        data["materials"][0].update(feature_bits=16, extension_index=0, flags=16 << 8)
+        data["material_extensions"] = {"version": 1, "records_per_material": 4,
+                                       "records": [record0, record1, [0] * 20, [0] * 20]}
+        if point:
+            data["lights"].append({"type": 1, "position": point, "direction": [0, 0, -1], "color": [1, 1, 1], "intensity": 60.0,
+                                   "range": 100.0, "inner": 0, "outer": 0})
+        path.write_text(json.dumps(data))
+        return root
+
+    def test_render_sun_point_environment_and_controls(self):
+        from f12_reference import snapshot as load
+        toward = unit(-0.8, 0.35, -0.3)
+        with tempfile.TemporaryDirectory() as tmp:
+            root, data = load(self.snapshot(tmp, 0.5, (toward, 3.0), 0.5, point=[-3.0, 2.0, -3.0]))
+            self.assertTrue(ref.uses_iridescence(data) and not ref.uses_specular_extension(data))
+            cast = ref.cast_primary_rays(root, data, 2)
+            images = {}
+            for name in ("spec", *ref.IRID_CONTROLS):
+                model = ref.APPENDIX_B if name == "spec" else ref.control_model(name, ref.APPENDIX_B)
+                image, masks, spheres, terms = ref.render_frame(root, data, model, cast=cast)
+                images[name] = image
+            self.assertEqual(terms, ["point-light", "sun-disk", "environment-quadrature"])
+            self.assertEqual(spheres[0]["iridescence"], 1.0)
+            self.assertAlmostEqual(spheres[0]["iridescence_ior"], 1.8, places=6)
+            self.assertEqual(spheres[0]["thickness"], 600.0)
+            self.assertEqual(spheres[0]["group"], "metallic 0.5 iridescence 1 ior 1.8")
+            roi = masks["roi"]
+            for name in ref.IRID_CONTROLS:
+                difference = np.abs(images[name][roi] - images["spec"][roi]).max()
+                self.assertGreater(float(difference), 1e-3, name)
+            declared, *_ = ref.render_frame(root, data, ref.APPENDIX_B, cast=cast, environment=ref.DECLARED)
+            blind, *_ = ref.render_frame(root, data, ref.APPENDIX_B, cast=cast,
+                                         environment=ref.IRID_DECLARED_CONTROLS["declared-iridescence-ignored"])
+            self.assertGreater(float(np.abs(declared[roi] - blind[roi]).max()), 1e-3)
+
+    def test_thickness_zero_renders_the_plain_model(self):
+        from f12_reference import snapshot as load
+        toward = unit(-0.8, 0.35, -0.3)
+        with tempfile.TemporaryDirectory() as tmp:
+            root, data = load(self.snapshot(tmp, 0.5, (toward, 3.0), 0.0, thickness=0.0))
+            cast = ref.cast_primary_rays(root, data, 2)
+            zero = ref.render_frame(root, data, ref.APPENDIX_B, cast=cast)[0]
+            data["materials"][0].update(feature_bits=0, flags=0)
+            plain = ref.render_frame(root, data, ref.APPENDIX_B, cast=cast)[0]
+        np.testing.assert_allclose(zero, plain, rtol=1e-9, atol=1e-12)
+
+    def test_command_writes_controls_and_declared_controls(self):
+        toward = unit(-0.8, 0.35, -0.3)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.snapshot(tmp, 0.5, (toward, 3.0), 0.0)
+            out = pathlib.Path(tmp) / "out"
+            code = ref.main(["render", str(root), "--out", str(out), "--controls", "iridescence-ignored", "iridescence-at-nv",
+                             "--declared-controls", "declared-iridescence-ignored", "declared-iridescence-film-ior-ignored"])
+            self.assertEqual(code, 0)
+            report = json.loads((out / "reference.json").read_text())
+            self.assertEqual(sorted(report["controls"]), ["iridescence-at-nv", "iridescence-ignored"])
+            self.assertEqual(report["controls"]["iridescence-at-nv"]["model_variant"]["irid"], "at-nv")
+            self.assertEqual(sorted(report["declared"]["controls"]),
+                             ["declared-iridescence-film-ior-ignored", "declared-iridescence-ignored"])
+            self.assertIn("iridescence", report["model"])
+
+    def test_textured_iridescence_is_refused(self):
+        from f12_reference import snapshot as load
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.snapshot(tmp, 0.5, None, 0.0)
+            path = pathlib.Path(root) / "scene.json"
+            data = json.loads(path.read_text())
+            data["material_extensions"]["records"][1][8] = 3
+            path.write_text(json.dumps(data))
+            root, data = load(root)
+            with self.assertRaises(ValueError):
+                ref.require_declared_scene(data)
+            self.assertEqual(ref.main(["render", str(root), "--out", str(pathlib.Path(tmp) / "out")]), 2)
 
 
 if __name__ == "__main__":
