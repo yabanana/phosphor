@@ -372,7 +372,13 @@ def environment_radiance(base, metallic, roughness, n_dot_v, radiance, model=APP
 DFG_HEADER = REPO / "src" / "renderer" / "dfg_table.h"
 _DFG = {}
 
-DECLARED = {"albedo": "dfg-table", "diffuse": "one-minus-dielectric-albedo", "dielectric": "extension"}
+# "extension_diffuse": the environment diffuse weight of materials carrying a feature. In the visibility
+# path the F13 composite assembles the environment diffuse from the base model (it receives the lobe
+# guide only with ticket 08), while the resolve already evaluates the extended environment specular:
+# "composite-base" declares that state (1 - E(0.04)); ticket 08 switches it to "extension"
+# (1 - max(E_dielectric)). Recorded in the support report as a named approximation.
+DECLARED = {"albedo": "dfg-table", "diffuse": "one-minus-dielectric-albedo", "dielectric": "extension",
+            "extension_diffuse": "composite-base"}
 # Deliberately wrong variants that the declared-model gate must reject.
 DECLARED_CONTROLS = {
     "declared-diffuse-unweighted": {**DECLARED, "diffuse": "unweighted"},            # no (1 - E) weight
@@ -450,7 +456,10 @@ def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, 
         f90 = np.ones_like(weight) if kind == "f90-one" else weight
         e_d = np.clip(f0_scaled * a + f90 * b, 0.0, 1.0)
         e_m = np.clip(base * a + b, 0.0, 1.0)
-        diffuse_weight = 1.0 - np.max(e_d, axis=-1, keepdims=True)
+        if variant.get("extension_diffuse", "composite-base") == "composite-base":
+            diffuse_weight = 1.0 - np.clip(DIELECTRIC_F0 * a + b, 0.0, 1.0)
+        else:
+            diffuse_weight = 1.0 - np.max(e_d, axis=-1, keepdims=True)
         return ((1 - m) * base * diffuse_weight + (1 - m) * e_d + m * e_m) * radiance
     f0 = DIELECTRIC_F0 * (1 - m) + base * m
     specular = np.clip(f0 * a + b, 0.0, 1.0)

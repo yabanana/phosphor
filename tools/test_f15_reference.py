@@ -416,11 +416,16 @@ class SpecularIorModel(unittest.TestCase):
         base = np.array([[0.8, 0.35, 0.15]])
         f0c = ref.specular_f0(np.array([1.33]), np.array([[2.0, 1.0, 0.5]]))
         dielectric = {"f0": f0c, "weight": np.array([0.5])}
-        out = ref.declared_environment_radiance(base, np.array([0.0]), rough, mu, 0.5, ref.DECLARED, dielectric)
+        full = {**ref.DECLARED, "extension_diffuse": "extension"}
+        out = ref.declared_environment_radiance(base, np.array([0.0]), rough, mu, 0.5, full, dielectric)
         # Hand-worked: E_d = f0c * 0.5 * A + 0.5 * B per channel; diffuse weight 1 - max(E_d).
         e_d = np.clip(f0c * 0.5 * a + 0.5 * b, 0.0, 1.0)
         expected = (base * (1 - e_d.max()) + e_d) * 0.5
         np.testing.assert_allclose(out, expected, rtol=1e-12)
+        # Until ticket 08 the composite weights the environment diffuse with the base model.
+        composite = ref.declared_environment_radiance(base, np.array([0.0]), rough, mu, 0.5, ref.DECLARED, dielectric)
+        expected_composite = (base * (1 - min(max(0.04 * a + b, 0.0), 1.0)) + e_d) * 0.5
+        np.testing.assert_allclose(composite, expected_composite, rtol=1e-12)
         # The neutral extension is exactly the base declared model.
         neutral = {"f0": ref.specular_f0(np.array([1.5]), np.ones((1, 3))), "weight": np.array([1.0])}
         for metallic in (0.0, 0.5, 1.0):

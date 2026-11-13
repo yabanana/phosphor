@@ -41,7 +41,7 @@ const MaterialSupportTable& currentSupportTable() {
         // specular transport (reflections) still evaluate the base model until tickets 07/08.
         FeatureSupportEntry& specular = t.features[static_cast<u32>(MaterialFeature::SpecularIor)];
         specular.level                = SupportLevel::Approximated;
-        specular.approximation        = "di_and_specular_transport_use_base_model";
+        specular.approximation        = "di_transport_and_composite_diffuse_use_base_model";
         return t;
     }();
     return table;
