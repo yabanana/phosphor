@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Unit tests of tools/filter_pipeline_harvest.py (stdlib only)."""
+import json
 import pathlib
 import sys
 import unittest
@@ -50,6 +51,23 @@ class FilterHarvest(unittest.TestCase):
             {"vertex_function_descriptor": "fnd:NOPE", "fragment_function_descriptor": "fnd:S22"}]}}
         with self.assertRaises(ValueError):
             f.filter_harvest(broken, 22)
+
+
+class SkipPresent(unittest.TestCase):
+    def test_pipelines_present_under_other_labels_are_dropped(self):
+        import copy
+        relabelled = copy.deepcopy(CORPUS)  # the same pipelines after a shader edit: every label differs
+        text = json.dumps(relabelled)
+        for old in ("LVS", "LFS", "LCS", "LUNUSED", "S22", "S21", "C22"):
+            text = text.replace('"' + old + '"', '"X' + old + '"').replace('fnd:' + old + '"', 'fnd:X' + old + '"')
+        relabelled = json.loads(text)
+        kept = f.filter_harvest(relabelled, 22, present=CORPUS)
+        self.assertEqual(sum(len(v) for v in kept["pipeline_descriptors"].values()), 0)
+        changed = copy.deepcopy(relabelled)
+        changed["pipeline_descriptors"]["render_pipeline_descriptors"][0]["label"] = "A2"  # different state
+        kept = f.filter_harvest(changed, 22, present=CORPUS)
+        self.assertEqual(len(kept["pipeline_descriptors"]["render_pipeline_descriptors"]), 1)
+        self.assertEqual(kept["pipeline_descriptors"]["compute_pipeline_descriptors"], [])
 
 
 if __name__ == "__main__":

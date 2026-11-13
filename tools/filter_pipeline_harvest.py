@@ -6,9 +6,11 @@ run creates), so F15 tickets add their specialised pipelines by a targeted updat
 
   1. run the scenario with `--harvest-pipelines RAW` and normalise it like tools/harvest_pipelines.sh
      (`jq -S '.libraries |= map(.path = "@PHOSPHOR_METALLIB@")'`);
-  2. `tools/filter_pipeline_harvest.py RAW --constant 22 --output KEPT` keeps the pipeline descriptors whose
-     functions are specialised with that function-constant index (22 = MATERIAL_FEATURES), plus exactly the
-     function descriptors they reference;
+  2. `tools/filter_pipeline_harvest.py RAW --constant 22 --skip-present shaders/pipelines.mtl4-json --output KEPT`
+     keeps the pipeline descriptors whose functions are specialised with that function-constant index
+     (22 = MATERIAL_FEATURES) and that the archive does not hold yet, plus exactly the function descriptors they
+     reference.  Labels are hashes of the metallib and change with every shader edit, so presence is compared
+     by function names, constants and state (without --skip-present, a later harvest duplicates entries);
   3. `tools/merge_pipeline_harvests.py --output MERGED shaders/pipelines.mtl4-json KEPT ...` merges (identity =
      complete state, so repeated pipelines are kept once), then `jq -S . MERGED > shaders/pipelines.mtl4-json`.
 """
@@ -36,14 +38,49 @@ def specialises(descriptor, constant):
                for c in descriptor.get("constant_values", []))
 
 
-def filter_harvest(corpus, constant):
+def semantic_keys(corpus):
+    """Label-independent identity of every pipeline descriptor: function names and constant values in place of
+    the function labels (hashes of the metallib, which change with every shader edit) plus the remaining
+    pipeline state."""
+    functions = corpus.get("function_descriptors", {})
+    library = {d["label"]: d["name"] for d in functions.get("library_function_descriptors", [])}
+    specialized = {}
+    for d in functions.get("specialized_function_descriptors", []):
+        base = d["function_descriptor"][len(PREFIX):]
+        constants = sorted((c["id"]["data"], json.dumps(c["value"], sort_keys=True)) for c in d.get("constant_values", []))
+        specialized[d["label"]] = [library.get(base, base), constants]
+
+    def resolve(value):
+        if isinstance(value, str) and value.startswith(PREFIX):
+            label = value[len(PREFIX):]
+            return specialized.get(label) or library.get(label) or label
+        if isinstance(value, dict):
+            return {k: resolve(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [resolve(v) for v in value]
+        return value
+
+    return {(kind, json.dumps(resolve(d), sort_keys=True))
+            for kind, descriptors in corpus.get("pipeline_descriptors", {}).items() for d in descriptors}
+
+
+def filter_harvest(corpus, constant, present=None):
+    """`present`: a corpus whose pipelines are dropped from the result (semantic identity, see semantic_keys)."""
     functions = corpus.get("function_descriptors", {})
     specialized = {d["label"]: d for d in functions.get("specialized_function_descriptors", [])}
     library = {d["label"]: d for d in functions.get("library_function_descriptors", [])}
     wanted = {label for label, d in specialized.items() if specialises(d, constant)}
+    skip = semantic_keys(present) if present else set()
+    own = {}
+    if skip:
+        single = {"function_descriptors": functions}
+        for kind, descriptors in corpus.get("pipeline_descriptors", {}).items():
+            for index, d in enumerate(descriptors):
+                own[(kind, index)] = next(iter(semantic_keys({**single, "pipeline_descriptors": {kind: [d]}})))
     kept_pipelines, used = {}, set()
     for kind, descriptors in corpus.get("pipeline_descriptors", {}).items():
-        kept = [d for d in descriptors if wanted & set(references(d))]
+        kept = [d for index, d in enumerate(descriptors)
+                if wanted & set(references(d)) and own.get((kind, index)) not in skip]
         kept_pipelines[kind] = kept
         for d in kept:
             used.update(references(d))
@@ -67,8 +104,12 @@ def main(argv=None):
     parser.add_argument("harvest", type=Path)
     parser.add_argument("--constant", type=int, required=True, help="function-constant index (22 = MATERIAL_FEATURES)")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--skip-present", type=Path,
+                        help="drop pipelines already in this corpus (e.g. shaders/pipelines.mtl4-json), compared by "
+                             "function names, constants and state rather than by the metallib-dependent labels")
     args = parser.parse_args(argv)
-    kept = filter_harvest(json.loads(args.harvest.read_text()), args.constant)
+    present = json.loads(args.skip_present.read_text()) if args.skip_present else None
+    kept = filter_harvest(json.loads(args.harvest.read_text()), args.constant, present)
     args.output.write_text(json.dumps(kept, indent=2, sort_keys=True) + "\n")
     counts = {kind: len(v) for kind, v in kept["pipeline_descriptors"].items()}
     print(json.dumps({"constant": args.constant, "pipelines": counts}))
