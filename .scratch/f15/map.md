@@ -14,8 +14,8 @@ any F15 code is written.
   spec in `spec.md`, tracer-bullet tickets 01–24 in `issues/` after two review passes (second
   pass: independent adversarial review `review-2026-11-13.md`; owner chose the
   Appendix B base-model correction, ADR-0006, and attenuated coloured
-  transmissive shadows in F15, ADR-0004 amendment); awaiting the owner's
-  approval of the plan before any F15 code.
+  transmissive shadows in F15, ADR-0004 amendment); approved by the owner on
+  2026-11-13; implementation follows the ticket graph.
 
 - Roadmap tasks F15.1–F15.4 (`docs/ROADMAP.md`), plan `docs/plans/F15.md`,
   method `docs/plans/METHOD.md`, sequencing `docs/plans/SEQUENCING.md`,
