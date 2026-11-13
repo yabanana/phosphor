@@ -1098,6 +1098,22 @@ TEST_CASE("F10-F12 launch contract refuses unavailable receiver paths and tiers"
     CHECK(o.debugLightingCorrupt==2);
 }
 
+TEST_CASE("F15.3 --capture-linear-accumulate averages the frames ending at the capture frame") {
+    LaunchOptions o;std::string e;
+    const std::vector<const char*> base{"--render-path","visibility","--frames","64","--warmup","0","--capture-linear","x.pfm","--capture-linear-frame","63"};
+    auto with=[&](std::initializer_list<const char*> extra){std::vector<const char*> a=base;a.insert(a.end(),extra.begin(),extra.end());return a;};
+    CHECK(o.captureLinearAccumulate==0);
+    REQUIRE(parse(with({"--capture-linear-accumulate","32"}),o,e));
+    CHECK(o.captureLinearAccumulate==32);
+    LaunchOptions whole;REQUIRE(parse(with({"--capture-linear-accumulate","64"}),whole,e));CHECK(whole.captureLinearAccumulate==64);
+    LaunchOptions bad;
+    CHECK_FALSE(parse(with({"--capture-linear-accumulate","0"}),bad,e));          // positive count
+    CHECK_FALSE(parse(with({"--capture-linear-accumulate","65"}),bad,e));         // the window would start before frame 0
+    CHECK_FALSE(parse(with({"--capture-linear-accumulate","x"}),bad,e));
+    CHECK_FALSE(parse({"--render-path","visibility","--frames","64","--capture-linear-sequence","seq","--capture-linear-accumulate","4"},bad,e));
+    CHECK_FALSE(parse({"--render-path","visibility","--frames","64","--capture-linear-accumulate","4"},bad,e)); // no single capture
+}
+
 TEST_CASE("F12 linear capture and exact-frame export validate their signal") {
     LaunchOptions o;std::string e;
     CHECK_FALSE(parse({"--capture-linear","x.pfm","--frames","1"},o,e));

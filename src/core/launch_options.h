@@ -424,6 +424,9 @@ struct LaunchOptions {
     std::string debugLobeGuideDump;
     bool debugGiNoVisibility=false; // Physical quality negative; invariant checks stay enabled.
     std::string exportReference, captureLinear, captureLinearSequence, lightingScene,reflectionScene,materialScene;
+    // F15.3 (ticket 13): --capture-linear-accumulate N averages the last N frames (ending at --capture-linear-frame) of the
+    // linear signal on the CPU (test infrastructure for the one-stochastic-sample-per-pixel transport; 0 = the single frame).
+    u32 captureLinearAccumulate = 0;
     u32 materialToggleEvery = 0; // --material-toggle-every N: specular grids edit/toggle their extension every N frames
     bool giProbeAnchor=false;
     float giAnchor[3]{},giSpacing=0;

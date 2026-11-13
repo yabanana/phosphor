@@ -670,6 +670,9 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if(!needCount(out.exportReferenceFrame))return false;
         } else if (arg == "--capture-linear-frame") {
             if(!needCount(out.captureLinearFrame))return false;
+        } else if (arg == "--capture-linear-accumulate") {
+            if(!needCount(out.captureLinearAccumulate))return false;
+            if(out.captureLinearAccumulate==0){error="--capture-linear-accumulate: expected a positive frame count";return false;}
         } else if (arg == "--export-reference") {
             auto v = needValue(); if (!v || v->empty() || v->starts_with("--")) {
                 error = "--export-reference: expected output directory"; return false;
@@ -1229,6 +1232,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if(!out.materialScene.empty() && out.reflections==ReflectionMode::Off && out.lightingDenoise==LightingDenoiseMode::Off && MaterialValidation::environmentRadiance(out.materialScene)>0.0f){error="--material-scenario with --reflections off requires --lighting-denoise custom (lit resolve)";return false;}
     if(!out.lightingScene.empty() && (!out.bench || *out.bench!=5)){error="--lighting-scene requires --bench 6";return false;}
     if(!out.captureLinear.empty() && !out.captureLinearSequence.empty()){error="Choose single linear capture or linear sequence";return false;}
+    if(out.captureLinearAccumulate>0 && (out.captureLinear.empty() || out.captureLinearFrame+1<out.captureLinearAccumulate)){
+        error="--capture-linear-accumulate requires --capture-linear and N <= --capture-linear-frame + 1 (the averaged frames end at the capture frame)";return false;}
     if((!out.captureLinear.empty() || !out.captureLinearSequence.empty()) && (!out.visibility || !out.benchmark())){error="Linear capture requires --render-path visibility and --frames";return false;}
     if((out.giProbeAnchor||out.giSpacing||out.giGrid[0])&&out.gi==GiMode::Off){error="GI volume controls require --gi";return false;}
     if(out.debugGiNoVisibility && (!out.debugLighting || out.gi==GiMode::Off || out.debugGiCorrupt)) {
