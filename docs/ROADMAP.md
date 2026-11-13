@@ -635,7 +635,7 @@ senza imporre il 90% quando aumenta la contesa [R91].
 Accettazione di sviluppo locale M5 per F14.1–F14.4 (2026-11-12): oracoli
 atmosferici, nebbia froxel secondo il piano (densità costante analitica, slicing,
 luce in moto, disocclusione, costo per volume) e coppie a piena frequenza delle
-nuvole 15/15 con D6. L'iniezione DDGI nella nebbia usa la media e il termine
+nuvole 16/16 con D6, compreso un volo a 700 m/s attraverso lo strato: la storia delle nuvole si azzera solo sui tagli dichiarati, non più sull'euristica dei 4 m per frame. L'iniezione DDGI nella nebbia usa la media e il termine
 di primo ordine Henyey-Greenstein delle sei irradianze, esatti fino al primo
 ordine e verificati contro integrali esatti (da6e495). La bimodalità della
 sorgente RT era causata dagli slot morti della TLAS, impilati sulla BLAS della
