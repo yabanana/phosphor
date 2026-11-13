@@ -72,23 +72,28 @@ inline float3 reflectionSecondary(GPURtHit hit,float3 direction,
     if(!all(isfinite(result))||any(result<0)){numericError=true;return 0;}return result;
 }
 
-kernel void reflection_ssr(constant GPUReflectionParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
+kernel void REFL_KERNEL(reflection_ssr)(constant GPUReflectionParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
     const device GPURadianceCacheEntry* cache [[buffer(13)]],constant GPUProbeGridParams& gi [[buffer(14)]],
-    device GPUSpecularSample* metadata [[buffer(17)]],const device GPUReflectionProbe* probes [[buffer(18)]],device atomic_uint* counts [[buffer(19)]],
+    device GPUSpecularSample* metadata [[buffer(17)]],const device GPUReflectionProbe* probes [[buffer(18)]],device atomic_uint* counts [[buffer(19)]]REFL_GUIDE_PARAM(20),
     texture2d<float,access::read> baseRadiance [[texture(0)]],texture2d<float,access::read> depth [[texture(1)]],texturecube_array<float> atlas [[texture(2)]],
     texture2d<float,access::write> output [[texture(5)]],texture2d<float,access::write> distance [[texture(6)]],uint tid [[thread_position_in_grid]]){
     if(tid>=p.width*p.height)return;uint seed=giHash(tid^giHash(p.frameIndex)^p.seed);const GPUDISurface s=surfaces[tid];
-    const auto dir=reflectionDirection(s,float2(giRandom(seed),giRandom(seed)));const auto sample=reflectionFallback(s,dir,p,surfaces,cache,gi,probes,baseRadiance,depth,atlas);
+#ifdef PHOSPHOR_REFL_LOBE
+    const auto lobe=REFL_LOBE(p.flags,REFLECTION_LOBE_GUIDE_VALID,tid);const auto dir=REFL_DIRECTION(s,float2(giRandom(seed),giRandom(seed)),lobe);
+#else
+    const auto dir=reflectionDirection(s,float2(giRandom(seed),giRandom(seed)));
+#endif
+    const auto sample=reflectionFallback(s,dir,p,surfaces,cache,gi,probes,baseRadiance,depth,atlas);
     reflectionStoreSample(p.flags,tid,p.width,sample,metadata,counts,output,distance);
 }
 
-kernel void reflection_rt(constant GPUReflectionParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
+kernel void REFL_KERNEL(reflection_rt)(constant GPUReflectionParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
     instance_acceleration_structure as [[buffer(2)]],intersection_function_table<triangle_data,instancing> ift [[buffer(3)]],
     const device GPUInstance* instances [[buffer(4)]],const device GPURtMesh* meshes [[buffer(5)]],const device GPUVertex* vertices [[buffer(6)]],const device uint* indices [[buffer(7)]],
     const device GPUMaterial* materials [[buffer(8)]],const device DITextureHandle* textures [[buffer(9)]],const device GPULight* lights [[buffer(10)]],
     const device GPUSampledLight* sampled [[buffer(11)]],const device GPUEmissiveSurface* emitters [[buffer(12)]],const device GPURadianceCacheEntry* cache [[buffer(13)]],
     constant GPUProbeGridParams& gi [[buffer(14)]],const device GPUProbeState* states [[buffer(15)]],constant GPUProbeTraceExtra& extra [[buffer(16)]],
-    device GPUSpecularSample* metadata [[buffer(17)]],const device GPUReflectionProbe* probes [[buffer(18)]],device atomic_uint* counts [[buffer(19)]],
+    device GPUSpecularSample* metadata [[buffer(17)]],const device GPUReflectionProbe* probes [[buffer(18)]],device atomic_uint* counts [[buffer(19)]]REFL_GUIDE_PARAM(20),
     texture2d<float,access::read> baseRadiance [[texture(0)]],texture2d<float,access::read> depth [[texture(1)]],texturecube_array<float> atlas [[texture(2)]],
     texture2d<float> irradiance [[texture(3)]],texture2d<float> moments [[texture(4)]],texture2d<float,access::write> output [[texture(5)]],
     texture2d<float,access::write> distance [[texture(6)]],uint tid [[thread_position_in_grid]]){
@@ -98,9 +103,16 @@ kernel void reflection_rt(constant GPUReflectionParams& p [[buffer(0)]],const de
     // independent samples, reduced in registers exactly like reflection_reduce.
     // Sample 0 keeps the single-sample seed, so count 1 is the plain path.
     const uint count=(p.boostSamples>1u&&(p.flags&REFLECTION_SINGLE_SAMPLE)&&s.valid&&s.roughness<p.boostRoughness)?min(p.boostSamples,8u):1u;
+#ifdef PHOSPHOR_REFL_LOBE
+    const auto lobe=REFL_LOBE(p.flags,REFLECTION_LOBE_GUIDE_VALID,tid);
+#endif
     auto reduction=reflectionReduceBegin();GPUSpecularSample sample=reflectionEmpty();
     for(uint k=0;k<count;++k){uint seed=giHash(tid^giHash(p.frameIndex)^(p.seed+k*0x9e3779b9u));
+#ifdef PHOSPHOR_REFL_LOBE
+    const auto dir=REFL_DIRECTION(s,float2(giRandom(seed),giRandom(seed)),lobe);sample=reflectionEmpty();
+#else
     const auto dir=reflectionDirection(s,float2(giRandom(seed),giRandom(seed)));sample=reflectionEmpty();
+#endif
     if(s.valid&&dir.valid&&any(dir.weight>0)&&giRandom(seed)<reflectionRTWeight(s.roughness,p)){
         float3 n=normalize(diVec(s.geometricNormal));if(dot(n,dir.direction)<0)n=-n;const float3 origin=rtOffsetRay(diVec(s.position),n);GPURtRay ray{};
         ray.ox=origin.x;ray.oy=origin.y;ray.oz=origin.z;ray.dx=dir.direction.x;ray.dy=dir.direction.y;ray.dz=dir.direction.z;ray.tmax=p.maxDistance;ray.mask=RT_MASK_INDIRECT;ray.type=RT_PROBE_DIFFUSE;
@@ -119,6 +131,7 @@ kernel void reflection_rt(constant GPUReflectionParams& p [[buffer(0)]],const de
     else{auto reduced=reflectionReduceEnd(reduction,counts);reduced.flags|=count<<SPECULAR_SAMPLE_COUNT_SHIFT;reflectionWriteSample(tid,p.width,reduced,metadata,output,distance);}
 }
 
+#ifndef PHOSPHOR_REFL_LOBE
 // Optional STATIC actual scene capture from each probe face, not a constant
 // environment posing as a scene. Same RT resource ABI above, no surfaces/cache/
 // SSR reads; output texture5 is a 2D view of the selected face/mip0. Own IFT.
@@ -141,3 +154,4 @@ kernel void reflection_capture_rt(constant GPUReflectionParams& p [[buffer(0)]],
     const float alpha=(p.flags&REFLECTION_CAPTURE_HALF)?min(max(emitted,0.0f),65504.0f):max(emitted,0.0f);
     output.write(float4(valid?L:float3(0),valid?alpha:-1.0f),pixel);
 }
+#endif

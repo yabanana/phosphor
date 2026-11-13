@@ -1,6 +1,7 @@
 #pragma once
 #include "gi_cache_common.h"
 #include "materials/bsdf.h"
+#include "reflection_lobe.h"
 #include "light_visibility.h"
 #include "surface_geometry.h"
 #include "renderer/reflection_probe_storage.h"
@@ -28,6 +29,30 @@ inline ReflectionDirection reflectionDirection(GPUDISurface s,float2 u){
         if(!all(isfinite(out.weight))||any(out.weight<0)){out.error=true;out.weight=0;}}
     return out;
 }
+#ifdef PHOSPHOR_REFL_LOBE
+// Sample weight f * cos / pdf of the (single) lobe for the sampled direction; same clamps as reflectionSpecularBRDF.
+inline float3 reflectionLobeWeight(GPUDISurface s, float3 wi, float pdf, ReflectionLobe lobe) {
+    const float3 n = normalize(diVec(s.shadingNormal)), v = normalize(diVec(s.viewDirection));
+    const float nl = dot(n, wi), nv = dot(n, v);
+    if (nl <= 0 || nv <= 0 || dot(v + wi, v + wi) < 1e-20f) return 0;
+    const float3 h = normalize(v + wi);
+    const float nh = saturate(dot(n, h)), vh = saturate(dot(v, h)), a = bsdfAlpha(s.roughness);
+    const float3 Fd = bsdfSpecFresnel(lobe.spec, vh);
+    const float3 f = bsdfDGGX(nh, a) * bsdfVSmithGGXCorrelated(nv, nl, a) * bsdfSpecLobeColor(Fd, diVec(s.albedo), saturate(s.metallic), vh);
+    return f * nl / pdf;
+}
+// GGX proposal of reflectionDirection (same stream of random numbers, same direction and pdf); the weight of an
+// extended pixel uses the extended lobe colour instead of Schlick(f0), with the same finite-clamp rule.
+inline ReflectionDirection reflectionDirectionLobe(GPUDISurface s, float2 u, ReflectionLobe lobe) {
+    ReflectionDirection out = reflectionDirection(s, u);
+    if ((kMaterialFeatures & MATERIAL_FEATURE_SPECULAR_IOR) != 0u && lobe.extended && out.valid && !out.error &&
+        dot(normalize(diVec(s.shadingNormal)), out.direction) > 0) {
+        out.weight = reflectionLobeWeight(s, out.direction, out.pdf, lobe);
+        if (!all(isfinite(out.weight)) || any(out.weight < 0)) { out.error = true; out.weight = 0; }
+    }
+    return out;
+}
+#endif
 inline float reflectionRTWeight(float roughness,constant GPUReflectionParams& p){return (p.flags&REFLECTION_ENABLE_RT)?1-smoothstep(p.rtRoughnessLow,p.rtRoughnessHigh,roughness):0;}
 
 inline bool reflectionProbeDirection(GPUReflectionProbe p,float3 point,float3 direction,thread float3& corrected,thread float& weight){

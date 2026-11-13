@@ -1,6 +1,8 @@
 #include "restir_common.h"
 #include "reflection_reduce.h"
+#include "reflection_lobe.h"
 #include "renderer/emission_pack.h"
+#ifndef PHOSPHOR_REFL_LOBE
 kernel void reflection_counter_clear(device atomic_uint* counts [[buffer(0)]],uint tid [[thread_position_in_grid]]){
     if(tid<16)atomic_store_explicit(counts+tid,0u,memory_order_relaxed);
 }
@@ -94,20 +96,27 @@ kernel void reflection_input_check(constant GPUReflectionComposeParams& p [[buff
         if(reasons)atomic_fetch_or_explicit(counts+7,reasons,memory_order_relaxed);
     }
 }
+#endif // !PHOSPHOR_REFL_LOBE
 // residual0,DIselected2,GIselectedE4,specular5,AO6,output7.
 // Root RESOLVE_EXTERNAL_DIFFUSE bit32 strips external DI/GI/hemisphere diffuse
 // from the primary residual. Assemble positive terms ONCE, never subtract an
 // FP32 signal from a quantized residual. Pre-reflection raw assembly uses this
 // same kernel with DI/GI only flags, SPEC/AO off and unfiltered inputs.
-kernel void reflection_composite(constant GPUReflectionComposeParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
-    device atomic_uint* counts [[buffer(2)]],texture2d<float,access::read> base [[texture(0)]],
+kernel void REFL_KERNEL(reflection_composite)(constant GPUReflectionComposeParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
+    device atomic_uint* counts [[buffer(2)]]REFL_GUIDE_PARAM(3),texture2d<float,access::read> base [[texture(0)]],
     texture2d<float,access::read> diSelected [[texture(2)]],texture2d<float,access::read> giSelected [[texture(4)]],
     texture2d<float,access::read> specular [[texture(5)]],texture2d<float,access::read> ao [[texture(6)]],texture2d<float,access::write> output [[texture(7)]],uint tid [[thread_position_in_grid]]){
     if(tid>=p.backingWidth*p.backingHeight)return;const uint2 pixel(tid%p.backingWidth,tid/p.backingWidth);float3 color=base.read(pixel).rgb;
     if(all(pixel<uint2(p.width,p.height))){const GPUDISurface s=surfaces[pixel.y*p.width+pixel.x];
         if(s.valid){if(p.flags&REFLECT_COMPOSE_EXCLUDE_EMISSION)color=max(color-unpackEmission3(s.pad[1]),0.0f);
             // ADR-0006: the base diffuse receives 1 - E of the dielectric specular layer.
-            const float envDiffuse=bsdfEnvDiffuseWeight(s.roughness,max(dot(normalize(diVec(s.shadingNormal)),normalize(diVec(s.viewDirection))),1e-4f),phosphor::DfgTable);
+            const float envNV=max(dot(normalize(diVec(s.shadingNormal)),normalize(diVec(s.viewDirection))),1e-4f);
+            float envDiffuse=bsdfEnvDiffuseWeight(s.roughness,envNV,phosphor::DfgTable);
+#ifdef PHOSPHOR_REFL_LOBE
+            // F15.1 (ticket 08): extended pixels receive 1 - max(E_dielectric) of their own specular lobe.
+            {const auto lobe=REFL_LOBE(p.flags,REFLECT_COMPOSE_LOBE_GUIDE_VALID,pixel.y*p.width+pixel.x);
+                if(lobe.extended)envDiffuse=bsdfSpecEnv(lobe.spec,diVec(s.albedo),saturate(s.metallic),s.roughness,envNV,phosphor::DfgTable).diffuseWeight;}
+#endif
             if(p.flags&REFLECT_COMPOSE_DI)color+=diSelected.read(pixel).rgb;
             if(p.flags&REFLECT_COMPOSE_GI)color+=giSelected.read(pixel).rgb*diVec(s.albedo)*(1-s.metallic)*envDiffuse/M_PI_F;
             if(p.flags&REFLECT_COMPOSE_SPEC)color+=specular.read(pixel).rgb;
@@ -119,6 +128,7 @@ kernel void reflection_composite(constant GPUReflectionComposeParams& p [[buffer
     if(!all(isfinite(color))||any(color<-.00001f)||(p.pad[0]&&any(color>65504.0f))){atomic_fetch_add_explicit(counts+4,1u,memory_order_relaxed);color=0;}
     output.write(float4(max(color,0.0f),1),pixel);
 }
+#ifndef PHOSPHOR_REFL_LOBE
 // Capture8 exports the actual GI denoiser result E as reflected diffuse Lo.
 // Current receiver material is applied once, matching gi_reference_diffuse;
 // no AO, exposure, other signal, or numerical sanitization alters this export.
@@ -140,3 +150,4 @@ kernel void reflection_check(constant GPUReflectionComposeParams& p [[buffer(0)]
     const uint total=simd_sum(1u),invalid=simd_sum(bad?1u:0u),invalidOutput=simd_sum(badOutput?1u:0u);
     if(lane==0){atomic_fetch_add_explicit(counts,total,memory_order_relaxed);if(invalid)atomic_fetch_add_explicit(counts+1,invalid,memory_order_relaxed);if(invalidOutput)atomic_fetch_add_explicit(counts+6,invalidOutput,memory_order_relaxed);}
 }
+#endif // !PHOSPHOR_REFL_LOBE

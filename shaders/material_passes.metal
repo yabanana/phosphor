@@ -10,3 +10,5 @@
 // restir_common.h): same-named inline functions with different bodies in two modules would be merged at link time.
 #include "restir_di_lobe.metal"
 #include "light_cluster_lobe.metal"
+// F15.1 (ticket 08): the specular transport and composite lobe kernels (same module reasons).
+#include "reflection_lobe.metal"

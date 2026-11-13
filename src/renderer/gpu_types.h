@@ -958,6 +958,8 @@ PHOSPHOR_GPU_CONSTANT u32 REFLECTION_SINGLE_SAMPLE = 64u; // one sample: the ker
 // reflectionFallbackEmissionShare() is the share a non-RT path adds back.
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_EXCLUDE_DI_EMISSION = 128u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_DI_EMITTER_BAND = 512u;
+// F15.1 (ticket 08): the lobe guide (buffer 20 of the "_lobe" reflection kernels) is valid this frame.
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_LOBE_GUIDE_VALID = 1024u;
 // F13.5 negative control: probe lookups ignore the box projection.
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_DEBUG_NO_PARALLAX = 256u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_NONE = 0u;
@@ -1216,6 +1218,8 @@ PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_SPEC = 8u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_AO = 16u;
 // SSR source only: remove the receiver's packed emission (F13.1 single count).
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_EXCLUDE_EMISSION = 32u;
+// F15.1 (ticket 08): the lobe guide (buffer 3 of reflection_composite_lobe) is valid this frame.
+PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_LOBE_GUIDE_VALID = 64u;
 struct GPUReflectionReduceParams {u32 width,height,samples,stridePixels;};
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionReduceParams)==16,"GPUReflectionReduceParams layout");
 struct GPUReflectionComposeParams {u32 width,height,backingWidth,backingHeight;u32 flags,pad[3];float environment[3];u32 pad2;};

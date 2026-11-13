@@ -36,13 +36,14 @@ const MaterialSupportTable& currentSupportTable() {
         t.base.level                    = SupportLevel::Implemented;
         t.emissiveStrength.level        = SupportLevel::Implemented;
         t.textureTransformUniform.level = SupportLevel::Implemented;
-        // F15.1 (ticket 05): ior + specular shade the resolve and forward paths (direct sun and
-        // analytic lights, environment, GI diffuse weight); ticket 07: ReSTIR DI and clustered DI read the lobe
-        // guide too; the specular transport (reflections) and the composite diffuse still use the base model until
-        // ticket 08.
+        // F15.1: ior + specular shade every primary light path: the resolve and forward paths (direct sun and
+        // analytic lights, environment, GI diffuse weight), ReSTIR and clustered DI (ticket 07: lobe guide), and
+        // (ticket 08) the specular transport (SSR, RT reflections, probes/environment split-sum) and the composite
+        // diffuse weight.  The remaining declared approximation (decision 06): secondary RT hits (reflection, GI
+        // and probe-capture hit surfaces) keep the base reduction albedo * (1 - metallic) + GGX.
         FeatureSupportEntry& specular = t.features[static_cast<u32>(MaterialFeature::SpecularIor)];
         specular.level                = SupportLevel::Approximated;
-        specular.approximation        = "transport_and_composite_diffuse_use_base_model";
+        specular.approximation        = "secondary_rt_hits_use_base_reduction";
         return t;
     }();
     return table;

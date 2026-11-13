@@ -1,6 +1,7 @@
 #include "reflection_common.h"
 #include "renderer/dfg_table.h"
 
+#ifndef PHOSPHOR_REFL_LOBE
 // Actual base-compatible STATIC scene capture. Host draws the full selected
 // static instance list for EACH face with a depth attachment; no camera cull
 // list reused. This baseline is explicitly unshadowed local/direct capture.
@@ -72,10 +73,11 @@ kernel void reflection_probe_prefilter(constant GPUProbeFilterParams& p [[buffer
     const bool valid=reflectionProbeStorageAccepts(value.x,value.y,value.z,p.storageFlags)&&isfinite(alpha)&&alpha>=0;
     filtered.write(float4(valid?value:float3(0),valid?alpha:-1.0f),pixel.xy,6*p.cubeIndex+pixel.z);
 }
+#endif // !PHOSPHOR_REFL_LOBE
 // Deterministic prefiltered-probe fallback uses split-sum receiver BRDF. It is
 // a separate mode, not a prefilter applied AGAIN to an already GGX sampled ray.
-kernel void reflection_probe_only(constant GPUReflectionParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
-    device GPUSpecularSample* metadata [[buffer(17)]],const device GPUReflectionProbe* probes [[buffer(18)]],device atomic_uint* counts [[buffer(19)]],texturecube_array<float> atlas [[texture(2)]],
+kernel void REFL_KERNEL(reflection_probe_only)(constant GPUReflectionParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
+    device GPUSpecularSample* metadata [[buffer(17)]],const device GPUReflectionProbe* probes [[buffer(18)]],device atomic_uint* counts [[buffer(19)]]REFL_GUIDE_PARAM(20),texturecube_array<float> atlas [[texture(2)]],
     texture2d<float,access::write> output [[texture(5)]],texture2d<float,access::write> distance [[texture(6)]],uint tid [[thread_position_in_grid]]){
     if(tid>=p.width*p.height)return;const GPUDISurface s=surfaces[tid];GPUSpecularSample sample=reflectionEmpty();float3 result=0;
     if(s.valid){const float3 n=normalize(diVec(s.shadingNormal)),v=normalize(diVec(s.viewDirection)),r=reflect(-v,n);uint path;
@@ -90,7 +92,16 @@ kernel void reflection_probe_only(constant GPUReflectionParams& p [[buffer(0)]],
         // The table can leave the physical [0,1] BRDF-integral domain (roughness=1
         // gives B=-.0024 for black metal): bsdfEnvSpecular bounds ONLY a finite
         // weight, never radiance or invalid numerical input (shared module, F15).
-        const float nv=max(0.0f,dot(n,v));const float3 fitWeight=bsdfEnvSpecular(f0,s.roughness,nv,phosphor::DfgTable);const bool finiteFit=all(isfinite(fitWeight));
+        const float nv=max(0.0f,dot(n,v));
+#ifdef PHOSPHOR_REFL_LOBE
+        // F15.1 (ticket 08): extended pixels weight the probe/environment by the split-sum of their specular lobe.
+        float3 fitWeight=bsdfEnvSpecular(f0,s.roughness,nv,phosphor::DfgTable);
+        {const auto lobe=REFL_LOBE(p.flags,REFLECTION_LOBE_GUIDE_VALID,tid);
+            if(lobe.extended){const float3 e=bsdfSpecEnv(lobe.spec,diVec(s.albedo),saturate(s.metallic),s.roughness,nv,phosphor::DfgTable).specular;if(isfinite(nv)&&isfinite(s.roughness)&&all(isfinite(diVec(s.albedo))))fitWeight=e;}} // invalid input stays visible: the base weight is non-finite then
+#else
+        const float3 fitWeight=bsdfEnvSpecular(f0,s.roughness,nv,phosphor::DfgTable);
+#endif
+const bool finiteFit=all(isfinite(fitWeight));
         result=L*fitWeight;
         sample.flags=SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_PREFILTERED;
         if(!finiteFit||!all(isfinite(L))||any(L<0)||!all(isfinite(result))||any(result<0))sample.flags|=SPECULAR_SAMPLE_ERROR;
