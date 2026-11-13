@@ -51,3 +51,8 @@ ddbd504; archive b7cfea0. Batch log: `build/f15-exact/battery06.log`.
   - `di_receiver_pack` clears the record of receivers it invalidates.
 - Open: Sponza D2 band (ticket 24). There is no coplanar-overlap fixture yet
   to prove the raster-order-group need.
+- 2026-11-13 later: regression found by ticket 08b and fixed in 039e22b. In scenes
+  without features `di_receiver_pack` left its guide binding (buffer 3) unset,
+  and shader validation aborted every DI scene. This battery ran with API
+  validation only, so it missed the abort. Lesson: F15 batteries include
+  shader-validation runs of an F13 DI fixture.
