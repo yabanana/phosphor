@@ -819,7 +819,7 @@ void Engine::finishBenchmark() {
     report.pipelinesJson = pipe::pipelineStatsJson(pipelines_->stats());
     // F15.3: support report of the loaded glTF materials (omitted for procedural scenes).
     for (const auto& materialSupport : gpuScene_->materialSupport()) {
-        if (materialSupport.features.empty()) continue;
+        if (!materialSupport.valid()) continue;
         report.materialsJson = supportToJson(gpuScene_->materialSupport(), gpuScene_->assetUnknownExtensions());
         break;
     }

@@ -83,9 +83,11 @@ TEST_CASE("glTF materials: a core-only material has an empty feature mask") {
     CHECK(b.metallicRoughnessTexture.index == INVALID_TEXTURE_INDEX);
 
     const auto report = buildSupportReport(p.description, p.info);
-    REQUIRE(report.features.size() == 1);
-    CHECK(report.features[0].feature == "base");
-    CHECK(report.features[0].level == SupportLevel::Implemented);
+    REQUIRE(report.valid());
+    CHECK(report.base.feature == "base");
+    CHECK(report.base.level == SupportLevel::Implemented);
+    CHECK(report.features.empty());
+    CHECK(report.encodings.empty());
 }
 
 TEST_CASE("glTF materials: alpha cutoff only applies to MASK") {
@@ -269,7 +271,8 @@ TEST_CASE("glTF materials: KHR_materials_emissive_strength folds into the emissi
 
     const auto report = buildSupportReport(p.description, p.info);
     bool found = false;
-    for (const auto& f : report.features)
+    CHECK(report.features.empty()); // an encoding is not a material feature
+    for (const auto& f : report.encodings)
         if (f.feature == "emissive_strength") {
             found = true;
             CHECK(f.level == SupportLevel::Implemented);
@@ -411,7 +414,8 @@ TEST_CASE("glTF materials: KHR_texture_transform parsing and uniform analysis") 
         CHECK(a.transform.scale[1] == doctest::Approx(3.0f));
         const auto report = buildSupportReport(p.description, p.info);
         bool found = false;
-        for (const auto& f : report.features)
+        CHECK(report.features.empty());
+        for (const auto& f : report.encodings)
             if (f.feature == "texture_transform") {
                 found = true;
                 CHECK(f.level == SupportLevel::Implemented);
@@ -424,7 +428,7 @@ TEST_CASE("glTF materials: KHR_texture_transform parsing and uniform analysis") 
         CHECK(p.info.transformStatus == TextureTransformStatus::NonUniform);
         const auto report = buildSupportReport(p.description, p.info);
         bool found = false;
-        for (const auto& f : report.features)
+        for (const auto& f : report.encodings)
             if (f.feature == "texture_transform") {
                 found = true;
                 CHECK(f.level == SupportLevel::Unsupported);
@@ -448,7 +452,9 @@ TEST_CASE("glTF materials: KHR_texture_transform parsing and uniform analysis") 
     SUBCASE("no transform: not reported") {
         const auto p = parseOne(R"({"pbrMetallicRoughness":{"baseColorTexture":{"index":0}}})");
         CHECK(p.info.transformStatus == TextureTransformStatus::None);
-        CHECK(buildSupportReport(p.description, p.info).features.size() == 1);
+        const auto report = buildSupportReport(p.description, p.info);
+        CHECK(report.features.empty());
+        CHECK(report.encodings.empty());
     }
 }
 
@@ -562,8 +568,9 @@ TEST_CASE("support report: summary line, detail and JSON") {
     }
     const std::vector<std::string> assetUnknown = {"KHR_lights_punctual"};
     const std::string line = formatSupportSummary(reports, assetUnknown);
-    CHECK(line.rfind("MATERIALS count=2 ", 0) == 0);
+    CHECK(line.rfind("MATERIALS count=2 base=[implemented(2)] ", 0) == 0);
     CHECK(line.find("implemented=0 approximated=0 unsupported=2") != std::string::npos);
+    CHECK(line.find("encodings=[]") != std::string::npos);
     CHECK(line.find("clearcoat:unsupported(1)") != std::string::npos);
     CHECK(line.find("subsurface:unsupported(1)") != std::string::npos);
     CHECK(line.find("KHR_lights_punctual") != std::string::npos);
@@ -575,8 +582,14 @@ TEST_CASE("support report: summary line, detail and JSON") {
 
     const auto json = nlohmann::json::parse(supportToJson(reports, assetUnknown));
     CHECK(json.at("count") == 2);
-    CHECK(json.at("unsupported") == 2);
+    CHECK(json.at("schema") == "phosphor.materials.v2");
+    CHECK(json.at("features").at("unsupported") == 2);
+    CHECK(json.at("features").at("implemented") == 0);
+    CHECK(json.at("base").at("implemented") == 2);
+    CHECK(json.at("encodings").at("implemented") == 0);
     CHECK(json.at("materials").at(0).at("name") == "paint");
+    CHECK(json.at("materials").at(0).at("base").at("support") == "implemented");
+    CHECK(json.at("materials").at(0).at("encodings").empty());
     bool sawDraft = false;
     for (const auto& f : json.at("materials").at(0).at("features"))
         if (f.at("feature") == "subsurface") {
@@ -643,4 +656,31 @@ TEST_CASE("image URI containment") {
         CHECK(error.find("outside the asset directory") != std::string::npos);
     }
     fs::remove_all(root);
+}
+
+TEST_CASE("support report: base, features and glTF encodings are reported apart") {
+    const auto p = parseOne(R"({"name":"mix","emissiveFactor":[1,1,1],"pbrMetallicRoughness":{"baseColorTexture":{"index":0,
+        "extensions":{"KHR_texture_transform":{"scale":[2,2]}}}},
+        "extensions":{"KHR_materials_emissive_strength":{"emissiveStrength":3},
+        "KHR_materials_clearcoat":{"clearcoatFactor":1}}})");
+    const auto report = buildSupportReport(p.description, p.info);
+    CHECK(report.base.level == SupportLevel::Implemented);
+    REQUIRE(report.features.size() == 1);
+    CHECK(report.features[0].feature == "clearcoat");
+    REQUIRE(report.encodings.size() == 2);
+    CHECK(report.encodings[0].feature == "emissive_strength");
+    CHECK(report.encodings[1].feature == "texture_transform");
+
+    const std::string line = formatSupportSummary({report}, {});
+    CHECK(line.find("features=[clearcoat:unsupported(1)]") != std::string::npos);
+    CHECK(line.find("encodings=[emissive_strength:implemented(1) texture_transform:implemented(1)]") != std::string::npos);
+    CHECK(line.find("implemented=0 approximated=0 unsupported=1") != std::string::npos); // encodings are not features
+
+    const auto json = nlohmann::json::parse(supportToJson({report}, {}));
+    CHECK(json.at("features").at("unsupported") == 1);
+    CHECK(json.at("encodings").at("implemented") == 2);
+    CHECK(json.at("materials").at(0).at("encodings").at(1).at("source") == "KHR_texture_transform");
+    const std::string detail = formatSupportDetail(report);
+    CHECK(detail.find("features: clearcoat=unsupported") != std::string::npos);
+    CHECK(detail.find("encodings: emissive_strength=implemented") != std::string::npos);
 }

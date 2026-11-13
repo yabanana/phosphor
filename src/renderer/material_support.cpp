@@ -3,6 +3,7 @@
 #include <json.hpp> // nlohmann/json, shipped with tinygltf
 
 #include <algorithm>
+#include <array>
 #include <map>
 
 namespace phosphor {
@@ -114,7 +115,7 @@ MaterialSupportReport buildSupportReport(const MaterialDescription& desc, const 
     r.unknownExtensions = info.unknownExtensions;
     r.warnings          = info.warnings;
 
-    r.features.push_back(entry("base", table.base, "glTF 2.0 core", InputLabel::Ratified));
+    r.base = entry("base", table.base, "glTF 2.0 core", InputLabel::Ratified);
 
     const u32 mask = featureMask(desc);
     for (u32 i = 0; i < MATERIAL_FEATURE_COUNT; ++i) {
@@ -125,60 +126,89 @@ MaterialSupportReport buildSupportReport(const MaterialDescription& desc, const 
         describeSource(f, desc, info, source, label);
         r.features.push_back(entry(featureName(f), table.features[i], source, label));
     }
+    // glTF encodings that carry no material feature of their own.
     if (info.emissiveStrengthUsed)
-        r.features.push_back(entry("emissive_strength", table.emissiveStrength, "KHR_materials_emissive_strength",
-                                   InputLabel::Ratified));
+        r.encodings.push_back(entry("emissive_strength", table.emissiveStrength, "KHR_materials_emissive_strength",
+                                    InputLabel::Ratified));
     switch (info.transformStatus) {
         case TextureTransformStatus::None: break;
         case TextureTransformStatus::Uniform:
-            r.features.push_back(entry("texture_transform", table.textureTransformUniform, "KHR_texture_transform",
-                                       InputLabel::Ratified));
+            r.encodings.push_back(entry("texture_transform", table.textureTransformUniform, "KHR_texture_transform",
+                                        InputLabel::Ratified));
             break;
         case TextureTransformStatus::NonUniform:
-            r.features.push_back(entry("texture_transform", FeatureSupportEntry{}, "KHR_texture_transform",
-                                       InputLabel::Ratified));
+            r.encodings.push_back(entry("texture_transform", FeatureSupportEntry{}, "KHR_texture_transform",
+                                        InputLabel::Ratified));
             r.warnings.push_back("texture_transform: textures of this material use different transforms or UV sets");
             break;
     }
     return r;
 }
 
-std::string formatSupportSummary(const std::vector<MaterialSupportReport>& materials,
-                                 const std::vector<std::string>& assetUnknown) {
-    u32 counts[3] = {0, 0, 0};
-    std::map<std::string, std::array<u32, 3>> perFeature;
-    std::vector<std::string> unknown = assetUnknown;
-    for (const auto& m : materials) {
-        for (const auto& f : m.features) {
-            if (f.feature == "base") continue;
-            ++counts[static_cast<size_t>(f.level)];
-            ++perFeature[f.feature][static_cast<size_t>(f.level)];
-        }
-        for (const auto& e : m.unknownExtensions)
-            if (!hasExtension(unknown, e.c_str())) unknown.push_back(e);
-    }
-    std::string line = "MATERIALS count=" + std::to_string(materials.size()) +
-                       " implemented=" + std::to_string(counts[0]) + " approximated=" + std::to_string(counts[1]) +
-                       " unsupported=" + std::to_string(counts[2]) + " features=[";
+namespace {
+
+using LevelCounts = std::array<u32, 3>;
+
+std::string levelList(const std::map<std::string, LevelCounts>& perName) {
+    std::string out;
     bool first = true;
-    for (const auto& [name, c] : perFeature) {
+    for (const auto& [name, c] : perName)
         for (size_t level = 0; level < 3; ++level) {
             if (!c[level]) continue;
-            line += (first ? "" : " ") + name + ":" + supportLevelName(static_cast<SupportLevel>(level)) + "(" +
-                    std::to_string(c[level]) + ")";
+            out += (first ? "" : " ") + name + ":" + supportLevelName(static_cast<SupportLevel>(level)) + "(" +
+                   std::to_string(c[level]) + ")";
             first = false;
         }
+    return out;
+}
+
+void addUnknown(std::vector<std::string>& unknown, const std::vector<std::string>& more) {
+    for (const auto& e : more)
+        if (!hasExtension(unknown, e.c_str())) unknown.push_back(e);
+}
+
+} // namespace
+
+std::string formatSupportSummary(const std::vector<MaterialSupportReport>& materials,
+                                 const std::vector<std::string>& assetUnknown) {
+    LevelCounts totals{}, base{};
+    std::map<std::string, LevelCounts> perFeature, perEncoding;
+    std::vector<std::string> unknown = assetUnknown;
+    for (const auto& m : materials) {
+        if (m.valid()) ++base[static_cast<size_t>(m.base.level)];
+        for (const auto& f : m.features) {
+            ++totals[static_cast<size_t>(f.level)];
+            ++perFeature[f.feature][static_cast<size_t>(f.level)];
+        }
+        for (const auto& e : m.encodings) ++perEncoding[e.feature][static_cast<size_t>(e.level)];
+        addUnknown(unknown, m.unknownExtensions);
     }
-    line += "] unknown_extensions=[" + join(unknown) + "]";
-    return line;
+    std::string baseText;
+    for (size_t level = 0; level < 3; ++level)
+        if (base[level])
+            baseText += (baseText.empty() ? "" : " ") + std::string(supportLevelName(static_cast<SupportLevel>(level))) +
+                        "(" + std::to_string(base[level]) + ")";
+    return "MATERIALS count=" + std::to_string(materials.size()) + " base=[" + baseText + "]" +
+           " implemented=" + std::to_string(totals[0]) + " approximated=" + std::to_string(totals[1]) +
+           " unsupported=" + std::to_string(totals[2]) + " features=[" + levelList(perFeature) + "] encodings=[" +
+           levelList(perEncoding) + "] unknown_extensions=[" + join(unknown) + "]";
 }
 
 std::string formatSupportDetail(const MaterialSupportReport& report) {
-    std::string out = "MATERIAL '" + report.name + "':";
-    for (const auto& f : report.features) {
-        out += " " + f.feature + "=" + supportLevelName(f.level);
+    auto one = [](const FeatureSupport& f) {
+        std::string out = " " + f.feature + "=" + supportLevelName(f.level);
         if (!f.approximation.empty()) out += "(" + f.approximation + ")";
         if (f.label != InputLabel::Ratified) out += "[" + std::string(inputLabelName(f.label)) + "]";
+        return out;
+    };
+    std::string out = "MATERIAL '" + report.name + "':" + one(report.base);
+    if (!report.features.empty()) {
+        out += " features:";
+        for (const auto& f : report.features) out += one(f);
+    }
+    if (!report.encodings.empty()) {
+        out += " encodings:";
+        for (const auto& f : report.encodings) out += one(f);
     }
     if (!report.unknownExtensions.empty()) out += " unknown_extensions=" + join(report.unknownExtensions);
     for (const auto& w : report.warnings) out += " warning: " + w;
@@ -188,39 +218,53 @@ std::string formatSupportDetail(const MaterialSupportReport& report) {
 std::string supportToJson(const std::vector<MaterialSupportReport>& materials,
                           const std::vector<std::string>& assetUnknown) {
     using Json = nlohmann::json;
+    auto supportJson = [](const FeatureSupport& f) {
+        Json e;
+        e["feature"]       = f.feature;
+        e["support"]       = supportLevelName(f.level);
+        e["approximation"] = f.approximation;
+        e["source"]        = f.source;
+        e["label"]         = inputLabelName(f.label);
+        return e;
+    };
+    auto countsJson = [](const LevelCounts& c) {
+        return Json{{"implemented", c[0]}, {"approximated", c[1]}, {"unsupported", c[2]}};
+    };
     Json root;
-    root["schema"] = "phosphor.materials.v1";
+    root["schema"] = "phosphor.materials.v2";
     root["count"]  = materials.size();
-    u32 counts[3]  = {0, 0, 0};
-    Json list      = Json::array();
+    LevelCounts base{}, features{}, encodings{};
+    Json list = Json::array();
     std::vector<std::string> unknown = assetUnknown;
     for (const auto& m : materials) {
         Json mj;
         mj["name"] = m.name;
-        Json fj    = Json::array();
+        if (m.valid()) {
+            ++base[static_cast<size_t>(m.base.level)];
+            mj["base"] = supportJson(m.base);
+        }
+        Json fj = Json::array(), ej = Json::array();
         for (const auto& f : m.features) {
-            if (f.feature != "base") ++counts[static_cast<size_t>(f.level)];
-            Json e;
-            e["feature"]       = f.feature;
-            e["support"]       = supportLevelName(f.level);
-            e["approximation"] = f.approximation;
-            e["source"]        = f.source;
-            e["label"]         = inputLabelName(f.label);
-            fj.push_back(std::move(e));
+            ++features[static_cast<size_t>(f.level)];
+            fj.push_back(supportJson(f));
+        }
+        for (const auto& f : m.encodings) {
+            ++encodings[static_cast<size_t>(f.level)];
+            ej.push_back(supportJson(f));
         }
         mj["features"]           = std::move(fj);
+        mj["encodings"]          = std::move(ej);
         mj["unknown_extensions"] = m.unknownExtensions;
         mj["warnings"]           = m.warnings;
-        for (const auto& e : m.unknownExtensions)
-            if (!hasExtension(unknown, e.c_str())) unknown.push_back(e);
+        addUnknown(unknown, m.unknownExtensions);
         list.push_back(std::move(mj));
     }
-    root["implemented"]        = counts[0];
-    root["approximated"]       = counts[1];
-    root["unsupported"]        = counts[2];
-    root["unknown_extensions"] = unknown;
+    root["base"]                     = countsJson(base);
+    root["features"]                 = countsJson(features);
+    root["encodings"]                = countsJson(encodings);
+    root["unknown_extensions"]       = unknown;
     root["asset_unknown_extensions"] = assetUnknown;
-    root["materials"]          = std::move(list);
+    root["materials"]                = std::move(list);
     return root.dump(2);
 }
 

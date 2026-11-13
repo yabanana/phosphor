@@ -2,10 +2,15 @@
 
 // F15.3 (ticket 04): the support report.
 //
-// Per material and feature: implemented / approximated (named approximation)
-// / unsupported, plus the extensions of the material the loader does not
-// understand.  Printed as a `MATERIALS` log line (per-material detail at debug
-// level) and written into the benchmark report JSON.  Portable.
+// Vocabulary (GLOSSARY.md): a material FEATURE is an optional part of the
+// model (clearcoat, sheen, ...); an EXTENSION is its glTF file encoding.  The
+// report therefore keeps three separate things per material: the status of the
+// base model, the material features the material uses (implemented /
+// approximated with a named approximation / unsupported) and the glTF
+// ENCODINGS handled without a feature of their own (emissive_strength,
+// texture_transform), plus the extensions the loader does not understand.
+// Printed as a `MATERIALS` log line (per-material detail at debug level) and
+// written into the benchmark report JSON (`phosphor.materials.v2`).  Portable.
 
 #include "core/types.h"
 #include "renderer/material_description.h"
@@ -51,7 +56,7 @@ struct MaterialSourceInfo {
 };
 
 struct FeatureSupport {
-    std::string  feature;       // "base", "emissive_strength", "texture_transform" or featureName()
+    std::string  feature;       // "base", featureName(), or an encoding: "emissive_strength", "texture_transform"
     SupportLevel level = SupportLevel::Unsupported;
     std::string  approximation; // named approximation id (Approximated only)
     std::string  source;        // extension name(s) or "material-description-file"
@@ -60,9 +65,14 @@ struct FeatureSupport {
 
 struct MaterialSupportReport {
     std::string                 name;
-    std::vector<FeatureSupport> features; // base first; only features the material uses
+    FeatureSupport              base;      // the glTF core metallic-roughness model (empty feature = no report)
+    std::vector<FeatureSupport> features;  // material features the material uses (featureName())
+    std::vector<FeatureSupport> encodings; // glTF encodings handled without a feature (emissive_strength, texture_transform)
     std::vector<std::string>    unknownExtensions;
     std::vector<std::string>    warnings;
+
+    /// False for materials added without a description (procedural benches).
+    [[nodiscard]] bool valid() const { return !base.feature.empty(); }
 };
 
 /// Build the report of one material.
@@ -70,9 +80,11 @@ struct MaterialSupportReport {
                                                        const MaterialSourceInfo& info,
                                                        const MaterialSupportTable& table = currentSupportTable());
 
-/// One line: `MATERIALS count=.. implemented=.. approximated=.. unsupported=..
-/// features=[name:level(count) ...] unknown_extensions=[...]` -- counts are
-/// (material, feature) pairs, base excluded.
+/// One line: `MATERIALS count=.. base=level(count).. implemented=..
+/// approximated=.. unsupported=.. features=[name:level(count) ...]
+/// encodings=[name:level(count) ...] unknown_extensions=[...]` -- the three
+/// totals count (material, feature) pairs only; base and encodings are listed
+/// apart.
 [[nodiscard]] std::string formatSupportSummary(const std::vector<MaterialSupportReport>& materials,
                                                const std::vector<std::string>& assetUnknownExtensions);
 

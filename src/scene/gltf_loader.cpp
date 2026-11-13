@@ -187,7 +187,7 @@ bool GltfLoader::loadFromFile(const std::string& path) {
 
     LOG_INFO("%s", formatSupportSummary(gpuScene_.materialSupport(), gpuScene_.assetUnknownExtensions()).c_str());
     for (const auto& report : gpuScene_.materialSupport())
-        if (!report.features.empty()) LOG_DEBUG("%s", formatSupportDetail(report).c_str());
+        if (report.valid()) LOG_DEBUG("%s", formatSupportDetail(report).c_str());
 
     LOG_INFO("Loaded glTF: %s (%zu meshes, %zu materials, %zu textures)",
              path.c_str(), model.meshes.size(), model.materials.size(),

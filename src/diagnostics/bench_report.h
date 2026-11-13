@@ -211,7 +211,7 @@ struct LightingReport {
     u64 historyResets=0;
     u32 checks=0, failures=0;
 };
-constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 11; // 11: F15 `materials` support report
+constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 12; // 12: F15 `materials` support report v2 (base / features / encodings; 11 had one mixed list)
 
 struct BenchReport {
     std::string   bench;
@@ -247,7 +247,7 @@ struct BenchReport {
     RtReport rt;                 // F9 (schema 9)
     LightingReport lighting;     // F10-F12 (schema 10)
     std::string denoisedFixtureJson; // actual native fixture evidence, never phase acceptance
-    std::string materialsJson;       // F15 (schema 11): support report object (supportToJson), empty = omitted
+    std::string materialsJson;       // F15 (schema 12): support report object (supportToJson), empty = omitted
 };
 
 /// Nearest-rank statistics of `values` (empty input gives all zeros).

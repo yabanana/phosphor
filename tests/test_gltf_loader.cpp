@@ -260,7 +260,8 @@ TEST_CASE("glTF loader (F15): materials keep description, name and support repor
     CHECK(scene.findMaterial("plain") == std::optional<u32>(0u));
     CHECK_FALSE(scene.findMaterial("nope").has_value());
     CHECK(scene.materialDescriptions()[0].base.baseColor[0] == 1.0f);
-    REQUIRE(scene.materialSupport()[0].features.size() == 1);
+    REQUIRE(scene.materialSupport()[0].valid());
+    CHECK(scene.materialSupport()[0].features.empty());
 }
 
 TEST_CASE("glTF loader (F15): extension materials are described and emissive strength is folded") {
@@ -315,7 +316,7 @@ TEST_CASE("glTF loader (F15): a non-uniform transform leaves UVs untouched and i
     REQUIRE(loadModelJson(model, scene, "phosphor_f15_uv_nonuniform.gltf"));
     for (const GPUVertex& v : scene.vertices()) CHECK((v.u == 0.0f || v.u == 1.0f));
     bool unsupported = false;
-    for (const auto& f : scene.materialSupport()[0].features)
+    for (const auto& f : scene.materialSupport()[0].encodings)
         if (f.feature == "texture_transform") unsupported = f.level == SupportLevel::Unsupported;
     CHECK(unsupported);
 }
