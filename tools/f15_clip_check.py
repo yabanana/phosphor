@@ -189,6 +189,10 @@ def case_table(out, binary):
                    "--warmup", "0", "--fixed-timestep", "--no-ui", "--no-vsync", "--no-gpu-timing",
                    "--capture-linear", str(folder / "engine.pfm"), "--capture-linear-frame", str(ADAPT_FRAMES - 1),
                    "--capture-linear-signal", "hdr", "--report", str(folder / "report.json"),
+                   # Bit comparisons: every pipeline is final before the first frame, so the captured frame never
+                   # depends on worker compile time (a loaded machine let run 1 capture with fallback pipelines while
+                   # the repeat, with a warm shader cache, did not; 2026-11-13).  The rendering is unchanged.
+                   "--pipeline-sync",
                    *(["--adaptive-shading"] if adaptive else [])]
         return {"name": name, "kind": "adapt", "scenario": scenario, "adaptive": adaptive, "command": command,
                 "env": {}, "folder": str(folder)}
