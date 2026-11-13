@@ -715,7 +715,11 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
                 error = "--material-overrides requires a non-empty file path";
                 return false;
             }
-            out.materialOverridesPath = *value;
+            // The app does not apply the file yet (F15 ticket 05 routes edits through
+            // SceneStore deltas): accepting it would be a silent no-op.
+            error = "--material-overrides is not supported yet: the app cannot apply material overrides until "
+                    "F15 ticket 05 (feature plumbing); refusing to ignore " + std::string(*value);
+            return false;
         } else if (arg == "--debug-rt") {
             if (!needCount(out.debugRt)) return false;
             rtSettingsSpecified = true;

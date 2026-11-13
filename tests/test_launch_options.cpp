@@ -1373,12 +1373,14 @@ TEST_CASE("F15.3 the runner's exact capture command line is accepted") {
     CHECK(error.empty());CHECK(o.materialScene=="base-grid-sun");CHECK(o.captureLinearFrame==127);CHECK(o.exportReference=="snapshot");
 }
 
-TEST_CASE("F15 launch option --material-overrides takes a file path") {
+TEST_CASE("F15 launch option --material-overrides is refused at parse time until ticket 05 applies it") {
     LaunchOptions o;
     std::string error;
-    CHECK(o.materialOverridesPath.empty());
-    REQUIRE(parse({"--material-overrides", "path with spaces/overrides.json"}, o, error));
-    CHECK(o.materialOverridesPath == "path with spaces/overrides.json");
+    REQUIRE_FALSE(parse({"--material-overrides", "path with spaces/overrides.json"}, o, error));
+    CHECK(error.find("--material-overrides") != std::string::npos);
+    CHECK(error.find("ticket 05") != std::string::npos);
+    CHECK(o.materialOverridesPath.empty()); // never silently accepted
+    // Malformed uses keep their own errors.
     CHECK_FALSE(parse({"--material-overrides"}, o, error));
     CHECK_FALSE(parse({"--material-overrides", ""}, o, error));
     CHECK_FALSE(parse({"--material-overrides", "--frames"}, o, error));

@@ -189,7 +189,7 @@ namespace phosphor {
 //   --rt-tlas-rebuild-every N  periodic TLAS rebuild, 0 = structural changes only
 //   --rt-proxy off|manifest    RT geometry source (default full geometry)
 //   --rt-proxy-manifest PATH   explicit measured manifest (needs manifest mode)
-//   --material-overrides FILE  F15: name-keyed material overrides (phosphor-material-overrides JSON) applied over the loaded glTF
+//   --material-overrides FILE  F15: REFUSED at parse time until ticket 05 applies overrides in the app (name-keyed phosphor-material-overrides JSON over the loaded glTF)
 //   --debug-view rt    RT primary-hit diagnostic, also on the indexed path
 //   --debug-rt N       CPU reference comparison every N frames (0 = disabled)
 //   --debug-rt-deform  deform mesh 0 for BLAS lifecycle diagnostics; requires
@@ -338,9 +338,9 @@ struct LaunchOptions {
     u32          rtTlasRebuildEvery = 0;        // 0 = structural changes only; cadence needs engine measurements
     bool         rtProxyManifest = false;      // --rt-proxy off|manifest
     std::string  rtProxyManifestPath;          // empty = scene's default manifest, missing = full geometry
-    std::string  materialOverridesPath;        // F15 --material-overrides FILE (empty = none)
-    // TODO(F15 ticket 05): the app must read this file after the scene loads and call
-    // applyMaterialOverridesToScene() (renderer/material_description_io.h) with a TextureManager path resolver.
+    std::string  materialOverridesPath;        // F15 --material-overrides FILE (empty = none); never set while the option is refused
+    // TODO(F15 ticket 05): the option fails at parse time until the app reads this file after the scene loads and applies
+    // it (applyMaterialOverridesToScene, renderer/material_description_io.h) through SceneStore deltas.
     u32          debugRt = 0;                  // --debug-rt N: readback/check cadence, 0 = off
     bool         debugRtDeform = false;       // diagnostic mesh-0 deformation; raster bounds are unchanged
     RtProxyTransition debugRtProxyTransition = RtProxyTransition::None;
