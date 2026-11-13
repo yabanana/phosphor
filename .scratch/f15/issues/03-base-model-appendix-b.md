@@ -43,3 +43,9 @@ Roadmap: F15.1, F15.3 (prefactor)
 - Pending: F13/F14 corpus on the new baseline (≈ 2.5 h, serial GPU) and the
   Sponza D2 A/B/A on a quiet machine (the first attempt was contaminated by an
   external 1600 % CPU job, sky sentinel 0.74–1.12 ms; discarded).
+- F13/F14 corpus on aa58b66 (`build/f15-corpus-t03`, same cases, references
+  and ROI as the closure's final4 run, 12:02–14:40): 89 cases, every role
+  gates (control 30/30, cross-check 2/2, full-rate-pair 17/17, functional
+  13/13, independent-clip 12/12, numerical 14/14, repeatability-pair 1/1).
+  Independent-clip linear RMSE p95 unchanged to 4 decimals except
+  metalfx-fallback 0.0309 → 0.0303.
