@@ -523,7 +523,7 @@ class RunnerLogic(unittest.TestCase):
         # The mirrored fixture alone has the determinant control, and every anisotropy control.
         self.assertEqual(sorted(check.SCENARIOS["aniso-mirrored-sun"]["controls"]), sorted(ref.ANISO_CONTROLS))
 
-    def test_iridescence_keys_are_pending_and_name_the_control_that_models_the_current_engine(self):
+    def test_iridescence_keys_are_planned_with_their_controls_and_no_longer_pending(self):
         keys = ["iridescence-grid-sun", "iridescence-grid-env-resolve", "iridescence-grid-env", "iridescence-grid-point",
                 "iridescence-grid-point@restir", "iridescence-grid-point@clustered", "furnace-iridescence",
                 "furnace-iridescence@resolve"]
@@ -558,14 +558,10 @@ class RunnerLogic(unittest.TestCase):
                 self.assertIn(name, ref.IRID_CONTROLS, key)
             for name in declared:
                 self.assertIn(name, ref.IRID_DECLARED_CONTROLS, key)
-            if key != "furnace-iridescence":
-                self.assertEqual(spec["pending"], "ticket 12", key)
-                self.assertIn(spec["pending_matches"], literal + declared, key)
-                self.assertIn(spec["pending_matches"], ("iridescence-ignored", "declared-iridescence-ignored"), key)
+            for field in ("pending", "pending_matches", "pending_gate"):
+                self.assertNotIn(field, spec, key)
         self.assertTrue(check.SCENARIOS["furnace-iridescence"]["always_green"])
-        self.assertNotIn("pending", check.SCENARIOS["furnace-iridescence"])
-        resolve = check.SCENARIOS["furnace-iridescence@resolve"]
-        self.assertEqual((resolve["pending"], resolve["pending_gate"]), ("ticket 12", "declared"))
+        self.assertTrue(check.SCENARIOS["furnace-iridescence@resolve"]["always_green"])
         self.assertEqual(check.SCENARIOS["iridescence-grid-env-resolve"]["kind"], "declared")
         self.assertEqual(check.SCENARIOS["iridescence-grid-env"]["kind"], "environment")
         for key in ("iridescence-grid-sun", "iridescence-grid-env", "iridescence-grid-point", "iridescence-grid-point@restir",
@@ -1226,21 +1222,19 @@ class BenchMirror(unittest.TestCase):
             environment = ref.IRID_DECLARED_CONTROLS["declared-iridescence-ignored"] if ignored else ref.DECLARED
         return self.scenario(check.bench_scenario(key), model, "green", environment=environment, tag="-" + key + tag, key=key)
 
-    def test_iridescence_keys_are_red_for_the_right_reason_with_a_film_blind_engine(self):
-        for key in self.IRID_KEYS:
-            entry = self.irid_entry(key, True, "-blind")
-            self.assertTrue(entry["discriminating"], (key, json.dumps(entry["controls"], indent=1)))
-            self.assertFalse(entry["gates_pass"], key)          # pending: the gate FAILS
-            self.assertTrue(entry["pending_matches_met"], key)  # ... and the engine image matches the iridescence-ignored control
-            self.assertEqual(entry["pending"], "ticket 12")
-            self.assertEqual(check.verdict([entry], "green"), ("GREEN", check.EXIT_OK), key)
-
-    def test_iridescence_keys_go_red_in_green_mode_once_the_engine_implements_the_film(self):
+    def test_iridescence_keys_pass_with_an_engine_that_implements_the_film(self):
         for key in self.IRID_KEYS:
             entry = self.irid_entry(key, False, "-film")
+            self.assertTrue(entry["discriminating"], (key, json.dumps(entry["controls"], indent=1)))
             self.assertTrue(entry["gates_pass"], (key, json.dumps(check.summarize(entry["result"]))))
-            self.assertFalse(entry["pending_matches_met"], key)
-            self.assertEqual(check.verdict([entry], "green")[1], check.EXIT_UNEXPECTED, key)
+            self.assertFalse(entry.get("pending"), key)
+            self.assertEqual(check.verdict([entry], "green"), ("GREEN", check.EXIT_OK), key)
+
+    def test_iridescence_keys_fail_with_a_film_blind_engine(self):
+        # The old engine (film ignored) fails the gate of every key listed here (the furnace bound of the transport is not).
+        for key in self.IRID_KEYS:
+            entry = self.irid_entry(key, True, "-blind")
+            self.assertFalse(entry["gates_pass"], key)
 
     def test_iridescence_controls_each_fail_their_gate(self):
         for key in self.IRID_KEYS:
