@@ -15,3 +15,4 @@ Roadmap: F15.1, F15.3
 - [ ] Forward and visibility resolve give the same specular-grid image within the existing lit-mode envelope
 - [ ] 0 GPU allocations in measured frames; IORTestGrid and SpecularTest captured under the declared Khronos-like rig
 - [ ] Extension-record deltas count as material deltas for the GI radiance state and every history keyed on material revision (today `gi_passes.cpp:91` bumps `materialRevision` on base material deltas only); after an edit, indirect/denoised signals recover within the F13.6 recovery criterion
+- [ ] The feature mask is a `reserved` function constant in `shaders/variants.def` (like `SALT`), set per scene through `PipelineDesc` constants, not a variant axis: the dense forward table (42 variants) and `tools/variant_check.sh` stay unchanged; the archive gains only the masks the fixtures use (targeted update)
