@@ -189,6 +189,7 @@ namespace phosphor {
 //   --rt-tlas-rebuild-every N  periodic TLAS rebuild, 0 = structural changes only
 //   --rt-proxy off|manifest    RT geometry source (default full geometry)
 //   --rt-proxy-manifest PATH   explicit measured manifest (needs manifest mode)
+//   --material-overrides FILE  F15: name-keyed material overrides (phosphor-material-overrides JSON) applied over the loaded glTF
 //   --debug-view rt    RT primary-hit diagnostic, also on the indexed path
 //   --debug-rt N       CPU reference comparison every N frames (0 = disabled)
 //   --debug-rt-deform  deform mesh 0 for BLAS lifecycle diagnostics; requires
@@ -337,6 +338,7 @@ struct LaunchOptions {
     u32          rtTlasRebuildEvery = 0;        // 0 = structural changes only; cadence needs engine measurements
     bool         rtProxyManifest = false;      // --rt-proxy off|manifest
     std::string  rtProxyManifestPath;          // empty = scene's default manifest, missing = full geometry
+    std::string  materialOverridesPath;        // F15 --material-overrides FILE (empty = none)
     u32          debugRt = 0;                  // --debug-rt N: readback/check cadence, 0 = off
     bool         debugRtDeform = false;       // diagnostic mesh-0 deformation; raster bounds are unchanged
     RtProxyTransition debugRtProxyTransition = RtProxyTransition::None;

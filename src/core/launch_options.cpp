@@ -708,6 +708,14 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             }
             out.rtProxyManifestPath = *value;
             rtSettingsSpecified = true;
+        } else if (arg == "--material-overrides") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (value->empty() || value->starts_with("--")) {
+                error = "--material-overrides requires a non-empty file path";
+                return false;
+            }
+            out.materialOverridesPath = *value;
         } else if (arg == "--debug-rt") {
             if (!needCount(out.debugRt)) return false;
             rtSettingsSpecified = true;

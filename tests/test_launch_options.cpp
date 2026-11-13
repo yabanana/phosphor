@@ -1369,3 +1369,14 @@ TEST_CASE("F15.3 the runner's exact capture command line is accepted") {
                    "--capture-linear-signal","hdr","--export-reference","snapshot","--export-reference-frame","127","--report","r.json"},o,error));
     CHECK(error.empty());CHECK(o.materialScene=="base-grid-sun");CHECK(o.captureLinearFrame==127);CHECK(o.exportReference=="snapshot");
 }
+
+TEST_CASE("F15 launch option --material-overrides takes a file path") {
+    LaunchOptions o;
+    std::string error;
+    CHECK(o.materialOverridesPath.empty());
+    REQUIRE(parse({"--material-overrides", "path with spaces/overrides.json"}, o, error));
+    CHECK(o.materialOverridesPath == "path with spaces/overrides.json");
+    CHECK_FALSE(parse({"--material-overrides"}, o, error));
+    CHECK_FALSE(parse({"--material-overrides", ""}, o, error));
+    CHECK_FALSE(parse({"--material-overrides", "--frames"}, o, error));
+}
