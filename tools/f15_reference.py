@@ -338,7 +338,7 @@ def coat_albedo_table(roughness):
     alpha = float(effective_alpha(roughness))
     key = round(alpha, 12)
     if key not in _COAT_ALBEDO:
-        mus = np.linspace(MIN_NDOTV, 1.0, MU_NODES)
+        mus = np.linspace(math.sqrt(MIN_NDOTV), 1.0, MU_NODES) ** 2
         a = np.empty(MU_NODES)
         b = np.empty(MU_NODES)
         for i, mu in enumerate(mus):
@@ -465,7 +465,10 @@ _SHEEN_ALBEDO = {}
 
 
 def sheen_albedo_table(alpha, variant="spec"):
-    """(mu grid, E) of D V N.L over the incident hemisphere for one alpha_g, clamped to SHEEN_E_CLAMP."""
+    """(mu grid, E) of D V N.L over the incident hemisphere for one alpha_g.  E is UNCLAMPED here: `sheen_albedo`
+    interpolates first and clamps to SHEEN_E_CLAMP after (a clamped table has a kink where E crosses 1, and interpolating
+    across it was off by 0.011 near N.V 0.05 at sheen roughness 0.1: measured against a 2048 x 1024 integration).  The mu
+    nodes are quadratic, mu = s^2 with s uniform in [sqrt(MIN_NDOTV), 1], where E changes fastest."""
     key = (round(float(alpha), 12), variant == "ashikhmin-visibility")
     if key not in _SHEEN_ALBEDO:
         n_theta, n_phi = SHEEN_QUADRATURE
@@ -485,7 +488,7 @@ def sheen_albedo_table(alpha, variant="spec"):
             else:
                 visibility = 1.0 / ((1.0 + charlie_lambda(mu, alpha) + lambda_i) * 4.0 * mu * cos_i)
             albedo[k] = float(np.sum(charlie_d(n_dot_h, alpha) * visibility * cos_i * cell))
-        _SHEEN_ALBEDO[key] = (mus, np.minimum(albedo, SHEEN_E_CLAMP))
+        _SHEEN_ALBEDO[key] = (mus, albedo)
     return _SHEEN_ALBEDO[key]
 
 
@@ -498,7 +501,7 @@ def sheen_albedo(mu, roughness, variant="spec"):
         sel = rough == r
         mus, e = sheen_albedo_table(float(sheen_alpha(r, variant)), variant)
         out[sel] = np.interp(mu[sel], mus, e)
-    return out
+    return np.minimum(out, SHEEN_E_CLAMP)
 
 
 def sheen_scaling(sheen, e_v, e_l=None):
@@ -1140,17 +1143,20 @@ def load_sheen_table(path=SHEEN_HEADER):
 
 
 def sheen_lookup(n_dot_v, roughness, path=SHEEN_HEADER):
-    """Bilinear E of the sheen table: the rule of `sheenTableLookup` (node = value * (size - 1), the cell index
-    clamped to size - 2, rows = sheen roughness, columns = N.V), written here from its documentation."""
+    """Bilinear E of the sheen table: the rule of `sheenTableLookup` (node = sqrt(N.V) * (size - 1) for the quadratic N.V
+    axis, (roughness - 0.07) / 0.93 * (size - 1) for the rows, the cell index
+    clamped to size - 2; the stored values are UNCLAMPED and the interpolated result is clamped to E <= 1), written here
+    from its documentation."""
     size, table = load_sheen_table(path)
     n = size - 1
-    x = np.clip(np.asarray(n_dot_v, dtype=np.float64), 0.0, 1.0) * n
-    y = np.clip(np.asarray(roughness, dtype=np.float64), 0.0, 1.0) * n
+    x = np.sqrt(np.clip(np.asarray(n_dot_v, dtype=np.float64), 0.0, 1.0)) * n
+    y = (np.clip(np.asarray(roughness, dtype=np.float64), SHEEN_MIN_ROUGHNESS, 1.0) - SHEEN_MIN_ROUGHNESS) / (1.0 - SHEEN_MIN_ROUGHNESS) * n
     x0 = np.minimum(np.floor(x).astype(np.int64), size - 2)
     y0 = np.minimum(np.floor(y).astype(np.int64), size - 2)
     fx, fy = x - x0, y - y0
-    return ((table[y0, x0] * (1 - fx) + table[y0, x0 + 1] * fx) * (1 - fy) +
-            (table[y0 + 1, x0] * (1 - fx) + table[y0 + 1, x0 + 1] * fx) * fy)
+    e = ((table[y0, x0] * (1 - fx) + table[y0, x0 + 1] * fx) * (1 - fy) +
+         (table[y0 + 1, x0] * (1 - fx) + table[y0 + 1, x0 + 1] * fx) * fy)
+    return np.minimum(e, SHEEN_E_CLAMP)
 
 
 def declared_sheen_environment(material, n_dot_v, sheen, variant):

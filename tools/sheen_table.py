@@ -11,23 +11,29 @@ E is the Fresnel-free albedo of the sheen BRDF f = D_charlie * V_charlie under u
 with, for alpha = r * r and inv_r = 1 / alpha (the specification's alpha_g):
   D_charlie = (2 + inv_r) sin(theta_h)^inv_r / (2 pi)
   V_charlie = 1 / ((1 + Lambda(N.V) + Lambda(N.L)) 4 N.V N.L),  Lambda the Estevez-Kulla fit of the notes.
-The stored value is min(E, 1): with the Estevez-Kulla visibility fit the Charlie lobe is NOT energy conserving at
+The model value is min(E, 1): with the Estevez-Kulla visibility fit the Charlie lobe is NOT energy conserving at
 grazing views of narrow lobes (E reaches 2.9 at N.V = 1e-3, roughness 0.07; the Sample Renderer's unorm LUT
 saturates the same way), and `1 - max3(sheenColor) E` would turn negative.  The clamp is part of the model
-(`E_CLAMP`), mirrored by the reference, and only touches N.V below about 0.05 at the narrowest lobes.
-Nodes: NdotV = i/(N-1) (node 0 at 1e-3), sheenRoughness = j/(N-1); roughness is clamped to [0.07, 1] (the
-declared lower bound: alpha 0.0049, a lobe about 0.07 rad wide; below it the table repeats row 0.07), the
-convention of tools/f15_reference.py `SHEEN_MIN_ROUGHNESS`.  The layout, the macros and the lookup follow
-src/renderer/dfg_table.h (read through a GPU buffer by fragment functions, see
-docs/research/2026-11-13-f15-shader-validation-constant-arrays.md).
+(`E_CLAMP`), mirrored by the reference, and only touches N.V below about 0.05 at the narrowest lobes.  The table
+stores the UNCLAMPED E (a smooth function) and `sheenTableLookup` clamps AFTER the bilinear interpolation: a clamped
+table has a kink where E crosses 1 and interpolated it by 0.03-0.05 at N.V near 0.05 (measured: the analytic light
+scaling min(1 - m E(N.V), 1 - m E(N.L)) then moved the dim pixels near the terminator by 20 % of the image floor).
+Nodes: N.V = (i/(N-1))^2 (node 0 at 1e-3; the quadratic spacing puts the nodes where E changes fastest, the
+interpolation error of min(E, 1) over N.V in [0.003, 1] is at most 0.002 at 64 nodes against 0.05 for a uniform axis),
+sheenRoughness = 0.07 + 0.93 j/(N-1): the roughness is clamped to [0.07, 1] (the declared lower bound: alpha 0.0049,
+a lobe about 0.07 rad wide), the convention of tools/f15_reference.py `SHEEN_MIN_ROUGHNESS`, and the rows span exactly
+that range (rows at j/(N-1) wasted five rows below the clamp and interpolated the row at 0.07 towards the next one:
+0.02 at the narrowest lobes).  The layout and the macros follow src/renderer/dfg_table.h (read through a GPU buffer by
+fragment functions, see docs/research/2026-11-13-f15-shader-validation-constant-arrays.md).
 
 Generation integrates over the half-vector (dwi = 4 (wo.h) dh, Gauss-Legendre in cos(theta_h) x midpoint in
 phi); it is fully deterministic (no random numbers).  `--check` has three parts:
   1. regeneration: the committed header must equal a fresh run with the parameters it records;
   2. independent integration: a separately written Charlie BRDF integrated in the hemisphere of the INCIDENT
      direction (midpoint product rule in theta_i x phi_i, a different parametrisation, different nodes and a
-     different code path) must agree with the committed table within INDEPENDENT_TOLERANCE (absolute) at a
-     fixed set of nodes, and the table must be in [0, 1] (the albedo scaling would otherwise go negative);
+     different code path) must agree with the committed table within INDEPENDENT_TOLERANCE (absolute plus
+     INDEPENDENT_RELATIVE of the value) at a fixed set of nodes, and the table must be finite, non-negative and
+     at most E_STORE_MAX (the lookup's clamp to 1 keeps the albedo scaling non-negative);
   3. the negative control (`--check --corrupt`, always run by `--check`): one perturbed entry must make the
      independent check FAIL; a check that accepts it would be useless.
 Usage: python3 tools/sheen_table.py [--size N] [--out PATH]      (write)
@@ -43,8 +49,10 @@ import numpy as np
 
 MIN_ROUGHNESS = 0.07
 MIN_MU = 1e-3
-E_CLAMP = 1.0  # the albedo is stored as min(E, E_CLAMP)
-INDEPENDENT_TOLERANCE = 2e-3  # absolute, on E in [0, 1]
+E_CLAMP = 1.0  # the model value is min(E, E_CLAMP); applied by the lookup after the interpolation
+E_STORE_MAX = 4.0  # sanity bound of the stored (unclamped) values; the maximum is 2.92
+INDEPENDENT_TOLERANCE = 2e-3  # absolute, plus INDEPENDENT_RELATIVE of the value
+INDEPENDENT_RELATIVE = 1e-3
 REGENERATION_TOLERANCE = 5e-7  # absolute: libm/numpy last-digit differences, never a modelling difference
 DEFAULT_SIZE = 64
 GENERATOR_NODES = (256, 256)  # (Gauss-Legendre nodes in cos(theta_h), phi midpoint nodes)
@@ -98,12 +106,22 @@ def albedo_half_vector(mu, roughness, nodes=GENERATOR_NODES):
     return float(np.sum(integrand.mean(axis=1) * 2.0 * math.pi * w))
 
 
+def node_roughness(j, size):
+    """Sheen roughness of row j: MIN_ROUGHNESS + (1 - MIN_ROUGHNESS) j / (size - 1)."""
+    return MIN_ROUGHNESS + (1.0 - MIN_ROUGHNESS) * j / (size - 1)
+
+
+def node_mu(i, size):
+    """N.V of column i: quadratic spacing (i/(size-1))^2, node 0 at MIN_MU (the lookup interpolates in sqrt(N.V))."""
+    return max((i / (size - 1)) ** 2, MIN_MU)
+
+
 def table(size=DEFAULT_SIZE, nodes=GENERATOR_NODES):
-    """size x size values: rows = roughness j/(size-1), columns = N.V i/(size-1)."""
+    """size x size UNCLAMPED values: rows = node_roughness(j), columns = N.V (i/(size-1))^2."""
     rows = []
     for j in range(size):
         for i in range(size):
-            rows.append(min(albedo_half_vector(i / (size - 1), j / (size - 1), nodes), E_CLAMP))
+            rows.append(albedo_half_vector(node_mu(i, size), node_roughness(j, size), nodes))
     return rows
 
 
@@ -154,8 +172,9 @@ def render_header(size, nodes, rows):
     return f'''#pragma once
 // GENERATED by tools/sheen_table.py --size {size}; do not edit.
 // F15.3 (ticket 10) directional albedo E(N.V, sheenRoughness) of the Charlie sheen BRDF (D_charlie * V_charlie,
-// Fresnel-free, stored as min(E, 1)), as the specification's albedo scaling needs: base *= 1 - max3(sheenColor) * E. Rows: sheen
-// roughness j/(N-1) (clamped to [0.07, 1]); columns: N.V i/(N-1) (node 0 evaluated at 1e-3). Generated by
+// Fresnel-free, stored UNCLAMPED; the lookup returns min(E, 1)), as the specification's albedo scaling needs:
+// base *= 1 - max3(sheenColor) * E. Rows: sheen roughness 0.07 + 0.93 j/(N-1); columns: N.V (i/(N-1))^2
+// (node 0 evaluated at 1e-3; the lookup interpolates in sqrt(N.V)). The roughness is clamped to [0.07, 1] by the lookup. Generated by
 // half-vector quadrature ({nodes[0]} x {nodes[1]} nodes) and checked by an independent incident-direction
 // integration (tools/sheen_table.py --check). Shared by C++ and MSL.
 #include "renderer/gpu_types.h"
@@ -166,20 +185,25 @@ PHOSPHOR_GPU_CONSTANT float SheenTable[{size * size}] = {{
 }};
 #if defined(__METAL_VERSION__)
 #define PHOSPHOR_SHEEN_TABLE const constant float*
+#define PHOSPHOR_SHEEN_SQRT(x) metal::sqrt(x)
 #else
+#include <cmath>
 #define PHOSPHOR_SHEEN_TABLE const float*
+#define PHOSPHOR_SHEEN_SQRT(x) std::sqrt(x)
 #endif
 // Bilinear lookup on any copy of the table: the program-scope array above or a GPU buffer holding the same values
 // (fragment functions read the buffer referenced by FrameConstants: MTL_SHADER_VALIDATION corrupts their reads of
-// program-scope constant arrays). Same node convention as dfgTableLookup; the result is E in [0, 1].
+// program-scope constant arrays). The columns are quadratic in N.V (x = sqrt(N.V) (N - 1)); the bilinear result is clamped
+// to the model's E <= 1 after the interpolation (tools/sheen_table.py), so the result is E in [0, 1].
 inline float sheenTableLookup(PHOSPHOR_SHEEN_TABLE table, float nv, float roughness) {{
     const float n = float(SheenTableSize - 1);
-    const float x = (nv > 0 ? (nv < 1 ? nv : 1.0f) : 0.0f) * n, y = (roughness > 0 ? (roughness < 1 ? roughness : 1.0f) : 0.0f) * n;
+    const float x = PHOSPHOR_SHEEN_SQRT(nv > 0 ? (nv < 1 ? nv : 1.0f) : 0.0f) * n, y = ((roughness > 0.07f ? (roughness < 1 ? roughness : 1.0f) : 0.07f) - 0.07f) * (n / 0.93f);
     const u32 x0 = u32(x) < SheenTableSize - 1 ? u32(x) : SheenTableSize - 2, y0 = u32(y) < SheenTableSize - 1 ? u32(y) : SheenTableSize - 2;
     const float fx = x - float(x0), fy = y - float(y0);
     const float v00 = table[y0 * SheenTableSize + x0], v10 = table[y0 * SheenTableSize + x0 + 1];
     const float v01 = table[(y0 + 1) * SheenTableSize + x0], v11 = table[(y0 + 1) * SheenTableSize + x0 + 1];
-    return (v00 * (1 - fx) + v10 * fx) * (1 - fy) + (v01 * (1 - fx) + v11 * fx) * fy;
+    const float e = (v00 * (1 - fx) + v10 * fx) * (1 - fy) + (v01 * (1 - fx) + v11 * fx) * fy;
+    return e < 1.0f ? e : 1.0f;
 }}
 inline float sheenTableLookup(float nv, float roughness) {{
     return sheenTableLookup(SheenTable, nv, roughness);
@@ -206,10 +230,12 @@ def parse_header(path):
 def check_nodes(size):
     """Fixed verification nodes (row = roughness, column = N.V): every roughness decade and a spread of N.V
     including both ends; deterministic, a subset of the table's own nodes."""
-    rows = sorted({0, round(0.07 * (size - 1)), round(0.1 * (size - 1)), round(0.3 * (size - 1)),
-                   round(0.5 * (size - 1)), round(0.75 * (size - 1)), size - 1})
-    cols = sorted({0, 1, round(0.1 * (size - 1)), round(0.25 * (size - 1)), round(0.5 * (size - 1)),
-                   round(0.75 * (size - 1)), size - 1})
+    # Rows (size 64): roughness 0.07, 0.10, 0.30, 0.50, 0.75, 1 (index = (r - 0.07) / 0.93 * (size - 1), rounded).
+    rows = sorted({0, *(round((r - MIN_ROUGHNESS) / (1.0 - MIN_ROUGHNESS) * (size - 1)) for r in (0.1, 0.3, 0.5, 0.75)),
+                   size - 1})
+    # Columns are quadratic in N.V: indices 0, 3, 6, 13, 25, 40, 63 are N.V 1e-3, 2e-3, 9e-3, 0.043, 0.157, 0.40, 1 (size 64).
+    cols = sorted({0, round(3 * (size - 1) / 63), round(6 * (size - 1) / 63), round(13 * (size - 1) / 63),
+                   round(25 * (size - 1) / 63), round(40 * (size - 1) / 63), size - 1})
     return [(j, i) for j in rows for i in cols]
 
 
@@ -217,11 +243,11 @@ def independent_check(values, nodes=None, tolerance=INDEPENDENT_TOLERANCE, integ
     """Failures of `values` ([size, size]) against the independent integration: a list of strings, empty = pass."""
     size = values.shape[0]
     failures = []
-    if not np.all(np.isfinite(values)) or values.min() < 0.0 or values.max() > 1.0:
-        failures.append(f"table outside [0, 1]: min {values.min():.6f} max {values.max():.6f}")
+    if not np.all(np.isfinite(values)) or values.min() < 0.0 or values.max() > E_STORE_MAX:
+        failures.append(f"table outside [0, {E_STORE_MAX}]: min {values.min():.6f} max {values.max():.6f}")
     for j, i in nodes or check_nodes(size):
-        reference = min(integrate(i / (size - 1), j / (size - 1)), E_CLAMP)
-        if abs(values[j, i] - reference) > tolerance:
+        reference = integrate(node_mu(i, size), node_roughness(j, size))
+        if abs(values[j, i] - reference) > tolerance + INDEPENDENT_RELATIVE * abs(reference):
             failures.append(f"row {j} column {i}: table {values[j, i]:.6f} vs independent {reference:.6f}")
     return failures
 
@@ -231,7 +257,7 @@ def corrupt(values, row=None, column=None, delta=0.05):
     verification node, so the control is guaranteed to be on a checked entry."""
     out = values.copy()
     j, i = (row, column) if row is not None and column is not None else check_nodes(values.shape[0])[len(check_nodes(values.shape[0])) // 2]
-    out[j, i] = min(1.0, out[j, i] + delta) if out[j, i] + delta <= 1.0 else out[j, i] - delta
+    out[j, i] += delta
     return out
 
 

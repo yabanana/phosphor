@@ -1263,13 +1263,22 @@ class SheenModel(unittest.TestCase):
     def test_sheen_lookup_rule_on_a_synthetic_header(self):
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory) / "sheen_table.h"
-            values = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 0.1, 0.3, 0.5]  # rows = roughness 0, 0.5, 1; columns = N.V 0, 0.5, 1
+            values = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 0.1, 0.3, 0.5]  # rows = roughness 0.07, 0.535, 1; columns = N.V 0, 0.25, 1 (quadratic axis)
             path.write_text("PHOSPHOR_GPU_CONSTANT u32 SheenTableSize = 3;\nPHOSPHOR_GPU_CONSTANT float SheenTable[9] = {\n    " +
                             ", ".join(f"{v:.8e}f" for v in values) + "\n};\n")
             self.assertEqual(ref.load_sheen_table(path)[0], 3)
-            self.assertAlmostEqual(float(ref.sheen_lookup(np.array([1.0]), np.array([0.5]), path)[0]), 1.0)
-            self.assertAlmostEqual(float(ref.sheen_lookup(np.array([0.25]), np.array([0.0]), path)[0]), 0.1)
-            self.assertAlmostEqual(float(ref.sheen_lookup(np.array([0.5]), np.array([0.25]), path)[0]), 0.5)
+            self.assertAlmostEqual(float(ref.sheen_lookup(np.array([1.0]), np.array([0.535]), path)[0]), 1.0)
+            self.assertAlmostEqual(float(ref.sheen_lookup(np.array([0.25]), np.array([0.0]), path)[0]), 0.2)  # sqrt(0.25) = column 1; roughness clamps to 0.07 = row 0
+            x =math.sqrt(0.5) * 2.0 - 1.0  # N.V 0.5: between columns 1 and 2
+            fy = (0.30 - 0.07) / 0.93 * 2.0
+            self.assertAlmostEqual(float(ref.sheen_lookup(np.array([0.5]), np.array([0.30]), path)[0]),
+                                   (0.2 + 0.2 * x) * (1 - fy) + (0.8 + 0.2 * x) * fy)
+            unclamped = pathlib.Path(directory) / "sheen_table_unclamped.h"  # (the loader caches by path)
+            unclamped.write_text("PHOSPHOR_GPU_CONSTANT u32 SheenTableSize = 2;\nPHOSPHOR_GPU_CONSTANT float SheenTable[4] = {\n    "
+                                 "1.6e+00f, 1.4e+00f, 1.2e+00f, 0.4e+00f\n};\n")  # unclamped values: the result is clamped AFTER interpolating
+            self.assertAlmostEqual(float(ref.sheen_lookup(np.array([0.0]), np.array([0.0]), unclamped)[0]), 1.0)
+            self.assertAlmostEqual(float(ref.sheen_lookup(np.array([1.0]), np.array([1.0]), unclamped)[0]), 0.4)
+            self.assertAlmostEqual(float(ref.sheen_lookup(np.array([0.25]), np.array([0.535]), unclamped)[0]), 1.0)  # (1.6+1.4+1.2+0.4)/4 = 1.15 -> 1
             clamped = ref.sheen_lookup(np.array([-0.5, 2.0]), np.array([3.0, -1.0]), path)  # clamp like the C++ lookup
             self.assertAlmostEqual(float(clamped[0]), 0.1)   # row 2 (roughness 1), column 0
             self.assertAlmostEqual(float(clamped[1]), 0.4)   # row 0, column 2
