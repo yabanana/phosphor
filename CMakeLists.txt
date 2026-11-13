@@ -120,6 +120,7 @@ add_library(phosphor_core STATIC
     src/scene/camera.cpp
     src/scene/ecs.cpp
     src/scene/gltf_loader.cpp
+    src/scene/gltf_contained_fs.cpp
     src/scene/gltf_material_extensions.cpp
     src/scene/mesh_processing.cpp
     src/scene/procedural.cpp

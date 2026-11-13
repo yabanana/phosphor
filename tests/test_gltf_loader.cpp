@@ -13,6 +13,8 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include "scene/gltf_contained_fs.h"
+#include <tiny_gltf.h>
 
 using namespace phosphor;
 using phosphor::test::NullTextureManager;
@@ -42,7 +44,7 @@ void append(std::vector<unsigned char>& bytes, const std::vector<T>& values) {
 
 // A quad facing +Z with POSITION, TEXCOORD_0 and indices only: no NORMAL,
 // no TANGENT.  glTF UVs: origin at the top-left, V grows downwards.
-std::string quadWithoutNormalsOrTangents(const std::string& materialJson = "") {
+std::vector<unsigned char> quadBytes() {
     const std::vector<float> positions = {-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0};
     const std::vector<float> uvs       = {0, 1, 1, 1, 1, 0, 0, 0};
     const std::vector<unsigned short> indices = {0, 1, 2, 0, 2, 3}; // counter-clockwise about +Z
@@ -50,6 +52,11 @@ std::string quadWithoutNormalsOrTangents(const std::string& materialJson = "") {
     append(bytes, positions); // 48 bytes
     append(bytes, uvs);       // 32 bytes
     append(bytes, indices);   // 12 bytes
+    return bytes;
+}
+
+std::string quadWithoutNormalsOrTangents(const std::string& materialJson = "") {
+    const std::vector<unsigned char> bytes = quadBytes();
     return R"({
   "asset": {"version": "2.0"},
   "scene": 0,
@@ -320,4 +327,150 @@ TEST_CASE("glTF loader (F15): image URIs outside the asset directory are refused
     model["images"]   = nlohmann::json::array({nlohmann::json{{"uri", "../escape.png"}}});
     GpuScene scene;
     CHECK_FALSE(loadModelJson(model, scene, "phosphor_f15_uri_escape.gltf"));
+}
+
+// ---------------------------------------------------------------------------
+// Review (ticket 04): URI containment before any read, for images AND buffers.
+// ---------------------------------------------------------------------------
+namespace {
+
+namespace fs = std::filesystem;
+
+// asset/ (the glTF and an inside buffer/image) next to outside/ (sentinels).
+struct UriSandbox {
+    fs::path root, asset, outside;
+    explicit UriSandbox(const char* name) {
+        root    = fs::temp_directory_path() / name;
+        asset   = root / "asset";
+        outside = root / "outside";
+        fs::remove_all(root);
+        fs::create_directories(asset / "data");
+        fs::create_directories(outside);
+        write(outside / "secret.bin", quadBytes());
+        write(outside / "secret.png", {1, 2, 3});
+        write(asset / "data" / "quad.bin", quadBytes());
+    }
+    ~UriSandbox() { fs::remove_all(root); }
+    static void write(const fs::path& p, const std::vector<unsigned char>& bytes) {
+        std::ofstream out(p, std::ios::binary);
+        out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    }
+    // The quad asset with its buffer at `bufferUri` and optionally one image URI.
+    fs::path writeGltf(const std::string& bufferUri, const std::string& imageUri = "") const {
+        auto model = nlohmann::json::parse(quadWithoutNormalsOrTangents());
+        model["buffers"][0]["uri"] = bufferUri;
+        if (!imageUri.empty()) {
+            model["images"]   = nlohmann::json::array({nlohmann::json{{"uri", imageUri}}});
+            model["textures"] = nlohmann::json::array({nlohmann::json{{"source", 0}}});
+        }
+        const fs::path path = asset / "model.gltf";
+        std::ofstream out(path);
+        out << model;
+        return path;
+    }
+};
+
+struct RawLoad {
+    bool                     ok = false;
+    std::vector<std::string> refusals, reads;
+    std::string              err;
+};
+
+RawLoad rawLoad(const fs::path& path) {
+    ContainedFileSystem files(path.string());
+    tinygltf::TinyGLTF loader;
+    std::string installError;
+    REQUIRE(files.install(loader, installError));
+    tinygltf::Model model;
+    RawLoad r;
+    std::string warn;
+    r.ok       = loader.LoadASCIIFromFile(&model, &r.err, &warn, path.string());
+    r.refusals = files.refusals();
+    r.reads    = files.reads();
+    return r;
+}
+
+bool readSomething(const std::vector<std::string>& reads, const std::string& needle) {
+    for (const auto& r : reads)
+        if (r.find(needle) != std::string::npos) return true;
+    return false;
+}
+
+} // namespace
+
+TEST_CASE("glTF contained file system: an escaping buffer or image URI is refused without opening the file") {
+    UriSandbox box("phosphor_uri_fs_escape");
+    SUBCASE("buffer with a .. segment") {
+        const auto r = rawLoad(box.writeGltf("../outside/secret.bin"));
+        CHECK_FALSE(r.ok);
+        REQUIRE(r.refusals.size() == 1);
+        CHECK(r.refusals[0].find("../outside/secret.bin") != std::string::npos);
+        CHECK_FALSE(readSomething(r.reads, "secret.bin"));
+    }
+    SUBCASE("buffer with a percent-encoded .. segment") {
+        const auto r = rawLoad(box.writeGltf("%2e%2e/outside/secret.bin"));
+        CHECK_FALSE(r.ok);
+        CHECK_FALSE(r.refusals.empty());
+        CHECK_FALSE(readSomething(r.reads, "secret.bin"));
+    }
+    SUBCASE("buffer with an absolute path") {
+        const auto r = rawLoad(box.writeGltf((box.outside / "secret.bin").string()));
+        CHECK_FALSE(r.ok);
+        CHECK_FALSE(r.refusals.empty());
+        CHECK_FALSE(readSomething(r.reads, "secret.bin"));
+    }
+    SUBCASE("buffer through a symlink to the outside") {
+        std::error_code ec;
+        fs::create_directory_symlink(box.outside, box.asset / "link", ec);
+        if (ec) return; // symlinks unavailable on this file system
+        const auto r = rawLoad(box.writeGltf("link/secret.bin"));
+        CHECK_FALSE(r.ok);
+        REQUIRE_FALSE(r.refusals.empty());
+        CHECK(r.refusals[0].find("outside the asset directory") != std::string::npos);
+        CHECK_FALSE(readSomething(r.reads, "secret.bin"));
+    }
+    SUBCASE("image with a .. segment (inside buffer is fine)") {
+        const auto r = rawLoad(box.writeGltf("data/quad.bin", "../outside/secret.png"));
+        REQUIRE_FALSE(r.refusals.empty());
+        CHECK(r.refusals[0].find("../outside/secret.png") != std::string::npos);
+        CHECK_FALSE(readSomething(r.reads, "secret.png"));
+    }
+}
+
+TEST_CASE("glTF contained file system: files inside the asset directory are read, nothing from the current directory") {
+    UriSandbox box("phosphor_uri_fs_inside");
+    const auto r = rawLoad(box.writeGltf("data/quad.bin"));
+    CHECK(r.ok);
+    CHECK(r.refusals.empty());
+    CHECK(readSomething(r.reads, "model.gltf"));
+    CHECK(readSomething(r.reads, "data/quad.bin"));
+    // A missing buffer is a plain failure, not a refusal and never found elsewhere.
+    const auto missing = rawLoad(box.writeGltf("data/absent.bin"));
+    CHECK_FALSE(missing.ok);
+    CHECK(missing.refusals.empty());
+    // The cwd fallback must not rescue it: put a same-named file in the cwd.
+    const fs::path cwd = fs::current_path();
+    fs::current_path(box.outside);
+    UriSandbox::write(box.outside / "elsewhere.bin", quadBytes());
+    const auto fallback = rawLoad(box.writeGltf("elsewhere.bin"));
+    fs::current_path(cwd);
+    CHECK_FALSE(fallback.ok);
+    CHECK_FALSE(readSomething(fallback.reads, "elsewhere.bin"));
+}
+
+TEST_CASE("glTF loader: an escaping buffer URI fails the load and names the URI") {
+    UriSandbox box("phosphor_uri_loader_escape");
+    GpuScene scene;
+    NullTextureManager textures;
+    textures.createDefaultTextures();
+    ECS ecs;
+    GltfLoader loader(scene, textures, ecs);
+    // The sentinel is a valid buffer: without containment it would load.
+    CHECK_FALSE(loader.loadFromFile(box.writeGltf("../outside/secret.bin").string()));
+    CHECK(loader.lastError().find("../outside/secret.bin") != std::string::npos);
+    CHECK(scene.getMeshCount() == 0);
+    // The same asset with an inside buffer loads.
+    CHECK(loader.loadFromFile(box.writeGltf("data/quad.bin").string()));
+    CHECK(loader.lastError().empty());
+    CHECK(scene.getMeshCount() == 1);
 }

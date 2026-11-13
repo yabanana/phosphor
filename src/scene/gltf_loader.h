@@ -34,6 +34,8 @@ public:
     /// @return true on success
     bool loadFromFile(const std::string& path);
     [[nodiscard]] std::span<const EntityID> createdEntities() const { return createdEntities_; }
+    /// Why the last loadFromFile() failed (empty after a success).
+    [[nodiscard]] const std::string& lastError() const { return lastError_; }
 
 private:
     void processNode(const tinygltf::Model& model, const tinygltf::Node& node,
@@ -45,6 +47,7 @@ private:
     GpuScene&       gpuScene_;
     TextureManager& textures_;
     ECS&            ecs_;
+    std::string     lastError_;
     std::string     baseDir_; // directory of the file being loaded, with trailing slash
 
     // Caches to avoid reprocessing the same glTF object twice within a single file

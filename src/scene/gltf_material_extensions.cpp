@@ -345,8 +345,58 @@ void bakeUvTransform(const UvTransform& transform, std::vector<glm::vec2>& uvs) 
     }
 }
 
-bool isImageUriContained(const std::string& baseDir, const std::string& uri, std::string& error) {
+bool isContainedRelativePath(const std::string& baseDir, const std::string& path, std::string& error) {
     namespace fs = std::filesystem;
+    if (path.empty()) {
+        error = "empty URI";
+        return false;
+    }
+    if (path.find('\0') != std::string::npos) {
+        error = "URI '" + path + "' contains a NUL byte";
+        return false;
+    }
+    if (path[0] == '/' || path[0] == '\\' || (path.size() >= 2 && path[1] == ':') ||
+        path.find("://") != std::string::npos || path.rfind("file:", 0) == 0) {
+        error = "URI '" + path + "' is absolute or has a scheme";
+        return false;
+    }
+    // ".." segments, on both separators.
+    size_t start = 0;
+    while (start <= path.size()) {
+        size_t end = path.find_first_of("/\\", start);
+        if (end == std::string::npos) end = path.size();
+        if (path.compare(start, end - start, "..") == 0) {
+            error = "URI '" + path + "' contains a '..' segment";
+            return false;
+        }
+        start = end + 1;
+    }
+
+    std::error_code ec;
+    const fs::path base = fs::weakly_canonical(baseDir.empty() ? fs::path(".") : fs::path(baseDir), ec);
+    if (ec) {
+        error = "cannot resolve asset directory '" + baseDir + "'";
+        return false;
+    }
+    const fs::path resolved = fs::weakly_canonical(base / path, ec);
+    if (ec) {
+        error = "cannot resolve URI '" + path + "'";
+        return false;
+    }
+    // Component-wise prefix comparison of the canonical (symlink-resolved) paths.
+    auto b = base.begin();
+    auto r = resolved.begin();
+    for (; b != base.end(); ++b, ++r) {
+        if (b->empty()) continue; // trailing separator
+        if (r == resolved.end() || *r != *b) {
+            error = "URI '" + path + "' resolves outside the asset directory";
+            return false;
+        }
+    }
+    return true;
+}
+
+bool isImageUriContained(const std::string& baseDir, const std::string& uri, std::string& error) {
     if (uri.empty()) {
         error = "empty image URI";
         return false;
@@ -364,49 +414,7 @@ bool isImageUriContained(const std::string& baseDir, const std::string& uri, std
             path += uri[i];
         }
     }
-    if (path.find('\0') != std::string::npos) {
-        error = "image URI '" + uri + "' contains a NUL byte";
-        return false;
-    }
-    if (path[0] == '/' || path[0] == '\\' || (path.size() >= 2 && path[1] == ':') ||
-        path.find("://") != std::string::npos || path.rfind("file:", 0) == 0) {
-        error = "image URI '" + uri + "' is absolute or has a scheme";
-        return false;
-    }
-    // ".." segments, on both separators.
-    size_t start = 0;
-    while (start <= path.size()) {
-        size_t end = path.find_first_of("/\\", start);
-        if (end == std::string::npos) end = path.size();
-        if (path.compare(start, end - start, "..") == 0) {
-            error = "image URI '" + uri + "' contains a '..' segment";
-            return false;
-        }
-        start = end + 1;
-    }
-
-    std::error_code ec;
-    const fs::path base = fs::weakly_canonical(baseDir.empty() ? fs::path(".") : fs::path(baseDir), ec);
-    if (ec) {
-        error = "cannot resolve asset directory '" + baseDir + "'";
-        return false;
-    }
-    const fs::path resolved = fs::weakly_canonical(base / path, ec);
-    if (ec) {
-        error = "cannot resolve image URI '" + uri + "'";
-        return false;
-    }
-    // Component-wise prefix comparison of the canonical (symlink-resolved) paths.
-    auto b = base.begin();
-    auto r = resolved.begin();
-    for (; b != base.end(); ++b, ++r) {
-        if (b->empty()) continue; // trailing separator
-        if (r == resolved.end() || *r != *b) {
-            error = "image URI '" + uri + "' resolves outside the asset directory";
-            return false;
-        }
-    }
-    return true;
+    return isContainedRelativePath(baseDir, path, error);
 }
 
 } // namespace phosphor

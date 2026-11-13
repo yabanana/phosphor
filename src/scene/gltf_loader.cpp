@@ -7,6 +7,7 @@
 #include <tiny_gltf.h>
 
 #include "scene/gltf_loader.h"
+#include "scene/gltf_contained_fs.h"
 #include "scene/gltf_material_extensions.h"
 #include "scene/mesh_processing.h"
 #include "scene/texture_manager.h"
@@ -102,9 +103,21 @@ GltfLoader::GltfLoader(GpuScene& gpuScene, TextureManager& textures, ECS& ecs)
 // ---------------------------------------------------------------------------
 
 bool GltfLoader::loadFromFile(const std::string& path) {
+    lastError_.clear();
     tinygltf::Model model;
     tinygltf::TinyGLTF loader;
     std::string err, warn;
+
+    // Every external image and buffer URI resolves inside the asset directory
+    // and is checked before anything is opened (review: the containment check
+    // used to run after tinygltf had already read the files).
+    ContainedFileSystem files(path);
+    std::string fsError;
+    if (!files.install(loader, fsError)) {
+        lastError_ = "cannot install file-system callbacks: " + fsError;
+        LOG_ERROR("glTF %s: %s", path.c_str(), lastError_.c_str());
+        return false;
+    }
 
     bool ok = false;
     if (path.size() >= 4 && path.substr(path.size() - 4) == ".glb") {
@@ -116,7 +129,13 @@ bool GltfLoader::loadFromFile(const std::string& path) {
     if (!warn.empty()) {
         LOG_WARN("glTF warning (%s): %s", path.c_str(), warn.c_str());
     }
+    if (!files.refusals().empty()) {
+        lastError_ = files.refusals().front();
+        LOG_ERROR("glTF %s: %s; refusing to load", path.c_str(), lastError_.c_str());
+        return false;
+    }
     if (!ok) {
+        lastError_ = err;
         LOG_ERROR("Failed to load glTF: %s (%s)", path.c_str(), err.c_str());
         return false;
     }
@@ -129,13 +148,15 @@ bool GltfLoader::loadFromFile(const std::string& path) {
     if (const auto required = unsupportedRequiredExtensions(model); !required.empty()) {
         std::string names;
         for (const auto& n : required) names += (names.empty() ? "" : ", ") + n;
-        LOG_ERROR("glTF %s requires unsupported extension(s): %s; refusing to load", path.c_str(), names.c_str());
+        lastError_ = "requires unsupported extension(s): " + names;
+        LOG_ERROR("glTF %s %s; refusing to load", path.c_str(), lastError_.c_str());
         return false;
     }
     // Image URIs resolve only inside the asset directory.
     for (const auto& image : model.images) {
         std::string uriError;
         if (!image.uri.empty() && !isImageUriContained(baseDir_, image.uri, uriError)) {
+            lastError_ = uriError;
             LOG_ERROR("glTF %s: %s; refusing to load", path.c_str(), uriError.c_str());
             return false;
         }

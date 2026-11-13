@@ -65,4 +65,9 @@ void bakeUvTransform(const UvTransform& transform, std::vector<glm::vec2>& uvs);
 /// On failure `error` explains why.
 [[nodiscard]] bool isImageUriContained(const std::string& baseDir, const std::string& uri, std::string& error);
 
+/// The same checks for an already percent-decoded path relative to `baseDir`
+/// (what tinygltf hands to its file-system callbacks).  Refuses empty, NUL,
+/// absolute, scheme, `..` and symlink-escaping paths.
+[[nodiscard]] bool isContainedRelativePath(const std::string& baseDir, const std::string& path, std::string& error);
+
 } // namespace phosphor
