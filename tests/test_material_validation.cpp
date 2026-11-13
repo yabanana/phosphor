@@ -17,13 +17,14 @@
 using namespace phosphor;
 
 TEST_CASE("F15.3 material scenarios are exactly the nine declared names") {
-    CHECK(MaterialValidation::scenarios().size() == 24);
+    CHECK(MaterialValidation::scenarios().size() == 30);
     for (auto name : {"base-grid-sun", "base-grid-env", "base-grid-env-resolve", "furnace-base", "furnace-resolve",
                       "roughness-extremes", "roughness-extremes-sun", "specular-grid-sun", "specular-grid-env-resolve", "specular-grid-point",
                       "specular-grid-env", "furnace-specular", "clearcoat-grid-sun", "clearcoat-grid-env-resolve",
                       "clearcoat-grid-env", "clearcoat-grid-point", "furnace-clearcoat",
                       "specular-grid-edit", "specular-grid-rough", "sheen-grid-sun", "sheen-grid-env-resolve",
-                      "sheen-grid-env", "sheen-grid-point", "furnace-sheen"})
+                      "sheen-grid-env", "sheen-grid-point", "furnace-sheen", "aniso-grid-sun", "aniso-grid-env-resolve",
+                      "aniso-grid-env", "aniso-grid-point", "furnace-aniso", "aniso-mirrored-sun"})
         CHECK(MaterialValidation::validScenario(name));
     CHECK_FALSE(MaterialValidation::validScenario("unknown"));
     CHECK_THROWS(MaterialValidation{"unknown"});
@@ -59,7 +60,9 @@ TEST_CASE("F15.3 grid spheres carry exact factors and no textures") {
         f.setup(ecs, scene, textures);
         const auto& s = MaterialValidation::spec(name);
         REQUIRE(f.spheres().size() == s.roughness.size() * s.metallic.size());
-        CHECK(scene.getMeshCount() == 1);
+        // One mesh, two for the mirrored carrier fixture (tangent handedness -1 and +1).
+        CHECK(scene.getMeshCount() == (std::find(s.tangentHandedness.begin(), s.tangentHandedness.end(), 1.0f) !=
+                                               s.tangentHandedness.end() ? 2u : 1u));
         for (u32 row = 0; row < s.metallic.size(); ++row)
             for (u32 col = 0; col < s.roughness.size(); ++col) {
                 const EntityID e = f.spheres()[row * s.roughness.size() + col];
@@ -615,6 +618,164 @@ TEST_CASE("F15.3 sheen-grid-point: the sheen grid lit by one point light from be
     CHECK(vl < -0.4f);
     CHECK(vl > -0.6f);
     CHECK(light.position.z < -MaterialValidation::SphereRadius);
+    CHECK(glm::length(light.position - centre) == doctest::Approx(9.0f));
+    for (u32 row = 0; row < point.metallic.size(); ++row)
+        for (u32 col = 0; col < point.roughness.size(); ++col) {
+            const float d = glm::length(light.position - MaterialValidation::sphereCenter(point, col, row));
+            const float r = d / light.range, window = (1.0f - r * r * r * r) * (1.0f - r * r * r * r);
+            CHECK(window > 0.9995f);
+        }
+}
+
+TEST_CASE("F15.3 anisotropy grids declare strength x rotation over a copper base (tools/test_f15_check.py mirrors them)") {
+    for (auto name : {"aniso-grid-sun", "aniso-grid-env-resolve", "aniso-grid-env", "aniso-grid-point", "furnace-aniso"}) {
+        const auto& s = MaterialValidation::spec(name);
+        REQUIRE(s.hasAnisotropyGrid());
+        CHECK_FALSE(s.hasSpecularGrid());
+        CHECK_FALSE(s.hasClearcoatGrid());
+        CHECK_FALSE(s.hasSheenGrid());
+        REQUIRE(s.anisotropyStrength.size() == s.metallic.size());
+        REQUIRE(s.anisotropyRotation.size() == s.roughness.size());
+        CHECK(s.anisotropyStrength == std::vector<float>{0.0f, 0.5f, 1.0f, 0.0f, 0.5f, 1.0f});
+        CHECK(s.metallic == std::vector<float>{0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f}); // dielectric rows, then metal rows
+        CHECK(s.anisotropyRotation == std::vector<float>{0.0f, 0.78539816f, 1.57079633f, -0.78539816f});
+        CHECK(s.roughness == std::vector<float>(4, 0.3f)); // base roughness 0.3: alpha 0.09, no sun quadrature mask
+        CHECK(s.mirroredColumn.empty());
+        CHECK(s.tangentHandedness.empty());
+    }
+    const auto& sun = MaterialValidation::spec("aniso-grid-sun");
+    CHECK(sun.sun);
+    CHECK(sun.environment == 0.0f);
+    CHECK(sun.baseColor == glm::vec3(0.8f, 0.35f, 0.15f));
+    CHECK(glm::length(sun.towardSun - glm::normalize(glm::vec3(-0.8f, 0.35f, -0.3f))) < 1e-6f);
+    const auto& resolve = MaterialValidation::spec("aniso-grid-env-resolve");
+    const auto& transport = MaterialValidation::spec("aniso-grid-env");
+    CHECK_FALSE(resolve.sun);
+    CHECK(resolve.environment == 0.5f);
+    CHECK(transport.environment == 0.5f);
+    CHECK(MaterialValidation::environmentRadiance("aniso-grid-env-resolve") == 0.5f);
+    const auto& furnace = MaterialValidation::spec("furnace-aniso");
+    CHECK_FALSE(furnace.sun);
+    CHECK(furnace.environment == 1.0f);
+    CHECK(furnace.baseColor == glm::vec3(1.0f));
+    for (auto name : {"base-grid-sun", "specular-grid-sun", "clearcoat-grid-sun", "sheen-grid-sun"})
+        CHECK_FALSE(MaterialValidation::spec(name).hasAnisotropyGrid());
+    // Six rows of unit spacing: the grid centre is y = 2.5.
+    CHECK(MaterialValidation{"aniso-grid-sun"}.getDefaultCamera().position == glm::vec3(0.0f, 2.5f, 5.5f));
+}
+
+TEST_CASE("F15.3 anisotropy grid spheres carry the strength of their row and the rotation of their column") {
+    ECS ecs;
+    GpuScene scene;
+    test::NullTextureManager textures;
+    MaterialValidation f{"aniso-grid-sun"};
+    f.setup(ecs, scene, textures);
+    const auto& s = MaterialValidation::spec("aniso-grid-sun");
+    for (u32 row = 0; row < s.metallic.size(); ++row)
+        for (u32 col = 0; col < s.roughness.size(); ++col) {
+            const EntityID e = f.spheres()[row * s.roughness.size() + col];
+            const auto& m = std::as_const(ecs).getComponent<MaterialComponent>(e);
+            CHECK(m.metallicFactor == s.metallic[row]);
+            CHECK(m.roughnessFactor == s.roughness[col]);
+            if (s.anisotropyStrength[row] == 0.0f) { // strength 0: the feature is inactive, the neutral material
+                CHECK((!m.extension || featureMask(*m.extension) == 0));
+                continue;
+            }
+            REQUIRE(m.extension);
+            REQUIRE(m.extension->anisotropy);
+            CHECK(m.extension->anisotropy->strength == s.anisotropyStrength[row]);
+            CHECK(m.extension->anisotropy->rotation == s.anisotropyRotation[col]);
+            CHECK_FALSE(m.extension->anisotropy->texture.present());
+            CHECK_FALSE(m.extension->specular);
+            CHECK_FALSE(m.extension->clearcoat);
+            CHECK_FALSE(m.extension->sheen);
+            CHECK(featureMask(*m.extension) == MATERIAL_FEATURE_ANISOTROPY);
+        }
+    SceneStore store;
+    store.sync(ecs, scene);
+    CHECK(store.verifyAgainstEcs(ecs, scene).empty());
+    CHECK(store.featureUnion() == MATERIAL_FEATURE_ANISOTROPY);
+    // The words the reference reads: record 1 (GPUMaterialExt1) word 0 strength, word 1 rotation, word 2 texture.
+    const u32 row = 4, col = 3; // strength 0.5, rotation -pi/4 on the metal row
+    const EntityID e = f.spheres()[row * s.roughness.size() + col];
+    const u32 group = store.materials()[store.materialIndexOf(e)].extensionIndex;
+    const auto& rec = store.extensions()[group + 1];
+    float strength, rotation;
+    std::memcpy(&strength, &rec.w[0], 4);
+    std::memcpy(&rotation, &rec.w[1], 4);
+    CHECK(strength == 0.5f);
+    CHECK(rotation == -0.78539816f);
+    CHECK(rec.w[2] == INVALID_TEXTURE_INDEX);
+    f.teardown(ecs, scene);
+}
+
+TEST_CASE("F15.3 anisotropy grids are rendered on combed spheres whose tangents come from the mesh (handedness -1)") {
+    ECS ecs;
+    GpuScene scene;
+    test::NullTextureManager textures;
+    MaterialValidation f{"aniso-grid-sun"};
+    f.setup(ecs, scene, textures);
+    CHECK(scene.getMeshCount() == 1);
+    // Every sphere of the grid is instanced from that one mesh, not mirrored.
+    SceneStore store;
+    store.sync(ecs, scene);
+    for (EntityID e : f.spheres()) CHECK((store.instances()[store.slotOf(e)].flags & INSTANCE_FLAG_MIRRORED) == 0u);
+    f.teardown(ecs, scene);
+}
+
+TEST_CASE("F15.3 aniso-mirrored-sun: plain and mirrored carriers over both tangent handedness values") {
+    const auto& s = MaterialValidation::spec("aniso-mirrored-sun");
+    CHECK(s.sun);
+    CHECK(s.environment == 0.0f);
+    CHECK(s.sunIrradiance == 3.0f);
+    CHECK(s.roughness == std::vector<float>(4, 0.3f));
+    CHECK(s.metallic == std::vector<float>{0.0f, 1.0f});
+    CHECK(s.anisotropyStrength == std::vector<float>{1.0f, 1.0f});
+    CHECK(s.anisotropyRotation == std::vector<float>(4, 0.78539816f));
+    CHECK(s.mirroredColumn == std::vector<bool>{false, true, false, true});
+    CHECK(s.tangentHandedness == std::vector<float>{-1.0f, -1.0f, 1.0f, 1.0f});
+    ECS ecs;
+    GpuScene scene;
+    test::NullTextureManager textures;
+    MaterialValidation f{"aniso-mirrored-sun"};
+    f.setup(ecs, scene, textures);
+    CHECK(scene.getMeshCount() == 2); // handedness -1 and +1
+    SceneStore store;
+    store.sync(ecs, scene);
+    for (u32 row = 0; row < 2; ++row)
+        for (u32 col = 0; col < 4; ++col) {
+            const EntityID e = f.spheres()[row * 4 + col];
+            const auto& t = std::as_const(ecs).getComponent<TransformComponent>(e);
+            CHECK(t.scale == glm::vec3(s.mirroredColumn[col] ? -1.0f : 1.0f, 1.0f, 1.0f));
+            const auto& instance = store.instances()[store.slotOf(e)];
+            // The engine flags a negative determinant (glTF: mirrored nodes flip the winding), nothing else does.
+            CHECK(((instance.flags & INSTANCE_FLAG_MIRRORED) != 0u) == s.mirroredColumn[col]);
+            const auto& mesh = std::as_const(ecs).getComponent<MeshInstanceComponent>(e);
+            CHECK(mesh.meshHandle == std::as_const(ecs).getComponent<MeshInstanceComponent>(f.spheres()[col < 2 ? 0 : 2]).meshHandle);
+        }
+    const auto handleMinus = std::as_const(ecs).getComponent<MeshInstanceComponent>(f.spheres()[0]).meshHandle;
+    const auto handlePlus = std::as_const(ecs).getComponent<MeshInstanceComponent>(f.spheres()[2]).meshHandle;
+    CHECK(handleMinus != handlePlus);
+    f.teardown(ecs, scene);
+}
+
+TEST_CASE("F15.3 aniso-grid-point: the anisotropy grid lit by one point light from behind the grid") {
+    const auto& sun = MaterialValidation::spec("aniso-grid-sun");
+    const auto& point = MaterialValidation::spec("aniso-grid-point");
+    CHECK(point.anisotropyStrength == sun.anisotropyStrength);
+    CHECK(point.anisotropyRotation == sun.anisotropyRotation);
+    CHECK_FALSE(point.sun);
+    CHECK(point.environment == 0.0f);
+    REQUIRE(point.pointLights.size() == 1);
+    const MaterialPointLight light = point.pointLights[0];
+    CHECK(light.intensity == 250.0f);
+    CHECK(light.range == 100.0f);
+    const glm::vec3 camera = MaterialValidation{"aniso-grid-point"}.getDefaultCamera().position;
+    const glm::vec3 centre(0.0f, 2.5f, 0.0f); // six rows: the grid centre is at y = 2.5
+    CHECK(camera.y == doctest::Approx(centre.y));
+    const float vl = glm::dot(glm::normalize(camera - centre), glm::normalize(light.position - centre));
+    CHECK(vl < -0.4f);
+    CHECK(vl > -0.6f);
     CHECK(glm::length(light.position - centre) == doctest::Approx(9.0f));
     for (u32 row = 0; row < point.metallic.size(); ++row)
         for (u32 col = 0; col < point.roughness.size(); ++col) {

@@ -57,7 +57,18 @@ struct MaterialScenarioSpec {
     // material) and sheen roughness per column; `roughness` then holds the (constant) base roughness of each column.
     std::vector<glm::vec3> sheenColor;
     std::vector<float>     sheenRoughness;
+    // F15.3 (ticket 11) anisotropy grids: KHR_materials_anisotropy strength per row (a zero strength carries no extension,
+    // the neutral material) and rotation (radians, counter-clockwise from the tangent) per column; `roughness` then holds the
+    // (constant) base roughness of each column.  The spheres are COMBED spheres (ProceduralMeshes::generateCombedSphere,
+    // comb direction +X, tangent handedness -1 like the engine's UV sphere): a uniform lobe direction facing the camera.
+    // Mirrored carrier fixture (both empty elsewhere): per column the instance is mirrored (scale x = -1, INSTANCE_FLAG_MIRRORED)
+    // and the handedness w (+1 or -1) of the mesh tangents.
+    std::vector<float> anisotropyStrength;
+    std::vector<float> anisotropyRotation;
+    std::vector<bool>  mirroredColumn;
+    std::vector<float> tangentHandedness;
     [[nodiscard]] bool hasSpecularGrid() const { return !ior.empty(); }
+    [[nodiscard]] bool hasAnisotropyGrid() const { return !anisotropyStrength.empty(); }
     [[nodiscard]] bool hasClearcoatGrid() const { return !clearcoatFactor.empty(); }
     [[nodiscard]] bool hasSheenGrid() const { return !sheenColor.empty(); }
 };

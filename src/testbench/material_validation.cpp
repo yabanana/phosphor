@@ -14,7 +14,7 @@
 namespace phosphor {
 namespace {
 // The names are mirrored by tools/f15_check.py SCENARIOS (tests/test_material_validation.cpp compares both).
-constexpr std::array<std::string_view, 24> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
+constexpr std::array<std::string_view, 30> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
                                                       "furnace-base",   "furnace-resolve",     "roughness-extremes",
                                                       "roughness-extremes-sun", "specular-grid-sun",
                                                       "specular-grid-env-resolve", "specular-grid-point", "specular-grid-env", "furnace-specular",
@@ -22,7 +22,9 @@ constexpr std::array<std::string_view, 24> kScenarios{"base-grid-sun",  "base-gr
                                                       "clearcoat-grid-point", "furnace-clearcoat",
                                                       "specular-grid-edit", "specular-grid-rough",
                                                       "sheen-grid-sun", "sheen-grid-env-resolve", "sheen-grid-env",
-                                                      "sheen-grid-point", "furnace-sheen"};
+                                                      "sheen-grid-point", "furnace-sheen",
+                                                      "aniso-grid-sun", "aniso-grid-env-resolve", "aniso-grid-env",
+                                                      "aniso-grid-point", "furnace-aniso", "aniso-mirrored-sun"};
 constexpr float pi = 3.14159265358979323846f;
 
 glm::quat orientLight(glm::vec3 towardLight) {
@@ -93,6 +95,26 @@ const std::vector<MaterialScenarioSpec>& specs() {
     static const glm::vec3 sheenGridCentre(0.0f, 1.5f, 0.0f);
     static const MaterialPointLight sheenBackLight{sheenGridCentre + 9.0f * glm::normalize(glm::vec3(-0.65f, 0.55f, -0.52f)),
                                                    250.0f, 100.0f};
+    // F15.3 (ticket 11): KHR_materials_anisotropy on texture-free COMBED spheres (a uniform tangent field facing the
+    // camera, handedness -1).  Rows are the strength {0 (no extension), 0.5, 1} over a dielectric (copper base) and then over
+    // a metal; columns are the rotation {0, pi/4, pi/2, -pi/4}: 0 and pi/2 stretch the highlight along and across the comb,
+    // +-pi/4 are the two diagonals (the pair that tells the rotation direction).  Base roughness 0.3 (alpha 0.09: a wide
+    // lobe for the sun disk rule, no quadrature mask), base copper.
+    static const std::vector<float> anisoStrength{0.0f, 0.5f, 1.0f, 0.0f, 0.5f, 1.0f};
+    static const std::vector<float> anisoMetallic{0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f};
+    static const std::vector<float> anisoRotation{0.0f, 0.78539816f, 1.57079633f, -0.78539816f};
+    static const std::vector<float> anisoRoughness(4, 0.3f);
+    static const glm::vec3 anisoGridCentre(0.0f, 2.5f, 0.0f);
+    static const MaterialPointLight anisoBackLight{anisoGridCentre + 9.0f * glm::normalize(glm::vec3(-0.65f, 0.55f, -0.52f)),
+                                                   250.0f, 100.0f};
+    // The mirrored carrier fixture: two rows (dielectric, metal) at strength 1, every column at rotation pi/4; columns
+    // alternate plain and MIRRORED instances (scale x = -1) over meshes of handedness -1 then +1, so the rotation direction,
+    // the tangent handedness w and the world-matrix determinant each flip the lobe on their own.
+    static const std::vector<float> mirrorStrength{1.0f, 1.0f};
+    static const std::vector<float> mirrorMetallic{0.0f, 1.0f};
+    static const std::vector<float> mirrorRotation(4, 0.78539816f);
+    static const std::vector<bool>  mirrorColumns{false, true, false, true};
+    static const std::vector<float> mirrorHandedness{-1.0f, -1.0f, 1.0f, 1.0f};
     static const std::vector<MaterialScenarioSpec> all{
         {"base-grid-sun", roughness, metallic, copper, true, 3.0f, towardSun, 0.0f},
         {"base-grid-env", roughness, metallic, copper, false, 0.0f, towardSun, 0.5f},
@@ -167,6 +189,25 @@ const std::vector<MaterialScenarioSpec>& specs() {
         // without the transport).
         {"furnace-sheen", sheenBaseRoughness, sheenMetallic, glm::vec3(1.0f), false, 0.0f, towardSun, 1.0f, {}, {}, {}, {}, {},
          {}, {}, false, sheenColors, sheenRoughnesses},
+        // F15.3 (ticket 11) anisotropy grids.  Sun only: the direct gate (the anisotropic lobe at the disk centre).
+        {"aniso-grid-sun", anisoRoughness, anisoMetallic, copper, true, 3.0f, towardSun, 0.0f, {}, {}, {}, {}, {}, {}, {}, false, {},
+         {}, anisoStrength, anisoRotation},
+        // Environment only, deterministic resolve (--reflections off --lighting-denoise custom): the declared anisotropy term.
+        {"aniso-grid-env-resolve", anisoRoughness, anisoMetallic, copper, false, 0.0f, towardSun, 0.5f, {}, {}, {}, {}, {}, {}, {},
+         false, {}, {}, anisoStrength, anisoRotation},
+        // The same scene with the specular transport on: the anisotropic lobe in the transport (VNDF sampling) and the environment.
+        {"aniso-grid-env", anisoRoughness, anisoMetallic, copper, false, 0.0f, towardSun, 0.5f, {}, {}, {}, {}, {}, {}, {}, false, {},
+         {}, anisoStrength, anisoRotation},
+        // One point light only (no sun, environment 0), side-lit from behind like the other grids.
+        {"aniso-grid-point", anisoRoughness, anisoMetallic, copper, false, 0.0f, towardSun, 0.0f, {}, {}, {}, {anisoBackLight}, {},
+         {}, {}, false, {}, {}, anisoStrength, anisoRotation},
+        // Furnace over anisotropic materials: base albedo 1 under a uniform environment of radiance 1 (the runner also
+        // captures it without the transport).
+        {"furnace-aniso", anisoRoughness, anisoMetallic, glm::vec3(1.0f), false, 0.0f, towardSun, 1.0f, {}, {}, {}, {}, {}, {}, {},
+         false, {}, {}, anisoStrength, anisoRotation},
+        // Mirrored carriers under the sun: rotation direction, handedness w and mirrored instances (see above).
+        {"aniso-mirrored-sun", std::vector<float>(4, 0.3f), mirrorMetallic, copper, true, 3.0f, towardSun, 0.0f, {}, {}, {}, {}, {},
+         {}, {}, false, {}, {}, mirrorStrength, mirrorRotation, mirrorColumns, mirrorHandedness},
     };
     return all;
 }
@@ -200,8 +241,16 @@ void MaterialValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& textur
     if (!spheres_.empty()) throw std::logic_error("Material fixture already set up");
     textures.createDefaultTextures(); // idempotent; materials reference none of them
     const auto& s = spec(scenario_);
-    const auto sphere = ProceduralMeshes::generateSphere(SphereRadius, SphereSlices, SphereStacks);
-    const u32 handle = scene.uploadMesh(sphere.positions, sphere.normals, sphere.tangents, sphere.uvs, sphere.indices);
+    // The anisotropy grids use combed spheres (one mesh per tangent handedness: -1 the engine's UV sphere convention).
+    auto upload = [&](float handedness) {
+        const auto sphere = s.hasAnisotropyGrid()
+            ? ProceduralMeshes::generateCombedSphere(SphereRadius, SphereSlices, SphereStacks, glm::vec3(1.0f, 0.0f, 0.0f), handedness)
+            : ProceduralMeshes::generateSphere(SphereRadius, SphereSlices, SphereStacks);
+        return scene.uploadMesh(sphere.positions, sphere.normals, sphere.tangents, sphere.uvs, sphere.indices);
+    };
+    const u32 handle = upload(-1.0f);
+    u32 handlePlus = handle;
+    if (std::find(s.tangentHandedness.begin(), s.tangentHandedness.end(), 1.0f) != s.tangentHandedness.end()) handlePlus = upload(1.0f);
     u32 materialIndex = 0;
     for (u32 row = 0; row < s.metallic.size(); ++row)
         for (u32 column = 0; column < s.roughness.size(); ++column) {
@@ -209,10 +258,11 @@ void MaterialValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& textur
             spheres_.push_back(e);
             TransformComponent transform;
             transform.position = sphereCenter(s, column, row);
+            if (!s.mirroredColumn.empty() && s.mirroredColumn[column]) transform.scale = glm::vec3(-1.0f, 1.0f, 1.0f);
             transform.updateMatrix();
             ecs.addComponent(e, std::move(transform));
             MeshInstanceComponent instance;
-            instance.meshHandle = handle;
+            instance.meshHandle = (!s.tangentHandedness.empty() && s.tangentHandedness[column] > 0.0f) ? handlePlus : handle;
             instance.materialIndex = materialIndex++;
             instance.setVisible(true);
             instance.setCastsShadows(true);
@@ -248,6 +298,13 @@ void MaterialValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& textur
                 const glm::vec3 c = s.sheenColor[row];
                 description->sheen->color     = {c.x, c.y, c.z};
                 description->sheen->roughness = s.sheenRoughness[column];
+                material.extension = std::move(description);
+            }
+            if (s.hasAnisotropyGrid() && s.anisotropyStrength[row] > 0.0f) {
+                auto description = std::make_shared<MaterialDescription>();
+                description->anisotropy.emplace();
+                description->anisotropy->strength = s.anisotropyStrength[row];
+                description->anisotropy->rotation = s.anisotropyRotation[column];
                 material.extension = std::move(description);
             }
             material.baseColorFactor = glm::vec4(s.baseColor, 1.0f);

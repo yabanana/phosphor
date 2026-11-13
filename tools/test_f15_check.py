@@ -88,26 +88,64 @@ for _name, _sun, _env, _base, _point in (("sheen-grid-sun", 3.0, 0.0, [0.1] * 3,
                         point=SHEEN_POINT_LIGHT if _point else False)
 
 
-def write_sphere_ply(path, radius=0.4, slices=64, stacks=32):
+# F15.3 (ticket 11): the anisotropy grids (mirrors MaterialValidation: rows = strength over a dielectric then a metal,
+# columns = rotation, combed spheres of handedness -1) and the mirrored carrier fixture (columns = plain / mirrored over
+# handedness -1 / +1 meshes, every rotation pi/4, rows = dielectric, metal at strength 1).
+ANISO = dict(strength=[0.0, 0.5, 1.0, 0.0, 0.5, 1.0], rotation=[0.0, math.pi / 4, math.pi / 2, -math.pi / 4],
+             mirrored=[False] * 4, handedness=[-1.0] * 4)
+ANISO_POINT_LIGHT = POINT_LIGHT  # grid centre y = 2.5, like the coat grid
+for _name, _sun, _env, _base, _point in (("aniso-grid-sun", 3.0, 0.0, COPPER, False),
+                                         ("aniso-grid-env-resolve", 0.0, 0.5, COPPER, False),
+                                         ("aniso-grid-env", 0.0, 0.5, COPPER, False),
+                                         ("aniso-grid-point", 0.0, 0.0, COPPER, True),
+                                         ("furnace-aniso", 0.0, 1.0, [1, 1, 1], False)):
+    SPECS[_name] = dict(roughness=[0.3] * 4, metallic=[0.0, 0.0, 0.0, 1.0, 1.0, 1.0], base=_base, sun=_sun, env=_env,
+                        aniso=ANISO, point=ANISO_POINT_LIGHT if _point else False)
+SPECS["aniso-mirrored-sun"] = dict(
+    roughness=[0.3] * 4, metallic=[0.0, 1.0], base=COPPER, sun=3.0, env=0.0, point=False,
+    aniso=dict(strength=[1.0, 1.0], rotation=[math.pi / 4] * 4, mirrored=[False, True, False, True],
+               handedness=[-1.0, -1.0, 1.0, 1.0]))
+
+
+def comb_tangent(n, comb=(1.0, 0.0, 0.0)):
+    """The tangent of ProceduralMeshes::generateCombedSphere at a vertex of normal n: `comb` projected onto the tangent
+    plane; where nothing is left, a unit perpendicular."""
+    d = sum(a * b for a, b in zip(comb, n))
+    t = [comb[i] - d * n[i] for i in range(3)]
+    length = math.sqrt(sum(c * c for c in t))
+    if length > 1e-3:
+        return [c / length for c in t]
+    helper = (0.0, 1.0, 0.0)  # |comb.y| < 0.9
+    c = [n[1] * helper[2] - n[2] * helper[1], n[2] * helper[0] - n[0] * helper[2], n[0] * helper[1] - n[1] * helper[0]]
+    length = math.sqrt(sum(x * x for x in c))
+    return [x / length for x in c]
+
+
+def write_sphere_ply(path, radius=0.4, slices=64, stacks=32, handedness=None):
+    """The material-validation sphere; with `handedness` (+1 / -1) the combed tangent attribute of the snapshot (mesh
+    version 2: properties tangent_x/y/z and handedness_x after s, t)."""
     verts, faces = [], []
     for st in range(stacks + 1):
         theta = math.pi * st / stacks
         for sl in range(slices + 1):
             phi = 2 * math.pi * sl / slices
             n = (math.sin(theta) * math.cos(phi), math.cos(theta), math.sin(theta) * math.sin(phi))
-            verts.append((*(c * radius for c in n), *n, sl / slices, st / stacks))
+            extra = (*comb_tangent(n), handedness) if handedness is not None else ()
+            verts.append((*(c * radius for c in n), *n, sl / slices, st / stacks, *extra))
     for st in range(stacks):
         for sl in range(slices):
             a = st * (slices + 1) + sl
             b = a + slices + 1
             faces += [(a, b, a + 1), (a + 1, b, b + 1)]
+    tangent = ("property float tangent_x\nproperty float tangent_y\nproperty float tangent_z\n"
+               "property float handedness_x\n") if handedness is not None else ""
     with open(path, "wb") as f:
         f.write(("ply\nformat binary_little_endian 1.0\nelement vertex %d\nproperty float x\nproperty float y\n"
                  "property float z\nproperty float nx\nproperty float ny\nproperty float nz\nproperty float s\n"
-                 "property float t\nelement face %d\nproperty list uchar uint vertex_indices\nend_header\n"
-                 % (len(verts), len(faces))).encode())
+                 "property float t\n%selement face %d\nproperty list uchar uint vertex_indices\nend_header\n"
+                 % (len(verts), tangent, len(faces))).encode())
         for v in verts:
-            f.write(struct.pack("<8f", *v))
+            f.write(struct.pack("<%df" % len(v), *v))
         for tri in faces:
             f.write(struct.pack("<B3I", 3, *tri))
 
@@ -116,7 +154,12 @@ def make_bench_snapshot(folder, name, width, height):
     spec = SPECS[name]
     folder = pathlib.Path(folder)
     (folder / "snapshot").mkdir(parents=True)
-    write_sphere_ply(folder / "snapshot" / "mesh_0.ply")
+    handed = spec["aniso"]["handedness"] if "aniso" in spec else None
+    write_sphere_ply(folder / "snapshot" / "mesh_0.ply", handedness=-1.0 if handed else None)
+    meshes = ["mesh_0.ply"]
+    if handed and 1.0 in handed:
+        write_sphere_ply(folder / "snapshot" / "mesh_1.ply", handedness=1.0)
+        meshes.append("mesh_1.ply")
     cols, rows = len(spec["roughness"]), len(spec["metallic"])
     instances, materials, records = [], [], []
     for row in range(rows):
@@ -153,7 +196,23 @@ def make_bench_snapshot(folder, name, width, height):
                     words[16] = bit(rough)
                     materials[-1].update(feature_bits=4, flags=4 << 8, extension_index=len(records))
                     records += [words, [0] * 20, [0] * 20, [0] * 20]
-            instances.append({"slot": len(instances), "generation": 1, "flags": 7, "mesh": 0,
+            mesh = 0
+            if "aniso" in spec:
+                a = spec["aniso"]
+                strength, rotation = a["strength"][row], a["rotation"][col]
+                if strength > 0:  # strength 0: the feature is inactive, no feature bit and no extension
+                    bit = lambda v: int.from_bytes(struct.pack("<f", v), "little")  # noqa: E731
+                    record0 = [0] * 20
+                    for k in (5, 6, 10, 11, 12, 17, 18):
+                        record0[k] = ref.INVALID
+                    record1 = [0] * 20
+                    record1[0], record1[1], record1[2] = bit(strength), bit(rotation), ref.INVALID
+                    materials[-1].update(feature_bits=8, flags=8 << 8, extension_index=len(records))
+                    records += [record0, record1, [0] * 20, [0] * 20]
+                if a["mirrored"][col]:
+                    world[0] = -1.0
+                mesh = 1 if a["handedness"][col] > 0 else 0
+            instances.append({"slot": len(instances), "generation": 1, "flags": 7 | (8 if world[0] < 0 else 0), "mesh": mesh,
                               "material": len(materials) - 1, "world": world})
     distance = 5.5 if cols > 2 else 4.0
     data = {"schema": 1, "state": "TEST", "linear": True, "units": "metres", "frame": 0, "revisions": [0, 0, 0],
@@ -161,7 +220,7 @@ def make_bench_snapshot(folder, name, width, height):
                        "fov_y_radians": math.radians(60), "near": 0.05, "far": 0, "width": width, "height": height,
                        "jitter_pixels": [0, 0], "projection": "perspective_reverse_z_infinite"},
             "sky": [spec["env"]] * 3, "sun_angular_radius": 0.00465, "textures": [], "materials": materials,
-            "meshes": ["mesh_0.ply"], "instances": instances, "lights": [], "sampled_lights": [],
+            "meshes": meshes, "mesh_version": 2 if handed else 1, "instances": instances, "lights": [], "sampled_lights": [],
             "material_extensions": {"version": 1, "records_per_material": 4, "records": records}}
     if spec["sun"] > 0:
         data["lights"].append({"type": 0, "position": [0, 0, 0], "direction": list(-TOWARD_SUN), "color": [1, 1, 1],
@@ -395,6 +454,58 @@ class RunnerLogic(unittest.TestCase):
             self.assertEqual(check.SCENARIOS[key]["kind"], "direct")
             self.assertEqual(sorted(check.SCENARIOS[key]["controls"]), sorted(ref.SHEEN_CONTROLS), key)
         self.assertNotIn("sheen-cheap-scaling", check.SCENARIOS["sheen-grid-env"]["controls"])
+
+    def test_aniso_keys_are_pending_and_name_the_control_that_models_the_current_engine(self):
+        keys = ["aniso-grid-sun", "aniso-grid-env-resolve", "aniso-grid-env", "aniso-grid-point", "aniso-grid-point@restir",
+                "aniso-grid-point@clustered", "furnace-aniso", "furnace-aniso@resolve", "aniso-mirrored-sun"]
+        with tempfile.TemporaryDirectory() as tmp:
+            with contextlib.redirect_stdout(io.StringIO()):
+                args = ["--out", tmp, "--binary", "build/release/phosphor"]
+                for key in keys:
+                    args += ["--only", key]
+                self.assertEqual(check.main(args), 0)
+            commands = json.loads((pathlib.Path(tmp) / "plan.json").read_text())["commands"]
+        expected = {"aniso-grid-sun": ("aniso-grid-sun", "legacy", "off", "ssr", "custom", "none"),
+                    "aniso-grid-env-resolve": ("aniso-grid-env-resolve", "legacy", "off", "off", "custom", "none"),
+                    "aniso-grid-env": ("aniso-grid-env", "legacy", "off", "ssr", "custom", "none"),
+                    "aniso-grid-point": ("aniso-grid-point", "legacy", "off", "ssr", "custom", "none"),
+                    "aniso-grid-point@restir": ("aniso-grid-point", "restir", "on", "ssr", "off", "rays"),
+                    "aniso-grid-point@clustered": ("aniso-grid-point", "clustered", "on", "ssr", "off", "rays"),
+                    "furnace-aniso": ("furnace-aniso", "legacy", "off", "ssr", "custom", "none"),
+                    "furnace-aniso@resolve": ("furnace-aniso", "legacy", "off", "off", "custom", "none"),
+                    "aniso-mirrored-sun": ("aniso-mirrored-sun", "legacy", "off", "ssr", "custom", "none")}
+        for key, (bench, lighting, rt, reflections, denoise, visibility) in expected.items():
+            capture, reference = commands[key]["capture"], commands[key]["reference"]
+            self.assertEqual(capture[capture.index("--material-scenario") + 1], bench, key)
+            self.assertEqual(capture[capture.index("--lighting") + 1], lighting, key)
+            self.assertEqual(capture[capture.index("--rt") + 1], rt, key)
+            self.assertEqual(capture[capture.index("--reflections") + 1], reflections, key)
+            self.assertEqual(capture[capture.index("--lighting-denoise") + 1], denoise, key)
+            self.assertEqual(reference[reference.index("--visibility") + 1], visibility, key)
+            literal, declared = check.scenario_controls(key)
+            for name in literal + declared:
+                self.assertIn(name, reference, key)
+            spec = check.SCENARIOS[key]
+            for name in literal:
+                self.assertIn(name, ref.ANISO_CONTROLS, key)
+            for name in declared:
+                self.assertIn(name, ref.ANISO_DECLARED_CONTROLS, key)
+            if not key.startswith("furnace-aniso") or key.endswith("@resolve"):
+                self.assertEqual(spec["pending"], "ticket 11", key)
+                self.assertIn(spec["pending_matches"], literal + declared, key)
+                self.assertIn(spec["pending_matches"], ("aniso-ignored", "declared-aniso-ignored"), key)
+        self.assertTrue(check.SCENARIOS["furnace-aniso"]["always_green"])
+        self.assertNotIn("pending", check.SCENARIOS["furnace-aniso"])
+        resolve = check.SCENARIOS["furnace-aniso@resolve"]
+        self.assertEqual((resolve["pending"], resolve["pending_gate"]), ("ticket 11", "declared"))
+        self.assertEqual(check.SCENARIOS["aniso-grid-env-resolve"]["kind"], "declared")
+        self.assertEqual(check.SCENARIOS["aniso-grid-env"]["kind"], "environment")
+        for key in ("aniso-grid-sun", "aniso-grid-point", "aniso-grid-point@restir", "aniso-grid-point@clustered"):
+            self.assertEqual(check.SCENARIOS[key]["kind"], "direct")
+            self.assertEqual(sorted(check.SCENARIOS[key]["controls"]), sorted(
+                set(ref.ANISO_CONTROLS) - {"aniso-mirror-unaware"}), key)
+        # The mirrored fixture alone has the determinant control, and every anisotropy control.
+        self.assertEqual(sorted(check.SCENARIOS["aniso-mirrored-sun"]["controls"]), sorted(ref.ANISO_CONTROLS))
 
     def test_pending_matches_must_also_hold_in_green_mode(self):
         failing = {"kind": "direct", "pass": False, "rows": {}}
@@ -947,6 +1058,96 @@ class BenchMirror(unittest.TestCase):
             self.assertEqual(check.verdict([entry], "red"), ("EXPECTED_RED_CONFIRMED", 0))
         wrong = self.scenario(key, ref.control_model("sheen-unscaled-base", ref.APPENDIX_B), "red", tag="-wrong")
         self.assertFalse(wrong["result"]["pass"])  # an engine that adds the sheen on top of the full base gains energy
+        self.assertEqual(check.verdict([wrong], "red")[1], check.EXIT_UNEXPECTED)
+
+    # --- F15.3 (ticket 11): the anisotropy harness, same method as the sheen one (the "engine" images are reference
+    # renders of the model the engine will have (anisotropy) or has today (aniso-ignored)).
+
+    ANISO_KEYS = ("aniso-grid-sun", "aniso-grid-env-resolve", "aniso-grid-env", "aniso-grid-point", "furnace-aniso@resolve",
+                  "aniso-mirrored-sun")
+    ANISO_DECLARED_KEYS = ("aniso-grid-env-resolve", "furnace-aniso@resolve")
+
+    def aniso_engine(self, key, ignored):
+        declared = key in self.ANISO_DECLARED_KEYS
+        model = ref.control_model("aniso-ignored", ref.APPENDIX_B) if ignored else ref.APPENDIX_B
+        environment = None
+        if declared:
+            environment = ref.ANISO_DECLARED_CONTROLS["declared-aniso-ignored"] if ignored else ref.DECLARED
+        return model, environment
+
+    def aniso_entry(self, key, ignored, tag):
+        model, environment = self.aniso_engine(key, ignored)
+        return self.scenario(check.bench_scenario(key), model, "green", environment=environment, tag="-" + key + tag,
+                             key=key)
+
+    def test_aniso_keys_are_red_for_the_right_reason_with_an_anisotropy_blind_engine(self):
+        for key in self.ANISO_KEYS:
+            entry = self.aniso_entry(key, True, "-blind")
+            self.assertTrue(entry["discriminating"], (key, json.dumps(entry["controls"], indent=1)))
+            self.assertFalse(entry["gates_pass"], key)          # pending: the gate FAILS
+            self.assertTrue(entry["pending_matches_met"], key)  # ... and the engine image matches the aniso-ignored control
+            self.assertEqual(entry["pending"], "ticket 11")
+            self.assertEqual(check.verdict([entry], "green"), ("GREEN", check.EXIT_OK), key)
+
+    def test_aniso_keys_go_red_in_green_mode_once_the_engine_implements_the_anisotropy(self):
+        for key in self.ANISO_KEYS:
+            entry = self.aniso_entry(key, False, "-aniso")
+            self.assertTrue(entry["gates_pass"], (key, json.dumps(check.summarize(entry["result"]))))
+            self.assertFalse(entry["pending_matches_met"], key)
+            self.assertEqual(check.verdict([entry], "green")[1], check.EXIT_UNEXPECTED, key)
+
+    def test_aniso_controls_each_fail_their_gate(self):
+        for key in self.ANISO_KEYS:
+            entry = self.aniso_entry(key, False, "-ctl")
+            controls = entry["declared"]["controls"] if entry["kind"] == "furnace" else entry["controls"]
+            if entry["kind"] == "furnace":
+                controls = {**entry["controls"], **controls}
+            wanted = set(check.SCENARIOS[key]["controls"]) | set(check.SCENARIOS[key].get("declared", []))
+            self.assertEqual(set(controls), wanted, key)
+            for name, verdict in controls.items():
+                self.assertTrue(verdict["fails_gate"], (key, name, verdict))
+
+    def test_every_direct_aniso_control_alone_fails_the_direct_gate_as_an_engine_image(self):
+        # An engine that implemented one of the wrong models must not pass the anisotropy gates (grid and mirrored fixture).
+        for control in ref.ANISO_CONTROLS:
+            if control == "aniso-ignored":
+                continue
+            for key in ("aniso-grid-sun", "aniso-mirrored-sun"):
+                if control == "aniso-mirror-unaware" and key == "aniso-grid-sun":
+                    continue  # no mirrored instance in the grid: the control is the spec there
+                entry = self.scenario(key, ref.control_model(control, ref.APPENDIX_B), "green", tag="-" + control, key=key)
+                self.assertFalse(entry["result"]["pass"], (key, control))
+
+    def test_mirror_unaware_engine_is_the_spec_on_the_grid_and_wrong_only_on_mirrored_columns(self):
+        grid = self.scenario("aniso-grid-sun", ref.control_model("aniso-mirror-unaware", ref.APPENDIX_B), "green",
+                             tag="-mirror-grid", key="aniso-grid-sun")
+        self.assertTrue(grid["result"]["pass"])
+        mirrored = self.scenario("aniso-mirrored-sun", ref.control_model("aniso-mirror-unaware", ref.APPENDIX_B), "green",
+                                 tag="-mirror", key="aniso-mirrored-sun")
+        self.assertFalse(mirrored["result"]["pass"])
+
+    def test_env_aniso_exact_gate_sees_every_wrong_model_the_direct_keys_see(self):
+        # The per-sphere mean over the combed sphere sees the lobe orientation (the view azimuth against the lobe axes is not
+        # uniform on a combed sphere), so the exact environment key uses the same five controls as the direct keys.
+        for control in check.SCENARIOS["aniso-grid-env"]["controls"]:
+            entry = self.scenario("aniso-grid-env", ref.control_model(control, ref.APPENDIX_B), "green", tag="-" + control,
+                                  key="aniso-grid-env")
+            self.assertEqual(entry["result"]["pass"], False, control)
+        self.assertEqual(sorted(check.SCENARIOS["aniso-grid-env"]["controls"]), sorted(check.ANISO_DIRECT_CONTROLS))
+
+    def test_furnace_aniso_bound_holds_for_the_model_and_the_energy_control_breaks_it(self):
+        key = "furnace-aniso"
+        # The literal Appendix B dielectric gains 1.2 % at roughness 0.3 (the specification says so, measured on the base
+        # rows), so the engine emulation is the energy-conserving declared model (with and without the anisotropy fit).
+        for ignored in (False, True):
+            environment = ref.ANISO_DECLARED_CONTROLS["declared-aniso-ignored"] if ignored else ref.DECLARED
+            entry = self.scenario(key, ref.APPENDIX_B, "red", environment=environment, tag=f"-{ignored}")
+            self.assertTrue(entry["result"]["pass"], (ignored, entry["result"]["max_sphere_mean"]))
+            self.assertTrue(entry["expectation"]["asserted"] and entry["expectation"]["met"])
+            self.assertTrue(entry["controls"]["aniso-d-normalised-by-ab"]["fails_gate"])
+            self.assertEqual(check.verdict([entry], "red"), ("EXPECTED_RED_CONFIRMED", 0))
+        wrong = self.scenario(key, ref.control_model("aniso-d-normalised-by-ab", ref.APPENDIX_B), "red", tag="-wrong")
+        self.assertFalse(wrong["result"]["pass"])  # an engine whose D is normalised by alpha_b^2 gains energy
         self.assertEqual(check.verdict([wrong], "red")[1], check.EXIT_UNEXPECTED)
 
     def test_cached_reference_is_reused_only_for_the_same_snapshot(self):
