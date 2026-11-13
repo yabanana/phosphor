@@ -37,6 +37,13 @@ struct ReferenceAreaLight {
     u32 materialIndex = ~0u;
     float uv0[2]{}, uv1[2]{}, uv2[2]{};
 };
+// F15.1 (ticket 05): version of the material-extension section of scene.json
+// ("material_extensions": {"version", "records_per_material", "records"}).  scene.json keeps
+// "schema":1 (readers of the base fields are unaffected); an exporter without extensions writes
+// version 1 with an empty record list.  Records are the raw 20 u32 words of the GPU layout
+// (gpu_types.h GPUMaterialExt0..3), so the reader sees exactly what the shader reads.
+constexpr u32 REFERENCE_MATERIAL_EXTENSION_VERSION = 1;
+
 struct OfflineReferenceScene {
     std::span<const GPUVertex> vertices;
     std::span<const u32> indices;
@@ -44,6 +51,9 @@ struct OfflineReferenceScene {
     // Explicit completed same-frame WORLD matrices; never local/base motions.
     std::span<const GPUInstance> worldInstances;
     std::span<const GPUMaterial> materials;
+    // F15.1: the extension buffer of the same frame (SceneStore::extensions); materials with feature
+    // bits in flags reference their group through GPUMaterial::extensionIndex.
+    std::span<const GPUMaterialExtRecord> materialExtensions;
     std::span<const GPULight> lights;
     std::span<const ReferenceAreaLight> sampledLights;
     std::span<const ReferenceTexture> textures;

@@ -207,3 +207,83 @@ TEST_CASE("support report: ior/specular is approximated with a named approximati
     CHECK(r.features[0].approximation == "di_and_specular_transport_use_base_model");
     CHECK(formatSupportSummary({r}, {}).find("approximated=1") != std::string::npos);
 }
+
+// ---------------------------------------------------------------------------
+// Offline-reference snapshot: versioned material extension section.
+// ---------------------------------------------------------------------------
+#include "renderer/offline_reference.h"
+
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+
+namespace {
+std::string readFile(const std::filesystem::path& p) {
+    std::ifstream in(p);
+    std::stringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+} // namespace
+
+TEST_CASE("offline reference: scene.json carries the versioned extension records, validation needs them") {
+    const auto dir = std::filesystem::temp_directory_path() / "phosphor_f15_ext_reference_unit";
+    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(dir.string() + ".partial");
+    std::array<GPUVertex, 3> v{};
+    v[1].px = 1;
+    v[2].py = 1;
+    const std::array<u32, 3> ids{0, 1, 2};
+    GPUMeshInfo m{};
+    m.indexCount = 3;
+    GPUMaterial material{};
+    material.baseColor[3] = 1;
+    material.baseColorTex = material.normalTex = material.metallicRoughnessTex = material.occlusionTex =
+        material.emissiveTex = INVALID_TEXTURE_INDEX;
+    MaterialDescription d;
+    d.specular.emplace();
+    d.specular->ior            = 1.33f;
+    d.specular->specularFactor = 0.5f;
+    const MaterialExtGroup group = packMaterialExtensions(d);
+    material.flags          = featureFlags(d);
+    material.extensionIndex = 0;
+    GPUInstance i{};
+    i.modelMatrix[0] = i.modelMatrix[5] = i.modelMatrix[10] = i.modelMatrix[15] = 1;
+    i.flags = INSTANCE_FLAG_VALID | 1;
+    OfflineReferenceScene s{.vertices = v, .indices = ids, .meshes = std::span(&m, 1), .worldInstances = std::span(&i, 1),
+                            .materials = std::span(&material, 1)};
+    s.camera.width = s.camera.height = 1;
+    // Feature bits without the records are refused (no silent base-model reference).
+    CHECK_FALSE(validateReferenceScene(s).ok);
+    s.materialExtensions = std::span(group.data(), group.size());
+    CHECK(validateReferenceScene(s).ok);
+    // An extension texture without texels is refused like a base texture.
+    MaterialDescription textured = d;
+    textured.specular->specularColorTexture.index = 9;
+    const MaterialExtGroup tg = packMaterialExtensions(textured);
+    s.materialExtensions = std::span(tg.data(), tg.size());
+    CHECK_FALSE(validateReferenceScene(s).ok);
+    s.materialExtensions = std::span(group.data(), group.size());
+
+    REQUIRE(exportOfflineReference(s, dir).ok);
+    const std::string manifest = readFile(dir / "scene.json");
+    CHECK(manifest.find("\"schema\":1") != std::string::npos);
+    CHECK(manifest.find("\"material_extensions\":{\"version\":1,\"records_per_material\":4,\"records\":[[") !=
+          std::string::npos);
+    CHECK(manifest.find("\"feature_bits\":1,\"extension_index\":0") != std::string::npos);
+    // Record 0 word 0 is the IOR 1.33 bit pattern, word 1 the specular factor 0.5.
+    u32 iorBits;
+    std::memcpy(&iorBits, &group[0].w[0], 4);
+    CHECK(manifest.find("[" + std::to_string(iorBits) + ",1056964608,") != std::string::npos);
+    std::filesystem::remove_all(dir);
+
+    // A scene without features writes the section empty.
+    material.flags          = 0;
+    material.extensionIndex = MATERIAL_EXTENSION_INVALID;
+    s.materialExtensions    = {};
+    REQUIRE(exportOfflineReference(s, dir).ok);
+    const std::string plain = readFile(dir / "scene.json");
+    CHECK(plain.find("\"records\":[]") != std::string::npos);
+    CHECK(plain.find("\"feature_bits\":0,\"extension_index\":-1") != std::string::npos);
+    std::filesystem::remove_all(dir);
+}

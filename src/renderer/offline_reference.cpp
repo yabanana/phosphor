@@ -63,6 +63,21 @@ ReferenceExportResult validateReferenceScene(const OfflineReferenceScene& s) {
            !std::isfinite(m.occlusionStrength)) return fail("nonfinite reference material");
         for(u32 id:{m.baseColorTex,m.normalTex,m.metallicRoughnessTex,m.occlusionTex,m.emissiveTex})
             if(id!=INVALID_TEXTURE_INDEX && !textures.contains(id)) return fail("missing exact material texture texels");
+        // F15.1: an extended material must have its whole record group, with texels for every texture.
+        if((m.flags>>MATERIAL_FEATURE_SHIFT)&MATERIAL_FEATURES_ALL) {
+            if(m.extensionIndex==MATERIAL_EXTENSION_INVALID||m.extensionIndex%MATERIAL_EXT_RECORDS!=0||
+               size_t(m.extensionIndex)+MATERIAL_EXT_RECORDS>s.materialExtensions.size())
+                return fail("reference material with feature bits lacks its extension records");
+            // Texture fields of the frozen layouts (word offsets, gpu_types.h).
+            static constexpr u32 texWords[4][8]{{5,6,10,11,12,17,18,~0u},{2,7,8,10,12,~0u,~0u,~0u},
+                                                {10,11,12,~0u,~0u,~0u,~0u,~0u},{0,~0u,~0u,~0u,~0u,~0u,~0u,~0u}};
+            for(u32 r=0;r<MATERIAL_EXT_RECORDS;++r)
+                for(u32 w:texWords[r]) {
+                    if(w==~0u) break;
+                    const u32 id=s.materialExtensions[m.extensionIndex+r].w[w];
+                    if(id!=INVALID_TEXTURE_INDEX && !textures.contains(id)) return fail("missing exact extension texture texels");
+                }
+        }
     }
     for(const auto& mesh:s.meshes) {
         if(mesh.indexCount%3 || size_t(mesh.indexOffset)+mesh.indexCount>s.indices.size())
@@ -218,8 +233,15 @@ ReferenceExportResult exportOfflineReference(const OfflineReferenceScene& s,cons
         out<<"{\"base\":";numberArray(out,m.baseColor,4);out<<",\"emissive\":";numberArray(out,m.emissive,3);
         out<<",\"metallic\":"<<m.metallic<<",\"roughness\":"<<m.roughness<<",\"normal_scale\":"<<m.normalScale
            <<",\"occlusion_strength\":"<<m.occlusionStrength<<",\"alpha_cutoff\":"<<m.alphaCutoff<<",\"flags\":"<<m.flags
+           <<",\"feature_bits\":"<<((m.flags>>MATERIAL_FEATURE_SHIFT)&MATERIAL_FEATURES_ALL)
+           <<",\"extension_index\":"<<((m.flags>>MATERIAL_FEATURE_SHIFT)&MATERIAL_FEATURES_ALL?int64_t(m.extensionIndex):int64_t(-1))
            <<",\"textures\":["<<m.baseColorTex<<','<<m.normalTex<<','<<m.metallicRoughnessTex<<','<<m.occlusionTex<<','<<m.emissiveTex<<"]}";}
-    out<<"],\"meshes\":[";
+    out<<"],\"material_extensions\":{\"version\":"<<REFERENCE_MATERIAL_EXTENSION_VERSION
+       <<",\"records_per_material\":"<<MATERIAL_EXT_RECORDS<<",\"records\":[";
+    for(size_t k=0;k<s.materialExtensions.size();++k) {if(k) out<<',';out<<'[';
+        for(u32 w=0;w<20;++w) {if(w) out<<',';out<<s.materialExtensions[k].w[w];}
+        out<<']';}
+    out<<"]},\"meshes\":[";
     for(size_t k=0;k<s.meshes.size();++k) {if(k) out<<',';out<<"\"mesh_"<<k<<".ply\"";}
     out<<"],\"instances\":[";bool first=true;
     for(size_t k=0;k<s.worldInstances.size();++k) {const auto& i=s.worldInstances[k];if(!(i.flags&INSTANCE_FLAG_VALID)||!(i.flags&3u)) continue;
