@@ -6,12 +6,12 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 07, 08
 
-**Status:** ready-for-agent
+**Status:** resolved (2026-11-13; GPU per-light timing → ticket 24 quiet-machine measurements, Khronos side-by-side and thickness-texture fixture → ticket 22)
 
 - [x] Iridescence fixtures (thickness sweep on dielectric and metal, factor) pass decision-11 thresholds against an independent implementation of the specification's code (the thickness TEXTURE fixture is carried to ticket 22)
 - [x] Thickness 0 disables the effect; furnace bound holds; negative control (film ior ignored) fails
-- [ ] Per-light cost measured (static cost only, GPU timings are the orchestrator's); IridescenceDielectricSpheres/MetallicSpheres side by side (carried to ticket 22)
-- [ ] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
+- [ ] Per-light cost measured (static cost only, GPU timings are the orchestrator's); IridescenceDielectricSpheres/MetallicSpheres side by side (carried to ticket 22) — static cost measured (one thin film ≈ 187 flops, 27 transcendentals, 11 divides; ≈ 5× the base specular per light sample, iridescent pixels only); GPU timing → ticket 24 (quiet machine)
+- [x] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
 
 ## Comments
 
@@ -144,3 +144,29 @@ transcendental plus one film per dielectric or metal light sample (two for 0 < m
 specular evaluation per light sample, active only for iridescent pixels (strength 0 selects the base expressions). GPU timings: orchestrator.
 Carried: thickness texture fixture and factor texture (ticket 22), IridescenceDielectricSpheres/MetallicSpheres side by side (ticket 22),
 combinations with other lobes (composed, unvalidated), `tools/archive_check.sh` and `tools/hitch_check.sh` (not run, orchestrator).
+
+2026-11-13 — orchestrator verification on M5 after integration. Batch log:
+`build/f15-exact/battery12.log`.
+- `tools/f15_check.py --run --expect green` (`build/f15-check/t12`): GREEN on
+  every key, every control failing.
+  - `iridescence-grid-sun`: worst p99 0.087 %.
+  - `-point`: 0.074 %; `@restir` and `@clustered`: 0.54 %.
+  - `-env-resolve`: worst mean 1.0e-4.
+  - `-env` (transport): worst sphere mean 3.57 %, against 5 %.
+  - `furnace-iridescence`: max sphere mean 0.9998, max pixel 1.0042.
+  - `@resolve`: max pixel 1.00027.
+- `--debug-lobe-guide 16` on iridescence-grid-sun: `pixels 63536 extended 63536
+  | PASS`. The corrupt control perturbs the film ior. Guide overflow PASS.
+- Shader validation: iridescence-grid-env with RT reflections and ReSTIR
+  exits clean.
+- O7, checked for tickets 05-12 at once: warmup 64, then 64 measured frames
+  at 1280x720.
+  - Scenes: base-grid-sun, specular-, clearcoat-, sheen-, aniso- and
+    iridescence-grid-env, each with legacy+SSR and with ReSTIR+RT.
+  - Every run: `GPU allocations 0`, `render-thread compiles 0`.
+  - The 77-91 allocations in the runner's BENCH lines come from its warmup-0
+    captures, where the load counts as measured; base-grid-sun shows the same
+    77.
+- Scenes without features: F13 exact captures and visual_check 0 px.
+  archive_check: every local scenario PASS. hitch_check OK. The clip runner
+  meets every expectation.
