@@ -619,7 +619,7 @@ class RunnerLogic(unittest.TestCase):
             self.assertEqual(sorted(check.SCENARIOS[key]["controls"]), sorted(ref.IRID_CONTROLS), key)
         self.assertEqual(sorted(check.SCENARIOS["iridescence-grid-env-resolve"]["controls"]), sorted(ref.IRID_DECLARED_CONTROLS))
 
-    def test_thin_subsurface_keys_are_pending_and_name_the_control_that_models_the_current_engine(self):
+    def test_thin_subsurface_keys_are_planned_with_their_controls_and_no_longer_pending(self):
         keys = ["subsurface-thin-sun", "subsurface-thin-env-resolve", "subsurface-thin-env", "subsurface-thin-point",
                 "subsurface-thin-point@restir", "subsurface-thin-point@clustered", "furnace-thin-subsurface",
                 "furnace-thin-subsurface@resolve"]
@@ -654,14 +654,10 @@ class RunnerLogic(unittest.TestCase):
                 self.assertIn(name, ref.THIN_CONTROLS, key)
             for name in declared:
                 self.assertIn(name, ref.THIN_DECLARED_CONTROLS, key)
-            if key != "furnace-thin-subsurface":
-                self.assertEqual(spec["pending"], "ticket 16", key)
-                self.assertIn(spec["pending_matches"], literal + declared, key)
-                self.assertIn(spec["pending_matches"], ("transmission-ignored", "declared-transmission-ignored"), key)
+            for field in ("pending", "pending_matches", "pending_gate"):
+                self.assertNotIn(field, spec, key)
         self.assertTrue(check.SCENARIOS["furnace-thin-subsurface"]["always_green"])
-        self.assertNotIn("pending", check.SCENARIOS["furnace-thin-subsurface"])
-        resolve = check.SCENARIOS["furnace-thin-subsurface@resolve"]
-        self.assertEqual((resolve["pending"], resolve["pending_gate"]), ("ticket 16", "declared"))
+        self.assertTrue(check.SCENARIOS["furnace-thin-subsurface@resolve"]["always_green"])
         self.assertEqual(check.SCENARIOS["subsurface-thin-env-resolve"]["kind"], "declared")
         self.assertEqual(check.SCENARIOS["subsurface-thin-env"]["kind"], "environment")
         for key in ("subsurface-thin-sun", "subsurface-thin-env"):
@@ -1408,21 +1404,19 @@ class BenchMirror(unittest.TestCase):
             environment = ref.THIN_DECLARED_CONTROLS["declared-transmission-ignored"] if ignored else ref.DECLARED
         return self.scenario(check.bench_scenario(key), model, "green", environment=environment, tag="-" + key + tag, key=key)
 
-    def test_thin_subsurface_keys_are_red_for_the_right_reason_with_a_transmission_blind_engine(self):
-        for key in self.THIN_KEYS:
-            entry = self.thin_entry(key, True, "-blind")
-            self.assertTrue(entry["discriminating"], (key, json.dumps(entry["controls"], indent=1)))
-            self.assertFalse(entry["gates_pass"], key)          # pending: the gate FAILS
-            self.assertTrue(entry["pending_matches_met"], key)  # ... and the engine image matches the transmission-ignored control
-            self.assertEqual(entry["pending"], "ticket 16")
-            self.assertEqual(check.verdict([entry], "green"), ("GREEN", check.EXIT_OK), key)
-
-    def test_thin_subsurface_keys_go_red_in_green_mode_once_the_engine_implements_the_lobe(self):
+    def test_thin_subsurface_keys_pass_with_an_engine_that_implements_the_lobe(self):
         for key in self.THIN_KEYS:
             entry = self.thin_entry(key, False, "-lobe")
+            self.assertTrue(entry["discriminating"], (key, json.dumps(entry["controls"], indent=1)))
             self.assertTrue(entry["gates_pass"], (key, json.dumps(check.summarize(entry["result"]))))
-            self.assertFalse(entry["pending_matches_met"], key)
-            self.assertEqual(check.verdict([entry], "green")[1], check.EXIT_UNEXPECTED, key)
+            self.assertFalse(entry.get("pending"), key)
+            self.assertEqual(check.verdict([entry], "green"), ("GREEN", check.EXIT_OK), key)
+
+    def test_thin_subsurface_keys_fail_with_a_transmission_blind_engine(self):
+        # The old engine (transmission ignored) fails the gate of every key listed here (the furnace bound of the transport is not).
+        for key in self.THIN_KEYS:
+            entry = self.thin_entry(key, True, "-blind")
+            self.assertFalse(entry["gates_pass"], key)
 
     def test_thin_subsurface_controls_each_fail_their_gate(self):
         for key in self.THIN_KEYS:

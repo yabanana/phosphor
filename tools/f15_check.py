@@ -69,9 +69,10 @@ reference ray casting):
   @restir, @clustered), furnace-thin-subsurface (+ @resolve) against the independent KHR_materials_diffuse_transmission model of
   tools/f15_reference.py (reflected (1 - w) and transmitted w * colour Lambert lobes under the literal fresnel_mix, sun at the disk
   centre, exact environment T <= Cd, declared environment (1 - E_d)(1 - 0.16 N.V); shadow rays start on the side of the light).
-  Every gate the transmission-blind engine can fail is "pending" (asserted to FAIL; `pending_matches` = transmission-ignored or its
-  declared twin must PASS); the furnace transport bound is asserted green (only the declared gate of furnace-thin-subsurface@resolve
-  is pending).  Negative controls (each must fail its gate): transmission ignored, colour ignored, lobe on the front hemisphere
+  The engine side landed with F15.1 ticket 16 (the keys were "pending" with transmission-ignored or its declared twin as the
+  matching image until then): every gate passes; the furnace transport bound and the declared furnace gate are asserted green
+  (the double-counted control gains energy and must fail them).
+  Negative controls (each must fail its gate): transmission ignored, colour ignored, lobe on the front hemisphere
   (back lights ignored), diffuse not reduced by w (energy), no Fresnel weight on the transmitted part (not in the declared keys).
 - declared (base-grid-env-resolve; also furnace-resolve next to its furnace
   gate): the engine image against the independent declared-environment model of
@@ -354,27 +355,27 @@ SCENARIOS = {
     # the same five controls (the per-sphere mean over a combed sphere sees the lobe orientation: measured); the declared
     # environment key (split sum at an effective roughness, see the reference) requires `declared-aniso-ignored` and
     # `-alpha-t` (the declared fit is independent of rotation, handedness and axis swap).
-    "aniso-grid-sun": {"kind": "direct", 
+    "aniso-grid-sun": {"kind": "direct",
                        "controls": ANISO_DIRECT_CONTROLS,
                        "terms": "sun disk only (environment 0, no shadows, no GI) on the strength x rotation grid"},
-    "aniso-grid-env-resolve": {"kind": "declared", 
+    "aniso-grid-env-resolve": {"kind": "declared",
                                "reflections": "off", "controls": ["declared-aniso-ignored", "declared-aniso-alpha-t"],
                                "terms": "constant environment only (radiance 0.5, no sun) on the anisotropy grid, deterministic "
                                         "resolve terms (--reflections off --lighting-denoise custom)"},
-    "aniso-grid-env": {"kind": "environment", 
+    "aniso-grid-env": {"kind": "environment",
                        "controls": ANISO_DIRECT_CONTROLS,
                        "terms": "constant environment only (radiance 0.5, no sun), SSR specular transport (anisotropic VNDF "
                                 "sampling), on the anisotropy grid"},
-    "aniso-grid-point": {"kind": "direct", 
+    "aniso-grid-point": {"kind": "direct",
                          "lighting": "legacy", "visibility": "none", "controls": ANISO_DIRECT_CONTROLS,
                          "terms": "one point light only (no sun, environment 0, no GI), resolve local lights "
                                   "(--lighting legacy), on the anisotropy grid"},
-    "aniso-grid-point@restir": {"kind": "direct", 
+    "aniso-grid-point@restir": {"kind": "direct",
                                 "lighting": "restir", "visibility": "rays", "denoise": "off", "terminator_band": 2,
                                 "controls": ANISO_DIRECT_CONTROLS,
                                 "terms": "one point light only, ReSTIR DI with RT visibility (--lighting restir --rt on), "
                                          "unfiltered (--lighting-denoise off), on the anisotropy grid"},
-    "aniso-grid-point@clustered": {"kind": "direct", 
+    "aniso-grid-point@clustered": {"kind": "direct",
                                    "lighting": "clustered", "visibility": "rays", "denoise": "off", "terminator_band": 2,
                                    "controls": ANISO_DIRECT_CONTROLS,
                                    "terms": "one point light only, clustered DI with RT visibility (--lighting clustered "
@@ -392,7 +393,7 @@ SCENARIOS = {
     # The mirrored carrier fixture (sun only): columns = (plain, mirrored) x (handedness -1, +1) at rotation pi/4.  The
     # mirrored instances carry INSTANCE_FLAG_MIRRORED; the reference puts the lobe on the world image of the model-space
     # bitangent (w sign(det)), so rotation sign, handedness w and the determinant each flip the lobe on their own.
-    "aniso-mirrored-sun": {"kind": "direct", 
+    "aniso-mirrored-sun": {"kind": "direct",
                            "controls": ["aniso-ignored", "aniso-rotation-flipped", "aniso-bitangent-flipped",
                                         "aniso-alpha-swapped", "aniso-mirror-unaware", "aniso-d-normalised-by-ab"],
                            "terms": "sun disk only on plain and mirrored combed spheres of both tangent handedness values"},
@@ -441,46 +442,42 @@ SCENARIOS = {
                                              "terms on the iridescence grid"},
     # F15.3 (ticket 16): thin subsurface (diffuse transmission).  Rows are the weight {0, 0.25, 0.5, 1} (no weight-0 row on the
     # point-light quads: nothing reaches them), columns the transmission colour {white, warm, teal}, over a blue-grey base.  Direct
-    # grids group their rows by (metallic, weight).  The engine renders no transmission until ticket 16, so every gate it can
-    # fail is "pending" and its image must PASS the gate against the transmission-ignored reference ("pending_matches").  Today's
-    # DI receivers return 0 for a light with N.L <= 0 (diBRDFWeighted) and the resolve's lights saturate N.L, so a light behind
-    # the surface contributes nothing; the reference's shadow rays start on the side of the light (a thin carrier does not
-    # occlude its own transmitted light).  The declared environment keys have no fresnel-ignored control (the declared model has
-    # no V.H).  The furnace transport bound is asserted green; only the declared gate of the resolve furnace is pending.
-    "subsurface-thin-sun": {"kind": "direct", "pending": "ticket 16", "pending_matches": "transmission-ignored",
+    # grids group their rows by (metallic, weight).  The engine side landed with ticket 16 (the keys were "pending" with the
+    # transmission-ignored reference as the matching image until then): every gate must pass.  The reference's shadow rays start on
+    # the side of the light (a thin carrier does not occlude its own transmitted light), as the engine's DI visibility rays do.  The
+    # declared environment keys have no fresnel-ignored control (the declared model has no V.H).  The furnace gates are asserted green.
+    "subsurface-thin-sun": {"kind": "direct",
                             "controls": THIN_SUN_CONTROLS,
                             "terms": "sun disk only BEHIND the spheres (environment 0, no shadows, no GI) on the weight x colour grid"},
-    "subsurface-thin-env-resolve": {"kind": "declared", "pending": "ticket 16", "pending_matches": "declared-transmission-ignored",
+    "subsurface-thin-env-resolve": {"kind": "declared",
                                     "reflections": "off", "controls": THIN_DECLARED_CONTROLS,
                                     "terms": "constant environment only (radiance 0.5, no sun) on the thin subsurface grid, "
                                              "deterministic resolve terms (--reflections off --lighting-denoise custom)"},
-    "subsurface-thin-env": {"kind": "environment", "pending": "ticket 16", "pending_matches": "transmission-ignored",
+    "subsurface-thin-env": {"kind": "environment",
                             "controls": THIN_SUN_CONTROLS,
                             "terms": "constant environment only (radiance 0.5, no sun), SSR specular transport (the back-side "
                                      "environment of the composition), on the thin subsurface grid"},
-    "subsurface-thin-point": {"kind": "direct", "pending": "ticket 16", "pending_matches": "transmission-ignored",
+    "subsurface-thin-point": {"kind": "direct",
                               "lighting": "legacy", "visibility": "none", "controls": THIN_POINT_CONTROLS,
                               "terms": "one point light BEHIND single-sided quads only (no sun, environment 0, no GI), resolve "
                                        "local lights (--lighting legacy)"},
-    "subsurface-thin-point@restir": {"kind": "direct", "pending": "ticket 16", "pending_matches": "transmission-ignored",
+    "subsurface-thin-point@restir": {"kind": "direct",
                                      "lighting": "restir", "visibility": "rays", "denoise": "off", "terminator_band": 2,
                                      "controls": THIN_POINT_CONTROLS,
                                      "terms": "one point light behind the quads only, ReSTIR DI with RT visibility "
                                               "(--lighting restir --rt on), unfiltered (--lighting-denoise off)"},
-    "subsurface-thin-point@clustered": {"kind": "direct", "pending": "ticket 16", "pending_matches": "transmission-ignored",
+    "subsurface-thin-point@clustered": {"kind": "direct",
                                         "lighting": "clustered", "visibility": "rays", "denoise": "off", "terminator_band": 2,
                                         "controls": THIN_POINT_CONTROLS,
                                         "terms": "one point light behind the quads only, clustered DI with RT visibility "
                                                  "(--lighting clustered --rt on), unfiltered (--lighting-denoise off)"},
     # Furnace over thin materials (white base, white transmission colour, environment 1): an upper bound that the blind engine
     # satisfies, asserted green in every mode (the double-counted control gains energy and must fail it); only the declared gate
-    # of the deterministic resolve is pending (the declared model moves energy from the diffuse to the transmitted lobe).
+    # (the declared model moves energy from the diffuse to the transmitted lobe).
     "furnace-thin-subsurface": {"kind": "furnace-transport", "always_green": True, "controls": ["transmission-double-counted"],
                                 "terms": "constant environment radiance 1, white base and transmission colour, no sun, stochastic "
                                          "specular transport on the thin subsurface grid"},
     "furnace-thin-subsurface@resolve": {"kind": "furnace", "always_green": True, "reflections": "off",
-                                        "pending": "ticket 16", "pending_gate": "declared",
-                                        "pending_matches": "declared-transmission-ignored",
                                         "controls": ["transmission-double-counted"], "declared": THIN_FURNACE_DECLARED_CONTROLS,
                                         "terms": "constant environment radiance 1, white base and transmission colour, no sun, "
                                                  "deterministic resolve terms on the thin subsurface grid"},
