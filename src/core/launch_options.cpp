@@ -2,6 +2,7 @@
 #include "renderer/gpu_types.h"
 #include "testbench/lighting_validation.h"
 #include "testbench/material_validation.h"
+#include "testbench/transmission_validation.h"
 #include "testbench/reflection_validation.h"
 
 #include <charconv>
@@ -584,7 +585,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             auto v=needValue();if(!v)return false;if(!ReflectionValidation::validScenario(*v)){error="--reflection-scene: unknown scenario";return false;}out.reflectionScene=*v;
         } else if (arg == "--material-scenario") {
             auto v=needValue();if(!v)return false;
-            if(!MaterialValidation::validScenario(*v)){error="--material-scenario: unknown scenario";return false;}out.materialScene=*v;
+            if(!MaterialValidation::validScenario(*v)&&!TransmissionValidation::validScenario(*v)){error="--material-scenario: unknown scenario";return false;}out.materialScene=*v;
         } else if (arg == "--material-toggle-every") {
             if (!needCount(out.materialToggleEvery)) return false;
         } else if (arg == "--lighting-scene") {
@@ -1223,7 +1224,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if(out.captureLinearSignal==6 && out.reflections==ReflectionMode::Off){error="Specular capture requires --reflections";return false;}
     if(out.captureLinearSignal==7 && out.ao==AoMode::Off){error="AO capture requires --ao";return false;}
     if(!out.materialOverridesPath.empty() && (!out.bench||*out.bench!=3||out.scenePath.empty()||out.scenePath=="procedural")){error="--material-overrides requires --bench 4 and a glTF --scene (the overrides name its materials)";return false;}
-    if(out.materialToggleEvery>0 && (out.materialScene.empty()||!MaterialValidation::spec(out.materialScene).hasSpecularGrid())){error="--material-toggle-every requires a specular grid --material-scenario";return false;}
+    if(out.materialToggleEvery>0 && (out.materialScene.empty()||!MaterialValidation::validScenario(out.materialScene)||!MaterialValidation::spec(out.materialScene).hasSpecularGrid())){error="--material-toggle-every requires a specular grid --material-scenario";return false;}
     if(!out.materialScene.empty() && (!out.bench||*out.bench!=1||!out.lightingScene.empty()||!out.reflectionScene.empty())){error="--material-scenario requires --bench 2 and exclusive scene fixture";return false;}
     // F15.3: the declared environment reaches the image through the reflection transport (--reflections ssr, rt or
     // probes: no captured probe, so the environment weight; F15.1 ticket 08) or, with reflections off, through the

@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 #include "testbench/material_validation.h"
+#include "testbench/transmission_validation.h"
 #include "renderer/gpu_scene.h"
 #include "renderer/scene_store.h"
 #include "renderer/scene_extract.h"
@@ -187,6 +188,8 @@ TEST_CASE("F15.3 the bench and the runner (tools/f15_check.py) list the same sce
     // The two clip fixtures of F15.1 ticket 08 belong to tools/f15_clip_check.py, not to the reference runner.
     for (auto name : MaterialValidation::scenarios())
         if (std::string_view(name) != "specular-grid-edit" && std::string_view(name) != "specular-grid-rough") bench.insert(std::string(name));
+    // F15.3 ticket 13: the transmission scenarios are a separate bench class on the same --material-scenario option.
+    for (auto name : TransmissionValidation::scenarios()) bench.insert(std::string(name));
     CHECK(runner == bench);
 }
 

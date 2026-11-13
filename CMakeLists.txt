@@ -130,6 +130,7 @@ add_library(phosphor_core STATIC
     src/testbench/cornell_box.cpp
     src/testbench/lighting_validation.cpp
     src/testbench/material_validation.cpp
+    src/testbench/transmission_validation.cpp
     src/testbench/reflection_validation.cpp
     src/testbench/culling_viz.cpp
     src/testbench/many_lights.cpp

@@ -1,4 +1,5 @@
 #include "testbench/material_validation.h"
+#include "testbench/transmission_validation.h"
 #include "renderer/gpu_scene.h"
 #include "scene/components.h"
 #include "scene/ecs.h"
@@ -305,6 +306,8 @@ const MaterialScenarioSpec& MaterialValidation::spec(std::string_view scenario) 
     throw std::invalid_argument("Unknown material validation scenario: " + std::string(scenario));
 }
 float MaterialValidation::environmentRadiance(std::string_view scenario) {
+    // F15.3 (ticket 13): the transmission scenarios share the --material-scenario option; their environment is declared there.
+    if (TransmissionValidation::validScenario(scenario)) return TransmissionValidation::environmentRadiance(scenario);
     return validScenario(scenario) ? spec(scenario).environment : 0.0f;
 }
 glm::vec3 MaterialValidation::sphereCenter(const MaterialScenarioSpec& s, u32 column, u32 row) {
