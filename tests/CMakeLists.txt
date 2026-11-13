@@ -107,12 +107,25 @@ if(Python3_Interpreter_FOUND)
 endif()
 
 # F15.3: the Appendix B reference and its runner need numpy and Mitsuba, which
-# only exist in the local uv cache (offline); registered where uv is available.
+# only exist in the local uv cache (offline).  The tests are registered only when
+# a configure-time probe can import both with exactly the command the tests use;
+# otherwise a skip message says so (a missing cache is not a test failure).
 find_program(UV_EXECUTABLE uv)
-if(UV_EXECUTABLE AND APPLE)
+set(F15_PYTHON_PROBE_RESULT 1)
+if(UV_EXECUTABLE)
+    execute_process(
+        COMMAND ${UV_EXECUTABLE} run --offline --no-project --python 3.13 --with mitsuba==3.9.1 --with numpy python -I -c "import mitsuba, numpy"
+        RESULT_VARIABLE F15_PYTHON_PROBE_RESULT
+        OUTPUT_QUIET ERROR_QUIET
+        TIMEOUT 180)
+endif()
+if(UV_EXECUTABLE AND F15_PYTHON_PROBE_RESULT EQUAL 0)
     foreach(f15_test f15_reference f15_check)
         add_test(NAME ${f15_test}_python
             COMMAND ${UV_EXECUTABLE} run --offline --no-project --python 3.13 --with mitsuba==3.9.1 --with numpy
                     python -I ${CMAKE_SOURCE_DIR}/tools/test_${f15_test}.py)
     endforeach()
+else()
+    message(STATUS "F15 Python tests (f15_reference_python, f15_check_python) skipped: "
+                   "uv with an offline mitsuba==3.9.1 + numpy cache is not available (probe exit: ${F15_PYTHON_PROBE_RESULT})")
 endif()
