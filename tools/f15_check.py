@@ -165,8 +165,10 @@ THIN_SUN_CONTROLS = ["transmission-ignored", "transmission-untinted", "transmiss
 THIN_POINT_CONTROLS = ["transmission-ignored", "transmission-untinted", "transmission-front-only", "transmission-fresnel-ignored"]
 THIN_DECLARED_CONTROLS = ["declared-transmission-ignored", "declared-transmission-untinted", "declared-transmission-front-only",
                           "declared-transmission-double-counted"]
-# The furnace carries a white transmission colour, so the untinted control equals the reference there.
-THIN_FURNACE_DECLARED_CONTROLS = [c for c in THIN_DECLARED_CONTROLS if c != "declared-transmission-untinted"]
+# The furnace carries a white transmission colour, so the untinted control equals the reference there; and in a uniform
+# environment the declared front-only control (transmitted weight = the diffuse weight it replaces) is the image of the ignored
+# control (measured: identical), so the furnace keeps the two controls that differ.
+THIN_FURNACE_DECLARED_CONTROLS = ["declared-transmission-ignored", "declared-transmission-double-counted"]
 
 SCENARIOS = {
     "base-grid-sun": {"kind": "direct", "controls": ["alpha-roughness", "fresnel-off", "engine-f0-blend"],
