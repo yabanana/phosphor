@@ -315,23 +315,30 @@ TEST_CASE("glTF materials: KHR_materials_diffuse_transmission (release candidate
 }
 
 TEST_CASE("glTF materials: draft KHR_materials_scatter (PR 2579 at a6cd5b4)") {
-    SUBCASE("thin-walled without a volume") {
-        const auto p = parseOne(R"({"extensions":{"KHR_materials_transmission":{"transmissionFactor":1},
+    // Expected values are worked from the draft formulas (research/khr-materials.md 10.3):
+    //   thin:       base = mix(diffuse, mix(btdf, scatter_bsdf(multiscatterColor, g), scatterStrength), transmission)
+    //               -> scatter weight = transmission * scatterStrength, colour = multiscatterColor
+    //   volumetric: surface unchanged -> weight = transmission; rho_ms* = scatterStrength * multiscatterColor
+    SUBCASE("thin-walled without a volume: weight is transmission x scatterStrength") {
+        const auto p = parseOne(R"({"extensions":{"KHR_materials_transmission":{"transmissionFactor":0.5},
             "KHR_materials_scatter":{"scatterStrengthFactor":0.7,"multiscatterColorFactor":[0.9,0.6,0.3],
             "scatterAnisotropy":0.25,"scatterStrengthTexture":{"index":1},"multiscatterColorTexture":{"index":2}}}})");
         const auto& s = *p.description.subsurface;
         CHECK(s.mode == SubsurfaceMode::Thin);
         CHECK(s.source == SubsurfaceSource::KhrMaterialsScatterDraft);
         REQUIRE(s.draft.has_value());
-        CHECK(s.draft->scatterStrength == doctest::Approx(0.7f));
+        CHECK(s.draft->scatterStrength == doctest::Approx(0.7f)); // raw draft values are kept
         CHECK(s.draft->multiscatterColor[1] == doctest::Approx(0.6f));
         CHECK(s.draft->scatterAnisotropy == doctest::Approx(0.25f));
-        CHECK(s.weight == doctest::Approx(0.7f));
+        CHECK(s.weight == doctest::Approx(0.35f)); // 0.5 * 0.7
+        CHECK(s.color[0] == doctest::Approx(0.9f));
+        CHECK(s.color[1] == doctest::Approx(0.6f));
         CHECK(s.color[2] == doctest::Approx(0.3f));
         CHECK(s.anisotropy == doctest::Approx(0.25f));
         CHECK(s.weightTexture.channel == TextureChannel::A);
         CHECK(s.colorTexture.colorSpace == TextureColorSpace::SRGB);
         CHECK(p.info.warnings.empty());
+        CHECK((featureMask(p.description) & featureBit(MaterialFeature::Subsurface)) != 0u);
 
         const auto report = buildSupportReport(p.description, p.info);
         bool found = false;
@@ -343,36 +350,71 @@ TEST_CASE("glTF materials: draft KHR_materials_scatter (PR 2579 at a6cd5b4)") {
             }
         CHECK(found);
     }
-    SUBCASE("defaults of the draft: strength 0, multiscatter colour 1, anisotropy 0") {
-        const auto p = parseOne(withExt("KHR_materials_scatter", "{}"));
+    SUBCASE("no effect without KHR_materials_transmission: warning, no subsurface block") {
+        const auto p = parseOne(R"({"extensions":{"KHR_materials_scatter":{"scatterStrengthFactor":1,
+            "multiscatterColorFactor":[0.9,0.6,0.3]}}})");
+        CHECK_FALSE(p.description.subsurface.has_value());
+        CHECK(featureMask(p.description) == 0);
+        CHECK(anyWarning(p, "no effect without KHR_materials_transmission"));
+        const auto volumetric = parseOne(R"({"extensions":{"KHR_materials_volume":{"thicknessFactor":1,
+            "attenuationDistance":2,"attenuationColor":[0.5,0.5,0.5]},
+            "KHR_materials_scatter":{"scatterStrengthFactor":1}}})");
+        CHECK_FALSE(volumetric.description.subsurface.has_value());
+    }
+    SUBCASE("defaults of the draft with transmission: strength 0 (weight 0), colour 1, anisotropy 0") {
+        const auto p = parseOne(R"({"extensions":{"KHR_materials_transmission":{"transmissionFactor":1},
+            "KHR_materials_scatter":{}}})");
+        REQUIRE(p.description.subsurface.has_value());
         CHECK(p.description.subsurface->weight == 0.0f);
         CHECK(p.description.subsurface->color == std::array<float, 3>{1, 1, 1});
         CHECK(p.description.subsurface->anisotropy == 0.0f);
+        CHECK((featureMask(p.description) & featureBit(MaterialFeature::Subsurface)) == 0u); // zero weight: disabled
+    }
+    SUBCASE("a transmission factor of 0 disables the scatter lobe") {
+        const auto p = parseOne(R"({"extensions":{"KHR_materials_transmission":{},
+            "KHR_materials_scatter":{"scatterStrengthFactor":1}}})");
+        REQUIRE(p.description.subsurface.has_value());
+        CHECK(p.description.subsurface->weight == 0.0f);
     }
     SUBCASE("thickness 0 is thin-walled") {
-        const auto p = parseOne(R"({"extensions":{"KHR_materials_volume":{"thicknessFactor":0},
-            "KHR_materials_scatter":{"scatterStrengthFactor":1}}})");
+        const auto p = parseOne(R"({"extensions":{"KHR_materials_transmission":{"transmissionFactor":0.8},
+            "KHR_materials_volume":{"thicknessFactor":0},
+            "KHR_materials_scatter":{"scatterStrengthFactor":0.5}}})");
         CHECK(p.description.subsurface->mode == SubsurfaceMode::Thin);
+        CHECK(p.description.subsurface->weight == doctest::Approx(0.4f)); // 0.8 * 0.5
     }
-    SUBCASE("volumetric with the mean free path of the medium") {
+    SUBCASE("volumetric: weight is the transmission, colour is strength x multiscatter, mean free path from the medium") {
         // sigma_t = -ln(c)/d, mean free path 1/sigma_t = d / -ln(c).
         // d = 2, c = (0.5, 0.25, 1): 2/ln 2 = 2.885390, 2/ln 4 = 1.442695, c = 1 -> no attenuation.
-        const auto p = parseOne(R"({"extensions":{"KHR_materials_transmission":{"transmissionFactor":1},
+        const auto p = parseOne(R"({"extensions":{"KHR_materials_transmission":{"transmissionFactor":0.5},
             "KHR_materials_volume":{"thicknessFactor":1,"attenuationDistance":2,"attenuationColor":[0.5,0.25,1]},
-            "KHR_materials_scatter":{"scatterStrengthFactor":1,"multiscatterColorFactor":[0.8,0.5,0.2],
+            "KHR_materials_scatter":{"scatterStrengthFactor":0.5,"multiscatterColorFactor":[0.8,0.5,0.2],
             "scatterAnisotropy":-0.3}}})");
         const auto& s = *p.description.subsurface;
         CHECK(s.mode == SubsurfaceMode::Volumetric);
+        CHECK(s.weight == doctest::Approx(0.5f));          // transmissionFactor
+        CHECK(s.color[0] == doctest::Approx(0.4f));        // 0.5 * 0.8
+        CHECK(s.color[1] == doctest::Approx(0.25f));       // 0.5 * 0.5
+        CHECK(s.color[2] == doctest::Approx(0.1f));        // 0.5 * 0.2
         const auto mfp = meanFreePath(s);
         CHECK(mfp[0] == doctest::Approx(2.885390f).epsilon(1e-4));
         CHECK(mfp[1] == doctest::Approx(1.442695f).epsilon(1e-4));
         CHECK(mfp[2] >= 1.0e5f); // effectively infinite
         CHECK(s.anisotropy == doctest::Approx(-0.3f));
-        CHECK(s.color[0] == doctest::Approx(0.8f));
+        REQUIRE(s.draft.has_value());
+        CHECK(s.draft->scatterStrength == doctest::Approx(0.5f)); // raw values kept
+        CHECK(s.draft->multiscatterColor[0] == doctest::Approx(0.8f));
         CHECK(p.info.warnings.empty());
     }
+    SUBCASE("a multiscatter colour above 1 is not an error, only a warning") {
+        const auto p = parseOne(R"({"extensions":{"KHR_materials_transmission":{"transmissionFactor":1},
+            "KHR_materials_scatter":{"scatterStrengthFactor":1,"multiscatterColorFactor":[2.5,0.5,0.5]}}})");
+        CHECK(p.description.subsurface->color[0] == doctest::Approx(2.5f));
+        CHECK_FALSE(anyWarning(p, "invalid value"));
+        CHECK(anyWarning(p, "subsurface.color"));
+    }
     SUBCASE("scatter replaces diffuse transmission, with a warning") {
-        const auto p = parseOne(R"({"extensions":{
+        const auto p = parseOne(R"({"extensions":{"KHR_materials_transmission":{"transmissionFactor":1},
             "KHR_materials_diffuse_transmission":{"diffuseTransmissionFactor":0.2},
             "KHR_materials_scatter":{"scatterStrengthFactor":0.9}}})");
         CHECK(p.description.subsurface->source == SubsurfaceSource::KhrMaterialsScatterDraft);
@@ -558,7 +600,7 @@ TEST_CASE("glTF extensions: required extensions must be rendered, not merely par
 TEST_CASE("support report: summary line, detail and JSON") {
     std::vector<MaterialSupportReport> reports;
     {
-        const auto p = parseOne(R"({"name":"paint","extensions":{"KHR_materials_clearcoat":{"clearcoatFactor":1},
+        const auto p = parseOne(R"({"name":"paint","extensions":{"KHR_materials_clearcoat":{"clearcoatFactor":1},"KHR_materials_transmission":{"transmissionFactor":1},
             "KHR_materials_scatter":{"scatterStrengthFactor":1},"KHR_materials_dispersion":{}}})");
         reports.push_back(buildSupportReport(p.description, p.info));
     }
@@ -569,7 +611,7 @@ TEST_CASE("support report: summary line, detail and JSON") {
     const std::vector<std::string> assetUnknown = {"KHR_lights_punctual"};
     const std::string line = formatSupportSummary(reports, assetUnknown);
     CHECK(line.rfind("MATERIALS count=2 base=[implemented(2)] ", 0) == 0);
-    CHECK(line.find("implemented=0 approximated=0 unsupported=2") != std::string::npos);
+    CHECK(line.find("implemented=0 approximated=0 unsupported=3") != std::string::npos);
     CHECK(line.find("encodings=[]") != std::string::npos);
     CHECK(line.find("clearcoat:unsupported(1)") != std::string::npos);
     CHECK(line.find("subsurface:unsupported(1)") != std::string::npos);
@@ -583,7 +625,7 @@ TEST_CASE("support report: summary line, detail and JSON") {
     const auto json = nlohmann::json::parse(supportToJson(reports, assetUnknown));
     CHECK(json.at("count") == 2);
     CHECK(json.at("schema") == "phosphor.materials.v2");
-    CHECK(json.at("features").at("unsupported") == 2);
+    CHECK(json.at("features").at("unsupported") == 3);
     CHECK(json.at("features").at("implemented") == 0);
     CHECK(json.at("base").at("implemented") == 2);
     CHECK(json.at("encodings").at("implemented") == 0);

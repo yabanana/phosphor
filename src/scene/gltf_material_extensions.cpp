@@ -271,29 +271,44 @@ GltfMaterialParse parseGltfMaterial(const tinygltf::Material& material, const Gl
         if (diffuseTransmission)
             info.warnings.push_back(std::string(EXT_SCATTER) + " excludes " + EXT_DIFFUSE_TRANSMISSION +
                                     "; the draft extension is used");
-        SubsurfaceBlock s;
-        ScatterDraftParams raw;
-        const Reader r = reader(*scatter, EXT_SCATTER);
-        r.number("scatterStrengthFactor", raw.scatterStrength);
-        r.vec("multiscatterColorFactor", raw.multiscatterColor);
-        r.number("scatterAnisotropy", raw.scatterAnisotropy);
-        r.texture("scatterStrengthTexture", s.weightTexture, false);
-        r.texture("multiscatterColorTexture", s.colorTexture, true);
-        s.source     = SubsurfaceSource::KhrMaterialsScatterDraft;
-        s.draft      = raw;
-        s.weight     = raw.scatterStrength;
-        s.color      = raw.multiscatterColor;
-        s.anisotropy = raw.scatterAnisotropy;
-        // Thin-walled without a volume (or thickness 0), volumetric otherwise.
-        const bool volumetric = d.volume && d.volume->thickness > 0.0f;
-        s.mode = volumetric ? SubsurfaceMode::Volumetric : SubsurfaceMode::Thin;
-        if (volumetric) {
-            // Mean free path 1 / sigma_t per channel, sigma_t = -ln(c) / d.
-            s.radius = 1.0f;
-            for (size_t c = 0; c < 3; ++c)
-                s.radiusScale[c] = meanFreePathFor(d.volume->attenuationDistance, d.volume->attenuationColor[c]);
+        if (!d.transmission) {
+            // Draft (PR 2579 at a6cd5b4): "no effect without KHR_materials_transmission".
+            info.warnings.push_back(std::string(EXT_SCATTER) + " has no effect without KHR_materials_transmission; "
+                                                               "no subsurface block");
+        } else {
+            SubsurfaceBlock s;
+            ScatterDraftParams raw;
+            const Reader r = reader(*scatter, EXT_SCATTER);
+            r.number("scatterStrengthFactor", raw.scatterStrength);
+            r.vec("multiscatterColorFactor", raw.multiscatterColor);
+            r.number("scatterAnisotropy", raw.scatterAnisotropy);
+            r.texture("scatterStrengthTexture", s.weightTexture, false);
+            r.texture("multiscatterColorTexture", s.colorTexture, true);
+            s.source     = SubsurfaceSource::KhrMaterialsScatterDraft;
+            s.draft      = raw; // the raw draft values are kept next to the mapping
+            s.anisotropy = raw.scatterAnisotropy;
+            const float transmission = d.transmission->factor;
+            // Thin-walled without a volume (or thickness 0), volumetric otherwise.
+            const bool volumetric = d.volume && d.volume->thickness > 0.0f;
+            s.mode = volumetric ? SubsurfaceMode::Volumetric : SubsurfaceMode::Thin;
+            if (!volumetric) {
+                // base = mix(diffuse, mix(specular_btdf * baseColor, scatter_bsdf(multiscatterColor, g),
+                //                         scatterStrength), transmission): the scatter lobe carries
+                // transmission * scatterStrength of the base, with the colour as authored.
+                s.weight = transmission * raw.scatterStrength;
+                s.color  = raw.multiscatterColor;
+            } else {
+                // Volumetric: the surface BSDF is unchanged (transmission); the medium scatters with
+                // rho_ms* = scatterStrength * multiscatterColor per channel, mean free path from the volume.
+                s.weight = transmission;
+                for (size_t c = 0; c < 3; ++c) s.color[c] = raw.scatterStrength * raw.multiscatterColor[c];
+                s.radius = 1.0f;
+                for (size_t c = 0; c < 3; ++c)
+                    s.radiusScale[c] =
+                        meanFreePathFor(d.volume->attenuationDistance, d.volume->attenuationColor[c]);
+            }
+            d.subsurface = s;
         }
-        d.subsurface = s;
     } else if (objectOrWarn(diffuseTransmission, EXT_DIFFUSE_TRANSMISSION)) {
         SubsurfaceBlock s;
         s.mode   = SubsurfaceMode::Thin;
