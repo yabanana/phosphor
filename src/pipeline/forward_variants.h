@@ -64,6 +64,20 @@ struct Variant {
 /// Reserved function-constant index of the salt (uint).
 [[nodiscard]] u16 saltConstantIndex();
 
+/// F15.1: reserved constant MATERIAL_FEATURES (uint, index 22; shaders/variants.def,
+/// NOT an axis).  MSL semantics: undefined => 0 (no extension lobes), so a
+/// descriptor without it is today's pipeline and keeps its key and archive entry.
+[[nodiscard]] u16 materialFeaturesConstantIndex();
+
+/// `desc` specialised with the feature union of a scene (bit n = MaterialFeature n).
+/// mask == 0 returns `desc` unchanged (byte-identical descriptor and key: scenes without
+/// features request exactly the pre-F15 pipelines).  Any other mask appends constant 22 (an
+/// existing constant 22 is replaced).
+[[nodiscard]] PipelineDesc withMaterialFeatures(const PipelineDesc& desc, u32 mask);
+/// The reference / compile-fallback pipeline: constant 22 = every feature bit.  Distinct from
+/// `desc` itself, which (undefined => 0) has no extension lobes.
+[[nodiscard]] PipelineDesc withAllLobes(const PipelineDesc& desc);
+
 /// Descriptor of the forward pipeline for `v` (constants set) and of the
 /// generic one (no constants), drawing into one colour attachment `color`.
 /// `salt` != 0 adds the salt constant to the specialised descriptor.

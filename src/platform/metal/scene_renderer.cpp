@@ -340,8 +340,16 @@ u64 SceneRenderer::prepareFrame(const SceneStore& store, std::span<const GPULigh
                  pipe::forward::variantIndex(variant), variant.lightTypes, variant.emissive ? 1 : 0, variant.debugMode);
         handle = pipelines_.request(pipe::forward::pipelineDesc(variant, rg::Format::BGRA8Srgb, salt_));
     }
-    usingFallback_ = genericOnly_ || !pipelines_.isFinal(handle);
-    pipeline_ = pipelines_.render(handle);
+    // F15.1: a scene with material features shades with the pipeline specialised by its feature
+    // union (all-lobes reference while that compiles); union 0 keeps `handle` (today's pipelines).
+    featureUnion_ = store.featureUnion();
+    const pipe::PipelineHandle served = featurePipelines_.serve(
+        pipelines_, genericOnly_ ? 1000u : variantIndex_, handle, featureUnion_, [&] {
+            return genericOnly_ ? pipe::forward::genericDesc(rg::Format::BGRA8Srgb)
+                                : pipe::forward::pipelineDesc(variant, rg::Format::BGRA8Srgb, salt_);
+        });
+    usingFallback_ = genericOnly_ || !pipelines_.isFinal(served);
+    pipeline_ = pipelines_.render(served);
     if (!pipeline_) pipeline_ = pipelines_.render(generic_);
 
     // Triangles of every live instance (off draws all of them; on draws the

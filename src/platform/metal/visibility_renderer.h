@@ -1,4 +1,5 @@
 #pragma once
+#include "platform/metal/feature_pipelines.h"
 #include "platform/metal/metal_context.h"
 #include "pipeline/pipeline_registry.h"
 #include "renderer/visibility_layout.h"
@@ -69,10 +70,16 @@ class VisibilityRenderer {
 
   private:
     void bind(rg::PassContext &ctx, MTL4::ArgumentTable *table);
+    [[nodiscard]] pipe::PipelineDesc fallbackDesc() const;
     MetalContext &context_;
     PipelineCache &pipelines_;
     SceneRenderer &scene_;
     MeshRenderer &mesh_;
+    // F15.1: the pipelines the frame encodes with (the scene's feature union applied by prepareFrame).
+    FeaturePipelines features_;
+    std::array<pipe::PipelineHandle, VISIBILITY_CLASSES> servedResolve_{};
+    pipe::PipelineHandle servedGeneric_ = pipe::INVALID_PIPELINE, servedTile_ = pipe::INVALID_PIPELINE,
+                         servedFallback_ = pipe::INVALID_PIPELINE;
     bool binning_;
     bool lighting_ = false;
     MTL::DepthStencilState* lightingFallbackDepth_ = nullptr;

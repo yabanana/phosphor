@@ -192,7 +192,12 @@ int main(int argc, char** argv) {
          "};\n\n"
          "inline constexpr u32 kAxisCount = " << axes.size() << ";\n"
          "inline constexpr u32 kVariantCount = " << total << ";\n"
-         "inline constexpr u16 kSaltConstantIndex = " << salt->index << ";\n\n";
+         "inline constexpr u16 kSaltConstantIndex = " << salt->index << ";\n";
+    for (const auto& r : reserved) {
+        if (r.name == "SALT") continue;
+        h << "inline constexpr u16 k" << camel(r.name) << "ConstantIndex = " << r.index << ";\n";
+    }
+    h << "\n";
     for (std::size_t i = 0; i < axes.size(); ++i) {
         h << "inline constexpr u32 AXIS_" << axes[i].name << " = " << i << ";\n";
     }
@@ -247,6 +252,14 @@ int main(int argc, char** argv) {
           << ";" << (a.runtime ? " // generic: read the runtime value instead" : "") << "\n\n";
     }
     m << "constant uint FC_" << salt->name << " [[function_constant(" << salt->index << ")]];\n";
+    for (const auto& r : reserved) {
+        if (r.name == "SALT") continue;
+        const std::string c = camel(r.name);
+        m << "\n// Reserved (not an axis): undefined => 0.\n"
+          << "constant uint FC_" << r.name << " [[function_constant(" << r.index << ")]];\n"
+          << "constant bool k" << c << "Specialised = is_function_constant_defined(FC_" << r.name << ");\n"
+          << "constant uint k" << c << " = k" << c << "Specialised ? FC_" << r.name << " : 0u;\n";
+    }
 
     const std::filesystem::path outDir = std::filesystem::path(argv[2]) / "pipeline";
     if (!writeIfChanged(outDir / "forward_variants.generated.h", h.str())) return 1;

@@ -71,6 +71,23 @@ Variant sceneVariant(const FrameScene& scene, u32 debugMode) {
 
 u16 saltConstantIndex() { return gen::kSaltConstantIndex; }
 
+u16 materialFeaturesConstantIndex() { return gen::kMaterialFeaturesConstantIndex; }
+
+PipelineDesc withMaterialFeatures(const PipelineDesc& desc, u32 mask) {
+    if (mask == 0) return desc;
+    PipelineDesc out = desc;
+    for (u32 i = 0; i < out.constantCount; ++i) {
+        if (out.constants[i].index == gen::kMaterialFeaturesConstantIndex) {
+            out.constants[i].bits = mask;
+            return out;
+        }
+    }
+    out.constant(gen::kMaterialFeaturesConstantIndex, ConstantType::UInt, mask);
+    return out;
+}
+
+PipelineDesc withAllLobes(const PipelineDesc& desc) { return withMaterialFeatures(desc, MATERIAL_FEATURES_ALL); }
+
 PipelineDesc genericDesc(rg::Format color) {
     PipelineDesc desc;
     desc.kind = PipelineKind::Render;

@@ -19,7 +19,11 @@
 #                   (the generic pipeline), or the word `runtime`: the shader
 #                   must then read the value from a runtime buffer (the MSL
 #                   header only exposes k<Name>Specialised and k<Name>).
-#   reserved        a constant declared but not an axis (the pipeline salt).
+#   reserved        a constant declared but not an axis.  SALT is the pipeline
+#                   salt.  Every other reserved constant is a uint whose MSL
+#                   value k<CamelName> is 0 when the constant is UNDEFINED, so a
+#                   pipeline that does not set it keeps its descriptor (and its
+#                   archive key) unchanged (MATERIAL_FEATURES: F15, ADR-0003).
 #
 # The dense variant index is a mixed-radix number: the FIRST axis is the least
 # significant digit.  Variants = product of (max - min + 1) over the axes.
@@ -29,3 +33,11 @@ axis EMISSIVE    bool 1 false true true
 axis DEBUG_MODE  uint 2 0 2 runtime  # FrameConstants::debugMode
 
 reserved SALT uint 31
+
+# F15: bitmask of the material features compiled into the shading code (bit n =
+# MaterialFeature n, renderer/gpu_types.h MATERIAL_FEATURE_*).  Undefined => 0:
+# no extension lobes, today's pipelines.  The all-lobes value (every feature
+# bit, MATERIAL_FEATURES_ALL) is the reference / compile-fallback pipeline;
+# forward and resolve pipelines of a scene with extended materials set the
+# scene's feature union.  NOT an axis: the 42 dense variants are unchanged.
+reserved MATERIAL_FEATURES uint 22

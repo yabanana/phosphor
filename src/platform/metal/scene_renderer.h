@@ -3,6 +3,7 @@
 #include "core/launch_options.h"
 #include "core/types.h"
 #include "pipeline/pipeline_registry.h"
+#include "platform/metal/feature_pipelines.h"
 #include "platform/metal/gpu_scene_buffers.h"
 #include "platform/metal/metal_context.h"
 #include "renderer/gpu_types.h"
@@ -139,6 +140,8 @@ public:
     [[nodiscard]] MTL::Buffer* vertexBuffer() const { return vertexBuffer_; }
     [[nodiscard]] MTL::Buffer* meshBuffer() const { return meshBuffer_; }
     [[nodiscard]] u32 forwardVariantIndex() const { return variantIndex_; }
+    /// F15.1: feature union of the frame's scene (SceneStore::featureUnion), for the other renderers.
+    [[nodiscard]] u32 featureUnion() const { return featureUnion_; }
     [[nodiscard]] MTL::DepthStencilState* depthState() const { return depthState_; }
     void countCommands(u32 n) const { count(0, n); }
 
@@ -173,6 +176,8 @@ private:
     std::optional<u32>        forceVariant_;
     pipe::PipelineHandle      generic_ = pipe::INVALID_PIPELINE;
     std::vector<pipe::PipelineHandle> variants_;
+    FeaturePipelines          featurePipelines_;
+    u32                       featureUnion_ = 0;
     MTL::RenderPipelineState* pipeline_ = nullptr;
     bool                      usingFallback_ = false;
     MTL::DepthStencilState*   depthState_ = nullptr;

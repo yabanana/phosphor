@@ -66,13 +66,7 @@ VisibilityRenderer::VisibilityRenderer(MetalContext &c, PipelineCache &p, SceneR
     d.functions = {"visibility_present_vs", "visibility_present_fs", ""};
     d.output(0, rg::Format::BGRA8Srgb);
     present_ = p.request(d);
-    d = pipe::forward::genericDesc(resolveFormat(0,lighting_));
-    d.label = "Visibility indexed overflow fallback";
-    d.functions[0] = "forward_surface_vs";
-    d.functions[1] = lighting_ ? "forward_surface_lit_fs" : "forward_surface_fs";
-    for (u32 i = 0; i < kFormats.size(); ++i)
-        d.output(i, resolveFormat(i,lighting_));
-    fallback_ = p.request(d);
+    fallback_ = p.request(fallbackDesc());
     for (auto &table : tables_) {
         auto *desc = MTL4::ArgumentTableDescriptor::alloc()->init();
         desc->setMaxBufferBindCount(18);
@@ -83,6 +77,15 @@ VisibilityRenderer::VisibilityRenderer(MetalContext &c, PipelineCache &p, SceneR
         if (!table)
             throw std::runtime_error("Visibility argument table creation failed");
     }
+}
+pipe::PipelineDesc VisibilityRenderer::fallbackDesc() const {
+    pipe::PipelineDesc d = pipe::forward::genericDesc(resolveFormat(0, lighting_));
+    d.label = "Visibility indexed overflow fallback";
+    d.functions[0] = "forward_surface_vs";
+    d.functions[1] = lighting_ ? "forward_surface_lit_fs" : "forward_surface_fs";
+    for (u32 i = 0; i < kFormats.size(); ++i)
+        d.output(i, resolveFormat(i, lighting_));
+    return d;
 }
 VisibilityRenderer::~VisibilityRenderer() {
     context_.waitIdle();
@@ -142,8 +145,30 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
     temporalAddress_ = temporalUpload.gpu;
     scene_.setTemporalInputs(previousInstances_[view_]->gpuAddress(), temporalAddress_);
     mesh_.setTemporalInputs(temporalAddress_);
-    useBinning_ =
-        binning_ && std::all_of(resolve_.begin(), resolve_.end(), [this](auto h) { return pipelines_.isFinal(h); });
+    // F15.1: with material features every shading pipeline is the one specialised by the scene's
+    // feature union (the all-lobes reference while it compiles); union 0 keeps today's handles.
+    {
+        const u32 mask = store.featureUnion();
+        const char *kernel = lighting_ ? "visibility_lit_resolve" : "visibility_resolve";
+        for (u32 i = 0; i < VISIBILITY_CLASSES; ++i) {
+            servedResolve_[i] = features_.serve(pipelines_, 100 + i, resolve_[i], mask, [&] {
+                auto d = compute(kernel);
+                d.constant(21, pipe::ConstantType::UInt, i);
+                return d;
+            });
+        }
+        servedGeneric_ = features_.serve(pipelines_, 110, adaptive_ ? adaptivePipeline_ : generic_, mask,
+                                         [&] { return compute(adaptive_ ? "visibility_adaptive" : kernel); });
+        servedTile_ = tile_ == pipe::INVALID_PIPELINE ? tile_ : features_.serve(pipelines_, 111, tile_, mask, [&] {
+            auto d = compute("visibility_tile");
+            d.kind = pipe::PipelineKind::Tile;
+            d.output(0, rg::Format::R32Uint);
+            return d;
+        });
+        servedFallback_ = features_.serve(pipelines_, 112, fallback_, mask, [&] { return fallbackDesc(); });
+    }
+    useBinning_ = binning_ && std::all_of(servedResolve_.begin(), servedResolve_.end(),
+                                          [this](auto h) { return pipelines_.isFinal(h); });
     params_ = {width,
                height,
                (width + 15) / 16,
@@ -284,7 +309,7 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
             [this](PassContext &ctx) {
                 auto *enc = static_cast<MTL4::RenderCommandEncoder *>(ctx.encoder());
                 bind(ctx, tables_[2]);
-                enc->setRenderPipelineState(pipelines_.render(tile_));
+                enc->setRenderPipelineState(pipelines_.render(servedTile_));
                 enc->setArgumentTable(tables_[2], MTL::RenderStageTile);
                 enc->dispatchThreadsPerTile(MTL::Size::Make(VISIBILITY_TILE, VISIBILITY_TILE, 1));
                 scene_.countCommands(3);
@@ -354,14 +379,14 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
                 if (useBinning_) {
                     ++binnedFrames_;
                     for (u32 i = 0; i < VISIBILITY_CLASSES; ++i) {
-                        enc->setComputePipelineState(pipelines_.compute(resolve_[i]));
+                        enc->setComputePipelineState(pipelines_.compute(servedResolve_[i]));
                         enc->dispatchThreadgroups(frames_[slot_].args->gpuAddress() + i * 12,
                                                   MTL::Size::Make(16, 16, 1));
                     }
                     scene_.countCommands(1 + 2 * VISIBILITY_CLASSES);
                 } else {
                     ++genericFrames_;
-                    enc->setComputePipelineState(pipelines_.compute(adaptive_ ? adaptivePipeline_ : generic_));
+                    enc->setComputePipelineState(pipelines_.compute(servedGeneric_));
                     enc->dispatchThreadgroups(MTL::Size::Make(params_.tilesX, params_.tilesY, 1),
                                               MTL::Size::Make(adaptive_ ? 8 : 16, adaptive_ ? 8 : 16, 1));
                     scene_.countCommands(3);
@@ -383,7 +408,7 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
             if (lighting_) scene_.setLightingInputs(lightingAddress_, static_cast<MTL::Texture*>(ctx.texture(sun_)),
                                                      static_cast<MTL::Texture*>(ctx.texture(direct_)),
                                                      static_cast<MTL::Texture*>(ctx.texture(indirect_)));
-            scene_.encodeOverlay(static_cast<MTL4::RenderCommandEncoder *>(ctx.encoder()), fallback_, true, lightingFallbackDepth_);
+            scene_.encodeOverlay(static_cast<MTL4::RenderCommandEncoder *>(ctx.encoder()), servedFallback_, true, lightingFallbackDepth_);
         });
     return outputs_[0];
 }

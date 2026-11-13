@@ -3,6 +3,7 @@
 #include "core/launch_options.h"
 #include "core/types.h"
 #include "pipeline/pipeline_registry.h"
+#include "platform/metal/feature_pipelines.h"
 #include "platform/metal/hiz_builder.h"
 #include "platform/metal/metal_context.h"
 #include "renderer/gpu_types.h"
@@ -185,6 +186,7 @@ private:
     // Pipelines.
     pipe::PipelineHandle generic_ = pipe::INVALID_PIPELINE, debug_ = pipe::INVALID_PIPELINE;
     std::vector<pipe::PipelineHandle> variants_;
+    FeaturePipelines featurePipelines_; // F15.1
     MTL::RenderPipelineState* pipeline_ = nullptr;
     bool usingFallback_ = false;
     pipe::PipelineHandle visibilityOpaque_ = pipe::INVALID_PIPELINE, visibilityAlpha_ = pipe::INVALID_PIPELINE;

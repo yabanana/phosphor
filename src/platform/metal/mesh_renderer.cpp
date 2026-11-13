@@ -360,8 +360,17 @@ void MeshRenderer::prepareFrame(const SceneStore& store, const GpuScene& scene, 
         }
         const bool debug =
             options_.debugView == MeshletDebugView::Meshlets || options_.debugView == MeshletDebugView::Cull;
-        usingFallback_ = !debug && (options_.genericOnly || !pipelines_.isFinal(handle));
-        pipeline_ = pipelines_.render(debug ? debug_ : handle);
+        // F15.1: the scene's feature union specialises the meshlet forward pipeline too.
+        const pipe::PipelineHandle served = featurePipelines_.serve(
+            pipelines_, options_.genericOnly ? 1000u : vi, handle, scene_.featureUnion(), [&] {
+                return meshDesc(options_.genericOnly
+                                    ? pipe::forward::genericDesc(rg::Format::BGRA8Srgb)
+                                    : pipe::forward::pipelineDesc(pipe::forward::variantAt(vi), rg::Format::BGRA8Srgb,
+                                                                  options_.salt),
+                                options_.genericOnly ? "Meshlet forward (generic)" : "Meshlet forward");
+            });
+        usingFallback_ = !debug && (options_.genericOnly || !pipelines_.isFinal(served));
+        pipeline_ = pipelines_.render(debug ? debug_ : served);
         if (!pipeline_)
             pipeline_ = pipelines_.render(generic_);
         if (usingFallback_)
