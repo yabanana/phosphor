@@ -101,3 +101,22 @@ Open / not done:
 - Not built: IridescenceDielectricSpheres / IridescenceMetallicSpheres side by side, per-light cost, `tools/archive_check.sh`,
   `tools/hitch_check.sh` (not run here); the GPU allocation count of measured frames is unchanged by a harness.
 - ctest 17/17 before the archive commit (`phosphor_tests` re-run green after it).
+
+2026-11-13 — orchestrator decisions on the harness questions (the engine
+side follows them):
+1. Thickness 0. The ratified README does not define it: it only says
+   factor 0 has no effect, and thickness is a linear mix of min and max. The
+   smoothstep that pulls the film IOR towards the outside IOR near d = 0
+   exists only in Belcour-Barla's and the Sample Viewer's code, not in the
+   normative text.
+   Phosphor's declared rule, from this ticket: thickness 0 disables the film
+   exactly (strength 0, the base model). Positive thicknesses use the
+   specification's function as written, with no smoothstep. Recorded as an
+   interpretation in the support report.
+2. Declared environment diffuse weight: 1 - max(F_irid(N.V) * clamp(A + B,
+   0, 1)). It is consistent with the composite's rule for the other extended
+   lobes and with the specification's (1 - rgb_alpha_max) * base. It is the
+   form the engine implements.
+3. Furnace: the literal Appendix B dielectric gains energy at grazing angles
+   by itself (sphere mean 1.028), so the gates are the engine-side ones:
+   transport mean 1.005 and resolve pixel 1.005, as for the other furnaces.
