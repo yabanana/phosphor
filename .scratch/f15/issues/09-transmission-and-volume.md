@@ -14,3 +14,4 @@ Roadmap: F15.1, F15.3
 - [ ] Negative control (no refraction / attenuation off) fails the bounds
 - [ ] Ray budget per pixel unchanged on non-transmissive scenes (Sponza D2 within noise); extra cost on the glass fixture measured
 - [ ] TransmissionTest, TransmissionRoughnessTest, TransmissionThinwallTestGrid, AttenuationTest side by side; pawn-top backlit capture stored
+- [ ] Temporal clip of the glass fixture (camera orbit, moving light) within the F13.6 specular contract; transmissive pixels marked reactive for the MetalFX temporal path like alpha-tested ones
