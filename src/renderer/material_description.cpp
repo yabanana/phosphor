@@ -144,7 +144,9 @@ std::vector<std::string> validate(const MaterialDescription& d, u32 materialCoun
     if (d.subsurface) {
         const SubsurfaceBlock& s = *d.subsurface;
         c.inRange("subsurface.weight", s.weight, 0.0f, 1.0f);
-        c.eachInRange("subsurface.color", s.color, 0.0f, 1.0f);
+        // The draft KHR_materials_scatter does not bound the multiple-scattering
+        // colour above (validationWarnings reports values over 1); it cannot be negative.
+        c.eachAtLeast("subsurface.color", s.color, 0.0f);
         c.atLeast("subsurface.radius", s.radius, 0.0f);
         c.finite("subsurface.radius", s.radius);
         c.eachAtLeast("subsurface.radiusScale", s.radiusScale, 0.0f);
@@ -156,13 +158,14 @@ std::vector<std::string> validate(const MaterialDescription& d, u32 materialCoun
         }
     }
 
-    // Companion rules.
+    // Companion rules.  A volume has an effect behind transmission, behind volumetric
+    // subsurface and also with a thin subsurface / diffuse-transmission block (the
+    // diffuse_transmission RC text combines it with KHR_materials_volume).
     if (d.volume && d.volume->thickness > 0.0f) {
         const bool transmissive = d.transmission && d.transmission->factor > 0.0f;
-        const bool volumetricSss = d.subsurface && d.subsurface->weight > 0.0f &&
-                                   d.subsurface->mode == SubsurfaceMode::Volumetric;
-        if (!transmissive && !volumetricSss)
-            c.error("volume requires transmission or volumetric subsurface to have an effect");
+        const bool subsurface   = d.subsurface && d.subsurface->weight > 0.0f;
+        if (!transmissive && !subsurface)
+            c.error("volume requires transmission or subsurface to have an effect");
     }
     if (d.subsurface && d.subsurface->weight > 0.0f && d.subsurface->mode == SubsurfaceMode::Volumetric &&
         !(d.volume && d.volume->thickness > 0.0f))
@@ -192,6 +195,21 @@ std::vector<std::string> validate(const MaterialDescription& d, u32 materialCoun
             if (l.heightContrast && !(*l.heightContrast >= 0.0f && std::isfinite(*l.heightContrast)))
                 c.error(prefix + ".heightContrast must be a finite value >= 0");
         }
+    }
+    return out;
+}
+
+std::vector<std::string> validationWarnings(const MaterialDescription& d) {
+    std::vector<std::string> out;
+    if (d.subsurface) {
+        const auto& color = d.subsurface->color;
+        for (size_t i = 0; i < 3; ++i)
+            if (color[i] > 1.0f) {
+                out.push_back("subsurface.color " + std::to_string(color[i]) +
+                              " is above 1 (the draft KHR_materials_scatter does not bound it; energy may exceed the "
+                              "single-layer albedo)");
+                break;
+            }
     }
     return out;
 }

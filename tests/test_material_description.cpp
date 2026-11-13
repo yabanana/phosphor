@@ -135,20 +135,24 @@ TEST_CASE("material description: companion rules") {
     MaterialDescription d;
     d.volume = VolumeBlock{};
     d.volume->thickness = 0.5f;
-    CHECK(mentions(validate(d), "volume requires transmission"));
+    CHECK(mentions(validate(d), "volume requires transmission or subsurface"));
 
     d.transmission = TransmissionBlock{};
     d.transmission->factor = 1.0f;
     CHECK(validate(d).empty());
 
-    // Volumetric subsurface is the other companion; thin subsurface is not.
+    // Any subsurface block is the other companion: the diffuse_transmission RC text
+    // combines diffuse transmission with KHR_materials_volume (thin mode).
     MaterialDescription e;
     e.volume = VolumeBlock{};
     e.volume->thickness = 0.5f;
     e.subsurface = SubsurfaceBlock{};
     e.subsurface->weight = 1.0f;
     e.subsurface->mode = SubsurfaceMode::Thin;
+    CHECK(validate(e).empty());
+    e.subsurface->weight = 0.0f; // a disabled block is no companion
     CHECK(mentions(validate(e), "volume requires"));
+    e.subsurface->weight = 1.0f;
     e.subsurface->mode = SubsurfaceMode::Volumetric;
     CHECK(validate(e).empty());
 
@@ -286,4 +290,19 @@ TEST_CASE("material description: subsurface radius scale texture is a colour3 sR
     d.subsurface->weight = 1.0f;
     d.subsurface->radius = 0.003f;
     CHECK(validate(d).empty());
+}
+
+TEST_CASE("material description: subsurface colour must not be negative; above 1 is only a warning") {
+    // KHR_materials_scatter (draft, a6cd5b4): multiscatterColorFactor "not constrained in schema".
+    MaterialDescription d;
+    d.subsurface = SubsurfaceBlock{};
+    d.subsurface->color = {1.0f, 1.0f, 1.0f};
+    CHECK(validate(d).empty());
+    CHECK(validationWarnings(d).empty());
+    d.subsurface->color = {2.5f, 0.5f, 0.5f};
+    CHECK(validate(d).empty());
+    REQUIRE(validationWarnings(d).size() == 1);
+    CHECK(mentions(validationWarnings(d), "subsurface.color"));
+    d.subsurface->color = {0.5f, -0.1f, 0.5f};
+    CHECK(mentions(validate(d), "subsurface.color"));
 }

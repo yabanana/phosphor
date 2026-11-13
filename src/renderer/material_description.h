@@ -250,11 +250,16 @@ constexpr u32 MATERIAL_FEATURE_COUNT = 9;
 [[nodiscard]] u32 featureMask(const MaterialDescription& desc);
 
 /// Human-readable problems (empty = valid): ranges per specification and
-/// companion rules (volume needs transmission or volumetric subsurface;
-/// volumetric subsurface needs a volume; layer stack bounds).
+/// companion rules (volume needs transmission or a subsurface block, thin or
+/// volumetric; volumetric subsurface needs a volume; layer stack bounds).
 /// `materialCount` (if known) bounds resolved layer material indices.
 [[nodiscard]] std::vector<std::string> validate(const MaterialDescription& desc,
                                                 u32 materialCount = ~0u);
+
+/// Values that validate() accepts but that deserve a note (not errors): the
+/// subsurface colour above 1, which the draft KHR_materials_scatter leaves
+/// unbounded.
+[[nodiscard]] std::vector<std::string> validationWarnings(const MaterialDescription& desc);
 
 /// Visit every texture slot (name = the slot in the description file).
 void forEachTexture(MaterialDescription& desc,

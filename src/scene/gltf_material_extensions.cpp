@@ -310,6 +310,7 @@ GltfMaterialParse parseGltfMaterial(const tinygltf::Material& material, const Gl
     info.transformStatus = analyzeTextureTransforms(d).status;
 
     for (const std::string& problem : validate(d)) info.warnings.push_back("invalid value: " + problem);
+    for (const std::string& note : validationWarnings(d)) info.warnings.push_back(note);
     return out;
 }
 
