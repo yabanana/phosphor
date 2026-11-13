@@ -6,13 +6,13 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 07, 08
 
-**Status:** ready-for-agent
+**Status:** resolved (2026-11-13; captured-probe sheen fixture and the Khronos side-by-side carried to ticket 22)
 
 - [x] Table generator reproducible and checked against an independent numerical integration; a corrupted table fails the check
-- [ ] Sheen grid (colour × roughness) passes decision-11 thresholds under constant environment and under a probe-lit fixture; furnace bound holds
+- [x] Sheen grid (colour × roughness) passes decision-11 thresholds under constant environment and under a probe-lit fixture; furnace bound holds — constant environment, the probe path (`@probes`, analytic) and the furnace pass; a CAPTURED-probe fixture is open (captured radiance does not reach the sheen term yet, declared) → ticket 22
 - [x] Negative control (no albedo scaling) exceeds the furnace bound
-- [ ] SheenTestGrid and one Tier B sheen model side by side
-- [ ] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
+- [ ] SheenTestGrid and one Tier B sheen model side by side → ticket 22
+- [x] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
 
 ## Comments
 
@@ -122,3 +122,49 @@ pixels it touches lie in the excluded terminator band today; a finer quadrature 
 Archive: +8 compute descriptors (371 -> 379), the nine sheen captures show 0 misses and 0 render-thread compiles.
 Open: SheenTestGrid / Tier B model (ticket 22), captured-probe sheen fixture, coat + sheen fixture, textured sheen on GPU (CPU guide
 expectation marks textured sheen unverified), `archive_check.sh` / `hitch_check.sh` not run here.
+
+2026-11-13 — engine side verified on M5. Code ded8a58 (Sonnet agent,
+reviewed), table fix 883cc6d, runner 56c3c01, archive 53da879, guide control
+1b2450c. Batch log: `build/f15-exact/battery10.log`.
+- `tools/f15_check.py --run --expect green` (`build/f15-check/t10`): GREEN on
+  every key; the anisotropy keys are pending until ticket 11. Every control
+  fails, and the unscaled-base control exceeds the furnace bound (1.277).
+  - `sheen-grid-sun`: worst max outside the mask 0.45 %.
+  - `-point`: 0.54 %; `@restir` and `@clustered`: 0.12 %.
+  - `-env-resolve`: worst mean 7e-5; `@probes`: 7e-5.
+  - `-env` (transport): worst sphere mean 0.94 %.
+  - `furnace-sheen`: 1.00007; `@resolve`: max pixel 1.0000006.
+- Table fix, made by the engine agent after the first engine run failed the
+  sun/point grids:
+  - The harness table interpolated values clamped to 1 across a kink near
+    N.V 0.05, and the reference's declared albedo table had the same kink
+    (0.011 off against a 2048x1024 integration).
+  - The table is now unclamped on a quadratic N.V axis and clamped after
+    interpolation, in both the engine table and the reference's declared
+    lookup.
+  - The exact quadrature of the reference is unchanged. This is a numerical
+    fix of a shared table, checked against an independent integration, not
+    a change of the gate to fit the engine.
+- `--debug-lobe-guide 16` on sheen-grid-sun: `pixels 34100 extended 25438
+  base 8662 unverified 0 | PASS`. The corrupt control now also perturbs the
+  sheen roughness.
+- Shader validation: sheen-grid-env with RT reflections and ReSTIR exits
+  clean.
+- Scenes without features:
+  - F13 exact captures 0 px.
+  - visual_check flagged benches 5 and 6 at 25 / 8 px, delta 1. Under API
+    validation only they are identical to the preceding build (0 px), and the
+    validated repeat agrees. This is shader-validation codegen after
+    FrameConstants grew to 184 B; the references were retaken (74ff194,
+    research note addendum).
+- archive_check: every local scenario PASS. hitch_check OK. The transport and
+  lobe-guide overflow checks PASS.
+- Clip runner: the adaptive-shading bit comparison failed `repeat_identical`.
+  One run captured with fallback pipelines, its worker compiles slowed by
+  parallel agent builds. It now runs with `--pipeline-sync` (74ff194), to be
+  re-verified in the next battery.
+- Declared:
+  - the sheen environment term in the composite is the declared environment
+    (or the GI irradiance / pi);
+  - captured probe radiance does not light the sheen term;
+  - secondary RT hits ignore sheen.
