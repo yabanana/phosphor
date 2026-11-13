@@ -17,14 +17,15 @@
 using namespace phosphor;
 
 TEST_CASE("F15.3 material scenarios are exactly the nine declared names") {
-    CHECK(MaterialValidation::scenarios().size() == 30);
+    CHECK(MaterialValidation::scenarios().size() == 35);
     for (auto name : {"base-grid-sun", "base-grid-env", "base-grid-env-resolve", "furnace-base", "furnace-resolve",
                       "roughness-extremes", "roughness-extremes-sun", "specular-grid-sun", "specular-grid-env-resolve", "specular-grid-point",
                       "specular-grid-env", "furnace-specular", "clearcoat-grid-sun", "clearcoat-grid-env-resolve",
                       "clearcoat-grid-env", "clearcoat-grid-point", "furnace-clearcoat",
                       "specular-grid-edit", "specular-grid-rough", "sheen-grid-sun", "sheen-grid-env-resolve",
                       "sheen-grid-env", "sheen-grid-point", "furnace-sheen", "aniso-grid-sun", "aniso-grid-env-resolve",
-                      "aniso-grid-env", "aniso-grid-point", "furnace-aniso", "aniso-mirrored-sun"})
+                      "aniso-grid-env", "aniso-grid-point", "furnace-aniso", "aniso-mirrored-sun", "iridescence-grid-sun",
+                      "iridescence-grid-env-resolve", "iridescence-grid-env", "iridescence-grid-point", "furnace-iridescence"})
         CHECK(MaterialValidation::validScenario(name));
     CHECK_FALSE(MaterialValidation::validScenario("unknown"));
     CHECK_THROWS(MaterialValidation{"unknown"});
@@ -772,6 +773,118 @@ TEST_CASE("F15.3 aniso-grid-point: the anisotropy grid lit by one point light fr
     CHECK(light.range == 100.0f);
     const glm::vec3 camera = MaterialValidation{"aniso-grid-point"}.getDefaultCamera().position;
     const glm::vec3 centre(0.0f, 2.5f, 0.0f); // six rows: the grid centre is at y = 2.5
+    CHECK(camera.y == doctest::Approx(centre.y));
+    const float vl = glm::dot(glm::normalize(camera - centre), glm::normalize(light.position - centre));
+    CHECK(vl < -0.4f);
+    CHECK(vl > -0.6f);
+    CHECK(glm::length(light.position - centre) == doctest::Approx(9.0f));
+    for (u32 row = 0; row < point.metallic.size(); ++row)
+        for (u32 col = 0; col < point.roughness.size(); ++col) {
+            const float d = glm::length(light.position - MaterialValidation::sphereCenter(point, col, row));
+            const float r = d / light.range, window = (1.0f - r * r * r * r) * (1.0f - r * r * r * r);
+            CHECK(window > 0.9995f);
+        }
+}
+
+TEST_CASE("F15.3 iridescence grids declare factor x ior rows over thickness columns on a copper base (tools/test_f15_check.py mirrors them)") {
+    for (auto name : {"iridescence-grid-sun", "iridescence-grid-env-resolve", "iridescence-grid-env", "iridescence-grid-point",
+                      "furnace-iridescence"}) {
+        const auto& s = MaterialValidation::spec(name);
+        REQUIRE(s.hasIridescenceGrid());
+        CHECK_FALSE(s.hasSpecularGrid());
+        CHECK_FALSE(s.hasClearcoatGrid());
+        CHECK_FALSE(s.hasSheenGrid());
+        CHECK_FALSE(s.hasAnisotropyGrid());
+        REQUIRE(s.iridescenceFactor.size() == s.metallic.size());
+        REQUIRE(s.iridescenceIor.size() == s.metallic.size());
+        REQUIRE(s.iridescenceThickness.size() == s.roughness.size());
+        CHECK(s.iridescenceFactor == std::vector<float>{0.5f, 1.0f, 1.0f, 0.5f, 1.0f, 1.0f});
+        CHECK(s.iridescenceIor == std::vector<float>{1.3f, 1.3f, 1.8f, 1.3f, 1.3f, 1.8f});
+        CHECK(s.iridescenceThickness == std::vector<float>{0.0f, 200.0f, 400.0f, 600.0f, 800.0f, 1200.0f});
+        CHECK(s.metallic == std::vector<float>{0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f}); // dielectric rows, then metal rows
+        CHECK(s.roughness == std::vector<float>(6, 0.3f));
+    }
+    const auto& sun = MaterialValidation::spec("iridescence-grid-sun");
+    CHECK(sun.sun);
+    CHECK(sun.environment == 0.0f);
+    CHECK(sun.baseColor == glm::vec3(0.8f, 0.35f, 0.15f));
+    const auto& resolve = MaterialValidation::spec("iridescence-grid-env-resolve");
+    const auto& transport = MaterialValidation::spec("iridescence-grid-env");
+    CHECK_FALSE(resolve.sun);
+    CHECK(resolve.environment == 0.5f);
+    CHECK(transport.environment == 0.5f);
+    const auto& furnace = MaterialValidation::spec("furnace-iridescence");
+    CHECK(furnace.environment == 1.0f);
+    CHECK(furnace.baseColor == glm::vec3(1.0f));
+    for (auto name : {"base-grid-sun", "aniso-grid-sun", "sheen-grid-sun"})
+        CHECK_FALSE(MaterialValidation::spec(name).hasIridescenceGrid());
+    CHECK(MaterialValidation{"iridescence-grid-sun"}.getDefaultCamera().position == glm::vec3(0.0f, 2.5f, 5.5f));
+}
+
+TEST_CASE("F15.3 iridescence grid spheres carry the factor and ior of their row and the thickness of their column") {
+    ECS ecs;
+    GpuScene scene;
+    test::NullTextureManager textures;
+    MaterialValidation f{"iridescence-grid-sun"};
+    f.setup(ecs, scene, textures);
+    const auto& s = MaterialValidation::spec("iridescence-grid-sun");
+    for (u32 row = 0; row < s.metallic.size(); ++row)
+        for (u32 col = 0; col < s.roughness.size(); ++col) {
+            const EntityID e = f.spheres()[row * s.roughness.size() + col];
+            const auto& m = std::as_const(ecs).getComponent<MaterialComponent>(e);
+            CHECK(m.metallicFactor == s.metallic[row]);
+            CHECK(m.roughnessFactor == s.roughness[col]);
+            REQUIRE(m.extension);
+            REQUIRE(m.extension->iridescence);
+            const auto& block = *m.extension->iridescence;
+            CHECK(block.factor == s.iridescenceFactor[row]);
+            CHECK(block.ior == s.iridescenceIor[row]);
+            CHECK(block.thicknessMax == s.iridescenceThickness[col]);
+            CHECK(block.thicknessMin == 100.0f); // the default, so thickness-min differs from the maximum in every column
+            CHECK_FALSE(block.factorTexture.present());
+            CHECK_FALSE(block.thicknessTexture.present());
+            CHECK_FALSE(m.extension->specular);
+            CHECK_FALSE(m.extension->clearcoat);
+            CHECK_FALSE(m.extension->sheen);
+            CHECK_FALSE(m.extension->anisotropy);
+            CHECK(featureMask(*m.extension) == MATERIAL_FEATURE_IRIDESCENCE); // thickness 0 keeps the block, the film is off by rule
+        }
+    SceneStore store;
+    store.sync(ecs, scene);
+    CHECK(store.verifyAgainstEcs(ecs, scene).empty());
+    CHECK(store.featureUnion() == MATERIAL_FEATURE_IRIDESCENCE);
+    // The words the reference reads: record 1 (GPUMaterialExt1) words 3 factor, 4 ior, 5 min, 6 max, 7 factor texture, 8 thickness texture.
+    const u32 row = 2, col = 4; // factor 1, ior 1.8, thickness 800 on the dielectric rows
+    const EntityID e = f.spheres()[row * s.roughness.size() + col];
+    const u32 group = store.materials()[store.materialIndexOf(e)].extensionIndex;
+    const auto& rec = store.extensions()[group + 1];
+    float factor, ior, thicknessMin, thicknessMax;
+    std::memcpy(&factor, &rec.w[3], 4);
+    std::memcpy(&ior, &rec.w[4], 4);
+    std::memcpy(&thicknessMin, &rec.w[5], 4);
+    std::memcpy(&thicknessMax, &rec.w[6], 4);
+    CHECK(factor == 1.0f);
+    CHECK(ior == 1.8f);
+    CHECK(thicknessMin == 100.0f);
+    CHECK(thicknessMax == 800.0f);
+    CHECK(rec.w[7] == INVALID_TEXTURE_INDEX);
+    CHECK(rec.w[8] == INVALID_TEXTURE_INDEX);
+    f.teardown(ecs, scene);
+}
+
+TEST_CASE("F15.3 iridescence-grid-point: the iridescence grid lit by one point light from behind the grid") {
+    const auto& sun = MaterialValidation::spec("iridescence-grid-sun");
+    const auto& point = MaterialValidation::spec("iridescence-grid-point");
+    CHECK(point.iridescenceFactor == sun.iridescenceFactor);
+    CHECK(point.iridescenceThickness == sun.iridescenceThickness);
+    CHECK_FALSE(point.sun);
+    CHECK(point.environment == 0.0f);
+    REQUIRE(point.pointLights.size() == 1);
+    const MaterialPointLight light = point.pointLights[0];
+    CHECK(light.intensity == 250.0f);
+    CHECK(light.range == 100.0f);
+    const glm::vec3 camera = MaterialValidation{"iridescence-grid-point"}.getDefaultCamera().position;
+    const glm::vec3 centre(0.0f, 2.5f, 0.0f);
     CHECK(camera.y == doctest::Approx(centre.y));
     const float vl = glm::dot(glm::normalize(camera - centre), glm::normalize(light.position - centre));
     CHECK(vl < -0.4f);

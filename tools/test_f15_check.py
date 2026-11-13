@@ -107,6 +107,19 @@ SPECS["aniso-mirrored-sun"] = dict(
                handedness=[-1.0, -1.0, 1.0, 1.0]))
 
 
+# F15.3 (ticket 12): the iridescence grids (mirrors MaterialValidation: rows = (factor, film ior) over a dielectric then a metal,
+# columns = thickness in nm, base roughness 0.3).
+IRID = dict(factor=[0.5, 1.0, 1.0, 0.5, 1.0, 1.0], ior=[1.3, 1.3, 1.8, 1.3, 1.3, 1.8],
+            thickness=[0.0, 200.0, 400.0, 600.0, 800.0, 1200.0])
+for _name, _sun, _env, _base, _point in (("iridescence-grid-sun", 3.0, 0.0, COPPER, False),
+                                         ("iridescence-grid-env-resolve", 0.0, 0.5, COPPER, False),
+                                         ("iridescence-grid-env", 0.0, 0.5, COPPER, False),
+                                         ("iridescence-grid-point", 0.0, 0.0, COPPER, True),
+                                         ("furnace-iridescence", 0.0, 1.0, [1, 1, 1], False)):
+    SPECS[_name] = dict(roughness=[0.3] * 6, metallic=[0.0, 0.0, 0.0, 1.0, 1.0, 1.0], base=_base, sun=_sun, env=_env,
+                        irid=IRID, point=POINT_LIGHT if _point else False)
+
+
 def comb_tangent(n, comb=(1.0, 0.0, 0.0)):
     """The tangent of ProceduralMeshes::generateCombedSphere at a vertex of normal n: `comb` projected onto the tangent
     plane; where nothing is left, a unit perpendicular."""
@@ -196,6 +209,17 @@ def make_bench_snapshot(folder, name, width, height):
                     words[16] = bit(rough)
                     materials[-1].update(feature_bits=4, flags=4 << 8, extension_index=len(records))
                     records += [words, [0] * 20, [0] * 20, [0] * 20]
+            if "irid" in spec:  # every sphere carries the block (factor > 0 sets the bit, thickness 0 included)
+                bit = lambda v: int.from_bytes(struct.pack("<f", v), "little")  # noqa: E731
+                record0 = [0] * 20
+                for k in (5, 6, 10, 11, 12, 17, 18):
+                    record0[k] = ref.INVALID
+                record1 = [0] * 20
+                record1[2] = ref.INVALID
+                record1[3:9] = [bit(spec["irid"]["factor"][row]), bit(spec["irid"]["ior"][row]), bit(100.0),
+                                bit(spec["irid"]["thickness"][col]), ref.INVALID, ref.INVALID]
+                materials[-1].update(feature_bits=16, flags=16 << 8, extension_index=len(records))
+                records += [record0, record1, [0] * 20, [0] * 20]
             mesh = 0
             if "aniso" in spec:
                 a = spec["aniso"]
@@ -501,6 +525,56 @@ class RunnerLogic(unittest.TestCase):
                 set(ref.ANISO_CONTROLS) - {"aniso-mirror-unaware"}), key)
         # The mirrored fixture alone has the determinant control, and every anisotropy control.
         self.assertEqual(sorted(check.SCENARIOS["aniso-mirrored-sun"]["controls"]), sorted(ref.ANISO_CONTROLS))
+
+    def test_iridescence_keys_are_pending_and_name_the_control_that_models_the_current_engine(self):
+        keys = ["iridescence-grid-sun", "iridescence-grid-env-resolve", "iridescence-grid-env", "iridescence-grid-point",
+                "iridescence-grid-point@restir", "iridescence-grid-point@clustered", "furnace-iridescence",
+                "furnace-iridescence@resolve"]
+        with tempfile.TemporaryDirectory() as tmp:
+            with contextlib.redirect_stdout(io.StringIO()):
+                args = ["--out", tmp, "--binary", "build/release/phosphor"]
+                for key in keys:
+                    args += ["--only", key]
+                self.assertEqual(check.main(args), 0)
+            commands = json.loads((pathlib.Path(tmp) / "plan.json").read_text())["commands"]
+        expected = {"iridescence-grid-sun": ("iridescence-grid-sun", "legacy", "off", "ssr", "custom", "none"),
+                    "iridescence-grid-env-resolve": ("iridescence-grid-env-resolve", "legacy", "off", "off", "custom", "none"),
+                    "iridescence-grid-env": ("iridescence-grid-env", "legacy", "off", "ssr", "custom", "none"),
+                    "iridescence-grid-point": ("iridescence-grid-point", "legacy", "off", "ssr", "custom", "none"),
+                    "iridescence-grid-point@restir": ("iridescence-grid-point", "restir", "on", "ssr", "off", "rays"),
+                    "iridescence-grid-point@clustered": ("iridescence-grid-point", "clustered", "on", "ssr", "off", "rays"),
+                    "furnace-iridescence": ("furnace-iridescence", "legacy", "off", "ssr", "custom", "none"),
+                    "furnace-iridescence@resolve": ("furnace-iridescence", "legacy", "off", "off", "custom", "none")}
+        for key, (bench, lighting, rt, reflections, denoise, visibility) in expected.items():
+            capture, reference = commands[key]["capture"], commands[key]["reference"]
+            self.assertEqual(capture[capture.index("--material-scenario") + 1], bench, key)
+            self.assertEqual(capture[capture.index("--lighting") + 1], lighting, key)
+            self.assertEqual(capture[capture.index("--rt") + 1], rt, key)
+            self.assertEqual(capture[capture.index("--reflections") + 1], reflections, key)
+            self.assertEqual(capture[capture.index("--lighting-denoise") + 1], denoise, key)
+            self.assertEqual(reference[reference.index("--visibility") + 1], visibility, key)
+            literal, declared = check.scenario_controls(key)
+            for name in literal + declared:
+                self.assertIn(name, reference, key)
+            spec = check.SCENARIOS[key]
+            for name in literal:
+                self.assertIn(name, ref.IRID_CONTROLS, key)
+            for name in declared:
+                self.assertIn(name, ref.IRID_DECLARED_CONTROLS, key)
+            if key != "furnace-iridescence":
+                self.assertEqual(spec["pending"], "ticket 12", key)
+                self.assertIn(spec["pending_matches"], literal + declared, key)
+                self.assertIn(spec["pending_matches"], ("iridescence-ignored", "declared-iridescence-ignored"), key)
+        self.assertTrue(check.SCENARIOS["furnace-iridescence"]["always_green"])
+        self.assertNotIn("pending", check.SCENARIOS["furnace-iridescence"])
+        resolve = check.SCENARIOS["furnace-iridescence@resolve"]
+        self.assertEqual((resolve["pending"], resolve["pending_gate"]), ("ticket 12", "declared"))
+        self.assertEqual(check.SCENARIOS["iridescence-grid-env-resolve"]["kind"], "declared")
+        self.assertEqual(check.SCENARIOS["iridescence-grid-env"]["kind"], "environment")
+        for key in ("iridescence-grid-sun", "iridescence-grid-env", "iridescence-grid-point", "iridescence-grid-point@restir",
+                    "iridescence-grid-point@clustered"):
+            self.assertEqual(sorted(check.SCENARIOS[key]["controls"]), sorted(ref.IRID_CONTROLS), key)
+        self.assertEqual(sorted(check.SCENARIOS["iridescence-grid-env-resolve"]["controls"]), sorted(ref.IRID_DECLARED_CONTROLS))
 
     def test_pending_matches_must_also_hold_in_green_mode(self):
         failing = {"kind": "direct", "pass": False, "rows": {}}
@@ -1141,6 +1215,76 @@ class BenchMirror(unittest.TestCase):
             self.assertEqual(check.verdict([entry], "red"), ("EXPECTED_RED_CONFIRMED", 0))
         wrong = self.scenario(key, ref.control_model("aniso-d-normalised-by-ab", ref.APPENDIX_B), "red", tag="-wrong")
         self.assertFalse(wrong["result"]["pass"])  # an engine whose D is normalised by alpha_b^2 gains energy
+        self.assertEqual(check.verdict([wrong], "red")[1], check.EXIT_UNEXPECTED)
+
+    # --- F15.3 (ticket 12): the iridescence harness, same method as the anisotropy one.
+
+    IRID_KEYS = ("iridescence-grid-sun", "iridescence-grid-env-resolve", "iridescence-grid-env", "iridescence-grid-point",
+                 "furnace-iridescence@resolve")
+    IRID_DECLARED_KEYS = ("iridescence-grid-env-resolve", "furnace-iridescence@resolve")
+
+    def irid_entry(self, key, ignored, tag):
+        declared = key in self.IRID_DECLARED_KEYS
+        model = ref.control_model("iridescence-ignored", ref.APPENDIX_B) if ignored else ref.APPENDIX_B
+        environment = None
+        if declared:
+            environment = ref.IRID_DECLARED_CONTROLS["declared-iridescence-ignored"] if ignored else ref.DECLARED
+        return self.scenario(check.bench_scenario(key), model, "green", environment=environment, tag="-" + key + tag, key=key)
+
+    def test_iridescence_keys_are_red_for_the_right_reason_with_a_film_blind_engine(self):
+        for key in self.IRID_KEYS:
+            entry = self.irid_entry(key, True, "-blind")
+            self.assertTrue(entry["discriminating"], (key, json.dumps(entry["controls"], indent=1)))
+            self.assertFalse(entry["gates_pass"], key)          # pending: the gate FAILS
+            self.assertTrue(entry["pending_matches_met"], key)  # ... and the engine image matches the iridescence-ignored control
+            self.assertEqual(entry["pending"], "ticket 12")
+            self.assertEqual(check.verdict([entry], "green"), ("GREEN", check.EXIT_OK), key)
+
+    def test_iridescence_keys_go_red_in_green_mode_once_the_engine_implements_the_film(self):
+        for key in self.IRID_KEYS:
+            entry = self.irid_entry(key, False, "-film")
+            self.assertTrue(entry["gates_pass"], (key, json.dumps(check.summarize(entry["result"]))))
+            self.assertFalse(entry["pending_matches_met"], key)
+            self.assertEqual(check.verdict([entry], "green")[1], check.EXIT_UNEXPECTED, key)
+
+    def test_iridescence_controls_each_fail_their_gate(self):
+        for key in self.IRID_KEYS:
+            entry = self.irid_entry(key, False, "-ctl")
+            controls = entry["declared"]["controls"] if entry["kind"] == "furnace" else entry["controls"]
+            if entry["kind"] == "furnace":
+                controls = {**entry["controls"], **controls}
+            wanted = set(check.SCENARIOS[key]["controls"]) | set(check.SCENARIOS[key].get("declared", []))
+            self.assertEqual(set(controls), wanted, key)
+            for name, verdict in controls.items():
+                self.assertTrue(verdict["fails_gate"], (key, name, verdict))
+
+    def test_every_iridescence_control_alone_fails_the_direct_gate_as_an_engine_image(self):
+        for control in ref.IRID_CONTROLS:
+            if control == "iridescence-ignored":
+                continue
+            entry = self.scenario("iridescence-grid-sun", ref.control_model(control, ref.APPENDIX_B), "green",
+                                  tag="-" + control, key="iridescence-grid-sun")
+            self.assertFalse(entry["result"]["pass"], control)
+
+    def test_env_iridescence_exact_gate_sees_every_wrong_model_the_direct_keys_see(self):
+        for control in check.SCENARIOS["iridescence-grid-env"]["controls"]:
+            entry = self.scenario("iridescence-grid-env", ref.control_model(control, ref.APPENDIX_B), "green",
+                                  tag="-" + control, key="iridescence-grid-env")
+            self.assertEqual(entry["result"]["pass"], False, control)
+
+    def test_furnace_iridescence_bound_holds_for_the_model_and_the_energy_control_breaks_it(self):
+        key = "furnace-iridescence"
+        # As for the other furnaces the engine emulation is the energy-conserving declared model (the literal Appendix B
+        # dielectric gains ~1.2 % at roughness 0.3, and the exact film gains up to ~3 % more at grazing angles).
+        for ignored in (False, True):
+            environment = ref.IRID_DECLARED_CONTROLS["declared-iridescence-ignored"] if ignored else ref.DECLARED
+            entry = self.scenario(key, ref.APPENDIX_B, "red", environment=environment, tag=f"-{ignored}")
+            self.assertTrue(entry["result"]["pass"], (ignored, entry["result"]["max_sphere_mean"]))
+            self.assertTrue(entry["expectation"]["asserted"] and entry["expectation"]["met"])
+            self.assertTrue(entry["controls"]["iridescence-diffuse-unweighted"]["fails_gate"])
+            self.assertEqual(check.verdict([entry], "red"), ("EXPECTED_RED_CONFIRMED", 0))
+        wrong = self.scenario(key, ref.control_model("iridescence-diffuse-unweighted", ref.APPENDIX_B), "red", tag="-wrong")
+        self.assertFalse(wrong["result"]["pass"])  # an engine that does not scale the diffuse by 1 - max F_irid gains energy
         self.assertEqual(check.verdict([wrong], "red")[1], check.EXIT_UNEXPECTED)
 
     def test_cached_reference_is_reused_only_for_the_same_snapshot(self):

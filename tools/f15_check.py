@@ -57,6 +57,14 @@ reference ray casting):
   twin must PASS); the furnace bound is asserted green (only the declared gate of furnace-aniso@resolve is pending).
   Negative controls (each must fail its gate): anisotropy ignored, rotation flipped, handedness ignored, alpha_t/alpha_b
   swapped, D normalised by alpha_b^2 (energy), world-matrix determinant ignored (mirrored fixture only).
+- Iridescence (F15.3, ticket 12): iridescence-grid-sun / -env-resolve / -env / -point (legacy, @restir, @clustered),
+  furnace-iridescence (+ @resolve) against the independent KHR_materials_iridescence model of tools/f15_reference.py (the
+  specification's thin-film Fresnel transcribed from its text; V.H per light sample; the exact environment integrates the film
+  at each V.H, the declared environment holds it at N.V in the split sum).  Every gate the film-blind engine can fail is
+  "pending" (asserted to FAIL; `pending_matches` = iridescence-ignored or its declared twin must PASS); the furnace bound is
+  asserted green (only the declared gate of furnace-iridescence@resolve is pending).  Negative controls (each must fail its
+  gate): film ignored, film ior = 1.0, film ior = the default 1.3, N.V instead of V.H, minimum thickness, diffuse not scaled
+  by 1 - max F_irid (energy).
 - declared (base-grid-env-resolve; also furnace-resolve next to its furnace
   gate): the engine image against the independent declared-environment model of
   tools/f15_reference.py (DFG table, ADR-0006): per sphere mean relative error
@@ -136,6 +144,11 @@ FRAMES, RESOLUTION = 128, "1280x720"
 
 ANISO_DIRECT_CONTROLS = ["aniso-ignored", "aniso-rotation-flipped", "aniso-bitangent-flipped", "aniso-alpha-swapped",
                          "aniso-d-normalised-by-ab"]
+
+IRID_DIRECT_CONTROLS = ["iridescence-ignored", "iridescence-film-ior-ignored", "iridescence-film-ior-default",
+                        "iridescence-at-nv", "iridescence-thickness-min", "iridescence-diffuse-unweighted"]
+IRID_DECLARED_CONTROLS = ["declared-iridescence-ignored", "declared-iridescence-film-ior-ignored",
+                          "declared-iridescence-film-ior-default", "declared-iridescence-diffuse-unweighted"]
 
 SCENARIOS = {
     "base-grid-sun": {"kind": "direct", "controls": ["alpha-roughness", "fresnel-off", "engine-f0-blend"],
@@ -366,6 +379,52 @@ SCENARIOS = {
                            "controls": ["aniso-ignored", "aniso-rotation-flipped", "aniso-bitangent-flipped",
                                         "aniso-alpha-swapped", "aniso-mirror-unaware", "aniso-d-normalised-by-ab"],
                            "terms": "sun disk only on plain and mirrored combed spheres of both tangent handedness values"},
+    # F15.3 (ticket 12): KHR_materials_iridescence.  Rows are (factor, film ior) {(0.5, 1.3), (1, 1.3), (1, 1.8)} over a copper
+    # dielectric and then a copper metal, columns the thickness {0, 200, 400, 600, 800, 1200} nm, base roughness 0.3.  Direct
+    # grids group their rows by (metallic, factor, ior).  The engine ignores the film until ticket 12, so every gate it can fail
+    # is "pending" and the engine image must PASS it against the iridescence-ignored reference ("pending_matches").  Controls:
+    # ignored, film ior = 1.0 (outside ior), film ior = the default 1.3 (differs on the 1.8 rows only), N.V instead of V.H (the
+    # Sample Renderer deviation), the minimum instead of the maximum thickness, diffuse not scaled by 1 - max F_irid (gains
+    # energy).  `iridescence-thickness-max` of the ticket text cannot differ on texture-free data (open for ticket 22).  The
+    # declared environment key (split sum with the film at N.V) has no at-nv control: the declared model is N.V by construction.
+    "iridescence-grid-sun": {"kind": "direct", "pending": "ticket 12", "pending_matches": "iridescence-ignored",
+                             "controls": IRID_DIRECT_CONTROLS,
+                             "terms": "sun disk only (environment 0, no shadows, no GI) on the factor x thickness grid"},
+    "iridescence-grid-env-resolve": {"kind": "declared", "pending": "ticket 12", "pending_matches": "declared-iridescence-ignored",
+                                     "reflections": "off", "controls": IRID_DECLARED_CONTROLS,
+                                     "terms": "constant environment only (radiance 0.5, no sun) on the iridescence grid, "
+                                              "deterministic resolve terms (--reflections off --lighting-denoise custom)"},
+    "iridescence-grid-env": {"kind": "environment", "pending": "ticket 12", "pending_matches": "iridescence-ignored",
+                             "controls": IRID_DIRECT_CONTROLS,
+                             "terms": "constant environment only (radiance 0.5, no sun), SSR specular transport (the weight uses "
+                                      "the film at the sampled V.H), on the iridescence grid"},
+    "iridescence-grid-point": {"kind": "direct", "pending": "ticket 12", "pending_matches": "iridescence-ignored",
+                               "lighting": "legacy", "visibility": "none", "controls": IRID_DIRECT_CONTROLS,
+                               "terms": "one point light only (no sun, environment 0, no GI), resolve local lights "
+                                        "(--lighting legacy), on the iridescence grid"},
+    "iridescence-grid-point@restir": {"kind": "direct", "pending": "ticket 12", "pending_matches": "iridescence-ignored",
+                                      "lighting": "restir", "visibility": "rays", "denoise": "off", "terminator_band": 2,
+                                      "controls": IRID_DIRECT_CONTROLS,
+                                      "terms": "one point light only, ReSTIR DI with RT visibility (--lighting restir --rt on), "
+                                               "unfiltered (--lighting-denoise off), on the iridescence grid"},
+    "iridescence-grid-point@clustered": {"kind": "direct", "pending": "ticket 12", "pending_matches": "iridescence-ignored",
+                                         "lighting": "clustered", "visibility": "rays", "denoise": "off", "terminator_band": 2,
+                                         "controls": IRID_DIRECT_CONTROLS,
+                                         "terms": "one point light only, clustered DI with RT visibility (--lighting clustered "
+                                                  "--rt on), unfiltered (--lighting-denoise off), on the iridescence grid"},
+    # Furnace over iridescent materials (base albedo 1, environment 1): an upper bound that the film-blind engine satisfies,
+    # asserted green in every mode (the diffuse-unscaled control gains energy and must fail it); only the declared gate of the
+    # deterministic resolve is pending.
+    "furnace-iridescence": {"kind": "furnace-transport", "always_green": True, "controls": ["iridescence-diffuse-unweighted"],
+                            "terms": "constant environment radiance 1, base albedo 1, no sun, stochastic specular transport on "
+                                     "the iridescence grid"},
+    "furnace-iridescence@resolve": {"kind": "furnace", "always_green": True, "reflections": "off",
+                                    "pending": "ticket 12", "pending_gate": "declared",
+                                    "pending_matches": "declared-iridescence-ignored",
+                                    "controls": ["iridescence-diffuse-unweighted"],
+                                    "declared": IRID_DECLARED_CONTROLS,
+                                    "terms": "constant environment radiance 1, base albedo 1, no sun, deterministic resolve "
+                                             "terms on the iridescence grid"},
     "specular-grid-point@clustered": {"kind": "direct", "lighting": "clustered", "visibility": "rays", "denoise": "off",
                                       "terminator_band": 2,
                                       "controls": ["specular-ignored", "f90-one", "specular-weight-not-on-f0"],

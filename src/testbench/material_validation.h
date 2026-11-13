@@ -67,6 +67,13 @@ struct MaterialScenarioSpec {
     std::vector<float> anisotropyRotation;
     std::vector<bool>  mirroredColumn;
     std::vector<float> tangentHandedness;
+    // F15.3 (ticket 12) iridescence grids: KHR_materials_iridescence factor and film ior per row, thickness (nm, the maximum:
+    // there is no thickness texture) per column; `roughness` holds the (constant) base roughness of each column.  Every sphere
+    // carries the block (thickness 0 included: the extension is present, the film is disabled by the specification's rule).
+    std::vector<float> iridescenceFactor;
+    std::vector<float> iridescenceIor;
+    std::vector<float> iridescenceThickness;
+    [[nodiscard]] bool hasIridescenceGrid() const { return !iridescenceFactor.empty(); }
     [[nodiscard]] bool hasSpecularGrid() const { return !ior.empty(); }
     [[nodiscard]] bool hasAnisotropyGrid() const { return !anisotropyStrength.empty(); }
     [[nodiscard]] bool hasClearcoatGrid() const { return !clearcoatFactor.empty(); }

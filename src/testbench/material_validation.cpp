@@ -14,7 +14,7 @@
 namespace phosphor {
 namespace {
 // The names are mirrored by tools/f15_check.py SCENARIOS (tests/test_material_validation.cpp compares both).
-constexpr std::array<std::string_view, 30> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
+constexpr std::array<std::string_view, 35> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
                                                       "furnace-base",   "furnace-resolve",     "roughness-extremes",
                                                       "roughness-extremes-sun", "specular-grid-sun",
                                                       "specular-grid-env-resolve", "specular-grid-point", "specular-grid-env", "furnace-specular",
@@ -24,7 +24,9 @@ constexpr std::array<std::string_view, 30> kScenarios{"base-grid-sun",  "base-gr
                                                       "sheen-grid-sun", "sheen-grid-env-resolve", "sheen-grid-env",
                                                       "sheen-grid-point", "furnace-sheen",
                                                       "aniso-grid-sun", "aniso-grid-env-resolve", "aniso-grid-env",
-                                                      "aniso-grid-point", "furnace-aniso", "aniso-mirrored-sun"};
+                                                      "aniso-grid-point", "furnace-aniso", "aniso-mirrored-sun",
+                                                      "iridescence-grid-sun", "iridescence-grid-env-resolve", "iridescence-grid-env",
+                                                      "iridescence-grid-point", "furnace-iridescence"};
 constexpr float pi = 3.14159265358979323846f;
 
 glm::quat orientLight(glm::vec3 towardLight) {
@@ -115,6 +117,20 @@ const std::vector<MaterialScenarioSpec>& specs() {
     static const std::vector<float> mirrorRotation(4, 0.78539816f);
     static const std::vector<bool>  mirrorColumns{false, true, false, true};
     static const std::vector<float> mirrorHandedness{-1.0f, -1.0f, 1.0f, 1.0f};
+    // F15.3 (ticket 12): KHR_materials_iridescence on texture-free spheres.  Rows are (factor, film ior) over a copper
+    // dielectric (rows 0-2) and then a copper metal (rows 3-5): (0.5, 1.3), (1, 1.3), (1, 1.8); columns are the thickness
+    // {0, 200, 400, 600, 800, 1200} nm (the MAXIMUM, the specification's thickness without a thickness texture; the minimum keeps
+    // its default 100 nm so that a control reading the minimum differs in every column).  Thickness 0 disables the film (the
+    // neutral column).  Base roughness 0.3 (alpha 0.09: a wide lobe for the sun disk rule, no quadrature mask).  Same rig as the
+    // other grids (sun 3 W/m2, 250 W/sr point light 9 m from the grid centre, V.L about -0.5).
+    static const std::vector<float> iridFactor{0.5f, 1.0f, 1.0f, 0.5f, 1.0f, 1.0f};
+    static const std::vector<float> iridIor{1.3f, 1.3f, 1.8f, 1.3f, 1.3f, 1.8f};
+    static const std::vector<float> iridThickness{0.0f, 200.0f, 400.0f, 600.0f, 800.0f, 1200.0f};
+    static const std::vector<float> iridMetallic{0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f};
+    static const std::vector<float> iridRoughness(6, 0.3f);
+    static const glm::vec3 iridGridCentre(0.0f, 2.5f, 0.0f);
+    static const MaterialPointLight iridBackLight{iridGridCentre + 9.0f * glm::normalize(glm::vec3(-0.65f, 0.55f, -0.52f)),
+                                                  250.0f, 100.0f};
     static const std::vector<MaterialScenarioSpec> all{
         {"base-grid-sun", roughness, metallic, copper, true, 3.0f, towardSun, 0.0f},
         {"base-grid-env", roughness, metallic, copper, false, 0.0f, towardSun, 0.5f},
@@ -208,6 +224,21 @@ const std::vector<MaterialScenarioSpec>& specs() {
         // Mirrored carriers under the sun: rotation direction, handedness w and mirrored instances (see above).
         {"aniso-mirrored-sun", std::vector<float>(4, 0.3f), mirrorMetallic, copper, true, 3.0f, towardSun, 0.0f, {}, {}, {}, {}, {},
          {}, {}, false, {}, {}, mirrorStrength, mirrorRotation, mirrorColumns, mirrorHandedness},
+        // F15.3 (ticket 12) iridescence grids.  Sun only: the direct gate (the film at V.H of the disk centre).
+        {"iridescence-grid-sun", iridRoughness, iridMetallic, copper, true, 3.0f, towardSun, 0.0f, {}, {}, {}, {}, {}, {}, {}, false,
+         {}, {}, {}, {}, {}, {}, iridFactor, iridIor, iridThickness},
+        // Environment only, deterministic resolve (--reflections off --lighting-denoise custom): the declared film at N.V.
+        {"iridescence-grid-env-resolve", iridRoughness, iridMetallic, copper, false, 0.0f, towardSun, 0.5f, {}, {}, {}, {}, {}, {}, {},
+         false, {}, {}, {}, {}, {}, {}, iridFactor, iridIor, iridThickness},
+        // The same scene with the specular transport on: the weight uses the film at the sampled V.H.
+        {"iridescence-grid-env", iridRoughness, iridMetallic, copper, false, 0.0f, towardSun, 0.5f, {}, {}, {}, {}, {}, {}, {}, false,
+         {}, {}, {}, {}, {}, {}, iridFactor, iridIor, iridThickness},
+        // One point light only (no sun, environment 0), side-lit from behind like the other grids.
+        {"iridescence-grid-point", iridRoughness, iridMetallic, copper, false, 0.0f, towardSun, 0.0f, {}, {}, {}, {iridBackLight}, {},
+         {}, {}, false, {}, {}, {}, {}, {}, {}, iridFactor, iridIor, iridThickness},
+        // Furnace over iridescent materials: base albedo 1 under a uniform environment of radiance 1 (also without the transport).
+        {"furnace-iridescence", iridRoughness, iridMetallic, glm::vec3(1.0f), false, 0.0f, towardSun, 1.0f, {}, {}, {}, {}, {}, {}, {},
+         false, {}, {}, {}, {}, {}, {}, iridFactor, iridIor, iridThickness},
     };
     return all;
 }
@@ -305,6 +336,14 @@ void MaterialValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& textur
                 description->anisotropy.emplace();
                 description->anisotropy->strength = s.anisotropyStrength[row];
                 description->anisotropy->rotation = s.anisotropyRotation[column];
+                material.extension = std::move(description);
+            }
+            if (s.hasIridescenceGrid()) {
+                auto description = std::make_shared<MaterialDescription>();
+                description->iridescence.emplace();
+                description->iridescence->factor       = s.iridescenceFactor[row];
+                description->iridescence->ior          = s.iridescenceIor[row];
+                description->iridescence->thicknessMax = s.iridescenceThickness[column]; // thicknessMin keeps its default (100 nm)
                 material.extension = std::move(description);
             }
             material.baseColorFactor = glm::vec4(s.baseColor, 1.0f);
