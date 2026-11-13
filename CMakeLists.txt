@@ -73,6 +73,7 @@ add_library(phosphor_core STATIC
     src/renderer/exposure.cpp
     src/renderer/gpu_scene.cpp
     src/renderer/material_description.cpp
+    src/renderer/material_support.cpp
     src/renderer/meshlet_builder.cpp
     src/renderer/rt_proxy.cpp
     src/renderer/rt_proxy_transition.cpp
@@ -118,6 +119,7 @@ add_library(phosphor_core STATIC
     src/scene/camera.cpp
     src/scene/ecs.cpp
     src/scene/gltf_loader.cpp
+    src/scene/gltf_material_extensions.cpp
     src/scene/mesh_processing.cpp
     src/scene/procedural.cpp
     src/scene/texture_manager.cpp
