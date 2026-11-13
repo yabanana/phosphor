@@ -1,6 +1,7 @@
 #include "testbench/testbench.h"
 #include "testbench/lighting_validation.h"
 #include "testbench/reflection_validation.h"
+#include "testbench/material_validation.h"
 #include "testbench/torus_demo.h"
 #include "testbench/pbr_grid.h"
 #include "testbench/stress_test.h"
@@ -53,7 +54,9 @@ std::unique_ptr<TestBench> createTestBench(TestBenchType type) {
 std::unique_ptr<TestBench> createTestBench(TestBenchType type, const TestBenchParams& params) {
     switch (type) {
         case TestBenchType::TorusDemo:   return std::make_unique<TorusDemo>();
-        case TestBenchType::PBRGrid:     return std::make_unique<PBRGrid>();
+        case TestBenchType::PBRGrid:
+            if(!params.materialScenario.empty())return std::make_unique<MaterialValidation>(params.materialScenario);
+            return std::make_unique<PBRGrid>();
         case TestBenchType::StressTest:  return std::make_unique<StressTest>();
         case TestBenchType::SceneViewer:
             return std::make_unique<SceneViewer>(params.scenePath);

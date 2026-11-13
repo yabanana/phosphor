@@ -216,7 +216,7 @@ struct ReflectionPasses::Impl {
         params.flags=realProbe?REFLECTION_ENABLE_PROBES:0u;if(options.reflections!=ReflectionMode::Probes)params.flags|=REFLECTION_ENABLE_SSR;
         // Tagged physical fixture: no local probe/SSR geometry, only the
         // constant infinite incident radiance specified above.
-        if(options.reflectionScene=="specular-environment")params.flags=0;
+        if(options.reflectionScene=="specular-environment"||!options.materialScene.empty())params.flags=0;
         if(rtReflection)params.flags|=REFLECTION_ENABLE_RT;if(gi&&options.gi!=GiMode::Off)params.flags|=REFLECTION_ENABLE_GI|REFLECTION_ENABLE_CACHE;
         if(options.reflectionSamples==1)params.flags|=REFLECTION_SINGLE_SAMPLE;
         // F13.1: non-legacy DI integrates every geometry emitter's specular

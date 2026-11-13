@@ -3,6 +3,7 @@
 #include <json.hpp>
 #include "app/engine.h"
 #include "testbench/reflection_validation.h"
+#include "testbench/material_validation.h"
 #include <glm/gtc/type_ptr.hpp>
 #include "platform/metal/temporal_worker.h"
 
@@ -93,7 +94,10 @@ namespace {
 // infinite environment; every other scene is black outside its geometry.
 GiEnvironment declaredEnvironment(const AtmospherePasses* atmosphere,const LaunchOptions& options){
     if(atmosphere)return atmosphere->environment();
-    GiEnvironment e{};if(options.reflectionScene=="specular-environment")e.skyRadiance={.03f,.035f,.045f};return e;
+    GiEnvironment e{};if(options.reflectionScene=="specular-environment")e.skyRadiance={.03f,.035f,.045f};
+    // F15.3: material-validation scenarios declare one constant isotropic environment.
+    if(!options.materialScene.empty()){const float L=MaterialValidation::environmentRadiance(options.materialScene);e.skyRadiance={L,L,L};}
+    return e;
 }
 }
 
@@ -1185,7 +1189,7 @@ void Engine::switchTestBench(TestBenchType type) {
     framesOnBench_ = 0;
     TestBenchParams benchParams;
     benchParams.scenePath = options_.scenePath;
-    benchParams.lightingScenario=options_.lightingScene;benchParams.reflectionScenario=options_.reflectionScene;
+    benchParams.materialScenario=options_.materialScene;benchParams.lightingScenario=options_.lightingScene;benchParams.reflectionScenario=options_.reflectionScene;
     benchParams.instances         = options_.sceneInstances;
     benchParams.localLightCount=options_.localLightCount;benchParams.areaLights=options_.areaLights;benchParams.stationaryLights=options_.stationaryLights;
     benchParams.meshes            = options_.sceneMeshes;
@@ -1741,7 +1745,9 @@ bool Engine::frame(float dt) {
         std::memcpy(camera.direction,glm::value_ptr(front),12);std::memcpy(camera.up,glm::value_ptr(up),12);camera.width=renderWidth;camera.height=renderHeight;
         camera.fovYRadians=camera_->getFovY();camera.nearPlane=camera_->getNear();camera.farPlane=0;
         camera.jitterPixels[0]=temporal.jitter[0];camera.jitterPixels[1]=temporal.jitter[1];
-        const GiEnvironment environment=atmosphere_?atmosphere_->environment():GiEnvironment{};
+        // The snapshot carries the scene's declared environment (F15.3: the material scenarios
+        // declare theirs, which the reference needs); without a fixture it is unchanged.
+        const GiEnvironment environment=(atmosphere_||!options_.materialScene.empty())?declaredEnvironment(atmosphere_.get(),options_):GiEnvironment{};
         referenceSnapshot_->prepareFrame(ref,camera,lights_,environment,*store_,directLighting_.get());
     }
     if(linearCapture_) {

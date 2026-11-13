@@ -1,6 +1,7 @@
 #include "core/launch_options.h"
 #include "renderer/gpu_types.h"
 #include "testbench/lighting_validation.h"
+#include "testbench/material_validation.h"
 #include "testbench/reflection_validation.h"
 
 #include <charconv>
@@ -580,6 +581,9 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if (!needCount(out.giRays)) return false;
         } else if (arg == "--reflection-scene") {
             auto v=needValue();if(!v)return false;if(!ReflectionValidation::validScenario(*v)){error="--reflection-scene: unknown scenario";return false;}out.reflectionScene=*v;
+        } else if (arg == "--material-scenario") {
+            auto v=needValue();if(!v)return false;
+            if(!MaterialValidation::validScenario(*v)){error="--material-scenario: unknown scenario";return false;}out.materialScene=*v;
         } else if (arg == "--lighting-scene") {
             auto v=needValue();if(!v)return false;
             if(!LightingValidation::validScenario(*v)){error="--lighting-scene: unknown analytic scenario";return false;}out.lightingScene=*v;
@@ -1194,6 +1198,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if(out.captureLinearSignal==8&&(out.gi==GiMode::Off||out.lightingDenoise!=LightingDenoiseMode::Custom)){error="Filtered indirect capture requires GI and --lighting-denoise custom";return false;}
     if(out.captureLinearSignal==6 && out.reflections==ReflectionMode::Off){error="Specular capture requires --reflections";return false;}
     if(out.captureLinearSignal==7 && out.ao==AoMode::Off){error="AO capture requires --ao";return false;}
+    if(!out.materialScene.empty() && (!out.bench||*out.bench!=1||!out.lightingScene.empty()||!out.reflectionScene.empty())){error="--material-scenario requires --bench 2 and exclusive scene fixture";return false;}
+    if(!out.materialScene.empty() && out.reflections!=ReflectionMode::SSR){error="--material-scenario requires --reflections ssr (declared environment composite path)";return false;}
     if(!out.lightingScene.empty() && (!out.bench || *out.bench!=5)){error="--lighting-scene requires --bench 6";return false;}
     if(!out.captureLinear.empty() && !out.captureLinearSequence.empty()){error="Choose single linear capture or linear sequence";return false;}
     if((!out.captureLinear.empty() || !out.captureLinearSequence.empty()) && (!out.visibility || !out.benchmark())){error="Linear capture requires --render-path visibility and --frames";return false;}
