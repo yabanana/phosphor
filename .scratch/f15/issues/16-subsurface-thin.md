@@ -6,12 +6,12 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 07, 08
 
-**Status:** ready-for-agent
+**Status:** resolved (2026-11-14; image equality of the glTF encodings vs the description file → ticket 20; GI at -N second lookup → ticket 19)
 
 - [x] Thin fixtures (backlit plane, factor and colour sweeps) pass decision-11 thresholds; furnace bound holds (energy moved, not added)
-- [ ] Both glTF encodings and the description file produce the same description (doctest) and image
+- [ ] Both glTF encodings and the description file produce the same description (doctest) and image — description doctests exist (ticket 04); the IMAGE comparison needs a glTF test asset → ticket 20 (the chess fixture uses both a glTF and a description file)
 - [x] Negative control (lobe on the front hemisphere) fails; support report labels RC/draft inputs
-- [ ] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
+- [x] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
 
 ## Comments
 
@@ -161,3 +161,32 @@ comparison); GI at -N as a real second lookup; CSM/RT sun shadows of a back-lit 
 shadow its own transmitted sun: transmissive shadows are tickets 14/15; the fixture has no shadows); weight/colour textures (guide expectation
 unverified, no reference: ticket 22); combinations with other lobes (not composed in the thin branch: a thin material in the resolve skips the
 coat/sheen/aniso light branches); metals with weight (rule unit-tested only); volumetric mode (ticket 17).
+
+2026-11-14 — orchestrator verification on M5 after integration (engine
+99e0d3d-equivalents). Batch log: `build/f15-exact/battery16.log`.
+- `tools/f15_check.py --run --expect green` (`build/f15-check/t16`): GREEN on
+  all 67 keys, every control failing.
+  - `subsurface-thin-sun`: worst p99 0.03 %.
+  - `-point`: 0; `@restir` and `@clustered`: 0.04 %.
+  - `-env-resolve`: worst mean 3.2e-4.
+  - `-env` (transport): worst sphere mean 0.98 %.
+  - `furnace-thin-subsurface`: 0.99999; `@resolve`: max pixel 1.0.
+- `--debug-lobe-guide 16` on subsurface-thin-env: `pixels 20052 extended 14952
+  | PASS`. The corrupt control shifts the weight.
+- Shader validation: subsurface-thin-point with ReSTIR and RT reflections
+  exits clean.
+- O7 (warmup 64, 64 measured frames): subsurface-thin-env in both lighting
+  modes gives 0 GPU allocations and 0 render-thread compiles.
+- Scenes without features: F13 exact captures and visual_check 0 px.
+  archive_check: every local scenario PASS. hitch_check OK. The clip runner
+  and the coat-emitter check meet every expectation.
+- Decision-06 deviation, declared (`gi_irradiance_at_n_stands_for_minus_n`):
+  the transmitted part uses the pixel's own GI irradiance at N instead of
+  E(-N). A real second lookup needs a second irradiance signal → ticket 19,
+  and the residue audit of ticket 24 lists it.
+- Declared:
+  - the sun's shadow of a back-lit thin receiver is the standard sun
+    visibility (tickets 14/15);
+  - a thin material in the resolve does not compose coat, sheen or
+    anisotropy (ticket 19);
+  - weight and colour textures have no reference (ticket 22).
