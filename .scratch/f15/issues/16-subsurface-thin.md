@@ -8,9 +8,9 @@ Roadmap: F15.1, F15.3
 
 **Status:** ready-for-agent
 
-- [ ] Thin fixtures (backlit plane, factor and colour sweeps) pass decision-11 thresholds; furnace bound holds (energy moved, not added)
+- [x] Thin fixtures (backlit plane, factor and colour sweeps) pass decision-11 thresholds; furnace bound holds (energy moved, not added)
 - [ ] Both glTF encodings and the description file produce the same description (doctest) and image
-- [ ] Negative control (lobe on the front hemisphere) fails; support report labels RC/draft inputs
+- [x] Negative control (lobe on the front hemisphere) fails; support report labels RC/draft inputs
 - [ ] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
 
 ## Comments
@@ -122,3 +122,42 @@ Open / not done:
   what the engine implements.
 - DI receivers must evaluate lights on the back hemisphere. Their shadow
   rays leave from the light's side.
+
+2026-11-13 — engine side (F15.1), commits `99e0d3d` (BSDF, resolve, DI, composite, guide, support table, tests), `fa3c7e1` (targeted
+archive update), `558f62f` (runner keys no longer pending), `3ad271e` (comment only).
+What was built:
+- `bsdf.h`: `BsdfThin {weight, colour}`; reflected diffuse x (1 - w), transmitted `w (1 - metallic)(1 - F(V.H)) colour / pi |N.L|`
+  for N.L < 0 with H = normalize(V + L) (degenerate H gives 0), declared environment weight `w colour (1 - metallic)(1 - E_d)(1 - 0.16 N.V)`.
+- Resolve (`shadeSurface`): record 2 read for mode 0 only (volumetric: base model, no subsurface bit published; ticket 17); analytic
+  lights and the sun disk centre keep back-hemisphere lights (no N.L clamp to the front), specular lobe unchanged; environment: front
+  diffuse x (1 - w), transmitted term on the radiance at -N (declared environment; legacy hemisphere at -N; with GI, see below).
+  The term travels with the diffuse ambient (the composite adds it when the resolve strips it).
+- DI `_lobe` kernels (ReSTIR candidates/temporal/spatial/shade and clustered share `diBRDFLobe`/`diTarget`): `DILobe` carries the thin
+  parameters; target and shading evaluate back-hemisphere lights. The visibility ray needed NO change: `diEndpointVisible` already flips
+  the geometric normal towards the light before `rtOffsetRay`, so a back light's ray leaves from the light's side.
+- Composite `_lobe`: front diffuse x (1 - w) plus the transmitted environment/GI term. GI at -N is NOT a probe lookup: the pixel's own
+  GI irradiance (the denoised irradiance at N) stands for E(-N) (declared approximation; no fixture has GI; support table id
+  `gi_irradiance_at_n_stands_for_minus_n`). A genuine -N lookup needs a second irradiance signal and is carried.
+- `LOBE_GUIDE_RESOLVED_FEATURES` gains SUBSURFACE (the volumetric flag is untouched); guide words carry weight and colour; CPU
+  expectation reads record 2 (mode 0, textures unverified, volumetric clears the bit); the corrupt control shifts the weight (+0.25).
+- Support table: subsurface = approximated (`thin_mode_only;gi_irradiance_at_n_stands_for_minus_n;secondary_rt_hits_ignore_transmission`),
+  the volumetric mode has its own unsupported entry (`MaterialSupportTable::subsurfaceVolumetric`); tests that used the subsurface
+  feature as unsupported were updated. No harness or reference change.
+Verification (M5 Max, release build, `-j 6`): ctest phosphor_tests 840 cases OK; `tools/test_f15_check.py` 70 tests OK.
+Runner `--run --expect green` over ALL keys (59 scenarios, `build/f15-check/t16-all`): GREEN exit 0, every gate pass, every expectation met,
+every negative control fails its gate, every capture 0 archive misses and 0 render-thread compiles (the restir/clustered captures keep
+the 8 background compiler calls noted above). Thin keys (`t16-b`): sun p99 <= 0.0003 per weight group; env-resolve worst sphere mean
+0.00032 (limit 0.005); env worst sphere mean 0.0098 (limit 0.05); point legacy p99 0.0000, @restir / @clustered p99 0.0004 (same as the
+base DI images); furnace transport max sphere mean 0.99999 (limit 1.005); furnace@resolve pixel max 1.00000 and declared gate worst
+mean 0.00000 (limit 0.005). Archive: +7 compute descriptors with MATERIAL_FEATURES 128 (429 -> 436; render 198, tile 10, mesh 142).
+Guide: `--debug-lobe-guide 8` PASS on subsurface-thin-env (14952 extended pixels), corrupt control FAIL (14952 mismatches, exit 1);
+`tools/f15_lobe_guide_overflow_check.sh` on subsurface-thin-sun PASS (dumps identical, 18432000 bytes). Validation
+(`MTL_SHADER_VALIDATION=1 MTL_DEBUG_LAYER=1`): 1500 frames of subsurface-thin-point with ReSTIR + RT reflections + custom denoiser exit 0,
+all LIGHTING and LOBE-GUIDE checks PASS; 200 frames of subsurface-thin-env with DDGI (the GI composite path) exit 0, guide PASS (no
+reference image for GI).
+Carried / not done: `tools/archive_check.sh` and `tools/hitch_check.sh` (not run, orchestrator); O7 per-frame allocation counts (the BENCH
+line counts the whole run); image equality of the glTF encodings against the description file (loader doctests exist, no engine image
+comparison); GI at -N as a real second lookup; CSM/RT sun shadows of a back-lit thin receiver use the standard sun visibility (the carrier can
+shadow its own transmitted sun: transmissive shadows are tickets 14/15; the fixture has no shadows); weight/colour textures (guide expectation
+unverified, no reference: ticket 22); combinations with other lobes (not composed in the thin branch: a thin material in the resolve skips the
+coat/sheen/aniso light branches); metals with weight (rule unit-tested only); volumetric mode (ticket 17).
