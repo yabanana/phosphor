@@ -16,9 +16,10 @@
 using namespace phosphor;
 
 TEST_CASE("F15.3 material scenarios are exactly the nine declared names") {
-    CHECK(MaterialValidation::scenarios().size() == 10);
+    CHECK(MaterialValidation::scenarios().size() == 12);
     for (auto name : {"base-grid-sun", "base-grid-env", "base-grid-env-resolve", "furnace-base", "furnace-resolve",
-                      "roughness-extremes", "roughness-extremes-sun", "specular-grid-sun", "specular-grid-env-resolve"})
+                      "roughness-extremes", "roughness-extremes-sun", "specular-grid-sun", "specular-grid-env-resolve", "specular-grid-point",
+                      "specular-grid-env", "furnace-specular"})
         CHECK(MaterialValidation::validScenario(name));
     CHECK_FALSE(MaterialValidation::validScenario("unknown"));
     CHECK_THROWS(MaterialValidation{"unknown"});
@@ -177,7 +178,7 @@ TEST_CASE("F15.3 the bench and the runner (tools/f15_check.py) list the same sce
 }
 
 TEST_CASE("F15.1 specular grids declare ior x specularFactor x specularColor, metallic 0 rows and one metallic 1 row") {
-    for (auto name : {"specular-grid-sun", "specular-grid-env-resolve"}) {
+    for (auto name : {"specular-grid-sun", "specular-grid-env-resolve", "specular-grid-env", "furnace-specular"}) {
         const auto& s = MaterialValidation::spec(name);
         REQUIRE(s.hasSpecularGrid());
         REQUIRE(s.ior.size() == s.roughness.size());
@@ -208,6 +209,19 @@ TEST_CASE("F15.1 specular grids declare ior x specularFactor x specularColor, me
     CHECK(env.environment == 0.5f);
     CHECK(MaterialValidation::environmentRadiance("specular-grid-env-resolve") == 0.5f);
     CHECK(MaterialValidation::environmentRadiance("specular-grid-sun") == 0.0f);
+    // F15.1 (ticket 08): the transport twin of the resolve grid, and the extended furnace (albedo 1, environment 1).
+    const auto& transport = MaterialValidation::spec("specular-grid-env");
+    CHECK_FALSE(transport.sun);
+    CHECK(transport.environment == 0.5f);
+    CHECK(transport.baseColor == env.baseColor);
+    CHECK(transport.ior == env.ior);
+    CHECK(transport.specularFactor == env.specularFactor);
+    CHECK(transport.specularColor == env.specularColor);
+    const auto& furnace = MaterialValidation::spec("furnace-specular");
+    CHECK_FALSE(furnace.sun);
+    CHECK(furnace.environment == 1.0f);
+    CHECK(furnace.baseColor == glm::vec3(1.0f));
+    CHECK(furnace.ior == env.ior);
     // The base scenarios carry no extension.
     for (auto name : {"base-grid-sun", "furnace-base", "roughness-extremes"})
         CHECK_FALSE(MaterialValidation::spec(name).hasSpecularGrid());

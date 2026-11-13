@@ -57,8 +57,9 @@ SPECS = {
 SPEC_IOR = [0.0, 1.0, 1.33, 1.5, 2.4]
 SPEC_ROWS = [(1.0, [1, 1, 1], 0.0), (0.5, [1, 1, 1], 0.0), (1.0, [2, 2, 2], 0.0), (0.5, [2, 1, 0.5], 0.0),
              (0.5, [2, 2, 2], 1.0)]
-for _name, _sun, _env in (("specular-grid-sun", 3.0, 0.0), ("specular-grid-env-resolve", 0.0, 0.5)):
-    SPECS[_name] = dict(roughness=[0.35] * 5, metallic=[row[2] for row in SPEC_ROWS], base=COPPER, sun=_sun, env=_env,
+for _name, _sun, _env, _base in (("specular-grid-sun", 3.0, 0.0, COPPER), ("specular-grid-env-resolve", 0.0, 0.5, COPPER),
+                                 ("specular-grid-env", 0.0, 0.5, COPPER), ("furnace-specular", 0.0, 1.0, [1, 1, 1])):
+    SPECS[_name] = dict(roughness=[0.35] * 5, metallic=[row[2] for row in SPEC_ROWS], base=_base, sun=_sun, env=_env,
                         ior=SPEC_IOR, specular=[(row[0], row[1]) for row in SPEC_ROWS])
 
 
@@ -219,6 +220,34 @@ class RunnerLogic(unittest.TestCase):
         for key in ("specular-grid-point@restir", "specular-grid-point@clustered"):
             self.assertNotIn("pending", check.SCENARIOS[key])
             self.assertNotIn("pending_matches", check.SCENARIOS[key])
+
+    def test_transport_variants_of_the_specular_grid_set_reflections_rt_and_denoise(self):
+        # F15.1 (ticket 08): SSR (default), RT reflections, the probe path and the extended furnace.
+        with tempfile.TemporaryDirectory() as tmp:
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = check.main(["--out", tmp, "--binary", "build/release/phosphor", "--only", "specular-grid-env",
+                                   "--only", "specular-grid-env@rt", "--only", "specular-grid-env@probes",
+                                   "--only", "furnace-specular", "--only", "furnace-specular@resolve"])
+            self.assertEqual(code, 0)
+            commands = json.loads((pathlib.Path(tmp) / "plan.json").read_text())["commands"]
+            for name, bench, reflections, rt, denoise in (
+                    ("specular-grid-env", "specular-grid-env", "ssr", "off", "custom"),
+                    ("specular-grid-env@rt", "specular-grid-env", "rt", "on", "custom"),
+                    ("specular-grid-env@probes", "specular-grid-env", "probes", "off", "off"),
+                    ("furnace-specular", "furnace-specular", "ssr", "off", "custom"),
+                    ("furnace-specular@resolve", "furnace-specular", "off", "off", "custom")):
+                capture = commands[name]["capture"]
+                self.assertEqual(capture[capture.index("--material-scenario") + 1], bench, name)
+                self.assertEqual(capture[capture.index("--reflections") + 1], reflections, name)
+                self.assertEqual(capture[capture.index("--rt") + 1], rt, name)
+                self.assertEqual(capture[capture.index("--lighting-denoise") + 1], denoise, name)
+        self.assertEqual(check.SCENARIOS["specular-grid-env"]["kind"], "environment")
+        self.assertEqual(check.SCENARIOS["specular-grid-env@probes"]["kind"], "declared")
+        self.assertEqual(check.SCENARIOS["furnace-specular"]["kind"], "furnace-transport")
+        self.assertEqual(check.SCENARIOS["furnace-specular@resolve"]["kind"], "furnace")
+        for key in ("specular-grid-env", "specular-grid-env@rt", "specular-grid-env@probes", "furnace-specular",
+                    "furnace-specular@resolve"):
+            self.assertTrue(check.SCENARIOS[key]["always_green"], key)
 
     def test_terminator_band_width_two_reaches_two_pixels_into_the_lit_side(self):
         lit = np.zeros((7, 9), dtype=bool)

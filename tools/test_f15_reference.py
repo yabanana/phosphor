@@ -416,14 +416,16 @@ class SpecularIorModel(unittest.TestCase):
         base = np.array([[0.8, 0.35, 0.15]])
         f0c = ref.specular_f0(np.array([1.33]), np.array([[2.0, 1.0, 0.5]]))
         dielectric = {"f0": f0c, "weight": np.array([0.5])}
-        full = {**ref.DECLARED, "extension_diffuse": "extension"}
-        out = ref.declared_environment_radiance(base, np.array([0.0]), rough, mu, 0.5, full, dielectric)
+        self.assertEqual(ref.DECLARED["extension_diffuse"], "extension")  # ticket 08: the composite is guide-aware
+        out = ref.declared_environment_radiance(base, np.array([0.0]), rough, mu, 0.5, ref.DECLARED, dielectric)
         # Hand-worked: E_d = f0c * 0.5 * A + 0.5 * B per channel; diffuse weight 1 - max(E_d).
         e_d = np.clip(f0c * 0.5 * a + 0.5 * b, 0.0, 1.0)
         expected = (base * (1 - e_d.max()) + e_d) * 0.5
         np.testing.assert_allclose(out, expected, rtol=1e-12)
-        # Until ticket 08 the composite weights the environment diffuse with the base model.
-        composite = ref.declared_environment_radiance(base, np.array([0.0]), rough, mu, 0.5, ref.DECLARED, dielectric)
+        # The negative control: the composite weighting the environment diffuse with the base model (pre-ticket 08).
+        composite = ref.declared_environment_radiance(base, np.array([0.0]), rough, mu, 0.5,
+                                                      ref.SPECULAR_DECLARED_CONTROLS["declared-extension-diffuse-base"],
+                                                      dielectric)
         expected_composite = (base * (1 - min(max(0.04 * a + b, 0.0), 1.0)) + e_d) * 0.5
         np.testing.assert_allclose(composite, expected_composite, rtol=1e-12)
         # The neutral extension is exactly the base declared model.
@@ -437,6 +439,26 @@ class SpecularIorModel(unittest.TestCase):
         np.testing.assert_allclose(
             ref.declared_environment_radiance(base, np.array([1.0]), rough, mu, 0.5, ref.DECLARED, dielectric),
             ref.declared_environment_radiance(base, np.array([1.0]), rough, mu, 0.5), rtol=1e-12)
+
+    def test_literal_environment_of_the_extension(self):
+        # F15.1 (ticket 08): the exact quadrature of the extended dielectric.  A neutral block (ior 1.5, weight 1,
+        # colour 1) is the base model; the wrong variants differ; a weight below 1 lowers the specular part and the
+        # exact diffuse integral follows 1 - max(F) (checked against the neutral value and the white-furnace bound).
+        mu, rough = np.array([0.8, 0.5]), np.array([0.35, 0.35])
+        base, metallic = np.array([[0.8, 0.35, 0.15], [1.0, 1.0, 1.0]]), np.array([0.0, 0.0])
+        neutral = {"f0": ref.specular_f0(np.array([1.5, 1.5]), np.ones((2, 3))), "weight": np.array([1.0, 1.0]),
+                   "variant": "extension"}
+        np.testing.assert_allclose(ref.environment_radiance(base, metallic, rough, mu, 0.5, ref.SPECULAR_EXT, neutral),
+                                   ref.environment_radiance(base, metallic, rough, mu, 0.5), rtol=2e-3)
+        weighted = {"f0": ref.specular_f0(np.array([2.4, 2.4]), np.full((2, 3), 2.0)), "weight": np.array([0.5, 0.5]),
+                    "variant": "extension"}
+        good = ref.environment_radiance(base, metallic, rough, mu, 0.5, ref.SPECULAR_EXT, weighted)
+        # A white albedo-1 dielectric never gains energy: radiance <= environment radiance.
+        self.assertLessEqual(float(good[1].max()), 0.5 * 1.002)
+        for variant in ("ignored", "f90-one", "f0-unweighted"):
+            wrong = ref.environment_radiance(base, metallic, rough, mu, 0.5, ref.SPECULAR_EXT,
+                                             {**weighted, "variant": variant})
+            self.assertGreater(float(np.abs(wrong - good).max() / good.max()), 0.005, variant)
 
     def test_declared_controls_differ_from_the_model(self):
         mu, rough = np.array([0.5]), np.array([0.35])

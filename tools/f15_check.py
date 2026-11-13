@@ -135,7 +135,7 @@ SCENARIOS = {
                           "terms": "sun disk only (environment 0, no shadows, no GI) on the ior x specular grid"},
     "specular-grid-env-resolve": {"kind": "declared", "always_green": True, "reflections": "off",
                                   "controls": ["declared-specular-ignored", "declared-f90-one",
-                                               "declared-specular-weight-not-on-f0"],
+                                               "declared-specular-weight-not-on-f0", "declared-extension-diffuse-base"],
                                   "terms": "constant environment only (radiance 0.5, no sun) on the ior x specular grid, "
                                            "deterministic resolve terms (--reflections off --lighting-denoise custom)"},
     # F15.1 (ticket 07): the ior x specular grid lit by one point light (bench scenario specular-grid-point; a
@@ -155,6 +155,34 @@ SCENARIOS = {
                                    "controls": ["specular-ignored", "f90-one", "specular-weight-not-on-f0"],
                                    "terms": "one point light only, ReSTIR DI with RT visibility (--lighting restir "
                                             "--rt on), unfiltered (--lighting-denoise off), on the ior x specular grid"},
+    # F15.1 (ticket 08): specular transport of ior/specular.  specular-grid-env: SSR (like base-grid-env, kind
+    # "environment": the reference is the literal quadrature, mean <= 5 % per sphere); @rt: RT reflections;
+    # @probes: the deterministic prefiltered-probe path, which with no captured probe is the environment split-sum
+    # weight of the extended lobe, so it gates against the declared model (kind "declared"), captured unfiltered
+    # (--lighting-denoise off: the custom denoiser lowers the near-unit specular signal of the ior 0 spheres by
+    # 0.74 % at the sphere centre, measured 2026-11-13, ticket 08b's; the gate measures the transport weight).
+    "specular-grid-env": {"kind": "environment", "always_green": True, "controls": ['specular-ignored', 'f90-one', 'specular-weight-not-on-f0'],
+                          "terms": "constant environment only (radiance 0.5, no sun), SSR specular transport, on the "
+                                   "ior x specular grid"},
+    "specular-grid-env@rt": {"kind": "environment", "always_green": True, "rt": True, "reflections": "rt",
+                             "controls": ['specular-ignored', 'f90-one', 'specular-weight-not-on-f0'],
+                             "terms": "constant environment only (radiance 0.5, no sun), RT reflections (--rt on "
+                                      "--reflections rt), on the ior x specular grid"},
+    "specular-grid-env@probes": {"kind": "declared", "always_green": True, "reflections": "probes", "denoise": "off",
+                                 "controls": ['declared-specular-ignored', 'declared-f90-one', 'declared-specular-weight-not-on-f0', 'declared-extension-diffuse-base'],
+                                 "terms": "constant environment only (radiance 0.5, no sun), probe path "
+                                          "(--reflections probes, no captured probe: environment split-sum weight), "
+                                          "on the ior x specular grid"},
+    # Extended furnace (albedo 1, environment 1): the transport gates the per-sphere mean (energy in expectation),
+    # @resolve the deterministic resolve terms per pixel plus the declared model.
+    "furnace-specular": {"kind": "furnace-transport", "always_green": True, "controls": ["diffuse-unweighted"],
+                         "terms": "constant environment radiance 1, albedo 1, no sun, stochastic specular transport "
+                                  "on the ior x specular grid"},
+    "furnace-specular@resolve": {"kind": "furnace", "always_green": True, "reflections": "off",
+                                 "controls": ["diffuse-unweighted"],
+                                 "declared": ["declared-karis-fit", "declared-extension-diffuse-base"],
+                                 "terms": "constant environment radiance 1, albedo 1, no sun, deterministic resolve "
+                                          "terms on the ior x specular grid"},
     "specular-grid-point@clustered": {"kind": "direct", "lighting": "clustered", "visibility": "rays", "denoise": "off",
                                       "terminator_band": 2,
                                       "controls": ["specular-ignored", "f90-one", "specular-weight-not-on-f0"],
@@ -249,7 +277,7 @@ def capture_command(binary, name, folder, seed=1):
     last = str(FRAMES - 1)
     lighting = SCENARIOS[name].get("lighting", "legacy")
     return [str(binary), "--scene", "procedural", "--bench", "2", "--material-scenario", bench_scenario(name),
-            "--render-path", "visibility", "--geometry-path", "mesh", "--rt", "off" if lighting == "legacy" else "on",
+            "--render-path", "visibility", "--geometry-path", "mesh", "--rt", "off" if lighting == "legacy" and not SCENARIOS[name].get("rt") else "on",
             "--shadows", "off",
             "--lighting", lighting, "--gi", "off", "--reflections", SCENARIOS[name].get("reflections", "ssr"), "--ao", "off",
             "--lighting-denoise", SCENARIOS[name].get("denoise", "custom"), "--reflection-samples", "8",

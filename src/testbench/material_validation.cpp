@@ -14,10 +14,10 @@
 namespace phosphor {
 namespace {
 // The names are mirrored by tools/f15_check.py SCENARIOS (tests/test_material_validation.cpp compares both).
-constexpr std::array<std::string_view, 10> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
+constexpr std::array<std::string_view, 12> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
                                                       "furnace-base",   "furnace-resolve",     "roughness-extremes",
                                                       "roughness-extremes-sun", "specular-grid-sun",
-                                                      "specular-grid-env-resolve", "specular-grid-point"};
+                                                      "specular-grid-env-resolve", "specular-grid-point", "specular-grid-env", "furnace-specular"};
 constexpr float pi = 3.14159265358979323846f;
 
 glm::quat orientLight(glm::vec3 towardLight) {
@@ -86,6 +86,14 @@ const std::vector<MaterialScenarioSpec>& specs() {
         // ReSTIR or clustered DI otherwise (the DI grid of ticket 07).
         {"specular-grid-point", specRoughness, specMetallic, copper, false, 0.0f, towardSun, 0.0f, specIor,
          specFactor, specColor, {backLight}},
+        // F15.1 (ticket 08): the same grid and environment as specular-grid-env-resolve with the specular transport on
+        // (SSR by default; the runner also captures it with RT reflections and with the probe path).
+        {"specular-grid-env", specRoughness, specMetallic, copper, false, 0.0f, towardSun, 0.5f, specIor, specFactor,
+         specColor},
+        // Furnace over EXTENDED materials: the ior x specular grid at base colour 1 under a uniform environment of
+        // radiance 1 (the runner also captures it without the transport, deterministic resolve terms).
+        {"furnace-specular", specRoughness, specMetallic, glm::vec3(1.0f), false, 0.0f, towardSun, 1.0f, specIor,
+         specFactor, specColor},
     };
     return all;
 }

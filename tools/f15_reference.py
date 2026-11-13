@@ -372,8 +372,27 @@ def environment_table(roughness, model=APPENDIX_B):
     return _TABLES[key]
 
 
-def environment_radiance(base, metallic, roughness, n_dot_v, radiance, model=APPENDIX_B):
-    """Outgoing radiance (n, 3) under a constant isotropic environment of radiance `radiance`."""
+_EXTENSION_DIFFUSE = {}
+
+
+def extension_diffuse_table(c0, c1, model=APPENDIX_B):
+    """Diffuse integral over N.V (the mu grid of environment_table) of (1 - max_c F_c(V.H)) * cos / pi for a dielectric
+    Fresnel F_c = c0_c + c1_c * w(V.H) (affine in the Schlick weight; see dielectric_fresnel)."""
+    key = (tuple(np.round(c0, 12)), tuple(np.round(c1, 12)), model["fresnel"])
+    if key not in _EXTENSION_DIFFUSE:
+        mus = np.linspace(MIN_NDOTV, 1.0, MU_NODES)
+        c0a, c1a = np.asarray(c0, dtype=np.float64), np.asarray(c1, dtype=np.float64)
+        weight = lambda vh: 1.0 - np.max(c0a[:, None, None] + c1a[:, None, None] * schlick_weight(vh, model)[None], axis=0)  # noqa: E731
+        _EXTENSION_DIFFUSE[key] = np.array([_diffuse_integral(float(mu), weight) for mu in mus])
+    return _EXTENSION_DIFFUSE[key]
+
+
+def environment_radiance(base, metallic, roughness, n_dot_v, radiance, model=APPENDIX_B, dielectric=None):
+    """Outgoing radiance (n, 3) under a constant isotropic environment of radiance `radiance`.
+
+    `dielectric` (F15.1, per-pixel {"f0", "weight", "variant"} of KHR_materials_ior/specular): the exact quadrature of
+    the extended dielectric.  F is affine in the Schlick weight (F = c0 + c1 w), so the specular part is
+    c0 * (A + B) + c1 * B per channel and the diffuse part integrates 1 - max(F) (extension_diffuse_table)."""
     n_pixels = len(n_dot_v)
     result = np.zeros((n_pixels, 3))
     mu = np.clip(n_dot_v, MIN_NDOTV, 1.0)
@@ -386,14 +405,28 @@ def environment_radiance(base, metallic, roughness, n_dot_v, radiance, model=APP
         cu = np.interp(mu[sel], t["mu"], t["Cu"])[:, None]
         m = np.asarray(metallic, dtype=np.float64)[sel, None]
         c = base[sel]
+        if dielectric is not None:
+            d = take(dielectric, sel)
+            f_w0, _ = dielectric_fresnel(d["f0"], d["weight"], np.zeros((len(sel), 1)), d["variant"])
+            f_w1, _ = dielectric_fresnel(d["f0"], d["weight"], np.ones((len(sel), 1)), d["variant"])
+            c0, c1 = f_w0, f_w1 - f_w0
+            cd_ext = np.empty((len(sel), 1))
+            combos = np.unique(np.concatenate([c0, c1], axis=1), axis=0)
+            for combo in combos:
+                pick = np.flatnonzero(np.all(np.concatenate([c0, c1], axis=1) == combo, axis=1))
+                table = extension_diffuse_table(combo[:3], combo[3:], model)
+                cd_ext[pick, 0] = np.interp(mu[sel][pick], t["mu"], table)
+            dielectric_value = c * cd_ext + c0 * (a + b) + c1 * b
+            result[sel] = (1 - m) * dielectric_value + m * (c * a + b)
+            continue
         if model["weighting"] == "engine-blend":
             f0 = DIELECTRIC_F0 * (1 - m) + c * m
             result[sel] = (1 - m) * c * cu + f0 * a + b
             continue
         diffuse = c * (cu if model["weighting"] == "unweighted-diffuse" else cd)
-        dielectric = diffuse + DIELECTRIC_F0 * a + b
+        dielectric_value = diffuse + DIELECTRIC_F0 * a + b
         metal = c * a + b
-        result[sel] = (1 - m) * dielectric + m * metal
+        result[sel] = (1 - m) * dielectric_value + m * metal
     return result * radiance
 
 
@@ -402,13 +435,12 @@ def environment_radiance(base, metallic, roughness, n_dot_v, radiance, model=APP
 DFG_HEADER = REPO / "src" / "renderer" / "dfg_table.h"
 _DFG = {}
 
-# "extension_diffuse": the environment diffuse weight of materials carrying a feature. In the visibility
-# path the F13 composite assembles the environment diffuse from the base model (it receives the lobe
-# guide only with ticket 08), while the resolve already evaluates the extended environment specular:
-# "composite-base" declares that state (1 - E(0.04)); ticket 08 switches it to "extension"
-# (1 - max(E_dielectric)). Recorded in the support report as a named approximation.
+# "extension_diffuse": the environment diffuse weight of materials carrying a feature. Since ticket 08 the F13
+# composite receives the lobe guide and weights the GI/environment diffuse of an extended pixel with
+# 1 - max(E_dielectric) of its own specular lobe ("extension", the engine's state). "composite-base" (the weight
+# 1 - E(0.04) of the base model, the engine's state before ticket 08) is kept as a negative control.
 DECLARED = {"albedo": "dfg-table", "diffuse": "one-minus-dielectric-albedo", "dielectric": "extension",
-            "extension_diffuse": "composite-base"}
+            "extension_diffuse": "extension"}
 # Deliberately wrong variants that the declared-model gate must reject.
 DECLARED_CONTROLS = {
     "declared-diffuse-unweighted": {**DECLARED, "diffuse": "unweighted"},            # no (1 - E) weight
@@ -421,6 +453,8 @@ SPECULAR_DECLARED_CONTROLS = {
     "declared-specular-ignored": {**DECLARED, "dielectric": "ignored"},
     "declared-f90-one": {**DECLARED, "dielectric": "f90-one"},
     "declared-specular-weight-not-on-f0": {**DECLARED, "dielectric": "f0-unweighted"},
+    # The composite weighting the environment diffuse of an extended pixel with the base model (ticket 08 closes it).
+    "declared-extension-diffuse-base": {**DECLARED, "extension_diffuse": "composite-base"},
 }
 ALL_DECLARED_CONTROLS = {**DECLARED_CONTROLS, **SPECULAR_DECLARED_CONTROLS}
 
@@ -486,7 +520,7 @@ def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, 
         f90 = np.ones_like(weight) if kind == "f90-one" else weight
         e_d = np.clip(f0_scaled * a + f90 * b, 0.0, 1.0)
         e_m = np.clip(base * a + b, 0.0, 1.0)
-        if variant.get("extension_diffuse", "composite-base") == "composite-base":
+        if variant.get("extension_diffuse", "extension") == "composite-base":
             diffuse_weight = 1.0 - np.clip(DIELECTRIC_F0 * a + b, 0.0, 1.0)
         else:
             diffuse_weight = 1.0 - np.max(e_d, axis=-1, keepdims=True)
@@ -723,7 +757,7 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
         terms.append("sun-disk")
     if sky > 0:
         if environment is None:
-            radiance += environment_radiance(base, metallic, roughness, dot(n, v), sky, model)
+            radiance += environment_radiance(base, metallic, roughness, dot(n, v), sky, model, sun_dielectric)
             terms.append("environment-quadrature")
         else:
             radiance += declared_environment_radiance(base, metallic, roughness, dot(n, v), sky, environment,

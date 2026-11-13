@@ -1222,10 +1222,9 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if(!out.materialOverridesPath.empty() && (!out.bench||*out.bench!=3||out.scenePath.empty()||out.scenePath=="procedural")){error="--material-overrides requires --bench 4 and a glTF --scene (the overrides name its materials)";return false;}
     if(out.materialToggleEvery>0 && (out.materialScene.empty()||!MaterialValidation::spec(out.materialScene).hasSpecularGrid())){error="--material-toggle-every requires a specular grid --material-scenario";return false;}
     if(!out.materialScene.empty() && (!out.bench||*out.bench!=1||!out.lightingScene.empty()||!out.reflectionScene.empty())){error="--material-scenario requires --bench 2 and exclusive scene fixture";return false;}
-    // F15.3: the declared environment reaches the image through the reflection
-    // composite (--reflections ssr, stochastic transport) or, with reflections
-    // off, through the resolve's own deterministic environment terms.
-    if(!out.materialScene.empty() && out.reflections!=ReflectionMode::SSR && out.reflections!=ReflectionMode::Off){error="--material-scenario requires --reflections ssr or off (declared environment)";return false;}
+    // F15.3: the declared environment reaches the image through the reflection transport (--reflections ssr, rt or
+    // probes: no captured probe, so the environment weight; F15.1 ticket 08) or, with reflections off, through the
+    // resolve's own deterministic environment terms.
     if(!out.materialScene.empty() && out.reflections==ReflectionMode::Off && out.lightingDenoise==LightingDenoiseMode::Off){error="--material-scenario with --reflections off requires --lighting-denoise custom (lit resolve)";return false;}
     if(!out.lightingScene.empty() && (!out.bench || *out.bench!=5)){error="--lighting-scene requires --bench 6";return false;}
     if(!out.captureLinear.empty() && !out.captureLinearSequence.empty()){error="Choose single linear capture or linear sequence";return false;}

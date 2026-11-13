@@ -1359,7 +1359,9 @@ TEST_CASE("F15.3 material scenarios select bench 2 with the declared environment
     CHECK_FALSE(parse({"--bench","2","--material-scenario","furnace-base","--render-path","visibility"},o,error)); // reflections off needs the lit resolve
     // Deterministic environment terms: reflections off with the lit resolve.
     CHECK(parse({"--bench","2","--material-scenario","furnace-resolve","--render-path","visibility","--reflections","off","--lighting-denoise","custom"},o,error));
-    CHECK_FALSE(parse({"--bench","2","--material-scenario","furnace-resolve","--render-path","visibility","--reflections","rt","--rt","on"},o,error));
+    // F15.1 (ticket 08): the RT and probe transports are valid fixtures of the ior/specular grid.
+    CHECK(parse({"--bench","2","--material-scenario","specular-grid-env","--render-path","visibility","--reflections","rt","--rt","on"},o,error));
+    CHECK(parse({"--bench","2","--material-scenario","specular-grid-env","--render-path","visibility","--reflections","probes"},o,error));
 }
 
 TEST_CASE("F15.3 the runner's exact capture command line is accepted") {
