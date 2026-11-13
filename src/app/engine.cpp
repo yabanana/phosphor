@@ -1219,6 +1219,7 @@ void Engine::switchTestBench(TestBenchType type) {
     // F5.1: full build of the persistent scene, uploaded through staging.
     store_->clear();
     store_->sync(*ecs_, *gpuScene_);
+    gpuScene_->sealMaterialLibrary(); // later description edits need SceneStore deltas (F15 ticket 05)
     ecs_->endFrame();
     renderer_->loadScene(*store_);
     if (mesh_) mesh_->loadScene(*store_, *gpuScene_);

@@ -65,10 +65,33 @@ public:
                     MaterialSupportReport support);
 
     /// F15.1: replace the description of a material and refresh the GPU base
-    /// record fields it describes (parameters and valid texture indices; the
-    /// flags other than double-sided are kept).  Returns false when `index` is
-    /// out of range.
+    /// record fields it describes: the parameters (the emissive factor is
+    /// clamped to >= 0 on the GPU; the description keeps the authored value),
+    /// the texture of every slot (a slot without a texture, e.g. one an
+    /// override removed, binds the documented default registered with
+    /// setBaseTextureDefaults, or INVALID_TEXTURE_INDEX = the shader fallback
+    /// when none was registered; a slot whose path is not resolved yet keeps
+    /// its current binding) and the double-sided flag (the other flags are
+    /// kept).  The material's support entry is recomputed from the new
+    /// description (its features are then sourced from the description file).
+    ///
+    /// Only valid BEFORE the scene store is built: once sealMaterialLibrary()
+    /// has been called the call is an error (logged) and is rejected, because
+    /// the persistent GPU scene would not see the edit.  Until F15 ticket 05
+    /// routes material edits through SceneStore deltas, overrides can only be
+    /// applied between loading a scene and the first scene sync.  Returns
+    /// false when `index` is out of range or the library is sealed.
     bool setMaterialDescription(u32 index, const MaterialDescription& description);
+
+    /// Bindless textures a material slot falls back to without a texture (the
+    /// loader registers the texture manager's defaults; cleared by clear()).
+    void setBaseTextureDefaults(u32 white, u32 metallicRoughness, u32 normal);
+
+    /// Mark the material library as mirrored by the scene store: from now on
+    /// setMaterialDescription is rejected.  Called by the engine after the
+    /// store's first sync of a scene; clear() reopens the library.
+    void sealMaterialLibrary() { materialLibrarySealed_ = true; }
+    [[nodiscard]] bool materialLibrarySealed() const { return materialLibrarySealed_; }
 
     /// Description, name and support report of material `index` (parallel to
     /// materials(); default-constructed for materials added without them).
@@ -130,6 +153,10 @@ private:
     std::vector<MaterialSupportReport> materialSupport_;      // parallel to materials_
     std::unordered_map<std::string, u32> materialByName_;     // first material of each name
     std::vector<std::string>           assetUnknownExtensions_;
+    struct BaseTextureDefaults {
+        u32 white = INVALID_TEXTURE_INDEX, metallicRoughness = INVALID_TEXTURE_INDEX, normal = INVALID_TEXTURE_INDEX;
+    } baseTextureDefaults_;
+    bool materialLibrarySealed_ = false;
     std::vector<GPULight>      lights_;
     std::vector<GPUSampledLight> sampledLights_;
 

@@ -157,8 +157,17 @@ void GpuScene::addAssetUnknownExtensions(const std::vector<std::string>& names) 
             assetUnknownExtensions_.push_back(n);
 }
 
+void GpuScene::setBaseTextureDefaults(u32 white, u32 metallicRoughness, u32 normal) {
+    baseTextureDefaults_ = {white, metallicRoughness, normal};
+}
+
 bool GpuScene::setMaterialDescription(u32 index, const MaterialDescription& d) {
     if (index >= materials_.size()) return false;
+    if (materialLibrarySealed_) {
+        LOG_ERROR("setMaterialDescription(%u): the material library is already mirrored by the scene store; "
+                  "edits need SceneStore deltas (F15 ticket 05); rejected", index);
+        return false;
+    }
     GPUMaterial& g = materials_[index];
     const BaseMaterial& b = d.base;
     for (size_t i = 0; i < 4; ++i) g.baseColor[i] = b.baseColor[i];
@@ -166,16 +175,33 @@ bool GpuScene::setMaterialDescription(u32 index, const MaterialDescription& d) {
     g.roughness         = b.roughness;
     g.normalScale       = b.normalScale;
     g.occlusionStrength = b.occlusionStrength;
-    for (size_t i = 0; i < 3; ++i) g.emissive[i] = b.emissive[i];
+    // The description keeps an authored negative emission; the GPU never gets one.
+    for (size_t i = 0; i < 3; ++i) g.emissive[i] = std::max(0.0f, b.emissive[i]);
     g.alphaCutoff = b.alphaCutoff;
     g.flags = b.doubleSided ? (g.flags | MATERIAL_FLAG_DOUBLE_SIDED) : (g.flags & ~MATERIAL_FLAG_DOUBLE_SIDED);
-    // Slots without a resolved texture keep the loader's default texture.
-    if (b.baseColorTexture.index != INVALID_TEXTURE_INDEX) g.baseColorTex = b.baseColorTexture.index;
-    if (b.metallicRoughnessTexture.index != INVALID_TEXTURE_INDEX) g.metallicRoughnessTex = b.metallicRoughnessTexture.index;
-    if (b.normalTexture.index != INVALID_TEXTURE_INDEX) g.normalTex = b.normalTexture.index;
-    if (b.occlusionTexture.index != INVALID_TEXTURE_INDEX) g.occlusionTex = b.occlusionTexture.index;
-    if (b.emissiveTexture.index != INVALID_TEXTURE_INDEX) g.emissiveTex = b.emissiveTexture.index;
+    // A slot with a texture binds it; one without binds the documented default
+    // (an override that removes a texture must not leave the old one bound); a
+    // path that is not resolved yet keeps what is bound.
+    auto slot = [](const MaterialTextureRef& ref, u32 current, u32 fallback) {
+        if (!ref.present()) return fallback;
+        return ref.index != INVALID_TEXTURE_INDEX ? ref.index : current;
+    };
+    g.baseColorTex         = slot(b.baseColorTexture, g.baseColorTex, baseTextureDefaults_.white);
+    g.metallicRoughnessTex = slot(b.metallicRoughnessTexture, g.metallicRoughnessTex, baseTextureDefaults_.metallicRoughness);
+    g.normalTex            = slot(b.normalTexture, g.normalTex, baseTextureDefaults_.normal);
+    g.occlusionTex         = slot(b.occlusionTexture, g.occlusionTex, baseTextureDefaults_.white);
+    g.emissiveTex          = slot(b.emissiveTexture, g.emissiveTex, baseTextureDefaults_.white);
     materialDescriptions_[index] = d;
+
+    // The support entry follows the new description.
+    MaterialSourceInfo info;
+    info.name              = materialNames_[index];
+    info.unknownExtensions = materialSupport_[index].unknownExtensions;
+    for (const FeatureSupport& e : materialSupport_[index].encodings)
+        if (e.feature == "emissive_strength") info.emissiveStrengthUsed = true;
+    info.transformStatus = analyzeTextureTransforms(d).status;
+    info.warnings        = validationWarnings(d);
+    materialSupport_[index] = buildSupportReport(d, info);
     return true;
 }
 
@@ -195,6 +221,8 @@ void GpuScene::clear() {
     materialSupport_.clear();
     materialByName_.clear();
     assetUnknownExtensions_.clear();
+    baseTextureDefaults_ = {};
+    materialLibrarySealed_ = false;
     lights_.clear();
     sampledLights_.clear();
     ++geometryVersion_;
