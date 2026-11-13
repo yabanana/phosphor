@@ -33,20 +33,33 @@ Declared engine conventions (every item is part of the JSON report):
   GGX CDF, midpoint rule; the table is a function of roughness and N.V only).
 - Camera: one ray through each pixel centre, no reconstruction filter.
 - Shadows: none (the scenarios declare `--shadows off`), no inter-reflection.
+
+Second, independent model (`--declared`): the DECLARED environment model of the
+engine (ADR-0006), re-implemented here from its documentation, not translated
+from the shader.  With E_d = 0.04 A + B the directional albedo of the
+dielectric specular layer, the environment radiance of one pixel is
+  L_env * ((1 - metallic) * baseColor * (1 - E_d) + clamp(f0 A + B, 0, 1))
+with f0 = mix(0.04, baseColor, metallic), (A, B) the DFG table values of
+`src/renderer/dfg_table.h` (parsed from that header; the bilinear rule of
+`dfgTableLookup` is re-implemented in `dfg_lookup`), roughness clamped to
+[0.04, 1] and N.V clamped at 1e-4.  It is a split-sum model, hence it differs
+from the exact quadrature above by a few percent (the diffuse weight); it is the
+gate of the deterministic resolve scenarios.
 """
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import os
 import pathlib
+import re
 import sys
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "tools"))
 from f12_reference import np_module, scene_digest, snapshot, write_pfm  # noqa: E402
+from f15_common import sha256_file  # noqa: E402
 
 np = np_module()
 
@@ -65,6 +78,8 @@ MODEL = {
     "environment": "exact hemisphere quadrature of BSDF * cos * L_env (constant isotropic), not a split-sum fit",
     "camera": "pixel-centre rays, no reconstruction filter",
     "shadows": "none",
+    "declared_environment": "(1 - metallic) * baseColor * (1 - (0.04 A + B)) + clamp(f0 A + B, 0, 1), (A, B) from the "
+                            "engine DFG table (bilinear), f0 = mix(0.04, baseColor, metallic), roughness in [0.04, 1]",
 }
 
 # The declared model plus the deliberately wrong variants used as negative controls.
@@ -289,6 +304,80 @@ def environment_radiance(base, metallic, roughness, n_dot_v, radiance, model=APP
     return result * radiance
 
 
+# --- declared environment model (the engine's, ADR-0006) -------------------------
+
+DFG_HEADER = REPO / "src" / "renderer" / "dfg_table.h"
+_DFG = {}
+
+DECLARED = {"albedo": "dfg-table", "diffuse": "one-minus-dielectric-albedo"}
+# Deliberately wrong variants that the declared-model gate must reject.
+DECLARED_CONTROLS = {
+    "declared-diffuse-unweighted": {**DECLARED, "diffuse": "unweighted"},            # no (1 - E) weight
+    "declared-karis-fit": {**DECLARED, "albedo": "karis-fit"},                       # mobile fit instead of the table
+    "declared-diffuse-f0-fresnel": {**DECLARED, "diffuse": "metallic-blended-f0"},   # F of the blended f0 weights diffuse
+}
+
+
+def load_dfg_table(path=DFG_HEADER):
+    """(size, table[size, size, 2]) parsed from the engine header: table[roughness row, N.V column, (A, B)]."""
+    key = str(path)
+    if key not in _DFG:
+        text = pathlib.Path(path).read_text()
+        size = int(re.search(r"DfgTableSize\s*=\s*(\d+)\s*;", text).group(1))
+        start = text.index("DfgTable[")
+        body = text[text.index("{", start) + 1:text.index("};", start)]
+        values = [float(v) for v in re.findall(r"[-+]?(?:\d+\.\d*|\.\d+)(?:[eE][-+]?\d+)?(?=f\b)", body)]
+        if len(values) != size * size * 2:
+            raise ValueError(f"{path}: expected {size * size * 2} DFG values, parsed {len(values)}")
+        _DFG[key] = (size, np.asarray(values, dtype=np.float64).reshape(size, size, 2))
+    return _DFG[key]
+
+
+def dfg_lookup(n_dot_v, roughness, path=DFG_HEADER):
+    """Bilinear (A, B) of the DFG table: the rule of `dfgTableLookup` (node = value * (size - 1), the cell
+    index clamped to size - 2, rows = roughness, columns = N.V), written here from its documentation."""
+    size, table = load_dfg_table(path)
+    n = size - 1
+    x = np.clip(np.asarray(n_dot_v, dtype=np.float64), 0.0, 1.0) * n
+    y = np.clip(np.asarray(roughness, dtype=np.float64), 0.0, 1.0) * n
+    x0 = np.minimum(np.floor(x).astype(np.int64), size - 2)
+    y0 = np.minimum(np.floor(y).astype(np.int64), size - 2)
+    fx, fy = x - x0, y - y0
+
+    def component(c):
+        return ((table[y0, x0, c] * (1 - fx) + table[y0, x0 + 1, c] * fx) * (1 - fy) +
+                (table[y0 + 1, x0, c] * (1 - fx) + table[y0 + 1, x0 + 1, c] * fx) * fy)
+
+    return component(0), component(1)
+
+
+def karis_ab(n_dot_v, roughness):
+    """Karis 2014 mobile environment-BRDF fit (A, B); the former engine model."""
+    c0 = (-1.0, -0.0275, -0.572, 0.022)
+    c1 = (1.0, 0.0425, 1.04, -0.04)
+    r = [roughness * c0[i] + c1[i] for i in range(4)]
+    a004 = np.minimum(r[0] * r[0], np.exp2(-9.28 * n_dot_v)) * r[0] + r[1]
+    return -1.04 * a004 + r[2], 1.04 * a004 + r[3]
+
+
+def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, variant=DECLARED):
+    """Outgoing radiance (n, 3) of the engine's declared environment model (see the module docstring)."""
+    mu = np.maximum(np.asarray(n_dot_v, dtype=np.float64), MIN_NDOTV)
+    rough = clamp_roughness(roughness)
+    a, b = karis_ab(mu, rough) if variant["albedo"] == "karis-fit" else dfg_lookup(mu, rough)
+    a, b = a[:, None], b[:, None]
+    m = np.asarray(metallic, dtype=np.float64)[:, None]
+    f0 = DIELECTRIC_F0 * (1 - m) + base * m
+    specular = np.clip(f0 * a + b, 0.0, 1.0)
+    if variant["diffuse"] == "unweighted":
+        weight = np.ones_like(a)
+    elif variant["diffuse"] == "metallic-blended-f0":
+        weight = 1.0 - np.clip(f0 * a + b, 0.0, 1.0)
+    else:
+        weight = 1.0 - np.clip(DIELECTRIC_F0 * a + b, 0.0, 1.0)
+    return ((1 - m) * base * weight + specular) * radiance
+
+
 # --- ray casting ------------------------------------------------------------
 
 def cast_primary_rays(root, data, threads):
@@ -366,8 +455,11 @@ def require_declared_scene(data):
         raise ValueError("sampled (area) lights are outside the declared model")
 
 
-def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None):
-    """Reference radiance image (h, w, 3) float32 plus masks and the per-sphere table."""
+def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environment=None):
+    """Reference radiance image (h, w, 3) float32 plus masks and the per-sphere table.
+
+    `environment` None = exact quadrature of the literal model; a DECLARED variant dict = the engine's declared
+    environment model (the sun term is the same in both)."""
     require_declared_scene(data)
     valid, position, normal, instance, (width, height) = cast or cast_primary_rays(
         root, data, threads or min(8, os.cpu_count() or 1))
@@ -397,8 +489,12 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None):
         lit = dot(n, np.broadcast_to(toward, n.shape)) > 0
         terms.append("sun-disk")
     if sky > 0:
-        radiance += environment_radiance(base, metallic, roughness, dot(n, v), sky, model)
-        terms.append("environment-quadrature")
+        if environment is None:
+            radiance += environment_radiance(base, metallic, roughness, dot(n, v), sky, model)
+            terms.append("environment-quadrature")
+        else:
+            radiance += declared_environment_radiance(base, metallic, roughness, dot(n, v), sky, environment)
+            terms.append("environment-declared")
     image = np.full((height * width, 3), sky, dtype=np.float64)  # pixels without geometry show the environment
     image[pick] = radiance
     # ROI: sphere pixels whose 4-neighbours belong to the same sphere (silhouette excluded).
@@ -417,21 +513,13 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None):
     return image.reshape(height, width, 3).astype(np.float32), masks, spheres, terms
 
 
-def sha(path):
-    digest = hashlib.sha256()
-    with pathlib.Path(path).open("rb") as stream:
-        for block in iter(lambda: stream.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
 def command_render(args):
     root, data = snapshot(args.snapshot)
     out = pathlib.Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     cast = cast_primary_rays(root, data, args.threads)
     controls = {"": APPENDIX_B, **{name: CONTROLS[name] for name in args.controls}}
-    report = {"schema": 1, "tool": "tools/f15_reference.py", "tool_sha256": sha(__file__), "model": MODEL,
+    report = {"schema": 1, "tool": "tools/f15_reference.py", "tool_sha256": sha256_file(__file__), "model": MODEL,
               "snapshot_sha256": scene_digest(root), "frame": data.get("frame"),
               "sun_angular_radius": data.get("sun_angular_radius"), "sky": data["sky"],
               "lights": data["lights"], "controls": {}, "deterministic": True}
@@ -446,6 +534,18 @@ def command_render(args):
                           roi_pixels=int(masks["roi"].sum()), quadrature_mask_pixels=int(masks["narrow"].sum()))
         else:
             report["controls"][name] = {"model_variant": model, "file": f"{stem}.pfm"}
+    if args.declared or args.declared_controls:
+        # The declared environment model on the same cast: the image and its negative controls.
+        declared = {"model": DECLARED, "file": "declared.pfm", "dfg_table": str(DFG_HEADER.relative_to(REPO)),
+                    "dfg_table_sha256": sha256_file(DFG_HEADER), "controls": {}}
+        image, masks, _, terms = render_frame(root, data, model=APPENDIX_B, cast=cast, environment=DECLARED)
+        write_pfm(out / "declared.pfm", image)
+        declared["terms"] = terms
+        for name in args.declared_controls:
+            image, *_ = render_frame(root, data, model=APPENDIX_B, cast=cast, environment=DECLARED_CONTROLS[name])
+            write_pfm(out / f"control-{name}.pfm", image)
+            declared["controls"][name] = {"model_variant": DECLARED_CONTROLS[name], "file": f"control-{name}.pfm"}
+        report["declared"] = declared
     (out / "reference.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps({"reference": str(out / "reference.pfm"), "terms": report["terms"],
                       "roi_pixels": report["roi_pixels"]}))
@@ -459,6 +559,10 @@ def main(argv=None):
     p.add_argument("snapshot")
     p.add_argument("--out", required=True)
     p.add_argument("--controls", nargs="*", default=[], choices=sorted(CONTROLS))
+    p.add_argument("--declared", action="store_true",
+                   help="also render the engine's declared environment model (declared.pfm)")
+    p.add_argument("--declared-controls", nargs="*", default=[], choices=sorted(DECLARED_CONTROLS),
+                   help="negative controls of the declared model (implies --declared)")
     p.add_argument("--threads", type=int, default=min(8, os.cpu_count() or 1))
     p.set_defaults(function=command_render)
     args = parser.parse_args(argv)

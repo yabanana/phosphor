@@ -216,6 +216,107 @@ class SunDisk(unittest.TestCase):
         np.testing.assert_allclose(got[0], total, rtol=0.02)
 
 
+class DeclaredEnvironmentModel(unittest.TestCase):
+    """The engine's declared environment model (ADR-0006): DFG table + Appendix B layering."""
+
+    def synthetic_header(self, directory):
+        # 3 x 3 table with A(y, x) = 10 y + x and B(y, x) = 100 y + 7 x: bilinear lookups of a
+        # function that is linear in both indices are exact, so the expectation is analytic.
+        values = []
+        for y in range(3):
+            for x in range(3):
+                values += [10 * y + x, 100 * y + 7 * x]
+        path = pathlib.Path(directory) / "dfg_table.h"
+        path.write_text("PHOSPHOR_GPU_CONSTANT u32 DfgTableSize = 3;\nPHOSPHOR_GPU_CONSTANT float DfgTable[18] = {\n    "
+                        + ", ".join(f"{v:.8e}f" for v in values) + "\n};\n")
+        return path
+
+    def test_engine_header_is_parsed(self):
+        size, table = ref.load_dfg_table()
+        self.assertEqual((size, table.shape), (64, (64, 64, 2)))
+        text = ref.DFG_HEADER.read_text()
+        self.assertIn("DfgTable[8192]", text)
+        # The first row of the header starts "4.04279739e-02f, 8.19578208e-01f": (A, B) at roughness 0, N.V 1e-3.
+        np.testing.assert_allclose(table[0, 0], [4.04279739e-02, 8.19578208e-01], rtol=1e-9)
+        # A perfect mirror seen head-on reflects the f0 channel unchanged: A = 1, B = 0.
+        a, b = ref.dfg_lookup(np.array([1.0]), np.array([0.0]))
+        self.assertAlmostEqual(float(a[0]), 1.0, delta=2e-3)
+        self.assertAlmostEqual(float(b[0]), 0.0, delta=2e-3)
+
+    def test_bilinear_rule_on_a_table_that_is_linear_in_both_indices(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            header = self.synthetic_header(tmp)
+            self.assertEqual(ref.load_dfg_table(header)[0], 3)
+            for nv, roughness in ((0.25, 0.75), (0.0, 0.0), (1.0, 1.0), (0.5, 0.5), (0.9, 0.1)):
+                a, b = ref.dfg_lookup(np.array([nv]), np.array([roughness]), header)
+                x, y = nv * 2, roughness * 2
+                self.assertAlmostEqual(float(a[0]), 10 * y + x, places=5, msg=(nv, roughness))
+                self.assertAlmostEqual(float(b[0]), 100 * y + 7 * x, places=4, msg=(nv, roughness))
+            # Out-of-range inputs clamp to the table edge.
+            a, _ = ref.dfg_lookup(np.array([-0.5, 2.0]), np.array([3.0, -1.0]), header)
+            self.assertAlmostEqual(float(a[0]), 10 * 2 + 0, places=5)
+            self.assertAlmostEqual(float(a[1]), 10 * 0 + 2, places=5)
+
+    def test_karis_fit_published_values(self):
+        # c0 = (-1, -0.0275, -0.572, 0.022), c1 = (1, 0.0425, 1.04, -0.04): at roughness 1, N.V = 1
+        # r = (0, 0.015, 0.468, -0.018), a004 = 0.015, A = -1.04 * 0.015 + 0.468, B = 1.04 * 0.015 - 0.018.
+        a, b = ref.karis_ab(np.array([1.0]), np.array([1.0]))
+        self.assertAlmostEqual(float(a[0]), 0.4524, places=9)
+        self.assertAlmostEqual(float(b[0]), -0.0024, places=9)
+        # The fit is visibly lower than the table at roughness 0.3, head-on (the reason the engine moved to the table).
+        fa, _ = ref.karis_ab(np.array([1.0]), np.array([0.3]))
+        ta, _ = ref.dfg_lookup(np.array([1.0]), np.array([0.3]))
+        self.assertLess(float(fa[0]), float(ta[0]) - 0.1)
+
+    def test_white_dielectric_conserves_energy_exactly(self):
+        # (1 - E) + (0.04 A + B) = 1 with E = 0.04 A + B: a white dielectric returns exactly L in a furnace.
+        white = np.ones((4, 3))
+        nv = np.array([1.0, 0.7, 0.3, 0.05])
+        for roughness in (0.04, 0.35, 0.8, 1.0):
+            out = ref.declared_environment_radiance(white, np.zeros(4), np.full(4, roughness), nv, 2.5)
+            np.testing.assert_allclose(out, 2.5, rtol=0, atol=1e-12, err_msg=str(roughness))
+
+    def test_metals_and_black_bodies(self):
+        nv, rough = np.array([0.8]), np.array([0.5])
+        a, b = ref.dfg_lookup(nv, rough)
+        black = np.zeros((1, 3))
+        # Black metal: f0 = 0, only B remains (clamped at 0 from below).
+        out = ref.declared_environment_radiance(black, np.array([1.0]), rough, nv, 1.0)
+        np.testing.assert_allclose(out, np.clip(b[0], 0, 1), atol=1e-12)
+        # White metal: f0 = 1, A + B (a directional albedo, at most 1).
+        out = ref.declared_environment_radiance(np.ones((1, 3)), np.array([1.0]), rough, nv, 1.0)
+        np.testing.assert_allclose(out, np.clip(a[0] + b[0], 0, 1), atol=1e-12)
+        self.assertLessEqual(float(out.max()), 1.0)
+        # Metallic 0.5: the diffuse term is halved, f0 is the mix of 0.04 and the base colour.
+        base = np.array([[0.8, 0.35, 0.15]])
+        out = ref.declared_environment_radiance(base, np.array([0.5]), rough, nv, 1.0)
+        f0 = 0.5 * 0.04 + 0.5 * base
+        expected = 0.5 * base * (1 - (0.04 * a[0] + b[0])) + np.clip(f0 * a[0] + b[0], 0, 1)
+        np.testing.assert_allclose(out, expected, rtol=1e-12)
+        # The roughness clamp: 0 behaves as 0.04.
+        low = ref.declared_environment_radiance(base, np.array([0.5]), np.array([0.0]), nv, 1.0)
+        clamped = ref.declared_environment_radiance(base, np.array([0.5]), np.array([0.04]), nv, 1.0)
+        np.testing.assert_allclose(low, clamped, rtol=1e-12)
+
+    def test_negative_controls_are_wrong_in_the_documented_direction(self):
+        base = np.array([[0.8, 0.35, 0.15]] * 2)
+        metallic = np.array([0.0, 0.5])
+        rough, nv = np.array([0.4, 0.4]), np.array([0.6, 0.6])
+        good = ref.declared_environment_radiance(base, metallic, rough, nv, 1.0)
+        unweighted = ref.declared_environment_radiance(base, metallic, rough, nv, 1.0,
+                                                       ref.DECLARED_CONTROLS["declared-diffuse-unweighted"])
+        blended = ref.declared_environment_radiance(base, metallic, rough, nv, 1.0,
+                                                    ref.DECLARED_CONTROLS["declared-diffuse-f0-fresnel"])
+        karis = ref.declared_environment_radiance(base, metallic, rough, nv, 1.0,
+                                                  ref.DECLARED_CONTROLS["declared-karis-fit"])
+        self.assertTrue(np.all(unweighted > good))          # no (1 - E): energy gain
+        np.testing.assert_allclose(blended[0], good[0], rtol=1e-12)   # metallic 0: f0 is 0.04 either way
+        self.assertTrue(np.all(blended[1] < good[1]))       # the blended f0 removes more diffuse energy
+        self.assertFalse(np.allclose(karis, good, rtol=0.01))
+        self.assertEqual(sorted(ref.DECLARED_CONTROLS), ["declared-diffuse-f0-fresnel", "declared-diffuse-unweighted",
+                                                        "declared-karis-fit"])
+
+
 @unittest.skipUnless(HAVE_MITSUBA, "mitsuba not installed")
 class RayCastedSnapshot(unittest.TestCase):
     @staticmethod
@@ -278,6 +379,24 @@ class RayCastedSnapshot(unittest.TestCase):
             table = ref.environment_table(0.5)
             expected = float(np.interp(1.0, table["mu"], table["A"] + table["B"]))  # white metal, f = 1
             self.assertAlmostEqual(float(image[72, 128, 0]), expected, delta=2e-3)
+
+    def test_declared_render_writes_the_image_and_its_controls(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.snapshot(tmp, 0.5, None, 0.5, 0.5, [0.8, 0.35, 0.15])
+            out = pathlib.Path(tmp) / "out"
+            code = ref.main(["render", str(root), "--out", str(out), "--declared-controls", "declared-karis-fit",
+                             "declared-diffuse-unweighted"])
+            self.assertEqual(code, 0)
+            report = json.loads((out / "reference.json").read_text())
+            declared = report["declared"]
+            self.assertEqual(declared["file"], "declared.pfm")
+            self.assertEqual(sorted(declared["controls"]), ["declared-diffuse-unweighted", "declared-karis-fit"])
+            self.assertEqual(declared["terms"], ["environment-declared"])
+            self.assertEqual(len(declared["dfg_table_sha256"]), 64)
+            from f12_reference import read_pfm
+            self.assertEqual(read_pfm(out / "declared.pfm").shape, read_pfm(out / "reference.pfm").shape)
+            for name in declared["controls"]:
+                self.assertTrue((out / f"control-{name}.pfm").is_file())
 
     def test_sun_lit_hemisphere_and_masks(self):
         with tempfile.TemporaryDirectory() as tmp:
