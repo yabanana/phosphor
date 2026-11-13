@@ -49,6 +49,7 @@ NamedMaterial richMaterial() {
     d.subsurface->radiusScale = {1.0f, 0.5f, 0.25f};
     d.subsurface->anisotropy = 0.3f;
     d.subsurface->source = SubsurfaceSource::KhrMaterialsScatterDraft;
+    d.subsurface->radiusScaleTexture.path = "tex/king_albedo.png";
     d.subsurface->draft = ScatterDraftParams{};
     d.subsurface->draft->scatterStrength = 0.9f;
     d.layers = LayerStack{};
@@ -95,6 +96,7 @@ TEST_CASE("material description file: save and load round-trip") {
     CHECK(d.subsurface->mode == SubsurfaceMode::Volumetric);
     CHECK(d.subsurface->source == SubsurfaceSource::KhrMaterialsScatterDraft);
     CHECK(d.subsurface->draft->scatterStrength == doctest::Approx(0.9f));
+    CHECK(d.subsurface->radiusScaleTexture.path == "tex/king_albedo.png");
     REQUIRE(d.layers.has_value());
     REQUIRE(d.layers->layers.size() == 2);
     CHECK(d.layers->layers[1].materialName == "rock");

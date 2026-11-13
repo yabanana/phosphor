@@ -339,6 +339,8 @@ struct LaunchOptions {
     bool         rtProxyManifest = false;      // --rt-proxy off|manifest
     std::string  rtProxyManifestPath;          // empty = scene's default manifest, missing = full geometry
     std::string  materialOverridesPath;        // F15 --material-overrides FILE (empty = none)
+    // TODO(F15 ticket 05): the app must read this file after the scene loads and call
+    // applyMaterialOverridesToScene() (renderer/material_description_io.h) with a TextureManager path resolver.
     u32          debugRt = 0;                  // --debug-rt N: readback/check cadence, 0 = off
     bool         debugRtDeform = false;       // diagnostic mesh-0 deformation; raster bounds are unchanged
     RtProxyTransition debugRtProxyTransition = RtProxyTransition::None;

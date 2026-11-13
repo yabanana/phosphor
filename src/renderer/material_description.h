@@ -181,6 +181,8 @@ struct SubsurfaceBlock {
     float                anisotropy = 0.0f;       // Henyey-Greenstein g
     MaterialTextureRef   weightTexture = textureSlot(TextureColorSpace::Linear, TextureChannel::A);
     MaterialTextureRef   colorTexture  = textureSlot(TextureColorSpace::SRGB, TextureChannel::Rgb);
+    // OpenPBR subsurface_radius_scale as a colour3 texture (multiplies radiusScale).
+    MaterialTextureRef   radiusScaleTexture = textureSlot(TextureColorSpace::SRGB, TextureChannel::Rgb);
     SubsurfaceSource     source        = SubsurfaceSource::DescriptionFile;
     std::optional<ScatterDraftParams> draft; // set when source is the draft extension
 };

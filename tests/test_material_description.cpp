@@ -265,3 +265,25 @@ TEST_CASE("material description: forEachTexture visits feature slots") {
     forEachTexture(d, [&](const char*, const MaterialTextureRef&) { ++n; });
     CHECK(n == 5 + 3 + 2);
 }
+
+TEST_CASE("material description: subsurface radius scale texture is a colour3 sRGB slot") {
+    SubsurfaceBlock s;
+    CHECK(s.radiusScaleTexture.channel == TextureChannel::Rgb);
+    CHECK(s.radiusScaleTexture.colorSpace == TextureColorSpace::SRGB);
+    CHECK_FALSE(s.radiusScaleTexture.present());
+    MaterialDescription d;
+    d.subsurface = s;
+    d.subsurface->radiusScaleTexture.index = 9;
+    bool seen = false;
+    forEachTexture(d, [&](const char* slot, const MaterialTextureRef& ref) {
+        if (std::string(slot) == "subsurfaceRadiusScaleTexture") {
+            seen = true;
+            CHECK(ref.index == 9u);
+        }
+    });
+    CHECK(seen);
+    // Chess-set style binding: radius 0.003 m with a textured scale is valid.
+    d.subsurface->weight = 1.0f;
+    d.subsurface->radius = 0.003f;
+    CHECK(validate(d).empty());
+}

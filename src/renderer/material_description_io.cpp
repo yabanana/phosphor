@@ -248,6 +248,7 @@ template <class V> void visitSubsurface(V& v, SubsurfaceBlock& s) {
     v.f("anisotropy", s.anisotropy);
     v.tex("weightTexture", s.weightTexture);
     v.tex("colorTexture", s.colorTexture);
+    v.tex("radiusScaleTexture", s.radiusScaleTexture);
     v.e("source", source, SOURCE_NAMES, 3);
     v.block("scatterDraft", s.draft, [](auto& sub, ScatterDraftParams& p) {
         sub.f("scatterStrength", p.scatterStrength);

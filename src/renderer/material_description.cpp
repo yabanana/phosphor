@@ -232,6 +232,7 @@ void visitTextures(Desc& d, Fn&& fn) {
     if (d.subsurface) {
         fn("subsurfaceWeightTexture", d.subsurface->weightTexture);
         fn("subsurfaceColorTexture", d.subsurface->colorTexture);
+        fn("subsurfaceRadiusScaleTexture", d.subsurface->radiusScaleTexture);
     }
     if (d.layers) fn("layerMaskTexture", d.layers->mask);
 }
