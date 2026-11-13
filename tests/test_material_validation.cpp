@@ -6,12 +6,17 @@
 #include "scene/ecs.h"
 #include "null_texture_manager.h"
 #include <cmath>
+#include <fstream>
+#include <regex>
+#include <set>
+#include <sstream>
 #include <utility>
 using namespace phosphor;
 
-TEST_CASE("F15.3 material scenarios are exactly the five declared names") {
-    CHECK(MaterialValidation::scenarios().size() == 5);
-    for (auto name : {"base-grid-sun", "base-grid-env", "furnace-base", "furnace-resolve", "roughness-extremes"})
+TEST_CASE("F15.3 material scenarios are exactly the seven declared names") {
+    CHECK(MaterialValidation::scenarios().size() == 7);
+    for (auto name : {"base-grid-sun", "base-grid-env", "base-grid-env-resolve", "furnace-base", "furnace-resolve",
+                      "roughness-extremes", "roughness-extremes-sun"})
         CHECK(MaterialValidation::validScenario(name));
     CHECK_FALSE(MaterialValidation::validScenario("unknown"));
     CHECK_THROWS(MaterialValidation{"unknown"});
@@ -123,4 +128,47 @@ TEST_CASE("F15.3 the deterministic furnace declares the same scene as the transp
     CHECK(resolve.baseColor == transport.baseColor);
     CHECK_FALSE(resolve.sun);
     CHECK(MaterialValidation::environmentRadiance("furnace-resolve") == 1.0f);
+}
+
+TEST_CASE("F15.3 the new deterministic scenarios declare the scenes the review asked for") {
+    // base-grid-env-resolve: the base-grid-env scene, resolved deterministically (no transport).
+    const auto& env = MaterialValidation::spec("base-grid-env");
+    const auto& envResolve = MaterialValidation::spec("base-grid-env-resolve");
+    CHECK(envResolve.roughness == env.roughness);
+    CHECK(envResolve.metallic == env.metallic);
+    CHECK(envResolve.baseColor == env.baseColor);
+    CHECK_FALSE(envResolve.sun);
+    CHECK(envResolve.environment == 0.5f);
+    CHECK(MaterialValidation::environmentRadiance("base-grid-env-resolve") == 0.5f);
+    // roughness-extremes-sun: the extremes lit by the sun only.
+    const auto& extremes = MaterialValidation::spec("roughness-extremes");
+    const auto& sunOnly = MaterialValidation::spec("roughness-extremes-sun");
+    CHECK(sunOnly.roughness == extremes.roughness);
+    CHECK(sunOnly.metallic == extremes.metallic);
+    CHECK(sunOnly.baseColor == extremes.baseColor);
+    CHECK(sunOnly.sun);
+    CHECK(sunOnly.sunIrradiance == extremes.sunIrradiance);
+    CHECK(sunOnly.towardSun == extremes.towardSun);
+    CHECK(sunOnly.environment == 0.0f);
+    CHECK(MaterialValidation::environmentRadiance("roughness-extremes-sun") == 0.0f);
+    CHECK(MaterialValidation{"roughness-extremes-sun"}.getDefaultCamera().position == glm::vec3(0.0f, 1.0f, 4.0f));
+}
+
+TEST_CASE("F15.3 the bench and the runner (tools/f15_check.py) list the same scenarios") {
+    std::ifstream in(std::string(PHOSPHOR_SOURCE_DIR) + "/tools/f15_check.py");
+    REQUIRE(in.good());
+    std::stringstream text;
+    text << in.rdbuf();
+    const std::string source = text.str();
+    const size_t start = source.find("SCENARIOS = {");
+    REQUIRE(start != std::string::npos);
+    const size_t end = source.find("\nGPU_PROCESS", start);
+    REQUIRE(end != std::string::npos);
+    const std::string block = source.substr(start, end - start);
+    std::set<std::string> runner;
+    const std::regex key(R"re(\n    "([a-z0-9-]+)": \{)re");
+    for (std::sregex_iterator it(block.begin(), block.end(), key), last; it != last; ++it) runner.insert((*it)[1]);
+    std::set<std::string> bench;
+    for (auto name : MaterialValidation::scenarios()) bench.insert(std::string(name));
+    CHECK(runner == bench);
 }

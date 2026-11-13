@@ -1373,6 +1373,25 @@ TEST_CASE("F15.3 the runner's exact capture command line is accepted") {
     CHECK(error.empty());CHECK(o.materialScene=="base-grid-sun");CHECK(o.captureLinearFrame==127);CHECK(o.exportReference=="snapshot");
 }
 
+TEST_CASE("F15.3 the deterministic resolve scenarios accept the runner's capture command lines") {
+    // base-grid-env-resolve runs with --reflections off (the resolve evaluates the declared environment);
+    // roughness-extremes-sun mirrors base-grid-sun.  Mirrors tools/f15_check.py capture_command.
+    for (const auto& [scenario, reflections] : {std::pair<const char*, const char*>{"base-grid-env-resolve", "off"},
+                                                {"roughness-extremes-sun", "ssr"}}) {
+        LaunchOptions o;std::string error;
+        REQUIRE_MESSAGE(parse({"--scene","procedural","--bench","2","--material-scenario",scenario,"--render-path","visibility",
+                       "--geometry-path","mesh","--rt","off","--shadows","off","--lighting","legacy","--gi","off","--reflections",reflections,
+                       "--ao","off","--lighting-denoise","custom","--reflection-samples","8","--lighting-seed","1","--post","--upscaler",
+                       "native","--resolution","1280x720","--frames","128","--warmup","0","--fixed-timestep","--no-ui","--no-vsync",
+                       "--no-gpu-timing","--debug-lighting","1","--capture-linear","engine.pfm","--capture-linear-frame","127",
+                       "--capture-linear-signal","hdr","--export-reference","snapshot","--export-reference-frame","127","--report","r.json"},o,error),error);
+        CHECK(o.materialScene==scenario);
+    }
+    LaunchOptions bad;std::string error;
+    // reflections off without the custom denoiser is refused (the resolve needs the lit path).
+    CHECK_FALSE(parse({"--bench","2","--material-scenario","base-grid-env-resolve","--render-path","visibility","--reflections","off"},bad,error));
+}
+
 TEST_CASE("F15 launch option --material-overrides is refused at parse time until ticket 05 applies it") {
     LaunchOptions o;
     std::string error;

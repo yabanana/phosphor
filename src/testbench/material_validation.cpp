@@ -13,8 +13,10 @@
 
 namespace phosphor {
 namespace {
-constexpr std::array<std::string_view, 5> kScenarios{"base-grid-sun", "base-grid-env", "furnace-base",
-                                                     "furnace-resolve", "roughness-extremes"};
+// The names are mirrored by tools/f15_check.py SCENARIOS (tests/test_material_validation.cpp compares both).
+constexpr std::array<std::string_view, 7> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
+                                                     "furnace-base",   "furnace-resolve",     "roughness-extremes",
+                                                     "roughness-extremes-sun"};
 constexpr float pi = 3.14159265358979323846f;
 
 glm::quat orientLight(glm::vec3 towardLight) {
@@ -40,12 +42,18 @@ const std::vector<MaterialScenarioSpec>& specs() {
     static const std::vector<MaterialScenarioSpec> all{
         {"base-grid-sun", roughness, metallic, copper, true, 3.0f, towardSun, 0.0f},
         {"base-grid-env", roughness, metallic, copper, false, 0.0f, towardSun, 0.5f},
+        // The same scene as base-grid-env without the specular transport: the resolve
+        // evaluates the declared environment itself (run with --reflections off
+        // --lighting-denoise custom); gated against the declared-model reference.
+        {"base-grid-env-resolve", roughness, metallic, copper, false, 0.0f, towardSun, 0.5f},
         {"furnace-base", roughness, metallic, glm::vec3(1.0f), false, 0.0f, towardSun, 1.0f},
         // Same scene without the specular transport: the resolve evaluates the
         // declared environment deterministically (run with --reflections off).
         {"furnace-resolve", roughness, metallic, glm::vec3(1.0f), false, 0.0f, towardSun, 1.0f},
         // Roughness 0 is the declared clamp (0.04); 1 is the upper bound.
         {"roughness-extremes", {0.0f, 1.0f}, {0.0f, 0.5f, 1.0f}, copper, true, 3.0f, towardSun, 0.3f},
+        // The same spheres lit by the sun only (environment 0): the direct gate applies.
+        {"roughness-extremes-sun", {0.0f, 1.0f}, {0.0f, 0.5f, 1.0f}, copper, true, 3.0f, towardSun, 0.0f},
     };
     return all;
 }
