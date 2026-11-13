@@ -109,3 +109,22 @@ Dropped, limited or open:
 - Not built: AnisotropyStrengthTest / AnisotropyRotationTest / AnisotropyDiscTest side by side, `tools/archive_check.sh` and
   `tools/hitch_check.sh` (not run here); the GPU allocation count of measured frames is unchanged by a harness and not re-measured.
 - ctest: 17/17 (phosphor_tests 828 cases, f15_reference_python, f15_check_python, sheen_table_python, ...).
+
+2026-11-13 — engine side (commits `a55207d` engine, `298136b` archive, `698b814` runner/tools). Verified on M5 Max, 1280x720:
+- `f15_check.py --run --expect green` on the nine anisotropy keys (`build/f15-check/t11b`): GREEN. Direct grids (sun, point legacy / ReSTIR /
+  clustered, mirrored): p99 <= 0.0003 per group (max outside mask <= 0.009), all five (mirrored: six) controls fail. aniso-grid-env-resolve
+  (declared): worst sphere mean 1e-5, both declared controls fail. aniso-grid-env (transport vs exact quadrature): sphere mean error 0.3-1.9 %,
+  five controls fail. furnace-aniso (transport): max sphere mean 1.0022 (bound 1.005); furnace-aniso@resolve: pass, declared worst 1e-5.
+  Full battery (all keys) before the last two composite edits: only furnace-aniso red (1.0063, see deviation 2); the complete rerun of
+  all keys is in the final report of this session's orchestration, not repeated here.
+- `--debug-lobe-guide 8` on aniso-grid-sun: PASS (extended 27552, base 13864); with `--debug-lobe-guide-corrupt` FAIL (27552 mismatches).
+- `MTL_SHADER_VALIDATION=1 MTL_DEBUG_LAYER=1`, aniso-grid-env, `--rt on --lighting restir --reflections rt`, 1500 frames: exit 0, no validation error.
+- `tools/f15_lobe_guide_overflow_check.sh ... aniso-grid-sun`: PASS (the direction words differ by <= 0.54 deg between the visibility resolve
+  and the indexed overflow receivers; every other word identical). Archive: 0 misses, 0 render-thread compiles in all nine captures.
+- ctest 17/17 (new: lobe guide direction by angle, strength record, support table, denoiser sharper-axis rule).
+Deviations: (1) the guide publishes the anisotropy bit only when a tangent frame exists (a primitive without tangents resolves it as
+strength 0, so `--debug-lobe-guide` would flag such a mesh); (2) the composite uses the mean-alpha albedo for the diffuse complement
+when it adds a transported specular signal (rms fit: furnace 1.0063 > 1.005 at strength-1 dielectric, because the diffuse weight at
+sqrt(alpha_eff) is 0.008 too high against the exact albedo); (3) coat/sheen + anisotropy is implemented (resolve lights, DI, transport
+mixture) but NOT validated (the harness refuses the combination). Carried: AnisotropyStrength/Rotation/DiscTest side by side and the
+direction texture fixture (ticket 22), narrow-lobe sun disk, non-constant environment fixture for the bent normal.
