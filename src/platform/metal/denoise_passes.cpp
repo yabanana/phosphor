@@ -103,9 +103,9 @@ struct DenoisePasses::Impl {
         s.params=denoiseParameters(settings,frame.width,frame.height,sig,frame.view,u32(decision.generation),u32(h.contentEpoch),decision.reset);
         {auto& age=ages[frame.view][sig];if(age.frame!=frame.index||decision.reset){age.frames=decision.reset?1u:age.frames+1u;age.frame=frame.index;}}
         s.params.flags|=DENOISE_CURRENT_VIEW_DEPTH;if(soft&&softChange)s.params.flags|=DENOISE_SOFT_CHANGE;
-        // A soft signal keeps a longer history; the cap only matters in stationary
-        // frames, every other frame's alpha floor (temporalAlpha) is above 1/32.
-        if(soft){s.params.maxHistory=std::max(s.params.maxHistory,options.specularMaxHistory);if(stationary)s.params.flags|=DENOISE_STATIONARY;}
+        // A soft signal (specular) uses its own history cap, --specular-max-history,
+        // above or below the preset's.
+        if(soft){s.params.maxHistory=options.specularMaxHistory;if(stationary)s.params.flags|=DENOISE_STATIONARY;}
         for(u32 c=0;c<4;++c)s.params.currentViewDepthRow[c]=frame.constants.view[c*4+2];
         if(diagnosticEndpoints&&sig==DENOISE_SIGNAL_SPECULAR)s.params.flags|=DENOISE_DIAGNOSTIC_ENDPOINTS;
         s.params.frameIndex=u32(frame.index);s.address=lighting::upload(c,s.params);s.readSide=h.lastWritten;s.writeSide=1u-s.readSide;

@@ -1338,3 +1338,12 @@ TEST_CASE("F13.5 no-parallax negative needs an actual probe") {
     CHECK(o.debugProbeNoParallax);
     o={};CHECK_FALSE(parse({"--bench","6","--reflection-scene","probe-box","--render-path","visibility","--frames","4","--reflections","probes","--debug-probe-no-parallax"},o,error));
 }
+
+TEST_CASE("F14.2 --report-frames names the per-frame GPU pass timeline file") {
+    LaunchOptions o;
+    std::string error;
+    REQUIRE(parse({"--frames", "8", "--report-frames", "frames.csv"}, o, error));
+    CHECK(o.reportFramesPath == "frames.csv");
+    LaunchOptions missing;
+    CHECK_FALSE(parse({"--report-frames"}, missing, error));
+}

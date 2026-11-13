@@ -16,6 +16,7 @@ import math
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 from run_checked import run_checked
 from temporal_light_metrics import analyse_paths,bounds,clip_files,homogeneous_fog,read_pfm
@@ -82,6 +83,9 @@ def reference_role(case):
       (F14 clouds); the pair metrics gate the case.
     repeatability-pair: a second identical run (F14.4 day/night); its frames
       must equal the first run's bit for bit, and its numerical oracle passes.
+    cross-check: an input-path case against an engine twin that must render
+      the same image (F13.5 cooked probe vs analytic probe), within CROSS_CHECK
+      tolerance on every frame; a negative of it must exceed the tolerance.
     control: raw inputs, higher-sample controls, SSR/probe-capture and
       full-rate controls; metrics are reported, they do not gate.
     functional: no capture; functional and negative checks only.
@@ -91,6 +95,7 @@ def reference_role(case):
     if case.get("raw_diagnostic") or case.get("probe_capture") or case.get("reference_kind"):return "control"
     if name=="mirror-ssr" or name.endswith("-raw"):return "control"
     if case.get("repeat_of"):return "repeatability-pair"
+    if case.get("cross_check_of"):return "cross-check"
     if case["phase"]=="F14":return "full-rate-pair" if case.get("quality_pair") else "numerical"
     return "independent-clip"
 
@@ -116,6 +121,11 @@ def gating_passed(result,role,case=None):
         elif not metrics.get("passed",False):return False
     if case.get("coverage_check") and not result.get("coverage",{}).get("passed",False):return False
     if role=="repeatability-pair" and not result.get("repeatability",{}).get("passed",False):return False
+    if role=="cross-check":
+        check=result.get("cross_check",{})
+        if case.get("expected_cross_check_failure"):
+            if "max_abs_difference" not in check or check.get("passed") is not False:return False
+        elif not check.get("passed",False):return False
     return result.get("numerical",{}).get("passed",True) and result.get("external_numerical",{}).get("passed",True)
 
 
@@ -153,6 +163,25 @@ def repeatability(first,second,frames):
         d=max(abs(float(p)-float(q)) for p,q in zip(ix.rgb,iy.rgb));worst=max(worst,d);differing.append(x.name)
     return {"frames":frames,"bit_identical_frames":frames-len(differing),"differing_frames":differing[:16],
             "max_abs_difference":worst,"passed":not differing}
+
+
+CROSS_CHECK={"max_abs_difference":1e-4}
+
+
+def cross_check(candidate,twin,frames,tolerance=CROSS_CHECK["max_abs_difference"]):
+    """Every frame of `candidate` against its engine twin: largest absolute
+    linear difference over all pixels and channels must stay within tolerance."""
+    a=sorted(Path(candidate).glob("frame-*.pfm"));b=sorted(Path(twin).glob("frame-*.pfm"))
+    if len(a)!=frames or [p.name for p in a]!=[p.name for p in b]:raise ValueError("cross-check runs captured different frame sets")
+    worst=0.0;worst_frame=None;total=0.0;count=0
+    for x,y in zip(a,b):
+        ix,iy=read_pfm(x),read_pfm(y)
+        if (ix.width,ix.height)!=(iy.width,iy.height):raise ValueError("cross-check extent differs")
+        for p,q in zip(ix.rgb,iy.rgb):
+            d=abs(float(p)-float(q));total+=d;count+=1
+            if d>worst:worst,worst_frame=d,x.name
+    return {"frames":frames,"twin":str(twin),"tolerance":tolerance,"max_abs_difference":worst,"worst_frame":worst_frame,
+            "mean_abs_difference":total/max(count,1),"passed":worst<=tolerance}
 
 
 def make_cases(out,frames,sdk_policy,probe_dir=None):
@@ -204,9 +233,21 @@ def make_cases(out,frames,sdk_policy,probe_dir=None):
         expected_clip_failure=True,**probe_rois)
     add("probe-box-rt-capture","F13","probe-box",[*base_rt,"--reflections","probes","--ao","off","--lighting-denoise","custom",
         "--reflection-capture-probe"],expected=dict(probe_expected),**probe_rois)
-    add("probe-parallax-cooked","F13","probe-parallax",[ *no_rt,"--reflections","probes","--ao","off","--lighting-denoise","custom",
-         "--reflection-probe",str(probe_dir or out/"EXTERNAL-COOKED-PROBE-REQUIRED")],needs_probe=True,
-        probe_input=str(probe_dir) if probe_dir else None,
+    # F13.5 cooked input: the engine never exports probes, so the six PFM faces
+    # come from tools/probe_pfm_author.py (Metal cube table, not engine code),
+    # written at freeze unless --probe-dir supplies them. They reproduce the
+    # built-in analytic probe, so the cooked run must equal its analytic twin;
+    # the same faces with flipped rows (the classic PFM row-order bug) must not.
+    probe_base=[*no_rt,"--reflections","probes","--ao","off","--lighting-denoise","custom"]
+    probe_cooked=str(probe_dir or out/"probe-inputs"/"analytic-gradient")
+    add("probe-parallax-analytic","F13","probe-parallax",list(probe_base),reference_kind="ANALYTIC_PROBE_TWIN",
+        expected={"reflections":"probes","ao":"off","denoise_requested":"custom","denoise_effective":"custom"})
+    add("probe-parallax-cooked","F13","probe-parallax",[*probe_base,"--reflection-probe",probe_cooked],needs_probe=True,
+        probe_input=probe_cooked,probe_author=None if probe_dir else "bottom-up",cross_check_of="probe-parallax-analytic",
+        expected={"reflections":"probes","ao":"off","denoise_requested":"custom","denoise_effective":"custom","probe_source":"cooked-linear-pfm"})
+    probe_flipped=str(out/"probe-inputs"/"analytic-gradient-rows-flipped")
+    add("negative-f13-probe-cooked-rows","F13","probe-parallax",[*probe_base,"--reflection-probe",probe_flipped],needs_probe=True,
+        probe_input=probe_flipped,probe_author="top-down",cross_check_of="probe-parallax-analytic",expected_cross_check_failure=True,
         expected={"reflections":"probes","ao":"off","denoise_requested":"custom","denoise_effective":"custom","probe_source":"cooked-linear-pfm"})
     for ao in ("gtao","rtao"):
         add("ao-cavity-"+ao,"F13","ao-cavity",[*(base_rt if ao=="rtao" else no_rt),
@@ -313,13 +354,17 @@ def make_cases(out,frames,sdk_policy,probe_dir=None):
     cloudBase=[*volume_base,"--atmosphere","on","--fog","off","--clouds","on"]
     full_frame=[("full-frame",[0.0,0.0,1.0,1.0])]
     flights={
-        # 200 m/s climbs (3.3 m per frame, below the engine's 4 m camera-cut
-        # rule) across the 1500 m base and the 4000 m top, horizon centred. A
-        # 700 m/s climb through the whole layer was a cut every frame.
+        # 200 m/s climbs (3.3 m per frame) across the 1500 m base and the
+        # 4000 m top, horizon centred.
         "flight-base":([*cloudBase,"--day-length","1200","--start-hour","11","--planet-camera-height","1000","--camera-climb","200","--camera-pitch","0"],
                        full_frame,{"flight_altitude":{"below":1500.0,"above":4000.0,"minimum_frames":10,"require":["below","inside"]}}),
         "flight-top":([*cloudBase,"--day-length","1200","--start-hour","11","--planet-camera-height","3500","--camera-climb","200","--camera-pitch","0"],
                       full_frame,{"flight_altitude":{"below":1500.0,"above":4000.0,"minimum_frames":10,"require":["inside","above"]}}),
+        # 700 m/s (11.7 m per frame, beyond the 4 m camera-cut heuristic)
+        # through the whole layer: cloud history must survive continuous
+        # flight; only declared cuts reset it (per-pixel tests do the rest).
+        "flight-fast":([*cloudBase,"--day-length","1200","--start-hour","11","--planet-camera-height","1000","--camera-climb","700","--camera-pitch","0"],
+                       full_frame,{"flight_altitude":{"below":1500.0,"above":4000.0,"minimum_frames":10,"require":["below","inside","above"]}}),
         # Low sun (about 5 degrees) 8 degrees below the image centre; the
         # solar disk itself stays outside every ROI.
         "backlit":([*cloudBase,"--day-length","1200","--start-hour","6.5","--planet-camera-height","2","--camera-aim-sun","8"],
@@ -574,6 +619,11 @@ def main(argv=None):
     else:
         raw=json_bytes(manifest)
         if manifest_path.exists():parser.error("refuse overwrite of frozen manifest; choose new output or --run --manifest")
+        # Cooked probe inputs are authored at freeze, by the external writer.
+        for case in cases:
+            if case.get("probe_author") and not Path(case["probe_input"]).exists():
+                subprocess.run([sys.executable,str(Path(__file__).with_name("probe_pfm_author.py")),"--out",case["probe_input"],
+                                "--row-order",case["probe_author"]],check=True,stdout=subprocess.DEVNULL)
         manifest_path.write_bytes(raw)
     manifest_hash=hashlib.sha256(raw).hexdigest()
     for case in cases:
@@ -668,6 +718,12 @@ def main(argv=None):
         if case.get("coverage_check"):
             try:result["coverage"]=coverage_evidence(control,case["linear"],case["roi"])
             except (ValueError,OSError) as error:result["coverage"]={"passed":False,"error":str(error)}
+        (out/case["name"]/"result.json").write_bytes(json_bytes(result))
+    for case in cases:
+        result=by_name.get(case["name"])
+        if result is None or not case.get("cross_check_of"):continue
+        try:result["cross_check"]=cross_check(Path(case["linear"]),out/case["cross_check_of"]/"linear",args.frames)
+        except (ValueError,OSError) as error:result["cross_check"]={"passed":False,"error":str(error)}
         (out/case["name"]/"result.json").write_bytes(json_bytes(result))
     for case in cases:
         result=by_name.get(case["name"])

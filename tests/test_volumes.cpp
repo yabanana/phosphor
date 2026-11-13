@@ -1,8 +1,10 @@
 #include <doctest/doctest.h>
 #include "renderer/fog_settings.h"
+#include "renderer/fog_gi.h"
 #include "renderer/cloud_settings.h"
 #include "renderer/volume_noise.h"
 #include "renderer/volume_math.h"
+#include <algorithm>
 #include <cmath>
 #include <limits>
 using namespace phosphor;
@@ -101,4 +103,72 @@ TEST_CASE("F14 cloud centroid correction preserves homogeneous front air and att
     for(u32 c=0;c<3;++c)CHECK(corrected[c]==doctest::Approx(expected[c]).epsilon(1e-12));
     const glm::dvec3 wrong=Lc+Tc*sceneAtmosphere;
     CHECK(glm::length(wrong-expected)>0.01); // old all-air-behind-cloud formula must fail
+}
+
+namespace {
+// Midpoint quadrature over the sphere of f(w) for unit w, in double.
+template<class F> double fogSphereIntegral(F f, int nTheta = 256, int nPhi = 512) {
+    const double pi = 3.14159265358979323846;
+    double sum = 0;
+    for (int i = 0; i < nTheta; ++i) {
+        const double theta = (i + 0.5) * pi / nTheta, st = std::sin(theta), ct = std::cos(theta);
+        for (int j = 0; j < nPhi; ++j) {
+            const double phi = (j + 0.5) * 2 * pi / nPhi;
+            sum += f(glm::dvec3(st * std::cos(phi), st * std::sin(phi), ct)) * st;
+        }
+    }
+    return sum * (pi / nTheta) * (2 * pi / nPhi);
+}
+double fogHg(double mu, double g) {
+    const double pi = 3.14159265358979323846;
+    return (1 - g * g) / (4 * pi * std::pow(1 + g * g - 2 * g * mu, 1.5));
+}
+// Six-orientation estimate and exact HG in-scattering of a radiance field
+// L(w), w towards the source, for the view ray d.
+template<class L> std::pair<double, double> fogGiCompare(L radiance, glm::dvec3 d, double g) {
+    double e[6];
+    for (int axis = 0; axis < 6; ++axis) {
+        glm::dvec3 n(0);
+        n[axis / 2] = (axis & 1) ? -1.0 : 1.0;
+        e[axis] = fogSphereIntegral([&](glm::dvec3 w) { return radiance(w) * std::max(0.0, glm::dot(w, n)); });
+    }
+    const double estimate = fogGiInScatter(float(e[0]), float(e[1]), float(e[2]), float(e[3]), float(e[4]), float(e[5]),
+                                           float(d.x), float(d.y), float(d.z), float(g));
+    const double exact = fogSphereIntegral([&](glm::dvec3 w) { return radiance(w) * fogHg(glm::dot(w, d), g); });
+    return {estimate, exact};
+}
+} // namespace
+
+TEST_CASE("F14.2 fog GI in-scattering from six DDGI orientations is exact up to order 1") {
+    const glm::dvec3 rays[] = {glm::normalize(glm::dvec3(0.3, -0.8, 0.5)), glm::dvec3(0, 0, 1), glm::normalize(glm::dvec3(-1, 0.2, 0.1))};
+    for (double g : {0.0, 0.2, 0.6}) {
+        for (const glm::dvec3& d : rays) {
+            // Constant and order-1 fields: exact (quadrature error only).
+            auto constant = fogGiCompare([](glm::dvec3) { return 1.7; }, d, g);
+            CHECK(constant.first == doctest::Approx(constant.second).epsilon(1e-4));
+            const glm::dvec3 b(0.3, -0.5, 0.2);
+            auto linear = fogGiCompare([&](glm::dvec3 w) { return 1.0 + glm::dot(b, w); }, d, g);
+            CHECK(linear.first == doctest::Approx(linear.second).epsilon(1e-4));
+            // Order 2: the estimate keeps the mean, the exact value adds
+            // g^2 * 0.4 * P2(d.a) -- the residual the header states.
+            const glm::dvec3 a = glm::normalize(glm::dvec3(1, 2, -0.5));
+            auto quadratic = fogGiCompare([&](glm::dvec3 w) { const double x = glm::dot(w, a); return 1.0 + 0.4 * (3 * x * x - 1) / 2; }, d, g);
+            const double x = glm::dot(d, a);
+            CHECK(quadratic.second - quadratic.first == doctest::Approx(g * g * 0.4 * (3 * x * x - 1) / 2).epsilon(1e-3).scale(1));
+        }
+    }
+    // A narrow sun-like lobe: with forward scattering the order-1 term removes
+    // most of the former isotropic estimate's error, averaged over view rays.
+    const glm::dvec3 s = glm::normalize(glm::dvec3(0.2, 1, 0.3));
+    auto lobe = [&](glm::dvec3 w) { return 5.0 * std::pow(std::max(0.0, glm::dot(w, s)), 8); };
+    double newError = 0, oldError = 0;
+    for (int k = 0; k < 16; ++k) {
+        const double t = (k + 0.5) / 16 * 3.14159265358979323846;
+        const glm::dvec3 d(std::sin(t), std::cos(t), 0.0);
+        auto withG = fogGiCompare(lobe, d, 0.2);
+        auto isotropic = fogGiCompare(lobe, d, 0.0);
+        newError += std::abs(withG.first - withG.second);
+        oldError += std::abs(isotropic.first - withG.second);
+    }
+    CHECK(newError < 0.5 * oldError);
 }

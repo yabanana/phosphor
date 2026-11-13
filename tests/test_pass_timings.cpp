@@ -269,3 +269,19 @@ TEST_CASE("PassTimings: configure resets windows and measurements") {
     CHECK(t.rolling(0).samples == 0);
     CHECK(t.endMeasure() == 0);
 }
+
+TEST_CASE("PassTimings: per-frame CSV keeps every measured frame and marks invalid samples") {
+    PassTimings t = makeTimings();
+    t.beginMeasure(3);
+    const float f0[] = {1.0f, 0.5f}, f1[] = {2.25f, 0.0f}, f2[] = {0.125f, 0.75f};
+    const bool v0[] = {true, true}, v1[] = {true, false}, v2[] = {true, true};
+    t.addFrame(10, f0, v0, 2.0f);
+    t.addFrame(11, f1, v1, -1.0f); // unknown span, invalid async unit
+    t.addFrame(12, f2, v2, 1.0f);
+    CHECK(t.endMeasure() == 3);
+    const std::string csv = t.framesCsv();
+    CHECK(csv == "frame,span_ms,sum_ms,\"Forward + Overlay\",\"Async reduce\"\n"
+                 "0,2.000000,1.500000,1.000000,0.500000\n"
+                 "1,,2.250000,2.250000,\n"
+                 "2,1.000000,0.875000,0.125000,0.750000\n");
+}

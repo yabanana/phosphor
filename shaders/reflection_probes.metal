@@ -79,7 +79,12 @@ kernel void reflection_probe_only(constant GPUReflectionParams& p [[buffer(0)]],
     texture2d<float,access::write> output [[texture(5)]],texture2d<float,access::write> distance [[texture(6)]],uint tid [[thread_position_in_grid]]){
     if(tid>=p.width*p.height)return;const GPUDISurface s=surfaces[tid];GPUSpecularSample sample=reflectionEmpty();float3 result=0;
     if(s.valid){const float3 n=normalize(diVec(s.shadingNormal)),v=normalize(diVec(s.viewDirection)),r=reflect(-v,n);uint path;
-        const float3 L=reflectionProbeRadiance(diVec(s.position),r,s.roughness,true,p,probes,atlas,path),f0=mix(float3(.04f),diVec(s.albedo),s.metallic);
+        // F13.5: the prefilter assumes n = v = r, so a rough receiver seen at a
+        // grazing angle would gather a lobe half below its own horizon. Look the
+        // probe up along the GGX dominant direction instead (Frostbite 2014,
+        // 4.9.3), which bends toward the normal as roughness grows.
+        const float da=s.roughness*s.roughness,dk=(1-da)*(sqrt(1-da)+da);const float3 dominant=normalize(mix(n,r,dk));
+        const float3 L=reflectionProbeRadiance(diVec(s.position),dominant,s.roughness,true,p,probes,atlas,path),f0=mix(float3(.04f),diVec(s.albedo),s.metallic);
         // F13.5: tabulated split-sum DFG of the engine BRDF (tools/dfg_table.py);
         // the former analytic mobile fit was 14% low at roughness 0.3-0.6.
         const float nv=max(0.0f,dot(n,v));const float2 ab(dfgTableLookup(nv,s.roughness,0u),dfgTableLookup(nv,s.roughness,1u));

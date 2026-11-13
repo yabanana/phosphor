@@ -27,6 +27,11 @@ struct ReflectionProbeBounds {glm::vec3 minimum,maximum;};
 // environment takes over. Shader mirror: reflectionProbeDirection.
 [[nodiscard]] float reflectionProbeWeight(const GPUReflectionProbe&,glm::vec3 point);
 [[nodiscard]] std::optional<glm::vec3> reflectionProbeParallax(const GPUReflectionProbe&,glm::vec3 point,glm::vec3 direction);
+// F13.5: direction a prefiltered probe is read along. The prefilter assumes
+// n = v = r; on rough receivers the GGX lobe's dominant direction bends from r
+// toward the normal (Frostbite 2014, 4.9.3), keeping a wide lobe above the
+// receiver's horizon. Shader mirror: reflection_probe_only.
+[[nodiscard]] glm::vec3 reflectionProbeDominantDirection(glm::vec3 normal,glm::vec3 reflected,float roughness);
 [[nodiscard]] glm::vec3 reflectionCubeDirection(u32 face,glm::vec2 uv);
 struct CubeCoordinate { u32 face; glm::vec2 uv; };
 [[nodiscard]] std::optional<CubeCoordinate> reflectionCubeCoordinate(glm::vec3 direction);

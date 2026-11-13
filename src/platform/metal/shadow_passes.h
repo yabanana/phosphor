@@ -14,6 +14,9 @@ public:
         u32 slot=0, view=0, width=0, height=0, backingWidth=0, backingHeight=0;
         u64 index=0, scene=0;
         bool cut=false, reset=false;
+        // F14.3: a declared cut (scripted camera jump/teleport) as opposed to
+        // `cut`, which also fires on the 4 m / 25 degree motion heuristic.
+        bool explicitCut=false;
         FrameConstants constants{};
         float unjitteredVP[16]{};
         float nearPlane=0.1f;

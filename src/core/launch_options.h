@@ -264,6 +264,7 @@ struct LaunchOptions {
     bool        injectInput   = false; // test: synthetic keys/mouse every frame
     std::string capturePath;
     std::string reportPath;
+    std::string reportFramesPath; // F14.2: --report-frames, per-frame GPU pass timeline (CSV)
     std::string dumpGraphPath;
     bool        debugSplitEncoding = false;
     bool        debugAsyncCompute  = false;

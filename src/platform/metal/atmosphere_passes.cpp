@@ -284,7 +284,12 @@ struct AtmospherePasses::Impl {
             const u64 pixels=u64((f.backingWidth+divisor-1)/divisor)*((f.backingHeight+divisor-1)/divisor);reserveCloud(std::max(pixels,u64(cloudWidth)*cloudHeight));
             const CloudSignal cloudSignal{f.scene,celestial.epoch,physicalUpdate.parameterRevision,pipelineGeneration};
             if(previousCloudSignal!=cloudSignal){previousCloudSignal=cloudSignal;++cloudEpoch;}
-            auto decision=cloudHistory.begin(f.view,{cloudWidth,cloudHeight,f.width,f.height},cloudEpoch,reset,reset||options.cloudFullRate);
+            // F14.3: cloud history follows declared cuts only. The 4 m / 25 degree
+            // camera-cut heuristic would drop it in every frame of a flight
+            // above 240 m/s; the per-pixel screen-bounds, 100 m world-position,
+            // depth and neighbourhood tests already reject what moved.
+            const bool cloudReset=f.explicitCut||f.reset||celestial.reset;
+            auto decision=cloudHistory.begin(f.view,{cloudWidth,cloudHeight,f.width,f.height},cloudEpoch,cloudReset,cloudReset||options.cloudFullRate);
             hadCloudHistory=hadCloudHistory&&!decision.reset&&!options.cloudFullRate;
             cloudParams={};std::memcpy(cloudParams.inverseViewProjection,glm::value_ptr(inverse),64);std::memcpy(cloudParams.previousViewProjection,cloudHistory.get(f.view).previousViewProjection.data(),64);
             copy3(cloudParams.cameraPosition,glm::dvec3(glm::make_vec3(f.constants.cameraPosition)));copy3(cloudParams.wind,clouds.wind);

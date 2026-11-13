@@ -217,3 +217,13 @@ TEST_CASE("F13.6 stationary specular history weights frames by their sample coun
     // Without the stationary flag the count is ignored (frame-weighted EMA).
     auto moving=p;moving.flags&=~DENOISE_STATIONARY;auto e=denoiseTemporal(s,glm::vec3(2),{},moving,{},{},four);CHECK(e.length==1);
 }
+TEST_CASE("F13.6 a specular history cap below the sample count keeps the weight a blend"){
+    // --specular-max-history 2 with a four-sample boosted record: the length is
+    // capped and the current frame replaces the history (alpha 1), never extrapolates.
+    DenoiseSettings settings;auto p=denoiseParameters(settings,1,1,DENOISE_SIGNAL_SPECULAR,0,1,1,false);p.maxHistory=2;p.flags|=DENOISE_STATIONARY;
+    const auto s=receiver();auto one=spec();one.flags|=SPECULAR_SAMPLE_STOCHASTIC;auto four=one;four.flags|=4u<<SPECULAR_SAMPLE_COUNT_SHIFT;
+    auto h=denoiseTemporal(s,glm::vec3(2),{},p,{},{},one);h=denoiseTemporal(s,glm::vec3(4),h,p,{},{},one);CHECK(h.length==2);CHECK(h.color[0]==doctest::Approx(3));
+    h=denoiseTemporal(s,glm::vec3(7),h,p,{},{},four);REQUIRE(h.valid);CHECK(h.length==2);CHECK(h.color[0]==doctest::Approx(7));
+    // A single-sample frame under the cap blends normally.
+    h=denoiseTemporal(s,glm::vec3(1),h,p,{},{},one);CHECK(h.length==2);CHECK(h.color[0]==doctest::Approx(4));
+}
