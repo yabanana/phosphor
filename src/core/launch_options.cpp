@@ -718,11 +718,9 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
                 error = "--material-overrides requires a non-empty file path";
                 return false;
             }
-            // The app does not apply the file yet (F15 ticket 05 routes edits through
-            // SceneStore deltas): accepting it would be a silent no-op.
-            error = "--material-overrides is not supported yet: the app cannot apply material overrides until "
-                    "F15 ticket 05 (feature plumbing); refusing to ignore " + std::string(*value);
-            return false;
+            // F15.1 (ticket 05): the scene viewer applies the file after the glTF loads,
+            // before the scene store mirrors the library (records reach the GPU as deltas).
+            out.materialOverridesPath = std::string(*value);
         } else if (arg == "--debug-rt") {
             if (!needCount(out.debugRt)) return false;
             rtSettingsSpecified = true;
@@ -1213,6 +1211,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if(out.captureLinearSignal==8&&(out.gi==GiMode::Off||out.lightingDenoise!=LightingDenoiseMode::Custom)){error="Filtered indirect capture requires GI and --lighting-denoise custom";return false;}
     if(out.captureLinearSignal==6 && out.reflections==ReflectionMode::Off){error="Specular capture requires --reflections";return false;}
     if(out.captureLinearSignal==7 && out.ao==AoMode::Off){error="AO capture requires --ao";return false;}
+    if(!out.materialOverridesPath.empty() && (!out.bench||*out.bench!=3||out.scenePath.empty()||out.scenePath=="procedural")){error="--material-overrides requires --bench 4 and a glTF --scene (the overrides name its materials)";return false;}
     if(out.materialToggleEvery>0 && (out.materialScene.empty()||!MaterialValidation::spec(out.materialScene).hasSpecularGrid())){error="--material-toggle-every requires a specular grid --material-scenario";return false;}
     if(!out.materialScene.empty() && (!out.bench||*out.bench!=1||!out.lightingScene.empty()||!out.reflectionScene.empty())){error="--material-scenario requires --bench 2 and exclusive scene fixture";return false;}
     // F15.3: the declared environment reaches the image through the reflection

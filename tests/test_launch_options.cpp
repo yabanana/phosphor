@@ -1393,17 +1393,22 @@ TEST_CASE("F15.3 the deterministic resolve scenarios accept the runner's capture
     CHECK_FALSE(parse({"--bench","2","--material-scenario","base-grid-env-resolve","--render-path","visibility","--reflections","off"},bad,error));
 }
 
-TEST_CASE("F15 launch option --material-overrides is refused at parse time until ticket 05 applies it") {
+TEST_CASE("F15 launch option --material-overrides needs the scene viewer and a glTF scene") {
     LaunchOptions o;
     std::string error;
-    REQUIRE_FALSE(parse({"--material-overrides", "path with spaces/overrides.json"}, o, error));
+    REQUIRE(parse({"--bench", "4", "--scene", "assets/a b/scene.gltf", "--material-overrides", "path with spaces/overrides.json"}, o, error));
+    CHECK(o.materialOverridesPath == "path with spaces/overrides.json");
+    // Without the scene viewer or a named glTF scene the overrides would be ignored: refused.
+    LaunchOptions bad;
+    CHECK_FALSE(parse({"--material-overrides", "o.json"}, bad, error));
     CHECK(error.find("--material-overrides") != std::string::npos);
-    CHECK(error.find("ticket 05") != std::string::npos);
-    CHECK(o.materialOverridesPath.empty()); // never silently accepted
+    CHECK_FALSE(parse({"--bench", "2", "--scene", "s.gltf", "--material-overrides", "o.json"}, bad, error));
+    CHECK_FALSE(parse({"--bench", "4", "--material-overrides", "o.json"}, bad, error));
+    CHECK_FALSE(parse({"--bench", "4", "--scene", "procedural", "--material-overrides", "o.json"}, bad, error));
     // Malformed uses keep their own errors.
-    CHECK_FALSE(parse({"--material-overrides"}, o, error));
-    CHECK_FALSE(parse({"--material-overrides", ""}, o, error));
-    CHECK_FALSE(parse({"--material-overrides", "--frames"}, o, error));
+    CHECK_FALSE(parse({"--material-overrides"}, bad, error));
+    CHECK_FALSE(parse({"--material-overrides", ""}, bad, error));
+    CHECK_FALSE(parse({"--material-overrides", "--frames"}, bad, error));
 }
 
 TEST_CASE("launch options: F15.1 --material-toggle-every needs a specular grid scenario") {

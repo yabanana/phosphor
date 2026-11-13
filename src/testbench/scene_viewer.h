@@ -14,7 +14,8 @@ namespace phosphor {
 
 class SceneViewer final : public TestBench {
 public:
-  explicit SceneViewer(std::string scenePath = {}) : scenePath_(std::move(scenePath)) {}
+  explicit SceneViewer(std::string scenePath = {}, std::string materialOverridesPath = {})
+      : scenePath_(std::move(scenePath)), materialOverridesPath_(std::move(materialOverridesPath)) {}
   void setup(ECS &ecs, GpuScene &gpuScene, TextureManager &textures) override;
   void update(float dt, ECS &ecs) override;
   void teardown(ECS &ecs, GpuScene &gpuScene) override;
@@ -29,6 +30,7 @@ private:
     std::vector<EntityID> entities_;
     bool loadedGltf_ = false;
     std::string scenePath_;
+    std::string materialOverridesPath_; // F15.1 --material-overrides (empty = none)
     std::string loadedPath_;
 };
 

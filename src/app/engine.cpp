@@ -1195,6 +1195,7 @@ void Engine::switchTestBench(TestBenchType type) {
     framesOnBench_ = 0;
     TestBenchParams benchParams;
     benchParams.scenePath = options_.scenePath;
+    benchParams.materialOverridesPath = options_.materialOverridesPath;
     benchParams.materialToggleEvery=options_.materialToggleEvery;benchParams.materialScenario=options_.materialScene;benchParams.lightingScenario=options_.lightingScene;benchParams.reflectionScenario=options_.reflectionScene;
     benchParams.instances         = options_.sceneInstances;
     benchParams.localLightCount=options_.localLightCount;benchParams.areaLights=options_.areaLights;benchParams.stationaryLights=options_.stationaryLights;

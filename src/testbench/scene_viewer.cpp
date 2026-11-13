@@ -4,11 +4,14 @@
 #include "scene/texture_manager.h"
 #include "scene/gltf_loader.h"
 #include "renderer/gpu_scene.h"
+#include "renderer/material_description_io.h"
 #include "core/log.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <stdexcept>
 
 namespace phosphor {
@@ -46,6 +49,30 @@ void SceneViewer::setup(ECS& ecs, GpuScene& gpuScene, TextureManager& textures) 
             if (std::filesystem::exists(path) && load(path))
                 break;
         }
+    }
+
+    // F15.1 (ticket 05): --material-overrides edits the loaded materials before the
+    // scene store mirrors the library, so the edited records are the scene's first
+    // upload (later edits go through the same setMaterialDescription path as deltas).
+    if (!materialOverridesPath_.empty()) {
+        if (!loadedGltf_)
+            throw std::runtime_error("--material-overrides needs a loaded glTF scene: " + materialOverridesPath_);
+        std::ifstream file(materialOverridesPath_, std::ios::binary);
+        if (!file)
+            throw std::runtime_error("cannot read material overrides " + materialOverridesPath_);
+        std::stringstream json;
+        json << file.rdbuf();
+        // Texture paths in the file are relative to its directory.
+        const std::filesystem::path dir = std::filesystem::path(materialOverridesPath_).parent_path();
+        const TexturePathResolver resolve = [&](const std::string& path, bool sRGB) {
+            return textures.loadTexture((dir / path).string(), sRGB);
+        };
+        std::string error;
+        const u64 before = gpuScene.materialEditVersion();
+        if (!applyMaterialOverridesToScene(json.str(), gpuScene, resolve, error))
+            throw std::runtime_error("material overrides " + materialOverridesPath_ + ": " + error);
+        LOG_INFO("SceneViewer: applied material overrides '%s' (%llu material edits)", materialOverridesPath_.c_str(),
+                 static_cast<unsigned long long>(gpuScene.materialEditVersion() - before));
     }
 
     if (!loadedGltf_) {
