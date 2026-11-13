@@ -18,6 +18,17 @@ Model (Appendix B):
   F          = Schlick, f0 + (1 - f0) (1 - |V.H|)^5
   diffuse    = baseColor / pi
 
+KHR_materials_ior + KHR_materials_specular (F15.1, ticket 05) are implemented from the specification
+text of KHR_materials_specular (research/khr-materials.md section 9), in its UNFLATTENED form -- the engine
+shader implements the flattened one, so the two are independent:
+  f0   = min(((1 - ior) / (1 + ior))^2 * specularColor, 1)       (ior = 0: the factor is 1, effective IOR +inf)
+  fr   = f0 + (1 - f0) (1 - |V.H|)^5
+  dielectric = (1 - specular * max(fr)) * diffuse + specular * fr * specular_brdf
+  metal      = unchanged; material = mix(dielectric, metal, metallic)
+The extension values come from the snapshot's `material_extensions` records (the raw GPU words of record 0,
+word offsets of src/renderer/gpu_types.h GPUMaterialExt0).  Environment: the declared split-sum model with
+E_d = f0_scaled * A + f90 * B (f0_scaled = f0 * specular, f90 = specular).
+
 Declared engine conventions (every item is part of the JSON report):
 - roughness clamped to [0.04, 1], alpha = max(roughness^2, 0.002), N.V >= 1e-4.
 - Sun: a disk of uniform radiance and angular radius r (the snapshot's
@@ -84,11 +95,17 @@ MODEL = {
 
 # The declared model plus the deliberately wrong variants used as negative controls.
 APPENDIX_B = {"alpha": "squared", "fresnel": "schlick", "weighting": "appendix-b"}
+# F15.1: the dielectric of KHR_materials_ior/specular scenes.  "base" = Appendix B (F0 0.04, no extension).
+SPECULAR_EXT = {**APPENDIX_B, "dielectric": "extension"}
 CONTROLS = {
     "alpha-roughness": {**APPENDIX_B, "alpha": "linear"},          # alpha = roughness instead of roughness^2
     "fresnel-off": {**APPENDIX_B, "fresnel": "off"},               # F = f0 for every angle
     "diffuse-unweighted": {**APPENDIX_B, "weighting": "unweighted-diffuse"},  # diffuse not scaled by (1 - F)
     "engine-f0-blend": {**APPENDIX_B, "weighting": "engine-blend"},  # F of the metallic-blended f0 weights diffuse
+    # F15.1 negative controls of the specular/ior grids (direct light).
+    "specular-ignored": {**APPENDIX_B, "dielectric": "ignored"},          # the extension is not applied (f0 0.04)
+    "f90-one": {**APPENDIX_B, "dielectric": "f90-one"},                    # f90 forced to 1 instead of the weight
+    "specular-weight-not-on-f0": {**APPENDIX_B, "dielectric": "f0-unweighted"},  # f0 keeps no specular weight
 }
 
 
@@ -131,14 +148,60 @@ def normalize(a):
     return a / np.maximum(np.linalg.norm(a, axis=-1, keepdims=True), 1e-300)
 
 
-def lobe_weights(base, metallic, v_dot_h, model=APPENDIX_B):
+# --- KHR_materials_ior + KHR_materials_specular -------------------------------
+
+def ior_factor(ior):
+    """((1 - ior) / (1 + ior))^2 of KHR_materials_ior; ior = 0 is the permanent special mode: the effective IOR is
+    +infinity, so the factor is its limit, 1 (the Fresnel term evaluates to 1 for specular 1 and colour <= 1)."""
+    ior = np.asarray(ior, dtype=np.float64)
+    safe = np.where(ior == 0.0, 1.0, ior)
+    return np.where(ior == 0.0, 1.0, ((1.0 - safe) / (1.0 + safe)) ** 2)
+
+
+def specular_f0(ior, specular_color):
+    """f0 of fresnel_mix: min(((1 - ior) / (1 + ior))^2 * specularColor, 1) per channel (before the weight)."""
+    return np.minimum(ior_factor(ior)[..., None] * np.asarray(specular_color, dtype=np.float64), 1.0)
+
+
+def dielectric_fresnel(f0, weight, w, variant="extension"):
+    """(F, max F): the dielectric Fresnel term (n, 3) and its channel maximum (n, 1) at Schlick weight `w` (n, 1).
+
+    extension (the specification): fr = f0 + (1 - f0) w; F = weight * fr, so the diffuse base is scaled by
+      1 - weight * max(fr) = 1 - max(F).  Wrong variants (negative controls): "f90-one" scales f0 by the weight
+      but keeps f90 = 1; "f0-unweighted" keeps f90 = weight without the weight on f0; "ignored" drops the
+      extension (f0 = 0.04, weight 1)."""
+    weight = np.asarray(weight, dtype=np.float64)[..., None]
+    if variant == "ignored":
+        f0, weight = np.full_like(f0, DIELECTRIC_F0), np.ones_like(weight)
+    if variant == "f90-one":
+        f = weight * f0 + (1.0 - weight * f0) * w
+    elif variant == "f0-unweighted":
+        f = f0 + (weight - f0) * w
+    else:
+        f = weight * (f0 + (1.0 - f0) * w)
+    return f, np.max(f, axis=-1, keepdims=True)
+
+
+def take(dielectric, sel):
+    """The per-pixel arrays of `dielectric` restricted to the pixel indices `sel` (None stays None)."""
+    if dielectric is None:
+        return None
+    return {"f0": dielectric["f0"][sel], "weight": dielectric["weight"][sel], "variant": dielectric["variant"]}
+
+
+def lobe_weights(base, metallic, v_dot_h, model=APPENDIX_B, dielectric=None):
     """(diffuse multiplier per channel, specular multiplier per channel) at one V.H.
 
     f = diffuse_multiplier * base/pi-style term + specular_multiplier * D * Vis; the
     diffuse multiplier already contains (1 - metallic) and the Fresnel weighting.
+    `dielectric` (F15.1): per-pixel {"f0" (n,3), "weight" (n,), "variant"} of KHR_materials_ior/specular.
     """
     w = schlick_weight(v_dot_h, model)[..., None]
     m = np.asarray(metallic, dtype=np.float64)[..., None]
+    if dielectric is not None:
+        f_d, max_f = dielectric_fresnel(dielectric["f0"], dielectric["weight"], w, dielectric["variant"])
+        f_metal = base + (1 - base) * w
+        return (1 - m) * (1.0 - max_f), (1 - m) * f_d + m * f_metal
     f_dielectric = DIELECTRIC_F0 + (1 - DIELECTRIC_F0) * w
     f_metal = base + (1 - base) * w
     if model["weighting"] == "engine-blend":
@@ -150,7 +213,7 @@ def lobe_weights(base, metallic, v_dot_h, model=APPENDIX_B):
     return diffuse, specular
 
 
-def bsdf(base, metallic, roughness, n, v, l, model=APPENDIX_B):
+def bsdf(base, metallic, roughness, n, v, l, model=APPENDIX_B, dielectric=None):
     """BSDF value f (without the cosine) for world unit vectors; (n, 3) arrays or broadcastable."""
     alpha = effective_alpha(roughness, model)
     n_dot_l = dot(n, l)
@@ -158,7 +221,7 @@ def bsdf(base, metallic, roughness, n, v, l, model=APPENDIX_B):
     h = normalize(v + l)
     n_dot_h = np.clip(dot(n, h), 0.0, 1.0)
     v_dot_h = dot(v, h)
-    diffuse_w, specular_w = lobe_weights(base, metallic, v_dot_h, model)
+    diffuse_w, specular_w = lobe_weights(base, metallic, v_dot_h, model, dielectric)
     spec = (ggx_d(n_dot_h, alpha) * smith_vis(n_dot_v, np.maximum(n_dot_l, 0.0), alpha))[..., None]
     value = diffuse_w * base / math.pi + specular_w * spec
     return np.where((n_dot_l > 0)[..., None], value, 0.0)
@@ -193,7 +256,7 @@ def sun_disk_samples(l, radius, count):
     return t[None, :] * (s * np.cos(phi))[:, None] + b[None, :] * (s * np.sin(phi))[:, None] + l[None, :] * z[:, None]
 
 
-def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius, model=APPENDIX_B):
+def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius, model=APPENDIX_B, dielectric=None):
     """Outgoing radiance per pixel from the sun disk; returns (radiance (n,3), narrow (n,))."""
     n_pixels = n.shape[0]
     l = np.asarray(toward_sun, dtype=np.float64)
@@ -204,7 +267,7 @@ def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius
     # Diffuse: centre of the disk.
     n_dot_l = np.clip(dot(n, np.broadcast_to(l, n.shape)), 0.0, 1.0)
     h_c = normalize(v + l)
-    diffuse_w, _ = lobe_weights(base, metallic, dot(v, h_c), model)
+    diffuse_w, _ = lobe_weights(base, metallic, dot(v, h_c), model, dielectric)
     total = np.where((n_dot_l > 0)[..., None], diffuse_w * base / math.pi * n_dot_l[..., None], 0.0)
     # Specular: mean of f_spec cos over the samples (count = 1 reduces to the point evaluation).
     spec_sum = np.zeros((n_pixels, 3))
@@ -216,7 +279,7 @@ def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius
             nl = np.clip(dot(n[sel], lk), 0.0, 1.0)
             h = normalize(v[sel] + lk)
             nh = np.clip(dot(n[sel], h), 0.0, 1.0)
-            _, specular_w = lobe_weights(base[sel], metallic[sel], dot(v[sel], h), model)
+            _, specular_w = lobe_weights(base[sel], metallic[sel], dot(v[sel], h), model, take(dielectric, sel))
             term = (ggx_d(nh, alpha[sel]) * smith_vis(n_dot_v[sel], nl, alpha[sel]) * nl)[:, None] * specular_w
             spec_sum[sel] += np.where((nl > 0)[:, None], term, 0.0) / int(c)
     return (total + spec_sum) * np.asarray(irradiance, dtype=np.float64), narrow
@@ -309,13 +372,21 @@ def environment_radiance(base, metallic, roughness, n_dot_v, radiance, model=APP
 DFG_HEADER = REPO / "src" / "renderer" / "dfg_table.h"
 _DFG = {}
 
-DECLARED = {"albedo": "dfg-table", "diffuse": "one-minus-dielectric-albedo"}
+DECLARED = {"albedo": "dfg-table", "diffuse": "one-minus-dielectric-albedo", "dielectric": "extension"}
 # Deliberately wrong variants that the declared-model gate must reject.
 DECLARED_CONTROLS = {
     "declared-diffuse-unweighted": {**DECLARED, "diffuse": "unweighted"},            # no (1 - E) weight
     "declared-karis-fit": {**DECLARED, "albedo": "karis-fit"},                       # mobile fit instead of the table
     "declared-diffuse-f0-fresnel": {**DECLARED, "diffuse": "metallic-blended-f0"},   # F of the blended f0 weights diffuse
 }
+# F15.1: negative controls of the ior/specular grid of the deterministic resolve (kept apart: they only apply
+# to scenes whose materials carry KHR_materials_ior/specular).
+SPECULAR_DECLARED_CONTROLS = {
+    "declared-specular-ignored": {**DECLARED, "dielectric": "ignored"},
+    "declared-f90-one": {**DECLARED, "dielectric": "f90-one"},
+    "declared-specular-weight-not-on-f0": {**DECLARED, "dielectric": "f0-unweighted"},
+}
+ALL_DECLARED_CONTROLS = {**DECLARED_CONTROLS, **SPECULAR_DECLARED_CONTROLS}
 
 
 def load_dfg_table(path=DFG_HEADER):
@@ -360,13 +431,27 @@ def karis_ab(n_dot_v, roughness):
     return -1.04 * a004 + r[2], 1.04 * a004 + r[3]
 
 
-def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, variant=DECLARED):
-    """Outgoing radiance (n, 3) of the engine's declared environment model (see the module docstring)."""
+def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, variant=DECLARED, dielectric=None):
+    """Outgoing radiance (n, 3) of the engine's declared environment model (see the module docstring).
+
+    `dielectric` (F15.1): per-pixel {"f0", "weight"} of KHR_materials_ior/specular (variant["dielectric"] picks the
+    model or one of its wrong controls): E_d = f0_scaled * A + f90 * B per lobe, diffuse weight 1 - max(E_d)."""
     mu = np.maximum(np.asarray(n_dot_v, dtype=np.float64), MIN_NDOTV)
     rough = clamp_roughness(roughness)
     a, b = karis_ab(mu, rough) if variant["albedo"] == "karis-fit" else dfg_lookup(mu, rough)
     a, b = a[:, None], b[:, None]
     m = np.asarray(metallic, dtype=np.float64)[:, None]
+    if dielectric is not None:
+        f0c, weight = dielectric["f0"], np.asarray(dielectric["weight"], dtype=np.float64)[:, None]
+        kind = variant.get("dielectric", "extension")
+        if kind == "ignored":
+            f0c, weight = np.full_like(f0c, DIELECTRIC_F0), np.ones_like(weight)
+        f0_scaled = f0c if kind == "f0-unweighted" else f0c * weight
+        f90 = np.ones_like(weight) if kind == "f90-one" else weight
+        e_d = np.clip(f0_scaled * a + f90 * b, 0.0, 1.0)
+        e_m = np.clip(base * a + b, 0.0, 1.0)
+        diffuse_weight = 1.0 - np.max(e_d, axis=-1, keepdims=True)
+        return ((1 - m) * base * diffuse_weight + (1 - m) * e_d + m * e_m) * radiance
     f0 = DIELECTRIC_F0 * (1 - m) + base * m
     specular = np.clip(f0 * a + b, 0.0, 1.0)
     if variant["diffuse"] == "unweighted":
@@ -432,16 +517,72 @@ def cast_primary_rays(root, data, threads):
 
 # --- frame ------------------------------------------------------------------
 
+SPECULAR_FEATURE_BIT = 1  # MaterialFeature::SpecularIor
+EXTENSION_RECORD_WORDS = 20
+
+
+def f32(word):
+    """The float whose IEEE-754 binary32 bit pattern is the unsigned word."""
+    import struct
+    return struct.unpack("<f", struct.pack("<I", int(word) & 0xFFFFFFFF))[0]
+
+
+def material_specular(data, material):
+    """(ior, specularFactor, specularColor[3]) of a material from the snapshot's extension records, or None when
+    the material has no KHR_materials_ior/specular feature bit.  Raises when it has other features or textures."""
+    bits = int(material.get("feature_bits", 0))
+    if bits == 0:
+        return None
+    if bits & ~SPECULAR_FEATURE_BIT:
+        raise ValueError(f"material feature bits {bits:#x} are outside the declared ior/specular model")
+    records = data["material_extensions"]["records"]
+    index = int(material["extension_index"])
+    words = records[index]
+    if len(words) != EXTENSION_RECORD_WORDS:
+        raise ValueError("a material extension record must hold 20 words")
+    if int(words[5]) != INVALID or int(words[6]) != INVALID:
+        raise ValueError("a specular texture is set; the reference is texture-free")
+    # GPUMaterialExt0 words 0 (ior), 1 (specularFactor), 2-4 (specularColor).
+    return f32(words[0]), f32(words[1]), [f32(words[2]), f32(words[3]), f32(words[4])]
+
+
+def uses_specular_extension(data):
+    return any(int(m.get("feature_bits", 0)) & SPECULAR_FEATURE_BIT for m in data["materials"])
+
+
 def sphere_table(data):
-    return [{"instance": k, "slot": inst["slot"], "base": data["materials"][inst["material"]]["base"][:3],
-             "metallic": float(data["materials"][inst["material"]]["metallic"]),
-             "roughness": float(data["materials"][inst["material"]]["roughness"])}
-            for k, inst in enumerate(data["instances"])]
+    out = []
+    uses = uses_specular_extension(data)
+    for k, inst in enumerate(data["instances"]):
+        material = data["materials"][inst["material"]]
+        entry = {"instance": k, "slot": inst["slot"], "base": material["base"][:3],
+                 "metallic": float(material["metallic"]), "roughness": float(material["roughness"])}
+        spec = material_specular(data, material)
+        if spec is None and uses:  # a neutral block (no feature bit) in a scene that has the extension
+            spec = (1.5, 1.0, [1.0, 1.0, 1.0])
+        if spec is not None:
+            entry.update(ior=spec[0], specular=spec[1], specular_color=spec[2],
+                         group=f"metallic {entry['metallic']:g} specular {spec[1]:g} colour "
+                               f"{spec[2][0]:g},{spec[2][1]:g},{spec[2][2]:g}")
+        out.append(entry)
+    return out
+
+
+def dielectric_arrays(spheres, instance_of_pixel, variant):
+    """Per-pixel {"f0", "weight", "variant"} of the extension, neutral (ior 1.5, weight 1, colour 1) elsewhere."""
+    f0 = np.empty((len(spheres), 3))
+    weight = np.empty(len(spheres))
+    for k, s in enumerate(spheres):
+        ior, spec, color = (s["ior"], s["specular"], s["specular_color"]) if "ior" in s else (1.5, 1.0, [1.0] * 3)
+        f0[k] = specular_f0(ior, color)
+        weight[k] = spec
+    return {"f0": f0[instance_of_pixel], "weight": weight[instance_of_pixel], "variant": variant}
 
 
 def require_declared_scene(data):
     for instance in data["instances"]:
         material = data["materials"][instance["material"]]
+        material_specular(data, material)  # only the ior/specular feature, without textures
         if any(index != INVALID for index in material["textures"]):
             raise ValueError("instanced material samples a texture; the Appendix B reference is texture-free")
         if any(v > 0 for v in material["emissive"]) or material["alpha_cutoff"] > 0:
@@ -473,6 +614,12 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
     base = np.array([spheres[k]["base"] for k in inst[pick]], dtype=np.float64)
     metallic = np.clip(np.array([spheres[k]["metallic"] for k in inst[pick]]), 0.0, 1.0)
     roughness = np.array([spheres[k]["roughness"] for k in inst[pick]])
+    # F15.1: KHR_materials_ior/specular of the scene (the model dicts name the dielectric variant).
+    variant = model.get("dielectric", "base")
+    sun_dielectric = None if variant == "base" else dielectric_arrays(spheres, inst[pick], variant)
+    env_variant = (environment or {}).get("dielectric", "extension")
+    env_dielectric = (dielectric_arrays(spheres, inst[pick], env_variant)
+                      if environment is not None and uses_specular_extension(data) else None)
     radiance = np.zeros((pick.size, 3))
     narrow = np.zeros(pick.size, dtype=bool)
     lit = np.zeros(pick.size, dtype=bool)
@@ -484,7 +631,8 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
         irradiance = np.asarray(light["color"], dtype=np.float64) * float(light["intensity"])
         if sun_radius <= 0:
             raise ValueError("a sun requires a positive angular radius")
-        sun, narrow = sun_radiance(base, metallic, roughness, n, v, toward, irradiance, sun_radius, model)
+        sun, narrow = sun_radiance(base, metallic, roughness, n, v, toward, irradiance, sun_radius, model,
+                                   sun_dielectric)
         radiance += sun
         lit = dot(n, np.broadcast_to(toward, n.shape)) > 0
         terms.append("sun-disk")
@@ -493,7 +641,8 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
             radiance += environment_radiance(base, metallic, roughness, dot(n, v), sky, model)
             terms.append("environment-quadrature")
         else:
-            radiance += declared_environment_radiance(base, metallic, roughness, dot(n, v), sky, environment)
+            radiance += declared_environment_radiance(base, metallic, roughness, dot(n, v), sky, environment,
+                                                      env_dielectric)
             terms.append("environment-declared")
     image = np.full((height * width, 3), sky, dtype=np.float64)  # pixels without geometry show the environment
     image[pick] = radiance
@@ -518,7 +667,8 @@ def command_render(args):
     out = pathlib.Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     cast = cast_primary_rays(root, data, args.threads)
-    controls = {"": APPENDIX_B, **{name: CONTROLS[name] for name in args.controls}}
+    main_model = SPECULAR_EXT if uses_specular_extension(data) else APPENDIX_B
+    controls = {"": main_model, **{name: CONTROLS[name] for name in args.controls}}
     report = {"schema": 1, "tool": "tools/f15_reference.py", "tool_sha256": sha256_file(__file__), "model": MODEL,
               "snapshot_sha256": scene_digest(root), "frame": data.get("frame"),
               "sun_angular_radius": data.get("sun_angular_radius"), "sky": data["sky"],
@@ -538,13 +688,13 @@ def command_render(args):
         # The declared environment model on the same cast: the image and its negative controls.
         declared = {"model": DECLARED, "file": "declared.pfm", "dfg_table": str(DFG_HEADER.relative_to(REPO)),
                     "dfg_table_sha256": sha256_file(DFG_HEADER), "controls": {}}
-        image, masks, _, terms = render_frame(root, data, model=APPENDIX_B, cast=cast, environment=DECLARED)
+        image, masks, _, terms = render_frame(root, data, model=main_model, cast=cast, environment=DECLARED)
         write_pfm(out / "declared.pfm", image)
         declared["terms"] = terms
         for name in args.declared_controls:
-            image, *_ = render_frame(root, data, model=APPENDIX_B, cast=cast, environment=DECLARED_CONTROLS[name])
+            image, *_ = render_frame(root, data, model=main_model, cast=cast, environment=ALL_DECLARED_CONTROLS[name])
             write_pfm(out / f"control-{name}.pfm", image)
-            declared["controls"][name] = {"model_variant": DECLARED_CONTROLS[name], "file": f"control-{name}.pfm"}
+            declared["controls"][name] = {"model_variant": ALL_DECLARED_CONTROLS[name], "file": f"control-{name}.pfm"}
         report["declared"] = declared
     (out / "reference.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps({"reference": str(out / "reference.pfm"), "terms": report["terms"],
@@ -561,7 +711,7 @@ def main(argv=None):
     p.add_argument("--controls", nargs="*", default=[], choices=sorted(CONTROLS))
     p.add_argument("--declared", action="store_true",
                    help="also render the engine's declared environment model (declared.pfm)")
-    p.add_argument("--declared-controls", nargs="*", default=[], choices=sorted(DECLARED_CONTROLS),
+    p.add_argument("--declared-controls", nargs="*", default=[], choices=sorted(ALL_DECLARED_CONTROLS),
                    help="negative controls of the declared model (implies --declared)")
     p.add_argument("--threads", type=int, default=min(8, os.cpu_count() or 1))
     p.set_defaults(function=command_render)

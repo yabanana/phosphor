@@ -14,9 +14,10 @@
 namespace phosphor {
 namespace {
 // The names are mirrored by tools/f15_check.py SCENARIOS (tests/test_material_validation.cpp compares both).
-constexpr std::array<std::string_view, 7> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
+constexpr std::array<std::string_view, 9> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
                                                      "furnace-base",   "furnace-resolve",     "roughness-extremes",
-                                                     "roughness-extremes-sun"};
+                                                     "roughness-extremes-sun", "specular-grid-sun",
+                                                     "specular-grid-env-resolve"};
 constexpr float pi = 3.14159265358979323846f;
 
 glm::quat orientLight(glm::vec3 towardLight) {
@@ -39,6 +40,17 @@ const std::vector<MaterialScenarioSpec>& specs() {
     // far from the view direction, so Schlick's (1 - V.H)^5 is non-negligible
     // and a missing or wrong Fresnel term is visible in the direct grid.
     static const glm::vec3 towardSun = glm::normalize(glm::vec3(-0.8f, 0.35f, -0.3f));
+    // F15.1 (ticket 05): KHR_materials_ior x KHR_materials_specular on texture-free spheres.  Columns
+    // are IORs (0 = the permanent Fresnel = 1 mode, 1.0 f0 = 0, 1.33 water, 1.5 the default, 2.4
+    // diamond), rows are (specularFactor, specularColor): the neutral pair, a weight, a colour above 1
+    // (f0 clamped before the weight), both; the last row is metallic 1, on which both extensions must
+    // have no effect.  One roughness (0.35, alpha 0.12: wide lobe, no sun quadrature) keeps the grid small.
+    static const std::vector<float> specIor{0.0f, 1.0f, 1.33f, 1.5f, 2.4f};
+    static const std::vector<float> specRoughness(5, 0.35f);
+    static const std::vector<float> specMetallic{0.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+    static const std::vector<float> specFactor{1.0f, 0.5f, 1.0f, 0.5f, 0.5f};
+    static const std::vector<glm::vec3> specColor{glm::vec3(1.0f), glm::vec3(1.0f), glm::vec3(2.0f),
+                                                  glm::vec3(2.0f, 1.0f, 0.5f), glm::vec3(2.0f)};
     static const std::vector<MaterialScenarioSpec> all{
         {"base-grid-sun", roughness, metallic, copper, true, 3.0f, towardSun, 0.0f},
         {"base-grid-env", roughness, metallic, copper, false, 0.0f, towardSun, 0.5f},
@@ -54,6 +66,13 @@ const std::vector<MaterialScenarioSpec>& specs() {
         {"roughness-extremes", {0.0f, 1.0f}, {0.0f, 0.5f, 1.0f}, copper, true, 3.0f, towardSun, 0.3f},
         // The same spheres lit by the sun only (environment 0): the direct gate applies.
         {"roughness-extremes-sun", {0.0f, 1.0f}, {0.0f, 0.5f, 1.0f}, copper, true, 3.0f, towardSun, 0.0f},
+        // Sun only: the direct gate applies (the extension lobes of the resolve and forward paths).
+        {"specular-grid-sun", specRoughness, specMetallic, copper, true, 3.0f, towardSun, 0.0f, specIor, specFactor,
+         specColor},
+        // Environment only, deterministic resolve (--reflections off --lighting-denoise custom): the
+        // declared split-sum model f0 * A + f90 * B per lobe.
+        {"specular-grid-env-resolve", specRoughness, specMetallic, copper, false, 0.0f, towardSun, 0.5f, specIor,
+         specFactor, specColor},
     };
     return all;
 }
@@ -103,6 +122,15 @@ void MaterialValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& textur
             instance.setStatic(true);
             ecs.addComponent(e, std::move(instance));
             MaterialComponent material;
+            if (s.hasSpecularGrid()) {
+                auto description = std::make_shared<MaterialDescription>();
+                description->specular.emplace();
+                description->specular->ior            = s.ior[column];
+                description->specular->specularFactor = s.specularFactor[row];
+                const glm::vec3 c = s.specularColor[row];
+                description->specular->specularColor = {c.x, c.y, c.z};
+                material.extension = std::move(description);
+            }
             material.baseColorFactor = glm::vec4(s.baseColor, 1.0f);
             material.metallicFactor = s.metallic[row];
             material.roughnessFactor = s.roughness[column];

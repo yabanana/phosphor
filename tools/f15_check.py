@@ -25,6 +25,10 @@ reference ray casting):
   reported.
 - furnace (furnace-base): no engine pixel above 1.0 + 0.5 %; energy loss per
   sphere is recorded, not gated.
+- KHR_materials_ior/specular (F15.1, ticket 05; always asserted green, no red state): specular-grid-sun uses
+  the direct gate per (metallic, specular weight, colour) group, specular-grid-env-resolve the declared-model
+  gate (split-sum f0 * A + f90 * B per lobe), both with the bounds above unchanged.  Negative controls on the
+  reference side that must fail: specular extension ignored, f90 forced to 1, specular weight not applied to f0.
 - declared (base-grid-env-resolve; also furnace-resolve next to its furnace
   gate): the engine image against the independent declared-environment model of
   tools/f15_reference.py (DFG table, ADR-0006): per sphere mean relative error
@@ -119,6 +123,15 @@ SCENARIOS = {
                                "terms": "sun disk only (environment 0, no shadows, no GI) on the roughness extremes 0 and 1"},
     "roughness-extremes": {"kind": "environment", "controls": ["alpha-roughness"],
                            "terms": "sun disk plus constant environment 0.3; only the environment criterion gates"},
+    # F15.1 (ticket 05): KHR_materials_ior x KHR_materials_specular; asserted green in every mode.
+    "specular-grid-sun": {"kind": "direct", "always_green": True,
+                          "controls": ["specular-ignored", "f90-one", "specular-weight-not-on-f0"],
+                          "terms": "sun disk only (environment 0, no shadows, no GI) on the ior x specular grid"},
+    "specular-grid-env-resolve": {"kind": "declared", "always_green": True, "reflections": "off",
+                                  "controls": ["declared-specular-ignored", "declared-f90-one",
+                                               "declared-specular-weight-not-on-f0"],
+                                  "terms": "constant environment only (radiance 0.5, no sun) on the ior x specular grid, "
+                                           "deterministic resolve terms (--reflections off --lighting-denoise custom)"},
 }
 # Red-state expectations (before ticket 03): direct metallic rows 0 and 1 pass, intermediate rows fail.
 GPU_PROCESS = re.compile(r"^(phosphor|soc_bench|f\d+_spike)$")
@@ -267,8 +280,9 @@ def evaluate_direct(np, candidate, reference, masks, spheres):
     narrow = masks["narrow"][lit]
     sphere = masks["sphere"][lit]
     rows = {}
-    for value in sorted({s["metallic"] for s in spheres}):
-        members = [s["instance"] for s in spheres if s["metallic"] == value]
+    group_of = lambda s: s.get("group", s["metallic"])  # noqa: E731 - specular grids group by (metallic, weight, colour)
+    for value in sorted({group_of(s) for s in spheres}, key=lambda g: (isinstance(g, str), g)):
+        members = [s["instance"] for s in spheres if group_of(s) == value]
         pick = np.isin(sphere, members)
         if not pick.any():
             rows[value] = {"pixels": 0, "pass": False, "note": "no lit ROI pixels"}
@@ -371,9 +385,9 @@ def evaluate(np, kind, candidate, reference, masks, spheres):
     return evaluate_environment(np, candidate, reference, masks, spheres)
 
 
-def expectation(kind, mode, result):
+def expectation(kind, mode, result, always_green=False):
     """Red-state assertions of ticket 02; None when a fixture is measured but not predicted."""
-    if mode == "green":
+    if mode == "green" or always_green:
         return {"asserted": True, "expected_pass": True, "met": result["pass"]}
     if kind == "declared":
         return {"asserted": False, "met": True, "note": "declared-model gate: measured, asserted in green mode only"}
@@ -479,7 +493,8 @@ def evaluate_scenario(np, name, folder, mode):
             direct = evaluate_direct(np, candidate, reference, masks, spheres)
             result = evaluate_environment(np, candidate, reference, masks, spheres, summarize(direct))
         verdicts = control_verdicts(np, spec["kind"], reference, controls, masks, spheres, literal_controls)
-        entry.update(result=result, expectation=expectation(spec["kind"], mode, result), controls=verdicts)
+        entry.update(result=result, expectation=expectation(spec["kind"], mode, result, spec.get("always_green", False)),
+                     controls=verdicts)
         checks.append((all(v["fails_gate"] for v in verdicts.values()), result["pass"]))
 
     if declared_controls:
@@ -488,7 +503,7 @@ def evaluate_scenario(np, name, folder, mode):
         controls = {c: read_pfm(reference_dir / declared_report["controls"][c]["file"]) for c in declared_controls}
         result = evaluate_declared(np, candidate, declared_reference, masks, spheres)
         verdicts = control_verdicts(np, "declared", declared_reference, controls, masks, spheres, declared_controls)
-        expected = expectation("declared", mode, result)
+        expected = expectation("declared", mode, result, spec.get("always_green", False))
         if spec["kind"] == "declared":
             entry.update(result=result, expectation=expected, controls=verdicts)
         else:

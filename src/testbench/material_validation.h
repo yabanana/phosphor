@@ -27,6 +27,12 @@ struct MaterialScenarioSpec {
     float sunIrradiance = 0.0f;   // W/m^2 on a surface facing the sun (colour is white)
     glm::vec3 towardSun{0, 1, 0}; // unit vector from the surface towards the sun
     float environment = 0.0f;     // constant isotropic radiance of the declared environment
+    // F15.1 (ticket 05) specular grids: KHR_materials_ior per column and KHR_materials_specular per row
+    // (all three empty = no extension, the base scenarios).  Rows keep `metallic`, columns `roughness`.
+    std::vector<float>     ior;            // per column; 0 is the permanent "Fresnel = 1" mode
+    std::vector<float>     specularFactor; // per row, [0, 1]
+    std::vector<glm::vec3> specularColor;  // per row, may exceed 1
+    [[nodiscard]] bool hasSpecularGrid() const { return !ior.empty(); }
 };
 
 class MaterialValidation final : public TestBench {
@@ -44,7 +50,7 @@ public:
     void update(float, ECS&) override {}
     void teardown(ECS&, GpuScene&) override;
     [[nodiscard]] const char* getName() const override { return name_.c_str(); }
-    [[nodiscard]] const char* assetSource() const override { return "procedural-material-validation-v1"; }
+    [[nodiscard]] const char* assetSource() const override { return "procedural-material-validation-v2"; }
     [[nodiscard]] CameraSetup getDefaultCamera() const override;
 
     [[nodiscard]] std::string_view scenario() const { return scenario_; }

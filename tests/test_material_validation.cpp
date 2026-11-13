@@ -5,6 +5,7 @@
 #include "scene/components.h"
 #include "scene/ecs.h"
 #include "null_texture_manager.h"
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <regex>
@@ -13,10 +14,10 @@
 #include <utility>
 using namespace phosphor;
 
-TEST_CASE("F15.3 material scenarios are exactly the seven declared names") {
-    CHECK(MaterialValidation::scenarios().size() == 7);
+TEST_CASE("F15.3 material scenarios are exactly the nine declared names") {
+    CHECK(MaterialValidation::scenarios().size() == 9);
     for (auto name : {"base-grid-sun", "base-grid-env", "base-grid-env-resolve", "furnace-base", "furnace-resolve",
-                      "roughness-extremes", "roughness-extremes-sun"})
+                      "roughness-extremes", "roughness-extremes-sun", "specular-grid-sun", "specular-grid-env-resolve"})
         CHECK(MaterialValidation::validScenario(name));
     CHECK_FALSE(MaterialValidation::validScenario("unknown"));
     CHECK_THROWS(MaterialValidation{"unknown"});
@@ -171,4 +172,68 @@ TEST_CASE("F15.3 the bench and the runner (tools/f15_check.py) list the same sce
     std::set<std::string> bench;
     for (auto name : MaterialValidation::scenarios()) bench.insert(std::string(name));
     CHECK(runner == bench);
+}
+
+TEST_CASE("F15.1 specular grids declare ior x specularFactor x specularColor, metallic 0 rows and one metallic 1 row") {
+    for (auto name : {"specular-grid-sun", "specular-grid-env-resolve"}) {
+        const auto& s = MaterialValidation::spec(name);
+        REQUIRE(s.hasSpecularGrid());
+        REQUIRE(s.ior.size() == s.roughness.size());
+        REQUIRE(s.specularFactor.size() == s.metallic.size());
+        REQUIRE(s.specularColor.size() == s.metallic.size());
+        // ior = 0 (special mode) and 1.0, 1.33, 1.5, 2.4 are all declared.
+        for (float ior : {0.0f, 1.0f, 1.33f, 1.5f, 2.4f}) CHECK(std::count(s.ior.begin(), s.ior.end(), ior) == 1);
+        // Weight and colour vary; the colour reaches 2.0; both are valid KHR ranges.
+        float maxColor = 0.0f;
+        for (size_t r = 0; r < s.metallic.size(); ++r) {
+            CHECK(s.specularFactor[r] >= 0.0f);
+            CHECK(s.specularFactor[r] <= 1.0f);
+            for (int c = 0; c < 3; ++c) maxColor = std::max(maxColor, s.specularColor[r][c]);
+        }
+        CHECK(maxColor == 2.0f);
+        CHECK(std::count(s.specularFactor.begin(), s.specularFactor.end(), 1.0f) >= 1);
+        CHECK(std::count(s.specularFactor.begin(), s.specularFactor.end(), 0.5f) >= 1);
+        // Metallic 0 rows plus exactly one metallic 1 row (on which the extension must change nothing).
+        CHECK(std::count(s.metallic.begin(), s.metallic.end(), 1.0f) == 1);
+        CHECK(std::count(s.metallic.begin(), s.metallic.end(), 0.0f) == long(s.metallic.size()) - 1);
+    }
+    const auto& sun = MaterialValidation::spec("specular-grid-sun");
+    CHECK(sun.sun);
+    CHECK(sun.environment == 0.0f);
+    CHECK(sun.sunIrradiance == 3.0f);
+    const auto& env = MaterialValidation::spec("specular-grid-env-resolve");
+    CHECK_FALSE(env.sun);
+    CHECK(env.environment == 0.5f);
+    CHECK(MaterialValidation::environmentRadiance("specular-grid-env-resolve") == 0.5f);
+    CHECK(MaterialValidation::environmentRadiance("specular-grid-sun") == 0.0f);
+    // The base scenarios carry no extension.
+    for (auto name : {"base-grid-sun", "furnace-base", "roughness-extremes"})
+        CHECK_FALSE(MaterialValidation::spec(name).hasSpecularGrid());
+}
+
+TEST_CASE("F15.1 specular grid spheres carry the extension of their row and column, nothing else changes") {
+    ECS ecs;
+    GpuScene scene;
+    test::NullTextureManager textures;
+    MaterialValidation f{"specular-grid-sun"};
+    f.setup(ecs, scene, textures);
+    const auto& s = MaterialValidation::spec("specular-grid-sun");
+    for (u32 row = 0; row < s.metallic.size(); ++row)
+        for (u32 col = 0; col < s.roughness.size(); ++col) {
+            const EntityID e = f.spheres()[row * s.roughness.size() + col];
+            const auto& m = std::as_const(ecs).getComponent<MaterialComponent>(e);
+            REQUIRE(m.extension);
+            REQUIRE(m.extension->specular);
+            CHECK(m.extension->specular->ior == s.ior[col]);
+            CHECK(m.extension->specular->specularFactor == s.specularFactor[row]);
+            CHECK(m.extension->specular->specularColor[0] == s.specularColor[row].x);
+            CHECK(m.extension->specular->specularColor[2] == s.specularColor[row].z);
+            CHECK(m.baseColorTexIndex == INVALID_TEXTURE_INDEX);
+            CHECK(m.metallicFactor == s.metallic[row]);
+            CHECK(m.roughnessFactor == s.roughness[col]);
+            // Neutral values (ior 1.5, weight 1, colour 1) are the base material: the bit stays clear.
+            const bool neutral = s.ior[col] == 1.5f && s.specularFactor[row] == 1.0f && s.specularColor[row] == glm::vec3(1.0f);
+            CHECK((featureMask(*m.extension) != 0) == !neutral);
+        }
+    f.teardown(ecs, scene);
 }

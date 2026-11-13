@@ -318,6 +318,145 @@ class DeclaredEnvironmentModel(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_MITSUBA, "mitsuba not installed")
+class SpecularIorModel(unittest.TestCase):
+    """KHR_materials_ior + KHR_materials_specular against values worked by hand from the specification text."""
+
+    def test_ior_factor_hand_values(self):
+        # ((1 - ior) / (1 + ior))^2: 0.33^2 / 2.33^2 = 0.020060; 1.5 -> 0.04; 1.0 -> 0; 2.4 -> 1.4^2 / 3.4^2 = 0.169550.
+        self.assertAlmostEqual(float(ref.ior_factor(1.33)), 0.02006, places=5)
+        self.assertAlmostEqual(float(ref.ior_factor(1.5)), 0.04, places=12)
+        self.assertEqual(float(ref.ior_factor(1.0)), 0.0)
+        self.assertAlmostEqual(float(ref.ior_factor(2.4)), 0.16955, places=5)
+        # ior = 0: effective IOR +infinity, the factor is its limit 1 (Fresnel evaluates to 1).
+        self.assertEqual(float(ref.ior_factor(0.0)), 1.0)
+        self.assertAlmostEqual(float(ref.ior_factor(1e9)), 1.0, places=6)  # the limit is continuous
+
+    def test_f0_clamps_before_the_weight_and_colour_scales_it(self):
+        # specularColor 2 at ior 1.5: min(0.08, 1) = 0.08.
+        f0 = ref.specular_f0(np.array([1.5]), np.array([[2.0, 2.0, 2.0]]))
+        np.testing.assert_allclose(f0, [[0.08, 0.08, 0.08]], atol=1e-12)
+        # A very large colour clamps at 1 per channel: ior 2.4, colour (30, 1, 0): (1, 0.16955, 0).
+        f0 = ref.specular_f0(np.array([2.4]), np.array([[30.0, 1.0, 0.0]]))
+        np.testing.assert_allclose(f0, [[1.0, 0.16955, 0.0]], atol=1e-5)
+
+    def test_fresnel_mix_end_points_follow_the_specification(self):
+        # specularColor 2, specular 0.5, ior 1.5: F(V.H = 1) = f0 * specular = 0.04, F(V.H = 0) = specular = 0.5 (f90).
+        f0 = ref.specular_f0(np.array([1.5]), np.array([[2.0, 2.0, 2.0]]))
+        f_normal, max_normal = ref.dielectric_fresnel(f0, np.array([0.5]), np.array([[0.0]]))
+        f_grazing, max_grazing = ref.dielectric_fresnel(f0, np.array([0.5]), np.array([[1.0]]))
+        np.testing.assert_allclose(f_normal, [[0.04] * 3], atol=1e-12)
+        np.testing.assert_allclose(f_grazing, [[0.5] * 3], atol=1e-12)
+        # The diffuse base is scaled by 1 - weight * max(fr) = 1 - max(F).
+        self.assertAlmostEqual(float(max_normal[0, 0]), 0.04, places=12)
+        self.assertAlmostEqual(float(max_grazing[0, 0]), 0.5, places=12)
+
+    def test_mid_angle_matches_the_unflattened_formula(self):
+        # fr = f0 + (1 - f0) (1 - V.H)^5 with V.H = 0.5 -> (0.5)^5 = 0.03125; weight 0.5, f0 = (0.08, 0.04, 0.02).
+        f0 = ref.specular_f0(np.array([1.5]), np.array([[2.0, 1.0, 0.5]]))
+        w = np.array([[0.03125]])
+        f, max_f = ref.dielectric_fresnel(f0, np.array([0.5]), w)
+        fr = np.array([[0.08, 0.04, 0.02]]) + (1 - np.array([[0.08, 0.04, 0.02]])) * 0.03125
+        np.testing.assert_allclose(f, 0.5 * fr, atol=1e-12)
+        self.assertAlmostEqual(float(max_f[0, 0]), 0.5 * float(fr.max()), places=12)
+
+    def test_ior_zero_is_fresnel_one_for_weight_one_and_unit_colour(self):
+        f0 = ref.specular_f0(np.array([0.0]), np.array([[1.0, 1.0, 1.0]]))
+        for vh in (0.0, 0.3, 1.0):
+            f, _ = ref.dielectric_fresnel(f0, np.array([1.0]), np.array([[(1 - vh) ** 5]]))
+            np.testing.assert_allclose(f, [[1.0] * 3], atol=1e-12)
+        # A weight below 1 scales it: the "specular-glossiness" conversion keeps F = specular.
+        f, _ = ref.dielectric_fresnel(f0, np.array([0.5]), np.array([[0.2]]))
+        np.testing.assert_allclose(f, [[0.5] * 3], atol=1e-12)
+
+    def test_neutral_extension_reduces_to_the_base_dielectric(self):
+        n = np.array([[0.0, 0.0, 1.0]])
+        v = np.array([unit(0.3, 0.1, 1.0)])
+        l = np.array([unit(-0.5, 0.2, 0.7)])
+        base = np.array([[0.8, 0.35, 0.15]])
+        dielectric = {"f0": ref.specular_f0(np.array([1.5]), np.ones((1, 3))), "weight": np.array([1.0]),
+                      "variant": "extension"}
+        for metallic in (0.0, 0.5, 1.0):
+            m = np.array([metallic])
+            with_ext = ref.bsdf(base, m, np.array([0.35]), n, v, l, ref.SPECULAR_EXT, dielectric)
+            plain = ref.bsdf(base, m, np.array([0.35]), n, v, l)
+            np.testing.assert_allclose(with_ext, plain, rtol=1e-12)
+
+    def test_the_metal_lobe_is_untouched_by_the_extension(self):
+        n = np.array([[0.0, 0.0, 1.0]])
+        v = np.array([unit(0.3, 0.1, 1.0)])
+        l = np.array([unit(-0.5, 0.2, 0.7)])
+        base = np.array([[0.8, 0.35, 0.15]])
+        dielectric = {"f0": ref.specular_f0(np.array([2.4]), np.array([[2.0, 2.0, 2.0]])), "weight": np.array([0.5]),
+                      "variant": "extension"}
+        with_ext = ref.bsdf(base, np.array([1.0]), np.array([0.35]), n, v, l, ref.SPECULAR_EXT, dielectric)
+        plain = ref.bsdf(base, np.array([1.0]), np.array([0.35]), n, v, l)
+        np.testing.assert_allclose(with_ext, plain, rtol=1e-12)
+
+    def test_controls_differ_from_the_specification_in_the_documented_way(self):
+        f0 = ref.specular_f0(np.array([1.5]), np.array([[2.0, 2.0, 2.0]]))  # 0.08
+        weight, w = np.array([0.5]), np.array([[1.0]])  # grazing: V.H = 0
+        good, _ = ref.dielectric_fresnel(f0, weight, w)
+        f90_one, _ = ref.dielectric_fresnel(f0, weight, w, "f90-one")
+        unweighted, _ = ref.dielectric_fresnel(f0, weight, w, "f0-unweighted")
+        ignored, _ = ref.dielectric_fresnel(f0, weight, w, "ignored")
+        np.testing.assert_allclose(good, [[0.5] * 3], atol=1e-12)
+        np.testing.assert_allclose(f90_one, [[1.0] * 3], atol=1e-12)        # f90 forced to 1
+        np.testing.assert_allclose(unweighted, [[0.5] * 3], atol=1e-12)     # f90 is still the weight at grazing ...
+        # ... but at normal incidence the unweighted f0 is 0.08 instead of 0.04.
+        g0, _ = ref.dielectric_fresnel(f0, weight, np.array([[0.0]]))
+        u0, _ = ref.dielectric_fresnel(f0, weight, np.array([[0.0]]), "f0-unweighted")
+        np.testing.assert_allclose(g0, [[0.04] * 3], atol=1e-12)
+        np.testing.assert_allclose(u0, [[0.08] * 3], atol=1e-12)
+        np.testing.assert_allclose(ignored, [[1.0] * 3], atol=1e-12)        # base: F90 = 1 at grazing
+
+    def test_declared_environment_split_sum_per_lobe(self):
+        mu, rough = np.array([0.8]), np.array([0.35])
+        a, b = ref.dfg_lookup(mu, ref.clamp_roughness(rough))
+        a, b = float(a[0]), float(b[0])
+        base = np.array([[0.8, 0.35, 0.15]])
+        f0c = ref.specular_f0(np.array([1.33]), np.array([[2.0, 1.0, 0.5]]))
+        dielectric = {"f0": f0c, "weight": np.array([0.5])}
+        out = ref.declared_environment_radiance(base, np.array([0.0]), rough, mu, 0.5, ref.DECLARED, dielectric)
+        # Hand-worked: E_d = f0c * 0.5 * A + 0.5 * B per channel; diffuse weight 1 - max(E_d).
+        e_d = np.clip(f0c * 0.5 * a + 0.5 * b, 0.0, 1.0)
+        expected = (base * (1 - e_d.max()) + e_d) * 0.5
+        np.testing.assert_allclose(out, expected, rtol=1e-12)
+        # The neutral extension is exactly the base declared model.
+        neutral = {"f0": ref.specular_f0(np.array([1.5]), np.ones((1, 3))), "weight": np.array([1.0])}
+        for metallic in (0.0, 0.5, 1.0):
+            m = np.array([metallic])
+            np.testing.assert_allclose(
+                ref.declared_environment_radiance(base, m, rough, mu, 0.5, ref.DECLARED, neutral),
+                ref.declared_environment_radiance(base, m, rough, mu, 0.5), rtol=1e-12)
+        # Metals do not see the extension at all.
+        np.testing.assert_allclose(
+            ref.declared_environment_radiance(base, np.array([1.0]), rough, mu, 0.5, ref.DECLARED, dielectric),
+            ref.declared_environment_radiance(base, np.array([1.0]), rough, mu, 0.5), rtol=1e-12)
+
+    def test_declared_controls_differ_from_the_model(self):
+        mu, rough = np.array([0.5]), np.array([0.35])
+        base = np.array([[0.8, 0.35, 0.15]])
+        dielectric = {"f0": ref.specular_f0(np.array([2.4]), np.array([[2.0, 2.0, 2.0]])), "weight": np.array([0.5])}
+        good = ref.declared_environment_radiance(base, np.array([0.0]), rough, mu, 0.5, ref.DECLARED, dielectric)
+        for name, variant in ref.SPECULAR_DECLARED_CONTROLS.items():
+            wrong = ref.declared_environment_radiance(base, np.array([0.0]), rough, mu, 0.5, variant, dielectric)
+            self.assertGreater(float(np.abs(wrong - good).max() / good.max()), 0.01, name)
+
+    def test_word_decoding_of_record_zero(self):
+        data = {"materials": [{"feature_bits": 1, "extension_index": 4}, {"feature_bits": 0}],
+                "material_extensions": {"version": 1, "records_per_material": 4,
+                                        "records": [[0] * 20] * 4 + [[int.from_bytes(struct.pack("<f", x), "little")
+                                                                      for x in (1.33, 0.5, 2.0, 1.0, 0.25)] +
+                                                                     [ref.INVALID, ref.INVALID] + [0] * 13]}}
+        ior, spec, color = ref.material_specular(data, data["materials"][0])
+        self.assertAlmostEqual(ior, 1.33, places=6)
+        self.assertEqual((spec, color), (0.5, [2.0, 1.0, 0.25]))
+        self.assertIsNone(ref.material_specular(data, data["materials"][1]))
+        data["materials"][0]["feature_bits"] = 3  # clearcoat is outside the declared model
+        with self.assertRaises(ValueError):
+            ref.material_specular(data, data["materials"][0])
+
+
 class RayCastedSnapshot(unittest.TestCase):
     @staticmethod
     def write_sphere_ply(path, radius=0.4, slices=48, stacks=24):
@@ -397,6 +536,54 @@ class RayCastedSnapshot(unittest.TestCase):
             self.assertEqual(read_pfm(out / "declared.pfm").shape, read_pfm(out / "reference.pfm").shape)
             for name in declared["controls"]:
                 self.assertTrue((out / f"control-{name}.pfm").is_file())
+
+    def specular_snapshot(self, directory, sky, sun, metallic, ior, weight, color):
+        """A one-sphere snapshot whose material carries KHR_materials_ior/specular in record 0 (the exporter's keys)."""
+        root = self.snapshot(directory, sky, sun, metallic, 0.35, [0.8, 0.35, 0.15])
+        path = pathlib.Path(root) / "scene.json"
+        data = json.loads(path.read_text())
+        words = [int.from_bytes(struct.pack("<f", x), "little") for x in (ior, weight, *color)]
+        record0 = words + [ref.INVALID, ref.INVALID] + [0] * 13
+        data["materials"][0].update(feature_bits=1, extension_index=0, flags=256)
+        data["material_extensions"] = {"version": 1, "records_per_material": 4,
+                                       "records": [record0, [0] * 20, [0] * 20, [0] * 20]}
+        path.write_text(json.dumps(data))
+        return root
+
+    def test_specular_sphere_sun_image_follows_the_extension_and_the_controls_differ(self):
+        from f12_reference import snapshot as load
+        with tempfile.TemporaryDirectory() as tmp:
+            toward = unit(-0.8, 0.35, -0.3)
+            root = self.specular_snapshot(tmp, 0.0, (toward, 3.0), 0.0, 1.33, 0.5, (2.0, 1.0, 0.5))
+            root, data = load(root)
+            self.assertTrue(ref.uses_specular_extension(data))
+            image, masks, spheres, terms = ref.render_frame(root, data, ref.SPECULAR_EXT, threads=2)
+            self.assertEqual(spheres[0]["ior"], np.float32(1.33).item())
+            self.assertIn("group", spheres[0])
+            lit = masks["roi"] & masks["lit"]
+            self.assertGreater(int(lit.sum()), 100)
+            for name in ("specular-ignored", "f90-one", "specular-weight-not-on-f0"):
+                other, *_ = ref.render_frame(root, data, ref.CONTROLS[name], threads=2)
+                difference = np.abs(other[lit] - image[lit]).max() / image[lit].max()
+                self.assertGreater(float(difference), 0.01, name)
+
+    def test_specular_sphere_declared_environment_and_main_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.specular_snapshot(tmp, 0.5, None, 0.0, 2.4, 0.5, (2.0, 2.0, 2.0))
+            out = pathlib.Path(tmp) / "out"
+            code = ref.main(["render", str(root), "--out", str(out), "--declared-controls",
+                             "declared-specular-ignored", "declared-f90-one", "declared-specular-weight-not-on-f0"])
+            self.assertEqual(code, 0)
+            report = json.loads((out / "reference.json").read_text())
+            self.assertEqual(report["model_variant"]["dielectric"], "extension")
+            self.assertEqual(sorted(report["declared"]["controls"]),
+                             ["declared-f90-one", "declared-specular-ignored", "declared-specular-weight-not-on-f0"])
+            from f12_reference import read_pfm
+            main = read_pfm(out / "declared.pfm")
+            roi = np.load(out / "masks.npz")["roi"]
+            for name in report["declared"]["controls"]:
+                control = read_pfm(out / f"control-{name}.pfm")
+                self.assertGreater(float(np.abs(control[roi] - main[roi]).max() / main[roi].max()), 0.01, name)
 
     def test_sun_lit_hemisphere_and_masks(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -19,6 +19,7 @@ import json
 import math
 import os
 import pathlib
+import struct
 import subprocess
 import sys
 import tempfile
@@ -52,10 +53,16 @@ SPECS = {
     "roughness-extremes": dict(roughness=[0.0, 1.0], metallic=[0.0, 0.5, 1.0], base=COPPER, sun=3.0, env=0.3),
     "roughness-extremes-sun": dict(roughness=[0.0, 1.0], metallic=[0.0, 0.5, 1.0], base=COPPER, sun=3.0, env=0.0),
 }
+# F15.1: the ior x specular grids (mirrors MaterialValidation: columns = ior, rows = (factor, colour, metallic)).
+SPEC_IOR = [0.0, 1.0, 1.33, 1.5, 2.4]
+SPEC_ROWS = [(1.0, [1, 1, 1], 0.0), (0.5, [1, 1, 1], 0.0), (1.0, [2, 2, 2], 0.0), (0.5, [2, 1, 0.5], 0.0),
+             (0.5, [2, 2, 2], 1.0)]
+for _name, _sun, _env in (("specular-grid-sun", 3.0, 0.0), ("specular-grid-env-resolve", 0.0, 0.5)):
+    SPECS[_name] = dict(roughness=[0.35] * 5, metallic=[row[2] for row in SPEC_ROWS], base=COPPER, sun=_sun, env=_env,
+                        ior=SPEC_IOR, specular=[(row[0], row[1]) for row in SPEC_ROWS])
 
 
 def write_sphere_ply(path, radius=0.4, slices=64, stacks=32):
-    import struct
     verts, faces = [], []
     for st in range(stacks + 1):
         theta = math.pi * st / stacks
@@ -85,14 +92,21 @@ def make_bench_snapshot(folder, name, width, height):
     (folder / "snapshot").mkdir(parents=True)
     write_sphere_ply(folder / "snapshot" / "mesh_0.ply")
     cols, rows = len(spec["roughness"]), len(spec["metallic"])
-    instances, materials = [], []
+    instances, materials, records = [], [], []
     for row in range(rows):
         for col in range(cols):
             x, y = -0.5 * (cols - 1) + col, float(row)
             world = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, 0, 1]
             materials.append({"base": [*spec["base"], 1], "emissive": [0, 0, 0], "metallic": spec["metallic"][row],
                               "roughness": spec["roughness"][col], "normal_scale": 1, "occlusion_strength": 1,
-                              "alpha_cutoff": 0, "flags": 0, "textures": [ref.INVALID] * 5})
+                              "alpha_cutoff": 0, "flags": 0, "textures": [ref.INVALID] * 5,
+                              "feature_bits": 0, "extension_index": -1})
+            if "ior" in spec:
+                ior, (factor, color) = spec["ior"][col], spec["specular"][row]
+                if not (ior == 1.5 and factor == 1.0 and color == [1, 1, 1]):  # the neutral block is not a feature
+                    words = [int.from_bytes(struct.pack("<f", v), "little") for v in (ior, factor, *color)]
+                    materials[-1].update(feature_bits=1, flags=256, extension_index=len(records))
+                    records += [words + [ref.INVALID, ref.INVALID] + [0] * 13, [0] * 20, [0] * 20, [0] * 20]
             instances.append({"slot": len(instances), "generation": 1, "flags": 7, "mesh": 0,
                               "material": len(materials) - 1, "world": world})
     distance = 5.5 if cols > 2 else 4.0
@@ -101,7 +115,8 @@ def make_bench_snapshot(folder, name, width, height):
                        "fov_y_radians": math.radians(60), "near": 0.05, "far": 0, "width": width, "height": height,
                        "jitter_pixels": [0, 0], "projection": "perspective_reverse_z_infinite"},
             "sky": [spec["env"]] * 3, "sun_angular_radius": 0.00465, "textures": [], "materials": materials,
-            "meshes": ["mesh_0.ply"], "instances": instances, "lights": [], "sampled_lights": []}
+            "meshes": ["mesh_0.ply"], "instances": instances, "lights": [], "sampled_lights": [],
+            "material_extensions": {"version": 1, "records_per_material": 4, "records": records}}
     if spec["sun"] > 0:
         data["lights"].append({"type": 0, "position": [0, 0, 0], "direction": list(-TOWARD_SUN), "color": [1, 1, 1],
                                "intensity": spec["sun"], "range": 0, "inner": 0, "outer": 0})
@@ -155,6 +170,29 @@ class RunnerLogic(unittest.TestCase):
             for key in ("commit", "os", "sdk_version", "power", "tool_sha256", "seed", "thresholds"):
                 self.assertIn(key, plan)
             self.assertIn("f15_common.py", plan["tool_sha256"])
+
+    def test_plan_prints_the_specular_scenarios(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                code = check.main(["--out", tmp, "--binary", "build/release/phosphor", "--only", "specular-grid-sun",
+                                   "--only", "specular-grid-env-resolve"])
+            self.assertEqual(code, 0)
+            text = buffer.getvalue()
+            self.assertIn("# specular-grid-sun:", text)
+            self.assertIn("# specular-grid-env-resolve:", text)
+            plan = json.loads((pathlib.Path(tmp) / "plan.json").read_text())
+            sun = plan["commands"]["specular-grid-sun"]
+            env = plan["commands"]["specular-grid-env-resolve"]
+            self.assertEqual(sun["capture"][sun["capture"].index("--material-scenario") + 1], "specular-grid-sun")
+            self.assertEqual(sun["capture"][sun["capture"].index("--reflections") + 1], "ssr")
+            self.assertEqual(env["capture"][env["capture"].index("--reflections") + 1], "off")
+            self.assertEqual(env["capture"][env["capture"].index("--lighting-denoise") + 1], "custom")
+            for name in ("specular-ignored", "f90-one", "specular-weight-not-on-f0"):
+                self.assertIn(name, sun["reference"])
+            for name in ("declared-specular-ignored", "declared-f90-one", "declared-specular-weight-not-on-f0"):
+                self.assertIn(name, env["reference"])
+            self.assertTrue(check.SCENARIOS["specular-grid-sun"]["always_green"])
 
     def test_plan_prints_the_exact_commands_of_the_new_scenarios(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -509,6 +547,38 @@ class BenchMirror(unittest.TestCase):
         red = self.scenario("roughness-extremes-sun", ref.CONTROLS["engine-f0-blend"], "green", tag="-red")
         self.assertTrue(red["result"]["rows"]["0.0"]["pass"] and red["result"]["rows"]["1.0"]["pass"])
         self.assertFalse(red["result"]["rows"]["0.5"]["pass"])
+
+    def test_specular_grid_sun_is_green_for_the_extension_and_every_control_fails(self):
+        entry = self.scenario("specular-grid-sun", ref.SPECULAR_EXT, "red")  # always asserted green, even in red mode
+        self.assertTrue(entry["result"]["pass"], json.dumps(check.summarize(entry["result"])))
+        self.assertTrue(entry["expectation"]["asserted"] and entry["expectation"]["met"])
+        self.assertEqual(sorted(entry["controls"]), ["f90-one", "specular-ignored", "specular-weight-not-on-f0"])
+        for name, verdict in entry["controls"].items():
+            self.assertTrue(verdict["fails_gate"], (name, verdict))
+        self.assertTrue(entry["discriminating"])
+        # Rows are grouped by (metallic, weight, colour): the four dielectric rows and the metal row.
+        self.assertEqual(len(entry["result"]["rows"]), 5)
+        self.assertEqual(check.verdict([entry], "red"), ("EXPECTED_RED_CONFIRMED", 0))
+
+    def test_specular_grid_sun_rejects_an_engine_that_ignores_or_mis_models_the_extension(self):
+        for control in ("specular-ignored", "f90-one", "specular-weight-not-on-f0"):
+            entry = self.scenario("specular-grid-sun", ref.CONTROLS[control], "red", tag="-" + control)
+            self.assertFalse(entry["result"]["pass"], control)
+            self.assertFalse(entry["expectation"]["met"], control)  # asserted green: red is an unexpected result
+            self.assertEqual(check.verdict([entry], "red")[1], check.EXIT_UNEXPECTED)
+
+    def test_specular_grid_env_resolve_declared_gate_and_controls(self):
+        entry = self.scenario("specular-grid-env-resolve", ref.APPENDIX_B, "red", environment=ref.DECLARED)
+        self.assertTrue(entry["result"]["pass"], json.dumps(check.summarize(entry["result"])))
+        self.assertLess(entry["result"]["worst_mean"], 1e-4)
+        self.assertEqual(sorted(entry["controls"]), sorted(ref.SPECULAR_DECLARED_CONTROLS))
+        for name, verdict in entry["controls"].items():
+            self.assertTrue(verdict["fails_gate"], (name, verdict))
+        self.assertTrue(entry["discriminating"] and entry["gates_pass"])
+        for control, variant in ref.SPECULAR_DECLARED_CONTROLS.items():
+            wrong = self.scenario("specular-grid-env-resolve", ref.APPENDIX_B, "red", environment=variant, tag="-" + control)
+            self.assertFalse(wrong["result"]["pass"], control)
+            self.assertEqual(check.verdict([wrong], "red")[1], check.EXIT_UNEXPECTED)
 
     def test_cached_reference_is_reused_only_for_the_same_snapshot(self):
         entry = self.scenario("base-grid-env-resolve", ref.APPENDIX_B, "green", environment=ref.DECLARED, tag="-cache")
