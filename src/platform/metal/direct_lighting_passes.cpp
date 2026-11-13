@@ -120,10 +120,17 @@ struct DirectLightingPasses::Impl {
         guideServed=features.serve(p,200,kernels[Guide],featureUnion,[&]{return lighting::kernel("material_lighting_guides");});
         receiverServed=features.serve(p,201,receiver,featureUnion,[&]{return receiverDesc("forward_di_receiver_guide_fs");});
         {static const char* diNames[]={"restir_di_candidates_lobe","restir_di_temporal_lobe","restir_di_spatial_lobe"};
-            for(u32 k:{u32(Candidate),u32(Temporal),u32(Spatial)})diServed[k]=features.serve(p,202+(k-Candidate),kernels[k],featureUnion,[&]{return lighting::kernel(diNames[k-Candidate]);});
+            // Only the active estimator's kernels are requested (RT shade pipelines are compiled, never archived).
+            const bool ris=options.directLighting==DirectLightingMode::ReSTIR;
+            for(u32 k:{u32(Candidate),u32(Temporal),u32(Spatial)})diServed[k]=ris?features.serve(p,202+(k-Candidate),kernels[k],featureUnion,[&]{return lighting::kernel(diNames[k-Candidate]);}):kernels[k];
             const char* shadeName=rt?"restir_di_shade_rt_lobe":"restir_di_shade_lobe";
-            diServed[Shade]=features.serve(p,205,kernels[Shade],featureUnion,[&]{return lighting::kernel(shadeName,rt!=nullptr);});
-            clusterServed=features.serve(p,206,clusterShade,featureUnion,[&]{return lighting::kernel(rt?"light_cluster_shade_rt_lobe":"light_cluster_shade_lobe",rt!=nullptr);});}
+            diServed[Shade]=ris?features.serve(p,205,kernels[Shade],featureUnion,[&]{return lighting::kernel(shadeName,rt!=nullptr);}):kernels[Shade];
+            clusterServed=ris?clusterShade:features.serve(p,206,clusterShade,featureUnion,[&]{return lighting::kernel(rt?"light_cluster_shade_rt_lobe":"light_cluster_shade_lobe",rt!=nullptr);});
+            // One BSDF per frame: the RIS target (candidates, temporal, spatial) and the shading must agree, so while any
+            // ReSTIR kernel still serves its base pipeline (compiling) every ReSTIR pass uses the base kernels.
+            const bool restirLobes=diServed[Candidate]!=kernels[Candidate]&&diServed[Temporal]!=kernels[Temporal]&&
+                                   diServed[Spatial]!=kernels[Spatial]&&diServed[Shade]!=kernels[Shade];
+            if(!restirLobes)for(u32 k:{u32(Candidate),u32(Temporal),u32(Spatial),u32(Shade)})diServed[k]=kernels[k];}
         guideValid=featureUnion!=0&&guideServed!=kernels[Guide]&&receiverServed!=receiver&&p.isFinal(guideServed)&&p.isFinal(receiverServed);
         slot.readbackWidth=f.width;slot.readbackHeight=f.height;slot.readbackUnion=featureUnion;slot.readbackValid=guideValid;slot.readbackRecorded=false;slot.readbackFrame=f.index;
         const bool empty = n == 0 && !options.debugLighting && !options.debugLightingCorrupt;
