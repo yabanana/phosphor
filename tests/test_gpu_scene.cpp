@@ -204,23 +204,26 @@ TEST_CASE("GpuScene::setMaterialDescription: the GPU emissive is clamped to >= 0
     CHECK(scene.materialDescriptions()[0].base.emissive[0] == -2.0f);
 }
 
-TEST_CASE("GpuScene::setMaterialDescription is rejected once the scene store was built, until clear()") {
+TEST_CASE("GpuScene::setMaterialDescription after the store mirrored the library bumps the edit version") {
     GpuScene scene;
     GPUMaterial g{};
     g.roughness = 0.9f;
     scene.addMaterial(g, MaterialDescription{}, "m", MaterialSupportReport{});
     CHECK_FALSE(scene.materialLibrarySealed());
+    CHECK(scene.materialEditVersion() == 0);
     MaterialDescription d;
     d.base.roughness = 0.1f;
     CHECK(scene.setMaterialDescription(0, d));
     CHECK(scene.materials()[0].roughness == doctest::Approx(0.1f));
+    CHECK(scene.materialEditVersion() == 1);
 
+    // F15.1 (ticket 05): edits stay valid once sealed; SceneStore re-derives the library.
     scene.sealMaterialLibrary();
     CHECK(scene.materialLibrarySealed());
     d.base.roughness = 0.7f;
-    CHECK_FALSE(scene.setMaterialDescription(0, d));
-    CHECK(scene.materials()[0].roughness == doctest::Approx(0.1f)); // unchanged
-    CHECK(scene.materialDescriptions()[0].base.roughness == doctest::Approx(0.1f)); // description unchanged too
+    CHECK(scene.setMaterialDescription(0, d));
+    CHECK(scene.materials()[0].roughness == doctest::Approx(0.7f));
+    CHECK(scene.materialEditVersion() == 2);
 
     scene.clear();
     CHECK_FALSE(scene.materialLibrarySealed());

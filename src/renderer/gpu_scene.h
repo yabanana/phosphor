@@ -75,12 +75,10 @@ public:
     /// kept).  The material's support entry is recomputed from the new
     /// description (its features are then sourced from the description file).
     ///
-    /// Only valid BEFORE the scene store is built: once sealMaterialLibrary()
-    /// has been called the call is an error (logged) and is rejected, because
-    /// the persistent GPU scene would not see the edit.  Until F15 ticket 05
-    /// routes material edits through SceneStore deltas, overrides can only be
-    /// applied between loading a scene and the first scene sync.  Returns
-    /// false when `index` is out of range or the library is sealed.
+    /// Valid at any time (F15.1 ticket 05): after the scene store mirrors the
+    /// library the edit bumps materialEditVersion() and the store's next sync
+    /// re-derives the library records, which reach the GPU as material and
+    /// extension deltas.  Returns false when `index` is out of range.
     bool setMaterialDescription(u32 index, const MaterialDescription& description);
 
     /// Bindless textures a material slot falls back to without a texture (the
@@ -92,6 +90,9 @@ public:
     /// store's first sync of a scene; clear() reopens the library.
     void sealMaterialLibrary() { materialLibrarySealed_ = true; }
     [[nodiscard]] bool materialLibrarySealed() const { return materialLibrarySealed_; }
+    /// Incremented by every successful setMaterialDescription (SceneStore diffs
+    /// the library when it changes).
+    [[nodiscard]] u64 materialEditVersion() const { return materialEditVersion_; }
 
     /// Description, name and support report of material `index` (parallel to
     /// materials(); default-constructed for materials added without them).
@@ -148,6 +149,7 @@ private:
 
     std::vector<GPUInstance>   instances_;
     std::vector<GPUMaterial>   materials_;
+    u64                                materialEditVersion_ = 0;
     std::vector<MaterialDescription>   materialDescriptions_; // parallel to materials_
     std::vector<std::string>           materialNames_;        // parallel to materials_
     std::vector<MaterialSupportReport> materialSupport_;      // parallel to materials_

@@ -1727,7 +1727,7 @@ bool Engine::frame(float dt) {
         if(directLighting_)directLighting_->prepareFrame(*gpuScene_,*store_,lights_,sf);
         if(gi_)gi_->prepareFrame(*gpuScene_,*store_,lights_,sf);
         if(store_->stats().structure||store_->stats().fullInstances||store_->stats().fullNodes||!store_->instanceDeltas().empty()||!store_->nodeDeltas().empty()||!store_->motionSlots().empty()||!store_->dirtyRoots().empty())++surfaceGeometryEpoch_;
-        if(store_->stats().fullMaterials||!store_->materialDeltas().empty())++surfaceMaterialEpoch_;
+        if(store_->materialsChanged())++surfaceMaterialEpoch_;
         const GiEnvironment environment=declaredEnvironment(atmosphere_.get(),options_);
         const auto lightEpoch=surfaceLightingEpoch_.update(lights_,environment,directLighting_?directLighting_->lightRevision():0);
         const SurfaceSignal signal{sceneEpoch_,surfaceGeometryEpoch_,surfaceMaterialEpoch_,rt_?rt_->geometryRevision():gpuScene_->geometryVersion(),lightEpoch,pipelines_->generation()};

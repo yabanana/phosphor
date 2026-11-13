@@ -617,7 +617,7 @@ struct AccelerationStructures::Impl {
                 if (proxy.selections[mesh].level != RtProxyLevel::Full)
                     throw std::runtime_error("RT proxy material assignment changed; reload with full/protected geometry");
         }
-        if (!store.materialDeltas().empty() || store.stats().fullMaterials)
+        if (store.materialsChanged())
             for (const auto& material : store.materials())
                 if (material.baseColorTex != INVALID_TEXTURE_INDEX && material.baseColorTex >= textures->textureCount())
                     throw std::invalid_argument("RT dynamic material texture index is outside bindless table");

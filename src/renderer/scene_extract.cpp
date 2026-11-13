@@ -1,6 +1,7 @@
 #include "renderer/scene_extract.h"
 #include "core/profile.h"
 #include "renderer/gpu_scene.h"
+#include "renderer/material_extension_pack.h"
 #include "scene/components.h"
 #include "scene/ecs.h"
 
@@ -29,6 +30,10 @@ GPUMaterial toGPUMaterial(const MaterialComponent& mat) {
     gm.emissive[2]          = mat.emissiveFactor.z;
     gm.alphaCutoff          = mat.alphaCutoff;
     gm.flags                = mat.doubleSided ? MATERIAL_FLAG_DOUBLE_SIDED : 0u;
+    // F15.1: feature bits follow the extension; the extension group index is
+    // assigned by SceneStore (the legacy FrameScene path has no extension buffer).
+    if (mat.extension) gm.flags |= featureFlags(*mat.extension);
+    gm.extensionIndex       = MATERIAL_EXTENSION_INVALID;
     return gm;
 }
 

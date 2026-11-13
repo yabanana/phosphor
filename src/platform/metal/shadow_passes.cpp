@@ -295,7 +295,7 @@ struct ShadowPasses::Impl {
     void prepare(const SceneStore& store,std::span<const GPULight> lights,const Frame& f) {
         frame=f;reserve(store.slotCapacity(),f.backingWidth,f.backingHeight);
         if(store.stats().structure || store.stats().fullInstances || !store.instanceDeltas().empty() || !store.motionSlots().empty() || !store.dirtyRoots().empty())++casterRevision;
-        if(store.stats().fullMaterials || !store.materialDeltas().empty())++materialRevision;
+        if(store.materialsChanged())++materialRevision;
         if(cachedPipelineGeneration!=pipelines.generation()) {
             cachedPipelineGeneration=pipelines.generation();++materialRevision; // alpha shader hot reload also invalidates static depth
         }

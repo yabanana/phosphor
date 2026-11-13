@@ -43,6 +43,17 @@ class GpuScene;
 // persistent material per entity with a MaterialComponent, allocated once
 // (free list) and re-sent only when the component changes.
 //
+// Material extensions (F15.1): an extended material (one with an active
+// feature) owns a fixed group of MATERIAL_EXT_RECORDS records in a separate
+// buffer (extensions(), GPUMaterial::extensionIndex = first record, feature
+// bits in GPUMaterial::flags).  The group is allocated when the material first
+// becomes extended (a counted structure change, never per frame) and kept
+// while the material lives, so toggling features rewrites records but never
+// reallocates; its records are produced by packMaterialExtensions from the
+// library description (GpuScene::materialDescriptions) or the entity's
+// MaterialComponent::extension and travel as deltas exactly like materials.
+// featureUnion() is the OR of the feature bits of the live materials.
+//
 // Hierarchy (F5.2): an entity with a HierarchyComponent is a child: its
 // slot has a GPUTransformNode (local matrix = its TransformComponent's
 // worldMatrix field, parent slot, depth) and its world matrix is computed on
@@ -84,11 +95,13 @@ struct SceneSyncStats {
     u32  materials       = 0;
     u32  instanceRecords = 0; // delta records written this frame, per buffer
     u32  materialRecords = 0;
+    u32  extensionRecords = 0; // extension delta records this frame
     u32  nodeRecords     = 0;
     u32  motionRecords   = 0;
     u32  dirtyRoots      = 0;
     bool fullInstances   = false; // whole buffer copied this frame
     bool fullMaterials   = false;
+    bool fullExtensions  = false;
     bool fullNodes       = false;
     bool fullMotions     = false;
     bool structure       = false; // bucket table / CSR / motion list / capacity changed
@@ -120,6 +133,8 @@ public:
     // --- Mirror (slot space; what the GPU buffers must hold) -------------------
     [[nodiscard]] std::span<const GPUInstance>      instances() const;  // slotCapacity()
     [[nodiscard]] std::span<const GPUMaterial>      materials() const;
+    /// F15.1: extension records (extensionGroupCapacity() * MATERIAL_EXT_RECORDS).
+    [[nodiscard]] std::span<const GPUMaterialExtRecord> extensions() const;
     [[nodiscard]] std::span<const GPUTransformNode> nodes() const;      // slotCapacity(); unused for roots
     [[nodiscard]] std::span<const GPUMotion>        motions() const;    // slotCapacity(); unused without motion
     [[nodiscard]] std::span<const SceneBucket>      buckets() const;    // sorted by (cull, mesh)
@@ -146,6 +161,12 @@ public:
     [[nodiscard]] u32 maxDepth() const; // 0 = no hierarchy
     /// True if any material is emissive (forward variant selection).
     [[nodiscard]] bool hasEmissive() const;
+    /// F15.1: OR of the feature bits (MaterialFeature bit values, unshifted) of
+    /// the live materials; 0 for a scene without features (Sponza, benches).
+    [[nodiscard]] u32 featureUnion() const;
+    /// Extension groups handed out so far (live + free) and the capacity.
+    [[nodiscard]] u32 extensionGroups() const;
+    [[nodiscard]] u32 extensionGroupCapacity() const;
 
     /// Slot of an entity's instance (~0u: not in the store) and its GPU
     /// material index (the library index or its persistent per-entity one).
@@ -157,6 +178,11 @@ public:
     // --- This frame's deltas ----------------------------------------------------
     [[nodiscard]] std::span<const GPUDeltaRecord> instanceDeltas() const;
     [[nodiscard]] std::span<const GPUDeltaRecord> materialDeltas() const;
+    [[nodiscard]] std::span<const GPUDeltaRecord> extensionDeltas() const;
+    /// True when any material data changed this frame (base records or
+    /// extension records, deltas or full copies): the single "material
+    /// revision" test of every consumer that caches material-dependent state.
+    [[nodiscard]] bool materialsChanged() const;
     [[nodiscard]] std::span<const GPUDeltaRecord> nodeDeltas() const;
     [[nodiscard]] std::span<const GPUDeltaRecord> motionDeltas() const;
     [[nodiscard]] const SceneSyncStats& stats() const;

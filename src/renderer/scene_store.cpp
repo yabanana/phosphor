@@ -2,6 +2,7 @@
 
 #include "core/log.h"
 #include "renderer/gpu_scene.h"
+#include "renderer/material_extension_pack.h"
 #include "scene/components.h"
 #include "scene/ecs.h"
 
@@ -134,6 +135,16 @@ struct SceneStore::Impl {
     std::vector<GPUTransformNode> nodes_;
     std::vector<GPUMotion>        motions_;
     std::vector<GPUMaterial>      materials_;
+    // F15.1 extension buffer: groups of MATERIAL_EXT_RECORDS records; matGroup_[i] =
+    // first record of material i's group (NONE: not extended).
+    std::vector<GPUMaterialExtRecord> ext_;
+    std::vector<u32>              extStamp_, matGroup_, extFree_; // extFree_: free group ids
+    std::vector<GPUDeltaRecord>   extRecs_;
+    std::vector<u32>              extDirty_;
+    u32 extHigh_ = 0, extCap_ = 0;            // groups handed out / capacity (groups)
+    u32 featureCount_[MATERIAL_FEATURE_COUNT] = {};
+    u64 editVersion_ = 0;                     // GpuScene::materialEditVersion mirrored
+    bool extCapChanged_ = false;
     std::vector<u32>              slotEntity_;
     std::vector<u32>              instStamp_, nodeStamp_, motStamp_, rootStamp_, matStamp_;
 
@@ -234,11 +245,49 @@ struct SceneStore::Impl {
         const size_t n = size_t(libRegion_) + newCap;
         growVector(materials_, n);
         growVector(matStamp_, n);
+        growVector(matGroup_, n);
         materials_.resize(n);
         matStamp_.resize(n, 0);
+        matGroup_.resize(n, NONE);
         matCap_        = newCap;
         matCapChanged_ = true;
         structure_     = true; // buffer re-sized: the host re-sends it (and rebinds)
+    }
+
+    void markExt(u32 r) { if (extStamp_[r] != frame_) { extStamp_[r] = frame_; extDirty_.push_back(r); } }
+
+    void growExt(u32 newCapGroups) {
+        if (newCapGroups <= extCap_) return;
+        const size_t n = size_t(newCapGroups) * MATERIAL_EXT_RECORDS;
+        growVector(ext_, n);
+        growVector(extStamp_, n);
+        ext_.resize(n);
+        extStamp_.resize(n, 0);
+        extCap_        = newCapGroups;
+        extCapChanged_ = true;
+        structure_     = true; // buffer re-sized: the host re-sends it
+    }
+
+    void setExt(u32 r, const GPUMaterialExtRecord& rec) {
+        if (sameBytes(ext_[r], rec)) return;
+        ext_[r] = rec;
+        markExt(r);
+    }
+
+    u32 allocGroup() {
+        if (!extFree_.empty()) {
+            const u32 g = extFree_.back();
+            extFree_.pop_back();
+            return g * MATERIAL_EXT_RECORDS;
+        }
+        if (extHigh_ == extCap_) growExt(std::max<u32>(4u, extCap_ + extCap_ / 2)); // a counted structure change
+        return (extHigh_++) * MATERIAL_EXT_RECORDS;
+    }
+
+    void countFeatures(const GPUMaterial& m, int delta) {
+        const u32 bits = materialFeatureBits(m);
+        for (u32 f = 0; f < MATERIAL_FEATURE_COUNT; ++f)
+            if (bits & (1u << f)) featureCount_[f] = u32(int(featureCount_[f]) + delta);
     }
 
     void setMaterial(u32 idx, const GPUMaterial& gm) {
@@ -246,8 +295,41 @@ struct SceneStore::Impl {
         if (sameBytes(cur, gm)) return;
         if (isEmissive(cur)) --emissiveCount_;
         if (isEmissive(gm)) ++emissiveCount_;
+        countFeatures(cur, -1);
+        countFeatures(gm, +1);
         cur = gm;
         markMat(idx);
+    }
+
+    /// Install material `idx` from its base record and optional extension data:
+    /// feature bits from the description, the extension group allocated when the
+    /// material first becomes extended (kept afterwards: toggling a feature
+    /// rewrites records, never the group), records packed and diffed.
+    void applyMaterial(u32 idx, GPUMaterial gm, const MaterialDescription* desc) {
+        const u32 mask = desc ? featureMask(*desc) : 0u;
+        u32 group = matGroup_[idx];
+        if (group == NONE && mask != 0) {
+            group = allocGroup();
+            matGroup_[idx] = group;
+        }
+        if (group != NONE) {
+            const MaterialExtGroup recs = packMaterialExtensions(desc ? *desc : MaterialDescription{});
+            for (u32 k = 0; k < MATERIAL_EXT_RECORDS; ++k) setExt(group + k, recs[k]);
+        }
+        gm.flags = (gm.flags & ~(MATERIAL_FEATURES_ALL << MATERIAL_FEATURE_SHIFT)) | (mask << MATERIAL_FEATURE_SHIFT);
+        gm.extensionIndex = group == NONE ? MATERIAL_EXTENSION_INVALID : group;
+        setMaterial(idx, gm);
+    }
+
+    /// Library material `i` from the scene (base record + description, if any).
+    void applyLibraryMaterial(u32 i) {
+        const auto& lib = scene_->materials();
+        const auto& desc = scene_->materialDescriptions();
+        if (lib.empty()) {
+            applyMaterial(0, toGPUMaterial(MaterialComponent{}), nullptr);
+            return;
+        }
+        applyMaterial(i, lib[i], i < desc.size() ? &desc[i] : nullptr);
     }
 
     u32 allocMaterial() {
@@ -263,7 +345,14 @@ struct SceneStore::Impl {
     void freeMaterial(u32 e) {
         Ent& en = ent_[e];
         if (en.matSlot == NONE) return;
-        setMaterial(libRegion_ + en.matSlot, GPUMaterial{});
+        const u32 idx = libRegion_ + en.matSlot;
+        if (matGroup_[idx] != NONE) { // the group goes back to the pool, zeroed (verify checks it)
+            const u32 g = matGroup_[idx];
+            for (u32 k = 0; k < MATERIAL_EXT_RECORDS; ++k) setExt(g + k, GPUMaterialExtRecord{});
+            extFree_.push_back(g / MATERIAL_EXT_RECORDS);
+            matGroup_[idx] = NONE;
+        }
+        setMaterial(idx, GPUMaterial{});
         matFree_.push_back(en.matSlot);
         en.matSlot = NONE;
     }
@@ -582,7 +671,7 @@ struct SceneStore::Impl {
         if (const MaterialComponent* mc = mat_->tryGet(e)) {
             if (en.matSlot == NONE) en.matSlot = allocMaterial();
             matIdx = libRegion_ + en.matSlot;
-            setMaterial(matIdx, toGPUMaterial(*mc)); // (may grow materials_; no Ent reference is invalidated)
+            applyMaterial(matIdx, toGPUMaterial(*mc), mc->extension.get()); // (may grow materials_; no Ent reference is invalidated)
         } else {
             freeMaterial(e);
             matIdx = mi.materialIndex < libRegion_ ? mi.materialIndex : 0u;
@@ -658,6 +747,9 @@ struct SceneStore::Impl {
         dirtyRoots_.clear();
         instRecs_.clear(); matRecs_.clear(); nodeRecs_.clear(); motRecs_.clear();
         instDirty_.clear(); nodeDirty_.clear(); motDirty_.clear(); matDirty_.clear();
+        ext_.clear(); extStamp_.clear(); matGroup_.clear(); extFree_.clear(); extRecs_.clear(); extDirty_.clear();
+        extHigh_ = extCap_ = 0;
+        std::memset(featureCount_, 0, sizeof(featureCount_));
         work_.clear(); dirtyParents_.clear();
         matFree_.clear();
         matHigh_ = matCap_ = 0;
@@ -672,10 +764,31 @@ struct SceneStore::Impl {
         libRegion_ = std::max<u32>(1u, static_cast<u32>(lib.size()));
         meshCount_ = scene_->getMeshCount();
         geometryVersion_ = scene_->geometryVersion();
+        editVersion_ = scene_->materialEditVersion();
+        // Size the extension buffer for the extended materials of the scene (library and
+        // entities) so the first sync is not a growth event; none: nothing allocated.
+        u32 extended = 0;
+        {
+            const auto& desc = scene_->materialDescriptions();
+            for (u32 i = 0; i < lib.size() && i < desc.size(); ++i) extended += featureMask(desc[i]) != 0 ? 1u : 0u;
+            for (EntityID e : mat_->entities())
+                if (const MaterialComponent* mc = mat_->tryGet(e); mc && mc->extension && featureMask(*mc->extension) != 0)
+                    ++extended;
+        }
         materials_.assign(lib.begin(), lib.end());
         if (materials_.empty()) materials_.push_back(toGPUMaterial(MaterialComponent{}));
         matStamp_.assign(materials_.size(), 0);
+        matGroup_.assign(materials_.size(), NONE);
+        if (extended > 0) growExt(extended + extended / 4 + 1);
+        // The store owns the feature bits and the extension index of the library records.
+        for (u32 i = 0; i < materials_.size(); ++i) {
+            GPUMaterial base = materials_[i];
+            base.flags &= ~(MATERIAL_FEATURES_ALL << MATERIAL_FEATURE_SHIFT);
+            base.extensionIndex = MATERIAL_EXTENSION_INVALID;
+            materials_[i] = base;
+        }
         for (const GPUMaterial& m : materials_) emissiveCount_ += isEmissive(m) ? 1u : 0u;
+        for (u32 i = 0; i < materials_.size(); ++i) applyLibraryMaterial(i);
 
         u32 maxId = 0;
         bool any = false;
@@ -829,6 +942,7 @@ struct SceneStore::Impl {
         deltas(capacityChanged_, nodeDirty_, nodes_, nodeRecs_, stats_.fullNodes, stats_.nodeRecords);
         deltas(capacityChanged_, motDirty_, motions_, motRecs_, stats_.fullMotions, stats_.motionRecords);
         deltas(matCapChanged_, matDirty_, materials_, matRecs_, stats_.fullMaterials, stats_.materialRecords);
+        deltas(extCapChanged_, extDirty_, ext_, extRecs_, stats_.fullExtensions, stats_.extensionRecords);
 
         // Dirty roots (GPU queue 0): parents whose descendants must be recomputed.
         dirtyRoots_.clear();
@@ -870,13 +984,14 @@ struct SceneStore::Impl {
         stats_.buckets   = static_cast<u32>(buckets_.size());
         stats_.materials = static_cast<u32>(materials_.size());
         stats_.dirtyRoots = static_cast<u32>(dirtyRoots_.size());
-        u64 bytes = u64(stats_.instanceRecords + stats_.materialRecords + stats_.nodeRecords + stats_.motionRecords) *
-                    sizeof(GPUDeltaRecord);
+        u64 bytes = u64(stats_.instanceRecords + stats_.materialRecords + stats_.extensionRecords + stats_.nodeRecords +
+                        stats_.motionRecords) * sizeof(GPUDeltaRecord);
         if (stats_.fullInstances) bytes += u64(instances_.size()) * sizeof(GPUInstance);
         if (stats_.fullNodes)     bytes += u64(nodes_.size()) * sizeof(GPUTransformNode);
         if (stats_.fullMotions)   bytes += u64(motions_.size()) * sizeof(GPUMotion);
         if (stats_.motionParentsChanged) bytes += 32 + u64(motionParentSlots_.size()) * sizeof(u32);
         if (stats_.fullMaterials) bytes += u64(materials_.size()) * sizeof(GPUMaterial);
+        if (stats_.fullExtensions) bytes += u64(ext_.size()) * sizeof(GPUMaterialExtRecord);
         if (stats_.structure) {
             bytes += u64(gpuBuckets_.size()) * sizeof(GPUDrawBucket) + u64(commandBuckets_.size()) * sizeof(u32) +
                      u64(csrOffsets_.size() + csrSlots_.size() + motionSlots_.size()) * sizeof(u32);
@@ -897,15 +1012,29 @@ struct SceneStore::Impl {
         ++frame_;
         instRecs_.clear(); matRecs_.clear(); nodeRecs_.clear(); motRecs_.clear();
         instDirty_.clear(); nodeDirty_.clear(); motDirty_.clear(); matDirty_.clear();
+        extRecs_.clear(); extDirty_.clear();
         dirtyParents_.clear();
         stats_ = SceneSyncStats{};
-        structure_ = capacityChanged_ = matCapChanged_ = csrDirty_ = bucketsDirty_ = fullAll_ = false;
+        structure_ = capacityChanged_ = matCapChanged_ = extCapChanged_ = csrDirty_ = bucketsDirty_ = fullAll_ = false;
 
-        const bool rebuild = !built_ || scene.geometryVersion() != geometryVersion_ ||
-                             std::max<u32>(1u, static_cast<u32>(scene.materials().size())) != libRegion_;
+        bool rebuild = !built_ || scene.geometryVersion() != geometryVersion_ ||
+                       std::max<u32>(1u, static_cast<u32>(scene.materials().size())) != libRegion_;
+        // A library edit that flips double-sided changes the cull class (bucket) of its
+        // instances: rebuild (rare, an authoring-time edit).
+        if (!rebuild && scene.materialEditVersion() != editVersion_) {
+            const auto& lib = scene.materials();
+            for (u32 i = 0; i < lib.size() && i < materials_.size(); ++i)
+                if ((lib[i].flags ^ materials_[i].flags) & MATERIAL_FLAG_DOUBLE_SIDED) { rebuild = true; break; }
+        }
         if (rebuild) {
             build();
         } else {
+            // A runtime edit of a library material (GpuScene::setMaterialDescription): re-derive
+            // the library records; unchanged ones diff to nothing (O(library), only on an edit).
+            if (scene.materialEditVersion() != editVersion_) {
+                editVersion_ = scene.materialEditVersion();
+                for (u32 i = 0; i < libRegion_; ++i) applyLibraryMaterial(i);
+            }
             gather();
             processWork();
         }
@@ -935,8 +1064,41 @@ std::string SceneStore::Impl::verify(const ECS& ecs, const GpuScene& scene) cons
     const u32 libRegion = static_cast<u32>(expLib.size());
     if (libRegion != libRegion_) return fmt("library size %u != %u", libRegion, libRegion_);
     if (materials_.size() < libRegion) return "materials_ smaller than the library";
-    for (u32 i = 0; i < libRegion; ++i) {
-        if (!sameBytes(materials_[i], expLib[i])) return fmt("library material %u differs", i);
+    // F15.1: extension groups in use (owner material -> checked below; unowned groups are zero).
+    std::vector<u8> groupOwned(extHigh_, 0);
+    // Expected record of a material: base data + feature bits of its description; the
+    // extension index is allocation history, so it is taken from the mirror after
+    // validating it (aligned, inside the used range, owned once, records equal the packing).
+    const auto checkMaterial = [&](u32 idx, GPUMaterial exp, const MaterialDescription* desc) -> std::string {
+        const u32 mask = desc ? featureMask(*desc) : 0u;
+        exp.flags = (exp.flags & ~(MATERIAL_FEATURES_ALL << MATERIAL_FEATURE_SHIFT)) | (mask << MATERIAL_FEATURE_SHIFT);
+        const u32 got = materials_[idx].extensionIndex;
+        if (got == MATERIAL_EXTENSION_INVALID) {
+            if (mask != 0) return fmt("material %u: active features without an extension group", idx);
+            if (matGroup_[idx] != NONE) return fmt("material %u: group tracked but not in the record", idx);
+        } else {
+            if (got % MATERIAL_EXT_RECORDS != 0 || got / MATERIAL_EXT_RECORDS >= extHigh_ || matGroup_[idx] != got)
+                return fmt("material %u: bad extension index %u", idx, got);
+            const u32 g = got / MATERIAL_EXT_RECORDS;
+            if (groupOwned[g]) return fmt("material %u: extension group %u shared", idx, g);
+            groupOwned[g] = 1;
+            const MaterialExtGroup want = packMaterialExtensions(desc ? *desc : MaterialDescription{});
+            for (u32 k = 0; k < MATERIAL_EXT_RECORDS; ++k)
+                if (!sameBytes(ext_[got + k], want[k])) return fmt("material %u: extension record %u differs", idx, k);
+        }
+        exp.extensionIndex = got;
+        if (!sameBytes(materials_[idx], exp)) return fmt("material %u differs", idx);
+        return {};
+    };
+    {
+        const auto& libDesc = scene.materialDescriptions();
+        for (u32 i = 0; i < libRegion; ++i) {
+            GPUMaterial exp = expLib[i];
+            exp.flags &= ~(MATERIAL_FEATURES_ALL << MATERIAL_FEATURE_SHIFT);
+            if (const std::string err = checkMaterial(i, exp, i < libDesc.size() && !lib.empty() ? &libDesc[i] : nullptr);
+                !err.empty())
+                return "library " + err;
+        }
     }
     const u32 meshCount = scene.getMeshCount();
 
@@ -1074,7 +1236,8 @@ std::string SceneStore::Impl::verify(const ECS& ecs, const GpuScene& scene) cons
             if (matUsed[en.matSlot]) return fmt("entity %u: material slot shared", e);
             matUsed[en.matSlot] = 1;
             matIdx = libRegion + en.matSlot;
-            if (!sameBytes(materials_[matIdx], toGPUMaterial(*mc))) return fmt("entity %u: material record differs", e);
+            if (const std::string err = checkMaterial(matIdx, toGPUMaterial(*mc), mc->extension.get()); !err.empty())
+                return fmt("entity %u: ", e) + err;
         } else {
             if (en.matSlot != NONE) return fmt("entity %u: stale per-entity material", e);
             matIdx = m.materialIndex < libRegion ? m.materialIndex : 0u;
@@ -1113,6 +1276,28 @@ std::string SceneStore::Impl::verify(const ECS& ecs, const GpuScene& scene) cons
         if (i >= libRegion && !matUsed[i - libRegion] && !isZero(materials_[i])) return fmt("free material %u not zero", i);
     }
     if (emissive != emissiveCount_ || (emissive > 0) != (emissiveCount_ > 0)) return "emissive count differs";
+    // F15.1: free and unowned extension groups are zero; the feature counters match the mirror.
+    {
+        std::vector<u8> freeSet(extHigh_, 0);
+        for (u32 g : extFree_) {
+            if (g >= extHigh_ || freeSet[g] || groupOwned[g]) return fmt("extension group %u: bad free list", g);
+            freeSet[g] = 1;
+        }
+        for (u32 g = 0; g < extHigh_; ++g) {
+            if (!groupOwned[g] && !freeSet[g]) return fmt("extension group %u leaked", g);
+            if (!groupOwned[g])
+                for (u32 k = 0; k < MATERIAL_EXT_RECORDS; ++k)
+                    if (!isZero(ext_[g * MATERIAL_EXT_RECORDS + k])) return fmt("free extension group %u not zero", g);
+        }
+        if (ext_.size() != size_t(extCap_) * MATERIAL_EXT_RECORDS) return "extension buffer size";
+        u32 counts[MATERIAL_FEATURE_COUNT] = {};
+        for (const GPUMaterial& m : materials_) {
+            const u32 bits = materialFeatureBits(m);
+            for (u32 f = 0; f < MATERIAL_FEATURE_COUNT; ++f) counts[f] += (bits >> f) & 1u;
+        }
+        for (u32 f = 0; f < MATERIAL_FEATURE_COUNT; ++f)
+            if (counts[f] != featureCount_[f]) return fmt("feature %u count differs", f);
+    }
 
     // CSR.
     if (csrOffsets_.size() != size_t(slotEnd()) + 1) return "CSR offsets size";
@@ -1178,6 +1363,15 @@ u32 SceneStore::maxDepth() const {
     return d;
 }
 bool SceneStore::hasEmissive() const { return impl_->emissiveCount_ > 0; }
+u32 SceneStore::featureUnion() const {
+    u32 u = 0;
+    for (u32 f = 0; f < MATERIAL_FEATURE_COUNT; ++f)
+        if (impl_->featureCount_[f] > 0) u |= 1u << f;
+    return u;
+}
+u32 SceneStore::extensionGroups() const { return impl_->extHigh_; }
+u32 SceneStore::extensionGroupCapacity() const { return impl_->extCap_; }
+std::span<const GPUMaterialExtRecord> SceneStore::extensions() const { return impl_->ext_; }
 
 u32 SceneStore::slotOf(EntityID entity) const {
     return entity < impl_->ent_.size() ? impl_->ent_[entity].slot : NONE;
@@ -1190,6 +1384,11 @@ u64 SceneStore::csrRebuildCount() const { return impl_->csrRebuilds_; }
 
 std::span<const GPUDeltaRecord> SceneStore::instanceDeltas() const { return impl_->instRecs_; }
 std::span<const GPUDeltaRecord> SceneStore::materialDeltas() const { return impl_->matRecs_; }
+std::span<const GPUDeltaRecord> SceneStore::extensionDeltas() const { return impl_->extRecs_; }
+bool SceneStore::materialsChanged() const {
+    const SceneSyncStats& st = impl_->stats_;
+    return st.fullMaterials || st.fullExtensions || !impl_->matRecs_.empty() || !impl_->extRecs_.empty();
+}
 std::span<const GPUDeltaRecord> SceneStore::nodeDeltas() const { return impl_->nodeRecs_; }
 std::span<const GPUDeltaRecord> SceneStore::motionDeltas() const { return impl_->motRecs_; }
 const SceneSyncStats& SceneStore::stats() const { return impl_->stats_; }

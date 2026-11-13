@@ -105,7 +105,7 @@ struct DirectLightingPasses::Impl {
             referenceWorlds(s,f.motionSinCos.data(),emissiveWorlds);
         } else emissiveWorlds.clear();
         if(emissiveDomain.update(lightScene.emitters,emissiveWorlds))++sceneSignal;
-        if(s.stats().structure||s.stats().fullMaterials||!s.materialDeltas().empty())++sceneSignal;
+        if(s.stats().structure||s.materialsChanged())++sceneSignal;
         const Signal signal{f.scene,sceneSignal,rt?rt->geometryRevision():g.geometryVersion(),lightScene.revision};
         if(!(signal==lastSignal)){++signalEpoch;lastSignal=signal;}
         const u64 revision=signalEpoch;

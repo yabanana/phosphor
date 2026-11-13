@@ -163,11 +163,6 @@ void GpuScene::setBaseTextureDefaults(u32 white, u32 metallicRoughness, u32 norm
 
 bool GpuScene::setMaterialDescription(u32 index, const MaterialDescription& d) {
     if (index >= materials_.size()) return false;
-    if (materialLibrarySealed_) {
-        LOG_ERROR("setMaterialDescription(%u): the material library is already mirrored by the scene store; "
-                  "edits need SceneStore deltas (F15 ticket 05); rejected", index);
-        return false;
-    }
     GPUMaterial& g = materials_[index];
     const BaseMaterial& b = d.base;
     for (size_t i = 0; i < 4; ++i) g.baseColor[i] = b.baseColor[i];
@@ -192,6 +187,7 @@ bool GpuScene::setMaterialDescription(u32 index, const MaterialDescription& d) {
     g.occlusionTex         = slot(b.occlusionTexture, g.occlusionTex, baseTextureDefaults_.white);
     g.emissiveTex          = slot(b.emissiveTexture, g.emissiveTex, baseTextureDefaults_.white);
     materialDescriptions_[index] = d;
+    ++materialEditVersion_;
 
     // The support entry follows the new description.
     MaterialSourceInfo info;

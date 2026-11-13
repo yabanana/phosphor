@@ -190,8 +190,8 @@ struct ReflectionPasses::Impl {
             u64(f.backingWidth)*f.backingHeight>std::numeric_limits<u32>::max())throw std::invalid_argument("Invalid F13 frame extent or view");
         frame=f;if(!rawCube)throw std::logic_error("F13 loadScene must precede prepareFrame");
         if(custom!=useCustom){custom=useCustom;denoise.invalidateAll("F13 denoiser path change");++graphVersion;}reserve();
-        const bool recordsChanged=staticStructure!=store.structureVersion()||store.stats().fullInstances||store.stats().fullNodes||store.stats().fullMaterials||
-            !store.instanceDeltas().empty()||!store.nodeDeltas().empty()||!store.materialDeltas().empty();
+        const bool recordsChanged=staticStructure!=store.structureVersion()||store.stats().fullInstances||store.stats().fullNodes||store.materialsChanged()||
+            !store.instanceDeltas().empty()||!store.nodeDeltas().empty();
         if(recordsChanged){buildStatic(store);probePlacementDirty=true;}
         const bool nextRT=rt&&rt->active();const bool nextReflection=options.reflections==ReflectionMode::RT&&nextRT;
         const bool nextAO=options.ao==AoMode::RTAO&&nextRT,nextCapture=options.reflectionCaptureProbe&&nextRT;
@@ -251,7 +251,7 @@ struct ReflectionPasses::Impl {
         auto& slot=slots[frame.slot];slot.customUsed=custom;slot.expected=frame.width*frame.height;
         if(store.stats().fullInstances||!store.instanceDeltas().empty())++instanceRevision;
         if(store.stats().fullNodes||!store.nodeDeltas().empty())++nodeRevision;
-        if(store.stats().fullMaterials||!store.materialDeltas().empty())++materialRevision;
+        if(store.materialsChanged())++materialRevision;
         if(!store.motionSlots().empty()||!store.dirtyRoots().empty())++motionRevision;
         const GeometryContent geometryContent{f.scene,store.structureVersion(),rt?rt->geometryRevision():0,instanceRevision,nodeRevision,materialRevision,motionRevision,p.generation()};
         if(!geometryKnown||lastGeometry!=geometryContent){lastGeometry=geometryContent;geometryKnown=true;++geometryEpoch;}

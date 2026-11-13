@@ -88,7 +88,7 @@ struct GiPasses::Impl {
         frame=f;reserve(u64(f.backingWidth)*f.backingHeight);
         if(atlasValid){std::swap(previousIrr,nextIrr);std::swap(previousDist,nextDist);}
         if(s.stats().structure||s.stats().fullInstances||!s.instanceDeltas().empty()||!s.motionSlots().empty()||!s.dirtyRoots().empty())++sceneRevision;
-        if(s.stats().fullMaterials||!s.materialDeltas().empty())++materialRevision;
+        if(s.materialsChanged())++materialRevision;
         const u64 allLightEpoch=lightingEpoch.update(lights,environment,direct.lightRevision());
         const GeometrySignal geometry{f.scene,sceneRevision,rt.geometryRevision()};
         if(!(geometry==lastGeometry)){++geometryGeneration;lastGeometry=geometry;}
