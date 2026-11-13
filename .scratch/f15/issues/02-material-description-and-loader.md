@@ -14,3 +14,4 @@ Roadmap: F15.1, F15.3
 - [ ] `MATERIALS` log line and report-JSON section (schema bump) with implemented / approximated / unsupported per material and feature; draft/RC inputs labelled
 - [ ] Material-description file load/save round-trip and name-keyed override over a glTF, with validation errors for out-of-range values
 - [ ] No Track Studio type or name appears in the schema (ADR-0001); Sponza loads with an empty feature set and identical images (visual_check 0 px)
+- [ ] Image URIs resolve only inside the asset's directory (no absolute paths, `..` or symlink escape), reported as a load error otherwise (lesson from the Track Studio audit)
