@@ -137,3 +137,41 @@ TEST_CASE("procedural meshes: flat polyhedra have one normal per face, smooth on
         CHECK(glm::length(smooth.normals[i] - glm::normalize(smooth.positions[i])) < 1e-5f);
     }
 }
+
+TEST_CASE("procedural meshes: the combed sphere carries a uniform tangent field and a chosen handedness") {
+    const glm::vec3 comb(1.0f, 0.0f, 0.0f);
+    for (const float handedness : {-1.0f, 1.0f}) {
+        CAPTURE(handedness);
+        const MeshData plain = ProceduralMeshes::generateSphere(0.4f, 64, 32);
+        const MeshData mesh = ProceduralMeshes::generateCombedSphere(0.4f, 64, 32, comb, handedness);
+        // Geometry is the UV sphere's.
+        REQUIRE(mesh.positions.size() == plain.positions.size());
+        CHECK(mesh.indices == plain.indices);
+        u32 notUnit = 0, notPerpendicular = 0, notComb = 0, wrongHandedness = 0, poles = 0;
+        for (size_t i = 0; i < mesh.normals.size(); ++i) {
+            const glm::vec3 n = mesh.normals[i];
+            const glm::vec3 t(mesh.tangents[i]);
+            if (std::abs(glm::length(t) - 1.0f) > 1e-5f) ++notUnit;
+            if (std::abs(glm::dot(t, n)) > 1e-5f) ++notPerpendicular;
+            if (mesh.tangents[i].w != handedness) ++wrongHandedness;
+            const glm::vec3 projected = comb - glm::dot(comb, n) * n;
+            if (glm::length(projected) <= 1e-3f) {
+                ++poles; // the poles of the field (normal = +-comb): any perpendicular
+                continue;
+            }
+            if (glm::dot(t, glm::normalize(projected)) < 1.0f - 1e-5f) ++notComb;
+        }
+        CHECK(notUnit == 0);
+        CHECK(notPerpendicular == 0);
+        CHECK(notComb == 0);
+        CHECK(wrongHandedness == 0);
+        CHECK(poles == 3); // normal = +x, -x and the +x seam duplicate on the equator row (slices 0, 32, 64)
+        // At the vertex facing +z the tangent is +x and the bitangent cross(N, T) w points to +y (w = +1) or -y (w = -1).
+        size_t front = 0;
+        for (size_t i = 0; i < mesh.normals.size(); ++i)
+            if (glm::dot(mesh.normals[i], glm::vec3(0, 0, 1)) > glm::dot(mesh.normals[front], glm::vec3(0, 0, 1))) front = i;
+        const glm::vec3 t(mesh.tangents[front]);
+        CHECK(glm::dot(t, glm::vec3(1, 0, 0)) > 0.999f);
+        CHECK(glm::cross(mesh.normals[front], t).y * handedness == doctest::Approx(handedness).epsilon(1e-3));
+    }
+}

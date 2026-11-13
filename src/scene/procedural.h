@@ -27,6 +27,14 @@ namespace ProceduralMeshes {
     // UV sphere centered at origin.
     MeshData generateSphere(float radius, u32 slices, u32 stacks);
 
+    // F15.3 (ticket 11): the UV sphere of generateSphere with a "combed" tangent field instead of the longitude
+    // one: the tangent of every vertex is the world direction `comb` projected onto its tangent plane (unit length,
+    // exactly perpendicular to the normal), `handedness` is stored in w (the engine's UV sphere uses -1: B = cross(N, T) * w).
+    // The field has its poles where the normal is +-comb; there (no projection left) the tangent is any unit
+    // perpendicular, a vertex-attribute choice only.  UVs are the sphere's: the tangent does NOT follow dP/du,
+    // so this mesh is a KHR_materials_anisotropy carrier (a uniform lobe direction facing the camera), not a UV test mesh.
+    MeshData generateCombedSphere(float radius, u32 slices, u32 stacks, const glm::vec3& comb, float handedness);
+
     // Axis-aligned cube centered at origin, side length = 2 * halfExtent.
     // 24 vertices (4 per face) with correct per-face normals and tangents.
     MeshData generateCube(float halfExtent);
