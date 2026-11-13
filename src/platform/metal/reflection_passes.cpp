@@ -282,7 +282,7 @@ struct ReflectionPasses::Impl {
         // alone keeps the temporalAlpha floor.
         auto& camera=lastCamera.at(f.view);const bool sameCamera=cameraKnown.at(f.view)&&std::memcmp(camera.data(),f.unjitteredVP,sizeof(f.unjitteredVP))==0;
         std::memcpy(camera.data(),f.unjitteredVP,sizeof(f.unjitteredVP));cameraKnown.at(f.view)=true;
-        if(custom){const std::array<u64,4> revisions{direct.lightRevision(),gi&&options.gi!=GiMode::Off?gi->readResources().parameters.cacheGeneration:0,specularEpoch,geometryEpoch};
+        if(custom){denoise.configureLobe((store.featureUnion()&MATERIAL_FEATURE_SPECULAR_IOR)?store.featureUnion():0u,lobeGuide);const std::array<u64,4> revisions{direct.lightRevision(),gi&&options.gi!=GiMode::Off?gi->readResources().parameters.cacheGeneration:0,specularEpoch,geometryEpoch};
             denoise.prepareFrame(frame,signalEpoch,revisions,options.directLighting!=DirectLightingMode::Legacy&&!slots[f.slot].skipLocalDenoise,
                                  1u<<DENOISE_SIGNAL_SPECULAR,softChange,sameCamera);}
         // F13.6 start-up boost: the first frames of a specular history (after a
@@ -422,7 +422,7 @@ struct ReflectionPasses::Impl {
             else{if(useDirectLighting)directSelected=denoise.addSignal(graph,DENOISE_SIGNAL_DI,direct.direct(),motion,receivers);
                 if(gi&&denoisesGi(options))giSelected=denoise.addSignal(graph,DENOISE_SIGNAL_GI,gi->irradiance(),motion,receivers);
                 if(options.ao!=AoMode::Off)aoSelected=denoise.addSignal(graph,DENOISE_SIGNAL_AO,ao,motion,receivers);}
-            if(options.reflections!=ReflectionMode::Off)specSelected=denoise.addSignal(graph,DENOISE_SIGNAL_SPECULAR,specular,motion,receivers,metadata);
+            if(options.reflections!=ReflectionMode::Off)specSelected=denoise.addSignal(graph,DENOISE_SIGNAL_SPECULAR,specular,motion,receivers,metadata,direct.lobeGuideRef());
         }
         if(options.captureLinearSignal==8){
             if(!custom||!gi||options.gi==GiMode::Off)throw std::logic_error("Filtered indirect capture requires GI and custom denoising");

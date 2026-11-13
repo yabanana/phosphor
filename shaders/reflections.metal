@@ -83,7 +83,10 @@ kernel void REFL_KERNEL(reflection_ssr)(constant GPUReflectionParams& p [[buffer
 #else
     const auto dir=reflectionDirection(s,float2(giRandom(seed),giRandom(seed)));
 #endif
-    const auto sample=reflectionFallback(s,dir,p,surfaces,cache,gi,probes,baseRadiance,depth,atlas);
+    auto sample=reflectionFallback(s,dir,p,surfaces,cache,gi,probes,baseRadiance,depth,atlas);
+#ifdef PHOSPHOR_REFL_LOBE
+    REFL_TAG(sample,lobe);
+#endif
     reflectionStoreSample(p.flags,tid,p.width,sample,metadata,counts,output,distance);
 }
 
@@ -126,6 +129,9 @@ kernel void REFL_KERNEL(reflection_rt)(constant GPUReflectionParams& p [[buffer(
         else L=reflectionProbeRadiance(diVec(s.position),dir.direction,s.roughness,false,p,probes,atlas,sample.path);
         L*=dir.weight;if(!all(isfinite(L))||any(L<0)){numericError=true;L=0;}if(numericError)sample.flags|=SPECULAR_SAMPLE_ERROR;for(uint i=0;i<3;++i)sample.radiance[i]=L[i];
     }else sample=reflectionFallback(s,dir,p,surfaces,cache,gi,probes,baseRadiance,depth,atlas);
+#ifdef PHOSPHOR_REFL_LOBE
+    REFL_TAG(sample,lobe);
+#endif
     if(count>1u)reflectionReduceAdd(reduction,sample,count);}
     if(count==1u)reflectionStoreSample(p.flags,tid,p.width,sample,metadata,counts,output,distance);
     else{auto reduced=reflectionReduceEnd(reduction,counts);reduced.flags|=count<<SPECULAR_SAMPLE_COUNT_SHIFT;reflectionWriteSample(tid,p.width,reduced,metadata,output,distance);}

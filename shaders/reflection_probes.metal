@@ -105,7 +105,11 @@ const bool finiteFit=all(isfinite(fitWeight));
         result=L*fitWeight;
         sample.flags=SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_PREFILTERED;
         if(!finiteFit||!all(isfinite(L))||any(L<0)||!all(isfinite(result))||any(result<0))sample.flags|=SPECULAR_SAMPLE_ERROR;
-        sample.path=path;for(uint i=0;i<3;++i){sample.direction[i]=r[i];sample.radiance[i]=result[i];}}
+        sample.path=path;for(uint i=0;i<3;++i){sample.direction[i]=r[i];sample.radiance[i]=result[i];}
+#ifdef PHOSPHOR_REFL_LOBE
+        {const auto taggedLobe=REFL_LOBE(p.flags,REFLECTION_LOBE_GUIDE_VALID,tid);REFL_TAG(sample,taggedLobe);}
+#endif
+    }
     // The record carries result and distance 0, the values written before the
     // shared store (multi-sample reduction reads them back from the record).
     sample.hitDistance=0;reflectionStoreSample(p.flags,tid,p.width,sample,metadata,counts,output,distance);

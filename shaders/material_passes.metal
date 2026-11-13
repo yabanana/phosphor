@@ -12,3 +12,5 @@
 #include "light_cluster_lobe.metal"
 // F15.1 (ticket 08): the specular transport and composite lobe kernels (same module reasons).
 #include "reflection_lobe.metal"
+// F15.1 (ticket 08): the specular denoiser lobe kernels (same module reasons).
+#include "denoise_lobe.metal"
