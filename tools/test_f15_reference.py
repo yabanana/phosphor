@@ -479,7 +479,7 @@ class SpecularIorModel(unittest.TestCase):
         self.assertAlmostEqual(ior, 1.33, places=6)
         self.assertEqual((spec, color), (0.5, [2.0, 1.0, 0.25]))
         self.assertIsNone(ref.material_specular(data, data["materials"][1]))
-        data["materials"][0]["feature_bits"] = 16  # iridescence is outside the declared model
+        data["materials"][0]["feature_bits"] = 32  # an unknown feature is outside the declared model
         with self.assertRaises(ValueError):
             ref.material_specular(data, data["materials"][0])
         data["materials"][0]["feature_bits"] = 3  # ior/specular + clearcoat is inside it (ticket 09)
