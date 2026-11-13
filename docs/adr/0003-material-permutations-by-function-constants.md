@@ -7,8 +7,11 @@ declared list) and specialises the hand-written lobe code with Metal function
 constants keyed by feature class; it does not emit textual MSL per
 permutation. Function constants remove dead lobes at compile time, and the
 existing PipelineCache, AOT archive harvest, flexible fallback and exact
-resolve-equivalence checks apply unchanged. The generic all-features pipeline is
-kept only as reference and compile fallback, never as the product path.
+resolve-equivalence checks apply unchanged. The feature mask is a reserved
+constant: undefined means "no extension lobes", so scenes without features keep
+the measured generic resolve (FC 21 undefined) with byte-identical descriptors;
+extended scenes use their union-specialised pipeline; an explicit all-lobes
+value serves only as reference and compile fallback.
 
 ## Consequences
 

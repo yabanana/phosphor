@@ -49,3 +49,20 @@ reflection RT roughness band and are always traced with RT (decision 09);
 (2) emitter ownership extends the F13 partition: the coat lobe's DI/RT emitter
 share uses the coat roughness, and thin-walled transmission gives emitters hit
 by refracted rays to the transport and delta lights to DI.
+Owner decisions and review findings (2026-11-13, second pass):
+- Base model: glTF Appendix B everywhere (ADR-0006, ticket 03); the matrix rows
+  above are relative to the corrected base.
+- Shadow casters (supersedes "opaque"): transmissive casters attenuate and tint
+  light along straight shadow rays (per-surface factor + Beer–Lambert from the
+  signed entry/exit distance sum, order-independent) in RT sun shadows, DI
+  visibility, GI shadow rays and reflection secondary lighting; CSM uses a
+  single-layer transmittance map; caustics excluded (declared). Non-shadow GI
+  and probe rays still hit glass as an opaque base reduction (declared).
+- Denoiser: a specialised binding carries sampled-lobe id, axis
+  (reflect/refract) and roughness; neighbours and history are rejected across
+  lobe ids; `GPUDISurface` is unchanged.
+- Sheen environment term lives in the composition (probe/GI radiance at N ×
+  Charlie albedo), since the resolve omits ambient specular when the transport
+  runs.
+- The indexed overflow fallback produces the lobe guide and the subsurface
+  irradiance target like the meshlet path (forced-overflow captures).

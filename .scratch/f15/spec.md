@@ -80,6 +80,12 @@ bounded layer stack.
 
 ## Implementation Decisions
 
+- **Base model (ADR-0006, owner decision).** The shared BSDF implements glTF
+  2.0 Appendix B (dielectric `mix(diffuse, specular, F(0.04))`, metal
+  `specular·F(baseColor)`, `mix(dielectric, metal, metallic)`; environment/GI
+  diffuse weighted by the dielectric directional Fresnel). Baselines that
+  depend on the model are re-taken deliberately with before/after evidence; the
+  F12 diagnostic signal stays pure Lambert.
 - **Shared BSDF module (prefactor).** The GGX/Lambert evaluation duplicated in
   the resolve shading, DI target/BRDF and reflection sampling becomes one MSL
   module; images stay identical (exact where the arithmetic is unchanged; any
@@ -129,16 +135,26 @@ bounded layer stack.
   BTDF, ≤ 4 interface crossings, Beer–Lambert along the real inside path
   (a medium entered at a front face ends at any hit), thin-walled without
   offset; probes/environment along the refracted ray without RT; transmissive
-  casters shadow opaquely. The F13 denoiser filters BRDF-weighted radiance with
-  roughness edge-stopping: the lobe guide supplies the effective transport
-  roughness (coat, IOR-scaled transmission) instead of the base roughness.
+  refraction is always traced with RT (independent of the reflection roughness
+  band) and accepts the inside back faces of the medium. The F13 denoiser
+  filters BRDF-weighted radiance with edge-stopping: a specialised binding gives
+  it the sampled-lobe id, axis and roughness, and rejects neighbours/history
+  across lobe ids; `GPUDISurface` is unchanged.
+- **Transmissive shadows (owner decision, ADR-0004 amendment).** Shadow rays
+  accumulate an RGB transmittance through transmissive surfaces (per-surface
+  factor + Beer–Lambert from the signed entry/exit distance sum,
+  order-independent) in RT sun shadows, DI visibility, GI shadow rays and the
+  reflection secondary lighting; the CSM path gets a single-layer
+  transmittance map; caustics are excluded.
 - **Subsurface (ADR-0005).** OpenPBR parameters. Thin mode = diffuse
   transmission lobe. Volumetric mode = Burley normalised diffusion in screen
   space on a diffuse-irradiance target that the resolve/DI write for subsurface
   pixels (21/55 samples, metres→pixels radius, sub-pixel skip, same-material and
-  depth test), recombined with the specular terms. If the screen-space result
-  misses its bound, the hybrid RT single-scattering variant is implemented in
-  F15 (timeboxed ≤ 2 weeks).
+  depth test), recombined with the specular terms; gated on side-lit fixtures
+  (back-lit thick volumes are a declared limit of screen-space diffusion). If
+  the side-lit bound is missed, a separate conditional ticket adds hybrid RT
+  single scattering with its own bound, a 2-week timebox and a declared
+  fallback (volumetric mode stays partial).
 - **Permutations (ADR-0003).** Function-constant feature classes. Every scene is
   specialised by its feature union (forward, resolve, DI/reflection kernels);
   the generator (extension of `variant_gen`) reads class manifests exported by
@@ -197,7 +213,7 @@ bounded layer stack.
 - Track Studio: no work for or in it (ADR-0001; its development is paused by
   the owner); no host-API work (`rea/host-embedding` stays outside F15).
 - F16: OIT, blended transparency, raster glass/liquids with a colour pyramid,
-  dispersion, coloured/attenuated shadows of transmissive casters.
+  dispersion. Caustics through transmissive casters.
 - Multiple-scattering energy compensation, `KHR_materials_unlit`,
   `KHR_lights_punctual`, per-texture (non-uniform) texture transforms, a second
   UV set.
@@ -209,10 +225,11 @@ bounded layer stack.
 
 ## Further Notes
 
-- Package order: prefactor and reference harness → feature plumbing and lobe
-  guide (proven by ior/specular) → lobes one at a time, each
+- Package order: shared BSDF and test-first reference harness → base model to
+  Appendix B (re-baseline) → description/loader → feature plumbing and lobe
+  guide in three tickets (proven by ior/specular) → lobes one at a time, each
   with its reference fixture (F15.1 + F15.3 incrementally) → critical
-  combinations → chess fixture → generator (F15.2) → Khronos corpus run →
+  transmissive shadows (RT, CSM) → combinations → chess fixture → generator (F15.2) → Khronos corpus run →
   layers (F15.4) → closure. This refines the plan's ".1 → .3 → .2 → .4": the
   reference harness comes first so every lobe lands with its test (tracer
   bullets); the generator comes after the lobes so its class set and binning

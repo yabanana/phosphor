@@ -56,3 +56,24 @@ Thresholds (fixed now, before any comparison):
   passes is redesigned, never the threshold.
 - Khronos corpus: no numeric gate; side-by-side page with per-feature defects
   and the explained Sample Renderer deviations; parity is never ticked globally.
+
+## Review amendments (2026-11-13, fixed before any comparison)
+
+- Relative errors use an absolute floor: `|a − b| / max(b, 0.05 · mean_ROI(b))`,
+  reported as mean and p95 over the ROI (aligned with F13's D1 absolute-floor
+  radiometry), for every gated fixture.
+- Sponza D2 band: the median of three A/B/A GPU p95 deltas ≤ 0.10 ms, and the
+  absolute GPU p95 ≤ 16.67 ms.
+- Gating policy for transmission: gated fixtures have nothing seen through glass
+  lit through curved glass; planar interfaces (pane, flat shallow water, sun
+  within 30° of the normal) are gated against Mitsuba now that shadows are
+  attenuated; curved-glass shadows are qualitative (caustics excluded).
+- Subsurface: screen-space diffusion is gated on side-lit fixtures only; the
+  back-lit thick case is measured and reported; Mitsuba's boundary uses the
+  engine's material roughness.
+- The reference models the declared roughness clamp (0.04) and the engine's
+  sun-disk quadrature; the direct-light "max ≤ 3 %" bound applies outside
+  pixels where the quadrature limits narrow highlights (mask declared with the
+  fixture).
+- Before ticket 03, the base fixtures at intermediate metallic and the furnace
+  are expected to fail (test-first red state).

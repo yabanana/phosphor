@@ -11,9 +11,10 @@ any F15 code is written.
 ## Notes
 
 - 2026-11-13: every decision ticket resolved (owner confirmed 09 and 10);
-  spec in `spec.md`, tracer-bullet tickets 01–18 in `issues/` (review pass:
-  ticket 04 split into plumbing + lobe guide, denoiser edge-stopping
-  corrected, Phosphor-only scope per ADR-0001 addendum); awaiting the owner's
+  spec in `spec.md`, tracer-bullet tickets 01–24 in `issues/` after two review passes (second
+  pass: independent adversarial review `review-2026-11-13.md`; owner chose the
+  Appendix B base-model correction, ADR-0006, and attenuated coloured
+  transmissive shadows in F15, ADR-0004 amendment); awaiting the owner's
   approval of the plan before any F15 code.
 
 - Roadmap tasks F15.1–F15.4 (`docs/ROADMAP.md`), plan `docs/plans/F15.md`,

@@ -54,3 +54,8 @@ liquids)?
   (area/emissive triangles); the DI BTDF term of thin-walled transmission
   covers only delta lights (directional, point, spot), which rays cannot hit —
   the same partition idea as F13's `DI_REFLECTED_EMITTER_SPECULAR`.
+- 2026-11-13, owner (second AskUserQuestion): transmissive shadows are
+  attenuated and coloured in F15 (supersedes "opaque"); ADR-0004 amended.
+- Review: interface traversal must accept the inside back faces of the
+  transmissive medium (`reflections.metal:21` rejects back faces of single-sided
+  materials today).

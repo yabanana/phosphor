@@ -15,3 +15,10 @@ liquids and dispersion belong to F16.
 - Khronos-style opaque colour pyramid in F15: rejected, it needs glass outside
   the visibility pass and a lit transparent pass (F16 infrastructure), and loses
   glass-through-glass and the RT lighting of the glass surface.
+
+## Amendment (owner, 2026-11-13)
+
+Transmissive casters no longer shadow opaquely: F15 attenuates and tints light
+along straight shadow rays through transmissive surfaces (RT sun shadows, DI
+visibility, GI shadow rays, reflection secondary lighting) and adds a
+single-layer transmittance map to the CSM path. Caustics stay excluded.

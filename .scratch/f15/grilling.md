@@ -106,3 +106,16 @@ measured 15.37–15.48 ms after `4505ee7`) within noise, A/B/A on a quiet machin
   effective transport roughness; ticket 04 split (plumbing / lobe guide) to fit
   one context each; Mitsuba 3.9.1 verified offline; glTF §3.2 rule verified;
   `GPUMaterial` padding unused; kernel buffer slots available (max used 19).
+
+## Round 3 — independent review and owner decisions (2026-11-13)
+
+- Independent adversarial review: `.scratch/f15/review-2026-11-13.md`
+  (2 blockers, 9 majors, 8 minors), each verified in code before acting.
+- Owner (AskUserQuestion): base model corrected to glTF Appendix B in F15
+  (ADR-0006); transmissive shadows attenuated and coloured in F15 (ADR-0004
+  amendment, supersedes "opaque").
+- Tickets restructured to 24: test-first Appendix B harness before the base
+  fix, lobe guide split into producers/DI/transport+denoiser with all layouts
+  frozen early, RT and CSM transmissive-shadow tickets, a conditional hybrid
+  subsurface ticket with its own bound and fallback, binning decision
+  provisional on chess and final with the terrain.
