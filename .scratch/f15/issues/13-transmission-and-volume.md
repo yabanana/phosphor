@@ -85,3 +85,12 @@ key fails through the other objects); `back-glass-black` discriminates it.
 Not done / open: the engine side and every other criterion of this ticket (crossings <= 4 counter, command buffer time, Sponza D2, temporal clip, forced overflow,
 side-by-side Khronos pages, `tools/archive_check.sh` / `hitch_check.sh` of the future pipelines, support report text for `--rt off`); the engine accumulation noise
 of the real transport; rough thin-walled glass; the exit-interface tint (orchestrator rule: factor 1 there, tint per transmitting event is my reading); ctest 18/18.
+
+2026-11-14, orchestrator decision on the harness's open question:
+- The baseColor tint follows the same rule as the transmission factor: it is
+  applied at the camera-visible ENTRY surface only, and the exit and interior
+  crossings are pure dielectric interfaces.
+- The reference tints at every transmitting event. That differs only on
+  tinted closed bodies; every gated volume uses a white base, so no gate
+  depends on it. Align the reference before a tinted closed body becomes a
+  gated fixture.
