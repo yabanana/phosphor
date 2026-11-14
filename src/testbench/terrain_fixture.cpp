@@ -22,10 +22,11 @@ constexpr float pi = 3.14159265358979323846f;
 
 // The scenarios the class-manifest export covers: every runner key's scene shape (stack with and without the coat finish, the
 // single-material twin, the flat transition and furnace fixtures).
-constexpr std::array<std::string_view, 7> kScenarios{
+constexpr std::array<std::string_view, 8> kScenarios{
     "terrain",
     "terrain/coat=off",
     "terrain/coat=zero",
+    "terrain/coat=spec",
     "terrain/single=0/coat=off",
     "terrain/ramp=on",
     "terrain/ramp=on/single=0",
@@ -162,6 +163,7 @@ bool TerrainFixture::parse(std::string_view scenario, TerrainOptions& out, std::
             if (value == "on") out.coat = TerrainOptions::Coat::On;
             else if (value == "off") out.coat = TerrainOptions::Coat::Off;
             else if (value == "zero") out.coat = TerrainOptions::Coat::Zero;
+            else if (value == "spec") out.coat = TerrainOptions::Coat::Spec;
             else return bad();
         } else if (key == "ramp") {
             if (value == "on") out.ramp = TerrainOptions::Ramp::Forward;
@@ -332,7 +334,14 @@ void TerrainFixture::setup(ECS& ecs, GpuScene& scene, TextureManager& textures) 
             }
             stack.layers.push_back(l);
         }
-        if (!flat && o.coat != TerrainOptions::Coat::Off) {
+        if (!flat && o.coat == TerrainOptions::Coat::Spec) {
+            // The extended-path twin of coat=zero: the same class machinery without a coat (specular ior 1.5 = F0 0.04, factor 1 - 2^-24 so that the
+            // block is active).
+            description->specular.emplace();
+            description->specular->ior = 1.5f;
+            description->specular->specularFactor = std::nextafter(1.0f, 0.0f);
+        }
+        if (!flat && (o.coat == TerrainOptions::Coat::On || o.coat == TerrainOptions::Coat::Zero)) {
             description->clearcoat.emplace();
             description->clearcoat->factor = 1.0f;
             description->clearcoat->roughness = 0.12f;

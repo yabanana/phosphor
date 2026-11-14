@@ -65,21 +65,26 @@ def compare_images(np, a, b, roi=None):
     a = np.asarray(a, dtype=np.float32)[roi]
     b = np.asarray(b, dtype=np.float32)[roi]
     if a.size == 0:
-        return {"pixels": 0, "bitwise_differing": 0, "eight_bit_differing": 0, "max_ulp": 0, "max_relative": 0.0, "mean_relative": 0.0}
+        return {"pixels": 0, "bitwise_differing": 0, "eight_bit_differing": 0, "max_ulp": 0, "max_relative": 0.0, "mean_relative": 0.0, "max_relative_floored": 0.0}
     differing = (a.view(np.uint32) != b.view(np.uint32)).any(axis=1)
     ulp = np.abs(ordered_ints(np, a) - ordered_ints(np, b)).max(axis=1)
     floor = 1e-4  # relative error floor: radiance below 1e-4 is not a visible difference
     relative = (np.abs(a.astype(np.float64) - b.astype(np.float64)) / np.maximum(np.abs(b.astype(np.float64)), floor)).max(axis=1)
     eight = (srgb8(np, a) != srgb8(np, b)).any(axis=1)
+    # The runner's own error convention (tools/f15_check.py relative_error): the denominator has the floor 0.05 x the mean radiance of the
+    # compared pixels, so that a dark pixel's rounding noise (absolute 1e-8) is not read as a 1e-4 relative difference.
+    floor_fraction = 0.05 * float(np.abs(b.astype(np.float64)).mean())
+    floored = (np.abs(a.astype(np.float64) - b.astype(np.float64)) / np.maximum(np.abs(b.astype(np.float64)), floor_fraction)).max(axis=1)
     return {"pixels": int(len(a)), "bitwise_differing": int(differing.sum()), "eight_bit_differing": int(eight.sum()),
-            "max_ulp": int(ulp.max()), "max_relative": float(relative.max()), "mean_relative": float(relative.mean())}
+            "max_ulp": int(ulp.max()), "max_relative": float(relative.max()), "mean_relative": float(relative.mean()),
+            "max_relative_floored": float(floored.max())}
 
 
 def evaluate_equal(np, candidate, reference, envelope=False, roi=None):
     """The `layer-equal` gate: exact (0 bitwise-differing pixels) or the declared envelope (max relative <= ENVELOPE)."""
     stats = compare_images(np, candidate, reference, roi)
     non_empty = float(np.asarray(candidate).max()) > 0.0 and float(np.asarray(reference).max()) > 0.0
-    passed = (stats["max_relative"] <= ENVELOPE) if envelope else (stats["bitwise_differing"] == 0)
+    passed = (stats["max_relative_floored"] <= ENVELOPE) if envelope else (stats["bitwise_differing"] == 0)
     return {"kind": "layer-equal", "gate": "envelope" if envelope else "exact", "limit": ENVELOPE if envelope else 0, **stats,
             "non_empty": bool(non_empty), "pass": bool(passed and non_empty)}
 

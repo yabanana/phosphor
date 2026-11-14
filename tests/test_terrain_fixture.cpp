@@ -68,11 +68,11 @@ TEST_CASE("terrain scenarios: every listed scenario parses, options are validate
 }
 
 // The scenes of the layers-* keys of tools/f15_check.py (tools/test_f15_check.py compares this list with the runner).
-constexpr std::array<std::string_view, 18> kRunnerScenes{
+constexpr std::array<std::string_view, 19> kRunnerScenes{
     "terrain/single=0/coat=off", "terrain/single=1/coat=off", "terrain/single=2/coat=off", "terrain/single=3/coat=off",
     "terrain/weights=1,0,0,0/coat=off", "terrain/weights=0,1,0,0/coat=off", "terrain/weights=0,0,1,0/coat=off", "terrain/weights=0,0,0,1/coat=off",
     "terrain/weights=1,1,0,0/layers=2/coat=off", "terrain/weights=1,1,0,0/coat=off", "terrain/coat=off", "terrain", "terrain/coat=zero",
-    "terrain/ramp=on/single=0", "terrain/ramp=on/single=1", "terrain/ramp=reverse", "terrain/ramp=on", "terrain/furnace=on",
+    "terrain/ramp=on/single=0", "terrain/ramp=on/single=1", "terrain/ramp=reverse", "terrain/ramp=on", "terrain/furnace=on", "terrain/coat=spec",
 };
 
 TEST_CASE("terrain scenarios: the runner's scenes are valid") {
@@ -131,6 +131,7 @@ TEST_CASE("terrain fixture: the stack's feature class, the single twin and the p
     }
     CHECK(Built("terrain/coat=off").store.featureUnion() == MATERIAL_FEATURE_LAYERS);
     CHECK(Built("terrain/coat=zero").store.featureUnion() == (MATERIAL_FEATURE_LAYERS | MATERIAL_FEATURE_CLEARCOAT));
+    CHECK(Built("terrain/coat=spec").store.featureUnion() == (MATERIAL_FEATURE_LAYERS | MATERIAL_FEATURE_SPECULAR_IOR));
     CHECK(Built("terrain/single=2/coat=off").store.featureUnion() == 0u);
     CHECK(Built("terrain/ramp=on").store.featureUnion() == MATERIAL_FEATURE_LAYERS);
     CHECK(Built("terrain/furnace=on").store.featureUnion() == MATERIAL_FEATURE_LAYERS);

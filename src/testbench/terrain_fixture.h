@@ -27,7 +27,8 @@ namespace phosphor {
 //   single=N          NO stack: the material is layer N alone and the mesh uvs carry its uvScale (the single-material twin of
 //                     weights=e_N: same textures, same uv * 2^k, same camera and lights)
 //   height=on|off     height-contrast blend (default on)
-//   coat=on|off|zero  cavity coat finish (default on; zero = the clearcoat block present with a black cavity map: coat weight 0)
+//   coat=on|off|zero|spec  cavity coat finish (default on; zero = the clearcoat block present with a black cavity map: coat weight 0; spec = NO
+//                     coat, a specular block at ior 1.5 and factor 1 - 2^-24 instead: the extended-path twin of zero, F0 0.04 to 6e-8)
 //   ramp=on|reverse   FLAT 8 m quad, two plain layers (albedo 0.05 and 0.9, roughness 0.8, dielectric), mask R = 1 - u, G = u (reverse
 //                     swaps them); sun only.  With single=0|1 the plain layer alone (the endpoints of the transition)
 //   furnace=on        FLAT quad seen at a grazing view, four albedo-1 layers (metallic 0/1/0/1, roughness 0.1/0.4/0.7/1) blended by
@@ -37,7 +38,7 @@ namespace phosphor {
 //
 // SOURCE ONLY / NOT VERIFIED on a device until tools/f15_check.py has captured the keys.
 struct TerrainOptions {
-    enum class Coat { Off, On, Zero };
+    enum class Coat { Off, On, Zero, Spec };
     enum class Ramp { None, Forward, Reverse };
     u32 layers = 4;
     bool height = true;

@@ -67,6 +67,27 @@
         {
           "lobes": [],
           "mask": 0,
+          "materials": 4
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "layers"
+          ],
+          "mask": 257,
+          "materials": 1
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/coat=spec",
+      "union": 257,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
           "materials": 2
         }
       ],

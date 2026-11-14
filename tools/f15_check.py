@@ -879,11 +879,14 @@ def _layer_keys():
                                    "terms": "the full terrain patch (generated mask, height contrast) without the coat finish"}
     keys["layers-patch"] = {"kind": "layer-equal", "capture_only": True, "controls": [], "snapshot": False, "scene": "terrain",
                             "terms": "the full terrain patch with the cavity coat finish (the measured view)"}
+    keys["layers-coat-spec"] = {"kind": "layer-equal", "capture_only": True, "controls": [], "snapshot": False, "scene": "terrain/coat=spec",
+                                "terms": "the full terrain patch with a specular block (ior 1.5, factor 1 - 2^-24) instead of a coat: the extended-path twin of coat weight 0"}
     keys["layers-coat-zero"] = {
-        "kind": "layer-equal", "always_green": True, "envelope": True, "snapshot": False, "scene": "terrain/coat=zero", "pair": "layers-patch-nocoat",
-        "controls": ["layers-patch"], "needs": ["layers-patch"],
+        "kind": "layer-equal", "always_green": True, "envelope": True, "snapshot": False, "scene": "terrain/coat=zero", "pair": "layers-coat-spec",
+        "info_pair": "layers-patch-nocoat", "controls": ["layers-patch"], "needs": ["layers-patch", "layers-patch-nocoat"],
         "terms": "the clearcoat finish present with coat weight 0 everywhere must leave the layered base untouched (a feature layer changes the coat "
-                 "weight only): equal to the uncoated patch within the declared envelope (a different class pipeline); the control is the real cavity coat"}
+                 "weight only): equal, within the declared envelope, to the same stack under the specular block of the same F0 (the same extended code path "
+                 "without a coat); the control is the real cavity coat.  The distance to the plain uncoated stack (base code path) is reported, not gated"}
     keys["layers-ramp-single-0"] = {"kind": "layer-ramp", "capture_only": True, "controls": [], "snapshot": False, "scene": "terrain/ramp=on/single=0", "reflections": "off",
                                     "terms": "the flat quad with the dark plain layer alone"}
     keys["layers-ramp-single-1"] = {"kind": "layer-ramp", "capture_only": True, "controls": [], "snapshot": False, "scene": "terrain/ramp=on/single=1", "reflections": "off",
@@ -1701,6 +1704,8 @@ def evaluate_layer_scenario(np, name, folder, mode):
         for control in spec["controls"]:
             c = layers.evaluate_equal(np, sibling(control), pair, envelope=envelope)
             verdicts[control] = {"fails_gate": not c["pass"], "gate_result": c}
+        if spec.get("info_pair"):  # reported, never gated: the distance to the same scene on the plain base code path
+            result["information_vs_" + spec["info_pair"]] = layers.compare_images(np, candidate, sibling(spec["info_pair"]))
         entry["roi_pixels"] = result["pixels"]
     elif kind == "layer-ramp":
         roi, x, z = layers.witness_positions(np, folder / "snapshot")
@@ -1871,7 +1876,7 @@ def result_lines(r):
                          f"{t.get('reference_mean_luminance', 0):.4f} | {t.get('gated')} | {t.get('bound_met')} |")
     elif r["kind"] == "layer-equal":
         lines += ["", f"gate {r['gate']} (limit {r['limit']}): {r['bitwise_differing']} of {r['pixels']} pixels differ bitwise, max {r['max_ulp']} ULP, "
-                      f"max relative {r['max_relative']:.3e}, {r['eight_bit_differing']} pixels differ in the 8-bit image"]
+                      f"max relative {r['max_relative']:.3e} (floored by 0.05 x mean: {r['max_relative_floored']:.3e}), {r['eight_bit_differing']} pixels differ in the 8-bit image"]
     elif r["kind"] == "layer-ramp":
         lines += ["", f"{r['usable_pixels']} pixels in {r['rows']} rows; rows with a reversal {r['rows_with_reversal']} (worst drop {r['worst_drop']:.2e}, "
                       f"tolerance {r['tolerance']}); max |t - u| {r['max_mask_error']:.4f} (limit {r['mask_error_limit']}); ends (mean t / 1-t)"
