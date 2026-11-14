@@ -169,3 +169,22 @@ thin-walled delta-light BTDF is unvalidated against a reference (no analytic-lig
   - recorded for ticket 24 as an O7 caveat of non-archived RT configurations, not as an F15 defect.
 - Command buffers: glass-behind-glass at 1920x1080 with RT shadows, ReSTIR, DDGI, RT reflections and refraction gives GPU frame max 14.0 ms (p50 13.7). That is far below 1 s (loaded machine, indicative only).
 - Crossings bound: structural. `reflectionRefractWalk` loops at most kTransmissionMaxEvents = 8 traces, and a crossing beyond kTransmissionMaxCrossings = 4 ends in the probes/environment (status 2). The unit tests of transmission_math.h cover the estimator. No GPU counter was added.
+
+2026-11-14 — orchestrator: the transmission keys against the corrected (glTF Schlick) reference.
+- 1024-spp references re-rendered with `gltf_dielectric`, then `--evaluate` on the battery13e captures (`build/f15-exact/tref13.log`).
+- Every key passes. Every control fails, so every key discriminates.
+
+| key | worst object mean | worst p95 |
+|---|---|---|
+| roughness-ior | 4.97 % | 13.5 % |
+| attenuation | 2.8 % | 8.8 % |
+| factor-tint | 2.7 % | **11.7 %** (was 15.78 % against exact Fresnel) |
+| thin-volume | 1.9 % | 5.4 % |
+| single-sided | 2.2 % | 5.6 % |
+| glass-behind-glass | 2.8 % | 9.6 % |
+| emissive-panel | 1.2 % | 3.7 % |
+| rtoff | 0.02 % | 0.02 % |
+
+- Roughness-ior's worst object is the roughness 0.6, ior 2 sphere. Its reference is Mitsuba's exact-Fresnel Walter model (declared difference). It is unchanged by the Schlick fix and sits 0.03 points under the bound.
+- Criterion 1 (transmission fixtures vs Mitsuba within the bound) is met on M5.
+- Temporal clip: the stable denoiser key is integrated (dab4380). The converged control and the per-branch history round are still running in an agent.

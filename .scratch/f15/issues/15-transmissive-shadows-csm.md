@@ -198,3 +198,17 @@ that reads the map is not built.  (c) A receiver that is a glass surface itself 
 transmittance: only its (negligible) direct term changes.  (d) Single layer: a receiver between two separated glass layers gets both (the nearest depth decides).  (e) The
 receiver-plane bias is gated on the map (deviation of finding 1): the owner decides whether every CSM scene gets it.  (f) The edge quality of the half-resolution default is
 not gated (the envelope excludes the edges); divisor 1 is one flag.  (g) The mesh and indexed transmit pipelines are requested even without glass (two archive hits).
+
+2026-11-14 — orchestrator: integrated on `cl/f15-plan-c38b51` as f0d8bc0…140a96e, with no conflicts. Archive: +1 render, +1 mesh descriptor.
+After the merge: build OK, ctest 20/20.
+- Accepted as declared:
+  - The receiver-plane bias applies only while a transmittance map is active, so scenes without glass stay bit-identical.
+    Extending it to every CSM scene would change every F10 reference. Not done; it is an OPT/EDGE candidate if a measured need appears.
+  - With `--shadow-cache on`, glass stays opaque.
+  - The froxel fog does not see glass with CSM.
+  - Two separate glass layers above a receiver both attenuate it (single-layer map).
+  - Default divisor 2 (16 MiB per cascade at 2048^2), measured. The `@csm` gates were identical at divisors 1, 2 and 4.
+- The cost on a quiet machine goes to ticket 24.
+- The agent's two blocked all-keys items were fixed on the branch:
+  - `transmission-rtoff-combinations` got a targeted archive update (83c0697) and is gated (322020d).
+  - `combo-irid-aniso-env` dropped its non-discriminating control (7a59d8c).
