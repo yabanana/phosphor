@@ -190,7 +190,7 @@ def validation_status(record):
     return f"clean (exit 0; only the known baseline notices: {notices} redundant state calls)" if notices else "clean (exit 0)"
 
 
-def build_report(summary, validation, notes, manifest, audits):
+def build_report(summary, validation, notes, manifest, audits, before=None):
     esc = lambda s: str(s).replace("|", "\\|")  # noqa: E731
     lines = ["# F15.3 Khronos corpus run and defect report (ticket 22)", "",
              f"Run `{summary['generated_utc']}` of `tools/f15_corpus.py` on binary `{summary['binary_sha256'][:12]}`; corpus glTF-Sample-Assets `{manifest['commit'][:7]}` "
@@ -201,8 +201,24 @@ def build_report(summary, validation, notes, manifest, audits):
              "`--rt on --shadows rt --lighting restir --reflections rt --lighting-denoise custom --post --tonemap aces`, `--corpus-rig YAW,PITCH` "
              "(`src/testbench/corpus_rig.h`).", "", "## Sample Renderer deviations cited", ""]
     lines += [f"- **{t}.** {d}" for t, d in DEVIATIONS]
-    lines += ["", "## Load / refusal table", "",
-              "| Model | Tier | Required extensions | Result | Archive misses | Fallback draws | O7 allocs | Validation |", "|---|---|---|---|---|---|---|---|"]
+    models = summary["models"]
+    rendered = [m for m in models if m["status"] == "rendered"]
+    refused = [m for m in models if m["status"] == "refused"]
+    failed = [m for m in models if m["status"] not in ("rendered", "refused")]
+    misses = sum(m.get("pipelines", {}).get("archive_misses", 0) for m in models)
+    draws = sum(m.get("pipelines", {}).get("fallback_draws", 0) for m in models)
+    allocations = sum(m.get("gpu_allocations_measured") or 0 for m in rendered)
+    clean = [m for m in (validation or {}).get("models", []) if validation_status(m).startswith("clean")]
+    lines += ["", "## Run summary", "",
+              f"- Models: {len(rendered)} rendered, {len(refused)} refused with a stated loader reason, {len(failed)} failed unexpectedly.",
+              f"- Archive: {misses} archive misses and {draws} fallback draws over the whole final run"
+              + (f" (before the targeted update {sum(m.get('pipelines', {}).get('archive_misses', 0) for m in (before or {}).get('models', []))} misses over {sum(1 for m in (before or {}).get('models', []) if m.get('pipelines', {}).get('archive_misses', 0))} models)" if before else "") + ".",
+              f"- O7: {allocations} GPU allocations in the measured frames, summed over the rendered models (warm-up {summary['rig']['warmup']} frames, measured {summary['rig']['frames']}).",
+              f"- Validation (API + shader, `MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1`, archive off): {len(clean)} of {len(rendered)} rendered models clean "
+              "(exit 0, EXIT marker 0, no validation failure, no unclassified line); the only messages are the known baseline notices of the validation layer (redundant "
+              "setDepthStencilState / setViewport calls, 96 of each per capture, identical on the phase-head binary per the ticket 15 record) and loader warnings.", "",
+              "## Load / refusal table", "",
+              "| Model | Tier | Required extensions | Result | Archive misses (before -> after update) | Fallback draws | O7 allocs | Validation |", "|---|---|---|---|---|---|---|---|"]
     for record in summary["models"]:
         name = record["model"]
         audit = (audits or {}).get(name, {})
@@ -210,7 +226,8 @@ def build_report(summary, validation, notes, manifest, audits):
         val = next((m for m in (validation or {}).get("models", []) if m["model"] == name), None)
         pipelines = record.get("pipelines", {})
         result = status_cell(record) + (f": {record['reason']}" if record.get("reason") else "")
-        lines.append(f"| {name} | {record['tier']} | {esc(required)} | {esc(result)} | {pipelines.get('archive_misses', '-')} | {pipelines.get('fallback_draws', '-')} | "
+        earlier = next((m.get("pipelines", {}).get("archive_misses") for m in (before or {}).get("models", []) if m["model"] == name), None)
+        lines.append(f"| {name} | {record['tier']} | {esc(required)} | {esc(result)} | {'' if earlier is None else str(earlier) + ' -> '}{pipelines.get('archive_misses', '-')} | {pipelines.get('fallback_draws', '-')} | "
                      f"{record.get('gpu_allocations_measured', '-')} | {esc(validation_status(val))} |")
     lines += ["", "## Per model", ""]
     defect_rows = []
@@ -259,7 +276,8 @@ def main(argv=None):
         build_page(summary, validation, notes, args.corpus, manifest, args.page)
         print(f"page: {args.page / 'index.html'}")
     if args.report_md:
-        args.report_md.write_text(build_report(summary, validation, notes, manifest, audits) + "\n")
+        before = load_json(args.run / "summary-run1.json") if (args.run / "summary-run1.json").is_file() else None
+        args.report_md.write_text(build_report(summary, validation, notes, manifest, audits, before) + "\n")
         print(f"report: {args.report_md}")
     return 0
 

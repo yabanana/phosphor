@@ -28,7 +28,7 @@
         "id": "C22-D3",
         "status": "open",
         "summary": "Isolated dark pixels on the outermost pixel row of the sphere silhouette (also on the SpecularTest, IORTestGrid and Sheen grids).",
-        "hypothesis": "Grazing-angle pixels whose interpolated shading normal faces away from the view: the RT reflection ray (reflections rt) starts on the wrong side of the surface and hits the sphere itself, a secondary hit that returns almost black. Not reproduced in isolation; check with --reflections ssr/off on the same model."
+        "hypothesis": "Diagnostic runs (build/f15-corpus-diag, same model and rig): the dark pixels are present with --reflections rt (corpus default) and with --reflections ssr and ABSENT with --reflections off, so they come from the reflection signal/composite at geometry edges, not from RT ray origins. Most likely the lobe filter or composite reads the sky/miss pixels next to the silhouette as zero-radiance reflection samples and the outermost pixel row weights them in. Not fixed here: it needs the reflection denoiser/composite shaders (F13), which this ticket does not own."
       }
     ]
   },
@@ -100,7 +100,7 @@
         "id": "C22-D4",
         "status": "open",
         "summary": "Near-black grainy squares where a glass tile overlaps the opaque label planes (rows 2 to 5 of the smooth column); the Khronos image shows the label through the glass.",
-        "hypothesis": "Secondary RT hits (the label seen through the glass) are shaded with the sun only: the label is in the sun shadow of the glass tile (transmissive shadow, noisy) and secondary hits carry no environment/ambient term with GI off (secondary_rt_hits_use_base_reduction). Check with --gi on."
+        "hypothesis": "Disproved: missing ambient/GI at secondary hits (the dark squares are unchanged with --gi ddgi, build/f15-corpus-diag). Still open: the squares sit at the part of the glass tile that overlaps the label panels; the label meshes are single-sided (LabelMat is not doubleSided), so the likely cause is the transmitted ray hitting the BACK of a label plane, which the rasteriser culls but the RT hit shading lights as a back face (no front lighting, noisy transmissive shadow), giving near-black grain. Check by making the RT hit test skip back faces of single-sided opaque surfaces."
       }
     ]
   },
