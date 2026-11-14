@@ -197,13 +197,12 @@ void addCombinations(std::vector<MaterialScenarioSpec>& out) {
                             default: return withIrid(none, 1.0f, 1.3f, 600.0f);
                         }
                     }), true});
-    // Iridescence + ior/specular: rows = (400 nm, film ior 1.3), (800 nm, 1.3), (600 nm, 1.3) over dielectrics (a film ior 1.8 over ior 2.4 pushed
-    // the declared film-at-N.V approximation of the environment to 5.01 % on one sphere: the film ior is the single-lobe ticket's business), then a metal
+    // Iridescence + ior/specular: rows = (400 nm, film ior 1.3), (800 nm, 1.3), (400 nm, film ior 1.8) over dielectrics, then a metal
     // (400 nm: the extension has no effect on a metal); columns = (film alone), (ior 1.8, weight 0.7, colour 1 .8 .6), (ior 2.4), (ior 1.5,
     // weight 0.5, colour 2 1 .5).  Strength 1 everywhere (for a fractional strength the specification's two forms of the diffuse weight
     // differ, see f15_reference.py irid_lobe_weights).
     {
-        const std::vector<std::tuple<float, float, float>> films{{1.3f, 400.0f, 0.0f}, {1.3f, 800.0f, 0.0f}, {1.3f, 600.0f, 0.0f}, {1.3f, 400.0f, 1.0f}};
+        const std::vector<std::tuple<float, float, float>> films{{1.3f, 400.0f, 0.0f}, {1.3f, 800.0f, 0.0f}, {1.8f, 400.0f, 0.0f}, {1.3f, 400.0f, 1.0f}};
         addCombination(out, "irid-specular",
                        {std::vector<float>(4, 0.3f), {0.0f, 0.0f, 0.0f, 1.0f}, copper, grid(4, 4, [&](size_t r, size_t c) {
                             Cell cell = withIrid(none, 1.0f, std::get<0>(films[r]), std::get<1>(films[r]));

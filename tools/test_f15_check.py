@@ -173,7 +173,7 @@ COMBO_GRIDS = {
         dict(irid=(1.0, 1.3, 400.0), aniso=(0.5, Q)), dict(irid=(1.0, 1.3, 800.0), aniso=(1.0, 0.0)),
         dict(irid=(1.0, 1.3, 400.0), aniso=(1.0, H)), dict(irid=(1.0, 1.3, 600.0))][c])),
     "irid-specular": dict(rough=[0.3] * 4, metallic=[0.0, 0.0, 0.0, 1.0], base=COPPER, cells=cells(4, 4, lambda r, c: dict(
-        irid=(1.0, 1.3, [400.0, 800.0, 600.0, 400.0][r]),
+        irid=(1.0, [1.3, 1.3, 1.8, 1.3][r], [400.0, 800.0, 400.0, 400.0][r]),
         **[{}, {"spec": SPEC_B}, {"spec": (2.4, 1.0, WHITE)}, {"spec": SPEC_C}][c]))),
     "thin-coat": dict(rough=[0.5] * 4, metallic=[0.0, 0.0], base=[0.3, 0.5, 0.8], toward=THIN_TOWARD, cells=cells(2, 4, lambda r, c: dict(
         thin=([0.5, 1.0][r], [WARM, TEAL][r]), **({} if c == 0 else {"coat": [None, (1.0, 0.3), (0.5, 0.35), (1.0, 0.6)][c]})))),
