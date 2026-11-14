@@ -149,3 +149,19 @@ Combinations validated by this ticket against the independent reference: coat + 
 transmission over diffuse transmission (declared `--rt off` closed form). Refused by the reference (thin + sheen / anisotropy / iridescence / ior/specular) and not composed
 in the engine's thin branch. Open: ticket 22 (Khronos side by side), ticket 20 (Track Studio), the ADR-0006 energy form of the iridescent diffuse weight (above),
 GI at -N for Cache/ReSTIR GI and for the legacy resolve GI path, weight/colour textures of the thin lobe (no reference).
+
+2026-11-14 — orchestrator: engine side integrated (24c8683, 606eba5, ca643b2; archive +1 compute, +1 render). Build OK, ctest 20/20.
+- All-keys run on the integrated tree (tickets 13, 14, 15, 17, 19):
+  - command: `tools/f15_check.py --run --expect green --out build/f15-check/t19int`;
+  - result: GREEN, exit 0, 112 keys;
+  - every reference was reused from the agent's run, made by identical tool revisions;
+  - only `subsurface-volumetric-sun` stays pending (ticket 18).
+- Accepted as declared approximations:
+  - Iridescence + specular: the sphere at 4.92 % is a deterministic bias of the composite diffuse weight evaluated at N.V (decision 06).
+    The alternative, the film at the mean V.H, breaks the declared furnace (1.111), so it is not adopted. Any future change is an
+    ADR-0006 energy-form decision.
+  - GI at -N: a DDGI probe lookup only.
+  - GI-back check: its expectation was changed after measurement (no shadow term, because DDGI cannot resolve shadows that small).
+    The agent recorded the change; the gate is unchanged.
+- Carried: the Khronos side by side (ticket 22); GI at -N for the cache/ReSTIR GI and the legacy resolve path; the reference for the
+  thin-lobe weight and colour textures.
