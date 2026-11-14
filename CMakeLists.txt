@@ -127,6 +127,7 @@ add_library(phosphor_core STATIC
     src/scene/gltf_material_extensions.cpp
     src/scene/mesh_processing.cpp
     src/scene/procedural.cpp
+    src/scene/terrain_textures.cpp
     src/scene/texture_manager.cpp
     src/testbench/cornell_box.cpp
     src/testbench/corpus_rig.cpp
@@ -135,6 +136,7 @@ add_library(phosphor_core STATIC
     src/testbench/transmission_validation.cpp
     src/testbench/transmissive_shadow_validation.cpp
     src/testbench/chess_fixture.cpp
+    src/testbench/terrain_fixture.cpp
     src/testbench/reflection_validation.cpp
     src/testbench/culling_viz.cpp
     src/testbench/many_lights.cpp

@@ -87,6 +87,7 @@ public:
 /// the other benches ignore them.  Zero / negative = the bench's default.
 struct TestBenchParams {
     std::string scenePath;
+    std::string terrainTexturesPath;   // F15.4 ticket 23: unpacked CC0 terrain sets (empty = the procedural stand-ins)
     std::string materialOverridesPath; // F15.1: applied by the scene viewer over the loaded glTF (empty = none)
     CorpusRigRequest corpusRig;        // F15.3 ticket 22: declared rig and bounds framing of the Khronos corpus run
     std::string lightingScenario,reflectionScenario,materialScenario;

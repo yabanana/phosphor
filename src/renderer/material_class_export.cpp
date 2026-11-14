@@ -5,6 +5,7 @@
 #include "scene/ecs.h"
 #include "scene/texture_manager.h"
 #include "testbench/material_validation.h"
+#include "testbench/terrain_fixture.h"
 #include "testbench/transmission_validation.h"
 #include "testbench/transmissive_shadow_validation.h"
 
@@ -35,7 +36,7 @@ SceneEntry entryFromStore(std::string name, std::string family, const SceneStore
     return makeSceneEntry(std::move(name), std::move(family), masks, store.volumetricSubsurface());
 }
 
-std::vector<std::string> fixtureFamilies() { return {"material", "transmission", "shadow"}; }
+std::vector<std::string> fixtureFamilies() { return {"material", "transmission", "shadow", "terrain"}; }
 
 std::vector<std::string> fixtureScenarios(std::string_view family) {
     std::vector<std::string> out;
@@ -45,6 +46,7 @@ std::vector<std::string> fixtureScenarios(std::string_view family) {
     if (family == "material") copy(MaterialValidation::scenarios());
     else if (family == "transmission") copy(TransmissionValidation::scenarios());
     else if (family == "shadow") copy(TransmissiveShadowValidation::scenarios());
+    else if (family == "terrain") copy(TerrainFixture::scenarios());
     else throw std::invalid_argument("unknown fixture family: " + std::string(family));
     return out;
 }
@@ -57,6 +59,7 @@ SceneEntry exportFixtureScene(std::string_view family, std::string_view scenario
     if (family == "material") bench = std::make_unique<MaterialValidation>(std::string(scenario));
     else if (family == "transmission") bench = std::make_unique<TransmissionValidation>(std::string(scenario));
     else if (family == "shadow") bench = std::make_unique<TransmissiveShadowValidation>(std::string(scenario));
+    else if (family == "terrain") bench = std::make_unique<TerrainFixture>(std::string(scenario));
     else throw std::invalid_argument("unknown fixture family: " + std::string(family));
     bench->setup(ecs, scene, textures);
     SceneStore store;

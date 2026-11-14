@@ -5,6 +5,7 @@
 #include "testbench/transmission_validation.h"
 #include "testbench/transmissive_shadow_validation.h"
 #include "testbench/chess_fixture.h"
+#include "testbench/terrain_fixture.h"
 #include "testbench/reflection_validation.h"
 
 #include <charconv>
@@ -592,7 +593,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             auto v=needValue();if(!v)return false;if(!ReflectionValidation::validScenario(*v)){error="--reflection-scene: unknown scenario";return false;}out.reflectionScene=*v;
         } else if (arg == "--material-scenario") {
             auto v=needValue();if(!v)return false;
-            if(!MaterialValidation::validScenario(*v)&&!TransmissionValidation::validScenario(*v)&&!TransmissiveShadowValidation::validScenario(*v)&&!ChessFixture::validScenario(*v)){error="--material-scenario: unknown scenario";return false;}out.materialScene=*v;
+            if(!MaterialValidation::validScenario(*v)&&!TransmissionValidation::validScenario(*v)&&!TransmissiveShadowValidation::validScenario(*v)&&!ChessFixture::validScenario(*v)&&!TerrainFixture::validScenario(*v)){error="--material-scenario: unknown scenario";return false;}out.materialScene=*v;
         } else if (arg == "--transmission-motion") {
             out.transmissionMotion = true;
         } else if (arg == "--resolve-features") {
@@ -771,6 +772,14 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             // F15.1 (ticket 05): the scene viewer applies the file after the glTF loads,
             // before the scene store mirrors the library (records reach the GPU as deltas).
             out.materialOverridesPath = std::string(*value);
+        } else if (arg == "--terrain-textures") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (value->empty() || value->starts_with("--")) {
+                error = "--terrain-textures requires a directory";
+                return false;
+            }
+            out.terrainTexturesPath = std::string(*value);
         } else if (arg == "--corpus-rig") {
             // F15.3 (ticket 22): the declared Phosphor rig of the Khronos corpus run, camera yaw,pitch in degrees around the model bounds.
             const auto value = needValue();

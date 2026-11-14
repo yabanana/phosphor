@@ -1207,6 +1207,7 @@ void Engine::switchTestBench(TestBenchType type) {
     benchParams.corpusRig = {options_.corpusRig, options_.corpusYaw, options_.corpusPitch,
                              static_cast<float>(std::max<u32>(context_->width(), 1)) / static_cast<float>(std::max<u32>(context_->height(), 1))};
     benchParams.materialOverridesPath = options_.materialOverridesPath;
+    benchParams.terrainTexturesPath = options_.terrainTexturesPath;
     benchParams.materialToggleEvery=options_.materialToggleEvery;benchParams.transmissionMotion=options_.transmissionMotion;benchParams.materialScenario=options_.materialScene;benchParams.lightingScenario=options_.lightingScene;benchParams.reflectionScenario=options_.reflectionScene;
     benchParams.instances         = options_.sceneInstances;
     benchParams.localLightCount=options_.localLightCount;benchParams.areaLights=options_.areaLights;benchParams.stationaryLights=options_.stationaryLights;

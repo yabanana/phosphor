@@ -2,6 +2,7 @@
 #include <metal_stdlib>
 #include "renderer/gpu_types.h"
 #include "renderer/lobe_guide_pack.h"
+#include "renderer/layer_blend.h"
 #include "pipeline/forward_variants.generated.metal.h"
 using namespace metal;
 using namespace phosphor;
@@ -357,6 +358,75 @@ static float3 tonemapACES(float3 x) {
     return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
 }
 
+// F15.4 (ticket 23): the layer stack (record 3 of the material's extension group).  The mask is sampled at the primitive's uv; every
+// layer with a non-zero weight is an ordinary material of the library whose base parameters are sampled at uv * uvScale with the
+// same expressions as the single-material path (so a weight vector e_j reproduces layer j exactly), blended in parameter space
+// (renderer/layer_blend.h) and shaded ONCE by the base model.  The layer materials' feature blocks, emissive and alpha are not
+// blended: they belong to the stack's own description (the coat finish).
+struct LayerSurface {
+    float3 baseColor;
+    float roughness, metallic, occlusion;
+    float3 tn; // the tangent-space normal vector for normalize(T a + B b + N c)
+};
+static LayerSurface resolveLayerStack(GPUMaterialExt3 e3, const device GPUMaterial *materials, const device TextureHandle *textures,
+                                      float2 uv, float2 dx, float2 dy) {
+    const uint count = min(e3.layerCount, LAYER_STACK_MAX);
+    const float4 mask = float4(sampleOr(textures, e3.maskTex, uv, half4(1.0h), dx, dy));
+    LayerWeights raw{{0.0f, 0.0f, 0.0f, 0.0f}};
+    bool heightOn = false;
+    for (uint i = 0; i < LAYER_STACK_MAX; ++i) {
+        if (i < count) {
+            raw.w[i] = mask[(e3.packedMaskChannels >> (2u * i)) & 3u];
+            heightOn = heightOn || e3.heightContrast[i] >= 0.0f;
+        }
+    }
+    LayerWeights w = layerNormalise(raw, count);
+    if (heightOn) {
+        LayerHeights heights{{0.0f, 0.0f, 0.0f, 0.0f}};
+        for (uint i = 0; i < LAYER_STACK_MAX; ++i) {
+            if (i < count && w.w[i] > 0.0f && e3.heightContrast[i] >= 0.0f) {
+                const float s = e3.uvScale[i];
+                const float texel = float(sampleOr(textures, e3.heightTex[i], uv * s, half4(0.5h), dx * s, dy * s).r);
+                heights.h[i] = layerHeight(e3.heightContrast[i], texel);
+            }
+        }
+        w = layerHeightBlend(w, heights, count);
+    }
+    float3 color[4] = {float3(0.0f), float3(0.0f), float3(0.0f), float3(0.0f)};
+    float rough[4] = {0.0f, 0.0f, 0.0f, 0.0f}, metal[4] = {0.0f, 0.0f, 0.0f, 0.0f}, occ[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    LayerNormals normals{{0.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}};
+    for (uint i = 0; i < LAYER_STACK_MAX; ++i) {
+        if (i < count && w.w[i] > 0.0f) {
+            const device GPUMaterial &lm = materials[e3.layerMaterial[i]];
+            const float s = e3.uvScale[i];
+            const float2 uvi = uv * s, dxi = dx * s, dyi = dy * s;
+            const half4 baseTex = sampleOr(textures, lm.baseColorTex, uvi, half4(1.0h), dxi, dyi);
+            const half4 mrTex = sampleOr(textures, lm.metallicRoughnessTex, uvi, half4(1.0h), dxi, dyi);
+            const half4 aoTex = sampleOr(textures, lm.occlusionTex, uvi, half4(1.0h), dxi, dyi);
+            const half4 nTex = sampleOr(textures, lm.normalTex, uvi, half4(0.5h, 0.5h, 1.0h, 1.0h), dxi, dyi);
+            color[i] = float3(lm.baseColor[0], lm.baseColor[1], lm.baseColor[2]) * float3(baseTex.rgb);
+            rough[i] = clamp(lm.roughness * float(mrTex.g), 0.04, 1.0);
+            metal[i] = saturate(lm.metallic * float(mrTex.b));
+            occ[i] = mix(1.0, float(aoTex.r), lm.occlusionStrength);
+            float3 tn = float3(nTex.xyz) * 2.0 - 1.0;
+            tn.xy *= lm.normalScale;
+            normals.tx[i] = tn.x;
+            normals.ty[i] = tn.y;
+            normals.tz[i] = tn.z;
+        }
+    }
+    LayerSurface out;
+    out.baseColor = float3(layerBlendScalar(w, color[0].x, color[1].x, color[2].x, color[3].x),
+                           layerBlendScalar(w, color[0].y, color[1].y, color[2].y, color[3].y),
+                           layerBlendScalar(w, color[0].z, color[1].z, color[2].z, color[3].z));
+    out.roughness = layerBlendScalar(w, rough[0], rough[1], rough[2], rough[3]);
+    out.metallic = layerBlendScalar(w, metal[0], metal[1], metal[2], metal[3]);
+    out.occlusion = layerBlendScalar(w, occ[0], occ[1], occ[2], occ[3]);
+    const LayerNormalResult n = layerNormalBlend(w, normals);
+    out.tn = float3(n.a, n.b, n.c);
+    return out;
+}
+
 static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &frame, const device GPUMaterial *materials,
                                   const device GPULight *lights, const device TextureHandle *textures,
                                   bool alphaTest = true, float3 sunVisibility = float3(1.0f), uint shadowLight = ~0u,
@@ -383,16 +453,30 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
             : (m.normalTex == INVALID_TEXTURE_INDEX ? half4(0.5h, 0.5h, 1.0h, 1.0h)
                                                     : half4(half(128.0f / 255.0f), half(128.0f / 255.0f), 1.0h, 1.0h));
 
-    const float4 baseColor = float4(m.baseColor[0], m.baseColor[1], m.baseColor[2], m.baseColor[3]) * float4(baseTex);
+    float4 baseColor = float4(m.baseColor[0], m.baseColor[1], m.baseColor[2], m.baseColor[3]) * float4(baseTex);
     ShadingResult out{};
     out.alpha = baseColor.a;
     if (alphaTest && baseColor.a < m.alphaCutoff)
         return out;
 
     // glTF: G = roughness, B = metallic.
-    const float roughness = clamp(m.roughness * float(mrTex.g), 0.04, 1.0);
-    const float metallic = saturate(m.metallic * float(mrTex.b));
-    const float occlusion = mix(1.0, float(aoTex.r), m.occlusionStrength);
+    float roughness = clamp(m.roughness * float(mrTex.g), 0.04, 1.0);
+    float metallic = saturate(m.metallic * float(mrTex.b));
+    float occlusion = mix(1.0, float(aoTex.r), m.occlusionStrength);
+    // F15.4 (ticket 23): the layer stack replaces the base parameters and the normal map of the pixel (compiled only when the scene's
+    // feature union has the bit, run only for materials that carry it).
+    const bool layersOn = (kMaterialFeatures & MATERIAL_FEATURE_LAYERS) != 0u &&
+                          (m.flags & (MATERIAL_FEATURE_LAYERS << MATERIAL_FEATURE_SHIFT)) != 0u;
+    float3 layerTn = float3(0.0f, 0.0f, 1.0f);
+    if (layersOn) {
+        const LayerSurface ls = resolveLayerStack(*reinterpret_cast<const device GPUMaterialExt3*>(frame.materialExtensions + m.extensionIndex + 3u),
+                                                  materials, textures, in.uv, in.uvDx, in.uvDy);
+        baseColor.rgb = ls.baseColor;
+        roughness = ls.roughness;
+        metallic = ls.metallic;
+        occlusion = ls.occlusion;
+        layerTn = ls.tn;
+    }
 
     // F15.1: KHR_materials_ior + KHR_materials_specular.  Compiled only when the scene's feature
     // union has the bit (kMaterialFeatures, undefined => 0) and run only for materials that carry it.
@@ -519,6 +603,7 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         }
         float3 tn = float3(nTex.xyz) * 2.0 - 1.0;
         tn.xy *= m.normalScale;
+        if (layersOn) tn = layerTn;
         N = normalize(Tn * tn.x + B * tn.y + N * tn.z);
         if (coatOn && e0.clearcoatNormalTex != INVALID_TEXTURE_INDEX) {
             float3 cn = float3(sampleOr(textures, e0.clearcoatNormalTex, in.uv, half4(0.5h, 0.5h, 1.0h, 1.0h), in.uvDx, in.uvDy).xyz) * 2.0 - 1.0;
