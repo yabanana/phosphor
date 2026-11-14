@@ -192,13 +192,18 @@ void ChessFixture::setup(ECS& ecs, GpuScene& scene, TextureManager& textures) {
 
     const std::vector<std::string> targets = targetMaterials(options_);
     if (options_.mask) {
-        // The mask capture: every material black and untextured without extensions, the targets pure emissive white.
+        // The mask capture: every material untextured and without extensions, black except the targets (white diffuse, specular off)
+        // under one sun pi W/m2 aimed along the view direction: a target pixel reads cos(N, V) (> 0.2 over all but a rim of the
+        // silhouette), every other pixel is black.  (Pure emissive targets were the first design: the kings' and queens' emissive
+        // triangle count hangs the GPU, "GPU timeout waiting for frame event" on frame 0, so the mask uses a lit white instead.)
         for (u32 i = 0; i < names.size(); ++i) {
             MaterialDescription d;
-            d.base.baseColor = {0.0f, 0.0f, 0.0f, 1.0f};
             d.base.metallic = 0.0f;
             d.base.roughness = 1.0f;
-            if (std::find(targets.begin(), targets.end(), names[i]) != targets.end()) d.base.emissive = {1.0f, 1.0f, 1.0f};
+            const bool target = std::find(targets.begin(), targets.end(), names[i]) != targets.end();
+            d.base.baseColor = target ? std::array<float, 4>{1.0f, 1.0f, 1.0f, 1.0f} : std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f};
+            d.specular.emplace();
+            d.specular->specularFactor = 0.0f;
             if (!scene.setMaterialDescription(i, d)) throw std::runtime_error("cannot edit material " + names[i]);
         }
     } else {
@@ -282,8 +287,9 @@ void ChessFixture::setup(ECS& ecs, GpuScene& scene, TextureManager& textures) {
                          CellSize, PanelEmission);
     }
 
-    const glm::vec3 sun = towardSun(options_);
-    if (glm::dot(sun, sun) > 0.0f && !options_.mask) {
+    const CameraSetup view = camera(options_);
+    const glm::vec3 sun = options_.mask ? glm::normalize(view.position - view.target) : towardSun(options_);
+    if (glm::dot(sun, sun) > 0.0f) {
         const EntityID light = ecs.createEntity();
         entities_.push_back(light);
         TransformComponent transform;
@@ -293,7 +299,7 @@ void ChessFixture::setup(ECS& ecs, GpuScene& scene, TextureManager& textures) {
         LightComponent component;
         component.type = LightType::Directional;
         component.color = glm::vec3(1.0f);
-        component.intensity = SunIrradiance;
+        component.intensity = options_.mask ? pi : SunIrradiance;
         ecs.addComponent(light, std::move(component));
     }
     LOG_INFO("ChessFixture: %s on '%s' (%zu entities)", scenario_.c_str(), scenePath_.c_str(), entities_.size());

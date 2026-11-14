@@ -128,12 +128,13 @@ TEST_CASE("F15.1 ticket 20: the rigs' fixed cameras see their subjects (mirrored
     REQUIRE(ChessFixture::parse("chess-backlight", o, error));
     const CameraSetup back = ChessFixture::camera(o);
     for (float x : kBlackTopX) {
-        const Projection p = project(back, {x, kTopY, kTopZ});
+        const float z = x == -0.0313f ? 0.0936f : kTopZ;  // Pawn_Top_B4 has advanced two squares
+        const Projection p = project(back, {x, kTopY, z});
         CHECK(p.depth > 0.3f);
         CHECK(std::abs(p.x) < 0.8f);
         CHECK(std::abs(p.y) < 0.8f);
         // The straight line through the top reaches the emissive panel (z = PanelZ) inside it, above the board.
-        const glm::vec3 d = glm::vec3(x, kTopY, kTopZ) - back.position;
+        const glm::vec3 d = glm::vec3(x, kTopY, z) - back.position;
         const float t = (ChessFixture::PanelZ - back.position.z) / d.z;
         const glm::vec3 hit = back.position + t * d;
         CHECK(std::abs(hit.x) < ChessFixture::PanelHalfWidth);
@@ -260,7 +261,7 @@ TEST_CASE("F15.1 ticket 20: the chess rigs on the pinned ABeautifulGame (skipped
         build("chess-sidelight/sss=off", ecs, scene, textures);
         CHECK_FALSE(scene.materialDescriptions()[materialIndex(scene, "King_Black")].subsurface.has_value());
     }
-    SUBCASE("mask mode: every material is black, the targets emissive white, nothing else in the scene") {
+    SUBCASE("mask mode: every material is black, the targets white diffuse, one sun along the view direction, specular off") {
         ECS ecs;
         GpuScene scene;
         test::NullTextureManager textures;
@@ -268,13 +269,23 @@ TEST_CASE("F15.1 ticket 20: the chess rigs on the pinned ABeautifulGame (skipped
         for (size_t i = 0; i < scene.materialNames().size(); ++i) {
             const MaterialDescription& d = scene.materialDescriptions()[i];
             const bool target = scene.materialNames()[i] == "Pawn_Top_Black";
-            CHECK(d.base.emissive[0] == (target ? 1.0f : 0.0f));
-            CHECK(d.base.baseColor[0] == 0.0f);
-            CHECK(featureMask(d) == 0u);
+            CHECK(d.base.emissive[0] == 0.0f);
+            CHECK(d.base.baseColor[0] == (target ? 1.0f : 0.0f));
+            CHECK(d.specular->specularFactor == 0.0f);
+            CHECK(featureMask(d) == featureBit(MaterialFeature::SpecularIor));  // nothing but the specular-off block
+            CHECK_FALSE(d.transmission.has_value());
+            CHECK_FALSE(d.subsurface.has_value());
         }
         size_t lights = 0;
-        for (EntityID e = 0; e < ecs.entityCount(); ++e) lights += std::as_const(ecs).hasComponent<LightComponent>(e) ? 1 : 0;
-        CHECK(lights == 0);
+        for (EntityID e = 0; e < ecs.entityCount(); ++e) {
+            if (!std::as_const(ecs).hasComponent<LightComponent>(e)) continue;
+            ++lights;
+            const auto& light = std::as_const(ecs).getComponent<LightComponent>(e);
+            CHECK(light.intensity == doctest::Approx(3.14159265f));
+            const CameraSetup view = ChessFixture::camera(ChessOptions{});
+            CHECK(view.position.z < 0.0f);  // the backlight camera: the sun (pi along the view) is built from it
+        }
+        CHECK(lights == 1);
     }
     SUBCASE("the backlight rig hides the other pieces and builds the panel; tops=hidden hides the pawn tops") {
         ECS ecs;

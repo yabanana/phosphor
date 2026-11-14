@@ -72,7 +72,7 @@ class GeometryTests(unittest.TestCase):
     def test_backlight_mask_geometry_check(self):
         mask = np.zeros((cc.HEIGHT, cc.WIDTH), dtype=bool)
         for x in cc.TOP_CENTRES_X:
-            column, row, _ = cc.project(cc.CAMERA_BACKLIGHT[0], cc.CAMERA_BACKLIGHT[1], (x, cc.TOP_Y, cc.TOP_Z))
+            column, row, _ = cc.project(cc.CAMERA_BACKLIGHT[0], cc.CAMERA_BACKLIGHT[1], (x, cc.TOP_Y, cc.TOP_Z_ADVANCED.get(x, cc.TOP_Z)))
             mask[int(row) - 15:int(row) + 15, int(column) - 15:int(column) + 15] = True
         result = cc.check_backlight_mask(np, mask)
         self.assertTrue(result["pass"], result)
@@ -269,6 +269,11 @@ class ReportTests(unittest.TestCase):
         self.assertTrue(cc.pipeline_health(good)["pass"])
         self.assertFalse(cc.pipeline_health(good.replace("misses 0", "misses 2"))["pass"])
         self.assertFalse(cc.pipeline_health(good.replace("compiles 0", "compiles 3"))["pass"])
+        startup = "STARTUP first frame submitted 400 ms after launch | PIPELINES requests 9 | archive hits 9, misses 0 | render-thread compiles 2 (0.3 ms) | fallbacks 0 (draws 0)\n"
+        late = cc.pipeline_health(startup + good.replace("compiles 0", "compiles 2"))
+        self.assertTrue(late["pass"])  # the two startup compiles are the phase baseline
+        self.assertEqual(late["startup_render_thread_compiles"], 2)
+        self.assertFalse(cc.pipeline_health(startup + good.replace("compiles 0", "compiles 3"))["pass"])
         self.assertFalse(cc.pipeline_health(good.replace("draws 0", "draws 9"))["pass"])
         self.assertIsNone(cc.pipeline_health("nothing"))
 

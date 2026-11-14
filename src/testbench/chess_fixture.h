@@ -28,8 +28,9 @@ namespace phosphor {
 //   chess-shadow      the pawns and the board under one sun from behind the black pawn row; the camera looks down at the empty rank in
 //                     front of the row where the pawn-top shadows fall.  Options: tops=on|opaque|hidden (the pawn-top materials as
 //                     authored, transmission forced to 0, or the pawn tops invisible), tint=asset|white.
-// Common option mask=1: every material is replaced by black (no textures, no extensions) except the target materials of the rig,
-// which are pure emissive white, the lights and the environment are off: the capture is the rig's mask of the same geometry and camera.
+// Common option mask=1: every material is replaced by black (no textures, specular off) except the target materials of the rig, which
+// are white diffuse; the only light is a sun of pi W/m^2 along the view direction and the environment is 0: a target pixel reads
+// cos(N, V), everything else is black, so the capture is the rig's mask of the same geometry and camera.
 // Mirrored by tools/f15_chess_check.py (tests/test_chess_fixture.cpp compares the names and the camera constants).
 //
 // SOURCE ONLY / NOT VERIFIED on a device until tools/f15_chess_check.py has captured the rigs.
