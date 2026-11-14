@@ -1442,9 +1442,11 @@ def judge(np, kind, candidate, reference, masks, spheres, controls, mode):
 
 
 def cached_transmission_reference_usable(reference_dir, snapshot_dir, controls, spp, tool="f15_transmission_reference.py",
-                                         sample_key="spp", margin=None):
+                                         sample_key="spp", margin=None, base_tool=None):
     """A cached transmission (or transmissive-shadow) reference is reused only when it was rendered from THIS snapshot by THIS tool
-    with the same sample count (and world margin) and holds every requested control file."""
+    with the same sample count (and world margin) and holds every requested control file.  `base_tool`: a module the tool imports
+    whose code shapes the images (the shadow reference builds its glass through f15_transmission_reference.py); its sha is
+    recorded by the report as `tool_sha256_base` and a change re-renders."""
     from f12_reference import scene_digest
     meta_path = reference_dir / "reference.json"
     if not meta_path.is_file():
@@ -1454,6 +1456,8 @@ def cached_transmission_reference_usable(reference_dir, snapshot_dir, controls, 
         if meta.get("snapshot_sha256") != scene_digest(pathlib.Path(snapshot_dir).resolve()):
             return False
         if meta.get("tool_sha256") != sha256_file(REPO / "tools" / tool):
+            return False
+        if base_tool is not None and meta.get("tool_sha256_base") != sha256_file(REPO / "tools" / base_tool):
             return False
         if meta.get("kind") == "mitsuba" and meta.get(sample_key) != spp:
             return False
@@ -1531,7 +1535,7 @@ def evaluate_shadow_scenario(np, name, folder, mode):
     margin = SHADOW_ENVELOPE[spec["envelope"]]
     reference_dir = folder / "reference"
     if not cached_transmission_reference_usable(reference_dir, folder / "snapshot", controls, samples, "f15_shadow_reference.py", "samples",
-                                                margin):
+                                                margin, "f15_transmission_reference.py"):
         if (reference_dir / "reference.json").is_file():
             print(f"{name}: the cached reference does not match this snapshot, tool, margin or controls; re-rendering", file=sys.stderr)
         code = sref.main(["render", str(folder / "snapshot"), "--out", str(reference_dir), "--margin", str(margin), "--samples", str(samples),

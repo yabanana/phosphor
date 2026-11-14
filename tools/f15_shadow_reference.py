@@ -511,7 +511,8 @@ def command_render(args):
                         "attenuation_distance": c["attenuation_distance"] if math.isfinite(c["attenuation_distance"]) else None,
                         "roughness": c["roughness"]})
     relative_noise = (noise * radiance[roi_pick] / np.maximum(shadowed, floor_value)).max(axis=1)
-    report = {"schema": 1, "tool": "tools/f15_shadow_reference.py", "tool_sha256": sha256_file(__file__), "model": MODEL,
+    report = {"schema": 1, "tool": "tools/f15_shadow_reference.py", "tool_sha256": sha256_file(__file__),
+              "tool_sha256_base": sha256_file(tref.__file__), "model": MODEL,
               "snapshot_sha256": snapshot_digest, "frame": data.get("frame"), "kind": kind, "samples": args.samples, "margin_m": args.margin,
               "cone_factor": {"sun": CONE_FACTOR_SUN, "point": CONE_FACTOR_POINT}, "point_light_radius": POINT_LIGHT_RADIUS, "max_bounces": MAX_BOUNCES, "seed": args.seed,
               "light": {"kind": light["kind"], **({"toward": light["toward"].tolist(), "angular_radius": light["radius"]}

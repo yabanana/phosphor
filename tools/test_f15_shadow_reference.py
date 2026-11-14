@@ -437,11 +437,28 @@ class EndToEnd(unittest.TestCase):
         folder, controls = self.folders[key], check.SCENARIOS[key]["controls"]
         usable = lambda **kw: check.cached_transmission_reference_usable(  # noqa: E731
             folder / "reference", folder / "snapshot", kw.get("controls", controls), kw.get("samples", sr.SAMPLES),
-            "f15_shadow_reference.py", "samples", kw.get("margin", 0.06))
+            "f15_shadow_reference.py", "samples", kw.get("margin", 0.06), "f15_transmission_reference.py")
         self.assertTrue(usable())
         self.assertFalse(usable(samples=sr.SAMPLES * 2))
         self.assertFalse(usable(margin=0.08))
         self.assertFalse(usable(controls=controls + ["beer-lambert-ignored"]))
+        # the glass BSDFs come from the base module: a report without (or with a stale) base sha must be re-rendered
+        meta_path = folder / "reference" / "reference.json"
+        original = meta_path.read_text()
+        meta = json.loads(original)
+        self.assertEqual(meta["tool_sha256_base"], check.sha256_file(check.REPO / "tools" / "f15_transmission_reference.py"))
+        try:
+            for stale in ("0" * 64, None):
+                changed = dict(meta)
+                if stale is None:
+                    changed.pop("tool_sha256_base")
+                else:
+                    changed["tool_sha256_base"] = stale
+                meta_path.write_text(json.dumps(changed))
+                self.assertFalse(usable(), stale)
+        finally:
+            meta_path.write_text(original)
+        self.assertTrue(usable())
 
 
 if __name__ == "__main__":
