@@ -78,11 +78,11 @@ reference ray casting):
   panes in front of an emissive checkerboard or emissive panels under a constant environment) against the Mitsuba 3.9.1
   path-traced ground truth of tools/f15_transmission_reference.py (pixel-centre rays, roughdielectric / dielectric + a homogeneous
   absorbing medium, the glTF thin-walled interface; every model decision is in that module's docstring).  The engine image is
-  the LINEAR HDR signal averaged over the last 32 frames (`--capture-linear-accumulate 32`: the transport is one stochastic sample
-  per pixel).  Gate "transmission" (decision 11): per glass object on the glass mask (silhouette band of 2 px excluded), mean
-  relative luminance error <= 5 % and p95 <= 15 %, with the absolute floor 0.05 * mean_ROI(reference).  Every key is "pending":
-  ticket 13 (asserted to FAIL: the engine ignores transmission) and its image must PASS the gate against `transmission-ignored`
-  (the opaque Appendix B dielectric: red for the right reason).  Negative controls (each must fail the gate): transmission
+  the LINEAR HDR signal averaged over the last 32 frames (`--capture-linear-accumulate 112`, `--lighting-denoise off`: the gate measures the unfiltered
+  stochastic estimator, as the DI keys do; the custom denoiser trades noise for edge blur, measured 5-6 % on rough refractions).  Gate "transmission" (decision 11): per glass object on the glass mask (silhouette band of 2 px excluded), mean
+  relative luminance error <= 5 % and p95 <= 15 %, with the absolute floor 0.05 * mean_ROI(reference).  The engine side landed with
+  F15.1 ticket 13 (the keys were "pending", asserted to FAIL with the `transmission-ignored` opaque dielectric as the matching image, until
+  then): every gate must pass.  Negative controls (each must fail the gate): transmission
   ignored, base colour tint ignored, volume attenuation ignored, ior ignored (no refraction bend), thin-walled treated as a
   volume, back faces of the closed glass mesh rejected (today's `reflections.metal` rule), emitter radiance counted twice, the
   glass behind the front glass black.  `transmission-rtoff` is the declared `--rt off` model (probes / environment along the
@@ -228,7 +228,10 @@ THRESHOLDS = {
 }
 LUMA_WEIGHTS = (0.2126, 0.7152, 0.0722)
 FRAMES, RESOLUTION = 128, "1280x720"
-ACCUMULATE = 32   # frames averaged by --capture-linear-accumulate for the stochastic transmission transport (frames 96..127)
+ACCUMULATE = 112  # frames averaged by --capture-linear-accumulate for the stochastic transmission transport (frames 16..127).  Measured
+#                   (F15.1 ticket 13): the refraction estimator is unbiased (per-object mean ratio to Mitsuba within 0.5 %) but its per-pixel
+#                   noise at 8 samples x 32 frames is 4-8 % on rough spheres (two seeds, same tolerance as the 256-sample Mitsuba noise),
+#                   which the 5 % per-object bound cannot absorb; 112 frames bring it to 2-4 %.
 REFERENCE_SPP = 1024  # Mitsuba samples per glass-mask pixel
 TRANSMISSION_KINDS = ("transmission", "transmission-declared")
 SHADOW_KINDS = ("transmissive-shadow", "transmissive-shadow-ratio", "transmissive-shadow-curved")
@@ -574,51 +577,51 @@ SCENARIOS = {
                                         "terms": "constant environment radiance 1, white base and transmission colour, no sun, "
                                                  "deterministic resolve terms on the thin subsurface grid"},
     # F15.3 (ticket 13): KHR_materials_transmission + KHR_materials_volume, ray-traced (decision 09, ADR-0004).  Written
-    # test-first: today's engine ignores transmission and renders the glass as an opaque dielectric, so every key is
-    # "pending" (asserted to FAIL) and its engine image must pass the gate against `transmission-ignored`.  All RT keys
+    # test-first (the keys were "pending" with the `transmission-ignored` opaque dielectric as the matching image until the engine side
+    # landed with F15.1 ticket 13): every gate must pass.  All RT keys
     # trace the glass with RT whatever the reflection band (--rt on --reflections rt); the engine image is the mean of
     # frames 96..127 (--capture-linear-accumulate).  Only the controls that change the fixture are listed (a control
     # identical to the reference would be non-discriminating: e.g. `transmission-not-tinted` needs a tinted base).
-    "transmission-roughness-ior": {"kind": "transmission", "pending": "ticket 13", "pending_matches": "transmission-ignored",
-                                   "rt": True, "reflections": "rt", "accumulate": ACCUMULATE,
+    "transmission-roughness-ior": {"kind": "transmission",
+                                   "rt": True, "reflections": "rt", "accumulate": ACCUMULATE, "denoise": "off",
                                    "controls": ["transmission-ignored", "ior-ignored"],
                                    "terms": "constant environment 0.5 + emissive checkerboard behind 12 clear volume spheres "
                                             "(roughness {0, .1, .3, .6} x ior {1.33, 1.5, 2.0}), RT glass transport"},
-    "transmission-attenuation": {"kind": "transmission", "pending": "ticket 13", "pending_matches": "transmission-ignored",
-                                 "rt": True, "reflections": "rt", "accumulate": ACCUMULATE,
+    "transmission-attenuation": {"kind": "transmission",
+                                 "rt": True, "reflections": "rt", "accumulate": ACCUMULATE, "denoise": "off",
                                  "controls": ["transmission-ignored", "volume-ignored", "ior-ignored"],
                                  "terms": "constant environment 0.5 + emissive checkerboard behind 6 absorbing volume spheres "
                                           "(attenuation colour x distance), RT glass transport"},
-    "transmission-factor-tint": {"kind": "transmission", "pending": "ticket 13", "pending_matches": "transmission-ignored",
-                                 "rt": True, "reflections": "rt", "accumulate": ACCUMULATE,
+    "transmission-factor-tint": {"kind": "transmission",
+                                 "rt": True, "reflections": "rt", "accumulate": ACCUMULATE, "denoise": "off",
                                  "controls": ["transmission-ignored", "transmission-not-tinted", "volume-ignored", "ior-ignored",
                                               "thin-as-volume"],
                                  "terms": "constant environment 0.5 + emissive checkerboard behind thin panes and volume slabs "
                                           "(factor {1, .5} x tint), RT glass transport"},
-    "transmission-thin-volume": {"kind": "transmission", "pending": "ticket 13", "pending_matches": "transmission-ignored",
-                                 "rt": True, "reflections": "rt", "accumulate": ACCUMULATE,
+    "transmission-thin-volume": {"kind": "transmission",
+                                 "rt": True, "reflections": "rt", "accumulate": ACCUMULATE, "denoise": "off",
                                  "controls": ["transmission-ignored", "volume-ignored", "ior-ignored", "thin-as-volume"],
                                  "terms": "constant environment 0.5 + emissive checkerboard behind a thin-walled sphere, a clear "
                                           "and an absorbing volume sphere, RT glass transport"},
-    "transmission-single-sided": {"kind": "transmission", "pending": "ticket 13", "pending_matches": "transmission-ignored",
-                                  "rt": True, "reflections": "rt", "accumulate": ACCUMULATE,
+    "transmission-single-sided": {"kind": "transmission",
+                                  "rt": True, "reflections": "rt", "accumulate": ACCUMULATE, "denoise": "off",
                                   "controls": ["transmission-ignored", "backface-rejected", "ior-ignored", "volume-ignored"],
                                   "terms": "constant environment 0.5 + emissive checkerboard behind SINGLE-SIDED closed glass "
                                            "meshes (lens sphere, rotated cube, absorbing sphere), RT glass transport"},
-    "transmission-glass-behind-glass": {"kind": "transmission", "pending": "ticket 13", "pending_matches": "transmission-ignored",
-                                        "rt": True, "reflections": "rt", "accumulate": ACCUMULATE,
+    "transmission-glass-behind-glass": {"kind": "transmission",
+                                        "rt": True, "reflections": "rt", "accumulate": ACCUMULATE, "denoise": "off",
                                         "controls": ["transmission-ignored", "back-glass-black", "ior-ignored", "volume-ignored"],
                                         "terms": "constant environment 0.5 + emissive checkerboard behind overlapping glass "
                                                  "(sphere behind sphere, pane in front of a sphere), RT glass transport"},
-    "transmission-emissive-panel": {"kind": "transmission", "pending": "ticket 13", "pending_matches": "transmission-ignored",
-                                    "rt": True, "reflections": "rt", "accumulate": ACCUMULATE, "lighting": "restir",
+    "transmission-emissive-panel": {"kind": "transmission",
+                                    "rt": True, "reflections": "rt", "accumulate": ACCUMULATE, "denoise": "off", "lighting": "restir",
                                     "visibility": "rays",
                                     "controls": ["transmission-ignored", "emitter-double-counted", "transmission-not-tinted"],
                                     "terms": "constant environment 0.5 + two emissive panels (radiance 3) behind a clear and a "
                                              "tinted thin pane, ReSTIR DI with RT visibility (--lighting restir --rt on): the "
                                              "panel radiance is counted once (transport), not again by DI"},
     # The declared --rt off model: no backdrop (probes/environment only), the probe path with the analytic constant probe.
-    "transmission-rtoff": {"kind": "transmission-declared", "pending": "ticket 13", "pending_matches": "declared-transmission-ignored",
+    "transmission-rtoff": {"kind": "transmission-declared",
                            "reflections": "probes", "denoise": "off",
                            "controls": ["declared-transmission-ignored", "declared-not-tinted", "declared-volume-ignored"],
                            "terms": "constant environment 0.5 only (no backdrop), --rt off probe path: the declared model "

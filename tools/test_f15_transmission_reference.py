@@ -260,15 +260,17 @@ class DeclaredModel(unittest.TestCase):
 
 
 class Runner(unittest.TestCase):
-    def test_every_transmission_key_is_pending_and_models_todays_engine(self):
+    def test_every_transmission_key_is_no_longer_pending_and_keeps_the_ignored_control(self):
+        # The engine side landed with F15.1 ticket 13: every gate must pass; the opaque (transmission-ignored) control stays as a
+        # negative control that must FAIL the gate.
         keys = [k for k in check.SCENARIOS if k.startswith("transmission-")]
         self.assertEqual(len(keys), 8)
         for key in keys:
             spec = check.SCENARIOS[key]
-            self.assertEqual(spec["pending"], "ticket 13", key)
+            for field in ("pending", "pending_matches", "pending_gate"):
+                self.assertNotIn(field, spec, key)
             declared = spec["kind"] == "transmission-declared"
-            self.assertEqual(spec["pending_matches"], "declared-transmission-ignored" if declared else "transmission-ignored", key)
-            self.assertIn(spec["pending_matches"], spec["controls"])
+            self.assertIn("declared-transmission-ignored" if declared else "transmission-ignored", spec["controls"])
             allowed = tr.DECLARED_CONTROLS if declared else tr.CONTROLS
             self.assertTrue(set(spec["controls"]) <= set(allowed), key)
             self.assertGreaterEqual(len(spec["controls"]), 2, key)

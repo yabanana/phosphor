@@ -87,6 +87,19 @@ inline float3 reflectionSecondary(GPURtHit hit,float3 direction,
 // surface (lit radiance: emitters hit by refracted rays are owned by the transport) or at the probes/environment; the walk never exceeds
 // kTransmissionMaxEvents traces; a fifth crossing ends in the probes/environment along the refracted direction.
 // ---------------------------------------------------------------------------------------------------------------------------------------
+// Visible-normal sampling of the isotropic GGX distribution (Heitz 2018): the half vector is drawn from D(h) G1(v) |v.h| / |n.v|, so the one-sample
+// estimator of a reflection or a refraction through it weighs G1(o) <= 1 (bounded: the D(h) n.h proposal weighs |i.h| G / (|i.n| |h.n|), unbounded for
+// rough interfaces, and made the rough refraction of a three-interface walk fire).  Returns the world half vector for the unit view direction `v`.
+inline float3 reflectionSampleVisibleNormal(float3 n,float3 v,float alpha,float2 u){
+    const float3 t=reflectionTangent(n),b=cross(n,t);const float3 ve=float3(dot(v,t),dot(v,b),dot(v,n));
+    const float3 vh=normalize(float3(alpha*ve.x,alpha*ve.y,ve.z));const float lensq=vh.x*vh.x+vh.y*vh.y;
+    const float3 t1=lensq>1e-12f?float3(-vh.y,vh.x,0.0f)*rsqrt(lensq):float3(1,0,0),t2=cross(vh,t1);
+    const float r=sqrt(u.x),phi=2*M_PI_F*u.y,p1=r*cos(phi);float p2=r*sin(phi);const float s=.5f*(1+vh.z);
+    p2=(1-s)*sqrt(max(0.0f,1-p1*p1))+s*p2;
+    const float3 nh=p1*t1+p2*t2+sqrt(max(0.0f,1-p1*p1-p2*p2))*vh;
+    const float3 ne=normalize(float3(alpha*nh.x,alpha*nh.y,max(0.0f,nh.z)));
+    return t*ne.x+b*ne.y+n*ne.z;
+}
 struct ReflectionGlassHit {
     bool glass;           // a transmissive interface the walk refracts through
     bool thin;            // thin-walled: no bend, no medium
@@ -134,25 +147,24 @@ struct ReflectionMedium {bool active;float3 color;float distance;};
 inline uint reflectionGlassEvent(thread float3& d,thread float3& weight,thread ReflectionMedium& medium,ReflectionGlassHit g,thread uint& seed,
     thread float3& side,thread uint& crossings,thread bool& numericError){
     const float3 n=g.normal,i=-d;const float cosN=dot(i,n);if(!(cosN>0))return 0;
-    const float2 u=float2(giRandom(seed),giRandom(seed));const float a2=g.alpha*g.alpha;
+    const float2 u=float2(giRandom(seed),giRandom(seed));
     // A material at the roughness floor (alpha <= kTransmissionSmoothAlpha: roughness 0 clamps to it) is a smooth interface: h = n, weight 1, the delta
     // the reference's `dielectric` is (the floor's own GGX tail would blur the refracted image the reference keeps sharp).
     const bool smooth=g.alpha<=phosphor::kTransmissionSmoothAlpha;
-    const float c=smooth?1.0f:sqrt((1-u.x)/(1+(a2-1)*u.x)),r=sqrt(max(0.0f,1-c*c)),phi=2*M_PI_F*u.y;
-    const float3 t=reflectionTangent(n),b=cross(n,t),h=smooth?n:t*(r*cos(phi))+b*(r*sin(phi))+n*c;const float iH=dot(i,h);if(!(iH>0))return 0;
+    const float3 h=smooth?n:reflectionSampleVisibleNormal(n,i,g.alpha,u);const float iH=dot(i,h);if(!(iH>0))return 0;
     const float eta=(g.thin||g.entering)?g.ior:1.0f/g.ior;
     const TransmissionFresnel fr=phosphor::transmissionFresnel(iH,eta);
     float3 o=2.0f*iH*h-i;float oN=dot(o,n);float wk;
     if(giRandom(seed)<fr.f){ // reflection: stays on the incoming side, inside the same medium
         if(!(oN>0))return 0;
-        wk=phosphor::transmissionMicrofacetWeight(cosN,oN,iH,dot(o,h),c,g.alpha);side=g.geometric;
+        wk=phosphor::transmissionG1(oN,dot(o,h),g.alpha);side=g.geometric;
     }else{
         float3 refracted;
         if(g.thin){ // thin-walled: the reflected direction mirrored through the surface keeps the ray going (no bend)
-            if(!(oN>0))return 0;wk=phosphor::transmissionMicrofacetWeight(cosN,oN,iH,dot(o,h),c,g.alpha);refracted=o-2.0f*oN*n;
+            if(!(oN>0))return 0;wk=phosphor::transmissionG1(oN,dot(o,h),g.alpha);refracted=o-2.0f*oN*n;
         }else{
             const float ratio=1.0f/eta;refracted=-ratio*i+(ratio*iH-fr.cosT)*h;const float rN=dot(refracted,n);if(!(rN<0))return 0;
-            wk=phosphor::transmissionMicrofacetWeight(cosN,rN,iH,dot(refracted,h),c,g.alpha);
+            wk=phosphor::transmissionG1(rN,dot(refracted,h),g.alpha);
             // entering a closed volume starts its medium, leaving ends it
             if(g.entering){medium.active=true;medium.color=g.attenuationColor;medium.distance=g.attenuationDistance;}else medium.active=false;
         }
@@ -210,14 +222,13 @@ inline GPUSpecularSample reflectionRefractSample(GPUDISurface s,float2 u,Reflect
     GPUSpecularSample out=reflectionEmpty();if(!s.valid)return out;
     float3 n=diVec(s.shadingNormal),v=diVec(s.viewDirection);if(!all(isfinite(n))||!all(isfinite(v))||dot(n,n)<=0||dot(v,v)<=0){out.flags|=SPECULAR_SAMPLE_ERROR;return out;}
     n=normalize(n);v=normalize(v);out.flags|=SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_STOCHASTIC;
-    const float alpha=bsdfAlpha(s.roughness),a2=alpha*alpha;const bool smooth=alpha<=phosphor::kTransmissionSmoothAlpha; // a smooth interface: h = n (see reflectionGlassEvent)
-    const float c=smooth?1.0f:sqrt((1-u.x)/(1+(a2-1)*u.x)),r=sqrt(max(0.0f,1-c*c)),phi=2*M_PI_F*u.y;
-    const float3 t=reflectionTangent(n),b=cross(n,t),h=smooth?n:t*(r*cos(phi))+b*(r*sin(phi))+n*c;const float vh=dot(v,h),nv=dot(n,v);
+    const float alpha=bsdfAlpha(s.roughness);const bool smooth=alpha<=phosphor::kTransmissionSmoothAlpha; // a smooth interface: h = n (see reflectionGlassEvent)
+    const float3 h=smooth?n:reflectionSampleVisibleNormal(n,v,alpha,u);const float c=dot(n,h),vh=dot(v,h),nv=dot(n,v);
     if(!(vh>0)||!(nv>0))return out;
     const bool thin=!(lobe.transThickness>0);float3 direction;float wk;
-    if(thin){const float3 mirror=2.0f*vh*h-v;const float mN=dot(mirror,n);if(!(mN>0))return out;wk=phosphor::transmissionMicrofacetWeight(nv,mN,vh,dot(mirror,h),c,alpha);direction=mirror-2.0f*mN*n;}
+    if(thin){const float3 mirror=2.0f*vh*h-v;const float mN=dot(mirror,n);if(!(mN>0))return out;wk=phosphor::transmissionG1(mN,dot(mirror,h),alpha);direction=mirror-2.0f*mN*n;}
     else{const float ratio=1.0f/lobe.transIor;const TransmissionFresnel fr=phosphor::transmissionFresnel(vh,lobe.transIor);
-        direction=-ratio*v+(ratio*vh-fr.cosT)*h;const float dN=dot(direction,n);if(fr.tir||!(dN<0))return out;wk=phosphor::transmissionMicrofacetWeight(nv,dN,vh,dot(direction,h),c,alpha);}
+        direction=-ratio*v+(ratio*vh-fr.cosT)*h;const float dN=dot(direction,n);if(fr.tir||!(dN<0))return out;wk=phosphor::transmissionG1(dN,dot(direction,h),alpha);}
     // The Fresnel layer of the glTF composition keeps (1 - max F) of the base (diffuse mixed with the tinted BTDF) for the transmitted lobe.
     const float layer=1.0f-bsdfMax3(bsdfSpecFresnel(lobe.spec,saturate(vh)));
     float3 weight=(layer*lobe.transFactor*(1.0f-saturate(s.metallic))*wk/max(1.0f-lobe.pReflect,1e-4f))*max(diVec(s.albedo),0.0f);
