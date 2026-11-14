@@ -106,8 +106,16 @@ reference ray casting):
   `transmittance-ignored` control (red for the right reason).  Negative controls (the declared straight-line model with one ingredient
   removed; each must fail the gate): transmittance ignored (opaque casters), tint ignored, Fresnel ignored, Beer-Lambert ignored,
   transmittance applied twice.  A control equal to the reference within the bound on a fixture is not listed there (water has
-  Fresnel 2 % per surface: Fresnel-ignored is 4.6 %).  `transmissive-shadow-curved@rt` is the report-only curved-glass key: reference =
-  the declared straight-line model (caustics are excluded by declaration), measured and never gated.  The declared model itself must
+  Fresnel 2 % per surface: Fresnel-ignored is 4.6 %).  ORCHESTRATOR DECISIONS (2026-11-14): the CSM keys (`@csm`, kind
+  `transmissive-shadow-ratio`) gate the TRANSMITTANCE RATIO, not the absolute luminance: per caster region T = mean luminance of the region /
+  mean luminance of the declared lit reference region (floor outside every shadow and envelope, within 0.5 m of the shadows), compared with the
+  truth's T (relative error <= 5 % with the floor 0.05 * mean T of the truth; p95 of the per-pixel luminance / lit mean against the truth's <= 15 %);
+  the lit-floor level of the CSM against the truth (a pre-existing F10 bias) is a separate NOT gated diagnostic (`lit_floor_diagnostic`).  RT and
+  DI keys keep the absolute bound.  `transmissive-shadow-curved@rt` (kind `transmissive-shadow-curved`, pending ticket 14) gates a QUALITATIVE
+  property only: per caster region 0.001 < T < 0.995 (lighter than an opaque caster, darker than unshadowed) and the chroma statistic R/B (mean
+  red over mean blue of the region) follows the tint (base x attenuation colour): within 2 % of 1 for a neutral caster, on the tint's side of 1 with
+  at least half its log magnitude for a tinted one; the numbers against the declared straight-line model (caustics excluded) are reported, never
+  gated; controls: shadow-ignored (T = 1) and transmittance-ignored (T = 0).  The declared model itself must
   pass the gate against the Mitsuba truth on every gated key (`model_feasible`): otherwise the bound is unreachable for an engine
   implementing the declaration and the fixture is blocked (exit 3).
 - Volumetric subsurface (F15.3, ticket 17): subsurface-volumetric-sun / -radius / -subpixel (+ the capture-only -subpixel-off) / -backlit
@@ -148,6 +156,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import pathlib
 import re
@@ -203,7 +212,12 @@ THRESHOLDS = {
     "transmissive_shadow": {"mean_per_object": 0.05, "p95_per_object": 0.15,
                             "floor": "0.05 * mean over the whole shadow mask of the GROUND TRUTH (controls and twin included)",
                             "mask": "floor pixels whose shadow ray and 8 ring neighbours at the world envelope first hit the same caster",
-                            "envelope_m": {"rt": 0.06, "csm": 0.08}},
+                            "envelope_m": {"rt": 0.06, "csm": 0.08},
+                            "ratio_gate": "CSM keys (orchestrator): T = mean luminance of the caster's shadow region / mean luminance of the declared lit "
+                                          "reference region (floor outside every shadow and envelope, within 0.5 m of the shadows); relative error of T <= 5 % "
+                                          "(floor 0.05 * mean T of the truth), p95 of the per-pixel luminance / lit mean against the truth's <= 15 %; "
+                                          "the lit-floor level is a separate not gated diagnostic",
+                            "curved": {"transmittance": [0.001, 0.995], "chroma_clear": 0.02, "chroma_tinted_fraction": 0.5}},
     # F15.3 (ticket 17), decision 11: subsurface vs random-walk ground truth on the piece mask.
     "subsurface": {"mean": 0.10, "p95": 0.25, "floor_fraction": 0.05,
                    "metric": "relative LUMINANCE error |Y_a - Y_b| / max(Y_b, 0.05 * mean_piece(Y_b)), Rec.709 weights, per piece ROI"},
@@ -217,7 +231,7 @@ FRAMES, RESOLUTION = 128, "1280x720"
 ACCUMULATE = 32   # frames averaged by --capture-linear-accumulate for the stochastic transmission transport (frames 96..127)
 REFERENCE_SPP = 1024  # Mitsuba samples per glass-mask pixel
 TRANSMISSION_KINDS = ("transmission", "transmission-declared")
-SHADOW_KINDS = ("transmissive-shadow", "transmissive-shadow-report")
+SHADOW_KINDS = ("transmissive-shadow", "transmissive-shadow-ratio", "transmissive-shadow-curved")
 # Declared BEFORE any measurement (tickets 14/15, see the docstring): the world radius of the ring that excludes the shadow boundary.
 SHADOW_ENVELOPE = {"rt": 0.06, "csm": 0.08}
 SHADOW_ACCUMULATE = 8   # frames averaged for the shadow keys (frames 120..127): the engine's shadow transport may be stochastic
@@ -618,7 +632,7 @@ SCENARIOS = {
                                         "envelope": "rt", "controls": SHADOW_PANE_CONTROLS,
                                         "terms": "sun 25 degrees from the pane normal, no environment, RT sun shadows (--shadows rt): "
                                                  "thin clear pane, thin green pane, thick clear pane, opaque slab over a diffuse floor"},
-    "transmissive-shadow-pane-sun@csm": {"kind": "transmissive-shadow", "pending": "ticket 15", "pending_matches": "transmittance-ignored",
+    "transmissive-shadow-pane-sun@csm": {"kind": "transmissive-shadow-ratio", "pending": "ticket 15", "pending_matches": "transmittance-ignored",
                                          "shadows": "csm", "reflections": "off", "accumulate": SHADOW_ACCUMULATE,
                                          "envelope": "csm", "controls": SHADOW_PANE_CONTROLS,
                                          "terms": "the pane fixture with the CSM path (--shadows csm, --rt off): single-layer transmittance map"},
@@ -627,7 +641,7 @@ SCENARIOS = {
                                          "envelope": "rt", "controls": SHADOW_WATER_CONTROLS,
                                          "terms": "sun 20 degrees from the normal, RT sun shadows: clear and murky flat shallow water "
                                                   "(ior 1.33 slabs 0.12 m), opaque slab"},
-    "transmissive-shadow-water-sun@csm": {"kind": "transmissive-shadow", "pending": "ticket 15", "pending_matches": "transmittance-ignored",
+    "transmissive-shadow-water-sun@csm": {"kind": "transmissive-shadow-ratio", "pending": "ticket 15", "pending_matches": "transmittance-ignored",
                                           "shadows": "csm", "reflections": "off", "accumulate": SHADOW_ACCUMULATE,
                                           "envelope": "csm", "controls": SHADOW_WATER_CONTROLS,
                                           "terms": "the shallow water fixture with the CSM path"},
@@ -636,7 +650,7 @@ SCENARIOS = {
                                            "envelope": "rt", "controls": SHADOW_VOLUME_CONTROLS,
                                            "terms": "sun 20 degrees from the normal, RT sun shadows: three thick glass panes (0.1 m) with "
                                                     "volume attenuation (colour x distance)"},
-    "transmissive-shadow-volume-pane@csm": {"kind": "transmissive-shadow", "pending": "ticket 15", "pending_matches": "transmittance-ignored",
+    "transmissive-shadow-volume-pane@csm": {"kind": "transmissive-shadow-ratio", "pending": "ticket 15", "pending_matches": "transmittance-ignored",
                                             "shadows": "csm", "reflections": "off", "accumulate": SHADOW_ACCUMULATE,
                                             "envelope": "csm", "controls": SHADOW_VOLUME_CONTROLS,
                                             "terms": "the attenuating thick pane fixture with the CSM path"},
@@ -645,11 +659,13 @@ SCENARIOS = {
                                          "accumulate": SHADOW_ACCUMULATE, "envelope": "rt", "controls": SHADOW_POINT_CONTROLS,
                                          "terms": "one point light 4.5 m above the floor, ReSTIR DI with RT visibility (--lighting restir "
                                                   "--rt on), unfiltered: thin clear, thin green, thick clear pane and an opaque slab"},
-    "transmissive-shadow-curved@rt": {"kind": "transmissive-shadow-report", "always_green": True, "rt": True, "shadows": "rt",
-                                      "reflections": "off", "accumulate": SHADOW_ACCUMULATE, "envelope": "rt", "controls": [],
+    "transmissive-shadow-curved@rt": {"kind": "transmissive-shadow-curved", "pending": "ticket 14", "rt": True, "shadows": "rt",
+                                      "reflections": "off", "accumulate": SHADOW_ACCUMULATE, "envelope": "rt",
+                                      "controls": ["shadow-ignored", "transmittance-ignored"],
                                       "reference_args": ["--no-ground-truth"],
                                       "terms": "sun 25 degrees from the vertical, RT sun shadows, clear and absorbing glass spheres: "
-                                               "measured against the declared straight-line model and reported, never gated (caustics are excluded)"},
+                                               "QUALITATIVE gate (0 < mean transmittance < 1, chroma follows the tint); the numbers against the declared "
+                                               "straight-line model are reported, never gated (caustics are excluded)"},
     "specular-grid-point@clustered": {"kind": "direct", "lighting": "clustered", "visibility": "rays", "denoise": "off",
                                       "terminator_band": 2,
                                       "controls": ["specular-ignored", "f90-one", "specular-weight-not-on-f0"],
@@ -995,6 +1011,83 @@ def evaluate_transmission(np, candidate, reference, masks, objects, gate_name="t
     return {"kind": kind, "floor": floor, "pooled_not_gated": pooled, "objects": table,
             "pass": all(t["pass"] for t in table) if gated else True, "gated": gated,
             "worst_mean": max(t.get("mean", 0.0) for t in table), "worst_p95": max(t.get("p95", 0.0) for t in table)}
+def ratio_statistics(np, candidate, reference, masks, objects, floor_from=None):
+    """Orchestrator decision (ticket 15): per caster region the TRANSMITTANCE RATIO T = mean luminance in the region / mean luminance of the
+    declared lit reference region of the same image, compared with the reference's: relative error of T (floor 0.05 * mean T of `floor_from`,
+    the ground truth, by default the reference) and the p95 of the per-pixel error of luminance / lit mean (same floor rule).  Also the lit-floor
+    level of the candidate against the reference (diagnostic, never gated)."""
+    gate = THRESHOLDS["transmissive_shadow"]
+    lit, roi = masks["lit"], masks["roi"]
+    truth = reference if floor_from is None else floor_from
+    ya, yb, yt = luminance(np, candidate), luminance(np, reference), luminance(np, truth)
+    lit_a, lit_b, lit_t = float(ya[lit].mean()), float(yb[lit].mean()), float(yt[lit].mean())
+    tiny = np.finfo(float).tiny
+    regions = {o["instance"]: roi & (masks["sphere"] == o["instance"]) for o in objects}
+    present = [float(yt[r].mean()) / lit_t for r in regions.values() if r.any()]
+    floor_t = THRESHOLDS["floor_fraction"] * (sum(present) / len(present) if present else 0.0)
+    floor_pixel = THRESHOLDS["floor_fraction"] * float((yt[roi] / lit_t).mean())
+    table = []
+    for o in objects:
+        pick = regions[o["instance"]]
+        label = {"instance": o["instance"], "label": o.get("label", ""), "metallic": 0.0, "roughness": 0.0}
+        if not pick.any():
+            table.append({**label, "pixels": 0, "pass": False})
+            continue
+        ta, tb = float(ya[pick].mean()) / max(lit_a, tiny), float(yb[pick].mean()) / lit_b
+        mean = abs(ta - tb) / max(tb, floor_t, tiny)
+        pixel = np.abs(ya[pick] / max(lit_a, tiny) - yb[pick] / lit_b) / np.maximum(yb[pick] / lit_b, max(floor_pixel, tiny))
+        p95 = float(np.percentile(pixel, 95))
+        table.append({**label, "pixels": int(pick.sum()), "mean": float(mean), "p95": p95, "transmittance": ta, "reference_transmittance": tb,
+                      "pass": bool(mean <= gate["mean_per_object"] and p95 <= gate["p95_per_object"])})
+    ratio = ya[lit] / np.maximum(yb[lit], tiny)
+    diagnostic = {"lit_pixels": int(lit.sum()), "candidate_lit_mean_luminance": lit_a, "reference_lit_mean_luminance": lit_b,
+                  "lit_level_ratio": lit_a / lit_b if lit_b else None, "lit_level_median_ratio": float(np.median(ratio)),
+                  "lit_level_p5_ratio": float(np.percentile(ratio, 5))}
+    return table, diagnostic
+
+
+def evaluate_shadow_ratio(np, candidate, reference, masks, objects, floor_from=None):
+    table, diagnostic = ratio_statistics(np, candidate, reference, masks, objects, floor_from)
+    return {"kind": "transmissive-shadow-ratio", "floor": 0.0, "pooled_not_gated": {}, "objects": table, "pass": all(t["pass"] for t in table),
+            "gated": True, "worst_mean": max(t.get("mean", 0.0) for t in table), "worst_p95": max(t.get("p95", 0.0) for t in table),
+            "lit_floor_diagnostic": diagnostic}
+
+
+def evaluate_shadow_curved(np, candidate, reference, masks, objects):
+    """Orchestrator decision: qualitative gate of the curved-glass key.  Per caster region T (as above) must satisfy 0 < T < 1 (lighter than an
+    opaque caster, darker than unshadowed) and the chroma statistic R/B (mean red over mean blue of the region) must follow the tint (tint =
+    base x attenuation colour): within 2 % of 1 (log) for a neutral caster, on the tint's side of 1 with at least half its log magnitude for a
+    tinted one.  The numbers against the declared model are reported, never gated."""
+    gate = THRESHOLDS["transmissive_shadow"]["curved"]
+    lit = masks["lit"]
+    ya = luminance(np, candidate)
+    lit_a = float(ya[lit].mean())
+    numbers = evaluate_transmission(np, candidate, reference, masks, objects, "transmissive_shadow", "transmissive-shadow-curved", reference, gated=False)
+    table = []
+    for o, n in zip(objects, numbers["objects"]):
+        pick = masks["roi"] & (masks["sphere"] == o["instance"])
+        label = {"instance": o["instance"], "label": o.get("label", ""), "metallic": 0.0, "roughness": 0.0}
+        if not pick.any():
+            table.append({**label, "pixels": 0, "pass": False})
+            continue
+        t = float(ya[pick].mean()) / max(lit_a, np.finfo(float).tiny)
+        mean_rgb = candidate[pick].mean(axis=0)
+        chroma = float(mean_rgb[0] / mean_rgb[2]) if mean_rgb[2] > 0 else 0.0
+        tint = [b * a for b, a in zip(o.get("base", [1, 1, 1]), o.get("attenuation_color", [1, 1, 1]))]
+        expected = math.log(tint[0] / tint[2])
+        if abs(expected) < 1e-6:
+            chroma_ok = chroma > 0 and abs(math.log(chroma)) <= gate["chroma_clear"]
+        else:
+            chroma_ok = chroma > 0 and math.log(chroma) * expected > 0 and abs(math.log(chroma)) >= gate["chroma_tinted_fraction"] * abs(expected)
+        transmittance_ok = gate["transmittance"][0] < t < gate["transmittance"][1]
+        table.append({**label, "pixels": int(pick.sum()), "mean": n.get("mean", 0.0), "p95": n.get("p95", 0.0), "transmittance": t,
+                      "chroma_r_over_b": chroma, "expected_chroma_r_over_b": math.exp(expected), "transmittance_ok": transmittance_ok,
+                      "chroma_ok": bool(chroma_ok), "pass": bool(transmittance_ok and chroma_ok)})
+    return {"kind": "transmissive-shadow-curved", "floor": numbers["floor"], "pooled_not_gated": {}, "objects": table,
+            "pass": all(t["pass"] for t in table), "gated": True, "numbers_gated": False,
+            "worst_mean": max(t.get("mean", 0.0) for t in table), "worst_p95": max(t.get("p95", 0.0) for t in table)}
+
+
 def luminance(np, image):
     return image[..., 0] * LUMA_WEIGHTS[0] + image[..., 1] * LUMA_WEIGHTS[1] + image[..., 2] * LUMA_WEIGHTS[2]
 
@@ -1119,9 +1212,12 @@ def evaluate_equal(np, candidate, reference, masks, spheres):
 def evaluate(np, kind, candidate, reference, masks, spheres, band=1):
     if kind in TRANSMISSION_KINDS:
         return evaluate_transmission(np, candidate, reference, masks, spheres)
+    if kind == "transmissive-shadow-ratio":
+        return evaluate_shadow_ratio(np, candidate, reference, masks, spheres)
+    if kind == "transmissive-shadow-curved":
+        return evaluate_shadow_curved(np, candidate, reference, masks, spheres)
     if kind in SHADOW_KINDS:
-        return evaluate_transmission(np, candidate, reference, masks, spheres, "transmissive_shadow", kind, reference,
-                                     gated=kind == "transmissive-shadow")
+        return evaluate_transmission(np, candidate, reference, masks, spheres, "transmissive_shadow", kind, reference)
     if kind == "subsurface":
         return evaluate_subsurface(np, candidate, reference, masks, spheres)
     if kind == "subsurface-report":
@@ -1331,7 +1427,7 @@ def evaluate_shadow_scenario(np, name, folder, mode):
     masks = dict(np.load(reference_dir / "masks.npz"))
     objects = report["objects"]
     kind = spec["kind"]
-    gated = kind == "transmissive-shadow"
+    gated = True
     images = {c: read_pfm(reference_dir / report["controls"][c]["file"]) for c in controls}
     result = evaluate(np, kind, candidate, reference, masks, objects)
     verdicts = control_verdicts(np, kind, reference, images, masks, objects, controls)
@@ -1340,8 +1436,11 @@ def evaluate_shadow_scenario(np, name, folder, mode):
     twins = []
     if spec.get("pending_matches") in images:
         # the twin's absolute floor is the ground truth's, not the control image's (an all-black control has floor 0)
-        twin = evaluate_transmission(np, candidate, images[spec["pending_matches"]], masks, objects, "transmissive_shadow", kind, reference,
-                                     gated=True)
+        if kind == "transmissive-shadow-ratio":  # the floors are the truth's (an all-black twin has T = 0 and no floor of its own)
+            twin = evaluate_shadow_ratio(np, candidate, images[spec["pending_matches"]], masks, objects, floor_from=reference)
+        else:
+            twin = evaluate_transmission(np, candidate, images[spec["pending_matches"]], masks, objects, "transmissive_shadow", kind, reference,
+                                         gated=True)
         expected = {**expected, "matches_control": spec["pending_matches"], "control_gate": summarize(twin),
                     "met": expected["met"] and twin["pass"]}
         twins.append(twin["pass"])
@@ -1352,7 +1451,8 @@ def evaluate_shadow_scenario(np, name, folder, mode):
              "model_gate": summarize(model), "model_feasible": bool(model["pass"]), "envelope_m": margin,
              "reference_settings": {k: report.get(k) for k in ("samples", "max_bounces", "margin_m", "cone_factor", "point_light_radius",
                                                                "kind", "light")},
-             "reference_noise": report["reference"].get("noise"), "model_vs_truth": report["model"].get("vs_truth")}
+             "reference_noise": report["reference"].get("noise"), "model_vs_truth": report["model"].get("vs_truth"),
+             "lit_floor_diagnostic": result.get("lit_floor_diagnostic")}
     entry["discriminating"] = all(v["fails_gate"] for v in verdicts.values()) and bool(model["pass"])
     entry["gates_pass"] = result["pass"]
     entry["pending_matches_met"] = all(twins)
@@ -1511,6 +1611,10 @@ def result_lines(r):
         pooled = r.get("pooled_not_gated") or {}
         if pooled:
             lines += ["", f"pooled glass mask (information, not gated): mean {pooled['mean']:.4f}, p95 {pooled['p95']:.4f}, {pooled['pixels']} pixels"]
+        diagnostic = r.get("lit_floor_diagnostic")
+        if diagnostic:
+            lines += ["", f"lit-floor diagnostic (not gated): candidate / reference level {diagnostic['lit_level_ratio']:.4f} (median "
+                          f"{diagnostic['lit_level_median_ratio']:.4f}, p5 {diagnostic['lit_level_p5_ratio']:.4f}, {diagnostic['lit_pixels']} pixels)"]
         lines += ["", f"worst object mean {r['worst_mean']:.4f} (limit {limits['mean_per_object']}), "
                       f"worst p95 {r['worst_p95']:.4f} (limit {limits['p95_per_object']}), floor {r['floor']:.4f}"
                       f"{'' if r.get('gated', True) else '; not gated (reported)'}", "",

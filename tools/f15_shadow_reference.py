@@ -39,7 +39,7 @@ What is compared and how (decision 11 transmission bound on the RECEIVER mask, A
   an opaque caster gives 0.  `model-differences` (and `model.pfm` of every render) states its difference with the Mitsuba truth.
 
 Negative controls (images of defective models; each must exceed the gate on the fixture it is listed for):
-  transmittance-ignored (opaque casters: today's engine; T = 0 behind any caster), tint-ignored (the declared model with tint white),
+  shadow-ignored (T = 1: no shadow; the curved key), transmittance-ignored (opaque casters: today's engine; T = 0 behind any caster), tint-ignored (the declared model with tint white),
   fresnel-ignored (F = 0), beer-lambert-ignored (no medium), double-counted (the declared transmittance applied twice).
 
 Usage:
@@ -72,11 +72,12 @@ PRIMES = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37)  # bases of the radical-in
 MAX_BOUNCES = 12           # path vertices followed through the casters (a slab needs 2 to 6)
 MAX_HITS = 10              # surfaces a straight shadow ray may cross (declared model)
 SHADOW_EPS = 1e-3          # m, shadow ray origin offset along the floor normal
+LIT_BAND = 0.5            # m, the declared LIT reference region of the ratio gate: floor outside every shadow and envelope, within this distance of the shadows
 RING = 8                   # ring neighbours of the region test
 FLOOR_MIN_SCALE = 5.0      # the receiver is the instance whose world X and Z scales are both at least this
 GOLDEN_ANGLE = 2.39996322972865332
 
-CONTROLS = ("transmittance-ignored", "tint-ignored", "fresnel-ignored", "beer-lambert-ignored", "double-counted")
+CONTROLS = ("shadow-ignored", "transmittance-ignored", "tint-ignored", "fresnel-ignored", "beer-lambert-ignored", "double-counted")
 
 MODEL = {
     "reference": "Mitsuba 3.9.1: rays from each receiver point through the casters (Mitsuba BSDFs and exact Fresnel), sun disk / point-light "
@@ -220,6 +221,27 @@ def shadow_regions(scene, mi, dr, index_of, light, position, normal, margin):
             neighbour = first_hit_instance(scene, mi, dr, index_of, moved + SHADOW_EPS * normal[pick], d)
             roi[pick] &= neighbour == cls[pick]
     return cls, roi
+
+
+def lit_region(scene, mi, dr, index_of, light, position, normal, cls, margin):
+    """Boolean (n,): the declared lit reference region next to the shadows: receiver points whose shadow ray and 8 ring neighbours
+    (world margin) hit nothing, inside the x/z bounding box of the shadow footprints grown by LIT_BAND."""
+    shadowed = cls >= 0
+    if not shadowed.any():
+        return np.zeros(len(position), dtype=bool)
+    low = position[shadowed][:, [0, 2]].min(axis=0) - LIT_BAND
+    high = position[shadowed][:, [0, 2]].max(axis=0) + LIT_BAND
+    inside = (cls < 0) & (position[:, 0] >= low[0]) & (position[:, 0] <= high[0]) & (position[:, 2] >= low[1]) & (position[:, 2] <= high[1])
+    pick = np.flatnonzero(inside)
+    keep = inside.copy()
+    if pick.size:
+        t1, t2 = floor_frame(normal[pick])
+        for k in range(RING):
+            angle = 2.0 * math.pi * k / RING
+            moved = position[pick] + margin * (math.cos(angle) * t1 + math.sin(angle) * t2)
+            d, _ = light_axes(light, moved)
+            keep[pick] &= first_hit_instance(scene, mi, dr, index_of, moved + SHADOW_EPS * normal[pick], d) < 0
+    return keep
 
 
 # --- the Mitsuba estimator -------------------------------------------------------------------------------------------------------
@@ -380,6 +402,8 @@ def declared_transmittance(hits, casters, variant="spec"):
         t_total = t_total * np.where(present[:, None], t_k, 1.0)
     if variant == "transmittance-ignored":
         t_total = np.where(any_caster[:, None], 0.0, 1.0) * np.ones((n, 3))
+    if variant == "shadow-ignored":
+        t_total = np.ones((n, 3))
     if variant == "double-counted":
         t_total = t_total * t_total
     return t_total
@@ -451,6 +475,9 @@ def command_render(args):
     if not roi_pick.size:
         raise ValueError("no receiver pixel lies inside a shadow region of a caster (margin too wide, or the camera hides the shadows)")
     region_ids = cls[roi_pick]
+    lit_pick = np.flatnonzero(lit_region(scene, mi, dr, index_of, light, p, n, cls, args.margin))
+    if not lit_pick.size:
+        raise ValueError("no lit reference region next to the shadows")
     direction, _ = light_axes(light, p[roi_pick])
     origin = p[roi_pick] + SHADOW_EPS * n[roi_pick]
     hits = straight_hits(scene, mi, dr, index_of, origin, direction)
@@ -490,7 +517,7 @@ def command_render(args):
               "light": {"kind": light["kind"], **({"toward": light["toward"].tolist(), "angular_radius": light["radius"]}
                                                   if light["kind"] == "sun" else {"position": light["position"].tolist()})},
               "floor_instance": context["floor"], "width": width, "height": height, "roi_pixels": int(roi_pick.size),
-              "floor_pixels": int(pick_floor.size), "objects": objects, "controls": {}, "maximum_radiance": float(shadowed.max()),
+              "floor_pixels": int(pick_floor.size), "lit_pixels": int(lit_pick.size), "lit_band_m": LIT_BAND, "objects": objects, "controls": {}, "maximum_radiance": float(shadowed.max()),
               "terms": ["light-through-casters", "receiver-radiance"] + (["mitsuba-bsdf-paths"] if kind == "mitsuba" else ["declared-model"]),
               "reference": {"file": "reference.pfm", "seconds": seconds,
                             "noise": {"mean_relative_standard_error": float(relative_noise.mean()),
@@ -509,7 +536,8 @@ def command_render(args):
         print(json.dumps({"variant": name}), flush=True)
     np.savez_compressed(out / "masks.npz", roi=_scatter_mask(np, pick_floor[roi_pick], height, width),
                         sphere=_scatter_ids(np, pick_floor[roi_pick], region_ids, height, width),
-                        glass=_scatter_mask(np, pick_floor[roi_pick], height, width))
+                        glass=_scatter_mask(np, pick_floor[roi_pick], height, width),
+                        lit=_scatter_mask(np, pick_floor[lit_pick], height, width))
     (out / "reference.json").write_text(json.dumps(report, indent=2, default=float) + "\n")
     print(json.dumps({"variant": "reference", "seconds": seconds, "roi_pixels": int(roi_pick.size), "kind": kind}), flush=True)
     return 0

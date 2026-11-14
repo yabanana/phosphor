@@ -30,7 +30,9 @@ import f15_transmission_reference as tr  # noqa: E402
 from f12_reference import read_pfm, snapshot, write_pfm  # noqa: E402
 
 KEYS = [k for k in check.SCENARIOS if k.startswith("transmissive-shadow-")]
-GATED = [k for k in KEYS if check.SCENARIOS[k]["kind"] == "transmissive-shadow"]
+GATED = list(KEYS)  # every key is pending (the curved one on its qualitative gate)
+CURVED = "transmissive-shadow-curved@rt"
+TRUTH_KEYS = [k for k in KEYS if k != CURVED]
 
 
 def quiet_main(argv):
@@ -213,7 +215,7 @@ class Runner(unittest.TestCase):
             "transmissive-shadow-pane-sun@rt", "transmissive-shadow-pane-sun@csm", "transmissive-shadow-water-sun@rt",
             "transmissive-shadow-water-sun@csm", "transmissive-shadow-volume-pane@rt", "transmissive-shadow-volume-pane@csm",
             "transmissive-shadow-point@restir", "transmissive-shadow-curved@rt"]))
-        for key in GATED:
+        for key in TRUTH_KEYS:
             spec = check.SCENARIOS[key]
             self.assertEqual(spec["pending"], "ticket 15" if key.endswith("@csm") else "ticket 14", key)
             self.assertEqual(spec["pending_matches"], "transmittance-ignored")
@@ -221,11 +223,15 @@ class Runner(unittest.TestCase):
             self.assertTrue(set(spec["controls"]) <= set(sr.CONTROLS), key)
             self.assertEqual(spec["envelope"], "csm" if key.endswith("@csm") else "rt", key)
             self.assertEqual(spec["reflections"], "off")
-        curved = check.SCENARIOS["transmissive-shadow-curved@rt"]
-        self.assertTrue(curved["always_green"])
-        self.assertNotIn("pending", curved)
-        self.assertEqual(curved["controls"], [])
+        curved = check.SCENARIOS[CURVED]
+        self.assertEqual(curved["kind"], "transmissive-shadow-curved")
+        self.assertEqual(curved["pending"], "ticket 14")
+        self.assertNotIn("always_green", curved)
+        self.assertEqual(curved["controls"], ["shadow-ignored", "transmittance-ignored"])
         self.assertEqual(curved["reference_args"], ["--no-ground-truth"])
+        for key in KEYS:  # orchestrator decision: the CSM keys gate the transmittance ratio, the others the absolute bound
+            self.assertEqual(check.SCENARIOS[key]["kind"], "transmissive-shadow-ratio" if key.endswith("@csm") else
+                             "transmissive-shadow-curved" if key == CURVED else "transmissive-shadow", key)
 
     def test_dropped_controls_are_the_ones_equal_to_the_reference_within_the_bound(self):
         # Fresnel-ignored on water (2 % per surface, 4.6 %) and every control that needs an ingredient the fixture lacks
@@ -272,7 +278,7 @@ class Runner(unittest.TestCase):
         for bench in ("pane-sun", "water-sun", "volume-pane"):
             rt, csm = (check.SCENARIOS[f"transmissive-shadow-{bench}@{v}"] for v in ("rt", "csm"))
             self.assertEqual(rt["controls"], csm["controls"])
-            self.assertEqual(rt["kind"], csm["kind"])
+            self.assertEqual((rt["kind"], csm["kind"]), ("transmissive-shadow", "transmissive-shadow-ratio"))
 
 
 class EndToEnd(unittest.TestCase):
@@ -319,13 +325,67 @@ class EndToEnd(unittest.TestCase):
             self.assertTrue(e["model_feasible"], (key, e["model_gate"]))
             self.assertTrue(e["discriminating"], key)
 
-    def test_the_curved_key_is_reported_never_gated(self):
-        e = self.entries["transmissive-shadow-curved@rt"]
-        self.assertFalse(e["gated"])
-        self.assertTrue(e["result"]["pass"])
-        self.assertTrue(e["gates_pass"])
+    def test_the_curved_key_gates_only_the_qualitative_properties(self):
+        e = self.entries[CURVED]
+        self.assertFalse(e["gates_pass"])           # today's engine: T = 0, the shadow is opaque
         self.assertTrue(e["expectation_met"])
+        self.assertTrue(e["model_feasible"])        # the declared model is lighter than opaque, darker than unshadowed, tinted
+        self.assertTrue(e["discriminating"], e["controls"])
+        self.assertFalse(e["result"]["numbers_gated"])
         self.assertEqual(len(e["result"]["objects"]), 2)
+        folder = self.folders[CURVED]
+        masks = dict(np.load(folder / "reference" / "masks.npz"))
+        report = json.loads((folder / "reference" / "reference.json").read_text())
+        model = read_pfm(folder / "reference" / "model.pfm")
+        result = check.evaluate(np, "transmissive-shadow-curved", model, model, masks, report["objects"])
+        clear, tinted = result["objects"]
+        self.assertTrue(result["pass"])
+        self.assertTrue(0.001 < clear["transmittance"] < 0.995 and 0.001 < tinted["transmittance"] < 0.995)
+        self.assertLess(abs(math.log(clear["chroma_r_over_b"])), 0.02)
+        self.assertLess(tinted["chroma_r_over_b"], 0.9)                       # attenuation (0.5, 0.8, 1.0): red absorbed more than blue
+        self.assertAlmostEqual(tinted["expected_chroma_r_over_b"], 0.5)
+        # a grey shadow of the tinted caster (chroma ignored) and an unshadowed one both fail
+        grey = model.copy()
+        for o in report["objects"]:
+            pick = masks["roi"] & (masks["sphere"] == o["instance"])
+            grey[pick] = grey[pick].mean() * np.ones(3)
+        self.assertFalse(check.evaluate(np, "transmissive-shadow-curved", grey, model, masks, report["objects"])["pass"])
+        lit = read_pfm(folder / "reference" / "lit.pfm")
+        self.assertFalse(check.evaluate(np, "transmissive-shadow-curved", lit, model, masks, report["objects"])["pass"])
+        self.assertFalse(check.evaluate(np, "transmissive-shadow-curved", model * 0.0, model, masks, report["objects"])["pass"])
+
+    def test_the_lit_reference_region_excludes_shadows_and_envelope_and_sits_next_to_them(self):
+        key = "transmissive-shadow-pane-sun@csm"
+        masks = dict(np.load(self.folders[key] / "reference" / "masks.npz"))
+        lit, roi = masks["lit"], masks["roi"]
+        self.assertGreater(int(lit.sum()), 1000)
+        self.assertFalse((lit & roi).any())
+        ys, xs = np.nonzero(roi)
+        ly, lx = np.nonzero(lit)
+        self.assertGreater(ly.min(), ys.min() - 200)   # a band next to the shadows, not the whole floor
+        self.assertLess(lx.max(), xs.max() + 400)
+
+    def test_csm_ratio_gate_ignores_the_lit_floor_bias_but_not_a_wrong_transmittance(self):
+        key = "transmissive-shadow-pane-sun@csm"
+        folder = self.folders[key]
+        reference = read_pfm(folder / "reference" / "reference.pfm")
+        masks = dict(np.load(folder / "reference" / "masks.npz"))
+        objects = json.loads((folder / "reference" / "reference.json").read_text())["objects"]
+        # a CSM-like bias: the whole image 5.2 % too dark (lit floor and shadow alike): the ratio is untouched
+        biased = reference * 0.948
+        ratio = check.evaluate(np, "transmissive-shadow-ratio", biased, reference, masks, objects)
+        self.assertTrue(ratio["pass"], ratio["objects"])
+        self.assertAlmostEqual(ratio["lit_floor_diagnostic"]["lit_level_ratio"], 0.948, places=3)
+        self.assertFalse(check.evaluate(np, "transmissive-shadow", biased, reference, masks, objects)["pass"])  # the absolute gate sees the bias
+        # a lit floor 5 % dark with the right shadows relative to it passes; a shadow 8 % too light relative to the lit floor fails
+        wrong = reference.copy()
+        pick = masks["roi"] & (masks["sphere"] == objects[0]["instance"])
+        wrong[pick] *= 1.08
+        self.assertFalse(check.evaluate(np, "transmissive-shadow-ratio", wrong, reference, masks, objects)["pass"])
+        # the opaque engine of today: T = 0 against the truth's T fails; against the ignored twin it passes with the truth's floor
+        control = read_pfm(folder / "reference" / "control-transmittance-ignored.pfm")
+        self.assertFalse(check.evaluate(np, "transmissive-shadow-ratio", control, reference, masks, objects)["pass"])
+        self.assertTrue(check.evaluate_shadow_ratio(np, control, control, masks, objects, floor_from=reference)["pass"])
 
     def test_the_declared_model_engine_would_be_green(self):
         # an engine that renders the declared straight-line model passes every gated gate (it is not pending then)
@@ -335,7 +395,7 @@ class EndToEnd(unittest.TestCase):
             model = read_pfm(folder / "reference" / "model.pfm")
             masks = dict(np.load(folder / "reference" / "masks.npz"))
             objects = json.loads((folder / "reference" / "reference.json").read_text())["objects"]
-            result = check.evaluate(np, "transmissive-shadow", model, reference, masks, objects)
+            result = check.evaluate(np, check.SCENARIOS[key]["kind"], model, reference, masks, objects)
             self.assertTrue(result["pass"], (key, result["worst_mean"], result["worst_p95"]))
 
     def test_the_floor_comes_from_the_truth_not_from_the_candidate(self):
@@ -355,7 +415,7 @@ class EndToEnd(unittest.TestCase):
                                                      reference)["pass"])
 
     def test_noise_and_settings_are_recorded(self):
-        for key in GATED:
+        for key in TRUTH_KEYS:
             report = json.loads((self.folders[key] / "reference" / "reference.json").read_text())
             self.assertEqual(report["kind"], "mitsuba")
             self.assertEqual(report["samples"], sr.SAMPLES)
