@@ -10,11 +10,34 @@ diffusion profile; Mitsuba does the transport, the BSDF of the boundary and the 
 Medium mapping (per colour channel c, all of it documented here and tested in tools/test_f15_subsurface_reference.py):
   mean free path      mfp_c = radius * radiusScale_c                (metres, record 2 words 5 and 6-8)
   extinction          sigma_t_c = 1 / mfp_c                         (1/m; the OpenPBR "subsurface_radius" IS the mean free path)
-  multiple-scatter    rho_ms_c = colour_c                           (record 2 words 2-4)
-  single-scatter      s = 4.09712 + 4.20863 rho - sqrt(9.59217 + 41.6808 rho + 17.7126 rho^2)   (clamped to [0, 1]; rho = 0 -> s = 1)
-  albedo              rho_ss_c = (1 - s^2) / (1 - g s^2)            (the Kulla-Conty 2017 inversion of the draft; g = word 9)
-  scattering/absorp.  sigma_s = sigma_t rho_ss, sigma_a = sigma_t (1 - rho_ss)   (Mitsuba `homogeneous`: albedo = rho_ss, sigma_t)
+  multiple-scatter    C_c = colour_c                                (record 2 words 2-4)
+  single-scatter      alpha_c = the root of  A(alpha; g, alpha_b) = C_c  (boundary-aware inversion, next paragraph)
+  albedo
+  scattering/absorp.  sigma_s = sigma_t alpha, sigma_a = sigma_t (1 - alpha)   (Mitsuba `homogeneous`: albedo = alpha, sigma_t)
   phase function     Henyey-Greenstein with the anisotropy g (Mitsuba `hg`: positive g = forward scattering)
+
+Boundary-aware inversion (orchestrator decision 2026-11-14, ticket 17).  OpenPBR defines subsurface_color as "the observed RGB
+reflection albedo color taking into account all orders of multiple scattering": the fraction of the energy transmitted through the
+interface that is transmitted back out and observed, E_multi-scatter = (1 - E_spec) C, for a semi-infinite homogeneous slab.  It does not
+prescribe alpha(C); it says the closer the inversion is to that relation the closer it is to the ground truth.  The draft
+KHR_materials_scatter uses the Kulla-Conty 2017 fit (`single_scatter_albedo`, kept as the draft's approximation: s = 4.09712 +
+4.20863 rho - sqrt(9.59217 + 41.6808 rho + 17.7126 rho^2), alpha = (1 - s^2) / (1 - g s^2)), which like van de Hulst ignores the
+dielectric boundary: behind the ior 1.5 boundary of this reference light is trapped by internal reflection and absorbed, so the observed
+albedo falls far below C (negative control in the tests: about 2x).  The ground truth therefore measures, with Mitsuba itself,
+  A(alpha; g, alpha_b) = (R_total - R_spec) / (1 - R_spec)
+for a very large homogeneous sphere (1000 mean free paths in radius, the same `roughdielectric` boundary builder as the pieces) under a
+constant environment of radiance 1: the orthographic image of the sphere averaged over its disc is the cosine-weighted (diffuse) incidence
+hemispherical albedo (disc area = cos-weighted hemisphere), R_total is that mean, R_spec the mean of the same sphere with an absorbing
+medium (alpha = 0: the first-surface specular reflection alone) and 1 - R_spec the energy transmitted through the interface (the
+OpenPBR E_spec).  The per-direction value follows from the radial position of the pixel (reciprocity: radiance seen at theta under a
+constant environment = directional albedo at theta); the table stores the diffuse value and the values at 0, 45 and 70 degrees, the
+measured angle dependence is the declared approximation of using the diffuse value (see `tools/f15_subsurface_albedo.json`,
+regenerate with `f15_subsurface_reference.py albedo-table`).  alpha(C) is the monotone inversion (bisection on the table interpolated
+linearly in sqrt(1 - alpha)).  MEASURED LIMIT: Mitsuba's `roughdielectric` is a single-scattering GGX BSDF and loses energy at every
+interaction, so with alpha_b = 0.49 even a non-absorbing medium (alpha = 1) returns only A_max = 0.447 (the observation of this
+ticket); colours above A_max are not reachable by any medium under this boundary and saturate at alpha = 1 (reported per piece in
+reference.json `albedo_target` / `albedo_reached`).
+
 The volume block of the material (record 1: thickness, attenuation) only marks the object as a solid, as the validation of the
 material description demands (volumetric subsurface requires a volume with thickness > 0); a non-neutral attenuation is refused.
 
@@ -64,7 +87,7 @@ import f15_reference as base  # noqa: E402
 
 np = np_module()
 
-GROUND_TRUTH_VERSION = 2
+GROUND_TRUTH_VERSION = 3
 DEFAULT_THREADS = int(os.environ.get("F15_REFERENCE_THREADS", min(4, os.cpu_count() or 1)))
 DEFAULT_SPP = int(os.environ.get("F15_SUBSURFACE_SPP", 2048))      # per grey render (two halves of spp / 2)
 DEFAULT_POOL = int(os.environ.get("F15_SUBSURFACE_POOL", 5))       # odd window of the interior pooling
@@ -90,16 +113,162 @@ def single_scatter_albedo(rho_ms, g=0.0):
     return (1.0 - s * s) / (1.0 - g * s * s)
 
 
-def medium_coefficients(block, radius=None):
-    """Per-channel medium of a volumetric block: sigma_t (1/m), single-scatter albedo, sigma_s, sigma_a, mean free path (m), g."""
+ALBEDO_TABLE_PATH = REPO / "tools" / "f15_subsurface_albedo.json"
+MEASURE_SIGMA_T = 1000.0        # extinction of the measurement sphere of radius 1: 1000 mean free paths
+MEASURE_SPP = 64                # per half (two independent halves)
+MEASURE_RES = 128
+MEASURE_SEED = 20261114
+# single-scatter albedos of the table, dense towards 1 (A is smooth in sqrt(1 - alpha))
+ALBEDO_GRID = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.93, 0.95, 0.97, 0.98, 0.99, 0.995, 0.998, 0.999, 0.9995,
+               0.9998, 0.9999, 0.99995, 0.99999, 0.999999, 1.0]
+ANGLES_DEG = (0.0, 45.0, 70.0)
+_table_cache = {}
+
+
+def boundary_bsdf(alpha, ior=BOUNDARY_IOR):
+    """The boundary of every medium of this reference (pieces and measurement spheres alike): GGX rough dielectric.  ior == 1 gives
+    the index-matched control boundary (no interface at all)."""
+    if ior == 1.0:
+        return {"type": "null"}
+    return {"type": "roughdielectric", "distribution": "ggx", "alpha": float(alpha), "int_ior": float(ior), "ext_ior": 1.0}
+
+
+def measure_albedo_point(mi, dr, albedo, g, alpha, ior, spp, seed, res=MEASURE_RES, sigma_t=MEASURE_SIGMA_T):
+    """Orthographic image of a sphere of radius 1 (homogeneous medium of the given single-scatter albedo behind the boundary) under a
+    constant environment of radiance 1: float64 (res, res)."""
+    transform = getattr(mi, "ScalarAffineTransform4f", None) or mi.ScalarTransform4f
+    description = {
+        "type": "scene", "integrator": {"type": "volpath", "max_depth": DEFAULT_DEPTH, "rr_depth": RR_DEPTH},
+        "sensor": {"type": "orthographic", "to_world": transform().look_at(origin=[0, 0, 5], target=[0, 0, 0], up=[0, 1, 0]),
+                   "sampler": {"type": "independent", "sample_count": int(spp)},
+                   "film": {"type": "hdrfilm", "width": res, "height": res, "pixel_format": "rgb", "component_format": "float32",
+                            "rfilter": {"type": "box"}}},
+        "env": {"type": "constant", "radiance": {"type": "rgb", "value": [1.0, 1.0, 1.0]}},
+        "piece": {"type": "sphere", "radius": 1.0, "bsdf": boundary_bsdf(alpha, ior),
+                  "interior": {"type": "homogeneous", "albedo": {"type": "rgb", "value": [float(albedo)] * 3},
+                               "sigma_t": {"type": "rgb", "value": [1.0, 1.0, 1.0]}, "scale": float(sigma_t),
+                               "phase": {"type": "hg", "g": float(g)}}}}
+    image = mi.render(mi.load_dict(description), spp=int(spp), seed=int(seed))
+    dr.eval(image)
+    return np.array(image, dtype=np.float64)[..., 0]
+
+
+def disc_radius(res=MEASURE_RES):
+    ys, xs = np.mgrid[0:res, 0:res]
+    return np.hypot((xs + 0.5 - res / 2.0) / (res / 2.0), (ys + 0.5 - res / 2.0) / (res / 2.0))
+
+
+def angle_masks(res=MEASURE_RES):
+    """Pixel masks of the disc (cosine-weighted diffuse incidence) and of the viewing angles 0, 45 and 70 degrees (sin theta = r)."""
+    r = disc_radius(res)
+    out = {"diffuse": r < 0.99, "0": r < 0.12}
+    for deg in ANGLES_DEG[1:]:
+        centre = math.sin(math.radians(deg))
+        out[f"{deg:g}"] = (r >= centre - 0.03) & (r <= centre + 0.03)
+    return out
+
+
+def observed_albedos(total, spec, masks):
+    """A = (R_total - R_spec) / (1 - R_spec) per mask from the mean images of the medium and of the absorbing medium."""
+    return {k: (float(total[m].mean()) - float(spec[m].mean())) / (1.0 - float(spec[m].mean())) for k, m in masks.items()}
+
+
+def measure_albedo_curve(g, alpha_b, ior, threads, albedos=ALBEDO_GRID, spp=MEASURE_SPP, log=None):
+    """The observed albedo A over the single-scatter albedos for one (g, boundary).  Every point is two independent halves (spp each);
+    the noise is the half-difference.  Returns a JSON-able dict."""
+    mi, dr = mitsuba_modules(threads)
+    masks = angle_masks()
+    spec = [measure_albedo_point(mi, dr, 0.0, g, alpha_b, ior, spp, MEASURE_SEED + 101 * h) for h in range(2)]
+    specs_mean = 0.5 * (spec[0] + spec[1])
+    points = []
+    for i, albedo in enumerate(albedos):
+        halves = [measure_albedo_point(mi, dr, albedo, g, alpha_b, ior, spp, MEASURE_SEED + 7 + 977 * i + 101 * h) for h in range(2)]
+        total = 0.5 * (halves[0] + halves[1])
+        a_mean = observed_albedos(total, specs_mean, masks)
+        a_halves = [observed_albedos(h, specs_mean, masks)["diffuse"] for h in halves]
+        points.append({"albedo": albedo, "A": a_mean["diffuse"], "noise": abs(a_halves[0] - a_halves[1]) / 2.0,
+                       "A_angle": {k: a_mean[k] for k in a_mean if k != "diffuse"}})
+        if log:
+            log(f"g {g} alpha_b {alpha_b} ior {ior} albedo {albedo}: A {a_mean['diffuse']:.4f} +- {points[-1]['noise']:.4f}")
+    r_spec = observed_albedos(specs_mean, np.zeros_like(specs_mean), masks)
+    return {"g": g, "alpha_b": alpha_b, "ior": ior, "R_spec": {k: v for k, v in r_spec.items()}, "points": points}
+
+
+def load_albedo_table():
+    key = str(ALBEDO_TABLE_PATH)
+    if key not in _table_cache:
+        _table_cache[key] = json.loads(ALBEDO_TABLE_PATH.read_text())
+    return _table_cache[key]
+
+
+def curve_for(g, alpha_b, ior=BOUNDARY_IOR, table=None):
+    table = table or load_albedo_table()
+    for curve in table["curves"]:
+        if abs(curve["g"] - g) < 1e-6 and abs(curve["alpha_b"] - alpha_b) < 1e-4 and abs(curve["ior"] - ior) < 1e-6:
+            return curve
+    raise ValueError(f"no observed-albedo curve for g {g}, boundary alpha {alpha_b}, ior {ior}: regenerate "
+                     f"{ALBEDO_TABLE_PATH.name} (f15_subsurface_reference.py albedo-table) for this combination")
+
+
+def _monotone_curve(curve):
+    """(x = sqrt(1 - alpha), A) with A made non-decreasing in alpha by weighted isotonic regression (pool adjacent violators, weight
+    1 / max(noise, 0.003)^2): the noise of the points near the A_max plateau (heavy tails of the long walks, up to 0.04) cannot reverse
+    the curve nor inflate A_max the way a running maximum would."""
+    alphas = np.array([p["albedo"] for p in curve["points"]])
+    values = [float(p["A"]) for p in curve["points"]]
+    weights = [1.0 / max(float(p["noise"]), 0.003) ** 2 for p in curve["points"]]
+    blocks = []  # [value, weight, count]
+    for v, w in zip(values, weights):
+        blocks.append([v, w, 1])
+        while len(blocks) > 1 and blocks[-2][0] > blocks[-1][0]:
+            v2, w2, c2 = blocks.pop()
+            v1, w1, c1 = blocks.pop()
+            blocks.append([(v1 * w1 + v2 * w2) / (w1 + w2), w1 + w2, c1 + c2])
+    a = np.concatenate([np.full(c, v) for v, _, c in blocks])
+    return np.sqrt(1.0 - alphas), a
+
+
+def observed_albedo(alpha, curve):
+    """A(alpha) interpolated from the table (linear in sqrt(1 - alpha))."""
+    x, a = _monotone_curve(curve)
+    return float(np.interp(math.sqrt(max(1.0 - float(alpha), 0.0)), x[::-1], a[::-1]))
+
+
+def invert_observed_albedo(target, curve):
+    """(alpha, reached A, saturated): the single-scatter albedo whose observed albedo is `target`, by bisection on the interpolated
+    table.  A target above the largest A of the curve (energy lost by the boundary: A_max < 1) saturates at alpha = 1."""
+    a_max = observed_albedo(1.0, curve)
+    if target <= 0.0:
+        return 0.0, 0.0, False
+    if target >= a_max:
+        return 1.0, a_max, bool(target > a_max)
+    lo, hi = 0.0, 1.0
+    for _ in range(80):
+        mid = 0.5 * (lo + hi)
+        if observed_albedo(mid, curve) < target:
+            lo = mid
+        else:
+            hi = mid
+    alpha = 0.5 * (lo + hi)
+    return alpha, observed_albedo(alpha, curve), False
+
+
+def medium_coefficients(block, radius=None, alpha_b=None):
+    """Per-channel medium of a volumetric block: sigma_t (1/m), single-scatter albedo, sigma_s, sigma_a, mean free path (m), g, plus
+    the target colour, the observed albedo it reaches and whether the boundary saturates it.  alpha_b = the boundary's GGX alpha."""
     radius = block["radius"] if radius is None else radius
+    if alpha_b is None:
+        raise ValueError("the boundary-aware inversion needs the boundary alpha (alpha_b)")
     mfp = np.array([radius * s for s in block["radius_scale"]], dtype=np.float64)
     if (mfp <= 0).any():
         raise ValueError("a volumetric piece needs a positive mean free path in every channel")
     sigma_t = 1.0 / mfp
-    albedo = single_scatter_albedo(block["color"], block["anisotropy"])
+    curve = curve_for(float(block["anisotropy"]), float(alpha_b))
+    inverted = [invert_observed_albedo(float(c), curve) for c in block["color"]]
+    albedo = np.array([i[0] for i in inverted])
     return {"sigma_t": sigma_t, "albedo": albedo, "sigma_s": sigma_t * albedo, "sigma_a": sigma_t * (1.0 - albedo),
-            "mfp": mfp, "g": float(block["anisotropy"])}
+            "mfp": mfp, "g": float(block["anisotropy"]), "albedo_target": [float(c) for c in block["color"]],
+            "albedo_reached": [i[1] for i in inverted], "saturated": [i[2] for i in inverted]}
 
 
 def material_volumetric(data, material):
@@ -245,8 +414,7 @@ def render_grey(root, data, instance_index, crop, alpha, sigma_t, albedo, g, spp
     shape = {"type": "ply", "filename": str(root / data["meshes"][instance["mesh"]]), "face_normals": False,
              "flip_normals": mesh_orientation(root, data, instance) < 0,
              "to_world": transform(np.asarray(instance["world"], dtype=np.float64).reshape(4, 4, order="F")),
-             "bsdf": {"type": "roughdielectric", "distribution": "ggx", "alpha": float(alpha), "int_ior": BOUNDARY_IOR,
-                      "ext_ior": 1.0}}
+             "bsdf": boundary_bsdf(alpha)}
     if medium:
         shape["interior"] = {"type": "homogeneous", "albedo": {"type": "rgb", "value": [float(albedo)] * 3},
                              "sigma_t": {"type": "rgb", "value": [1.0, 1.0, 1.0]}, "scale": float(sigma_t),
@@ -344,7 +512,7 @@ def sss_image_of_piece(root, data, cast, k, block, radius, alpha, spp, pool, thr
     """(pooled SSS image placed on the full film, pooled halves for the noise estimate) of one piece with the given radius."""
     instance_grid = cast[3]
     crop = piece_crop(instance_grid, k)
-    medium = medium_coefficients(block, radius)
+    medium = medium_coefficients(block, radius, alpha)
     a, b = render_piece_channels(root, data, k, crop, alpha, medium, spp, threads, cache)
     x0, y0, x1, y1 = crop
     interior = interior_mask(instance_grid, k)[y0:y1, x0:x1]
@@ -423,6 +591,9 @@ def command_render(args):
             entry.update(subsurface={"weight": b["weight"], "color": b["color"], "radius": b["radius"],
                                      "radius_scale": b["radius_scale"], "anisotropy": b["anisotropy"],
                                      "mfp": [b["radius"] * s for s in b["radius_scale"]], "piece_size": b["thickness"],
+                                     "single_scatter_albedo": [float(x) for x in medium_coefficients(b, None, alpha_of(k))["albedo"]],
+                                     "albedo_reached": medium_coefficients(b, None, alpha_of(k))["albedo_reached"],
+                                     "albedo_saturated": medium_coefficients(b, None, alpha_of(k))["saturated"],
                                      "mfp_max": max(b["radius"] * s for s in b["radius_scale"])},
                          diffusion_regime=bool(max(b["radius"] * s for s in b["radius_scale"])
                                                <= DIFFUSION_REGIME_FRACTION * b["thickness"] * (1.0 + 1e-4)),
@@ -459,6 +630,40 @@ def command_render(args):
     return 0
 
 
+def fixture_alpha_b():
+    """GGX alpha of the fixtures' boundary (roughness 0.7 of every volumetric scene)."""
+    return float(base.effective_alpha(0.7))
+
+
+def command_albedo_table(args):
+    """Measure the observed-albedo table of the fixtures' (g, boundary) combinations and the index-matched control curves."""
+    alpha_b = fixture_alpha_b()
+    started = time.time()
+    curves = []
+    for g in (0.0, 0.3):
+        for ior in (BOUNDARY_IOR, 1.0):
+            curves.append(measure_albedo_curve(g, alpha_b, ior, args.threads, spp=args.spp, log=lambda m: print(m, flush=True)))
+    # energy kept by the boundary: A at alpha = 1 against the boundary roughness (g = 0)
+    mi, dr = mitsuba_modules(args.threads)
+    masks = angle_masks()
+    a_max = []
+    for alpha in (0.02, 0.05, 0.1, 0.2, 0.3, 0.49, 0.7, 1.0):
+        spec = 0.5 * sum(measure_albedo_point(mi, dr, 0.0, 0.0, alpha, BOUNDARY_IOR, args.spp, MEASURE_SEED + 101 * h) for h in range(2))
+        full = 0.5 * sum(measure_albedo_point(mi, dr, 1.0, 0.0, alpha, BOUNDARY_IOR, args.spp, MEASURE_SEED + 977 * h) for h in range(2))
+        a_max.append({"alpha_b": alpha, "A_at_albedo_1": observed_albedos(full, spec, masks)["diffuse"]})
+        print("A_max", a_max[-1], flush=True)
+    table = {"schema": 1, "tool": "tools/f15_subsurface_reference.py albedo-table", "mitsuba": "3.9.1",
+             "definition": "A = (R_total - R_spec) / (1 - R_spec): sphere of radius 1, sigma_t 1000 (1000 mfp), roughdielectric (or null for "
+                           "ior 1) boundary, constant environment 1, orthographic view; 'A' = disc mean = cosine-weighted diffuse incidence; "
+                           "'A_angle' = viewing/incidence angle 0, 45, 70 degrees (reciprocity)",
+             "sigma_t": MEASURE_SIGMA_T, "spp_per_half": args.spp, "halves": 2, "resolution": MEASURE_RES, "seed": MEASURE_SEED,
+             "integrator": {"type": "volpath", "max_depth": DEFAULT_DEPTH, "rr_depth": RR_DEPTH}, "seconds": round(time.time() - started, 1),
+             "curves": curves, "A_at_albedo_1_by_boundary_alpha": a_max}
+    pathlib.Path(args.out).write_text(json.dumps(table, indent=1) + "\n")
+    print(f"wrote {args.out}")
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -475,8 +680,13 @@ def main(argv=None):
                         "need renders are still produced): for keys whose gate does not read the ground truth (the sub-pixel pair)")
     p.add_argument("--cache-dir", default=None, help="cache of the per-piece renders (default $F15_REFERENCE_CACHE or build/f15-reference-cache)")
     p.set_defaults(function=command_render)
+    t = sub.add_parser("albedo-table", help="measure the observed-albedo table (boundary-aware inversion) with Mitsuba")
+    t.add_argument("--out", default=str(ALBEDO_TABLE_PATH))
+    t.add_argument("--threads", type=int, default=DEFAULT_THREADS)
+    t.add_argument("--spp", type=int, default=MEASURE_SPP, help="samples per half image")
+    t.set_defaults(function=command_albedo_table)
     args = parser.parse_args(argv)
-    if args.pool % 2 == 0 or args.pool < 1:
+    if getattr(args, "pool", 1) % 2 == 0 or getattr(args, "pool", 1) < 1:
         parser.error("--pool must be odd")
     try:
         return args.function(args)
