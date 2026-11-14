@@ -915,7 +915,11 @@ class RunnerLogic(unittest.TestCase):
         # ticket 13: the transmission scenarios are the separate bench class TransmissionValidation
         transmission = (HERE.parent / "src" / "testbench" / "transmission_validation.cpp").read_text()
         names = transmission[transmission.index("kAll{"):transmission.index("};", transmission.index("kAll{"))]
-        self.assertEqual(sorted((set(re.findall(r'"([a-z0-9-]+)"', block)) - clip_only) | set(re.findall(r'"([a-z0-9-]+)"', names))),
+        # tickets 14/15: the transmissive-shadow scenarios are the separate bench class TransmissiveShadowValidation
+        shadow = (HERE.parent / "src" / "testbench" / "transmissive_shadow_validation.cpp").read_text()
+        shadow_names = shadow[shadow.index("kAll{"):shadow.index("};", shadow.index("kAll{"))]
+        self.assertEqual(sorted((set(re.findall(r'"([a-z0-9-]+)"', block)) - clip_only) | set(re.findall(r'"([a-z0-9-]+)"', names)) |
+                                set(re.findall(r'"([a-z0-9-]+)"', shadow_names))),
                          sorted({check.bench_scenario(name) for name in check.SCENARIOS}))
 
     def test_declared_gate_bounds(self):

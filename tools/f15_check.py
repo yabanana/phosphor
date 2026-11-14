@@ -87,6 +87,29 @@ reference ray casting):
   volume, back faces of the closed glass mesh rejected (today's `reflections.metal` rule), emitter radiance counted twice, the
   glass behind the front glass black.  `transmission-rtoff` is the declared `--rt off` model (probes / environment along the
   refracted ray, closed form from the DFG table) with the same bound.
+- Transmissive shadows (F15.3, tickets 14 and 15): the `transmissive-shadow-*` keys (bench class TransmissiveShadowValidation: a
+  horizontal diffuse floor under horizontal planar casters, lit by the sun within 30 degrees of their normal or by one point light,
+  environment 0) against tools/f15_shadow_reference.py (Mitsuba 3.9.1 rays from each receiver point through the casters with
+  Mitsuba's BSDFs, Fresnel and the Beer-Lambert wrapper; the receiver irradiance through a parallel slab is the straight-line
+  transmittance up to a lateral shift of millimetres).  The engine image is the linear HDR signal of the last 8 frames.  Gate
+  "transmissive-shadow" (decision 11 transmission bound): per caster SHADOW REGION on the floor (the receiver pixels whose shadow ray,
+  and the 8 ring neighbours at the declared world envelope, first hit that caster; the camera never sees the floor through a caster):
+  mean relative error <= 5 %, p95 <= 15 %, absolute floor 0.05 * mean over the whole mask of the GROUND TRUTH (also for the controls and
+  for the pending twin).  The envelope is declared BEFORE any measurement (SHADOW_ENVELOPE): `rt` 0.06 m = sun penumbra at the caster
+  height (3.7 mm) + the shadow-mask bilateral filter (about 1.5 cm at this view) + the horizontal run of the straight ray through the
+  thickest slab (0.1 m * tan 20 degrees = 3.6 cm: the straight ray may leave through a side wall where the refracted one leaves
+  through the top); `csm` 0.08 m = 2 texels of the cascade covering the receiver (cascade radius <= 9 m, 1024 texels: <= 17.6 mm per
+  texel; PCSS disk radius max(penumbra, 0.5 texel), nearest-texel quantisation, depth/normal bias slop) + the same 3.6 cm + the penumbra.
+  The sun keys run with `--shadows rt` (`@rt`, ticket 14) and `--shadows csm` (`@csm`, ticket 15); `transmissive-shadow-point@restir`
+  is the DI visibility through glass (ReSTIR DI, RT visibility rays).  Every gated key is "pending" ("ticket 14" for RT and DI keys,
+  "ticket 15" for CSM keys; asserted to FAIL: the engine's casters shadow opaquely) and its image must PASS the gate against the
+  `transmittance-ignored` control (red for the right reason).  Negative controls (the declared straight-line model with one ingredient
+  removed; each must fail the gate): transmittance ignored (opaque casters), tint ignored, Fresnel ignored, Beer-Lambert ignored,
+  transmittance applied twice.  A control equal to the reference within the bound on a fixture is not listed there (water has
+  Fresnel 2 % per surface: Fresnel-ignored is 4.6 %).  `transmissive-shadow-curved@rt` is the report-only curved-glass key: reference =
+  the declared straight-line model (caustics are excluded by declaration), measured and never gated.  The declared model itself must
+  pass the gate against the Mitsuba truth on every gated key (`model_feasible`): otherwise the bound is unreachable for an engine
+  implementing the declaration and the fixture is blocked (exit 3).
 - Volumetric subsurface (F15.3, ticket 17): subsurface-volumetric-sun / -radius / -subpixel (+ the capture-only -subpixel-off) / -backlit
   against the independent ground truth of tools/f15_subsurface_reference.py (Mitsuba 3.9.1 `volpath` random walk of a homogeneous medium
   inside a rough dielectric boundary; OpenPBR parameters mapped through the draft's Kulla-Conty inversion; the reference of a piece with
@@ -176,6 +199,11 @@ THRESHOLDS = {
     # F15.3 ticket 13 (decision 11): transmission vs Mitsuba ground truth on the glass mask, static accumulation, per glass object.
     "transmission": {"mean_per_object": 0.05, "p95_per_object": 0.15, "floor": "0.05 * mean over the whole glass ROI of the reference",
                      "mask": "primary hit on a glass instance, silhouette band of 2 px excluded"},
+    # F15.3 tickets 14/15 (decision 11): transmissive shadows vs Mitsuba on the receiver's shadow regions, per caster.
+    "transmissive_shadow": {"mean_per_object": 0.05, "p95_per_object": 0.15,
+                            "floor": "0.05 * mean over the whole shadow mask of the GROUND TRUTH (controls and twin included)",
+                            "mask": "floor pixels whose shadow ray and 8 ring neighbours at the world envelope first hit the same caster",
+                            "envelope_m": {"rt": 0.06, "csm": 0.08}},
     # F15.3 (ticket 17), decision 11: subsurface vs random-walk ground truth on the piece mask.
     "subsurface": {"mean": 0.10, "p95": 0.25, "floor_fraction": 0.05,
                    "metric": "relative LUMINANCE error |Y_a - Y_b| / max(Y_b, 0.05 * mean_piece(Y_b)), Rec.709 weights, per piece ROI"},
@@ -189,6 +217,14 @@ FRAMES, RESOLUTION = 128, "1280x720"
 ACCUMULATE = 32   # frames averaged by --capture-linear-accumulate for the stochastic transmission transport (frames 96..127)
 REFERENCE_SPP = 1024  # Mitsuba samples per glass-mask pixel
 TRANSMISSION_KINDS = ("transmission", "transmission-declared")
+SHADOW_KINDS = ("transmissive-shadow", "transmissive-shadow-report")
+# Declared BEFORE any measurement (tickets 14/15, see the docstring): the world radius of the ring that excludes the shadow boundary.
+SHADOW_ENVELOPE = {"rt": 0.06, "csm": 0.08}
+SHADOW_ACCUMULATE = 8   # frames averaged for the shadow keys (frames 120..127): the engine's shadow transport may be stochastic
+SHADOW_PANE_CONTROLS = ["transmittance-ignored", "tint-ignored", "fresnel-ignored", "double-counted"]
+SHADOW_WATER_CONTROLS = ["transmittance-ignored", "beer-lambert-ignored", "double-counted"]      # Fresnel-ignored: 4.6 % < the bound
+SHADOW_VOLUME_CONTROLS = ["transmittance-ignored", "fresnel-ignored", "beer-lambert-ignored", "double-counted"]  # base white: no tint control
+SHADOW_POINT_CONTROLS = ["transmittance-ignored", "tint-ignored", "fresnel-ignored", "double-counted"]
 
 ANISO_DIRECT_CONTROLS = ["aniso-ignored", "aniso-rotation-flipped", "aniso-bitangent-flipped", "aniso-alpha-swapped",
                          "aniso-d-normalised-by-ab"]
@@ -573,6 +609,47 @@ SCENARIOS = {
                            "controls": ["declared-transmission-ignored", "declared-not-tinted", "declared-volume-ignored"],
                            "terms": "constant environment 0.5 only (no backdrop), --rt off probe path: the declared model "
                                     "L ((1 - E)((1 - t) base + t tint T) + E) of tools/f15_transmission_reference.py"},
+    # F15.3 (tickets 14/15): attenuated coloured shadows through transmissive casters (decision 06 shadow casters, ADR-0004 amendment).
+    # Written test-first: today's engine shadows opaquely, so every gated key is "pending" (asserted to FAIL) and its image must pass
+    # the gate against `transmittance-ignored`.  --reflections off: the floor is lit by the light only (no SSR of the lit floor into
+    # the shadow).  The sun keys exist as @rt (ticket 14) and @csm (ticket 15); the CSM keys share the bench scene and the RT reference.
+    "transmissive-shadow-pane-sun@rt": {"kind": "transmissive-shadow", "pending": "ticket 14", "pending_matches": "transmittance-ignored",
+                                        "rt": True, "shadows": "rt", "reflections": "off", "accumulate": SHADOW_ACCUMULATE,
+                                        "envelope": "rt", "controls": SHADOW_PANE_CONTROLS,
+                                        "terms": "sun 25 degrees from the pane normal, no environment, RT sun shadows (--shadows rt): "
+                                                 "thin clear pane, thin green pane, thick clear pane, opaque slab over a diffuse floor"},
+    "transmissive-shadow-pane-sun@csm": {"kind": "transmissive-shadow", "pending": "ticket 15", "pending_matches": "transmittance-ignored",
+                                         "shadows": "csm", "reflections": "off", "accumulate": SHADOW_ACCUMULATE,
+                                         "envelope": "csm", "controls": SHADOW_PANE_CONTROLS,
+                                         "terms": "the pane fixture with the CSM path (--shadows csm, --rt off): single-layer transmittance map"},
+    "transmissive-shadow-water-sun@rt": {"kind": "transmissive-shadow", "pending": "ticket 14", "pending_matches": "transmittance-ignored",
+                                         "rt": True, "shadows": "rt", "reflections": "off", "accumulate": SHADOW_ACCUMULATE,
+                                         "envelope": "rt", "controls": SHADOW_WATER_CONTROLS,
+                                         "terms": "sun 20 degrees from the normal, RT sun shadows: clear and murky flat shallow water "
+                                                  "(ior 1.33 slabs 0.12 m), opaque slab"},
+    "transmissive-shadow-water-sun@csm": {"kind": "transmissive-shadow", "pending": "ticket 15", "pending_matches": "transmittance-ignored",
+                                          "shadows": "csm", "reflections": "off", "accumulate": SHADOW_ACCUMULATE,
+                                          "envelope": "csm", "controls": SHADOW_WATER_CONTROLS,
+                                          "terms": "the shallow water fixture with the CSM path"},
+    "transmissive-shadow-volume-pane@rt": {"kind": "transmissive-shadow", "pending": "ticket 14", "pending_matches": "transmittance-ignored",
+                                           "rt": True, "shadows": "rt", "reflections": "off", "accumulate": SHADOW_ACCUMULATE,
+                                           "envelope": "rt", "controls": SHADOW_VOLUME_CONTROLS,
+                                           "terms": "sun 20 degrees from the normal, RT sun shadows: three thick glass panes (0.1 m) with "
+                                                    "volume attenuation (colour x distance)"},
+    "transmissive-shadow-volume-pane@csm": {"kind": "transmissive-shadow", "pending": "ticket 15", "pending_matches": "transmittance-ignored",
+                                            "shadows": "csm", "reflections": "off", "accumulate": SHADOW_ACCUMULATE,
+                                            "envelope": "csm", "controls": SHADOW_VOLUME_CONTROLS,
+                                            "terms": "the attenuating thick pane fixture with the CSM path"},
+    "transmissive-shadow-point@restir": {"kind": "transmissive-shadow", "pending": "ticket 14", "pending_matches": "transmittance-ignored",
+                                         "lighting": "restir", "rt": True, "reflections": "off", "denoise": "off",
+                                         "accumulate": SHADOW_ACCUMULATE, "envelope": "rt", "controls": SHADOW_POINT_CONTROLS,
+                                         "terms": "one point light 4.5 m above the floor, ReSTIR DI with RT visibility (--lighting restir "
+                                                  "--rt on), unfiltered: thin clear, thin green, thick clear pane and an opaque slab"},
+    "transmissive-shadow-curved@rt": {"kind": "transmissive-shadow-report", "always_green": True, "rt": True, "shadows": "rt",
+                                      "reflections": "off", "accumulate": SHADOW_ACCUMULATE, "envelope": "rt", "controls": [],
+                                      "reference_args": ["--no-ground-truth"],
+                                      "terms": "sun 25 degrees from the vertical, RT sun shadows, clear and absorbing glass spheres: "
+                                               "measured against the declared straight-line model and reported, never gated (caustics are excluded)"},
     "specular-grid-point@clustered": {"kind": "direct", "lighting": "clustered", "visibility": "rays", "denoise": "off",
                                       "terminator_band": 2,
                                       "controls": ["specular-ignored", "f90-one", "specular-weight-not-on-f0"],
@@ -666,7 +743,8 @@ def build_manifest(binary, metallib, scenarios, seed):
     git = lambda *a: command_text(["git", "-C", str(REPO), *a])  # noqa: E731
     power = command_text(["pmset", "-g", "batt"]) or ""
     tools = {name: sha256_file(REPO / "tools" / name) for name in
-             ("f15_check.py", "f15_reference.py", "f15_transmission_reference.py", "f15_subsurface_reference.py", "f15_common.py",
+             ("f15_check.py", "f15_reference.py", "f15_transmission_reference.py", "f15_shadow_reference.py", "f15_subsurface_reference.py",
+              "f15_common.py",
               "f12_reference.py",
               "run_checked.py")}
     return {"schema": 1, "created_utc": datetime.now(timezone.utc).isoformat(),
@@ -694,7 +772,7 @@ def capture_command(binary, name, folder, seed=1):
     lighting = SCENARIOS[name].get("lighting", "legacy")
     return [str(binary), "--scene", "procedural", "--bench", "2", "--material-scenario", bench_scenario(name),
             "--render-path", "visibility", "--geometry-path", "mesh", "--rt", "off" if lighting == "legacy" and not SCENARIOS[name].get("rt") else "on",
-            "--shadows", "off",
+            "--shadows", SCENARIOS[name].get("shadows", "off"),
             "--lighting", lighting, "--gi", "off", "--reflections", SCENARIOS[name].get("reflections", "ssr"), "--ao", "off",
             "--lighting-denoise", SCENARIOS[name].get("denoise", "custom"), "--reflection-samples", "8",
             "--lighting-seed", str(seed),
@@ -718,6 +796,8 @@ def scenario_controls(name):
 def reference_script(name):
     """The independent reference tool of one scenario: the Appendix B model, (ticket 13) the transmission ground truth or
     (ticket 17) the volumetric random walk."""
+    if SCENARIOS[name]["kind"] in SHADOW_KINDS:
+        return "f15_shadow_reference.py"
     if SCENARIOS[name]["kind"] in TRANSMISSION_KINDS:
         return "f15_transmission_reference.py"
     return "f15_subsurface_reference.py" if SCENARIOS[name].get("reference") == "subsurface" else "f15_reference.py"
@@ -729,6 +809,11 @@ def reference_arguments(name):
 
 
 def reference_command(name, folder):
+    if SCENARIOS[name]["kind"] in SHADOW_KINDS:
+        return ["uv", "run", "--offline", "--no-project", "--python", "3.13", "--with", "mitsuba==3.9.1", "--with", "numpy", "python", "-I",
+                str(REPO / "tools" / "f15_shadow_reference.py"), "render", str(folder / "snapshot"), "--out", str(folder / "reference"),
+                "--margin", str(SHADOW_ENVELOPE[SCENARIOS[name]["envelope"]]), *reference_arguments(name),
+                "--controls", *SCENARIOS[name]["controls"]]
     if SCENARIOS[name]["kind"] in TRANSMISSION_KINDS:
         declared = SCENARIOS[name]["kind"] == "transmission-declared"
         command = ["uv", "run", "--offline", "--no-project", "--python", "3.13", "--with", "mitsuba==3.9.1",
@@ -749,9 +834,10 @@ def reference_command(name, folder):
 
 # --- statistics (pure numpy) --------------------------------------------------
 
-def relative_error(np, candidate, reference, roi):
-    """Per-pixel relative error over the ROI (max over RGB), with the absolute floor of decision 11."""
-    floor = THRESHOLDS["floor_fraction"] * float(reference[roi].mean())
+def relative_error(np, candidate, reference, roi, floor_reference=None):
+    """Per-pixel relative error over the ROI (max over RGB), with the absolute floor of decision 11 (taken from `floor_reference`
+    when given: the shadow keys derive it from the ground truth for every candidate and control)."""
+    floor = THRESHOLDS["floor_fraction"] * float((reference if floor_reference is None else floor_reference)[roi].mean())
     # A reference that is exactly 0 over the whole ROI (a control image of a surface nothing reaches, e.g. a back-lit carrier
     # without transmission) has floor 0: 0 / 0 is the error 0 of two equal black pixels, a non-zero candidate is infinitely wrong.
     denominator = np.maximum(np.maximum(reference[roi], floor), np.finfo(reference.dtype).tiny)
@@ -883,12 +969,15 @@ def evaluate_furnace_transport(np, candidate, reference, masks, spheres):
     return result
 
 
-def evaluate_transmission(np, candidate, reference, masks, objects):
+def evaluate_transmission(np, candidate, reference, masks, objects, gate_name="transmission", kind="transmission", floor_reference=None,
+                          gated=True):
     """Decision 11 transmission bound, per glass object on the glass mask: mean and p95 of the relative luminance error
-    (absolute floor 0.05 * mean over the whole ROI of the reference).  `objects` are the reference report's glass objects."""
-    gate = THRESHOLDS["transmission"]
+    (absolute floor 0.05 * mean over the whole ROI of the reference).  `objects` are the reference report's glass objects.
+    The transmissive-shadow keys (tickets 14/15) use the same bound per caster shadow region (`gate_name`, `floor_reference` =
+    the ground truth); `gated` False measures and passes (the curved-glass report)."""
+    gate = THRESHOLDS[gate_name]
     roi = masks["roi"]
-    error, floor = relative_error(np, candidate, reference, roi)
+    error, floor = relative_error(np, candidate, reference, roi, floor_reference)
     instance = masks["sphere"][roi]
     table = []
     for o in objects:
@@ -903,7 +992,8 @@ def evaluate_transmission(np, candidate, reference, masks, objects):
                       "pass": bool(mean <= gate["mean_per_object"] and p95 <= gate["p95_per_object"])})
     # Orchestrator decision: the pooled glass-mask statistic of decision 11 is reported for information (not gated).
     pooled = {"pixels": int(error.size), "mean": float(error.mean()), "p95": float(np.percentile(error, 95))} if error.size else {}
-    return {"kind": "transmission", "floor": floor, "pooled_not_gated": pooled, "objects": table, "pass": all(t["pass"] for t in table),
+    return {"kind": kind, "floor": floor, "pooled_not_gated": pooled, "objects": table,
+            "pass": all(t["pass"] for t in table) if gated else True, "gated": gated,
             "worst_mean": max(t.get("mean", 0.0) for t in table), "worst_p95": max(t.get("p95", 0.0) for t in table)}
 def luminance(np, image):
     return image[..., 0] * LUMA_WEIGHTS[0] + image[..., 1] * LUMA_WEIGHTS[1] + image[..., 2] * LUMA_WEIGHTS[2]
@@ -1029,6 +1119,9 @@ def evaluate_equal(np, candidate, reference, masks, spheres):
 def evaluate(np, kind, candidate, reference, masks, spheres, band=1):
     if kind in TRANSMISSION_KINDS:
         return evaluate_transmission(np, candidate, reference, masks, spheres)
+    if kind in SHADOW_KINDS:
+        return evaluate_transmission(np, candidate, reference, masks, spheres, "transmissive_shadow", kind, reference,
+                                     gated=kind == "transmissive-shadow")
     if kind == "subsurface":
         return evaluate_subsurface(np, candidate, reference, masks, spheres)
     if kind == "subsurface-report":
@@ -1133,9 +1226,10 @@ def judge(np, kind, candidate, reference, masks, spheres, controls, mode):
     return result, verdicts, expectation(kind, mode, result)
 
 
-def cached_transmission_reference_usable(reference_dir, snapshot_dir, controls, spp):
-    """A cached transmission reference is reused only when it was rendered from THIS snapshot by THIS tool with the same
-    sample count and holds every requested control file."""
+def cached_transmission_reference_usable(reference_dir, snapshot_dir, controls, spp, tool="f15_transmission_reference.py",
+                                         sample_key="spp", margin=None):
+    """A cached transmission (or transmissive-shadow) reference is reused only when it was rendered from THIS snapshot by THIS tool
+    with the same sample count (and world margin) and holds every requested control file."""
     from f12_reference import scene_digest
     meta_path = reference_dir / "reference.json"
     if not meta_path.is_file():
@@ -1144,9 +1238,11 @@ def cached_transmission_reference_usable(reference_dir, snapshot_dir, controls, 
         meta = json.loads(meta_path.read_text())
         if meta.get("snapshot_sha256") != scene_digest(pathlib.Path(snapshot_dir).resolve()):
             return False
-        if meta.get("tool_sha256") != sha256_file(REPO / "tools" / "f15_transmission_reference.py"):
+        if meta.get("tool_sha256") != sha256_file(REPO / "tools" / tool):
             return False
-        if meta.get("kind") == "mitsuba" and meta.get("spp") != spp:
+        if meta.get("kind") == "mitsuba" and meta.get(sample_key) != spp:
+            return False
+        if margin is not None and meta.get("margin_m") != margin:
             return False
         files = [reference_dir / "reference.pfm", reference_dir / "masks.npz"]
         if not set(controls) <= set(meta.get("controls", {})):
@@ -1208,10 +1304,68 @@ def evaluate_transmission_scenario(np, name, folder, mode):
     return entry
 
 
+def evaluate_shadow_scenario(np, name, folder, mode):
+    """One `transmissive-shadow-*` key: the engine image against the Mitsuba ground truth on the caster shadow regions, the
+    pending_matches twin, every negative control, and the declared straight-line model (which must pass the gate: feasibility)."""
+    from f12_reference import read_pfm
+    import f15_shadow_reference as sref
+
+    spec = SCENARIOS[name]
+    controls = list(spec["controls"])
+    samples = spec.get("samples", sref.SAMPLES)
+    margin = SHADOW_ENVELOPE[spec["envelope"]]
+    reference_dir = folder / "reference"
+    if not cached_transmission_reference_usable(reference_dir, folder / "snapshot", controls, samples, "f15_shadow_reference.py", "samples",
+                                                margin):
+        if (reference_dir / "reference.json").is_file():
+            print(f"{name}: the cached reference does not match this snapshot, tool, margin or controls; re-rendering", file=sys.stderr)
+        code = sref.main(["render", str(folder / "snapshot"), "--out", str(reference_dir), "--margin", str(margin), "--samples", str(samples),
+                          *reference_arguments(name), "--controls", *controls])
+        if code:
+            raise RuntimeError(f"{name}: reference render failed ({code})")
+    report = json.loads((reference_dir / "reference.json").read_text())
+    reference = read_pfm(reference_dir / "reference.pfm")
+    candidate = read_pfm(folder / "engine.pfm")
+    if candidate.shape != reference.shape:
+        raise RuntimeError(f"{name}: engine capture {candidate.shape} and reference {reference.shape} differ in size")
+    masks = dict(np.load(reference_dir / "masks.npz"))
+    objects = report["objects"]
+    kind = spec["kind"]
+    gated = kind == "transmissive-shadow"
+    images = {c: read_pfm(reference_dir / report["controls"][c]["file"]) for c in controls}
+    result = evaluate(np, kind, candidate, reference, masks, objects)
+    verdicts = control_verdicts(np, kind, reference, images, masks, objects, controls)
+    model = evaluate(np, kind, read_pfm(reference_dir / report["model"]["file"]), reference, masks, objects)
+    expected = expectation(kind, mode, result, spec.get("always_green", False), spec.get("pending"))
+    twins = []
+    if spec.get("pending_matches") in images:
+        # the twin's absolute floor is the ground truth's, not the control image's (an all-black control has floor 0)
+        twin = evaluate_transmission(np, candidate, images[spec["pending_matches"]], masks, objects, "transmissive_shadow", kind, reference,
+                                     gated=True)
+        expected = {**expected, "matches_control": spec["pending_matches"], "control_gate": summarize(twin),
+                    "met": expected["met"] and twin["pass"]}
+        twins.append(twin["pass"])
+    entry = {"scenario": name, "kind": kind, "terms": spec["terms"], "reference_terms": report["terms"],
+             "reference_maximum_radiance": report["maximum_radiance"], "quadrature_mask_pixels": 0,
+             "roi_pixels": report["roi_pixels"], "snapshot_sha256": report["snapshot_sha256"], "result": result,
+             "expectation": expected, "controls": verdicts, "pending": spec.get("pending"), "gated": gated,
+             "model_gate": summarize(model), "model_feasible": bool(model["pass"]), "envelope_m": margin,
+             "reference_settings": {k: report.get(k) for k in ("samples", "max_bounces", "margin_m", "cone_factor", "point_light_radius",
+                                                               "kind", "light")},
+             "reference_noise": report["reference"].get("noise"), "model_vs_truth": report["model"].get("vs_truth")}
+    entry["discriminating"] = all(v["fails_gate"] for v in verdicts.values()) and bool(model["pass"])
+    entry["gates_pass"] = result["pass"]
+    entry["pending_matches_met"] = all(twins)
+    entry["expectation_met"] = expected["met"]
+    return entry
+
+
 def evaluate_scenario(np, name, folder, mode):
     from f12_reference import read_pfm
     import f15_reference
 
+    if SCENARIOS[name]["kind"] in SHADOW_KINDS:
+        return evaluate_shadow_scenario(np, name, folder, mode)
     if SCENARIOS[name]["kind"] in TRANSMISSION_KINDS:
         return evaluate_transmission_scenario(np, name, folder, mode)
 
@@ -1352,12 +1506,14 @@ def result_lines(r):
         lines += ["", "| metallic | roughness | mean | p95 | pass |", "|---|---|---|---|---|"]
         for t in r["spheres"]:
             lines.append(f"| {t['metallic']} | {t['roughness']} | {t.get('mean', 0):.4f} | {t.get('p95', 0):.4f} | {t['pass']} |")
-    elif r["kind"] == "transmission":
+    elif r["kind"] in ("transmission", *SHADOW_KINDS):
+        limits = THRESHOLDS["transmissive_shadow" if r["kind"] in SHADOW_KINDS else "transmission"]
         pooled = r.get("pooled_not_gated") or {}
         if pooled:
             lines += ["", f"pooled glass mask (information, not gated): mean {pooled['mean']:.4f}, p95 {pooled['p95']:.4f}, {pooled['pixels']} pixels"]
-        lines += ["", f"worst object mean {r['worst_mean']:.4f} (limit {THRESHOLDS['transmission']['mean_per_object']}), "
-                      f"worst p95 {r['worst_p95']:.4f} (limit {THRESHOLDS['transmission']['p95_per_object']}), floor {r['floor']:.4f}", "",
+        lines += ["", f"worst object mean {r['worst_mean']:.4f} (limit {limits['mean_per_object']}), "
+                      f"worst p95 {r['worst_p95']:.4f} (limit {limits['p95_per_object']}), floor {r['floor']:.4f}"
+                      f"{'' if r.get('gated', True) else '; not gated (reported)'}", "",
                   "| object | pixels | mean | p95 | pass |", "|---|---|---|---|---|"]
         for t in r["objects"]:
             lines.append(f"| {t['label']} | {t['pixels']} | {t.get('mean', 0):.4f} | {t.get('p95', 0):.4f} | {t['pass']} |")
