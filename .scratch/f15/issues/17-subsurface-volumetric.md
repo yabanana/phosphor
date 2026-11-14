@@ -167,3 +167,35 @@ semantic filtering of the commit's own additions, +22 compute and +6 render).
   passes (bleed truth skin 0.021 0.059 0.132 0.230 0.343, jade 0.061 0.141 0.249 0.404 0.570 vs engine unchanged).  Back-lit reported: mean error
   0.972 0.989 0.996 1.000.  Controls all fail: subsurface-off 1.57 (gated 1,2,3,6,7,8), diffusion-off 1.06, radius-ignored 0.49 (pieces 2, 7);
   sub-pixel pass (0.000000), leak control fails.
+
+2026-11-14 — fixtures move to roughness 0.35 (ORCHESTRATOR DECISION, recorded before any measurement on the new fixture; commit `1d1b642`).
+Decision: at roughness 0.7 (alpha_b 0.49) the Mitsuba rough dielectric cannot represent the OpenPBR material (single-scattering GGX loses
+energy at every internal reflection, A_max < most fixture colours); the volumetric fixtures move to a roughness at which every fixture colour
+is reachable; roughness 0.7 subsurface is declared "no ground truth" (like rough thin-walled glass), its numbers kept as information.
+Gates, thresholds, controls and the inversion definition unchanged.
+- CORRECTION of the first record above: the A_max = 0.45 / 0.447 of the first table was biased low by Russian roulette from depth 64 (the long
+  walks of a non-absorbing medium were under-sampled; also a sigma_t 1000 sphere).  With roulette from depth 5000 (20000 on a 30-mfp sphere)
+  the plateau is stable across sphere size (10-100 mfp) and ior 1 gives exactly A = 1: A at alpha = 1 under the ior 1.5 boundary =
+  0.980 (roughness 0.15), 0.948 (0.25), 0.876 (0.35), 0.717 (0.5), 0.503 (0.7), 0.986 (0.04); noise 0.0001-0.0004 (20000-roulette check
+  on 30 mfp: 0.993, 0.960, 0.887, 0.724, 0.507).  The qualitative finding stands at 0.7 (0.50), smaller loss than first stated.
+- Rule (stated before the change): the LARGEST roughness of {0.15, 0.25, 0.35, 0.5} with A_max >= 0.85 + 3 sigma.  0.5 fails (0.72), 0.35 passes
+  (0.876 / 0.887, sigma 0.0003) -> 0.35.  src/testbench: volRoughness, subRoughness, backRoughness and the doctests only; roughness is data: 0
+  archive misses, 0 render-thread compiles, 0 fallbacks on the five captures.
+- Table regenerated (`tools/f15_subsurface_albedo.json`, schema 2, sigma_t 100, 64 spp per half, roulette 5000, max noise 0.0013): curves for
+  alpha_b 0.1225 (g 0 and 0.3) and the index-matched control (|A - rho| <= 0.004 up to rho 0.7); angle dependence <= 3 % (0 / 45 / 70 deg vs
+  diffuse); the draft Kulla-Conty mapping returns 0.76 x C at 0.85, 0.63 at 0.7, 0.53 at 0.55, 0.48 at 0.45, 0.41 at 0.30 behind this boundary.
+  GROUND_TRUTH_VERSION 4, pieces rendered with roulette from depth 1000.  The 0.7 curves are not kept (the old table was biased); A_max(0.7) is in the table.
+- Re-measurement (`build/f15-check/t17s`, GREEN exit 0, `albedo_saturated` false everywhere):
+  sun FAIL (pending "ticket 18" kept), worst gated piece mean 0.364 / p95 0.924.  Per piece mean/p95 (candidate Y vs reference Y): skin 0.5@0.08
+  0.355/0.924 (0.1945/0.2063); skin 1@0.04 0.252/0.794 (0.2076/0.2124); skin 1@0.08 0.257/0.789 (0.2399/0.2484); skin 1@0.16 [reported]
+  0.231/0.607 (0.2678/0.2553); jade 0.5@0.08 0.364/0.904 (0.1841/0.2004); jade 1@0.04 0.299/0.870 (0.1971/0.2104); jade 1@0.08 0.309/0.737
+  (0.2230/0.2202); jade 1@0.16 [reported] 0.400/0.972 (0.2499/0.1989).  The mean luminance now agrees within 1-8 % on the gated pieces: the energy
+  convention is right and the remaining error is spatial.  Reference residual noise 3-5 % mean, 9-13 % p95 (sweep max 6.5 % mean, back-lit 4-6 / 10-15).
+  Radius sweep now FAILS (key marked pending "ticket 18", it was passing against the biased truth): bleed truth skin 0.033 0.073 0.157 0.302
+  0.427, jade 0.088 0.191 0.338 0.548 0.705 against engine skin 0.006 0.026 0.051 0.138 0.147 (flat above 0.16 m), jade 0.021 0.090 0.122 0.222
+  0.243 (jade passes, skin fails its rise rule at 0.16 -> 0.24).  Back-lit reported: mean error 0.979 0.994 1.001 1.000 (candidate Y 0.032 0.009
+  0.001 0.000 vs truth 0.055 0.090 0.085 0.172).  Controls all fail: subsurface-off 1.00 (gated 1,2,3,6,7,8), diffusion-off 0.67, radius-ignored
+  0.48 (pieces 2, 7); sub-pixel pass 0.000000, leak control fails.
+- Reading: with equal energy the miss is the profile shape (the truth's lateral spread is 2-4x the engine's Burley width at the sweep's large
+  radii, the bleed numbers; the error stays 25-36 % mean with the luminance means within 8 %), so the decision-10 rule triggers ticket 18 on VALID
+  ground truth.  The residual reference noise (3-5 % mean) is a minor part of it.

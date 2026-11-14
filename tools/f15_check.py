@@ -808,7 +808,10 @@ SCENARIOS = {
                                   "controls": VOLUMETRIC_BOUND_CONTROLS,
                                   "terms": "sun only from the side (environment 0, no shadows, no GI) on skin and jade spheres, weight {0, 0.5, 1} at the "
                                            "nominal radius 0.08 m and radius x0.5 / x1 / x2 at weight 1"},
-    "subsurface-volumetric-radius": {"kind": "radius-monotonic", "reference": "subsurface", "reflections": "off",
+    # Re-measured on the valid ground truth (roughness 0.35, boundary-aware albedo; ticket 17 record): the engine's terminator bleed
+    # saturates at large radii (skin 0.137 -> 0.147 where the truth rises 0.30 -> 0.43), so the sweep key is asserted red like the
+    # side-lit key until ticket 18 (profile shape).
+    "subsurface-volumetric-radius": {"kind": "radius-monotonic", "reference": "subsurface", "reflections": "off", "pending": "ticket 18",
                                      "controls": VOLUMETRIC_SWEEP_CONTROLS,
                                      "terms": "sun only from the side on skin and jade spheres of weight 1, radius x0.25 / x0.5 / x1 / x2 / x3 of 0.08 m"},
     "subsurface-volumetric-subpixel": {"kind": "equal", "reference": "subsurface", "reflections": "off",
