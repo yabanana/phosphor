@@ -66,7 +66,7 @@ inline DenoiseLobe denoiseLobeLoad_lobe(constant GPUDenoiseParams& p,const devic
         if(real&4u){
             const float3 n=diVec(s.shadingNormal),v=diVec(s.viewDirection);
             if(dot(n,n)>0&&dot(v,v)>0&&all(isfinite(n))&&all(isfinite(v))){const float ior=(isfinite(u.ior)&&u.ior>=1.0f)?u.ior:1.5f;
-                const float3 t=refract(-normalize(v),normalize(n),1.0f/ior);if(dot(t,t)>0)l.axis=normalize(t);}
+                const float3 t=u.volumeThickness>0?refract(-normalize(v),normalize(n),1.0f/ior):-normalize(v);if(dot(t,t)>0)l.axis=normalize(t);}
         }
     }
     return l;

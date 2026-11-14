@@ -97,6 +97,26 @@ const MaterialSupportTable& currentSupportTable() {
         FeatureSupportEntry& subsurface = t.features[static_cast<u32>(MaterialFeature::Subsurface)];
         subsurface.level                = SupportLevel::Approximated;
         subsurface.approximation        = "thin_mode_only;gi_irradiance_at_n_stands_for_minus_n;secondary_rt_hits_ignore_transmission";
+        // F15.1 (ticket 13): KHR_materials_transmission + KHR_materials_volume, ray-traced (ADR-0004).  The diffuse base of the visible surface is
+        // mixed by 1 - t in every primary path; the reflected lobes keep DI, RT reflections and the denoiser.  With --rt on the transport draws
+        // ONE Fresnel-chosen sample per pixel: reflection (today's lobes) or refraction through a GGX microfacet (rough BTDF, separable Smith),
+        // traced with RT whatever the reflection roughness band, crossing at most 4 interface events (the visible surface included) that accept the
+        // inside back faces of the medium (single-sided closed meshes too), Beer-Lambert c^(x/d) along the real inside segment, thin-walled
+        // surfaces without bend or offset, glass behind glass, emitters hit by refracted rays owned by the transport (thin-walled DI covers
+        // delta lights behind the pane through the glTF thin BTDF); the denoiser gets the refract lobe id/axis and the IOR-scaled roughness;
+        // MetalFX temporal treats the pixel as reactive.  Declared approximations (decisions 06/09): without RT the transmitted radiance is the
+        // probe/environment along the refracted direction with the volume thickness hint as path length (never SSR); the transmission factor
+        // applies at the camera-visible surface only (interior crossings are pure dielectric interfaces); an event beyond the 4th ends in the
+        // environment; Schlick Fresnel (the exact one differs by <= 1.2 % mean on the fixtures); direct light through two interfaces is
+        // excluded (caustics); non-shadow GI/probe/secondary RT hits see glass as an opaque base reduction; a rough thin-walled surface and the
+        // thickness/transmission textures are not validated against an independent reference.
+        FeatureSupportEntry& transmission = t.features[static_cast<u32>(MaterialFeature::Transmission)];
+        transmission.level                = SupportLevel::Approximated;
+        transmission.approximation        = "rt_refraction_one_fresnel_chosen_sample;rt_off_probes_environment_along_refracted_ray;factor_at_visible_surface_only;"
+                                            "at_most_4_interface_events;schlick_fresnel;caustics_excluded;secondary_gi_and_probe_hits_ignore_transmission";
+        FeatureSupportEntry& volume = t.features[static_cast<u32>(MaterialFeature::Volume)];
+        volume.level                = SupportLevel::Approximated;
+        volume.approximation        = "beer_lambert_along_real_inside_segment_with_rt;rt_off_uses_thickness_hint;thickness_texture_ignored_with_rt;no_scattering";
         return t;
     }();
     return table;

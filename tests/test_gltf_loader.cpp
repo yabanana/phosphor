@@ -485,8 +485,10 @@ TEST_CASE("glTF loader: a required extension whose feature is not rendered refus
         CHECK(loadModelJson(model, scene, "phosphor_f15_optional_transmission.gltf"));
     }
     SUBCASE("required") {
-        model["extensionsRequired"] = {"KHR_materials_transmission"};
-        const auto path = std::filesystem::temp_directory_path() / "phosphor_f15_required_transmission.gltf";
+        // Transmission is rendered since F15.1 ticket 13: a required extension that nothing renders (dispersion is F16) is the refused case.
+        model["extensionsUsed"] = {"KHR_materials_dispersion"};
+        model["extensionsRequired"] = {"KHR_materials_dispersion"};
+        const auto path = std::filesystem::temp_directory_path() / "phosphor_f15_required_dispersion.gltf";
         { std::ofstream out(path); out << model; }
         GpuScene scene;
         NullTextureManager textures;
@@ -495,7 +497,7 @@ TEST_CASE("glTF loader: a required extension whose feature is not rendered refus
         GltfLoader loader(scene, textures, ecs);
         CHECK_FALSE(loader.loadFromFile(path.string()));
         std::filesystem::remove(path);
-        CHECK(loader.lastError().find("KHR_materials_transmission") != std::string::npos);
+        CHECK(loader.lastError().find("KHR_materials_dispersion") != std::string::npos);
         CHECK(scene.getMeshCount() == 0);
     }
 }

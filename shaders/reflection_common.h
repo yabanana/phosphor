@@ -173,6 +173,25 @@ inline float3 reflectionProbeRadiance(float3 point,float3 direction,float roughn
     if(total>0){path=REFLECTION_PATH_PROBE;float coverage=saturate(total);return (sum/total)*coverage+reflectionConstantVec(p.environment)*(1-coverage);}
     return reflectionConstantVec(p.environment);
 }
+#ifdef PHOSPHOR_REFL_LOBE
+// F15.1 (ticket 13): the declared --rt off transmitted radiance of a transmissive pixel (decision 09): the probe/environment radiance along the
+// refracted direction (a closed volume bends once through the shading normal, a thin-walled surface does not), weighted by
+// (1 - E) t (1 - metallic) tint T with E the split-sum albedo of the dielectric layer and T the Beer-Lambert absorption over the volume's
+// thickness hint (the only path length available without RT).  Deterministic: the weight is the closed form tools/f15_transmission_reference.py
+// `declared` evaluates.  The stochastic RT transport owns the refraction when RT is on (reflectionRefractSample).
+inline float3 reflectionDeclaredTransmission(GPUDISurface s,ReflectionLobe lobe,constant GPUReflectionParams& p,const device GPUReflectionProbe* probes,
+    texturecube_array<float> atlas,thread uint& path){
+    path=REFLECTION_PATH_NONE;if(!lobe.trans||!s.valid)return 0;
+    float3 n=diVec(s.shadingNormal),v=diVec(s.viewDirection);if(!all(isfinite(n))||!all(isfinite(v))||dot(n,n)<=0||dot(v,v)<=0)return 0;
+    n=normalize(n);v=normalize(v);const float nv=max(dot(n,v),1e-4f);
+    const float diffuseWeight=bsdfSpecEnvIrid(lobe.spec,lobe.irid,diVec(s.albedo),saturate(s.metallic),lobe.envRoughness,nv,phosphor::DfgTable).diffuseWeight;
+    const bool volume=lobe.transThickness>0;
+    const float3 absorption=volume?bsdfVolumeAbsorption(lobe.transAttenuationColor,lobe.transAttenuationDistance,lobe.transThickness):float3(1.0f);
+    float3 direction=-v;if(volume){const float3 refracted=refract(-v,n,1.0f/lobe.transIor);if(dot(refracted,refracted)>0)direction=normalize(refracted);}
+    const float3 L=reflectionProbeRadiance(diVec(s.position),direction,s.roughness,true,p,probes,atlas,path);
+    return bsdfTransmissionEnvWeight(lobe.transFactor,saturate(s.metallic),diffuseWeight,diVec(s.albedo),absorption)*L;
+}
+#endif
 struct ReflectionSSRHit {uint pixel;float distance;float3 point;bool valid;};
 inline bool reflectionSSRPoint(float3 origin,float3 direction,float distance,constant GPUReflectionParams& p,
     texture2d<float,access::read> depth,thread ReflectionSSRHit& hit,thread float& delta){

@@ -323,6 +323,16 @@ TEST_CASE("F15.1 ticket 09: the stable key keeps the history of a mixed-sample p
     for(int frame=0;frame<8;++frame)h=denoiseTemporal(s,glm::vec3(1),h,p,{},{},lobeSpec(frame&1?kCoat:0u),-1,glm::vec3(0),glm::vec3(-1),&g);
     CHECK(h.length==1);
 }
+TEST_CASE("F15.1 (ticket 13) a thin-walled surface keeps the refract axis straight along -V"){
+    auto s=receiver();s.shadingNormal[0]=0;s.shadingNormal[1]=0;s.shadingNormal[2]=1;
+    const float angle=.5f;s.viewDirection[0]=std::sin(angle);s.viewDirection[1]=0;s.viewDirection[2]=std::cos(angle);
+    DenoiseLobeGuide g;g.ior=1.5f;g.volumeThickness=0;
+    const auto thin=denoiseLobeAxis(s,4,g);
+    CHECK(thin.x==doctest::Approx(-std::sin(angle)));CHECK(thin.z==doctest::Approx(-std::cos(angle))); // the ray goes through unbent: -V
+    g.volumeThickness=.8f;const auto volume=denoiseLobeAxis(s,4,g);
+    CHECK(volume.x>thin.x);                                                                                // the volume bends it towards the normal
+    CHECK(glm::dot(thin,volume)<.999f);
+}
 TEST_CASE("F15.1 the refract axis follows the refracted direction, not the reflection axis"){
     auto s=receiver();s.shadingNormal[0]=0;s.shadingNormal[1]=0;s.shadingNormal[2]=1;
     const float angle=.5f;s.viewDirection[0]=std::sin(angle);s.viewDirection[1]=0;s.viewDirection[2]=std::cos(angle);

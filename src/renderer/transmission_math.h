@@ -28,8 +28,14 @@
 namespace phosphor {
 
 PHOSPHOR_GPU_CONSTANT float kTransmissionSelectFloor = 1.0f / 32.0f;
-/// The declared bound of interface events along one transport sample, the camera-visible surface included (the reference's ENGINE_CROSSINGS).
-PHOSPHOR_GPU_CONSTANT unsigned kTransmissionMaxEvents = 4u;
+/// The declared bound of interface CROSSINGS (transmissions) along one transport sample, the camera-visible refraction included: a path that would
+/// cross a fifth interface ends in the probes/environment along the refracted direction.  Reflections (total internal reflection inside a cube)
+/// do not cross an interface; the hard bound kTransmissionMaxEvents on all interface events keeps every loop finite (GPU safety).
+PHOSPHOR_GPU_CONSTANT unsigned kTransmissionMaxCrossings = 4u;
+PHOSPHOR_GPU_CONSTANT unsigned kTransmissionMaxEvents = 8u;
+/// An interface whose GGX alpha is at the engine's floor (bsdfAlpha: max(roughness^2, 0.002); roughness 0 clamps to it) is a SMOOTH interface for the
+/// transmission transport: h = n and weight 1 (the delta of the reference's `dielectric`).
+PHOSPHOR_GPU_CONSTANT float kTransmissionSmoothAlpha = 0.00201f;
 /// Smallest attenuation colour channel: sigma_t = -ln(max(c, kTransmissionMinColor)) / d (the reference clips at 1e-6).
 PHOSPHOR_GPU_CONSTANT float kTransmissionMinColor = 1.0e-6f;
 

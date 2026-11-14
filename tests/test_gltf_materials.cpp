@@ -520,7 +520,9 @@ TEST_CASE("glTF extensions: required extensions must be rendered, not merely par
     const std::string irid = R"({"asset":{"version":"2.0"},
         "extensionsUsed":["KHR_materials_transmission"],"extensionsRequired":["KHR_materials_transmission"]})";
     SUBCASE("a required extension whose feature is unsupported today is refused with a reason") {
-        const auto bad = unsupportedRequiredExtensions(loadModel(irid));
+        MaterialSupportTable unsupported = currentSupportTable(); // transmission is rendered since F15.1 ticket 13
+        unsupported.features[static_cast<size_t>(MaterialFeature::Transmission)].level = SupportLevel::Unsupported;
+        const auto bad = unsupportedRequiredExtensions(loadModel(irid), unsupported);
         REQUIRE(bad.size() == 1);
         CHECK(bad[0].name == "KHR_materials_transmission");
         CHECK(bad[0].reason.find("not rendered") != std::string::npos);
@@ -528,6 +530,8 @@ TEST_CASE("glTF extensions: required extensions must be rendered, not merely par
     SUBCASE("the same asset loads once the feature is implemented or approximated") {
         MaterialSupportTable table = currentSupportTable();
         auto& entry = table.features[static_cast<size_t>(MaterialFeature::Transmission)];
+        entry.level = SupportLevel::Unsupported;
+        CHECK_FALSE(unsupportedRequiredExtensions(loadModel(irid), table).empty());
         entry.level = SupportLevel::Implemented;
         CHECK(unsupportedRequiredExtensions(loadModel(irid), table).empty());
         entry.level = SupportLevel::Approximated;
@@ -613,7 +617,7 @@ TEST_CASE("support report: summary line, detail and JSON") {
     const std::vector<std::string> assetUnknown = {"KHR_lights_punctual"};
     const std::string line = formatSupportSummary(reports, assetUnknown);
     CHECK(line.rfind("MATERIALS count=2 base=[implemented(2)] ", 0) == 0);
-    CHECK(line.find("implemented=0 approximated=2 unsupported=1") != std::string::npos); // clearcoat (ticket 09) and thin subsurface (ticket 16) are approximated
+    CHECK(line.find("implemented=0 approximated=3 unsupported=0") != std::string::npos); // clearcoat (ticket 09), thin subsurface (ticket 16) and transmission (ticket 13) are approximated
     CHECK(line.find("encodings=[]") != std::string::npos);
     CHECK(line.find("clearcoat:approximated(1)") != std::string::npos);
     CHECK(line.find("subsurface:approximated(1)") != std::string::npos);
@@ -628,8 +632,8 @@ TEST_CASE("support report: summary line, detail and JSON") {
     const auto json = nlohmann::json::parse(supportToJson(reports, assetUnknown));
     CHECK(json.at("count") == 2);
     CHECK(json.at("schema") == "phosphor.materials.v2");
-    CHECK(json.at("features").at("unsupported") == 1);
-    CHECK(json.at("features").at("approximated") == 2);
+    CHECK(json.at("features").at("unsupported") == 0);
+    CHECK(json.at("features").at("approximated") == 3);
     CHECK(json.at("features").at("implemented") == 0);
     CHECK(json.at("base").at("implemented") == 2);
     CHECK(json.at("encodings").at("implemented") == 0);

@@ -203,8 +203,17 @@ TEST_CASE("support report: ior/specular, clearcoat and sheen are approximated wi
     for (u32 f = 0; f < MATERIAL_FEATURE_COUNT; ++f)
         if (f != static_cast<u32>(MaterialFeature::SpecularIor) && f != static_cast<u32>(MaterialFeature::Clearcoat) &&
             f != static_cast<u32>(MaterialFeature::Sheen) && f != static_cast<u32>(MaterialFeature::Anisotropy) &&
-            f != static_cast<u32>(MaterialFeature::Iridescence) && f != static_cast<u32>(MaterialFeature::Subsurface))
+            f != static_cast<u32>(MaterialFeature::Iridescence) && f != static_cast<u32>(MaterialFeature::Subsurface) &&
+            f != static_cast<u32>(MaterialFeature::Transmission) && f != static_cast<u32>(MaterialFeature::Volume))
             CHECK(t.features[f].level == SupportLevel::Unsupported);
+    // F15.1 (ticket 13): transmission and volume are approximated with named declared approximations.
+    const FeatureSupportEntry& tr = t.features[static_cast<u32>(MaterialFeature::Transmission)];
+    CHECK(tr.level == SupportLevel::Approximated);
+    CHECK(std::string(tr.approximation).find("rt_off_probes_environment_along_refracted_ray") != std::string::npos);
+    CHECK(std::string(tr.approximation).find("at_most_4_interface_events") != std::string::npos);
+    const FeatureSupportEntry& vo = t.features[static_cast<u32>(MaterialFeature::Volume)];
+    CHECK(vo.level == SupportLevel::Approximated);
+    CHECK(std::string(vo.approximation).find("beer_lambert_along_real_inside_segment_with_rt") != std::string::npos);
     const FeatureSupportEntry& ss = t.features[static_cast<u32>(MaterialFeature::Subsurface)];
     CHECK(ss.level == SupportLevel::Approximated); // the thin mode (ticket 16); the volumetric mode has its own entry
     CHECK(std::string(ss.approximation) == "thin_mode_only;gi_irradiance_at_n_stands_for_minus_n;secondary_rt_hits_ignore_transmission");

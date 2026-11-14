@@ -28,6 +28,7 @@ glm::vec3 denoiseLobeAxis(const GPUDISurface& s,u32 key,const DenoiseLobeGuide& 
     const auto n=v3(s.shadingNormal),v=v3(s.viewDirection);if(!finite(n)||!finite(v)||glm::dot(n,n)<=0||glm::dot(v,v)<=0)return {};
     const auto nn=glm::normalize(n),vv=glm::normalize(v);const auto reflected=glm::reflect(-vv,nn);
     if(!(key&4u))return reflected;
+    if(!(g.volumeThickness>0))return -vv; // ticket 13: a thin-walled surface keeps the ray straight: the refracted image sits along -V
     const float ior=std::isfinite(g.ior)&&g.ior>=1?g.ior:1.5f;const auto t=glm::refract(-vv,nn,1.f/ior);
     return glm::dot(t,t)>0?glm::normalize(t):reflected;
 }

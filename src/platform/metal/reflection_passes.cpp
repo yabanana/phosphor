@@ -404,6 +404,7 @@ struct ReflectionPasses::Impl {
                         scratch=b.write(scratch,Usage::ShaderWrite,StageDispatch);scratchDistance=b.write(scratchDistance,Usage::ShaderWrite,StageDispatch);sampleScratch[sample]=scratch;sampleDistance[sample]=scratchDistance;}
                     b.setProfileShaders(options.reflections==ReflectionMode::Probes?"reflection_probe_only":rtReflection?"reflection_rt":"reflection_ssr");
                 },[this,sample,single](PassContext& ctx){auto* t=slots[frame.slot].sampleTables[sample];commonTable(t,ctx,sampleAddress[sample]);t->setAddress(guideAddress(ctx),20);
+                    {const auto extensions=scene.materialExtensionsAddress();t->setAddress(extensions?extensions:dummyBuffer->gpuAddress(),21);} // F15.1 (ticket 13): ior/transmission/volume records of the glass the refracted rays cross
                     t->setAddress(single?slots[frame.slot].metadata->gpuAddress():slots[frame.slot].samples->gpuAddress()+u64(sample)*pixels*sizeof(GPUSpecularSample),17);t->setAddress(slots[frame.slot].errors->gpuAddress(),19);
                     if(rtReflection)reflectionConsumer->bind(t,2,3);texture(t,ctx,base,0);texture(t,ctx,depth,1);texture(t,ctx,filteredRef,2);texture(t,ctx,sampleScratch[sample],5);texture(t,ctx,sampleDistance[sample],6);
                     lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,transportServed,t,frame.width*frame.height);

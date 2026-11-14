@@ -122,6 +122,9 @@ const bool finiteFit=all(isfinite(fitWeight));
         result=L*fitWeight;
 #ifdef PHOSPHOR_REFL_LOBE
         result+=coatResult;
+        // F15.1 (ticket 13): the declared transmitted term of a transmissive pixel (probes/environment along the refracted direction).
+        {const auto transLobe=REFL_LOBE(p.flags,REFLECTION_LOBE_GUIDE_VALID,tid,s);uint transmittedPath;
+            if(transLobe.trans){const float3 Lt=reflectionDeclaredTransmission(s,transLobe,p,probes,atlas,transmittedPath);if(!all(isfinite(Lt))||any(Lt<0))result=as_type<float>(0x7fc00000u);else result+=Lt;}}
 #endif
         sample.flags=SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_PREFILTERED;
         if(!finiteFit||!all(isfinite(L))||any(L<0)||!all(isfinite(result))||any(result<0))sample.flags|=SPECULAR_SAMPLE_ERROR;

@@ -17,7 +17,9 @@ struct DenoiseSettings {
 [[nodiscard]] GPUDenoiseParams denoiseParameters(const DenoiseSettings&,u32 width,u32 height,u32 signal,u32 view,u32 epoch,u32 revision,bool reset);
 // F15.1 (ticket 08) lobe contract of the specular denoiser (CPU mirror of the "_lobe" kernels in shaders/denoise.metal).
 // The fields of the pixel's GPULobeGuide the rule reads; a null lobe pointer below selects the base rule bit for bit.
-struct DenoiseLobeGuide { float ior=0, clearcoatRoughness=0; };
+// volumeThickness: the guide's world thickness of the transmission volume (0 = thin-walled: the refract axis does not bend; the default keeps a
+// bent axis for callers that only know the ior).
+struct DenoiseLobeGuide { float ior=0, clearcoatRoughness=0, volumeThickness=1; };
 // A pixel as the lobe kernels see it: its sample flags (sampled lobe id and axis) and its guide.
 struct DenoiseLobePixel { u32 sampleFlags=0; DenoiseLobeGuide guide{}; };
 // Edge-stopping roughness of the pixel's lobe key.  Ticket 09: with a coat the key is STABLE per pixel (renderer/lobe_select.h: the coat
