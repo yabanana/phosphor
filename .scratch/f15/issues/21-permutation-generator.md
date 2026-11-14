@@ -58,3 +58,22 @@ pixels. If the owner wants strict bit identity the all-lobes pipeline would have
 **Open.** Chess fixture and Khronos corpus manifests (append a `manifest` line after `class_manifest`/`--export-class-manifest`; rerun `harvest` + `material_class_archive.py
 update` for the new classes); the A/B/A binning vs union measurement (3 replicas, quiet machine) on the chess fixture, final decision with the terrain of ticket 23
 (logged as provisional in `docs/opt-log.md`, no timing claim made); layers (bit 8) has no fixture yet.
+
+## Integration step: chess and corpus manifests (2026-11-14, after the merge onto the phase branch)
+
+Commits: manifests `tools/f15_export_manifests.py` + `chess.json`, `khronos-corpus.json`; archive update (+12 compute); table tests. After the merge `f15_material_class_archive` failed
+on [38, 64, 106, 113, 224]; all five are explained by manifests: 38 = ToyCar (clearcoat+sheen+transmission on separate materials), 64 = IORTestGrid class (volume alone),
+106 = AnisotropyBarnLamp, 113 = IridescenceSuzanne, 224 = chess-sidelight union (transmission+volume+subsurface). Nothing was forced into the plan.
+- Manifests exported by the app (`phosphor --export-class-manifest`, serial, locked): 3 chess rigs (classes [0,96], [0,96,192], [0,96]) and 21 corpus models (ABeautifulGame and ToyCar
+  included; DiffuseTransmissionTest, TextureTransformMultiTest and GlamVelvetSofa are refused by the loader for required extensions, as in the corpus runner). Max 5 classes in a scene.
+- Plan 74 pipelines, 38 archived permutations (budget 64), <= 16 classes per scene; archive +12 compute descriptors (871 total; existing entries a prefix, no duplicates added), `check` passes.
+- metal-tt (machine loaded by other agents, runs 13..27 s, interleaved, median of 3): branch archive without any RESOLVE_BIN pipeline 14.79 s / 113.3 MB, with all 74: 16.18 s / 126.4 MB
+  (+9.4 % time, +11.6 % size; budget +25 %). The pre-ticket archive (commit 432f02a) measured 10.96 s / 91.9 MB in the same session, so the whole branch (tickets 20 and 22 included) is
+  +34 % over it; the RESOLVE_BIN share is the +9.4 %.
+- ctest 26/26 with KHRONOS_CORPUS_DIR; `visual_check` 0 px (8 benches); `archive_check` pass; `hitch_check` 0 hitches.
+- Class equivalence on the 24 new scenes (8 frames, the runners' own rigs, both lighting paths): 4 bit-identical, 7 differing 8-bit pixels in total (max delta 1 LSB), all-lobes repeat bit-identical
+  6 of 6, negative control leaves the envelope in 22 of 22 scenes with features, every feature bit 0..7 discriminated; overflow bin (2 scenes) runs. **The 1e-5 information envelope is exceeded
+  on 15 of 24 textured real-asset scenes: worst 1.0e-2 relative (99,533 ULP, ToyCar) at isolated pixels, typically 4e-5..8e-4** (specular highlights and texture filtering amplify the codegen
+  difference; the fixtures stayed at 3.1e-6). Reported, not gated further; 8-bit stays within 1 LSB.
+- Budget run (warmup 64, 32 frames): 0 fallback draws, 0 render-thread compiles, 0 compiler calls in measured frames, 0 archive misses, at most 5 bins.
+- Chess runner (`f15_chess_check --run --expect green`): GREEN, 26 engine runs with 0 archive misses. Corpus runner: 21 rendered, 3 refused, 0 misses.
