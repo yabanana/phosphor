@@ -374,3 +374,24 @@ TEST_CASE("F15.1 ticket 11: an anisotropic pixel is filtered at the roughness of
     auto wide=a;wide.roughness=eff;auto wideB=b;wideB.roughness=eff;
     CHECK(denoiseSpatialWeight(wide,wideB,2,2,1,p,&base,&base)>sharp);
 }
+TEST_CASE("F15.1 (ticket 13) a transmissive pixel has one key whichever branch of the reflect/refract estimator was drawn"){
+    const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);const auto s=receiver();
+    DenoiseLobeGuide glass;glass.ior=1.5f;glass.transmissionFactor=1.0f;
+    const u32 reflectBranch=0u,refractBranch=kRefract;
+    CHECK(denoiseStableLobeKey(specularSampleLobeKey(reflectBranch),glass)==(SPECULAR_LOBE_TRANSMISSION|4u));
+    CHECK(denoiseStableLobeKey(specularSampleLobeKey(refractBranch),glass)==(SPECULAR_LOBE_TRANSMISSION|4u));
+    // history survives a branch change in either direction
+    const auto fromRefract=denoiseTemporal(s,glm::vec3(1),{},p,{},{},lobeSpec(refractBranch),-1,glm::vec3(0),glm::vec3(-1),&glass);REQUIRE(fromRefract.valid);
+    CHECK(denoiseCompatible(s,fromRefract,p,lobeSpec(reflectBranch),&glass));
+    const auto fromReflect=denoiseTemporal(s,glm::vec3(1),{},p,{},{},lobeSpec(reflectBranch),-1,glm::vec3(0),glm::vec3(-1),&glass);
+    CHECK(fromReflect.lobe==fromRefract.lobe);CHECK(denoiseCompatible(s,fromReflect,p,lobeSpec(refractBranch),&glass));
+    auto h=denoiseTemporal(s,glm::vec3(1),fromRefract,p,{},{},lobeSpec(reflectBranch),-1,glm::vec3(0),glm::vec3(-1),&glass);CHECK(h.length==2);
+    // neighbours of different branches filter together (same axis and roughness: the refracted image)
+    DenoiseLobePixel a,b;a.guide=b.guide=glass;a.sampleFlags=reflectBranch|SPECULAR_SAMPLE_VALID;b.sampleFlags=refractBranch|SPECULAR_SAMPLE_VALID;
+    auto sv=s;sv.viewDirection[2]=1;CHECK(denoiseSpatialWeight(sv,sv,.5f,.5f,.1f,p,&a,&b)>.99f);
+    // a pixel below the factor threshold, or without a guide factor, keeps the sampled key (the clearcoat and base rules are untouched)
+    DenoiseLobeGuide faint=glass;faint.transmissionFactor=.25f;
+    CHECK(denoiseStableLobeKey(specularSampleLobeKey(reflectBranch),faint)==0u);CHECK(denoiseStableLobeKey(specularSampleLobeKey(refractBranch),faint)==(SPECULAR_LOBE_TRANSMISSION|4u));
+    CHECK(denoiseStableLobeKey(specularSampleLobeKey(kCoat),DenoiseLobeGuide{})==SPECULAR_LOBE_CLEARCOAT);
+    DenoiseLobeGuide nan=glass;nan.transmissionFactor=std::nanf("");CHECK(denoiseStableLobeKey(0u,nan)==0u);
+}

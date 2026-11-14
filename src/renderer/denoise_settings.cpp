@@ -19,6 +19,9 @@ float denoiseLobeRoughness(float base,u32 key,const DenoiseLobeGuide& g){
     case SPECULAR_LOBE_TRANSMISSION:return std::isfinite(g.ior)&&std::isfinite(base)?base*std::clamp(2*(g.ior>=1?g.ior:1.5f)-2,0.f,1.f):base;
     default:return base;}
 }
+u32 denoiseStableLobeKey(u32 sampledKey,const DenoiseLobeGuide& g){
+    return std::isfinite(g.transmissionFactor)&&g.transmissionFactor>=0.5f?(SPECULAR_LOBE_TRANSMISSION|4u):sampledKey;
+}
 float denoiseAnisotropicRoughness(float base,float strength){
     if(!std::isfinite(base)||!std::isfinite(strength))return base;
     const float ab=std::max(base*base,0.002f),k=std::clamp(strength,0.f,1.f),at=ab+(1.f-ab)*k*k;
@@ -64,9 +67,9 @@ bool denoiseCompatible(const GPUDISurface& s,const DenoiseHistory& h,const GPUDe
         const bool stochastic=(spec.flags&SPECULAR_SAMPLE_STOCHASTIC)!=0&&!(p.flags&DENOISE_DIAGNOSTIC_ENDPOINTS);
         if(!(spec.flags&SPECULAR_SAMPLE_VALID)||(spec.flags&SPECULAR_SAMPLE_ERROR)||
            stochastic!=bool(h.flags&DENOISE_HISTORY_STOCHASTIC)||!std::isfinite(h.roughness)||!std::isfinite(s.roughness)||
-           std::abs(h.roughness-(lobe?denoiseLobeRoughness(s.roughness,specularSampleLobeKey(spec.flags),*lobe):s.roughness))>p.roughnessThreshold||!std::isfinite(spec.hitDistance)||spec.hitDistance<0)return false;
+           std::abs(h.roughness-(lobe?denoiseLobeRoughness(s.roughness,denoiseStableLobeKey(specularSampleLobeKey(spec.flags),*lobe),*lobe):s.roughness))>p.roughnessThreshold||!std::isfinite(spec.hitDistance)||spec.hitDistance<0)return false;
         // F15.1 lobe contract: history accumulated from another sampled lobe (id or axis) is a different signal.
-        if(lobe&&h.lobe!=specularSampleLobeKey(spec.flags))return false;
+        if(lobe&&h.lobe!=denoiseStableLobeKey(specularSampleLobeKey(spec.flags),*lobe))return false;
         // A fresh GGX ray can legitimately hit another object, miss, or have
         // zero contribution. Primary geometry and source revisions above own
         // validity; conditioning accumulation on the random endpoint defeats it.
@@ -100,7 +103,7 @@ DenoiseHistory denoiseTemporal(const GPUDISurface& s,glm::vec3 current,const Den
     const auto n=glm::normalize(signalNormal(s,p.signal));
     for(u32 i=0;i<3;++i){h.color[i]=color[i];h.position[i]=s.position[i];h.normal[i]=n[i];}
     h.depth=s.depth;h.roughness=s.roughness;
-    if(lobe&&p.signal==DENOISE_SIGNAL_SPECULAR){h.lobe=specularSampleLobeKey(spec.flags);h.roughness=denoiseLobeRoughness(s.roughness,h.lobe,*lobe);}
+    if(lobe&&p.signal==DENOISE_SIGNAL_SPECULAR){h.lobe=denoiseStableLobeKey(specularSampleLobeKey(spec.flags),*lobe);h.roughness=denoiseLobeRoughness(s.roughness,h.lobe,*lobe);}
     h.slot=s.instanceSlot;h.instanceGeneration=s.instanceGeneration;h.materialRevision=s.materialRevision;
     h.hitDistance=spec.hitDistance;h.path=spec.path;h.secondarySlot=spec.secondarySlot;h.secondaryGeneration=spec.secondaryGeneration;
     h.valid=finite(color)&&std::isfinite(h.variance)&&finite(n);if(!h.valid)h.flags=1;return h;
@@ -108,7 +111,7 @@ DenoiseHistory denoiseTemporal(const GPUDISurface& s,glm::vec3 current,const Den
 float denoiseSpatialWeight(const GPUDISurface& a,const GPUDISurface& b,float la,float lb,float variance,const GPUDenoiseParams& p,const DenoiseLobePixel* lobeA,const DenoiseLobePixel* lobeB){
     if(!a.valid||!b.valid||!std::isfinite(la)||!std::isfinite(lb)||!std::isfinite(variance)||variance<0)return 0;
     const bool lobes=lobeA&&lobeB&&p.signal==DENOISE_SIGNAL_SPECULAR;
-    const u32 ka=lobes?specularSampleLobeKey(lobeA->sampleFlags):0u,kb=lobes?specularSampleLobeKey(lobeB->sampleFlags):0u;
+    const u32 ka=lobes?denoiseStableLobeKey(specularSampleLobeKey(lobeA->sampleFlags),lobeA->guide):0u,kb=lobes?denoiseStableLobeKey(specularSampleLobeKey(lobeB->sampleFlags),lobeB->guide):0u;
     if(lobes&&ka!=kb)return 0; // F15.1 lobe contract: never filter across sampled lobes
     const auto na=lobes?denoiseLobeAxis(a,ka,lobeA->guide):signalGuide(a,p.signal),nb=lobes?denoiseLobeAxis(b,kb,lobeB->guide):signalGuide(b,p.signal);if(!finite(na)||!finite(nb)||glm::dot(na,na)<=0||glm::dot(nb,nb)<=0)return 0;
     const float cosine=glm::dot(glm::normalize(na),glm::normalize(nb));const float normal=std::pow(std::max(0.f,cosine),p.normalPhi);

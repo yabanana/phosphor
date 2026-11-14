@@ -58,6 +58,10 @@ inline uint denoiseLobeCompareKey(constant GPUDenoiseParams& p,uint2 pixel,uint 
 }
 inline DenoiseLobe denoiseLobeLoad_lobe(constant GPUDenoiseParams& p,const device GPULobeGuide* guides,GPUDISurface s,uint flags,uint index,uint2 pixel){
     DenoiseLobe l;uint real=specularSampleLobeKey(flags);
+    // F15.1 (ticket 13): a transmissive pixel (factor >= 0.5) has ONE key, the refract key, whichever branch of the one-sample reflect/refract estimator this
+    // frame drew (denoiseStableLobeKey of the CPU mirror).  Only scenes that resolve transmission pay the guide read.
+    if((kMaterialFeatures&MATERIAL_FEATURE_TRANSMISSION)!=0u){const LobeParams t0=unpackLobeGuide(guides[index]);
+        if(isfinite(t0.transmissionFactor)&&t0.transmissionFactor>=0.5f)real=SPECULAR_LOBE_TRANSMISSION|4u;}
     // F15.1 (ticket 13) negative: a refract-axis sample handled as a reflect-axis one (key without the axis bit, reflect spatial axis).
     if(p.flags&DENOISE_DIAGNOSTIC_LOBE_REFLECT_AXIS)real&=~4u;
     l.key=denoiseLobeCompareKey(p,pixel,real);
