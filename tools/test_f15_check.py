@@ -1903,28 +1903,29 @@ class VolumetricSubsurfaceRunner(unittest.TestCase):
                 "diffusion-off": self.image(masks, 0.5, lambda k: 0.0),
                 "radius-ignored": self.image(masks, 0.6, lambda k: 0.12)}
 
-    def test_the_sweep_key_is_green_and_the_bound_key_asserted_red_after_ticket_17(self):
+    def test_the_sweep_and_bound_keys_are_asserted_red_pending_ticket_18(self):
         masks, spheres = self.layout()
         truth = self.truth(masks)
         controls = self.controls_of(masks)
         sun, sweep = check.SCENARIOS["subsurface-volumetric-sun"], check.SCENARIOS["subsurface-volumetric-radius"]
         self.assertEqual((sun["pending"], sun["reference"]), ("ticket 18", "subsurface"))
         self.assertNotIn("pending_matches", sun)
-        self.assertNotIn("pending", sweep)
+        self.assertEqual(sweep["pending"], "ticket 18")   # asserted red since the roughness 0.35 re-measurement (profile shape)
         self.assertNotIn("pending_matches", sweep)
         self.assertEqual(sweep["reference"], "subsurface")
-        # The sweep key is an ordinary gate: the engine that implements the mode passes, the base model (a flat bleed) fails.
+        # The sweep key is asserted red like the bound key (pending ticket 18): an engine that misses the rise rule is GREEN, one that
+        # meets it turns the verdict red until the marker is removed; the controls still fail their gate.
         key = "subsurface-volumetric-radius"
         done = self.write_folder(key + "-done", truth, truth, controls, masks, spheres)
         entry = check.evaluate_scenario(np, key, done, "green")
         self.assertTrue(entry["gates_pass"])
         self.assertTrue(entry["discriminating"])
-        self.assertEqual(check.verdict([entry], "green"), ("GREEN", 0))
+        self.assertEqual(check.verdict([entry], "green")[1], check.EXIT_UNEXPECTED)
         self.assertTrue(all(v["fails_gate"] for v in entry["controls"].values()))
         today = self.write_folder(key + "-off", controls["subsurface-off"], truth, controls, masks, spheres)
         entry = check.evaluate_scenario(np, key, today, "green")
         self.assertFalse(entry["gates_pass"])
-        self.assertEqual(check.verdict([entry], "green")[1], check.EXIT_UNEXPECTED)
+        self.assertEqual(check.verdict([entry], "green"), ("GREEN", 0))
         # The bound key keeps its bound and is asserted red: an engine that misses it is GREEN, one that meets it turns the verdict red
         # (the marker is removed by the ticket that closes the gap).
         key = "subsurface-volumetric-sun"
