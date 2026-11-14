@@ -74,7 +74,10 @@ section "Defects found during F15"; integrated by fast-forward to 6b6bf04; orche
   RESULT (7e3f730): cause proven = the a-trous luminance edge-stopping weight (row-normalised) of the F13.4 denoiser loses energy
   on heavy-tailed noise; the cap's estimator is unbiased (raw 128 / raw 8192 strata 0.9996 +- 0.006); denoised/raw 0.977 +- 0.004
   (128), 0.988 +- 0.002 (8192), 1.0000 for exact lists; luminance weight off 1.004 +- 0.007; CPU reference in tests/test_denoise.cpp.
-  Owner asked 2026-11-14: A) energy-preserving a-trous (reopens F13.4/F13.6 acceptance) or B) declared behaviour (recommended).
+  Owner 2026-11-14: ONE timeboxed experiment with an energy-preserving a-trous behind an option (default unchanged), adopted only if
+  the bias drops within noise on DI-cap + GI + AO + specular signals (8-seed protocol, CPU reference), no corpus/flicker/ghost gate
+  gets worse (full F13/F14 corpus, option on vs off) and the Sponza D2 GPU p95 interleaved A/B (orchestrator, quiet machine) is no
+  worse; otherwise fall back to B with the numbers. Spike in docs/opt-log.md, numbers in the closure document. IN PROGRESS.
 - Declared (owner noted, no objection): single-sided planes cast sun shadows from both sides in CSM (two-sided by contract) and RT.
 - OPEN, F15 (transmission, ticket 13 territory): 67 dark pixels on the silhouette ring of the IORTestGrid transmissive spheres
   (N.V > 0 there, untouched by the D3 fix); hypothesis: a refraction sample that returns nothing at grazing incidence while the
