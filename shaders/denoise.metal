@@ -57,7 +57,10 @@ inline uint denoiseLobeCompareKey(constant GPUDenoiseParams& p,uint2 pixel,uint 
     return key;
 }
 inline DenoiseLobe denoiseLobeLoad_lobe(constant GPUDenoiseParams& p,const device GPULobeGuide* guides,GPUDISurface s,uint flags,uint index,uint2 pixel){
-    DenoiseLobe l;const uint real=specularSampleLobeKey(flags);l.key=denoiseLobeCompareKey(p,pixel,real);
+    DenoiseLobe l;uint real=specularSampleLobeKey(flags);
+    // F15.1 (ticket 13) negative: a refract-axis sample handled as a reflect-axis one (key without the axis bit, reflect spatial axis).
+    if(p.flags&DENOISE_DIAGNOSTIC_LOBE_REFLECT_AXIS)real&=~4u;
+    l.key=denoiseLobeCompareKey(p,pixel,real);
     l.roughness=s.roughness;l.axis=denoiseGuide(s,DENOISE_SIGNAL_SPECULAR);
     if(real!=0u){ // the guide is only read for a sampled lobe other than the base reflection
         const LobeParams u=unpackLobeGuide(guides[index]);const uint id=real&3u;

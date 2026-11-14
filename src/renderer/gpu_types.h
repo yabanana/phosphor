@@ -1026,6 +1026,11 @@ PHOSPHOR_GPU_CONSTANT u32 DENOISE_LOBE_GUIDE_VALID = 64u;
 // lobe id the denoiser sees is forced to 1 on vertical stripes 16 px wide (static: neighbours across a stripe edge
 // are rejected), or on the stripes of alternating frames (the history key changes every frame: history rejected).
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_DIAGNOSTIC_LOBE_STRIPES = 128u, DENOISE_DIAGNOSTIC_LOBE_FLIP = 256u;
+// F15.1 (ticket 13) refract-axis negative (PHOSPHOR_DIAGNOSTIC_DENOISE_LOBE=reflect-axis): the lobe kernels treat a refract-axis sample as a
+// reflect-axis one, as a defective implementation without the refract rule would: the key loses its axis bit and the spatial axis of the
+// edge-stopping weights is the mirror reflection of the view about the normal instead of the refracted ray.  The reprojection (motion
+// vectors) never depends on the axis; the axis acts through the history/neighbour key and the cosine of the axes in the a-trous weights.
+PHOSPHOR_GPU_CONSTANT u32 DENOISE_DIAGNOSTIC_LOBE_REFLECT_AXIS = 512u;
 
 struct GPUReflectionParams {
     float viewProjection[16], inverseViewProjection[16], view[16];

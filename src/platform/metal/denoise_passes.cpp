@@ -73,7 +73,8 @@ struct DenoisePasses::Impl {
         if(const char* value=std::getenv("PHOSPHOR_DIAGNOSTIC_DENOISE_LOBE")){
             if(std::strcmp(value,"stripes")==0)lobeDiagnostic=DENOISE_DIAGNOSTIC_LOBE_STRIPES;
             else if(std::strcmp(value,"flip")==0)lobeDiagnostic=DENOISE_DIAGNOSTIC_LOBE_FLIP;
-            else throw std::invalid_argument("PHOSPHOR_DIAGNOSTIC_DENOISE_LOBE must be stripes or flip");
+            else if(std::strcmp(value,"reflect-axis")==0)lobeDiagnostic=DENOISE_DIAGNOSTIC_LOBE_REFLECT_AXIS;
+            else throw std::invalid_argument("PHOSPHOR_DIAGNOSTIC_DENOISE_LOBE must be stripes, flip or reflect-axis");
             if(!o.debugLighting)throw std::invalid_argument("PHOSPHOR_DIAGNOSTIC_DENOISE_LOBE requires --debug-lighting N");
         }
         LOG_INFO("F13 atrous backend: %s",diagnosticReference?"reference":diagnosticGuide4Reference?"tiled strides 1/2, reference 4+":"tiled strides 1/2, shared guides 4");
