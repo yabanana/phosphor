@@ -152,3 +152,20 @@ thin-walled delta-light BTDF is unvalidated against a reference (no analytic-lig
   - the crossings bound (structural: `kTransmissionMaxEvents` bounds the loop) and the command-buffer time on
     glass-behind-glass;
   - cost on a quiet machine (ticket 24), the Khronos pages (ticket 22) and Sponza D2 (ticket 24).
+
+2026-11-14 — orchestrator checks on the integrated tree (tickets 13, 14 and 17 in; `build/f15-exact/battery13g.log`, `build/f15-t13-checks`).
+- Forced overflow, RT transport with accumulate 112, normal vs `--debug-meshlets 1 --debug-meshlets-corrupt count`, glass mask of the runner (limit 2e-3):
+  - thin-volume: mean |d| 6.2e-4 (relative 0.06 %);
+  - single-sided: mean |d| 9.9e-4 (relative 0.10 %);
+  - frame mean 5e-5;
+  - result: PASS.
+- O7 (warmup 64, 64 frames), every transmission scene on the RT path (`--rt on --lighting restir --reflections rt`) and on the declared path (`--rt off --reflections probes`):
+  - 0 GPU allocations and 0 render-thread compiles everywhere, with one exception: the first RT run of `transmission-rtoff-combinations` had 3 GPU allocations;
+  - reproduced and explained. Configurations outside the runner set miss the archive (16-19 misses), so their RT-consumer kernels start on the fallback and the final variant compiles in the background. When it arrives, `RtConsumer::prepare` and `updateIft` create a new intersection function table, one per frame slot (3), because an IFT belongs to its pipeline object;
+  - cold Metal compiler cache: compiles take up to 608 ms, the final variant arrives after the warmup, and the run shows 3 allocations. Warm cache: compiles take at most 45 ms and the run shows 0, in two repeats (`o7g-cold`, `o7g-warm1`/`warm2`, a never-compiled clustered + DDGI configuration);
+  - load alone does not reproduce it: 0 in 5 runs at load average 10;
+  - archived configurations have no misses, so there is no IFT churn;
+  - the mechanism predates F15 (F9 consumers, F3 async variants); F15 only adds variants;
+  - recorded for ticket 24 as an O7 caveat of non-archived RT configurations, not as an F15 defect.
+- Command buffers: glass-behind-glass at 1920x1080 with RT shadows, ReSTIR, DDGI, RT reflections and refraction gives GPU frame max 14.0 ms (p50 13.7). That is far below 1 s (loaded machine, indicative only).
+- Crossings bound: structural. `reflectionRefractWalk` loops at most kTransmissionMaxEvents = 8 traces, and a crossing beyond kTransmissionMaxCrossings = 4 ends in the probes/environment (status 2). The unit tests of transmission_math.h cover the estimator. No GPU counter was added.
