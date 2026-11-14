@@ -94,3 +94,30 @@ of the real transport; rough thin-walled glass; the exit-interface tint (orchest
   tinted closed bodies; every gated volume uses a white base, so no gate
   depends on it. Align the reference before a tinted closed body becomes a
   gated fixture.
+
+2026-11-14 - engine side (agent), verified on M5 Max; NOT fully green, see "Open".
+
+Implemented: `src/renderer/transmission_math.h` (Schlick with the transmitted cosine and TIR, branch selection floor 1/32, Beer-Lambert, Walter weight, thin BTDF;
+doctests incl. Monte Carlo estimator checks), `bsdf.h` thin BTDF + declared weights, resolve/forward/DI diffuse x (1 - t) and thin-walled delta-light BTDF,
+composite, lobe guide (factor, world thickness via `SurfaceInput::volumeScale`, medium, ior; CPU expectation; corrupt control), transport
+(`reflectionRefractSample` / `reflectionRefractWalk` in `reflections.metal`: one Fresnel-chosen sample, refraction always traced, 4 crossings / 8 events,
+back faces accepted, Beer-Lambert on the real inside segment, tint at the visible entry only, emitters owned by the transport, VNDF sampling, smooth interface
+at the roughness floor), declared `--rt off` term in the SSR and probe-only kernels, denoiser (refract key/axis, thin axis -V), MetalFX reactive, support table,
+targeted archive update, runner keys no longer pending (denoise off, accumulate 112: see the commit message for the evidence).
+
+Measured (reference = Mitsuba 3.9.1, `tools/f15_check.py --evaluate`; gate = per object mean <= 5 %, p95 <= 15 %):
+- thin-volume (1024 spp): pass, worst mean 2.3 %, p95 6.9 %; single-sided (1024 spp): pass, worst mean 2.6 %, p95 9.9 % (the cube needed 8 events); all controls fail.
+- emissive-panel (256 spp, denoiser on): pass, worst mean 1.7 %, p95 5.2 %; glass-behind-glass: pass, worst mean 4.2 %, p95 14.8 %; rtoff: pass, worst mean 0.0002.
+- factor-tint (1024 spp, denoise off, accumulate 112): 7 of 8 objects pass; the slab with attenuation 0.2 and t = 1 has mean 3.1 %, p95 15.8 % (limit 15 %).
+- attenuation (256 spp ref, denoise off, accumulate 112): worst mean 3.8 %, p95 10.4 %: pass; roughness-ior (256 spp ref): worst mean 6.7 %, p95 16.8 %, noise-limited on
+  both sides (the Mitsuba 256-spp reference itself has 5.8 % per-pixel noise on roughness 0.6); per-object mean ratio engine/reference 0.995-1.005 (unbiased).
+- Accumulation noise (two seeds, N = 32 frames x 8 samples, glass mask, relative difference): thin-volume 0.55 % mean / 1.9 % p95, single-sided 0.50 / 1.85,
+  roughness-ior 0.74 / 2.7 with the denoiser, 4.0 / 12.3 pooled and up to 7.6 / 18 on roughness 0.6 without it.
+- `--debug-lobe-guide 8` PASS (thin-volume 29836 extended), corrupt control FAIL; `tools/f15_lobe_guide_overflow_check.sh` PASS on thin-volume and single-sided (dumps identical);
+  forced-overflow image vs meshlet path in the glass mask: mean |d| 0.05 % (thin-volume) / 0.10 % (single-sided); shader + API validation 1500 frames glass-behind-glass with ReSTIR + RT: clean;
+  eight captures: 0 archive misses, 0 render-thread compiles, 0 GPU allocations after warm-up (four scenes checked).
+- Base scenes: base-grid-sun, specular-grid-env@rt, iridescence-grid-point@restir are bit-identical to 65dd54f; clearcoat/sheen/aniso/subsurface env fixtures differ in 0.2-2.7 % of the pixels by <= 6 ulp (compiler contraction).
+
+Open: the full runner with 1024-spp references of roughness-ior / attenuation / glass-behind-glass / emissive-panel (hours of Mitsuba CPU time); factor-tint slab p95 15.8 %;
+thin-walled delta-light BTDF is unvalidated against a reference (no analytic-light fixture); temporal clip, Khronos side by side (22), Sponza D2 (24), cost measurement,
+`archive_check.sh` / `hitch_check.sh` not run.
