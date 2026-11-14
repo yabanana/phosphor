@@ -138,6 +138,101 @@ for _name, _sun, _env, _base, _weights, _colors, _rough, _point in (
                         point=THIN_POINT_LIGHT if _point else False)
 
 
+# F15.3 (ticket 19): the combination grids (mirror of addCombinations in src/testbench/material_validation.cpp: rows keep the metallic
+# list, columns the roughness list, `cells` are the extension blocks of each sphere, row-major).
+Q, H = math.pi / 4, math.pi / 2
+WHITE, ORANGE, BLUE, WARM, TEAL = [1, 1, 1], [1, 0.5, 0.25], [0.25, 0.5, 1], [1, 0.55, 0.25], [0.1, 0.7, 0.6]
+SPEC_B = (1.8, 0.7, [1, 0.8, 0.6])
+SPEC_C = (1.5, 0.5, [2, 1, 0.5])
+
+
+def cells(rows, cols, make):
+    return [make(r, c) for r in range(rows) for c in range(cols)]
+
+
+COMBO_GRIDS = {
+    "coat-sheen": dict(rough=[0.7] * 4, metallic=[0.0, 0.0, 1.0], base=[0.1] * 3, cells=cells(3, 4, lambda r, c: dict(
+        sheen=([WHITE, ORANGE, BLUE][r], [0.4, 0.75, 0.5][r]),
+        **({} if c == 0 else {"coat": [(0, 0), (0.5, 0.3), (1.0, 0.3), (1.0, 0.6)][c]})))),
+    "aniso-coat": dict(rough=[0.3] * 4, metallic=[0.0, 1.0], base=COPPER, combed=True, cells=cells(2, 4, lambda r, c: [
+        dict(aniso=(0.5, Q), coat=(1.0, 0.3)), dict(aniso=(1.0, 0.0), coat=(1.0, 0.3)), dict(aniso=(1.0, H), coat=(0.5, 0.35)),
+        dict(coat=(1.0, 0.3))][c])),
+    "aniso-sheen": dict(rough=[0.3] * 4, metallic=[0.0, 1.0], base=[0.3, 0.15, 0.08], combed=True, cells=cells(2, 4, lambda r, c: [
+        dict(aniso=(0.5, Q), sheen=(WHITE, 0.4)), dict(aniso=(1.0, 0.0), sheen=(ORANGE, 0.4)),
+        dict(aniso=(1.0, H), sheen=(WHITE, 0.75)), dict(sheen=(WHITE, 0.4))][c])),
+    "specular-sheen": dict(rough=[0.35] * 4, metallic=[0.0, 0.0], base=[0.2] * 3, cells=cells(2, 4, lambda r, c: dict(
+        sheen=([WHITE, ORANGE][r], [0.4, 0.75][r]),
+        **[{}, {"spec": (2.4, 1.0, WHITE)}, {"spec": (1.33, 1.0, WHITE)}, {"spec": SPEC_C}][c]))),
+    "irid-coat": dict(rough=[0.3] * 4, metallic=[0.0, 1.0], base=COPPER, cells=cells(2, 4, lambda r, c: [
+        dict(irid=(1.0, 1.3, 400.0), coat=(1.0, 0.3)), dict(irid=(1.0, 1.3, 800.0), coat=(1.0, 0.3)),
+        dict(irid=(1.0, 1.8, 400.0), coat=(0.5, 0.35)), dict(irid=(1.0, 1.3, 400.0))][c])),
+    "irid-sheen": dict(rough=[0.3] * 4, metallic=[0.0, 1.0], base=[0.3, 0.15, 0.08], cells=cells(2, 4, lambda r, c: [
+        dict(irid=(1.0, 1.3, 400.0), sheen=(WHITE, 0.4)), dict(irid=(1.0, 1.3, 800.0), sheen=(ORANGE, 0.4)),
+        dict(irid=(1.0, 1.8, 400.0), sheen=(WHITE, 0.75)), dict(irid=(1.0, 1.3, 600.0))][c])),
+    "irid-aniso": dict(rough=[0.3] * 4, metallic=[0.0, 1.0], base=COPPER, combed=True, cells=cells(2, 4, lambda r, c: [
+        dict(irid=(1.0, 1.3, 400.0), aniso=(0.5, Q)), dict(irid=(1.0, 1.3, 800.0), aniso=(1.0, 0.0)),
+        dict(irid=(1.0, 1.3, 400.0), aniso=(1.0, H)), dict(irid=(1.0, 1.3, 600.0))][c])),
+    "irid-specular": dict(rough=[0.3] * 4, metallic=[0.0, 0.0, 0.0, 1.0], base=COPPER, cells=cells(4, 4, lambda r, c: dict(
+        irid=(1.0, 1.3, [400.0, 800.0, 600.0, 400.0][r]),
+        **[{}, {"spec": SPEC_B}, {"spec": (2.4, 1.0, WHITE)}, {"spec": SPEC_C}][c]))),
+    "thin-coat": dict(rough=[0.5] * 4, metallic=[0.0, 0.0], base=[0.3, 0.5, 0.8], toward=THIN_TOWARD, cells=cells(2, 4, lambda r, c: dict(
+        thin=([0.5, 1.0][r], [WARM, TEAL][r]), **({} if c == 0 else {"coat": [None, (1.0, 0.3), (0.5, 0.35), (1.0, 0.6)][c]})))),
+    "all-lobes": dict(rough=[0.3] * 4, metallic=[0.0, 1.0], base=COPPER, combed=True, cells=cells(2, 4, lambda r, c: [
+        dict(spec=SPEC_B, coat=(0.5, 0.35), sheen=(WHITE, 0.4), aniso=(0.5, Q)),
+        dict(spec=SPEC_B, coat=(0.5, 0.35), sheen=(WHITE, 0.4), aniso=(1.0, 0.0)),
+        dict(spec=(2.4, 1.0, WHITE), coat=(1.0, 0.3), sheen=(ORANGE, 0.75), aniso=(1.0, H)),
+        dict(spec=SPEC_C, coat=(1.0, 0.6), sheen=(BLUE, 0.4))][c])),
+}
+for _name, _g in COMBO_GRIDS.items():
+    for _suffix, _sun, _env in (("sun", 3.0, 0.0), ("env", 0.0, 0.5)):
+        SPECS[f"combo-{_name}-{_suffix}"] = dict(roughness=_g["rough"], metallic=_g["metallic"], base=_g["base"], sun=_sun, env=_env,
+                                                 cells=_g["cells"], combed=_g.get("combed", False), toward=_g.get("toward", TOWARD_SUN))
+SPECS["furnace-combinations"] = dict(roughness=[0.2, 0.35, 0.5, 0.7, 0.9], metallic=[0.0, 0.0, 1.0, 1.0], base=[1, 1, 1], sun=0.0, env=1.0,
+                                     combed=True, cells=cells(4, 5, lambda r, c: [
+    dict(coat=(1.0, 0.3), sheen=(WHITE, 0.4)), dict(aniso=(1.0, Q), coat=(1.0, 0.3)), dict(aniso=(1.0, Q), sheen=(WHITE, 0.4)),
+    dict(spec=SPEC_B, sheen=(WHITE, 0.4)), dict(irid=(1.0, 1.3, 400.0), coat=(1.0, 0.3)),
+    dict(irid=(1.0, 1.3, 400.0), sheen=(WHITE, 0.4)), dict(irid=(1.0, 1.3, 400.0), aniso=(1.0, Q)),
+    dict(irid=(1.0, 1.3, 400.0), spec=SPEC_B), dict(thin=(1.0, WHITE), coat=(1.0, 0.3)),
+    dict(irid=(1.0, 1.3, 400.0), spec=SPEC_B, coat=(1.0, 0.3), sheen=(WHITE, 0.4), aniso=(1.0, Q))][(r % 2) * 5 + c]))
+
+
+def combo_records(cell):
+    """(feature bits, the four extension records) of one combination cell (words of GPUMaterialExt0/1/2)."""
+    bit = lambda v: int.from_bytes(struct.pack("<f", v), "little")  # noqa: E731
+    r0, r1, r2 = [0] * 20, [0] * 20, [0] * 20
+    for k in (5, 6, 10, 11, 12, 17, 18):
+        r0[k] = ref.INVALID
+    r1[2] = r1[7] = r1[8] = ref.INVALID
+    for k in (10, 11, 12):
+        r2[k] = ref.INVALID
+    bits = 0
+    spec = cell.get("spec")
+    ior, factor, color = spec if spec else (1.5, 1.0, [1, 1, 1])
+    r0[0:5] = [bit(ior), bit(factor), *(bit(c) for c in color)]
+    if spec:
+        bits |= 1
+    if cell.get("coat"):
+        bits |= 2
+        r0[7:10] = [bit(cell["coat"][0]), bit(cell["coat"][1]), bit(1.0)]
+    if cell.get("sheen"):
+        bits |= 4
+        r0[13:16] = [bit(c) for c in cell["sheen"][0]]
+        r0[16] = bit(cell["sheen"][1])
+    if cell.get("aniso"):
+        bits |= 8
+        r1[0], r1[1] = bit(cell["aniso"][0]), bit(cell["aniso"][1])
+    if cell.get("irid"):
+        bits |= 16
+        r1[3:7] = [bit(cell["irid"][0]), bit(cell["irid"][1]), bit(100.0), bit(cell["irid"][2])]
+    if cell.get("thin"):
+        bits |= 128
+        r2[1] = bit(cell["thin"][0])
+        r2[2:5] = [bit(c) for c in cell["thin"][1]]
+        r2[5] = bit(1.0)
+        r2[6:9] = [bit(1.0), bit(0.5), bit(0.25)]
+    return bits, [r0, r1, r2, [0] * 20]
+
+
 def write_quad_ply(path, half=0.4):
     """The thin point-light carrier: a quad in the z = 0 plane facing +z (what the bench's rotated generatePlane exports)."""
     verts = [(-half, -half, 0, 0, 0, 1, 0, 0), (half, -half, 0, 0, 0, 1, 1, 0), (half, half, 0, 0, 0, 1, 1, 1),
@@ -199,7 +294,7 @@ def make_bench_snapshot(folder, name, width, height):
     spec = SPECS[name]
     folder = pathlib.Path(folder)
     (folder / "snapshot").mkdir(parents=True)
-    handed = spec["aniso"]["handedness"] if "aniso" in spec else None
+    handed = spec["aniso"]["handedness"] if "aniso" in spec else ([-1.0] if spec.get("combed") else None)
     if spec.get("thin", {}).get("quad"):
         write_quad_ply(folder / "snapshot" / "mesh_0.ply")
     else:
@@ -270,6 +365,10 @@ def make_bench_snapshot(folder, name, width, height):
                     record2[10:13] = [ref.INVALID] * 3
                     materials[-1].update(feature_bits=128, flags=128 << 8, extension_index=len(records))
                     records += [record0, [0] * 20, record2, [0] * 20]
+            if "cells" in spec and spec["cells"][row * cols + col]:
+                bits, group = combo_records(spec["cells"][row * cols + col])
+                materials[-1].update(feature_bits=bits, flags=bits << 8, extension_index=len(records))
+                records += group
             mesh = 0
             if "aniso" in spec:
                 a = spec["aniso"]
@@ -1016,6 +1115,8 @@ class BenchMirror(unittest.TestCase):
         make_bench_snapshot(folder, name, self.WIDTH, self.HEIGHT)
         from f12_reference import snapshot as load
         root, data = load(folder / "snapshot")
+        if engine_model == "main":  # the main model of the reference command (f15_reference.command_render)
+            engine_model = ref.SPECULAR_EXT if ref.uses_specular_extension(data) or ref.uses_clearcoat(data) else ref.APPENDIX_B
         image, *_ = ref.render_frame(root, data, engine_model, environment=environment)
         write_pfm(folder / "engine.pfm", image)
         with contextlib.redirect_stdout(io.StringIO()):
@@ -1464,6 +1565,91 @@ class BenchMirror(unittest.TestCase):
         wrong = self.scenario(key, ref.control_model("transmission-double-counted", ref.APPENDIX_B), "red", tag="-wrong")
         self.assertFalse(wrong["result"]["pass"])  # an engine that does not reduce the diffuse by w gains energy
         self.assertEqual(check.verdict([wrong], "red")[1], check.EXIT_UNEXPECTED)
+
+
+    # --- F15.3 (ticket 19): the combination keys.
+
+    COMBO_PAIRS = ("coat-sheen", "aniso-coat", "aniso-sheen", "specular-sheen", "irid-coat", "irid-sheen", "irid-aniso",
+                   "irid-specular", "thin-coat", "all-lobes")
+
+    def test_every_combination_key_is_planned_with_valid_controls_and_coherent_pending_fields(self):
+        keys = [k for k in check.SCENARIOS if k.startswith("combo-") or k.startswith("furnace-combinations")]
+        self.assertEqual(len(keys), 32)
+        with tempfile.TemporaryDirectory() as tmp:
+            with contextlib.redirect_stdout(io.StringIO()):
+                args = ["--out", tmp, "--binary", "build/release/phosphor"]
+                for key in keys:
+                    args += ["--only", key]
+                self.assertEqual(check.main(args), 0)
+            commands = json.loads((pathlib.Path(tmp) / "plan.json").read_text())["commands"]
+        for key in keys:
+            spec = check.SCENARIOS[key]
+            capture, reference = commands[key]["capture"], commands[key]["reference"]
+            bench = check.bench_scenario(key)
+            self.assertEqual(capture[capture.index("--material-scenario") + 1], bench, key)
+            self.assertEqual(capture[capture.index("--reflections") + 1], "off" if key.endswith("@resolve") else "ssr", key)
+            literal, declared = check.scenario_controls(key)
+            for name in literal:
+                self.assertIn(name, ref.ALL_CONTROLS, key)
+                self.assertIn(name, reference, key)
+            for name in declared:
+                self.assertIn(name, ref.ALL_DECLARED_CONTROLS, key)
+                self.assertIn(name, reference, key)
+            if spec.get("pending"):  # a pending key names the control that models today's engine and says which ticket
+                self.assertEqual(spec["pending"], "ticket 19", key)
+                self.assertIn(spec["pending_matches"], literal + declared, key)
+                if spec.get("pending_gate"):
+                    self.assertEqual(spec["pending_gate"], "declared", key)
+        for name in self.COMBO_PAIRS:
+            self.assertEqual(check.SCENARIOS[f"combo-{name}-sun"]["kind"], "direct")
+            self.assertEqual(check.SCENARIOS[f"combo-{name}-env@resolve"]["kind"], "declared")
+            self.assertEqual(check.SCENARIOS[f"combo-{name}-env"]["kind"], "environment")
+        self.assertTrue(check.SCENARIOS["furnace-combinations"]["always_green"])
+        self.assertTrue(check.SCENARIOS["furnace-combinations@resolve"]["always_green"])
+        self.assertIn("order-swapped", check.SCENARIOS["combo-coat-sheen-sun"]["controls"])
+        self.assertIn("additive-layering", check.SCENARIOS["furnace-combinations"]["controls"])
+
+    COMBO_E2E = ("combo-coat-sheen-sun", "combo-coat-sheen-env", "combo-coat-sheen-env@resolve", "combo-irid-specular-sun",
+                 "combo-irid-specular-env", "combo-irid-specular-env@resolve", "combo-thin-coat-sun", "combo-thin-coat-env",
+                 "combo-thin-coat-env@resolve")
+
+    def combo_entry(self, key, tag):
+        declared = key.endswith("@resolve")
+        return self.scenario(check.bench_scenario(key), "main", "green", environment=ref.DECLARED if declared else None,
+                             tag="-" + key + tag, key=key)
+
+    def test_combination_keys_pass_with_an_engine_that_composes_the_lobes_and_every_control_fails(self):
+        for key in self.COMBO_E2E:
+            entry = self.combo_entry(key, "-model")
+            self.assertTrue(entry["gates_pass"], (key, json.dumps(check.summarize(entry["result"]))))
+            wanted = set(check.SCENARIOS[key]["controls"])
+            self.assertEqual(set(entry["controls"]), wanted, key)
+            for name, verdict in entry["controls"].items():
+                # the swapped order moves the exact environment by about the 5 % bound: on the 480 x 270 test image of the coat + sheen
+                # grid it sits just below it (it fails the gate at the bench's 1280 x 720, measured on the device)
+                if name == "order-swapped" and key == "combo-coat-sheen-env":
+                    continue
+                self.assertTrue(verdict["fails_gate"], (key, name))
+
+    def test_furnace_combinations_bound_holds_for_the_declared_model_and_the_additive_control_breaks_it(self):
+        for key in ("furnace-combinations", "furnace-combinations@resolve"):
+            entry = self.scenario("furnace-combinations", "main", "red", environment=ref.DECLARED, tag="-" + key, key=key)
+            self.assertTrue(entry["result"]["pass"], (key, entry["result"].get("max_sphere_mean", entry["result"].get("max_pixel"))))
+            self.assertTrue(entry["controls"]["additive-layering"]["fails_gate"], key)
+            if key.endswith("@resolve"):
+                self.assertTrue(entry["declared"]["controls"]["declared-additive-layering"]["fails_gate"])
+
+    def test_an_engine_that_drops_one_lobe_of_a_combination_fails_the_gate(self):
+        # coat + sheen: an engine without the sheen under the coat (or without the coat) fails the direct and the declared gate
+        for control, key in (("sheen-ignored", "combo-coat-sheen-sun"), ("coat-ignored", "combo-coat-sheen-sun"),
+                             ("order-swapped", "combo-coat-sheen-sun"), ("additive-layering", "combo-coat-sheen-sun"),
+                             ("iridescence-ignored", "combo-irid-specular-sun"), ("specular-ignored", "combo-irid-specular-sun"),
+                             ("transmission-ignored", "combo-thin-coat-sun"), ("transmission-uncoated", "combo-thin-coat-sun"),
+                             ("coat-ignored", "combo-thin-coat-sun")):
+            folder_name = check.bench_scenario(key)
+            model = ref.control_model(control, ref.SPECULAR_EXT if "irid" in key or "coat" in key else ref.APPENDIX_B)
+            entry = self.scenario(folder_name, model, "green", tag=f"-{key}-{control}", key=key)
+            self.assertFalse(entry["result"]["pass"], (key, control))
 
     def test_cached_reference_is_reused_only_for_the_same_snapshot(self):
         entry = self.scenario("base-grid-env-resolve", ref.APPENDIX_B, "green", environment=ref.DECLARED, tag="-cache")

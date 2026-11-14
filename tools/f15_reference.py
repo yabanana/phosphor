@@ -748,6 +748,67 @@ def aniso_albedo_table(at, ab, variant="spec"):
     return _ANISO_ALBEDO[key]
 
 
+_ANISO_HIST = {}
+
+
+def _aniso_vh_histogram(mu, phi_v, at, ab, variant="spec"):
+    """Histogram over V.H (IRID_BINS bins, linear splitting) of the weights of `_aniso_spec_integrals` (the same half-vector quadrature):
+    sum_k hist[k] f(k / (bins - 1)) is the quadrature of f(V.H) D V cos, so hist . (1 - w) = A and hist . w = B (tested)."""
+    n1, n2 = ANISO_QUADRATURE
+    u1 = (np.arange(n1) + 0.5) / n1
+    u2 = (np.arange(n2) + 0.5) / n2
+    phi_h = np.arctan2(ab * np.sin(2 * math.pi * u2), at * np.cos(2 * math.pi * u2))
+    tan2 = (u1[:, None] / (1.0 - u1[:, None])) / ((np.cos(phi_h) / at) ** 2 + (np.sin(phi_h) / ab) ** 2)[None, :]
+    cos_h = 1.0 / np.sqrt(1.0 + tan2)
+    sin_h = np.sqrt(np.maximum(0.0, 1.0 - cos_h * cos_h))
+    h = np.stack([sin_h * np.cos(phi_h)[None, :], sin_h * np.sin(phi_h)[None, :], cos_h], axis=-1)
+    sin_v = math.sqrt(max(0.0, 1.0 - mu * mu))
+    wo = np.array([sin_v * math.cos(phi_v), sin_v * math.sin(phi_v), mu])
+    vh = h @ wo
+    wi = 2.0 * vh[..., None] * h - wo
+    valid = (wi[..., 2] > 0) & (vh > 0)
+    wi_z = np.maximum(wi[..., 2], 0.0)
+    ggx_v = wi_z * np.sqrt((at * wo[0]) ** 2 + (ab * wo[1]) ** 2 + mu * mu)
+    ggx_l = mu * np.sqrt((at * wi[..., 0]) ** 2 + (ab * wi[..., 1]) ** 2 + wi_z ** 2)
+    vis = 0.5 / np.maximum(ggx_v + ggx_l, 1e-12)
+    weight = np.where(valid, vis * wi_z * 4.0 * vh / cos_h, 0.0)
+    if variant == "d-normalised-by-ab":
+        weight = weight * at / ab
+    return _vh_histogram(vh, weight / (n1 * n2))
+
+
+def aniso_vh_histograms(at, ab, variant="spec"):
+    """(mu grid, phi grid, hist[mu, phi, bins]) of one (alpha_t, alpha_b): the V.H histograms of the anisotropic quadrature
+    (exact environment of iridescence + anisotropy, ticket 19)."""
+    key = (round(float(at), 12), round(float(ab), 12), variant)
+    if key not in _ANISO_HIST:
+        mus = np.linspace(MIN_NDOTV, 1.0, ANISO_MU_NODES)
+        phis = np.linspace(0.0, 0.5 * math.pi, ANISO_PHI_NODES)
+        table = np.empty((len(mus), len(phis), IRID_BINS))
+        for i, mu in enumerate(mus):
+            for j, phi in enumerate(phis):
+                table[i, j] = _aniso_vh_histogram(float(mu), float(phi), float(at), float(ab), variant)
+        _ANISO_HIST[key] = (mus, phis, table)
+    return _ANISO_HIST[key]
+
+
+def aniso_film_spec(film_ior, thickness, f0, mu, aniso_env):
+    """Exact specular integral (n, 3) of the thin-film Fresnel under the anisotropic lobe: the integral of D V cos F_irid(V.H) for the
+    pixels of one film (ior, thickness nm, base f0 (3,)) at per-pixel N.V `mu` and the (alpha_t, alpha_b, azimuth) of `aniso_env`."""
+    out = np.empty((len(mu), 3))
+    bins = np.linspace(0.0, 1.0, IRID_BINS)
+    film = thin_film_fresnel(bins, np.full(IRID_BINS, film_ior), np.full(IRID_BINS, thickness),
+                             np.broadcast_to(np.asarray(f0, dtype=np.float64), (IRID_BINS, 3)))
+    pairs = np.stack([np.round(aniso_env["at"], 12), np.round(aniso_env["ab"], 12)], axis=1)
+    for at, ab in np.unique(pairs, axis=0):
+        pick = np.flatnonzero((pairs[:, 0] == at) & (pairs[:, 1] == ab))
+        mus, phis, hist = aniso_vh_histograms(at, ab, aniso_env["variant"])
+        values = hist @ film
+        for c in range(3):
+            out[pick, c] = _bilinear(mus, phis, values[..., c], np.clip(mu[pick], MIN_NDOTV, 1.0), aniso_env["phi"][pick])
+    return out
+
+
 def _bilinear(mus, phis, table, mu, phi):
     """Bilinear interpolation of table[mu, phi] at per-pixel (mu, phi), both clamped to the grid."""
     x = np.clip((mu - mus[0]) / (mus[-1] - mus[0]), 0.0, 1.0) * (len(mus) - 1)
@@ -1468,7 +1529,7 @@ def irid_environment_table(alpha, film_ior, thickness, f0, variant):
     return _IRID_TABLE[key]
 
 
-def irid_environment_value(base, metallic, mu, alpha, a, b, cd, irid, ext=None):
+def irid_environment_value(base, metallic, mu, alpha, a, b, cd, irid, ext=None, aniso_env=None):
     """Exact environment value (n, 3) for unit radiance of iridescent pixels sharing one alpha (a, b, cd: the base tables'
     A, B and diffuse (n, 1) at the pixels' N.V).  `at-nv` (control and declared model alike) evaluates F_irid once at N.V:
     spec F (A + B), diffuse (1 - max F) integral of cos / pi without the Fresnel (the F_irid constant over the lobe)."""
@@ -1493,6 +1554,9 @@ def irid_environment_value(base, metallic, mu, alpha, a, b, cd, irid, ext=None):
         for key in np.unique(np.round(pairs, 9), axis=0):
             pick = np.flatnonzero(np.all(np.round(pairs, 9) == key, axis=1))
             for target, f0 in ((spec_d, key[5:8]), (spec_m, key[2:5])):
+                if aniso_env is not None:  # ticket 19: the film under the anisotropic lobe (V.H histograms of the anisotropic quadrature)
+                    target[pick] = aniso_film_spec(key[0], key[1], f0, mu[pick], take_aniso(aniso_env, pick))
+                    continue
                 mus, spec, diffuse = irid_environment_table(alpha, key[0], key[1], f0, irid["variant"])
                 for c in range(3):
                     target[pick, c] = np.interp(mu[pick], mus, spec[:, c])
@@ -1552,18 +1616,26 @@ def environment_radiance(base, metallic, roughness, n_dot_v, radiance, model=APP
                 pick = np.flatnonzero(np.all(np.concatenate([c0, c1], axis=1) == combo, axis=1))
                 table = extension_diffuse_table(combo[:3], combo[3:], model)
                 cd_ext[pick, 0] = np.interp(mu[sel][pick], t["mu"], table)
-            dielectric_value = c * cd_ext + c0 * (a + b) + c1 * b
+            diffuse_ext = c * cd_ext
+            if thin_env is not None:  # ticket 19 (thin + coat): (1 - w) c Cd + w color T, T the back-hemisphere quadrature
+                tt = take_thin(thin_env, sel)
+                mus, table = thin_transmission_table()
+                albedo = np.interp(mu[sel], mus, table)[:, None]
+                if tt["variant"] == "front-only":
+                    albedo = cd_ext
+                elif tt["variant"] == "fresnel-ignored":
+                    albedo = np.ones_like(cd_ext)
+                diffuse_ext = thin_reflect_scale(tt)[:, None] * diffuse_ext + thin_weight(tt)[:, None] * thin_color(tt) * albedo
+            dielectric_value = diffuse_ext + c0 * (a + b) + c1 * b
             result[sel] = (1 - m) * dielectric_value + m * (c * a + b)
             if irid_env is not None:  # ticket 19: iridescence + ior/specular, the film takes the scaled f0 (c0)
                 sub = take_irid(irid_env, sel)
                 active = np.flatnonzero(irid_strength(sub) > 0.0)
                 if active.size:
-                    if aniso_env is not None:
-                        raise ValueError("the exact environment of iridescence + anisotropy needs an anisotropic V.H histogram "
-                                         "(declared environment only)")
                     result[sel[active]] = irid_environment_value(
                         c[active], m[active, 0], mu[sel][active], float(effective_alpha(r, model)), a[active], b[active],
-                        cd[active], take_irid(sub, active), {"f0_scaled": c0[active], "plain": dielectric_value[active]})
+                        cd[active], take_irid(sub, active), {"f0_scaled": c0[active], "plain": dielectric_value[active]},
+                        None if aniso_env is None else take_aniso(take_aniso(aniso_env, sel), active))
             continue
         if model["weighting"] == "engine-blend":
             f0 = DIELECTRIC_F0 * (1 - m) + c * m
@@ -1586,13 +1658,10 @@ def environment_radiance(base, metallic, roughness, n_dot_v, radiance, model=APP
             sub = take_irid(irid_env, sel)
             active = np.flatnonzero(irid_strength(sub) > 0.0)
             if active.size:
-                if aniso_env is not None:
-                    raise ValueError("the exact environment of iridescence + anisotropy needs an anisotropic V.H histogram "
-                                     "(declared environment only)")
                 part = take_irid(sub, active)
-                result[sel[active]] = irid_environment_value(c[active], m[active, 0], mu[sel][active],
-                                                             float(effective_alpha(r, model)), a[active], b[active],
-                                                             cd[active], part)
+                result[sel[active]] = irid_environment_value(
+                    c[active], m[active, 0], mu[sel][active], float(effective_alpha(r, model)), a[active], b[active], cd[active], part,
+                    None, None if aniso_env is None else take_aniso(take_aniso(aniso_env, sel), active))
     return result * radiance
 
 
@@ -2365,7 +2434,7 @@ def require_declared_scene(data):
             raise ValueError("sampled (area) lights are outside the declared model")
 
 
-def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environment=None, visibility=None):
+def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environment=None, visibility=None, exact_environment=True):
     """Reference radiance image (h, w, 3) float32 plus masks and the per-sphere table.
 
     `environment` None = exact quadrature of the literal model; a DECLARED variant dict = the engine's declared
@@ -2441,7 +2510,11 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
         lit = lit | (dot(n, toward_all) > 0) | (thin_lit(thin, n, toward_all) if thin is not None else False)
         terms.append("sun-disk")
     if sky > 0:
-        if environment is None:
+        if environment is None and not exact_environment:
+            # ticket 19: a combination without an exact quadrature (iridescence + anisotropy) is gated by its declared model only;
+            # the literal image then carries the direct terms alone (the environment key does not exist for it)
+            terms.append("environment-not-modelled")
+        elif environment is None:
             aniso_env = None if aniso is None else aniso_environment_inputs(aniso, roughness, n, v)
             material = environment_radiance(base, metallic, roughness, dot(n, v), sky, model, sun_dielectric, aniso_env, irid,
                                             thin)
@@ -2499,7 +2572,8 @@ def command_render(args):
     if visibility is not None:
         report["shadowed_hits"] = [int((~v).sum()) for v in visibility]
     for name, model in controls.items():
-        image, masks, spheres, terms = render_frame(root, data, model, cast=cast, visibility=visibility)
+        image, masks, spheres, terms = render_frame(root, data, model, cast=cast, visibility=visibility,
+                                                    exact_environment=not args.no_exact_environment)
         stem = "reference" if not name else f"control-{name}"
         write_pfm(out / f"{stem}.pfm", image)
         if not name:
@@ -2542,6 +2616,8 @@ def main(argv=None):
                    help="negative controls of the declared model (implies --declared)")
     p.add_argument("--visibility", choices=["none", "rays"], default="none",
                    help="point-light visibility: none (legacy resolve lights) or Mitsuba shadow rays (DI)")
+    p.add_argument("--no-exact-environment", action="store_true",
+                   help="skip the exact environment quadrature of the literal image (combinations without one: declared model only)")
     p.add_argument("--threads", type=int, default=DEFAULT_THREADS)
     p.set_defaults(function=command_render)
     args = parser.parse_args(argv)

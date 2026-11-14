@@ -76,6 +76,7 @@ np = np_module()
 
 INVALID = 0xFFFFFFFF
 FEATURE_SPECULAR_IOR, FEATURE_TRANSMISSION, FEATURE_VOLUME = 1, 32, 64
+FEATURE_IRIDESCENCE, FEATURE_SUBSURFACE = 16, 128   # ticket 19: the declared --rt off model composes them with the transmission
 EXTENSION_RECORD_WORDS = 20
 MIN_ROUGHNESS, MIN_ALPHA = 0.04, 0.002
 EROSION = 2                 # glass mask: pixels whose (2 * EROSION + 1)^2 neighbourhood is one glass instance
@@ -85,7 +86,9 @@ MIN_SIGMA = 1e-4            # 1/m: absorption floor of a channel the attenuation
 
 CONTROLS = ("transmission-ignored", "transmission-not-tinted", "volume-ignored", "ior-ignored", "thin-as-volume",
             "backface-rejected", "emitter-double-counted", "back-glass-black")
-DECLARED_CONTROLS = ("declared-transmission-ignored", "declared-not-tinted", "declared-volume-ignored")
+DECLARED_CONTROLS = ("declared-transmission-ignored", "declared-not-tinted", "declared-volume-ignored",
+                     "declared-iridescence-ignored", "declared-diffuse-transmission-ignored",
+                     "declared-diffuse-transmission-not-overridden")
 
 MODEL = {
     "reference": "Mitsuba 3.9.1 path integrator, pixel-centre rays through integrator.sample, only the glass-mask pixels",
@@ -129,9 +132,14 @@ def mitsuba_alpha(roughness):
     return max(r * r, MIN_ALPHA)
 
 
-def glass_table(data, allow_rough_thin=False):
+def glass_table(data, allow_rough_thin=False, extended=False):
     """One dict per instance whose material carries KHR_materials_transmission (factor > 0), keyed by instance index.
-    Raises for the combinations the reference does not model (textures, ior 0, rough thin-walled, other features)."""
+    Raises for the combinations the reference does not model (textures, ior 0, rough thin-walled, other features).
+
+    `extended` (ticket 19, only the declared --rt off model): the material may also carry KHR_materials_iridescence (record 1 words
+    3-6: factor, film ior, thickness min / max) and the thin subsurface block (record 2 words 0-4: mode, weight, colour); the entry
+    then holds `irid` = (strength, film ior, thickness nm: the maximum, no thickness texture; 0 disables the film) and `thin` =
+    (weight, colour).  The ray-traced Mitsuba ground truth refuses both (no thin-film dielectric BSDF is built)."""
     table = {}
     for k, instance in enumerate(data["instances"]):
         material = data["materials"][instance["material"]]
@@ -140,7 +148,8 @@ def glass_table(data, allow_rough_thin=False):
             if bits & FEATURE_VOLUME:
                 raise ValueError("a volume without transmission has no effect and is outside the declared model")
             continue
-        if bits & ~(FEATURE_SPECULAR_IOR | FEATURE_TRANSMISSION | FEATURE_VOLUME):
+        allowed = FEATURE_SPECULAR_IOR | FEATURE_TRANSMISSION | FEATURE_VOLUME | ((FEATURE_IRIDESCENCE | FEATURE_SUBSURFACE) if extended else 0)
+        if bits & ~allowed:
             raise ValueError(f"glass material feature bits {bits:#x} are outside the transmission/volume/ior model")
         if any(index != INVALID for index in material["textures"]):
             raise ValueError("glass samples a base texture; the reference is texture-free")
@@ -160,6 +169,17 @@ def glass_table(data, allow_rough_thin=False):
                  "attenuation_distance": f32(record1[16]), "double_sided": bool(int(material["flags"]) & 1),
                  "metallic": float(material["metallic"])}
         entry["thin"] = not entry["thickness"] > 0.0
+        entry["irid"] = (0.0, 1.3, 0.0)
+        entry["diffuse_transmission"] = (0.0, [1.0, 1.0, 1.0])
+        if bits & FEATURE_IRIDESCENCE:
+            if int(record1[7]) != INVALID or int(record1[8]) != INVALID:
+                raise ValueError("an iridescence or thickness texture is set; the reference is texture-free")
+            entry["irid"] = (f32(record1[3]), f32(record1[4]), f32(record1[6]))
+        if bits & FEATURE_SUBSURFACE:
+            record2 = records[first + 2]
+            if int(record2[0]) != 0 or any(int(record2[k]) != INVALID for k in (10, 11, 12)) or f32(record2[9]) != 0.0:
+                raise ValueError("only the thin subsurface mode without textures or anisotropy composes with the transmission")
+            entry["diffuse_transmission"] = (f32(record2[1]), [f32(record2[2]), f32(record2[3]), f32(record2[4])])
         entry["sigma_t"] = sigma_t(entry["attenuation_color"], entry["attenuation_distance"])
         entry["has_medium"] = bool((entry["sigma_t"] > 0).any()) and not entry["thin"]
         if entry["metallic"] != 0.0:
@@ -779,14 +799,31 @@ def command_render(args):
 # --- declared --rt off model ------------------------------------------------------------------------------------------------
 
 DECLARED_VARIANTS = {"spec": {}, "declared-transmission-ignored": {"t": 0.0}, "declared-not-tinted": {"tint": False},
-                     "declared-volume-ignored": {"volume": False}}
+                     "declared-volume-ignored": {"volume": False},
+                     # ticket 19 (iridescence / diffuse transmission composed with the transmission)
+                     "declared-iridescence-ignored": {"irid": False}, "declared-diffuse-transmission-ignored": {"diffuse": False},
+                     "declared-diffuse-transmission-not-overridden": {"override": False}}
+THIN_RATIO_SLOPE = 0.16   # the declared transmitted/diffuse weight ratio of the thin subsurface lobe, 1 - 0.16 N.V (tools/f15_reference.py)
 
 
-def declared_pixel(base, roughness, ior, t, thickness, att_color, att_distance, n_dot_v, sky, variant="spec"):
-    """The declared --rt off model of one pixel set (arrays (n, ...)): see the module docstring."""
+def declared_pixel(base, roughness, ior, t, thickness, att_color, att_distance, n_dot_v, sky, variant="spec", irid=None,
+                   diffuse_transmission=None):
+    """The declared --rt off model of one pixel set (arrays (n, ...)): see the module docstring.
+
+    Ticket 19: the base slot of the dielectric layer carries the transmission over the diffuse transmission (the specification's
+    `base = mix(diffuse_bsdf, specular_btdf * baseColor, transmission)` with `diffuse_bsdf = mix(diffuse_brdf, diffuse_btdf, w)`:
+    transmission REPLACES the diffuse part, diffuse transmission included).  With the declared thin weights of tools/f15_reference.py
+    (reflected (1 - w) base, transmitted w colour (1 - 0.16 N.V), both times the dielectric complement (1 - E)):
+        M = (1 - t) ((1 - w) base + w colour (1 - 0.16 N.V)) + t tint T                 (t = transmission factor, T = Beer-Lambert)
+        L = sky ((1 - s) (M (1 - E) + E) + s (M (1 - max E_irid) + E_irid))
+    with E = clamp(f0 A + B, 0, 1) and, for an iridescent pixel (strength s, film ior, thickness nm), E_irid = clamp(F_irid(N.V;
+    f0 of the ior) clamp(A + B, 0, 1), 0, 1) (the declared film of ticket 12: the film once at N.V in the split sum, diffuse weight
+    1 - max E_irid).  Without iridescence and diffuse transmission this is the ticket 13 formula exactly.
+    `irid` = (strength (n,), film ior (n,), thickness (n,)); `diffuse_transmission` = (weight (n,), colour (n, 3))."""
     import f15_reference as ref
     options = DECLARED_VARIANTS[variant]
-    a, b = ref.dfg_lookup(np.clip(n_dot_v, 1e-4, 1.0), np.clip(roughness, MIN_ROUGHNESS, 1.0))
+    mu = np.clip(n_dot_v, 1e-4, 1.0)
+    a, b = ref.dfg_lookup(mu, np.clip(roughness, MIN_ROUGHNESS, 1.0))
     f0 = ref.ior_factor(ior)
     spec = np.clip(f0 * a + b, 0.0, 1.0)[:, None]
     tint = base if options.get("tint", True) else np.ones_like(base)
@@ -796,8 +833,28 @@ def declared_pixel(base, roughness, ior, t, thickness, att_color, att_distance, 
             if thickness[k] > 0:
                 absorb[k] = np.exp(-sigma_t(att_color[k], float(att_distance[k])) * thickness[k])
     t = np.full(len(base), options["t"]) if "t" in options else t
-    diffuse_mix = (1.0 - t)[:, None] * base + t[:, None] * tint * absorb
-    return float(sky) * (diffuse_mix * (1.0 - spec) + spec)
+    diffuse = base
+    extra = np.zeros_like(base)
+    if diffuse_transmission is not None and options.get("diffuse", True):
+        w, colour = np.asarray(diffuse_transmission[0], dtype=np.float64)[:, None], np.asarray(diffuse_transmission[1], dtype=np.float64)
+        ratio = (1.0 - THIN_RATIO_SLOPE * mu)[:, None]
+        diffuse = (1.0 - w) * base + w * colour * ratio
+        if not options.get("override", True):  # control: the diffuse transmission is NOT replaced by the transmission
+            diffuse = (1.0 - w) * base
+            extra = w * colour * ratio
+    slot = (1.0 - t)[:, None] * diffuse + t[:, None] * tint * absorb + extra
+    plain = slot * (1.0 - spec) + spec
+    if irid is None or not options.get("irid", True):
+        return float(sky) * plain
+    strength = np.asarray(irid[0], dtype=np.float64)
+    thickness_nm = np.asarray(irid[2], dtype=np.float64)
+    strength = np.where(thickness_nm > 0.0, strength, 0.0)[:, None]  # thickness 0 disables the film (ticket 12 rule)
+    f0_film = np.tile(f0[:, None], (1, 3)) if np.ndim(f0) == 1 else np.broadcast_to(f0[:, None], base.shape)
+    film = ref.thin_film_fresnel(mu, np.asarray(irid[1], dtype=np.float64), thickness_nm, f0_film)
+    carry = np.clip(a + b, 0.0, 1.0)[:, None]
+    e_irid = np.clip(film * carry, 0.0, 1.0)
+    filmed = slot * (1.0 - np.max(e_irid, axis=-1, keepdims=True)) + e_irid
+    return float(sky) * ((1.0 - strength) * plain + strength * filmed)
 
 
 def command_declared(args):
@@ -806,7 +863,7 @@ def command_declared(args):
     check_scene(data)
     out = pathlib.Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    glass = glass_table(data, allow_rough_thin=True)
+    glass = glass_table(data, allow_rough_thin=True, extended=True)
     cast = ref.cast_primary_rays(root, data, args.threads)
     instance_map, roi = glass_masks(cast, glass)
     height, width = roi.shape
@@ -823,6 +880,13 @@ def command_declared(args):
         thickness=np.array([glass[k]["thickness"] * float(np.linalg.norm(instance_matrix(data["instances"][k])[:3, :3], axis=0).min())
                             for k in ids]),
         att_color=np.array([glass[k]["attenuation_color"] for k in ids]), att_distance=np.array([glass[k]["attenuation_distance"] for k in ids]))
+    # ticket 19: iridescence and diffuse transmission, passed only when some glass carries them (older scenes call the old function)
+    extension = {}
+    if any(glass[k]["irid"][0] > 0.0 for k in glass):
+        extension["irid"] = tuple(np.array([glass[k]["irid"][i] for k in ids], dtype=np.float64) for i in range(3))
+    if any(glass[k]["diffuse_transmission"][0] > 0.0 for k in glass):
+        extension["diffuse_transmission"] = (np.array([glass[k]["diffuse_transmission"][0] for k in ids], dtype=np.float64),
+                                             np.array([glass[k]["diffuse_transmission"][1] for k in ids], dtype=np.float64))
     sky = float(data["sky"][0])
     report = {"schema": 1, "tool": "tools/f15_transmission_reference.py", "tool_sha256": sha256_file(__file__), "model": MODEL,
               "snapshot_sha256": scene_digest(root), "kind": "declared", "width": width, "height": height,
@@ -830,7 +894,7 @@ def command_declared(args):
               "objects": [{"instance": k, "label": g["label"], "pixels": int((ids == k).sum())} for k, g in sorted(glass.items())]}
     for name in ["spec"] + list(args.controls):
         values = declared_pixel(arrays["base"], arrays["roughness"], arrays["ior"], arrays["t"], arrays["thickness"],
-                                arrays["att_color"], arrays["att_distance"], n_dot_v, sky, name)
+                                arrays["att_color"], arrays["att_distance"], n_dot_v, sky, name, **extension)
         image = np.full((height * width, 3), sky, dtype=np.float32)
         image[pick] = values
         stem = "reference" if name == "spec" else f"control-{name}"

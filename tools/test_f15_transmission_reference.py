@@ -275,7 +275,7 @@ class Runner(unittest.TestCase):
             self.assertTrue(set(spec["controls"]) <= set(allowed), key)
             self.assertGreaterEqual(len(spec["controls"]), 2, key)
             self.assertEqual(spec["kind"] in check.TRANSMISSION_KINDS, True)
-        self.assertEqual(sum(1 for k in keys if check.SCENARIOS[k]["kind"] == "transmission-declared"), 1)
+        self.assertEqual(sum(1 for k in keys if check.SCENARIOS[k]["kind"] == "transmission-declared"), 2)  # rtoff, ticket 19 combinations
 
     def test_capture_commands_accumulate_and_trace_the_glass(self):
         binary = pathlib.Path("build/release/phosphor")
@@ -540,6 +540,116 @@ class ControlsOnEveryFixtureShape(unittest.TestCase):
         half = images[0.5][0][roi]
         # glTF mix(diffuse, btdf, t) is linear in t: the t = 0.5 image is the mean of the t = 1 image and the opaque one
         np.testing.assert_allclose(half, 0.5 * full + 0.5 * opaque, rtol=0.08, atol=0.03)
+
+
+class DeclaredCombinationModel(unittest.TestCase):
+    """Ticket 19: the declared --rt off model of iridescence + transmission + volume and of the transmission over the diffuse
+    transmission.  Cross-checked against the declared single-lobe models of tools/f15_reference.py (tickets 12 and 16), never
+    against the shader."""
+
+    def setUp(self):
+        self.n = 5
+        self.base = np.tile([0.9, 0.55, 0.25], (self.n, 1))
+        self.rough = np.full(self.n, 0.1)
+        self.mu = np.array([0.15, 0.4, 0.7, 0.9, 1.0])
+        self.ior = np.full(self.n, 1.5)
+        self.zero = np.zeros(self.n)
+        self.att = np.tile([0.4, 0.8, 1.0], (self.n, 1))
+        self.dist = np.full(self.n, 0.8)
+
+    def pixel(self, t=1.0, thickness=0.0, variant="spec", irid=None, dt=None, base=None, sky=0.5):
+        return tr.declared_pixel(self.base if base is None else base, self.rough, self.ior, np.full(self.n, float(t)),
+                                 np.full(self.n, float(thickness)), self.att, self.dist, self.mu, sky, variant, irid=irid,
+                                 diffuse_transmission=dt)
+
+    def irid(self, strength=1.0, ior=1.3, thickness=400.0):
+        return (np.full(self.n, strength), np.full(self.n, ior), np.full(self.n, thickness))
+
+    def dt(self, weight=0.7, colour=(1.0, 0.55, 0.25)):
+        return (np.full(self.n, weight), np.tile(colour, (self.n, 1)))
+
+    def test_without_the_new_blocks_the_ticket_13_formula_is_unchanged(self):
+        a, b = ref.dfg_lookup(self.mu, self.rough)
+        spec = np.clip(ref.ior_factor(self.ior) * a + b, 0.0, 1.0)[:, None]
+        absorb = np.exp(-tr.sigma_t([0.4, 0.8, 1.0], 0.8) * 0.8)
+        expected = 0.5 * (((0.5 * self.base + 0.5 * self.base * absorb)) * (1.0 - spec) + spec)
+        np.testing.assert_allclose(self.pixel(0.5, 0.8), expected, rtol=1e-12)
+
+    def test_transmission_zero_is_the_thin_subsurface_declared_model_of_ticket_16(self):
+        import f15_check  # noqa: F401  (the same module the runner uses)
+        thin = {"weight": np.full(self.n, 0.7), "color": np.tile([1.0, 0.55, 0.25], (self.n, 1)), "variant": "spec"}
+        expected = ref.declared_environment_radiance(self.base, np.zeros(self.n), self.rough, self.mu, 0.5, ref.DECLARED,
+                                                     dielectric=None, thin=thin)
+        got = self.pixel(0.0, dt=self.dt())
+        # ticket 16's declared model uses the DFG E_d = 0.04 A + B of the base (ior 1.5 here: the same f0)
+        np.testing.assert_allclose(got, expected, rtol=1e-10)
+
+    def test_transmission_one_replaces_the_diffuse_transmission(self):
+        plain = self.pixel(1.0)
+        for weight in (0.3, 0.7, 1.0):
+            np.testing.assert_allclose(self.pixel(1.0, dt=self.dt(weight, (0.1, 0.7, 0.6))), plain, rtol=1e-12)
+        # a partial factor keeps (1 - t) of it: strictly between the thin-only and the transmission-only images
+        half = self.pixel(0.5, dt=self.dt())
+        np.testing.assert_allclose(half, 0.5 * self.pixel(0.0, dt=self.dt()) + 0.5 * plain, rtol=1e-12)
+        # the control that does not override differs at factor 1 (the diffuse transmission is added on top)
+        added = self.pixel(1.0, variant="declared-diffuse-transmission-not-overridden", dt=self.dt())
+        self.assertGreater(float(np.abs(added - plain).max() / plain.max()), 0.1)
+
+    def test_iridescence_with_transmission_matches_the_ticket_12_declared_film_at_zero_transmission(self):
+        irid = {"strength": np.full(self.n, 1.0), "ior": np.full(self.n, 1.3), "thickness": np.full(self.n, 400.0),
+                "thickness_min": np.full(self.n, 100.0), "nv": self.mu, "variant": "spec"}
+        expected = ref.declared_environment_radiance(self.base, np.zeros(self.n), self.rough, self.mu, 0.5, ref.DECLARED,
+                                                     dielectric=None, irid=irid)
+        np.testing.assert_allclose(self.pixel(0.0, irid=self.irid()), expected, rtol=1e-10)
+
+    def test_the_film_changes_the_transmissive_image_and_thickness_zero_disables_it(self):
+        plain = self.pixel(1.0, 0.8)
+        film = self.pixel(1.0, 0.8, irid=self.irid())
+        self.assertGreater(float(np.abs(film - plain).max() / plain.max()), 0.02)
+        np.testing.assert_allclose(self.pixel(1.0, 0.8, irid=self.irid(thickness=0.0)), plain, rtol=1e-12)
+        np.testing.assert_allclose(self.pixel(1.0, 0.8, irid=self.irid(strength=0.0)), plain, rtol=1e-12)
+        np.testing.assert_allclose(self.pixel(1.0, 0.8, variant="declared-iridescence-ignored", irid=self.irid()), plain, rtol=1e-12)
+
+    def test_furnace_bound_of_every_combination_and_the_controls_that_gain_energy(self):
+        white = np.ones((self.n, 3))
+        self.att = np.ones((self.n, 3))  # no absorption: the transmitted colour is white
+        for t in (0.0, 0.5, 1.0):
+            for irid in (None, self.irid()):
+                value = self.pixel(t, 0.0, base=white, irid=irid, dt=self.dt(0.7, (1.0, 1.0, 1.0)), sky=1.0)
+                self.assertLessEqual(float(value.max()), 1.0 + 1e-12, (t, irid is not None))
+        not_overridden = self.pixel(1.0, 0.0, "declared-diffuse-transmission-not-overridden", base=white, dt=self.dt(0.7, (1.0, 1.0, 1.0)), sky=1.0)
+        self.assertGreater(float(not_overridden.max()), 1.05)
+
+    def test_every_control_differs_from_the_reference_on_the_fixture_cells(self):
+        # the fixture's four cells (tinted base, ior 1.5, roughness 0.1) at factors 1 and 0.5: every control moves some cell by > 5 %
+        cells = [dict(thickness=0.0, irid=self.irid(1.0, 1.3, 400.0)), dict(thickness=0.8, irid=self.irid(1.0, 1.3, 800.0)),
+                 dict(thickness=0.0, dt=self.dt(0.7, (1.0, 0.55, 0.25))),
+                 dict(thickness=0.8, irid=self.irid(1.0, 1.3, 600.0), dt=self.dt(0.7, (0.1, 0.7, 0.6)))]
+        for control in ("declared-transmission-ignored", "declared-iridescence-ignored", "declared-diffuse-transmission-ignored",
+                        "declared-diffuse-transmission-not-overridden", "declared-volume-ignored", "declared-not-tinted"):
+            worst = 0.0
+            for t in (1.0, 0.5):
+                for cell in cells:
+                    reference = self.pixel(t, **cell)
+                    other = self.pixel(t, variant=control, **cell)
+                    worst = max(worst, float((np.abs(other - reference) / reference).max()))
+            self.assertGreater(worst, 0.05, control)
+
+    def test_glass_table_decodes_the_new_blocks_only_for_the_declared_model(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(tmp, ignore_errors=True))
+        fx.write_snapshot(tmp, [fx.glass(thickness=0.0, base=fx.TINT, irid=(1.0, 1.4, 600.0), diffuse_transmission=(0.7, (0.1, 0.7, 0.6)))], [])
+        root, data = snapshot(tmp)
+        with self.assertRaisesRegex(ValueError, "outside"):
+            tr.glass_table(data)  # the ray-traced ground truth refuses the film and the diffuse transmission
+        entry = tr.glass_table(data, extended=True)[0]
+        np.testing.assert_allclose(entry["irid"], (1.0, 1.4, 600.0), rtol=1e-6)
+        self.assertAlmostEqual(entry["diffuse_transmission"][0], 0.7, places=6)
+        np.testing.assert_allclose(entry["diffuse_transmission"][1], [0.1, 0.7, 0.6], rtol=1e-6)
+        self.assertEqual(int(data["materials"][0]["feature_bits"]) & (16 | 128), 16 | 128)
+        data["material_extensions"]["records"][2][0] = 1  # volumetric subsurface does not compose
+        with self.assertRaisesRegex(ValueError, "thin subsurface"):
+            tr.glass_table(data, extended=True)
 
 
 if __name__ == "__main__":

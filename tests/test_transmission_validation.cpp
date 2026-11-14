@@ -31,11 +31,12 @@ std::vector<std::string> runnerKeys() {
 }
 } // namespace
 
-TEST_CASE("F15.3 ticket 13: the transmission scenarios are exactly the eight declared names") {
+TEST_CASE("F15.3 ticket 13: the transmission scenarios are exactly the declared names (eight, ticket 19 adds the combinations)") {
     const auto names = TransmissionValidation::scenarios();
-    CHECK(names.size() == 8);
+    CHECK(names.size() == 9);
     for (auto name : {"transmission-roughness-ior", "transmission-attenuation", "transmission-factor-tint", "transmission-thin-volume",
-                      "transmission-single-sided", "transmission-glass-behind-glass", "transmission-emissive-panel", "transmission-rtoff"}) {
+                      "transmission-single-sided", "transmission-glass-behind-glass", "transmission-emissive-panel", "transmission-rtoff",
+                      "transmission-rtoff-combinations"}) {
         CHECK(TransmissionValidation::validScenario(name));
         CHECK_FALSE(MaterialValidation::validScenario(name)); // a separate bench class, not a grid scenario
     }
@@ -231,4 +232,43 @@ TEST_CASE("F15.3 ticket 13: the camera frames every glass object and the backdro
             }
         }
     }
+}
+
+
+TEST_CASE("F15.3 ticket 19: transmission-rtoff-combinations carries iridescence and diffuse transmission next to the transmission") {
+    const auto& s = TransmissionValidation::spec("transmission-rtoff-combinations");
+    CHECK(s.backdrop == TransmissionScenarioSpec::Backdrop::None);
+    REQUIRE(s.glass.size() == 8);  // rows: factor 1, 0.5; columns: film thin, film + volume, diffuse transmission thin, all three
+    ECS ecs;
+    GpuScene scene;
+    test::NullTextureManager textures;
+    TransmissionValidation f{"transmission-rtoff-combinations"};
+    f.setup(ecs, scene, textures);
+    for (size_t k = 0; k < s.glass.size(); ++k) {
+        const GlassObject& g = s.glass[k];
+        const size_t row = k / 4, column = k % 4;
+        CHECK(g.transmission == (row == 0 ? 1.0f : 0.5f));
+        CHECK(g.baseColor == glm::vec3(0.9f, 0.55f, 0.25f));
+        CHECK(g.roughness == 0.1f);
+        CHECK((g.thickness > 0.0f) == (column == 1 || column == 3));
+        CHECK((g.iridescenceFactor > 0.0f) == (column != 2));
+        CHECK((g.diffuseTransmission > 0.0f) == (column >= 2));
+        const auto& m = std::as_const(ecs).getComponent<MaterialComponent>(f.glass()[k]);
+        REQUIRE(m.extension);
+        CHECK(bool(m.extension->iridescence) == (g.iridescenceFactor > 0.0f));
+        CHECK(bool(m.extension->subsurface) == (g.diffuseTransmission > 0.0f));
+        const u32 mask = featureMask(*m.extension);
+        CHECK(((mask & featureBit(MaterialFeature::Iridescence)) != 0) == (g.iridescenceFactor > 0.0f));
+        CHECK(((mask & featureBit(MaterialFeature::Subsurface)) != 0) == (g.diffuseTransmission > 0.0f));
+        CHECK((mask & featureBit(MaterialFeature::Transmission)) != 0);
+        if (m.extension->subsurface) {
+            CHECK(m.extension->subsurface->mode == SubsurfaceMode::Thin);
+            CHECK(m.extension->subsurface->weight == g.diffuseTransmission);
+        }
+        if (m.extension->iridescence) {
+            CHECK(m.extension->iridescence->factor == 1.0f);
+            CHECK(m.extension->iridescence->thicknessMax > 0.0f);
+        }
+    }
+    f.teardown(ecs, scene);
 }

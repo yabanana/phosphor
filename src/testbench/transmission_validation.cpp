@@ -17,9 +17,10 @@ namespace phosphor {
 namespace {
 // The names are mirrored by tools/f15_check.py SCENARIOS (tests/test_transmission_validation.cpp compares both).
 // transmission-rtoff (the last) is the declared --rt off model (see below).
-constexpr std::array<std::string_view, 8> kAll{
+constexpr std::array<std::string_view, 9> kAll{
     "transmission-roughness-ior", "transmission-attenuation", "transmission-factor-tint", "transmission-thin-volume",
-    "transmission-single-sided", "transmission-glass-behind-glass", "transmission-emissive-panel", "transmission-rtoff"};
+    "transmission-single-sided", "transmission-glass-behind-glass", "transmission-emissive-panel", "transmission-rtoff",
+    "transmission-rtoff-combinations"};
 constexpr float pi = 3.14159265358979323846f;
 
 using Glass = GlassObject;
@@ -203,6 +204,42 @@ std::vector<TransmissionScenarioSpec> specs() {
         s.cameraTarget = {0.0f, 0.95f, 0.0f};
         all.push_back(std::move(s));
     }
+    // 9. (ticket 19) The declared --rt off model of the critical transmission combinations, no backdrop like the scene above.  Rows are the
+    // transmission factor {1, 0.5, 0}; columns (tinted base, roughness 0.1, ior 1.5): (a) thin-walled with iridescence (factor 1, film
+    // ior 1.3, 400 nm), (b) an attenuating volume (thickness 0.8) with iridescence (800 nm), (c) thin-walled with diffuse transmission
+    // (weight 0.7, warm colour: at factor 1 the transmission REPLACES it), (d) iridescence,
+    // diffuse transmission (weight 0.7, teal) and an attenuating volume together.
+    {
+        TransmissionScenarioSpec s;
+        s.name = "transmission-rtoff-combinations";
+        s.backdrop = TransmissionScenarioSpec::Backdrop::None;
+        const float factor[2] = {1.0f, 0.5f};
+        for (int r = 0; r < 2; ++r)
+            for (int c = 0; c < 4; ++c) {
+                GlassObject g = sphere({(float(c) - 1.5f) * 1.1f, 0.4f + 1.1f * float(r), 0.0f}, 0.1f, 1.5f, (c == 1 || c == 3) ? 0.8f : 0.0f);
+                g.transmission = factor[r];
+                g.baseColor = tint;
+                if (c == 1 || c == 3) {
+                    g.attenuationColor = {0.4f, 0.8f, 1.0f};
+                    g.attenuationDistance = 0.8f;
+                }
+                if (c == 0 || c == 3) {
+                    g.iridescenceFactor = 1.0f;
+                    g.iridescenceThickness = c == 0 ? 400.0f : 600.0f;
+                }
+                if (c == 1) {
+                    g.iridescenceFactor = 1.0f;
+                    g.iridescenceThickness = 800.0f;
+                }
+                if (c == 2 || c == 3) {
+                    g.diffuseTransmission = 0.7f;
+                    g.diffuseTransmissionColor = c == 2 ? glm::vec3(1.0f, 0.55f, 0.25f) : glm::vec3(0.1f, 0.7f, 0.6f);
+                }
+                s.glass.push_back(g);
+            }
+        s.cameraTarget = {0.0f, 0.95f, 0.0f};
+        all.push_back(std::move(s));
+    }
     return all;
 }
 const std::vector<TransmissionScenarioSpec>& table() {
@@ -270,6 +307,18 @@ void TransmissionValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& te
         description->volume->thickness = g.thickness;
         description->volume->attenuationColor = {g.attenuationColor.x, g.attenuationColor.y, g.attenuationColor.z};
         description->volume->attenuationDistance = g.attenuationDistance;
+        if (g.iridescenceFactor > 0.0f) {
+            description->iridescence.emplace();
+            description->iridescence->factor       = g.iridescenceFactor;
+            description->iridescence->ior          = g.iridescenceIor;
+            description->iridescence->thicknessMax = g.iridescenceThickness;
+        }
+        if (g.diffuseTransmission > 0.0f) {
+            description->subsurface.emplace();
+            description->subsurface->mode   = SubsurfaceMode::Thin;
+            description->subsurface->weight = g.diffuseTransmission;
+            description->subsurface->color  = {g.diffuseTransmissionColor.x, g.diffuseTransmissionColor.y, g.diffuseTransmissionColor.z};
+        }
         material.extension = std::move(description);
         material.baseColorFactor = glm::vec4(g.baseColor, 1.0f);
         material.metallicFactor = 0.0f;

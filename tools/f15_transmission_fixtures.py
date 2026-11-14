@@ -104,10 +104,12 @@ def world_words(position, scale, rotation):
 
 def glass(shape="sphere", center=(0, 1, 0), scale=(1, 1, 1), yaw=0.0, pitch=0.0, base=(1, 1, 1), roughness=0.0,
           transmission=1.0, ior=1.5, thickness=0.8, attenuation_color=(1, 1, 1), attenuation_distance=math.inf,
-          double_sided=False):
+          double_sided=False, irid=(0.0, 1.3, 400.0), diffuse_transmission=(0.0, (1, 1, 1))):
+    """`irid` = (factor, film ior, thickness nm) and `diffuse_transmission` = (weight, colour): ticket 19 (factor / weight 0 = no block)."""
     return dict(shape=shape, center=center, scale=scale, yaw=yaw, pitch=pitch, base=base, roughness=roughness,
                 transmission=transmission, ior=ior, thickness=thickness, attenuation_color=attenuation_color,
-                attenuation_distance=attenuation_distance, double_sided=double_sided)
+                attenuation_distance=attenuation_distance, double_sided=double_sided, irid=irid,
+                diffuse_transmission=diffuse_transmission)
 
 
 def checker_cells(columns=24, rows=16, cell=0.4, origin=(-4.8, -1.2), z=-3.0):
@@ -127,16 +129,23 @@ def write_snapshot(folder, objects, emitters, sky=0.5, emission=2.0, width=320, 
     mesh_of = {"sphere": 0, "cube": 1, "pane": 2}
     materials, records, instances = [], [], []
     for g in objects:
-        feature_bits = (32 if g["transmission"] > 0 else 0) | (64 if g["thickness"] > 0 else 0) | (1 if g["ior"] != 1.5 else 0)
+        irid, (dt_weight, dt_color) = g.get("irid", (0.0, 1.3, 400.0)), g.get("diffuse_transmission", (0.0, (1, 1, 1)))
+        feature_bits = ((32 if g["transmission"] > 0 else 0) | (64 if g["thickness"] > 0 else 0) | (1 if g["ior"] != 1.5 else 0) |
+                        (16 if irid[0] > 0 else 0) | (128 if dt_weight > 0 else 0))
         record0 = [bits(g["ior"]), bits(1.0), bits(1), bits(1), bits(1), INVALID, INVALID] + [0] * 13
-        record1 = ([bits(0), bits(0), INVALID, bits(0), bits(1.3), bits(100), bits(400), INVALID, INVALID,
+        record2 = [0] * 20
+        record2[10] = record2[11] = record2[12] = INVALID
+        if dt_weight > 0:
+            record2[1:5] = [bits(dt_weight), *(bits(c) for c in dt_color)]
+            record2[5], record2[6:9] = bits(1.0), [bits(1.0), bits(0.5), bits(0.25)]
+        record1 = ([bits(0), bits(0), INVALID, bits(irid[0]), bits(irid[1]), bits(100), bits(irid[2]), INVALID, INVALID,
                     bits(g["transmission"]), INVALID, bits(g["thickness"]), INVALID] +
                    [bits(c) for c in g["attenuation_color"]] + [bits(g["attenuation_distance"]), 0, 0, 0])
         materials.append({"base": [*g["base"], 1], "emissive": [0, 0, 0], "metallic": 0.0, "roughness": g["roughness"],
                           "normal_scale": 1, "occlusion_strength": 1, "alpha_cutoff": 0,
                           "flags": (feature_bits << FEATURE_SHIFT) | (1 if g["double_sided"] else 0), "textures": [INVALID] * 5,
                           "feature_bits": feature_bits, "extension_index": len(records)})
-        records += [record0, record1, [0] * 20, [0] * 20]
+        records += [record0, record1, record2, [0] * 20]
         rotation = rotation_matrix(g["yaw"], g["pitch"], g["shape"] == "pane")
         instances.append({"slot": len(instances), "generation": 1, "flags": 3, "mesh": mesh_of[g["shape"]],
                           "material": len(materials) - 1, "world": world_words(g["center"], g["scale"], rotation)})

@@ -34,6 +34,14 @@ struct GlassObject {
     glm::vec3 attenuationColor{1.0f};
     float     attenuationDistance = std::numeric_limits<float>::infinity();
     bool      doubleSided = false;
+    // F15.3 (ticket 19): KHR_materials_iridescence (factor 0 = no block; the film ior; thickness in nm, the maximum) and the thin
+    // subsurface block (diffuse transmission weight 0 = no block; colour) on the glass material: the declared --rt off model composes
+    // them with the transmission (tools/f15_transmission_reference.py declared_pixel).
+    float     iridescenceFactor = 0.0f;
+    float     iridescenceIor = 1.3f;
+    float     iridescenceThickness = 400.0f;
+    float     diffuseTransmission = 0.0f;
+    glm::vec3 diffuseTransmissionColor{1.0f};
 };
 
 struct TransmissionScenarioSpec {

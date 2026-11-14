@@ -2993,6 +2993,32 @@ class CombinationModel(unittest.TestCase):
                                                      dielectric_dict(n), irid=irid)
         np.testing.assert_allclose(decl_ext, decl, rtol=1e-12)
 
+    def test_anisotropic_vh_histograms_reproduce_the_a_and_b_tables(self):
+        # hist . (1 - w) = A and hist . w = B of the anisotropic quadrature (the film replaces w by F_irid(V.H))
+        at, ab = ref.aniso_alphas(float(ref.effective_alpha(0.3)), 0.8)
+        mus, phis, hist = ref.aniso_vh_histograms(float(at), float(ab))
+        bins = np.linspace(0.0, 1.0, ref.IRID_BINS)
+        w = ref.schlick_weight(bins)
+        for i, j in ((10, 4), (40, 20), (64, 32)):
+            a, b = ref._aniso_spec_integrals(float(mus[i]), float(phis[j]), float(at), float(ab))
+            self.assertAlmostEqual(float(hist[i, j] @ (1 - w)), a, delta=2e-4)
+            self.assertAlmostEqual(float(hist[i, j] @ w), b, delta=2e-4)
+
+    def test_exact_environment_of_iridescence_with_anisotropy_agrees_with_a_monte_carlo(self):
+        aniso = aniso_pixels(0.8, 0.6)
+        for metallic, mu in ((0.0, 0.5), (1.0, 0.85)):
+            v = np.array([[math.sqrt(1 - mu * mu), 0.0, mu]])
+            n = np.array([[0.0, 0.0, 1.0]])
+            irid = irid_pixels(1, 1.0, 1.4, 500.0, nv=mu)
+            ai = ref.aniso_environment_inputs(aniso, np.array([0.3]), n, v)
+            exact = ref.environment_radiance(self.BASE, np.array([metallic]), np.array([0.3]), np.array([mu]), 1.0,
+                                             aniso_env=ai, irid_env=irid)[0]
+            mean, sigma = self.mc_environment(mu, base=self.BASE, metallic=metallic, roughness=0.3, aniso=aniso, irid=irid)
+            np.testing.assert_allclose(exact, mean, atol=6 * sigma.max() + 2e-3, err_msg=f"metallic {metallic} mu {mu}")
+        # the film acts: the same pixel without the film differs
+        plain = ref.environment_radiance(self.BASE, np.array([0.0]), np.array([0.3]), np.array([0.5]), 1.0, aniso_env=ai)[0]
+        self.assertGreater(float(np.abs(plain - exact).max() / plain.max()), 0.01)
+
     def mc_environment(self, mu, count=300000, seed=5, **kw):
         """Independent wi-space estimate of the unit-radiance environment value: uniform sphere, bsdf cos on the front hemisphere."""
         rng = np.random.default_rng(seed)
@@ -3132,6 +3158,18 @@ class CombinationModel(unittest.TestCase):
         additive = ref.declared_environment_radiance(np.ones((n, 3)), np.zeros(n), np.full(n, 0.4), mu, 1.0,
                                                      ref.COMBO_DECLARED_CONTROLS["declared-additive-layering"], None, coat=coat, thin=thin)
         self.assertGreater(float(additive.max()), 1.05)
+
+    def test_the_exact_environment_keeps_the_thin_lobe_next_to_the_extended_dielectric(self):
+        # regression: with a coat the main model carries the ior/specular dielectric arrays; the thin transmitted term must survive there
+        mu = np.array([0.4, 0.9])
+        thin = thin_pixels(2, 0.6, (1.0, 0.55, 0.25))
+        base = np.tile(self.BASE, (2, 1))
+        plain = ref.environment_radiance(base, np.zeros(2), np.full(2, 0.5), mu, 1.0, thin_env=thin)
+        ext = ref.environment_radiance(base, np.zeros(2), np.full(2, 0.5), mu, 1.0, ref.SPECULAR_EXT, dielectric_dict(2), thin_env=thin)
+        np.testing.assert_allclose(ext, plain, rtol=1e-9)
+        ignored = ref.environment_radiance(base, np.zeros(2), np.full(2, 0.5), mu, 1.0, ref.SPECULAR_EXT, dielectric_dict(2),
+                                           thin_env=thin_pixels(2, 0.6, (1.0, 0.55, 0.25), "ignored"))
+        self.assertGreater(float(np.abs(ext - ignored).max() / ext.max()), 0.05)
 
     def test_the_exact_furnace_of_the_thin_lobe_under_the_coat_does_not_exceed_the_unextended_model(self):
         # reflected + transmitted never exceeds the unextended material (ticket 16), and the coat only attenuates it

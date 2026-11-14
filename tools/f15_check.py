@@ -285,7 +285,15 @@ COMBO_IRID_ANISO_DECLARED = ["declared-iridescence-ignored", "declared-aniso-ign
 COMBO_IRID_SPECULAR_CONTROLS = ["iridescence-ignored", "specular-ignored", "additive-layering"]
 COMBO_IRID_SPECULAR_DECLARED = ["declared-iridescence-ignored", "declared-specular-ignored", "declared-additive-layering"]
 COMBO_THIN_COAT_CONTROLS = ["transmission-ignored", "coat-ignored", "transmission-uncoated", "additive-layering"]
+# `transmission-uncoated` does not move the sphere mean of the exact environment by 5 % (the attenuated transmitted share is small): direct keys only.
+COMBO_THIN_COAT_ENV_CONTROLS = ["transmission-ignored", "coat-ignored", "additive-layering"]
 COMBO_THIN_COAT_DECLARED = ["declared-transmission-ignored", "declared-coat-ignored", "declared-additive-layering"]
+# The exact-environment keys integrate over the whole sphere: a rotation of the lobe by the sign of the angle moves the sphere mean by less
+# than the 5 % bound there (measured: aniso-rotation-flipped passes the env gate of the anisotropy + coat / sheen grids), so those keys drop it.
+COMBO_ANISO_COAT_ENV_CONTROLS = ["aniso-ignored", "coat-ignored", "additive-layering"]
+COMBO_ANISO_SHEEN_ENV_CONTROLS = ["aniso-ignored", "sheen-ignored", "additive-layering"]
+COMBO_IRID_ANISO_ENV_CONTROLS = ["iridescence-ignored", "aniso-ignored", "additive-layering"]
+COMBO_IRID_SPECULAR_ENV_CONTROLS = ["iridescence-ignored", "specular-ignored", "additive-layering"]
 COMBO_ALL_LOBES_CONTROLS = ["coat-ignored", "sheen-ignored", "aniso-ignored", "specular-ignored", "additive-layering"]
 COMBO_ALL_LOBES_DECLARED = ["declared-coat-ignored", "declared-sheen-ignored", "declared-aniso-ignored", "declared-specular-ignored",
                             "declared-additive-layering"]
@@ -612,13 +620,13 @@ SCENARIOS = {
                                              "terms": "constant environment only (radiance 0.5, no sun) on the clearcoat over sheen grid, deterministic resolve terms (--reflections off --lighting-denoise custom)"},
     "combo-aniso-coat-sun": {"kind": "direct", "controls": COMBO_ANISO_COAT_CONTROLS,
                                      "terms": "sun disk only (environment 0, no shadows, no GI) on the anisotropy + clearcoat grid"},
-    "combo-aniso-coat-env": {"kind": "environment", "controls": COMBO_ANISO_COAT_CONTROLS,
+    "combo-aniso-coat-env": {"kind": "environment", "controls": COMBO_ANISO_COAT_ENV_CONTROLS,
                                      "terms": "constant environment only (radiance 0.5, no sun), SSR specular transport, on the anisotropy + clearcoat grid"},
     "combo-aniso-coat-env@resolve": {"kind": "declared", "reflections": "off", "controls": COMBO_ANISO_COAT_DECLARED,
                                              "terms": "constant environment only (radiance 0.5, no sun) on the anisotropy + clearcoat grid, deterministic resolve terms (--reflections off --lighting-denoise custom)"},
     "combo-aniso-sheen-sun": {"kind": "direct", "controls": COMBO_ANISO_SHEEN_CONTROLS,
                                       "terms": "sun disk only (environment 0, no shadows, no GI) on the anisotropy + sheen grid"},
-    "combo-aniso-sheen-env": {"kind": "environment", "controls": COMBO_ANISO_SHEEN_CONTROLS,
+    "combo-aniso-sheen-env": {"kind": "environment", "controls": COMBO_ANISO_SHEEN_ENV_CONTROLS,
                                       "terms": "constant environment only (radiance 0.5, no sun), SSR specular transport, on the anisotropy + sheen grid"},
     "combo-aniso-sheen-env@resolve": {"kind": "declared", "reflections": "off", "controls": COMBO_ANISO_SHEEN_DECLARED,
                                               "terms": "constant environment only (radiance 0.5, no sun) on the anisotropy + sheen grid, deterministic resolve terms (--reflections off --lighting-denoise custom)"},
@@ -642,17 +650,19 @@ SCENARIOS = {
                                              "terms": "constant environment only (radiance 0.5, no sun) on the iridescence + sheen grid, deterministic resolve terms (--reflections off --lighting-denoise custom)"},
     "combo-irid-aniso-sun": {"kind": "direct", "controls": COMBO_IRID_ANISO_CONTROLS,
                                      "terms": "sun disk only (environment 0, no shadows, no GI) on the iridescence + anisotropy grid"},
+    "combo-irid-aniso-env": {"kind": "environment", "controls": COMBO_IRID_ANISO_ENV_CONTROLS,
+                                     "terms": "constant environment only (radiance 0.5, no sun), SSR specular transport, on the iridescence + anisotropy grid"},
     "combo-irid-aniso-env@resolve": {"kind": "declared", "reflections": "off", "controls": COMBO_IRID_ANISO_DECLARED,
                                              "terms": "constant environment only (radiance 0.5, no sun) on the iridescence + anisotropy grid, deterministic resolve terms (--reflections off --lighting-denoise custom)"},
     "combo-irid-specular-sun": {"kind": "direct", "controls": COMBO_IRID_SPECULAR_CONTROLS,
                                         "terms": "sun disk only (environment 0, no shadows, no GI) on the iridescence + ior/specular grid"},
-    "combo-irid-specular-env": {"kind": "environment", "controls": COMBO_IRID_SPECULAR_CONTROLS,
+    "combo-irid-specular-env": {"kind": "environment", "controls": COMBO_IRID_SPECULAR_ENV_CONTROLS,
                                         "terms": "constant environment only (radiance 0.5, no sun), SSR specular transport, on the iridescence + ior/specular grid"},
     "combo-irid-specular-env@resolve": {"kind": "declared", "reflections": "off", "controls": COMBO_IRID_SPECULAR_DECLARED,
                                                 "terms": "constant environment only (radiance 0.5, no sun) on the iridescence + ior/specular grid, deterministic resolve terms (--reflections off --lighting-denoise custom)"},
-    "combo-thin-coat-sun": {"kind": "direct", "controls": COMBO_THIN_COAT_CONTROLS,
+    "combo-thin-coat-sun": {"kind": "direct", "pending": "ticket 19", "pending_matches": "coat-ignored", "controls": COMBO_THIN_COAT_CONTROLS,
                                     "terms": "sun disk only (environment 0, no shadows, no GI) on the thin subsurface + clearcoat grid"},
-    "combo-thin-coat-env": {"kind": "environment", "controls": COMBO_THIN_COAT_CONTROLS,
+    "combo-thin-coat-env": {"kind": "environment", "controls": COMBO_THIN_COAT_ENV_CONTROLS,
                                     "terms": "constant environment only (radiance 0.5, no sun), SSR specular transport, on the thin subsurface + clearcoat grid"},
     "combo-thin-coat-env@resolve": {"kind": "declared", "reflections": "off", "controls": COMBO_THIN_COAT_DECLARED,
                                             "terms": "constant environment only (radiance 0.5, no sun) on the thin subsurface + clearcoat grid, deterministic resolve terms (--reflections off --lighting-denoise custom)"},
@@ -718,6 +728,19 @@ SCENARIOS = {
                            "controls": ["declared-transmission-ignored", "declared-not-tinted", "declared-volume-ignored"],
                            "terms": "constant environment 0.5 only (no backdrop), --rt off probe path: the declared model "
                                     "L ((1 - E)((1 - t) base + t tint T) + E) of tools/f15_transmission_reference.py"},
+    # F15.3 (ticket 19): the critical transmission combinations of the declared --rt off model: iridescence + transmission + volume and
+    # the transmission OVER the diffuse transmission (thin subsurface), rows = transmission factor {1, 0.5}.  The ray-traced Mitsuba
+    # ground truth of a thin-film dielectric is NOT built (no thin-film BSDF plugin for the two interface sides): the closed form of
+    # tools/f15_transmission_reference.py declared_pixel gates the --rt off path only.  Pending ("ticket 19": today's engine ignores
+    # the transmission and keeps the film and the thin subsurface, the image of `declared-transmission-ignored`).
+    "transmission-rtoff-combinations": {"kind": "transmission-declared", "pending": "ticket 19",
+                                        "pending_matches": "declared-transmission-ignored", "reflections": "probes", "denoise": "off",
+                                        "controls": ["declared-transmission-ignored", "declared-iridescence-ignored",
+                                                     "declared-diffuse-transmission-ignored",
+                                                     "declared-diffuse-transmission-not-overridden", "declared-volume-ignored"],
+                                        "terms": "constant environment 0.5 only (no backdrop), --rt off probe path: the declared model with the "
+                                                 "film (iridescence + transmission + volume) and the transmission replacing the diffuse "
+                                                 "transmission, tools/f15_transmission_reference.py declared_pixel"},
     # F15.3 (tickets 14/15): attenuated coloured shadows through transmissive casters (decision 06 shadow casters, ADR-0004 amendment).
     # Written test-first: today's engine shadows opaquely, so every gated key is "pending" (asserted to FAIL) and its image must pass
     # the gate against `transmittance-ignored`.  --reflections off: the floor is lit by the light only (no SSR of the lit floor into
