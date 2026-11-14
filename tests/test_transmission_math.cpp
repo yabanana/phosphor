@@ -163,3 +163,35 @@ TEST_CASE("thin-walled BTDF: the directional integral equals the D(h) sampled Wa
             CHECK(directional == doctest::Approx(walter).epsilon(0.03));
         }
 }
+
+// F15.1 (ticket 14): the log-space shadow factors the intersection function accumulates (ADR-0004 amendment).
+TEST_CASE("shadow ray transmittance: per-surface Fresnel pass, signed Beer-Lambert sum, floors") {
+    // Normal incidence on ior 1.5: F = ((1.5 - 1) / (1.5 + 1))^2 = 0.04; grazing incidence reflects almost everything.
+    CHECK(std::exp(transmissionShadowLnPass(1.0f, 1.5f)) == doctest::Approx(0.96).epsilon(1e-6));
+    CHECK(std::exp(transmissionShadowLnPass(-1.0f, 1.5f)) == doctest::Approx(0.96).epsilon(1e-6)); // |cos|: either facing
+    CHECK(std::exp(transmissionShadowLnPass(0.02f, 1.5f)) < 0.2);
+    CHECK(transmissionShadowLnPass(0.7f, 0.0f) == 0.0f); // ior 0: the permanent no-Fresnel mode
+    // The Schlick form of the Python declared model (tools/f15_transmission_reference.fresnel_schlick) at 25 degrees from the normal.
+    const double c = std::cos(25.0 * M_PI / 180.0), f0 = 0.04, x = 1.0 - c;
+    CHECK(std::exp(transmissionShadowLnPass(float(c), 1.5f)) == doctest::Approx(1.0 - (f0 + (1.0 - f0) * x * x * x * x * x)).epsilon(1e-5));
+    // Two interfaces of a closed slab multiply (the log sum): (1 - F)^2, independent of the order of the two hits.
+    const double pass = std::exp(transmissionShadowLnPass(float(c), 1.5f));
+    CHECK(std::exp(transmissionShadowLnPass(float(c), 1.5f) + transmissionShadowLnPass(-float(c), 1.5f)) == doctest::Approx(pass * pass).epsilon(1e-5));
+    // Beer-Lambert: colour 0.5 at 0.2 m, a ray crossing the slab from t = 3.0 to t = 3.3: the entry adds +sigma t_entry, the exit -sigma t_exit.
+    const float sigma = transmissionShadowSigma(0.5f, 0.2f);
+    CHECK(sigma == doctest::Approx(std::log(2.0) / 0.2).epsilon(1e-6));
+    const double lnSum = double(sigma) * 3.0 - double(sigma) * 3.3;
+    CHECK(std::exp(lnSum) == doctest::Approx(std::pow(0.5, 0.3 / 0.2)).epsilon(1e-5));
+    // Either order of the two intersection-function invocations gives the same sum (order independence: no sorting).
+    CHECK(double(-sigma * 3.3f + sigma * 3.0f) == doctest::Approx(lnSum).epsilon(1e-5));
+    CHECK(transmissionShadowSigma(1.0f, 0.2f) == 0.0f);   // colour 1: no medium
+    CHECK(transmissionShadowSigma(0.5f, 0.0f) == 0.0f);   // no attenuation distance
+    CHECK(transmissionShadowSigma(0.5f, INFINITY) == 0.0f);
+    CHECK(transmissionShadowSigma(0.0f, 1.0f) == doctest::Approx(-std::log(1.0e-6)).epsilon(1e-5)); // the clip of the reference
+    // A zero factor (tint channel 0) floors at ln(1e-30): exp of it is 0 at float precision and the sum stays finite.
+    CHECK(std::isfinite(transmissionShadowLn(0.0f)));
+    CHECK(std::exp(transmissionShadowLn(0.0f)) < 1e-29);
+    CHECK(transmissionShadowLn(1.0f) == 0.0f);
+    // The negative control: a duplicated invocation multiplies the factor twice (the harness' `double-counted` control).
+    CHECK(std::exp(2.0 * double(transmissionShadowLnPass(float(c), 1.5f))) == doctest::Approx(pass * pass).epsilon(1e-5));
+}

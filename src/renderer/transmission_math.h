@@ -126,4 +126,36 @@ PHOSPHOR_LOBE_FN float transmissionThinBtdf(float nlAbs, float nv, float nh, flo
     return D * transmissionG1Plain(nlAbs, alpha) * transmissionG1Plain(nv, alpha) / (4.0f * nlAbs * nv);
 }
 
+
+// ---------------------------------------------------------------------------
+// F15.1 (ticket 14): attenuated coloured shadows (ADR-0004 amendment).  A visibility ray crossing transmissive casters multiplies, in
+// log space (so the product is order independent and a zero payload is transmittance 1), per crossed SURFACE the factor (1 - F) with F the
+// Schlick Fresnel of the STRAIGHT ray at the geometric normal (transmissionFresnel with eta = ior), per medium the Beer-Lambert factor of the
+// signed distance sum (an entry surface adds +sigma_t t, an exit surface -sigma_t t: the medium length is the sum of the (exit - entry)
+// distances along the straight ray), and ONCE per caster the transmission factor x (1 - metallic) x tint at the ENTRY surface (a thin-walled
+// single surface counts as the entry).  Caustics are excluded: the ray never bends.
+// ---------------------------------------------------------------------------
+PHOSPHOR_GPU_CONSTANT float kShadowLogFloor = 1.0e-30f; // a zero factor is ln(1e-30) = -69: exp() of the sum is 0 at float precision
+PHOSPHOR_GPU_CONSTANT float kShadowDefaultIor = 1.5f;   // a transmissive material without the ior block (glTF default)
+
+/// ln(1 - F) of one crossed interface for the ray cosine `cosI` (the |cosine| with the geometric normal); ior <= 0 (the special no-Fresnel mode) gives 0.
+PHOSPHOR_LOBE_FN float transmissionShadowLnPass(float cosI, float ior) {
+    if (!(ior > 0.0f)) return 0.0f;
+    const TransmissionFresnel f = transmissionFresnel(PHOSPHOR_LOBE_ABS(cosI), ior);
+    const float pass = 1.0f - f.f;
+    return PHOSPHOR_LOBE_LOG(pass < kShadowLogFloor ? kShadowLogFloor : pass);
+}
+
+/// ln of a non-negative factor, floored.
+PHOSPHOR_LOBE_FN float transmissionShadowLn(float factor) {
+    return PHOSPHOR_LOBE_LOG(factor < kShadowLogFloor ? kShadowLogFloor : factor);
+}
+
+/// sigma_t of one channel of a homogeneous medium (1 / metres): -ln(c) / distance, 0 without attenuation (colour 1, distance <= 0 or infinite).
+PHOSPHOR_LOBE_FN float transmissionShadowSigma(float color, float distance) {
+    if (!(distance > 0.0f) || !(distance < 3.0e38f)) return 0.0f;
+    const float c = color < kTransmissionMinColor ? kTransmissionMinColor : (color > 1.0f ? 1.0f : color);
+    return -PHOSPHOR_LOBE_LOG(c) / distance;
+}
+
 } // namespace phosphor
