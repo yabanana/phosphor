@@ -17,7 +17,7 @@ replica, the effect is B / A - 1 per replica, reported as the median of 3 replic
   python3 -I tools/f15_layers_timing.py run --out build/f15-layers-timing [--binning] [--replicas 3] [--resolution 1920x1080]
   python3 -I tools/f15_layers_timing.py summarize --out DIR          rebuild the table from the reports of a run
 
-The resolve unit is the report's `gpu_timing` unit whose name contains "resolve" (summed when the resolve is split in dispatches or bins).  Nothing
+The resolve time is the report passes named "Material resolve" and "Material classification" (the cost of binning) (`passes[].gpu_ms.mean`, summed when split in several units).  Nothing
 here claims a number: results are written to DIR/results.json and DIR/summary.md for perf-log.md / opt-log.md.
 """
 from __future__ import annotations
@@ -70,14 +70,14 @@ def run_name(run):
 
 
 def resolve_ms(report):
-    """Mean GPU ms per frame of the units whose name contains "resolve" (the report's gpu_timing)."""
-    timing = report.get("gpu_timing") or {}
-    units = timing.get("passes") or timing.get("units") or []
+    """Mean GPU ms per frame of the report's `passes` named "Material resolve" (one unit; summed if the resolve is split in several units).
+    The report's per-pass entries are {name, queue, fused, gpu_ms: {mean, p99, max, ...}} (tools/perf_record.sh reads the same keys)."""
     total = 0.0
     found = False
-    for unit in units:
-        if "resolve" in str(unit.get("name", "")).lower():
-            total += float(unit.get("gpu_ms", unit.get("mean_ms", 0.0)))
+    for unit in report.get("passes") or []:
+        if str(unit.get("name", "")).lower().startswith(("material resolve", "material classification")):  # the classification is the price of the bins
+            gpu = unit.get("gpu_ms")
+            total += float(gpu["mean"] if isinstance(gpu, dict) else gpu)
             found = True
     return total if found else None
 
