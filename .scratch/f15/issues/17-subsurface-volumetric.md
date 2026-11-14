@@ -125,3 +125,23 @@ decision rule of ticket 10 points at ticket 18; not applied here.
   DI local lights are not diffused; combinations with coat/sheen/anisotropy/iridescence/transmission keep the base diffuse; the on-tile
   resolve experiment has no diffusion; weight/colour/radius-scale textures modulate the irradiance but not the profile shape; visual_check,
   archive_check, hitch_check and the diffusion pass cost are the orchestrator's.
+
+2026-11-14 — orchestrator decision on the engine record (integrated as 7c96691…b618511; the archive conflict was resolved by
+semantic filtering of the commit's own additions, +22 compute and +6 render).
+- Measured gap: the engine misses the bound by a lot. The engine agent's emulation shows the ground truth returns about
+  half the energy of colour x (1 - F).
+- Cause: the reference maps colour to a single-scattering albedo with the draft's Kulla-Conty inversion. That inversion,
+  like van de Hulst, ignores the dielectric boundary. Under an ior-1.5 boundary, internal reflection traps light and
+  the observed albedo falls well below colour.
+- OpenPBR, the semantics of ADR-0005, defines subsurface_color as the OBSERVED albedo: "the fraction of the energy
+  transmitted through the interface that is transmitted back out and observed", E_ms = (1 - E_spec) C. It names the
+  boundary-ignoring inversions as approximations and prescribes no formula.
+- The engine's contract follows that definition, and so does the sub-pixel key (colour = base colour equals no block).
+- Decision: the ground truth's medium albedo is chosen so that a semi-infinite slab under the SAME boundary satisfies
+  the OpenPBR relation. The boundary-aware inversion is tabulated with Mitsuba (Sonnet agent running).
+- Unchanged:
+  - gates, thresholds, fixtures and controls;
+  - the draft's Kulla-Conty formula stays documented as the draft's approximation (the loader maps multiscatterColor to
+    C, flagged `draft`).
+- Ticket 18 (decision 10's rule): it is decided on the re-measured gap against the corrected reference, not on the
+  current numbers.

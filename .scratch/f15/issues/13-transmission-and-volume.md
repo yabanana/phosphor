@@ -121,3 +121,34 @@ Measured (reference = Mitsuba 3.9.1, `tools/f15_check.py --evaluate`; gate = per
 Open: the full runner with 1024-spp references of roughness-ior / attenuation / glass-behind-glass / emissive-panel (hours of Mitsuba CPU time); factor-tint slab p95 15.8 %;
 thin-walled delta-light BTDF is unvalidated against a reference (no analytic-light fixture); temporal clip, Khronos side by side (22), Sponza D2 (24), cost measurement,
 `archive_check.sh` / `hitch_check.sh` not run.
+
+2026-11-14 — orchestrator: battery `battery13e` (full runner, 1024-spp references) and the factor-tint diagnosis.
+- Full runner (`build/f15-check/t13e`, saved as `results-battery13e.json`): every transmission key passes except
+  `transmission-factor-tint`, whose slab 0 (attenuation 0.2, t = 1) has mean 3.1 % and p95 15.78 % (limit 15 %), the same
+  value as the engine agent's run: systematic, not noise.
+- Diagnosis: the high-error pixels are a ~9 px strip on the slab's left side face, seen at 65 deg incidence. Its mirror
+  reflection sees an emissive checkerboard cell (radiance 2, four times the environment). The engine is about 0.05
+  darker in all three channels. An independent analytic Fresnel-tree tracer of the box agrees with the Mitsuba
+  reference to 0.69 % mean on the slab. Exact Fresnel there is 0.120 and Schlick 0.101.
+  - With the analytic Schlick-minus-exact correction added to the Mitsuba reference, the engine's p95 on that object
+    falls to 12.05 %.
+  - Against the noise-free Schlick tracer it is 9.9 %.
+- Decision (orchestrator): the reference must model the glTF Fresnel. The engine follows glTF (Schlick, the
+  transmitted cosine on the leaving side, TIR = 1). The reference used Mitsuba's exact Fresnel for smooth solids while
+  it already used Schlick for thin walls. The bound is unchanged.
+  - `gltf_dielectric` (Schlick) now renders smooth solids and the thin-as-volume control (475d05f, Sonnet agent,
+    reviewed). Its exact mode is event-for-event equal to Mitsuba's `dielectric`. Schlick mode matches the analytic
+    sphere tracer.
+  - On slab 0 the new render agrees with the Schlick tracer at 0.59 % mean, as the old render did with the exact one
+    (0.61 %).
+  - Rough solids keep Mitsuba's Walter model (declared difference).
+  - The shadow reference now records the base module's sha (d77ce96), so its cache re-renders when that module changes.
+- The 1024-spp transmission references are being re-rendered with the corrected reference (`build/f15-exact/tref13.log`).
+- Still open in this ticket:
+  - the temporal clip with transmission, the refract-axis clip control and the MetalFX reactive proof (Sonnet agent
+    running);
+  - O7 on the transmission scenes;
+  - the forced overflow on a glass fixture, rerun by the orchestrator;
+  - the crossings bound (structural: `kTransmissionMaxEvents` bounds the loop) and the command-buffer time on
+    glass-behind-glass;
+  - cost on a quiet machine (ticket 24), the Khronos pages (ticket 22) and Sponza D2 (ticket 24).
