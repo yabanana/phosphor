@@ -114,7 +114,7 @@ struct ReflectionPasses::Impl {
         for(auto& f:slots){for(auto*& t:f.sampleTables)t=lighting::table(c);for(auto*& t:f.captureTables)t=lighting::table(c);for(auto*& t:f.filterTables)t=lighting::table(c);for(auto*& t:f.validateTables)t=lighting::table(c);
             for(auto** t:{&f.reduceTable,&f.aoTable,&f.composeTable,&f.preComposeTable,&f.zeroTable,&f.clearTable,&f.checkTable,&f.publishTable,&f.rawValidateTable,&f.inputPoisonTable,&f.inputCheckTable})*t=lighting::table(c);
             if(o.captureLinearSignal==8)f.filteredIndirectTable=lighting::table(c);
-            f.errors=lighting::buffer(c,64,"F13 numerical state counters",true);std::memset(f.errors->contents(),0,64);}
+            f.errors=lighting::buffer(c,128,"F13 numerical state counters",true);std::memset(f.errors->contents(),0,128);}
         aoSettings.radius=o.aoRadius;aoSettings.rays=o.aoRays?o.aoRays:((o.reducedLighting||o.forceApple9)?2:4);
     }
     ~Impl(){c.waitIdle();releaseProbe();c.memory().release(probeMetadata,MemoryCategory::RayTracing);c.memory().release(probeFault,MemoryCategory::RayTracing);c.memory().release(staticSlots,MemoryCategory::RayTracing);c.memory().release(dummyBuffer,MemoryCategory::RayTracing);c.memory().release(dummyTexture,MemoryCategory::RayTracing);
@@ -358,12 +358,12 @@ struct ReflectionPasses::Impl {
         outputHalf=false;composeParams.pad[0]=0;composeAddress=lighting::upload(c,composeParams);
         preComposeParams=composeParams;preComposeParams.flags&=REFLECT_COMPOSE_DI|REFLECT_COMPOSE_GI|REFLECT_COMPOSE_LOBE_GUIDE_VALID|REFLECT_COMPOSE_GI_BACK;
         if(preComposeParams.flags&REFLECT_COMPOSE_DI)preComposeParams.flags|=REFLECT_COMPOSE_EXCLUDE_EMISSION;preComposeAddress=lighting::upload(c,preComposeParams);
-        errorsRef=graph.importBuffer("F13 completed signal error words",{64},ImportPerFrame|ImportOutput);
+        errorsRef=graph.importBuffer("F13 completed signal error words",{128},ImportPerFrame|ImportOutput);
         dummyRef=graph.importBuffer("F13 disabled GI safe buffer",{dummyBuffer->length()},ImportContentsDefined);
         dummyTexRef=graph.importTexture("F13 disabled GI zero texture",{Format::RGBA32Float,1,1},ImportContentsDefined);
         sampleRef=graph.importBuffer("F13 per-sample specular records",{slot.samples->length()},ImportPerFrame);
         metadata=graph.importBuffer("F13 selected secondary hit metadata",{slot.metadata->length()},ImportPerFrame);
-        graph.addPass("F13 numerical counters clear",PassType::Compute,[this](PassBuilder& b){errorsRef=b.write(errorsRef,Usage::ShaderWrite,StageDispatch);},[this](PassContext& ctx){auto* t=slots[frame.slot].clearTable;t->setAddress(slots[frame.slot].errors->gpuAddress(),0);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,clear,t,16);});
+        graph.addPass("F13 numerical counters clear",PassType::Compute,[this](PassBuilder& b){errorsRef=b.write(errorsRef,Usage::ShaderWrite,StageDispatch);},[this](PassContext& ctx){auto* t=slots[frame.slot].clearTable;t->setAddress(slots[frame.slot].errors->gpuAddress(),0);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,clear,t,32);});
         if(options.debugReflectionCorrupt>=2){if(options.debugReflectionCorrupt==3)receivers=graph.importBuffer("F13 owned poisoned receiver guides",{slot.testSurfaces->length()},ImportPerFrame);
             graph.addPass("F13 authored input negative",PassType::Compute,[this](PassBuilder& b){b.read(direct.surfaceRef(),Usage::ShaderRead,StageDispatch);b.read(direct.motion(),Usage::ShaderRead,StageDispatch);
                 if(options.debugReflectionCorrupt==3)receivers=b.write(receivers,Usage::ShaderWrite,StageDispatch);motion=b.createTexture("F13 owned negative pixel motion",{Format::RG32Float,frame.width,frame.height});motion=b.write(motion,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("reflection_input_poison");
@@ -467,7 +467,8 @@ u64 ReflectionPasses::version()const{const std::pair<u64,u64> components{impl_->
 bool ReflectionPasses::check(u32 slot)const{const auto& f=impl_->slots.at(slot);const auto* errors=static_cast<const u32*>(f.errors->contents());
     if(impl_->options.debugLighting&&errors[15])std::printf("REFLECTION probe HDR slot %u | raw_above_half %u | raw_max %.9g %.9g %.9g | format %s\n",slot,errors[15],
         double(std::bit_cast<float>(errors[12])),double(std::bit_cast<float>(errors[13])),double(std::bit_cast<float>(errors[14])),
-        impl_->probeFormat==MTL::PixelFormatRGBA32Float?"RGBA32Float":"RGBA16Float");bool okay=!impl_->options.debugLighting||errors[0]==f.expected;for(u32 i=1;i<8;++i)okay=okay&&!errors[i];if(!okay){std::fprintf(stderr,"REFLECTION check slot %u expected %u counts %u %u %u %u %u %u %u %u\n",slot,f.expected,errors[0],errors[1],errors[2],errors[3],errors[4],errors[5],errors[6],errors[7]);
+        impl_->probeFormat==MTL::PixelFormatRGBA32Float?"RGBA32Float":"RGBA16Float");if(impl_->options.debugLighting&&errors[16])std::printf("REFLECTION back-face continuations slot %u | culled single-sided back faces passed %u | bound exhausted %u\n",slot,errors[16],errors[17]);
+    bool okay=!impl_->options.debugLighting||errors[0]==f.expected;for(u32 i=1;i<8;++i)okay=okay&&!errors[i];if(!okay){std::fprintf(stderr,"REFLECTION check slot %u expected %u counts %u %u %u %u %u %u %u %u\n",slot,f.expected,errors[0],errors[1],errors[2],errors[3],errors[4],errors[5],errors[6],errors[7]);
     if(errors[8])std::fprintf(stderr,"REFLECTION motion raw slot %u count %u first_tid %u bits %08x %08x\n",slot,errors[8],errors[9],errors[10],errors[11]);return false;}return !f.customUsed||impl_->denoise.check(slot);}
 bool ReflectionPasses::ready()const{const auto& i=*impl_;const auto& o=i.options;
     if(!i.p.compute(i.compose)||!i.p.compute(i.zero)||!i.p.compute(i.clear)||!i.p.compute(i.prefilter)||!i.p.compute(i.validateProbe)||!i.p.compute(i.publishProbe))return false;

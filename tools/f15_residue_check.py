@@ -10,6 +10,8 @@ Cases:
             removes the diffuse weight 1 - E(N.V) the specular estimate then has to give back).
   mirror-env  a perfect mirror floor seeing a wall in the sun shadow of an opaque panel, GI off: the wall seen in the mirror must carry the same
             ambient light as the wall seen directly (mirror / direct ratio), shadowed and lit.
+  backface  a mirror floor and a thin glass pane over a single-sided plane seen from BEHIND (culled by the rasteriser, a lit wall behind it): the transport
+            ray must go on past the plane and show the wall as the camera sees it (mirror / direct and glass / direct ratios).
   all       every case
 
 Exit codes: 0 gates hold (and every control fails as it must), 1 a gate failed, 2 usage, 3 a control did not fail (non-discriminating),
@@ -19,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import pathlib
 import sys
 
@@ -141,7 +144,65 @@ def case_mirror_env(binary, control, out):
     return ok, control_fails, report
 
 
-CASES = {"grazing": case_grazing, "mirror-env": case_mirror_env}
+# --- transport rays that meet the BACK of a single-sided opaque surface ------------------------------------------------------------------
+
+BACKFACE_GATE = (0.85, 1.15)
+BACKFACE_CONTROL_MAX = 0.5
+GLASS_THIN = {"KHR_materials_transmission": {"transmissionFactor": 1.0}, "KHR_materials_ior": {"ior": 1.0}}
+
+
+def backface_scene(folder):
+    """A lit wall W2 (z = -0.4), a single-sided red plane W1 (z = 0) whose FRONT faces away from the camera and the mirror (the rasteriser culls
+    it: the camera sees W2 through it), a perfect mirror floor and a thin glass pane (IOR 1: no bend, no Fresnel) in front of W1."""
+    scene = fx.Scene()
+    w2 = scene.material("lit wall", (0.8, 0.8, 0.8), 0.0, 1.0)
+    w1 = scene.material("single-sided plane, back to the viewer", (0.8, 0.1, 0.1), 0.0, 1.0)
+    mirror = scene.material("mirror", (1.0, 1.0, 1.0), 1.0, 0.0)
+    glass = scene.material("glass", (1.0, 1.0, 1.0), 0.0, 0.0, GLASS_THIN)
+    scene.quad([(-1.0, -0.6, -0.4), (1.0, -0.6, -0.4), (1.0, 0.9, -0.4), (-1.0, 0.9, -0.4)], w2)
+    scene.quad([(1.0, -0.6, 0.0), (-1.0, -0.6, 0.0), (-1.0, 0.9, 0.0), (1.0, 0.9, 0.0)], w1)  # reversed winding: the normal is -z
+    scene.quad([(-1.6, FLOOR_Y, 2.2), (1.6, FLOOR_Y, 2.2), (1.6, FLOOR_Y, -0.4), (-1.6, FLOOR_Y, -0.4)], mirror)
+    scene.quad([(0.45, -0.4, 0.15), (0.85, -0.4, 0.15), (0.85, 0.1, 0.15), (0.45, 0.1, 0.15)], glass)
+    return scene, scene.write(folder)
+
+
+BACKFACE_ROWS = (-0.12, 0.02)
+BACKFACE_REGIONS = {"direct": (-0.70, BACKFACE_ROWS[0], -0.30, BACKFACE_ROWS[1]), "glass": (0.55, BACKFACE_ROWS[0], 0.80, BACKFACE_ROWS[1])}
+
+
+def backface_boxes(scene):
+    bmin, bmax = scene.bounds()
+    centre, distance = fx.frame_rig(bmin, bmax)
+    x0, y0, x1, y1 = BACKFACE_REGIONS["direct"]
+    return {"direct": fx.region_pixels((x0, y0, x1, y1), -0.4, centre, distance),
+            "glass": fx.region_pixels(BACKFACE_REGIONS["glass"], -0.4, centre, distance),
+            "mirror": fx.region_pixels((x0, 2 * FLOOR_Y - y1, x1, 2 * FLOOR_Y - y0), -0.4, centre, distance)}
+
+
+def measure_backface(binary, scene, path, out):
+    image = fx.read_png_gray(fx.capture(binary, path, out, {"--reflections": "rt", "--gi": "off"}, ["--debug-lighting", "1"]))
+    means = {name: fx.region_mean(image, box) for name, box in backface_boxes(scene).items()}
+    log = (out / "engine.log").read_text()
+    skipped = [int(m) for m in re.findall(r"back-face continuations slot \d+ \| culled single-sided back faces passed (\d+)", log)]
+    return {"means": means, "mirror_ratio": means["mirror"] / max(means["direct"], 1e-6), "glass_ratio": means["glass"] / max(means["direct"], 1e-6),
+            "continuations_reported": max(skipped) if skipped else 0}
+
+
+def case_backface(binary, control, out):
+    scene, path = backface_scene(out / "backface" / "scene")
+    fixed = measure_backface(binary, scene, path, out / "backface" / "fixed")
+    ok = all(BACKFACE_GATE[0] <= fixed[k] <= BACKFACE_GATE[1] for k in ("mirror_ratio", "glass_ratio")) and fixed["continuations_reported"] > 0
+    report = {"fixed": fixed, "gates_hold": ok}
+    control_fails = None
+    if control:
+        report["control"] = measure_backface(control, scene, path, out / "backface" / "control")
+        c = report["control"]
+        control_fails = c["mirror_ratio"] < BACKFACE_CONTROL_MAX and c["glass_ratio"] < BACKFACE_CONTROL_MAX
+        report["control_fails_as_required"] = control_fails
+    return ok, control_fails, report
+
+
+CASES = {"grazing": case_grazing, "mirror-env": case_mirror_env, "backface": case_backface}
 
 
 def main(argv=None):

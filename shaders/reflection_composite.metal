@@ -4,7 +4,7 @@
 #include "renderer/emission_pack.h"
 #ifndef PHOSPHOR_REFL_LOBE
 kernel void reflection_counter_clear(device atomic_uint* counts [[buffer(0)]],uint tid [[thread_position_in_grid]]){
-    if(tid<16)atomic_store_explicit(counts+tid,0u,memory_order_relaxed);
+    if(tid<32)atomic_store_explicit(counts+tid,0u,memory_order_relaxed);
 }
 // Metadata is per-sample, each block stridePixels long (reflection_reduce.h).
 kernel void reflection_reduce(constant GPUReflectionReduceParams& p [[buffer(0)]],const device GPUSpecularSample* samples [[buffer(1)]],
