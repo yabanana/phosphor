@@ -44,6 +44,12 @@ class FilterHarvest(unittest.TestCase):
         self.assertEqual(sorted(d["label"] for d in functions["library_function_descriptors"]), ["LCS", "LFS", "LVS"])
         self.assertEqual(kept["libraries"], CORPUS["libraries"])
 
+    def test_a_new_kernel_without_the_constant_is_kept_by_name(self):
+        kept = f.filter_harvest(CORPUS, 22, functions_by_name=("cs",))
+        self.assertEqual(kept["pipeline_descriptors"]["compute_pipeline_descriptors"],
+                         [{"compute_function_descriptor": "fnd:C22"}, {"compute_function_descriptor": "fnd:LCS"}])
+        self.assertEqual(sorted(d["label"] for d in kept["function_descriptors"]["library_function_descriptors"]), ["LCS", "LFS", "LVS"])
+
     def test_other_constant_and_unknown_references(self):
         self.assertEqual([d["label"] for d in f.filter_harvest(CORPUS, 21)["pipeline_descriptors"]
                           ["render_pipeline_descriptors"]], ["A", "B"])

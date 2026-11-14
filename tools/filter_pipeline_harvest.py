@@ -64,12 +64,14 @@ def semantic_keys(corpus):
             for kind, descriptors in corpus.get("pipeline_descriptors", {}).items() for d in descriptors}
 
 
-def filter_harvest(corpus, constant, present=None):
-    """`present`: a corpus whose pipelines are dropped from the result (semantic identity, see semantic_keys)."""
+def filter_harvest(corpus, constant, present=None, functions_by_name=()):
+    """`present`: a corpus whose pipelines are dropped from the result (semantic identity, see semantic_keys).
+    `functions_by_name`: library functions (new kernels without a specialisation constant, e.g. a new pass) whose pipelines are kept too."""
     functions = corpus.get("function_descriptors", {})
     specialized = {d["label"]: d for d in functions.get("specialized_function_descriptors", [])}
     library = {d["label"]: d for d in functions.get("library_function_descriptors", [])}
     wanted = {label for label, d in specialized.items() if specialises(d, constant)}
+    wanted |= {label for label, d in library.items() if d.get("name") in set(functions_by_name)}
     skip = semantic_keys(present) if present else set()
     own = {}
     if skip:
@@ -103,13 +105,15 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("harvest", type=Path)
     parser.add_argument("--constant", type=int, required=True, help="function-constant index (22 = MATERIAL_FEATURES)")
+    parser.add_argument("--function", action="append", default=[],
+                        help="also keep the pipelines of this library function (a new kernel without the constant); repeatable")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--skip-present", type=Path,
                         help="drop pipelines already in this corpus (e.g. shaders/pipelines.mtl4-json), compared by "
                              "function names, constants and state rather than by the metallib-dependent labels")
     args = parser.parse_args(argv)
     present = json.loads(args.skip_present.read_text()) if args.skip_present else None
-    kept = filter_harvest(json.loads(args.harvest.read_text()), args.constant, present)
+    kept = filter_harvest(json.loads(args.harvest.read_text()), args.constant, present, args.function)
     args.output.write_text(json.dumps(kept, indent=2, sort_keys=True) + "\n")
     counts = {kind: len(v) for kind, v in kept["pipeline_descriptors"].items()}
     print(json.dumps({"constant": args.constant, "pipelines": counts}))
