@@ -111,17 +111,23 @@ kernel void REFL_KERNEL(reflection_composite)(constant GPUReflectionComposeParam
     if(all(pixel<uint2(p.width,p.height))){const GPUDISurface s=surfaces[pixel.y*p.width+pixel.x];
         if(s.valid){if(p.flags&REFLECT_COMPOSE_EXCLUDE_EMISSION)color=max(color-unpackEmission3(s.pad[1]),0.0f);
             // ADR-0006: the base diffuse receives 1 - E of the dielectric specular layer.
-            const float envNV=max(dot(normalize(diVec(s.shadingNormal)),normalize(diVec(s.viewDirection))),1e-4f);
-            float envDiffuse=bsdfEnvDiffuseWeight(s.roughness,envNV,phosphor::DfgTable);
+            // F13.1 (C22-D3, found in F15): a shading normal that faces away from the viewer (the silhouette ring of a tessellated smooth surface,
+            // N.V < 0 while the geometric N.V > 0) has NO specular estimate: reflectionSpecularBRDF, reflectionLobeWeight and the refraction sample
+            // all reject N.V <= 0.  The diffuse base then keeps its full weight: it must not give up 1 - E to a layer that returns nothing
+            // (the ring pixel lost both, 0.17 against 0.46).
+            const float nvRaw=dot(normalize(diVec(s.shadingNormal)),normalize(diVec(s.viewDirection)));
+            const bool noSpecularEstimate=!(nvRaw>0.0f);
+            const float envNV=max(nvRaw,1e-4f);
+            float envDiffuse=noSpecularEstimate?1.0f:bsdfEnvDiffuseWeight(s.roughness,envNV,phosphor::DfgTable);
 #ifdef PHOSPHOR_REFL_LOBE
             float3 sheenTerm=float3(0); // F15.1 (ticket 10): S E (coat attenuation), the environment term of the sheen layer
             float3 thinTerm=float3(0); // F15.1 (ticket 16): w color (1 - metallic) (1 - E_d) (1 - 0.16 N.V), the transmitted diffuse (radiance / pi at -N)
             // F15.1 (ticket 08): extended pixels receive 1 - max(E_dielectric) of their own specular lobe.
             {const auto lobe=REFL_LOBE(p.flags,REFLECT_COMPOSE_LOBE_GUIDE_VALID,pixel.y*p.width+pixel.x,s);
-                if(lobe.extended)envDiffuse=bsdfSpecEnvIrid(lobe.spec,lobe.irid,diVec(s.albedo),saturate(s.metallic),(p.flags&REFLECT_COMPOSE_SPEC)?lobe.diffuseRoughness:lobe.envRoughness,envNV,phosphor::DfgTable).diffuseWeight;
+                if(lobe.extended&&!noSpecularEstimate)envDiffuse=bsdfSpecEnvIrid(lobe.spec,lobe.irid,diVec(s.albedo),saturate(s.metallic),(p.flags&REFLECT_COMPOSE_SPEC)?lobe.diffuseRoughness:lobe.envRoughness,envNV,phosphor::DfgTable).diffuseWeight;
                 // F15.1 (ticket 09): the diffuse under a coat receives 1 - c F_c(|V.Nc|).
                 // F15.1 (ticket 13): the diffuse base of a transmissive material is mixed by 1 - t.
-                if(lobe.trans)envDiffuse*=1.0f-lobe.transFactor;
+                if(lobe.trans&&!noSpecularEstimate)envDiffuse*=1.0f-lobe.transFactor; // no refraction sample either at N.V <= 0: the transmitted share is not released
                 float coatAtt=1.0f;
                 if(lobe.coat){coatAtt=1.0f-lobe.coatFactor*bsdfCoatFresnel(abs(dot(lobe.coatNormal,normalize(diVec(s.viewDirection)))));envDiffuse*=coatAtt;}
                 // F15.1 (ticket 10): the diffuse under a sheen layer receives 1 - max3(S) E(N.V) (view-only form); the sheen term
