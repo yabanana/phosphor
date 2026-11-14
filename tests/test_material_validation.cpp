@@ -1088,7 +1088,7 @@ TEST_CASE("F15.3 volumetric subsurface grids declare weight/radius columns over 
     CHECK(sun.environment == 0.0f);
     CHECK(sun.sunIrradiance == 3.0f);
     CHECK(sun.baseColor == glm::vec3(0.8f));
-    CHECK(sun.roughness == std::vector<float>(5, 0.7f));
+    CHECK(sun.roughness == std::vector<float>(5, 0.35f));
     CHECK(sun.metallic == std::vector<float>(2, 0.0f));
     CHECK(sun.volumetricWeight == std::vector<float>{0.0f, 0.5f, 1.0f, 1.0f, 1.0f});
     CHECK(sun.volumetricRadius == std::vector<float>{0.08f, 0.08f, 0.04f, 0.08f, 0.16f});
@@ -1152,7 +1152,7 @@ TEST_CASE("F15.3 volumetric carriers hold the block of their column and row, a v
             const EntityID e = f.spheres()[row * s.roughness.size() + col];
             const auto& m = std::as_const(ecs).getComponent<MaterialComponent>(e);
             CHECK(m.metallicFactor == 0.0f);
-            CHECK(m.roughnessFactor == 0.7f);
+            CHECK(m.roughnessFactor == 0.35f);
             if (s.volumetricWeight[col] == 0.0f) {
                 CHECK_FALSE(m.extension); // the neutral material
                 continue;

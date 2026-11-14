@@ -33,8 +33,9 @@ except ImportError:  # pragma: no cover
 
 INVALID = base.INVALID
 SPHERE_RADIUS = 0.4
-INDEX_MATCHED_TOLERANCE = 0.05      # measured worst |A - rho| 0.043 (rho 0.3), 0.035 (0.9); the numpy walk of the Kulla-Conty test: 0.01-0.07
-ANGLE_SPREAD_BOUND = 0.10      # measured: diffuse vs 0 / 45 / 70 degrees differ by <= 6 % up to alpha 0.99 (A <= 0.36)
+INDEX_MATCHED_TOLERANCE = 0.02      # measured worst |A - rho| 0.004 up to rho 0.7 (the numpy walk of the Kulla-Conty test: 0.01-0.07)
+NOISE_BOUND = 0.003      # measured max 0.0013
+ANGLE_SPREAD_BOUND = 0.05      # measured: diffuse vs 0 / 45 / 70 degrees differ by <= 3 % (A > 0.05)
 
 
 def f32bits(x):
@@ -89,7 +90,7 @@ def volumetric_records(weight, color, radius, scale, g, thickness=0.8, attenuati
     return [record0, record1, record2, [0] * 20]
 
 
-def make_snapshot(directory, pieces, sun, outward=False, width=320, height=180, roughness=0.7, base_color=(0.8, 0.8, 0.8), camera=(0.0, 0.0, 4.0),
+def make_snapshot(directory, pieces, sun, outward=False, width=320, height=180, roughness=0.35, base_color=(0.8, 0.8, 0.8), camera=(0.0, 0.0, 4.0),
                   sky=0.0):
     """pieces: list of dicts {position, block: None | dict(weight, color, radius, scale, g)}; one material per piece."""
     root = pathlib.Path(directory)
@@ -205,6 +206,9 @@ class Mapping(unittest.TestCase):
         with self.assertRaises(ValueError):
             sss.medium_coefficients(block, None, 0.123)  # no curve for another boundary: regenerate the table
         # a colour above the energy the boundary lets out saturates at alpha = 1 and says so
+        reachable = sss.medium_coefficients({**block, "color": [0.85, 0.55, 0.45]}, None, alpha_b)
+        self.assertFalse(any(reachable["saturated"]))
+        np.testing.assert_allclose(reachable["albedo_reached"], [0.85, 0.55, 0.45], atol=1e-6)
         bright = sss.medium_coefficients({**block, "color": [0.9, 0.9, 0.9]}, None, alpha_b)
         self.assertTrue(all(bright["saturated"]))
         np.testing.assert_allclose(bright["albedo"], 1.0)
@@ -260,27 +264,24 @@ class ObservedAlbedoTable(unittest.TestCase):
         return sss.curve_for(g, sss.fixture_alpha_b(), ior)
 
     def test_table_covers_the_fixture_combinations_and_is_monotone_within_noise(self):
-        for g in (0.0, 0.3):
-            for ior in (sss.BOUNDARY_IOR, 1.0):
-                points = self.curve(g, ior)["points"]
-                self.assertEqual([p["albedo"] for p in points], sss.ALBEDO_GRID)
-                self.assertAlmostEqual(points[0]["A"], 0.0, delta=1e-3)
-                # (the index-matched curve above 0.99 is truncated by the path depth bound and noisy: not used by the inversion)
-                usable = [p for p in points if ior != 1.0 or p["albedo"] <= 0.99]
-                for lo, hi in zip(usable, usable[1:]):
-                    self.assertGreater(hi["A"] + 3 * (lo["noise"] + hi["noise"]) + 0.002, lo["A"], (g, ior, lo["albedo"]))
-                # the measurement noise is small against the 10 % bound it serves (largest near the A_max plateau)
-                self.assertLess(max(p["noise"] for p in usable if p["albedo"] <= 0.99), 0.004)
-                self.assertLess(max(p["noise"] for p in usable), 0.04)   # heavy tails of the plateau; pooled by the isotonic fit
+        for g, ior in ((0.0, sss.BOUNDARY_IOR), (0.3, sss.BOUNDARY_IOR), (0.0, 1.0)):
+            points = self.curve(g, ior)["points"]
+            expected = sss.ALBEDO_GRID if ior != 1.0 else [a for a in sss.ALBEDO_GRID if a <= 0.99]
+            self.assertEqual([p["albedo"] for p in points], expected)
+            self.assertAlmostEqual(points[0]["A"], 0.0, delta=1e-3)
+            for lo, hi in zip(points, points[1:]):
+                self.assertGreater(hi["A"] + 3 * (lo["noise"] + hi["noise"]) + 0.002, lo["A"], (g, ior, lo["albedo"]))
+            # the measurement noise is small against the 10 % bound it serves
+            self.assertLess(max(p["noise"] for p in points), NOISE_BOUND)
 
     def test_inversion_reproduces_the_table_and_saturates_above_the_energy_the_boundary_returns(self):
         a_max = sss.observed_albedo(1.0, self.curve())
-        self.assertGreater(a_max, 0.3)
-        self.assertLess(a_max, 0.6)       # the lossy single-scattering GGX boundary lets out less than 0.6
+        self.assertGreater(a_max, 0.85 + 0.02)   # roughness 0.35: the brightest fixture colour is reachable (the rule that chose it)
+        self.assertLess(a_max, 0.95)             # the lossy single-scattering GGX boundary keeps a few percent
         for g in (0.0, 0.3):
             curve = self.curve(g)
             a_max = sss.observed_albedo(1.0, curve)
-            for target in (0.02, 0.1, 0.2, 0.3, 0.4, 0.95 * a_max):
+            for target in (0.02, 0.1, 0.3, 0.55, 0.85, 0.99 * a_max):
                 alpha, reached, saturated = sss.invert_observed_albedo(target, curve)
                 self.assertFalse(saturated)
                 self.assertAlmostEqual(reached, target, delta=1e-6)
@@ -290,29 +291,29 @@ class ObservedAlbedoTable(unittest.TestCase):
                 alpha, reached, _ = sss.invert_observed_albedo(p["A"], curve)
                 self.assertAlmostEqual(sss.observed_albedo(alpha, curve), min(p["A"], a_max), delta=1e-6)
         self.assertEqual(sss.invert_observed_albedo(0.0, curve), (0.0, 0.0, False))
-        alpha, reached, saturated = sss.invert_observed_albedo(0.9, curve)
+        alpha, reached, saturated = sss.invert_observed_albedo(0.93, curve)
         self.assertEqual((alpha, saturated), (1.0, True))
         self.assertAlmostEqual(reached, sss.observed_albedo(1.0, curve))
 
     def test_the_draft_mapping_fails_the_openpbr_relation_under_this_boundary(self):
-        # Negative control: the Kulla-Conty alpha(C) (boundary ignored) behind the ior 1.5 rough boundary returns about half of C
-        # for the fixture colours; the boundary-aware inversion returns C wherever the boundary allows it.
+        # Negative control: the Kulla-Conty alpha(C) (boundary ignored) behind the ior 1.5 rough boundary returns well below C for the
+        # fixture colours (0.76 x C at 0.85, 0.48 x at 0.45, 0.41 x at 0.30); the boundary-aware inversion returns C for all of them.
         for g in (0.0, 0.3):
             curve = self.curve(g)
-            for colour in (0.85, 0.55, 0.45):
+            for colour, bound in ((0.85, 0.80), (0.55, 0.65), (0.45, 0.55), (0.30, 0.45)):
                 draft = sss.observed_albedo(float(sss.single_scatter_albedo(colour, g)), curve)
-                self.assertLess(draft / colour, 0.62, (g, colour, draft))
-            self.assertGreater(0.85 / sss.observed_albedo(float(sss.single_scatter_albedo(0.85, g)), curve), 1.6)  # the ~2x miss
-            alpha, reached, saturated = sss.invert_observed_albedo(0.30, curve)
-            self.assertAlmostEqual(reached, 0.30, delta=1e-6)
-            self.assertGreater(alpha, float(sss.single_scatter_albedo(0.30, g)))
+                self.assertLess(draft / colour, bound, (g, colour, draft))
+                alpha, reached, saturated = sss.invert_observed_albedo(colour, curve)
+                self.assertFalse(saturated)
+                self.assertAlmostEqual(reached, colour, delta=1e-6)
+                self.assertGreater(alpha, float(sss.single_scatter_albedo(colour, g)))
 
     def test_index_matched_boundary_agrees_with_the_draft_relation(self):
         # A check of the measurement itself: without an interface (ior 1) the observed albedo under diffuse incidence is what the
         # boundary-blind van de Hulst / Kulla-Conty relation describes (g = 0; the fit is of the diffuse albedo).
         curve = self.curve(0.0, 1.0)
         worst = 0.0
-        for rho in (0.1, 0.3, 0.5, 0.7, 0.9):  # above, alpha -> 1 paths exceed the 1e5 depth bound
+        for rho in (0.1, 0.3, 0.5, 0.7):  # (the grid of the control curve stops at alpha 0.99, rho 0.8)
             predicted = sss.observed_albedo(float(sss.single_scatter_albedo(rho)), curve)
             worst = max(worst, abs(predicted - rho))
         self.assertLess(worst, INDEX_MATCHED_TOLERANCE)
@@ -321,7 +322,7 @@ class ObservedAlbedoTable(unittest.TestCase):
         # The table is built for diffuse incidence; the per-direction values at 0 / 45 / 70 degrees (reciprocity) differ by the
         # declared approximation of using the diffuse value.
         for p in self.curve()["points"]:
-            if p["A"] < 0.05 or p["albedo"] > 0.99:   # (the plateau above is dominated by noise)
+            if p["A"] < 0.05:
                 continue
             spread = max(abs(v - p["A"]) for v in p["A_angle"].values())
             self.assertLess(spread / p["A"], ANGLE_SPREAD_BOUND, p)

@@ -376,7 +376,7 @@ const std::vector<MaterialScenarioSpec>& specs() {
     static const MaterialPointLight thinBackLight{thinPointCentre + 9.0f * glm::normalize(glm::vec3(-0.55f, 0.4f, -0.73f)), 250.0f,
                                                   100.0f};
     // F15.3 (ticket 17): the volumetric subsurface mode (screen-space diffusion).  Texture-free spheres of radius 0.4 m on a
-    // light grey base (0.8) of roughness 0.7 (a wide boundary lobe: the Mitsuba ground truth converges in minutes, not hours), lit
+    // light grey base (0.8) of roughness 0.35 (alpha_b 0.1225: the largest roughness at which the Mitsuba rough dielectric lets out more than the brightest fixture colour 0.85, A_max 0.887; at 0.7 it returns only 0.507 and the reference is declared invalid), lit
     // by a sun from the SIDE (toward the sun (-0.9, 0.25, 0.35): the terminator crosses the visible disc to the right of its
     // centre).  Rows are the material: skin-like (multiple-scattering colour (0.85, 0.55, 0.45), radiusScale (1, 0.5, 0.25),
     // isotropic) and jade-like (0.30, 0.70, 0.45), (0.5, 1, 0.7), g = 0.3; columns the (weight, radius): {0 (neutral), 0.5 @ 0.08 m,
@@ -384,7 +384,7 @@ const std::vector<MaterialScenarioSpec>& specs() {
     // at weight 1.  The radius sweep scene shares columns 2-4 with it (identical pieces: the reference render is cached across both)
     // and adds x0.25 and x3.  The mean free path of the dominant (green) channel at the nominal radius is 0.04 m (4.5 px at the
     // 5.5 m camera).
-    static const std::vector<float> volRoughness(5, 0.7f);
+    static const std::vector<float> volRoughness(5, 0.35f);
     static const std::vector<float> volMetallic2(2, 0.0f);
     static const std::vector<float> volWeights{0.0f, 0.5f, 1.0f, 1.0f, 1.0f};
     static const std::vector<float> volRadii{0.08f, 0.08f, 0.04f, 0.08f, 0.16f};
@@ -398,7 +398,7 @@ const std::vector<MaterialScenarioSpec>& specs() {
     // Sub-pixel fixture: weight {1, 1, 0.5, 0.5} x radius {0.0005, 0.002, 0.0005, 0.002} m (the mean free path is at most 0.002 m =
     // 0.23 px at the 5.5 m camera), subsurface colour = the base colour (so the "diffusion skipped" image IS the base model), g = 0.
     // `-off` is the identical scene without any block: the runner compares the two engine captures.
-    static const std::vector<float> subRoughness(4, 0.7f);
+    static const std::vector<float> subRoughness(4, 0.35f);
     static const std::vector<float> subMetallic1(1, 0.0f);
     static const std::vector<float> subWeights{1.0f, 1.0f, 0.5f, 0.5f};
     static const std::vector<float> subRadii{0.0005f, 0.002f, 0.0005f, 0.002f};
@@ -407,7 +407,7 @@ const std::vector<MaterialScenarioSpec>& specs() {
     static const std::vector<float> subAnisotropy{0.0f};
     // Back-lit thick fixture: the sun BEHIND the spheres (V.L about -0.96), weight 1, radius {0.08, 0.16} m, both materials.  Measured
     // and reported, not gated: screen-space diffusion cannot carry light through a thick volume (a declared limit).
-    static const std::vector<float> backRoughness(2, 0.7f);
+    static const std::vector<float> backRoughness(2, 0.35f);
     static const std::vector<float> backWeights(2, 1.0f);
     static const std::vector<float> backRadii{0.08f, 0.16f};
     static const glm::vec3 backSun = glm::normalize(glm::vec3(0.15f, 0.25f, -0.96f));

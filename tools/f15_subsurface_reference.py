@@ -33,10 +33,13 @@ OpenPBR E_spec).  The per-direction value follows from the radial position of th
 constant environment = directional albedo at theta); the table stores the diffuse value and the values at 0, 45 and 70 degrees, the
 measured angle dependence is the declared approximation of using the diffuse value (see `tools/f15_subsurface_albedo.json`,
 regenerate with `f15_subsurface_reference.py albedo-table`).  alpha(C) is the monotone inversion (bisection on the table interpolated
-linearly in sqrt(1 - alpha)).  MEASURED LIMIT: Mitsuba's `roughdielectric` is a single-scattering GGX BSDF and loses energy at every
-interaction, so with alpha_b = 0.49 even a non-absorbing medium (alpha = 1) returns only A_max = 0.447 (the observation of this
-ticket); colours above A_max are not reachable by any medium under this boundary and saturate at alpha = 1 (reported per piece in
-reference.json `albedo_target` / `albedo_reached`).
+linearly in sqrt(1 - alpha)).  MEASURED LIMIT: Mitsuba's `roughdielectric` is a single-scattering GGX BSDF and loses energy at every interaction, so a non-absorbing
+medium (alpha = 1) returns only A_max(alpha_b): 0.980 (roughness 0.15), 0.948 (0.25), 0.876 (0.35), 0.717 (0.5), 0.503 (0.7) in the table (a longer
+roulette depth, 20000, on a 30-mfp sphere reads 0.993, 0.960, 0.887, 0.724, 0.507; noise 0.0001-0.0004), measured with
+Russian roulette from depth 5000 (the first table, roulette from 64, read 0.45 at 0.7: the long walks were under-sampled).  Colours above
+A_max are not reachable by any medium under this boundary and saturate at alpha = 1 (reported per piece in reference.json `albedo_target` /
+`albedo_reached` / `albedo_saturated`).  The volumetric fixtures therefore use roughness 0.35, the largest roughness whose A_max exceeds the
+brightest fixture colour (0.85) by 3 table sigmas (orchestrator decision 2026-11-14); roughness 0.7 subsurface has no valid ground truth.
 
 The volume block of the material (record 1: thickness, attenuation) only marks the object as a solid, as the validation of the
 material description demands (volumetric subsurface requires a volume with thickness > 0); a non-neutral attenuation is refused.
@@ -87,12 +90,12 @@ import f15_reference as base  # noqa: E402
 
 np = np_module()
 
-GROUND_TRUTH_VERSION = 3
+GROUND_TRUTH_VERSION = 4
 DEFAULT_THREADS = int(os.environ.get("F15_REFERENCE_THREADS", min(4, os.cpu_count() or 1)))
 DEFAULT_SPP = int(os.environ.get("F15_SUBSURFACE_SPP", 2048))      # per grey render (two halves of spp / 2)
 DEFAULT_POOL = int(os.environ.get("F15_SUBSURFACE_POOL", 5))       # odd window of the interior pooling
 DEFAULT_DEPTH = 100000                                             # path depth bound (volpath counts surface and medium events)
-RR_DEPTH = 64
+RR_DEPTH = 1000                                                    # Russian roulette from this depth on (64 under-sampled the long walks near alpha = 1)
 SUBSURFACE_BIT = base.SUBSURFACE_FEATURE_BIT   # 128
 VOLUME_BIT = 64                                # MaterialFeature::Volume
 VOLUME_RECORD = 1                              # GPUMaterialExt1 words 11 thickness, 13-15 attenuation colour, 16 attenuation distance
@@ -114,7 +117,8 @@ def single_scatter_albedo(rho_ms, g=0.0):
 
 
 ALBEDO_TABLE_PATH = REPO / "tools" / "f15_subsurface_albedo.json"
-MEASURE_SIGMA_T = 1000.0        # extinction of the measurement sphere of radius 1: 1000 mean free paths
+MEASURE_SIGMA_T = 100.0         # extinction of the measurement sphere of radius 1: 100 mean free paths (A is stable from 10 to 100)
+MEASURE_RR_DEPTH = 5000         # roulette depth of the measurement (64 / 1000 bias the plateau low: 0.44 / 0.49 against 0.507)
 MEASURE_SPP = 64                # per half (two independent halves)
 MEASURE_RES = 128
 MEASURE_SEED = 20261114
@@ -138,7 +142,7 @@ def measure_albedo_point(mi, dr, albedo, g, alpha, ior, spp, seed, res=MEASURE_R
     constant environment of radiance 1: float64 (res, res)."""
     transform = getattr(mi, "ScalarAffineTransform4f", None) or mi.ScalarTransform4f
     description = {
-        "type": "scene", "integrator": {"type": "volpath", "max_depth": DEFAULT_DEPTH, "rr_depth": RR_DEPTH},
+        "type": "scene", "integrator": {"type": "volpath", "max_depth": DEFAULT_DEPTH, "rr_depth": MEASURE_RR_DEPTH},
         "sensor": {"type": "orthographic", "to_world": transform().look_at(origin=[0, 0, 5], target=[0, 0, 0], up=[0, 1, 0]),
                    "sampler": {"type": "independent", "sample_count": int(spp)},
                    "film": {"type": "hdrfilm", "width": res, "height": res, "pixel_format": "rgb", "component_format": "float32",
@@ -630,35 +634,46 @@ def command_render(args):
     return 0
 
 
+FIXTURE_ROUGHNESS = 0.35        # volumetric fixtures (orchestrator decision 2026-11-14: the largest roughness whose A_max exceeds 0.85 + 3 sigma)
+LEGACY_ROUGHNESS = 0.7          # the first fixtures: A_max 0.507, the reference cannot represent colours above it (kept as information)
+
+
 def fixture_alpha_b():
-    """GGX alpha of the fixtures' boundary (roughness 0.7 of every volumetric scene)."""
-    return float(base.effective_alpha(0.7))
+    """GGX alpha of the fixtures' boundary (the roughness of every volumetric scene)."""
+    return float(base.effective_alpha(FIXTURE_ROUGHNESS))
 
 
 def command_albedo_table(args):
-    """Measure the observed-albedo table of the fixtures' (g, boundary) combinations and the index-matched control curves."""
+    """Measure the observed-albedo curves of the fixtures' (g, boundary) combinations, the index-matched control curve and A at
+    alpha = 1 against the boundary roughness (0.7 included)."""
     alpha_b = fixture_alpha_b()
     started = time.time()
     curves = []
+    log = lambda m: print(m, flush=True)  # noqa: E731
     for g in (0.0, 0.3):
-        for ior in (BOUNDARY_IOR, 1.0):
-            curves.append(measure_albedo_curve(g, alpha_b, ior, args.threads, spp=args.spp, log=lambda m: print(m, flush=True)))
-    # energy kept by the boundary: A at alpha = 1 against the boundary roughness (g = 0)
+        curves.append(measure_albedo_curve(g, alpha_b, BOUNDARY_IOR, args.threads, spp=args.spp, log=log))
+    # index-matched control (g = 0, no interface; the grid stops where the walks need no roulette tuning): validates the measurement
+    curves.append(measure_albedo_curve(0.0, alpha_b, 1.0, args.threads, albedos=[a for a in ALBEDO_GRID if a <= 0.99], spp=args.spp, log=log))
     mi, dr = mitsuba_modules(args.threads)
     masks = angle_masks()
     a_max = []
-    for alpha in (0.02, 0.05, 0.1, 0.2, 0.3, 0.49, 0.7, 1.0):
-        spec = 0.5 * sum(measure_albedo_point(mi, dr, 0.0, 0.0, alpha, BOUNDARY_IOR, args.spp, MEASURE_SEED + 101 * h) for h in range(2))
-        full = 0.5 * sum(measure_albedo_point(mi, dr, 1.0, 0.0, alpha, BOUNDARY_IOR, args.spp, MEASURE_SEED + 977 * h) for h in range(2))
-        a_max.append({"alpha_b": alpha, "A_at_albedo_1": observed_albedos(full, spec, masks)["diffuse"]})
-        print("A_max", a_max[-1], flush=True)
-    table = {"schema": 1, "tool": "tools/f15_subsurface_reference.py albedo-table", "mitsuba": "3.9.1",
-             "definition": "A = (R_total - R_spec) / (1 - R_spec): sphere of radius 1, sigma_t 1000 (1000 mfp), roughdielectric (or null for "
+    for rough in (0.04, 0.15, 0.25, 0.35, 0.5, 0.7, 1.0):
+        alpha = float(base.effective_alpha(rough))
+        row = {"roughness": rough, "alpha_b": alpha}
+        for g in (0.0, 0.3):
+            spec = np.mean([measure_albedo_point(mi, dr, 0.0, g, alpha, BOUNDARY_IOR, args.spp, MEASURE_SEED + 101 * h) for h in range(4)], axis=0)
+            vals = [observed_albedos(measure_albedo_point(mi, dr, 1.0, g, alpha, BOUNDARY_IOR, args.spp, MEASURE_SEED + 977 * h), spec, masks)["diffuse"]
+                    for h in range(4)]
+            row[f"g{g:g}"] = {"A": float(np.mean(vals)), "noise": float(np.std(vals, ddof=1) / 2.0)}
+        a_max.append(row)
+        print("A at albedo 1", row, flush=True)
+    table = {"schema": 2, "tool": "tools/f15_subsurface_reference.py albedo-table", "mitsuba": "3.9.1",
+             "definition": "A = (R_total - R_spec) / (1 - R_spec): sphere of radius 1, sigma_t 100 (100 mfp), roughdielectric (or null for "
                            "ior 1) boundary, constant environment 1, orthographic view; 'A' = disc mean = cosine-weighted diffuse incidence; "
                            "'A_angle' = viewing/incidence angle 0, 45, 70 degrees (reciprocity)",
              "sigma_t": MEASURE_SIGMA_T, "spp_per_half": args.spp, "halves": 2, "resolution": MEASURE_RES, "seed": MEASURE_SEED,
-             "integrator": {"type": "volpath", "max_depth": DEFAULT_DEPTH, "rr_depth": RR_DEPTH}, "seconds": round(time.time() - started, 1),
-             "curves": curves, "A_at_albedo_1_by_boundary_alpha": a_max}
+             "integrator": {"type": "volpath", "max_depth": DEFAULT_DEPTH, "rr_depth": MEASURE_RR_DEPTH}, "seconds": round(time.time() - started, 1),
+             "curves": curves, "A_at_albedo_1_by_roughness": a_max}
     pathlib.Path(args.out).write_text(json.dumps(table, indent=1) + "\n")
     print(f"wrote {args.out}")
     return 0
