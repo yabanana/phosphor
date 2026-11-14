@@ -161,6 +161,11 @@ if(PYTHON3_EXECUTABLE)
         COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_f15_corpus.py)
     add_test(NAME f15_shadowed_hit_check_python
         COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_f15_shadowed_hit_check.py)
+    # F15.4 (ticket 23): the owner-approved CC0 terrain sets (never committed); the verify test reads TERRAIN_MATERIALS_DIR (or
+    # build/terrain-materials) at run time and skips (exit 77) when no copy exists.
+    add_test(NAME terrain_materials_verify
+        COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_terrain_materials_verify.py)
+    set_tests_properties(terrain_materials_verify PROPERTIES SKIP_RETURN_CODE 77)
     # The corpus itself is third-party data fetched on demand (never committed): when a fetched copy exists, verify it against the manifest;
     # otherwise the check is skipped with a message (an absent corpus is not a test failure).
     set(KHRONOS_CORPUS_DIR "${CMAKE_SOURCE_DIR}/build/khronos-corpus" CACHE PATH "fetched Khronos corpus (tools/fetch_khronos_corpus.py)")
