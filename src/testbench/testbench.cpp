@@ -3,6 +3,7 @@
 #include "testbench/reflection_validation.h"
 #include "testbench/material_validation.h"
 #include "testbench/transmission_validation.h"
+#include "testbench/transmissive_shadow_validation.h"
 #include "testbench/torus_demo.h"
 #include "testbench/pbr_grid.h"
 #include "testbench/stress_test.h"
@@ -57,6 +58,7 @@ std::unique_ptr<TestBench> createTestBench(TestBenchType type, const TestBenchPa
         case TestBenchType::TorusDemo:   return std::make_unique<TorusDemo>();
         case TestBenchType::PBRGrid:
             if(TransmissionValidation::validScenario(params.materialScenario))return std::make_unique<TransmissionValidation>(params.materialScenario);
+            if(TransmissiveShadowValidation::validScenario(params.materialScenario))return std::make_unique<TransmissiveShadowValidation>(params.materialScenario);
             if(!params.materialScenario.empty())return std::make_unique<MaterialValidation>(params.materialScenario, params.materialToggleEvery);
             return std::make_unique<PBRGrid>();
         case TestBenchType::StressTest:  return std::make_unique<StressTest>();

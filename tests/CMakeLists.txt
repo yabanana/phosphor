@@ -58,6 +58,7 @@ add_executable(phosphor_tests
     test_reflection_validation.cpp
     test_material_validation.cpp
     test_transmission_validation.cpp
+    test_transmissive_shadow_validation.cpp
     test_reflections.cpp
     test_denoise.cpp
     test_surface_signal_controls.cpp

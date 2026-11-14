@@ -3,6 +3,7 @@
 #include "testbench/lighting_validation.h"
 #include "testbench/material_validation.h"
 #include "testbench/transmission_validation.h"
+#include "testbench/transmissive_shadow_validation.h"
 #include "testbench/reflection_validation.h"
 
 #include <charconv>
@@ -585,7 +586,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             auto v=needValue();if(!v)return false;if(!ReflectionValidation::validScenario(*v)){error="--reflection-scene: unknown scenario";return false;}out.reflectionScene=*v;
         } else if (arg == "--material-scenario") {
             auto v=needValue();if(!v)return false;
-            if(!MaterialValidation::validScenario(*v)&&!TransmissionValidation::validScenario(*v)){error="--material-scenario: unknown scenario";return false;}out.materialScene=*v;
+            if(!MaterialValidation::validScenario(*v)&&!TransmissionValidation::validScenario(*v)&&!TransmissiveShadowValidation::validScenario(*v)){error="--material-scenario: unknown scenario";return false;}out.materialScene=*v;
         } else if (arg == "--material-toggle-every") {
             if (!needCount(out.materialToggleEvery)) return false;
         } else if (arg == "--lighting-scene") {

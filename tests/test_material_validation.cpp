@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 #include "testbench/material_validation.h"
 #include "testbench/transmission_validation.h"
+#include "testbench/transmissive_shadow_validation.h"
 #include "renderer/gpu_scene.h"
 #include "renderer/scene_store.h"
 #include "renderer/scene_extract.h"
@@ -191,6 +192,8 @@ TEST_CASE("F15.3 the bench and the runner (tools/f15_check.py) list the same sce
         if (std::string_view(name) != "specular-grid-edit" && std::string_view(name) != "specular-grid-rough") bench.insert(std::string(name));
     // F15.3 ticket 13: the transmission scenarios are a separate bench class on the same --material-scenario option.
     for (auto name : TransmissionValidation::scenarios()) bench.insert(std::string(name));
+    // F15.3 tickets 14/15: so are the transmissive-shadow scenarios.
+    for (auto name : TransmissiveShadowValidation::scenarios()) bench.insert(std::string(name));
     CHECK(runner == bench);
 }
 
