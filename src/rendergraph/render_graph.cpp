@@ -137,6 +137,15 @@ void PassBuilder::setTileSize(u32 width, u32 height) {
     p.tileHeight = height;
 }
 
+void PassBuilder::setStandalone() {
+    auto &p = graph_.passes_[pass_];
+    if (p.type != PassType::Raster) {
+        graph_.error("A standalone pass must be a raster pass");
+        return;
+    }
+    p.standalone = true;
+}
+
 void PassBuilder::readColor(TextureRef target, u32 slot, Stages stages) {
     RenderGraph& g = graph_;
     PassNode& p = g.passes_[pass_];

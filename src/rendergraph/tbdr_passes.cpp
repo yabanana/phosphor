@@ -106,11 +106,13 @@ struct GroupState {
     std::vector<u32> written;                 // resources written by any member (any usage)
     std::vector<u32> writtenNonAttachment;    // ... via ShaderWrite/CopyDst
     std::vector<u32> readNonAttachment;       // resources read outside an attachment
+    bool standalone = false;                  // a member is a standalone pass: the group is closed to others
 
     void reset() { *this = GroupState{}; }
 };
 
 bool canJoin(const GroupState& g, const PassNode& pass, const PassAttachments& pa) {
+    if (g.standalone || pass.standalone) return false; // F15.1 (ticket 15): PassBuilder::setStandalone
     if (g.tileWidth && pass.tileWidth && (g.tileWidth != pass.tileWidth || g.tileHeight != pass.tileHeight))
         return false;
     if (pa.width != g.width || pa.height != g.height || pa.sampleCount != g.sampleCount) return false;
@@ -149,6 +151,7 @@ bool canJoin(const GroupState& g, const PassNode& pass, const PassAttachments& p
 }
 
 void absorb(GroupState& g, const PassNode& pass, const PassAttachments& pa) {
+    if (pass.standalone) g.standalone = true;
     if (pass.tileWidth) {
         g.tileWidth = pass.tileWidth;
         g.tileHeight = pass.tileHeight;
