@@ -6,14 +6,14 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 13
 
-**Status:** ready-for-agent
+**Status:** resolved with carried items (2026-11-14; cost and Sponza D2 band → ticket 24; GI shadow rays / reflection secondary lighting through glass without a numeric fixture: carried)
 
 - [x] Spike first (timeboxed, results in opt-log): Metal intersection-function invocation multiplicity for non-opaque triangles (duplicate invocations would double-count) and cost; mitigation chosen by measurement
 - [x] (RT sun and ReSTIR point keys; the CSM keys are ticket 15) Planar-interface fixtures (glass pane, flat shallow water with sun within 30° of the normal) vs Mitsuba within the decision-11 transmission bound; curved-glass shadows (pawn tops) qualitative (caustics excluded)
-- [ ] Opaque casters unchanged (visual_check 0 px on scenes without transmissive materials); negative control (transmittance ignored → opaque) fails the planar fixtures
+- [x] Opaque casters unchanged (visual_check 0 px on scenes without transmissive materials); negative control (transmittance ignored → opaque) fails the planar fixtures
 - [x] Sun shadow mask format change and DI/GI visibility changes keep F10/F11/F12 corpus cases green
-- [ ] Cost on the glass fixture and Sponza D2 within band
-- [ ] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
+- [ ] Cost on the glass fixture and Sponza D2 within band — ticket 24 (quiet machine); indicative loaded-machine pass time +0.12 ms on volume-pane
+- [x] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
 
 ## Comments
 
@@ -164,3 +164,12 @@ have NO numeric fixture (the harness has none; only the shared kernel of the DI 
 orchestrator on a quiet machine (my in-process pass measurement is in the opt log and is not quiet); `visual_check`, `archive_check`, `hitch_check`: not
 run by me; the interior of a closed volume at the light end (a ray that ends inside a medium) is clamped T <= 1; a transmissive material that is also
 alpha-masked is treated as an opaque-masked caster (declared); the dedup list is 8 surfaces (beyond it the filter is off and counted).
+
+2026-11-14 — orchestrator mid-phase battery on the integrated tree (tickets 13, 14, 15, 17 and the ticket-19 harness; `build/f15-exact/battery_mid.log`):
+- visual_check: all benches pass at 0 px (BENCH8_ARGS --instances 100000).
+- F13 exact captures: 0 px against base03 (sponza-d2, cornell-restir, cornell-clustered-ssr, manylights-restir, grid-sky).
+- archive_check: every local scenario PASS. hitch_check: no hitches.
+- O7 (warmup 64): 0 GPU allocations and 0 render-thread compiles on all five transmissive-shadow scenes, on RT shadows + ReSTIR and on CSM.
+- Shader + API validation of pane-sun, RT + DDGI + RT reflections and CSM + SSR: clean, exit 0.
+- Negative controls: transmittance-ignored fails every RT/DI key (agent run, t14a).
+- Ticked: opaque casters unchanged, and the archive/O7 criterion. The ticket adds no pipelines; the existing kernels run with 0 misses.

@@ -6,7 +6,7 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 13
 
-**Status:** ready-for-agent
+**Status:** resolved (2026-11-14; quiet cost → ticket 24; declared limits in the orchestrator record)
 
 - [x] Planar fixtures with `--shadows csm` match the RT result of ticket 14 within the decision-11 transmission bound (or the CSM filtering envelope, declared before measuring)
 - [x] Scenes without transmissive casters unchanged (visual_check 0 px); negative control (map ignored) fails
@@ -212,3 +212,7 @@ After the merge: build OK, ctest 20/20.
 - The agent's two blocked all-keys items were fixed on the branch:
   - `transmission-rtoff-combinations` got a targeted archive update (83c0697) and is gated (322020d).
   - `combo-irid-aniso-env` dropped its non-discriminating control (7a59d8c).
+- Orchestrator mid-phase battery (2026-11-14, `build/f15-exact/battery_mid.log`):
+  - O7 on CSM: 0 allocations and 0 render-thread compiles on the five shadow scenes;
+  - shader + API validation of pane-sun with CSM: clean;
+  - visual_check 0 px; archive_check PASS; hitch_check OK.
