@@ -6,12 +6,12 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 09, 10, 11, 12, 13, 16
 
-**Status:** ready-for-agent
+**Status:** engine side implemented and verified on M5 (2026-11-14, last comment); the Khronos side-by-side criterion belongs to ticket 22
 
-- [ ] Each combination passes decision-11 thresholds against the independent reference
-- [ ] Furnace bound holds for every combination; an additive (non-layered) negative control exceeds it
+- [x] Each combination passes decision-11 thresholds against the independent reference (all 30 `combo-*` keys, `--expect green`, 2026-11-14)
+- [x] Furnace bound holds for every combination; an additive (non-layered) negative control exceeds it (`furnace-combinations`, `@resolve`: additive-layering fails, declared twin too)
 - [ ] AnisotropyBarnLamp, IridescenceSuzanne, ToyCar, SpecularSilkPouf side by side
-- [ ] The F15.1 roadmap line re-read literally; every lobe's status (exact/approximated) listed
+- [x] The F15.1 roadmap line re-read literally; every lobe's status (exact/approximated) listed (list in the last comment; the F15.1 roadmap line itself stays unticked: the Track Studio case is ticket 20's)
 
 ## Comments
 
@@ -66,3 +66,86 @@ ticket's pending `transmission-rtoff-combinations` key; the combination test acc
 - The two queued keys need no harvest. Captures of `combo-irid-aniso-env` and `transmission-rtoff-combinations` on the integrated
   build (tickets 13, 14, 17 in) show 0 archive misses and 0 render-thread compiles (`build/f15-harvest-19`).
 - The final `--expect green` over every key runs in the closing battery of the integrated tree.
+
+2026-11-14 - engine side (F15.1, F15.3), commits `ab42590` (thin + coat in the resolve), `c0de265` (GI at -N second lookup, fixture, check, archive).
+Binary of `c0de265`, M5 Max, release build, loaded machine (another agent renders Mitsuba): no timing claim.
+
+Item 1, `combo-thin-coat-sun` (coat dropped by the thin branch): the resolve's thin-subsurface light branch (`shadeSurface`, `thinResolved`) skipped
+the coat. It now composes like every other base: the reflected and the transmitted lobe are scaled by `1 - c F_c(|V.Nc|)` and the coat lobe
+is added (sun disk rule `sunDiskCoat`, delta lights `coatLobeLight`). The DI `_lobe` kernels (ReSTIR candidates/temporal/spatial/shade, clustered)
+already applied the coat after the thin result (back lights: `result *= 1 - c F_c`), and the composite already carried `coatAtt` into the thin
+environment term (`-env`, `-env@resolve` were green); no other path shades thin pixels. Measured (seed 1): every row of the direct gate passes,
+max outside the mask 0.0005-0.0045 (limit 3 %), p99 <= 0.0004 (limit 1 %). `pending` removed; `-env` and `-env@resolve` stay green.
+
+Item 2, `combo-irid-specular-env` (sphere ior 2.4, film 1.8 / 400 nm): NOT noise and NOT the transport weight. Measured on the integrated engine
+the sphere mean is 0.0492 (below the 5 % bound by 0.8 points; the harness 0.0501 came from an engine before the integrations); seeds 1, 2, 3, 4
+give 0.0492 on all four and the per-sphere errors of seeds 1 and 2 differ by <= 1e-4: the image is deterministic at this sample count.
+The signed error is the evidence: every dielectric sphere is darker than the exact quadrature (sphere-mean ratio - 1: -1.5 to -4.3 %, sphere 10 = -4.3 %,
+metals +-0.01 %), i.e. a bias. Decomposition (offline, the reference's own tables, sphere-weighted over N.V): the engine's composite takes the diffuse weight
+`1 - max E_irid(N.V)` (decision 06, the film at N.V and the `1 - E` energy form) while the exact reference integrates `1 - max F_irid(V.H)` over the
+cosine-weighted hemisphere: declared diffuse term of sphere 10 -6.5 % (exact 0.6749 / 0.2953 / 0.1265, declared 0.6313 / 0.2762 / 0.1184), declared
+specular albedo +3 % (the transport samples the specular lobe exactly, so that part is not the cause); the total declared/exact - 1 = -4.5 / -4.3 / -2.4 %
+per channel, which is what the capture shows (-4.3 % sphere mean). Spheres 6, 1, 7: predicted -3.3 / -3.0 / -2.3 %, measured -2.9 / -3.2 / -2.35 %.
+Candidate fix measured offline and NOT adopted: evaluating the film of the diffuse weight at the cosine-weighted mean V.H (quadratic fit
+0.67943 + 0.26204 mu - 0.03135 mu^2, 3.7e-4 max) matches the exact diffuse term within +-1 % on all eight fixture films (declared -3.4 to -7.3 %), but it
+breaks the declared furnace bound by construction (the diffuse weight can no longer be `1 - max E` of the specular albedo it shares energy with):
+`test_declared_furnace_bound_of_the_combinations...` then reads 1.111 against the 1.005 bound. Shipping it needs the specular albedo of the
+declared film model improved in the same change (+3 to +10 % over the exact quadrature) and a decision on the ADR-0006 energy form: an orchestrator
+decision, not a defect fix; reverted. The key is un-pended because it passes with a deterministic 0.8 point margin; the support-table text of
+iridescence ("3.8 % worst") stays true, the combination with a high-f0 base (ior 2.4) reaches 4.9 %.
+
+Item 3, GI at -N (carried from ticket 16). Cheapest correct form for the product path: a second probe-grid lookup `ddgi_resolve_back`
+(`giIrradiance(point, -N)`, geometric normal negated) in the pass after "DDGI indirect irradiance", only for pixels whose lobe guide carries
+the thin subsurface bit without the volumetric flag (the guide is read per pixel; other texels are written 0 and never read), into a transient RGBA16F
+texture ("Thin subsurface back irradiance": 7.4 MB at 1280x720, 16.6 MB at 1080p, aliased in the transient heap; one extra compute dispatch of the
+frame size that exits after one 4-byte guide read on every non-thin pixel). The lobe composite (and the raw pre-reflection composite) reads it with
+`REFLECT_COMPOSE_GI_BACK` instead of `giSelected`; it is a probe lookup, not a denoised signal. Only scenes whose feature union has SUBSURFACE and
+DDGI with a valid guide get the pass and the pipeline (`--thin-gi-back off` disables it: the control). The Cache and ReSTIR GI modes and the legacy
+resolve GI path (no reflection composite) keep the pixel's own irradiance at N for E(-N); support table id
+`gi_at_minus_n_ddgi_probe_lookup_other_gi_modes_use_irradiance_at_n`.
+Declared check (`tools/f15_thin_gi_back_check.py`, scene `subsurface-thin-gi-back`: three weight-1 thin quads in front of a sunlit diffuse wall,
+only the back side sees light; independent expectation = form factor of the wall x wall radiance x the declared thin weight): the second
+lookup is within 4.7 / 6.1 / 6.7 % of the expectation (gate 25 %), the control `--thin-gi-back off` delivers 0.7 % of it (fails the bound). The
+shadows of the quads on the wall are not in the expectation (a first run with them subtracted differed by 35 % on two quads: DDGI does not resolve
+0.8 m shadows with this probe spacing; the gate was not changed). Gate and metric are indicative (no decision-11 threshold exists for GI). A
+first attempt with an emissive wall measured nothing: with `--lighting restir` the emissive wall is a DI emitter that lights the quads through the
+transmitted lobe whatever the GI does (GI requires DI for emissive transport). Unverified: radiometric accuracy of DDGI itself, Cache/ReSTIR GI modes.
+
+Item 4, all keys (`tools/f15_check.py --run --expect green --out build/f15-check/t19 --reference-cache <t13e>`, seed 1, one process after
+another, binary `74adf340...` of `c0de265`): GREEN exit 0, 112 scenario keys, every expectation met, every listed negative control fails its gate.
+Pending left: `subsurface-volumetric-sun` (ticket 18, unchanged). No `pending` remains on a combination key: `combo-thin-coat-sun` and `combo-irid-specular-env`
+removed here (`transmission-rtoff-combinations` was removed earlier). Thin + coat: sun p99 <= 0.0004, `-env` and `-env@resolve` green; `furnace-combinations`
+(+ `@resolve`) pass and the additive-layering control fails (declared twin too). Controls dropped by the harness for lack of discrimination (reported, not
+silently): `aniso-rotation-flipped` on aniso + coat / + sheen env keys (passes the 5 % sphere-mean gate), `additive-layering` on `combo-irid-aniso-env` (4.0 %),
+`transmission-uncoated` on `combo-thin-coat-env` (does not move the exact environment sphere mean by 5 %); each is covered by the sun key of the
+same combination. Tests after the final edits: `phosphor_tests` 886 cases OK, `tools/test_f15_check.py` 89 OK; full ctest 20/20 before the GI fixture edits.
+
+Item 5, pipelines and checks. Archive: targeted update `+1 compute (ddgi_resolve_back), +1 render (Forward variant of the GI fixture)`, additive
+(+74 lines), harvested with `--harvest-pipelines`, `filter_pipeline_harvest.py --constant 22 --function ddgi_resolve_back --skip-present`,
+merged; the shader-body changes of the resolve need no descriptor change. `tools/visual_check.sh build/release build/reference-f15-appB`
+(`BENCH8_ARGS="--instances 100000"`): all 8 benches 0 of 5 760 000 pixels differ. `tools/archive_check.sh`: all scenarios pass (a-foreign-os SKIP, no CI
+artifact). `tools/hitch_check.sh`: 0 hitches, 0 misses, 0 render-thread compiles. O7 (warmup 64, 64 measured frames, no --pipeline-sync): `combo-thin-coat-sun`,
+`-env`, `combo-irid-specular-env`, `combo-all-lobes-env`, `combo-coat-sheen-sun` and `subsurface-thin-gi-back` (DDGI + ReSTIR): 0 GPU allocations, 0 misses,
+0 render-thread compiles (the runner's captures use `--pipeline-sync`, which compiles synchronously by design). API + shader validation
+(`MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1`, 120 frames, `--pipeline-sync`, `--debug-lobe-guide 8`): `combo-thin-coat-sun` with ReSTIR (the DI lobe kernels,
+53160 extended pixels, guide PASS on every check frame) and `subsurface-thin-gi-back` with DDGI (the second lookup, guide PASS) exit 0, every LIGHTING check PASS.
+A first validation run without `--pipeline-sync` served the base fallback producers at frame 119 (guide check skipped): not counted.
+
+Lobe status from `src/renderer/material_support.cpp` after these changes (none is "exact"; "approximated" names the declared approximations):
+- base metallic-roughness, emissive strength (folded), uniform texture transform (baked): implemented.
+- ior/specular: approximated (secondary RT hits use the base reduction).
+- clearcoat: approximated (secondary RT hits ignore the coat; DI emitters uncoated).
+- sheen: approximated (lobe not sampled, environment term in the composition, sun disk point-evaluated, secondary RT hits ignore sheen).
+- anisotropy: approximated (environment split sum at an effective roughness, secondary RT hits ignore it, no tangents = isotropic).
+- iridescence: approximated (environment film at N.V constant over the lobe, thickness 0 disables the film, secondary RT hits ignore it).
+- subsurface, thin mode: approximated (thin only; GI at -N a DDGI probe lookup, other GI modes use E(N); secondary RT hits ignore the transmission;
+  composed with clearcoat only).
+- subsurface, volumetric mode: approximated (screen-space Burley diffusion; resolve lights only; no back-lit translucency; not composed with other diffuse lobes).
+- transmission: approximated (one Fresnel-chosen RT sample, RT-off probes along the refracted ray, factor at the visible surface, at most 4 interface events,
+  Schlick, no caustics, CSM shadows opaque).
+- volume: approximated (Beer-Lambert along the real inside segment with RT, thickness hint without; no scattering).
+Combinations validated by this ticket against the independent reference: coat + sheen, anisotropy + coat / + sheen, ior/specular + sheen, iridescence + coat / + sheen /
++ anisotropy / + ior/specular, thin subsurface + coat, ior/specular + coat + sheen + anisotropy, furnace over all of them, iridescence + transmission + volume and
+transmission over diffuse transmission (declared `--rt off` closed form). Refused by the reference (thin + sheen / anisotropy / iridescence / ior/specular) and not composed
+in the engine's thin branch. Open: ticket 22 (Khronos side by side), ticket 20 (Track Studio), the ADR-0006 energy form of the iridescent diffuse weight (above),
+GI at -N for Cache/ReSTIR GI and for the legacy resolve GI path, weight/colour textures of the thin lobe (no reference).

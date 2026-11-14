@@ -190,3 +190,5 @@ coat/sheen/aniso light branches); metals with weight (rule unit-tested only); vo
   - a thin material in the resolve does not compose coat, sheen or
     anisotropy (ticket 19);
   - weight and colour textures have no reference (ticket 22).
+
+2026-11-14 - ticket 19 closed the carried item "GI at -N second lookup" for DDGI (commit c0de265: second probe-grid lookup for thin pixels, --thin-gi-back, declared check tools/f15_thin_gi_back_check.py) and composed the thin lobe with a clearcoat on the sun and delta-light paths of the resolve (commit ab42590); details in the last comment of ticket 19. Cache/ReSTIR GI and the legacy resolve GI path keep E(N) for E(-N).
