@@ -31,7 +31,7 @@ from f12_reference import read_pfm, snapshot, write_pfm  # noqa: E402
 
 KEYS = [k for k in check.SCENARIOS if k.startswith("transmissive-shadow-")]
 GATED = list(KEYS)  # every key has a gate (the curved one a qualitative gate)
-PENDING = [k for k in KEYS if k.endswith("@csm")]  # ticket 15; the RT, DI and curved keys landed with ticket 14
+PENDING = []  # the RT, DI and curved keys landed with ticket 14, the CSM keys with ticket 15: nothing is pending
 CURVED = "transmissive-shadow-curved@rt"
 TRUTH_KEYS = [k for k in KEYS if k != CURVED]
 
@@ -211,19 +211,15 @@ class MitsubaTruth(unittest.TestCase):
 
 
 class Runner(unittest.TestCase):
-    def test_every_gated_key_is_pending_and_models_todays_engine(self):
+    def test_every_key_is_gated_green_and_has_its_controls(self):
         self.assertEqual(sorted(KEYS), sorted([
             "transmissive-shadow-pane-sun@rt", "transmissive-shadow-pane-sun@csm", "transmissive-shadow-water-sun@rt",
             "transmissive-shadow-water-sun@csm", "transmissive-shadow-volume-pane@rt", "transmissive-shadow-volume-pane@csm",
             "transmissive-shadow-point@restir", "transmissive-shadow-curved@rt"]))
         for key in TRUTH_KEYS:
             spec = check.SCENARIOS[key]
-            if key.endswith("@csm"):
-                self.assertEqual(spec["pending"], "ticket 15", key)
-                self.assertEqual(spec["pending_matches"], "transmittance-ignored")
-            else:
-                self.assertNotIn("pending", spec, key)  # ticket 14 landed: the RT and DI keys are gated green
-                self.assertNotIn("pending_matches", spec, key)
+            self.assertNotIn("pending", spec, key)  # tickets 14 and 15 landed: every key is gated green
+            self.assertNotIn("pending_matches", spec, key)
             self.assertIn("transmittance-ignored", spec["controls"])
             self.assertTrue(set(spec["controls"]) <= set(sr.CONTROLS), key)
             self.assertEqual(spec["envelope"], "csm" if key.endswith("@csm") else "rt", key)

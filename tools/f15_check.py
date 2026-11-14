@@ -102,8 +102,9 @@ reference ray casting):
   texel; PCSS disk radius max(penumbra, 0.5 texel), nearest-texel quantisation, depth/normal bias slop) + the same 3.6 cm + the penumbra.
   The sun keys run with `--shadows rt` (`@rt`, ticket 14) and `--shadows csm` (`@csm`, ticket 15); `transmissive-shadow-point@restir`
   is the DI visibility through glass (ReSTIR DI, RT visibility rays).  The RT and DI keys (ticket 14) are gated since
-  F15.1 ticket 14 (RGB transmittance of straight shadow rays); the CSM keys stay "pending" ("ticket 15"; asserted to FAIL: the CSM casters
-  shadow opaquely) and their image must PASS the gate against the `transmittance-ignored` control (red for the right reason).  Negative controls (the declared straight-line model with one ingredient
+  F15.1 ticket 14 (RGB transmittance of straight shadow rays); the CSM keys are gated since
+  F15.1 ticket 15 (the single-layer transmittance map of the cascades); before it they were "pending" (asserted to FAIL: the CSM casters
+  shadowed opaquely) and their image passed the gate against the `transmittance-ignored` control (red for the right reason).  Negative controls (the declared straight-line model with one ingredient
   removed; each must fail the gate): transmittance ignored (opaque casters), tint ignored, Fresnel ignored, Beer-Lambert ignored,
   transmittance applied twice.  A control equal to the reference within the bound on a fixture is not listed there (water has
   Fresnel 2 % per surface: Fresnel-ignored is 4.6 %).  ORCHESTRATOR DECISIONS (2026-11-14): the CSM keys (`@csm`, kind
@@ -745,15 +746,15 @@ SCENARIOS = {
                                                  "transmission, tools/f15_transmission_reference.py declared_pixel"},
     # F15.3 (tickets 14/15): attenuated coloured shadows through transmissive casters (decision 06 shadow casters, ADR-0004 amendment).
     # Written test-first: the engine shadowed opaquely, so every gated key was "pending" (asserted to FAIL, its image equal to
-    # `transmittance-ignored`).  The RT and DI keys (ticket 14) landed with F15.1 ticket 14 and are gated now; the CSM keys stay pending until
-    # ticket 15.  --reflections off: the floor is lit by the light only (no SSR of the lit floor into
+    # `transmittance-ignored`).  The RT and DI keys (ticket 14) landed with F15.1 ticket 14 and the CSM keys (ticket 15) with F15.1 ticket 15:
+    # every key is gated now.  --reflections off: the floor is lit by the light only (no SSR of the lit floor into
     # the shadow).  The sun keys exist as @rt (ticket 14) and @csm (ticket 15); the CSM keys share the bench scene and the RT reference.
     "transmissive-shadow-pane-sun@rt": {"kind": "transmissive-shadow",
                                         "rt": True, "shadows": "rt", "reflections": "off", "accumulate": SHADOW_ACCUMULATE,
                                         "envelope": "rt", "controls": SHADOW_PANE_CONTROLS,
                                         "terms": "sun 25 degrees from the pane normal, no environment, RT sun shadows (--shadows rt): "
                                                  "thin clear pane, thin green pane, thick clear pane, opaque slab over a diffuse floor"},
-    "transmissive-shadow-pane-sun@csm": {"kind": "transmissive-shadow-ratio", "pending": "ticket 15", "pending_matches": "transmittance-ignored",
+    "transmissive-shadow-pane-sun@csm": {"kind": "transmissive-shadow-ratio",
                                          "shadows": "csm", "reflections": "off", "accumulate": SHADOW_ACCUMULATE,
                                          "envelope": "csm", "controls": SHADOW_PANE_CONTROLS,
                                          "terms": "the pane fixture with the CSM path (--shadows csm, --rt off): single-layer transmittance map"},
@@ -762,7 +763,7 @@ SCENARIOS = {
                                          "envelope": "rt", "controls": SHADOW_WATER_CONTROLS,
                                          "terms": "sun 20 degrees from the normal, RT sun shadows: clear and murky flat shallow water "
                                                   "(ior 1.33 slabs 0.12 m), opaque slab"},
-    "transmissive-shadow-water-sun@csm": {"kind": "transmissive-shadow-ratio", "pending": "ticket 15", "pending_matches": "transmittance-ignored",
+    "transmissive-shadow-water-sun@csm": {"kind": "transmissive-shadow-ratio",
                                           "shadows": "csm", "reflections": "off", "accumulate": SHADOW_ACCUMULATE,
                                           "envelope": "csm", "controls": SHADOW_WATER_CONTROLS,
                                           "terms": "the shallow water fixture with the CSM path"},
@@ -771,7 +772,7 @@ SCENARIOS = {
                                            "envelope": "rt", "controls": SHADOW_VOLUME_CONTROLS,
                                            "terms": "sun 20 degrees from the normal, RT sun shadows: three thick glass panes (0.1 m) with "
                                                     "volume attenuation (colour x distance)"},
-    "transmissive-shadow-volume-pane@csm": {"kind": "transmissive-shadow-ratio", "pending": "ticket 15", "pending_matches": "transmittance-ignored",
+    "transmissive-shadow-volume-pane@csm": {"kind": "transmissive-shadow-ratio",
                                             "shadows": "csm", "reflections": "off", "accumulate": SHADOW_ACCUMULATE,
                                             "envelope": "csm", "controls": SHADOW_VOLUME_CONTROLS,
                                             "terms": "the attenuating thick pane fixture with the CSM path"},
