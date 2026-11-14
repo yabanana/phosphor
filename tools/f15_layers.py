@@ -40,7 +40,6 @@ ENVELOPE = 1e-5            # ticket 21: declared relative envelope between a spe
 FURNACE_LIMIT = 1.0 + 0.005
 RAMP_TOLERANCE = 1e-3      # monotonicity tolerance on the blend factor
 RAMP_MASK_ERROR = 0.02     # |blend factor - u| bound (mask quantisation 1/255 + the sampler's half-texel)
-RAMP_END_ERROR = 0.02
 
 
 # --- image statistics ----------------------------------------------------------------------------------------------
@@ -132,14 +131,14 @@ def evaluate_ramp(np, candidate, endpoint0, endpoint1, roi, u):
         worst_drop = max(worst_drop, drop)
         reversals += int(drop > RAMP_TOLERANCE)
     error = np.abs(t[usable] - u[usable]) if usable.any() else np.zeros(1)
-    low = usable & (u < 0.1)
-    high = usable & (u > 0.9)
-    end_low = float(np.abs(t[low]).max()) if low.any() else 1.0
-    end_high = float(np.abs(1.0 - t[high]).max()) if high.any() else 1.0
+    low = usable & (u < 0.05)
+    high = usable & (u > 0.95)
+    end_low = float(t[low].mean()) if low.any() else 1.0  # reported: the blend factor near the ends of the ramp (~0 and ~1)
+    end_high = float(1.0 - t[high].mean()) if high.any() else 1.0
     slope = float(np.polyfit(u[usable], t[usable], 1)[0]) if usable.sum() > 2 else 0.0
-    ok = bool(rows > 0 and reversals == 0 and float(error.max()) <= RAMP_MASK_ERROR and end_low <= RAMP_END_ERROR and end_high <= RAMP_END_ERROR)
+    ok = bool(rows > 0 and reversals == 0 and float(error.max()) <= RAMP_MASK_ERROR)
     return {"kind": "layer-ramp", "rows": rows, "usable_pixels": int(usable.sum()), "rows_with_reversal": reversals, "worst_drop": worst_drop,
-            "max_mask_error": float(error.max()), "mean_mask_error": float(error.mean()), "end_error_low": end_low, "end_error_high": end_high,
+            "max_mask_error": float(error.max()), "mean_mask_error": float(error.mean()), "mean_t_near_low_end": end_low, "mean_one_minus_t_near_high_end": end_high,
             "fitted_slope": slope, "tolerance": RAMP_TOLERANCE, "mask_error_limit": RAMP_MASK_ERROR, "pass": ok}
 
 

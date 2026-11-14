@@ -8,6 +8,7 @@
 #include "scene/texture_manager.h"
 #include "testbench/terrain_fixture.h"
 
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <set>
@@ -64,6 +65,18 @@ TEST_CASE("terrain scenarios: every listed scenario parses, options are validate
     CHECK(TerrainFixture::environmentRadiance("terrain/ramp=on") == 0.0f);
     CHECK(TerrainFixture::environmentRadiance("terrain") == TerrainFixture::PatchEnvironment);
     CHECK(TerrainFixture::environmentRadiance("nonsense") == 0.0f);
+}
+
+// The scenes of the layers-* keys of tools/f15_check.py (tools/test_f15_check.py compares this list with the runner).
+constexpr std::array<std::string_view, 18> kRunnerScenes{
+    "terrain/single=0/coat=off", "terrain/single=1/coat=off", "terrain/single=2/coat=off", "terrain/single=3/coat=off",
+    "terrain/weights=1,0,0,0/coat=off", "terrain/weights=0,1,0,0/coat=off", "terrain/weights=0,0,1,0/coat=off", "terrain/weights=0,0,0,1/coat=off",
+    "terrain/weights=1,1,0,0/layers=2/coat=off", "terrain/weights=1,1,0,0/coat=off", "terrain/coat=off", "terrain", "terrain/coat=zero",
+    "terrain/ramp=on/single=0", "terrain/ramp=on/single=1", "terrain/ramp=reverse", "terrain/ramp=on", "terrain/furnace=on",
+};
+
+TEST_CASE("terrain scenarios: the runner's scenes are valid") {
+    for (std::string_view s : kRunnerScenes) CHECK_MESSAGE(TerrainFixture::validScenario(s), std::string(s));
 }
 
 TEST_CASE("terrain data: deterministic, layer tilings are powers of two, the mask uses every layer") {

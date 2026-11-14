@@ -825,6 +825,74 @@ SCENARIOS = {
                                       "terms": "sun BEHIND thick weight-1 spheres (radius 0.08 and 0.16 m): measured and reported, not gated "
                                                "(declared limit of screen-space diffusion)"},
 }
+
+
+# --- F15.4 (ticket 23): layered materials on the terrain patch fixture (tools/f15_layers.py) ------------------------------
+LAYER_KINDS = ("layer-equal", "layer-ramp", "layer-furnace")
+TERRAIN_MATERIALS_ENV = "TERRAIN_MATERIALS_DIR"
+
+
+def terrain_materials_dir():
+    """The unpacked CC0 terrain sets (tools/fetch_terrain_materials.py) or None: the `cc0` keys are skipped without them."""
+    import os
+    candidate = os.environ.get(TERRAIN_MATERIALS_ENV)
+    path = pathlib.Path(candidate) if candidate else REPO / "build" / "terrain-materials"
+    return path if (path / "Grass004").is_dir() else None
+
+
+def _layer_keys():
+    keys = {}
+    weights = ["1,0,0,0", "0,1,0,0", "0,0,1,0", "0,0,0,1"]
+    for source, suffix in (("procedural", ""), ("cc0", "-cc0")):
+        extra = {"cc0": True} if source == "cc0" else {}
+        for j in range(4):
+            keys[f"layers-single-{j}{suffix}"] = {"kind": "layer-equal", "capture_only": True, "controls": [], "snapshot": False, **extra,
+                                                  "scene": f"terrain/single={j}/coat=off",
+                                                  "terms": f"the terrain patch with layer {j} alone as an ordinary material (no stack, mesh uvs x the tiling)"}
+        for j in range(4):
+            other = (j + 1) % 4
+            keys[f"layers-endpoint-{j}{suffix}"] = {
+                "kind": "layer-equal", "always_green": True, "snapshot": False, **extra, "scene": f"terrain/weights={weights[j]}/coat=off",
+                "pair": f"layers-single-{j}{suffix}", "controls": [f"layers-single-{other}{suffix}"], "needs": [f"layers-single-{other}{suffix}"],
+                "terms": f"the terrain stack with the constant mask e_{j} (weight 1 on layer {j}, 0 on the others, height contrast on) must equal the single "
+                         f"material of layer {j} bit for bit; the control compares it with the single material of layer {other}"}
+    keys["layers-two-layers"] = {"kind": "layer-equal", "capture_only": True, "controls": [], "snapshot": False, "scene": "terrain/weights=1,1,0,0/layers=2/coat=off",
+                                 "terms": "the terrain stack of only two layers, constant mask (1, 1)"}
+    keys["layers-weight-zero"] = {
+        "kind": "layer-equal", "always_green": True, "snapshot": False, "scene": "terrain/weights=1,1,0,0/coat=off", "pair": "layers-two-layers",
+        "controls": ["layers-endpoint-0"], "needs": ["layers-endpoint-0"],
+        "terms": "four layers with weight 0 on layers 2 and 3 must equal the stack without them (weight 0 leaves the others unchanged); the control "
+                 "is the weight vector (1, 0, 0, 0), which differs"}
+    keys["layers-patch-nocoat"] = {"kind": "layer-equal", "capture_only": True, "controls": [], "snapshot": False, "scene": "terrain/coat=off",
+                                   "terms": "the full terrain patch (generated mask, height contrast) without the coat finish"}
+    keys["layers-patch"] = {"kind": "layer-equal", "capture_only": True, "controls": [], "snapshot": False, "scene": "terrain",
+                            "terms": "the full terrain patch with the cavity coat finish (the measured view)"}
+    keys["layers-coat-zero"] = {
+        "kind": "layer-equal", "always_green": True, "envelope": True, "snapshot": False, "scene": "terrain/coat=zero", "pair": "layers-patch-nocoat",
+        "controls": ["layers-patch"], "needs": ["layers-patch"],
+        "terms": "the clearcoat finish present with coat weight 0 everywhere must leave the layered base untouched (a feature layer changes the coat "
+                 "weight only): equal to the uncoated patch within the declared envelope (a different class pipeline); the control is the real cavity coat"}
+    keys["layers-ramp-single-0"] = {"kind": "layer-ramp", "capture_only": True, "controls": [], "snapshot": False, "scene": "terrain/ramp=on/single=0", "reflections": "off",
+                                    "terms": "the flat quad with the dark plain layer alone"}
+    keys["layers-ramp-single-1"] = {"kind": "layer-ramp", "capture_only": True, "controls": [], "snapshot": False, "scene": "terrain/ramp=on/single=1", "reflections": "off",
+                                    "terms": "the flat quad with the light plain layer alone"}
+    keys["layers-ramp-reverse"] = {"kind": "layer-ramp", "capture_only": True, "controls": [], "snapshot": False, "scene": "terrain/ramp=reverse", "reflections": "off",
+                                   "terms": "the reversed ramp (the negative control of the monotonic gate)"}
+    keys["layers-ramp"] = {
+        "kind": "layer-ramp", "always_green": True, "snapshot": True, "scene": "terrain/ramp=on", "endpoints": ["layers-ramp-single-0", "layers-ramp-single-1"],
+        "controls": ["layers-ramp-reverse"], "needs": ["layers-ramp-single-0", "layers-ramp-single-1", "layers-ramp-reverse"],
+        "reflections": "off",
+        "terms": "a flat quad, two plain layers (albedo 0.05 and 0.9), the weight of the second rising linearly with u under one sun: the blend factor "
+                 "against the two single-material twins must rise monotonically along u and follow the mask; the reversed ramp must fail"}
+    keys["layers-furnace"] = {
+        "kind": "layer-furnace", "always_green": True, "snapshot": True, "scene": "terrain/furnace=on", "reflections": "off",
+        "controls": ["additive-blend"],
+        "terms": "a flat quad at a grazing view under a constant environment of radiance 1, four albedo-1 layers (metallic 0/1/0/1, roughness .1/.4/.7/1) "
+                 "blended by a bilinear mask: the blended single BSDF must not exceed 1 + 0.5 %; the additive sum of the layers' BSDFs is the control"}
+    return keys
+
+
+SCENARIOS.update(_layer_keys())
 # Red-state expectations (before ticket 03): direct metallic rows 0 and 1 pass, intermediate rows fail.
 GPU_PROCESS = re.compile(r"^(phosphor|soc_bench|f\d+_spike)$")
 
@@ -888,7 +956,7 @@ def build_manifest(binary, metallib, scenarios, seed):
     power = command_text(["pmset", "-g", "batt"]) or ""
     tools = {name: sha256_file(REPO / "tools" / name) for name in
              ("f15_check.py", "f15_reference.py", "f15_transmission_reference.py", "f15_shadow_reference.py", "f15_subsurface_reference.py",
-              "f15_common.py",
+              "f15_common.py", "f15_layers.py",
               "f12_reference.py",
               "run_checked.py")}
     return {"schema": 1, "created_utc": datetime.now(timezone.utc).isoformat(),
@@ -907,7 +975,7 @@ def build_manifest(binary, metallib, scenarios, seed):
 
 def bench_scenario(name):
     """The bench scenario of a runner key ("<bench>@<lighting>" variants share the bench scene)."""
-    return name.split("@", 1)[0]
+    return SCENARIOS.get(name, {}).get("scene") or name.split("@", 1)[0]
 
 
 def capture_command(binary, name, folder, seed=1):
@@ -928,7 +996,8 @@ def capture_command(binary, name, folder, seed=1):
             "--capture-linear", str(folder / "engine.pfm"), "--capture-linear-frame", last,
             *(["--capture-linear-accumulate", str(SCENARIOS[name]["accumulate"])] if SCENARIOS[name].get("accumulate") else []),
             "--capture-linear-signal", "hdr",
-            "--export-reference", str(folder / "snapshot"), "--export-reference-frame", last,
+            *(["--export-reference", str(folder / "snapshot"), "--export-reference-frame", last] if SCENARIOS[name].get("snapshot", True) else []),
+            *(["--terrain-textures", str(terrain_materials_dir() or "build/terrain-materials")] if SCENARIOS[name].get("cc0") else []),
             "--report", str(folder / "report.json")]
 
 
@@ -943,6 +1012,8 @@ def scenario_controls(name):
 def reference_script(name):
     """The independent reference tool of one scenario: the Appendix B model, (ticket 13) the transmission ground truth or
     (ticket 17) the volumetric random walk."""
+    if SCENARIOS[name]["kind"] in LAYER_KINDS:
+        return "f15_layers.py"
     if SCENARIOS[name]["kind"] in SHADOW_KINDS:
         return "f15_shadow_reference.py"
     if SCENARIOS[name]["kind"] in TRANSMISSION_KINDS:
@@ -956,6 +1027,8 @@ def reference_arguments(name):
 
 
 def reference_command(name, folder):
+    if SCENARIOS[name]["kind"] in LAYER_KINDS:  # no external reference tool: the statistics and the BSDF quadrature of tools/f15_layers.py
+        return ["python3", "-I", str(REPO / "tools" / "f15_layers.py"), "evaluate", str(folder)]
     if SCENARIOS[name]["kind"] in SHADOW_KINDS:
         return ["uv", "run", "--offline", "--no-project", "--python", "3.13", "--with", "mitsuba==3.9.1", "--with", "numpy", "python", "-I",
                 str(REPO / "tools" / "f15_shadow_reference.py"), "render", str(folder / "snapshot"), "--out", str(folder / "reference"),
@@ -1595,6 +1668,64 @@ def evaluate_shadow_scenario(np, name, folder, mode):
     return entry
 
 
+def evaluate_layer_scenario(np, name, folder, mode):
+    """One `layers-*` key (F15.4, ticket 23): exact equality of two engine captures (the stack at a weight vector against the single material),
+    the transition ramp, or the furnace of the blended BSDF; every negative control must fail its gate."""
+    from f12_reference import read_pfm
+    import f15_layers as layers
+
+    spec = SCENARIOS[name]
+    kind = spec["kind"]
+    candidate = read_pfm(folder / "engine.pfm")
+    sibling = lambda key: read_pfm(folder.parent / key / "engine.pfm")  # noqa: E731
+    entry = {"scenario": name, "kind": kind, "terms": spec["terms"], "reference_terms": ["engine capture pair" if kind != "layer-furnace" else
+                                                                                          "tools/f15_reference.py environment quadrature of the blended BSDF"],
+             "reference_maximum_radiance": None, "quadrature_mask_pixels": 0, "snapshot_sha256": None}
+    verdicts = {}
+    if kind == "layer-equal":
+        pair = sibling(spec["pair"])
+        envelope = bool(spec.get("envelope"))
+        result = layers.evaluate_equal(np, candidate, pair, envelope=envelope)
+        for control in spec["controls"]:
+            c = layers.evaluate_equal(np, sibling(control), pair, envelope=envelope)
+            verdicts[control] = {"fails_gate": not c["pass"], "gate_result": c}
+        entry["roi_pixels"] = result["pixels"]
+    elif kind == "layer-ramp":
+        roi, x, z = layers.witness_positions(np, folder / "snapshot")
+        u, _ = layers.plane_uv(np, x, z)
+        e0, e1 = (sibling(k) for k in spec["endpoints"])
+        result = layers.evaluate_ramp(np, candidate, e0, e1, roi, u)
+        for control in spec["controls"]:
+            c = layers.evaluate_ramp(np, sibling(control), e0, e1, roi, u)
+            verdicts[control] = {"fails_gate": not c["pass"], "gate_result": c}
+        entry["roi_pixels"] = int(roi.sum())
+    else:
+        roi, x, z = layers.witness_positions(np, folder / "snapshot")
+        u, v = layers.plane_uv(np, x, z)
+        scene = json.loads((folder / "snapshot" / "scene.json").read_text())
+        position = np.array(scene["camera"]["position"], dtype=np.float64)
+        inside = roi & (u > layers.EDGE_MARGIN * 2) & (u < 1 - layers.EDGE_MARGIN * 2) & (v > layers.EDGE_MARGIN * 2) & (v < 1 - layers.EDGE_MARGIN * 2)
+        px, py, pz = x[inside], np.zeros(int(inside.sum())), z[inside]
+        view = position[None, :] - np.stack([px, py, pz], axis=1)
+        n_dot_v = view[:, 1] / np.linalg.norm(view, axis=1)
+        exact = layers.furnace_reference(np, u[inside], v[inside], n_dot_v, declared=False)
+        declared = layers.furnace_reference(np, u[inside], v[inside], n_dot_v, declared=True)
+        result = layers.evaluate_furnace(np, candidate, inside, exact, {"additive-blend": exact["additive"]})
+        result["declared_model"] = {"blended_max": float(declared["blended"].max()), "mixed_max": float(declared["mixed"].max()),
+                                    "additive_max": float(declared["additive"].max()),
+                                    "deviation_max_abs": float(np.abs(declared["blended"] - declared["mixed"]).max())}
+        verdicts = {c: {"fails_gate": v_["fails_gate"], "gate_result": v_} for c, v_ in result.pop("controls").items()}
+        entry["roi_pixels"] = int(inside.sum())
+        entry["reference_maximum_radiance"] = result["reference_max"]
+    expected = expectation(kind, mode, result, spec.get("always_green", True), spec.get("pending"))
+    entry.update(result=result, expectation=expected, controls=verdicts, pending=spec.get("pending"))
+    entry["discriminating"] = all(v["fails_gate"] for v in verdicts.values())
+    entry["gates_pass"] = result["pass"]
+    entry["pending_matches_met"] = True
+    entry["expectation_met"] = expected["met"]
+    return entry
+
+
 def evaluate_scenario(np, name, folder, mode):
     from f12_reference import read_pfm
     import f15_reference
@@ -1603,6 +1734,8 @@ def evaluate_scenario(np, name, folder, mode):
         return evaluate_shadow_scenario(np, name, folder, mode)
     if SCENARIOS[name]["kind"] in TRANSMISSION_KINDS:
         return evaluate_transmission_scenario(np, name, folder, mode)
+    if SCENARIOS[name]["kind"] in LAYER_KINDS:
+        return evaluate_layer_scenario(np, name, folder, mode)
 
     spec = SCENARIOS[name]
     literal_controls, declared_controls = scenario_controls(name)
@@ -1724,6 +1857,19 @@ def result_lines(r):
             lines.append(f"| {t['instance']} | {t.get('weight', 0):g} | {t.get('radius') or 0:g} | {t['pixels']} | {t.get('mean', 0):.4f} | "
                          f"{t.get('p95', 0):.4f} | {t.get('candidate_mean_luminance', 0):.4f} | "
                          f"{t.get('reference_mean_luminance', 0):.4f} | {t.get('gated')} | {t.get('bound_met')} |")
+    elif r["kind"] == "layer-equal":
+        lines += ["", f"gate {r['gate']} (limit {r['limit']}): {r['bitwise_differing']} of {r['pixels']} pixels differ bitwise, max {r['max_ulp']} ULP, "
+                      f"max relative {r['max_relative']:.3e}, {r['eight_bit_differing']} pixels differ in the 8-bit image"]
+    elif r["kind"] == "layer-ramp":
+        lines += ["", f"{r['usable_pixels']} pixels in {r['rows']} rows; rows with a reversal {r['rows_with_reversal']} (worst drop {r['worst_drop']:.2e}, "
+                      f"tolerance {r['tolerance']}); max |t - u| {r['max_mask_error']:.4f} (limit {r['mask_error_limit']}); ends (mean t / 1-t)"
+                      f" {r['mean_t_near_low_end']:.4f} / {r['mean_one_minus_t_near_high_end']:.4f}; fitted slope {r['fitted_slope']:.4f}"]
+    elif r["kind"] == "layer-furnace":
+        d = r["deviation_from_bsdf_mix"]
+        lines += ["", f"max pixel {r['max_pixel']:.5f} (limit {r['limit']}), mean {r['mean_pixel']:.5f}; reference (blended BSDF) max {r['reference_max']:.5f}, "
+                      f"mean {r['reference_mean']:.5f}; engine vs reference mean relative {r['engine_vs_reference_mean_relative']:.4f}, p99 "
+                      f"{r['engine_vs_reference_p99_relative']:.4f}; parameter blend minus BSDF-space mix: max |d| {d['max_abs']:.5f}, mean {d['mean']:.5f}, "
+                      f"range [{d['min']:.5f}, {d['max']:.5f}]"]
     elif r["kind"] == "radius-monotonic":
         lines += ["", f"statistic: {r['statistic']}; tolerance {r['tolerance']}; ground truth rises at every step: "
                       f"{r['reference_monotonic']}", "", "| series | radii | candidate | reference | pass |", "|---|---|---|---|---|"]
@@ -1794,7 +1940,7 @@ def markdown(manifest, entries, status):
                      f"{'' if ex.get('asserted') else ' (not asserted)'} | {controls} |")
     for e in entries:
         lines += ["", f"## {e['scenario']} ({e['kind']})", f"Image contains: {e['terms']}.",
-                  f"Reference terms: {', '.join(e['reference_terms'])}; ROI pixels {e['roi_pixels']}; "
+                  f"Reference terms: {', '.join(e['reference_terms'])}; ROI pixels {e.get('roi_pixels', 0)}; "
                   f"quadrature mask pixels {e['quadrature_mask_pixels']}."]
         lines += result_lines(e["result"])
         if e.get("declared"):
@@ -1896,7 +2042,14 @@ def run(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)  # SystemExit(2) on a usage error
     names = args.only or list(SCENARIOS)
-    names = names + [SCENARIOS[n]["pair"] for n in names if SCENARIOS[n].get("pair") and SCENARIOS[n]["pair"] not in names]
+    if not args.only and terrain_materials_dir() is None and (args.run or args.evaluate):
+        skipped = [n for n in names if SCENARIOS[n].get("cc0")]
+        names = [n for n in names if not SCENARIOS[n].get("cc0")]
+        print(f"skipping {len(skipped)} cc0 keys: no unpacked CC0 terrain sets (set {TERRAIN_MATERIALS_ENV} or run tools/fetch_terrain_materials.py)", file=sys.stderr)
+    for n in list(names):  # dependencies (pair, endpoints, control captures) are captured too
+        for dep in [SCENARIOS[n].get("pair"), *SCENARIOS[n].get("endpoints", []), *SCENARIOS[n].get("needs", [])]:
+            if dep and dep not in names:
+                names.append(dep)
     out = args.out.resolve()
     binary = args.binary.resolve()
     metallib = binary.parent / "shaders" / "phosphor.metallib"
