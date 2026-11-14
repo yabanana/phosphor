@@ -1701,7 +1701,7 @@ def evaluate_layer_scenario(np, name, folder, mode):
     verdicts = {}
     if kind == "layer-equal":
         pair = sibling(spec["pair"])
-        envelope = bool(spec.get("envelope"))
+        envelope = spec.get("envelope", False)
         result = layers.evaluate_equal(np, candidate, pair, envelope=envelope)
         for control in spec["controls"]:
             c = layers.evaluate_equal(np, sibling(control), pair, envelope=envelope)
