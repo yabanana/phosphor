@@ -174,17 +174,20 @@ Generated {esc(summary['generated_utc'])} from {esc(summary['binary_sha256'][:12
 
 
 def validation_status(record):
+    """One-line API + shader validation result of a capture record (summary-validation.json)."""
     if record is None:
         return "not run"
     if record["status"] == "refused":
-        return "refused (no render)"
-    problems = record.get("validation_failures") or []
-    others = record.get("other_messages") or []
-    if record["status"] == "rendered" and not problems and not others:
-        return "clean"
-    if record["status"] == "rendered":
-        return f"rendered, {len(others)} unclassified log lines" if not problems else f"{len(problems)} validation failures"
-    return f"failed: {record.get('reason')}"
+        return "refused before rendering (loader reason in the table)"
+    if record["status"] != "rendered":
+        return f"failed: {record.get('reason')}"
+    problems, others = record.get("validation_failures") or [], record.get("other_messages") or []
+    if problems:
+        return f"{len(problems)} validation failures"
+    if others:
+        return f"rendered, {len(others)} unclassified log lines"
+    notices = sum(v for k, v in (record.get("known_notices") or {}).items() if k.startswith("Redundant"))
+    return f"clean (exit 0; only the known baseline notices: {notices} redundant state calls)" if notices else "clean (exit 0)"
 
 
 def build_report(summary, validation, notes, manifest, audits):
@@ -245,14 +248,14 @@ def main(argv=None):
     parser.add_argument("--report-md", type=pathlib.Path)
     parser.add_argument("--notes", type=pathlib.Path, default=REPO / "tools/f15_corpus_notes.json")
     args = parser.parse_args(argv)
+    if args.page and REPO.resolve() in args.page.resolve().parents and args.page.resolve().relative_to(REPO.resolve()).parts[0] != "build":
+        raise SystemExit("the page holds third-party images: generate it under build/, never in a tracked folder")
     summary = load_json(args.run / "summary.json")
     validation = load_json(args.run / "summary-validation.json") if (args.run / "summary-validation.json").is_file() else None
     notes = load_json(args.notes) if args.notes.is_file() else {}
     manifest = load_json(REPO / "tools/khronos_corpus.json")
     audits = load_json(args.run / "static-audit.json") if (args.run / "static-audit.json").is_file() else {}
     if args.page:
-        if REPO.resolve() in args.page.resolve().parents and args.page.resolve().relative_to(REPO.resolve()).parts[0] != "build":
-            raise SystemExit("the page holds third-party images: generate it under build/, never in a tracked folder")
         build_page(summary, validation, notes, args.corpus, manifest, args.page)
         print(f"page: {args.page / 'index.html'}")
     if args.report_md:

@@ -16,6 +16,7 @@ Modes (exactly one):
   --run             serial captures under the GPU guard, one process per model; writes <out>/summary.json
   --validate        the same captures under API + shader validation (archive off, nothing else changes), summary-validation.json
   --harvest         one capture per model with archive misses (from <out>/summary.json) with --harvest-pipelines into <out>/harvest/
+  --reclassify      CPU only: re-scan the logs of <out>/summary*.json (classification of validation notices, loader messages)
   --archive-update  CPU only: filter (constant 22 [23], --skip-present) and merge the harvests into shaders/pipelines.mtl4-json
 
 Exit codes: 0 ok, 1 a model failed unexpectedly (neither rendered nor refused for a stated reason), 2 usage / corpus missing, 4 GPU busy,
@@ -172,6 +173,31 @@ VALIDATION_FAILURE = re.compile(r"failed assertion|Shader Validation Error|Metal
 SAFE_LINES = re.compile(r"^\[INFO\]|^BENCH|^SCENE|^MESHLET|^PIPELINES|^RT |^LIGHTING|^EXIT \d+$|^STARTUP|^REFLECTION|^SHADOW|^GI |^DI |Validation Enabled|^$")
 
 
+KNOWN_NOTICE = re.compile(r"Render Command Encoder Set (Depth Stencil State|Viewport|Render Pipeline State) Validation|^Redundant call to set(DepthStencilState|Viewport|RenderPipelineState)")
+LOADER_LINE = re.compile(r"^\[(WARN|ERROR)\][^\n]*(gltf_loader|main\.cpp)")
+NSLOG_PREFIX = re.compile(r"^\d{4}-\d\d-\d\d [\d:.]+ phosphor\[[\d:]+\] ")
+
+
+def scan_log(text):
+    """Classify the non-INFO lines of a capture log: validation failures, the KNOWN baseline notices (redundant state calls of the validation
+    layer: present with the phase-head binary on every scene, ticket 15 record), loader warnings / refusal errors, and anything else."""
+    lines = text.splitlines()
+    known, loader, other = {}, [], []
+    for line in lines:
+        bare = NSLOG_PREFIX.sub("", line)
+        if SAFE_LINES.search(line) and not LOADER_LINE.search(line):
+            continue
+        if KNOWN_NOTICE.search(bare):
+            key = re.sub(r"\s+Validation\.?$", "", bare.strip())
+            known[key] = known.get(key, 0) + 1
+        elif LOADER_LINE.search(line):
+            loader.append(re.sub(r"^\[[A-Z]+\] \[[^\]]*\] [^ ]+:\d+: ", "", line))
+        else:
+            other.append(line)
+    return {"other_messages": other[:20], "known_notices": known, "loader_messages": loader[:20],
+            "validation_failures": [line.strip() for line in lines if VALIDATION_FAILURE.search(line)][:10]}
+
+
 def fallback_draws(text):
     found = PIPELINES_LINE.findall(text)
     return int(found[-1][6]) if found else None
@@ -247,9 +273,7 @@ def run_one(binary, corpus, name, folder, timeout, validation=False, harvest=Non
         record["materials"] = summarize_materials(report.get("materials"))
         record["frames"] = report.get("frames")
         record["scene"] = {k: report.get("scene", {}).get(k) for k in ("instances", "materials", "buckets", "queue_overflow")}
-    messages = [line for line in text.splitlines() if not SAFE_LINES.search(line)]
-    record["other_messages"] = messages[:20]
-    record["validation_failures"] = [line.strip() for line in text.splitlines() if VALIDATION_FAILURE.search(line)][:10]
+    record.update(scan_log(text))
     record["capture"] = str((folder / "engine.png")) if (folder / "engine.png").is_file() else None
     reason = refusal_reason(text)
     if timed_out:
@@ -260,13 +284,14 @@ def run_one(binary, corpus, name, folder, timeout, validation=False, harvest=Non
         record["status"], record["reason"] = "rendered", None
     else:
         record["status"], record["reason"] = "failed", f"exit {code}, EXIT marker {exit_marker}; see {log.name}"
-    record["loader_messages"] = loader_error_lines(text)
     if record["status"] == "rendered":
         problems = []
         if record.get("pipelines", {}).get("fallback_draws", 1) != 0 and not validation:
             problems.append(f"fallback draws {record.get('pipelines', {}).get('fallback_draws')}")
         if record["validation_failures"]:
             problems.append("validation failures in the log")
+        if any(line.startswith("[ERROR]") for line in record["other_messages"]):
+            problems.append("[ERROR] lines in the log")
         if problems:
             record["status"], record["reason"] = "failed", "; ".join(problems)
     return record
@@ -348,6 +373,22 @@ def archive_update(args):
     print(f"updated {archive}")
 
 
+def reclassify(args):
+    """CPU only: re-scan the logs of an existing summary (after a change of the log classification) and rewrite it."""
+    for name in ("summary.json", "summary-validation.json"):
+        path = args.out / name
+        if not path.is_file():
+            continue
+        document = json.loads(path.read_text())
+        folder = "validation" if "validation" in name else "captures"
+        for record in document["models"]:
+            log = args.out / folder / record["model"] / "engine.log"
+            record.pop("loader_messages", None)
+            record.update(scan_log(log.read_text(errors="replace")))
+        path.write_text(json.dumps(document, indent=2) + "\n")
+        print(f"reclassified {path}")
+
+
 # --- main ---------------------------------------------------------------------
 
 def build_parser():
@@ -357,7 +398,7 @@ def build_parser():
     parser.add_argument("--out", type=pathlib.Path, default=REPO / "build/f15-corpus")
     parser.add_argument("--only", action="append", default=[], choices=sorted(MODELS))
     mode = parser.add_mutually_exclusive_group(required=True)
-    for flag in ("static", "run", "validate", "harvest", "archive-update"):
+    for flag in ("static", "run", "validate", "harvest", "archive-update", "reclassify"):
         mode.add_argument(f"--{flag}", action="store_true")
     parser.add_argument("--constant", type=int, action="append", default=None)
     parser.add_argument("--gpu-lock", type=pathlib.Path, default=pathlib.Path("/tmp/phosphor-gpu-verification.lock"))
@@ -375,6 +416,9 @@ def main(argv=None):
     try:
         if args.archive_update:
             archive_update(args)
+            return 0
+        if args.reclassify:
+            reclassify(args)
             return 0
         if not args.corpus.is_dir():
             print(f"corpus folder {args.corpus} is absent: fetch it with tools/fetch_khronos_corpus.py (owner-approved set only)", file=sys.stderr)

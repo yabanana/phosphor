@@ -1,0 +1,275 @@
+{
+  "_comment": "Per-model review of the captures of tools/f15_corpus.py (one settled frame, declared rig). Written from the captures and the engine's own support report; every defect carries a root-cause HYPOTHESIS unless its status says otherwise. Consumed by tools/f15_corpus_page.py (page + report).",
+  "ClearCoatTest": {
+    "khronos_screenshot": "screenshot_large.jpg",
+    "renders": [
+      "All 19 materials load; the three columns (base, coated, coat only) and the six rows (simple, partial, roughness, base normal map, shared normal map, coat normal map) are laid out as in the Khronos image.",
+      "Partial coating (coat factor texture), coat roughness texture and the coat normal texture rows visibly change the coated column against the base column; the base normal map ribs appear on the base tiles.",
+      "Coat-only column: the coat lobe is visible as the sun highlight and the rim reflection of the constant environment."
+    ],
+    "approximations": [
+      "No image-based lighting: the coat-only tiles read near black (coat F0 0.04 x environment 0.5) where the Khronos tiles reflect an HDR environment; the coat highlight is the sun disk only.",
+      "The engine support report names clearcoat as approximated: secondary_rt_hits_ignore_coat, di_emitters_uncoated.",
+      "alphaMode BLEND (label planes) is rendered opaque until F16 (loader warning)."
+    ],
+    "defects": []
+  },
+  "ClearCoatCarPaint": {
+    "renders": [
+      "KHR_texture_transform (required) loads; the car-paint flake normal map shows as sparkle on the red sphere and a coat highlight sits on top.",
+      "The sphere shows the broad Fresnel rim of a smooth coat over a constant environment."
+    ],
+    "approximations": [
+      "Coat F0 fixed at IOR 1.5 (ratified text); the Sample Renderer derives it from the material IOR.",
+      "No HDR environment: the Khronos image shows a street reflected in the coat, here the reflection is the constant environment."
+    ],
+    "defects": [
+      {
+        "id": "C22-D3",
+        "status": "open",
+        "summary": "Isolated dark pixels on the outermost pixel row of the sphere silhouette (also on the SpecularTest, IORTestGrid and Sheen grids).",
+        "hypothesis": "Grazing-angle pixels whose interpolated shading normal faces away from the view: the RT reflection ray (reflections rt) starts on the wrong side of the surface and hits the sphere itself, a secondary hit that returns almost black. Not reproduced in isolation; check with --reflections ssr/off on the same model."
+      }
+    ]
+  },
+  "SheenTestGrid": {
+    "renders": [
+      "Sheen colour (columns) and sheen roughness (rows) are monotonic: the cyan rim grows with both, the zero-colour column carries no sheen (README criterion).",
+      "KHR_materials_sheen (required) loads; the 16 spheres cast sun shadows on the checker backdrop."
+    ],
+    "approximations": [
+      "Sheen is named approximated: lobe not sampled, environment term in the composition, sun disk point-evaluated, secondary RT hits ignore sheen.",
+      "The constant environment gives every sphere a uniform sheen rim; the Khronos image under 'Footprint Court' has a directional one. Our sun adds a one-sided shadow on the checker, the Khronos grid is lit by the environment only."
+    ],
+    "defects": []
+  },
+  "AnisotropyStrengthTest": {
+    "renders": [
+      "Strength rows x roughness columns: the sun highlight stretches along the tangent as strength rises and collapses to the isotropic highlight at strength 0; at roughness 1.0 the anisotropy has no effect (README criterion)."
+    ],
+    "approximations": [
+      "Environment split sum at an effective roughness (named): the stretching of environment reflections that the Khronos image shows cannot appear in a constant environment, only the sun highlight is anisotropic."
+    ],
+    "defects": [
+      {
+        "id": "C22-D5",
+        "status": "open",
+        "summary": "Near-mirror anisotropic spheres (strength >= 0.5, roughness <= 0.17) are speckled in the single settled frame; the neighbouring-sphere reflections at strength 0 show black blotches.",
+        "hypothesis": "Stochastic VNDF samples of a very narrow anisotropic lobe (8 reflection samples) that the custom denoiser's lobe edge-stopping does not converge in 48 frames; the black blotches are reflections of neighbouring dark spheres (single-bounce RT reflections, see C22-A1)."
+      }
+    ]
+  },
+  "AnisotropyRotationTest": {
+    "renders": [
+      "The stacked rings load with tangents + texture + rotation variants; the sun highlight orientation changes with the rotation offsets and the groove normal map ring shows its pattern."
+    ],
+    "approximations": [
+      "The README states the horizontal stretching needs image-based lighting: it is not expected here (constant environment, bent-normal fetch invisible, ticket 11)."
+    ],
+    "defects": []
+  },
+  "AnisotropyDiscTest": {
+    "renders": [
+      "The anisotropy direction texture (disc) loads: in every tile the lower discs show the radial highlight pattern; strength falls off towards roughness 1.0 as in the Khronos image."
+    ],
+    "approximations": [
+      "The 3 % and 10 % strength discs (upper row of each tile) are nearly invisible: with a constant environment only the sun highlight carries the pattern."
+    ],
+    "defects": []
+  },
+  "TransmissionTest": {
+    "khronos_screenshot": "screenshot_large.jpg",
+    "renders": [
+      "Uniform and textured transmission, opacity (alpha) and metallic transmission spheres are all present; the refracted checker, the tint, the textured stripes and the metallic variant read as in the Khronos image.",
+      "Rough transmission blurs the refracted checker."
+    ],
+    "approximations": [
+      "Thin-walled transmission (no volume) is traced by RT; the spheres refract no environment beyond the constant 0.5."
+    ],
+    "defects": []
+  },
+  "TransmissionRoughnessTest": {
+    "renders": [
+      "Roughness x IOR tiles: the smooth column shows the refracted pattern and the pattern blurs monotonically with roughness (README criterion); IOR 1.0 shows no refraction and the higher IORs show the rim reflections."
+    ],
+    "approximations": [
+      "No HDR environment: the bright refracted/reflected highlights of the Khronos tiles come from the environment, here from the sun."
+    ],
+    "defects": [
+      {
+        "id": "C22-D4",
+        "status": "open",
+        "summary": "Near-black grainy squares where a glass tile overlaps the opaque label planes (rows 2 to 5 of the smooth column); the Khronos image shows the label through the glass.",
+        "hypothesis": "Secondary RT hits (the label seen through the glass) are shaded with the sun only: the label is in the sun shadow of the glass tile (transmissive shadow, noisy) and secondary hits carry no environment/ambient term with GI off (secondary_rt_hits_use_base_reduction). Check with --gi on."
+      }
+    ]
+  },
+  "TransmissionThinwallTestGrid": {
+    "renders": [
+      "Thin-wall (top row) against volume (bottom row) spheres over the checker at five IORs: the volume row refracts and inverts the checker (IOR >= 1.33), the thin-wall row does not shift it; IOR 1.0 shows no refraction in either row (the intended difference)."
+    ],
+    "approximations": [
+      "Volume thickness is the authored thicknessFactor (1 m); no environment image to reflect."
+    ],
+    "defects": []
+  },
+  "AttenuationTest": {
+    "khronos_screenshot": "screenshot_large.jpg",
+    "renders": [
+      "Attenuation colour x distance x thickness: columns read as one blue each and deepen with size and thickness (README pass criterion: a uniform shade per column), thickness texture and node-scale rows included."
+    ],
+    "approximations": [
+      "Transmissive sun shadows (coloured, attenuated) are visible as blue pools on the wall, as in the Khronos path-traced image."
+    ],
+    "defects": []
+  },
+  "IORTestGrid": {
+    "renders": [
+      "Black / white base, specular 0.25 / 1, transmission 0 / 1 at five IORs: the black spheres show the IOR-dependent Fresnel reflection, the transmissive spheres refract the checker; IOR 1.0 with transmission shows no refraction."
+    ],
+    "approximations": [
+      "Specular and IOR use the ratified F0 / F90 model; no HDR environment."
+    ],
+    "defects": [
+      {
+        "id": "C22-D7",
+        "status": "open",
+        "summary": "White transmissive spheres at IOR >= 1.76 are visibly grainy in the single settled frame; the Khronos image is smooth.",
+        "hypothesis": "Stochastic refraction (8 samples) of a high-IOR sphere, denoised by the custom denoiser in 48 frames only; the ticket 13 measurements converge with 112 accumulated frames (tools/f15_check.py ACCUMULATE)."
+      }
+    ]
+  },
+  "SpecularTest": {
+    "renders": [
+      "Specular factor row = specular texture row, the leftmost sphere is black, colour rows darken the centre but not the edge, yellow rows keep a white rim (README criteria); colour factor > 1.0 brightens the reflection."
+    ],
+    "approximations": [
+      "Reflections are the constant environment and neighbouring spheres, not an HDR image."
+    ],
+    "defects": []
+  },
+  "IridescenceDielectricSpheres": {
+    "renders": [
+      "344 materials load (thickness x IOR lattice); the thin-film hue shift is visible on the lower rows where the environment/sun reflect at grazing angles."
+    ],
+    "approximations": [
+      "The film is evaluated per light sample at V.H and at N.V in the environment (ticket 12); the Sample Renderer uses N.V everywhere. White dielectric spheres under a bright constant environment read mostly white: the colour shows only in the reflection."
+    ],
+    "defects": []
+  },
+  "IridescenceMetallicSpheres": {
+    "renders": [
+      "The metal lattice shows the thin-film colour sweep along thickness and base colour, close to the Khronos image in hue order (blue-magenta-gold-green)."
+    ],
+    "approximations": [
+      "Single-bounce RT reflections (see C22-A1)."
+    ],
+    "defects": [
+      {
+        "id": "C22-A1",
+        "status": "named-approximation",
+        "summary": "Dense metal lattices show black holes inside each sphere: a sphere sees its neighbours as dark.",
+        "hypothesis": "RT reflections are one bounce: the neighbour hit is shaded without its own environment reflection (metals have no diffuse), so a mirror seen in a mirror is dark. Named in the support report as secondary_rt_hits_ignore_<lobe>; the Khronos image renders it with image-based lighting."
+      }
+    ]
+  },
+  "IridescenceSuzanne": {
+    "renders": [
+      "Three Suzannes: iridescent dielectric, iridescent metal (thickness texture), iridescent + transmission + volume + IOR; the metal one shows the green-magenta thickness variation of the Khronos image.",
+      "KHR_lights_punctual is used but not required: its lights are ignored and the rig light applies."
+    ],
+    "approximations": [
+      "Environment film at N.V constant over the lobe (named).",
+      "The loader warns 'volume requires transmission or subsurface to have an effect' for the opaque materials (volume ignored there)."
+    ],
+    "defects": []
+  },
+  "DiffuseTransmissionTest": {
+    "renders": [],
+    "approximations": [],
+    "defects": [
+      {
+        "id": "C22-R1",
+        "status": "by-design",
+        "summary": "Refused: the model REQUIRES KHR_materials_unlit and KHR_lights_punctual.",
+        "hypothesis": "Decision 02: both extensions are reported unsupported, so the loader refuses the asset (glTF 3.2) instead of rendering it wrongly. The thin diffuse transmission lobe itself is covered by the independent reference (ticket 16), not by this model."
+      }
+    ]
+  },
+  "EmissiveStrengthTest": {
+    "renders": [
+      "emissiveStrength 1 to 100 folded into the emissive factor: the cubes brighten monotonically from blue to white, the walls and floor stay lit as in the Khronos image."
+    ],
+    "approximations": [
+      "No bloom: the Khronos image shows a glow around the bright cubes."
+    ],
+    "defects": []
+  },
+  "TextureTransformTest": {
+    "renders": [
+      "Offset, rotation and scale on the base colour: the U, V and UV tiles and the arrow tiles with their check marks match the Khronos image tile for tile (qualitative).",
+      "The README's pass criteria (check mark on every tile, marker squares) hold in the capture."
+    ],
+    "approximations": [],
+    "defects": []
+  },
+  "TextureTransformMultiTest": {
+    "renders": [],
+    "approximations": [],
+    "defects": [
+      {
+        "id": "C22-R2",
+        "status": "open",
+        "summary": "Refused: material 'BaseColorTest1Mat' has a non-uniform KHR_texture_transform (a transform on one texture slot only).",
+        "hypothesis": "The loader bakes a transform into the mesh UV0 and therefore accepts only a UNIFORM one (analyzeTextureTransforms: every textured slot of a material carries the same transform); BaseColorTest1Mat transforms the base colour only (offset, rotation 90 degrees, scale 0.35, texCoord 1) while its other slots are untransformed or on UV0. Supporting it needs per-slot transforms in MaterialDescription, the GPU material record and the shader texture fetches (and UV1 for texCoord overrides): an F15.1 feature, not a corpus-run fix. The model also uses KHR_materials_unlit, which would render lit."
+      }
+    ]
+  },
+  "AnisotropyBarnLamp": {
+    "renders": [
+      "Brushed-copper anisotropy + clear coat on one material (anisotropy texture + coat normal texture) loads; the anisotropic streak follows the spun metal, the bulb material (transmission + volume) is visible."
+    ],
+    "approximations": [
+      "Anisotropy and clearcoat are combined in the resolve (ticket 19); no HDR environment, so the long environment streaks of the Khronos image are absent."
+    ],
+    "defects": []
+  },
+  "ToyCar": {
+    "khronos_screenshot": "screenshot_large.jpg",
+    "renders": [
+      "Clear coat on the paint (texture + coat), sheen on the velvet cloth, transmission on the glass; the cloth shows its sheen rim and the car body its flame decals."
+    ],
+    "approximations": [
+      "Sheen and coat on separate materials as authored; secondary RT hits ignore both."
+    ],
+    "defects": []
+  },
+  "SpecularSilkPouf": {
+    "renders": [
+      "Specular + sheen on one required material: the folds read as satin with the sun highlight and a soft sheen rim."
+    ],
+    "approximations": [
+      "Sheen approximations as in SheenTestGrid."
+    ],
+    "defects": []
+  },
+  "GlamVelvetSofa": {
+    "renders": [],
+    "approximations": [],
+    "defects": [
+      {
+        "id": "C22-R2b",
+        "status": "open",
+        "summary": "Refused: material 'GlamVelvetSofa_fabric_champagne' has a non-uniform KHR_texture_transform (scale 5x5 on the normal texture only).",
+        "hypothesis": "Same root cause as C22-R2: the loader bakes only a uniform transform into UV0, the fabric normal texture alone is scaled 5x (the base colour texture is not)."
+      }
+    ]
+  },
+  "ABeautifulGame": {
+    "renders": [
+      "Not a Tier A model (Track Studio case, ticket 20): the board and the pieces (transmission + volume materials) load and render under the rig."
+    ],
+    "approximations": [],
+    "defects": []
+  }
+}

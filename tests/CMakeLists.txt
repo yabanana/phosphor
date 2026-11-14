@@ -144,4 +144,15 @@ find_program(PYTHON3_EXECUTABLE python3)
 if(PYTHON3_EXECUTABLE)
     add_test(NAME fetch_khronos_corpus_python
         COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_fetch_khronos_corpus.py)
+    add_test(NAME f15_corpus_python
+        COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_f15_corpus.py)
+    # The corpus itself is third-party data fetched on demand (never committed): when a fetched copy exists, verify it against the manifest;
+    # otherwise the check is skipped with a message (an absent corpus is not a test failure).
+    set(KHRONOS_CORPUS_DIR "${CMAKE_SOURCE_DIR}/build/khronos-corpus" CACHE PATH "fetched Khronos corpus (tools/fetch_khronos_corpus.py)")
+    if(EXISTS "${KHRONOS_CORPUS_DIR}/CORPUS.json")
+        add_test(NAME khronos_corpus_verify
+            COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/fetch_khronos_corpus.py --verify ${KHRONOS_CORPUS_DIR})
+    else()
+        message(STATUS "khronos_corpus_verify skipped: no fetched corpus at ${KHRONOS_CORPUS_DIR}")
+    endif()
 endif()
