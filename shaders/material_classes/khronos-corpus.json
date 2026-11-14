@@ -1,0 +1,513 @@
+{
+  "scenes": [
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 13
+        },
+        {
+          "lobes": [
+            "transmission",
+            "volume"
+          ],
+          "mask": 96,
+          "materials": 2
+        }
+      ],
+      "family": "corpus",
+      "name": "corpus:ABeautifulGame",
+      "union": 96,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "clearcoat",
+            "anisotropy"
+          ],
+          "mask": 10,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "transmission",
+            "volume"
+          ],
+          "mask": 96,
+          "materials": 1
+        }
+      ],
+      "family": "corpus",
+      "name": "corpus:AnisotropyBarnLamp",
+      "union": 106,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "anisotropy"
+          ],
+          "mask": 8,
+          "materials": 11
+        }
+      ],
+      "family": "corpus",
+      "name": "corpus:AnisotropyDiscTest",
+      "union": 8,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "anisotropy"
+          ],
+          "mask": 8,
+          "materials": 4
+        }
+      ],
+      "family": "corpus",
+      "name": "corpus:AnisotropyRotationTest",
+      "union": 8,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 8
+        },
+        {
+          "lobes": [
+            "anisotropy"
+          ],
+          "mask": 8,
+          "materials": 42
+        }
+      ],
+      "family": "corpus",
+      "name": "corpus:AnisotropyStrengthTest",
+      "union": 8,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "transmission"
+          ],
+          "mask": 32,
+          "materials": 5
+        },
+        {
+          "lobes": [
+            "transmission",
+            "volume"
+          ],
+          "mask": 96,
+          "materials": 11
+        }
+      ],
+      "family": "corpus",
+      "name": "corpus:AttenuationTest",
+      "union": 96,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [
+            "clearcoat"
+          ],
+          "mask": 2,
+          "materials": 1
+        }
+      ],
+      "family": "corpus",
+      "name": "corpus:ClearCoatCarPaint",
+      "union": 2,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 13
+        },
+        {
+          "lobes": [
+            "clearcoat"
+          ],
+          "mask": 2,
+          "materials": 6
+        }
+      ],
+      "family": "corpus",
+      "name": "corpus:ClearCoatTest",
+      "union": 2,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 6
+        }
+      ],
+      "family": "corpus",
+      "name": "corpus:EmissiveStrengthTest",
+      "union": 0,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "volume"
+          ],
+          "mask": 64,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "volume"
+          ],
+          "mask": 65,
+          "materials": 9
+        },
+        {
+          "lobes": [
+            "transmission",
+            "volume"
+          ],
+          "mask": 96,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "transmission",
+            "volume"
+          ],
+          "mask": 97,
+          "materials": 9
+        }
+      ],
+      "family": "corpus",
+      "name": "corpus:IORTestGrid",
+      "union": 97,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "iridescence"
+          ],
+          "mask": 16,
+          "materials": 49
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "iridescence"
+          ],
+          "mask": 17,
+          "materials": 294
+        }
+      ],
+      "family": "corpus",
+      "name": "corpus:IridescenceDielectricSpheres",
+      "union": 17,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "iridescence"
+          ],
+          "mask": 16,
+          "materials": 343
+        }
+      ],
+      "family": "corpus",
+      "name": "corpus:IridescenceMetallicSpheres",
+      "union": 16,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [
+            "iridescence",
+            "volume"
+          ],
+          "mask": 80,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "iridescence",
+            "volume"
+          ],
+          "mask": 81,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "iridescence",
+            "transmission",
+            "volume"
+          ],
+          "mask": 112,
+          "materials": 1
+        }
+      ],
+      "family": "corpus",
+      "name": "corpus:IridescenceSuzanne",
+      "union": 113,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 7
+        },
+        {
+          "lobes": [
+            "sheen"
+          ],
+          "mask": 4,
+          "materials": 12
+        }
+      ],
+      "family": "corpus",
+      "name": "corpus:SheenTestGrid",
+      "union": 4,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [
+            "specular_ior",
+            "sheen"
+          ],
+          "mask": 5,
+          "materials": 1
+        }
+      ],
+      "family": "corpus",
+      "name": "corpus:SpecularSilkPouf",
+      "union": 5,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "specular_ior"
+          ],
+          "mask": 1,
+          "materials": 21
+        }
+      ],
+      "family": "corpus",
+      "name": "corpus:SpecularTest",
+      "union": 1,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 9
+        }
+      ],
+      "family": "corpus",
+      "name": "corpus:TextureTransformTest",
+      "union": 0,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [
+            "clearcoat"
+          ],
+          "mask": 2,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "sheen"
+          ],
+          "mask": 4,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "transmission"
+          ],
+          "mask": 32,
+          "materials": 1
+        }
+      ],
+      "family": "corpus",
+      "name": "corpus:ToyCar",
+      "union": 38,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 4
+        },
+        {
+          "lobes": [
+            "transmission",
+            "volume"
+          ],
+          "mask": 96,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "transmission",
+            "volume"
+          ],
+          "mask": 97,
+          "materials": 4
+        }
+      ],
+      "family": "corpus",
+      "name": "corpus:TransmissionRoughnessTest",
+      "union": 97,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "transmission"
+          ],
+          "mask": 32,
+          "materials": 12
+        }
+      ],
+      "family": "corpus",
+      "name": "corpus:TransmissionTest",
+      "union": 32,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "transmission"
+          ],
+          "mask": 32,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "transmission"
+          ],
+          "mask": 33,
+          "materials": 4
+        },
+        {
+          "lobes": [
+            "transmission",
+            "volume"
+          ],
+          "mask": 96,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "transmission",
+            "volume"
+          ],
+          "mask": 97,
+          "materials": 4
+        }
+      ],
+      "family": "corpus",
+      "name": "corpus:TransmissionThinwallTestGrid",
+      "union": 97,
+      "volumetric": false
+    }
+  ],
+  "schema": "phosphor.material-class-manifest",
+  "source": "phosphor --export-class-manifest (Khronos corpus models, declared rigs, tools/f15_export_manifests.py)",
+  "version": 1
+}

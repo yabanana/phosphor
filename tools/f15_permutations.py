@@ -45,6 +45,7 @@ import time
 REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import f15_check as fc  # noqa: E402
+import f15_export_manifests as ext  # noqa: E402
 
 MANIFEST_DIR = REPO / "shaders/material_classes"
 LOCK = pathlib.Path("/tmp/phosphor-gpu-verification.lock")
@@ -74,6 +75,9 @@ def manifest_scenes():
     return sorted(out, key=lambda s: s["name"])
 
 
+CORPUS = pathlib.Path(__import__("os").environ.get("KHRONOS_CORPUS_DIR", "")) if __import__("os").environ.get("KHRONOS_CORPUS_DIR") else None
+
+
 def cases(scenes):
     """One case per f15_check key that uses a scene, plus a base-grid-sun substitution for a scene without key."""
     by_bench = {}
@@ -83,6 +87,9 @@ def cases(scenes):
         by_bench.setdefault(fc.bench_scenario(key), []).append(key)
     out = []
     for s in scenes:
+        if s["family"] in ("chess", "corpus"):  # the chess rigs and the Khronos models: their own command (tools/f15_export_manifests.py)
+            out.append({"id": s["name"], "template": None, "scene": s, "external": True})
+            continue
         keys = by_bench.get(s["scenario"], [])
         if keys:
             out += [{"id": k, "template": k, "scene": s} for k in keys]
@@ -109,6 +116,14 @@ def drop_flag(cmd, flag):
 
 
 def base_command(binary, case, folder, frames, resolution, capture=True):
+    if case.get("external"):
+        if CORPUS is None:
+            raise SystemExit("chess and corpus scenes need KHRONOS_CORPUS_DIR (the owner-approved read-only corpus)")
+        cmd = ext.scene_command(binary, case["scene"]["family"], case["scene"]["scenario"], CORPUS, frames=frames, warmup=0)
+        if capture:
+            cmd += ["--capture-linear", str(folder / "engine.pfm"), "--capture-linear-frame", str(frames - 1), "--capture-linear-signal", "hdr",
+                    "--capture", str(folder / "final.png")]
+        return cmd + ["--report", str(folder / "report.json")]
     cmd = fc.capture_command(binary, case["template"], folder)
     cmd = set_flag(cmd, "--material-scenario", case["scene"]["scenario"])
     cmd = set_flag(cmd, "--resolution", resolution)
@@ -222,6 +237,8 @@ def do_harvest(args, binary, out):
         if args.only and s["name"] not in args.only:
             continue
         case = {"id": s["scenario"], "template": next((k for k in fc.SCENARIOS if fc.bench_scenario(k) == s["scenario"]), "base-grid-sun"), "scene": s}
+        if s["family"] in ("chess", "corpus"):
+            case = {"id": s["name"], "template": None, "scene": s, "external": True}
         folder = out / s["name"].replace(":", "_")
         cmd = base_command(binary, case, folder, 3, EQUIV_RESOLUTION, capture=False)
         cmd += ["--material-binning", "on", "--harvest-pipelines", str(out / (s["name"].replace(":", "_") + ".json"))]  # synchronous compiles: every request is recorded

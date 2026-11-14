@@ -21,8 +21,8 @@ kernel visibility_lit_resolve   # the same with the F10-F14 lighting inputs
 manifest material_classes/material.json
 manifest material_classes/transmission.json
 manifest material_classes/shadow.json
-# manifest material_classes/chess.json         (ticket 20)
-# manifest material_classes/khronos-corpus.json (ticket 22)
+manifest material_classes/chess.json            # tools/f15_export_manifests.py: ABeautifulGame rigs (ticket 20)
+manifest material_classes/khronos-corpus.json   # the Khronos corpus models that load, declared rigs (ticket 22)
 
 # declare <NAME> <lobe>[|lobe...]   a class no manifest shows yet, e.g.
 # declare CHESS_QUEEN_SKIN subsurface|specular_ior

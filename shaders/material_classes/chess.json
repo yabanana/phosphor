@@ -1,0 +1,78 @@
+{
+  "scenes": [
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 1553
+        },
+        {
+          "lobes": [
+            "transmission",
+            "volume"
+          ],
+          "mask": 96,
+          "materials": 2
+        }
+      ],
+      "family": "chess",
+      "name": "chess:chess-backlight",
+      "union": 96,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 13
+        },
+        {
+          "lobes": [
+            "transmission",
+            "volume"
+          ],
+          "mask": 96,
+          "materials": 2
+        }
+      ],
+      "family": "chess",
+      "name": "chess:chess-shadow",
+      "union": 96,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 9
+        },
+        {
+          "lobes": [
+            "transmission",
+            "volume"
+          ],
+          "mask": 96,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "volume",
+            "subsurface"
+          ],
+          "mask": 192,
+          "materials": 4
+        }
+      ],
+      "family": "chess",
+      "name": "chess:chess-sidelight",
+      "union": 224,
+      "volumetric": true
+    }
+  ],
+  "schema": "phosphor.material-class-manifest",
+  "source": "phosphor --export-class-manifest (ABeautifulGame, chess rigs, tools/f15_export_manifests.py)",
+  "version": 1
+}
