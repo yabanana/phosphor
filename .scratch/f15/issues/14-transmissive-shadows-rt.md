@@ -94,3 +94,30 @@ cost, `tools/archive_check.sh` / `hitch_check.sh` of the future pipelines, memor
 regions: nothing to average; the 8-frame window is a placeholder to be measured when the transport lands); GI shadow rays and reflection secondary lighting through glass have NO fixture in
 this harness (the brief asked for sun, DI and CSM keys): candidates for the closure pass; `--lighting clustered` DI visibility is not keyed; what "qualitative" asserts for the curved key beyond
 the numbers it prints (suggested: the shadow of a curved caster is neither black nor absent: 0 < mean transmittance < 1) is left to the owner; casters rotated off the horizontal (tilted panes) are not fixtures.
+
+2026-11-14, ORCHESTRATOR DECISIONS on the open questions of the harness (taken before any engine result; commit `d3c4537`; they supersede the contrary
+wording above: the CSM finding and the curved key):
+1. CSM keys (ticket 15) gate the TRANSMITTANCE RATIO, not the absolute receiver luminance (kind `transmissive-shadow-ratio`). Per shadow region
+   T = mean luminance inside the caster's shadow (envelope excluded) / mean luminance of a declared LIT reference region of the same floor next to it
+   (floor pixels whose shadow ray and 8 ring neighbours at the envelope hit nothing, inside the x/z box of the shadows grown by 0.5 m), compared with the same
+   ratio of the ground truth: relative error of T <= 5 % (absolute floor 0.05 x the mean T of the truth), and p95 of the per-pixel luminance / lit mean error
+   against the truth's <= 15 % (same floor rule; the floors come from the truth for controls and twin). The lit-floor bias of today's CSM (a pre-existing F10
+   property) is a separate NOT gated diagnostic line of the CSM keys (`lit_floor_diagnostic`). RT and DI keys keep the absolute bound.
+   Measured on the existing captures (luminance basis, lit region 28-48 k pixels): CSM lit floor / truth 0.954 mean (median 0.982, p5 0.809) pane-sun, 0.977
+   (0.9995, 0.879) water-sun, 0.976 (0.997, 0.879) volume-pane. Red state `--expect green`: GREEN, exit 0; the three @csm gates FAIL (T = 0 against the truth's
+   0.92 / 0.96 / 0.73 for the clear, green and thick panes, 0.96 / 0.82 for water, 0.79 / 0.74 / 0.68 for the volume panes), the twins pass 0 / 0 with the truth's
+   floors, and the controls fail the ratio gate: pane-sun tint-ignored 0.314 / 0.318, fresnel-ignored 0.089 / 0.096, double-counted 0.208 / 0.209; water-sun
+   beer-lambert-ignored 0.171 / 0.176, double-counted 0.175 / 0.179; volume-pane fresnel-ignored 0.082 / 0.089, beer-lambert-ignored 0.347 / 0.355,
+   double-counted 0.327 / 0.330 (transmittance-ignored 1.000 everywhere). The declared model passes the ratio gate on every @csm key (`model_feasible`).
+   Tests: ratio gate ignores a uniform 5.2 % bias but fails an 8 % wrong shadow and the opaque engine; the absolute gate sees the bias; the lit region excludes
+   shadows and envelope.
+2. Curved glass (report-only key, now `transmissive-shadow-curved@rt`, kind `transmissive-shadow-curved`, pending "ticket 14"): the numbers against the declared
+   model stay report-only (`numbers_gated: false`); a QUALITATIVE assertion is gated: per caster region 0.001 < T < 0.995 (lighter than an opaque caster, darker than
+   unshadowed; T as above, lit region of the key) and the chroma statistic R/B = mean red over mean blue of the region follows the tint (tint = base x attenuation
+   colour; expected R/B printed): within 2 % of 1 (log) for the neutral clear sphere, on the tint's side of 1 with at least half its log magnitude for the absorbing sphere
+   (expected R/B 0.5). Controls `shadow-ignored` (T = 1: fails 0 < T < 1 and chroma) and `transmittance-ignored` (T = 0); today's engine (T = 0) fails, the declared model
+   passes. The key therefore leaves `always_green` and becomes pending like the others (no pending_matches twin).
+3. GI shadow rays, reflection secondary lighting through glass and clustered DI visibility have no fixture in this harness: recorded as ITEMS FOR THE ENGINE TICKET (14),
+   no new fixture now.
+
+- [ ] (orchestrator, 2026-11-14) engine ticket items without a harness fixture yet: GI shadow rays, reflection secondary lighting through glass, clustered DI visibility through glass
