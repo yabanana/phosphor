@@ -294,15 +294,21 @@ kernel void REFL_KERNEL(reflection_rt)(constant GPUReflectionParams& p [[buffer(
 #else
     const float boostRoughness=s.roughness;
 #endif
-    const uint count=(p.boostSamples>1u&&(p.flags&REFLECTION_SINGLE_SAMPLE)&&s.valid&&boostRoughness<p.boostRoughness)?min(p.boostSamples,8u):1u;
+    uint count=(p.boostSamples>1u&&(p.flags&REFLECTION_SINGLE_SAMPLE)&&s.valid&&boostRoughness<p.boostRoughness)?min(p.boostSamples,8u):1u;
+#ifdef PHOSPHOR_REFL_LOBE
+    // VERIFICATION ONLY (--debug-transmission-both-branches): a transmissive pixel evaluates both Fresnel branches (k = 0 refraction, k = 1 reflection),
+    // each scaled back to its unweighted contribution (x (1 - pReflect) / x pReflect) and by the count the reduction divides by: the same expectation.
+    const bool both=(p.flags&REFLECTION_DEBUG_BOTH_BRANCHES)!=0u&&lobe.trans&&s.valid;if(both)count=2u;
+#endif
     auto reduction=reflectionReduceBegin();GPUSpecularSample sample=reflectionEmpty();
     for(uint k=0;k<count;++k){uint seed=giHash(tid^giHash(p.frameIndex)^(p.seed+k*0x9e3779b9u));
 #ifdef PHOSPHOR_REFL_LOBE
     const float2 u=float2(giRandom(seed),giRandom(seed));
     // F15.1 (ticket 13): a transmissive pixel draws the branch first: reflection (today's lobes, weight / pReflect) or refraction (always traced).
-    lobe.sampleRefract=lobe.trans&&giRandom(seed)>=lobe.pReflect;lobe.id=lobe.sampleRefract?SPECULAR_LOBE_TRANSMISSION:baseLobeId;lobe.refract=lobe.sampleRefract;
+    const float branchDraw=lobe.trans?giRandom(seed):0.0f; /* drawn only by transmissive pixels: every other pixel keeps its random sequence */ lobe.sampleRefract=lobe.trans&&(both?(k==0u):branchDraw>=lobe.pReflect);lobe.id=lobe.sampleRefract?SPECULAR_LOBE_TRANSMISSION:baseLobeId;lobe.refract=lobe.sampleRefract;
     if(lobe.sampleRefract){
         sample=reflectionRefractSample(s,u,lobe,as,ift,p,instances,meshes,vertices,indices,materials,textures,extRecords,lights,sampled,emitters,gi,states,extra,irradiance,moments,probes,atlas,seed);
+        if(both)for(uint i=0;i<3;++i)sample.radiance[i]*=float(count)*(1.0f-lobe.pReflect);
         REFL_TAG(sample,lobe);if(count>1u)reflectionReduceAdd(reduction,sample,count);continue;
     }
     if(lobe.coat)reflectionLobePick(lobe,giRandom(seed)); // the coat or the base lobe by albedo weight (one-sample MIS)
@@ -326,6 +332,7 @@ kernel void REFL_KERNEL(reflection_rt)(constant GPUReflectionParams& p [[buffer(
         L*=dir.weight;if(!all(isfinite(L))||any(L<0)){numericError=true;L=0;}if(numericError)sample.flags|=SPECULAR_SAMPLE_ERROR;for(uint i=0;i<3;++i)sample.radiance[i]=L[i];
     }else sample=reflectionFallback(sl,dir,p,surfaces,cache,gi,probes,baseRadiance,depth,atlas);
 #ifdef PHOSPHOR_REFL_LOBE
+    if(both)for(uint i=0;i<3;++i)sample.radiance[i]*=float(count)*lobe.pReflect;
     REFL_TAG(sample,lobe);
 #endif
     if(count>1u)reflectionReduceAdd(reduction,sample,count);}

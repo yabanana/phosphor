@@ -38,6 +38,16 @@ class TransmissionClipCases(unittest.TestCase):
         for name in ("transmission-raw", "transmission-custom", "transmission-rt8"):
             self.assertEqual(self.cases[name]["env"], {})
 
+    def test_converged_control_uses_the_both_branch_estimator_only_for_the_control(self):
+        seeds = [c for c in clip.case_table(pathlib.Path("/tmp/x"), pathlib.Path("/tmp/phosphor"), 4) if c["kind"] == "control-seed"]
+        self.assertEqual([c["seed"] for c in seeds], [1000, 1001, 1002, 1003])
+        for case in seeds:
+            self.assertIn("--debug-transmission-both-branches", case["command"])
+            self.assertIn("--debug-lighting", case["command"])  # the switch is refused without it
+            self.assertEqual(case["command"][case["command"].index("--reflection-samples") + 1], "8")
+        for name in ("transmission-raw", "transmission-custom", "transmission-rt8", "negative-refract-axis"):
+            self.assertNotIn("--debug-transmission-both-branches", self.cases[name]["command"])  # never the product path
+
     def test_gates_are_the_f13_thresholds_on_glass_pixels(self):
         config = clip.transmission_roi_config()
         self.assertEqual([r["name"] for r in config["rois"]], [n for n, _, _ in clip.GLASS_GATED])
@@ -45,7 +55,8 @@ class TransmissionClipCases(unittest.TestCase):
             self.assertEqual(roi["thresholds"], THRESHOLDS)  # never loosened
             self.assertEqual(roi["scale"], clip.TRANSMISSION_ROI_SCALE)
         diagnostic = clip.transmission_roi_config(diagnostic=True)
-        self.assertEqual([r["name"] for r in diagnostic["rois"]], ["glass-r0.6-ior1.5", "glass-grid"])
+        self.assertEqual([r["name"] for r in diagnostic["rois"]], [n for n, _, _ in clip.GLASS_DIAGNOSTIC] + ["glass-grid"])
+        self.assertEqual([n for n, _, _ in clip.GLASS_GATED], ["glass-smooth-ior1.33", "glass-smooth-ior1.5", "glass-smooth-ior2.0"])
 
     def test_rois_lie_on_the_spheres_with_a_motion_margin(self):
         w, h = 640, 360

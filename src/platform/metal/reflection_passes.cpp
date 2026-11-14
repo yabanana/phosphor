@@ -239,7 +239,8 @@ struct ReflectionPasses::Impl {
                     else served=features.serve(p,210,reflectionSSR,mask,[&]{return lighting::kernel("reflection_ssr_lobe");});}
                 const auto composeLobe=features.serve(p,213,compose,mask,[&]{return lighting::kernel("reflection_composite_lobe");});
                 if(direct.lobeGuideValid()&&composeLobe!=compose&&(!transport||served!=baseTransport)){transportServed=served;composeServed=composeLobe;lobeGuide=true;}}
-            if(lobeGuide)params.flags|=REFLECTION_LOBE_GUIDE_VALID;}
+            if(lobeGuide)params.flags|=REFLECTION_LOBE_GUIDE_VALID;
+            if(lobeGuide&&options.debugTransmissionBothBranches)params.flags|=REFLECTION_DEBUG_BOTH_BRANCHES;}
         paramsAddress=lighting::upload(c,params);probeAddress=lighting::upload(c,probe);
         for(u32 i=0;i<options.reflectionSamples;++i){auto sample=params;sample.seed=options.lightingSeed+i*0x9e3779b9u;sampleAddress[i]=lighting::upload(c,sample);}
         aoParams={};std::memcpy(aoParams.viewProjection,params.viewProjection,64);std::memcpy(aoParams.inverseViewProjection,params.inverseViewProjection,64);

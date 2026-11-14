@@ -188,3 +188,54 @@ thin-walled delta-light BTDF is unvalidated against a reference (no analytic-lig
 - Roughness-ior's worst object is the roughness 0.6, ior 2 sphere. Its reference is Mitsuba's exact-Fresnel Walter model (declared difference). It is unchanged by the Schlick fix and sits 0.03 points under the bound.
 - Criterion 1 (transmission fixtures vs Mitsuba within the bound) is met on M5.
 - Temporal clip: the stable denoiser key is integrated (dab4380). The converged control and the per-branch history round are still running in an agent.
+
+2026-11-14 — temporal clip record (agent; decisions marked "orchestrator" are the orchestrator's). Criterion "Temporal clip (orbit, moving light) within F13.6;
+transmissive pixels reactive for MetalFX temporal": reactive part MET, temporal clip NOT MET (stays unticked, partial).
+
+Built (all in `tools/f15_clip_check.py`, `tools/f15_reactive_check.py`, `--transmission-motion`, `--debug-transmission-both-branches`):
+- Motion: `--transmission-motion` on `transmission-roughness-ior`: scripted camera orbit 12 deg * sin(t) about the target (<= 0.2 deg/frame, no cut) and one emissive
+  panel (radiance 3) sliding in x behind the glass; deterministic under `--fixed-timestep`; the static fixtures are unchanged without it.
+- Reactive proof (`tools/f15_reactive_check.py`, `--capture-linear-signal reactive` = the R8Unorm MetalFX mask): 9 cases ALL MET. In the visibility resolve AND the
+  indexed-overflow fallback (forced by `--debug-meshlets 1 --debug-meshlets-corrupt count`), plain and lit, every pixel of the eroded glass discs is 0.75 (4632/4632 on
+  thin-volume, 12404/12404 with motion) and none outside the dilated discs; the opaque `base-grid-sun` control marks 0 pixels in all four path/lighting combinations.
+- Stable denoiser key of transmissive pixels (factor >= 0.5: the refract key whichever Fresnel branch was drawn): `denoiseStableLobeKey`, dab4380.
+- Every clip capture passes `--pipeline-sync` and is rejected on fallback draws (9f669f1). A seed run with ~100 fallback frames once biased the control by 8 %.
+- Converged control: the per-frame mean of N independent 8-spp runs (seeds 1000 + k, halves A/B alternating), each with the verification-only
+  `--debug-transmission-both-branches` (both Fresnel branches at the visible interface). The estimator is proven equal to the product one: accumulated 112 frames, mean
+  |both - standard| / mean on the eroded glass discs 0.35 % (thin-volume) and 0.53 % (roughness-ior), mean ratio 1.0000 (bound declared before: 2 %, 1 +- 0.01).
+  Self-test: half A against half B with p95, max and flicker at most 1/3 of the gates; the runner refuses to judge (exit 5) when it fails.
+  Seeds needed (flicker falls as 1/sqrt(N); 16 -> 96 measured 0.0713 -> 0.0292 on roughness 0.3): smooth ior 1.33 / 1.5 pass at 96, ior 2.0 passes at 128
+  (p95 0.0092, max 0.0145, flicker 0.0057 against 0.02 / 0.05 / 0.0067); roughness 0.1 and 0.3 sit at flicker 0.0128 / 0.0253 at 128 and need about 460 / 1,800 seeds
+  (4 h / 17 h of GPU).
+- Bit-identity (product path vs the phase head b886141, 24 frames, same commands): transmission-custom, transmission-raw, clip-custom, coat-custom, edit-custom and
+  negative-lobe-flip are bit-identical with the verification switch compiled in.
+
+Orchestrator decisions: roughness 0.1 and 0.3 are NOT judgeable (control cost): reported as information, not gated (a measurability statement, not a gate change). The
+smooth ior 1.33 / 1.5 / 2.0 ROIs have a converged control and stay gated.
+
+Gate table (F13 thresholds unchanged: p95 <= 0.06, max <= 0.15, flicker <= 0.02; 128-seed control, 640x360, 160 frames, 1 spp; `build/f15-clip-t13b`):
+
+| ROI (gated) | custom p95 / max / flicker | raw 1 spp | negative-refract-axis |
+|---|---|---|---|
+| smooth ior 1.33 | 0.1745 / 0.1995 / 0.0252 | 0.155 / 0.171 / 0.045 | 0.1745 / 0.1995 / 0.0252 |
+| smooth ior 1.5 | 0.1690 / 0.1875 / 0.0234 | 0.149 / 0.154 / 0.047 | 0.1690 / 0.1875 / 0.0234 |
+| smooth ior 2.0 | 0.1448 / 0.1843 / 0.0267 | 0.185 / 0.357 / 0.083 | 0.1448 / 0.1843 / 0.0267 |
+
+Information only (control not judgeable): roughness 0.1 custom 0.145 / 0.150 / 0.026 (raw 0.247 / 0.256 / 0.146); roughness 0.3 custom 0.086 / 0.141 / 0.024 (raw 0.402 / 0.414 /
+0.374; negative 0.088 / 0.210 / 0.034); roughness 0.6 custom 0.049 / 0.068 / 0.017; whole grid 0.077 / 0.082 / 0.013. The single-8-spp control (old) is kept in the report: its
+own seed-vs-seed noise is p95 0.07 to 0.20, which is why it was withdrawn as a judge.
+
+Verdict: the gated smooth ROIs FAIL on all three checks; `negative-refract-axis` cannot show "fails while custom passes" (same numbers on the smooth ROIs: the axis term is
+~4e-6 for smooth lobes and no spatial filter acts; on roughness 0.3 it acts, flicker +39 %, max 0.210 against 0.141). The runner states the failure (`TRANSMISSION CLIP
+FAILED`, exit 1); `--group coat` and the other groups are unaffected.
+
+Cause: the error is at the edges of the refracted checkerboard (88 % of the error energy; custom is WORSE than raw on smooth glass: 0.17 against 0.15). The surface motion vectors
+do not move the refracted image, so the temporal history drags the previous image along under the orbit and the moving panel. Through lens spheres the previous-frame pixel of a
+refracted point is not a reprojection of the surface pixel; it needs the virtual-image motion. Orchestrator: not attempted in F15, an EDGE/F16 item.
+
+Rejected spike A (orchestrator decision: not adopted; numbers in `docs/opt-log.md`): per-branch denoiser history (a second reflect-branch history, the transport handing the
+denoiser the unweighted contribution of the drawn branch). 16 B per pixel per history buffer (66 MiB at 1080p), flicker 0.025 -> 0.021 on the smooth ROIs, p95 and max unchanged
+(0.17 / 0.19), so smooth-glass p95 stays far above 0.06. Also tried and reverted: endpoint-strict history for smooth refract samples (p95 0.17 -> 0.11 on ior 1.33 / 1.5, flicker worse on
+ior 2.0: 0.031 -> 0.058, stochastic endpoints through internal Fresnel branching).
+
+Not done / open: criterion "temporal clip within F13.6" (unticked); virtual-image reprojection (EDGE/F16); judging roughness 0.1 and 0.3 (about 460 / 1,800 seeds).

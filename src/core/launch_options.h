@@ -431,6 +431,7 @@ struct LaunchOptions {
     // the raw guide bytes of the last checked frame.
     u32 debugLobeGuide = 0;
     bool debugLobeGuideCorrupt = false;
+    bool debugTransmissionBothBranches = false; // --debug-transmission-both-branches (verification only; needs --debug-lighting): both Fresnel branches at the visible glass interface
     std::string debugLobeGuideDump;
     bool debugGiNoVisibility=false; // Physical quality negative; invariant checks stay enabled.
     // F15.1 (ticket 14): --debug-transmittance-dedup on|off.  off removes the per-primitive duplicate filter of the transmittance accumulation

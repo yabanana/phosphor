@@ -1471,6 +1471,26 @@ TEST_CASE("launch options: F15.1 --transmission-motion needs a transmission scen
     CHECK_FALSE(fresh.transmissionMotion);
 }
 
+TEST_CASE("launch options: F15.1 --debug-transmission-both-branches is verification only") {
+    LaunchOptions o;
+    std::string error;
+    const std::vector<const char*> base{"--scene", "procedural", "--bench", "2", "--material-scenario", "transmission-thin-volume", "--render-path", "visibility",
+                                        "--rt", "on", "--reflections", "rt", "--post", "--upscaler", "native"};
+    auto with = [&](std::vector<const char*> extra, const char* scenario = "transmission-thin-volume") {
+        std::vector<const char*> args = base;
+        args[5] = scenario;
+        args.insert(args.end(), extra.begin(), extra.end());
+        return parse(args, o, error);
+    };
+    CHECK_FALSE(with({"--debug-transmission-both-branches"}));              // refused without --debug-lighting
+    CHECK(error.find("--debug-lighting") != std::string::npos);
+    CHECK(with({"--debug-transmission-both-branches", "--debug-lighting", "1"}));
+    CHECK(o.debugTransmissionBothBranches);
+    CHECK_FALSE(with({"--debug-transmission-both-branches", "--debug-lighting", "1"}, "base-grid-sun")); // transmission scenarios only
+    CHECK(with({"--debug-lighting", "1"}));
+    CHECK_FALSE(o.debugTransmissionBothBranches);
+}
+
 TEST_CASE("launch options: --debug-lobe-guide (F15.1)") {
     LaunchOptions o;
     std::string e;

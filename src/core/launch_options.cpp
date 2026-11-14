@@ -692,6 +692,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if (!needCount(out.debugLighting)) return false;
         } else if (arg == "--debug-lobe-guide") {
             if (!needCount(out.debugLobeGuide)) return false;
+        } else if (arg == "--debug-transmission-both-branches") {
+            out.debugTransmissionBothBranches = true;
         } else if (arg == "--debug-lobe-guide-corrupt") {
             out.debugLobeGuideCorrupt = true;
         } else if (arg == "--debug-lobe-guide-dump") {
@@ -1295,6 +1297,9 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     }
     if (out.debugLighting && !lighting) { error = "--debug-lighting requires F10-F12 lighting"; return false; }
     // F15.1: the lobe guide is produced by the direct-lighting passes (visibility + mesh path).
+    if (out.debugTransmissionBothBranches && (!out.debugLighting || out.reflections != ReflectionMode::RT || out.materialScene.empty() || !TransmissionValidation::validScenario(out.materialScene))) {
+        error = "--debug-transmission-both-branches requires --debug-lighting, --reflections rt and a transmission --material-scenario"; return false;
+    }
     if ((out.debugLobeGuideCorrupt || !out.debugLobeGuideDump.empty()) && !out.debugLobeGuide) {
         error = "--debug-lobe-guide-corrupt / --debug-lobe-guide-dump require --debug-lobe-guide N"; return false;
     }

@@ -996,6 +996,9 @@ PHOSPHOR_GPU_CONSTANT u32 REFLECTION_EXCLUDE_DI_EMISSION = 128u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_DI_EMITTER_BAND = 512u;
 // F15.1 (ticket 08): the lobe guide (buffer 20 of the "_lobe" reflection kernels) is valid this frame.
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_LOBE_GUIDE_VALID = 1024u;
+// F15.1 (ticket 13, VERIFICATION ONLY, --debug-transmission-both-branches): a transmissive pixel evaluates BOTH branches of the Fresnel one-sample
+// estimator at the camera-visible interface (each with its own unweighted contribution) instead of drawing one: the same expectation, no branch noise.
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_DEBUG_BOTH_BRANCHES = 2048u;
 // F13.5 negative control: probe lookups ignore the box projection.
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_DEBUG_NO_PARALLAX = 256u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_NONE = 0u;

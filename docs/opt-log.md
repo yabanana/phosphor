@@ -2255,3 +2255,21 @@ Results (12 frames per run; counts of the last frame, identical in every frame):
 Decision: keep the per-primitive filter (bounded list, idempotent per `(slot, primitive)`; overflow beyond 8 distinct surfaces is counted and unfiltered).
 Hardware does not duplicate on the M5 Max, but the Metal specification does not promise it and no other device is available (Apple9 is
 EXTERNAL_VALIDATION_PENDING); the filter costs nothing measurable and its absence would be a silent 8-14 % darkening of the pane shadows (measured with the injected duplicate).  Counters stay in the engine.
+
+## 2026-11-14 — F15 ticket 13 spikes: per-branch denoiser history and the both-branch clip control
+
+**Hypothesis (denoiser):** on a transmissive pixel the Fresnel reflect/refract branch of the one-sample estimator (ADR-0004) is the temporal noise; a history per branch
+(updated only on the frames that draw it, output = their sum, the transport handing over the unweighted branch contribution) converges to the same expectation without
+rejecting history across branches, and should bring the smooth-glass clip under the F13.6 gates.
+
+**Method:** `tools/f15_clip_check.py` transmission clip (`transmission-roughness-ior` with `--transmission-motion`, 640x360, 160 frames, 1 spp, custom denoiser), judged against
+a converged control (mean of N independent 8-spp both-branch runs, `--debug-transmission-both-branches`; self-test half vs half at 1/3 of the gates passed at 128 seeds for the three
+smooth ROIs). A/B on the same control and captures: the stable-key denoiser without and with the per-branch history.
+
+**Measures (smooth ior 1.33 / 1.5 / 2.0):** flicker 0.025 / 0.024 / 0.027 -> 0.021 / 0.020 / 0.021; p95 0.175 / 0.169 / 0.145 -> 0.174 / 0.169 / 0.148; max unchanged (0.16 to 0.20). Cost: 16 B per
+pixel per history buffer, two buffers per view (7.4 MiB at 640x360, 66 MiB at 1920x1080); time not measured. Also: endpoint-strict history for smooth refract samples gave p95 0.175 -> 0.107
+(ior 1.33) and 0.170 -> 0.117 (1.5) but flicker 0.031 -> 0.058 on ior 2.0 (stochastic endpoints through internal Fresnel branching).
+
+**Decision:** neither is adopted (orchestrator: adopt only a measured benefit). The dominant error is the refracted-image lag at checker edges (88 % of the error energy, custom worse than raw):
+the surface motion vectors do not move the refracted image; the remedy is virtual-image reprojection (EDGE/F16). The both-branch estimator is kept as a verification switch (never the product path):
+it equals the product estimator on the glass mask to 0.35 / 0.53 % (accumulated 112 frames) and made the smooth ROIs measurable (128 seeds); roughness 0.1 / 0.3 need about 460 / 1,800 seeds.

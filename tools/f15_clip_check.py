@@ -46,7 +46,8 @@ Usage (numpy is needed only by the adaptive comparison):
   ... --evaluate --out build/f15-clip      (existing captures, no GPU process)
   ... --plan --out build/f15-clip          (commands only)
 Converged control (ticket 13): the transmission cases are judged against the per-frame MEAN of N independent 8 spp runs that differ only
-in --lighting-seed (seeds 1000 + k, folded into running sums and deleted: --group control [--control-seeds N], resumable, serial GPU jobs).
+in --lighting-seed, each with --debug-transmission-both-branches (verification estimator: both Fresnel branches at the visible interface, proven equal
+to the product estimator by the accumulated static comparison, mean |d| 0.35 / 0.53 % on the glass masks) (seeds 1000 + k, folded into running sums and deleted: --group control [--control-seeds N], resumable, serial GPU jobs).
 The seeds alternate between two halves A and B; the control self-test judges half A against half B with the clip metrics on the gated glass
 ROIs and requires p95, max and flicker to be at most CONTROL_FRACTION (1/3, declared before any measurement) of the gates.  When it fails
 the runner REFUSES to judge: the transmission entries are reported as not judged, with their numbers as information only, and the exit
@@ -195,9 +196,11 @@ GLASS_ROUGHNESS, GLASS_IOR = [0.0, 0.1, 0.3, 0.6], [1.33, 1.5, 2.0]
 # with transmittance <= 1; the F13 rough-emitter clip derives its scale from its emitter in the same way).  Recorded as a choice made
 # before the first measurement.
 TRANSMISSION_ROI_SCALE = 2.0
-GLASS_GATED = [("glass-smooth-ior1.33", 0, 0), ("glass-smooth-ior1.5", 0, 1), ("glass-smooth-ior2.0", 0, 2),
-               ("glass-r0.1-ior1.5", 1, 1), ("glass-rough-r0.3-ior1.5", 2, 1)]
-GLASS_DIAGNOSTIC = [("glass-r0.6-ior1.5", 3, 1)]
+# Judgeability (orchestrator decision 2026-11-14, a statement of measurability, not a gate change): a ROI is gated when the converged control passes its
+# self-test.  Measured (both-branch control, half vs half, 1/3 of the gates): at 128 seeds the three smooth ROIs pass; roughness 0.1 and 0.3 reach flicker
+# 0.0128 / 0.0253 against 0.0067, which needs about 460 / 1,800 seeds (flicker falls as 1/sqrt(N); 4 h / 17 h of GPU), so they are reported as information.
+GLASS_GATED = [("glass-smooth-ior1.33", 0, 0), ("glass-smooth-ior1.5", 0, 1), ("glass-smooth-ior2.0", 0, 2)]
+GLASS_DIAGNOSTIC = [("glass-r0.1-ior1.5", 1, 1), ("glass-rough-r0.3-ior1.5", 2, 1), ("glass-r0.6-ior1.5", 3, 1)]
 
 
 def glass_sphere_screen(column, row, width, height):
@@ -235,7 +238,7 @@ def transmission_roi_config(width=640, height=360, diagnostic=False):
 
 # --- converged control (ticket 13) --------------------------------------------------------------------------------------------
 CONTROL_FRACTION = 1.0 / 3.0  # the half-vs-half error of the control must be at most this fraction of each gate (declared before measuring)
-CONTROL_SEED_BASE, CONTROL_DEFAULT_SEEDS = 1000, 16
+CONTROL_SEED_BASE, CONTROL_DEFAULT_SEEDS = 1000, 128  # 128 seeds = 128 x 8 spp x 2 branches, about 80 min of GPU
 CONTROL_GATE_FIELDS = ("linear_rmse_p95_max", "linear_rmse_max", "residual_flicker_mean_max")
 
 
@@ -355,7 +358,7 @@ def case_table(out, binary, control_seeds=CONTROL_DEFAULT_SEEDS):
     # Without --pipeline-sync (now passed by every case) a loaded machine rendered the early frames of a run with flexible fallback pipelines (seen:
     # 212 fallback draws in one control seed against 13, an 8 % brightness difference over ~110 frames between two otherwise identical runs).
     glass, motion = TRANSMISSION_SCENARIO, ["--transmission-motion"]
-    seeds = [dict(clip(f"control-seed-{seed}", CLIP_FRAMES, "off", 8, motion, scenario=glass, seed=seed), kind="control-seed", seed=seed, index=k)
+    seeds = [dict(clip(f"control-seed-{seed}", CLIP_FRAMES, "off", 8, motion + ["--debug-transmission-both-branches"], scenario=glass, seed=seed), kind="control-seed", seed=seed, index=k)
              for k, seed in enumerate(control_seed_ids(control_seeds))]
     return seeds + [clip("transmission-raw", CLIP_FRAMES, "off", 1, motion, scenario=glass),
             clip("transmission-custom", CLIP_FRAMES, "custom", 1, motion, scenario=glass),
@@ -579,12 +582,16 @@ def evaluate_transmission(out):
     result["transmission-raw"]["passed"] = True
     result["transmission-raw"]["expectation"] = "control: reported, does not gate"
     result["transmission-custom"]["passed"] = all(v["passed"] for v in result["transmission-custom"]["metrics"].values())
-    result["transmission-custom"]["expectation"] = ("every check passes on the glass ROIs (smooth spheres of three iors, roughness 0.1 and 0.3) against the "
-                                                    "converged control under the camera orbit and the moving panel; roughness 0.6 and the grid are diagnostic")
+    result["transmission-custom"]["expectation"] = ("every check passes on the gated smooth glass ROIs (ior 1.33, 1.5, 2.0) against the converged control "
+                                                    "under the camera orbit and the moving panel; roughness 0.1, 0.3, 0.6 and the grid are information (control not judgeable)")
     negative = result["negative-refract-axis"]
-    negative["passed"] = any(not v["passed"] for v in negative["metrics"].values())
-    negative["expectation"] = "the clip gates FAIL on the glass ROIs (a refract-axis lobe handled with the reflect axis), while transmission-custom passes"
-    negative["discriminates_against_custom"] = negative["passed"] and result["transmission-custom"]["passed"]
+    # Truthful verdict: the control demonstrates anything only when custom passes and it fails.  Custom FAILS the gated ROIs (refracted-image lag, see the ticket
+    # 13 record), so the control cannot discriminate and its expectation is not met; both entries fail the runner.
+    negative["discriminates_against_custom"] = any(not v["passed"] for v in negative["metrics"].values()) and result["transmission-custom"]["passed"]
+    negative["passed"] = negative["discriminates_against_custom"]
+    negative["expectation"] = "the clip gates FAIL on the gated glass ROIs (a refract-axis lobe handled with the reflect axis) while transmission-custom passes"
+    if not negative["passed"] and not result["transmission-custom"]["passed"]:
+        negative["not_demonstrable"] = "transmission-custom fails the same gates: the control cannot show 'fails while custom passes'"
     if not judged:
         for name in ("transmission-custom", "negative-refract-axis"):
             result[name]["passed"] = False
@@ -636,6 +643,8 @@ def markdown(clips, adaptive, status):
             lines.append(f"- NOT JUDGED: {entry['not_judged']}")
         for roi, m in entry.get("single_8spp_control", {}).items():
             lines.append(f"- (information, single 8 spp control) {roi}: p95 {m['linear_rmse_p95']:.4f}  max {m['linear_rmse_max']:.4f}  flicker {m['residual_flicker_mean']:.4f}")
+        if "not_demonstrable" in entry:
+            lines.append(f"- NOT DEMONSTRABLE: {entry['not_demonstrable']}")
         for roi, m in entry.get("metrics", {}).items():
             lines.append(f"- {roi}: p95 {m['linear_rmse_p95']:.4f}  max {m['linear_rmse_max']:.4f}  flicker {m['residual_flicker_mean']:.4f}  "
                          f"ghost {m['error_change_ghost_fraction']:.4f}  recovery {m['recovery_frames']}  {'ok' if m['passed'] else 'checks ' + str({k: v for k, v in m['checks'].items() if not v})}")
@@ -733,10 +742,16 @@ def main(argv=None):
         print(str(error), file=sys.stderr)
         return EXIT_CAPTURE
     refused = any("not_judged" in v for v in clips.values())
+    failed = [name for name, passed in entries.items() if not passed]
     status = "CONTROL NOT CONVERGED: NOT JUDGED" if refused else "ALL EXPECTATIONS MET" if ok else "EXPECTATION FAILED"
     (out / "results.json").write_text(json.dumps({"status": status, "entries": entries, "clips": clips, "adaptive": adaptive}, indent=2) + "\n")
     (out / "summary.md").write_text(markdown(clips, adaptive, status))
     print(markdown(clips, adaptive, status))
+    if failed and not refused:
+        print("FAILED ENTRIES: " + ", ".join(failed))
+        if any(name.startswith("transmission-") or name == "negative-refract-axis" for name in failed):
+            print("TRANSMISSION CLIP FAILED: the gated smooth glass ROIs exceed the F13 gates against the converged control "
+                  "(ticket 13 criterion 'temporal clip within F13.6' is NOT met; the other groups are unaffected: --group coat exits 0).")
     code = EXIT_NOT_CONVERGED if refused else EXIT_OK if ok else EXIT_FAILED
     print(f"{status} (exit {code})")
     return code
