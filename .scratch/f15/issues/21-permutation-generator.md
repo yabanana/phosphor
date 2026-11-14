@@ -47,7 +47,8 @@ four classes and byte-identical descriptors.
   compiler calls 0 in every case; archive misses 0; at most 11 classes (bins) in a scene. Whole-run transient (warmup only) 9..14 fallback draws per feature scene,
   the phase-branch binary shows 18 for `aniso-grid-sun` without bins (pre-existing).
 - `tools/visual_check.sh` (validation on, BENCH8_ARGS=--instances 100000, references reference-f15-appB): 0 of 5,760,000 pixels, 8 of 8 benches;
-  `tools/archive_check.sh` all scenarios pass; `tools/hitch_check.sh` 0 hitches (SWITCH n=15).
+  `tools/archive_check.sh` all scenarios pass; `tools/hitch_check.sh` 0 hitches (SWITCH n=15); `tools/f15_check.py --run --expect green --reference-cache build/f15-check/t19int`
+  (112 keys, commit `37c59e4`, 62 min with the volumetric references re-rendered): GREEN, exit 0, every key met its expectation.
 
 **Deviation (criterion 2).** A pipeline specialised with a different `MATERIAL_FEATURES` value is not bit-identical to the all-lobes pipeline: the Metal compiler
 schedules the shortened code differently (ADR-0003 already recorded 1 LSB on Sponza). The gate is a declared envelope fixed from the first corpus (relative 1e-5
