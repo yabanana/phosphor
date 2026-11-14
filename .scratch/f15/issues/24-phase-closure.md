@@ -59,8 +59,16 @@ section "Defects found during F15"; integrated by fast-forward to 6b6bf04):
 - DDGI wall behind glass black (probe in the gap went inactive on the pane's back faces): fixed 4422a13 (`f15_shadowed_hit_check.py
   --mode ddgi`, 1.248 vs 0.377, gate 0.90..2.0).
 - Transport rays ending black on single-sided back faces: fixed 26fe229 (`--case backface`, 1.000 vs 0.00001; error words 16/17).
-- OPEN, owner decision asked 2026-11-14: with `--gi ddgi` the declared environment reaches no primary surface (the INDIRECT atlas
-  excludes it by design, no other pass adds it): shadowed wall 16/255 with GI on vs 194 with GI off.
+- IN PROGRESS, owner 2026-11-14 "Correggere in F15": with any GI mode the declared environment reaches no primary surface (the
+  INDIRECT atlas excludes it by design, no other pass adds it): shadowed wall 16/255 with `--gi ddgi` vs 194 with GI off. Required:
+  one ownership rule (no double count against the GI-off term and the reflection/probe paths), reference albedo x L_env with a
+  negative control, F13/F14 corpus rerun with every image change explained (thresholds only tightened, re-cut references justified),
+  Sponza D2 re-measured on a quiet machine in an interleaved A/B with the previous binary, closure-document row.
+- IN PROGRESS, owner 2026-11-14 "Dimostrare o correggere": the F11.5 DI cap (1bf0e19) ratio budget/exact is 1.016 +- 0.008 with
+  the denoiser off and 0.973 (sem 0.001) with `--lighting-denoise custom`. Measure the cause (clamp disabled/widened, same scene
+  below the 128-light cap); fix a systematic loss with a failing-before fixture, or prove the expected behaviour against a
+  reference. No "probably" may remain in the closure documents.
+- Declared (owner noted, no objection): single-sided planes cast sun shadows from both sides in CSM (two-sided by contract) and RT.
 - OPEN, F15 (transmission, ticket 13 territory): 67 dark pixels on the silhouette ring of the IORTestGrid transmissive spheres
   (N.V > 0 there, untouched by the D3 fix); hypothesis: a refraction sample that returns nothing at grazing incidence while the
   composite released 1 - t of the diffuse. Analyse before closure.
