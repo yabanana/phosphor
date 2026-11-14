@@ -39,6 +39,7 @@ struct ChessOptions {
     enum class Tops { AsAuthored, Opaque, Hidden };
     Rig rig = Rig::Backlight;
     bool mask = false;
+    bool emit = false;            // mask=1 only: the targets are pure emissive white (tens of thousands of emissive triangles, F15 GPU-safety regression)
     float transmission = -1.0f;   // < 0: the asset's factor
     bool whiteTint = false;       // base colour factor of the pawn tops forced to white
     bool panel = true;            // backlight: the emissive backdrop

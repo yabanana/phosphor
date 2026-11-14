@@ -1,3 +1,4 @@
+#include "renderer/light_budget.h"
 #include "renderer/light_sampling.h"
 #include "renderer/reservoir.h"
 #include "renderer/stochastic_sampling.h"
@@ -498,4 +499,56 @@ TEST_CASE("F11 exact IID history expiry does not condition the estimate on weigh
     CHECK(expectation(false)==doctest::Approx(2).epsilon(1e-6));
     CHECK(expectation(true)==doctest::Approx(182666318.0/91265265.0).epsilon(1e-6));
     CHECK(expectation(true)>2.001); // Negative old policy must lose the energy gate.
+}
+
+TEST_CASE("F15 light budget: exact up to the budget, hard-bounded and unbiased stratified sampling beyond it") {
+    const u32 budget = lightShadeBudget();
+    // Identity below and at the budget; the cap above it, whatever the list length.
+    CHECK(lightBudgetCount(0) == 0);
+    CHECK(lightBudgetCount(1) == 1);
+    CHECK(lightBudgetCount(budget) == budget);
+    CHECK(lightBudgetCount(budget + 1) == budget);
+    CHECK(lightBudgetCount(75000) == budget);
+    CHECK(lightBudgetCount(0xffffffffu) == budget);
+    for (const u32 n : {budget + 1, budget + 2, 2 * budget - 1, 1000u, 75000u, 4000003u}) {
+        const u32 m = lightBudgetCount(n);
+        u32 expectedBegin = 0, sizeSum = 0, minSize = ~0u, maxSize = 0;
+        for (u32 j = 0; j < m; ++j) {
+            u32 first, size, last, lastSize;
+            lightBudgetPick(n, m, j, 0.0f, first, size);
+            lightBudgetPick(n, m, j, 0.99999994f, last, lastSize); // the largest float below 1
+            CHECK(size == lastSize);
+            CHECK(first == expectedBegin);               // strata are contiguous ...
+            CHECK(last == first + size - 1u);            // ... u in [0,1) reaches both ends and never leaves the stratum
+            CHECK(size >= 1u);
+            expectedBegin += size; sizeSum += size;
+            minSize = std::min(minSize, size); maxSize = std::max(maxSize, size);
+        }
+        CHECK(sizeSum == n);                             // ... and partition the list exactly
+        CHECK(expectedBegin == n);
+        CHECK(maxSize - minSize <= 1u);
+    }
+    // Unbiasedness: sweeping u over one stratum visits each of its entries exactly once, so the expectation of the
+    // estimator sum_j size_j f(pick_j) is the exact sum of f for ANY f (an arbitrary, uneven emission pattern here).
+    const u32 n = 5000, m = lightBudgetCount(n);
+    std::vector<double> f(n);
+    double exact = 0;
+    for (u32 i = 0; i < n; ++i) { f[i] = double((i * 2654435761u) % 1000u) * 1e-3 + (i % 97 == 0 ? 50.0 : 0.0); exact += f[i]; }
+    double expectation = 0, unweighted = 0;
+    for (u32 j = 0; j < m; ++j) {
+        u32 index, size;
+        lightBudgetPick(n, m, j, 0.0f, index, size);
+        double mean = 0;
+        for (u32 o = 0; o < size; ++o) {
+            u32 picked, s2;
+            lightBudgetPick(n, m, j, (float(o) + 0.5f) / float(size), picked, s2);
+            CHECK(picked == index + o);
+            mean += f[picked] / size;
+        }
+        expectation += size * mean;
+        unweighted += f[index];
+    }
+    CHECK(expectation == doctest::Approx(exact).epsilon(1e-9));
+    // Negative control: dropping the inverse-probability weight loses almost all of the energy.
+    CHECK(unweighted < 0.1 * exact);
 }

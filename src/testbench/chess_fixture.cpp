@@ -84,6 +84,9 @@ bool ChessFixture::parse(std::string_view scenario, ChessOptions& out, std::stri
         if (key == "mask") {
             if (value != "1" && value != "0") return bad();
             out.mask = value == "1";
+        } else if (key == "emit") {
+            if (value != "1" && value != "0") return bad();
+            out.emit = value == "1";
         } else if (key == "transmission" && (back || shadow)) {
             if (!parseFloat(value, out.transmission) || out.transmission < 0.0f || out.transmission > 1.0f) return bad();
         } else if (key == "tint" && (back || shadow)) {
@@ -110,6 +113,10 @@ bool ChessFixture::parse(std::string_view scenario, ChessOptions& out, std::stri
         } else {
             return bad();
         }
+    }
+    if (out.emit && !out.mask) {
+        error = "option 'emit=1' needs mask=1 for " + std::string(parts[0]);
+        return false;
     }
     return true;
 }
@@ -196,7 +203,8 @@ void ChessFixture::setup(ECS& ecs, GpuScene& scene, TextureManager& textures) {
         // The mask capture: every material untextured and without extensions, black except the targets (white diffuse, specular off)
         // under one sun pi W/m2 aimed along the view direction: a target pixel reads cos(N, V) (> 0.2 over all but a rim of the
         // silhouette), every other pixel is black.  (Pure emissive targets were the first design: the kings' and queens' emissive
-        // triangle count hangs the GPU, "GPU timeout waiting for frame event" on frame 0, so the mask uses a lit white instead.)
+        // triangle count hung the GPU on frame 0 until the F15 light budget (shaders/light_cluster.metal); the mask keeps the lit white, `emit=1` selects
+        // the emissive design as the regression scene.)
         for (u32 i = 0; i < names.size(); ++i) {
             MaterialDescription d;
             d.base.metallic = 0.0f;
@@ -205,6 +213,8 @@ void ChessFixture::setup(ECS& ecs, GpuScene& scene, TextureManager& textures) {
             d.base.baseColor = target ? std::array<float, 4>{1.0f, 1.0f, 1.0f, 1.0f} : std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f};
             d.specular.emplace();
             d.specular->specularFactor = 0.0f;
+            // emit=1: the targets are PURE emissive white (the F15 GPU-safety regression scene: every triangle of a king or queen is a light).
+            if (target && options_.emit) d.base.emissive = {1.0f, 1.0f, 1.0f};
             if (!scene.setMaterialDescription(i, d)) throw std::runtime_error("cannot edit material " + names[i]);
         }
     } else {

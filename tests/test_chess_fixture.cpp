@@ -63,6 +63,12 @@ TEST_CASE("F15.1 ticket 20: the chess scenarios parse, reject unknown keys and d
     CHECK_FALSE(o.panel);
     CHECK(o.mask);
     CHECK(o.pawnsOnly);
+    // F15 GPU-safety regression scene: emissive mask targets, only with mask=1.
+    REQUIRE(ChessFixture::parse("chess-sidelight/mask=1/emit=1", o, error));
+    CHECK(o.emit);
+    CHECK(o.mask);
+    CHECK_FALSE(ChessFixture::validScenario("chess-sidelight/emit=1"));
+    CHECK_FALSE(ChessFixture::validScenario("chess-sidelight/mask=1/emit=2"));
     REQUIRE(ChessFixture::parse("chess-sidelight/weight=0.5/scale=2/view=white/sss=off", o, error));
     CHECK(o.weight == doctest::Approx(0.5f));
     CHECK(o.scale == doctest::Approx(2.0f));

@@ -1,6 +1,7 @@
 #include <metal_stdlib>
 #include "restir_common.h"
 #include "light_visibility.h"
+#include "renderer/light_budget.h" // F15 (GPU safety): per-pixel local-light budget
 using namespace metal;
 using namespace phosphor;
 
@@ -120,7 +121,7 @@ kernel void light_cluster_build(constant GPULightClusterParams& p [[buffer(0)]],
     for (uint i = 0; i < p.lightCount; ++i) {
         if (lights[i].type == LIGHT_DIRECTIONAL || !clusterLightIntersects(p, cell, lights[i])) continue;
         if (out.count < p.capacity) indices[cell * p.capacity + out.count] = i;
-        else out.overflow = 1;
+        else { out.overflow = 1; break; } // F15: an overflowed cell is shaded from the budgeted all-light set; count saturates at capacity
         ++out.count;
     }
     cells[cell] = out;
@@ -166,9 +167,15 @@ kernel void DI_KERNEL(light_cluster_shade)(constant GPUDIParams& p [[buffer(0)]]
     if (surface.valid) {
         const uint cell = p.pad1 ? ~0u : clusterCell(clusters, diVec(surface.position));
         const bool full = cell == ~0u || cells[cell].overflow != 0;
-        const uint count = full ? p.lightCount : min(cells[cell].count, clusters.capacity);
+        const uint listCount = full ? p.lightCount : min(cells[cell].count, clusters.capacity);
+        // F15 (GPU safety): at most lightShadeBudget() lights per pixel; a longer list is sampled by strata (light_budget.h).
+        const uint count = lightBudgetCount(listCount);
         for (uint i = 0; i < count; ++i) {
-            const uint lightIndex = full ? i : indices[cell * clusters.capacity + i];
+            uint entry = i, stratum = 1u;
+            if (count < listCount)
+                lightBudgetPick(listCount, count, i, fract(diRandom(pixel, 42u, p, ranks) + diWhite(0, 0, p.frameIndex, 0x80000000u + i, p.stbnSeed)), entry, stratum);
+            const float stratumWeight = float(stratum);
+            const uint lightIndex = full ? entry : indices[cell * clusters.capacity + entry];
             if (lightIndex >= p.lightCount || lights[lightIndex].type == LIGHT_DIRECTIONAL) continue;
             // Per-light rotation prevents identical endpoints of nearby emitters
             // while maintaining a uniform marginal and repeatable A/B seeds.
@@ -178,7 +185,7 @@ kernel void DI_KERNEL(light_cluster_shade)(constant GPUDIParams& p [[buffer(0)]]
             const DISample sample = diSampleTexturedLight(lights[lightIndex], lightIndex, uv,
                                                           diVec(surface.position), emitters, materials, textures);
             const float3 contribution=DI_FN(diBRDFLobe)(surface,sample,diEmitterSpecularWeight(p,lights[lightIndex],surface),lobe,DI_FN(diEmitterCoatWeight)(p,lights[lightIndex],lobe));diRecordNonfinite(contribution,signalErrors,0u);
-            if (sample.valid && sample.pdfArea > 0) {value += contribution / sample.pdfArea;diRecordNonfinite(value,signalErrors,2u);}
+            if (sample.valid && sample.pdfArea > 0) {value += (count < listCount ? stratumWeight * contribution : contribution) / sample.pdfArea;diRecordNonfinite(value,signalErrors,2u);}
         }
     }
     diRecordNonfinite(value,signalErrors,1u);
@@ -214,9 +221,15 @@ kernel void DI_KERNEL(light_cluster_shade_rt)(constant GPUDIParams& p [[buffer(0
     if (surface.valid) {
         const uint cell = p.pad1 ? ~0u : clusterCell(clusters, diVec(surface.position));
         const bool full = cell == ~0u || cells[cell].overflow != 0;
-        const uint count = full ? p.lightCount : min(cells[cell].count, clusters.capacity);
+        const uint listCount = full ? p.lightCount : min(cells[cell].count, clusters.capacity);
+        // F15 (GPU safety): at most lightShadeBudget() lights per pixel; a longer list is sampled by strata (light_budget.h).
+        const uint count = lightBudgetCount(listCount);
         for (uint i = 0; i < count; ++i) {
-            const uint lightIndex = full ? i : indices[cell * clusters.capacity + i];
+            uint entry = i, stratum = 1u;
+            if (count < listCount)
+                lightBudgetPick(listCount, count, i, fract(diRandom(pixel, 42u, p, ranks) + diWhite(0, 0, p.frameIndex, 0x80000000u + i, p.stbnSeed)), entry, stratum);
+            const float stratumWeight = float(stratum);
+            const uint lightIndex = full ? entry : indices[cell * clusters.capacity + entry];
             if (lightIndex >= p.lightCount || lights[lightIndex].type == LIGHT_DIRECTIONAL) continue;
             const float2 uv(fract(diRandom(pixel, 40u, p, ranks) + diWhite(0, 0, p.frameIndex, lightIndex * 2u, p.stbnSeed)),
                             fract(diRandom(pixel, 41u, p, ranks) + diWhite(0, 0, p.frameIndex, lightIndex * 2u + 1u, p.stbnSeed)));
@@ -228,7 +241,7 @@ kernel void DI_KERNEL(light_cluster_shade_rt)(constant GPUDIParams& p [[buffer(0
                 // F15.1 (ticket 14): the visibility ray's RGB transmittance (0 = blocked) scales the contribution.
                 const float3 transmittance = ((p.flags & DI_ENABLE_VISIBILITY) && any(contribution > 0))
                     ? diEndpointTransmittance(surface, sample, tlas, ift, instances, p.slotCount) : float3(1);
-                if (any(transmittance > 0)) {value += contribution * transmittance / sample.pdfArea;diRecordNonfinite(value,signalErrors,2u);}
+                if (any(transmittance > 0)) {value += (count < listCount ? stratumWeight * (contribution * transmittance) : contribution * transmittance) / sample.pdfArea;diRecordNonfinite(value,signalErrors,2u);}
             }
         }
     }
