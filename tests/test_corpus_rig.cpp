@@ -3,6 +3,7 @@
 #include <doctest/doctest.h>
 #include <glm/gtc/constants.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -49,12 +50,16 @@ TEST_CASE("F15 corpus rig: every bounds corner stays inside the frame for rotate
     for (const float yaw : {0.0f, 35.0f, 90.0f, -140.0f}) {
         for (const float pitch : {0.0f, 20.0f, -30.0f}) {
             const auto view = frameCorpusRig(minimum, maximum, yaw, pitch, fovY, aspect);
+            float widest = 0.0f;
             for (unsigned corner = 0; corner < 8; ++corner) {
                 const glm::vec3 point((corner & 1) ? maximum.x : minimum.x, (corner & 2) ? maximum.y : minimum.y, (corner & 4) ? maximum.z : minimum.z);
                 const glm::vec2 p = ndc(view, point, aspect);
                 CHECK(std::abs(p.x) <= 1.0f);
                 CHECK(std::abs(p.y) <= 1.0f);
+                widest = std::max(widest, std::max(std::abs(p.x), std::abs(p.y)));
             }
+            // The fit is exact: the extreme corner sits at 1 / margin of the half frame (not a loose sphere or front-face fit).
+            CHECK(widest == doctest::Approx(1.0f / CorpusRig::margin).epsilon(1e-3));
             CHECK(glm::length(view.position - view.target) == doctest::Approx(view.distance));
         }
     }
