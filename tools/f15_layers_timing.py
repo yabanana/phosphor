@@ -23,6 +23,7 @@ here claims a number: results are written to DIR/results.json and DIR/summary.md
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import pathlib
@@ -147,7 +148,14 @@ def main(argv=None):
     if out.exists() and any(out.iterdir()):
         parser.error(f"{out} is not empty")
     load = os.getloadavg()
-    with f15_check.gpu_lock(args.gpu_lock):
+    try:
+        lock = f15_check.gpu_lock(args.gpu_lock)
+        lock.__enter__()
+    except f15_check.GpuBusy as error:
+        print(f"GPU busy: {error}", file=sys.stderr)
+        return 4
+    with contextlib.ExitStack() as stack:
+        stack.push(lock)
         for run in runs:
             busy = f15_check.running_gpu_processes()
             if busy:
