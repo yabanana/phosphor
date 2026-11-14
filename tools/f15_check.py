@@ -736,8 +736,7 @@ SCENARIOS = {
     # ground truth of a thin-film dielectric is NOT built (no thin-film BSDF plugin for the two interface sides): the closed form of
     # tools/f15_transmission_reference.py declared_pixel gates the --rt off path only.  Pending ("ticket 19": today's engine ignores
     # the transmission and keeps the film and the thin subsurface, the image of `declared-transmission-ignored`).
-    "transmission-rtoff-combinations": {"kind": "transmission-declared", "pending": "ticket 19",
-                                        "pending_matches": "declared-transmission-ignored", "reflections": "probes", "denoise": "off",
+    "transmission-rtoff-combinations": {"kind": "transmission-declared", "reflections": "probes", "denoise": "off",
                                         "controls": ["declared-transmission-ignored", "declared-iridescence-ignored",
                                                      "declared-diffuse-transmission-ignored",
                                                      "declared-diffuse-transmission-not-overridden", "declared-volume-ignored"],

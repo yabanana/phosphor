@@ -411,11 +411,9 @@ class Runner(unittest.TestCase):
     def test_every_transmission_key_is_no_longer_pending_and_keeps_the_ignored_control(self):
         # The engine side landed with F15.1 ticket 13: every gate must pass; the opaque (transmission-ignored) control stays as a
         # negative control that must FAIL the gate.
-        # Ticket 19's declared combination key stays pending on its own engine ticket until that ticket lands.
-        combinations = [k for k in check.SCENARIOS if k.startswith("transmission-") and check.SCENARIOS[k].get("pending") == "ticket 19"]
-        self.assertEqual(combinations, ["transmission-rtoff-combinations"])
-        keys = [k for k in check.SCENARIOS if k.startswith("transmission-") and k not in combinations]
-        self.assertEqual(len(keys), 8)
+        # Ticket 19's declared combination key passes on the ticket-13 engine (orchestrator run t19probe-2): no transmission key is pending.
+        keys = [k for k in check.SCENARIOS if k.startswith("transmission-")]
+        self.assertEqual(len(keys), 9)
         for key in keys:
             spec = check.SCENARIOS[key]
             for field in ("pending", "pending_matches", "pending_gate"):
@@ -426,8 +424,7 @@ class Runner(unittest.TestCase):
             self.assertTrue(set(spec["controls"]) <= set(allowed), key)
             self.assertGreaterEqual(len(spec["controls"]), 2, key)
             self.assertEqual(spec["kind"] in check.TRANSMISSION_KINDS, True)
-        self.assertEqual(sum(1 for k in keys if check.SCENARIOS[k]["kind"] == "transmission-declared"), 1)  # rtoff
-        self.assertEqual(check.SCENARIOS[combinations[0]]["kind"], "transmission-declared")
+        self.assertEqual(sum(1 for k in keys if check.SCENARIOS[k]["kind"] == "transmission-declared"), 2)  # rtoff, ticket 19 combinations
 
     def test_capture_commands_accumulate_and_trace_the_glass(self):
         binary = pathlib.Path("build/release/phosphor")
