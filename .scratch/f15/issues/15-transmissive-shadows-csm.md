@@ -8,10 +8,10 @@ Roadmap: F15.1, F15.3
 
 **Status:** ready-for-agent
 
-- [ ] Planar fixtures with `--shadows csm` match the RT result of ticket 14 within the decision-11 transmission bound (or the CSM filtering envelope, declared before measuring)
-- [ ] Scenes without transmissive casters unchanged (visual_check 0 px); negative control (map ignored) fails
-- [ ] Memory and cost of the map per cascade measured
-- [ ] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
+- [x] Planar fixtures with `--shadows csm` match the RT result of ticket 14 within the decision-11 transmission bound (or the CSM filtering envelope, declared before measuring)
+- [x] Scenes without transmissive casters unchanged (visual_check 0 px); negative control (map ignored) fails
+- [x] Memory and cost of the map per cascade measured
+- [x] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
 
 ## Comments
 
@@ -117,3 +117,84 @@ wording above: the CSM finding and the curved key):
    passes. The key therefore leaves `always_green` and becomes pending like the others (no pending_matches twin).
 3. GI shadow rays, reflection secondary lighting through glass and clustered DI visibility have no fixture in this harness: recorded as ITEMS FOR THE ENGINE TICKET (14),
    no new fixture now.
+
+2026-11-14 — ENGINE SIDE (F15.1 ticket 15; commits `7cc67b6` map, `677bbac` targeted archive update, `54324fb` runner keys gated, `839c28b` standalone
+render groups, `63e3b47` divisor, `85355cb` stand-in maps with shadows off).  The four criteria above are ticked on this evidence.
+
+Design.  Transmissive casters (KHR_materials_transmission with extension records, not alpha-masked: masked ones stay opaque-masked casters as in ticket 14)
+leave the opaque cascade depth maps (`shadow_depth_vertex/mesh` reject them while `SHADOW_FLAG_TRANSMITTANCE_MAP` is set) and draw, per cascade, into ONE
+RGBA32Float map in a standalone raster pass ("CSM transmittance N"; indexed `shadow_transmit_vertex` and mesh `shadow_transmit_mesh` + `shadow_transmit_fragment`,
+new pipeline blend `TransmittanceMap`: RGB add, alpha max, key token `tmap`).  RGB = the SUM over every crossed surface of the ln RGB transmittance, alpha =
+the NEAREST transmissive depth (reverse-Z maximum, 0 = none).  Per surface the math is the same function as the ray-traced any-hit (new
+`transmissionShadowSurfaceLn` in `transmission_math.h`; `rt_intersections.metal` now calls it: pixel-identical RT captures, below): ln(1 - F) at the straight
+ray's |cos| (geometric normal from the screen derivatives of the world position), the entry factor x (1 - metallic) x tint once per caster (entry of a solid or
+the only surface of a thin-walled material), and for a solid the signed medium term +sigma_t d (entry) / -sigma_t d (exit).  d is measured from the cascade FAR
+plane (`shadowTransmitDistance`: it grows towards the light like the distance of a ray from a receiver below the volume), so a closed volume cancels the
+origin and a receiver behind it gets -sigma_t (t_exit - t_entry) exactly (test).  Entry/exit comes from `[[front_facing]]` x the instance's MIRRORED flag
+(`shadowTransmitEntry`: the surface faces away from the light = a back face in the light's view = entry; checked on the slabs with attenuation, a wrong sign
+gives T clamped to 1).  The receiver (`shadow_csm_pcss`) multiplies its opaque PCSS visibility by the mean over the same disk of exp(min(sum, 0)) of the taps
+whose texel's nearest transmissive depth lies in front of the receiver (the declared single-layer approximation: the nearest depth decides "behind", every
+layer in the texel contributes its factor like the ray-traced sum); cascades blend like the opaque term; the mask is RGB (the layout of ticket 14).  The passes
+exist in the graph only while a transmissive caster exists (`graphVersion` bump when the answer changes; 54 passes / 15 render passes with the map against
+50 / 11 without on the fixtures; no empty encoder); 1x1 zero stand-in maps keep the kernel's bindings valid otherwise (also with `--shadows off`, where the
+PCSS pass exists).  `--debug-transmittance-map on|off` (off: the receiver ignores the map: glass casts nothing), `--shadow-transmittance-divisor 1|2|4` (default 2).
+
+Findings, in the order they were found.  (1) CSM acne on a tilted floor that is also a caster: the first run of pane-sun@csm gave mean 0.6 % but p95 17.5 % (limit
+15 %): the lit floor read 0.954 of the reference with ROWS of 0.82-0.95 along the shadow-map texel grid (a PCSS tap at up to half a texel plus the nearest-texel
+quantisation moves the stored depth by about one texel x slope, the bias covers a quarter texel x slope).  Fix inside `shadowPcss`: with the map, the FILTER taps use a
+receiver-plane bias (filter radius + a quarter texel) x slope / depthRange; the lit floor is then 0.9999 (median 1.0000, p5 0.9995) on all three keys.  DECLARED
+DEVIATION: the extra bias is applied ONLY while `SHADOW_FLAG_TRANSMITTANCE_MAP` is set, because the criterion demands that scenes without transmissive casters are
+bit-identical; promoting it to every CSM scene (the `filterBias` condition) would change every CSM reference of F10.  (2) The render graph fused the colour-only
+transmit pass with the opaque cascade depth pass: validation (pixel format mismatch of the opaque pipelines against the encoder's colour attachment) and, on the
+indexed path, the opaque depth state leaking into the transmit draws (the lower face of a closed slab lost to a depth test).  `PassBuilder::setStandalone()` (new,
+tested) gives the pass its own render group.  (3) A ReSTIR scene with `--shadows off` failed to compile the graph (the PCSS pass exists there; stand-in maps).
+
+Runner (`tools/f15_check.py`): `pending` / `pending_matches` removed from the three @csm keys, no gate, threshold or envelope changed; the python harness test expects
+every key gated.  Final binary, captures of the full run `build/f15-check/t15` (112 keys captured serially under the GPU lock), shadow keys evaluated key by key
+(same `evaluate_scenario` / `verdict` as the runner): GREEN.  Worst caster (limits mean 0.05 / p95 0.15): pane-sun@csm 0.0016 / 0.0081, water-sun@csm 0.0043 / 0.0093,
+volume-pane@csm 0.0091 / 0.0148 (the opaque slab exactly 0 / 0); lit-floor diagnostic 0.9999 on all three (not gated).  Controls (all FAIL; worst mean / p95):
+pane-sun transmittance-ignored 1.000 / 1.000, tint-ignored 0.314 / 0.318, fresnel-ignored 0.087 / 0.094, double-counted 0.208 / 0.209; water-sun transmittance 1.000,
+beer-lambert-ignored 0.170 / 0.176, double-counted 0.176 / 0.179; volume-pane transmittance 1.000, fresnel-ignored 0.082 / 0.088, beer-lambert-ignored 0.346 / 0.353,
+double-counted 0.327 / 0.331.  The @rt / @restir / @curved keys stay green on the same binary (pane-sun@rt 0.0032 / 0.0080, water@rt 0.0080 / 0.0117, volume@rt
+0.0205 / 0.0259, point@restir 0.0111 / 0.0203, curved qualitative PASS).  Map-ignored negative control (`--debug-transmittance-map off`, evaluated against the same
+references, EXPECTED_RED_CONFIRMED): pane-sun worst 0.369 / 0.373, water-sun 0.219 / 0.224, volume-pane 0.460 / 0.469.  The indexed path (`--force-family apple9`) was
+checked on volume-pane (T per slab 0.787 / 0.736 / 0.679 against the truth's 0.790 / 0.742 / 0.685), and the three gates are identical at divisors 1, 2 and 4.
+
+Whole-runner accounting (112 keys captured, 95 evaluated key by key): every evaluated key meets its expectation (pending keys fail as asserted) except that ONE key
+blocks `--expect green`, `combo-irid-aniso-env` (ticket 19's harness: its `additive-layering` control does not fail the gate, BLOCKED_NON_DISCRIMINATING_FIXTURE, exit 3),
+and `transmission-rtoff-combinations` cannot be captured (13 archive misses: specialised forward / resolve variants missing from the archive).  Both are identical on the
+phase-head binary (13 misses with `build/base/phosphor`; the `combo-irid-aniso-env` capture is pixel-identical to the phase head's).  The eight ticket-13 Mitsuba keys
+(`transmission-roughness-ior`, `-attenuation`, `-factor-tint`, `-thin-volume`, `-single-sided`, `-glass-behind-glass`, `-emissive-panel`, `-rtoff`) were NOT re-evaluated
+by me: their references take hours of CPU on the loaded machine (one ran 45+ min before I stopped it); their captures are pixel-identical (0 px, max 0.0) to captures of
+the phase-head binary, so their verdicts are the phase head's.  The closing battery of the integrated tree owns the literal single `--expect green` over every key.
+
+Unchanged-scene checks.  `tools/visual_check.sh build/release build/reference-f15-appB` (copy of the orchestrator's references): benches 1-7 0 px; bench 8 differs from
+the reference by default arguments, not by this change (the phase-head binary gives the same 5 592 801 px; with `BENCH8_ARGS="--instances 100000"`, the value the
+reference was taken with, 0 px).  Captures against `build/base/phosphor` (the phase-branch head `b618511`), bit-identical (0 px, max abs 0.0): shadow-penumbra CSM
+(contact on and off), CSM with `--shadow-cache on`, CSM `--force-family apple9` (indexed casters), base-grid-sun CSM, shadow-penumbra RT, volume-pane RT shadows (glass:
+the refactored shared function), the ReSTIR point scene through glass with `--shadows off` (the run that found failure 3).
+
+Pipelines and the archive.  Targeted update: harvest of the pane-sun@csm capture (`--harvest-pipelines`), `filter_pipeline_harvest.py --constant 22 --function
+shadow_transmit_{vertex,mesh,fragment} --skip-present`, `merge_pipeline_harvests.py`: +1 render +1 mesh descriptor (253 / 142 -> 254 / 143).  Both pipelines are requested
+at startup in the non-cache CSM path whether or not the scene has glass (archive hits).  `tools/archive_check.sh build/release build/reference-f15-appB`: all scenarios
+PASS (full: 18 hits, 0 misses); `tools/hitch_check.sh build/release`, also with `--render-path visibility --geometry-path mesh --shadows csm --post --upscaler native`
+(67 requests, 67 hits): 0 hitches, 0 render-thread compiles.  Warmup 64 / 128 frames on the three fixtures: 0 GPU allocations, 0 render-thread compiles, 0 archive
+misses.  Shader + API validation (`MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1`, volume-pane@csm mesh path, water-sun@csm indexed path, 128 frames each): exit 0, 128 LIGHTING
+checks PASS each; the only messages are the "Redundant call to setDepthStencilState / setRenderPipelineState / setViewport" notices, 1280 per capture exactly as with the
+phase-head binary, and the 31 flexible-pipeline "blending substate" notices (also identical).  `tools/f10_f12_check.py --run` (26 jobs under validation): every job its
+expected exit, 25 FUNCTIONAL_RESULT_ONLY and `f10_solar_bias_negative` QUALITY_CONTROL_PENDING as before (one overlap: another agent's phosphor process was running when
+it started; no failure).  Unit tests 883 / 883, ctest 19 / 19.
+
+Memory (graph accounting, `report.json` `graph.heap_unaliased_bytes` and `heap_bytes`, volume-pane at 1280x720, default `--shadow-map-size 2048`; baseline = the phase head
+with opaque glass: 295 960 576 / 121 241 600): divisor 1 (RGBA32Float 2048^2) +269 484 032 / +269 484 032 = 64.25 MiB per cascade; divisor 2 (default, 1024^2) +67 371 008 /
++67 371 008 = 16.06 MiB per cascade (the size of one opaque depth map); divisor 4 +16 842 752 / +16 842 752 = 4.02 MiB.  A scene without glass allocates a 1x1 RGBA32Float
+(16 B) per process and nothing else.  Cost (LOADED machine, load average about 10: indicative only; per-pass p50 GPU ms on volume-pane at 1280x720, four cascades summed):
+transmit passes 0.33 ms at divisor 1, 0.17 at 2, 0.08 at 4; the opaque cascades get cheaper (0.29 -> 0.12-0.19 ms: the glass left them); PCSS 0.35-0.56 ms (noise
+dominates; baseline 0.43).  Frame totals are meaningless under this load; the quiet measurement is the orchestrator's.
+
+Declared limitations / open.  (a) `--shadow-cache on`: transmissive casters stay opaque there (logged once; the static cache composes opaque depth only).  (b) The
+froxel fog with CSM reads the opaque maps: glass no longer blocks fog light in CSM mode (in RT mode the fog rays treat glass as opaque: declared in ticket 14); a fog
+that reads the map is not built.  (c) A receiver that is a glass surface itself (the underside of a slab) lies "behind" its own top surface and is multiplied by the slab's
+transmittance: only its (negligible) direct term changes.  (d) Single layer: a receiver between two separated glass layers gets both (the nearest depth decides).  (e) The
+receiver-plane bias is gated on the map (deviation of finding 1): the owner decides whether every CSM scene gets it.  (f) The edge quality of the half-resolution default is
+not gated (the envelope excludes the edges); divisor 1 is one flag.  (g) The mesh and indexed transmit pipelines are requested even without glass (two archive hits).
