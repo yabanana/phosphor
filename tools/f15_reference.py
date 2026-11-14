@@ -233,7 +233,17 @@ THIN_CONTROLS = {
     "transmission-double-counted": {"thin": "double-counted"},       # diffuse reflection not reduced by w: gains energy
     "transmission-fresnel-ignored": {"thin": "fresnel-ignored"},     # transmitted part not weighted by 1 - F(V.H)
 }
-ALL_CONTROLS = sorted({**CONTROLS, **SHEEN_CONTROLS, **ANISO_CONTROLS, **IRID_CONTROLS, **THIN_CONTROLS})
+# F15.3 (ticket 19) negative controls of the combination grids (deltas on the scene's main model).  `additive-layering` removes the
+# layer attenuation of every layered lobe the scene has at once (coat: base not scaled by 1 - c F_c; sheen: base not scaled by the
+# albedo scaling; iridescence: diffuse not scaled by 1 - max F_irid; thin: diffuse reflection not reduced by w): lobes summed, the
+# furnace control that must exceed the bound.  `order-swapped` puts the coat BELOW the sheen; `transmission-uncoated` lets the thin
+# transmitted lobe escape the coat.
+COMBO_CONTROLS = {
+    "additive-layering": {"coat": "base-unattenuated", "sheen": "unscaled-base", "irid": "diffuse-unweighted", "thin": "double-counted"},
+    "order-swapped": {"order": "swapped"},
+    "transmission-uncoated": {"thin": "uncoated"},
+}
+ALL_CONTROLS = sorted({**CONTROLS, **SHEEN_CONTROLS, **ANISO_CONTROLS, **IRID_CONTROLS, **THIN_CONTROLS, **COMBO_CONTROLS})
 
 
 def control_model(name, main_model):
@@ -247,6 +257,8 @@ def control_model(name, main_model):
         return {**main_model, **IRID_CONTROLS[name]}
     if name in THIN_CONTROLS:
         return {**main_model, **THIN_CONTROLS[name]}
+    if name in COMBO_CONTROLS:
+        return {**main_model, **COMBO_CONTROLS[name]}
     return CONTROLS[name]
 
 
@@ -925,21 +937,40 @@ def irid_fresnel(irid, base_f0, cos_theta1):
     return thin_film_fresnel(cos1, irid_film_ior(irid), irid_thickness(irid), base_f0)
 
 
-def irid_lobe_weights(base, metallic, v_dot_h, irid, model=APPENDIX_B):
-    """(diffuse multiplier per channel, specular multiplier per channel) of an iridescent material at one V.H (see above)."""
+def irid_base_f0(base, dielectric):
+    """The dielectric base_f0 handed to the thin film (n, 3): 0.04 without the ior/specular extension; with it (ticket 19, the
+    README's `iridescent_fresnel(..., specular_weight * base_f0, ...)` with base_f0 = min(((1 - ior) / (1 + ior))^2 * specularColor, 1)) the
+    scaled f0 `weight * f0` of the dielectric (the `ignored` control: 0.04)."""
+    if dielectric is None:
+        return np.full(base.shape, DIELECTRIC_F0)
+    zero = np.zeros((base.shape[0], 1))
+    return dielectric_fresnel(dielectric["f0"], dielectric["weight"], zero, dielectric["variant"])[0]
+
+
+def irid_lobe_weights(base, metallic, v_dot_h, irid, model=APPENDIX_B, dielectric=None):
+    """(diffuse multiplier per channel, specular multiplier per channel) of an iridescent material at one V.H (see above).
+
+    `dielectric` (ticket 19, iridescence + ior/specular): the (1 - s) part keeps the extended Fresnel `weight * fr` and its
+    diffuse weight 1 - max(F), the film takes the scaled f0 (irid_base_f0).  For a fractional strength the specification's two
+    forms (mix of the two layers, or one rgb_mix with the mixed Fresnel) differ in the diffuse weight only; the fixtures of
+    ticket 19 use s = 1 where they coincide, and this function implements the mix of the diffuse weights (the form of the
+    iridescence-only text) for both."""
     if model["weighting"] != "appendix-b":
         raise ValueError("iridescence is modelled on the Appendix B weighting only")
     w = schlick_weight(v_dot_h, model)[..., None]
     m = np.asarray(metallic, dtype=np.float64)[..., None]
     s = irid_strength(irid)[..., None]
-    f_dielectric = DIELECTRIC_F0 + (1 - DIELECTRIC_F0) * w
+    if dielectric is None:
+        f_dielectric = DIELECTRIC_F0 + (1 - DIELECTRIC_F0) * w
+    else:
+        f_dielectric, _ = dielectric_fresnel(dielectric["f0"], dielectric["weight"], w, dielectric["variant"])
     f_metal = base + (1 - base) * w
     cos1 = np.asarray(v_dot_h, dtype=np.float64)
-    film_dielectric = irid_fresnel(irid, np.full(base.shape, DIELECTRIC_F0), cos1)
+    film_dielectric = irid_fresnel(irid, irid_base_f0(base, dielectric), cos1)
     film_metal = irid_fresnel(irid, base, cos1)
     film_weight = np.ones_like(f_dielectric) if irid["variant"] == "diffuse-unweighted" else \
         1.0 - np.max(film_dielectric, axis=-1, keepdims=True)
-    diffuse = (1 - m) * ((1 - s) * (1.0 - f_dielectric) + s * film_weight)
+    diffuse = (1 - m) * ((1 - s) * (1.0 - np.max(f_dielectric, axis=-1, keepdims=True)) + s * film_weight)
     specular = (1 - m) * ((1 - s) * f_dielectric + s * film_dielectric) + m * ((1 - s) * f_metal + s * film_metal)
     return diffuse, specular
 
@@ -1087,7 +1118,7 @@ def lobe_weights(base, metallic, v_dot_h, model=APPENDIX_B, dielectric=None, iri
     `irid` (F15.3, ticket 12): per-pixel dict of the iridescence section (the thin-film Fresnel replaces Schlick).
     """
     if irid is not None:
-        return irid_lobe_weights(base, metallic, v_dot_h, irid, model)
+        return irid_lobe_weights(base, metallic, v_dot_h, irid, model, dielectric)
     w = schlick_weight(v_dot_h, model)[..., None]
     m = np.asarray(metallic, dtype=np.float64)[..., None]
     if dielectric is not None:
@@ -1131,6 +1162,11 @@ def bsdf(base, metallic, roughness, n, v, l, model=APPENDIX_B, dielectric=None, 
     else:  # F15.3 (ticket 11): the anisotropic lobe replaces D V (Fresnel and the diffuse weighting are unchanged)
         spec = aniso_dv(n, v, l, alpha, aniso)[..., None]
     value = np.where((n_dot_l > 0)[..., None], diffuse_w * base / math.pi + specular_w * spec, 0.0)
+    if sheen is not None and coat is not None and model.get("order") == "swapped":
+        # ticket 19 control: the coat BELOW the sheen (sheen over coat over material): the sheen is not coated, the coat lobe is
+        # scaled by the sheen's albedo scaling
+        attenuation, coat_value = coat_lobe(coat, n, v, l)
+        return sheen_layer(attenuation[..., None] * value + coat_value[..., None], sheen, n_dot_v, n_dot_l, n_dot_h)
     if sheen is not None:
         value = sheen_layer(value, sheen, n_dot_v, n_dot_l, n_dot_h)
     if coat is None:
@@ -1192,8 +1228,13 @@ def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius
     if thin is not None:
         diffuse_w = diffuse_w * thin_reflect_scale(thin)[..., None]
     total = np.where((n_dot_l > 0)[..., None], diffuse_w * base / math.pi * n_dot_l[..., None], 0.0)
+    uncoated_thin = None
     if thin is not None:  # F15.3 (ticket 16): the transmitted lobe at the disk centre (smooth, like the diffuse term)
-        total = total + thin_transmitted(thin, metallic, n, v, np.broadcast_to(l, n.shape), model)
+        transmitted = thin_transmitted(thin, metallic, n, v, np.broadcast_to(l, n.shape), model)
+        if coat is not None and thin["variant"] == "uncoated":  # ticket 19 control: the coat does not cover the transmitted lobe
+            uncoated_thin = transmitted
+        else:
+            total = total + transmitted
     coat_c = None
     if coat is not None:
         coat_c = coat_weight(coat)
@@ -1219,15 +1260,7 @@ def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius
                 term = term * coat_attenuation(sub, coat_c[sel], coat_fresnel(sub, n[sel], v[sel], h))[:, None]
             spec_sum[sel] += np.where((nl > 0)[:, None], term, 0.0) / int(c)
     result = total + spec_sum
-    if sheen is not None:
-        e_v = sheen_albedo(n_dot_v, sheen["roughness"], sheen["variant"])
-        e_l = sheen_albedo(np.maximum(n_dot_l, MIN_NDOTV), sheen["roughness"], sheen["variant"])
-        scale = sheen_scaling(sheen, e_v, e_l)
-        lobe = sheen_lobe(sheen, n_dot_v, n_dot_l, np.clip(dot(n, h_c), 0.0, 1.0)) * n_dot_l[:, None]
-        lobe = np.where((n_dot_l > 0)[:, None], lobe, 0.0)
-        if coat is not None:
-            lobe = lobe * coat_attenuation(coat, coat_c, coat_fresnel(coat, n, v, h_c))[:, None]
-        result = result * scale[:, None] + lobe
+    coat_sum = None
     if coat is not None:
         # The coat lobe: its own roughness drives the disk rule (axis = reflection about Nc = n, own alpha).
         count_c, narrow_c = sun_quadrature(n, v, l, coat["roughness"], radius, model)
@@ -1244,8 +1277,25 @@ def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius
                 fc = coat_fresnel(sub, n[sel], v[sel], h)
                 term = coat_c[sel] * fc * ggx_d(nh, alpha_c[sel]) * smith_vis(n_dot_v[sel], nl, alpha_c[sel]) * nl
                 coat_sum[sel] += np.where(nl > 0, term, 0.0) / int(c)
-        result = result + coat_sum[:, None]
         narrow = narrow | narrow_c
+    swapped = sheen is not None and coat is not None and model.get("order") == "swapped"  # ticket 19 control: coat BELOW the sheen
+    if sheen is not None:
+        e_v = sheen_albedo(n_dot_v, sheen["roughness"], sheen["variant"])
+        e_l = sheen_albedo(np.maximum(n_dot_l, MIN_NDOTV), sheen["roughness"], sheen["variant"])
+        scale = sheen_scaling(sheen, e_v, e_l)
+        lobe = sheen_lobe(sheen, n_dot_v, n_dot_l, np.clip(dot(n, h_c), 0.0, 1.0)) * n_dot_l[:, None]
+        lobe = np.where((n_dot_l > 0)[:, None], lobe, 0.0)
+        if coat is not None and not swapped:
+            lobe = lobe * coat_attenuation(coat, coat_c, coat_fresnel(coat, n, v, h_c))[:, None]
+        if swapped:  # sheen over (coat over material): the coat lobe is scaled by the sheen's albedo scaling, the sheen is not coated
+            result = (result + coat_sum[:, None]) * scale[:, None] + lobe
+            coat_sum = None
+        else:
+            result = result * scale[:, None] + lobe
+    if coat_sum is not None:
+        result = result + coat_sum[:, None]
+    if uncoated_thin is not None:
+        result = result + uncoated_thin
     return result * np.asarray(irradiance, dtype=np.float64), narrow
 
 
@@ -1268,7 +1318,10 @@ def point_radiance(base, metallic, roughness, n, v, position, light, model=APPEN
     value = bsdf(base, metallic, roughness, n, v, l, model, dielectric, coat, sheen, aniso, irid, thin) * n_dot_l[:, None] * incident
     lit = dot(n, l) > 0
     if thin is not None:  # F15.3 (ticket 16): lights behind the surface light it through the transmitted lobe
-        value = value + thin_transmitted(thin, metallic, n, v, l, model) * incident
+        transmitted = thin_transmitted(thin, metallic, n, v, l, model)
+        if coat is not None and thin["variant"] != "uncoated":  # ticket 19: the coat sits above the transmitted lobe too
+            transmitted = transmitted * coat_lobe(coat, n, v, l)[0][:, None]
+        value = value + transmitted * incident
         lit = thin_lit(thin, n, l)
     if visible is not None:
         value = value * visible[:, None]
@@ -1415,7 +1468,7 @@ def irid_environment_table(alpha, film_ior, thickness, f0, variant):
     return _IRID_TABLE[key]
 
 
-def irid_environment_value(base, metallic, mu, alpha, a, b, cd, irid):
+def irid_environment_value(base, metallic, mu, alpha, a, b, cd, irid, ext=None):
     """Exact environment value (n, 3) for unit radiance of iridescent pixels sharing one alpha (a, b, cd: the base tables'
     A, B and diffuse (n, 1) at the pixels' N.V).  `at-nv` (control and declared model alike) evaluates F_irid once at N.V:
     spec F (A + B), diffuse (1 - max F) integral of cos / pi without the Fresnel (the F_irid constant over the lobe)."""
@@ -1425,27 +1478,43 @@ def irid_environment_value(base, metallic, mu, alpha, a, b, cd, irid):
     film_ior, thickness = irid_film_ior(irid), irid_thickness(irid)
     spec_d, spec_m = np.empty((n, 3)), np.empty((n, 3))
     diff_d = np.empty((n, 1))
+    # ticket 19: with the ior/specular extension (`ext` = {"f0_scaled" (n, 3), "plain" (n, 3)}) the film takes the scaled f0 and the
+    # (1 - s) part is the extended dielectric radiance `plain` (unit radiance) computed by the caller.
+    f0d = np.full((n, 3), DIELECTRIC_F0) if ext is None else ext["f0_scaled"]
     if irid["variant"] == "at-nv":
-        fd = thin_film_fresnel(irid["nv"], film_ior, thickness, np.full((n, 3), DIELECTRIC_F0))
+        fd = thin_film_fresnel(irid["nv"], film_ior, thickness, f0d)
         fm = thin_film_fresnel(irid["nv"], film_ior, thickness, base)
         _, _, _, cu_t = irid_histograms(alpha)
         cu = np.interp(mu, np.linspace(MIN_NDOTV, 1.0, IRID_MU_NODES), cu_t)[:, None]
         spec_d, spec_m = fd * (a + b), fm * (a + b)
         diff_d = (1.0 - fd.max(axis=-1, keepdims=True)) * cu
     else:
-        pairs = np.concatenate([film_ior[:, None], thickness[:, None], base], axis=1)
+        pairs = np.concatenate([film_ior[:, None], thickness[:, None], base, f0d], axis=1)
         for key in np.unique(np.round(pairs, 9), axis=0):
             pick = np.flatnonzero(np.all(np.round(pairs, 9) == key, axis=1))
-            for target, f0 in ((spec_d, np.full(3, DIELECTRIC_F0)), (spec_m, key[2:])):
+            for target, f0 in ((spec_d, key[5:8]), (spec_m, key[2:5])):
                 mus, spec, diffuse = irid_environment_table(alpha, key[0], key[1], f0, irid["variant"])
                 for c in range(3):
                     target[pick, c] = np.interp(mu[pick], mus, spec[:, c])
-            mus, _, diffuse = irid_environment_table(alpha, key[0], key[1], np.full(3, DIELECTRIC_F0), irid["variant"])
+            mus, _, diffuse = irid_environment_table(alpha, key[0], key[1], key[5:8], irid["variant"])
             diff_d[pick, 0] = np.interp(mu[pick], mus, diffuse)
-    f_d_schlick = DIELECTRIC_F0 * a + b
-    dielectric = (1 - s) * (base * cd + f_d_schlick) + s * (base * diff_d + spec_d)
+    plain = (base * cd + DIELECTRIC_F0 * a + b) if ext is None else ext["plain"]
+    dielectric = (1 - s) * plain + s * (base * diff_d + spec_d)
     metal = (1 - s) * (base * a + b) + s * spec_m
     return (1 - m) * dielectric + m * metal
+
+
+def layered_environment(material, n_dot_v, coat, sheen, radiance, swapped=False):
+    """Exact-environment layering above the material radiance `material` (n, 3, already times `radiance`): the sheen layer over the
+    material, the coat over the sheen (research/khr-materials.md section 12: clearcoat > sheen > base).  `swapped` is the ticket 19
+    control that puts the coat below the sheen."""
+    if sheen is not None and coat is not None and swapped:
+        return sheen_environment(environment_coat(material, n_dot_v, coat, radiance), n_dot_v, sheen, radiance)
+    if sheen is not None:
+        material = sheen_environment(material, n_dot_v, sheen, radiance)
+    if coat is not None:
+        material = environment_coat(material, n_dot_v, coat, radiance)
+    return material
 
 
 def environment_radiance(base, metallic, roughness, n_dot_v, radiance, model=APPENDIX_B, dielectric=None, aniso_env=None,
@@ -1485,6 +1554,16 @@ def environment_radiance(base, metallic, roughness, n_dot_v, radiance, model=APP
                 cd_ext[pick, 0] = np.interp(mu[sel][pick], t["mu"], table)
             dielectric_value = c * cd_ext + c0 * (a + b) + c1 * b
             result[sel] = (1 - m) * dielectric_value + m * (c * a + b)
+            if irid_env is not None:  # ticket 19: iridescence + ior/specular, the film takes the scaled f0 (c0)
+                sub = take_irid(irid_env, sel)
+                active = np.flatnonzero(irid_strength(sub) > 0.0)
+                if active.size:
+                    if aniso_env is not None:
+                        raise ValueError("the exact environment of iridescence + anisotropy needs an anisotropic V.H histogram "
+                                         "(declared environment only)")
+                    result[sel[active]] = irid_environment_value(
+                        c[active], m[active, 0], mu[sel][active], float(effective_alpha(r, model)), a[active], b[active],
+                        cd[active], take_irid(sub, active), {"f0_scaled": c0[active], "plain": dielectric_value[active]})
             continue
         if model["weighting"] == "engine-blend":
             f0 = DIELECTRIC_F0 * (1 - m) + c * m
@@ -1507,6 +1586,9 @@ def environment_radiance(base, metallic, roughness, n_dot_v, radiance, model=APP
             sub = take_irid(irid_env, sel)
             active = np.flatnonzero(irid_strength(sub) > 0.0)
             if active.size:
+                if aniso_env is not None:
+                    raise ValueError("the exact environment of iridescence + anisotropy needs an anisotropic V.H histogram "
+                                     "(declared environment only)")
                 part = take_irid(sub, active)
                 result[sel[active]] = irid_environment_value(c[active], m[active, 0], mu[sel][active],
                                                              float(effective_alpha(r, model)), a[active], b[active],
@@ -1578,7 +1660,14 @@ THIN_DECLARED_CONTROLS = {
     "declared-transmission-front-only": {**DECLARED, "thin": "front-only"},           # ratio 1: transmitted weight = front diffuse's
     "declared-transmission-double-counted": {**DECLARED, "thin": "double-counted"},
 }
-ALL_DECLARED_CONTROLS = {**DECLARED_CONTROLS, **SPECULAR_DECLARED_CONTROLS, **COAT_DECLARED_CONTROLS,
+# F15.3 (ticket 19): the declared twins of the combination controls (`transmission-uncoated` has none: the declared transmitted weight
+# lives inside the material the coat attenuates).
+COMBO_DECLARED_CONTROLS = {
+    "declared-additive-layering": {**DECLARED, "coat": "base-unattenuated", "sheen": "unscaled-base", "irid": "diffuse-unweighted",
+                                   "thin": "double-counted"},
+    "declared-order-swapped": {**DECLARED, "order": "swapped"},
+}
+ALL_DECLARED_CONTROLS = {**DECLARED_CONTROLS, **SPECULAR_DECLARED_CONTROLS, **COAT_DECLARED_CONTROLS, **COMBO_DECLARED_CONTROLS,
                          **SHEEN_DECLARED_CONTROLS, **ANISO_DECLARED_CONTROLS, **IRID_DECLARED_CONTROLS,
                          **THIN_DECLARED_CONTROLS}
 
@@ -1700,25 +1789,30 @@ def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, 
         roughness = np.where(alpha_eff == ab, np.asarray(roughness, dtype=np.float64), np.sqrt(alpha_eff))
     material = _declared_material_radiance(base, metallic, roughness, n_dot_v, variant, dielectric)
     if irid is not None:
-        material = declared_irid_environment(material, base, metallic, roughness, n_dot_v, irid)
+        material = declared_irid_environment(material, base, metallic, roughness, n_dot_v, irid, dielectric, variant)
     if thin is not None:  # F15.3 (ticket 16)
         material = declared_thin_environment(material, metallic, base, roughness, n_dot_v, thin)
-    if sheen is not None:
-        material = declared_sheen_environment(material, n_dot_v, sheen, variant)
-    if coat is not None:
-        coat = {**coat, "variant": variant.get("coat", "spec")}
-        if coat["variant"] == "fresnel-vh":
+    def under_coat(material):
+        coat_v = {**coat, "variant": variant.get("coat", "spec")}
+        if coat_v["variant"] == "fresnel-vh":
             raise ValueError("the declared split-sum model has no V.H: no fresnel-vh control")
-        c = coat_weight(coat)
+        c = coat_weight(coat_v)
         mu = np.maximum(np.asarray(n_dot_v, dtype=np.float64), MIN_NDOTV)
-        a_c, b_c = dfg_lookup(mu, clamp_roughness(coat["roughness"]))
-        fc = coat_fresnel_mu(coat, mu)
-        material = (coat_attenuation(coat, c, fc)[:, None] * material +
-                    (c * fc * np.clip(a_c + b_c, 0.0, 1.0))[:, None])
+        a_c, b_c = dfg_lookup(mu, clamp_roughness(coat_v["roughness"]))
+        fc = coat_fresnel_mu(coat_v, mu)
+        return (coat_attenuation(coat_v, c, fc)[:, None] * material +
+                (c * fc * np.clip(a_c + b_c, 0.0, 1.0))[:, None])
+    if sheen is not None and coat is not None and variant.get("order") == "swapped":  # ticket 19 control: coat below sheen
+        material = declared_sheen_environment(under_coat(material), n_dot_v, sheen, variant)
+    else:
+        if sheen is not None:
+            material = declared_sheen_environment(material, n_dot_v, sheen, variant)
+        if coat is not None:
+            material = under_coat(material)
     return material * radiance
 
 
-def declared_irid_environment(material, base, metallic, roughness, n_dot_v, irid):
+def declared_irid_environment(material, base, metallic, roughness, n_dot_v, irid, dielectric=None, variant=None):
     """The declared iridescence model for unit radiance (decision 06): pixels whose film is active use the split sum with the
     thin-film Fresnel evaluated ONCE at N.V and held constant over the lobe, E_irid = clamp(F_irid(N.V) clamp(A + B, 0, 1), 0, 1)
     (A, B at the material roughness, `dfg_lookup`); diffuse weight 1 - max(E_irid) (the composite's rule for an extended lobe).
@@ -1732,14 +1826,28 @@ def declared_irid_environment(material, base, metallic, roughness, n_dot_v, irid
     m = np.asarray(metallic, dtype=np.float64)[:, None]
     film, thickness = irid_film_ior(irid), irid_thickness(irid)
     carry = np.clip(a + b, 0.0, 1.0)
-    e_d = np.clip(thin_film_fresnel(mu, film, thickness, np.full(base.shape, DIELECTRIC_F0)) * carry, 0.0, 1.0)
+    # ticket 19 (iridescence + ior/specular): the (1 - s) layer is the declared extended dielectric (E = f0_scaled A + f90 B, diffuse
+    # weight 1 - max E, the model of _declared_material_radiance) and the film takes the scaled f0 (irid_base_f0).
+    if dielectric is None:
+        f0_film = np.full(base.shape, DIELECTRIC_F0)
+        e_ds = np.clip(DIELECTRIC_F0 * a + b, 0.0, 1.0)
+        plain = base * (1 - e_ds) + e_ds
+    else:
+        kind = (variant or DECLARED).get("dielectric", "extension")
+        f0c, weight_s = dielectric["f0"], np.asarray(dielectric["weight"], dtype=np.float64)[:, None]
+        if kind == "ignored":
+            f0c, weight_s = np.full_like(f0c, DIELECTRIC_F0), np.ones_like(weight_s)
+        f0_film = f0c * weight_s
+        f90 = np.ones_like(weight_s) if kind == "f90-one" else weight_s
+        e_ds = np.clip((f0c if kind == "f0-unweighted" else f0_film) * a + f90 * b, 0.0, 1.0)
+        plain = base * (1.0 - np.max(e_ds, axis=-1, keepdims=True)) + e_ds
+    e_d = np.clip(thin_film_fresnel(mu, film, thickness, f0_film) * carry, 0.0, 1.0)
     e_m = np.clip(thin_film_fresnel(mu, film, thickness, base) * carry, 0.0, 1.0)
-    e_ds = np.clip(DIELECTRIC_F0 * a + b, 0.0, 1.0)
     e_ms = np.clip(base * a + b, 0.0, 1.0)
     weight = np.ones_like(a) if irid["variant"] == "diffuse-unweighted" else 1.0 - np.max(e_d, axis=-1, keepdims=True)
-    dielectric = (1 - s) * (base * (1 - e_ds) + e_ds) + s * (base * weight + e_d)
+    dielectric_value = (1 - s) * plain + s * (base * weight + e_d)
     metal = (1 - s) * e_ms + s * e_m
-    return np.where(s > 0.0, (1 - m) * dielectric + m * metal, material)
+    return np.where(s > 0.0, (1 - m) * dielectric_value + m * metal, material)
 
 
 def _declared_material_radiance(base, metallic, roughness, n_dot_v, variant, dielectric):
@@ -1950,6 +2058,19 @@ def orthogonal_tangent(tangent, n):
 SPECULAR_FEATURE_BIT = 1  # MaterialFeature::SpecularIor
 CLEARCOAT_FEATURE_BIT = 2  # MaterialFeature::Clearcoat
 EXTENSION_RECORD_WORDS = 20
+# F15.3 (ticket 19): every feature bit the reference models; the combinations it composes are listed at check_combination
+# (anything else is refused with a ValueError, never silently approximated).
+SUPPORTED_FEATURE_BITS = 1 | 2 | 4 | 8 | 16 | 128
+
+
+def check_combination(bits):
+    """Refuses the feature combinations the reference does not compose (ticket 19).  Composed: any subset of {ior/specular,
+    clearcoat, sheen, anisotropy, iridescence} (layering order of research/khr-materials.md section 12) and thin subsurface
+    with clearcoat (the coat sits above the transmitted lobe like above the rest of the base).  Refused: thin subsurface
+    with sheen, anisotropy, iridescence or ior/specular (the specification text has no composition for the transmitted lobe
+    under those: the Fresnel weight of the transmitted lobe and the sheen scaling of a back light are undefined there)."""
+    if bits & SUBSURFACE_FEATURE_BIT and bits & (SHEEN_FEATURE_BIT | ANISOTROPY_FEATURE_BIT | IRIDESCENCE_FEATURE_BIT | SPECULAR_FEATURE_BIT):
+        raise ValueError("thin subsurface is composed with clearcoat only (sheen, anisotropy, iridescence, ior/specular are refused)")
 
 
 def f32(word):
@@ -1964,7 +2085,7 @@ def material_extension_words(data, material):
     bits = int(material.get("feature_bits", 0))
     if bits == 0:
         return None
-    if bits not in (IRIDESCENCE_FEATURE_BIT, SUBSURFACE_FEATURE_BIT) and bits & ~(SPECULAR_FEATURE_BIT | CLEARCOAT_FEATURE_BIT | SHEEN_FEATURE_BIT | ANISOTROPY_FEATURE_BIT):
+    if bits & ~SUPPORTED_FEATURE_BITS:
         raise ValueError(f"material feature bits {bits:#x} are outside the declared "
                          "ior/specular/clearcoat/sheen/anisotropy/iridescence/thin-subsurface model")
     words = data["material_extensions"]["records"][int(material["extension_index"])]
@@ -2015,13 +2136,12 @@ def material_sheen(data, material):
 def material_anisotropy(data, material):
     """(strength, rotation) from words 0 and 1 of record 1 (GPUMaterialExt1) of the material's extension group, or None
     without the anisotropy feature bit.  Raises when the anisotropy texture (word 2) is set: the reference is texture-free
-    (the direction texture is open for the Khronos corpus, ticket 22), and when the material also carries coat or sheen
-    (the combinations are not modelled)."""
+    (the direction texture is open for the Khronos corpus, ticket 22).  Ticket 19: composed with coat, sheen, ior/specular and
+    iridescence (check_combination)."""
     bits = int(material.get("feature_bits", 0))
     if not bits & ANISOTROPY_FEATURE_BIT:
         return None
-    if bits & (CLEARCOAT_FEATURE_BIT | SHEEN_FEATURE_BIT):
-        raise ValueError("anisotropy combined with clearcoat or sheen is outside the declared model")
+    check_combination(bits)
     words = data["material_extensions"]["records"][int(material["extension_index"]) + ANISOTROPY_RECORD]
     if len(words) != EXTENSION_RECORD_WORDS:
         raise ValueError("a material extension record must hold 20 words")
@@ -2033,13 +2153,12 @@ def material_anisotropy(data, material):
 def material_iridescence(data, material):
     """(iridescenceFactor, iridescenceIor, thicknessMinimum, thicknessMaximum) from words 3-6 of record 1 (GPUMaterialExt1) of the
     material's extension group, or None without the iridescence feature bit.  Raises when the factor or thickness texture (words 7
-    and 8) is set (the reference is texture-free: the thickness texture case is open for ticket 22) and when the material carries
-    another feature (the combinations are not modelled)."""
+    and 8) is set (the reference is texture-free: the thickness texture case is open for ticket 22).  Ticket 19: composed with coat,
+    sheen, anisotropy and ior/specular (check_combination)."""
     bits = int(material.get("feature_bits", 0))
     if not bits & IRIDESCENCE_FEATURE_BIT:
         return None
-    if bits & ~IRIDESCENCE_FEATURE_BIT:
-        raise ValueError("iridescence combined with another material feature is outside the declared model")
+    check_combination(bits)
     words = data["material_extensions"]["records"][int(material["extension_index"]) + IRIDESCENCE_RECORD]
     if len(words) != EXTENSION_RECORD_WORDS:
         raise ValueError("a material extension record must hold 20 words")
@@ -2055,8 +2174,7 @@ def material_subsurface(data, material):
     bits = int(material.get("feature_bits", 0))
     if not bits & SUBSURFACE_FEATURE_BIT:
         return None
-    if bits & ~SUBSURFACE_FEATURE_BIT:
-        raise ValueError("subsurface combined with another material feature is outside the declared model")
+    check_combination(bits)
     words = data["material_extensions"]["records"][int(material["extension_index"]) + SUBSURFACE_RECORD]
     if len(words) != EXTENSION_RECORD_WORDS:
         raise ValueError("a material extension record must hold 20 words")
@@ -2139,6 +2257,23 @@ def sphere_table(data):
             thin = material_subsurface(data, material) or (0.0, [1.0, 1.0, 1.0])
             entry.update(thin_weight=thin[0], thin_color=thin[1],
                          group=f"metallic {entry['metallic']:g} thin weight {thin[0]:g}")
+        kinds = sum(map(bool, (uses, uses_coat, uses_sheen_scene, uses_aniso, uses_irid, uses_thin)))
+        if kinds > 1:  # ticket 19: a combination scene groups its spheres by the full set of lobe parameters
+            tokens = [f"metallic {entry['metallic']:g}"]
+            if "ior" in entry:
+                tokens.append(f"ior {entry['ior']:g} spec {entry['specular']:g}")
+            if entry.get("coat", 0.0) > 0.0:
+                tokens.append(f"coat {entry['coat']:g}/{entry['coat_roughness']:g}")
+            if any(c > 0.0 for c in entry.get("sheen_color", [0.0])):
+                c = entry["sheen_color"]
+                tokens.append(f"sheen {c[0]:g},{c[1]:g},{c[2]:g}/{entry['sheen_roughness']:g}")
+            if entry.get("anisotropy", 0.0) > 0.0:
+                tokens.append(f"aniso {entry['anisotropy']:g}@{entry['anisotropy_rotation']:g}")
+            if entry.get("iridescence", 0.0) > 0.0:
+                tokens.append(f"irid {entry['iridescence']:g}/{entry['iridescence_ior']:g}/{entry['thickness']:g}nm")
+            if entry.get("thin_weight", 0.0) > 0.0:
+                tokens.append(f"thin {entry['thin_weight']:g}")
+            entry["group"] = " ".join(tokens)
         out.append(entry)
     return out
 
@@ -2308,9 +2443,7 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
             aniso_env = None if aniso is None else aniso_environment_inputs(aniso, roughness, n, v)
             material = environment_radiance(base, metallic, roughness, dot(n, v), sky, model, sun_dielectric, aniso_env, irid,
                                             thin)
-            if sheen is not None:
-                material = sheen_environment(material, dot(n, v), sheen, sky)
-            radiance += material if coat is None else environment_coat(material, dot(n, v), coat, sky)
+            radiance += layered_environment(material, dot(n, v), coat, sheen, sky, model.get("order") == "swapped")
             terms.append("environment-quadrature")
         else:
             radiance += declared_environment_radiance(base, metallic, roughness, dot(n, v), sky, environment,

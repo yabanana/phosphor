@@ -750,8 +750,12 @@ class ClearcoatModel(unittest.TestCase):
         for index in (2, 3):  # a coat factor/roughness texture (word 10) or a coat normal texture (word 12)
             with self.assertRaises(ValueError):
                 ref.material_clearcoat(data, data["materials"][index])
-        with self.assertRaises(ValueError):  # iridescence (bit 16 in feature bits 18) is outside the declared model
+        # ticket 19: coat + iridescence (feature bits 18) is a composed combination; an unknown bit is still refused
+        self.assertEqual(ref.material_clearcoat(data, data["materials"][4]), (0.5, 0.25, 0.75))
+        data["materials"][4]["feature_bits"] = 2 | 32
+        with self.assertRaises(ValueError):
             ref.material_clearcoat(data, data["materials"][4])
+        data["materials"][4]["feature_bits"] = 18
         self.assertTrue(ref.uses_clearcoat(data) and not ref.uses_specular_extension(data))
         data["materials"][4]["feature_bits"] = 3
         self.assertEqual(ref.material_specular(data, data["materials"][4])[0], 1.5)
@@ -1310,8 +1314,12 @@ class SheenModel(unittest.TestCase):
         for index in (2, 3):  # sheenColorTexture (word 17) or sheenRoughnessTexture (word 18)
             with self.assertRaises(ValueError):
                 ref.material_sheen(data, data["materials"][index])
-        with self.assertRaises(ValueError):  # iridescence (bit 16 in feature bits 20) is outside the declared model
+        # ticket 19: sheen + iridescence (feature bits 20) is composed; an unknown bit is still refused
+        self.assertEqual(ref.material_sheen(data, data["materials"][4])[0], [1.0, 0.5, 0.25])
+        data["materials"][4]["feature_bits"] = 4 | 32
+        with self.assertRaises(ValueError):
             ref.material_sheen(data, data["materials"][4])
+        data["materials"][4]["feature_bits"] = 20
         self.assertEqual(ref.material_sheen(data, data["materials"][5])[0], [0.5, 0.5, 0.5])  # coat + sheen is inside it
         self.assertTrue(ref.uses_sheen(data))
         self.assertIsNone(ref.material_specular(data, data["materials"][0]))  # sheen-only: neutral specular block
@@ -1726,9 +1734,12 @@ class AnisotropyModel(unittest.TestCase):
         self.assertIsNone(ref.material_anisotropy(data, data["materials"][5]))     # a different feature
         with self.assertRaises(ValueError):                                        # anisotropyTexture is refused
             ref.material_anisotropy(data, data["materials"][2])
-        for index in (3, 4):                                                       # coat or sheen on top: not modelled
-            with self.assertRaises(ValueError):
-                ref.material_anisotropy(data, data["materials"][index])
+        for index in (3, 4):                                                       # ticket 19: coat / sheen on top are composed
+            self.assertEqual(ref.material_anisotropy(data, data["materials"][index]), (1.0, 0.0))
+        data["materials"][3]["feature_bits"] = 8 | 128                             # thin subsurface + anisotropy: refused
+        with self.assertRaises(ValueError):
+            ref.material_anisotropy(data, data["materials"][3])
+        data["materials"][3]["feature_bits"] = 10
         self.assertTrue(ref.uses_anisotropy(data))
         self.assertIsNone(ref.material_specular(data, data["materials"][0]))       # anisotropy-only: neutral specular block
         self.assertIsNone(ref.material_clearcoat(data, data["materials"][0]))
@@ -2279,8 +2290,11 @@ class IridescenceModel(unittest.TestCase):
         for index in (2, 3):                                                          # factor / thickness texture: refused
             with self.assertRaises(ValueError):
                 ref.material_iridescence(data, data["materials"][index])
-        with self.assertRaises(ValueError):                                           # combined with anisotropy: not modelled
+        np.testing.assert_allclose(ref.material_iridescence(data, data["materials"][4]), (1.0, 1.3, 100.0, 400.0), rtol=1e-7)  # ticket 19: + anisotropy composed
+        data["materials"][4]["feature_bits"] = 16 | 128                               # + thin subsurface: refused
+        with self.assertRaises(ValueError):
             ref.material_iridescence(data, data["materials"][4])
+        data["materials"][4]["feature_bits"] = 24
         self.assertTrue(ref.uses_iridescence(data))
         self.assertIsNone(ref.material_specular(data, data["materials"][0]))
         self.assertIsNone(ref.material_anisotropy(data, data["materials"][0]))
@@ -2792,6 +2806,366 @@ class ThinSubsurfaceSnapshot(unittest.TestCase):
                 with self.assertRaises(ValueError, msg=word):
                     ref.require_declared_scene(data)
                 self.assertEqual(ref.main(["render", str(root), "--out", str(pathlib.Path(tmp) / "out")]), 2)
+
+
+# --- F15.3 (ticket 19): critical lobe combinations ---------------------------------------------------------------------------
+
+def dielectric_dict(count, ior=1.5, weight=1.0, color=(1.0, 1.0, 1.0), variant="extension"):
+    """Per-pixel ior/specular arrays of `count` identical pixels (see ref.dielectric_arrays)."""
+    f0 = ref.specular_f0(ior, np.asarray(color, dtype=np.float64))
+    return {"f0": np.tile(f0, (count, 1)), "weight": np.full(count, float(weight)), "variant": variant}
+
+
+class CombinationModel(unittest.TestCase):
+    """Combinations of the lobes (ticket 19), from the layering text of research/khr-materials.md section 12: clearcoat over
+    sheen over the base; iridescence replaces the base specular Fresnel (with the ior/specular f0 under the film); anisotropy
+    changes D and V of the base specular lobe; the thin subsurface transmitted lobe is part of the base under the coat.  Hand
+    values assembled in the test, identities when one lobe is neutral, an independent wi-space Monte Carlo for the exact
+    environment, furnace bounds and the discrimination of every control."""
+
+    BASE = np.array([[0.4, 0.25, 0.1]])
+
+    def setUp(self):
+        self.n = np.array([[0.0, 0.0, 1.0]])
+        self.v = np.array([unit(0.6, 0.1, 0.5)])
+        self.l = np.array([unit(-0.7, 0.2, 0.3)])
+        self.rough = np.array([0.45])
+
+    def f(self, metallic=0.0, base=None, **kw):
+        base = self.BASE if base is None else base
+        return ref.bsdf(base, np.array([metallic]), self.rough, self.n, self.v, self.l, **kw)[0]
+
+    # -- identities: a neutral lobe leaves the other exactly as it is ----------------------------------------------------------
+    def test_a_neutral_lobe_reduces_every_pair_to_the_single_lobe(self):
+        lobes = {"coat": coat_dict(0.7, 0.3), "sheen": sheen_dict((0.9, 0.6, 0.3), 0.4), "aniso": aniso_pixels(0.8, 0.6),
+                 "irid": irid_pixels(1, 1.0, 1.4, 500.0, nv=float(self.v[0] @ self.n[0])), "dielectric": dielectric_dict(1, 1.8, 0.7, (1.0, 0.8, 0.6))}
+        neutral = {"coat": coat_dict(0.0, 0.3), "sheen": sheen_dict((0.0, 0.0, 0.0), 0.4), "aniso": aniso_pixels(0.0, 0.6),
+                   "irid": irid_pixels(1, 0.0, 1.4, 500.0, nv=float(self.v[0] @ self.n[0])),
+                   "dielectric": dielectric_dict(1)}
+        for metallic in (0.0, 1.0):
+            for a in lobes:
+                for b in lobes:
+                    if a >= b:
+                        continue
+                    only_a = self.f(metallic, **{a: lobes[a]})
+                    # lobe b neutral next to lobe a == lobe a alone (the neutral ior/specular block is the base f0 0.04 weight 1)
+                    both = self.f(metallic, **{a: lobes[a], b: neutral[b]})
+                    np.testing.assert_allclose(both, only_a, rtol=1e-11, err_msg=f"{a} + neutral {b}, metallic {metallic}")
+                    both = self.f(metallic, **{b: lobes[b], a: neutral[a]})
+                    np.testing.assert_allclose(both, self.f(metallic, **{b: lobes[b]}), rtol=1e-11,
+                                               err_msg=f"neutral {a} + {b}, metallic {metallic}")
+
+    def test_every_pair_of_active_lobes_differs_from_each_lobe_alone(self):
+        # The identities above must not hold vacuously: with both lobes active the value moves away from both single lobes.
+        lobes = {"coat": coat_dict(0.7, 0.3), "sheen": sheen_dict((0.9, 0.6, 0.3), 0.4), "aniso": aniso_pixels(0.8, 0.6),
+                 "irid": irid_pixels(1, 1.0, 1.4, 500.0, nv=float(self.v[0] @ self.n[0])), "dielectric": dielectric_dict(1, 1.8, 0.7, (1.0, 0.8, 0.6))}
+        for a in lobes:
+            for b in lobes:
+                if a >= b:
+                    continue
+                both = self.f(0.0, **{a: lobes[a], b: lobes[b]})
+                for single in (a, b):
+                    alone = self.f(0.0, **{single: lobes[single]})
+                    self.assertGreater(float(np.abs(both - alone).max() / alone.max()), 1e-3, (a, b, single))
+
+    def test_thin_with_coat_reduces_to_each_single_lobe(self):
+        thin = thin_pixels(1, 0.6, (1.0, 0.55, 0.25))
+        no_thin = thin_pixels(1, 0.0, (1.0, 0.55, 0.25))
+        for light in (self.l, np.array([unit(-0.5, 0.2, -0.7)])):
+            def radiance(coat=None, thin=None):
+                position = np.array([[0.0, 0.0, 0.0]])
+                lamp = {"position": (position + 3.0 * light)[0], "intensity": 10.0, "range": 100.0, "color": (1.0, 1.0, 1.0)}
+                return ref.point_radiance(self.BASE, np.array([0.0]), self.rough, self.n, self.v, position, lamp, coat=coat, thin=thin)[0][0]
+            np.testing.assert_allclose(radiance(coat_dict(0.0, 0.3), thin), radiance(None, thin), rtol=1e-12)
+            np.testing.assert_allclose(radiance(coat_dict(0.7, 0.3), no_thin), radiance(coat_dict(0.7, 0.3)), rtol=1e-12)
+
+    # -- hand values of the layering ---------------------------------------------------------------------------------------
+    def test_coat_over_sheen_hand_value(self):
+        # f = (1 - c F_c) (f_sheen + f_material scaling) + c F_c D Vis_coat: assembled here from the parts.
+        c, rc, color, rs = 0.8, 0.3, np.array([0.9, 0.6, 0.3]), 0.5
+        sheen = sheen_dict(color, rs)
+        n, v, l = self.n, self.v, self.l
+        nv, nl = float(v[0] @ n[0]), float(l[0] @ n[0])
+        h = unit(*(v[0] + l[0]))
+        nh = float(h @ n[0])
+        material = self.f(0.0)
+        e_v = float(ref.sheen_albedo(np.array([nv]), np.array([rs]))[0])
+        e_l = float(ref.sheen_albedo(np.array([nl]), np.array([rs]))[0])
+        scaling = min(1 - color.max() * e_v, 1 - color.max() * e_l)
+        alpha_g = rs ** 2
+        lobe = color * float(ref.charlie_d(nh, alpha_g) * ref.charlie_visibility(nv, nl, alpha_g))
+        fc = 0.04 + 0.96 * (1 - nv) ** 5
+        coat_value = ClearcoatModel.d_vis(n[0], v[0], l[0], rc ** 2)
+        expected = (1 - c * fc) * (lobe + material * scaling) + c * fc * coat_value
+        np.testing.assert_allclose(self.f(0.0, coat=coat_dict(c, rc), sheen=sheen), expected, rtol=1e-11)
+
+    def test_swapped_order_differs_and_is_the_sheen_over_coat_formula(self):
+        c, rc, color, rs = 1.0, 0.3, np.array([1.0, 1.0, 1.0]), 0.4
+        sheen, coat = sheen_dict(color, rs), coat_dict(c, rc)
+        normal = self.f(0.0, coat=coat, sheen=sheen)
+        swapped = self.f(0.0, coat=coat, sheen=sheen, model={**ref.SPECULAR_EXT, "order": "swapped"})
+        self.assertGreater(float(np.abs(normal - swapped).max() / normal.max()), 0.01)
+        # the swapped value is f_sheen + (coated material) * scaling: assembled from the single-layer values
+        alone_sheen = self.f(0.0, sheen=sheen)
+        alone_material = self.f(0.0)
+        coated = self.f(0.0, coat=coat)
+        nv, nl = float(self.v[0] @ self.n[0]), float(self.l[0] @ self.n[0])
+        e_v = float(ref.sheen_albedo(np.array([nv]), np.array([rs]))[0])
+        e_l = float(ref.sheen_albedo(np.array([nl]), np.array([rs]))[0])
+        scaling = min(1 - e_v, 1 - e_l)
+        lobe = alone_sheen - alone_material * scaling
+        np.testing.assert_allclose(swapped, lobe + coated * scaling, rtol=1e-10)
+
+    def test_swapped_order_differs_in_the_sun_and_in_both_environments(self):
+        coat, sheen = coat_dict(1.0, 0.3), sheen_dict((1.0, 0.5, 0.25), 0.4)
+        toward = unit(-0.7, 0.2, 0.3)
+        args = (self.BASE, np.array([0.0]), self.rough, self.n, self.v, toward, np.ones(3), 0.00465)
+        normal, _ = ref.sun_radiance(*args, coat=coat, sheen=sheen)
+        swapped, _ = ref.sun_radiance(*args, model={**ref.SPECULAR_EXT, "order": "swapped"}, coat=coat, sheen=sheen)
+        self.assertGreater(float(np.abs(normal - swapped).max() / normal.max()), 0.005)
+        mu = np.array([0.3])
+        material = ref.environment_radiance(self.BASE, np.array([0.0]), self.rough, mu, 0.5)
+        a = ref.layered_environment(material, mu, coat, sheen, 0.5)
+        b = ref.layered_environment(material, mu, coat, sheen, 0.5, swapped=True)
+        self.assertGreater(float(np.abs(a - b).max() / a.max()), 0.005)
+        decl = ref.declared_environment_radiance(self.BASE, np.array([0.0]), self.rough, mu, 0.5, ref.DECLARED, None, coat, sheen)
+        decl_s = ref.declared_environment_radiance(self.BASE, np.array([0.0]), self.rough, mu, 0.5, ref.COMBO_DECLARED_CONTROLS["declared-order-swapped"],
+                                                   None, coat, sheen)
+        self.assertGreater(float(np.abs(decl - decl_s).max() / decl.max()), 0.005)
+
+    def test_the_sun_term_of_the_combination_matches_the_point_evaluation_for_a_wide_lobe(self):
+        # The sun disk of every combination at a wide lobe is the point evaluation of the same BSDF at the disk centre (the
+        # disk rule only changes narrow lobes): ties sun_radiance to bsdf for coat + sheen + anisotropy + iridescence together.
+        toward = unit(-0.7, 0.2, 0.3)
+        lobes = dict(coat=coat_dict(0.6, 0.5), sheen=sheen_dict((0.8, 0.4, 0.2), 0.5), aniso=aniso_pixels(0.7, 0.5),
+                     irid=irid_pixels(1, 1.0, 1.3, 400.0, nv=float(self.v[0] @ self.n[0])), dielectric=dielectric_dict(1, 1.8, 0.7))
+        irid_less = dict(lobes)
+        del irid_less["irid"]
+        for metallic in (0.0, 1.0):
+            for use in (lobes, irid_less):
+                sun, narrow = ref.sun_radiance(self.BASE, np.array([metallic]), self.rough, self.n, self.v, toward, np.ones(3), 0.00465,
+                                               **use)
+                point = ref.bsdf(self.BASE, np.array([metallic]), self.rough, self.n, self.v, np.array([toward]), **use)[0] * float(toward @ self.n[0])
+                self.assertFalse(bool(narrow[0]))
+                np.testing.assert_allclose(sun[0], point, rtol=1e-9)  # wide lobes: the disk rule is the point evaluation
+
+    # -- iridescence with ior/specular ------------------------------------------------------------------------------------------
+    def test_iridescence_over_the_specular_extension_hand_value(self):
+        # README: rgb_mix(base, spec, mix(w fr, F_irid(base_f0 = w f0), s)); with s = 1: spec weight F_irid(w f0, V.H), diffuse 1 - max.
+        ior, weight, color = 1.8, 0.7, (1.0, 0.8, 0.6)
+        f0 = ref.specular_f0(ior, np.array(color))
+        h = unit(*(self.v[0] + self.l[0]))
+        vh = float(self.v[0] @ h)
+        film = ref.thin_film_fresnel(np.array([vh]), np.array([1.4]), np.array([500.0]), (weight * f0)[None, :])
+        diffuse_w, spec_w = ref.lobe_weights(self.BASE, np.array([0.0]), np.array([vh]), ref.SPECULAR_EXT,
+                                             dielectric_dict(1, ior, weight, color), irid_pixels(1, 1.0, 1.4, 500.0))
+        np.testing.assert_allclose(spec_w, film, rtol=1e-12)
+        np.testing.assert_allclose(diffuse_w, 1 - film.max(axis=-1, keepdims=True), rtol=1e-12)
+        # strength 0: the extended Fresnel alone (w fr, diffuse 1 - w max fr)
+        diffuse_0, spec_0 = ref.lobe_weights(self.BASE, np.array([0.0]), np.array([vh]), ref.SPECULAR_EXT,
+                                             dielectric_dict(1, ior, weight, color), irid_pixels(1, 0.0, 1.4, 500.0))
+        fr = weight * (f0 + (1 - f0) * (1 - vh) ** 5)
+        np.testing.assert_allclose(spec_0, fr[None, :], rtol=1e-12)
+        np.testing.assert_allclose(diffuse_0, 1 - fr.max(), rtol=1e-12)
+
+    def test_the_film_takes_the_scaled_f0_and_a_metal_ignores_the_extension(self):
+        weak = dielectric_dict(1, 1.5, 0.3)
+        strong = dielectric_dict(1, 1.5, 1.0)
+        irid = irid_pixels(1, 1.0, 1.3, 300.0)
+        _, w_weak = ref.lobe_weights(self.BASE, np.array([0.0]), np.array([0.6]), ref.SPECULAR_EXT, weak, irid)
+        _, w_strong = ref.lobe_weights(self.BASE, np.array([0.0]), np.array([0.6]), ref.SPECULAR_EXT, strong, irid)
+        self.assertGreater(float(np.abs(w_weak - w_strong).max()), 1e-3)  # base_f0 = weight * f0 reaches the film
+        _, m_weak = ref.lobe_weights(self.BASE, np.array([1.0]), np.array([0.6]), ref.SPECULAR_EXT, weak, irid)
+        _, m_strong = ref.lobe_weights(self.BASE, np.array([1.0]), np.array([0.6]), ref.SPECULAR_EXT, strong, irid)
+        np.testing.assert_allclose(m_weak, m_strong, rtol=1e-13)
+
+    def test_the_exact_environment_of_iridescence_with_a_neutral_extension_is_the_iridescence_only_value(self):
+        mu = np.array([0.35, 0.8])
+        irid = irid_pixels(2, 1.0, 1.3, 400.0, nv=mu)
+        n = 2
+        plain = ref.environment_radiance(np.tile(self.BASE, (n, 1)), np.zeros(n), np.full(n, 0.3), mu, 1.0, irid_env=irid)
+        ext = ref.environment_radiance(np.tile(self.BASE, (n, 1)), np.zeros(n), np.full(n, 0.3), mu, 1.0, ref.SPECULAR_EXT,
+                                       dielectric_dict(n), irid_env=irid)
+        np.testing.assert_allclose(ext, plain, rtol=1e-9)
+        decl = ref.declared_environment_radiance(np.tile(self.BASE, (n, 1)), np.zeros(n), np.full(n, 0.3), mu, 1.0, ref.DECLARED,
+                                                 None, irid=irid)
+        decl_ext = ref.declared_environment_radiance(np.tile(self.BASE, (n, 1)), np.zeros(n), np.full(n, 0.3), mu, 1.0, ref.DECLARED,
+                                                     dielectric_dict(n), irid=irid)
+        np.testing.assert_allclose(decl_ext, decl, rtol=1e-12)
+
+    def mc_environment(self, mu, count=300000, seed=5, **kw):
+        """Independent wi-space estimate of the unit-radiance environment value: uniform sphere, bsdf cos on the front hemisphere."""
+        rng = np.random.default_rng(seed)
+        w = rng.normal(size=(count, 3))
+        w /= np.linalg.norm(w, axis=1, keepdims=True)
+        v = np.array([math.sqrt(max(0.0, 1 - mu * mu)), 0.0, mu])
+        n = np.tile([0.0, 0.0, 1.0], (count, 1))
+        vv = np.tile(v, (count, 1))
+        base = np.tile(kw.pop("base"), (count, 1))
+        metallic = np.full(count, kw.pop("metallic"))
+        rough = np.full(count, kw.pop("roughness"))
+        take_n = lambda d: None if d is None else {k: (np.repeat(x[:1], count, axis=0) if isinstance(x, np.ndarray) else x) for k, x in d.items()}  # noqa: E731
+        kw = {k: take_n(x) for k, x in kw.items()}
+        f = ref.bsdf(base, metallic, rough, n, vv, w, **kw) * np.clip(w[:, 2:3], 0.0, None)
+        value = 4 * math.pi * f
+        return value.mean(axis=0), value.std(axis=0) / math.sqrt(count)
+
+    def test_exact_environment_of_iridescence_with_specular_agrees_with_a_monte_carlo(self):
+        ior, weight, color = 1.8, 0.7, (1.0, 0.8, 0.6)
+        for mu in (0.4, 0.9):
+            mean, sigma = self.mc_environment(mu, base=self.BASE, metallic=0.0, roughness=0.45, model=ref.SPECULAR_EXT,
+                                              dielectric=dielectric_dict(1, ior, weight, color), irid=irid_pixels(1, 1.0, 1.4, 500.0))
+            exact = ref.environment_radiance(self.BASE, np.array([0.0]), np.array([0.45]), np.array([mu]), 1.0, ref.SPECULAR_EXT,
+                                             dielectric_dict(1, ior, weight, color), irid_env=irid_pixels(1, 1.0, 1.4, 500.0, nv=mu))[0]
+            np.testing.assert_allclose(exact, mean, atol=6 * sigma.max() + 2e-3, err_msg=f"mu {mu}")
+
+    def test_exact_environment_of_the_coat_over_the_thin_lobe_agrees_with_a_monte_carlo(self):
+        coat, thin = coat_dict(0.8, 0.35), thin_pixels(1, 0.6, (1.0, 0.55, 0.25))
+        for mu in (0.4, 0.9):
+            n = 1
+            material = ref.environment_radiance(self.BASE, np.array([0.0]), np.array([0.45]), np.array([mu]), 1.0, thin_env=thin)
+            exact = ref.layered_environment(material, np.array([mu]), coat, None, 1.0)[0]
+            # the coat attenuates the whole base value including the transmitted lobe: the estimate adds the attenuated transmitted lobe
+            mean, sigma = self.mc_environment_coated_thin(mu, coat, thin)
+            np.testing.assert_allclose(exact, mean, atol=6 * sigma.max() + 3e-3, err_msg=f"mu {mu}")
+            del n
+
+    def mc_environment_coated_thin(self, mu, coat, thin, count=300000, seed=9):
+        rng = np.random.default_rng(seed)
+        w = rng.normal(size=(count, 3))
+        w /= np.linalg.norm(w, axis=1, keepdims=True)
+        v = np.tile([math.sqrt(max(0.0, 1 - mu * mu)), 0.0, mu], (count, 1))
+        n = np.tile([0.0, 0.0, 1.0], (count, 1))
+        base = np.tile(self.BASE, (count, 1))
+        metallic, rough = np.zeros(count), np.full(count, 0.45)
+        rep = lambda d: {k: (np.repeat(x[:1], count, axis=0) if isinstance(x, np.ndarray) else x) for k, x in d.items()}  # noqa: E731
+        c, t = rep(coat), rep(thin)
+        front = ref.bsdf(base, metallic, rough, n, v, w, coat=c, thin=t) * np.clip(w[:, 2:3], 0.0, None)
+        attenuation = ref.coat_lobe(c, n, v, w)[0][:, None]
+        back = ref.thin_transmitted(t, metallic, n, v, w) * attenuation
+        value = 4 * math.pi * (front + back)
+        return value.mean(axis=0), value.std(axis=0) / math.sqrt(count)
+
+    # -- thin subsurface under the coat ---------------------------------------------------------------------------------------
+    def test_the_coat_attenuates_the_transmitted_lobe_and_the_uncoated_control_does_not(self):
+        thin, coat = thin_pixels(1, 0.6, (1.0, 0.55, 0.25)), coat_dict(1.0, 0.3)
+        back = np.array([unit(-0.5, 0.2, -0.7)])
+        position = np.array([[0.0, 0.0, 0.0]])
+        lamp = {"position": (position + 3.0 * back)[0], "intensity": 10.0, "range": 100.0, "color": (1.0, 1.0, 1.0)}
+
+        def radiance(thin, coat):
+            return ref.point_radiance(self.BASE, np.array([0.0]), self.rough, self.n, self.v, position, lamp, coat=coat, thin=thin)[0][0]
+        plain = radiance(thin, None)
+        fc = 0.04 + 0.96 * (1 - float(self.v[0] @ self.n[0])) ** 5
+        np.testing.assert_allclose(radiance(thin, coat), (1 - fc) * plain, rtol=1e-12)  # a back light: no coat lobe, only the attenuation
+        np.testing.assert_allclose(radiance({**thin, "variant": "uncoated"}, coat), plain, rtol=1e-12)
+        # sun: same rule (the transmitted term is inside the base the coat attenuates)
+        toward = unit(-0.5, 0.2, -0.7)
+        args = (self.BASE, np.array([0.0]), self.rough, self.n, self.v, toward, np.ones(3), 0.00465)
+        sun_plain, _ = ref.sun_radiance(*args, thin=thin)
+        sun_coated, _ = ref.sun_radiance(*args, coat=coat, thin=thin)
+        sun_uncoated, _ = ref.sun_radiance(*args, coat=coat, thin={**thin, "variant": "uncoated"})
+        np.testing.assert_allclose(sun_coated, (1 - fc) * sun_plain, rtol=1e-10)
+        np.testing.assert_allclose(sun_uncoated, sun_plain, rtol=1e-10)
+
+    def test_thin_subsurface_with_sheen_anisotropy_iridescence_or_specular_is_refused(self):
+        for other in (4, 8, 16, 1):
+            with self.assertRaises(ValueError, msg=other):
+                ref.check_combination(128 | other)
+        ref.check_combination(128 | 2)       # coat: composed
+        ref.check_combination(1 | 2 | 4 | 8 | 16)  # every other lobe together: composed
+        with self.assertRaises(ValueError):   # an unknown bit (transmission, 32) is refused by material_extension_words
+            ref.material_extension_words({"material_extensions": {"records": [[0] * 20]}}, {"feature_bits": 2 | 32, "extension_index": 0})
+
+    # -- energy ---------------------------------------------------------------------------------------------------------------
+    def white_furnace(self, mu, metallic, coat=None, sheen=None, irid=None, thin=None, variant=None, rough=0.4):
+        """Exact-quadrature furnace value (radiance 1, albedo 1) of one pixel and the same of the base material alone."""
+        base = np.ones((1, 3))
+        args = (base, np.array([metallic]), np.array([rough]), np.array([mu]), 1.0)
+        material = ref.environment_radiance(*args, irid_env=irid, thin_env=thin)
+        model = {**ref.SPECULAR_EXT, **(variant or {})}
+        coat_v = None if coat is None else {**coat, "variant": model.get("coat", "spec")}
+        sheen_v = None if sheen is None else {**sheen, "variant": model.get("sheen", "spec")}
+        return ref.layered_environment(material, np.array([mu]), coat_v, sheen_v, 1.0, model.get("order") == "swapped")[0], \
+            ref.environment_radiance(*args)[0]
+
+    def test_layering_never_adds_energy_to_the_exact_furnace_and_the_additive_control_does(self):
+        coat, sheen = coat_dict(1.0, 0.3), sheen_dict((1.0, 1.0, 1.0), 0.4)
+        additive = ref.COMBO_CONTROLS["additive-layering"]
+        for metallic in (0.0, 1.0):
+            for mu in (0.1, 0.3, 0.6, 1.0):
+                layered, base = self.white_furnace(mu, metallic, coat, sheen)
+                bound = max(1.0, float(base.max())) + 1e-9
+                self.assertLessEqual(float(layered.max()), bound, (metallic, mu))
+                swapped, _ = self.white_furnace(mu, metallic, coat, sheen, variant=ref.COMBO_CONTROLS["order-swapped"])
+                self.assertLessEqual(float(swapped.max()), bound, (metallic, mu))
+        summed, base = self.white_furnace(1.0, 0.0, coat, sheen, variant=additive)
+        self.assertGreater(float(summed.max()), 1.04)  # lobes summed without the attenuation: far above the furnace
+        layered, _ = self.white_furnace(1.0, 0.0, coat, sheen)
+        self.assertLess(float(layered.max()), 1.0 + 1e-9)
+
+    def test_declared_furnace_bound_of_the_combinations_and_their_additive_control(self):
+        mu = np.linspace(0.05, 1.0, 20)
+        n = len(mu)
+        base = np.ones((n, 3))
+        coat = {**coat_dict(1.0, 0.3, count=n)}
+        sheen = {**sheen_dict((1.0, 1.0, 1.0), 0.4, count=n)}
+        irid = irid_pixels(n, 1.0, 1.3, 400.0, nv=mu)
+        for metallic in (0.0, 1.0):
+            kwargs = dict(coat=coat, sheen=sheen, irid=irid)
+            value = ref.declared_environment_radiance(base, np.full(n, metallic), np.full(n, 0.4), mu, 1.0, ref.DECLARED, None, **kwargs)
+            self.assertLessEqual(float(value.max()), 1.0 + 1e-9, metallic)
+            additive = ref.declared_environment_radiance(base, np.full(n, metallic), np.full(n, 0.4), mu, 1.0,
+                                                         ref.COMBO_DECLARED_CONTROLS["declared-additive-layering"], None, **kwargs)
+            self.assertGreater(float(additive.max()), 1.05, metallic)
+            swapped = ref.declared_environment_radiance(base, np.full(n, metallic), np.full(n, 0.4), mu, 1.0,
+                                                        ref.COMBO_DECLARED_CONTROLS["declared-order-swapped"], None, **kwargs)
+            self.assertLessEqual(float(swapped.max()), 1.0 + 1e-9, metallic)
+
+    def test_the_declared_furnace_of_thin_subsurface_with_coat_holds_and_its_additive_control_gains_energy(self):
+        mu = np.linspace(0.05, 1.0, 20)
+        n = len(mu)
+        thin = thin_pixels(n, 0.7, (1.0, 1.0, 1.0))
+        coat = coat_dict(1.0, 0.3, count=n)
+        value = ref.declared_environment_radiance(np.ones((n, 3)), np.zeros(n), np.full(n, 0.4), mu, 1.0, ref.DECLARED, None, coat=coat, thin=thin)
+        self.assertLessEqual(float(value.max()), 1.0 + 1e-9)
+        additive = ref.declared_environment_radiance(np.ones((n, 3)), np.zeros(n), np.full(n, 0.4), mu, 1.0,
+                                                     ref.COMBO_DECLARED_CONTROLS["declared-additive-layering"], None, coat=coat, thin=thin)
+        self.assertGreater(float(additive.max()), 1.05)
+
+    def test_the_exact_furnace_of_the_thin_lobe_under_the_coat_does_not_exceed_the_unextended_model(self):
+        # reflected + transmitted never exceeds the unextended material (ticket 16), and the coat only attenuates it
+        coat, thin = coat_dict(1.0, 0.3), thin_pixels(1, 1.0, (1.0, 1.0, 1.0))
+        for mu in (0.2, 0.6, 1.0):
+            layered, base = self.white_furnace(mu, 0.0, coat=coat, thin=thin)
+            self.assertLessEqual(float(layered.max()), max(1.0, float(base.max())) + 1e-9, mu)
+
+    # -- the controls discriminate ---------------------------------------------------------------------------------------------
+    def test_the_per_lobe_controls_move_the_combination_value(self):
+        base = np.ones((1, 3)) * 0.5
+        lobes = dict(coat=coat_dict(1.0, 0.3), sheen=sheen_dict((1.0, 0.6, 0.3), 0.4), aniso=aniso_pixels(0.9, 0.7),
+                     irid=irid_pixels(1, 1.0, 1.4, 500.0, nv=float(self.v[0] @ self.n[0])))
+        reference = ref.bsdf(base, np.array([0.0]), self.rough, self.n, self.v, self.l, ref.SPECULAR_EXT, **lobes)
+        for key, variant in (("coat", "ignored"), ("sheen", "ignored"), ("aniso", "ignored"), ("irid", "ignored")):
+            changed = dict(lobes)
+            changed[key] = {**lobes[key], "variant": variant}
+            other = ref.bsdf(base, np.array([0.0]), self.rough, self.n, self.v, self.l, ref.SPECULAR_EXT, **changed)
+            self.assertGreater(float(np.abs(other - reference).max() / reference.max()), 1e-3, key)
+        additive = ref.bsdf(base, np.array([0.0]), self.rough, self.n, self.v, self.l,
+                            {**ref.SPECULAR_EXT, **ref.COMBO_CONTROLS["additive-layering"]},
+                            coat={**lobes["coat"], "variant": "base-unattenuated"}, sheen={**lobes["sheen"], "variant": "unscaled-base"},
+                            aniso=lobes["aniso"], irid={**lobes["irid"], "variant": "diffuse-unweighted"})
+        self.assertGreater(float(additive.max()), float(reference.max()))
+
+    def test_control_models_and_declared_twins_are_registered(self):
+        for name in ("additive-layering", "order-swapped", "transmission-uncoated"):
+            self.assertIn(name, ref.ALL_CONTROLS)
+            self.assertIn(name, ref.COMBO_CONTROLS)
+        self.assertEqual(ref.control_model("additive-layering", ref.SPECULAR_EXT)["coat"], "base-unattenuated")
+        self.assertEqual(ref.control_model("transmission-uncoated", ref.SPECULAR_EXT)["thin"], "uncoated")
+        self.assertIn("declared-additive-layering", ref.ALL_DECLARED_CONTROLS)
+        self.assertIn("declared-order-swapped", ref.ALL_DECLARED_CONTROLS)
+        self.assertNotIn("declared-transmission-uncoated", ref.ALL_DECLARED_CONTROLS)
 
 
 if __name__ == "__main__":
