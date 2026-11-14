@@ -2545,6 +2545,21 @@
         "label": "E5FA4AB1754AAA5F4A74883606CFAE1EB17CBBBCAA566CEEA1E294A9E814A011",
         "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
         "name": "visibility_resolve"
+      },
+      {
+        "label": "09C575B6DE07EA05A0168B04834FB64CB849D727B1B82902E6D23A9E8B9C7004",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "shadow_transmit_fragment"
+      },
+      {
+        "label": "373C5928FF4A684B989AC09A0292E620F9E31F79D97091EF2EE242123FFAA3AC",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "shadow_transmit_vertex"
+      },
+      {
+        "label": "CA0F7354182914F4EBEA55399173BC016BF32240B4BE10B3A4F450FE35EC024C",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "shadow_transmit_mesh"
       }
     ],
     "specialized_function_descriptors": [
@@ -28026,6 +28041,25 @@
           0,
           0
         ]
+      },
+      {
+        "color_attachments": [
+          {
+            "alpha_blend_operation": "Max",
+            "blending_state": "Enabled",
+            "destination_alpha_blend_factor": "One",
+            "destination_rgb_blend_factor": "One",
+            "pixel_format": "RGBA32Float"
+          }
+        ],
+        "fragment_function_descriptor": "fnd:09C575B6DE07EA05A0168B04834FB64CB849D727B1B82902E6D23A9E8B9C7004",
+        "max_total_threads_per_mesh_threadgroup": 128,
+        "mesh_function_descriptor": "fnd:CA0F7354182914F4EBEA55399173BC016BF32240B4BE10B3A4F450FE35EC024C",
+        "required_threads_per_mesh_threadgroup": [
+          0,
+          0,
+          0
+        ]
       }
     ],
     "render_pipeline_descriptors": [
@@ -31302,6 +31336,19 @@
         "fragment_function_descriptor": "fnd:7E5E691961E01145C90DBC0879D300E2B02F5AE67DAF45CC001FC48CD67F9993",
         "support_indirect_command_buffers": "Enabled",
         "vertex_function_descriptor": "fnd:6C0ABC6D1C65B09BBF0042B49854994C93810703B3B70D728BDF735AF89B0A4B"
+      },
+      {
+        "color_attachments": [
+          {
+            "alpha_blend_operation": "Max",
+            "blending_state": "Enabled",
+            "destination_alpha_blend_factor": "One",
+            "destination_rgb_blend_factor": "One",
+            "pixel_format": "RGBA32Float"
+          }
+        ],
+        "fragment_function_descriptor": "fnd:09C575B6DE07EA05A0168B04834FB64CB849D727B1B82902E6D23A9E8B9C7004",
+        "vertex_function_descriptor": "fnd:373C5928FF4A684B989AC09A0292E620F9E31F79D97091EF2EE242123FFAA3AC"
       }
     ],
     "tile_render_pipeline_descriptors": [
