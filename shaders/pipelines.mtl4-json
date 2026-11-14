@@ -2715,6 +2715,51 @@
         "label": "2A9306B8F159D272368F9CEA33D708704C7202E53E4CDE750D7C86B3DB3EE747",
         "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
         "name": "visibility_resolve"
+      },
+      {
+        "label": "2D5757E795D44231337118AA24B5AB4D3577FA5E1B17073D61EDB73269B721DB",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "light_cluster_shade_lobe"
+      },
+      {
+        "label": "27F64BB2F50026017E4C3B7A74E12CBF4EF0E5C00C55F988B2BA1CEBA90641F8",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "forward_di_receiver_guide_fs"
+      },
+      {
+        "label": "9D21FE4DE6DD69901657F047F3FD6E61760AFBADE705B152AD1C4F58FBD69C06",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "visibility_resolve"
+      },
+      {
+        "label": "107BF0F40E0AA1DD281DE038857932F44096F67FE1DCC10E04DA080C8C89B7B6",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "material_lighting_guides"
+      },
+      {
+        "label": "57D13F93414357C7656DD4CB4A80B3CDF20F87476DBC4E7FA0CAF011773C39F6",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "visibility_lit_resolve"
+      },
+      {
+        "label": "89388EC79E1F3AA1335A059E9EBE3C4C0A2F28960CA2D8B47A5464748E8294C6",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "visibility_tile"
+      },
+      {
+        "label": "63C512F9327D2E1B72A80002608CB7A8BEEE6D83BB645A30E50D404602AA64B5",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "forward_surface_lit_fs"
+      },
+      {
+        "label": "45FF2E8D9494DA64231B4A9340249995E8AE8221F96318BB8B69899AE3F5338F",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "forward_fs"
+      },
+      {
+        "label": "0729515A91707B15D39DC3C309AC5D1CB1462743D3B837A3DD877279730B7B84",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "reflection_ssr_lobe"
       }
     ],
     "specialized_function_descriptors": [
@@ -24455,6 +24500,556 @@
         ],
         "function_descriptor": "fnd:5A3A78AAD531883EA19D4D499D5C8B2052CA722D14F32B5D293444238D397115",
         "label": "44F49E59C3BFD41E94380874BF19AB51A8D903DF742EAD664E64C8C397794BA2"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 256
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:2D5757E795D44231337118AA24B5AB4D3577FA5E1B17073D61EDB73269B721DB",
+        "label": "1B25CA6454A629EF0F0BC6F48789C07E84631C99FEB7546FC96F6A4D4A5D589B"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 256
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 24
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 4352
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:57D13F93414357C7656DD4CB4A80B3CDF20F87476DBC4E7FA0CAF011773C39F6",
+        "label": "F321CED40CCC5C37FD6F97D9E983E77E8AD3F81FD9898CB9CADF71DE09115FF9"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 256
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 24
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 4352
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:9D21FE4DE6DD69901657F047F3FD6E61760AFBADE705B152AD1C4F58FBD69C06",
+        "label": "3CB92883EED126FF84D4521F919D14960DF28D576361F3B53EE86CD9A7A8B0F9"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 256
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:89388EC79E1F3AA1335A059E9EBE3C4C0A2F28960CA2D8B47A5464748E8294C6",
+        "label": "EE7679C26135A8E7783D4D1764970DFE00263BCF7A9D8C65CAAA8533E308B9B4"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 0
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 1
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 1
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": false
+            },
+            "value_type": "ConstantBool"
+          },
+          {
+            "id": {
+              "data": 2
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 0
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 256
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:45FF2E8D9494DA64231B4A9340249995E8AE8221F96318BB8B69899AE3F5338F",
+        "label": "BD5445E1E1CCFB3FBAEFD0F48A0FA7149594249BC97ABE0CAFE455D0CBA5D3C4"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 256
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:27F64BB2F50026017E4C3B7A74E12CBF4EF0E5C00C55F988B2BA1CEBA90641F8",
+        "label": "338469736F9F95421C04A7BC1DF832C62C30C3317A94651B053B9EF0750C5C59"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 256
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:57D13F93414357C7656DD4CB4A80B3CDF20F87476DBC4E7FA0CAF011773C39F6",
+        "label": "05E51D1199C7C0283E5DBC798A0287F3ABBE8FF666292DA646B2C1BA8E06C14E"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 256
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:107BF0F40E0AA1DD281DE038857932F44096F67FE1DCC10E04DA080C8C89B7B6",
+        "label": "96547369FE705FF35C4F2CBDD11946F9BF043B3D690755D3F2C51ED2F70D45E1"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 256
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:63C512F9327D2E1B72A80002608CB7A8BEEE6D83BB645A30E50D404602AA64B5",
+        "label": "2F15C9CCBC20DA88039C48E5719992E24C0E5745E0D2832760742903697671B3"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 258
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 40
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 2
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:7520B9897922ED40737AF8BC9E1E98434E23CCF39C19B07F66A919C2476A567D",
+        "label": "692A5907DC71722FA6F704863D18AB36D860B6D2CA6F2BC9FE7DC6B63F977089"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 258
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:23488489CF36ADBF6B685F575F2BE41BAC0D5A072F87731F552CF3603DFD5380",
+        "label": "9325C6B43F00ACEDA88EC0E6D045F37051A98CC546601958E3E3D206C4DD945F"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 258
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:0729515A91707B15D39DC3C309AC5D1CB1462743D3B837A3DD877279730B7B84",
+        "label": "4E028BDAB9A1D41E81E493F40EBE6C42D095738C70CD61D5E734278205E351F3"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 0
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 1
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 1
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": false
+            },
+            "value_type": "ConstantBool"
+          },
+          {
+            "id": {
+              "data": 2
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 0
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 258
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:45FF2E8D9494DA64231B4A9340249995E8AE8221F96318BB8B69899AE3F5338F",
+        "label": "0322BEED4A08BC8EB71027ADB04E696A9A546CF86465D41D14A7906A36D91744"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 258
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:63C512F9327D2E1B72A80002608CB7A8BEEE6D83BB645A30E50D404602AA64B5",
+        "label": "8AC99F94A22CB9A7C12E63E66824295B891A631BF12963B1083787207AC93AFA"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 258
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:2D5757E795D44231337118AA24B5AB4D3577FA5E1B17073D61EDB73269B721DB",
+        "label": "1E12C77BB920CD469344786B402D1123BED1D34BB93C976159088B3978C2BDBD"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 258
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:89388EC79E1F3AA1335A059E9EBE3C4C0A2F28960CA2D8B47A5464748E8294C6",
+        "label": "50D4F81A850FDABD60F08A88B4DC897B668493F5ADE0937EF191DD39887F0349"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 258
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 40
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 2
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:9FDDA91C2BEC7B12FDF1CB5A34DB162165A887C4A567FAEE1C93D51948E0A2C3",
+        "label": "709B07114570611EB13B1A0AE2C812445CCFF4730859A99CAC8D60AD1BCE8958"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 258
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 40
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 2
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:2B4911276334F3E9DCA8A6BA0063CC419A7595EA1F57BCB3B1EB727D3C1D235F",
+        "label": "E37129263DDF03BBC8F8A19186D8F5078340D1699E3FCED781E87D4039BDC4FF"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 258
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:27F64BB2F50026017E4C3B7A74E12CBF4EF0E5C00C55F988B2BA1CEBA90641F8",
+        "label": "8332229C9083B6C97ED915434C14389D73030E1D785E13405E23666EC0B4671C"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 258
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:57D13F93414357C7656DD4CB4A80B3CDF20F87476DBC4E7FA0CAF011773C39F6",
+        "label": "E1C3494728B1D762F7F0C6A59FA6CAD8F40956DC1EAE61760A01A275523C909F"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 258
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 40
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 2
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:6D121F30D0E14D63570A8760B1E468CBFB8E3859E2E8E3AAE3E3945A236F1A70",
+        "label": "F302D45FA8F83D1A4BBDC240885BF2D41AFBF011ECB66EBAE38E7175FAE2CF88"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 258
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 40
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 2
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:CAE2E71744FDFD518D38C7261681E1B121B12D56FDF6C91E91F6C36EA79CA0F1",
+        "label": "2C39D442665DA8D2E1B6BF874598BD4167F91BA6A7F6F45C60205581C55EAF9D"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 258
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 24
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 4354
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:9D21FE4DE6DD69901657F047F3FD6E61760AFBADE705B152AD1C4F58FBD69C06",
+        "label": "131B5C0312E35BA7CEB01CFE2B4B5782E8F3E131B035030E307246963155A155"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 258
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 24
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 4354
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:57D13F93414357C7656DD4CB4A80B3CDF20F87476DBC4E7FA0CAF011773C39F6",
+        "label": "2A965155E95D3C7DEBC06A2AFBE5D598C0CD85689D36ACA62087B199D5C61811"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 258
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:107BF0F40E0AA1DD281DE038857932F44096F67FE1DCC10E04DA080C8C89B7B6",
+        "label": "3A8DDA2E05AF85D9A544954B303FF4DB8AB5B2D904915ED9CA9126B8001027DC"
       }
     ]
   },
@@ -31759,6 +32354,142 @@
           0,
           0
         ]
+      },
+      {
+        "compute_function_descriptor": "fnd:05E51D1199C7C0283E5DBC798A0287F3ABBE8FF666292DA646B2C1BA8E06C14E",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:3CB92883EED126FF84D4521F919D14960DF28D576361F3B53EE86CD9A7A8B0F9",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:F321CED40CCC5C37FD6F97D9E983E77E8AD3F81FD9898CB9CADF71DE09115FF9",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:96547369FE705FF35C4F2CBDD11946F9BF043B3D690755D3F2C51ED2F70D45E1",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:1B25CA6454A629EF0F0BC6F48789C07E84631C99FEB7546FC96F6A4D4A5D589B",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:E1C3494728B1D762F7F0C6A59FA6CAD8F40956DC1EAE61760A01A275523C909F",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:131B5C0312E35BA7CEB01CFE2B4B5782E8F3E131B035030E307246963155A155",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:2A965155E95D3C7DEBC06A2AFBE5D598C0CD85689D36ACA62087B199D5C61811",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:3A8DDA2E05AF85D9A544954B303FF4DB8AB5B2D904915ED9CA9126B8001027DC",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:1E12C77BB920CD469344786B402D1123BED1D34BB93C976159088B3978C2BDBD",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:4E028BDAB9A1D41E81E493F40EBE6C42D095738C70CD61D5E734278205E351F3",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:9325C6B43F00ACEDA88EC0E6D045F37051A98CC546601958E3E3D206C4DD945F",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:E37129263DDF03BBC8F8A19186D8F5078340D1699E3FCED781E87D4039BDC4FF",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:F302D45FA8F83D1A4BBDC240885BF2D41AFBF011ECB66EBAE38E7175FAE2CF88",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:692A5907DC71722FA6F704863D18AB36D860B6D2CA6F2BC9FE7DC6B63F977089",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:709B07114570611EB13B1A0AE2C812445CCFF4730859A99CAC8D60AD1BCE8958",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:2C39D442665DA8D2E1B6BF874598BD4167F91BA6A7F6F45C60205581C55EAF9D",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
       }
     ],
     "mesh_render_pipeline_descriptors": [
@@ -38867,6 +39598,120 @@
         "fragment_function_descriptor": "fnd:B5BBC86CC813F5FEF48311A231C7AD59DC1DF711732BFFD4CC82CCB21E568989",
         "support_indirect_command_buffers": "Enabled",
         "vertex_function_descriptor": "fnd:8997F5ED2B3E64F0F4538A60A87322BB77B59CF9938F86E872C77851602E35AA"
+      },
+      {
+        "color_attachments": [
+          {
+            "pixel_format": "BGRA8Unorm_sRGB"
+          }
+        ],
+        "fragment_function_descriptor": "fnd:BD5445E1E1CCFB3FBAEFD0F48A0FA7149594249BC97ABE0CAFE455D0CBA5D3C4",
+        "support_indirect_command_buffers": "Enabled",
+        "vertex_function_descriptor": "fnd:8997F5ED2B3E64F0F4538A60A87322BB77B59CF9938F86E872C77851602E35AA"
+      },
+      {
+        "color_attachments": [
+          {
+            "pixel_format": "RGBA32Float"
+          },
+          {
+            "pixel_format": "RGBA16Float"
+          },
+          {
+            "pixel_format": "RGBA16Float"
+          },
+          {
+            "pixel_format": "RGBA16Float"
+          },
+          {
+            "pixel_format": "RG16Float"
+          },
+          {
+            "pixel_format": "R8Unorm"
+          }
+        ],
+        "fragment_function_descriptor": "fnd:2F15C9CCBC20DA88039C48E5719992E24C0E5745E0D2832760742903697671B3",
+        "support_indirect_command_buffers": "Enabled",
+        "vertex_function_descriptor": "fnd:6C0ABC6D1C65B09BBF0042B49854994C93810703B3B70D728BDF735AF89B0A4B"
+      },
+      {
+        "color_attachments": [
+          {
+            "pixel_format": "RGBA16Float"
+          },
+          {
+            "pixel_format": "RGBA16Float"
+          },
+          {
+            "pixel_format": "RG32Float"
+          },
+          {
+            "pixel_format": "R16Float"
+          },
+          {
+            "pixel_format": "R32Uint"
+          }
+        ],
+        "fragment_function_descriptor": "fnd:338469736F9F95421C04A7BC1DF832C62C30C3317A94651B053B9EF0750C5C59",
+        "support_indirect_command_buffers": "Enabled",
+        "vertex_function_descriptor": "fnd:6C0ABC6D1C65B09BBF0042B49854994C93810703B3B70D728BDF735AF89B0A4B"
+      },
+      {
+        "color_attachments": [
+          {
+            "pixel_format": "BGRA8Unorm_sRGB"
+          }
+        ],
+        "fragment_function_descriptor": "fnd:0322BEED4A08BC8EB71027ADB04E696A9A546CF86465D41D14A7906A36D91744",
+        "support_indirect_command_buffers": "Enabled",
+        "vertex_function_descriptor": "fnd:8997F5ED2B3E64F0F4538A60A87322BB77B59CF9938F86E872C77851602E35AA"
+      },
+      {
+        "color_attachments": [
+          {
+            "pixel_format": "RGBA32Float"
+          },
+          {
+            "pixel_format": "RGBA16Float"
+          },
+          {
+            "pixel_format": "RGBA16Float"
+          },
+          {
+            "pixel_format": "RGBA16Float"
+          },
+          {
+            "pixel_format": "RG16Float"
+          },
+          {
+            "pixel_format": "R8Unorm"
+          }
+        ],
+        "fragment_function_descriptor": "fnd:8AC99F94A22CB9A7C12E63E66824295B891A631BF12963B1083787207AC93AFA",
+        "support_indirect_command_buffers": "Enabled",
+        "vertex_function_descriptor": "fnd:6C0ABC6D1C65B09BBF0042B49854994C93810703B3B70D728BDF735AF89B0A4B"
+      },
+      {
+        "color_attachments": [
+          {
+            "pixel_format": "RGBA16Float"
+          },
+          {
+            "pixel_format": "RGBA16Float"
+          },
+          {
+            "pixel_format": "RG32Float"
+          },
+          {
+            "pixel_format": "R16Float"
+          },
+          {
+            "pixel_format": "R32Uint"
+          }
+        ],
+        "fragment_function_descriptor": "fnd:8332229C9083B6C97ED915434C14389D73030E1D785E13405E23666EC0B4671C",
+        "support_indirect_command_buffers": "Enabled",
+        "vertex_function_descriptor": "fnd:6C0ABC6D1C65B09BBF0042B49854994C93810703B3B70D728BDF735AF89B0A4B"
       }
     ],
     "tile_render_pipeline_descriptors": [
@@ -39317,6 +40162,34 @@
         ],
         "threadgroup_size_matches_tile_size": true,
         "tile_function_descriptor": "fnd:1BA61D52C721538C5F1E7BE14E7925BD9AB45D66C749DFD921E12487B63C66EF"
+      },
+      {
+        "color_attachments": [
+          {
+            "pixel_format": "R32Uint"
+          }
+        ],
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ],
+        "threadgroup_size_matches_tile_size": true,
+        "tile_function_descriptor": "fnd:EE7679C26135A8E7783D4D1764970DFE00263BCF7A9D8C65CAAA8533E308B9B4"
+      },
+      {
+        "color_attachments": [
+          {
+            "pixel_format": "R32Uint"
+          }
+        ],
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ],
+        "threadgroup_size_matches_tile_size": true,
+        "tile_function_descriptor": "fnd:50D4F81A850FDABD60F08A88B4DC897B668493F5ADE0937EF191DD39887F0349"
       }
     ]
   },
