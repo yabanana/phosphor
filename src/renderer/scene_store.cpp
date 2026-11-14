@@ -1369,6 +1369,18 @@ u32 SceneStore::featureUnion() const {
         if (impl_->featureCount_[f] > 0) u |= 1u << f;
     return u;
 }
+bool SceneStore::volumetricSubsurface() const {
+    if ((featureUnion() & MATERIAL_FEATURE_SUBSURFACE) == 0u) return false;
+    for (const GPUMaterial& m : impl_->materials_) {
+        if (!(materialFeatureBits(m) & MATERIAL_FEATURE_SUBSURFACE) || m.extensionIndex == MATERIAL_EXTENSION_INVALID ||
+            size_t(m.extensionIndex) + 2 >= impl_->ext_.size())
+            continue;
+        GPUMaterialExt2 e2;
+        std::memcpy(&e2, &impl_->ext_[m.extensionIndex + 2], sizeof(e2));
+        if (e2.mode == 1u && (e2.weight > 0.0f || e2.weightTex != INVALID_TEXTURE_INDEX)) return true;
+    }
+    return false;
+}
 u32 SceneStore::extensionGroups() const { return impl_->extHigh_; }
 u32 SceneStore::extensionGroupCapacity() const { return impl_->extCap_; }
 std::span<const GPUMaterialExtRecord> SceneStore::extensions() const { return impl_->ext_; }

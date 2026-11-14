@@ -41,3 +41,8 @@ reserved SALT uint 31
 # forward and resolve pipelines of a scene with extended materials set the
 # scene's feature union.  NOT an axis: the 42 dense variants are unchanged.
 reserved MATERIAL_FEATURES uint 22
+
+# F15.1 (ticket 17): 1 = the resolve kernels / the indexed overflow fallback of a scene with VOLUMETRIC subsurface write the
+# diffuse-irradiance target (kernel texture 10, fallback colour attachment 6) and strip that diffuse from the colour (the screen-space
+# diffusion pass puts it back).  Undefined => 0: every other pipeline keeps its descriptor (and archive key) unchanged.
+reserved SSS_OUTPUT uint 23

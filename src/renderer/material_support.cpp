@@ -97,6 +97,22 @@ const MaterialSupportTable& currentSupportTable() {
         FeatureSupportEntry& subsurface = t.features[static_cast<u32>(MaterialFeature::Subsurface)];
         subsurface.level                = SupportLevel::Approximated;
         subsurface.approximation        = "thin_mode_only;gi_irradiance_at_n_stands_for_minus_n;secondary_rt_hits_ignore_transmission";
+        // F15.1 (ticket 17): the VOLUMETRIC mode.  Screen-space Burley normalised diffusion (ADR-0005): the resolve strips the diffuse term of
+        // the pixel (lights and ambient) into a diffuse-irradiance target, subsurface.metal spreads it with the Christensen-Burley profile
+        // (21 or 55 golden-angle samples at the equal-mass radii of the mixture of the three channel profiles, metres to pixels from the
+        // pixel's depth, sub-pixel footprint skipped, same material, 3D distance and surface-area factor, self-normalised) and adds it to the
+        // colour before reflections, atmosphere and post.  Declared approximations: only the diffuse term the resolve evaluates is diffused (its
+        // analytic lights and sun, and the ambient where no composite owns it); the DI local-light, GI and ambient terms of the reflection
+        // composite and the denoiser stay on the base model of the pixel: not diffused, no back-lit translucency of thick volumes
+        // (a screen-space gather sees only the visible surface), the profile is a diffusion approximation (the pixels with a mean free path
+        // above 10 % of the piece size are reported, not gated), colour / radius-scale / weight textures modulate the irradiance but not the
+        // profile shape, the anisotropy enters through the similarity relation (radius / (1 - rho g)), combinations with a coat, sheen,
+        // anisotropy, iridescence or transmission lobe keep the base diffuse of that pixel, the local lights supplied by DI (localDirect) are not
+        // diffused, and the on-tile resolve experiment has no diffusion.
+        t.subsurfaceVolumetric.level    = SupportLevel::Approximated;
+        t.subsurfaceVolumetric.approximation =
+            "screen_space_burley_diffusion;resolve_lights_only_di_gi_composite_terms_not_diffused;no_back_lit_translucency;"
+            "profile_shape_ignores_textures;anisotropy_by_similarity_relation;not_composed_with_other_diffuse_lobes";
         // F15.1 (ticket 13): KHR_materials_transmission + KHR_materials_volume, ray-traced (ADR-0004).  The diffuse base of the visible surface is
         // mixed by 1 - t in every primary path; the reflected lobes keep DI, RT reflections and the denoiser.  With --rt on the transport draws
         // ONE Fresnel-chosen sample per pixel: reflection (today's lobes) or refraction through a GGX microfacet (rough BTDF, separable Smith),

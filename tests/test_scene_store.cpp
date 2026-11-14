@@ -1284,6 +1284,43 @@ TEST_CASE("scene store: a scene without features has no extension buffer and uni
     CHECK(w.store.materials()[0].extensionIndex == MATERIAL_EXTENSION_INVALID);
 }
 
+// F15.1 (ticket 17): the scene asks for the diffuse-irradiance target and the diffusion pass only for a VOLUMETRIC subsurface material with a
+// weight (or a weight texture); the thin mode and a zero weight never do.
+TEST_CASE("scene store: volumetricSubsurface follows the mode and the weight of the subsurface records") {
+    World w;
+    w.padMaterials(8);
+    const EntityID a = w.add(0, glm::vec3(0), glm::vec3(1.0f), 0, true);
+    w.frame();
+    CHECK_FALSE(w.store.volumetricSubsurface());
+    const auto subsurface = [](SubsurfaceMode mode, float weight) {
+        auto d = std::make_shared<MaterialDescription>();
+        d->subsurface.emplace();
+        d->subsurface->mode = mode;
+        d->subsurface->weight = weight;
+        if (mode == SubsurfaceMode::Volumetric) {
+            d->volume.emplace();
+            d->volume->thickness = 0.8f;
+        }
+        return d;
+    };
+    w.ecs.getComponent<MaterialComponent>(a).extension = subsurface(SubsurfaceMode::Thin, 1.0f);
+    w.sync();
+    CHECK((w.store.featureUnion() & MATERIAL_FEATURE_SUBSURFACE) != 0u);
+    CHECK_FALSE(w.store.volumetricSubsurface());
+    w.ecs.endFrame();
+    w.ecs.getComponent<MaterialComponent>(a).extension = subsurface(SubsurfaceMode::Volumetric, 0.0f);
+    w.sync();
+    CHECK_FALSE(w.store.volumetricSubsurface());
+    w.ecs.endFrame();
+    w.ecs.getComponent<MaterialComponent>(a).extension = subsurface(SubsurfaceMode::Volumetric, 0.5f);
+    w.sync();
+    CHECK(w.store.volumetricSubsurface());
+    w.ecs.endFrame();
+    w.ecs.getComponent<MaterialComponent>(a).extension = nullptr;
+    w.sync();
+    CHECK_FALSE(w.store.volumetricSubsurface());
+}
+
 TEST_CASE("scene store: an extended entity material owns a group, flags and records follow the description") {
     World w;
     w.padMaterials(40);

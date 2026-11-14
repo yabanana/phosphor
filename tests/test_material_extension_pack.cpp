@@ -217,7 +217,9 @@ TEST_CASE("support report: ior/specular, clearcoat and sheen are approximated wi
     const FeatureSupportEntry& ss = t.features[static_cast<u32>(MaterialFeature::Subsurface)];
     CHECK(ss.level == SupportLevel::Approximated); // the thin mode (ticket 16); the volumetric mode has its own entry
     CHECK(std::string(ss.approximation) == "thin_mode_only;gi_irradiance_at_n_stands_for_minus_n;secondary_rt_hits_ignore_transmission");
-    CHECK(t.subsurfaceVolumetric.level == SupportLevel::Unsupported);
+    CHECK(t.subsurfaceVolumetric.level == SupportLevel::Approximated); // ticket 17: screen-space Burley diffusion
+    CHECK(std::string(t.subsurfaceVolumetric.approximation).find("screen_space_burley_diffusion") != std::string::npos);
+    CHECK(std::string(t.subsurfaceVolumetric.approximation).find("resolve_lights_only_di_gi_composite_terms_not_diffused") != std::string::npos);
     const FeatureSupportEntry& an = t.features[static_cast<u32>(MaterialFeature::Anisotropy)];
     CHECK(an.level == SupportLevel::Approximated);
     CHECK(std::string(an.approximation) ==

@@ -175,6 +175,7 @@ struct ForwardSurfaceOutput {
     half4 specularAlbedo [[color(3)]];
     half2 motion [[color(4)]];
     half reactive [[color(5)]];
+    float4 sss [[color(6), function_constant(kSssWrite)]]; // F15.1 (ticket 17): the diffuse-irradiance target (volumetric subsurface)
 };
 fragment ForwardSurfaceOutput forward_surface_fs(SurfaceVertexOut in [[stage_in]], bool frontFacing [[front_facing]],
                                                  constant FrameConstants &frame [[buffer(0)]],
@@ -206,6 +207,7 @@ fragment ForwardSurfaceOutput forward_surface_fs(SurfaceVertexOut in [[stage_in]
     out.specularAlbedo = half4(half3(value.specularAlbedo), 1.0h);
     out.motion = half2(temporalMotion(in.unjitteredClip, in.previousClip, temporal, in.historyValid != 0));
     out.reactive = in.historyValid == 0 ? 1.0h : (materials[in.materialIndex].alphaCutoff > 0 || (materials[in.materialIndex].flags & (MATERIAL_FEATURE_TRANSMISSION << MATERIAL_FEATURE_SHIFT)) != 0) ? 0.75h : 0.0h;
+    if (kSssWrite) out.sss = float4(value.sssMaterial != 0u ? value.sssIrradiance : float3(0.0f), float(value.sssMaterial));
     return out;
 }
 // ICB pipelines inherit buffers. Lighting textures use the same direct
@@ -224,6 +226,7 @@ struct ForwardLitSurfaceOutput {
     half4 specularAlbedo [[color(3)]];
     half2 motion [[color(4)]];
     half reactive [[color(5)]];
+    float4 sss [[color(6), function_constant(kSssWrite)]]; // F15.1 (ticket 17)
 };
 fragment ForwardLitSurfaceOutput forward_surface_lit_fs(SurfaceVertexOut in [[stage_in]], bool frontFacing [[front_facing]],
                                                  constant FrameConstants &frame [[buffer(0)]],
@@ -260,6 +263,7 @@ fragment ForwardLitSurfaceOutput forward_surface_lit_fs(SurfaceVertexOut in [[st
     out.specularAlbedo = half4(half3(value.specularAlbedo), 1.0h);
     out.motion = half2(temporalMotion(in.unjitteredClip, in.previousClip, temporal, in.historyValid != 0));
     out.reactive = in.historyValid == 0 ? 1.0h : (materials[in.materialIndex].alphaCutoff > 0 || (materials[in.materialIndex].flags & (MATERIAL_FEATURE_TRANSMISSION << MATERIAL_FEATURE_SHIFT)) != 0) ? 0.75h : 0.0h;
+    if (kSssWrite) out.sss = float4(value.sssMaterial != 0u ? value.sssIrradiance : float3(0.0f), float(value.sssMaterial));
     return out;
 }
 

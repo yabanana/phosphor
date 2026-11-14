@@ -309,6 +309,7 @@ private:
         u64 reflectionResources=0,denoiseResources=0,atmosphereResources=0;
         bool reflectionReady=false;
         u64 fixtureResources=0;bool fixtureReady=false;
+        bool subsurface=false; // F15.1 (ticket 17): the diffuse-irradiance target and the diffusion pass are in the graph
         bool operator==(const GraphKey&) const = default;
     };
     rg::RenderGraph frameGraph_;

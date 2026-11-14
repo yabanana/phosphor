@@ -28,6 +28,7 @@ constexpr rg::Format resolveFormat(u32 index,bool lighting) {
     // Preserve its range before F13/F14 composition; F7/F8 keeps its HALF ABI.
     return index==0&&lighting?rg::Format::RGBA32Float:kFormats[index];
 }
+constexpr u16 kSssConstant = 23; // reserved SSS_OUTPUT (shaders/variants.def)
 constexpr std::array<const char *, 6> kNames = {
     "Linear HDR", "Signed normal + roughness", "Diffuse albedo", "Specular albedo", "Motion pixels", "Reactive mask"};
 } // namespace
@@ -67,10 +68,15 @@ VisibilityRenderer::VisibilityRenderer(MetalContext &c, PipelineCache &p, SceneR
     d.output(0, rg::Format::BGRA8Srgb);
     present_ = p.request(d);
     fallback_ = p.request(fallbackDesc());
+    // Ticket 17: the base of the fallback while the specialised one compiles, for a scene whose pass has the diffuse-irradiance attachment
+    // (SSS_OUTPUT without the feature union: it writes the target as 0).  Requested at startup like every base pipeline (archive entry).
+    fallbackSss_ = p.request(fallbackDesc(true));
+    sssClear_ = p.request(compute("subsurface_clear"));
+    sssDiffuse_ = p.request(compute("subsurface_diffuse"));
     for (auto &table : tables_) {
         auto *desc = MTL4::ArgumentTableDescriptor::alloc()->init();
         desc->setMaxBufferBindCount(18);
-        desc->setMaxTextureBindCount(10);
+        desc->setMaxTextureBindCount(11);
         NS::Error *error = nullptr;
         table = c.device()->newArgumentTable(desc, &error);
         desc->release();
@@ -78,13 +84,17 @@ VisibilityRenderer::VisibilityRenderer(MetalContext &c, PipelineCache &p, SceneR
             throw std::runtime_error("Visibility argument table creation failed");
     }
 }
-pipe::PipelineDesc VisibilityRenderer::fallbackDesc() const {
+pipe::PipelineDesc VisibilityRenderer::fallbackDesc(bool sss) const {
     pipe::PipelineDesc d = pipe::forward::genericDesc(resolveFormat(0, lighting_));
     d.label = "Visibility indexed overflow fallback";
     d.functions[0] = "forward_surface_vs";
     d.functions[1] = lighting_ ? "forward_surface_lit_fs" : "forward_surface_fs";
     for (u32 i = 0; i < kFormats.size(); ++i)
         d.output(i, resolveFormat(i, lighting_));
+    if (sss) { // F15.1 (ticket 17): the diffuse-irradiance attachment of volumetric subsurface
+        d.output(kFormats.size(), rg::Format::RGBA32Float);
+        d.constant(kSssConstant, pipe::ConstantType::UInt, 1u);
+    }
     return d;
 }
 VisibilityRenderer::~VisibilityRenderer() {
@@ -147,25 +157,34 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
     mesh_.setTemporalInputs(temporalAddress_);
     // F15.1: with material features every shading pipeline is the one specialised by the scene's
     // feature union (the all-lobes reference while it compiles); union 0 keeps today's handles.
+    // Ticket 17: a scene with volumetric subsurface also sets SSS_OUTPUT (constant 23) on the compute resolve and the overflow fallback
+    // (its own cache slots: the same union without subsurface keeps its pipelines).
     {
         const u32 mask = store.featureUnion();
+        subsurface_ = subsurfaceAllowed_ && !tileResolve_ && mask != 0u && store.volumetricSubsurface();
+        const u32 so = subsurface_ ? 50u : 0u;
+        const auto sssConstant = [&](pipe::PipelineDesc d) {
+            if (subsurface_) d.constant(kSssConstant, pipe::ConstantType::UInt, 1u);
+            return d;
+        };
         const char *kernel = lighting_ ? "visibility_lit_resolve" : "visibility_resolve";
         for (u32 i = 0; i < VISIBILITY_CLASSES; ++i) {
-            servedResolve_[i] = features_.serve(pipelines_, 100 + i, resolve_[i], mask, [&] {
+            servedResolve_[i] = features_.serve(pipelines_, 100 + so + i, resolve_[i], mask, [&] {
                 auto d = compute(kernel);
                 d.constant(21, pipe::ConstantType::UInt, i);
-                return d;
+                return sssConstant(d);
             });
         }
-        servedGeneric_ = features_.serve(pipelines_, 110, adaptive_ ? adaptivePipeline_ : generic_, mask,
-                                         [&] { return compute(adaptive_ ? "visibility_adaptive" : kernel); });
+        servedGeneric_ = features_.serve(pipelines_, 110 + so, adaptive_ ? adaptivePipeline_ : generic_, mask,
+                                         [&] { return sssConstant(compute(adaptive_ ? "visibility_adaptive" : kernel)); });
         servedTile_ = tile_ == pipe::INVALID_PIPELINE ? tile_ : features_.serve(pipelines_, 111, tile_, mask, [&] {
             auto d = compute("visibility_tile");
             d.kind = pipe::PipelineKind::Tile;
             d.output(0, rg::Format::R32Uint);
             return d;
         });
-        servedFallback_ = features_.serve(pipelines_, 112, fallback_, mask, [&] { return fallbackDesc(); });
+        servedFallback_ = features_.serve(pipelines_, 112 + so, subsurface_ ? fallbackSss_ : fallback_, mask,
+                                          [&] { return fallbackDesc(subsurface_); });
     }
     useBinning_ = binning_ && std::all_of(servedResolve_.begin(), servedResolve_.end(),
                                           [this](auto h) { return pipelines_.isFinal(h); });
@@ -222,6 +241,12 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
     const auto upload = context_.frameUploads().allocate(sizeof(params_));
     std::memcpy(upload.cpu, &params_, sizeof(params_));
     paramsAddress_ = upload.gpu;
+    if (subsurface_) {
+        const GPUSubsurfaceParams sp{width, height, outputWidth, outputHeight, sssNear_, sssTanX_, sssTanY_, 0};
+        const auto su = context_.frameUploads().allocate(sizeof(sp));
+        std::memcpy(su.cpu, &sp, sizeof(sp));
+        sssParamsAddress_ = su.gpu;
+    }
 }
 void VisibilityRenderer::prepareLighting(u32 flags, u32 sunIndex, std::array<float, 3> environment, float sunAngularRadius) {
     const GPUResolveLightingParams p{flags, sunIndex, params_.width, params_.height, {environment[0], environment[1], environment[2]}, sunAngularRadius};
@@ -230,7 +255,7 @@ void VisibilityRenderer::prepareLighting(u32 flags, u32 sunIndex, std::array<flo
 void VisibilityRenderer::setLightingTextures(rg::TextureRef sun, rg::TextureRef direct, rg::TextureRef gi) {
     sun_ = sun; direct_ = direct; indirect_ = gi;
 }
-void VisibilityRenderer::bind(rg::PassContext &ctx, MTL4::ArgumentTable *table) {
+void VisibilityRenderer::bind(rg::PassContext &ctx, MTL4::ArgumentTable *table, bool withSss) {
     table->setAddress(scene_.frameConstantsAddress(), 0);
     table->setAddress(scene_.vertexBuffer()->gpuAddress(), 1);
     table->setAddress(scene_.buffers().instances()->gpuAddress(), 2);
@@ -258,6 +283,7 @@ void VisibilityRenderer::bind(rg::PassContext &ctx, MTL4::ArgumentTable *table) 
     table->setTexture(static_cast<MTL::Texture *>(ctx.texture(visibility_))->gpuResourceID(), 0);
     for (u32 i = 0; i < outputs_.size(); ++i)
         table->setTexture(static_cast<MTL::Texture *>(ctx.texture(outputs_[i]))->gpuResourceID(), i + 1);
+    if (withSss) table->setTexture(static_cast<MTL::Texture *>(ctx.texture(sss_))->gpuResourceID(), 10);
 }
 rg::BufferRef VisibilityRenderer::importPoseHistory(rg::RenderGraph& graph) {
     // The caller imports before receiver guides; addResolve reuses this exact
@@ -353,6 +379,28 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
                                               MTL::Size::Make(16, 16, 1));
                     scene_.countCommands(3);
                 });
+        if (subsurface_) {
+            // F15.1 (ticket 17): the diffuse-irradiance target, cleared every frame (the resolve writes only volumetric pixels).
+            graph.addPass(
+                "Subsurface clear", PassType::Compute,
+                [&](PassBuilder &b) {
+                    sss_ = b.createTexture("Subsurface diffuse irradiance",
+                                           {Format::RGBA32Float, params_.outputWidth, params_.outputHeight});
+                    sss_ = b.write(sss_, Usage::ShaderWrite, StageDispatch);
+                },
+                [this](PassContext &ctx) {
+                    auto *enc = static_cast<MTL4::ComputeCommandEncoder *>(ctx.encoder());
+                    auto *table = tables_[5];
+                    table->setAddress(sssParamsAddress_, 0);
+                    table->setTexture(static_cast<MTL::Texture *>(ctx.texture(sss_))->gpuResourceID(), 0);
+                    enc->setComputePipelineState(pipelines_.compute(sssClear_));
+                    enc->setArgumentTable(table);
+                    enc->dispatchThreadgroups(
+                        MTL::Size::Make((params_.outputWidth + 15) / 16, (params_.outputHeight + 15) / 16, 1),
+                        MTL::Size::Make(16, 16, 1));
+                    scene_.countCommands(3);
+                });
+        }
         graph.addPass(
             "Material resolve", PassType::Compute,
             [&](PassBuilder &b) {
@@ -370,11 +418,15 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
                     output = b.write(output, Usage::ShaderWrite, StageDispatch);
                 }
                 if (lighting_) for (auto ref : {sun_, direct_, indirect_}) b.read(ref, Usage::ShaderRead, StageDispatch);
+                if (subsurface_) {
+                    b.read(sss_, Usage::ShaderRead, StageDispatch);
+                    sss_ = b.write(sss_, Usage::ShaderWrite, StageDispatch);
+                }
                 b.setProfileShaders(lighting_ ? "visibility_lit_resolve" : "visibility_resolve");
             },
             [this](PassContext &ctx) {
                 auto *enc = static_cast<MTL4::ComputeCommandEncoder *>(ctx.encoder());
-                bind(ctx, tables_[2]);
+                bind(ctx, tables_[2], subsurface_);
                 enc->setArgumentTable(tables_[2]);
                 if (useBinning_) {
                     ++binnedFrames_;
@@ -398,6 +450,7 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
         [&](PassBuilder &b) {
             for (u32 i = 0; i < outputs_.size(); ++i)
                 outputs_[i] = b.writeColor(outputs_[i], i, LoadIntent::Preserve);
+            if (subsurface_) sss_ = b.writeColor(sss_, u32(outputs_.size()), LoadIntent::Preserve);
             depth_ = b.writeDepth(depth_, LoadIntent::Preserve);
             scene_.declareDrawReads(b);
             b.read(poses_, Usage::ShaderRead, StageVertex);
@@ -410,6 +463,46 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
                                                      static_cast<MTL::Texture*>(ctx.texture(indirect_)));
             scene_.encodeOverlay(static_cast<MTL4::RenderCommandEncoder *>(ctx.encoder()), servedFallback_, true, lightingFallbackDepth_);
         });
+    if (subsurface_) {
+        // F15.1 (ticket 17): screen-space Burley diffusion of the volumetric pixels' diffuse irradiance, added to the resolved colour.
+        // It is a new colour version: every later consumer reads color() (reflections, atmosphere, post, capture).
+        const TextureRef resolved = outputs_[0];
+        const TextureRef sss = sss_;
+        const TextureRef depth = depth_;
+        const TextureRef normal = outputs_[1];
+        graph.addPass(
+            "Subsurface diffusion", PassType::Compute,
+            [&](PassBuilder &b) {
+                b.read(resolved, Usage::ShaderRead, StageDispatch);
+                b.read(sss, Usage::ShaderRead, StageDispatch);
+                b.read(depth, Usage::ShaderRead, StageDispatch);
+                b.read(normal, Usage::ShaderRead, StageDispatch);
+                b.read(scene_.dataRef(), Usage::ShaderRead, StageDispatch);
+                TextureRef out = b.createTexture("Subsurface linear HDR",
+                                                 {resolveFormat(0, lighting_), params_.outputWidth, params_.outputHeight});
+                sssResult_ = b.write(out, Usage::ShaderWrite, StageDispatch);
+                b.setProfileShaders("subsurface_diffuse");
+            },
+            [this, resolved, sss, depth, normal](PassContext &ctx) {
+                auto *enc = static_cast<MTL4::ComputeCommandEncoder *>(ctx.encoder());
+                auto *table = tables_[6];
+                table->setAddress(sssParamsAddress_, 0);
+                table->setAddress(scene_.frameConstantsAddress(), 1);
+                table->setAddress(scene_.buffers().materials()->gpuAddress(), 2);
+                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(resolved))->gpuResourceID(), 0);
+                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(sss))->gpuResourceID(), 1);
+                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(depth))->gpuResourceID(), 2);
+                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(normal))->gpuResourceID(), 3);
+                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(sssResult_))->gpuResourceID(), 4);
+                enc->setComputePipelineState(pipelines_.compute(sssDiffuse_));
+                enc->setArgumentTable(table);
+                enc->dispatchThreadgroups(
+                    MTL::Size::Make((params_.outputWidth + 15) / 16, (params_.outputHeight + 15) / 16, 1),
+                    MTL::Size::Make(16, 16, 1));
+                scene_.countCommands(3);
+            });
+        composedColor_ = sssResult_;
+    }
     return outputs_[0];
 }
 void VisibilityRenderer::addPoseSnapshot(rg::RenderGraph &graph) {

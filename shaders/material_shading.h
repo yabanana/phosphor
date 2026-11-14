@@ -14,6 +14,8 @@ constant bool kHasSpot = (kLightTypes & 4u) != 0u;
 // 0..3: normal-map/emissive feature bits, 4: generic reference.
 constant uint FC_RESOLVE_CLASS [[function_constant(21)]];
 constant uint kResolveClass = is_function_constant_defined(FC_RESOLVE_CLASS) ? FC_RESOLVE_CLASS : 4u;
+// F15.1 (ticket 17): the volumetric-subsurface resolve (reserved constant SSS_OUTPUT, variants.def): the diffuse irradiance goes to its own target.
+constant bool kSssWrite = kSssOutput != 0u;
 struct TextureHandle {
     texture2d<float> tex;
 };
@@ -32,6 +34,10 @@ struct SurfaceInput {
     float volumeScale = 1.0f;
 };
 struct ShadingResult {
+    // F15.1 (ticket 17): the diffuse irradiance of a volumetric-subsurface pixel (premultiplied by weight x colour, see shadeSurface) and its
+    // material index + 1 (0 = none): written to the diffuse-irradiance target when kSssOutput; the colour then excludes that diffuse term.
+    float3 sssIrradiance;
+    uint sssMaterial;
     float3 color;
     float3 normal;
     float3 baseColor;
@@ -447,19 +453,23 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
                             ? saturate(e1.iridescenceFactor * float(sampleOr(textures, e1.iridescenceFactorTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).r))
                             : 0.0f;
     }
-    // F15.1 (ticket 16): subsurface thin mode (record 2, mode 0), same gating.  Volumetric mode (ticket 17) is not resolved here: the
-    // pixel keeps the base model and publishes no subsurface feature.  weight = saturate(w x texture.a), colour = color x texture.rgb.
+    // F15.1 (ticket 16/17): subsurface (record 2), same gating.  Mode 0 = thin; mode 1 = volumetric: its weight, colour and profile
+    // parameters reach the lobe guide (the thin consumers ignore the volumetric flag) and, when the resolve writes the diffuse-irradiance
+    // target (kSssWrite, resolve lighting only), the diffuse term of the pixel is replaced by its screen-space diffusion
+    // (subsurface.metal).  weight = saturate(w x texture.a), colour = color x texture.rgb.
     BsdfThin thin = bsdfThinNone();
     const bool thinOn = (kMaterialFeatures & MATERIAL_FEATURE_SUBSURFACE) != 0u &&
                         (m.flags & (MATERIAL_FEATURE_SUBSURFACE << MATERIAL_FEATURE_SHIFT)) != 0u;
-    bool thinResolved = false;
+    bool thinResolved = false, volResolved = false;
+    GPUMaterialExt2 e2{};
     if (thinOn) {
-        const GPUMaterialExt2 e2 = *reinterpret_cast<const device GPUMaterialExt2*>(frame.materialExtensions + m.extensionIndex + 2u);
-        if (e2.mode == 0u) {
-            thinResolved = true;
+        e2 = *reinterpret_cast<const device GPUMaterialExt2*>(frame.materialExtensions + m.extensionIndex + 2u);
+        if (e2.mode == 0u || e2.mode == 1u) {
             thin.weight = saturate(e2.weight * float(sampleOr(textures, e2.weightTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).a));
             thin.color = float3(e2.color[0], e2.color[1], e2.color[2]) *
                          float3(sampleOr(textures, e2.colorTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).rgb);
+            thinResolved = e2.mode == 0u;
+            volResolved = e2.mode == 1u;
         }
     }
     CoatParams coat{0.0f, 0.04f, float3(0.0f)};
@@ -524,6 +534,10 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     const bool anisoActive = anisoOn && anisoStrength > 0.0f && dot(anisoDir, anisoDir) > 1e-12f;
     const BsdfAniso aniso = bsdfAnisoFrame(N, anisoDir, roughness, anisoStrength);
 
+    // F15.1 (ticket 17): the volumetric diffusion replaces the diffuse of the base model (and the ior/specular dielectric) only: another
+    // lobe that modifies the diffuse (coat, sheen, anisotropy, iridescence, transmission) keeps the base diffuse of that pixel.
+    const bool volDiffuse = kSssWrite && volResolved && thin.weight > 0.0f && !(coatOn || sheenOn || anisoOn || iridOn || transOn);
+    float3 sssUnit = float3(0.0f); // sum over the lights of the diffuse weight (albedo 1) x radiance x N.L, then the ambient term
     float3 color = float3(0.0);
     for (uint i = 0; i < frame.lightCount; ++i) {
         const device GPULight &light = lights[i];
@@ -553,6 +567,15 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         if (!isDirectional && replaceLocal) continue;
         // F15.1 (ticket 14): the RGB transmittance of the sun's shadow ray (1 on every channel without transmissive casters).
         const float3 visibility = i == shadowLight ? sunVisibility : float3(1.0f);
+        if (volDiffuse) {
+            const float volNL = saturate(dot(N, L));
+            if (volNL > 0.0f) {
+                const float volVH = saturate(dot(V, normalize(V + L)));
+                const float3 du = useSpec ? bsdfSpecDiffuse(bsdfSpecFresnel(spec, volVH), metallic, float3(1.0f))
+                                          : bsdfBaseDiffuse(bsdfDielectricFresnel(volVH), metallic, float3(1.0f));
+                sssUnit += du * lightColor * attenuation * visibility * volNL;
+            }
+        }
         // F15.1 (ticket 13): a light BEHIND a thin-walled transmissive surface lights it through the transmitted lobe (delta lights only: the area
         // emitters a refracted or straight ray hits belong to the transport, decision 09).  The visible face keeps the front-hemisphere terms below.
         if (transThin && dot(N, L) < 0.0f) {
@@ -687,6 +710,17 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     if(!externalDiffuse)color += (useGI ? indirectIrradiance * baseColor.rgb * (1.0f - metallic) * envDiffuse / M_PI_F * (physicalGI?1.0f:occlusion) : ambientDiffuse * occlusion);
     if(!externalDiffuse && thinResolved)color += useGI ? indirectIrradiance * thinWeight / M_PI_F * (physicalGI?1.0f:occlusion)
                                                        : (physicalGI ? environment : hemisphere(-N)) * thinWeight * occlusion;
+    if (volDiffuse) {
+        // F15.1 (ticket 17): the diffuse of the pixel (the resolve's lights + ambient, base colour) is stripped from the colour; weight x colour x the same
+        // unit-albedo irradiance goes to the target, where the diffusion profile spreads it (and the recombination adds it back).
+        // The ambient diffuse joins only where the resolve owns it (an external composite adds its own, not diffused: declared).
+        if (!externalDiffuse)
+            sssUnit += useGI ? indirectIrradiance * (1.0f - metallic) * envDiffuse / M_PI_F * (physicalGI ? 1.0f : occlusion)
+                             : (physicalGI ? environment : hemisphere(N)) * (1.0f - metallic) * envDiffuse * occlusion;
+        color = max(color - thin.weight * baseColor.rgb * sssUnit, float3(0.0f));
+        out.sssIrradiance = thin.weight * thin.color * sssUnit;
+        out.sssMaterial = in.materialIndex + 1u;
+    }
     if(!externalDiffuse && sheenOn)color += sheenEnvironment * coatAtt * (useGI ? (physicalGI?1.0f:occlusion) : occlusion);
     if(!omitSpecularAmbient)color += ambientSpecular * occlusion;
     if (!omitSpecularAmbient && transOn && transFactor > 0.0f && lobeIor >= 1.0f) color += (physicalGI ? environment : hemisphere(transDirection)) * transWeight;
@@ -716,13 +750,19 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     // An anisotropy bit without a resolved lobe (no tangent frame, or a texture strength of 0) is not published: the guide then
     // describes the isotropic lobe, as the resolve shaded it.
     if (anisoOn && !anisoActive) out.lobes.features &= ~MATERIAL_FEATURE_ANISOTROPY;
-    // The subsurface bit is published for the thin mode only (volumetric: ticket 17).
-    if (thinOn && !thinResolved) out.lobes.features &= ~MATERIAL_FEATURE_SUBSURFACE;
-    if (thinResolved) {
+    // The subsurface bit is published for both modes (the volumetric one carries the flag and the profile parameters, ticket 17).
+    if (thinOn && !thinResolved && !volResolved) out.lobes.features &= ~MATERIAL_FEATURE_SUBSURFACE;
+    if (thinResolved || volResolved) {
         out.lobes.subsurfaceWeight = thin.weight;
         out.lobes.subsurfaceColor[0] = thin.color.x;
         out.lobes.subsurfaceColor[1] = thin.color.y;
         out.lobes.subsurfaceColor[2] = thin.color.z;
+    }
+    if (volResolved) {
+        out.lobes.features |= LOBE_GUIDE_FLAG_SUBSURFACE_VOLUMETRIC;
+        out.lobes.subsurfaceRadius = e2.radius;
+        out.lobes.subsurfaceAnisotropy = e2.anisotropy;
+        for (uint c = 0; c < 3; ++c) out.lobes.subsurfaceRadiusScale[c] = e2.radiusScale[c];
     }
     // F15.1 (ticket 13): the volume bit travels with the transmission bit only ("a volume without transmission has no effect"); the factor, the
     // world thickness (mesh-local x instance scale) and the medium.

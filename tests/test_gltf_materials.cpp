@@ -651,7 +651,7 @@ TEST_CASE("support report: summary line, detail and JSON") {
     CHECK(json.at("asset_unknown_extensions").at(0) == "KHR_lights_punctual");
 }
 
-TEST_CASE("support report: the volumetric subsurface mode stays unsupported while the thin mode is approximated") {
+TEST_CASE("support report: both subsurface modes are approximated, the volumetric one with its own named approximations") {
     const auto thin = parseOne(R"({"extensions":{"KHR_materials_diffuse_transmission":{"diffuseTransmissionFactor":0.5}}})");
     const auto thinReport = buildSupportReport(thin.description, thin.info);
     REQUIRE(thinReport.features.size() == 1);
@@ -661,7 +661,8 @@ TEST_CASE("support report: the volumetric subsurface mode stays unsupported whil
     volumetric.subsurface->mode = SubsurfaceMode::Volumetric;
     const auto volumetricReport = buildSupportReport(volumetric, thin.info);
     REQUIRE(volumetricReport.features.size() == 1);
-    CHECK(volumetricReport.features[0].level == SupportLevel::Unsupported);
+    CHECK(volumetricReport.features[0].level == SupportLevel::Approximated); // ticket 17: screen-space diffusion
+    CHECK(std::string(volumetricReport.features[0].approximation).find("no_back_lit_translucency") != std::string::npos);
 }
 
 TEST_CASE("support report: an approximated feature carries its named approximation") {

@@ -23,6 +23,9 @@ static uint materialClass(const device GPUMaterial &m, constant GPUVisibilityPar
     return normal | emissive;
 }
 
+static void writeSubsurface(texture2d<float, access::write> sss, uint2 pixel, thread const ShadingResult &value) {
+    sss.write(float4(value.sssIrradiance, float(value.sssMaterial)), pixel);
+}
 kernel void visibility_clear(constant GPUVisibilityParams &p [[buffer(11)]], device uint *args [[buffer(13)]],
                              texture2d<float, access::write> color [[texture(1)]],
                              texture2d<float, access::write> normal [[texture(2)]],
@@ -92,6 +95,7 @@ static void resolveVisibilityPixel(constant FrameConstants &frame, const device 
                                    float3 localDirect = float3(0), bool useGI = false, float3 irradiance = float3(0),
                                    bool omitSpecularAmbient=false, bool physicalGI=false, bool externalDiffuse=false,
                                    float3 environment = float3(0), float sunAngularRadius = 0.0f) {
+    cached.sssMaterial = 0u; // F15.1 (ticket 17): set by the shading of a volumetric-subsurface pixel only
     if (pixel.x >= p.width || pixel.y >= p.height)
         return;
     if (id == VISIBILITY_BACKGROUND || visibilityCluster(id) >= 2u * p.candidateCapacity)
@@ -190,6 +194,7 @@ kernel void visibility_resolve(
     texture2d<float, access::write> color [[texture(1)]], texture2d<float, access::write> normal [[texture(2)]],
     texture2d<float, access::write> diffuse [[texture(3)]], texture2d<float, access::write> specular [[texture(4)]],
     texture2d<float, access::write> motion [[texture(5)]], texture2d<float, access::write> reactive [[texture(6)]],
+    texture2d<float, access::write> sss [[texture(10), function_constant(kSssWrite)]],
     uint2 tile [[threadgroup_position_in_grid]], uint2 local [[thread_position_in_threadgroup]]) {
     uint index = tile.y * p.tilesX + tile.x;
     if (kResolveClass < 4u)
@@ -202,6 +207,7 @@ kernel void visibility_resolve(
     resolveVisibilityPixel(frame, vertices, instances, materials, lights, textures, meshlets, meshletVertices,
                            triangles, a, b, p, previousInstances, temporal, color, normal, diffuse, specular, motion,
                            reactive, pixel, id, false, cached);
+    if (kSssWrite && cached.sssMaterial != 0u) writeSubsurface(sss, pixel, cached);
 }
 kernel void visibility_lit_resolve(
     constant FrameConstants &frame [[buffer(0)]], const device GPUVertex *vertices [[buffer(1)]],
@@ -219,6 +225,7 @@ kernel void visibility_lit_resolve(
     texture2d<float, access::read> sun [[texture(7)]],
     texture2d<float, access::read> localDirect [[texture(8)]],
     texture2d<float, access::read> irradiance [[texture(9)]],
+    texture2d<float, access::write> sss [[texture(10), function_constant(kSssWrite)]],
     uint2 tile [[threadgroup_position_in_grid]], uint2 local [[thread_position_in_threadgroup]]) {
     uint index = tile.y * p.tilesX + tile.x;
     if (kResolveClass < 4u)
@@ -235,6 +242,7 @@ kernel void visibility_lit_resolve(
                            (lighting.flags & 2u) != 0, (lighting.flags & 2u) ? localDirect.read(pixel).xyz : float3(0),
                            (lighting.flags & 4u) != 0, (lighting.flags & 4u) ? irradiance.read(pixel).xyz : float3(0),(lighting.flags & 8u)!=0,(lighting.flags & 16u)!=0,(lighting.flags & RESOLVE_EXTERNAL_DIFFUSE)!=0,
                            float3(lighting.environment[0],lighting.environment[1],lighting.environment[2]),lighting.sunAngularRadius);
+    if (kSssWrite && cached.sssMaterial != 0u) writeSubsurface(sss, pixel, cached);
 }
 kernel void visibility_adaptive(
     constant FrameConstants &frame [[buffer(0)]], const device GPUVertex *vertices [[buffer(1)]],
@@ -249,6 +257,7 @@ kernel void visibility_adaptive(
     texture2d<float, access::write> color [[texture(1)]], texture2d<float, access::write> normal [[texture(2)]],
     texture2d<float, access::write> diffuse [[texture(3)]], texture2d<float, access::write> specular [[texture(4)]],
     texture2d<float, access::write> motion [[texture(5)]], texture2d<float, access::write> reactive [[texture(6)]],
+    texture2d<float, access::write> sss [[texture(10), function_constant(kSssWrite)]],
     uint2 tile [[threadgroup_position_in_grid]], uint2 local [[thread_position_in_threadgroup]],
     uint lane [[thread_index_in_simdgroup]]) {
     const uint2 origin = tile * VISIBILITY_TILE + local * 2u;
@@ -258,6 +267,7 @@ kernel void visibility_adaptive(
     resolveVisibilityPixel(frame, vertices, instances, materials, lights, textures, meshlets, meshletVertices,
                            triangles, a, b, p, previousInstances, temporal, color, normal, diffuse, specular, motion,
                            reactive, origin, firstID, false, cached);
+    if (kSssWrite && cached.sssMaterial != 0u) writeSubsurface(sss, origin, cached);
     bool coarse = (p.pad2 & 2u) && !(temporal.debugFlags & 4u) && temporal.historyValid && firstID != 0u &&
                   all(origin + 1u < uint2(p.width, p.height)) && cached.alpha < 0.25f;
     if (coarse) {
@@ -289,6 +299,7 @@ kernel void visibility_adaptive(
         resolveVisibilityPixel(frame, vertices, instances, materials, lights, textures, meshlets, meshletVertices,
                                triangles, a, b, p, previousInstances, temporal, color, normal, diffuse, specular,
                                motion, reactive, pixel, id, coarse, cached);
+        if (kSssWrite && cached.sssMaterial != 0u) writeSubsurface(sss, pixel, cached);
         shaded += valid && id != 0 && !coarse;
     }
     const uint total = simd_sum(shaded), reused = simd_sum(coarse ? 3u : 0u);

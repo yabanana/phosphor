@@ -50,6 +50,13 @@ class VisibilityRenderer {
     // path (flag 16) for ambient fallbacks. Background: pixels without geometry.
     void prepareLighting(u32 flags, u32 sunIndex, std::array<float, 3> environment = {}, float sunAngularRadius = 0);
     void setBackground(std::array<float, 3> radiance) { background_ = radiance; }
+    /// F15.1 (ticket 17): called before prepareFrame.  allowed = the resolve owns the diffuse term (no external diffuse composite); the camera
+    /// is the unjittered reverse-Z infinite projection (tan of the half field of view per axis).  The screen-space diffusion of volumetric
+    /// subsurface is active when allowed, the scene has a volumetric material and the compute resolve runs (not the on-tile experiment).
+    void setSubsurface(bool allowed, float nearPlane, float tanHalfFovX, float tanHalfFovY) {
+        subsurfaceAllowed_ = allowed; sssNear_ = nearPlane; sssTanX_ = tanHalfFovX; sssTanY_ = tanHalfFovY;
+    }
+    [[nodiscard]] bool subsurfaceActive() const { return subsurface_; }
     void setLightingTextures(rg::TextureRef sun, rg::TextureRef direct, rg::TextureRef gi);
     rg::BufferRef importPoseHistory(rg::RenderGraph& graph);
     [[nodiscard]] MTL::GPUAddress paramsAddress() const { return paramsAddress_; }
@@ -69,8 +76,8 @@ class VisibilityRenderer {
     [[nodiscard]] rg::TextureRef motion() const { return outputs_[4]; }
 
   private:
-    void bind(rg::PassContext &ctx, MTL4::ArgumentTable *table);
-    [[nodiscard]] pipe::PipelineDesc fallbackDesc() const;
+    void bind(rg::PassContext &ctx, MTL4::ArgumentTable *table, bool withSss = false);
+    [[nodiscard]] pipe::PipelineDesc fallbackDesc(bool sss = false) const;
     MetalContext &context_;
     PipelineCache &pipelines_;
     SceneRenderer &scene_;
@@ -125,7 +132,13 @@ class VisibilityRenderer {
     };
     std::array<Buffers, METAL_FRAMES_IN_FLIGHT> frames_{};
     // Separate tables: mutation after encoding must not change earlier work.
-    std::array<MTL4::ArgumentTable *, 5> tables_{};
+    std::array<MTL4::ArgumentTable *, 7> tables_{};
+    // F15.1 (ticket 17): diffuse-irradiance target, clear and diffusion passes (tables_ 5 and 6).
+    bool subsurfaceAllowed_ = false, subsurface_ = false;
+    float sssNear_ = 0.1f, sssTanX_ = 1.0f, sssTanY_ = 1.0f;
+    pipe::PipelineHandle sssClear_, sssDiffuse_, fallbackSss_;
+    rg::TextureRef sss_, sssResult_;
+    MTL::GPUAddress sssParamsAddress_ = 0;
     pipe::PipelineHandle clear_, classify_, generic_, present_, fallback_, tile_;
     pipe::PipelineHandle adaptivePipeline_, saveHistory_;
     std::array<pipe::PipelineHandle, VISIBILITY_CLASSES> resolve_{};

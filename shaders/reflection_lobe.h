@@ -98,7 +98,8 @@ inline ReflectionLobe reflectionLoadLobe(uint flags, uint validFlag, const devic
                 l.irid.ior = u.iridescenceIor;
                 l.irid.thickness = u.iridescenceThickness;
             }
-            if ((kMaterialFeatures & MATERIAL_FEATURE_SUBSURFACE) != 0u && (g.features & MATERIAL_FEATURE_SUBSURFACE) != 0u) {
+            if ((kMaterialFeatures & MATERIAL_FEATURE_SUBSURFACE) != 0u && (g.features & MATERIAL_FEATURE_SUBSURFACE) != 0u &&
+                (g.features & LOBE_GUIDE_FLAG_SUBSURFACE_VOLUMETRIC) == 0u) { // ticket 17: the volumetric mode is the screen-space diffusion, not a thin lobe
                 l.thinParams.weight = u.subsurfaceWeight;
                 l.thinParams.color = float3(u.subsurfaceColor[0], u.subsurfaceColor[1], u.subsurfaceColor[2]);
                 l.thin = bsdfThinActive(l.thinParams);

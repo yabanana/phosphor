@@ -1673,6 +1673,12 @@ bool Engine::frame(float dt) {
         const GiEnvironment declared=declaredEnvironment(atmosphere_.get(),options_);
         visibility_->setBackground(reflections_&&reflections_->ready()?declared.skyRadiance:std::array<float,3>{0.02f,0.025f,0.035f});
     }
+    if (visibility_) {
+        // F15.1 (ticket 17): screen-space diffusion of volumetric subsurface: the diffuse term the resolve evaluates (analytic lights and the
+        // sun, plus the ambient where no external composite owns it) is diffused; DI/GI composite terms are not (declared).
+        const glm::mat4 projection = unjittered * glm::inverse(view);
+        visibility_->setSubsurface(true, camera_->getNear(), 1.0f / projection[0][0], 1.0f / projection[1][1]);
+    }
     if (visibility_)
         visibility_->prepareFrame(
             frame.slot, renderWidth, renderHeight, renderBackingWidth_, renderBackingHeight_, *store_,
@@ -1822,7 +1828,7 @@ bool Engine::frame(float dt) {
                        shadows_?shadows_->version():0,directLighting_?directLighting_->version():0,
                        gi_?gi_->version():0,referenceSnapshot_?referenceSnapshot_->version():0,
                        linearCapture_?linearCapture_->version():0,renderWidth,renderHeight,
-                       reflections_?reflections_->version():0,denoised_?denoised_->version():0,atmosphere_?atmosphere_->version():0,reflections_&&reflections_->ready(),denoisedFixture_?denoisedFixture_->version():0,denoisedFixture_&&denoisedFixture_->ready()};
+                       reflections_?reflections_->version():0,denoised_?denoised_->version():0,atmosphere_?atmosphere_->version():0,reflections_&&reflections_->ready(),denoisedFixture_?denoisedFixture_->version():0,denoisedFixture_&&denoisedFixture_->ready(),visibility_&&visibility_->subsurfaceActive()};
     if (!(key == graphKey_) || !graphExecutor_->valid()) {
         frameFlags_ |= FrameGraphCompile;
         if (key.width != graphKey_.width || key.height != graphKey_.height) frameFlags_ |= FrameResize;

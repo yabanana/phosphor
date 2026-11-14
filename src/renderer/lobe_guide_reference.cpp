@@ -106,8 +106,9 @@ LobeGuideExpectation expectedLobeParams(const GPUMaterial& material, std::span<c
         }
     }
     if (features & MATERIAL_FEATURE_SUBSURFACE) {
-        // Record 2 (GPUMaterialExt2).  shadeSurface publishes the bit for the thin mode (mode 0) only: weight = saturate(w * tex.a), colour =
-        // color * tex.rgb (the half 1.0 fallback without a texture).  A volumetric material keeps the base model and clears the bit.
+        // Record 2 (GPUMaterialExt2).  shadeSurface publishes the bit for both modes: weight = saturate(w * tex.a), colour = color * tex.rgb
+        // (the half 1.0 fallback without a texture); the volumetric mode (mode 1, ticket 17) adds the flag and the profile parameters
+        // (radius, radiusScale, anisotropy; the radius scale texture is not part of the expectation).
         if (material.extensionIndex == MATERIAL_EXTENSION_INVALID || size_t(material.extensionIndex) + 2 >= extensions.size()) {
             if (extensionsValid) *extensionsValid = false;
             r.unverified = true;
@@ -115,13 +116,19 @@ LobeGuideExpectation expectedLobeParams(const GPUMaterial& material, std::span<c
         }
         GPUMaterialExt2 e2;
         std::memcpy(&e2, &extensions[material.extensionIndex + 2], sizeof(e2));
-        if (e2.mode != 0u) {
+        if (e2.mode > 1u) {
             r.params.features &= ~MATERIAL_FEATURE_SUBSURFACE;
         } else {
             const float w = e2.weight * 1.0f;
             r.params.subsurfaceWeight = w < 0.0f ? 0.0f : (w > 1.0f ? 1.0f : w);
             for (int c = 0; c < 3; ++c) r.params.subsurfaceColor[c] = e2.color[c] * 1.0f;
             if (e2.weightTex != INVALID_TEXTURE_INDEX || e2.colorTex != INVALID_TEXTURE_INDEX) r.unverified = true;
+            if (e2.mode == 1u) {
+                r.params.features |= LOBE_GUIDE_FLAG_SUBSURFACE_VOLUMETRIC;
+                r.params.subsurfaceRadius = e2.radius;
+                r.params.subsurfaceAnisotropy = e2.anisotropy;
+                for (int c = 0; c < 3; ++c) r.params.subsurfaceRadiusScale[c] = e2.radiusScale[c];
+            }
         }
     }
     return r;

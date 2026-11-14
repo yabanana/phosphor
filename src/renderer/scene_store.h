@@ -164,6 +164,9 @@ public:
     /// F15.1: OR of the feature bits (MaterialFeature bit values, unshifted) of
     /// the live materials; 0 for a scene without features (Sponza, benches).
     [[nodiscard]] u32 featureUnion() const;
+    /// F15.1 (ticket 17): a live material carries the subsurface feature in VOLUMETRIC mode (record 2 mode 1) with a weight above 0 (or a
+    /// weight texture): the scene needs the diffuse-irradiance target and the diffusion pass.
+    [[nodiscard]] bool volumetricSubsurface() const;
     /// Extension groups handed out so far (live + free) and the capacity.
     [[nodiscard]] u32 extensionGroups() const;
     [[nodiscard]] u32 extensionGroupCapacity() const;

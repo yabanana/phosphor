@@ -406,8 +406,8 @@ TEST_CASE("lobe guide reference: resolved factor, ior and thickness of iridescen
     CHECK(u.iridescenceThickness == 1200.0f);
 }
 
-// F15.1 (ticket 16): subsurface, thin mode.  Record 2 carries mode, weight and colour; the bit is published for mode 0 only (the
-// volumetric mode keeps the base model until ticket 17), the weight is saturated and textures make the expectation unverified.
+// F15.1 (ticket 16/17): subsurface.  Record 2 carries mode, weight and colour; the bit is published for both modes (the volumetric one
+// adds the flag and the profile parameters), the weight is saturated and textures make the expectation unverified.
 namespace {
 GPUMaterialExtRecord subsurfaceRecord(u32 mode, float weight, float r, float g, float b, u32 weightTex = INVALID_TEXTURE_INDEX,
                                       u32 colorTex = INVALID_TEXTURE_INDEX) {
@@ -446,7 +446,28 @@ TEST_CASE("lobe guide reference: resolved weight and colour of thin subsurface, 
     CHECK(u.subsurfaceWeight == 0.5f);
     CHECK(u.subsurfaceColor[0] == 1.0f);
     CHECK(u.subsurfaceColor[2] == 0.25f);
-    CHECK(expectedLobeParams(subsurfaceMaterial(4), ext, MATERIAL_FEATURE_SUBSURFACE).params.features == 0u); // volumetric: base model
+    // Volumetric (ticket 17): the bit, the flag and the profile parameters.
+    {
+        GPUMaterialExt2 v{};
+        v.mode = 1u; v.weight = 0.75f; v.color[0] = 0.85f; v.color[1] = 0.55f; v.color[2] = 0.45f;
+        v.radius = 0.08f; v.radiusScale[0] = 1.0f; v.radiusScale[1] = 0.5f; v.radiusScale[2] = 0.25f; v.anisotropy = 0.3f;
+        v.weightTex = v.colorTex = v.radiusScaleTex = INVALID_TEXTURE_INDEX;
+        std::memcpy(&ext[6], &v, sizeof(v));
+        const auto ev = expectedLobeParams(subsurfaceMaterial(4), ext, MATERIAL_FEATURE_SUBSURFACE);
+        CHECK(ev.params.features == (MATERIAL_FEATURE_SUBSURFACE | LOBE_GUIDE_FLAG_SUBSURFACE_VOLUMETRIC));
+        CHECK(ev.params.subsurfaceWeight == 0.75f);
+        CHECK(ev.params.subsurfaceRadius == 0.08f);
+        CHECK(ev.params.subsurfaceRadiusScale[1] == 0.5f);
+        CHECK(ev.params.subsurfaceAnisotropy == 0.3f);
+        CHECK_FALSE(ev.unverified);
+        const LobeParams uv = unpackLobeGuide(packLobeGuide(ev.params));
+        CHECK(uv.features == ev.params.features);
+        CHECK(uv.subsurfaceRadius == doctest::Approx(0.08f).epsilon(1e-3));
+        CHECK(uv.subsurfaceColor[0] == doctest::Approx(0.85f).epsilon(1e-3));
+        v.mode = 2u; // an unknown mode publishes nothing
+        std::memcpy(&ext[6], &v, sizeof(v));
+        CHECK(expectedLobeParams(subsurfaceMaterial(4), ext, MATERIAL_FEATURE_SUBSURFACE).params.features == 0u);
+    }
     CHECK(expectedLobeParams(subsurfaceMaterial(8), ext, MATERIAL_FEATURE_SUBSURFACE).params.subsurfaceWeight == 1.0f);
     CHECK(expectedLobeParams(subsurfaceMaterial(12), ext, MATERIAL_FEATURE_SUBSURFACE).unverified);
     CHECK(expectedLobeParams(subsurfaceMaterial(0), ext, MATERIAL_FEATURE_SPECULAR_IOR).params.features == 0u);

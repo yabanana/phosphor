@@ -240,6 +240,16 @@ struct GPULobeGuide {
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPULobeGuide) == 80, "GPULobeGuide layout");
 
+// F15.1 (ticket 17): screen-space diffusion of volumetric subsurface (shaders/subsurface.metal).  Reverse-Z infinite projection: view depth
+// z = nearPlane / depth; metres per pixel at depth z are 2 z tanHalfFovX / width (square pixels).
+struct GPUSubsurfaceParams {
+    u32   width, height;               // the rendered (logical) image
+    u32   outputWidth, outputHeight;   // the attachments
+    float nearPlane, tanHalfFovX, tanHalfFovY;
+    u32   pad;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUSubsurfaceParams) == 32, "GPUSubsurfaceParams layout");
+
 struct GPUMeshInfo {
     u32 meshletCount;
     u32 meshletOffset;     // into the global meshlet buffer
