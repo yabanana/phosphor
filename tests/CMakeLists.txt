@@ -137,3 +137,10 @@ else()
     message(STATUS "F15 Python tests (f15_reference_python, f15_check_python) skipped: "
                    "uv with an offline mitsuba==3.9.1 + numpy cache is not available (probe exit: ${F15_PYTHON_PROBE_RESULT})")
 endif()
+
+# F15.3 (ticket 22): offline --verify mode of the Khronos corpus fetcher (stdlib only, fake corpus, no network).
+find_program(PYTHON3_EXECUTABLE python3)
+if(PYTHON3_EXECUTABLE)
+    add_test(NAME fetch_khronos_corpus_python
+        COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_fetch_khronos_corpus.py)
+endif()
