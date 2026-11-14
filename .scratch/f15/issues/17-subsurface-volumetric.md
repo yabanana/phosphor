@@ -199,3 +199,24 @@ Gates, thresholds, controls and the inversion definition unchanged.
 - Reading: with equal energy the miss is the profile shape (the truth's lateral spread is 2-4x the engine's Burley width at the sweep's large
   radii, the bleed numbers; the error stays 25-36 % mean with the luminance means within 8 %), so the decision-10 rule triggers ticket 18 on VALID
   ground truth.  The residual reference noise (3-5 % mean) is a minor part of it.
+
+2026-11-14 — orchestrator: re-measure on valid ground truth and the profile-mapping experiment. Integrated as 340376f…935b8f1 and
+d32de4b (sub-pixel test follows roughness 0.35); ctest 20/20.
+- Fixtures moved to boundary roughness 0.35 by the rule fixed before any engine measurement: the largest roughness with
+  A_max >= 0.85 + 3 sigma. A_max is 0.876 there; at 0.7 it is 0.50, after the roulette bias was removed.
+- With the boundary-aware inversion the energy agrees: candidate mean luminance is within 1-8 % of the truth.
+- The gated pieces still miss: mean 0.25-0.36, p95 0.74-0.92. The radius sweep now fails too (skin), so it is pending ticket 18.
+- Profile-mapping experiment (shader emulation that matches the GPU to 4 digits, against the t17s references):
+
+| variant | gated mean | gated p95 |
+|---|---|---|
+| V0, current CB15 mfp fit | 0.25-0.36 | 0.74-0.92 |
+| V1, CB15 dmfp fit with the boundary-aware alpha_ss (best principled) | 0.18-0.28 | 0.50-0.77 |
+| V2, dmfp with the Kulla-Conty alpha_ss | at least as bad as V0 | at least as bad as V0 |
+| V3, plain width scale k = 1.5-4 (diagnostic, unprincipled) | best piece 0.147 | best piece 0.35 |
+
+  - No variant meets the bound on any gated piece.
+  - The bleed saturates below the truth at large radius: a two-exponential Burley profile cannot carry the long tail of a near-lossless
+    medium behind the boundary.
+- Decision 10's rule therefore triggers ticket 18 on a correctly parameterised diffusion.
+- The reference noise floor per piece (mean 0.03-0.05, p95 0.09-0.13) leaves the bound reachable.
