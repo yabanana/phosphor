@@ -325,6 +325,9 @@ def case_table(out, binary, control_seeds=CONTROL_DEFAULT_SEEDS):
                    "--lighting-denoise", reflections_denoise, "--reflection-samples", str(spp), "--lighting-seed", str(seed),
                    "--post", "--upscaler", "native", "--resolution", RESOLUTION, "--frames", str(frames), "--warmup", "0",
                    "--fixed-timestep", "--no-ui", "--no-vsync", "--no-gpu-timing", "--debug-lighting", "1",
+                   # Synchronous pipelines for EVERY capture (a cold compiler cache once let a capture draw with fallback variants);
+                   # functional() rejects a capture whose last pipeline summary still reports fallback draws.
+                   "--pipeline-sync",
                    "--capture-linear-sequence", str(folder / "linear"), "--capture-linear-signal", "hdr",
                    "--report", str(folder / "report.json"), *extra]
         return {"name": name, "kind": "clip", "frames": frames, "command": command, "env": env or {},
@@ -349,10 +352,9 @@ def case_table(out, binary, control_seeds=CONTROL_DEFAULT_SEEDS):
 
     toggle = ["--material-toggle-every", str(TOGGLE_EVERY)]
     coat = "clearcoat-grid-env"
-    # --pipeline-sync (as the adaptive cases): every pipeline is final before the first frame.  Without it a loaded machine renders the early frames of
-    # a run with flexible fallback pipelines (seen: 212 fallback draws in one control seed against 13, an 8 % brightness difference over ~110 frames
-    # between two otherwise identical runs), which the metrics read as noise or bias.  The rendering itself is unchanged.
-    glass, motion = TRANSMISSION_SCENARIO, ["--transmission-motion", "--pipeline-sync"]
+    # Without --pipeline-sync (now passed by every case) a loaded machine rendered the early frames of a run with flexible fallback pipelines (seen:
+    # 212 fallback draws in one control seed against 13, an 8 % brightness difference over ~110 frames between two otherwise identical runs).
+    glass, motion = TRANSMISSION_SCENARIO, ["--transmission-motion"]
     seeds = [dict(clip(f"control-seed-{seed}", CLIP_FRAMES, "off", 8, motion, scenario=glass, seed=seed), kind="control-seed", seed=seed, index=k)
              for k, seed in enumerate(control_seed_ids(control_seeds))]
     return seeds + [clip("transmission-raw", CLIP_FRAMES, "off", 1, motion, scenario=glass),
@@ -417,6 +419,15 @@ def run_cases(cases, timeout):
 
 
 # --- evaluation -------------------------------------------------------------------------------------------------------------
+PIPELINES_FALLBACK_DRAWS = re.compile(r"PIPELINES .*?fallbacks \d+ \(draws (\d+)\)")
+
+
+def fallback_draws(log_text):
+    """Fallback draws of the LAST pipeline summary line of a capture log (None when the log has none)."""
+    found = PIPELINES_FALLBACK_DRAWS.findall(log_text)
+    return int(found[-1]) if found else None
+
+
 def functional(case):
     """Process-level evidence of one case: clean exit, no validation message, LIGHTING readbacks PASS (clips)."""
     folder = pathlib.Path(case["folder"])
@@ -426,6 +437,9 @@ def functional(case):
         errors.append("EXIT marker is not 0")
     if GPU_ERROR.search(log):
         errors.append("GPU/API/shader validation failure in the log")
+    draws = fallback_draws(log)
+    if draws is None or draws > 0:
+        errors.append("capture drew with fallback pipelines or has no pipeline summary" + ("" if draws is None else f" ({draws} fallback draws)"))
     if case["kind"] in ("clip", "control-seed"):
         lines = list(CHECK_LINE.finditer(log))
         if not lines or any(m[2] != "PASS" for m in lines):

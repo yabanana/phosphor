@@ -67,6 +67,23 @@ class TransmissionClipCases(unittest.TestCase):
         self.assertTrue({"clip-custom", "coat-custom", "transmission-custom", "negative-refract-axis", "adapt-on"} <= names)
 
 
+class CaptureRules(unittest.TestCase):
+    def test_every_clip_case_is_synchronous(self):
+        for case in clip.case_table(pathlib.Path("/tmp/x"), pathlib.Path("/tmp/phosphor"), 2):
+            self.assertEqual(case["command"].count("--pipeline-sync"), 1, case["name"])
+
+    def test_fallback_draws_rule(self):
+        self.assertEqual(clip.fallback_draws("x\nPIPELINES requests 1 | fallbacks 2 (draws 13) | failures 0\nEXIT 0"), 13)
+        self.assertEqual(clip.fallback_draws("PIPELINES a fallbacks 2 (draws 9)\nPIPELINES b fallbacks 0 (draws 0)"), 0)  # the LAST line decides
+        self.assertIsNone(clip.fallback_draws("no summary\nEXIT 0"))
+        import tempfile
+        for log, ok in (("PIPELINES a fallbacks 0 (draws 0)\nEXIT 0\n", True), ("PIPELINES a fallbacks 2 (draws 13)\nEXIT 0\n", False), ("EXIT 0\n", False)):
+            with tempfile.TemporaryDirectory() as folder:
+                pathlib.Path(folder, "log.txt").write_text(log)
+                errors = clip.functional({"folder": folder, "kind": "adapt", "denoise": "off"})
+                self.assertEqual(not any("fallback" in e for e in errors), ok, log)
+
+
 class ReactivePredicates(unittest.TestCase):
     def image(self, fixture, fill):
         w, h = reactive.WIDTH, reactive.HEIGHT
