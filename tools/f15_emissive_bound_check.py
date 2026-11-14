@@ -9,7 +9,7 @@ completed (ticket 20, "GPU timeout waiting for frame event").  The per-pixel lig
 Runs `chess-sidelight/mask=1/emit=1` (the black kings and queens emissive white) SERIALLY under the cooperating GPU lock, RT on and
 off, with the renderer's own timeout; passes when both runs exit 0, the report's worst GPU frame time is below the bound (default
 100 ms, indicative: measured about 15 ms at 1280x720 with the budget, seconds without it) and no GPU allocation happens in the
-measured frames (O7).  Pipelines compile without the archive (the emissive forward variant is not archived; not a lighting check).  Exit codes: 0 pass, 1 fail, 3 GPU busy.
+measured frames (O7).  The pipelines come from the archive (the emissive forward variant is archived, targeted update of F15 closure).  Exit codes: 0 pass, 1 fail, 3 GPU busy.
 """
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ def command(binary, gltf, rt, resolution, report):
             "--geometry-path", "mesh", "--rt", "on" if rt else "off", "--shadows", "rt" if rt else "off", "--lighting", "legacy",
             "--gi", "off", "--reflections", "off", "--ao", "off", "--lighting-denoise", "custom", "--post", "--upscaler", "native",
             "--resolution", resolution, "--no-ui", "--no-vsync", "--frames", "16", "--warmup", "4", "--fixed-timestep",
-            "--debug-lighting", "1", "--no-pipeline-archive", "--report", str(report)]  # the emissive forward variant is not in the archive
+            "--debug-lighting", "1", "--report", str(report)]
 
 
 def main(argv=None):
