@@ -17,7 +17,7 @@
 namespace phosphor {
 namespace {
 // The names are mirrored by tools/f15_check.py SCENARIOS (tests/test_material_validation.cpp compares both).
-constexpr std::array<std::string_view, 66> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
+constexpr std::array<std::string_view, 67> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
                                                       "furnace-base",   "furnace-resolve",     "roughness-extremes",
                                                       "roughness-extremes-sun", "specular-grid-sun",
                                                       "specular-grid-env-resolve", "specular-grid-point", "specular-grid-env", "furnace-specular",
@@ -41,7 +41,8 @@ constexpr std::array<std::string_view, 66> kScenarios{"base-grid-sun",  "base-gr
                                                       "combo-irid-coat-env", "combo-irid-sheen-sun", "combo-irid-sheen-env",
                                                       "combo-irid-aniso-sun", "combo-irid-aniso-env", "combo-irid-specular-sun",
                                                       "combo-irid-specular-env", "combo-thin-coat-sun", "combo-thin-coat-env",
-                                                      "combo-all-lobes-sun", "combo-all-lobes-env", "furnace-combinations"};
+                                                      "combo-all-lobes-sun", "combo-all-lobes-env", "furnace-combinations",
+                                                      "subsurface-thin-gi-back"};
 constexpr float pi = 3.14159265358979323846f;
 
 glm::quat orientLight(glm::vec3 towardLight) {
@@ -540,6 +541,11 @@ const std::vector<MaterialScenarioSpec>& specs() {
         {.name = "furnace-thin-subsurface", .roughness = thinFurnaceRoughness, .metallic = thinMetallic4,
          .baseColor = glm::vec3(1.0f), .towardSun = thinSun, .environment = 1.0f, .subsurfaceWeight = thinWeights4,
          .subsurfaceColor = thinWhite},
+        // F15.1 (ticket 19): GI at -N of the thin lobe (tools/f15_thin_gi_back_check.py, DDGI + DI): weight-1 quads of three transmission
+        // colours in front of a sunlit diffuse wall; the sun comes from the camera side at 60 degrees from the wall normal's complement.
+        {.name = "subsurface-thin-gi-back", .roughness = thinRoughness, .metallic = {0.0f}, .baseColor = glm::vec3(0.0f),
+         .sun = true, .sunIrradiance = 3.0f, .towardSun = glm::normalize(glm::vec3(0.8f, 0.3f, 0.52f)), .environment = 0.0f,
+         .subsurfaceWeight = {1.0f}, .subsurfaceColor = thinColors, .quadCarriers = true, .giBackWall = true, .giWallAlbedo = 0.8f},
         // F15.3 (ticket 17) volumetric subsurface.  Sun only (environment 0): the gate against the Mitsuba volumetric random walk.
         {.name = "subsurface-volumetric-sun", .roughness = volRoughness, .metallic = volMetallic2, .baseColor = volBase, .sun = true,
          .sunIrradiance = 3.0f, .towardSun = volSun, .environment = 0.0f, .volumetricWeight = volWeights, .volumetricRadius = volRadii,
@@ -750,6 +756,34 @@ void MaterialValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& textur
             // fallbacks: the default normal/MR textures would perturb factors.
             ecs.addComponent(e, std::move(material));
         }
+    if (s.giBackWall) {
+        // The wall faces the camera (generatePlane normal +Y rotated +90 degrees about X); the anchor is an unlit-black speck out of view.
+        auto addPlane = [&](float side, glm::vec3 position, glm::vec3 albedo) {
+            const auto plane = ProceduralMeshes::generatePlane(side, side, 8, 8);
+            const u32 mesh = scene.uploadMesh(plane.positions, plane.normals, plane.tangents, plane.uvs, plane.indices);
+            const EntityID e = ecs.createEntity();
+            extras_.push_back(e);
+            TransformComponent transform;
+            transform.position = position;
+            transform.rotation = glm::angleAxis(0.5f * pi, glm::vec3(1.0f, 0.0f, 0.0f));
+            transform.updateMatrix();
+            ecs.addComponent(e, std::move(transform));
+            MeshInstanceComponent instance;
+            instance.meshHandle = mesh;
+            instance.materialIndex = materialIndex++;
+            instance.setVisible(true);
+            instance.setCastsShadows(true);
+            instance.setStatic(true);
+            ecs.addComponent(e, std::move(instance));
+            MaterialComponent material;
+            material.baseColorFactor = glm::vec4(albedo, 1.0f);
+            material.metallicFactor  = 0.0f;
+            material.roughnessFactor = 1.0f;
+            ecs.addComponent(e, std::move(material));
+        };
+        addPlane(8.0f, glm::vec3(0.0f, 0.0f, -0.6f), glm::vec3(s.giWallAlbedo));
+        addPlane(0.02f, glm::vec3(-6.5f, -4.0f, 1.2f), glm::vec3(0.0f));
+    }
     if (s.sun) {
         sun_ = ecs.createEntity();
         TransformComponent transform;
@@ -802,7 +836,9 @@ void MaterialValidation::teardown(ECS& ecs, GpuScene&) {
     for (EntityID e : spheres_) ecs.destroyEntity(e);
     if (sun_ != INVALID_ENTITY) ecs.destroyEntity(sun_);
     for (EntityID e : pointLights_) ecs.destroyEntity(e);
+    for (EntityID e : extras_) ecs.destroyEntity(e);
     pointLights_.clear();
+    extras_.clear();
     spheres_.clear();
     sun_ = INVALID_ENTITY;
 }

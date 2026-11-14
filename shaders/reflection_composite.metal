@@ -105,7 +105,8 @@ kernel void reflection_input_check(constant GPUReflectionComposeParams& p [[buff
 kernel void REFL_KERNEL(reflection_composite)(constant GPUReflectionComposeParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
     device atomic_uint* counts [[buffer(2)]]REFL_GUIDE_PARAM(3),texture2d<float,access::read> base [[texture(0)]],
     texture2d<float,access::read> diSelected [[texture(2)]],texture2d<float,access::read> giSelected [[texture(4)]],
-    texture2d<float,access::read> specular [[texture(5)]],texture2d<float,access::read> ao [[texture(6)]],texture2d<float,access::write> output [[texture(7)]],uint tid [[thread_position_in_grid]]){
+    texture2d<float,access::read> specular [[texture(5)]],texture2d<float,access::read> ao [[texture(6)]],texture2d<float,access::write> output [[texture(7)]],
+    texture2d<half,access::read> giBack [[texture(8)]],uint tid [[thread_position_in_grid]]){
     if(tid>=p.backingWidth*p.backingHeight)return;const uint2 pixel(tid%p.backingWidth,tid/p.backingWidth);float3 color=base.read(pixel).rgb;
     if(all(pixel<uint2(p.width,p.height))){const GPUDISurface s=surfaces[pixel.y*p.width+pixel.x];
         if(s.valid){if(p.flags&REFLECT_COMPOSE_EXCLUDE_EMISSION)color=max(color-unpackEmission3(s.pad[1]),0.0f);
@@ -133,7 +134,8 @@ kernel void REFL_KERNEL(reflection_composite)(constant GPUReflectionComposeParam
             if(p.flags&REFLECT_COMPOSE_GI)color+=giSelected.read(pixel).rgb*diVec(s.albedo)*(1-s.metallic)*envDiffuse/M_PI_F;
 #ifdef PHOSPHOR_REFL_LOBE
             if((p.flags&REFLECT_COMPOSE_GI)&&any(sheenTerm>0))color+=giSelected.read(pixel).rgb*sheenTerm/M_PI_F;
-            if((p.flags&REFLECT_COMPOSE_GI)&&any(thinTerm>0))color+=giSelected.read(pixel).rgb*thinTerm/M_PI_F; // E(-N) ~ E(N) (declared)
+            // F15.1 (ticket 19): E(-N) is the probe-grid lookup of the back normal (REFLECT_COMPOSE_GI_BACK, DDGI); the other GI modes keep the declared E(-N) ~ E(N).
+            if((p.flags&REFLECT_COMPOSE_GI)&&any(thinTerm>0))color+=((p.flags&REFLECT_COMPOSE_GI_BACK)?float3(giBack.read(pixel).rgb):giSelected.read(pixel).rgb)*thinTerm/M_PI_F;
 #endif
             if(p.flags&REFLECT_COMPOSE_SPEC)color+=specular.read(pixel).rgb;
             if(!(p.flags&REFLECT_COMPOSE_GI)){const float3 n=normalize(diVec(s.shadingNormal));

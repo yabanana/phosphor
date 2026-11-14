@@ -194,6 +194,9 @@ namespace phosphor {
 //   --meshlet-triangle-cull on|off  F6.3 option: the mesh shader also drops
 //                      back/front-facing triangles and compacts the rest
 //                      (default off: measured slower on M5 Max)
+//   --thin-gi-back on|off  F15.1 (ticket 19): thin-walled subsurface pixels read the DDGI probe
+//                      irradiance at -N for the transmitted GI term (default on; off = the
+//                      pixel's own GI irradiance at N stands for it: the control)
 //   --meshlet-object off  spike S2: mesh-only pipeline without object stage
 //                      (needs --meshlet-cull off; a measurement variant)
 //   --history-reset-every N  F6.5: invalidate the Hi-Z history every N
@@ -484,6 +487,7 @@ struct LaunchOptions {
     bool         meshletObjectStage = true; // --meshlet-object off: spike S2 mesh-only pipeline
     float        meshletMinPixels   = 0.0f; // --meshlet-min-pixels P (approximate size cull, 0 = off)
     bool         meshletTriangleCull = false; // --meshlet-triangle-cull on
+    bool         thinGiBack = true; // --thin-gi-back on|off (F15.1 ticket 19)
 
     [[nodiscard]] bool benchmark() const { return frames > 0; }
 };

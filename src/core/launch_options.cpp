@@ -1104,6 +1104,15 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
                 error = "--meshlet-triangle-cull: expected on or off, got '" + std::string(*value) + "'";
                 return false;
             }
+        } else if (arg == "--thin-gi-back") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "on") out.thinGiBack = true;
+            else if (*value == "off") out.thinGiBack = false;
+            else {
+                error = "--thin-gi-back: expected on or off, got '" + std::string(*value) + "'";
+                return false;
+            }
         } else if (arg == "--meshlet-object") {
             const auto value = needValue();
             if (!value) return false;

@@ -21,7 +21,7 @@
 using namespace phosphor;
 
 TEST_CASE("F15.3 material scenarios are exactly the nine declared names") {
-    CHECK(MaterialValidation::scenarios().size() == 66);
+    CHECK(MaterialValidation::scenarios().size() == 67);
     for (auto name : {"base-grid-sun", "base-grid-env", "base-grid-env-resolve", "furnace-base", "furnace-resolve",
                       "roughness-extremes", "roughness-extremes-sun", "specular-grid-sun", "specular-grid-env-resolve", "specular-grid-point",
                       "specular-grid-env", "furnace-specular", "clearcoat-grid-sun", "clearcoat-grid-env-resolve",
@@ -38,7 +38,7 @@ TEST_CASE("F15.3 material scenarios are exactly the nine declared names") {
                       "combo-irid-coat-sun", "combo-irid-coat-env", "combo-irid-sheen-sun", "combo-irid-sheen-env",
                       "combo-irid-aniso-sun", "combo-irid-aniso-env", "combo-irid-specular-sun", "combo-irid-specular-env",
                       "combo-thin-coat-sun", "combo-thin-coat-env", "combo-all-lobes-sun", "combo-all-lobes-env",
-                      "furnace-combinations"})
+                      "furnace-combinations", "subsurface-thin-gi-back"})
         CHECK(MaterialValidation::validScenario(name));
     CHECK_FALSE(MaterialValidation::validScenario("unknown"));
     CHECK_THROWS(MaterialValidation{"unknown"});
@@ -75,8 +75,9 @@ TEST_CASE("F15.3 grid spheres carry exact factors and no textures") {
         const auto& s = MaterialValidation::spec(name);
         REQUIRE(f.spheres().size() == s.roughness.size() * s.metallic.size());
         // One mesh, two for the mirrored carrier fixture (tangent handedness -1 and +1).
+        // (F15.1 ticket 19: the GI back-lookup fixture adds a wall and an anchor, two more meshes and instances.)
         CHECK(scene.getMeshCount() == (std::find(s.tangentHandedness.begin(), s.tangentHandedness.end(), 1.0f) !=
-                                               s.tangentHandedness.end() ? 2u : 1u));
+                                               s.tangentHandedness.end() ? 2u : 1u) + (s.giBackWall ? 2u : 0u));
         for (u32 row = 0; row < s.metallic.size(); ++row)
             for (u32 col = 0; col < s.roughness.size(); ++col) {
                 const EntityID e = f.spheres()[row * s.roughness.size() + col];
@@ -95,7 +96,7 @@ TEST_CASE("F15.3 grid spheres carry exact factors and no textures") {
             }
         FrameScene frame;
         extractFrameScene(ecs, scene, frame);
-        CHECK(frame.instances.size() == f.spheres().size());
+        CHECK(frame.instances.size() == f.spheres().size() + (s.giBackWall ? 2u : 0u));
         CHECK(frame.lights.size() == (s.sun ? 1u : 0u) + s.pointLights.size());
         if (s.sun) {
             // Directional light: the engine's toward-sun vector is the negated travel direction.
@@ -196,7 +197,10 @@ TEST_CASE("F15.3 the bench and the runner (tools/f15_check.py) list the same sce
     std::set<std::string> bench;
     // The two clip fixtures of F15.1 ticket 08 belong to tools/f15_clip_check.py, not to the reference runner.
     for (auto name : MaterialValidation::scenarios())
-        if (std::string_view(name) != "specular-grid-edit" && std::string_view(name) != "specular-grid-rough") bench.insert(std::string(name));
+        // F15.1 ticket 19: the GI back-lookup fixture belongs to tools/f15_thin_gi_back_check.py (it needs DDGI, the runner captures with --gi off).
+        if (std::string_view(name) != "specular-grid-edit" && std::string_view(name) != "specular-grid-rough" &&
+            std::string_view(name) != "subsurface-thin-gi-back")
+            bench.insert(std::string(name));
     // F15.3 ticket 13: the transmission scenarios are a separate bench class on the same --material-scenario option.
     for (auto name : TransmissionValidation::scenarios()) bench.insert(std::string(name));
     // F15.3 tickets 14/15: so are the transmissive-shadow scenarios.

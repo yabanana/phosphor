@@ -115,6 +115,11 @@ struct MaterialScenarioSpec {
     };
     std::vector<ComboCell> combo;
     bool                   combedCarriers = false;
+    // F15.1 (ticket 19, tools/f15_thin_gi_back_check.py): a diffuse WALL 0.6 m behind the carriers (albedo `giWallAlbedo`, facing the
+    // camera, 8 m square, lit by the sun of the scenario) and a tiny anchor instance off-screen in front of them, so that the DDGI
+    // volume covers both sides of the thin carriers while only the BACK side sees the lit wall (nothing in front of the quads reflects).
+    bool                   giBackWall = false;
+    float                  giWallAlbedo = 0.0f;
     [[nodiscard]] bool hasComboGrid() const { return !combo.empty(); }
     [[nodiscard]] bool hasVolumetricGrid() const { return !volumetricWeight.empty(); }
     [[nodiscard]] bool hasSubsurfaceGrid() const { return !subsurfaceWeight.empty(); }
@@ -170,6 +175,7 @@ private:
     std::vector<EntityID> spheres_;
     EntityID sun_ = INVALID_ENTITY;
     std::vector<EntityID> pointLights_;
+    std::vector<EntityID> extras_; // giBackWall: the wall and the anchor
 };
 
 } // namespace phosphor

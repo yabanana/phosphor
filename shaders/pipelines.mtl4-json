@@ -2605,6 +2605,16 @@
         "label": "2B8816C9B7E793DFC837BC3408CB4518B824DEE1583DA325B21BA506C81DEC76",
         "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
         "name": "material_lighting_guides"
+      },
+      {
+        "label": "E2F9F3B025FB7214CB76ABA27137CE32C964582DF9D7F5F795AF5BA2CA10963E",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "ddgi_resolve_back"
+      },
+      {
+        "label": "BCA7C6849241D31C10DA4D25326553437CA247F235723119B9DCDB006782F82C",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "forward_fs"
       }
     ],
     "specialized_function_descriptors": [
@@ -19319,6 +19329,52 @@
         ],
         "function_descriptor": "fnd:A4783BEE9AB09FA8F3B63A19373E27D75FE39BF073EC2AC1F9CEBBD2A7D65BE2",
         "label": "B2E16C452CF7546E6473EB228CCAA65BF2C91660EE3D59006C64B41ED07F8859"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 0
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 1
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 1
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": true
+            },
+            "value_type": "ConstantBool"
+          },
+          {
+            "id": {
+              "data": 2
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 0
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 128
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:BCA7C6849241D31C10DA4D25326553437CA247F235723119B9DCDB006782F82C",
+        "label": "41ABAE697086EDBCE1FDBA6322580F247E7EACFD1C431B98710788FCF68C05F7"
       }
     ]
   },
@@ -25063,6 +25119,14 @@
       },
       {
         "compute_function_descriptor": "fnd:1B2A25ADBE91A81D78AB2720CDDA2F0FD131DB20DBB56BD81C2AB12CB38033F4",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:E2F9F3B025FB7214CB76ABA27137CE32C964582DF9D7F5F795AF5BA2CA10963E",
         "required_threads_per_threadgroup": [
           0,
           0,
@@ -31801,6 +31865,16 @@
         "fragment_function_descriptor": "fnd:116FEF2EF4088C2CFCE0983765F82A7D581232839AF20C296FE7631807405C1F",
         "support_indirect_command_buffers": "Enabled",
         "vertex_function_descriptor": "fnd:6C0ABC6D1C65B09BBF0042B49854994C93810703B3B70D728BDF735AF89B0A4B"
+      },
+      {
+        "color_attachments": [
+          {
+            "pixel_format": "BGRA8Unorm_sRGB"
+          }
+        ],
+        "fragment_function_descriptor": "fnd:41ABAE697086EDBCE1FDBA6322580F247E7EACFD1C431B98710788FCF68C05F7",
+        "support_indirect_command_buffers": "Enabled",
+        "vertex_function_descriptor": "fnd:8997F5ED2B3E64F0F4538A60A87322BB77B59CF9938F86E872C77851602E35AA"
       }
     ],
     "tile_render_pipeline_descriptors": [

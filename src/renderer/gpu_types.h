@@ -1279,6 +1279,8 @@ PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_AO = 16u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_EXCLUDE_EMISSION = 32u;
 // F15.1 (ticket 08): the lobe guide (buffer 3 of reflection_composite_lobe) is valid this frame.
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_LOBE_GUIDE_VALID = 64u;
+// F15.1 (ticket 19): texture 8 of the composite holds E(-N) for the thin subsurface pixels (DDGI); without it the pixel's own GI stands for it.
+PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_GI_BACK = 128u;
 struct GPUReflectionReduceParams {u32 width,height,samples,stridePixels;};
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionReduceParams)==16,"GPUReflectionReduceParams layout");
 struct GPUReflectionComposeParams {u32 width,height,backingWidth,backingHeight;u32 flags,pad[3];float environment[3];u32 pad2;};

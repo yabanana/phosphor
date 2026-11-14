@@ -20,6 +20,8 @@ public:
     void addToGraph(rg::RenderGraph&);
     void bindFrame(MetalGraphExecutor&);
     [[nodiscard]] rg::TextureRef irradiance() const;
+    /// F15.1 (ticket 19): E(-N) of the thin-walled subsurface pixels (DDGI with a valid lobe guide), else an invalid ref.
+    [[nodiscard]] rg::TextureRef irradianceBack() const;
     [[nodiscard]] rg::TextureRef referenceDiffuse() const;
     [[nodiscard]] u64 version() const;
     [[nodiscard]] bool check(u32 slot) const;
