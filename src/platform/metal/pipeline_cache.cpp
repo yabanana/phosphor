@@ -144,6 +144,15 @@ void setColorOutputs(MTL4::RenderPipelineColorAttachmentDescriptorArray* attachm
             color->setDestinationRGBBlendFactor(MTL::BlendFactorOneMinusSourceAlpha);
             color->setSourceAlphaBlendFactor(MTL::BlendFactorOne);
             color->setDestinationAlphaBlendFactor(MTL::BlendFactorOneMinusSourceAlpha);
+        } else if (out.blend == pipe::ColorOutput::Blend::TransmittanceMap) {
+            // RGB: the sum of the per-surface ln transmittance; alpha: the nearest (largest reverse-Z) transmissive depth.
+            color->setBlendingState(MTL4::BlendStateEnabled);
+            color->setRgbBlendOperation(MTL::BlendOperationAdd);
+            color->setAlphaBlendOperation(MTL::BlendOperationMax);
+            color->setSourceRGBBlendFactor(MTL::BlendFactorOne);
+            color->setDestinationRGBBlendFactor(MTL::BlendFactorOne);
+            color->setSourceAlphaBlendFactor(MTL::BlendFactorOne);
+            color->setDestinationAlphaBlendFactor(MTL::BlendFactorOne);
         }
     }
 }

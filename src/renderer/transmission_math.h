@@ -158,4 +158,31 @@ PHOSPHOR_LOBE_FN float transmissionShadowSigma(float color, float distance) {
     return -PHOSPHOR_LOBE_LOG(c) / distance;
 }
 
+/// F15.1 (ticket 15): the ln RGB transmittance of ONE crossed surface, the single source of the ray-traced any-hit
+/// (shaders/rt_intersections.metal) and of the CSM transmittance pass (shaders/shadows.metal): per surface ln(1 - F) at the straight-ray
+/// `cosine` (|cos| with the geometric normal; sign = which side the ray meets), the entry factor `factor` (transmission x (1 - metallic), already
+/// saturated) x tint ONCE per caster (an entry surface of a solid, or the only surface of a thin-walled material: `entry || !solid`), and for a
+/// solid the signed medium term +sigma_t d at an entry, -sigma_t d at an exit with `distance` the distance along the ray from the common origin
+/// (the sum over a closed volume is -sigma_t (t_exit - t_entry)).
+struct TransmissionShadowLn { float r, g, b; };
+PHOSPHOR_LOBE_FN TransmissionShadowLn transmissionShadowSurfaceLn(float cosine, bool entry, bool solid, float ior, float factor,
+                                                                  float tintR, float tintG, float tintB,
+                                                                  float attenuationR, float attenuationG, float attenuationB,
+                                                                  float attenuationDistance, float distance) {
+    float ln0 = transmissionShadowLnPass(cosine, ior), ln1 = ln0, ln2 = ln0;
+    if (entry || !solid) {
+        ln0 += transmissionShadowLn(factor * tintR);
+        ln1 += transmissionShadowLn(factor * tintG);
+        ln2 += transmissionShadowLn(factor * tintB);
+    }
+    if (solid) {
+        const float sign = entry ? 1.0f : -1.0f;
+        ln0 += sign * transmissionShadowSigma(attenuationR, attenuationDistance) * distance;
+        ln1 += sign * transmissionShadowSigma(attenuationG, attenuationDistance) * distance;
+        ln2 += sign * transmissionShadowSigma(attenuationB, attenuationDistance) * distance;
+    }
+    TransmissionShadowLn r; r.r = ln0; r.g = ln1; r.b = ln2;
+    return r;
+}
+
 } // namespace phosphor

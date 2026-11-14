@@ -1513,3 +1513,16 @@ TEST_CASE("F15.1 ticket 14 transmittance duplicate filter controls need RT and a
     CHECK_FALSE(parse({"--debug-transmittance-inject"},options,error));
     CHECK_FALSE(parse({"--rt","on","--debug-transmittance-dedup","maybe"},options,error));
 }
+
+TEST_CASE("F15.1 ticket 15 --debug-transmittance-map is on by default and needs --shadows csm") {
+    LaunchOptions options; std::string error;
+    CHECK(options.debugTransmittanceMap);
+    REQUIRE(parse({"--render-path","visibility","--shadows","csm","--debug-transmittance-map","off"},options,error));
+    CHECK_FALSE(options.debugTransmittanceMap);
+    options = LaunchOptions{};
+    REQUIRE(parse({"--render-path","visibility","--shadows","csm","--debug-transmittance-map","on"},options,error));
+    CHECK(options.debugTransmittanceMap);
+    options = LaunchOptions{};
+    CHECK_FALSE(parse({"--debug-transmittance-map","off"},options,error));
+    CHECK_FALSE(parse({"--render-path","visibility","--shadows","csm","--debug-transmittance-map","maybe"},options,error));
+}

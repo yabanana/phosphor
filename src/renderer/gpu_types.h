@@ -693,6 +693,11 @@ PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_RT = 1u << 1;
 PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_HISTORY_VALID = 1u << 2;
 PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_CONTACT = 1u << 3;
 PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_LIGHT_VALID = 1u << 4;
+// F15.1 (ticket 15): the scene has transmissive casters and the CSM path keeps them out of the opaque depth maps: the cascades carry a
+// single-layer transmittance map (nearest transmissive depth + summed ln RGB transmittance) the receiver multiplies in.
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_TRANSMITTANCE_MAP = 1u << 5;
+// The receiver ignores the map (negative control `--debug-transmittance-map off`): transmissive casters then cast nothing.
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_TRANSMITTANCE_IGNORED = 1u << 6;
 PHOSPHOR_GPU_CONSTANT u32 SHADOW_CORRUPT_NONE = 0u;
 PHOSPHOR_GPU_CONSTANT u32 SHADOW_CORRUPT_BIAS = 1u;
 PHOSPHOR_GPU_CONSTANT u32 SHADOW_CORRUPT_CASTER = 2u;

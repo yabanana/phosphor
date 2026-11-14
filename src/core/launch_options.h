@@ -436,6 +436,9 @@ struct LaunchOptions {
     // --debug-transmittance-inject: every transmissive triangle invokes the accumulation twice (a deliberate duplicate: with the filter on the
     // image is unchanged, with --debug-transmittance-dedup off every surface factor is applied twice).
     bool debugTransmittanceInject=false;
+    // F15.1 (ticket 15): --debug-transmittance-map on|off (--shadows csm).  off: the receiver ignores the CSM transmittance map, so transmissive
+    // casters cast no shadow at all (negative control of the map).
+    bool debugTransmittanceMap=true;
     std::string exportReference, captureLinear, captureLinearSequence, lightingScene,reflectionScene,materialScene;
     // F15.3 (ticket 13): --capture-linear-accumulate N averages the last N frames (ending at --capture-linear-frame) of the
     // linear signal on the CPU (test infrastructure for the one-stochastic-sample-per-pixel transport; 0 = the single frame).

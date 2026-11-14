@@ -41,26 +41,21 @@ inline void rtAccumulateTransmittance(uint primitive, uint slot, float2 bary, fl
     float ior = kShadowDefaultIor;
     if ((features & MATERIAL_FEATURE_SPECULAR_IOR) != 0u)
         ior = reinterpret_cast<const device GPUMaterialExt0*>(extensions + m.extensionIndex)->ior;
-    float ln0 = transmissionShadowLnPass(cosine, ior), ln1 = ln0, ln2 = ln0;
+    float factor = 1.0f;
+    float3 tint(1.0f);
     if (entry || !solid) {
-        float factor = e1.transmissionFactor;
+        factor = e1.transmissionFactor;
         if (e1.transmissionTex != INVALID_TEXTURE_INDEX) factor *= float(half(textures[e1.transmissionTex].tex.sample(kRtAlphaSampler, uv, level(0)).r));
         float metallic = m.metallic;
         if (m.metallicRoughnessTex != INVALID_TEXTURE_INDEX) metallic *= float(half(textures[m.metallicRoughnessTex].tex.sample(kRtAlphaSampler, uv, level(0)).b));
-        float3 tint(m.baseColor[0], m.baseColor[1], m.baseColor[2]);
+        tint = float3(m.baseColor[0], m.baseColor[1], m.baseColor[2]);
         if (m.baseColorTex != INVALID_TEXTURE_INDEX) tint *= float3(half3(textures[m.baseColorTex].tex.sample(kRtAlphaSampler, uv, level(0)).rgb));
         factor = saturate(factor) * (1.0f - saturate(metallic));
-        ln0 += transmissionShadowLn(factor * tint.x);
-        ln1 += transmissionShadowLn(factor * tint.y);
-        ln2 += transmissionShadowLn(factor * tint.z);
     }
-    if (solid) {
-        // Entry adds +sigma_t t, exit -sigma_t t: the sum is -sigma_t (t_exit - t_entry) over the medium's crossed length.
-        const float sign = entry ? 1.0f : -1.0f;
-        ln0 += sign * transmissionShadowSigma(e1.attenuationColor[0], e1.attenuationDistance) * distance;
-        ln1 += sign * transmissionShadowSigma(e1.attenuationColor[1], e1.attenuationDistance) * distance;
-        ln2 += sign * transmissionShadowSigma(e1.attenuationColor[2], e1.attenuationDistance) * distance;
-    }
+    // Shared with the CSM transmittance pass (F15.1 ticket 15): the entry factor, the Fresnel pass and the signed medium term.
+    const TransmissionShadowLn ln = transmissionShadowSurfaceLn(cosine, entry, solid, ior, factor, tint.x, tint.y, tint.z,
+        e1.attenuationColor[0], e1.attenuationColor[1], e1.attenuationColor[2], e1.attenuationDistance, distance);
+    const float ln0 = ln.r, ln1 = ln.g, ln2 = ln.b;
     payload.lnTransmittance[0] += ln0; payload.lnTransmittance[1] += ln1; payload.lnTransmittance[2] += ln2;
 }
 
