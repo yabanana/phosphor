@@ -45,7 +45,13 @@ Usage (numpy is needed only by the adaptive comparison):
   uv run --offline --no-project --python 3.13 --with numpy python -I tools/f15_clip_check.py --run --out build/f15-clip
   ... --evaluate --out build/f15-clip      (existing captures, no GPU process)
   ... --plan --out build/f15-clip          (commands only)
-Exit codes: 0 every expectation met, 1 an expectation failed, 2 usage, 3 GPU busy, 4 capture failed.
+Converged control (ticket 13): the transmission cases are judged against the per-frame MEAN of N independent 8 spp runs that differ only
+in --lighting-seed (seeds 1000 + k, folded into running sums and deleted: --group control [--control-seeds N], resumable, serial GPU jobs).
+The seeds alternate between two halves A and B; the control self-test judges half A against half B with the clip metrics on the gated glass
+ROIs and requires p95, max and flicker to be at most CONTROL_FRACTION (1/3, declared before any measurement) of the gates.  When it fails
+the runner REFUSES to judge: the transmission entries are reported as not judged, with their numbers as information only, and the exit
+code is 5 ("control not converged").  The old single 8 spp control (transmission-rt8) stays in the report as information.
+Exit codes: 0 every expectation met, 1 an expectation failed, 2 usage, 3 GPU busy, 4 capture failed, 5 control not converged.
 """
 from __future__ import annotations
 
@@ -69,7 +75,7 @@ from run_checked import run_checked  # noqa: E402
 from temporal_light_metrics import analyse_clips, analyse_paths, clip_files, read_pfm  # noqa: E402
 
 REPO = HERE.parent
-EXIT_OK, EXIT_FAILED, EXIT_USAGE, EXIT_BUSY, EXIT_CAPTURE = 0, 1, 2, 3, 4
+EXIT_OK, EXIT_FAILED, EXIT_USAGE, EXIT_BUSY, EXIT_CAPTURE, EXIT_NOT_CONVERGED = 0, 1, 2, 3, 4, 5
 
 # --- declared geometry of the grid fixtures (src/testbench/material_validation.cpp) -------------------------------------
 SPACING, RADIUS, CAMERA_DISTANCE, CENTRE_Y, FOV_DEGREES = 1.0, 0.4, 5.5, 2.0, 60.0
@@ -227,8 +233,90 @@ def transmission_roi_config(width=640, height=360, diagnostic=False):
     return config
 
 
+# --- converged control (ticket 13) --------------------------------------------------------------------------------------------
+CONTROL_FRACTION = 1.0 / 3.0  # the half-vs-half error of the control must be at most this fraction of each gate (declared before measuring)
+CONTROL_SEED_BASE, CONTROL_DEFAULT_SEEDS = 1000, 16
+CONTROL_GATE_FIELDS = ("linear_rmse_p95_max", "linear_rmse_max", "residual_flicker_mean_max")
+
+
+def read_pfm_raw(path):
+    """(header bytes, float32 array) of a PFM exactly as stored (rows bottom-up); the mean of such files is a PFM of the same layout."""
+    import numpy as np
+    data = pathlib.Path(path).read_bytes()
+    position = 0
+    for _ in range(3):  # PF / width height / scale
+        position = data.index(b"\n", position) + 1
+    return data[:position], np.frombuffer(data, dtype="<f4", offset=position).copy()
+
+
+def control_seed_ids(count):
+    return [CONTROL_SEED_BASE + k for k in range(count)]
+
+
+def fold_seed(out, seed, index):
+    """Add the frames of one seed's run to the running sum of its half (even index: A, odd: B), then delete the frames."""
+    import numpy as np
+    folder = out / f"control-seed-{seed}" / "linear"
+    half = "AB"[index % 2]
+    sums = out / "control" / f"sum-{half}"
+    sums.mkdir(parents=True, exist_ok=True)
+    frames = sorted(folder.glob("frame-*.pfm"))
+    if len(frames) != CLIP_FRAMES:
+        raise CaptureFailed(f"control seed {seed}: {len(frames)} frames, expected {CLIP_FRAMES}")
+    for frame in frames:
+        _, values = read_pfm_raw(frame)
+        target = sums / (frame.stem + ".npy")
+        total = np.load(target) + values.astype(np.float64) if target.exists() else values.astype(np.float64)
+        np.save(target, total)
+    for frame in frames:
+        frame.unlink()
+    state = control_state(out)
+    state["seeds"].append(seed)
+    state[half] += 1
+    (out / "control" / "state.json").write_text(json.dumps(state))
+
+
+def control_state(out):
+    path = out / "control" / "state.json"
+    return json.loads(path.read_text()) if path.exists() else {"seeds": [], "A": 0, "B": 0}
+
+
+def write_control(out):
+    """Finalize the means: control-A, control-B (half means) and control (all seeds) as PFM clips; returns the state."""
+    import numpy as np
+    state = control_state(out)
+    if state["A"] < 1 or state["A"] != state["B"]:
+        raise CaptureFailed("the converged control needs the same number (>= 1) of seeds in both halves")
+    header = read_pfm_raw(next((out / "transmission-rt8" / "linear").glob("frame-*.pfm")))[0]
+    for name in ("control-A", "control-B", "control"):
+        (out / name / "linear").mkdir(parents=True, exist_ok=True)
+    for sum_a in sorted((out / "control" / "sum-A").glob("frame-*.npy")):
+        a, b = np.load(sum_a), np.load(out / "control" / "sum-B" / sum_a.name)
+        for name, values in (("control-A", a / state["A"]), ("control-B", b / state["B"]), ("control", (a + b) / (state["A"] + state["B"]))):
+            (out / name / "linear" / (sum_a.stem + ".pfm")).write_bytes(header + values.astype("<f4").tobytes())
+    return state
+
+
+def scaled_config(config, fraction):
+    scaled = json.loads(json.dumps(config))
+    for roi in scaled["rois"]:
+        for field in CONTROL_GATE_FIELDS:
+            roi["thresholds"][field] = roi["thresholds"][field] * fraction
+    enforce_gates(scaled)  # only ever tightens
+    return scaled
+
+
+def control_self_test(out):
+    """Half A against half B on the gated glass ROIs with every gate scaled by CONTROL_FRACTION."""
+    state = write_control(out)
+    config = scaled_config(transmission_roi_config(), CONTROL_FRACTION)
+    rows = metrics_row(analyse_paths(out / "control-B" / "linear", out / "control-A" / "linear", config))
+    return {"seeds": len(state["seeds"]), "seeds_per_half": state["A"], "fraction": CONTROL_FRACTION, "rois": rows,
+            "converged": all(row["passed"] for row in rows.values())}
+
+
 # --- cases ---------------------------------------------------------------------------------------------------------------
-def case_table(out, binary):
+def case_table(out, binary, control_seeds=CONTROL_DEFAULT_SEEDS):
     def clip(name, frames, reflections_denoise, spp, extra=(), env=None, scenario="specular-grid-edit", seed=1):
         folder = out / name
         command = [str(binary), "--scene", "procedural", "--bench", "2", "--material-scenario", scenario,
@@ -261,8 +349,13 @@ def case_table(out, binary):
 
     toggle = ["--material-toggle-every", str(TOGGLE_EVERY)]
     coat = "clearcoat-grid-env"
-    glass, motion = TRANSMISSION_SCENARIO, ["--transmission-motion"]
-    return [clip("transmission-raw", CLIP_FRAMES, "off", 1, motion, scenario=glass),
+    # --pipeline-sync (as the adaptive cases): every pipeline is final before the first frame.  Without it a loaded machine renders the early frames of
+    # a run with flexible fallback pipelines (seen: 212 fallback draws in one control seed against 13, an 8 % brightness difference over ~110 frames
+    # between two otherwise identical runs), which the metrics read as noise or bias.  The rendering itself is unchanged.
+    glass, motion = TRANSMISSION_SCENARIO, ["--transmission-motion", "--pipeline-sync"]
+    seeds = [dict(clip(f"control-seed-{seed}", CLIP_FRAMES, "off", 8, motion, scenario=glass, seed=seed), kind="control-seed", seed=seed, index=k)
+             for k, seed in enumerate(control_seed_ids(control_seeds))]
+    return seeds + [clip("transmission-raw", CLIP_FRAMES, "off", 1, motion, scenario=glass),
             clip("transmission-custom", CLIP_FRAMES, "custom", 1, motion, scenario=glass),
             clip("transmission-rt8", CLIP_FRAMES, "off", 8, motion, scenario=glass),
             clip("transmission-rt8-seed2", CLIP_FRAMES, "off", 8, motion, scenario=glass, seed=2),
@@ -306,6 +399,7 @@ def run_cases(cases, timeout):
         folder = pathlib.Path(case["folder"])
         if folder.exists() and any(folder.iterdir()):
             raise CaptureFailed(f"{folder} is not empty: choose a new --out")
+    out = pathlib.Path(cases[0]["folder"]).parent if cases else None
     with gpu_lock(pathlib.Path("/tmp/phosphor-gpu-verification.lock")):
         for position, case in enumerate(cases):
             busy = running_gpu_processes()
@@ -316,6 +410,8 @@ def run_cases(cases, timeout):
             status = run_checked(case["command"], folder / "log.txt", timeout=timeout, env=dict(env, **case["env"]))
             if not status["passed"]:
                 raise CaptureFailed(f"{case['name']}: capture failed: {status['failures']}")
+            if case["kind"] == "control-seed":
+                fold_seed(out, case["seed"], case["index"])
             if position + 1 < len(cases):
                 time.sleep(2)  # serial and quiet between GPU jobs
 
@@ -330,7 +426,7 @@ def functional(case):
         errors.append("EXIT marker is not 0")
     if GPU_ERROR.search(log):
         errors.append("GPU/API/shader validation failure in the log")
-    if case["kind"] == "clip":
+    if case["kind"] in ("clip", "control-seed"):
         lines = list(CHECK_LINE.finditer(log))
         if not lines or any(m[2] != "PASS" for m in lines):
             errors.append("LIGHTING readback lines missing or failing")
@@ -445,27 +541,40 @@ def evaluate_coat(out):
 
 def evaluate_transmission(out):
     config, diagnostic = transmission_roi_config(), transmission_roi_config(diagnostic=True)
+    converged = (out / "control" / "state.json").exists()
+    selftest = control_self_test(out) if converged else None
+    judged = bool(selftest and selftest["converged"])
+    reference = out / ("control" if converged else "transmission-rt8") / "linear"
     result = {}
+    if selftest:
+        result["control-selftest"] = {"role": "self-test", "passed": judged, "metrics": selftest["rois"], "seeds": selftest["seeds"],
+                                      "expectation": (f"half A against half B of the {selftest['seeds']}-seed control: p95, max and flicker at most "
+                                                      f"{selftest['fraction']:.3f} of the gates on every gated glass ROI; else the runner refuses to judge")}
     for name in ("transmission-raw", "transmission-custom", "negative-refract-axis"):
         entry = {"role": "control" if name == "transmission-raw" else "gate",
-                 "metrics": metrics_row(analyse_paths(out / "transmission-rt8" / "linear", out / name / "linear", config)),
-                 "diagnostic_rois": metrics_row(analyse_paths(out / "transmission-rt8" / "linear", out / name / "linear", diagnostic))}
+                 "metrics": metrics_row(analyse_paths(reference, out / name / "linear", config)),
+                 "diagnostic_rois": metrics_row(analyse_paths(reference, out / name / "linear", diagnostic))}
+        if converged:  # information: the old single 8 spp control
+            entry["single_8spp_control"] = metrics_row(analyse_paths(out / "transmission-rt8" / "linear", out / name / "linear", config))
         result[name] = entry
-    # Control validity (reported, not gating): an independent 8 spp render (another seed) judged against the control like a candidate.
-    # The F13 gates are meant for a control whose own noise is below them; this row measures that floor on the glass ROIs.
+    # The noise floor of the OLD single 8 spp control (information): a second seed against the first.
     result["transmission-rt8-seed2"] = {
         "role": "diagnostic", "passed": True,
         "metrics": metrics_row(analyse_paths(out / "transmission-rt8" / "linear", out / "transmission-rt8-seed2" / "linear", config)),
-        "expectation": "diagnostic, not gating: the noise floor of the 8 spp control itself (a second seed against the first)"}
+        "expectation": "diagnostic, not gating: the noise floor of the single 8 spp control (a second seed against the first)"}
     result["transmission-raw"]["passed"] = True
     result["transmission-raw"]["expectation"] = "control: reported, does not gate"
     result["transmission-custom"]["passed"] = all(v["passed"] for v in result["transmission-custom"]["metrics"].values())
     result["transmission-custom"]["expectation"] = ("every check passes on the glass ROIs (smooth spheres of three iors, roughness 0.1 and 0.3) against the "
-                                                    "8 spp control under the camera orbit and the moving panel; roughness 0.6 and the grid are diagnostic")
+                                                    "converged control under the camera orbit and the moving panel; roughness 0.6 and the grid are diagnostic")
     negative = result["negative-refract-axis"]
     negative["passed"] = any(not v["passed"] for v in negative["metrics"].values())
     negative["expectation"] = "the clip gates FAIL on the glass ROIs (a refract-axis lobe handled with the reflect axis), while transmission-custom passes"
     negative["discriminates_against_custom"] = negative["passed"] and result["transmission-custom"]["passed"]
+    if not judged:
+        for name in ("transmission-custom", "negative-refract-axis"):
+            result[name]["passed"] = False
+            result[name]["not_judged"] = ("control not converged" if converged else "no converged control: run --group control") + " (numbers are information only)"
     return result
 
 
@@ -509,6 +618,10 @@ def markdown(clips, adaptive, status):
     lines = [f"# F15.1 ticket 08 clip checks: {status}", ""]
     for name, entry in clips.items():
         lines.append(f"## {name}: {'PASS' if entry['passed'] else 'FAIL'}  ({entry.get('expectation', '')})")
+        if "not_judged" in entry:
+            lines.append(f"- NOT JUDGED: {entry['not_judged']}")
+        for roi, m in entry.get("single_8spp_control", {}).items():
+            lines.append(f"- (information, single 8 spp control) {roi}: p95 {m['linear_rmse_p95']:.4f}  max {m['linear_rmse_max']:.4f}  flicker {m['residual_flicker_mean']:.4f}")
         for roi, m in entry.get("metrics", {}).items():
             lines.append(f"- {roi}: p95 {m['linear_rmse_p95']:.4f}  max {m['linear_rmse_max']:.4f}  flicker {m['residual_flicker_mean']:.4f}  "
                          f"ghost {m['error_change_ghost_fraction']:.4f}  recovery {m['recovery_frames']}  {'ok' if m['passed'] else 'checks ' + str({k: v for k, v in m['checks'].items() if not v})}")
@@ -535,18 +648,30 @@ def build_parser():
     mode.add_argument("--evaluate", action="store_true", help="evaluate existing captures (no GPU process)")
     mode.add_argument("--plan", action="store_true", help="write the commands only")
     parser.add_argument("--timeout", type=float, default=600)
-    parser.add_argument("--group", choices=("all", "coat", "transmission"), default="all", help="coat / transmission: only the ticket 09 clearcoat or ticket 13 transmission cases")
+    parser.add_argument("--group", choices=("all", "coat", "transmission", "control"), default="all", help="coat / transmission: only the ticket 09 clearcoat or ticket 13 transmission cases; control: only the converged-control seeds (resumable, then the self-test)")
+    parser.add_argument("--control-seeds", type=int, default=CONTROL_DEFAULT_SEEDS, help="N independent 8 spp runs of the converged control (even)")
+    parser.add_argument("--only", default="", help="comma-separated case names to (re)capture within the group (the others must already exist for --run evaluation)")
     return parser
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
     out, binary = args.out.resolve(), args.binary.resolve()
-    cases = case_table(out, binary)
+    if args.control_seeds < 2 or args.control_seeds % 2:
+        print("--control-seeds must be even and >= 2", file=sys.stderr)
+        return EXIT_USAGE
+    cases = case_table(out, binary, args.control_seeds)
+    done = set(control_state(out)["seeds"])
     if args.group == "coat":
         cases = [c for c in cases if c["name"].startswith("coat-")]
     elif args.group == "transmission":
         cases = [c for c in cases if c["name"].startswith("transmission-") or c["name"] == "negative-refract-axis"]
+    elif args.group == "control":
+        cases = [c for c in cases if c["kind"] == "control-seed" and c["seed"] not in done]
+    else:
+        cases = [c for c in cases if c["kind"] != "control-seed"]
+    if args.only:
+        cases = [c for c in cases if c["name"] in args.only.split(",")]
     out.mkdir(parents=True, exist_ok=True)
     manifest = {"schema": 1, "thresholds": THRESHOLDS, "roi_scale": ROI_SCALE, "clip_frames": CLIP_FRAMES, "edit_frames": EDIT_FRAMES,
                 "edit_events": EDIT_EVENTS, "resolution": RESOLUTION, "adaptive_resolution": ADAPT_RESOLUTION,
@@ -565,7 +690,17 @@ def main(argv=None):
             if not binary.is_file():
                 print("--run requires an existing compiled renderer; this runner never builds", file=sys.stderr)
                 return EXIT_USAGE
+            if args.group == "control":  # leftovers of an interrupted seed are not folded: start it afresh
+                import shutil
+                for case in cases:
+                    shutil.rmtree(case["folder"], ignore_errors=True)
             run_cases(cases, args.timeout)
+        if args.group == "control":
+            test = control_self_test(out)
+            print(json.dumps(test, indent=1))
+            (out / "control" / "selftest.json").write_text(json.dumps(test, indent=2) + "\n")
+            print("control converged" if test["converged"] else "control NOT converged")
+            return EXIT_OK if test["converged"] else EXIT_NOT_CONVERGED
         errors = {c["name"]: functional(c) for c in cases}
         clips = (evaluate_coat(out) if args.group == "coat" else evaluate_transmission(out) if args.group == "transmission" else
                  {**evaluate_clips(out), **evaluate_coat(out), **evaluate_transmission(out)})
@@ -583,12 +718,14 @@ def main(argv=None):
     except CaptureFailed as error:
         print(str(error), file=sys.stderr)
         return EXIT_CAPTURE
-    status = "ALL EXPECTATIONS MET" if ok else "EXPECTATION FAILED"
+    refused = any("not_judged" in v for v in clips.values())
+    status = "CONTROL NOT CONVERGED: NOT JUDGED" if refused else "ALL EXPECTATIONS MET" if ok else "EXPECTATION FAILED"
     (out / "results.json").write_text(json.dumps({"status": status, "entries": entries, "clips": clips, "adaptive": adaptive}, indent=2) + "\n")
     (out / "summary.md").write_text(markdown(clips, adaptive, status))
     print(markdown(clips, adaptive, status))
-    print(f"{status} (exit {EXIT_OK if ok else EXIT_FAILED})")
-    return EXIT_OK if ok else EXIT_FAILED
+    code = EXIT_NOT_CONVERGED if refused else EXIT_OK if ok else EXIT_FAILED
+    print(f"{status} (exit {code})")
+    return code
 
 
 if __name__ == "__main__":
