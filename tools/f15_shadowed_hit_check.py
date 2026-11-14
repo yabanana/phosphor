@@ -10,6 +10,14 @@ region of the wall seen through the glass / the same wall region seen directly, 
   shadowed ratio in [0.90, 1.10]   lit ratio in [0.90, 1.10]
 Negative control (`--control-binary`, a build WITHOUT the fix) must fail the shadowed gate (ratio < 0.5) and keep the lit gate.
 
+DDGI variant (`--gi ddgi`, residue found in F15, scene scaled by 8 so the probe grid resolves it): with GI on the atlas answers the indirect light,
+and glass is a white diffuse surface of the ATLAS (declared: secondary_gi_and_probe_hits_ignore_transmission).  A single-sided pane's back face
+used to read as the inside of a solid: the probes in the gap between the pane and the wall went inactive and every lookup behind the glass found
+no probe (0).  The wall seen through the glass is lit by the atlas like the wall seen directly, but the region behind a pane also receives the
+bounce of that white pane, so equality is not the criterion; the gate is that it is NOT darker than the directly seen wall and not wildly brighter:
+  shadowed ratio in [0.90, 2.0]   lit ratio in [0.90, 1.10]
+Negative control (a build without the probe-classification fix) must fail the shadowed gate (ratio < 0.5).
+
 Exit codes: 0 gates hold (and the control fails as it must), 1 a gate failed, 2 usage, 3 the control did not fail (non-discriminating),
 4 GPU busy, 5 internal error, 6 capture failed.
 """
@@ -83,13 +91,15 @@ def region_pixels(rect, centre, distance):
     return int(math.ceil(x0)), int(math.ceil(y0)), int(math.floor(x1)), int(math.floor(y1))
 
 
-def write_scene(folder):
-    """glTF with four quads (wall, panel, two glass panes); returns the .gltf path."""
+def write_scene(folder, scale=1.0):
+    """glTF with four quads (wall, panel, two glass panes), every coordinate times `scale` (the rig frames by bounds: the image is
+    scale invariant); returns the .gltf path."""
     folder.mkdir(parents=True, exist_ok=True)
     quads = [(WALL, 0), (PANEL, 1), (PANE_SHADOW, 2), (PANE_LIT, 2)]
     positions, indices, nodes, meshes = [], [], [], []
     blob = bytearray()
     for k, ((x0, y0, x1, y1, z), material) in enumerate(quads):
+        x0, y0, x1, y1, z = (v * scale for v in (x0, y0, x1, y1, z))
         corners = [(x0, y0, z), (x1, y0, z), (x1, y1, z), (x0, y1, z)]
         base = len(blob)
         for c in corners:
@@ -179,12 +189,14 @@ def region_mean(image, box):
     return total / max(count, 1)
 
 
-def capture(binary, scene, folder):
+def capture(binary, scene, folder, flags=None):
     """One serial capture under the runner's GPU guard; returns the PNG path."""
     corpus.MODELS["fixture"] = {"tier": "A", "view": (0, 0), "shows": "shadowed hit seen through glass"}
     corpus.gltf_path = lambda corpus_dir, name: scene
     folder.mkdir(parents=True, exist_ok=True)
     command = corpus.capture_command(binary, None, "fixture", folder)
+    for flag, value in (flags or {}).items():
+        command[command.index(flag) + 1] = value
     deadline = time.monotonic() + 3600
     while True:
         try:
@@ -216,24 +228,40 @@ def measure(png):
             "lit_ratio": means["lit_glass"] / max(means["lit_direct"], 1e-6)}
 
 
+DDGI_SCALE = 8.0
+DDGI_GATE = {"shadowed_ratio": (0.90, 2.0), "lit_ratio": (0.90, 1.10)}
+MODES = {"off": {"scale": 1.0, "flags": {}, "gate": {"shadowed_ratio": GATE, "lit_ratio": GATE}},
+         "ddgi": {"scale": DDGI_SCALE, "flags": {"--gi": "ddgi"}, "gate": DDGI_GATE}}
+
+
+def run_mode(name, args):
+    mode = MODES[name]
+    folder = args.out / name
+    scene = write_scene(folder / "scene", mode["scale"])
+    result = {"fixture": str(scene), "gate": mode["gate"]}
+    result["fixed"] = measure(capture(args.binary.resolve(), scene, folder / "fixed", mode["flags"]))
+    ok = all(mode["gate"][k][0] <= result["fixed"][k] <= mode["gate"][k][1] for k in mode["gate"])
+    result["gates_hold"] = ok
+    control_failed = None
+    if args.control_binary:
+        result["control"] = measure(capture(args.control_binary.resolve(), scene, folder / "control", mode["flags"]))
+        lit = mode["gate"]["lit_ratio"]
+        control_failed = result["control"]["shadowed_ratio"] < CONTROL_MAX and lit[0] <= result["control"]["lit_ratio"] <= lit[1]
+        result["control_fails_as_required"] = control_failed
+    return ok, control_failed, result
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--binary", type=pathlib.Path, required=True)
-    parser.add_argument("--control-binary", type=pathlib.Path, help="a build WITHOUT the fix: the shadowed gate must fail with it")
+    parser.add_argument("--control-binary", type=pathlib.Path, help="a build WITHOUT the fix of the selected mode: its shadowed gate must fail")
+    parser.add_argument("--mode", choices=["off", "ddgi"], default="off", help="off: GI off (C22-D4); ddgi: the probe-atlas variant")
     parser.add_argument("--out", type=pathlib.Path, default=REPO / "build/f15-shadowed-hit")
     args = parser.parse_args(argv)
     try:
-        scene = write_scene(args.out / "scene")
-        result = {"fixture": str(scene)}
-        result["fixed"] = measure(capture(args.binary.resolve(), scene, args.out / "fixed"))
-        ok = all(GATE[0] <= result["fixed"][k] <= GATE[1] for k in ("shadowed_ratio", "lit_ratio"))
-        result["gates_hold"] = ok
-        control_failed = None
-        if args.control_binary:
-            result["control"] = measure(capture(args.control_binary.resolve(), scene, args.out / "control"))
-            control_failed = result["control"]["shadowed_ratio"] < CONTROL_MAX and GATE[0] <= result["control"]["lit_ratio"] <= GATE[1]
-            result["control_fails_as_required"] = control_failed
-        (args.out / "result.json").write_text(json.dumps(result, indent=2))
+        ok, control_failed, result = run_mode(args.mode, args)
+        args.out.mkdir(parents=True, exist_ok=True)
+        (args.out / f"result-{args.mode}.json").write_text(json.dumps(result, indent=2))
         print(json.dumps(result, indent=2))
         if not ok:
             return 1
