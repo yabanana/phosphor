@@ -253,8 +253,24 @@ void TerrainFixture::setup(ECS& ecs, GpuScene& scene, TextureManager& textures) 
     }
 
     MeshData mesh;
-    if (flat) mesh = ProceduralMeshes::generatePlane(terrain::kPatchSize, terrain::kPatchSize, 1, 1);
-    else mesh = terrain::makePatch(PatchGrid, o.single >= 0 ? terrain::layerSpec(static_cast<u32>(o.single)).uvScale : 1.0f);
+    if (flat) {
+        mesh = ProceduralMeshes::generatePlane(terrain::kPatchSize, terrain::kPatchSize, 1, 1);
+        // A second quad 0.5 m below facing DOWN (back-face culled from every view above): the scene bounds the reflection probe is
+        // placed in must have a positive extent in y (a single flat quad has none: "invalid probe capture").
+        const u32 n = static_cast<u32>(mesh.positions.size());
+        for (u32 i = 0; i < n; ++i) {
+            mesh.positions.push_back(mesh.positions[i] - glm::vec3(0.0f, 0.5f, 0.0f));
+            mesh.normals.push_back(glm::vec3(0.0f, -1.0f, 0.0f));
+            mesh.tangents.push_back(glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
+            mesh.uvs.push_back(mesh.uvs[i]);
+        }
+        const size_t triangles = mesh.indices.size() / 3;
+        for (size_t t = 0; t < triangles; ++t) {
+            mesh.indices.push_back(n + mesh.indices[3 * t]);
+            mesh.indices.push_back(n + mesh.indices[3 * t + 2]);
+            mesh.indices.push_back(n + mesh.indices[3 * t + 1]);
+        }
+    } else mesh = terrain::makePatch(PatchGrid, o.single >= 0 ? terrain::layerSpec(static_cast<u32>(o.single)).uvScale : 1.0f);
     const u32 handle = scene.uploadMesh(mesh.positions, mesh.normals, mesh.tangents, mesh.uvs, mesh.indices);
 
     MaterialComponent owner;
