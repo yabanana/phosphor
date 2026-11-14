@@ -62,8 +62,16 @@ list(REMOVE_ITEM PHOSPHOR_METAL_SHADERS
     ${CMAKE_SOURCE_DIR}/shaders/reflection_lobe.metal
     ${CMAKE_SOURCE_DIR}/shaders/denoise_lobe.metal)
 list(PREPEND PHOSPHOR_METAL_SHADERS ${CMAKE_SOURCE_DIR}/shaders/material_passes.metal)
-# Headers the shaders include (C++/MSL shared): an edit recompiles every shader.
-set(PHOSPHOR_SHADER_HEADERS
+# Headers the shaders include (C++/MSL shared): an edit recompiles every shader.  F15: the list was hand-kept and
+# missed new headers (renderer/dfg_table.h, lobe_guide_pack.h, sheen_table.h, lobe_select.h, transmission_math.h,
+# shaders/reflection_lobe.h ...), so a header-only edit left a stale metallib.  Every header a shader can include is
+# now globbed (over-inclusion only costs rebuilds), plus the .metal sources that other shaders #include.
+file(GLOB_RECURSE PHOSPHOR_SHADER_HEADERS CONFIGURE_DEPENDS
+    ${CMAKE_SOURCE_DIR}/shaders/*.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/*.h
+    ${CMAKE_SOURCE_DIR}/src/diagnostics/*.h
+    ${CMAKE_SOURCE_DIR}/src/platform/metal/*_check.h)
+list(APPEND PHOSPHOR_SHADER_HEADERS
     ${CMAKE_SOURCE_DIR}/shaders/restir_di.metal
     ${CMAKE_SOURCE_DIR}/shaders/light_cluster.metal
     ${CMAKE_SOURCE_DIR}/shaders/restir_di_lobe.metal
@@ -75,45 +83,7 @@ set(PHOSPHOR_SHADER_HEADERS
     ${CMAKE_SOURCE_DIR}/shaders/reflection_probes.metal
     ${CMAKE_SOURCE_DIR}/shaders/reflection_composite.metal
     ${CMAKE_SOURCE_DIR}/shaders/forward.metal
-    ${CMAKE_SOURCE_DIR}/shaders/visibility_resolve.metal
-    ${CMAKE_SOURCE_DIR}/shaders/material_shading.h
-    ${CMAKE_SOURCE_DIR}/shaders/materials/bsdf.h
-    ${CMAKE_SOURCE_DIR}/shaders/surface_geometry.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/normal_transform.h
-    ${CMAKE_SOURCE_DIR}/shaders/temporal_motion.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/temporal_layout.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/post_layout.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/visibility_layout.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/visibility_math.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/gpu_types.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/denoise_history_layout.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/metalfx_denoise_layout.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/metalfx_denoise_fixture_layout.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/visibility_layout.h
-    ${CMAKE_SOURCE_DIR}/shaders/reflection_common.h
-    ${CMAKE_SOURCE_DIR}/shaders/reflection_reduce.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/reflection_probe_storage.h
-    ${CMAKE_SOURCE_DIR}/shaders/atmosphere_common.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/atmosphere_bindings.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/volume_noise.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/volume_math.h
-    ${CMAKE_SOURCE_DIR}/shaders/gi_common.h
-    ${CMAKE_SOURCE_DIR}/shaders/gi_cache_common.h
-    ${CMAKE_SOURCE_DIR}/shaders/restir_common.h
-    ${CMAKE_SOURCE_DIR}/shaders/light_visibility.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/shadow_math.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/shadow_layout.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/shadow_dispatch.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/rt_geometry.h
-    ${CMAKE_SOURCE_DIR}/shaders/rt_common.h
-    ${CMAKE_SOURCE_DIR}/src/platform/metal/rt_visibility_check.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/gpu_scene_layout.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/gpu_queue.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/cull_math.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/transform_math.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/meshlet_layout.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/meshlet_cull_math.h
-    ${CMAKE_SOURCE_DIR}/src/diagnostics/overlay_math.h)
+    ${CMAKE_SOURCE_DIR}/shaders/visibility_resolve.metal)
 set(PHOSPHOR_SHADER_OUT ${CMAKE_BINARY_DIR}/shaders)
 set(PHOSPHOR_METALLIB ${PHOSPHOR_SHADER_OUT}/phosphor.metallib)
 set(PHOSPHOR_METAL_FLAGS -std=metal4.0 -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}
