@@ -295,7 +295,10 @@ COMBO_THIN_COAT_DECLARED = ["declared-transmission-ignored", "declared-coat-igno
 # than the 5 % bound there (measured: aniso-rotation-flipped passes the env gate of the anisotropy + coat / sheen grids), so those keys drop it.
 COMBO_ANISO_COAT_ENV_CONTROLS = ["aniso-ignored", "coat-ignored", "additive-layering"]
 COMBO_ANISO_SHEEN_ENV_CONTROLS = ["aniso-ignored", "sheen-ignored", "additive-layering"]
-COMBO_IRID_ANISO_ENV_CONTROLS = ["iridescence-ignored", "aniso-ignored", "additive-layering"]
+# Orchestrator decision (2026-11-14, measured on the integrated engine, build/f15-check/t19probe-1): on the iridescence + anisotropy grid
+# `additive-layering` (the diffuse not weighted by the film) moves the exact-environment sphere mean by 4.0 % < 5 %: it does not discriminate
+# there and is dropped from the env key only (it stays on -sun and -env@resolve, where the per-pixel and declared gates see it).
+COMBO_IRID_ANISO_ENV_CONTROLS = ["iridescence-ignored", "aniso-ignored"]
 COMBO_IRID_SPECULAR_ENV_CONTROLS = ["iridescence-ignored", "specular-ignored", "additive-layering"]
 COMBO_ALL_LOBES_CONTROLS = ["coat-ignored", "sheen-ignored", "aniso-ignored", "specular-ignored", "additive-layering"]
 COMBO_ALL_LOBES_DECLARED = ["declared-coat-ignored", "declared-sheen-ignored", "declared-aniso-ignored", "declared-specular-ignored",
