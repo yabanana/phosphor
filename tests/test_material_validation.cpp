@@ -1220,7 +1220,7 @@ TEST_CASE("F15.3 the sub-pixel pair differs only by the block, the grids frame e
         for (EntityID e : f.spheres()) {
             const auto& m = std::as_const(ecs).getComponent<MaterialComponent>(e);
             CHECK(m.baseColorFactor == glm::vec4(0.8f, 0.8f, 0.8f, 1.0f));
-            CHECK(m.roughnessFactor == 0.7f);
+            CHECK(m.roughnessFactor == 0.35f); // volumetric fixtures at roughness 0.35 (orchestrator decision, ticket 17)
             CHECK(static_cast<bool>(m.extension) == withBlock);
         }
         f.teardown(ecs, scene);
