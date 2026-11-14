@@ -16,7 +16,7 @@ Roadmap: F15.1, F15.3
 - [ ] Ray budget per pixel unchanged on non-transmissive scenes (Sponza D2 within band); extra cost on the glass fixture measured — non-transmissive F13 captures 0 px; D2 band and quiet cost → ticket 24
 - [ ] Temporal clip (orbit, moving light) within F13.6; transmissive pixels reactive for MetalFX temporal — reactive proven in both paths; clip FAILS on the gated smooth ROIs (p95 0.14-0.17): partial, carried
 - [x] Forced-overflow capture (`--debug-meshlets 1 --debug-meshlets-corrupt count`, as `tools/f13_overflow_emission_check.sh`) equals the meshlet path on the ticket's fixture
-- [x] TransmissionTest, TransmissionRoughnessTest, TransmissionThinwallTestGrid, AttenuationTest side by side — ticket 22 (done 2026-11-14, qualitative; open defect C22-D4 dark grain where glass overlaps single-sided label planes in TransmissionRoughnessTest; `docs/research/2026-11-14-f15-khronos-corpus-report.md`)
+- [x] TransmissionTest, TransmissionRoughnessTest, TransmissionThinwallTestGrid, AttenuationTest side by side — ticket 22 (done 2026-11-14, qualitative; defect C22-D4 (dark squares behind glass in TransmissionRoughnessTest) FIXED in the ticket 22 follow-up: the wall behind the glass lacked the environment diffuse term in the sun shadow of the label panel, not a back-face hit; `docs/research/2026-11-14-f15-khronos-corpus-report.md`)
 - [x] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
 
 ## Comments

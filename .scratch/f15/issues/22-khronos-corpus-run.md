@@ -6,7 +6,7 @@ Roadmap: F15.3
 
 **Blocked by:** 19
 
-**Status:** resolved with open defects (2026-11-14; 21 of 24 models render, 3 refused with stated reasons; defects C22-D3/D4/D5/D7/R2 open; numeric texture fixtures of tickets 09/11/12/16 NOT built)
+**Status:** resolved with open defects (2026-11-14; 21 of 24 models render, 3 refused with stated reasons; defects C22-D3/R2 open, D4 fixed, D5/D7 named approximations (follow-up below); numeric texture fixtures of tickets 09/11/12/16 NOT built)
 
 - [x] Fetch script reproducible, verifies hashes, stores licence/attribution, skips Draco/BasisU/WebP variants (`--verify`, offline, unit-tested; the committed manifest records no skipped file: the default variant of all 24 models is plain .gltf/.bin/.png/.jpg)
 - [x] Every Tier A model loads or is refused for a stated reason (e.g. DiffuseTransmissionTest requires unlit/lights_punctual) (Tier A: 17 of 19 render, DiffuseTransmissionTest and TextureTransformMultiTest refused; Tier B: 3 render, GlamVelvetSofa refused; ABeautifulGame renders)
@@ -49,3 +49,18 @@ Not done: numeric texture fixtures (coat normal, anisotropy direction, iridescen
 corpus exercises those textures only qualitatively; no per-slot texture transform; no Render Fidelity goldens (not approved). Deviation from the brief: the corpus framing uses
 a fixed front or three-quarter view per model (`MODELS` in the runner), not the Khronos cameras. Process note: one probe run with the first framing build started while another
 agent's phosphor was running (before the runner's guard existed); it lasted a few seconds, finished with exit 0 and is not used as evidence.
+
+## Defect triage follow-up (2026-11-14, agent for ticket 22 defects)
+
+- **C22-D4 fixed** (`reflections.metal`: the refract walk lights its first opaque hit with the declared environment diffuse term when transported GI is off).
+  The back-face hypothesis was disproved (double-sided labels: 2 of 786432 pixels; a debug counter found no back-face hit); the dark squares were the wall
+  behind the glass in the sun shadow of the label panel, lit by the sun only. Check: `tools/f15_shadowed_hit_check.py` (ratio through glass / direct 1.001 shadowed,
+  1.001 lit; control binary without the fix 0.000 / 0.926, fails as required), ctest `f15_shadowed_hit_check_python`. 17 transmission f15_check keys green
+  (roughness-ior numbers identical to the pre-fix run: worst mean 0.0497, p95 0.1349), `visual_check` 0 px on 8 benches, shader + API validation clean on 6
+  transmissive corpus models, O7 0 allocations, corpus rerun: ClearCoatTest and IORTestGrid 0 px against the pre-fix binary, transmissive models changed as intended.
+  Latent, reported: reflection estimators (F13) keep the sun-only lighting of a shadowed hit with GI off; a transport ray hitting the back of a single-sided opaque
+  plane returns black (not triggered by the corpus, no fixture).
+- **C22-D3 open (F13)**: pre-existing code path (reproduced on extension-free spheres); raw and filtered specular are exactly 0 at the outermost silhouette pixel,
+  the composite already removed the diffuse share: not fixed (F13 composite/kernels, F13 exact captures not available), details in the report.
+- **C22-D5 / C22-D7 named approximations**: D7 is unbiased noise converging as 1/sqrt(N) (ratio 7.9 for 64 frames); D5 is converged deterministic structure
+  (reflections of the neighbours), not noise. Numbers in the report.

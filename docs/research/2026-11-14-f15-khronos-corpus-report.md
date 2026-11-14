@@ -96,7 +96,7 @@ Named approximations:
 
 Defects:
 
-- **C22-D3** [open] Isolated dark pixels on the outermost pixel row of the sphere silhouette (also on the SpecularTest, IORTestGrid and Sheen grids). Root-cause hypothesis: Diagnostic runs (build/f15-corpus-diag, same model and rig): the dark pixels are present with --reflections rt (corpus default) and with --reflections ssr and ABSENT with --reflections off, so they come from the reflection signal/composite at geometry edges, not from RT ray origins. Most likely the lobe filter or composite reads the sky/miss pixels next to the silhouette as zero-radiance reflection samples and the outermost pixel row weights them in. Not fixed here: it needs the reflection denoiser/composite shaders (F13), which this ticket does not own.
+- **C22-D3** [open] Isolated dark pixels on the outermost pixel row of the sphere silhouette (also on the SpecularTest, IORTestGrid and Sheen grids). Root-cause hypothesis: Characterised in the follow-up (not fixed: F13 shaders). Reproduced on extension-free base-material spheres (no F15 lobe kernel runs for them): the outermost silhouette pixel is darker than with reflections off in 52 of 11705 edge pixels with --reflections rt and 4 with ssr (0.4 % / 0.03 %), absent with off. At those pixels the RAW and the FILTERED specular signal (--capture-linear-signal specular, specular-filtered) are exactly 0 and the HDR pixel is 0.17 against 0.46 for the neighbours: the specular estimate is missing while the composite already applied the dielectric diffuse weight 1 - E(N.V -> 0), so the pixel loses diffuse and specular. NOT the back-face rejection (double-sided spheres: identical dark pixels) and not the transmission code. Open: which guard returns the empty sample (candidates: reflectionDirection's vh <= 0 / n.l <= 0 rejection at N.V ~ 0, or a guide record left invalid at the silhouette); a fix needs the F13 composite/reflection kernels and their exact captures (sponza-d2, cornell-restir, cornell-clustered-ssr, manylights-restir, grid-sky), which were not available here. The pre-F15 binary could not be compared: it has no corpus rig or sky for sphere scenes.
 
 ### SheenTestGrid
 
@@ -134,7 +134,7 @@ Named approximations:
 
 Defects:
 
-- **C22-D5** [open] Near-mirror anisotropic spheres (strength >= 0.5, roughness <= 0.17) are speckled in the single settled frame; the neighbouring-sphere reflections at strength 0 show black blotches. Root-cause hypothesis: Stochastic VNDF samples of a very narrow anisotropic lobe (8 reflection samples) that the custom denoiser's lobe edge-stopping does not converge in 48 frames; the black blotches are reflections of neighbouring dark spheres (single-bounce RT reflections, see C22-A1).
+- **C22-D5** [named-approximation] Near-mirror anisotropic spheres (strength >= 0.5, roughness <= 0.17) are speckled in the single settled frame; the neighbouring-sphere reflections at strength 0 show black blotches. Root-cause hypothesis: Accumulated, it does not smooth (follow-up, --capture-linear-accumulate 64, denoiser off): in the near-mirror columns the high-pass residual std is 0.286 (denoised frame), 0.291 (64-frame average), 0.301 (one unfiltered frame) and the residuals of unfiltered frames 60 and 95 correlate at 0.63 to 0.80, against 0.07 for the rough sphere (std 0.196 -> 0.026 averaged, correlation 0.07: noise). The speckle is the deterministic reflected image of the neighbouring spheres and the sky seen through a nearly delta lobe (single-bounce reflections, C22-A1), mean levels agree to 0.3 % between the denoised, accumulated and single frames. No bias was found against the frame average, but there is no independent reference for this model, so correctness against truth is not claimed.
 
 ### AnisotropyRotationTest
 
@@ -203,7 +203,7 @@ Named approximations:
 
 Defects:
 
-- **C22-D4** [open] Near-black grainy squares where a glass tile overlaps the opaque label planes (rows 2 to 5 of the smooth column); the Khronos image shows the label through the glass. Root-cause hypothesis: Disproved: missing ambient/GI at secondary hits (the dark squares are unchanged with --gi ddgi, build/f15-corpus-diag). Still open: the squares sit at the part of the glass tile that overlaps the label panels; the label meshes are single-sided (LabelMat is not doubleSided), so the likely cause is the transmitted ray hitting the BACK of a label plane, which the rasteriser culls but the RT hit shading lights as a back face (no front lighting, noisy transmissive shadow), giving near-black grain. Check by making the RT hit test skip back faces of single-sided opaque surfaces.
+- **C22-D4** [fixed] Near-black grainy squares where a glass tile overlaps the opaque label planes (rows 2 to 5 of the smooth column); the Khronos image shows the label through the glass. Root-cause hypothesis: Root cause (follow-up of ticket 22; the back-face hypothesis was DISPROVED: LabelMat made double-sided changed 2 of 786432 pixels, and a debug colour counter in the refract walk found no back-face hit). The dark squares are the WALL behind the glass, in the sun shadow of the opaque label panel: the transmitted ray ends at the wall, the sun shadow ray of that hit is blocked by the panel (an opaque hit of the label instance, confirmed by a debug trace), and reflectionSecondary lit the hit with the sun only (it adds no environment term when the probe atlas is not used, so a surface the sun does not reach was black while the camera-visible wall carries the declared ambient). Fix: the refract walk asks reflectionSecondary for the declared environment diffuse term (environment x albedo x (1 - metallic), the camera-visible ambient without occlusion) when transported GI is off; reflection estimators are unchanged (F13 behaviour kept: a shadowed surface seen in a mirror is black with GI off, reported as a finding). Evidence: tools/f15_shadowed_hit_check.py (through-glass / direct wall ratio 1.001 shadowed, 1.001 lit; the pre-fix binary gives 0.000 / 0.926), the corpus rerun (TransmissionRoughnessTest 62220 px changed, ClearCoatTest and IORTestGrid 0 px), 17 transmission f15_check keys green, visual_check 0 px, shader + API validation clean. Not covered: with --gi ddgi the squares stay black (the atlas path was not analysed: a probe grid that does not reach the wall returns 0); a transmitted ray that hits the BACK of a single-sided opaque plane still returns black (latent: the corpus does not trigger it, no fixture built).
 
 ### TransmissionThinwallTestGrid
 
@@ -255,7 +255,7 @@ Named approximations:
 
 Defects:
 
-- **C22-D7** [open] White transmissive spheres at IOR >= 1.76 are visibly grainy in the single settled frame; the Khronos image is smooth. Root-cause hypothesis: Stochastic refraction (8 samples) of a high-IOR sphere, denoised by the custom denoiser in 48 frames only; the ticket 13 measurements converge with 112 accumulated frames (tools/f15_check.py ACCUMULATE).
+- **C22-D7** [named-approximation] White transmissive spheres at IOR >= 1.76 are visibly grainy in the single settled frame; the Khronos image is smooth. Root-cause hypothesis: Noise, unbiased, converging at 1/sqrt(N) (follow-up, sapphire sphere interior, --lighting-denoise off): one frame hp std 0.126, 64-frame average 0.016 (ratio 7.9, expected 8.0), residual correlation of frames 60 and 95 -0.002, mean level 0.0779 / 0.0787 (single) against 0.0770 (average), within 1.5 %. The denoised settled frame keeps a spatially smooth residual (hp std 0.011) that the 64-frame accumulation of denoised frames does not remove: it is the 8-sample refraction transport of a high-IOR sphere through the custom denoiser, the declared 1-spp-class noise of ADR-0004, not a defect of the transport.
 
 ### SpecularTest
 
@@ -445,9 +445,9 @@ Renders correctly:
 | Id | Model | Status | Summary |
 |---|---|---|---|
 | C22-D3 | ClearCoatCarPaint | open | Isolated dark pixels on the outermost pixel row of the sphere silhouette (also on the SpecularTest, IORTestGrid and Sheen grids). |
-| C22-D5 | AnisotropyStrengthTest | open | Near-mirror anisotropic spheres (strength >= 0.5, roughness <= 0.17) are speckled in the single settled frame; the neighbouring-sphere reflections at strength 0 show black blotches. |
-| C22-D4 | TransmissionRoughnessTest | open | Near-black grainy squares where a glass tile overlaps the opaque label planes (rows 2 to 5 of the smooth column); the Khronos image shows the label through the glass. |
-| C22-D7 | IORTestGrid | open | White transmissive spheres at IOR >= 1.76 are visibly grainy in the single settled frame; the Khronos image is smooth. |
+| C22-D5 | AnisotropyStrengthTest | named-approximation | Near-mirror anisotropic spheres (strength >= 0.5, roughness <= 0.17) are speckled in the single settled frame; the neighbouring-sphere reflections at strength 0 show black blotches. |
+| C22-D4 | TransmissionRoughnessTest | fixed | Near-black grainy squares where a glass tile overlaps the opaque label planes (rows 2 to 5 of the smooth column); the Khronos image shows the label through the glass. |
+| C22-D7 | IORTestGrid | named-approximation | White transmissive spheres at IOR >= 1.76 are visibly grainy in the single settled frame; the Khronos image is smooth. |
 | C22-A1 | IridescenceMetallicSpheres | named-approximation | Dense metal lattices show black holes inside each sphere: a sphere sees its neighbours as dark. |
 | C22-R1 | DiffuseTransmissionTest | by-design | Refused: the model REQUIRES KHR_materials_unlit and KHR_lights_punctual. |
 | C22-R2 | TextureTransformMultiTest | open | Refused: material 'BaseColorTest1Mat' has a non-uniform KHR_texture_transform (a transform on one texture slot only). |
