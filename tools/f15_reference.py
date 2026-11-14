@@ -2257,8 +2257,10 @@ def sphere_table(data):
             thin = material_subsurface(data, material) or (0.0, [1.0, 1.0, 1.0])
             entry.update(thin_weight=thin[0], thin_color=thin[1],
                          group=f"metallic {entry['metallic']:g} thin weight {thin[0]:g}")
-        kinds = sum(map(bool, (uses, uses_coat, uses_sheen_scene, uses_aniso, uses_irid, uses_thin)))
-        if kinds > 1:  # ticket 19: a combination scene groups its spheres by the full set of lobe parameters
+        layered = sum(map(bool, (uses_coat, uses_sheen_scene, uses_aniso, uses_irid, uses_thin)))
+        # ticket 19: a combination scene groups its spheres by the full set of lobe parameters.  The clearcoat grids of ticket 09 (coat
+        # over a base with an ior block in some rows) keep their own grouping.
+        if layered > 1 or (uses and layered == 1 and not uses_coat):
             tokens = [f"metallic {entry['metallic']:g}"]
             if "ior" in entry:
                 tokens.append(f"ior {entry['ior']:g} spec {entry['specular']:g}")

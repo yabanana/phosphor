@@ -92,6 +92,30 @@ struct MaterialScenarioSpec {
     std::vector<glm::vec3> volumetricRadiusScale;
     std::vector<float>     volumetricAnisotropy;
     float                  cameraDistance = 0.0f;
+    // F15.3 (ticket 19) combination grids: `combo` holds one cell per sphere (row-major, rows x columns like every grid; the rows keep
+    // `metallic`, the columns `roughness`, the base colour is `baseColor`) with the extension blocks of that sphere.  A block is present
+    // when its factor/colour/weight is non-zero (specular: `hasSpecular`), so a cell may carry any subset of the lobes; the neutral
+    // cell carries no extension at all.  `combedCarriers` selects the combed spheres (needed by every cell with anisotropy).
+    struct ComboCell {
+        bool      hasSpecular    = false;
+        float     ior            = 1.5f;
+        float     specularFactor = 1.0f;
+        glm::vec3 specularColor{1.0f};
+        float     coatFactor     = 0.0f;
+        float     coatRoughness  = 0.0f;
+        glm::vec3 sheenColor{0.0f};
+        float     sheenRoughness = 0.3f;
+        float     anisoStrength  = 0.0f;
+        float     anisoRotation  = 0.0f;
+        float     iridFactor     = 0.0f;
+        float     iridIor        = 1.3f;
+        float     iridThickness  = 400.0f; // nm, the maximum (no thickness texture)
+        float     thinWeight     = 0.0f;
+        glm::vec3 thinColor{1.0f};
+    };
+    std::vector<ComboCell> combo;
+    bool                   combedCarriers = false;
+    [[nodiscard]] bool hasComboGrid() const { return !combo.empty(); }
     [[nodiscard]] bool hasVolumetricGrid() const { return !volumetricWeight.empty(); }
     [[nodiscard]] bool hasSubsurfaceGrid() const { return !subsurfaceWeight.empty(); }
     [[nodiscard]] bool hasIridescenceGrid() const { return !iridescenceFactor.empty(); }

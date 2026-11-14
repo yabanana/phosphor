@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <memory>
+#include <tuple>
 #include <stdexcept>
 #include <utility>
 #include <glm/gtc/quaternion.hpp>
@@ -15,7 +17,7 @@
 namespace phosphor {
 namespace {
 // The names are mirrored by tools/f15_check.py SCENARIOS (tests/test_material_validation.cpp compares both).
-constexpr std::array<std::string_view, 45> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
+constexpr std::array<std::string_view, 66> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
                                                       "furnace-base",   "furnace-resolve",     "roughness-extremes",
                                                       "roughness-extremes-sun", "specular-grid-sun",
                                                       "specular-grid-env-resolve", "specular-grid-point", "specular-grid-env", "furnace-specular",
@@ -32,7 +34,14 @@ constexpr std::array<std::string_view, 45> kScenarios{"base-grid-sun",  "base-gr
                                                       "subsurface-thin-point", "furnace-thin-subsurface",
                                                       "subsurface-volumetric-sun", "subsurface-volumetric-radius",
                                                       "subsurface-volumetric-subpixel", "subsurface-volumetric-subpixel-off",
-                                                      "subsurface-volumetric-backlit"};
+                                                      "subsurface-volumetric-backlit",
+                                                      "combo-coat-sheen-sun", "combo-coat-sheen-env", "combo-aniso-coat-sun",
+                                                      "combo-aniso-coat-env", "combo-aniso-sheen-sun", "combo-aniso-sheen-env",
+                                                      "combo-specular-sheen-sun", "combo-specular-sheen-env", "combo-irid-coat-sun",
+                                                      "combo-irid-coat-env", "combo-irid-sheen-sun", "combo-irid-sheen-env",
+                                                      "combo-irid-aniso-sun", "combo-irid-aniso-env", "combo-irid-specular-sun",
+                                                      "combo-irid-specular-env", "combo-thin-coat-sun", "combo-thin-coat-env",
+                                                      "combo-all-lobes-sun", "combo-all-lobes-env", "furnace-combinations"};
 constexpr float pi = 3.14159265358979323846f;
 
 glm::quat orientLight(glm::vec3 towardLight) {
@@ -43,6 +52,214 @@ glm::quat orientLight(glm::vec3 towardLight) {
     if (cosine > 0.999999f) return glm::quat(1, 0, 0, 0);
     if (cosine < -0.999999f) return glm::angleAxis(pi, glm::vec3(0, 1, 0));
     return glm::angleAxis(std::acos(cosine), glm::normalize(glm::cross(forward, direction)));
+}
+
+// F15.3 (ticket 19): the critical lobe combinations (tools/f15_reference.py composes them from the layering text of
+// research/khr-materials.md section 12).  Every combination is a grid of texture-free spheres whose cells carry the lobes in play and
+// their neutral neighbours (a cell with one lobe neutral reduces to the other, so the same grid also pins the single lobes).
+using Cell = MaterialScenarioSpec::ComboCell;
+// The scenario name as the string_view of its literal in kScenarios (the specs hold views; a name that is not declared there is a bug).
+std::string_view declaredName(const std::string& wanted) {
+    for (const std::string_view name : kScenarios)
+        if (name == wanted) return name;
+    throw std::logic_error("combination scenario not declared in kScenarios: " + wanted);
+}
+Cell withSpecular(Cell c, float ior, float factor, glm::vec3 color) {
+    c.hasSpecular = true; c.ior = ior; c.specularFactor = factor; c.specularColor = color;
+    return c;
+}
+Cell withCoat(Cell c, float factor, float roughness) { c.coatFactor = factor; c.coatRoughness = roughness; return c; }
+Cell withSheen(Cell c, glm::vec3 color, float roughness) { c.sheenColor = color; c.sheenRoughness = roughness; return c; }
+Cell withAniso(Cell c, float strength, float rotation) { c.anisoStrength = strength; c.anisoRotation = rotation; return c; }
+Cell withIrid(Cell c, float factor, float ior, float thickness) {
+    c.iridFactor = factor; c.iridIor = ior; c.iridThickness = thickness;
+    return c;
+}
+Cell withThin(Cell c, float weight, glm::vec3 color) { c.thinWeight = weight; c.thinColor = color; return c; }
+
+struct ComboLook {
+    std::vector<float> roughness; // per column
+    std::vector<float> metallic;  // per row
+    glm::vec3          base;
+    std::vector<Cell>  cells;     // rows x columns, row-major
+    bool               combed = false;
+    glm::vec3          towardSun{-0.8f, 0.35f, -0.3f};
+};
+
+// One combination: `name`-sun (sun only: the direct gate) and `name`-env (environment 0.5 only: the exact quadrature through the
+// transport, and, captured with --reflections off, the declared resolve model).  The grids share the base-grid rig.
+void addCombination(std::vector<MaterialScenarioSpec>& out, const std::string& name, const ComboLook& look) {
+    MaterialScenarioSpec sun;
+    sun.name           = declaredName("combo-" + name + "-sun");
+    sun.roughness      = look.roughness;
+    sun.metallic       = look.metallic;
+    sun.baseColor      = look.base;
+    sun.sun            = true;
+    sun.sunIrradiance  = 3.0f;
+    sun.towardSun      = glm::normalize(look.towardSun);
+    sun.combo          = look.cells;
+    sun.combedCarriers = look.combed;
+    out.push_back(sun);
+    MaterialScenarioSpec env = sun;
+    env.name          = declaredName("combo-" + name + "-env");
+    env.sun           = false;
+    env.sunIrradiance = 0.0f;
+    env.environment   = 0.5f;
+    out.push_back(env);
+}
+
+void addCombinations(std::vector<MaterialScenarioSpec>& out) {
+    constexpr float quarter = 0.78539816f, half = 1.57079633f;
+    const glm::vec3 white(1.0f), orange(1.0f, 0.5f, 0.25f), blue(0.25f, 0.5f, 1.0f), warm(1.0f, 0.55f, 0.25f), teal(0.1f, 0.7f, 0.6f);
+    const glm::vec3 copper(0.8f, 0.35f, 0.15f), darkCopper(0.3f, 0.15f, 0.08f), dark(0.1f);
+    const Cell none{};
+    auto grid = [](size_t rows, size_t cols, auto&& make) {
+        std::vector<Cell> cells;
+        for (size_t r = 0; r < rows; ++r)
+            for (size_t c = 0; c < cols; ++c) cells.push_back(make(r, c));
+        return cells;
+    };
+    // Clearcoat + sheen (no Khronos sample has it): rows = sheen (white 0.4, orange 0.75) over a dielectric, blue 0.5 over a metal;
+    // columns = the coat (none, 0.5 / 0.3, 1 / 0.3, 1 / 0.6).  Dark rough base: the sheen is the visible feature, the coat over it.
+    {
+        const std::vector<std::pair<glm::vec3, float>> sheens{{white, 0.4f}, {orange, 0.75f}, {blue, 0.5f}};
+        const std::vector<std::pair<float, float>>     coats{{0.0f, 0.0f}, {0.5f, 0.3f}, {1.0f, 0.3f}, {1.0f, 0.6f}};
+        addCombination(out, "coat-sheen",
+                       {std::vector<float>(4, 0.7f), {0.0f, 0.0f, 1.0f}, dark, grid(3, 4, [&](size_t r, size_t c) {
+                            Cell cell = withSheen(none, sheens[r].first, sheens[r].second);
+                            return coats[c].first > 0.0f ? withCoat(cell, coats[c].first, coats[c].second) : cell;
+                        })});
+    }
+    // Anisotropy + clearcoat: rows = dielectric, metal (copper); columns = (strength 0.5 at pi/4, coat 1 / 0.3), (1 at 0, coat 1 / 0.3),
+    // (1 at pi/2, coat 0.5 / 0.35), (no anisotropy, coat 1 / 0.3).
+    addCombination(out, "aniso-coat",
+                   {std::vector<float>(4, 0.3f), {0.0f, 1.0f}, copper, grid(2, 4, [&](size_t, size_t c) {
+                        switch (c) {
+                            case 0: return withCoat(withAniso(none, 0.5f, quarter), 1.0f, 0.3f);
+                            case 1: return withCoat(withAniso(none, 1.0f, 0.0f), 1.0f, 0.3f);
+                            case 2: return withCoat(withAniso(none, 1.0f, half), 0.5f, 0.35f);
+                            default: return withCoat(none, 1.0f, 0.3f);
+                        }
+                    }), true});
+    // Anisotropy + sheen (carried from ticket 11): rows = dielectric, metal; columns = the anisotropic lobe under a sheen.
+    addCombination(out, "aniso-sheen",
+                   {std::vector<float>(4, 0.3f), {0.0f, 1.0f}, darkCopper, grid(2, 4, [&](size_t, size_t c) {
+                        switch (c) {
+                            case 0: return withSheen(withAniso(none, 0.5f, quarter), white, 0.4f);
+                            case 1: return withSheen(withAniso(none, 1.0f, 0.0f), orange, 0.4f);
+                            case 2: return withSheen(withAniso(none, 1.0f, half), white, 0.75f);
+                            default: return withSheen(none, white, 0.4f);
+                        }
+                    }), true});
+    // Specular + sheen: rows = sheen (white 0.4, orange 0.75); columns = (sheen alone), (ior 2.4), (ior 1.33), (ior 1.5, weight 0.5, colour 2 1 .5).
+    {
+        const std::vector<std::pair<glm::vec3, float>> sheens{{white, 0.4f}, {orange, 0.75f}};
+        addCombination(out, "specular-sheen",
+                       {std::vector<float>(4, 0.35f), {0.0f, 0.0f}, glm::vec3(0.2f), grid(2, 4, [&](size_t r, size_t c) {
+                            Cell cell = withSheen(none, sheens[r].first, sheens[r].second);
+                            switch (c) {
+                                case 0: return cell; // the sheen alone (the neutral extension)
+                                case 1: return withSpecular(cell, 2.4f, 1.0f, white);
+                                case 2: return withSpecular(cell, 1.33f, 1.0f, white);
+                                default: return withSpecular(cell, 1.5f, 0.5f, glm::vec3(2.0f, 1.0f, 0.5f));
+                            }
+                        })});
+    }
+    // Iridescence + clearcoat (the interface between coat and film is ignored by the specification): rows = dielectric, metal;
+    // columns = (film 400 nm, coat 1 / 0.3), (800 nm, coat 1 / 0.3), (film ior 1.8, 400 nm, coat 0.5 / 0.35), (film only).
+    addCombination(out, "irid-coat",
+                   {std::vector<float>(4, 0.3f), {0.0f, 1.0f}, copper, grid(2, 4, [&](size_t, size_t c) {
+                        switch (c) {
+                            case 0: return withCoat(withIrid(none, 1.0f, 1.3f, 400.0f), 1.0f, 0.3f);
+                            case 1: return withCoat(withIrid(none, 1.0f, 1.3f, 800.0f), 1.0f, 0.3f);
+                            case 2: return withCoat(withIrid(none, 1.0f, 1.8f, 400.0f), 0.5f, 0.35f);
+                            default: return withIrid(none, 1.0f, 1.3f, 400.0f);
+                        }
+                    })});
+    // Iridescence + sheen: rows = dielectric, metal; columns = film under a sheen, the last one the film alone.
+    addCombination(out, "irid-sheen",
+                   {std::vector<float>(4, 0.3f), {0.0f, 1.0f}, darkCopper, grid(2, 4, [&](size_t, size_t c) {
+                        switch (c) {
+                            case 0: return withSheen(withIrid(none, 1.0f, 1.3f, 400.0f), white, 0.4f);
+                            case 1: return withSheen(withIrid(none, 1.0f, 1.3f, 800.0f), orange, 0.4f);
+                            case 2: return withSheen(withIrid(none, 1.0f, 1.8f, 400.0f), white, 0.75f);
+                            default: return withIrid(none, 1.0f, 1.3f, 600.0f); // the film alone
+                        }
+                    })});
+    // Iridescence + anisotropy (carried from tickets 11/12): the exact environment of this pair has no quadrature in the reference
+    // (it needs an anisotropic V.H histogram), so only the sun and the declared environment gate it.
+    addCombination(out, "irid-aniso",
+                   {std::vector<float>(4, 0.3f), {0.0f, 1.0f}, copper, grid(2, 4, [&](size_t, size_t c) {
+                        switch (c) {
+                            case 0: return withAniso(withIrid(none, 1.0f, 1.3f, 400.0f), 0.5f, quarter);
+                            case 1: return withAniso(withIrid(none, 1.0f, 1.3f, 800.0f), 1.0f, 0.0f);
+                            case 2: return withAniso(withIrid(none, 1.0f, 1.3f, 400.0f), 1.0f, half);
+                            default: return withIrid(none, 1.0f, 1.3f, 600.0f);
+                        }
+                    }), true});
+    // Iridescence + ior/specular: rows = (400 nm, film ior 1.3), (800 nm, 1.3), (400 nm, film ior 1.8) over dielectrics, then a metal
+    // (400 nm: the extension has no effect on a metal); columns = (film alone), (ior 1.8, weight 0.7, colour 1 .8 .6), (ior 2.4), (ior 1.5,
+    // weight 0.5, colour 2 1 .5).  Strength 1 everywhere (for a fractional strength the specification's two forms of the diffuse weight
+    // differ, see f15_reference.py irid_lobe_weights).
+    {
+        const std::vector<std::tuple<float, float, float>> films{{1.3f, 400.0f, 0.0f}, {1.3f, 800.0f, 0.0f}, {1.8f, 400.0f, 0.0f}, {1.3f, 400.0f, 1.0f}};
+        addCombination(out, "irid-specular",
+                       {std::vector<float>(4, 0.3f), {0.0f, 0.0f, 0.0f, 1.0f}, copper, grid(4, 4, [&](size_t r, size_t c) {
+                            Cell cell = withIrid(none, 1.0f, std::get<0>(films[r]), std::get<1>(films[r]));
+                            switch (c) {
+                                case 0: return cell; // the film alone (the neutral extension)
+                                case 1: return withSpecular(cell, 1.8f, 0.7f, glm::vec3(1.0f, 0.8f, 0.6f));
+                                case 2: return withSpecular(cell, 2.4f, 1.0f, white);
+                                default: return withSpecular(cell, 1.5f, 0.5f, glm::vec3(2.0f, 1.0f, 0.5f));
+                            }
+                        })});
+    }
+    // Thin subsurface + clearcoat: rows = thin weight 0.5 (warm), 1 (teal); columns = coat (none), (1 / 0.3), (0.5 / 0.35), (1 / 0.6);
+    // sun behind the spheres (the thin-sun rig): the transmitted lobe under the coat.
+    addCombination(out, "thin-coat",
+                   {std::vector<float>(4, 0.5f), {0.0f, 0.0f}, glm::vec3(0.3f, 0.5f, 0.8f), grid(2, 4, [&](size_t r, size_t c) {
+                        Cell cell = withThin(none, r == 0 ? 0.5f : 1.0f, r == 0 ? warm : teal);
+                        switch (c) {
+                            case 1: return withCoat(cell, 1.0f, 0.3f);
+                            case 2: return withCoat(cell, 0.5f, 0.35f);
+                            case 3: return withCoat(cell, 1.0f, 0.6f);
+                            default: return cell;
+                        }
+                    }), false, glm::normalize(glm::vec3(-0.55f, 0.4f, -0.73f))});
+    // Everything but the film at once (ior/specular + coat + sheen + anisotropy): rows = dielectric, metal.
+    addCombination(out, "all-lobes",
+                   {std::vector<float>(4, 0.3f), {0.0f, 1.0f}, copper, grid(2, 4, [&](size_t, size_t c) {
+                        switch (c) {
+                            case 0: return withAniso(withSheen(withCoat(withSpecular(none, 1.8f, 0.7f, glm::vec3(1.0f, 0.8f, 0.6f)), 0.5f, 0.35f), white, 0.4f), 0.5f, quarter);
+                            case 1: return withAniso(withSheen(withCoat(withSpecular(none, 1.8f, 0.7f, glm::vec3(1.0f, 0.8f, 0.6f)), 0.5f, 0.35f), white, 0.4f), 1.0f, 0.0f);
+                            case 2: return withAniso(withSheen(withCoat(withSpecular(none, 2.4f, 1.0f, white), 1.0f, 0.3f), orange, 0.75f), 1.0f, half);
+                            default: return withSheen(withCoat(withSpecular(none, 1.5f, 0.5f, glm::vec3(2.0f, 1.0f, 0.5f)), 1.0f, 0.6f), blue, 0.4f);
+                        }
+                    }), true});
+    // Furnace over every implemented combination: white base, environment 1, no sun.  Rows 0-1 dielectric, rows 2-3 metal; the ten
+    // combinations run over (row % 2, column); the column roughness varies the base lobe.
+    {
+        const std::vector<Cell> combos{
+            withSheen(withCoat(none, 1.0f, 0.3f), white, 0.4f),                                                           // coat + sheen
+            withCoat(withAniso(none, 1.0f, quarter), 1.0f, 0.3f),                                                         // aniso + coat
+            withSheen(withAniso(none, 1.0f, quarter), white, 0.4f),                                                       // aniso + sheen
+            withSheen(withSpecular(none, 1.8f, 0.7f, glm::vec3(1.0f, 0.8f, 0.6f)), white, 0.4f),                          // specular + sheen
+            withCoat(withIrid(none, 1.0f, 1.3f, 400.0f), 1.0f, 0.3f),                                                     // irid + coat
+            withSheen(withIrid(none, 1.0f, 1.3f, 400.0f), white, 0.4f),                                                   // irid + sheen
+            withAniso(withIrid(none, 1.0f, 1.3f, 400.0f), 1.0f, quarter),                                                 // irid + aniso
+            withSpecular(withIrid(none, 1.0f, 1.3f, 400.0f), 1.8f, 0.7f, glm::vec3(1.0f, 0.8f, 0.6f)),                    // irid + specular
+            withThin(withCoat(none, 1.0f, 0.3f), 1.0f, white),                                                            // thin + coat
+            withAniso(withSheen(withCoat(withIrid(withSpecular(none, 1.8f, 0.7f, glm::vec3(1.0f, 0.8f, 0.6f)), 1.0f, 1.3f, 400.0f), 1.0f, 0.3f), white, 0.4f), 1.0f, quarter)};
+        MaterialScenarioSpec furnace;
+        furnace.name           = declaredName("furnace-combinations");
+        furnace.roughness      = {0.2f, 0.35f, 0.5f, 0.7f, 0.9f};
+        furnace.metallic       = {0.0f, 0.0f, 1.0f, 1.0f};
+        furnace.baseColor      = glm::vec3(1.0f);
+        furnace.environment    = 1.0f;
+        furnace.combedCarriers = true;
+        furnace.combo          = grid(4, 5, [&](size_t r, size_t c) { return combos[(r % 2) * 5 + c]; });
+        out.push_back(furnace);
+    }
 }
 
 const std::vector<MaterialScenarioSpec>& specs() {
@@ -193,7 +410,7 @@ const std::vector<MaterialScenarioSpec>& specs() {
     static const std::vector<float> backWeights(2, 1.0f);
     static const std::vector<float> backRadii{0.08f, 0.16f};
     static const glm::vec3 backSun = glm::normalize(glm::vec3(0.15f, 0.25f, -0.96f));
-    static const std::vector<MaterialScenarioSpec> all{
+    static const std::vector<MaterialScenarioSpec> baseSpecs{
         {"base-grid-sun", roughness, metallic, copper, true, 3.0f, towardSun, 0.0f},
         {"base-grid-env", roughness, metallic, copper, false, 0.0f, towardSun, 0.5f},
         // The same scene as base-grid-env without the specular transport: the resolve
@@ -345,6 +562,11 @@ const std::vector<MaterialScenarioSpec>& specs() {
          .volumetricRadius = backRadii, .volumetricColor = volColors, .volumetricRadiusScale = volScales,
          .volumetricAnisotropy = volAnisotropy, .cameraDistance = 4.0f},
     };
+    static const std::vector<MaterialScenarioSpec> all = [&] {
+        std::vector<MaterialScenarioSpec> v = baseSpecs;
+        addCombinations(v);
+        return v;
+    }();
     return all;
 }
 }
@@ -384,7 +606,7 @@ void MaterialValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& textur
         // F15.3 (ticket 16): the thin point-light fixture uses single-sided quads (generatePlane lies in XZ with normal +Y; the
         // instance is rotated by +90 degrees about X so the normal faces the camera).
         const auto sphere = s.quadCarriers ? ProceduralMeshes::generatePlane(2.0f * SphereRadius, 2.0f * SphereRadius, 8, 8)
-            : s.hasAnisotropyGrid()
+            : (s.hasAnisotropyGrid() || s.combedCarriers)
             ? ProceduralMeshes::generateCombedSphere(SphereRadius, SphereSlices, SphereStacks, glm::vec3(1.0f, 0.0f, 0.0f), handedness)
             : ProceduralMeshes::generateSphere(SphereRadius, SphereSlices, SphereStacks);
         return scene.uploadMesh(sphere.positions, sphere.normals, sphere.tangents, sphere.uvs, sphere.indices);
@@ -472,6 +694,46 @@ void MaterialValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& textur
                 description->volume.emplace(); // a solid: thickness = the sphere diameter, neutral attenuation
                 description->volume->thickness = 2.0f * SphereRadius;
                 material.extension = std::move(description);
+            }
+            if (s.hasComboGrid()) {
+                // F15.3 (ticket 19): one sphere, any subset of the lobes (the cell of this row and column).
+                const auto& cell = s.combo[row * s.roughness.size() + column];
+                auto description = std::make_shared<MaterialDescription>();
+                const glm::vec3 sc = cell.specularColor, sh = cell.sheenColor, tc = cell.thinColor;
+                if (cell.hasSpecular) {
+                    description->specular.emplace();
+                    description->specular->ior            = cell.ior;
+                    description->specular->specularFactor = cell.specularFactor;
+                    description->specular->specularColor  = {sc.x, sc.y, sc.z};
+                }
+                if (cell.coatFactor > 0.0f) {
+                    description->clearcoat.emplace();
+                    description->clearcoat->factor    = cell.coatFactor;
+                    description->clearcoat->roughness = cell.coatRoughness;
+                }
+                if (sh != glm::vec3(0.0f)) {
+                    description->sheen.emplace();
+                    description->sheen->color     = {sh.x, sh.y, sh.z};
+                    description->sheen->roughness = cell.sheenRoughness;
+                }
+                if (cell.anisoStrength > 0.0f) {
+                    description->anisotropy.emplace();
+                    description->anisotropy->strength = cell.anisoStrength;
+                    description->anisotropy->rotation = cell.anisoRotation;
+                }
+                if (cell.iridFactor > 0.0f) {
+                    description->iridescence.emplace();
+                    description->iridescence->factor       = cell.iridFactor;
+                    description->iridescence->ior          = cell.iridIor;
+                    description->iridescence->thicknessMax = cell.iridThickness;
+                }
+                if (cell.thinWeight > 0.0f) {
+                    description->subsurface.emplace();
+                    description->subsurface->mode   = SubsurfaceMode::Thin;
+                    description->subsurface->weight = cell.thinWeight;
+                    description->subsurface->color  = {tc.x, tc.y, tc.z};
+                }
+                if (featureMask(*description) != 0) material.extension = std::move(description);
             }
             if (s.hasIridescenceGrid()) {
                 auto description = std::make_shared<MaterialDescription>();

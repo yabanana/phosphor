@@ -10,6 +10,7 @@
 #include "null_texture_manager.h"
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <fstream>
 #include <regex>
@@ -20,7 +21,7 @@
 using namespace phosphor;
 
 TEST_CASE("F15.3 material scenarios are exactly the nine declared names") {
-    CHECK(MaterialValidation::scenarios().size() == 45);
+    CHECK(MaterialValidation::scenarios().size() == 66);
     for (auto name : {"base-grid-sun", "base-grid-env", "base-grid-env-resolve", "furnace-base", "furnace-resolve",
                       "roughness-extremes", "roughness-extremes-sun", "specular-grid-sun", "specular-grid-env-resolve", "specular-grid-point",
                       "specular-grid-env", "furnace-specular", "clearcoat-grid-sun", "clearcoat-grid-env-resolve",
@@ -31,7 +32,13 @@ TEST_CASE("F15.3 material scenarios are exactly the nine declared names") {
                       "iridescence-grid-env-resolve", "iridescence-grid-env", "iridescence-grid-point", "furnace-iridescence",
                       "subsurface-thin-sun", "subsurface-thin-env-resolve", "subsurface-thin-env", "subsurface-thin-point",
                       "furnace-thin-subsurface", "subsurface-volumetric-sun", "subsurface-volumetric-radius",
-                      "subsurface-volumetric-subpixel", "subsurface-volumetric-subpixel-off", "subsurface-volumetric-backlit"})
+                      "subsurface-volumetric-subpixel", "subsurface-volumetric-subpixel-off", "subsurface-volumetric-backlit",
+                      "combo-coat-sheen-sun", "combo-coat-sheen-env", "combo-aniso-coat-sun", "combo-aniso-coat-env",
+                      "combo-aniso-sheen-sun", "combo-aniso-sheen-env", "combo-specular-sheen-sun", "combo-specular-sheen-env",
+                      "combo-irid-coat-sun", "combo-irid-coat-env", "combo-irid-sheen-sun", "combo-irid-sheen-env",
+                      "combo-irid-aniso-sun", "combo-irid-aniso-env", "combo-irid-specular-sun", "combo-irid-specular-env",
+                      "combo-thin-coat-sun", "combo-thin-coat-env", "combo-all-lobes-sun", "combo-all-lobes-env",
+                      "furnace-combinations"})
         CHECK(MaterialValidation::validScenario(name));
     CHECK_FALSE(MaterialValidation::validScenario("unknown"));
     CHECK_THROWS(MaterialValidation{"unknown"});
@@ -1214,4 +1221,126 @@ TEST_CASE("F15.3 the sub-pixel pair differs only by the block, the grids frame e
         }
         f.teardown(ecs, scene);
     }
+}
+
+
+TEST_CASE("F15.3 (ticket 19) combination grids: one cell per sphere, the lobes in play, sun / environment pairs, furnace") {
+    struct Expected {
+        const char* name;
+        u32         rows, columns, features; // features: the union of the cells' feature bits
+    };
+    constexpr u32 Spec = MATERIAL_FEATURE_SPECULAR_IOR, Coat = MATERIAL_FEATURE_CLEARCOAT, Sheen = MATERIAL_FEATURE_SHEEN,
+                  Aniso = MATERIAL_FEATURE_ANISOTROPY, Irid = MATERIAL_FEATURE_IRIDESCENCE, Thin = MATERIAL_FEATURE_SUBSURFACE;
+    const Expected expected[] = {{"coat-sheen", 3, 4, Coat | Sheen},      {"aniso-coat", 2, 4, Aniso | Coat},
+                                 {"aniso-sheen", 2, 4, Aniso | Sheen},    {"specular-sheen", 2, 4, Spec | Sheen},
+                                 {"irid-coat", 2, 4, Irid | Coat},        {"irid-sheen", 2, 4, Irid | Sheen},
+                                 {"irid-aniso", 2, 4, Irid | Aniso},      {"irid-specular", 4, 4, Irid | Spec},
+                                 {"thin-coat", 2, 4, Thin | Coat},        {"all-lobes", 2, 4, Spec | Coat | Sheen | Aniso}};
+    for (const auto& e : expected) {
+        for (const char* suffix : {"-sun", "-env"}) {
+            const std::string name = std::string("combo-") + e.name + suffix;
+            const auto&       s    = MaterialValidation::spec(name);
+            REQUIRE(s.hasComboGrid());
+            CHECK_FALSE(s.hasSpecularGrid());
+            CHECK_FALSE(s.hasClearcoatGrid());
+            CHECK_FALSE(s.hasSheenGrid());
+            CHECK_FALSE(s.hasAnisotropyGrid());
+            CHECK_FALSE(s.hasIridescenceGrid());
+            CHECK_FALSE(s.hasSubsurfaceGrid());
+            CHECK(s.metallic.size() == e.rows);
+            CHECK(s.roughness.size() == e.columns);
+            REQUIRE(s.combo.size() == size_t(e.rows) * e.columns);
+            // the sun key lights with the sun only, the environment key with the environment 0.5 only
+            const bool sunKey = std::string(suffix) == "-sun";
+            CHECK(s.sun == sunKey);
+            CHECK(s.sunIrradiance == (sunKey ? 3.0f : 0.0f));
+            CHECK(s.environment == (sunKey ? 0.0f : 0.5f));
+            CHECK(s.pointLights.empty());
+            // the grid carries exactly the declared feature union
+            ECS ecs;
+            GpuScene scene;
+            test::NullTextureManager textures;
+            MaterialValidation f{name};
+            f.setup(ecs, scene, textures);
+            u32 unionMask = 0;
+            for (EntityID sphere : f.spheres()) {
+                const auto& m = std::as_const(ecs).getComponent<MaterialComponent>(sphere);
+                if (m.extension) unionMask |= featureMask(*m.extension);
+                CHECK(m.baseColorTexIndex == INVALID_TEXTURE_INDEX);
+                CHECK(m.baseColorFactor == glm::vec4(s.baseColor, 1.0f));
+            }
+            CHECK(unionMask == e.features);
+            SceneStore store;
+            store.sync(ecs, scene);
+            CHECK(store.verifyAgainstEcs(ecs, scene).empty());
+            CHECK(store.featureUnion() == e.features);
+            f.teardown(ecs, scene);
+        }
+        // the environment key is the sun key's grid (same cells, rows, columns and base)
+        const auto& sun = MaterialValidation::spec(std::string("combo-") + e.name + "-sun");
+        const auto& env = MaterialValidation::spec(std::string("combo-") + e.name + "-env");
+        CHECK(sun.baseColor == env.baseColor);
+        CHECK(sun.metallic == env.metallic);
+        CHECK(sun.roughness == env.roughness);
+        CHECK(sun.combedCarriers == env.combedCarriers);
+        for (size_t i = 0; i < sun.combo.size(); ++i) {
+            CHECK(sun.combo[i].coatFactor == env.combo[i].coatFactor);
+            CHECK(sun.combo[i].anisoStrength == env.combo[i].anisoStrength);
+        }
+    }
+}
+
+TEST_CASE("F15.3 (ticket 19) combination cells: every pair grid has cells with both lobes and cells with one lobe alone") {
+    // a pair grid pins each lobe alone too: coat-sheen has the sheen-only column, aniso-coat the coat-only one and so on
+    auto lobesOf = [](const MaterialScenarioSpec::ComboCell& c) {
+        return u32(c.hasSpecular) | (c.coatFactor > 0.0f ? 2u : 0u) | (c.sheenColor != glm::vec3(0.0f) ? 4u : 0u) |
+               (c.anisoStrength > 0.0f ? 8u : 0u) | (c.iridFactor > 0.0f ? 16u : 0u) | (c.thinWeight > 0.0f ? 128u : 0u);
+    };
+    for (const char* name : {"coat-sheen", "aniso-coat", "aniso-sheen", "specular-sheen", "irid-coat", "irid-sheen", "irid-aniso",
+                             "thin-coat"}) {
+        const auto& s = MaterialValidation::spec(std::string("combo-") + name + "-sun");
+        u32 both = 0, single = 0;
+        for (const auto& cell : s.combo) {
+            const u32 mask = lobesOf(cell);
+            if (std::popcount(mask) >= 2) ++both;
+            if (std::popcount(mask) == 1) ++single;
+        }
+        CHECK(both > 0);
+        CHECK(single > 0);
+    }
+    // iridescence cells use strength 1 and the thickness is positive (a zero thickness disables the film, ticket 12 rule)
+    for (const char* name : {"irid-coat", "irid-sheen", "irid-aniso", "irid-specular"})
+        for (const auto& cell : MaterialValidation::spec(std::string("combo-") + name + "-sun").combo)
+            if (cell.iridFactor > 0.0f) {
+                CHECK(cell.iridFactor == 1.0f);
+                CHECK(cell.iridThickness > 0.0f);
+            }
+}
+
+TEST_CASE("F15.3 (ticket 19) the thin + coat grid has the sun behind the spheres; furnace-combinations holds every combination in white") {
+    const auto& thin = MaterialValidation::spec("combo-thin-coat-sun");
+    CHECK(thin.towardSun.z < -0.7f); // behind the grid (V.L about -0.73 at the centre)
+    CHECK_FALSE(thin.combedCarriers);
+    const auto& furnace = MaterialValidation::spec("furnace-combinations");
+    CHECK_FALSE(furnace.sun);
+    CHECK(furnace.environment == 1.0f);
+    CHECK(furnace.baseColor == glm::vec3(1.0f));
+    CHECK(MaterialValidation::environmentRadiance("furnace-combinations") == 1.0f);
+    CHECK(furnace.metallic == std::vector<float>{0.0f, 0.0f, 1.0f, 1.0f});
+    REQUIRE(furnace.combo.size() == 20);
+    // rows 0-1 (dielectric) and rows 2-3 (metal) run the same ten combinations
+    for (size_t i = 0; i < 10; ++i) {
+        CHECK(furnace.combo[i].coatFactor == furnace.combo[10 + i].coatFactor);
+        CHECK(furnace.combo[i].iridFactor == furnace.combo[10 + i].iridFactor);
+    }
+    ECS ecs;
+    GpuScene scene;
+    test::NullTextureManager textures;
+    MaterialValidation f{"furnace-combinations"};
+    f.setup(ecs, scene, textures);
+    SceneStore store;
+    store.sync(ecs, scene);
+    CHECK(store.featureUnion() == (MATERIAL_FEATURE_SPECULAR_IOR | MATERIAL_FEATURE_CLEARCOAT | MATERIAL_FEATURE_SHEEN |
+                                   MATERIAL_FEATURE_ANISOTROPY | MATERIAL_FEATURE_IRIDESCENCE | MATERIAL_FEATURE_SUBSURFACE));
+    f.teardown(ecs, scene);
 }
