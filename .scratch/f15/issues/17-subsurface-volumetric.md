@@ -6,14 +6,14 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 16
 
-**Status:** ready-for-agent
+**Status:** resolved PARTIAL (2026-11-14): side-lit bound not met on valid OpenPBR ground truth; ticket 18 triggered and closed by its fallback (screen-space diffusion stays); diffusion cost → ticket 24
 
-- [ ] Side-lit volumetric fixtures vs Mitsuba 3.9.1 `volpath` random walk (homogeneous medium inside a boundary with the engine's roughness) on the piece mask: decision-11 subsurface bound
-- [ ] Back-lit thick fixture measured and reported, not gated (declared limit of screen-space diffusion)
-- [ ] Radius sweep monotonic; sub-pixel radius equals subsurface-off within FP noise; negative control (diffusion off) fails
-- [ ] Forced-overflow capture (`--debug-meshlets 1 --debug-meshlets-corrupt count`, as `tools/f13_overflow_emission_check.sh`) equals the meshlet path on the ticket's fixture
-- [ ] Scenes without subsurface unchanged (visual_check 0 px); diffusion pass cost measured
-- [ ] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
+- [ ] Side-lit volumetric fixtures vs Mitsuba 3.9.1 `volpath` random walk (homogeneous medium inside a boundary with the engine's roughness) on the piece mask: decision-11 subsurface bound — NOT met (gated mean 0.25-0.36, p95 0.74-0.92; confinement, see ticket 18)
+- [x] Back-lit thick fixture measured and reported, not gated (declared limit of screen-space diffusion) — reported: mean error 0.98-1.0 (engine near black)
+- [ ] Radius sweep monotonic; sub-pixel radius equals subsurface-off within FP noise; negative control (diffusion off) fails — engine bleed monotonic, sub-pixel equal (0.000000), diffusion-off fails; the sweep KEY fails against the truth (skin saturates): partial
+- [x] Forced-overflow capture (`--debug-meshlets 1 --debug-meshlets-corrupt count`, as `tools/f13_overflow_emission_check.sh`) equals the meshlet path on the ticket's fixture — engine agent run: mean |overflow - normal| 1.3e-5 (limit 2e-3); rerun in the ticket-24 battery
+- [ ] Scenes without subsurface unchanged (visual_check 0 px); diffusion pass cost measured — visual_check 0 px and F13 exact captures 0 px (orchestrator mid-phase battery); diffusion pass cost → ticket 24
+- [x] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames — archive_check PASS, hitch_check OK (mid-phase battery); O7 0/0 at warmup 64 (agent)
 
 ## Comments
 
