@@ -756,6 +756,26 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             // F15.1 (ticket 05): the scene viewer applies the file after the glTF loads,
             // before the scene store mirrors the library (records reach the GPU as deltas).
             out.materialOverridesPath = std::string(*value);
+        } else if (arg == "--corpus-rig") {
+            // F15.3 (ticket 22): the declared Phosphor rig of the Khronos corpus run, camera yaw,pitch in degrees around the model bounds.
+            const auto value = needValue();
+            if (!value) return false;
+            const size_t comma = value->find(',');
+            const std::string text(*value);
+            char* end = nullptr;
+            const float yaw = std::strtof(text.c_str(), &end);
+            if (comma == std::string_view::npos || end != text.c_str() + comma) {
+                error = "--corpus-rig: expected YAW,PITCH in degrees";
+                return false;
+            }
+            const float pitch = std::strtof(text.c_str() + comma + 1, &end);
+            if (*end != 0 || !std::isfinite(yaw) || !std::isfinite(pitch) || std::abs(yaw) > 360 || std::abs(pitch) > 85) {
+                error = "--corpus-rig: expected YAW,PITCH with |yaw| <= 360 and |pitch| <= 85 degrees";
+                return false;
+            }
+            out.corpusRig = true;
+            out.corpusYaw = yaw;
+            out.corpusPitch = pitch;
         } else if (arg == "--debug-rt") {
             if (!needCount(out.debugRt)) return false;
             rtSettingsSpecified = true;
@@ -1255,6 +1275,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if(out.captureLinearSignal==8&&(out.gi==GiMode::Off||out.lightingDenoise!=LightingDenoiseMode::Custom)){error="Filtered indirect capture requires GI and --lighting-denoise custom";return false;}
     if(out.captureLinearSignal==6 && out.reflections==ReflectionMode::Off){error="Specular capture requires --reflections";return false;}
     if(out.captureLinearSignal==7 && out.ao==AoMode::Off){error="AO capture requires --ao";return false;}
+    if(out.corpusRig && (!out.bench||*out.bench!=3||out.scenePath.empty()||out.scenePath=="procedural")){error="--corpus-rig requires --bench 4 and a glTF --scene";return false;}
     if(!out.materialOverridesPath.empty() && (!out.bench||*out.bench!=3||out.scenePath.empty()||out.scenePath=="procedural")){error="--material-overrides requires --bench 4 and a glTF --scene (the overrides name its materials)";return false;}
     if(out.transmissionMotion && (out.materialScene.empty()||!TransmissionValidation::validScenario(out.materialScene))){error="--transmission-motion requires a transmission --material-scenario";return false;}
     if(out.materialToggleEvery>0 && (out.materialScene.empty()||!MaterialValidation::validScenario(out.materialScene)||!MaterialValidation::spec(out.materialScene).hasSpecularGrid())){error="--material-toggle-every requires a specular grid --material-scenario";return false;}

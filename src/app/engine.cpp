@@ -97,6 +97,8 @@ GiEnvironment declaredEnvironment(const AtmospherePasses* atmosphere,const Launc
     GiEnvironment e{};if(options.reflectionScene=="specular-environment")e.skyRadiance={.03f,.035f,.045f};
     // F15.3: material-validation scenarios declare one constant isotropic environment.
     if(!options.materialScene.empty()){const float L=MaterialValidation::environmentRadiance(options.materialScene);e.skyRadiance={L,L,L};}
+    // F15.3 (ticket 22): the Khronos corpus rig declares one constant isotropic environment (testbench/corpus_rig.h).
+    if(options.corpusRig){const float L=CorpusRig::environmentRadiance;e.skyRadiance={L,L,L};}
     return e;
 }
 }
@@ -1195,6 +1197,8 @@ void Engine::switchTestBench(TestBenchType type) {
     framesOnBench_ = 0;
     TestBenchParams benchParams;
     benchParams.scenePath = options_.scenePath;
+    benchParams.corpusRig = {options_.corpusRig, options_.corpusYaw, options_.corpusPitch,
+                             static_cast<float>(std::max<u32>(context_->width(), 1)) / static_cast<float>(std::max<u32>(context_->height(), 1))};
     benchParams.materialOverridesPath = options_.materialOverridesPath;
     benchParams.materialToggleEvery=options_.materialToggleEvery;benchParams.transmissionMotion=options_.transmissionMotion;benchParams.materialScenario=options_.materialScene;benchParams.lightingScenario=options_.lightingScene;benchParams.reflectionScenario=options_.reflectionScene;
     benchParams.instances         = options_.sceneInstances;
@@ -1757,7 +1761,7 @@ bool Engine::frame(float dt) {
                         (options_.reflections!=ReflectionMode::Off && reflections_&&reflections_->ready()?8u:0u) | (reflections_&&reflections_->ready()?16u|RESOLVE_EXTERNAL_DIFFUSE:0u) |
                         // F15.3: a material scenario without the reflection composite has the
                         // resolve evaluate its declared environment (deterministic furnace).
-                        (!options_.materialScene.empty() && !(reflections_&&reflections_->ready())?16u:0u);
+                        ((!options_.materialScene.empty()||options_.corpusRig) && !(reflections_&&reflections_->ready())?16u:0u);
         visibility_->prepareLighting(flags,shadows_->sunIndex(),environment.skyRadiance,environment.sunAngularRadius);
     }
     if(referenceSnapshot_) {
@@ -1768,7 +1772,7 @@ bool Engine::frame(float dt) {
         camera.jitterPixels[0]=temporal.jitter[0];camera.jitterPixels[1]=temporal.jitter[1];
         // The snapshot carries the scene's declared environment (F15.3: the material scenarios
         // declare theirs, which the reference needs); without a fixture it is unchanged.
-        const GiEnvironment environment=(atmosphere_||!options_.materialScene.empty())?declaredEnvironment(atmosphere_.get(),options_):GiEnvironment{};
+        const GiEnvironment environment=(atmosphere_||!options_.materialScene.empty()||options_.corpusRig)?declaredEnvironment(atmosphere_.get(),options_):GiEnvironment{};
         referenceSnapshot_->prepareFrame(ref,camera,lights_,environment,*store_,directLighting_.get());
     }
     if(linearCapture_) {

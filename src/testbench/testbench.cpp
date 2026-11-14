@@ -63,7 +63,7 @@ std::unique_ptr<TestBench> createTestBench(TestBenchType type, const TestBenchPa
             return std::make_unique<PBRGrid>();
         case TestBenchType::StressTest:  return std::make_unique<StressTest>();
         case TestBenchType::SceneViewer:
-            return std::make_unique<SceneViewer>(params.scenePath, params.materialOverridesPath);
+            return std::make_unique<SceneViewer>(params.scenePath, params.materialOverridesPath, params.corpusRig);
         case TestBenchType::ManyLights:  return std::make_unique<ManyLights>(params);
         case TestBenchType::CornellBox:
             if(!params.reflectionScenario.empty())return std::make_unique<ReflectionValidation>(params.reflectionScenario);

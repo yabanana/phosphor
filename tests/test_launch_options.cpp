@@ -1559,3 +1559,20 @@ TEST_CASE("F15.1 ticket 15 --shadow-transmittance-divisor accepts 1, 2 and 4 (de
     CHECK_FALSE(parse({"--shadow-transmittance-divisor", "3"}, options, error));
     CHECK_FALSE(parse({"--shadow-transmittance-divisor", "0"}, options, error));
 }
+
+TEST_CASE("F15 launch option --corpus-rig parses YAW,PITCH and needs the scene viewer with a glTF scene") {
+    LaunchOptions o;
+    std::string error;
+    REQUIRE(parse({"--bench", "4", "--scene", "m.gltf", "--corpus-rig", "-35.5,12"}, o, error));
+    CHECK(o.corpusRig);
+    CHECK(o.corpusYaw == doctest::Approx(-35.5f));
+    CHECK(o.corpusPitch == doctest::Approx(12.0f));
+    LaunchOptions bad;
+    CHECK_FALSE(parse({"--corpus-rig", "0,0"}, bad, error));
+    CHECK(error.find("--corpus-rig") != std::string::npos);
+    CHECK_FALSE(parse({"--bench", "4", "--scene", "procedural", "--corpus-rig", "0,0"}, bad, error));
+    CHECK_FALSE(parse({"--bench", "4", "--scene", "m.gltf", "--corpus-rig", "10"}, bad, error));
+    CHECK_FALSE(parse({"--bench", "4", "--scene", "m.gltf", "--corpus-rig", "10,90"}, bad, error));
+    CHECK_FALSE(parse({"--bench", "4", "--scene", "m.gltf", "--corpus-rig", "x,y"}, bad, error));
+    CHECK_FALSE(parse({"--bench", "4", "--scene", "m.gltf", "--corpus-rig", "0,0,1"}, bad, error));
+}

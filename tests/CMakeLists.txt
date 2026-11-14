@@ -11,6 +11,7 @@ add_executable(phosphor_tests
     test_barrier_plan.cpp
     test_bench_report.cpp
     test_compile_queue.cpp
+    test_corpus_rig.cpp
     test_cull_math.cpp
     test_ecs_changes.cpp
     test_file_watcher.cpp

@@ -128,6 +128,7 @@ add_library(phosphor_core STATIC
     src/scene/procedural.cpp
     src/scene/texture_manager.cpp
     src/testbench/cornell_box.cpp
+    src/testbench/corpus_rig.cpp
     src/testbench/lighting_validation.cpp
     src/testbench/material_validation.cpp
     src/testbench/transmission_validation.cpp

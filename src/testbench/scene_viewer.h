@@ -2,6 +2,7 @@
 
 #include "testbench/testbench.h"
 #include "scene/components.h"
+#include "testbench/corpus_rig.h"
 #include <vector>
 #include <string>
 
@@ -14,8 +15,8 @@ namespace phosphor {
 
 class SceneViewer final : public TestBench {
 public:
-  explicit SceneViewer(std::string scenePath = {}, std::string materialOverridesPath = {})
-      : scenePath_(std::move(scenePath)), materialOverridesPath_(std::move(materialOverridesPath)) {}
+  explicit SceneViewer(std::string scenePath = {}, std::string materialOverridesPath = {}, CorpusRigRequest rig = {})
+      : scenePath_(std::move(scenePath)), materialOverridesPath_(std::move(materialOverridesPath)), rig_(rig) {}
   void setup(ECS &ecs, GpuScene &gpuScene, TextureManager &textures) override;
   void update(float dt, ECS &ecs) override;
   void teardown(ECS &ecs, GpuScene &gpuScene) override;
@@ -32,6 +33,8 @@ private:
     std::string scenePath_;
     std::string materialOverridesPath_; // F15.1 --material-overrides (empty = none)
     std::string loadedPath_;
+    CorpusRigRequest rig_;      // F15.3 ticket 22 (--corpus-rig)
+    CorpusRigView    rigView_;  // framing computed at setup from the loaded entities' world bounds
 };
 
 } // namespace phosphor

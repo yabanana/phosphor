@@ -357,6 +357,8 @@ struct LaunchOptions {
     bool         rtProxyManifest = false;      // --rt-proxy off|manifest
     std::string  rtProxyManifestPath;          // empty = scene's default manifest, missing = full geometry
     std::string  materialOverridesPath;        // F15.1 --material-overrides FILE (empty = none), applied by the scene viewer
+    bool         corpusRig = false;            // F15.3 ticket 22 --corpus-rig YAW,PITCH: declared light rig + bounds framing (testbench/corpus_rig.h)
+    float        corpusYaw = 0, corpusPitch = 0;
     u32          debugRt = 0;                  // --debug-rt N: readback/check cadence, 0 = off
     bool         debugRtDeform = false;       // diagnostic mesh-0 deformation; raster bounds are unchanged
     RtProxyTransition debugRtProxyTransition = RtProxyTransition::None;
