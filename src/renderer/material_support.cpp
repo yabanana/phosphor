@@ -110,10 +110,16 @@ const MaterialSupportTable& currentSupportTable() {
         // environment; Schlick Fresnel (the exact one differs by <= 1.2 % mean on the fixtures); direct light through two interfaces is
         // excluded (caustics); non-shadow GI/probe/secondary RT hits see glass as an opaque base reduction; a rough thin-walled surface and the
         // thickness/transmission textures are not validated against an independent reference.
+        // F15.1 (ticket 14): RT shadow rays (sun, DI visibility ReSTIR and clustered, GI shadow rays, reflection secondary lighting) cross glass
+        // on a straight line and multiply an RGB transmittance: (1 - Schlick F) per surface at the ray angle, transmission x (1 - metallic) x
+        // baseColor tint once at the entry surface (a thin-walled surface counts once), Beer-Lambert from the signed entry/exit distance sum,
+        // order independent; opaque and alpha-masked casters stop the ray; the shadow is NOT shifted by refraction (a planar slab shifts it by
+        // centimetres) and focuses no light (caustics); the CSM path keeps opaque casters until ticket 15.
         FeatureSupportEntry& transmission = t.features[static_cast<u32>(MaterialFeature::Transmission)];
         transmission.level                = SupportLevel::Approximated;
         transmission.approximation        = "rt_refraction_one_fresnel_chosen_sample;rt_off_probes_environment_along_refracted_ray;factor_at_visible_surface_only;"
-                                            "at_most_4_interface_events;schlick_fresnel;caustics_excluded;secondary_gi_and_probe_hits_ignore_transmission";
+                                            "at_most_4_interface_events;schlick_fresnel;caustics_excluded;secondary_gi_and_probe_hits_ignore_transmission;"
+                                            "rt_shadow_rays_attenuate_through_glass_straight_line;csm_shadows_opaque";
         FeatureSupportEntry& volume = t.features[static_cast<u32>(MaterialFeature::Volume)];
         volume.level                = SupportLevel::Approximated;
         volume.approximation        = "beer_lambert_along_real_inside_segment_with_rt;rt_off_uses_thickness_hint;thickness_texture_ignored_with_rt;no_scattering";

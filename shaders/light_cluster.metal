@@ -224,8 +224,12 @@ kernel void DI_KERNEL(light_cluster_shade_rt)(constant GPUDIParams& p [[buffer(0
             const DISample sample = diSampleTexturedLight(lights[lightIndex], lightIndex, uv,
                                                           diVec(surface.position), emitters, materials, textures);
             const float3 contribution = DI_FN(diBRDFLobe)(surface, sample, diEmitterSpecularWeight(p, lights[lightIndex], surface), lobe, DI_FN(diEmitterCoatWeight)(p, lights[lightIndex], lobe));diRecordNonfinite(contribution,signalErrors,0u);
-            if (sample.valid && sample.pdfArea > 0 && (!(p.flags & DI_ENABLE_VISIBILITY) || !any(contribution > 0) ||
-                diEndpointVisible(surface, sample, tlas, ift, instances, p.slotCount))) {value += contribution / sample.pdfArea;diRecordNonfinite(value,signalErrors,2u);}
+            if (sample.valid && sample.pdfArea > 0) {
+                // F15.1 (ticket 14): the visibility ray's RGB transmittance (0 = blocked) scales the contribution.
+                const float3 transmittance = ((p.flags & DI_ENABLE_VISIBILITY) && any(contribution > 0))
+                    ? diEndpointTransmittance(surface, sample, tlas, ift, instances, p.slotCount) : float3(1);
+                if (any(transmittance > 0)) {value += contribution * transmittance / sample.pdfArea;diRecordNonfinite(value,signalErrors,2u);}
+            }
         }
     }
     diRecordNonfinite(value,signalErrors,1u);

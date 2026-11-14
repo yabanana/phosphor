@@ -149,6 +149,13 @@ namespace phosphor {
 //                      the visibility + mesh path with direct-lighting passes)
 //   --debug-lobe-guide-corrupt  negative control of the check above
 //   --debug-lobe-guide-dump FILE  raw guide bytes of the last checked frame
+//   --debug-transmittance-dedup on|off  F15.1 (ticket 14): off removes the
+//                      per-primitive duplicate filter of the shadow-ray
+//                      transmittance accumulation (negative control; needs
+//                      --rt on; default on)
+//   --debug-transmittance-inject  F15.1 (ticket 14): every transmissive
+//                      triangle accumulates twice (spike control of the
+//                      duplicate filter; needs --rt on)
 //   --geometry-path indexed|mesh  F6.3: the scene is drawn with indexed draws
 //                      (the F5 reference, default) or with object + mesh
 //                      shaders over meshlets (needs --gpu-driven on)
@@ -423,6 +430,12 @@ struct LaunchOptions {
     bool debugLobeGuideCorrupt = false;
     std::string debugLobeGuideDump;
     bool debugGiNoVisibility=false; // Physical quality negative; invariant checks stay enabled.
+    // F15.1 (ticket 14): --debug-transmittance-dedup on|off.  off removes the per-primitive duplicate filter of the transmittance accumulation
+    // (negative control: if hardware invokes the intersection function twice for a triangle the surface factor is applied twice).
+    bool debugTransmittanceDedup=true;
+    // --debug-transmittance-inject: every transmissive triangle invokes the accumulation twice (a deliberate duplicate: with the filter on the
+    // image is unchanged, with --debug-transmittance-dedup off every surface factor is applied twice).
+    bool debugTransmittanceInject=false;
     std::string exportReference, captureLinear, captureLinearSequence, lightingScene,reflectionScene,materialScene;
     // F15.3 (ticket 13): --capture-linear-accumulate N averages the last N frames (ending at --capture-linear-frame) of the
     // linear signal on the CPU (test infrastructure for the one-stochastic-sample-per-pixel transport; 0 = the single frame).

@@ -692,6 +692,13 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.debugLobeGuideDump = std::string(*v);
         } else if (arg == "--debug-gi-no-visibility") {
             out.debugGiNoVisibility=true;
+        } else if (arg == "--debug-transmittance-inject") {
+            out.debugTransmittanceInject = true;
+        } else if (arg == "--debug-transmittance-dedup") {
+            auto v = needValue(); if (!v) return false;
+            if (*v == "on") out.debugTransmittanceDedup = true;
+            else if (*v == "off") out.debugTransmittanceDedup = false;
+            else { error = "--debug-transmittance-dedup: expected on or off"; return false; }
         } else if (arg == "--debug-gi-corrupt") {
             auto v=needValue();if(!v)return false;
             if(*v=="cache")out.debugGiCorrupt=1;else if(*v=="probe")out.debugGiCorrupt=2;else if(*v=="pdf")out.debugGiCorrupt=3;
@@ -1238,6 +1245,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
         error="--capture-linear-accumulate requires --capture-linear and N <= --capture-linear-frame + 1 (the averaged frames end at the capture frame)";return false;}
     if((!out.captureLinear.empty() || !out.captureLinearSequence.empty()) && (!out.visibility || !out.benchmark())){error="Linear capture requires --render-path visibility and --frames";return false;}
     if((out.giProbeAnchor||out.giSpacing||out.giGrid[0])&&out.gi==GiMode::Off){error="GI volume controls require --gi";return false;}
+    if((!out.debugTransmittanceDedup || out.debugTransmittanceInject) && !out.rtEnabled){error="--debug-transmittance-dedup off / --debug-transmittance-inject require --rt on";return false;}
     if(out.debugGiNoVisibility && (!out.debugLighting || out.gi==GiMode::Off || out.debugGiCorrupt)) {
         error="--debug-gi-no-visibility requires GI, --debug-lighting N>0 and no GI state corruption";return false;
     }

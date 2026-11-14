@@ -60,12 +60,12 @@ inline float3 reflectionSecondary(GPURtHit hit,float3 direction,
         else{GPUSampledLight l{};l.type=light.type;l.range=light.range;l.innerCone=light.innerCone;l.outerCone=light.outerCone;
             for(uint c=0;c<3;++c){l.position[c]=light.position[c];l.axisU[c]=light.direction[c];l.emission[c]=light.color[c]*light.intensity;}sample=diSampleLight(l,float2(.5f),point);}
         const float3 contribution=diBRDF(surface,sample);if(!all(isfinite(contribution))||any(contribution<0))numericError=true;
-        else if(sample.valid&&any(contribution>0)&&diEndpointVisible(surface,sample,as,ift,instances,p.slotCount))result+=contribution;
+        else if(sample.valid&&any(contribution>0))result+=contribution*diEndpointTransmittance(surface,sample,as,ift,instances,p.slotCount);
     }
     if(extra.sampledLightCount){const uint i=min(uint(giRandom(seed)*extra.sampledLightCount),extra.sampledLightCount-1u);
         const DISample sample=diSampleTexturedLight(sampled[i],i,float2(giRandom(seed),giRandom(seed)),point,emitters,materials,textures);
         if(sample.valid&&sample.pdfArea>0){const float3 contribution=diBRDF(surface,sample)*float(extra.sampledLightCount)/sample.pdfArea;
-            if(!all(isfinite(contribution))||any(contribution<0))numericError=true;else if(diEndpointVisible(surface,sample,as,ift,instances,p.slotCount))result+=contribution;}}
+            if(!all(isfinite(contribution))||any(contribution<0))numericError=true;else result+=contribution*diEndpointTransmittance(surface,sample,as,ift,instances,p.slotCount);}}
     // GI atlas is INDIRECT irradiance. Add once; AO never modulates it.
     if((p.flags&REFLECTION_ENABLE_GI)&&gi.countX>=2&&gi.countY>=2&&gi.countZ>=2)
         result+=giIrradiance(point,geometric,gi,states,irradiance,moments,true)*diVec(surface.albedo)*(1-surface.metallic)/M_PI_F;

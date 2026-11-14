@@ -353,7 +353,7 @@ static float3 tonemapACES(float3 x) {
 
 static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &frame, const device GPUMaterial *materials,
                                   const device GPULight *lights, const device TextureHandle *textures,
-                                  bool alphaTest = true, float sunVisibility = 1.0f, uint shadowLight = ~0u,
+                                  bool alphaTest = true, float3 sunVisibility = float3(1.0f), uint shadowLight = ~0u,
                                   bool replaceLocal = false, float3 localDirect = float3(0),
                                   bool useGI = false, float3 indirectIrradiance = float3(0),
                                   bool omitSpecularAmbient = false, bool physicalGI = false, bool externalDiffuse = false,
@@ -551,7 +551,8 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
             }
         }
         if (!isDirectional && replaceLocal) continue;
-        const float visibility = i == shadowLight ? sunVisibility : 1.0f;
+        // F15.1 (ticket 14): the RGB transmittance of the sun's shadow ray (1 on every channel without transmissive casters).
+        const float3 visibility = i == shadowLight ? sunVisibility : float3(1.0f);
         // F15.1 (ticket 13): a light BEHIND a thin-walled transmissive surface lights it through the transmitted lobe (delta lights only: the area
         // emitters a refracted or straight ray hits belong to the transport, decision 09).  The visible face keeps the front-hemisphere terms below.
         if (transThin && dot(N, L) < 0.0f) {

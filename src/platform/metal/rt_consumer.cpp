@@ -36,6 +36,7 @@ void RtConsumer::prepare(u32 slot, pipe::PipelineHandle handle) {
     s.table->setBuffer(r.instances, 0, 4);
     s.table->setBuffer(r.meshes, 0, 5);
     s.table->setBuffer(r.params, 0, 6);
+    s.table->setBuffer(r.extensions, 0, 7);
 }
 void RtConsumer::bind(MTL4::ArgumentTable* table, u32 asBinding, u32 iftBinding) const {
     const auto r = rt_.traceResources(slot_);

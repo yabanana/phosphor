@@ -1,6 +1,69 @@
 // One exported alpha entry shared by all statically linked RT consumers.
 #include "rt_common.h"
 
+// F15.1 (ticket 14): the transmittance of ONE transmissive triangle crossed by a RT_PROBE_SHADOW_TRANSMITTED ray, accumulated in log space
+// into the payload (order independent: no sorting of the hits).  Hardware invokes the intersection function for every non-opaque triangle the
+// ray meets; the transmissive instances are non-opaque (rt_write_instances) so that it sees them.  The caller returns false, which rejects the
+// triangle and lets the traversal continue to the light; an opaque or alpha-masked caster that is accepted ends the ray (any-hit).  The facing
+// of the hit (entry = the ray goes against the outward normal, exit = along it) comes from the world-space winding.
+inline void rtAccumulateTransmittance(uint primitive, uint slot, float2 bary, float distance, ray_data RtPayload& payload,
+                                      const device GPUMaterial& m, const device GPUInstance& instance, const device GPURtMesh& mesh,
+                                      const device RtTextureHandle* textures, const device GPUVertex* vertices, const device uint* indices,
+                                      const device GPUMaterialExtRecord* extensions, uint transmittanceFlags) {
+    ++payload.ifInvocations;
+    // The duplicate filter: Metal may invoke the function more than once for the same primitive (measured by the F15 ticket 14 spike).
+    bool seen = false;
+    for (uint i = 0; i < payload.listCount; ++i) seen |= all(payload.listed[i] == uint2(slot, primitive));
+    if (!seen) {
+        ++payload.ifDistinct;
+        if (payload.listCount < kRtTransmitList) payload.listed[payload.listCount++] = uint2(slot, primitive);
+        else ++payload.listOverflows;
+    }
+    if (seen && (transmittanceFlags & RT_TRANSMITTANCE_NO_DEDUP) == 0u) return;
+    const uint base = mesh.indexOffset + 3u * primitive;
+    const device GPUVertex& v0 = vertices[mesh.vertexOffset + indices[base]];
+    const device GPUVertex& v1 = vertices[mesh.vertexOffset + indices[base + 1u]];
+    const device GPUVertex& v2 = vertices[mesh.vertexOffset + indices[base + 2u]];
+    const float3 a = rtWorldPoint(instance, rtPosition(v0)), b = rtWorldPoint(instance, rtPosition(v1)), c = rtWorldPoint(instance, rtPosition(v2));
+    float3 n = cross(b - a, c - a);
+    const float len2 = dot(n, n);
+    if (!(len2 > 1e-30f)) return;
+    n *= rsqrt(len2);
+    if ((instance.flags & INSTANCE_FLAG_MIRRORED) != 0u) n = -n; // the world winding of a mirrored instance is reversed
+    const float3 direction = normalize(float3(payload.direction[0], payload.direction[1], payload.direction[2]));
+    const float cosine = dot(n, direction);
+    const bool entry = cosine < 0.0f;
+    const float2 uv0(v0.u, v0.v), uv1(v1.u, v1.v), uv2(v2.u, v2.v);
+    const float2 uv = uv0 * (1.0f - bary.x - bary.y) + uv1 * bary.x + uv2 * bary.y;
+    const uint features = (m.flags >> MATERIAL_FEATURE_SHIFT) & MATERIAL_FEATURES_ALL;
+    const device GPUMaterialExt1& e1 = *reinterpret_cast<const device GPUMaterialExt1*>(extensions + m.extensionIndex + 1u);
+    const bool solid = (features & MATERIAL_FEATURE_VOLUME) != 0u && e1.volumeThickness > 0.0f; // thin-walled: one surface, no medium
+    float ior = kShadowDefaultIor;
+    if ((features & MATERIAL_FEATURE_SPECULAR_IOR) != 0u)
+        ior = reinterpret_cast<const device GPUMaterialExt0*>(extensions + m.extensionIndex)->ior;
+    float ln0 = transmissionShadowLnPass(cosine, ior), ln1 = ln0, ln2 = ln0;
+    if (entry || !solid) {
+        float factor = e1.transmissionFactor;
+        if (e1.transmissionTex != INVALID_TEXTURE_INDEX) factor *= float(half(textures[e1.transmissionTex].tex.sample(kRtAlphaSampler, uv, level(0)).r));
+        float metallic = m.metallic;
+        if (m.metallicRoughnessTex != INVALID_TEXTURE_INDEX) metallic *= float(half(textures[m.metallicRoughnessTex].tex.sample(kRtAlphaSampler, uv, level(0)).b));
+        float3 tint(m.baseColor[0], m.baseColor[1], m.baseColor[2]);
+        if (m.baseColorTex != INVALID_TEXTURE_INDEX) tint *= float3(half3(textures[m.baseColorTex].tex.sample(kRtAlphaSampler, uv, level(0)).rgb));
+        factor = saturate(factor) * (1.0f - saturate(metallic));
+        ln0 += transmissionShadowLn(factor * tint.x);
+        ln1 += transmissionShadowLn(factor * tint.y);
+        ln2 += transmissionShadowLn(factor * tint.z);
+    }
+    if (solid) {
+        // Entry adds +sigma_t t, exit -sigma_t t: the sum is -sigma_t (t_exit - t_entry) over the medium's crossed length.
+        const float sign = entry ? 1.0f : -1.0f;
+        ln0 += sign * transmissionShadowSigma(e1.attenuationColor[0], e1.attenuationDistance) * distance;
+        ln1 += sign * transmissionShadowSigma(e1.attenuationColor[1], e1.attenuationDistance) * distance;
+        ln2 += sign * transmissionShadowSigma(e1.attenuationColor[2], e1.attenuationDistance) * distance;
+    }
+    payload.lnTransmittance[0] += ln0; payload.lnTransmittance[1] += ln1; payload.lnTransmittance[2] += ln2;
+}
+
 [[intersection(triangle, triangle_data, instancing)]]
 bool rt_alpha_generic(uint primitive [[primitive_id]], uint slot [[user_instance_id]],
                        float2 bary [[barycentric_coord]], float distance [[distance]],
@@ -11,15 +74,31 @@ bool rt_alpha_generic(uint primitive [[primitive_id]], uint slot [[user_instance
                        const device uint* indices [[buffer(3)]],
                        const device GPUInstance* instances [[buffer(4)]],
                        const device GPURtMesh* meshes [[buffer(5)]],
-                       constant GPURtParams& params [[buffer(6)]]) {
+                       constant GPURtParams& params [[buffer(6)]],
+                       const device GPUMaterialExtRecord* extensions [[buffer(7)]]) {
     ++payload.alphaTests;
     if (slot >= params.slotCount) return false;
     const device GPUInstance& instance = instances[slot];
     if (instance.meshIndex >= params.meshCount || instance.materialIndex >= params.materialCount) return false;
     const device GPUMaterial& m = materials[instance.materialIndex];
+    // F15.1 (ticket 14): a transmissive instance is non-opaque only so that transmittance rays see it.
+    const bool transmissive = (m.flags & (MATERIAL_FEATURE_TRANSMISSION << MATERIAL_FEATURE_SHIFT)) != 0u &&
+                              m.extensionIndex != MATERIAL_EXTENSION_INVALID;
     if (m.alphaCutoff <= 0.0f) {
-        // Must stay zero: opaque instances have the hardware Opaque option.
-        ++payload.opaqueAlphaTests;
+        if (transmissive && payload.type == RT_PROBE_SHADOW_TRANSMITTED) {
+            const device GPURtMesh& mesh = meshes[instance.meshIndex];
+            if (primitive < mesh.indexCount / 3u) {
+                rtAccumulateTransmittance(primitive, slot, bary, distance, payload, m, instance, mesh, textures, vertices, indices, extensions,
+                                          params.transmittanceFlags);
+                // The spike's control: a duplicated invocation of the same triangle (hardware does not produce one on the M5 Max, see the opt log).
+                if ((params.transmittanceFlags & RT_TRANSMITTANCE_INJECT_DUPLICATE) != 0u)
+                    rtAccumulateTransmittance(primitive, slot, bary, distance, payload, m, instance, mesh, textures, vertices, indices, extensions,
+                                              params.transmittanceFlags);
+            }
+            return false;
+        }
+        // Must stay zero: opaque instances have the hardware Opaque option (a transmissive instance is the declared exception).
+        if (!transmissive) ++payload.opaqueAlphaTests;
         return true;
     }
     const device GPURtMesh& mesh = meshes[instance.meshIndex];

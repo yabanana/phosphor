@@ -88,7 +88,7 @@ static void resolveVisibilityPixel(constant FrameConstants &frame, const device 
                                    texture2d<float, access::write> diffuse, texture2d<float, access::write> specular,
                                    texture2d<float, access::write> motion, texture2d<float, access::write> reactive,
                                    uint2 pixel, uint id, bool reuse, thread ShadingResult &cached,
-                                   float sunVisibility = 1.0f, uint sunIndex = ~0u, bool replaceLocal = false,
+                                   float3 sunVisibility = float3(1.0f), uint sunIndex = ~0u, bool replaceLocal = false,
                                    float3 localDirect = float3(0), bool useGI = false, float3 irradiance = float3(0),
                                    bool omitSpecularAmbient=false, bool physicalGI=false, bool externalDiffuse=false,
                                    float3 environment = float3(0), float sunAngularRadius = 0.0f) {
@@ -231,7 +231,7 @@ kernel void visibility_lit_resolve(
     resolveVisibilityPixel(frame, vertices, instances, materials, lights, textures, meshlets, meshletVertices,
                            triangles, a, b, p, previousInstances, temporal, color, normal, diffuse, specular, motion,
                            reactive, pixel, id, false, cached,
-                           (lighting.flags & 1u) ? sun.read(pixel).x : 1.0f, lighting.sunIndex,
+                           (lighting.flags & 1u) ? sun.read(pixel).xyz : float3(1.0f), lighting.sunIndex,
                            (lighting.flags & 2u) != 0, (lighting.flags & 2u) ? localDirect.read(pixel).xyz : float3(0),
                            (lighting.flags & 4u) != 0, (lighting.flags & 4u) ? irradiance.read(pixel).xyz : float3(0),(lighting.flags & 8u)!=0,(lighting.flags & 16u)!=0,(lighting.flags & RESOLVE_EXTERNAL_DIFFUSE)!=0,
                            float3(lighting.environment[0],lighting.environment[1],lighting.environment[2]),lighting.sunAngularRadius);

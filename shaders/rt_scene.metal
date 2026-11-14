@@ -69,7 +69,11 @@ kernel void rt_write_instances(const device GPUInstance* instances [[buffer(0)]]
             if ((material.flags & MATERIAL_FLAG_DOUBLE_SIDED) != 0u) d.options |= 1u;
             // Instance opacity overrides the BLAS geometry's original choice,
             // allowing a material to switch OPAQUE <-> MASK without a rebuild.
-            d.options |= material.alphaCutoff <= 0.0f ? 4u : 8u;
+            // F15.1 (ticket 14): a transmissive material is non-opaque too: transmittance rays must see its triangles in the intersection
+            // function (every other ray type accepts them there at once, rt_alpha_generic).
+            const bool transmissive = (material.flags & (MATERIAL_FEATURE_TRANSMISSION << MATERIAL_FEATURE_SHIFT)) != 0u &&
+                                      material.extensionIndex != MATERIAL_EXTENSION_INVALID;
+            d.options |= (material.alphaCutoff <= 0.0f && !transmissive) ? 4u : 8u;
             if (p.corruption == RT_CORRUPT_TRANSFORM) d.transform[9] += 100000.0f;
             if (p.corruption == RT_CORRUPT_MASK) d.mask = 0u;
             if (p.corruption == RT_CORRUPT_BLAS) {

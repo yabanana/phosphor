@@ -2142,6 +2142,11 @@ void Engine::onSceneCounters(u32 slot) {
         ++lightingChecks_;const bool pass=shadows_->check(slot) && (!directLighting_ || directLighting_->check(slot)) && (!gi_ || gi_->check(slot)) && reflectionPassed && volumePassed && (!atmosphere_ || atmosphere_->check(slot));
         if(!pass){if(reflectionPassed&&volumePassed)++lightingFailures_;exitCode_=1;}
         std::printf("LIGHTING check frame %llu | %s\n",static_cast<unsigned long long>(slotFrame_[slot]),pass?"PASS":"FAIL");
+        // F15.1 (ticket 14): intersection-function multiplicity of the sun's transmittance rays (the spike's measurement; only with glass).
+        if(const auto sc=shadows_->counters(slot);sc.ifInvocations)
+            std::printf("SHADOW-TRANSMITTANCE frame %llu | rays %u transmitted %u invocations %u distinct %u overflows %u dedup %s\n",
+                        static_cast<unsigned long long>(slotFrame_[slot]),sc.rays,sc.transmittedRays,sc.ifInvocations,sc.ifDistinct,sc.listOverflows,
+                        options_.debugTransmittanceDedup?(options_.debugTransmittanceInject?"on+injected-duplicates":"on"):(options_.debugTransmittanceInject?"off+injected-duplicates":"off"));
         std::fflush(stdout); // Keep each diagnostic intact beside stderr capture logs.
     }
     lastCounters_ = renderer_->counters(slot);

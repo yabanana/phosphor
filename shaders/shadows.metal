@@ -22,7 +22,7 @@ static void shadowCount(device atomic_uint* counters,uint index,uint value) {
     if(value) atomic_fetch_add_explicit(counters+index,value,memory_order_relaxed);
 }
 kernel void shadow_clear_counters(device atomic_uint* counters [[buffer(15)]],uint tid [[thread_position_in_grid]]) {
-    if(tid<8) atomic_store_explicit(counters+tid,0u,memory_order_relaxed);
+    if(tid<12) atomic_store_explicit(counters+tid,0u,memory_order_relaxed);
 }
 
 kernel void shadow_surface_guides(
@@ -251,7 +251,7 @@ kernel void shadow_csm_pcss(constant GPUShadowParams& p [[buffer(1)]],
             break;
         }
     }
-    mask.write(float4(visibility,visibility*visibility,0,1),pixel);
+    mask.write(float4(visibility,visibility,visibility,1),pixel); // the CSM visibility is grey (ticket 15 adds the transmittance map)
 }
 
 static float3 shadowSolarSample(float3 light,float angularRadius,float u,float v) {
@@ -269,7 +269,7 @@ kernel void shadow_sun_rt(instance_acceleration_structure as [[buffer(0)]],
     if(pixel.x>=p.width || pixel.y>=p.height) return;
     const uint index=pixel.y*p.width+pixel.x;
     const GPUShadowSurface s=surfaces[index];
-    float visible=1;
+    float3 visible=float3(1);
     if(s.valid && (p.flags&SHADOW_FLAG_LIGHT_VALID)) {
         const uint seed=shadowHash(index^shadowHash(p.frameIndex)^shadowHash(p.viewID)^shadowHash(p.lightID));
         const float3 towardLight=normalize(float3(p.lightDirection[0],p.lightDirection[1],p.lightDirection[2]));
@@ -281,14 +281,17 @@ kernel void shadow_sun_rt(instance_acceleration_structure as [[buffer(0)]],
         GPURtRay ray{};
         ray.ox=origin.x; ray.oy=origin.y; ray.oz=origin.z;
         ray.dx=direction.x; ray.dy=direction.y; ray.dz=direction.z; ray.tmax=p.maxTraceDistance;
-        ray.mask=RT_MASK_SHADOW; ray.type=RT_PROBE_SHADOW; ray.coneWidth=0;
+        ray.mask=RT_MASK_SHADOW; ray.type=RT_PROBE_SHADOW_TRANSMITTED; ray.coneWidth=0;
         RtPayload payload{};
         const GPURtHit hit=rtTrace(ray,as,ift,instances,p.slotCount,payload);
-        visible=hit.hit?0.0f:1.0f;
+        // F15.1 (ticket 14): an opaque or alpha-masked caster blocks the ray; transmissive casters multiplied their RGB factor into the payload.
+        visible=hit.hit?float3(0):rtShadowTransmittance(payload);
         shadowCount(counters,1,1); shadowCount(counters,2,hit.hit);
         if(hit.t==-2.0f) shadowCount(counters,7,1);
+        shadowCount(counters,8,payload.ifInvocations?1u:0u); shadowCount(counters,9,payload.ifInvocations);
+        shadowCount(counters,10,payload.ifDistinct); shadowCount(counters,11,payload.listOverflows);
     }
-    mask.write(float4(visible,visible*visible,0,1),pixel);
+    mask.write(float4(visible,1),pixel);
 }
 
 kernel void shadow_temporal(constant GPUShadowParams& p [[buffer(1)]],
@@ -299,8 +302,11 @@ kernel void shadow_temporal(constant GPUShadowParams& p [[buffer(1)]],
     if(pixel.x>=p.width || pixel.y>=p.height) return;
     const uint index=pixel.y*p.width+pixel.x;
     const GPUShadowSurface s=surfaces[index];
-    const float value=saturate(raw.read(pixel).x);
-    GPUShadowHistory h{}; h.visibility=value; h.secondMoment=value*value;
+    // F15.1 (ticket 14): the raw mask is the RGB transmittance; the scalar the variance estimator works on is its luminance (the value itself
+    // while the three channels are equal, which they are without transmissive casters).
+    const float3 raw3=saturate(raw.read(pixel).xyz);
+    const float value=(raw3.x==raw3.y&&raw3.y==raw3.z)?raw3.x:dot(raw3,float3(0.2126f,0.7152f,0.0722f));
+    GPUShadowHistory h{}; h.visibility=value; h.secondMoment=value*value; h.transmittance[0]=raw3.x; h.transmittance[1]=raw3.y; h.transmittance[2]=raw3.z;
     h.slot=s.slot; h.generation=s.generation; h.lightID=p.lightID; h.lightRevision=p.lightRevision;
     h.sceneRevision=p.sceneRevision; h.viewID=p.viewID; h.samples=1; h.valid=s.valid && (p.flags&SHADOW_FLAG_LIGHT_VALID);
     for(uint k=0;k<3;++k) { h.position[k]=s.position[k]; h.geometricNormal[k]=s.geometricNormal[k]; }
@@ -322,13 +328,14 @@ kernel void shadow_temporal(constant GPUShadowParams& p [[buffer(1)]],
                     h.samples=min(prev.samples+1u,clamp(p.historyMaxSamples,1u,64u));
                     h.visibility=shadowTemporalMean(prev.visibility,value,h.samples);
                     h.secondMoment=shadowTemporalMean(prev.secondMoment,value*value,h.samples);
+                    for(uint k=0;k<3;++k) h.transmittance[k]=shadowTemporalMean(prev.transmittance[k],raw3[k],h.samples);
                 }
             }
         }
         shadowCount(counters,accepted?3u:4u,1u);
     }
     next[index]=h;
-    mask.write(float4(h.visibility,max(0.0f,h.secondMoment-h.visibility*h.visibility),float(h.samples),1),pixel);
+    mask.write(float4(h.transmittance[0],h.transmittance[1],h.transmittance[2],max(0.0f,h.secondMoment-h.visibility*h.visibility)),pixel);
 }
 
 // Bilateral 3x3 moment-aware mask filter; history remains the unfiltered
@@ -339,7 +346,7 @@ kernel void shadow_filter(constant GPUShadowParams& p [[buffer(1)]],
     if(pixel.x>=p.width || pixel.y>=p.height) return;
     const GPUShadowSurface s=surfaces[pixel.y*p.width+pixel.x];
     const float4 center=input.read(pixel);
-    float sum=center.x,weight=1;
+    float3 sum=center.xyz;float weight=1;
     if(s.valid) for(int y=-1;y<=1;++y) for(int x=-1;x<=1;++x) {
         if(x==0&&y==0) continue;
         const int2 n=int2(pixel)+int2(x,y);
@@ -347,11 +354,11 @@ kernel void shadow_filter(constant GPUShadowParams& p [[buffer(1)]],
         const GPUShadowSurface q=surfaces[uint(n.y)*p.width+uint(n.x)];
         if(!q.valid || q.slot!=s.slot || q.generation!=s.generation || dot(shadowNormal(q),shadowNormal(s))<0.95f) continue;
         const float distance=length(shadowPoint(q)-shadowPoint(s));
-        const float varianceStrength=saturate(max(center.y,0.0f)*16.0f);
+        const float varianceStrength=saturate(max(center.w,0.0f)*16.0f);
         const float w=exp(-distance/max(p.temporalPositionThreshold*4,1e-5f))*mix(0.125f,0.5f,varianceStrength);
-        sum+=input.read(uint2(n)).x*w; weight+=w;
+        sum+=input.read(uint2(n)).xyz*w; weight+=w;
     }
-    output.write(float4(sum/weight,center.yzw),pixel);
+    output.write(float4(sum/weight,center.w),pixel);
 }
 
 kernel void shadow_contact(constant GPUShadowParams& p [[buffer(1)]],
@@ -386,7 +393,7 @@ kernel void shadow_contact(constant GPUShadowParams& p [[buffer(1)]],
             const float delta=rayViewDepth-screenDepth;
             if(delta>0 && delta<p.contactThickness) { occluded=true; break; }
         }
-        if(occluded) { value.x=min(value.x,1-saturate(p.contactStrength)); shadowCount(counters,6,1); }
+        if(occluded) { value.xyz=min(value.xyz,1-saturate(p.contactStrength)); shadowCount(counters,6,1); }
     }
     output.write(value,pixel);
 }

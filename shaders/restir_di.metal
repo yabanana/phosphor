@@ -204,8 +204,8 @@ kernel void DI_KERNEL(restir_di_shade_rt)(constant GPUDIParams& p [[buffer(0)]],
     DISample sample{};
     float3 value = DI_FN(diShadeSelected)(surface, surface.valid ? DI_FN(diLoadLobe)(p, lobeGuides, tid) : DILobe{}, reservoirs[tid], lights, p, emitters, materials, textures, sample);
     diRecordNonfinite(value,signalErrors,0u);
-    if ((p.flags & DI_ENABLE_VISIBILITY) && sample.valid && any(value > 0) &&
-        !diEndpointVisible(surface, sample, tlas, ift, instances, p.slotCount)) value = float3(0);
+    if ((p.flags & DI_ENABLE_VISIBILITY) && sample.valid && any(value > 0))
+        value *= diEndpointTransmittance(surface, sample, tlas, ift, instances, p.slotCount); // F15.1 (ticket 14): coloured through glass
     diRecordNonfinite(value,signalErrors,1u);
     localDirect.write(float4(all(isfinite(value)) ? value : float3(0), 1), uint2(tid % p.width, tid / p.width));
 }

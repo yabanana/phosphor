@@ -265,6 +265,13 @@ PHOSPHOR_GPU_CONSTANT u32 RT_PROBE_PRIMARY = 0u;
 PHOSPHOR_GPU_CONSTANT u32 RT_PROBE_SHADOW = 1u;
 PHOSPHOR_GPU_CONSTANT u32 RT_PROBE_AO = 2u;
 PHOSPHOR_GPU_CONSTANT u32 RT_PROBE_DIFFUSE = 3u;
+// F15.1 (ticket 14): a visibility ray that ACCUMULATES the RGB transmittance of transmissive casters (any-hit, the intersection function rejects
+// the transmissive triangles after multiplying their factor into the payload) instead of stopping at them; opaque and alpha-masked casters
+// stop it as RT_PROBE_SHADOW does.  Every other ray type sees a transmissive surface as an opaque hit.
+PHOSPHOR_GPU_CONSTANT u32 RT_PROBE_SHADOW_TRANSMITTED = 4u;
+// GPURtParams::transmittanceFlags.
+PHOSPHOR_GPU_CONSTANT u32 RT_TRANSMITTANCE_NO_DEDUP = 1u << 0; // negative control: no per-primitive duplicate filter (--debug-transmittance-dedup off)
+PHOSPHOR_GPU_CONSTANT u32 RT_TRANSMITTANCE_INJECT_DUPLICATE = 1u << 1; // spike control: every transmissive triangle invokes the accumulation twice (--debug-transmittance-inject)
 PHOSPHOR_GPU_CONSTANT u32 RT_MESH_ALPHA = 1u;
 
 struct GPURtInstanceDesc {
@@ -283,8 +290,9 @@ PHOSPHOR_STATIC_ASSERT(sizeof(GPURtMesh) == 32, "GPURtMesh layout");
 
 struct GPURtParams {
     u32 slotCount, meshCount, materialCount, corruption;
+    u32 transmittanceFlags, pad0, pad1, pad2; // F15.1 (ticket 14): RT_TRANSMITTANCE_*
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPURtParams) == 16, "GPURtParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPURtParams) == 32, "GPURtParams layout");
 
 struct GPURtRay {
     float ox, oy, oz, tmin;
@@ -697,12 +705,13 @@ struct GPUShadowSurface {
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowSurface) == 48, "GPUShadowSurface layout");
 
 struct GPUShadowHistory {
-    float position[3], visibility;
+    float position[3], visibility;        // visibility = the luminance of the RGB transmittance (the variance estimator's scalar)
     float geometricNormal[3], secondMoment;
     u32 slot, generation, lightID, lightRevision;
     u32 sceneRevision, viewID, samples, valid;
+    float transmittance[3], pad;          // F15.1 (ticket 14): the temporal mean of the RGB transmittance (= visibility on each channel without glass)
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowHistory) == 64, "GPUShadowHistory layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowHistory) == 80, "GPUShadowHistory layout");
 
 struct GPUShadowParams {
     float inverseViewProjection[16], viewProjection[16];
@@ -724,8 +733,11 @@ PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowParams) == 864, "GPUShadowParams layout")
 struct GPUShadowCounters {
     u32 guides, rays, hits, historyReused;
     u32 historyRejected, casters, contactHits, errors;
+    // F15.1 (ticket 14): transmittance rays that crossed at least one transmissive triangle, intersection-function invocations on
+    // transmissive triangles, of which distinct (slot, primitive) pairs, and rays whose hit list overflowed.
+    u32 transmittedRays, ifInvocations, ifDistinct, listOverflows;
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowCounters) == 32, "GPUShadowCounters layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowCounters) == 48, "GPUShadowCounters layout");
 
 // F10.5 cache region controls. Masks are 64 bits split into scalar u32 words;
 // bit y*8+x identifies a tile in the 8x8 map. Revisions are FULL 64-bit values,

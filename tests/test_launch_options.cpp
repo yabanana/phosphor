@@ -1476,3 +1476,17 @@ TEST_CASE("launch options: --debug-lobe-guide (F15.1)") {
     CHECK_FALSE(parse({"--render-path", "visibility", "--geometry-path", "mesh", "--shadows", "csm", "--debug-lobe-guide", "1"},
                       plain, e));
 }
+
+TEST_CASE("F15.1 ticket 14 transmittance duplicate filter controls need RT and are off by default") {
+    LaunchOptions options; std::string error;
+    CHECK(options.debugTransmittanceDedup); CHECK_FALSE(options.debugTransmittanceInject);
+    REQUIRE(parse({"--rt","on","--debug-transmittance-dedup","off"},options,error));
+    CHECK_FALSE(options.debugTransmittanceDedup);
+    options = LaunchOptions{};
+    REQUIRE(parse({"--rt","on","--debug-transmittance-inject","--debug-transmittance-dedup","on"},options,error));
+    CHECK(options.debugTransmittanceDedup); CHECK(options.debugTransmittanceInject);
+    options = LaunchOptions{};
+    CHECK_FALSE(parse({"--debug-transmittance-dedup","off"},options,error));
+    CHECK_FALSE(parse({"--debug-transmittance-inject"},options,error));
+    CHECK_FALSE(parse({"--rt","on","--debug-transmittance-dedup","maybe"},options,error));
+}

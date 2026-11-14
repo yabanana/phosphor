@@ -99,14 +99,15 @@ inline bool giMaterial(GPURtHit hit,constant GPUProbeGridParams& p,const device 
     out.emissive=max(out.emissive,0.0f); out.doubleSided=(m.flags&MATERIAL_FLAG_DOUBLE_SIDED)!=0u;
     return all(isfinite(out.diffuse)) && all(isfinite(out.emissive));
 }
-inline bool giShadowVisible(float3 point,float3 geometricNormal,float3 wi,float distance,
+// F15.1 (ticket 14): the RGB transmittance of the shadow segment (0 = blocked by an opaque caster, product of the crossed glass factors otherwise).
+inline float3 giShadowTransmittance(float3 point,float3 geometricNormal,float3 wi,float distance,
                             instance_acceleration_structure as,intersection_function_table<triangle_data,instancing> ift,
                             const device GPUInstance* instances,constant GPUProbeGridParams& p) {
     float3 origin=rtOffsetRay(point,dot(geometricNormal,wi)>=0.0f?geometricNormal:-geometricNormal);
     GPURtRay ray{}; ray.ox=origin.x;ray.oy=origin.y;ray.oz=origin.z;ray.dx=wi.x;ray.dy=wi.y;ray.dz=wi.z;
-    ray.tmax=max(0.0f,distance-length(origin-point)-1e-5f);ray.mask=RT_MASK_SHADOW;ray.type=RT_PROBE_SHADOW;
+    ray.tmax=max(0.0f,distance-length(origin-point)-1e-5f);ray.mask=RT_MASK_SHADOW;ray.type=RT_PROBE_SHADOW_TRANSMITTED;
     RtPayload payload{};
-    return rtTrace(ray,as,ift,instances,p.slotCount,payload).hit==0u;
+    return rtTrace(ray,as,ift,instances,p.slotCount,payload).hit==0u?rtShadowTransmittance(payload):float3(0);
 }
 // Secondary diffuse radiance. Area integrals include both emitter cosine and
 // the 1/(selection-PMF * area-PDF). Emissive hit contributes Le directly once.
@@ -154,16 +155,19 @@ inline float3 giSecondaryRadiance(float3 point,float3 normal,GiMaterial material
                 dot(-wi,normalize(float3(light.direction[0],light.direction[1],light.direction[2]))));
         }
         float cosN=max(0.0f,dot(normal,wi));
-        if(cosN>0.0f && att>0.0f && giShadowVisible(point,normal,wi,distance,as,ift,instances,p))
-            E+=float3(light.color[0],light.color[1],light.color[2])*light.intensity*att*cosN;
+        if(cosN>0.0f && att>0.0f) {
+            const float3 transmittance=giShadowTransmittance(point,normal,wi,distance,as,ift,instances,p);
+            if(any(transmittance>0.0f)) E+=float3(light.color[0],light.color[1],light.color[2])*light.intensity*att*cosN*transmittance;
+        }
     }
     if(extra.sampledLightCount) {
         uint index=min(uint(giRandom(seed)*float(extra.sampledLightCount)),extra.sampledLightCount-1u);
         DISample sample=diSampleTexturedLight(sampled[index],index,float2(giRandom(seed),giRandom(seed)),point,emissive,materials,textures);
         float cosN=max(0.0f,dot(normal,sample.wi));
-        if(sample.valid && cosN>0.0f && giShadowVisible(point,normal,sample.wi,sample.distance,as,ift,instances,p)) {
+        if(sample.valid && cosN>0.0f) {
             float inversePdf=sample.delta?float(extra.sampledLightCount):float(extra.sampledLightCount)/max(sample.pdfArea,1e-20f);
-            E+=diIncident(sample)*cosN*inversePdf;
+            const float3 transmittance=giShadowTransmittance(point,normal,sample.wi,sample.distance,as,ift,instances,p);
+            if(any(transmittance>0.0f)) E+=diIncident(sample)*cosN*inversePdf*transmittance;
         }
     }
     return material.emissive+material.diffuse*max(E,0.0f)/M_PI_F;
