@@ -45,3 +45,27 @@ for union 0 the descriptor is returned unchanged, byte for byte.
   (2026-11-13). Scenes without features keep byte-identical descriptors and
   images (the guarantee above); within extended scenes the decision-11 gates
   apply.
+
+## F15.2 (ticket 21): generator, class table and per-class bins
+
+- **Inputs.** A class is the feature mask of one material. Feature-class manifests (`phosphor.material-class-manifest` v1, strict schema,
+  `src/renderer/material_class_manifest.h`) list per scene the classes with their material counts and the scene union. The F15 fixtures export
+  GPU-free through `class_manifest export shaders/material_classes`; `phosphor --export-class-manifest FILE` exports the scene the app runs (chess
+  fixture, Khronos corpus). The declared list is `shaders/material_classes.def`: budgets, the resolve kernels, the manifests, extra `declare`d classes.
+  Appending an input is one `manifest` or `declare` line.
+- **Generator.** `variant_gen classes` writes the class table (C++), the MSL constants and `material_class_plan.json` (every pipeline the table
+  implies: kernel + function constants) into `build/generated/pipeline/`. Two runs are byte-identical; a malformed manifest, an unknown directive or more
+  than 64 distinct `MATERIAL_FEATURES` values (class masks, scene unions, the all-lobes mask) fail the generation. No text MSL is emitted per
+  permutation: the permutation is still `MATERIAL_FEATURES = mask` on the hand-written lobe code.
+- **Archive.** `tools/material_class_archive.py update` adds exactly the plan to `shaders/pipelines.mtl4-json` from per-scene harvests
+  (`tools/f15_permutations.py harvest`), with the label-independent identity of `filter_pipeline_harvest.py`; history duplicates are never added to.
+- **Per-class bins.** With `--material-binning on` a scene with features is binned by material class: the classify kernel gives each tile a list per class
+  (up to 16 bins by descending material count, plus one overflow bin), and each class is resolved by its own pipeline, specialised with
+  `MATERIAL_FEATURES = class mask` and the new reserved constant `RESOLVE_BIN` (24; `0x1000 | mask` for a class bin that resolves only the pixels of that
+  mask, `0x2000` for the overflow bin, which is the all-lobes pipeline and resolves the pixels outside the table). Beyond 16 classes the surplus runs the
+  overflow bin (logged). A class pipeline not yet final makes that frame use the union-served generic dispatch (never a fallback pipeline).
+  Scenes without features keep the legacy four classes and unchanged descriptors.
+- **Measured deviation (2026-11-14).** A pipeline specialised by a different `MATERIAL_FEATURES` value is not bit-identical to the all-lobes one in the
+  linear float capture: the compiler schedules the shortened code differently, a few ULP on a part of the sphere pixels and up to 37 ULP (3.1e-6 relative) on iridescence code (counts in the verification
+  record). The equivalence gate is therefore a declared envelope (relative 1e-5 per channel; reported with the bitwise and the 8-bit counts), not "0 bitwise pixels".
+  `docs/implementation/` records the numbers; the all-lobes arm repeats bit for bit.

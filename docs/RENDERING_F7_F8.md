@@ -53,7 +53,14 @@ are separate in each culling phase. Future translucent rendering (F16) follows
 both phases; alpha blending is not delivered by F7's alpha-test work.
 
 The material classifier creates bounded lists of 16×16 tiles for four feature
-classes (normal mapping/emission), with a generic resolve available. Analytic
+classes (normal mapping/emission), with a generic resolve available. F15.2
+(ticket 21): a scene with material features is binned by feature class instead
+(`--material-binning on`; up to 16 classes from the scene's class table plus an
+all-lobes overflow bin; the pipelines are the archived class pipelines of
+`shaders/material_classes.def`, ADR-0003). The per-class bins are verified for
+correctness only (`tools/f15_permutations.py equivalence`); whether they beat the
+union pipeline on the chess fixture (A/B/A) is open (ticket 24), so the default
+stays the generic resolve. Analytic
 homogeneous barycentrics remain defined across the near plane, including a
 vertex with clip W = 0. The forward reference retains raster derivatives, so
 textured comparisons have a documented numerical/filtering envelope; binning
