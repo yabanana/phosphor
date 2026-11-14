@@ -200,6 +200,23 @@ TEST_CASE("F15.2 generated table covers every fixture class, union and the all-l
             }
         }
     }
+    // The other committed manifests (chess rigs, Khronos corpus: exported by the app) add their scenes and classes.
+    for (const char* name : {"chess", "khronos-corpus"}) {
+        matclass::Manifest m;
+        std::string error;
+        const fs::path path = fs::path(PHOSPHOR_SOURCE_DIR) / "shaders/material_classes" / (std::string(name) + ".json");
+        if (!fs::exists(path)) continue;
+        REQUIRE_MESSAGE(matclass::parseManifest(slurp(path), m, error), error);
+        for (const auto& e : m.scenes) {
+            ++scenes;
+            CHECK_MESSAGE(e.classes.size() <= gen::kActiveClassBudget, e.name);
+            if (e.unionMask) CHECK_MESSAGE(gen::isArchivedPermutation(e.unionMask), e.name);
+            for (const auto& c : e.classes) {
+                masks.insert(c.mask);
+                if (c.mask) CHECK_MESSAGE(gen::isClassMask(c.mask), e.name << " class " << c.mask);
+            }
+        }
+    }
     CHECK(gen::kSceneCount == scenes);
     for (const auto& c : gen::kClasses) CHECK(masks.count(c.mask) == 1); // no class without a user (nothing is declared)
 }
@@ -222,7 +239,7 @@ TEST_CASE("F15.2 generator: two runs write byte-identical outputs, independent o
     std::vector<std::string> manifestLines;
     for (const auto& l : lines)
         if (l.rfind("manifest ", 0) == 0) manifestLines.push_back(l);
-    REQUIRE(manifestLines.size() == 3);
+    REQUIRE(manifestLines.size() >= 3);
     std::string reordered;
     for (const auto& l : lines) {
         if (l.rfind("manifest ", 0) == 0) continue;
