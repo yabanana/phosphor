@@ -159,6 +159,8 @@ if(PYTHON3_EXECUTABLE)
         COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_f15_corpus.py)
     add_test(NAME f15_shadowed_hit_check_python
         COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_f15_shadowed_hit_check.py)
+    add_test(NAME f15_residue_check_python
+        COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_f15_residue_check.py)
     # The corpus itself is third-party data fetched on demand (never committed): when a fetched copy exists, verify it against the manifest;
     # otherwise the check is skipped with a message (an absent corpus is not a test failure).
     set(KHRONOS_CORPUS_DIR "${CMAKE_SOURCE_DIR}/build/khronos-corpus" CACHE PATH "fetched Khronos corpus (tools/fetch_khronos_corpus.py)")
