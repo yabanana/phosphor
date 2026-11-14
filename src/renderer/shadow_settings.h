@@ -12,6 +12,8 @@ enum class ShadowTechnique : u32 { Off, Cascaded, RayTraced };
 struct ShadowSettings {
     ShadowTechnique mode = ShadowTechnique::Off;
     u32 mapResolution = 1024, blockerSamples = 16, filterSamples = 16;
+    // F15.1 (ticket 15): the transmittance map of a cascade is (mapResolution / transmittanceDivisor)^2 texels (1, 2 or 4).
+    u32 transmittanceDivisor = 1;
     float distance = 120.0f, splitLambda = 0.6f, casterReach = 500.0f;
     float sunAngularRadius = 0.00465f;
     float depthBiasWorld = 0.0005f, normalBiasWorld = 0.002f;

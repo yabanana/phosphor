@@ -564,6 +564,11 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.reducedLighting = *v == "reduced";
         } else if (arg == "--shadow-map-size") {
             if (!needCount(out.shadowMapResolution)) return false;
+        } else if (arg == "--shadow-transmittance-divisor") {
+            if (!needCount(out.shadowTransmittanceDivisor)) return false;
+            if (out.shadowTransmittanceDivisor != 1 && out.shadowTransmittanceDivisor != 2 && out.shadowTransmittanceDivisor != 4) {
+                error = "--shadow-transmittance-divisor: expected 1, 2 or 4"; return false;
+            }
         } else if (arg == "--lighting-seed") {
             if (!needCount(out.lightingSeed)) return false;
         } else if (arg == "--lighting-candidates") {

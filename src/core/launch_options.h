@@ -420,6 +420,9 @@ struct LaunchOptions {
     u32 localLightCount = 1024;
     bool areaLights = false, stationaryLights = false;
     u32 shadowMapResolution = 2048, lightingSeed = 1;
+    // F15.1 (ticket 15): --shadow-transmittance-divisor 1|2|4: the CSM transmittance map has (--shadow-map-size / divisor)^2 texels.
+    // Default 2 (measured, F15.1 ticket 15: the three @csm gates are identical at 1, 2 and 4; 64.25 / 16.06 / 4.2 MiB per cascade at 2048^2).
+    u32 shadowTransmittanceDivisor = 2;
     u32 lightingCandidates = 8, lightingSpatialSamples = 4, giRays = 64;
     u32 debugLighting = 0, debugLightingCorrupt = 0, debugGiCorrupt=0;
     // F15.1 (ticket 06): --debug-lobe-guide N reads back the lobe guide and the DI surfaces every N frames and

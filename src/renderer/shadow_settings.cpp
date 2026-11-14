@@ -19,7 +19,8 @@ void lightBasis(glm::vec3 light, glm::vec3& right, glm::vec3& up) {
 }
 }
 void validateShadowSettings(const ShadowSettings& s) {
-    if (s.mapResolution < 16 || s.mapResolution > 8192 || s.blockerSamples < 1 || s.blockerSamples > 64 ||
+    if (s.mapResolution < 16 || s.mapResolution > 8192 || (s.transmittanceDivisor != 1 && s.transmittanceDivisor != 2 && s.transmittanceDivisor != 4) ||
+        s.mapResolution / s.transmittanceDivisor < 16 || s.blockerSamples < 1 || s.blockerSamples > 64 ||
         s.filterSamples < 1 || s.filterSamples > 64 || s.historySamples < 1 || s.historySamples > 64 ||
         s.contactSteps < 1 || s.contactSteps > 64 || s.cacheCapacity < 1 || s.cacheCapacity > 4096 ||
         !(s.distance > 0 && std::isfinite(s.distance)) || !(s.casterReach >= 0 && std::isfinite(s.casterReach)) ||

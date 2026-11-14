@@ -361,3 +361,11 @@ TEST_CASE("CSM transmittance map: the entry factor and tint apply once; a thin-w
     CHECK(std::isfinite(metal.r));
     CHECK(std::exp(metal.r) < 1e-29);
 }
+
+TEST_CASE("CSM transmittance map: the divisor is 1, 2 or 4 and keeps a usable map") {
+    ShadowSettings settings;
+    for (u32 n : {1u, 2u, 4u}) { settings.transmittanceDivisor = n; CHECK_NOTHROW(validateShadowSettings(settings)); }
+    settings.transmittanceDivisor = 3; CHECK_THROWS(validateShadowSettings(settings));
+    settings.transmittanceDivisor = 0; CHECK_THROWS(validateShadowSettings(settings));
+    settings.transmittanceDivisor = 4; settings.mapResolution = 32; CHECK_THROWS(validateShadowSettings(settings)); // 8 texels
+}

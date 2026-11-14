@@ -1526,3 +1526,16 @@ TEST_CASE("F15.1 ticket 15 --debug-transmittance-map is on by default and needs 
     CHECK_FALSE(parse({"--debug-transmittance-map","off"},options,error));
     CHECK_FALSE(parse({"--render-path","visibility","--shadows","csm","--debug-transmittance-map","maybe"},options,error));
 }
+
+TEST_CASE("F15.1 ticket 15 --shadow-transmittance-divisor accepts 1, 2 and 4 (default 2)") {
+    LaunchOptions options; std::string error;
+    CHECK(options.shadowTransmittanceDivisor == 2);
+    for (u32 n : {1u, 2u, 4u}) {
+        options = LaunchOptions{};
+        REQUIRE(parse({"--shadow-transmittance-divisor", n == 1 ? "1" : n == 2 ? "2" : "4"}, options, error));
+        CHECK(options.shadowTransmittanceDivisor == n);
+    }
+    options = LaunchOptions{};
+    CHECK_FALSE(parse({"--shadow-transmittance-divisor", "3"}, options, error));
+    CHECK_FALSE(parse({"--shadow-transmittance-divisor", "0"}, options, error));
+}

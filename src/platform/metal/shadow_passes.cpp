@@ -92,7 +92,7 @@ struct ShadowPasses::Impl {
     rg::BufferRef classificationRef{};
     Impl(MetalContext& context,PipelineCache& p,SceneRenderer& s,MeshRenderer& m,VisibilityRenderer& v,
          AccelerationStructures* a,const LaunchOptions& o):c(context),pipelines(p),scene(s),mesh(m),visibility(v),rt(a),options(o) {
-        settings.mapResolution=o.shadowMapResolution; settings.contact=o.contactShadows; settings.staticCache=o.shadowCache;
+        settings.mapResolution=o.shadowMapResolution; settings.transmittanceDivisor=o.shadowTransmittanceDivisor; settings.contact=o.contactShadows; settings.staticCache=o.shadowCache;
         settings.mode=o.shadows==ShadowMode::RT?ShadowTechnique::RayTraced:
                       o.shadows==ShadowMode::CSM?ShadowTechnique::Cascaded:ShadowTechnique::Off;
         validateShadowSettings(settings);
@@ -565,7 +565,7 @@ struct ShadowPasses::Impl {
             b.read(scene.dataRef(),Usage::ShaderRead,StageVertex|StageMesh|StageFragment);b.read(flagsRef,Usage::ShaderRead,StageVertex|StageMesh);b.setProfileShaders("shadow_depth_mesh,shadow_depth_vertex,shadow_depth_fragment");
         },[this,cascade](PassContext& ctx){drawCascade(ctx,cascade,0,false);});
         if(hasTransmissive && !settings.staticCache)for(u32 cascade=0;cascade<4;++cascade)g.addPass("CSM transmittance "+std::to_string(cascade),PassType::Raster,[&,cascade](PassBuilder& b){
-            transmitMaps[cascade]=b.createTexture("CSM transmittance "+std::to_string(cascade),{Format::RGBA32Float,settings.mapResolution,settings.mapResolution});
+            transmitMaps[cascade]=b.createTexture("CSM transmittance "+std::to_string(cascade),{Format::RGBA32Float,settings.mapResolution/settings.transmittanceDivisor,settings.mapResolution/settings.transmittanceDivisor});
             transmitMaps[cascade]=b.writeColor(transmitMaps[cascade],0,LoadIntent::Clear,ClearValue{}); // sum 0 (transmittance 1), nearest depth 0 (none)
             b.read(scene.dataRef(),Usage::ShaderRead,StageVertex|StageMesh|StageFragment);b.read(flagsRef,Usage::ShaderRead,StageVertex|StageMesh);
             // Its own render encoder: the opaque cascade pipelines have no colour output and must not run in an encoder with a colour attachment
