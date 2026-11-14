@@ -119,6 +119,11 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME f13_probe_pfm_author COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_probe_pfm_author.py)
     add_test(NAME f13_physical_ao_temporal_control COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_f13_ao_temporal_check.py)
     add_test(NAME f15_clip_reactive COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_f15_clip_reactive.py)
+    # F15.2 (ticket 21): the targeted archive update (synthetic corpora) and the committed archive against the generated plan.
+    add_test(NAME f15_material_class_archive COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_material_class_archive.py)
+    add_test(NAME f15_permutations_runner COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_f15_permutations.py)
+    set_tests_properties(f15_material_class_archive PROPERTIES
+        ENVIRONMENT "PHOSPHOR_CLASS_PLAN=${CMAKE_BINARY_DIR}/generated/pipeline/material_class_plan.json")
 endif()
 
 # F15.3: the Appendix B reference and its runner need numpy and Mitsuba, which
