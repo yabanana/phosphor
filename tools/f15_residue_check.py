@@ -12,6 +12,9 @@ Cases:
             ambient light as the wall seen directly (mirror / direct ratio), shadowed and lit.
   backface  a mirror floor and a thin glass pane over a single-sided plane seen from BEHIND (culled by the rasteriser, a lit wall behind it): the transport
             ray must go on past the plane and show the wall as the camera sees it (mirror / direct and glass / direct ratios).
+  transmissive  C22-D3 follow-up (IORTestGrid "dark ring" count): smooth solid glass spheres (transmission 1, IOR 1.0 .. 2.42) in a white furnace: no pixel of
+            the discs, the silhouette ring included, may be darker than the furnace radiance (the glass is energy conserving); the same glass with
+            an absorbing medium is the negative control (the gate must fail).  Not a fix: the engine already conserves energy there.
   all       every case
 
 Exit codes: 0 gates hold (and every control fails as it must), 1 a gate failed, 2 usage, 3 a control did not fail (non-discriminating),
@@ -202,7 +205,75 @@ def case_backface(binary, control, out):
     return ok, control_fails, report
 
 
-CASES = {"grazing": case_grazing, "mirror-env": case_mirror_env, "backface": case_backface}
+# --- transmissive spheres in a white furnace (C22-D3 follow-up: the IORTestGrid "dark ring" count) -----------------------------------------------
+
+# Smooth solid glass (transmission 1, white, ior as the IORTestGrid columns, volume thickness 0.1) in an environment that is the only thing any
+# ray can find: no ray is absorbed (attenuation distance infinite, tint 1), so the Fresnel-chosen reflection plus the walked refraction must give
+# back exactly the environment at EVERY pixel of the disc, the silhouette ring included (a white furnace: radiance 0.5, the declared rig).  The
+# estimator weights are (1 - F) / (1 - pReflect) and F / pReflect, i.e. ~1 per sample: the settled frame is nearly noise free.
+IORS = (1.0, 1.33, 1.5, 1.76, 2.42)
+GLASS_SPACING = 2.4
+FURNACE_DARK_RATIO = 0.70
+FURNACE_LOW_RATIO = 0.90
+FURNACE_LOW_FRACTION = 0.002  # settled-frame noise: single interior pixels of the stochastic Fresnel choice (measured 9 of 83540 below 0.96)
+FURNACE_MEAN_RANGE = (0.97, 1.03)
+
+
+ABSORBING = {"attenuationColor": [0.5, 0.5, 0.5], "attenuationDistance": 0.2}  # the negative control: a medium that really removes energy
+
+
+def furnace_scene(folder, glass=True, segments=48, absorbing=False):
+    scene = fx.Scene()
+    for k, ior in enumerate(IORS):
+        extensions = {"KHR_materials_transmission": {"transmissionFactor": 1.0}, "KHR_materials_ior": {"ior": ior},
+                      "KHR_materials_volume": {"thicknessFactor": 0.1, **(ABSORBING if absorbing else {})}}
+        material = (scene.material(f"glass ior {ior}", (1.0, 1.0, 1.0), 0.0, 0.0, extensions) if glass
+                    else scene.material(f"black ior {ior}", (0.0, 0.0, 0.0), 0.0, 1.0))  # the opaque twin only gives the silhouette
+        scene.sphere(((k - 0.5 * (len(IORS) - 1)) * GLASS_SPACING, 0.0, 0.0), 1.0, segments, material)
+    return scene, scene.write(folder)
+
+
+def measure_furnace(binary, glass_path, twin_path, out, mode="rt", twin=None):
+    twin = twin or fx.read_png_gray(fx.capture(binary, twin_path, out / "twin", {"--reflections": "off"}))
+    disc = [(x, y) for y in range(1, twin[1] - 1) for x in range(1, twin[0] - 1) if tuple(twin[3][y][x * twin[2]:x * twin[2] + 3]) != tuple(twin[3][0][0:3])]
+    ring = ring_pixels(twin)
+    image = fx.read_png_gray(fx.capture(binary, glass_path, out / "glass", {"--reflections": mode, "--gi": "off"}))
+    background = fx.luminance(image, 2, 2)
+    ratios = {p: fx.luminance(image, *p) / background for p in disc}
+    ring_set = set(ring)
+    dark_ring = [p for p in ring if ratios[p] < FURNACE_DARK_RATIO]
+    dark_disc = [p for p in disc if ratios[p] < FURNACE_DARK_RATIO]
+    return {"twin": twin, "disc_pixels": len(disc), "ring_pixels": len(ring), "background": background,
+            "mean_ratio": round(sum(ratios.values()) / len(ratios), 4), "ring_mean_ratio": round(sum(ratios[p] for p in ring_set) / len(ring_set), 4),
+            "min_ratio": round(min(ratios.values()), 3),
+            "low_fraction": round(sum(1 for r in ratios.values() if r < FURNACE_LOW_RATIO) / len(ratios), 5), "dark_ring_pixels": len(dark_ring), "dark_disc_pixels": len(dark_disc), "first": dark_disc[:6]}
+
+
+def furnace_gate(m):
+    return (m["dark_disc_pixels"] == 0 and m["low_fraction"] <= FURNACE_LOW_FRACTION and FURNACE_MEAN_RANGE[0] <= m["mean_ratio"] <= FURNACE_MEAN_RANGE[1]
+            and FURNACE_MEAN_RANGE[0] <= m["ring_mean_ratio"] <= FURNACE_MEAN_RANGE[1])
+
+
+def case_transmissive(binary, control, out):
+    _, glass_path = furnace_scene(out / "transmissive" / "scene-glass")
+    _, twin_path = furnace_scene(out / "transmissive" / "scene-twin", glass=False)
+    fixed = measure_furnace(binary, glass_path, twin_path, out / "transmissive" / "fixed")
+    ok = furnace_gate(fixed)
+    # Negative control of the fixture itself (same binary): the same glass with a medium that absorbs (Beer-Lambert, attenuation colour 0.5 over
+    # 0.2 m: ~1 / 1000 survives a diameter) must read dark, so the gate does fail when energy is lost.  (Screen-space reflections or reflections off
+    # are no control: a white diffuse sphere reads exactly the furnace radiance, albedo 1 x environment 0.5.)
+    _, absorbing_path = furnace_scene(out / "transmissive" / "scene-absorbing", absorbing=True)
+    absorbing_result = measure_furnace(binary, absorbing_path, twin_path, out / "transmissive" / "negative-absorbing", twin=fixed["twin"])
+    gate_can_fail = not furnace_gate(absorbing_result)
+    for entry in (fixed, absorbing_result):
+        entry.pop("twin")  # the decoded image is not a report value
+    report = {"fixed": fixed, "negative_control_absorbing": absorbing_result, "negative_control_fails_as_required": gate_can_fail, "gates_hold": ok and gate_can_fail}
+    # No defect was found (the IORTestGrid count is a metric artefact, see the doc): there is no build WITHOUT a fix, so --control-binary is not
+    # asked to fail here (control_fails None = not applicable); the discriminating control is the absorbing run above.
+    return ok and gate_can_fail, True if control else None, report
+
+
+CASES = {"grazing": case_grazing, "mirror-env": case_mirror_env, "backface": case_backface, "transmissive": case_transmissive}
 
 
 def main(argv=None):

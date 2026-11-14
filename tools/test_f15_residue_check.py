@@ -131,6 +131,42 @@ class Cases(unittest.TestCase):
                     found = True
         self.assertTrue(found)
 
+    def test_furnace_scene_is_smooth_solid_glass_with_an_opaque_twin_of_the_same_framing(self):
+        glass, _ = check.furnace_scene(tempfile.mkdtemp())
+        twin, _ = check.furnace_scene(tempfile.mkdtemp(), glass=False)
+        self.assertEqual(len(glass.primitives), len(check.IORS))
+        self.assertEqual(glass.bounds(), twin.bounds())  # the corpus rig frames both identically: the twin's silhouette is the glass's
+        for material, ior in zip(glass.materials, check.IORS):
+            extensions = material["extensions"]
+            self.assertEqual(extensions["KHR_materials_ior"]["ior"], ior)
+            self.assertEqual(extensions["KHR_materials_transmission"]["transmissionFactor"], 1.0)
+            self.assertGreater(extensions["KHR_materials_volume"]["thicknessFactor"], 0.0)  # a solid, not a thin-walled pane
+            self.assertEqual(material["pbrMetallicRoughness"]["baseColorFactor"], [1.0, 1.0, 1.0, 1])
+            self.assertEqual(material["pbrMetallicRoughness"]["roughnessFactor"], 0.0)
+            self.assertNotIn("attenuationDistance", extensions["KHR_materials_volume"])  # nothing absorbs: a furnace
+        for material in twin.materials:
+            self.assertNotIn("extensions", material)
+        for centre in range(len(check.IORS)):
+            x = (centre - 0.5 * (len(check.IORS) - 1)) * check.GLASS_SPACING
+            self.assertTrue(any(abs(p[0] - (x + 1.0)) < 1e-6 for p in glass.primitives[centre][0]))
+
+    def test_absorbing_control_only_adds_a_medium(self):
+        plain, _ = check.furnace_scene(tempfile.mkdtemp())
+        absorbing, _ = check.furnace_scene(tempfile.mkdtemp(), absorbing=True)
+        self.assertEqual(plain.bounds(), absorbing.bounds())
+        for a, b in zip(plain.materials, absorbing.materials):
+            volume = b["extensions"]["KHR_materials_volume"]
+            self.assertEqual(volume["attenuationColor"], [0.5, 0.5, 0.5])
+            self.assertEqual({k: v for k, v in volume.items() if k not in check.ABSORBING}, a["extensions"]["KHR_materials_volume"])
+
+    def test_furnace_gate_demands_no_dark_pixel_and_a_flat_mean(self):
+        good = {"dark_disc_pixels": 0, "low_fraction": 0.0001, "mean_ratio": 1.0, "ring_mean_ratio": 0.99}
+        self.assertTrue(check.furnace_gate(good))
+        self.assertFalse(check.furnace_gate({**good, "dark_disc_pixels": 1}))
+        self.assertFalse(check.furnace_gate({**good, "low_fraction": 0.05}))
+        self.assertFalse(check.furnace_gate({**good, "mean_ratio": 0.9}))
+        self.assertFalse(check.furnace_gate({**good, "ring_mean_ratio": 1.1}))
+
 
 if __name__ == "__main__":
     unittest.main()

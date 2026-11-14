@@ -243,3 +243,43 @@ Not done / open: criterion "temporal clip within F13.6" (unticked); virtual-imag
 ### Ticket 22 closure (2026-11-14)
 
 - The four side-by-side models rendered (TransmissionTest also exercises transmissionTexture, AttenuationTest thicknessTexture, qualitatively). Open: C22-D4 (dark grain through glass over single-sided labels, disproved as missing GI by a --gi ddgi diagnostic), C22-D7 (grain at high IOR in one settled frame).
+
+### C22-D3 follow-up: the 67 IORTestGrid "dark ring" pixels are a metric artefact, not a defect (2026-11-14)
+
+Question: on IORTestGrid 67 pixels of the "silhouette ring" of the transmissive spheres are darker than 70 % of the same pixel with reflections off; the C22-D3 fix (e9569ac,
+N.V <= 0 keeps the full diffuse) cannot touch them (N.V > 0).  Candidates: a refraction sample that returns 0 at grazing incidence while the composite released 1 - t of the
+diffuse; the ray origin along the geometric normal; the reflected branch below the horizon; the denoiser at the edge.  Base = cl/f15-plan-c38b51 (290e4ce), Release build,
+declared corpus command (`tools/f15_corpus.py capture_command`, 1024x768, settled frame).  No engine change was needed; no engine file is touched.
+
+Evidence (all with the unmodified base binary):
+- Locating the 67 (ring set of `tools/f15_residue_check.py::ring_pixels` applied to the reflections-off capture, then compared with the rt capture): they sit at r / R = 0.23 .. 0.47
+  of the sphere radius (sphere centres and R = 42.7 px from the opaque black spheres of the same image, column pitch 94.2 px, row pitch 94.3 px), in the eight glass spheres of
+  IOR > 1 (12/11/10/9 pixels in the right white column of the first four rows, 8/8/5/4 in the left one, none in the IOR 1.0 row, which has no glint).  None is anywhere near the silhouette.
+- Why they are in the ring set: with reflections off a transmissive white sphere is its diffuse, albedo 1 x environment 0.5 = 0.5, EXACTLY the clear colour (206 in the PNG, linear
+  0.5001), so the eight glass spheres are invisible against the background and the only non-background pixels are the 3x3 halos of the analytic sun glint (off 207..212 around 255).
+  The "ring" is those halos.  In the rt capture the same pixels are part of a sphere that shows the refracted backdrop (linear 0.11 .. 0.20, PNG ~85): 42 968 of 43 092 pixels
+  (99.7 %) of the glass spheres (r / R <= 0.97) are below 70 % of their reflections-off value.  The 67 are the visible tip of a baseline that is wrong for transmissive material
+  (reflections off cannot transport the transmitted share), not a local loss.
+- Mechanisms excluded by an energy argument, measured on the real silhouette: five smooth solid glass spheres (`--case transmissive`, transmission 1, white, IOR 1.0 / 1.33 / 1.5 /
+  1.76 / 2.42, 48 segments like the corpus spheres, thickness 0.1, infinite attenuation) in the declared constant environment 0.5 with nothing else in the scene.  Every ray
+  ends in the environment, no ray is absorbed, so Fresnel reflection + walked refraction must return the furnace radiance at EVERY pixel.  Measured (final capture): disc mean
+  1.0007 of the furnace, silhouette ring (2 056 pixels, ring from the opaque twin of the same framing) mean 0.9984, dark pixels (< 70 %) 0 of 83 540 (0 of 2 056 in the ring), fraction
+  below 90 % 4e-5 (single interior pixels: stochastic Fresnel choice).  A refraction that returned 0 at grazing incidence (while the composite released 1 - t), a ray leaving below the
+  geometric horizon, an origin offset onto the wrong side of a faceted sphere or the walk exhausting kTransmissionMaxEvents without the environment term would all show as a dark
+  rim there: none does.  Negative control (same binary, same scene with an absorbing medium, attenuation colour 0.5 over 0.2): disc mean 0.274, 79 209 dark pixels, 99.2 % below 90 %: the
+  gate fails when energy is lost.  (Reflections off / SSR are not controls: a white diffuse sphere also reads exactly 0.5 in this furnace; the first SSR control did not fail and was replaced.)
+- API + shader validation on the fixture scene (`MTL_DEBUG_LAYER`, `MTL_SHADER_VALIDATION`, `--no-pipeline-archive`): exit 0, 0 validation failures (384 known redundant-state notices).
+- ctest on the final tree (`KHRONOS_CORPUS_DIR` set): 100 % of 31 passed (`terrain_materials_verify` skipped, as before; `f15_residue_check_python` included).
+- Not usable here: `--debug-transmission-both-branches` needs a `--material-scenario`, it refuses glTF scenes (exit 1); the furnace is the analytic reference instead of the Mitsuba path
+  (no geometry behind the glass, nothing for a path tracer to add).  A per-pixel linear comparison of the glint delta (off against rt, 48 and 256 accumulated frames) was too noisy to
+  judge (ratio 0.74 / 0.77, per-pixel rt noise ~0.02 on a 0.15 base) and is not used as evidence.
+
+Fixture: `tools/f15_residue_check.py --case transmissive` (new; gates: dark disc pixels 0, fraction below 90 % <= 0.2 %, disc and ring mean in 0.97 .. 1.03, and the absorbing
+negative control must fail), CPU tests in `tools/test_f15_residue_check.py` (scene composition, absorbing twin, gate arithmetic).  There is no pre-fix build to fail on (no fix): the
+discriminating control is the absorbing run.  Corpus metric: `ring_pixels` must not be taken from a reflections-off image for materials whose off rendering is not their appearance;
+the count of 67 is withdrawn for IORTestGrid.
+
+Open / limits: (1) the furnace proves energy conservation of the environment-terminated walk; rays that end on lit geometry are covered by the existing transmission gates, not re-run
+(no engine change).  (2) Pixels with shading N.V <= 0 on a glass sphere keep the full diffuse (e9569ac, declared in the composite): white diffuse x environment instead of
+glass; invisible in a furnace by construction (albedo 1 x 0.5) and not measured on IORTestGrid.  (3) Single-frame noise of the stochastic estimator on glass over a checker backdrop
+(C22-D7) is untouched.
