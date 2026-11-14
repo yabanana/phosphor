@@ -74,6 +74,7 @@ SUBSURFACE_BIT = base.SUBSURFACE_FEATURE_BIT   # 128
 VOLUME_BIT = 64                                # MaterialFeature::Volume
 VOLUME_RECORD = 1                              # GPUMaterialExt1 words 11 thickness, 13-15 attenuation colour, 16 attenuation distance
 BOUNDARY_IOR = 1.5
+DIFFUSION_REGIME_FRACTION = 0.1                # orchestrator decision: gated only when max-channel mfp <= 10 % of the piece size (diameter)
 LEAK_RADIUS = 0.08                             # metres: the radius of the subsurface-leak control (not sub-pixel at any fixture distance)
 CONTROLS = ("subsurface-off", "diffusion-off", "radius-ignored", "subsurface-leak")
 LUMA = (0.2126, 0.7152, 0.0722)
@@ -421,7 +422,10 @@ def command_render(args):
             b = blocks[k]
             entry.update(subsurface={"weight": b["weight"], "color": b["color"], "radius": b["radius"],
                                      "radius_scale": b["radius_scale"], "anisotropy": b["anisotropy"],
-                                     "mfp": [b["radius"] * s for s in b["radius_scale"]]},
+                                     "mfp": [b["radius"] * s for s in b["radius_scale"]], "piece_size": b["thickness"],
+                                     "mfp_max": max(b["radius"] * s for s in b["radius_scale"])},
+                         diffusion_regime=bool(max(b["radius"] * s for s in b["radius_scale"])
+                                               <= DIFFUSION_REGIME_FRACTION * b["thickness"] * (1.0 + 1e-4)),
                          weight=b["weight"], radius=b["radius"], series=series_label(b), group=f"weight {b['weight']:g}")
     report = {"schema": 1, "tool": "tools/f15_subsurface_reference.py", "tool_sha256": sha256_file(__file__),
               "tool_sha256_base": sha256_file(base.__file__), "model": "volumetric subsurface: Mitsuba 3.9.1 volpath random walk",

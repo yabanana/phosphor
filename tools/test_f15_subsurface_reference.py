@@ -250,6 +250,15 @@ class MeshOrientation(unittest.TestCase):
                 self.assertEqual(sss.mesh_orientation(root, data, mirrored), -1 if outward else 1)
 
 
+class DiffusionRegime(unittest.TestCase):
+    def test_regime_is_ten_percent_of_the_piece_size_on_the_largest_channel(self):
+        self.assertEqual(sss.DIFFUSION_REGIME_FRACTION, 0.1)
+        # skin radius 0.08 x scale 1.0 = 0.08 m on a 0.8 m piece: exactly at the limit (in); 0.16 m: out
+        for radius, expected in ((0.04, True), (0.08, True), (0.16, False), (0.24, False)):
+            mfp = max(np.float32(radius) * np.float32(s) for s in (1.0, 0.5, 0.25))
+            self.assertEqual(bool(mfp <= sss.DIFFUSION_REGIME_FRACTION * np.float32(0.8) * (1 + 1e-4)), expected)
+
+
 class Pooling(unittest.TestCase):
     def test_box_pool_uses_only_valid_pixels_and_keeps_a_constant(self):
         image = np.ones((9, 9, 3)) * 2.0
@@ -353,6 +362,9 @@ class MitsubaConventions(unittest.TestCase):
             piece = masks["roi"] & (masks["sphere"] == 0)
             self.assertGreater(float(np.abs(reference[piece] - off[piece]).mean()), 1e-3)  # the weighted medium changes the piece
             self.assertEqual(report["spheres"][0]["weight"], 0.5)
+            # mfp max 0.04 m on a 0.8 m piece: inside the 10 % diffusion regime of the orchestrator decision
+            self.assertTrue(report["spheres"][0]["diffusion_regime"])
+            self.assertAlmostEqual(report["spheres"][0]["subsurface"]["mfp_max"], 0.04, places=6)
             self.assertNotIn("weight", report["spheres"][1])
             self.assertIn("residual_noise_per_piece", report["ground_truth"])
             # The nominal radius of a one-piece scene is its own radius: radius-ignored equals the reference.

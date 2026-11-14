@@ -71,3 +71,19 @@ applied to every piece including the neutral weight-0 ones; the x2 / x3 pieces (
 outside the diffusion regime, so the bound may be unreachable there (the decision rule of ticket 10 then applies: ticket 18).
 Open: `archive_check`, `hitch_check`, O7 counts, shader validation not run (no engine change); the forced-overflow capture and the
 "scenes without subsurface unchanged / diffusion pass cost" criteria belong to the engine ticket.
+
+2026-11-14 — orchestrator decisions (taken before any engine result), applied to the harness:
+1. The subsurface bound (mean <= 10 %, p95 <= 25 %) gates only pieces in the DIFFUSION regime: max over RGB of radius x radiusScale <=
+   10 % of the piece size (the volume thickness = the sphere diameter, 0.8 m, so 0.08 m; screen-space diffusion is a diffusion
+   approximation, the target case is the chess pieces: radius = base colour x 0.003 m on pieces a few cm tall). Pieces outside it stay in
+   the radius SWEEP (monotonicity still required) and are measured and REPORTED against the bound, not gated, like the back-lit thick
+   fixture. Implemented as `diffusion_regime` in the reference's sphere table (`DIFFUSION_REGIME_FRACTION = 0.1`, tolerance 1e-4) and
+   per-piece `gated` / `bound_met` in `subsurface-volumetric-sun`; a scene with no gated piece is not a gate. The fixture needed no
+   change: the gated SSS pieces are weight 0.5 and 1 at 0.08 m and weight 1 at 0.04 m for both materials (6 pieces, mfp max 0.04-0.08 m)
+   plus the two neutral ones; only the x2 pieces (0.16 m, pieces 4 and 9) are reported. Re-evaluated on the same captures with
+   `--evaluate --expect green` (`build/f15-check/t17-b`): GREEN exit 0; sun FAIL with pieces 1,2,3,6,7,8 failing (worst mean 2.12),
+   twin passes; controls still fail on gated pieces (subsurface-off and diffusion-off on 1,2,3,6,7,8; radius-ignored on the x0.5 pieces 2
+   and 7, worst mean 0.57). Tests: 83 runner and 14 reference tests OK.
+2. Jade g = 0.3 stays. Declared mapping the engine is expected to use: HG anisotropy through the similarity relation (reduced scattering
+   sigma_s' = sigma_s (1 - g)) to scale the diffusion radius (the multiple-scatter colour already goes through the draft's inversion
+   with g); the ground truth uses the real HG walk, so a missing correction shows in the jade pieces.

@@ -936,15 +936,17 @@ def evaluate_subsurface(np, candidate, reference, masks, spheres, gated=True):
         error, floor = luminance_error(np, candidate, reference, roi, gate["floor_fraction"])
         ya, yb = luminance(np, candidate)[roi], luminance(np, reference)[roi]
         mean, p95 = float(error.mean()), float(np.percentile(error, 95))
+        met = bool(mean <= gate["mean"] and p95 <= gate["p95"])
+        in_regime = bool(s.get("diffusion_regime", True))  # orchestrator decision: pieces outside the diffusion regime are reported only
         pieces.append({"instance": s["instance"], "weight": s.get("weight", 0.0), "radius": s.get("radius"),
                        "group": s.get("series"), "pixels": int(roi.sum()), "mean": mean, "p95": p95, "floor": floor,
                        "candidate_mean_luminance": float(ya.mean()), "reference_mean_luminance": float(yb.mean()),
-                       "pass": bool(mean <= gate["mean"] and p95 <= gate["p95"])})
-    passed = all(piece["pass"] for piece in pieces)
+                       "gated": in_regime, "bound_met": met, "pass": met or not in_regime})
+    passed = all(piece["pass"] for piece in pieces) and any(piece["gated"] for piece in pieces)
     return {"kind": "subsurface" if gated else "subsurface-report", "gated": gated, "pieces": pieces,
             "worst_mean": max(piece.get("mean", 0.0) for piece in pieces), "worst_p95": max(piece.get("p95", 0.0) for piece in pieces),
             "limits": {"mean": gate["mean"], "p95": gate["p95"]}, "pass": passed if gated else True,
-            "bound_met": passed}
+            "bound_met": all(piece.get("bound_met", False) for piece in pieces)}
 
 
 def terminator_bleed(np, image, masks, instance):
@@ -1328,11 +1330,11 @@ def result_lines(r):
     elif r["kind"] in ("subsurface", "subsurface-report"):
         lines += ["", f"worst piece mean {r['worst_mean']:.4f} (limit {r['limits']['mean']}), worst p95 {r['worst_p95']:.4f} "
                       f"(limit {r['limits']['p95']}){'' if r['gated'] else '; not gated (reported)'}", "",
-                  "| piece | weight | radius | pixels | mean | p95 | candidate Y | reference Y | pass |", "|---|---|---|---|---|---|---|---|---|"]
+                  "| piece | weight | radius | pixels | mean | p95 | candidate Y | reference Y | in regime (gated) | bound met |", "|---|---|---|---|---|---|---|---|---|---|"]
         for t in r["pieces"]:
             lines.append(f"| {t['instance']} | {t.get('weight', 0):g} | {t.get('radius') or 0:g} | {t['pixels']} | {t.get('mean', 0):.4f} | "
                          f"{t.get('p95', 0):.4f} | {t.get('candidate_mean_luminance', 0):.4f} | "
-                         f"{t.get('reference_mean_luminance', 0):.4f} | {t['pass']} |")
+                         f"{t.get('reference_mean_luminance', 0):.4f} | {t.get('gated')} | {t.get('bound_met')} |")
     elif r["kind"] == "radius-monotonic":
         lines += ["", f"statistic: {r['statistic']}; tolerance {r['tolerance']}; ground truth rises at every step: "
                       f"{r['reference_monotonic']}", "", "| series | radii | candidate | reference | pass |", "|---|---|---|---|---|"]

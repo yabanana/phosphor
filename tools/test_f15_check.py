@@ -1573,6 +1573,28 @@ class VolumetricSubsurfaceRunner(unittest.TestCase):
         self.assertLess(spiky_result["pieces"][3]["mean"], 0.10)
         self.assertGreater(spiky_result["pieces"][3]["p95"], 0.25)
 
+    def test_pieces_outside_the_diffusion_regime_are_reported_not_gated(self):
+        masks, spheres = self.layout()
+        truth = self.truth(masks)
+        for k in (3, 4, 8, 9):  # the large radii: out of regime
+            spheres[k]["diffusion_regime"] = False
+        bad = truth.copy()
+        for k in (3, 4):
+            piece = masks["roi"] & (masks["sphere"] == k)
+            bad[piece] = truth[piece] * np.float32(1.5)
+        result = check.evaluate(np, "subsurface", bad, truth, masks, spheres)
+        self.assertTrue(result["pass"])  # the failing pieces are not gated
+        self.assertFalse(result["pieces"][3]["gated"] or result["pieces"][3]["bound_met"])
+        self.assertFalse(result["bound_met"])  # but reported as missing the bound
+        self.assertTrue(result["pieces"][0]["gated"])
+        gated_bad = bad.copy()
+        piece = masks["roi"] & (masks["sphere"] == 1)
+        gated_bad[piece] = truth[piece] * np.float32(1.5)
+        self.assertFalse(check.evaluate(np, "subsurface", gated_bad, truth, masks, spheres)["pass"])
+        for s_ in spheres:
+            s_["diffusion_regime"] = False
+        self.assertFalse(check.evaluate(np, "subsurface", truth, truth, masks, spheres)["pass"])  # nothing gated: not a gate
+
     def test_the_absolute_floor_protects_dark_pixels_but_not_a_missing_bleed(self):
         masks, spheres = self.layout()
         truth = self.truth(masks)
