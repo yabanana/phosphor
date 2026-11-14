@@ -42,18 +42,28 @@ Declared approximations and limits (support table entries):
 - 19: GI at -N is a DDGI probe lookup only (cache, ReSTIR GI and the legacy resolve path keep E(N)). The iridescence diffuse
   weight is evaluated at N.V (ADR-0006 energy form).
 - 22:
-  - D4 fix: refracted first opaque hits get the environment term, but F13 reflection estimators do not (asymmetry);
-  - with `--gi ddgi` the shadowed wall behind glass stays black (latent, not analysed);
-  - transport rays hitting the back of a single-sided opaque plane return black (latent);
+  - D4 fix: refracted first opaque hits get the environment term; the F13 reflection estimators and the RT probe capture now
+    get it too (bf0799f, F13 residue below);
+  - sun shadow rays (RT) and the CSM depth pass both treat the back of a single-sided plane as a caster: declared behaviour,
+    consistent across the two shadow paths ("Shadow depth remains conservatively two-sided", shadow_passes.cpp), not a defect;
   - D5 is the single-bounce reflection of neighbours; D7 is unbiased 1-spp noise;
   - refusals: KHR_materials_unlit and KHR_lights_punctual are unsupported by design; non-uniform KHR_texture_transform is
     deferred.
 
-Found in F15, outside F15 code:
-- C22-D3, a pre-existing F13 defect: on silhouette pixels the specular is exactly 0 while the composite has already removed the
-  diffuse weight 1 - E(N.V -> 0), so those pixels are dark with RT or SSR reflections.
-- GPU safety: large emissive meshes (chess kings/queens, ~75k triangles) hung frame 0 with the clustered DI path. An agent is
-  investigating it.
+Found in F15, outside F15 code (owner 2026-11-14: fixed inside F15; record in docs/implementation/F13-F14-CLOSURE-2026-11-12.md,
+section "Defects found during F15"; integrated by fast-forward to 6b6bf04):
+- GPU safety, clustered DI hang with emissive meshes: fixed 1bf0e19 (F11.5 per-pixel bound), emissive variant archived 3015a46.
+- C22-D3 silhouette ring (shading N.V <= 0, no specular estimate, composite removed 1 - E anyway): fixed e9569ac, fixture
+  `f15_residue_check.py --case grazing` (11/11 ring pixels below 70 % on the control, 0/0 fixed).
+- Shadowed secondary hit black in reflection estimators / probe capture with GI off: fixed bf0799f (`--case mirror-env`, 1.001 vs 0.004).
+- DDGI wall behind glass black (probe in the gap went inactive on the pane's back faces): fixed 4422a13 (`f15_shadowed_hit_check.py
+  --mode ddgi`, 1.248 vs 0.377, gate 0.90..2.0).
+- Transport rays ending black on single-sided back faces: fixed 26fe229 (`--case backface`, 1.000 vs 0.00001; error words 16/17).
+- OPEN, owner decision asked 2026-11-14: with `--gi ddgi` the declared environment reaches no primary surface (the INDIRECT atlas
+  excludes it by design, no other pass adds it): shadowed wall 16/255 with GI on vs 194 with GI off.
+- OPEN, F15 (transmission, ticket 13 territory): 67 dark pixels on the silhouette ring of the IORTestGrid transmissive spheres
+  (N.V > 0 there, untouched by the D3 fix); hypothesis: a refraction sample that returns nothing at grazing incidence while the
+  composite released 1 - t of the diffuse. Analyse before closure.
 - O7 caveat: a non-archived RT configuration with a cold compiler cache allocates one IFT per frame slot when its final variant
   arrives (ticket 13 record).
 

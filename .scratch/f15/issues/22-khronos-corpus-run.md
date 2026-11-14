@@ -64,3 +64,12 @@ agent's phosphor was running (before the runner's guard existed); it lasted a fe
   the composite already removed the diffuse share: not fixed (F13 composite/kernels, F13 exact captures not available), details in the report.
 - **C22-D5 / C22-D7 named approximations**: D7 is unbiased noise converging as 1/sqrt(N) (ratio 7.9 for 64 frames); D5 is converged deterministic structure
   (reflections of the neighbours), not noise. Numbers in the report.
+
+## F13 residues fixed inside F15 (2026-11-14, owner decision; integrated at 6b6bf04)
+
+- **C22-D3 fixed** (e9569ac): shading N.V <= 0 on the silhouette ring has no specular estimate; the composite now keeps the full diffuse
+  weight there. Fixture `tools/f15_residue_check.py --case grazing` (control 11/11 ring pixels below 70 %, fixed 0/0). Corpus: SpecularTest
+  ring count 1165 -> 937 (includes label/background edges); IORTestGrid stays at 67 (transmissive sphere edges, N.V > 0, open: ticket 24).
+- **Latent cases fixed**: reflection estimators and probe capture get the environment term (bf0799f); single-sided back faces no longer end
+  transport rays (26fe229); DDGI behind glass (4422a13). Corpus rerun on ten models: all render, 0 archive misses, validation clean; the
+  changed-pixel counts per model are in docs/implementation/F13-F14-CLOSURE-2026-11-12.md.
