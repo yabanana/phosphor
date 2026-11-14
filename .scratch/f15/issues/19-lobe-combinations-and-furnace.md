@@ -59,3 +59,10 @@ F15.1 line (re-read literally: clearcoat, sheen, anisotropy, transmission, iride
 from `material_support.cpp` on `cl/f15-plan-c38b51`: base implemented; ior/specular, clearcoat, sheen, anisotropy, iridescence,
 subsurface (thin only), transmission and volume are all APPROXIMATED with named approximations (none is "exact"); subsurface volumetric
 and layers are not yet supported there. The Track Studio case (pawns transmission, king/queen subsurface) is ticket 20's.
+
+2026-11-14 — orchestrator: harness integrated on `cl/f15-plan-c38b51`. The archive conflict with ticket 13 was resolved by semantic
+filtering: exactly the commit's own +154 compute, +33 render and +11 tile descriptors. The ticket-13 runner test now accepts this
+ticket's pending `transmission-rtoff-combinations` key; the combination test accepts the decided pending key without a matching control (81e8859).
+- The two queued keys need no harvest. Captures of `combo-irid-aniso-env` and `transmission-rtoff-combinations` on the integrated
+  build (tickets 13, 14, 17 in) show 0 archive misses and 0 render-thread compiles (`build/f15-harvest-19`).
+- The final `--expect green` over every key runs in the closing battery of the integrated tree.
