@@ -110,6 +110,8 @@ MaterialExtGroup packMaterialExtensions(const MaterialDescription& d) {
         for (u32 k = 0; k < MATERIAL_LAYER_MAX; ++k) {
             r.layerMaterial[k]  = MATERIAL_EXTENSION_INVALID;
             r.heightContrast[k] = -1.0f;
+            r.uvScale[k]        = 1.0f;
+            r.heightTex[k]      = INVALID_TEXTURE_INDEX;
         }
         if (d.layers) {
             const LayerStack& ls = *d.layers;
@@ -120,6 +122,8 @@ MaterialExtGroup packMaterialExtensions(const MaterialDescription& d) {
                 r.layerMaterial[k] = l.materialIndex;
                 r.packedMaskChannels |= channelCode(l.maskChannel) << (2u * k);
                 r.heightContrast[k] = l.heightContrast ? *l.heightContrast : -1.0f;
+                r.uvScale[k]        = l.uvScale;
+                r.heightTex[k]      = l.heightTexture.index;
             }
         }
         out[3] = toRecord(r);

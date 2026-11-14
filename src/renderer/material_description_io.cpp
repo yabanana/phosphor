@@ -271,6 +271,11 @@ void writeLayers(Json& out, LayerStack& stack, const std::string& path) {
         if (ch > 3) fail(path + ": layer mask channel must be R, G, B or A");
         lj["maskChannel"] = CHANNEL_NAMES[ch];
         if (l.heightContrast) lj["heightContrast"] = *l.heightContrast;
+        if (l.uvScale != 1.0f) lj["uvScale"] = l.uvScale;
+        {
+            Writer lw{lj, path + ".layers." + l.materialName};
+            lw.tex("heightTexture", l.heightTexture);
+        }
         list.push_back(std::move(lj));
     }
     out["layers"] = std::move(list);
@@ -295,6 +300,8 @@ void readLayers(const Json& in, LayerStack& stack, const std::string& path) {
             lr.e("maskChannel", ch, CHANNEL_NAMES, 4);
             l.maskChannel = static_cast<TextureChannel>(ch);
             lr.optf("heightContrast", l.heightContrast);
+            lr.f("uvScale", l.uvScale);
+            lr.tex("heightTexture", l.heightTexture);
             lr.finish();
             stack.layers.push_back(std::move(l));
         }

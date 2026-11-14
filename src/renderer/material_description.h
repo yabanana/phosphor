@@ -196,11 +196,19 @@ struct SubsurfaceBlock {
 /// One layer of a layer stack: a material of the library blended by one
 /// channel of the stack's RGBA mask.  Defined and validated here; not loaded
 /// from glTF (F15.4 renders it).
+///
+/// F15.4 (ticket 23) semantics: a layer contributes the BASE parameters of its material (base colour factor x texture,
+/// metallic, roughness, occlusion, normal map); the feature blocks of a layer material and its emissive/alpha are not
+/// blended (features belong to the stack's own description: the coat finish).  `uvScale` tiles the layer's textures
+/// (uv * uvScale; the mask keeps the primitive's uv).  `heightContrast` (metres, >= 0) switches the layer into the
+/// height-contrast blend (renderer/layer_blend.h): its height is heightContrast * (heightTexture.r - 0.5).
 struct MaterialLayer {
     std::string          materialName;
     u32                  materialIndex = ~0u; // resolved by the caller
     TextureChannel       maskChannel   = TextureChannel::R; // R, G, B or A
     std::optional<float> heightContrast; // metres, >= 0
+    float                uvScale       = 1.0f; // > 0
+    MaterialTextureRef   heightTexture = textureSlot(TextureColorSpace::Linear, TextureChannel::R);
 };
 
 struct LayerStack {

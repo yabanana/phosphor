@@ -194,6 +194,7 @@ std::vector<std::string> validate(const MaterialDescription& d, u32 materialCoun
                 c.error(prefix + ".materialIndex out of range");
             if (l.heightContrast && !(*l.heightContrast >= 0.0f && std::isfinite(*l.heightContrast)))
                 c.error(prefix + ".heightContrast must be a finite value >= 0");
+            if (!(l.uvScale > 0.0f && std::isfinite(l.uvScale))) c.error(prefix + ".uvScale must be a finite value > 0");
         }
     }
     return out;
@@ -252,7 +253,13 @@ void visitTextures(Desc& d, Fn&& fn) {
         fn("subsurfaceColorTexture", d.subsurface->colorTexture);
         fn("subsurfaceRadiusScaleTexture", d.subsurface->radiusScaleTexture);
     }
-    if (d.layers) fn("layerMaskTexture", d.layers->mask);
+    if (d.layers) {
+        fn("layerMaskTexture", d.layers->mask);
+        static constexpr const char* kHeightSlots[MATERIAL_LAYER_MAX] = {"layerHeightTexture0", "layerHeightTexture1",
+                                                                          "layerHeightTexture2", "layerHeightTexture3"};
+        for (size_t i = 0; i < d.layers->layers.size() && i < MATERIAL_LAYER_MAX; ++i)
+            fn(kHeightSlots[i], d.layers->layers[i].heightTexture);
+    }
 }
 
 } // namespace
