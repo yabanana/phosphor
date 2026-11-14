@@ -188,7 +188,7 @@ def furnace_reference(np, u, v, n_dot_v, radiance=1.0, declared=False):
     return {"blended": blended, "mixed": mixed, "additive": additive, "layers": layers}
 
 
-def evaluate_furnace(np, candidate, roi, reference, controls):
+def evaluate_furnace(np, candidate, roi, reference, controls, declared=None):
     """Gate: no engine pixel above FURNACE_LIMIT.  Recorded: the engine against the blended reference, the reference's own maximum, the
     deviation of the parameter blend from the BSDF-space mix.  Controls (additive blend) must exceed the limit."""
     values = candidate[roi]
@@ -204,5 +204,14 @@ def evaluate_furnace(np, candidate, roi, reference, controls):
                                           "max": float(deviation.max()),
                                           "max_relative": float((np.abs(deviation) / np.maximum(lum(reference["mixed"]), 1e-6)).max())},
               "pass": bool(engine_max <= FURNACE_LIMIT)}
+    if declared is not None:  # the engine's own model (ADR-0006): the literal Appendix B quadrature above is NOT what the resolve evaluates
+        declared_error = np.abs(lum(values) - lum(declared["blended"])) / np.maximum(lum(declared["blended"]), 0.05 * float(lum(declared["blended"]).mean()))
+        declared_deviation = lum(declared["blended"]) - lum(declared["mixed"])
+        result["declared_model"] = {"blended_max": float(declared["blended"].max()), "mixed_max": float(declared["mixed"].max()),
+                                    "additive_max": float(declared["additive"].max()),
+                                    "engine_vs_declared_mean_relative": float(declared_error.mean()),
+                                    "engine_vs_declared_p99_relative": float(np.percentile(declared_error, 99)),
+                                    "deviation_from_bsdf_mix": {"max_abs": float(np.abs(declared_deviation).max()), "mean": float(declared_deviation.mean()),
+                                                                "min": float(declared_deviation.min()), "max": float(declared_deviation.max())}}
     result["controls"] = {name: {"max_pixel": float(image.max()), "fails_gate": bool(float(image.max()) > FURNACE_LIMIT)} for name, image in controls.items()}
     return result

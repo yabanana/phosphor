@@ -1729,10 +1729,7 @@ def evaluate_layer_scenario(np, name, folder, mode):
         n_dot_v = view[:, 1] / np.linalg.norm(view, axis=1)
         exact = layers.furnace_reference(np, u[inside], v[inside], n_dot_v, declared=False)
         declared = layers.furnace_reference(np, u[inside], v[inside], n_dot_v, declared=True)
-        result = layers.evaluate_furnace(np, candidate, inside, exact, {"additive-blend": exact["additive"]})
-        result["declared_model"] = {"blended_max": float(declared["blended"].max()), "mixed_max": float(declared["mixed"].max()),
-                                    "additive_max": float(declared["additive"].max()),
-                                    "deviation_max_abs": float(np.abs(declared["blended"] - declared["mixed"]).max())}
+        result = layers.evaluate_furnace(np, candidate, inside, exact, {"additive-blend": exact["additive"]}, declared)
         verdicts = {c: {"fails_gate": v_["fails_gate"], "gate_result": v_} for c, v_ in result.pop("controls").items()}
         entry["roi_pixels"] = int(inside.sum())
         entry["reference_maximum_radiance"] = result["reference_max"]
@@ -1889,6 +1886,13 @@ def result_lines(r):
                       f"mean {r['reference_mean']:.5f}; engine vs reference mean relative {r['engine_vs_reference_mean_relative']:.4f}, p99 "
                       f"{r['engine_vs_reference_p99_relative']:.4f}; parameter blend minus BSDF-space mix: max |d| {d['max_abs']:.5f}, mean {d['mean']:.5f}, "
                       f"range [{d['min']:.5f}, {d['max']:.5f}]"]
+        m = r.get("declared_model")
+        if m:
+            md = m["deviation_from_bsdf_mix"]
+            lines += ["", f"engine model (ADR-0006 declared split sum): blended max {m['blended_max']:.5f}, BSDF-space mix max {m['mixed_max']:.5f}, additive max "
+                          f"{m['additive_max']:.5f}; engine vs declared mean relative {m['engine_vs_declared_mean_relative']:.4f}, p99 "
+                          f"{m['engine_vs_declared_p99_relative']:.4f}; blend minus mix: max |d| {md['max_abs']:.5f}, mean {md['mean']:.5f}, range "
+                          f"[{md['min']:.5f}, {md['max']:.5f}]"]
     elif r["kind"] == "radius-monotonic":
         lines += ["", f"statistic: {r['statistic']}; tolerance {r['tolerance']}; ground truth rises at every step: "
                       f"{r['reference_monotonic']}", "", "| series | radii | candidate | reference | pass |", "|---|---|---|---|---|"]
