@@ -79,9 +79,16 @@ section "Defects found during F15"; integrated by fast-forward to 6b6bf04; orche
   gets worse (full F13/F14 corpus, option on vs off) and the Sponza D2 GPU p95 interleaved A/B (orchestrator, quiet machine) is no
   worse; otherwise fall back to B with the numbers. Spike in docs/opt-log.md, numbers in the closure document. IN PROGRESS.
 - Declared (owner noted, no objection): single-sided planes cast sun shadows from both sides in CSM (two-sided by contract) and RT.
-- OPEN, F15 (transmission, ticket 13 territory): 67 dark pixels on the silhouette ring of the IORTestGrid transmissive spheres
-  (N.V > 0 there, untouched by the D3 fix); hypothesis: a refraction sample that returns nothing at grazing incidence while the
-  composite released 1 - t of the diffuse. Analyse before closure.
+- CLOSED, not a defect (eac5233, ticket 13 "C22-D3 follow-up"): the 67 IORTestGrid "dark ring" pixels are a metric artefact. With
+  reflections off a white transmissive sphere reads albedo 1 x environment 0.5 = the clear colour, so the ring set of the off image
+  holds only the 3x3 sun-glint halos (r/R 0.23 .. 0.47, none on a silhouette); 99.7 % of all glass-sphere pixels are below 70 % of
+  that baseline because the glass shows the backdrop. Reference: white furnace `tools/f15_residue_check.py --case transmissive`
+  (five smooth solid glass spheres, IOR 1.0 .. 2.42, environment 0.5 only). Orchestrator rerun on the c978151 Release binary
+  (2026-11-14), identical to the agent's numbers: disc mean 1.0007, silhouette-ring mean 0.9984 (2 056 px), min 0.83, 0 of 83 540
+  pixels below 70 %, fraction below 90 % 4e-5; absorbing-medium negative control (same binary) disc mean 0.2736, 79 209 dark pixels,
+  ring mean 0.866 (grazing Fresnel reflection dominates there), gate fails as required. No engine change; the IORTestGrid count is
+  withdrawn. Limits recorded in ticket 13: walks that end on lit geometry are covered by the existing transmission gates; glass
+  pixels with shading N.V <= 0 keep the declared full diffuse (e9569ac).
 - O7 caveat: a non-archived RT configuration with a cold compiler cache allocates one IFT per frame slot when its final variant
   arrives (ticket 13 record).
 
