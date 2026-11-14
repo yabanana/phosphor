@@ -9,8 +9,8 @@ What is compared and how (decision 11: transmission vs Mitsuba ground truth on t
   Only the pixels of the glass mask are rendered (primary hit on a glass instance, silhouette band excluded).
 - Glass, from the material extension records of the snapshot (record 0 ior; record 1 transmissionFactor word 9,
   thicknessFactor word 11, attenuationColor 13-15, attenuationDistance 16; textures refused):
-    * thicknessFactor > 0 (a CLOSED volume, single- or double-sided): Mitsuba `dielectric` (roughness 0) or
-      `roughdielectric` (GGX, alpha = max(clamp(roughness, 0.04, 1)^2, 0.002), the engine's clamp), int_ior = ior,
+    * thicknessFactor > 0 (a CLOSED volume, single- or double-sided): `gltf_dielectric` (roughness 0: Mitsuba's smooth
+      dielectric geometry with the glTF Schlick Fresnel) or Mitsuba `roughdielectric` (GGX, alpha = max(clamp(roughness, 0.04, 1)^2, 0.002), the engine's clamp), int_ior = ior,
       ext_ior = 1, specular transmittance = baseColor (the glTF tint of the BTDF), the interior a HOMOGENEOUS, purely
       ABSORBING medium sigma_t = -ln(attenuationColor) / attenuationDistance (albedo 0).  By default the medium is the
       expectation of Mitsuba's own: exp(-sigma_t * length) applied by a BSDF wrapper (`gltf_absorbing`) to the interior
@@ -32,7 +32,14 @@ What is compared and how (decision 11: transmission vs Mitsuba ground truth on t
 
 Differences between the glTF model and Mitsuba, all measured by `model-differences` (analytic sphere tracer below,
 independent of Mitsuba) and reported with the harness:
-  1. Fresnel: Mitsuba exact unpolarised; glTF Schlick (also on the leaving side, with the transmitted cosine; TIR = 1).
+  1. Fresnel: smooth interfaces (solids: `gltf_dielectric`, thin-walled: `gltf_thin`) use the glTF Schlick rule like the
+     engine (incident cosine entering, transmitted cosine leaving, TIR = 1); rough solids keep Mitsuba's exact-Fresnel
+     Walter model (declared, absorbed by the bound).  Evidence for modelling it (key transmission-factor-tint, slab 0, ior
+     1.5): the slab's left side face at 65 degrees incidence mirrors an emissive cell of radiance 2 (4x the environment):
+     exact F = 0.120, Schlick F = 0.101, an engine-darker 0.05 in all channels that an exact-Fresnel reference turned into a
+     p95 of 15.8 % (> 15 %); against the Schlick reference the same engine image has p95 12.05 % (Mitsuba + analytic
+     correction) and 9.9 % (noise-free Schlick tracer).  The earlier claim that the bound absorbs it was measured on
+     spheres in a uniform environment only, where reflection and transmission compensate.
   2. Crossings: Mitsuba unbounded (max_depth 64, no Russian roulette); the engine stops at 4 interface events.
   3. Thin-walled: handled exactly (the custom BSDF); Mitsuba's `thindielectric` would differ (above).
   4. Tint: applied at EVERY transmitting interface event (Mitsuba `specular_transmittance` and the custom BSDF), so a
@@ -92,8 +99,9 @@ DECLARED_CONTROLS = ("declared-transmission-ignored", "declared-not-tinted", "de
 
 MODEL = {
     "reference": "Mitsuba 3.9.1 path integrator, pixel-centre rays through integrator.sample, only the glass-mask pixels",
-    "solid": "dielectric / roughdielectric (GGX, alpha = max(clamp(r, .04, 1)^2, .002)), int_ior = ior, ext_ior = 1, "
-             "specular transmittance = baseColor, interior = homogeneous absorbing medium (sigma_t = -ln(c) / d)",
+    "solid": "gltf_dielectric (r = 0: Mitsuba dielectric geometry, glTF Schlick Fresnel: incident cosine entering, transmitted "
+             "cosine leaving, TIR = 1) / roughdielectric (GGX, alpha = max(clamp(r, .04, 1)^2, .002), exact Fresnel), "
+             "ior = ior, ext_ior = 1, specular transmittance = baseColor, interior = homogeneous absorbing medium (sigma_t = -ln(c) / d)",
     "thin_walled": "gltf_thin: per surface reflect F (Schlick at N.V, f0 = ((ior - 1) / (ior + 1))^2) else straight "
                    "transmission x baseColor (roughness 0 only)",
     "transmission_factor": "image(t) = (1 - t) I0 + t I1, I0 = opaque Appendix B dielectric (exact environment quadrature), "
@@ -484,6 +492,60 @@ def register_gltf_thin(mi, dr):
         def to_string(self):
             return "GltfThin[]"
 
+    class GltfDielectric(mi.BSDF):
+        """A smooth dielectric interface as Mitsuba's `dielectric` (two delta lobes, `mi.fresnel` / `mi.refract` geometry,
+        `specular_transmittance` tint on every transmitted event, radiance-mode scaling eta_ti^2 of the refracted lobe,
+        bs.eta = eta_it) whose Fresnel reflectance F is selectable: `fresnel` "exact" (Mitsuba's, proven equal to `dielectric`
+        by the tests) or "schlick" (glTF): F = f0 + (1 - f0)(1 - c)^5, f0 = ((ior - 1) / (ior + 1))^2, c = |cos| of the
+        INCIDENT angle when entering and of the TRANSMITTED angle when leaving, total internal reflection F = 1."""
+
+        def __init__(self, props):
+            mi.BSDF.__init__(self, props)
+            self.ior = float(props.get("ior", 1.5))
+            self.schlick = str(props.get("fresnel", "schlick")) == "schlick"
+            self.f0 = ior_f0(self.ior)
+            self.tint = mi.Color3f(float(props.get("tint_r", 1.0)), float(props.get("tint_g", 1.0)), float(props.get("tint_b", 1.0)))
+            sides = mi.BSDFFlags.FrontSide | mi.BSDFFlags.BackSide
+            reflection = mi.BSDFFlags.DeltaReflection | sides
+            transmission = mi.BSDFFlags.DeltaTransmission | sides
+            self.m_components = [reflection, transmission]
+            self.m_flags = reflection | transmission
+
+        def sample(self, ctx, si, sample1, sample2, active):
+            cos_i = mi.Frame3f.cos_theta(si.wi)
+            r_exact, cos_t, eta_it, eta_ti = mi.fresnel(cos_i, mi.Float(self.ior))
+            if self.schlick:
+                c = dr.select(cos_i > 0.0, dr.abs(cos_i), dr.abs(cos_t))
+                f = dr.select(cos_t == 0.0, mi.Float(1.0), self.f0 + (1.0 - self.f0) * (1.0 - c) ** 5)
+            else:
+                f = r_exact
+            reflect = sample1 <= f
+            bs = dr.zeros(mi.BSDFSample3f)
+            bs.wo = dr.select(reflect, mi.Vector3f(-si.wi.x, -si.wi.y, si.wi.z), mi.refract(si.wi, cos_t, eta_ti))
+            bs.pdf = dr.select(reflect, f, 1.0 - f)
+            bs.eta = dr.select(reflect, mi.Float(1.0), eta_it)
+            bs.sampled_type = dr.select(reflect, mi.UInt32(+mi.BSDFFlags.DeltaReflection), mi.UInt32(+mi.BSDFFlags.DeltaTransmission))
+            bs.sampled_component = dr.select(reflect, mi.UInt32(0), mi.UInt32(1))
+            weight = dr.select(reflect, mi.Color3f(1.0), self.tint)
+            if ctx.mode == mi.TransportMode.Radiance:
+                weight = dr.select(reflect, weight, weight * dr.square(eta_ti))
+            return bs, dr.select(active, weight, mi.Color3f(0.0))
+
+        def eval(self, ctx, si, wo, active=True):
+            return mi.Color3f(0.0)
+
+        def pdf(self, ctx, si, wo, active=True):
+            return mi.Float(0.0)
+
+        def eval_pdf(self, ctx, si, wo, active=True):
+            return mi.Color3f(0.0), mi.Float(0.0)
+
+        def traverse(self, callback):
+            pass
+
+        def to_string(self):
+            return "GltfDielectric[]"
+
     class GltfAbsorbing(mi.BSDF):
         """Beer-Lambert absorption of a homogeneous, purely absorbing interior as a BSDF wrapper: the segment that ends at a hit
         approached from INSIDE (shading cosine < 0) began at the previous interaction on the same closed glass mesh, so its
@@ -561,6 +623,7 @@ def register_gltf_thin(mi, dr):
 
     mi.register_bsdf("gltf_mirror", lambda props: GltfMirror(props))
     mi.register_bsdf("gltf_thin", lambda props: GltfThin(props))
+    mi.register_bsdf("gltf_dielectric", lambda props: GltfDielectric(props))
     mi.register_bsdf("gltf_absorbing", lambda props: GltfAbsorbing(props))
     _REGISTERED.append(True)
 
@@ -633,15 +696,15 @@ def build_scene(root, data, glass, control, threads, out_dir, medium="analytic")
             tint = [1.0, 1.0, 1.0] if control == "transmission-not-tinted" else g["base"]
             solid = not g["thin"]
             if control == "thin-as-volume" and g["thin"]:
-                bsdf = {"type": "dielectric", "int_ior": g["ior"], "ext_ior": 1.0,
-                        "specular_transmittance": {"type": "rgb", "value": tint}}
+                bsdf = {"type": "gltf_dielectric", "ior": g["ior"], "fresnel": "schlick",
+                        "tint_r": tint[0], "tint_g": tint[1], "tint_b": tint[2]}
             elif control == "ior-ignored" and solid:
                 bsdf = {"type": "gltf_thin", "f0": ior_f0(g["ior"]), "tint_r": tint[0], "tint_g": tint[1], "tint_b": tint[2]}
             elif g["thin"]:
                 bsdf = {"type": "gltf_thin", "f0": ior_f0(g["ior"]), "tint_r": tint[0], "tint_g": tint[1], "tint_b": tint[2]}
             elif g["roughness"] <= 0.0:
-                bsdf = {"type": "dielectric", "int_ior": g["ior"], "ext_ior": 1.0,
-                        "specular_transmittance": {"type": "rgb", "value": tint}}
+                bsdf = {"type": "gltf_dielectric", "ior": g["ior"], "fresnel": "schlick",
+                        "tint_r": tint[0], "tint_g": tint[1], "tint_b": tint[2]}
             else:
                 bsdf = {"type": "roughdielectric", "distribution": "ggx", "alpha": mitsuba_alpha(g["roughness"]),
                         "int_ior": g["ior"], "ext_ior": 1.0, "specular_transmittance": {"type": "rgb", "value": tint}}

@@ -137,6 +137,154 @@ class AnalyticModel(unittest.TestCase):
         np.testing.assert_allclose(out[1], 4.0)
 
 
+def mitsuba_session():
+    """(mi, dr) with the glTF BSDF plugins registered (one thread: the unit tests are tiny)."""
+    mi, dr = tr.mitsuba_modules(1)
+    tr.register_gltf_thin(mi, dr)
+    return mi, dr
+
+
+class GltfDielectric(unittest.TestCase):
+    """`gltf_dielectric`: Mitsuba's smooth dielectric with a selectable Fresnel (glTF Schlick | exact)."""
+
+    TINT = [0.9, 0.6, 0.3]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mi, cls.dr = mitsuba_session()
+
+    def bsdfs(self, fresnel, ior=1.5):
+        mi = self.mi
+        mine = mi.load_dict({"type": "gltf_dielectric", "ior": ior, "fresnel": fresnel,
+                             "tint_r": self.TINT[0], "tint_g": self.TINT[1], "tint_b": self.TINT[2]})
+        theirs = mi.load_dict({"type": "dielectric", "int_ior": ior, "ext_ior": 1.0,
+                               "specular_transmittance": {"type": "rgb", "value": self.TINT}})
+        return mine, theirs
+
+    def sample(self, bsdf, theta, sample1):
+        """bsdf.sample for wi at angle theta from +Z (negative theta_cos: inside, i.e. wi.z < 0); returns f (= pdf of the
+        chosen lobe for sample1 = 0), wo, weight, eta as numpy.  theta is the angle from the normal, sign of cos given by
+        `theta` > pi / 2 (leaving)."""
+        mi = self.mi
+        theta = np.asarray(theta, dtype=np.float64)
+        si = mi.SurfaceInteraction3f()
+        si.wi = mi.Vector3f(mi.Float(np.sin(theta)), mi.Float(np.zeros(len(theta))), mi.Float(np.cos(theta)))
+        ctx = mi.BSDFContext()
+        bs, weight = bsdf.sample(ctx, si, mi.Float(np.full(len(theta), sample1)), mi.Point2f(0.5, 0.5), mi.Bool(True))
+        wo = np.stack([np.asarray(bs.wo[c]) for c in range(3)], axis=1)
+        w = np.stack([np.asarray(weight[c]) for c in range(3)], axis=1)
+        return np.asarray(bs.pdf), wo, w, np.asarray(bs.eta), np.asarray(bs.sampled_type)
+
+    def angles(self):
+        enter = np.radians(np.linspace(0.0, 89.0, 30))
+        return np.concatenate([enter, np.pi - enter[::-1] - 1e-9])  # wi.z < 0: seen from inside
+
+    def test_exact_mode_is_mitsubas_dielectric_event_by_event(self):
+        mine, theirs = self.bsdfs("exact")
+        theta = self.angles()
+        for sample1 in (0.0, 1.0):
+            a, b = self.sample(mine, theta, sample1), self.sample(theirs, theta, sample1)
+            for x, y, name in zip(a, b, ("pdf", "wo", "weight", "eta", "type")):
+                np.testing.assert_allclose(x, y, atol=2e-6, err_msg=f"{name} sample1={sample1}")
+
+    def test_schlick_mode_differs_from_the_dielectric_where_the_curves_differ(self):
+        # negative control of the equivalence check above: the same comparison fails for the Schlick interface at 65 degrees
+        mine, theirs = self.bsdfs("schlick")
+        theta = np.radians([65.0])
+        f_schlick, f_exact = self.sample(mine, theta, 0.0)[0], self.sample(theirs, theta, 0.0)[0]
+        self.assertAlmostEqual(float(f_exact[0]), 0.120, delta=0.002)    # the factor-tint side face
+        self.assertAlmostEqual(float(f_schlick[0]), 0.101, delta=0.002)
+        self.assertGreater(float(f_exact[0] - f_schlick[0]), 0.015)
+
+    def test_reflectance_follows_the_gltf_rule_entering_and_leaving(self):
+        mine, _ = self.bsdfs("schlick")
+        theta = self.angles()
+        f = self.sample(mine, theta, 0.0)[0]
+        cos_i = np.abs(np.cos(theta))
+        entering = np.cos(theta) > 0
+        eta = np.where(entering, 1.5, 1.0 / 1.5)
+        np.testing.assert_allclose(f, tr.fresnel_schlick(cos_i, eta), atol=2e-6)
+        # leaving glass at 40 degrees: transmitted angle asin(1.5 sin 40) = 74.6 degrees, F = f0 + (1 - f0)(1 - cos_t)^5 = 0.243
+        f40 = float(self.sample(mine, np.radians([180.0 - 40.0]), 0.0)[0][0])
+        cos_t = math.sqrt(1.0 - (1.5 * math.sin(math.radians(40.0))) ** 2)
+        self.assertAlmostEqual(f40, 0.04 + 0.96 * (1.0 - cos_t) ** 5, places=5)
+        # negative control: the incident-cosine rule would give 0.0407, six times less
+        self.assertGreater(f40, 5.0 * (0.04 + 0.96 * (1.0 - math.cos(math.radians(40.0))) ** 5))
+
+    def test_total_internal_reflection_always_reflects(self):
+        for fresnel in ("schlick", "exact"):
+            mine, _ = self.bsdfs(fresnel)
+            theta = np.radians([180.0 - 45.0, 180.0 - 60.0, 180.0 - 80.0])   # critical angle of ior 1.5: 41.8 degrees
+            f, wo, weight, eta, kind = self.sample(mine, theta, 1.0)         # sample1 = 1: reflects only if F = 1
+            np.testing.assert_allclose(f, 1.0, atol=1e-6, err_msg=fresnel)
+            self.assertTrue((kind == int(self.mi.BSDFFlags.DeltaReflection)).all(), fresnel)
+            np.testing.assert_allclose(wo[:, 2], np.cos(theta), atol=1e-6)  # mirror keeps z
+            np.testing.assert_allclose(weight, 1.0, atol=1e-6)               # a reflection is not tinted
+        # just inside the critical angle (40 degrees): refracts at sample1 = 1, with the radiance scaling eta_ti^2 = 2.25
+        mine, _ = self.bsdfs("schlick")
+        f, wo, weight, eta, kind = self.sample(mine, np.radians([180.0 - 40.0]), 1.0)
+        self.assertLess(float(f[0]), 1.0)
+        self.assertEqual(int(kind[0]), int(self.mi.BSDFFlags.DeltaTransmission))
+        np.testing.assert_allclose(weight[0], np.array(self.TINT) * 2.25, rtol=1e-5)
+        self.assertAlmostEqual(float(eta[0]), 1.0 / 1.5, places=5)
+
+    def scene_pixels(self, n=60):
+        x = np.linspace(-0.97, 0.97, n) * 0.4
+        origin = np.array([0.0, 0.0, 5.5])
+        direction = np.stack([x, np.zeros(n), np.full(n, 0.0)], axis=1) - origin
+        return origin, direction / np.linalg.norm(direction, axis=1, keepdims=True)
+
+    def render_sphere(self, bsdf, spp=8192):
+        mi, dr = self.mi, self.dr
+        scene = mi.load_dict({
+            "type": "scene", "integrator": {"type": "path", "max_depth": 64, "rr_depth": 65},
+            "sensor": {"type": "perspective", "fov": 45.0, "film": {"type": "hdrfilm", "width": 8, "height": 8},
+                       "sampler": {"type": "independent", "sample_count": 1}},
+            "ball": {"type": "sphere", "radius": 0.4, "bsdf": bsdf},
+            "backdrop": {"type": "rectangle", "to_world": mi.ScalarTransform4f().translate([0, 0, -3]).scale([5, 5, 1]),
+                         "bsdf": {"type": "diffuse", "reflectance": {"type": "rgb", "value": [0, 0, 0]}},
+                         "emitter": {"type": "area", "radiance": {"type": "rgb", "value": [2.0, 2.0, 2.0]}}},
+            "sky": {"type": "constant", "radiance": {"type": "rgb", "value": SKY}}})
+        origin, direction = self.scene_pixels()
+        return tr.render_pixels(scene, mi, dr, origin, direction, spp, 7)
+
+    def test_rendered_sphere_exact_mode_matches_mitsuba_and_schlick_does_not(self):
+        tint = {"type": "rgb", "value": self.TINT}
+        reference_bsdf = {"type": "dielectric", "int_ior": 1.5, "ext_ior": 1.0, "specular_transmittance": tint}
+        exact = {"type": "gltf_dielectric", "ior": 1.5, "fresnel": "exact", "tint_r": 0.9, "tint_g": 0.6, "tint_b": 0.3}
+        schlick = dict(exact, fresnel="schlick")
+        mean_ref, err_ref, _ = self.render_sphere(reference_bsdf)
+        mean_exact, err_exact, _ = self.render_sphere(exact)
+        mean_schlick, err_schlick, _ = self.render_sphere(schlick)
+
+        def z_scores(a, ea, b, eb):
+            return np.abs(a - b) / np.maximum(np.sqrt(ea * ea + eb * eb), 1e-9)
+        self.assertLess(float(z_scores(mean_exact, err_exact, mean_ref, err_ref).max()), 5.0)
+        # negative control: the Schlick render is distinguishable from Mitsuba's dielectric on the same pixels (measured rms z
+        # 2.05 and max 6.0 against exactly 0 for the exact mode, which draws the same sample stream)
+        z = z_scores(mean_schlick, err_schlick, mean_ref, err_ref)
+        self.assertGreater(float(np.sqrt((z * z).mean())), 1.6)
+
+    def test_rendered_sphere_schlick_mode_matches_the_analytic_schlick_tracer(self):
+        schlick = {"type": "gltf_dielectric", "ior": 1.5, "fresnel": "schlick", "tint_r": 0.9, "tint_g": 0.6, "tint_b": 0.3}
+        mean, err, bad = self.render_sphere(schlick)
+        self.assertEqual(bad, 0)
+        origin, direction = self.scene_pixels()
+        rect = np.array([[-3.0, 0.0, 0.0, 5.0, 5.0, 2.0, 2.0, 2.0]])
+        glass = {"ior": 1.5, "base": self.TINT, "sigma_t": np.zeros(3), "thin": False}
+        sphere = {"centre": np.zeros(3), "radius": 0.4}
+        schlick_tree = tr.trace_sphere(np.broadcast_to(origin, direction.shape).copy(), direction, sphere, glass, rect, SKY, "schlick")
+        exact_tree = tr.trace_sphere(np.broadcast_to(origin, direction.shape).copy(), direction, sphere, glass, rect, SKY, "exact")
+        scale = np.sqrt(err * err + 1e-12)
+        z = np.abs(mean - schlick_tree) / scale
+        self.assertLess(float(z.max()), 5.0)
+        self.assertLess(float(np.sqrt((z * z).mean())), 1.5)
+        # negative control: the exact tree is further from the Schlick render than the noise allows
+        z_exact = np.abs(mean - exact_tree) / scale
+        self.assertGreater(float(np.sqrt((z_exact * z_exact).mean())), 1.6)
+        self.assertGreater(float(np.sqrt((z_exact * z_exact).mean())), 2.0 * float(np.sqrt((z * z).mean())))
+
+
 class SnapshotParsing(unittest.TestCase):
     def snapshot(self, objects, emitters=(), **kw):
         tmp = tempfile.mkdtemp()
@@ -412,13 +560,13 @@ class EndToEnd(unittest.TestCase):
         masks = np.load(self.folder / "reference" / "masks.npz")
         origin, directions = tr.camera_directions(data)
         rectangles = tr.backdrop_rectangles(data)
-        # the thin sphere follows the glTF (Schlick) rule, the solids Mitsuba's exact Fresnel
+        # thin-walled and smooth solid glass follow the glTF (Schlick) rule
         for k, g in sorted(glass.items()):
             pixels = np.flatnonzero(masks["roi"].reshape(-1) & (masks["sphere"].reshape(-1) == k))
             self.assertGreater(len(pixels), 100)
             sphere = tr.sphere_of(root, data, k)
             expected = tr.trace_sphere(np.broadcast_to(origin, (len(pixels), 3)).copy(), directions[pixels], sphere, g, rectangles,
-                                       SKY, "schlick" if g["thin"] else "exact")
+                                       SKY, "schlick")
             seen = image.reshape(-1, 3)[pixels]
             floor = 0.05 * float(expected.mean())
             error = (np.abs(seen - expected) / np.maximum(expected, floor)).max(axis=1)
