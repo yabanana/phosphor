@@ -275,7 +275,7 @@ kernel void denoise_atrous_energy(constant GPUDenoiseParams& p [[buffer(0)]],con
         const uint index=uint(q.y)*p.width+uint(q.x);const float3 color=input.read(uint2(q)).rgb;if(!all(isfinite(color))||!denoiseEnergyPair(p,specular,tid,index))continue;
         const float sender=weightSum.read(uint2(q)).x;if(!(sender>0))continue;
         sum+=color*(taps[x+2]*taps[y+2]*denoiseWeightSym(center,surfaces[index],lum,diLuminance(color),variance,moments.read(uint2(q)).z,p)/sender);}
-    if(denoiseSignal(p)==DENOISE_SIGNAL_AO)sum=saturate(sum);output.write(float4(sum,1),pixel);
+    if(denoiseSignal(p)==DENOISE_SIGNAL_AO)sum=saturate(sum);output.write(float4(sum,1),pixel); // AO is not routed here by the host (see denoise_passes.cpp); the clamp is kept for the contract
 }
 #endif
 

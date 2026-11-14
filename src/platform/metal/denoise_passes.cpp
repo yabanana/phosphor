@@ -209,7 +209,7 @@ struct DenoisePasses::Impl {
         const u32 iterations=sig==DENOISE_SIGNAL_SPECULAR?std::min(settings.atrousIterations,options.specularAtrousIterations):
             sig==DENOISE_SIGNAL_AO?std::min(settings.atrousIterations,options.aoAtrousIterations):settings.atrousIterations;
         for(u32 iteration=0;iteration<iterations-(deferFinal?1u:0u);++iteration){s.atrousInput[iteration]=s.filtered;
-            if(options.lightingDenoiseEnergy&&!lobeFor(sig)){addEnergyIteration(g,sig,iteration,label);s.filtered=s.atrousOutput[iteration];continue;}
+            if(options.lightingDenoiseEnergy&&sig!=DENOISE_SIGNAL_AO&&!lobeFor(sig)){addEnergyIteration(g,sig,iteration,label);s.filtered=s.atrousOutput[iteration];continue;}
             g.addPass(label+" atrous "+std::to_string(iteration),PassType::Compute,[this,sig,iteration](PassBuilder& b){auto& s=signal[sig];
                 b.read(s.atrousInput[iteration],Usage::ShaderRead,StageDispatch);b.read(s.moments,Usage::ShaderRead,StageDispatch);b.read(s.surface,Usage::ShaderRead,StageDispatch);
                 if(s.metadata.valid())b.read(s.metadata,Usage::ShaderRead,StageDispatch);if(s.lobeGuide.valid())b.read(s.lobeGuide,Usage::ShaderRead,StageDispatch);s.atrousOutput[iteration]=b.createTexture("F13 filtered signal "+std::to_string(sig)+" "+std::to_string(iteration),{Format::RGBA32Float,frame.width,frame.height});
