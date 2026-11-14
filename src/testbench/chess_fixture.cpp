@@ -131,6 +131,7 @@ float ChessFixture::environmentRadiance(std::string_view scenario) {
 std::vector<std::string> ChessFixture::targetMaterials(const ChessOptions& o) {
     if (o.rig == ChessOptions::Rig::Sidelight)
         return o.viewWhite ? std::vector<std::string>{"King_White", "Queen_White"} : std::vector<std::string>{"King_Black", "Queen_Black"};
+    if (o.rig == ChessOptions::Rig::Shadow) return {"Pawn_Top_Black", "Pawn_Top_White"};  // the receiver region excludes both rows' own pixels
     return {"Pawn_Top_Black"};
 }
 

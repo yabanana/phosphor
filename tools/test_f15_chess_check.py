@@ -30,7 +30,7 @@ class CommandTests(unittest.TestCase):
     def test_capture_names_and_scenarios_are_valid_bench_names(self):
         self.assertEqual(sum(1 for s in cc.CAPTURES.values() if s["group"] == "backlight"), 8)
         self.assertEqual(sum(1 for s in cc.CAPTURES.values() if s["group"] == "sidelight"), 9)
-        self.assertEqual(sum(1 for s in cc.CAPTURES.values() if s["group"] == "shadow"), 8)
+        self.assertEqual(sum(1 for s in cc.CAPTURES.values() if s["group"] == "shadow"), 9)
         for spec in cc.CAPTURES.values():
             self.assertTrue(spec["scenario"].startswith("chess-"))
 
@@ -44,6 +44,8 @@ class CommandTests(unittest.TestCase):
             self.assertIn(needle, text)
         csm = " ".join(cc.capture_command(binary, gltf, overrides, "sh-csm-hidden", pathlib.Path("/out/x")))
         self.assertIn("--shadows csm", csm)
+        self.assertIn("--shadow-map-size 8192", csm)
+        self.assertNotIn("--shadow-map-size", " ".join(cc.capture_command(binary, gltf, overrides, "sh-rt-on", pathlib.Path("/out/x"))))
         self.assertIn("--rt off", csm)
         rt = " ".join(cc.capture_command(binary, gltf, overrides, "sh-rt-on", pathlib.Path("/out/x")))
         self.assertIn("--shadows rt", rt)
@@ -234,6 +236,26 @@ class ShadowTests(unittest.TestCase):
         self.assertFalse(cc.evaluate_shadow(np, clear)["attenuated"])
         wrong = shadow_images(t=(0.45, 0.45, 0.27))
         self.assertFalse(cc.evaluate_shadow(np, wrong)["tinted"])
+
+    def test_region_excludes_the_tops_own_pixels_and_the_foreground_rows(self):
+        images = shadow_images()
+        tops = np.zeros((H, W), dtype=bool)
+        tops[40:50, 50:80] = True  # the pixels of a top seen directly: hiding it uncovers the board, which must not count as receiver
+        plain = cc.shadow_region(np, images["hidden"], images["opaque"])
+        masked = cc.shadow_region(np, images["hidden"], images["opaque"], tops)
+        self.assertTrue(plain[42:48, 55:75].all())
+        self.assertFalse(masked[40 - cc.SHADOW_DILATE_PIXELS:50 + cc.SHADOW_DILATE_PIXELS, 50:80].any())
+        limited = cc.shadow_region(np, images["hidden"], images["opaque"], tops, row_limit=50)
+        self.assertFalse(limited[50:, :].any())
+        self.assertTrue(limited[41:48, 90:105].all())
+
+    def test_shadow_camera_row_limit_is_inside_the_frame(self):
+        _, row, depth = cc.project(cc.CAMERA_SHADOW[0], cc.CAMERA_SHADOW[1], (0.0, cc.SHADOW_BOARD_Y, cc.SHADOW_ROW_LIMIT_Z), cc.WIDTH, cc.HEIGHT)
+        self.assertTrue(0 < row < cc.HEIGHT)
+        self.assertGreater(depth, 0)
+        # the black row's shadow (z = 0.1) lies above the limit, the white row's (z = -0.2) below it
+        self.assertLess(cc.project(cc.CAMERA_SHADOW[0], cc.CAMERA_SHADOW[1], (0.0, cc.SHADOW_BOARD_Y, 0.1), cc.WIDTH, cc.HEIGHT)[1], row)
+        self.assertGreater(cc.project(cc.CAMERA_SHADOW[0], cc.CAMERA_SHADOW[1], (0.0, cc.SHADOW_BOARD_Y, -0.2), cc.WIDTH, cc.HEIGHT)[1], row)
 
     def test_region_excludes_the_body_shadow_and_needs_pixels(self):
         images = shadow_images()

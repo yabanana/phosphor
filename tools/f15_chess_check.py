@@ -26,8 +26,7 @@ Gates (each also has declared CONTROLS that must FAIL, built from the same captu
   ignored, scale ignored, order reversed).  View white (King_White, Queen_White 0.001 m): weight 0 -> 1 never falls, King rises
   by at least 0.002, the Queen's rise is reported.
 - shadow (--shadows rt with --rt on, and csm with --rt off; sun 60 degrees from the vertical behind the black pawn row): the receiver
-  region = floor pixels the opaque pawn top shadows (B < 0.5 H) and that are lit when the tops are hidden (H > 10 % of its board
-  p99): per channel T_c = sum(A - B) / sum(H - B) with A the glass tops, B the opaque control, H the tops hidden.  Gate: 0.05 <= T_luma <= 0.95
+  region = floor pixels the opaque pawn top shadows (B < 0.5 H, outside the tops' own pixels, black row only) with a sun term H - B above 25 % of the median H of those candidates: per channel T_c = sum(A - B) / sum(H - B) with A the glass tops, B the opaque control, H the tops hidden.  Gate: 0.05 <= T_luma <= 0.95
   (attenuated, neither opaque nor clear) and the chroma follows the tint within 20 % (curved glass: qualitative) (controls: transmission
   ignored = A := B; tint ignored = A := the white-tint capture).
 - support: the materials section of every report lists each chess feature as implemented or approximated (an approximation names itself).
@@ -64,6 +63,10 @@ CAMERA_BACKLIGHT = ((0.0, 0.16, -0.4), (0.0, 0.07, 0.156))
 TOP_CENTRES_X = (-0.2192, -0.15675, -0.0938, -0.0313, 0.03125, 0.0938, 0.1561, 0.21875)
 TOP_Y, TOP_Z = 0.0704, 0.1564
 TOP_Z_ADVANCED = {-0.0313: 0.0936}  # Pawn_Top_B4
+CAMERA_SHADOW = ((0.0, 0.35, -0.2), (0.0, 0.0185, 0.1))
+SHADOW_BOARD_Y = 0.0185           # the board surface; the black pawn shadows lie at z in 0.047 .. 0.156, the white row's at z < -0.156
+SHADOW_ROW_LIMIT_Z = 0.0          # image rows above the projection of z = 0 (farther) belong to the black row's shadows
+SHADOW_DILATE_PIXELS = 4          # margin around the pawn tops' own pixels (they are not receiver)
 FOV_Y_DEGREES = 60.0
 
 # Gate constants, declared before any measurement (a bound is never loosened to fit a result).
@@ -79,14 +82,16 @@ UNLIT_FRACTION, LIT_FRACTION = 0.01, 0.25
 REGION_MIN_PIXELS = 300
 SHADOW_T_RANGE = (0.05, 0.95)
 SHADOW_TINT_TOLERANCE = 0.20
-SHADOW_SHADOWED, SHADOW_LIT = 0.5, 0.10
+SHADOW_SHADOWED, SHADOW_LIT = 0.5, 0.25  # shadowed: B < 0.5 H; lit: H - B above 0.25 x the median H of the shadowed candidates
 SHADOW_REGION_MIN_PIXELS = 500
 
 BACKLIGHT_FLAGS = {"rt": True, "shadows": "off", "reflections": "rt", "denoise": "off", "accumulate": 112}
 SIDELIGHT_FLAGS = {"rt": False, "shadows": "off", "reflections": "off", "denoise": "custom", "accumulate": 8}
 MASK_FLAGS = {"rt": False, "shadows": "off", "reflections": "off", "denoise": "custom", "accumulate": 0}
 SHADOW_RT_FLAGS = {"rt": True, "shadows": "rt", "reflections": "off", "denoise": "custom", "accumulate": 8}
-SHADOW_CSM_FLAGS = {"rt": False, "shadows": "csm", "reflections": "off", "denoise": "custom", "accumulate": 8}
+# --shadow-map-size 8192: the default cascade 0 spans about 12 m (shadow distance 120 m), 1 cm per 2048-map texel against 2 cm pawn tops: the
+# transmittance of the tops vanishes (T = 1.03 measured, ticket 20 record); the fixture is a 1 m scene, so its CSM map is 8192.
+SHADOW_CSM_FLAGS = {"rt": False, "shadows": "csm", "reflections": "off", "denoise": "custom", "accumulate": 8, "shadow_map_size": 8192}
 
 CAPTURES = {}
 
@@ -109,6 +114,7 @@ _add("sidelight", "sl-mask", "chess-sidelight/mask=1", MASK_FLAGS)
 _add("sidelight", "sw-w000", "chess-sidelight/view=white/weight=0", SIDELIGHT_FLAGS)
 _add("sidelight", "sw-w100", "chess-sidelight/view=white/weight=1", SIDELIGHT_FLAGS)
 _add("sidelight", "sw-mask", "chess-sidelight/view=white/mask=1", MASK_FLAGS)
+_add("shadow", "sh-mask", "chess-shadow/mask=1", MASK_FLAGS)
 for _mode, _flags in (("rt", SHADOW_RT_FLAGS), ("csm", SHADOW_CSM_FLAGS)):
     _add("shadow", f"sh-{_mode}-on", "chess-shadow", _flags)
     _add("shadow", f"sh-{_mode}-opaque", "chess-shadow/tops=opaque", _flags)
@@ -131,7 +137,7 @@ def command_flags(binary, gltf, overrides, scenario, flags, seed=1):
             "--lighting", "legacy", "--gi", "off", "--reflections", flags.get("reflections", "off"), "--ao", "off",
             "--lighting-denoise", flags.get("denoise", "custom"), "--reflection-samples", "8", "--lighting-seed", str(seed),
             "--post", "--upscaler", "native", "--resolution", RESOLUTION, "--no-ui", "--no-vsync", "--no-gpu-timing", "--debug-lighting", "1",
-            "--pipeline-sync"]
+            "--pipeline-sync", *(["--shadow-map-size", str(flags["shadow_map_size"])] if flags.get("shadow_map_size") else [])]
 
 
 def capture_command(binary, gltf, overrides, name, folder, seed=1):
@@ -330,10 +336,26 @@ def sidelight_controls(np, images, masks_black, masks_white):
     return {name: evaluate_sidelight(np, variant, masks_black, masks_white, bases) for name, variant in variants.items()}
 
 
-def shadow_region(np, hidden, opaque):
+def dilate(np, mask, pixels):
+    return ~erode(np, ~mask, pixels)
+
+
+def shadow_region(np, hidden, opaque, tops_mask=None, row_limit=None):
+    """Floor pixels the opaque pawn tops shadow and that are lit with the tops hidden, minus the tops' own pixels (a mask capture dilated
+    by SHADOW_DILATE_PIXELS: where a top is seen directly, hiding it shows the floor behind it) and, with `row_limit`, only the image
+    rows above that row (the black row's shadows: the white row's lie in the foreground)."""
     yh, yb = luminance(np, hidden), luminance(np, opaque)
-    board = float(np.percentile(yh[yh > 0], 99)) if bool((yh > 0).any()) else 0.0
-    return erode(np, (yb < SHADOW_SHADOWED * yh) & (yh > SHADOW_LIT * board), 1)
+    candidates = yb < SHADOW_SHADOWED * yh
+    if tops_mask is not None:
+        candidates &= ~dilate(np, tops_mask, SHADOW_DILATE_PIXELS)
+    if row_limit is not None:
+        candidates[int(row_limit):, :] = False
+    if not bool(candidates.any()):
+        return candidates
+    # The lit floor level is the median of H over the candidates (the sun-lit board, dark and light squares alike); a percentile of the whole
+    # frame is dominated by the specular glare of the sun on the board border (first version: 68-393 pixels).
+    region = candidates & (yh - yb > SHADOW_LIT * float(np.median(yh[candidates])))
+    return erode(np, region, 1)
 
 
 def evaluate_shadow(np, images, region=None):
@@ -359,9 +381,9 @@ def evaluate_shadow(np, images, region=None):
     return result
 
 
-def shadow_controls(np, images):
+def shadow_controls(np, images, region=None):
     """Transmission ignored (the glass tops cast the opaque shadow) and tint ignored (the white-tint capture): each must fail."""
-    region = shadow_region(np, images["hidden"], images["opaque"])
+    region = shadow_region(np, images["hidden"], images["opaque"]) if region is None else region
     return {"transmission-ignored": evaluate_shadow(np, {**images, "on": images["opaque"]}, region),
             "tint-ignored": evaluate_shadow(np, {**images, "on": images["white"]}, region)}
 
@@ -449,11 +471,15 @@ def evaluate_group_sidelight(np, out):
 
 def evaluate_group_shadow(np, out):
     entries = {}
+    mask_image = read_images(out, ["sh-mask"])["sh-mask"]
+    tops = luminance(np, mask_image) > 0.2
+    _, row_limit, _ = project(CAMERA_SHADOW[0], CAMERA_SHADOW[1], (0.0, SHADOW_BOARD_Y, SHADOW_ROW_LIMIT_Z), mask_image.shape[1], mask_image.shape[0])
     for mode in ("rt", "csm"):
         images = read_images(out, [f"sh-{mode}-{v}" for v in ("on", "opaque", "hidden", "white")])
         images = {v: images[f"sh-{mode}-{v}"] for v in ("on", "opaque", "hidden", "white")}
-        result = evaluate_shadow(np, images)
-        controls = shadow_controls(np, images)
+        region = shadow_region(np, images["hidden"], images["opaque"], tops, row_limit)
+        result = evaluate_shadow(np, images, region)
+        controls = shadow_controls(np, images, region)
         entries[mode] = {"result": result, "controls": {k: v["pass"] for k, v in controls.items()},
                          "controls_fail": all(not v["pass"] for v in controls.values())}
     return {"group": "shadow", "modes": entries, "pass": all(e["result"]["pass"] for e in entries.values()),
