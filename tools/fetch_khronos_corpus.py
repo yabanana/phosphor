@@ -6,7 +6,7 @@ Approved scope (owner, 2026-11-14, relayed by the parent session): KhronosGroup/
 into build/khronos-corpus/.  Files are untrusted data: this script only writes bytes, never executes anything it downloads.
 Per model it also stores the model's own license/metadata text files (README.md, LICENSE.md, metadata.json) and writes
 CORPUS.json (source commit, files, sizes, sha256, license fields)."""
-import hashlib, json, pathlib, subprocess, sys, urllib.request
+import hashlib, json, pathlib, re, subprocess, sys, urllib.request
 
 REPO = "KhronosGroup/glTF-Sample-Assets"
 COMMIT = "8f492390ddc7a2ae221a1369ef560589cf8c70fb"
@@ -17,6 +17,9 @@ TIER_A = ["ClearCoatTest", "ClearCoatCarPaint", "SheenTestGrid", "AnisotropyStre
 TIER_B = ["AnisotropyBarnLamp", "ToyCar", "SpecularSilkPouf", "GlamVelvetSofa"]
 CHESS = ["ABeautifulGame"]
 META_FILES = {"README.md", "LICENSE.md", "metadata.json"}
+# Owner approval (2026-11-14, second request): the Khronos reference screenshots of the same models, Models/<Name>/screenshot/,
+# only files named screenshot*.jpg / screenshot*.png (no photos, .sbsar or .zip), about 9.8 MB.
+SCREENSHOT = re.compile(r"^screenshot.*\.(jpg|png)$")
 ALLOWED_SUFFIXES = {".gltf", ".bin", ".png", ".jpg", ".jpeg"}
 
 
@@ -41,8 +44,31 @@ def walk(path):
             yield entry
 
 
+def fetch_screenshots(out):
+    """Add the approved screenshot images of every model of the existing manifest (sha256 recorded next to the models)."""
+    manifest = out / "CORPUS.json"
+    corpus = json.loads(manifest.read_text())
+    total = 0
+    for name, model in corpus["models"].items():
+        shots = []
+        for entry in gh_list(f"Models/{name}/screenshot"):
+            if entry["type"] != "file" or not SCREENSHOT.match(entry["name"]):
+                continue
+            size, digest = fetch(entry["download_url"], out / name / "screenshot" / entry["name"])
+            shots.append({"path": f"screenshot/{entry['name']}", "bytes": size, "sha256": digest})
+            total += size
+        model["screenshots"] = shots
+        print(f"{name:32} {len(shots)} screenshots, {sum(x['bytes'] for x in shots) / 1e6:.2f} MB", flush=True)
+    corpus["screenshots_approved"] = "owner, 2026-11-14 (screenshot*.jpg/png of the same models, ~9.8 MB)"
+    corpus["screenshot_bytes"] = total
+    manifest.write_text(json.dumps(corpus, indent=2) + "\n")
+    print(f"screenshots total {total / 1e6:.1f} MB")
+
+
 def main():
     out = pathlib.Path(sys.argv[1]).resolve()
+    if len(sys.argv) > 2 and sys.argv[2] == "--screenshots":
+        return fetch_screenshots(out)
     out.mkdir(parents=True, exist_ok=True)
     corpus = {"source": f"https://github.com/{REPO}", "commit": COMMIT, "variant": "glTF (default; no Draco/KTX/WebP)",
               "approved": "owner, 2026-11-14 (full Tier A + Tier B + ABeautifulGame, ~71 MB)", "models": {}}

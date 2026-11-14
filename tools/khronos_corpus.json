@@ -77,6 +77,18 @@
           "spdx": "CC-BY-4.0",
           "icon": "https://licensebuttons.net/l/by/4.0/88x31.png"
         }
+      ],
+      "screenshots": [
+        {
+          "path": "screenshot/screenshot.jpg",
+          "bytes": 32519,
+          "sha256": "2a5ca5fee423f20a125e1d80232fbbefd30d565f898ba584eedd4f5a3bdc9a46"
+        },
+        {
+          "path": "screenshot/screenshot_large.jpg",
+          "bytes": 173820,
+          "sha256": "1984fb8a7360909810ffc0b046857f518ddd4c60bfb5c1fb37c810c12b717dc5"
+        }
       ]
     },
     "ClearCoatCarPaint": {
@@ -126,6 +138,18 @@
           "text": "Creative Commons Zero v1.0 Universal",
           "spdx": "CC0-1.0",
           "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
+        }
+      ],
+      "screenshots": [
+        {
+          "path": "screenshot/screenshot.jpg",
+          "bytes": 36533,
+          "sha256": "0d8a7106c9bc579c5eda51f07045aa62fba860d8ce5fad7675d568f5ef3a5a60"
+        },
+        {
+          "path": "screenshot/screenshot_large.jpg",
+          "bytes": 334490,
+          "sha256": "2f5c2172ca3389bc4e1e20c9bc8ecba7eb5e3d782aeb6ad4d27323bac5d19315"
         }
       ]
     },
@@ -177,6 +201,23 @@
           "spdx": "CC0-1.0",
           "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
         }
+      ],
+      "screenshots": [
+        {
+          "path": "screenshot/screenshot.jpg",
+          "bytes": 3320,
+          "sha256": "448f0403fb8b5e5220441770da62dbf55ab50498372ce65caa6042a99d7c327c"
+        },
+        {
+          "path": "screenshot/screenshot_Large.jpg",
+          "bytes": 219189,
+          "sha256": "eee7b0c746660329035c103f341af188e8991177a0862cfcfac3bfb40baaa37b"
+        },
+        {
+          "path": "screenshot/screenshot_Punctual.jpg",
+          "bytes": 198218,
+          "sha256": "24e89da3ae55e0a330b9c57242750d0ae314a4bec958178af9aacebc22ff347a"
+        }
       ]
     },
     "AnisotropyStrengthTest": {
@@ -226,6 +267,18 @@
           "text": "Creative Commons Zero v1.0 Universal",
           "spdx": "CC0-1.0",
           "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
+        }
+      ],
+      "screenshots": [
+        {
+          "path": "screenshot/screenshot-large.png",
+          "bytes": 231925,
+          "sha256": "deea0ea4331a6cf0f911641dc4926704ff7d65809cdaf25009dd31d9f5e92544"
+        },
+        {
+          "path": "screenshot/screenshot.png",
+          "bytes": 25409,
+          "sha256": "afeb84138c893a8f8ade34d67f44cd43d819c18e6ddd9a050c7181c248862f63"
         }
       ]
     },
@@ -302,6 +355,18 @@
           "spdx": "CC-BY-4.0",
           "icon": "https://licensebuttons.net/l/by/4.0/88x31.png"
         }
+      ],
+      "screenshots": [
+        {
+          "path": "screenshot/screenshot-large.png",
+          "bytes": 155476,
+          "sha256": "ff93865f8c0b641fe25b1cbfa022a1f960e9392324873a0f244dec63e5688c54"
+        },
+        {
+          "path": "screenshot/screenshot.png",
+          "bytes": 8366,
+          "sha256": "6e6428282902185bb0be6740f499afde859c259d4f5fe4e1ef9467eeabc31491"
+        }
       ]
     },
     "AnisotropyDiscTest": {
@@ -351,6 +416,18 @@
           "text": "Creative Commons Zero v1.0 Universal",
           "spdx": "CC0-1.0",
           "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
+        }
+      ],
+      "screenshots": [
+        {
+          "path": "screenshot/screenshot.jpg",
+          "bytes": 2873,
+          "sha256": "43c84bc9694b207ef61a1370d0c6ce3dbb7efd58d07cdeeb53ed74e10a58f506"
+        },
+        {
+          "path": "screenshot/screenshot_Large.jpg",
+          "bytes": 220018,
+          "sha256": "7c0ddab0c43df3ebb61b52a92391823ed1cd367cf0cd5efc176cc5e3dc0e756b"
         }
       ]
     },
@@ -442,6 +519,18 @@
           "spdx": "CC0-1.0",
           "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
         }
+      ],
+      "screenshots": [
+        {
+          "path": "screenshot/screenshot.jpg",
+          "bytes": 42548,
+          "sha256": "935883998a23eab7dda8fbd49486b5e08c0348af18211d301ed02ea5745969e6"
+        },
+        {
+          "path": "screenshot/screenshot_large.png",
+          "bytes": 497357,
+          "sha256": "92bf0e05bf25dea32d46ec2f4d72915db73d4dc3b7eae419def8f367aa524c81"
+        }
       ]
     },
     "TransmissionRoughnessTest": {
@@ -512,6 +601,18 @@
           "spdx": "CC-BY-4.0",
           "icon": "https://licensebuttons.net/l/by/4.0/88x31.png"
         }
+      ],
+      "screenshots": [
+        {
+          "path": "screenshot/screenshot-large.png",
+          "bytes": 857211,
+          "sha256": "b30a1a0db0c1f21e1f2becb49c6dc12f389018adba17c97cca059e63f5d23f00"
+        },
+        {
+          "path": "screenshot/screenshot.jpg",
+          "bytes": 36597,
+          "sha256": "bd97250610bec35de13b546b81bd3569698bf026060e6d4b6eebd20b427f6f8b"
+        }
       ]
     },
     "TransmissionThinwallTestGrid": {
@@ -561,6 +662,18 @@
           "text": "Creative Commons Zero v1.0 Universal",
           "spdx": "CC0-1.0",
           "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
+        }
+      ],
+      "screenshots": [
+        {
+          "path": "screenshot/screenshot.jpg",
+          "bytes": 2491,
+          "sha256": "8523412f845b06ffbe85864316d2c9f824a4982694d87647cfc5435be93e3d93"
+        },
+        {
+          "path": "screenshot/screenshot_Large.jpg",
+          "bytes": 192769,
+          "sha256": "2f7cc0dde1116560260bd212c96c964fb02691306273ee6e3f42a44679397bc5"
         }
       ]
     },
@@ -622,6 +735,18 @@
           "spdx": "CC-BY-4.0",
           "icon": "https://licensebuttons.net/l/by/4.0/88x31.png"
         }
+      ],
+      "screenshots": [
+        {
+          "path": "screenshot/screenshot-large.jpg",
+          "bytes": 555848,
+          "sha256": "d41c734768c9c2de73a4b354a64aafae9ce5c639adbb582b7a5677c639c4eb85"
+        },
+        {
+          "path": "screenshot/screenshot.jpg",
+          "bytes": 64621,
+          "sha256": "b1280ece2f5cc447694e9274c8c0018514f3b5260f12e9a655deccb24ad4fa7a"
+        }
       ]
     },
     "IORTestGrid": {
@@ -671,6 +796,18 @@
           "text": "Creative Commons Zero v1.0 Universal",
           "spdx": "CC0-1.0",
           "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
+        }
+      ],
+      "screenshots": [
+        {
+          "path": "screenshot/screenshot.jpg",
+          "bytes": 6672,
+          "sha256": "a4ca5d39a5be694d718b559647126a1036da3e1d512df5f3995be4dcfee16245"
+        },
+        {
+          "path": "screenshot/screenshot_Large.jpg",
+          "bytes": 385635,
+          "sha256": "a23bd2080091755642032661e1cf1a27249b4936c89785f3e57539b9fb5a064a"
         }
       ]
     },
@@ -737,6 +874,18 @@
           "spdx": "CC-BY-4.0",
           "icon": "https://licensebuttons.net/l/by/4.0/88x31.png"
         }
+      ],
+      "screenshots": [
+        {
+          "path": "screenshot/screenshot-large.png",
+          "bytes": 649158,
+          "sha256": "ec006498cf392a0466122a792156f3881fe98b43cc1fd4a11911d90b6878761d"
+        },
+        {
+          "path": "screenshot/screenshot.jpg",
+          "bytes": 15720,
+          "sha256": "514af152c65cfe9246c18a3eac9071daa947fe07f2de1cdc94afada2b2d9b89c"
+        }
       ]
     },
     "IridescenceDielectricSpheres": {
@@ -787,6 +936,18 @@
           "spdx": "CC0-1.0",
           "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
         }
+      ],
+      "screenshots": [
+        {
+          "path": "screenshot/screenshot.jpg",
+          "bytes": 32496,
+          "sha256": "9957fecf8149268e76028db2eb9ed98a55e3025bea56d6de5bf735e6ad802145"
+        },
+        {
+          "path": "screenshot/screenshot_large.jpg",
+          "bytes": 333286,
+          "sha256": "9f55198a086dbb7c2da68bff02fb72998ee4f66046ddb81c195f1cabc57d67d9"
+        }
       ]
     },
     "IridescenceMetallicSpheres": {
@@ -836,6 +997,18 @@
           "text": "Creative Commons Zero v1.0 Universal",
           "spdx": "CC0-1.0",
           "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
+        }
+      ],
+      "screenshots": [
+        {
+          "path": "screenshot/screenshot.jpg",
+          "bytes": 51361,
+          "sha256": "5777a3a57e6d7aa4888a850b6d744ba95e68e6a5e8be52e2960eb01b853f131b"
+        },
+        {
+          "path": "screenshot/screenshot_large.jpg",
+          "bytes": 615960,
+          "sha256": "5c9efec1abb78b9d36960bc34ca1be41f660a50f41c50186fa2847e429b86c15"
         }
       ]
     },
@@ -897,6 +1070,18 @@
           "text": "Creative Commons Zero v1.0 Universal",
           "spdx": "CC0-1.0",
           "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
+        }
+      ],
+      "screenshots": [
+        {
+          "path": "screenshot/screenshot.jpg",
+          "bytes": 9747,
+          "sha256": "dc3231e4f570ae7d02e8d7e92e447cc1de47e65bffdbb1fe764ae21b67c35754"
+        },
+        {
+          "path": "screenshot/screenshot_large.jpg",
+          "bytes": 112411,
+          "sha256": "2a8b882fe1b914360ece4114f83ab7a70e7afd360e476e8b93bc6e867d58f53e"
         }
       ]
     },
@@ -978,6 +1163,18 @@
           "text": "Khronos Trademark or Logo",
           "icon": ""
         }
+      ],
+      "screenshots": [
+        {
+          "path": "screenshot/screenshot.jpg",
+          "bytes": 16021,
+          "sha256": "6558cfabf5f70bc78ca2bb4120e1b892947f6ee004d9be033cb79f5a398d6842"
+        },
+        {
+          "path": "screenshot/screenshot_Large.jpg",
+          "bytes": 359110,
+          "sha256": "c7c014514dfae8a4a87654341536cb154c1296517cc4b8746c8059ab826be5e6"
+        }
       ]
     },
     "EmissiveStrengthTest": {
@@ -1027,6 +1224,23 @@
           "text": "Creative Commons Attribution 4.0 International",
           "spdx": "CC-BY-4.0",
           "icon": "https://licensebuttons.net/l/by/4.0/88x31.png"
+        }
+      ],
+      "screenshots": [
+        {
+          "path": "screenshot/screenshot.jpg",
+          "bytes": 20819,
+          "sha256": "bad88a7bb0e458082cc372fc92c2c19265fb9578e43725f38fc333521bd483c5"
+        },
+        {
+          "path": "screenshot/screenshot_large_bloom.jpg",
+          "bytes": 101463,
+          "sha256": "7213004b92c38c06715659b9c21d0304a25b1042e6ee88024700a60498e944c2"
+        },
+        {
+          "path": "screenshot/screenshot_large_plain.jpg",
+          "bytes": 95448,
+          "sha256": "448fa5678c2cfe4d9f95a0c3821660bbd4abc4916c276a2d6024ad1cd45d65bb"
         }
       ]
     },
@@ -1098,6 +1312,13 @@
           "spdx": "CC0-1.0",
           "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
         }
+      ],
+      "screenshots": [
+        {
+          "path": "screenshot/screenshot.jpg",
+          "bytes": 17903,
+          "sha256": "2c7f68ec97ce572c9e225ff627148428aba1417cc4dd360d7a388e1dc81fa6d7"
+        }
       ]
     },
     "TextureTransformMultiTest": {
@@ -1163,6 +1384,18 @@
           "spdx": "CC-BY-4.0",
           "icon": "https://licensebuttons.net/l/by/4.0/88x31.png"
         }
+      ],
+      "screenshots": [
+        {
+          "path": "screenshot/screenshot.jpg",
+          "bytes": 42642,
+          "sha256": "59e7aaf3d371dc80bbc39ac3f763dda771c5b79700428a8e2f4c40bd0590d948"
+        },
+        {
+          "path": "screenshot/screenshot_large.jpg",
+          "bytes": 164870,
+          "sha256": "1fc41cd95b068788f500c33cfdc14df394d719bcb4324acec8fa9a75272416ea"
+        }
       ]
     },
     "AnisotropyBarnLamp": {
@@ -1227,6 +1460,18 @@
           "text": "Creative Commons Attribution 4.0 International",
           "spdx": "CC-BY-4.0",
           "icon": "https://licensebuttons.net/l/by/4.0/88x31.png"
+        }
+      ],
+      "screenshots": [
+        {
+          "path": "screenshot/screenshot.jpg",
+          "bytes": 13445,
+          "sha256": "89cabdb01a7c89b7acce6dc8b2ff605d0d85baa3217cd7cca87726e24d6bfb0d"
+        },
+        {
+          "path": "screenshot/screenshot_Large.jpg",
+          "bytes": 380286,
+          "sha256": "3ee16e1ae1c7c1d490b91f92da482518e5d8f6da5025cfbd39048c19692966bf"
         }
       ]
     },
@@ -1324,6 +1569,18 @@
           "spdx": "CC0-1.0",
           "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
         }
+      ],
+      "screenshots": [
+        {
+          "path": "screenshot/screenshot.jpg",
+          "bytes": 25873,
+          "sha256": "72c12b01ead0bd6c071dacd0caa02fcd37115f3501de9e02ee82236303686d93"
+        },
+        {
+          "path": "screenshot/screenshot_large.jpg",
+          "bytes": 671915,
+          "sha256": "e86ecd7cc5e7edf5b1ea24e1f8b24e3b4956ed6d22005cbb131745c58e8ccdac"
+        }
       ]
     },
     "SpecularSilkPouf": {
@@ -1379,6 +1636,18 @@
           "spdx": "CC-BY-4.0",
           "icon": "https://licensebuttons.net/l/by/4.0/88x31.png"
         }
+      ],
+      "screenshots": [
+        {
+          "path": "screenshot/screenshot.jpg",
+          "bytes": 3630,
+          "sha256": "7e6fb1a069be44770de90674bd2714cce1cff73df1e7fc87487c33c5b6854b97"
+        },
+        {
+          "path": "screenshot/screenshot_Large.jpg",
+          "bytes": 90773,
+          "sha256": "5f7693064747e26db05d7509fdcc186a9932658d45f82a86aa84482275c3df97"
+        }
       ]
     },
     "GlamVelvetSofa": {
@@ -1433,6 +1702,33 @@
           "text": "Creative Commons Attribution 4.0 International",
           "spdx": "CC-BY-4.0",
           "icon": "https://licensebuttons.net/l/by/4.0/88x31.png"
+        }
+      ],
+      "screenshots": [
+        {
+          "path": "screenshot/screenshot.jpg",
+          "bytes": 26867,
+          "sha256": "0d2b3b12c144d425f36105096f66bd8eb4e8bdf4a97c7026588822cb585deabc"
+        },
+        {
+          "path": "screenshot/screenshot_large.jpg",
+          "bytes": 120052,
+          "sha256": "f511dd4c4dff62d5d6137b9e8ba915e7930b4d2dbb63fa4bc5238fa6ce6e7f82"
+        },
+        {
+          "path": "screenshot/screenshot_layers.jpg",
+          "bytes": 249775,
+          "sha256": "aa09ea41719a6d14edcc2a19f8f6ad83c2f98a216ce2f74e719241c935e4d8c2"
+        },
+        {
+          "path": "screenshot/screenshot_punctual.jpg",
+          "bytes": 252607,
+          "sha256": "89e94222247d90933d616e7d231f883dd6f9d45f2bfcd7e0bb44de8ee7cbab24"
+        },
+        {
+          "path": "screenshot/screenshot_variants.jpg",
+          "bytes": 168715,
+          "sha256": "2ff6f8203006b76d1b409abf667b582cf7df8711ec49542cd78e1621cb3eb20b"
         }
       ]
     },
@@ -1655,8 +1951,27 @@
           "spdx": "CC-BY-4.0",
           "icon": "https://licensebuttons.net/l/by/4.0/88x31.png"
         }
+      ],
+      "screenshots": [
+        {
+          "path": "screenshot/screenshot-babylonjs.jpg",
+          "bytes": 448248,
+          "sha256": "aaa2a3ed449e067c57117e8b324fb3be89a6ac9e4730ba2b6c21afd9b735d472"
+        },
+        {
+          "path": "screenshot/screenshot-threejs.jpg",
+          "bytes": 419052,
+          "sha256": "d6cff003082c186639ac21df34ea12b402a1a906cf8059384a867b0166031237"
+        },
+        {
+          "path": "screenshot/screenshot.jpg",
+          "bytes": 37625,
+          "sha256": "03da38faeddee145e21a9e2f539f5879c725db7b8ebdf730d6d77345111d4baf"
+        }
       ]
     }
   },
-  "total_bytes": 62353850
+  "total_bytes": 62353850,
+  "screenshots_approved": "owner, 2026-11-14 (screenshot*.jpg/png of the same models, ~9.8 MB)",
+  "screenshot_bytes": 9831183
 }
