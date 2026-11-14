@@ -272,3 +272,72 @@ TEST_CASE("F15.3 ticket 19: transmission-rtoff-combinations carries iridescence 
     }
     f.teardown(ecs, scene);
 }
+
+TEST_CASE("F15.1 ticket 13: --transmission-motion is a deterministic camera orbit plus a moving emissive panel; off = the static fixture") {
+    const std::string name = "transmission-roughness-ior";
+    const auto& s = TransmissionValidation::spec(name);
+    {   // Off: nothing moves, no scripted camera, no extra entity (the gated static fixtures are untouched).
+        ECS ecs;
+        GpuScene scene;
+        test::NullTextureManager textures;
+        TransmissionValidation f{name};
+        f.setup(ecs, scene, textures);
+        glm::vec3 p, t;
+        bool cut = true;
+        CHECK_FALSE(f.scriptedCamera(1.0, p, t, cut));
+        CHECK_FALSE(cut);
+        CHECK(f.movingPanel() == INVALID_ENTITY);
+        f.update(1.0f, ecs);
+        f.teardown(ecs, scene);
+    }
+    ECS ecs;
+    GpuScene scene;
+    test::NullTextureManager textures;
+    TransmissionValidation f{name, true};
+    f.setup(ecs, scene, textures);
+    REQUIRE(f.movingPanel() != INVALID_ENTITY);
+    CHECK(f.emitters().size() == size_t(TransmissionValidation::CheckerColumns * TransmissionValidation::CheckerRows / 2)); // backdrop unchanged
+    // The panel: purely emissive, dynamic, behind every glass object, in front of the checkerboard.
+    const auto& material = std::as_const(ecs).getComponent<MaterialComponent>(f.movingPanel());
+    CHECK(material.baseColorFactor == glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+    CHECK(material.emissiveFactor == glm::vec3(s.emission * TransmissionValidation::PanelEmissionScale));
+    CHECK_FALSE(std::as_const(ecs).getComponent<MeshInstanceComponent>(f.movingPanel()).isStatic());
+    for (double time : {0.0, 0.7, 1.9, 2.7}) {
+        const glm::vec3 c = TransmissionValidation::movingPanelCenter(time);
+        for (const auto& g : s.glass) CHECK(c.z < g.center.z - 0.3f);
+        CHECK(c.z > TransmissionValidation::BackdropZ + 0.3f);
+        CHECK(std::abs(c.x) <= TransmissionValidation::PanelAmplitude + 1e-6f);
+    }
+    // The camera: a horizontal arc about the target at the default distance, never a cut, starting at the default pose.
+    glm::vec3 p, t;
+    bool cut = true;
+    REQUIRE(f.scriptedCamera(0.0, p, t, cut));
+    CHECK_FALSE(cut);
+    CHECK(t == s.cameraTarget);
+    CHECK(glm::length(p - f.getDefaultCamera().position) < 1e-5f);
+    float maxStep = 0.0f, maxYaw = 0.0f;
+    glm::vec3 previous = p;
+    for (int frame = 1; frame <= 160; ++frame) {
+        glm::vec3 q, tt;
+        REQUIRE(f.scriptedCamera(double(frame) / 60.0, q, tt, cut));
+        CHECK_FALSE(cut);
+        CHECK(glm::length(q - s.cameraTarget) == doctest::Approx(s.cameraDistance).epsilon(1e-5));
+        CHECK(q.y == doctest::Approx(s.cameraTarget.y));
+        maxStep = std::max(maxStep, std::acos(std::clamp(glm::dot(glm::normalize(previous - s.cameraTarget), glm::normalize(q - s.cameraTarget)), -1.0f, 1.0f)));
+        maxYaw = std::max(maxYaw, std::abs(TransmissionValidation::orbitYawRadians(double(frame) / 60.0)));
+        previous = q;
+    }
+    CHECK(glm::degrees(maxStep) < 0.25f); // at most 0.2 degrees per frame at 60 fps
+    CHECK(glm::degrees(maxYaw) < 12.0f + 1e-3f);
+    CHECK(glm::degrees(maxYaw) > 4.0f); // the 160-frame clip really moves the camera
+    // update(): the panel follows the script (dt = 0 changes nothing, a negative dt is refused).
+    const float x0 = std::as_const(ecs).getComponent<TransformComponent>(f.movingPanel()).position.x;
+    f.update(0.0f, ecs);
+    CHECK(std::as_const(ecs).getComponent<TransformComponent>(f.movingPanel()).position.x == x0);
+    for (int frame = 0; frame < 30; ++frame) f.update(1.0f / 60.0f, ecs);
+    CHECK(std::as_const(ecs).getComponent<TransformComponent>(f.movingPanel()).position.x ==
+          doctest::Approx(TransmissionValidation::movingPanelCenter(30.0 * double(1.0f / 60.0f)).x).epsilon(1e-4));
+    CHECK_THROWS(f.update(-1.0f, ecs));
+    f.teardown(ecs, scene);
+    CHECK(f.movingPanel() == INVALID_ENTITY);
+}

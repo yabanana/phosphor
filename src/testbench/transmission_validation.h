@@ -59,7 +59,9 @@ struct TransmissionScenarioSpec {
 
 class TransmissionValidation final : public TestBench {
 public:
-    explicit TransmissionValidation(std::string scenario);
+    // `motion` (--transmission-motion, F15.1 ticket 13 temporal clip): a scripted camera orbit and an extra emissive panel that
+    // slides behind the glass; the static fixture is unchanged without it (tools/f15_clip_check.py transmission clips).
+    explicit TransmissionValidation(std::string scenario, bool motion = false);
     [[nodiscard]] static bool validScenario(std::string_view scenario);
     [[nodiscard]] static std::span<const std::string_view> scenarios();
     // Declared constants of a scenario (throws std::invalid_argument when unknown).
@@ -68,11 +70,17 @@ public:
     [[nodiscard]] static float environmentRadiance(std::string_view scenario);
 
     void setup(ECS&, GpuScene&, TextureManager&) override;
-    void update(float, ECS&) override {}
+    void update(float dt, ECS& ecs) override;
     void teardown(ECS&, GpuScene&) override;
     [[nodiscard]] const char* getName() const override { return name_.c_str(); }
     [[nodiscard]] const char* assetSource() const override { return "procedural-transmission-validation-v1"; }
     [[nodiscard]] CameraSetup getDefaultCamera() const override;
+    bool scriptedCamera(double t, glm::vec3& position, glm::vec3& target, bool& cut) const override;
+    // The motion script, a pure function of the scene time (unit tested): camera yaw about the target and the panel centre.
+    [[nodiscard]] static float orbitYawRadians(double t);
+    [[nodiscard]] static glm::vec3 movingPanelCenter(double t);
+    [[nodiscard]] bool motion() const { return motion_; }
+    [[nodiscard]] EntityID movingPanel() const { return movingPanel_; } // INVALID_ENTITY without motion
 
     [[nodiscard]] std::string_view scenario() const { return scenario_; }
     [[nodiscard]] std::span<const EntityID> glass() const { return glass_; }       // spec order
@@ -87,10 +95,18 @@ public:
     static constexpr int CheckerColumns = 24, CheckerRows = 16;  // x in [-4.8, 4.8], y in [-1.2, 5.2]
     static constexpr float CheckerOriginX = -4.8f, CheckerOriginY = -1.2f;
     static constexpr float PaneHalfExtent = 0.45f;    // a pane is a 0.9 x 0.9 square
+    // Motion script (--transmission-motion): yaw = 12 degrees * sin(1.0 t) about the target at the default distance (a horizontal arc,
+    // at most 0.2 degrees per frame at 60 fps); the panel (1.0 x 1.0, radiance 1.5 x the backdrop emission) slides along x in
+    // +-1.8 m at 1.3 rad/s at height 2.2 m, z = -1.2 m: behind every glass object and in front of the checkerboard.
+    static constexpr float OrbitAmplitudeDegrees = 12.0f, OrbitRate = 1.0f;
+    static constexpr float PanelAmplitude = 1.8f, PanelRate = 1.3f, PanelY = 2.2f, PanelMotionZ = -1.2f, PanelSize = 1.0f, PanelEmissionScale = 1.5f;
 
 private:
     std::string scenario_, name_;
     std::vector<EntityID> glass_, emitters_;
+    bool motion_ = false;
+    EntityID movingPanel_ = INVALID_ENTITY;
+    double time_ = 0.0;
 };
 
 } // namespace phosphor

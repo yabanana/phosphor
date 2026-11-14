@@ -587,6 +587,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
         } else if (arg == "--material-scenario") {
             auto v=needValue();if(!v)return false;
             if(!MaterialValidation::validScenario(*v)&&!TransmissionValidation::validScenario(*v)&&!TransmissiveShadowValidation::validScenario(*v)){error="--material-scenario: unknown scenario";return false;}out.materialScene=*v;
+        } else if (arg == "--transmission-motion") {
+            out.transmissionMotion = true;
         } else if (arg == "--material-toggle-every") {
             if (!needCount(out.materialToggleEvery)) return false;
         } else if (arg == "--lighting-scene") {
@@ -667,7 +669,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             else if(*v=="specular")out.captureLinearSignal=6;else if(*v=="ao")out.captureLinearSignal=7;
             else if(*v=="indirect-diffuse-filtered")out.captureLinearSignal=8;else if(*v=="ao-filtered")out.captureLinearSignal=9;else if(*v=="specular-filtered")out.captureLinearSignal=10;
             else if(*v=="cloud-transmittance")out.captureLinearSignal=11;
-            else{error="--capture-linear-signal: expected hdr, indirect-diffuse, indirect-diffuse-filtered, direct, shadow, shadow-position, shadow-normal, specular, specular-filtered, ao or ao-filtered";return false;}
+            else if(*v=="reactive")out.captureLinearSignal=12;
+            else{error="--capture-linear-signal: expected hdr, indirect-diffuse, indirect-diffuse-filtered, direct, shadow, shadow-position, shadow-normal, specular, specular-filtered, ao, ao-filtered or reactive";return false;}
         } else if (arg == "--export-reference-frame") {
             if(!needCount(out.exportReferenceFrame))return false;
         } else if (arg == "--capture-linear-frame") {
@@ -1232,6 +1235,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if(out.captureLinearSignal==6 && out.reflections==ReflectionMode::Off){error="Specular capture requires --reflections";return false;}
     if(out.captureLinearSignal==7 && out.ao==AoMode::Off){error="AO capture requires --ao";return false;}
     if(!out.materialOverridesPath.empty() && (!out.bench||*out.bench!=3||out.scenePath.empty()||out.scenePath=="procedural")){error="--material-overrides requires --bench 4 and a glTF --scene (the overrides name its materials)";return false;}
+    if(out.transmissionMotion && (out.materialScene.empty()||!TransmissionValidation::validScenario(out.materialScene))){error="--transmission-motion requires a transmission --material-scenario";return false;}
     if(out.materialToggleEvery>0 && (out.materialScene.empty()||!MaterialValidation::validScenario(out.materialScene)||!MaterialValidation::spec(out.materialScene).hasSpecularGrid())){error="--material-toggle-every requires a specular grid --material-scenario";return false;}
     if(!out.materialScene.empty() && (!out.bench||*out.bench!=1||!out.lightingScene.empty()||!out.reflectionScene.empty())){error="--material-scenario requires --bench 2 and exclusive scene fixture";return false;}
     // F15.3: the declared environment reaches the image through the reflection transport (--reflections ssr, rt or

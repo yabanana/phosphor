@@ -1448,6 +1448,29 @@ TEST_CASE("launch options: F15.1 --material-toggle-every needs a specular grid s
     CHECK(fresh.materialToggleEvery == 0);
 }
 
+TEST_CASE("launch options: F15.1 --transmission-motion needs a transmission scenario; --capture-linear-signal reactive") {
+    LaunchOptions o;
+    std::string error;
+    const std::vector<const char*> base{"--scene", "procedural", "--bench", "2", "--material-scenario", "transmission-roughness-ior",
+                                        "--render-path", "visibility", "--reflections", "ssr", "--post", "--upscaler", "native"};
+    auto with = [&](std::vector<const char*> extra, const char* scenario) {
+        std::vector<const char*> args = base;
+        args[5] = scenario;
+        args.insert(args.end(), extra.begin(), extra.end());
+        return parse(args, o, error);
+    };
+    CHECK(with({"--transmission-motion"}, "transmission-roughness-ior"));
+    CHECK(o.transmissionMotion);
+    CHECK_FALSE(with({"--transmission-motion"}, "base-grid-sun"));
+    CHECK(error.find("transmission") != std::string::npos);
+    CHECK(with({}, "transmission-roughness-ior"));
+    CHECK_FALSE(o.transmissionMotion);
+    CHECK(with({"--capture-linear", "x.pfm", "--frames", "4", "--capture-linear-signal", "reactive"}, "transmission-roughness-ior"));
+    CHECK(o.captureLinearSignal == 12);
+    LaunchOptions fresh;
+    CHECK_FALSE(fresh.transmissionMotion);
+}
+
 TEST_CASE("launch options: --debug-lobe-guide (F15.1)") {
     LaunchOptions o;
     std::string e;

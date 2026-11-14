@@ -373,7 +373,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     if(!options_.exportReference.empty())referenceSnapshot_=std::make_unique<ReferenceSnapshot>(*context_,*renderer_,options_.exportReference,options_.exportReferenceFrame,rt_.get());
     if(!options_.captureLinear.empty()||!options_.captureLinearSequence.empty()) {
         LinearCapture::Config capture;capture.path=options_.captureLinear;capture.sequence=options_.captureLinearSequence;
-        capture.frame=options_.captureLinearFrame;capture.every=options_.captureEvery;capture.accumulate=options_.captureLinearAccumulate;capture.scalar=options_.captureLinearSignal==3||options_.captureLinearSignal==7||options_.captureLinearSignal==9;
+        capture.frame=options_.captureLinearFrame;capture.every=options_.captureEvery;capture.accumulate=options_.captureLinearAccumulate;capture.scalar=options_.captureLinearSignal==3||options_.captureLinearSignal==7||options_.captureLinearSignal==9||options_.captureLinearSignal==12;
         // Denoise history checkpoints exist only where the independent checks
         // are encoded (--debug-lighting, always passed by the F13/F14 runner);
         // product captures carry no history metadata.
@@ -1196,7 +1196,7 @@ void Engine::switchTestBench(TestBenchType type) {
     TestBenchParams benchParams;
     benchParams.scenePath = options_.scenePath;
     benchParams.materialOverridesPath = options_.materialOverridesPath;
-    benchParams.materialToggleEvery=options_.materialToggleEvery;benchParams.materialScenario=options_.materialScene;benchParams.lightingScenario=options_.lightingScene;benchParams.reflectionScenario=options_.reflectionScene;
+    benchParams.materialToggleEvery=options_.materialToggleEvery;benchParams.transmissionMotion=options_.transmissionMotion;benchParams.materialScenario=options_.materialScene;benchParams.lightingScenario=options_.lightingScene;benchParams.reflectionScenario=options_.reflectionScene;
     benchParams.instances         = options_.sceneInstances;
     benchParams.localLightCount=options_.localLightCount;benchParams.areaLights=options_.areaLights;benchParams.stationaryLights=options_.stationaryLights;
     benchParams.meshes            = options_.sceneMeshes;
@@ -2368,7 +2368,7 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
                                                        options_.captureLinearSignal==5?shadows_->geometricNormal():
                                                        options_.captureLinearSignal==6?reflections_->rawSpecular():
                                                        options_.captureLinearSignal==7?reflections_->rawAO():options_.captureLinearSignal==8?reflections_->filteredIndirectDiffuse():options_.captureLinearSignal==9?reflections_->filteredAO():options_.captureLinearSignal==10?reflections_->filteredSpecular():
-                                                       options_.captureLinearSignal==11?atmosphere_->readResources().cloudTransmittance:visibility_->color());
+                                                       options_.captureLinearSignal==11?atmosphere_->readResources().cloudTransmittance:options_.captureLinearSignal==12?visibility_->reactiveMask():visibility_->color());
             color = post_ ? post_->addToGraph(frameGraph_, *visibility_, drawableRef_, graphKey_.outputFormat,reconstructed)
                           : visibility_->addPresent(frameGraph_, drawableRef_);
             visibility_->addChecks(frameGraph_,post_?post_->exposureInput():visibility_->color());

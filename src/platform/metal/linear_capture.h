@@ -16,7 +16,7 @@ class MetalGraphExecutor;
 // tonemapping/upscaling/UI: radiance or dimensionless shadow visibility in R.
 // GPU float4 readback preserves values
 // from RGBA16Float or RGBA32Float; PFM writes only RGB, as linear float32.
-// Explicit scalar captures accept R16Float/R32Float or the R channel of
+// Explicit scalar captures accept R16Float/R32Float/R8Unorm (the MetalFX reactive mask) or the R channel of
 // RGBA16Float/RGBA32Float storage, and replicate R to RGB.
 // Scalar values retain their own units (e.g. dimensionless AO), never radiance.
 class LinearCapture {

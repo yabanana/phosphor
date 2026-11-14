@@ -440,11 +440,12 @@ struct LaunchOptions {
     // F15.3 (ticket 13): --capture-linear-accumulate N averages the last N frames (ending at --capture-linear-frame) of the
     // linear signal on the CPU (test infrastructure for the one-stochastic-sample-per-pixel transport; 0 = the single frame).
     u32 captureLinearAccumulate = 0;
+    bool transmissionMotion = false; // --transmission-motion: scripted camera orbit + moving emissive panel on a transmission fixture (F15.1 ticket 13 clip)
     u32 materialToggleEvery = 0; // --material-toggle-every N: specular grids edit/toggle their extension every N frames
     bool giProbeAnchor=false;
     float giAnchor[3]{},giSpacing=0;
     u32 giGrid[3]{};
-    u32 exportReferenceFrame=0, captureLinearFrame=0, captureLinearSignal=0; // 0 HDR, 1 indirect diffuse, 2 direct; tester reserves 3 shadow, 4 world position, 5 world normal; 6 specular, 7 AO, 8 filtered indirect diffuse Lo, 9 filtered AO visibility, 10 filtered specular Lo, 11 composed cloud transmittance
+    u32 exportReferenceFrame=0, captureLinearFrame=0, captureLinearSignal=0; // 0 HDR, 1 indirect diffuse, 2 direct; tester reserves 3 shadow, 4 world position, 5 world normal; 6 specular, 7 AO, 8 filtered indirect diffuse Lo, 9 filtered AO visibility, 10 filtered specular Lo, 11 composed cloud transmittance, 12 MetalFX reactive mask (R8Unorm, F15.1 ticket 13)
     // F7/F8 renderer, temporal reconstruction, capture and bounded diagnostics.
     std::string scenePath;
     bool visibility = false, materialBinning = false; // measured baseline; specialization stays opt-in

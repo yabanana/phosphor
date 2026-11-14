@@ -57,7 +57,7 @@ std::unique_ptr<TestBench> createTestBench(TestBenchType type, const TestBenchPa
     switch (type) {
         case TestBenchType::TorusDemo:   return std::make_unique<TorusDemo>();
         case TestBenchType::PBRGrid:
-            if(TransmissionValidation::validScenario(params.materialScenario))return std::make_unique<TransmissionValidation>(params.materialScenario);
+            if(TransmissionValidation::validScenario(params.materialScenario))return std::make_unique<TransmissionValidation>(params.materialScenario, params.transmissionMotion);
             if(TransmissiveShadowValidation::validScenario(params.materialScenario))return std::make_unique<TransmissiveShadowValidation>(params.materialScenario);
             if(!params.materialScenario.empty())return std::make_unique<MaterialValidation>(params.materialScenario, params.materialToggleEvery);
             return std::make_unique<PBRGrid>();

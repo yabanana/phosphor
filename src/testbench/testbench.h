@@ -88,6 +88,7 @@ struct TestBenchParams {
     std::string scenePath;
     std::string materialOverridesPath; // F15.1: applied by the scene viewer over the loaded glTF (empty = none)
     std::string lightingScenario,reflectionScenario,materialScenario;
+    bool transmissionMotion = false; // F15.1 ticket 13: --transmission-motion (camera orbit + moving emissive panel on a transmission fixture)
     u32 materialToggleEvery = 0; // F15.1: specular grids edit/toggle the extension every N frames (0 = never)
     u32 localLightCount = 1024;
     bool areaLights = false, stationaryLights = false;

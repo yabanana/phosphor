@@ -255,7 +255,7 @@ glm::quat orientation(const GlassObject& g) {
 }
 } // namespace
 
-TransmissionValidation::TransmissionValidation(std::string scenario) : scenario_(std::move(scenario)) {
+TransmissionValidation::TransmissionValidation(std::string scenario, bool motion) : scenario_(std::move(scenario)), motion_(motion) {
     if (!validScenario(scenario_)) throw std::invalid_argument("Unknown transmission validation scenario: " + scenario_);
     name_ = "Transmission validation: " + scenario_;
 }
@@ -350,6 +350,30 @@ void TransmissionValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& te
         material.emissiveFactor = glm::vec3(s.emission);
         ecs.addComponent(e, std::move(material));
     };
+    if (motion_) {
+        // The moving light: one extra purely emissive panel, dynamic, not part of emitters() (the static backdrop).
+        const EntityID e = ecs.createEntity();
+        movingPanel_ = e;
+        TransformComponent transform;
+        transform.position = movingPanelCenter(0.0);
+        transform.rotation = glm::angleAxis(pi * 0.5f, glm::vec3(1, 0, 0));
+        transform.scale = {PanelSize, 1.0f, PanelSize};
+        transform.updateMatrix();
+        ecs.addComponent(e, std::move(transform));
+        MeshInstanceComponent instance;
+        instance.meshHandle = planeMesh;
+        instance.materialIndex = materialIndex++;
+        instance.setVisible(true);
+        instance.setCastsShadows(true);
+        instance.setStatic(false);
+        ecs.addComponent(e, std::move(instance));
+        MaterialComponent material;
+        material.baseColorFactor = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+        material.metallicFactor = 0.0f;
+        material.roughnessFactor = 1.0f;
+        material.emissiveFactor = glm::vec3(s.emission * PanelEmissionScale);
+        ecs.addComponent(e, std::move(material));
+    }
     if (s.backdrop == TransmissionScenarioSpec::Backdrop::Checker) {
         for (int row = 0; row < CheckerRows; ++row)
             for (int column = 0; column < CheckerColumns; ++column)
@@ -364,8 +388,37 @@ void TransmissionValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& te
 void TransmissionValidation::teardown(ECS& ecs, GpuScene&) {
     for (EntityID e : glass_) ecs.destroyEntity(e);
     for (EntityID e : emitters_) ecs.destroyEntity(e);
+    if (movingPanel_ != INVALID_ENTITY) ecs.destroyEntity(movingPanel_);
     glass_.clear();
     emitters_.clear();
+    movingPanel_ = INVALID_ENTITY;
+    time_ = 0.0;
+}
+
+float TransmissionValidation::orbitYawRadians(double t) {
+    return glm::radians(OrbitAmplitudeDegrees) * float(std::sin(double(OrbitRate) * t));
+}
+glm::vec3 TransmissionValidation::movingPanelCenter(double t) {
+    return {PanelAmplitude * float(std::sin(double(PanelRate) * t)), PanelY, PanelMotionZ};
+}
+void TransmissionValidation::update(float dt, ECS& ecs) {
+    if (!std::isfinite(dt) || dt < 0.0f) throw std::invalid_argument("Transmission fixture dt must be finite nonnegative");
+    if (!motion_ || dt == 0.0f || movingPanel_ == INVALID_ENTITY) return;
+    time_ += dt;
+    const glm::vec3 p = movingPanelCenter(time_);
+    if (std::as_const(ecs).getComponent<TransformComponent>(movingPanel_).position == p) return;
+    auto& t = ecs.getComponent<TransformComponent>(movingPanel_);
+    t.position = p;
+    t.updateMatrix();
+}
+bool TransmissionValidation::scriptedCamera(double t, glm::vec3& position, glm::vec3& target, bool& cut) const {
+    cut = false; // a continuous orbit: never a camera cut
+    if (!motion_ || !std::isfinite(t) || t < 0.0) return false;
+    const auto& s = spec(scenario_);
+    const float yaw = orbitYawRadians(t);
+    target = s.cameraTarget;
+    position = target + s.cameraDistance * glm::vec3(std::sin(yaw), 0.0f, std::cos(yaw));
+    return true;
 }
 
 CameraSetup TransmissionValidation::getDefaultCamera() const {
