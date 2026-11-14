@@ -51,7 +51,10 @@ Declared approximations and limits (support table entries):
     deferred.
 
 Found in F15, outside F15 code (owner 2026-11-14: fixed inside F15; record in docs/implementation/F13-F14-CLOSURE-2026-11-12.md,
-section "Defects found during F15"; integrated by fast-forward to 6b6bf04):
+section "Defects found during F15"; integrated by fast-forward to 6b6bf04; orchestrator re-verification on the integrated tree
+1903a09: ctest 30/30 with KHRONOS_CORPUS_DIR, F13 exact captures identical to the fixing worktree's `final` (0 px, 5 cases; sponza-d2
+328 px / max delta 70 against base03 as explained in the closure document, the other four 0 px), new baseline
+`build/f15-exact/base-residues`; `visual_check` against reference-f15-appB 0 px on 8 benches):
 - GPU safety, clustered DI hang with emissive meshes: fixed 1bf0e19 (F11.5 per-pixel bound), emissive variant archived 3015a46.
 - C22-D3 silhouette ring (shading N.V <= 0, no specular estimate, composite removed 1 - E anyway): fixed e9569ac, fixture
   `f15_residue_check.py --case grazing` (11/11 ring pixels below 70 % on the control, 0/0 fixed).
