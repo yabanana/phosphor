@@ -10,7 +10,7 @@ Roadmap: F15.1, F15.3
 
 - [x] Iridescence fixtures (thickness sweep on dielectric and metal, factor) pass decision-11 thresholds against an independent implementation of the specification's code (the thickness TEXTURE fixture is carried to ticket 22)
 - [x] Thickness 0 disables the effect; furnace bound holds; negative control (film ior ignored) fails
-- [ ] Per-light cost measured (static cost only, GPU timings are the orchestrator's); IridescenceDielectricSpheres/MetallicSpheres side by side (carried to ticket 22) — static cost measured (one thin film ≈ 187 flops, 27 transcendentals, 11 divides; ≈ 5× the base specular per light sample, iridescent pixels only); GPU timing → ticket 24 (quiet machine)
+- [ ] Per-light cost measured (static cost only, GPU timings are the orchestrator's); IridescenceDielectricSpheres/MetallicSpheres side by side (DONE in ticket 22, 2026-11-14, qualitative; the box stays open for the per-light GPU timing) — static cost measured (one thin film ≈ 187 flops, 27 transcendentals, 11 divides; ≈ 5× the base specular per light sample, iridescent pixels only); GPU timing → ticket 24 (quiet machine)
 - [x] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
 
 ## Comments
@@ -170,3 +170,7 @@ combinations with other lobes (composed, unvalidated), `tools/archive_check.sh` 
 - Scenes without features: F13 exact captures and visual_check 0 px.
   archive_check: every local scenario PASS. hitch_check OK. The clip runner
   meets every expectation.
+
+### Ticket 22 closure (2026-11-14)
+
+- Dielectric and metallic sphere lattices rendered side by side (oblique view for the lattices). IridescenceSuzanne exercises iridescenceThicknessTexture qualitatively; the NUMERIC thickness/factor texture fixture was not built (the reference refuses words 7/8): still open.

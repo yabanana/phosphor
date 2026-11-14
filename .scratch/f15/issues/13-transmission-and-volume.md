@@ -16,7 +16,7 @@ Roadmap: F15.1, F15.3
 - [ ] Ray budget per pixel unchanged on non-transmissive scenes (Sponza D2 within band); extra cost on the glass fixture measured — non-transmissive F13 captures 0 px; D2 band and quiet cost → ticket 24
 - [ ] Temporal clip (orbit, moving light) within F13.6; transmissive pixels reactive for MetalFX temporal — reactive proven in both paths; clip FAILS on the gated smooth ROIs (p95 0.14-0.17): partial, carried
 - [x] Forced-overflow capture (`--debug-meshlets 1 --debug-meshlets-corrupt count`, as `tools/f13_overflow_emission_check.sh`) equals the meshlet path on the ticket's fixture
-- [ ] TransmissionTest, TransmissionRoughnessTest, TransmissionThinwallTestGrid, AttenuationTest side by side — ticket 22
+- [x] TransmissionTest, TransmissionRoughnessTest, TransmissionThinwallTestGrid, AttenuationTest side by side — ticket 22 (done 2026-11-14, qualitative; open defect C22-D4 dark grain where glass overlaps single-sided label planes in TransmissionRoughnessTest; `docs/research/2026-11-14-f15-khronos-corpus-report.md`)
 - [x] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
 
 ## Comments
@@ -239,3 +239,7 @@ denoiser the unweighted contribution of the drawn branch). 16 B per pixel per hi
 ior 2.0: 0.031 -> 0.058, stochastic endpoints through internal Fresnel branching).
 
 Not done / open: criterion "temporal clip within F13.6" (unticked); virtual-image reprojection (EDGE/F16); judging roughness 0.1 and 0.3 (about 460 / 1,800 seeds).
+
+### Ticket 22 closure (2026-11-14)
+
+- The four side-by-side models rendered (TransmissionTest also exercises transmissionTexture, AttenuationTest thicknessTexture, qualitatively). Open: C22-D4 (dark grain through glass over single-sided labels, disproved as missing GI by a --gi ddgi diagnostic), C22-D7 (grain at high IOR in one settled frame).

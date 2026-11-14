@@ -12,7 +12,7 @@ Roadmap: F15.1, F15.3
 - [x] Rough base + smooth coat: the coat reflection survives the denoiser and matches the reference within the transport bound
 - [x] Emitter ownership: an emissive-panel fixture shows no double count between DI and the coat lobe's transport
 - [x] Negative control (coat ignored, or coat F0 from the material ior as in the Sample Renderer) fails the bound
-- [ ] ClearCoatTest and ClearCoatCarPaint side by side under the declared rig; Sample Renderer deviations listed; temporal clip within F13.6 — temporal clip done (coat cases of tools/f15_clip_check.py); the Khronos side-by-side → ticket 22
+- [x] ClearCoatTest and ClearCoatCarPaint side by side under the declared rig (ticket 22, 2026-11-14, `docs/research/2026-11-14-f15-khronos-corpus-report.md`, qualitative, no parity claim); Sample Renderer deviations listed; temporal clip within F13.6 — temporal clip done (coat cases of tools/f15_clip_check.py); the Khronos side-by-side → ticket 22
 - [x] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
 
 ## Comments
@@ -144,3 +144,8 @@ Batch logs: `build/f15-exact/battery09.log`, `battery09b.log`,
   orchestrator had rebuilt `build/release` while the runner was running,
   so the two repeats used different binaries. The rerun at a fixed binary
   passes. Rule: never rebuild a binary under a running verification.
+
+### Ticket 22 closure (2026-11-14)
+
+- Side by side done (`docs/research/2026-11-14-f15-khronos-corpus-report.md`). ClearCoatTest also exercises the coat factor texture, the coat roughness texture and the coat normal texture visually (qualitative); the NUMERIC coat-normal-texture fixture was not built (the reference refuses texture words): still open.
+- Open defect C22-D3: isolated dark pixels on the silhouette of smooth spheres (ClearCoatCarPaint), present with the RT and SSR reflection paths, absent with reflections off.

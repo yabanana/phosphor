@@ -11,7 +11,7 @@ Roadmap: F15.1, F15.3
 - [x] Table generator reproducible and checked against an independent numerical integration; a corrupted table fails the check
 - [x] Sheen grid (colour × roughness) passes decision-11 thresholds under constant environment and under a probe-lit fixture; furnace bound holds — constant environment, the probe path (`@probes`, analytic) and the furnace pass; a CAPTURED-probe fixture is open (captured radiance does not reach the sheen term yet, declared) → ticket 22
 - [x] Negative control (no albedo scaling) exceeds the furnace bound
-- [ ] SheenTestGrid and one Tier B sheen model side by side → ticket 22
+- [x] SheenTestGrid and one Tier B sheen model side by side → ticket 22 (done 2026-11-14: SheenTestGrid and SpecularSilkPouf rendered; GlamVelvetSofa REFUSED, non-uniform KHR_texture_transform, defect C22-R2b; `docs/research/2026-11-14-f15-khronos-corpus-report.md`)
 - [x] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
 
 ## Comments
@@ -168,3 +168,7 @@ reviewed), table fix 883cc6d, runner 56c3c01, archive 53da879, guide control
     (or the GI irradiance / pi);
   - captured probe radiance does not light the sheen term;
   - secondary RT hits ignore sheen.
+
+### Ticket 22 closure (2026-11-14)
+
+- SheenTestGrid and SpecularSilkPouf side by side done; ToyCar adds sheen on a cloth. GlamVelvetSofa refused (non-uniform texture transform). The captured-probe sheen fixture and the coat + sheen fixture remain open (no Khronos model combines them).

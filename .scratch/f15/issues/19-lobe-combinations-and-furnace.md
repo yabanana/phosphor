@@ -10,7 +10,7 @@ Roadmap: F15.1, F15.3
 
 - [x] Each combination passes decision-11 thresholds against the independent reference (all 30 `combo-*` keys, `--expect green`, 2026-11-14)
 - [x] Furnace bound holds for every combination; an additive (non-layered) negative control exceeds it (`furnace-combinations`, `@resolve`: additive-layering fails, declared twin too)
-- [ ] AnisotropyBarnLamp, IridescenceSuzanne, ToyCar, SpecularSilkPouf side by side
+- [x] AnisotropyBarnLamp, IridescenceSuzanne, ToyCar, SpecularSilkPouf side by side (ticket 22, 2026-11-14, all four render under the declared rig, 0 archive misses, 0 allocations; `docs/research/2026-11-14-f15-khronos-corpus-report.md`)
 - [x] The F15.1 roadmap line re-read literally; every lobe's status (exact/approximated) listed (list in the last comment; the F15.1 roadmap line itself stays unticked: the Track Studio case is ticket 20's)
 
 ## Comments
@@ -165,3 +165,7 @@ GI at -N for Cache/ReSTIR GI and for the legacy resolve GI path, weight/colour t
     The agent recorded the change; the gate is unchanged.
 - Carried: the Khronos side by side (ticket 22); GI at -N for the cache/ReSTIR GI and the legacy resolve path; the reference for the
   thin-lobe weight and colour textures.
+
+### Ticket 22 closure (2026-11-14)
+
+- Khronos side by side done for the four models. Named approximation seen: single-bounce RT reflections turn mirror-in-mirror dark (C22-A1, dense metal lattices).

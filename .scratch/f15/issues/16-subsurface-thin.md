@@ -192,3 +192,7 @@ coat/sheen/aniso light branches); metals with weight (rule unit-tested only); vo
   - weight and colour textures have no reference (ticket 22).
 
 2026-11-14 - ticket 19 closed the carried item "GI at -N second lookup" for DDGI (commit c0de265: second probe-grid lookup for thin pixels, --thin-gi-back, declared check tools/f15_thin_gi_back_check.py) and composed the thin lobe with a clearcoat on the sun and delta-light paths of the resolve (commit ab42590); details in the last comment of ticket 19. Cache/ReSTIR GI and the legacy resolve GI path keep E(N) for E(-N).
+
+### Ticket 22 closure (2026-11-14)
+
+- DiffuseTransmissionTest is REFUSED (requires KHR_materials_unlit and KHR_lights_punctual, decision 02), so the subsurface weight/colour TEXTURES still have no reference and no corpus coverage: open. The glTF + description IMAGE comparison stays with ticket 20.

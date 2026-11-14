@@ -11,7 +11,7 @@ Roadmap: F15.1, F15.3
 - [x] Anisotropy fixtures (strength, rotation, direction texture) pass decision-11 thresholds; furnace bound holds — strength and rotation fixtures and the furnace pass; the direction-TEXTURE fixture needs textures in the reference → ticket 22
 - [x] Rotation direction and tangent handedness correct on mirrored instances (glTF conventions)
 - [x] Negative control (rotation sign flipped) fails
-- [ ] AnisotropyStrengthTest, AnisotropyRotationTest, AnisotropyDiscTest side by side → ticket 22
+- [x] AnisotropyStrengthTest, AnisotropyRotationTest, AnisotropyDiscTest side by side → ticket 22 (done 2026-11-14, qualitative: only the sun highlight shows the anisotropy in a constant environment; open defect C22-D5, speckle on near-mirror strong anisotropy in one settled frame; `docs/research/2026-11-14-f15-khronos-corpus-report.md`)
 - [x] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
 
 ## Comments
@@ -171,3 +171,7 @@ Batch log: `build/f15-exact/battery11.log`.
     reference (the harness refuses it) → ticket 19;
   - the narrow-lobe sun disk (alpha < 0.05) and a non-constant environment
     for the bent normal are not exercised.
+
+### Ticket 22 closure (2026-11-14)
+
+- Side by side done. The direction texture is exercised qualitatively by AnisotropyDiscTest, AnisotropyRotationTest and AnisotropyBarnLamp; the NUMERIC direction-texture fixture was not built (the reference refuses texture words): still open.
