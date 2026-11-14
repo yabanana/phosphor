@@ -587,12 +587,19 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         }
         if (thinResolved) {
             // F15.1 (ticket 16): lights on the back hemisphere light the visible face through the transmitted lobe (no N.L clamp to the front).
-            if (physicalGI && isDirectional && i == shadowLight && sunAngularRadius > 0.0f)
-                color += (sunThinDiffuse(N, V, L, baseColor.rgb, metallic, spec, thin) +
-                          sunDiskSpecularSpec(N, V, L, baseColor.rgb, metallic, roughness, sunAngularRadius, spec)) *
-                         lightColor * attenuation * visibility;
-            else
-                color += evaluateLightThin(N, V, L, lightColor * attenuation, baseColor.rgb, metallic, roughness, spec, thin) * visibility;
+            // F15.1 (ticket 19): a coat above the thin material attenuates the reflected lobes and the transmitted lobe alike by
+            // 1 - c F_c(|V.Nc|) and adds its own lobe (research/khr-materials.md section 12; the base sits under the coat).
+            float3 thinSum;
+            if (physicalGI && isDirectional && i == shadowLight && sunAngularRadius > 0.0f) {
+                thinSum = sunThinDiffuse(N, V, L, baseColor.rgb, metallic, spec, thin) +
+                          sunDiskSpecularSpec(N, V, L, baseColor.rgb, metallic, roughness, sunAngularRadius, spec);
+                if (coatOn) thinSum = thinSum * coatAttenuation(coat, V) + sunDiskCoat(V, L, sunAngularRadius, coat);
+                color += thinSum * lightColor * attenuation * visibility;
+            } else {
+                thinSum = evaluateLightThin(N, V, L, float3(1.0f), baseColor.rgb, metallic, roughness, spec, thin);
+                if (coatOn) thinSum = thinSum * coatAttenuation(coat, V) + coatLobeLight(V, L, coat);
+                color += thinSum * lightColor * attenuation * visibility;
+            }
             continue;
         }
         if (physicalGI && isDirectional && i == shadowLight && sunAngularRadius > 0.0f) {

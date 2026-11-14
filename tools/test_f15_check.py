@@ -1051,7 +1051,8 @@ class RunnerLogic(unittest.TestCase):
         import re
         block = source[source.index("kScenarios{"):source.index("};", source.index("kScenarios{"))]
         # the two clip fixtures of ticket 08 belong to tools/f15_clip_check.py, not to this reference runner
-        clip_only = {"specular-grid-edit", "specular-grid-rough"}
+        # ticket 19: the GI back-lookup fixture belongs to tools/f15_thin_gi_back_check.py (it needs DDGI; the runner captures with --gi off)
+        clip_only = {"specular-grid-edit", "specular-grid-rough", "subsurface-thin-gi-back"}
         # ticket 13: the transmission scenarios are the separate bench class TransmissionValidation
         transmission = (HERE.parent / "src" / "testbench" / "transmission_validation.cpp").read_text()
         names = transmission[transmission.index("kAll{"):transmission.index("};", transmission.index("kAll{"))]
@@ -1636,14 +1637,7 @@ class BenchMirror(unittest.TestCase):
             for name in declared:
                 self.assertIn(name, ref.ALL_DECLARED_CONTROLS, key)
                 self.assertIn(name, reference, key)
-            if spec.get("pending"):  # a pending key names the control that models today's engine and says which ticket
-                self.assertEqual(spec["pending"], "ticket 19", key)
-                if "pending_matches" in spec:
-                    self.assertIn(spec["pending_matches"], literal + declared, key)
-                else:  # orchestrator decision (2026-11-14): the film ior 1.8 row stays; no control models today's engine there
-                    self.assertEqual(key, "combo-irid-specular-env")
-                if spec.get("pending_gate"):
-                    self.assertEqual(spec["pending_gate"], "declared", key)
+            self.assertFalse(spec.get("pending"), key)  # ticket 19 engine side: no combination key is pending any more
         for name in self.COMBO_PAIRS:
             self.assertEqual(check.SCENARIOS[f"combo-{name}-sun"]["kind"], "direct")
             self.assertEqual(check.SCENARIOS[f"combo-{name}-env@resolve"]["kind"], "declared")
