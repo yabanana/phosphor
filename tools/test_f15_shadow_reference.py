@@ -30,7 +30,8 @@ import f15_transmission_reference as tr  # noqa: E402
 from f12_reference import read_pfm, snapshot, write_pfm  # noqa: E402
 
 KEYS = [k for k in check.SCENARIOS if k.startswith("transmissive-shadow-")]
-GATED = list(KEYS)  # every key is pending (the curved one on its qualitative gate)
+GATED = list(KEYS)  # every key has a gate (the curved one a qualitative gate)
+PENDING = [k for k in KEYS if k.endswith("@csm")]  # ticket 15; the RT, DI and curved keys landed with ticket 14
 CURVED = "transmissive-shadow-curved@rt"
 TRUTH_KEYS = [k for k in KEYS if k != CURVED]
 
@@ -217,15 +218,19 @@ class Runner(unittest.TestCase):
             "transmissive-shadow-point@restir", "transmissive-shadow-curved@rt"]))
         for key in TRUTH_KEYS:
             spec = check.SCENARIOS[key]
-            self.assertEqual(spec["pending"], "ticket 15" if key.endswith("@csm") else "ticket 14", key)
-            self.assertEqual(spec["pending_matches"], "transmittance-ignored")
+            if key.endswith("@csm"):
+                self.assertEqual(spec["pending"], "ticket 15", key)
+                self.assertEqual(spec["pending_matches"], "transmittance-ignored")
+            else:
+                self.assertNotIn("pending", spec, key)  # ticket 14 landed: the RT and DI keys are gated green
+                self.assertNotIn("pending_matches", spec, key)
             self.assertIn("transmittance-ignored", spec["controls"])
             self.assertTrue(set(spec["controls"]) <= set(sr.CONTROLS), key)
             self.assertEqual(spec["envelope"], "csm" if key.endswith("@csm") else "rt", key)
             self.assertEqual(spec["reflections"], "off")
         curved = check.SCENARIOS[CURVED]
         self.assertEqual(curved["kind"], "transmissive-shadow-curved")
-        self.assertEqual(curved["pending"], "ticket 14")
+        self.assertNotIn("pending", curved)
         self.assertNotIn("always_green", curved)
         self.assertEqual(curved["controls"], ["shadow-ignored", "transmittance-ignored"])
         self.assertEqual(curved["reference_args"], ["--no-ground-truth"])
@@ -299,7 +304,9 @@ class EndToEnd(unittest.TestCase):
             code = quiet_main(["render", str(folder / "snapshot"), "--out", str(folder / "reference"), "--margin", str(margin),
                                *spec.get("reference_args", []), "--controls", *spec["controls"]])
             assert code == 0, key
-            today = "transmittance-ignored" if "transmittance-ignored" in spec["controls"] else None
+            # The engine of the red state shadows opaquely (transmittance-ignored): the pending CSM keys; the keys that landed take the
+            # declared model as their engine (an engine implementing the declaration), which every gate must pass.
+            today = "transmittance-ignored" if key in PENDING else None
             source = folder / "reference" / (f"control-{today}.pfm" if today else "model.pfm")
             write_pfm(folder / "engine.pfm", read_pfm(source))
             cls.entries[key] = check.evaluate_shadow_scenario(np, key, folder, "green")
@@ -308,13 +315,16 @@ class EndToEnd(unittest.TestCase):
     def tearDownClass(cls):
         cls.tmp.cleanup()
 
-    def test_todays_engine_fails_every_gated_gate_and_matches_the_ignored_control(self):
+    def test_pending_keys_fail_with_the_ignored_control_and_landed_keys_pass_with_the_model(self):
         for key in GATED:
             e = self.entries[key]
-            self.assertFalse(e["gates_pass"], key)
-            self.assertTrue(e["pending_matches_met"], key)
+            self.assertEqual(e["gates_pass"], key not in PENDING, key)
             self.assertTrue(e["expectation_met"], key)
-            self.assertEqual(e["pending"], check.SCENARIOS[key]["pending"])
+            if key in PENDING:
+                self.assertTrue(e["pending_matches_met"], key)
+                self.assertEqual(e["pending"], check.SCENARIOS[key]["pending"])
+            else:
+                self.assertIsNone(e["pending"], key)
         self.assertEqual(check.verdict([self.entries[k] for k in KEYS], "green"), ("GREEN", check.EXIT_OK))
 
     def test_every_control_is_discriminating_and_the_declared_model_is_feasible(self):
@@ -327,7 +337,7 @@ class EndToEnd(unittest.TestCase):
 
     def test_the_curved_key_gates_only_the_qualitative_properties(self):
         e = self.entries[CURVED]
-        self.assertFalse(e["gates_pass"])           # today's engine: T = 0, the shadow is opaque
+        self.assertTrue(e["gates_pass"])            # an engine implementing the declared model passes the qualitative gate
         self.assertTrue(e["expectation_met"])
         self.assertTrue(e["model_feasible"])        # the declared model is lighter than opaque, darker than unshadowed, tinted
         self.assertTrue(e["discriminating"], e["controls"])
