@@ -40,7 +40,7 @@ inline float3 reflectionSecondary(GPURtHit hit,float3 direction,
     const device DITextureHandle* textures,const device GPULight* lights,const device GPUSampledLight* sampled,
     const device GPUEmissiveSurface* emitters,constant GPUProbeGridParams& gi,const device GPUProbeState* states,
     constant GPUProbeTraceExtra& extra,texture2d<float> irradiance,texture2d<float> moments,thread uint& seed,thread bool& numericError,
-    float minRoughness=0.0f,thread float* emissionLuminance=nullptr){
+    float minRoughness=0.0f,thread float* emissionLuminance=nullptr,bool environmentAmbient=false){
     float3 point,normal,emission;GPUDISurface surface;
     if(!rtSurface(hit,instances,meshes,vertices,indices,p.slotCount,p.meshCount,point,normal)||
         !reflectionMaterial(hit,point,normal,-direction,p,instances,meshes,vertices,indices,materials,textures,surface,emission,numericError))return 0;
@@ -69,6 +69,11 @@ inline float3 reflectionSecondary(GPURtHit hit,float3 direction,
     // GI atlas is INDIRECT irradiance. Add once; AO never modulates it.
     if((p.flags&REFLECTION_ENABLE_GI)&&gi.countX>=2&&gi.countY>=2&&gi.countZ>=2)
         result+=giIrradiance(point,geometric,gi,states,irradiance,moments,true)*diVec(surface.albedo)*(1-surface.metallic)/M_PI_F;
+    // F15.1 (ticket 22, C22-D4): the transmitted-ray walk lights the first opaque surface it meets with the declared environment diffuse term the
+    // camera-visible shading adds (environment x albedo x (1 - metallic), no occlusion) wherever the probe atlas does not supply the indirect light
+    // (transported GI off).  Without it a surface seen through glass that the sun does not reach (the wall in the
+    // shadow of an opaque panel) is black while the same wall is ambient-lit in the camera-visible image.  Reflection estimators keep their F13 behaviour.
+    else if(environmentAmbient)result+=float3(p.environment[0],p.environment[1],p.environment[2])*diVec(surface.albedo)*(1-surface.metallic);
     if(!all(isfinite(result))||any(result<0)){numericError=true;return 0;}return result;
 }
 
@@ -196,7 +201,7 @@ inline float3 reflectionRefractWalk(float3 origin,float3 direction,float3 weight
                                         phosphor::transmissionBeerLambert(medium.color.z,medium.distance,hit.t));
         const ReflectionGlassHit g=reflectionGlassHit(hit,d,p,instances,meshes,vertices,indices,materials,textures,extRecords);
         if(!g.glass){
-            radiance+=weight*reflectionSecondary(hit,d,as,ift,p,instances,meshes,vertices,indices,materials,textures,lights,sampled,emitters,gi,states,extra,irradiance,moments,seed,numericError,floorRoughness);
+            radiance+=weight*reflectionSecondary(hit,d,as,ift,p,instances,meshes,vertices,indices,materials,textures,lights,sampled,emitters,gi,states,extra,irradiance,moments,seed,numericError,floorRoughness,nullptr,true);
             hitSlot=hit.slot;hitGeneration=hit.generation;break;
         }
         float3 side;
