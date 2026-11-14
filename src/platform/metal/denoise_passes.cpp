@@ -19,7 +19,7 @@ struct DenoisePasses::Impl {
     MetalContext& c;PipelineCache& pipelines;LaunchOptions options;DenoiseSettings settings;
     ShadowPasses::Frame frame{};u64 epoch=0,graphVersion=1;
     bool diagnosticHistory=false,diagnosticEndpoints=false,diagnosticReference=false,diagnosticGuide4Reference=false,diagnosticGeneric=false;
-    struct Kernels {pipe::PipelineHandle temporal{},atrous{},guide4{},checker{};std::array<pipe::PipelineHandle,2> tiled{};};
+    struct Kernels {pipe::PipelineHandle temporal{},atrous{},guide4{},checker{},norm{},energy{};std::array<pipe::PipelineHandle,2> tiled{};};
     std::array<Kernels,Signals> kernels{};
     // F15.1 (ticket 08): lobe-contract variants of the specular kernels ("<name>_lobe", shaders/denoise.metal), specialised by the
     // scene feature union (FeaturePipelines slots 214..218).  The five switch together: lobeActive is true only when all of them are
@@ -38,7 +38,7 @@ struct DenoisePasses::Impl {
     struct History {MTL::Buffer* pair[2]{};u64 capacity=0,contentEpoch=0;u32 lastWritten=0;Content content{};bool contentKnown=false;};
     std::array<std::array<History,Signals>,Views> histories{};
     struct SlotSignal {
-        std::array<MTL4::ArgumentTable*,MaxAtrous+5> tables{};
+        std::array<MTL4::ArgumentTable*,2*MaxAtrous+5> tables{}; // [MaxAtrous+5+i]: the energy experiment's weight-sum pass of iteration i
         MTL::Buffer* check=nullptr;bool used=false;u32 expected=0;
         struct Checkpoint {
             u64 frame=0;u32 view=0,pixels=0,epoch=0,revision=0,atrousIterations=0;
@@ -53,6 +53,7 @@ struct DenoisePasses::Impl {
         std::array<MTL::GPUAddress,MaxAtrous> atrousAddress{};
         rg::BufferRef previous{},next{},counts{},surface{},metadata{},lobeGuide{};
         rg::TextureRef raw{},motion{},temporalOutput{},moments{},filtered{};
+        std::array<rg::TextureRef,MaxAtrous> atrousNorm{};
         std::array<rg::TextureRef,MaxAtrous> atrousInput{},atrousOutput{};
     };
     std::array<Signal,Signals> signal{};
@@ -84,6 +85,7 @@ struct DenoisePasses::Impl {
             auto request=[&](const char* name){auto d=lighting::kernel(name);d.constant(40,pipe::ConstantType::UInt,diagnosticGeneric?0xffffffffu:sig);return p.request(d);};
             auto& k=kernels[sig];k.temporal=request("denoise_temporal");k.atrous=request("denoise_atrous");k.guide4=request("denoise_atrous_guide4");k.checker=request("denoise_check");
             for(u32 i=0;i<2;++i)k.tiled[i]=request(("denoise_atrous_tile"+std::to_string(1u<<i)).c_str());
+            if(o.lightingDenoiseEnergy){k.norm=request("denoise_atrous_norm");k.energy=request("denoise_atrous_energy");}
         }
         clear=p.request(lighting::kernel("lighting_check_clear"));
         for(const bool withDI:{false,true}) {
@@ -207,6 +209,7 @@ struct DenoisePasses::Impl {
         const u32 iterations=sig==DENOISE_SIGNAL_SPECULAR?std::min(settings.atrousIterations,options.specularAtrousIterations):
             sig==DENOISE_SIGNAL_AO?std::min(settings.atrousIterations,options.aoAtrousIterations):settings.atrousIterations;
         for(u32 iteration=0;iteration<iterations-(deferFinal?1u:0u);++iteration){s.atrousInput[iteration]=s.filtered;
+            if(options.lightingDenoiseEnergy&&!lobeFor(sig)){addEnergyIteration(g,sig,iteration,label);s.filtered=s.atrousOutput[iteration];continue;}
             g.addPass(label+" atrous "+std::to_string(iteration),PassType::Compute,[this,sig,iteration](PassBuilder& b){auto& s=signal[sig];
                 b.read(s.atrousInput[iteration],Usage::ShaderRead,StageDispatch);b.read(s.moments,Usage::ShaderRead,StageDispatch);b.read(s.surface,Usage::ShaderRead,StageDispatch);
                 if(s.metadata.valid())b.read(s.metadata,Usage::ShaderRead,StageDispatch);if(s.lobeGuide.valid())b.read(s.lobeGuide,Usage::ShaderRead,StageDispatch);s.atrousOutput[iteration]=b.createTexture("F13 filtered signal "+std::to_string(sig)+" "+std::to_string(iteration),{Format::RGBA32Float,frame.width,frame.height});
@@ -229,6 +232,28 @@ struct DenoisePasses::Impl {
         if(!deferFinal&&options.debugLighting)addChecks(g,sig);
         return s.filtered;
     }
+    // F13.4 experiment: energy-preserving a-trous iteration (denoise.metal denoise_atrous_norm + denoise_atrous_energy), base kernels only.
+    void addEnergyIteration(rg::RenderGraph& g,u32 sig,u32 iteration,const std::string& label){
+        using namespace rg;const std::string suffix=std::to_string(sig)+" "+std::to_string(iteration);
+        g.addPass(label+" atrous weight sums "+std::to_string(iteration),PassType::Compute,[this,sig,iteration,suffix](PassBuilder& b){auto& s=signal[sig];
+            b.read(s.atrousInput[iteration],Usage::ShaderRead,StageDispatch);b.read(s.moments,Usage::ShaderRead,StageDispatch);b.read(s.surface,Usage::ShaderRead,StageDispatch);
+            if(s.metadata.valid())b.read(s.metadata,Usage::ShaderRead,StageDispatch);
+            s.atrousNorm[iteration]=b.createTexture("F13 energy weight sums "+suffix,{Format::RGBA32Float,frame.width,frame.height});
+            s.atrousNorm[iteration]=b.write(s.atrousNorm[iteration],Usage::ShaderWrite,StageDispatch);b.setProfileShaders("denoise_atrous_norm");
+        },[this,sig,iteration](PassContext& ctx){auto& s=signal[sig];auto* t=slots[frame.slot][sig].tables[MaxAtrous+5+iteration];t->setAddress(s.atrousAddress[iteration],0);
+            t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(s.surface))->gpuAddress(),1);t->setAddress(s.metadata.valid()?static_cast<MTL::Buffer*>(ctx.buffer(s.metadata))->gpuAddress():histories[frame.view][sig].pair[s.readSide]->gpuAddress(),3);
+            texture(t,ctx,s.atrousInput[iteration],0);texture(t,ctx,s.moments,1);texture(t,ctx,s.atrousNorm[iteration],2);
+            lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[sig].norm,t,frame.width*frame.height);});
+        g.addPass(label+" atrous energy "+std::to_string(iteration),PassType::Compute,[this,sig,iteration,suffix](PassBuilder& b){auto& s=signal[sig];
+            b.read(s.atrousInput[iteration],Usage::ShaderRead,StageDispatch);b.read(s.moments,Usage::ShaderRead,StageDispatch);b.read(s.surface,Usage::ShaderRead,StageDispatch);
+            b.read(s.atrousNorm[iteration],Usage::ShaderRead,StageDispatch);if(s.metadata.valid())b.read(s.metadata,Usage::ShaderRead,StageDispatch);
+            s.atrousOutput[iteration]=b.createTexture("F13 filtered signal "+suffix,{Format::RGBA32Float,frame.width,frame.height});
+            s.atrousOutput[iteration]=b.write(s.atrousOutput[iteration],Usage::ShaderWrite,StageDispatch);b.setProfileShaders("denoise_atrous_energy");
+        },[this,sig,iteration](PassContext& ctx){auto& s=signal[sig];auto* t=slots[frame.slot][sig].tables[1+iteration];t->setAddress(s.atrousAddress[iteration],0);
+            t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(s.surface))->gpuAddress(),1);t->setAddress(s.metadata.valid()?static_cast<MTL::Buffer*>(ctx.buffer(s.metadata))->gpuAddress():histories[frame.view][sig].pair[s.readSide]->gpuAddress(),3);
+            texture(t,ctx,s.atrousInput[iteration],0);texture(t,ctx,s.moments,1);texture(t,ctx,s.atrousOutput[iteration],2);texture(t,ctx,s.atrousNorm[iteration],3);
+            lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[sig].energy,t,frame.width*frame.height);});
+    }
     void addChecks(rg::RenderGraph& g,u32 sig){using namespace rg;auto& s=signal[sig];const std::string label="F13 denoise "+std::to_string(sig);
         if(options.debugReflectionCorrupt==1)g.addPass(label+" negative NEXT foreign view",PassType::Compute,[this,sig](PassBuilder& b){auto& s=signal[sig];
             b.read(s.next,Usage::ShaderRead,StageDispatch);s.next=b.write(s.next,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("denoise_next_foreign_view");
@@ -245,7 +270,7 @@ struct DenoisePasses::Impl {
     }
     std::array<rg::TextureRef,3> addDiffuse(rg::RenderGraph& g,std::array<rg::TextureRef,3> raw,rg::TextureRef motion,rg::BufferRef surfaces,bool withDI){
         using namespace rg;constexpr std::array<u32,3> signals{DENOISE_SIGNAL_DI,DENOISE_SIGNAL_GI,DENOISE_SIGNAL_AO};
-        const bool batch=settings.atrousIterations==3&&options.aoAtrousIterations>=3&&!diagnosticUnbatched&&!diagnosticReference&&!diagnosticGuide4Reference;
+        const bool batch=settings.atrousIterations==3&&!options.lightingDenoiseEnergy&&options.aoAtrousIterations>=3&&!diagnosticUnbatched&&!diagnosticReference&&!diagnosticGuide4Reference;
         const u32 first=withDI?0u:1u;
         for(u32 i=first;i<3;++i)raw[i]=add(g,signals[i],raw[i],motion,surfaces,{},batch);
         if(batch){
@@ -309,6 +334,7 @@ u32 DenoisePasses::historyFrames(u32 sig)const{
 bool DenoisePasses::ready()const{
     for(const auto& k:impl_->kernels){
         for(auto h:{k.temporal,k.atrous,k.guide4,k.checker,k.tiled[0],k.tiled[1]})if(!impl_->pipelines.compute(h))return false;
+        if(impl_->options.lightingDenoiseEnergy&&(!impl_->pipelines.compute(k.norm)||!impl_->pipelines.compute(k.energy)))return false;
     }
     return impl_->pipelines.compute(impl_->clear)&&impl_->pipelines.compute(impl_->diffuse4[0])&&impl_->pipelines.compute(impl_->diffuse4[1])&&(!impl_->options.debugHistoryCorrupt||impl_->pipelines.compute(impl_->corrupt))&&
         (impl_->options.debugReflectionCorrupt!=1||impl_->pipelines.compute(impl_->poisonNext));

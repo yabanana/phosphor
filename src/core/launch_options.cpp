@@ -523,6 +523,10 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if(*v=="off")out.lightingDenoise=LightingDenoiseMode::Off;else if(*v=="custom")out.lightingDenoise=LightingDenoiseMode::Custom;
             else if(*v=="metalfx")out.lightingDenoise=LightingDenoiseMode::MetalFX;
             else{error="--lighting-denoise: expected off, custom or metalfx";return false;}
+        } else if (arg == "--lighting-denoise-energy") {
+            auto v=needValue();if(!v)return false;
+            if(*v=="on")out.lightingDenoiseEnergy=true;else if(*v=="off")out.lightingDenoiseEnergy=false;
+            else{error="--lighting-denoise-energy: expected on or off";return false;}
         } else if (arg == "--ao-radius") {
             if(!needFloat(out.aoRadius)||out.aoRadius<=0||out.aoRadius>100){error="--ao-radius: expected world metres in (0,100]";return false;}
         } else if (arg == "--reflection-samples") {
@@ -1293,6 +1297,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
         error = "RT sun, local visibility and GI require --rt on"; return false;
     }
     if(!out.reflectionScene.empty() && (!out.bench||*out.bench!=5||!out.lightingScene.empty())){error="--reflection-scene requires --bench 6 and exclusive scene fixture";return false;}
+    if(out.lightingDenoiseEnergy&&out.lightingDenoise!=LightingDenoiseMode::Custom){error="--lighting-denoise-energy on requires --lighting-denoise custom";return false;}
     if(out.captureLinearSignal==9&&(out.ao==AoMode::Off||out.lightingDenoise!=LightingDenoiseMode::Custom)){error="Filtered AO capture requires AO and --lighting-denoise custom";return false;}
     if(out.captureLinearSignal==10&&(out.reflections==ReflectionMode::Off||out.lightingDenoise!=LightingDenoiseMode::Custom)){error="Filtered specular capture requires reflections and --lighting-denoise custom";return false;}
     if(out.reflectionScene=="ao-temporal-wall"&&(out.ao!=AoMode::RTAO||out.aoRadius!=2||out.gi!=GiMode::Off||out.reflections!=ReflectionMode::Off||out.directLighting!=DirectLightingMode::Legacy||out.temporalUpscale||out.renderScale!=1||out.dynamicResolution||out.temporalViews!=1||out.resolutionScript||out.referenceScale!=1)){error="Physical AO control requires RTAO radius2, fixed native geometry, one view and exclusive AO";return false;}

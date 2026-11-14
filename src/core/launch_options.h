@@ -417,6 +417,7 @@ struct LaunchOptions {
     ReflectionMode reflections=ReflectionMode::Off;
     AoMode ao=AoMode::Off;
     LightingDenoiseMode lightingDenoise=LightingDenoiseMode::Off;
+    bool lightingDenoiseEnergy=false; // F13.4 experiment: energy-preserving (sender-normalised, symmetric-weight) a-trous; default off = the row-normalised filter
     float aoRadius=1.0f;u32 reflectionSamples=1,debugReflectionCorrupt=0;
     bool reflectionCaptureProbe=false;
     std::string reflectionProbePath;

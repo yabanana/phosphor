@@ -115,7 +115,9 @@ TEST_CASE("F13 atrous edge weights preserve identity on constant signals and sto
 // Declared behaviour: the budget estimator itself is unbiased (paired GPU measurement, .scratch/f15/issues/20-chess-fixture.md); the loss is
 // the filter's, grows with the tail weight, and vanishes with the luminance weight disabled (negative control) or on a light-tailed signal.
 namespace {
-double atrousEnergyRatio(double p,double k,double inputSigmaScale,float phi){
+// senderNormalised: the F13.4 energy-preserving variant (out(q) = sum_p w(q,p) x(p) / W(p), W(p) = sum_q w(p,q), symmetric weights; the weight
+// of denoiseSpatialWeight is symmetric here because the variance is one constant); false: the shipped receiver-normalised gather.
+double atrousEnergyRatio(double p,double k,double inputSigmaScale,float phi,bool senderNormalised=false){
     constexpr int N=48;std::vector<float> img(N*N);u32 state=12345u;auto uniform=[&]{state=state*1664525u+1013904223u;return double(state>>8)/double(1u<<24);};
     const double hi=1+k,lo=(1-p*hi)/(1-p);double sum=0,sq=0;for(auto& v:img){v=float(uniform()<p?hi:lo);sum+=v;sq+=double(v)*v;}
     const double mean=sum/img.size(),variance=sq/img.size()-mean*mean;
@@ -124,10 +126,15 @@ double atrousEnergyRatio(double p,double k,double inputSigmaScale,float phi){
     const double before=std::accumulate(img.begin(),img.end(),0.0);const float taps[5]={1,4,6,4,1};
     for(int iteration=0;iteration<3;++iteration){
         params.atrousStep=1u<<iteration;const int step=1<<iteration;std::vector<float> out(img.size());
+        auto w=[&](int y,int x,int dy,int dx){const int qy=y+dy*step,qx=x+dx*step;return taps[dy+2]*taps[dx+2]*double(denoiseSpatialWeight(s,s,img[y*N+x],img[qy*N+qx],float(variance),params));};
+        auto inside=[&](int y,int x,int dy,int dx){const int qy=y+dy*step,qx=x+dx*step;return qy>=0&&qy<N&&qx>=0&&qx<N;};
+        std::vector<double> sender(img.size(),0.0);
+        if(senderNormalised)for(int y=0;y<N;++y)for(int x=0;x<N;++x)for(int dy=-2;dy<=2;++dy)for(int dx=-2;dx<=2;++dx)if(inside(y,x,dy,dx))sender[y*N+x]+=w(y,x,dy,dx);
         for(int y=0;y<N;++y)for(int x=0;x<N;++x){double acc=0,weights=0;
-            for(int dy=-2;dy<=2;++dy)for(int dx=-2;dx<=2;++dx){const int qy=y+dy*step,qx=x+dx*step;if(qy<0||qy>=N||qx<0||qx>=N)continue;
-                const double w=taps[dy+2]*taps[dx+2]*denoiseSpatialWeight(s,s,img[y*N+x],img[qy*N+qx],float(variance),params);acc+=w*img[qy*N+qx];weights+=w;}
-            out[y*N+x]=float(acc/weights);}
+            for(int dy=-2;dy<=2;++dy)for(int dx=-2;dx<=2;++dx){if(!inside(y,x,dy,dx))continue;const int q=(y+dy*step)*N+x+dx*step;
+                const double weightValue=w(y,x,dy,dx);
+                if(senderNormalised)acc+=weightValue*img[q]/sender[q];else{acc+=weightValue*img[q];weights+=weightValue;}}
+            out[y*N+x]=float(senderNormalised?acc:acc/weights);}
         img=out;}
     return std::accumulate(img.begin(),img.end(),0.0)/before;
 }
@@ -138,7 +145,11 @@ TEST_CASE("F15 variance-guided atrous filter loses energy on heavy-tailed noise,
     CHECK(heavyAccumulated<.995);    // after temporal accumulation (sigma x0.2): ~1-2 % loss, the magnitude measured on the GPU (0.977 at 128 strata)
     CHECK(heavyAccumulated>heavy);
     CHECK(light>.99);                // a light-tailed signal is untouched
-    CHECK(atrousEnergyRatio(.02,20,1.0,1e6f)>.995); // negative control (image-border clipping only): the same heavy-tailed field, luminance weight disabled
+    CHECK(atrousEnergyRatio(.02,20,1.0,1e6f)>.995); // negative control (image-border clipping only)
+    // F13.4 energy-preserving variant: exact conservation on the same fields, and the control that fails if its normalisation is replaced by the row one.
+    for(const double inputScale:{1.0,.2})CHECK(atrousEnergyRatio(.02,20,inputScale,4,true)==doctest::Approx(1.0).epsilon(1e-4));
+    CHECK(atrousEnergyRatio(.2,.2,1.0,4,true)==doctest::Approx(1.0).epsilon(1e-4));
+    CHECK(atrousEnergyRatio(.02,20,.2,4,false)<.995);   // control: the per-row normalisation of the same weights is NOT conservative; a variant regressing to it fails above: the same heavy-tailed field, luminance weight disabled
 }
 
 TEST_CASE("F13.6 specular atrous weight is bounded by the reflection lobe"){

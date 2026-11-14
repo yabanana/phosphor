@@ -230,6 +230,55 @@ kernel void DN_KERNEL(denoise_atrous)(constant GPUDenoiseParams& p [[buffer(0)]]
     float3 result=weights>0?sum/weights:value;if(denoiseSignal(p)==DENOISE_SIGNAL_AO)result=saturate(result);output.write(float4(result,1),pixel);
 }
 
+#ifndef PHOSPHOR_DENOISE_LOBE
+// F13.4 experiment (--lighting-denoise-energy on): ENERGY-PRESERVING a-trous, two dispatches per iteration.
+// The weight is SYMMETRIC, w(p,q)==w(q,p) bit for bit: tap product, normal term, depth term (max of both depths), luminance term with the
+// MEAN of the two variances, specular roughness term with the MINIMUM roughness for the lobe bound, and symmetric pair rejection rules.
+// Pass 1 (denoise_atrous_norm): W(p) = sum_q w(p,q) over the 5x5 stride footprint (the sender's total).
+// Pass 2 (denoise_atrous_energy): out(q) = sum_p w(q,p) x(p) / W(p).  Sum_q out(q) = sum_p x(p) W(p)/W(p) = sum_p x(p): the filter conserves
+// the signal energy exactly (up to float summation), unlike the receiver-normalised gather whose mass per source differs from 1.
+inline float denoiseWeightSym(GPUDISurface a,GPUDISurface b,float la,float lb,float va,float vb,constant GPUDenoiseParams& p){
+    if(!a.valid||!b.valid)return 0;const float3 na=denoiseGuide(a,denoiseSignal(p)),nb=denoiseGuide(b,denoiseSignal(p));if(dot(na,na)<=0||dot(nb,nb)<=0)return 0;
+    const float cosine=dot(normalize(na),normalize(nb));const float normal=pow(max(0.0f,cosine),p.normalPhi);
+    const float depth=exp(-abs(a.depth-b.depth)/max(1e-6f,p.depthThreshold*max(a.depth,b.depth)*float(p.atrousStep)));
+    const float color=exp(-abs(la-lb)/(p.luminancePhi*sqrt(max(0.5f*(va+vb),p.varianceFloor))+1e-6f));
+    const float rough=denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR?exp(-abs(a.roughness-b.roughness)/max(p.roughnessThreshold,1e-6f))*denoiseLobe(cosine,min(a.roughness,b.roughness)):1;
+    return normal*depth*color*rough;
+}
+inline bool denoiseEnergyPair(constant GPUDenoiseParams& p,const device GPUSpecularSample* specular,uint i,uint j){
+    if(denoiseSignal(p)!=DENOISE_SIGNAL_SPECULAR)return true;const GPUSpecularSample a=specular[i],b=specular[j];
+    if((a.flags|b.flags)&SPECULAR_SAMPLE_ERROR||((a.flags^b.flags)&SPECULAR_SAMPLE_STOCHASTIC))return false;
+    if((!(a.flags&SPECULAR_SAMPLE_STOCHASTIC)||(p.flags&DENOISE_DIAGNOSTIC_ENDPOINTS))&&(a.path!=b.path||a.secondarySlot!=b.secondarySlot||a.secondaryGeneration!=b.secondaryGeneration))return false;
+    return true;
+}
+// params0/surfaces1/optionalSpecMetadata3. Textures input0, moments1, W output2.
+kernel void denoise_atrous_norm(constant GPUDenoiseParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
+    const device GPUSpecularSample* specular [[buffer(3)]],texture2d<float,access::read> input [[texture(0)]],
+    texture2d<float,access::read> moments [[texture(1)]],texture2d<float,access::write> weightSum [[texture(2)]],uint tid [[thread_position_in_grid]]){
+    if(tid>=p.width*p.height)return;const uint2 pixel(tid%p.width,tid/p.width);const GPUDISurface center=surfaces[tid];const float3 value=input.read(pixel).rgb;
+    float total=0;const float taps[5]={1,4,6,4,1};
+    if(center.valid&&all(isfinite(value))){const float variance=moments.read(pixel).z,lum=diLuminance(value);
+        for(int y=-2;y<=2;++y)for(int x=-2;x<=2;++x){const int2 q=int2(pixel)+int2(x,y)*int(p.atrousStep);if(any(q<0)||any(q>=int2(p.width,p.height)))continue;
+            const uint index=uint(q.y)*p.width+uint(q.x);const float3 color=input.read(uint2(q)).rgb;if(!all(isfinite(color))||!denoiseEnergyPair(p,specular,tid,index))continue;
+            total+=taps[x+2]*taps[y+2]*denoiseWeightSym(center,surfaces[index],lum,diLuminance(color),variance,moments.read(uint2(q)).z,p);}}
+    weightSum.write(float4(total,0,0,1),pixel);
+}
+// params0/surfaces1/optionalSpecMetadata3. Textures input0, moments1, output2, W3.
+kernel void denoise_atrous_energy(constant GPUDenoiseParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
+    const device GPUSpecularSample* specular [[buffer(3)]],texture2d<float,access::read> input [[texture(0)]],
+    texture2d<float,access::read> moments [[texture(1)]],texture2d<float,access::write> output [[texture(2)]],
+    texture2d<float,access::read> weightSum [[texture(3)]],uint tid [[thread_position_in_grid]]){
+    if(tid>=p.width*p.height)return;const uint2 pixel(tid%p.width,tid/p.width);const GPUDISurface center=surfaces[tid];const float3 value=input.read(pixel).rgb;
+    if(!center.valid||!all(isfinite(value))){output.write(float4(value,1),pixel);return;}
+    const float variance=moments.read(pixel).z,lum=diLuminance(value);float3 sum=0;const float taps[5]={1,4,6,4,1};
+    for(int y=-2;y<=2;++y)for(int x=-2;x<=2;++x){const int2 q=int2(pixel)+int2(x,y)*int(p.atrousStep);if(any(q<0)||any(q>=int2(p.width,p.height)))continue;
+        const uint index=uint(q.y)*p.width+uint(q.x);const float3 color=input.read(uint2(q)).rgb;if(!all(isfinite(color))||!denoiseEnergyPair(p,specular,tid,index))continue;
+        const float sender=weightSum.read(uint2(q)).x;if(!(sender>0))continue;
+        sum+=color*(taps[x+2]*taps[y+2]*denoiseWeightSym(center,surfaces[index],lum,diLuminance(color),variance,moments.read(uint2(q)).z,p)/sender);}
+    if(denoiseSignal(p)==DENOISE_SIGNAL_AO)sum=saturate(sum);output.write(float4(sum,1),pixel);
+}
+#endif
+
 constant constexpr uint DENOISE_TILE_VALID=1u<<30;
 static_assert((DENOISE_TILE_VALID&(SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_PREFILTERED|SPECULAR_SAMPLE_ERROR|SPECULAR_SAMPLE_STOCHASTIC|SPECULAR_SAMPLE_MIXED))==0,
               "Tile validity must not alias any specular metadata flag");
