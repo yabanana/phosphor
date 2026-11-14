@@ -1,0 +1,1662 @@
+{
+  "source": "https://github.com/KhronosGroup/glTF-Sample-Assets",
+  "commit": "8f492390ddc7a2ae221a1369ef560589cf8c70fb",
+  "variant": "glTF (default; no Draco/KTX/WebP)",
+  "approved": "owner, 2026-11-14 (full Tier A + Tier B + ABeautifulGame, ~71 MB)",
+  "models": {
+    "ClearCoatTest": {
+      "tier": "A",
+      "files": [
+        {
+          "path": "glTF/ClearCoatLabels.png",
+          "bytes": 10270,
+          "sha256": "b8b006dd13229d51f25a7162e6fd249cd2255c97f3d0fac7f604c61de9ff45d8"
+        },
+        {
+          "path": "glTF/ClearCoatTest.bin",
+          "bytes": 69288,
+          "sha256": "b08f3e07f8050fd117b4b3bb3fa0bb93fd7a3f8dbe509d48e330daf8b754c840"
+        },
+        {
+          "path": "glTF/ClearCoatTest.gltf",
+          "bytes": 31068,
+          "sha256": "c171d3fcac0a9567e9e46c0312408755737bc6450968c0c5fc320cf08ea2bd01"
+        },
+        {
+          "path": "glTF/PartialCoating.png",
+          "bytes": 5077,
+          "sha256": "c0af343c4d9c1e10498acd5d36ab1ca8ed20fe66628af3a69ec42a645555d405"
+        },
+        {
+          "path": "glTF/PartialCoating_Alpha.png",
+          "bytes": 5065,
+          "sha256": "1f1623143d44a08978ddc9ec00a6fe33fb34fc292fc5c46b5ddb0c056c2c316a"
+        },
+        {
+          "path": "glTF/PlasticWrap_normals.jpg",
+          "bytes": 144210,
+          "sha256": "1bd5ce83066aae7ee8af324ada1492dadad0eba9dac15eb629f2be78684a5ce0"
+        },
+        {
+          "path": "glTF/RibsNormal.png",
+          "bytes": 1605,
+          "sha256": "2d8c08bcd0b260a17ad973c4ee1353c48a317302c153aa3b7bb356a6b3689ca3"
+        },
+        {
+          "path": "glTF/RoughnessStripes.png",
+          "bytes": 5033,
+          "sha256": "4cfe60f6d25acdf6fa6396da652783582cad25eb73372f72af3d5ece5a5ea2a8"
+        }
+      ],
+      "license_files": [
+        {
+          "path": "LICENSE.md",
+          "bytes": 796,
+          "sha256": "2a21cbc5df494391458b194dee0d2a42009de72c3af135ab17546109727117ff"
+        },
+        {
+          "path": "README.md",
+          "bytes": 4922,
+          "sha256": "dd0d8791d54e03e4a22ab8c72fc27b6961044f9fb0c822c040eb9b8594db0517"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 712,
+          "sha256": "4679ed589da3c9e6477d2149f1328ee4d21472d9840a4367ec0b2c05f002b69c"
+        }
+      ],
+      "license": [
+        {
+          "license": "CC-BY-4.0",
+          "licenseUrl": "https://creativecommons.org/licenses/by/4.0/legalcode",
+          "artist": "Ed Mackey",
+          "year": "2020",
+          "owner": "Analytical Graphics, Inc.",
+          "what": "Everything",
+          "text": "Creative Commons Attribution 4.0 International",
+          "spdx": "CC-BY-4.0",
+          "icon": "https://licensebuttons.net/l/by/4.0/88x31.png"
+        }
+      ]
+    },
+    "ClearCoatCarPaint": {
+      "tier": "A",
+      "files": [
+        {
+          "path": "glTF/ClearCoatCarPaint.bin",
+          "bytes": 73728,
+          "sha256": "bc5009cd4d910631806b45645c4b8dec38d352919bea8a53858175a933a6b620"
+        },
+        {
+          "path": "glTF/ClearCoatCarPaint.gltf",
+          "bytes": 4144,
+          "sha256": "3e7365cba16575216298cefa7cd4e535ab413fa69274ddb3815d28fe4e299bd6"
+        },
+        {
+          "path": "glTF/ClearCoatCarPaint_Normal.png",
+          "bytes": 41240,
+          "sha256": "3f1bf8d127374684c89b0d1963ca57d36a8ea59de96bef752b62daebc6362eeb"
+        }
+      ],
+      "license_files": [
+        {
+          "path": "LICENSE.md",
+          "bytes": 782,
+          "sha256": "c2c2a4b4638cc863715b52abc5b4e060080bbe4fc1ed737265268d18ca368bd3"
+        },
+        {
+          "path": "README.md",
+          "bytes": 2240,
+          "sha256": "cfbf8aeaa96a95e1efc1d6c4da898e4c60dabd054d8e6622277a48714a94306f"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 710,
+          "sha256": "5c9f1bd82e6b211381fc114f6451e22b122a40a27c5f4167191470fa8bea4f14"
+        }
+      ],
+      "license": [
+        {
+          "year": "2023",
+          "owner": "Public",
+          "license": "CC0-1.0",
+          "artist": "Eric Chadwick",
+          "what": "Everything",
+          "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+          "text": "Creative Commons Zero v1.0 Universal",
+          "spdx": "CC0-1.0",
+          "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
+        }
+      ]
+    },
+    "SheenTestGrid": {
+      "tier": "A",
+      "files": [
+        {
+          "path": "glTF/SheenTestGrid.bin",
+          "bytes": 1818312,
+          "sha256": "b52ed6d876d1fb6aaf1a17834b2b0851311966b38b412d3c9bdb303aa75c4601"
+        },
+        {
+          "path": "glTF/SheenTestGrid.gltf",
+          "bytes": 39487,
+          "sha256": "2797d555b875633d85ea5b8dc6622dc63bd965356d0dc81adabec10f2d480ccf"
+        },
+        {
+          "path": "glTF/checker.png",
+          "bytes": 827,
+          "sha256": "5ce6a35b4803157654513640ba75608aabd24475b695390773381e7f0242ec23"
+        }
+      ],
+      "license_files": [
+        {
+          "path": "LICENSE.md",
+          "bytes": 775,
+          "sha256": "6cd28ebc2ac334391e49933dadfb0f5ab448b5ebdf5fd8603be49b91c572abcf"
+        },
+        {
+          "path": "README.md",
+          "bytes": 2235,
+          "sha256": "7af02e43f1396fde3e32ea03d69df507d6ab38e7e31520c66b6f52d8c644e358"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 658,
+          "sha256": "95a4dc50f219a13f8a2ff01a953f6efd0570054b0f6c1f9051ff89eef805cb15"
+        }
+      ],
+      "license": [
+        {
+          "year": "2023",
+          "owner": "Public",
+          "license": "CC0-1.0",
+          "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+          "artist": "Eric Chadwick",
+          "what": "Everything",
+          "text": "Creative Commons Zero v1.0 Universal",
+          "spdx": "CC0-1.0",
+          "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
+        }
+      ]
+    },
+    "AnisotropyStrengthTest": {
+      "tier": "A",
+      "files": [
+        {
+          "path": "glTF/AnisotropySpheresLabels.png",
+          "bytes": 12473,
+          "sha256": "9c9779ff502078bda171a645f15d4ac6998dc6c833c6b101fd0ed4fd8c2be6ae"
+        },
+        {
+          "path": "glTF/AnisotropyStrengthTest.gltf",
+          "bytes": 32421,
+          "sha256": "4f50735d6cb3a3088709e576185ab74cb5a0b476b106bf96a53028475e996868"
+        },
+        {
+          "path": "glTF/AnisotropyStrengthTest_data.bin",
+          "bytes": 65760,
+          "sha256": "24946d44e80827fa214c8b3c4b10a2289a2a97843e2b1aeb5781bc1259d9761b"
+        }
+      ],
+      "license_files": [
+        {
+          "path": "LICENSE.md",
+          "bytes": 786,
+          "sha256": "6e1f0c3b85131b9ede49c6138833a6369d46685fc707690d50bab22816a1dd30"
+        },
+        {
+          "path": "README.md",
+          "bytes": 1636,
+          "sha256": "7a3d42eda713eedbc609bde11dc88b304e8b917d6b89851b9ca378395e2437e7"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 692,
+          "sha256": "553237f43461cc5eb9bf1c152f57a8bae0a55a674ff63398cc471c2f817f5aa1"
+        }
+      ],
+      "license": [
+        {
+          "year": "2023",
+          "owner": "Public",
+          "license": "CC0-1.0",
+          "artist": "Ed Mackey",
+          "what": "Everything",
+          "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+          "text": "Creative Commons Zero v1.0 Universal",
+          "spdx": "CC0-1.0",
+          "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
+        }
+      ]
+    },
+    "AnisotropyRotationTest": {
+      "tier": "A",
+      "files": [
+        {
+          "path": "glTF/AnisoDonutLabels.png",
+          "bytes": 25281,
+          "sha256": "2dc261bb7e042731d9d329377dfcda549b2c6a1ee4c8421e494701c697aaae77"
+        },
+        {
+          "path": "glTF/AnisoDonuts.bin",
+          "bytes": 300168,
+          "sha256": "f86a69241db285ba73442aac895192dbb878f307b90b30175b2230166d68004b"
+        },
+        {
+          "path": "glTF/AnisoRotation10_Linear.png",
+          "bytes": 99,
+          "sha256": "3f0b20da89914605cb3b68c62b393837836c26ea389fb837faced1ae00c4270c"
+        },
+        {
+          "path": "glTF/AnisoRotation30_Linear.png",
+          "bytes": 99,
+          "sha256": "8e18ed0d8339b08c8ef97158d0d4c831ae736758615c42f5610b27089c14cc4f"
+        },
+        {
+          "path": "glTF/AnisotropyRotationTest.gltf",
+          "bytes": 19226,
+          "sha256": "fa88231997dce23a3c6bfe2487b917725f2be9c24b6d358adb37e607d68ba0cc"
+        },
+        {
+          "path": "glTF/GridWithMarkers.png",
+          "bytes": 8170,
+          "sha256": "a8f3c5da29eece1ba340cb00c0e07dafc67e385d02aedd932962f0382488fa25"
+        },
+        {
+          "path": "glTF/GridWithMarkers_30deg.png",
+          "bytes": 489889,
+          "sha256": "367bd299208810b8b885f4346b6849732cf61ed2c7ea2e5ebe30c4b293ae5a74"
+        },
+        {
+          "path": "glTF/Heights_1d_Normals_v2.png",
+          "bytes": 169,
+          "sha256": "defac4f519579595050a626a526345eecae5ef43ea3cd458f1b9f64974fc6ebb"
+        }
+      ],
+      "license_files": [
+        {
+          "path": "LICENSE.md",
+          "bytes": 792,
+          "sha256": "b5a52c8eba00ab8fa6a0cad35d91a389eddfc684a97470196682527e04e50261"
+        },
+        {
+          "path": "README.md",
+          "bytes": 3846,
+          "sha256": "96bd2c54d04c9ea2907ba20ad8df0389950a6fcb176d2d6b2f6774394cceeefc"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 713,
+          "sha256": "1f852d7eaa85830e3054703f1fef00581b979f8e7b1cf282df63fbd5c7d09846"
+        }
+      ],
+      "license": [
+        {
+          "year": "2023",
+          "owner": "Analytical Graphics, Inc.",
+          "license": "CC-BY-4.0",
+          "artist": "Ed Mackey",
+          "what": "Everything",
+          "licenseUrl": "https://creativecommons.org/licenses/by/4.0/legalcode",
+          "text": "Creative Commons Attribution 4.0 International",
+          "spdx": "CC-BY-4.0",
+          "icon": "https://licensebuttons.net/l/by/4.0/88x31.png"
+        }
+      ]
+    },
+    "AnisotropyDiscTest": {
+      "tier": "A",
+      "files": [
+        {
+          "path": "glTF/AnisotropyDiscTest.gltf",
+          "bytes": 20977,
+          "sha256": "0dae843c341a6bcd48fa36f482c89f7957d3e04b79c2fccc6c62d474af21b2a4"
+        },
+        {
+          "path": "glTF/AnisotropyDiscTest_data.bin",
+          "bytes": 97320,
+          "sha256": "19d5cea81f73f0068600d133c62847144f1d2b37f55536c6b767d8950743309d"
+        },
+        {
+          "path": "glTF/AnisotropyDiscs.png",
+          "bytes": 132363,
+          "sha256": "ee7571349f37d5a50ec52ad3708ff16e2802aa2ed940936f25764cc4f092ef07"
+        }
+      ],
+      "license_files": [
+        {
+          "path": "LICENSE.md",
+          "bytes": 782,
+          "sha256": "636bc6f3ec6c29e5085c88224628ca256fbbdeeaff6e2368000fe391e463c313"
+        },
+        {
+          "path": "README.md",
+          "bytes": 2226,
+          "sha256": "5411f45086eec576a5ec06ba2795d9e87c153991ba04b194eac28d7be837f542"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 680,
+          "sha256": "4e58df236feb8571f1ffc7a1fd59670feb9f117bcee8020051a06ce6ca515897"
+        }
+      ],
+      "license": [
+        {
+          "year": "2023",
+          "owner": "Public",
+          "license": "CC0-1.0",
+          "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+          "artist": "Eric Chadwick",
+          "what": "Everything",
+          "text": "Creative Commons Zero v1.0 Universal",
+          "spdx": "CC0-1.0",
+          "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
+        }
+      ]
+    },
+    "TransmissionTest": {
+      "tier": "A",
+      "files": [
+        {
+          "path": "glTF/TransmissionTest.gltf",
+          "bytes": 43019,
+          "sha256": "b0266b4c9146a24094ee7525fee80d347dd7937c066c0f05ce6d833a1a5d9340"
+        },
+        {
+          "path": "glTF/TransmissionTest_binary.bin",
+          "bytes": 1441156,
+          "sha256": "120cefc0ed6e55024afe34c149c7cf89487e03668ab0e5d6817ae9cf2dffdec0"
+        },
+        {
+          "path": "glTF/TransmissionTest_images/texture10487.png",
+          "bytes": 1219,
+          "sha256": "5f3e289e961a387e5c755cd25e3ed73592ae82ec38b599decc8dbcf1113e72b0"
+        },
+        {
+          "path": "glTF/TransmissionTest_images/texture14184.png",
+          "bytes": 672,
+          "sha256": "2e4ba1dace3834db02ddb0ad927369ea0560904f57c39aee3e400a6ef6e5ab3d"
+        },
+        {
+          "path": "glTF/TransmissionTest_images/texture15366.png",
+          "bytes": 4011,
+          "sha256": "1494e7411eaf91837663e23e9a44f0279242f35f671b613d46fd7665301729e8"
+        },
+        {
+          "path": "glTF/TransmissionTest_images/texture175763.png",
+          "bytes": 1167,
+          "sha256": "b15545ef9cf719319975d352b9ae2e0af33139f5ea24fb6b023ec9634e318e02"
+        },
+        {
+          "path": "glTF/TransmissionTest_images/texture177328.png",
+          "bytes": 1167,
+          "sha256": "10357c591036677dd8ac6a0461ea70459cfbfb54153cb41d54291c6df254efea"
+        },
+        {
+          "path": "glTF/TransmissionTest_images/texture214190.png",
+          "bytes": 602,
+          "sha256": "b7cb04b935e44ad18c202b36cf2b9027938e2279788fc7fc5b91017f435bd0e0"
+        },
+        {
+          "path": "glTF/TransmissionTest_images/texture28577.png",
+          "bytes": 2484,
+          "sha256": "ee566e345e32b918faefa66ca81d2fbb8352640afa60a5b4109a87afe49c9983"
+        },
+        {
+          "path": "glTF/TransmissionTest_images/texture4086.png",
+          "bytes": 1308,
+          "sha256": "f63a62a76e30c989d165cb5b33a4e84b790d6a9b03b5aedda8b74eb314b43340"
+        },
+        {
+          "path": "glTF/TransmissionTest_images/texture6807.png",
+          "bytes": 1548,
+          "sha256": "8fe70625523452709cbf606b8dcae9462025766adec54b2b14323b48f99ad62e"
+        }
+      ],
+      "license_files": [
+        {
+          "path": "LICENSE.md",
+          "bytes": 779,
+          "sha256": "d2b3951c4809d7ebc2cdac547379402d5051d41fc7cf3719bdc489a518270975"
+        },
+        {
+          "path": "README.md",
+          "bytes": 1326,
+          "sha256": "db422e77f92000cedebb9f24ecd4f31fa40099e15f717b326042faf6241692dd"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 678,
+          "sha256": "ee9070ab6c7a2b4cf5845d98c688fbc73d6417735b251edeb5781b518aa8e8c2"
+        }
+      ],
+      "license": [
+        {
+          "license": "CC0-1.0",
+          "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+          "artist": "Adobe",
+          "year": "2020",
+          "owner": "Public",
+          "what": "Everything",
+          "text": "Creative Commons Zero v1.0 Universal",
+          "spdx": "CC0-1.0",
+          "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
+        }
+      ]
+    },
+    "TransmissionRoughnessTest": {
+      "tier": "A",
+      "files": [
+        {
+          "path": "glTF/GridWithDetails.png",
+          "bytes": 27613,
+          "sha256": "6994d6799c1bb3883456e32d290ebdbf4d06e69ceda0b8159a87047f4cc486d8"
+        },
+        {
+          "path": "glTF/IOR_Labels.png",
+          "bytes": 21200,
+          "sha256": "21559e79c4345d385a0eb91aecafecadc5842bda24b94ae22e6251f34e3d3bb1"
+        },
+        {
+          "path": "glTF/RoughnessGrid-1.png",
+          "bytes": 290,
+          "sha256": "23ce73e3ddb30ccf2a6dbfef24494a0602e1f6ae014ff88cde0400897ce601af"
+        },
+        {
+          "path": "glTF/RoughnessGrid.png",
+          "bytes": 184,
+          "sha256": "1a09a25a3e888fc3ff0e12d3ad7add59b34a3405019e6c3a1c788a287dd854c8"
+        },
+        {
+          "path": "glTF/SmoothVsRough.png",
+          "bytes": 5285,
+          "sha256": "a90c26700a8b213c576e7a55ada714d99589998c94fda8f95a016446ab2f7aa3"
+        },
+        {
+          "path": "glTF/TransmissionRoughnessTest.bin",
+          "bytes": 331712,
+          "sha256": "2090e0f5c32c736424ea8795d0bbf70825bb2aeedc0716401b8701c9feb46c2e"
+        },
+        {
+          "path": "glTF/TransmissionRoughnessTest.gltf",
+          "bytes": 18102,
+          "sha256": "6c944a996eff0f34c5f7f1145bbe7c52d358ffd1f3a94d579b261f7f78e6b7f2"
+        }
+      ],
+      "license_files": [
+        {
+          "path": "LICENSE.md",
+          "bytes": 795,
+          "sha256": "c123f42eb1ceabe4e771e0903f9a45287b3b0e0e602d27a5c0c9ebf47eb10e23"
+        },
+        {
+          "path": "README.md",
+          "bytes": 6118,
+          "sha256": "88122c600c28fcdaa18e3815c10397bea357cf1b411115557805458b0d6af4ed"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 702,
+          "sha256": "298d81b528e141f2c363ca5fbe2a41dc95f84bb6394d215d6d82e9767b7cbd55"
+        }
+      ],
+      "license": [
+        {
+          "license": "CC-BY-4.0",
+          "licenseUrl": "https://creativecommons.org/licenses/by/4.0/legalcode",
+          "artist": "Ed Mackey",
+          "year": "2021",
+          "owner": "Analytical Graphics, Inc.",
+          "what": "Everything",
+          "text": "Creative Commons Attribution 4.0 International",
+          "spdx": "CC-BY-4.0",
+          "icon": "https://licensebuttons.net/l/by/4.0/88x31.png"
+        }
+      ]
+    },
+    "TransmissionThinwallTestGrid": {
+      "tier": "A",
+      "files": [
+        {
+          "path": "glTF/TransmissionThinwallTestGrid.bin",
+          "bytes": 1174536,
+          "sha256": "923fa069b2e85e47f005bcd49a480bdce7e167f60b9efc27893e32c9d425a5a8"
+        },
+        {
+          "path": "glTF/TransmissionThinwallTestGrid.gltf",
+          "bytes": 25211,
+          "sha256": "8963f1948c4e5a055b40e3f7b72a4ba40ccf25311c95adbe5d987fc0c6dcc112"
+        },
+        {
+          "path": "glTF/checker.png",
+          "bytes": 827,
+          "sha256": "5ce6a35b4803157654513640ba75608aabd24475b695390773381e7f0242ec23"
+        }
+      ],
+      "license_files": [
+        {
+          "path": "LICENSE.md",
+          "bytes": 790,
+          "sha256": "db879d7afc59e9ac844e96aabd7ccdf2140edda9b9af26132fa6f925e18e335d"
+        },
+        {
+          "path": "README.md",
+          "bytes": 1945,
+          "sha256": "f4817cce819e1faa8d031bc5b1fd7780ac87af67adee9e104555418850e9dacc"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 699,
+          "sha256": "708ca46a7b7f97eb36819fe8c722e5c6a47b27a77f86c580294510acafbec0a6"
+        }
+      ],
+      "license": [
+        {
+          "year": "2023",
+          "owner": "Public",
+          "license": "CC0-1.0",
+          "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+          "artist": "Eric Chadwick",
+          "what": "Everything",
+          "text": "Creative Commons Zero v1.0 Universal",
+          "spdx": "CC0-1.0",
+          "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
+        }
+      ]
+    },
+    "AttenuationTest": {
+      "tier": "A",
+      "files": [
+        {
+          "path": "glTF/AttenuationLabels.png",
+          "bytes": 24933,
+          "sha256": "27e70c599e643d2d093cad56f38232e7648d1d1fa6e8bdb1c4ab49ea23b7fbf4"
+        },
+        {
+          "path": "glTF/AttenuationTest.bin",
+          "bytes": 10584,
+          "sha256": "cc2035622175e93adc8634686a583c64da39d4428f8a2af314874a475977910a"
+        },
+        {
+          "path": "glTF/AttenuationTest.gltf",
+          "bytes": 34579,
+          "sha256": "b7902e3770da83b739f333763763ae48f181eee06dec99024c044f49175ea8b2"
+        },
+        {
+          "path": "glTF/PlainGrid.png",
+          "bytes": 618,
+          "sha256": "c67b0411f4f8d2c940c7e4583ce6c7607cc6c45779c88c3c16f2d2892fb9c411"
+        },
+        {
+          "path": "glTF/ThicknessTexture.png",
+          "bytes": 8370,
+          "sha256": "9d1b2b183e8184c9c554ea75903ca94fc82222658983f792556d99f3229d4215"
+        }
+      ],
+      "license_files": [
+        {
+          "path": "LICENSE.md",
+          "bytes": 784,
+          "sha256": "4eb1a24a04fc9453b4d7d750a919325ed6fe68c704161d58fb75a222912881f6"
+        },
+        {
+          "path": "README.md",
+          "bytes": 5004,
+          "sha256": "7f6786accf3ee343f0f9d61783147f3a231aefc627fb2643775a603e77bcbc83"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 698,
+          "sha256": "9facc3dd17ca4c8eab94bc15007a1a24c72da582eeb8bfd6c5395a1ad05906a9"
+        }
+      ],
+      "license": [
+        {
+          "license": "CC-BY-4.0",
+          "licenseUrl": "https://creativecommons.org/licenses/by/4.0/legalcode",
+          "artist": "Ed Mackey",
+          "year": "2021",
+          "owner": "Analytical Graphics, Inc.",
+          "what": "Everything",
+          "text": "Creative Commons Attribution 4.0 International",
+          "spdx": "CC-BY-4.0",
+          "icon": "https://licensebuttons.net/l/by/4.0/88x31.png"
+        }
+      ]
+    },
+    "IORTestGrid": {
+      "tier": "A",
+      "files": [
+        {
+          "path": "glTF/IORTestGrid.bin",
+          "bytes": 2599860,
+          "sha256": "4c281eb95e22c88c158b4529e26de7b53a4e2e8e89b4009250cacfc394248025"
+        },
+        {
+          "path": "glTF/IORTestGrid.gltf",
+          "bytes": 49573,
+          "sha256": "3b02fa47725d55f7ca1f056d259174b522cde8571979b1c01b8631c9e266c8c1"
+        },
+        {
+          "path": "glTF/checker.png",
+          "bytes": 827,
+          "sha256": "5ce6a35b4803157654513640ba75608aabd24475b695390773381e7f0242ec23"
+        }
+      ],
+      "license_files": [
+        {
+          "path": "LICENSE.md",
+          "bytes": 773,
+          "sha256": "8ae5db0d4a8b0ad0348bd8e45653246e141c1f6692027beea050d92ad362fe9b"
+        },
+        {
+          "path": "README.md",
+          "bytes": 1751,
+          "sha256": "8a648b4f67bfdd98281bb96fdfbe01ef6b5643ee1ccd95cb69b453041d75c7e5"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 652,
+          "sha256": "79b71a0b94ab93e9b26a9ae806a38a7ffa6ff23e0bbf492954a50fbd8e7557d3"
+        }
+      ],
+      "license": [
+        {
+          "year": "2023",
+          "owner": "Public",
+          "license": "CC0-1.0",
+          "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+          "artist": "Eric Chadwick",
+          "what": "Everything",
+          "text": "Creative Commons Zero v1.0 Universal",
+          "spdx": "CC0-1.0",
+          "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
+        }
+      ]
+    },
+    "SpecularTest": {
+      "tier": "A",
+      "files": [
+        {
+          "path": "glTF/LeftLabels.png",
+          "bytes": 30517,
+          "sha256": "491def53d2f2fe82aa2d9babad922475661f54c416abc17bc0dbd52e4565de11"
+        },
+        {
+          "path": "glTF/SpecularTest.bin",
+          "bytes": 180088,
+          "sha256": "c0f38c6c39c65f0d00213ff3cdd37328e9ce6bfaf12af563ff28d50d30659355"
+        },
+        {
+          "path": "glTF/SpecularTest.gltf",
+          "bytes": 32846,
+          "sha256": "e9e582c705a2fdfa342c9e2c796bbb459e67c4f19518f754364f72ada8791a18"
+        },
+        {
+          "path": "glTF/WhiteGrid.png",
+          "bytes": 205,
+          "sha256": "237e82e386d84ab705a69d3b78d1f7c2854422c8c83bd2b824fc2cbd1a907353"
+        },
+        {
+          "path": "glTF/YellowGrid.png",
+          "bytes": 204,
+          "sha256": "b0b2c99b097f4a55ed587a58c32a254cc5ff76c0aa028825af0018c65ccdff85"
+        },
+        {
+          "path": "glTF/specularTextureGrid.png",
+          "bytes": 242,
+          "sha256": "3232a9a310f6057359bd03a863ea33576406b26df0f951d614e7fee424cf0ae9"
+        }
+      ],
+      "license_files": [
+        {
+          "path": "LICENSE.md",
+          "bytes": 781,
+          "sha256": "ba4efcf580044ed611a725df80d19eaf99535157daf430baa34fd1daa947d8a7"
+        },
+        {
+          "path": "README.md",
+          "bytes": 3680,
+          "sha256": "6aea86d25fca436ffc3ea7011bbc5dc7aaca825167602796f5350c8f934a8d5e"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 696,
+          "sha256": "f4351fa7a7b4f79d59d328e669d8088731635c3f57e78b62eca20f650cf5a900"
+        }
+      ],
+      "license": [
+        {
+          "license": "CC-BY-4.0",
+          "licenseUrl": "https://creativecommons.org/licenses/by/4.0/legalcode",
+          "artist": "Ed Mackey",
+          "year": "2021",
+          "owner": "Analytical Graphics, Inc.",
+          "what": "Everything",
+          "text": "Creative Commons Attribution 4.0 International",
+          "spdx": "CC-BY-4.0",
+          "icon": "https://licensebuttons.net/l/by/4.0/88x31.png"
+        }
+      ]
+    },
+    "IridescenceDielectricSpheres": {
+      "tier": "A",
+      "files": [
+        {
+          "path": "glTF/IridescenceDielectricSpheres.bin",
+          "bytes": 34068,
+          "sha256": "eeacab254dfd44b8e026a8ad9e865aa1b63711eb86fa7c36180a437845e97253"
+        },
+        {
+          "path": "glTF/IridescenceDielectricSpheres.gltf",
+          "bytes": 295192,
+          "sha256": "fe156ca114515aa2606d35e3eea4940fcf9895559d474e14ec48dedf4e5a8575"
+        },
+        {
+          "path": "glTF/textures/guides.png",
+          "bytes": 42439,
+          "sha256": "01cef8cce29485f2e12c422aca6330b2ec869068f8035c3f006210678afc3573"
+        }
+      ],
+      "license_files": [
+        {
+          "path": "LICENSE.md",
+          "bytes": 792,
+          "sha256": "e494d2a8847df3a8831f5ff4309c880c65d72a4edd468c674399d5a76ac9e4de"
+        },
+        {
+          "path": "README.md",
+          "bytes": 1272,
+          "sha256": "ee3872b93ff065a7aabc65dea0a404e7a9550a0b4a0a2c10ce79141b886c9209"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 692,
+          "sha256": "626cd43494f61ad40d905a64d9be985f7be15ffc1570d066f122445c188eda15"
+        }
+      ],
+      "license": [
+        {
+          "license": "CC0-1.0",
+          "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+          "artist": "Khronos",
+          "year": "2019",
+          "owner": "Public",
+          "what": "Everything",
+          "text": "Creative Commons Zero v1.0 Universal",
+          "spdx": "CC0-1.0",
+          "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
+        }
+      ]
+    },
+    "IridescenceMetallicSpheres": {
+      "tier": "A",
+      "files": [
+        {
+          "path": "glTF/IridescenceMetallicSpheres.bin",
+          "bytes": 34068,
+          "sha256": "eeacab254dfd44b8e026a8ad9e865aa1b63711eb86fa7c36180a437845e97253"
+        },
+        {
+          "path": "glTF/IridescenceMetallicSpheres.gltf",
+          "bytes": 267539,
+          "sha256": "8b43928584db4a27806fb9b806ebd22d5cb106b2262fc4ce3f4421419c0e60fe"
+        },
+        {
+          "path": "glTF/textures/guides.png",
+          "bytes": 43791,
+          "sha256": "04be7e96eacef9981b3cdf67eeef390d080f601af86d86bef51993ee1bf738cc"
+        }
+      ],
+      "license_files": [
+        {
+          "path": "LICENSE.md",
+          "bytes": 790,
+          "sha256": "4f0246487b90bf517becb25eb938c3893b36eb12b8ead3b96ba91f769ef42145"
+        },
+        {
+          "path": "README.md",
+          "bytes": 1246,
+          "sha256": "a0d7c942b7a90b495a7386910f496acf778e4311e97092a6ce800258c21e43ac"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 679,
+          "sha256": "d87fd62f51abdb797284f1d731141f41137f20ec03a26077cf8b3a0ff0d3f674"
+        }
+      ],
+      "license": [
+        {
+          "license": "CC0-1.0",
+          "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+          "artist": "UX3D",
+          "year": "2022",
+          "owner": "UX3D",
+          "what": "Everything",
+          "text": "Creative Commons Zero v1.0 Universal",
+          "spdx": "CC0-1.0",
+          "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
+        }
+      ]
+    },
+    "IridescenceSuzanne": {
+      "tier": "A",
+      "files": [
+        {
+          "path": "glTF/IridescenceSuzanne.bin",
+          "bytes": 129888,
+          "sha256": "c95d04bce8ee05eb28ef4848b9f266a06969fb173f5893cd076aa488bc42b7ad"
+        },
+        {
+          "path": "glTF/IridescenceSuzanne.gltf",
+          "bytes": 7725,
+          "sha256": "563bd85845396dede6fd35db93eea20fad4e11fd07cf15bf45419201afbe050e"
+        },
+        {
+          "path": "glTF/noise.png",
+          "bytes": 374268,
+          "sha256": "ed92d3fe28072845a96cb23282c53e71304c322302fd10406f0d110aa19f29e3"
+        }
+      ],
+      "license_files": [
+        {
+          "path": "LICENSE.md",
+          "bytes": 923,
+          "sha256": "204da4d7d1b7b88273f03dfdfbc39fef1200d2e7f3833afeca440a3e5b47aaa7"
+        },
+        {
+          "path": "README.md",
+          "bytes": 1658,
+          "sha256": "15470c5c0b0751089edd04d2019078a164ea9450bf596495cb8cd2c37a148305"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 1052,
+          "sha256": "72228ea5a9e2f3d148ac2a185f5dfb49ed8d94741f5b5c8c983a05d2eb043ee2"
+        }
+      ],
+      "license": [
+        {
+          "license": "CC0-1.0",
+          "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+          "artist": "Mathias Kanzler",
+          "year": "2022",
+          "owner": "UX3D",
+          "what": "Initial version",
+          "text": "Creative Commons Zero v1.0 Universal",
+          "spdx": "CC0-1.0",
+          "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
+        },
+        {
+          "license": "CC0-1.0",
+          "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+          "artist": "Pascal Schoen",
+          "year": "2021",
+          "owner": "Pascal Schoen",
+          "what": "Internal clean-up",
+          "text": "Creative Commons Zero v1.0 Universal",
+          "spdx": "CC0-1.0",
+          "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
+        }
+      ]
+    },
+    "DiffuseTransmissionTest": {
+      "tier": "A",
+      "files": [
+        {
+          "path": "glTF/DiffuseTransmissionTest.bin",
+          "bytes": 192896,
+          "sha256": "87d7cd135734640fec1fbd36a6db97b93c756caf9ded99b45fa258d5413275e8"
+        },
+        {
+          "path": "glTF/DiffuseTransmissionTest.gltf",
+          "bytes": 66668,
+          "sha256": "3f5cf89bc6994b73f0e496c8d31033ed9a50bb1e811ea5d666b723fd9779d312"
+        },
+        {
+          "path": "glTF/DiffuseTransmissionTexture.png",
+          "bytes": 105,
+          "sha256": "a3da25a54b719b0eb2c0fac80015470b5427520cce1dda734df77931cc1881fb"
+        },
+        {
+          "path": "glTF/Khronos-Red.png",
+          "bytes": 5449,
+          "sha256": "eb51124ea117db3bc3ba78c60c05fb8011725df8df5e7a31ae089647208cc8c8"
+        },
+        {
+          "path": "glTF/glTF-Green.png",
+          "bytes": 5311,
+          "sha256": "98dfaf6136b3b72cdcb1ddb8027e1361d3dac3acfcb5fad6c4230ad4598e50aa"
+        }
+      ],
+      "license_files": [
+        {
+          "path": "LICENSE.md",
+          "bytes": 955,
+          "sha256": "1ab1b47c797c4594771b53cd7a2d5bec56d6c7c69e61966dbf6d03d8bb2355d2"
+        },
+        {
+          "path": "README.md",
+          "bytes": 2647,
+          "sha256": "ff282ba88ccc63e363925499c4c2ed34b18e019af9c9c217398a58e0ccd74c71"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 1372,
+          "sha256": "bc07074ea980a82832136a99ef61e6e623d42e110538d5981aaab35b3dd693fe"
+        }
+      ],
+      "license": [
+        {
+          "license": "CC-BY-4.0",
+          "licenseUrl": "https://creativecommons.org/licenses/by/4.0/legalcode",
+          "artist": "Eric Chadwick",
+          "year": "2025",
+          "owner": "Darmstadt Graphics Group GmbH",
+          "what": "Model and textures",
+          "text": "Creative Commons Attribution 4.0 International",
+          "spdx": "CC-BY-4.0",
+          "icon": "https://licensebuttons.net/l/by/4.0/88x31.png"
+        },
+        {
+          "license": "LicenseRef-LegalMark-Khronos",
+          "licenseUrl": "../../LICENSES/LicenseRef-LegalMark-Khronos.txt",
+          "artist": "Non-copyrightable logo",
+          "year": "2015",
+          "owner": "Khronos Group",
+          "what": "Khronos logo",
+          "text": "Khronos Trademark or Logo",
+          "icon": ""
+        },
+        {
+          "license": "LicenseRef-LegalMark-Khronos",
+          "licenseUrl": "../../LICENSES/LicenseRef-LegalMark-Khronos.txt",
+          "artist": "Non-copyrightable logo",
+          "year": "2017",
+          "owner": "Khronos Group",
+          "what": "glTF logo",
+          "text": "Khronos Trademark or Logo",
+          "icon": ""
+        }
+      ]
+    },
+    "EmissiveStrengthTest": {
+      "tier": "A",
+      "files": [
+        {
+          "path": "glTF/EmissiveStrengthTest.bin",
+          "bytes": 5308,
+          "sha256": "54ba759d776228b52a256bb7b739581ad3081ac77677ee905b4920e869ceccf5"
+        },
+        {
+          "path": "glTF/EmissiveStrengthTest.gltf",
+          "bytes": 12458,
+          "sha256": "84264f4300d2618aa2be39e90448f1716df8f1946d0d172476773bc9a4a99f65"
+        },
+        {
+          "path": "glTF/PlainGrid.png",
+          "bytes": 618,
+          "sha256": "c67b0411f4f8d2c940c7e4583ce6c7607cc6c45779c88c3c16f2d2892fb9c411"
+        }
+      ],
+      "license_files": [
+        {
+          "path": "LICENSE.md",
+          "bytes": 790,
+          "sha256": "9c35d0375eb3052e456ecbd63f3725f2cfd194602ba2387e28213e74a83dedf6"
+        },
+        {
+          "path": "README.md",
+          "bytes": 2636,
+          "sha256": "9bf3926c75ec145faec3afa3a9ca86cd726feed1f13255a6d01842fe054ca6ab"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 699,
+          "sha256": "eca4bb70f70c57785d9e61108b8923ad9f4121cdc731fd348e22764891e19eda"
+        }
+      ],
+      "license": [
+        {
+          "license": "CC-BY-4.0",
+          "licenseUrl": "https://creativecommons.org/licenses/by/4.0/legalcode",
+          "artist": "Ed Mackey",
+          "year": "2022",
+          "owner": "AGI",
+          "what": "Everything",
+          "text": "Creative Commons Attribution 4.0 International",
+          "spdx": "CC-BY-4.0",
+          "icon": "https://licensebuttons.net/l/by/4.0/88x31.png"
+        }
+      ]
+    },
+    "TextureTransformTest": {
+      "tier": "A",
+      "files": [
+        {
+          "path": "glTF/Arrow.png",
+          "bytes": 867,
+          "sha256": "5df5b251fed0ac306cf859a30b59a4953d152483a4bed2b84e5bba1c667a1e64"
+        },
+        {
+          "path": "glTF/Correct.png",
+          "bytes": 2457,
+          "sha256": "3a14b12635ebbcee3ea427fbdb4d20da73e4740ec7a51683d700a2d6b4b7861a"
+        },
+        {
+          "path": "glTF/Error.png",
+          "bytes": 2273,
+          "sha256": "8d1032ef535a5c379bf78f9f565d3180ee3fc2d1cfef6892dee6e567728b619c"
+        },
+        {
+          "path": "glTF/NotSupported.png",
+          "bytes": 3291,
+          "sha256": "1fbdeca7e5c105d677a39578e4bab82b89c8aa9f406ee681ede05635ea0f8c74"
+        },
+        {
+          "path": "glTF/TextureTransformTest.bin",
+          "bytes": 136,
+          "sha256": "d0cdd23f2fa0996a0db99d4932fb9912a51a34e27c8bf832d072dc856ee9a7af"
+        },
+        {
+          "path": "glTF/TextureTransformTest.gltf",
+          "bytes": 9179,
+          "sha256": "c22c8c6c96c0ea4bcbb9b47ea245a093c5ef59acc5fd425effa4c00da4cdf164"
+        },
+        {
+          "path": "glTF/UV.png",
+          "bytes": 12345,
+          "sha256": "ac37ff52fe06a4c8c35ad4e1e7e8da039dfa8afc9b629d40a44ca8b8cfe9d03d"
+        }
+      ],
+      "license_files": [
+        {
+          "path": "LICENSE.md",
+          "bytes": 784,
+          "sha256": "93e698e0f4c7bca4f51e71a3b989acc488be5e069ed724074ae58947ced3ff83"
+        },
+        {
+          "path": "README.md",
+          "bytes": 2353,
+          "sha256": "1022ad635f6ead720586d36477a53843fcb4c3b8f543308b684ec21a83eb12b7"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 694,
+          "sha256": "4f72fabbb7ac82a01375edfa3fce0a70e68e05ab905752af18d4566dc0f12f51"
+        }
+      ],
+      "license": [
+        {
+          "license": "CC0-1.0",
+          "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+          "artist": "Microsoft",
+          "year": "2018",
+          "owner": "Microsoft",
+          "what": "Everything",
+          "text": "Creative Commons Zero v1.0 Universal",
+          "spdx": "CC0-1.0",
+          "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
+        }
+      ]
+    },
+    "TextureTransformMultiTest": {
+      "tier": "A",
+      "files": [
+        {
+          "path": "glTF/TTMT_Labels.png",
+          "bytes": 22486,
+          "sha256": "744109ace177c81063faf7540bdc9b029834076fe5058af5810159b97149873b"
+        },
+        {
+          "path": "glTF/TestMap-1.png",
+          "bytes": 31260,
+          "sha256": "e0d3820efacf8a37628e24f838016ad792391dc4b597ba5d9cc6fb34d0b66412"
+        },
+        {
+          "path": "glTF/TestMap.png",
+          "bytes": 25791,
+          "sha256": "29e88a0807288a7fe1fbad7b75eb920115f8850d3f28c53df9815ca83b9daa01"
+        },
+        {
+          "path": "glTF/TestMap_Normal.png",
+          "bytes": 199514,
+          "sha256": "7ab4b4ec2270dac1d5bebd76986b8734ab42908678c2e87509f8408689313e5b"
+        },
+        {
+          "path": "glTF/TextureTransformMultiTest.bin",
+          "bytes": 87660,
+          "sha256": "72a0dea23011275b1ee6891a2b2fc91925e3b0a83677b4ad278925db755a2575"
+        },
+        {
+          "path": "glTF/TextureTransformMultiTest.gltf",
+          "bytes": 39919,
+          "sha256": "088276b7f005109c94d22e3938f49bab20aeca675adc8be335ee3f6909a25d5a"
+        }
+      ],
+      "license_files": [
+        {
+          "path": "LICENSE.md",
+          "bytes": 796,
+          "sha256": "81450598807e7862bf1f261783addaea69f0ab1090470b9982fe2167db2f1320"
+        },
+        {
+          "path": "README.md",
+          "bytes": 5325,
+          "sha256": "ac4258a187d4c1bd1d9f07e89c81ee27d05f367150d69cd9f8280eb664c4d3ca"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 732,
+          "sha256": "d36631307904abeb75451401ea0723e5aa2dde5ebb47ab59559e1ff9d739024f"
+        }
+      ],
+      "license": [
+        {
+          "license": "CC-BY-4.0",
+          "licenseUrl": "https://creativecommons.org/licenses/by/4.0/legalcode",
+          "artist": "Ed Mackey",
+          "year": "2020",
+          "owner": "Analytical Graphics, Inc.",
+          "what": "Everything",
+          "text": "Creative Commons Attribution 4.0 International",
+          "spdx": "CC-BY-4.0",
+          "icon": "https://licensebuttons.net/l/by/4.0/88x31.png"
+        }
+      ]
+    },
+    "AnisotropyBarnLamp": {
+      "tier": "B",
+      "files": [
+        {
+          "path": "glTF/AnisotropyBarnLamp.bin",
+          "bytes": 409580,
+          "sha256": "50f196f7613c3cf40886c0058c8f4a51f6118d5654879f41bb2fcdb5ba989871"
+        },
+        {
+          "path": "glTF/AnisotropyBarnLamp.gltf",
+          "bytes": 6805,
+          "sha256": "a9cd85ee50b263cee9a8bd5436cb2af1bb0759d6c20e24c1d698b2ad9743dffc"
+        },
+        {
+          "path": "glTF/AnisotropyBarnLamp_anisotropy.png",
+          "bytes": 1237273,
+          "sha256": "a6984933a23e9b01be337e22944abd332300c3f87a0db7debf2d96dd067cb393"
+        },
+        {
+          "path": "glTF/AnisotropyBarnLamp_basecolor.png",
+          "bytes": 3634673,
+          "sha256": "3827208d4de41289a1f698b0153778b14e713b00dd05ba3c5be55f2e19c5a264"
+        },
+        {
+          "path": "glTF/AnisotropyBarnLamp_normalbump.png",
+          "bytes": 177708,
+          "sha256": "30749a9c852e8179164678e315657f5da37e60e4915f6000fb9dca8f42fd10c7"
+        },
+        {
+          "path": "glTF/AnisotropyBarnLamp_occlusionroughnessmetal.png",
+          "bytes": 2369841,
+          "sha256": "b70aef816e86ec7c2867e7babbaa94d818d9fd587dd2fcd447fc8af0a8055577"
+        }
+      ],
+      "license_files": [
+        {
+          "path": "LICENSE.md",
+          "bytes": 788,
+          "sha256": "94c499e10f0efaace94370f6430c743cd2f0a0c46b0997bd2d82755e222ea201"
+        },
+        {
+          "path": "README.md",
+          "bytes": 11113,
+          "sha256": "ade4de1d07abaf9ae489c4ce36d11b68216993128a4054c3485c8adb880306e8"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 772,
+          "sha256": "295ef639003f7d5e31e042e7fa7d9cec4ac43f30fe51db866fc1d1c9d7eaaac3"
+        }
+      ],
+      "license": [
+        {
+          "license": "CC-BY-4.0",
+          "licenseUrl": "https://creativecommons.org/licenses/by/4.0/legalcode",
+          "artist": "Eric Chadwick",
+          "year": "2023",
+          "owner": "Copyright 2023 Wayfair, LLC",
+          "what": "Everything",
+          "text": "Creative Commons Attribution 4.0 International",
+          "spdx": "CC-BY-4.0",
+          "icon": "https://licensebuttons.net/l/by/4.0/88x31.png"
+        }
+      ]
+    },
+    "ToyCar": {
+      "tier": "B",
+      "files": [
+        {
+          "path": "glTF/Fabric_baseColor.png",
+          "bytes": 412812,
+          "sha256": "2d37e6edee4d5249c7076847cd47a732596c0385ce596d8a8d92746b4b902ef7"
+        },
+        {
+          "path": "glTF/Fabric_normal.png",
+          "bytes": 294759,
+          "sha256": "24aee901f99facf761329b374b46a83d83060fecac88aa290e2cb92c2f6b90c2"
+        },
+        {
+          "path": "glTF/Fabric_occlusion.png",
+          "bytes": 191518,
+          "sha256": "b9e421842b576be7cf98a8fb8103ebf371b1d3d13eb226379ec4b5d8b8db3fcd"
+        },
+        {
+          "path": "glTF/ToyCar.bin",
+          "bytes": 3664368,
+          "sha256": "2f264fe41cedb20914817b891a9f02438f2e5049e17f0983b13245f93aeb9ceb"
+        },
+        {
+          "path": "glTF/ToyCar.gltf",
+          "bytes": 17626,
+          "sha256": "8e7341dfb0429663d0e93455757ea151cfd4fc5e4a7bc9e55d577bb5b498beb5"
+        },
+        {
+          "path": "glTF/ToyCar_basecolor.png",
+          "bytes": 196648,
+          "sha256": "7d51b5df33344f00dbc248f9a6043a7eaa6864b9f7ece1fb90f884a425423ed7"
+        },
+        {
+          "path": "glTF/ToyCar_clearcoat.png",
+          "bytes": 15362,
+          "sha256": "0dee4964f011c50bb1942cdc4f373f7e85277a3bbd75ae9f45261b763618f0ec"
+        },
+        {
+          "path": "glTF/ToyCar_emissive.png",
+          "bytes": 83739,
+          "sha256": "f35fdda6764b6b6521296326143a654f6cae13c082fd6021e766677c422cf7e6"
+        },
+        {
+          "path": "glTF/ToyCar_normal.png",
+          "bytes": 98429,
+          "sha256": "f3af8fd862a8a1ed13b6cf508d4edc3df6a484c43ed32bc5927a03b452515833"
+        },
+        {
+          "path": "glTF/ToyCar_occlusion_roughness_metallic.png",
+          "bytes": 457137,
+          "sha256": "22911f36dc5e9a3b2acc6dfb8f7946f4c963b5296ab10e8dc6cce260140ce8a3"
+        }
+      ],
+      "license_files": [
+        {
+          "path": "LICENSE.md",
+          "bytes": 911,
+          "sha256": "6e7c41dba03a561a67197a5aba92219bcc462806d69d13d8aba1c0ccbe183253"
+        },
+        {
+          "path": "README.md",
+          "bytes": 2073,
+          "sha256": "aed216cda25deab59a115bdd6f486da0437fe4e1d9df11c34e496242dbf89fe2"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 1070,
+          "sha256": "4ccccf4f019521aea50d462a8b20b876478aca456ab6adde17cd8e4a53110b73"
+        }
+      ],
+      "license": [
+        {
+          "license": "CC0-1.0",
+          "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+          "artist": "Guido Odendahl",
+          "year": "2020",
+          "owner": "Public",
+          "what": "Initial car model",
+          "text": "Creative Commons Zero v1.0 Universal",
+          "spdx": "CC0-1.0",
+          "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
+        },
+        {
+          "license": "CC0-1.0",
+          "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+          "artist": "Eric Chadwick",
+          "year": "2020",
+          "owner": "Public",
+          "what": "Extensions and scene composition",
+          "text": "Creative Commons Zero v1.0 Universal",
+          "spdx": "CC0-1.0",
+          "icon": "https://licensebuttons.net/p/zero/1.0/88x31.png"
+        }
+      ]
+    },
+    "SpecularSilkPouf": {
+      "tier": "B",
+      "files": [
+        {
+          "path": "glTF/SpecularSilkPouf.bin",
+          "bytes": 2313984,
+          "sha256": "9672553b7189af65ba2a17390986f24eaf372df9b9155f6f003c6c7a713c7126"
+        },
+        {
+          "path": "glTF/SpecularSilkPouf.gltf",
+          "bytes": 3699,
+          "sha256": "0c02b75be098b94fb940c5d149a8e0ff716c7f0202b51836dfb2c336a379e5ab"
+        },
+        {
+          "path": "glTF/SpecularSilkPouf_normal.png",
+          "bytes": 2126796,
+          "sha256": "c121660fc1893333f95f502601ccea23a7b4257ca2ee2a5971666d8d9039341f"
+        },
+        {
+          "path": "glTF/SpecularSilkPouf_occlusion.png",
+          "bytes": 189550,
+          "sha256": "24aace874acf863c32969ce7c8d1a6ddd906a32018b6e5b7dff91f2e1220a33a"
+        }
+      ],
+      "license_files": [
+        {
+          "path": "LICENSE.md",
+          "bytes": 786,
+          "sha256": "8ac6f8b603941489e8effe67cdac4eb0181f24316f55de3f110616c1435445a5"
+        },
+        {
+          "path": "README.md",
+          "bytes": 2397,
+          "sha256": "363595a7e09ec439719dcdbbfa02186050a06d5277fd9048bc23c1e35d2a088f"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 710,
+          "sha256": "39fd9482d19ac6892c982dc3cacff12a0e73cd6d46afa2bbd0fe689894a58750"
+        }
+      ],
+      "license": [
+        {
+          "license": "CC-BY-4.0",
+          "licenseUrl": "https://creativecommons.org/licenses/by/4.0/legalcode",
+          "artist": "Eric Chadwick",
+          "year": "2023",
+          "owner": "Copyright 2023 Wayfair, LLC",
+          "what": "Everything",
+          "text": "Creative Commons Attribution 4.0 International",
+          "spdx": "CC-BY-4.0",
+          "icon": "https://licensebuttons.net/l/by/4.0/88x31.png"
+        }
+      ]
+    },
+    "GlamVelvetSofa": {
+      "tier": "B",
+      "files": [
+        {
+          "path": "glTF/GlamVelvetSofa.bin",
+          "bytes": 124952,
+          "sha256": "89ddbaa02fbc247729e296f6a60f8430d8d142b506771e2bafd3ec3c8228fd86"
+        },
+        {
+          "path": "glTF/GlamVelvetSofa.gltf",
+          "bytes": 16868,
+          "sha256": "ee92d0fdabe20241b953c954c7a85e5b76a320d7c30db50ce64107ce809c4ca1"
+        },
+        {
+          "path": "glTF/GlamVelvetSofa_normal.png",
+          "bytes": 2487826,
+          "sha256": "a498a58575791eebad0eedb9b27a672ece39a3047423481f38c55b04b2d00af2"
+        },
+        {
+          "path": "glTF/GlamVelvetSofa_occlusion.png",
+          "bytes": 530651,
+          "sha256": "b5b8d4a01869827bbb1dd43ced8116444e84f87902a1a7e822e9560980e6f8d5"
+        }
+      ],
+      "license_files": [
+        {
+          "path": "LICENSE.md",
+          "bytes": 782,
+          "sha256": "b9a0328334d3597cf438846bd14eac5cf07a70cc93746cd8b8b569806d1b8c7f"
+        },
+        {
+          "path": "README.md",
+          "bytes": 7428,
+          "sha256": "3c96b73fb52169fc1b79873dd70b4b783c3b04204f3033fe949247077fd59652"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 669,
+          "sha256": "047515275fd94ee1a8969d027e4b7c68c96ebde6876da7f80722efcc3660af4e"
+        }
+      ],
+      "license": [
+        {
+          "license": "CC-BY-4.0",
+          "licenseUrl": "https://creativecommons.org/licenses/by/4.0/legalcode",
+          "artist": "Eric Chadwick",
+          "year": "2021",
+          "owner": "Wayfair, LLC",
+          "what": "Everything",
+          "text": "Creative Commons Attribution 4.0 International",
+          "spdx": "CC-BY-4.0",
+          "icon": "https://licensebuttons.net/l/by/4.0/88x31.png"
+        }
+      ]
+    },
+    "ABeautifulGame": {
+      "tier": "chess",
+      "files": [
+        {
+          "path": "glTF/ABeautifulGame.bin",
+          "bytes": 10829440,
+          "sha256": "727eea28752b2b0c35cad89e726f0bc6a1800c3fa8696867ccf3d0c39933f5fb"
+        },
+        {
+          "path": "glTF/ABeautifulGame.gltf",
+          "bytes": 46214,
+          "sha256": "2e1b63ae34173c6e3251f749b1b8b97a32e92517aab2cfd4bfffd9158f4dd278"
+        },
+        {
+          "path": "glTF/Bishop_black_ORM.jpg",
+          "bytes": 630950,
+          "sha256": "2e02bf8975c9d0585b1b0a4fbb0448b99a20ce888b8065d37d71d2a6bb26a869"
+        },
+        {
+          "path": "glTF/Bishop_black_base_color.jpg",
+          "bytes": 403990,
+          "sha256": "3ebe3fe7859d6ae50327033fd4cb61253e81f2441baa3ae752edf309b7491973"
+        },
+        {
+          "path": "glTF/Bishop_black_normal.jpg",
+          "bytes": 850400,
+          "sha256": "243ed45b4e752f1dd6aa67673239afc8d54ce821ce081d1c8f8d8b877f4c5a3c"
+        },
+        {
+          "path": "glTF/Bishop_white_ORM.jpg",
+          "bytes": 622771,
+          "sha256": "08fa51b364f6a4484bec3c9e1e3ce8cd0371d0959f38799acbde06e9b910806d"
+        },
+        {
+          "path": "glTF/Bishop_white_base_color.jpg",
+          "bytes": 361127,
+          "sha256": "f1df1e4b755e95741a4170c73281fb5532394026f2683e5bd5478af053a4c40a"
+        },
+        {
+          "path": "glTF/Bishop_white_normal.jpg",
+          "bytes": 673915,
+          "sha256": "ffe7997b80f831d099d386483fe195beeee1ff37a11e5e95dad5a830975ec312"
+        },
+        {
+          "path": "glTF/Castle_ORM.jpg",
+          "bytes": 1371413,
+          "sha256": "1e00bd2b6cc122da8fb77f4bf5db590ec10cea609719a334518b6cae7f416d0c"
+        },
+        {
+          "path": "glTF/Castle_black_base_color.jpg",
+          "bytes": 394527,
+          "sha256": "025fdde8ae3a97c8d430e1ca2539acc36d071886ed4ff7c0396751094031b479"
+        },
+        {
+          "path": "glTF/Castle_normal.jpg",
+          "bytes": 491396,
+          "sha256": "91342101f6e3fdced973c247165d4e244c4410e647a524d23a763b122e9881ed"
+        },
+        {
+          "path": "glTF/Castle_white_base_color.jpg",
+          "bytes": 334252,
+          "sha256": "56aa97849639f9e5def51dd55edd1550038ec31cdd3a362060258ffa526b60ca"
+        },
+        {
+          "path": "glTF/Chessboard_ORM.jpg",
+          "bytes": 582751,
+          "sha256": "18c357a7aa4beac43c604ebd73dca129e0db505adc74c19dfd3767f8df3d51c5"
+        },
+        {
+          "path": "glTF/Chessboard_base_color.jpg",
+          "bytes": 529405,
+          "sha256": "31a0a9e3d82958f310ec6c817f13968bdddab4efe5b612d471b1c6177156a0a6"
+        },
+        {
+          "path": "glTF/Chessboard_normal.jpg",
+          "bytes": 727372,
+          "sha256": "b496ad48f281a4ccbcf2b08378ac4693f21c3942e34340e9cbcd8bec18765bc1"
+        },
+        {
+          "path": "glTF/King_black_ORM.jpg",
+          "bytes": 782417,
+          "sha256": "e77a83078879b7068420d2f7ad76a02c3fc78bcf752e82e037754a242895f3da"
+        },
+        {
+          "path": "glTF/King_black_base_color.jpg",
+          "bytes": 366216,
+          "sha256": "68d65ffad3ddae474e17a7c028c0ec65af0a15b0a46a5fb03b856eb40f8fe725"
+        },
+        {
+          "path": "glTF/King_black_normal.jpg",
+          "bytes": 764089,
+          "sha256": "2fdf5d40f38cac95175f2e685476e28f12c7e0555fb4345df34cc05420cef66e"
+        },
+        {
+          "path": "glTF/King_white_ORM.jpg",
+          "bytes": 822486,
+          "sha256": "a9b0bde70cc75d7763dd658a2d5f26f9edb2739f453a88291071e20111b4581c"
+        },
+        {
+          "path": "glTF/King_white_base_color.jpg",
+          "bytes": 395138,
+          "sha256": "f64a03112150d2e55bf716b11467a18cf30cab799f9081c2236b8f4ff668fa53"
+        },
+        {
+          "path": "glTF/King_white_normal.jpg",
+          "bytes": 961725,
+          "sha256": "9e9630daee38e7eb3e7188540a1a7be1f49187a13cd4b72588ec709f53ce0cea"
+        },
+        {
+          "path": "glTF/Knight_ORM.jpg",
+          "bytes": 350946,
+          "sha256": "64db87cfd2c2b31400248035817da7fc6e88e58f27ee02b540283e3aa38afc8e"
+        },
+        {
+          "path": "glTF/Knight_black_base_color.jpg",
+          "bytes": 244999,
+          "sha256": "68db3a457ad7d7e2c6ef19320614cb0976038a9b5d10dc596ef9fa8e0efe71ff"
+        },
+        {
+          "path": "glTF/Knight_normal.jpg",
+          "bytes": 215780,
+          "sha256": "28d817c0e3179b1bd76c99a8b634ab17cbdd55b9594ef4ec5843ff8cb2811f9f"
+        },
+        {
+          "path": "glTF/Knight_white_base_color.jpg",
+          "bytes": 395645,
+          "sha256": "89ab1100fce0e724249e433cdf4089a3edfdcd4d9aec9f14ba44f83b7284181e"
+        },
+        {
+          "path": "glTF/Pawn_ORM.jpg",
+          "bytes": 792174,
+          "sha256": "bb7ac27d4b650cf533e398e0477c9fbf129846d566e706d76146cdb947c3f17a"
+        },
+        {
+          "path": "glTF/Pawn_black_base_color.jpg",
+          "bytes": 315179,
+          "sha256": "e3a42ac61d090cf23b5722e20b8b993f087ca09689500b74dde61c8a28899e26"
+        },
+        {
+          "path": "glTF/Pawn_normal.jpg",
+          "bytes": 750313,
+          "sha256": "c1e2e201efcdc9184da793f6fe98bc54dace592274842dd7e42427a9294277c3"
+        },
+        {
+          "path": "glTF/Pawn_white_base_color.jpg",
+          "bytes": 303807,
+          "sha256": "46153b809dfcc35f1a3c3508310a25dc423062204e95b328dddd420cb3d60952"
+        },
+        {
+          "path": "glTF/Queen_black_ORM.jpg",
+          "bytes": 741172,
+          "sha256": "4df982f977eae6da3239e9e7a02534633f07473010025cd742d55ad4d85976ca"
+        },
+        {
+          "path": "glTF/Queen_black_base_color.jpg",
+          "bytes": 295346,
+          "sha256": "26132e8fb23808295c7d77fedf1e760730d097d138e66a5947e0cc3a7f9302ed"
+        },
+        {
+          "path": "glTF/Queen_black_normal.jpg",
+          "bytes": 777060,
+          "sha256": "b2dfb93933b47ff4589eca6acd8c96b9b17521e024060e7e0fca1a7f95a9401e"
+        },
+        {
+          "path": "glTF/Queen_white_ORM.jpg",
+          "bytes": 709227,
+          "sha256": "07fba609ee23a02ea22a3d1f6d76df87a0cfa8eca5bc38ddbe7a1258d7448b33"
+        },
+        {
+          "path": "glTF/Queen_white_base_color.jpg",
+          "bytes": 309191,
+          "sha256": "2cc4b5295ff58d920cc23c13ee089821e193f6006c966af395824fc1c94ce4e0"
+        },
+        {
+          "path": "glTF/Queen_white_normal.jpg",
+          "bytes": 662916,
+          "sha256": "5270859cd49784272da97b92d9aeef4d6008033d654014b34328c7ea961cb282"
+        }
+      ],
+      "license_files": [
+        {
+          "path": "LICENSE.md",
+          "bytes": 932,
+          "sha256": "2f2bdb47880dcffc73bf532c69d48863c081708adc5f870ad21cfff6d7b9363e"
+        },
+        {
+          "path": "README.md",
+          "bytes": 3783,
+          "sha256": "35b650cc930a9c86de184f28e973e5122e26a0c20b88175e7c362e1faf97596b"
+        },
+        {
+          "path": "metadata.json",
+          "bytes": 1065,
+          "sha256": "80070530e19cba44b46bc0655ec94a2c67683d773697c9f17e3e5f5faffc4a91"
+        }
+      ],
+      "license": [
+        {
+          "license": "CC-BY-4.0",
+          "licenseUrl": "https://creativecommons.org/licenses/by/4.0/legalcode",
+          "artist": "MaterialX Project",
+          "year": "2020",
+          "owner": "ASWF",
+          "what": "Original model",
+          "text": "Creative Commons Attribution 4.0 International",
+          "spdx": "CC-BY-4.0",
+          "icon": "https://licensebuttons.net/l/by/4.0/88x31.png"
+        },
+        {
+          "license": "CC-BY-4.0",
+          "licenseUrl": "https://creativecommons.org/licenses/by/4.0/legalcode",
+          "artist": "Ed Mackey",
+          "year": "2022",
+          "owner": "Ed Mackey",
+          "what": "Conversion to glTF",
+          "text": "Creative Commons Attribution 4.0 International",
+          "spdx": "CC-BY-4.0",
+          "icon": "https://licensebuttons.net/l/by/4.0/88x31.png"
+        }
+      ]
+    }
+  },
+  "total_bytes": 62353850
+}
