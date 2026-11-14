@@ -109,8 +109,14 @@ texture (0.09-2.3 mm) acts as a uniform 3 mm; the measured bleed is that of 3 mm
 ### Findings and open items
 
 * **Emissive meshes of the kings/queens hang the GPU.**  The first mask design (pure emissive white on King_Black and Queen_Black, about 75k triangles) timed out on frame 0 ("GPU timeout waiting for
-  frame event value 1 (current 0)", reproduced in two runs, a harvest and a debug run); the emissive pawn tops (2208 triangles each) are fine.  The mask now uses a lit white; the engine limit for large
-  emissive meshes is not investigated here (candidate for ticket 24).
+  frame event value 1 (current 0)", reproduced in two runs, a harvest and a debug run); the emissive pawn tops (2208 triangles each) are fine.  The mask now uses a lit white.
+  **Fixed afterwards (F15 GPU-safety commit):** cause = the clustered local-DI fallback (`--lighting legacy` with RT lighting passes): emissive triangles are unbounded lights (range 0), so every cluster
+  cell overflows and `light_cluster_shade(_rt)` shaded ALL lights per pixel, one visibility ray each (`light_cluster_build` also looped over every light per cell).  Measured with the old shader
+  (Pawn_Top_Black emissive, 17,664 lights, 128x72..384x216): "Local clustered RT shading" 58.5 / 56.1 / 49.8 / 70.9 ms at 128x72 / 192x108 / 256x144 / 384x216 (latency bound: linear in the light
+  count, 113.7 ms for 35,328 lights, flat in resolution until the GPU fills), "3D light clusters" 5.4-5.6 ms (10.3 ms for 35k); 75k lights is pixels x 75k rays.  Fix: at most 128 lights per pixel
+  (`src/renderer/light_budget.h`: exact below, stratified unbiased above), cluster build stops at the first overflow.  After: 0.97 ms at 192x108 for the 17.7k case; `emit=1` kings + queens
+  (75k lights) 13.8 ms shading, 14-26 ms GPU frame at 1280x720 (`tools/f15_emissive_bound_check.py`).  Not a bound: the loop of `reflection_probe_capture_fs` over all sampled lights x 16
+  (opt-in `--reflection-capture-probe`) showed no measurable cost with 75k lights (frame 0 GPU max 20 vs 13.5 ms without emitters) and is unchanged.
 * The first receiver definition of the shadow gate was dominated by the tops' own pixels (hiding a top uncovers the floor) and by a glare percentile (68-393 pixels); the definition was corrected before any
   gate verdict (the bounds are unchanged: 0.05-0.95, 20 %).
 * Not run: `tools/archive_check.sh`, `tools/hitch_check.sh` (no pipeline-descriptor change outside the targeted update), ticket 22's side-by-side screenshots, Sponza D2.
