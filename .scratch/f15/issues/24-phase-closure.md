@@ -62,11 +62,23 @@ section "Defects found during F15"; integrated by fast-forward to 6b6bf04; orche
 - DDGI wall behind glass black (probe in the gap went inactive on the pane's back faces): fixed 4422a13 (`f15_shadowed_hit_check.py
   --mode ddgi`, 1.248 vs 0.377, gate 0.90..2.0).
 - Transport rays ending black on single-sided back faces: fixed 26fe229 (`--case backface`, 1.000 vs 0.00001; error words 16/17).
-- IN PROGRESS, owner 2026-11-14 "Correggere in F15": with any GI mode the declared environment reaches no primary surface (the
+- FIXED (D2 A/B pending), owner 2026-11-14 "Correggere in F15": with any GI mode the declared environment reaches no primary surface (the
   INDIRECT atlas excludes it by design, no other pass adds it): shadowed wall 16/255 with `--gi ddgi` vs 194 with GI off. Required:
   one ownership rule (no double count against the GI-off term and the reflection/probe paths), reference albedo x L_env with a
   negative control, F13/F14 corpus rerun with every image change explained (thresholds only tightened, re-cut references justified),
   Sponza D2 re-measured on a quiet machine in an interleaved A/B with the previous binary, closure-document row.
+  RESULT: fixed 4fc1c8a (agent 8a6335d, F12.1), closure row 274d503 plus the orchestrator re-verification. Ownership rule in
+  shaders/gi_common.h (giEscapeRadiance): GI off = the analytic unoccluded term; GI on = escaped probe/candidate rays return the declared
+  radiance (occluded by geometry), secondary hits get it through the atlas, the explicit secondary sky ray is removed, the GI-off term is
+  stripped. Fixture tools/f15_gi_environment_check.py (CPU cosine-weighted sky-visibility reference), orchestrator rerun against the
+  c978151 control: open ddgi 1.018 / cache 1.019 / restir 1.003 against 0.039 / 0.016 / 0.016, slot 1.049 / 1.040 / 1.044 (an
+  unoccluded term reads 3.94). ctest 33/33; exact sponza-d2 284 775 px (max 12, 50.53 dB: the atmosphere sky now reaches surfaces),
+  the other four 0 px; visual_check 0 px; zero-environment scenes bit-identical in every GI mode (Cornell room, moving-sun restir);
+  f10_f12 f12_* functional battery exit 0 (negatives exit 1). F13/F14 corpus (agent): 37 verdicts equal final4, no reference re-cut,
+  no threshold moved, control vs fixed bit-identical on five representative cases (none of the 37 declares an environment). Pipeline
+  descriptors unchanged. Remaining: Sponza D2 interleaved A/B on a quiet machine (control build/ctl-c978151 vs build/release).
+  Process note: the agent's first configure fetched the CMake dependencies over the network for a few seconds against the no-download
+  rule; it deleted that directory and rebuilt offline from the local sources.
 - IN PROGRESS, owner 2026-11-14 "Dimostrare o correggere": the F11.5 DI cap (1bf0e19) ratio budget/exact is 1.016 +- 0.008 with
   the denoiser off and 0.973 (sem 0.001) with `--lighting-denoise custom`. Measure the cause (clamp disabled/widened, same scene
   below the 128-light cap); fix a systematic loss with a failing-before fixture, or prove the expected behaviour against a
