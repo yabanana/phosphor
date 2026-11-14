@@ -87,3 +87,41 @@ Open: `archive_check`, `hitch_check`, O7 counts, shader validation not run (no e
 2. Jade g = 0.3 stays. Declared mapping the engine is expected to use: HG anisotropy through the similarity relation (reduced scattering
    sigma_s' = sigma_s (1 - g)) to scale the diffusion radius (the multiple-scatter colour already goes through the draft's inversion
    with g); the ground truth uses the real HG walk, so a missing correction shows in the jade pieces.
+
+2026-11-14 — engine side (F15.1, commits 7f8ab18 engine, 3ba6ba7 archive, d5c24dc runner).  The bound is MISSED on every gated SSS piece: the
+decision rule of ticket 10 points at ticket 18; not applied here.
+- Pipeline: resolve/fallback write the diffuse-irradiance target (constant SSS_OUTPUT 23, RGBA32F, texture 10 / colour attachment 6), the
+  colour keeps (1 - w) diffuse + specular, `subsurface_diffuse` (shaders/subsurface.metal) spreads the premultiplied irradiance with the Burley
+  profile (21/55 samples, mixture-quantile radii, 3D distance, area factor, same material, sub-pixel skip < 0.5 px) into a new colour version
+  before reflections/atmosphere/post.  Static cost per volumetric pixel: 21 or 55 sample gathers (sss, depth, normal reads) + 16-step bisection
+  per sample on the mixture CDF (about 100 exp per sample: the radii depend only on the material and could be hoisted into threadgroup memory
+  if the measured cost asks for it); one RGBA32F target (33 MB at 1080p) and one extra colour texture, only when the scene has volumetric subsurface.
+- Runner (`build/f15-check/t17-b`, GREEN exit 0): sun key FAIL, now asserted red as pending "ticket 18"; radius key pass; sub-pixel pass
+  (max relative luminance error 0.000000 on the four pieces); back-lit reported; controls all fail their gates; 0 archive misses, 0 render-thread
+  compiles on the five captures.  Per piece (mean / p95 relative luminance error, candidate Y vs ground-truth Y): skin 0.5@0.08 0.240 / 0.376
+  (0.192 vs 0.153); skin 1@0.04 0.863 / 1.317 (0.206 vs 0.099); skin 1@0.08 0.821 / 1.417 (0.239 vs 0.117); skin 1@0.16 [reported] 0.985 / 1.689
+  (0.268 vs 0.127); jade 0.5@0.08 0.292 / 0.750 (0.182 vs 0.152); jade 1@0.04 0.910 / 1.644 (0.196 vs 0.104); jade 1@0.08 0.736 / 1.604
+  (0.222 vs 0.116); jade 1@0.16 [reported] 1.172 / 2.468 (0.250 vs 0.108); the weight-0 pieces 0.0000.  Sweep (terminator bleed engine vs truth):
+  skin 0.0063 0.0262 0.0509 0.1377 0.1487 vs 0.0152 0.0407 0.0913 0.1898 0.3047; jade 0.0213 0.0910 0.1221 0.2220 0.2467 vs 0.0304 0.1042 0.2302
+  0.3945 0.5617 (monotonic, under-estimated).  Back-lit (reported): mean error 0.956 / 0.986 / 0.995 / 1.000, candidate Y 0.0050 0.0018 0.0004
+  0.0000 vs truth 0.0128 0.0332 0.0338 0.1063.
+- Why the bound is missed (offline emulation of the shader on the t17-b snapshot reproduced the GPU per-piece Y to 4 digits, so its variants are
+  trustworthy): (1) energy: the truth at fully lit pixels reflects 0.47-0.5 of colour x (1 - F) x E (skin 0.416/0.266/0.21 against colour
+  0.85/0.55/0.45), the Mitsuba rough dielectric boundary loses energy on every internal reflection; the engine contract (colour = diffuse
+  albedo, also the sub-pixel gate: colour = base colour must equal the base model) cannot reproduce it.  A boundary-aware effective albedo
+  A (1 - F_i) / (1 - A F_i), F_i = 0.596 for ior 1.5, still leaves the engine 1.4x above the truth, and breaks the sub-pixel gate.  (2) shape:
+  even with an ORACLE energy factor (0.72) and a tuned profile width (x0.5 ... x2) the best per-piece mean errors on the gated pieces are
+  0.11-0.23 (worst 0.31-0.42 on the jade pieces), p95 0.31-0.9: a screen-space profile cannot reach the 10 % / 25 % bound here.  So ticket 18 is
+  warranted by the shape error alone; its mapping must also fix the boundary energy convention (colour = multiple-scattering albedo of the
+  medium under the engine's boundary) or the same 2x offset appears.
+- Verification (M5 Max): `--debug-lobe-guide 8` on subsurface-volumetric-sun PASS (extended 13314 pixels), `--debug-lobe-guide-corrupt` FAIL
+  (13314 mismatches, exit 1); `MTL_SHADER_VALIDATION=1 MTL_DEBUG_LAYER=1` 200 frames exit 0 without a validation message (the first attempt
+  found a real defect: the base fallback pipeline had no attachment 6; fixed with the SSS_OUTPUT base fallback); warmup 64: GPU allocations 0;
+  forced overflow (`tools/f15_subsurface_overflow_check.sh`): mean |overflow - normal| 1.3e-5 over the covered pixels (limit 2e-3) PASS;
+  `tools/f15_lobe_guide_overflow_check.sh` on the fixture: guide dumps identical; a base scene capture (base-grid-sun) is bit-identical to the
+  t16 capture; ctest 19/19, runner tests 83 OK.
+- Carried: DI/ReSTIR/clustered and GI composite diffuse is not diffused (the DI kernels keep the base model for volumetric pixels, the thin
+  consumers ignore the VOLUMETRIC flag; no diffuse-irradiance write from DI); the ambient diffuse of an external reflection composite and
+  DI local lights are not diffused; combinations with coat/sheen/anisotropy/iridescence/transmission keep the base diffuse; the on-tile
+  resolve experiment has no diffusion; weight/colour/radius-scale textures modulate the irradiance but not the profile shape; visual_check,
+  archive_check, hitch_check and the diffusion pass cost are the orchestrator's.
