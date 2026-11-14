@@ -1760,6 +1760,10 @@ bool Engine::frame(float dt) {
         sf.constants=constants;sf.nearPlane=camera_->getNear();std::memcpy(sf.unjitteredVP,&unjittered[0][0],64);
         shadows_->prepareFrame(*store_,lights_,sf);
         if(directLighting_)directLighting_->prepareFrame(*gpuScene_,*store_,lights_,sf);
+        // F15 (F13.1 residue found in F15): the GI passes receive the declared environment in EVERY scene (the atmosphere's is set in the scene sync
+        // above; a corpus rig, material scenario or specular-environment fixture declares its own constant one).  Escaped probe / candidate rays
+        // return it (ownership rule: shaders/gi_common.h giEscapeRadiance); before, GI saw black outside the geometry unless an atmosphere ran.
+        if(gi_&&!atmosphere_)gi_->setEnvironment(declaredEnvironment(nullptr,options_));
         if(gi_)gi_->prepareFrame(*gpuScene_,*store_,lights_,sf);
         if(store_->stats().structure||store_->stats().fullInstances||store_->stats().fullNodes||!store_->instanceDeltas().empty()||!store_->nodeDeltas().empty()||!store_->motionSlots().empty()||!store_->dirtyRoots().empty())++surfaceGeometryEpoch_;
         if(store_->materialsChanged())++surfaceMaterialEpoch_;

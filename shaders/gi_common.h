@@ -74,6 +74,25 @@ inline float3 giIrradiance(float3 point,float3 normal,constant GPUProbeGridParam
     return weights>1e-8f ? result/weights : float3(0.0f);
 }
 
+// F15 (F13.1 residue found in F15; owner decision 2026-11-14): ENVIRONMENT OWNERSHIP with a GI mode on.
+//
+//   GI off      the resolve / composite adds the analytic diffuse term  environment x albedo x (1 - metallic)  (declared, unoccluded);
+//               reflectionSecondary adds the same term to every secondary RT hit.
+//   GI on       the TRANSPORT owns the environment.  A ray that leaves the scene (no hit within maxDistance) returns the declared radiance:
+//               - ddgi_trace probe rays and gi_candidates cosine rays return it on a miss, so the atlas / reservoir irradiance of a surface
+//                 already contains the sky it can see, occluded by geometry (an open surface reads albedo x L, a slot reads albedo x L x V);
+//               - a secondary hit receives it through the atlas lookup like every other indirect light (giSecondaryRadiance has no explicit
+//                 sky ray: with the atlas carrying the sky it would count it twice);
+//               - the GI-off analytic term is NOT added: useGI (resolve) and REFLECT_COMPOSE_GI (composite) strip it, and reflectionSecondary
+//                 takes the atlas branch when REFLECTION_ENABLE_GI is set.
+//   Specular environment / probe radiance is a different lobe (ambientSpecular, the reflection estimators) and is untouched.
+// Emitters follow the F13.1 band rule: this function never returns emission.
+inline float3 giEscapeRadiance(constant GPUProbeGridParams& p) {
+    return max(float3(p.skyRadiance[0],p.skyRadiance[1],p.skyRadiance[2]),0.0f);
+}
+// A reservoir sample that escaped the scene references no instance: giReusable and the independent state check accept this slot.
+constant uint GI_SLOT_ESCAPED=~0u;
+
 struct GiMaterial { float3 diffuse,emissive; bool doubleSided; };
 inline bool giMaterial(GPURtHit hit,constant GPUProbeGridParams& p,const device GPUInstance* instances,
                        const device GPURtMesh* meshes,const device GPUVertex* vertices,const device uint* indices,
@@ -122,17 +141,8 @@ inline float3 giSecondaryRadiance(float3 point,float3 normal,GiMaterial material
                                   const device GPUSampledLight* sampled,const device GPUEmissiveSurface* emissive,
                                   constant GPUProbeTraceExtra& extra,thread uint& seed,
                                   const device GPUProbeState* states,texture2d<float> irradiance,texture2d<float> moments) {
+    // The atlas carries the sky (escaped probe rays return it, giEscapeRadiance): no explicit sky ray here (it would count it twice).
     float3 E=giIrradiance(point,normal,p,states,irradiance,moments);
-    float3 sky(p.skyRadiance[0],p.skyRadiance[1],p.skyRadiance[2]);
-    if(any(sky>0.0f)) {
-        float2 uv(giRandom(seed),giRandom(seed));float radius=sqrt(uv.x),a=2.0f*M_PI_F*uv.y;
-        float3 t=normalize(cross(abs(normal.z)<0.999f?float3(0,0,1):float3(0,1,0),normal)),b=cross(normal,t);
-        float3 wi=t*(radius*cos(a))+b*(radius*sin(a))+normal*sqrt(max(0.0f,1.0f-uv.x));
-        float3 origin=rtOffsetRay(point,normal);GPURtRay ray{};
-        ray.ox=origin.x;ray.oy=origin.y;ray.oz=origin.z;ray.dx=wi.x;ray.dy=wi.y;ray.dz=wi.z;
-        ray.tmax=p.maxDistance;ray.mask=RT_MASK_INDIRECT;ray.type=RT_PROBE_SHADOW;RtPayload payload{};
-        if(rtTrace(ray,as,ift,instances,p.slotCount,payload).hit==0u) E+=sky*M_PI_F;
-    }
     for(uint l=0;l<p.lightCount;++l) {
         const device GPULight& light=lights[l];
         if(extra.sampledLightCount && light.type!=LIGHT_DIRECTIONAL) continue;

@@ -33,7 +33,7 @@ kernel void ddgi_trace(instance_acceleration_structure as [[buffer(0)]],
     GPURtHit hit=rtTraceSurface(ray,as,ift,instances,p.slotCount,payload,meshes,vertices,indices,p.meshCount);
     GPUProbeRay output{};output.direction[0]=direction.x;output.direction[1]=direction.y;output.direction[2]=direction.z;
     output.distance=p.maxDistance;
-    float3 L(0.0f); // no direct environment in the INDIRECT atlas
+    float3 L=hit.hit?float3(0.0f):giEscapeRadiance(p); // an escaped ray returns the declared environment (ownership rule: gi_common.h)
     GPUGiReservoir candidate{};
     float3 point,normal;GiMaterial material;
     if(hit.hit && rtSurface(hit,instances,meshes,vertices,indices,p.slotCount,p.meshCount,point,normal) &&

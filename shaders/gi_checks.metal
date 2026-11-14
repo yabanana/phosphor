@@ -105,7 +105,8 @@ kernel void gi_check_state(constant GPUProbeGridParams& p [[buffer(0)]],
                     r.proposalArea<=0.0f || r.sourceProposalArea<=0.0f || r.proposalSolidAngle<=0.0f ||
                     r.geometryRevision!=p.geometryRevision || r.lightRevision!=p.lightRevision ||
                     r.materialRevision!=p.materialRevision || r.viewRevision!=p.viewRevision ||
-                    r.slot>=p.slotCount || r.age>32u ||
+                    (r.slot!=~0u && r.slot>=p.slotCount) || r.age>32u || // ~0u: an escaped sample (environment)
+                    
                     !giCheckUnit(float3(r.normal[0],r.normal[1],r.normal[2])) ||
                     !giCheckUnit(float3(r.sourceNormal[0],r.sourceNormal[1],r.sourceNormal[2]));
                 // Independent estimator invariant, including merged M cap:
