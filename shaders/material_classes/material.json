@@ -1,0 +1,1579 @@
+{
+  "scenes": [
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 44
+        }
+      ],
+      "family": "material",
+      "name": "material:base-grid-sun",
+      "union": 0,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 44
+        }
+      ],
+      "family": "material",
+      "name": "material:base-grid-env",
+      "union": 0,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 44
+        }
+      ],
+      "family": "material",
+      "name": "material:base-grid-env-resolve",
+      "union": 0,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 44
+        }
+      ],
+      "family": "material",
+      "name": "material:furnace-base",
+      "union": 0,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 44
+        }
+      ],
+      "family": "material",
+      "name": "material:furnace-resolve",
+      "union": 0,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 8
+        }
+      ],
+      "family": "material",
+      "name": "material:roughness-extremes",
+      "union": 0,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 8
+        }
+      ],
+      "family": "material",
+      "name": "material:roughness-extremes-sun",
+      "union": 0,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 8
+        },
+        {
+          "lobes": [
+            "specular_ior"
+          ],
+          "mask": 1,
+          "materials": 24
+        }
+      ],
+      "family": "material",
+      "name": "material:specular-grid-sun",
+      "union": 1,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 8
+        },
+        {
+          "lobes": [
+            "specular_ior"
+          ],
+          "mask": 1,
+          "materials": 24
+        }
+      ],
+      "family": "material",
+      "name": "material:specular-grid-env-resolve",
+      "union": 1,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 8
+        },
+        {
+          "lobes": [
+            "specular_ior"
+          ],
+          "mask": 1,
+          "materials": 24
+        }
+      ],
+      "family": "material",
+      "name": "material:specular-grid-point",
+      "union": 1,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 8
+        },
+        {
+          "lobes": [
+            "specular_ior"
+          ],
+          "mask": 1,
+          "materials": 24
+        }
+      ],
+      "family": "material",
+      "name": "material:specular-grid-env",
+      "union": 1,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 8
+        },
+        {
+          "lobes": [
+            "specular_ior"
+          ],
+          "mask": 1,
+          "materials": 24
+        }
+      ],
+      "family": "material",
+      "name": "material:furnace-specular",
+      "union": 1,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 13
+        },
+        {
+          "lobes": [
+            "clearcoat"
+          ],
+          "mask": 2,
+          "materials": 20
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "clearcoat"
+          ],
+          "mask": 3,
+          "materials": 5
+        }
+      ],
+      "family": "material",
+      "name": "material:clearcoat-grid-sun",
+      "union": 3,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 13
+        },
+        {
+          "lobes": [
+            "clearcoat"
+          ],
+          "mask": 2,
+          "materials": 20
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "clearcoat"
+          ],
+          "mask": 3,
+          "materials": 5
+        }
+      ],
+      "family": "material",
+      "name": "material:clearcoat-grid-env-resolve",
+      "union": 3,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 13
+        },
+        {
+          "lobes": [
+            "clearcoat"
+          ],
+          "mask": 2,
+          "materials": 20
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "clearcoat"
+          ],
+          "mask": 3,
+          "materials": 5
+        }
+      ],
+      "family": "material",
+      "name": "material:clearcoat-grid-env",
+      "union": 3,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 13
+        },
+        {
+          "lobes": [
+            "clearcoat"
+          ],
+          "mask": 2,
+          "materials": 20
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "clearcoat"
+          ],
+          "mask": 3,
+          "materials": 5
+        }
+      ],
+      "family": "material",
+      "name": "material:clearcoat-grid-point",
+      "union": 3,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 13
+        },
+        {
+          "lobes": [
+            "clearcoat"
+          ],
+          "mask": 2,
+          "materials": 20
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "clearcoat"
+          ],
+          "mask": 3,
+          "materials": 5
+        }
+      ],
+      "family": "material",
+      "name": "material:furnace-clearcoat",
+      "union": 3,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 8
+        },
+        {
+          "lobes": [
+            "specular_ior"
+          ],
+          "mask": 1,
+          "materials": 24
+        }
+      ],
+      "family": "material",
+      "name": "material:specular-grid-edit",
+      "union": 1,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 8
+        },
+        {
+          "lobes": [
+            "specular_ior"
+          ],
+          "mask": 1,
+          "materials": 24
+        }
+      ],
+      "family": "material",
+      "name": "material:specular-grid-rough",
+      "union": 1,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 11
+        },
+        {
+          "lobes": [
+            "sheen"
+          ],
+          "mask": 4,
+          "materials": 15
+        }
+      ],
+      "family": "material",
+      "name": "material:sheen-grid-sun",
+      "union": 4,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 11
+        },
+        {
+          "lobes": [
+            "sheen"
+          ],
+          "mask": 4,
+          "materials": 15
+        }
+      ],
+      "family": "material",
+      "name": "material:sheen-grid-env-resolve",
+      "union": 4,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 11
+        },
+        {
+          "lobes": [
+            "sheen"
+          ],
+          "mask": 4,
+          "materials": 15
+        }
+      ],
+      "family": "material",
+      "name": "material:sheen-grid-env",
+      "union": 4,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 11
+        },
+        {
+          "lobes": [
+            "sheen"
+          ],
+          "mask": 4,
+          "materials": 15
+        }
+      ],
+      "family": "material",
+      "name": "material:sheen-grid-point",
+      "union": 4,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 11
+        },
+        {
+          "lobes": [
+            "sheen"
+          ],
+          "mask": 4,
+          "materials": 15
+        }
+      ],
+      "family": "material",
+      "name": "material:furnace-sheen",
+      "union": 4,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 15
+        },
+        {
+          "lobes": [
+            "anisotropy"
+          ],
+          "mask": 8,
+          "materials": 16
+        }
+      ],
+      "family": "material",
+      "name": "material:aniso-grid-sun",
+      "union": 8,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 15
+        },
+        {
+          "lobes": [
+            "anisotropy"
+          ],
+          "mask": 8,
+          "materials": 16
+        }
+      ],
+      "family": "material",
+      "name": "material:aniso-grid-env-resolve",
+      "union": 8,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 15
+        },
+        {
+          "lobes": [
+            "anisotropy"
+          ],
+          "mask": 8,
+          "materials": 16
+        }
+      ],
+      "family": "material",
+      "name": "material:aniso-grid-env",
+      "union": 8,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 15
+        },
+        {
+          "lobes": [
+            "anisotropy"
+          ],
+          "mask": 8,
+          "materials": 16
+        }
+      ],
+      "family": "material",
+      "name": "material:aniso-grid-point",
+      "union": 8,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 15
+        },
+        {
+          "lobes": [
+            "anisotropy"
+          ],
+          "mask": 8,
+          "materials": 16
+        }
+      ],
+      "family": "material",
+      "name": "material:furnace-aniso",
+      "union": 8,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "anisotropy"
+          ],
+          "mask": 8,
+          "materials": 8
+        }
+      ],
+      "family": "material",
+      "name": "material:aniso-mirrored-sun",
+      "union": 8,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 10
+        },
+        {
+          "lobes": [
+            "iridescence"
+          ],
+          "mask": 16,
+          "materials": 36
+        }
+      ],
+      "family": "material",
+      "name": "material:iridescence-grid-sun",
+      "union": 16,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 10
+        },
+        {
+          "lobes": [
+            "iridescence"
+          ],
+          "mask": 16,
+          "materials": 36
+        }
+      ],
+      "family": "material",
+      "name": "material:iridescence-grid-env-resolve",
+      "union": 16,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 10
+        },
+        {
+          "lobes": [
+            "iridescence"
+          ],
+          "mask": 16,
+          "materials": 36
+        }
+      ],
+      "family": "material",
+      "name": "material:iridescence-grid-env",
+      "union": 16,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 10
+        },
+        {
+          "lobes": [
+            "iridescence"
+          ],
+          "mask": 16,
+          "materials": 36
+        }
+      ],
+      "family": "material",
+      "name": "material:iridescence-grid-point",
+      "union": 16,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 10
+        },
+        {
+          "lobes": [
+            "iridescence"
+          ],
+          "mask": 16,
+          "materials": 36
+        }
+      ],
+      "family": "material",
+      "name": "material:furnace-iridescence",
+      "union": 16,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 7
+        },
+        {
+          "lobes": [
+            "subsurface"
+          ],
+          "mask": 128,
+          "materials": 9
+        }
+      ],
+      "family": "material",
+      "name": "material:subsurface-thin-sun",
+      "union": 128,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 7
+        },
+        {
+          "lobes": [
+            "subsurface"
+          ],
+          "mask": 128,
+          "materials": 9
+        }
+      ],
+      "family": "material",
+      "name": "material:subsurface-thin-env-resolve",
+      "union": 128,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 7
+        },
+        {
+          "lobes": [
+            "subsurface"
+          ],
+          "mask": 128,
+          "materials": 9
+        }
+      ],
+      "family": "material",
+      "name": "material:subsurface-thin-env",
+      "union": 128,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "subsurface"
+          ],
+          "mask": 128,
+          "materials": 9
+        }
+      ],
+      "family": "material",
+      "name": "material:subsurface-thin-point",
+      "union": 128,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 7
+        },
+        {
+          "lobes": [
+            "subsurface"
+          ],
+          "mask": 128,
+          "materials": 9
+        }
+      ],
+      "family": "material",
+      "name": "material:furnace-thin-subsurface",
+      "union": 128,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 5
+        },
+        {
+          "lobes": [
+            "volume",
+            "subsurface"
+          ],
+          "mask": 192,
+          "materials": 8
+        }
+      ],
+      "family": "material",
+      "name": "material:subsurface-volumetric-sun",
+      "union": 192,
+      "volumetric": true
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "volume",
+            "subsurface"
+          ],
+          "mask": 192,
+          "materials": 10
+        }
+      ],
+      "family": "material",
+      "name": "material:subsurface-volumetric-radius",
+      "union": 192,
+      "volumetric": true
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "volume",
+            "subsurface"
+          ],
+          "mask": 192,
+          "materials": 4
+        }
+      ],
+      "family": "material",
+      "name": "material:subsurface-volumetric-subpixel",
+      "union": 192,
+      "volumetric": true
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 6
+        }
+      ],
+      "family": "material",
+      "name": "material:subsurface-volumetric-subpixel-off",
+      "union": 0,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "volume",
+            "subsurface"
+          ],
+          "mask": 192,
+          "materials": 4
+        }
+      ],
+      "family": "material",
+      "name": "material:subsurface-volumetric-backlit",
+      "union": 192,
+      "volumetric": true
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 4
+        },
+        {
+          "lobes": [
+            "sheen"
+          ],
+          "mask": 4,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "clearcoat",
+            "sheen"
+          ],
+          "mask": 6,
+          "materials": 9
+        }
+      ],
+      "family": "material",
+      "name": "material:combo-coat-sheen-sun",
+      "union": 6,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 4
+        },
+        {
+          "lobes": [
+            "sheen"
+          ],
+          "mask": 4,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "clearcoat",
+            "sheen"
+          ],
+          "mask": 6,
+          "materials": 9
+        }
+      ],
+      "family": "material",
+      "name": "material:combo-coat-sheen-env",
+      "union": 6,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "clearcoat"
+          ],
+          "mask": 2,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "clearcoat",
+            "anisotropy"
+          ],
+          "mask": 10,
+          "materials": 6
+        }
+      ],
+      "family": "material",
+      "name": "material:combo-aniso-coat-sun",
+      "union": 10,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "clearcoat"
+          ],
+          "mask": 2,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "clearcoat",
+            "anisotropy"
+          ],
+          "mask": 10,
+          "materials": 6
+        }
+      ],
+      "family": "material",
+      "name": "material:combo-aniso-coat-env",
+      "union": 10,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "sheen"
+          ],
+          "mask": 4,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "sheen",
+            "anisotropy"
+          ],
+          "mask": 12,
+          "materials": 6
+        }
+      ],
+      "family": "material",
+      "name": "material:combo-aniso-sheen-sun",
+      "union": 12,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "sheen"
+          ],
+          "mask": 4,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "sheen",
+            "anisotropy"
+          ],
+          "mask": 12,
+          "materials": 6
+        }
+      ],
+      "family": "material",
+      "name": "material:combo-aniso-sheen-env",
+      "union": 12,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "sheen"
+          ],
+          "mask": 4,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "sheen"
+          ],
+          "mask": 5,
+          "materials": 6
+        }
+      ],
+      "family": "material",
+      "name": "material:combo-specular-sheen-sun",
+      "union": 5,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "sheen"
+          ],
+          "mask": 4,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "sheen"
+          ],
+          "mask": 5,
+          "materials": 6
+        }
+      ],
+      "family": "material",
+      "name": "material:combo-specular-sheen-env",
+      "union": 5,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "iridescence"
+          ],
+          "mask": 16,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "clearcoat",
+            "iridescence"
+          ],
+          "mask": 18,
+          "materials": 6
+        }
+      ],
+      "family": "material",
+      "name": "material:combo-irid-coat-sun",
+      "union": 18,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "iridescence"
+          ],
+          "mask": 16,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "clearcoat",
+            "iridescence"
+          ],
+          "mask": 18,
+          "materials": 6
+        }
+      ],
+      "family": "material",
+      "name": "material:combo-irid-coat-env",
+      "union": 18,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "iridescence"
+          ],
+          "mask": 16,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "sheen",
+            "iridescence"
+          ],
+          "mask": 20,
+          "materials": 6
+        }
+      ],
+      "family": "material",
+      "name": "material:combo-irid-sheen-sun",
+      "union": 20,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "iridescence"
+          ],
+          "mask": 16,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "sheen",
+            "iridescence"
+          ],
+          "mask": 20,
+          "materials": 6
+        }
+      ],
+      "family": "material",
+      "name": "material:combo-irid-sheen-env",
+      "union": 20,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "iridescence"
+          ],
+          "mask": 16,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "anisotropy",
+            "iridescence"
+          ],
+          "mask": 24,
+          "materials": 6
+        }
+      ],
+      "family": "material",
+      "name": "material:combo-irid-aniso-sun",
+      "union": 24,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "iridescence"
+          ],
+          "mask": 16,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "anisotropy",
+            "iridescence"
+          ],
+          "mask": 24,
+          "materials": 6
+        }
+      ],
+      "family": "material",
+      "name": "material:combo-irid-aniso-env",
+      "union": 24,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 5
+        },
+        {
+          "lobes": [
+            "iridescence"
+          ],
+          "mask": 16,
+          "materials": 4
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "iridescence"
+          ],
+          "mask": 17,
+          "materials": 12
+        }
+      ],
+      "family": "material",
+      "name": "material:combo-irid-specular-sun",
+      "union": 17,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 5
+        },
+        {
+          "lobes": [
+            "iridescence"
+          ],
+          "mask": 16,
+          "materials": 4
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "iridescence"
+          ],
+          "mask": 17,
+          "materials": 12
+        }
+      ],
+      "family": "material",
+      "name": "material:combo-irid-specular-env",
+      "union": 17,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "subsurface"
+          ],
+          "mask": 128,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "clearcoat",
+            "subsurface"
+          ],
+          "mask": 130,
+          "materials": 6
+        }
+      ],
+      "family": "material",
+      "name": "material:combo-thin-coat-sun",
+      "union": 130,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "subsurface"
+          ],
+          "mask": 128,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "clearcoat",
+            "subsurface"
+          ],
+          "mask": 130,
+          "materials": 6
+        }
+      ],
+      "family": "material",
+      "name": "material:combo-thin-coat-env",
+      "union": 130,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "clearcoat",
+            "sheen"
+          ],
+          "mask": 7,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "clearcoat",
+            "sheen",
+            "anisotropy"
+          ],
+          "mask": 15,
+          "materials": 6
+        }
+      ],
+      "family": "material",
+      "name": "material:combo-all-lobes-sun",
+      "union": 15,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "clearcoat",
+            "sheen"
+          ],
+          "mask": 7,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "clearcoat",
+            "sheen",
+            "anisotropy"
+          ],
+          "mask": 15,
+          "materials": 6
+        }
+      ],
+      "family": "material",
+      "name": "material:combo-all-lobes-env",
+      "union": 15,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 6
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "sheen"
+          ],
+          "mask": 5,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "clearcoat",
+            "sheen"
+          ],
+          "mask": 6,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "clearcoat",
+            "anisotropy"
+          ],
+          "mask": 10,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "sheen",
+            "anisotropy"
+          ],
+          "mask": 12,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "iridescence"
+          ],
+          "mask": 17,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "clearcoat",
+            "iridescence"
+          ],
+          "mask": 18,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "sheen",
+            "iridescence"
+          ],
+          "mask": 20,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "anisotropy",
+            "iridescence"
+          ],
+          "mask": 24,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "clearcoat",
+            "sheen",
+            "anisotropy",
+            "iridescence"
+          ],
+          "mask": 31,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "clearcoat",
+            "subsurface"
+          ],
+          "mask": 130,
+          "materials": 2
+        }
+      ],
+      "family": "material",
+      "name": "material:furnace-combinations",
+      "union": 159,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 4
+        },
+        {
+          "lobes": [
+            "subsurface"
+          ],
+          "mask": 128,
+          "materials": 3
+        }
+      ],
+      "family": "material",
+      "name": "material:subsurface-thin-gi-back",
+      "union": 128,
+      "volumetric": false
+    }
+  ],
+  "schema": "phosphor.material-class-manifest",
+  "source": "tools/class_manifest (F15 fixtures, family material)",
+  "version": 1
+}

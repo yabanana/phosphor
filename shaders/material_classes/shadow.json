@@ -1,0 +1,127 @@
+{
+  "scenes": [
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 4
+        },
+        {
+          "lobes": [
+            "transmission"
+          ],
+          "mask": 32,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "transmission",
+            "volume"
+          ],
+          "mask": 96,
+          "materials": 1
+        }
+      ],
+      "family": "shadow",
+      "name": "shadow:transmissive-shadow-pane-sun",
+      "union": 96,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 4
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "transmission",
+            "volume"
+          ],
+          "mask": 97,
+          "materials": 2
+        }
+      ],
+      "family": "shadow",
+      "name": "shadow:transmissive-shadow-water-sun",
+      "union": 97,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "transmission",
+            "volume"
+          ],
+          "mask": 96,
+          "materials": 3
+        }
+      ],
+      "family": "shadow",
+      "name": "shadow:transmissive-shadow-volume-pane",
+      "union": 96,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 4
+        },
+        {
+          "lobes": [
+            "transmission"
+          ],
+          "mask": 32,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "transmission",
+            "volume"
+          ],
+          "mask": 96,
+          "materials": 1
+        }
+      ],
+      "family": "shadow",
+      "name": "shadow:transmissive-shadow-point",
+      "union": 96,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "transmission",
+            "volume"
+          ],
+          "mask": 96,
+          "materials": 2
+        }
+      ],
+      "family": "shadow",
+      "name": "shadow:transmissive-shadow-curved",
+      "union": 96,
+      "volumetric": false
+    }
+  ],
+  "schema": "phosphor.material-class-manifest",
+  "source": "tools/class_manifest (F15 fixtures, family shadow)",
+  "version": 1
+}

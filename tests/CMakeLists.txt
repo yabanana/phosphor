@@ -19,6 +19,7 @@ add_executable(phosphor_tests
     test_forward_variants.cpp
     test_frame_trace.cpp
     test_gltf_loader.cpp
+    test_material_classes.cpp
     test_material_description.cpp
     test_gltf_materials.cpp
     test_material_description_io.cpp
@@ -93,6 +94,10 @@ add_executable(phosphor_tests
 target_link_libraries(phosphor_tests PRIVATE phosphor_core doctest::doctest)
 # test_pipeline_script.cpp reads the committed shaders/pipelines.mtl4-json.
 target_compile_definitions(phosphor_tests PRIVATE PHOSPHOR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+# F15.2: test_material_classes.cpp runs the generator and compares with the build's generated table.
+target_compile_definitions(phosphor_tests PRIVATE PHOSPHOR_VARIANT_GEN_BIN="$<TARGET_FILE:variant_gen>" PHOSPHOR_BINARY_DIR="${CMAKE_BINARY_DIR}")
+add_dependencies(phosphor_tests variant_gen)
+target_link_libraries(phosphor_tests PRIVATE tinygltf)
 target_include_directories(phosphor_tests PRIVATE ${CMAKE_SOURCE_DIR}/tools)
 target_compile_options(phosphor_tests PRIVATE ${PHOSPHOR_WARNINGS})
 add_test(NAME phosphor_tests COMMAND phosphor_tests)

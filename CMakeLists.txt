@@ -102,6 +102,7 @@ add_library(phosphor_core STATIC
     src/renderer/meshlet_cull_reference.cpp
     src/renderer/meshlet_check.cpp
     src/renderer/scene_check.cpp
+    src/renderer/material_class_export.cpp
     src/renderer/scene_extract.cpp
     src/renderer/scene_store.cpp
     src/renderer/transform_reference.cpp
@@ -172,6 +173,10 @@ set_source_files_properties(tools/image_diff/image_diff.cpp PROPERTIES COMPILE_O
 add_executable(soc_model tools/soc_model/soc_model.cpp)
 target_link_libraries(soc_model PRIVATE phosphor_core tinygltf) # tinygltf: nlohmann json.hpp
 target_compile_options(soc_model PRIVATE ${PHOSPHOR_WARNINGS})
+# F15.2 (ticket 21): feature-class manifest exporter of the F15 fixtures (GPU-free). Portable.
+add_executable(class_manifest tools/class_manifest/class_manifest.cpp)
+target_link_libraries(class_manifest PRIVATE phosphor_core tinygltf) # tinygltf: nlohmann json.hpp
+target_compile_options(class_manifest PRIVATE ${PHOSPHOR_WARNINGS})
 # OPT-1.1: offline graph optimiser CLI (scenarios -> plans + report). Portable.
 add_executable(graph_opt tools/graph_opt/graph_opt.cpp)
 target_link_libraries(graph_opt PRIVATE phosphor_core)

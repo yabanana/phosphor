@@ -2,6 +2,7 @@
 // tables (C++ and MSL).  Plain C++20, no dependencies; host tool of the build.
 //
 //   variant_gen <variants.def> <output-dir>
+//   variant_gen classes <variants.def> <material_classes.def> <output-dir>   (F15.2: tools/variant_gen/class_gen.cpp)
 //
 // Writes <output-dir>/pipeline/forward_variants.generated.h and
 // <output-dir>/pipeline/forward_variants.generated.metal.h, only when their
@@ -16,6 +17,8 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
+#include "class_gen.h"
 
 namespace {
 
@@ -97,11 +100,13 @@ bool writeIfChanged(const std::filesystem::path& path, const std::string& conten
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 3) {
-        std::fprintf(stderr, "usage: variant_gen <variants.def> <output-dir>\n");
+    const bool classesMode = argc == 5 && std::string(argv[1]) == "classes";
+    if (argc != 3 && !classesMode) {
+        std::fprintf(stderr, "usage: variant_gen <variants.def> <output-dir>\n"
+                             "       variant_gen classes <variants.def> <material_classes.def> <output-dir>\n");
         return 2;
     }
-    const std::string defPath = argv[1];
+    const std::string defPath = classesMode ? argv[2] : argv[1];
     std::ifstream in(defPath);
     if (!in) {
         std::fprintf(stderr, "variant_gen: cannot open %s\n", defPath.c_str());
@@ -170,6 +175,19 @@ int main(int argc, char** argv) {
     for (const auto& a : axes) {
         total *= a.range();
         if (total > 0xFFFFFFu) fail(defPath, lineNo, "variant count overflows (> 16M)");
+    }
+
+    if (classesMode) {
+        ClassGenConstants constants;
+        const struct { const char* name; unsigned* target; } wanted[] = {
+            {"MATERIAL_FEATURES", &constants.materialFeatures}, {"RESOLVE_BIN", &constants.resolveBin}, {"SSS_OUTPUT", &constants.sssOutput}};
+        for (const auto& w : wanted) {
+            bool found = false;
+            for (const auto& r : reserved)
+                if (r.name == w.name) { *w.target = r.index; found = true; }
+            if (!found) fail(defPath, lineNo, std::string("missing 'reserved ") + w.name + " uint <index>' (needed by the class generator)");
+        }
+        return generateClasses(argv[3], argv[4], constants);
     }
 
     // ---- C++ header -------------------------------------------------------
