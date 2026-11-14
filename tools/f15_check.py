@@ -127,8 +127,10 @@ reference ray casting):
   medium carries across the terminator) must increase at every step of the radius sweep (no reversal beyond 0.01, and an increase of at
   least 0.01 wherever the ground truth increases by that much), `equal` = the engine capture equals the engine capture of the pair scene
   without any block (sub-pixel radius = subsurface off), `subsurface-report` = measured and reported, never gated (back-lit thick pieces:
-  declared limit of screen-space diffusion).  Until the engine side lands (ticket 17) the gated keys carry "pending": "ticket 17" with
-  `pending_matches` = subsurface-off (a volumetric block falls back to the base model today).  Negative controls: subsurface-off,
+  declared limit of screen-space diffusion).  The engine side landed with F15.1 ticket 17 (the keys were "pending": "ticket 17" with
+  `pending_matches` = subsurface-off, the base-model image, until then): the sweep, sub-pixel and back-lit keys pass; the side-lit bound
+  key misses the bound on the gated pieces and is asserted red as "pending": "ticket 18" (hybrid RT single scattering, the decision rule
+  of ticket 10).  Negative controls: subsurface-off,
   diffusion-off (the colour replaces the diffuse albedo, no diffusion), radius-ignored (the median radius everywhere), subsurface-leak
   (a sub-pixel radius that is not skipped).
 - declared (base-grid-env-resolve; also furnace-resolve next to its furnace
@@ -793,16 +795,17 @@ SCENARIOS = {
                                                "on the ior x specular grid"},
     # F15.3 (ticket 17): the volumetric subsurface mode.  The reference is the Mitsuba random walk (tools/f15_subsurface_reference.py), not
     # the Appendix B model: "reference": "subsurface".  Captures run with --reflections off (deterministic resolve terms: the neighbours'
-    # glow must not appear in SSR reflections).  The gated keys are "pending": "ticket 17" with the subsurface-off control as the image
-    # of today's engine (a volumetric block falls back to the base model); the sub-pixel key is a regression guard (equal today).
+    # glow must not appear in SSR reflections).  The engine side (screen-space Burley diffusion) landed with F15.1 ticket 17: the sweep,
+    # sub-pixel and back-lit keys pass.  The side-lit bound key MISSES the decision-11 bound on the gated pieces (see the ticket 17
+    # comment: the diffusion is energy-normalised to the colour, the Mitsuba rough boundary is not, and the best-case shape error is
+    # above the bound too): the decision rule of ticket 10 (hybrid RT single scattering, ticket 18) applies, so the key stays asserted
+    # red ("pending": "ticket 18") with the bound unchanged; ticket 18 (or the orchestrator's decision) removes the marker.
     "subsurface-volumetric-sun": {"kind": "subsurface", "reference": "subsurface", "reflections": "off",
-                                  "pending": "ticket 17", "pending_matches": "subsurface-off",
+                                  "pending": "ticket 18",
                                   "controls": VOLUMETRIC_BOUND_CONTROLS,
                                   "terms": "sun only from the side (environment 0, no shadows, no GI) on skin and jade spheres, weight {0, 0.5, 1} at the "
                                            "nominal radius 0.08 m and radius x0.5 / x1 / x2 at weight 1"},
     "subsurface-volumetric-radius": {"kind": "radius-monotonic", "reference": "subsurface", "reflections": "off",
-                                     "pending": "ticket 17", "pending_matches": "subsurface-off",
-                                     "twin_kind": "radius-statistic-match",
                                      "controls": VOLUMETRIC_SWEEP_CONTROLS,
                                      "terms": "sun only from the side on skin and jade spheres of weight 1, radius x0.25 / x0.5 / x1 / x2 / x3 of 0.08 m"},
     "subsurface-volumetric-subpixel": {"kind": "equal", "reference": "subsurface", "reflections": "off",

@@ -1868,40 +1868,46 @@ class VolumetricSubsurfaceRunner(unittest.TestCase):
                 "diffusion-off": self.image(masks, 0.5, lambda k: 0.0),
                 "radius-ignored": self.image(masks, 0.6, lambda k: 0.12)}
 
-    def test_the_bound_and_sweep_keys_are_red_for_the_right_reason_until_the_engine_lands(self):
+    def test_the_sweep_key_is_green_and_the_bound_key_asserted_red_after_ticket_17(self):
         masks, spheres = self.layout()
         truth = self.truth(masks)
         controls = self.controls_of(masks)
-        for key in ("subsurface-volumetric-sun", "subsurface-volumetric-radius"):
-            spec = check.SCENARIOS[key]
-            self.assertEqual((spec["pending"], spec["pending_matches"], spec["reference"]), ("ticket 17", "subsurface-off", "subsurface"))
-            # Today's engine = the subsurface-off control: every gate fails, the twin passes, every control discriminates -> GREEN.
-            today = self.write_folder(key + "-today", controls["subsurface-off"], truth, controls, masks, spheres)
-            entry = check.evaluate_scenario(np, key, today, "green")
-            self.assertFalse(entry["gates_pass"], key)
-            self.assertTrue(entry["pending_matches_met"], key)
-            self.assertTrue(entry["discriminating"], key)
-            self.assertEqual(entry["expectation"]["matches_control"], "subsurface-off")
-            self.assertEqual(check.verdict([entry], "green"), ("GREEN", 0), key)
-            self.assertTrue(all(v["fails_gate"] for v in entry["controls"].values()), key)
-            # The engine that implements the mode passes the gate: a pending key must FAIL, so the verdict turns red (the runner keys
-            # lose "pending" in the ticket that implements it).
-            done = self.write_folder(key + "-done", truth, truth, controls, masks, spheres)
-            entry = check.evaluate_scenario(np, key, done, "green")
-            self.assertTrue(entry["gates_pass"], key)
-            self.assertEqual(check.verdict([entry], "green")[1], check.EXIT_UNEXPECTED, key)
-            # An engine that is neither the base model nor the truth is not "red for the right reason".
-            other = self.write_folder(key + "-other", controls["radius-ignored"], truth, controls, masks, spheres)
-            entry = check.evaluate_scenario(np, key, other, "green")
-            self.assertFalse(entry["pending_matches_met"], key)
-            self.assertEqual(check.verdict([entry], "green")[1], check.EXIT_UNEXPECTED, key)
+        sun, sweep = check.SCENARIOS["subsurface-volumetric-sun"], check.SCENARIOS["subsurface-volumetric-radius"]
+        self.assertEqual((sun["pending"], sun["reference"]), ("ticket 18", "subsurface"))
+        self.assertNotIn("pending_matches", sun)
+        self.assertNotIn("pending", sweep)
+        self.assertNotIn("pending_matches", sweep)
+        self.assertEqual(sweep["reference"], "subsurface")
+        # The sweep key is an ordinary gate: the engine that implements the mode passes, the base model (a flat bleed) fails.
+        key = "subsurface-volumetric-radius"
+        done = self.write_folder(key + "-done", truth, truth, controls, masks, spheres)
+        entry = check.evaluate_scenario(np, key, done, "green")
+        self.assertTrue(entry["gates_pass"])
+        self.assertTrue(entry["discriminating"])
+        self.assertEqual(check.verdict([entry], "green"), ("GREEN", 0))
+        self.assertTrue(all(v["fails_gate"] for v in entry["controls"].values()))
+        today = self.write_folder(key + "-off", controls["subsurface-off"], truth, controls, masks, spheres)
+        entry = check.evaluate_scenario(np, key, today, "green")
+        self.assertFalse(entry["gates_pass"])
+        self.assertEqual(check.verdict([entry], "green")[1], check.EXIT_UNEXPECTED)
+        # The bound key keeps its bound and is asserted red: an engine that misses it is GREEN, one that meets it turns the verdict red
+        # (the marker is removed by the ticket that closes the gap).
+        key = "subsurface-volumetric-sun"
+        missed = self.write_folder(key + "-missed", controls["subsurface-off"], truth, controls, masks, spheres)
+        entry = check.evaluate_scenario(np, key, missed, "green")
+        self.assertFalse(entry["gates_pass"])
+        self.assertTrue(entry["discriminating"])
+        self.assertEqual(check.verdict([entry], "green"), ("GREEN", 0))
+        met = self.write_folder(key + "-met", truth, truth, controls, masks, spheres)
+        entry = check.evaluate_scenario(np, key, met, "green")
+        self.assertTrue(entry["gates_pass"])
+        self.assertEqual(check.verdict([entry], "green")[1], check.EXIT_UNEXPECTED)
 
     def test_statistic_match_twin_distinguishes_the_base_model_from_a_flat_bleed(self):
         masks, spheres = self.layout()
         off = self.off(masks)
         self.assertTrue(check.evaluate(np, "radius-statistic-match", off, off, masks, spheres)["pass"])
         self.assertFalse(check.evaluate(np, "radius-statistic-match", self.image(masks, 0.6, lambda k: 0.12), off, masks, spheres)["pass"])
-        self.assertEqual(check.SCENARIOS["subsurface-volumetric-radius"]["twin_kind"], "radius-statistic-match")
 
     def test_a_sweep_fixture_whose_truth_does_not_rise_is_non_discriminating(self):
         masks, spheres = self.layout()
