@@ -1,0 +1,62 @@
+{
+  "schema": "phosphor-material-overrides",
+  "version": 1,
+  "overrides": [
+    {
+      "name": "King_Black",
+      "subsurface": {
+        "mode": "volumetric",
+        "weight": 1.0,
+        "color": [1.0, 1.0, 1.0],
+        "radius": 0.003,
+        "radiusScale": [1.0, 1.0, 1.0],
+        "anisotropy": 0.0,
+        "colorTexture": {"path": "King_black_base_color.jpg"},
+        "radiusScaleTexture": {"path": "King_black_base_color.jpg"}
+      },
+      "volume": {"thickness": 0.04}
+    },
+    {
+      "name": "King_White",
+      "subsurface": {
+        "mode": "volumetric",
+        "weight": 1.0,
+        "color": [1.0, 1.0, 1.0],
+        "radius": 0.003,
+        "radiusScale": [1.0, 1.0, 1.0],
+        "anisotropy": 0.0,
+        "colorTexture": {"path": "King_white_base_color.jpg"},
+        "radiusScaleTexture": {"path": "King_white_base_color.jpg"}
+      },
+      "volume": {"thickness": 0.04}
+    },
+    {
+      "name": "Queen_Black",
+      "subsurface": {
+        "mode": "volumetric",
+        "weight": 1.0,
+        "color": [1.0, 1.0, 1.0],
+        "radius": 0.003,
+        "radiusScale": [1.0, 1.0, 1.0],
+        "anisotropy": 0.0,
+        "colorTexture": {"path": "Queen_black_base_color.jpg"},
+        "radiusScaleTexture": {"path": "Queen_black_base_color.jpg"}
+      },
+      "volume": {"thickness": 0.04}
+    },
+    {
+      "name": "Queen_White",
+      "subsurface": {
+        "mode": "volumetric",
+        "weight": 1.0,
+        "color": [1.0, 1.0, 1.0],
+        "radius": 0.001,
+        "radiusScale": [1.0, 1.0, 1.0],
+        "anisotropy": 0.0,
+        "colorTexture": {"path": "Queen_white_base_color.jpg"},
+        "radiusScaleTexture": {"path": "Queen_white_base_color.jpg"}
+      },
+      "volume": {"thickness": 0.04}
+    }
+  ]
+}
