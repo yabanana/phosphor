@@ -6,12 +6,12 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 17 (and only if its bound is missed)
 
-**Status:** ready-for-agent
+**Status:** resolved by the FALLBACK (2026-11-14): bound not met; screen-space diffusion stays; F15.1 volumetric subsurface explicitly PARTIAL with the measured gap
 
-- [ ] Bound: the ticket-17 side-lit subsurface bound on the same fixtures; additionally the back-lit fixture within 2× the side-lit bound
-- [ ] Timebox 2 weeks; if not met, fallback = keep screen-space diffusion, F15.1 subsurface stays explicitly partial (unticked for the volumetric mode) with the measured gap reported
-- [ ] Cost per subsurface pixel measured; scenes without subsurface unchanged
-- [ ] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
+- [ ] Bound: the ticket-17 side-lit subsurface bound on the same fixtures; additionally the back-lit fixture within 2× the side-lit bound — NOT met (measured gap below)
+- [x] Timebox 2 weeks; if not met, fallback = keep screen-space diffusion, F15.1 subsurface stays explicitly partial (unticked for the volumetric mode) with the measured gap reported
+- [ ] Cost per subsurface pixel measured; scenes without subsurface unchanged — no engine change adopted (nothing to measure); the screen-space pass cost goes to ticket 24
+- [x] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
 
 ## Comments
 
@@ -47,3 +47,23 @@ Roadmap: F15.1, F15.3
 - Decision under the ticket's rule: step 2 (RT single scattering) is not started; the screen-space diffusion stays, the volumetric mode is reported
   partial.  The tabulated profile is an optional measured improvement (sweep and gated pieces) whose price is this LUT and a gather that samples by
   its CDF; it is not adopted here because it does not change the verdict.
+
+2026-11-14 — orchestrator: conclusion. The spike is integrated as 4fc42af (generator, LUT, emulation, test); ctest 21/21.
+- What was measured:
+  - A radial profile tabulated from the same transport and boundary, used in the screen-space gather, gives gated mean 0.14-0.27
+    and p95 0.42-0.77. That is the best measured variant, but still 1.4-2.7x over the bound on every gated piece.
+  - The remaining error is CONFINEMENT. To return the observed colour behind the boundary (OpenPBR), the medium needs alpha_ss
+    close to 1, which gives a diffusion length of about 60 mfp against piece radii of about 10 mfp. Light spreads over the whole
+    object: the lit limb is dimmer and the terminator tail is brighter than any semi-infinite profile.
+  - A screen-space gather cannot model that. RT zero/single scattering (S6) adds low orders and back-lit light, not this
+    multiple-scattering confinement, so step 2 was not started: by this analysis it cannot close the side-lit gap.
+- Decision (orchestrator):
+  - The ticket's FALLBACK applies. The screen-space diffusion with the CB15 mfp fit stays. The F15.1 volumetric subsurface mode is
+    explicitly PARTIAL, and the volumetric keys keep their pending marker naming this ticket.
+  - Measured gap: gated mean 0.25-0.36 and p95 0.74-0.92 against 0.10 / 0.25. Back-lit mean error about 1 (the engine is nearly
+    black there).
+  - The tabulated profile and the V1 dmfp mapping are recorded as measured candidates and NOT adopted. Neither meets the bound;
+    the LUT exists only for roughness 0.35 and would need a roughness axis. They stay selectable.
+  - The approach that could close the gap is a real-time volumetric random walk (or path-traced SSS) with denoising. That is a
+    later-phase EDGE candidate, outside this ticket's scope.
+- The thin-walled subsurface mode (ticket 16) is unaffected and stays verified.
