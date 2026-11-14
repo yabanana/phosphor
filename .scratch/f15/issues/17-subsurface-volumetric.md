@@ -145,3 +145,25 @@ semantic filtering of the commit's own additions, +22 compute and +6 render).
     C, flagged `draft`).
 - Ticket 18 (decision 10's rule): it is decided on the re-measured gap against the corrected reference, not on the
   current numbers.
+||||||| parent of 8e097a6 (F15.3 (ticket 17): record the boundary-aware reference and its re-measurement)
+
+2026-11-14 — reference correction (boundary-aware inversion, commit `a32ee1a`; no engine or shader change).
+- Ground truth version 3: the medium albedo alpha(C) solves the OpenPBR relation measured with Mitsuba under the SAME ior 1.5 roughdielectric
+  boundary (alpha_b 0.49): A = (R_total - R_spec) / (1 - R_spec) of a 1000-mfp sphere under a constant environment (disc mean = cosine-weighted
+  diffuse incidence; R_spec from an absorbing medium).  Table `tools/f15_subsurface_albedo.json` (generator `f15_subsurface_reference.py
+  albedo-table`, 64 spp per half, 128 px, seed 20261114; noise <= 0.004 below alpha 0.99, heavy tails to 0.04 on the plateau: weighted isotonic
+  fit).  Angle dependence of A (0 / 45 / 70 degrees vs diffuse): within 6 % up to alpha 0.99.  Index-matched check: |A - rho| <= 0.043 against
+  the Kulla-Conty relation.  Negative control: the draft mapping behind the boundary returns 0.39 (C 0.85), 0.21 (0.55), 0.16 (0.45), 0.09 (0.30).
+- FINDING: Mitsuba's single-scattering GGX `roughdielectric` loses energy at every internal reflection, so even alpha = 1 (no absorption) returns
+  only A_max = 0.44-0.47 at alpha_b 0.49 (0.34 at 0.7, 0.25 at 1.0).  Colours above A_max (every fixture colour except 0.30 and 0.45) are not
+  reachable by any medium under this boundary: they saturate at alpha = 1 (`albedo_saturated` in reference.json).  The OpenPBR relation can
+  only be honoured for C <= A_max; above it the truth is the most translucent medium the boundary allows, not an observed albedo C.
+- Re-measure (`build/f15-check/t17r`, GREEN exit 0; first attempt `t17r-cold-first` discarded: the first process after a build served the
+  fallback pipelines (141/153 archive swaps, 774 fallback draws), the capture had no diffusion; the rerun has 153/153 and 17 fallback draws):
+  sun FAIL (pending ticket 18 kept), worst gated piece mean 0.417 / p95 0.979.  Per piece mean/p95, old truth -> new truth: skin 0.5@0.08 0.240/0.376
+  -> 0.297/0.806; skin 1@0.04 0.863/1.317 -> 0.283/0.611; skin 1@0.08 0.821/1.417 -> 0.332/0.677; skin 1@0.16 [reported] 0.985/1.689 -> 0.435/0.932;
+  jade 0.5@0.08 0.292/0.750 -> 0.285/0.797; jade 1@0.04 0.910/1.644 -> 0.360/0.842; jade 1@0.08 0.736/1.604 -> 0.417/0.979; jade 1@0.16 [reported]
+  1.172/2.468 -> 0.740/1.765.  Residual reference noise (halves): mean 1.2-5.6 %, p95 3.5-23 % (piece 2, alpha -> 1 heavy tails).  Radius sweep
+  passes (bleed truth skin 0.021 0.059 0.132 0.230 0.343, jade 0.061 0.141 0.249 0.404 0.570 vs engine unchanged).  Back-lit reported: mean error
+  0.972 0.989 0.996 1.000.  Controls all fail: subsurface-off 1.57 (gated 1,2,3,6,7,8), diffusion-off 1.06, radius-ignored 0.49 (pieces 2, 7);
+  sub-pixel pass (0.000000), leak control fails.
