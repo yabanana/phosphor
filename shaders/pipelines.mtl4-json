@@ -25050,6 +25050,214 @@
         ],
         "function_descriptor": "fnd:107BF0F40E0AA1DD281DE038857932F44096F67FE1DCC10E04DA080C8C89B7B6",
         "label": "3A8DDA2E05AF85D9A544954B303FF4DB8AB5B2D904915ED9CA9126B8001027DC"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 21
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 3
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 258
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:57D13F93414357C7656DD4CB4A80B3CDF20F87476DBC4E7FA0CAF011773C39F6",
+        "label": "73EBCD182EB1E1AF597985C0AF7B15E3BD91D5AD4BE3921E038AF2C0F76C9A5C"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 21
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 2
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 258
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:57D13F93414357C7656DD4CB4A80B3CDF20F87476DBC4E7FA0CAF011773C39F6",
+        "label": "E4EA749A939C8B21E3207F84E78100EDC04728AE742B8337B1BCEDF47EE7AF63"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 21
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 1
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 258
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:57D13F93414357C7656DD4CB4A80B3CDF20F87476DBC4E7FA0CAF011773C39F6",
+        "label": "6F3144B947370EAF2EA0371CD26AE37C789D7A71BDF7F7FA755CB6A135FFC146"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 21
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 0
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 258
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:57D13F93414357C7656DD4CB4A80B3CDF20F87476DBC4E7FA0CAF011773C39F6",
+        "label": "1A73063846B89C787B6068374DD32767B223C7C2CF6073E50449D7C2DD0F7C36"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 21
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 1
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 256
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:57D13F93414357C7656DD4CB4A80B3CDF20F87476DBC4E7FA0CAF011773C39F6",
+        "label": "5BC2D30539B06DCFF9BEFB887A7980B68AFC84B2842196D0A58F52DDB0C244E6"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 21
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 2
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 256
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:57D13F93414357C7656DD4CB4A80B3CDF20F87476DBC4E7FA0CAF011773C39F6",
+        "label": "B36E00935E05CD29FF77C6D4C2F55893C031B55BC4AFB774B620F41888033CA2"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 21
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 0
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 256
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:57D13F93414357C7656DD4CB4A80B3CDF20F87476DBC4E7FA0CAF011773C39F6",
+        "label": "05941A077E6E3DD0487D5C82E2DFC7235BF31E10ECE71F8D3E6C26547F379490"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 21
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 3
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 256
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:57D13F93414357C7656DD4CB4A80B3CDF20F87476DBC4E7FA0CAF011773C39F6",
+        "label": "050875E0BF0A14DEF0597227235145F0106D8C229A98EC05262B6870EEE101E8"
       }
     ]
   },
@@ -32485,6 +32693,70 @@
       },
       {
         "compute_function_descriptor": "fnd:2C39D442665DA8D2E1B6BF874598BD4167F91BA6A7F6F45C60205581C55EAF9D",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:1A73063846B89C787B6068374DD32767B223C7C2CF6073E50449D7C2DD0F7C36",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:6F3144B947370EAF2EA0371CD26AE37C789D7A71BDF7F7FA755CB6A135FFC146",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:E4EA749A939C8B21E3207F84E78100EDC04728AE742B8337B1BCEDF47EE7AF63",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:73EBCD182EB1E1AF597985C0AF7B15E3BD91D5AD4BE3921E038AF2C0F76C9A5C",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:05941A077E6E3DD0487D5C82E2DFC7235BF31E10ECE71F8D3E6C26547F379490",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:5BC2D30539B06DCFF9BEFB887A7980B68AFC84B2842196D0A58F52DDB0C244E6",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:B36E00935E05CD29FF77C6D4C2F55893C031B55BC4AFB774B620F41888033CA2",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:050875E0BF0A14DEF0597227235145F0106D8C229A98EC05262B6870EEE101E8",
         "required_threads_per_threadgroup": [
           0,
           0,
