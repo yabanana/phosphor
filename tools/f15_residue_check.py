@@ -8,6 +8,8 @@ case's gate (exit 3 when it does not: the fixture would not discriminate).
 Cases:
   grazing   C22-D3: smooth spheres, silhouette ring.  A ring pixel must not be darker than the same pixel with reflections off (the composite
             removes the diffuse weight 1 - E(N.V) the specular estimate then has to give back).
+  mirror-env  a perfect mirror floor seeing a wall in the sun shadow of an opaque panel, GI off: the wall seen in the mirror must carry the same
+            ambient light as the wall seen directly (mirror / direct ratio), shadowed and lit.
   all       every case
 
 Exit codes: 0 gates hold (and every control fails as it must), 1 a gate failed, 2 usage, 3 a control did not fail (non-discriminating),
@@ -84,7 +86,62 @@ def case_grazing(binary, control, out):
     return ok, control_fails, report
 
 
-CASES = {"grazing": case_grazing}
+# --- mirror seeing a shadowed wall (the reflection environment term) ---------------------------------------------------------------------
+
+MIRROR_GATE = (0.85, 1.15)
+MIRROR_CONTROL_MAX = 0.5
+FLOOR_Y = -0.6
+
+
+def mirror_scene(folder):
+    scene = fx.Scene()
+    wall = scene.material("wall", (0.8, 0.8, 0.8), 0.0, 1.0)
+    panel = scene.material("panel", (0.5, 0.5, 0.5), 0.0, 1.0)
+    mirror = scene.material("mirror", (1.0, 1.0, 1.0), 1.0, 0.0)  # a metal of baseColor 1: F = 1 at every angle, smooth (roughness clamps at .04)
+    scene.quad([(-1.0, -0.6, 0.0), (1.0, -0.6, 0.0), (1.0, 0.9, 0.0), (-1.0, 0.9, 0.0)], wall)
+    scene.quad([(-0.5, 0.1, 0.3), (0.0, 0.1, 0.3), (0.0, 0.5, 0.3), (-0.5, 0.5, 0.3)], panel)
+    scene.quad([(-1.6, FLOOR_Y, 2.2), (1.6, FLOOR_Y, 2.2), (1.6, FLOOR_Y, 0.0), (-1.6, FLOOR_Y, 0.0)], mirror)
+    return scene, scene.write(folder)
+
+
+# wall rectangles (x0, y0, x1, y1) at z = 0: the sun shadow of the panel covers x -0.31..0.19, y -0.14..0.26 (panel height 0.3 shifts it by
+# -0.3 * towardSun.xy / towardSun.z); the lit region is far from it.  Both lie in the part of the wall the floor mirror shows (y <= 0.11).
+MIRROR_REGIONS = {"shadow": (-0.20, -0.07, 0.10, 0.06), "lit": (0.40, -0.07, 0.90, 0.06)}
+
+
+def mirror_boxes(scene):
+    bmin, bmax = scene.bounds()
+    centre, distance = fx.frame_rig(bmin, bmax)
+    boxes = {}
+    for name, (x0, y0, x1, y1) in MIRROR_REGIONS.items():
+        boxes["direct_" + name] = fx.region_pixels((x0, y0, x1, y1), 0.0, centre, distance)
+        # the mirror image of the wall: reflected about the floor plane, seen at the wall's depth
+        boxes["mirror_" + name] = fx.region_pixels((x0, 2 * FLOOR_Y - y1, x1, 2 * FLOOR_Y - y0), 0.0, centre, distance)
+    return boxes
+
+
+def measure_mirror(binary, scene, path, out):
+    image = fx.read_png_gray(fx.capture(binary, path, out, {"--reflections": "rt", "--gi": "off"}))
+    boxes = mirror_boxes(scene)
+    means = {name: fx.region_mean(image, box) for name, box in boxes.items()}
+    return {"means": means, "shadow_ratio": means["mirror_shadow"] / max(means["direct_shadow"], 1e-6),
+            "lit_ratio": means["mirror_lit"] / max(means["direct_lit"], 1e-6)}
+
+
+def case_mirror_env(binary, control, out):
+    scene, path = mirror_scene(out / "mirror-env" / "scene")
+    fixed = measure_mirror(binary, scene, path, out / "mirror-env" / "fixed")
+    ok = all(MIRROR_GATE[0] <= fixed[k] <= MIRROR_GATE[1] for k in ("shadow_ratio", "lit_ratio"))
+    report = {"fixed": fixed, "gates_hold": ok}
+    control_fails = None
+    if control:
+        report["control"] = measure_mirror(control, scene, path, out / "mirror-env" / "control")
+        control_fails = report["control"]["shadow_ratio"] < MIRROR_CONTROL_MAX
+        report["control_fails_as_required"] = control_fails
+    return ok, control_fails, report
+
+
+CASES = {"grazing": case_grazing, "mirror-env": case_mirror_env}
 
 
 def main(argv=None):
