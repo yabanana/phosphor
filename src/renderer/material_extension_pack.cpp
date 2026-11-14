@@ -110,8 +110,8 @@ MaterialExtGroup packMaterialExtensions(const MaterialDescription& d) {
         for (u32 k = 0; k < MATERIAL_LAYER_MAX; ++k) {
             r.layerMaterial[k]  = MATERIAL_EXTENSION_INVALID;
             r.heightContrast[k] = -1.0f;
-            r.uvScale[k]        = 1.0f;
-            r.heightTex[k]      = INVALID_TEXTURE_INDEX;
+            // uvScale / heightTex stay 0 for a layer that does not exist: the record of a material without a stack is byte-identical to
+            // the pre-F15.4 one (snapshots, references and delta payloads of every other scene are unchanged).
         }
         if (d.layers) {
             const LayerStack& ls = *d.layers;

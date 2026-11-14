@@ -226,6 +226,22 @@ TEST_CASE("layer stack: the layer bit joins the feature class and the coat finis
     CHECK(featureMask(d) == MATERIAL_FEATURE_LAYERS);
 }
 
+TEST_CASE("layer stack: a material without a stack packs the pre-F15.4 record 3 (the new words are 0)") {
+    MaterialDescription d;
+    d.clearcoat = ClearcoatBlock{};
+    d.clearcoat->factor = 0.5f;
+    const GPUMaterialExt3 e3 = unpackExtRecord<GPUMaterialExt3>(packMaterialExtensions(d)[3]);
+    CHECK(e3.layerCount == 0);
+    for (u32 i = 0; i < 4; ++i) {
+        CHECK(e3.uvScale[i] == 0.0f);
+        CHECK(e3.heightTex[i] == 0u);
+        CHECK(e3.layerMaterial[i] == MATERIAL_EXTENSION_INVALID);
+        CHECK(e3.heightContrast[i] == -1.0f);
+    }
+    CHECK(e3.pad == 0u);
+    CHECK(e3.maskTex == INVALID_TEXTURE_INDEX);
+}
+
 TEST_CASE("layer stack: description file keeps uvScale and the height texture, validation rejects a bad scale") {
     NamedMaterial m;
     m.name = "terrain";
