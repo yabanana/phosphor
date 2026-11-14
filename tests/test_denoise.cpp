@@ -3,6 +3,8 @@
 #include <doctest/doctest.h>
 #include <cmath>
 #include <limits>
+#include <numeric>
+#include <vector>
 using namespace phosphor;
 namespace {
 GPUDISurface receiver(){GPUDISurface s{};s.valid=1;s.depth=3;s.geometricNormal[2]=s.shadingNormal[2]=1;s.instanceSlot=7;s.instanceGeneration=3;s.materialRevision=5;s.roughness=.2f;return s;}
@@ -105,6 +107,38 @@ TEST_CASE("F13 atrous edge weights preserve identity on constant signals and sto
     CHECK(denoiseSpatialWeight(a,b,2,2,1,p)==doctest::Approx(1));b.geometricNormal[2]=-1;CHECK(denoiseSpatialWeight(a,b,2,2,1,p)==0);
     b=a;b.depth=30;CHECK(denoiseSpatialWeight(a,b,2,2,1,p)<.001f);
     CHECK(denoiseSpatialWeight(a,a,2,200,1,p)<.001f);
+}
+
+// F15 (clustered-DI budget residue): the variance-guided luminance edge-stopping weight is row-normalised, hence NOT energy conserving on a
+// heavy-tailed signal.  Reference model of the loss (the same CPU mirror weights as the shader, 3 a-trous iterations, flat receiver): an iid
+// field of mean 1 where a fraction p of the samples is (1 + k) and the rest is lowered to keep the mean; `ratio` = energy out / energy in.
+// Declared behaviour: the budget estimator itself is unbiased (paired GPU measurement, .scratch/f15/issues/20-chess-fixture.md); the loss is
+// the filter's, grows with the tail weight, and vanishes with the luminance weight disabled (negative control) or on a light-tailed signal.
+namespace {
+double atrousEnergyRatio(double p,double k,double inputSigmaScale,float phi){
+    constexpr int N=48;std::vector<float> img(N*N);u32 state=12345u;auto uniform=[&]{state=state*1664525u+1013904223u;return double(state>>8)/double(1u<<24);};
+    const double hi=1+k,lo=(1-p*hi)/(1-p);double sum=0,sq=0;for(auto& v:img){v=float(uniform()<p?hi:lo);sum+=v;sq+=double(v)*v;}
+    const double mean=sum/img.size(),variance=sq/img.size()-mean*mean;
+    for(auto& v:img)v=float(mean+(v-mean)*inputSigmaScale); // temporal accumulation lowers the noise the spatial filter sees, not the variance estimate
+    DenoiseSettings settings;settings.luminancePhi=phi;auto params=denoiseParameters(settings,N,N,DENOISE_SIGNAL_DI,0,1,1,false);const auto s=receiver();
+    const double before=std::accumulate(img.begin(),img.end(),0.0);const float taps[5]={1,4,6,4,1};
+    for(int iteration=0;iteration<3;++iteration){
+        params.atrousStep=1u<<iteration;const int step=1<<iteration;std::vector<float> out(img.size());
+        for(int y=0;y<N;++y)for(int x=0;x<N;++x){double acc=0,weights=0;
+            for(int dy=-2;dy<=2;++dy)for(int dx=-2;dx<=2;++dx){const int qy=y+dy*step,qx=x+dx*step;if(qy<0||qy>=N||qx<0||qx>=N)continue;
+                const double w=taps[dy+2]*taps[dx+2]*denoiseSpatialWeight(s,s,img[y*N+x],img[qy*N+qx],float(variance),params);acc+=w*img[qy*N+qx];weights+=w;}
+            out[y*N+x]=float(acc/weights);}
+        img=out;}
+    return std::accumulate(img.begin(),img.end(),0.0)/before;
+}
+}
+TEST_CASE("F15 variance-guided atrous filter loses energy on heavy-tailed noise, not with the luminance weight off"){
+    const double heavy=atrousEnergyRatio(.02,20,1.0,4),heavyAccumulated=atrousEnergyRatio(.02,20,.2,4),light=atrousEnergyRatio(.2,.2,1.0,4);
+    CHECK(heavy<.9);                 // raw-level heavy tail (model value ~0.79)
+    CHECK(heavyAccumulated<.995);    // after temporal accumulation (sigma x0.2): ~1-2 % loss, the magnitude measured on the GPU (0.977 at 128 strata)
+    CHECK(heavyAccumulated>heavy);
+    CHECK(light>.99);                // a light-tailed signal is untouched
+    CHECK(atrousEnergyRatio(.02,20,1.0,1e6f)>.995); // negative control (image-border clipping only): the same heavy-tailed field, luminance weight disabled
 }
 
 TEST_CASE("F13.6 specular atrous weight is bounded by the reflection lobe"){

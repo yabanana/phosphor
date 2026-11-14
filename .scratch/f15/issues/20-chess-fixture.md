@@ -122,3 +122,24 @@ texture (0.09-2.3 mm) acts as a uniform 3 mm; the measured bleed is that of 3 mm
 * Not run: `tools/archive_check.sh`, `tools/hitch_check.sh` (no pipeline-descriptor change outside the targeted update), ticket 22's side-by-side screenshots, Sponza D2.
 * Non-mask captures of `run3` come from the build before the mask change (it touches mask scenes only); the O7 runs and the mask captures are from the final build.
 * The scattering weight map (`*_shared_scattering.jpg`) is not in the pinned subset: if the owner approves fetching it, `weightTexture` binds it with one more line per material.
+
+### Denoised energy of the budgeted clustered DI (proof, 2026-11-14)
+
+Question: budget image / exact image was 1.016 +- 0.008 undenoised but 0.973 with `--lighting-denoise custom`.  Method: temporary env patches (reverted, never committed: stride over the light list, budget override, denoiser knobs), scene `chess-sidelight` + Queen_Black emissive,
+128x72, `--capture-linear-accumulate 32`, per-seed ratios (8 seeds), "raw" = denoiser pass-through (atrous 0, alpha 1) in the same resolve path (the off/custom resolve paths differ by a constant structure, so only same-mode ratios are compared).
+
+| condition | ratio | sem |
+|---|---|---|
+| estimator: raw 128 strata / raw 8192 strata | 0.9996 | 0.0059 |
+| denoised / raw, 128 strata | 0.977 | 0.004 |
+| denoised / raw, 8192 strata | 0.988 | 0.002 |
+| denoised / raw, list <= 128 (exact path, stride 1000) | 1.0000 | 0.0000 |
+| denoised / raw, 1.2k lights (stride 30) | 0.9995 | ~0 |
+| temporal EMA only / raw (atrous 0) | 1.006 | 0.009 |
+| luminance weight off (phi 1e6) / raw | 1.004 | 0.007 |
+| spatial filter only (alpha 1) / raw | 0.970 | 0.003 |
+| history clamp on (opt-in, off by default) / raw | 0.956 | 0.003 |
+
+Cause: the a-trous luminance edge-stopping weight (row-normalised, variance-guided) loses energy on heavy-tailed noise; the loss is concentrated on the emitter's own surface pixels (close-range 1/r^2 terms), grows with the tail weight and is absent for exact lists.  Not a clamp
+(clampHistory, soft-change are off by default; the denoise-pack clamp belongs to MetalFX) and not the estimator.  Reference: `tests/test_denoise.cpp` "F15 variance-guided atrous filter loses energy..." (CPU mirror weights: 0.79 raw-level, ~0.985 after temporal accumulation, ~1 with the weight off).
+Declared behaviour, no engine change (an energy-conserving filter would change every denoised signal and the F13 corpus; not selected).

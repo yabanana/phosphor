@@ -14,7 +14,9 @@
 //    (the inverse of its selection probability).  Every light has selection probability 1 / size(stratum), so the
 //    estimator  sum_j size_j * f(light_j)  is UNBIASED for  sum_i f(light_i)  for any stratum partition and any fixed
 //    uniform draw; the per-pixel cost never exceeds m lights.  The variance is higher than the exact sum (declared:
-//    uniform, not power-weighted, selection); the Monte Carlo noise is not hidden by any clamp.
+//    uniform, not power-weighted, selection); the Monte Carlo noise is not hidden by any clamp.  The ESTIMATOR is unbiased (measured:
+//    raw 128-strata / 8192-strata luminance 0.9996 +- 0.0059); the 1-3 % darkening seen after --lighting-denoise custom is the a-trous luminance edge-stopping
+//    weight's energy loss on heavy-tailed noise (tests/test_denoise.cpp), present for any noisy signal and absent for exact lists.
 // ---------------------------------------------------------------------------
 
 #ifdef __METAL_VERSION__
