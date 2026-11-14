@@ -116,9 +116,9 @@ struct ShadowPasses::Impl {
             d.kind=pipe::PipelineKind::Mesh;d.label="CSM transmittance mesh casters";
             d.functions={"","shadow_transmit_mesh","shadow_transmit_fragment"};d.mesh.meshThreads=128;transmitMesh=p.request(d);
         }
-        // The PCSS kernel always declares the four transmittance maps: a 1x1 zero texture stands in while the scene has no transmissive casters
-        // (and on the static cache path, which has no map).
-        if(o.shadows==ShadowMode::CSM)dummyTransmit=lighting::texture(c,1,1,MTL::PixelFormatRGBA32Float,"CSM transmittance disabled zero");
+        // The PCSS pass (also present with --shadows off, where it writes a fully lit mask) always binds the four transmittance maps: a 1x1 zero
+        // texture stands in while the scene has no transmissive casters (and on the static cache path, which has no map).
+        if(o.shadows!=ShadowMode::RT)dummyTransmit=lighting::texture(c,1,1,MTL::PixelFormatRGBA32Float,"CSM transmittance disabled zero");
         d=pipe::PipelineDesc{};d.kind=pipe::PipelineKind::Render;d.label="Indexed overflow shadow receivers";
         d.functions={"forward_surface_vs","forward_shadow_receiver_fs",""};d.indirectCommandBuffers=true;
         d.output(0,rg::Format::RGBA32Float).output(1,rg::Format::RGBA16Float).output(2,rg::Format::RGBA32Uint);
