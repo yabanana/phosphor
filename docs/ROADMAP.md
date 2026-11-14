@@ -706,6 +706,7 @@ invariata; frame time piatto (nessun picco da aggiornamenti ammortizzati).
 - [ ] F15.1 Modello esteso: clearcoat, sheen, anisotropia, trasmissione, iridescenza, subsurface (estensioni glTF `KHR_materials_*`)
   - Caso Track Studio: trasmissione attraverso la geometria per due materiali dei pedoni e scattering sottosuperficiale per quattro materiali di re e regine. [Dettaglio e criteri di verifica](plans/F15.md#f151--lobi-avanzati).
 - [ ] F15.2 Descrizione dati dei materiali → generatore di permutazioni MSL offline (O11), niente uber-shader
+  - Stato 2026-11-14 (ticket 21): manifest dei benchmark F15 (81 scene), generatore `variant_gen classes`, tabella delle classi, aggiornamento mirato dell'archivio (+62 pipeline, 29 permutazioni ≤ 64, metal-tt +11,7 %), budget e binning per classe verificati sulle fixture; aperti: manifest di scacchi (ticket 20) e corpus Khronos (ticket 22), A/B/A del binning su scacchi (ticket 24). [Dettaglio](plans/F15.md#f152--codegen).
 - [ ] F15.3 Testbench materiali confrontato con i modelli di riferimento Khronos
 - [ ] F15.4 Layered material (blend di strati) per terreni e superfici complesse
 

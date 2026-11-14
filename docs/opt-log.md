@@ -2273,3 +2273,23 @@ pixel per history buffer, two buffers per view (7.4 MiB at 640x360, 66 MiB at 19
 **Decision:** neither is adopted (orchestrator: adopt only a measured benefit). The dominant error is the refracted-image lag at checker edges (88 % of the error energy, custom worse than raw):
 the surface motion vectors do not move the refracted image; the remedy is virtual-image reprojection (EDGE/F16). The both-branch estimator is kept as a verification switch (never the product path):
 it equals the product estimator on the glass mask to 0.35 / 0.53 % (accumulated 112 frames) and made the smooth ROIs measurable (128 seeds); roughness 0.1 / 0.3 need about 460 / 1,800 seeds.
+
+## 2026-11-14 — F15.2 (ticket 21): per-class tile binning vs the union pipeline (PROVISIONAL, correctness only)
+
+**Hypothesis:** a scene whose materials carry different feature sets resolves faster when each tile list is resolved by a pipeline specialised with
+only the lobes of that class (`MATERIAL_FEATURES = class mask`) than by the one union pipeline, because the dead lobes of each class vanish from the code
+(occupancy, register pressure) at the price of one dispatch per class (up to 16 bins plus an all-lobes overflow bin) and a classification pass.
+
+**Method (this ticket):** the class table of the generator (`shaders/material_classes.def`, 29 archived permutations, 27 class masks) drives the existing F7.4
+material-binning path (`--material-binning on`; the classify kernel writes one tile list per class, binning 2 in `GPUVisibilityParams`). Correctness only:
+`tools/f15_permutations.py equivalence` over 116 fixture cases (81 scenes, both resolve kernels), each class bin pipeline against the all-lobes resolve.
+**No performance figure was taken:** the A/B/A comparison against the union pipeline (3 replicas, quiet machine) on the chess fixture belongs to the
+orchestrator (ticket 24; the fixture is ticket 20) and the final decision waits for the terrain of ticket 23.
+
+**Measures (correctness):** 77 of 116 cases are bit-identical to the all-lobes resolve; the others differ by at most 3.1e-6 relative (37 ULP, iridescence code;
+the codegen of a specialised pipeline schedules the shorter code differently) and by 8-bit pixels in 2 of 116 cases (1 pixel each, 1 LSB); the all-lobes arm repeats
+bit for bit (7 of 7); with the lobes removed from the class pipelines 55 cases leave the envelope, up to 7e7 ULP (the negative control; every
+feature bit 0..7 is discriminated by at least 4 scenes); the overflow bin (class table limited to 2) stays inside the envelope on the 4 scenes with 4 or more classes.
+
+**Decision (provisional):** binning stays opt-in (`--material-binning on`) and the default resolve stays the generic/union one; the class table makes the bins
+possible, whether they are worth their dispatches is open until the A/B/A on the chess fixture (ticket 24) and the terrain (ticket 23).
