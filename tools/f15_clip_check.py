@@ -24,6 +24,20 @@ Cases (one renderer process each, serial, API + shader validation like the F13 r
                                     6 rows x 5 columns, rough base 0.6 under a coat of roughness 0..1, RT reflections): 1 spp raw, custom
                                     denoiser 1 spp (the coat reflection of the smooth-coat spheres must survive the denoiser: the stable lobe
                                     key and the sharper-lobe roughness), 8 spp control; the flip control (per-frame lobe key) must FAIL
+  transmission-raw, -custom, -rt8   ticket 13: the transmission-roughness-ior glass grid (12 volume spheres, roughness {0, .1, .3, .6} x
+                                    ior {1.33, 1.5, 2}, constant environment 0.5, emissive checkerboard behind) with --transmission-motion
+                                    (camera orbit +-12 deg about the target, an emissive panel sliding behind the glass): raw 1 spp,
+                                    custom denoiser 1 spp, 8 spp control.  Gated ROIs (declared before any run, see
+                                    transmission_roi_config): the smooth spheres of the three iors, roughness 0.1 and 0.3 at ior 1.5;
+                                    roughness 0.6 and the whole grid are diagnostic.  The fixture is the one with smooth AND rough glass
+                                    and volume interfaces (thickness 0.8 on every sphere) that the ticket-13 harness already gates against
+                                    Mitsuba; the orbit moves the refracted image against the surface motion vectors and the panel moves
+                                    the emitter seen through (and reflected by) the glass, the two stimuli of the F13 moving-light clip.
+  transmission-rt8-seed2            diagnostic: a second 8 spp render (--lighting-seed 2) judged against the control: its noise floor
+  negative-refract-axis             custom denoiser that treats the refract-axis lobe as a reflect-axis one (PHOSPHOR_DIAGNOSTIC_DENOISE_
+                                    LOBE=reflect-axis: key without the axis bit, reflect spatial axis in the edge-stopping weights): must
+                                    FAIL the clip gates on the glass ROIs (the reprojection uses surface motion vectors and never depends
+                                    on the axis: the axis acts through the key and the a-trous weights only)
 Stale control: the edit clip judged with the control delayed by 5 frames must FAIL the recovery gate (a history that
 kept the old value for 5 frames).
 
@@ -165,14 +179,62 @@ def coat_roi_config(width=640, height=360):
     return config
 
 
+# --- transmission clip (ticket 13) -------------------------------------------------------------------------------------------
+TRANSMISSION_SCENARIO = "transmission-roughness-ior"
+# transmission-roughness-ior (src/testbench/transmission_validation.cpp): camera (0, 2.2, 5.5) -> (0, 2.2, 0), spheres of radius 0.4 at
+# x = (column - 1) * 1.2, y = 0.4 + 1.2 * row; rows = roughness {0, .1, .3, .6}, columns = ior {1.33, 1.5, 2.0}.
+GLASS_TARGET_Y, GLASS_DISTANCE, GLASS_SPACING = 2.2, 5.5, 1.2
+GLASS_ROUGHNESS, GLASS_IOR = [0.0, 0.1, 0.3, 0.6], [1.33, 1.5, 2.0]
+# Predeclared radiance scale of the glass ROIs: the backdrop emission 2.0 (the declared radiance bound of a pixel seen through glass
+# with transmittance <= 1; the F13 rough-emitter clip derives its scale from its emitter in the same way).  Recorded as a choice made
+# before the first measurement.
+TRANSMISSION_ROI_SCALE = 2.0
+GLASS_GATED = [("glass-smooth-ior1.33", 0, 0), ("glass-smooth-ior1.5", 0, 1), ("glass-smooth-ior2.0", 0, 2),
+               ("glass-r0.1-ior1.5", 1, 1), ("glass-rough-r0.3-ior1.5", 2, 1)]
+GLASS_DIAGNOSTIC = [("glass-r0.6-ior1.5", 3, 1)]
+
+
+def glass_sphere_screen(column, row, width, height):
+    """Normalized (cx, cy, rx, ry) of one glass sphere at the default camera (the orbit keeps the target and the distance)."""
+    aspect, tan_half = width / height, math.tan(math.radians(FOV_DEGREES) / 2)
+    x, y = (column - 1) * GLASS_SPACING, 0.4 + GLASS_SPACING * row - GLASS_TARGET_Y
+    return (0.5 + 0.5 * x / (GLASS_DISTANCE * tan_half * aspect), 0.5 - 0.5 * y / (GLASS_DISTANCE * tan_half),
+            0.5 * RADIUS / (GLASS_DISTANCE * tan_half * aspect), 0.5 * RADIUS / (GLASS_DISTANCE * tan_half))
+
+
+def glass_roi(column, row, width, height, fraction=0.5):
+    """The inner square of a sphere: half-side 0.5 radius, corners at 0.71 radius, leaving 0.29 radius (about 6 px at 640x360) for
+    the sphere's motion under the +-12 degree orbit (at most 0.05 m at the outer columns)."""
+    cx, cy, rx, ry = glass_sphere_screen(column, row, width, height)
+    return [round(cx - fraction * rx, 4), round(cy - fraction * ry, 4), round(cx + fraction * rx, 4), round(cy + fraction * ry, 4)]
+
+
+def transmission_roi_config(width=640, height=360, diagnostic=False):
+    """Gated: smooth spheres of the three iors, roughness 0.1 and 0.3 at ior 1.5 (pixels on transmissive objects).  Diagnostic
+    (same thresholds, reported, not gated): roughness 0.6 (noise-limited like the base metals of ticket 08: the 8 spp control
+    itself is far from converged there) and the whole grid."""
+    if diagnostic:
+        first, last = glass_sphere_screen(0, 0, width, height), glass_sphere_screen(2, 3, width, height)
+        rois = [(name, glass_roi(c, r, width, height)) for name, r, c in GLASS_DIAGNOSTIC] + \
+               [("glass-grid", [round(first[0] - first[2], 4), round(last[1] - last[3], 4), round(last[0] + last[2], 4), round(first[1] + first[3], 4)])]
+    else:
+        rois = [(name, glass_roi(c, r, width, height)) for name, r, c in GLASS_GATED]
+    config = {"schema": 1, "linear": True, "frozen_before_run": True, "reconstruction_support_radius": 1, "events": [],
+              "minimum_change_energy": 1e-8,
+              "rois": [{"name": name, "normalized": region, "scale": TRANSMISSION_ROI_SCALE, "require_change": False,
+                        "thresholds": dict(THRESHOLDS), "ghost_metric": "error-change"} for name, region in rois]}
+    enforce_gates(config)
+    return config
+
+
 # --- cases ---------------------------------------------------------------------------------------------------------------
 def case_table(out, binary):
-    def clip(name, frames, reflections_denoise, spp, extra=(), env=None, scenario="specular-grid-edit"):
+    def clip(name, frames, reflections_denoise, spp, extra=(), env=None, scenario="specular-grid-edit", seed=1):
         folder = out / name
         command = [str(binary), "--scene", "procedural", "--bench", "2", "--material-scenario", scenario,
                    "--render-path", "visibility", "--geometry-path", "mesh", "--rt", "on", "--shadows", "rt",
                    "--lighting", "brute", "--gi", "off", "--reflections", "rt", "--ao", "off",
-                   "--lighting-denoise", reflections_denoise, "--reflection-samples", str(spp), "--lighting-seed", "1",
+                   "--lighting-denoise", reflections_denoise, "--reflection-samples", str(spp), "--lighting-seed", str(seed),
                    "--post", "--upscaler", "native", "--resolution", RESOLUTION, "--frames", str(frames), "--warmup", "0",
                    "--fixed-timestep", "--no-ui", "--no-vsync", "--no-gpu-timing", "--debug-lighting", "1",
                    "--capture-linear-sequence", str(folder / "linear"), "--capture-linear-signal", "hdr",
@@ -199,7 +261,13 @@ def case_table(out, binary):
 
     toggle = ["--material-toggle-every", str(TOGGLE_EVERY)]
     coat = "clearcoat-grid-env"
-    return [clip("coat-raw", CLIP_FRAMES, "off", 1, scenario=coat), clip("coat-custom", CLIP_FRAMES, "custom", 1, scenario=coat),
+    glass, motion = TRANSMISSION_SCENARIO, ["--transmission-motion"]
+    return [clip("transmission-raw", CLIP_FRAMES, "off", 1, motion, scenario=glass),
+            clip("transmission-custom", CLIP_FRAMES, "custom", 1, motion, scenario=glass),
+            clip("transmission-rt8", CLIP_FRAMES, "off", 8, motion, scenario=glass),
+            clip("transmission-rt8-seed2", CLIP_FRAMES, "off", 8, motion, scenario=glass, seed=2),
+            clip("negative-refract-axis", CLIP_FRAMES, "custom", 1, motion, env={"PHOSPHOR_DIAGNOSTIC_DENOISE_LOBE": "reflect-axis"}, scenario=glass),
+            ] + [clip("coat-raw", CLIP_FRAMES, "off", 1, scenario=coat), clip("coat-custom", CLIP_FRAMES, "custom", 1, scenario=coat),
             clip("coat-rt8", CLIP_FRAMES, "off", 8, scenario=coat),
             clip("coat-negative-flip", CLIP_FRAMES, "custom", 1, env={"PHOSPHOR_DIAGNOSTIC_DENOISE_LOBE": "flip"}, scenario=coat),
             ] + [clip("clip-raw", CLIP_FRAMES, "off", 1), clip("clip-custom", CLIP_FRAMES, "custom", 1),
@@ -375,6 +443,32 @@ def evaluate_coat(out):
     return result
 
 
+def evaluate_transmission(out):
+    config, diagnostic = transmission_roi_config(), transmission_roi_config(diagnostic=True)
+    result = {}
+    for name in ("transmission-raw", "transmission-custom", "negative-refract-axis"):
+        entry = {"role": "control" if name == "transmission-raw" else "gate",
+                 "metrics": metrics_row(analyse_paths(out / "transmission-rt8" / "linear", out / name / "linear", config)),
+                 "diagnostic_rois": metrics_row(analyse_paths(out / "transmission-rt8" / "linear", out / name / "linear", diagnostic))}
+        result[name] = entry
+    # Control validity (reported, not gating): an independent 8 spp render (another seed) judged against the control like a candidate.
+    # The F13 gates are meant for a control whose own noise is below them; this row measures that floor on the glass ROIs.
+    result["transmission-rt8-seed2"] = {
+        "role": "diagnostic", "passed": True,
+        "metrics": metrics_row(analyse_paths(out / "transmission-rt8" / "linear", out / "transmission-rt8-seed2" / "linear", config)),
+        "expectation": "diagnostic, not gating: the noise floor of the 8 spp control itself (a second seed against the first)"}
+    result["transmission-raw"]["passed"] = True
+    result["transmission-raw"]["expectation"] = "control: reported, does not gate"
+    result["transmission-custom"]["passed"] = all(v["passed"] for v in result["transmission-custom"]["metrics"].values())
+    result["transmission-custom"]["expectation"] = ("every check passes on the glass ROIs (smooth spheres of three iors, roughness 0.1 and 0.3) against the "
+                                                    "8 spp control under the camera orbit and the moving panel; roughness 0.6 and the grid are diagnostic")
+    negative = result["negative-refract-axis"]
+    negative["passed"] = any(not v["passed"] for v in negative["metrics"].values())
+    negative["expectation"] = "the clip gates FAIL on the glass ROIs (a refract-axis lobe handled with the reflect axis), while transmission-custom passes"
+    negative["discriminates_against_custom"] = negative["passed"] and result["transmission-custom"]["passed"]
+    return result
+
+
 def evaluate_adaptive(out):
     import numpy as np
     width, height = (int(v) for v in ADAPT_RESOLUTION.split("x"))
@@ -418,6 +512,8 @@ def markdown(clips, adaptive, status):
         for roi, m in entry.get("metrics", {}).items():
             lines.append(f"- {roi}: p95 {m['linear_rmse_p95']:.4f}  max {m['linear_rmse_max']:.4f}  flicker {m['residual_flicker_mean']:.4f}  "
                          f"ghost {m['error_change_ghost_fraction']:.4f}  recovery {m['recovery_frames']}  {'ok' if m['passed'] else 'checks ' + str({k: v for k, v in m['checks'].items() if not v})}")
+        if "discriminates_against_custom" in entry:
+            lines.append(f"- discriminates against transmission-custom (this fails, custom passes): {entry['discriminates_against_custom']}")
         for roi, m in entry.get("diagnostic_rois", {}).items():
             lines.append(f"- (diagnostic, not gating) {roi}: p95 {m['linear_rmse_p95']:.4f}  max {m['linear_rmse_max']:.4f}  flicker {m['residual_flicker_mean']:.4f}  recovery {m['recovery_frames']}")
         if "differing_pixels_vs_custom" in entry:
@@ -439,7 +535,7 @@ def build_parser():
     mode.add_argument("--evaluate", action="store_true", help="evaluate existing captures (no GPU process)")
     mode.add_argument("--plan", action="store_true", help="write the commands only")
     parser.add_argument("--timeout", type=float, default=600)
-    parser.add_argument("--group", choices=("all", "coat"), default="all", help="coat: only the ticket 09 clearcoat cases")
+    parser.add_argument("--group", choices=("all", "coat", "transmission"), default="all", help="coat / transmission: only the ticket 09 clearcoat or ticket 13 transmission cases")
     return parser
 
 
@@ -449,6 +545,8 @@ def main(argv=None):
     cases = case_table(out, binary)
     if args.group == "coat":
         cases = [c for c in cases if c["name"].startswith("coat-")]
+    elif args.group == "transmission":
+        cases = [c for c in cases if c["name"].startswith("transmission-") or c["name"] == "negative-refract-axis"]
     out.mkdir(parents=True, exist_ok=True)
     manifest = {"schema": 1, "thresholds": THRESHOLDS, "roi_scale": ROI_SCALE, "clip_frames": CLIP_FRAMES, "edit_frames": EDIT_FRAMES,
                 "edit_events": EDIT_EVENTS, "resolution": RESOLUTION, "adaptive_resolution": ADAPT_RESOLUTION,
@@ -469,12 +567,13 @@ def main(argv=None):
                 return EXIT_USAGE
             run_cases(cases, args.timeout)
         errors = {c["name"]: functional(c) for c in cases}
-        clips = evaluate_coat(out) if args.group == "coat" else {**evaluate_clips(out), **evaluate_coat(out)}
+        clips = (evaluate_coat(out) if args.group == "coat" else evaluate_transmission(out) if args.group == "transmission" else
+                 {**evaluate_clips(out), **evaluate_coat(out), **evaluate_transmission(out)})
         for name, entry in clips.items():
             if name in errors and errors[name]:
                 entry["passed"] = False
                 entry["functional_errors"] = errors[name]
-        adaptive = {"passed": True, "expectation": "not run (--group coat)"} if args.group == "coat" else evaluate_adaptive(out)
+        adaptive = ({"passed": True, "expectation": f"not run (--group {args.group})"} if args.group != "all" else evaluate_adaptive(out))
         adaptive["functional_errors"] = {n: e for n, e in errors.items() if e and n.startswith("adapt")}
         adaptive["passed"] = adaptive["passed"] and not adaptive["functional_errors"]
         ok, entries = verdict(clips, adaptive)

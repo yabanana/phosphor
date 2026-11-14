@@ -111,6 +111,7 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME f14_volume_snapshot_check COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_volume_snapshot_check.py)
     add_test(NAME f13_probe_pfm_author COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_probe_pfm_author.py)
     add_test(NAME f13_physical_ao_temporal_control COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_f13_ao_temporal_check.py)
+    add_test(NAME f15_clip_reactive COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_f15_clip_reactive.py)
 endif()
 
 # F15.3: the Appendix B reference and its runner need numpy and Mitsuba, which
