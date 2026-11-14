@@ -916,6 +916,9 @@ def capture_command(binary, name, folder, seed=1):
             "--lighting-seed", str(seed),
             "--post", "--upscaler", "native", "--resolution", RESOLUTION, "--frames", str(FRAMES),
             "--warmup", "0", "--fixed-timestep", "--no-ui", "--no-vsync", "--no-gpu-timing", "--debug-lighting", "1",
+            # Synchronous pipelines: a cold compiler cache must never let a capture use a fallback variant (a fallback-served capture once
+            # equalled the base model, ticket 17); fallback_draws() rejects any capture whose log still reports fallback draws.
+            "--pipeline-sync",
             "--capture-linear", str(folder / "engine.pfm"), "--capture-linear-frame", last,
             *(["--capture-linear-accumulate", str(SCENARIOS[name]["accumulate"])] if SCENARIOS[name].get("accumulate") else []),
             "--capture-linear-signal", "hdr",
@@ -1796,6 +1799,43 @@ def markdown(manifest, entries, status):
 
 # --- main ---------------------------------------------------------------------
 
+PIPELINES_FALLBACK_DRAWS = re.compile(r"PIPELINES .*?fallbacks \d+ \(draws (\d+)\)")
+
+
+def fallback_draws(log_text):
+    """Fallback draws of the LAST pipeline summary line of a capture log (None when the log has none)."""
+    found = PIPELINES_FALLBACK_DRAWS.findall(log_text)
+    return int(found[-1]) if found else None
+
+
+REFERENCE_BASE_TOOL = {"f15_subsurface_reference.py": "f15_reference.py", "f15_shadow_reference.py": "f15_transmission_reference.py"}
+
+
+def seed_reference_from_cache(cache_folder, folder):
+    """Copy `cache_folder`/reference into `folder`/reference when the cached reference was rendered by the CURRENT tool (and base module):
+    the scenario's own cache check (snapshot digest, controls, samples) then decides whether it is usable or re-rendered.  Returns the reason
+    when nothing is copied (reported, never fatal)."""
+    import shutil
+    source, target = pathlib.Path(cache_folder) / "reference", pathlib.Path(folder) / "reference"
+    meta_path = source / "reference.json"
+    if target.exists():
+        return "target already has a reference"
+    if not meta_path.is_file():
+        return "no cached reference"
+    try:
+        meta = json.loads(meta_path.read_text())
+        tool = pathlib.Path(meta["tool"]).name
+        if meta.get("tool_sha256") != sha256_file(REPO / "tools" / tool):
+            return f"cached reference made by another revision of {tool}"
+        base = REFERENCE_BASE_TOOL.get(tool)
+        if base and meta.get("tool_sha256_base") != sha256_file(REPO / "tools" / base):
+            return f"cached reference made by another revision of {base}"
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        return f"unreadable cached reference ({error})"
+    shutil.copytree(source, target)
+    return None
+
+
 def capture(command, log, timeout):
     """One renderer process through run_checked (tests replace this)."""
     from run_checked import run_checked
@@ -1815,6 +1855,9 @@ def build_parser():
     parser.add_argument("--gpu-lock", type=pathlib.Path, default=pathlib.Path("/tmp/phosphor-gpu-verification.lock"))
     parser.add_argument("--timeout", type=float, default=300)
     parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--reference-cache", type=pathlib.Path, default=None,
+                        help="an earlier --out whose references are reused when the current tools rendered them (the per-scenario cache checks "
+                             "still apply: snapshot digest, controls, samples)")
     return parser
 
 
@@ -1835,6 +1878,10 @@ def run_captures(parser, args, names, out, binary):
             status = capture(capture_command(binary, n, folders[n], args.seed), folders[n] / "engine.log", args.timeout)
             if not status["passed"]:
                 raise CaptureFailed(f"{n}: capture failed: {status['failures']}")
+            log = folders[n] / "engine.log"
+            draws = fallback_draws(log.read_text(errors="replace")) if log.is_file() else None
+            if draws is None or draws > 0:
+                raise CaptureFailed(f"{n}: capture served fallback pipelines (fallback draws {draws}); its image is not the engine's")
             if position + 1 < len(names):
                 time.sleep(2)  # serial and quiet between GPU jobs
 
@@ -1865,6 +1912,11 @@ def run(argv=None):
     if args.run:
         run_captures(parser, args, names, out, binary)
 
+    if args.reference_cache:
+        for n in names:
+            if not SCENARIOS[n].get("capture_only"):
+                reason = seed_reference_from_cache(args.reference_cache.resolve() / n, out / n)
+                print(f"{n}: reference cache {'reused' if reason is None else 'not used: ' + reason}", file=sys.stderr)
     import numpy as np
     entries = [evaluate_scenario(np, n, out / n, args.expect) for n in names if not SCENARIOS[n].get("capture_only")]
     status, code = verdict(entries, args.expect)

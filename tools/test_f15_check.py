@@ -908,7 +908,9 @@ class RunnerLogic(unittest.TestCase):
 
         def capture(command, log, timeout):
             captured.append(command[command.index("--material-scenario") + 1])
-            return captures(len(captured))
+            result = dict(captures(len(captured)))
+            pathlib.Path(log).write_text(result.pop("log", "PIPELINES requests 3 | archive hits 3, misses 0 | fallbacks 0 (draws 0) | failures 0\n"))
+            return result
 
         saved = (check.running_gpu_processes, check.capture, check.time.sleep)
         check.running_gpu_processes, check.capture, check.time.sleep = guard, capture, lambda *_: None
@@ -939,6 +941,45 @@ class RunnerLogic(unittest.TestCase):
                                               lambda _n: {"passed": False, "failures": ["boom"]})
             self.assertEqual(code, check.EXIT_CAPTURE_FAILED)
             self.assertEqual(captured, ["base-grid-sun"])
+
+    def test_a_capture_that_served_fallback_pipelines_fails_and_stops(self):
+        # Ticket 17 finding: a cold compiler cache once let a capture draw with fallback variants (the image equalled the base model).
+        startup = "PIPELINES requests 9 | fallbacks 1 (draws 21) | failures 0\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            late = lambda _n: {"passed": True, "failures": [], "log": startup + "PIPELINES requests 9 | fallbacks 2 (draws 774) | failures 0\n"}  # noqa: E731
+            code, _, captured = self.run_with(tmp, ["--only", "base-grid-sun", "--only", "base-grid-env"], [[]], late)
+            self.assertEqual((code, captured), (check.EXIT_CAPTURE_FAILED, ["base-grid-sun"]))
+        with tempfile.TemporaryDirectory() as tmp:  # a log without any pipeline summary is not trusted either
+            silent = lambda _n: {"passed": True, "failures": [], "log": "EXIT 0\n"}  # noqa: E731
+            code, _, captured = self.run_with(tmp, ["--only", "base-grid-sun"], [[]], silent)
+            self.assertEqual(code, check.EXIT_CAPTURE_FAILED)
+        self.assertEqual(check.fallback_draws(startup + "PIPELINES requests 9 | fallbacks 1 (draws 0) | failures 0"), 0)  # the LAST line counts
+        self.assertIsNone(check.fallback_draws("no summary"))
+        for name in ("base-grid-sun", "transmission-factor-tint", "subsurface-volumetric-sun"):
+            self.assertIn("--pipeline-sync", check.capture_command(pathlib.Path("phosphor"), name, pathlib.Path("o")), name)
+
+    def test_reference_cache_is_copied_only_for_the_current_tool_revisions(self):
+        def cached(root, tool, sha, base_sha=None):
+            folder = pathlib.Path(root) / "reference"
+            folder.mkdir(parents=True)
+            (folder / "reference.json").write_text(json.dumps({"tool": f"tools/{tool}", "tool_sha256": sha, "tool_sha256_base": base_sha}))
+            (folder / "reference.pfm").write_bytes(b"pfm")
+            return pathlib.Path(root)
+        sha = lambda name: check.sha256_file(check.REPO / "tools" / name)  # noqa: E731
+        with tempfile.TemporaryDirectory() as tmp:
+            good = cached(pathlib.Path(tmp) / "a", "f15_transmission_reference.py", sha("f15_transmission_reference.py"))
+            target = pathlib.Path(tmp) / "new"
+            self.assertIsNone(check.seed_reference_from_cache(good, target))
+            self.assertTrue((target / "reference" / "reference.pfm").is_file())
+            self.assertEqual(check.seed_reference_from_cache(good, target), "target already has a reference")  # never overwrites
+            stale = cached(pathlib.Path(tmp) / "b", "f15_transmission_reference.py", "0" * 64)
+            self.assertIn("another revision", check.seed_reference_from_cache(stale, pathlib.Path(tmp) / "n2"))
+            shadow = cached(pathlib.Path(tmp) / "c", "f15_shadow_reference.py", sha("f15_shadow_reference.py"), "0" * 64)
+            self.assertIn("f15_transmission_reference.py", check.seed_reference_from_cache(shadow, pathlib.Path(tmp) / "n3"))
+            subsurface = cached(pathlib.Path(tmp) / "d", "f15_subsurface_reference.py", sha("f15_subsurface_reference.py"), sha("f15_reference.py"))
+            self.assertIsNone(check.seed_reference_from_cache(subsurface, pathlib.Path(tmp) / "n4"))
+            self.assertEqual(check.seed_reference_from_cache(pathlib.Path(tmp) / "missing", pathlib.Path(tmp) / "n5"), "no cached reference")
+            self.assertFalse((pathlib.Path(tmp) / "n2" / "reference").exists())
 
     def test_output_folders_are_checked_before_the_capture_loop(self):
         with tempfile.TemporaryDirectory() as tmp:
