@@ -1597,7 +1597,10 @@ class BenchMirror(unittest.TestCase):
                 self.assertIn(name, reference, key)
             if spec.get("pending"):  # a pending key names the control that models today's engine and says which ticket
                 self.assertEqual(spec["pending"], "ticket 19", key)
-                self.assertIn(spec["pending_matches"], literal + declared, key)
+                if "pending_matches" in spec:
+                    self.assertIn(spec["pending_matches"], literal + declared, key)
+                else:  # orchestrator decision (2026-11-14): the film ior 1.8 row stays; no control models today's engine there
+                    self.assertEqual(key, "combo-irid-specular-env")
                 if spec.get("pending_gate"):
                     self.assertEqual(spec["pending_gate"], "declared", key)
         for name in self.COMBO_PAIRS:
