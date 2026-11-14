@@ -461,6 +461,14 @@ struct LaunchOptions {
     // F7/F8 renderer, temporal reconstruction, capture and bounded diagnostics.
     std::string scenePath;
     bool visibility = false, materialBinning = false; // measured baseline; specialization stays opt-in
+    // F15.2 (ticket 21): --resolve-features all serves the visibility resolve of a scene with material features by the
+    // all-lobes pipeline (the exact-equivalence reference of the class pipelines; union = the default, the scene's union);
+    // --debug-class-drop-lobes MASK compiles every class bin pipeline without those lobes (negative control, must differ);
+    // --export-class-manifest FILE writes the feature-class manifest of the scene the app loaded (renderer/material_class_manifest.h).
+    bool resolveFeaturesAll = false;
+    u32 debugClassDropLobes = 0;
+    u32 debugClassBudget = 16; // --debug-class-budget N: the class table keeps N classes (1..16), the rest takes the overflow bin
+    std::string exportClassManifest;
     bool tileResolve = false;
     bool adaptiveShading = false;
     bool debugAdaptiveNoHistory = false;

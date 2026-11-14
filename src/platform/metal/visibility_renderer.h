@@ -3,10 +3,12 @@
 #include "platform/metal/metal_context.h"
 #include "pipeline/pipeline_registry.h"
 #include "renderer/visibility_layout.h"
+#include "renderer/material_class_table.h"
 #include "renderer/temporal_layout.h"
 #include "renderer/exposure.h"
 #include "rendergraph/render_graph.h"
 #include <array>
+#include <unordered_map>
 
 namespace phosphor {
 class PipelineCache;
@@ -36,6 +38,15 @@ class VisibilityRenderer {
     [[nodiscard]] bool needsPoseReset(u32 view, u64 bytes) const {
         return view >= previousInstances_.size() || !previousInstances_[view] || bytes > poseCapacity_;
     }
+    /// F15.2 (ticket 21): --resolve-features all (the resolve of a scene with features uses the all-lobes pipeline, no feature bins:
+    /// the exact-equivalence reference) and --debug-class-drop-lobes (every class bin pipeline compiled without those lobes).
+    /// `classBudget` (--debug-class-budget) shrinks the class table so that the overflow bin is exercised on small fixtures.
+    void setFeatureDebug(bool forceAllLobes, u32 dropLobes, u32 classBudget = VISIBILITY_FEATURE_CLASSES) {
+        forceAllLobes_ = forceAllLobes; dropLobes_ = dropLobes; classBudget_ = classBudget;
+    }
+    /// Frames resolved through per-class feature bins, and the table of the latest of them.
+    [[nodiscard]] u64 featureBinnedFrames() const { return featureBinnedFrames_; }
+    [[nodiscard]] const MaterialClassTable& classTable() const { return classTable_; }
     [[nodiscard]] u64 binnedFrames() const { return binnedFrames_; }
     [[nodiscard]] u64 genericFrames() const { return genericFrames_; }
     [[nodiscard]] u32 checkCount() const { return checksCount_; }
@@ -88,6 +99,16 @@ class VisibilityRenderer {
     pipe::PipelineHandle servedGeneric_ = pipe::INVALID_PIPELINE, servedTile_ = pipe::INVALID_PIPELINE,
                          servedFallback_ = pipe::INVALID_PIPELINE;
     bool binning_;
+    // F15.2: per-class feature bins of a scene with material features (binning == 2 in the params).
+    pipe::PipelineHandle binPipeline(u32 mask, bool overflow);
+    bool forceAllLobes_ = false, featureBins_ = false;
+    u32 dropLobes_ = 0, classBudget_ = VISIBILITY_FEATURE_CLASSES;
+    MaterialClassTable classTable_;
+    std::array<pipe::PipelineHandle, VISIBILITY_FEATURE_CLASSES> servedBins_{};
+    pipe::PipelineHandle servedOverflow_ = pipe::INVALID_PIPELINE;
+    std::unordered_map<u64, pipe::PipelineHandle> binHandles_;
+    u64 featureBinnedFrames_ = 0;
+    u32 loggedOverflowClasses_ = 0;
     bool lighting_ = false;
     MTL::DepthStencilState* lightingFallbackDepth_ = nullptr;
     MTL::GPUAddress lightingAddress_ = 0;

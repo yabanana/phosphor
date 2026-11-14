@@ -5,6 +5,8 @@
 #include "platform/metal/gpu_memory.h"
 #include "platform/metal/upload_ring.h"
 #include "pipeline/forward_variants.h"
+#include "pipeline/material_classes.generated.h"
+#include "core/log.h"
 #include "renderer/scene_store.h"
 #include "rendergraph/pass_context.h"
 #include <algorithm>
@@ -29,6 +31,11 @@ constexpr rg::Format resolveFormat(u32 index,bool lighting) {
     return index==0&&lighting?rg::Format::RGBA32Float:kFormats[index];
 }
 constexpr u16 kSssConstant = 23; // reserved SSS_OUTPUT (shaders/variants.def)
+// F15.2: the generated class table (shaders/material_classes.def) and the shared layout agree.
+static_assert(pipe::matclass::gen::kActiveClassBudget == VISIBILITY_FEATURE_CLASSES, "active-class budget of material_classes.def");
+static_assert(pipe::matclass::gen::kBinClassFlag == VISIBILITY_BIN_CLASS && pipe::matclass::gen::kBinOverflowValue == VISIBILITY_BIN_OVERFLOW,
+              "RESOLVE_BIN values");
+static_assert(pipe::matclass::gen::kSssOutputConstantIndex == kSssConstant, "SSS_OUTPUT constant index");
 constexpr std::array<const char *, 6> kNames = {
     "Linear HDR", "Signed normal + roughness", "Diffuse albedo", "Specular albedo", "Motion pixels", "Reactive mask"};
 } // namespace
@@ -83,6 +90,27 @@ VisibilityRenderer::VisibilityRenderer(MetalContext &c, PipelineCache &p, SceneR
         if (!table)
             throw std::runtime_error("Visibility argument table creation failed");
     }
+}
+pipe::PipelineHandle VisibilityRenderer::binPipeline(u32 mask, bool overflow) {
+    // Bin pipelines are keyed by what they compile, not by the scene: the class table of the generator names them.
+    const u64 key = u64(mask) | (u64(overflow) << 16) | (u64(subsurface_) << 17) | (u64(dropLobes_) << 20);
+    auto it = binHandles_.find(key);
+    if (it == binHandles_.end()) {
+        const auto describe = [&](const char* kernel) {
+            auto d = compute(kernel);
+            const u32 compiled = overflow ? MATERIAL_FEATURES_ALL : (mask & ~dropLobes_); // dropLobes_: negative control
+            if (compiled != 0u) d.constant(pipe::matclass::gen::kMaterialFeaturesConstantIndex, pipe::ConstantType::UInt, compiled);
+            if (subsurface_) d.constant(kSssConstant, pipe::ConstantType::UInt, 1u);
+            d.constant(pipe::matclass::gen::kResolveBinConstantIndex, pipe::ConstantType::UInt,
+                       overflow ? VISIBILITY_BIN_OVERFLOW : (VISIBILITY_BIN_CLASS | mask));
+            return d;
+        };
+        // A harvest (--harvest-pipelines) records both resolve kernels of every class (the plan names both), whichever lighting
+        // path the harvested run uses.
+        if (pipelines_.harvesting()) (void)pipelines_.request(describe(lighting_ ? "visibility_resolve" : "visibility_lit_resolve"));
+        it = binHandles_.emplace(key, pipelines_.request(describe(lighting_ ? "visibility_lit_resolve" : "visibility_resolve"))).first;
+    }
+    return it->second;
 }
 pipe::PipelineDesc VisibilityRenderer::fallbackDesc(bool sss) const {
     pipe::PipelineDesc d = pipe::forward::genericDesc(resolveFormat(0, lighting_));
@@ -160,7 +188,10 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
     // Ticket 17: a scene with volumetric subsurface also sets SSS_OUTPUT (constant 23) on the compute resolve and the overflow fallback
     // (its own cache slots: the same union without subsurface keeps its pipelines).
     {
-        const u32 mask = store.featureUnion();
+        // --resolve-features all: the all-lobes pipeline resolves the whole scene (reference of the class pipelines).
+        const u32 mask = forceAllLobes_ && store.featureUnion() != 0u ? MATERIAL_FEATURES_ALL : store.featureUnion();
+        // F15.2: a scene with features bins per feature class (the legacy normal/emission classes only serve scenes without).
+        const bool featureBinsWanted = binning_ && !forceAllLobes_ && mask != 0u;
         subsurface_ = subsurfaceAllowed_ && !tileResolve_ && mask != 0u && store.volumetricSubsurface();
         const u32 so = subsurface_ ? 50u : 0u;
         const auto sssConstant = [&](pipe::PipelineDesc d) {
@@ -169,6 +200,10 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
         };
         const char *kernel = lighting_ ? "visibility_lit_resolve" : "visibility_resolve";
         for (u32 i = 0; i < VISIBILITY_CLASSES; ++i) {
+            if (featureBinsWanted) {
+                servedResolve_[i] = resolve_[i]; // not used: the class bins below serve this scene
+                continue;
+            }
             servedResolve_[i] = features_.serve(pipelines_, 100 + so + i, resolve_[i], mask, [&] {
                 auto d = compute(kernel);
                 d.constant(21, pipe::ConstantType::UInt, i);
@@ -186,8 +221,28 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
         servedFallback_ = features_.serve(pipelines_, 112 + so, subsurface_ ? fallbackSss_ : fallback_, mask,
                                           [&] { return fallbackDesc(subsurface_); });
     }
-    useBinning_ = binning_ && std::all_of(servedResolve_.begin(), servedResolve_.end(),
-                                          [this](auto h) { return pipelines_.isFinal(h); });
+    featureBins_ = binning_ && !forceAllLobes_ && store.featureUnion() != 0u;
+    if (featureBins_) {
+        // F15.2 (ticket 21): one pipeline per class of the scene's class table (the archived class pipelines of the
+        // generator) plus the all-lobes overflow bin when the scene has more classes than the budget; while one is not
+        // final the frame uses the union-served generic dispatch (a transient after a load, never a fallback pipeline).
+        classTable_ = buildMaterialClassTable(store.materials(), classBudget_);
+        for (u32 i = 0; i < classTable_.count; ++i) servedBins_[i] = binPipeline(classTable_.masks[i], false);
+        servedOverflow_ = classTable_.overflow() ? binPipeline(MATERIAL_FEATURES_ALL, true) : pipe::INVALID_PIPELINE;
+        if (pipelines_.harvesting()) (void)binPipeline(MATERIAL_FEATURES_ALL, true); // the archive holds the overflow bin of every scene
+        if (classTable_.overflowClasses != loggedOverflowClasses_) {
+            loggedOverflowClasses_ = classTable_.overflowClasses;
+            if (classTable_.overflow())
+                LOG_WARN("Material classes: %u classes exceed the %u-class bin budget; their %u material(s) run the all-lobes pipeline",
+                         classTable_.overflowClasses, VISIBILITY_FEATURE_CLASSES, classTable_.overflowMaterials);
+        }
+        useBinning_ = true;
+        for (u32 i = 0; i < classTable_.count; ++i) useBinning_ = useBinning_ && pipelines_.isFinal(servedBins_[i]);
+        if (classTable_.overflow()) useBinning_ = useBinning_ && pipelines_.isFinal(servedOverflow_);
+    } else {
+        useBinning_ = binning_ && std::all_of(servedResolve_.begin(), servedResolve_.end(),
+                                              [this](auto h) { return pipelines_.isFinal(h); });
+    }
     params_ = {width,
                height,
                (width + 15) / 16,
@@ -198,14 +253,17 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
                debugMode,
                exposure,
                temporal.mipBias,
-               useBinning_ ? 1u : 0u,
+               useBinning_ ? (featureBins_ ? 2u : 1u) : 0u,
                store.slotCapacity(),
                outputWidth,
                outputHeight,
                adaptive_ ? (shadingHistoryValid_[view_] ? 3u : 1u) : 0u,
-               0,
+               featureBins_ && useBinning_ ? classTable_.count : 0u,
                {background_[0], background_[1], background_[2]},
-               0};
+               0,
+               {}};
+    if (featureBins_ && useBinning_)
+        for (u32 i = 0; i < classTable_.count; ++i) params_.classMasks[i] = classTable_.masks[i];
     const u64 tiles = u64((outputWidth + 15) / 16) * ((outputHeight + 15) / 16);
     if (tiles > tileCapacity_) {
         tileCapacity_ = tiles;
@@ -213,9 +271,9 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
             context_.memory().release(f.tiles, MemoryCategory::Other);
             context_.memory().release(f.args, MemoryCategory::Other);
             f.tiles =
-                context_.memory().newBuffer(tiles * VISIBILITY_CLASSES * sizeof(u32), MTL::ResourceStorageModePrivate,
+                context_.memory().newBuffer(tiles * VISIBILITY_MAX_BINS * sizeof(u32), MTL::ResourceStorageModePrivate,
                                             MemoryCategory::Other, "Material tile bins");
-            f.args = context_.memory().newBuffer(64, MTL::ResourceStorageModeShared, MemoryCategory::Other,
+            f.args = context_.memory().newBuffer(256, MTL::ResourceStorageModeShared, MemoryCategory::Other,
                                                  "Material indirect arguments");
         }
     }
@@ -314,7 +372,7 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
     if (adaptive_)
         shadingHistoryRef_ = graph.importBuffer("Adaptive shading history per view", {shadingHistorySize_[view_]},
                                                 ImportContentsDefined | ImportOutput);
-    bins_ = graph.importBuffer("Material bins and arguments", {tileCapacity_ * VISIBILITY_CLASSES * sizeof(u32) + 64},
+    bins_ = graph.importBuffer("Material bins and arguments", {tileCapacity_ * VISIBILITY_MAX_BINS * sizeof(u32) + 256},
                                ImportPerFrame);
     if (tileResolve_) {
         graph.addPass(
@@ -428,7 +486,22 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
                 auto *enc = static_cast<MTL4::ComputeCommandEncoder *>(ctx.encoder());
                 bind(ctx, tables_[2], subsurface_);
                 enc->setArgumentTable(tables_[2]);
-                if (useBinning_) {
+                if (useBinning_ && featureBins_) {
+                    // F15.2: one dispatch per class bin (indirect arguments of the bin) plus the overflow bin when used.
+                    ++binnedFrames_;
+                    ++featureBinnedFrames_;
+                    for (u32 i = 0; i < classTable_.count; ++i) {
+                        enc->setComputePipelineState(pipelines_.compute(servedBins_[i]));
+                        enc->dispatchThreadgroups(frames_[slot_].args->gpuAddress() + i * 12, MTL::Size::Make(16, 16, 1));
+                    }
+                    u32 dispatches = classTable_.count;
+                    if (classTable_.overflow()) {
+                        enc->setComputePipelineState(pipelines_.compute(servedOverflow_));
+                        enc->dispatchThreadgroups(frames_[slot_].args->gpuAddress() + VISIBILITY_FEATURE_CLASSES * 12, MTL::Size::Make(16, 16, 1));
+                        ++dispatches;
+                    }
+                    scene_.countCommands(1 + 2 * dispatches);
+                } else if (useBinning_) {
                     ++binnedFrames_;
                     for (u32 i = 0; i < VISIBILITY_CLASSES; ++i) {
                         enc->setComputePipelineState(pipelines_.compute(servedResolve_[i]));

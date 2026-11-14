@@ -262,7 +262,8 @@ TEST_CASE("F15.2 generator: the archive plan names one class pipeline per kernel
             previous = index;
             if (index == pipe::matclass::gen::kResolveBinConstantIndex) {
                 haveBin = true;
-                CHECK(c["value"] == bin);
+                CHECK(c["value"] == p["bin_value"]);
+                CHECK(c["value"] == (bin == 1 ? (pipe::matclass::gen::kBinClassFlag | mask) : pipe::matclass::gen::kBinOverflowValue));
             }
             if (index == pipe::matclass::gen::kMaterialFeaturesConstantIndex) CHECK(c["value"] == mask);
         }
@@ -323,4 +324,53 @@ TEST_CASE("F15.2 generator: a scene beyond the active-class budget is reported, 
     m.scenes.push_back(matclass::makeSceneEntry("material:wide", "material", masks, false));
     REQUIRE(runGenerator(writeDef(t, matclass::serialize(m)), t.path / "o") == 0);
     CHECK(slurp(t.path / "o/pipeline/material_classes.generated.h").find("kScenesOverActiveBudget = 1") != std::string::npos);
+}
+
+#include "renderer/material_class_table.h"
+
+namespace {
+std::vector<GPUMaterial> materialsWithMasks(const std::vector<u32>& masks) {
+    std::vector<GPUMaterial> out(masks.size());
+    for (size_t i = 0; i < masks.size(); ++i) {
+        out[i] = GPUMaterial{};
+        out[i].flags = masks[i] << MATERIAL_FEATURE_SHIFT;
+    }
+    return out;
+}
+} // namespace
+
+TEST_CASE("F15.2 class table: bins by descending material count then ascending mask; the overflow bin is the last") {
+    const auto mats = materialsWithMasks({0, 1, 1, 3, 3, 3, 2});
+    const MaterialClassTable t = buildMaterialClassTable(mats);
+    CHECK(t.count == 4);
+    CHECK(t.masks[0] == 3); // 3 materials
+    CHECK(t.masks[1] == 1); // 2
+    CHECK(t.masks[2] == 0); // 1 each, ascending mask
+    CHECK(t.masks[3] == 2);
+    CHECK(t.materials[0] == 3);
+    CHECK_FALSE(t.overflow());
+    CHECK(t.binOf(1) == 1);
+    CHECK(t.binOf(0) == 2);
+    CHECK(t.binOf(7) == VISIBILITY_FEATURE_CLASSES); // not in the table: the overflow bin
+    CHECK(buildMaterialClassTable(mats) == t);      // deterministic
+}
+
+TEST_CASE("F15.2 class table: beyond the budget the most used classes keep a bin and the rest overflow") {
+    std::vector<u32> masks;
+    for (u32 m = 1; m <= 20; ++m) masks.push_back(m);     // 20 classes with one material each ...
+    masks.push_back(5); masks.push_back(5); masks.push_back(9); // ... mask 5 has 3 materials, mask 9 has 2
+    const MaterialClassTable t = buildMaterialClassTable(materialsWithMasks(masks));
+    CHECK(t.count == VISIBILITY_FEATURE_CLASSES);
+    CHECK(t.masks[0] == 5);
+    CHECK(t.masks[1] == 9);
+    CHECK(t.overflowClasses == 20 - VISIBILITY_FEATURE_CLASSES);
+    CHECK(t.overflowMaterials == t.overflowClasses);
+    CHECK(t.overflow());
+    // The kept classes are the 14 smallest masks of the single-material ones (ascending tie break).
+    CHECK(t.binOf(1) < VISIBILITY_FEATURE_CLASSES);
+    CHECK(t.binOf(20) == VISIBILITY_FEATURE_CLASSES);
+    // A tighter budget only shrinks the table.
+    CHECK(buildMaterialClassTable(materialsWithMasks(masks), 3).count == 3);
+    // The empty scene has no class.
+    CHECK(buildMaterialClassTable({}).count == 0);
 }

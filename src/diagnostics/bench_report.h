@@ -168,6 +168,10 @@ struct RenderingReport {
     std::string path, asset, upscaler, tonemap;
     u32 inputWidth = 0, inputHeight = 0, views = 1, framesInFlight = 3, gpuFailures = 0;
     u64 temporalFrames = 0, nativeFrames = 0, historyResets = 0, binnedFrames = 0, genericFrames = 0;
+    // F15.2 (ticket 21): frames resolved through per-class feature bins, and the class table of the scene (bins in use, classes beyond
+    // the budget served by the all-lobes overflow bin).
+    u64 featureBinnedFrames = 0;
+    u32 classBins = 0, classOverflow = 0;
     u32 guideChecks = 0, guideFailures = 0;
     u32 shadedPixels = 0, reusedPixels = 0;
     u64 deviceAllocatedBytes = 0, engineResourceBytes = 0;

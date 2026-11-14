@@ -94,7 +94,9 @@ struct PipelineStats {
 ///  fallbacks F (draws D) | failures E | reloads L (failed K)"
 [[nodiscard]] std::string formatPipelineStats(const PipelineStats& stats);
 /// JSON object with every field (embedded in the benchmark report).
-[[nodiscard]] std::string pipelineStatsJson(const PipelineStats& stats);
+/// `atStart` (F15.2): the counters when the measured frames started; the JSON then also carries "measured" (the deltas since:
+/// requests, archiveMisses, compilerCalls, fallbackDraws, renderThreadCompiles), the budget numbers of warm runs.
+[[nodiscard]] std::string pipelineStatsJson(const PipelineStats& stats, const PipelineStats* atStart = nullptr);
 
 class PipelineRegistry {
 public:

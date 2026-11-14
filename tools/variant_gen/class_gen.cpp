@@ -41,6 +41,11 @@ namespace {
 using phosphor::u32;
 using namespace phosphor::matclass;
 
+// RESOLVE_BIN values (renderer/visibility_layout.h VISIBILITY_BIN_CLASS / VISIBILITY_BIN_OVERFLOW; the engine static_asserts
+// the generated copies against them).
+constexpr u32 kBinClassFlag = 0x1000u;
+constexpr u32 kBinOverflowValue = 0x2000u;
+
 [[noreturn]] void fail(const std::string& file, int line, const std::string& msg) {
     if (line > 0) std::fprintf(stderr, "variant_gen: %s:%d: error: %s\n", file.c_str(), line, msg.c_str());
     else std::fprintf(stderr, "variant_gen: %s: error: %s\n", file.c_str(), msg.c_str());
@@ -188,13 +193,15 @@ int generateClasses(const std::string& defPath, const std::string& outputDir, co
     std::map<u32, u32> classScenes;       // per-material class mask (nonzero) -> scenes using it
     std::set<u32> unions;                 // scene unions (nonzero)
     bool anyVolumetric = false;
-    std::set<u32> volumetricClasses;      // classes of volumetric scenes (the resolve also sets SSS_OUTPUT there)
+    // The resolve of a VOLUMETRIC scene also sets SSS_OUTPUT on every class pipeline of that scene, so a class gets the plain
+    // pipeline when a plain scene (or the declared list) uses it and the SSS_OUTPUT one when a volumetric scene does.
+    std::set<u32> volumetricClasses, plainClasses;
     u32 scenesOverBudget = 0;
     for (const SceneEntry& s : scenes) {
         if (s.unionMask) unions.insert(s.unionMask);
         for (const ClassUse& c : s.classes) {
             if (c.mask) ++classScenes[c.mask];
-            if (s.volumetric && c.mask) volumetricClasses.insert(c.mask);
+            if (c.mask) (s.volumetric ? volumetricClasses : plainClasses).insert(c.mask);
         }
         anyVolumetric |= s.volumetric;
         if (s.classes.size() > activeBudget) ++scenesOverBudget;
@@ -203,6 +210,7 @@ int generateClasses(const std::string& defPath, const std::string& outputDir, co
     for (const Declared& d : declared) {
         if (!declaredName.emplace(d.mask, d.name).second) fail(defPath, 0, "declared classes '" + declaredName[d.mask] + "' and '" + d.name + "' have the same mask");
         classScenes.emplace(d.mask, 0u);
+        plainClasses.insert(d.mask);
     }
     std::set<u32> permutations;
     for (const auto& [mask, count] : classScenes) permutations.insert(mask);
@@ -229,7 +237,9 @@ int generateClasses(const std::string& defPath, const std::string& outputDir, co
          "inline constexpr u32 kAllLobesMask = " << hex(phosphor::MATERIAL_FEATURES_ALL) << ";\n"
          "inline constexpr u16 kMaterialFeaturesConstantIndex = " << fc.materialFeatures << ";\n"
          "inline constexpr u16 kResolveBinConstantIndex = " << fc.resolveBin << ";\n"
-         "inline constexpr u16 kSssOutputConstantIndex = " << fc.sssOutput << ";\n\n"
+         "inline constexpr u16 kSssOutputConstantIndex = " << fc.sssOutput << ";\n"
+         "inline constexpr u32 kBinClassFlag = " << hex(kBinClassFlag) << ";      // RESOLVE_BIN = kBinClassFlag | mask: one class bin\n"
+         "inline constexpr u32 kBinOverflowValue = " << hex(kBinOverflowValue) << "; // RESOLVE_BIN of the all-lobes overflow bin\n\n"
          "struct ClassEntry {\n"
          "    const char* name;\n"
          "    u32         mask;   // feature mask of one material (bit n = MaterialFeature n)\n"
@@ -293,26 +303,25 @@ int generateClasses(const std::string& defPath, const std::string& outputDir, co
     plan["permutations"] = std::vector<u32>(permutations.begin(), permutations.end());
     json pipelines = json::array();
     const auto entry = [&](const std::string& kernel, u32 mask, u32 binMode, bool sss) {
+        // RESOLVE_BIN value: a class bin carries its own mask (the kernel filters on it), the overflow bin is a flag.
+        const u32 binValue = binMode == 1 ? (kBinClassFlag | mask) : kBinOverflowValue;
         json constants = json::array();
         if (mask) constants.push_back({{"index", fc.materialFeatures}, {"value", mask}});
         if (sss) constants.push_back({{"index", fc.sssOutput}, {"value", 1}});
-        constants.push_back({{"index", fc.resolveBin}, {"value", binMode}});
+        constants.push_back({{"index", fc.resolveBin}, {"value", binValue}});
         std::sort(constants.begin(), constants.end(), [](const json& a, const json& b) { return a["index"].get<u32>() < b["index"].get<u32>(); });
-        pipelines.push_back({{"kernel", kernel}, {"mask", mask}, {"bin_mode", binMode}, {"sss", sss}, {"constants", constants}});
+        pipelines.push_back({{"kernel", kernel}, {"mask", mask}, {"bin_mode", binMode}, {"bin_value", binValue}, {"sss", sss}, {"constants", constants}});
     };
     // The feature-free class of an extended scene (a material without features next to extended ones) bins with the
     // scene's base resolve (no MATERIAL_FEATURES): a pipeline of its own because the bin constant is set.
-    bool featureFreeClass = false, featureFreeClassVolumetric = false;
+    bool featureFreePlain = false, featureFreeVolumetric = false;
     for (const SceneEntry& s : scenes)
-        if (s.unionMask != 0 && s.classes.front().mask == 0) {
-            featureFreeClass = true;
-            featureFreeClassVolumetric |= s.volumetric;
-        }
+        if (s.unionMask != 0 && s.classes.front().mask == 0) (s.volumetric ? featureFreeVolumetric : featureFreePlain) = true;
     for (const std::string& kernel : kernels) {
-        if (featureFreeClass) entry(kernel, 0, 1, false);
-        if (featureFreeClassVolumetric) entry(kernel, 0, 1, true);
+        if (featureFreePlain) entry(kernel, 0, 1, false);
+        if (featureFreeVolumetric) entry(kernel, 0, 1, true);
         for (const auto& [mask, count] : classScenes) {
-            entry(kernel, mask, 1, false);
+            if (plainClasses.count(mask)) entry(kernel, mask, 1, false);
             if (volumetricClasses.count(mask)) entry(kernel, mask, 1, true);
         }
         entry(kernel, phosphor::MATERIAL_FEATURES_ALL, 2, false);

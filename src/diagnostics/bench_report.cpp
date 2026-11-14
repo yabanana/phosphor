@@ -329,6 +329,9 @@ std::string reportToJson(const BenchReport& r) {
             ", \"history_resets_total\": " + std::to_string(v.historyResets) +
             ", \"binned_frames_total\": " + std::to_string(v.binnedFrames) +
             ", \"generic_frames_total\": " + std::to_string(v.genericFrames) +
+            ", \"feature_binned_frames_total\": " + std::to_string(v.featureBinnedFrames) +
+            ", \"class_bins\": " + std::to_string(v.classBins) +
+            ", \"class_overflow\": " + std::to_string(v.classOverflow) +
             ", \"guide_checks\": " + std::to_string(v.guideChecks) +
             ", \"shaded_pixels_last\": " + std::to_string(v.shadedPixels) +
             ", \"reused_pixels_last\": " + std::to_string(v.reusedPixels) +

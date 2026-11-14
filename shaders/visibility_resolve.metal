@@ -3,6 +3,7 @@
 #include "temporal_motion.h"
 #include "renderer/visibility_math.h"
 #include "renderer/visibility_layout.h"
+#include "pipeline/material_classes.generated.metal.h"
 
 static float4x4 visibilityMatrix(const device float *m) {
     return float4x4(float4(m[0], m[1], m[2], m[3]), float4(m[4], m[5], m[6], m[7]), float4(m[8], m[9], m[10], m[11]),
@@ -23,6 +24,22 @@ static uint materialClass(const device GPUMaterial &m, constant GPUVisibilityPar
     return normal | emissive;
 }
 
+// F15.2 (ticket 21): per-class bins.  RESOLVE_BIN (constant 24) is undefined for every other pipeline (kResolveBin 0).
+constant bool kBinFeature = (kResolveBin & (VISIBILITY_BIN_CLASS | VISIBILITY_BIN_OVERFLOW)) != 0u;
+constant bool kBinOverflow = (kResolveBin & VISIBILITY_BIN_OVERFLOW) != 0u;
+constant uint kBinMask = kResolveBin & MATERIAL_FEATURES_ALL;
+static uint featureMaskOf(const device GPUMaterial &m) { return (m.flags >> MATERIAL_FEATURE_SHIFT) & MATERIAL_FEATURES_ALL; }
+// Bin of a feature mask in the scene's class table (hard bound: the table holds at most 16 classes), the overflow bin otherwise.
+static uint classBinOf(constant GPUVisibilityParams &p, uint mask) {
+    const uint count = min(p.classCount, min(VISIBILITY_FEATURE_CLASSES, kMaterialClassActiveBudget));
+    for (uint i = 0; i < count; ++i)
+        if (p.classMasks[i] == mask)
+            return i;
+    return VISIBILITY_FEATURE_CLASSES;
+}
+// The bin this feature-bin kernel serves.
+static uint ownBin(constant GPUVisibilityParams &p) { return kBinOverflow ? VISIBILITY_FEATURE_CLASSES : classBinOf(p, kBinMask); }
+
 static void writeSubsurface(texture2d<float, access::write> sss, uint2 pixel, thread const ShadingResult &value) {
     sss.write(float4(value.sssIrradiance, float(value.sssMaterial)), pixel);
 }
@@ -34,8 +51,8 @@ kernel void visibility_clear(constant GPUVisibilityParams &p [[buffer(11)]], dev
                              texture2d<float, access::write> motion [[texture(5)]],
                              texture2d<float, access::write> reactive [[texture(6)]],
                              uint2 pixel [[thread_position_in_grid]]) {
-    if (pixel.y == 0 && pixel.x < 16)
-        args[pixel.x] = pixel.x >= 12 ? 0u : (pixel.x % 3 == 0) ? 0u : 1u;
+    if (pixel.y == 0 && pixel.x < 64)
+        args[pixel.x] = pixel.x >= VISIBILITY_ARGS_WORDS ? 0u : (pixel.x % 3 == 0) ? 0u : 1u; // F15.2: x = 0, y = z = 1 per bin
     if (pixel.x >= p.outputWidth || pixel.y >= p.outputHeight)
         return;
     color.write(float4(p.background[0], p.background[1], p.background[2], 1), pixel);
@@ -63,7 +80,8 @@ kernel void visibility_classify(const device GPUInstance *instances [[buffer(2)]
         const uint id = visibility.read(pixel).x;
         if (id != VISIBILITY_BACKGROUND && visibilityCluster(id) < 2u * p.candidateCapacity) {
             const auto candidate = candidateOf(id, p, a, b);
-            const uint cls = materialClass(materials[instances[candidate.slot].materialIndex], p);
+            const device GPUMaterial &material = materials[instances[candidate.slot].materialIndex];
+            const uint cls = p.binning == 2u ? classBinOf(p, featureMaskOf(material)) : materialClass(material, p);
             atomic_fetch_or_explicit(&mask, 1u << cls, memory_order_relaxed);
         }
     }
@@ -71,7 +89,8 @@ kernel void visibility_classify(const device GPUInstance *instances [[buffer(2)]
     if (tid == 0) {
         const uint bits = atomic_load_explicit(&mask, memory_order_relaxed);
         const uint tiles = p.tilesX * p.tilesY;
-        for (uint cls = 0; cls < VISIBILITY_CLASSES; ++cls)
+        const uint binCount = p.binning == 2u ? VISIBILITY_MAX_BINS : VISIBILITY_CLASSES;
+        for (uint cls = 0; cls < binCount; ++cls)
             if (bits & (1u << cls)) {
                 const uint index = atomic_fetch_add_explicit(&args[cls * 3], 1u, memory_order_relaxed);
                 if (index < tiles)
@@ -106,6 +125,12 @@ static void resolveVisibilityPixel(constant FrameConstants &frame, const device 
         return;
     if (kResolveClass < 4u && materialClass(materials[instance.materialIndex], p) != kResolveClass)
         return;
+    if (kBinFeature) {
+        // F15.2: this pipeline serves one class bin; the pixels of other classes belong to their own pipelines.
+        const uint featureMask = featureMaskOf(materials[instance.materialIndex]);
+        if (kBinOverflow ? classBinOf(p, featureMask) != VISIBILITY_FEATURE_CLASSES : featureMask != kBinMask)
+            return;
+    }
     const GPUMeshlet m = meshlets[candidate.meshlet];
     const uint triangle = visibilityTriangle(id);
     if (triangle >= m.triangleCount)
@@ -197,7 +222,9 @@ kernel void visibility_resolve(
     texture2d<float, access::write> sss [[texture(10), function_constant(kSssWrite)]],
     uint2 tile [[threadgroup_position_in_grid]], uint2 local [[thread_position_in_threadgroup]]) {
     uint index = tile.y * p.tilesX + tile.x;
-    if (kResolveClass < 4u)
+    if (kBinFeature)
+        index = bins[ownBin(p) * p.tilesX * p.tilesY + tile.x];
+    else if (kResolveClass < 4u)
         index = bins[kResolveClass * p.tilesX * p.tilesY + tile.x];
     const uint2 pixel = uint2(index % p.tilesX, index / p.tilesX) * VISIBILITY_TILE + local;
     if (pixel.x >= p.width || pixel.y >= p.height)
@@ -228,7 +255,9 @@ kernel void visibility_lit_resolve(
     texture2d<float, access::write> sss [[texture(10), function_constant(kSssWrite)]],
     uint2 tile [[threadgroup_position_in_grid]], uint2 local [[thread_position_in_threadgroup]]) {
     uint index = tile.y * p.tilesX + tile.x;
-    if (kResolveClass < 4u)
+    if (kBinFeature)
+        index = bins[ownBin(p) * p.tilesX * p.tilesY + tile.x];
+    else if (kResolveClass < 4u)
         index = bins[kResolveClass * p.tilesX * p.tilesY + tile.x];
     const uint2 pixel = uint2(index % p.tilesX, index / p.tilesX) * VISIBILITY_TILE + local;
     if (pixel.x >= p.width || pixel.y >= p.height)

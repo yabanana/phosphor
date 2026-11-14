@@ -54,6 +54,7 @@
 #include "renderer/gpu_scene.h"
 #include "renderer/scene_check.h"
 #include "renderer/scene_store.h"
+#include "renderer/material_class_export.h"
 #include "renderer/transform_math.h"
 #include "rendergraph/graph_dump.h"
 #include "rendergraph/optimizer/plan.h"
@@ -265,6 +266,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
                                                            options_.materialBinning, options_.debugVisibility,
                                                            options_.tileResolve, options_.adaptiveShading,
                                                            options_.shadows != ShadowMode::Off || options_.directLighting != DirectLightingMode::Legacy || options_.gi != GiMode::Off || options_.reflections!=ReflectionMode::Off || options_.ao!=AoMode::Off || options_.lightingDenoise!=LightingDenoiseMode::Off || options_.atmosphere || options_.fog || options_.clouds);
+    if (visibility_) visibility_->setFeatureDebug(options_.resolveFeaturesAll, options_.debugClassDropLobes, options_.debugClassBudget);
     if (options_.post) {
         PostProcessor::Options po;
         po.physicalFloat32=options_.shadows!=ShadowMode::Off || options_.directLighting!=DirectLightingMode::Legacy || options_.gi!=GiMode::Off || options_.atmosphere || options_.fog || options_.clouds || options_.reflections!=ReflectionMode::Off || options_.ao!=AoMode::Off || options_.lightingDenoise!=LightingDenoiseMode::Off || !options_.denoisedFixture.empty();
@@ -566,6 +568,7 @@ void Engine::run() {
             meshletSamples_.reserve(options_.frames);
             allocationsAtStart_ = context_->memory().allocationCount() + TemporalWorker::totalGpuAllocations();
             commandRebuildsAtStart_ = context_->commandBufferRebuilds();
+        pipelineStatsAtStart_ = pipelines_->stats();
             heapUsage(heapBlocksAtStart_, heapBytesAtStart_);
         }
     }
@@ -746,6 +749,7 @@ void Engine::recordBenchmarkFrame(float dt, float cpuMs, float waitMs) {
         trace_.reserve(options_.frames, options_.frames / std::max(options_.switchEvery, 1u) + 2);
         allocationsAtStart_ = context_->memory().allocationCount() + TemporalWorker::totalGpuAllocations();
         commandRebuildsAtStart_ = context_->commandBufferRebuilds();
+        pipelineStatsAtStart_ = pipelines_->stats();
         heapUsage(heapBlocksAtStart_, heapBytesAtStart_);
     } else if (presentedFrames_ > options_.warmup) {
         FrameRecord record;
@@ -818,7 +822,7 @@ void Engine::finishBenchmark() {
     report.cpuHeapBlocksDelta = static_cast<i64>(heapBlocks) - static_cast<i64>(heapBlocksAtStart_);
     report.cpuHeapBytesDelta  = static_cast<i64>(heapBytes) - static_cast<i64>(heapBytesAtStart_);
     summarizeSamples(samples_, report);
-    report.pipelinesJson = pipe::pipelineStatsJson(pipelines_->stats());
+    report.pipelinesJson = pipe::pipelineStatsJson(pipelines_->stats(), &pipelineStatsAtStart_);
     // F15.3: support report of the loaded glTF materials (omitted for procedural scenes).
     for (const auto& materialSupport : gpuScene_->materialSupport()) {
         if (!materialSupport.valid()) continue;
@@ -891,6 +895,9 @@ void Engine::finishBenchmark() {
         if (visibility_) {
             r.binnedFrames = visibility_->binnedFrames();
             r.genericFrames = visibility_->genericFrames();
+            r.featureBinnedFrames = visibility_->featureBinnedFrames();
+            r.classBins = visibility_->classTable().count;
+            r.classOverflow = visibility_->classTable().overflowClasses;
             r.guideChecks = visibility_->checkCount();
             r.guideFailures = visibility_->checkFailures();
             const auto adaptive = visibility_->adaptiveStats();
@@ -1683,6 +1690,19 @@ bool Engine::frame(float dt) {
         const glm::mat4 projection = unjittered * glm::inverse(view);
         visibility_->setSubsurface(true, camera_->getNear(), 1.0f / projection[0][0], 1.0f / projection[1][1]);
     }
+    if (!options_.exportClassManifest.empty() && !classManifestExported_ && store_ && store_->instanceCount() > 0) {
+        // F15.2 (ticket 21): the feature-class manifest of the scene the app runs (one scene entry, family "app"); the generator takes it
+        // as one more `manifest` input of shaders/material_classes.def.
+        classManifestExported_ = true;
+        matclass::Manifest manifest;
+        manifest.source = std::string("phosphor --export-class-manifest (") + (activeBench_ ? activeBench_->getName() : "") + ")";
+        manifest.scenes.push_back(matclass::entryFromStore(std::string("app:") + (activeBench_ ? activeBench_->getName() : "scene"), "app", *store_));
+        std::ofstream out(options_.exportClassManifest, std::ios::binary | std::ios::trunc);
+        out << matclass::serialize(manifest);
+        out.flush();
+        if (out) LOG_INFO("Class manifest written to %s (%zu material classes)", options_.exportClassManifest.c_str(), manifest.scenes[0].classes.size());
+        else LOG_ERROR("Cannot write the class manifest %s", options_.exportClassManifest.c_str());
+    }
     if (visibility_)
         visibility_->prepareFrame(
             frame.slot, renderWidth, renderHeight, renderBackingWidth_, renderBackingHeight_, *store_,
@@ -1725,7 +1745,7 @@ bool Engine::frame(float dt) {
             measureFirstFrame_=frame.index;measureLastFrame_=frame.index+options_.frames-1;
             context_->beginGpuTimeCapture(options_.frames);sceneSamples_.reserve(options_.frames);meshletSamples_.reserve(options_.frames);
             allocationsAtStart_=context_->memory().allocationCount()+TemporalWorker::totalGpuAllocations();
-            commandRebuildsAtStart_=context_->commandBufferRebuilds();heapUsage(heapBlocksAtStart_,heapBytesAtStart_);
+            commandRebuildsAtStart_=context_->commandBufferRebuilds();pipelineStatsAtStart_=pipelines_->stats();heapUsage(heapBlocksAtStart_,heapBytesAtStart_);
             fixtureMeasurementStarted_=true;
         }
     }

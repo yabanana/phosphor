@@ -223,6 +223,7 @@ private:
     std::vector<FrameSample> samples_;
     u64                      allocationsAtStart_ = 0;
     u64 commandRebuildsAtStart_ = 0;
+    pipe::PipelineStats pipelineStatsAtStart_{}; // F15.2: pipeline counters when the measured frames start (report pipelines.measured)
     u64                      heapBlocksAtStart_  = 0;
     u64                      heapBytesAtStart_   = 0;
     // CPU time spent blocked in beginFrame() (slot + drawable waits).
@@ -281,6 +282,7 @@ private:
     u32                         requestsBeforeFrame_ = 0;
     double                      requestMsBeforeFrame_ = 0.0;
     double                      rtCompileMsBeforeFrame_ = 0.0;
+    bool                        classManifestExported_ = false; // --export-class-manifest (F15.2): written once, after the first scene sync
     std::chrono::steady_clock::time_point launch_;
     float eventPumpMs_ = 0.0f;
     bool                        firstFrameLogged_ = false;

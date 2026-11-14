@@ -32,7 +32,7 @@ std::string formatPipelineStats(const PipelineStats& s) {
     return buf;
 }
 
-std::string pipelineStatsJson(const PipelineStats& s) {
+std::string pipelineStatsJson(const PipelineStats& s, const PipelineStats* atStart) {
     char buf[768];
     std::snprintf(buf, sizeof(buf),
                   "{\"requests\":%u,\"archiveHits\":%u,\"archiveMisses\":%u,\"archiveUnavailable\":%u,"
@@ -45,7 +45,19 @@ std::string pipelineStatsJson(const PipelineStats& s) {
                   static_cast<double>(s.compileMsMax), s.fallbacksServed,
                   static_cast<unsigned long long>(s.fallbackDraws), s.renderThreadCompiles,
                   s.renderThreadCompileMs, s.failures, s.swaps, s.reloads, s.reloadFailures);
-    return buf;
+    std::string json = buf;
+    if (atStart) {
+        char measured[256];
+        std::snprintf(measured, sizeof(measured),
+                      ",\"measured\":{\"requests\":%u,\"archiveMisses\":%u,\"compilerCalls\":%u,\"fallbackDraws\":%llu,"
+                      "\"renderThreadCompiles\":%u}}",
+                      s.requests - atStart->requests, s.archiveMisses - atStart->archiveMisses, s.compilerCalls - atStart->compilerCalls,
+                      static_cast<unsigned long long>(s.fallbackDraws - atStart->fallbackDraws),
+                      s.renderThreadCompiles - atStart->renderThreadCompiles);
+        json.pop_back(); // the closing brace of the object above
+        json += measured;
+    }
+    return json;
 }
 
 // ---------------------------------------------------------------------------

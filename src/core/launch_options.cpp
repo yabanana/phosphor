@@ -595,6 +595,20 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if(!MaterialValidation::validScenario(*v)&&!TransmissionValidation::validScenario(*v)&&!TransmissiveShadowValidation::validScenario(*v)&&!ChessFixture::validScenario(*v)){error="--material-scenario: unknown scenario";return false;}out.materialScene=*v;
         } else if (arg == "--transmission-motion") {
             out.transmissionMotion = true;
+        } else if (arg == "--resolve-features") {
+            const auto v = needValue();
+            if (!v) return false;
+            if (*v == "all") out.resolveFeaturesAll = true;
+            else if (*v == "union") out.resolveFeaturesAll = false;
+            else { error = "--resolve-features: expected union or all"; return false; }
+        } else if (arg == "--debug-class-drop-lobes") {
+            if (!needCount(out.debugClassDropLobes)) return false;
+            if (out.debugClassDropLobes > 0x1FFu) { error = "--debug-class-drop-lobes: expected a lobe mask up to 511"; return false; }
+        } else if (arg == "--debug-class-budget") {
+            if (!needCount(out.debugClassBudget)) return false;
+            if (out.debugClassBudget < 1 || out.debugClassBudget > 16) { error = "--debug-class-budget: expected 1..16"; return false; }
+        } else if (arg == "--export-class-manifest") {
+            if (!needString(out.exportClassManifest)) return false;
         } else if (arg == "--material-toggle-every") {
             if (!needCount(out.materialToggleEvery)) return false;
         } else if (arg == "--lighting-scene") {
