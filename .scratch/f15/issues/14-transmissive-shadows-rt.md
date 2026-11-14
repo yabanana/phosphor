@@ -8,10 +8,10 @@ Roadmap: F15.1, F15.3
 
 **Status:** ready-for-agent
 
-- [ ] Spike first (timeboxed, results in opt-log): Metal intersection-function invocation multiplicity for non-opaque triangles (duplicate invocations would double-count) and cost; mitigation chosen by measurement
-- [ ] Planar-interface fixtures (glass pane, flat shallow water with sun within 30° of the normal) vs Mitsuba within the decision-11 transmission bound; curved-glass shadows (pawn tops) qualitative (caustics excluded)
+- [x] Spike first (timeboxed, results in opt-log): Metal intersection-function invocation multiplicity for non-opaque triangles (duplicate invocations would double-count) and cost; mitigation chosen by measurement
+- [x] (RT sun and ReSTIR point keys; the CSM keys are ticket 15) Planar-interface fixtures (glass pane, flat shallow water with sun within 30° of the normal) vs Mitsuba within the decision-11 transmission bound; curved-glass shadows (pawn tops) qualitative (caustics excluded)
 - [ ] Opaque casters unchanged (visual_check 0 px on scenes without transmissive materials); negative control (transmittance ignored → opaque) fails the planar fixtures
-- [ ] Sun shadow mask format change and DI/GI visibility changes keep F10/F11/F12 corpus cases green
+- [x] Sun shadow mask format change and DI/GI visibility changes keep F10/F11/F12 corpus cases green
 - [ ] Cost on the glass fixture and Sponza D2 within band
 - [ ] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
 
@@ -121,3 +121,46 @@ wording above: the CSM finding and the curved key):
    no new fixture now.
 
 - [ ] (orchestrator, 2026-11-14) engine ticket items without a harness fixture yet: GI shadow rays, reflection secondary lighting through glass, clustered DI visibility through glass
+
+2026-11-14 — ENGINE SIDE (F15.1, commits `36a4392` math, `055c5dd` engine, `381947c` runner; spike in `docs/opt-log.md` "F15 ticket 14 spike").
+
+Design. A new ray type `RT_PROBE_SHADOW_TRANSMITTED` (any-hit): the sun kernel, `diEndpointTransmittance` (ReSTIR and clustered DI, reflection secondary
+lighting) and `giShadowTransmittance` use it; AO, fog and the reconnection/sky rays keep `RT_PROBE_SHADOW` (declared: opaque glass).  Transmissive
+instances are non-opaque in the TLAS (`rt_write_instances`: feature bit TRANSMISSION), so `rt_alpha_generic` sees their triangles: every other ray type
+accepts them at once (no counter change: `opaqueAlphaTests` still counts opaque instances only), a transmittance ray accumulates in log space into the
+payload (`lnTransmittance`, zero = 1: order independent) and REJECTS the triangle, so traversal continues to the light; an opaque or alpha-masked caster
+accepted ends the ray (hit -> T = 0).  Per crossed surface: ln(1 - Schlick F) at the straight-ray |cos| with the geometric normal (ior = ext0.ior with the
+ior feature, else 1.5; ior 0 = no Fresnel); once at the ENTRY surface (front-facing hit of a solid, or the single surface of a thin-walled material:
+volume feature absent or thickness 0): transmission factor (x texture) x (1 - metallic) x baseColor tint (x texture); solid media: +sigma_t t at an entry,
+-sigma_t t at an exit with sigma_t = -ln(attenuationColor)/attenuationDistance per channel (sum = -sigma_t (t_exit - t_entry), clamped T <= 1).  The IFT
+gets the extension buffer at index 7 (`TraceResources::extensions`, the materials buffer while the scene has no extended material); `GPURtParams`
+grows to 32 bytes (`transmittanceFlags`).  Per-primitive duplicate filter: 8 `(slot, primitive)` pairs per ray (the spike measured multiplicity 1.000;
+kept as insurance, controls `--debug-transmittance-dedup off|on`, `--debug-transmittance-inject`).  The sun mask is RGB end to end: raw RGBA16F,
+temporal history 80 bytes (RGB mean next to the luminance scalar the variance estimator uses; the value itself while the channels are equal, so grey
+scenes are bit-identical), filter and contact on three channels with the variance in `.w`, `shadeSurface` and the overflow forward path take a `float3`
+sun visibility.  Channel 0 of the captured `shadow` signal is still the scalar visibility (F10 quality tools read it); `.y/.z` (moment, samples) became
+`.y/.z` = G/B, variance `.w`.  CSM writes grey (ticket 15 adds the transmittance map).  Counters: `GPUShadowCounters` +4 words (rays through glass,
+invocations, distinct, overflows), printed as `SHADOW-TRANSMITTANCE` with `--debug-lighting`.
+
+Runner (`f15_check.py --run --expect green --only <5 keys>`, `build/f15-check/t14a`, GREEN, exit 0; worst caster mean / p95, limits 0.05 / 0.15):
+pane-sun@rt 0.0037 / 0.0080 (controls transmittance-ignored, tint-ignored, fresnel-ignored, double-counted all FAIL); water-sun@rt 0.0077 / 0.0113
+(transmittance-ignored, beer-lambert-ignored, double-counted FAIL); volume-pane@rt 0.0199 / 0.0253 (transmittance-ignored, fresnel-ignored,
+beer-lambert-ignored, double-counted FAIL); point@restir 0.0111 / 0.0203 (transmittance-ignored, tint-ignored, fresnel-ignored, double-counted FAIL);
+curved@rt qualitative gate PASS (0 < T < 0.995 on both spheres, chroma R/B follows the tint; shadow-ignored and transmittance-ignored FAIL; the numbers
+against the declared model are 0.0018 / 0.0061 worst, report only).  `pending` / `pending_matches` are gone from those keys; the three @csm keys keep
+"ticket 15".  0 archive misses and 0 render-thread compiles in every capture (no new pipeline descriptor: the new code lives in existing kernels, so no
+targeted archive update was needed).
+
+Other checks run: unit tests 869 / 869 (`phosphor_tests`) and ctest 19 / 19 except the shadow harness python test updated for the landed keys (green);
+clustered DI through glass: `transmissive-shadow-point` with `--lighting clustered` equals the gated ReSTIR capture to 1.5e-7 absolute (245 829 pixels,
+max abs 1.49e-7, none above 0.1 %); pixel identity without glass: six captures (shadow-penumbra RT, CSM, RT + contact; specular-grid-point ReSTIR + RT
+reflections; clustered; base-grid-sun RT sun + DDGI + RT reflections) against the orchestrator tree's binary: 0 pixels differ, max abs 0.0 in all six;
+shader + API validation (`MTL_SHADER_VALIDATION=1 MTL_DEBUG_LAYER=1`, pane-sun, RT sun + ReSTIR + DDGI + RT reflections, 24 frames): exit 0, 24
+LIGHTING checks PASS; F10-F12 tester runner (`tools/f10_f12_check.py --run`, 26 jobs under validation): every job its expected exit (negative controls
+exit 1), 0 failures, `f10_solar_bias_negative` stays QUALITY_CONTROL_PENDING (image control, as before).
+
+Not done / open: GI shadow rays and reflection secondary lighting through glass compile, run clean under validation and pass the identity checks but
+have NO numeric fixture (the harness has none; only the shared kernel of the DI keys is gated); cost on the glass fixture and Sponza D2 (ticket 24):
+orchestrator on a quiet machine (my in-process pass measurement is in the opt log and is not quiet); `visual_check`, `archive_check`, `hitch_check`: not
+run by me; the interior of a closed volume at the light end (a ray that ends inside a medium) is clamped T <= 1; a transmissive material that is also
+alpha-masked is treated as an opaque-masked caster (declared); the dedup list is 8 surfaces (beyond it the filter is off and counted).

@@ -2226,3 +2226,32 @@ Final quiet measurement, interleaved (`docs/perf-log.md`, 2026-11-11):
 HEAD 42adefd GPU p95 14.91–15.39 ms, frame p95 15.74–16.36 ms in five clean
 runs, against 22.4–23.1 ms for 2b285df. The 16.67 ms gate is met on this
 M5 Max.
+
+## 2026-11-14 — F15 ticket 14 spike: intersection-function multiplicity for non-opaque triangles
+
+Hypothesis: Metal may invoke the intersection function of a non-opaque triangle more than once for the same primitive; the transmittance product
+(one factor per crossed surface) would then be applied twice (the harness' `double-counted` control: 0.32-0.62 worst-caster mean error).
+
+Method (commit 055c5dd, M5 Max, macOS 27.2, Release): transmissive instances are non-opaque in the TLAS; the function
+(`rt_alpha_generic`, `rtAccumulateTransmittance`) rejects every transmissive triangle after multiplying its factor into a log-space payload, and keeps a
+bounded per-ray list (8 `(slot, primitive)` pairs) of the triangles already accounted.  Per frame the sun kernel sums, over every sun ray
+(1280x720, one ray per pixel), the invocations on transmissive triangles and the distinct pairs among them (`SHADOW-TRANSMITTANCE` line of
+`--debug-lighting 1`); `--debug-transmittance-dedup off` removes the filter, `--debug-transmittance-inject` makes the function accumulate every
+triangle twice (the control that produces the duplicate the hardware does not).
+
+Results (12 frames per run; counts of the last frame, identical in every frame):
+- pane-sun 16 439 rays crossed glass, 21 832 invocations, 21 832 distinct; water-sun 11 330 / 20 429 / 20 429; volume-pane (six surfaces per ray at most)
+  18 961 / 34 754 / 34 754; curved spheres 12 418 / 19 672 / 19 672.  Multiplicity exactly 1.000: hardware invoked the function once per triangle on
+  about 100 000 invocations per scenario (0 list overflows; the longest crossing is 6 surfaces).  The same counts with the filter off.
+- Control (pane-sun, accumulate-8 HDR capture): with the injected duplicate and the filter ON the image is bit-identical to the normal one (0 pixels
+  differ); with the injected duplicate and the filter OFF 17 084 pixels differ, the shadows are darker (mean ratio 0.86 / 0.92 / 0.86 RGB on the
+  differing pixels): the double count is real and the filter removes it.
+- Cost (in-process `Solar RT visibility`, volume-pane, 200 frames after 60 warm-up, `--gpu-timing-serial`, alternating, 3 repetitions each; NOT a quiet
+  machine: load average 6.5, another agent's Mitsuba at ~330 % CPU, GPU clocks bimodal 0.19 / 0.32 / 0.44 ms): p50 per run baseline binary (opaque
+  shadows, no function call) 0.325 / 0.179 / 0.322 ms; this tree 0.444 / 0.445 / 0.446 ms; filter off 0.314 / 0.314 / 0.446 ms.  The glass costs about
+  +0.12 ms on this pass at 1280x720 (four glass shadows of 4 k pixels each); the filter is not measurable against the clock noise (<= 8 compares per
+  invocation).  The orchestrator's quiet measurement (glass fixture, Sponza D2) supersedes these numbers.
+
+Decision: keep the per-primitive filter (bounded list, idempotent per `(slot, primitive)`; overflow beyond 8 distinct surfaces is counted and unfiltered).
+Hardware does not duplicate on the M5 Max, but the Metal specification does not promise it and no other device is available (Apple9 is
+EXTERNAL_VALIDATION_PENDING); the filter costs nothing measurable and its absence would be a silent 8-14 % darkening of the pane shadows (measured with the injected duplicate).  Counters stay in the engine.
