@@ -79,8 +79,8 @@ inline float3 reflectionSecondary(GPURtHit hit,float3 direction,
 // A refraction sample of a transmissive pixel crosses at most kTransmissionMaxCrossings interfaces (the camera-visible refraction is the first) and
 // meets at most kTransmissionMaxEvents interface events (reflections included: total internal reflection in a cube).
 // Every interface is a GGX dielectric of the glass material it belongs to: the half vector is drawn from D(h) n.h, the Fresnel factor chooses
-// reflection or refraction, the weight is the separable-Smith Walter weight (transmission_math.h) times the baseColor tint of every transmitting
-// event (the transmission factor applies at the camera-visible surface only: interior crossings are pure dielectric interfaces).  A medium
+// reflection or refraction, the weight is the separable-Smith Walter weight (transmission_math.h) times the baseColor tint of the camera-visible entry refraction only (no tint at interior or exit
+// crossings; the transmission factor applies at the camera-visible surface only: interior crossings are pure dielectric interfaces.  A medium
 // entered through a front face of a closed volume absorbs along the REAL inside segment (Beer-Lambert c^(x/d)) and ends at ANY hit; the inside
 // back faces of single-sided closed meshes are interfaces like the front faces (the reflection estimator rejects them: reflectionMaterial).
 // Thin-walled glass (thickness 0) keeps the direction on transmission, no medium.  A ray that leaves the glass ends at the first non-glass
@@ -156,7 +156,7 @@ inline uint reflectionGlassEvent(thread float3& d,thread float3& weight,thread R
             // entering a closed volume starts its medium, leaving ends it
             if(g.entering){medium.active=true;medium.color=g.attenuationColor;medium.distance=g.attenuationDistance;}else medium.active=false;
         }
-        o=refracted;weight*=g.tint;side=-g.geometric;++crossings;
+        o=refracted;side=-g.geometric;++crossings; // orchestrator: the tint applies at the camera-visible entry surface only (interior crossings are pure dielectric interfaces)
     }
     if(!(isfinite(wk))||!all(isfinite(o))||dot(o,o)<=0){numericError=true;return 0;}
     weight*=wk;d=normalize(o);
