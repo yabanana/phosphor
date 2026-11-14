@@ -94,3 +94,13 @@ start while another GPU process runs); it was NOT run for a number (it exits 4 c
 **Open.** (1) Resolve GPU time at 1080p per active-layer count (1-4) and for the generated mix against the single material, A/B/A with 3 replicas on a quiet machine, and (2) the final binning
 decision (>= 5 % rule on chess + terrain) in opt-log: both need the orchestrator (ticket 24); command `python3 -I tools/f15_layers_timing.py run --out build/f15-layers-timing --binning`; the opt-log
 entry is written with the decision left open. No timing claim is made in this record.
+
+## Integration (orchestrator, 2026-11-14)
+
+Merged onto cl/f15-plan-c38b51 as cfa5e73 (after the F13 residue fixes). Conflicts: pipelines archive = union of both sides
+(`tools/merge_pipeline_harvests.py`, no descriptor removed; 871/143/279/32 + ticket 23 -> 912/143/288/35), tests/CMakeLists.txt keeps
+both new tests. Re-verified on the merged tree: ctest 32/32 (KHRONOS_CORPUS_DIR set, CC0 set present); `f15_check --only layers-*`
+GREEN (12 evaluated keys, every control fails; `build/f15-check/cfa5e73-layers`); F13 exact captures 0 px on 5 cases against
+`build/f15-exact/base-residues`; `visual_check` 0 px on 8 benches; `archive_check` all scenarios pass; `hitch_check` 0 hitches.
+Carried to ticket 24: resolve GPU time per active-layer count and the binning decision (quiet machine, `tools/f15_layers_timing.py`).
+

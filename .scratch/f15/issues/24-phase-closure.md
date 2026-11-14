@@ -89,4 +89,6 @@ Quiet-machine measurements for this ticket:
 - Sponza D2 A/B/A band;
 - cost of transmission RT, transmissive shadows (RT and the CSM map), the subsurface diffusion pass, the iridescence per light
   (ticket 12) and the GI-back lookup;
-- binning vs union on chess.
+- binning vs union on chess and terrain (ticket 23: `python3 -I tools/f15_layers_timing.py run --out build/f15-layers-timing --binning`,
+  never run end to end; resolve GPU time per active-layer count; >= 5 % rule of decision 05);
+- Sponza D2 interleaved A/B for the GI-mode environment fix and for the energy-preserving a-trous experiment.
