@@ -2293,3 +2293,16 @@ feature bit 0..7 is discriminated by at least 4 scenes); the overflow bin (class
 
 **Decision (provisional):** binning stays opt-in (`--material-binning on`) and the default resolve stays the generic/union one; the class table makes the bins
 possible, whether they are worth their dispatches is open until the A/B/A on the chess fixture (ticket 24) and the terrain (ticket 23).
+
+## 2026-11-14 — F15.4 (ticket 23): layer stack resolve and the binning decision on the terrain (OPEN, no timing taken)
+
+**What changed in the resolve:** a material whose description carries a layer stack (feature bit 8, `MATERIAL_FEATURE_LAYERS`) is resolved by `resolveLayerStack`
+(`shaders/material_shading.h`, rules in `src/renderer/layer_blend.h`): mask sample, optional height-contrast reweighting, per-layer base-parameter samples only
+for layers with a non-zero weight (the cost grows with the number of ACTIVE layers, up to 4 x {base colour, metallic-roughness, occlusion, normal} samples plus the
+height texture), parameter-space blend, surface-gradient normal, then the ONE base BSDF evaluation. Scenes without the bit compile none of it (function constant).
+
+**Not measured here (belongs to the orchestrator, ticket 24, quiet machine):** the resolve GPU time at 1080p per active-layer count against the single material, and
+`--material-binning on` vs the union pipeline on chess + terrain (the >= 5 % rule). The measurement is prepared: `python3 -I tools/f15_layers_timing.py plan|run [--binning]`
+(arms single, layers-1..4, full; A/B/A, 3 replicas, 320 frames with warmup 64, saturated clocks `--no-vsync --gpu-timing-serial`, refuses to start while another GPU
+process runs; results land in `results.json` / `summary.md` for perf-log.md). Until it runs, binning stays opt-in and the default resolve stays the union one (the
+provisional decision of ticket 21 is unchanged). The terrain has two feature classes (layers; layers + coat), so its bins are 2 (the budget run shows `bins 2`).
