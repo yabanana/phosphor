@@ -180,7 +180,9 @@ struct GPUMaterialExt3 {
     u32   layerMaterial[4];
     u32   packedMaskChannels;
     float heightContrast[4];
-    u32   pad[9];
+    float uvScale[4];          // F15.4 (ticket 23): per-layer texture tiling (uv * uvScale); 0 for a layer that does not exist
+    u32   heightTex[4];        // F15.4: per-layer height texture (R): INVALID_TEXTURE_INDEX when the layer has none, 0 for a layer that does not exist
+    u32   pad;
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUMaterialExt3) == 80, "GPUMaterialExt3 layout");
 

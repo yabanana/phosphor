@@ -82,7 +82,7 @@ def cases(scenes):
     """One case per f15_check key that uses a scene, plus a base-grid-sun substitution for a scene without key."""
     by_bench = {}
     for key in fc.SCENARIOS:
-        if fc.SCENARIOS[key].get("capture_only"):
+        if fc.SCENARIOS[key].get("capture_only") or fc.SCENARIOS[key].get("cc0"):  # cc0 keys share the procedural keys' scenes
             continue
         by_bench.setdefault(fc.bench_scenario(key), []).append(key)
     out = []

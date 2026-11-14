@@ -443,8 +443,10 @@ class RunnerLogic(unittest.TestCase):
                 capture = commands["capture"]
                 self.assertEqual(capture[capture.index("--material-scenario") + 1], check.bench_scenario(name))
                 self.assertEqual(capture[capture.index("--bench") + 1], "2")
-                for flag in ("--capture-linear", "--export-reference", "--reflections", "--resolution"):
+                for flag in ("--capture-linear", "--reflections", "--resolution"):
                     self.assertIn(flag, capture)
+                if check.SCENARIOS[name].get("snapshot", True):  # the F15.4 equality keys compare engine captures: no snapshot
+                    self.assertIn("--export-reference", capture)
                 self.assertIn(" ".join(capture), text)
                 self.assertIn(check.reference_script(name), " ".join(commands["reference"]))
             for key in ("commit", "os", "sdk_version", "power", "tool_sha256", "seed", "thresholds"):
@@ -1061,7 +1063,16 @@ class RunnerLogic(unittest.TestCase):
         shadow_names = shadow[shadow.index("kAll{"):shadow.index("};", shadow.index("kAll{"))]
         self.assertEqual(sorted((set(re.findall(r'"([a-z0-9-]+)"', block)) - clip_only) | set(re.findall(r'"([a-z0-9-]+)"', names)) |
                                 set(re.findall(r'"([a-z0-9-]+)"', shadow_names))),
-                         sorted({check.bench_scenario(name) for name in check.SCENARIOS}))
+                         sorted({check.bench_scenario(name) for name in check.SCENARIOS if check.SCENARIOS[name]["kind"] not in check.LAYER_KINDS}))
+
+    def test_layer_keys_use_terrain_scenarios_the_cpp_test_parses(self):
+        """F15.4 (ticket 23): the scenes of the layers-* keys are the TerrainFixture strings that tests/test_terrain_fixture.cpp parses."""
+        import re
+        text = (HERE.parent / "tests" / "test_terrain_fixture.cpp").read_text()
+        block = text[text.index("kRunnerScenes"):text.index("};", text.index("kRunnerScenes"))]
+        declared = set(re.findall(r'"(terrain[^"]*)"', block))
+        used = {check.bench_scenario(n) for n, spec in check.SCENARIOS.items() if spec["kind"] in check.LAYER_KINDS}
+        self.assertEqual(used, declared)
 
     def test_declared_gate_bounds(self):
         masks, spheres = self.synthetic_masks()

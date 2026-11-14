@@ -24,3 +24,15 @@ record 3 layer stack), each 80 bytes with a `static_assert`.
   every secondary-hit read for all scenes.
 - A per-feature texture atlas of parameters: rejected, parameters must follow
   per-entity edits through the existing delta path.
+
+## F15.4 (ticket 23): record 3 in use
+
+The layer stack (record 3) is rendered. Its frozen 80 bytes keep `maskTex`, `layerCount`, `layerMaterial[4]`,
+`packedMaskChannels` and `heightContrast[4]`; the nine padding words now hold `uvScale[4]` (per-layer texture
+tiling, 0 for a layer that does not exist), `heightTex[4]` (per-layer height texture, `INVALID_TEXTURE_INDEX` when the layer has none) and one
+padding word. Size and offsets of the existing fields are unchanged, so no existing scene, delta or archive entry
+changes; scenes without layers never read the record, and a material without a stack packs the same bytes into it as before F15.4 (the
+unused words are 0), so snapshots and reference caches of every other scene stay valid. The layer materials are ordinary entries of the material
+library (`GPUMaterial` records, base parameters only); the stack's own `GPUMaterial` keeps its base fields as the
+appearance for secondary hits and probes (declared limit: ray-traced reflections, GI and probes see that single
+record, not the blend).

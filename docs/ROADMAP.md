@@ -709,6 +709,7 @@ invariata; frame time piatto (nessun picco da aggiornamenti ammortizzati).
   - Stato 2026-11-14 (ticket 21): manifest dei benchmark F15 (81 scene), generatore `variant_gen classes`, tabella delle classi, aggiornamento mirato dell'archivio (+62 pipeline, 29 permutazioni ≤ 64, metal-tt +11,7 %), budget e binning per classe verificati sulle fixture; aperti: manifest di scacchi (ticket 20) e corpus Khronos (ticket 22), A/B/A del binning su scacchi (ticket 24). [Dettaglio](plans/F15.md#f152--codegen).
 - [ ] F15.3 Testbench materiali confrontato con i modelli di riferimento Khronos
 - [ ] F15.4 Layered material (blend di strati) per terreni e superfici complesse
+  - Stato 2026-11-14 (ticket 23): pila di 4 layer (maschera RGBA, contrasto in altezza esatto agli estremi, blend nello spazio dei parametri, normali con surface gradient, bit 8 della classe di feature) sulla fixture di terreno (procedurale + quattro set CC0 ambientCG); layer a peso 1 = materiale singolo a 0 pixel (4 layer, procedurali e CC0), peso 0 invariato, rampa monotona, furnace con controllo additivo; archivio aggiornato; aperti: tempi del resolve per numero di layer (A/B/A su macchina quieta) e decisione finale sul binning (ticket 24). [Dettaglio](plans/F15.md#f154--layer).
 
 ## F16 — Trasparenze on-tile, particelle, VFX [AAA]
 

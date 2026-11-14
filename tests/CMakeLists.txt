@@ -85,6 +85,8 @@ add_executable(phosphor_tests
     test_temporal.cpp
     test_emission_pack.cpp
     test_lobe_guide_pack.cpp
+    test_layer_blend.cpp
+    test_terrain_fixture.cpp
     test_lobe_guide_reference.cpp
     test_lobe_select.cpp
     test_transmission_math.cpp
@@ -140,7 +142,7 @@ if(UV_EXECUTABLE)
         TIMEOUT 180)
 endif()
 if(UV_EXECUTABLE AND F15_PYTHON_PROBE_RESULT EQUAL 0)
-    foreach(f15_test f15_reference f15_check f15_transmission_reference f15_shadow_reference filter_pipeline_harvest sheen_table f15_subsurface_profile f15_chess_check f15_emissive_bound_check)
+    foreach(f15_test f15_reference f15_check f15_transmission_reference f15_shadow_reference filter_pipeline_harvest sheen_table f15_subsurface_profile f15_chess_check f15_emissive_bound_check f15_layers)
         add_test(NAME ${f15_test}_python
             COMMAND ${UV_EXECUTABLE} run --offline --no-project --python 3.13 --with mitsuba==3.9.1 --with numpy
                     python -I ${CMAKE_SOURCE_DIR}/tools/test_${f15_test}.py)
@@ -161,6 +163,11 @@ if(PYTHON3_EXECUTABLE)
         COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_f15_shadowed_hit_check.py)
     add_test(NAME f15_residue_check_python
         COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_f15_residue_check.py)
+    # F15.4 (ticket 23): the owner-approved CC0 terrain sets (never committed); the verify test reads TERRAIN_MATERIALS_DIR (or
+    # build/terrain-materials) at run time and skips (exit 77) when no copy exists.
+    add_test(NAME terrain_materials_verify
+        COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_terrain_materials_verify.py)
+    set_tests_properties(terrain_materials_verify PROPERTIES SKIP_RETURN_CODE 77)
     # The corpus itself is third-party data fetched on demand (never committed): when a fetched copy exists, verify it against the manifest;
     # otherwise the check is skipped with a message (an absent corpus is not a test failure).
     set(KHRONOS_CORPUS_DIR "${CMAKE_SOURCE_DIR}/build/khronos-corpus" CACHE PATH "fetched Khronos corpus (tools/fetch_khronos_corpus.py)")

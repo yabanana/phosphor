@@ -5,6 +5,7 @@
 #include "testbench/transmission_validation.h"
 #include "testbench/transmissive_shadow_validation.h"
 #include "testbench/chess_fixture.h"
+#include "testbench/terrain_fixture.h"
 #include "testbench/torus_demo.h"
 #include "testbench/pbr_grid.h"
 #include "testbench/stress_test.h"
@@ -58,6 +59,7 @@ std::unique_ptr<TestBench> createTestBench(TestBenchType type, const TestBenchPa
     switch (type) {
         case TestBenchType::TorusDemo:   return std::make_unique<TorusDemo>();
         case TestBenchType::PBRGrid:
+            if(TerrainFixture::validScenario(params.materialScenario))return std::make_unique<TerrainFixture>(params.materialScenario, params.terrainTexturesPath);
             if(ChessFixture::validScenario(params.materialScenario))return std::make_unique<ChessFixture>(params.materialScenario, params.scenePath, params.materialOverridesPath);
             if(TransmissionValidation::validScenario(params.materialScenario))return std::make_unique<TransmissionValidation>(params.materialScenario, params.transmissionMotion);
             if(TransmissiveShadowValidation::validScenario(params.materialScenario))return std::make_unique<TransmissiveShadowValidation>(params.materialScenario);

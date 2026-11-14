@@ -21,6 +21,7 @@ kernel visibility_lit_resolve   # the same with the F10-F14 lighting inputs
 manifest material_classes/material.json
 manifest material_classes/transmission.json
 manifest material_classes/shadow.json
+manifest material_classes/terrain.json          # tools/class_manifest: the terrain patch fixture, layers = bit 8 (ticket 23)
 manifest material_classes/chess.json            # tools/f15_export_manifests.py: ABeautifulGame rigs (ticket 20)
 manifest material_classes/khronos-corpus.json   # the Khronos corpus models that load, declared rigs (ticket 22)
 

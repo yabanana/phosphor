@@ -208,6 +208,7 @@ namespace phosphor {
 //   --rt-proxy-manifest PATH   explicit measured manifest (needs manifest mode)
 //   --material-overrides FILE  F15.1: name-keyed phosphor-material-overrides JSON applied over the loaded glTF
 //                      (needs --bench 4 and --scene FILE; unknown names or invalid values abort the load)
+//   --terrain-textures DIR  F15.4: the unpacked CC0 terrain sets (tools/fetch_terrain_materials.py) for a terrain --material-scenario
 //   --debug-view rt    RT primary-hit diagnostic, also on the indexed path
 //   --debug-rt N       CPU reference comparison every N frames (0 = disabled)
 //   --debug-rt-deform  deform mesh 0 for BLAS lifecycle diagnostics; requires
@@ -356,6 +357,7 @@ struct LaunchOptions {
     u32          rtTlasRebuildEvery = 0;        // 0 = structural changes only; cadence needs engine measurements
     bool         rtProxyManifest = false;      // --rt-proxy off|manifest
     std::string  rtProxyManifestPath;          // empty = scene's default manifest, missing = full geometry
+    std::string  terrainTexturesPath;          // F15.4 --terrain-textures DIR (empty = procedural stand-ins)
     std::string  materialOverridesPath;        // F15.1 --material-overrides FILE (empty = none), applied by the scene viewer
     bool         corpusRig = false;            // F15.3 ticket 22 --corpus-rig YAW,PITCH: declared light rig + bounds framing (testbench/corpus_rig.h)
     float        corpusYaw = 0, corpusPitch = 0;
