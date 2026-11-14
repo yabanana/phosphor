@@ -140,6 +140,18 @@ reference ray casting):
   <= 0.5 % and per-pixel p99 <= 1 % (the absolute floor rule above).  Its
   negative controls (diffuse unweighted, Karis fit instead of the table,
   diffuse weighted by the metallic-blended F0 Fresnel) must all fail it.
+- Layered materials (F15.4, ticket 23): the `layers-*` keys (bench `terrain`, testbench/terrain_fixture.h; statistics and the blended-BSDF
+  quadrature in tools/f15_layers.py, no external reference tool).  `layer-equal` keys compare two ENGINE captures: the layer stack with the constant
+  mask e_j (weight 1 on layer j; height contrast on) against the single material of layer j (same textures, mesh uvs scaled by the power-of-two
+  tiling) must have 0 bitwise-differing pixels (the ticket criterion; bitwise / ULP / relative / 8-bit counts are always reported, a codegen ULP
+  difference is never redefined away); `layers-weight-zero`: weight 0 on two layers equals the stack without them; `layers-coat-zero`: the coat
+  finish present with coat weight 0 leaves the base untouched (declared envelope 1e-5 relative: a different class pipeline).  `layer-ramp`: on a
+  flat quad with two plain layers the blend factor (L - L0) / (L1 - L0) against the two single twins must rise monotonically along the mask ramp
+  and follow it within 0.02.  `layer-furnace`: four albedo-1 layers (metallic 0/1/0/1) under environment 1: no engine pixel above 1.005; the
+  independent reference of the blended single BSDF (tools/f15_reference.py quadrature) and its deviation from the BSDF-space mix are recorded.
+  Negative controls (each must fail its gate): the single material of another layer (equality), a stack of the wrong layer or weights (weight
+  zero), the real cavity coat (coat zero), the reversed ramp, the additive blend of the layers' BSDFs (furnace).  The `-cc0` keys repeat the
+  endpoint equality with the owner-approved CC0 sets (TERRAIN_MATERIALS_DIR or build/terrain-materials; skipped when absent).
 Design note: the environment gate cannot see a missing diffuse Fresnel weighting
 (it moves a sphere mean by at most about 4.5 %, below the 5 % bound, measured with
 the reference's `diffuse-unweighted` control), so that defect is owned by the
