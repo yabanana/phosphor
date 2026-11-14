@@ -26,6 +26,7 @@ namespace phosphor {
 //   layers=K          the stack has only the first K layers (1..4, default 4)
 //   single=N          NO stack: the material is layer N alone and the mesh uvs carry its uvScale (the single-material twin of
 //                     weights=e_N: same textures, same uv * 2^k, same camera and lights)
+//   ior=F             coat=spec only: the twin block's ior in [1, 3] (default 1.5; 1.4 is the wrong-F0 control of the coat-zero gate)
 //   height=on|off     height-contrast blend (default on)
 //   coat=on|off|zero|spec  cavity coat finish (default on; zero = the clearcoat block present with a black cavity map: coat weight 0; spec = NO
 //                     coat, a specular block at ior 1.5 and factor 1 - 2^-24 instead: the extended-path twin of zero, F0 0.04 to 6e-8)
@@ -42,6 +43,7 @@ struct TerrainOptions {
     enum class Ramp { None, Forward, Reverse };
     u32 layers = 4;
     bool height = true;
+    float specIor = 1.5f; // coat=spec: the ior of the twin block
     Coat coat = Coat::On;
     bool constantMask = false;
     std::array<u8, 4> weights{0, 0, 0, 0};

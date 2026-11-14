@@ -37,6 +37,10 @@ PATCH_SIZE = 8.0
 MASK_SIZE = 256            # flat mask width/height (ramp: 256 x 4)
 EDGE_MARGIN = 3.0 / MASK_SIZE  # uv margin excluded at the plane edges (the repeat sampler blends the opposite edge there)
 ENVELOPE = 1e-5            # ticket 21: declared relative envelope between a specialised and the all-lobes pipeline
+# The coat-weight-0 key: the clearcoat guide bit routes the pixel through other composite/denoise code, so its capture differs from the coat-free
+# twin by float noise (measured: median 1e-7, worst 3e-6 absolute at a pixel of 0.033, 1.0e-4 floored relative, 0 pixels in the 8-bit image).  The bound
+# 5e-4 sits 5x above that and far below what a wrong base F0 does (the wrong-F0 control, ior 1.4: F0 0.040 -> 0.028, must fail it).
+COAT_ZERO_ENVELOPE = 5e-4
 FURNACE_LIMIT = 1.0 + 0.005
 RAMP_TOLERANCE = 1e-3      # monotonicity tolerance on the blend factor
 RAMP_MASK_ERROR = 0.02     # |blend factor - u| bound (mask quantisation 1/255 + the sampler's half-texel)
@@ -81,11 +85,13 @@ def compare_images(np, a, b, roi=None):
 
 
 def evaluate_equal(np, candidate, reference, envelope=False, roi=None):
-    """The `layer-equal` gate: exact (0 bitwise-differing pixels) or the declared envelope (max relative <= ENVELOPE)."""
+    """The `layer-equal` gate: exact (0 bitwise-differing pixels) or an envelope on the floored relative error (`envelope` True = ENVELOPE,
+    a number = that bound; the plain relative error with an absolute 1e-4 floor, the bitwise, ULP and 8-bit counts are reported next to it)."""
     stats = compare_images(np, candidate, reference, roi)
     non_empty = float(np.asarray(candidate).max()) > 0.0 and float(np.asarray(reference).max()) > 0.0
-    passed = (stats["max_relative_floored"] <= ENVELOPE) if envelope else (stats["bitwise_differing"] == 0)
-    return {"kind": "layer-equal", "gate": "envelope" if envelope else "exact", "limit": ENVELOPE if envelope else 0, **stats,
+    bound = (ENVELOPE if envelope is True else float(envelope)) if envelope else 0
+    passed = (stats["max_relative_floored"] <= bound) if envelope else (stats["bitwise_differing"] == 0)
+    return {"kind": "layer-equal", "gate": "envelope" if envelope else "exact", "limit": bound, **stats,
             "non_empty": bool(non_empty), "pass": bool(passed and non_empty)}
 
 

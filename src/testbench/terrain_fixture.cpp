@@ -121,6 +121,7 @@ bool TerrainFixture::parse(std::string_view scenario, TerrainOptions& out, std::
         error = "unknown terrain scenario '" + std::string(scenario) + "'";
         return false;
     }
+    bool iorGiven = false;
     for (size_t i = 1; i < parts.size(); ++i) {
         const size_t eq = parts[i].find('=');
         if (eq == std::string_view::npos) {
@@ -165,6 +166,9 @@ bool TerrainFixture::parse(std::string_view scenario, TerrainOptions& out, std::
             else if (value == "zero") out.coat = TerrainOptions::Coat::Zero;
             else if (value == "spec") out.coat = TerrainOptions::Coat::Spec;
             else return bad();
+        } else if (key == "ior") {
+            if (!parseFloat(value, out.specIor) || out.specIor < 1.0f || out.specIor > 3.0f) return bad();
+            iorGiven = true;
         } else if (key == "ramp") {
             if (value == "on") out.ramp = TerrainOptions::Ramp::Forward;
             else if (value == "reverse") out.ramp = TerrainOptions::Ramp::Reverse;
@@ -175,6 +179,10 @@ bool TerrainFixture::parse(std::string_view scenario, TerrainOptions& out, std::
         } else {
             return bad();
         }
+    }
+    if (iorGiven && out.coat != TerrainOptions::Coat::Spec) {
+        error = "ior needs coat=spec";
+        return false;
     }
     if (out.ramp != TerrainOptions::Ramp::None && out.furnace) {
         error = "ramp and furnace are exclusive";
@@ -338,7 +346,7 @@ void TerrainFixture::setup(ECS& ecs, GpuScene& scene, TextureManager& textures) 
             // The extended-path twin of coat=zero: the same class machinery without a coat (specular ior 1.5 = F0 0.04, factor 1 - 2^-24 so that the
             // block is active).
             description->specular.emplace();
-            description->specular->ior = 1.5f;
+            description->specular->ior = o.specIor;
             description->specular->specularFactor = std::nextafter(1.0f, 0.0f);
         }
         if (!flat && (o.coat == TerrainOptions::Coat::On || o.coat == TerrainOptions::Coat::Zero)) {

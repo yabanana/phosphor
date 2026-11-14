@@ -38,6 +38,22 @@ class CompareTests(unittest.TestCase):
         self.assertFalse(layers.evaluate_equal(np, a, b, envelope=True)["pass"])
         self.assertTrue(layers.evaluate_equal(np, a, a * np.float32(1.0 + 2e-6), envelope=True)["pass"])
 
+    def test_numeric_envelope_and_the_floor(self):
+        a = noise_image()
+        r = layers.evaluate_equal(np, a * np.float32(1.0 + 2e-4), a, envelope=layers.COAT_ZERO_ENVELOPE)
+        self.assertTrue(r["pass"])
+        self.assertEqual(r["limit"], layers.COAT_ZERO_ENVELOPE)
+        self.assertFalse(layers.evaluate_equal(np, a * np.float32(1.0 + 2e-3), a, envelope=layers.COAT_ZERO_ENVELOPE)["pass"])
+        # A dark pixel with a large relative but tiny absolute difference does not fail the floored gate.
+        b = a.copy()
+        b[0, 0, :] = 1e-6
+        c = b.copy()
+        c[0, 0, :] = 1.1e-6
+        r = layers.evaluate_equal(np, c, b, envelope=True)
+        self.assertGreater(r["max_relative"], 1e-5)
+        self.assertLess(r["max_relative_floored"], 1e-5)
+        self.assertTrue(r["pass"])
+
     def test_empty_images_do_not_pass(self):
         z = np.zeros((4, 4, 3), dtype=np.float32)
         self.assertFalse(layers.evaluate_equal(np, z, z)["pass"])

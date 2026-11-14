@@ -58,7 +58,7 @@ TEST_CASE("terrain scenarios: every listed scenario parses, options are validate
     CHECK_FALSE(o.height);
     CHECK(o.coat == TerrainOptions::Coat::Zero);
     for (const char* bad : {"terrain/weights=1,0,0", "terrain/weights=2,0,0,0", "terrain/single=4", "terrain/layers=0", "terrain/coat=maybe",
-                            "terrain/ramp=on/furnace=on", "terrain/ramp=on/single=2", "terrain/furnace=on/single=0",
+                            "terrain/ramp=on/furnace=on", "terrain/ior=1.4", "terrain/coat=spec/ior=4", "terrain/ramp=on/single=2", "terrain/furnace=on/single=0",
                             "terrain/single=0/weights=1,0,0,0", "terrain/unknown=1", "terrain/height", "chess-backlight"})
         CHECK_MESSAGE(!TerrainFixture::validScenario(bad), bad);
     CHECK(TerrainFixture::environmentRadiance("terrain/furnace=on") == 1.0f);
@@ -68,11 +68,11 @@ TEST_CASE("terrain scenarios: every listed scenario parses, options are validate
 }
 
 // The scenes of the layers-* keys of tools/f15_check.py (tools/test_f15_check.py compares this list with the runner).
-constexpr std::array<std::string_view, 19> kRunnerScenes{
+constexpr std::array<std::string_view, 20> kRunnerScenes{
     "terrain/single=0/coat=off", "terrain/single=1/coat=off", "terrain/single=2/coat=off", "terrain/single=3/coat=off",
     "terrain/weights=1,0,0,0/coat=off", "terrain/weights=0,1,0,0/coat=off", "terrain/weights=0,0,1,0/coat=off", "terrain/weights=0,0,0,1/coat=off",
     "terrain/weights=1,1,0,0/layers=2/coat=off", "terrain/weights=1,1,0,0/coat=off", "terrain/coat=off", "terrain", "terrain/coat=zero",
-    "terrain/ramp=on/single=0", "terrain/ramp=on/single=1", "terrain/ramp=reverse", "terrain/ramp=on", "terrain/furnace=on", "terrain/coat=spec",
+    "terrain/ramp=on/single=0", "terrain/ramp=on/single=1", "terrain/ramp=reverse", "terrain/ramp=on", "terrain/furnace=on", "terrain/coat=spec", "terrain/coat=spec/ior=1.4",
 };
 
 TEST_CASE("terrain scenarios: the runner's scenes are valid") {

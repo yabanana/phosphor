@@ -881,12 +881,14 @@ def _layer_keys():
                             "terms": "the full terrain patch with the cavity coat finish (the measured view)"}
     keys["layers-coat-spec"] = {"kind": "layer-equal", "capture_only": True, "controls": [], "snapshot": False, "scene": "terrain/coat=spec",
                                 "terms": "the full terrain patch with a specular block (ior 1.5, factor 1 - 2^-24) instead of a coat: the extended-path twin of coat weight 0"}
+    keys["layers-coat-wrong-f0"] = {"kind": "layer-equal", "capture_only": True, "controls": [], "snapshot": False, "scene": "terrain/coat=spec/ior=1.4",
+                                    "terms": "the specular-block twin with ior 1.4 (base F0 0.028 instead of 0.040): the negative control of the coat-zero gate"}
     keys["layers-coat-zero"] = {
-        "kind": "layer-equal", "always_green": True, "envelope": True, "snapshot": False, "scene": "terrain/coat=zero", "pair": "layers-coat-spec",
-        "info_pair": "layers-patch-nocoat", "controls": ["layers-patch"], "needs": ["layers-patch", "layers-patch-nocoat"],
+        "kind": "layer-equal", "always_green": True, "envelope": 5e-4, "snapshot": False, "scene": "terrain/coat=zero", "pair": "layers-coat-spec",
+        "info_pair": "layers-patch-nocoat", "controls": ["layers-patch", "layers-coat-wrong-f0"], "needs": ["layers-patch", "layers-patch-nocoat", "layers-coat-wrong-f0"],
         "terms": "the clearcoat finish present with coat weight 0 everywhere must leave the layered base untouched (a feature layer changes the coat "
-                 "weight only): equal, within the declared envelope, to the same stack under the specular block of the same F0 (the same extended code path "
-                 "without a coat); the control is the real cavity coat.  The distance to the plain uncoated stack (base code path) is reported, not gated"}
+                 "weight only): equal, within the declared envelope (COAT_ZERO_ENVELOPE of tools/f15_layers.py, 5e-4 floored relative), to the same stack under the specular block of the same F0 (the same extended code path "
+                 "without a coat); the controls are the real cavity coat and a base F0 changed by the ior (1.4 instead of 1.5).  The distance to the plain uncoated stack (base code path) is reported, not gated"}
     keys["layers-ramp-single-0"] = {"kind": "layer-ramp", "capture_only": True, "controls": [], "snapshot": False, "scene": "terrain/ramp=on/single=0", "reflections": "off",
                                     "terms": "the flat quad with the dark plain layer alone"}
     keys["layers-ramp-single-1"] = {"kind": "layer-ramp", "capture_only": True, "controls": [], "snapshot": False, "scene": "terrain/ramp=on/single=1", "reflections": "off",
