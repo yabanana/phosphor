@@ -2437,3 +2437,15 @@ So the images would change at more than the bound-exhausted pixels (numerically 
 **Cost** (3 alternating runs, sentinel 0.81 throughout; reflection sample 0 p50 / p95 median, frame p95): 2e1057a 2.735 / 3.501, 15.46; current 2.767 / 3.719, 15.65; culled variant 2.756 / 3.645, 15.63.
 It recovers about a third of the p95 growth (0.07 of 0.22 ms), not "near 2e1057a" (0.14 above).  Both adoption conditions fail: variant discarded, nothing committed but this record.
 The F13 exact / visual_check / residue fixtures were not run (the ray-level result already fails the acceptance rule).  Remaining tail = the extra traversals of the continuation itself (see the previous entry).
+
+## 2026-11-15 — F15 ticket 24 / ticket 21: binning vs union on the chess fixture (A/B/A, 3 replicas, quiet machine): union stays the default
+
+**Question (decision 05/08, fixed before measuring):** per-class tile binning becomes the default for scenes with extended materials only if it lowers the extended resolve time on the chess
+and terrain fixtures by >= 5 % beyond noise.
+**Method:** `tools/f15_costs.py` items 6a-6c on the cfb9e11 Release binary, `--material-binning off` (A, union) vs `on` (B), A/B/A x 3 replicas, 256 frames after 64 warm-up,
+`--gpu-timing-serial --no-vsync`, 0 GPU allocations; resolve = `Material resolve` + `Material classification` (mean ms). Full table in `docs/perf-log.md` ("F15 ticket 24: quiet-machine cost").
+**Result (relative effect of binning on the resolve, median and min..max over replicas, A-A noise):** side-light 1080p -1.8 % (-4.9..-0.4, noise 2.6 %); shadow rig 1080p +6.7 % (+5.2..+7.6, 0.9 %);
+back-light 720p +9.8 % (+8.2..+11.7, 4.3 %). The terrain result of 2026-11-15 (ticket 23) was full +1 %, layers-4 +4 %, layers-2 -1 %.
+**Mechanism:** the class resolve is cheaper (`Material resolve` -0.031 / -0.011 / -0.006 ms p50) but `Material classification` costs 0.026 / 0.028 / 0.014 ms, the same order; no scene pays it back.
+**Decision:** the >= 5 % rule is not met on any chess rig or on the terrain: the union pipeline stays the default, binning stays opt-in (`--material-binning on`). Not a change of the engine.
+Chess classes are not bit-identical to the union (ticket 21: up to 37 ULP) which would anyway have kept binning opt-in. The side-light rig is the only one with a lower mean (-1.8 %), inside its own noise.
