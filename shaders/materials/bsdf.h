@@ -538,6 +538,28 @@ inline float3 bsdfThinTransmitted(BsdfThin t, float VdotH, float metallic) {
 inline float3 bsdfThinTransmittedSpec(BsdfDielectricSpec s, BsdfIrid irid, BsdfThin t, float VdotH, float metallic) {
     return t.weight * bsdfSpecDiffuseIrid(s, irid, bsdfSpecFresnel(s, VdotH), metallic, t.color, VdotH);
 }
+// F15.3 closure (ticket 16): the declared transmitted albedo T(N.V) of a thin material under an extended dielectric (ior/specular) or a thin film: a 4-node
+// quadrature in V.H, T = sum_k a_k(N.V) W(vh_k), W = the diffuse weight 1 - max3 F(vh) of bsdfSpecDiffuseIrid, nodes 0.15 0.4 0.65 0.9 and cubic weights
+// fitted offline (tools/f15_reference.py THIN_ENV_POLY: held-out error <= 0.13 % of T, against 5 % of the radiance for the default-dielectric ratio fit).
+// Scalar literals, no constant arrays (shader validation corrupts program-scope constant arrays).
+inline float bsdfThinEnvNode(BsdfDielectricSpec s, BsdfIrid irid, float vh, float c3, float c2, float c1, float c0, float mu) {
+    const float w = bsdfSpecDiffuseIrid(s, irid, bsdfSpecFresnel(s, vh), 0.0f, float3(1.0f), vh).x * M_PI_F;
+    return (((c3 * mu + c2) * mu + c1) * mu + c0) * w;
+}
+inline float bsdfThinEnvAlbedo(BsdfDielectricSpec s, BsdfIrid irid, float NdotV) {
+    const float mu = clamp(NdotV, 0.0f, 1.0f);
+    const float t = bsdfThinEnvNode(s, irid, 0.15f, -0.093795337f, 0.193347433f, 0.125582023f, 0.027399036f, mu) + bsdfThinEnvNode(s, irid, 0.4f, 0.197867067f, -0.097814745f, 0.288317827f, 0.183036859f, mu) +
+                    bsdfThinEnvNode(s, irid, 0.65f, -0.179523756f, -0.107787082f, 0.045040643f, 0.429318433f, mu) + bsdfThinEnvNode(s, irid, 0.9f, 0.074219065f, 0.014610016f, -0.461559537f, 0.360719294f, mu);
+    return max(t, 0.0f);
+}
+// True when the declared transmitted term keeps the default-dielectric ratio fit (default specular, no active film).
+inline bool bsdfThinEnvIsDefault(BsdfDielectricSpec s, BsdfIrid irid) {
+    return !bsdfIridActive(irid) && abs(s.f0.x - 0.04f) < 1e-6f && abs(s.f0.y - 0.04f) < 1e-6f && abs(s.f0.z - 0.04f) < 1e-6f && abs(s.f90 - 1.0f) < 1e-6f;
+}
+// Transmitted environment weight with the fitted albedo; `layerScale` = the coat / sheen / transmission scaling already applied to the diffuse weight.
+inline float3 bsdfThinEnvWeightFit(BsdfThin t, BsdfDielectricSpec s, BsdfIrid irid, float metallic, float NdotV, float layerScale) {
+    return (t.weight * (1.0f - metallic) * bsdfThinEnvAlbedo(s, irid, NdotV) * layerScale) * t.color;
+}
 // The declared environment ratio r(mu) = 1 - 0.16 mu of the transmitted weight to the front diffuse weight.
 inline float bsdfThinEnvRatio(float NdotV) { return 1.0f - 0.16f * clamp(NdotV, 0.0f, 1.0f); }
 // Transmitted environment/GI weight (multiplies the radiance or irradiance / pi at -N): w color (1 - metallic) (1 - E_d) r(N.V).

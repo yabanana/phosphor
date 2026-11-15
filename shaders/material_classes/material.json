@@ -1821,7 +1821,7 @@
             "subsurface"
           ],
           "mask": 144,
-          "materials": 2
+          "materials": 4
         }
       ],
       "family": "material",
@@ -1866,7 +1866,7 @@
             "subsurface"
           ],
           "mask": 144,
-          "materials": 2
+          "materials": 4
         }
       ],
       "family": "material",

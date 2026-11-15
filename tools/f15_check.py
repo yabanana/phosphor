@@ -308,8 +308,8 @@ COMBO_THIN_COAT_DECLARED = ["declared-transmission-ignored", "declared-coat-igno
 # of the combination has no per-ior transmitted-albedo table yet (the key is gated by the declared model, like iridescence + anisotropy was).
 COMBO_THIN_LOBES_CONTROLS = ["transmission-ignored", "sheen-ignored", "aniso-ignored", "iridescence-ignored", "specular-ignored",
                              "transmission-default-fresnel", "transmission-sheen-unscaled"]
-# `specular-ignored` and `iridescence-ignored` (film 1.5 / 400 nm) move the exact environment sphere mean by less than 5 % (non-discriminating there; both fail on the sun and declared keys).
-COMBO_THIN_LOBES_ENV_CONTROLS = ["transmission-ignored", "sheen-ignored", "aniso-ignored", "transmission-default-fresnel"]
+# `specular-ignored` moves the exact environment sphere mean by less than 5 % (non-discriminating there; it fails on the sun and declared keys).
+COMBO_THIN_LOBES_ENV_CONTROLS = ["transmission-ignored", "sheen-ignored", "aniso-ignored", "iridescence-ignored", "transmission-default-fresnel"]
 COMBO_THIN_LOBES_DECLARED = ["declared-transmission-ignored", "declared-sheen-ignored", "declared-aniso-ignored", "declared-iridescence-ignored",
                              "declared-specular-ignored", "declared-transmission-default-weight"]
 # The exact-environment keys integrate over the whole sphere: a rotation of the lobe by the sign of the angle moves the sphere mean by less

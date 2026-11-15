@@ -408,12 +408,13 @@ void addCombinations(std::vector<MaterialScenarioSpec>& out) {
     // pi/4), + iridescence (film 1.5 / 400 nm), + ior/specular (1.8, weight 0.7, colour 1 .8 .6).  Sun from the side: the left half of every sphere is lit
     // from the front (reflected lobes), the right half from behind (transmitted lobe under the layers).
     addCombination(out, "thin-lobes",
-                   {std::vector<float>(4, 0.3f), {0.0f, 0.0f}, glm::vec3(0.3f, 0.5f, 0.8f), grid(2, 4, [&](size_t r, size_t c) {
+                   {std::vector<float>(5, 0.3f), {0.0f, 0.0f}, glm::vec3(0.3f, 0.5f, 0.8f), grid(2, 5, [&](size_t r, size_t c) {
                         Cell cell = withThin(none, r == 0 ? 1.0f : 0.6f, r == 0 ? white : warm);
                         switch (c) {
                             case 0: return withSheen(cell, white, 0.4f);
                             case 1: return withAniso(cell, 1.0f, quarter);
-                            case 2: return withIrid(cell, 1.0f, 1.5f, 400.0f); // index 1.5: declared-vs-exact 2.8 % (1.3 gave 5.3 %, over the 5 % bound)
+                            case 2: return withIrid(cell, 1.0f, 1.3f, 400.0f); // the film the first run measured at 5.04 % against the exact environment
+                            case 3: return withIrid(cell, 1.0f, 1.5f, 400.0f);
                             default: return withSpecular(cell, 1.8f, 0.7f, glm::vec3(1.0f, 0.8f, 0.6f));
                         }
                     }), true, glm::vec3(-0.9f, 0.3f, -0.25f)});

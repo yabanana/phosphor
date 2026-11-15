@@ -1094,6 +1094,7 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         envDiffuse = env.diffuseWeight;
         envSpecularWeight = env.specular;
     }
+    const float envDiffuseBase = envDiffuse; // F15.3 closure (ticket 16): the diffuse weight before the coat / sheen / transmission scalings (thin env albedo)
     // F15.1 (ticket 13): the diffuse base of a transmissive material is mixed by 1 - t; the transmitted lobe takes (1 - E) t (1 - metallic) tint T
     // of the radiance along the refracted direction (declared: the environment, or the legacy hemisphere along the refraction of V through N,
     // with the volume absorption over the thickness hint, decision 09).  Added below where the resolve owns the ambient specular, i.e. where
@@ -1137,7 +1138,8 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     // companion texture of the GI pass, F15 closure ticket 19; the pixel's own E(N) only when the scene has none).  The term travels with the diffuse ambient.
     float3 thinWeight = float3(0.0);
     if (thinResolved) {
-        thinWeight = bsdfThinEnvWeight(thin, metallic, envDiffuse, NdotV);
+        thinWeight = (useSpec && !bsdfThinEnvIsDefault(spec, irid)) ? bsdfThinEnvWeightFit(thin, spec, irid, metallic, NdotV, envDiffuse / max(envDiffuseBase, 1e-6f))
+                                                                    : bsdfThinEnvWeight(thin, metallic, envDiffuse, NdotV);
         envDiffuse *= bsdfThinReflectScale(thin);
     }
     const float3 ambientDiffuse = (physicalGI ? environment : hemisphere(N)) * baseColor.rgb * (1.0 - metallic) * envDiffuse;

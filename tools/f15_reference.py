@@ -1281,6 +1281,45 @@ def legacy_hemisphere_radiance(base, metallic, roughness, n, v, aniso, variant):
     return (1 - m) * base * diffuse_w * hemisphere_radiance(n) + spec_w * hemisphere_radiance(direction)
 
 
+# F15.3 closure (ticket 16): the declared transmitted albedo of a thin material under an extended dielectric or a film.  The dielectric-only ratio fit
+# `1 - 0.16 mu` missed the exact T by 5 % of the radiance at film 1.3 / 400 nm and at ior 1.8; a 4-node quadrature in V.H with N.V-polynomial weights
+# (fitted on 96 films and 24 dielectrics, held-out error <= 0.13 PERCENT of T sphere-weighted) replaces it when the material is not the default dielectric:
+#   T(mu) = sum_k a_k(mu) W(vh_k),  W = the diffuse weight 1 - max3 F(V.H) (the extension Fresnel, or the (1 - s) / s mix with the film).
+# The same constants live in shaders/materials/bsdf.h (bsdfThinEnvAlbedo).
+THIN_ENV_NODES = (0.15, 0.4, 0.65, 0.9)
+THIN_ENV_POLY = ((-0.093795337, 0.193347433, 0.125582023, 0.027399036), (0.197867067, -0.097814745, 0.288317827, 0.183036859), (-0.179523756, -0.107787082, 0.045040643, 0.429318433), (0.074219065, 0.014610016, -0.461559537, 0.360719294))
+
+
+def thin_env_is_default(dielectric, irid):
+    """Per pixel (n,) bool, or a scalar bool without arrays: the declared transmitted term keeps the default-dielectric ratio fit (no film, f0 0.04 and f90 1)."""
+    n = 1 if dielectric is None and irid is None else len(dielectric["weight"] if dielectric is not None else irid_strength(irid))
+    default = np.ones(n, dtype=bool)
+    if irid is not None:
+        default &= ~(irid_strength(irid) > 0.0)
+    if dielectric is not None:
+        default &= np.all(np.abs(np.asarray(dielectric["f0"], dtype=np.float64) - DIELECTRIC_F0) < 1e-6, axis=-1) & (np.abs(np.asarray(dielectric["weight"]) - 1.0) < 1e-6)
+    return default if (dielectric is not None or irid is not None) else bool(default[0])
+
+
+def thin_env_albedo(base, mu, dielectric, irid):
+    """T(mu) (n,) of the 4-node declared transmitted albedo (see THIN_ENV_NODES)."""
+    n = len(mu)
+    mu = np.clip(np.asarray(mu, dtype=np.float64), 0.0, 1.0)
+    f0 = np.full((n, 3), DIELECTRIC_F0) if dielectric is None else np.asarray(dielectric["f0"], dtype=np.float64)
+    weight = np.ones(n) if dielectric is None else np.asarray(dielectric["weight"], dtype=np.float64)
+    film_f0 = None if irid is None else irid_base_f0(base, dielectric)
+    total = np.zeros(n)
+    for vh, poly in zip(THIN_ENV_NODES, THIN_ENV_POLY):
+        _, max_f = dielectric_fresnel(f0, weight, np.full((n, 1), (1.0 - vh) ** 5), "extension")
+        w_value = 1.0 - max_f[:, 0]
+        if irid is not None:
+            s = irid_strength(irid)
+            film = thin_film_fresnel(np.full(n, vh), irid_film_ior(irid), irid_thickness(irid), film_f0)
+            w_value = (1.0 - s) * w_value + s * (1.0 - film.max(axis=-1))
+        total += np.polyval(poly, mu) * w_value
+    return np.maximum(total, 0.0)
+
+
 def declared_extension_diffuse_weight(metallic, roughness, n_dot_v, variant, dielectric, irid):
     """The declared diffuse weight 1 - max3 E of the underlying dielectric (n, 1): the extension (ior/specular) and/or the film, exactly the weights
     `_declared_material_radiance` and `declared_irid_environment` apply to the diffuse term (F15.3 closure, thin + ior / iridescence)."""
@@ -1304,7 +1343,7 @@ def declared_extension_diffuse_weight(metallic, roughness, n_dot_v, variant, die
     return (1.0 - s) * plain + s * (1.0 - np.max(e_film, axis=-1, keepdims=True))
 
 
-def declared_thin_environment(material, metallic, base, roughness, n_dot_v, thin, diffuse_weight=None):
+def declared_thin_environment(material, metallic, base, roughness, n_dot_v, thin, diffuse_weight=None, albedo=None):
     """The declared thin-subsurface model for unit radiance (decision 06): `material` is the declared base radiance
     (1 - m) c (1 - E_d) + E.  The reflected diffuse is scaled by (1 - w) and the transmitted lobe adds
         (1 - m) w color (1 - E_d(mu)) r(mu),   r(mu) = 1 - 0.16 mu,  E_d = clamp(0.04 A + B, 0, 1)  (A, B at the material roughness),
@@ -1318,7 +1357,7 @@ def declared_thin_environment(material, metallic, base, roughness, n_dot_v, thin
     m = np.asarray(metallic, dtype=np.float64)[:, None]
     w = thin_weight(thin)[:, None]
     ratio = np.ones_like(weight) if thin["variant"] == "front-only" else thin_ratio(mu)[:, None]
-    transmitted = w * thin_color(thin) * (1.0 - weight) * ratio
+    transmitted = w * thin_color(thin) * ((1.0 - weight) * ratio if albedo is None else np.where(albedo[1][:, None], albedo[0][:, None], (1.0 - weight) * ratio))
     removed = (1.0 - thin_reflect_scale(thin))[:, None] * base * (1.0 - weight)
     return material + (1.0 - m) * (transmitted - removed)
 
@@ -2138,9 +2177,11 @@ def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, 
     if irid is not None:
         material = declared_irid_environment(material, base, metallic, roughness, n_dot_v, irid, dielectric, variant)
     if thin is not None:  # F15.3 (ticket 16)
+        exact_fit = (dielectric is not None or irid is not None) and thin["variant"] != "default-weight"
         material = declared_thin_environment(material, metallic, base, roughness, n_dot_v, thin,
                                              None if dielectric is None and irid is None else
-                                             declared_extension_diffuse_weight(metallic, roughness, n_dot_v, variant, dielectric, irid))
+                                             declared_extension_diffuse_weight(metallic, roughness, n_dot_v, variant, dielectric, irid),
+                                             (thin_env_albedo(base, n_dot_v, dielectric, irid), ~thin_env_is_default(dielectric, irid)) if exact_fit else None)
     def under_coat(material):
         coat_v = {**coat, "variant": variant.get("coat", "spec")}
         if coat_v["variant"] == "fresnel-vh":

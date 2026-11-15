@@ -280,3 +280,20 @@ bound, the other spheres 1.1 - 4.1 %; controls transmission-ignored, sheen-ignor
 declared-vs-exact 5.3 % at index 1.3 / 400 nm (measured 5.04 % on the engine, reference prediction 5.3 %), so the film is index 1.5 / 400 nm (2.8 %); `specular-ignored` and `iridescence-ignored` move the exact
 environment sphere mean by less than 5 % and stay on the sun and declared keys. The sun and declared keys stay GREEN with the index-1.5 film (`combo-thin-lobes-sun`, `-env@resolve`, all
 controls fail). The environment margin of the ior cell (4.94 %) is thin: the declared transmitted ratio fit `1 - 0.16 N.V` was derived for the default dielectric.
+
+### 2026-11-15 (4) — the declared transmitted term fitted per ior / per film (agent `tex`, round 4; replaces the film-index redesign of round 3)
+
+- The film 1.3 / 400 nm cell is back (next to 1.5 / 400 nm and ior 1.8 / 0.7): it measured 5.04 % (exact environment) and was a real engine miss, not a fixture defect. Cause measured with the reference:
+  replacing ONLY the declared transmitted term by the exact table T gives 1.1 % (film 1.3), 0.9 % (film 1.5) and 0.0 % (ior 1.8), against 5.3 / 2.8 / 5.2 % with the dielectric-only ratio `1 - 0.16 N.V`: the whole
+  gap is the transmitted ratio (T / (1 - max F at N.V) is 0.82 .. 2.3 for the film, not 0.86 .. 0.98).
+- Engine fix (`bsdfThinEnvAlbedo`, `bsdfThinEnvWeightFit`, `bsdfThinEnvIsDefault` in shaders/materials/bsdf.h; used in the thin environment of `shadeSurface` and in `reflection_composite_lobe` only when the
+  material is NOT the default dielectric: `useSpec && !bsdfThinEnvIsDefault`): T(N.V) = sum over 4 V.H nodes {0.15, 0.4, 0.65, 0.9} of a_k(N.V) W(vh_k), W = the diffuse weight `1 - max3 F` of
+  `bsdfSpecDiffuseIrid` (extension Fresnel or film), a_k cubic in N.V fitted offline on 96 films and 24 dielectrics (`THIN_ENV_NODES`, `THIN_ENV_POLY` in tools/f15_reference.py, the same literals in the shader).
+  Held-out error of T (film 1.3 / 400, 1.5 / 400, 1.4 / 600, 1.7 / 250, ior 1.8, ior 2.4, default): <= 0.13 % sphere-weighted. The coat / sheen / transmission scalings carry over as `envDiffuse / envDiffuseBase`
+  (a new local, the diffuse weight before those scalings). Default-dielectric thin materials keep the old statements, the featureless path is untouched.
+- Result (`build/f15-check/tex23`): `combo-thin-lobes-env` (exact environment, unchanged 5 % bound) GREEN with worst sphere mean 1.95 % (was 5.04 % / 4.94 %); controls transmission-ignored, sheen-ignored,
+  aniso-ignored, iridescence-ignored (now discriminating again with the 1.3 film), transmission-default-fresnel FAIL; `combo-thin-lobes-sun` and `-env@resolve` (worst mean 0.026 %) GREEN, all controls fail;
+  `subsurface-thin-env(-resolve)`, `combo-thin-coat-env(@resolve)`, `texture-thin-env-resolve`, `furnace-thin-subsurface(@resolve)`, `combo-irid-aniso-env@resolve`, `iridescence-grid-env-resolve`,
+  `specular-grid-env-resolve` stay GREEN. The reference mirrors the fit per pixel (`thin_env_albedo`, `thin_env_is_default`): a first version decided "default" over the whole image and broke the sheen / aniso
+  columns by 1.7 % (found by the gate, fixed). Unit test `test_declared_thin_albedo_fit_tracks_the_exact_table_and_keeps_the_radiance_within_the_bound` (fit < 2 %, the old fit > 4 %).
+- Featureless: the five F13 exactness PFMs are byte-identical; visual_check with `EXTRA_ARGS=--pipeline-sync` on this tree: all 8 benches 0 px (`build/visual3.log`).

@@ -3340,6 +3340,40 @@ class CombinationModel(unittest.TestCase):
                                               thin_env={**thin, "variant": "default-fresnel"})
         self.assertGreater(abs(float(controlled[0, 0] - high_env[0, 0])), 1e-3)  # the control (default 0.04 weight) differs
 
+    def test_declared_thin_albedo_fit_tracks_the_exact_table_and_keeps_the_radiance_within_the_bound(self):
+        # ticket 16 closure: the 4-node declared transmitted albedo (THIN_ENV_*) against the exact table per ior / per film, and the declared radiance against the exact
+        # one (sphere-weighted mean relative error, the 5 % bound of decision 11); the control `default-weight` (the old ratio fit) exceeds it at film 1.3 / 400 nm.
+        mus = np.linspace(0.05, 1.0, 30)
+        weight = 2 * mus
+        n = len(mus)
+        base = np.tile([0.3, 0.5, 0.8], (n, 1))
+        rough = np.full(n, 0.3)
+        f0 = np.array(ref.specular_f0(1.8, [1.0, 0.8, 0.6]))
+        cases = {
+            "film 1.3 / 400 nm": ({"strength": np.ones(n), "ior": np.full(n, 1.3), "thickness": np.full(n, 400.0), "thickness_min": np.full(n, 100.0), "nv": mus,
+                                   "variant": "spec"}, None),
+            "ior 1.8 / 0.7": (None, {"f0": np.tile(f0, (n, 1)), "weight": np.full(n, 0.7), "variant": "extension"}),
+        }
+        for name, (irid, dielectric) in cases.items():
+            thin = {"weight": np.ones(n), "color": np.ones((n, 3)), "variant": "spec"}
+            self.assertFalse(bool(np.any(ref.thin_env_is_default(dielectric, irid))), name)
+            film = None if irid is None else (1.3, 400.0, 1.0, ref.irid_base_f0(base, dielectric)[0])
+            mt, table = ref.thin_transmission_table_for(f0 if dielectric is not None else [0.04] * 3, 0.7 if dielectric is not None else 1.0, film)
+            fit = ref.thin_env_albedo(base, mus, dielectric, irid)
+            np.testing.assert_allclose(fit, np.interp(mus, mt, table), rtol=0.012, atol=2e-3, err_msg=name)
+            exact = ref.environment_radiance(base, np.zeros(n), rough, mus, 1.0, ref.SPECULAR_EXT, dielectric, None, irid, thin)
+
+            def gap(variant, kind="spec"):
+                declared = ref.declared_environment_radiance(base, np.zeros(n), rough, mus, 1.0, variant, dielectric, irid=irid, thin={**thin, "variant": kind})
+                err = np.abs(declared - exact).max(axis=1) / np.maximum(exact.max(axis=1), 1e-9)
+                return float((err * weight).sum() / weight.sum())
+            self.assertLess(gap(ref.DECLARED), 0.02, name)
+            self.assertGreater(gap(ref.COMBO_DECLARED_CONTROLS["declared-transmission-default-weight"], "default-weight"), 0.04, name)
+        self.assertTrue(bool(ref.thin_env_is_default({"f0": np.full((1, 3), 0.04), "weight": np.ones(1), "variant": "extension"}, None)[0]))
+        # per pixel: a default pixel next to a film pixel keeps the old ratio fit
+        mixed = {"strength": np.array([0.0, 1.0]), "ior": np.full(2, 1.3), "thickness": np.full(2, 400.0), "thickness_min": np.full(2, 100.0), "nv": np.array([0.5, 0.5]), "variant": "spec"}
+        self.assertEqual(ref.thin_env_is_default(None, mixed).tolist(), [True, False])
+
     def test_sheen_scales_the_transmitted_lobe_of_a_back_light_with_the_smallest_n_dot_l(self):
         # the glTF Sample Renderer scales the whole base by min(1 - m E(N.V), 1 - m E(N.L)) with N.L = 0 behind the surface: E at the table minimum
         base, metallic, rough = np.ones((1, 3)), np.zeros(1), np.full(1, 0.5)

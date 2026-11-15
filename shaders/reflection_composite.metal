@@ -125,6 +125,7 @@ kernel void REFL_KERNEL(reflection_composite)(constant GPUReflectionComposeParam
             // F15.1 (ticket 08): extended pixels receive 1 - max(E_dielectric) of their own specular lobe.
             {const auto lobe=REFL_LOBE(p.flags,REFLECT_COMPOSE_LOBE_GUIDE_VALID,pixel.y*p.width+pixel.x,s);
                 if(lobe.extended&&!noSpecularEstimate)envDiffuse=bsdfSpecEnvIrid(lobe.spec,lobe.irid,diVec(s.albedo),saturate(s.metallic),(p.flags&REFLECT_COMPOSE_SPEC)?lobe.diffuseRoughness:lobe.envRoughness,envNV,phosphor::DfgTable).diffuseWeight;
+                const float envDiffuseBase=envDiffuse; // F15.3 closure (ticket 16): before the coat / sheen / transmission scalings
                 // F15.1 (ticket 09): the diffuse under a coat receives 1 - c F_c(|V.Nc|).
                 // F15.1 (ticket 13): the diffuse base of a transmissive material is mixed by 1 - t.
                 if(lobe.trans&&!noSpecularEstimate)envDiffuse*=1.0f-lobe.transFactor; // no refraction sample either at N.V <= 0: the transmitted share is not released
@@ -134,7 +135,7 @@ kernel void REFL_KERNEL(reflection_composite)(constant GPUReflectionComposeParam
                 // S E L(N) is added below next to the diffuse (GI irradiance / pi, or the declared environment).
                 if(lobe.sheen){envDiffuse*=lobe.sheenScale;sheenTerm=lobe.sheenColor*(lobe.sheenAlbedo*coatAtt);}
                 // F15.1 (ticket 16): thin subsurface: the front diffuse keeps 1 - w, the transmitted part takes the weight it released.
-                if(lobe.thin){thinTerm=bsdfThinEnvWeight(lobe.thinParams,saturate(s.metallic),envDiffuse,envNV);envDiffuse*=bsdfThinReflectScale(lobe.thinParams);}}
+                if(lobe.thin){thinTerm=(lobe.extended&&!bsdfThinEnvIsDefault(lobe.spec,lobe.irid))?bsdfThinEnvWeightFit(lobe.thinParams,lobe.spec,lobe.irid,saturate(s.metallic),envNV,envDiffuse/max(envDiffuseBase,1e-6f)):bsdfThinEnvWeight(lobe.thinParams,saturate(s.metallic),envDiffuse,envNV);envDiffuse*=bsdfThinReflectScale(lobe.thinParams);}}
 #endif
             if(p.flags&REFLECT_COMPOSE_DI)color+=diSelected.read(pixel).rgb;
             if(p.flags&REFLECT_COMPOSE_GI)color+=giSelected.read(pixel).rgb*diVec(s.albedo)*(1-s.metallic)*envDiffuse/M_PI_F;

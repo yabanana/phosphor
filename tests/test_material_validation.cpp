@@ -1245,7 +1245,7 @@ TEST_CASE("F15.3 (ticket 19) combination grids: one cell per sphere, the lobes i
                                  {"irid-aniso", 3, 4, Irid | Aniso},      {"irid-specular", 4, 4, Irid | Spec},
                                  {"thin-coat", 3, 4, Thin | Coat},        {"all-lobes", 2, 4, Spec | Coat | Sheen | Aniso},
                                  {"aniso-panel", 2, 3, Aniso | Coat | Sheen},
-                                 {"thin-lobes", 2, 4, Thin | Sheen | Aniso | Irid | Spec}};
+                                 {"thin-lobes", 2, 5, Thin | Sheen | Aniso | Irid | Spec}};
     for (const auto& e : expected) {
         for (const char* suffix : {"-sun", "-env"}) {
             const std::string name = std::string("combo-") + e.name + suffix;
