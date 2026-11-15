@@ -1,3 +1,4 @@
+#include "pipeline/compile_retry.h"
 #include "pipeline/pipeline_registry.h"
 
 #include <doctest/doctest.h>
@@ -358,11 +359,12 @@ TEST_CASE("pipeline stats: miss rate, format and JSON") {
     s.failures              = 1;
     s.reloads               = 2;
     s.reloadFailures        = 1;
+    s.compileRetries        = 3;
     const std::string line = formatPipelineStats(s);
     CHECK(line ==
           "PIPELINES requests 8 | archive hits 6, misses 1, unavailable 1 (miss rate 25.0%) | "
           "compiler calls 3 (12.5 ms, max 7.5 ms) | render-thread compiles 1 (2.0 ms) | "
-          "fallbacks 2 (draws 40) | failures 1 | reloads 2 (failed 1)");
+          "fallbacks 2 (draws 40) | failures 1 | reloads 2 (failed 1) | compile retries 3");
     CHECK(line.find('\n') == std::string::npos);
 
     const std::string json = pipelineStatsJson(s);
@@ -372,7 +374,7 @@ TEST_CASE("pipeline stats: miss rate, format and JSON") {
                               "archiveMissRate", "compilerCalls", "compileMs", "compileMsMax",
                               "fallbacksServed", "fallbackDraws", "renderThreadCompiles",
                               "renderThreadCompileMs", "failures", "swaps", "reloads",
-                              "reloadFailures"}) {
+                              "reloadFailures", "compileRetries"}) {
         CHECK(json.find(std::string("\"") + field + "\":") != std::string::npos);
     }
     CHECK(json.find("\"fallbackDraws\":40") != std::string::npos);
@@ -392,4 +394,51 @@ TEST_CASE("registry: stats counters and render-thread compile") {
     f.reg.drain();
     CHECK(f.reg.stats().failures == 1);
     CHECK(f.reg.state(h) == PipelineState::Pending);
+}
+
+TEST_CASE("compile retry: transient XPC interruptions are retried, a bounded number of times") {
+    using namespace phosphor::pipe;
+    const std::string xpc = TRANSIENT_COMPILER_ERROR_TEXT;
+    CHECK(isTransientCompilerInterruption(xpc));
+    CHECK_FALSE(isTransientCompilerInterruption("Compilation failed: error: use of undeclared identifier"));
+    CHECK_FALSE(isTransientCompilerInterruption("connection reset"));
+
+    // N failures below the bound: success, N retries.
+    for (unsigned failures = 0; failures <= COMPILE_RETRY_LIMIT; ++failures) {
+        unsigned calls = 0, retries = 0;
+        std::string why;
+        const bool ok = retryTransientCompile(
+            COMPILE_RETRY_LIMIT, why,
+            [&](std::string& w) {
+                if (calls++ < failures) { w = xpc; return false; }
+                return true;
+            },
+            [&](unsigned, const std::string&) { ++retries; });
+        CHECK(ok);
+        CHECK(retries == failures);
+        CHECK(calls == failures + 1);
+    }
+    // Control: one more failure than the bound is a failure after exactly bound+1 calls.
+    {
+        unsigned calls = 0, retries = 0;
+        std::string why;
+        const bool ok = retryTransientCompile(
+            COMPILE_RETRY_LIMIT, why, [&](std::string& w) { ++calls; w = xpc; return false; },
+            [&](unsigned, const std::string&) { ++retries; });
+        CHECK_FALSE(ok);
+        CHECK(retries == COMPILE_RETRY_LIMIT);
+        CHECK(calls == COMPILE_RETRY_LIMIT + 1);
+        CHECK(isTransientCompilerInterruption(why));
+    }
+    // A real compile error is never retried.
+    {
+        unsigned calls = 0, retries = 0;
+        std::string why;
+        const bool ok = retryTransientCompile(
+            COMPILE_RETRY_LIMIT, why, [&](std::string& w) { ++calls; w = "Compilation failed: bad shader"; return false; },
+            [&](unsigned, const std::string&) { ++retries; });
+        CHECK_FALSE(ok);
+        CHECK(calls == 1);
+        CHECK(retries == 0);
+    }
 }

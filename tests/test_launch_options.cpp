@@ -84,7 +84,7 @@ TEST_CASE("launch options: F3 pipeline switches") {
     CHECK_FALSE(o.compileQosInteractive);
     CHECK(o.pipelineSalt == 0);
     REQUIRE(parse({"--pipeline-archive", "a.metallib", "--no-pipeline-archive", "--harvest-pipelines", "p.mtl4-json",
-                   "--pipeline-sync", "--debug-compile-storm", "--debug-pipeline-fallback", "--debug-flexible-pipelines", "--debug-mode", "2", "--force-variant", "41", "--compile-qos", "interactive", "--pipeline-salt", "42", "--frame-trace", "t.csv",
+                   "--pipeline-sync", "--debug-compile-storm", "--debug-pipeline-fallback", "--debug-pipeline-xpc-fail", "2", "--debug-flexible-pipelines", "--debug-mode", "2", "--force-variant", "41", "--compile-qos", "interactive", "--pipeline-salt", "42", "--frame-trace", "t.csv",
                    "--shader-dir", "shaders", "--debug-hot-reload", "probe.metallib"},
                   o, err));
     CHECK(o.pipelineArchivePath == "a.metallib");
@@ -93,6 +93,7 @@ TEST_CASE("launch options: F3 pipeline switches") {
     CHECK(o.pipelineSync);
     CHECK(o.debugCompileStorm);
     CHECK(o.debugPipelineFallback);
+    CHECK(o.debugPipelineXpcFail == 2u);
     CHECK(o.debugFlexiblePipelines);
     CHECK(o.debugMode == 2);
     CHECK(o.forceVariant == 41u);

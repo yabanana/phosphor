@@ -61,6 +61,11 @@ namespace phosphor {
 //                      specialised variants and draws with the generic
 //                      pipeline, the fallback a new variant uses while it
 //                      compiles (F3.2/F3.3 check: same pixels as before F3)
+//   --debug-pipeline-xpc-fail N  the first N pipeline compile attempts of
+//                      the run fail with a synthetic "interrupted connection"
+//                      error (XPC_ERROR_CONNECTION_INTERRUPTED), injected
+//                      before the real compile call: N up to 3 is absorbed
+//                      by the bounded retry, a larger N must fail (control)
 //   --debug-mode N     start in debug view N (0 lit, 1 normals, 2 base colour;
 //                      the F1-F3 keys, for benchmark/capture runs)
 //   --force-variant N  the forward pass always draws with variant N of the
@@ -300,6 +305,7 @@ struct LaunchOptions {
     std::string frameTracePath;
     bool        debugCompileStorm  = false;
     bool        debugPipelineFallback = false;
+    u32         debugPipelineXpcFail  = 0;     // --debug-pipeline-xpc-fail N (0 = off)
     bool        debugFlexiblePipelines = false;
     u32         debugMode      = 0;
     std::optional<u32> forceVariant;

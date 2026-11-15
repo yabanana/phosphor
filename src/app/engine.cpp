@@ -224,6 +224,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     pipelineOptions.sync           = options_.pipelineSync;
     pipelineOptions.interactiveQos = options_.compileQosInteractive;
     pipelineOptions.fallbackOnly   = options_.debugFlexiblePipelines;
+    pipelineOptions.debugXpcFail   = options_.debugPipelineXpcFail;
     pipelines_     = std::make_unique<PipelineCache>(*context_, pipelineOptions);
     renderer_      = std::make_unique<SceneRenderer>(*context_, *pipelines_, options_.pipelineSalt,
                                                      /*genericOnly*/ options_.debugPipelineFallback,

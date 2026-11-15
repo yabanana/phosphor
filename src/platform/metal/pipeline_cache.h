@@ -74,6 +74,7 @@ public:
         bool        sync           = false;
         bool        interactiveQos = false; // negative control (F3.1)
         bool        fallbackOnly   = false; // debug: never apply final objects
+        u32         debugXpcFail   = 0;     // debug: first N compile attempts fail with a synthetic XPC interruption
     };
 
     PipelineCache(MetalContext& context, const Options& options);
@@ -169,6 +170,12 @@ private:
     /// Flexible pipeline of `generic` for `library` (compiled once, shared).
     MTL::RenderPipelineState* flexibleBase(const pipe::PipelineDesc& generic, MTL::Library* library,
                                            u32& compilerCalls, float& compileMs);
+    /// One compiler call with the bounded retry of transient compiler-service
+    /// interruptions and the --debug-pipeline-xpc-fail injection.  `call`
+    /// returns the created object or nullptr and sets the error.
+    NS::Object* compileWithRetry(const std::string& label, NS::Error** error,
+                                 const std::function<NS::Object*(NS::Error**)>& call);
+    std::atomic<u32> xpcFailBudget_{0};
     NS::Object* compileFinal(const pipe::PipelineDesc& desc, MTL::Library* library, NS::Error** error);
     NS::Object* archiveLookup(const pipe::PipelineDesc& desc, MTL::Library* library, NS::Error** error);
     void waitForCompletions(const std::function<bool()>& done);

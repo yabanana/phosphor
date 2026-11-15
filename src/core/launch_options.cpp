@@ -256,6 +256,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.debugFlexiblePipelines = true;
         } else if (arg == "--debug-pipeline-fallback") {
             out.debugPipelineFallback = true;
+        } else if (arg == "--debug-pipeline-xpc-fail") {
+            if (!needCount(out.debugPipelineXpcFail)) return false;
         } else if (arg == "--debug-compile-storm") {
             out.debugCompileStorm = true;
         } else if (arg == "--frame-trace") {

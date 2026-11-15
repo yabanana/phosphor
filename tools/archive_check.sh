@@ -113,7 +113,7 @@ run_case() {
     # "Validation Enabled" banners is a problem.  A rejected archive may be
     # reported by the app as a warning mentioning the archive: tolerated only
     # in the scenarios that expect a rejection.
-    local ignore='^\[INFO\]|^BENCH|^SCENE|^EXIT 0$|^MESHLET |^PIPELINES|^STARTUP|^SWITCH|^GRAPH-TRANSIENTS|^ASYNC-COMPUTE|Validation Enabled'
+    local ignore='^\[INFO\]|^BENCH|^SCENE|^EXIT 0$|^MESHLET |^PIPELINES|^STARTUP|^SWITCH|^GRAPH-TRANSIENTS|^ASYNC-COMPUTE|Validation Enabled|^\[WARN\].*compiler service interrupted, retry'
     [[ $allow_warn == 1 ]] && ignore="$ignore|^\[WARN\].*[Aa]rchive"
     messages=$(grep -Ev "$ignore" "$log" | grep -c . || true)
     # The scenario run itself is asynchronous (its counters are what is checked).  When a fallback object drew

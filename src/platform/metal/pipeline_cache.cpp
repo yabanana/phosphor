@@ -7,6 +7,7 @@
 
 #include "core/log.h"
 #include "core/profile.h"
+#include "pipeline/compile_retry.h"
 #include "platform/metal/metal_context.h"
 #include "platform/metal/metal_graph_executor.h"
 #include "platform/metal/metalfx_lifetime.h"
@@ -21,6 +22,7 @@
 #include <functional>
 #include <memory>
 #include <stdexcept>
+#include <thread>
 
 namespace phosphor {
 
@@ -253,6 +255,7 @@ std::shared_ptr<void> retainLibrary(MTL::Library* library) {
 
 PipelineCache::PipelineCache(MetalContext& context, const Options& options)
     : context_(context), options_(options) {
+    xpcFailBudget_.store(options.debugXpcFail);
     MTL::Device* device = context_.device();
     NS::Error* error = nullptr;
 
@@ -512,7 +515,10 @@ void PipelineCache::resolve(pipe::PipelineHandle handle, const pipe::PipelineDes
             MTL::RenderPipelineState* fallback = nullptr;
             {
                 PH_ZONE("Pipeline fallback specialise");
-                fallback = compiler_->newRenderPipelineStateBySpecialization(d, base, &error);
+                fallback = static_cast<MTL::RenderPipelineState*>(
+                    compileWithRetry(desc.label + " (fallback specialisation)", &error, [&](NS::Error** e) -> NS::Object* {
+                        return compiler_->newRenderPipelineStateBySpecialization(d, base, e);
+                    }));
             }
             ms += msSince(start);
             ++calls;
@@ -576,10 +582,49 @@ NS::Object* PipelineCache::compileFinal(const pipe::PipelineDesc& desc, MTL::Lib
             // autoreleased reference is drained by resolve()'s autorelease pool.
             task->setLookupArchives(NS::Array::array(archive_));
         }
-        object = compiler_->newComputePipelineState(static_cast<MTL4::ComputePipelineDescriptor*>(d.get()), task.get(), error);
+        object = compileWithRetry(desc.label, error, [&](NS::Error** e) -> NS::Object* {
+            return compiler_->newComputePipelineState(static_cast<MTL4::ComputePipelineDescriptor*>(d.get()), task.get(), e);
+        });
     } else {
-        object = compiler_->newRenderPipelineState(d.get(), nullptr, error);
+        object = compileWithRetry(desc.label, error, [&](NS::Error** e) -> NS::Object* {
+            return compiler_->newRenderPipelineState(d.get(), nullptr, e);
+        });
     }
+    return object;
+}
+
+NS::Object* PipelineCache::compileWithRetry(const std::string& label, NS::Error** error,
+                                            const std::function<NS::Object*(NS::Error**)>& call) {
+    NS::Object* object = nullptr;
+    std::string why;
+    u32 retry = 0;
+    pipe::retryTransientCompile(
+        pipe::COMPILE_RETRY_LIMIT, why,
+        [&](std::string& reasonOut) {
+            *error = nullptr;
+            object = nullptr;
+            // --debug-pipeline-xpc-fail: the first N compile attempts fail with the
+            // synthetic interruption, before the real compile call.
+            u32 budget = xpcFailBudget_.load();
+            while (budget > 0 && !xpcFailBudget_.compare_exchange_weak(budget, budget - 1)) {}
+            if (budget > 0) {
+                NS::Dictionary* info = NS::Dictionary::dictionary(str(pipe::TRANSIENT_COMPILER_ERROR_TEXT), NS::LocalizedDescriptionKey);
+                *error = NS::Error::error(str("PhosphorDebugCompiler"), 1, info);
+                reasonOut = reason(*error);
+                return false;
+            }
+            object = call(error);
+            if (!object) reasonOut = reason(*error);
+            return object != nullptr;
+        },
+        [&](u32 n, const std::string& text) {
+            retry = n;
+            registry_.noteCompileRetry();
+            LOG_WARN("Pipeline %s: compiler service interrupted, retry %u/%u (%s)", label.c_str(), n,
+                     pipe::COMPILE_RETRY_LIMIT, text.c_str());
+            std::this_thread::sleep_for(std::chrono::milliseconds(50u << (n - 1))); // 50, 100, 200 ms
+        });
+    (void)retry;
     return object;
 }
 

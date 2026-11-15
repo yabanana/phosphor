@@ -23,12 +23,12 @@ std::string formatPipelineStats(const PipelineStats& s) {
     std::snprintf(buf, sizeof(buf),
                   "PIPELINES requests %u | archive hits %u, misses %u, unavailable %u (miss rate %.1f%%) | "
                   "compiler calls %u (%.1f ms, max %.1f ms) | render-thread compiles %u (%.1f ms) | "
-                  "fallbacks %u (draws %llu) | failures %u | reloads %u (failed %u)",
+                  "fallbacks %u (draws %llu) | failures %u | reloads %u (failed %u) | compile retries %u",
                   s.requests, s.archiveHits, s.archiveMisses, s.archiveUnavailable,
                   static_cast<double>(s.archiveMissRate()) * 100.0, s.compilerCalls, s.compileMs,
                   static_cast<double>(s.compileMsMax), s.renderThreadCompiles, s.renderThreadCompileMs,
                   s.fallbacksServed, static_cast<unsigned long long>(s.fallbackDraws), s.failures,
-                  s.reloads, s.reloadFailures);
+                  s.reloads, s.reloadFailures, s.compileRetries);
     return buf;
 }
 
@@ -39,12 +39,12 @@ std::string pipelineStatsJson(const PipelineStats& s, const PipelineStats* atSta
                   "\"archiveMissRate\":%.4f,\"compilerCalls\":%u,\"compileMs\":%.3f,\"compileMsMax\":%.3f,"
                   "\"fallbacksServed\":%u,\"fallbackDraws\":%llu,\"renderThreadCompiles\":%u,"
                   "\"renderThreadCompileMs\":%.3f,\"failures\":%u,\"swaps\":%u,\"reloads\":%u,"
-                  "\"reloadFailures\":%u}",
+                  "\"reloadFailures\":%u,\"compileRetries\":%u}",
                   s.requests, s.archiveHits, s.archiveMisses, s.archiveUnavailable,
                   static_cast<double>(s.archiveMissRate()), s.compilerCalls, s.compileMs,
                   static_cast<double>(s.compileMsMax), s.fallbacksServed,
                   static_cast<unsigned long long>(s.fallbackDraws), s.renderThreadCompiles,
-                  s.renderThreadCompileMs, s.failures, s.swaps, s.reloads, s.reloadFailures);
+                  s.renderThreadCompileMs, s.failures, s.swaps, s.reloads, s.reloadFailures, s.compileRetries);
     std::string json = buf;
     if (atStart) {
         char measured[256];
