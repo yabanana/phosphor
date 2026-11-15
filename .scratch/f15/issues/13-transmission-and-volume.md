@@ -382,3 +382,22 @@ which is what let the firefly land on a length-1 history.
 Needs a quiet-machine A/B (orchestrator): cost of the extra deterministic endpoint walk per transmissive pixel (one more trace walk, <= 8 traces) and of the 81-read window search in
 `denoise_temporal_lobe`; +16 B per pixel per specular history buffer in every scene (66 MiB at 1080p for three views x two buffers is NOT claimed: measure).
 Files / tools: `build/f15-clip-glass` (captures, control sums), `build/control_chunks.py` (control in lock-fair chunks), `build/case_driver.py`.
+
+### 2026-11-15 addendum (glass-temporal): history layout follows the feature union; rough ROIs after two iterations
+
+1. Layout (commit 8d43c2e).  The orchestrator asked that featureless scenes keep the 16 B specular history.  GPUDenoiseSpecularHistory is 16 B again; the endpoint is a
+   second 16 B extension (GPUDenoiseEndpointHistory) AFTER the specular one in the same buffer, present only while the lobe kernels are wanted and the feature union has
+   transmission (DenoisePasses::reserve reallocates on a change, buffers 10 / 11 of denoise_temporal_lobe, touched under kMaterialFeatures & TRANSMISSION).  Evidence:
+   f15_exact.sh 5 cases byte-identical to build/litefix/exact-new; visual_check with EXTRA_ARGS=--pipeline-sync 8/8 benches 0 px; Sponza D2 report (baseline binary vs this one,
+   same command, 8 frames) engine_resource_bytes_last 3788213061 and device_allocated_bytes_last 4867604480 in both; the transmission clip is unchanged (smooth p95 0.0229 / 0.0235 / 0.0304).
+2. Rough ROIs, two iterations (corrected judge, 110-seed control, gates 0.06 / 0.15 / 0.02; r0.1 / r0.3 p95, max, flicker):
+   - baseline of this item (endpoint match, soft test and 2 x temporalAlpha blend kept for rough): 0.0885 / 0.0938 / 0.0278 and 0.0840 / 0.1385 / 0.0211;
+   - iteration 1, rough blend floor 1 / 16 (between the rough 0.16 and the smooth 1 / 32): 0.0888 / 0.0954 / 0.0230 and 0.0918 / 0.1385 / 0.0192 (p95 unchanged or worse, flicker better); reverted;
+   - iteration 2 (diagnostic, no code): `--specular-atrous-iterations 1`: 0.0872 / 0.0946 / 0.0227 and 0.0911 / 0.1716 / 0.0198: the spatial filter is not the limit;
+   - earlier: the smooth treatment (no soft test, 1 / 32) on rough pixels: 0.1006 and 0.1106, worse.
+   What limits it (measured): the error is not noise (raw 1 spp is unbiased, mean error 0.0005) and is insensitive to the blend floor and to the a-trous depth; it is a signed contrast loss
+   (bright pixels -0.047 / -0.054, dark +0.049 / +0.150 on r0.1 / r0.3) that is temporally correlated (lag-1 autocorrelation 0.75-0.78); r0.1 is 72 % checker edges (minified image) with 91 % of
+   the squared error on them, r0.3 is a smooth blurred image with 97 % of the error in the interior.  A rough interface has no point endpoint (the sample scatters around the deterministic one), so
+   a nearest-pixel match of the centre endpoint resamples a blurred, moving image with a sub-pixel position error that no blend or filter setting removes.  Candidate (not done): a sub-pixel,
+   gradient-aware (bilinear on the endpoint offset) history for rough pixels or a rough-lobe-specific reprojection of the blurred image; that is a research item, not a one- or two-iteration change.
+   `ROUGH_GATED` stays empty: the gate for r0.1 / r0.3 is MISSED (reported by transmission-rough-corrected), the owner decides.

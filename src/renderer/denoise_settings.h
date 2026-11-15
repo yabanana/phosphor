@@ -57,7 +57,7 @@ struct DenoiseLobePixel { u32 sampleFlags=0; DenoiseLobeGuide guide{}; };
 [[nodiscard]] DenoiseHistory denoiseTemporal(const GPUDISurface&,glm::vec3 current,const DenoiseHistory&,
     const GPUDenoiseParams&,glm::vec3 neighborhoodLow,glm::vec3 neighborhoodHigh,const GPUSpecularSample& specular={},float neighborhoodVariance=-1,
     glm::vec3 neighborhoodMean=glm::vec3(0),glm::vec3 neighborhoodSigma=glm::vec3(-1),const DenoiseLobeGuide* lobe=nullptr,
-    bool endpointMatched=false,bool endpointRough=false); // endpointRough: matched by the endpoint of a ROUGH interface: soft test kept, blend floor kDenoiseEndpointRoughFloor / maxHistory.
+    bool endpointMatched=false);
     // F15.1 ticket 13: the history was matched by the endpoint of a SMOOTH interface: no soft test, the blend floor is 1 / maxHistory
 [[nodiscard]] float denoiseSpatialWeight(const GPUDISurface&,const GPUDISurface&,float centerLuminance,float neighborLuminance,
     float variance,const GPUDenoiseParams&,const DenoiseLobePixel* lobeA=nullptr,const DenoiseLobePixel* lobeB=nullptr);

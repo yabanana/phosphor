@@ -168,7 +168,7 @@ kernel void DN_KERNEL(denoise_temporal)(constant GPUDenoiseParams& p [[buffer(0)
     if(denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR&&(spec.flags&SPECULAR_SAMPLE_STOCHASTIC)&&!(p.flags&DENOISE_DIAGNOSTIC_ENDPOINTS))h.flags|=DENOISE_HISTORY_STOCHASTIC;
     if(s.valid&&(!all(isfinite(current))||!all(isfinite(normal))||dot(normal,normal)<=0))h.flags=1u;
     if(s.valid&&all(isfinite(current))&&all(isfinite(normal))&&dot(normal,normal)>0){current=max(current,0.0f);if(denoiseSignal(p)==DENOISE_SIGNAL_AO)current=saturate(current);
-        DenoiseHistory old{};bool reuse=false;bool endpointHistory=false,endpointRough=false;
+        DenoiseHistory old{};bool reuse=false;bool endpointHistory=false;
         if(!(p.flags&DENOISE_RESET)){const float2 delta=motion.read(pixel).xy,center=float2(pixel)+.5f+delta;
             if(all(isfinite(delta))&&all(center>=0)&&all(center<float2(p.width,p.height))){const uint2 q=uint2(center);
 #ifdef PHOSPHOR_DENOISE_LOBE
@@ -176,7 +176,7 @@ kernel void DN_KERNEL(denoise_temporal)(constant GPUDenoiseParams& p [[buffer(0)
                 const bool endpointMatch=kDenoiseEndpoints&&lobes&&lobe.key==(SPECULAR_LOBE_TRANSMISSION|4u)&&(spec.flags&SPECULAR_SAMPLE_ENDPOINT)!=0u;
                 uint found=q.y*p.width+q.x;const bool matched=endpointMatch?denoiseEndpointFind(p,specular,previousEndpoint,pixel,int2(q),spec,found):true;
                 if(matched){old=denoiseLoad(p,previousHeader,previous,previousSpecular,found);
-                    reuse=DN_FN(denoiseCompatible)(s,old,p,spec,lobes,lobe,!endpointMatch);const bool smoothInterface=max(s.roughness*s.roughness,0.002f)<=phosphor::kTransmissionSmoothAlpha;endpointHistory=endpointMatch&&reuse&&smoothInterface;endpointRough=endpointMatch&&reuse&&!smoothInterface;} // only a SMOOTH interface (h = n) has an exact endpoint: a rough pixel keeps the soft test and the blend floor
+                    reuse=DN_FN(denoiseCompatible)(s,old,p,spec,lobes,lobe,!endpointMatch);const bool smoothInterface=max(s.roughness*s.roughness,0.002f)<=phosphor::kTransmissionSmoothAlpha;endpointHistory=endpointMatch&&reuse&&smoothInterface;} // only a SMOOTH interface (h = n) has an exact endpoint: a rough pixel keeps the soft test and the blend floor
 #else
                 old=denoiseLoad(p,previousHeader,previous,previousSpecular,q.y*p.width+q.x);
                 reuse=denoiseCompatible(s,old,p,spec);
@@ -203,8 +203,7 @@ kernel void DN_KERNEL(denoise_temporal)(constant GPUDenoiseParams& p [[buffer(0)
         const bool still=(p.flags&DENOISE_STATIONARY)!=0;const uint length=still?min(reuse?old.length+spp:spp,p.maxHistory):frames;
         // F15.1 ticket 13: an endpoint-matched history is the same refracted point (no reprojection error to outrun), so it integrates over the whole
         // history cap: the floor of the blend is 1 / maxHistory instead of temporalAlpha (denoiseEndpointAlpha of the CPU mirror).
-        const float softAlpha=(p.flags&DENOISE_SOFT_CHANGE)?2*p.temporalAlpha:p.temporalAlpha;
-        const float baseAlpha=endpointHistory?min(p.temporalAlpha,1.0f/float(p.maxHistory)):(endpointRough?min(softAlpha,kDenoiseEndpointRoughFloor/float(p.maxHistory)):softAlpha);
+        const float baseAlpha=endpointHistory?min(p.temporalAlpha,1.0f/float(p.maxHistory)):((p.flags&DENOISE_SOFT_CHANGE)?2*p.temporalAlpha:p.temporalAlpha);
         const float alpha=reuse?(still?min(1.0f,float(spp)/float(length)):max(baseAlpha,1.0f/float(length))):1;
         const float ma=reuse?max(p.momentsAlpha,1.0f/float(frames)):1,L=diLuminance(current);float3 color=reuse?mix(oldColor,current,alpha):current;if(denoiseSignal(p)==DENOISE_SIGNAL_AO)color=saturate(color);
         h.length=length;h.firstMoment=reuse?mix(old.firstMoment,L,ma):L;h.secondMoment=reuse?mix(old.secondMoment,L*L,ma):L*L;

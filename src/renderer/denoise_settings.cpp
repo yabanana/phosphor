@@ -81,7 +81,7 @@ bool denoiseCompatible(const GPUDISurface& s,const DenoiseHistory& h,const GPUDe
     return true;
 }
 DenoiseHistory denoiseTemporal(const GPUDISurface& s,glm::vec3 current,const DenoiseHistory& old,const GPUDenoiseParams& p,glm::vec3 low,glm::vec3 high,const GPUSpecularSample& spec,float neighborhoodVariance,
-                                   glm::vec3 mean,glm::vec3 sigma,const DenoiseLobeGuide* lobe,bool endpointMatched,bool endpointRough){
+                                   glm::vec3 mean,glm::vec3 sigma,const DenoiseLobeGuide* lobe,bool endpointMatched){
     DenoiseHistory h{};h.signal=p.signal;h.viewID=p.viewID;h.historyEpoch=p.historyEpoch;h.signalRevision=p.signalRevision;
     if(p.signal==DENOISE_SIGNAL_SPECULAR&&(spec.flags&SPECULAR_SAMPLE_STOCHASTIC)&&!(p.flags&DENOISE_DIAGNOSTIC_ENDPOINTS))h.flags|=DENOISE_HISTORY_STOCHASTIC;
     if(!s.valid)return h;
@@ -96,8 +96,7 @@ DenoiseHistory denoiseTemporal(const GPUDISurface& s,glm::vec3 current,const Den
     const u32 count=reuse?std::min(old.length,p.maxHistory-1)+1:1;
     const u32 spp=p.signal==DENOISE_SIGNAL_SPECULAR?std::max(1u,(spec.flags>>SPECULAR_SAMPLE_COUNT_SHIFT)&SPECULAR_SAMPLE_COUNT_MASK):1u;
     const bool still=(p.flags&DENOISE_STATIONARY)!=0;const u32 length=still?std::min(reuse?old.length+spp:spp,p.maxHistory):count;
-    const float softAlpha=(p.flags&DENOISE_SOFT_CHANGE)?2*p.temporalAlpha:p.temporalAlpha;
-    const float base=endpointMatched?std::min(p.temporalAlpha,1.f/float(p.maxHistory)):(endpointRough?std::min(softAlpha,kDenoiseEndpointRoughFloor/float(p.maxHistory)):softAlpha);
+    const float base=endpointMatched?std::min(p.temporalAlpha,1.f/float(p.maxHistory)):((p.flags&DENOISE_SOFT_CHANGE)?2*p.temporalAlpha:p.temporalAlpha);
     const float alpha=reuse?(still?std::min(1.f,float(spp)/float(length)):std::max(base,1.f/count)):1,ma=reuse?std::max(p.momentsAlpha,1.f/count):1;
     glm::vec3 color=reuse?glm::mix(previous,current,alpha):current;if(p.signal==DENOISE_SIGNAL_AO)color=glm::clamp(color,glm::vec3(0),glm::vec3(1));const float L=luminance(current);
     h.firstMoment=reuse?old.firstMoment*(1-ma)+L*ma:L;h.secondMoment=reuse?old.secondMoment*(1-ma)+L*L*ma:L*L;
