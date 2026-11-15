@@ -200,3 +200,13 @@ Open item "per-light cost, film-free arm" (no timing taken here: other agents ru
       python3 -I tools/f15_costs.py summarize --out build/f15-costs/t4
 
   (`plan` prints the exact phosphor command lines; the sentinel and A-A noise rules of the script apply.)
+
+### 2026-11-15 — thickness / factor texture fixture (agent `tex`, branch f15c-tex-2)
+
+- `texture-irid-sun` / `texture-irid-env-resolve`: iridescence thickness (G, mix of min/max) and factor (R) textures, 2 x 3 spheres (dielectric, copper;
+  film ior 1.3 / 1.8). GREEN (`build/f15-check/tex5`): sun worst p99 0.70 % (copper, thickness texture only), max outside mask 0.98 %;
+  env-resolve worst mean 0.073 %, p99 0.86 % (limit 1 %). Controls texture-v-flipped, irid-thickness-ignored, irid-thickness-inverted,
+  irid-factor-ignored FAIL (sun and declared twins).
+- Fixture redesigns (thresholds untouched): the first run, thickness 100..900 nm and a fast wave over the sphere, failed copper p99 1.1 % (sun) and
+  1.045 % (env-resolve): a metal film is steep in thickness. The wave frequency was halved and the range cut to 100..500 nm (200..600 for the
+  ior 1.8 column). The copper env-resolve p99 0.86 % shows the declared model still has less margin on a metal with a thickness gradient.

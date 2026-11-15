@@ -198,3 +198,27 @@ Open: direction-texture fixture; declared-environment fit 6.4-7.0 % gap on metal
 - Still declared: an anisotropy primitive built by a bench through `GpuScene::uploadMesh` without tangents gets (1, 0, 0, 1) (the synthetic fixtures use combed spheres on purpose); a repaired tangent frame
   has the arbitrary direction of `anyPerpendicular`, so the anisotropy ROTATION of such a vertex is relative to that arbitrary direction (glTF requires tangents for anisotropic materials; an asset that
   ships none, or degenerate ones, has no authored direction to honour).
+
+### 2026-11-15 — direction/strength texture fixture and fit bounds (agent `tex`, branch f15c-tex-2)
+
+- Anisotropy texture (RG direction, B strength) fixture: `texture-aniso-sun` and `texture-aniso-env-resolve` (`build/f15-check/tex3`, `tex4`): sun worst p99 0.65 %
+  (copper), max outside mask 1.94 %; env-resolve worst mean 0.007 %, p99 0.06 %. Sun controls texture-v-flipped, aniso-direction-ignored,
+  aniso-direction-y-flipped, aniso-strength-ignored all FAIL. The env-resolve key keeps v-flipped and strength-ignored only: the first run showed
+  declared-aniso-direction-ignored / -y-flipped PASS (non-discriminating) and that is physics, not a fixture defect: a constant environment has no
+  angular signature of the lobe direction (the declared model is rotation independent by design), so the direction controls live on the sun key.
+- Declared-environment fit as a tested bound (grid measured with `aniso_albedo_table` against the split sum at the fit roughness, sphere-weighted
+  N.V >= 0.1, base roughness 0.2 / 0.3 / 0.5 / 0.7, strength 0.25 / 0.5 / 0.75 / 1): rms fit error 0.4 / 1.1 / 2.0 / 6.5 % at strength 0.25 / 0.5 / 0.75 / 1
+  (r 0.3; 6.5, 6.6, 6.5, 4.8 % at strength 1 for r 0.2, 0.3, 0.5, 0.7). The BEST single isotropic roughness (scan of 60 values) still leaves 4.0 / 4.2 / 4.8 /
+  4.0 % at strength 1, so no fit of the declared split-sum form reaches below ~4 % and the decision-11 5 % is only met by an anisotropic albedo table
+  (the 4-D table of this ticket's open question). Tested bounds (unit tests, thresholds fixed before): rms fit < 7 % at strength 1 (r 0.3, 0.7); best
+  isotropic roughness > 3.5 %. The strength-1 metal gap therefore stays a DECLARED approximation of the declared model, now with a measured bound
+  instead of an anecdote; a candidate engine tweak (roughness x ~0.97 at strength 1: best fit 0.815-0.827 vs rms 0.841-0.854) would give 4.0-4.8 % and is
+  left as an owner decision (it re-opens every aniso key).
+- Composite complement fit: the sphere-weighted mean of E_fit - E_exact (F0 0.04, N.V >= 0.1) is +0.0007 / +0.0023 / +0.0030 / +0.0005 for the mean-alpha
+  roughness (r/strength 0.3/0.5, 0.3/1, 0.2/1, 0.7/1: never below zero, i.e. the complement does not gain energy on the sphere average) and -0.0042 for the rms
+  fit at (0.3, 1) (the 1.0063 furnace gain). Unit test `test_composite_complement_never_gains_energy_on_the_sphere_average` (control: rms < -0.002). A per-pixel
+  bound does NOT exist: E_fit - E_exact reaches -0.46 at grazing views along the stretched axis (N.V < 0.1), outside the sphere weight; the furnace fixture
+  (pixel max 1.0022 < 1.005) is the per-pixel evidence and stays fixture-bound.
+- Narrow-lobe sun and non-constant environment (bent normal): not built. The reference already integrates the sun disk of a narrow anisotropic lobe with the
+  engine's disk rule (its `narrow` mask drops the highlight from the max gate), so a fixture would gate only the tails; a non-constant declared environment does not exist in the
+  engine (the declared environment is isotropic), so the bent-normal fetch has nothing to be compared against. Stays declared.

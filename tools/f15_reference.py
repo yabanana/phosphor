@@ -233,6 +233,26 @@ THIN_CONTROLS = {
     "transmission-double-counted": {"thin": "double-counted"},       # diffuse reflection not reduced by w: gains energy
     "transmission-fresnel-ignored": {"thin": "fresnel-ignored"},     # transmitted part not weighted by 1 - F(V.H)
 }
+# F15.3 (texture closure) negative controls of the textured fixtures (deltas on the scene's main model; see the KHR texture fixtures section).
+TEXTURE_CONTROLS = {
+    "texture-v-flipped": {"tex": "v-flipped"},                                  # every texture sampled at 1 - v (the origin convention)
+    "texture-coat-normal-ignored": {"tex": "coat-normal-ignored"},              # Nc = N
+    "texture-coat-normal-y-flipped": {"tex": "coat-normal-y-flipped"},          # the green channel read with the OpenGL (+Y down) sign
+    "texture-coat-factor-ignored": {"tex": "coat-factor-ignored"},
+    "texture-coat-roughness-ignored": {"tex": "coat-roughness-ignored"},
+    "texture-aniso-direction-ignored": {"tex": "aniso-direction-ignored"},      # the lobe along +X rotated by `rotation` only
+    "texture-aniso-direction-y-flipped": {"tex": "aniso-direction-y-flipped"},
+    "texture-aniso-strength-ignored": {"tex": "aniso-strength-ignored"},        # strength = the factor
+    "texture-irid-thickness-ignored": {"tex": "irid-thickness-ignored"},        # thickness = the maximum
+    "texture-irid-thickness-inverted": {"tex": "irid-thickness-inverted"},      # t -> 1 - t
+    "texture-irid-factor-ignored": {"tex": "irid-factor-ignored"},
+    "texture-sheen-color-ignored": {"tex": "sheen-color-ignored"},
+    "texture-sheen-color-srgb-encoded": {"tex": "sheen-color-srgb-encoded"},    # the texels used as stored (no sRGB decode)
+    "texture-sheen-roughness-ignored": {"tex": "sheen-roughness-ignored"},
+    "texture-thin-weight-ignored": {"tex": "thin-weight-ignored"},
+    "texture-thin-color-ignored": {"tex": "thin-color-ignored"},
+    "texture-thin-color-srgb-encoded": {"tex": "thin-color-srgb-encoded"},
+}
 # F15.3 (ticket 19) negative controls of the combination grids (deltas on the scene's main model).  `additive-layering` removes the
 # layer attenuation of every layered lobe the scene has at once (coat: base not scaled by 1 - c F_c; sheen: base not scaled by the
 # albedo scaling; iridescence: diffuse not scaled by 1 - max F_irid; thin: diffuse reflection not reduced by w): lobes summed, the
@@ -243,7 +263,8 @@ COMBO_CONTROLS = {
     "order-swapped": {"order": "swapped"},
     "transmission-uncoated": {"thin": "uncoated"},
 }
-ALL_CONTROLS = sorted({**CONTROLS, **SHEEN_CONTROLS, **ANISO_CONTROLS, **IRID_CONTROLS, **THIN_CONTROLS, **COMBO_CONTROLS})
+ALL_CONTROLS = sorted({**CONTROLS, **SHEEN_CONTROLS, **ANISO_CONTROLS, **IRID_CONTROLS, **THIN_CONTROLS, **COMBO_CONTROLS,
+                       **TEXTURE_CONTROLS})
 
 
 def control_model(name, main_model):
@@ -259,6 +280,8 @@ def control_model(name, main_model):
         return {**main_model, **THIN_CONTROLS[name]}
     if name in COMBO_CONTROLS:
         return {**main_model, **COMBO_CONTROLS[name]}
+    if name in TEXTURE_CONTROLS:
+        return {**main_model, **TEXTURE_CONTROLS[name]}
     return CONTROLS[name]
 
 
@@ -352,8 +375,12 @@ def take_coat(coat, sel):
     """The per-pixel arrays of `coat` restricted to the pixel indices `sel` (None stays None)."""
     if coat is None:
         return None
-    return {"factor": coat["factor"][sel], "roughness": coat["roughness"][sel], "f0_ior": coat["f0_ior"][sel],
-            "variant": coat["variant"]}
+    out = {"factor": coat["factor"][sel], "roughness": coat["roughness"][sel], "f0_ior": coat["f0_ior"][sel],
+           "variant": coat["variant"]}
+    for key in ("normal", "mu"):  # texture closure: the per-pixel coat normal Nc and |V.Nc| of a coat normal texture
+        if key in coat:
+            out[key] = coat[key][sel]
+    return out
 
 
 def coat_weight(coat):
@@ -382,6 +409,7 @@ def coat_lobe(coat, n, v, l):
     cosine max(Nc.L, 0) as its validity mask; the caller multiplies it by that cosine."""
     c = coat_weight(coat)
     h = normalize(v + l)
+    n = coat.get("normal", n)  # texture closure: the coat normal Nc (the shading normal without a coat normal texture)
     fc = coat_fresnel(coat, n, v, h)
     alpha = effective_alpha(coat["roughness"])
     nl = dot(n, l)
@@ -416,6 +444,9 @@ def coat_albedo(mu, roughness):
     albedo = np.empty(len(mu))
     weighted = np.empty(len(mu))
     rough = np.asarray(roughness, dtype=np.float64)
+    if len(np.unique(rough)) > 16:
+        raise ValueError("a textured coat roughness has no exact environment table: render the declared model "
+                         "(--no-exact-environment)")
     for r in np.unique(rough):
         sel = rough == r
         mus, a, b = coat_albedo_table(r)
@@ -436,7 +467,7 @@ def environment_coat(material, n_dot_v, coat, radiance):
     (1 - c F_c(mu)) * material + c F_c(mu) * E_coat(mu, a_c) * radiance.  Control `fresnel-vh`: the coat term
     integrates Schlick on V.H, c * (f0 (A + B) + (1 - f0) B) * radiance, the attenuation stays at |V.Nc|."""
     c = coat_weight(coat)
-    mu = np.clip(n_dot_v, MIN_NDOTV, 1.0)
+    mu = np.clip(coat.get("mu", n_dot_v), MIN_NDOTV, 1.0)  # texture closure: |V.Nc| with a coat normal texture
     fc = coat_fresnel_mu(coat, mu)
     albedo, weighted = coat_albedo(mu, coat["roughness"])
     if coat["variant"] == "fresnel-vh":
@@ -530,36 +561,73 @@ def sheen_albedo_table(alpha, variant="spec"):
     """(mu grid, E) of D V N.L over the incident hemisphere for one alpha_g.  E is UNCLAMPED here: `sheen_albedo`
     interpolates first and clamps to SHEEN_E_CLAMP after (a clamped table has a kink where E crosses 1, and interpolating
     across it was off by 0.011 near N.V 0.05 at sheen roughness 0.1: measured against a 2048 x 1024 integration).  The mu
-    nodes are quadratic, mu = s^2 with s uniform in [sqrt(MIN_NDOTV), 1], where E changes fastest."""
+    nodes are quadratic, mu = s^2 with s uniform in [sqrt(MIN_NDOTV), 1], where E changes fastest.
+    Incident quadrature (ticket 10, N.V < 0.005): the integrand D V cos is a narrow peak around the horizon and the azimuth of
+    the view for a grazing view (D is largest for a horizontal half vector), so the nodes are dense there: cos_i = u^2 and
+    phi = pi w^3 with (u, w) midpoint nodes, the Jacobian 2 u * 3 pi w^2 (the previous uniform nodes gave E 0.81 against 0.876
+    at N.V 0.001, roughness 0.3: proven against a dense independent quadrature in tools/test_f15_reference.py)."""
     key = (round(float(alpha), 12), variant == "ashikhmin-visibility")
     if key not in _SHEEN_ALBEDO:
-        n_theta, n_phi = SHEEN_QUADRATURE
-        theta = (np.arange(n_theta) + 0.5) * (0.5 * math.pi / n_theta)
-        phi = (np.arange(n_phi) + 0.5) * (math.pi / n_phi)
-        cos_i, sin_i = np.cos(theta)[:, None], np.sin(theta)[:, None]
-        cell = 2.0 * (0.5 * math.pi / n_theta) * (math.pi / n_phi) * sin_i  # x2: the phi range [pi, 2 pi] mirrors
-        mus = np.linspace(MIN_NDOTV, 1.0, MU_NODES)
+        n_u, n_w = SHEEN_QUADRATURE
+        u = (np.arange(n_u) + 0.5) / n_u
+        w = (np.arange(n_w) + 0.5) / n_w
+        cos_i = (u * u)[:, None]
+        sin_i = np.sqrt(np.maximum(1.0 - cos_i * cos_i, 0.0))
+        phi = math.pi * w ** 3
+        cell = 2.0 * (2.0 * u / n_u)[:, None] * (3.0 * math.pi * w ** 2 / n_w)[None, :]  # x2: the phi range [pi, 2 pi] mirrors
+        s_nodes = np.linspace(math.sqrt(MIN_NDOTV), 1.0, MU_NODES)
+        mus = s_nodes * s_nodes
         albedo = np.empty(MU_NODES)
         lambda_i = charlie_lambda(cos_i, alpha)
         for k, mu in enumerate(mus):
             sin_o = math.sqrt(max(0.0, 1.0 - mu * mu))
             wi_dot_wo = sin_i * np.cos(phi)[None, :] * sin_o + cos_i * mu
-            n_dot_h = np.clip((cos_i + mu) / np.sqrt(2.0 + 2.0 * wi_dot_wo), 0.0, 1.0)  # (wi + wo).n / |wi + wo|
+            n_dot_h = np.clip((cos_i + mu) / np.sqrt(np.maximum(2.0 + 2.0 * wi_dot_wo, 1e-30)), 0.0, 1.0)  # (wi + wo).n / |wi + wo|
             if variant == "ashikhmin-visibility":
-                visibility = 1.0 / (4.0 * (cos_i + mu - cos_i * mu))
+                visibility_cos = cos_i / (4.0 * (cos_i + mu - cos_i * mu))
             else:
-                visibility = 1.0 / ((1.0 + charlie_lambda(mu, alpha) + lambda_i) * 4.0 * mu * cos_i)
-            albedo[k] = float(np.sum(charlie_d(n_dot_h, alpha) * visibility * cos_i * cell))
+                visibility_cos = 1.0 / ((1.0 + charlie_lambda(mu, alpha) + lambda_i) * 4.0 * mu)  # V N.L with N.L cancelled
+            albedo[k] = float(np.sum(charlie_d(n_dot_h, alpha) * visibility_cos * cell))
         _SHEEN_ALBEDO[key] = (mus, albedo)
     return _SHEEN_ALBEDO[key]
 
 
+SHEEN_ROUGHNESS_NODES = 96  # roughness nodes of the textured-roughness grid (sheen_albedo_grid): r = r_min + (1 - r_min) q^2, q uniform
+SHEEN_EXACT_UNIQUE = 16     # up to this many distinct roughness values the exact table of each one is used
+_SHEEN_GRID = {}
+
+
+def sheen_albedo_grid(variant="spec"):
+    """(s nodes, r nodes, E) of the exact tables on a roughness-node grid (E unclamped, s = sqrt(N.V)): the lookup for a
+    continuous per-pixel roughness (a roughness texture) interpolates it bilinearly instead of integrating one table per value."""
+    key = (variant == "ashikhmin-visibility", variant == "roughness-linear")
+    if key not in _SHEEN_GRID:
+        q = np.linspace(0.0, 1.0, SHEEN_ROUGHNESS_NODES)
+        r_nodes = SHEEN_MIN_ROUGHNESS + (1.0 - SHEEN_MIN_ROUGHNESS) * q * q
+        tables = [sheen_albedo_table(float(sheen_alpha(r, variant)), variant) for r in r_nodes]
+        _SHEEN_GRID[key] = (np.sqrt(tables[0][0]), r_nodes, np.stack([t[1] for t in tables], axis=0))
+    return _SHEEN_GRID[key]
+
+
 def sheen_albedo(mu, roughness, variant="spec"):
-    """E per pixel (interpolated over N.V) for per-pixel sheen roughness values."""
+    """E per pixel (interpolated over N.V) for per-pixel sheen roughness values: one exact table per distinct roughness up to
+    SHEEN_EXACT_UNIQUE of them, the roughness-node grid (bilinear in sqrt(N.V) and roughness) for a continuous field."""
     mu = np.clip(np.asarray(mu, dtype=np.float64), MIN_NDOTV, 1.0)
     rough = np.asarray(roughness, dtype=np.float64)
     out = np.empty(mu.shape)
-    for r in np.unique(rough):
+    unique = np.unique(rough)
+    if len(unique) > SHEEN_EXACT_UNIQUE:
+        s_nodes, r_nodes, table = sheen_albedo_grid(variant)
+        r = np.clip(rough, SHEEN_MIN_ROUGHNESS, 1.0)
+        fr = np.sqrt((r - SHEEN_MIN_ROUGHNESS) / (1.0 - SHEEN_MIN_ROUGHNESS)) * (len(r_nodes) - 1)
+        i = np.clip(np.floor(fr).astype(np.int64), 0, len(r_nodes) - 2)
+        t = fr - i
+        fs = (np.sqrt(mu) - s_nodes[0]) / (s_nodes[1] - s_nodes[0])
+        j = np.clip(np.floor(fs).astype(np.int64), 0, len(s_nodes) - 2)
+        f = fs - j
+        out = ((table[i, j] * (1 - f) + table[i, j + 1] * f) * (1 - t) + (table[i + 1, j] * (1 - f) + table[i + 1, j + 1] * f) * t)
+        return np.minimum(out, SHEEN_E_CLAMP)
+    for r in unique:
         sel = rough == r
         mus, e = sheen_albedo_table(float(sheen_alpha(r, variant)), variant)
         out[sel] = np.interp(mu[sel], mus, e)
@@ -1299,7 +1367,7 @@ def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius
     coat_c = None
     if coat is not None:
         coat_c = coat_weight(coat)
-        total = total * coat_attenuation(coat, coat_c, coat_fresnel(coat, n, v, h_c))[:, None]
+        total = total * coat_attenuation(coat, coat_c, coat_fresnel(coat, coat.get("normal", n), v, h_c))[:, None]
     # Specular: mean of f_spec cos over the samples (count = 1 reduces to the point evaluation).
     spec_sum = np.zeros((n_pixels, 3))
     for c in np.unique(count):
@@ -1318,25 +1386,28 @@ def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius
             term = (lobe * nl)[:, None] * specular_w
             if coat is not None:
                 sub = take_coat(coat, sel)
-                term = term * coat_attenuation(sub, coat_c[sel], coat_fresnel(sub, n[sel], v[sel], h))[:, None]
+                term = term * coat_attenuation(sub, coat_c[sel], coat_fresnel(sub, sub.get("normal", n[sel]), v[sel], h))[:, None]
             spec_sum[sel] += np.where((nl > 0)[:, None], term, 0.0) / int(c)
     result = total + spec_sum
     coat_sum = None
     if coat is not None:
         # The coat lobe: its own roughness drives the disk rule (axis = reflection about Nc = n, own alpha).
-        count_c, narrow_c = sun_quadrature(n, v, l, coat["roughness"], radius, model)
+        nc_all = coat.get("normal", n)  # texture closure: the coat lobe lives on Nc
+        count_c, narrow_c = sun_quadrature(nc_all, v, l, coat["roughness"], radius, model)
         alpha_c = effective_alpha(coat["roughness"], model)
+        n_dot_v_c = np.maximum(dot(nc_all, v), MIN_NDOTV)
         coat_sum = np.zeros(n_pixels)
         for c in np.unique(count_c):
             sel = np.flatnonzero(count_c == c)
             sub = take_coat(coat, sel)
             for sample in sun_disk_samples(l, radius, int(c)):
                 lk = np.broadcast_to(sample, (sel.size, 3))
-                nl = np.clip(dot(n[sel], lk), 0.0, 1.0)
+                ncs = nc_all[sel]
+                nl = np.clip(dot(ncs, lk), 0.0, 1.0)
                 h = normalize(v[sel] + lk)
-                nh = np.clip(dot(n[sel], h), 0.0, 1.0)
-                fc = coat_fresnel(sub, n[sel], v[sel], h)
-                term = coat_c[sel] * fc * ggx_d(nh, alpha_c[sel]) * smith_vis(n_dot_v[sel], nl, alpha_c[sel]) * nl
+                nh = np.clip(dot(ncs, h), 0.0, 1.0)
+                fc = coat_fresnel(sub, ncs, v[sel], h)
+                term = coat_c[sel] * fc * ggx_d(nh, alpha_c[sel]) * smith_vis(n_dot_v_c[sel], nl, alpha_c[sel]) * nl
                 coat_sum[sel] += np.where(nl > 0, term, 0.0) / int(c)
         narrow = narrow | narrow_c
     swapped = sheen is not None and coat is not None and model.get("order") == "swapped"  # ticket 19 control: coat BELOW the sheen
@@ -1347,7 +1418,7 @@ def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius
         lobe = sheen_lobe(sheen, n_dot_v, n_dot_l, np.clip(dot(n, h_c), 0.0, 1.0)) * n_dot_l[:, None]
         lobe = np.where((n_dot_l > 0)[:, None], lobe, 0.0)
         if coat is not None and not swapped:
-            lobe = lobe * coat_attenuation(coat, coat_c, coat_fresnel(coat, n, v, h_c))[:, None]
+            lobe = lobe * coat_attenuation(coat, coat_c, coat_fresnel(coat, coat.get("normal", n), v, h_c))[:, None]
         if swapped:  # sheen over (coat over material): the coat lobe is scaled by the sheen's albedo scaling, the sheen is not coated
             result = (result + coat_sum[:, None]) * scale[:, None] + lobe
             coat_sum = None
@@ -1736,9 +1807,11 @@ COMBO_DECLARED_CONTROLS = {
                                    "thin": "double-counted"},
     "declared-order-swapped": {**DECLARED, "order": "swapped"},
 }
+# F15.3 (texture closure): the declared twins of the texture controls (the same per-pixel parameters feed the declared model).
+TEXTURE_DECLARED_CONTROLS = {"declared-" + name: {**DECLARED, **delta} for name, delta in TEXTURE_CONTROLS.items()}
 ALL_DECLARED_CONTROLS = {**DECLARED_CONTROLS, **SPECULAR_DECLARED_CONTROLS, **COAT_DECLARED_CONTROLS, **COMBO_DECLARED_CONTROLS,
                          **SHEEN_DECLARED_CONTROLS, **ANISO_DECLARED_CONTROLS, **IRID_DECLARED_CONTROLS,
-                         **THIN_DECLARED_CONTROLS}
+                         **THIN_DECLARED_CONTROLS, **TEXTURE_DECLARED_CONTROLS}
 
 
 def load_dfg_table(path=DFG_HEADER):
@@ -1866,7 +1939,7 @@ def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, 
         if coat_v["variant"] == "fresnel-vh":
             raise ValueError("the declared split-sum model has no V.H: no fresnel-vh control")
         c = coat_weight(coat_v)
-        mu = np.maximum(np.asarray(n_dot_v, dtype=np.float64), MIN_NDOTV)
+        mu = np.maximum(np.asarray(coat.get("mu", n_dot_v), dtype=np.float64), MIN_NDOTV)  # |V.Nc| with a coat normal texture
         a_c, b_c = dfg_lookup(mu, clamp_roughness(coat_v["roughness"]))
         fc = coat_fresnel_mu(coat_v, mu)
         return (coat_attenuation(coat_v, c, fc)[:, None] * material +
@@ -2178,31 +2251,31 @@ def material_specular(data, material):
     return f32(words[0]), f32(words[1]), [f32(words[2]), f32(words[3]), f32(words[4])]
 
 
-def material_clearcoat(data, material):
+def material_clearcoat(data, material, textures_ok=False):
     """(clearcoatFactor, clearcoatRoughness, clearcoatNormalScale) from word offsets 7, 8, 9 of GPUMaterialExt0, or
     None without the clearcoat feature bit.  Raises when a clear-coat texture (words 10, 11, 12: factor, roughness,
     normal) is set: the reference is texture-free, and the coat normal is the shading normal."""
     words = material_extension_words(data, material)
     if words is None or not int(material.get("feature_bits", 0)) & CLEARCOAT_FEATURE_BIT:
         return None
-    if any(int(words[k]) != INVALID for k in (10, 11, 12)):
+    if not textures_ok and any(int(words[k]) != INVALID for k in (10, 11, 12)):
         raise ValueError("a clear-coat texture is set; the reference is texture-free")
     return f32(words[7]), f32(words[8]), f32(words[9])
 
 
-def material_sheen(data, material):
+def material_sheen(data, material, textures_ok=False):
     """(sheenColor[3], sheenRoughness) from word offsets 13-15 and 16 of GPUMaterialExt0, or None without the sheen
     feature bit.  Raises when a sheen texture (words 17, 18: colour, roughness) is set: the reference is texture-free.
     A zero sheenColor disables the layer (the engine clears the bit then); the formulas reduce to no sheen as well."""
     words = material_extension_words(data, material)
     if words is None or not int(material.get("feature_bits", 0)) & SHEEN_FEATURE_BIT:
         return None
-    if any(int(words[k]) != INVALID for k in (17, 18)):
+    if not textures_ok and any(int(words[k]) != INVALID for k in (17, 18)):
         raise ValueError("a sheen texture is set; the reference is texture-free")
     return [f32(words[13]), f32(words[14]), f32(words[15])], f32(words[16])
 
 
-def material_anisotropy(data, material):
+def material_anisotropy(data, material, textures_ok=False):
     """(strength, rotation) from words 0 and 1 of record 1 (GPUMaterialExt1) of the material's extension group, or None
     without the anisotropy feature bit.  Raises when the anisotropy texture (word 2) is set: the reference is texture-free
     (the direction texture is open for the Khronos corpus, ticket 22).  Ticket 19: composed with coat, sheen, ior/specular and
@@ -2214,12 +2287,12 @@ def material_anisotropy(data, material):
     words = data["material_extensions"]["records"][int(material["extension_index"]) + ANISOTROPY_RECORD]
     if len(words) != EXTENSION_RECORD_WORDS:
         raise ValueError("a material extension record must hold 20 words")
-    if int(words[2]) != INVALID:
+    if not textures_ok and int(words[2]) != INVALID:
         raise ValueError("an anisotropy texture is set; the reference is texture-free")
     return f32(words[0]), f32(words[1])
 
 
-def material_iridescence(data, material):
+def material_iridescence(data, material, textures_ok=False):
     """(iridescenceFactor, iridescenceIor, thicknessMinimum, thicknessMaximum) from words 3-6 of record 1 (GPUMaterialExt1) of the
     material's extension group, or None without the iridescence feature bit.  Raises when the factor or thickness texture (words 7
     and 8) is set (the reference is texture-free: the thickness texture case is open for ticket 22).  Ticket 19: composed with coat,
@@ -2231,12 +2304,12 @@ def material_iridescence(data, material):
     words = data["material_extensions"]["records"][int(material["extension_index"]) + IRIDESCENCE_RECORD]
     if len(words) != EXTENSION_RECORD_WORDS:
         raise ValueError("a material extension record must hold 20 words")
-    if int(words[7]) != INVALID or int(words[8]) != INVALID:
+    if not textures_ok and (int(words[7]) != INVALID or int(words[8]) != INVALID):
         raise ValueError("an iridescence or thickness texture is set; the reference is texture-free")
     return f32(words[3]), f32(words[4]), f32(words[5]), f32(words[6])
 
 
-def material_subsurface(data, material):
+def material_subsurface(data, material, textures_ok=False):
     """(weight, colour[3]) of the thin subsurface block from record 2 (GPUMaterialExt2) of the material's extension group
     (words 1 weight, 2-4 colour), or None without the subsurface feature bit.  Raises on volumetric mode (word 0 = 1: ticket 17),
     on a texture (words 10-12), on a non-zero anisotropy (word 9) and on any other feature bit."""
@@ -2249,7 +2322,7 @@ def material_subsurface(data, material):
         raise ValueError("a material extension record must hold 20 words")
     if int(words[0]) != 0:
         raise ValueError("volumetric subsurface is outside the thin-mode model (ticket 17)")
-    if any(int(words[k]) != INVALID for k in (10, 11, 12)):
+    if any(int(words[k]) != INVALID for k in ((12,) if textures_ok else (10, 11, 12))):
         raise ValueError("a subsurface texture is set; the reference is texture-free")
     if f32(words[9]) != 0.0:
         raise ValueError("a non-zero subsurface anisotropy is outside the thin-mode model (the draft's scatter split is not modelled)")
@@ -2283,7 +2356,247 @@ def uses_clearcoat(data):
     return any(int(m.get("feature_bits", 0)) & CLEARCOAT_FEATURE_BIT for m in data["materials"])
 
 
-def sphere_table(data):
+# --- KHR texture fixtures (F15.3 texture closure, tickets 09-12, 16, 19, 22) ------------------------------------------------
+#
+# Textured lobe parameters, from the KHR_materials_* texts (research/khr-materials.md) and the engine's sampler, written here
+# independently of the MSL.  Enabled by `--textures` (render_frame(textures=True)); without it a textured material is refused as before.
+#
+# Sampling definition (the engine's `kMaterialSampler`: linear, trilinear mips, repeat, anisotropy 8; the visibility resolve passes
+# analytic UV gradients; the result is a half4):
+#   * the texel centre of texel i is (i + 0.5) / size, v = 0 is the first (top) row, wrap = repeat; level 0 bilinear;
+#   * the value is rounded to binary16 before the factor multiplication (shader: `half4(tex.sample(...))`);
+#   * the exported RGB of an sRGB texture is ALREADY linear (the hardware decodes before filtering, ReferenceTexture contract);
+#     alpha is linear.
+#   * mip selection is NOT modelled: a pixel whose UV footprint (largest UV step to a 4-neighbour of the same instance, wrapped in u)
+#     exceeds FOOTPRINT_LIMIT texels in either axis is dropped from the ROI of the render (`ambiguous`), the engine's LOD may be above
+#     0 there.  Everywhere else the sampler magnifies (LOD <= 0) and level 0 is exact.  The criterion is a property of the texture
+#     and the view, fixed before any comparison.
+#   * UV = the mesh `s`, `t` of the PLY barycentrically interpolated at the hit (the hit position in the object space of the hit
+#     triangle: affine invariant, equal to the engine's perspective-correct interpolation); no KHR_texture_transform.
+#
+# Channel semantics (texture word -> parameter):
+#   clearcoat      factor c = saturate(factor * tex.r), roughness = clamp(roughnessFactor * tex.g, 0.04, 1),
+#                  normal Nc = normalize(T x + B y + N z), (x, y, z) = (2 rgb - 1) with x, y scaled by clearcoatNormalScale;
+#                  T the shading tangent orthogonalised against N, B = cross(N, T) w det (the anisotropy frame), N the shading normal
+#   sheen          colour S = factor * tex.rgb (sRGB), roughness = factor * tex.a
+#   anisotropy     direction d = normalize(2 rg - 1) (+X when zero), strength = saturate(strength * tex.b), the lobe direction is
+#                  d rotated counter-clockwise by `rotation`, i.e. the lobe angle in the (T, B) frame is rotation + atan2(d.y, d.x)
+#   iridescence    thickness = min (1 - tex.g) + max tex.g, factor = saturate(factor * tex.r)
+#   thin           weight = saturate(weight * tex.a), colour = colour * tex.rgb (sRGB)
+# Controls (render_frame model["tex"] / environment["tex"]): see TEXTURE_CONTROLS.
+FOOTPRINT_LIMIT = 0.5
+TEXTURE_WORDS = {  # slot: (record offset in the material's extension group, word, feature bit that owns the record words)
+    "coat_factor": (0, 10, 2), "coat_roughness": (0, 11, 2), "coat_normal": (0, 12, 2),
+    "sheen_color": (0, 17, 4), "sheen_roughness": (0, 18, 4),
+    "aniso": (1, 2, 8),
+    "irid_factor": (1, 7, 16), "irid_thickness": (1, 8, 16),
+    "thin_weight": (2, 10, 128), "thin_color": (2, 11, 128),
+}
+TEXTURE_SLOT_ORDER = tuple(TEXTURE_WORDS)
+# TEXTURE_CONTROLS: defined with the other control tables (top of the module).
+
+
+def srgb_encode(linear):
+    """The sRGB opto-electronic transfer function (IEC 61966-2-1): the inverse of the decode the hardware applies."""
+    x = np.clip(np.asarray(linear, dtype=np.float64), 0.0, 1.0)
+    return np.where(x <= 0.0031308, 12.92 * x, 1.055 * np.power(x, 1.0 / 2.4) - 0.055)
+
+
+def texture_slots(data, material):
+    """{slot: texture id} of the texture words a material sets, read only from the records of its feature bits."""
+    bits = int(material.get("feature_bits", 0))
+    out = {}
+    if not bits:
+        return out
+    records = data["material_extensions"]["records"]
+    base = int(material["extension_index"])
+    for slot, (record, word, bit) in TEXTURE_WORDS.items():
+        if bits & bit and int(records[base + record][word]) != INVALID:
+            out[slot] = int(records[base + record][word])
+    return out
+
+
+def texture_slot_bits(data, material):
+    """The slots a material binds as a bit set (bit k = TEXTURE_SLOT_ORDER[k]); 0 for a texture-free material."""
+    slots = texture_slots(data, material)
+    return sum(1 << k for k, name in enumerate(TEXTURE_SLOT_ORDER) if name in slots)
+
+
+def uses_textures(data):
+    return any(texture_slots(data, m) for m in data["materials"])
+
+
+def surface_uv_image(root, data, cast):
+    """((h, w, 2) interpolated mesh UV of the valid pixels, (h, w, 2) UV footprint): the footprint of a pixel is the largest absolute
+    UV step (u wrapped to [0, 0.5], v plain) to its valid 4-neighbours of the same instance; 0 where no such neighbour exists."""
+    valid, position, _, instance, (width, height) = cast
+    if getattr(cast, "primitive", None) is None:
+        raise ValueError("the cast carries no primitive indices")
+    flat = valid.reshape(-1)
+    inst = instance.reshape(-1)
+    prim = cast.primitive.reshape(-1)
+    uv = np.zeros((width * height, 2))
+    pick = np.flatnonzero(flat)
+    for k in np.unique(inst[pick]):
+        sel = pick[inst[pick] == k]
+        item = data["instances"][int(k)]
+        properties, faces = read_ply(root / data["meshes"][item["mesh"]])
+        if "s" not in properties or "t" not in properties:
+            raise ValueError("the mesh PLY has no UV (s, t)")
+        world = instance_matrix(item)
+        triangle = faces[prim[sel]]
+        position_o = np.stack([properties["x"], properties["y"], properties["z"]], axis=1).astype(np.float64)
+        corners = position_o[triangle]
+        p = (np.concatenate([position[sel], np.ones((len(sel), 1))], axis=1) @ np.linalg.inv(world).T)[:, :3]
+        e1, e2, d = corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0], p - corners[:, 0]
+        d11, d12, d22 = dot(e1, e1), dot(e1, e2), dot(e2, e2)
+        d1, d2 = dot(d, e1), dot(d, e2)
+        denominator = d11 * d22 - d12 * d12
+        b1 = (d22 * d1 - d12 * d2) / denominator
+        b2 = (d11 * d2 - d12 * d1) / denominator
+        bary = np.stack([1.0 - b1 - b2, b1, b2], axis=1)
+        st = np.stack([properties["s"], properties["t"]], axis=1).astype(np.float64)
+        uv[sel] = np.einsum("mc,mcj->mj", bary, st[triangle])
+    uv_image = uv.reshape(height, width, 2)
+    inst_image = instance
+    foot = np.zeros((height, width, 2))
+    for axis, shift in ((0, 1), (0, -1), (1, 1), (1, -1)):
+        other = np.roll(uv_image, shift, axis=axis)
+        same = np.roll(inst_image, shift, axis=axis) == inst_image
+        same &= np.roll(valid, shift, axis=axis) & valid
+        delta = np.abs(other - uv_image)
+        delta[..., 0] = np.minimum(delta[..., 0], 1.0 - delta[..., 0])
+        foot = np.maximum(foot, np.where(same[..., None], delta, 0.0))
+    return uv_image, foot
+
+
+class TextureField:
+    """Per-pixel sampling of the snapshot textures at the picked pixels of a cast (see the section comment)."""
+
+    def __init__(self, root, data, cast, pick):
+        from f12_reference import read_pfm
+        uv_image, foot = surface_uv_image(root, data, cast)
+        self.uv = uv_image.reshape(-1, 2)[pick]
+        self.foot = foot.reshape(-1, 2)[pick]
+        self.images = {}
+        for t in data["textures"]:
+            self.images[int(t["id"])] = (read_pfm(root / t["rgb"]).astype(np.float64),
+                                         read_pfm(root / t["alpha"])[:, :, 0].astype(np.float64))
+        self.ambiguous = np.zeros(len(pick), dtype=bool)
+        self._cache = {}
+
+    def sample_all(self, index, flip_v=False):
+        """(n, 4) binary16-rounded bilinear RGBA of texture `index` at every picked pixel (cached)."""
+        key = (index, flip_v)
+        if key not in self._cache:
+            rgb, alpha = self.images[index]
+            h, w = alpha.shape
+            uv = self.uv.copy()
+            if flip_v:
+                uv[:, 1] = 1.0 - uv[:, 1]
+            x, y = uv[:, 0] * w - 0.5, uv[:, 1] * h - 0.5
+            ix, iy = np.floor(x).astype(np.int64), np.floor(y).astype(np.int64)
+            fx, fy = (x - ix)[:, None], (y - iy)[:, None]
+            image = np.concatenate([rgb, alpha[:, :, None]], axis=2)
+
+            def texel(dx, dy):
+                return image[(iy + dy) % h, (ix + dx) % w]
+            value = ((texel(0, 0) * (1 - fx) + texel(1, 0) * fx) * (1 - fy) + (texel(0, 1) * (1 - fx) + texel(1, 1) * fx) * fy)
+            self._cache[key] = value.astype(np.float16).astype(np.float64)
+        return self._cache[key]
+
+    def use(self, index, rows, flip_v=False):
+        """The samples of texture `index` at pixel indices `rows`; flags the pixels whose footprint exceeds FOOTPRINT_LIMIT texels."""
+        _, alpha = self.images[index]
+        h, w = alpha.shape
+        exceeds = (self.foot[rows, 0] * w > FOOTPRINT_LIMIT) | (self.foot[rows, 1] * h > FOOTPRINT_LIMIT)
+        self.ambiguous[rows] |= exceeds
+        return self.sample_all(index, flip_v)[rows]
+
+
+def apply_textures(field, data, material_of_pixel, n, v, frame, coat, sheen, aniso, irid, thin, mode="spec"):
+    """The per-pixel lobe dicts with the texture-driven parameters substituted (copies; None stays None).  `frame` = the
+    (tangent, w, det) of `surface_tangents`, needed for a coat normal texture; `mode` names a control (TEXTURE_CONTROLS)."""
+    flip = mode == "v-flipped"
+    coat, sheen, aniso, irid, thin = [None if x is None else {k: (a.copy() if isinstance(a, np.ndarray) else a) for k, a in x.items()}
+                                      for x in (coat, sheen, aniso, irid, thin)]
+    for material_index in np.unique(material_of_pixel):
+        rows = np.flatnonzero(material_of_pixel == material_index)
+        material = data["materials"][int(material_index)]
+        slots = texture_slots(data, material)
+        if not slots:
+            continue
+
+        def sample(slot):
+            return field.use(slots[slot], rows, flip) if slot in slots else None
+        if coat is not None:
+            t = sample("coat_factor")
+            if t is not None and mode != "coat-factor-ignored":
+                coat["factor"][rows] = np.clip(coat["factor"][rows] * t[:, 0], 0.0, 1.0)
+            t = sample("coat_roughness")
+            if t is not None and mode != "coat-roughness-ignored":
+                coat["roughness"][rows] = coat["roughness"][rows] * t[:, 1]
+            t = sample("coat_normal")
+            if t is not None:
+                words = data["material_extensions"]["records"][int(material["extension_index"])]
+                scale = f32(words[9])
+                nr = n[rows]
+                tangent, w, det = frame
+                tr = orthogonal_tangent(tangent[rows], nr)
+                br = np.cross(nr, tr) * (w[rows] * det[rows])[:, None]
+                cn = 2.0 * t[:, :3] - 1.0
+                cn[:, :2] *= scale
+                if mode == "coat-normal-y-flipped":
+                    cn[:, 1] = -cn[:, 1]
+                nc = normalize(tr * cn[:, 0:1] + br * cn[:, 1:2] + nr * cn[:, 2:3])
+                if mode == "coat-normal-ignored":
+                    nc = nr
+                if "normal" not in coat:
+                    coat["normal"] = n.copy()
+                coat["normal"][rows] = nc
+        if aniso is not None:
+            t = sample("aniso")
+            if t is not None:
+                d = 2.0 * t[:, :2] - 1.0
+                if mode == "aniso-direction-y-flipped":
+                    d[:, 1] = -d[:, 1]
+                length = np.linalg.norm(d, axis=1)
+                angle = np.where(length > 1e-6, np.arctan2(d[:, 1], d[:, 0]), 0.0)
+                if mode != "aniso-direction-ignored":
+                    aniso["rotation"][rows] = aniso["rotation"][rows] + angle
+                if mode != "aniso-strength-ignored":
+                    aniso["strength"][rows] = np.clip(aniso["strength"][rows] * t[:, 2], 0.0, 1.0)
+        if irid is not None:
+            t = sample("irid_thickness")
+            if t is not None and mode != "irid-thickness-ignored":
+                weight = 1.0 - t[:, 1] if mode == "irid-thickness-inverted" else t[:, 1]
+                lo, hi = irid["thickness_min"][rows], irid["thickness"][rows]
+                irid["thickness"][rows] = lo * (1.0 - weight) + hi * weight
+            t = sample("irid_factor")
+            if t is not None and mode != "irid-factor-ignored":
+                irid["strength"][rows] = np.clip(irid["strength"][rows] * t[:, 0], 0.0, 1.0)
+        if sheen is not None:
+            t = sample("sheen_color")
+            if t is not None and mode != "sheen-color-ignored":
+                rgb = srgb_encode(t[:, :3]) if mode == "sheen-color-srgb-encoded" else t[:, :3]
+                sheen["color"][rows] = sheen["color"][rows] * rgb
+            t = sample("sheen_roughness")
+            if t is not None and mode != "sheen-roughness-ignored":
+                sheen["roughness"][rows] = sheen["roughness"][rows] * t[:, 3]
+        if thin is not None:
+            t = sample("thin_weight")
+            if t is not None and mode != "thin-weight-ignored":
+                thin["weight"][rows] = np.clip(thin["weight"][rows] * t[:, 3], 0.0, 1.0)
+            t = sample("thin_color")
+            if t is not None and mode != "thin-color-ignored":
+                rgb = srgb_encode(t[:, :3]) if mode == "thin-color-srgb-encoded" else t[:, :3]
+                thin["color"][rows] = thin["color"][rows] * rgb
+    if coat is not None and "normal" in coat:
+        coat["mu"] = np.abs(dot(coat["normal"], v))
+    return coat, sheen, aniso, irid, thin
+
+
+def sphere_table(data, textures_ok=False):
     out = []
     uses = uses_specular_extension(data)
     uses_coat = uses_clearcoat(data)
@@ -2303,27 +2616,27 @@ def sphere_table(data):
                          group=f"metallic {entry['metallic']:g} specular {spec[1]:g} colour "
                                f"{spec[2][0]:g},{spec[2][1]:g},{spec[2][2]:g}")
         if uses_coat:
-            coat = material_clearcoat(data, material) or (0.0, 0.0, 1.0)
+            coat = material_clearcoat(data, material, textures_ok) or (0.0, 0.0, 1.0)
             ior = spec[0] if spec is not None else 1.5
             entry.update(coat=coat[0], coat_roughness=coat[1], coat_normal_scale=coat[2],
                          group=f"metallic {entry['metallic']:g} ior {ior:g} coat {coat[0]:g}")
         if uses_sheen_scene:
-            sheen = material_sheen(data, material) or ([0.0, 0.0, 0.0], 0.0)
+            sheen = material_sheen(data, material, textures_ok) or ([0.0, 0.0, 0.0], 0.0)
             c = sheen[0]
             entry.update(sheen_color=c, sheen_roughness=sheen[1],
                          group=f"{entry.get('group', 'metallic ' + format(entry['metallic'], 'g'))} sheen "
                                f"{c[0]:g},{c[1]:g},{c[2]:g}")
         if uses_aniso:
-            aniso = material_anisotropy(data, material) or (0.0, 0.0)
+            aniso = material_anisotropy(data, material, textures_ok) or (0.0, 0.0)
             det = float(np.sign(np.linalg.det(instance_matrix(inst)[:3, :3])))
             entry.update(anisotropy=aniso[0], anisotropy_rotation=aniso[1], mirrored=bool(det < 0),
                          group=f"metallic {entry['metallic']:g} anisotropy {aniso[0]:g}")
         if uses_irid:
-            irid = material_iridescence(data, material) or (0.0, 1.3, 100.0, 400.0)
+            irid = material_iridescence(data, material, textures_ok) or (0.0, 1.3, 100.0, 400.0)
             entry.update(iridescence=irid[0], iridescence_ior=irid[1], thickness_min=irid[2], thickness=irid[3],
                          group=f"metallic {entry['metallic']:g} iridescence {irid[0]:g} ior {irid[1]:g}")
         if uses_thin:
-            thin = material_subsurface(data, material) or (0.0, [1.0, 1.0, 1.0])
+            thin = material_subsurface(data, material, textures_ok) or (0.0, [1.0, 1.0, 1.0])
             entry.update(thin_weight=thin[0], thin_color=thin[1],
                          group=f"metallic {entry['metallic']:g} thin weight {thin[0]:g}")
         layered = sum(map(bool, (uses_coat, uses_sheen_scene, uses_aniso, uses_irid, uses_thin)))
@@ -2345,6 +2658,9 @@ def sphere_table(data):
             if entry.get("thin_weight", 0.0) > 0.0:
                 tokens.append(f"thin {entry['thin_weight']:g}")
             entry["group"] = " ".join(tokens)
+        if textures_ok and texture_slot_bits(data, material):
+            # texture closure: every textured sphere is its own gate row (a control that changes one sphere only must not hide in the 1 %)
+            entry["group"] = f"metallic {entry['metallic']:g} sphere {k} textures {texture_slot_bits(data, material):#x}"
         out.append(entry)
     return out
 
@@ -2403,15 +2719,15 @@ def aniso_arrays(spheres, instance_of_pixel, surface, n, variant):
             "tangent": orthogonal_tangent(tangent, n), "w": w, "det": det, "variant": variant}
 
 
-def require_declared_scene(data):
+def require_declared_scene(data, textures_ok=False):
     for instance in data["instances"]:
         material = data["materials"][instance["material"]]
         material_specular(data, material)  # only the ior/specular and clearcoat features, without textures
-        material_clearcoat(data, material)
-        material_sheen(data, material)
-        material_anisotropy(data, material)
-        material_iridescence(data, material)
-        material_subsurface(data, material)
+        material_clearcoat(data, material, textures_ok)
+        material_sheen(data, material, textures_ok)
+        material_anisotropy(data, material, textures_ok)
+        material_iridescence(data, material, textures_ok)
+        material_subsurface(data, material, textures_ok)
         if any(index != INVALID for index in material["textures"]):
             raise ValueError("instanced material samples a texture; the Appendix B reference is texture-free")
         if any(v > 0 for v in material["emissive"]) or material["alpha_cutoff"] > 0:
@@ -2434,16 +2750,19 @@ def require_declared_scene(data):
             raise ValueError("sampled (area) lights are outside the declared model")
 
 
-def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environment=None, visibility=None, exact_environment=True):
+def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environment=None, visibility=None, exact_environment=True,
+                 textures=False):
     """Reference radiance image (h, w, 3) float32 plus masks and the per-sphere table.
 
     `environment` None = exact quadrature of the literal model; a DECLARED variant dict = the engine's declared
     environment model (the sun term is the same in both).  `visibility`: None (no shadow rays) or a list with
-    one boolean array per point light (shadow rays, see point_light_visibility)."""
-    require_declared_scene(data)
+    one boolean array per point light (shadow rays, see point_light_visibility).  `textures` (texture closure): sample the
+    lobe textures of the materials (the KHR texture fixtures section); the ROI then drops the pixels whose texture footprint is
+    ambiguous."""
+    require_declared_scene(data, textures)
     cast = cast or cast_primary_rays(root, data, threads or DEFAULT_THREADS)
     valid, position, normal, instance, (width, height) = cast
-    spheres = sphere_table(data)
+    spheres = sphere_table(data, textures)
     flat = valid.reshape(-1)
     inst = instance.reshape(-1)
     camera = np.asarray(data["camera"]["position"], dtype=np.float64)
@@ -2481,6 +2800,17 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
     if uses_subsurface(data):
         thin = thin_arrays(spheres, inst[pick], model.get("thin", "spec"))
         env_thin = thin_arrays(spheres, inst[pick], (environment or {}).get("thin", "spec"))
+    field = None
+    if textures and uses_textures(data):
+        field = TextureField(root, data, cast, pick)
+        material_of_pixel = np.array([data["instances"][int(k)]["material"] for k in inst[pick]])
+        frame = surface_tangents(root, data, cast, pick) if any("coat_normal" in texture_slots(data, m) for m in data["materials"]) else None
+        coat, sheen, aniso, irid, thin = apply_textures(field, data, material_of_pixel, n, v, frame, coat, sheen, aniso, irid, thin,
+                                                        model.get("tex", "spec"))
+        if environment is not None:
+            env_coat, env_sheen, env_aniso, env_irid, env_thin = apply_textures(
+                field, data, material_of_pixel, n, v, frame, env_coat, env_sheen, env_aniso, env_irid, env_thin,
+                environment.get("tex", "spec"))
     env_variant = (environment or {}).get("dielectric", "extension")
     env_dielectric = (dielectric_arrays(spheres, inst[pick], env_variant)
                       if environment is not None and uses_specular_extension(data) else None)
@@ -2533,6 +2863,10 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
         same &= np.roll(sphere_id, shift, axis=axis) == sphere_id
     same[0, :] = same[-1, :] = same[:, 0] = same[:, -1] = False
     roi = valid & same
+    if field is not None:  # texture closure: pixels whose UV footprint may select a mip level above 0
+        ambiguous = np.zeros(height * width, dtype=bool)
+        ambiguous[pick] = field.ambiguous
+        roi &= ~ambiguous.reshape(height, width)
     narrow_full = np.zeros(height * width, dtype=bool)
     narrow_full[pick] = narrow
     lit_full = np.zeros(height * width, dtype=bool)
@@ -2559,6 +2893,7 @@ def point_light_visibility(root, data, cast, threads):
 
 def command_render(args):
     root, data = snapshot(args.snapshot)
+    textures = bool(args.textures)
     out = pathlib.Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     cast = cast_primary_rays(root, data, args.threads)
@@ -2573,7 +2908,7 @@ def command_render(args):
         report["shadowed_hits"] = [int((~v).sum()) for v in visibility]
     for name, model in controls.items():
         image, masks, spheres, terms = render_frame(root, data, model, cast=cast, visibility=visibility,
-                                                    exact_environment=not args.no_exact_environment)
+                                                    exact_environment=not args.no_exact_environment, textures=textures)
         stem = "reference" if not name else f"control-{name}"
         write_pfm(out / f"{stem}.pfm", image)
         if not name:
@@ -2588,12 +2923,12 @@ def command_render(args):
         declared = {"model": DECLARED, "file": "declared.pfm", "dfg_table": str(DFG_HEADER.relative_to(REPO)),
                     "dfg_table_sha256": sha256_file(DFG_HEADER), "controls": {}}
         image, masks, _, terms = render_frame(root, data, model=main_model, cast=cast, environment=DECLARED,
-                                              visibility=visibility)
+                                              visibility=visibility, textures=textures)
         write_pfm(out / "declared.pfm", image)
         declared["terms"] = terms
         for name in args.declared_controls:
             image, *_ = render_frame(root, data, model=main_model, cast=cast, environment=ALL_DECLARED_CONTROLS[name],
-                                     visibility=visibility)
+                                     visibility=visibility, textures=textures)
             write_pfm(out / f"control-{name}.pfm", image)
             declared["controls"][name] = {"model_variant": ALL_DECLARED_CONTROLS[name], "file": f"control-{name}.pfm"}
         report["declared"] = declared
@@ -2618,6 +2953,8 @@ def main(argv=None):
                    help="point-light visibility: none (legacy resolve lights) or Mitsuba shadow rays (DI)")
     p.add_argument("--no-exact-environment", action="store_true",
                    help="skip the exact environment quadrature of the literal image (combinations without one: declared model only)")
+    p.add_argument("--textures", action="store_true",
+                   help="sample the lobe textures of the materials (texture closure; the ROI drops ambiguous-footprint pixels)")
     p.add_argument("--threads", type=int, default=DEFAULT_THREADS)
     p.set_defaults(function=command_render)
     args = parser.parse_args(argv)

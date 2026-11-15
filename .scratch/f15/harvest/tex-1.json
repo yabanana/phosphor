@@ -1,0 +1,85 @@
+{
+  "function_descriptors": {
+    "library_function_descriptors": [
+      {
+        "label": "2D5757E795D44231337118AA24B5AB4D3577FA5E1B17073D61EDB73269B721DB",
+        "library": "9C5354202903896736A8661C85210117671D9DE2BE4252D55358CAB6F90E4156",
+        "name": "light_cluster_shade_lobe"
+      },
+      {
+        "label": "BF2487D695B1151D8D87C57B4AF2E3869B46F8AD2B9DD5A0F48CD530A9C0FFD7",
+        "library": "9C5354202903896736A8661C85210117671D9DE2BE4252D55358CAB6F90E4156",
+        "name": "reflection_ssr_lobe"
+      }
+    ],
+    "specialized_function_descriptors": [
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 2
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:2D5757E795D44231337118AA24B5AB4D3577FA5E1B17073D61EDB73269B721DB",
+        "label": "4E3D2F1B895F36A3010E4A985A51094430C33CB43564A180A13E6307EA0BE572"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 2
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:BF2487D695B1151D8D87C57B4AF2E3869B46F8AD2B9DD5A0F48CD530A9C0FFD7",
+        "label": "F064CFFC4698550B3824AF4EDA91A9FCD1DE883D26C4A7461F3DC3804239D0FA"
+      }
+    ]
+  },
+  "generator": "MetalFramework",
+  "libraries": [
+    {
+      "label": "9C5354202903896736A8661C85210117671D9DE2BE4252D55358CAB6F90E4156",
+      "path": "@PHOSPHOR_METALLIB@"
+    }
+  ],
+  "pipeline_descriptors": {
+    "compute_pipeline_descriptors": [
+      {
+        "compute_function_descriptor": "fnd:4E3D2F1B895F36A3010E4A985A51094430C33CB43564A180A13E6307EA0BE572",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:F064CFFC4698550B3824AF4EDA91A9FCD1DE883D26C4A7461F3DC3804239D0FA",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      }
+    ],
+    "mesh_render_pipeline_descriptors": [],
+    "render_pipeline_descriptors": [],
+    "tile_render_pipeline_descriptors": []
+  },
+  "version": {
+    "major": 0,
+    "minor": 1,
+    "sub_minor": 0
+  }
+}

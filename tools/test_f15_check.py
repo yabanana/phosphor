@@ -760,6 +760,34 @@ class RunnerLogic(unittest.TestCase):
         self.assertTrue(check.SCENARIOS["furnace-thin-subsurface"]["always_green"])
         self.assertTrue(check.SCENARIOS["furnace-thin-subsurface@resolve"]["always_green"])
         self.assertEqual(check.SCENARIOS["subsurface-thin-env-resolve"]["kind"], "declared")
+
+    def test_texture_keys_are_planned_with_controls_the_reference_knows(self):
+        keys = [f"texture-{lobe}-{mode}" for lobe in ("coat", "aniso", "irid", "sheen", "thin") for mode in ("sun", "env-resolve")]
+        with tempfile.TemporaryDirectory() as tmp:
+            with contextlib.redirect_stdout(io.StringIO()):
+                args = ["--out", tmp, "--binary", "build/release/phosphor"]
+                for key in keys:
+                    args += ["--only", key]
+                self.assertEqual(check.main(args), 0)
+            commands = json.loads((pathlib.Path(tmp) / "plan.json").read_text())["commands"]
+        for key in keys:
+            spec = check.SCENARIOS[key]
+            capture, reference = commands[key]["capture"], commands[key]["reference"]
+            self.assertEqual(capture[capture.index("--material-scenario") + 1], key, key)
+            self.assertIn("--textures", reference, key)
+            self.assertEqual("--no-exact-environment" in reference, key.endswith("env-resolve"), key)
+            self.assertTrue(spec["always_green"], key)
+            literal, declared = check.scenario_controls(key)
+            self.assertGreaterEqual(len(literal) + len(declared), 2, key)
+            for name in literal:
+                self.assertIn(name, ref.TEXTURE_CONTROLS, key)
+            for name in declared:
+                self.assertIn(name, ref.TEXTURE_DECLARED_CONTROLS, key)
+            for field in ("pending", "pending_matches", "pending_gate"):
+                self.assertNotIn(field, spec, key)
+        # A constant environment has no angular signature of the anisotropy direction: those controls live on the sun key.
+        self.assertFalse(any("direction" in c for c in check.SCENARIOS["texture-aniso-env-resolve"]["controls"]))
+        self.assertTrue(any("direction" in c for c in check.SCENARIOS["texture-aniso-sun"]["controls"]))
         self.assertEqual(check.SCENARIOS["subsurface-thin-env"]["kind"], "environment")
         for key in ("subsurface-thin-sun", "subsurface-thin-env"):
             self.assertEqual(sorted(check.SCENARIOS[key]["controls"]), sorted(ref.THIN_CONTROLS), key)

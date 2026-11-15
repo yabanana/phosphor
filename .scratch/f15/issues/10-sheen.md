@@ -181,3 +181,21 @@ reviewed), table fix 883cc6d, runner 56c3c01, archive 53da879, guide control
 - 4 side by side: MET qualitative (ticket 22: SheenTestGrid, SpecularSilkPouf; GlamVelvetSofa refused). Ticked.
 - 5 archive/hitch/O7: MET (+17, +8 descriptors). Ticked.
 Open: captured-probe sheen fixture; sheen texture numeric fixture; reference quadrature inaccurate for N.V < 0.005 at roughness >= 0.3 (terminator band only). Note: references of benches 5/6 retaken in 74ff194 after a 1-LSB shader-validation change.
+
+### 2026-11-15 — texture closure and grazing quadrature (agent `tex`, branch f15c-tex-2)
+
+- Sheen colour (sRGB RGB) and roughness (A) texture fixture: `texture-sheen-sun` and `texture-sheen-env-resolve` GREEN (`build/f15-check/tex4`):
+  sun worst p99 0.18 %, max outside mask 0.44 %; env-resolve worst mean 0.027 %, p99 0.11 %; controls texture-v-flipped,
+  sheen-color-ignored, sheen-color-srgb-encoded (texels used as stored), sheen-roughness-ignored all FAIL (sun and declared twins).
+- The per-roughness `sheen_albedo` loop is replaced for continuous fields: a 96 x 257 grid (roughness r = 0.07 + 0.93 q^2, N.V = s^2) interpolated
+  bilinearly in (q, s) for more than 16 distinct roughness values; up to 16 values the exact table of each is used as before. Threshold fixed
+  before comparing: |grid - exact table| <= 1e-3 in E at off-node roughness (unit test `test_roughness_grid_matches_the_exact_tables_at_off_node_roughness`,
+  with a coarse-grid negative control that exceeds it).
+- Grazing quadrature (N.V < 0.005, roughness >= 0.3): the incident quadrature is now dense near the horizon and the view azimuth (cos_i = u^2,
+  phi = pi w^3, 512 x 128 midpoint nodes). Independent proof: a Gauss-Legendre grid (cos_i = u^3, phi = pi w^4, 700 x 500 and 1400 x 1000: equal
+  to 1e-6) and a log-spaced midpoint grid (6000 x 6000: equal to 1e-7) give E = 0.871033 at N.V 0.001, roughness 0.3 (the old table gave 0.81; the
+  ticket said 0.876, which was not an exact value). New table vs dense: max |error| 3.8e-4 over roughness 0.3 / 0.5 / 1 and N.V 1e-4 .. 5e-3
+  (bound 1e-3, unit test `test_albedo_is_accurate_at_grazing_views_against_a_dense_quadrature`).
+- Captured-probe sheen fixture: NOT built. The engine does not light the sheen term from captured probes (declared in this ticket); a fixture
+  would measure a declared gap, not a correctness property, and needs an analytic radiance field plus an engine change (a probe lookup of S E L(N)).
+  Stays open as a declared limitation.

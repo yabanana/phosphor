@@ -19,7 +19,7 @@
 namespace phosphor {
 namespace {
 // The names are mirrored by tools/f15_check.py SCENARIOS (tests/test_material_validation.cpp compares both).
-constexpr std::array<std::string_view, 72> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
+constexpr std::array<std::string_view, 82> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
                                                       "furnace-base",   "furnace-resolve",     "roughness-extremes",
                                                       "roughness-extremes-sun", "specular-grid-sun",
                                                       "specular-grid-env-resolve", "specular-grid-point", "specular-grid-env", "furnace-specular",
@@ -45,7 +45,11 @@ constexpr std::array<std::string_view, 72> kScenarios{"base-grid-sun",  "base-gr
                                                       "combo-irid-specular-env", "combo-thin-coat-sun", "combo-thin-coat-env",
                                                       "combo-all-lobes-sun", "combo-all-lobes-env", "furnace-combinations",
                                                       "subsurface-thin-gi-back",
-                                                      "iridescence-cost-nofilm", "iridescence-cost-lights8", "iridescence-cost-nofilm-lights8", "clearcoat-grid-coat-only-sun", "lobe-guide-coplanar"};
+                                                      "iridescence-cost-nofilm", "iridescence-cost-lights8", "iridescence-cost-nofilm-lights8", "clearcoat-grid-coat-only-sun", "lobe-guide-coplanar",
+                                                      "texture-coat-sun", "texture-coat-env-resolve", "texture-aniso-sun",
+                                                      "texture-aniso-env-resolve", "texture-irid-sun", "texture-irid-env-resolve",
+                                                      "texture-sheen-sun", "texture-sheen-env-resolve", "texture-thin-sun",
+                                                      "texture-thin-env-resolve"};
 constexpr float pi = 3.14159265358979323846f;
 
 glm::quat orientLight(glm::vec3 towardLight) {
@@ -110,6 +114,146 @@ void addCombination(std::vector<MaterialScenarioSpec>& out, const std::string& n
     env.sunIrradiance = 0.0f;
     env.environment   = 0.5f;
     out.push_back(env);
+}
+
+// F15.3 (texture closure): the generated textures of the textured lobe fixtures (32 x 16 RGBA8, smooth functions of (u, v) at the
+// texel centres; u runs around the sphere, the camera sees u in [0, 0.5], v runs from pole to pole).  Small on purpose: the sphere
+// covers at least ~170 pixels, so the sampler magnifies (level 0, bilinear) everywhere the reference gates.
+constexpr u32 kTextureW = 32, kTextureH = 16;
+template <class F>
+u32 uploadGenerated(TextureManager& textures, bool sRGB, F&& fn) {
+    std::vector<u8> rgba(size_t(kTextureW) * kTextureH * 4);
+    auto q = [](float x) { return u8(std::lround(std::clamp(x, 0.0f, 1.0f) * 255.0f)); };
+    for (u32 y = 0; y < kTextureH; ++y)
+        for (u32 x = 0; x < kTextureW; ++x) {
+            const float u = (float(x) + 0.5f) / float(kTextureW), v = (float(y) + 0.5f) / float(kTextureH);
+            const glm::vec4 c = fn(u, v);
+            u8* texel = &rgba[(size_t(y) * kTextureW + x) * 4];
+            texel[0] = q(c.x); texel[1] = q(c.y); texel[2] = q(c.z); texel[3] = q(c.w);
+        }
+    return textures.loadTextureFromMemory(rgba.data(), kTextureW, kTextureH, 4, sRGB);
+}
+struct FixtureTextures { u32 first = INVALID_TEXTURE_INDEX, second = INVALID_TEXTURE_INDEX; };
+FixtureTextures makeFixtureTextures(TextureManager& textures, MaterialScenarioSpec::TextureFixture kind) {
+    using TF = MaterialScenarioSpec::TextureFixture;
+    constexpr float tau = 6.28318530718f;
+    FixtureTextures t;
+    switch (kind) {
+    case TF::Coat:
+        // first: the coat normal map (tangent space, linear): a smooth bump field of slopes up to 0.45; second: factor (R, ramp
+        // over v) and roughness (G, varying over u) of the coat.
+        t.first = uploadGenerated(textures, false, [](float u, float v) {
+            const float nx = 0.45f * std::sin(tau * 2.0f * u), ny = 0.45f * std::sin(tau * 1.5f * v + 0.5f);
+            const float nz = std::sqrt(1.0f - nx * nx - ny * ny);
+            return glm::vec4(0.5f * (nx + 1.0f), 0.5f * (ny + 1.0f), 0.5f * (nz + 1.0f), 1.0f);
+        });
+        t.second = uploadGenerated(textures, false, [](float u, float v) {
+            return glm::vec4(0.2f + 0.8f * v, 0.35f + 0.65f * (0.5f + 0.5f * std::cos(tau * u)), 1.0f, 1.0f);
+        });
+        break;
+    case TF::Anisotropy:
+        // direction rg = (cos a, sin a) with a = 2 pi (u - 0.25) (-90 .. +90 degrees over the visible half), strength b ramp over v
+        t.first = uploadGenerated(textures, false, [](float u, float v) {
+            const float a = tau * (u - 0.25f);
+            return glm::vec4(0.5f * (std::cos(a) + 1.0f), 0.5f * (std::sin(a) + 1.0f), 0.3f + 0.7f * v, 1.0f);
+        });
+        break;
+    case TF::Iridescence:
+        // R = factor ramp over v, G = thickness weight (a slow wave over u and v: a metal film is steep in thickness, a faster wave gave
+        // p99 0.011 on the first run, so the gradient is halved)
+        t.first = uploadGenerated(textures, false, [](float u, float v) {
+            return glm::vec4(0.3f + 0.7f * v, 0.5f + 0.5f * std::sin(tau * (0.5f * u + 0.25f * v + 0.1f)), 1.0f, 1.0f);
+        });
+        break;
+    case TF::Sheen:
+        // sRGB RGB = sheen colour, linear A = sheen roughness
+        t.first = uploadGenerated(textures, true, [](float u, float v) {
+            const float c = std::cos(0.5f * tau * u), s = std::sin(0.5f * tau * (u + v));
+            return glm::vec4(0.3f + 0.7f * c * c, 0.3f + 0.7f * v, 0.3f + 0.7f * s * s,
+                             0.2f + 0.8f * (0.5f + 0.5f * std::sin(tau * u + 0.5f * tau * v)));
+        });
+        break;
+    case TF::Thin:
+        // sRGB RGB = transmission colour, linear A = weight ramp over v
+        t.first = uploadGenerated(textures, true, [](float u, float v) {
+            return glm::vec4(1.0f, 0.4f + 0.6f * std::clamp(2.0f * u, 0.0f, 1.0f), 0.25f + 0.5f * v, 0.3f + 0.7f * v);
+        });
+        break;
+    case TF::None: break;
+    }
+    return t;
+}
+
+// F15.3 (texture closure): the textured lobe fixtures.  Every lobe has a `-sun` scenario (the direct gate) and an `-env-resolve`
+// scenario (the declared environment, --reflections off) on the same grid: 2 rows (a dielectric and a metal) x 3 columns, the cells
+// binding different subsets of the texture slots so that each slot is also told apart from its factor-only twin.  Slots per lobe (the
+// reference's "KHR texture fixtures" section lists the texture contents):
+//   Coat        bit 0 coat normal, bit 1 coat factor (R) and roughness (G); a = coat roughness factor, b = coat normal scale
+//   Anisotropy  one slot (direction rg + strength b); a = strength, b = rotation
+//   Iridescence bit 0 thickness (G), bit 1 factor (R); a = factor, b = film ior, c = thickness minimum, d = maximum (nm)
+//   Sheen       bit 0 colour (RGB, sRGB), bit 1 roughness (A); a = roughness factor, color = colour factor
+//   Thin        bit 0 weight (A), bit 1 colour (RGB, sRGB); a = weight factor, color = colour factor
+void addTextureScenarios(std::vector<MaterialScenarioSpec>& out) {
+    using TF = MaterialScenarioSpec::TextureFixture;
+    using TC = MaterialScenarioSpec::TextureCell;
+    const glm::vec3 towardSun = glm::normalize(glm::vec3(-0.8f, 0.35f, -0.3f));
+    const glm::vec3 thinSun   = glm::normalize(glm::vec3(-0.55f, 0.4f, -0.73f));
+    const glm::vec3 copper(0.8f, 0.35f, 0.15f), dark(0.1f), thinBase(0.3f, 0.5f, 0.8f);
+    const std::vector<float> metallic{0.0f, 1.0f}, dielectricRows{0.0f, 0.0f};
+    auto add = [&](const char* sunName, const char* envName, TF fixture, float baseRoughness, glm::vec3 base, glm::vec3 sunDirection,
+                   const std::vector<float>& rows, std::vector<TC> cells) {
+        MaterialScenarioSpec sun;
+        sun.name           = declaredName(sunName);
+        sun.roughness      = std::vector<float>(3, baseRoughness);
+        sun.metallic       = rows;
+        sun.baseColor      = base;
+        sun.sun            = true;
+        sun.sunIrradiance  = 3.0f;
+        sun.towardSun      = sunDirection;
+        sun.cameraDistance = 2.8f;
+        sun.combedCarriers = fixture == TF::Anisotropy;
+        sun.textureFixture = fixture;
+        sun.textureCells   = std::move(cells);
+        out.push_back(sun);
+        MaterialScenarioSpec env = sun;
+        env.name          = declaredName(envName);
+        env.sun           = false;
+        env.sunIrradiance = 0.0f;
+        env.environment   = 0.5f;
+        out.push_back(env);
+    };
+    const auto both = [](auto make) { return std::vector<TC>{make(0), make(1), make(2), make(3), make(4), make(5)}; };
+    // Cell index = row * 3 + column; the same column binds the same slots in both rows.
+    add("texture-coat-sun", "texture-coat-env-resolve", TF::Coat, 0.5f, copper, towardSun, metallic, both([](int k) {
+            TC c; const int column = k % 3;
+            c.use = column == 0 ? 1u : (column == 1 ? 2u : 3u);
+            c.a = column == 0 ? 0.3f : 1.0f; c.b = column == 2 ? 0.7f : 1.0f;
+            return c;
+        }));
+    add("texture-aniso-sun", "texture-aniso-env-resolve", TF::Anisotropy, 0.3f, copper, towardSun, metallic, both([](int k) {
+            TC c; const int column = k % 3;
+            c.use = 1u;
+            c.a = column == 2 ? 0.6f : 1.0f; c.b = column == 1 ? 0.78539816f : 0.0f;
+            return c;
+        }));
+    add("texture-irid-sun", "texture-irid-env-resolve", TF::Iridescence, 0.3f, copper, towardSun, metallic, both([](int k) {
+            TC c; const int column = k % 3;
+            c.use = column == 0 ? 1u : 3u;
+            c.a = 1.0f; c.b = column == 2 ? 1.8f : 1.3f; c.c = column == 2 ? 200.0f : 100.0f; c.d = column == 2 ? 600.0f : 500.0f;
+            return c;
+        }));
+    add("texture-sheen-sun", "texture-sheen-env-resolve", TF::Sheen, 0.7f, dark, towardSun, metallic, both([](int k) {
+            TC c; const int column = k % 3;
+            c.use = column == 0 ? 1u : (column == 1 ? 2u : 3u);
+            c.a = column == 0 ? 0.5f : 1.0f; c.color = column == 1 ? glm::vec3(0.8f) : glm::vec3(1.0f);
+            return c;
+        }));
+    add("texture-thin-sun", "texture-thin-env-resolve", TF::Thin, 0.5f, thinBase, thinSun, dielectricRows, both([](int k) {
+            TC c; const int column = k % 3, row = k / 3;
+            c.use = column == 0 ? 1u : (column == 1 ? 2u : 3u);
+            c.a = row == 0 ? 1.0f : 0.6f; c.color = column == 0 ? glm::vec3(1.0f, 0.55f, 0.25f) : glm::vec3(1.0f);
+            return c;
+        }));
 }
 
 void addCombinations(std::vector<MaterialScenarioSpec>& out) {
@@ -613,6 +757,7 @@ const std::vector<MaterialScenarioSpec>& specs() {
     static const std::vector<MaterialScenarioSpec> all = [&] {
         std::vector<MaterialScenarioSpec> v = baseSpecs;
         addCombinations(v);
+        addTextureScenarios(v);
         return v;
     }();
     return all;
@@ -698,6 +843,7 @@ void MaterialValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& textur
     const u32 handle = upload(-1.0f);
     u32 handlePlus = handle;
     if (std::find(s.tangentHandedness.begin(), s.tangentHandedness.end(), 1.0f) != s.tangentHandedness.end()) handlePlus = upload(1.0f);
+    const FixtureTextures fixtureTextures = makeFixtureTextures(textures, s.textureFixture);
     u32 materialIndex = 0;
     for (u32 row = 0; row < s.metallic.size(); ++row)
         for (u32 column = 0; column < s.roughness.size(); ++column) {
@@ -816,6 +962,52 @@ void MaterialValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& textur
                     description->subsurface->mode   = SubsurfaceMode::Thin;
                     description->subsurface->weight = cell.thinWeight;
                     description->subsurface->color  = {tc.x, tc.y, tc.z};
+                }
+                if (featureMask(*description) != 0) material.extension = std::move(description);
+            }
+            if (s.hasTextureFixture()) {
+                // F15.3 (texture closure): one textured lobe per sphere; see addTextureScenarios for the slots of each lobe.
+                using TF = MaterialScenarioSpec::TextureFixture;
+                const auto& cell = s.textureCells[row * s.roughness.size() + column];
+                const u32 t0 = fixtureTextures.first, t1 = fixtureTextures.second;
+                auto description = std::make_shared<MaterialDescription>();
+                switch (s.textureFixture) {
+                case TF::Coat: {
+                    auto& block = description->clearcoat.emplace();
+                    block.factor = 1.0f; block.roughness = cell.a; block.normalScale = cell.b;
+                    if (cell.use & 1u) block.normalTexture.index = t0;
+                    if (cell.use & 2u) { block.factorTexture.index = t1; block.roughnessTexture.index = t1; }
+                    break;
+                }
+                case TF::Anisotropy: {
+                    auto& block = description->anisotropy.emplace();
+                    block.strength = cell.a; block.rotation = cell.b;
+                    if (cell.use & 1u) block.texture.index = t0;
+                    break;
+                }
+                case TF::Iridescence: {
+                    auto& block = description->iridescence.emplace();
+                    block.factor = cell.a; block.ior = cell.b; block.thicknessMin = cell.c; block.thicknessMax = cell.d;
+                    if (cell.use & 1u) block.thicknessTexture.index = t0;
+                    if (cell.use & 2u) block.factorTexture.index = t0;
+                    break;
+                }
+                case TF::Sheen: {
+                    auto& block = description->sheen.emplace();
+                    block.color = {cell.color.x, cell.color.y, cell.color.z}; block.roughness = cell.a;
+                    if (cell.use & 1u) block.colorTexture.index = t0;
+                    if (cell.use & 2u) block.roughnessTexture.index = t0;
+                    break;
+                }
+                case TF::Thin: {
+                    auto& block = description->subsurface.emplace();
+                    block.mode = SubsurfaceMode::Thin; block.weight = cell.a;
+                    block.color = {cell.color.x, cell.color.y, cell.color.z};
+                    if (cell.use & 1u) block.weightTexture.index = t0;
+                    if (cell.use & 2u) block.colorTexture.index = t0;
+                    break;
+                }
+                case TF::None: break;
                 }
                 if (featureMask(*description) != 0) material.extension = std::move(description);
             }

@@ -172,3 +172,18 @@ Open item: "coat-only union (mask 2) not archived (no fixture uses it)".  DONE.
 - Image criterion (fixed from float rounding, see the docstring: the first version asked for bit equality and failed with a largest difference of 1.8e-7, the two specialisations are different compiled programs):
   every pixel outside row 4's band equals the reference pixel to within 1e-6 (0 pixels above, largest 1.79e-7) and inside the band 9 610 pixels differ by more than 1e-3 (largest 0.384: row 4 lost its ior 2.4 block,
   the negative control).  The coat model itself is unchanged: the scene is the sun gate's grid, only the specialisation differs.
+
+### 2026-11-15 — texture closure (agent `tex`, branch f15c-tex-2)
+
+- The coat-normal / factor / roughness texture fixture is built: `texture-coat-sun` (direct) and `texture-coat-env-resolve` (declared), 2 x 3
+  spheres (dielectric and copper rows) binding {normal}, {factor, roughness} and all three slots. The reference reads the EXPORTED texels
+  (level-0 bilinear, repeat, binary16, ROI without ambiguous-footprint pixels; `tools/f15_reference.py` "KHR texture fixtures") and
+  applies the coat normal per pixel (T x + B y + N z with the engine frame). Thresholds are the existing ones (sun p99 <= 1 %, max <= 3 %;
+  declared sphere mean <= 0.5 %, p99 <= 1 %), every sphere its own row.
+- Result (`build/f15-check/tex2`, `tex3`): GREEN. Sun: worst p99 0.34 % (sphere 0), max outside mask 1.47 %; env-resolve: worst mean 0.048 %,
+  p99 0.22 %. Controls, all FAIL as they must: texture-v-flipped, coat-normal-ignored, coat-normal-y-flipped, coat-factor-ignored,
+  coat-roughness-ignored (sun and declared twins).
+- Coat-only union (mask 2) archived: the first capture logged 2 archive misses (`light_cluster_shade_lobe`, `reflection_ssr_lobe`, constant 22 = 2).
+  Targeted update, +2 compute descriptors, `.scratch/f15/harvest/tex-1.json` (harvested from the 10 texture scenarios, `--constant 22
+  --skip-present`); the class manifest `shaders/material_classes/material.json` was re-exported for the 10 new scenes.
+- Open: nothing in this ticket's list.

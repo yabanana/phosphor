@@ -125,6 +125,21 @@ struct MaterialScenarioSpec {
     // depth), the vertex normals of layer i tilted by layerTiltDegrees[i] degrees about +X, so the layer a fragment belongs to shows in its
     // shading normal (colour attachments and the coat normal of the lobe guide).
     std::vector<float>     layerTiltDegrees;
+    // F15.3 (ticket 22, texture closure): TEXTURED lobe fixtures.  `textureFixture` selects the texture set and the lobe of the
+    // grid (rows keep `metallic`, columns `roughness` = the base roughness); `textureCells` holds one cell per sphere (row-major).
+    // `use` is a bit set naming which texture slots of the lobe the cell binds (bit 0, 1, 2 = the first, second, third slot of the
+    // lobe in tools/f15_reference.py "KHR texture fixtures"), a..d and `color` are the factor parameters of that sphere (their
+    // meaning per lobe is documented at the cells in addTextureScenarios).  The textures are small (32 x 16), smooth and generated
+    // deterministically in setup(); the reference reads the exported texels, never this generator.
+    enum class TextureFixture : u8 { None, Coat, Anisotropy, Iridescence, Sheen, Thin };
+    struct TextureCell {
+        u32       use = 0;
+        float     a = 0.0f, b = 0.0f, c = 0.0f, d = 0.0f;
+        glm::vec3 color{1.0f};
+    };
+    TextureFixture           textureFixture = TextureFixture::None;
+    std::vector<TextureCell> textureCells;
+    [[nodiscard]] bool hasTextureFixture() const { return textureFixture != TextureFixture::None; }
     [[nodiscard]] bool hasComboGrid() const { return !combo.empty(); }
     [[nodiscard]] bool hasVolumetricGrid() const { return !volumetricWeight.empty(); }
     [[nodiscard]] bool hasSubsurfaceGrid() const { return !subsurfaceWeight.empty(); }
