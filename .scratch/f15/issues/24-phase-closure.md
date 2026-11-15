@@ -141,8 +141,17 @@ section "Defects found during F15"; integrated by fast-forward to 6b6bf04; orche
   - against the ticket-03 baseline 2e1057a, which is the cost baseline of the plan ("after ticket 03 the scenes without features stay identical to the new
     baseline in images and cost", docs/plans/F15.md; built in worktree f15-t03-baseline, `build/d2-ab-t03-fix`): GPU p95 15.40 / 15.66, 15.35 / 15.70,
     15.60 / 15.68 (A/B/A deltas +0.29 / +0.23 / +0.08, median +0.23 against 0.10), p50 median +0.03; per pass the residual is only `F13 reflection
-    sample 0` (p50 +0.04, p95 +0.42 / +0.51 / +0.18 on a 3.53 ms base), every other pass within +-0.07 p95 with mixed signs. STILL OPEN: the D2 agent
-    is attributing the reflection tail and specialising the pass.
+    sample 0` (p50 +0.04, p95 +0.42 / +0.51 / +0.18 on a 3.53 ms base), every other pass within +-0.07 p95 with mixed signs.
+  - attribution (D2 agent, opt-log entries of 2026-11-15): the reflection tail is the F13 back-face continuation of 26fe229 (about 3 900 continued
+    transport rays per frame on D2, about 200 exhaust the bound of 4, i.e. five traversals in one lane); with the bound at 0 the pass p95 returns to
+    the 2e1057a level; restructuring the loop changes nothing; it cannot be specialised (single-sidedness is not a feature bit and Sponza has
+    single-sided back faces: bound 0 changes sponza-d2 by 934 px, max delta 122). A one-traversal hardware back-face culling variant
+    (`RT_PROBE_DIFFUSE_CULLED`) was discarded: per-ray comparison finds 24-35 rays/frame with a different first surface outside the bound-exhausted
+    ones and ~2 800 with different t/u/v (the loop re-traces from an offset origin), and it recovered only 0.07 of the 0.22 ms.
+  - orchestrator A/B/A, 2e1057a vs the current code with the continuation bound set to 0 (a never-committed probe build, `build/d2-ab-t03-skips0`):
+    GPU p95 15.46 / 15.60, 15.44 / 15.49, 15.44 / 15.47 (A/B/A deltas +0.15 / +0.05 / +0.04, median +0.05 within the band), p50 median +0.07; so the
+    F15 features alone meet the band and the excess is the continuation's cost. OWNER DECISION REQUESTED (2026-11-15): (A) declare it as the intrinsic
+    cost of the 26fe229 correctness fix, or (B) reduce it by changing images under a new gate.
 - Declared (owner noted, no objection): single-sided planes cast sun shadows from both sides in CSM (two-sided by contract) and RT.
 - CLOSED, not a defect (eac5233, ticket 13 "C22-D3 follow-up"): the 67 IORTestGrid "dark ring" pixels are a metric artefact. With
   reflections off a white transmissive sphere reads albedo 1 x environment 0.5 = the clear colour, so the ring set of the off image
