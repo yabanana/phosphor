@@ -1397,6 +1397,9 @@ PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_EXCLUDE_EMISSION = 32u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_LOBE_GUIDE_VALID = 64u;
 // F15.1 (ticket 19): texture 8 of the composite holds E(-N) for the thin subsurface pixels (every GI mode); without it the pixel's own GI stands for it.
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_GI_BACK = 128u;
+// F15.1 (ticket 10, decision 06): the probe kernel adds the sheen term S E L(N) with the PROBE radiance at N into the specular signal, so the composite
+// must not add its declared-environment sheen term (set with --reflections probes; the probe kernel skips the term itself when GI is on).
+PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_SHEEN_FROM_PROBE = 256u;
 struct GPUReflectionReduceParams {u32 width,height,samples,stridePixels;};
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionReduceParams)==16,"GPUReflectionReduceParams layout");
 struct GPUReflectionComposeParams {u32 width,height,backingWidth,backingHeight;u32 flags,pad[3];float environment[3];u32 pad2;};

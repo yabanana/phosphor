@@ -1743,6 +1743,136 @@
       "name": "material:combo-aniso-panel-env",
       "union": 14,
       "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 15
+        },
+        {
+          "lobes": [
+            "anisotropy"
+          ],
+          "mask": 8,
+          "materials": 16
+        }
+      ],
+      "family": "material",
+      "name": "material:aniso-narrow-sun",
+      "union": 8,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 11
+        },
+        {
+          "lobes": [
+            "sheen"
+          ],
+          "mask": 4,
+          "materials": 15
+        }
+      ],
+      "family": "material",
+      "name": "material:sheen-probe-env",
+      "union": 4,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "subsurface"
+          ],
+          "mask": 129,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "sheen",
+            "subsurface"
+          ],
+          "mask": 132,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "anisotropy",
+            "subsurface"
+          ],
+          "mask": 136,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "iridescence",
+            "subsurface"
+          ],
+          "mask": 144,
+          "materials": 2
+        }
+      ],
+      "family": "material",
+      "name": "material:combo-thin-lobes-sun",
+      "union": 157,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "subsurface"
+          ],
+          "mask": 129,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "sheen",
+            "subsurface"
+          ],
+          "mask": 132,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "anisotropy",
+            "subsurface"
+          ],
+          "mask": 136,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "iridescence",
+            "subsurface"
+          ],
+          "mask": 144,
+          "materials": 2
+        }
+      ],
+      "family": "material",
+      "name": "material:combo-thin-lobes-env",
+      "union": 157,
+      "volumetric": false
     }
   ],
   "schema": "phosphor.material-class-manifest",

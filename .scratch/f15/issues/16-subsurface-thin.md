@@ -234,3 +234,36 @@ stand-in) fails the declared check in all six mode x consumer combinations, `on`
   negative controls differ as they must: weight +0.02 on one sphere 21 523 pixels (max delta 3), blue channel +0.02 on one sphere 14 479 pixels (max delta 2).
   Unit tests: `tools/test_f15_encoding_check.py` (scene, override mapping, pixel counting). Run: `F15_GPU_LOCK_HELD=1 python3 gpulock.py uv run ... tools/f15_encoding_check.py
   --binary build/release/phosphor` (or alone: the capture takes the lock itself).
+
+### 2026-11-15 (2) — thin under sheen / anisotropy / iridescence / ior (agent `tex`, round 2)
+
+Semantics, pinned to the plan's primary source (glTF-Sample-Renderer cc3d5ff; the source tree is not in this checkout, so the citations are the research note that
+quotes it, `.scratch/f15/research/khr-materials.md` section 12, lines 453 and 460, and the layering order on line 440):
+- Dielectric base: `f_dielectric_brdf = mix(f_diffuse, f_specular_dielectric, F)` with `f_diffuse = mix(diffuse_brdf, diffuse_btdf, w)`: the diffuse transmission sits INSIDE the
+  base of the same Fresnel mix as the diffuse reflection (line 453). Consequence implemented: the transmitted lobe takes the diffuse weight of the reflected lobe,
+  `(1 - metallic) (1 - max3 F)` with F the extended dielectric Fresnel (ior/specular) or the thin-film Fresnel (iridescence) at V.H of the real half vector
+  (`bsdfThinTransmittedSpec`, `tools/f15_reference.py thin_transmitted`), instead of the default 0.04 Fresnel.
+- Back lights: the Sample Renderer evaluates the BTDF with the lambertian term of `-n` (line 460, "lightIntensity * clampedDot(-n, l) / pi * color"); the sheen scaling
+  `albedoSheenScaling = min(1 - m E(N.V), 1 - m E(N.L))` uses `N.L = clampedDot(n, l) = 0` behind the surface, i.e. E at the smallest table N.L (clamped to 1), and the sheen
+  lobe is added for `N.L > 0` only: the whole base, transmitted lobe included, is scaled (`thinSheenBackScale`, reference `point_radiance` / `sun_radiance`).
+- Anisotropy changes D V of the specular lobes only (line 435: "anisotropy changes D/Vis of both specular lobes"): the transmitted lobe is a diffuse lobe and is unaffected.
+- Coat above sheen above the base (line 440), unchanged from ticket 19.
+Engine: `shadeSurface` thin branch keeps its statements for a thin-only material and takes new functions `thinLayerLight`, `sunThinLayer`, `thinSheenBackScale` (material_shading.h)
+and `bsdfThinTransmittedSpec` (bsdf.h) when the material also carries ior/specular, sheen, anisotropy or iridescence (the diffuse base scale 1 - w is the existing `diffuseScale`
+argument of `evaluateLightSpec` / `evaluateLightAniso`). Reference: refusal lifted (`check_combination`), `declared_extension_diffuse_weight` feeds the declared thin environment.
+Archive/class table: new fixture scene `combo-thin-lobes` (classes 129, 132, 136, 144 and the union), manifest re-exported, archive updated with `tools/material_class_archive.py`.
+Result (round 2, `build/f15-check/tex11`, `tex12`, `tex17`; the thin + coat, thin-only and sheen keys stay GREEN with the same binary):
+- `combo-thin-lobes-sun` (2 x 4 grid: thin weight 1 white / 0.6 warm under sheen 0.4, anisotropy 1 at pi/4, a film 1.3 / 400 nm, ior 1.8 / specular 0.7; sun from the side so
+  the left half of every sphere is front-lit and the right half back-lit): GREEN, p99 <= 0.39 % (sheen column), <= 0.02 % elsewhere, max outside mask <= 0.44 %. Seven controls
+  FAIL: transmission-ignored, sheen-ignored, aniso-ignored, iridescence-ignored, specular-ignored, transmission-default-fresnel (the engine before this change for
+  ior / film), transmission-sheen-unscaled (the engine before this change for sheen).
+- `combo-thin-lobes-env@resolve` (declared model): GREEN, worst sphere mean 0.022 %, p99 0.034 %; six declared controls FAIL. The exact-environment twin does NOT exist:
+  the per-ior transmitted-albedo tables of the exact environment are not built, so the key is gated by the declared model only (`--no-exact-environment`, like iridescence +
+  anisotropy was). OPEN: exact-environment tables per ior / film.
+- First run (`tex10`/`tex11`): sheen column 28 % off. Cause: N.L = 0 behind the surface is not resolved by the engine's sheen table (flat below N.L 1e-3 at E 0.7695) while the exact
+  albedo falls to 0.678 at N.L 1e-4; the back-light albedo is now read at N.L = 1e-3 in both (`THIN_BACK_NDOTL`, `thinSheenBackScale`).
+- Archive / class table: +26 descriptors in all (22 compute, 3 render, 1 tile): 8 class resolve pipelines (classes 129, 132, 136, 144) through `tools/material_class_archive.py` (harvest `tools/f15_permutations.py harvest`) and 18 constant-22
+  descriptors (`.scratch/f15/harvest/tex-3.json`); `shaders/material_classes/material.json` re-exported; budget 46 / 64 archived permutations.
+- Touched engine functions (shaders/material_shading.h: new `thinSheenBackScale`, `thinLayerLight`, `sunThinLayer`, and in `shadeSurface` ONLY the thin branch `if (thinResolved) {...}`;
+  shaders/materials/bsdf.h: new `bsdfThinTransmittedSpec`). `bsdfThinTransmitted` and every other statement are untouched; a thin-only material still takes the old statements.
+  Featureless: the five F13 exactness PFMs are byte-identical (`build/tex-exact4`).

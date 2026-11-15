@@ -21,7 +21,7 @@
 using namespace phosphor;
 
 TEST_CASE("F15.3 material scenarios are exactly the nine declared names") {
-    CHECK(MaterialValidation::scenarios().size() == 84);
+    CHECK(MaterialValidation::scenarios().size() == 88);
     for (auto name : {"base-grid-sun", "base-grid-env", "base-grid-env-resolve", "furnace-base", "furnace-resolve",
                       "roughness-extremes", "roughness-extremes-sun", "specular-grid-sun", "specular-grid-env-resolve", "specular-grid-point",
                       "specular-grid-env", "furnace-specular", "clearcoat-grid-sun", "clearcoat-grid-env-resolve",
@@ -1244,7 +1244,8 @@ TEST_CASE("F15.3 (ticket 19) combination grids: one cell per sphere, the lobes i
                                  {"irid-coat", 2, 4, Irid | Coat},        {"irid-sheen", 2, 4, Irid | Sheen},
                                  {"irid-aniso", 3, 4, Irid | Aniso},      {"irid-specular", 4, 4, Irid | Spec},
                                  {"thin-coat", 3, 4, Thin | Coat},        {"all-lobes", 2, 4, Spec | Coat | Sheen | Aniso},
-                                 {"aniso-panel", 2, 3, Aniso | Coat | Sheen}};
+                                 {"aniso-panel", 2, 3, Aniso | Coat | Sheen},
+                                 {"thin-lobes", 2, 4, Thin | Sheen | Aniso | Irid | Spec}};
     for (const auto& e : expected) {
         for (const char* suffix : {"-sun", "-env"}) {
             const std::string name = std::string("combo-") + e.name + suffix;

@@ -304,6 +304,12 @@ COMBO_THIN_COAT_CONTROLS = ["transmission-ignored", "coat-ignored", "transmissio
 # small); the grid has a third row (weight 1, white transmission colour) where it must (ticket 19, F15.3 closure).
 COMBO_THIN_COAT_ENV_CONTROLS = ["transmission-ignored", "coat-ignored", "transmission-uncoated", "additive-layering"]
 COMBO_THIN_COAT_DECLARED = ["declared-transmission-ignored", "declared-coat-ignored", "declared-additive-layering"]
+# F15.3 closure (ticket 16): thin subsurface under sheen, anisotropy, iridescence and ior/specular (glTF Sample Renderer layering).  The exact environment
+# of the combination has no per-ior transmitted-albedo table yet (the key is gated by the declared model, like iridescence + anisotropy was).
+COMBO_THIN_LOBES_CONTROLS = ["transmission-ignored", "sheen-ignored", "aniso-ignored", "iridescence-ignored", "specular-ignored",
+                             "transmission-default-fresnel", "transmission-sheen-unscaled"]
+COMBO_THIN_LOBES_DECLARED = ["declared-transmission-ignored", "declared-sheen-ignored", "declared-aniso-ignored", "declared-iridescence-ignored",
+                             "declared-specular-ignored", "declared-transmission-default-weight"]
 # The exact-environment keys integrate over the whole sphere: a rotation of the lobe by the sign of the angle moves the sphere mean by less
 # than the 5 % bound there (measured: aniso-rotation-flipped passes the env gate of the anisotropy + coat / sheen grids), so those keys drop it.
 COMBO_ANISO_COAT_ENV_CONTROLS = ["aniso-ignored", "coat-ignored", "additive-layering"]
@@ -472,6 +478,13 @@ SCENARIOS = {
                                            "declared-sheen-roughness-linear"],
                               "terms": "constant environment only (radiance 0.5, no sun), probe path (--reflections probes, "
                                        "analytic constant probe, unfiltered), on the sheen grid"},
+    # ticket 10 (F15.3 closure): a COOKED probe of constant radiance 0.2 (written by capture_command) lights the specular and sheen terms while the declared
+    # environment is 0.5; black base (no diffuse).  The reference runs with --sky-override 0.2.  The control that lights the sheen term with the declared 0.5
+    # (the engine before the fix, decision 06 violated) must fail.
+    "sheen-probe-env": {"kind": "declared", "reflections": "probes", "lighting": "clustered", "denoise": "off", "probe_constant": 0.2,
+                        "reference_args": ["--sky-override", "0.2"],
+                        "controls": ["declared-sheen-ignored", "declared-sheen-declared-radiance"],
+                        "terms": "cooked constant probe (radiance 0.2) with the declared environment 0.5, black base, probe path (--reflections probes), sheen grid"},
     "sheen-grid-point": {"kind": "direct", "lighting": "legacy", "visibility": "none",
                          "controls": ["sheen-ignored", "sheen-unscaled-base", "sheen-ashikhmin-visibility",
                                       "sheen-roughness-linear", "sheen-cheap-scaling"],
@@ -512,6 +525,10 @@ SCENARIOS = {
     "aniso-grid-sun": {"kind": "direct",
                        "controls": ANISO_DIRECT_CONTROLS,
                        "terms": "sun disk only (environment 0, no shadows, no GI) on the strength x rotation grid"},
+    "aniso-narrow-sun": {"kind": "direct", "controls": ["aniso-ignored", "aniso-rotation-flipped", "aniso-alpha-swapped"],
+                         "reference_args": ["--exact-aniso-disk"],
+                         "terms": "sun disk only on the strength x rotation grid with NARROW lobes (alpha_b 0.0064 .. 0.04); the reference integrates the disk "
+                                  "exactly (polar grid, no quadrature mask) instead of the engine's spiral rule"},
     "aniso-grid-env-resolve": {"kind": "declared",
                                "reflections": "off", "controls": ["declared-aniso-ignored", "declared-aniso-alpha-t"],
                                "terms": "constant environment only (radiance 0.5, no sun) on the anisotropy grid, deterministic "
@@ -652,6 +669,12 @@ SCENARIOS = {
                                       "terms": "sun disk only (environment 0, no shadows, no GI) on the anisotropy panels (yaw 50, roll 20 degrees) under a coat, a sheen and alone"},
     "combo-aniso-panel-env": {"kind": "environment", "controls": COMBO_ANISO_PANEL_ENV_CONTROLS,
                                       "terms": "constant environment only (radiance 0.5, no sun), SSR specular transport, on the anisotropy panels (yaw 50, roll 20 degrees)"},
+    "combo-thin-lobes-sun": {"kind": "direct", "controls": COMBO_THIN_LOBES_CONTROLS,
+                             "terms": "sun disk only (environment 0, no shadows, no GI) from the side on the thin subsurface under sheen / anisotropy / iridescence / ior grid"},
+    "combo-thin-lobes-env@resolve": {"kind": "declared", "reflections": "off", "controls": COMBO_THIN_LOBES_DECLARED,
+                                     "reference_args": ["--no-exact-environment"],
+                                     "terms": "constant environment only (radiance 0.5, no sun) on the thin subsurface under sheen / anisotropy / iridescence / ior grid, "
+                                              "deterministic resolve terms (--reflections off --lighting-denoise custom)"},
     "combo-aniso-sheen-sun": {"kind": "direct", "controls": COMBO_ANISO_SHEEN_CONTROLS,
                                       "terms": "sun disk only (environment 0, no shadows, no GI) on the anisotropy + sheen grid"},
     "combo-aniso-sheen-env": {"kind": "environment", "controls": COMBO_ANISO_SHEEN_ENV_CONTROLS,
@@ -1154,6 +1177,17 @@ def bench_scenario(name):
     return SCENARIOS.get(name, {}).get("scene") or name.split("@", 1)[0]
 
 
+def write_constant_probe(folder, radiance):
+    """Six 64x64 linear RGB PFM faces (px nx py ny pz nz) of a constant grey radiance: the cooked probe whose radiance is known exactly."""
+    import struct
+    folder = pathlib.Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    payload = struct.pack("<f", float(radiance)) * (64 * 64 * 3)
+    for face in ("px", "nx", "py", "ny", "pz", "nz"):
+        (folder / f"{face}.pfm").write_bytes(b"PF\n64 64\n-1.0\n" + payload)
+    return folder
+
+
 def capture_command(binary, name, folder, seed=1):
     """The exact single GPU process of one scenario; CPU-side everything else."""
     last = str(FRAMES - 1)
@@ -1174,6 +1208,7 @@ def capture_command(binary, name, folder, seed=1):
             "--capture-linear-signal", "hdr",
             *(["--export-reference", str(folder / "snapshot"), "--export-reference-frame", last] if SCENARIOS[name].get("snapshot", True) else []),
             *(["--terrain-textures", str(terrain_materials_dir() or "build/terrain-materials")] if SCENARIOS[name].get("cc0") else []),
+            *(["--reflection-probe", str(write_constant_probe(folder / "probe", SCENARIOS[name]["probe_constant"]))] if SCENARIOS[name].get("probe_constant") else []),
             "--report", str(folder / "report.json")]
 
 

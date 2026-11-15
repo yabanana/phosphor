@@ -530,6 +530,14 @@ inline float bsdfThinReflectScale(BsdfThin t) { return 1.0f - t.weight; }
 inline float3 bsdfThinTransmitted(BsdfThin t, float VdotH, float metallic) {
     return (t.weight * (1.0f - metallic) * (1.0f - bsdfDielectricFresnel(VdotH).x) / M_PI_F) * t.color;
 }
+// F15.3 (ticket 16 closure, thin + ior/specular/iridescence): the transmitted lobe under the dielectric layer of the extended path.  The glTF
+// Sample Renderer puts the diffuse transmission inside the base of the same fresnel_mix as the diffuse reflection (research/khr-materials.md
+// section 12 lines 453 and 460: f_diffuse = mix(diffuse_brdf, diffuse_btdf, w) under mix(f_diffuse, f_specular, F)), so the transmitted lobe takes
+// the SAME diffuse weight as the reflected one: 1 - max3 F_spec(V.H) (or 1 - max3 of the film Fresnel, bsdfSpecDiffuseIrid), not the default 0.04.
+// A thin-only material (default spec) keeps bsdfThinTransmitted above.
+inline float3 bsdfThinTransmittedSpec(BsdfDielectricSpec s, BsdfIrid irid, BsdfThin t, float VdotH, float metallic) {
+    return t.weight * bsdfSpecDiffuseIrid(s, irid, bsdfSpecFresnel(s, VdotH), metallic, t.color, VdotH);
+}
 // The declared environment ratio r(mu) = 1 - 0.16 mu of the transmitted weight to the front diffuse weight.
 inline float bsdfThinEnvRatio(float NdotV) { return 1.0f - 0.16f * clamp(NdotV, 0.0f, 1.0f); }
 // Transmitted environment/GI weight (multiplies the radiance or irradiance / pi at -N): w color (1 - metallic) (1 - E_d) r(N.V).

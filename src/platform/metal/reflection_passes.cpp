@@ -221,7 +221,7 @@ struct ReflectionPasses::Impl {
         params.flags=realProbe?REFLECTION_ENABLE_PROBES:0u;if(options.reflections!=ReflectionMode::Probes)params.flags|=REFLECTION_ENABLE_SSR;
         // Tagged physical fixture: no local probe/SSR geometry, only the
         // constant infinite incident radiance specified above.
-        if(options.reflectionScene=="specular-environment"||!options.materialScene.empty())params.flags=0;
+        if(options.reflectionScene=="specular-environment"||(!options.materialScene.empty()&&options.reflectionProbePath.empty()))params.flags=0; // F15.1 (ticket 10): an explicit cooked probe is honoured in a material scene
         if(rtReflection)params.flags|=REFLECTION_ENABLE_RT;if(gi&&options.gi!=GiMode::Off)params.flags|=REFLECTION_ENABLE_GI|REFLECTION_ENABLE_CACHE;
         if(options.reflectionSamples==1)params.flags|=REFLECTION_SINGLE_SAMPLE;
         params.flags|=(options.reflectionBounces&REFLECTION_BOUNCE_MASK)<<REFLECTION_BOUNCE_SHIFT;
@@ -253,7 +253,7 @@ struct ReflectionPasses::Impl {
         composeParams={f.width,f.height,f.backingWidth,f.backingHeight,0,{0,options.debugReflectionCorrupt,0},{environment[0],environment[1],environment[2]},0};
         if(gi&&options.gi!=GiMode::Off)composeParams.flags|=REFLECT_COMPOSE_GI;if(custom)composeParams.flags|=REFLECT_COMPOSE_CUSTOM;
         if(options.directLighting!=DirectLightingMode::Legacy)composeParams.flags|=REFLECT_COMPOSE_DI;
-        if(lobeGuide)composeParams.flags|=REFLECT_COMPOSE_LOBE_GUIDE_VALID;if(options.reflections!=ReflectionMode::Off)composeParams.flags|=REFLECT_COMPOSE_SPEC;if(options.ao!=AoMode::Off)composeParams.flags|=REFLECT_COMPOSE_AO;composeParams.pad[0]=0;composeAddress=lighting::upload(c,composeParams);
+        if(lobeGuide)composeParams.flags|=REFLECT_COMPOSE_LOBE_GUIDE_VALID;if(options.reflections!=ReflectionMode::Off)composeParams.flags|=REFLECT_COMPOSE_SPEC;if(options.reflections==ReflectionMode::Probes)composeParams.flags|=REFLECT_COMPOSE_SHEEN_FROM_PROBE;if(options.ao!=AoMode::Off)composeParams.flags|=REFLECT_COMPOSE_AO;composeParams.pad[0]=0;composeAddress=lighting::upload(c,composeParams);
         preComposeParams=composeParams;preComposeParams.flags&=REFLECT_COMPOSE_DI|REFLECT_COMPOSE_GI|REFLECT_COMPOSE_LOBE_GUIDE_VALID;
         if(preComposeParams.flags&REFLECT_COMPOSE_DI)preComposeParams.flags|=REFLECT_COMPOSE_EXCLUDE_EMISSION;preComposeAddress=lighting::upload(c,preComposeParams);
         GPUProbeGridParams dummy{};dummy.reset=1;giDummyAddress=lighting::upload(c,dummy);GPUProbeTraceExtra extra{};extra.sampledLightCount=direct.lightCount();extra.frameSeed=options.lightingSeed;extra.sunAngularRadius=.00465f;extraDummyAddress=lighting::upload(c,extra);

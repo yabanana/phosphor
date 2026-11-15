@@ -1107,6 +1107,22 @@ class SheenModel(unittest.TestCase):
         # The table clamps to 1 where the Charlie albedo exceeds it (narrow lobe, grazing view).
         self.assertEqual(float(ref.sheen_albedo(np.array([0.01]), np.array([0.07]))[0]), 1.0)
 
+    def test_declared_sheen_term_follows_the_probe_radiance_and_the_old_behaviour_is_a_control(self):
+        # Ticket 10 (decision 06): the sheen environment term is S E L(N) with the radiance of the probe, not of the declared environment.  The control
+        # `declared-radiance` lights the term with the declared radiance: here 2.5 times the probe's (0.5 / 0.2), so it must differ by 1.5 S E per unit.
+        sheen = sheen_dict([0.8, 0.4, 0.2], 0.5)
+        mu = np.array([0.6])
+        material = np.zeros((1, 3))
+        good = ref.declared_sheen_environment(material, mu, sheen, {"sheen": "spec"})
+        saved = ref.SKY_RATIO_CONTROL
+        try:
+            ref.SKY_RATIO_CONTROL = 2.5
+            old = ref.declared_sheen_environment(material, mu, sheen, {"sheen": "declared-radiance"})
+        finally:
+            ref.SKY_RATIO_CONTROL = saved
+        np.testing.assert_allclose(old, 2.5 * good, rtol=1e-12)
+        self.assertIn("declared-sheen-declared-radiance", ref.ALL_DECLARED_CONTROLS)
+
     def test_scaling_forms(self):
         sheen = sheen_dict([1.0, 0.5, 0.25], 0.5)
         e_v, e_l = np.array([0.3]), np.array([0.6])
@@ -1288,9 +1304,14 @@ class SheenModel(unittest.TestCase):
         e = float(ref.sheen_lookup(mu, np.array([0.5]))[0])
         np.testing.assert_allclose(got, (plain * (1 - e) + np.array([1.0, 0.5, 0.25]) * e) * 2.0, rtol=1e-12)
         good = ref.declared_environment_radiance(self.base, np.array([0.0]), rough, mu, 1.0, sheen=sheen)
-        for name, variant in ref.SHEEN_DECLARED_CONTROLS.items():
-            wrong = ref.declared_environment_radiance(self.base, np.array([0.0]), rough, mu, 1.0, variant, sheen=sheen)
-            self.assertGreater(float(np.abs(wrong - good).max() / good.max()), 0.01, name)
+        saved = ref.SKY_RATIO_CONTROL
+        try:
+            ref.SKY_RATIO_CONTROL = 2.5  # the probe fixture's declared / probe radiance ratio (the declared-radiance control needs a ratio != 1)
+            for name, variant in ref.SHEEN_DECLARED_CONTROLS.items():
+                wrong = ref.declared_environment_radiance(self.base, np.array([0.0]), rough, mu, 1.0, variant, sheen=sheen)
+                self.assertGreater(float(np.abs(wrong - good).max() / good.max()), 0.01, name)
+        finally:
+            ref.SKY_RATIO_CONTROL = saved
         ignored = ref.declared_environment_radiance(self.base, np.array([0.0]), rough, mu, 1.0,
                                                     ref.SHEEN_DECLARED_CONTROLS["declared-sheen-ignored"], sheen=sheen)
         np.testing.assert_allclose(ignored, plain, rtol=1e-14)
@@ -1829,6 +1850,36 @@ class AnisotropyModel(unittest.TestCase):
         flipped = mean_albedo(panel_n, panel_t, math.pi / 4, 1.0, "rotation-flipped").mean()
         self.assertGreater(abs(float(spec - flipped)) / float(spec), 0.05)
 
+    def test_exact_disk_integration_of_a_narrow_anisotropic_lobe(self):
+        # F15.3 closure (ticket 11): `--exact-aniso-disk` integrates the disk of a narrow anisotropic lobe on a polar grid (a different family from the
+        # engine's golden-angle spiral) and drops the pixels from the quadrature mask.  The grid is converged (64 x 128 against 192 x 384: < 1e-6 relative),
+        # and the engine's 32 / 128-sample spiral agrees with it within 1e-3 on highlight pixels (measured 3e-5), i.e. the declared rule is accurate.
+        saved = (ref.EXACT_ANISO_DISK, ref.EXACT_DISK_RINGS, ref.EXACT_DISK_AZIMUTHS, ref.EXACT_DISK_COUNT)
+
+        def radiance(offset, flag, rings=64, azimuths=128):
+            ref.EXACT_ANISO_DISK, ref.EXACT_DISK_RINGS, ref.EXACT_DISK_AZIMUTHS = flag, rings, azimuths
+            ref.EXACT_DISK_COUNT = rings * azimuths
+            n, v = np.array([[0.0, 0.0, 1.0]]), np.array([[math.sin(0.4), 0.0, math.cos(0.4)]])
+            sun = np.array([-math.sin(0.4) + math.cos(0.4) * offset, 0.0, math.cos(0.4) + math.sin(0.4) * offset])
+            sun /= np.linalg.norm(sun)
+            out, narrow = ref.sun_radiance(np.array([[0.8, 0.35, 0.15]]), np.array([1.0]), np.array([0.1]), n, v, sun, 3.0, 0.00465,
+                                           aniso=aniso_pixels(0.5, 0.0, count=1))
+            return out[0], bool(narrow[0])
+        try:
+            for offset in (0.0, 0.003, 0.01):
+                spiral, spiral_narrow = radiance(offset, False)
+                exact, exact_narrow = radiance(offset, True)
+                finer, _ = radiance(offset, True, 192, 384)
+                self.assertTrue(spiral_narrow)
+                self.assertFalse(exact_narrow)
+                self.assertLess(float(np.max(np.abs(exact - finer) / finer)), 1e-6)
+                self.assertLess(float(np.max(np.abs(spiral - exact) / exact)), 1e-3)
+            # the polar grid is uniform in solid angle: its mean cosine equals the analytic mean of cos(theta) over the cap
+            samples = ref.sun_disk_polar(np.array([0.0, 0.0, 1.0]), 0.2)
+            self.assertAlmostEqual(float(samples[:, 2].mean()), (1.0 + math.cos(0.2)) / 2.0, places=6)
+        finally:
+            ref.EXACT_ANISO_DISK, ref.EXACT_DISK_RINGS, ref.EXACT_DISK_AZIMUTHS, ref.EXACT_DISK_COUNT = saved
+
     def test_record_word_decoding_texture_refusal_and_combinations(self):
         f = lambda x: int.from_bytes(struct.pack("<f", x), "little")  # noqa: E731
 
@@ -1861,9 +1912,8 @@ class AnisotropyModel(unittest.TestCase):
             ref.material_anisotropy(data, data["materials"][2])
         for index in (3, 4):                                                       # ticket 19: coat / sheen on top are composed
             self.assertEqual(ref.material_anisotropy(data, data["materials"][index]), (1.0, 0.0))
-        data["materials"][3]["feature_bits"] = 8 | 128                             # thin subsurface + anisotropy: refused
-        with self.assertRaises(ValueError):
-            ref.material_anisotropy(data, data["materials"][3])
+        data["materials"][3]["feature_bits"] = 8 | 128                             # thin subsurface + anisotropy: composed (ticket 16 closure)
+        self.assertEqual(ref.material_anisotropy(data, data["materials"][3]), (1.0, 0.0))
         data["materials"][3]["feature_bits"] = 10
         self.assertTrue(ref.uses_anisotropy(data))
         self.assertIsNone(ref.material_specular(data, data["materials"][0]))       # anisotropy-only: neutral specular block
@@ -2416,9 +2466,8 @@ class IridescenceModel(unittest.TestCase):
             with self.assertRaises(ValueError):
                 ref.material_iridescence(data, data["materials"][index])
         np.testing.assert_allclose(ref.material_iridescence(data, data["materials"][4]), (1.0, 1.3, 100.0, 400.0), rtol=1e-7)  # ticket 19: + anisotropy composed
-        data["materials"][4]["feature_bits"] = 16 | 128                               # + thin subsurface: refused
-        with self.assertRaises(ValueError):
-            ref.material_iridescence(data, data["materials"][4])
+        data["materials"][4]["feature_bits"] = 16 | 128                               # + thin subsurface: composed (ticket 16 closure)
+        ref.material_iridescence(data, data["materials"][4])
         data["materials"][4]["feature_bits"] = 24
         self.assertTrue(ref.uses_iridescence(data))
         self.assertIsNone(ref.material_specular(data, data["materials"][0]))
@@ -2793,8 +2842,7 @@ class ThinSubsurfaceModel(unittest.TestCase):
                 continue
             with self.assertRaises(ValueError, msg=index):
                 ref.material_subsurface(data, materials[index])
-        with self.assertRaises(ValueError):                    # a combination with iridescence is not modelled
-            ref.material_subsurface(data, materials[len(groups) + 1])
+        ref.material_subsurface(data, materials[len(groups) + 1])  # a combination with iridescence is composed (ticket 16 closure)
         self.assertTrue(ref.uses_subsurface(data))
         self.assertEqual((ref.SUBSURFACE_FEATURE_BIT, ref.SUBSURFACE_RECORD), (128, 2))  # MaterialFeature::Subsurface, GPUMaterialExt2
         # a subsurface-only material is not mistaken for the other features
@@ -3219,14 +3267,41 @@ class CombinationModel(unittest.TestCase):
         np.testing.assert_allclose(sun_coated, (1 - fc) * sun_plain, rtol=1e-10)
         np.testing.assert_allclose(sun_uncoated, sun_plain, rtol=1e-10)
 
-    def test_thin_subsurface_with_sheen_anisotropy_iridescence_or_specular_is_refused(self):
-        for other in (4, 8, 16, 1):
-            with self.assertRaises(ValueError, msg=other):
-                ref.check_combination(128 | other)
-        ref.check_combination(128 | 2)       # coat: composed
-        ref.check_combination(1 | 2 | 4 | 8 | 16)  # every other lobe together: composed
+    def test_thin_subsurface_with_every_other_lobe_is_composed(self):
+        for other in (4, 8, 16, 1, 2):
+            ref.check_combination(128 | other)
+        ref.check_combination(128 | 1 | 2 | 4 | 8 | 16)
         with self.assertRaises(ValueError):   # an unknown bit (transmission, 32) is refused by material_extension_words
             ref.material_extension_words({"material_extensions": {"records": [[0] * 20]}}, {"feature_bits": 2 | 32, "extension_index": 0})
+
+    def test_thin_transmitted_lobe_takes_the_diffuse_weight_of_the_extended_dielectric(self):
+        # ticket 16 closure: under ior/specular the transmitted weight is (1 - metallic) (1 - max3 F_spec(V.H)) (the weight of the reflected diffuse),
+        # not the default 0.04 Fresnel; without a dielectric the original expression stands.
+        n = np.array([[0.0, 0.0, 1.0]] * 2)
+        v = np.array([[0.0, 0.6, 0.8]] * 2)
+        l = np.array([[0.3, -0.4, -0.8]] * 2) / np.linalg.norm([0.3, -0.4, -0.8])
+        thin = {"weight": np.array([1.0, 1.0]), "color": np.ones((2, 3)), "variant": "spec"}
+        plain = ref.thin_transmitted(thin, np.zeros(2), n, v, l)
+        high = {"f0": np.tile(ref.specular_f0(2.4, [1, 1, 1]), (2, 1)), "weight": np.ones(2), "variant": "spec"}
+        same = {"f0": np.full((2, 3), ref.DIELECTRIC_F0), "weight": np.ones(2), "variant": "spec"}
+        np.testing.assert_allclose(ref.thin_transmitted(thin, np.zeros(2), n, v, l, ref.SPECULAR_EXT, same), plain, rtol=1e-12)
+        self.assertTrue(np.all(ref.thin_transmitted(thin, np.zeros(2), n, v, l, ref.SPECULAR_EXT, high) < plain - 1e-3))
+        # a metal transmits nothing
+        self.assertEqual(float(ref.thin_transmitted(thin, np.ones(2), n, v, l, ref.SPECULAR_EXT, high).max()), 0.0)
+
+    def test_sheen_scales_the_transmitted_lobe_of_a_back_light_with_the_smallest_n_dot_l(self):
+        # the glTF Sample Renderer scales the whole base by min(1 - m E(N.V), 1 - m E(N.L)) with N.L = 0 behind the surface: E at the table minimum
+        base, metallic, rough = np.ones((1, 3)), np.zeros(1), np.full(1, 0.5)
+        n, v = np.array([[0.0, 0.0, 1.0]]), np.array([[0.0, 0.6, 0.8]])
+        position, light = np.zeros((1, 3)), {"position": [0.6, -0.8, -1.6], "color": [1, 1, 1], "intensity": 10.0, "range": 100.0}
+        thin = {"weight": np.ones(1), "color": np.ones((1, 3)), "variant": "spec"}
+        sheen = {"color": np.full((1, 3), 0.8), "roughness": np.full(1, 0.5), "variant": "spec"}
+        plain, _ = ref.point_radiance(base, metallic, rough, n, v, position, light, thin=thin)
+        layered, _ = ref.point_radiance(base, metallic, rough, n, v, position, light, sheen=sheen, thin=thin)
+        e_v = float(ref.sheen_albedo(np.array([0.8]), np.array([0.5]))[0])
+        e_l = float(ref.sheen_albedo(np.array([ref.THIN_BACK_NDOTL]), np.array([0.5]))[0])
+        np.testing.assert_allclose(layered, plain * min(1 - 0.8 * e_v, 1 - 0.8 * e_l), rtol=1e-10)
+        self.assertTrue(float(layered.max()) < float(plain.max()))
 
     # -- energy ---------------------------------------------------------------------------------------------------------------
     def white_furnace(self, mu, metallic, coat=None, sheen=None, irid=None, thin=None, variant=None, rough=0.4):

@@ -19,7 +19,7 @@
 namespace phosphor {
 namespace {
 // The names are mirrored by tools/f15_check.py SCENARIOS (tests/test_material_validation.cpp compares both).
-constexpr std::array<std::string_view, 84> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
+constexpr std::array<std::string_view, 88> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
                                                       "furnace-base",   "furnace-resolve",     "roughness-extremes",
                                                       "roughness-extremes-sun", "specular-grid-sun",
                                                       "specular-grid-env-resolve", "specular-grid-point", "specular-grid-env", "furnace-specular",
@@ -49,7 +49,7 @@ constexpr std::array<std::string_view, 84> kScenarios{"base-grid-sun",  "base-gr
                                                       "texture-coat-sun", "texture-coat-env-resolve", "texture-aniso-sun",
                                                       "texture-aniso-env-resolve", "texture-irid-sun", "texture-irid-env-resolve",
                                                       "texture-sheen-sun", "texture-sheen-env-resolve", "texture-thin-sun",
-                                                      "texture-thin-env-resolve", "combo-aniso-panel-sun", "combo-aniso-panel-env"};
+                                                      "texture-thin-env-resolve", "combo-aniso-panel-sun", "combo-aniso-panel-env", "aniso-narrow-sun", "sheen-probe-env", "combo-thin-lobes-sun", "combo-thin-lobes-env"};
 constexpr float pi = 3.14159265358979323846f;
 
 glm::quat orientLight(glm::vec3 towardLight) {
@@ -404,6 +404,19 @@ void addCombinations(std::vector<MaterialScenarioSpec>& out) {
                             default: return cell;
                         }
                     }), false, glm::normalize(glm::vec3(-0.55f, 0.4f, -0.73f))});
+    // Thin subsurface under every other lobe (ticket 16 closure): rows = (weight 1, white) and (0.6, warm); columns = + sheen (white 0.4), + anisotropy (1 at
+    // pi/4), + iridescence (film 1.3 / 400 nm), + ior/specular (1.8, weight 0.7, colour 1 .8 .6).  Sun from the side: the left half of every sphere is lit
+    // from the front (reflected lobes), the right half from behind (transmitted lobe under the layers).
+    addCombination(out, "thin-lobes",
+                   {std::vector<float>(4, 0.3f), {0.0f, 0.0f}, glm::vec3(0.3f, 0.5f, 0.8f), grid(2, 4, [&](size_t r, size_t c) {
+                        Cell cell = withThin(none, r == 0 ? 1.0f : 0.6f, r == 0 ? white : warm);
+                        switch (c) {
+                            case 0: return withSheen(cell, white, 0.4f);
+                            case 1: return withAniso(cell, 1.0f, quarter);
+                            case 2: return withIrid(cell, 1.0f, 1.3f, 400.0f);
+                            default: return withSpecular(cell, 1.8f, 0.7f, glm::vec3(1.0f, 0.8f, 0.6f));
+                        }
+                    }), true, glm::vec3(-0.9f, 0.3f, -0.25f)});
     // Everything but the film at once (ior/specular + coat + sheen + anisotropy): rows = dielectric, metal.
     addCombination(out, "all-lobes",
                    {std::vector<float>(4, 0.3f), {0.0f, 1.0f}, copper, grid(2, 4, [&](size_t, size_t c) {
@@ -507,6 +520,8 @@ const std::vector<MaterialScenarioSpec>& specs() {
     static const std::vector<float> anisoMetallic{0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f};
     static const std::vector<float> anisoRotation{0.0f, 0.78539816f, 1.57079633f, -0.78539816f};
     static const std::vector<float> anisoRoughness(4, 0.3f);
+    // ticket 11 (F15.3 closure): narrow lobes, alpha_b = 0.0064 .. 0.04 (< 0.05: the sun disk uses the engine's spiral rule there)
+    static const std::vector<float> anisoNarrowRoughness{0.08f, 0.12f, 0.16f, 0.2f};
     static const glm::vec3 anisoGridCentre(0.0f, 2.5f, 0.0f);
     static const MaterialPointLight anisoBackLight{anisoGridCentre + 9.0f * glm::normalize(glm::vec3(-0.65f, 0.55f, -0.52f)),
                                                    250.0f, 100.0f};
@@ -684,6 +699,11 @@ const std::vector<MaterialScenarioSpec>& specs() {
         // Environment only, deterministic resolve (--reflections off --lighting-denoise custom): the declared sheen term.
         {"sheen-grid-env-resolve", sheenBaseRoughness, sheenMetallic, sheenBase, false, 0.0f, towardSun, 0.5f, {}, {}, {}, {},
          {}, {}, {}, false, sheenColors, sheenRoughnesses},
+        // ticket 10 (F15.3 closure): the sheen grid on a BLACK base (no diffuse term, which keeps the declared environment), lit by a cooked probe of
+        // constant radiance 0.2 (tools/f15_check.py writes it) while the declared environment is 0.5: the specular and sheen terms must carry the
+        // probe radiance, not the declared one (decision 06: probe radiance at N x Charlie albedo).
+        {"sheen-probe-env", sheenBaseRoughness, sheenMetallic, glm::vec3(0.0f), false, 0.0f, towardSun, 0.5f, {}, {}, {}, {},
+         {}, {}, {}, false, sheenColors, sheenRoughnesses},
         // The same scene with the specular transport on: sheen is not sampled, the environment term comes from the composition.
         {"sheen-grid-env", sheenBaseRoughness, sheenMetallic, sheenBase, false, 0.0f, towardSun, 0.5f, {}, {}, {}, {}, {}, {},
          {}, false, sheenColors, sheenRoughnesses},
@@ -696,6 +716,8 @@ const std::vector<MaterialScenarioSpec>& specs() {
          {}, {}, false, sheenColors, sheenRoughnesses},
         // F15.3 (ticket 11) anisotropy grids.  Sun only: the direct gate (the anisotropic lobe at the disk centre).
         {"aniso-grid-sun", anisoRoughness, anisoMetallic, copper, true, 3.0f, towardSun, 0.0f, {}, {}, {}, {}, {}, {}, {}, false, {},
+         {}, anisoStrength, anisoRotation},
+        {"aniso-narrow-sun", anisoNarrowRoughness, anisoMetallic, copper, true, 3.0f, towardSun, 0.0f, {}, {}, {}, {}, {}, {}, {}, false, {},
          {}, anisoStrength, anisoRotation},
         // Environment only, deterministic resolve (--reflections off --lighting-denoise custom): the declared anisotropy term.
         {"aniso-grid-env-resolve", anisoRoughness, anisoMetallic, copper, false, 0.0f, towardSun, 0.5f, {}, {}, {}, {}, {}, {}, {},

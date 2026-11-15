@@ -763,6 +763,29 @@ class RunnerLogic(unittest.TestCase):
         self.assertTrue(check.SCENARIOS["furnace-thin-subsurface@resolve"]["always_green"])
         self.assertEqual(check.SCENARIOS["subsurface-thin-env-resolve"]["kind"], "declared")
 
+    def test_probe_and_narrow_lobe_keys_are_planned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(check.main(["--out", tmp, "--binary", "build/release/phosphor", "--only", "sheen-probe-env", "--only", "aniso-narrow-sun"]), 0)
+            commands = json.loads((pathlib.Path(tmp) / "plan.json").read_text())["commands"]
+            capture, reference = commands["sheen-probe-env"]["capture"], commands["sheen-probe-env"]["reference"]
+            probe = pathlib.Path(capture[capture.index("--reflection-probe") + 1])
+            self.assertEqual(capture[capture.index("--reflections") + 1], "probes")
+            self.assertEqual(reference[reference.index("--sky-override") + 1], "0.2")
+            for face in ("px", "nx", "py", "ny", "pz", "nz"):
+                data = (probe / f"{face}.pfm").read_bytes()
+                self.assertTrue(data.startswith(b"PF\n64 64\n-1.0\n"))
+                self.assertEqual(len(data), len(b"PF\n64 64\n-1.0\n") + 64 * 64 * 3 * 4)
+            self.assertIn("--exact-aniso-disk", commands["aniso-narrow-sun"]["reference"])
+        for key, controls in (("sheen-probe-env", ["declared-sheen-ignored", "declared-sheen-declared-radiance"]),
+                              ("aniso-narrow-sun", ["aniso-ignored", "aniso-rotation-flipped", "aniso-alpha-swapped"])):
+            self.assertEqual(check.SCENARIOS[key]["controls"], controls)
+            literal, declared = check.scenario_controls(key)
+            for name in literal:
+                self.assertIn(name, ref.ALL_CONTROLS)
+            for name in declared:
+                self.assertIn(name, ref.ALL_DECLARED_CONTROLS)
+
     def test_texture_keys_are_planned_with_controls_the_reference_knows(self):
         keys = [f"texture-{lobe}-{mode}" for lobe in ("coat", "aniso", "irid", "sheen", "thin") for mode in ("sun", "env-resolve")]
         with tempfile.TemporaryDirectory() as tmp:
@@ -1665,7 +1688,7 @@ class BenchMirror(unittest.TestCase):
 
     def test_every_combination_key_is_planned_with_valid_controls_and_coherent_pending_fields(self):
         keys = [k for k in check.SCENARIOS if k.startswith("combo-") or k.startswith("furnace-combinations")]
-        self.assertEqual(len(keys), 34)
+        self.assertEqual(len(keys), 36)
         with tempfile.TemporaryDirectory() as tmp:
             with contextlib.redirect_stdout(io.StringIO()):
                 args = ["--out", tmp, "--binary", "build/release/phosphor"]

@@ -142,6 +142,12 @@ const bool finiteFit=all(isfinite(fitWeight));
         result=L*fitWeight;
 #ifdef PHOSPHOR_REFL_LOBE
         result+=coatResult;
+        // F15.1 (ticket 10, decision 06): the sheen environment term S E L(N) takes the PROBE radiance at N (the roughest filtered level), with the
+        // coat attenuation, where the composite does not own it (GI on: the GI irradiance / pi stands for L(N) there).
+        if(!(p.flags&REFLECTION_ENABLE_GI)){const auto sheenLobe=REFL_LOBE(p.flags,REFLECTION_LOBE_GUIDE_VALID,tid,s);
+            if(sheenLobe.sheen){uint sheenPath;float sheenCoatAtt=1.0f;
+                if(sheenLobe.coat)sheenCoatAtt=1.0f-sheenLobe.coatFactor*bsdfCoatFresnel(abs(dot(sheenLobe.coatNormal,v)));
+                result+=reflectionProbeRadiance(diVec(s.position),n,1.0f,true,p,probes,atlas,sheenPath)*sheenLobe.sheenColor*(sheenLobe.sheenAlbedo*sheenCoatAtt);}}
         // F15.1 (ticket 13): the declared transmitted term of a transmissive pixel (probes/environment along the refracted direction).
         {const auto transLobe=REFL_LOBE(p.flags,REFLECTION_LOBE_GUIDE_VALID,tid,s);uint transmittedPath;
             if(transLobe.trans){const float3 Lt=reflectionDeclaredTransmission(s,transLobe,p,probes,atlas,transmittedPath);if(!all(isfinite(Lt))||any(Lt<0))result=as_type<float>(0x7fc00000u);else result+=Lt;}}

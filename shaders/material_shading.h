@@ -356,6 +356,48 @@ static float3 sheenLayerLight(float3 value, float3 N, float3 V, float3 L, SheenP
     const float scale = bsdfSheenScaleLight(sheen.color, sheen.roughness, NdotV, NdotL, table);
     return value * scale + bsdfSheenLobe(sheen.color, sheen.roughness, NdotL, NdotV, NdotH) * NdotL;
 }
+// F15.3 (ticket 16 closure): a thin material that also carries ior/specular, iridescence, anisotropy or sheen.  The layered value of those
+// lobes with the diffuse base scaled by 1 - w (the diffuseScale of evaluateLightSpec / evaluateLightAniso), the transmitted lobe under the same
+// dielectric Fresnel layer (bsdfThinTransmittedSpec) and the sheen layer above both: the glTF Sample Renderer scales the whole base
+// (diffuse reflection and transmission) by albedoSheenScaling = min(1 - m E(N.V), 1 - m E(N.L)) with N.L = clampedDot(n, l) = 0 for a light
+// behind the surface and adds the sheen lobe only for N.L > 0.  N.L = 0 itself is not resolved by the table (the exact albedo falls to 0 below
+// N.L 1e-3 while the engine table stays flat), so the back-light albedo is read at N.L = 1e-3, the same constant as tools/f15_reference.py
+// THIN_BACK_NDOTL (E 0.7698 in the table against 0.7689 exact at sheen roughness 0.4).
+static float3 thinSheenBackScale(float3 value, float3 N, float3 V, SheenParams sheen, const constant float* table) {
+    const float NdotV = max(dot(N, V), 1e-4f);
+    return value * bsdfSheenScaleLight(sheen.color, sheen.roughness, NdotV, 1e-3f, table);
+}
+static float3 thinLayerLight(float3 N, float3 V, float3 L, float3 albedo, float metallic, float roughness, BsdfDielectricSpec spec, BsdfThin thin,
+                             bool anisoActive, BsdfAniso an, BsdfIrid irid, bool sheenOn, SheenParams sheen, const constant float* sheenTable) {
+    const float NdotLs = dot(N, L);
+    if (NdotLs > 0.0f) {
+        const float3 front = anisoActive ? evaluateLightAniso(N, V, L, float3(1.0f), albedo, metallic, spec, an, irid, bsdfThinReflectScale(thin))
+                                         : evaluateLightSpec(N, V, L, float3(1.0f), albedo, metallic, roughness, spec, irid, bsdfThinReflectScale(thin));
+        return sheenOn ? sheenLayerLight(front, N, V, L, sheen, sheenTable) : front;
+    }
+    if (NdotLs < 0.0f && dot(V + L, V + L) > 1e-20f) {
+        const float3 back = bsdfThinTransmittedSpec(spec, irid, thin, saturate(dot(V, normalize(V + L))), metallic) * (-NdotLs);
+        return sheenOn ? thinSheenBackScale(back, N, V, sheen, sheenTable) : back;
+    }
+    return float3(0.0);
+}
+// The sun of a thin layered material: diffuse reflection and transmission at the disk centre, the specular lobe (anisotropic or not) over the disk.
+static float3 sunThinLayer(float3 N, float3 V, float3 L, float3 albedo, float metallic, float roughness, float angularRadius, BsdfDielectricSpec spec,
+                           BsdfThin thin, bool anisoActive, BsdfAniso an, BsdfIrid irid, bool sheenOn, SheenParams sheen, const constant float* sheenTable) {
+    const float NdotLs = dot(N, L);
+    float3 sum = float3(0.0);
+    if (dot(V + L, V + L) > 1e-20f) {
+        const float VdotH = saturate(dot(V, normalize(V + L)));
+        if (NdotLs > 0.0f) sum = bsdfSpecDiffuseIrid(spec, irid, bsdfSpecFresnel(spec, VdotH), metallic, albedo, VdotH) * bsdfThinReflectScale(thin) * NdotLs;
+        else if (NdotLs < 0.0f) sum = bsdfThinTransmittedSpec(spec, irid, thin, VdotH, metallic) * (-NdotLs);
+    }
+    if (NdotLs > 0.0f) {
+        sum += anisoActive ? sunDiskSpecularAniso(N, V, L, albedo, metallic, angularRadius, spec, an, irid)
+                           : sunDiskSpecularSpec(N, V, L, albedo, metallic, roughness, angularRadius, spec, irid);
+        return sheenOn ? sheenLayerLight(sum, N, V, L, sheen, sheenTable) : sum;
+    }
+    return (NdotLs < 0.0f && sheenOn) ? thinSheenBackScale(sum, N, V, sheen, sheenTable) : sum;
+}
 // The coat lobe alone for one light, irradiance-normalised: c F_c D Vis max(Nc.L, 0) (the same expression as evaluateLightCoat).
 static float coatLobeLight(float3 V, float3 L, CoatParams coat) {
     const float ncl = saturate(dot(coat.normal, L));
@@ -973,13 +1015,18 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
             // F15.1 (ticket 19): a coat above the thin material attenuates the reflected lobes and the transmitted lobe alike by
             // 1 - c F_c(|V.Nc|) and adds its own lobe (research/khr-materials.md section 12; the base sits under the coat).
             float3 thinSum;
+            // F15.3 (ticket 16 closure): thin + ior/specular, iridescence, anisotropy or sheen takes the layered functions; a thin-only material keeps the
+            // statements below unchanged.
+            const bool thinLayered = specExt || sheenOn || anisoActive || bsdfIridActive(irid);
             if (physicalGI && isDirectional && i == shadowLight && sunAngularRadius > 0.0f) {
-                thinSum = sunThinDiffuse(N, V, L, baseColor.rgb, metallic, spec, thin) +
+                thinSum = thinLayered ? sunThinLayer(N, V, L, baseColor.rgb, metallic, roughness, sunAngularRadius, spec, thin, anisoActive, aniso, irid, sheenOn, sheen, frame.sheenTable)
+                                      : sunThinDiffuse(N, V, L, baseColor.rgb, metallic, spec, thin) +
                           sunDiskSpecularSpec(N, V, L, baseColor.rgb, metallic, roughness, sunAngularRadius, spec);
                 if (coatOn) thinSum = thinSum * coatAttenuation(coat, V) + sunDiskCoat(V, L, sunAngularRadius, coat);
                 color += thinSum * lightColor * attenuation * visibility;
             } else {
-                thinSum = evaluateLightThin(N, V, L, float3(1.0f), baseColor.rgb, metallic, roughness, spec, thin);
+                thinSum = thinLayered ? thinLayerLight(N, V, L, baseColor.rgb, metallic, roughness, spec, thin, anisoActive, aniso, irid, sheenOn, sheen, frame.sheenTable)
+                                      : evaluateLightThin(N, V, L, float3(1.0f), baseColor.rgb, metallic, roughness, spec, thin);
                 if (coatOn) thinSum = thinSum * coatAttenuation(coat, V) + coatLobeLight(V, L, coat);
                 color += thinSum * lightColor * attenuation * visibility;
             }

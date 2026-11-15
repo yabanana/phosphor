@@ -199,3 +199,23 @@ Open: captured-probe sheen fixture; sheen texture numeric fixture; reference qua
 - Captured-probe sheen fixture: NOT built. The engine does not light the sheen term from captured probes (declared in this ticket); a fixture
   would measure a declared gap, not a correctness property, and needs an analytic radiance field plus an engine change (a probe lookup of S E L(N)).
   Stays open as a declared limitation.
+
+### 2026-11-15 (2) — captured-probe sheen term (agent `tex`, round 2; decision 06: "probe/GI radiance at N x Charlie albedo")
+
+- Defect confirmed and fixed. The probe kernel (`reflection_probe_only_lobe`) lit the specular lobe from the probe but the composite added the sheen term S E L(N) with the DECLARED
+  environment; with `--reflections probes` and no GI the sheen term now takes the probe radiance at N (roughest filtered level, coat attenuation included): `shaders/reflection_probes.metal`
+  (new block after `result+=coatResult`), `shaders/reflection_composite.metal` (the declared term is skipped under the new flag `REFLECT_COMPOSE_SHEEN_FROM_PROBE`, `src/renderer/gpu_types.h`,
+  set in `src/platform/metal/reflection_passes.cpp`). With GI on the GI irradiance / pi stays L(N) (unchanged).
+- Fixture `sheen-probe-env`: the sheen grid on a BLACK base (no diffuse term, which keeps the declared environment 0.5), lit by a cooked constant probe of radiance 0.2 written by
+  `tools/f15_check.py` (`write_constant_probe`, `--reflection-probe`), `--lighting clustered --reflections probes --lighting-denoise off`; reference `--sky-override 0.2` (the declared
+  sheen model at the probe radiance). Material scenes disabled every probe lookup (`!options.materialScene.empty()` zeroed the probe flags, "constant infinite incident radiance"): an
+  explicit `--reflection-probe` is now honoured there (`reflection_passes.cpp`), nothing else changes.
+- Evidence the fixture bites: before the probe lookup took effect (legacy lighting, then the probe flags still zeroed) the engine ignored the probe entirely (a 0.8 probe gave an image
+  identical to the 0.2 probe: max difference 0.0) and the gate failed with sphere means of 150 % (engine = declared 0.5 everywhere, reference = 0.2). With the probe honoured but the composite
+  still adding the declared sheen term the interior spheres matched and the sheen rows differed; after the change: GREEN, worst sphere mean 0.018 %, p99 0.065 % (`tex17`).
+  Controls FAIL: declared-sheen-ignored and `declared-sheen-declared-radiance` (the sheen term lit by the declared 0.5, i.e. the engine before the fix).
+- Declared remainder: with the custom denoiser on, the probe-lit specular+sheen signal passes through the denoiser and the boundary spheres of the grid differ by up to 1.9 % (measured
+  with `--lighting-denoise custom`: worst sphere mean 0.83 %, p99 6.7 %): the fixture runs unfiltered like the other `@probes` keys. With `--lighting-denoise off` / legacy lighting the resolve
+  owns the ambient and the sheen term there still uses the declared environment (decision 06 is met on the F13 composite path only).
+- visual_check (`BENCH8_ARGS="--instances 100000"`, reference-f15-appB): benches 1-5, 7, 8 are 0 px; bench 6 differs by 9 px, max delta 1 (the known 1-LSB shader-validation codegen effect of tickets 10/74ff194, the
+  references of benches 5/6 were retaken then). It was NOT re-checked under API validation only (battery hold); the five F13 exactness PFMs are byte-identical. Owner/orchestrator: rerun bench 6 without shader validation.

@@ -150,7 +150,7 @@ kernel void REFL_KERNEL(reflection_composite)(constant GPUReflectionComposeParam
                 const float aoFactor=(p.flags&REFLECT_COMPOSE_AO)?saturate(ao.read(pixel).x):1.0f;
                 color+=ambient*aoFactor;
 #ifdef PHOSPHOR_REFL_LOBE
-                if(any(sheenTerm>0))color+=float3(p.environment[0],p.environment[1],p.environment[2])*sheenTerm*as_type<float>(s.pad[0])*aoFactor;
+                if(any(sheenTerm>0)&&!(p.flags&REFLECT_COMPOSE_SHEEN_FROM_PROBE))color+=float3(p.environment[0],p.environment[1],p.environment[2])*sheenTerm*as_type<float>(s.pad[0])*aoFactor;
                 if(any(thinTerm>0))color+=float3(p.environment[0],p.environment[1],p.environment[2])*thinTerm*as_type<float>(s.pad[0])*aoFactor;
 #endif
             }}

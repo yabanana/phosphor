@@ -222,3 +222,15 @@ Open: direction-texture fixture; declared-environment fit 6.4-7.0 % gap on metal
 - Narrow-lobe sun and non-constant environment (bent normal): not built. The reference already integrates the sun disk of a narrow anisotropic lobe with the
   engine's disk rule (its `narrow` mask drops the highlight from the max gate), so a fixture would gate only the tails; a non-constant declared environment does not exist in the
   engine (the declared environment is isotropic), so the bent-normal fetch has nothing to be compared against. Stays declared.
+
+### 2026-11-15 (2) — narrow-lobe sun and the bent-normal fixture (agent `tex`, round 2)
+
+- Narrow-lobe sun: the reference now integrates the disk of a narrow anisotropic lobe EXACTLY (`--exact-aniso-disk`: a polar grid of 64 x 128 samples uniform in solid angle, a different
+  family from the engine's golden-angle spiral; the narrow pixels leave the quadrature mask). Converged: 64 x 128 against 192 x 384 within 3e-10 relative; the engine's 32 / 128-sample
+  spiral agrees with it to 3e-5 on highlight pixels (unit test `test_exact_disk_integration_of_a_narrow_anisotropic_lobe`). New fixture `aniso-narrow-sun` (6 rows x 4 rotations,
+  alpha_b 0.0064 .. 0.04, all below the 0.05 rule): GREEN with the existing thresholds, p99 <= 0.35 %, max outside mask <= 1.12 % (3 % bound), no pixel masked (`tex17`); controls
+  aniso-ignored, aniso-rotation-flipped, aniso-alpha-swapped FAIL. FINDING: the engine does not miss; the declared 32 / 128-sample rule is accurate for narrow anisotropic lobes.
+- Bent-normal fixture: NOT built, with the reason measured: the material-scenario rig runs the declared F13 path in every scenario (`physicalGI` true: the constant declared
+  environment, 0 when the scenario sets none), the legacy two-colour hemisphere is only reachable through the legacy bench scenes, not through `--material-scenario`; a fixture
+  needs a host option that switches a material scenario to the hemisphere environment plus a reference for the hemisphere fetch (exact quadrature of the anisotropic lobe against a
+  non-constant radiance, ~300 M lobe evaluations). Not attempted; the engine's bent-normal fetch stays unexercised.
