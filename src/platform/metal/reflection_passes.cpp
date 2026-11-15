@@ -225,6 +225,7 @@ struct ReflectionPasses::Impl {
         if(rtReflection)params.flags|=REFLECTION_ENABLE_RT;if(gi&&options.gi!=GiMode::Off)params.flags|=REFLECTION_ENABLE_GI|REFLECTION_ENABLE_CACHE;
         if(options.reflectionSamples==1)params.flags|=REFLECTION_SINGLE_SAMPLE;
         params.flags|=(options.reflectionBounces&REFLECTION_BOUNCE_MASK)<<REFLECTION_BOUNCE_SHIFT;
+        if(options.debugGlassTintCameraOnly)params.flags|=REFLECTION_DEBUG_TINT_CAMERA_ONLY; // F15 closure ticket 13: negative control of the tint rule
         // F13.1: non-legacy DI integrates every geometry emitter's specular
         // lobe that RT reflections do not own (all of it outside the RT band).
         if(options.directLighting!=DirectLightingMode::Legacy)params.flags|=REFLECTION_EXCLUDE_DI_EMISSION;

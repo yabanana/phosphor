@@ -723,6 +723,20 @@ SCENARIOS = {
                                  "controls": ["transmission-ignored", "volume-ignored", "ior-ignored", "thin-as-volume"],
                                  "terms": "constant environment 0.5 + emissive checkerboard behind a thin-walled sphere, a clear "
                                           "and an absorbing volume sphere, RT glass transport"},
+    # F15 closure (ticket 13): the glTF tint rule (baseColor once per closed solid at its entering interface, at every thin-walled
+    # surface) on TINTED closed bodies, and ROUGH thin-walled glass against `gltf_thin_rough` (the README's thin-walled specular_btdf).
+    # Written fail-before: the engine of 3ef8f41 tinted the camera-visible entry only (a tinted thin sphere lost its second wall's
+    # tint) and the reference tinted every transmitting event; thin-walled glass above roughness 0 was refused by the reference.
+    "transmission-tinted-bodies": {"kind": "transmission",
+                                   "rt": True, "reflections": "rt", "accumulate": ACCUMULATE, "denoise": "off",
+                                   "controls": ["transmission-ignored", "tint-every-event", "transmission-not-tinted", "volume-ignored", "ior-ignored"],
+                                   "terms": "constant environment 0.5 + emissive checkerboard behind TINTED closed bodies (smooth, rough "
+                                            "and absorbing solid spheres, a cube, an absorbing slab) and a tinted thin-walled sphere, RT glass transport"},
+    "transmission-thin-rough": {"kind": "transmission",
+                                "rt": True, "reflections": "rt", "accumulate": ACCUMULATE, "denoise": "off",
+                                "controls": ["transmission-ignored", "thin-rough-as-smooth", "thin-rough-refracted", "transmission-not-tinted"],
+                                "terms": "constant environment 0.5 + emissive checkerboard behind rough thin-walled panes (roughness {0.1, 0.3, 0.6}, "
+                                         "white and tinted), rough thin-walled spheres and a half-transmission pane, RT glass transport"},
     "transmission-single-sided": {"kind": "transmission",
                                   "rt": True, "reflections": "rt", "accumulate": ACCUMULATE, "denoise": "off",
                                   "controls": ["transmission-ignored", "backface-rejected", "ior-ignored", "volume-ignored"],

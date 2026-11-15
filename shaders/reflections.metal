@@ -173,8 +173,8 @@ inline float3 reflectionSecondaryChain(GPURtHit hit,float3 direction,uint maxBou
 // A refraction sample of a transmissive pixel crosses at most kTransmissionMaxCrossings interfaces (the camera-visible refraction is the first) and
 // meets at most kTransmissionMaxEvents interface events (reflections included: total internal reflection in a cube).
 // Every interface is a GGX dielectric of the glass material it belongs to: the half vector is drawn from D(h) n.h, the Fresnel factor chooses
-// reflection or refraction, the weight is the separable-Smith Walter weight (transmission_math.h) times the baseColor tint of the camera-visible entry refraction only (no tint at interior or exit
-// crossings; the transmission factor applies at the camera-visible surface only: interior crossings are pure dielectric interfaces.  A medium
+// reflection or refraction, the weight is the separable-Smith Walter weight (transmission_math.h) times the baseColor tint: once per closed solid at the ENTERING interface (including the
+// camera-visible one, through the albedo) and at every thin-walled surface, never at an exit; the transmission factor applies at the camera-visible surface only: interior crossings are pure dielectric interfaces.  A medium
 // entered through a front face of a closed volume absorbs along the REAL inside segment (Beer-Lambert c^(x/d)) and ends at ANY hit; the inside
 // back faces of single-sided closed meshes are interfaces like the front faces (the reflection estimator rejects them: reflectionMaterial).
 // Thin-walled glass (thickness 0) keeps the direction on transmission, no medium.  A ray that leaves the glass ends at the first non-glass
@@ -239,7 +239,7 @@ struct ReflectionMedium {bool active;float3 color;float distance;};
 // incoming direction `d`.  Returns 0 when the sample dies (a facet that cannot reflect or refract the ray, an invalid weight), 1 to continue, 2 when the
 // event crossed the interface beyond the bound (kTransmissionMaxCrossings): the ray ends in the probes/environment along its new direction.
 inline uint reflectionGlassEvent(thread float3& d,thread float3& weight,thread ReflectionMedium& medium,ReflectionGlassHit g,thread uint& seed,
-    thread float3& side,thread uint& crossings,thread bool& numericError){
+    thread float3& side,thread uint& crossings,thread bool& numericError,bool tintInterior){
     const float3 n=g.normal,i=-d;const float cosN=dot(i,n);if(!(cosN>0))return 0;
     const float2 u=float2(giRandom(seed),giRandom(seed));
     // A material at the roughness floor (alpha <= kTransmissionSmoothAlpha: roughness 0 clamps to it) is a smooth interface: h = n, weight 1, the delta
@@ -262,7 +262,10 @@ inline uint reflectionGlassEvent(thread float3& d,thread float3& weight,thread R
             // entering a closed volume starts its medium, leaving ends it
             if(g.entering){medium.active=true;medium.color=g.attenuationColor;medium.distance=g.attenuationDistance;}else medium.active=false;
         }
-        o=refracted;side=-g.geometric;++crossings; // orchestrator: the tint applies at the camera-visible entry surface only (interior crossings are pure dielectric interfaces)
+        o=refracted;side=-g.geometric;++crossings;
+        // F15 closure (ticket 13): baseColor tints a closed solid ONCE, when the ray enters it (the exit is a pure dielectric interface: the medium does the
+        // rest) and every thin-walled surface (each is an independent pane); the camera-visible surface carries its own tint in the weight (albedo).
+        if(tintInterior&&(g.thin||g.entering))weight*=g.tint;
     }
     if(!(isfinite(wk))||!all(isfinite(o))||dot(o,o)<=0){numericError=true;return 0;}
     weight*=wk;d=normalize(o);
@@ -300,7 +303,7 @@ inline float3 reflectionRefractWalk(float3 origin,float3 direction,float3 weight
             hitSlot=hit.slot;hitGeneration=hit.generation;break;
         }
         float3 side;
-        const uint status=reflectionGlassEvent(d,weight,medium,g,seed,side,crossings,numericError);
+        const uint status=reflectionGlassEvent(d,weight,medium,g,seed,side,crossings,numericError,(p.flags&REFLECTION_DEBUG_TINT_CAMERA_ONLY)==0u);
         if(status==0u)break;
         if(status==2u){radiance+=weight*reflectionProbeRadiance(g.point,d,0.0f,false,p,probes,atlas,path);break;}
         o=rtOffsetRay(g.point,side);

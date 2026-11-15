@@ -33,10 +33,10 @@ std::vector<std::string> runnerKeys() {
 
 TEST_CASE("F15.3 ticket 13: the transmission scenarios are exactly the declared names (eight, ticket 19 adds the combinations)") {
     const auto names = TransmissionValidation::scenarios();
-    CHECK(names.size() == 9);
+    CHECK(names.size() == 11);
     for (auto name : {"transmission-roughness-ior", "transmission-attenuation", "transmission-factor-tint", "transmission-thin-volume",
                       "transmission-single-sided", "transmission-glass-behind-glass", "transmission-emissive-panel", "transmission-rtoff",
-                      "transmission-rtoff-combinations"}) {
+                      "transmission-rtoff-combinations", "transmission-tinted-bodies", "transmission-thin-rough"}) {
         CHECK(TransmissionValidation::validScenario(name));
         CHECK_FALSE(MaterialValidation::validScenario(name)); // a separate bench class, not a grid scenario
     }
@@ -203,6 +203,28 @@ TEST_CASE("F15.3 ticket 13: declared fixture numbers are pinned (tools/test_f15_
     const auto& off = TransmissionValidation::spec("transmission-rtoff");
     CHECK(off.backdrop == TransmissionScenarioSpec::Backdrop::None);
     CHECK(off.glass.size() == 8);
+}
+
+TEST_CASE("F15 closure ticket 13: the tinted-bodies and thin-rough fixtures pin their numbers") {
+    const auto& bodies = TransmissionValidation::spec("transmission-tinted-bodies");
+    REQUIRE(bodies.glass.size() == 6);
+    int thin = 0, solids = 0;
+    for (const GlassObject& g : bodies.glass) {
+        // every body carries the tint (the tint rule matters only for tinted solids); the thin-walled sphere (two walls) a lighter one
+        CHECK(g.baseColor == (g.thickness > 0.0f ? glm::vec3(0.9f, 0.55f, 0.25f) : glm::vec3(0.95f, 0.8f, 0.6f)));
+        CHECK(g.transmission == 1.0f);
+        (g.thickness > 0.0f ? solids : thin)++;
+    }
+    CHECK(solids == 5);
+    CHECK(thin == 1);
+    CHECK(bodies.glass[1].roughness == 0.3f); // the rough solid
+    const auto& rough = TransmissionValidation::spec("transmission-thin-rough");
+    REQUIRE(rough.glass.size() == 9);
+    for (const GlassObject& g : rough.glass) {
+        CHECK(g.thickness == 0.0f); // every object is thin-walled
+        CHECK(g.roughness >= 0.1f);
+    }
+    CHECK(rough.glass[8].transmission == 0.5f);
 }
 
 TEST_CASE("F15.3 ticket 13: the camera frames every glass object and the backdrop covers what is seen through it") {

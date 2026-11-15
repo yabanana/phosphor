@@ -20,8 +20,22 @@ What is compared and how (decision 11: transmission vs Mitsuba ground truth on t
       `thindielectric`: glTF layers ONE Fresnel-chosen sample per surface (reflect F, otherwise straight transmission
       tinted by baseColor, no refraction), whereas `thindielectric` models the slab's internal inter-reflections
       (T = (1 - F) / (1 + F), 4 % darker at normal incidence for ior 1.5, 8 % through a thin sphere's two surfaces).  A
-      tiny Python BSDF (`gltf_thin`, two delta lobes) implements the glTF rule with the Schlick Fresnel at N.V.  Rough
-      thin-walled glass has NO ground truth here (Mitsuba has no rough thin dielectric): it is refused.
+      tiny Python BSDF (`gltf_thin`, two delta lobes) implements the glTF rule with the Schlick Fresnel at N.V.
+      ROUGH thin-walled glass (F15 closure, ticket 13): Mitsuba has no rough thin dielectric, so `gltf_thin_rough` implements the
+      KHR_materials_transmission README directly: per surface the GGX half vector is drawn from Mitsuba's visible-normal
+      distribution (`mi.MicrofacetDistribution`), the glTF Schlick Fresnel at V.H (f0 from the ior) chooses the reflection (the
+      GGX mirror, weight G1(o)) or the specular_btdf (thin-walled, no refraction: the reflected direction mirrored through the
+      surface, weight baseColor G1(o)): the separable-Smith nu_T D_T of the README, whose directional integral the unit tests
+      compare with an independent numerical quadrature of the README formulas (no sampling).
+- Tint rule (F15 closure, ticket 13; settles the open question of the previous reading "tint at every transmitting event"):
+  KHR_materials_transmission defines baseColor as the absorption of the transmitted light of a SURFACE ("two surfaces back-to-back"
+  carry ONE tint, absorption constant = 1 - baseColor), KHR_materials_volume gives the interior of a closed volume only the
+  Beer-Lambert medium (the volume README says nothing about a second baseColor factor at the exit) and the reference
+  implementation (glTF-Sample-Renderer) multiplies the transmitted radiance by baseColor exactly once.  Therefore a CLOSED solid is
+  tinted once, when the ray ENTERS it from outside (the exit surface is a pure dielectric interface, the medium does the rest) and a
+  thin-walled surface is tinted at every crossing (each thin surface is an independent pane).  The engine implements exactly this
+  (reflections.metal: entry of every solid met by the walk, every thin-walled surface); the previous reference tinted every
+  transmitting event (baseColor^2 through a closed body) and is kept as the control `tint-every-event`.
 - Transmission factor t < 1 (interpretation, declared): t mixes the diffuse base at the camera-VISIBLE surface only,
   glTF `mix(diffuse, specular_btdf * baseColor, t)` under the Fresnel layer; the interfaces refracted rays cross later
   are full dielectric interfaces.  image(t) = (1 - t) I0 + t I1 with I0 the opaque Appendix B dielectric (exact
@@ -42,15 +56,18 @@ independent of Mitsuba) and reported with the harness:
      spheres in a uniform environment only, where reflection and transmission compensate.
   2. Crossings: Mitsuba unbounded (max_depth 64, no Russian roulette); the engine stops at 4 interface events.
   3. Thin-walled: handled exactly (the custom BSDF); Mitsuba's `thindielectric` would differ (above).
-  4. Tint: applied at EVERY transmitting interface event (Mitsuba `specular_transmittance` and the custom BSDF), so a
-     two-crossing body is tinted baseColor^2; the gated volume fixtures use a white base (ambiguity not gated).
+  4. Tint: once per solid (the entering event) and at every thin-walled surface (see "Tint rule"); Mitsuba's own
+     `specular_transmittance` would tint every transmitting event, which the `gltf_entry_tint` wrapper and the `tint` mode of
+     `gltf_dielectric` remove on the exit.
   5. Rough solids: Mitsuba's Walter rough dielectric (exact Fresnel, height-correlated Smith) against glTF's
      Schlick + separable Smith G_T: not measurable analytically here; the bound absorbs it (declared).
 
 Negative controls (scene or model variants that a defective engine would match):
   transmission-ignored (the opaque Appendix B dielectric: analytic environment quadrature + for smooth glass the traced mirror
   reflection of the scene, M - F L_sky, so that an opaque cube sees the checkerboard in its top face like the engine's RT), transmission-not-tinted (tint = white), volume-ignored (no interior
-  medium), ior-ignored (no refraction bend: solids become gltf_thin interfaces with their media kept), thin-as-volume
+  medium), ior-ignored (no refraction bend: solids become gltf_thin interfaces with their media kept), tint-every-event (the
+  pre-closure reading: a closed solid tinted at its exit too), thin-rough-as-smooth (rough thin-walled glass rendered as the smooth
+  glTF pane), thin-rough-refracted (rough thin glass refracting like a solid), thin-as-volume
   (thin-walled objects refract like a solid, no medium), backface-rejected (back faces of the closed glass meshes removed
   from the scene: the exit is never found; medium dropped), emitter-double-counted (emissive radiance x 2),
   back-glass-black (glass more than 0.5 m behind the front-most glass is a black absorber).
@@ -92,7 +109,8 @@ ENGINE_CROSSINGS = 4        # the engine's declared bound of interface events al
 MIN_SIGMA = 1e-4            # 1/m: absorption floor of a channel the attenuation colour leaves at 1 (exp(-1e-4 * 10 m) = 0.999)
 
 CONTROLS = ("transmission-ignored", "transmission-not-tinted", "volume-ignored", "ior-ignored", "thin-as-volume",
-            "backface-rejected", "emitter-double-counted", "back-glass-black")
+            "backface-rejected", "emitter-double-counted", "back-glass-black", "tint-every-event", "thin-rough-as-smooth",
+            "thin-rough-refracted")
 DECLARED_CONTROLS = ("declared-transmission-ignored", "declared-not-tinted", "declared-volume-ignored",
                      "declared-iridescence-ignored", "declared-diffuse-transmission-ignored",
                      "declared-diffuse-transmission-not-overridden")
@@ -103,7 +121,9 @@ MODEL = {
              "cosine leaving, TIR = 1) / roughdielectric (GGX, alpha = max(clamp(r, .04, 1)^2, .002), exact Fresnel), "
              "ior = ior, ext_ior = 1, specular transmittance = baseColor, interior = homogeneous absorbing medium (sigma_t = -ln(c) / d)",
     "thin_walled": "gltf_thin: per surface reflect F (Schlick at N.V, f0 = ((ior - 1) / (ior + 1))^2) else straight "
-                   "transmission x baseColor (roughness 0 only)",
+                   "transmission x baseColor; roughness > 0: gltf_thin_rough (GGX visible normals, Schlick at V.H, the "
+                   "reflected direction mirrored through the surface for the transmission, separable Smith)",
+    "tint": "baseColor once per closed solid (entering event) and at every thin-walled surface",
     "transmission_factor": "image(t) = (1 - t) I0 + t I1, I0 = opaque Appendix B dielectric (exact environment quadrature), "
                            "I1 = the t = 1 Mitsuba image; t applies at the camera-visible surface only",
     "environment": "constant emitter, radiance = snapshot sky; emitters: one-sided area emitters on a black diffuse base",
@@ -140,9 +160,9 @@ def mitsuba_alpha(roughness):
     return max(r * r, MIN_ALPHA)
 
 
-def glass_table(data, allow_rough_thin=False, extended=False):
+def glass_table(data, allow_rough_thin=True, extended=False):
     """One dict per instance whose material carries KHR_materials_transmission (factor > 0), keyed by instance index.
-    Raises for the combinations the reference does not model (textures, ior 0, rough thin-walled, other features).
+    Raises for the combinations the reference does not model (textures, ior 0, other features; `allow_rough_thin` is kept for callers and ignored: rough thin-walled glass is modelled).
 
     `extended` (ticket 19, only the declared --rt off model): the material may also carry KHR_materials_iridescence (record 1 words
     3-6: factor, film ior, thickness min / max) and the thin subsurface block (record 2 words 0-4: mode, weight, colour); the entry
@@ -192,8 +212,6 @@ def glass_table(data, allow_rough_thin=False, extended=False):
         entry["has_medium"] = bool((entry["sigma_t"] > 0).any()) and not entry["thin"]
         if entry["metallic"] != 0.0:
             raise ValueError("metallic glass is outside the declared model (metals absorb all refracted light)")
-        if entry["thin"] and entry["roughness"] > 0.0 and not allow_rough_thin:
-            raise ValueError("rough thin-walled glass has no ground truth (Mitsuba has no rough thin dielectric)")
         entry["label"] = (f"{'thin' if entry['thin'] else 'volume'} r={entry['roughness']:g} ior={ior:g} t={entry['transmission']:g}"
                           f"{'' if entry['base'] == [1.0, 1.0, 1.0] else ' tint=' + ','.join(f'{c:g}' for c in entry['base'])}"
                           f"{'' if not entry['has_medium'] else ' atten=' + ','.join(f'{c:g}' for c in entry['attenuation_color']) + '@' + format(entry['attenuation_distance'], 'g')}")
@@ -297,13 +315,14 @@ def exit_radiance(origin, direction, rectangles, sky):
 
 
 def trace_sphere(origin, direction, sphere, glass, rectangles, sky, fresnel="exact", max_events=None, on_limit="env",
-                 prune=1e-5, max_iterations=60):
+                 prune=1e-5, max_iterations=60, tint_mode="entry"):
     """Expected radiance of pixel-centre rays (n, 3) through ONE smooth sphere {"centre", "radius"} of the glass dict
     `glass` (ior, base = tint, sigma_t, thin): the exact expectation of the Fresnel-chosen reflect/refract tree (every
     branch followed, weights pruned below `prune`), Beer-Lambert along the inside segments.  Other geometry is ignored
     except the emissive rectangles seen after the glass.  `fresnel`: "exact" (Mitsuba) or "schlick" (glTF);
     `max_events`: interface events allowed per path (None = unbounded); a path that would exceed them ends with the
-    environment (`on_limit` "env") or black ("zero")."""
+    environment (`on_limit` "env") or black ("zero").  `tint_mode`: "entry" (the glTF rule: a solid is tinted when the ray
+    enters it, a thin-walled surface at every crossing) or "every" (every transmitting event: the control)."""
     fresnel_function = fresnel_exact if fresnel == "exact" else fresnel_schlick
     centre, radius = np.asarray(sphere["centre"], dtype=np.float64), float(sphere["radius"])
     ior, tint, sigma, thin = float(glass["ior"]), np.asarray(glass["base"], dtype=np.float64), glass["sigma_t"], glass["thin"]
@@ -370,7 +389,8 @@ def trace_sphere(origin, direction, sphere, glass, rectangles, sky, fresnel="exa
             cos_t = np.sqrt(np.clip(1.0 - sin2_t, 0.0, None))
             transmit_d = ratio[:, None] * d + (ratio * cos_i - cos_t)[:, None] * n_facing
             transmit_inside = entering
-            transmit_weight = (1.0 - f)[:, None] * tint[None, :]
+            tint_here = tint[None, :] if tint_mode == "every" else np.where(entering[:, None], tint[None, :], 1.0)
+            transmit_weight = (1.0 - f)[:, None] * tint_here
             ok = sin2_t < 1.0
         new_o = np.concatenate([p, p[ok]])
         new_d = np.concatenate([reflect_d, transmit_d[ok]])
@@ -494,7 +514,8 @@ def register_gltf_thin(mi, dr):
 
     class GltfDielectric(mi.BSDF):
         """A smooth dielectric interface as Mitsuba's `dielectric` (two delta lobes, `mi.fresnel` / `mi.refract` geometry,
-        `specular_transmittance` tint on every transmitted event, radiance-mode scaling eta_ti^2 of the refracted lobe,
+        `specular_transmittance` tint on the transmitted events (`tint_mode` "entry": only when entering from outside, the glTF rule;
+        "every": every one, Mitsuba's own), radiance-mode scaling eta_ti^2 of the refracted lobe,
         bs.eta = eta_it) whose Fresnel reflectance F is selectable: `fresnel` "exact" (Mitsuba's, proven equal to `dielectric`
         by the tests) or "schlick" (glTF): F = f0 + (1 - f0)(1 - c)^5, f0 = ((ior - 1) / (ior + 1))^2, c = |cos| of the
         INCIDENT angle when entering and of the TRANSMITTED angle when leaving, total internal reflection F = 1."""
@@ -505,6 +526,7 @@ def register_gltf_thin(mi, dr):
             self.schlick = str(props.get("fresnel", "schlick")) == "schlick"
             self.f0 = ior_f0(self.ior)
             self.tint = mi.Color3f(float(props.get("tint_r", 1.0)), float(props.get("tint_g", 1.0)), float(props.get("tint_b", 1.0)))
+            self.tint_every = str(props.get("tint_mode", "entry")) == "every"
             sides = mi.BSDFFlags.FrontSide | mi.BSDFFlags.BackSide
             reflection = mi.BSDFFlags.DeltaReflection | sides
             transmission = mi.BSDFFlags.DeltaTransmission | sides
@@ -526,7 +548,8 @@ def register_gltf_thin(mi, dr):
             bs.eta = dr.select(reflect, mi.Float(1.0), eta_it)
             bs.sampled_type = dr.select(reflect, mi.UInt32(+mi.BSDFFlags.DeltaReflection), mi.UInt32(+mi.BSDFFlags.DeltaTransmission))
             bs.sampled_component = dr.select(reflect, mi.UInt32(0), mi.UInt32(1))
-            weight = dr.select(reflect, mi.Color3f(1.0), self.tint)
+            transmit_tint = self.tint if self.tint_every else dr.select(cos_i > 0.0, self.tint, mi.Color3f(1.0))
+            weight = dr.select(reflect, mi.Color3f(1.0), transmit_tint)
             if ctx.mode == mi.TransportMode.Radiance:
                 weight = dr.select(reflect, weight, weight * dr.square(eta_ti))
             return bs, dr.select(active, weight, mi.Color3f(0.0))
@@ -585,6 +608,100 @@ def register_gltf_thin(mi, dr):
         def to_string(self):
             return "GltfAbsorbing[]"
 
+    class GltfEntryTint(mi.BSDF):
+        """The glTF tint rule on a nested transmitting BSDF whose own transmittance is white (a `roughdielectric`): baseColor
+        multiplies the transmitted weight only when the ray ENTERS the closed solid (wi on the outer side, cosine > 0)."""
+
+        def __init__(self, props):
+            mi.BSDF.__init__(self, props)
+            self.tint = mi.Color3f(float(props.get("tint_r", 1.0)), float(props.get("tint_g", 1.0)), float(props.get("tint_b", 1.0)))
+            self.nested = props["nested"]
+            self.m_flags = self.nested.flags()
+            self.m_components = [self.nested.flags(i) for i in range(self.nested.component_count())]
+
+        def factor(self, si, transmitted):
+            entering = mi.Frame3f.cos_theta(si.wi) > 0.0
+            return dr.select(transmitted & entering, self.tint, mi.Color3f(1.0))
+
+        def sample(self, ctx, si, sample1, sample2, active):
+            bs, value = self.nested.sample(ctx, si, sample1, sample2, active)
+            transmitted = (bs.sampled_type & mi.UInt32(+mi.BSDFFlags.Transmission)) != 0
+            return bs, value * self.factor(si, transmitted)
+
+        def eval(self, ctx, si, wo, active=True):
+            transmitted = mi.Frame3f.cos_theta(si.wi) * mi.Frame3f.cos_theta(wo) < 0.0
+            return self.nested.eval(ctx, si, wo, active) * self.factor(si, transmitted)
+
+        def pdf(self, ctx, si, wo, active=True):
+            return self.nested.pdf(ctx, si, wo, active)
+
+        def eval_pdf(self, ctx, si, wo, active=True):
+            transmitted = mi.Frame3f.cos_theta(si.wi) * mi.Frame3f.cos_theta(wo) < 0.0
+            value, pdf = self.nested.eval_pdf(ctx, si, wo, active)
+            return value * self.factor(si, transmitted), pdf
+
+        def traverse(self, callback):
+            pass
+
+        def to_string(self):
+            return "GltfEntryTint[]"
+
+    class GltfThinRough(mi.BSDF):
+        """Rough thin-walled glass, KHR_materials_transmission README (thin-walled: "two surfaces back to back", no refraction):
+        a GGX microfacet interface (visible normals, separable Smith, alpha) whose Schlick Fresnel at V.H (f0 from the ior) chooses
+        between the specular reflection (the GGX mirror, weight G1(o)) and the specular_btdf, the reflected direction mirrored
+        through the surface (weight baseColor G1(o)).  Sampled as two delta-flagged lobes (the path integrator must not MIS-weight
+        a lobe whose eval is 0); a facet that cannot reflect the ray ends the path (the same energy loss as the README formula)."""
+
+        def __init__(self, props):
+            mi.BSDF.__init__(self, props)
+            self.f0 = float(props.get("f0", 0.04))
+            self.alpha = float(props.get("alpha", 0.1))
+            self.tint = mi.Color3f(float(props.get("tint_r", 1.0)), float(props.get("tint_g", 1.0)), float(props.get("tint_b", 1.0)))
+            self.mode = str(props.get("mode", "thin"))   # "thin" | "refracted" (control: the mirrored direction is not mirrored)
+            self.distribution = mi.MicrofacetDistribution(mi.MicrofacetType.GGX, self.alpha, self.alpha, True)
+            sides = mi.BSDFFlags.FrontSide | mi.BSDFFlags.BackSide
+            reflection = mi.BSDFFlags.DeltaReflection | sides
+            transmission = mi.BSDFFlags.DeltaTransmission | sides
+            self.m_components = [reflection, transmission]
+            self.m_flags = reflection | transmission
+
+        def sample(self, ctx, si, sample1, sample2, active):
+            side = dr.select(mi.Frame3f.cos_theta(si.wi) >= 0.0, mi.Float(1.0), mi.Float(-1.0))
+            wi = mi.Vector3f(si.wi.x * side, si.wi.y * side, dr.abs(si.wi.z))
+            m, _ = self.distribution.sample(wi, sample2)
+            i_dot_m = dr.dot(wi, m)
+            mirror = 2.0 * i_dot_m * m - wi
+            valid = active & (i_dot_m > 0.0) & (mirror.z > 0.0)
+            g1 = self.distribution.smith_g1(mirror, m)
+            f = self.f0 + (1.0 - self.f0) * (1.0 - dr.clip(i_dot_m, 0.0, 1.0)) ** 5
+            reflect = sample1 < f
+            across = mi.Vector3f(mirror.x, mirror.y, -mirror.z) if self.mode == "thin" else mi.Vector3f(mirror.x, mirror.y, mirror.z)
+            local = dr.select(reflect, mirror, across)
+            bs = dr.zeros(mi.BSDFSample3f)
+            bs.wo = mi.Vector3f(local.x * side, local.y * side, local.z * side)
+            bs.pdf = dr.select(reflect, f, 1.0 - f)
+            bs.eta = 1.0
+            bs.sampled_type = dr.select(reflect, mi.UInt32(+mi.BSDFFlags.DeltaReflection), mi.UInt32(+mi.BSDFFlags.DeltaTransmission))
+            bs.sampled_component = dr.select(reflect, mi.UInt32(0), mi.UInt32(1))
+            weight = dr.select(reflect, mi.Color3f(g1), self.tint * g1)
+            return bs, dr.select(valid, weight, mi.Color3f(0.0))
+
+        def eval(self, ctx, si, wo, active=True):
+            return mi.Color3f(0.0)
+
+        def pdf(self, ctx, si, wo, active=True):
+            return mi.Float(0.0)
+
+        def eval_pdf(self, ctx, si, wo, active=True):
+            return mi.Color3f(0.0), mi.Float(0.0)
+
+        def traverse(self, callback):
+            pass
+
+        def to_string(self):
+            return "GltfThinRough[]"
+
     class GltfMirror(mi.BSDF):
         """The specular layer of an OPAQUE glTF dielectric as a mirror: always reflect, weighted by the Schlick Fresnel at N.V."""
 
@@ -623,6 +740,8 @@ def register_gltf_thin(mi, dr):
 
     mi.register_bsdf("gltf_mirror", lambda props: GltfMirror(props))
     mi.register_bsdf("gltf_thin", lambda props: GltfThin(props))
+    mi.register_bsdf("gltf_thin_rough", lambda props: GltfThinRough(props))
+    mi.register_bsdf("gltf_entry_tint", lambda props: GltfEntryTint(props))
     mi.register_bsdf("gltf_dielectric", lambda props: GltfDielectric(props))
     mi.register_bsdf("gltf_absorbing", lambda props: GltfAbsorbing(props))
     _REGISTERED.append(True)
@@ -695,19 +814,30 @@ def build_scene(root, data, glass, control, threads, out_dir, medium="analytic")
             g = glass[k]
             tint = [1.0, 1.0, 1.0] if control == "transmission-not-tinted" else g["base"]
             solid = not g["thin"]
+            tint_mode = "every" if control == "tint-every-event" else "entry"
+            rough_thin = g["thin"] and g["roughness"] > 0.0 and control != "thin-rough-as-smooth"
+            thin_rough = {"type": "gltf_thin_rough", "f0": ior_f0(g["ior"]), "alpha": mitsuba_alpha(g["roughness"]),
+                          "tint_r": tint[0], "tint_g": tint[1], "tint_b": tint[2],
+                          "mode": "refracted" if control == "thin-rough-refracted" else "thin"}
             if control == "thin-as-volume" and g["thin"]:
-                bsdf = {"type": "gltf_dielectric", "ior": g["ior"], "fresnel": "schlick",
+                bsdf = {"type": "gltf_dielectric", "ior": g["ior"], "fresnel": "schlick", "tint_mode": tint_mode,
                         "tint_r": tint[0], "tint_g": tint[1], "tint_b": tint[2]}
             elif control == "ior-ignored" and solid:
                 bsdf = {"type": "gltf_thin", "f0": ior_f0(g["ior"]), "tint_r": tint[0], "tint_g": tint[1], "tint_b": tint[2]}
+            elif rough_thin:
+                bsdf = thin_rough
             elif g["thin"]:
                 bsdf = {"type": "gltf_thin", "f0": ior_f0(g["ior"]), "tint_r": tint[0], "tint_g": tint[1], "tint_b": tint[2]}
             elif g["roughness"] <= 0.0:
-                bsdf = {"type": "gltf_dielectric", "ior": g["ior"], "fresnel": "schlick",
+                bsdf = {"type": "gltf_dielectric", "ior": g["ior"], "fresnel": "schlick", "tint_mode": tint_mode,
                         "tint_r": tint[0], "tint_g": tint[1], "tint_b": tint[2]}
-            else:
+            elif tint_mode == "every":
                 bsdf = {"type": "roughdielectric", "distribution": "ggx", "alpha": mitsuba_alpha(g["roughness"]),
                         "int_ior": g["ior"], "ext_ior": 1.0, "specular_transmittance": {"type": "rgb", "value": tint}}
+            else:
+                bsdf = {"type": "gltf_entry_tint", "tint_r": tint[0], "tint_g": tint[1], "tint_b": tint[2],
+                        "nested": {"type": "roughdielectric", "distribution": "ggx", "alpha": mitsuba_alpha(g["roughness"]),
+                                   "int_ior": g["ior"], "ext_ior": 1.0, "specular_transmittance": {"type": "rgb", "value": [1.0, 1.0, 1.0]}}}
             if control == "mirror-only":
                 bsdf = {"type": "gltf_mirror", "f0": ior_f0(g["ior"])}
             if control == "back-glass-black" and instance_matrix(instance)[2, 3] < front - 0.5:
@@ -832,7 +962,7 @@ def command_render(args):
               "spp": args.spp, "max_depth": MAX_DEPTH, "medium": args.medium, "erosion_pixels": EROSION, "engine_crossings": ENGINE_CROSSINGS,
               "width": width, "height": height, "roi_pixels": int(pick.size), "objects": objects, "controls": {},
               "terms": ["environment", "emitters", "glass-path-traced"], "interpretations": [
-                  "tint applies at every transmitting interface event", "transmission factor applies at the camera-visible surface only",
+                  "tint once per closed solid (entering event) and at every thin-walled surface", "transmission factor applies at the camera-visible surface only",
                   "thin-walled = glTF single Fresnel sample per surface (gltf_thin), not Mitsuba thindielectric"]}
     names = [""] + list(args.controls)
     for name in names:

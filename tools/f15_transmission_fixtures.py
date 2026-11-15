@@ -168,3 +168,30 @@ def write_snapshot(folder, objects, emitters, sky=0.5, emission=2.0, width=320, 
              "sampled_lights": []}
     (folder / "scene.json").write_text(json.dumps(scene))
     return folder
+
+
+def tinted_bodies_objects():
+    """Mirror of the `transmission-tinted-bodies` scenario (src/testbench/transmission_validation.cpp; tests/test_transmission_validation.cpp pins it)."""
+    x = (-1.3, 0.0, 1.3)
+    return [glass(center=(x[0], 0.4, 0), base=TINT, thickness=0.8),
+            glass(center=(x[1], 0.4, 0), base=TINT, roughness=0.3, thickness=0.8),
+            glass(center=(x[2], 0.4, 0), base=(0.95, 0.8, 0.6), thickness=0.0),
+            glass(shape="cube", center=(x[0], 1.6, 0), scale=(0.8, 0.8, 0.8), yaw=25.0, base=TINT, thickness=1.0),
+            glass(shape="cube", center=(x[1], 1.6, 0), scale=(0.9, 0.9, 0.3), yaw=20.0, base=TINT, thickness=1.0,
+                  attenuation_color=(0.6, 0.85, 1.0), attenuation_distance=0.6),
+            glass(center=(x[2], 1.6, 0), base=TINT, thickness=0.8, attenuation_color=(0.5, 0.8, 1.0), attenuation_distance=0.6)]
+
+
+def thin_rough_objects():
+    """Mirror of the `transmission-thin-rough` scenario."""
+    def pane(centre, roughness, base, transmission):
+        return glass(shape="pane", center=centre, scale=(0.9, 1.0, 0.9), yaw=25.0, roughness=roughness, base=base,
+                     transmission=transmission, thickness=0.0, double_sided=True)
+    objects = []
+    for c, r in enumerate((0.1, 0.3, 0.6)):
+        objects.append(pane(((c - 1.0) * 1.2, 0.3, 0), r, (1, 1, 1), 1.0))
+        objects.append(pane(((c - 1.0) * 1.2, 1.5, 0), r, TINT, 1.0))
+    objects.append(glass(center=(-1.2, 2.7, 0), roughness=0.3, thickness=0.0))
+    objects.append(glass(center=(0.0, 2.7, 0), roughness=0.3, thickness=0.0, base=(0.95, 0.8, 0.6)))
+    objects.append(pane((1.2, 2.7, 0), 0.3, (1, 1, 1), 0.5))
+    return objects

@@ -260,6 +260,54 @@
       "name": "transmission:transmission-rtoff-combinations",
       "union": 240,
       "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 242
+        },
+        {
+          "lobes": [
+            "transmission"
+          ],
+          "mask": 32,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "transmission",
+            "volume"
+          ],
+          "mask": 96,
+          "materials": 5
+        }
+      ],
+      "family": "transmission",
+      "name": "transmission:transmission-tinted-bodies",
+      "union": 96,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 243
+        },
+        {
+          "lobes": [
+            "transmission"
+          ],
+          "mask": 32,
+          "materials": 9
+        }
+      ],
+      "family": "transmission",
+      "name": "transmission:transmission-thin-rough",
+      "union": 32,
+      "volumetric": false
     }
   ],
   "schema": "phosphor.material-class-manifest",

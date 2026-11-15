@@ -155,7 +155,7 @@ class GltfDielectric(unittest.TestCase):
 
     def bsdfs(self, fresnel, ior=1.5):
         mi = self.mi
-        mine = mi.load_dict({"type": "gltf_dielectric", "ior": ior, "fresnel": fresnel,
+        mine = mi.load_dict({"type": "gltf_dielectric", "ior": ior, "fresnel": fresnel, "tint_mode": "every",
                              "tint_r": self.TINT[0], "tint_g": self.TINT[1], "tint_b": self.TINT[2]})
         theirs = mi.load_dict({"type": "dielectric", "int_ior": ior, "ext_ior": 1.0,
                                "specular_transmittance": {"type": "rgb", "value": self.TINT}})
@@ -225,8 +225,17 @@ class GltfDielectric(unittest.TestCase):
         f, wo, weight, eta, kind = self.sample(mine, np.radians([180.0 - 40.0]), 1.0)
         self.assertLess(float(f[0]), 1.0)
         self.assertEqual(int(kind[0]), int(self.mi.BSDFFlags.DeltaTransmission))
-        np.testing.assert_allclose(weight[0], np.array(self.TINT) * 2.25, rtol=1e-5)
+        np.testing.assert_allclose(weight[0], np.array(self.TINT) * 2.25, rtol=1e-5)   # tint_mode "every" (Mitsuba's own rule)
         self.assertAlmostEqual(float(eta[0]), 1.0 / 1.5, places=5)
+        # the glTF rule (default "entry"): leaving a closed solid is a pure dielectric interface, only the radiance scaling remains
+        entry = self.mi.load_dict({"type": "gltf_dielectric", "ior": 1.5, "fresnel": "schlick", "tint_r": self.TINT[0],
+                                   "tint_g": self.TINT[1], "tint_b": self.TINT[2]})
+        f, wo, weight, eta, kind = self.sample(entry, np.radians([180.0 - 40.0]), 1.0)
+        np.testing.assert_allclose(weight[0], 2.25, rtol=1e-5)
+        f, wo, weight, eta, kind = self.sample(entry, np.radians([40.0]), 1.0)         # entering: tinted (and 1 / 1.5^2 scaling)
+        np.testing.assert_allclose(weight[0], np.array(self.TINT) / 2.25, rtol=1e-5)
+        # negative control: a tint applied on the exit too would be the "every" reading
+        self.assertGreater(float(np.abs(weight[0] * 2.25 - 1.0).max()), 0.05)
 
     def scene_pixels(self, n=60):
         x = np.linspace(-0.97, 0.97, n) * 0.4
@@ -251,7 +260,7 @@ class GltfDielectric(unittest.TestCase):
     def test_rendered_sphere_exact_mode_matches_mitsuba_and_schlick_does_not(self):
         tint = {"type": "rgb", "value": self.TINT}
         reference_bsdf = {"type": "dielectric", "int_ior": 1.5, "ext_ior": 1.0, "specular_transmittance": tint}
-        exact = {"type": "gltf_dielectric", "ior": 1.5, "fresnel": "exact", "tint_r": 0.9, "tint_g": 0.6, "tint_b": 0.3}
+        exact = {"type": "gltf_dielectric", "ior": 1.5, "fresnel": "exact", "tint_mode": "every", "tint_r": 0.9, "tint_g": 0.6, "tint_b": 0.3}
         schlick = dict(exact, fresnel="schlick")
         mean_ref, err_ref, _ = self.render_sphere(reference_bsdf)
         mean_exact, err_exact, _ = self.render_sphere(exact)
@@ -267,7 +276,7 @@ class GltfDielectric(unittest.TestCase):
 
     def test_rendered_sphere_schlick_mode_matches_the_analytic_schlick_tracer(self):
         schlick = {"type": "gltf_dielectric", "ior": 1.5, "fresnel": "schlick", "tint_r": 0.9, "tint_g": 0.6, "tint_b": 0.3}
-        mean, err, bad = self.render_sphere(schlick)
+        mean, err, bad = self.render_sphere(schlick)   # default tint_mode: entry
         self.assertEqual(bad, 0)
         origin, direction = self.scene_pixels()
         rect = np.array([[-3.0, 0.0, 0.0, 5.0, 5.0, 2.0, 2.0, 2.0]])
@@ -279,10 +288,127 @@ class GltfDielectric(unittest.TestCase):
         z = np.abs(mean - schlick_tree) / scale
         self.assertLess(float(z.max()), 5.0)
         self.assertLess(float(np.sqrt((z * z).mean())), 1.5)
+        # the tint rule (entry): the "every event" tree is a different image of the tinted sphere (its control)
+        every_tree = tr.trace_sphere(np.broadcast_to(origin, direction.shape).copy(), direction, sphere, glass, rect, SKY, "schlick",
+                                     tint_mode="every")
+        z_every = np.abs(mean - every_tree) / scale
+        self.assertGreater(float(np.sqrt((z_every * z_every).mean())), 3.0 * float(np.sqrt((z * z).mean())))
         # negative control: the exact tree is further from the Schlick render than the noise allows
         z_exact = np.abs(mean - exact_tree) / scale
         self.assertGreater(float(np.sqrt((z_exact * z_exact).mean())), 1.6)
         self.assertGreater(float(np.sqrt((z_exact * z_exact).mean())), 2.0 * float(np.sqrt((z * z).mean())))
+
+
+class ThinRoughAndTint(unittest.TestCase):
+    """`gltf_thin_rough` against an independent quadrature of the KHR_materials_transmission README formulas (no sampling), and the
+    glTF tint rule of the rough solid wrapper `gltf_entry_tint`."""
+
+    TINT = [0.9, 0.6, 0.3]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mi, cls.dr = mitsuba_session()
+
+    def estimate(self, bsdf, cos_v, n=1_500_000, seed=3, wi_sign=1.0):
+        """(mean weight of the reflection samples, mean weight of the transmission samples, mean |wo.z| deviation info) per channel,
+        each averaged over ALL n samples (invalid samples weigh 0): the total reflectance R and transmittance T at cos_v."""
+        mi = self.mi
+        rng = np.random.default_rng(seed)
+        theta = math.acos(cos_v)
+        si = mi.SurfaceInteraction3f()
+        si.wi = mi.Vector3f(mi.Float(np.full(n, math.sin(theta))), mi.Float(np.zeros(n)), mi.Float(np.full(n, wi_sign * cos_v)))
+        sample1 = mi.Float(rng.random(n))
+        sample2 = mi.Point2f(mi.Float(rng.random(n)), mi.Float(rng.random(n)))
+        bs, weight = bsdf.sample(mi.BSDFContext(), si, sample1, sample2, mi.Bool(True))
+        w = np.stack([np.asarray(weight[c], dtype=np.float64) for c in range(3)], axis=1)   # float64: a float32 column sum drifts by 0.3 %
+        kind = np.asarray(bs.sampled_type)
+        wo = np.stack([np.asarray(bs.wo[c]) for c in range(3)], axis=1)
+        reflected = (kind & int(mi.BSDFFlags.Reflection)) != 0
+        alive = w.max(axis=1) > 0.0                      # a dead sample (a facet that cannot reflect the ray) carries no direction
+        return w[reflected].sum(axis=0) / n, w[~reflected].sum(axis=0) / n, wo[alive], reflected[alive]
+
+    @staticmethod
+    def quadrature(cos_v, alpha, f0, thetas=1500, phis=720):
+        """R and T of the README's thin-walled interface by direct integration over the mirrored light direction L' (front hemisphere):
+        R = int F(V.H) nu_T-like f_r cos, T = int (1 - F(V.H)) f_t |cos| (tint 1), with the README's D_T, G_T (separable Smith) of
+        H = normalize(V + L'): f = D G1(V) G1(L') / (4 cos_v cos_l)."""
+        v = np.array([math.sqrt(1.0 - cos_v ** 2), 0.0, cos_v])
+        mu = (np.arange(thetas) + 0.5) / thetas              # cos theta_l uniform: the measure d(cos) d(phi)
+        phi = (np.arange(phis) + 0.5) / phis * 2.0 * math.pi
+        cl, ph = np.meshgrid(mu, phi, indexing="ij")
+        sl = np.sqrt(1.0 - cl * cl)
+        lm = np.stack([sl * np.cos(ph), sl * np.sin(ph), cl], axis=-1)
+        h = lm + v
+        h /= np.linalg.norm(h, axis=-1, keepdims=True)
+        nh = h[..., 2]
+        vh = np.clip(np.einsum("ijk,k->ij", h, v), 0.0, 1.0)
+        a2 = alpha * alpha
+        d = a2 / (math.pi * (nh * nh * (a2 - 1.0) + 1.0) ** 2)
+        g1 = lambda c: 2.0 * c / (c + np.sqrt(a2 + (1.0 - a2) * c * c))
+        f = d * g1(cv_arr := np.full_like(cl, cos_v)) * g1(cl) / (4.0 * cv_arr * cl)
+        fresnel = f0 + (1.0 - f0) * (1.0 - vh) ** 5
+        cell = (1.0 / thetas) * (2.0 * math.pi / phis)
+        return float((fresnel * f * cl).sum() * cell), float(((1.0 - fresnel) * f * cl).sum() * cell)
+
+    def thin_rough(self, alpha=0.1, f0=0.04, **extra):
+        return self.mi.load_dict({"type": "gltf_thin_rough", "f0": f0, "alpha": alpha, "tint_r": 1.0, "tint_g": 1.0, "tint_b": 1.0, **extra})
+
+    def test_reflectance_and_transmittance_match_the_readme_quadrature(self):
+        for alpha in (0.04, 0.09, 0.36):                 # roughness 0.2, 0.3, 0.6 (alpha = r^2)
+            for cos_v in (0.95, 0.7, 0.4):
+                r_q, t_q = self.quadrature(cos_v, alpha, 0.04)
+                r, t, _, _ = self.estimate(self.thin_rough(alpha), cos_v)
+                self.assertAlmostEqual(float(r[0]), r_q, delta=0.012 * max(r_q, 0.01) + 4e-4, msg=f"R alpha={alpha} cos={cos_v}")
+                self.assertAlmostEqual(float(t[0]), t_q, delta=0.012 * t_q, msg=f"T alpha={alpha} cos={cos_v}")
+
+    def test_negative_controls_are_distinguishable(self):
+        # the quadrature of another ior (f0 0.2) and of the wrong roughness differ from the sampled estimate by far more than the gate
+        r, t, _, _ = self.estimate(self.thin_rough(0.09), 0.7)
+        r_q, t_q = self.quadrature(0.7, 0.09, 0.2)
+        self.assertGreater(abs(float(r[0]) - r_q), 0.05 * r_q)
+        self.assertGreater(abs(float(t[0]) - t_q), 0.04 * t_q)
+        r, t, _, _ = self.estimate(self.thin_rough(0.36), 0.4)    # the roughness enters through the shadowing at grazing views
+        r_q, t_q = self.quadrature(0.4, 0.04, 0.04)
+        self.assertGreater(abs(float(t[0]) - t_q), 0.05 * t_q)
+
+    def test_transmission_keeps_the_direction_side_and_the_refracted_control_does_not(self):
+        r, t, wo, reflected = self.estimate(self.thin_rough(0.04), 0.8, n=20000)
+        # wi = (sin, 0, cos) for a front side ray: reflected samples stay in z > 0, transmitted samples continue to z < 0 (no bend)
+        self.assertTrue((wo[reflected][:, 2] > 0).all())
+        self.assertTrue((wo[~reflected][:, 2] < 0).all())
+        # the lobe peak is -V for the transmission: mean direction of the transmitted samples ~ (-sin, 0, -cos)
+        peak = wo[~reflected].mean(axis=0)
+        self.assertAlmostEqual(float(peak[0]), -math.sqrt(1.0 - 0.64), delta=0.03)
+        self.assertAlmostEqual(float(peak[2]), -0.8, delta=0.03)
+        # control (thin-rough-refracted): the "transmitted" samples stay on the front side: a different gate answer
+        _, _, wo2, reflected2 = self.estimate(self.thin_rough(0.04, mode="refracted"), 0.8, n=20000)
+        self.assertTrue((wo2[~reflected2][:, 2] > 0).all())
+
+    def test_back_side_view_is_symmetric(self):
+        r_f, t_f, _, _ = self.estimate(self.thin_rough(0.09), 0.6)
+        r_b, t_b, _, _ = self.estimate(self.thin_rough(0.09), 0.6, wi_sign=-1.0)
+        np.testing.assert_allclose(r_b, r_f, rtol=0.02, atol=1e-3)
+        np.testing.assert_allclose(t_b, t_f, rtol=0.02, atol=1e-3)
+
+    def test_rough_solid_is_tinted_on_entry_only(self):
+        mi = self.mi
+        nested = {"type": "roughdielectric", "distribution": "ggx", "alpha": 0.09, "int_ior": 1.5, "ext_ior": 1.0,
+                  "specular_transmittance": {"type": "rgb", "value": [1.0, 1.0, 1.0]}}
+        wrapped = mi.load_dict({"type": "gltf_entry_tint", "tint_r": self.TINT[0], "tint_g": self.TINT[1], "tint_b": self.TINT[2],
+                                "nested": nested})
+        plain = mi.load_dict(nested)
+        tinted_nested = dict(nested, specular_transmittance={"type": "rgb", "value": self.TINT})
+        every = mi.load_dict(tinted_nested)
+        for sign, expected in ((1.0, np.array(self.TINT)), (-1.0, np.ones(3))):
+            # transmitted total (sum of the weights of the transmission samples / n): wrapper = tint on entry, 1 on exit, against the
+            # untinted plain dielectric (same sample stream: same seed)
+            _, t_wrapped, _, _ = self.estimate(wrapped, 0.8, n=400000, seed=11, wi_sign=sign)
+            _, t_plain, _, _ = self.estimate(plain, 0.8, n=400000, seed=11, wi_sign=sign)
+            np.testing.assert_allclose(t_wrapped, t_plain * expected, rtol=1e-4)
+        # negative control: Mitsuba's own tint (every event) tints the exit as well
+        _, t_every_exit, _, _ = self.estimate(every, 0.8, n=400000, seed=11, wi_sign=-1.0)
+        _, t_plain_exit, _, _ = self.estimate(plain, 0.8, n=400000, seed=11, wi_sign=-1.0)
+        self.assertGreater(float(np.abs(t_every_exit / np.maximum(t_plain_exit, 1e-9) - 1.0).max()), 0.05)
 
 
 class SnapshotParsing(unittest.TestCase):
@@ -308,9 +434,8 @@ class SnapshotParsing(unittest.TestCase):
         self.assertEqual(sorted(tr.emitters(data)), [2, 3, 4])
 
     def test_refusals(self):
-        with self.assertRaisesRegex(ValueError, "rough thin"):
-            tr.glass_table(self.snapshot([fx.glass(thickness=0.0, roughness=0.2)])[1])
-        tr.glass_table(self.snapshot([fx.glass(thickness=0.0, roughness=0.2)])[1], allow_rough_thin=True)  # the declared model accepts it
+        # rough thin-walled glass is modelled (gltf_thin_rough) since the F15 closure: no refusal any more
+        self.assertTrue(tr.glass_table(self.snapshot([fx.glass(thickness=0.0, roughness=0.2)])[1])[0]["thin"])
         with self.assertRaisesRegex(ValueError, "no transmissive"):
             tr.glass_table(self.snapshot([fx.glass(transmission=0.0, thickness=0.0)])[1])
         root, data = self.snapshot([fx.glass()])
@@ -413,7 +538,7 @@ class Runner(unittest.TestCase):
         # negative control that must FAIL the gate.
         # Ticket 19's declared combination key passes on the ticket-13 engine (orchestrator run t19probe-2): no transmission key is pending.
         keys = [k for k in check.SCENARIOS if k.startswith("transmission-")]
-        self.assertEqual(len(keys), 9)
+        self.assertEqual(len(keys), 11)
         for key in keys:
             spec = check.SCENARIOS[key]
             for field in ("pending", "pending_matches", "pending_gate"):

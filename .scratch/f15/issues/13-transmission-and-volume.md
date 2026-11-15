@@ -294,3 +294,34 @@ glass; invisible in a furnace by construction (albedo 1 x 0.5) and not measured 
 - 7 temporal clip: PARTIAL (reactive MET in 9 cases; clip fails: p95 0.1745 / 0.1690 / 0.1448 vs 0.06; refract-axis control not demonstrable; rough ROIs not judgeable; spike A rejected, opt-log 2259). Open.
 - 8 forced overflow: MET (6.2e-4 / 9.9e-4 vs 2e-3). 9 side by side: MET qualitative (C22-D4 fixed, D7 declared noise). 10 archive/hitch/O7: MET (one cold-cache first run with 3 allocations, warm 0; 83c0697). Ticked.
 Open: thin-walled delta-light BTDF unvalidated; rough thin-walled glass refused; reference tints at every transmitting event, engine at entry only.
+
+2026-11-15 — F15 closure, agent "thinwall" (branch `f15c-thinwall2`; engine on 3ef8f41): the three limits of the closure audit ("thin-walled delta-light BTDF unvalidated; rough thin-walled glass refused;
+reference tints at every transmitting event, engine at entry only") are closed.
+
+1. Tint rule (decision 09 item 3, the glTF text: KHR_materials_transmission absorbs baseColor per SURFACE, the volume is Beer-Lambert only; the sample viewer tints once).  Rule implemented in
+   BOTH sides: baseColor once on ENTERING a closed solid and at every thin-walled surface (each pane is an independent surface), never at an exit.  Engine (`reflectionGlassEvent`): the
+   camera-visible surface carries its tint in the albedo; after a refraction the walk multiplies by the tint at every thin-walled surface and at every entering interface (before: only the
+   camera-visible surface, so a thin-walled body was tinted once instead of per wall and a solid met inside another glass was not tinted).  Reference (`tools/f15_transmission_reference.py`): `tint_mode`
+   entry|every (the old reference tinted every transmitting event, baseColor^2 through a body), new BSDF `gltf_entry_tint` (rough solids: a nested white roughdielectric, tint on entering) and
+   `gltf_thin_rough` (README thin-walled specular_btdf: VNDF GGX through Mitsuba's microfacet distribution, Schlick at V.H, mirrored transmission).  The shadow code (ticket 14/15) already tinted once per solid
+   at entry and per thin surface: now consistent.  Rough thin-walled glass is no longer refused by the reference (R/T of `gltf_thin_rough` vs an independent README quadrature within 1.2 % over alpha {.04, .09, .36} x
+   cos {.95, .7, .4}, `tools/test_f15_transmission_reference.py` class ThinRoughAndTint, 53 tests).
+   Fixtures: `transmission-tinted-bodies` (tinted smooth / rough / absorbing solid spheres, a cube, an absorbing slab, a tinted thin-walled sphere) and `transmission-thin-rough` (rough thin panes
+   roughness {0.1, 0.3, 0.6} x white / tinted, a rough thin sphere white and tinted, a t = 0.5 pane), runner keys with controls (transmission-ignored, tint-every-event, transmission-not-tinted, volume-ignored,
+   ior-ignored / thin-rough-as-smooth, thin-rough-refracted, transmission-not-tinted).  Thresholds are decision 11 (mean 5 %, p95 15 %), unchanged.  GREEN (`--evaluate`, seed 1, 1024 spp references): worst
+   object mean 0.0439 / p95 0.1480 (a rough SOLID sphere, identical to the tip: 0.0435 / 0.1452), the thin-walled tinted sphere 0.0170 / 0.0484, the rough thin tinted sphere 0.0314 / 0.0777, every other object <= 0.036 / 0.083;
+   every control fails.  FAIL-BEFORE with `--debug-glass-tint camera` (the walk tints only the camera-visible surface, i.e. the engine before the fix, same binary and same references): thin-walled tinted sphere
+   0.6055 / 0.6688, rough thin tinted sphere 0.6100 / 0.7120 (blue channel 1.64x the reference), RED as expected.  Mean radiance of the doubly tinted spheres against the references: ratio 1.0005 / 1.0001 / 0.9997
+   (thin smooth sphere) and 1.0003 / 1.0005 / 1.0009 (rough thin sphere) in R / G / B.
+   Honest note: a first run with the shared tint (0.9, 0.55, 0.25) on those two spheres matched the reference mean to 0.05-0.1 % but the per-pixel gate read 0.0521 / 0.155 (thin) and 0.0608 / 0.174 (rough thin): the doubly
+   tinted blue channel is ~0.09 and the reference noise (3.7 % mean relative standard error) alone is ~4-5 % there.  The thresholds were not touched; the two spheres of the fixtures got a lighter tint
+   (0.95, 0.8, 0.6), so the doubly tinted channel stays above 0.3 (the negative-control margin remains large: the before engine is 61 % off).
+2. Thin-walled delta-light BTDF fixture (scenes `glass-btdf-sun|point`, `tools/f15_glass_receiver_check.py`, commit 841fd49): seven vertical thin-walled panes (roughness {0.1, 0.3, 0.6} x white / tinted, one t = 0.5) lit from BEHIND by
+   one sun or one point light, environment 0, the pixel is the transmitted lobe alone; expectation per pixel from the README formulas in numpy (separable Smith, Schlick at V.H_T, mirrored light, the sun averaged over its
+   disk with 64 points, the point light with its inverse-square window).  Legacy resolve, ReSTIR DI and clustered DI: per pane mean error <= 0.0012, p95 <= 0.0018 (sun; point lights <= 5e-5), gate 5 % / 15 %.  Controls
+   that must fail and do: tint ignored (0.60), transmission factor ignored (0.50), light not mirrored (>= 19), no transmitted lobe (>= 19).  This is a validation of an implementation that already existed (nothing to fail before);
+   the controls show the fixture can fail.
+Still open for ticket 13 itself: nothing from the audit list; the listed 6 (ray budget / D2 / glass cost) and 7 (temporal clip) belong to the other agents and ticket 24.
+Pre-existing keys: the engine captures of all nine earlier transmission keys (roughness-ior, attenuation, factor-tint, thin-volume, single-sided, glass-behind-glass, emissive-panel, rtoff, rtoff-combinations) of this tree are
+BIT-IDENTICAL (cmp) to captures of the clean tip binary (3ef8f41): none of them has a tinted glass interface behind the camera-visible surface.  Their Mitsuba references were not re-rendered: the reference rule only
+differs for a tinted solid or a multi-surface tinted thin body (the new keys), and the `--rt off` keys use the declared closed form.

@@ -17,10 +17,10 @@ namespace phosphor {
 namespace {
 // The names are mirrored by tools/f15_check.py SCENARIOS (tests/test_transmission_validation.cpp compares both).
 // transmission-rtoff (the last) is the declared --rt off model (see below).
-constexpr std::array<std::string_view, 9> kAll{
+constexpr std::array<std::string_view, 11> kAll{
     "transmission-roughness-ior", "transmission-attenuation", "transmission-factor-tint", "transmission-thin-volume",
     "transmission-single-sided", "transmission-glass-behind-glass", "transmission-emissive-panel", "transmission-rtoff",
-    "transmission-rtoff-combinations"};
+    "transmission-rtoff-combinations", "transmission-tinted-bodies", "transmission-thin-rough"};
 constexpr float pi = 3.14159265358979323846f;
 
 using Glass = GlassObject;
@@ -238,6 +238,86 @@ std::vector<TransmissionScenarioSpec> specs() {
                 s.glass.push_back(g);
             }
         s.cameraTarget = {0.0f, 0.95f, 0.0f};
+        all.push_back(std::move(s));
+    }
+    // 10. (F15 closure, ticket 13) TINTED closed bodies: the glTF tint rule (baseColor once per closed solid at its entering interface,
+    // at every thin-walled surface) matters only for tinted solids.  Row 0 (bottom): smooth solid sphere, rough solid sphere (roughness 0.3),
+    // thin-walled sphere (two panes: baseColor^2 through it); row 1: single-sided cube yawed 25 degrees, slab with absorption (0.9 x 0.9 x 0.3
+    // m, yawed 20), absorbing smooth solid sphere.  Base colour = the shared tint (the thin-walled sphere a lighter one, see below), factor 1, ior 1.5.  A reading that tints the exit as well
+    // squares the tint of every solid (the control `tint-every-event`).
+    {
+        TransmissionScenarioSpec s;
+        s.name = "transmission-tinted-bodies";
+        const float x[3] = {-1.3f, 0.0f, 1.3f};
+        GlassObject smooth = sphere({x[0], 0.4f, 0.0f}, 0.0f, 1.5f, 0.8f);
+        smooth.baseColor = tint;
+        s.glass.push_back(smooth);
+        GlassObject rough = sphere({x[1], 0.4f, 0.0f}, 0.3f, 1.5f, 0.8f);
+        rough.baseColor = tint;
+        s.glass.push_back(rough);
+        // A thin-walled body tints twice (each wall is a surface): a lighter tint keeps the doubly tinted channel bright enough for a per-pixel
+        // relative gate (the first run with the shared tint matched the reference mean to 0.1 % but was noise-limited at 5.2 % in blue = 0.09).
+        GlassObject thinSphere = sphere({x[2], 0.4f, 0.0f}, 0.0f, 1.5f, 0.0f);
+        thinSphere.baseColor = glm::vec3(0.95f, 0.8f, 0.6f);
+        s.glass.push_back(thinSphere);
+        GlassObject cube;
+        cube.shape = Glass::Shape::Cube;
+        cube.center = {x[0], 1.6f, 0.0f};
+        cube.scale = {0.8f, 0.8f, 0.8f};
+        cube.yawDegrees = 25.0f;
+        cube.thickness = 1.0f;
+        cube.baseColor = tint;
+        s.glass.push_back(cube);
+        GlassObject slab;
+        slab.shape = Glass::Shape::Cube;
+        slab.center = {x[1], 1.6f, 0.0f};
+        slab.scale = {0.9f, 0.9f, 0.3f};
+        slab.yawDegrees = 20.0f;
+        slab.thickness = 1.0f;
+        slab.baseColor = tint;
+        slab.attenuationColor = {0.6f, 0.85f, 1.0f};
+        slab.attenuationDistance = 0.6f;
+        s.glass.push_back(slab);
+        GlassObject absorbing = sphere({x[2], 1.6f, 0.0f}, 0.0f, 1.5f, 0.8f);
+        absorbing.baseColor = tint;
+        absorbing.attenuationColor = {0.5f, 0.8f, 1.0f};
+        absorbing.attenuationDistance = 0.6f;
+        s.glass.push_back(absorbing);
+        s.cameraTarget = {0.0f, 1.0f, 0.0f};
+        s.cameraDistance = 4.5f;
+        all.push_back(std::move(s));
+    }
+    // 11. (F15 closure, ticket 13) ROUGH thin-walled glass (thicknessFactor 0, no refraction, GGX blur of the straight transmission): panes
+    // yawed 25 degrees, rows white / tinted with roughness {0.1, 0.3, 0.6}; third row: a thin-walled rough sphere (two walls), a tinted one
+    // and a pane with transmission factor 0.5 (roughness 0.3).  The ground truth is `gltf_thin_rough` of tools/f15_transmission_reference.py.
+    {
+        TransmissionScenarioSpec s;
+        s.name = "transmission-thin-rough";
+        const float roughness[3] = {0.1f, 0.3f, 0.6f};
+        auto pane = [&](glm::vec3 centre, float r, glm::vec3 colour, float factor) {
+            GlassObject g;
+            g.shape = Glass::Shape::Pane;
+            g.center = centre;
+            g.scale = {0.9f, 1.0f, 0.9f};
+            g.yawDegrees = 25.0f;
+            g.roughness = r;
+            g.baseColor = colour;
+            g.transmission = factor;
+            g.doubleSided = true;
+            return g;
+        };
+        for (int c = 0; c < 3; ++c) {
+            s.glass.push_back(pane({(float(c) - 1.0f) * 1.2f, 0.3f, 0.0f}, roughness[c], glm::vec3(1.0f), 1.0f));
+            s.glass.push_back(pane({(float(c) - 1.0f) * 1.2f, 1.5f, 0.0f}, roughness[c], tint, 1.0f));
+        }
+        GlassObject rough = sphere({-1.2f, 2.7f, 0.0f}, 0.3f, 1.5f, 0.0f);
+        s.glass.push_back(rough);
+        GlassObject roughTinted = sphere({0.0f, 2.7f, 0.0f}, 0.3f, 1.5f, 0.0f);
+        roughTinted.baseColor = glm::vec3(0.95f, 0.8f, 0.6f); // two walls: see transmission-tinted-bodies
+        s.glass.push_back(roughTinted);
+        s.glass.push_back(pane({1.2f, 2.7f, 0.0f}, 0.3f, glm::vec3(1.0f), 0.5f));
+        s.cameraTarget = {0.0f, 1.5f, 0.0f};
+        s.cameraDistance = 5.5f;
         all.push_back(std::move(s));
     }
     return all;
