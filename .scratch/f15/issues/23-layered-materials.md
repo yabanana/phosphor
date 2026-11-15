@@ -112,3 +112,64 @@ Carried to ticket 24: resolve GPU time per active-layer count and the binning de
 - 5 resolve time per layer count + final binning decision: PARTIAL (terrain A/B/A x3 on 2026-11-15: union single 0.089 ms, layers 1..4 0.136/0.162/0.183/0.208 ms; binning never lowers the resolve by 5 % (full +1 %, layers-4 +4 %); ran on procedural stand-in textures, not the CC0 sets; chess A/B/A not run; nothing written to opt-log/perf-log). Open.
 - 6 CC0 fetch pinned: MET. 7 archive/hitch/O7: MET (+41 compute +9 render +3 tile; integration re-verified). Ticked.
 Open: layers contribute base parameters only, feature blocks/emissive/alpha not blended (deviation from plan wording); secondary hits/GI/probes see the stack's own record; mask uses primitive uv; the 1e-5 envelope exceeded on two textured terrain cases.
+
+## F15 closure (writer "layers", 2026-11-15): feature blocks, emissive, secondary hits, mask edge, exact coat zero
+
+Commits `a1a2548` (item 3), `a5bf1d9` (items 1 and 5, fixtures, runner, archive), `64074eb` (item 2). Everything below ran on the M5 Max under the shared lock; no timing
+claim is made (other agents ran in parallel).
+
+**Item 3, mask edge: DONE.** The mask uses a `clamp_to_edge` sampler (`kMaskSampler`). The ramp gate gates the edge band (u < 1.5/256 and u > 1 - 1.5/256) on its own and
+the 3-texel exclusion is gone (`EDGE_MARGIN` 0 for ramp and furnace). BEFORE (base build + the new gate): edge max |t - u| 0.4999 over 2,978 edge pixels, 412 of 424 rows
+reverse. AFTER: 0.0021, 0 reversals, slope 1.0039; the reversed ramp (control) still fails; furnace without the margin 1.00000 (limit 1.005, additive 3.46).
+
+**Item 1, features blended: DONE except the combination of all seven blocks (2 ULP).** Rules in `src/renderer/layer_blend.h` header and ADR-0002: per feature a layer's source is
+its own block, else the stack's own block (the finish it inherits), else neutral; presence-like scalars (coat factor, sheen colour, anisotropy strength, film strength, specular
+factor/colour, thin subsurface weight, emission) blend linearly with the final weights; the secondary parameters of a lobe (coat/sheen roughness, film ior/thickness, anisotropy
+direction, subsurface colour, the coat normal by surface gradients) are weighted by w_i x presence_i; ior 0 is a mode that wins where at least half of the weight asks for it; a
+sole layer (weight exactly 1) returns its own values bit for bit. Alpha: see below. Emissive: sum of w_i emissive_i x texel_i, the stack's own emissive is an additive finish.
+The stack's flags carry the layers' blendable bits (record 3 `features` word), a lobe whose blended weight is 0 at the pixel is off.
+- Not blendable, with reasons (declared; the SceneStore logs the dropped blocks once): transmission and volume (the refraction, the transmittance shadow/ray passes and the
+  guide read ONE record per surface at traced hits, and a refracting layer has no parameter-space mean: interface and absorption are path-dependent), volumetric subsurface
+  (a screen-space diffusion pass over a target keyed by the material). The layer still contributes the rest of its material.
+- Gates per block (flat quad, layer 1 carries the block, checker factor textures, layer tilings 1 and 4): stack at constant mask (0,1) equals the single material of layer 1,
+  0 of 921,600 px (coat, sheen, aniso, irid, spec, emissive, thin); stack at (1,0) equals the plain single layer 0, 0 px (the twin runs in the same feature union through an
+  unused library material); the negative controls (the same layer without its block = the old behaviour, and the other layer) all fail; transition ramps: pooled blend factor
+  monotone (0 reversals) and, for the blocks affine in the blended parameter (coat, sheen, irid, emissive, thin), max |t - u| 0.002 (limit 0.02); aniso and spec are gated
+  monotone only (their luminance is not affine in the parameter: reported). The pooled estimator replaces the per-pixel ratio for blocks because the effect of a block on the
+  luminance is tiny and changes sign across a textured layer (sheen conserves energy: L1 - L0 ~ 0.2 %); the thresholds (0.001 drop, 0.02 mask error) are unchanged.
+- Furnace (base blend, four layers) 1.00000 with the additive control at 3.46; the deviation from the BSDF-space mix is the one recorded before (max 0.0859). A per-block furnace
+  is not added: every block's energy rule is the one of its own ticket (coat attenuation, sheen albedo scaling, film replacing the Fresnel), applied to blended parameters.
+- OPEN: all seven blocks on one layer (`layers-blk-all-e1`) differ from the single material by 2 ULP in 39,045 px (0 in the 8-bit image); each block alone is exact. Cause not
+  isolated (FMA contraction of the many accumulations in the fused path; the emissive block alone was exactly this: the product feeds `color +=` and had to be one expression
+  for both paths). The key is `pending` in the runner (asserted to fail until closed); the zero-weight and ramp keys of `all` pass.
+- Alpha: NOT blended (PARTIAL). Coverage is decided from the stack's own record in about 15 independent passes (visibility alpha fragments, forward, CSM and cached shadow
+  depth, RT any-hit intersection functions, ReSTIR emitter alpha, the probe capture, CPU light sampling and the RT checks), most of them with only `materials` and `textures` bound.
+  Blending it in the resolve alone would disagree with those passes (holes without shadows). It is feasible, not impossible: one shared `layerStackAlpha` (mask + height weights
+  x layer alpha) plus the extension pointer in GPUTemporalParams (visibility and forward), the shadow params and the RT entries (buffer 7 already holds it). Proposal for the owner:
+  schedule it as its own ticket with an alpha-cutout ramp fixture and RT shadow / reflection coverage gates; until then a stack's coverage is its own alpha record.
+
+**Item 2, secondary hits: DONE for base parameters, normal and emission.** `layerStackSurface` (one helper, `shaders/layer_resolve.h` + `gi_common.h`) feeds reflectionMaterial,
+giMaterial (DDGI and ReSTIR GI hits) and the raster probe capture; features are not evaluated at secondary hits for any material (the documented reduction of ADR-0002).
+Gates `layers-hit-{refl,probe,gi}`: stack at (0,1) equals the single material of layer 1 in 0 px in all three modes, (1,0) equals layer 0 (0 px), controls (the stack's own record,
+the other layer) fail. Sampled emitters: a layer's emission is not an emitter for the DI/GI emitter sampling (declared; the stack's own emissive is).
+
+**Item 4, triplanar: NOT REQUIRED in F15.4, deferred to F19.2.** Re-searched `docs/plans/F15.md` (F15.4 section), this ticket, `.scratch/f15/decisions/`, `docs/adr/`,
+`.scratch/f15/research/layered-materials.md`: none requires triplanar; the mask is an RGBA weight mask at the primitive uv and the Mikkelsen surface gradients are used for the
+per-layer uv frames. `research/track-studio-audit.md` (lines 325-327) says triplanar "va decisa come caso F15.4 oppure rinviata a F19 dichiarandolo": it is declared deferred to
+F19.2 (ROADMAP "Texturing del terreno con virtual texture e materiali a strati"), where heightfield walls need it.
+
+**Item 5, threshold: DONE, the gate is 0.** A coat that resolves to weight 0 switches the coat off at the pixel (`activeBits`), so the pixel takes the code path of a pixel without a
+coat. `layers-coat-zero` now compares `terrain/coat=zero` with `terrain/coat=union` (no coat on the stack; an unused library material carries a coat so that the feature union and
+the pipeline are the same): BEFORE 59,945 of 921,600 px differ bitwise (max 24 ULP); AFTER 0 px; controls (real cavity coat, the ior-1.4 twin) fail. The old twin (specular block
+factor 1 - 2^-24) is reported only. The 1e-5 class-equivalence overshoot (655 ULP on the textured patch) is NOT the coat: `terrain/coat=off/height=off` measures 31 ULP (3.7e-6,
+inside 1e-5) against 654 ULP with the height contrast on; the height blend is exp((h - hmax)/5 mm), a gain of ~200 on a 1-ULP codegen difference between the class and the
+all-lobes pipeline. Declared as inherent to the height contrast; not re-declared as an envelope.
+
+**Archive and regressions.** New permutations (unions 0x9F, 0x104, 0x108, 0x110, 0x180, 0x19F) entered by the targeted update (`.scratch/f15/harvest/layers-1.json`,
+`tools/material_class_archive.py check` passes). Featureless scenes unchanged: Sponza D2 and the F13 exactness captures bit-identical to `build/litefix/exact-new`; visual_check
+8 of 8 benches 0 px (see the final report for the last run). A first restructuring of the secondary-hit code moved Sponza D2 by 5,768 px: reverted to verbatim original
+statements plus an override.
+
+**Needs a quiet machine (orchestrator):** resolve cost at 1080p by active layer count with the new blocks on the CC0 terrain, A/B/A, 3 replicas:
+`python3 -I tools/f15_layers_timing.py run --out build/f15-layers-timing --binning` (new arms `blocks-1..4` = `terrain/layerblocks=on/weights=...`, plus the old arms); and
+Sponza D2 / RT reflection kernel timing after the secondary-hit change.
