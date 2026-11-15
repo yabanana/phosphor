@@ -6,7 +6,7 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 16
 
-**Status:** resolved PARTIAL (2026-11-14): side-lit bound not met on valid OpenPBR ground truth; ticket 18 triggered and closed by its fallback (screen-space diffusion stays); diffusion pass cost never measured (ticket 24 quiet-machine list); forced-overflow rerun in the ticket 24 battery not recorded
+**Status:** the screen-space tier is PARTIAL (2026-11-14); the optional RT tier (--subsurface-mode rt-walk) MEETS the side-lit and back-lit bounds, see the 2026-11-15 RT-tier comment at the end.  Screen-space tier: resolved PARTIAL (2026-11-14): side-lit bound not met on valid OpenPBR ground truth; ticket 18 triggered and closed by its fallback (screen-space diffusion stays); diffusion pass cost never measured (ticket 24 quiet-machine list); forced-overflow rerun in the ticket 24 battery not recorded
 
 - [ ] Side-lit volumetric fixtures vs Mitsuba 3.9.1 `volpath` random walk (homogeneous medium inside a boundary with the engine's roughness) on the piece mask: decision-11 subsurface bound — NOT met (gated mean 0.25-0.36, p95 0.74-0.92; confinement, see ticket 18)
 - [x] Back-lit thick fixture measured and reported, not gated (declared limit of screen-space diffusion) — reported: mean error 0.98-1.0 (engine near black)
@@ -229,3 +229,58 @@ d32de4b (sub-pixel test follows roughness 0.35); ctest 20/20.
 - 5 scenes without subsurface + pass cost: PARTIAL (visual_check 0 px, F13 exact 0 px; diffusion pass cost never measured, static cost only). Open.
 - 6 archive/hitch/O7: MET (3ba6ba7, +22 compute +6 render). Ticked.
 Stray merge-marker line removed from the ticket body. Open, support-table only: DI/ReSTIR/clustered and GI composite diffuse not diffused; ambient diffuse of reflection composite and DI local lights not diffused; combinations with other lobes keep base diffuse; weight/colour/radius-scale textures do not change the profile shape.
+
+
+## 2026-11-15 -- RT tier (agent sss, branch f15c-sss-w): the side-lit bound is MET on the declared RT mode; composite limits closed for the RT tier
+
+Owner decision: volumetric subsurface gets an OPTIONAL RT tier (`--subsurface-mode diffusion|rt-walk`, default diffusion; rt-walk needs `--rt on`, otherwise the
+diffusion serves, logged and reported in the report object `subsurface`: requested / effective / fallback_reason / samples / max_steps / approximations).
+Commits: d2f13c5 (tier, keys, structural guard), b0e3531 + a034a49 (albedo table, rough fixture, test fixes), fdb7899 + fcb3359 (archive KEPT sss-1 / sss-2),
+58b809e (ambient, GI, DI local lights), 94dd37b (roughness key).
+
+Technique (shaders/subsurface_walk.metal, shared scalar math renderer/subsurface_walk_math.h): per pixel a camera ray finds the boundary; a GGX visible normal is
+refracted into the mesh (weight (1 - F) G1 / eta^2); free flights (closest-hit ray bounded by the flight, hero colour channel per walk, HG phase, the boundary-aware
+single-scatter albedo of ticket 18); at every exit next-event estimation of the analytic lights through the Walter rough-dielectric BTDF (+ optional shadow ray), then
+the internal reflection only (F G1); Russian roulette on the weight; hard bound `--subsurface-steps` (512).  Back-lit needs no special case.  Texture-modulated colour and
+radius scale set the medium of the entry pixel (locally homogeneous).  Hard loop bounds, 16-byte lite payload (rt_alpha_lite), command buffers: 64 walks x 1280x720
+sphere fixtures = 67-75 ms per frame GPU under load (4 walks: 6 ms).
+
+Criteria of this ticket, closed on the RT mode (all on the M5 Max, 64 walks x 96 frames, noisy term pooled over the 5x5 interior window exactly like the reference,
+unpooled numbers reported: the criterion -- bound, statistic, pixel set -- is UNCHANGED from decision 11 / this ticket; only the stochastic candidate's noise is
+averaged the way the reference averages its own):
+- [x] side-lit vs Mitsuba volpath: every piece, incl. the x2 pieces outside the diffusion regime, mean <= 0.0635, p95 <= 0.1708 (bound 0.10 / 0.25); luminance means within
+  0.5 %; controls subsurface-off, diffusion-off, radius-ignored and walk-lights-off FAIL.  Apple9 (`--force-family apple9`): the walk runs (effective rt-walk) and gives the same numbers.
+- [x] back-lit thick fixture GATED at the plan's 2x bound (0.20 / 0.50, fixed before comparing, ticket 18 text): worst 0.0919 / 0.2288; controls fail.  Note: piece 0's blue
+  channel is 1.5x the reference in the 592-608 px column band where the ENGINE'S analytic specular limb glint (0.216, walk contribution 0.005) exceeds Mitsuba's total (0.140):
+  a base-specular difference at grazing angles (Appendix B vs exact Fresnel / separable G), not the walk (earlier-phase item for the orchestrator, below the bound).
+- [x] radius sweep monotone, terminator bleed within 0.01 of the truth on both series (skin 0.0299 0.0695 0.1591 0.2918 0.4297 vs 0.0327 0.0727 0.1570 0.3020 0.4273); controls fail.
+- [x] sub-pixel: the walk gives the base model's ambient diffuse of the medium colour (below, furnace pair); the screen-space tier's bit-equality is a property of that tier.
+- [x] forced overflow, archive, hitch: sss-1.json / sss-2.json KEPT; archive_check / hitch_check are the orchestrator's (0 archive misses and 0 fallback draws in every capture
+  after the update except the first run per configuration).
+- [x] scenes without subsurface: 5 exactness PFMs byte-identical to litefix/exact-new; visual_check 8 benches 0 px (bench 6 / 7 included: the weight rides in sssMaterial,
+  ShadingResult keeps its layout; a first variant with an added member differed by 9 / 25 px).
+- STRUCTURAL guard (orchestrator): every key that requests the walk reads the capture report and FAILS as a capture error unless subsurface.effective == rt-walk (reason printed);
+  fallback key `@rt-walk-fallback-rt-off` asserts the opposite (effective diffusion, equal to the plain capture); tests in tools/test_f15_check.py (RtWalkKeys).
+
+Composite limits of the carry list, the plan does NOT exclude them (decision 06 row "Subsurface (volumetric)": environment / ambient and GI "included in the irradiance target"),
+so they are implemented for the RT tier:
+- ambient / GI irradiance when the RESOLVE owns it (no reflection composite: engine.cpp:358-365 creates the composite only with reflections / AO / the denoiser on; flag
+  RESOLVE_EXTERNAL_DIFFUSE engine.cpp:1813): the walk exit samples the dome (locally uniform radiance, GI irradiance / pi) -- key `subsurface-volumetric-hemi@rt-walk`
+  (legacy hemisphere, no lighting stack): worst mean 0.0382 / p95 0.0524 (bound 0.06 / 0.12), walk-less control 0.9055 FAILS;
+- composite-owned ambient / GI (the product presets): the walk writes a gain target, `reflection_composite_lobe` multiplies its diffuse factor by it (REFLECT_COMPOSE_SSS):
+  key `subsurface-volumetric-env@rt-walk-composite`: 0.0398 / 0.0541, control (gain 0 = Lambert base colour) 0.3076 FAILS;
+  bound 6 % mean / 12 % p95 fixed before measuring from the measured angle dependence of the albedo table (A_angle within 6 %);
+- analytic local lights through DI: ReSTIR and clustered shade the diffuse of walk pixels with 1 - weight for DELTA samples (DI_SSS_WALK), the walk's NEE adds it; key
+  `subsurface-volumetric-point@rt-walk` (+ `-restir`, `-clustered`) vs Mitsuba with a point emitter: each 0.0807 / 0.2284; controls: walk lights off 0.98 FAILS,
+  DI diffuse kept (double counted, --debug-subsurface-di-diffuse keep) 1.012 / 2.58 FAILS for ReSTIR and clustered;
+- weight / colour / radius-scale textures: the medium of the entry pixel follows them (colour recomputed from the texture, radius scale sampled at the entry uv); chess (ticket 20).
+Earlier "no effect" ambient run: stale composite-path captures (the denoise-off re-capture was rejected by launch_options.cpp:1333); not a plumbing bug (composite key above), the
+fixture discriminates.
+What stays declared (named in the report's `approximations`): locally homogeneous medium of the entry texel; boundary ior 1.5 fixed (the table is measured behind it); albedo
+table clamped to roughness 0.15..0.7 and g 0..0.3; normal maps at the entry only; AREA emitters sampled by DI keep their full base diffuse (the walk samples analytic lights);
+GI irradiance is a locally uniform dome (not the irradiance at the exit points); combinations with coat / sheen / anisotropy / iridescence / transmission keep the base
+diffuse; stochastic (default 4 walks per pixel is noisy; converges over frames); partially metallic texels use weight x (1 - metallic) for both the gain and the strip.
+
+Needs a quiet-machine timing (orchestrator): `python3 gpulock.py build/release/phosphor --scene procedural --bench 2 --material-scenario subsurface-volumetric-sun --render-path visibility
+--geometry-path mesh --rt on --shadows off --lighting legacy --reflections off --post --upscaler native --resolution 1280x720 --frames 300 --warmup 64 --no-ui --no-vsync --gpu-timing-serial
+--subsurface-mode rt-walk --subsurface-samples N --report r.json` for N = 4 / 16 / 64 against `--subsurface-mode diffusion` (pass "Subsurface RT walk" / "Subsurface diffusion").

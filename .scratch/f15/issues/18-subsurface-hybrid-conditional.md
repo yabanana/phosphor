@@ -6,7 +6,7 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 17 (and only if its bound is missed)
 
-**Status:** resolved by the FALLBACK (2026-11-14): bound not met; screen-space diffusion stays; F15.1 volumetric subsurface explicitly PARTIAL with the measured gap (RT single scattering analysed, not implemented; LUT valid for roughness 0.35 only)
+**Status:** resolved by the FALLBACK (2026-11-14) and, for the RT tier, implemented (2026-11-15 comment at the end: optional rt-walk meets both bounds; LUT over the roughness).  Fallback record: bound not met; screen-space diffusion stays; F15.1 volumetric subsurface explicitly PARTIAL with the measured gap (RT single scattering analysed, not implemented; LUT valid for roughness 0.35 only)
 
 - [ ] Bound: the ticket-17 side-lit subsurface bound on the same fixtures; additionally the back-lit fixture within 2× the side-lit bound — NOT met (measured gap below)
 - [x] Timebox 2 weeks; if not met, fallback = keep screen-space diffusion, F15.1 subsurface stays explicitly partial (unticked for the volumetric mode) with the measured gap reported
@@ -74,3 +74,26 @@ Roadmap: F15.1, F15.3
 - 2 timebox / fallback: MET (fallback executed; spike 1 tabulated profile emulation 4fc42af; step 2 RT single scattering not started by analysis, not by timebox expiry). Ticked.
 - 3 cost per pixel + unchanged scenes: NOT MET / n.a. (no engine change adopted; screen-space pass cost deferred to 24, unmeasured). Open.
 - 4 archive/hitch/O7: MET vacuously (no engine or pipeline change). Ticked.
+
+
+## 2026-11-15 -- RT tier (agent sss): the hybrid is implemented as the optional RT random walk; the LUT is generalised over the roughness
+
+The ticket-18 analysis (confinement, step 2 "cannot close the side-lit gap") concerned RT SINGLE scattering added to a screen-space diffusion.  The owner's decision makes the
+whole transport RT (`--subsurface-mode rt-walk`, ticket 17 comment of the same date): the multiple-scattering confinement is carried by the walk through the real mesh, which the
+analysis named as the approach that could close the gap.  Bounds as fixed here: side-lit = the ticket-17 bound on the same fixtures (met: 0.0635 / 0.1708 vs 0.10 / 0.25), back-lit within
+2x (met: 0.0919 / 0.2288 vs 0.20 / 0.50).
+- [x] Bound / back-lit bound: met on the declared RT mode (the diffusion tier keeps its measured gap, marked in ticket 17).
+- [x] Timebox / fallback: the fallback (screen-space diffusion) is the default and the automatic fallback without `--rt on` (logged, in the report, asserted by a runner key).
+- [~] Cost per subsurface pixel: structural only here (6 ms at 4 walks, 67-75 ms at 64 walks per frame for the 1280x720 fixtures under load: not a claim); quiet-machine A/B in ticket 17.
+- [x] Archive, scenes without subsurface unchanged: sss-1.json, sss-2.json; exactness PFMs identical, visual_check 0 px.
+
+LUT over the roughness (boundary-aware single-scatter albedo, valid only at 0.35 before): `f15_subsurface_reference.py albedo-curves` measured the observed-albedo curves of
+roughness 0.15 / 0.25 / 0.5 / 0.7 at g 0 and 0.3 (tools/f15_subsurface_albedo_curves.json, Mitsuba 3.9.1, 64 spp per half, 100-mfp sphere; the plateaus reproduce the independent
+7-point A_max table of the first measurement: 0.980 / 0.9485 / 0.8766 / 0.7174 / 0.5034 at g 0); `tools/f15_subsurface_lut.py` inverts the ten curves into the 5 x 2 x 65 table
+(`renderer/subsurface_walk_table.h`, generated, staleness test); the walk interpolates linearly in roughness and g, clamped to 0.15..0.7 and 0..0.3 (declared).  Evidence:
+`subsurface-volumetric-rough@rt-walk` (roughness {0.25, 0.5, 0.7}, side-lit, Mitsuba 8192 spp per grey render, engine 256 walks x 96 frames): worst gated piece (roughness <= 0.5,
+declared before measuring) mean 0.0645 / p95 0.1756; roughness 0.5 pieces 0.5-1.9 %, the reported roughness 0.7 pieces 0.5-1.1 %; controls subsurface-off, diffusion-off, walk-lights-off FAIL.
+The roughness 0.15 knot has no fixture (its Mitsuba reference is the noisiest case, alpha 0.0225); it is covered by its curve and the table test only.  An intermediate capture at
+2048 spp / 64 walks read 0.1275 / 0.3365: reference residual noise of its own 7.5-8.8 % and the engine's, both reduced by sampling, the bound untouched.
+Colours above the largest albedo the boundary lets through (A_max) saturate (alpha = 1) in the engine exactly as in the reference (both read the same plateau): the observed albedo
+is then below the requested colour (declared).
