@@ -166,7 +166,7 @@ inline float3 giShadowTransmittance(float3 point,float3 geometricNormal,float3 w
     GPURtRay ray{}; ray.ox=origin.x;ray.oy=origin.y;ray.oz=origin.z;ray.dx=wi.x;ray.dy=wi.y;ray.dz=wi.z;
     ray.tmax=max(0.0f,distance-length(origin-point)-1e-5f);ray.mask=RT_MASK_SHADOW;ray.type=RT_PROBE_SHADOW_TRANSMITTED;
     RtPayload payload{};
-    return rtTrace(ray,as,ift,instances,p.slotCount,payload).hit==0u?rtShadowTransmittance(payload):float3(0);
+    return rtTrace(ray,as,ift,instances,p.slotCount,payload).hit==0u?rtShadowTransmittance(payload,ray.tmax):float3(0);
 }
 // Secondary diffuse radiance. Area integrals include both emitter cosine and
 // the 1/(selection-PMF * area-PDF). Emissive hit contributes Le directly once.

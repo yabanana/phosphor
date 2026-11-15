@@ -2490,3 +2490,43 @@ unchanged (316 / 7, 369 / 19 at 720p with `--debug-lighting 4`).
 - absolute GPU p95 15.33-15.43 ms, 0 GPU allocations, archive 137 hits / 0 misses, 0 render-thread compiles.
 **Decision:** adopted (measured benefit in every replica, identical images); the F15 band is met under option A and also against the plain ticket-03
 baseline.  Not done: the lobe kernels of feature scenes without glass still trace with the full payload (a candidate, no measured need).
+
+## 2026-11-15 — F15 closure (transport): cost of transmission in `Local clustered RT shading` (chess back-light), spike
+
+**Question (owner, "Ottimizzarlo in F15").** Transmission costs +10.67 ms frame p50 / +9.18 ms in `Local clustered RT shading` (`light_cluster_shade_rt`, up to 128 shadow rays per pixel,
+124-byte `RtPayload`, generic intersection function).  Project method: prove the bottleneck, simple baseline, one or two timeboxed experiments, adopt only a measured benefit.
+
+**(a) Bottleneck, proven.**
+- Arm A (`transmission=0`) has NO transmissive feature at all: `material_description.cpp` reports the Transmission feature only for `factor > 0`, so the pawn tops are ordinary
+  hardware-opaque instances (`rt_write_instances`: Opaque option); arm B makes them non-opaque.  Both arms trace with the SAME kernel (`light_cluster_shade_rt` links
+  `rt_alpha_generic` and the 124-byte payload in both: `lighting::kernel(name, rt != nullptr)`), so the payload size is NOT what separates A from B.
+- Counted in-kernel (throw-away instrumentation, not committed: per-pixel counters reduced by SIMD-group into the DI error buffer, `--debug-lighting 1`, 1280x720, per frame):
+  rays 35.13 M (B) vs 35.66 M (A); rays that invoked the intersection function 2.62 M = 7.5 % of the rays (A: 0); invocations 5.37 M (2.05 per crossing ray: entry and exit face of
+  a pawn top); invocations = distinct (multiplicity 1.000 again, now on 5.4 M samples); valid pixels 457 157 in both arms.  Every `alphaTests` increment is a glass invocation (opaque
+  instances never reach the function).
+- So +9.2 ms is paid by 2.6 M rays (about 3.5 ns of GPU time each against 0.74 ns for the average ray): a ray that used to end at the first hit on the opaque pawn top now
+  (1) leaves the fixed-function traversal twice for the shader core (the intersection function) and (2) continues to the emitter instead of ending.
+- Cost probe (`GPURtParams::transmittanceFlags` bit 2, throw-away: the function returns right after counting, T = 1): the body of the function (3 vertex fetches via the index buffer,
+  the metallic texture sample, Fresnel, logs, the duplicate scan) is roughly 4-6 of the 9-10 ms, the round trip and the longer ray the rest (indicative, see noise below).  Bit 3 (no duplicate
+  scan, no list write): -0.0..-1.3 ms, inside the noise: the 8-entry scan is cheap.
+- A first instrumented build that kept the counters inside the kernel made the pass 109 ms (against 39): the kernel is very sensitive to anything that keeps payload fields alive after
+  the trace.  The numbers above come from the counting build; the timing probes from a build WITHOUT the counters.
+
+**(b) Baseline.** The tip 3ef8f41 binary (`build/base`): A/B/A of `t0` (factor 0) and `t1` (factor 1) on the chess back-light rig, `tools/f15_costs.py` command line (256 frames after 64,
+`--gpu-timing-serial --no-vsync`), `Local clustered RT shading` p50: t0 30.26 / 30.39 / 30.51 ms, t1 39.69 / 40.52 / 41.54 / 42.84 ms.
+
+**(c) Experiments (timeboxed, one build each, same binary text except the constant).**
+1. Dedup list 8 -> 4 -> 1 entries (payload 136 -> 104 -> 80 bytes, open-sigma field included), the only way to shrink the payload by 64 of its bytes:
+   t0 cluster p50 (2 replicas, load 7-27): base 30.36 / 30.51, list 8 30.14-31.6, list 4 30.26 / 30.14, list 1 29.26 / 28.84.  t1: list 8 38.9 / 46.1, list 4 38.0 / 41.9, list 1 40.7 / 40.1,
+   base 41.5 / 42.8: the glass arm is bimodal by 4-7 ms between identical runs here (GPU clocks while other agents' jobs run), so NO ranking of the variants is possible on t1.  The only
+   consistent signal is the payload size on the glass-free arm (-1.0 to -1.5 ms, 3-5 %, for the 1-entry list).
+2. Per-material precomputed transmittance record and "skip rays": not built; the probe says the body is at most about half of the cost and its dominant part is the dependent
+   index -> vertex loads (the geometric normal), which no record can replace; skipping rays changes the images.
+
+**Decision.** NO optimisation adopted.  A 1-entry (or 4-entry) list would weaken the duplicate guarantee (Apple9 evidence is pending, HARDWARE_VALIDATION) for a gain that is not measurable on
+the glass arm in this window; the intrinsic price of glass here is the round trip of 5.4 M intersection-function invocations.  Kept: the 8-entry list.  Removed the dead `noDedup` payload word (4 bytes).
+The closure's payload growth (open sigma, +12 bytes) costs +0.6..1.2 ms on the glass-free arm in this window (t0 cluster x1 31.6 / 31.0 against 30.4 / 30.5) and the removal of `noDedup`
+recovers 4 of the 12 bytes; the orchestrator must confirm on a quiet window (commands below).  Open candidates if the glass cost must come down: a separate lean payload entry for the DI kernels
+(archive update for every kernel moved), `accept_any_intersection` + hardware culling of the exit faces with an analytic thickness (changes images), a per-light "may cross glass" bit.
+**Quiet-window A/B commands** (each variant needs the binary's `shaders/` beside it): `python3 -I tools/f15_costs.py run --binary <phosphor> --only t1-transmission-chess-backlight --out DIR`
+for base 3ef8f41 and the closure binary (A/B/A, 3 replicas, one pair per lock acquisition).

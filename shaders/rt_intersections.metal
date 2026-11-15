@@ -61,6 +61,9 @@ inline void rtAccumulateTransmittance(uint primitive, uint slot, float2 bary, fl
         e1.attenuationColor[0], e1.attenuationColor[1], e1.attenuationColor[2], e1.attenuationDistance, distance);
     const float ln0 = ln.r, ln1 = ln.g, ln2 = ln.b;
     payload.lnTransmittance[0] += ln0; payload.lnTransmittance[1] += ln1; payload.lnTransmittance[2] += ln2;
+    const TransmissionShadowOpen open = transmissionShadowSurfaceOpen(entry, solid, e1.attenuationColor[0], e1.attenuationColor[1], e1.attenuationColor[2],
+                                                                      e1.attenuationDistance);
+    payload.openSigma[0] += open.r; payload.openSigma[1] += open.g; payload.openSigma[2] += open.b;
 }
 
 // The alpha-masked (alphaCutoff > 0) test shared by both linked entries.
@@ -150,6 +153,16 @@ bool rt_alpha_generic(uint primitive [[primitive_id]], uint slot [[user_instance
         // Must stay zero: opaque instances have the hardware Opaque option (a transmissive instance is the declared exception).
         if (!transmissive) ++payload.opaqueAlphaTests;
         return true;
+    }
+    // F15.1 (ticket 14 closure): a transmissive AND alpha-masked material.  A texel below the cutoff does not exist for the transmittance ray
+    // (rejected, the ray continues untouched); a texel at or above it is a glass surface like any other (its transmittance accumulates and the
+    // ray continues): it is NOT an opaque blocker.  Every other ray type keeps the accepted-hit rule.
+    if (transmissive && payload.type == RT_PROBE_SHADOW_TRANSMITTED) {
+        if (rtAlphaMaskedTest(primitive, bary, distance, payload, m, instance, meshes, textures, vertices, indices, extensions, materials, params.vertexColors)) {
+            rtAccumulateTransmittance(primitive, slot, bary, distance, payload, m, instance, meshes[instance.meshIndex], textures, vertices, indices,
+                                      extensions, params.transmittanceFlags);
+        }
+        return false;
     }
     return rtAlphaMaskedTest(primitive, bary, distance, payload, m, instance, meshes, textures, vertices, indices, extensions, materials, params.vertexColors);
 }

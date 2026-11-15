@@ -383,6 +383,35 @@ TEST_CASE("CSM transmittance map: the entry factor and tint apply once; a thin-w
     CHECK(std::exp(metal.r) < 1e-29);
 }
 
+// F15.1 (ticket 14 closure): a segment that ENDS inside a closed volume.  The signed sum alone keeps +sigma_t t_entry (the exit term is missing);
+// the open sigma restores the medium length endDistance - t_entry.
+TEST_CASE("RT transmittance: a segment that ends inside a closed volume is attenuated over the open length") {
+    const float ior = 1.5f, cosine = 0.8f, attenuation[3] = {0.6f, 0.8f, 0.95f}, attenuationDistance = 0.3f;
+    const float tEntry = 0.4f, endDistance = 0.65f;
+    const TransmissionShadowLn entry = transmissionShadowSurfaceLn(cosine, true, true, ior, 1.0f, 1.0f, 1.0f, 1.0f,
+                                                                   attenuation[0], attenuation[1], attenuation[2], attenuationDistance, tEntry);
+    const TransmissionShadowOpen open = transmissionShadowSurfaceOpen(true, true, attenuation[0], attenuation[1], attenuation[2], attenuationDistance);
+    const double fresnel = double(transmissionShadowLnPass(cosine, ior));
+    const float ln[3] = {entry.r, entry.g, entry.b}, o[3] = {open.r, open.g, open.b};
+    for (int k = 0; k < 3; ++k) {
+        const double sigma = double(transmissionShadowSigma(attenuation[k], attenuationDistance));
+        CHECK(double(o[k]) == doctest::Approx(sigma).epsilon(1e-6));
+        // Without the correction the entry term is positive (the pre-closure clamp T <= 1 hid the medium).
+        CHECK(double(ln[k]) == doctest::Approx(fresnel + sigma * tEntry).epsilon(1e-4));
+        const double corrected = double(ln[k]) + double(transmissionShadowOpenLn(o[k], endDistance));
+        CHECK(corrected == doctest::Approx(fresnel - sigma * (endDistance - tEntry)).epsilon(1e-4));
+    }
+    // A closed pair cancels (net open 0: no correction); a segment that STARTS inside a medium has a negative net (nothing to add).
+    const TransmissionShadowOpen exit = transmissionShadowSurfaceOpen(false, true, attenuation[0], attenuation[1], attenuation[2], attenuationDistance);
+    CHECK(open.r + exit.r == 0.0f);
+    CHECK(transmissionShadowOpenLn(exit.r, endDistance) == 0.0f);
+    // A thin-walled or non-solid surface opens nothing; no attenuation (distance infinite) opens nothing.
+    const TransmissionShadowOpen thin = transmissionShadowSurfaceOpen(true, false, attenuation[0], attenuation[1], attenuation[2], attenuationDistance);
+    CHECK((thin.r == 0.0f && thin.g == 0.0f && thin.b == 0.0f));
+    const TransmissionShadowOpen clear = transmissionShadowSurfaceOpen(true, true, attenuation[0], attenuation[1], attenuation[2], 1.0e39f);
+    CHECK((clear.r == 0.0f && clear.g == 0.0f && clear.b == 0.0f));
+}
+
 TEST_CASE("CSM transmittance map: the divisor is 1, 2 or 4 and keeps a usable map") {
     ShadowSettings settings;
     for (u32 n : {1u, 2u, 4u}) { settings.transmittanceDivisor = n; CHECK_NOTHROW(validateShadowSettings(settings)); }

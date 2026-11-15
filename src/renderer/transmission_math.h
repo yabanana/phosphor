@@ -185,4 +185,26 @@ PHOSPHOR_LOBE_FN TransmissionShadowLn transmissionShadowSurfaceLn(float cosine, 
     return r;
 }
 
+/// F15.1 (ticket 14 closure): the OPEN medium of a shadow segment.  The signed sum of transmissionShadowSurfaceLn is exact when every medium
+/// entered is left again before the endpoint.  A segment that ENDS inside a closed volume (a light inside a glass cube) has the entry term
+/// +sigma_t t_entry without its exit: the missing medium length is (endDistance - t_entry), so the ln transmittance needs -sigma_t endDistance
+/// for every medium still open.  The payload accumulates per channel the NET open sigma (+sigma_t at a solid's entry, -sigma_t at its exit, 0 for
+/// a thin-walled or non-solid surface); only a positive net is an open medium (a negative one is a segment that STARTS inside a medium: its
+/// exit term -sigma_t t_exit is already the medium length).  A volume mesh is declared closed (KHR_materials_volume).
+struct TransmissionShadowOpen { float r, g, b; };
+PHOSPHOR_LOBE_FN TransmissionShadowOpen transmissionShadowSurfaceOpen(bool entry, bool solid, float attenuationR, float attenuationG,
+                                                                      float attenuationB, float attenuationDistance) {
+    TransmissionShadowOpen o; o.r = o.g = o.b = 0.0f;
+    if (!solid) return o;
+    const float sign = entry ? 1.0f : -1.0f;
+    o.r = sign * transmissionShadowSigma(attenuationR, attenuationDistance);
+    o.g = sign * transmissionShadowSigma(attenuationG, attenuationDistance);
+    o.b = sign * transmissionShadowSigma(attenuationB, attenuationDistance);
+    return o;
+}
+/// ln correction of one channel for the net open sigma accumulated over a segment of length `endDistance`: -endDistance max(open, 0).
+PHOSPHOR_LOBE_FN float transmissionShadowOpenLn(float open, float endDistance) {
+    return open > 0.0f && endDistance > 0.0f ? -open * endDistance : 0.0f;
+}
+
 } // namespace phosphor

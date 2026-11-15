@@ -36,5 +36,5 @@ inline float3 diEndpointTransmittance(GPUDISurface surface, DISample sample,
     ray.mask = RT_MASK_SHADOW; ray.type = RT_PROBE_SHADOW_TRANSMITTED; ray.coneWidth = 0;
     Payload payload{};
     const GPURtHit hit = rtTrace(ray, tlas, ift, instances, slotCount, payload);
-    return (hit.hit == 0u && hit.t != -2.0f) ? rtShadowTransmittance(payload) : float3(0);
+    return (hit.hit == 0u && hit.t != -2.0f) ? rtShadowTransmittance(payload, ray.tmax) : float3(0);
 }

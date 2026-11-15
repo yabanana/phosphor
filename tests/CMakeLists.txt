@@ -171,6 +171,8 @@ if(PYTHON3_EXECUTABLE)
         COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_f13_reference_mirror.py)
     add_test(NAME f15_reflection_bounce_check_python
         COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_f15_reflection_bounce_check.py)
+    add_test(NAME f15_transport_check_python
+        COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_f15_transport_check.py)
     add_test(NAME f15_residue_check_python
         COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_f15_residue_check.py)
     # F15.1 (ticket 22): the reference maths and the fixture generation of the per-slot texture transform check (CPU only).

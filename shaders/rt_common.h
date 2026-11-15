@@ -33,8 +33,8 @@ struct RtPayload {
     uint alphaTests;
     uint opaqueAlphaTests;
     float lnTransmittance[3];
+    float openSigma[3];                 // net open sigma_t of the media entered and not left (ticket 14 closure: a segment that ends inside a volume)
     uint listCount;
-    uint noDedup;                       // copy of GPURtParams::transmittanceFlags & RT_TRANSMITTANCE_NO_DEDUP, set by the IF itself
     uint ifInvocations, ifDistinct, listOverflows;
     uint2 listed[kRtTransmitList];      // (slot, primitive)
     float direction[3];                 // the world ray direction (set by rtTrace for the intersection function)
@@ -53,7 +53,7 @@ struct RtPayloadLite {
 };
 inline void rtSetPayloadDirection(thread RtPayload& payload, float3 d) { payload.direction[0] = d.x; payload.direction[1] = d.y; payload.direction[2] = d.z; }
 inline void rtSetPayloadDirection(thread RtPayloadLite&, float3) {}
-inline float3 rtShadowTransmittance(thread const RtPayloadLite&) { return float3(1.0f); }
+inline float3 rtShadowTransmittance(thread const RtPayloadLite&, float = 0.0f) { return float3(1.0f); }
 
 inline float3 rtPosition(const device GPUVertex& v) { return float3(v.px, v.py, v.pz); }
 inline float3 rtWorldPoint(const device GPUInstance& i, float3 p) {
@@ -141,8 +141,12 @@ inline GPURtHit rtTrace(const GPURtRay r, instance_acceleration_structure as,
 
 // F15.1 (ticket 14): the RGB transmittance accumulated along a RT_PROBE_SHADOW_TRANSMITTED ray (1 for a ray that crossed no transmissive
 // surface; the caller multiplies it only when the ray ended without an opaque hit).
-inline float3 rtShadowTransmittance(thread const RtPayload& payload) {
-    const float3 ln = min(float3(payload.lnTransmittance[0], payload.lnTransmittance[1], payload.lnTransmittance[2]), 0.0f);
+// `endDistance` = the length of the segment (a local endpoint): a medium entered and not left before it is attenuated over the rest of the
+// segment (transmissionShadowOpenLn).  0 for the sun, whose ray never ends inside a medium (no open correction, the pre-closure behaviour).
+inline float3 rtShadowTransmittance(thread const RtPayload& payload, float endDistance = 0.0f) {
+    const float3 open(transmissionShadowOpenLn(payload.openSigma[0], endDistance), transmissionShadowOpenLn(payload.openSigma[1], endDistance),
+                      transmissionShadowOpenLn(payload.openSigma[2], endDistance));
+    const float3 ln = min(float3(payload.lnTransmittance[0], payload.lnTransmittance[1], payload.lnTransmittance[2]) + open, 0.0f);
     return exp(ln);
 }
 

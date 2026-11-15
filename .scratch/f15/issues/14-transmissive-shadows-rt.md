@@ -179,3 +179,28 @@ alpha-masked is treated as an opaque-masked caster (declared); the dedup list is
 - 6 archive/hitch/O7: MET (no new descriptor; later +4 compute descriptors with the payload follow-up).
 Stray checkbox line removed: clustered DI visibility through glass is CLOSED (clustered equals gated ReSTIR to 1.5e-7, 245 829 px); GI shadow rays and reflection secondary lighting through glass remain without a numeric fixture (declared).
 Open (declared in the ticket, not in 24): AO, fog, reconnection/sky rays treat glass as opaque; interior of a closed volume at the light end clamped T <= 1; transmissive + alpha-masked = opaque-masked caster; dedup list 8 surfaces.
+
+2026-11-15 — CLOSURE (agent "transport", branch f15c-transport-2): interior of a closed volume, transmissive + alpha-masked caster, dedup decision.
+
+Fixtures (generated glTF, corpus rig, linear HDR PFM averaged over 16 frames, `tools/f15_transport_check.py {volume|masked|thin-backlit}`, unit tests `tools/test_f15_transport_check.py`
+in ctest as `f15_transport_check_python`; each fixture has a control binary = the tip 3ef8f41 build that must fail the gate, and model controls that must fail on the fixed build):
+- `volume` (the "ends inside a medium" clamp): wall, closed absorbing glass cube (ior 1.5, attenuation (0.6, 0.8, 0.95) at 0.3 m, solid), an emissive quad INSIDE the cube (ReSTIR DI, RT
+  visibility).  Arms A = no attenuation, B = attenuation, C = emitter off; D = capture - C cancels sun and environment, B/A cancels the entry Fresnel factor.  Expected per ROI pixel (10 218
+  pixels per ROI, left and right of the cube): T = mean over a 5x5 grid of the emitter of exp(-sigma_t |L_s - E_s|), weighted by the measured D_A.  Fixed build (x1, probes included): B/A =
+  0.6446 / 0.8254 / 0.9570 against 0.6429 / 0.8243 / 0.9565 expected (relative errors 0.26 / 0.13 / 0.05 %, bound 5 %); left ROI the same within 0.2 %.  Tip build (control binary): B/A = 1.0418 in
+  every channel, i.e. 1 / (1 - F): the clamp T <= 1 lost the open medium (fails the gate by 62 / 26 / 9 %).  Model control `clamp-model` (expect B/A = 1) fails on the fixed build by 35.5 / 17.5 / 4.3 %.
+- `masked` (transmissive + alpha-masked caster): thin-walled glass pane (ior 1, tint (0.9, 0.5, 0.3)) with an RGBA base-colour texture, alpha 0 on the left half and 1 on the right, alphaMode MASK
+  cutoff 0.5, sun with RT shadows; arm O = the same pane opaque, T_k = (M_k - O_k) / (lit - O_k) cancels the ambient.  Fixed build (final binary): left (texel below the cutoff) T = 0.9996 (expect 1),
+  right (above the cutoff) T = 0.8973 / 0.4985 / 0.2990 (expect the tint 0.9 / 0.5 / 0.3: 0.3 % error each).  Tip build: left 0.9996, right 0.000 (the accepted masked texel was an opaque
+  blocker): fails.  Model controls `opaque-model` and `ignored-model` fail on the fixed build (right ROI).
+Engine: `rt_alpha_generic` sends a transmissive material with `alphaCutoff > 0` hit by a `RT_PROBE_SHADOW_TRANSMITTED` ray through the mask test: a texel below the cutoff is rejected, a texel at or
+above it accumulates its transmittance and the ray continues (other ray types keep the accepted-hit rule).  The payload gains `openSigma[3]` (+sigma_t at a solid's entry, -sigma_t at its exit,
+`transmissionShadowSurfaceOpen`); `rtShadowTransmittance(payload, endDistance)` adds -endDistance x max(net open, 0) per channel to the ln sum before the T <= 1 clamp: a segment that ends inside a
+medium is attenuated over the rest of its length; a segment that starts inside one needs nothing.  `diEndpointTransmittance` (ReSTIR, clustered DI, reflection secondary lighting) and
+`giShadowTransmittance` pass the segment length; the SUN does not (its ray never ends inside a medium: unchanged behaviour).  Declared: a volume mesh is closed (KHR_materials_volume); an OPEN mesh with
+`thickness > 0` used as a local-light caster now attenuates over the whole segment instead of being clamped; nested media with different sigma use the net sum.  Unit test
+`RT transmittance: a segment that ends inside a closed volume...` (tests/test_shadows.cpp).
+Dedup list: KEPT at 8 (spike in docs/opt-log.md: no measurable benefit of a shorter list on the glass arm, Apple9 evidence pending); the dead `noDedup` word was removed (payload 136 -> 132 bytes with open sigma).
+Identity: the five F13 exactness captures (sponza-d2, cornell-restir, cornell-clustered-ssr, manylights-restir, grid-sky) are bit-identical (`cmp` of the PFMs) to `build/litefix/exact-new` with the final binary.
+Open / for the orchestrator: quiet-window cost of the +8 payload bytes on the glass arm and on feature scenes with the full payload (A/B commands in the opt-log entry); `visual_check` and archive checks not run by me
+(no descriptor changed, no archive update needed).
