@@ -394,6 +394,33 @@ struct ReflectionPasses::Impl {
             // Scratch storage is reused, but each dispatch owns its argument
             // table and output slice. Aggregate record versions preserve all
             // earlier slices and prevent the graph culling prior proposals.
+            if(!single){
+                // F15 closure (ticket 20): ONE graph pass with N dispatches instead of N passes fused in one compute encoder (each of which set the same pipeline again:
+                // 7 "Redundant call to setComputePipelineState" per frame at 8 samples).  The scratch textures are reused by every sample, so a Dispatch->Dispatch barrier
+                // (device visibility) between the dispatches replaces the barriers the graph used to insert between the passes; each sample keeps its own argument table,
+                // seed and output slice, so the records are bit-identical.
+                for(u32 sample=0;sample<options.reflectionSamples;++sample){auto sampleParams=params;sampleParams.seed=options.lightingSeed+sample*0x9e3779b9u;sampleAddress[sample]=lighting::upload(c,sampleParams);}
+                graph.addPass("F13 reflection samples",PassType::Compute,[this,&scratch,&scratchDistance](PassBuilder& b){
+                    commonReads(b);readGuide(b);b.read(base,Usage::ShaderRead,StageDispatch);b.read(depth,Usage::ShaderRead,StageDispatch);b.read(filteredRef,Usage::ShaderRead,StageDispatch);b.read(probeRef,Usage::ShaderRead,StageDispatch);
+                    if(rtReflection)rt->declareTraceReads(b);
+                    sampleRef=b.write(sampleRef,Usage::ShaderWrite,StageDispatch);
+                    scratch=b.createTexture("F13 raw sample scratch",{Format::RGBA32Float,frame.width,frame.height});scratchDistance=b.createTexture("F13 sample distance scratch",{Format::R32Float,frame.width,frame.height});
+                    scratch=b.write(scratch,Usage::ShaderWrite,StageDispatch);scratchDistance=b.write(scratchDistance,Usage::ShaderWrite,StageDispatch);
+                    for(u32 sample=0;sample<options.reflectionSamples;++sample){sampleScratch[sample]=scratch;sampleDistance[sample]=scratchDistance;}
+                    b.setProfileShaders(options.reflections==ReflectionMode::Probes?"reflection_probe_only":rtReflection?"reflection_rt":"reflection_ssr");
+                },[this](PassContext& ctx){
+                    auto* e=static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder());
+                    auto* state=p.compute(transportServed);const u32 count=frame.width*frame.height;if(!state||!count)throw std::logic_error("Lighting dispatch missing pipeline/work");
+                    e->setComputePipelineState(state); // once: the N dispatches share it
+                    for(u32 sample=0;sample<options.reflectionSamples;++sample){auto* t=slots[frame.slot].sampleTables[sample];commonTable(t,ctx,sampleAddress[sample]);t->setAddress(guideAddress(ctx),20);
+                        {const auto extensions=scene.materialExtensionsAddress();t->setAddress(extensions?extensions:dummyBuffer->gpuAddress(),21);}
+                        t->setAddress(slots[frame.slot].samples->gpuAddress()+u64(sample)*pixels*sizeof(GPUSpecularSample),17);t->setAddress(slots[frame.slot].errors->gpuAddress(),19);
+                        if(rtReflection)reflectionConsumer->bind(t,2,3);texture(t,ctx,base,0);texture(t,ctx,depth,1);texture(t,ctx,filteredRef,2);texture(t,ctx,sampleScratch[sample],5);texture(t,ctx,sampleDistance[sample],6);
+                        if(sample)e->barrierAfterEncoderStages(MTL::StageDispatch,MTL::StageDispatch,MTL4::VisibilityOptionDevice);
+                        e->setArgumentTable(t);e->dispatchThreads(MTL::Size::Make(count,1,1),MTL::Size::Make(std::min<u32>(8,count),1,1));
+                    }
+                });
+            } else
             for(u32 sample=0;sample<options.reflectionSamples;++sample){auto sampleParams=params;sampleParams.seed=options.lightingSeed+sample*0x9e3779b9u;const auto address=lighting::upload(c,sampleParams);
                 // Updated in prepareFrame for cached graph callbacks below.
                 sampleAddress[sample]=address;

@@ -169,3 +169,9 @@ tools/f15_chess_check.py: 220 ms plain, 1126 ms validated with `--debug-lighting
 exit 1, 0 validation messages).  A longer wait would put multi-second command buffers in front of the WindowServer watchdog (CLAUDE.md GPU safety), so the wait stays.  The rig is validated at 640x360 with the exact flags:
 `tools/f15_chess_validate.py` (12 frames, `--debug-lighting 1`, archive off, no accumulation): transmission 0 and 1 both exit 0, 0 validation messages, 0 timeouts, 1.03 s (transmission 0) / 1.02 s (transmission 1) per frame (1.13 / 1.21 s in the diagnostic run); the 640x360 / 8-sample configuration that
 the first record listed as timing out did NOT time out here (frame 1.1 s, far below the 5 s wait); the earlier timeout at that size is not reproduced (machine contention at the time is a guess, not verified).
+
+### Follow-up (2026-11-15, orchestrator review): setComputePipelineState notices fixed
+The N reflection sample passes (`--reflection-samples` > 1) are now ONE graph pass "F13 reflection samples" with N dispatches that set the pipeline once, a Dispatch->Dispatch device barrier between them (they reuse the scratch
+textures; each sample keeps its table, seed and output slice).  Evidence: tools/f15_chess_validate.py (any `Redundant call to set...` counts) on both back-light rigs under API + shader validation: 0 notices, 0 validation messages (was 84);
+subsurface-volumetric-sun with 8 samples under the API layer: 0 notices; bit-identical images: cornell RT-reflection capture and an SSR grid capture at `--reflection-samples 8` `cmp` identical to the orchestrator tree's binary, the 5 F13 exactness PFMs `cmp`
+identical, visual_check 8/8 0 px.  No pipeline descriptor changed (no archive update).  Per-pass timing units: the eight "F13 reflection sample k" units became one.

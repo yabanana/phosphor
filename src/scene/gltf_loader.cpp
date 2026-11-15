@@ -263,6 +263,12 @@ void GltfLoader::processNode(const tinygltf::Model& model,
             const auto converted = convertPunctualLight(model.lights[static_cast<size_t>(node.light)], photometricToEngine_);
             for (const std::string& w : converted.warnings) LOG_WARN("glTF node '%s': %s", node.name.c_str(), w.c_str());
             if (converted.valid) {
+                if (converted.light.type == LightType::Spot && !spotFalloffNoted_) {
+                    spotFalloffNoted_ = true;
+                    const FeatureSupportEntry& e = currentSupportTable().punctualLights;
+                    LOG_INFO("KHR_lights_punctual: %s (%s): spot cone falloff is smoothstep(cosOuter, cosInner), the informative formula of the extension is t^2",
+                             supportLevelName(e.level), e.approximation);
+                }
                 const EntityID entity = ecs_.createEntity();
                 createdEntities_.push_back(entity);
                 TransformComponent transform{};

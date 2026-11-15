@@ -391,7 +391,7 @@ bool isExtensionRendered(const std::string& name, const MaterialSupportTable& ta
     if (name == EXT_EMISSIVE) return rendered(table.emissiveStrength);
     if (name == EXT_TEXTURE_TRANSFORM) return rendered(table.textureTransformUniform);
     if (name == EXT_UNLIT) return rendered(table.unlit);
-    if (name == EXT_LIGHTS_PUNCTUAL) return true; // imported by GltfLoader as ECS LightComponents
+    if (name == EXT_LIGHTS_PUNCTUAL) return rendered(table.punctualLights); // imported by GltfLoader as ECS LightComponents
     return false;
 }
 

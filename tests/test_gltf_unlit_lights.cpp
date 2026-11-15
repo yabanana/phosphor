@@ -454,3 +454,10 @@ TEST_CASE("tangent frames: repairTangentFrames unit behaviour") {
     CHECK(g.tangents[2] == glm::vec4(1, 0, 0, 1));
     CHECK(repairTangentFrames(g) == 0); // idempotent
 }
+
+TEST_CASE("lights: the spot falloff deviation from the informative t^2 is declared in the support table") {
+    const MaterialSupportTable& t = currentSupportTable();
+    CHECK(t.punctualLights.level == SupportLevel::Approximated);
+    CHECK(std::string(t.punctualLights.approximation) == "spot_falloff_smoothstep_not_informative_t2");
+    CHECK(isExtensionRendered("KHR_lights_punctual", t));
+}

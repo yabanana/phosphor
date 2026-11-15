@@ -72,6 +72,7 @@ private:
     std::unordered_map<u64, u32>        textureCache_;
     bool                                importLights_ = true;
     u32                                 importedLights_ = 0;
+    bool                                spotFalloffNoted_ = false;
     float                               photometricToEngine_ = 1.0f;
 };
 

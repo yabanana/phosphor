@@ -9,7 +9,7 @@ is the wait giving up on a slow frame, not a validation message, and a longer wa
 WindowServer watchdog (CLAUDE.md GPU safety: command buffers far below 1 s).  The rig is therefore validated at 640x360, 12 frames, without the
 112-frame accumulation (the exact flags of tools/f15_chess_check.py otherwise, `--debug-lighting 1` included, `--no-pipeline-archive`: Metal rejects archive
 lookups under shader validation).  PASS: every capture exits 0 with no GPU timeout, no `Shader Validation` / `failed assertion` / `Validation Error`
-line and no `Redundant call to setDepthStencilState / setViewport` notice.
+line and no `Redundant call to set...` notice of any kind.
 
   python3 "$H/gpulock.py" python3 -I tools/f15_chess_validate.py run OUTDIR [BINARY] [--gltf FILE] [--rig bl-t100 --rig bl-t000 ...]
 """
@@ -29,7 +29,7 @@ import f15_chess_check as cc  # noqa: E402
 DEFAULT_GLTF = pathlib.Path("/Users/danielsan/Documents/phosphor/.claude/worktrees/f15-plan-c38b51/build/khronos-corpus/ABeautifulGame/glTF/ABeautifulGame.gltf")
 VALIDATION_ENV = {"MTL_DEBUG_LAYER": "1", "MTL_SHADER_VALIDATION": "1", "MTL_DEBUG_LAYER_WARNING_MODE": "nslog"}
 BAD = re.compile(r"Shader Validation|failed assertion|Validation Error|GPU timeout")
-REDUNDANT_STATE = re.compile(r"Redundant call to set(DepthStencilState|Viewport)")
+REDUNDANT_STATE = re.compile(r"Redundant call to set")
 RESOLUTION, FRAMES = "640x360", 12
 
 
