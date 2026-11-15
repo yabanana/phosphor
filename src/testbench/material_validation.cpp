@@ -19,7 +19,7 @@
 namespace phosphor {
 namespace {
 // The names are mirrored by tools/f15_check.py SCENARIOS (tests/test_material_validation.cpp compares both).
-constexpr std::array<std::string_view, 89> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
+constexpr std::array<std::string_view, 90> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
                                                       "furnace-base",   "furnace-resolve",     "roughness-extremes",
                                                       "roughness-extremes-sun", "specular-grid-sun",
                                                       "specular-grid-env-resolve", "specular-grid-point", "specular-grid-env", "furnace-specular",
@@ -36,7 +36,7 @@ constexpr std::array<std::string_view, 89> kScenarios{"base-grid-sun",  "base-gr
                                                       "subsurface-thin-point", "furnace-thin-subsurface",
                                                       "subsurface-volumetric-sun", "subsurface-volumetric-radius",
                                                       "subsurface-volumetric-subpixel", "subsurface-volumetric-subpixel-off",
-                                                      "subsurface-volumetric-backlit",
+                                                      "subsurface-volumetric-backlit", "subsurface-volumetric-rough",
                                                       "combo-coat-sheen-sun", "combo-coat-sheen-env", "combo-aniso-coat-sun",
                                                       "combo-aniso-coat-env", "combo-aniso-sheen-sun", "combo-aniso-sheen-env",
                                                       "combo-specular-sheen-sun", "combo-specular-sheen-env", "combo-irid-coat-sun",
@@ -617,6 +617,12 @@ const std::vector<MaterialScenarioSpec>& specs() {
     static const std::vector<float> subAnisotropy{0.0f};
     // Back-lit thick fixture: the sun BEHIND the spheres (V.L about -0.96), weight 1, radius {0.08, 0.16} m, both materials.  Measured
     // and reported, not gated: screen-space diffusion cannot carry light through a thick volume (a declared limit).
+    // Boundary-roughness fixture (ticket 18, the rt-walk albedo table over the roughness): the side-lit scene at weight {1, 1, 1, 0.5, 0.5} and a
+    // boundary roughness {0.25, 0.5, 0.7, 0.5, 0.7} (alpha_b 0.0625 / 0.25 / 0.49), radius 0.08 m, both materials.  The albedo table
+    // saturates a colour above the largest albedo the boundary lets through (0.948 / 0.717 / 0.503): both sides use the saturated medium.
+    static const std::vector<float> roughRoughness{0.25f, 0.5f, 0.7f, 0.5f, 0.7f};
+    static const std::vector<float> roughWeights{1.0f, 1.0f, 1.0f, 0.5f, 0.5f};
+    static const std::vector<float> roughRadii(5, 0.08f);
     static const std::vector<float> backRoughness(2, 0.35f);
     static const std::vector<float> backWeights(2, 1.0f);
     static const std::vector<float> backRadii{0.08f, 0.16f};
@@ -804,6 +810,10 @@ const std::vector<MaterialScenarioSpec>& specs() {
          .volumetricAnisotropy = subAnisotropy},
         {.name = "subsurface-volumetric-subpixel-off", .roughness = subRoughness, .metallic = subMetallic1, .baseColor = volBase,
          .sun = true, .sunIrradiance = 3.0f, .towardSun = volSun, .environment = 0.0f},
+        // Boundary roughness 0.25 / 0.5 / 0.7 (the rt-walk albedo table over the roughness, ticket 18).
+        {.name = "subsurface-volumetric-rough", .roughness = roughRoughness, .metallic = volMetallic2, .baseColor = volBase, .sun = true,
+         .sunIrradiance = 3.0f, .towardSun = volSun, .environment = 0.0f, .volumetricWeight = roughWeights, .volumetricRadius = roughRadii,
+         .volumetricColor = volColors, .volumetricRadiusScale = volScales, .volumetricAnisotropy = volAnisotropy},
         // Back-lit thick spheres: measured and reported, not gated.
         {.name = "subsurface-volumetric-backlit", .roughness = backRoughness, .metallic = volMetallic2, .baseColor = volBase,
          .sun = true, .sunIrradiance = 3.0f, .towardSun = backSun, .environment = 0.0f, .volumetricWeight = backWeights,

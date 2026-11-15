@@ -198,10 +198,17 @@ def measure_albedo_curve(g, alpha_b, ior, threads, albedos=ALBEDO_GRID, spp=MEAS
     return {"g": g, "alpha_b": alpha_b, "ior": ior, "R_spec": {k: v for k, v in r_spec.items()}, "points": points}
 
 
+ALBEDO_CURVES_PATH = REPO / "tools" / "f15_subsurface_albedo_curves.json"   # ticket 18: more boundary roughnesses (`albedo-curves`)
+
+
 def load_albedo_table():
+    """The measured curves: the fixtures' table plus (when present) the curves of the other roughnesses (ticket 18, the rt-walk LUT)."""
     key = str(ALBEDO_TABLE_PATH)
     if key not in _table_cache:
-        _table_cache[key] = json.loads(ALBEDO_TABLE_PATH.read_text())
+        table = json.loads(ALBEDO_TABLE_PATH.read_text())
+        if ALBEDO_CURVES_PATH.exists():
+            table = {**table, "curves": table["curves"] + json.loads(ALBEDO_CURVES_PATH.read_text())["curves"]}
+        _table_cache[key] = table
     return _table_cache[key]
 
 
@@ -601,7 +608,8 @@ def command_render(args):
                                      "mfp_max": max(b["radius"] * s for s in b["radius_scale"])},
                          diffusion_regime=bool(max(b["radius"] * s for s in b["radius_scale"])
                                                <= DIFFUSION_REGIME_FRACTION * b["thickness"] * (1.0 + 1e-4)),
-                         weight=b["weight"], radius=b["radius"], series=series_label(b), group=f"weight {b['weight']:g}")
+                         weight=b["weight"], radius=b["radius"], series=series_label(b), group=f"weight {b['weight']:g}",
+                         boundary_roughness=float(data["materials"][data["instances"][k]["material"]]["roughness"]))
     report = {"schema": 1, "tool": "tools/f15_subsurface_reference.py", "tool_sha256": sha256_file(__file__),
               "tool_sha256_base": sha256_file(base.__file__), "model": "volumetric subsurface: Mitsuba 3.9.1 volpath random walk",
               "ground_truth": {"version": GROUND_TRUTH_VERSION, "integrator": "volpath", "max_depth": DEFAULT_DEPTH, "rr_depth": RR_DEPTH,
@@ -679,6 +687,30 @@ def command_albedo_table(args):
     return 0
 
 
+def command_albedo_curves(args):
+    """F15.1 (ticket 18): observed-albedo curves for more boundary roughnesses (the engine's rt-walk LUT, tools/f15_subsurface_lut.py).
+    One curve per (roughness, g) is appended to --out after it is measured (resumable: a curve already in the file is skipped)."""
+    out = pathlib.Path(args.out)
+    doc = json.loads(out.read_text()) if out.exists() else {"schema": 2, "tool": "tools/f15_subsurface_reference.py albedo-curves", "mitsuba": "3.9.1",
+                                                           "sigma_t": MEASURE_SIGMA_T, "spp_per_half": args.spp, "halves": 2, "resolution": MEASURE_RES,
+                                                           "seed": MEASURE_SEED, "integrator": {"type": "volpath", "max_depth": DEFAULT_DEPTH, "rr_depth": MEASURE_RR_DEPTH},
+                                                           "definition": load_albedo_table()["definition"], "curves": []}
+    log = lambda m: print(m, flush=True)  # noqa: E731
+    for rough in args.roughness:
+        alpha = float(base.effective_alpha(rough))
+        for g in args.g:
+            if any(abs(c["g"] - g) < 1e-6 and abs(c["alpha_b"] - alpha) < 1e-4 and abs(c["ior"] - BOUNDARY_IOR) < 1e-6 for c in doc["curves"]):
+                continue
+            started = time.time()
+            curve = measure_albedo_curve(g, alpha, BOUNDARY_IOR, args.threads, spp=args.spp, log=log)
+            curve["roughness"] = rough
+            curve["seconds"] = round(time.time() - started, 1)
+            doc["curves"].append(curve)
+            out.write_text(json.dumps(doc, indent=1) + "\n")
+    print(f"wrote {out}")
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -700,6 +732,13 @@ def main(argv=None):
     t.add_argument("--threads", type=int, default=DEFAULT_THREADS)
     t.add_argument("--spp", type=int, default=MEASURE_SPP, help="samples per half image")
     t.set_defaults(function=command_albedo_table)
+    c = sub.add_parser("albedo-curves", help="measure observed-albedo curves for more roughnesses (ticket 18, the rt-walk LUT)")
+    c.add_argument("--out", required=True)
+    c.add_argument("--roughness", type=float, nargs="+", required=True)
+    c.add_argument("--g", type=float, nargs="+", default=[0.0, 0.3])
+    c.add_argument("--threads", type=int, default=DEFAULT_THREADS)
+    c.add_argument("--spp", type=int, default=MEASURE_SPP, help="samples per half image")
+    c.set_defaults(function=command_albedo_curves)
     args = parser.parse_args(argv)
     if getattr(args, "pool", 1) % 2 == 0 or getattr(args, "pool", 1) < 1:
         parser.error("--pool must be odd")

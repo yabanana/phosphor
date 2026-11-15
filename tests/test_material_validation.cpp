@@ -33,7 +33,7 @@ TEST_CASE("F15.3 material scenarios are exactly the nine declared names") {
                       "subsurface-thin-sun", "subsurface-thin-env-resolve", "subsurface-thin-env", "subsurface-thin-point",
                       "furnace-thin-subsurface", "subsurface-volumetric-sun", "subsurface-volumetric-radius",
                       "subsurface-volumetric-subpixel", "subsurface-volumetric-subpixel-off", "subsurface-volumetric-backlit",
-                      "combo-coat-sheen-sun", "combo-coat-sheen-env", "combo-aniso-coat-sun", "combo-aniso-coat-env",
+                      "subsurface-volumetric-rough", "combo-coat-sheen-sun", "combo-coat-sheen-env", "combo-aniso-coat-sun", "combo-aniso-coat-env",
                       "combo-aniso-sheen-sun", "combo-aniso-sheen-env", "combo-specular-sheen-sun", "combo-specular-sheen-env",
                       "combo-irid-coat-sun", "combo-irid-coat-env", "combo-irid-sheen-sun", "combo-irid-sheen-env",
                       "combo-irid-aniso-sun", "combo-irid-aniso-env", "combo-irid-specular-sun", "combo-irid-specular-env",
@@ -1140,6 +1140,14 @@ TEST_CASE("F15.3 volumetric subsurface grids declare weight/radius columns over 
     CHECK(back.towardSun.z < -0.9f);
     CHECK(back.volumetricWeight == std::vector<float>(2, 1.0f));
     CHECK(MaterialValidation{"subsurface-volumetric-backlit"}.getDefaultCamera().position.z == 4.0f);
+    // Ticket 18: the boundary-roughness fixture is the side-lit scene with another roughness per column (the albedo table over the roughness).
+    const auto& rough = MaterialValidation::spec("subsurface-volumetric-rough");
+    CHECK(rough.roughness == std::vector<float>{0.25f, 0.5f, 0.7f, 0.5f, 0.7f});
+    CHECK(rough.volumetricWeight == std::vector<float>{1.0f, 1.0f, 1.0f, 0.5f, 0.5f});
+    CHECK(rough.volumetricRadius == std::vector<float>(5, 0.08f));
+    CHECK(rough.volumetricColor == sun.volumetricColor);
+    CHECK(rough.volumetricRadiusScale == sun.volumetricRadiusScale);
+    CHECK(rough.towardSun == sun.towardSun);
     CHECK(MaterialValidation{"subsurface-volumetric-sun"}.getDefaultCamera().position == glm::vec3(0.0f, 0.5f, 5.5f));
 }
 
