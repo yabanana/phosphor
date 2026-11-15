@@ -2400,3 +2400,27 @@ the only messages are the 24 "Redundant call to setViewport/setDepthStencilState
 
 Sky sentinel (`Physical sky and aerial perspective` p95) read 0.81-0.82 in EVERY run of this session, the 75924b2 ones included (clean: 0.674-0.677): the machine was not quiet, so these are indicative; the band measurement is the orchestrator's.
 Remaining after the fix: frame p50 +0.04..+0.11 ms, p95 +0.17..+0.20 ms against 75924b2, per pass dominated by `F13 reflection sample 0` (p95 +0.15) and +0.04 each on three small passes whose p50 did not move.
+
+## 2026-11-15 — F15 ticket 24 follow-up: the p95 tail of `F13 reflection sample 0` against 2e1057a (attributed to the back-face continuation; NOT removable by specialisation)
+
+**Question (orchestrator, baseline 2e1057a = tickets 01-04):** after the payload/history fix the residual is `F13 reflection sample 0`, p50 +0.03..+0.08, p95 +0.18..+0.5 ms.
+**Method:** Sponza D2, `--gpu-timing-serial`, runs alternated per window (t03 = 2e1057a binary, head = ec63efc, variants), pass p50/p95 medians; the sky sentinel was constant in the windows used
+(0.81 in C/D/E, 0.67 in B), contended windows (a run at 1.8 ms slower frames) discarded.  Variants are built on ec63efc and copied to scratch binaries.
+
+| variant (pass p50 / p95 median, ms) | window B (sky 0.67, n=2 clean) | window D (sky 0.81, n=4) | window E (sky 0.81, n=3) |
+|---|---|---|---|
+| 2e1057a | 2.649 / 3.528 | 2.683 / 3.525 | 2.691 / 3.519 |
+| current (ec63efc) | 2.692 / 3.692 | 2.744 / 3.745 | 2.756 / 3.721 |
+| base `reflection_rt` with RtPayloadLite + rt_alpha_lite | 2.662 / 3.582 | - | - |
+| ... + `kReflectionBackfaceSkips` 4 -> 0 | 2.630 / 3.487 | 2.703 / 3.492 | - |
+| lite + `#pragma unroll(disable)` on the continuation loop | - | 2.757 / 3.820 | - |
+| lite + continuation moved out of the first-trace fast path (same arithmetic) | - | - | 2.711 / 3.954 |
+
+**Result:** the whole tail growth disappears only when the continuation is removed (skips 0: p95 3.49 / 3.49 against 3.53 / 3.53 for 2e1057a and 3.69-3.75 for the current code, four runs in D with a constant sentinel).
+The RtPayloadLite variant recovered about 0.1 ms of p95 in the clean window B but not in the 0.81 windows (the unroll and fast-path variants, which contain it, are not better than the current code there),
+so the payload is at most a minor, window-dependent contribution that is not proven.  The cause is work, not code shape: `--debug-lighting 4` on the D2 command counts ~3900 transport rays per frame that meet the back of a
+single-sided surface and continue (26fe229, F13.1 residue), ~200 per frame exhaust the bound of 4 (five traversals for the lane: the SIMD-group tail); restructuring the loop did not change that.
+The continuation is part of the corrected image: with the bound at 0 the D2 exactness capture differs from 94da95c in 934 of 921600 pixels (max delta 122; the other four cases 0 px), so
+**no specialisation can remove it with bit-identical images**: Sponza does contain single-sided surfaces whose back faces rays hit.  A scene-union function constant would not help (single-sidedness is not a feature bit),
+and lowering the bound or skipping the loop changes the image.  Not attempted, because it changes the images: a cheaper continuation (bound below 4, or tmax-limited re-trace) with its own gate.
+No code change from this follow-up (all variants reverted).
