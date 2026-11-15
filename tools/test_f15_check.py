@@ -2108,6 +2108,12 @@ class VolumetricSubsurfaceRunner(unittest.TestCase):
 class RtWalkKeys(unittest.TestCase):
     """F15.1 (ticket 17/18): the keys of the optional RT tier (--subsurface-mode rt-walk)."""
 
+    def test_the_converged_bias_keys_run_the_converged_estimator(self):
+        # the bias keys are the converged estimator: no accumulation and 64 walks per pixel (4 walks x 96 frames measured 0.1809 / 0.4942 on the sun key, noise not bias)
+        args = check.WALK_ARGS
+        self.assertEqual(args[args.index("--subsurface-accumulate") + 1], "off")
+        self.assertGreaterEqual(int(args[args.index("--subsurface-samples") + 1]), 64)
+
     def test_the_side_lit_bound_of_the_rt_tier_is_the_unchanged_decision_11_bound(self):
         spec = check.SCENARIOS["subsurface-volumetric-sun@rt-walk"]
         self.assertEqual(spec["kind"], "subsurface")

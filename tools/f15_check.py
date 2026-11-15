@@ -252,8 +252,8 @@ THRESHOLDS = {
 }
 LUMA_WEIGHTS = (0.2126, 0.7152, 0.0722)
 FRAMES, RESOLUTION = 128, "1280x720"
-WALK_FRAMES = 96                                                    # frames the rt-walk captures accumulate (4 walks per pixel each)
-WALK_ARGS = ["--subsurface-mode", "rt-walk", "--subsurface-accumulate", "off", "--subsurface-samples", "4", "--subsurface-steps", "512"]  # the bias keys: no accumulation (the product keys run the defaults)
+WALK_FRAMES = 96                                                    # frames the rt-walk captures accumulate (64 walks per pixel each: the converged estimator, bias check)
+WALK_ARGS = ["--subsurface-mode", "rt-walk", "--subsurface-accumulate", "off", "--subsurface-samples", "64", "--subsurface-steps", "512"]  # the bias keys: no accumulation (the product keys run the defaults)
 ACCUMULATE = 112  # frames averaged by --capture-linear-accumulate for the stochastic transmission transport (frames 16..127).  Measured
 #                   (F15.1 ticket 13): the refraction estimator is unbiased (per-object mean ratio to Mitsuba within 0.5 %) but its per-pixel
 #                   noise at 8 samples x 32 frames is 4-8 % on rough spheres (two seeds, same tolerance as the 256-sample Mitsuba noise),
