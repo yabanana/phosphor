@@ -2306,3 +2306,33 @@ height texture), parameter-space blend, surface-gradient normal, then the ONE ba
 (arms single, layers-1..4, full; A/B/A, 3 replicas, 320 frames with warmup 64, saturated clocks `--no-vsync --gpu-timing-serial`, refuses to start while another GPU
 process runs; results land in `results.json` / `summary.md` for perf-log.md). Until it runs, binning stays opt-in and the default resolve stays the union one (the
 provisional decision of ticket 21 is unchanged). The terrain has two feature classes (layers; layers + coat), so its bins are 2 (the budget run shows `bins 2`).
+
+## 2026-11-15 — F13.4 / F11.5: energy-preserving a-trous (`--lighting-denoise-energy on`), timeboxed experiment (verdict: candidate for adoption)
+
+**Hypothesis:** the 1-3 % darkening of a denoised, noisy signal (cause proven in 0bae6e5: the receiver-normalised luminance edge-stopping a-trous) disappears if the filter is
+sender-normalised with a symmetric weight.  **Design (one, no sweep):** w(p,q) = taps x normal x depth(max depth) x luminance weight with the MEAN of the two variances x (specular) roughness weight with the MINIMUM
+roughness, pair-rejection rules symmetric; pass 1 `denoise_atrous_norm` writes W(p) = sum_q w(p,q) (one RGBA32F transient texture per iteration), pass 2 `denoise_atrous_energy`
+gathers out(q) = sum_p w(q,p) x(p) / W(p).  Sum_q out(q) = sum_p x(p) exactly.  Two graph passes per iteration with exact accesses, hard-bounded 5x5 loops, PipelineCache, transient textures only.
+Routed signals: DI, GI, specular (base kernels; lobe-contract scenes keep the shipped filter).  AO stays on the shipped filter: it is bounded to [0,1] and the checker rejects values above 1; the energy-routed AO lost 0.8 % to the clamp
+(a shipped-filter AO bias is 1.0004 +- 0.0001, nothing to fix).  Default stays off.
+
+**Numbers** (filtered / pass-through of the same seed or window, mean +- sem; "raw" = atrous 0, temporal alpha 1):
+| signal / scene | shipped filter | energy filter |
+|---|---|---|
+| DI cap fixture `mask=1/emit=1` (75k emitters, 128 strata), 128x72, 8 seeds | 0.9933 +- 0.0009 | 0.9990 +- 0.0011 |
+| DI cap, Queen_Black emissive scene, 8 seeds | 0.9771 +- 0.0036 | 1.0062 +- 0.0087 |
+| DI cap fixture, 256x144 sequence, seed 1, frames 24-55 | 0.9895 | 1.0000 |
+| specular, bench-6 `roughness`, 320x180, 6 windows of 8 frames | 0.9941 +- 0.0007 | 1.0000 +- 0.0000 |
+| GI (DDGI denoised), same scene, spatial only (alpha 1) | 0.9992 +- 0.0001 | 1.0000 +- 0.0000 |
+| GI with temporal accumulation | 0.926 +- 0.016 | 0.927 +- 0.016 (history lag of the converging DDGI, same for both: not the spatial filter) |
+| AO (`roughness`, `ao-cavity`), not routed | 1.0004 / 1.0006 | = shipped |
+CPU reference (tests/test_denoise.cpp, same weights): energy ratio 1.0000 (1e-4) where the shipped normalisation gives 0.985; control: the row-normalised variant fails the >= 0.9999 check.
+Fireflies (pixels with L > 4 x median 5x5 and L > 0.05, frames 24/40/56; defined before measuring): DI raw 65.7, shipped 61.0, energy 61.0; specular raw 169.0, shipped 144.3, energy 138.3; GI and AO equal.
+Corpus (`tools/f13_f14_check.py`, 89 cases, independent clips bound as final4, ROI d4-fallback, both runs on the same build): option off 13/13 functional, 12/12 independent clips, controls 30/30, 14/14 numerical, 17/17 pairs;
+option on: the same verdicts case by case, no check pass -> fail, negatives still fail.  Metric drift with the option on (all far inside the gates): error-change ghost fraction mirror primary 0.00148 -> 0.00180,
+mirror floor-front 0.00115 -> 0.00216, rough-emitter floors +11/+22 %, disocclusion 0 -> 0.00023 (gate 0.25), fog-disocclusion 3.2e-5 -> 4.2e-6; residual flicker +0.4..+3.7 % (moving-light 0.00541 -> 0.00561, gate 0.02);
+linear RMSE p95 mirror +1.8 %, moving-light -1.4 %, disocclusion -0.9 %.  ctest 909/909, API + shader validation clean on the fixture, 0 GPU allocations in the measured frames.
+No timing taken (machine not quiet): the Sponza D2 A/B is the orchestrator's.
+
+**Verdict: candidate for adoption** on (a) bias within noise on every routed signal and (b) no gate or verdict worse; the ghost and flicker numbers drift upward in the mirror, rough-emitter and disocclusion clips (listed above)
+and the choice weighs that against the removed 1-3 % darkening; (c), the budget A/B, is the orchestrator's.  The default is NOT flipped.
