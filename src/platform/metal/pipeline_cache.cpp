@@ -481,6 +481,8 @@ void PipelineCache::resolve(pipe::PipelineHandle handle, const pipe::PipelineDes
     // lookupArchives is an optional cache hint, whose hit state is not exposed.
     // Report the actual compiler API call below, never an inferred archive hit.
     if (serializer_ || linkedCompute) done.archive = pipe::ArchiveOutcome::NotTried;
+    // F15 closure (ticket 16): the "compiler calls" of a warm run are exactly these pipelines (RT kernels linking rt_alpha_*); name them.
+    if (linkedCompute) LOG_INFO("Pipeline linked compute (compiler by policy, never archived): %s", desc.label.c_str());
 
     // 1. Archive (F3.4): no compiler API invocation on a direct hit.
     if (archive_ && !options_.fallbackOnly && !linkedCompute) {

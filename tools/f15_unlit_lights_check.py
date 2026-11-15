@@ -136,10 +136,14 @@ def lights_cases():
         d2 = x * x + 9.0
         ex.append(BASE / math.pi * I_POINT * (3.0 / math.sqrt(d2)) / d2)
     cases["point"] = {"panels": px, "node": {"translation": [0.0, 3.0, -3.0]}, "light": {"type": "point"}, "intensity": I_POINT, "expect": ex}
-    spot_panels = [0.0, 5.2]
+    # The middle panel sits at 0.45 rad from the axis, between the inner (0.3) and the outer (0.6) cone: t = (cos 0.45 - cos 0.6) / (cos 0.3 - cos 0.6)
+    # = 0.5777; informational only (None): the angular falloff between the cones is implementation-defined in the extension, the informative formula
+    # of the specification is t^2 = 0.334, the engine's forward / resolve path is smoothstep(t) = 0.616 and its ReSTIR path t = 0.578.
+    mid = 3.0 * math.tan(0.45)
+    spot_panels = [0.0, mid, 5.2]
     cases["spot"] = {"panels": spot_panels, "node": {"translation": [0.0, 3.0, -3.0]},
                      "light": {"type": "spot", "spot": {"innerConeAngle": 0.3, "outerConeAngle": 0.6}}, "intensity": I_SPOT,
-                     "expect": [BASE / math.pi * I_SPOT / 9.0, 0.0]}
+                     "expect": [BASE / math.pi * I_SPOT / 9.0, None, 0.0]}
     return cases
 
 
@@ -270,6 +274,11 @@ def verify_lights(out):
             ma, _ = mean_and_dev(patch(a, cx, cy))
             mb, _ = mean_and_dev(patch(b, cx, cy))
             delta = sum(ma[k] - mb[k] for k in range(3)) / 3
+            if expect is None:
+                full = BASE / math.pi * c["intensity"] * (3.0 / math.sqrt(x * x + 9.0)) / (x * x + 9.0)
+                results.append(f"{name} panel x={x:+.3f} (0.45 rad, between the cones): delta {delta:.5f}, angular factor {delta / full:.4f} "
+                               f"(informative spec t^2 0.334, smoothstep 0.616, linear 0.578) INFO")
+                continue
             if name == "dir-y90":
                 # Grazing sun: the engine's directional light is a disk of angular radius 0.00465 rad, half of it above the horizon of the panel
                 # at 90 degrees; E <= I r and delta <= base I r / pi (an upper bound derived from the disk, not from the capture).  The first

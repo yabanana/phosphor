@@ -19,7 +19,7 @@
 namespace phosphor {
 namespace {
 // The names are mirrored by tools/f15_check.py SCENARIOS (tests/test_material_validation.cpp compares both).
-constexpr std::array<std::string_view, 67> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
+constexpr std::array<std::string_view, 72> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
                                                       "furnace-base",   "furnace-resolve",     "roughness-extremes",
                                                       "roughness-extremes-sun", "specular-grid-sun",
                                                       "specular-grid-env-resolve", "specular-grid-point", "specular-grid-env", "furnace-specular",
@@ -44,7 +44,8 @@ constexpr std::array<std::string_view, 67> kScenarios{"base-grid-sun",  "base-gr
                                                       "combo-irid-aniso-sun", "combo-irid-aniso-env", "combo-irid-specular-sun",
                                                       "combo-irid-specular-env", "combo-thin-coat-sun", "combo-thin-coat-env",
                                                       "combo-all-lobes-sun", "combo-all-lobes-env", "furnace-combinations",
-                                                      "subsurface-thin-gi-back"};
+                                                      "subsurface-thin-gi-back",
+                                                      "iridescence-cost-nofilm", "iridescence-cost-lights8", "iridescence-cost-nofilm-lights8", "clearcoat-grid-coat-only-sun", "lobe-guide-coplanar"};
 constexpr float pi = 3.14159265358979323846f;
 
 glm::quat orientLight(glm::vec3 towardLight) {
@@ -357,6 +358,23 @@ const std::vector<MaterialScenarioSpec>& specs() {
     static const glm::vec3 iridGridCentre(0.0f, 2.5f, 0.0f);
     static const MaterialPointLight iridBackLight{iridGridCentre + 9.0f * glm::normalize(glm::vec3(-0.65f, 0.55f, -0.52f)),
                                                   250.0f, 100.0f};
+    // F15 closure (ticket 12): per-light cost fixtures of the iridescence lobe (tools/f15_costs.py t4-iridescence; they have no
+    // reference and no gate, so the runner does not list them).  `iridescence-cost-nofilm` is the film-free twin of
+    // `iridescence-grid-point`: identical spheres and rig (every sphere carries the block, so the same feature union and
+    // pipelines) but thickness 0 in every column, which disables the film by the specification's rule.  `-lights8` replaces the one
+    // point light by eight on the same 9 m arc around the grid centre (each 250/8 W/sr, so the brightness stays comparable): the
+    // slope of the shading cost over the light count, with and without the film, is the cost of the film per light.
+    static const std::vector<float> iridThicknessOff(6, 0.0f);
+    static const std::vector<MaterialPointLight> iridEightLights = [] {
+        std::vector<MaterialPointLight> lights;
+        const glm::vec3 axis = glm::normalize(glm::vec3(-0.65f, 0.55f, -0.52f));
+        for (u32 i = 0; i < 8; ++i) {
+            const float angle = (static_cast<float>(i) - 3.5f) * 0.12f; // +-0.42 rad about the vertical
+            const glm::quat turn = glm::angleAxis(angle, glm::vec3(0.0f, 1.0f, 0.0f));
+            lights.push_back({glm::vec3(0.0f, 2.5f, 0.0f) + 9.0f * (turn * axis), 250.0f / 8.0f, 100.0f});
+        }
+        return lights;
+    }();
     // F15.3 (ticket 16): the thin subsurface (diffuse transmission) lobe.  Rows are the weight {0 (no extension, the neutral
     // material), 0.25, 0.5, 1}, columns the transmission colour {white, warm, teal}, over a blue-grey base (so the reflected and the
     // transmitted colour are told apart) of roughness 0.5.  The sun sits BEHIND the spheres (V.L about -0.73 at the grid centre):
@@ -450,6 +468,21 @@ const std::vector<MaterialScenarioSpec>& specs() {
         // F15.3 (ticket 09) clearcoat grids.  Sun only: the direct gate (coat lobe in the sun-disk quadrature).
         {"clearcoat-grid-sun", coatBaseRoughness, coatMetallic, copper, true, 3.0f, towardSun, 0.0f, {}, {}, {}, {},
          coatFactor, coatRoughness, coatBaseIor},
+        // F15 closure (ticket 09): clearcoat-grid-sun without the ior block of row 4: every sphere carries the clearcoat block only, so
+        // the scene's feature union is the coat-only mask 2 (clearcoat-grid-sun is mask 3).  No reference, no gate: the pixels of the
+        // other rows must equal clearcoat-grid-sun's (tools/f15_coat_only_check.py).
+        {"clearcoat-grid-coat-only-sun", coatBaseRoughness, coatMetallic, copper, true, 3.0f, towardSun, 0.0f, {}, {}, {}, {},
+         coatFactor, coatRoughness, {}},
+        // F15 closure (ticket 06): ONE carrier mesh of 16 exactly coplanar, fully overlapping layers (same positions, one draw), the vertex
+        // normals of layer i tilted by (i - 7.5) * 4 degrees about +X, under the sun, coat factor 0.6.  Run with the overflow receivers
+        // forced (--debug-meshlets 1 --debug-meshlets-corrupt count): all 16 fragments of a pixel pass the equal-depth test, the colour
+        // attachments keep the LAST (primitive order) and the guide must keep the record of the SAME fragment (raster order group); the
+        // coat normal of the guide is the shading normal of the fragment, so --debug-lobe-guide FAILs on a mismatch.
+        // tools/f15_lobe_guide_coplanar_check.py; --debug-lobe-guide-no-rog is the control.
+        {.name = "lobe-guide-coplanar", .roughness = {0.3f}, .metallic = {0.0f}, .baseColor = glm::vec3(0.8f), .sun = true,
+         .sunIrradiance = 3.0f, .towardSun = glm::normalize(glm::vec3(0.4f, 0.6f, 0.7f)), .environment = 0.0f,
+         .clearcoatFactor = {0.6f}, .clearcoatRoughness = {0.3f}, .cameraDistance = 2.0f,
+         .layerTiltDegrees = {-30.0f, -26.0f, -22.0f, -18.0f, -14.0f, -10.0f, -6.0f, -2.0f, 2.0f, 6.0f, 10.0f, 14.0f, 18.0f, 22.0f, 26.0f, 30.0f}},
         // Environment only, deterministic resolve (--reflections off --lighting-denoise custom): the declared coat term.
         {"clearcoat-grid-env-resolve", coatBaseRoughness, coatMetallic, copper, false, 0.0f, towardSun, 0.5f, {}, {}, {},
          {}, coatFactor, coatRoughness, coatBaseIor},
@@ -518,6 +551,13 @@ const std::vector<MaterialScenarioSpec>& specs() {
         // One point light only (no sun, environment 0), side-lit from behind like the other grids.
         {"iridescence-grid-point", iridRoughness, iridMetallic, copper, false, 0.0f, towardSun, 0.0f, {}, {}, {}, {iridBackLight}, {},
          {}, {}, false, {}, {}, {}, {}, {}, {}, iridFactor, iridIor, iridThickness},
+        // F15 closure (ticket 12): cost twins of iridescence-grid-point, see the declarations above.
+        {"iridescence-cost-nofilm", iridRoughness, iridMetallic, copper, false, 0.0f, towardSun, 0.0f, {}, {}, {}, {iridBackLight}, {},
+         {}, {}, false, {}, {}, {}, {}, {}, {}, iridFactor, iridIor, iridThicknessOff},
+        {"iridescence-cost-lights8", iridRoughness, iridMetallic, copper, false, 0.0f, towardSun, 0.0f, {}, {}, {}, iridEightLights, {},
+         {}, {}, false, {}, {}, {}, {}, {}, {}, iridFactor, iridIor, iridThickness},
+        {"iridescence-cost-nofilm-lights8", iridRoughness, iridMetallic, copper, false, 0.0f, towardSun, 0.0f, {}, {}, {}, iridEightLights, {},
+         {}, {}, false, {}, {}, {}, {}, {}, {}, iridFactor, iridIor, iridThicknessOff},
         // Furnace over iridescent materials: base albedo 1 under a uniform environment of radiance 1 (also without the transport).
         {"furnace-iridescence", iridRoughness, iridMetallic, glm::vec3(1.0f), false, 0.0f, towardSun, 1.0f, {}, {}, {}, {}, {}, {}, {},
          false, {}, {}, {}, {}, {}, {}, iridFactor, iridIor, iridThickness},
@@ -615,6 +655,40 @@ void MaterialValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& textur
     auto upload = [&](float handedness) {
         // F15.3 (ticket 16): the thin point-light fixture uses single-sided quads (generatePlane lies in XZ with normal +Y; the
         // instance is rotated by +90 degrees about X so the normal faces the camera).
+        if (!s.layerTiltDegrees.empty()) {
+            // N coplanar layers in one mesh: quad corners in the z = 0 plane facing +Z, identical positions per layer, normals tilted about +X.
+            std::vector<glm::vec3> positions, normals;
+            std::vector<glm::vec4> tangents;
+            std::vector<glm::vec2> uvs;
+            std::vector<u32>       indices;
+            for (size_t layer = 0; layer < s.layerTiltDegrees.size(); ++layer) {
+                const float a = glm::radians(s.layerTiltDegrees[layer]);
+                const glm::vec3 normal(0.0f, -std::sin(a), std::cos(a));
+                const u32 base = static_cast<u32>(positions.size());
+                const float r = SphereRadius;
+                for (const glm::vec2 corner : {glm::vec2(-r, -r), glm::vec2(r, -r), glm::vec2(r, r), glm::vec2(-r, r)}) {
+                    positions.emplace_back(corner.x, corner.y, 0.0f);
+                    normals.push_back(normal);
+                    tangents.emplace_back(1.0f, 0.0f, 0.0f, 1.0f);
+                    uvs.emplace_back(corner.x / (2.0f * r) + 0.5f, 0.5f - corner.y / (2.0f * r));
+                }
+                for (const u32 i : {0u, 1u, 2u, 0u, 2u, 3u}) indices.push_back(base + i);
+            }
+            // The reflection probe is placed in the scene bounds, which need a positive extent on every axis (a flat stack has none:
+            // "invalid probe capture"): one more quad 0.5 m behind, facing away (-Z, reversed winding: culled from the camera side).
+            {
+                const u32 base = static_cast<u32>(positions.size());
+                const float r = SphereRadius;
+                for (const glm::vec2 corner : {glm::vec2(-r, -r), glm::vec2(r, -r), glm::vec2(r, r), glm::vec2(-r, r)}) {
+                    positions.emplace_back(corner.x, corner.y, -0.5f);
+                    normals.emplace_back(0.0f, 0.0f, -1.0f);
+                    tangents.emplace_back(1.0f, 0.0f, 0.0f, 1.0f);
+                    uvs.emplace_back(corner.x / (2.0f * r) + 0.5f, 0.5f - corner.y / (2.0f * r));
+                }
+                for (const u32 i : {0u, 2u, 1u, 0u, 3u, 2u}) indices.push_back(base + i);
+            }
+            return scene.uploadMesh(positions, normals, tangents, uvs, indices);
+        }
         const auto sphere = s.quadCarriers ? ProceduralMeshes::generatePlane(2.0f * SphereRadius, 2.0f * SphereRadius, 8, 8)
             : (s.hasAnisotropyGrid() || s.combedCarriers)
             ? ProceduralMeshes::generateCombedSphere(SphereRadius, SphereSlices, SphereStacks, glm::vec3(1.0f, 0.0f, 0.0f), handedness)

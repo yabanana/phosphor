@@ -326,6 +326,21 @@ fragment DIReceiverOutput forward_di_receiver_fs(SurfaceVertexOut in [[stage_in]
 // writes either.  The buffer is a raster order group: fragments at equal depth (coplanar overlap) resolve in
 // primitive order like the colour attachments (last wins).  The function writes no depth or coverage, which
 // early tests require.  A separate entry point keeps forward_di_receiver_fs (scenes without features) unchanged.
+static DIReceiverOutput diReceiverGuideBody(SurfaceVertexOut in,bool frontFacing,constant FrameConstants& frame,const device GPUMaterial* materials,
+    const device GPULight* lights,const device TextureHandle* textures,constant GPUTemporalParams& temporal,
+    device GPULobeGuide* lobeGuide,constant GPUDIParams& di) {
+    const auto value=diReceiverResolve(in,frontFacing,frame,materials,lights,textures,temporal);
+    if((di.flags&DI_LOBE_GUIDE_DELAY)!=0u) {
+        // Debug control only (--debug-lobe-guide-delay): a bounded delay that is longest for the first layer of lobe-guide-coplanar (normal y 0.5) and
+        // zero for the last (-0.5), so overlapping fragments complete out of submission order.  x stays inside (-1, 1): the write below never happens.
+        float x=value.normal.y;
+        const uint iterations=uint(clamp(value.normal.y+0.5f,0.0f,1.0f)*16384.0f);
+        for(uint i=0;i<iterations;++i)x=fma(x,0.99999f,1e-7f);
+        if(x==123456.0f)lobeGuide[0].reserved=1u;
+    }
+    if(kMaterialFeatures!=0u)lobeGuide[uint(in.position.y)*di.width+uint(in.position.x)]=lobeGuideRecord(value,di.flags);
+    return diReceiverOutput(in,value,temporal);
+}
 [[early_fragment_tests]]
 fragment DIReceiverOutput forward_di_receiver_guide_fs(SurfaceVertexOut in [[stage_in]],bool frontFacing [[front_facing]],
     constant FrameConstants& frame [[buffer(0)]],const device GPUMaterial* materials [[buffer(3)]],
@@ -333,7 +348,17 @@ fragment DIReceiverOutput forward_di_receiver_guide_fs(SurfaceVertexOut in [[sta
     constant GPUTemporalParams& temporal [[buffer(8)]],
     device GPULobeGuide* lobeGuide [[buffer(11), raster_order_group(0)]],
     constant GPUDIParams& di [[buffer(12)]]) {
-    const auto value=diReceiverResolve(in,frontFacing,frame,materials,lights,textures,temporal);
-    if(kMaterialFeatures!=0u)lobeGuide[uint(in.position.y)*di.width+uint(in.position.x)]=lobeGuideRecord(value,di.flags);
-    return diReceiverOutput(in,value,temporal);
+    return diReceiverGuideBody(in,frontFacing,frame,materials,lights,textures,temporal,lobeGuide,di);
+}
+// F15 closure (ticket 06): the NEGATIVE CONTROL of the raster order group above (--debug-lobe-guide-no-rog): the same body without the
+// attribute.  Never used by the engine itself; tools/f15_lobe_guide_coplanar_check.sh shows that coplanar overlapping fragments then
+// leave a guide record that disagrees with the colour attachments.
+[[early_fragment_tests]]
+fragment DIReceiverOutput forward_di_receiver_guide_norog_fs(SurfaceVertexOut in [[stage_in]],bool frontFacing [[front_facing]],
+    constant FrameConstants& frame [[buffer(0)]],const device GPUMaterial* materials [[buffer(3)]],
+    const device GPULight* lights [[buffer(4)]],const device TextureHandle* textures [[buffer(5)]],
+    constant GPUTemporalParams& temporal [[buffer(8)]],
+    device GPULobeGuide* lobeGuide [[buffer(11)]],
+    constant GPUDIParams& di [[buffer(12)]]) {
+    return diReceiverGuideBody(in,frontFacing,frame,materials,lights,textures,temporal,lobeGuide,di);
 }

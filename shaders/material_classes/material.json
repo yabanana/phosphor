@@ -1571,6 +1571,106 @@
       "name": "material:subsurface-thin-gi-back",
       "union": 128,
       "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 10
+        },
+        {
+          "lobes": [
+            "iridescence"
+          ],
+          "mask": 16,
+          "materials": 36
+        }
+      ],
+      "family": "material",
+      "name": "material:iridescence-cost-nofilm",
+      "union": 16,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 10
+        },
+        {
+          "lobes": [
+            "iridescence"
+          ],
+          "mask": 16,
+          "materials": 36
+        }
+      ],
+      "family": "material",
+      "name": "material:iridescence-cost-lights8",
+      "union": 16,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 10
+        },
+        {
+          "lobes": [
+            "iridescence"
+          ],
+          "mask": 16,
+          "materials": 36
+        }
+      ],
+      "family": "material",
+      "name": "material:iridescence-cost-nofilm-lights8",
+      "union": 16,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 13
+        },
+        {
+          "lobes": [
+            "clearcoat"
+          ],
+          "mask": 2,
+          "materials": 25
+        }
+      ],
+      "family": "material",
+      "name": "material:clearcoat-grid-coat-only-sun",
+      "union": 2,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "clearcoat"
+          ],
+          "mask": 2,
+          "materials": 1
+        }
+      ],
+      "family": "material",
+      "name": "material:lobe-guide-coplanar",
+      "union": 2,
+      "volumetric": false
     }
   ],
   "schema": "phosphor.material-class-manifest",

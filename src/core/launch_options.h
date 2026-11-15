@@ -148,6 +148,8 @@ namespace phosphor {
 //                      a LOBE-GUIDE line, exit code 1 on FAIL; 0 = off; needs
 //                      the visibility + mesh path with direct-lighting passes)
 //   --debug-lobe-guide-corrupt  negative control of the check above
+//   --debug-lobe-guide-no-rog  overflow receivers without the raster order group on the guide (negative control of the coplanar fixture)
+//   --debug-lobe-guide-delay  bounded per-fragment delay before the guide write (lets overlapping fragments finish out of order)
 //   --debug-lobe-guide-dump FILE  raw guide bytes of the last checked frame
 //   --debug-transmittance-dedup on|off  F15.1 (ticket 14): off removes the
 //                      per-primitive duplicate filter of the shadow-ray
@@ -439,6 +441,11 @@ struct LaunchOptions {
     // the raw guide bytes of the last checked frame.
     u32 debugLobeGuide = 0;
     bool debugLobeGuideCorrupt = false;
+    // F15 closure (ticket 06): --debug-lobe-guide-no-rog runs the overflow receivers with the entry point whose guide buffer is NOT a
+    // raster order group (negative control of the coplanar-overlap fixture, tools/f15_lobe_guide_coplanar_check.sh).
+    bool debugLobeGuideNoRog = false;
+    // --debug-lobe-guide-delay: the guide-writing receivers wait a data-dependent bounded time before the write (see DI_LOBE_GUIDE_DELAY).
+    bool debugLobeGuideDelay = false;
     bool debugTransmissionBothBranches = false; // --debug-transmission-both-branches (verification only; needs --debug-lighting): both Fresnel branches at the visible glass interface
     std::string debugLobeGuideDump;
     bool debugGiNoVisibility=false; // Physical quality negative; invariant checks stay enabled.

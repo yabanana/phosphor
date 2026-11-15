@@ -716,6 +716,10 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.debugTransmissionBothBranches = true;
         } else if (arg == "--debug-lobe-guide-corrupt") {
             out.debugLobeGuideCorrupt = true;
+        } else if (arg == "--debug-lobe-guide-no-rog") {
+            out.debugLobeGuideNoRog = true;
+        } else if (arg == "--debug-lobe-guide-delay") {
+            out.debugLobeGuideDelay = true;
         } else if (arg == "--debug-lobe-guide-dump") {
             auto v = needValue();
             if (!v || v->empty() || v->starts_with("--")) { error = "--debug-lobe-guide-dump: expected a file path"; return false; }
@@ -1359,8 +1363,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if (out.debugTransmissionBothBranches && (!out.debugLighting || out.reflections != ReflectionMode::RT || out.materialScene.empty() || !TransmissionValidation::validScenario(out.materialScene))) {
         error = "--debug-transmission-both-branches requires --debug-lighting, --reflections rt and a transmission --material-scenario"; return false;
     }
-    if ((out.debugLobeGuideCorrupt || !out.debugLobeGuideDump.empty()) && !out.debugLobeGuide) {
-        error = "--debug-lobe-guide-corrupt / --debug-lobe-guide-dump require --debug-lobe-guide N"; return false;
+    if ((out.debugLobeGuideCorrupt || out.debugLobeGuideNoRog || out.debugLobeGuideDelay || !out.debugLobeGuideDump.empty()) && !out.debugLobeGuide) {
+        error = "--debug-lobe-guide-corrupt / --debug-lobe-guide-no-rog / --debug-lobe-guide-delay / --debug-lobe-guide-dump require --debug-lobe-guide N"; return false;
     }
     if (out.debugLobeGuide &&
         (!out.visibility || out.geometryPath != GeometryPath::Mesh ||

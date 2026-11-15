@@ -121,7 +121,7 @@ struct DirectLightingPasses::Impl {
         // (the marker rides on the mask; featureUnion stays the lobe union that decides the guide).
         const u32 shadeUnion=featureUnion|(s.textureTransformInUse()?FEATURE_UNION_TEXTURE_TRANSFORM:0u);
         guideServed=features.serve(p,200,kernels[Guide],shadeUnion,[&]{return lighting::kernel("material_lighting_guides");});
-        receiverServed=features.serve(p,201,receiver,shadeUnion,[&]{return receiverDesc("forward_di_receiver_guide_fs");});
+        receiverServed=features.serve(p,201,receiver,shadeUnion,[&]{return receiverDesc(options.debugLobeGuideNoRog?"forward_di_receiver_guide_norog_fs":"forward_di_receiver_guide_fs");});
         {static const char* diNames[]={"restir_di_candidates_lobe","restir_di_temporal_lobe","restir_di_spatial_lobe"};
             // Only the active estimator's kernels are requested (RT shade pipelines are compiled, never archived).
             const bool ris=options.directLighting==DirectLightingMode::ReSTIR;
@@ -175,6 +175,7 @@ struct DirectLightingPasses::Impl {
         if(slot.lobeGuide)params.flags|=DI_LOBE_GUIDE_BOUND;
         if(guideValid)params.flags|=DI_LOBE_GUIDE_VALID;
         if(options.debugLobeGuideCorrupt)params.flags|=DI_LOBE_GUIDE_CORRUPT;
+        if(options.debugLobeGuideDelay)params.flags|=DI_LOBE_GUIDE_DELAY;
         params.stbnWidth=stbn.config.width;params.stbnHeight=stbn.config.height;params.stbnFrames=stbn.config.frames;params.stbnDimensions=stbn.config.dimensions;params.stbnSeed=options.lightingSeed;
         params.depthRelativeThreshold=0.02f;params.normalThreshold=0.95f;params.targetFloor=1e-6f;params.slotCount=s.slotCapacity();params.pad1=options.directLighting==DirectLightingMode::BruteForce;
         // F13.1: whenever a reflection path sees emissive geometry (RT rays or

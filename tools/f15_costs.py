@@ -112,7 +112,27 @@ ITEMS = {
         "4. Iridescence per light, iridescence grid (absolute, no strength switch)",
         {"grid-sun": proc("iridescence-grid-sun", R1080), "grid-point-legacy": proc("iridescence-grid-point", R1080),
          "grid-point-restir": proc("iridescence-grid-point@restir", R1080), "grid-point-clustered": proc("iridescence-grid-point@clustered", R1080)},
-        "the grid has no film-off arm (rows are factor 0.5 / 1) and no light-count option on material scenarios: absolute pass times"),
+        "absolute pass times of the grid; the film-off and light-count arms are t4-iridescence-film-*"),
+    # F15 closure (ticket 12): film-free twins (src/testbench/material_validation.cpp, `iridescence-cost-*`): every sphere keeps the iridescence
+    # block (same feature union, same specialised pipelines) but thickness 0 disables the film, so A (no film) vs B (film) isolates the film
+    # evaluation; the 8-light twins give its cost per light as the difference of the two deltas (8 lights minus 1 light) / 7.
+    "t4-iridescence-film-1light-legacy": ab(
+        "4a. Iridescence film cost, 1 point light, resolve lights (legacy): film off (A) vs film (B)",
+        proc("iridescence-grid-point", R1080, scenario="iridescence-cost-nofilm"), proc("iridescence-grid-point", R1080),
+        "A = iridescence-cost-nofilm (thickness 0 everywhere), B = iridescence-grid-point; same rig, same pipelines, 1 light"),
+    "t4-iridescence-film-8lights-legacy": ab(
+        "4b. Iridescence film cost, 8 point lights, resolve lights (legacy): film off (A) vs film (B)",
+        proc("iridescence-grid-point", R1080, scenario="iridescence-cost-nofilm-lights8"), proc("iridescence-grid-point", R1080, scenario="iridescence-cost-lights8"),
+        "per-light film cost = (delta of 4b - delta of 4a) / 7 on the Material resolve pass"),
+    "t4-iridescence-film-1light-clustered": ab(
+        "4c. Iridescence film cost, 1 point light, clustered DI: film off (A) vs film (B)",
+        proc("iridescence-grid-point@clustered", R1080, scenario="iridescence-cost-nofilm"), proc("iridescence-grid-point@clustered", R1080),
+        "A = iridescence-cost-nofilm, B = iridescence-grid-point, clustered DI with RT visibility"),
+    "t4-iridescence-film-8lights-clustered": ab(
+        "4d. Iridescence film cost, 8 point lights, clustered DI: film off (A) vs film (B)",
+        proc("iridescence-grid-point@clustered", R1080, scenario="iridescence-cost-nofilm-lights8"),
+        proc("iridescence-grid-point@clustered", R1080, scenario="iridescence-cost-lights8"),
+        "per-light film cost = (delta of 4d - delta of 4c) / 7 on the DI shading pass"),
     "t5-gi-back": ab(
         "5. GI-back lookup: --thin-gi-back off (A) vs on (B), subsurface-thin-gi-back + DDGI",
         dict(GI_BACK, back="off", resolution=R720), dict(GI_BACK, back="on", resolution=R720), "the second DDGI probe lookup at -N of thin subsurface pixels"),

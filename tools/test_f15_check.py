@@ -1055,6 +1055,8 @@ class RunnerLogic(unittest.TestCase):
         # the two clip fixtures of ticket 08 belong to tools/f15_clip_check.py, not to this reference runner
         # ticket 19: the GI back-lookup fixture belongs to tools/f15_thin_gi_back_check.py (it needs DDGI; the runner captures with --gi off)
         clip_only = {"specular-grid-edit", "specular-grid-rough", "subsurface-thin-gi-back"}
+        # F15 closure (tickets 09, 12): cost twins and the coat-only fixture have no reference and no gate (tools/f15_costs.py, tools/f15_unlit_lights_check.py)
+        clip_only |= {"iridescence-cost-nofilm", "iridescence-cost-lights8", "iridescence-cost-nofilm-lights8", "clearcoat-grid-coat-only-sun", "lobe-guide-coplanar"}
         # ticket 13: the transmission scenarios are the separate bench class TransmissionValidation
         transmission = (HERE.parent / "src" / "testbench" / "transmission_validation.cpp").read_text()
         names = transmission[transmission.index("kAll{"):transmission.index("};", transmission.index("kAll{"))]

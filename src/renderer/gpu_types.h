@@ -867,6 +867,10 @@ PHOSPHOR_GPU_CONSTANT u32 DI_LOBE_GUIDE_VALID = 64u;
 PHOSPHOR_GPU_CONSTANT u32 DI_LOBE_GUIDE_CORRUPT = 128u;
 // The lobe guide buffer is allocated and bound (di_receiver_pack clears the record of surfaces it invalidates).
 PHOSPHOR_GPU_CONSTANT u32 DI_LOBE_GUIDE_BOUND = 256u;
+// F15 closure (ticket 06): --debug-lobe-guide-delay makes the guide-writing overflow receivers spend a bounded, data-dependent time before
+// the write (up to 16384 dependent fma per fragment, the longest for the first layer of the coplanar fixture), so that overlapping fragments
+// finish out of order: the raster order group must still order the writes, its absence must not.
+PHOSPHOR_GPU_CONSTANT u32 DI_LOBE_GUIDE_DELAY = 4096u;
 // F13.6: RT reflections also see geometry-backed emitters (DI_LIGHT_TRIANGLE).
 // Their specular lobe is then split by the reflection RT probability: DI keeps
 // smoothstep(low, high, roughness), the RT path (taken with the complementary

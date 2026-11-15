@@ -1516,6 +1516,15 @@ TEST_CASE("launch options: --debug-lobe-guide (F15.1)") {
     CHECK_FALSE(with({"--debug-lobe-guide-dump", "guide.bin"}));
     CHECK_FALSE(with({"--debug-lobe-guide-dump"}));
     CHECK_FALSE(with({"--debug-lobe-guide", "-1"}));
+    // F15 closure (ticket 06): the raster-order-group control and the skewed-cost delay need the check too.
+    REQUIRE(with({"--debug-lobe-guide", "1", "--debug-lobe-guide-no-rog", "--debug-lobe-guide-delay"}));
+    CHECK(o.debugLobeGuideNoRog);
+    CHECK(o.debugLobeGuideDelay);
+    REQUIRE(with({"--debug-lobe-guide", "1"}));
+    CHECK_FALSE(o.debugLobeGuideNoRog);
+    CHECK_FALSE(o.debugLobeGuideDelay);
+    CHECK_FALSE(with({"--debug-lobe-guide-no-rog"}));
+    CHECK_FALSE(with({"--debug-lobe-guide-delay"}));
     // The producers exist only on the visibility + mesh path with direct-lighting passes.
     LaunchOptions plain;
     CHECK_FALSE(parse({"--debug-lobe-guide", "1"}, plain, e));

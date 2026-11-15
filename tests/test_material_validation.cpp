@@ -21,7 +21,7 @@
 using namespace phosphor;
 
 TEST_CASE("F15.3 material scenarios are exactly the nine declared names") {
-    CHECK(MaterialValidation::scenarios().size() == 67);
+    CHECK(MaterialValidation::scenarios().size() == 72);
     for (auto name : {"base-grid-sun", "base-grid-env", "base-grid-env-resolve", "furnace-base", "furnace-resolve",
                       "roughness-extremes", "roughness-extremes-sun", "specular-grid-sun", "specular-grid-env-resolve", "specular-grid-point",
                       "specular-grid-env", "furnace-specular", "clearcoat-grid-sun", "clearcoat-grid-env-resolve",
@@ -38,7 +38,8 @@ TEST_CASE("F15.3 material scenarios are exactly the nine declared names") {
                       "combo-irid-coat-sun", "combo-irid-coat-env", "combo-irid-sheen-sun", "combo-irid-sheen-env",
                       "combo-irid-aniso-sun", "combo-irid-aniso-env", "combo-irid-specular-sun", "combo-irid-specular-env",
                       "combo-thin-coat-sun", "combo-thin-coat-env", "combo-all-lobes-sun", "combo-all-lobes-env",
-                      "furnace-combinations", "subsurface-thin-gi-back"})
+                      "furnace-combinations", "subsurface-thin-gi-back", "iridescence-cost-nofilm", "iridescence-cost-lights8",
+                      "iridescence-cost-nofilm-lights8", "clearcoat-grid-coat-only-sun", "lobe-guide-coplanar"})
         CHECK(MaterialValidation::validScenario(name));
     CHECK_FALSE(MaterialValidation::validScenario("unknown"));
     CHECK_THROWS(MaterialValidation{"unknown"});
@@ -199,7 +200,10 @@ TEST_CASE("F15.3 the bench and the runner (tools/f15_check.py) list the same sce
     for (auto name : MaterialValidation::scenarios())
         // F15.1 ticket 19: the GI back-lookup fixture belongs to tools/f15_thin_gi_back_check.py (it needs DDGI, the runner captures with --gi off).
         if (std::string_view(name) != "specular-grid-edit" && std::string_view(name) != "specular-grid-rough" &&
-            std::string_view(name) != "subsurface-thin-gi-back")
+            std::string_view(name) != "subsurface-thin-gi-back" &&
+            // F15 closure ticket 12: the iridescence per-light cost twins belong to tools/f15_costs.py (no reference, no gate).
+            std::string_view(name).rfind("iridescence-cost-", 0) != 0 && std::string_view(name) != "clearcoat-grid-coat-only-sun" &&
+            std::string_view(name) != "lobe-guide-coplanar")
             bench.insert(std::string(name));
     // F15.3 ticket 13: the transmission scenarios are a separate bench class on the same --material-scenario option.
     for (auto name : TransmissionValidation::scenarios()) bench.insert(std::string(name));
@@ -1346,5 +1350,103 @@ TEST_CASE("F15.3 (ticket 19) the thin + coat grid has the sun behind the spheres
     store.sync(ecs, scene);
     CHECK(store.featureUnion() == (MATERIAL_FEATURE_SPECULAR_IOR | MATERIAL_FEATURE_CLEARCOAT | MATERIAL_FEATURE_SHEEN |
                                    MATERIAL_FEATURE_ANISOTROPY | MATERIAL_FEATURE_IRIDESCENCE | MATERIAL_FEATURE_SUBSURFACE));
+    f.teardown(ecs, scene);
+}
+
+TEST_CASE("F15 closure ticket 12: the iridescence cost twins differ from iridescence-grid-point only in film thickness and light count") {
+    const auto& ref  = MaterialValidation::spec("iridescence-grid-point");
+    const auto& off  = MaterialValidation::spec("iridescence-cost-nofilm");
+    const auto& l8   = MaterialValidation::spec("iridescence-cost-lights8");
+    const auto& off8 = MaterialValidation::spec("iridescence-cost-nofilm-lights8");
+    for (const auto* s : {&off, &l8, &off8}) {
+        REQUIRE(s->hasIridescenceGrid());
+        CHECK(s->roughness == ref.roughness);
+        CHECK(s->metallic == ref.metallic);
+        CHECK(s->baseColor == ref.baseColor);
+        CHECK(s->iridescenceFactor == ref.iridescenceFactor);
+        CHECK(s->iridescenceIor == ref.iridescenceIor);
+        CHECK_FALSE(s->sun);
+        CHECK(s->environment == 0.0f);
+    }
+    CHECK(off.iridescenceThickness == std::vector<float>(6, 0.0f));
+    CHECK(off8.iridescenceThickness == std::vector<float>(6, 0.0f));
+    CHECK(l8.iridescenceThickness == ref.iridescenceThickness);
+    CHECK(off.pointLights.size() == 1);
+    REQUIRE(l8.pointLights.size() == 8);
+    REQUIRE(off8.pointLights.size() == 8);
+    float total = 0.0f;
+    const glm::vec3 centre(0.0f, 2.5f, 0.0f);
+    for (const auto& light : l8.pointLights) {
+        total += light.intensity;
+        CHECK(glm::length(light.position - centre) == doctest::Approx(9.0f));
+    }
+    CHECK(total == doctest::Approx(ref.pointLights[0].intensity)); // the same total intensity
+    CHECK(ref.iridescenceThickness != off.iridescenceThickness);   // negative control: the reference grid is not film-free
+    // Every twin keeps the iridescence feature union (the block is on every sphere): the same specialised pipelines as the reference.
+    for (const char* name : {"iridescence-grid-point", "iridescence-cost-nofilm", "iridescence-cost-lights8", "iridescence-cost-nofilm-lights8"}) {
+        ECS ecs;
+        GpuScene scene;
+        test::NullTextureManager textures;
+        MaterialValidation f{name};
+        f.setup(ecs, scene, textures);
+        SceneStore store;
+        store.sync(ecs, scene);
+        CHECK(store.featureUnion() == MATERIAL_FEATURE_IRIDESCENCE);
+        f.teardown(ecs, scene);
+    }
+}
+
+TEST_CASE("F15 closure ticket 09: clearcoat-grid-coat-only-sun is clearcoat-grid-sun without the ior row, feature union = coat only (mask 2)") {
+    const auto& ref  = MaterialValidation::spec("clearcoat-grid-sun");
+    const auto& only = MaterialValidation::spec("clearcoat-grid-coat-only-sun");
+    CHECK(only.roughness == ref.roughness);
+    CHECK(only.metallic == ref.metallic);
+    CHECK(only.clearcoatFactor == ref.clearcoatFactor);
+    CHECK(only.clearcoatRoughness == ref.clearcoatRoughness);
+    CHECK(only.sun == ref.sun);
+    CHECK(only.towardSun == ref.towardSun);
+    CHECK(only.baseIor.empty());
+    CHECK_FALSE(ref.baseIor.empty());
+    for (const auto* name : {"clearcoat-grid-sun", "clearcoat-grid-coat-only-sun"}) {
+        ECS ecs;
+        GpuScene scene;
+        test::NullTextureManager textures;
+        MaterialValidation f{name};
+        f.setup(ecs, scene, textures);
+        SceneStore store;
+        store.sync(ecs, scene);
+        if (std::string_view(name) == "clearcoat-grid-coat-only-sun")
+            CHECK(store.featureUnion() == MATERIAL_FEATURE_CLEARCOAT);       // mask 2
+        else
+            CHECK(store.featureUnion() == (MATERIAL_FEATURE_CLEARCOAT | MATERIAL_FEATURE_SPECULAR_IOR)); // negative control: mask 3
+        f.teardown(ecs, scene);
+    }
+}
+
+TEST_CASE("F15 closure ticket 06: lobe-guide-coplanar is one mesh of 16 coplanar layers with distinct normals and the coat-only union") {
+    const auto& s = MaterialValidation::spec("lobe-guide-coplanar");
+    REQUIRE(s.layerTiltDegrees.size() == 16);
+    for (size_t i = 1; i < 16; ++i) CHECK(s.layerTiltDegrees[i] > s.layerTiltDegrees[i - 1]); // distinct tilts
+    ECS ecs;
+    GpuScene scene;
+    test::NullTextureManager textures;
+    MaterialValidation f{"lobe-guide-coplanar"};
+    f.setup(ecs, scene, textures);
+    REQUIRE(f.spheres().size() == 1);
+    REQUIRE(scene.getMeshCount() == 1);
+    const auto& vertices = scene.vertices();
+    REQUIRE(vertices.size() == 68); // 16 layers + the culled back quad that gives the scene bounds a z extent
+    for (size_t layer = 0; layer < 16; ++layer)
+        for (size_t corner = 0; corner < 4; ++corner) {
+            const GPUVertex& v = vertices[layer * 4 + corner];
+            const GPUVertex& v0 = vertices[corner];
+            CHECK(v.px == v0.px); // exactly coplanar and identical positions: one depth per pixel
+            CHECK(v.py == v0.py);
+            CHECK(v.pz == 0.0f);
+            if (layer > 0) CHECK(v.ny != v0.ny); // the layer shows in the normal
+        }
+    SceneStore store;
+    store.sync(ecs, scene);
+    CHECK(store.featureUnion() == MATERIAL_FEATURE_CLEARCOAT); // guide producers specialised for the coat-only union
     f.teardown(ecs, scene);
 }

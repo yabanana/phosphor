@@ -120,6 +120,11 @@ struct MaterialScenarioSpec {
     // volume covers both sides of the thin carriers while only the BACK side sees the lit wall (nothing in front of the quads reflects).
     bool                   giBackWall = false;
     float                  giWallAlbedo = 0.0f;
+    // F15 closure (ticket 06, tools/f15_lobe_guide_coplanar_check.py): when non-empty the carrier is ONE mesh (one draw) of
+    // layerTiltDegrees.size() exactly coplanar, fully overlapping quads (identical positions: every fragment of the stack has the same
+    // depth), the vertex normals of layer i tilted by layerTiltDegrees[i] degrees about +X, so the layer a fragment belongs to shows in its
+    // shading normal (colour attachments and the coat normal of the lobe guide).
+    std::vector<float>     layerTiltDegrees;
     [[nodiscard]] bool hasComboGrid() const { return !combo.empty(); }
     [[nodiscard]] bool hasVolumetricGrid() const { return !volumetricWeight.empty(); }
     [[nodiscard]] bool hasSubsurfaceGrid() const { return !subsurfaceWeight.empty(); }
