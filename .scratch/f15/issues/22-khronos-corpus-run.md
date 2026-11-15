@@ -79,3 +79,43 @@ agent's phosphor was running (before the runner's guard existed); it lasted a fe
 - 1 fetch script: MET (--verify 24 models, 9 unit tests). 2 every Tier A model loads or is refused: MET (17/19 render; DiffuseTransmissionTest, TextureTransformMultiTest, GlamVelvetSofa refused with reasons). Ticked.
 - 3 side-by-side page: MET qualitative (page under build/, report docs/research/2026-11-14-f15-khronos-corpus-report.md; own cameras, no IBL, no parity claim). 4 serial captures with GPU guard: MET. Ticked.
 Open: numeric texture fixtures (coat normal, anisotropy direction, iridescence thickness/factor, subsurface weight/colour; sheen textures) because the reference refuses textures; per-slot texture transform; Render Fidelity goldens not approved; A1 (single-bounce mirror-in-mirror dark) not in 24.
+
+2026-11-15 — per-slot KHR_texture_transform (closure agent texxform; owner decision: implement the non-uniform transform now; details in ticket 04, same date):
+
+- **C22-R2 (TextureTransformMultiTest) and C22-R2b (GlamVelvetSofa) fixed: both now load and render** (`build/f15-corpus`, serial, GPU lock;
+  `tools/f15_corpus.py --run --only TextureTransformMultiTest --only GlamVelvetSofa --only TextureTransformTest`): status rendered, 0 fallback draws, 0 failures,
+  O7 0 GPU allocations in the measured frames, TextureTransformTest (the uniform baked path) still renders.  API + shader validation (`--validate`, archive off): 3 of 3
+  exit 0, no validation failure, only the known baseline notices (96 redundant setDepthStencilState + 96 setViewport per capture).
+- What renders: **TextureTransformMultiTest** - all nine rows (BaseColor, Emission, Normal, Metal/Rough, Occlusion, Unlit, Clearcoat factor / roughness / normal) draw the
+  same check-mark pattern in the UV 0, UV 1 and Sample columns (the README's criterion).  Its 28 textured materials have exactly ONE textured slot each (a UNIFORM transform,
+  baked as before); what was blocking it was texCoord 1 (the UV 1 column): the loader now copies TEXCOORD_1 into UV0 for a material whose textures sample set 1.  The model therefore
+  does not exercise the per-slot GPU path.  The "Unlit" row still renders lit: KHR_materials_unlit is only USED here (3 materials), reported unsupported and ignored (agent loader-misc owns
+  it; nothing else blocks this model).  **GlamVelvetSofa** - renders (blue velvet, default variant): the fabric normal texture carries scale 5 while the base colour does not (PerSlot status,
+  the per-slot GPU path with a rotated tangent frame), specular + sheen on the fabric.  KHR_materials_variants and KHR_lights_punctual are used, not required: the default
+  material renders, the asset's lights are not used (the rig lights it); that does not block the render (notes C22-R4, named approximation).
+- Numeric fixture (the corpus is qualitative): `tools/f15_texture_transform_check.py --run` (GPU lock; ctest `f15_texture_transform_python` runs its CPU self-test): a synthetic glTF with five
+  quads, every material carries four DIFFERENT transforms on four slots (baseColor, emissive, occlusion, normal; thresholds fixed in the docstring before any comparison) and each quad
+  measures one slot (baseColor / emissive: 3-bit colour code per cell; occlusion: luminance bit; normal: bright / dark class of N'.L under the rig sun, which includes the rotation of the tangent
+  frame; alpha: a MASK material's cut-out through the base colour transform) against a CPU texel lookup with the README formula.  Result: agreement 1.0 on every slot (valid pixels
+  3265 / 3192 / 3254 / 2916 / 3278; threshold 0.995); negative controls (the same pixels against ANOTHER slot's transform = the uniform-bake result, against the identity, normal: frame not rotated,
+  frame rotated the wrong way) 0.09 - 0.58 (must stay below 0.90, otherwise exit 3): normal frame-not-rotated 0.478, wrong way 0.0.  The same run under API + shader validation (archive off): 1.0, clean.
+- Featureless scenes unchanged: `f15_exact.sh` 5 cases (sponza-d2, cornell-restir, cornell-clustered-ssr, manylights-restir, grid-sky) PFM byte-identical (cmp) to build/litefix/exact-new;
+  `visual_check` 8 benches 0 px against build/reference-f15-appB.  One finding on the way: the first version (restructured shadeSurface expressions) changed benches 1 / 2 / 6 by 9 / 1 / 9 px of delta 1
+  with the constant compiled out (a 3ef8f41 binary: 0 px); the fix keeps every plain statement verbatim and adds the transform as a guarded alternative (commit fc94500).  Rule for later edits of shadeSurface:
+  never restructure an existing expression, add a guarded branch.
+- Sites NOT covered (named approximation `texture_transform_secondary_sites`): a slot with a per-slot transform samples UV0 untransformed at reflection / GI / probe-capture hits
+  (reflections.metal, gi_common.h, reflection_probes.metal, restir_common.h emitter UVs), at the RT any-hit alpha test and transmission tint (rt_intersections.metal rtAlphaMaskedTest and the tint at
+  shadows.metal), and in the CSM / static-cache shadow-map alpha tests (shadow_depth_fragment, shadow_cache_depth_fragment).  Uniform transforms are baked into the vertex UVs, so none of those sites is
+  wrong for them.  Covered: forward, meshlet forward, visibility resolve (generic, adaptive, class bins), indexed overflow fallback, DI guide kernel and receivers, the volumetric-subsurface resolve, the visibility
+  alpha raster (visibility_alpha(_lit)_tt_fs) and the overflow receiver prepass (forward_shadow_receiver_tt_fs).  What covering the rest takes: the extension buffer bound at each of those kernels
+  (rt_alpha_generic already receives it at buffer 7), the `On` helpers of shaders/texture_transform.h and one separate entry point per alpha function (metal-tt cannot lower an unspecialised descriptor
+  whose function references a function constant: found when the archive step failed with "cannot lower module with unresolved function constants").
+- Layer stacks (F15.4): a layer sub-material's own transforms and the mask / height UV are not applied (a transform or UV set on a layer texture is Unsupported); the layer tiling `uvScale` is the only per-layer UV control.
+- Archive: targeted update (`.scratch/f15/harvest/texxform-1.json` KEPT, constant 26 plus the three `*_tt_fs` functions, `--skip-present`, from the fixture and GlamVelvetSofa harvests; TextureTransformMultiTest adds nothing,
+  its transforms are baked): +12 compute, +1 mesh, +7 render descriptors, purely additive (`diff --minimal`: 0 deleted lines, 813 added).
+- Still open for the orchestrator: regenerate the page and `docs/research/2026-11-14-f15-khronos-corpus-report.md` from a FULL corpus run (the notes json carries the new status of C22-R2 / R2b, new C22-R3 unlit, C22-R4
+  variants / lights; this agent ran only three models and did not edit the generated report), and the timings below.
+- Timing for a quiet machine (not measured here: other agents were running): A/B/A of the textured fixture with `--no-gpu-timing` off and `--gpu-timing-serial`: `tools/f15_texture_transform_check.py` scene with the constant
+  (default) against the same scene with every transform removed (unused: remove the `KHR_texture_transform` blocks from the generated glTF: a copy of build_gltf without them) - the per-pixel cost of one extra 2x3 matrix per slot
+  (about 40 flops per slot sampled); Sponza D2 `--frames` A/B against 3ef8f41 (bit-identical output; the shader code of the generic and class pipelines differs only by dead branches, expected equal within noise); GlamVelvetSofa
+  at 1080p with and without the constant (same scene, `withTextureTransform` skipped) for the real cost of the transform on a textured model.

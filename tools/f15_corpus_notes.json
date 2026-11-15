@@ -214,14 +214,25 @@
     "defects": []
   },
   "TextureTransformMultiTest": {
-    "renders": [],
-    "approximations": [],
+    "renders": [
+      "All nine rows (BaseColor, Emission, Normal, Metal/Rough, Occlusion, Unlit, Clearcoat factor / roughness / normal) draw the same check-mark pattern in the UV 0, UV 1 and Sample columns (the README's pass criterion: rows of identical check marks).  Every one of the 28 materials has exactly ONE textured slot, so each is a UNIFORM transform: baked into the mesh UVs (offset, rotation 90 degrees, scale 0.35); the UV 1 column exercises the new UV-set copy (the loader copies TEXCOORD_1 into UV0 for a material whose textures sample set 1; one UV set per material).",
+      "This model does not exercise the per-slot GPU path (no material mixes transformed and plain slots); GlamVelvetSofa (normal slot only) and tools/f15_texture_transform_check.py (five slots, different transforms, numeric) do."
+    ],
+    "approximations": [
+      "Per-slot transforms (ticket 22) are applied by every primary shading path and by the visibility and overflow-receiver alpha tests; reflection / GI / probe-capture hits, RT any-hit alpha tests and the CSM / static-cache shadow-map alpha tests sample UV0 untransformed for a slot that carries a per-slot transform (not exercised by this model: its transforms are baked)."
+    ],
     "defects": [
       {
         "id": "C22-R2",
+        "status": "fixed",
+        "summary": "Was refused: material 'BaseColorTest1Mat' carries KHR_texture_transform with texCoord 1 (a UV set other than UV0).",
+        "hypothesis": "Fixed by F15.1 ticket 22: BaseColorTest1Mat and its siblings use texCoord 1, which the old analysis refused; the loader now copies the set into UV0 and bakes the (uniform) transform. The model loads and renders (build/f15-corpus: 0 fallback draws, O7 0 GPU allocations, API + shader validation clean)."
+      },
+      {
+        "id": "C22-R3",
         "status": "open",
-        "summary": "Refused: material 'BaseColorTest1Mat' has a non-uniform KHR_texture_transform (a transform on one texture slot only).",
-        "hypothesis": "The loader bakes a transform into the mesh UV0 and therefore accepts only a UNIFORM one (analyzeTextureTransforms: every textured slot of a material carries the same transform); BaseColorTest1Mat transforms the base colour only (offset, rotation 90 degrees, scale 0.35, texCoord 1) while its other slots are untransformed or on UV0. Supporting it needs per-slot transforms in MaterialDescription, the GPU material record and the shader texture fetches (and UV1 for texCoord overrides): an F15.1 feature, not a corpus-run fix. The model also uses KHR_materials_unlit, which would render lit."
+        "summary": "The 'Unlit' row renders lit (KHR_materials_unlit is used, not required: three materials).",
+        "hypothesis": "KHR_materials_unlit is reported unsupported (decision 02) and ignored when optional; the loader-misc work item of the closure owns it. The row's check marks are still correct, only the shading differs."
       }
     ]
   },
@@ -254,14 +265,22 @@
     "defects": []
   },
   "GlamVelvetSofa": {
-    "renders": [],
+    "renders": [
+      "The sofa body (blue velvet, default variant) with the fabric normal texture scaled 5x by its KHR_texture_transform (the fabric weave is visible; the base colour texture is not scaled: status PerSlot), specular + sheen on the fabric, legs and caps."
+    ],
     "approximations": [],
     "defects": [
       {
         "id": "C22-R2b",
-        "status": "open",
-        "summary": "Refused: material 'GlamVelvetSofa_fabric_champagne' has a non-uniform KHR_texture_transform (scale 5x5 on the normal texture only).",
-        "hypothesis": "Same root cause as C22-R2: the loader bakes only a uniform transform into UV0, the fabric normal texture alone is scaled 5x (the base colour texture is not)."
+        "status": "fixed",
+        "summary": "Was refused: material 'GlamVelvetSofa_fabric_champagne' has a non-uniform KHR_texture_transform (scale 5x5 on the normal texture only).",
+        "hypothesis": "Fixed by F15.1 ticket 22: the normal slot carries its own transform (the tangent frame is rotated with it)."
+      },
+      {
+        "id": "C22-R4",
+        "status": "named-approximation",
+        "summary": "KHR_materials_variants and KHR_lights_punctual are used, not required: the default (first primitive) material is rendered, the asset's lights are not used (the declared rig lights it).",
+        "hypothesis": "Both extensions are reported as unknown optional (decision 02); a variant selector and punctual lights are outside the F15 material scope. Nothing blocks the render."
       }
     ]
   },

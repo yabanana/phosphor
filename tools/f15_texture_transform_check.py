@@ -447,7 +447,8 @@ def main(argv=None):
     p.add_argument("--evaluate", action="store_true", help="evaluate OUT/engine.png")
     p.add_argument("--binary")
     p.add_argument("--out", default="build/f15-texxform")
-    p.add_argument("--extra", nargs="*", default=[], help="extra renderer arguments (e.g. --harvest-pipelines FILE)")
+    p.add_argument("--no-archive", action="store_true", help="run with --no-pipeline-archive (needed under MTL_SHADER_VALIDATION)")
+    p.add_argument("--harvest", metavar="FILE", help="record the pipelines of the run with --harvest-pipelines FILE")
     a = p.parse_args(argv)
     if a.selftest:
         selftest()
@@ -465,7 +466,11 @@ def main(argv=None):
         if not a.binary:
             print("--run needs --binary", file=sys.stderr)
             return 2
-        cmd = capture_command(a.binary, gltf, out) + a.extra
+        cmd = capture_command(a.binary, gltf, out)
+        if a.no_archive:
+            cmd.append("--no-pipeline-archive")
+        if a.harvest:
+            cmd += ["--harvest-pipelines", a.harvest]
         with log.open("w") as stream:
             code = subprocess.run(cmd, stdout=stream, stderr=subprocess.STDOUT).returncode
         text = log.read_text(errors="replace")
