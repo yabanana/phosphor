@@ -305,3 +305,21 @@ Open: numeric texture fixtures (coat normal, anisotropy direction, iridescence t
   No reference image was touched; only Sponza D2 (the 828 smooth dielectric texels) changes.
 - **F13/F14 reflection subset** (20 cases, floor-removed binary): control 11/11, functional 3/3, independent-clip 6/6; independent-clip p95 identical to the F0-floor run to 4 decimals
   (roughness-custom 0.0393, metalfx-fallback 0.0393, mirror-custom 0.0184, moving-light-custom 0.0515, disocclusion-custom 0.0568, rough-emitter-custom 0.0098).
+
+### C22-A1: cumulative-throughput criterion replaces the per-hit Fresnel gate (2026-11-15, orchestrator review of 934133f)
+
+- `reflections.metal`: no per-hit F >= 0.1 condition any more. The chain multiplies the Fresnel weights of the hits and ends when the product is below the declared 0.01
+  (`kReflectionMirrorMinThroughput`), keeps roughness <= 0.1 and at most 3 extra bounces. The model's Fresnel-gate mask is removed (decision 11: the pixel set is fixed before comparing).
+- **dielectric-corridor, no mask**, classes 1-2 (29084 / 4788 stable pixels): class 1 1.99 %, class 2 **4.40 %** (gate 5 %); controls: `--reflection-bounces 0` class 2 99.1 %, F0-floor build
+  99.1 % (both fail as required). Metal fixtures unchanged: corridor 0.20 / 0.32 / 0.39 / 0.70 %, ball 0.63 / 2.43 / 4.7 %, controls 98-100 %. Class 2 has margin 0.6 points: the remaining
+  error is the engine's probe radiance vs the exact sky and the sphere-free tessellation-free geometry here, not a criterion effect (F2 >= 0.04 so the 0.01 cutoff never fires in class 2).
+- **Sponza D2 trace count** (`--debug-lighting 1`): 364-383 extra specular traces per frame (the previous criteria: 0 with the F0 floor, about 70 with the F >= 0.1 gate); 0 chains ended by the bound.
+- **Re-baseline evidence** (default 3 against `--reflection-bounces 0` = integrated tip behaviour): sponza-d2 linear PFM **3650 of 921600 px differ, max delta 0.011700, mean delta over the
+  differing px 8.25e-06 (3.27e-08 over the frame)**, 8-bit PNG 0 px; cornell-restir, cornell-clustered-ssr, manylights-restir, grid-sky 0 px; the 8 `visual_check` benches 0 of 5760000 px,
+  max delta 0, mean delta 0. No reference image touched.
+- **F13/F14 reflection subset** (20 cases): control 11/11, functional 3/3, independent-clip 6/6, independent-clip p95 identical to the previous run to 4 decimals (roughness-custom 0.0393,
+  metalfx-fallback 0.0394, mirror-custom 0.0184, moving-light-custom 0.0515, disocclusion-custom 0.0568, rough-emitter-custom 0.0098). The first full run showed the three moving-light cases
+  failing with `Pipeline Forward v0 failed: Compilation failed due to an interrupted connection: XPC_ERROR_CONNECTION_INTERRUPTED` (Metal compiler service, shader validation without archive, machine
+  loaded by other jobs): reproduced once in a second 3-case run, NOT reproducible in isolation (the same command with the F0-floor build, the current build and `--reflection-bounces 0`: no
+  failure), and a third runner run of the three cases passed (control 2/2, independent-clip 1/1, p95 0.1060 / 0.0515 / 0.0421, identical to before). The failure is in a Forward pipeline
+  compile, outside the reflection kernels; recorded here as an environment interruption, not as a pass of the first run.
