@@ -16,6 +16,12 @@
 # references instead of comparing.  Captures use --fixed-timestep and the
 # same frame count, so animated benches are deterministic; --inject-input
 # proves that keyboard/mouse input cannot change a capture.
+# --pipeline-sync: the capture always uses each pipeline's final variant.  Without it the frame
+# drew with whichever pipeline had finished compiling by the capture frame: under shader
+# validation (no archive) and machine load the forward variant was still compiling after 31
+# frames, the generic fallback drew every frame, and benches 1/2/3/6/7 differed by 9/1/5/9/25
+# pixels of delta 1 (the codegen difference F3.3 allows between generic and variant, checked by
+# variant_check.sh) on 264b552 and on the texture-transform tree alike (F15 ticket 24, 2026-11-15).
 set -euo pipefail
 
 build_dir=${1:-build}
@@ -37,7 +43,7 @@ for bench in 1 2 3 4 5 6 7 8; do
     extra_bench_args=""
     [[ "$bench" == 8 ]] && extra_bench_args=${BENCH8_ARGS:-}
     MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 MTL_DEBUG_LAYER_WARNING_MODE=nslog \
-        "$app" --scene procedural --bench "$bench" --warmup "$warmup" --frames 1 --no-ui --fixed-timestep --inject-input \
+        "$app" --scene procedural --bench "$bench" --warmup "$warmup" --frames 1 --no-ui --fixed-timestep --inject-input --pipeline-sync \
         ${EXTRA_ARGS:-} ${extra_bench_args:-} --capture "$capture" >"$log" 2>&1 || status=$?
     # Anything besides our INFO lines, the BENCH/PIPELINES/STARTUP/SWITCH
     # summaries and the two "Validation Enabled" banners is a problem.
