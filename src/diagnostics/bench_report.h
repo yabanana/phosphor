@@ -165,6 +165,7 @@ struct MeshletReport {
 
 struct RenderingReport {
     bool present = false, materialBinning = false, post = false, autoExposure = false, edr = false, offscreen = false;
+    bool specularMs = false; // --specular-ms (F15 closure): Kulla-Conty multiple-scattering compensation of the specular lobes
     std::string path, asset, upscaler, tonemap;
     u32 inputWidth = 0, inputHeight = 0, views = 1, framesInFlight = 3, gpuFailures = 0;
     u64 temporalFrames = 0, nativeFrames = 0, historyResets = 0, binnedFrames = 0, genericFrames = 0;

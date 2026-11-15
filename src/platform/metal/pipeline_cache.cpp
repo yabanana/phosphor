@@ -417,7 +417,38 @@ PipelineCache::requestTemporalWorker(std::shared_ptr<TemporalWorker> worker) {
 
 u32 PipelineCache::workerCount() const { return queue_ ? queue_->workerCount() : 0; }
 
-pipe::PipelineHandle PipelineCache::request(const pipe::PipelineDesc& desc, bool loading) {
+// F15 closure (--specular-ms): the functions that run shadeSurface (shaders/material_shading.h) take the SPECULAR_MS constant
+// (reserved 25, shaders/variants.def).  Every other pipeline keeps its descriptor and archive key.
+static bool runsShadeSurface(const pipe::PipelineDesc& desc) {
+    static constexpr const char* names[] = {"forward_fs",         "forward_shadow_receiver_fs", "forward_shadow_receiver_tt_fs", "forward_surface_fs",
+                                            "forward_surface_lit_fs", "forward_di_receiver_fs",  "forward_di_receiver_guide_fs", "forward_di_receiver_guide_norog_fs",
+                                            "visibility_resolve", "visibility_lit_resolve",     "visibility_adaptive",
+                                            "visibility_tile",    "material_lighting_guides"};
+    for (const std::string& full : desc.functions) {
+        std::string f = full; // the exact-maths module ("phx_exact::" prefix) and the vertex-colour variants ("_vc" suffix) run it too
+        if (f.rfind("phx_exact::", 0) == 0) f = f.substr(11);
+        if (f.size() > 3 && f.compare(f.size() - 3, 3, "_vc") == 0) f.resize(f.size() - 3);
+        for (const char* n : names)
+            if (f == n) return true;
+    }
+    return false;
+}
+
+// The descriptor with SPECULAR_MS = 1 when the option is on and the pipeline runs shadeSurface (also applied to the generic variant a fallback
+// or the fallback decision looks for: the generic forward pipeline carries the constant too, or every request would look "not ready").
+static pipe::PipelineDesc withSpecularMsConstant(const pipe::PipelineDesc& desc, bool on) {
+    constexpr u16 kSpecularMsConstant = 25; // reserved SPECULAR_MS (shaders/variants.def)
+    if (!on || !runsShadeSurface(desc)) return desc;
+    for (u32 i = 0; i < desc.constantCount; ++i)
+        if (desc.constants[i].index == kSpecularMsConstant) return desc;
+    pipe::PipelineDesc out = desc;
+    out.constant(kSpecularMsConstant, pipe::ConstantType::UInt, 1u);
+    return out;
+}
+
+pipe::PipelineHandle PipelineCache::request(const pipe::PipelineDesc& requested, bool loading) {
+    const pipe::PipelineDesc patched = withSpecularMsConstant(requested, options_.specularMs);
+    const pipe::PipelineDesc& desc = patched;
     const Clock::time_point requestStart = Clock::now();
     struct AddTime {
         double& total;
@@ -455,7 +486,7 @@ pipe::PipelineHandle PipelineCache::request(const pipe::PipelineDesc& desc, bool
     // only where it buys something.  --debug-pipeline-fallback forces it.
     bool allowFallback = options_.fallbackOnly;
     if (!allowFallback && startupDone_ && !loading && desc.kind == pipe::PipelineKind::Render) {
-        const pipe::PipelineHandle generic = registry_.find(pipe::pipelineKey(desc.generic()));
+        const pipe::PipelineHandle generic = registry_.find(pipe::pipelineKey(withSpecularMsConstant(desc.generic(), options_.specularMs)));
         allowFallback = generic == pipe::INVALID_PIPELINE || !registry_.isFinal(generic);
     }
     submit(handle, desc, generation, library, allowFallback);
@@ -506,7 +537,7 @@ void PipelineCache::resolve(pipe::PipelineHandle handle, const pipe::PipelineDes
     if (allowFallback && render && !desc.isFlexible()) {
         u32 calls = 0;
         float ms = 0.0f;
-        const pipe::PipelineDesc generic = desc.generic();
+        const pipe::PipelineDesc generic = withSpecularMsConstant(desc.generic(), options_.specularMs);
         MTL::RenderPipelineState* base = flexibleBase(generic, library, calls, ms);
         if (base) {
             MTL4::PipelineDescriptor* d = buildDescriptor(generic, library);

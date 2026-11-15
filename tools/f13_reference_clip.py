@@ -284,6 +284,8 @@ def main(argv=None):
     p.add_argument("--mirror-bounces", type=int, default=0,
                    help="F15 ticket 22: extra ideal-mirror hits after the camera's specular lobe (0 = declared F13 model)")
     p.add_argument("--threads", type=int, default=min(12, os.cpu_count() or 1))
+    p.add_argument("--specular-ms", choices=["on", "off"], default="on",
+                   help="ADR-0007: the Kulla-Conty multiple-scattering lobe of the engine default (on) or the Appendix B lobe alone (off)")
     p.add_argument("--resume", action="store_true", help="keep converged states already in --out")
     p.add_argument("--window-regions", action="store_true", help="render only the regions' bounding box (+margin)")
     p.add_argument("--window-margin", type=int, default=2)
@@ -301,6 +303,8 @@ def main(argv=None):
     p.add_argument("--out", required=True)
     p.set_defaults(function=command_refs)
     args = parser.parse_args(argv)
+    if hasattr(args, "specular_ms"):
+        reference.Context.ms_lobe = args.specular_ms == "on"
     try:
         return args.function(args)
     except (ImportError, ValueError, RuntimeError, OSError) as error:

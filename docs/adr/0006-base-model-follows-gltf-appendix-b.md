@@ -17,3 +17,6 @@ dielectric directional Fresnel) before any lobe lands.
   re-taken deliberately, with before/after evidence; the F12 diagnostic signal
   `gi_reference_diffuse` stays pure Lambert so the Mitsuba Cornell oracle stays
   valid. Sponza D2 is re-measured.
+
+> Superseded in part by [ADR-0007](0007-specular-multiple-scattering-compensation.md) (2026-11-15): the base specular lobe carries
+> Kulla-Conty multiple-scattering compensation by default (a declared deviation from Appendix B); `--specular-ms off` restores this model.

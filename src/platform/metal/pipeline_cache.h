@@ -75,6 +75,7 @@ public:
         bool        interactiveQos = false; // negative control (F3.1)
         bool        fallbackOnly   = false; // debug: never apply final objects
         u32         debugXpcFail   = 0;     // debug: first N compile attempts fail with a synthetic XPC interruption
+        bool        specularMs     = false; // --specular-ms: shading pipelines (forward_*, resolve) get SPECULAR_MS = 1 (variants.def)
     };
 
     PipelineCache(MetalContext& context, const Options& options);

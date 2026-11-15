@@ -1631,3 +1631,18 @@ TEST_CASE("F15.1 (ticket 22) --reflection-bounces bounds the mirror chain at 0..
     CHECK_FALSE(parse({"--bench", "4", "--reflection-bounces", "-1"}, bad, error));
     CHECK_FALSE(parse({"--bench", "4", "--reflection-bounces"}, bad, error));
 }
+
+TEST_CASE("F15 closure launch option --specular-ms defaults on (ADR-0007) and parses on|off") {
+    LaunchOptions o;
+    std::string error;
+    REQUIRE(parse({}, o, error));
+    CHECK(o.specularMs); // owner decision 2026-11-15: on by default; off = the Appendix B model, bit-identical to before
+    REQUIRE(parse({"--specular-ms", "off"}, o, error));
+    CHECK_FALSE(o.specularMs);
+    REQUIRE(parse({"--specular-ms", "on"}, o, error));
+    CHECK(o.specularMs);
+    LaunchOptions bad;
+    CHECK_FALSE(parse({"--specular-ms", "maybe"}, bad, error));
+    CHECK(error.find("--specular-ms") != std::string::npos);
+    CHECK_FALSE(parse({"--specular-ms"}, bad, error));
+}

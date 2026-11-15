@@ -1212,6 +1212,15 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
                 error = "--meshlet-triangle-cull: expected on or off, got '" + std::string(*value) + "'";
                 return false;
             }
+        } else if (arg == "--specular-ms") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "on") out.specularMs = true;
+            else if (*value == "off") out.specularMs = false;
+            else {
+                error = "--specular-ms: expected on or off, got '" + std::string(*value) + "'";
+                return false;
+            }
         } else if (arg == "--thin-gi-back") {
             const auto value = needValue();
             if (!value) return false;

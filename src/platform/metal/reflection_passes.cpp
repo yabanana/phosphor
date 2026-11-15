@@ -105,7 +105,7 @@ struct ReflectionPasses::Impl {
             float32Filtering?"RGBA32Float":"RGBA16Float-bounded",u32(float32Filtering),u32(o.forceApple9),u32(o.reducedLighting));
         raster.output(0,graphProbeFormat);captureRaster=p.request(raster);rasterDesc=raster;
         prefilter=p.request(lighting::kernel("reflection_probe_prefilter"));validateProbe=p.request(lighting::kernel("reflection_probe_validate"));publishProbe=p.request(lighting::kernel("reflection_probe_ready"));
-        reduce=p.request(lighting::kernel("reflection_reduce"));compose=p.request(lighting::kernel("reflection_composite"));zero=p.request(lighting::kernel("reflection_signal_zero"));clear=p.request(lighting::kernel("reflection_counter_clear"));checker=p.request(lighting::kernel("reflection_check"));
+        reduce=p.request(lighting::kernel("reflection_reduce"));compose=p.request(lighting::kernel(o.specularMs?"reflection_composite_ms":"reflection_composite"));zero=p.request(lighting::kernel("reflection_signal_zero"));clear=p.request(lighting::kernel("reflection_counter_clear"));checker=p.request(lighting::kernel("reflection_check"));
         inputCheck=p.request(lighting::kernel("reflection_input_check"));if(o.debugReflectionCorrupt>=2)inputPoison=p.request(lighting::kernel("reflection_input_poison"));
         if(o.captureLinearSignal==8)filteredIndirectExport=p.request(lighting::kernel("reflection_filtered_indirect_diffuse"));
         auto* dd=MTL::DepthStencilDescriptor::alloc()->init();dd->setDepthCompareFunction(MTL::CompareFunctionGreater);dd->setDepthWriteEnabled(true);captureDepthState=c.device()->newDepthStencilState(dd);dd->release();
@@ -256,8 +256,8 @@ struct ReflectionPasses::Impl {
         composeParams={f.width,f.height,f.backingWidth,f.backingHeight,0,{0,options.debugReflectionCorrupt,0},{environment[0],environment[1],environment[2]},0};
         if(gi&&options.gi!=GiMode::Off)composeParams.flags|=REFLECT_COMPOSE_GI;if(custom)composeParams.flags|=REFLECT_COMPOSE_CUSTOM;
         if(options.directLighting!=DirectLightingMode::Legacy)composeParams.flags|=REFLECT_COMPOSE_DI;
-        if(lobeGuide)composeParams.flags|=REFLECT_COMPOSE_LOBE_GUIDE_VALID;if(sssWalk&&lobeGuide)composeParams.flags|=REFLECT_COMPOSE_SSS;if(options.reflections!=ReflectionMode::Off)composeParams.flags|=REFLECT_COMPOSE_SPEC;if(options.reflections==ReflectionMode::Probes)composeParams.flags|=REFLECT_COMPOSE_SHEEN_FROM_PROBE;if(options.ao!=AoMode::Off)composeParams.flags|=REFLECT_COMPOSE_AO;composeParams.pad[0]=0;composeAddress=lighting::upload(c,composeParams);
-        preComposeParams=composeParams;preComposeParams.flags&=REFLECT_COMPOSE_DI|REFLECT_COMPOSE_GI|REFLECT_COMPOSE_LOBE_GUIDE_VALID|REFLECT_COMPOSE_SSS;
+        if(lobeGuide)composeParams.flags|=REFLECT_COMPOSE_LOBE_GUIDE_VALID;if(sssWalk&&lobeGuide)composeParams.flags|=REFLECT_COMPOSE_SSS;if(options.reflections!=ReflectionMode::Off)composeParams.flags|=REFLECT_COMPOSE_SPEC;if(options.reflections==ReflectionMode::Probes)composeParams.flags|=REFLECT_COMPOSE_SHEEN_FROM_PROBE;if(options.ao!=AoMode::Off)composeParams.flags|=REFLECT_COMPOSE_AO;if(options.specularMs)composeParams.flags|=REFLECT_COMPOSE_SPECULAR_MS;composeParams.pad[0]=0;composeAddress=lighting::upload(c,composeParams);
+        preComposeParams=composeParams;preComposeParams.flags&=REFLECT_COMPOSE_DI|REFLECT_COMPOSE_GI|REFLECT_COMPOSE_LOBE_GUIDE_VALID|REFLECT_COMPOSE_SSS|REFLECT_COMPOSE_SPECULAR_MS;
         if(preComposeParams.flags&REFLECT_COMPOSE_DI)preComposeParams.flags|=REFLECT_COMPOSE_EXCLUDE_EMISSION;preComposeAddress=lighting::upload(c,preComposeParams);
         GPUProbeGridParams dummy{};dummy.reset=1;giDummyAddress=lighting::upload(c,dummy);GPUProbeTraceExtra extra{};extra.sampledLightCount=direct.lightCount();extra.frameSeed=options.lightingSeed;extra.sunAngularRadius=.00465f;extraDummyAddress=lighting::upload(c,extra);
         useCaptureVC=scene.vertexColorInUse();if(useCaptureVC&&captureRasterVC==pipe::INVALID_PIPELINE)captureRasterVC=p.request(pipe::forward::withVertexColor(rasterDesc));
@@ -362,7 +362,7 @@ struct ReflectionPasses::Impl {
         const rg::TextureRef giBackRef=gi&&options.gi!=GiMode::Off?gi->irradianceBack():rg::TextureRef{};
         composeParams.flags&=~REFLECT_COMPOSE_GI_BACK;if(giBackRef.valid()&&lobeGuide)composeParams.flags|=REFLECT_COMPOSE_GI_BACK;
         outputHalf=false;composeParams.pad[0]=0;composeAddress=lighting::upload(c,composeParams);
-        preComposeParams=composeParams;preComposeParams.flags&=REFLECT_COMPOSE_DI|REFLECT_COMPOSE_GI|REFLECT_COMPOSE_LOBE_GUIDE_VALID|REFLECT_COMPOSE_GI_BACK|REFLECT_COMPOSE_SSS;
+        preComposeParams=composeParams;preComposeParams.flags&=REFLECT_COMPOSE_DI|REFLECT_COMPOSE_GI|REFLECT_COMPOSE_LOBE_GUIDE_VALID|REFLECT_COMPOSE_GI_BACK|REFLECT_COMPOSE_SSS|REFLECT_COMPOSE_SPECULAR_MS;
         if(preComposeParams.flags&REFLECT_COMPOSE_DI)preComposeParams.flags|=REFLECT_COMPOSE_EXCLUDE_EMISSION;preComposeAddress=lighting::upload(c,preComposeParams);
         errorsRef=graph.importBuffer("F13 completed signal error words",{128},ImportPerFrame|ImportOutput);
         dummyRef=graph.importBuffer("F13 disabled GI safe buffer",{dummyBuffer->length()},ImportContentsDefined);

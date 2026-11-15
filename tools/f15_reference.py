@@ -173,7 +173,9 @@ MODEL = {
 }
 
 # The declared model plus the deliberately wrong variants used as negative controls.
-APPENDIX_B = {"alpha": "squared", "fresnel": "schlick", "weighting": "appendix-b"}
+# F15 closure (ADR-0007): the engine applies the Kulla-Conty multiple-scattering lobe by default ("ms": "kulla-conty", tools/f15_ms.py); the
+# glTF Appendix B model without it is {**APPENDIX_B, "ms": "off"} (`--specular-ms off`, the control `ms-ignored`).
+APPENDIX_B = {"alpha": "squared", "fresnel": "schlick", "weighting": "appendix-b", "ms": "kulla-conty"}
 # F15.1: the dielectric of KHR_materials_ior/specular scenes.  "base" = Appendix B (F0 0.04, no extension).
 SPECULAR_EXT = {**APPENDIX_B, "dielectric": "extension"}
 CONTROLS = {
@@ -267,8 +269,13 @@ COMBO_CONTROLS = {
     "transmission-default-fresnel": {"thin": "default-fresnel"},
     "transmission-sheen-unscaled": {"thin": "sheen-unscaled"},
 }
+# F15 closure (--specular-ms, tools/f15_ms.py): deltas on the scene's main model, which then carries "ms": "kulla-conty".
+MS_CONTROLS = {
+    "ms-ignored": {"ms": "off"},      # no multiple-scattering compensation (today's base model)
+    "ms-double": {"ms": "double"},    # F_ms doubled: the lobe gains energy
+}
 ALL_CONTROLS = sorted({**CONTROLS, **SHEEN_CONTROLS, **ANISO_CONTROLS, **IRID_CONTROLS, **THIN_CONTROLS, **COMBO_CONTROLS,
-                       **TEXTURE_CONTROLS})
+                       **TEXTURE_CONTROLS, **MS_CONTROLS})
 
 
 def control_model(name, main_model):
@@ -286,6 +293,8 @@ def control_model(name, main_model):
         return {**main_model, **COMBO_CONTROLS[name]}
     if name in TEXTURE_CONTROLS:
         return {**main_model, **TEXTURE_CONTROLS[name]}
+    if name in MS_CONTROLS:
+        return {**main_model, **MS_CONTROLS[name]}
     return CONTROLS[name]
 
 
@@ -1275,10 +1284,18 @@ def legacy_hemisphere_radiance(base, metallic, roughness, n, v, aniso, variant):
     f0 = DIELECTRIC_F0 * (1 - m) + base * m
     spec_w = np.clip(f0 * a[:, None] + b[:, None], 0.0, 1.0)
     diffuse_w = 1.0 - np.clip(DIELECTRIC_F0 * a + b, 0.0, 1.0)[:, None]
+    ms_term = 0.0
+    if variant.get("ms", "off") != "off":  # ADR-0007: the lobe times hemisphere(N) (anisotropic lobes carry none), its energy out of the diffuse complement
+        import f15_ms
+        mask = f15_ms.isotropic(aniso, len(n_dot_v))[:, None] if aniso is not None else 1.0
+        lobe = f15_ms.declared_complement(DIELECTRIC_F0, 1.0, clamp_roughness(effective), n_dot_v, variant["ms"]) * mask
+        diffuse_w = np.maximum(diffuse_w - np.max(lobe, axis=-1, keepdims=True), 0.0)
+        ms_term = f15_ms.declared_environment_value(base, np.asarray(metallic, dtype=np.float64), clamp_roughness(effective), n_dot_v, 1.0,
+                                                    variant["ms"], None) * mask * hemisphere_radiance(n)
     reflected = 2.0 * dot(env_normal, v)[:, None] * env_normal - v
     mix_k = (np.asarray(roughness, dtype=np.float64) ** 2)[:, None]
     direction = normalize(reflected * (1.0 - mix_k) + env_normal * mix_k)
-    return (1 - m) * base * diffuse_w * hemisphere_radiance(n) + spec_w * hemisphere_radiance(direction)
+    return (1 - m) * base * diffuse_w * hemisphere_radiance(n) + spec_w * hemisphere_radiance(direction) + ms_term
 
 
 # F15.3 closure (ticket 16): the declared transmitted albedo of a thin material under an extended dielectric or a film.  The dielectric-only ratio fit
@@ -1335,15 +1352,21 @@ def declared_extension_diffuse_weight(metallic, roughness, n_dot_v, variant, die
             f0c, weight_s = np.full_like(f0c, DIELECTRIC_F0), np.ones_like(weight_s)
         f0_film = f0c * weight_s
         e_ds = np.clip((f0c if kind == "f0-unweighted" else f0_film) * a + (np.ones_like(weight_s) if kind == "f90-one" else weight_s) * b, 0.0, 1.0)
-    plain = 1.0 - np.max(e_ds, axis=-1, keepdims=True)
+    lobe = 0.0
+    if variant.get("ms", "off") != "off":  # ADR-0007: F_ms L of the film-free dielectric layer comes out of the complement
+        import f15_ms
+        f90_ms = np.ones((len(mu), 1)) if dielectric is None or variant.get("dielectric", "extension") == "f90-one" else \
+            np.asarray(dielectric["weight"], dtype=np.float64)[:, None]
+        lobe = f15_ms.declared_complement(f0_film, f90_ms, clamp_roughness(roughness), mu, variant["ms"])
+    plain = np.maximum(1.0 - np.max(e_ds + lobe, axis=-1, keepdims=True), 0.0)
     if irid is None:
         return plain
     s = irid_strength(irid)[:, None]
     e_film = np.clip(thin_film_fresnel(mu, irid_film_ior(irid), irid_thickness(irid), f0_film) * np.clip(a + b, 0.0, 1.0), 0.0, 1.0)
-    return (1.0 - s) * plain + s * (1.0 - np.max(e_film, axis=-1, keepdims=True))
+    return (1.0 - s) * plain + s * np.maximum(1.0 - np.max(e_film + lobe, axis=-1, keepdims=True), 0.0)
 
 
-def declared_thin_environment(material, metallic, base, roughness, n_dot_v, thin, diffuse_weight=None, albedo=None):
+def declared_thin_environment(material, metallic, base, roughness, n_dot_v, thin, diffuse_weight=None, albedo=None, ms_kind="off"):
     """The declared thin-subsurface model for unit radiance (decision 06): `material` is the declared base radiance
     (1 - m) c (1 - E_d) + E.  The reflected diffuse is scaled by (1 - w) and the transmitted lobe adds
         (1 - m) w color (1 - E_d(mu)) r(mu),   r(mu) = 1 - 0.16 mu,  E_d = clamp(0.04 A + B, 0, 1)  (A, B at the material roughness),
@@ -1354,6 +1377,9 @@ def declared_thin_environment(material, metallic, base, roughness, n_dot_v, thin
     if thin["variant"] == "default-weight":
         diffuse_weight = None
     weight = np.clip(DIELECTRIC_F0 * a + b, 0.0, 1.0)[:, None] if diffuse_weight is None else 1.0 - diffuse_weight  # E_d of the extension / film when given
+    if ms_kind != "off" and diffuse_weight is None:  # ADR-0007: the diffuse complement 1 - E_d - F_ms L that the transmitted lobe and the front diffuse share
+        import f15_ms
+        weight = weight + np.max(f15_ms.declared_complement(DIELECTRIC_F0, 1.0, clamp_roughness(roughness), mu, ms_kind), axis=-1, keepdims=True)
     m = np.asarray(metallic, dtype=np.float64)[:, None]
     w = thin_weight(thin)[:, None]
     ratio = np.ones_like(weight) if thin["variant"] == "front-only" else thin_ratio(mu)[:, None]
@@ -1415,6 +1441,10 @@ def bsdf(base, metallic, roughness, n, v, l, model=APPENDIX_B, dielectric=None, 
     else:  # F15.3 (ticket 11): the anisotropic lobe replaces D V (Fresnel and the diffuse weighting are unchanged)
         spec = aniso_dv(n, v, l, alpha, aniso)[..., None]
     value = np.where((n_dot_l > 0)[..., None], diffuse_w * base / math.pi + specular_w * spec, 0.0)
+    if model.get("ms", "off") != "off":  # F15 closure (ADR-0007): the Kulla-Conty lobe (tools/f15_ms.py) of the material under the layers
+        import f15_ms
+        value = value + f15_ms.lobe_value(base, metallic, roughness, n_dot_v, n_dot_l, model, dielectric, model["ms"]) * \
+            f15_ms.isotropic(aniso, len(n_dot_v))[:, None]
     if sheen is not None and coat is not None and model.get("order") == "swapped":
         # ticket 19 control: the coat BELOW the sheen (sheen over coat over material): the sheen is not coated, the coat lobe is
         # scaled by the sheen's albedo scaling
@@ -1425,6 +1455,9 @@ def bsdf(base, metallic, roughness, n, v, l, model=APPENDIX_B, dielectric=None, 
     if coat is None:
         return value
     attenuation, coat_value = coat_lobe(coat, n, v, l)
+    if model.get("ms", "off") != "off":  # the coat's own dielectric lobe (not attenuated, like the coat lobe)
+        import f15_ms
+        coat_value = coat_value + f15_ms.coat_lobe_value(coat, coat_weight(coat), np.abs(dot(n, v)), n_dot_l, model, model["ms"])
     return attenuation[..., None] * value + coat_value[..., None]
 
 
@@ -1549,6 +1582,13 @@ def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius
                 term = term * coat_attenuation(sub, coat_c[sel], coat_fresnel(sub, sub.get("normal", n[sel]), v[sel], h))[:, None]
             spec_sum[sel] += np.where((nl > 0)[:, None], term, 0.0) / int(c)
     result = total + spec_sum
+    if model.get("ms", "off") != "off":  # F15 closure (ADR-0007): the lobe at the disk centre (smooth against the disk), under the coat
+        import f15_ms
+        ms_centre = f15_ms.lobe_value(base, metallic, roughness, n_dot_v, n_dot_l, model, dielectric, model["ms"]) * n_dot_l[:, None] * \
+            f15_ms.isotropic(aniso, n_pixels)[:, None]
+        if coat is not None:
+            ms_centre = ms_centre * coat_attenuation(coat, coat_c, coat_fresnel(coat, n, v, h_c))[:, None]
+        result = result + ms_centre
     coat_sum = None
     if coat is not None:
         # The coat lobe: its own roughness drives the disk rule (axis = reflection about Nc = n, own alpha).
@@ -1570,6 +1610,9 @@ def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius
                 term = coat_c[sel] * fc * ggx_d(nh, alpha_c[sel]) * smith_vis(n_dot_v_c[sel], nl, alpha_c[sel]) * nl
                 coat_sum[sel] += np.where(nl > 0, term, 0.0) / int(c)
         narrow = narrow | narrow_c
+        if model.get("ms", "off") != "off":  # the coat's own dielectric lobe at the disk centre
+            import f15_ms
+            coat_sum = coat_sum + f15_ms.coat_lobe_value(coat, coat_c, n_dot_v, n_dot_l, model, model["ms"]) * n_dot_l
     swapped = sheen is not None and coat is not None and model.get("order") == "swapped"  # ticket 19 control: coat BELOW the sheen
     if sheen is not None:
         e_v = sheen_albedo(n_dot_v, sheen["roughness"], sheen["variant"])
@@ -1985,7 +2028,7 @@ _DFG = {}
 # 1 - E(0.04) of the base model, the engine's state before ticket 08) is kept as a negative control.
 DECLARED = {"albedo": "dfg-table", "diffuse": "one-minus-dielectric-albedo", "dielectric": "extension",
             "extension_diffuse": "extension", "coat": "spec", "sheen": "spec", "aniso": "spec", "irid": "spec",
-            "thin": "spec"}
+            "thin": "spec", "ms": "table"}  # ms: the declared form of the multiple-scattering lobe (engine tables), ADR-0007
 # Deliberately wrong variants that the declared-model gate must reject.
 DECLARED_CONTROLS = {
     "declared-diffuse-unweighted": {**DECLARED, "diffuse": "unweighted"},            # no (1 - E) weight
@@ -2050,9 +2093,16 @@ COMBO_DECLARED_CONTROLS = {
 }
 # F15.3 (texture closure): the declared twins of the texture controls (the same per-pixel parameters feed the declared model).
 TEXTURE_DECLARED_CONTROLS = {"declared-" + name: {**DECLARED, **delta} for name, delta in TEXTURE_CONTROLS.items()}
+# F15 closure (--specular-ms): the declared environment model with the table form of the multiple-scattering lobe (engine DFG and E_avg
+# tables), and its negative controls.
+DECLARED_MS = DECLARED  # kept for the callers of the first version of the option
+MS_DECLARED_CONTROLS = {
+    "declared-ms-ignored": {**DECLARED, "ms": "off"},
+    "declared-ms-double": {**DECLARED, "ms": "double"},
+}
 ALL_DECLARED_CONTROLS = {**DECLARED_CONTROLS, **SPECULAR_DECLARED_CONTROLS, **COAT_DECLARED_CONTROLS, **COMBO_DECLARED_CONTROLS,
                          **SHEEN_DECLARED_CONTROLS, **ANISO_DECLARED_CONTROLS, **IRID_DECLARED_CONTROLS,
-                         **THIN_DECLARED_CONTROLS, **TEXTURE_DECLARED_CONTROLS}
+                         **THIN_DECLARED_CONTROLS, **TEXTURE_DECLARED_CONTROLS, **MS_DECLARED_CONTROLS}
 
 
 def load_dfg_table(path=DFG_HEADER):
@@ -2168,20 +2218,26 @@ def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, 
     sqrt(alpha_eff) of `declared_aniso_alpha` (variant["aniso"] names the fit or the control); the bent-normal radiance fetch
     of the Sample Renderer has no effect in a constant environment.
     `thin` (F15.3, ticket 16, per-pixel {"weight", "color", "variant"}): declared_thin_environment."""
+    ms_pixels = np.ones(len(np.asarray(n_dot_v)), dtype=bool)  # ADR-0007: anisotropic base lobes carry no multiple-scattering lobe
     if aniso is not None:
         alpha = effective_alpha(roughness)
         at, ab = aniso_alphas(alpha, aniso["strength"])
         alpha_eff = declared_aniso_alpha(at, ab, variant.get("aniso", "spec"))
         roughness = np.where(alpha_eff == ab, np.asarray(roughness, dtype=np.float64), np.sqrt(alpha_eff))
-    material = _declared_material_radiance(base, metallic, roughness, n_dot_v, variant, dielectric)
+        ms_pixels = ~(np.asarray(aniso["strength"], dtype=np.float64) > 0.0)
+    material = _declared_material_radiance(base, metallic, roughness, n_dot_v, variant, dielectric, ms_pixels)
     if irid is not None:
-        material = declared_irid_environment(material, base, metallic, roughness, n_dot_v, irid, dielectric, variant)
+        material = declared_irid_environment(material, base, metallic, roughness, n_dot_v, irid, dielectric, variant, ms_pixels)
     if thin is not None:  # F15.3 (ticket 16)
         exact_fit = (dielectric is not None or irid is not None) and thin["variant"] != "default-weight"
         material = declared_thin_environment(material, metallic, base, roughness, n_dot_v, thin,
                                              None if dielectric is None and irid is None else
                                              declared_extension_diffuse_weight(metallic, roughness, n_dot_v, variant, dielectric, irid),
-                                             (thin_env_albedo(base, n_dot_v, dielectric, irid), ~thin_env_is_default(dielectric, irid)) if exact_fit else None)
+                                             (thin_env_albedo(base, n_dot_v, dielectric, irid), ~thin_env_is_default(dielectric, irid)) if exact_fit else None,
+                                             variant.get("ms", "off"))
+    if variant.get("ms", "off") != "off":  # F15 closure (ADR-0007): the declared lobe (engine tables) joins the material under sheen and coat
+        import f15_ms
+        material = material + f15_ms.declared_environment_value(base, metallic, roughness, n_dot_v, 1.0, variant["ms"], dielectric) * _ms_mask(ms_pixels)
     def under_coat(material):
         coat_v = {**coat, "variant": variant.get("coat", "spec")}
         if coat_v["variant"] == "fresnel-vh":
@@ -2199,10 +2255,19 @@ def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, 
             material = declared_sheen_environment(material, n_dot_v, sheen, variant)
         if coat is not None:
             material = under_coat(material)
+    if coat is not None and variant.get("ms", "off") != "off":  # the coat's own lobe, not attenuated
+        import f15_ms
+        material = material + f15_ms.declared_coat_environment_value(coat, coat_weight({**coat, "variant": variant.get("coat", "spec")}), n_dot_v,
+                                                                     variant["ms"])
     return material * radiance
 
 
-def declared_irid_environment(material, base, metallic, roughness, n_dot_v, irid, dielectric=None, variant=None):
+def _ms_mask(ms_pixels):
+    """(n, 1) float mask of the pixels that carry the multiple-scattering lobe (None: all)."""
+    return 1.0 if ms_pixels is None else np.asarray(ms_pixels, dtype=np.float64)[:, None]
+
+
+def declared_irid_environment(material, base, metallic, roughness, n_dot_v, irid, dielectric=None, variant=None, ms_pixels=None):
     """The declared iridescence model for unit radiance (decision 06): pixels whose film is active use the split sum with the
     thin-film Fresnel evaluated ONCE at N.V and held constant over the lobe, E_irid = clamp(F_irid(N.V) clamp(A + B, 0, 1), 0, 1)
     (A, B at the material roughness, `dfg_lookup`); diffuse weight 1 - max(E_irid) (the composite's rule for an extended lobe).
@@ -2218,10 +2283,15 @@ def declared_irid_environment(material, base, metallic, roughness, n_dot_v, irid
     carry = np.clip(a + b, 0.0, 1.0)
     # ticket 19 (iridescence + ior/specular): the (1 - s) layer is the declared extended dielectric (E = f0_scaled A + f90 B, diffuse
     # weight 1 - max E, the model of _declared_material_radiance) and the film takes the scaled f0 (irid_base_f0).
+    ms_kind = (variant or DECLARED).get("ms", "off")  # ADR-0007: the film-free dielectric lobe's energy comes out of the diffuse complement
     if dielectric is None:
         f0_film = np.full(base.shape, DIELECTRIC_F0)
         e_ds = np.clip(DIELECTRIC_F0 * a + b, 0.0, 1.0)
-        plain = base * (1 - e_ds) + e_ds
+        lobe = 0.0
+        if ms_kind != "off":
+            import f15_ms
+            lobe = f15_ms.declared_complement(DIELECTRIC_F0, 1.0, clamp_roughness(roughness), mu, ms_kind) * _ms_mask(ms_pixels)
+        plain = base * (1 - np.max(e_ds + lobe, axis=-1, keepdims=True) if ms_kind != "off" else 1 - e_ds) + e_ds
     else:
         kind = (variant or DECLARED).get("dielectric", "extension")
         f0c, weight_s = dielectric["f0"], np.asarray(dielectric["weight"], dtype=np.float64)[:, None]
@@ -2230,23 +2300,28 @@ def declared_irid_environment(material, base, metallic, roughness, n_dot_v, irid
         f0_film = f0c * weight_s
         f90 = np.ones_like(weight_s) if kind == "f90-one" else weight_s
         e_ds = np.clip((f0c if kind == "f0-unweighted" else f0_film) * a + f90 * b, 0.0, 1.0)
-        plain = base * (1.0 - np.max(e_ds, axis=-1, keepdims=True)) + e_ds
+        lobe = 0.0
+        if ms_kind != "off":
+            import f15_ms
+            lobe = f15_ms.declared_complement(f0_film, f90, clamp_roughness(roughness), mu, ms_kind) * _ms_mask(ms_pixels)
+        plain = base * (1.0 - np.max(e_ds + lobe, axis=-1, keepdims=True)) + e_ds
     e_d = np.clip(thin_film_fresnel(mu, film, thickness, f0_film) * carry, 0.0, 1.0)
     e_m = np.clip(thin_film_fresnel(mu, film, thickness, base) * carry, 0.0, 1.0)
     e_ms = np.clip(base * a + b, 0.0, 1.0)
-    weight = np.ones_like(a) if irid["variant"] == "diffuse-unweighted" else 1.0 - np.max(e_d, axis=-1, keepdims=True)
+    weight = np.ones_like(a) if irid["variant"] == "diffuse-unweighted" else np.maximum(1.0 - np.max(e_d + lobe, axis=-1, keepdims=True), 0.0)
     dielectric_value = (1 - s) * plain + s * (base * weight + e_d)
     metal = (1 - s) * e_ms + s * e_m
     return np.where(s > 0.0, (1 - m) * dielectric_value + m * metal, material)
 
 
-def _declared_material_radiance(base, metallic, roughness, n_dot_v, variant, dielectric):
+def _declared_material_radiance(base, metallic, roughness, n_dot_v, variant, dielectric, ms_pixels=None):
     """The declared model of the material alone for unit environment radiance (see declared_environment_radiance)."""
     mu = np.maximum(np.asarray(n_dot_v, dtype=np.float64), MIN_NDOTV)
     rough = clamp_roughness(roughness)
     a, b = karis_ab(mu, rough) if variant["albedo"] == "karis-fit" else dfg_lookup(mu, rough)
     a, b = a[:, None], b[:, None]
     m = np.asarray(metallic, dtype=np.float64)[:, None]
+    ms_on = variant.get("ms", "off") != "off"  # ADR-0007: the dielectric layer's lobe energy comes out of the diffuse complement
     if dielectric is not None:
         f0c, weight = dielectric["f0"], np.asarray(dielectric["weight"], dtype=np.float64)[:, None]
         kind = variant.get("dielectric", "extension")
@@ -2259,7 +2334,9 @@ def _declared_material_radiance(base, metallic, roughness, n_dot_v, variant, die
         if variant.get("extension_diffuse", "extension") == "composite-base":
             diffuse_weight = 1.0 - np.clip(DIELECTRIC_F0 * a + b, 0.0, 1.0)
         else:
-            diffuse_weight = 1.0 - np.max(e_d, axis=-1, keepdims=True)
+            import f15_ms
+            lobe = f15_ms.declared_complement(f0_scaled, f90, rough, mu, variant["ms"]) * _ms_mask(ms_pixels) if ms_on else 0.0
+            diffuse_weight = np.maximum(1.0 - np.max(e_d + lobe, axis=-1, keepdims=True), 0.0)
         return (1 - m) * base * diffuse_weight + (1 - m) * e_d + m * e_m
     f0 = DIELECTRIC_F0 * (1 - m) + base * m
     specular = np.clip(f0 * a + b, 0.0, 1.0)
@@ -2269,6 +2346,10 @@ def _declared_material_radiance(base, metallic, roughness, n_dot_v, variant, die
         weight = 1.0 - np.clip(f0 * a + b, 0.0, 1.0)
     else:
         weight = 1.0 - np.clip(DIELECTRIC_F0 * a + b, 0.0, 1.0)
+        if ms_on:
+            import f15_ms
+            weight = np.maximum(weight - np.max(f15_ms.declared_complement(DIELECTRIC_F0, 1.0, rough, mu, variant["ms"]) * _ms_mask(ms_pixels),
+                                                axis=-1, keepdims=True), 0.0)
     return (1 - m) * base * weight + specular
 
 
@@ -3093,6 +3174,10 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
             aniso_env = None if aniso is None else aniso_environment_inputs(aniso, roughness, n, v)
             material = environment_radiance(base, metallic, roughness, dot(n, v), sky, model, sun_dielectric, aniso_env, irid,
                                             thin)
+            if model.get("ms", "off") != "off":  # F15 closure (ADR-0007): the lobe joins the material, so sheen and coat layer it like the rest
+                import f15_ms
+                material = material + f15_ms.environment_value(base, metallic, roughness, dot(n, v), sky, model, sun_dielectric, model["ms"]) * \
+                    f15_ms.isotropic(aniso, pick.size)[:, None]
             if thin is not None and coat is not None and thin["variant"] == "uncoated":
                 # ticket 19 control (F15.3 closure): the transmitted lobe escapes the coat.  Split the material radiance into the part
                 # without the transmitted lobe (colour 0: the reflected diffuse keeps its 1 - w) and the transmitted term itself.
@@ -3101,6 +3186,8 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
                 radiance += layered_environment(reflected, dot(n, v), coat, sheen, sky, model.get("order") == "swapped") + (material - reflected)
             else:
                 radiance += layered_environment(material, dot(n, v), coat, sheen, sky, model.get("order") == "swapped")
+            if model.get("ms", "off") != "off" and coat is not None:  # the coat's own lobe, not attenuated
+                radiance += f15_ms.coat_environment_value(coat, coat_weight(coat), dot(n, v), sky, model, model["ms"])
             terms.append("environment-quadrature")
         else:
             if LEGACY_ENVIRONMENT:
@@ -3164,7 +3251,11 @@ def command_render(args):
     cast = cast_primary_rays(root, data, args.threads)
     visibility = point_light_visibility(root, data, cast, args.threads) if args.visibility == "rays" else None
     main_model = SPECULAR_EXT if uses_specular_extension(data) or uses_clearcoat(data) else APPENDIX_B  # sheen/anisotropy-only: base
-    controls = {"": main_model, **{name: control_model(name, main_model) for name in args.controls}}
+    main_model = {**main_model, "ms": "kulla-conty" if args.specular_ms == "on" else "off"}  # ADR-0007: the engine default is on
+    controls = {"": main_model}
+    for name in args.controls:  # every control keeps the scene's multiple-scattering state, except the ms controls themselves
+        model = control_model(name, main_model)
+        controls[name] = model if name in MS_CONTROLS else {**model, "ms": main_model["ms"]}
     report = {"schema": 1, "tool": "tools/f15_reference.py", "tool_sha256": sha256_file(__file__), "model": MODEL,
               "snapshot_sha256": scene_digest(root), "frame": data.get("frame"),
               "sun_angular_radius": data.get("sun_angular_radius"), "sky": data["sky"],
@@ -3187,15 +3278,18 @@ def command_render(args):
         # The declared environment model on the same cast: the image and its negative controls.
         declared = {"model": DECLARED, "file": "declared.pfm", "dfg_table": str(DFG_HEADER.relative_to(REPO)),
                     "dfg_table_sha256": sha256_file(DFG_HEADER), "controls": {}}
-        image, masks, _, terms = render_frame(root, data, model=main_model, cast=cast, environment=DECLARED,
+        image, masks, _, terms = render_frame(root, data, model=main_model, cast=cast, environment={**DECLARED, "ms": "table" if args.specular_ms == "on" else "off"},
                                               visibility=visibility, textures=textures)
         write_pfm(out / "declared.pfm", image)
         declared["terms"] = terms
         for name in args.declared_controls:
-            image, *_ = render_frame(root, data, model=main_model, cast=cast, environment=ALL_DECLARED_CONTROLS[name],
+            control_env = ALL_DECLARED_CONTROLS[name]
+            if args.specular_ms == "off" and name not in MS_DECLARED_CONTROLS:
+                control_env = {**control_env, "ms": "off"}
+            image, *_ = render_frame(root, data, model=main_model, cast=cast, environment=control_env,
                                      visibility=visibility, textures=textures)
             write_pfm(out / f"control-{name}.pfm", image)
-            declared["controls"][name] = {"model_variant": ALL_DECLARED_CONTROLS[name], "file": f"control-{name}.pfm"}
+            declared["controls"][name] = {"model_variant": control_env, "file": f"control-{name}.pfm"}
         report["declared"] = declared
     (out / "reference.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps({"reference": str(out / "reference.pfm"), "terms": report["terms"],
@@ -3226,6 +3320,8 @@ def main(argv=None):
                    help="radiance of the environment terms instead of the snapshot sky (a cooked constant probe; black base only)")
     p.add_argument("--textures", action="store_true",
                    help="sample the lobe textures of the materials (texture closure; the ROI drops ambiguous-footprint pixels)")
+    p.add_argument("--specular-ms", choices=["on", "off"], default="on",
+                   help="F15 closure (ADR-0007): the engine runs --specular-ms on (default: the Kulla-Conty lobe in the literal and the declared model) or off")
     p.add_argument("--threads", type=int, default=DEFAULT_THREADS)
     p.set_defaults(function=command_render)
     args = parser.parse_args(argv)

@@ -223,3 +223,4 @@ Each dropped control now fails on a fixture the engine passes; thresholds untouc
   aniso-rotation-flipped, coat-ignored, sheen-ignored all FAIL; `-env` (`tex8`) GREEN again with aniso-rotation-flipped and aniso-ignored failing.
 - Featureless scenes: the five F13 exactness captures (`f15_exact.sh`, `build/tex-exact`) are byte-identical (`cmp`) to `build/litefix/exact-new` (sponza-d2, cornell-restir,
   cornell-clustered-ssr, manylights-restir, grid-sky); nothing under src/renderer, src/platform or shaders changed except the additive archive descriptors.
+2026-11-15 — the furnace with multiple scattering (ADR-0007, ticket 03 section of the same date): `ms-furnace@resolve` gates the pure-metal spheres at 1.0 +- 0.5 % (0.00016 measured, the lobe off: 0.60 deviation, the negative control) and every furnace key stays under 1.005 with the lobe on by default (the ior 0 dielectric and the anisotropic lobe needed the two corrections described there).

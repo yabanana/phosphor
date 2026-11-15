@@ -25,6 +25,25 @@ sys.path.insert(0, str(HERE))
 import numpy as np  # noqa: E402
 import f15_reference as ref  # noqa: E402
 
+
+def _force_ms_off():
+    """ADR-0007: the engine and the reference default to the multiple-scattering lobe.  The tests of this file check the single-scattering
+    lobe models (Appendix B hand values, layering formulas, furnace identities of the declared split sum), so every default model dict runs
+    with the lobe OFF here; the lobe itself is tested in tools/test_f15_ms.py (which also asserts the defaults are ON)."""
+    keep = set(ref.MS_CONTROLS) | set(ref.MS_DECLARED_CONTROLS)
+    for name, value in vars(ref).items():
+        if isinstance(value, dict) and value.get("ms") not in (None, "off") and name not in keep:
+            value["ms"] = "off"
+        if isinstance(value, dict) and name in ("CONTROLS", "SHEEN_CONTROLS", "ANISO_CONTROLS", "IRID_CONTROLS", "THIN_CONTROLS", "COMBO_CONTROLS",
+                                                  "DECLARED_CONTROLS", "SPECULAR_DECLARED_CONTROLS", "COAT_DECLARED_CONTROLS", "COMBO_DECLARED_CONTROLS",
+                                                  "SHEEN_DECLARED_CONTROLS", "ANISO_DECLARED_CONTROLS", "IRID_DECLARED_CONTROLS", "THIN_DECLARED_CONTROLS"):
+            for entry in value.values():
+                if isinstance(entry, dict) and entry.get("ms") not in (None, "off"):
+                    entry["ms"] = "off"
+
+
+_force_ms_off()
+
 try:
     import mitsuba  # noqa: F401
     HAVE_MITSUBA = True

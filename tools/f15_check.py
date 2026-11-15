@@ -212,6 +212,10 @@ THRESHOLDS = {
     "direct": {"p99": 0.01, "max_outside_quadrature_mask": 0.03},
     "environment": {"mean_per_sphere": 0.05},
     "furnace": {"max_pixel": 1.005, "energy_loss": "recorded, not gated"},
+    # F15 closure (--specular-ms), fixed before any comparison from independent arguments (tools/test_f15_ms.py): a white furnace over rough
+    # metal (f0 = f90 = 1) returns E + F_ms (1 - E) = 1 for any E, so |mean - 1| is bounded by the 0.2 % quadrature error of
+    # tools/ms_table.py --check plus the engine's table interpolation (budget 0.5 %); no pixel above the decision-11 bound 1.005.
+    "furnace_ms": {"max_pixel": 1.005, "metal_mean_abs": 0.005},
     # Stochastic transport (furnace-base): the gate is the per-sphere mean, i.e. the
     # energy in expectation; per-pixel maxima are estimator noise there (decision 11
     # amendment: a pure-metal sphere, which cannot gain energy, reaches 1.013-1.019
@@ -1255,6 +1259,40 @@ SCENARIOS.update(_product_keys())
 # Red-state expectations (before ticket 03): direct metallic rows 0 and 1 pass, intermediate rows fail.
 GPU_PROCESS = re.compile(r"^(phosphor|soc_bench|f\d+_spike)$")
 
+# F15 closure (--specular-ms): runner keys on the scenes of the base families (`scene`), merged here like the layer keys: they are not bench
+# scenarios of their own (tests/test_material_validation.cpp lists the literal block above against the bench).
+MS_SCENARIOS = {
+    # --specular-ms on (default off = the base model of the keys above): the Kulla-Conty multiple-scattering lobe of the GGX
+    # specular lobes.  The scenes are the base ones (roughness 0.1..1 x metallic 0..1, albedo 1 furnace); the reference models the lobe
+    # twice (tools/f15_ms.py: literal = own quadrature, declared = engine tables); controls: ms-ignored (today's base model) and ms-double.
+    "ms-grid-sun": {"kind": "direct", "always_green": True, "scene": "base-grid-sun", "specular_ms": True,
+                    "controls": ["ms-ignored", "ms-double"],
+                    "terms": "sun disk only (environment 0, no shadows, no GI), --specular-ms on, roughness x metallic grid"},
+    "ms-grid-env-resolve": {"kind": "declared", "always_green": True, "scene": "base-grid-env-resolve", "specular_ms": True,
+                            "reflections": "off",
+                            "controls": ["declared-ms-ignored", "declared-ms-double"],
+                            "terms": "constant environment only (radiance 0.5, no sun), deterministic resolve terms, --specular-ms on"},
+    "ms-grid-env": {"kind": "environment", "always_green": True, "scene": "base-grid-env", "specular_ms": True,
+                    "controls": ["ms-ignored", "ms-double"],
+                    "terms": "constant environment only (radiance 0.5, no sun), SSR specular transport (composite), --specular-ms on"},
+    "ms-furnace@resolve": {"kind": "furnace-ms", "always_green": True, "scene": "furnace-resolve", "specular_ms": True,
+                           "reflections": "off", "controls": ["ms-ignored"],
+                           "terms": "constant environment radiance 1, albedo 1, no sun, deterministic resolve terms, --specular-ms on: "
+                                    "pure-metal spheres return 1.0, nothing above 1.005"},
+    "ms-specular-point": {"kind": "direct", "always_green": True, "scene": "specular-grid-point", "specular_ms": True,
+                          "lighting": "legacy", "visibility": "none", "controls": ["ms-ignored", "ms-double"],
+                          "terms": "one point light only (no sun, environment 0, no GI), resolve local lights (--lighting legacy), --specular-ms on"},
+    "ms-specular-point@restir": {"kind": "direct", "always_green": True, "scene": "specular-grid-point", "specular_ms": True,
+                                 "lighting": "restir", "visibility": "rays", "denoise": "off",
+                                 "terminator_band": 2, "controls": ["ms-ignored", "ms-double"],
+                                 "terms": "one point light only, ReSTIR DI with RT visibility, unfiltered, --specular-ms on"},
+    "ms-specular-point@clustered": {"kind": "direct", "always_green": True, "scene": "specular-grid-point", "specular_ms": True,
+                                    "lighting": "clustered", "visibility": "rays", "denoise": "off",
+                                    "terminator_band": 2, "controls": ["ms-ignored", "ms-double"],
+                                    "terms": "one point light only, clustered DI with RT visibility, unfiltered, --specular-ms on"},
+}
+SCENARIOS.update(MS_SCENARIOS)
+
 
 # --- guard and manifest -------------------------------------------------------
 
@@ -1363,6 +1401,7 @@ def capture_command(binary, name, folder, seed=1):
             # Synchronous pipelines: a cold compiler cache must never let a capture use a fallback variant (a fallback-served capture once
             # equalled the base model, ticket 17); fallback_draws() rejects any capture whose log still reports fallback draws.
             "--pipeline-sync", *(["--reflection-capture-probe"] if SCENARIOS[name].get("probe") else []),
+            "--specular-ms", "on" if SCENARIOS[name].get("specular_ms", True) else "off",  # ADR-0007: the Kulla-Conty lobe, the engine default
             "--capture-linear", str(folder / "engine.pfm"), "--capture-linear-frame", last,
             *(["--capture-linear-accumulate", str(SCENARIOS[name]["accumulate"])] if SCENARIOS[name].get("accumulate") else []),
             *SCENARIOS[name].get("engine_args", []),
@@ -1550,6 +1589,20 @@ def evaluate_furnace(np, candidate, reference, masks, spheres):
     maximum = float(values.max())
     return {"kind": "furnace", "limit": limit, "max_pixel": maximum, "spheres": table, "pass": maximum <= limit,
             "reference_max_pixel": float(reference[roi].max())}
+
+
+def evaluate_furnace_ms(np, candidate, reference, masks, spheres):
+    """F15 closure (--specular-ms): the furnace bound plus the energy-return gate on the pure-metal spheres (white base, metallic 1):
+    their mean must sit within THRESHOLDS["furnace_ms"]["metal_mean_abs"] of 1 (the compensation returns the energy the
+    single-scattering lobe loses; without it the mean is 0.41 at roughness 1)."""
+    gate = THRESHOLDS["furnace_ms"]
+    result = evaluate_furnace(np, candidate, reference, masks, spheres)
+    metals = [t for t in result["spheres"] if t.get("metallic") == 1.0 and t.get("pixels")]
+    deviations = [abs(t["mean"] - 1.0) for t in metals]
+    result.update(kind="furnace-ms", limit=gate["max_pixel"], metal_mean_limit=gate["metal_mean_abs"], metal_spheres=len(metals),
+                  worst_metal_mean_deviation=max(deviations) if deviations else None)
+    result["pass"] = bool(metals) and result["max_pixel"] <= gate["max_pixel"] and max(deviations) <= gate["metal_mean_abs"]
+    return result
 
 
 def evaluate_furnace_transport(np, candidate, reference, masks, spheres):
@@ -1817,6 +1870,8 @@ def evaluate(np, kind, candidate, reference, masks, spheres, band=1, gate_max_ro
         return evaluate_direct(np, candidate, reference, masks, spheres, band)
     if kind == "furnace":
         return evaluate_furnace(np, candidate, reference, masks, spheres)
+    if kind == "furnace-ms":
+        return evaluate_furnace_ms(np, candidate, reference, masks, spheres)
     if kind == "furnace-transport":
         return evaluate_furnace_transport(np, candidate, reference, masks, spheres)
     if kind == "declared":
@@ -1833,7 +1888,7 @@ def expectation(kind, mode, result, always_green=False, pending=None):
         return {"asserted": True, "expected_pass": True, "met": result["pass"]}
     if kind == "declared":
         return {"asserted": False, "met": True, "note": "declared-model gate: measured, asserted in green mode only"}
-    if kind in ("furnace", "furnace-transport"):
+    if kind in ("furnace", "furnace-ms", "furnace-transport"):
         return {"asserted": True, "expected_pass": False, "met": not result["pass"]}
     if kind == "direct":
         rows = {}

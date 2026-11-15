@@ -27,6 +27,8 @@ constant bool kSssWalk = kSssOutput == 2u;
 inline float sssCodeOf(uint packed) {
     return kSssWalk ? float(packed & 0xFFFFFu) + 0.49f * (float(packed >> 20) * (1.0f / 1023.0f)) : float(packed);
 }
+// F15 closure (--specular-ms, reserved constant SPECULAR_MS): the Kulla-Conty multiple-scattering lobe (materials/bsdf_energy.h).
+constant bool kSpecularMsOn = kSpecularMs != 0u;
 struct TextureHandle {
     texture2d<float> tex;
 };
@@ -988,6 +990,20 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     const bool volDiffuse = kSssWrite && volResolved && thin.weight > 0.0f && !(coatOn || sheenOn || anisoOn || iridOn || transOn);
     float3 sssUnit = float3(0.0f); // sum over the lights of the diffuse weight (albedo 1) x radiance x N.L, then the ambient term
     float3 color = float3(0.0);
+    // F15 closure (--specular-ms): the lobe of the multiple-scattering term.  f0 / f90 of the specular lobe (the film's non-iridescent f0
+    // for iridescence, declared), the effective isotropic roughness of an anisotropic lobe, the coat as its own dielectric lobe.
+    BsdfMs msBase{};
+    BsdfMs msCoat{};
+    if (kSpecularMsOn) {
+        const float msNV = max(dot(N, V), 1e-4f);
+        msBase = bsdfMsPrepare(useSpec ? mix(spec.f0, baseColor.rgb, metallic) : bsdfBaseF0(baseColor.rgb, metallic), useSpec ? mix(spec.f90, 1.0f, metallic) : 1.0f,
+                               anisoActive ? bsdfAnisoEnvRoughness(roughness, anisoStrength) : roughness, msNV, BSDF_MS_LOSS_AVG(frame.dfgTable), BSDF_MS_LOST(frame.dfgTable));
+        // ADR-0007: an anisotropic lobe carries no multiple-scattering lobe (an isotropic table cannot follow its azimuth dependence: the effective
+        // isotropic roughness gained +3.3 % in the white furnace of a pure metal at strength 1, measured); the coat's own lobe stays.
+        if (anisoActive) msBase.fms = float3(0.0f);
+        if (coatOn)
+            msCoat = bsdfMsPrepare(float3(0.04f), 1.0f, coat.roughness, max(dot(coat.normal, V), 1e-4f), BSDF_MS_LOSS_AVG(frame.dfgTable), BSDF_MS_LOST(frame.dfgTable));
+    }
     for (uint i = 0; i < frame.lightCount; ++i) {
         const device GPULight &light = lights[i];
         const float3 lightColor = float3(light.color[0], light.color[1], light.color[2]) * light.intensity;
@@ -1024,6 +1040,22 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
                                           : bsdfBaseDiffuse(bsdfDielectricFresnel(volVH), metallic, float3(1.0f));
                 sssUnit += du * lightColor * attenuation * visibility * volNL;
             }
+        }
+        // F15 closure (--specular-ms): the multiple-scattering lobe of this light (sun: the disk centre), scaled like the material under the
+        // sheen and the coat (the coat adds its own dielectric MS lobe with the coat normal).
+        if (kSpecularMsOn) {
+            const float msNL = saturate(dot(N, L));
+            float3 msValue = float3(0.0f);
+            if (msNL > 0.0f) {
+                msValue = bsdfMsLobe(msBase, msNL, BSDF_MS_LOST(frame.dfgTable)) * msNL;
+                if (sheenOn) msValue *= bsdfSheenScaleLight(sheen.color, sheen.roughness, max(dot(N, V), 1e-4f), msNL, frame.sheenTable);
+            }
+            if (coatOn) {
+                msValue *= coatAttenuation(coat, V);
+                const float msNcL = saturate(dot(coat.normal, L));
+                if (msNcL > 0.0f) msValue += coat.factor * bsdfMsLobe(msCoat, msNcL, BSDF_MS_LOST(frame.dfgTable)) * msNcL;
+            }
+            color += msValue * lightColor * attenuation * visibility;
         }
         // F15.1 (ticket 13): a light BEHIND a thin-walled transmissive surface lights it through the transmitted lobe (delta lights only: the area
         // emitters a refracted or straight ray hits belong to the transport, decision 09).  The visible face keeps the front-hemisphere terms below.
@@ -1109,6 +1141,7 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     // F13 path (physicalGI): the scene's single declared isotropic environment,
     // the same radiance GI and reflection misses see; legacy keeps the gradient.
     float envDiffuse = bsdfEnvDiffuseWeight(roughness, NdotV, frame.dfgTable); // ADR-0006
+    float3 envDielectric = bsdfEnvSpecular(float3(0.04f), roughness, NdotV, frame.dfgTable); // the dielectric layer's single-scattering albedo
     float3 envSpecularWeight = bsdfEnvSpecular(f0, roughness, NdotV, frame.dfgTable);
     if (useSpec) { // F15.1: f0 * A + f90 * B per lobe, diffuse weight 1 - max(E_dielectric)
         // F15.1 (ticket 11): the split sum (diffuse weight included) at the effective isotropic roughness of an anisotropic lobe.
@@ -1117,7 +1150,14 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
                                                 NdotV, frame.dfgTable);
         envDiffuse = env.diffuseWeight;
         envSpecularWeight = env.specular;
+        envDielectric = env.dielectric;
     }
+    // F15 closure (ADR-0007): the energy that the multiple-scattering lobe of the DIELECTRIC layer returns is taken from the diffuse complement
+    // (1 - E_d - F_ms L): the single-scattering loss was already refilled into the base by 1 - E_d, so a layer of Fresnel near 1 (ior 0, a
+    // saturated specular colour) would otherwise reflect it twice (measured +3.6 % in the white furnace); for F0 0.04 the change is below 1e-3.
+    if (kSpecularMsOn && !anisoActive)
+        envDiffuse = max(1.0f - bsdfMax3(envDielectric + bsdfMsEnv(bsdfMsPrepare(useSpec ? spec.f0 : float3(0.04f), useSpec ? spec.f90 : 1.0f, msBase.roughness, NdotV,
+                                                                                 BSDF_MS_LOSS_AVG(frame.dfgTable), BSDF_MS_LOST(frame.dfgTable)))), 0.0f);
     const float envDiffuseBase = envDiffuse; // F15.3 closure (ticket 16): the diffuse weight before the coat / sheen / transmission scalings (thin env albedo)
     // F15.1 (ticket 13): the diffuse base of a transmissive material is mixed by 1 - t; the transmitted lobe takes (1 - E) t (1 - metallic) tint T
     // of the radiance along the refracted direction (declared: the environment, or the legacy hemisphere along the refraction of V through N,
@@ -1156,6 +1196,16 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         envDiffuse *= scale;
         envSpecularWeight *= scale;
         sheenEnvironment = (useGI ? indirectIrradiance / M_PI_F : (physicalGI ? environment : hemisphere(N))) * sheen.color * E;
+    }
+    // F15 closure (--specular-ms): the environment form of the multiple-scattering lobe, F_ms (1 - E(N.V)) times the radiance L(N) (GI
+    // irradiance / pi, the declared environment or the legacy hemisphere), under the sheen and the coat like the material; the coat adds its
+    // own term.  It travels with the diffuse ambient (the composite adds it when the resolve strips the external diffuse).
+    float3 msEnvironment = float3(0.0);
+    if (kSpecularMsOn) {
+        float3 w = bsdfMsEnv(msBase);
+        if (sheenOn) w *= bsdfSheenScaleView(sheen.color, sheen.roughness, NdotV, frame.sheenTable);
+        if (coatOn) w = w * coatAtt + coat.factor * bsdfMsEnv(msCoat);
+        msEnvironment = (useGI ? indirectIrradiance / M_PI_F : (physicalGI ? environment : hemisphere(N))) * w;
     }
     // F15.1 (ticket 16): the front diffuse weight is scaled by 1 - w and the transmitted lobe takes w color (1 - E_d) (1 - 0.16 N.V) of the
     // radiance at -N: the declared environment (physicalGI), the legacy hemisphere at -N, or (GI) the probe-grid irradiance at -N (the
@@ -1203,6 +1253,7 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         out.sssMaterial = (in.materialIndex + 1u) | (weightBits << 20);
     }
     if(!externalDiffuse && sheenOn)color += sheenEnvironment * coatAtt * (useGI ? (physicalGI?1.0f:occlusion) : occlusion);
+    if(!externalDiffuse && kSpecularMsOn)color += msEnvironment * (useGI ? (physicalGI?1.0f:occlusion) : occlusion);
     if(!omitSpecularAmbient)color += ambientSpecular * occlusion;
     if (!omitSpecularAmbient && transOn && transFactor > 0.0f && lobeIor >= 1.0f) color += (physicalGI ? environment : hemisphere(transDirection)) * transWeight;
 

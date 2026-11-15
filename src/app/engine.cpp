@@ -225,6 +225,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     pipelineOptions.interactiveQos = options_.compileQosInteractive;
     pipelineOptions.fallbackOnly   = options_.debugFlexiblePipelines;
     pipelineOptions.debugXpcFail   = options_.debugPipelineXpcFail;
+    pipelineOptions.specularMs     = options_.specularMs;
     pipelines_     = std::make_unique<PipelineCache>(*context_, pipelineOptions);
     renderer_      = std::make_unique<SceneRenderer>(*context_, *pipelines_, options_.pipelineSalt,
                                                      /*genericOnly*/ options_.debugPipelineFallback,
@@ -908,6 +909,7 @@ void Engine::finishBenchmark() {
         auto &r = report.rendering;
         r.present = true;
         r.offscreen = options_.offscreen;
+        r.specularMs = options_.specularMs;
         r.deviceAllocatedBytes = context_->device()->currentAllocatedSize();
         r.engineResourceBytes = context_->memory().totalBytes();
         r.commandBufferRebuilds = context_->commandBufferRebuilds();

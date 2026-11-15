@@ -1000,7 +1000,7 @@ THIN_RATIO_SLOPE = 0.16   # the declared transmitted/diffuse weight ratio of the
 
 
 def declared_pixel(base, roughness, ior, t, thickness, att_color, att_distance, n_dot_v, sky, variant="spec", irid=None,
-                   diffuse_transmission=None):
+                   diffuse_transmission=None, ms=True):
     """The declared --rt off model of one pixel set (arrays (n, ...)): see the module docstring.
 
     Ticket 19: the base slot of the dielectric layer carries the transmission over the diffuse transmission (the specification's
@@ -1036,9 +1036,21 @@ def declared_pixel(base, roughness, ior, t, thickness, att_color, att_distance, 
             diffuse = (1.0 - w) * base
             extra = w * colour * ratio
     slot = (1.0 - t)[:, None] * diffuse + t[:, None] * tint * absorb + extra
-    plain = slot * (1.0 - spec) + spec
+    # ADR-0007 (declared): the glass layer's multiple-scattering energy comes out of the diffuse complement, 1 - E - F_ms L
+    import f15_ms
+    count = len(base)
+    complement = np.max(f15_ms.declared_complement(np.tile(np.asarray(f0, dtype=np.float64).reshape(-1, 1), (1, 3)), np.ones(count),
+                                                   np.clip(roughness, MIN_ROUGHNESS, 1.0), mu, "table"), axis=-1, keepdims=True) if ms else 0.0
+    plain = slot * np.maximum(1.0 - spec - complement, 0.0) + spec
+    # ADR-0007: the reflected specular lobe of the glass carries the multiple-scattering compensation (declared engine tables, f0 of the ior,
+    # f90 1, no film: iridescence keeps the film-free f0), added next to the split sum like every other declared environment term.
+    import f15_ms
+    count = len(base)
+    ms_term = f15_ms.declared_environment_value(np.ones((count, 3)), np.zeros(count), np.clip(roughness, MIN_ROUGHNESS, 1.0), mu, 1.0, "table",
+                                                {"f0": np.tile(np.asarray(f0, dtype=np.float64).reshape(-1, 1), (1, 3)), "weight": np.ones(count),
+                                                 "variant": "extension"}) if ms else 0.0
     if irid is None or not options.get("irid", True):
-        return float(sky) * plain
+        return float(sky) * (plain + ms_term)
     strength = np.asarray(irid[0], dtype=np.float64)
     thickness_nm = np.asarray(irid[2], dtype=np.float64)
     strength = np.where(thickness_nm > 0.0, strength, 0.0)[:, None]  # thickness 0 disables the film (ticket 12 rule)
@@ -1046,8 +1058,8 @@ def declared_pixel(base, roughness, ior, t, thickness, att_color, att_distance, 
     film = ref.thin_film_fresnel(mu, np.asarray(irid[1], dtype=np.float64), thickness_nm, f0_film)
     carry = np.clip(a + b, 0.0, 1.0)[:, None]
     e_irid = np.clip(film * carry, 0.0, 1.0)
-    filmed = slot * (1.0 - np.max(e_irid, axis=-1, keepdims=True)) + e_irid
-    return float(sky) * ((1.0 - strength) * plain + strength * filmed)
+    filmed = slot * np.maximum(1.0 - np.max(e_irid, axis=-1, keepdims=True) - complement, 0.0) + e_irid
+    return float(sky) * ((1.0 - strength) * plain + strength * filmed + ms_term)
 
 
 def command_declared(args):

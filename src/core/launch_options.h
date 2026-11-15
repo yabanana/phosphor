@@ -201,6 +201,10 @@ namespace phosphor {
 //   --meshlet-triangle-cull on|off  F6.3 option: the mesh shader also drops
 //                      back/front-facing triangles and compacts the rest
 //                      (default off: measured slower on M5 Max)
+//   --specular-ms on|off  F15 closure (ADR-0007): Kulla-Conty multiple-scattering energy compensation of the GGX
+//                      specular lobes (lights, sun, DI/ReSTIR/clustered, environment, GI-fed ambient); default ON (owner
+//                      decision 2026-11-15, a declared deviation from glTF Appendix B); off = the Appendix B model of
+//                      ADR-0006, bit-identical to the tree before the option existed
 //   --thin-gi-back on|off  F15.1 (ticket 19): thin-walled subsurface pixels read the DDGI probe
 //                      irradiance at -N for the transmitted GI term (default on; off = the
 //                      pixel's own GI irradiance at N stands for it: the control)
@@ -541,6 +545,7 @@ struct LaunchOptions {
     bool         meshletObjectStage = true; // --meshlet-object off: spike S2 mesh-only pipeline
     float        meshletMinPixels   = 0.0f; // --meshlet-min-pixels P (approximate size cull, 0 = off)
     bool         meshletTriangleCull = false; // --meshlet-triangle-cull on
+    bool         specularMs = true; // --specular-ms on|off (F15 closure, ADR-0007: default on)
     bool         thinGiBack = true; // --thin-gi-back on|off (F15.1 ticket 19)
 
     [[nodiscard]] bool benchmark() const { return frames > 0; }

@@ -57,3 +57,6 @@ Findings: [khr-materials.md](../research/khr-materials.md) (KhronosGroup/glTF
     description, unit-tested with small glTF JSON fixtures.
   - The material description models lobes, not extension JSON, so future
     coat/fuzz extensions map onto the same features.
+
+> Superseded in part by [ADR-0007](../../../docs/adr/0007-specular-multiple-scattering-compensation.md) (2026-11-15): Appendix B has no
+> multiple-scattering lobe; the engine now applies the Kulla-Conty compensation by default (`--specular-ms off` = the Appendix B lobe).

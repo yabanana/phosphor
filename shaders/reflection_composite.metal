@@ -2,7 +2,7 @@
 #include "reflection_reduce.h"
 #include "reflection_lobe.h"
 #include "renderer/emission_pack.h"
-#ifndef PHOSPHOR_REFL_LOBE
+#if !defined(PHOSPHOR_REFL_LOBE) && !defined(PHOSPHOR_REFL_MS)
 kernel void reflection_counter_clear(device atomic_uint* counts [[buffer(0)]],uint tid [[thread_position_in_grid]]){
     if(tid<32)atomic_store_explicit(counts+tid,0u,memory_order_relaxed);
 }
@@ -96,7 +96,7 @@ kernel void reflection_input_check(constant GPUReflectionComposeParams& p [[buff
         if(reasons)atomic_fetch_or_explicit(counts+7,reasons,memory_order_relaxed);
     }
 }
-#endif // !PHOSPHOR_REFL_LOBE
+#endif // !PHOSPHOR_REFL_LOBE && !PHOSPHOR_REFL_MS
 // residual0,DIselected2,GIselectedE4,specular5,AO6,output7.
 // Root RESOLVE_EXTERNAL_DIFFUSE bit32 strips external DI/GI/hemisphere diffuse
 // from the primary residual. Assemble positive terms ONCE, never subtract an
@@ -119,12 +119,29 @@ kernel void REFL_KERNEL(reflection_composite)(constant GPUReflectionComposeParam
             const bool noSpecularEstimate=!(nvRaw>0.0f);
             const float envNV=max(nvRaw,1e-4f);
             float envDiffuse=noSpecularEstimate?1.0f:bsdfEnvDiffuseWeight(s.roughness,envNV,phosphor::DfgTable);
+            // F15 closure (--specular-ms): F_ms (1 - E(N.V)) of the multiple-scattering lobe, the environment / GI form (added next to the diffuse
+            // ambient below, like the sheen term).  The base kernel handles the base pixels; the lobe kernel (below) every pixel.
+#if defined(PHOSPHOR_REFL_LOBE) || defined(PHOSPHOR_REFL_MS)
+            float3 msTerm=float3(0); // ADR-0007: the multiple-scattering lobe, F_ms L(N.V), next to the diffuse ambient like the sheen term
+#endif
+#ifdef PHOSPHOR_REFL_MS
+            if((p.flags&REFLECT_COMPOSE_SPECULAR_MS)&&!noSpecularEstimate){
+                msTerm=bsdfMsEnv(bsdfMsPrepare(bsdfBaseF0(diVec(s.albedo),saturate(s.metallic)),1.0f,s.roughness,envNV,phosphor::MsLogLossAvgTable,phosphor::MsLogLostTable));
+                // the dielectric layer's multiple-scattering energy is taken from the diffuse complement (1 - E_d - F_ms L)
+                envDiffuse=max(1.0f-bsdfMax3(bsdfEnvSpecular(float3(0.04f),s.roughness,envNV,phosphor::DfgTable)+bsdfMsEnv(bsdfMsPrepare(float3(0.04f),1.0f,s.roughness,envNV,phosphor::MsLogLossAvgTable,phosphor::MsLogLostTable))),0.0f);}
+#endif
 #ifdef PHOSPHOR_REFL_LOBE
             float3 sheenTerm=float3(0); // F15.1 (ticket 10): S E (coat attenuation), the environment term of the sheen layer
             float3 thinTerm=float3(0); // F15.1 (ticket 16): w color (1 - metallic) (1 - E_d) (1 - 0.16 N.V), the transmitted diffuse (radiance / pi at -N)
             // F15.1 (ticket 08): extended pixels receive 1 - max(E_dielectric) of their own specular lobe.
             {const auto lobe=REFL_LOBE(p.flags,REFLECT_COMPOSE_LOBE_GUIDE_VALID,pixel.y*p.width+pixel.x,s);
                 if(lobe.extended&&!noSpecularEstimate)envDiffuse=bsdfSpecEnvIrid(lobe.spec,lobe.irid,diVec(s.albedo),saturate(s.metallic),(p.flags&REFLECT_COMPOSE_SPEC)?lobe.diffuseRoughness:lobe.envRoughness,envNV,phosphor::DfgTable).diffuseWeight;
+                // F15 closure (ADR-0007): the dielectric layer's multiple-scattering energy is taken from the diffuse complement (1 - E_d - F_ms L).
+                if((p.flags&REFLECT_COMPOSE_SPECULAR_MS)&&!noSpecularEstimate&&!lobe.aniso){ // anisotropic lobes carry none (ADR-0007)
+                    const float msRough=(p.flags&REFLECT_COMPOSE_SPEC)?lobe.diffuseRoughness:lobe.envRoughness;
+                    const BsdfMs msD=bsdfMsPrepare(lobe.extended?lobe.spec.f0:float3(0.04f),lobe.extended?lobe.spec.f90:1.0f,msRough,envNV,phosphor::MsLogLossAvgTable,phosphor::MsLogLostTable);
+                    const float3 eD=lobe.extended?bsdfSpecEnvIrid(lobe.spec,lobe.irid,diVec(s.albedo),saturate(s.metallic),msRough,envNV,phosphor::DfgTable).dielectric:bsdfEnvSpecular(float3(0.04f),s.roughness,envNV,phosphor::DfgTable);
+                    envDiffuse=max(1.0f-bsdfMax3(eD+bsdfMsEnv(msD)),0.0f);}
                 const float envDiffuseBase=envDiffuse; // F15.3 closure (ticket 16): before the coat / sheen / transmission scalings
                 // F15.1 (ticket 09): the diffuse under a coat receives 1 - c F_c(|V.Nc|).
                 // F15.1 (ticket 13): the diffuse base of a transmissive material is mixed by 1 - t.
@@ -135,7 +152,17 @@ kernel void REFL_KERNEL(reflection_composite)(constant GPUReflectionComposeParam
                 // S E L(N) is added below next to the diffuse (GI irradiance / pi, or the declared environment).
                 if(lobe.sheen){envDiffuse*=lobe.sheenScale;sheenTerm=lobe.sheenColor*(lobe.sheenAlbedo*coatAtt);}
                 // F15.1 (ticket 16): thin subsurface: the front diffuse keeps 1 - w, the transmitted part takes the weight it released.
-                if(lobe.thin){thinTerm=(lobe.extended&&!bsdfThinEnvIsDefault(lobe.spec,lobe.irid))?bsdfThinEnvWeightFit(lobe.thinParams,lobe.spec,lobe.irid,saturate(s.metallic),envNV,envDiffuse/max(envDiffuseBase,1e-6f)):bsdfThinEnvWeight(lobe.thinParams,saturate(s.metallic),envDiffuse,envNV);envDiffuse*=bsdfThinReflectScale(lobe.thinParams);}}
+                if(lobe.thin){thinTerm=(lobe.extended&&!bsdfThinEnvIsDefault(lobe.spec,lobe.irid))?bsdfThinEnvWeightFit(lobe.thinParams,lobe.spec,lobe.irid,saturate(s.metallic),envNV,envDiffuse/max(envDiffuseBase,1e-6f)):bsdfThinEnvWeight(lobe.thinParams,saturate(s.metallic),envDiffuse,envNV);envDiffuse*=bsdfThinReflectScale(lobe.thinParams);}
+                // F15 closure (--specular-ms): the multiple-scattering lobe of the pixel's own f0 / f90 and effective roughness, under the sheen and
+                // the coat like the material; the coat adds its own dielectric term.
+                if((p.flags&REFLECT_COMPOSE_SPECULAR_MS)&&!noSpecularEstimate){ // anisotropic base lobe: no base term (ADR-0007), the coat's own lobe stays
+                    const float3 msAlbedo=diVec(s.albedo);const float msMetal=saturate(s.metallic);
+                    const BsdfMs ms=bsdfMsPrepare(lobe.extended?mix(lobe.spec.f0,msAlbedo,msMetal):bsdfBaseF0(msAlbedo,msMetal),lobe.extended?mix(lobe.spec.f90,1.0f,msMetal):1.0f,
+                        lobe.envRoughness,envNV,phosphor::MsLogLossAvgTable,phosphor::MsLogLostTable);
+                    float3 w=lobe.aniso?float3(0):bsdfMsEnv(ms);
+                    if(lobe.sheen)w*=lobe.sheenScale;
+                    if(lobe.coat)w=w*coatAtt+lobe.coatFactor*bsdfMsEnv(bsdfMsPrepare(float3(0.04f),1.0f,lobe.coatRoughness,max(dot(lobe.coatNormal,normalize(diVec(s.viewDirection))),1e-4f),phosphor::MsLogLossAvgTable,phosphor::MsLogLostTable));
+                    msTerm=w;}}
 #endif
             if(p.flags&REFLECT_COMPOSE_DI)color+=diSelected.read(pixel).rgb;
 #ifdef PHOSPHOR_REFL_LOBE
@@ -148,6 +175,11 @@ kernel void REFL_KERNEL(reflection_composite)(constant GPUReflectionComposeParam
 #endif
 #ifdef PHOSPHOR_REFL_LOBE
             if((p.flags&REFLECT_COMPOSE_GI)&&any(sheenTerm>0))color+=giSelected.read(pixel).rgb*sheenTerm/M_PI_F;
+#endif
+#if defined(PHOSPHOR_REFL_LOBE) || defined(PHOSPHOR_REFL_MS)
+            if((p.flags&REFLECT_COMPOSE_GI)&&any(msTerm>0))color+=giSelected.read(pixel).rgb*msTerm/M_PI_F;
+#endif
+#ifdef PHOSPHOR_REFL_LOBE
             // F15.1 (ticket 19): E(-N) is the probe-grid lookup of the back normal (REFLECT_COMPOSE_GI_BACK; every GI mode since the F15 closure: the probe atlas exists in all of them).
             if((p.flags&REFLECT_COMPOSE_GI)&&any(thinTerm>0))color+=((p.flags&REFLECT_COMPOSE_GI_BACK)?float3(giBack.read(pixel).rgb):giSelected.read(pixel).rgb)*thinTerm/M_PI_F;
 #endif
@@ -164,6 +196,11 @@ kernel void REFL_KERNEL(reflection_composite)(constant GPUReflectionComposeParam
                 color+=ambient*aoFactor;
 #ifdef PHOSPHOR_REFL_LOBE
                 if(any(sheenTerm>0)&&!(p.flags&REFLECT_COMPOSE_SHEEN_FROM_PROBE))color+=float3(p.environment[0],p.environment[1],p.environment[2])*sheenTerm*as_type<float>(s.pad[0])*aoFactor;
+#endif
+#if defined(PHOSPHOR_REFL_LOBE) || defined(PHOSPHOR_REFL_MS)
+                if(any(msTerm>0))color+=float3(p.environment[0],p.environment[1],p.environment[2])*msTerm*as_type<float>(s.pad[0])*aoFactor;
+#endif
+#ifdef PHOSPHOR_REFL_LOBE
                 if(any(thinTerm>0))color+=float3(p.environment[0],p.environment[1],p.environment[2])*thinTerm*as_type<float>(s.pad[0])*aoFactor;
 #endif
             }}
@@ -171,7 +208,7 @@ kernel void REFL_KERNEL(reflection_composite)(constant GPUReflectionComposeParam
     if(!all(isfinite(color))||any(color<-.00001f)||(p.pad[0]&&any(color>65504.0f))){atomic_fetch_add_explicit(counts+4,1u,memory_order_relaxed);color=0;}
     output.write(float4(max(color,0.0f),1),pixel);
 }
-#ifndef PHOSPHOR_REFL_LOBE
+#if !defined(PHOSPHOR_REFL_LOBE) && !defined(PHOSPHOR_REFL_MS)
 // Capture8 exports the actual GI denoiser result E as reflected diffuse Lo.
 // Current receiver material is applied once, matching gi_reference_diffuse;
 // no AO, exposure, other signal, or numerical sanitization alters this export.
@@ -193,4 +230,4 @@ kernel void reflection_check(constant GPUReflectionComposeParams& p [[buffer(0)]
     const uint total=simd_sum(1u),invalid=simd_sum(bad?1u:0u),invalidOutput=simd_sum(badOutput?1u:0u);
     if(lane==0){atomic_fetch_add_explicit(counts,total,memory_order_relaxed);if(invalid)atomic_fetch_add_explicit(counts+1,invalid,memory_order_relaxed);if(invalidOutput)atomic_fetch_add_explicit(counts+6,invalidOutput,memory_order_relaxed);}
 }
-#endif // !PHOSPHOR_REFL_LOBE
+#endif // !PHOSPHOR_REFL_LOBE && !PHOSPHOR_REFL_MS

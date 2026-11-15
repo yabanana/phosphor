@@ -831,10 +831,19 @@ class DeclaredCombinationModel(unittest.TestCase):
         self.att = np.tile([0.4, 0.8, 1.0], (self.n, 1))
         self.dist = np.full(self.n, 0.8)
 
-    def pixel(self, t=1.0, thickness=0.0, variant="spec", irid=None, dt=None, base=None, sky=0.5):
+    def pixel(self, t=1.0, thickness=0.0, variant="spec", irid=None, dt=None, base=None, sky=0.5, ms=False):
         return tr.declared_pixel(self.base if base is None else base, self.rough, self.ior, np.full(self.n, float(t)),
                                  np.full(self.n, float(thickness)), self.att, self.dist, self.mu, sky, variant, irid=irid,
-                                 diffuse_transmission=dt)
+                                 diffuse_transmission=dt, ms=ms)
+
+    def test_the_multiple_scattering_lobe_is_added_by_default_and_never_gains_beyond_the_furnace_bound(self):
+        # ADR-0007: the formula tests above run with ms=False (single-scattering algebra); the default adds the declared lobe of the glass
+        # (f0 of the ior): positive, below 0.2 % of the sky for a dielectric, and the furnace bound 1.005 of decision 11 holds
+        without, with_ms = self.pixel(0.0, sky=1.0), self.pixel(0.0, sky=1.0, ms=True)
+        self.assertTrue(np.all(with_ms >= without))
+        self.assertTrue(np.any(with_ms > without))
+        self.assertLess(float((with_ms - without).max()), 0.002)
+        self.assertLessEqual(float(with_ms.max()), 1.005)
 
     def irid(self, strength=1.0, ior=1.3, thickness=400.0):
         return (np.full(self.n, strength), np.full(self.n, ior), np.full(self.n, thickness))
@@ -854,7 +863,7 @@ class DeclaredCombinationModel(unittest.TestCase):
         thin = {"weight": np.full(self.n, 0.7), "color": np.tile([1.0, 0.55, 0.25], (self.n, 1)), "variant": "spec"}
         expected = ref.declared_environment_radiance(self.base, np.zeros(self.n), self.rough, self.mu, 0.5, ref.DECLARED,
                                                      dielectric=None, thin=thin)
-        got = self.pixel(0.0, dt=self.dt())
+        got = self.pixel(0.0, dt=self.dt(), ms=True)  # both carry the ADR-0007 lobe
         # ticket 16's declared model uses the DFG E_d = 0.04 A + B of the base (ior 1.5 here: the same f0)
         np.testing.assert_allclose(got, expected, rtol=1e-10)
 
@@ -874,7 +883,7 @@ class DeclaredCombinationModel(unittest.TestCase):
                 "thickness_min": np.full(self.n, 100.0), "nv": self.mu, "variant": "spec"}
         expected = ref.declared_environment_radiance(self.base, np.zeros(self.n), self.rough, self.mu, 0.5, ref.DECLARED,
                                                      dielectric=None, irid=irid)
-        np.testing.assert_allclose(self.pixel(0.0, irid=self.irid()), expected, rtol=1e-10)
+        np.testing.assert_allclose(self.pixel(0.0, irid=self.irid(), ms=True), expected, rtol=1e-10)  # both carry the ADR-0007 lobe
 
     def test_the_film_changes_the_transmissive_image_and_thickness_zero_disables_it(self):
         plain = self.pixel(1.0, 0.8)

@@ -11,7 +11,8 @@ sampling; the BRDF and the path integrator below are this file's own.
 Declared reference model (every item is part of the report):
 - Material (glTF Appendix B, ADR-0006): Lambert (1-F(0.04))(1-metallic)albedo/pi
   plus GGX with height-correlated Smith visibility and Schlick Fresnel,
-  f0 = mix(0.04, albedo, metallic),
+  f0 = mix(0.04, albedo, metallic) plus (ADR-0007, default on) the Kulla-Conty multiple-scattering lobe, folded into the
+  cosine-sampled strategy (tables from tools/ms_table.py `albedo`, no engine table),
   roughness clamped to [0.04, 1], alpha = max(roughness^2, 0.002).
 - Camera: one ray through each pixel centre, no reconstruction filter.
 - Transport: full material at the camera vertex with both lobes continued;
@@ -91,6 +92,7 @@ def require_texture_free(data):
 
 
 class Context:
+    ms_lobe = True  # ADR-0007: the engine default; `--specular-ms off` renders the glTF Appendix B lobe alone
     """Scene, per-shape material tables and camera for one snapshot."""
 
     def __init__(self, root, data, threads, secondary_specular, max_bounces=16, rr_depth=5, regularization_scale=8.0, mirror_bounces=0):
@@ -160,6 +162,8 @@ class Context:
             table[identifier] = [*material["base"][:3], min(1.0, max(0.0, float(material["metallic"]))),
                                  max(roughness * roughness, MIN_ALPHA)]
         self.table = [mi.Float(table[:, column].copy()) for column in range(5)]
+        if self.ms_lobe:
+            self.build_multiple_scattering_tables(table)
         camera = data["camera"]
         if any(camera.get("jitter_pixels", [0, 0])):
             raise ValueError("pixel-centre reference requires an unjittered camera")
@@ -176,6 +180,50 @@ class Context:
         self.sampler = mi.load_dict({"type": "independent"})
         self.vector, self.colour = mi.Vector3d, getattr(mi, "Color3d", mi.Vector3d)
 
+    # -- multiple-scattering lobe (ADR-0007) -----------------------------
+    MS_NODES = 129  # cos(theta) nodes of the lost-energy tables, 1e-3 .. 1
+
+    def build_multiple_scattering_tables(self, table):
+        """Lost energy L(mu) = 1 - E(mu) and 1 - E_avg of every material (Kulla-Conty 2017): deterministic quadrature of the GGX lobe
+        (tools/ms_table.py `albedo`, independent of the engine tables and of its split-sum DFG), one row per material identifier."""
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+        import ms_table
+        mi, np = self.mi, self.np
+        nodes = np.concatenate([[1e-3], np.linspace(0.0, 1.0, self.MS_NODES)[1:]])
+        cache = {}
+        lost = np.zeros((table.shape[0], self.MS_NODES), dtype=np.float32)
+        loss = np.zeros(table.shape[0], dtype=np.float32)
+        for identifier in range(table.shape[0]):
+            alpha = float(table[identifier, 4])
+            if alpha <= 0:
+                continue
+            if alpha not in cache:
+                roughness = max(math.sqrt(alpha), MIN_ROUGHNESS)
+                row = np.array([max(0.0, 1.0 - ms_table.albedo(float(mu), roughness, 8192, 128)) for mu in nodes])
+                average = 2.0 * float(np.sum(0.5 * (row[1:] * nodes[1:] + row[:-1] * nodes[:-1]) * np.diff(nodes)))
+                cache[alpha] = (row, average)
+            lost[identifier], loss[identifier] = cache[alpha]
+        self.ms_lost, self.ms_loss = mi.Float(lost.reshape(-1).copy()), mi.Float(loss.copy())
+
+    def multiple_scattering(self, material, wo, nl, valid, f0):
+        """f_ms cos(theta_i) of the extra lobe: F_ms L(mu_o) L(mu_i) / (pi (1 - E_avg)) cos(theta_i), F_ms from F_avg = f0 + (1 - f0) / 21."""
+        mi, dr = self.mi, self.dr
+        identifier = material["id"]
+        loss = mi.Float64(dr.gather(mi.Float, self.ms_loss, identifier))
+        favg = f0 + (1 - f0) / 21.0
+        fms = favg * favg * ((1 - loss) / (1 - favg * loss))
+
+        def lost(mu):
+            x = dr.clip((mu - 1e-3) / (1 - 1e-3), 0.0, 1.0) * (self.MS_NODES - 1)
+            i0 = dr.minimum(mi.UInt32(x), self.MS_NODES - 2)
+            fraction = x - mi.Float64(i0)
+            base = identifier * self.MS_NODES + i0
+            return ((1 - fraction) * mi.Float64(dr.gather(mi.Float, self.ms_lost, base)) +
+                    fraction * mi.Float64(dr.gather(mi.Float, self.ms_lost, base + 1)))
+
+        scale = lost(dr.clip(wo.z, 1e-3, 1.0)) * lost(dr.clip(nl, 1e-3, 1.0)) / (math.pi * dr.maximum(loss, 1e-9))
+        return dr.select(valid, fms * (scale * nl), 0)
+
     # -- camera ---------------------------------------------------------
     def primary_ray(self, pixel):
         mi, dr = self.mi, self.dr
@@ -191,7 +239,7 @@ class Context:
         identifier = dr.reinterpret_array(mi.UInt32, si.shape)
         values = [dr.gather(mi.Float, column, identifier, si.is_valid()) for column in self.table]
         return {"albedo": self.colour(values[0], values[1], values[2]), "metallic": mi.Float64(values[3]),
-                "alpha": mi.Float64(values[4])}
+                "alpha": mi.Float64(values[4]), "id": identifier}
 
     def lobes(self, material, wo, wi, alpha):
         """Engine BRDF times cos(theta_i) for local unit vectors; returns diffuse, specular, VNDF pdf."""
@@ -215,6 +263,10 @@ class Context:
         # glTF Appendix B (ADR-0006): the diffuse lobe is weighted by the dielectric Fresnel only.
         dielectric = 0.04 + (1 - 0.04) * (1 - vh) ** 5
         diffuse = dr.select(valid, (1 - dielectric) * (1 - material["metallic"]) * material["albedo"] * (nl / math.pi), 0)
+        if "id" in material and self.ms_lobe:
+            # ADR-0007: the multiple-scattering lobe joins the cosine-sampled strategy (smooth, ~ L(mu_i) cos); the closed-form checks
+            # below (no material id) test the single-scattering lobe and keep it out.
+            diffuse = diffuse + self.multiple_scattering(material, wo, nl, valid, f0)
         specular = dr.select(valid, fresnel * (distribution * visibility * nl), 0)
         g1 = 2 * nv / (nv + dr.sqrt(a2 + (1 - a2) * nv * nv))
         pdf = dr.select(valid, g1 * distribution / (4 * nv), 0)
@@ -574,6 +626,19 @@ def closed_form_checks(threads=8):
     head = context.vector(0.0, 0.0, 1.0) + dr.zeros(mi.Vector3d, count)
     diffuse, _, _ = context.lobes(plastic, head, head, mi.Float64(0.64))
     record("Lambert term at normal incidence", diffuse.x[0], 0.96 * 0.65 / math.pi, 1e-9)
+    # ADR-0007: with the multiple-scattering lobe a rough white conductor returns all the light (the entries above, without a material id,
+    # are the single-scattering negative control: 1 - ln 2 = 0.307 at alpha 1).
+    one_row = np.zeros((1, 5), dtype=np.float32)
+    for alpha in (0.25, 1.0):
+        one_row[0] = [1.0, 1.0, 1.0, 1.0, alpha]
+        context.build_multiple_scattering_tables(one_row)
+        metal_ms = {**material(1.0, 1.0), "alpha": mi.Float64(alpha), "id": dr.zeros(mi.UInt32, count)}
+        for cosine in (1.0, 0.5):
+            wo = view(cosine)
+            wi, pdf = uniform()
+            diffuse, specular, _ = context.lobes(metal_ms, wo, wi, mi.Float64(alpha))
+            record(f"white conductor furnace with the multiple-scattering lobe alpha={alpha} cos={cosine}",
+                   dr.mean((diffuse.x + specular.x) / pdf)[0], 1.0, 1.5e-2)
     return results
 
 
@@ -647,8 +712,12 @@ def main(argv=None):
     p.add_argument("--mirror-bounces", type=int, default=0,
                    help="F15 ticket 22: extra ideal-mirror hits after the camera's specular lobe through smooth surfaces (0 = declared F13 model)")
     p.add_argument("--threads", type=int, default=min(12, os.cpu_count() or 1))
+    p.add_argument("--specular-ms", choices=["on", "off"], default="on",
+                   help="ADR-0007: the Kulla-Conty multiple-scattering lobe of the engine default (on) or the Appendix B lobe alone (off)")
     p.set_defaults(function=command_render)
     args = parser.parse_args(argv)
+    if hasattr(args, "specular_ms"):
+        Context.ms_lobe = args.specular_ms == "on"
     if hasattr(args, "spp") and (any(n < 1 for n in args.spp) or args.spp != sorted(set(args.spp))):
         parser.error("strictly increasing positive SPP checkpoints required")
     try:

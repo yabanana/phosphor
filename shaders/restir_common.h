@@ -148,6 +148,11 @@ inline DISample diSampleTexturedLight(GPUSampledLight l, uint lightIndex, float2
 }
 
 inline float3 diIncident(DISample s) { return s.valid ? s.radiance * s.geometry : float3(0); }
+// F15 closure (--specular-ms): the Kulla-Conty lobe of a base (dielectric/metal) pixel for one light sample (cosine included).
+inline float3 diMsBase(float3 albedo, float metallic, float roughness, float nv, float nl, float3 incident) {
+    const BsdfMs ms = bsdfMsPrepare(bsdfBaseF0(albedo, metallic), 1.0f, roughness, nv, phosphor::MsLogLossAvgTable, phosphor::MsLogLostTable);
+    return bsdfMsLobe(ms, nl, phosphor::MsLogLostTable) * incident * nl;
+}
 inline float3 diBRDFWeighted(GPUDISurface surface, DISample s, float specularWeight) {
     if (!surface.valid || !s.valid) return float3(0);
     float3 n = diVec(surface.shadingNormal), v = diVec(surface.viewDirection);
@@ -163,6 +168,18 @@ inline float3 diBRDFWeighted(GPUDISurface surface, DISample s, float specularWei
         bsdfBaseEval(nl, nv, nh, vh, albedo, metallic, bsdfAlpha(surface.roughness), specularWeight);
     const float3 result = (lobes.diffuse + lobes.specular) * diIncident(s) * nl;
     return result; // caller MUST record nonfinite BEFORE any safe-output sanitization
+}
+// F15 closure (--specular-ms): the base expression above, UNTOUCHED (a branch inside it changed the compiler's association of the products in a few
+// pixels, measured), plus the multiple-scattering lobe; the callers select between the two functions, so the option off keeps the old code.
+inline float3 diBRDFWeightedMs(GPUDISurface surface, DISample s, float specularWeight) {
+    const float3 base = diBRDFWeighted(surface, s, specularWeight);
+    if (!surface.valid || !s.valid) return base;
+    float3 n = diVec(surface.shadingNormal), v = diVec(surface.viewDirection);
+    if (!all(isfinite(n)) || !all(isfinite(v)) || !(dot(n, n) > 0 && dot(v, v) > 0)) return base;
+    n = normalize(n); v = normalize(v);
+    const float nl = saturate(dot(n, s.wi)), nv = max(dot(n, v), 1e-4f);
+    if (!(nl > 0) || dot(v + s.wi, v + s.wi) <= 1e-20f) return base;
+    return base + diMsBase(max(diVec(surface.albedo), 0.0f), saturate(surface.metallic), surface.roughness, nv, nl, diIncident(s));
 }
 // F15.1 (ticket 07): lobe parameters of the destination pixel read from the lobe guide.  `extended` is false for
 // base pixels and, in the base kernels (no PHOSPHOR_DI_LOBE), always: the lobe code is not compiled in, so scenes
@@ -199,9 +216,12 @@ struct DILobe {
     bool transThin;
     // F15.1 (ticket 17, RT tier): the weight of a volumetric-subsurface pixel while the walk is effective (DI_SSS_WALK), 0 otherwise.
     float sssWalk;
+    // F15 closure (--specular-ms): the Kulla-Conty multiple-scattering lobe (DI_SPECULAR_MS), set for base and extended pixels alike.
+    bool specularMs;
 };
 inline DILobe DI_FN(diLoadLobe)(constant GPUDIParams& p, const device GPULobeGuide* guides, uint index) {
     DILobe l{};
+    l.specularMs = (p.flags & DI_SPECULAR_MS) != 0u;
 #ifdef PHOSPHOR_DI_LOBE
     if ((kMaterialFeatures & LOBE_GUIDE_RESOLVED_FEATURES) != 0u && (p.flags & DI_LOBE_GUIDE_VALID) != 0u) {
         const GPULobeGuide g = guides[index];
@@ -294,6 +314,16 @@ inline float3 DI_FN(diBRDFLobe)(GPUDISurface surface, DISample s, float specular
                 const float scale = bsdfSheenScaleLight(lobe.sheenColor, lobe.sheenRoughness, nv, nl, phosphor::SheenTable);
                 result = result * scale + bsdfSheenLobe(lobe.sheenColor, lobe.sheenRoughness, nl, nv, nh) * incident * nl;
             }
+            // F15 closure (--specular-ms): the multiple-scattering lobe of the material under the sheen (same scaling), before the coat attenuation.
+            if (lobe.specularMs && !((kMaterialFeatures & MATERIAL_FEATURE_ANISOTROPY) != 0u && lobe.aniso)) { // anisotropic lobes carry none (ADR-0007)
+                const float msRoughness = surface.roughness;
+                const BsdfMs ms = bsdfMsPrepare(mix(spec.f0, albedo, metallic), mix(spec.f90, 1.0f, metallic), msRoughness, nv,
+                                                phosphor::MsLogLossAvgTable, phosphor::MsLogLostTable);
+                float3 msValue = bsdfMsLobe(ms, nl, phosphor::MsLogLostTable) * incident * nl;
+                if ((kMaterialFeatures & MATERIAL_FEATURE_SHEEN) != 0u && lobe.sheen)
+                    msValue *= bsdfSheenScaleLight(lobe.sheenColor, lobe.sheenRoughness, nv, nl, phosphor::SheenTable);
+                result += msValue;
+            }
         }
         // Ticket 16: a light behind the surface (N.L < 0) lights it through the transmitted lobe, weighted by 1 - F(V.H) and |N.L|.
         if ((kMaterialFeatures & MATERIAL_FEATURE_SUBSURFACE) != 0u && lobe.thin) {
@@ -317,10 +347,16 @@ inline float3 DI_FN(diBRDFLobe)(GPUDISurface surface, DISample s, float specular
                 const float3 h = normalize(v + s.wi);
                 result += (coatWeight * lobe.coatFactor * fc * bsdfCoatSpecular(ncl, ncv, saturate(dot(nc, h)), bsdfAlpha(lobe.coatRoughness)) * ncl) * incident;
             }
+            // F15 closure (--specular-ms): the coat's own dielectric multiple-scattering lobe (not attenuated by the coat, like the coat lobe).
+            if (lobe.specularMs && ncl > 0) {
+                const BsdfMs msc = bsdfMsPrepare(float3(0.04f), 1.0f, lobe.coatRoughness, ncv, phosphor::MsLogLossAvgTable, phosphor::MsLogLostTable);
+                result += lobe.coatFactor * bsdfMsLobe(msc, ncl, phosphor::MsLogLostTable) * ncl * incident;
+            }
         }
         return result; // caller MUST record nonfinite BEFORE any safe-output sanitization
     }
 #endif
+    if (lobe.specularMs) return diBRDFWeightedMs(surface, s, specularWeight);
     return diBRDFWeighted(surface, s, specularWeight);
 }
 inline float3 diBRDF(GPUDISurface surface, DISample s) { return diBRDFWeighted(surface, s, 1.0f); }

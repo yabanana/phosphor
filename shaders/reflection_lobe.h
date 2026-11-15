@@ -18,7 +18,11 @@
 // The sampled lobe's (id, axis) key into the sample flags read by the "_lobe" denoiser kernels (denoise.metal, lobe contract).
 #define REFL_TAG(sample, lobe) if (((sample).flags & SPECULAR_SAMPLE_VALID) != 0u) (sample).flags |= specularSampleLobeFlags((lobe).id, (lobe).refract)
 #else
+#ifdef PHOSPHOR_REFL_MS
+#define REFL_KERNEL(name) name##_ms // ADR-0007: the base kernels with the multiple-scattering lobe (reflection_composite_ms.metal)
+#else
 #define REFL_KERNEL(name) name
+#endif
 #define REFL_GUIDE_PARAM(index)
 #define REFL_EXT_PARAM(index)
 #define REFL_SSS_PARAM(index)

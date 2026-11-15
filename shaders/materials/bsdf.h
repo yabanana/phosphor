@@ -15,6 +15,7 @@
 #include "renderer/sheen_table.h"
 #include "renderer/lobe_select.h"
 #include "renderer/transmission_math.h"
+#include "renderer/specular_ms.h" // before the exact-maths region opens (bsdf_energy.h below only wraps it)
 #include "exact_pragma_off.h"
 using namespace metal;
 #include "exact_math_begin.h"
@@ -604,4 +605,6 @@ inline float3 bsdfVolumeAbsorption(float3 attenuationColor, float attenuationDis
                   phosphor::transmissionBeerLambert(attenuationColor.y, attenuationDistance, length),
                   phosphor::transmissionBeerLambert(attenuationColor.z, attenuationDistance, length));
 }
+// F15 closure (--specular-ms, ADR-0007): the multiple-scattering lobe, additive hooks only (inside the exact-maths region of the exact module).
+#include "bsdf_energy.h"
 #include "exact_math_end.h"

@@ -316,6 +316,7 @@ std::string reportToJson(const BenchReport& r) {
             ",\n  \"rendering\": {\"offscreen\": " + std::string(boolean(v.offscreen)) + ", \"path\": \"" +
             jsonEscape(v.path) + "\", \"asset\": \"" + jsonEscape(v.asset) +
             "\", \"material_binning_requested\": " + boolean(v.materialBinning) + ", \"post\": " + boolean(v.post) +
+            ", \"specular_ms\": " + boolean(v.specularMs) +
             ", \"upscaler_effective\": \"" + jsonEscape(v.upscaler) + "\", \"tonemap\": \"" + jsonEscape(v.tonemap) +
             "\", \"input_width_last\": " + std::to_string(v.inputWidth) +
             ", \"input_height_last\": " + std::to_string(v.inputHeight) + ", \"views\": " + std::to_string(v.views) +
