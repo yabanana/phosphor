@@ -4,6 +4,7 @@
 #include "testbench/material_validation.h"
 #include "testbench/transmission_validation.h"
 #include "testbench/transmissive_shadow_validation.h"
+#include "testbench/glass_receiver_validation.h"
 #include "testbench/chess_fixture.h"
 #include "testbench/terrain_fixture.h"
 #include "testbench/reflection_validation.h"
@@ -599,7 +600,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             auto v=needValue();if(!v)return false;if(!ReflectionValidation::validScenario(*v)){error="--reflection-scene: unknown scenario";return false;}out.reflectionScene=*v;
         } else if (arg == "--material-scenario") {
             auto v=needValue();if(!v)return false;
-            if(!MaterialValidation::validScenario(*v)&&!TransmissionValidation::validScenario(*v)&&!TransmissiveShadowValidation::validScenario(*v)&&!ChessFixture::validScenario(*v)&&!TerrainFixture::validScenario(*v)){error="--material-scenario: unknown scenario";return false;}out.materialScene=*v;
+            if(!MaterialValidation::validScenario(*v)&&!TransmissionValidation::validScenario(*v)&&!TransmissiveShadowValidation::validScenario(*v)&&!GlassReceiverValidation::validScenario(*v)&&!ChessFixture::validScenario(*v)&&!TerrainFixture::validScenario(*v)){error="--material-scenario: unknown scenario";return false;}out.materialScene=*v;
         } else if (arg == "--transmission-motion") {
             out.transmissionMotion = true;
         } else if (arg == "--resolve-features") {
@@ -740,6 +741,16 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if (*v == "on") out.debugTransmittanceMap = true;
             else if (*v == "off") out.debugTransmittanceMap = false;
             else { error = "--debug-transmittance-map: expected on or off"; return false; }
+        } else if (arg == "--debug-glass-tint") {
+            auto v = needValue(); if (!v) return false;
+            if (*v == "entry") out.debugGlassTintCameraOnly = false;
+            else if (*v == "camera") out.debugGlassTintCameraOnly = true;
+            else { error = "--debug-glass-tint: expected entry or camera"; return false; }
+        } else if (arg == "--debug-receiver-own") {
+            auto v = needValue(); if (!v) return false;
+            if (*v == "on") out.debugReceiverOwn = true;
+            else if (*v == "off") out.debugReceiverOwn = false;
+            else { error = "--debug-receiver-own: expected on or off"; return false; }
         } else if (arg == "--debug-gi-corrupt") {
             auto v=needValue();if(!v)return false;
             if(*v=="cache")out.debugGiCorrupt=1;else if(*v=="probe")out.debugGiCorrupt=2;else if(*v=="pdf")out.debugGiCorrupt=3;
@@ -1327,6 +1338,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if((!out.captureLinear.empty() || !out.captureLinearSequence.empty()) && (!out.visibility || !out.benchmark())){error="Linear capture requires --render-path visibility and --frames";return false;}
     if((out.giProbeAnchor||out.giSpacing||out.giGrid[0])&&out.gi==GiMode::Off){error="GI volume controls require --gi";return false;}
     if(!out.debugTransmittanceMap && out.shadows!=ShadowMode::CSM){error="--debug-transmittance-map off requires --shadows csm";return false;}
+    if(!out.debugReceiverOwn && out.shadows!=ShadowMode::CSM){error="--debug-receiver-own off requires --shadows csm";return false;}
     if((!out.debugTransmittanceDedup || out.debugTransmittanceInject) && !out.rtEnabled){error="--debug-transmittance-dedup off / --debug-transmittance-inject require --rt on";return false;}
     if(out.debugGiNoVisibility && (!out.debugLighting || out.gi==GiMode::Off || out.debugGiCorrupt)) {
         error="--debug-gi-no-visibility requires GI, --debug-lighting N>0 and no GI state corruption";return false;

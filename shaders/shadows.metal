@@ -10,6 +10,7 @@
 #include "renderer/visibility_math.h"
 #include "renderer/meshlet_layout.h"
 #include "texture_transform_core.h" // F15.1 (ticket 22): per-slot texture transforms at the alpha tests and the transmittance tint
+#include "shadow_receiver_own.h"
 
 static float4x4 shadowMatrix(constant float* m) {
     return float4x4(float4(m[0],m[1],m[2],m[3]),float4(m[4],m[5],m[6],m[7]),
@@ -35,8 +36,12 @@ kernel void shadow_surface_guides(
     device atomic_uint* counters [[buffer(15)]],texture2d<float,access::read> depth [[texture(0)]],
     texture2d<uint,access::read> visibility [[texture(1)]],
     texture2d<float,access::write> worldPosition [[texture(5)]],
-    texture2d<float,access::write> geometricNormal [[texture(6)]],uint2 pixel [[thread_position_in_grid]]) {
+    texture2d<float,access::write> geometricNormal [[texture(6)]],
+    const device GPUMaterial* materials [[buffer(16)]],const device RtTextureHandle* textures [[buffer(17)]],
+    const device GPUMaterialExtRecord* extensions [[buffer(22)]],texture2d<float,access::write> receiverOwn [[texture(14)]],
+    uint2 pixel [[thread_position_in_grid]]) {
     if(pixel.x>=p.width || pixel.y>=p.height) return;
+    float3 own=float3(0);
     const uint index=pixel.y*p.width+pixel.x,id=visibility.read(pixel).x;
     GPUShadowSurface s{}; s.slot=~0u; s.primitive=~0u;
     bool valid=id!=VISIBILITY_BACKGROUND && visibilityCluster(id)<2u*p.candidateCapacity;
@@ -85,6 +90,15 @@ kernel void shadow_surface_guides(
                                     s.geometricNormal[0]=normal.x; s.geometricNormal[1]=normal.y; s.geometricNormal[2]=normal.z;
                                     s.reverseDepth=z; s.slot=candidate.slot; s.generation=instance.generation;
                                     s.primitive=triangle; s.valid=1;
+                                    if(p.flags&SHADOW_FLAG_TRANSMITTANCE_MAP) { // F15 closure (ticket 15): the receiver's own surface in the map
+                                        const device GPUVertex& v0=vertices[meshletVertices[m.vertexOffset+i0]];
+                                        const device GPUVertex& v1=vertices[meshletVertices[m.vertexOffset+i1]];
+                                        const device GPUVertex& v2=vertices[meshletVertices[m.vertexOffset+i2]];
+                                        const float2 uv=float2(v0.u,v0.v)*bary.value[0]+float2(v1.u,v1.v)*bary.value[1]+float2(v2.u,v2.v)*bary.value[2];
+                                        const float3 outward=normalize(crossNormal)*((instance.flags&INSTANCE_FLAG_MIRRORED)?-1.0f:1.0f);
+                                        own=shadowReceiverOwnLn(materials,instance.materialIndex,p.materialCount,textures,extensions,uv,outward,
+                                            normalize(float3(p.lightDirection[0],p.lightDirection[1],p.lightDirection[2])));
+                                    }
                                 }
                             }
                         }
@@ -94,6 +108,7 @@ kernel void shadow_surface_guides(
         }
     }
     surfaces[index]=s;
+    if(p.flags&SHADOW_FLAG_TRANSMITTANCE_MAP) receiverOwn.write(float4(own,0.0f),pixel);
     worldPosition.write(float4(shadowPoint(s),float(s.valid)),pixel);
     geometricNormal.write(float4(shadowNormal(s),float(s.valid)),pixel);
     shadowCount(counters,0,s.valid);
@@ -358,7 +373,7 @@ static float4 shadowTransmitRead(texture2d<float,access::read> t0,texture2d<floa
 }
 static float3 shadowTransmitFilter(float3 point,float3 normal,uint cascade,constant GPUShadowParams& p,
                                     texture2d<float,access::read> t0,texture2d<float,access::read> t1,
-                                    texture2d<float,access::read> t2,texture2d<float,access::read> t3,uint seed) {
+                                    texture2d<float,access::read> t2,texture2d<float,access::read> t3,uint seed,float3 own) {
     const GPUShadowCascade c=p.cascades[cascade];
     const float3 light=normalize(float3(p.lightDirection[0],p.lightDirection[1],p.lightDirection[2]));
     if(dot(normal,light)<0) normal=-normal;
@@ -378,7 +393,8 @@ static float3 shadowTransmitFilter(float3 point,float3 normal,uint cascade,const
         const float2 at=uv+shadowDisk(s,filterCount,rotation)*radiusUv;
         if(any(at<0)||any(at>1)) { sum+=1.0f; continue; }
         const float4 v=shadowTransmitRead(t0,t1,t2,t3,at,cascade);
-        sum+=shadowTransmittanceBehind(clip.z,v.w,bias)?float3(shadowTransmittanceOfLn(v.x),shadowTransmittanceOfLn(v.y),shadowTransmittanceOfLn(v.z)):float3(1);
+        // F15 closure (ticket 15): `own` = the receiver's own surface, which every tap that covers it has summed (zero for an opaque receiver)
+        sum+=shadowTransmittanceBehind(clip.z,v.w,bias)?float3(shadowTransmittanceOfLn(v.x-own.x),shadowTransmittanceOfLn(v.y-own.y),shadowTransmittanceOfLn(v.z-own.z)):float3(1);
     }
     return sum/float(filterCount);
 }
@@ -388,16 +404,18 @@ kernel void shadow_csm_pcss(constant GPUShadowParams& p [[buffer(1)]],
     depth2d<float,access::sample> map3 [[texture(9)]],
     texture2d<float,access::read> transmit0 [[texture(10)]],texture2d<float,access::read> transmit1 [[texture(11)]],
     texture2d<float,access::read> transmit2 [[texture(12)]],texture2d<float,access::read> transmit3 [[texture(13)]],
+    texture2d<float,access::read> receiverOwn [[texture(14)]],
     texture2d<float,access::write> mask [[texture(4)]],uint2 pixel [[thread_position_in_grid]]) {
     if(pixel.x>=p.width || pixel.y>=p.height) return;
     const GPUShadowSurface s=surfaces[pixel.y*p.width+pixel.x];
     float visibility=1;
     float3 transmittance=float3(1);
     const bool transmit=(p.flags&SHADOW_FLAG_TRANSMITTANCE_MAP) && !(p.flags&SHADOW_FLAG_TRANSMITTANCE_IGNORED);
+    const float3 own=(transmit && !(p.flags&SHADOW_FLAG_RECEIVER_OWN_IGNORED))?receiverOwn.read(pixel).xyz:float3(0);
     if(s.valid && (p.flags&SHADOW_FLAG_LIGHT_VALID)) {
         for(uint c=0;c<4;++c) if(s.viewDepth>=p.cascades[c].splitNear && s.viewDepth<=p.cascades[c].splitFar) {
             visibility=shadowPcss(shadowPoint(s),shadowNormal(s),c,p,map0,map1,map2,map3,pixel.y*p.width+pixel.x);
-            if(transmit) transmittance=shadowTransmitFilter(shadowPoint(s),shadowNormal(s),c,p,transmit0,transmit1,transmit2,transmit3,pixel.y*p.width+pixel.x);
+            if(transmit) transmittance=shadowTransmitFilter(shadowPoint(s),shadowNormal(s),c,p,transmit0,transmit1,transmit2,transmit3,pixel.y*p.width+pixel.x,own);
             // Blend only the common receiver volume close to the cascade far
             // boundary. The next cascade must cover this overlap at kickoff.
             const float start=p.cascades[c].splitFar-(p.cascades[c].splitFar-p.cascades[c].splitNear)*0.1f;
@@ -406,7 +424,7 @@ kernel void shadow_csm_pcss(constant GPUShadowParams& p [[buffer(1)]],
                     shadowPcss(shadowPoint(s),shadowNormal(s),c+1,p,map0,map1,map2,map3,pixel.y*p.width+pixel.x),
                     saturate((s.viewDepth-start)/max(p.cascades[c].splitFar-start,1e-6f)));
                 if(transmit) transmittance=mix(transmittance,
-                    shadowTransmitFilter(shadowPoint(s),shadowNormal(s),c+1,p,transmit0,transmit1,transmit2,transmit3,pixel.y*p.width+pixel.x),
+                    shadowTransmitFilter(shadowPoint(s),shadowNormal(s),c+1,p,transmit0,transmit1,transmit2,transmit3,pixel.y*p.width+pixel.x,own),
                     saturate((s.viewDepth-start)/max(p.cascades[c].splitFar-start,1e-6f)));
             }
             break;

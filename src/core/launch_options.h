@@ -458,6 +458,12 @@ struct LaunchOptions {
     // F15.1 (ticket 15): --debug-transmittance-map on|off (--shadows csm).  off: the receiver ignores the CSM transmittance map, so transmissive
     // casters cast no shadow at all (negative control of the map).
     bool debugTransmittanceMap=true;
+    // F15 closure (ticket 15): --debug-receiver-own on|off (--shadows csm).  off: a transmissive RECEIVER keeps its own surface in the transmittance
+    // map sum (the behaviour before the fix: a pane behind another pane is attenuated by its own Fresnel pass and tint again); the negative control.
+    bool debugReceiverOwn=true;
+    // F15 closure (ticket 13): --debug-glass-tint entry|camera.  camera: the refraction walk tints only the camera-visible surface (the behaviour before the
+    // tint rule; the negative control of the tint fixtures); entry (default): once per closed solid at its entering interface and at every thin-walled surface.
+    bool debugGlassTintCameraOnly=false;
     std::string exportReference, captureLinear, captureLinearSequence, lightingScene,reflectionScene,materialScene;
     // F15.3 (ticket 13): --capture-linear-accumulate N averages the last N frames (ending at --capture-linear-frame) of the
     // linear signal on the CPU (test infrastructure for the one-stochastic-sample-per-pixel transport; 0 = the single frame).

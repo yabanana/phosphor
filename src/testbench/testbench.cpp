@@ -4,6 +4,7 @@
 #include "testbench/material_validation.h"
 #include "testbench/transmission_validation.h"
 #include "testbench/transmissive_shadow_validation.h"
+#include "testbench/glass_receiver_validation.h"
 #include "testbench/chess_fixture.h"
 #include "testbench/terrain_fixture.h"
 #include "testbench/torus_demo.h"
@@ -63,6 +64,7 @@ std::unique_ptr<TestBench> createTestBench(TestBenchType type, const TestBenchPa
             if(ChessFixture::validScenario(params.materialScenario))return std::make_unique<ChessFixture>(params.materialScenario, params.scenePath, params.materialOverridesPath);
             if(TransmissionValidation::validScenario(params.materialScenario))return std::make_unique<TransmissionValidation>(params.materialScenario, params.transmissionMotion);
             if(TransmissiveShadowValidation::validScenario(params.materialScenario))return std::make_unique<TransmissiveShadowValidation>(params.materialScenario);
+            if(GlassReceiverValidation::validScenario(params.materialScenario))return std::make_unique<GlassReceiverValidation>(params.materialScenario);
             if(!params.materialScenario.empty())return std::make_unique<MaterialValidation>(params.materialScenario, params.materialToggleEvery);
             return std::make_unique<PBRGrid>();
         case TestBenchType::StressTest:  return std::make_unique<StressTest>();

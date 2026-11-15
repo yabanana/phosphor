@@ -754,6 +754,8 @@ PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_LIGHT_VALID = 1u << 4;
 PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_TRANSMITTANCE_MAP = 1u << 5;
 // The receiver ignores the map (negative control `--debug-transmittance-map off`): transmissive casters then cast nothing.
 PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_TRANSMITTANCE_IGNORED = 1u << 6;
+// F15 closure (ticket 15): the receiver keeps its own transmissive surface in the map sum (negative control `--debug-receiver-own off`).
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_RECEIVER_OWN_IGNORED = 1u << 7;
 PHOSPHOR_GPU_CONSTANT u32 SHADOW_CORRUPT_NONE = 0u;
 PHOSPHOR_GPU_CONSTANT u32 SHADOW_CORRUPT_BIAS = 1u;
 PHOSPHOR_GPU_CONSTANT u32 SHADOW_CORRUPT_CASTER = 2u;
@@ -840,6 +842,8 @@ PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowCacheTile) == 48, "GPUShadowCacheTile lay
 // F13 residual surface base omits external DI/GI and hemisphere diffuse.
 // A positive raw assembly supplies full pre-reflection Lo for SSR separately.
 PHOSPHOR_GPU_CONSTANT u32 RESOLVE_EXTERNAL_DIFFUSE = 1u<<5;
+// F15 closure (ticket 19): the resolve's GI irradiance texture has a companion with E(-N) (thin-walled subsurface transmitted lobe).
+PHOSPHOR_GPU_CONSTANT u32 RESOLVE_GI_BACK = 1u<<6;
 struct GPUResolveLightingParams {
     u32 flags, sunIndex, width, height; // bits: sun visibility, replace local DI, indirect irradiance
     float environment[3];               // declared isotropic environment radiance (bit16 = F13 path)
@@ -1087,6 +1091,9 @@ PHOSPHOR_GPU_CONSTANT u32 REFLECTION_DEBUG_BOTH_BRANCHES = 2048u;
 // secondary hit is mirror-like (0 = the single-bounce path of F13, the negative control; 3 = the engine default).
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_BOUNCE_SHIFT = 12u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_BOUNCE_MASK = 3u;
+// F15 closure (ticket 13): the refraction walk tints only the camera-visible surface, as the engine did before the tint rule (every thin-walled
+// surface and the entering interface of every closed solid; negative control `--debug-glass-tint camera`).
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_DEBUG_TINT_CAMERA_ONLY = 1u << 14; // bit 14: bits 12-13 are REFLECTION_BOUNCE_*
 // F13.5 negative control: probe lookups ignore the box projection.
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_DEBUG_NO_PARALLAX = 256u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_NONE = 0u;
@@ -1387,7 +1394,7 @@ PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_AO = 16u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_EXCLUDE_EMISSION = 32u;
 // F15.1 (ticket 08): the lobe guide (buffer 3 of reflection_composite_lobe) is valid this frame.
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_LOBE_GUIDE_VALID = 64u;
-// F15.1 (ticket 19): texture 8 of the composite holds E(-N) for the thin subsurface pixels (DDGI); without it the pixel's own GI stands for it.
+// F15.1 (ticket 19): texture 8 of the composite holds E(-N) for the thin subsurface pixels (every GI mode); without it the pixel's own GI stands for it.
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_GI_BACK = 128u;
 struct GPUReflectionReduceParams {u32 width,height,samples,stridePixels;};
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionReduceParams)==16,"GPUReflectionReduceParams layout");

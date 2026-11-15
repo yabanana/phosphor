@@ -1560,6 +1560,30 @@ TEST_CASE("F15.1 ticket 15 --debug-transmittance-map is on by default and needs 
     CHECK_FALSE(parse({"--render-path","visibility","--shadows","csm","--debug-transmittance-map","maybe"},options,error));
 }
 
+TEST_CASE("F15 closure ticket 13 --debug-glass-tint is entry by default and accepts entry or camera") {
+    LaunchOptions options; std::string error;
+    CHECK_FALSE(options.debugGlassTintCameraOnly);
+    REQUIRE(parse({"--debug-glass-tint","camera"},options,error));
+    CHECK(options.debugGlassTintCameraOnly);
+    options = LaunchOptions{};
+    REQUIRE(parse({"--debug-glass-tint","entry"},options,error));
+    CHECK_FALSE(options.debugGlassTintCameraOnly);
+    CHECK_FALSE(parse({"--debug-glass-tint","maybe"},options,error));
+}
+
+TEST_CASE("F15 closure ticket 15 --debug-receiver-own is on by default and needs --shadows csm") {
+    LaunchOptions options; std::string error;
+    CHECK(options.debugReceiverOwn);
+    REQUIRE(parse({"--render-path","visibility","--shadows","csm","--debug-receiver-own","off"},options,error));
+    CHECK_FALSE(options.debugReceiverOwn);
+    options = LaunchOptions{};
+    REQUIRE(parse({"--render-path","visibility","--shadows","csm","--debug-receiver-own","on"},options,error));
+    CHECK(options.debugReceiverOwn);
+    options = LaunchOptions{};
+    CHECK_FALSE(parse({"--debug-receiver-own","off"},options,error));
+    CHECK_FALSE(parse({"--render-path","visibility","--shadows","csm","--debug-receiver-own","maybe"},options,error));
+}
+
 TEST_CASE("F15.1 ticket 15 --shadow-transmittance-divisor accepts 1, 2 and 4 (default 2)") {
     LaunchOptions options; std::string error;
     CHECK(options.shadowTransmittanceDivisor == 2);

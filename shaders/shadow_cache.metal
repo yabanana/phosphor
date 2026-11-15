@@ -1,6 +1,7 @@
 #include <metal_stdlib>
 #include "renderer/gpu_types.h"
 #include "renderer/shadow_dispatch.h"
+#include "renderer/shadow_math.h"
 #include "renderer/meshlet_layout.h"
 using namespace metal;
 using namespace phosphor;
@@ -30,6 +31,13 @@ static float3 cacheWorld(const device GPUInstance& i,const device GPUVertex& v) 
            float3(m[8],m[9],m[10])*v.pz+float3(m[12],m[13],m[14]);
 }
 struct CacheDepthOut { float4 position [[position]]; float2 uv; uint material [[flat]]; };
+// F15 closure (ticket 15): with a transmittance map (SHADOW_FLAG_TRANSMITTANCE_MAP) the transmissive casters leave the static and dynamic depth
+// the cache composes (they draw into the uncached transmittance map, as on the non-cache path); without it every caster stays opaque as before.
+static bool cacheTransmitCaster(constant GPUShadowParams& p,const device GPUMaterial* materials,uint materialIndex) {
+    if(!(p.flags&SHADOW_FLAG_TRANSMITTANCE_MAP) || materialIndex>=p.materialCount) return false;
+    const device GPUMaterial& m=materials[materialIndex];
+    return shadowCasterTransmissive(m.flags,m.extensionIndex,m.alphaCutoff);
+}
 static bool cacheCaster(uint slot,constant GPUShadowParams& p,constant GPUShadowCacheParams& cache,
                          const device uint* flags,const device uint* classifications) {
     if(slot>=p.slotCount || p.cascadeIndex>=4 || !(flags[slot]&(1u<<p.cascadeIndex))) return false;
@@ -42,12 +50,14 @@ static CacheDepthOut cacheVertex(const device GPUVertex& v,const device GPUInsta
 vertex CacheDepthOut shadow_cache_depth_vertex(uint vertexId [[vertex_id]],uint instance [[instance_id]],
     constant GPUShadowParams& p [[buffer(1)]],const device GPUInstance* instances [[buffer(3)]],
     const device GPUVertex* vertices [[buffer(6)]],const device uint* flags [[buffer(14)]],
-    constant GPUShadowCacheParams& cache [[buffer(18)]],const device uint* classifications [[buffer(19)]]) {
+    constant GPUShadowCacheParams& cache [[buffer(18)]],const device uint* classifications [[buffer(19)]],
+    const device GPUMaterial* materials [[buffer(16)]]) {
     CacheDepthOut invalid{};invalid.position=float4(2,2,0,1);
     const uint slot=shadowDrawSlot(p.casterSlot,instance,p.slotCount);
     if(!cacheCaster(slot,p,cache,flags,classifications)) return invalid;
     const device GPUInstance& i=instances[slot];
-    if(!(i.flags&INSTANCE_FLAG_VALID) || !(i.flags&2u) || i.meshIndex!=p.pad || i.materialIndex>=p.materialCount) return invalid;
+    if(!(i.flags&INSTANCE_FLAG_VALID) || !(i.flags&2u) || i.meshIndex!=p.pad || i.materialIndex>=p.materialCount ||
+        cacheTransmitCaster(p,materials,i.materialIndex)) return invalid;
     return cacheVertex(vertices[vertexId],i,p);
 }
 using CacheMesh=metal::mesh<CacheDepthOut,void,MESHLET_MESH_GROUP,MESHLET_MESH_GROUP,topology::triangle>;
@@ -57,14 +67,14 @@ using CacheMesh=metal::mesh<CacheDepthOut,void,MESHLET_MESH_GROUP,MESHLET_MESH_G
     const device GPUVertex* vertices [[buffer(6)]],const device GPUMeshlet* meshlets [[buffer(7)]],
     const device uint* vertexIndices [[buffer(8)]],const device uchar* triangles [[buffer(9)]],
     const device uint* flags [[buffer(14)]],constant GPUShadowCacheParams& cache [[buffer(18)]],
-    const device uint* classifications [[buffer(19)]]) {
+    const device uint* classifications [[buffer(19)]],const device GPUMaterial* materials [[buffer(16)]]) {
     const uint slot=shadowDrawSlot(p.casterSlot,group.y,p.slotCount);
     const uint meshlet=shadowDrawMeshlet(p.meshletFirst,group.x,p.meshletCount);
     bool valid=cacheCaster(slot,p,cache,flags,classifications);
     if(valid) {
         const device GPUInstance& i=instances[slot];
         valid=(i.flags&INSTANCE_FLAG_VALID) && (i.flags&2u) && i.meshIndex==p.pad &&
-              i.meshIndex<p.meshCount && i.materialIndex<p.materialCount;
+              i.meshIndex<p.meshCount && i.materialIndex<p.materialCount && !cacheTransmitCaster(p,materials,i.materialIndex);
         if(valid) { const device GPUMeshInfo& m=meshes[i.meshIndex];valid=meshlet>=m.meshletOffset && meshlet-m.meshletOffset<m.meshletCount; }
     }
     if(!valid) { if(tid==0)out.set_primitive_count(0);return; }

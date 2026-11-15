@@ -224,3 +224,43 @@ After the merge: build OK, ctest 20/20.
 - 3 memory and cost per cascade: PARTIAL (memory exact; cost loaded-machine indicative only). Unticked.
 - 4 archive/hitch/O7: MET (+1 render +1 mesh descriptor). Ticked.
 Open: quiet cost; minor limits not in 24: glass receiver's own underside multiplied by its slab's transmittance, half-resolution edge quality not gated, mesh/indexed transmit pipelines requested even without glass.
+
+2026-11-15 — F15 closure, agent "thinwall" (branch `f15c-thinwall2`; engine on 3ef8f41): the four limits that ticket 24 listed as open (glass receiver's own
+underside, half-resolution edge quality, transmit pipelines without glass) plus the declared "glass with `--shadow-cache on`" are implemented and gated.  All
+numbers below are from `tools/f15_glass_receiver_check.py` (scenes `glass-receiver-*`, bench class `GlassReceiverValidation`, tests
+`tests/test_glass_receiver_validation.cpp`, `tools/test_f15_glass_receiver_check.py`; thresholds are the decision-11 transmission bound, fixed before comparing).
+
+1. A transmissive RECEIVER no longer multiplies itself.  Cause: the CSM transmittance map sums the ln transmittance of every surface of a texel, the receiver's own
+   (thin pane, or the entering face of a solid) included, so the sun reflection on a pane behind another pane was attenuated by its own (1 - F) tint again.  Fix: the
+   guide producers (`shadow_surface_guides`, `shadow_receiver_pack`) evaluate the receiver's own Fresnel pass + transmission factor x tint with its own uv (textures
+   included, `shaders/shadow_receiver_own.h`) into a transient RGBA16F texture (only while the map exists: `Receiver own transmittance ln`, texture 14), the PCSS kernel
+   subtracts it from every map tap.  Fixture: `glass-receiver-stack` (tinted-clear pane A (0.6, 0.8, 0.9) above a rough tinted pane B (0.4, 0.9, 0.45), sun = mirror of the
+   camera, B seen directly and wholly inside A's shadow; verified by `tests/test_glass_receiver_validation.cpp`) against `glass-receiver-single` (B alone, the baseline);
+   ratio R_c = sum(stack_c) / sum(single_c) over the B region (7278 px) must equal T_A = (1 - F_Schlick(cos 52 degrees)) x tint_A = (0.5712, 0.7616, 0.8568).
+   After: CSM R = (0.5710, 0.7614, 0.8567), mean error 4e-4 / 1e-4 / 1e-4, p95 1.0e-3 / 6e-4 / 4e-4; RT (independent truth, ticket 14) R = (0.5707, 0.7611, 0.8563), mean 8e-4 / 6e-4 /
+   5e-4.  FAIL-BEFORE (`--debug-receiver-own off`, the behaviour before the fix, same binary): R = (0.2175, 0.6525, 0.3670), errors 0.62 / 0.14 / 0.57, equal to the
+   "own surface counted twice" expectation T_A (1 - F) tint_B to 1e-4.  Negative controls on the same data (must fail): own-counted (errors 1.63 / 0.17 / 1.33) and no
+   attenuation (0.43 / 0.24 / 0.14) both FAIL the gate (a first design with a clear A passed the no-attenuation control at 4.8 %: A was redesigned, not the threshold).
+   Declared remainder: a SOLID receiver's light-facing face behind another layer still carries its own slab (its back face cannot be separated in a single-layer map); a
+   solid's far face (the underside of a slab) keeps only the medium term, which is exactly the ray-traced receiver inside the slab.
+2. Half-resolution edge quality is gated (`edge`).  Scene `transmissive-shadow-pane-sun`, the green pane's shadow edges, CSM (divisor 2) against RT (ticket 14, analytic
+   edge positions within 0.1-4 mm): per row / column the sub-pixel mid-level crossing of the red channel, mapped to world metres.  Bound derived before measuring from the
+   quantisation of the map: a straight edge is displaced by a constant <= 0.5 texel; mean <= 0.5 texel, p95 <= 1 texel + half a pixel.  FIRST RUN FAILED (mean 15.1 / 4.7 / 1.9 /
+   13.7 mm vs 8.8 mm): the texel had been taken from this ticket's note "cascade radius <= 9 m" (17.6 mm), wrong for this camera; the floor lies in cascade 0 (view range
+   0.05..12.2 m, radius 15.7 m): opaque texel 15.33 mm, transmittance texel 30.67 mm at divisor 2 (`cascade_texel`, the formulas of `makeShadowCascades`, cross-checked by a C++
+   test).  The criterion is unchanged, only the input was corrected from the engine geometry.  Result: mean 15.06 / 4.72 / 1.94 / 13.68 mm (limit 15.33), p95 16.7 / 6.4 / 2.9 / 14.6 mm
+   (limit 30.67 + 0.5 px); the control (the capture shifted by 5 px) FAILS (64 / 54 mm on the vertical edges).  The worst edges sit at 98 % of the half-texel bound: that is the nearest-texel
+   quantisation of the half-resolution map, nothing else.  Divisor 4 (texel 61.3 mm) is reported against its own bound (z0 32.0 mm vs 30.67 mm: one edge slightly over, report only).
+   Owner-visible fact: the default half-resolution map moves a glass shadow edge by up to 15 mm; divisor 1 halves it (one flag).
+3. Transmit pipelines only with glass.  `shadow_transmit_{vertex,mesh,fragment}` descriptors are requested by `requestTransmitPipelines()` on the first frame whose scene has a
+   transmissive caster (until both are available the glass casters stay opaque, flag and passes follow).  Request count (`PIPELINES requests`, bench 1 `--shadows csm`, the clean
+   tip binary of the orchestrator vs this tree): featureless 64 -> 62 (-2); glass scene `transmissive-shadow-pane-sun` 73 -> 73.  Featureless images: see the commit message
+   (exactness captures and visual_check, 0 px).
+4. Glass with `--shadow-cache on` is implemented (it was declared "stays opaque").  The transmittance map is never cached (transmissive casters draw into it every frame,
+   cascade by cascade), the static/dynamic cache depth omits the transmissive casters (`cacheTransmitCaster` in `shadow_cache.metal`, flag-guarded) and the static depth is
+   invalidated (material revision) when the answer changes.  Gate: the green pane's shadow ratio (shadow interior / lit floor, 2918 / 1484 px) against the closed form
+   T = (1 - F_Schlick(cos 25 degrees)) tint = (0.384, 0.864, 0.432): cache (0.3835, 0.8632, 0.4316), no cache (0.3835, 0.8632, 0.4316), errors 0.12 / 0.09 / 0.09 %; controls
+   own-counted and opaque FAIL.  FAIL-BEFORE (the clean tip binary, `--shadow-cache on`): R = (0, 0, 0) (opaque shadow), gate fails.
+5. Archive (targeted, never a full re-harvest): `.scratch/f15/harvest/thinwall-1.json` (+2 render, +3 compute descriptors, shared with ticket 19: the `light_cluster_shade_lobe` /
+   forward variants of the new fixtures and `ddgi_resolve_back_all`), harvested with the SAME command lines as the captures (`f15_glass_receiver_check.py --harvest`,
+   `f15_thin_gi_back_check.py --harvest`).

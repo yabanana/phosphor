@@ -136,6 +136,7 @@ add_library(phosphor_core STATIC
     src/testbench/material_validation.cpp
     src/testbench/transmission_validation.cpp
     src/testbench/transmissive_shadow_validation.cpp
+    src/testbench/glass_receiver_validation.cpp
     src/testbench/chess_fixture.cpp
     src/testbench/terrain_fixture.cpp
     src/testbench/reflection_validation.cpp

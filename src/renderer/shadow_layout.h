@@ -30,6 +30,7 @@ PHOSPHOR_GPU_CONSTANT u32 ST_CSM_1 = 7u;
 PHOSPHOR_GPU_CONSTANT u32 ST_CSM_2 = 8u;
 PHOSPHOR_GPU_CONSTANT u32 ST_CSM_3 = 9u;
 PHOSPHOR_GPU_CONSTANT u32 ST_TRANSMIT = 10u; // F15.1 (ticket 15): first of four RGBA32Float transmittance maps (10..13), PCSS kernel only
+PHOSPHOR_GPU_CONSTANT u32 ST_RECEIVER_OWN = 14u; // F15 closure (ticket 15): the receiver's own ln transmittance (guide producers write, PCSS reads)
 PHOSPHOR_GPU_CONSTANT u32 ST_MASK_READ = 3u;
 PHOSPHOR_GPU_CONSTANT u32 ST_MASK_WRITE = 4u;
 PHOSPHOR_GPU_CONSTANT u32 ST_WORLD_POSITION = 5u; // RGBA32Float, w=guide validity
