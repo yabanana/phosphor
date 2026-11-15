@@ -33,6 +33,14 @@ tiling, 0 for a layer that does not exist), `heightTex[4]` (per-layer height tex
 padding word. Size and offsets of the existing fields are unchanged, so no existing scene, delta or archive entry
 changes; scenes without layers never read the record, and a material without a stack packs the same bytes into it as before F15.4 (the
 unused words are 0), so snapshots and reference caches of every other scene stay valid. The layer materials are ordinary entries of the material
-library (`GPUMaterial` records, base parameters only); the stack's own `GPUMaterial` keeps its base fields as the
-appearance for secondary hits and probes (declared limit: ray-traced reflections, GI and probes see that single
-record, not the blend).
+library (`GPUMaterial` records with their own extension groups); a layer contributes its base parameters, its emissive and its blendable
+feature blocks (specular/ior, clearcoat, sheen, anisotropy, iridescence, thin subsurface) to the parameter-space blend; the stack's own record
+is the finish a layer without a block inherits. The last padding word of record 3 is now `features`: bits 0..15 the stack's OWN feature mask, bits
+16..31 the union of its layers' blendable features (`layerFeatureUnion`), written by the scene store when it packs the record; the stack's
+`GPUMaterial::flags` carry both, so the feature class, the guide bits and the permutation of a scene include the layers' features. A stack that
+owns no block therefore differs from one that owns it only in that word. Secondary hits (reflection hits, GI probe and reservoir hits, the probe
+capture) resolve the stack's blended base parameters, normal and emission through the same shared helper (`shaders/layer_resolve.h`); the
+extension buffer reaches them through `GPUMaterialExtPtr materialExtensions` at the end of the three parameter structs (offset 168 of
+`GPUProbeGridParams`, the former padding; +8 bytes in `GPUReflectionParams` and `GPUProbeCaptureParams`). Feature blocks are not evaluated at
+secondary hits for any material (the declared reduction of this ADR). Transmission, volume and volumetric subsurface do not blend (a layer carrying
+them contributes the rest of its material).

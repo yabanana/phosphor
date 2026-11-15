@@ -1073,6 +1073,12 @@ class RunnerLogic(unittest.TestCase):
         text = (HERE.parent / "tests" / "test_terrain_fixture.cpp").read_text()
         block = text[text.index("kRunnerScenes"):text.index("};", text.index("kRunnerScenes"))]
         declared = set(re.findall(r'"(terrain[^"]*)"', block))
+        # F15.4 feature blocks: the templates of kBlockTemplates expanded over kBlocks
+        blocks = re.findall(r'"([a-z]+)"', text[text.index("kBlocks"):text.index("};", text.index("kBlocks"))])
+        templates = re.findall(r'"(terrain/block=%s[^"]*)"', text[text.index("kBlockTemplates"):text.index("};", text.index("kBlockTemplates"))])
+        self.assertEqual(len(blocks), len(check.LAYER_BLOCKS))
+        self.assertEqual(blocks, list(check.LAYER_BLOCKS))
+        declared |= {t % b if False else t.replace("%s", b) for b in blocks for t in templates}
         used = {check.bench_scenario(n) for n, spec in check.SCENARIOS.items() if spec["kind"] in check.LAYER_KINDS}
         self.assertEqual(used, declared)
 

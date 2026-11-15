@@ -897,12 +897,16 @@ def _layer_keys():
                                 "terms": "the full terrain patch with a specular block (ior 1.5, factor 1 - 2^-24) instead of a coat: the extended-path twin of coat weight 0"}
     keys["layers-coat-wrong-f0"] = {"kind": "layer-equal", "capture_only": True, "controls": [], "snapshot": False, "scene": "terrain/coat=spec/ior=1.4",
                                     "terms": "the specular-block twin with ior 1.4 (base F0 0.028 instead of 0.040): the negative control of the coat-zero gate"}
+    keys["layers-coat-union"] = {"kind": "layer-equal", "capture_only": True, "controls": [], "snapshot": False, "scene": "terrain/coat=union",
+                                 "terms": "the full terrain patch with NO coat on the stack in a scene whose feature union has the clearcoat bit (an unused library material "
+                                          "carries a coat): the exact twin of coat weight 0 (the same pipeline, the same code path of a pixel without a coat)"}
     keys["layers-coat-zero"] = {
-        "kind": "layer-equal", "always_green": True, "envelope": 5e-4, "snapshot": False, "scene": "terrain/coat=zero", "pair": "layers-coat-spec",
-        "info_pair": "layers-patch-nocoat", "controls": ["layers-patch", "layers-coat-wrong-f0"], "needs": ["layers-patch", "layers-patch-nocoat", "layers-coat-wrong-f0"],
+        "kind": "layer-equal", "always_green": True, "snapshot": False, "scene": "terrain/coat=zero", "pair": "layers-coat-union",
+        "info_pair": "layers-coat-spec", "controls": ["layers-patch", "layers-coat-wrong-f0"], "needs": ["layers-patch", "layers-coat-spec", "layers-coat-wrong-f0"],
         "terms": "the clearcoat finish present with coat weight 0 everywhere must leave the layered base untouched (a feature layer changes the coat "
-                 "weight only): equal, within the declared envelope (COAT_ZERO_ENVELOPE of tools/f15_layers.py, 5e-4 floored relative), to the same stack under the specular block of the same F0 (the same extended code path "
-                 "without a coat); the controls are the real cavity coat and a base F0 changed by the ior (1.4 instead of 1.5).  The distance to the plain uncoated stack (base code path) is reported, not gated"}
+                 "weight only): EXACTLY (0 pixels) equal to the same stack without a coat in a scene of the same feature union (a coat that resolves to weight 0 "
+                 "takes the path of a pixel without a coat, by construction); the controls are the real cavity coat and a base F0 changed by the ior (the specular-block "
+                 "twin at 1.4 instead of 1.5).  The distance to the specular-block twin of the same F0 (factor 1 - 2^-24, F0 0.04 to 6e-8) is reported, not gated"}
     keys["layers-ramp-single-0"] = {"kind": "layer-ramp", "capture_only": True, "controls": [], "snapshot": False, "scene": "terrain/ramp=on/single=0", "reflections": "off",
                                     "terms": "the flat quad with the dark plain layer alone"}
     keys["layers-ramp-single-1"] = {"kind": "layer-ramp", "capture_only": True, "controls": [], "snapshot": False, "scene": "terrain/ramp=on/single=1", "reflections": "off",
@@ -924,6 +928,89 @@ def _layer_keys():
 
 
 SCENARIOS.update(_layer_keys())
+
+# F15.4 (ticket 23, the layers' feature blocks): per block B (layer 1 of a flat two-layer quad carries it, layer 0 is plain) the stack at each endpoint
+# of a constant mask must equal the single material (0 pixels), the stack at weight 1 must NOT equal the same layer without its block (negative
+# control: the old behaviour, blocks ignored), and the transition ramp must rise monotonically (and, for the blocks whose luminance is affine in the
+# blended parameter, follow the mask like the base ramp).  tests/test_terrain_fixture.cpp kBlockTemplates mirrors the scene strings.
+LAYER_BLOCKS = ("coat", "sheen", "aniso", "irid", "spec", "emissive", "thin", "all")
+# Blocks whose luminance is affine in the blended parameter (coat factor, sheen colour, film strength, subsurface weight, emission): the blend
+# factor of the ramp follows the mask u like the base ramp.  Anisotropy and specular/ior act non-linearly (alpha_t = mix(alpha, 1, s^2); F0 from ior):
+# monotonic only, the deviation from the mask is reported.
+LAYER_BLOCKS_AFFINE = ("coat", "sheen", "irid", "emissive", "thin")
+
+
+def _layer_block_keys():
+    keys = {}
+    for b in LAYER_BLOCKS:
+        base = {"snapshot": False, "reflections": "off"}
+        keys[f"layers-blk-{b}-s0"] = {"kind": "layer-equal", "capture_only": True, "controls": [], **base, "scene": f"terrain/block={b}/single=0",
+                                      "terms": f"layer 0 (plain) alone as an ordinary material on the flat quad ({b} scenes)"}
+        keys[f"layers-blk-{b}-s1"] = {"kind": "layer-equal", "capture_only": True, "controls": [], **base, "scene": f"terrain/block={b}/single=1",
+                                      "terms": f"layer 1 alone with its {b} block as an ordinary material (mesh uvs x its tiling)"}
+        keys[f"layers-blk-{b}-s1x"] = {"kind": "layer-equal", "capture_only": True, "controls": [], **base, "scene": f"terrain/block={b}/single=1/blockless=on",
+                                       "terms": f"layer 1 alone WITHOUT the {b} block (the old behaviour: the block ignored)"}
+        keys[f"layers-blk-{b}-e1"] = {
+            "kind": "layer-equal", "always_green": True, **base, "scene": f"terrain/block={b}/weights=0,1,0,0", "pair": f"layers-blk-{b}-s1",
+            **({"pending": "ticket 23: the seven blocks together differ from the single material by 2 ULP (39,045 of 921,600 pixels, 0 in the 8-bit image): each block alone is exact"} if b == "all" else {}),
+            "controls": [f"layers-blk-{b}-s1x", f"layers-blk-{b}-s0"], "needs": [f"layers-blk-{b}-s1x", f"layers-blk-{b}-s0"],
+            "terms": f"the stack with the constant mask (0, 1) must render layer 1 with its {b} block exactly like the single material (0 pixels); the "
+                     f"controls are the same layer without the block (blocks ignored) and the plain layer 0"}
+        keys[f"layers-blk-{b}-e0"] = {
+            "kind": "layer-equal", "always_green": True, **base, "scene": f"terrain/block={b}/weights=1,0,0,0", "pair": f"layers-blk-{b}-s0",
+            "controls": [f"layers-blk-{b}-s1"], "needs": [f"layers-blk-{b}-s1"],
+            "terms": f"the stack with the constant mask (1, 0), the {b} layer at weight 0, must equal the plain single layer 0 (weight 0 has no effect); the "
+                     f"control is the layer carrying the block"}
+        keys[f"layers-blk-{b}-ramp-s0"] = {"kind": "layer-ramp", "capture_only": True, "controls": [], **base, "scene": f"terrain/block={b}/ramp=on/single=0",
+                                           "terms": f"the flat quad, plain layer 0 alone ({b} ramp endpoint)"}
+        keys[f"layers-blk-{b}-ramp-s1"] = {"kind": "layer-ramp", "capture_only": True, "controls": [], **base, "scene": f"terrain/block={b}/ramp=on/single=1",
+                                           "terms": f"the flat quad, layer 1 with its {b} block alone ({b} ramp endpoint)"}
+        keys[f"layers-blk-{b}-ramp-rev"] = {"kind": "layer-ramp", "capture_only": True, "controls": [], **base, "scene": f"terrain/block={b}/ramp=reverse",
+                                            "terms": f"the reversed {b} ramp (negative control of the monotonic gate)"}
+        keys[f"layers-blk-{b}-ramp"] = {
+            "kind": "layer-ramp", "always_green": True, "snapshot": True, "reflections": "off", "scene": f"terrain/block={b}/ramp=on",
+            "endpoints": [f"layers-blk-{b}-ramp-s0", f"layers-blk-{b}-ramp-s1"], "controls": [f"layers-blk-{b}-ramp-rev"],
+            "needs": [f"layers-blk-{b}-ramp-s0", f"layers-blk-{b}-ramp-s1", f"layers-blk-{b}-ramp-rev"], "affine": b in LAYER_BLOCKS_AFFINE, "pooled": True,
+            "terms": f"two layers of one dielectric, the {b} block on layer 1, its weight rising linearly with u: the blend factor against the two single "
+                     f"twins must rise monotonically along u"
+                     + (" and follow the mask" if b in LAYER_BLOCKS_AFFINE else " (non-linear block: the deviation from the mask is reported)")
+                     + "; the reversed ramp must fail"}
+    return keys
+
+
+SCENARIOS.update(_layer_block_keys())
+
+# F15.4 (ticket 23, secondary hits): the flat quad of two coloured layers seen through a mirror sphere (RT reflection hits, the captured reflection
+# probe) and as the bounce on a wall (GI hits).  The stack at weight 1 on one layer must render EXACTLY like the single material of that layer (the
+# secondary-hit path samples the blended material); the negative controls are the other layer and the stack's own record alone (what secondary
+# hits saw before the blend), which differ.
+LAYER_HIT_MODES = dict(refl=dict(rt=True, reflections="rt"), probe=dict(reflections="probes", probe=True),
+                       gi=dict(lighting="brute", shadows="rt", gi="ddgi", reflections="off"))
+
+
+def _layer_hit_keys():
+    keys = {}
+    for mode, extra in LAYER_HIT_MODES.items():
+        base = {"snapshot": False, **extra}
+        keys[f"layers-hit-{mode}-s0"] = {"kind": "layer-equal", "capture_only": True, "controls": [], **base, "scene": "terrain/hit=on/single=0",
+                                         "terms": f"layer 0 (green) alone as an ordinary material, {mode} hits"}
+        keys[f"layers-hit-{mode}-s1"] = {"kind": "layer-equal", "capture_only": True, "controls": [], **base, "scene": "terrain/hit=on/single=1",
+                                         "terms": f"layer 1 (red) alone as an ordinary material, {mode} hits"}
+        keys[f"layers-hit-{mode}-own"] = {"kind": "layer-equal", "capture_only": True, "controls": [], **base, "scene": "terrain/hit=on/owner=on",
+                                          "terms": f"the stack's own record alone (the pre-blend secondary-hit appearance), {mode} hits"}
+        keys[f"layers-hit-{mode}-e1"] = {
+            "kind": "layer-equal", "always_green": True, **base, "scene": "terrain/hit=on/weights=0,1,0,0", "pair": f"layers-hit-{mode}-s1",
+            "controls": [f"layers-hit-{mode}-own", f"layers-hit-{mode}-s0"], "needs": [f"layers-hit-{mode}-own", f"layers-hit-{mode}-s0"],
+            "terms": f"the stack with the constant mask (0, 1) seen at secondary hits ({mode}) must equal the single material of layer 1 exactly (0 pixels); "
+                     f"the controls are the stack's own record alone (the old behaviour) and layer 0"}
+        keys[f"layers-hit-{mode}-e0"] = {
+            "kind": "layer-equal", "always_green": True, **base, "scene": "terrain/hit=on/weights=1,0,0,0", "pair": f"layers-hit-{mode}-s0",
+            "controls": [f"layers-hit-{mode}-s1"], "needs": [f"layers-hit-{mode}-s1"],
+            "terms": f"the stack with the constant mask (1, 0) seen at secondary hits ({mode}) must equal the single material of layer 0; the control is layer 1"}
+    return keys
+
+
+SCENARIOS.update(_layer_hit_keys())
 # Red-state expectations (before ticket 03): direct metallic rows 0 and 1 pass, intermediate rows fail.
 GPU_PROCESS = re.compile(r"^(phosphor|soc_bench|f\d+_spike)$")
 
@@ -1016,14 +1103,14 @@ def capture_command(binary, name, folder, seed=1):
     return [str(binary), "--scene", "procedural", "--bench", "2", "--material-scenario", bench_scenario(name),
             "--render-path", "visibility", "--geometry-path", "mesh", "--rt", "off" if lighting == "legacy" and not SCENARIOS[name].get("rt") else "on",
             "--shadows", SCENARIOS[name].get("shadows", "off"),
-            "--lighting", lighting, "--gi", "off", "--reflections", SCENARIOS[name].get("reflections", "ssr"), "--ao", "off",
+            "--lighting", lighting, "--gi", SCENARIOS[name].get("gi", "off"), "--reflections", SCENARIOS[name].get("reflections", "ssr"), "--ao", "off",
             "--lighting-denoise", SCENARIOS[name].get("denoise", "custom"), "--reflection-samples", "8",
             "--lighting-seed", str(seed),
             "--post", "--upscaler", "native", "--resolution", RESOLUTION, "--frames", str(FRAMES),
             "--warmup", "0", "--fixed-timestep", "--no-ui", "--no-vsync", "--no-gpu-timing", "--debug-lighting", "1",
             # Synchronous pipelines: a cold compiler cache must never let a capture use a fallback variant (a fallback-served capture once
             # equalled the base model, ticket 17); fallback_draws() rejects any capture whose log still reports fallback draws.
-            "--pipeline-sync",
+            "--pipeline-sync", *(["--reflection-capture-probe"] if SCENARIOS[name].get("probe") else []),
             "--capture-linear", str(folder / "engine.pfm"), "--capture-linear-frame", last,
             *(["--capture-linear-accumulate", str(SCENARIOS[name]["accumulate"])] if SCENARIOS[name].get("accumulate") else []),
             "--capture-linear-signal", "hdr",
@@ -1727,9 +1814,11 @@ def evaluate_layer_scenario(np, name, folder, mode):
         roi, x, z = layers.witness_positions(np, folder / "snapshot")
         u, _ = layers.plane_uv(np, x, z)
         e0, e1 = (sibling(k) for k in spec["endpoints"])
-        result = layers.evaluate_ramp(np, candidate, e0, e1, roi, u)
+        affine = spec.get("affine", True)
+        ramp = layers.evaluate_ramp_pooled if spec.get("pooled") else layers.evaluate_ramp
+        result = ramp(np, candidate, e0, e1, roi, u, affine=affine)
         for control in spec["controls"]:
-            c = layers.evaluate_ramp(np, sibling(control), e0, e1, roi, u)
+            c = ramp(np, sibling(control), e0, e1, roi, u, affine=affine)
             verdicts[control] = {"fails_gate": not c["pass"], "gate_result": c}
         entry["roi_pixels"] = int(roi.sum())
     else:

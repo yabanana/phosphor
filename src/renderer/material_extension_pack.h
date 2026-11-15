@@ -23,7 +23,9 @@ using MaterialExtGroup = std::array<GPUMaterialExtRecord, MATERIAL_EXT_RECORDS>;
 
 /// The four records of `desc` (specular+ior/clearcoat/sheen, anisotropy/
 /// iridescence/transmission/volume, subsurface, layer stack).
-[[nodiscard]] MaterialExtGroup packMaterialExtensions(const MaterialDescription& desc);
+/// F15.4 (ticket 23): `layerFeatures` = layerFeatureUnion() of the stack's layers; record 3 of a stack keeps both masks in its `features` word
+/// (bits 0..15 the stack's OWN featureMask, bits 16..31 the layers' blendable features).  A material without a stack packs the pre-F15.4 bytes.
+[[nodiscard]] MaterialExtGroup packMaterialExtensions(const MaterialDescription& desc, u32 layerFeatures = 0);
 
 /// F15.1 (ticket 22): the transform block of a material with per-slot KHR_texture_transform (status PerSlot): MATERIAL_TT_RECORDS
 /// records, slot s at record s / 3.  Absent or identity slots keep a zero record entry and no mask bit.

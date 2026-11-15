@@ -18,6 +18,14 @@
 //   parameters  base colour, metallic, roughness, occlusion blend linearly with the final weights (parameter space, one
 //               BSDF evaluation afterwards).  The blend is a sum in layer order; at a weight vector e_j the result is the
 //               layer's own parameter bit for bit (0 * p adds an exact zero for finite p).
+//   features    (F15.4, ticket 23) a layer is an ordinary material, so its feature blocks blend too, in parameter space with ONE BSDF
+//               evaluation afterwards.  Per feature F and layer i the source is the layer's own block, else the stack's own block (the
+//               "finish" a layer without F inherits), else the neutral value (coat factor 0, sheen colour 0, anisotropy strength 0,
+//               iridescence strength 0, specular ior 1.5 / factor 1 / colour 1).  Presence-like scalars (coat factor, sheen colour,
+//               anisotropy strength, iridescence strength, thin subsurface weight, specular factor and colour) blend linearly with the
+//               final weights; the secondary parameters of a lobe (coat and sheen roughness, the film ior and thickness, the anisotropy
+//               direction, the subsurface colour) are weighted by w_i x presence_i so that a layer without the lobe does not dilute them
+//               (layerBlendPresence).  At a weight vector e_j every blend returns the layer's own value bit for bit (exact select).
 //   normals     surface-gradient blending (Mikkelsen 2020): a layer's tangent-space normal t = (tx, ty, tz) (tz > 0) is
 //               the gradient g = (tx / tz, ty / tz) with n ~ N + g.x T + g.y B; gradients add with the final weights, the
 //               result is returned as the tangent-space vector (sum w g, 1) that the caller maps with its own frame:
@@ -100,6 +108,30 @@ PHOSPHOR_LAYER_FN LayerWeights layerHeightBlend(LayerWeights n, LayerHeights hei
 /// Parameter-space blend of one scalar: the sum in layer order (exact at a weight vector e_j).
 PHOSPHOR_LAYER_FN float layerBlendScalar(LayerWeights w, float p0, float p1, float p2, float p3) {
     return ((w.w[0] * p0 + w.w[1] * p1) + w.w[2] * p2) + w.w[3] * p3;
+}
+
+/// The index of the layer whose weight is exactly 1 (the endpoint of a transition), else LAYER_STACK_MAX.
+PHOSPHOR_LAYER_FN u32 layerSole(LayerWeights w) {
+    for (u32 i = 0; i < LAYER_STACK_MAX; ++i)
+        if (w.w[i] == 1.0f) return i;
+    return LAYER_STACK_MAX;
+}
+
+/// Presence-weighted blend of a lobe's secondary parameter p_i (coat roughness, film thickness, one component of a direction ...):
+/// sum_i w_i c_i p_i / sum_i w_i c_i with c_i the presence (coat factor, strength ...) of the lobe in layer i; `fallback` when the lobe is
+/// absent everywhere (sum w c = 0); the sole layer's own value at an endpoint (exact).
+PHOSPHOR_LAYER_FN float layerBlendPresence(LayerWeights w, float c0, float c1, float c2, float c3, float p0, float p1, float p2, float p3,
+                                           float fallback) {
+    const u32 sole = layerSole(w);
+    if (sole < LAYER_STACK_MAX) {
+        const float cs[4] = {c0, c1, c2, c3};
+        const float ps[4] = {p0, p1, p2, p3};
+        return cs[sole] > 0.0f ? ps[sole] : fallback;
+    }
+    const float d0 = w.w[0] * c0, d1 = w.w[1] * c1, d2 = w.w[2] * c2, d3 = w.w[3] * c3;
+    const float sum = ((d0 + d1) + d2) + d3;
+    if (!(sum > 0.0f)) return fallback;
+    return (((d0 * p0 + d1 * p1) + d2 * p2) + d3 * p3) / sum;
 }
 
 /// Surface-gradient blend of the layers' tangent-space normals (see the header comment).  `w` are final weights.

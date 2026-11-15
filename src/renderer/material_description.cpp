@@ -87,6 +87,33 @@ u32 featureMask(const MaterialDescription& d) {
     return mask;
 }
 
+u32 layerBlendableMask(const MaterialDescription& d) {
+    if (d.layers) return 0; // a layer that is itself a stack does not nest (its own layers are not resolved)
+    u32 mask = featureMask(d) & (featureBit(MaterialFeature::SpecularIor) | featureBit(MaterialFeature::Clearcoat) |
+                                 featureBit(MaterialFeature::Sheen) | featureBit(MaterialFeature::Anisotropy) |
+                                 featureBit(MaterialFeature::Iridescence) | featureBit(MaterialFeature::Subsurface));
+    if ((mask & featureBit(MaterialFeature::Subsurface)) && d.subsurface->mode != SubsurfaceMode::Thin)
+        mask &= ~featureBit(MaterialFeature::Subsurface);
+    return mask;
+}
+
+u32 layerUnblendableMask(const MaterialDescription& d) {
+    if (d.layers) return 0;
+    u32 mask = featureMask(d) & (featureBit(MaterialFeature::Transmission) | featureBit(MaterialFeature::Volume));
+    if ((featureMask(d) & featureBit(MaterialFeature::Subsurface)) && d.subsurface->mode != SubsurfaceMode::Thin)
+        mask |= featureBit(MaterialFeature::Subsurface);
+    return mask;
+}
+
+u32 layerFeatureUnion(const LayerStack& stack, const std::vector<MaterialDescription>& library) {
+    u32 mask = 0;
+    for (size_t i = 0; i < stack.layers.size() && i < MATERIAL_LAYER_MAX; ++i) {
+        const u32 index = stack.layers[i].materialIndex;
+        if (index < library.size()) mask |= layerBlendableMask(library[index]);
+    }
+    return mask;
+}
+
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------

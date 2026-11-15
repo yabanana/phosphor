@@ -201,9 +201,12 @@ struct SubsurfaceBlock {
 /// channel of the stack's RGBA mask.  Defined and validated here; not loaded
 /// from glTF (F15.4 renders it).
 ///
-/// F15.4 (ticket 23) semantics: a layer contributes the BASE parameters of its material (base colour factor x texture,
-/// metallic, roughness, occlusion, normal map); the feature blocks of a layer material and its emissive/alpha are not
-/// blended (features belong to the stack's own description: the coat finish).  `uvScale` tiles the layer's textures
+/// F15.4 (ticket 23) semantics: a layer is an ordinary material of the library and contributes its base parameters (base colour
+/// factor x texture, metallic, roughness, occlusion, normal map), its emissive and its BLENDABLE feature blocks (specular/ior,
+/// clearcoat, sheen, anisotropy, iridescence, thin subsurface: layerBlendableMask) to the parameter-space blend; the stack's own
+/// description is the finish a layer without that block inherits.  Not blendable in parameter space (declared, layerUnblendableMask):
+/// transmission and volume (the refraction and shadow transmittance passes read one record per surface) and volumetric subsurface
+/// (a screen-space diffusion pass); a layer carrying them contributes the rest of its material.  `uvScale` tiles the layer's textures
 /// (uv * uvScale; the mask keeps the primitive's uv).  `heightContrast` (metres, >= 0) switches the layer into the
 /// height-contrast blend (renderer/layer_blend.h): its height is heightContrast * (heightTexture.r - 0.5).
 struct MaterialLayer {
@@ -282,6 +285,15 @@ static_assert(MATERIAL_FEATURE_SPECULAR_IOR == (1u << static_cast<u32>(MaterialF
 /// One bit per active feature (see MaterialFeature).  Core-only materials
 /// give 0.
 [[nodiscard]] u32 featureMask(const MaterialDescription& desc);
+
+/// F15.4 (ticket 23): the features of a LAYER material that blend in parameter space with one BSDF evaluation (see MaterialLayer): the
+/// active blocks among specular/ior, clearcoat, sheen, anisotropy, iridescence and the THIN subsurface mode.
+[[nodiscard]] u32 layerBlendableMask(const MaterialDescription& layer);
+/// The active blocks of a layer material that cannot blend (transmission, volume, volumetric subsurface); the layer's other blocks still do.
+[[nodiscard]] u32 layerUnblendableMask(const MaterialDescription& layer);
+/// The union of layerBlendableMask over the layers of `stack`, looked up in `library` (index = MaterialLayer::materialIndex; an index outside
+/// the library or a layer that is itself a stack contributes nothing).
+[[nodiscard]] u32 layerFeatureUnion(const LayerStack& stack, const std::vector<MaterialDescription>& library);
 
 /// Shared, immutable reference to a description: the per-entity form of the
 /// extension data (MaterialComponent::extension).  An edit creates a new

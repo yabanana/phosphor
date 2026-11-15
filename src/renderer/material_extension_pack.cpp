@@ -31,7 +31,7 @@ u32 channelCode(TextureChannel c) {
 
 } // namespace
 
-MaterialExtGroup packMaterialExtensions(const MaterialDescription& d) {
+MaterialExtGroup packMaterialExtensions(const MaterialDescription& d, u32 layerFeatures) {
     MaterialExtGroup out{};
 
     // Record 0: specular + ior, clearcoat, sheen.
@@ -117,6 +117,7 @@ MaterialExtGroup packMaterialExtensions(const MaterialDescription& d) {
         if (d.layers) {
             const LayerStack& ls = *d.layers;
             r.maskTex    = ls.mask.index;
+            r.features   = (featureMask(d) & 0xFFFFu) | ((layerFeatures & 0xFFFFu) << 16);
             r.layerCount = static_cast<u32>(std::min<size_t>(ls.layers.size(), MATERIAL_LAYER_MAX));
             for (u32 k = 0; k < r.layerCount; ++k) {
                 const MaterialLayer& l = ls.layers[k];

@@ -120,6 +120,7 @@ struct SceneStore::Impl {
     const ComponentArray<MotionComponent>*       mot_ = nullptr;
     const GpuScene*                              scene_ = nullptr;
     const ECS *ecs_ = nullptr;
+    std::unordered_map<u64, u8>                  warnedLayers_; // (material, dropped blocks): warned once
 
     // --- State ---------------------------------------------------------------------
     bool built_ = false;
@@ -328,14 +329,25 @@ struct SceneStore::Impl {
     /// material first becomes extended (kept afterwards: toggling a feature
     /// rewrites records, never the group), records packed and diffed.
     void applyMaterial(u32 idx, GPUMaterial gm, const MaterialDescription* desc) {
-        const u32 mask = desc ? featureMask(*desc) : 0u;
+        // F15.4 (ticket 23): a stack's flags carry the blendable features of its layers next to its own (the layers are library materials).
+        const u32 layerUnion = desc && desc->layers ? layerFeatureUnion(*desc->layers, scene_->materialDescriptions()) : 0u;
+        const u32 mask = (desc ? featureMask(*desc) : 0u) | layerUnion;
+        if (desc && desc->layers) { // the blocks of a layer that cannot blend are dropped, reported once (never silently)
+            u32 dropped = 0;
+            for (size_t k = 0; k < desc->layers->layers.size() && k < MATERIAL_LAYER_MAX; ++k) {
+                const u32 index = desc->layers->layers[k].materialIndex;
+                if (index < scene_->materialDescriptions().size()) dropped |= layerUnblendableMask(scene_->materialDescriptions()[index]);
+            }
+            if (dropped != 0 && warnedLayers_.emplace((u64(idx) << 32) | dropped, 1).second)
+                LOG_WARN("SceneStore: layer stack material %u: layer blocks 0x%x (transmission, volume or volumetric subsurface) cannot blend in parameter space and are not applied", idx, dropped);
+        }
         u32 group = matGroup_[idx];
         if (group == NONE && mask != 0) {
             group = allocGroup();
             matGroup_[idx] = group;
         }
         if (group != NONE) {
-            const MaterialExtGroup recs = packMaterialExtensions(desc ? *desc : MaterialDescription{});
+            const MaterialExtGroup recs = packMaterialExtensions(desc ? *desc : MaterialDescription{}, layerUnion);
             for (u32 k = 0; k < MATERIAL_EXT_RECORDS; ++k) setExt(group + k, recs[k]);
         }
         // F15.1 (ticket 22): the transform block of a PerSlot material (allocated on first need, kept, zeroed when the transforms go).
@@ -811,9 +823,11 @@ struct SceneStore::Impl {
         u32 extended = 0;
         {
             const auto& desc = scene_->materialDescriptions();
-            for (u32 i = 0; i < lib.size() && i < desc.size(); ++i) extended += featureMask(desc[i]) != 0 ? 1u : 0u;
+            for (u32 i = 0; i < lib.size() && i < desc.size(); ++i)
+                extended += (featureMask(desc[i]) != 0 || (desc[i].layers && layerFeatureUnion(*desc[i].layers, desc) != 0)) ? 1u : 0u;
             for (EntityID e : mat_->entities())
-                if (const MaterialComponent* mc = mat_->tryGet(e); mc && mc->extension && featureMask(*mc->extension) != 0)
+                if (const MaterialComponent* mc = mat_->tryGet(e);
+                    mc && mc->extension && (featureMask(*mc->extension) != 0 || (mc->extension->layers && layerFeatureUnion(*mc->extension->layers, desc) != 0)))
                     ++extended;
             for (u32 i = 0; i < lib.size() && i < desc.size(); ++i) extended += needsTextureTransformBlock(desc[i]) ? 2u : 0u;
             for (EntityID e : mat_->entities())
@@ -1081,6 +1095,12 @@ struct SceneStore::Impl {
             if (scene.materialEditVersion() != editVersion_) {
                 editVersion_ = scene.materialEditVersion();
                 for (u32 i = 0; i < libRegion_; ++i) applyLibraryMaterial(i);
+                // F15.4: a stack's flags and record 3 carry the features of its layers, which live in the library: re-derive the entity stacks.
+                for (EntityID e : mat_->entities()) {
+                    const MaterialComponent* mc = mat_->tryGet(e);
+                    if (mc && mc->extension && mc->extension->layers && e < ent_.size() && ent_[e].matSlot != NONE)
+                        applyMaterial(libRegion_ + ent_[e].matSlot, toGPUMaterial(*mc), mc->extension.get());
+                }
             }
             gather();
             processWork();
@@ -1117,7 +1137,8 @@ std::string SceneStore::Impl::verify(const ECS& ecs, const GpuScene& scene) cons
     // extension index is allocation history, so it is taken from the mirror after
     // validating it (aligned, inside the used range, owned once, records equal the packing).
     const auto checkMaterial = [&](u32 idx, GPUMaterial exp, const MaterialDescription* desc) -> std::string {
-        const u32 mask = desc ? featureMask(*desc) : 0u;
+        const u32 layerUnion = desc && desc->layers ? layerFeatureUnion(*desc->layers, scene.materialDescriptions()) : 0u;
+        const u32 mask = (desc ? featureMask(*desc) : 0u) | layerUnion;
         exp.flags = (exp.flags & ~(MATERIAL_FEATURES_ALL << MATERIAL_FEATURE_SHIFT)) | (mask << MATERIAL_FEATURE_SHIFT);
         // F15.1 (ticket 22): the transform block (allocation history again: validated, then taken from the mirror).
         const bool tt = desc && needsTextureTransformBlock(*desc);
@@ -1148,7 +1169,7 @@ std::string SceneStore::Impl::verify(const ECS& ecs, const GpuScene& scene) cons
             const u32 g = got / MATERIAL_EXT_RECORDS;
             if (groupOwned[g]) return fmt("material %u: extension group %u shared", idx, g);
             groupOwned[g] = 1;
-            const MaterialExtGroup want = packMaterialExtensions(desc ? *desc : MaterialDescription{});
+            const MaterialExtGroup want = packMaterialExtensions(desc ? *desc : MaterialDescription{}, layerUnion);
             for (u32 k = 0; k < MATERIAL_EXT_RECORDS; ++k)
                 if (!sameBytes(ext_[got + k], want[k])) return fmt("material %u: extension record %u differs", idx, k);
         }

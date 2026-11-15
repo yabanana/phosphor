@@ -88,6 +88,125 @@
         {
           "lobes": [],
           "mask": 0,
+          "materials": 4
+        },
+        {
+          "lobes": [
+            "clearcoat"
+          ],
+          "mask": 2,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "layers"
+          ],
+          "mask": 256,
+          "materials": 1
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/coat=union",
+      "union": 258,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [
+            "clearcoat"
+          ],
+          "mask": 2,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "sheen"
+          ],
+          "mask": 4,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "anisotropy"
+          ],
+          "mask": 9,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "iridescence",
+            "subsurface"
+          ],
+          "mask": 144,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "clearcoat",
+            "sheen",
+            "anisotropy",
+            "iridescence",
+            "subsurface",
+            "layers"
+          ],
+          "mask": 415,
+          "materials": 1
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/layerblocks=on",
+      "union": 415,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "anisotropy"
+          ],
+          "mask": 9,
+          "materials": 1
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/layerblocks=on/single=2/coat=off",
+      "union": 9,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 4
+        },
+        {
+          "lobes": [
+            "layers"
+          ],
+          "mask": 256,
+          "materials": 1
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/coat=off/height=off",
+      "union": 256,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
           "materials": 2
         }
       ],
@@ -147,6 +266,464 @@
       "family": "terrain",
       "name": "terrain:terrain/furnace=on",
       "union": 256,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "clearcoat"
+          ],
+          "mask": 2,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "clearcoat",
+            "layers"
+          ],
+          "mask": 258,
+          "materials": 1
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/block=coat/weights=0,1,0,0",
+      "union": 258,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "clearcoat"
+          ],
+          "mask": 2,
+          "materials": 1
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/block=coat/single=1",
+      "union": 2,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "sheen"
+          ],
+          "mask": 4,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "sheen",
+            "layers"
+          ],
+          "mask": 260,
+          "materials": 1
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/block=sheen/weights=0,1,0,0",
+      "union": 260,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "sheen"
+          ],
+          "mask": 4,
+          "materials": 1
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/block=sheen/single=1",
+      "union": 4,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "anisotropy"
+          ],
+          "mask": 8,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "anisotropy",
+            "layers"
+          ],
+          "mask": 264,
+          "materials": 1
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/block=aniso/weights=0,1,0,0",
+      "union": 264,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "anisotropy"
+          ],
+          "mask": 8,
+          "materials": 1
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/block=aniso/single=1",
+      "union": 8,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "iridescence"
+          ],
+          "mask": 16,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "iridescence",
+            "layers"
+          ],
+          "mask": 272,
+          "materials": 1
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/block=irid/weights=0,1,0,0",
+      "union": 272,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "iridescence"
+          ],
+          "mask": 16,
+          "materials": 1
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/block=irid/single=1",
+      "union": 16,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "specular_ior"
+          ],
+          "mask": 1,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "layers"
+          ],
+          "mask": 257,
+          "materials": 1
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/block=spec/weights=0,1,0,0",
+      "union": 257,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "specular_ior"
+          ],
+          "mask": 1,
+          "materials": 1
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/block=spec/single=1",
+      "union": 1,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "layers"
+          ],
+          "mask": 256,
+          "materials": 1
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/block=emissive/weights=0,1,0,0",
+      "union": 256,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 2
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/block=emissive/single=1",
+      "union": 0,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "subsurface"
+          ],
+          "mask": 128,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "subsurface",
+            "layers"
+          ],
+          "mask": 384,
+          "materials": 1
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/block=thin/weights=0,1,0,0",
+      "union": 384,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "subsurface"
+          ],
+          "mask": 128,
+          "materials": 1
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/block=thin/single=1",
+      "union": 128,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "clearcoat",
+            "sheen",
+            "anisotropy",
+            "iridescence",
+            "subsurface"
+          ],
+          "mask": 159,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "clearcoat",
+            "sheen",
+            "anisotropy",
+            "iridescence",
+            "subsurface",
+            "layers"
+          ],
+          "mask": 415,
+          "materials": 1
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/block=all/weights=0,1,0,0",
+      "union": 415,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "clearcoat",
+            "sheen",
+            "anisotropy",
+            "iridescence",
+            "subsurface"
+          ],
+          "mask": 159,
+          "materials": 1
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/block=all/single=1",
+      "union": 159,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "clearcoat"
+          ],
+          "mask": 2,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "clearcoat",
+            "layers"
+          ],
+          "mask": 258,
+          "materials": 1
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/block=coat/ramp=on",
+      "union": 258,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 4
+        },
+        {
+          "lobes": [
+            "layers"
+          ],
+          "mask": 256,
+          "materials": 1
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/hit=on/weights=0,1,0,0",
+      "union": 256,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 4
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/hit=on/single=1",
+      "union": 0,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 4
+        }
+      ],
+      "family": "terrain",
+      "name": "terrain:terrain/hit=on/owner=on",
+      "union": 0,
       "volumetric": false
     }
   ],

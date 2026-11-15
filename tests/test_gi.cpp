@@ -395,10 +395,10 @@ TEST_CASE("F12 exact same-support IID expiry is independent of endpoint selectio
 
 
 TEST_CASE("F12 probe parameter ABI has zero-default explicit physical diagnostic flags") {
-    CHECK(sizeof(GPUProbeGridParams)==184);
+    CHECK(sizeof(GPUProbeGridParams)==176);
     ProbeGrid grid(ProbeGridConfig{});const auto params=grid.parameters(17,2);
     CHECK(params.debugFlags==0);
-    for (u32 word : params.debugPadding) CHECK(word==0);
+    CHECK(params.debugPadding0==0); CHECK(params.materialExtensions==0);
     CHECK((GI_DEBUG_NO_VISIBILITY & (GI_DEBUG_NO_VISIBILITY-1u))==0);
 }
 

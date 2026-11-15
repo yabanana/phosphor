@@ -387,73 +387,254 @@ static float3 tonemapACES(float3 x) {
     return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
 }
 
-// F15.4 (ticket 23): the layer stack (record 3 of the material's extension group).  The mask is sampled at the primitive's uv; every
-// layer with a non-zero weight is an ordinary material of the library whose base parameters are sampled at uv * uvScale with the
-// same expressions as the single-material path (so a weight vector e_j reproduces layer j exactly), blended in parameter space
-// (renderer/layer_blend.h) and shaded ONCE by the base model.  The layer materials' feature blocks, emissive and alpha are not
-// blended: they belong to the stack's own description (the coat finish).
-struct LayerSurface {
-    float3 baseColor;
-    float roughness, metallic, occlusion;
-    float3 tn; // the tangent-space normal vector for normalize(T a + B b + N c)
+// F15.4 (ticket 23): the layer stack (record 3 of the material's extension group): the base resolve is shared with the secondary hits
+// (layer_resolve.h); here the sampler policy of the primary resolve (derivative gradients, repeat layer textures, clamped mask) and the
+// blend of the layers' FEATURE blocks, which happens at the same weights and ends in the ONE existing BSDF evaluation.
+struct LayerRasterSamples {
+    template <typename T>
+    static half4 sample(const device T *table, uint index, float2 uv, half4 fallback, float2 dx, float2 dy) {
+        return sampleOr(table, index, uv, fallback, dx, dy);
+    }
+    template <typename T>
+    static half4 mask(const device T *table, uint index, float2 uv, half4 fallback, float2 dx, float2 dy) {
+        return sampleMaskOr(table, index, uv, fallback, dx, dy);
+    }
 };
-static LayerSurface resolveLayerStack(GPUMaterialExt3 e3, const device GPUMaterial *materials, const device TextureHandle *textures,
-                                      float2 uv, float2 dx, float2 dy) {
-    const uint count = min(e3.layerCount, LAYER_STACK_MAX);
-    const float4 mask = float4(sampleMaskOr(textures, e3.maskTex, uv, half4(1.0h), dx, dy));
-    LayerWeights raw{{0.0f, 0.0f, 0.0f, 0.0f}};
-    bool heightOn = false;
-    for (uint i = 0; i < LAYER_STACK_MAX; ++i) {
-        if (i < count) {
-            raw.w[i] = mask[(e3.packedMaskChannels >> (2u * i)) & 3u];
-            heightOn = heightOn || e3.heightContrast[i] >= 0.0f;
+#include "layer_resolve.h"
+
+// One block owner's blendable feature values: a layer's material at uv * uvScale or the stack's own record at uv.  The expressions are
+// those of the single-material path of shadeSurface, so a weight vector e_j reproduces layer j bit for bit.  `present` says which blocks the
+// owner really carries (the thin subsurface only in its thin mode).
+constant uint kLayerBlendable = MATERIAL_FEATURE_SPECULAR_IOR | MATERIAL_FEATURE_CLEARCOAT | MATERIAL_FEATURE_SHEEN | MATERIAL_FEATURE_ANISOTROPY |
+                                MATERIAL_FEATURE_IRIDESCENCE | MATERIAL_FEATURE_SUBSURFACE;
+struct LayerFeatureSet {
+    float ior, specWeight;
+    float3 specColor;
+    float coat, coatRoughness;
+    float3 coatTn;          // the tangent-space coat normal vector (flat without a coat normal texture)
+    bool coatHasNormal;
+    float3 sheenColor;
+    float sheenRoughness;
+    float anisoStrength;
+    float2 anisoDir;        // the unit lobe direction in the tangent frame (the texture direction rotated by the rotation)
+    float iridStrength, iridIor, iridThickness;
+    float thinWeight;
+    float3 thinColor;
+    uint present;
+};
+struct LayerFeatureSets {
+    LayerFeatureSet v[4];
+};
+static LayerFeatureSet layerFeatureNeutral() {
+    LayerFeatureSet o;
+    o.ior = 1.5f;
+    o.specWeight = 1.0f;
+    o.specColor = float3(1.0f);
+    o.coat = 0.0f;
+    o.coatRoughness = 0.04f;
+    o.coatTn = float3(0.0f, 0.0f, 1.0f);
+    o.coatHasNormal = false;
+    o.sheenColor = float3(0.0f);
+    o.sheenRoughness = 0.07f;
+    o.anisoStrength = 0.0f;
+    o.anisoDir = float2(1.0f, 0.0f);
+    o.iridStrength = 0.0f;
+    o.iridIor = 1.3f;
+    o.iridThickness = 0.0f;
+    o.thinWeight = 0.0f;
+    o.thinColor = float3(0.0f);
+    o.present = 0u;
+    return o;
+}
+static LayerFeatureSet layerFeaturesOf(uint bits, const device GPUMaterialExtRecord *ext, const device TextureHandle *textures, float2 uv, float2 dx,
+                                       float2 dy) {
+    LayerFeatureSet o = layerFeatureNeutral();
+    bits &= kLayerBlendable & kMaterialFeatures;
+    if ((bits & (MATERIAL_FEATURE_SPECULAR_IOR | MATERIAL_FEATURE_CLEARCOAT | MATERIAL_FEATURE_SHEEN)) != 0u) {
+        const GPUMaterialExt0 e0 = *reinterpret_cast<const device GPUMaterialExt0 *>(ext);
+        if ((bits & MATERIAL_FEATURE_SPECULAR_IOR) != 0u) {
+            o.specWeight = e0.specularFactor * float(sampleOr(textures, e0.specularTex, uv, half4(1.0h), dx, dy).a);
+            o.specColor = float3(e0.specularColor[0], e0.specularColor[1], e0.specularColor[2]) *
+                          float3(sampleOr(textures, e0.specularColorTex, uv, half4(1.0h), dx, dy).rgb);
+            o.ior = e0.ior;
+            o.present |= MATERIAL_FEATURE_SPECULAR_IOR;
         }
-    }
-    LayerWeights w = layerNormalise(raw, count);
-    if (heightOn) {
-        LayerHeights heights{{0.0f, 0.0f, 0.0f, 0.0f}};
-        for (uint i = 0; i < LAYER_STACK_MAX; ++i) {
-            if (i < count && w.w[i] > 0.0f && e3.heightContrast[i] >= 0.0f) {
-                const float s = e3.uvScale[i];
-                const float texel = float(sampleOr(textures, e3.heightTex[i], uv * s, half4(0.5h), dx * s, dy * s).r);
-                heights.h[i] = layerHeight(e3.heightContrast[i], texel);
+        if ((bits & MATERIAL_FEATURE_CLEARCOAT) != 0u) {
+            o.coat = saturate(e0.clearcoatFactor * float(sampleOr(textures, e0.clearcoatFactorTex, uv, half4(1.0h), dx, dy).r));
+            o.coatRoughness = clamp(e0.clearcoatRoughness * float(sampleOr(textures, e0.clearcoatRoughnessTex, uv, half4(1.0h), dx, dy).g), 0.04f, 1.0f);
+            if (e0.clearcoatNormalTex != INVALID_TEXTURE_INDEX) {
+                float3 cn = float3(sampleOr(textures, e0.clearcoatNormalTex, uv, half4(0.5h, 0.5h, 1.0h, 1.0h), dx, dy).xyz) * 2.0 - 1.0;
+                cn.xy *= e0.clearcoatNormalScale;
+                o.coatTn = cn;
+                o.coatHasNormal = true;
             }
+            o.present |= MATERIAL_FEATURE_CLEARCOAT;
         }
-        w = layerHeightBlend(w, heights, count);
+        if ((bits & MATERIAL_FEATURE_SHEEN) != 0u) {
+            o.sheenColor = float3(e0.sheenColor[0], e0.sheenColor[1], e0.sheenColor[2]) * float3(sampleOr(textures, e0.sheenColorTex, uv, half4(1.0h), dx, dy).rgb);
+            o.sheenRoughness = bsdfSheenRoughness(e0.sheenRoughness * float(sampleOr(textures, e0.sheenRoughnessTex, uv, half4(1.0h), dx, dy).a));
+            o.present |= MATERIAL_FEATURE_SHEEN;
+        }
     }
-    float3 color[4] = {float3(0.0f), float3(0.0f), float3(0.0f), float3(0.0f)};
-    float rough[4] = {0.0f, 0.0f, 0.0f, 0.0f}, metal[4] = {0.0f, 0.0f, 0.0f, 0.0f}, occ[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-    LayerNormals normals{{0.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}};
+    if ((bits & (MATERIAL_FEATURE_ANISOTROPY | MATERIAL_FEATURE_IRIDESCENCE)) != 0u) {
+        const GPUMaterialExt1 e1 = *reinterpret_cast<const device GPUMaterialExt1 *>(ext + 1u);
+        if ((bits & MATERIAL_FEATURE_ANISOTROPY) != 0u) {
+            const float4 at = float4(sampleOr(textures, e1.anisotropyTex, uv, half4(1.0h, 0.5h, 1.0h, 1.0h), dx, dy));
+            float2 d = at.xy * 2.0f - 1.0f;
+            const float dl = length(d);
+            d = dl > 1e-6f ? d / dl : float2(1.0f, 0.0f);
+            const float cs = cos(e1.anisotropyRotation), sn = sin(e1.anisotropyRotation);
+            o.anisoDir = float2(cs * d.x - sn * d.y, sn * d.x + cs * d.y);
+            o.anisoStrength = saturate(e1.anisotropyStrength * at.z);
+            o.present |= MATERIAL_FEATURE_ANISOTROPY;
+        }
+        if ((bits & MATERIAL_FEATURE_IRIDESCENCE) != 0u) {
+            const float t = float(sampleOr(textures, e1.iridescenceThicknessTex, uv, half4(1.0h), dx, dy).g);
+            o.iridThickness = e1.iridescenceThicknessMin * (1.0f - t) + e1.iridescenceThicknessMax * t;
+            o.iridIor = e1.iridescenceIor;
+            o.iridStrength = o.iridThickness > 0.0f
+                                 ? saturate(e1.iridescenceFactor * float(sampleOr(textures, e1.iridescenceFactorTex, uv, half4(1.0h), dx, dy).r))
+                                 : 0.0f;
+            o.present |= MATERIAL_FEATURE_IRIDESCENCE;
+        }
+    }
+    if ((bits & MATERIAL_FEATURE_SUBSURFACE) != 0u) {
+        const GPUMaterialExt2 e2 = *reinterpret_cast<const device GPUMaterialExt2 *>(ext + 2u);
+        if (e2.mode == 0u) { // the volumetric mode is a screen-space diffusion pass: not blendable
+            o.thinWeight = saturate(e2.weight * float(sampleOr(textures, e2.weightTex, uv, half4(1.0h), dx, dy).a));
+            o.thinColor = float3(e2.color[0], e2.color[1], e2.color[2]) * float3(sampleOr(textures, e2.colorTex, uv, half4(1.0h), dx, dy).rgb);
+            o.present |= MATERIAL_FEATURE_SUBSURFACE;
+        }
+    }
+    return o;
+}
+
+// The blend of the per-layer values (weights `w`), the rules of renderer/layer_blend.h.  Presence-like scalars blend linearly; the secondary
+// parameters of a lobe are weighted by w_i x presence_i (layerBlendPresence); every result is the sole layer's own value at an endpoint.
+#define LF(field) S.v[0].field, S.v[1].field, S.v[2].field, S.v[3].field
+#define LF3(field, c) S.v[0].field.c, S.v[1].field.c, S.v[2].field.c, S.v[3].field.c
+static LayerFeatureSet blendLayerFeatures(LayerWeights w, thread const LayerFeatureSets &S) {
+    LayerFeatureSet o = layerFeatureNeutral();
+    o.specWeight = layerBlendScalar(w, LF(specWeight));
+    o.specColor = float3(layerBlendScalar(w, LF3(specColor, x)), layerBlendScalar(w, LF3(specColor, y)), layerBlendScalar(w, LF3(specColor, z)));
+    // ior 0 is a mode (the Fresnel evaluates to 1): it wins where at least half of the weight asks for it, else the others' ior is blended.
+    const uint sole = layerSole(w);
+    if (sole < LAYER_STACK_MAX) {
+        o.ior = S.v[sole].ior;
+    } else {
+        float zero = 0.0f, iorSum = 0.0f;
+        for (uint i = 0; i < LAYER_STACK_MAX; ++i) {
+            if (S.v[i].ior == 0.0f) zero += w.w[i];
+            else iorSum += w.w[i] * S.v[i].ior;
+        }
+        o.ior = zero >= 0.5f ? 0.0f : (zero > 0.0f ? iorSum / (1.0f - zero) : iorSum);
+    }
+    o.coat = layerBlendScalar(w, LF(coat));
+    o.coatRoughness = layerBlendPresence(w, LF(coat), LF(coatRoughness), 0.04f);
+    {
+        float c[4], sum = 0.0f;
+        for (uint i = 0; i < LAYER_STACK_MAX; ++i) {
+            c[i] = w.w[i] * S.v[i].coat;
+            sum += c[i];
+        }
+        if (sum > 0.0f) {
+            LayerWeights wc{{c[0] / sum, c[1] / sum, c[2] / sum, c[3] / sum}};
+            LayerNormals tn{{S.v[0].coatTn.x, S.v[1].coatTn.x, S.v[2].coatTn.x, S.v[3].coatTn.x},
+                            {S.v[0].coatTn.y, S.v[1].coatTn.y, S.v[2].coatTn.y, S.v[3].coatTn.y},
+                            {S.v[0].coatTn.z, S.v[1].coatTn.z, S.v[2].coatTn.z, S.v[3].coatTn.z}};
+            const LayerNormalResult n = layerNormalBlend(wc, tn);
+            o.coatTn = float3(n.a, n.b, n.c);
+            bool any = false;
+            for (uint i = 0; i < LAYER_STACK_MAX; ++i) any = any || (c[i] > 0.0f && S.v[i].coatHasNormal);
+            o.coatHasNormal = any;
+        }
+    }
+    o.sheenColor = float3(layerBlendScalar(w, LF3(sheenColor, x)), layerBlendScalar(w, LF3(sheenColor, y)), layerBlendScalar(w, LF3(sheenColor, z)));
+    float sheenPresence[4];
+    for (uint i = 0; i < LAYER_STACK_MAX; ++i) sheenPresence[i] = S.v[i].sheenColor.x + S.v[i].sheenColor.y + S.v[i].sheenColor.z;
+    o.sheenRoughness = layerBlendPresence(w, sheenPresence[0], sheenPresence[1], sheenPresence[2], sheenPresence[3], LF(sheenRoughness), 0.07f);
+    o.anisoStrength = layerBlendScalar(w, LF(anisoStrength));
+    {
+        const float vx = layerBlendPresence(w, LF(anisoStrength), LF3(anisoDir, x), 1.0f);
+        const float vy = layerBlendPresence(w, LF(anisoStrength), LF3(anisoDir, y), 0.0f);
+        const float l = sqrt(vx * vx + vy * vy);
+        o.anisoDir = sole < LAYER_STACK_MAX ? float2(vx, vy) : (l > 1e-6f ? float2(vx / l, vy / l) : float2(1.0f, 0.0f));
+    }
+    o.iridStrength = layerBlendScalar(w, LF(iridStrength));
+    o.iridIor = layerBlendPresence(w, LF(iridStrength), LF(iridIor), 1.3f);
+    o.iridThickness = layerBlendPresence(w, LF(iridStrength), LF(iridThickness), 0.0f);
+    o.thinWeight = layerBlendScalar(w, LF(thinWeight));
+    o.thinColor = float3(layerBlendPresence(w, LF(thinWeight), LF3(thinColor, x), 0.0f), layerBlendPresence(w, LF(thinWeight), LF3(thinColor, y), 0.0f),
+                         layerBlendPresence(w, LF(thinWeight), LF3(thinColor, z), 0.0f));
+    return o;
+}
+#undef LF
+#undef LF3
+
+struct LayerFeatureResult {
+    LayerFeatureSet f; // the blended values; meaningful for the features in `decided`
+    uint effective;    // the blendable features this pixel carries: the stack's own | the present blocks of the layers with weight > 0
+    uint decided;      // the features some layer of the stack carries: their parameters come from this blend (inheriting the stack's own block)
+};
+// `extBase` = the extension buffer; the stack's own group starts at `ownIndex`; the layers' union is the high half of e3.features.
+static LayerFeatureResult resolveLayerFeatures(GPUMaterialExt3 e3, const device GPUMaterial *materials, const device TextureHandle *textures,
+                                               const device GPUMaterialExtRecord *extBase, uint ownIndex, LayerWeights w, float2 uv, float2 dx,
+                                               float2 dy) {
+    const uint ownBits = e3.features & 0xFFFFu & kLayerBlendable & kMaterialFeatures;
+    const uint layerBits = (e3.features >> 16) & kLayerBlendable & kMaterialFeatures;
+    LayerFeatureResult r;
+    r.decided = layerBits;
+    r.effective = ownBits;
+    r.f = layerFeatureNeutral();
+    if (layerBits == 0u) return r;
+    // The stack's own block is the finish a layer without that block inherits (textures at the primitive uv).
+    LayerFeatureSet finish = layerFeatureNeutral();
+    if (ownBits != 0u) finish = layerFeaturesOf(ownBits, extBase + ownIndex, textures, uv, dx, dy);
+    LayerFeatureSets S;
+    const uint count = min(e3.layerCount, LAYER_STACK_MAX);
     for (uint i = 0; i < LAYER_STACK_MAX; ++i) {
+        S.v[i] = finish;
         if (i < count && w.w[i] > 0.0f) {
             const device GPUMaterial &lm = materials[e3.layerMaterial[i]];
-            const float s = e3.uvScale[i];
-            const float2 uvi = uv * s, dxi = dx * s, dyi = dy * s;
-            const half4 baseTex = sampleOr(textures, lm.baseColorTex, uvi, half4(1.0h), dxi, dyi);
-            const half4 mrTex = sampleOr(textures, lm.metallicRoughnessTex, uvi, half4(1.0h), dxi, dyi);
-            const half4 aoTex = sampleOr(textures, lm.occlusionTex, uvi, half4(1.0h), dxi, dyi);
-            const half4 nTex = sampleOr(textures, lm.normalTex, uvi, half4(0.5h, 0.5h, 1.0h, 1.0h), dxi, dyi);
-            color[i] = float3(lm.baseColor[0], lm.baseColor[1], lm.baseColor[2]) * float3(baseTex.rgb);
-            rough[i] = clamp(lm.roughness * float(mrTex.g), 0.04, 1.0);
-            metal[i] = saturate(lm.metallic * float(mrTex.b));
-            occ[i] = mix(1.0, float(aoTex.r), lm.occlusionStrength);
-            float3 tn = float3(nTex.xyz) * 2.0 - 1.0;
-            tn.xy *= lm.normalScale;
-            normals.tx[i] = tn.x;
-            normals.ty[i] = tn.y;
-            normals.tz[i] = tn.z;
+            const uint bits = (lm.flags >> MATERIAL_FEATURE_SHIFT) & layerBits;
+            if (bits != 0u && lm.extensionIndex != MATERIAL_EXTENSION_INVALID) {
+                const float s = e3.uvScale[i];
+                const LayerFeatureSet own = layerFeaturesOf(bits, extBase + lm.extensionIndex, textures, uv * s, dx * s, dy * s);
+                // A feature the layer carries replaces the inherited finish; the others keep it.
+                if ((own.present & MATERIAL_FEATURE_SPECULAR_IOR) != 0u) {
+                    S.v[i].ior = own.ior;
+                    S.v[i].specWeight = own.specWeight;
+                    S.v[i].specColor = own.specColor;
+                }
+                if ((own.present & MATERIAL_FEATURE_CLEARCOAT) != 0u) {
+                    S.v[i].coat = own.coat;
+                    S.v[i].coatRoughness = own.coatRoughness;
+                    S.v[i].coatTn = own.coatTn;
+                    S.v[i].coatHasNormal = own.coatHasNormal;
+                }
+                if ((own.present & MATERIAL_FEATURE_SHEEN) != 0u) {
+                    S.v[i].sheenColor = own.sheenColor;
+                    S.v[i].sheenRoughness = own.sheenRoughness;
+                }
+                if ((own.present & MATERIAL_FEATURE_ANISOTROPY) != 0u) {
+                    S.v[i].anisoStrength = own.anisoStrength;
+                    S.v[i].anisoDir = own.anisoDir;
+                }
+                if ((own.present & MATERIAL_FEATURE_IRIDESCENCE) != 0u) {
+                    S.v[i].iridStrength = own.iridStrength;
+                    S.v[i].iridIor = own.iridIor;
+                    S.v[i].iridThickness = own.iridThickness;
+                }
+                if ((own.present & MATERIAL_FEATURE_SUBSURFACE) != 0u) {
+                    S.v[i].thinWeight = own.thinWeight;
+                    S.v[i].thinColor = own.thinColor;
+                }
+                r.effective |= own.present;
+            }
         }
     }
-    LayerSurface out;
-    out.baseColor = float3(layerBlendScalar(w, color[0].x, color[1].x, color[2].x, color[3].x),
-                           layerBlendScalar(w, color[0].y, color[1].y, color[2].y, color[3].y),
-                           layerBlendScalar(w, color[0].z, color[1].z, color[2].z, color[3].z));
-    out.roughness = layerBlendScalar(w, rough[0], rough[1], rough[2], rough[3]);
-    out.metallic = layerBlendScalar(w, metal[0], metal[1], metal[2], metal[3]);
-    out.occlusion = layerBlendScalar(w, occ[0], occ[1], occ[2], occ[3]);
-    const LayerNormalResult n = layerNormalBlend(w, normals);
-    out.tn = float3(n.a, n.b, n.c);
-    return out;
+    r.f = blendLayerFeatures(w, S);
+    return r;
 }
 
 static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &frame, const device GPUMaterial *materials,
@@ -495,25 +676,56 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     float roughness = clamp(m.roughness * float(mrTex.g), 0.04, 1.0);
     float metallic = saturate(m.metallic * float(mrTex.b));
     float occlusion = mix(1.0, float(aoTex.r), m.occlusionStrength);
-    // F15.4 (ticket 23): the layer stack replaces the base parameters and the normal map of the pixel (compiled only when the scene's
-    // feature union has the bit, run only for materials that carry it).
+    // F15.4 (ticket 23): the layer stack replaces the base parameters, the normal map, the emission and (decided per feature) the feature
+    // blocks of the pixel (compiled only when the scene's feature union has the bit, run only for materials that carry it).  activeBits are
+    // the features this pixel carries: the record's flags, for a stack the non-blendable ones plus the stack's own and the present blocks of
+    // its layers with weight > 0; a blended lobe whose weight is 0 at the pixel is OFF (the pixel takes the path of a material without it,
+    // so a zero-weight feature is the plain pixel exactly).
     const bool layersOn = (kMaterialFeatures & MATERIAL_FEATURE_LAYERS) != 0u &&
                           (m.flags & (MATERIAL_FEATURE_LAYERS << MATERIAL_FEATURE_SHIFT)) != 0u;
+    uint activeBits = m.flags >> MATERIAL_FEATURE_SHIFT;
     float3 layerTn = float3(0.0f, 0.0f, 1.0f);
+    float3 layerEmission = float3(0.0f), layerEmitFactor = float3(0.0f), layerEmitTexel = float3(1.0f);
+    bool layerEmitSole = false;
+    LayerFeatureResult lfr;
+    lfr.decided = 0u;
+    lfr.effective = 0u;
+    lfr.f = layerFeatureNeutral();
     if (layersOn) {
-        const LayerSurface ls = resolveLayerStack(*reinterpret_cast<const device GPUMaterialExt3*>(frame.materialExtensions + m.extensionIndex + 3u),
-                                                  materials, textures, in.uv, in.uvDx, in.uvDy);
+        const GPUMaterialExt3 e3 = *reinterpret_cast<const device GPUMaterialExt3*>(frame.materialExtensions + m.extensionIndex + 3u);
+        const LayerSurface ls = resolveLayerBase<TextureHandle, LayerRasterSamples>(e3, materials, textures, in.uv, in.uvDx, in.uvDy, kEmissive);
         baseColor.rgb = ls.baseColor;
         roughness = ls.roughness;
         metallic = ls.metallic;
         occlusion = ls.occlusion;
         layerTn = ls.tn;
+        layerEmission = ls.emission;
+        const uint soleLayer = layerSole(ls.w);
+        if (soleLayer < LAYER_STACK_MAX) {
+            layerEmitSole = true;
+            layerEmitFactor = ls.emitFactor[soleLayer];
+            layerEmitTexel = ls.emitTexel[soleLayer];
+        }
+        lfr = resolveLayerFeatures(e3, materials, textures, frame.materialExtensions, m.extensionIndex, ls.w, in.uv, in.uvDx, in.uvDy);
+        activeBits = (activeBits & ~kLayerBlendable) | lfr.effective;
+        if ((lfr.decided & MATERIAL_FEATURE_CLEARCOAT) != 0u && !(lfr.f.coat > 0.0f)) activeBits &= ~MATERIAL_FEATURE_CLEARCOAT;
+        if ((lfr.decided & MATERIAL_FEATURE_SHEEN) != 0u && !(max(lfr.f.sheenColor.x, max(lfr.f.sheenColor.y, lfr.f.sheenColor.z)) > 0.0f))
+            activeBits &= ~MATERIAL_FEATURE_SHEEN;
+        if ((lfr.decided & MATERIAL_FEATURE_ANISOTROPY) != 0u && !(lfr.f.anisoStrength > 0.0f)) activeBits &= ~MATERIAL_FEATURE_ANISOTROPY;
+        if ((lfr.decided & MATERIAL_FEATURE_IRIDESCENCE) != 0u && !(lfr.f.iridStrength > 0.0f)) activeBits &= ~MATERIAL_FEATURE_IRIDESCENCE;
+        if ((lfr.decided & MATERIAL_FEATURE_SUBSURFACE) != 0u && !(lfr.f.thinWeight > 0.0f)) activeBits &= ~MATERIAL_FEATURE_SUBSURFACE;
+        // The stack's own coat finish (no layer carries a coat): a coat factor of 0 at this pixel switches the coat off, exactly.
+        if ((activeBits & MATERIAL_FEATURE_CLEARCOAT) != 0u && (lfr.decided & MATERIAL_FEATURE_CLEARCOAT) == 0u) {
+            const GPUMaterialExt0 own0 = *reinterpret_cast<const device GPUMaterialExt0*>(frame.materialExtensions + m.extensionIndex);
+            if (!(saturate(own0.clearcoatFactor * float(sampleOr(textures, own0.clearcoatFactorTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).r)) > 0.0f))
+                activeBits &= ~MATERIAL_FEATURE_CLEARCOAT;
+        }
     }
 
     // F15.1: KHR_materials_ior + KHR_materials_specular.  Compiled only when the scene's feature
     // union has the bit (kMaterialFeatures, undefined => 0) and run only for materials that carry it.
     const bool specExt = (kMaterialFeatures & MATERIAL_FEATURE_SPECULAR_IOR) != 0u &&
-                         (m.flags & (MATERIAL_FEATURE_SPECULAR_IOR << MATERIAL_FEATURE_SHIFT)) != 0u;
+                         (activeBits & MATERIAL_FEATURE_SPECULAR_IOR) != 0u;
     BsdfDielectricSpec spec;
     spec.f0 = float3(0.04f);
     spec.f90 = 1.0f;
@@ -522,26 +734,26 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     // F15.1 (ticket 09): KHR_materials_clearcoat, same gating.  A coated material without the ior/specular block
     // keeps the default dielectric (f0 0.04, f90 1) through the extended path.
     const bool coatOn = (kMaterialFeatures & MATERIAL_FEATURE_CLEARCOAT) != 0u &&
-                        (m.flags & (MATERIAL_FEATURE_CLEARCOAT << MATERIAL_FEATURE_SHIFT)) != 0u;
+                        (activeBits & MATERIAL_FEATURE_CLEARCOAT) != 0u;
     // F15.1 (ticket 11): KHR_materials_anisotropy, same gating.  An anisotropic material without the ior/specular block keeps the default
     // dielectric (f0 0.04, f90 1) through the extended path; anisoActive below says whether the lobe is resolved for this pixel.
     const bool anisoOn = (kMaterialFeatures & MATERIAL_FEATURE_ANISOTROPY) != 0u &&
-                         (m.flags & (MATERIAL_FEATURE_ANISOTROPY << MATERIAL_FEATURE_SHIFT)) != 0u;
+                         (activeBits & MATERIAL_FEATURE_ANISOTROPY) != 0u;
     // F15.1 (ticket 12): KHR_materials_iridescence, same gating.  An iridescent material without the ior/specular block keeps the default
     // dielectric (f0 0.04, f90 1) through the extended path; the film replaces the Fresnel of the specular lobe (bsdf.h).
     const bool iridOn = (kMaterialFeatures & MATERIAL_FEATURE_IRIDESCENCE) != 0u &&
-                        (m.flags & (MATERIAL_FEATURE_IRIDESCENCE << MATERIAL_FEATURE_SHIFT)) != 0u;
+                        (activeBits & MATERIAL_FEATURE_IRIDESCENCE) != 0u;
     // F15.1 (ticket 13): KHR_materials_transmission (+ volume), same gating.  A transmissive material without the ior/specular block keeps the
     // default dielectric (ior 1.5: f0 0.04, f90 1) through the extended path; the diffuse base is mixed by 1 - t, the volume decides
     // thin-walled (thickness 0) or refracting (thickness > 0: RT traces it, probes/environment declare it).
     const bool transOn = (kMaterialFeatures & MATERIAL_FEATURE_TRANSMISSION) != 0u &&
-                         (m.flags & (MATERIAL_FEATURE_TRANSMISSION << MATERIAL_FEATURE_SHIFT)) != 0u;
+                         (activeBits & MATERIAL_FEATURE_TRANSMISSION) != 0u;
     const bool volOn = transOn && (kMaterialFeatures & MATERIAL_FEATURE_VOLUME) != 0u &&
-                       (m.flags & (MATERIAL_FEATURE_VOLUME << MATERIAL_FEATURE_SHIFT)) != 0u;
+                       (activeBits & MATERIAL_FEATURE_VOLUME) != 0u;
     const bool useSpec = specExt || coatOn || anisoOn || iridOn || transOn;
     // F15.1 (ticket 10): KHR_materials_sheen, same gating.  A sheen-only material keeps the base dielectric path below.
     const bool sheenOn = (kMaterialFeatures & MATERIAL_FEATURE_SHEEN) != 0u &&
-                         (m.flags & (MATERIAL_FEATURE_SHEEN << MATERIAL_FEATURE_SHIFT)) != 0u;
+                         (activeBits & MATERIAL_FEATURE_SHEEN) != 0u;
     GPUMaterialExt0 e0{};
     if (specExt || coatOn || sheenOn) e0 = *reinterpret_cast<const device GPUMaterialExt0*>(frame.materialExtensions + m.extensionIndex);
     GPUMaterialExt1 e1{};
@@ -575,7 +787,7 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     // (subsurface.metal).  weight = saturate(w x texture.a), colour = color x texture.rgb.
     BsdfThin thin = bsdfThinNone();
     const bool thinOn = (kMaterialFeatures & MATERIAL_FEATURE_SUBSURFACE) != 0u &&
-                        (m.flags & (MATERIAL_FEATURE_SUBSURFACE << MATERIAL_FEATURE_SHIFT)) != 0u;
+                        (activeBits & MATERIAL_FEATURE_SUBSURFACE) != 0u;
     bool thinResolved = false, volResolved = false;
     GPUMaterialExt2 e2{};
     if (thinOn) {
@@ -609,6 +821,35 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         lobeSpecularWeight = specularWeight;
         lobeSpecularColor = specularColor;
     }
+    // F15.4: the blended feature parameters of a stack replace the record's for the features some layer carries (the stack's own block is
+    // the finish the layers without it inherit, resolveLayerFeatures).
+    if (layersOn && lfr.decided != 0u) {
+        if ((lfr.decided & MATERIAL_FEATURE_SPECULAR_IOR) != 0u && specExt) {
+            spec = bsdfSpecularParams(lfr.f.ior, lfr.f.specWeight, lfr.f.specColor);
+            lobeIor = lfr.f.ior;
+            lobeSpecularWeight = lfr.f.specWeight;
+            lobeSpecularColor = lfr.f.specColor;
+        }
+        if ((lfr.decided & MATERIAL_FEATURE_CLEARCOAT) != 0u && coatOn) {
+            coat.factor = lfr.f.coat;
+            coat.roughness = lfr.f.coatRoughness;
+        }
+        if ((lfr.decided & MATERIAL_FEATURE_SHEEN) != 0u && sheenOn) {
+            sheen.color = lfr.f.sheenColor;
+            sheen.roughness = lfr.f.sheenRoughness;
+        }
+        if ((lfr.decided & MATERIAL_FEATURE_IRIDESCENCE) != 0u && iridOn) {
+            irid.thickness = lfr.f.iridThickness;
+            irid.ior = lfr.f.iridIor;
+            irid.strength = lfr.f.iridStrength;
+        }
+        if ((lfr.decided & MATERIAL_FEATURE_SUBSURFACE) != 0u && thinOn) {
+            thin.weight = lfr.f.thinWeight;
+            thin.color = lfr.f.thinColor;
+            thinResolved = true;
+            volResolved = false;
+        }
+    }
 
     // Two-sided lighting.  A mirrored model matrix reverses the winding, so
     // the rasteriser's facing is inverted for those instances.
@@ -624,7 +865,10 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     if (dot(T, T) > 1e-8) {
         const float3 Tn = normalize(T);
         const float3 B = cross(N, Tn) * in.tangent.w;
-        if (anisoOn) {
+        if (anisoOn && layersOn && (lfr.decided & MATERIAL_FEATURE_ANISOTROPY) != 0u) {
+            anisoDir = Tn * lfr.f.anisoDir.x + B * lfr.f.anisoDir.y;
+            anisoStrength = lfr.f.anisoStrength;
+        } else if (anisoOn) {
             const float4 at = float4(sampleSlot(textures, e1.anisotropyTex, TT_SLOT_ANISOTROPY, xf, in.uv, half4(1.0h, 0.5h, 1.0h, 1.0h), in.uvDx, in.uvDy));
             float2 d = at.xy * 2.0f - 1.0f;
             const float dl = length(d);
@@ -649,10 +893,14 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         } else {
             N = normalize(Tn * tn.x + B * tn.y + N * tn.z);
         }
-        if (coatOn && e0.clearcoatNormalTex != INVALID_TEXTURE_INDEX) {
-            float3 cn = float3(sampleSlot(textures, e0.clearcoatNormalTex, TT_SLOT_COAT_NORMAL, xf, in.uv, half4(0.5h, 0.5h, 1.0h, 1.0h), in.uvDx, in.uvDy).xyz) * 2.0 - 1.0;
-            cn.xy *= e0.clearcoatNormalScale;
-            if (texXfHas(xf, TT_SLOT_COAT_NORMAL)) {
+        const bool coatBlended = layersOn && (lfr.decided & MATERIAL_FEATURE_CLEARCOAT) != 0u;
+        if (coatOn && (coatBlended ? lfr.f.coatHasNormal : e0.clearcoatNormalTex != INVALID_TEXTURE_INDEX)) {
+            float3 cn = lfr.f.coatTn;
+            if (!coatBlended) {
+                cn = float3(sampleSlot(textures, e0.clearcoatNormalTex, TT_SLOT_COAT_NORMAL, xf, in.uv, half4(0.5h, 0.5h, 1.0h, 1.0h), in.uvDx, in.uvDy).xyz) * 2.0 - 1.0;
+                cn.xy *= e0.clearcoatNormalScale;
+            }
+            if (!coatBlended && texXfHas(xf, TT_SLOT_COAT_NORMAL)) {
                 float3 Tc = Tn, Bc = B;
                 texXfFrame(xf, TT_SLOT_COAT_NORMAL, Tc, Bc);
                 coat.normal = normalize(Tc * cn.x + Bc * cn.y + N0 * cn.z);
@@ -869,7 +1117,23 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     if (!omitSpecularAmbient && transOn && transFactor > 0.0f && lobeIor >= 1.0f) color += (physicalGI ? environment : hemisphere(transDirection)) * transWeight;
 
     // The emission under a coat is attenuated like the material (the DI emitter share stays uncoated: declared).
-    const float3 emission = float3(m.emissive[0], m.emissive[1], m.emissive[2]) * float3(emTex.rgb) * coatAtt;
+    // F15.4: a stack adds the blended emission of its layers (the stack's own emissive stays, an additive finish).  The emission is ONE expression
+    // factor x texel x coatAtt for every material: a layer stack whose weight is 1 on one layer feeds that layer's factor and texel into it, so the
+    // arithmetic (and its fusing into the colour) is that of the single material.
+    float3 emissionFactor = float3(m.emissive[0], m.emissive[1], m.emissive[2]);
+    float3 emissionTexel = float3(emTex.rgb);
+    if (layersOn) {
+        const bool ownEmits = m.emissive[0] > 0.0f || m.emissive[1] > 0.0f || m.emissive[2] > 0.0f;
+        if (layerEmitSole && !ownEmits) {
+            emissionFactor = layerEmitFactor;
+            emissionTexel = layerEmitTexel;
+        } else {
+            emissionFactor = float3(1.0f);
+            emissionTexel = layerEmission + (ownEmits ? float3(m.emissive[0], m.emissive[1], m.emissive[2]) * float3(emTex.rgb) : float3(0.0f));
+        }
+    }
+    const float3 emission = emissionFactor * emissionTexel * coatAtt;
+
     color += emission;
 
     out.color = color;
@@ -888,7 +1152,7 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     // F15.1: only the features the resolve resolves today (LOBE_GUIDE_RESOLVED_FEATURES) and the scene's
     // union reach the guide; every other LobeParams field stays 0 (packLobeGuide ignores clear features).
     out.lobes.features = (kMaterialFeatures != 0u)
-                             ? ((m.flags >> MATERIAL_FEATURE_SHIFT) & kMaterialFeatures & LOBE_GUIDE_RESOLVED_FEATURES)
+                             ? (activeBits & kMaterialFeatures & LOBE_GUIDE_RESOLVED_FEATURES)
                              : 0u;
     // An anisotropy bit without a resolved lobe (no tangent frame, or a texture strength of 0) is not published: the guide then
     // describes the isotropic lobe, as the resolve shaded it.

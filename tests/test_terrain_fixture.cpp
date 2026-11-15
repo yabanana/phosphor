@@ -68,15 +68,30 @@ TEST_CASE("terrain scenarios: every listed scenario parses, options are validate
 }
 
 // The scenes of the layers-* keys of tools/f15_check.py (tools/test_f15_check.py compares this list with the runner).
-constexpr std::array<std::string_view, 20> kRunnerScenes{
+constexpr std::array<std::string_view, 26> kRunnerScenes{
     "terrain/single=0/coat=off", "terrain/single=1/coat=off", "terrain/single=2/coat=off", "terrain/single=3/coat=off",
     "terrain/weights=1,0,0,0/coat=off", "terrain/weights=0,1,0,0/coat=off", "terrain/weights=0,0,1,0/coat=off", "terrain/weights=0,0,0,1/coat=off",
     "terrain/weights=1,1,0,0/layers=2/coat=off", "terrain/weights=1,1,0,0/coat=off", "terrain/coat=off", "terrain", "terrain/coat=zero",
-    "terrain/ramp=on/single=0", "terrain/ramp=on/single=1", "terrain/ramp=reverse", "terrain/ramp=on", "terrain/furnace=on", "terrain/coat=spec", "terrain/coat=spec/ior=1.4",
+    "terrain/ramp=on/single=0", "terrain/ramp=on/single=1", "terrain/ramp=reverse", "terrain/ramp=on", "terrain/furnace=on", "terrain/coat=spec", "terrain/coat=spec/ior=1.4", "terrain/coat=union",
+    "terrain/hit=on/single=0", "terrain/hit=on/single=1", "terrain/hit=on/owner=on", "terrain/hit=on/weights=0,1,0,0", "terrain/hit=on/weights=1,0,0,0",
+};
+
+// F15.4 feature-block scenes of the layers-blk-* keys: templates over the blocks (tools/test_f15_check.py expands them like the runner).
+constexpr std::array<std::string_view, 8> kBlocks{"coat", "sheen", "aniso", "irid", "spec", "emissive", "thin", "all"};
+constexpr std::array<std::string_view, 9> kBlockTemplates{
+    "terrain/block=%s/single=0", "terrain/block=%s/single=1", "terrain/block=%s/single=1/blockless=on", "terrain/block=%s/weights=0,1,0,0",
+    "terrain/block=%s/weights=1,0,0,0", "terrain/block=%s/ramp=on/single=0", "terrain/block=%s/ramp=on/single=1", "terrain/block=%s/ramp=reverse",
+    "terrain/block=%s/ramp=on",
 };
 
 TEST_CASE("terrain scenarios: the runner's scenes are valid") {
     for (std::string_view s : kRunnerScenes) CHECK_MESSAGE(TerrainFixture::validScenario(s), std::string(s));
+    for (std::string_view block : kBlocks)
+        for (std::string_view t : kBlockTemplates) {
+            std::string scene(t);
+            scene.replace(scene.find("%s"), 2, block);
+            CHECK_MESSAGE(TerrainFixture::validScenario(scene), scene);
+        }
 }
 
 TEST_CASE("terrain data: deterministic, layer tilings are powers of two, the mask uses every layer") {
@@ -132,9 +147,53 @@ TEST_CASE("terrain fixture: the stack's feature class, the single twin and the p
     CHECK(Built("terrain/coat=off").store.featureUnion() == MATERIAL_FEATURE_LAYERS);
     CHECK(Built("terrain/coat=zero").store.featureUnion() == (MATERIAL_FEATURE_LAYERS | MATERIAL_FEATURE_CLEARCOAT));
     CHECK(Built("terrain/coat=spec").store.featureUnion() == (MATERIAL_FEATURE_LAYERS | MATERIAL_FEATURE_SPECULAR_IOR));
+    // F15.4: the exact twin of coat=zero has the same feature union with no coat on the stack (an unused library material carries it).
+    CHECK(Built("terrain/coat=union").store.featureUnion() == Built("terrain/coat=zero").store.featureUnion());
+    for (const GPUMaterial& m : Built("terrain/coat=union").store.materials())
+        if (materialFeatureBits(m) & MATERIAL_FEATURE_LAYERS) CHECK(materialFeatureBits(m) == MATERIAL_FEATURE_LAYERS);
     CHECK(Built("terrain/single=2/coat=off").store.featureUnion() == 0u);
     CHECK(Built("terrain/ramp=on").store.featureUnion() == MATERIAL_FEATURE_LAYERS);
     CHECK(Built("terrain/furnace=on").store.featureUnion() == MATERIAL_FEATURE_LAYERS);
+    // F15.4: the block of layer 1 reaches the stack's flags (the union over its layers) and the twin carries it as its own block.
+    struct {
+        const char* block;
+        u32 feature;
+    } const blocks[] = {{"coat", MATERIAL_FEATURE_CLEARCOAT},        {"sheen", MATERIAL_FEATURE_SHEEN},   {"aniso", MATERIAL_FEATURE_ANISOTROPY},
+                        {"irid", MATERIAL_FEATURE_IRIDESCENCE},      {"spec", MATERIAL_FEATURE_SPECULAR_IOR}, {"thin", MATERIAL_FEATURE_SUBSURFACE},
+                        {"emissive", 0u}};
+    for (const auto& b : blocks) {
+        const std::string stack = std::string("terrain/block=") + b.block + "/weights=0,1,0,0";
+        Built built(stack);
+        CHECK_MESSAGE(built.store.featureUnion() == (MATERIAL_FEATURE_LAYERS | b.feature), stack);
+        bool found = false;
+        for (const GPUMaterial& m : built.store.materials()) {
+            if (!(materialFeatureBits(m) & MATERIAL_FEATURE_LAYERS)) continue;
+            found = true;
+            CHECK_MESSAGE(materialFeatureBits(m) == (MATERIAL_FEATURE_LAYERS | b.feature), stack); // the stack's flags: layers' blendable features included
+            const GPUMaterialExt3 e3 = unpackExtRecord<GPUMaterialExt3>(built.store.extensions()[m.extensionIndex + 3]);
+            CHECK_MESSAGE((e3.features & 0xFFFFu) == MATERIAL_FEATURE_LAYERS, stack); // the stack owns no block
+            CHECK_MESSAGE((e3.features >> 16) == b.feature, stack);
+        }
+        CHECK(found);
+        CHECK_MESSAGE(Built(std::string("terrain/block=") + b.block + "/single=1").store.featureUnion() == b.feature, b.block);
+        CHECK_MESSAGE(Built(std::string("terrain/block=") + b.block + "/weights=0,1,0,0/blockless=on").store.featureUnion() == MATERIAL_FEATURE_LAYERS, b.block);
+    }
+    // F15.4: the secondary-hit scenes (a stack of the two colour layers, its twins and the stack's own record alone).
+    CHECK(Built("terrain/hit=on/weights=0,1,0,0").store.featureUnion() == MATERIAL_FEATURE_LAYERS);
+    CHECK(Built("terrain/hit=on/single=1").store.featureUnion() == 0u);
+    CHECK(Built("terrain/hit=on/owner=on").store.featureUnion() == 0u);
+    for (const char* bad : {"terrain/hit=on", "terrain/hit=on/ramp=on/weights=0,1,0,0", "terrain/owner=on", "terrain/hit=on/owner=on/single=1", "terrain/hit=on/single=2"})
+        CHECK_MESSAGE(!TerrainFixture::validScenario(bad), bad);
+    // F15.4: the patch with blocks on its four layers has the union of all the blendable features (the timing fixture).
+    CHECK(Built("terrain/layerblocks=on/coat=off").store.featureUnion() ==
+          (MATERIAL_FEATURE_LAYERS | MATERIAL_FEATURE_CLEARCOAT | MATERIAL_FEATURE_SHEEN | MATERIAL_FEATURE_ANISOTROPY | MATERIAL_FEATURE_SPECULAR_IOR |
+           MATERIAL_FEATURE_IRIDESCENCE | MATERIAL_FEATURE_SUBSURFACE));
+    CHECK(Built("terrain/layerblocks=on/single=2/coat=off").store.featureUnion() == (MATERIAL_FEATURE_ANISOTROPY | MATERIAL_FEATURE_SPECULAR_IOR));
+    CHECK(!TerrainFixture::validScenario("terrain/layerblocks=on/ramp=on"));
+    CHECK(TerrainFixture::environmentRadiance("terrain/block=coat/ramp=on") == TerrainFixture::BlockEnvironment);
+    for (const char* bad : {"terrain/block=coat", "terrain/block=glow/ramp=on", "terrain/blockless=on/ramp=on", "terrain/block=coat/furnace=on",
+                            "terrain/block=coat/ramp=on/single=2"})
+        CHECK_MESSAGE(!TerrainFixture::validScenario(bad), bad);
     // height=off leaves the layers without a height contrast.
     Built plain("terrain/height=off/coat=off");
     for (const GPUMaterial& m : plain.store.materials())

@@ -216,8 +216,17 @@ TEST_CASE("layer stack: the layer bit joins the feature class and the coat finis
     d.clearcoat->roughness = 0.1f;
     const MaterialExtGroup on = packMaterialExtensions(d);
     CHECK(featureMask(d) == (MATERIAL_FEATURE_LAYERS | MATERIAL_FEATURE_CLEARCOAT));
-    CHECK(std::memcmp(&off[3], &on[3], sizeof(GPUMaterialExtRecord)) == 0);
-    CHECK(std::memcmp(&plain[3], &on[3], sizeof(GPUMaterialExtRecord)) == 0);
+    // Record 3 keeps the stack's own feature mask in its `features` word (F15.4: the resolve inherits the own blocks into the layers); every other
+    // word of it is byte-identical.
+    {
+        GPUMaterialExt3 a = unpackExtRecord<GPUMaterialExt3>(off[3]), b = unpackExtRecord<GPUMaterialExt3>(on[3]), c = unpackExtRecord<GPUMaterialExt3>(plain[3]);
+        CHECK(a.features == (MATERIAL_FEATURE_LAYERS | 0u));      // factor 0: the clearcoat block is inactive
+        CHECK(b.features == (MATERIAL_FEATURE_LAYERS | MATERIAL_FEATURE_CLEARCOAT));
+        CHECK(c.features == MATERIAL_FEATURE_LAYERS);
+        a.features = b.features = c.features = 0;
+        CHECK(std::memcmp(&a, &b, sizeof(a)) == 0);
+        CHECK(std::memcmp(&c, &b, sizeof(c)) == 0);
+    }
     CHECK(std::memcmp(&plain[1], &on[1], sizeof(GPUMaterialExtRecord)) == 0);
     CHECK(std::memcmp(&plain[0], &on[0], sizeof(GPUMaterialExtRecord)) != 0);
     // The base F0 of the blended parameters does not depend on the coat: the resolve gives the coat its own record, so the
@@ -238,7 +247,7 @@ TEST_CASE("layer stack: a material without a stack packs the pre-F15.4 record 3 
         CHECK(e3.layerMaterial[i] == MATERIAL_EXTENSION_INVALID);
         CHECK(e3.heightContrast[i] == -1.0f);
     }
-    CHECK(e3.pad == 0u);
+    CHECK(e3.features == 0u);
     CHECK(e3.maskTex == INVALID_TEXTURE_INDEX);
 }
 
@@ -269,4 +278,81 @@ TEST_CASE("layer stack: description file keeps uvScale and the height texture, v
     bool found = false;
     for (const std::string& e : validate(d)) found = found || e.find("uvScale") != std::string::npos;
     CHECK(found);
+}
+
+TEST_CASE("layer blend: sole layer and presence-weighted secondary parameters (F15.4 features)") {
+    CHECK(layerSole(W(0, 1, 0, 0)) == 1);
+    CHECK(layerSole(W(0.5f, 0.5f, 0, 0)) == LAYER_STACK_MAX);
+    CHECK(layerSole(W(0.999f, 0.001f, 0, 0)) == LAYER_STACK_MAX);
+    // Layer 0 has no coat (presence 0): its roughness must not dilute the coat roughness of layer 1 (0.2) at any weight.
+    for (float t : {0.1f, 0.5f, 0.9f}) {
+        const float r = layerBlendPresence(W(1.0f - t, t, 0, 0), 0.0f, 1.0f, 0.0f, 0.0f, 0.9f, 0.2f, 0.0f, 0.0f, 0.04f);
+        CHECK(r == doctest::Approx(0.2f));
+    }
+    // Two coats, presence 0.25 and 0.75 at equal weights: (0.25 * 0.1 + 0.75 * 0.5) / 1.0 = 0.4.
+    CHECK(layerBlendPresence(W(0.5f, 0.5f, 0, 0), 0.25f, 0.75f, 0, 0, 0.1f, 0.5f, 0, 0, 0.04f) == doctest::Approx(0.4f));
+    // No presence anywhere: the fallback.  The sole layer: its own value bit for bit, with or without presence.
+    CHECK(layerBlendPresence(W(0.5f, 0.5f, 0, 0), 0, 0, 0, 0, 0.3f, 0.7f, 0, 0, 0.04f) == 0.04f);
+    CHECK(bits(layerBlendPresence(W(0, 0, 1, 0), 0.0f, 0.0f, 0.3f, 0.0f, 0.1f, 0.2f, 0.333333f, 0.4f, 0.04f)) == bits(0.333333f));
+    CHECK(layerBlendPresence(W(0, 0, 1, 0), 0.0f, 0.0f, 0.0f, 0.0f, 0.1f, 0.2f, 0.3f, 0.4f, 0.04f) == 0.04f);
+}
+
+TEST_CASE("layer features: blendable and unblendable blocks of a layer material, the stack union") {
+    MaterialDescription plain;
+    CHECK(layerBlendableMask(plain) == 0u);
+    MaterialDescription coat;
+    coat.clearcoat = ClearcoatBlock{};
+    coat.clearcoat->factor = 1.0f;
+    CHECK(layerBlendableMask(coat) == MATERIAL_FEATURE_CLEARCOAT);
+    MaterialDescription rich = coat;
+    rich.sheen = SheenBlock{};
+    rich.sheen->color = {1.0f, 0.5f, 0.2f};
+    rich.anisotropy = AnisotropyBlock{};
+    rich.anisotropy->strength = 0.5f;
+    rich.iridescence = IridescenceBlock{};
+    rich.iridescence->factor = 1.0f;
+    rich.specular = SpecularBlock{};
+    rich.specular->ior = 1.4f;
+    CHECK(layerBlendableMask(rich) == (MATERIAL_FEATURE_CLEARCOAT | MATERIAL_FEATURE_SHEEN | MATERIAL_FEATURE_ANISOTROPY | MATERIAL_FEATURE_IRIDESCENCE |
+                                       MATERIAL_FEATURE_SPECULAR_IOR));
+    CHECK(layerUnblendableMask(rich) == 0u);
+    // Transmission and volume do not blend (the refraction / shadow transmittance passes read one record per surface).
+    MaterialDescription glass = coat;
+    glass.transmission = TransmissionBlock{};
+    glass.transmission->factor = 1.0f;
+    glass.volume = VolumeBlock{};
+    glass.volume->thickness = 0.1f;
+    CHECK(layerBlendableMask(glass) == MATERIAL_FEATURE_CLEARCOAT);
+    CHECK(layerUnblendableMask(glass) == (MATERIAL_FEATURE_TRANSMISSION | MATERIAL_FEATURE_VOLUME));
+    // Subsurface blends in its thin mode only.
+    MaterialDescription thin;
+    thin.subsurface = SubsurfaceBlock{};
+    thin.subsurface->weight = 0.5f;
+    CHECK(layerBlendableMask(thin) == MATERIAL_FEATURE_SUBSURFACE);
+    thin.subsurface->mode = SubsurfaceMode::Volumetric;
+    CHECK(layerBlendableMask(thin) == 0u);
+    CHECK(layerUnblendableMask(thin) == MATERIAL_FEATURE_SUBSURFACE);
+    // A layer that is itself a stack does not nest.
+    MaterialDescription nested = coat;
+    nested.layers = LayerStack{};
+    CHECK(layerBlendableMask(nested) == 0u);
+    // The union over a stack, looked up in the library; indices outside the library contribute nothing.
+    std::vector<MaterialDescription> library{plain, coat, rich, glass};
+    LayerStack stack;
+    for (u32 index : {0u, 1u, 99u}) {
+        MaterialLayer l;
+        l.materialIndex = index;
+        stack.layers.push_back(l);
+    }
+    CHECK(layerFeatureUnion(stack, library) == MATERIAL_FEATURE_CLEARCOAT);
+    stack.layers[2].materialIndex = 2;
+    CHECK(layerFeatureUnion(stack, library) == layerBlendableMask(rich));
+    // The packed record carries the stack's own mask (low half) and the layers' union (high half).
+    MaterialDescription owner;
+    owner.layers = stack;
+    owner.clearcoat = ClearcoatBlock{};
+    owner.clearcoat->factor = 1.0f;
+    const GPUMaterialExt3 e3 = unpackExtRecord<GPUMaterialExt3>(packMaterialExtensions(owner, layerFeatureUnion(stack, library))[3]);
+    CHECK((e3.features & 0xFFFFu) == (MATERIAL_FEATURE_LAYERS | MATERIAL_FEATURE_CLEARCOAT));
+    CHECK((e3.features >> 16) == layerBlendableMask(rich));
 }

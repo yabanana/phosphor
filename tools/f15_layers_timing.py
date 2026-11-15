@@ -42,9 +42,14 @@ ARMS = {
     "layers-2": "terrain/weights=1,1,0,0/coat=off",
     "layers-3": "terrain/weights=1,1,1,0/coat=off",
     "layers-4": "terrain/weights=1,1,1,1/coat=off",
+    # F15.4 feature blocks on the layers (0 coat, 1 sheen, 2 anisotropy + specular, 3 iridescence + thin subsurface): the cost of the blended features
+    "blocks-1": "terrain/layerblocks=on/weights=1,0,0,0/coat=off",
+    "blocks-2": "terrain/layerblocks=on/weights=1,1,0,0/coat=off",
+    "blocks-3": "terrain/layerblocks=on/weights=1,1,1,0/coat=off",
+    "blocks-4": "terrain/layerblocks=on/weights=1,1,1,1/coat=off",
     "full": "terrain",
 }
-COMPARED = ["layers-1", "layers-2", "layers-3", "layers-4", "full"]
+COMPARED = ["layers-1", "layers-2", "layers-3", "layers-4", "full", "blocks-1", "blocks-2", "blocks-3", "blocks-4"]
 
 
 def command(binary, scene, out, resolution, binning, textures=None):

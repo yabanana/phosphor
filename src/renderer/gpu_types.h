@@ -192,7 +192,7 @@ struct GPUMaterialExt3 {
     float heightContrast[4];
     float uvScale[4];          // F15.4 (ticket 23): per-layer texture tiling (uv * uvScale); 0 for a layer that does not exist
     u32   heightTex[4];        // F15.4: per-layer height texture (R): INVALID_TEXTURE_INDEX when the layer has none, 0 for a layer that does not exist
-    u32   pad;
+    u32   features;            // F15.4: bits 0..15 = the stack's OWN feature mask, bits 16..31 = the blendable features of its layers (0 without a stack)
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUMaterialExt3) == 80, "GPUMaterialExt3 layout");
 
@@ -245,6 +245,15 @@ struct GPUMaterialExtRecord {
     u32 w[20];
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUMaterialExtRecord) == 80, "GPUMaterialExtRecord layout");
+
+/// GPU address of the extension buffer inside a parameter struct (a device pointer in MSL, 8 bytes either way; 0 without extended
+/// materials).  F15.4 (ticket 23): the secondary-hit kernels (reflection hits, GI probe/reservoir hits, probe capture) read it to resolve a layer
+/// stack's blended base parameters (shaders/layer_resolve.h).
+#if defined(__METAL_VERSION__)
+typedef const device GPUMaterialExtRecord* GPUMaterialExtPtr;
+#else
+typedef u64 GPUMaterialExtPtr;
+#endif
 
 // ---------------------------------------------------------------------------
 // F15.1 (ticket 06): the per-pixel lobe guide (decision 07: "an additional
@@ -1004,16 +1013,10 @@ struct GPUProbeGridParams {
     u32 width, height, mode, reset;
     u32 cacheCapacity, cacheProbeLimit, cacheMaxAge, cacheGeneration;
     u32 geometryRevision, lightRevision, materialRevision, viewRevision;
-    u32 debugFlags, debugPadding[3];
-    // F15.1 (ticket 22): GPU address of the material extension buffer: the per-slot texture transforms of the secondary-site texture lookups
-    // (emitter / hit / capture surfaces); 0 when the scene has none.  Set by the host that owns the params.
-#if defined(__METAL_VERSION__)
-    const device GPUMaterialExtRecord* materialExtensions;
-#else
-    u64 materialExtensions;
-#endif
+    u32 debugFlags, debugPadding0;
+    GPUMaterialExtPtr materialExtensions; // F15.1 (ticket 22) per-slot texture transforms and F15.4 (ticket 23) layer stacks: the extension buffer (offset 168, the former debugPadding[1..2])
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeGridParams) == 184, "GPUProbeGridParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeGridParams) == 176, "GPUProbeGridParams layout");
 
 struct GPUProbeState {
     float offset[3]; u32 state;
@@ -1144,13 +1147,7 @@ struct GPUReflectionParams {
     u32 ssrSteps, ssrBinarySteps, probeCount, seed;
     float environment[3], maxProbeMip;
     float regularizationScale; u32 ssrRoughSteps, boostSamples; float boostRoughness; // k: alpha' = max(alpha_secondary, k*alpha_camera); SSR steps at roughness 1; samples after a reset below boostRoughness
-    // F15.1 (ticket 22): GPU address of the material extension buffer: the per-slot texture transforms of the secondary-site texture lookups
-    // (emitter / hit / capture surfaces); 0 when the scene has none.  Set by the host that owns the params.
-#if defined(__METAL_VERSION__)
-    const device GPUMaterialExtRecord* materialExtensions;
-#else
-    u64 materialExtensions;
-#endif
+    GPUMaterialExtPtr materialExtensions; // F15.1 (ticket 22) per-slot texture transforms and F15.4 (ticket 23) layer stacks: the extension buffer, for the layer stacks of reflection hits
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionParams) == 312, "GPUReflectionParams layout");
 struct GPUSpecularSample {
@@ -1177,13 +1174,7 @@ struct GPUProbeCaptureParams {
     float viewProjection[16], capturePosition[4];
     u32 lightCount, slotCount, materialCount, sampledLightCount;
     float environment[3]; u32 storageFlags; // formerly unused raster seed; ABI size unchanged
-    // F15.1 (ticket 22): GPU address of the material extension buffer: the per-slot texture transforms of the secondary-site texture lookups
-    // (emitter / hit / capture surfaces); 0 when the scene has none.  Set by the host that owns the params.
-#if defined(__METAL_VERSION__)
-    const device GPUMaterialExtRecord* materialExtensions;
-#else
-    u64 materialExtensions;
-#endif
+    GPUMaterialExtPtr materialExtensions;   // F15.1 (ticket 22) per-slot texture transforms and F15.4 (ticket 23) layer stacks: the extension buffer, for the layer stacks the capture draws
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeCaptureParams) == 120, "GPUProbeCaptureParams layout");
 struct GPUProbeFilterParams {
