@@ -21,7 +21,7 @@
 using namespace phosphor;
 
 TEST_CASE("F15.3 material scenarios are exactly the nine declared names") {
-    CHECK(MaterialValidation::scenarios().size() == 89);
+    CHECK(MaterialValidation::scenarios().size() == 90);
     for (auto name : {"base-grid-sun", "base-grid-env", "base-grid-env-resolve", "furnace-base", "furnace-resolve",
                       "roughness-extremes", "roughness-extremes-sun", "specular-grid-sun", "specular-grid-env-resolve", "specular-grid-point",
                       "specular-grid-env", "furnace-specular", "clearcoat-grid-sun", "clearcoat-grid-env-resolve",
@@ -193,7 +193,7 @@ TEST_CASE("F15.3 the bench and the runner (tools/f15_check.py) list the same sce
     const std::string block = source.substr(start, end - start);
     std::set<std::string> runner;
     // Runner keys are bench scenario names, optionally with an "@lighting" variant suffix.
-    const std::regex key(R"re(\n    "([a-z0-9-]+)(@[a-z]+)?": \{)re");
+    const std::regex key(R"re(\n    "([a-z0-9-]+)(@[a-z0-9-]+)?": \{)re");
     for (std::sregex_iterator it(block.begin(), block.end(), key), last; it != last; ++it) runner.insert((*it)[1]);
     std::set<std::string> bench;
     // The two clip fixtures of F15.1 ticket 08 belong to tools/f15_clip_check.py, not to the reference runner.
