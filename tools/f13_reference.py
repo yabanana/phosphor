@@ -20,7 +20,13 @@ Declared reference model (every item is part of the report):
   reduction albedo(1-metallic)/pi. Emitters are counted once (light and BSDF
   sampling combined with the power heuristic).
 - Excluded by construction: light reaching a diffuse receiver through a
-  specular bounce (caustics) and specular inter-reflection beyond one bounce.
+  specular bounce (caustics) and, unless --mirror-bounces N is given,
+  specular inter-reflection beyond one bounce.  With --mirror-bounces N
+  (F15 ticket 22, A1) the first hit of the camera's specular lobe, when its
+  roughness is at most MIRROR_ROUGHNESS (alpha <= 0.01, a near-delta lobe), also
+  continues along its ideal mirror direction, up to N further hits, weighted
+  by the Schlick Fresnel of every hit (any f0, dielectric or metal); every hit
+  of the chain is lit and continued with its diffuse lobe like the first hit.
 - Secondary specular light connections use alpha' = max(alpha_secondary,
   k * alpha_camera), k = 8 by owner decision D5, the engine default
   (path regularisation), unless --secondary-specular raw|off is selected.
@@ -43,6 +49,7 @@ from f12_reference import read_pfm, scene_digest, snapshot, write_pfm  # noqa: E
 
 INVALID = 0xFFFFFFFF
 MIN_ROUGHNESS, MIN_ALPHA, DIELECTRIC_F0, MIN_NDOTV = 0.04, 0.002, 0.04, 1e-4
+MIRROR_ROUGHNESS = 0.1  # F15 ticket 22: a hit whose roughness is at most this reflects like an ideal mirror (alpha <= 0.01)
 SEEDS = (1234, 5678)
 CONVERGENCE = 0.02
 MODEL = {
@@ -81,7 +88,7 @@ def require_texture_free(data):
 class Context:
     """Scene, per-shape material tables and camera for one snapshot."""
 
-    def __init__(self, root, data, threads, secondary_specular, max_bounces=16, rr_depth=5, regularization_scale=8.0):
+    def __init__(self, root, data, threads, secondary_specular, max_bounces=16, rr_depth=5, regularization_scale=8.0, mirror_bounces=0):
         import drjit as dr
         import mitsuba as mi
         import numpy as np
@@ -97,6 +104,9 @@ class Context:
         if not (self.regularization_scale >= 1.0):
             raise ValueError("regularization scale must be >= 1")
         self.max_bounces, self.rr_depth = max_bounces, rr_depth
+        self.mirror_bounces = int(mirror_bounces)  # F15 ticket 22: extra ideal-mirror hits after the camera's specular lobe (0 = declared F13 model)
+        if not 0 <= self.mirror_bounces <= 8:
+            raise ValueError("mirror bounces must be in 0..8")
         require_texture_free(data)
         transform = getattr(mi, "ScalarAffineTransform4f", None) or mi.ScalarTransform4f
         description = {"type": "scene"}
@@ -226,7 +236,7 @@ class Context:
         return dr.select(first2 + second2 > 0, first2 / (first2 + second2), 0)
 
     # -- transport ------------------------------------------------------
-    def tail(self, previous, direction, beta, pdf_previous, active, full_first, alpha_floor):
+    def tail(self, previous, direction, beta, pdf_previous, active, full_first, alpha_floor, skip_specular=None):
         """Follow one sampled direction from `previous`; diffuse continuation only."""
         mi, dr, scene, sampler = self.mi, self.dr, self.scene, self.sampler
         radiance = mi.Color3f(0)
@@ -257,7 +267,9 @@ class Context:
                 diffuse, specular, _ = self.lobes(material, wo, wi, alpha)
                 value = diffuse * light_weight
                 if self.secondary_specular != "off":
-                    value = value + specular  # light sampling is the only strategy for this lobe
+                    # light sampling is the only strategy for this lobe; skip_specular (F15 ticket 22): a hit that continues as an
+                    # ideal mirror gets that light through the continuation, counting it here too would count it twice
+                    value = value + (specular if skip_specular is None else dr.select(skip_specular, 0, specular))
             else:
                 value = reduced * (dr.maximum(wi.z, 0) / math.pi) * light_weight
             radiance += dr.select(lit, beta * emitted * mi.Color3f(value), 0)
@@ -278,6 +290,49 @@ class Context:
                 beta = dr.select(active, beta / dr.maximum(survival, 1e-30), 0)
             previous, ray = si, si.spawn_ray(direction)
             dr.eval(radiance, beta, active, pdf_previous, ray, previous)
+            if not dr.any(active):
+                break
+        return radiance
+
+    def mirror_hit(self, hit, direction, active):
+        """F15 ticket 22 (A1): which lanes of `hit` reflect like an ideal mirror, with the mirror direction and the Schlick Fresnel weight.
+
+        A hit does when it is front facing and its roughness is at most MIRROR_ROUGHNESS (alpha <= 0.01); the weight is the Schlick Fresnel at
+        the incoming angle with f0 = mix(0.04, albedo, metallic), any surface (no f0 floor)."""
+        mi, dr = self.mi, self.dr
+        material = self.material(hit)
+        normal = hit.sh_frame.n
+        cosine = dr.dot(normal, -direction)
+        smooth = active & hit.is_valid() & (material["alpha"] <= MIRROR_ROUGHNESS * MIRROR_ROUGHNESS) & (cosine > 0)
+        reflected = dr.normalize(direction + normal * (2 * cosine))
+        smooth &= dr.dot(hit.n, reflected) > 0
+        f0 = material["albedo"] * material["metallic"] + DIELECTRIC_F0 * (1 - material["metallic"])
+        fresnel = f0 + (1 - f0) * (1 - dr.clip(mi.Float64(cosine), 0.0, 1.0)) ** 5
+        return smooth, reflected, mi.Color3f(fresnel)
+
+    def mirror_chain(self, hit, direction, beta, active, alpha_floor):
+        """F15 ticket 22 (A1): ideal specular continuation through smooth hits, written from the physics of a smooth surface.
+
+        `hit` is the first hit of the camera's specular sample along `direction` with throughput `beta` (the camera lobe's weight).  A smooth
+        hit (mirror_hit) sends the light that arrives along its mirror direction: the throughput is multiplied by its Fresnel and the next
+        hit is lit and continued with its diffuse lobe exactly like the first one (tail with full_first), with no specular light connection
+        at a hit that itself continues (the continuation carries that light).  At most `mirror_bounces` further hits; the hit at the bound
+        keeps its regularised specular connection.  Delta direction: the emitter MIS weight is 1."""
+        mi, dr = self.mi, self.dr
+        radiance = mi.Color3f(0)
+        for bounce in range(self.mirror_bounces):
+            smooth, reflected, fresnel = self.mirror_hit(hit, direction, active)
+            beta = beta * fresnel
+            beta = mi.Color3f(dr.select(smooth, beta.x, 0), dr.select(smooth, beta.y, 0), dr.select(smooth, beta.z, 0))
+            ray = hit.spawn_ray(reflected)
+            following = self.scene.ray_intersect(ray, smooth)
+            skip = None
+            if bounce + 1 < self.mirror_bounces:
+                skip = dr.copy(self.mirror_hit(following, ray.d, smooth)[0])
+            # tail narrows its masks in place (drjit &=): hand it copies
+            radiance += self.tail(hit, reflected, beta, mi.Float(1e30), dr.copy(smooth), True, alpha_floor, skip)
+            hit, direction, active = following, ray.d, smooth
+            dr.eval(radiance, beta, active, direction, hit)
             if not dr.any(active):
                 break
         return radiance
@@ -324,8 +379,17 @@ class Context:
         beta = mi.Color3f(specular / dr.maximum(specular_pdf, 1e-30))
         direction = si.to_world(mi.Vector3f(local))
         go = active & (local.z > 0) & (specular_pdf > 0) & (dr.dot(si.n, direction) > 0) & (dr.max(beta) > 0)
+        chain_go = dr.copy(go) if self.mirror_bounces else None  # tail() narrows its mask in place (drjit &=): keep a copy
+        skip = first_hit = sample_ray = None
+        if self.mirror_bounces:
+            sample_ray = si.spawn_ray(direction)
+            first_hit = self.scene.ray_intersect(sample_ray, chain_go)
+            skip = dr.copy(self.mirror_hit(first_hit, sample_ray.d, chain_go)[0])
         radiance += self.tail(si, direction, beta, mi.Float(specular_pdf), go, True,
-                              dr.minimum(alpha * self.regularization_scale, 1.0))
+                              dr.minimum(alpha * self.regularization_scale, 1.0), skip)
+        if self.mirror_bounces:
+            radiance += self.mirror_chain(first_hit, sample_ray.d, beta, chain_go & first_hit.is_valid(),
+                                          dr.minimum(alpha * self.regularization_scale, 1.0))
         image = np.zeros((pixels, 3), dtype=np.float64)
         for channel, values in enumerate((radiance.x, radiance.y, radiance.z)):
             target = dr.zeros(mi.Float64, pixels)
@@ -506,6 +570,7 @@ def render_frame(context, args, out, positions=None, regions=None):
     out.mkdir(parents=True, exist_ok=False)
     report = {"schema": 1, "tool": "tools/f13_reference.py", "tool_sha256": sha(__file__), "model": MODEL,
               "secondary_specular": context.secondary_specular, "regularization_scale": context.regularization_scale,
+              "mirror_bounces": context.mirror_bounces,
               "seeds": list(SEEDS),
               "convergence_relative_rmse": CONVERGENCE, "frame": context.data["frame"],
               "candidate_read": False, "phase_accepted": False}
@@ -541,7 +606,8 @@ def command_validate(args):
 def command_render(args):
     root, data = snapshot(args.snapshot)
     context = Context(root, data, args.threads, args.secondary_specular,
-                      regularization_scale=getattr(args, "regularization_scale", 8.0))
+                      regularization_scale=getattr(args, "regularization_scale", 8.0),
+                      mirror_bounces=getattr(args, "mirror_bounces", 0))
     regions = json.loads(pathlib.Path(args.regions).read_text()) if args.regions else None
     report = render_frame(context, args, pathlib.Path(args.out).resolve(), args.positions, regions)
     report["snapshot_sha256"] = scene_digest(root)
@@ -566,6 +632,8 @@ def main(argv=None):
     p.add_argument("--secondary-specular", choices=["regularized", "raw", "off"], default="regularized")
     p.add_argument("--regularization-scale", type=float, default=8.0,
                    help="k in alpha' = max(alpha_secondary, k * alpha_camera); default 8, owner decision D5 (engine default)")
+    p.add_argument("--mirror-bounces", type=int, default=0,
+                   help="F15 ticket 22: extra ideal-mirror hits after the camera's specular lobe through smooth surfaces (0 = declared F13 model)")
     p.add_argument("--threads", type=int, default=min(12, os.cpu_count() or 1))
     p.set_defaults(function=command_render)
     args = parser.parse_args(argv)

@@ -157,7 +157,7 @@ def render_config(args, regions, scene_sha256):
     return {"model": reference.MODEL, "secondary_specular": args.secondary_specular,
             "regularization_scale": args.regularization_scale, "spp": args.spp, "spp_per_pass": args.spp_per_pass,
             "regions": regions or {}, "window_regions": bool(args.window_regions), "window_margin": args.window_margin,
-            "scene_sha256": scene_sha256}
+            "scene_sha256": scene_sha256, **({"mirror_bounces": args.mirror_bounces} if getattr(args, "mirror_bounces", 0) else {})}
 
 
 def reusable(report_path, config, resume):
@@ -192,7 +192,8 @@ def command_render(args):
                 shutil.rmtree(folder)
             data = state(args.scene, base, members[0])
             context = reference.Context(root, data, args.threads, args.secondary_specular,
-                                        regularization_scale=args.regularization_scale)
+                                        regularization_scale=args.regularization_scale,
+                                        mirror_bounces=getattr(args, "mirror_bounces", 0))
             if args.window_regions:
                 context.window = window(regions, context.width, context.height, args.window_margin)
             namespace = argparse.Namespace(spp=args.spp, spp_per_pass=args.spp_per_pass)
@@ -224,7 +225,7 @@ def command_render(args):
                 "base_snapshot_sha256": config["scene_sha256"], "frames": [frames[0], frames[-1]],
                 "states": index, "converged": converged, "model": reference.MODEL,
                 "secondary_specular": args.secondary_specular, "regularization_scale": args.regularization_scale,
-                "regions": regions or {},
+                "regions": regions or {}, **({"mirror_bounces": args.mirror_bounces} if getattr(args, "mirror_bounces", 0) else {}),
                 "window_regions": bool(args.window_regions), "window_margin": args.window_margin,
                 "tool_sha256": reference.sha(__file__), "reference_tool_sha256": reference.sha(reference.__file__),
                 "candidate_read": False, "phase_accepted": False}
@@ -280,6 +281,8 @@ def main(argv=None):
     p.add_argument("--secondary-specular", choices=["regularized", "raw", "off"], default="regularized")
     p.add_argument("--regularization-scale", type=float, default=8.0,
                    help="k in alpha' = max(alpha_secondary, k * alpha_camera); default 8, owner decision D5 (engine default)")
+    p.add_argument("--mirror-bounces", type=int, default=0,
+                   help="F15 ticket 22: extra ideal-mirror hits after the camera's specular lobe (0 = declared F13 model)")
     p.add_argument("--threads", type=int, default=min(12, os.cpu_count() or 1))
     p.add_argument("--resume", action="store_true", help="keep converged states already in --out")
     p.add_argument("--window-regions", action="store_true", help="render only the regions' bounding box (+margin)")
