@@ -84,6 +84,9 @@ struct Variant {
 [[nodiscard]] u16 textureTransformConstantIndex();
 /// `desc` with TEXTURE_TRANSFORM = 1 (an existing constant is replaced).
 [[nodiscard]] PipelineDesc withTextureTransform(const PipelineDesc& desc);
+/// F15 closure (COLOR_0): reserved constant VERTEX_COLOR (uint, index 27) = 1: the per-vertex colour stream is read and multiplied into the base colour.
+[[nodiscard]] u16 vertexColorConstantIndex();
+[[nodiscard]] PipelineDesc withVertexColor(const PipelineDesc& desc);
 
 /// The reference / compile-fallback pipeline: constant 22 = every feature bit.  Distinct from
 /// `desc` itself, which (undefined => 0) has no extension lobes.

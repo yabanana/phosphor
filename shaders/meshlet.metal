@@ -25,6 +25,7 @@
 using namespace metal;
 using namespace phosphor;
 #include "surface_geometry.h"
+#include "vertex_color.h"
 #include "texture_transform.h" // F15.1 (ticket 22): the *_tt_fs alpha tests
 #include "layer_resolve.h"
 
@@ -842,6 +843,129 @@ fragment uint visibility_alpha_lit_tt_fs(VisibilityFragment in [[stage_in]], con
              : float(half(textures[material.baseColorTex].tex.sample(sampling, uv, gradient2d(uvDx, uvDy)).a)));
     alpha *= visibilityStackAlpha(materials, in.vert.materialIndex, textures, temporal, in.vert.uv); // F15.4 (ticket 23)
     if (alpha < material.alphaCutoff)
+        discard_fragment();
+    return in.primitive.id;
+}
+
+// F15 closure (COLOR_0): the vertex-colour twins of the visibility mesh stage and of the four alpha tests (separate entry points: the stage interface
+// carries the colour only here, so the plain entry points above stay byte-stable).  The alpha of a cut-out is factor x texture x COLOR_0.a.
+struct VisibilityVertexVC {
+    float4 position [[position, invariant]];
+    float2 uv;
+    uint materialIndex [[flat]];
+    float4 color;
+};
+struct VisibilityFragmentVC {
+    VisibilityVertexVC vert;
+    VisibilityPrimitive primitive;
+};
+using VisibilityMeshVC =
+    metal::mesh<VisibilityVertexVC, VisibilityPrimitive, MESHLET_MESH_GROUP, MESHLET_MESH_GROUP, topology::triangle>;
+
+[[mesh]] void
+visibility_mesh_vc(VisibilityMeshVC out, const object_data MeshletPayload &payload [[payload]],
+                uint tid [[thread_index_in_threadgroup]], uint gid [[threadgroup_position_in_grid]],
+                constant FrameConstants &frame [[buffer(0)]], const device GPUVertex *vertices [[buffer(1)]],
+                const device GPUInstance *instances [[buffer(2)]], const device GPUMeshlet *meshlets [[buffer(6)]],
+                const device uint *meshletVertices [[buffer(7)]], const device uchar *triangles [[buffer(8)]]) {
+    const GPUMeshlet m = meshlets[payload.meshlet[gid]];
+    const GPUInstance gi = instances[payload.slot[gid]];
+    if (tid == 0)
+        out.set_primitive_count(m.triangleCount);
+    if (tid < m.vertexCount) {
+        const GPUVertex v = vertices[meshletVertices[m.vertexOffset + tid]];
+        VisibilityVertexVC o;
+        const float4x4 model =
+            float4x4(float4(gi.modelMatrix[0], gi.modelMatrix[1], gi.modelMatrix[2], gi.modelMatrix[3]),
+                     float4(gi.modelMatrix[4], gi.modelMatrix[5], gi.modelMatrix[6], gi.modelMatrix[7]),
+                     float4(gi.modelMatrix[8], gi.modelMatrix[9], gi.modelMatrix[10], gi.modelMatrix[11]),
+                     float4(gi.modelMatrix[12], gi.modelMatrix[13], gi.modelMatrix[14], gi.modelMatrix[15]));
+        o.position = loadMatrix(frame.viewProjection) * model * float4(v.px, v.py, v.pz, 1);
+        o.uv = float2(v.u, v.v);
+        o.materialIndex = gi.materialIndex;
+        o.color = frame.vertexColors[meshletVertices[m.vertexOffset + tid]]; // F15 closure (COLOR_0)
+        out.set_vertex(tid, o);
+    }
+    if (tid < m.triangleCount) {
+        for (uint k = 0; k < 3; ++k)
+            out.set_index(tid * 3 + k, triangles[m.triangleOffset + tid * 3 + k]);
+        out.set_primitive(tid, VisibilityPrimitive{visibilityPack(payload.decision[gid], tid)});
+    }
+}
+
+fragment uint visibility_alpha_vc_fs(VisibilityFragmentVC in [[stage_in]], const device GPUMaterial *materials [[buffer(3)]],
+                                  const device VisibilityTextureHandle *textures [[buffer(5)]],
+                                  constant GPUTemporalParams &temporal [[buffer(16)]]) {
+    // Preserve the F7/F8 forward-reference contract. F10 lighting receivers
+    // use the separate explicit-footprint entry point below.
+    const GPUMaterial material = materials[in.vert.materialIndex];
+    constexpr sampler sampling(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
+    const float alpha =
+        material.baseColor[3] *
+        (material.baseColorTex == INVALID_TEXTURE_INDEX
+             ? 1.0f
+             : float(half(textures[material.baseColorTex].tex.sample(sampling, in.vert.uv, bias(temporal.mipBias)).a)));
+    if (alpha * in.vert.color.a < material.alphaCutoff)
+        discard_fragment();
+    return in.primitive.id;
+}
+fragment uint visibility_alpha_lit_vc_fs(VisibilityFragmentVC in [[stage_in]], const device GPUMaterial *materials [[buffer(3)]],
+                                  const device VisibilityTextureHandle *textures [[buffer(5)]],
+                                  constant GPUTemporalParams &temporal [[buffer(16)]]) {
+    const GPUMaterial material = materials[in.vert.materialIndex];
+    constexpr sampler sampling(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
+    // Match every indexed receiver/material path: scale the derivative
+    // footprint itself. An implicit LOD bias does not express that same
+    // footprint to anisotropic sampling, so alpha coverage can diverge in DRS.
+    const float footprintScale = exp2(temporal.mipBias);
+    const float2 uvDx = dfdx(in.vert.uv) * footprintScale;
+    const float2 uvDy = dfdy(in.vert.uv) * footprintScale;
+    const float alpha =
+        material.baseColor[3] *
+        (material.baseColorTex == INVALID_TEXTURE_INDEX
+             ? 1.0f
+             : float(half(textures[material.baseColorTex].tex.sample(sampling, in.vert.uv, gradient2d(uvDx, uvDy)).a)));
+    if (alpha * in.vert.color.a < material.alphaCutoff)
+        discard_fragment();
+    return in.primitive.id;
+}
+
+// F15.1 (ticket 22): the alpha tests of a scene with per-slot KHR_texture_transform (SceneStore::textureTransformInUse) sample the base
+// colour slot through its transform.  Separate entry points (no function constant: metal-tt cannot lower an unspecialised descriptor
+// whose function references one); the plain entry points above are unchanged.  The frame constants are bound at MR_FRAME (0) in the
+// draw table of the mesh path.
+fragment uint visibility_alpha_tt_vc_fs(VisibilityFragmentVC in [[stage_in]], const device GPUMaterial *materials [[buffer(3)]],
+                                     const device VisibilityTextureHandle *textures [[buffer(5)]],
+                                     constant GPUTemporalParams &temporal [[buffer(16)]],
+                                     constant FrameConstants &frame [[buffer(0)]]) {
+    const GPUMaterial material = materials[in.vert.materialIndex];
+    constexpr sampler sampling(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
+    float2 uv = in.vert.uv, noDx = float2(0.0f), noDy = float2(0.0f); // implicit derivatives follow the transformed uv
+    texXfUvOn(texXfForOn(frame.materialExtensions, material.flags, material.textureTransformIndex), TT_SLOT_BASE_COLOR, uv, noDx, noDy);
+    const float alpha =
+        material.baseColor[3] *
+        (material.baseColorTex == INVALID_TEXTURE_INDEX
+             ? 1.0f
+             : float(half(textures[material.baseColorTex].tex.sample(sampling, uv, bias(temporal.mipBias)).a)));
+    if (alpha * in.vert.color.a < material.alphaCutoff)
+        discard_fragment();
+    return in.primitive.id;
+}
+fragment uint visibility_alpha_lit_tt_vc_fs(VisibilityFragmentVC in [[stage_in]], const device GPUMaterial *materials [[buffer(3)]],
+                                         const device VisibilityTextureHandle *textures [[buffer(5)]],
+                                         constant GPUTemporalParams &temporal [[buffer(16)]],
+                                         constant FrameConstants &frame [[buffer(0)]]) {
+    const GPUMaterial material = materials[in.vert.materialIndex];
+    constexpr sampler sampling(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
+    const float footprintScale = exp2(temporal.mipBias);
+    float2 uv = in.vert.uv, uvDx = dfdx(in.vert.uv) * footprintScale, uvDy = dfdy(in.vert.uv) * footprintScale;
+    texXfUvOn(texXfForOn(frame.materialExtensions, material.flags, material.textureTransformIndex), TT_SLOT_BASE_COLOR, uv, uvDx, uvDy);
+    const float alpha =
+        material.baseColor[3] *
+        (material.baseColorTex == INVALID_TEXTURE_INDEX
+             ? 1.0f
+             : float(half(textures[material.baseColorTex].tex.sample(sampling, uv, gradient2d(uvDx, uvDy)).a)));
+    if (alpha * in.vert.color.a < material.alphaCutoff)
         discard_fragment();
     return in.primitive.id;
 }

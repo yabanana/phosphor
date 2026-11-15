@@ -143,6 +143,10 @@ public:
         return buffers_.extensions() ? buffers_.extensions()->gpuAddress() : 0;
     }
     [[nodiscard]] MTL::Buffer* vertexBuffer() const { return vertexBuffer_; }
+    /// F15 closure (COLOR_0): the per-vertex colour stream (float4 per vertex, parallel to vertexBuffer()); null without COLOR_0.
+    [[nodiscard]] MTL::Buffer* vertexColorBuffer() const { return vertexColorBuffer_; }
+    [[nodiscard]] MTL::GPUAddress vertexColorsAddress() const { return vertexColorBuffer_ ? vertexColorBuffer_->gpuAddress() : 0; }
+    [[nodiscard]] bool vertexColorInUse() const { return (pipelineUnion_ & FEATURE_UNION_VERTEX_COLOR) != 0u; }
     [[nodiscard]] MTL::Buffer* meshBuffer() const { return meshBuffer_; }
     [[nodiscard]] u32 forwardVariantIndex() const { return variantIndex_; }
     /// F15.1: feature union of the frame's scene (SceneStore::featureUnion), for the other renderers.
@@ -205,6 +209,7 @@ private:
     MTL4::ArgumentTable* drawTable_      = nullptr;
 
     MTL::Buffer* vertexBuffer_ = nullptr;
+    MTL::Buffer* vertexColorBuffer_ = nullptr; // F15 closure (COLOR_0): only when the scene has a colour stream
     MTL::Buffer* indexBuffer_  = nullptr;
     MTL::Buffer* meshBuffer_   = nullptr; // GPUMeshInfo[]
     u64          geometryVersion_ = ~u64{0};

@@ -16,8 +16,9 @@ struct Vertex {
     glm::vec3 normal;
     glm::vec2 uv;
     glm::vec4 tangent;
+    glm::vec4 color{1.0f}; // COLOR_0 (white without)
 };
-static_assert(sizeof(Vertex) == 48, "Vertex must be tightly packed for welding");
+static_assert(sizeof(Vertex) == 64, "Vertex must be tightly packed for welding");
 
 glm::vec3 anyPerpendicular(const glm::vec3& n) {
     const glm::vec3 axis = std::abs(n.x) < 0.9f ? glm::vec3(1, 0, 0) : glm::vec3(0, 1, 0);
@@ -57,6 +58,7 @@ void completeGeometry(GeometryStreams& g, bool hasNormals, bool hasTangents, boo
     const size_t corners = g.indices.size() - g.indices.size() % 3;
     if (corners == 0) return;
 
+    const bool hasColors = g.colors.size() == g.positions.size() && !g.colors.empty();
     // Expand per triangle corner.
     std::vector<Vertex> expanded(corners);
     for (size_t c = 0; c < corners; ++c) {
@@ -66,6 +68,7 @@ void completeGeometry(GeometryStreams& g, bool hasNormals, bool hasTangents, boo
         v.normal   = hasNormals ? g.normals[i] : glm::vec3(0.0f);
         v.uv       = hasUVs ? g.uvs[i] : glm::vec2(0.0f);
         v.tangent  = hasTangents ? g.tangents[i] : glm::vec4(0.0f);
+        if (hasColors) v.color = g.colors[i];
     }
 
     if (!hasNormals) {
@@ -117,7 +120,9 @@ void completeGeometry(GeometryStreams& g, bool hasNormals, bool hasTangents, boo
     g.normals.resize(unique);
     g.uvs.resize(unique);
     g.tangents.resize(unique);
+    if (hasColors) g.colors.resize(unique);
     for (size_t v = 0; v < unique; ++v) {
+        if (hasColors) g.colors[v] = welded[v].color;
         g.positions[v] = welded[v].position;
         g.normals[v]   = welded[v].normal;
         g.uvs[v]       = welded[v].uv;

@@ -96,6 +96,8 @@ PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURES_ALL         = (1u << 9) - 1u;
 /// per-slot texture transforms (SceneStore::pipelineFeatureUnion).  Never a MATERIAL_FEATURES constant value: serve() strips it and sets
 /// the reserved constant TEXTURE_TRANSFORM instead.  Outside MATERIAL_FEATURES_ALL.
 PHOSPHOR_GPU_CONSTANT u32 FEATURE_UNION_TEXTURE_TRANSFORM = 1u << 31;
+/// F15 closure (COLOR_0), HOST ONLY: the same kind of marker for a scene with a per-vertex colour stream (reserved constant VERTEX_COLOR).
+PHOSPHOR_GPU_CONSTANT u32 FEATURE_UNION_VERTEX_COLOR = 1u << 30;
 /// GPUMaterial::extensionIndex of a material without an extension group.
 PHOSPHOR_GPU_CONSTANT u32 MATERIAL_EXTENSION_INVALID    = 0xFFFFFFFFu;
 /// Records of the extension group of one extended material (fixed, so
@@ -494,8 +496,15 @@ struct FrameConstants {
 #else
     u64 sheenTable;
 #endif
+    // F15 closure (COLOR_0): GPU address of the per-vertex colour stream (float4 per GPUVertex, parallel to the vertex buffer); 0 and never read
+    // unless the pipeline sets the reserved constant VERTEX_COLOR (a scene without COLOR_0 has no stream).
+#if defined(__METAL_VERSION__)
+    const device float4* vertexColors;
+#else
+    u64 vertexColors;
+#endif
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(FrameConstants) == 184, "FrameConstants layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(FrameConstants) == 192, "FrameConstants layout");
 
 // ---------------------------------------------------------------------------
 // F5: persistent GPU scene (renderer/scene_store.h, renderer/gpu_scene_layout.h)
@@ -1203,8 +1212,15 @@ struct GPUReflectionParams {
     float environment[3], maxProbeMip;
     float regularizationScale; u32 ssrRoughSteps, boostSamples; float boostRoughness; // k: alpha' = max(alpha_secondary, k*alpha_camera); SSR steps at roughness 1; samples after a reset below boostRoughness
     GPUMaterialExtPtr materialExtensions; // F15.1 (ticket 22) per-slot texture transforms and F15.4 (ticket 23) layer stacks: the extension buffer, for the layer stacks of reflection hits
+    // F15 closure (COLOR_0): GPU address of the per-vertex colour stream (float4 per vertex); 0 without COLOR_0.  A runtime test (this pointer), not a
+    // function constant: the RT kernels are linked compute pipelines that the cache compiles anyway.
+#if defined(__METAL_VERSION__)
+    const device float4* vertexColors;
+#else
+    u64 vertexColors;
+#endif
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionParams) == 312, "GPUReflectionParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionParams) == 320, "GPUReflectionParams layout");
 struct GPUSpecularSample {
     float radiance[3], hitDistance; // weighted outgoing Lo; 0 distance for environment/miss
     float direction[3], proposalSolidAngle;

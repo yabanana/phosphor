@@ -41,6 +41,7 @@ struct ShadowPasses::Impl {
         return d;
     }
     pipe::PipelineHandle receiverTT=pipe::INVALID_PIPELINE, receiverServed=pipe::INVALID_PIPELINE;
+    std::array<pipe::PipelineHandle,4> receiverVariants{pipe::INVALID_PIPELINE,pipe::INVALID_PIPELINE,pipe::INVALID_PIPELINE,pipe::INVALID_PIPELINE}; // F15 closure (COLOR_0): [tt | vc << 1]
     pipe::PipelineHandle indexed, meshDepth, receiver, cacheIndexed, cacheMesh, cacheInitialize, cachePublish, cacheValidate, cacheComposite;
     MTL::DepthStencilState* depthState=nullptr;
     MTL::DepthStencilState* receiverDepthState=nullptr;
@@ -362,9 +363,11 @@ struct ShadowPasses::Impl {
         // F15 ticket 24: the temporal kernel and its history record layout follow the feature union (see shadows.metal); a change of layout
         // (a material edit that adds or removes glass) restarts every history, whatever the kernel that serves the transition frame.
         receiverServed=receiver;
-        if(store.textureTransformInUse()){
-            if(receiverTT==pipe::INVALID_PIPELINE)receiverTT=pipelines.request(receiverDesc(true));
-            if(pipelines.isFinal(receiverTT))receiverServed=receiverTT;else pipelines.noteFallbackUse();
+        if(store.textureTransformInUse()||store.vertexColorInUse()){
+            // F15 closure (COLOR_0): a scene with a colour stream compiles the vertex colour into the receiver prepass (alpha test, vertex stage emits it).
+            const u32 k=(store.textureTransformInUse()?1u:0u)|(store.vertexColorInUse()?2u:0u);
+            if(receiverVariants[k]==pipe::INVALID_PIPELINE){auto d=receiverDesc(store.textureTransformInUse());if(store.vertexColorInUse())d=pipe::forward::withVertexColor(d);receiverVariants[k]=pipelines.request(d);}
+            if(pipelines.isFinal(receiverVariants[k]))receiverServed=receiverVariants[k];else pipelines.noteFallbackUse();
         }
         const bool glassScene=(store.featureUnion()&MATERIAL_FEATURE_TRANSMISSION)!=0u;
         temporalServed=transmitPipes.serve(pipelines,1,kernels[Temporal],glassScene,[&]{return lighting::kernel("shadow_temporal");});

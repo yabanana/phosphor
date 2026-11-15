@@ -41,7 +41,13 @@ public:
                           const std::vector<glm::vec3>& normals,
                           const std::vector<glm::vec4>& tangents,
                           const std::vector<glm::vec2>& uvs,
-                          const std::vector<u32>& indices);
+                          const std::vector<u32>& indices,
+                          const std::vector<glm::vec4>& colors = {});
+
+    /// F15 closure (COLOR_0): the per-vertex colour stream, parallel to vertices() (RGBA float, white for the vertices of meshes without
+    /// COLOR_0).  EMPTY until a mesh with COLOR_0 is uploaded: a scene without vertex colours has no stream, no buffer and no cost.
+    [[nodiscard]] const std::vector<glm::vec4>& vertexColors() const { return vertexColors_; }
+    [[nodiscard]] bool hasVertexColors() const { return !vertexColors_.empty(); }
 
     /// Replace the per-frame instance list.
     void updateInstances(const std::vector<GPUInstance>& instances);
@@ -140,6 +146,7 @@ public:
 private:
     std::vector<MeshLocalBounds> meshBounds_;      // parallel to meshInfos_
     std::vector<GPUVertex>     vertices_;
+    std::vector<glm::vec4>     vertexColors_; // parallel to vertices_ once any mesh has COLOR_0, else empty
     std::vector<u32>           indices_;          // mesh-local indices, offset by GPUMeshInfo
     std::vector<Meshlet>       meshlets_;
     std::vector<u32>           meshletVertices_;  // global vertex indices

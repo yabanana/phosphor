@@ -58,3 +58,8 @@ reserved RESOLVE_BIN uint 24
 # MATERIAL_FLAG_TEXTURE_TRANSFORM.  Set only on the pipelines of a scene with such a material (SceneStore::textureTransformInUse);
 # undefined => 0, so every other pipeline keeps its descriptor (and archive key) and compiles the transform out.
 reserved TEXTURE_TRANSFORM uint 26
+
+# F15 closure (COLOR_0): 1 = the shading code multiplies the base colour by the interpolated per-vertex colour (FrameConstants::vertexColors,
+# the vertex stages of the indexed path emit it).  Set only on the pipelines of a scene whose assets have COLOR_0 (GpuScene::hasVertexColors);
+# undefined => 0, so every other pipeline keeps its descriptor (and archive key) and compiles the colour stream out.
+reserved VERTEX_COLOR uint 27

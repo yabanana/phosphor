@@ -357,7 +357,14 @@ void MeshRenderer::prepareFrame(const SceneStore& store, const GpuScene& scene, 
         // transforms rasterises its cut-outs with the pipeline that compiles them (requested on first use; the plain one serves
         // until it is final, a transient that --pipeline-sync removes).
         alphaServed_ = visibilityAlpha_;
-        if (scene_.textureTransformInUse()) {
+        if (scene_.vertexColorInUse()) {
+            // F15 closure (COLOR_0): the alpha test multiplies the vertex colour's alpha; the mesh stage emits it.
+            const u32 k = scene_.textureTransformInUse() ? 1u : 0u;
+            if (visibilityAlphaVC_[k] == pipe::INVALID_PIPELINE)
+                visibilityAlphaVC_[k] = pipelines_.request(pipe::forward::withVertexColor(visibilityRasterDesc(2, k == 1u)));
+            if (pipelines_.isFinal(visibilityAlphaVC_[k])) alphaServed_ = visibilityAlphaVC_[k];
+            else pipelines_.noteFallbackUse();
+        } else if (scene_.textureTransformInUse()) {
             if (visibilityAlphaTT_ == pipe::INVALID_PIPELINE)
                 visibilityAlphaTT_ = pipelines_.request(visibilityRasterDesc(2, true));
             if (pipelines_.isFinal(visibilityAlphaTT_)) alphaServed_ = visibilityAlphaTT_;

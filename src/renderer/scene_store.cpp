@@ -145,6 +145,7 @@ struct SceneStore::Impl {
     std::vector<u32>              matTt_, ttFree_;
     std::vector<u8>               layerTarget_; // library material i is a layer of some stack (its transform is evaluated on the GPU even when uniform)
     u32 ttCount_ = 0;
+    bool vertexColors_ = false; // F15 closure (COLOR_0): the GpuScene has a colour stream
     std::vector<GPUDeltaRecord>   extRecs_;
     std::vector<u32>              extDirty_;
     u32 extHigh_ = 0, extCap_ = 0;            // groups handed out / capacity (groups)
@@ -1090,6 +1091,7 @@ struct SceneStore::Impl {
 
     void sync(ECS& ecs, const GpuScene& scene) {
         ecs_ = &ecs;
+        vertexColors_ = scene.hasVertexColors();
         const ECS& c = ecs; // const access: reading must not mark changes
         xf_   = &c.getArray<TransformComponent>();
         mi_   = &c.getArray<MeshInstanceComponent>();
@@ -1491,6 +1493,7 @@ u32 SceneStore::maxDepth() const {
 }
 bool SceneStore::hasEmissive() const { return impl_->emissiveCount_ > 0; }
 bool SceneStore::textureTransformInUse() const { return impl_->ttCount_ > 0; }
+bool SceneStore::vertexColorInUse() const { return impl_->vertexColors_; }
 u32 SceneStore::featureUnion() const {
     u32 u = 0;
     for (u32 f = 0; f < MATERIAL_FEATURE_COUNT; ++f)

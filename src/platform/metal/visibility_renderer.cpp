@@ -99,8 +99,8 @@ VisibilityRenderer::VisibilityRenderer(MetalContext &c, PipelineCache &p, SceneR
 }
 pipe::PipelineHandle VisibilityRenderer::binPipeline(u32 mask, bool overflow) {
     // Bin pipelines are keyed by what they compile, not by the scene: the class table of the generator names them.
-    // sssOutput() is 0..2 (bits 17-18); the texture-transform bit moved to 19 at integration (it collided with the SSS walk value).
-    const u64 key = u64(mask) | (u64(overflow) << 16) | (u64(sssOutput()) << 17) | (u64(textureTransform_) << 19) | (u64(dropLobes_) << 20);
+    // sssOutput() is 0..2 (bits 17-18); texture transform 19 (moved at integration); dropLobes_ (a feature mask) from bit 20; vertex colour 60.
+    const u64 key = u64(mask) | (u64(overflow) << 16) | (u64(sssOutput()) << 17) | (u64(textureTransform_) << 19) | (u64(dropLobes_) << 20) | (u64(vertexColor_) << 60);
     auto it = binHandles_.find(key);
     if (it == binHandles_.end()) {
         const auto describe = [&](const char* kernel) {
@@ -109,6 +109,7 @@ pipe::PipelineHandle VisibilityRenderer::binPipeline(u32 mask, bool overflow) {
             if (compiled != 0u) d.constant(pipe::matclass::gen::kMaterialFeaturesConstantIndex, pipe::ConstantType::UInt, compiled);
             if (subsurface_) d.constant(kSssConstant, pipe::ConstantType::UInt, sssOutput());
             if (textureTransform_) d = pipe::forward::withTextureTransform(d); // F15.1 (ticket 22)
+            if (vertexColor_) d = pipe::forward::withVertexColor(d);           // F15 closure (COLOR_0)
             d.constant(pipe::matclass::gen::kResolveBinConstantIndex, pipe::ConstantType::UInt,
                        overflow ? VISIBILITY_BIN_OVERFLOW : (VISIBILITY_BIN_CLASS | mask));
             return pipe::forward::inExactModule(d); // F15.2 (ticket 21): the exact-maths copy of the kernel
@@ -204,7 +205,8 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
         // F15.1 (ticket 22): per-slot texture transforms: the marker rides on the mask the shading pipelines are served with (the
         // lobe-only `mask` keeps deciding binning, subsurface and the tile path).
         textureTransform_ = store.textureTransformInUse();
-        const u32 shadeMask = mask | (textureTransform_ ? FEATURE_UNION_TEXTURE_TRANSFORM : 0u);
+        vertexColor_ = store.vertexColorInUse();
+        const u32 shadeMask = mask | (textureTransform_ ? FEATURE_UNION_TEXTURE_TRANSFORM : 0u) | (vertexColor_ ? FEATURE_UNION_VERTEX_COLOR : 0u);
         // F15.2: a scene with features bins per feature class (the legacy normal/emission classes only serve scenes without).
         const bool featureBinsWanted = binning_ && !forceAllLobes_ && mask != 0u;
         subsurface_ = subsurfaceAllowed_ && !tileResolve_ && mask != 0u && store.volumetricSubsurface();

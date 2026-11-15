@@ -38,7 +38,7 @@ public:
         // F15.1 (ticket 22): FEATURE_UNION_TEXTURE_TRANSFORM rides on the mask (SceneStore::pipelineFeatureUnion): the lobe bits keep
         // their meaning, the marker becomes the TEXTURE_TRANSFORM constant of the specialised and of the all-lobes pipeline.
         const u32 lobes = mask & MATERIAL_FEATURES_ALL;
-        const u32 tt = mask & FEATURE_UNION_TEXTURE_TRANSFORM;
+        const u32 tt = mask & (FEATURE_UNION_TEXTURE_TRANSFORM | FEATURE_UNION_VERTEX_COLOR); // both markers ride along
         const pipe::PipelineHandle spec = handleFor(cache, slot, mask, makeDesc);
         if (cache.isFinal(spec)) return spec;
         pipe::PipelineHandle all = pipe::INVALID_PIPELINE;
@@ -78,6 +78,7 @@ private:
         if (it == handles_.end()) {
             pipe::PipelineDesc desc = pipe::forward::withMaterialFeatures(makeDesc(), mask & MATERIAL_FEATURES_ALL);
             if (mask & FEATURE_UNION_TEXTURE_TRANSFORM) desc = pipe::forward::withTextureTransform(desc);
+            if (mask & FEATURE_UNION_VERTEX_COLOR) desc = pipe::forward::withVertexColor(desc);
             it = handles_.emplace(key, cache.request(desc)).first;
         }
         return it->second;

@@ -171,6 +171,12 @@ static void resolveVisibilityPixel(constant FrameConstants &frame, const device 
     surface.uvDy = (uv0 * bary.dy[0] + uv1 * bary.dy[1] + uv2 * bary.dy[2]) * bias;
     surface.materialIndex = instance.materialIndex;
     surface.mirrored = (instance.flags & INSTANCE_FLAG_MIRRORED) != 0;
+    if (kVertexColorOn) { // F15 closure (COLOR_0): perspective-correct barycentric blend of the three vertex colours
+        const uint ci0 = meshletVertices[m.vertexOffset + triangles[m.triangleOffset + triangle * 3]];
+        const uint ci1 = meshletVertices[m.vertexOffset + triangles[m.triangleOffset + triangle * 3 + 1]];
+        const uint ci2 = meshletVertices[m.vertexOffset + triangles[m.triangleOffset + triangle * 3 + 2]];
+        surface.vertexColor = frame.vertexColors[ci0] * weights.x + frame.vertexColors[ci1] * weights.y + frame.vertexColors[ci2] * weights.z;
+    }
     surface.volumeScale = min(length(model[0].xyz), min(length(model[1].xyz), length(model[2].xyz))); // ticket 13: the thickness hint in world units
     const float3 eye = float3(frame.cameraPosition[0], frame.cameraPosition[1], frame.cameraPosition[2]);
     surface.frontFacing = dot(cross(w1.xyz - w0.xyz, w2.xyz - w0.xyz), eye - surface.worldPos) > 0;
@@ -489,6 +495,12 @@ kernel void material_lighting_guides(
     surface.uvDy = (uv0 * bary.dy[0] + uv1 * bary.dy[1] + uv2 * bary.dy[2]) * bias;
     surface.materialIndex = instance.materialIndex;
     surface.mirrored = (instance.flags & INSTANCE_FLAG_MIRRORED) != 0;
+    if (kVertexColorOn) { // F15 closure (COLOR_0): perspective-correct barycentric blend of the three vertex colours
+        const uint ci0 = meshletVertices[m.vertexOffset + triangles[m.triangleOffset + triangle * 3]];
+        const uint ci1 = meshletVertices[m.vertexOffset + triangles[m.triangleOffset + triangle * 3 + 1]];
+        const uint ci2 = meshletVertices[m.vertexOffset + triangles[m.triangleOffset + triangle * 3 + 2]];
+        surface.vertexColor = frame.vertexColors[ci0] * weights.x + frame.vertexColors[ci1] * weights.y + frame.vertexColors[ci2] * weights.z;
+    }
     surface.volumeScale = min(length(model[0].xyz), min(length(model[1].xyz), length(model[2].xyz))); // ticket 13: the thickness hint in world units
     const float3 eye = float3(frame.cameraPosition[0], frame.cameraPosition[1], frame.cameraPosition[2]);
     surface.frontFacing = dot(cross(w1.xyz - w0.xyz, w2.xyz - w0.xyz), eye - surface.worldPos) > 0;

@@ -110,6 +110,47 @@ PipelineDesc withTextureTransform(const PipelineDesc& desc) {
     return out;
 }
 
+u16 vertexColorConstantIndex() { return gen::kVertexColorConstantIndex; }
+
+namespace {
+// The entry points that have a vertex-colour twin (shaders/forward_plain.inc, forward_surface.inc, meshlet.metal): their stage interface carries the
+// colour only in the twin, so no function-constant interface member is needed (metal-tt cannot lower one in a constant-free descriptor).  A twin is only
+// used for a consistent pair: the indexed vertex stages with their fragments, or the visibility mesh stage with the alpha tests.  The meshlet FORWARD
+// pipeline (mesh stage + forward_fs) has no twin: it keeps its entry points (and ignores the colour stream: declared).
+void applyVertexColorTwins(PipelineDesc& out) {
+    const std::string vertexStage = out.functions[0];
+    const bool indexed = vertexStage == "forward_vs" || vertexStage == "forward_surface_vs";
+    const bool visibility = out.functions[1] == "visibility_mesh";
+    static const char* const suffixed[] = {"forward_vs", "forward_fs", "forward_surface_vs", "forward_shadow_receiver_fs", "forward_shadow_receiver_tt_fs",
+                                           "forward_surface_fs", "forward_surface_lit_fs", "forward_di_receiver_fs", "forward_di_receiver_guide_fs",
+                                           "forward_di_receiver_guide_norog_fs"};
+    static const char* const alpha[] = {"visibility_alpha_fs", "visibility_alpha_lit_fs", "visibility_alpha_tt_fs", "visibility_alpha_lit_tt_fs"};
+    for (auto& f : out.functions) {
+        if (indexed)
+            for (const char* name : suffixed)
+                if (f == name) f += "_vc";
+        if (visibility) {
+            if (f == "visibility_mesh") f = "visibility_mesh_vc";
+            for (const char* name : alpha)
+                if (f == name) f = f.substr(0, f.size() - 3) + "_vc_fs";
+        }
+    }
+}
+} // namespace
+
+PipelineDesc withVertexColor(const PipelineDesc& desc) {
+    PipelineDesc out = desc;
+    applyVertexColorTwins(out);
+    for (u32 i = 0; i < out.constantCount; ++i) {
+        if (out.constants[i].index == gen::kVertexColorConstantIndex) {
+            out.constants[i].bits = 1u;
+            return out;
+        }
+    }
+    out.constant(gen::kVertexColorConstantIndex, ConstantType::UInt, 1u);
+    return out;
+}
+
 PipelineDesc withAllLobes(const PipelineDesc& desc) { return withMaterialFeatures(desc, MATERIAL_FEATURES_ALL); }
 
 PipelineDesc genericDesc(rg::Format color) {

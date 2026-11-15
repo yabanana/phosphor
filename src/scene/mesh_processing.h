@@ -14,6 +14,7 @@ struct GeometryStreams {
     std::vector<glm::vec3> normals;
     std::vector<glm::vec4> tangents; // xyz + handedness w
     std::vector<glm::vec2> uvs;
+    std::vector<glm::vec4> colors; // COLOR_0 as RGBA (empty = the primitive has none); carried through completeGeometry
     std::vector<u32>       indices;
 };
 

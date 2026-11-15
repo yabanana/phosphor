@@ -9,6 +9,7 @@
 using namespace metal;
 using namespace phosphor;
 #include "surface_geometry.h"
+#include "vertex_color.h"
 #include "materials/bsdf.h"
 
 constant bool kHasDirectional = (kLightTypes & 1u) != 0u;
@@ -43,6 +44,9 @@ struct SurfaceInput {
     // F15.1 (ticket 13): the instance scale along its thinnest axis (min column norm of the model matrix): KHR_materials_volume's
     // thicknessFactor is mesh-local, the lobe guide and the declared --rt off model carry the world thickness.  1 where unknown.
     float volumeScale = 1.0f;
+    // F15 closure (COLOR_0): the interpolated per-vertex colour (white where the primitive has none).  Multiplied into the base colour (and into the
+    // emission of an unlit material) only when the pipeline sets the reserved constant VERTEX_COLOR (kVertexColor, undefined => 0).
+    float4 vertexColor = float4(1.0f);
 };
 struct ShadingResult {
     // F15.1 (ticket 17): the diffuse irradiance of a volumetric-subsurface pixel (premultiplied by weight x colour, see shadeSurface) and its
@@ -727,6 +731,7 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         baseColor.a *= layerStackAlpha<TextureHandle, LayerRasterSamples>(stackE3, materials, textures, in.uv, in.uvDx, in.uvDy,
                                                                           frame.materialExtensions, m.flags, m.textureTransformIndex);
     }
+    if (kVertexColor != 0u) baseColor *= in.vertexColor; // glTF: base colour = factor x texture x COLOR_0 (alpha included)
     ShadingResult out{};
     out.alpha = baseColor.a;
     if (alphaTest && baseColor.a < m.alphaCutoff)
@@ -1220,9 +1225,13 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     const float3 emission = emissionFactor * emissionTexel * coatAtt;
 
     color += emission;
+    // KHR_materials_unlit shows base colour x COLOR_0 (lowerUnlit turned the base colour into this emission): the colour joins it here.
+    const bool unlitColor = kVertexColor != 0u && (m.flags & MATERIAL_FLAG_UNLIT) != 0u;
+    if (unlitColor) color += emission * (in.vertexColor.rgb - 1.0f);
 
     out.color = color;
     out.emission = emission;
+    if (unlitColor) out.emission = emission * in.vertexColor.rgb;
     out.normal = N;
     out.baseColor = baseColor.rgb;
     out.diffuseAlbedo = baseColor.rgb * (1.0f - metallic) * envDiffuse + thinWeight;

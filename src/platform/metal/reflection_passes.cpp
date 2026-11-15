@@ -213,7 +213,7 @@ struct ReflectionPasses::Impl {
         params={};std::memcpy(params.viewProjection,f.constants.viewProjection,64);const auto inverse=glm::inverse(glm::make_mat4(f.constants.viewProjection));std::memcpy(params.inverseViewProjection,glm::value_ptr(inverse),64);
         std::memcpy(params.view,f.constants.view,64);std::memcpy(params.cameraPosition,f.constants.cameraPosition,16);
         params.width=f.width;params.height=f.height;params.frameIndex=u32(f.index);params.maxDistance=settings.maxDistance;params.ssrThickness=settings.ssrThickness;
-        params.rtRoughnessLow=settings.rtRoughnessLow;params.rtRoughnessHigh=settings.rtRoughnessHigh;params.materialExtensions=scene.materialExtensionsAddress();params.slotCount=store.slotCapacity();params.meshCount=u32(geometry.size());params.materialCount=u32(store.materials().size());params.lightCount=f.constants.lightCount;
+        params.rtRoughnessLow=settings.rtRoughnessLow;params.rtRoughnessHigh=settings.rtRoughnessHigh;params.materialExtensions=scene.materialExtensionsAddress();params.vertexColors=scene.vertexColorsAddress();params.slotCount=store.slotCapacity();params.meshCount=u32(geometry.size());params.materialCount=u32(store.materials().size());params.lightCount=f.constants.lightCount;
         params.ssrSteps=settings.ssrSteps;params.ssrBinarySteps=settings.ssrBinarySteps;params.probeCount=1;params.seed=options.lightingSeed;params.maxProbeMip=ProbeMips-1;
         for(u32 i=0;i<3;++i)params.environment[i]=environment[i];params.regularizationScale=options.reflectionRegularizationScale;params.ssrRoughSteps=options.ssrRoughSteps;
         // The analytic probe is a fixed gradient, not the declared environment:

@@ -168,7 +168,11 @@ public:
     /// shading pipelines compile the transform (reserved constant TEXTURE_TRANSFORM); false for Sponza and every featureless scene.
     [[nodiscard]] bool textureTransformInUse() const;
     /// featureUnion() with FEATURE_UNION_TEXTURE_TRANSFORM or-ed in when textureTransformInUse(): what FeaturePipelines::serve takes.
-    [[nodiscard]] u32 pipelineFeatureUnion() const { return featureUnion() | (textureTransformInUse() ? FEATURE_UNION_TEXTURE_TRANSFORM : 0u); }
+    [[nodiscard]] u32 pipelineFeatureUnion() const {
+        return featureUnion() | (textureTransformInUse() ? FEATURE_UNION_TEXTURE_TRANSFORM : 0u) | (vertexColorInUse() ? FEATURE_UNION_VERTEX_COLOR : 0u);
+    }
+    /// F15 closure (COLOR_0): the synced GpuScene has a per-vertex colour stream.
+    [[nodiscard]] bool vertexColorInUse() const;
     /// F15.1 (ticket 17): a live material carries the subsurface feature in VOLUMETRIC mode (record 2 mode 1) with a weight above 0 (or a
     /// weight texture): the scene needs the diffuse-irradiance target and the diffusion pass.
     [[nodiscard]] bool volumetricSubsurface() const;

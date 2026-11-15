@@ -119,6 +119,7 @@ class VisibilityRenderer {
     MeshRenderer &mesh_;
     // F15.1: the pipelines the frame encodes with (the scene's feature union applied by prepareFrame).
     FeaturePipelines features_;
+    bool vertexColor_ = false;      // F15 closure (COLOR_0): the scene has a vertex colour stream (resolve kernels read it)
     bool textureTransform_ = false; // F15.1 (ticket 22): the scene has per-slot texture transforms (bin pipelines compile them)
     std::array<pipe::PipelineHandle, VISIBILITY_CLASSES> servedResolve_{};
     pipe::PipelineHandle servedGeneric_ = pipe::INVALID_PIPELINE, servedTile_ = pipe::INVALID_PIPELINE,

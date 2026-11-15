@@ -12,7 +12,8 @@ MeshHandle GpuScene::uploadMesh(
     const std::vector<glm::vec3>& normals,
     const std::vector<glm::vec4>& tangents,
     const std::vector<glm::vec2>& uvs,
-    const std::vector<u32>& indices) {
+    const std::vector<u32>& indices,
+    const std::vector<glm::vec4>& colors) {
 
     assert(!positions.empty());
     assert(indices.size() % 3 == 0);
@@ -29,6 +30,13 @@ MeshHandle GpuScene::uploadMesh(
     const u32 meshletTriOffset    = static_cast<u32>(meshletTriangles_.size());
 
     vertices_.reserve(vertices_.size() + vertexCount);
+    // COLOR_0: the stream appears with the first coloured mesh (earlier vertices become white) and then stays parallel to vertices_.
+    const bool coloured = colors.size() == vertexCount && !colors.empty();
+    if (coloured || !vertexColors_.empty()) {
+        if (vertexColors_.empty()) vertexColors_.assign(vertices_.size(), glm::vec4(1.0f));
+        if (coloured) vertexColors_.insert(vertexColors_.end(), colors.begin(), colors.end());
+        else vertexColors_.insert(vertexColors_.end(), vertexCount, glm::vec4(1.0f));
+    }
     for (size_t i = 0; i < vertexCount; ++i) {
         GPUVertex v{};
         v.px = positions[i].x;
@@ -210,6 +218,7 @@ bool GpuScene::setMaterialDescription(u32 index, const MaterialDescription& auth
 
 void GpuScene::clear() {
     vertices_.clear();
+    vertexColors_.clear();
     indices_.clear();
     meshlets_.clear();
     meshletVertices_.clear();

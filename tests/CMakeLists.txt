@@ -20,6 +20,7 @@ add_executable(phosphor_tests
     test_frame_trace.cpp
     test_gltf_loader.cpp
     test_gltf_unlit_lights.cpp
+    test_gltf_vertex_colors.cpp
     test_material_classes.cpp
     test_material_description.cpp
     test_gltf_materials.cpp

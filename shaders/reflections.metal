@@ -38,8 +38,11 @@ inline bool reflectionMaterial(GPURtHit hit,float3 point,float3 geometric,float3
         const float handedL=(a.tw*bary.x+b.tw*bary.y+c.tw*bary.z)*((instance.flags&INSTANCE_FLAG_MIRRORED)?-1.0f:1.0f);
         n=normalize(tu*layered.tn.x+cross(nShade,tu)*handedL*layered.tn.y+nShade*layered.tn.z);}else n=nShade;}
     float3 albedo=float3(m.baseColor[0],m.baseColor[1],m.baseColor[2]);if(m.baseColorTex!=INVALID_TEXTURE_INDEX)albedo*=float3(half3(textures[m.baseColorTex].tex.sample(kGiMaterialSampler,texXfSlotUv(p.materialExtensions,m.flags,m.textureTransformIndex,TT_SLOT_BASE_COLOR,uv),level(0)).rgb));
+    // F15 closure (COLOR_0): base colour = factor x texture x vertex colour (RT hit surface); an unlit material shows it through its emission.
+    float4 vertexColor=float4(1.0f);if(p.vertexColors!=nullptr){vertexColor=p.vertexColors[mesh.vertexOffset+indices[base]]*bary.x+p.vertexColors[mesh.vertexOffset+indices[base+1]]*bary.y+p.vertexColors[mesh.vertexOffset+indices[base+2]]*bary.z;albedo*=vertexColor.rgb;}
     float rough=m.roughness,metal=m.metallic;if(m.metallicRoughnessTex!=INVALID_TEXTURE_INDEX){half4 mr=half4(textures[m.metallicRoughnessTex].tex.sample(kGiMaterialSampler,texXfSlotUv(p.materialExtensions,m.flags,m.textureTransformIndex,TT_SLOT_METAL_ROUGH,uv),level(0)));rough*=float(mr.g);metal*=float(mr.b);}
     emission=float3(m.emissive[0],m.emissive[1],m.emissive[2]);if(m.emissiveTex!=INVALID_TEXTURE_INDEX)emission*=float3(half3(textures[m.emissiveTex].tex.sample(kGiMaterialSampler,texXfSlotUv(p.materialExtensions,m.flags,m.textureTransformIndex,TT_SLOT_EMISSIVE,uv),level(0)).rgb));if(stack){albedo=layered.baseColor;rough=layered.roughness;metal=layered.metallic;emission+=layered.emission;}
+    if(p.vertexColors!=nullptr&&(m.flags&MATERIAL_FLAG_UNLIT)!=0u)emission*=vertexColor.rgb;
     surface={};for(uint i=0;i<3;++i){surface.position[i]=point[i];surface.geometricNormal[i]=geometric[i];surface.shadingNormal[i]=n[i];surface.albedo[i]=albedo[i];surface.viewDirection[i]=outgoing[i];}
     surface.roughness=clamp(rough,.04f,1.0f);surface.metallic=saturate(metal);surface.instanceSlot=hit.slot;surface.instanceGeneration=hit.generation;surface.valid=1;
     const bool finite=all(isfinite(n))&&all(isfinite(albedo))&&all(isfinite(emission));if(!finite)numericError=true;return finite;

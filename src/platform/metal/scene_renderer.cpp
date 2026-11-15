@@ -160,7 +160,7 @@ MTL::Buffer* SceneRenderer::createPrivateBuffer(const void* data, size_t size, c
 }
 
 void SceneRenderer::releaseGeometry() {
-    for (MTL::Buffer** b : {&vertexBuffer_, &indexBuffer_, &meshBuffer_}) {
+    for (MTL::Buffer** b : {&vertexBuffer_, &vertexColorBuffer_, &indexBuffer_, &meshBuffer_}) {
         context_.memory().release(*b, MemoryCategory::Geometry);
         *b = nullptr;
     }
@@ -177,6 +177,8 @@ void SceneRenderer::syncGeometry(const GpuScene& scene) {
 
     vertexBuffer_ = createPrivateBuffer(scene.vertices().data(),
                                         scene.vertices().size() * sizeof(GPUVertex), "Vertices");
+    if (scene.hasVertexColors())
+        vertexColorBuffer_ = createPrivateBuffer(scene.vertexColors().data(), scene.vertexColors().size() * sizeof(glm::vec4), "Vertex colours");
     indexBuffer_  = createPrivateBuffer(scene.indices().data(),
                                         scene.indices().size() * sizeof(u32), "Indices");
     meshBuffer_   = createPrivateBuffer(scene.meshInfos().data(),
@@ -218,6 +220,7 @@ u64 SceneRenderer::prepareFrame(const SceneStore& store, std::span<const GPULigh
     // F15.1: the extension buffer may have been (re)allocated by stageFrame above.
     FrameConstants frameConstantsData = constants;
     frameConstantsData.materialExtensions = materialExtensionsAddress();
+    frameConstantsData.vertexColors = vertexColorsAddress(); // F15 closure (COLOR_0): 0 without a stream
     const MTL::GPUAddress frameConstants = put(&frameConstantsData, sizeof(frameConstantsData));
     GPULight noLight{};
     const MTL::GPUAddress lightsAddress =

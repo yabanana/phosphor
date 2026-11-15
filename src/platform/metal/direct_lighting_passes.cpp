@@ -119,7 +119,7 @@ struct DirectLightingPasses::Impl {
         reserveGuide(s.featureUnion(),u64(f.backingWidth)*f.backingHeight);
         // F15.1 (ticket 22): both producers sample material textures: a scene with per-slot texture transforms compiles them in
         // (the marker rides on the mask; featureUnion stays the lobe union that decides the guide).
-        const u32 shadeUnion=featureUnion|(s.textureTransformInUse()?FEATURE_UNION_TEXTURE_TRANSFORM:0u);
+        const u32 shadeUnion=featureUnion|(s.textureTransformInUse()?FEATURE_UNION_TEXTURE_TRANSFORM:0u)|(s.vertexColorInUse()?FEATURE_UNION_VERTEX_COLOR:0u);
         guideServed=features.serve(p,200,kernels[Guide],shadeUnion,[&]{return lighting::kernel("material_lighting_guides");});
         receiverServed=features.serve(p,201,receiver,shadeUnion,[&]{return receiverDesc(options.debugLobeGuideNoRog?"forward_di_receiver_guide_norog_fs":"forward_di_receiver_guide_fs");});
         {static const char* diNames[]={"restir_di_candidates_lobe","restir_di_temporal_lobe","restir_di_spatial_lobe"};

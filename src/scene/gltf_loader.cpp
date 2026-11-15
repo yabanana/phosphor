@@ -54,6 +54,42 @@ static std::vector<T> readAccessor(const tinygltf::Model& model, int accessorIdx
     return result;
 }
 
+/// COLOR_0 as RGBA floats: VEC3 (alpha 1) or VEC4; float, or normalised unsigned byte / short (the only integer types the specification allows).
+/// Empty when the accessor is not a valid colour attribute (the caller warns and ignores it).
+static std::vector<glm::vec4> readColor0(const tinygltf::Model& model, int accessorIdx, std::string& problem) {
+    if (accessorIdx < 0 || accessorIdx >= static_cast<int>(model.accessors.size())) { problem = "accessor index out of range"; return {}; }
+    const auto& accessor = model.accessors[static_cast<size_t>(accessorIdx)];
+    const int components = accessor.type == TINYGLTF_TYPE_VEC3 ? 3 : accessor.type == TINYGLTF_TYPE_VEC4 ? 4 : 0;
+    if (components == 0) { problem = "COLOR_0 must be VEC3 or VEC4"; return {}; }
+    const int ct = accessor.componentType;
+    size_t size = 0;
+    if (ct == TINYGLTF_COMPONENT_TYPE_FLOAT) size = 4;
+    else if (ct == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE) size = 1;
+    else if (ct == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) size = 2;
+    else { problem = "COLOR_0 component type must be float, unsigned byte or unsigned short"; return {}; }
+    if (accessor.bufferView < 0 || accessor.bufferView >= static_cast<int>(model.bufferViews.size())) { problem = "COLOR_0 has no buffer view"; return {}; }
+    const auto& view = model.bufferViews[static_cast<size_t>(accessor.bufferView)];
+    const auto& buffer = model.buffers[static_cast<size_t>(view.buffer)];
+    const size_t stride = view.byteStride ? view.byteStride : size * static_cast<size_t>(components);
+    const size_t first = view.byteOffset + accessor.byteOffset;
+    if (accessor.count == 0 || first + (accessor.count - 1) * stride + size * static_cast<size_t>(components) > buffer.data.size()) {
+        problem = "COLOR_0 reads outside its buffer";
+        return {};
+    }
+    std::vector<glm::vec4> out(accessor.count, glm::vec4(1.0f));
+    for (size_t i = 0; i < accessor.count; ++i) {
+        const u8* at = buffer.data.data() + first + i * stride;
+        for (int c = 0; c < components; ++c) {
+            float value;
+            if (ct == TINYGLTF_COMPONENT_TYPE_FLOAT) { std::memcpy(&value, at + 4 * c, 4); }
+            else if (ct == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE) value = static_cast<float>(at[c]) / 255.0f;
+            else { u16 s; std::memcpy(&s, at + 2 * c, 2); value = static_cast<float>(s) / 65535.0f; }
+            out[i][c] = value;
+        }
+    }
+    return out;
+}
+
 /// Build a glm::mat4 from a glTF node's TRS or matrix fields.
 static glm::mat4 nodeTransform(const tinygltf::Node& node) {
     if (node.matrix.size() == 16) {
@@ -339,6 +375,15 @@ MeshHandle GltfLoader::processPrimitive(const tinygltf::Model& model,
         hasUVs = geom.uvs.size() == vertexCount;
     }
     if (!hasUVs) geom.uvs.assign(vertexCount, glm::vec2{0.0f});
+    // COLOR_0 (F15 closure): base colour = factor x texture x COLOR_0.  Only COLOR_0 exists in the engine (COLOR_1... are ignored, like extra UV sets).
+    if (auto it = prim.attributes.find("COLOR_0"); it != prim.attributes.end()) {
+        std::string problem;
+        geom.colors = readColor0(model, it->second, problem);
+        if (geom.colors.size() != vertexCount) {
+            LOG_WARN("Mesh '%s': COLOR_0 ignored (%s)", mesh.name.c_str(), problem.empty() ? "vertex count differs from POSITION" : problem.c_str());
+            geom.colors.clear();
+        }
+    }
 
     // KHR_texture_transform and texCoord (F15.1 ticket 22).  The engine has ONE UV stream per mesh (UV0), so the UV set that every
     // texture of the primitive's material samples (glTF texCoord, usually 0) is copied into UV0 when it is another one; a material
@@ -417,7 +462,7 @@ MeshHandle GltfLoader::processPrimitive(const tinygltf::Model& model,
         return INVALID_MESH_HANDLE;
     }
 
-    MeshHandle handle = gpuScene_.uploadMesh(geom.positions, geom.normals, geom.tangents, geom.uvs, geom.indices);
+    MeshHandle handle = gpuScene_.uploadMesh(geom.positions, geom.normals, geom.tangents, geom.uvs, geom.indices, geom.colors);
     meshCache_[key] = handle;
     return handle;
 }
