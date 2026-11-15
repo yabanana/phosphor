@@ -17,6 +17,13 @@ constant uint FC_RESOLVE_CLASS [[function_constant(21)]];
 constant uint kResolveClass = is_function_constant_defined(FC_RESOLVE_CLASS) ? FC_RESOLVE_CLASS : 4u;
 // F15.1 (ticket 17): the volumetric-subsurface resolve (reserved constant SSS_OUTPUT, variants.def): the diffuse irradiance goes to its own target.
 constant bool kSssWrite = kSssOutput != 0u;
+// F15.1 (ticket 17, RT tier): SSS_OUTPUT == 2 = the RT random walk consumes the target: colour (rgb) and weight (fraction of the alpha code).
+constant bool kSssWalk = kSssOutput == 2u;
+// Alpha of the diffuse-irradiance target from ShadingResult::sssMaterial: material index + 1 (bits 0-19), in RT walk mode the weight of the walk
+// in bits 20-29 (10 bits): code = material + 0.49 x weight, decoded by subsurface_walk.metal (material = floor(code)).
+inline float sssCodeOf(uint packed) {
+    return kSssWalk ? float(packed & 0xFFFFFu) + 0.49f * (float(packed >> 20) * (1.0f / 1023.0f)) : float(packed);
+}
 struct TextureHandle {
     texture2d<float> tex;
 };
@@ -1163,12 +1170,24 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         // F15.1 (ticket 17): the diffuse of the pixel (the resolve's lights + ambient, base colour) is stripped from the colour; weight x colour x the same
         // unit-albedo irradiance goes to the target, where the diffusion profile spreads it (and the recombination adds it back).
         // The ambient diffuse joins only where the resolve owns it (an external composite adds its own, not diffused: declared).
+        const float3 sssLights = sssUnit; // the lights' share of the diffuse irradiance, before the ambient term joins (RT walk mode)
+        uint weightBits = 0u;
         if (!externalDiffuse)
             sssUnit += useGI ? indirectIrradiance * (1.0f - metallic) * envDiffuse / M_PI_F * (physicalGI ? 1.0f : occlusion)
                              : (physicalGI ? environment : hemisphere(N)) * (1.0f - metallic) * envDiffuse * occlusion;
-        color = max(color - thin.weight * baseColor.rgb * sssUnit, float3(0.0f));
-        out.sssIrradiance = thin.weight * thin.color * sssUnit;
-        out.sssMaterial = in.materialIndex + 1u;
+        if (kSssWalk) {
+            // RT walk tier: the lights' diffuse (sssLights) is replaced by the walk; the ambient stays in the colour (not diffused: declared).
+            // The target carries the subsurface colour and the weight (the walk reads the lights itself).
+            color = max(color - thin.weight * baseColor.rgb * sssLights, float3(0.0f));
+            out.sssIrradiance = thin.color;
+            // a metallic texel has no diffuse substrate (the stripped lights term carries the same factor); the weight rides in the upper bits of
+            // sssMaterial (ShadingResult keeps the layout of the screen-space tier): 10 bits, sssCodeOf unpacks it
+            weightBits = uint(saturate(thin.weight * (1.0f - metallic)) * 1023.0f + 0.5f);
+        } else {
+            color = max(color - thin.weight * baseColor.rgb * sssUnit, float3(0.0f));
+            out.sssIrradiance = thin.weight * thin.color * sssUnit;
+        }
+        out.sssMaterial = (in.materialIndex + 1u) | (weightBits << 20);
     }
     if(!externalDiffuse && sheenOn)color += sheenEnvironment * coatAtt * (useGI ? (physicalGI?1.0f:occlusion) : occlusion);
     if(!omitSpecularAmbient)color += ambientSpecular * occlusion;

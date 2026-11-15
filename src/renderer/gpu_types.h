@@ -329,6 +329,24 @@ struct GPUSubsurfaceParams {
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUSubsurfaceParams) == 32, "GPUSubsurfaceParams layout");
 
+/// F15.1 (ticket 17/18, RT tier): parameters of the subsurface random-walk kernel (shaders/subsurface_walk.metal, --subsurface-mode rt-walk).
+/// flags: SSS_WALK_SHADOW_RAYS = the lights are occluded by a shadow ray from each exit point of the walk; SSS_WALK_NO_LOCAL = point and spot
+/// lights are not lit by the walk (the direct-lighting path owns them); SSS_WALK_NO_LIGHTS = negative control: the walk lights nothing.
+/// samples = walks per pixel and frame, maxSteps = hard bound of the events (free flights and boundary hits) of one walk.
+/// The single-scatter albedo table is the buffer of renderer/subsurface_walk_table.h (kSubsurfaceTableData).
+PHOSPHOR_GPU_CONSTANT u32 SSS_WALK_SHADOW_RAYS = 1u;
+PHOSPHOR_GPU_CONSTANT u32 SSS_WALK_NO_LOCAL    = 2u;
+PHOSPHOR_GPU_CONSTANT u32 SSS_WALK_NO_LIGHTS   = 4u;
+struct GPUSubsurfaceWalkParams {
+    u32   width, height;               // the rendered (logical) image
+    u32   outputWidth, outputHeight;   // the attachments
+    float tanHalfFovX, tanHalfFovY;
+    u32   slotCount, meshCount;
+    u32   samples, maxSteps, frameIndex, flags;
+    u32   lightCount, materialCount, pad0, pad1;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUSubsurfaceWalkParams) == 64, "GPUSubsurfaceWalkParams layout");
+
 struct GPUMeshInfo {
     u32 meshletCount;
     u32 meshletOffset;     // into the global meshlet buffer

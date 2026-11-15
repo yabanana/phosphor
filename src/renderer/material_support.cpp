@@ -126,7 +126,8 @@ const MaterialSupportTable& currentSupportTable() {
         t.subsurfaceVolumetric.level    = SupportLevel::Approximated;
         t.subsurfaceVolumetric.approximation =
             "screen_space_burley_diffusion;resolve_lights_only_di_gi_composite_terms_not_diffused;no_back_lit_translucency;"
-            "profile_shape_ignores_textures;anisotropy_by_similarity_relation;not_composed_with_other_diffuse_lobes";
+            "profile_shape_ignores_textures;anisotropy_by_similarity_relation;not_composed_with_other_diffuse_lobes;"
+            "optional_rt_walk_tier_see_the_subsurface_report_object";
         // F15.1 (ticket 13): KHR_materials_transmission + KHR_materials_volume, ray-traced (ADR-0004).  The diffuse base of the visible surface is
         // mixed by 1 - t in every primary path; the reflected lobes keep DI, RT reflections and the denoiser.  With --rt on the transport draws
         // ONE Fresnel-chosen sample per pixel: reflection (today's lobes) or refraction through a GGX microfacet (rough BTDF, separable Smith),

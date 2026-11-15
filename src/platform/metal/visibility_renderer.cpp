@@ -4,6 +4,10 @@
 #include "platform/metal/mesh_renderer.h"
 #include "platform/metal/gpu_memory.h"
 #include "platform/metal/upload_ring.h"
+#include "platform/metal/acceleration_structures.h"
+#include "platform/metal/rt_consumer.h"
+#include "platform/metal/lighting_dispatch.h"
+#include "renderer/subsurface_walk_table.h"
 #include "pipeline/forward_variants.h"
 #include "pipeline/material_classes.generated.h"
 #include "core/log.h"
@@ -77,7 +81,7 @@ VisibilityRenderer::VisibilityRenderer(MetalContext &c, PipelineCache &p, SceneR
     fallback_ = p.request(fallbackDesc());
     // Ticket 17: the base of the fallback while the specialised one compiles, for a scene whose pass has the diffuse-irradiance attachment
     // (SSS_OUTPUT without the feature union: it writes the target as 0).  Requested at startup like every base pipeline (archive entry).
-    fallbackSss_ = p.request(fallbackDesc(true));
+    fallbackSss_ = p.request(fallbackDesc(1u));
     sssClear_ = p.request(compute("subsurface_clear"));
     sssDiffuse_ = p.request(compute("subsurface_diffuse"));
     for (auto &table : tables_) {
@@ -93,14 +97,15 @@ VisibilityRenderer::VisibilityRenderer(MetalContext &c, PipelineCache &p, SceneR
 }
 pipe::PipelineHandle VisibilityRenderer::binPipeline(u32 mask, bool overflow) {
     // Bin pipelines are keyed by what they compile, not by the scene: the class table of the generator names them.
-    const u64 key = u64(mask) | (u64(overflow) << 16) | (u64(subsurface_) << 17) | (u64(textureTransform_) << 18) | (u64(dropLobes_) << 20);
+    // sssOutput() is 0..2 (bits 17-18); the texture-transform bit moved to 19 at integration (it collided with the SSS walk value).
+    const u64 key = u64(mask) | (u64(overflow) << 16) | (u64(sssOutput()) << 17) | (u64(textureTransform_) << 19) | (u64(dropLobes_) << 20);
     auto it = binHandles_.find(key);
     if (it == binHandles_.end()) {
         const auto describe = [&](const char* kernel) {
             auto d = compute(kernel);
             const u32 compiled = overflow ? MATERIAL_FEATURES_ALL : (mask & ~dropLobes_); // dropLobes_: negative control
             if (compiled != 0u) d.constant(pipe::matclass::gen::kMaterialFeaturesConstantIndex, pipe::ConstantType::UInt, compiled);
-            if (subsurface_) d.constant(kSssConstant, pipe::ConstantType::UInt, 1u);
+            if (subsurface_) d.constant(kSssConstant, pipe::ConstantType::UInt, sssOutput());
             if (textureTransform_) d = pipe::forward::withTextureTransform(d); // F15.1 (ticket 22)
             d.constant(pipe::matclass::gen::kResolveBinConstantIndex, pipe::ConstantType::UInt,
                        overflow ? VISIBILITY_BIN_OVERFLOW : (VISIBILITY_BIN_CLASS | mask));
@@ -113,16 +118,16 @@ pipe::PipelineHandle VisibilityRenderer::binPipeline(u32 mask, bool overflow) {
     }
     return it->second;
 }
-pipe::PipelineDesc VisibilityRenderer::fallbackDesc(bool sss) const {
+pipe::PipelineDesc VisibilityRenderer::fallbackDesc(u32 sss) const {
     pipe::PipelineDesc d = pipe::forward::genericDesc(resolveFormat(0, lighting_));
     d.label = "Visibility indexed overflow fallback";
     d.functions[0] = "forward_surface_vs";
     d.functions[1] = lighting_ ? "forward_surface_lit_fs" : "forward_surface_fs";
     for (u32 i = 0; i < kFormats.size(); ++i)
         d.output(i, resolveFormat(i, lighting_));
-    if (sss) { // F15.1 (ticket 17): the diffuse-irradiance attachment of volumetric subsurface
+    if (sss != 0u) { // F15.1 (ticket 17): the diffuse-irradiance attachment of volumetric subsurface (SSS_OUTPUT 1 diffusion, 2 RT walk)
         d.output(kFormats.size(), rg::Format::RGBA32Float);
-        d.constant(kSssConstant, pipe::ConstantType::UInt, 1u);
+        d.constant(kSssConstant, pipe::ConstantType::UInt, sss);
     }
     return d;
 }
@@ -200,9 +205,11 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
         // F15.2: a scene with features bins per feature class (the legacy normal/emission classes only serve scenes without).
         const bool featureBinsWanted = binning_ && !forceAllLobes_ && mask != 0u;
         subsurface_ = subsurfaceAllowed_ && !tileResolve_ && mask != 0u && store.volumetricSubsurface();
-        const u32 so = subsurface_ ? 50u : 0u;
+        // Ticket 17/18: the optional RT walk replaces the diffusion when the acceleration structures exist and its kernel is resident.
+        walk_ = subsurface_ && walkWanted_ && walkRt_ && walkRt_->active() && sssWalk_ != pipe::INVALID_PIPELINE && pipelines_.isFinal(sssWalk_);
+        const u32 so = walk_ ? 100u : (subsurface_ ? 50u : 0u);
         const auto sssConstant = [&](pipe::PipelineDesc d) {
-            if (subsurface_) d.constant(kSssConstant, pipe::ConstantType::UInt, 1u);
+            if (subsurface_) d.constant(kSssConstant, pipe::ConstantType::UInt, sssOutput());
             return d;
         };
         const char *kernel = lighting_ ? "visibility_lit_resolve" : "visibility_resolve";
@@ -226,7 +233,7 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
             return d;
         });
         servedFallback_ = features_.serve(pipelines_, 112 + so, subsurface_ ? fallbackSss_ : fallback_, shadeMask,
-                                          [&] { return fallbackDesc(subsurface_); });
+                                          [&] { return fallbackDesc(sssOutput()); });
     }
     featureBins_ = binning_ && !forceAllLobes_ && store.featureUnion() != 0u;
     if (featureBins_) {
@@ -312,6 +319,32 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
         std::memcpy(su.cpu, &sp, sizeof(sp));
         sssParamsAddress_ = su.gpu;
     }
+    if (walk_) {
+        GPUSubsurfaceWalkParams wp{};
+        wp.width = width; wp.height = height; wp.outputWidth = outputWidth; wp.outputHeight = outputHeight;
+        wp.tanHalfFovX = sssTanX_; wp.tanHalfFovY = sssTanY_;
+        wp.slotCount = store.slotCapacity(); wp.meshCount = static_cast<u32>(walkRt_->meshes().size());
+        wp.samples = walkSamples_; wp.maxSteps = walkSteps_; wp.frameIndex = constants.frameIndex; wp.flags = walkFlags_;
+        wp.lightCount = constants.lightCount; wp.materialCount = static_cast<u32>(store.materials().size());
+        walkParamsAddress_ = lighting::upload(context_, wp);
+        const auto table = context_.frameUploads().allocate(sizeof(kSubsurfaceTableData));
+        std::memcpy(table.cpu, kSubsurfaceTableData, sizeof(kSubsurfaceTableData));
+        walkTableAddress_ = table.gpu;
+    }
+}
+void VisibilityRenderer::setSubsurfaceWalk(AccelerationStructures *rt, u32 samples, u32 maxSteps, u32 flags) {
+    walkRt_ = rt;
+    walkWanted_ = rt != nullptr;
+    walkSamples_ = std::max(samples, 1u);
+    walkSteps_ = std::clamp(maxSteps, 1u, 8192u);
+    walkFlags_ = flags;
+    if (!walkWanted_) return;
+    // linked alpha function: the walk traces with the 16-byte lite payload (the alpha test is the same, rt_common.h)
+    sssWalk_ = pipelines_.request(lighting::kernel("subsurface_walk", true, true));
+    walkConsumer_ = std::make_unique<RtConsumer>(context_, pipelines_, *rt);
+}
+void VisibilityRenderer::prepareSubsurfaceWalk(u32 slot) {
+    if (walk_) walkConsumer_->prepare(slot, sssWalk_);
 }
 void VisibilityRenderer::prepareLighting(u32 flags, u32 sunIndex, std::array<float, 3> environment, float sunAngularRadius) {
     const GPUResolveLightingParams p{flags, sunIndex, params_.width, params_.height, {environment[0], environment[1], environment[2]}, sunAngularRadius};
@@ -545,7 +578,53 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
                                                      static_cast<MTL::Texture*>(ctx.texture(indirectBack_)));
             scene_.encodeOverlay(static_cast<MTL4::RenderCommandEncoder *>(ctx.encoder()), servedFallback_, true, lightingFallbackDepth_);
         });
-    if (subsurface_) {
+    if (subsurface_ && walk_) {
+        // F15.1 (ticket 17/18, RT tier): the random walk through the real geometry replaces the screen-space diffusion (same inputs, same
+        // output: a new colour version that every later consumer reads).
+        const TextureRef resolved = outputs_[0];
+        const TextureRef sss = sss_;
+        const TextureRef normal = outputs_[1];
+        graph.addPass(
+            "Subsurface RT walk", PassType::Compute,
+            [&](PassBuilder &b) {
+                b.read(resolved, Usage::ShaderRead, StageDispatch);
+                b.read(sss, Usage::ShaderRead, StageDispatch);
+                b.read(normal, Usage::ShaderRead, StageDispatch);
+                b.read(scene_.dataRef(), Usage::ShaderRead, StageDispatch);
+                walkRt_->declareTraceReads(b);
+                TextureRef out = b.createTexture("Subsurface linear HDR",
+                                                 {resolveFormat(0, lighting_), params_.outputWidth, params_.outputHeight});
+                sssResult_ = b.write(out, Usage::ShaderWrite, StageDispatch);
+                b.setProfileShaders("subsurface_walk");
+            },
+            [this, resolved, sss, normal](PassContext &ctx) {
+                auto *enc = static_cast<MTL4::ComputeCommandEncoder *>(ctx.encoder());
+                auto *table = tables_[6];
+                const auto r = walkRt_->traceResources(slot_);
+                table->setAddress(walkParamsAddress_, 0);
+                table->setAddress(scene_.frameConstantsAddress(), 1);
+                table->setAddress(scene_.buffers().materials()->gpuAddress(), 2);
+                walkConsumer_->bind(table, 3, 4);
+                table->setAddress(r.instances->gpuAddress(), 5);
+                table->setAddress(r.meshes->gpuAddress(), 6);
+                table->setAddress(r.vertices->gpuAddress(), 7);
+                table->setAddress(r.indices->gpuAddress(), 8);
+                table->setAddress(scene_.lightsAddress(), 9);
+                table->setAddress(walkTableAddress_, 10);
+                table->setAddress(r.textures->gpuAddress(), 11);
+                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(resolved))->gpuResourceID(), 0);
+                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(sss))->gpuResourceID(), 1);
+                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(normal))->gpuResourceID(), 2);
+                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(sssResult_))->gpuResourceID(), 3);
+                enc->setComputePipelineState(pipelines_.compute(sssWalk_));
+                enc->setArgumentTable(table);
+                enc->dispatchThreadgroups(
+                    MTL::Size::Make((params_.outputWidth + 15) / 16, (params_.outputHeight + 15) / 16, 1),
+                    MTL::Size::Make(16, 16, 1));
+                scene_.countCommands(3);
+            });
+        composedColor_ = sssResult_;
+    } else if (subsurface_) {
         // F15.1 (ticket 17): screen-space Burley diffusion of the volumetric pixels' diffuse irradiance, added to the resolved colour.
         // It is a new colour version: every later consumer reads color() (reflections, atmosphere, post, capture).
         const TextureRef resolved = outputs_[0];

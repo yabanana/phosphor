@@ -2090,7 +2090,7 @@ class VolumetricSubsurfaceRunner(unittest.TestCase):
             self.assertIn("--reflections", plan["commands"]["subsurface-volumetric-sun" if False else "subsurface-volumetric-subpixel"]["capture"])
 
     def test_every_volumetric_key_and_its_declared_controls(self):
-        keys = [k for k in check.SCENARIOS if k.startswith("subsurface-volumetric")]
+        keys = [k for k in check.SCENARIOS if k.startswith("subsurface-volumetric") and "@" not in k]  # the @rt-walk keys: RtWalkKeys below
         self.assertEqual(sorted(keys), ["subsurface-volumetric-backlit", "subsurface-volumetric-radius", "subsurface-volumetric-subpixel",
                                         "subsurface-volumetric-subpixel-off", "subsurface-volumetric-sun"])
         import f15_subsurface_reference as tool
@@ -2103,6 +2103,81 @@ class VolumetricSubsurfaceRunner(unittest.TestCase):
         self.assertEqual(check.SCENARIOS["subsurface-volumetric-radius"]["kind"], "radius-monotonic")
         self.assertEqual(check.THRESHOLDS["subsurface"]["mean"], 0.10)
         self.assertEqual(check.THRESHOLDS["subsurface"]["p95"], 0.25)
+
+
+class RtWalkKeys(unittest.TestCase):
+    """F15.1 (ticket 17/18): the keys of the optional RT tier (--subsurface-mode rt-walk)."""
+
+    def test_the_side_lit_bound_of_the_rt_tier_is_the_unchanged_decision_11_bound(self):
+        spec = check.SCENARIOS["subsurface-volumetric-sun@rt-walk"]
+        self.assertEqual(spec["kind"], "subsurface")
+        self.assertNotIn("pending", spec)  # the engine side landed: asserted green
+        self.assertEqual((check.THRESHOLDS["subsurface"]["mean"], check.THRESHOLDS["subsurface"]["p95"]), (0.10, 0.25))
+        self.assertIn("--subsurface-mode", spec["engine_args"])
+        self.assertTrue(spec["rt"])
+
+    def test_the_back_lit_bound_is_twice_the_side_lit_bound_and_fixed_by_the_plan(self):
+        back = check.THRESHOLDS["subsurface_backlit"]
+        side = check.THRESHOLDS["subsurface"]
+        self.assertEqual((back["mean"], back["p95"]), (2 * side["mean"], 2 * side["p95"]))
+        self.assertEqual(check.SCENARIOS["subsurface-volumetric-backlit@rt-walk"]["kind"], "subsurface-backlit")
+
+    def test_every_rt_key_has_a_noise_twin_or_is_one_and_the_negative_controls_are_pending(self):
+        for name, spec in check.SCENARIOS.items():
+            if not name.startswith("subsurface-volumetric") or "@rt-walk" not in name:
+                continue
+            if name.endswith("lights-off"):
+                self.assertEqual(spec["pending"], "negative control", name)  # must FAIL
+                self.assertIn("lights-off", " ".join(spec["engine_args"]) + name)
+            elif spec["kind"] == "subsurface" or spec["kind"] == "subsurface-backlit":
+                self.assertIn(spec["noise_twin"], check.SCENARIOS, name)
+
+    def _report(self, tmp, effective, reason=""):
+        folder = pathlib.Path(tmp)
+        (folder / "report.json").write_text(json.dumps({"subsurface": {"requested": "rt-walk", "effective": effective, "fallback_reason": reason}}))
+        return folder
+
+    def test_a_walk_key_whose_capture_rendered_the_diffusion_is_a_capture_error_with_the_reason(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = self._report(tmp, "diffusion", "--rt off: the walk needs the acceleration structures")
+            for name in ("subsurface-volumetric-sun@rt-walk", "subsurface-volumetric-backlit@rt-walk", "subsurface-volumetric-radius@rt-walk",
+                         "subsurface-volumetric-rough@rt-walk", "subsurface-volumetric-sun@rt-walk-lights-off", "subsurface-volumetric-sun@rt-walk-apple9"):
+                with self.assertRaises(check.CaptureFailed) as raised:
+                    check.require_subsurface_mode(name, folder)
+                self.assertIn("--rt off", str(raised.exception))
+            check.require_subsurface_mode("subsurface-volumetric-sun@rt-walk", self._report(tmp, "rt-walk"))  # the walk really ran: accepted
+            with self.assertRaises(check.CaptureFailed):  # no report at all: cannot tell
+                check.require_subsurface_mode("subsurface-volumetric-sun@rt-walk", pathlib.Path(tmp) / "missing")
+
+    def test_the_fallback_key_asserts_the_opposite_and_a_diffusion_key_is_not_checked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            key = "subsurface-volumetric-sun@rt-walk-fallback-rt-off"
+            check.require_subsurface_mode(key, self._report(tmp, "diffusion", "--rt off"))
+            with self.assertRaises(check.CaptureFailed):
+                check.require_subsurface_mode(key, self._report(tmp, "rt-walk"))  # it must NOT have run the walk
+            self.assertIsNone(check.expected_subsurface_mode("subsurface-volumetric-sun"))
+            self.assertEqual(check.expected_subsurface_mode("subsurface-volumetric-sun@rt-walk"), "rt-walk")
+
+    def test_the_gate_is_discriminating_a_candidate_without_the_walk_fails_every_gated_piece(self):
+        import numpy as np
+        h, w = 40, 40
+        grid = np.full((h, w), -1, dtype=np.int32)
+        grid[5:35, 5:35] = 0
+        roi = np.zeros((h, w), dtype=bool)
+        roi[8:32, 8:32] = True
+        rng = np.random.default_rng(3)
+        reference = np.full((h, w, 3), 0.2, dtype=np.float32) + 0.02 * rng.standard_normal((h, w, 3)).astype(np.float32)
+        twin = np.full((h, w, 3), 0.05, dtype=np.float32)  # the deterministic remainder (specular only)
+        noisy = reference + 0.6 * rng.standard_normal((h, w, 3)).astype(np.float32)  # an unbiased but very noisy walk
+        masks = {"sphere": grid, "roi": roi}
+        spheres = [{"instance": 0, "weight": 1.0, "diffusion_regime": True, "boundary_roughness": 0.35}]
+        raw = check.evaluate_subsurface(np, noisy, reference, masks, spheres)
+        pooled = check.evaluate_subsurface(np, check.pool_noisy_term(np, noisy, twin, masks, 5) + 0.0, reference, masks, spheres)
+        self.assertFalse(raw["pass"])
+        self.assertLess(pooled["worst_mean"], raw["worst_mean"])  # pooling the noisy term averages the noise down (the mean level is kept)
+        absent = check.evaluate_subsurface(np, twin, reference, masks, spheres)  # no walk: the base remainder only
+        self.assertFalse(absent["pass"])
+        self.assertTrue(check.evaluate_subsurface(np, reference, reference, masks, spheres)["pass"])
 
 
 if __name__ == "__main__":

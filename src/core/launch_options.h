@@ -210,6 +210,12 @@ namespace phosphor {
 //                      frames (camera-cut path; 0 = only on real cuts)
 //
 //   --rt off|on        F9 BLAS/TLAS infrastructure (default off)
+//   --subsurface-mode diffusion|rt-walk  F15.1 (ticket 17/18): the volumetric-subsurface technique: the screen-space Burley diffusion
+//                      (default) or the optional ray-traced random walk (needs --rt on; otherwise the diffusion serves, logged)
+//   --subsurface-samples N  walks per pixel and frame of rt-walk (default 4)
+//   --subsurface-steps N    hard bound of the events of one walk (default 512)
+//   --subsurface-walk-shadows on|off  occlude the lights at the exits of the walk by a shadow ray (default: on with --shadows other than off)
+//   --debug-subsurface-walk-lights off  negative control: the walk lights nothing
 //   --rt-tlas-rebuild-every N  periodic TLAS rebuild, 0 = structural changes only
 //   --rt-proxy off|manifest    RT geometry source (default full geometry)
 //   --rt-proxy-manifest PATH   explicit measured manifest (needs manifest mode)
@@ -362,6 +368,13 @@ struct LaunchOptions {
     u32          meshletMaxTriangles = 0; // 0 = default (124)
     // F9: RT infrastructure is opt-in until a lighting consumer needs it.
     bool         rtEnabled = false;           // --rt off|on
+    // F15.1 (ticket 17/18): the volumetric-subsurface technique (SubsurfaceMode::RtWalk needs rtEnabled).
+    enum class SubsurfaceMode : u8 { Diffusion, RtWalk };
+    SubsurfaceMode subsurfaceMode = SubsurfaceMode::Diffusion;
+    u32          subsurfaceSamples = 4;
+    u32          subsurfaceSteps = 512;
+    int          subsurfaceWalkShadows = -1;  // -1 = follows --shadows, 0 off, 1 on
+    bool         debugSubsurfaceWalkLights = true; // false = negative control: the walk lights nothing
     u32          rtTlasRebuildEvery = 0;        // 0 = structural changes only; cadence needs engine measurements
     bool         rtProxyManifest = false;      // --rt-proxy off|manifest
     std::string  rtProxyManifestPath;          // empty = scene's default manifest, missing = full geometry

@@ -470,6 +470,23 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if (*value == "on") out.rtEnabled = true;
             else if (*value == "off") out.rtEnabled = false;
             else { error = "--rt: expected off or on"; return false; }
+        } else if (arg == "--subsurface-mode") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "diffusion") out.subsurfaceMode = LaunchOptions::SubsurfaceMode::Diffusion;
+            else if (*value == "rt-walk") out.subsurfaceMode = LaunchOptions::SubsurfaceMode::RtWalk;
+            else { error = "--subsurface-mode: expected diffusion or rt-walk"; return false; }
+        } else if (arg == "--subsurface-samples" || arg == "--subsurface-steps") {
+            u32 count = 0;
+            if (!needCount(count)) return false;
+            if (count == 0 || count > 4096) { error = std::string(arg) + ": expected 1..4096"; return false; }
+            if (arg == "--subsurface-samples") out.subsurfaceSamples = count; else out.subsurfaceSteps = count;
+        } else if (arg == "--subsurface-walk-shadows" || arg == "--debug-subsurface-walk-lights") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value != "on" && *value != "off") { error = std::string(arg) + ": expected on or off"; return false; }
+            if (arg == "--subsurface-walk-shadows") out.subsurfaceWalkShadows = *value == "on" ? 1 : 0;
+            else out.debugSubsurfaceWalkLights = *value == "on";
         } else if (arg == "--atmosphere" || arg == "--fog" || arg == "--clouds") {
             auto v=needValue();if(!v)return false;if(*v!="on"&&*v!="off"){error=std::string(arg)+": expected on or off";return false;}
             if(arg=="--atmosphere")out.atmosphere=*v=="on";else if(arg=="--fog")out.fog=*v=="on";else out.clouds=*v=="on";

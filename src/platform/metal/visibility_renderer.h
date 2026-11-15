@@ -8,6 +8,7 @@
 #include "renderer/exposure.h"
 #include "rendergraph/render_graph.h"
 #include <array>
+#include <memory>
 #include <unordered_map>
 
 namespace phosphor {
@@ -16,6 +17,8 @@ class SceneRenderer;
 class MeshRenderer;
 class SceneStore;
 class GpuScene;
+class AccelerationStructures;
+class RtConsumer;
 namespace rg {
 class PassContext;
 }
@@ -68,6 +71,15 @@ class VisibilityRenderer {
         subsurfaceAllowed_ = allowed; sssNear_ = nearPlane; sssTanX_ = tanHalfFovX; sssTanY_ = tanHalfFovY;
     }
     [[nodiscard]] bool subsurfaceActive() const { return subsurface_; }
+    /// F15.1 (ticket 17/18): the OPTIONAL RT tier of the volumetric subsurface (--subsurface-mode rt-walk).  `rt` = the acceleration structures
+    /// (null = the tier is not available: the screen-space diffusion serves, the reason is the caller's to log); `samples` walks per pixel and frame,
+    /// `maxSteps` the hard bound of one walk; `flags` = SSS_WALK_* (gpu_types.h).  Call once after construction (it requests the kernel).
+    void setSubsurfaceWalk(AccelerationStructures* rt, u32 samples, u32 maxSteps, u32 flags);
+    /// After AccelerationStructures::prepareFrame: binds the walk's intersection function table for this frame slot.
+    void prepareSubsurfaceWalk(u32 slot);
+    [[nodiscard]] bool subsurfaceWalkActive() const { return walk_; }
+    /// Graph-key value of the subsurface path: 0 none, 1 screen-space diffusion, 2 RT walk.
+    [[nodiscard]] u32 subsurfaceKey() const { return subsurface_ ? (walk_ ? 2u : 1u) : 0u; }
     void setLightingTextures(rg::TextureRef sun, rg::TextureRef direct, rg::TextureRef gi, rg::TextureRef giBack = {});
     rg::BufferRef importPoseHistory(rg::RenderGraph& graph);
     [[nodiscard]] MTL::GPUAddress paramsAddress() const { return paramsAddress_; }
@@ -88,7 +100,7 @@ class VisibilityRenderer {
 
   private:
     void bind(rg::PassContext &ctx, MTL4::ArgumentTable *table, bool withSss = false);
-    [[nodiscard]] pipe::PipelineDesc fallbackDesc(bool sss = false) const;
+    [[nodiscard]] pipe::PipelineDesc fallbackDesc(u32 sss = 0) const;
     MetalContext &context_;
     PipelineCache &pipelines_;
     SceneRenderer &scene_;
@@ -160,6 +172,14 @@ class VisibilityRenderer {
     float sssNear_ = 0.1f, sssTanX_ = 1.0f, sssTanY_ = 1.0f;
     pipe::PipelineHandle sssClear_, sssDiffuse_, fallbackSss_;
     rg::TextureRef sss_, sssResult_;
+    // Ticket 17/18: the RT walk tier (SSS_OUTPUT == 2): the kernel replaces the diffusion pass.
+    AccelerationStructures* walkRt_ = nullptr;
+    std::unique_ptr<RtConsumer> walkConsumer_;
+    pipe::PipelineHandle sssWalk_ = pipe::INVALID_PIPELINE;
+    bool walkWanted_ = false, walk_ = false;
+    u32 walkSamples_ = 4, walkSteps_ = 512, walkFlags_ = 0;
+    MTL::GPUAddress walkParamsAddress_ = 0, walkTableAddress_ = 0;
+    [[nodiscard]] u32 sssOutput() const { return subsurface_ ? (walk_ ? 2u : 1u) : 0u; }
     MTL::GPUAddress sssParamsAddress_ = 0;
     pipe::PipelineHandle clear_, classify_, generic_, present_, fallback_, tile_;
     pipe::PipelineHandle adaptivePipeline_, saveHistory_;

@@ -252,6 +252,7 @@ struct BenchReport {
     LightingReport lighting;     // F10-F12 (schema 10)
     std::string denoisedFixtureJson; // actual native fixture evidence, never phase acceptance
     std::string materialsJson;       // F15 (schema 12): support report object (supportToJson), empty = omitted
+    std::string subsurfaceJson;      // F15.1 (ticket 17/18): volumetric subsurface technique requested/effective, empty = omitted
 };
 
 /// Nearest-rank statistics of `values` (empty input gives all zeros).

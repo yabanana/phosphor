@@ -342,6 +342,17 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
             rtVisibility_ = std::make_unique<RtVisibilityChecker>(*context_, *pipelines_, *renderer_, *mesh_, *rt_);
         rtCheckRays_.reserve(512);
         rtCheckHits_.reserve(512);
+        if (visibility_ && options_.subsurfaceMode == LaunchOptions::SubsurfaceMode::RtWalk) {
+            // F15.1 (ticket 17/18): the optional RT tier of the volumetric subsurface.  The lights are occluded at the exits of the walk when
+            // shadows are on; the direct-lighting path owns the local lights then (the walk lights the directional ones only).
+            u32 flags = 0;
+            if (options_.subsurfaceWalkShadows == 1 || (options_.subsurfaceWalkShadows < 0 && options_.shadows != ShadowMode::Off)) flags |= SSS_WALK_SHADOW_RAYS;
+            if (options_.directLighting != DirectLightingMode::Legacy) flags |= SSS_WALK_NO_LOCAL;
+            if (!options_.debugSubsurfaceWalkLights) flags |= SSS_WALK_NO_LIGHTS;
+            visibility_->setSubsurfaceWalk(rt_.get(), options_.subsurfaceSamples, options_.subsurfaceSteps, flags);
+            LOG_INFO("Subsurface: RT random walk tier (%u walks per pixel, <= %u events, %s shadow rays); the screen-space diffusion serves until the scene's acceleration structures exist",
+                     options_.subsurfaceSamples, options_.subsurfaceSteps, (flags & SSS_WALK_SHADOW_RAYS) ? "with" : "without");
+        }
         rtTlasTimes_.reserve(options_.frames);
         rtProbeTimes_.reserve(options_.frames);
         rtProbeNs_.reserve(options_.frames);
@@ -831,6 +842,21 @@ void Engine::finishBenchmark() {
         break;
     }
     if(denoisedFixture_)report.denoisedFixtureJson=denoisedFixture_->reportJSON();
+    if (visibility_ && (visibility_->subsurfaceKey() != 0u || options_.subsurfaceMode != LaunchOptions::SubsurfaceMode::Diffusion)) {
+        // F15.1 (ticket 17/18): which technique rendered the volumetric subsurface (and why not the requested one).
+        const bool wantWalk = options_.subsurfaceMode == LaunchOptions::SubsurfaceMode::RtWalk;
+        const u32 key = visibility_->subsurfaceKey();
+        const char* effective = key == 2u ? "rt-walk" : key == 1u ? "diffusion" : "none";
+        const char* reason = "";
+        if (wantWalk && key != 2u) reason = !rt_ ? "--rt off: the walk needs the acceleration structures" : key == 0u ? "no volumetric subsurface in the scene" : "acceleration structures or the walk kernel not ready";
+        report.subsurfaceJson = std::string("{\"requested\": \"") + (wantWalk ? "rt-walk" : "diffusion") + "\", \"effective\": \"" + effective +
+            "\", \"fallback_reason\": \"" + reason + "\", \"samples\": " + std::to_string(options_.subsurfaceSamples) +
+            ", \"max_steps\": " + std::to_string(options_.subsurfaceSteps) + ", \"force_family_apple9\": " + (options_.forceApple9 ? "true" : "false") +
+            (key == 2u ? ", \"approximations\": \"locally_homogeneous_medium_of_the_entry_texel;boundary_ior_1_5_fixed;albedo_table_roughness_0_15_to_0_7_and_g_0_to_0_3_clamped;"
+                         "normal_maps_at_the_entry_only;ambient_gi_and_di_composite_diffuse_not_walked;di_local_lights_walked_only_by_the_resolve_path;"
+                         "analytic_lights_next_event_estimated_at_exits;not_composed_with_other_diffuse_lobes;stochastic_converges_over_frames;"
+                         "walk_bounded_by_max_steps\"" : "") + "}";
+    }
     report.gpuTiming        = timestamps_ != nullptr && timestamps_->enabled();
     report.gpuTimingUnfused = options_.gpuTimingUnfused;
     report.graph            = graphReport_;
@@ -1731,6 +1757,7 @@ bool Engine::frame(float dt) {
         rp.constants = constants;
         rp.check = rtCheckFrame;
         rt_->prepareFrame(*store_, rp);
+        if (visibility_) visibility_->prepareSubsurfaceWalk(frame.slot);
         if (rtVisibility_ && rt_->active())
             rtVisibility_->prepareFrame(frame.slot, renderWidth, renderHeight, constants);
     }
@@ -1858,7 +1885,7 @@ bool Engine::frame(float dt) {
                        shadows_?shadows_->version():0,directLighting_?directLighting_->version():0,
                        gi_?gi_->version():0,referenceSnapshot_?referenceSnapshot_->version():0,
                        linearCapture_?linearCapture_->version():0,renderWidth,renderHeight,
-                       reflections_?reflections_->version():0,denoised_?denoised_->version():0,atmosphere_?atmosphere_->version():0,reflections_&&reflections_->ready(),denoisedFixture_?denoisedFixture_->version():0,denoisedFixture_&&denoisedFixture_->ready(),visibility_&&visibility_->subsurfaceActive()};
+                       reflections_?reflections_->version():0,denoised_?denoised_->version():0,atmosphere_?atmosphere_->version():0,reflections_&&reflections_->ready(),denoisedFixture_?denoisedFixture_->version():0,denoisedFixture_&&denoisedFixture_->ready(),visibility_?visibility_->subsurfaceKey():0u};
     if (!(key == graphKey_) || !graphExecutor_->valid()) {
         frameFlags_ |= FrameGraphCompile;
         if (key.width != graphKey_.width || key.height != graphKey_.height) frameFlags_ |= FrameResize;

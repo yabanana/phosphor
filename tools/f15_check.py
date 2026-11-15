@@ -236,6 +236,9 @@ THRESHOLDS = {
     # F15.3 (ticket 17), decision 11: subsurface vs random-walk ground truth on the piece mask.
     "subsurface": {"mean": 0.10, "p95": 0.25, "floor_fraction": 0.05,
                    "metric": "relative LUMINANCE error |Y_a - Y_b| / max(Y_b, 0.05 * mean_piece(Y_b)), Rec.709 weights, per piece ROI"},
+    # F15.1 (ticket 17/18, RT tier): the back-lit bound of the ticket-18 plan: 2x the side-lit bound, fixed BEFORE the walk was compared.
+    "subsurface_backlit": {"mean": 0.20, "p95": 0.50, "floor_fraction": 0.05,
+                           "metric": "as `subsurface`; ticket 18: the back-lit fixture within 2x the side-lit bound; every piece is gated (the walk has no diffusion regime)"},
     "radius_sweep": {"tolerance": 0.01,
                      "statistic": "terminator bleed = mean Y over the geometrically unlit ROI pixels of a piece / mean Y over its lit ROI pixels"},
     "equal": {"max_relative_luminance_error": 0.002, "min_mean_luminance": 1e-3},
@@ -243,6 +246,8 @@ THRESHOLDS = {
 }
 LUMA_WEIGHTS = (0.2126, 0.7152, 0.0722)
 FRAMES, RESOLUTION = 128, "1280x720"
+WALK_FRAMES = 96                                                    # frames the rt-walk captures accumulate (4 walks per pixel each)
+WALK_ARGS = ["--subsurface-mode", "rt-walk", "--subsurface-samples", "4", "--subsurface-steps", "512"]
 ACCUMULATE = 112  # frames averaged by --capture-linear-accumulate for the stochastic transmission transport (frames 16..127).  Measured
 #                   (F15.1 ticket 13): the refraction estimator is unbiased (per-object mean ratio to Mitsuba within 0.5 %) but its per-pixel
 #                   noise at 8 samples x 32 frames is 4-8 % on rough spheres (two seeds, same tolerance as the 256-sample Mitsuba noise),
@@ -891,6 +896,57 @@ SCENARIOS = {
                                                 "colour; must equal the engine capture of the same scene without any block"},
     "subsurface-volumetric-subpixel-off": {"kind": "equal", "capture_only": True, "reflections": "off", "controls": [],
                                            "terms": "the sub-pixel scene without any subsurface block (the pair of the key above; capture only)"},
+    # F15.1 (ticket 17/18): the OPTIONAL RT tier (--subsurface-mode rt-walk): the random walk through the real geometry.  Same fixtures, same
+    # ground truth and the SAME side-lit bound on the same gated pieces (the diffusion regime pieces; the others are reported); the back-lit
+    # fixture is GATED at 2x the side-lit bound (ticket 18).  The engine capture accumulates WALK_FRAMES frames (the estimator is unbiased, the
+    # noise falls with the accumulation).  Negative controls: the reference-side controls of the side-lit key plus the engine capture whose walk
+    # lights nothing (`@rt-walk-lights-off`, asserted to FAIL).
+    "subsurface-volumetric-sun@rt-walk": {"kind": "subsurface", "reference": "subsurface", "reflections": "off", "rt": True,
+                                          "engine_args": WALK_ARGS, "accumulate": WALK_FRAMES,
+                                          "noise_twin": "subsurface-volumetric-sun@rt-walk-lights-off",
+                                          "controls": VOLUMETRIC_BOUND_CONTROLS,
+                                          "terms": "the side-lit skin and jade spheres of subsurface-volumetric-sun with --subsurface-mode rt-walk"},
+    "subsurface-volumetric-sun@rt-walk-lights-off": {"kind": "subsurface", "reference": "subsurface", "reflections": "off", "rt": True,
+                                                     "engine_args": WALK_ARGS + ["--debug-subsurface-walk-lights", "off"], "accumulate": 8,
+                                                     "pending": "negative control", "controls": [],
+                                                     "terms": "negative control of the rt-walk side-lit key: the walk lights nothing (must FAIL the bound)"},
+    "subsurface-volumetric-backlit@rt-walk-lights-off": {"kind": "subsurface-backlit", "reference": "subsurface", "reflections": "off", "rt": True,
+                                                         "engine_args": WALK_ARGS + ["--debug-subsurface-walk-lights", "off"], "accumulate": 8,
+                                                         "pending": "negative control", "controls": [],
+                                                         "terms": "negative control of the rt-walk back-lit key: the walk lights nothing (must FAIL the bound; also the noise twin)"},
+    # ticket 18: the rt-walk albedo table over the boundary roughness.  Gated: the pieces of roughness <= 0.5 (declared before the measurement: at
+    # 0.7 the plateau of the boundary is 0.503 and the fixture colours saturate; those pieces are reported).
+    "subsurface-volumetric-rough@rt-walk": {"kind": "subsurface", "reference": "subsurface", "reflections": "off", "rt": True,
+                                            "engine_args": WALK_ARGS, "accumulate": WALK_FRAMES, "gate_max_roughness": 0.5,
+                                            "noise_twin": "subsurface-volumetric-rough@rt-walk-lights-off",
+                                            "controls": ["subsurface-off", "diffusion-off"],
+                                            "terms": "sun only from the side on skin and jade spheres of boundary roughness 0.25 / 0.5 / 0.7, weight {1, 1, 1, 0.5, 0.5}, radius 0.08 m, "
+                                                     "--subsurface-mode rt-walk; gated: roughness <= 0.5"},
+    "subsurface-volumetric-rough@rt-walk-lights-off": {"kind": "subsurface", "reference": "subsurface", "reflections": "off", "rt": True,
+                                                       "engine_args": WALK_ARGS + ["--debug-subsurface-walk-lights", "off"], "accumulate": 8,
+                                                       "gate_max_roughness": 0.5, "pending": "negative control", "controls": [],
+                                                       "terms": "negative control of the roughness key: the walk lights nothing (must FAIL; also the noise twin)"},
+    # The fallback and Apple9 keys.  --rt off: the walk is requested but cannot run; the engine must say so (effective = diffusion, reason names --rt)
+    # and render exactly the screen-space tier (equal to the capture of subsurface-volumetric-sun).  Apple9 (--force-family apple9, effective
+    # capabilities only: the walk uses no Apple10 feature) must RUN the walk: effective = rt-walk, same bound.
+    "subsurface-volumetric-sun@rt-walk-fallback-rt-off": {"kind": "equal", "reference": "subsurface", "reflections": "off",
+                                                          "engine_args": WALK_ARGS, "expect_effective": "diffusion",
+                                                          "reference_args": ["--no-ground-truth"], "pair": "subsurface-volumetric-sun", "controls": [],
+                                                          "terms": "--subsurface-mode rt-walk without --rt on: the engine falls back to the screen-space diffusion "
+                                                                   "(logged, reported) and renders the image of subsurface-volumetric-sun"},
+    "subsurface-volumetric-sun@rt-walk-apple9": {"kind": "subsurface", "reference": "subsurface", "reflections": "off", "rt": True,
+                                                 "engine_args": WALK_ARGS + ["--force-family", "apple9"], "accumulate": WALK_FRAMES,
+                                                 "noise_twin": "subsurface-volumetric-sun@rt-walk-lights-off", "controls": [],
+                                                 "terms": "the side-lit rt-walk key under --force-family apple9: the walk runs and meets the same bound"},
+    "subsurface-volumetric-radius@rt-walk": {"kind": "radius-monotonic", "reference": "subsurface", "reflections": "off", "rt": True,
+                                             "engine_args": WALK_ARGS, "accumulate": WALK_FRAMES,
+                                             "controls": VOLUMETRIC_SWEEP_CONTROLS,
+                                             "terms": "the radius sweep of subsurface-volumetric-radius with --subsurface-mode rt-walk"},
+    "subsurface-volumetric-backlit@rt-walk": {"kind": "subsurface-backlit", "reference": "subsurface", "reflections": "off", "rt": True,
+                                              "engine_args": WALK_ARGS, "accumulate": WALK_FRAMES,
+                                              "noise_twin": "subsurface-volumetric-backlit@rt-walk-lights-off",
+                                              "controls": ["subsurface-off", "diffusion-off"],
+                                              "terms": "sun BEHIND thick weight-1 spheres (radius 0.08 and 0.16 m) with --subsurface-mode rt-walk: GATED at the back-lit bound"},
     "subsurface-volumetric-backlit": {"kind": "subsurface-report", "reference": "subsurface", "reflections": "off", "controls": [],
                                       "terms": "sun BEHIND thick weight-1 spheres (radius 0.08 and 0.16 m): measured and reported, not gated "
                                                "(declared limit of screen-space diffusion)"},
@@ -1216,6 +1272,7 @@ def capture_command(binary, name, folder, seed=1):
             "--pipeline-sync", *(["--reflection-capture-probe"] if SCENARIOS[name].get("probe") else []),
             "--capture-linear", str(folder / "engine.pfm"), "--capture-linear-frame", last,
             *(["--capture-linear-accumulate", str(SCENARIOS[name]["accumulate"])] if SCENARIOS[name].get("accumulate") else []),
+            *SCENARIOS[name].get("engine_args", []),
             "--capture-linear-signal", "hdr",
             *(["--export-reference", str(folder / "snapshot"), "--export-reference-frame", last] if SCENARIOS[name].get("snapshot", True) else []),
             *(["--terrain-textures", str(terrain_materials_dir() or "build/terrain-materials")] if SCENARIOS[name].get("cc0") else []),
@@ -1532,11 +1589,11 @@ def luminance_error(np, candidate, reference, roi, floor_fraction):
         return np.abs(ya - yb) / denominator, floor
 
 
-def evaluate_subsurface(np, candidate, reference, masks, spheres, gated=True):
+def evaluate_subsurface(np, candidate, reference, masks, spheres, gated=True, gate_key="subsurface", every_piece=False, max_roughness=None):
     """Ticket 17, decision 11: per PIECE (every sphere of the scene, the neutral weight-0 ones included) the mean and p95 of the relative
     luminance error over the piece's ROI against the random-walk ground truth; the gate is every piece mean <= 10 % and p95 <= 25 %.
     `gated` False (the back-lit report) measures the same numbers and passes."""
-    gate = THRESHOLDS["subsurface"]
+    gate = THRESHOLDS[gate_key]
     pieces = []
     for s in spheres:
         roi = piece_roi(masks, s["instance"])
@@ -1547,13 +1604,15 @@ def evaluate_subsurface(np, candidate, reference, masks, spheres, gated=True):
         ya, yb = luminance(np, candidate)[roi], luminance(np, reference)[roi]
         mean, p95 = float(error.mean()), float(np.percentile(error, 95))
         met = bool(mean <= gate["mean"] and p95 <= gate["p95"])
-        in_regime = bool(s.get("diffusion_regime", True))  # orchestrator decision: pieces outside the diffusion regime are reported only
+        in_regime = True if every_piece else bool(s.get("diffusion_regime", True))
+        if max_roughness is not None:  # ticket 18: the boundary-roughness fixture gates the pieces whose roughness the table measured with a valid plateau
+            in_regime = bool(s.get("boundary_roughness", 0.0) <= max_roughness + 1e-6)  # orchestrator decision: pieces outside the diffusion regime are reported only
         pieces.append({"instance": s["instance"], "weight": s.get("weight", 0.0), "radius": s.get("radius"),
                        "group": s.get("series"), "pixels": int(roi.sum()), "mean": mean, "p95": p95, "floor": floor,
                        "candidate_mean_luminance": float(ya.mean()), "reference_mean_luminance": float(yb.mean()),
                        "gated": in_regime, "bound_met": met, "pass": met or not in_regime})
     passed = all(piece["pass"] for piece in pieces) and any(piece["gated"] for piece in pieces)
-    return {"kind": "subsurface" if gated else "subsurface-report", "gated": gated, "pieces": pieces,
+    return {"kind": "subsurface" if gated else "subsurface-report", "gated": gated, "gate": gate_key, "pieces": pieces,
             "worst_mean": max(piece.get("mean", 0.0) for piece in pieces), "worst_p95": max(piece.get("p95", 0.0) for piece in pieces),
             "limits": {"mean": gate["mean"], "p95": gate["p95"]}, "pass": passed if gated else True,
             "bound_met": all(piece.get("bound_met", False) for piece in pieces)}
@@ -1636,7 +1695,7 @@ def evaluate_equal(np, candidate, reference, masks, spheres):
             "limit": gate["max_relative_luminance_error"], "pass": all(piece["pass"] for piece in pieces)}
 
 
-def evaluate(np, kind, candidate, reference, masks, spheres, band=1):
+def evaluate(np, kind, candidate, reference, masks, spheres, band=1, gate_max_roughness=None):
     if kind in TRANSMISSION_KINDS:
         return evaluate_transmission(np, candidate, reference, masks, spheres)
     if kind == "transmissive-shadow-ratio":
@@ -1646,9 +1705,11 @@ def evaluate(np, kind, candidate, reference, masks, spheres, band=1):
     if kind in SHADOW_KINDS:
         return evaluate_transmission(np, candidate, reference, masks, spheres, "transmissive_shadow", kind, reference)
     if kind == "subsurface":
-        return evaluate_subsurface(np, candidate, reference, masks, spheres)
+        return evaluate_subsurface(np, candidate, reference, masks, spheres, max_roughness=gate_max_roughness)
     if kind == "subsurface-report":
         return evaluate_subsurface(np, candidate, reference, masks, spheres, gated=False)
+    if kind == "subsurface-backlit":
+        return evaluate_subsurface(np, candidate, reference, masks, spheres, gate_key="subsurface_backlit", every_piece=True)
     if kind == "radius-monotonic":
         return evaluate_radius_monotonic(np, candidate, reference, masks, spheres)
     if kind == "radius-statistic-match":
@@ -1687,11 +1748,11 @@ def expectation(kind, mode, result, always_green=False, pending=None):
     return {"asserted": False, "met": True, "note": "measured, not predicted before ticket 03"}
 
 
-def control_verdicts(np, kind, reference, controls, masks, spheres, required, band=1):
+def control_verdicts(np, kind, reference, controls, masks, spheres, required, band=1, gate_max_roughness=None):
     """Every required control rendered on the reference side must FAIL the gate of its fixture."""
     verdicts = {}
     for name in required:
-        result = evaluate(np, kind, controls[name], reference, masks, spheres, band)
+        result = evaluate(np, kind, controls[name], reference, masks, spheres, band, gate_max_roughness)
         verdicts[name] = {"fails_gate": not result["pass"], "gate_result": summarize(result)}
     return verdicts
 
@@ -1950,6 +2011,55 @@ def evaluate_layer_scenario(np, name, folder, mode):
     return entry
 
 
+def expected_subsurface_mode(name):
+    """The technique a key must have rendered: "rt-walk" for every key that requests --subsurface-mode rt-walk, unless it declares
+    `expect_effective` (the fallback keys assert the diffusion); None for a key that does not request the mode."""
+    spec = SCENARIOS[name]
+    if spec.get("expect_effective"):
+        return spec["expect_effective"]
+    args = spec.get("engine_args", [])
+    return "rt-walk" if "--subsurface-mode" in args and args[args.index("--subsurface-mode") + 1] == "rt-walk" else None
+
+
+def require_subsurface_mode(name, folder):
+    """STRUCTURAL guard (orchestrator, ticket 17/18): a key that requests the RT walk must have rendered it.  The capture's report says which
+    technique the engine used (`subsurface.effective`) and why not the requested one; a mismatch is a capture error, never an evaluation of the
+    diffusion tier under the name of the walk.  The fallback keys declare the opposite (`expect_effective`) and are held to it."""
+    expected = expected_subsurface_mode(name)
+    if expected is None:
+        return
+    report_path = pathlib.Path(folder) / "report.json"
+    if not report_path.is_file():
+        raise CaptureFailed(f"{name}: no report.json: cannot tell which subsurface technique rendered the capture")
+    section = json.loads(report_path.read_text()).get("subsurface") or {}
+    effective = section.get("effective")
+    if effective != expected:
+        raise CaptureFailed(f"{name}: subsurface.effective is {effective!r}, the key requires {expected!r} "
+                            f"(requested {section.get('requested')!r}, fallback reason: {section.get('fallback_reason') or 'none reported'})")
+
+
+def pool_noisy_term(np, candidate, twin, masks, window):
+    """F15.1 (ticket 17/18, RT tier): the candidate of a stochastic estimator, noise handled the way the reference handles its own: the noisy
+    term (engine capture minus the capture whose walk lights nothing, i.e. weight x the walk) is averaged over the `window` x `window` interior
+    neighbourhood of each piece (tools/f15_subsurface_reference.py box_pool / interior_mask: the image is smooth at the scale of the mean free
+    path and the window never crosses a silhouette) and added back to the deterministic remainder, which stays unpooled like the reference's base
+    model.  Thresholds are unchanged; the unpooled numbers are reported next to the pooled ones."""
+    import f15_subsurface_reference as rt
+    grid = masks["sphere"]
+    term = candidate - twin
+    out = twin.copy()
+    for k in np.unique(grid):
+        if int(k) < 0:
+            continue
+        x0, y0, x1, y1 = rt.piece_crop(grid, int(k))
+        interior = rt.interior_mask(grid, int(k))[y0:y1, x0:x1]
+        pooled = rt.box_pool(term[y0:y1, x0:x1], interior, window)
+        inside = (grid == k)[y0:y1, x0:x1]
+        view = out[y0:y1, x0:x1]
+        view[inside] = view[inside] + pooled[inside]
+    return out
+
+
 def evaluate_scenario(np, name, folder, mode):
     from f12_reference import read_pfm
     import f15_reference
@@ -1984,6 +2094,12 @@ def evaluate_scenario(np, name, folder, mode):
     report = json.loads((reference_dir / "reference.json").read_text())
     reference = read_pfm(reference_dir / "reference.pfm")
     candidate = read_pfm(folder / "engine.pfm")
+    unpooled_candidate = None
+    if spec.get("noise_twin"):
+        # stochastic estimator: pool its noisy term like the reference pools its walk (pool_noisy_term); the unpooled image is kept for the report
+        unpooled_candidate = candidate
+        candidate = pool_noisy_term(np, candidate, read_pfm(folder.parent / spec["noise_twin"] / "engine.pfm"),
+                                    dict(np.load(reference_dir / "masks.npz")), spec.get("noise_pool", 5))
     if spec.get("pair"):
         # An `equal` key compares the engine capture with the engine capture of its pair scene (same geometry, no block).
         reference = read_pfm(folder.parent / spec["pair"] / "engine.pfm")
@@ -2001,11 +2117,15 @@ def evaluate_scenario(np, name, folder, mode):
     if spec["kind"] != "declared":
         band = spec.get("terminator_band", 1)
         controls = {c: read_pfm(reference_dir / report["controls"][c]["file"]) for c in literal_controls}
-        result = evaluate(np, spec["kind"], candidate, reference, masks, spheres, band)
+        gate_roughness = spec.get("gate_max_roughness")
+        result = evaluate(np, spec["kind"], candidate, reference, masks, spheres, band, gate_roughness)
+        if unpooled_candidate is not None:
+            unpooled = evaluate(np, spec["kind"], unpooled_candidate, reference, masks, spheres, band, gate_roughness)
+            result["unpooled"] = {k: unpooled[k] for k in ("worst_mean", "worst_p95", "pass") if k in unpooled}
         if name == "roughness-extremes":  # sun + environment: direct statistics reported, environment gates
             direct = evaluate_direct(np, candidate, reference, masks, spheres)
             result = evaluate_environment(np, candidate, reference, masks, spheres, summarize(direct))
-        verdicts = control_verdicts(np, spec["kind"], reference, controls, masks, spheres, literal_controls, band)
+        verdicts = control_verdicts(np, spec["kind"], reference, controls, masks, spheres, literal_controls, band, gate_roughness)
         # "pending_gate": "declared" keeps the literal gate asserted green (only the declared-model gate is pending).
         declared_only = spec.get("pending_gate") == "declared"
         expected = expectation(spec["kind"], mode, result, spec.get("always_green", False),
@@ -2073,7 +2193,7 @@ def result_lines(r):
         for k, row in r["rows"].items():
             lines.append(f"| {k} | {row['pixels']} | {row.get('mean', 0):.4f} | {row.get('p95', 0):.4f} | "
                          f"{row.get('p99', 0):.4f} | {row.get('max_outside_mask', 0):.4f} | {row['pass']} |")
-    elif r["kind"] in ("subsurface", "subsurface-report"):
+    elif r["kind"] in ("subsurface", "subsurface-report", "subsurface-backlit"):
         lines += ["", f"worst piece mean {r['worst_mean']:.4f} (limit {r['limits']['mean']}), worst p95 {r['worst_p95']:.4f} "
                       f"(limit {r['limits']['p95']}){'' if r['gated'] else '; not gated (reported)'}", "",
                   "| piece | weight | radius | pixels | mean | p95 | candidate Y | reference Y | in regime (gated) | bound met |", "|---|---|---|---|---|---|---|---|---|---|"]
@@ -2265,6 +2385,7 @@ def run_captures(parser, args, names, out, binary):
             draws = fallback_draws(log.read_text(errors="replace")) if log.is_file() else None
             if draws is None or draws > 0:
                 raise CaptureFailed(f"{n}: capture served fallback pipelines (fallback draws {draws}); its image is not the engine's")
+            require_subsurface_mode(n, folders[n])
             if position + 1 < len(names):
                 time.sleep(2)  # serial and quiet between GPU jobs
 
@@ -2308,6 +2429,8 @@ def run(argv=None):
                 reason = seed_reference_from_cache(args.reference_cache.resolve() / n, out / n)
                 print(f"{n}: reference cache {'reused' if reason is None else 'not used: ' + reason}", file=sys.stderr)
     import numpy as np
+    for n in names:
+        require_subsurface_mode(n, out / n)
     entries = [evaluate_scenario(np, n, out / n, args.expect) for n in names if not SCENARIOS[n].get("capture_only")]
     status, code = verdict(entries, args.expect)
     manifest["state"] = status

@@ -41,7 +41,7 @@ static uint classBinOf(constant GPUVisibilityParams &p, uint mask) {
 static uint ownBin(constant GPUVisibilityParams &p) { return kBinOverflow ? VISIBILITY_FEATURE_CLASSES : classBinOf(p, kBinMask); }
 
 static void writeSubsurface(texture2d<float, access::write> sss, uint2 pixel, thread const ShadingResult &value) {
-    sss.write(float4(value.sssIrradiance, float(value.sssMaterial)), pixel);
+    sss.write(float4(value.sssIrradiance, sssCodeOf(value.sssMaterial)), pixel);
 }
 kernel void visibility_clear(constant GPUVisibilityParams &p [[buffer(11)]], device uint *args [[buffer(13)]],
                              texture2d<float, access::write> color [[texture(1)]],
