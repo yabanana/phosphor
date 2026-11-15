@@ -197,3 +197,17 @@ Forward v0, DI guides, the five denoise_*_lobe kernels, overflow fallback).  No 
 requestBoth for the generic dispatch only, +6 descriptors.
 **Featureless / archive checks on the same build:** 5 exactness cases cmp-identical, visual_check 0 px on 8 benches, archive_check full 18 hits / 0 misses, hitch_check 0 hitches 21 hits 0 misses; generic-vs-variant forward 9/1/5/9/25 px unchanged (module untouched).
 **Earlier harvests missed every scene whose name contains `/`** (nested output folders: the terrain / layerblocks fixtures); the final update uses `find` and includes them.
+
+### Bisection of the old ToyCar variation (2026-11-16, timeboxed; ToyCar class vs all-lobes, 20 runs each, each run its own lock acquisition, battery 55 %)
+
+- Old build still flaky on a quiet machine: the exact module on the old base 78d173d (snapshot x6, archive of that branch), rerun now: **11 of 20** runs differ (205..1303 px).  So the variation is not machine load; it is in the old build.
+- (1) integrated tip + exact module with the texxform-3 archive entries REMOVED (9 archive descriptors; the cls arm then shows the old 4 misses and the ref arm 8, exactly the old flaky build's numbers: 138 hits / 4 misses and 135 / 8): **0 of 20** differ.
+- (2) integrated tip + exact module with MATERIAL_FLAG_LAYER_TRANSFORM moved back to bit 2 (the collision with UNLIT that 24563ce fixes; static assert removed for the experiment, reverted): **0 of 20** differ.
+  (The collision cannot be tested on the old base: MATERIAL_FLAG_LAYER_TRANSFORM does not exist there, texxform-layers added it.)
+- Neither the archive entries nor the flag fix removes anything, and the old miss/hit pattern alone does not cause the variation (it is stable at the tip with it).  So the cause is another change in 78d173d..24563ce (11,654 lines in shaders and
+  src/renderer).  Not bisected further: a source bisection needs one full rebuild plus archive harvest per step.
+- Leading candidate, untested: texxform-layers (7fcbb3d) added `GPUTemporalParams::materialExtensions` and made every alpha site read the extension buffer from it ("the extension buffer for the alpha tests of layer stacks and per-slot transforms").
+  On the old base the per-slot-transform alpha tests (`visibility_alpha_tt_fs`, `visibility_alpha_lit_tt_fs`, meshlet.metal:800/817) read `frame.materialExtensions`, and the old visibility_renderer.cpp never set an extension pointer of its own; if that pointer is stale or
+  unset in a pass the alpha test reads another buffer's words, the visibility buffer differs at the triangles of the alpha-tested, transformed materials (the differing regions are triangle-shaped blocks, in either arm) and the result changes from run to run
+  with the contents of that memory.  ToyCar and ClearCoatCarPaint are the corpus scenes with per-slot transforms next to alpha-tested or textured parts.  That also explains why the class-vs-all-lobes comparison, which shares the visibility pass,
+  could not be the cause.  To confirm: build 7fcbb3d^ and 7fcbb3d, 20 ToyCar runs each.
