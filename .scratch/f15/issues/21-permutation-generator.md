@@ -179,3 +179,21 @@ Metal 4 no-hazard-tracking rule requires (shaders/visibility_resolve.metal bins 
   flag is set and the slot's `slotMask` bit is set (`texture_transform_core.h` texXfForOn / texXfHasOn / texXfGet; texXfFrame, sampleSlot); a material without the block has `rec == nullptr, mask == 0`.  I found no read of an
   unwritten or out-of-block word.
 - (b) shader validation with `--no-pipeline-archive` on the exact module: NOT run (battery 35 %, owner rule).  Pending.
+
+### Rebased tip (24563ce) + exact module: results (2026-11-16, branch f15c-bitexact-b, 038eb10)
+
+**The ToyCar / ClearCoatCarPaint variation does not occur on the integrated tip.**  Official `tools/f15_permutations.py equivalence` (every arm, RELATIVE_TOLERANCE 0.0), run TWICE on two archive states:
+200 cases (162 scenes) all bit-identical (0 px, 0 ULP, 8-bit 0), failures [], repeated reference 7 of 7, overflow bin 12 runs 0 ULP, app manifest export 0 failures, negative control leaves the envelope in 125 of 185 controls with every
+feature bit 0..8 discriminated by 16..34 scenes.  ToyCar, ClearCoatCarPaint and all nine `layers-blk-*` keys, `layers-blk-all-e1` included, are exact.  Flake study on the rebased build, archive on, `--pipeline-sync`, each run its own lock:
+ToyCar 0 of 12 differ, and 0 of 12 with a forced Dispatch->Dispatch device barrier after every bin dispatch (experiment, reverted); with `MTL_SHADER_VALIDATION=1 MTL_DEBUG_LAYER=1 --no-pipeline-archive` ToyCar 0 of 6 and ClearCoatCarPaint 0 of 6 differ and the logs
+hold no validation message (check (b)).  Before the rebase (78d173d base) the same study gave 8 of 15 / 8 of 12 / 4 of 12 differing runs.  The cls arm now has 0 archive misses on ToyCar (was 4).
+What changed between the two bases for these scenes: texxform-3 archives the per-slot-transform pipelines (the 4 Forward v7 / guide misses), texxform-layers and the flag-collision fix (24563ce: MATERIAL_FLAG_LAYER_TRANSFORM bit 2 collided with
+MATERIAL_FLAG_UNLIT).  I did not bisect which of them removed the variation, so the old nondeterminism is NOT root-caused; it is not reproducible on the integrated tip in 24 + 12 runs and two full equivalence runs.
+(a) no NaN/Inf in the old differing captures, (c) the host initialises every transform-block word: neither explains it.
+
+**Archive / budget on the final build (038eb10):** full budget run, 200 cases: measured-frame fallback draws 0, render-thread compiles 0, compiler calls 0 in every case; 197 cases 0 archive misses; the three cases with misses miss ONLY pipelines of the
+base module (ToyCar: indexed overflow fallback, Forward v7, DI guides, material_lighting_guides = the texture-transform gap owned by the texxform agent; aniso-bent-env: indexed overflow fallback forward_surface_fs; terrain/layerblocks=on/single=2/coat=off#base:
+Forward v0, DI guides, the five denoise_*_lobe kernels, overflow fallback).  No exact-module pipeline misses anywhere.  The all-lobes fallback of the generic dispatch had to be archived too (serve() asks for it while the specialised pipeline is not final):
+requestBoth for the generic dispatch only, +6 descriptors.
+**Featureless / archive checks on the same build:** 5 exactness cases cmp-identical, visual_check 0 px on 8 benches, archive_check full 18 hits / 0 misses, hitch_check 0 hitches 21 hits 0 misses; generic-vs-variant forward 9/1/5/9/25 px unchanged (module untouched).
+**Earlier harvests missed every scene whose name contains `/`** (nested output folders: the terrain / layerblocks fixtures); the final update uses `find` and includes them.
