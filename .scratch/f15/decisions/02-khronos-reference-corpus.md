@@ -44,3 +44,10 @@ Sample-Renderer `cc3d5ff`, Sample-Viewer `7306f9c`).
   is required by several corpus models and joins F15.1's loader scope;
   KHR_materials_unlit and KHR_lights_punctual are reported as unsupported
   (DiffuseTransmissionTest is then qualitative only).
+
+Amendment (owner, 2026-11-15, F15 closure round 2): KHR_materials_unlit and KHR_lights_punctual are now an approved scope addition, no
+longer unsupported by design. The loader lowers unlit onto the emission path; the surface is never a sampled emitter or GI emission.
+Punctual lights are imported as ECS lights (lux and candela taken as W/m2 and W/sr). The spot falloff stays the engine smoothstep, a
+declared deviation from the specification's informative t^2. DiffuseTransmissionTest renders. Per-slot (non-uniform)
+KHR_texture_transform and COLOR_0 vertex colours were also approved by the owner on the same day. A second UV set per material
+stays out of scope.
