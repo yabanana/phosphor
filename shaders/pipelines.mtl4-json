@@ -30155,58 +30155,6 @@
             },
             "id_type": "FunctionConstantIndex",
             "value": {
-              "data": 144
-            },
-            "value_type": "ConstantUInt"
-          },
-          {
-            "id": {
-              "data": 24
-            },
-            "id_type": "FunctionConstantIndex",
-            "value": {
-              "data": 4240
-            },
-            "value_type": "ConstantUInt"
-          }
-        ],
-        "function_descriptor": "fnd:24715C82E6D0C39B42D3AB2CECEB3A2021D5C41F87D33018BDB6199362EAD0D2",
-        "label": "C8535FBCF9919587B1F95B2913BB4834F6F44E366DBB69DC1D0C75196BD3F378"
-      },
-      {
-        "constant_values": [
-          {
-            "id": {
-              "data": 22
-            },
-            "id_type": "FunctionConstantIndex",
-            "value": {
-              "data": 144
-            },
-            "value_type": "ConstantUInt"
-          },
-          {
-            "id": {
-              "data": 24
-            },
-            "id_type": "FunctionConstantIndex",
-            "value": {
-              "data": 4240
-            },
-            "value_type": "ConstantUInt"
-          }
-        ],
-        "function_descriptor": "fnd:BEB011A7900B97A3D7E81FE88B7831995D44476994E5EDF4E8389C9EE6390EFD",
-        "label": "18B11F79D2DE276E7C129CDD096CF07AF1C2AE0B211065D618B81B9FB74E1E10"
-      },
-      {
-        "constant_values": [
-          {
-            "id": {
-              "data": 22
-            },
-            "id_type": "FunctionConstantIndex",
-            "value": {
               "data": 136
             },
             "value_type": "ConstantUInt"
@@ -39696,22 +39644,6 @@
       },
       {
         "compute_function_descriptor": "fnd:7774F0F44457944FBD8C0FF0887AA6F13EC5D174C8EBE55B018390EB2AA3EAD4",
-        "required_threads_per_threadgroup": [
-          0,
-          0,
-          0
-        ]
-      },
-      {
-        "compute_function_descriptor": "fnd:18B11F79D2DE276E7C129CDD096CF07AF1C2AE0B211065D618B81B9FB74E1E10",
-        "required_threads_per_threadgroup": [
-          0,
-          0,
-          0
-        ]
-      },
-      {
-        "compute_function_descriptor": "fnd:C8535FBCF9919587B1F95B2913BB4834F6F44E366DBB69DC1D0C75196BD3F378",
         "required_threads_per_threadgroup": [
           0,
           0,
