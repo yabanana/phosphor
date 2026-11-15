@@ -2307,7 +2307,7 @@ height texture), parameter-space blend, surface-gradient normal, then the ONE ba
 process runs; results land in `results.json` / `summary.md` for perf-log.md). Until it runs, binning stays opt-in and the default resolve stays the union one (the
 provisional decision of ticket 21 is unchanged). The terrain has two feature classes (layers; layers + coat), so its bins are 2 (the budget run shows `bins 2`).
 
-## 2026-11-15 — F13.4 / F11.5: energy-preserving a-trous (`--lighting-denoise-energy on`), timeboxed experiment (verdict: candidate for adoption)
+## 2026-11-15 — F13.4 / F11.5: energy-preserving a-trous (`--lighting-denoise-energy on`), timeboxed experiment (verdict: rejected for cost, owner option B)
 
 **Hypothesis:** the 1-3 % darkening of a denoised, noisy signal (cause proven in 0bae6e5: the receiver-normalised luminance edge-stopping a-trous) disappears if the filter is
 sender-normalised with a symmetric weight.  **Design (one, no sweep):** w(p,q) = taps x normal x depth(max depth) x luminance weight with the MEAN of the two variances x (specular) roughness weight with the MINIMUM
@@ -2336,3 +2336,17 @@ No timing taken (machine not quiet): the Sponza D2 A/B is the orchestrator's.
 
 **Verdict: candidate for adoption** on (a) bias within noise on every routed signal and (b) no gate or verdict worse; the ghost and flicker numbers drift upward in the mirror, rough-emitter and disocclusion clips (listed above)
 and the choice weighs that against the removed 1-3 % darkening; (c), the budget A/B, is the orchestrator's.  The default is NOT flipped.
+
+**Orchestrator budget A/B (2026-11-15, quiet machine, `build/d2-ab-energy`):** Sponza D2, 1080p, every feature, 128 + 256 frames, `--gpu-timing-serial --no-vsync`,
+option off vs on on the same 94da95c binary, 3 interleaved pairs, 0 GPU allocations in every run:
+| pair | off GPU p50 / p95 | on GPU p50 / p95 |
+|---|---|---|
+| 1 | 15.67 / 17.89 | 28.31 / 29.79 |
+| 2 | 15.32 / 16.64 | 28.38 / 30.02 |
+| 3 | 15.33 / 16.60 | 28.37 / 29.87 |
+Median p95 delta +13.27 ms against the 0.10 ms band.  Per pass (pair 3, p50): the D2 preset routes only the specular signal through the energy path,
+`F13 denoise 2 atrous weight sums 0/1` 3.42 / 3.38 ms and `atrous energy 0/1` 4.01 / 3.91 ms (14.73 ms) replace `atrous 0/1` 0.81 / 0.83 ms; every other pass
+is within 0.05 ms.  The sky sentinel read 0.81 ms in this window (clean 0.674-0.677), which cannot explain a 13 ms delta.  The naive 5x5 gather with the
+weight recomputed in both passes and the per-tap specular metadata loads is about 9x the shipped tiled filter.  **Verdict: rejected for cost; owner option B**
+(the shipped filter stays the default, the residue is declared with its bound in docs/implementation/F13-F14-CLOSURE-2026-11-12.md).  The flag, the kernels
+(not archived) and the CPU reference stay as an opt-in experiment; option A remains an open candidate that needs a cost-bounded implementation first.

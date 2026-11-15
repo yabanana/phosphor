@@ -62,7 +62,7 @@ section "Defects found during F15"; integrated by fast-forward to 6b6bf04; orche
 - DDGI wall behind glass black (probe in the gap went inactive on the pane's back faces): fixed 4422a13 (`f15_shadowed_hit_check.py
   --mode ddgi`, 1.248 vs 0.377, gate 0.90..2.0).
 - Transport rays ending black on single-sided back faces: fixed 26fe229 (`--case backface`, 1.000 vs 0.00001; error words 16/17).
-- FIXED (D2 A/B pending), owner 2026-11-14 "Correggere in F15": with any GI mode the declared environment reaches no primary surface (the
+- FIXED, owner 2026-11-14 "Correggere in F15": with any GI mode the declared environment reaches no primary surface (the
   INDIRECT atlas excludes it by design, no other pass adds it): shadowed wall 16/255 with `--gi ddgi` vs 194 with GI off. Required:
   one ownership rule (no double count against the GI-off term and the reflection/probe paths), reference albedo x L_env with a
   negative control, F13/F14 corpus rerun with every image change explained (thresholds only tightened, re-cut references justified),
@@ -76,7 +76,8 @@ section "Defects found during F15"; integrated by fast-forward to 6b6bf04; orche
   the other four 0 px; visual_check 0 px; zero-environment scenes bit-identical in every GI mode (Cornell room, moving-sun restir);
   f10_f12 f12_* functional battery exit 0 (negatives exit 1). F13/F14 corpus (agent): 37 verdicts equal final4, no reference re-cut,
   no threshold moved, control vs fixed bit-identical on five representative cases (none of the 37 declares an environment). Pipeline
-  descriptors unchanged. Remaining: Sponza D2 interleaved A/B on a quiet machine (control build/ctl-c978151 vs build/release).
+  descriptors unchanged. Sponza D2 interleaved A/B (2026-11-15, `build/d2-ab-envfix`, control c978151 vs 94da95c): GPU p95 deltas -0.10 /
+  +0.14 / -0.04 ms (median -0.04 within the 0.10 ms band), p50 -0.05 / +0.01 / -0.05, 0 GPU allocations, sky sentinel 0.689-0.695 on both.
   Process note: the agent's first configure fetched the CMake dependencies over the network for a few seconds against the no-download
   rule; it deleted that directory and rebuilt offline from the local sources.
 - IN PROGRESS, owner 2026-11-14 "Dimostrare o correggere": the F11.5 DI cap (1bf0e19) ratio budget/exact is 1.016 +- 0.008 with
@@ -89,7 +90,24 @@ section "Defects found during F15"; integrated by fast-forward to 6b6bf04; orche
   Owner 2026-11-14: ONE timeboxed experiment with an energy-preserving a-trous behind an option (default unchanged), adopted only if
   the bias drops within noise on DI-cap + GI + AO + specular signals (8-seed protocol, CPU reference), no corpus/flicker/ghost gate
   gets worse (full F13/F14 corpus, option on vs off) and the Sponza D2 GPU p95 interleaved A/B (orchestrator, quiet machine) is no
-  worse; otherwise fall back to B with the numbers. Spike in docs/opt-log.md, numbers in the closure document. IN PROGRESS.
+  worse; otherwise fall back to B with the numbers. Spike in docs/opt-log.md, numbers in the closure document.
+  RESULT (2026-11-15): option B. The experiment (ceec9db, d6e12c2, 2b7f823, 94da95c; flag default off) removes the bias within noise (DI cap
+  0.9933 -> 0.9990, Queen 0.977 -> 1.006, specular 0.9941 -> 1.0000, GI spatial 0.9992 -> 1.0000) with identical corpus verdicts, but the Sponza
+  D2 A/B (`build/d2-ab-energy`) costs +13.27 ms GPU p95 (median of 3 pairs; p50 15.3 -> 28.4 ms), all in the specular energy passes (14.73 ms vs
+  1.64 ms). Shipped filter stays; residue declared with its bound in the closure row; A stays an open candidate (opt-log). Integration check:
+  ctest 33/33, F13 exactness 0 px and PFM bit-identical against 4fc1c8a, visual_check 0 px. CLOSED.
+  Still to explain (energy agent's numbers): GI with temporal accumulation 0.926 +- 0.016 filtered/raw for BOTH filters (attributed to the history
+  lag of a converging DDGI, not isolated), and the negative-f14-lut exit -11 in its first corpus run (crash report 2026-11-14 17:07: SIGSEGV in
+  the AGX compiler, `UserIntersectionProgram::VariantSetEntry::signalPending`, on a phosphor-compile worker inside
+  `PipelineCache::compileFinal` of a compute pipeline with a linked intersection function, under the shader-validation compiler; a 2026-11-13
+  report crashed in `RayPayloadSizeAlignImpl::merge` at `setComputePipelineState`). OPEN.
+- OPEN, found 2026-11-15 (blocks the D2 criterion): Sponza D2 A/B/A against the pre-F15 baseline 75924b2 (`build/d2-ab-f15-closure`, quiet
+  machine, 3 pairs): GPU p50 +0.73 / +0.67 / +0.64 ms, p95 15.57 / 16.40, 15.46 / 16.53, 15.31 / 16.39 ms (median delta +1.07 ms against the
+  0.10 ms band; absolute 16.39-16.53 <= 16.67). Per-pass p50 medians: `F13 world-radius RTAO` +0.459 (1.046 -> 1.504, the kernel is unchanged),
+  `Solar RT visibility` +0.066, `Solar temporal moments` +0.065, `F13 reflection sample 0` +0.064, froxel RT source +0.012, Material resolve
+  +0.009. Sponza uses no F15 feature, so the cost is paid by scenes that do not need it. Leading hypothesis to test with a measured spike: the
+  shared RtPayload grew from 16 to ~124 bytes in c59c5af (ticket 14 transmittance list, counters, direction), so every RT query pays it; the RGB
+  sun mask (same commit) for the temporal moments pass.
 - Declared (owner noted, no objection): single-sided planes cast sun shadows from both sides in CSM (two-sided by contract) and RT.
 - CLOSED, not a defect (eac5233, ticket 13 "C22-D3 follow-up"): the 67 IORTestGrid "dark ring" pixels are a metric artefact. With
   reflections off a white transmissive sphere reads albedo 1 x environment 0.5 = the clear colour, so the ring set of the off image
