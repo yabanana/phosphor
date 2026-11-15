@@ -6,6 +6,7 @@
 #include "pipeline/forward_variants.h"
 #include "platform/metal/gpu_memory.h"
 #include "platform/metal/pipeline_cache.h"
+#include "platform/metal/render_state_tracker.h"
 #include "renderer/gpu_queue.h"
 #include "renderer/gpu_scene.h"
 #include "renderer/gpu_scene_layout.h"
@@ -631,13 +632,12 @@ void SceneRenderer::encodeForward(MTL4::RenderCommandEncoder* enc, MTL::RenderPi
     // Null: the encoder's default (no depth test, no write); overlay passes
     // without a depth attachment must not set a redundant state.
     if (depthState) {
-        enc->setDepthStencilState(depthState);
-        ++n;
+        if (metal_state::setDepthStencil(enc, depthState)) ++n;
     }
     enc->setArgumentTable(arguments_, MTL::RenderStageVertex | MTL::RenderStageFragment);
-    enc->setViewport(MTL::Viewport{0.0, 0.0, static_cast<double>(frame_.width), static_cast<double>(frame_.height),
-                                   0.0, 1.0});
-    n += 3;
+    if (metal_state::setViewport(enc, MTL::Viewport{0.0, 0.0, static_cast<double>(frame_.width), static_cast<double>(frame_.height), 0.0, 1.0}))
+        ++n;
+    n += 2;
 
     // glTF convention: counter-clockwise front faces (Metal defaults to
     // clockwise).  A mirrored model matrix reverses the on-screen winding, so

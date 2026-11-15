@@ -6,6 +6,7 @@
 #include "platform/metal/gpu_memory.h"
 #include "platform/metal/metal_graph_executor.h"
 #include "platform/metal/pipeline_cache.h"
+#include "platform/metal/render_state_tracker.h"
 #include "platform/metal/scene_renderer.h"
 #include "renderer/gpu_scene.h"
 #include "renderer/meshlet_cull_math.h"
@@ -689,10 +690,11 @@ void MeshRenderer::encodeRaster(MTL4::RenderCommandEncoder *enc, u32 phase, bool
     const FrameSet& f      = frames_[frame_.slot];
     MTL4::ArgumentTable* t = drawTables_[phase];
     u32 n = 0;
-    enc->setDepthStencilState(scene_.depthState());
-    enc->setViewport(
-        MTL::Viewport{0.0, 0.0, static_cast<double>(frame_.width), static_cast<double>(frame_.height), 0.0, 1.0});
-    n += 2;
+    // Fused render groups share the encoder: the tracker skips a state the encoder already holds (tickets 20/22).
+    if (metal_state::setDepthStencil(enc, scene_.depthState())) ++n;
+    if (metal_state::setViewport(
+            enc, MTL::Viewport{0.0, 0.0, static_cast<double>(frame_.width), static_cast<double>(frame_.height), 0.0, 1.0}))
+        ++n;
     // Cull state per class, tracked from Metal's defaults (clockwise, none):
     // validation rejects redundant changes (as SceneRenderer::encodeForward).
     MTL::Winding winding   = MTL::WindingClockwise;

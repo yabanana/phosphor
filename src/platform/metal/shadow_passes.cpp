@@ -6,6 +6,7 @@
 #include "platform/metal/mesh_renderer.h"
 #include "platform/metal/visibility_renderer.h"
 #include "platform/metal/metal_graph_executor.h"
+#include "platform/metal/render_state_tracker.h"
 #include "renderer/scene_store.h"
 #include "renderer/gpu_scene.h"
 #include "renderer/shadow_layout.h"
@@ -436,7 +437,7 @@ struct ShadowPasses::Impl {
     void drawCascade(rg::PassContext& ctx,u32 cascade,u32 cls,bool cached,bool transmit=false) {
         auto* e=static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder());auto& slot=slots[frame.slot];
         // The transmittance pass has no depth attachment (a standalone render group): additive/maximum blending of every transmissive fragment.
-        if(!transmit)e->setDepthStencilState(depthState);
+        if(!transmit)metal_state::setDepthStencil(e,depthState);
         else e->setCullMode(MTL::CullModeNone); // both faces of a closed volume: the entry and the exit surface (explicit, the encoder is standalone)
         const size_t base=(cascade*(settings.staticCache?2u:1u)+cls)*slot.casterDraws.size();
         MTL::RenderPipelineState* current=nullptr;
@@ -467,7 +468,7 @@ struct ShadowPasses::Impl {
                     range.slotCount,info.vertexOffset,0);
             }
         }
-        if(!transmit)e->setDepthStencilState(scene.depthState());
+        if(!transmit)metal_state::setDepthStencil(e,scene.depthState());
     }
     void addCacheGraph(rg::RenderGraph& g) {
         using namespace rg;
@@ -532,9 +533,9 @@ struct ShadowPasses::Impl {
                 auto& slot=slots[frame.slot];auto* t=slot.compositeTables[cascade];t->setAddress(slot.staticParams[cascade],18);
                 t->setAddress(slot.expectedAddress[cascade],20);t->setAddress(views[frame.view].cacheTiles[cascade]->gpuAddress(),21);t->setAddress(slot.counters->gpuAddress(),15);
                 texture(t,ctx,cacheRefs[cascade],0);texture(t,ctx,currentStaticRefs[cascade],1);texture(t,ctx,dynamicRefs[cascade],2);
-                auto* e=static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder());e->setDepthStencilState(compositeDepthState);
+                auto* e=static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder());metal_state::setDepthStencil(e,compositeDepthState);
                 e->setRenderPipelineState(pipelines.render(cacheComposite));e->setArgumentTable(t,MTL::RenderStageVertex|MTL::RenderStageFragment);
-                e->drawPrimitives(MTL::PrimitiveTypeTriangle,0,3);e->setDepthStencilState(scene.depthState());
+                e->drawPrimitives(MTL::PrimitiveTypeTriangle,0,3);metal_state::setDepthStencil(e,scene.depthState());
             });
         }
     }

@@ -2,6 +2,7 @@
 #include "core/profile.h"
 #include "platform/metal/gpu_memory.h"
 #include "platform/metal/pipeline_cache.h"
+#include "platform/metal/render_state_tracker.h"
 #include "core/log.h"
 
 #include <imgui.h>
@@ -127,7 +128,7 @@ void ImGuiRenderer::setupRenderState(MTL4::RenderCommandEncoder* encoder, MTL::G
 
     encoder->setRenderPipelineState(
         pipelines_.render(context_.colorFormat() == MTL::PixelFormatRGBA16Float ? pipelineEDR_ : pipeline_));
-    encoder->setDepthStencilState(depthState_);
+    metal_state::setDepthStencil(encoder, depthState_);
     encoder->setArgumentTable(arguments_, MTL::RenderStageVertex | MTL::RenderStageFragment);
     // Viewport (full target) and CullModeNone are Metal's defaults, and the
     // scene pass fused before this one leaves them so (render graph, F2.7);
