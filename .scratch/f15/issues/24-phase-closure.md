@@ -50,6 +50,46 @@ Declared approximations and limits (support table entries):
   - refusals: KHR_materials_unlit and KHR_lights_punctual are unsupported by design; non-uniform KHR_texture_transform is
     deferred.
 
+Added by the closure audit (2026-11-15; three read-only audits of tickets 01-23, bookkeeping 65c8a52; each item names its source ticket):
+- Orphaned or unowned: 16 image equality of the glTF encodings (KHR_materials_diffuse_transmission, draft scatter) vs the description
+  file (carried to 20, which never held it; not built); 06 no coplanar-overlap fixture for the raster_order_group need of the lobe-guide
+  producer; 06 the visibility resolve does not write the lobe guide (the pre-resolve kernel does; deviation recorded in commits only);
+  10 captured-probe sheen fixture and sheen texture numeric fixture, reference quadrature inaccurate for N.V < 0.005 at roughness >= 0.3;
+  09 the coat-only feature union (mask 2) is not archived (no fixture uses it).
+- Quiet-machine costs: measured 2026-11-15 (af56a4b, perf-log) except the iridescence per light (no film-free twin of the grid and no
+  light-count option: only absolute times and the static 187 flops per `bsdfThinFilm`). Transmission on the chess back-light rig costs
+  +10.67 ms frame p50 (`Local clustered RT shading` +9.18): recorded as a cost, an optimisation candidate, not a gate.
+- Declared limits and fit gaps: 11 anisotropic declared-environment fit 6.4-7.0 % on metal at strength 1 and the composite complement
+  fit not proven as a bound, narrow-lobe sun and non-constant environment for the bent normal not exercised, a primitive without tangents
+  shades as strength 0; 13 thin-walled delta-light BTDF unvalidated, rough thin-walled glass refused, the reference tints at every
+  transmitting event while the engine tints at the entry only; 14 AO, fog and reconnection/sky rays see glass as opaque, the interior of a
+  closed volume at the light end clamped T <= 1, transmissive + alpha-masked caster = opaque-masked, dedup list of 8 surfaces; 15 a glass
+  receiver's own underside is multiplied by its slab's transmittance, half-resolution edge quality not gated, mesh/indexed transmit
+  pipelines requested without glass; 16 thin + sheen/anisotropy/iridescence/ior not composed (the reference refuses), back-lit thin
+  receiver uses the standard sun visibility, 8 background compiler calls in restir/clustered captures not explained; 17 composite diffuse
+  limits (DI/ReSTIR/clustered and GI composite diffuse, reflection ambient diffuse and DI local lights not diffused; combinations keep the
+  base diffuse; weight/colour/radius-scale textures do not change the profile shape); 18 RT single scattering analysed, not implemented,
+  LUT valid for roughness 0.35 only; 19 thin-lobe weight/colour textures without reference, dropped non-discriminating controls
+  (aniso-rotation-flipped, additive-layering on combo-irid-aniso-env, transmission-uncoated on combo-thin-coat-env); 20 API notices
+  "Redundant call to setDepthStencilState/setViewport" on chess and subsurface fixtures (the same on 1d64ba5), the chess back-light rig
+  under shader validation times out; 22 A1 single-bounce reflections make mirror-in-mirror dark (named approximation), sheen textures
+  without numeric fixture; 23 layers blend base parameters only (feature blocks, emissive and alpha are not blended: deviation from the
+  plan wording), secondary hits/GI/probes see the stack's own record, the mask uses the primitive uv (no triplanar), the repeat sampler
+  blends the opposite texel at the mask edge; 07/08 the denoised DI/near-unit specular energy bias (bounded and declared, closure doc) and
+  thin clip margins (0.0551 vs 0.06, 0.0198 vs 0.02).
+- Thresholds set after measurement / understated figures: 21 the 1e-5 envelope was fixed after the first corpus and is exceeded on 15 of
+  24 textured real-asset scenes (worst 1.0e-2 relative, 99 533 ULP on ToyCar, 8-bit within 1 LSB), and 21 of 73 featured scenes cannot
+  discriminate through the resolve colour: "up to 37 ULP" above is the fixture maximum only; 23 the coat-zero gate 5e-4 was floored
+  after the first measurement and the 1e-5 envelope is exceeded on two textured terrain cases (6.8e-5, 655 ULP, 0 px in 8-bit);
+  10 the references of benches 5/6 were retaken in 74ff194 (1 LSB shader-validation change), so "0 px vs the ticket-03 baseline" for
+  those benches is against retaken references; 03 archive_check compares with a same-mode no-archive baseline (12 px at 1 LSB on bench 1
+  under shader validation since ticket 03).
+- Closure battery items with no record yet: metal_syntax_check (non-Apple target; emulate with the stubs on macOS), variant_check, the
+  full F13/F14 corpus after ticket 08 and after 8fbda9c, shader validation of DI scenes (first exercised in 08b, 039e22b), the forced-
+  overflow subsurface capture (`tools/f15_subsurface_overflow_check.sh`, promised by ticket 17), the final report schema number (04).
+- Plan deliverables not yet written: the deferred-items list in the handoff, docs/F15_HANDOFF.md, RENDERER.md beyond the table row,
+  ROADMAP status lines (F15.2/F15.4 stale, F15.1/F15.3 missing), opt-log terrain headings.
+
 Found in F15, outside F15 code (owner 2026-11-14: fixed inside F15; record in docs/implementation/F13-F14-CLOSURE-2026-11-12.md,
 section "Defects found during F15"; integrated by fast-forward to 6b6bf04; orchestrator re-verification on the integrated tree
 1903a09: ctest 30/30 with KHRONOS_CORPUS_DIR, F13 exact captures identical to the fixing worktree's `final` (0 px, 5 cases; sponza-d2
