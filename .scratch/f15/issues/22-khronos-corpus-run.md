@@ -265,3 +265,18 @@ Open: numeric texture fixtures (coat normal, anisotropy direction, iridescence t
   non-uniform transform is refused at load, GlamVelvetSofa).
 - Still open here: the DiffuseTransmissionTest corpus model stays refused (needs KHR_materials_unlit and punctual lights); the texture word handling of the corpus itself is
   exercised by the fixtures, not by the model.
+
+2026-11-15 (fourth round, on the integrated tip 4e89658; layers, coverage, dual use, archive):
+
+- **Dual use fixed at the source** (`MATERIAL_FLAG_LAYER_TRANSFORM`, gpu_types.h bit 2; `SceneStore::ttFlagBits`): a material referenced as a layer anywhere in the library keeps its block for LAYER sampling; its DIRECT
+  shading applies the block only when it is per-slot (a uniform transform is baked into the uvs of its direct users).  Case `direct-and-layer` (tools/f15_texture_transform_layers.py): AFTER the directly used quad and the layered quad both show the
+  palette through the transform ONCE (cells 1.0 / 1.0; applied-twice control 0.16, identity 0.15, other transforms 0.09-0.13); BEFORE (adca5c8) the direct quad: 0.1613 against once, 0.9497 against twice (the defect).  Doctest
+  `a material used directly AND as a layer is never transformed twice` (uniform and per-slot variants: flags, block, store verify) fails on adca5c8 (the direct bit was set for the uniform material) and passes.
+- **Archive texxform-3** (KEPT `.scratch/f15/harvest/texxform-3.json`, purely additive, 0 deleted / 914 added lines, +12 compute +7 render descriptors with constant 26): harvests of ClearCoatCarPaint, ToyCar, GlamVelvetSofa, TextureTransformTest and the
+  nine layer cases.  Corpus runs on the final binary (`f15_corpus.py --run`): ClearCoatCarPaint, ToyCar, GlamVelvetSofa, TextureTransformTest: archive misses 0, fallback draws 0, O7 0 GPU allocations.  Render-thread compiles: 0 at startup and
+  0 during the warm-up and measured frames; the 2 / 3 / 2 counted in the final line are all compiled on the FIRST frame under `--pipeline-sync` (the STARTUP line already shows the same count; the BENCH line equals it: nothing compiles in the measured
+  frames).  TextureTransformMultiTest shows 1 miss (`Forward v7`, a plain forward variant, no transform constant): it is the same on the 096675f binary (pre-existing, not a texture-transform pipeline; its materials are uniform).
+- **Gates of the final build**: ctest 40 / 40; `f15_exact.sh` 5 PFMs byte-identical (cmp) to build/litefix/exact-new; `visual_check` with `EXTRA_ARGS=--pipeline-sync BENCH8_ARGS=--instances 100000` 0 px on 8 benches; primary fixture 1.0 with controls
+  failing; the secondary fixtures (rt / csm / cache shadow, reflection, emitter, gi, probe, glass, glass-csm) all pass; the nine layer cases pass, also under API + shader validation (archive off).  `layers-*` keys: all four chunks GREEN
+  (46 evaluated keys, the other 70 capture-only); `layers-blk-all-e1` is the only FAIL row and it is the expected pending one.  Run notes: a chunk split drops second-level dependencies of a key (the `needs` of `needs`), chunk 3 therefore also lists
+  layers-single-0..3 / layers-endpoint-0..3; the CC0 keys need the terrain sets at build/terrain-materials (symlinked to the orchestrator's unpacked sets).

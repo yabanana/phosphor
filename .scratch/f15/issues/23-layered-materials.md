@@ -192,3 +192,13 @@ Sponza D2 / RT reflection kernel timing after the secondary-hit change.
   1.0, controls (identity, uniform-bake = other slots' transforms) 0.09-0.15; layer-mask (halves mask mirrored by the mask's own transform) and layer-height (halves height swapped by the height's transform) measure R - G
   left - right -0.68 / -0.68 with the reference's sign (model -1), the identity predicts +1 and the controls disagree.
 - Still declared: the stack's emission-as-emitter alpha uses the stack's own record; a layer sub-material used BOTH directly by a primitive and as a layer would apply a uniform transform twice (baked + block): not authored anywhere.
+
+2026-11-15 (texxform agent, second part): the two declared limits are closed.
+
+- **Stack as emitter** (`restir_common.h` diSampleTexturedLight, CPU `light_sampling` mirror with an optional coverage callback): an emissive stack's emitter alpha is its own record alpha x the blended layer coverage (LOD0,
+  `layerCoverage`), tested against the stack's cutoff.  Fixture `stack-emitter` (`tools/f15_texture_transform_layers.py`): an emissive stack (strength 40, ramp mask, cutoff 0.5) lights the floor in front of it from the u >= 0.5
+  half only; the gate is the floor luminance left - right (threshold 0.08) against a form-factor sum over the emitting half (model -0.556): AFTER -0.1142 (reference class), BEFORE (binary of adca5c8) -0.0013 (the own-alpha class: the whole
+  quad emitted); controls own-alpha and inverted ramp disagree.  Doctest: the stack's own record never cuts, the ramp coverage cuts the u < 0.5 half.
+- **Gates of the final build** (`5c775d8` + this section): the 116 `layers-*` keys in four chunks under the lock (`f15_check.py --run --expect green --reference-cache t19int`, references whose snapshot digest changed re-rendered by
+  Mitsuba): all four chunks GREEN (exit 0) - see the ticket 22 record for the per-chunk numbers and the one chunk that had to be re-run (the CC0 sets must be reachable at build/terrain-materials; a symlink to the orchestrator's unpacked sets was
+  missing in the first attempt).
