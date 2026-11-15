@@ -2840,6 +2840,21 @@
         "label": "45C3C9ED0749176A9E3C2226D6F24439189CAA73DC61EA1DB6977A41CC69349D",
         "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
         "name": "visibility_mesh"
+      },
+      {
+        "label": "BF2487D695B1151D8D87C57B4AF2E3869B46F8AD2B9DD5A0F48CD530A9C0FFD7",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "reflection_ssr_lobe"
+      },
+      {
+        "label": "C8082BB583C690D94B99A0DDE99A328B2A540DD6AF81E25ECB3BBF9A2AB9E537",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "light_cluster_shade_rt_lobe"
+      },
+      {
+        "label": "55532D4A98F24BFCC0C86246DBAAD4A42AF47C7E3B8547115B05ED9A13CE3C48",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "rt_alpha_generic"
       }
     ],
     "specialized_function_descriptors": [
@@ -26362,6 +26377,54 @@
         ],
         "function_descriptor": "fnd:1D67414417AA130FE7BDD367E8EB5BE85428B7798DB1ABEC7193796694CEA441",
         "label": "AD5E26212F43CAD7F8455D286234814F989B8E7969B5D413CDAD19624B43E457"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 2
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:2D5757E795D44231337118AA24B5AB4D3577FA5E1B17073D61EDB73269B721DB",
+        "label": "4E3D2F1B895F36A3010E4A985A51094430C33CB43564A180A13E6307EA0BE572"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 2
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:BF2487D695B1151D8D87C57B4AF2E3869B46F8AD2B9DD5A0F48CD530A9C0FFD7",
+        "label": "F064CFFC4698550B3824AF4EDA91A9FCD1DE883D26C4A7461F3DC3804239D0FA"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 2
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:C8082BB583C690D94B99A0DDE99A328B2A540DD6AF81E25ECB3BBF9A2AB9E537",
+        "label": "D83A9306AD97CE51D6C2CA060DF28E43D5A2EDFD74D3EC4787C2136AD4EF81C4"
       }
     ]
   },
@@ -34150,6 +34213,35 @@
           0,
           0
         ]
+      },
+      {
+        "compute_function_descriptor": "fnd:4E3D2F1B895F36A3010E4A985A51094430C33CB43564A180A13E6307EA0BE572",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:F064CFFC4698550B3824AF4EDA91A9FCD1DE883D26C4A7461F3DC3804239D0FA",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:D83A9306AD97CE51D6C2CA060DF28E43D5A2EDFD74D3EC4787C2136AD4EF81C4",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ],
+        "static_linking_descriptor": {
+          "function_descriptors": [
+            "fnd:55532D4A98F24BFCC0C86246DBAAD4A42AF47C7E3B8547115B05ED9A13CE3C48"
+          ]
+        }
       }
     ],
     "mesh_render_pipeline_descriptors": [
