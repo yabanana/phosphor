@@ -226,6 +226,8 @@ stale_dir="$out_dir/stale"
 mkdir -p "$stale_dir"
 cp "$repo_dir"/shaders/*.metal "$stale_dir/"
 cp "$repo_dir"/shaders/*.h "$stale_dir/"
+# Textual includes other than headers (F15 COLOR_0: forward_surface.inc / forward_plain.inc instantiate the forward stages twice).
+for inc in "$repo_dir"/shaders/*.inc; do [[ -e "$inc" ]] && cp "$inc" "$stale_dir/"; done
 # Shader headers in subdirectories (F15: shaders/materials/).
 for sub in "$repo_dir"/shaders/*/; do cp -R "${sub%/}" "$stale_dir/"; done
 if ! sed -i.bak 's/float3(0\.30, 0\.36, 0\.45)/float3(0.31, 0.36, 0.45)/' "$stale_dir/material_shading.h" \
@@ -243,8 +245,11 @@ else
         name=$(basename "$src")
         [[ $included == *" $name "* ]] && continue
         [[ $name == material_passes.metal && ${#airs[@]} -gt 0 ]] && continue
+        # Per-module extra flags, as App.cmake PHOSPHOR_METAL_EXTRA_FLAGS_<name> (F15.2 ticket 21: the exact-maths resolve module).
+        extra=()
+        [[ $name == material_passes_exact.metal ]] && extra=(-fmetal-math-mode=safe -DPHOSPHOR_EXACT_MODULE=1 -Wno-modules-import-nested-redundant)
         xcrun -sdk macosx metal -std=metal4.0 "-mmacosx-version-min=${target:-26.0}" \
-            -I "$repo_dir/src" -I "$build_dir/generated" -Wall -fpreserve-invariance -c "$src" -o "${src%.metal}.air" >"$src.log" 2>&1 \
+            -I "$repo_dir/src" -I "$build_dir/generated" -Wall -fpreserve-invariance ${extra[@]+"${extra[@]}"} -c "$src" -o "${src%.metal}.air" >"$src.log" 2>&1 \
             || { echo "error: compiling $src failed:" >&2; cat "$src.log" >&2; exit 2; }
         airs+=("${src%.metal}.air")
     done
