@@ -167,7 +167,7 @@ all-lobes pipeline. Declared as inherent to the height contrast; not re-declared
 
 **Archive and regressions.** New permutations (unions 0x9F, 0x104, 0x108, 0x110, 0x180, 0x19F) entered by the targeted update (`.scratch/f15/harvest/layers-1.json`,
 `tools/material_class_archive.py check` passes). Featureless scenes unchanged: Sponza D2 and the F13 exactness captures bit-identical to `build/litefix/exact-new`; visual_check
-8 of 8 benches 0 px (see the final report for the last run). A first restructuring of the secondary-hit code moved Sponza D2 by 5,768 px: reverted to verbatim original
+8 of 8 benches 0 px and the 5 exactness captures IDENTICAL on the final binary (also Sponza D2 and bench 6 on the secondary-hit variant). A first restructuring of the secondary-hit code moved Sponza D2 by 5,768 px: reverted to verbatim original
 statements plus an override.
 
 **Needs a quiet machine (orchestrator):** resolve cost at 1080p by active layer count with the new blocks on the CC0 terrain, A/B/A, 3 replicas:
