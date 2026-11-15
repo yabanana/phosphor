@@ -190,6 +190,9 @@ private:
     MTL::RenderPipelineState* pipeline_ = nullptr;
     bool usingFallback_ = false;
     pipe::PipelineHandle visibilityOpaque_ = pipe::INVALID_PIPELINE, visibilityAlpha_ = pipe::INVALID_PIPELINE;
+    // F15.1 (ticket 22): the alpha raster pipeline that compiles per-slot texture transforms (scenes that have them), and the one drawn.
+    pipe::PipelineHandle visibilityAlphaTT_ = pipe::INVALID_PIPELINE, alphaServed_ = pipe::INVALID_PIPELINE;
+    [[nodiscard]] pipe::PipelineDesc visibilityRasterDesc(u32 pass, bool textureTransform = false) const;
     pipe::PipelineHandle kCandCount_ = pipe::INVALID_PIPELINE, kCandScan_ = pipe::INVALID_PIPELINE,
                          kCandWrite_ = pipe::INVALID_PIPELINE, kBCount_ = pipe::INVALID_PIPELINE,
                          kBScan_ = pipe::INVALID_PIPELINE, kBWrite_ = pipe::INVALID_PIPELINE;

@@ -31,6 +31,15 @@ struct ShadowPasses::Impl {
     Frame frame{}; GPUShadowParams params{}; MTL::GPUAddress paramsAddress=0;
     std::array<pipe::PipelineHandle,PassCount> kernels{};
     pipe::PipelineHandle transmitIndexed, transmitMesh;
+    // F15.1 (ticket 22): the overflow receiver prepass alpha-tests the base colour slot through its texture transform; a scene with
+    // per-slot transforms uses receiverTT (requested on first use), every other scene keeps `receiver`.
+    pipe::PipelineDesc receiverDesc(bool textureTransform=false) const {
+        pipe::PipelineDesc d;d.kind=pipe::PipelineKind::Render;d.label=textureTransform?"Indexed overflow shadow receivers (texture transform)":"Indexed overflow shadow receivers";
+        d.functions={"forward_surface_vs",textureTransform?"forward_shadow_receiver_tt_fs":"forward_shadow_receiver_fs",""};d.indirectCommandBuffers=true;
+        d.output(0,rg::Format::RGBA32Float).output(1,rg::Format::RGBA16Float).output(2,rg::Format::RGBA32Uint);
+        return d;
+    }
+    pipe::PipelineHandle receiverTT=pipe::INVALID_PIPELINE, receiverServed=pipe::INVALID_PIPELINE;
     pipe::PipelineHandle indexed, meshDepth, receiver, cacheIndexed, cacheMesh, cacheInitialize, cachePublish, cacheValidate, cacheComposite;
     MTL::DepthStencilState* depthState=nullptr;
     MTL::DepthStencilState* receiverDepthState=nullptr;
@@ -122,10 +131,7 @@ struct ShadowPasses::Impl {
         // The PCSS pass (also present with --shadows off, where it writes a fully lit mask) always binds the four transmittance maps: a 1x1 zero
         // texture stands in while the scene has no transmissive casters (and on the static cache path, which has no map).
         if(o.shadows!=ShadowMode::RT)dummyTransmit=lighting::texture(c,1,1,MTL::PixelFormatRGBA32Float,"CSM transmittance disabled zero");
-        d=pipe::PipelineDesc{};d.kind=pipe::PipelineKind::Render;d.label="Indexed overflow shadow receivers";
-        d.functions={"forward_surface_vs","forward_shadow_receiver_fs",""};d.indirectCommandBuffers=true;
-        d.output(0,rg::Format::RGBA32Float).output(1,rg::Format::RGBA16Float).output(2,rg::Format::RGBA32Uint);
-        receiver=p.request(d);
+        receiver=p.request(receiverDesc());
         if(settings.staticCache) {
             d=pipe::PipelineDesc{};d.kind=pipe::PipelineKind::Render;d.label="Regional static/dynamic CSM indexed";
             d.functions={"shadow_cache_depth_vertex","shadow_cache_depth_fragment",""};cacheIndexed=p.request(d);
@@ -350,6 +356,11 @@ struct ShadowPasses::Impl {
         if(!(signal==lastSignal)){++signalEpoch;lastSignal=signal;}const u64 signalRevision=signalEpoch;
         // F15 ticket 24: the temporal kernel and its history record layout follow the feature union (see shadows.metal); a change of layout
         // (a material edit that adds or removes glass) restarts every history, whatever the kernel that serves the transition frame.
+        receiverServed=receiver;
+        if(store.textureTransformInUse()){
+            if(receiverTT==pipe::INVALID_PIPELINE)receiverTT=pipelines.request(receiverDesc(true));
+            if(pipelines.isFinal(receiverTT))receiverServed=receiverTT;else pipelines.noteFallbackUse();
+        }
         const bool glassScene=(store.featureUnion()&MATERIAL_FEATURE_TRANSMISSION)!=0u;
         temporalServed=transmitPipes.serve(pipelines,1,kernels[Temporal],glassScene,[&]{return lighting::kernel("shadow_temporal");});
         const bool glassServed=temporalServed!=kernels[Temporal];
@@ -554,7 +565,7 @@ struct ShadowPasses::Impl {
         g.addPass("Indexed overflow receiver prepass",PassType::Raster,[&](PassBuilder& b){
             pointRef=b.writeColor(pointRef,0,LoadIntent::Preserve);normalRef=b.writeColor(normalRef,1,LoadIntent::Preserve);keyRef=b.writeColor(keyRef,2,LoadIntent::Preserve);
             depthRef=b.writeDepth(depthRef,LoadIntent::Preserve);scene.declareDrawReads(b);b.read(poseRef,Usage::ShaderRead,StageVertex);b.setProfileShaders("forward_surface_vs,forward_shadow_receiver_fs");
-        },[this](PassContext& ctx){scene.encodeOverlay(static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder()),receiver,true,receiverDepthState);});
+        },[this](PassContext& ctx){scene.encodeOverlay(static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder()),receiverServed,true,receiverDepthState);});
         g.addPass("Indexed receiver pack",PassType::Compute,[&](PassBuilder& b){
             for(auto r:{pointRef,normalRef,keyRef,depthRef})b.read(r,Usage::ShaderRead,StageDispatch);b.read(surfaceRef,Usage::ShaderRead,StageDispatch);surfaceRef=b.write(surfaceRef,Usage::ShaderWrite,StageDispatch);
             // scene.dataRef also versions vertex updates; preserve untouched

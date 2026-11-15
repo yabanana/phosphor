@@ -166,6 +166,28 @@ fragment ShadowReceiverOutput forward_shadow_receiver_fs(
             uint4(in.instanceSlot, instances[in.instanceSlot].generation, primitive, in.materialIndex)};
 }
 
+// F15.1 (ticket 22): the same prepass for a scene with per-slot KHR_texture_transform (the base colour slot's transform in the alpha test);
+// a separate entry point because metal-tt cannot lower an unspecialised descriptor whose function references a function constant.
+fragment ShadowReceiverOutput forward_shadow_receiver_tt_fs(
+    SurfaceVertexOut in [[stage_in]], uint primitive [[primitive_id]],
+    constant FrameConstants& frame [[buffer(0)]],
+    const device GPUInstance* instances [[buffer(2)]],
+    const device GPUMaterial* materials [[buffer(3)]],
+    const device TextureHandle* textures [[buffer(5)]],
+    constant GPUTemporalParams& temporal [[buffer(8)]]) {
+    const device auto& material = materials[in.materialIndex];
+    float2 uv = in.uv, dx = dfdx(in.uv)*exp2(temporal.mipBias), dy = dfdy(in.uv)*exp2(temporal.mipBias);
+    texXfUvOn(texXfForOn(frame.materialExtensions, material.flags, material.textureTransformIndex), TT_SLOT_BASE_COLOR, uv, dx, dy);
+    const float alpha = material.baseColor[3] * float(sampleOr(textures, material.baseColorTex, uv, half4(1), dx, dy).a);
+    if (alpha < material.alphaCutoff) discard_fragment();
+    float3 n = cross(dfdx(in.worldPos), dfdy(in.worldPos));
+    if (dot(n,n) < 1e-20f) discard_fragment();
+    const float3 eye(frame.cameraPosition[0],frame.cameraPosition[1],frame.cameraPosition[2]);
+    if(dot(n,eye-in.worldPos)<0.0f)n=-n;
+    return {float4(in.worldPos, 1), half4(half3(normalize(n)), 1),
+            uint4(in.instanceSlot, instances[in.instanceSlot].generation, primitive, in.materialIndex)};
+}
+
 // F7 overflow fallback: the existing GPU-built indexed ICB writes the same
 // linear lighting and guide contract as the visibility resolve.
 struct ForwardSurfaceOutput {

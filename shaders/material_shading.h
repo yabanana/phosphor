@@ -68,6 +68,16 @@ static half4 sampleOr(const device TextureHandle *table, uint index, float2 uv, 
 
 #include "texture_transform.h"
 
+// Sample a material texture with the slot's transform (the plain sample when the slot has none).
+static half4 sampleSlot(const device TextureHandle *table, uint index, uint slot, TexXf xf, float2 uv, half4 fallback, float2 dx,
+                        float2 dy) {
+    if (index == INVALID_TEXTURE_INDEX) {
+        return fallback;
+    }
+    texXfUv(xf, slot, uv, dx, dy);
+    return half4(table[index].tex.sample(kMaterialSampler, uv, gradient2d(dx, dy)));
+}
+
 static float3 evaluateLight(float3 N, float3 V, float3 L, float3 radiance, float3 albedo, float metallic,
                             float roughness) {
     const float3 H = normalize(V + L);

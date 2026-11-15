@@ -20,6 +20,15 @@ two random 3-bit codes agree with probability 1/8 for a uniform draw, up to 0.4 
 Valid pixels: inside the quad (6 px inset) and at least 0.08 cell away from a cell edge in the transformed UV (filtering and the edge
 position error of one pixel excluded).
 
+A fourth quad measures the NORMAL slot, including the rotation of the tangent frame with the transform (a normal map sampled through a
+rotated UV must tilt the normal along the rotated texel axes): its 4 x 4 cells tilt the normal by 0.6 towards +x, -x, +y or -y of the
+texture, the sun of the rig (direction fixed by src/testbench/corpus_rig.h) lights the quad, and a cell is "bright" when N'.L exceeds the
+flat N.L.  Extra negative controls: the frame NOT rotated with the transform and the frame rotated the wrong way.
+
+A fifth quad measures the ALPHA test (alphaMode MASK, cutoff 0.5) through the base colour slot's transform: the alpha channel of its
+texture is 255 / 0 per cell, a cell is "visible" when the quad covers the pixel (differs from the background) and "cut out" otherwise; it
+runs through the alpha raster pipeline of the visibility path (visibility_alpha_lit_tt_fs).
+
 Modes: --selftest (CPU: reference maths), --generate DIR, --run (needs the GPU lock: wrap with gpulock.py), --evaluate (existing capture).
 Exit codes: 0 ok, 1 gate failed, 2 usage, 3 non-discriminating control, 6 capture failed.
 """
@@ -52,15 +61,22 @@ CODES = [5, 3, 6, 1,
          3, 6, 1, 5,
          7, 2, 0, 4]
 
+TILT = 0.6  # tangent-space tilt of a normal-map cell (sin of the angle)
 TRANSFORMS = {
     "baseColor": {"offset": [0.2, 0.1], "rotation": 0.3, "scale": [2.0, 1.5]},
     "emissive": {"offset": [0.5, 0.25], "rotation": 1.5707963267948966, "scale": [1.25, 1.25]},
     "occlusion": {"offset": [0.05, 0.6], "rotation": -0.7, "scale": [3.0, 3.0]},
+    "normal": {"offset": [0.3, 0.15], "rotation": 1.5707963267948966, "scale": [2.0, 2.0]},
+    "alpha": {"offset": [0.1, 0.35], "rotation": 2.2, "scale": [1.75, 2.5]},
 }
+# towardSun of corpus_rig.h for yaw 0, pitch 0 (right = +X, up = +Y, back = +Z), normalised
+_L = (-0.45, 0.55, 0.70)
+_LN = math.sqrt(sum(c * c for c in _L))
+SUN = tuple(c / _LN for c in _L)
 IDENTITY = {"offset": [0.0, 0.0], "rotation": 0.0, "scale": [1.0, 1.0]}
 # quad index, measured slot, X centre
 # (slot, X centre, Z): the quads sit at +-0.1 in Z so that the scene bounds have a depth (the probe capture of the renderer needs a positive extent)
-QUADS = [("baseColor", -1.3, 0.1), ("emissive", 0.0, -0.1), ("occlusion", 1.3, 0.1)]
+QUADS = [("baseColor", -2.6, 0.1), ("emissive", -1.3, -0.1), ("occlusion", 0.0, 0.1), ("normal", 1.3, -0.1), ("alpha", 2.6, 0.1)]
 QUAD_SIZE = 1.0
 
 
@@ -118,6 +134,36 @@ def palette_png(kind):
     return png_bytes(TEXELS, TEXELS, pixel)
 
 
+def normal_png():
+    """Tilt codes 0..3 (+x, -x, +y, -y) of the cell code & 3 as a tangent-space normal map (linear RGB)."""
+    cell = TEXELS // CELLS
+    tz = math.sqrt(1.0 - TILT * TILT)
+    vectors = [(TILT, 0.0), (-TILT, 0.0), (0.0, TILT), (0.0, -TILT)]
+
+    def pixel(x, y):
+        tx, ty = vectors[code_at(x // cell, y // cell) & 3]
+        return tuple(int(round((v * 0.5 + 0.5) * 255)) for v in (tx, ty, tz))
+
+    return png_bytes(TEXELS, TEXELS, pixel)
+
+
+def alpha_png():
+    """Red cells whose alpha is 255 / 0 by bit 0 of the cell code (RGBA)."""
+    cell = TEXELS // CELLS
+    raw = bytearray()
+    for y in range(TEXELS):
+        raw.append(0)
+        for x in range(TEXELS):
+            raw += bytes((230, 40, 40, 255 if code_at(x // cell, y // cell) & 1 else 0))
+
+    def chunk(tag, data):
+        body = tag + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", TEXELS, TEXELS, 8, 6, 0, 0, 0)) +
+            chunk(b"IDAT", zlib.compress(bytes(raw), 9)) + chunk(b"IEND", b""))
+
+
 def flat_png(value):
     return png_bytes(8, 8, lambda x, y: (value, value, value))
 
@@ -131,7 +177,7 @@ def data_uri(png):
 def build_gltf(path):
     images = {  # name -> png
         "palette": palette_png("color"), "ao": palette_png("ao"),
-        "black": flat_png(0), "grey": flat_png(60), "white": flat_png(255),
+        "black": flat_png(0), "grey": flat_png(60), "white": flat_png(255), "normal": normal_png(), "alphatex": alpha_png(), "flatnormal": png_bytes(8, 8, lambda x, y: (128, 128, 255)),
     }
     names = list(images)
     textures = [{"source": i, "sampler": 0} for i in range(len(names))]
@@ -146,22 +192,27 @@ def build_gltf(path):
         "baseColor": ("palette", "black", "white", [1, 1, 1]),
         "emissive": ("grey", "palette", "white", [1, 1, 1]),
         "occlusion": ("white", "black", "ao", [1, 1, 1]),
+        "normal": ("white", "black", "white", [1, 1, 1]),
+        "alpha": ("alphatex", "black", "white", [1, 1, 1]),
     }
     materials = []
-    positions, normals, uvs, indices = [], [], [], []
+    positions, normals, uvs, indices, tangents = [], [], [], [], []
     for qi, (slot, cx, cz) in enumerate(QUADS):
         base, emi, occ, ef = recipes[slot]
         materials.append({
             "name": f"measure-{slot}",
-            "pbrMetallicRoughness": {"baseColorTexture": tex(base, "baseColor"), "metallicFactor": 0.0, "roughnessFactor": 1.0},
+            **({"alphaMode": "MASK", "alphaCutoff": 0.5} if slot == "alpha" else {}),
+            "pbrMetallicRoughness": {"baseColorTexture": tex(base, "alpha" if slot == "alpha" else "baseColor"), "metallicFactor": 0.0, "roughnessFactor": 1.0},
             "emissiveTexture": tex(emi, "emissive"), "emissiveFactor": ef,
             "occlusionTexture": tex(occ, "occlusion"),
+            "normalTexture": tex("normal" if slot == "normal" else "flatnormal", "normal"),
         })
         h = QUAD_SIZE / 2
         corners = [(cx - h, h, 0, 0), (cx - h, -h, 0, 1), (cx + h, -h, 1, 1), (cx + h, h, 1, 0)]
         for x, y, u, v in corners:
             positions += [x, y, cz]
             normals += [0.0, 0.0, 1.0]
+            tangents += [1.0, 0.0, 0.0, 1.0]
             uvs += [u, v]
         b = qi * 4
         indices += [b, b + 1, b + 2, b, b + 2, b + 3]
@@ -169,26 +220,29 @@ def build_gltf(path):
     pos_b = struct.pack(f"<{len(positions)}f", *positions)
     nor_b = struct.pack(f"<{len(normals)}f", *normals)
     uv_b = struct.pack(f"<{len(uvs)}f", *uvs)
+    tan_b = struct.pack(f"<{len(tangents)}f", *tangents)
     idx_b = struct.pack(f"<{len(indices)}H", *indices)
-    blob = pos_b + nor_b + uv_b + idx_b
+    blob = pos_b + nor_b + uv_b + tan_b + idx_b
     views = [
         {"buffer": 0, "byteOffset": 0, "byteLength": len(pos_b)},
         {"buffer": 0, "byteOffset": len(pos_b), "byteLength": len(nor_b)},
         {"buffer": 0, "byteOffset": len(pos_b) + len(nor_b), "byteLength": len(uv_b)},
+        {"buffer": 0, "byteOffset": len(pos_b) + len(nor_b) + len(uv_b), "byteLength": len(tan_b)},
     ]
     accessors = [
         {"bufferView": 0, "componentType": 5126, "count": len(positions) // 3, "type": "VEC3",
          "min": [min(positions[0::3]), min(positions[1::3]), min(positions[2::3])], "max": [max(positions[0::3]), max(positions[1::3]), max(positions[2::3])]},
         {"bufferView": 1, "componentType": 5126, "count": len(normals) // 3, "type": "VEC3"},
         {"bufferView": 2, "componentType": 5126, "count": len(uvs) // 2, "type": "VEC2"},
+        {"bufferView": 3, "componentType": 5126, "count": len(tangents) // 4, "type": "VEC4"},
     ]
     # one mesh per quad, each with its own index buffer view
     meshes, nodes = [], []
-    offset = len(pos_b) + len(nor_b) + len(uv_b)
+    offset = len(pos_b) + len(nor_b) + len(uv_b) + len(tan_b)
     for qi in range(len(QUADS)):
         views.append({"buffer": 0, "byteOffset": offset + qi * 12, "byteLength": 12})
         accessors.append({"bufferView": len(views) - 1, "componentType": 5123, "count": 6, "type": "SCALAR"})
-        meshes.append({"primitives": [{"attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}, "indices": len(accessors) - 1, "material": qi}]})
+        meshes.append({"primitives": [{"attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2, "TANGENT": 3}, "indices": len(accessors) - 1, "material": qi}]})
         nodes.append({"mesh": qi, "name": f"quad-{QUADS[qi][0]}"})
     doc = {
         "asset": {"version": "2.0", "generator": "tools/f15_texture_transform_check.py"},
@@ -230,8 +284,34 @@ def quad_pixel_to_uv(px, py, cx, cz, distance, aspect, width, height):
 
 # --- evaluation ----------------------------------------------------------------------------------------------------
 
-def decode_pixel(rgb, lo, hi, slot):
-    if slot == "occlusion":
+def normal_bright(code, transform, frame):
+    """Is the cell's normal turned towards the sun more than the flat one?  frame: 'rotated' (the tangent frame follows the UV
+    transform: T' = inv00 T - inv10 B, B' = -inv01 T + inv11 B), 'plain' (not rotated), 'inverse' (rotated the wrong way)."""
+    tz = math.sqrt(1.0 - TILT * TILT)
+    tx, ty = [(TILT, 0.0), (-TILT, 0.0), (0.0, TILT), (0.0, -TILT)][code & 3]
+    c, s_ = math.cos(transform["rotation"]), math.sin(transform["rotation"])
+    sx, sy = transform["scale"]
+    m00, m01, m10, m11 = c * sx, -s_ * sy, s_ * sx, c * sy
+    det = m00 * m11 - m01 * m10
+    i00, i01, i10, i11 = m11 / det, -m01 / det, -m10 / det, m00 / det
+    if frame == "plain":
+        t_, b_ = (1.0, 0.0), (0.0, 1.0)
+    else:
+        sign = 1.0 if frame == "rotated" else -1.0
+        # T = (1, 0), B = (0, 1) in the plane of the quad; the inverse rotation negates the off-diagonal terms
+        t_ = (i00, -sign * i10)
+        b_ = (-sign * i01, i11)
+        lt, lb = math.hypot(*t_), math.hypot(*b_)
+        t_, b_ = (t_[0] / lt, t_[1] / lt), (b_[0] / lb, b_[1] / lb)
+    n = (t_[0] * tx + b_[0] * ty, t_[1] * tx + b_[1] * ty, tz)
+    ln = math.sqrt(sum(v * v for v in n))
+    return sum(n[i] * SUN[i] for i in range(3)) / ln > SUN[2]
+
+
+def decode_pixel(rgb, lo, hi, slot, background=None):
+    if slot == "alpha":
+        return int(max(abs(rgb[c] - background[c]) for c in range(3)) > 8)
+    if slot in ("occlusion", "normal"):
         luma = (rgb[0] + rgb[1] + rgb[2]) / 3.0
         return int(luma > (lo[3] + hi[3]) / 2.0)
     return sum(int(rgb[c] > (lo[c] + hi[c]) / 2.0) << (2 - c) for c in range(3))
@@ -240,6 +320,7 @@ def decode_pixel(rgb, lo, hi, slot):
 def evaluate_slot(img, slot, cx, cz, distance, aspect):
     width, height = img.size
     pix = img.load()
+    background = pix[4, 4]
     x0, y0 = project(cx - QUAD_SIZE / 2, QUAD_SIZE / 2, cz, distance, aspect, width, height)
     x1, y1 = project(cx + QUAD_SIZE / 2, -QUAD_SIZE / 2, cz, distance, aspect, width, height)
     samples = []
@@ -260,18 +341,24 @@ def evaluate_slot(img, slot, cx, cz, distance, aspect):
         luma = sum(rgb[:3]) / 3.0
         lo[3], hi[3] = min(lo[3], luma), max(hi[3], luma)
     result = {"valid_pixels": len(samples), "range": {"lo": lo, "hi": hi}}
-    candidates = {"reference": TRANSFORMS[slot], "identity": IDENTITY}
+    # name -> (transform of the lookup, frame mode of the normal slot)
+    candidates = {"reference": (TRANSFORMS[slot], "rotated"), "identity": (IDENTITY, "rotated")}
     for other in TRANSFORMS:
         if other != slot:
-            candidates[f"uniform-bake:{other}-transform"] = TRANSFORMS[other]
+            candidates[f"uniform-bake:{other}-transform"] = (TRANSFORMS[other], "rotated")
+    if slot == "normal":
+        candidates["frame-not-rotated"] = (TRANSFORMS[slot], "plain")
+        candidates["frame-rotated-the-wrong-way"] = (TRANSFORMS[slot], "inverse")
     agree = {name: 0 for name in candidates}
     for _, _, u, v, rgb in samples:
-        seen = decode_pixel(rgb, lo, hi, slot)
-        for name, t in candidates.items():
+        seen = decode_pixel(rgb, lo, hi, slot, background)
+        for name, (t, frame) in candidates.items():
             col, row, _, _ = cell_of(*transform_uv(t, u, v))
             want = code_at(col, row)
-            if slot == "occlusion":
+            if slot in ("occlusion", "alpha"):
                 want &= 1
+            elif slot == "normal":
+                want = int(normal_bright(want, t, frame))
             if seen == want:
                 agree[name] += 1
     result["agreement"] = {name: round(n / len(samples), 4) for name, n in agree.items()}

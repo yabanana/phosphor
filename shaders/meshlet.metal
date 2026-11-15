@@ -24,6 +24,7 @@
 using namespace metal;
 using namespace phosphor;
 #include "surface_geometry.h"
+#include "texture_transform.h" // F15.1 (ticket 22): the *_tt_fs alpha tests
 
 static_assert(MB_PARAMS == 0 && MB_INSTANCES == 1 && MB_MESHES == 2 && MB_MATERIALS == 3 && MB_SCENE_FLAGS == 4 &&
                   MB_GROUP_SUMS == 5 && MB_RANGES == 6 && MB_ARGS == 7 && MB_COUNTERS == 8 && MB_GATE == 9 &&
@@ -787,6 +788,46 @@ fragment uint visibility_alpha_lit_fs(VisibilityFragment in [[stage_in]], const 
         (material.baseColorTex == INVALID_TEXTURE_INDEX
              ? 1.0f
              : float(half(textures[material.baseColorTex].tex.sample(sampling, in.vert.uv, gradient2d(uvDx, uvDy)).a)));
+    if (alpha < material.alphaCutoff)
+        discard_fragment();
+    return in.primitive.id;
+}
+
+// F15.1 (ticket 22): the alpha tests of a scene with per-slot KHR_texture_transform (SceneStore::textureTransformInUse) sample the base
+// colour slot through its transform.  Separate entry points (no function constant: metal-tt cannot lower an unspecialised descriptor
+// whose function references one); the plain entry points above are unchanged.  The frame constants are bound at MR_FRAME (0) in the
+// draw table of the mesh path.
+fragment uint visibility_alpha_tt_fs(VisibilityFragment in [[stage_in]], const device GPUMaterial *materials [[buffer(3)]],
+                                     const device VisibilityTextureHandle *textures [[buffer(5)]],
+                                     constant GPUTemporalParams &temporal [[buffer(16)]],
+                                     constant FrameConstants &frame [[buffer(0)]]) {
+    const GPUMaterial material = materials[in.vert.materialIndex];
+    constexpr sampler sampling(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
+    float2 uv = in.vert.uv, noDx = float2(0.0f), noDy = float2(0.0f); // implicit derivatives follow the transformed uv
+    texXfUvOn(texXfForOn(frame.materialExtensions, material.flags, material.textureTransformIndex), TT_SLOT_BASE_COLOR, uv, noDx, noDy);
+    const float alpha =
+        material.baseColor[3] *
+        (material.baseColorTex == INVALID_TEXTURE_INDEX
+             ? 1.0f
+             : float(half(textures[material.baseColorTex].tex.sample(sampling, uv, bias(temporal.mipBias)).a)));
+    if (alpha < material.alphaCutoff)
+        discard_fragment();
+    return in.primitive.id;
+}
+fragment uint visibility_alpha_lit_tt_fs(VisibilityFragment in [[stage_in]], const device GPUMaterial *materials [[buffer(3)]],
+                                         const device VisibilityTextureHandle *textures [[buffer(5)]],
+                                         constant GPUTemporalParams &temporal [[buffer(16)]],
+                                         constant FrameConstants &frame [[buffer(0)]]) {
+    const GPUMaterial material = materials[in.vert.materialIndex];
+    constexpr sampler sampling(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
+    const float footprintScale = exp2(temporal.mipBias);
+    float2 uv = in.vert.uv, uvDx = dfdx(in.vert.uv) * footprintScale, uvDy = dfdy(in.vert.uv) * footprintScale;
+    texXfUvOn(texXfForOn(frame.materialExtensions, material.flags, material.textureTransformIndex), TT_SLOT_BASE_COLOR, uv, uvDx, uvDy);
+    const float alpha =
+        material.baseColor[3] *
+        (material.baseColorTex == INVALID_TEXTURE_INDEX
+             ? 1.0f
+             : float(half(textures[material.baseColorTex].tex.sample(sampling, uv, gradient2d(uvDx, uvDy)).a)));
     if (alpha < material.alphaCutoff)
         discard_fragment();
     return in.primitive.id;

@@ -21,18 +21,30 @@ static TexXf texXfNone() {
     return x;
 }
 
+// The "On" functions never reference kTextureTransform: an entry point that only exists for scenes with transforms (the *_tt_fs alpha
+// tests) uses them, so its descriptor needs no function constant (metal-tt cannot lower an unspecialised descriptor whose function
+// references one).  The plain names compile the transform in only when the pipeline sets the reserved constant.
+
 // The block of a material: the extension buffer address plus the material's first transform record.
-static TexXf texXfFor(const device GPUMaterialExtRecord *extensions, uint flags, uint index) {
+static TexXf texXfForOn(const device GPUMaterialExtRecord *extensions, uint flags, uint index) {
     TexXf x = texXfNone();
-    if (kTextureTransform != 0u && extensions != nullptr && (flags & MATERIAL_FLAG_TEXTURE_TRANSFORM) != 0u) {
+    if (extensions != nullptr && (flags & MATERIAL_FLAG_TEXTURE_TRANSFORM) != 0u) {
         x.rec = reinterpret_cast<const device GPUTextureTransformRecord *>(extensions + index);
         x.mask = x.rec[0].slotMask;
     }
     return x;
 }
 
+static TexXf texXfFor(const device GPUMaterialExtRecord *extensions, uint flags, uint index) {
+    return kTextureTransform != 0u ? texXfForOn(extensions, flags, index) : texXfNone();
+}
+
+static bool texXfHasOn(TexXf x, uint slot) {
+    return ((x.mask >> slot) & 1u) != 0u;
+}
+
 static bool texXfHas(TexXf x, uint slot) {
-    return kTextureTransform != 0u && ((x.mask >> slot) & 1u) != 0u;
+    return kTextureTransform != 0u && texXfHasOn(x, slot);
 }
 
 static GPUTextureTransform texXfGet(TexXf x, uint slot) {
@@ -47,14 +59,19 @@ static float2 texXfLinear(GPUTextureTransform t, float2 d) {
     return float2(t.m[0] * d.x + t.m[1] * d.y, t.m[2] * d.x + t.m[3] * d.y);
 }
 
-// The slot's uv and derivatives (unchanged when the slot has no transform or the feature is compiled out).
-static void texXfUv(TexXf x, uint slot, thread float2 &uv, thread float2 &dx, thread float2 &dy) {
-    if (texXfHas(x, slot)) {
+// The slot's uv and derivatives (unchanged when the slot has no transform).
+static void texXfUvOn(TexXf x, uint slot, thread float2 &uv, thread float2 &dx, thread float2 &dy) {
+    if (texXfHasOn(x, slot)) {
         const GPUTextureTransform t = texXfGet(x, slot);
         uv = texXfApply(t, uv);
         dx = texXfLinear(t, dx);
         dy = texXfLinear(t, dy);
     }
+}
+
+// Unchanged when the feature is compiled out.
+static void texXfUv(TexXf x, uint slot, thread float2 &uv, thread float2 &dx, thread float2 &dy) {
+    if (kTextureTransform != 0u) texXfUvOn(x, slot, uv, dx, dy);
 }
 
 // The tangent frame of a normal-like slot.  T = dP/du, B = -dP/dv (glTF: bitangent towards decreasing V); with uv' = M uv the
@@ -75,14 +92,4 @@ static void texXfFrame(TexXf x, uint slot, thread float3 &T, thread float3 &B) {
             }
         }
     }
-}
-
-// Sample a material texture with the slot's transform (the plain sample when the slot has none).
-static half4 sampleSlot(const device TextureHandle *table, uint index, uint slot, TexXf xf, float2 uv, half4 fallback, float2 dx,
-                        float2 dy) {
-    if (index == INVALID_TEXTURE_INDEX) {
-        return fallback;
-    }
-    texXfUv(xf, slot, uv, dx, dy);
-    return half4(table[index].tex.sample(kMaterialSampler, uv, gradient2d(dx, dy)));
 }
