@@ -173,3 +173,22 @@ statements plus an override.
 **Needs a quiet machine (orchestrator):** resolve cost at 1080p by active layer count with the new blocks on the CC0 terrain, A/B/A, 3 replicas:
 `python3 -I tools/f15_layers_timing.py run --out build/f15-layers-timing --binning` (new arms `blocks-1..4` = `terrain/layerblocks=on/weights=...`, plus the old arms); and
 Sponza D2 / RT reflection kernel timing after the secondary-hit change.
+
+2026-11-15 (texxform agent, follow-up on the integrated tip 4e89658): layer-stack coverage alpha and per-slot transforms inside stacks.
+
+- **Coverage alpha** = the stack's own record alpha x the blended layer alpha (`resolveLayerWeights`, `layerStackAlpha`, `layerCoverage` in `shaders/layer_resolve.h`: the weights are those of the base blend, a_i = layer i's baseColor[3] x
+  its base colour texture alpha at uv * uvScale through the layer's own transform), tested against the STACK's cutoff, at every alpha site of `$H/layers-alpha-notes.md`: `material_shading.h` (before the alpha test:
+  forward, resolve, guide kernels, indexed fallback), `meshlet.metal` (the four visibility alpha entries), `forward.metal` (the receiver prepasses), `shadows.metal` (CSM), `shadow_cache.metal`, `rt_intersections.metal`
+  (any-hit, both entries: RT shadows, reflection rays, GI rays), `reflection_probes.metal` (probe capture).  Plumbing: `GPUTemporalParams` carries the extension-buffer pointer (offset 184, size 192, filled in
+  `visibility_renderer.cpp`); the other sites already bound the extension buffer (ticket 22).  CPU mirrors: `rt_check.cpp` reports a stack's alpha decision Ambiguous (the CPU reference has no extension records) instead of
+  deciding from the stack's own record; `rt_proxy.cpp` protection already tests the stack's own cutoff.  Emitter alpha of a stack (`restir_common.h`): the stack's own record (declared optional in the notes).
+- **Fixtures** (`tools/f15_texture_transform_layers.py`, glTF + a material-overrides file: the override loader now resolves a layer's material NAME to the library index): a ramp mask R = u, G = 1 - u, layer 0 alpha 1, layer 1
+  alpha 0, stack MASK cutoff 0.5: the coverage boundary sits at u = 0.5.  stack-visibility 1.0, stack-rt-shadow 1.0, stack-csm-shadow 1.0, stack-cache-shadow 1.0, stack-reflection 0.9975 (thresholds 0.97, set before the
+  run); NEGATIVE controls: the stack's OWN alpha (coverage 1 everywhere) 0.5 / 0.65 / 0.65 / 0.65 / 0.50 and the inverted ramp 0.0 / 0.0 / 0.0 / 0.0 / 0.0025, all < 0.90: they fail as required.
+- **Per-slot transforms inside stacks** (ticket 22 owner decision): `TT_SLOT_LAYER_MASK` (the mask through the stack's block), `TT_SLOT_LAYER_HEIGHT0 + i` (layer i's height on uv * uvScale through the stack's block), every texture of layer
+  i (base colour, metal-rough, occlusion, normal with the texel axes rotated into the mesh frame, emissive, and the feature textures of `layerFeaturesOf`) through the block of the layer's SUB-material on uv * uvScale.
+  A stack with any transform is PerSlot and never baked; a layer sub-material that is only UNIFORM still gets its block (`SceneStore::layerTargets`: nothing bakes a layer).  A transform on a layer texture is no
+  longer Unsupported.  The transform block grew to 3 extension groups (25 slots).  Fixtures: layer-tex (layer 1 base colour palette through a per-slot transform, decoy transform on a second slot, weight 1) cell agreement
+  1.0, controls (identity, uniform-bake = other slots' transforms) 0.09-0.15; layer-mask (halves mask mirrored by the mask's own transform) and layer-height (halves height swapped by the height's transform) measure R - G
+  left - right -0.68 / -0.68 with the reference's sign (model -1), the identity predicts +1 and the controls disagree.
+- Still declared: the stack's emission-as-emitter alpha uses the stack's own record; a layer sub-material used BOTH directly by a primitive and as a layer would apply a uniform transform twice (baked + block): not authored anywhere.
