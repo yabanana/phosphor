@@ -208,13 +208,13 @@ TEST_CASE("F13 compact denoise history round-trips every field a later frame rea
     // Budget closure: header + 64-byte record + 16-byte specular extension
     // replace the 112-byte record. Every value the temporal pass can write must
     // survive packing, and the reuse decision on the unpacked history must match.
-    static_assert(sizeof(GPUDenoiseHistoryHeader)==64&&sizeof(GPUDenoiseHistoryRecord)==64&&sizeof(GPUDenoiseSpecularHistory)==16);
+    static_assert(sizeof(GPUDenoiseHistoryHeader)==64&&sizeof(GPUDenoiseHistoryRecord)==64&&sizeof(GPUDenoiseSpecularHistory)==32);
     CHECK(DenoiseSettings{}.maxHistory<=DENOISE_HISTORY_MAX_LENGTH);CHECK(REFLECTION_PATH_ENVIRONMENT<=DENOISE_HISTORY_MAX_PATH);
     CHECK((1u|DENOISE_HISTORY_STOCHASTIC)<=DENOISE_HISTORY_MAX_FLAGS);
     for(const u32 length:{0u,1u,2u,255u,256u})for(const u32 flags:{0u,1u,DENOISE_HISTORY_STOCHASTIC,1u|DENOISE_HISTORY_STOCHASTIC})
         for(u32 path=0;path<=REFLECTION_PATH_ENVIRONMENT;++path)for(const u32 valid:{0u,1u}){const u32 state=denoisePackState(length,flags,path,valid);
             CHECK(denoiseStateLength(state)==length);CHECK(denoiseStateFlags(state)==flags);CHECK(denoiseStatePath(state)==path);CHECK(denoiseStateValid(state)==valid);}
-    CHECK(denoiseHistoryBytes(100,false)==64+100*64);CHECK(denoiseHistoryBytes(100,true)==64+100*80);CHECK(denoiseHistorySpecularOffset(100)==64+100*64);
+    CHECK(denoiseHistoryBytes(100,false)==64+100*64);CHECK(denoiseHistoryBytes(100,true)==64+100*96);CHECK(denoiseHistorySpecularOffset(100)==64+100*64);
     DenoiseSettings settings;const auto s=receiver();
     for(const u32 variant:{0u,1u,2u,3u,4u}){const u32 signal=variant==4?DENOISE_SIGNAL_SPECULAR:variant;
         const auto p=denoiseParameters(settings,4,4,signal,2,7,9,false);auto m=spec();if(variant==4)m.flags|=SPECULAR_SAMPLE_STOCHASTIC;
@@ -439,4 +439,72 @@ TEST_CASE("F15.1 (ticket 13) a transmissive pixel has one key whichever branch o
     CHECK(denoiseStableLobeKey(specularSampleLobeKey(reflectBranch),faint)==0u);CHECK(denoiseStableLobeKey(specularSampleLobeKey(refractBranch),faint)==(SPECULAR_LOBE_TRANSMISSION|4u));
     CHECK(denoiseStableLobeKey(specularSampleLobeKey(kCoat),DenoiseLobeGuide{})==SPECULAR_LOBE_CLEARCOAT);
     DenoiseLobeGuide nan=glass;nan.transmissionFactor=std::nanf("");CHECK(denoiseStableLobeKey(0u,nan)==0u);
+}
+
+namespace {
+GPUSpecularSample endpointSample(u32 key,float x,float y,float z){GPUSpecularSample m=spec();m.flags|=SPECULAR_SAMPLE_STOCHASTIC|SPECULAR_SAMPLE_ENDPOINT|specularSampleLobeFlags(SPECULAR_LOBE_TRANSMISSION,true);
+    m.direction[0]=x;m.direction[1]=y;m.direction[2]=z;m.proposalSolidAngle=denoiseEndpointKeyEncode(key);return m;}
+GPUDenoiseSpecularHistory endpointHistory(u32 key,float x,float y,float z){GPUDenoiseSpecularHistory h{};h.endpoint[0]=x;h.endpoint[1]=y;h.endpoint[2]=z;h.endpointKey=denoiseEndpointHistoryKey(key);return h;}
+}
+TEST_CASE("F15.1 (ticket 13) the endpoint key rides in a normal float and the sample flag is a free bit"){
+    for(const u32 key:{0u,1u,2u,12345u,0x7fffffu}){const float e=denoiseEndpointKeyEncode(key);CHECK(std::isnormal(e));CHECK(e>=1.0f);CHECK(e<2.0f);CHECK(denoiseEndpointKeyDecode(e)==key);}
+    CHECK((SPECULAR_SAMPLE_ENDPOINT&(SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_PREFILTERED|SPECULAR_SAMPLE_MIXED|SPECULAR_SAMPLE_STOCHASTIC|SPECULAR_SAMPLE_ERROR|
+        SPECULAR_SAMPLE_LOBE_KEY_MASK|(SPECULAR_SAMPLE_COUNT_MASK<<SPECULAR_SAMPLE_COUNT_SHIFT)))==0u);
+    CHECK(denoiseEndpointHistoryKey(0u)!=DENOISE_ENDPOINT_NONE); // key 0 (environment) is a real key, a zeroed record is none
+    CHECK(GPUDenoiseSpecularHistory{}.endpointKey==DENOISE_ENDPOINT_NONE);
+}
+TEST_CASE("F15.1 (ticket 13) the history carries the endpoint of the sample it was accumulated from"){
+    DenoiseLobeGuide glass;glass.ior=1.5f;glass.transmissionFactor=1.0f;const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);const auto s=receiver();
+    const auto m=endpointSample(41u,.25f,-.5f,.125f);const auto h=denoiseTemporal(s,glm::vec3(1),{},p,{},{},m,-1,glm::vec3(0),glm::vec3(-1),&glass);REQUIRE(h.valid);
+    const auto back=denoiseUnpack(denoisePackHeader(h),denoisePackRecord(h),denoisePackSpecular(h));
+    CHECK(back.endpointKey==denoiseEndpointHistoryKey(41u));CHECK(back.endpoint[0]==.25f);CHECK(back.endpoint[1]==-.5f);CHECK(back.endpoint[2]==.125f);
+    // a sample without the flag, or an error sample, stores none
+    auto plain=m;plain.flags&=~SPECULAR_SAMPLE_ENDPOINT;CHECK(denoiseTemporal(s,glm::vec3(1),{},p,{},{},plain,-1,glm::vec3(0),glm::vec3(-1),&glass).endpointKey==DENOISE_ENDPOINT_NONE);
+    auto bad=m;bad.flags|=SPECULAR_SAMPLE_ERROR;CHECK(denoiseTemporal(s,glm::vec3(1),{},p,{},{},bad,-1,glm::vec3(0),glm::vec3(-1),&glass).endpointKey==DENOISE_ENDPOINT_NONE);
+    // other signals never store one
+    const auto di=denoiseParameters({},4,4,DENOISE_SIGNAL_DI,0,1,1,false);CHECK(denoiseTemporal(s,glm::vec3(1),{},di,{},{},m).endpointKey==DENOISE_ENDPOINT_NONE);
+}
+TEST_CASE("F15.1 (ticket 13) the endpoint window search picks the nearest same-key endpoint inside the footprint rule"){
+    const auto center=endpointSample(5u,1.0f,0.0f,0.0f);
+    // footprint: the largest endpoint distance to a same-key neighbour, other keys and missing endpoints ignored
+    const GPUSpecularSample neighbours[4]={endpointSample(5u,1.0f,0.2f,0.0f),endpointSample(5u,1.0f,0.0f,-0.1f),endpointSample(6u,9.0f,9.0f,9.0f),spec()};
+    CHECK(denoiseEndpointFootprint(center,neighbours,4)==doctest::Approx(0.2f));
+    CHECK(denoiseEndpointFootprint(center,neighbours+2,2)==0.0f);
+    const float f=denoiseEndpointFootprint(center,neighbours,4);
+    const GPUDenoiseSpecularHistory window[5]={GPUDenoiseSpecularHistory{},endpointHistory(5u,1.0f,0.5f,0.0f),endpointHistory(5u,1.0f,0.25f,0.0f),endpointHistory(7u,1.0f,0.0f,0.0f),endpointHistory(5u,1.0f,0.25f,0.0f)};
+    CHECK(denoiseEndpointSelect(center,f,window,5)==2); // nearest same key (0.25 <= 1.5 x 0.2), the first of the equal ones
+    CHECK(denoiseEndpointSelect(center,f,window+1,1)==-1); // 0.5 is beyond 1.5 x 0.2
+    CHECK(denoiseEndpointSelect(center,0.0f,window,5)==2); // no footprint (a sliver): the nearest same-key endpoint of the window
+    CHECK(denoiseEndpointSelect(center,f,window+3,1)==-1); // other key only
+    auto none=center;none.flags&=~SPECULAR_SAMPLE_ENDPOINT;CHECK(denoiseEndpointSelect(none,f,window,5)==-1);
+    // an environment endpoint (key 0) matches only environment history
+    const auto sky=endpointSample(0u,0.0f,1.0f,0.0f);const GPUDenoiseSpecularHistory skyWindow[2]={endpointHistory(5u,0.0f,1.0f,0.0f),endpointHistory(0u,0.0f,.99f,.1f)};
+    CHECK(denoiseEndpointSelect(sky,0.2f,skyWindow,2)==1);
+}
+TEST_CASE("F15.1 (ticket 13) an endpoint-matched candidate skips the receiver geometry tests only"){
+    DenoiseLobeGuide glass;glass.ior=1.5f;glass.transmissionFactor=1.0f;const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);const auto s=receiver();
+    const auto m=endpointSample(41u,.25f,-.5f,.125f);const auto h=denoiseTemporal(s,glm::vec3(1),{},p,{},{},m,-1,glm::vec3(0),glm::vec3(-1),&glass);REQUIRE(h.valid);
+    auto tilted=s;tilted.shadingNormal[0]=.8f;tilted.shadingNormal[2]=.6f;tilted.geometricNormal[0]=.8f;tilted.geometricNormal[2]=.6f; // another point of the sphere
+    auto farther=s;farther.depth=3.4f;farther.position[2]=.4f;
+    CHECK_FALSE(denoiseCompatible(tilted,h,p,m,&glass));CHECK(denoiseCompatible(tilted,h,p,m,&glass,false));
+    CHECK_FALSE(denoiseCompatible(farther,h,p,m,&glass));CHECK(denoiseCompatible(farther,h,p,m,&glass,false));
+    // identity, revision, lobe key and roughness are still compared
+    auto other=s;other.instanceSlot=8;CHECK_FALSE(denoiseCompatible(other,h,p,m,&glass,false));
+    auto rev=s;rev.materialRevision=6;CHECK_FALSE(denoiseCompatible(rev,h,p,m,&glass,false));
+    auto rough=s;rough.roughness=.9f;CHECK_FALSE(denoiseCompatible(rough,h,p,m,&glass,false));
+    DenoiseLobeGuide coat=glass;coat.transmissionFactor=0.0f;auto reflectBranch=m;reflectBranch.flags&=~SPECULAR_SAMPLE_LOBE_KEY_MASK;CHECK_FALSE(denoiseCompatible(s,h,p,reflectBranch,&coat,false)); // another lobe key
+    auto reset=p;reset.flags|=DENOISE_RESET;CHECK_FALSE(denoiseCompatible(s,h,reset,m,&glass,false));
+}
+TEST_CASE("F15.1 (ticket 13) an endpoint-matched history blends at 1 / maxHistory once its length reaches the cap"){
+    DenoiseLobeGuide glass;glass.ior=1.5f;glass.transmissionFactor=1.0f;DenoiseSettings settings;const auto p=denoiseParameters(settings,4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);
+    const auto s=receiver();const auto m=endpointSample(41u,.25f,-.5f,.125f);
+    DenoiseHistory h{};for(u32 i=0;i<settings.maxHistory+4;++i)h=denoiseTemporal(s,glm::vec3(0),h,p,{},{},m,-1,glm::vec3(0),glm::vec3(-1),&glass,true);
+    REQUIRE(h.length==settings.maxHistory);
+    const auto surface=denoiseTemporal(s,glm::vec3(1),h,p,{},{},m,-1,glm::vec3(0),glm::vec3(-1),&glass,false);
+    const auto matched=denoiseTemporal(s,glm::vec3(1),h,p,{},{},m,-1,glm::vec3(0),glm::vec3(-1),&glass,true);
+    CHECK(surface.color[0]==doctest::Approx(settings.temporalAlpha));
+    CHECK(matched.color[0]==doctest::Approx(1.0f/float(settings.maxHistory)));
+    // a short history still blends by 1 / length (the running mean), matched or not
+    const auto first=denoiseTemporal(s,glm::vec3(1),denoiseTemporal(s,glm::vec3(0),{},p,{},{},m,-1,glm::vec3(0),glm::vec3(-1),&glass,true),p,{},{},m,-1,glm::vec3(0),glm::vec3(-1),&glass,true);
+    CHECK(first.color[0]==doctest::Approx(0.5f));
 }

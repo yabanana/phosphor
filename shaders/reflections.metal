@@ -1,5 +1,6 @@
 #include "reflection_common.h"
 #include "texture_transform_core.h" // F15.1 (ticket 22): per-slot texture transforms at the reflection hits
+#include "renderer/denoise_endpoint.h"
 
 // RT and screen-space kernels share params0/surfaces1, cache13/GIparams14,
 // probeMetadata18, specOutput17. Textures: baseRadiance0, depth1, cubeAtlas2,
@@ -317,6 +318,46 @@ inline float3 reflectionRefractWalk(float3 origin,float3 direction,float3 weight
     }
     return radiance;
 }
+// F15.1 (ticket 13, temporal clip): the ENDPOINT of the refracted path of a transmissive pixel, for the endpoint-matched denoiser history
+// (renderer/denoise_endpoint.h).  A DETERMINISTIC walk (no random numbers, no shading): the camera-visible surface refracts at h = n (thin-walled: the
+// ray stays straight), every glass interface after it refracts (reflects only under total internal reflection), back faces of single-sided opaque
+// surfaces are skipped like in the transport, and the walk ends at the first non-glass hit (key = slot + 1, point = the OBJECT-space position of the
+// hit from the vertices and the barycentric coordinates: a moving panel and an orbiting camera keep the same point) or in the environment (key 0, point
+// = the final ray direction: a miss, the crossing bound or the event bound, like the transport).  At most kTransmissionMaxEvents traces.
+struct ReflectionEndpoint {bool valid;uint key;float3 point;};
+inline ReflectionEndpoint reflectionRefractEndpoint(GPUDISurface s,ReflectionLobe lobe,
+    instance_acceleration_structure as,intersection_function_table<triangle_data,instancing> ift,
+    constant GPUReflectionParams& p,const device GPUInstance* instances,const device GPURtMesh* meshes,
+    const device GPUVertex* vertices,const device uint* indices,const device GPUMaterial* materials,
+    const device DITextureHandle* textures,const device GPUMaterialExtRecord* extRecords){
+    ReflectionEndpoint e{};float3 n=diVec(s.shadingNormal),v=diVec(s.viewDirection);
+    if(!s.valid||!all(isfinite(n))||!all(isfinite(v))||dot(n,n)<=0||dot(v,v)<=0)return e;
+    n=normalize(n);v=normalize(v);float3 d;
+    if(!(lobe.transThickness>0))d=-v;else{d=refract(-v,n,1.0f/lobe.transIor);if(!(dot(d,d)>0)||!all(isfinite(d)))return e;}
+    d=normalize(d);float3 ng=normalize(diVec(s.geometricNormal));if(dot(ng,d)<0)ng=-ng;float3 o=rtOffsetRay(diVec(s.position),ng);uint crossings=1u;
+    for(uint step=0;step<kTransmissionMaxEvents;++step){
+        GPURtRay ray{};ray.ox=o.x;ray.oy=o.y;ray.oz=o.z;ray.dx=d.x;ray.dy=d.y;ray.dz=d.z;ray.tmax=p.maxDistance;ray.mask=RT_MASK_INDIRECT;ray.type=RT_PROBE_DIFFUSE;
+        RtPayload payload{};const auto hit=rtTraceSurface(ray,as,ift,instances,p.slotCount,payload,meshes,vertices,indices,p.meshCount);
+        if(!hit.hit)break;
+        const ReflectionGlassHit g=reflectionGlassHit(hit,d,p,instances,meshes,vertices,indices,materials,textures,extRecords);
+        if(!g.glass&&reflectionCulledBackFace(hit,p,instances,materials,true)){o=rtOffsetRay(o+d*hit.t,d);continue;}
+        if(!g.glass){
+            if(hit.slot>=p.slotCount)return e;const GPUInstance instance=instances[hit.slot];if(instance.meshIndex>=p.meshCount)return e;
+            const GPURtMesh mesh=meshes[instance.meshIndex];if(hit.primitive>=mesh.indexCount/3u)return e;
+            const uint base=mesh.indexOffset+3u*hit.primitive;const GPUVertex a=vertices[mesh.vertexOffset+indices[base]],b=vertices[mesh.vertexOffset+indices[base+1]],c=vertices[mesh.vertexOffset+indices[base+2]];
+            const float3 bary(1-hit.u-hit.v,hit.u,hit.v);
+            e.point=float3(a.px,a.py,a.pz)*bary.x+float3(b.px,b.py,b.pz)*bary.y+float3(c.px,c.py,c.pz)*bary.z;if(!all(isfinite(e.point)))return ReflectionEndpoint{};
+            e.key=denoiseEndpointKeyOfSlot(hit.slot);e.valid=true;return e;
+        }
+        float3 side=-g.geometric;
+        if(!g.thin){const float eta=g.entering?g.ior:1.0f/g.ior;const float3 r=refract(d,g.normal,1.0f/eta);
+            if(dot(r,r)>0&&all(isfinite(r))){d=normalize(r);++crossings;}else{d=reflect(d,g.normal);side=g.geometric;}}
+        else ++crossings;
+        if(crossings>kTransmissionMaxCrossings)break;
+        o=rtOffsetRay(g.point,side);
+    }
+    e.valid=all(isfinite(d));e.key=0u;e.point=d;return e;
+}
 // One refraction sample of a transmissive pixel (the single Fresnel-chosen sample of ADR-0004): the camera-visible surface refracts through a
 // half vector drawn like the reflection proposal (the same random numbers), weight (1 - max F) t (1 - metallic) tint G |v.h| / (|n.v| n.h) over the
 // branch probability 1 - pReflect.  A refraction is ALWAYS traced, whatever the reflection roughness band.
@@ -454,8 +495,26 @@ kernel void REFL_KERNEL(reflection_rt)(constant GPUReflectionParams& p [[buffer(
     REFL_TAG(sample,lobe);
 #endif
     if(count>1u)reflectionReduceAdd(reduction,sample,count);}
-    if(count==1u)reflectionStoreSample(p.flags,tid,p.width,sample,metadata,counts,output,distance);
-    else{auto reduced=reflectionReduceEnd(reduction,counts);reduced.flags|=count<<SPECULAR_SAMPLE_COUNT_SHIFT;reflectionWriteSample(tid,p.width,reduced,metadata,output,distance);}
+#ifdef PHOSPHOR_REFL_LOBE
+    // F15.1 (ticket 13, temporal clip): the refracted-path endpoint of a transmissive pixel, whichever Fresnel branch the frame drew and also for a boosted
+    // multi-sample pixel (the start-up frames: their history must carry the endpoint too), for the endpoint-matched denoiser history.  Not in the
+    // verification both-branch mode (its control never reaches a denoiser).
+    ReflectionEndpoint endpoint{};
+    if(lobe.trans&&!both&&s.valid)endpoint=reflectionRefractEndpoint(s,lobe,as,ift,p,instances,meshes,vertices,indices,materials,textures,extRecords);
+    const bool endpointOk=endpoint.valid;
+#endif
+    if(count==1u){
+#ifdef PHOSPHOR_REFL_LOBE
+        if(endpointOk&&(sample.flags&SPECULAR_SAMPLE_VALID)&&!(sample.flags&SPECULAR_SAMPLE_ERROR)){for(uint i=0;i<3;++i)sample.direction[i]=endpoint.point[i];
+            sample.proposalSolidAngle=denoiseEndpointKeyEncode(endpoint.key);sample.flags|=SPECULAR_SAMPLE_ENDPOINT;}
+#endif
+        reflectionStoreSample(p.flags,tid,p.width,sample,metadata,counts,output,distance);
+    }else{auto reduced=reflectionReduceEnd(reduction,counts);reduced.flags|=count<<SPECULAR_SAMPLE_COUNT_SHIFT;
+#ifdef PHOSPHOR_REFL_LOBE
+        if(endpointOk&&(reduced.flags&SPECULAR_SAMPLE_VALID)&&!(reduced.flags&SPECULAR_SAMPLE_ERROR)){for(uint i=0;i<3;++i)reduced.direction[i]=endpoint.point[i];
+            reduced.proposalSolidAngle=denoiseEndpointKeyEncode(endpoint.key);reduced.flags|=SPECULAR_SAMPLE_ENDPOINT;}
+#endif
+        reflectionWriteSample(tid,p.width,reduced,metadata,output,distance);}
 }
 
 #ifndef PHOSPHOR_REFL_LOBE

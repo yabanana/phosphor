@@ -1216,8 +1216,9 @@ struct GPUDenoiseHistoryRecord {
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseHistoryRecord) == 64, "GPUDenoiseHistoryRecord layout");
 struct GPUDenoiseSpecularHistory {
     float roughness, hitDistance; u32 secondarySlot, secondaryGeneration;
+    float endpoint[3]; u32 endpointKey; // F15.1 ticket 13: refracted-path endpoint of a transmissive pixel; endpointKey = key + 1, 0 = none
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseSpecularHistory) == 16, "GPUDenoiseSpecularHistory layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseSpecularHistory) == 32, "GPUDenoiseSpecularHistory layout");
 
 // F14: ALL positions/radii/heights/distances are WORLD METRES; extinction and
 // scattering coefficients are m^-1. RGB radiance and irradiance remain linear
@@ -1375,6 +1376,9 @@ PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_COUNT_SHIFT = 16u, SPECULAR_SAMPLE_COU
 PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_LOBE_SHIFT = 8u, SPECULAR_SAMPLE_LOBE_MASK = 3u;
 PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_AXIS_REFRACT = 1u << 10;
 PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_LOBE_KEY_MASK = (3u << 8) | (1u << 10);
+// F15.1 (ticket 13, temporal clip): bit 11 = the sample carries the refracted-path ENDPOINT of a transmissive pixel in direction[3]
+// (point) and proposalSolidAngle (encoded key); see renderer/denoise_endpoint.h.  The transport writes it, the specular denoiser matches it.
+PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_ENDPOINT = 1u << 11;
 PHOSPHOR_GPU_CONSTANT u32 SPECULAR_LOBE_BASE = 0u, SPECULAR_LOBE_CLEARCOAT = 1u, SPECULAR_LOBE_TRANSMISSION = 2u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_GI = 1u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_CUSTOM = 2u;

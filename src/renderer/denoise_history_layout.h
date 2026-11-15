@@ -8,6 +8,7 @@
 //   bits 24-30 path   (REFLECTION_PATH_*, <= 5)
 //   bit  31    valid
 // losslessly for every value the temporal pass writes (tests/test_denoise.cpp).
+#include "renderer/denoise_endpoint.h"
 #include "renderer/gpu_types.h"
 namespace phosphor {
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_HISTORY_MAX_LENGTH = 0xffffu, DENOISE_HISTORY_MAX_FLAGS = 0xfu, DENOISE_HISTORY_MAX_PATH = 0x7fu, DENOISE_HISTORY_MAX_LOBE = 7u;
@@ -40,6 +41,7 @@ struct DenoiseHistory {
     float position[3], roughness;
     float hitDistance; u32 path, secondarySlot, secondaryGeneration;
     u32 lobe; // specularSampleLobeKey of the sample the record was accumulated from (specular signal)
+    float endpoint[3]; u32 endpointKey; // F15.1 ticket 13: endpoint of the refracted path; endpointKey = key + 1, 0 = none, see denoise_endpoint.h
 };
 inline GPUDenoiseHistoryHeader denoisePackHeader(DenoiseHistory h) {
     GPUDenoiseHistoryHeader out{};
@@ -57,6 +59,8 @@ inline GPUDenoiseHistoryRecord denoisePackRecord(DenoiseHistory h) {
 inline GPUDenoiseSpecularHistory denoisePackSpecular(DenoiseHistory h) {
     GPUDenoiseSpecularHistory out{};
     out.roughness = h.roughness; out.hitDistance = h.hitDistance; out.secondarySlot = h.secondarySlot; out.secondaryGeneration = h.secondaryGeneration;
+    for (u32 i = 0; i < 3; ++i) out.endpoint[i] = h.endpoint[i];
+    out.endpointKey = h.endpointKey;
     return out;
 }
 // Variance loads as 0 (see GPUDenoiseHistoryRecord); a non-specular signal
@@ -69,6 +73,8 @@ inline DenoiseHistory denoiseUnpack(GPUDenoiseHistoryHeader header, GPUDenoiseHi
     h.signal = header.signal; h.viewID = header.viewID; h.historyEpoch = header.historyEpoch; h.signalRevision = header.signalRevision;
     h.slot = r.slot; h.instanceGeneration = r.instanceGeneration; h.materialRevision = r.materialRevision;
     h.roughness = spec.roughness; h.hitDistance = spec.hitDistance; h.secondarySlot = spec.secondarySlot; h.secondaryGeneration = spec.secondaryGeneration;
+    for (u32 i = 0; i < 3; ++i) h.endpoint[i] = spec.endpoint[i];
+    h.endpointKey = spec.endpointKey;
     return h;
 }
 #ifndef __METAL_VERSION__
