@@ -18,6 +18,8 @@
 #include "rendergraph/pass_context.h"
 #include <glm/gtc/type_ptr.hpp>
 #include <bit>
+#include <array>
+#include "pipeline/forward_variants.h"
 #include <vector>
 #include <algorithm>
 #include <cmath>
@@ -42,6 +44,8 @@ struct ShadowPasses::Impl {
     }
     pipe::PipelineHandle receiverTT=pipe::INVALID_PIPELINE, receiverServed=pipe::INVALID_PIPELINE;
     std::array<pipe::PipelineHandle,4> receiverVariants{pipe::INVALID_PIPELINE,pipe::INVALID_PIPELINE,pipe::INVALID_PIPELINE,pipe::INVALID_PIPELINE}; // F15 closure (COLOR_0): [tt | vc << 1]
+    // F15 closure (COLOR_0): the casters of a scene with a colour stream use the _vc twins (alpha test x vertex colour alpha), requested on first use.
+    std::array<pipe::PipelineDesc,4> casterDescs; std::array<pipe::PipelineHandle,4> casterVC{pipe::INVALID_PIPELINE,pipe::INVALID_PIPELINE,pipe::INVALID_PIPELINE,pipe::INVALID_PIPELINE}; bool casterColors=false;
     pipe::PipelineHandle indexed, meshDepth, receiver, cacheIndexed, cacheMesh, cacheInitialize, cachePublish, cacheValidate, cacheComposite;
     MTL::DepthStencilState* depthState=nullptr;
     MTL::DepthStencilState* receiverDepthState=nullptr;
@@ -119,9 +123,9 @@ struct ShadowPasses::Impl {
             kernels[i]=p.request(i==Sun?lighting::kernel("shadow_sun_rt_lite",true,true):i==Temporal?lighting::kernel("shadow_temporal_scalar"):lighting::kernel(names[i]));
         }
         pipe::PipelineDesc d; d.kind=pipe::PipelineKind::Render;d.label="CSM indexed casters";
-        d.functions={"shadow_depth_vertex","shadow_depth_fragment",""}; indexed=p.request(d);
+        d.functions={"shadow_depth_vertex","shadow_depth_fragment",""}; indexed=p.request(d);casterDescs[0]=d;
         d.kind=pipe::PipelineKind::Mesh;d.label="CSM mesh casters";
-        d.functions={"","shadow_depth_mesh","shadow_depth_fragment"};d.mesh.meshThreads=128; meshDepth=p.request(d);
+        d.functions={"","shadow_depth_mesh","shadow_depth_fragment"};d.mesh.meshThreads=128; meshDepth=p.request(d);casterDescs[1]=d;
         // F15 closure (ticket 15): the transmittance map pipelines are requested by requestTransmitPipelines() when the scene first has a
         // transmissive caster (a scene without glass keeps the pipeline set it had before ticket 15).
         // The PCSS pass (also present with --shadows off, where it writes a fully lit mask) always binds the four transmittance maps: a 1x1 zero
@@ -130,9 +134,9 @@ struct ShadowPasses::Impl {
         receiver=p.request(receiverDesc());
         if(settings.staticCache) {
             d=pipe::PipelineDesc{};d.kind=pipe::PipelineKind::Render;d.label="Regional static/dynamic CSM indexed";
-            d.functions={"shadow_cache_depth_vertex","shadow_cache_depth_fragment",""};cacheIndexed=p.request(d);
+            d.functions={"shadow_cache_depth_vertex","shadow_cache_depth_fragment",""};cacheIndexed=p.request(d);casterDescs[2]=d;
             d.kind=pipe::PipelineKind::Mesh;d.label="Regional static/dynamic CSM mesh";
-            d.functions={"","shadow_cache_depth_mesh","shadow_cache_depth_fragment"};d.mesh.meshThreads=128;cacheMesh=p.request(d);
+            d.functions={"","shadow_cache_depth_mesh","shadow_cache_depth_fragment"};d.mesh.meshThreads=128;cacheMesh=p.request(d);casterDescs[3]=d;
             cachePublish=p.request(lighting::kernel("shadow_cache_publish"));
             cacheInitialize=p.request(lighting::kernel("shadow_cache_initialize"));
             cacheValidate=p.request(lighting::kernel("shadow_cache_validate"));
@@ -363,6 +367,8 @@ struct ShadowPasses::Impl {
         // F15 ticket 24: the temporal kernel and its history record layout follow the feature union (see shadows.metal); a change of layout
         // (a material edit that adds or removes glass) restarts every history, whatever the kernel that serves the transition frame.
         receiverServed=receiver;
+        casterColors=store.vertexColorInUse();
+        if(casterColors)for(u32 k=0;k<4;++k)if(casterVC[k]==pipe::INVALID_PIPELINE&&(!casterDescs[k].functions[0].empty()||!casterDescs[k].functions[1].empty()))casterVC[k]=pipelines.request(pipe::forward::withVertexColor(casterDescs[k]));
         if(store.textureTransformInUse()||store.vertexColorInUse()){
             // F15 closure (COLOR_0): a scene with a colour stream compiles the vertex colour into the receiver prepass (alpha test, vertex stage emits it).
             const u32 k=(store.textureTransformInUse()?1u:0u)|(store.vertexColorInUse()?2u:0u);
@@ -374,7 +380,7 @@ struct ShadowPasses::Impl {
         const bool glassServed=temporalServed!=kernels[Temporal];
         if(glassServed!=temporalGlass){temporalGlass=glassServed;for(u32 v=0;v<views.size();++v)history.invalidate(v,"history layout");}
         auto decision=history.begin(f.view,{f.width,f.height,f.backingWidth,f.backingHeight},signalRevision,f.cut,f.reset);
-        params={};
+        params={};params.vertexColors=scene.vertexColorsAddress(); // F15 closure (COLOR_0): 0 without a colour stream
         const auto inverse=glm::inverse(glm::make_mat4(f.constants.viewProjection));
         std::memcpy(params.inverseViewProjection,glm::value_ptr(inverse),64);std::memcpy(params.viewProjection,f.constants.viewProjection,64);
         std::memcpy(params.previousViewProjection,history.get(f.view).previousViewProjection.data(),64);
@@ -445,6 +451,12 @@ struct ShadowPasses::Impl {
     void texture(MTL4::ArgumentTable* t,rg::PassContext& ctx,rg::TextureRef ref,u32 binding) {
         t->setTexture(static_cast<MTL::Texture*>(ctx.texture(ref))->gpuResourceID(),binding);
     }
+    // The colour twin of a depth caster when the scene has a colour stream and the twin is final (index 0..3 = indexed, mesh, cache indexed, cache mesh; 9 = a
+    // transmit pipeline, which has none: the plain pipeline keeps serving it).
+    pipe::PipelineHandle casterPipeline(pipe::PipelineHandle plain,u32 index) {
+        if(!casterColors||index>3u||casterVC[index]==pipe::INVALID_PIPELINE||!pipelines.isFinal(casterVC[index]))return plain;
+        return casterVC[index];
+    }
     void drawCascade(rg::PassContext& ctx,u32 cascade,u32 cls,bool cached,bool transmit=false) {
         auto* e=static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder());auto& slot=slots[frame.slot];
         // The transmittance pass has no depth attachment (a standalone render group): additive/maximum blending of every transmissive fragment.
@@ -462,14 +474,14 @@ struct ShadowPasses::Impl {
             {const auto extensions=scene.materialExtensionsAddress();t->setAddress(extensions?extensions:scene.buffers().materials()->gpuAddress(),SB_EXTENSIONS);} // transmittance tint, F15.1 ticket 22: the alpha tests too
             if(cached){t->setAddress(cls==0?slot.staticParams[cascade]:slot.dynamicParams[cascade],18);t->setAddress(slot.classificationAddress,19);}
             if(range.meshShader) {
-                auto* state=pipelines.render(cached?cacheMesh:transmit?transmitMesh:meshDepth);
+                auto* state=pipelines.render(casterPipeline(cached?cacheMesh:transmit?transmitMesh:meshDepth,cached?3u:transmit?9u:1u));
                 if(!transmit || state!=current){e->setRenderPipelineState(state);current=state;} // the transmit pass skips the redundant per-draw sets
                 e->setArgumentTable(t,MTL::RenderStageMesh|MTL::RenderStageFragment);
                 e->drawMeshThreadgroups(MTL::Size::Make(range.meshletCount,range.slotCount,1),
                     MTL::Size::Make(1,1,1),MTL::Size::Make(128,1,1));
             } else {
                 const auto& info=geometry[range.mesh];
-                auto* state=pipelines.render(cached?cacheIndexed:transmit?transmitIndexed:indexed);
+                auto* state=pipelines.render(casterPipeline(cached?cacheIndexed:transmit?transmitIndexed:indexed,cached?2u:transmit?9u:0u));
                 if(!transmit || state!=current){e->setRenderPipelineState(state);current=state;}
                 e->setArgumentTable(t,MTL::RenderStageVertex|MTL::RenderStageFragment);
                 // instance_id starts at zero. Shader adds range.firstSlot,

@@ -11,6 +11,7 @@
 #include "core/log.h"
 #include "renderer/scene_store.h"
 #include "renderer/gpu_scene.h"
+#include "pipeline/forward_variants.h"
 #include "renderer/cull_math.h"
 #include "renderer/transform_reference.h"
 #include "rendergraph/pass_context.h"
@@ -59,7 +60,8 @@ struct ReflectionPasses::Impl {
     GPUReflectionReduceParams reduceParams{};GPUReflectionComposeParams composeParams{},preComposeParams{};
     MTL::GPUAddress paramsAddress=0,aoAddress=0,reduceAddress=0,composeAddress=0,preComposeAddress=0,probeAddress=0,giDummyAddress=0,extraDummyAddress=0;
     std::array<MTL::GPUAddress,6> captureAddress{},rasterCaptureAddress{};std::array<MTL::GPUAddress,ProbeMips> filterAddress{},validateAddress{};MTL::GPUAddress rawValidateAddress=0;
-    pipe::PipelineHandle reflectionSSR{},reflectionRT{},probeOnly{},captureRT{},captureRaster{},prefilter{},validateProbe{},publishProbe{};
+    pipe::PipelineHandle reflectionSSR{},reflectionRT{},probeOnly{},captureRT{},captureRaster{},captureRasterVC{},prefilter{},validateProbe{},publishProbe{};
+    pipe::PipelineDesc rasterDesc;bool useCaptureVC=false; // F15 closure (COLOR_0): the static probe capture descriptor and whether the scene has a colour stream
     pipe::PipelineHandle rtao{},gtao{},reduce{},compose{},zero{},clear{},checker{};
     pipe::PipelineHandle inputPoison{},inputCheck{},filteredIndirectExport{};
     // F15.1 (ticket 08): lobe-guide variants of the transport kernel in use and of the composite ("<name>_lobe",
@@ -101,7 +103,7 @@ struct ReflectionPasses::Impl {
         if(float32Filtering){probeFormat=MTL::PixelFormatRGBA32Float;graphProbeFormat=rg::Format::RGBA32Float;}
         LOG_INFO("Reflection probe storage %s | Float32 filtering %u | forced Apple9 %u | reduced %u",
             float32Filtering?"RGBA32Float":"RGBA16Float-bounded",u32(float32Filtering),u32(o.forceApple9),u32(o.reducedLighting));
-        raster.output(0,graphProbeFormat);captureRaster=p.request(raster);
+        raster.output(0,graphProbeFormat);captureRaster=p.request(raster);rasterDesc=raster;
         prefilter=p.request(lighting::kernel("reflection_probe_prefilter"));validateProbe=p.request(lighting::kernel("reflection_probe_validate"));publishProbe=p.request(lighting::kernel("reflection_probe_ready"));
         reduce=p.request(lighting::kernel("reflection_reduce"));compose=p.request(lighting::kernel("reflection_composite"));zero=p.request(lighting::kernel("reflection_signal_zero"));clear=p.request(lighting::kernel("reflection_counter_clear"));checker=p.request(lighting::kernel("reflection_check"));
         inputCheck=p.request(lighting::kernel("reflection_input_check"));if(o.debugReflectionCorrupt>=2)inputPoison=p.request(lighting::kernel("reflection_input_poison"));
@@ -258,11 +260,12 @@ struct ReflectionPasses::Impl {
         preComposeParams=composeParams;preComposeParams.flags&=REFLECT_COMPOSE_DI|REFLECT_COMPOSE_GI|REFLECT_COMPOSE_LOBE_GUIDE_VALID|REFLECT_COMPOSE_SSS;
         if(preComposeParams.flags&REFLECT_COMPOSE_DI)preComposeParams.flags|=REFLECT_COMPOSE_EXCLUDE_EMISSION;preComposeAddress=lighting::upload(c,preComposeParams);
         GPUProbeGridParams dummy{};dummy.reset=1;giDummyAddress=lighting::upload(c,dummy);GPUProbeTraceExtra extra{};extra.sampledLightCount=direct.lightCount();extra.frameSeed=options.lightingSeed;extra.sunAngularRadius=.00465f;extraDummyAddress=lighting::upload(c,extra);
+        useCaptureVC=scene.vertexColorInUse();if(useCaptureVC&&captureRasterVC==pipe::INVALID_PIPELINE)captureRasterVC=p.request(pipe::forward::withVertexColor(rasterDesc));
         for(u32 face=0;face<6;++face){const auto vp=reflectionProbeViewProjection(probe,face,.05f,settings.maxDistance),inv=glm::inverse(vp);auto capture=params;
             std::memcpy(capture.viewProjection,glm::value_ptr(vp),64);std::memcpy(capture.inverseViewProjection,glm::value_ptr(inv),64);for(u32 k=0;k<3;++k)capture.cameraPosition[k]=probe.capturePosition[k];capture.width=capture.height=ProbeSide;
             if(probeFormat==MTL::PixelFormatRGBA16Float)capture.flags|=REFLECTION_CAPTURE_HALF;
             captureAddress[face]=lighting::upload(c,capture);
-            GPUProbeCaptureParams raster{};raster.materialExtensions=scene.materialExtensionsAddress();std::memcpy(raster.viewProjection,glm::value_ptr(vp),64);for(u32 k=0;k<3;++k){raster.capturePosition[k]=probe.capturePosition[k];raster.environment[k]=params.environment[k];}
+            GPUProbeCaptureParams raster{};raster.materialExtensions=scene.materialExtensionsAddress();raster.vertexColors=scene.vertexColorsAddress();std::memcpy(raster.viewProjection,glm::value_ptr(vp),64);for(u32 k=0;k<3;++k){raster.capturePosition[k]=probe.capturePosition[k];raster.environment[k]=params.environment[k];}
             raster.slotCount=store.slotCapacity();raster.materialCount=u32(store.materials().size());raster.lightCount=f.constants.lightCount;raster.sampledLightCount=direct.lightCount();raster.storageFlags=probeFormat==MTL::PixelFormatRGBA16Float?REFLECTION_CAPTURE_HALF:0u;rasterCaptureAddress[face]=lighting::upload(c,raster);}
         for(u32 mip=0;mip<ProbeMips;++mip){GPUProbeFilterParams filter{std::max(1u,ProbeSide>>mip),mip,128,0,float(mip)/float(ProbeMips-1),float(ProbeSide),probeFormat==MTL::PixelFormatRGBA16Float?REFLECTION_CAPTURE_HALF:0u,0};
             filterAddress[mip]=lighting::upload(c,filter);validateAddress[mip]=filterAddress[mip];}GPUProbeFilterParams rawCheck{ProbeSide,~0u,0,0,0,float(ProbeSide),probeFormat==MTL::PixelFormatRGBA16Float?REFLECTION_CAPTURE_HALF:0u,u32(options.debugLighting!=0)};rawValidateAddress=lighting::upload(c,rawCheck);
@@ -324,7 +327,7 @@ struct ReflectionPasses::Impl {
                 else graph.addPass("F13 actual static raster probe face "+std::to_string(face),PassType::Raster,[this,face](PassBuilder& b){commonReads(b,StageVertex|StageFragment);b.read(staticRef,Usage::ShaderRead,StageVertex);
                     ClearValue clear;clear.color[0]=params.environment[0];clear.color[1]=params.environment[1];clear.color[2]=params.environment[2];clear.color[3]=1;faceRef[face]=b.writeColor(faceRef[face],0,LoadIntent::Clear,clear);
                     auto depth=b.createTexture("F13 probe depth face "+std::to_string(face),{Format::Depth32Float,ProbeSide,ProbeSide});b.writeDepth(depth,LoadIntent::Clear);b.setProfileShaders("reflection_probe_capture_vs,reflection_probe_capture_fs");
-                },[this,face](PassContext& ctx){auto* encoder=static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder());auto* state=p.render(captureRaster);if(!state)throw std::runtime_error("Probe raster PSO is not ready");
+                },[this,face](PassContext& ctx){auto* encoder=static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder());auto* state=(useCaptureVC&&p.render(captureRasterVC))?p.render(captureRasterVC):p.render(captureRaster);if(!state)throw std::runtime_error("Probe raster PSO is not ready");
                     encoder->setRenderPipelineState(state);encoder->setDepthStencilState(captureDepthState);encoder->setViewport(MTL::Viewport{0,0,ProbeSide,ProbeSide,0,1});
                     // Capture VP flips Y to cube convention: ordinary object
                     // fronts are clockwise; mirrored fronts reverse cull mode.

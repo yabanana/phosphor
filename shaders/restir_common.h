@@ -113,7 +113,8 @@ inline DISample diSampleLight(GPUSampledLight l, float2 uv, float3 receiver) {
 inline DISample diSampleTexturedLight(GPUSampledLight l, uint lightIndex, float2 uv, float3 receiver,
                                       const device GPUEmissiveSurface* emitters,
                                       const device GPUMaterial* materials, const device DITextureHandle* textures,
-                                      const device GPUMaterialExtRecord* extensions = nullptr) { // F15.1 (ticket 22): per-slot texture transforms
+                                      const device GPUMaterialExtRecord* extensions = nullptr, // F15.1 (ticket 22): per-slot texture transforms
+                                      GPUVertexColorPtr vertexColors = nullptr) { // F15 closure (COLOR_0): the cut-out alpha of an emitter multiplies its vertex colour's alpha
     DISample s = diSampleLight(l, uv, receiver);
     if (!s.valid || l.type != DI_LIGHT_TRIANGLE || !(l.flags & DI_LIGHT_TEXTURED_EMISSION)) return s;
     const GPUEmissiveSurface emitter = emitters[lightIndex];
@@ -135,8 +136,12 @@ inline DISample diSampleTexturedLight(GPUSampledLight l, uint lightIndex, float2
         const float alpha = m.baseColor[3] * float(alphaTexel) *
                             layerCoverage<DITextureHandle, LayerAlphaLevel0>(materials[emitter.materialIndex], materials, textures, lightUV,
                                                                              float2(0.0f), float2(0.0f), extensions);
+        float colorAlpha = 1.0f;
+        if (vertexColors != nullptr && emitter.geometryValid != 0u)
+            colorAlpha = (vertexColors[emitter.vertex0] * (1.0f - root) + vertexColors[emitter.vertex1] * (root * (1.0f - uv.y)) +
+                          vertexColors[emitter.vertex2] * (root * uv.y)).a;
         if (!isfinite(alpha)) { s.valid = false; return s; }
-        if (alpha < m.alphaCutoff) s.radiance = float3(0);
+        if (alpha * colorAlpha < m.alphaCutoff) s.radiance = float3(0);
     }
     s.valid = all(isfinite(s.radiance)) && all(s.radiance >= 0);
     return s;

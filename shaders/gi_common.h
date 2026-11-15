@@ -138,6 +138,8 @@ inline bool giMaterial(GPURtHit hit,constant GPUProbeGridParams& p,const device 
     const device GPUMaterial& m=materials[i.materialIndex];
     float3 base=float3(m.baseColor[0],m.baseColor[1],m.baseColor[2]);
     if(m.baseColorTex!=INVALID_TEXTURE_INDEX) base*=float3(half3(textures[m.baseColorTex].tex.sample(kGiMaterialSampler,texXfSlotUv(p.materialExtensions,m.flags,m.textureTransformIndex,TT_SLOT_BASE_COLOR,uv),level(0.0f)).rgb));
+    // F15 closure (COLOR_0): base colour = factor x texture x vertex colour (GI hit surface); the pointer is 0 without a colour stream.
+    if(p.vertexColors!=nullptr) base*=(p.vertexColors[mesh.vertexOffset+indices[b]]*(1.0f-hit.u-hit.v)+p.vertexColors[mesh.vertexOffset+indices[b+1]]*hit.u+p.vertexColors[mesh.vertexOffset+indices[b+2]]*hit.v).rgb;
     float metallic=m.metallic;
     if(m.metallicRoughnessTex!=INVALID_TEXTURE_INDEX) metallic*=float(half(textures[m.metallicRoughnessTex].tex.sample(kGiMaterialSampler,texXfSlotUv(p.materialExtensions,m.flags,m.textureTransformIndex,TT_SLOT_METAL_ROUGH,uv),level(0.0f)).b));
     out.diffuse=max(base,0.0f)*(1.0f-saturate(metallic));
@@ -210,7 +212,7 @@ inline float3 giSecondaryRadiance(float3 point,float3 normal,GiMaterial material
     }
     if(extra.sampledLightCount) {
         uint index=min(uint(giRandom(seed)*float(extra.sampledLightCount)),extra.sampledLightCount-1u);
-        DISample sample=diSampleTexturedLight(sampled[index],index,float2(giRandom(seed),giRandom(seed)),point,emissive,materials,textures,p.materialExtensions);
+        DISample sample=diSampleTexturedLight(sampled[index],index,float2(giRandom(seed),giRandom(seed)),point,emissive,materials,textures,p.materialExtensions,p.vertexColors);
         float cosN=max(0.0f,dot(normal,sample.wi));
         if(sample.valid && cosN>0.0f) {
             float inversePdf=sample.delta?float(extra.sampledLightCount):float(extra.sampledLightCount)/max(sample.pdfArea,1e-20f);

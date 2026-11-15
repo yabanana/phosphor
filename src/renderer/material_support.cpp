@@ -38,14 +38,13 @@ const MaterialSupportTable& currentSupportTable() {
         t.textureTransformUniform.level = SupportLevel::Implemented;
         t.textureTransformPerSlot.level = SupportLevel::Implemented;
         // F15 closure: KHR_materials_unlit is lowered onto the emission path (emission = base colour, no reflection, features
-        // dropped) and excluded from the sampled emitters and the GI hit emission, so it lights nothing.  The vertex colour
-        // factor of the specification is not applied: the engine has no COLOR_0 stream for any material.
+        // dropped) and excluded from the sampled emitters and the GI hit emission, so it lights nothing.  COLOR_0 multiplies the displayed colour (the
+        // vertex colour stream, F15 closure: tools/f15_vertex_color_check.py), so the extension is complete: Implemented.
         // KHR_lights_punctual: the spot cone falloff of every engine light path is smoothstep(cosOuter, cosInner, cos angle) (measured on legacy, ReSTIR and clustered DI,
         // tools/f15_spot_falloff_check.py); the informative formula of the extension is its square-of-linear t^2, the blend between the cones being implementation-defined.
         t.punctualLights.level         = SupportLevel::Approximated;
         t.punctualLights.approximation = "spot_falloff_smoothstep_not_informative_t2";
-        t.unlit.level         = SupportLevel::Approximated;
-        t.unlit.approximation = "no_vertex_color_stream";
+        t.unlit.level         = SupportLevel::Implemented;
         // F15.1: ior + specular shade every primary light path: the resolve and forward paths (direct sun and
         // analytic lights, environment, GI diffuse weight), ReSTIR and clustered DI (ticket 07: lobe guide), and
         // (ticket 08) the specular transport (SSR, RT reflections, probes/environment split-sum) and the composite

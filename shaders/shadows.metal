@@ -211,6 +211,73 @@ fragment void shadow_depth_fragment(ShadowDepthOut in [[stage_in]],
     }
 }
 
+// F15 closure (COLOR_0): the vertex-colour twins of the CSM depth casters (the alpha test multiplies the vertex colour's alpha; separate entry points because a
+// function-constant interface member cannot be lowered in a constant-free descriptor).  GPUShadowParams::vertexColors is read by the stage.
+struct ShadowDepthOutVC {
+    float4 position [[position]];
+    float2 uv;
+    uint material [[flat]];
+    float4 color;
+};
+static ShadowDepthOutVC shadowVC(ShadowDepthOut b,float4 color) { ShadowDepthOutVC o; o.position=b.position; o.uv=b.uv; o.material=b.material; o.color=color; return o; }
+using ShadowDepthMeshVC=metal::mesh<ShadowDepthOutVC,void,MESHLET_MESH_GROUP,MESHLET_MESH_GROUP,topology::triangle>;
+vertex ShadowDepthOutVC shadow_depth_vertex_vc(uint vertexId [[vertex_id]],uint instanceID [[instance_id]],
+    constant GPUShadowParams& p [[buffer(1)]],const device GPUInstance* instances [[buffer(3)]],
+    const device GPUVertex* vertices [[buffer(6)]],const device uint* casterFlags [[buffer(14)]],
+    const device GPUMaterial* materials [[buffer(16)]]) {
+    const uint slot=shadowDrawSlot(p.casterSlot,instanceID,p.slotCount);
+    ShadowDepthOutVC invalid{}; invalid.position=float4(2,2,0,1);
+    if(slot>=p.slotCount || p.cascadeIndex>=4) return invalid;
+    const device GPUInstance& i=instances[slot];
+    if(!(casterFlags[slot]&(1u<<p.cascadeIndex)) || i.materialIndex>=p.materialCount ||
+        !(i.flags&INSTANCE_FLAG_VALID) || !(i.flags&2u) || i.meshIndex!=p.pad ||
+        shadowTransmitCaster(p,materials,i.materialIndex)) return invalid;
+    return shadowVC(shadowDepthVertex(vertices[vertexId],i,p),p.vertexColors[vertexId]); // host passes mesh vertexOffset as baseVertex
+}
+[[mesh]] void shadow_depth_mesh_vc(ShadowDepthMeshVC out,uint tid [[thread_index_in_threadgroup]],
+    uint2 group [[threadgroup_position_in_grid]],constant GPUShadowParams& p [[buffer(1)]],
+    const device GPUInstance* instances [[buffer(3)]],const device GPUMeshInfo* meshes [[buffer(5)]],
+    const device GPUVertex* vertices [[buffer(6)]],const device GPUMeshlet* meshlets [[buffer(7)]],
+    const device uint* meshletVertices [[buffer(8)]],const device uchar* triangles [[buffer(9)]],
+    const device uint* casterFlags [[buffer(14)]],const device GPUMaterial* materials [[buffer(16)]]) {
+    const uint slot=shadowDrawSlot(p.casterSlot,group.y,p.slotCount);
+    const uint meshlet=shadowDrawMeshlet(p.meshletFirst,group.x,p.meshletCount);
+    bool valid=slot<p.slotCount && p.cascadeIndex<4;
+    if(valid) {
+        const device GPUInstance& i=instances[slot];
+        valid=(i.flags&INSTANCE_FLAG_VALID) && (i.flags&2u) && i.meshIndex==p.pad &&
+              i.meshIndex<p.meshCount && i.materialIndex<p.materialCount && (casterFlags[slot]&(1u<<p.cascadeIndex)) &&
+              !shadowTransmitCaster(p,materials,i.materialIndex);
+        if(valid) {
+            const device GPUMeshInfo& mesh=meshes[i.meshIndex];
+            valid=meshlet>=mesh.meshletOffset && meshlet-mesh.meshletOffset<mesh.meshletCount;
+        }
+    }
+    if(!valid) { if(tid==0) out.set_primitive_count(0); return; }
+    const GPUMeshlet m=meshlets[meshlet];
+    if(m.vertexCount>MESHLET_MESH_GROUP || m.triangleCount>MESHLET_MESH_GROUP) {
+        if(tid==0) out.set_primitive_count(0); return; // upload validation must reject this asset
+    }
+    if(tid==0) out.set_primitive_count(m.triangleCount);
+    if(tid<m.vertexCount) out.set_vertex(tid,shadowVC(shadowDepthVertex(vertices[meshletVertices[m.vertexOffset+tid]],instances[slot],p),p.vertexColors[meshletVertices[m.vertexOffset+tid]]));
+    if(tid<m.triangleCount) {
+        const uint base=m.triangleOffset+3u*tid;
+        out.set_index(3u*tid,triangles[base]); out.set_index(3u*tid+1u,triangles[base+1u]); out.set_index(3u*tid+2u,triangles[base+2u]);
+    }
+}
+fragment void shadow_depth_fragment_vc(ShadowDepthOutVC in [[stage_in]],
+    const device GPUMaterial* materials [[buffer(16)]],const device RtTextureHandle* textures [[buffer(17)]],
+    const device GPUMaterialExtRecord* extensions [[buffer(22)]]) { // F15.1 (ticket 22): the base colour slot's transform
+    const device GPUMaterial& m=materials[in.material];
+    if(m.alphaCutoff>0) {
+        float alpha=m.baseColor[3];
+        if(m.baseColorTex!=INVALID_TEXTURE_INDEX) alpha*=float(half(textures[m.baseColorTex].tex.sample(kRtAlphaSampler,texXfSlotUv(extensions,m.flags,m.textureTransformIndex,TT_SLOT_BASE_COLOR,in.uv),level(0)).a));
+        alpha*=layerCoverage<RtTextureHandle,LayerAlphaLevel0>(m,materials,textures,in.uv,float2(0.0f),float2(0.0f),extensions); // F15.4 (ticket 23)
+        alpha*=in.color.a; // F15 closure (COLOR_0)
+        if(alpha<m.alphaCutoff) discard_fragment();
+    }
+}
+
 // F15.1 (ticket 15): the transmittance pass of one cascade.  Only transmissive casters draw (the others are moved out of the clip volume), with no
 // depth test: every fragment ADDS its surface ln RGB transmittance (transmissionShadowSurfaceLn, shared with the ray-traced any-hit) and keeps
 // the nearest depth in alpha.  The face orientation comes from the rasteriser (shadowTransmitEntry), the Fresnel cosine from the screen-space

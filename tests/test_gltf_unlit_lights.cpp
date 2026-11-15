@@ -157,7 +157,7 @@ TEST_CASE("unlit: the base colour is displayed as emission, nothing else reflect
     for (const auto& e : report.encodings)
         if (e.feature == "unlit") {
             saw = true;
-            CHECK(e.level == SupportLevel::Approximated);
+            CHECK(e.level == SupportLevel::Implemented); // COLOR_0 is applied now: no approximation left
         }
     CHECK(saw);
     CHECK(p.info.unknownExtensions.empty());

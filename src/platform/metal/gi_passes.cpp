@@ -102,7 +102,7 @@ struct GiPasses::Impl {
         if(!(signal==lastSignal)){++radianceGeneration;lastSignal=signal;if(!continuousSky)atlasValid=false;}
         const auto decision=history.begin(f.view,{f.width,f.height,f.backingWidth,f.backingHeight},radianceGeneration,f.cut,f.reset);
         params=oracle->parameters(f.index,geometryGeneration);params.width=f.width;params.height=f.height;
-        params.materialExtensions=scene.materialExtensionsAddress();params.slotCount=s.slotCapacity();params.meshCount=g.getMeshCount();params.materialCount=s.materials().size();params.lightCount=f.constants.lightCount;
+        params.materialExtensions=scene.materialExtensionsAddress();params.vertexColors=scene.vertexColorsAddress();params.slotCount=s.slotCapacity();params.meshCount=g.getMeshCount();params.materialCount=s.materials().size();params.lightCount=f.constants.lightCount;
         params.mode=options.gi==GiMode::DDGI?GI_MODE_DDGI:options.gi==GiMode::Cache?GI_MODE_CACHE:GI_MODE_RESTIR;
         params.debugFlags=options.debugGiNoVisibility?GI_DEBUG_NO_VISIBILITY:0u;
         // World-space DDGI atlases survive camera cuts and pixel-extent changes.

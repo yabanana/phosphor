@@ -647,7 +647,7 @@ struct AccelerationStructures::Impl {
         const GPURtParams params{slots, static_cast<u32>(meshTable.size()), materialCount,
             diagnostic ? static_cast<u32>(options.debugRtCorrupt) : RT_CORRUPT_NONE,
             (options.debugTransmittanceDedup ? 0u : RT_TRANSMITTANCE_NO_DEDUP) | (options.debugTransmittanceInject ? RT_TRANSMITTANCE_INJECT_DUPLICATE : 0u),
-            0u, 0u, 0u};
+            0u, renderer.vertexColorsAddress()};
         std::memcpy(f.params->contents(), &params, sizeof(params));
         std::memcpy(f.meshTable->contents(), meshTable.data(), meshTable.size() * sizeof(GPURtMesh));
         GPURtProbeParams probe{};

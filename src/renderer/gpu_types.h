@@ -270,6 +270,13 @@ typedef const device GPUMaterialExtRecord* GPUMaterialExtPtr;
 #else
 typedef u64 GPUMaterialExtPtr;
 #endif
+/// F15 closure (COLOR_0): GPU address of the per-vertex colour stream (float4 per vertex) inside a parameter struct; 0 without COLOR_0.  The secondary
+/// sites test it at run time (a null pointer leaves the value untouched), the primary pipelines are specialised (reserved constant VERTEX_COLOR).
+#if defined(__METAL_VERSION__)
+typedef const device float4* GPUVertexColorPtr;
+#else
+typedef u64 GPUVertexColorPtr;
+#endif
 
 // ---------------------------------------------------------------------------
 // F15.1 (ticket 06): the per-pixel lobe guide (decision 07: "an additional
@@ -411,7 +418,8 @@ PHOSPHOR_STATIC_ASSERT(sizeof(GPURtMesh) == 32, "GPURtMesh layout");
 
 struct GPURtParams {
     u32 slotCount, meshCount, materialCount, corruption;
-    u32 transmittanceFlags, pad0, pad1, pad2; // F15.1 (ticket 14): RT_TRANSMITTANCE_*
+    u32 transmittanceFlags, pad0;             // F15.1 (ticket 14): RT_TRANSMITTANCE_*
+    GPUVertexColorPtr vertexColors;           // F15 closure (COLOR_0): the colour stream of the any-hit alpha test (offset 24, the former pad1 / pad2); 0 without COLOR_0
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPURtParams) == 32, "GPURtParams layout");
 
@@ -872,8 +880,9 @@ struct GPUShadowParams {
     u32 contactSteps, cascadeIndex, casterSlot, meshletFirst;
     u32 meshletCount, meshletGridWidth, corruption, pad;
     GPUShadowCascade cascades[4];
+    GPUVertexColorPtr vertexColors; // F15 closure (COLOR_0): the colour stream of the caster alpha tests (the _vc twins read it); 0 without COLOR_0
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowParams) == 864, "GPUShadowParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowParams) == 872, "GPUShadowParams layout");
 
 struct GPUShadowCounters {
     u32 guides, rays, hits, historyReused;
@@ -1075,8 +1084,9 @@ struct GPUProbeGridParams {
     u32 geometryRevision, lightRevision, materialRevision, viewRevision;
     u32 debugFlags, debugPadding0;
     GPUMaterialExtPtr materialExtensions; // F15.1 (ticket 22) per-slot texture transforms and F15.4 (ticket 23) layer stacks: the extension buffer (offset 168, the former debugPadding[1..2])
+    GPUVertexColorPtr vertexColors;       // F15 closure (COLOR_0): the colour stream of GI hit surfaces (offset 176); 0 without COLOR_0
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeGridParams) == 176, "GPUProbeGridParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeGridParams) == 184, "GPUProbeGridParams layout");
 
 struct GPUProbeState {
     float offset[3]; u32 state;
@@ -1246,8 +1256,9 @@ struct GPUProbeCaptureParams {
     u32 lightCount, slotCount, materialCount, sampledLightCount;
     float environment[3]; u32 storageFlags; // formerly unused raster seed; ABI size unchanged
     GPUMaterialExtPtr materialExtensions;   // F15.1 (ticket 22) per-slot texture transforms and F15.4 (ticket 23) layer stacks: the extension buffer, for the layer stacks the capture draws
+    GPUVertexColorPtr vertexColors;         // F15 closure (COLOR_0): the colour stream of the capture surfaces (the _vc entry points read it); 0 without COLOR_0
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeCaptureParams) == 120, "GPUProbeCaptureParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeCaptureParams) == 128, "GPUProbeCaptureParams layout");
 struct GPUProbeFilterParams {
     u32 side, mip, sampleCount, cubeIndex;
     float roughness, sourceSide; u32 storageFlags, diagnosticReadback;

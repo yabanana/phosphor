@@ -21,9 +21,15 @@ barycentric interpolation of the vertex colours at the world point under the cen
          mean bias is <= 0.03 (the first version required a max error <= 0.06 and measured 0.117 at single samples of steep gradients: the reflection is traced and
          filtered, the geometry matches to a pixel).  Control: without COLOR_0 the reflection is white: FAILS.  Mesh path only (the secondary site is the RT hit surface).
 
+  SHADOW (CUT-OUT SHADOW through COLOR_0 alpha): a horizontal double-sided MASK panel (4 m, alpha = x / 4 from COLOR_0, cutoff 0.5) 1 m above a lit white floor
+         under the rig's sun; `--shadows rt` (the any-hit alpha test) and `--shadows csm` (the CSM caster alpha test).  Floor points in the shadow of the VISIBLE
+         half (x >= 0) must be darker than 0.7 x the unshadowed floor luminance, floor points in the shadow of the CUT half (x < 0) at least 0.9 x (not covered
+         by the panel in the image).  Control: without COLOR_0 the whole panel casts: the cut half is dark, the predicate FAILS.  GI hit shading, the probe capture
+         and the emitter alpha have no numeric fixture (the sites are written and compile; see the ticket).
+
 Paths: `mesh` (visibility + meshlets, resolve kernels and the visibility alpha pass), `overflow` (the same forced through the indexed overflow receivers:
 --debug-meshlets 1 --debug-meshlets-corrupt count, exit 1 by design) and `forward` (--render-path forward: forward_vs / forward_fs, PNG capture compared
-in the display domain, UNLIT and CUTOUT only).
+in the display domain, UNLIT and CUTOUT only) and `meshforward` (--render-path forward --geometry-path mesh: the meshlet mesh stages and forward_fs).
 
   python3 "$H/gpulock.py" python3 -I tools/f15_vertex_color_check.py run OUTDIR [BINARY]
   python3 -I tools/f15_vertex_color_check.py verify OUTDIR
@@ -114,6 +120,32 @@ def scene(kind, colors=True):
     return doc
 
 
+def scene_shadow(colors):
+    """The COLOR_0 cut-out grid, horizontal, 1 m above a floor, lit and double sided."""
+    doc = scene("cutout", colors)
+    doc["materials"][0] = {"pbrMetallicRoughness": {"baseColorFactor": [1, 1, 1, 1], "metallicFactor": 0.0, "roughnessFactor": 1.0}, "alphaMode": "MASK",
+                           "alphaCutoff": 0.5, "doubleSided": True}
+    doc.pop("extensionsUsed", None)
+    doc["nodes"] = [{"mesh": 0, "translation": [0.0, 1.0, 0.0], "rotation": [-0.70710678, 0.0, 0.0, 0.70710678]}, {"mesh": 1}]
+    doc["scenes"] = [{"nodes": [0, 1]}]
+    floor = struct.pack("<12f", -7, 0, -7, 7, 0, -7, 7, 0, 7, -7, 0, 7) + struct.pack("<12f", *([0.0, 1.0, 0.0] * 4)) + struct.pack("<8f", 0, 0, 1, 0, 1, 1, 0, 1)
+    floor += struct.pack("<6H", 0, 3, 2, 0, 2, 1)
+    blob = base64.b64decode(doc["buffers"][0]["uri"].split(",", 1)[1])
+    offset = len(blob)
+    blob += floor
+    doc["buffers"][0] = {"byteLength": len(blob), "uri": "data:application/octet-stream;base64," + base64.b64encode(blob).decode()}
+    nview, na = len(doc["bufferViews"]), len(doc["accessors"])
+    doc["bufferViews"] += [{"buffer": 0, "byteOffset": offset, "byteLength": 48}, {"buffer": 0, "byteOffset": offset + 48, "byteLength": 48},
+                           {"buffer": 0, "byteOffset": offset + 96, "byteLength": 32}, {"buffer": 0, "byteOffset": offset + 128, "byteLength": 12}]
+    doc["accessors"] += [{"bufferView": nview, "componentType": 5126, "count": 4, "type": "VEC3", "min": [-7, 0, -7], "max": [7, 0, 7]},
+                         {"bufferView": nview + 1, "componentType": 5126, "count": 4, "type": "VEC3"},
+                         {"bufferView": nview + 2, "componentType": 5126, "count": 4, "type": "VEC2"},
+                         {"bufferView": nview + 3, "componentType": 5123, "count": 6, "type": "SCALAR"}]
+    doc["meshes"].append({"primitives": [{"attributes": {"POSITION": na, "NORMAL": na + 1, "TEXCOORD_0": na + 2}, "indices": na + 3, "material": 1}]})
+    doc["materials"].append({"pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.8, 0.8, 1], "metallicFactor": 0.0, "roughnessFactor": 1.0}})
+    return doc
+
+
 def scene_mirror(colors):
     """The COLOR_0 panel of `scene('unlit')` (3 m, centre (0, -0.5, 0)) standing on a metal mirror floor at y = -2."""
     doc = scene("unlit", colors)
@@ -151,20 +183,21 @@ PATHS = {
     "mesh": {"extra": [], "linear": True},
     "overflow": {"extra": ["--debug-meshlets", "1", "--debug-meshlets-corrupt", "count"], "linear": True},
     "forward": {"extra": [], "linear": False},
+    "meshforward": {"extra": [], "linear": False},  # --render-path forward --geometry-path mesh: meshlet_mesh + forward_fs (the _vc twins)
 }
 
 
-def capture(binary, folder, path, name, gltf, pitch=0):
+def capture(binary, folder, path, name, gltf, pitch=0, shadows="rt"):
     folder.mkdir(parents=True, exist_ok=True)
     spec = PATHS[path]
     out = folder / f"{path}-{name}"
-    if path == "forward":
-        cmd = [str(binary), "--bench", "4", "--scene", str(gltf), "--corpus-rig", "0,0", "--render-path", "forward", "--geometry-path", "indexed", "--rt", "off",
+    if path in ("forward", "meshforward"):
+        cmd = [str(binary), "--bench", "4", "--scene", str(gltf), "--corpus-rig", "0,0", "--render-path", "forward", "--geometry-path", "indexed" if path == "forward" else "mesh", "--rt", "off",
                "--lighting", "legacy", "--gi", "off", "--reflections", "off", "--ao", "off", "--lighting-denoise", "off", "--tonemap", "aces",
                "--resolution", f"{RES[0]}x{RES[1]}", "--warmup", "16", "--frames", "2", "--fixed-timestep", "--offscreen", "--no-ui", "--no-vsync", "--no-gpu-timing",
                "--pipeline-sync", "--capture", str(out) + ".png"]
     else:
-        cmd = [str(binary), "--bench", "4", "--scene", str(gltf), "--corpus-rig", f"0,{pitch}", "--rt", "on", "--shadows", "rt", "--lighting", "restir", "--gi", "off",
+        cmd = [str(binary), "--bench", "4", "--scene", str(gltf), "--corpus-rig", f"0,{pitch}", "--rt", "on", "--shadows", shadows, "--lighting", "restir", "--gi", "off",
                "--reflections", "rt", "--ao", "off", "--lighting-denoise", "custom", "--tonemap", "aces", "--post", "--upscaler", "native",
                "--render-path", "visibility", "--geometry-path", "mesh", "--resolution", f"{RES[0]}x{RES[1]}", "--warmup", "48", "--frames", "1",
                "--fixed-timestep", "--offscreen", "--no-ui", "--no-vsync", "--no-gpu-timing", "--pipeline-sync", "--capture-linear", str(out) + ".pfm", *spec["extra"]]
@@ -407,8 +440,68 @@ def verify(out):
         good = a >= 0.995 and ca < 0.9
         lines.append(f"{path} CUTOUT: mask agreement {a * 100:.2f} % of {n} pixels (>= 99.5), control {ca * 100:.2f} % (must be < 90) -> {'PASS' if good else 'FAIL'}")
         ok = ok and good
+    for mode in ("rt", "csm"):
+        if not (out / f"mesh-shadow-{mode}.pfm").exists():
+            lines.append(f"mesh SHADOW {mode}: captures missing"); ok = False; continue
+        cut, vis, lit, ccut = shadow_scores(out, mode)
+        good = vis < 0.7 and cut >= 0.9 and ccut < 0.7
+        lines.append(f"mesh SHADOW {mode}: visible-half shadow {vis:.3f} x lit (< 0.7), cut-half {cut:.3f} x lit (>= 0.9), control cut-half {ccut:.3f} (must be < 0.7) -> {'PASS' if good else 'FAIL'}")
+        ok = ok and good
     lines.append("PASS" if ok else "FAIL")
     return ok, lines
+
+
+SHADOW_PITCH = 55.0
+
+
+def shadow_scores(out, mode):
+    """(cut-half, visible-half, unshadowed reference, control cut-half): mean floor luminance of the points in the shadow of each half, relative to the lit floor."""
+    results = {}
+    for name in (f"shadow-{mode}", f"shadow-{mode}-control"):
+        img, pix, _ = load(out, "mesh", name)
+        centre, dist = log_bounds(pathlib.Path(out / f"mesh-{name}.log").read_text(errors="replace"))
+        size = (img[0], img[1])
+        pr = math.radians(SHADOW_PITCH)
+        back = (0.0, math.sin(pr), math.cos(pr)); right = (1.0, 0.0, 0.0); up = (0.0, math.cos(pr), -math.sin(pr))
+        pos = [centre[k] + back[k] * dist for k in range(3)]
+        tan_half = math.tan(math.radians(30))
+        def project(P):
+            v = [P[k] - pos[k] for k in range(3)]
+            xc = sum(v[k] * right[k] for k in range(3)); yc = sum(v[k] * up[k] for k in range(3)); zc = -sum(v[k] * back[k] for k in range(3))
+            return ((xc / (zc * tan_half * size[0] / size[1])) * 0.5 + 0.5) * size[0], (0.5 - (yc / (zc * tan_half)) * 0.5) * size[1]
+        sun = [-0.45 * right[k] + 0.55 * up[k] + 0.70 * back[k] for k in range(3)]
+        norm = math.sqrt(sum(c * c for c in sun)); sun = [c / norm for c in sun]
+        def lum(P):
+            px, py = project(P)
+            c = pix(img, int(px), int(py))
+            return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+        # panel corners in the image (the horizontal panel, y = 1): points of the floor covered by the panel in the image are skipped
+        corners = [project((-2, 1, -2)), project((2, 1, -2)), project((2, 1, 2)), project((-2, 1, 2))]
+        def covered(px, py):
+            sign = 0
+            for a, b in zip(corners, corners[1:] + corners[:1]):
+                cr = (b[0] - a[0]) * (py - a[1]) - (b[1] - a[1]) * (px - a[0])
+                if cr != 0:
+                    if sign == 0: sign = 1 if cr > 0 else -1
+                    elif (cr > 0) != (sign > 0): return False
+            return True
+        def floor_of(x, z):  # the floor point in the shadow of the panel point (x, 1, z): along -sun down to y = 0
+            t = 1.0 / sun[1]
+            return (x - sun[0] * t, 0.0, z - sun[2] * t)
+        def mean_shadow(xs):
+            vals = []
+            for x in xs:
+                for z in (1.5, 1.7, 1.9):  # the strip under the panel's front edge: the floor there is visible from the camera
+                    F = floor_of(x, z)
+                    px, py = project(F)
+                    if covered(px, py) or not (0 <= px < size[0] and 0 <= py < size[1]): continue
+                    vals.append(lum(F))
+            return sum(vals) / len(vals) if vals else float("nan"), len(vals)
+        reference = sum(lum((5.5, 0.0, 5.0 + 0.4 * k)) for k in range(3)) / 3  # an unshadowed floor corner
+        results[name] = (mean_shadow([-1.5, -0.9]), mean_shadow([0.9, 1.5]), reference)
+    (cut, _), (vis, _), lit = results[f"shadow-{mode}"][0], results[f"shadow-{mode}"][1], results[f"shadow-{mode}"][2]
+    (ccut, _) = results[f"shadow-{mode}-control"][0]
+    return cut / lit, vis / lit, lit, ccut / results[f"shadow-{mode}-control"][2]
 
 
 def main():
@@ -428,6 +521,12 @@ def main():
                     continue
                 code = capture(args.binary, out, path, name, out / f"{name}.gltf", pitch=30 if name.startswith("mirror") else 0)
                 print(f"{path}-{name}: exit {code}", flush=True)
+        for mode in ("rt", "csm"):
+            for control in (False, True):
+                name = f"shadow-{mode}" + ("-control" if control else "")
+                (out / f"{name}.gltf").write_text(json.dumps(scene_shadow(not control)))
+                code = capture(args.binary, out, "mesh", name, out / f"{name}.gltf", pitch=SHADOW_PITCH, shadows=mode)
+                print(f"mesh-{name}: exit {code}", flush=True)
     ok, lines = verify(out)
     print("\n".join(lines))
     return 0 if ok else 1

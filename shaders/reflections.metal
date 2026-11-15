@@ -124,7 +124,7 @@ inline float3 reflectionSecondary(GPURtHit hit,float3 direction,
         else if(sample.valid&&any(contribution>0))result+=contribution*diEndpointTransmittance<Payload>(surface,sample,as,ift,instances,p.slotCount);
     }
     if(extra.sampledLightCount){const uint i=min(uint(giRandom(seed)*extra.sampledLightCount),extra.sampledLightCount-1u);
-        const DISample sample=diSampleTexturedLight(sampled[i],i,float2(giRandom(seed),giRandom(seed)),point,emitters,materials,textures,p.materialExtensions);
+        const DISample sample=diSampleTexturedLight(sampled[i],i,float2(giRandom(seed),giRandom(seed)),point,emitters,materials,textures,p.materialExtensions,p.vertexColors);
         if(sample.valid&&sample.pdfArea>0){const float3 contribution=diBRDF(surface,sample)*float(extra.sampledLightCount)/sample.pdfArea;
             if(!all(isfinite(contribution))||any(contribution<0))numericError=true;else result+=contribution*diEndpointTransmittance<Payload>(surface,sample,as,ift,instances,p.slotCount);}}
     // GI atlas is INDIRECT irradiance. Add once; AO never modulates it.

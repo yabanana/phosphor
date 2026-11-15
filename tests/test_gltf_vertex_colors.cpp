@@ -192,8 +192,13 @@ TEST_CASE("COLOR_0: the scene store marks the pipeline union only for a coloured
     CHECK(twin.constantCount == indexed.constantCount + 1);
     pipe::PipelineDesc meshForward;
     meshForward.kind = pipe::PipelineKind::Render;
-    meshForward.functions = {"meshlet_object", "meshlet_mesh", "forward_fs"}; // the meshlet forward pipeline has no twin: its entry points stay
-    CHECK(pipe::forward::withVertexColor(meshForward).functions[2] == "forward_fs");
+    meshForward.functions = {"meshlet_object", "meshlet_mesh", "forward_fs"};
+    CHECK(pipe::forward::withVertexColor(meshForward).functions[1] == "meshlet_mesh_vc");
+    CHECK(pipe::forward::withVertexColor(meshForward).functions[2] == "forward_fs_vc");
+    pipe::PipelineDesc debugMesh;
+    debugMesh.kind = pipe::PipelineKind::Mesh;
+    debugMesh.functions = {"meshlet_object", "meshlet_mesh_debug", "meshlet_debug_fs"}; // a pair without twins is left alone
+    CHECK(pipe::forward::withVertexColor(debugMesh).functions[1] == "meshlet_mesh_debug");
     pipe::PipelineDesc alpha;
     alpha.kind = pipe::PipelineKind::Render;
     alpha.functions = {"visibility_object_alpha", "visibility_mesh", "visibility_alpha_lit_tt_fs"};
