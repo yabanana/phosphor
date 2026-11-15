@@ -17,7 +17,13 @@ is a coarse probe grid and no decision-11 threshold exists for GI): `on` within 
 must fail the gate: a control that cannot fail proves nothing).  Not covered: the radiometric accuracy of DDGI itself, the Cache/ReSTIR GI
 modes (they keep E(N) for E(-N), declared in the support table) and the legacy resolve GI path (no composite).
 
-  uv run --offline --no-project --python 3.13 --with numpy python -I tools/f15_thin_gi_back_check.py --run --out build/f15-check/t19-gi
+F15 closure (ticket 19): the same expectation and gates for EVERY GI mode and consumer: `--gi ddgi|cache|restir` (the radiance-cache and
+ReSTIR GI modes read the same probe-atlas lookup at -N: gi_shade's own fallback is that lookup) and `--path composite|resolve` (composite:
+--reflections ssr, the reflection composite shades the thin lobe; resolve: --reflections off, the legacy visibility resolve shades it, no
+composite).  Written fail-before: with `--thin-gi-back off` (the control, and the behaviour of the engine before the closure in every mode but
+DDGI+composite) the transmitted GI term is the pixel's own E(N) = 0 here.
+
+  uv run --offline --no-project --python 3.13 --with numpy python -I tools/f15_thin_gi_back_check.py --run --out build/f15-check/t19-gi [--gi cache] [--path resolve]
   ... --evaluate --out DIR     (existing captures, no GPU process)
 Exit codes: 0 gates met, 1 a gate failed, 2 usage, 4 GPU busy, 6 capture failed.
 """
@@ -82,12 +88,12 @@ def quad_region(index):
     return slice(cy - 30, cy + 31), slice(cx - 30, cx + 31)
 
 
-def capture_command(binary, folder, mode, seed):
-    gi = "off" if mode == "nogi" else "ddgi"
+def capture_command(binary, folder, mode, seed, gi_mode="ddgi", path="composite"):
+    gi = "off" if mode == "nogi" else gi_mode
     back = "off" if mode == "off" else "on"
     last = str(FRAMES - 1)
     return [str(binary), "--scene", "procedural", "--bench", "2", "--material-scenario", SCENARIO, "--render-path", "visibility",
-            "--geometry-path", "mesh", "--rt", "on", "--shadows", "off", "--lighting", "restir", "--gi", gi, "--reflections", "ssr",
+            "--geometry-path", "mesh", "--rt", "on", "--shadows", "off", "--lighting", "restir", "--gi", gi, "--reflections", "ssr" if path == "composite" else "off",
             "--ao", "off", "--lighting-denoise", "custom", "--reflection-samples", "8", "--lighting-seed", str(seed), "--thin-gi-back", back,
             "--post", "--upscaler", "native", "--resolution", f"{RESOLUTION[0]}x{RESOLUTION[1]}", "--frames", str(FRAMES), "--warmup", "0",
             "--fixed-timestep", "--no-ui", "--no-vsync", "--no-gpu-timing", "--debug-lighting", "1", "--pipeline-sync",
@@ -120,17 +126,36 @@ def evaluate(out):
 
 
 def run(args):
+    gi_mode, path = args.gi, args.path
     import f15_check as fc
     out = args.out.resolve()
     binary = args.binary.resolve()
-    with fc.gpu_lock(args.gpu_lock):
+    import contextlib
+    import subprocess
+    if args.harvest:  # targeted archive update: the `on` capture command of this GI mode and path, harvesting instead of capturing
+        command = capture_command(binary, out / "on", "on", args.seed, gi_mode, path)
+        drop, kept, skip = {"--capture-linear", "--capture-linear-frame", "--capture-linear-signal", "--report"}, [], False
+        for word in command:
+            if skip:
+                skip = False
+            elif word in drop:
+                skip = True
+            else:
+                kept.append(word)
+        kept[kept.index("--frames") + 1] = "12"
+        args.harvest.mkdir(parents=True, exist_ok=True)
+        raw = args.harvest / f"{gi_mode}-{path}.raw.json"
+        result = subprocess.run(kept + ["--harvest-pipelines", str(raw)], stdout=open(args.harvest / f"{gi_mode}-{path}.log", "w"), stderr=subprocess.STDOUT, timeout=args.timeout)
+        print(f"harvest {gi_mode}-{path}: exit {result.returncode}")
+        return result.returncode
+    with (contextlib.nullcontext() if args.no_lock else fc.gpu_lock(args.gpu_lock)):
         for mode in ("on", "off", "nogi"):
             busy = fc.running_gpu_processes()
             if busy:
                 raise fc.GpuBusy(f"other GPU jobs are running: {', '.join(busy)}")
             folder = out / mode
             folder.mkdir(parents=True, exist_ok=True)
-            status = fc.capture(capture_command(binary, folder, mode, args.seed), folder / "engine.log", args.timeout)
+            status = fc.capture(capture_command(binary, folder, mode, args.seed, gi_mode, path), folder / "engine.log", args.timeout)
             if not status["passed"]:
                 print(f"capture {mode} failed: {status['failures']}")
                 return 6
@@ -149,6 +174,10 @@ def main(argv=None):
     parser.add_argument("--gpu-lock", default="/tmp/phosphor-gpu-verification.lock")
     parser.add_argument("--timeout", type=float, default=900.0)
     parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--no-lock", action="store_true", help="do not take the GPU lock (the caller holds it, gpulock.py)")
+    parser.add_argument("--harvest", type=pathlib.Path, default=None, help="write the --harvest-pipelines output of the `on` command here instead of capturing")
+    parser.add_argument("--gi", choices=("ddgi", "cache", "restir"), default="ddgi")
+    parser.add_argument("--path", choices=("composite", "resolve"), default="composite")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--run", action="store_true")
     mode.add_argument("--evaluate", action="store_true")

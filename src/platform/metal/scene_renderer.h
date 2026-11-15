@@ -123,7 +123,7 @@ public:
     /// F15.1 (ticket 06): the lobe guide buffer and the frame's GPUDIParams, read by the indexed overflow
     /// receivers of scenes with material features (forward_di_receiver_guide_fs).
     void setLobeGuideInputs(MTL::GPUAddress guide, MTL::GPUAddress diParams);
-    void setLightingInputs(MTL::GPUAddress params, MTL::Texture* sun, MTL::Texture* local, MTL::Texture* gi);
+    void setLightingInputs(MTL::GPUAddress params, MTL::Texture* sun, MTL::Texture* local, MTL::Texture* gi, MTL::Texture* giBack);
     [[nodiscard]] MTL::Buffer* indexBuffer() const { return indexBuffer_; }
     void setDrawGate(MTL::GPUAddress gate) { drawGate_ = gate; }
     /// The indexed fallback of one cull class inside the mesh path's render

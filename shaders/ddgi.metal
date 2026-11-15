@@ -176,3 +176,19 @@ kernel void ddgi_resolve_back(constant GPUProbeGridParams& p [[buffer(0)]],
     }
     backIrradiance.write(half4(half3(min(E,float3(65000.0f))),1.0h),pixel);
 }
+
+// F15 closure (ticket 19): the same lookup for EVERY valid receiver (no lobe guide): the legacy resolve shades thin-walled subsurface
+// pixels before any guide exists, and the Cache / ReSTIR GI modes read the probe atlas they maintain exactly like DDGI (gi_shade's own
+// fallback is this lookup).  Only scenes with a subsurface material request it.
+kernel void ddgi_resolve_back_all(constant GPUProbeGridParams& p [[buffer(0)]],
+                                  const device GPUProbeState* states [[buffer(1)]],
+                                  texture2d<float,access::read> positions [[texture(0)]],
+                                  texture2d<float,access::read> normals [[texture(1)]],
+                                  texture2d<float> irradiance [[texture(2)]],texture2d<float> moments [[texture(3)]],
+                                  texture2d<half,access::write> backIrradiance [[texture(4)]],uint2 pixel [[thread_position_in_grid]]) {
+    if(pixel.x>=p.width || pixel.y>=p.height) return;
+    float3 E=0.0f;
+    const float4 point=positions.read(pixel),normal=normals.read(pixel);
+    if(point.w>0.0f && normal.w>0.0f) E=giIrradiance(point.xyz,-normal.xyz,p,states,irradiance,moments,true);
+    backIrradiance.write(half4(half3(min(E,float3(65000.0f))),1.0h),pixel);
+}

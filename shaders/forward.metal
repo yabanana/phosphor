@@ -271,7 +271,8 @@ fragment ForwardLitSurfaceOutput forward_surface_lit_fs(SurfaceVertexOut in [[st
     const ShadingResult value = shadeSurface(surface, frame, materials, lights, textures, true,
         (lighting.flags & 1u) ? lightingTextures[0].tex.read(uint2(in.position.xy)).xyz : float3(1.0f), lighting.sunIndex,
         (lighting.flags & 2u) != 0, (lighting.flags & 2u) ? lightingTextures[1].tex.read(uint2(in.position.xy)).xyz : float3(0),
-        (lighting.flags & 4u) != 0, (lighting.flags & 4u) ? lightingTextures[2].tex.read(uint2(in.position.xy)).xyz : float3(0),(lighting.flags & 8u)!=0,(lighting.flags & 16u)!=0,(lighting.flags & RESOLVE_EXTERNAL_DIFFUSE)!=0);
+        (lighting.flags & 4u) != 0, (lighting.flags & 4u) ? lightingTextures[2].tex.read(uint2(in.position.xy)).xyz : float3(0),(lighting.flags & 8u)!=0,(lighting.flags & 16u)!=0,(lighting.flags & RESOLVE_EXTERNAL_DIFFUSE)!=0,
+        float3(0), 0.0f, (lighting.flags & RESOLVE_GI_BACK) != 0, (lighting.flags & RESOLVE_GI_BACK) ? lightingTextures[3].tex.read(uint2(in.position.xy)).xyz : float3(0));
     if (value.alpha < materials[in.materialIndex].alphaCutoff)
         discard_fragment();
     ForwardLitSurfaceOutput out;

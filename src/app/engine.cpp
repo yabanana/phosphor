@@ -1782,7 +1782,7 @@ bool Engine::frame(float dt) {
         const bool custom=options_.lightingDenoise==LightingDenoiseMode::Custom || (denoised_&&!denoised_->ready());
         if(reflections_&&reflections_->ready()){reflections_->setEnvironment(environment.skyRadiance);reflections_->prepareFrame(*store_,sf,custom,surfaceSignalEpoch_);}
         if(atmosphere_)atmosphere_->prepareFrame(sf,surfaceGeometryEpoch_,surfaceMaterialEpoch_);
-        const u32 flags=(options_.shadows!=ShadowMode::Off?1u:0u) | (options_.directLighting!=DirectLightingMode::Legacy?2u:0u) | (options_.gi!=GiMode::Off?4u:0u) |
+        const u32 flags=(options_.shadows!=ShadowMode::Off?1u:0u) | (options_.directLighting!=DirectLightingMode::Legacy?2u:0u) | (options_.gi!=GiMode::Off?4u:0u) | (gi_&&gi_->backAvailable()?RESOLVE_GI_BACK:0u) |
                         (options_.reflections!=ReflectionMode::Off && reflections_&&reflections_->ready()?8u:0u) | (reflections_&&reflections_->ready()?16u|RESOLVE_EXTERNAL_DIFFUSE:0u) |
                         // F15.3: a material scenario without the reflection composite has the
                         // resolve evaluate its declared environment (deterministic furnace).
@@ -2372,7 +2372,7 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
                 shadows_->addToGraph(frameGraph_,color,depth);
                 if(directLighting_)directLighting_->addToGraph(frameGraph_,color,shadows_->depth());
                 if(gi_)gi_->addToGraph(frameGraph_);
-                visibility_->setLightingTextures(shadows_->mask(),directLighting_?directLighting_->direct():shadows_->zeroLighting(),gi_?gi_->irradiance():shadows_->zeroLighting());
+                visibility_->setLightingTextures(shadows_->mask(),directLighting_?directLighting_->direct():shadows_->zeroLighting(),gi_?gi_->irradiance():shadows_->zeroLighting(),gi_?gi_->irradianceBack():rg::TextureRef{});
             }
             visibility_->addResolve(frameGraph_, color, shadows_?shadows_->depth():depth);
             if(graphKey_.reflectionReady)visibility_->replaceColor(reflections_->addToGraph(frameGraph_,visibility_->color(),visibility_->depth()));

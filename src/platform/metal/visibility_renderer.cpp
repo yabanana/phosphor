@@ -83,7 +83,7 @@ VisibilityRenderer::VisibilityRenderer(MetalContext &c, PipelineCache &p, SceneR
     for (auto &table : tables_) {
         auto *desc = MTL4::ArgumentTableDescriptor::alloc()->init();
         desc->setMaxBufferBindCount(18);
-        desc->setMaxTextureBindCount(11);
+        desc->setMaxTextureBindCount(12); // F15 closure ticket 19: texture 11 = E(-N) companion of the GI irradiance
         NS::Error *error = nullptr;
         table = c.device()->newArgumentTable(desc, &error);
         desc->release();
@@ -315,8 +315,8 @@ void VisibilityRenderer::prepareLighting(u32 flags, u32 sunIndex, std::array<flo
     const GPUResolveLightingParams p{flags, sunIndex, params_.width, params_.height, {environment[0], environment[1], environment[2]}, sunAngularRadius};
     auto u = context_.frameUploads().allocate(sizeof p); std::memcpy(u.cpu, &p, sizeof p); lightingAddress_ = u.gpu;
 }
-void VisibilityRenderer::setLightingTextures(rg::TextureRef sun, rg::TextureRef direct, rg::TextureRef gi) {
-    sun_ = sun; direct_ = direct; indirect_ = gi;
+void VisibilityRenderer::setLightingTextures(rg::TextureRef sun, rg::TextureRef direct, rg::TextureRef gi, rg::TextureRef giBack) {
+    sun_ = sun; direct_ = direct; indirect_ = gi; indirectBack_ = giBack.valid() ? giBack : gi; // F15 closure ticket 19: E(-N) companion (gi itself when the scene has none: bound, never read)
 }
 void VisibilityRenderer::bind(rg::PassContext &ctx, MTL4::ArgumentTable *table, bool withSss) {
     table->setAddress(scene_.frameConstantsAddress(), 0);
@@ -338,6 +338,7 @@ void VisibilityRenderer::bind(rg::PassContext &ctx, MTL4::ArgumentTable *table, 
         table->setTexture(static_cast<MTL::Texture*>(ctx.texture(sun_))->gpuResourceID(), 7);
         table->setTexture(static_cast<MTL::Texture*>(ctx.texture(direct_))->gpuResourceID(), 8);
         table->setTexture(static_cast<MTL::Texture*>(ctx.texture(indirect_))->gpuResourceID(), 9);
+        table->setTexture(static_cast<MTL::Texture*>(ctx.texture(indirectBack_))->gpuResourceID(), 11);
     }
     if (adaptive_)
         table->setAddress(shadingHistory_[view_]->gpuAddress(), 16);
@@ -480,7 +481,7 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
                     b.read(output, Usage::ShaderRead, StageDispatch);
                     output = b.write(output, Usage::ShaderWrite, StageDispatch);
                 }
-                if (lighting_) for (auto ref : {sun_, direct_, indirect_}) b.read(ref, Usage::ShaderRead, StageDispatch);
+                if (lighting_) for (auto ref : {sun_, direct_, indirect_, indirectBack_}) b.read(ref, Usage::ShaderRead, StageDispatch);
                 if (subsurface_) {
                     b.read(sss_, Usage::ShaderRead, StageDispatch);
                     sss_ = b.write(sss_, Usage::ShaderWrite, StageDispatch);
@@ -532,13 +533,14 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
             depth_ = b.writeDepth(depth_, LoadIntent::Preserve);
             scene_.declareDrawReads(b);
             b.read(poses_, Usage::ShaderRead, StageVertex);
-            if (lighting_) for (auto ref : {sun_, direct_, indirect_}) b.read(ref, Usage::ShaderRead, StageFragment);
+            if (lighting_) for (auto ref : {sun_, direct_, indirect_, indirectBack_}) b.read(ref, Usage::ShaderRead, StageFragment);
             b.setProfileShaders(lighting_ ? "forward_surface_vs,forward_surface_lit_fs" : "forward_vs,forward_surface_fs");
         },
         [this](PassContext &ctx) {
             if (lighting_) scene_.setLightingInputs(lightingAddress_, static_cast<MTL::Texture*>(ctx.texture(sun_)),
                                                      static_cast<MTL::Texture*>(ctx.texture(direct_)),
-                                                     static_cast<MTL::Texture*>(ctx.texture(indirect_)));
+                                                     static_cast<MTL::Texture*>(ctx.texture(indirect_)),
+                                                     static_cast<MTL::Texture*>(ctx.texture(indirectBack_)));
             scene_.encodeOverlay(static_cast<MTL4::RenderCommandEncoder *>(ctx.encoder()), servedFallback_, true, lightingFallbackDepth_);
         });
     if (subsurface_) {

@@ -101,16 +101,16 @@ const MaterialSupportTable& currentSupportTable() {
         // description file): the Lambert BTDF of lights behind the surface (analytic lights, the sun disk centre, ReSTIR and clustered DI in
         // target and shading with visibility rays leaving from the light's side), the back-side environment (declared weight
         // w color (1 - E_d) (1 - 0.16 N.V), exact within 3 % of the quadrature), and the composite.  Declared approximations (decision 06):
-        // the transmitted GI term reads the DDGI probe-grid irradiance at -N (ticket 19: a second lookup of the pixel's position with the
-        // geometric normal negated, thin pixels only, written next to the GI irradiance); the Cache and ReSTIR GI modes and the legacy resolve
-        // GI path keep the pixel's own irradiance at N standing for E(-N), secondary RT hits ignore the transmission, the draft's
+        // the transmitted GI term reads the probe-grid irradiance at -N (ticket 19: a second lookup of the pixel's position with the
+        // geometric normal negated, written next to the GI irradiance in EVERY GI mode: DDGI, the radiance cache and ReSTIR GI maintain the same
+        // probe atlas, and in the legacy resolve path without a reflection composite as well, F15 closure), secondary RT hits ignore the transmission, the draft's
         // anisotropic scatter split and the weight/colour textures are not validated against an independent reference.  Ticket 19 composes the
         // thin lobe with a clearcoat on every primary path (the coat attenuates the reflected and transmitted lobes by 1 - c F_c and adds its
         // own lobe, validated against the independent reference); thin + sheen, anisotropy, iridescence or ior/specular are not composed in the
         // resolve branch and the reference refuses them.  The volumetric mode (ticket 17) is declared Approximated below.
         FeatureSupportEntry& subsurface = t.features[static_cast<u32>(MaterialFeature::Subsurface)];
         subsurface.level                = SupportLevel::Approximated;
-        subsurface.approximation        = "thin_mode_only;gi_at_minus_n_ddgi_probe_lookup_other_gi_modes_use_irradiance_at_n;secondary_rt_hits_ignore_transmission;thin_composed_with_clearcoat_only";
+        subsurface.approximation        = "thin_mode_only;gi_at_minus_n_probe_grid_lookup_in_every_gi_mode;secondary_rt_hits_ignore_transmission;thin_composed_with_clearcoat_only";
         // F15.1 (ticket 17): the VOLUMETRIC mode.  Screen-space Burley normalised diffusion (ADR-0005): the resolve strips the diffuse term of
         // the pixel (lights and ambient) into a diffuse-irradiance target, subsurface.metal spreads it with the Christensen-Burley profile
         // (21 or 55 golden-angle samples at the equal-mass radii of the mixture of the three channel profiles, metres to pixels from the

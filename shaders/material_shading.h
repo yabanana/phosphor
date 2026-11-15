@@ -451,7 +451,8 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
                                   bool replaceLocal = false, float3 localDirect = float3(0),
                                   bool useGI = false, float3 indirectIrradiance = float3(0),
                                   bool omitSpecularAmbient = false, bool physicalGI = false, bool externalDiffuse = false,
-                                  float3 environment = float3(0), float sunAngularRadius = 0.0f) {
+                                  float3 environment = float3(0), float sunAngularRadius = 0.0f,
+                                  bool useGIBack = false, float3 irradianceBack = float3(0)) {
     const device GPUMaterial &m = materials[in.materialIndex];
     // F15.1 (ticket 22): the per-slot texture transforms of the material (compiled out without kTextureTransform).
     const TexXf xf = texXfFor(frame.materialExtensions, m.flags, m.textureTransformIndex);
@@ -826,8 +827,8 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         sheenEnvironment = (useGI ? indirectIrradiance / M_PI_F : (physicalGI ? environment : hemisphere(N))) * sheen.color * E;
     }
     // F15.1 (ticket 16): the front diffuse weight is scaled by 1 - w and the transmitted lobe takes w color (1 - E_d) (1 - 0.16 N.V) of the
-    // radiance at -N: the declared environment (physicalGI), the legacy hemisphere at -N, or (GI) the irradiance of this pixel, which stands
-    // for E(-N) (declared approximation: no probe lookup at -N).  The term travels with the diffuse ambient.
+    // radiance at -N: the declared environment (physicalGI), the legacy hemisphere at -N, or (GI) the probe-grid irradiance at -N (the
+    // companion texture of the GI pass, F15 closure ticket 19; the pixel's own E(N) only when the scene has none).  The term travels with the diffuse ambient.
     float3 thinWeight = float3(0.0);
     if (thinResolved) {
         thinWeight = bsdfThinEnvWeight(thin, metallic, envDiffuse, NdotV);
@@ -838,7 +839,8 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     // F13 assembles these positive signals once outside this residual base.
     // Never subtract full-float lighting from a quantized summed color later.
     if(!externalDiffuse)color += (useGI ? indirectIrradiance * baseColor.rgb * (1.0f - metallic) * envDiffuse / M_PI_F * (physicalGI?1.0f:occlusion) : ambientDiffuse * occlusion);
-    if(!externalDiffuse && thinResolved)color += useGI ? indirectIrradiance * thinWeight / M_PI_F * (physicalGI?1.0f:occlusion)
+    // F15 closure (ticket 19): E(-N) is the companion lookup of the GI pass when it exists (RESOLVE_GI_BACK), else the pixel's own E(N).
+    if(!externalDiffuse && thinResolved)color += useGI ? (useGIBack ? irradianceBack : indirectIrradiance) * thinWeight / M_PI_F * (physicalGI?1.0f:occlusion)
                                                        : (physicalGI ? environment : hemisphere(-N)) * thinWeight * occlusion;
     if (volDiffuse) {
         // F15.1 (ticket 17): the diffuse of the pixel (the resolve's lights + ambient, base colour) is stripped from the colour; weight x colour x the same

@@ -425,13 +425,13 @@ void SceneRenderer::addPassesToGraph(rg::RenderGraph& graph, GpuDrivenMode mode,
         [this](PassContext& ctx) { encodeDrawBuild(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder())); });
 }
 
-void SceneRenderer::setLightingInputs(MTL::GPUAddress params, MTL::Texture* sun, MTL::Texture* local, MTL::Texture* gi) {
+void SceneRenderer::setLightingInputs(MTL::GPUAddress params, MTL::Texture* sun, MTL::Texture* local, MTL::Texture* gi, MTL::Texture* giBack) {
     // The ICB inherits buffer bindings from this argument table. Encode the
     // three texture handles in a fresh frame-ring slice so in-flight draws
     // retain their exact resources across views/resize and later rebinding.
     static_assert(sizeof(MTL::ResourceID) == 8, "Metal resource-ID ABI");
-    const MTL::ResourceID handles[] = {sun->gpuResourceID(), local->gpuResourceID(), gi->gpuResourceID()};
-    static_assert(sizeof(handles) == 3 * 8, "Forward lighting texture-table ABI");
+    const MTL::ResourceID handles[] = {sun->gpuResourceID(), local->gpuResourceID(), gi->gpuResourceID(), giBack->gpuResourceID()}; // F15 closure ticket 19: E(-N) of thin-walled subsurface pixels (gi when the scene has none)
+    static_assert(sizeof(handles) == 4 * 8, "Forward lighting texture-table ABI");
     const auto slice = context_.frameUploads().allocate(sizeof(handles));
     std::memcpy(slice.cpu, handles, sizeof(handles));
     arguments_->setAddress(params, BindLightingParams);

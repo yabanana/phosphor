@@ -113,7 +113,8 @@ static void resolveVisibilityPixel(constant FrameConstants &frame, const device 
                                    float3 sunVisibility = float3(1.0f), uint sunIndex = ~0u, bool replaceLocal = false,
                                    float3 localDirect = float3(0), bool useGI = false, float3 irradiance = float3(0),
                                    bool omitSpecularAmbient=false, bool physicalGI=false, bool externalDiffuse=false,
-                                   float3 environment = float3(0), float sunAngularRadius = 0.0f) {
+                                   float3 environment = float3(0), float sunAngularRadius = 0.0f,
+                                   bool useGIBack = false, float3 irradianceBack = float3(0)) {
     cached.sssMaterial = 0u; // F15.1 (ticket 17): set by the shading of a volumetric-subsurface pixel only
     if (pixel.x >= p.width || pixel.y >= p.height)
         return;
@@ -171,7 +172,7 @@ static void resolveVisibilityPixel(constant FrameConstants &frame, const device 
     const float3 eye = float3(frame.cameraPosition[0], frame.cameraPosition[1], frame.cameraPosition[2]);
     surface.frontFacing = dot(cross(w1.xyz - w0.xyz, w2.xyz - w0.xyz), eye - surface.worldPos) > 0;
     const ShadingResult value = reuse ? cached : shadeSurface(surface, frame, materials, lights, textures, false,
-                                                              sunVisibility, sunIndex, replaceLocal, localDirect, useGI, irradiance,omitSpecularAmbient,physicalGI,externalDiffuse,environment,sunAngularRadius);
+                                                              sunVisibility, sunIndex, replaceLocal, localDirect, useGI, irradiance,omitSpecularAmbient,physicalGI,externalDiffuse,environment,sunAngularRadius,useGIBack,irradianceBack);
     cached = value;
     color.write(float4(p.debugMode == 1   ? value.normal * 0.5f + 0.5f
                        : p.debugMode == 2 ? value.baseColor
@@ -253,6 +254,7 @@ kernel void visibility_lit_resolve(
     texture2d<float, access::read> localDirect [[texture(8)]],
     texture2d<float, access::read> irradiance [[texture(9)]],
     texture2d<float, access::write> sss [[texture(10), function_constant(kSssWrite)]],
+    texture2d<float, access::read> irradianceBack [[texture(11)]],
     uint2 tile [[threadgroup_position_in_grid]], uint2 local [[thread_position_in_threadgroup]]) {
     uint index = tile.y * p.tilesX + tile.x;
     if (kBinFeature)
@@ -270,7 +272,8 @@ kernel void visibility_lit_resolve(
                            (lighting.flags & 1u) ? sun.read(pixel).xyz : float3(1.0f), lighting.sunIndex,
                            (lighting.flags & 2u) != 0, (lighting.flags & 2u) ? localDirect.read(pixel).xyz : float3(0),
                            (lighting.flags & 4u) != 0, (lighting.flags & 4u) ? irradiance.read(pixel).xyz : float3(0),(lighting.flags & 8u)!=0,(lighting.flags & 16u)!=0,(lighting.flags & RESOLVE_EXTERNAL_DIFFUSE)!=0,
-                           float3(lighting.environment[0],lighting.environment[1],lighting.environment[2]),lighting.sunAngularRadius);
+                           float3(lighting.environment[0],lighting.environment[1],lighting.environment[2]),lighting.sunAngularRadius,
+                           (lighting.flags & RESOLVE_GI_BACK) != 0, (lighting.flags & RESOLVE_GI_BACK) ? irradianceBack.read(pixel).xyz : float3(0));
     if (kSssWrite && cached.sssMaterial != 0u) writeSubsurface(sss, pixel, cached);
 }
 kernel void visibility_adaptive(

@@ -177,3 +177,21 @@ GI at -N for Cache/ReSTIR GI and for the legacy resolve GI path, weight/colour t
 - 3 four side-by-side models: MET qualitative (ticket 22). Ticked.
 - 4 roadmap re-read, lobe status list: MET (all lobes approximated with named approximations; list in the last comment). Ticked.
 Open: thin-lobe weight/colour textures without reference; dropped controls (aniso-rotation-flipped, additive-layering on combo-irid-aniso-env, transmission-uncoated on combo-thin-coat-env) reported here only; thin + sheen/aniso/iridescence/ior refused by the reference and not composed in the engine; radiometric accuracy of DDGI itself and Cache/ReSTIR GI modes unverified.
+
+2026-11-15 — F15 closure, agent "thinwall" (branch `f15c-thinwall2`): GI at -N in EVERY GI mode and for the legacy resolve (the carried item of tickets 16/19/24; it was not scoped out by
+`docs/plans/F15.md`).  Cause of the limit: the second probe-grid lookup `ddgi_resolve_back` ran only for DDGI with this frame's lobe guide, and only the reflection composite read it.
+Now: the pass exists for every GI mode (DDGI, the radiance cache and ReSTIR GI all maintain the same probe atlas; `gi_shade`'s own M == 0 fallback is this very lookup) whenever the
+scene has a subsurface material and `--thin-gi-back on`; with a lobe guide only thin pixels are written (`ddgi_resolve_back`), without one (the legacy visibility resolve and the
+forward path shade thin pixels before any guide exists) every valid receiver is (`ddgi_resolve_back_all`, new kernel).  The resolve reads E(-N) from a companion texture
+(texture 11 of `visibility_lit_resolve`, texture 3 of the forward lighting handles, flag `RESOLVE_GI_BACK`, argument table of 12 textures) instead of the pixel's own E(N); the composite
+reads it with `REFLECT_COMPOSE_GI_BACK` as before.  The support table approximation id is now `gi_at_minus_n_probe_grid_lookup_in_every_gi_mode`.
+Fixture: the existing declared check `tools/f15_thin_gi_back_check.py` (scene `subsurface-thin-gi-back`, independent expectation = form factor x wall radiance x the declared thin weight,
+gate 25 % per quad, declared before the first measurement, unchanged) now runs per GI mode and consumer (`--gi ddgi|cache|restir` x `--path composite|resolve`; resolve = `--reflections off`,
+no composite).  Result (6 combinations, seed 1, 128 frames, `--thin-gi-back on`): quad errors 6.7 % / 6.2 % / 4.7 % in EVERY combination (identical numbers: the same lookup), expected GI terms
+0.3159 / (0.3156, 0.1736, 0.0789) / (0.0316, 0.2211, 0.1895).  FAIL-BEFORE (`--thin-gi-back off` = the pixel's own E(N), what Cache, ReSTIR GI and the legacy resolve did): 100 % error
+(0 % of the term) with cache and ReSTIR, 99.3 % with DDGI (0.7 % leak, as in the first measurement); the control fails the same gate on every combination.
+Verification of the tree: exactness captures (5) bit-identical to `build/litefix/exact-new`, `tools/visual_check.sh` 8 benches 0 px, API + shader validation (120 frames, `--debug-lighting`) of cache + composite,
+ReSTIR + resolve and DDGI + resolve exit 0 with 120 LIGHTING PASS each (the validation run found the one-slot argument-table overflow of the resolve, fixed before this commit).
+Still true / open: the probe lookup is not a denoised signal and not path traced at -N: its accuracy is the DDGI probe accuracy in every mode (the gate is indicative, no decision-11 GI
+threshold exists); a path-traced E(-N) with its own reservoir history for ReSTIR GI would need a second denoiser signal (not built, not required by the plan).  Cost of the extra dispatch
+(frame-size, 7.4 MB RGBA16F at 720p, thin scenes only) needs a quiet-machine A/B (`tools/f15_costs.py` item 5 compares `--thin-gi-back off|on`).

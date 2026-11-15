@@ -68,7 +68,7 @@ class VisibilityRenderer {
         subsurfaceAllowed_ = allowed; sssNear_ = nearPlane; sssTanX_ = tanHalfFovX; sssTanY_ = tanHalfFovY;
     }
     [[nodiscard]] bool subsurfaceActive() const { return subsurface_; }
-    void setLightingTextures(rg::TextureRef sun, rg::TextureRef direct, rg::TextureRef gi);
+    void setLightingTextures(rg::TextureRef sun, rg::TextureRef direct, rg::TextureRef gi, rg::TextureRef giBack = {});
     rg::BufferRef importPoseHistory(rg::RenderGraph& graph);
     [[nodiscard]] MTL::GPUAddress paramsAddress() const { return paramsAddress_; }
     [[nodiscard]] MTL::GPUAddress temporalAddress() const { return temporalAddress_; }
@@ -113,7 +113,7 @@ class VisibilityRenderer {
     bool lighting_ = false;
     MTL::DepthStencilState* lightingFallbackDepth_ = nullptr;
     MTL::GPUAddress lightingAddress_ = 0;
-    rg::TextureRef sun_, direct_, indirect_;
+    rg::TextureRef sun_, direct_, indirect_, indirectBack_;
     bool tileResolve_ = false;
     bool adaptive_ = false;
     std::array<MTL::Buffer *, 4> shadingHistory_{};

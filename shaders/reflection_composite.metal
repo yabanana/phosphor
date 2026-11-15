@@ -140,7 +140,7 @@ kernel void REFL_KERNEL(reflection_composite)(constant GPUReflectionComposeParam
             if(p.flags&REFLECT_COMPOSE_GI)color+=giSelected.read(pixel).rgb*diVec(s.albedo)*(1-s.metallic)*envDiffuse/M_PI_F;
 #ifdef PHOSPHOR_REFL_LOBE
             if((p.flags&REFLECT_COMPOSE_GI)&&any(sheenTerm>0))color+=giSelected.read(pixel).rgb*sheenTerm/M_PI_F;
-            // F15.1 (ticket 19): E(-N) is the probe-grid lookup of the back normal (REFLECT_COMPOSE_GI_BACK, DDGI); the other GI modes keep the declared E(-N) ~ E(N).
+            // F15.1 (ticket 19): E(-N) is the probe-grid lookup of the back normal (REFLECT_COMPOSE_GI_BACK; every GI mode since the F15 closure: the probe atlas exists in all of them).
             if((p.flags&REFLECT_COMPOSE_GI)&&any(thinTerm>0))color+=((p.flags&REFLECT_COMPOSE_GI_BACK)?float3(giBack.read(pixel).rgb):giSelected.read(pixel).rgb)*thinTerm/M_PI_F;
 #endif
             if(p.flags&REFLECT_COMPOSE_SPEC)color+=specular.read(pixel).rgb;

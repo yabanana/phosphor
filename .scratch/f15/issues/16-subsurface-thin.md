@@ -217,3 +217,7 @@ Open item: "8 background compiler calls in restir/clustered captures never expla
   runs add restir_di_shade_rt_lobe and reflection_rt_lobe (the Khronos corpus rig, `--lighting restir`, `--reflections rt`: 9 lines, the rest of its 28 calls are archive misses of an unharvested model).  Same count as
   ticket 07's "6 base RT plus 2 lobe RT on workers".  The compile runs on the utility-QoS workers (335 ms of summed CPU at startup, 0 on the render thread), so it never reaches a frame.
 - Not changed: archiving them again would reintroduce the lifetime retention of ticket F9 (the policy is older than F15 and measured); the cost is startup CPU on workers only.
+
+2026-11-15 — F15 closure, agent "thinwall": the carried "GI at -N" item is closed for every GI mode and for the legacy resolve (details and numbers in ticket 19, same date): E(-N) is the
+probe-grid lookup of the back normal for DDGI, the radiance cache and ReSTIR GI, read by the reflection composite and by the legacy visibility/forward resolve; `--thin-gi-back off` (the old E(N)
+stand-in) fails the declared check in all six mode x consumer combinations, `on` is within 4.7-6.7 % of the independent expectation (gate 25 %, indicative).
