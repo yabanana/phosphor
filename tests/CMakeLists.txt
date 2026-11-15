@@ -175,6 +175,9 @@ if(PYTHON3_EXECUTABLE)
         COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/f15_texture_transform_check.py --selftest)
     add_test(NAME f15_texture_transform_secondary_python
         COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/f15_texture_transform_secondary.py --selftest)
+    # F15.1 (ticket 13): control-noise-corrected clip metrics (numpy; the tests skip themselves without it).
+    add_test(NAME f15_clip_bias_python
+        COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_f15_clip_bias.py)
     # F15.4 (ticket 23): the owner-approved CC0 terrain sets (never committed); the verify test reads TERRAIN_MATERIALS_DIR (or
     # build/terrain-materials) at run time and skips (exit 77) when no copy exists.
     add_test(NAME terrain_materials_verify

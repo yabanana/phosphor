@@ -325,3 +325,60 @@ Still open for ticket 13 itself: nothing from the audit list; the listed 6 (ray 
 Pre-existing keys: the engine captures of all nine earlier transmission keys (roughness-ior, attenuation, factor-tint, thin-volume, single-sided, glass-behind-glass, emissive-panel, rtoff, rtoff-combinations) of this tree are
 BIT-IDENTICAL (cmp) to captures of the clean tip binary (3ef8f41): none of them has a tinted glass interface behind the camera-visible surface.  Their Mitsuba references were not re-rendered: the reference rule only
 differs for a tinted solid or a multi-surface tinted thin body (the new keys), and the `--rt off` keys use the declared closed form.
+
+## 2026-11-15 - temporal clip closure (agent glass-temporal, branch f15c-glass-temporal-w; items 1-3)
+
+Result: the gated smooth-glass temporal clip now PASSES F13.6 (unchanged thresholds) against the converged control; the refract-axis control is demonstrable;
+the rough-glass ROIs are judgeable (bias-corrected) and FAIL honestly (information, not gating).  Rough-glass temporal quality stays open.
+
+What changed (commit b6c7ee6 and the tooling commit after it; shared files touched, additive: `src/renderer/gpu_types.h` (SPECULAR_SAMPLE_ENDPOINT, history struct
+16 -> 32 B), `tests/test_denoise.cpp`, `tests/CMakeLists.txt`, `tools/f15_clip_check.py`):
+- Endpoint-matched history (the handover plan), only in the transmission-specialised kernels: `reflectionRefractEndpoint` (reflections.metal) walks the deterministic
+  refraction path to the first non-glass hit (slot key + object-space point) or the environment (key 0, final direction) for every transmissive pixel whatever branch was
+  drawn (also boosted start-up pixels); `denoise_temporal_lobe` searches a 9x9 window around the surface reprojection for the same-key previous pixel with the nearest endpoint
+  (accept <= 1.5 x the same-key 4-neighbour footprint, none = nearest of the window), skips the receiver geometry tests for that candidate, and for SMOOTH interfaces blends at
+  1 / maxHistory without the soft-change test.  Mirror and tests: `renderer/denoise_endpoint.h`, `denoiseEndpointFootprint/Select`, 6 new doctests.
+- Bit-identity of featureless scenes: `f15_exact.sh` 5 cases byte-identical (cmp) to `build/litefix/exact-new`; `visual_check` against `reference-f15-appB` 8/8 benches 0 px.
+
+Iterations (corrected judge on partial controls, smooth ior 1.33 / 1.5 / 2.0 p95 / max): endpoint matching alone, window 4: 0.048 / 0.047 / 0.065, max 0.058 / 0.052 / 0.171
+(the start-up frames had no endpoint: boost pixels now carry it; before that 0.059 / 0.067 / 0.097, max 0.167 / 0.132 / 0.171); window 8 identical to window 4 (kept 4);
++ blend floor 1 / maxHistory: 0.038 / 0.038 / 0.055, ior 2.0 max 0.167 = ONE pixel-frame firefly (raw sample 16.18 = weight 32 x 0.5, frame 61, pixel (381, 271)) that landed
+on a history reset the soft-change test had caused one frame earlier; + no soft-change test for an endpoint-matched smooth history: all three pass.
+Window-8 and "no soft test for rough pixels" were measured: rough r0.1 / r0.3 got WORSE (p95 0.100 / 0.110) with the long blend and no soft test, so those two apply to smooth pixels only.
+
+Final gate table (`tools/f15_clip_check.py --evaluate --group transmission --out build/f15-clip-glass`, 110 control seeds (self-test half A vs half B: p95 0.006 / 0.007 / 0.010,
+flicker 0.004 / 0.005 / 0.006 against the gates / 3), 640x360, 160 frames, 1 spp, all checks incl. ghost and recovery; the control continues to 128 seeds, numbers will not move:
+the half-vs-half floor is already below a third of every gate):
+
+| ROI (gated) | custom p95 / max / flicker | raw 1 spp | negative-refract-axis |
+|---|---|---|---|
+| smooth ior 1.33 | 0.0230 / 0.0409 / 0.0029 PASS | 0.155 / 0.171 / 0.046 | 0.1746 / 0.1996 / 0.0253 FAIL |
+| smooth ior 1.5 | 0.0236 / 0.0480 / 0.0032 PASS | 0.149 / 0.154 / 0.046 | 0.1691 / 0.1874 / 0.0234 FAIL |
+| smooth ior 2.0 | 0.0306 / 0.0622 / 0.0047 PASS | 0.184 / 0.365 / 0.079 | 0.1445 / 0.1877 / 0.0259 FAIL |
+
+(gates 0.06 / 0.15 / 0.02; before: 0.1745 / 0.1690 / 0.1448 p95).  Item 2: `negative-refract-axis` (PHOSPHOR_DIAGNOSTIC_DENOISE_LOBE=reflect-axis, now also disabling endpoint
+matching: the key without the axis bit) reproduces the pre-fix numbers exactly and fails every gate while custom passes: `discriminates_against_custom` True.
+
+Item 3 (rough ROIs): `tools/f15_clip_bias.py` removes the CONTROL's own noise instead of buying seeds (460 / 1,800 would be 4 / 17 h of GPU): per frame RMSE^2 - mean (A - B)^2 / 4
+(Var(A - B) = 4 Var(control) for the two independent halves), the flicker in quadrature with the control flicker from the halves; thresholds unchanged; synthetic tests
+(`tools/test_f15_clip_bias.py`, ctest `f15_clip_bias_python`: an unbiased candidate whose raw RMSE reads the control noise gives ~0, a known bias is recovered, a bad candidate still fails).
+Resolution limit stated: the correction energy is itself estimated, ~0.02 at these ROI sizes.  The runner reports `transmission-rough-corrected` (information, `ROUGH_GATED = ()`):
+
+| ROI (info) | custom p95 / max / flicker (corrected) | raw 1 spp | control floor p95 |
+|---|---|---|---|
+| r0.1 ior 1.5 | 0.0885 / 0.0938 / 0.0278 FAIL | 0.247 / 0.256 / 0.147 | 0.0075 |
+| r0.3 ior 1.5 | 0.0840 / 0.1385 / 0.0211 FAIL | 0.402 / 0.414 / 0.377 | 0.0132 |
+| r0.6 ior 1.5 | 0.0482 / 0.0704 / 0.0130 PASS | 0.347 / 0.361 / 0.319 | 0.0118 |
+| grid | 0.0600 / 0.0989 / 0.0104 FAIL | 0.215 / 0.237 / 0.098 | 0.0076 |
+
+Both rough ROIs are judgeable now (floor far below the gates) and the raw 1 spp control fails them; custom FAILS them (before the change: r0.1 0.145 / 0.150 / 0.026, r0.3 0.086 / 0.141 /
+0.024): the endpoint of a rough interface is the centre of a scatter, and a long, soft-test-free blend lags the blurred moving panel, so rough pixels keep the old blend rules.  OPEN: a rough-glass
+history (match by the lobe-width footprint of the blurred endpoint, per-roughness blend).  Not gated, per the orchestrator decision of 2026-11-14.
+
+Findings for other agents (transport): (1) a 1 spp raw sample with weight ~32 (1 / the 1/32 branch-select floor) occurs about once per 92k smooth ior-2 pixel-samples; with the soft test it
+made the ior-2 max gate fail on one frame; unexplained here (neither the reflect weight F / pReflect nor the refract weight can reach 32 by my reading: lobe.pReflect = F / (F + T)), worth a look in
+`reflectionRefractWalk` / the branch weights.  (2) The soft-change test drops a whole flat-region history after any outlier sample (the history deviates > 2 % from a noise-free neighbourhood),
+which is what let the firefly land on a length-1 history.
+Needs a quiet-machine A/B (orchestrator): cost of the extra deterministic endpoint walk per transmissive pixel (one more trace walk, <= 8 traces) and of the 81-read window search in
+`denoise_temporal_lobe`; +16 B per pixel per specular history buffer in every scene (66 MiB at 1080p for three views x two buffers is NOT claimed: measure).
+Files / tools: `build/f15-clip-glass` (captures, control sums), `build/control_chunks.py` (control in lock-fair chunks), `build/case_driver.py`.

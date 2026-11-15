@@ -556,6 +556,42 @@ def evaluate_coat(out):
     return result
 
 
+ROUGH_GATED = ()  # judged and reported (bias-corrected), not gating: the engine does not meet the gates there (ticket 13 record 2026-11-15); fill in to gate
+
+
+def rough_corrected(out, name, config):
+    """Noise-corrected metrics (tools/f15_clip_bias.py) of one transmission capture on the ROIs of `config` against the converged control."""
+    import f15_clip_bias as bias
+    return bias.analyse(out / "control" / "linear", out / "control-A" / "linear", out / "control-B" / "linear", out / name / "linear", config)
+
+
+def evaluate_rough(out, judged):
+    """Ticket 13: the rough-glass ROIs (roughness 0.1 and 0.3 at ior 1.5), judged against the same converged control with its own noise removed
+    (control-noise-corrected RMSE and flicker, thresholds UNCHANGED: p95 <= 0.06, max <= 0.15, flicker <= 0.02).  Roughness 0.6 and the whole grid
+    stay information.  Discrimination: transmission-raw (1 spp, no denoiser) must FAIL the corrected gates on every judged ROI, and
+    transmission-custom must pass.  A ROI whose control noise floor alone exceeds a gate is not judgeable (reported, not gated)."""
+    diagnostic = transmission_roi_config(diagnostic=True)
+    names = ("transmission-custom", "transmission-raw", "negative-refract-axis")
+    metrics = {name: rough_corrected(out, name, diagnostic) for name in names}
+    entry = {"role": "gate", "rois": {}, "expectation": ("roughness 0.1 and 0.3 (ior 1.5) against the converged control with the control noise removed: transmission-custom passes "
+                                                           "the unchanged gates, transmission-raw (1 spp, no denoiser) fails them; a ROI whose control noise floor exceeds a gate is not judgeable")}
+    passed = True
+    for roi in diagnostic["rois"]:
+        row = {name: {"metrics": metrics[name][roi["name"]]["metrics"], "verdict": metrics[name][roi["name"]]["verdict"]} for name in names}
+        gated = roi["name"] in ROUGH_GATED
+        judgeable = row["transmission-custom"]["verdict"]["judgeable"]
+        row_passed = row["transmission-custom"]["verdict"]["passed"] and not row["transmission-raw"]["verdict"]["passed"]
+        entry["rois"][roi["name"]] = {"gated": gated, "judgeable": judgeable, "passed": row_passed, "cases": row}
+        if gated and judgeable:
+            passed = passed and row_passed
+        elif gated:
+            entry.setdefault("not_judgeable", []).append(roi["name"])
+    entry["passed"] = passed and "not_judgeable" not in entry
+    entry["judged_failing"] = [name for name, r in entry["rois"].items() if r["judgeable"] and not r["cases"]["transmission-custom"]["verdict"]["passed"]]
+    entry["raw_control_discriminates"] = [name for name, r in entry["rois"].items() if r["judgeable"] and not r["cases"]["transmission-raw"]["verdict"]["passed"]]
+    return entry
+
+
 def evaluate_transmission(out):
     config, diagnostic = transmission_roi_config(), transmission_roi_config(diagnostic=True)
     converged = (out / "control" / "state.json").exists()
@@ -592,8 +628,12 @@ def evaluate_transmission(out):
     negative["expectation"] = "the clip gates FAIL on the gated glass ROIs (a refract-axis lobe handled with the reflect axis) while transmission-custom passes"
     if not negative["passed"] and not result["transmission-custom"]["passed"]:
         negative["not_demonstrable"] = "transmission-custom fails the same gates: the control cannot show 'fails while custom passes'"
+    if converged:
+        result["transmission-rough-corrected"] = evaluate_rough(out, judged)
     if not judged:
-        for name in ("transmission-custom", "negative-refract-axis"):
+        for name in ("transmission-custom", "negative-refract-axis", "transmission-rough-corrected"):
+            if name not in result:
+                continue
             result[name]["passed"] = False
             result[name]["not_judged"] = ("control not converged" if converged else "no converged control: run --group control") + " (numbers are information only)"
     return result
@@ -652,6 +692,16 @@ def markdown(clips, adaptive, status):
             lines.append(f"- discriminates against transmission-custom (this fails, custom passes): {entry['discriminates_against_custom']}")
         for roi, m in entry.get("diagnostic_rois", {}).items():
             lines.append(f"- (diagnostic, not gating) {roi}: p95 {m['linear_rmse_p95']:.4f}  max {m['linear_rmse_max']:.4f}  flicker {m['residual_flicker_mean']:.4f}  recovery {m['recovery_frames']}")
+        for roi, r in entry.get("rois", {}).items():
+            for case, row in r["cases"].items():
+                m = row["metrics"]
+                lines.append(f"- {roi} [{case}] corrected p95 {m['p95']:.4f} max {m['max']:.4f} flicker {m['flicker']:.4f} (raw p95 {m['raw_p95']:.4f} max {m['raw_max']:.4f} flicker {m['raw_flicker']:.4f}; "
+                             f"control floor p95 {m['control_floor_p95']:.4f} flicker {m['control_flicker']:.4f}) {'ok' if row['verdict']['passed'] else 'fails'}")
+            lines.append(f"- {roi}: {'gated' if r['gated'] else 'information'}, judgeable {r['judgeable']}, discriminates (custom passes, raw fails) {r['passed']}")
+        if "judged_failing" in entry:
+            lines.append(f"- corrected judge: custom fails the unchanged gates on {entry['judged_failing']}; transmission-raw (the negative control) fails on {entry['raw_control_discriminates']}")
+        if "not_judgeable" in entry:
+            lines.append(f"- NOT JUDGEABLE (control noise floor above a gate): {entry['not_judgeable']}")
         if "differing_pixels_vs_custom" in entry:
             lines.append(f"- differing pixels vs clip-custom: {entry['differing_pixels_vs_custom']}")
         if "event_visibility_control_mean_abs" in entry:
