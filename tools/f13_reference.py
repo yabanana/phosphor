@@ -109,6 +109,7 @@ class Context:
         if not (self.regularization_scale >= 1.0):
             raise ValueError("regularization scale must be >= 1")
         self.max_bounces, self.rr_depth = max_bounces, rr_depth
+        self.mirror_min_alpha = 0.5 * MIN_ALPHA  # a real surface has alpha >= MIN_ALPHA; the sun disk has no material row (alpha 0)
         self.mirror_bounces = int(mirror_bounces)  # F15 ticket 22: extra ideal-mirror hits after the camera's specular lobe (0 = declared F13 model)
         if not 0 <= self.mirror_bounces <= 8:
             raise ValueError("mirror bounces must be in 0..8")
@@ -313,7 +314,8 @@ class Context:
         material = self.material(hit)
         normal = hit.sh_frame.n
         cosine = dr.dot(normal, -direction)
-        smooth = active & hit.is_valid() & (material["alpha"] <= MIRROR_ROUGHNESS * MIRROR_ROUGHNESS) & (cosine > 0)
+        smooth = (active & hit.is_valid() & (material["alpha"] <= MIRROR_ROUGHNESS * MIRROR_ROUGHNESS) & (cosine > 0) &
+                  (material["alpha"] >= self.mirror_min_alpha))  # shapes without a material row (the sun disk) have alpha 0 and absorb
         reflected = dr.normalize(direction + normal * (2 * cosine))
         smooth &= dr.dot(hit.n, reflected) > 0
         f0 = material["albedo"] * material["metallic"] + DIELECTRIC_F0 * (1 - material["metallic"])
