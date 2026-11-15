@@ -6,11 +6,11 @@ Roadmap: F15.1
 
 **Blocked by:** 05
 
-**Status:** resolved (2026-11-13; D2 band carried to ticket 24)
+**Status:** resolved (2026-11-13; D2 band not met at HEAD, ticket 24; open: no coplanar-overlap fixture for the raster_order_group need)
 
 - [x] Guide content equals a CPU reconstruction of the resolved feature parameters on the ior/specular fixture (readback check with a corruption control that must FAIL)
 - [x] Forced-overflow capture (`--debug-meshlets 1 --debug-meshlets-corrupt count`, as `tools/f13_overflow_emission_check.sh`) equals the meshlet path on the ticket's fixture
-- [ ] Guide allocated only for a non-empty union (memory per category in the report); Sponza unchanged (visual_check 0 px, D2 within band) — allocation and visual_check done; D2 band → ticket 24
+- [ ] Guide allocated only for a non-empty union (memory per category in the report); Sponza unchanged (visual_check 0 px, D2 within band) — allocation and visual_check done; D2 band → ticket 24 — D2 band not met at HEAD (median p95 +0.23 ms vs 2e1057a; owner decision on the 26fe229 continuation cost pending, ticket 24)
 - [x] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
 
 ## Comments
@@ -56,3 +56,11 @@ ddbd504; archive b7cfea0. Batch log: `build/f15-exact/battery06.log`.
   and shader validation aborted every DI scene. This battery ran with API
   validation only, so it missed the abort. Lesson: F15 batteries include
   shader-validation runs of an F13 DI fixture.
+
+2026-11-15 — closure audit (ticket 24):
+
+- 1 guide equals CPU reconstruction + control: MET (--debug-lobe-guide 8: 43116 px, unverified 0, PASS; corrupt FAIL). Ticked.
+- 2 forced overflow: MET (tools/f15_lobe_guide_overflow_check.sh, 18 432 000 bytes identical). Ticked.
+- 3 allocation only for non-empty union, Sponza unchanged: PARTIAL (allocation and visual_check 8/8 0 px, F13 exact 0 px, Sponza +32 768 B = DFG table; per-category report memory not quoted; D2 band not met). Open.
+- 4 archive/hitch: MET (b7cfea0, ddbd504; hitch 0), under API validation only; the shader-validation abort (buffer 3 unbound, 6a64b0e) was found in 08b and fixed in 039e22b. Ticked.
+Open: no coplanar-overlap fixture proving the raster_order_group need (no owner in 07/08); the visibility resolve does not write the guide (pre-resolve kernel covers every meshlet pixel), deviation recorded in commits only.

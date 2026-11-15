@@ -6,7 +6,7 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 09, 10, 11, 12, 13, 16
 
-**Status:** engine side implemented and verified on M5 (2026-11-14, last comment); the Khronos side-by-side criterion belongs to ticket 22
+**Status:** engine side implemented and verified on M5 (2026-11-14); Khronos side-by-side delivered by ticket 22; open: thin-lobe weight/colour textures without reference, dropped non-discriminating controls, GI at -N for DDGI only
 
 - [x] Each combination passes decision-11 thresholds against the independent reference (all 30 `combo-*` keys, `--expect green`, 2026-11-14)
 - [x] Furnace bound holds for every combination; an additive (non-layered) negative control exceeds it (`furnace-combinations`, `@resolve`: additive-layering fails, declared twin too)
@@ -169,3 +169,11 @@ GI at -N for Cache/ReSTIR GI and for the legacy resolve GI path, weight/colour t
 ### Ticket 22 closure (2026-11-14)
 
 - Khronos side by side done for the four models. Named approximation seen: single-bounce RT reflections turn mirror-in-mirror dark (C22-A1, dense metal lattices).
+
+2026-11-15 — closure audit (ticket 24):
+
+- 1 combinations vs reference: MET with named exceptions (112 keys GREEN, 30 combo keys; combo-irid-specular-env 4.92 % under 5 % declared (ADR-0006 energy form); transmission-rtoff-combinations closed form only). Ticked.
+- 2 furnace + additive control: MET (furnace-combinations, @resolve; additive-layering fails). Ticked.
+- 3 four side-by-side models: MET qualitative (ticket 22). Ticked.
+- 4 roadmap re-read, lobe status list: MET (all lobes approximated with named approximations; list in the last comment). Ticked.
+Open: thin-lobe weight/colour textures without reference; dropped controls (aniso-rotation-flipped, additive-layering on combo-irid-aniso-env, transmission-uncoated on combo-thin-coat-env) reported here only; thin + sheen/aniso/iridescence/ior refused by the reference and not composed in the engine; radiometric accuracy of DDGI itself and Cache/ReSTIR GI modes unverified.

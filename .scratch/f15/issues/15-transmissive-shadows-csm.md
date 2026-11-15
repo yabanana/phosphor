@@ -6,11 +6,11 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 13
 
-**Status:** resolved (2026-11-14; quiet cost → ticket 24; declared limits in the orchestrator record)
+**Status:** resolved (2026-11-14; box 3 PARTIAL: map memory measured exactly, cost only a loaded-machine indicative figure, quiet cost -> ticket 24; declared limits in the orchestrator record)
 
 - [x] Planar fixtures with `--shadows csm` match the RT result of ticket 14 within the decision-11 transmission bound (or the CSM filtering envelope, declared before measuring)
 - [x] Scenes without transmissive casters unchanged (visual_check 0 px); negative control (map ignored) fails
-- [x] Memory and cost of the map per cascade measured
+- [ ] Memory and cost of the map per cascade measured — PARTIAL (audit 2026-11-15): memory exact (64.25 / 16.06 / 4.02 MiB per cascade at divisors 1/2/4); cost only loaded-machine indicative (0.33 / 0.17 / 0.08 ms summed over four cascades), no quiet measurement
 - [x] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
 
 ## Comments
@@ -216,3 +216,11 @@ After the merge: build OK, ctest 20/20.
   - O7 on CSM: 0 allocations and 0 render-thread compiles on the five shadow scenes;
   - shader + API validation of pane-sun with CSM: clean;
   - visual_check 0 px; archive_check PASS; hitch_check OK.
+
+2026-11-15 — closure audit (ticket 24):
+
+- 1 planar fixtures vs RT: MET (t15 pane-sun@csm 0.0016/0.0081, volume-pane 0.0091/0.0148; envelope 0.08 m declared before measuring; ratio gate by orchestrator decision). Ticked.
+- 2 unchanged scenes + control: MET (benches 1-8 0 px, control EXPECTED_RED_CONFIRMED). Ticked.
+- 3 memory and cost per cascade: PARTIAL (memory exact; cost loaded-machine indicative only). Unticked.
+- 4 archive/hitch/O7: MET (+1 render +1 mesh descriptor). Ticked.
+Open: quiet cost; minor limits not in 24: glass receiver's own underside multiplied by its slab's transmittance, half-resolution edge quality not gated, mesh/indexed transmit pipelines requested even without glass.

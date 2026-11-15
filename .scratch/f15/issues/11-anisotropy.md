@@ -6,9 +6,9 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 07, 08
 
-**Status:** resolved (2026-11-13; direction-texture fixture and the Khronos side-by-side carried to ticket 22)
+**Status:** resolved with carried items (2026-11-13; Khronos side-by-side delivered by ticket 22; direction-texture numeric fixture NOT built: box 1 PARTIAL)
 
-- [x] Anisotropy fixtures (strength, rotation, direction texture) pass decision-11 thresholds; furnace bound holds — strength and rotation fixtures and the furnace pass; the direction-TEXTURE fixture needs textures in the reference → ticket 22
+- [ ] Anisotropy fixtures (strength, rotation, direction texture) pass decision-11 thresholds; furnace bound holds — strength and rotation fixtures and the furnace pass; the direction-TEXTURE fixture needs textures in the reference → ticket 22 — PARTIAL (audit 2026-11-15): strength and rotation fixtures and furnace met; direction-TEXTURE fixture not built (ticket 22: qualitative only)
 - [x] Rotation direction and tangent handedness correct on mirrored instances (glTF conventions)
 - [x] Negative control (rotation sign flipped) fails
 - [x] AnisotropyStrengthTest, AnisotropyRotationTest, AnisotropyDiscTest side by side → ticket 22 (done 2026-11-14, qualitative: only the sun highlight shows the anisotropy in a constant environment; open defect C22-D5, speckle on near-mirror strong anisotropy in one settled frame; `docs/research/2026-11-14-f15-khronos-corpus-report.md`)
@@ -175,3 +175,12 @@ Batch log: `build/f15-exact/battery11.log`.
 ### Ticket 22 closure (2026-11-14)
 
 - Side by side done. The direction texture is exercised qualitatively by AnisotropyDiscTest, AnisotropyRotationTest and AnisotropyBarnLamp; the NUMERIC direction-texture fixture was not built (the reference refuses texture words): still open.
+
+2026-11-15 — closure audit (ticket 24):
+
+- 1 fixtures + furnace: PARTIAL (strength/rotation p99 <= 0.061 %, furnace 1.0022 vs 1.005 met; direction texture not built). Unticked.
+- 2 mirrored instances: MET (aniso-mirrored-sun p99 <= 0.017 %, six controls). Ticked.
+- 3 rotation-flip control: MET. Ticked.
+- 4 side by side: MET qualitative (ticket 22; C22-D5 declared single-bounce reflection of neighbours). Ticked.
+- 5 archive/hitch/O7: MET (+17 descriptors). Ticked.
+Open: direction-texture fixture; declared-environment fit 6.4-7.0 % gap on metal strength 1 and composite complement fit not proven as a bound; narrow-lobe sun and non-constant environment for the bent normal not exercised; denoiser lobe-id for anisotropic highlights not covered; primitive without tangent shaded as strength 0 (declared).

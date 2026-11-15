@@ -6,13 +6,13 @@ Roadmap: F15.1, F15.3 (prefactor)
 
 **Blocked by:** 01, 02
 
-**Status:** ready-for-agent
+**Status:** resolved (verified 2026-11-13, aa58b66, 1ffc724) with open criteria: closure-log before/after diff (ticket 24 deliverable); D2 band not met at HEAD; archive_check/hitch_check not recorded in this ticket (covered only retroactively by 05-08)
 
-- [ ] Ticket-02 base grids (all metallic values) and furnace pass decision-11 bounds; negative control (old weighting) fails
-- [ ] visual_check references re-taken; before/after diff per bench documented in the closure log (expected change: intermediate metallic and ambient/GI diffuse)
-- [ ] Declared material model of the independent references updated where they model the engine BSDF (`tools/f13_reference.py` and the clip references); affected Mitsuba clip references re-rendered with battery pacing; F13/F14 corpus green on the new baseline; F12 oracle unchanged
-- [ ] Sponza D2 GPU p95 re-measured A/B/A (within the decision-11 band; cost change expected ≈ 0); 0 GPU allocations
-- [ ] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
+- [x] Ticket-02 base grids (all metallic values) and furnace pass decision-11 bounds; negative control (old weighting) fails
+- [ ] visual_check references re-taken; before/after diff per bench documented in the closure log (expected change: intermediate metallic and ambient/GI diffuse) — PARTIAL (audit 2026-11-15): references retaken (reference-f15-appB, 8/8 0 px) and diff recorded here; the closure-log entry is a ticket 24 deliverable
+- [x] Declared material model of the independent references updated where they model the engine BSDF (`tools/f13_reference.py` and the clip references); affected Mitsuba clip references re-rendered with battery pacing; F13/F14 corpus green on the new baseline; F12 oracle unchanged
+- [ ] Sponza D2 GPU p95 re-measured A/B/A (within the decision-11 band; cost change expected ≈ 0); 0 GPU allocations — D2 band not met at HEAD (median p95 +0.23 ms vs 2e1057a; owner decision on the 26fe229 continuation cost pending, ticket 24)
+- [ ] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames — PARTIAL (audit 2026-11-15): no archive_check/hitch_check run recorded in this ticket; tickets 05-08 pass them later (archive_check there compares against a same-mode no-archive baseline: 12 px at 1 LSB on bench 1 since ticket 03 under shader validation)
 
 ## Comments
 
@@ -60,3 +60,11 @@ Roadmap: F15.1, F15.3 (prefactor)
   GPU p95 15.42–15.87 ms ≤ 16.67 ms, 0 GPU allocations. Formal band check
   re-run at closure (ticket 24) on a quiet machine. The earlier 11:3x attempt
   (Track Studio cargo tests at 1600 % CPU) is discarded.
+
+2026-11-15 — closure audit (ticket 24):
+
+- 1 base grids + furnace + control: MET (aa58b66; direct grid all metallic p99 <= 0.09 %, furnace-resolve 1.00000, furnace-base 1.00001; post-review worst mean 0.009 %, p99 0.037 %, three controls fail). Ticked.
+- 2 references retaken, diff in closure log: PARTIAL (reference-f15-appB 8/8 0 px, PSNR 29.9-55.1 dB recorded here; closure log is ticket 24). Open.
+- 3 reference model updated, corpus green, F12 oracle: MET with justification (f13_reference.py updated, inert for F13 fixtures so no clip re-render; corpus 89/89 at 1ffc724; F12 signal pure Lambert by design). Ticked.
+- 4 D2 band: NOT MET (2nd run "not a valid band measurement", +0.20 ms; 0 GPU allocations OK). Open, ticket 24.
+- 5 archive/hitch: NOT EVIDENCED in this ticket; later runs of 05-08 pass. Open.

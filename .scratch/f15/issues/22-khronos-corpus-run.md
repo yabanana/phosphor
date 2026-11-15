@@ -6,7 +6,7 @@ Roadmap: F15.3
 
 **Blocked by:** 19
 
-**Status:** resolved with open defects (2026-11-14; 21 of 24 models render, 3 refused with stated reasons; defects C22-D3/R2 open, D4 fixed, D5/D7 named approximations (follow-up below); numeric texture fixtures of tickets 09/11/12/16 NOT built)
+**Status:** resolved with open items (2026-11-14; 21 of 24 models render, 3 refused with stated reasons; C22-D3 FIXED in e9569ac (section 'F13 residues fixed inside F15'), D4 fixed, D5/D7/A1 named approximations, R2 non-uniform texture transform deferred; numeric texture fixtures of tickets 09/11/12/16 NOT built)
 
 - [x] Fetch script reproducible, verifies hashes, stores licence/attribution, skips Draco/BasisU/WebP variants (`--verify`, offline, unit-tested; the committed manifest records no skipped file: the default variant of all 24 models is plain .gltf/.bin/.png/.jpg)
 - [x] Every Tier A model loads or is refused for a stated reason (e.g. DiffuseTransmissionTest requires unlit/lights_punctual) (Tier A: 17 of 19 render, DiffuseTransmissionTest and TextureTransformMultiTest refused; Tier B: 3 render, GlamVelvetSofa refused; ABeautifulGame renders)
@@ -73,3 +73,9 @@ agent's phosphor was running (before the runner's guard existed); it lasted a fe
 - **Latent cases fixed**: reflection estimators and probe capture get the environment term (bf0799f); single-sided back faces no longer end
   transport rays (26fe229); DDGI behind glass (4422a13). Corpus rerun on ten models: all render, 0 archive misses, validation clean; the
   changed-pixel counts per model are in docs/implementation/F13-F14-CLOSURE-2026-11-12.md.
+
+2026-11-15 — closure audit (ticket 24):
+
+- 1 fetch script: MET (--verify 24 models, 9 unit tests). 2 every Tier A model loads or is refused: MET (17/19 render; DiffuseTransmissionTest, TextureTransformMultiTest, GlamVelvetSofa refused with reasons). Ticked.
+- 3 side-by-side page: MET qualitative (page under build/, report docs/research/2026-11-14-f15-khronos-corpus-report.md; own cameras, no IBL, no parity claim). 4 serial captures with GPU guard: MET. Ticked.
+Open: numeric texture fixtures (coat normal, anisotropy direction, iridescence thickness/factor, subsurface weight/colour; sheen textures) because the reference refuses textures; per-slot texture transform; Render Fidelity goldens not approved; A1 (single-bounce mirror-in-mirror dark) not in 24.

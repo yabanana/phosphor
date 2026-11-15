@@ -6,7 +6,7 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 13, 14, 17
 
-**Status:** resolved PARTIAL (2026-11-14): criteria 1, 3 and 4 met on M5; criterion 2's ticket-17 bound on the piece masks cannot be built (the volumetric ground truth cannot represent the textured chess meshes), and the volumetric mode itself is partial (tickets 17/18)
+**Status:** resolved PARTIAL (2026-11-14): criteria 1, 3 and 4 met on M5; criterion 2 PARTIAL: monotone gate met, ticket-17 bound on the piece masks cannot be built and the volumetric mode is partial (tickets 17/18); chess binning A/B/A pending (ticket 24)
 
 - [x] Back-light rig: the scene is visible through the pawn tops; transmission 0 → 1 increases transmitted luminance on the glass mask monotonically; tint changes chroma as specified
 - [ ] Side-light rig: subsurface weight 0 → 1 and scale × 0.5 / × 2 change the terminator softness monotonically (MET, gated); ticket-17 bound on the piece masks (NOT BUILDABLE: the ground truth is texture-free and homogeneous, see the record)
@@ -143,3 +143,11 @@ Question: budget image / exact image was 1.016 +- 0.008 undenoised but 0.973 wit
 Cause: the a-trous luminance edge-stopping weight (row-normalised, variance-guided) loses energy on heavy-tailed noise; the loss is concentrated on the emitter's own surface pixels (close-range 1/r^2 terms), grows with the tail weight and is absent for exact lists.  Not a clamp
 (clampHistory, soft-change are off by default; the denoise-pack clamp belongs to MetalFX) and not the estimator.  Reference: `tests/test_denoise.cpp` "F15 variance-guided atrous filter loses energy..." (CPU mirror weights: 0.79 raw-level, ~0.985 after temporal accumulation, ~1 with the weight off).
 Declared behaviour, no engine change (an energy-conserving filter would change every denoised signal and the F13 corpus; not selected).
+
+2026-11-15 — closure audit (ticket 24):
+
+- 1 back-light rig: MET (steps 0.1266, visible ratio 11.6, chroma within 1.4 % / 0.2 %; controls fail). Ticked.
+- 2 side-light rig: PARTIAL (monotone gate met, steps 0.039-0.047; ticket-17 bound on piece masks NOT BUILDABLE, five reasons in the record; Mitsuba comparison on the pieces therefore NOT MET). Open.
+- 3 pawn-top shadows: MET qualitative (RT T_luma 0.391; CSM needs --shadow-map-size 8192). Ticked.
+- 4 support report + conversion note: MET (fixtures/chess/README.md). Ticked.
+Open: scattering weight map not in the pinned subset (weight 1); profile_shape_ignores_textures; API-layer "Redundant call to setDepthStencilState/setViewport" notices on chess and subsurface fixtures carried to 24 and not recorded there; CSM cascade fit to the scene for small casters (candidate); chess binning A/B/A not run.

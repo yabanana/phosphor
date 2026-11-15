@@ -6,14 +6,14 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 07, 08
 
-**Status:** resolved with carried items (2026-11-14; temporal clip PARTIAL: smooth glass fails F13.6 under orbit (refracted-image reprojection), carried to ticket 24 and the EDGE/F16 list; Khronos pages → ticket 22; Sponza D2 band and quiet cost → ticket 24)
+**Status:** resolved with carried items (2026-11-14; temporal clip PARTIAL: smooth glass fails F13.6 under orbit (refracted-image reprojection), carried to ticket 24 and the EDGE/F16 list; Khronos pages delivered by ticket 22; Sponza D2 band not met at HEAD and quiet cost unmeasured, ticket 24)
 
 - [x] Transmission fixtures (factor, roughness × ior, thin vs volume, attenuation) vs Mitsuba 3.9.1 rough dielectric (same roughness) + homogeneous absorbing medium on the glass mask, with nothing behind the glass lit through glass: decision-11 transmission bound
 - [x] Single-sided closed glass mesh renders the exit correctly; negative control keeping today's back-face rejection (`reflections.metal:21`) fails
 - [x] Glass behind glass is not black; crossings never exceed the bound; command buffers far below 1 s
 - [x] `--rt off`: image compared with the declared probes/environment approximation (image check + negative control), and the support report says so
 - [x] Emissive panel behind thin glass: no double count
-- [ ] Ray budget per pixel unchanged on non-transmissive scenes (Sponza D2 within band); extra cost on the glass fixture measured — non-transmissive F13 captures 0 px; D2 band and quiet cost → ticket 24
+- [ ] Ray budget per pixel unchanged on non-transmissive scenes (Sponza D2 within band); extra cost on the glass fixture measured — non-transmissive F13 captures 0 px; D2 band and quiet cost → ticket 24 — D2 band not met at HEAD (median p95 +0.23 ms vs 2e1057a; owner decision on the 26fe229 continuation cost pending, ticket 24)
 - [ ] Temporal clip (orbit, moving light) within F13.6; transmissive pixels reactive for MetalFX temporal — reactive proven in both paths; clip FAILS on the gated smooth ROIs (p95 0.14-0.17): partial, carried
 - [x] Forced-overflow capture (`--debug-meshlets 1 --debug-meshlets-corrupt count`, as `tools/f13_overflow_emission_check.sh`) equals the meshlet path on the ticket's fixture
 - [x] TransmissionTest, TransmissionRoughnessTest, TransmissionThinwallTestGrid, AttenuationTest side by side — ticket 22 (done 2026-11-14, qualitative; defect C22-D4 (dark squares behind glass in TransmissionRoughnessTest) FIXED in the ticket 22 follow-up: the wall behind the glass lacked the environment diffuse term in the sun shadow of the label panel, not a back-face hit; `docs/research/2026-11-14-f15-khronos-corpus-report.md`)
@@ -283,3 +283,14 @@ Open / limits: (1) the furnace proves energy conservation of the environment-ter
 (no engine change).  (2) Pixels with shading N.V <= 0 on a glass sphere keep the full diffuse (e9569ac, declared in the composite): white diffuse x environment instead of
 glass; invisible in a furnace by construction (albedo 1 x 0.5) and not measured on IORTestGrid.  (3) Single-frame noise of the stochastic estimator on glass over a checker backdrop
 (C22-D7) is untouched.
+
+2026-11-15 — closure audit (ticket 24):
+
+- 1 transmission fixtures vs Mitsuba: MET with declared difference (475d05f Schlick reference correction; roughness-ior 4.97 % vs 5 %; controls fail). Ticked.
+- 2 single-sided closed mesh: MET (2.2 % / 5.6 %, control fails). Ticked.
+- 3 glass behind glass, bounded crossings: MET (crossing bound structural, kTransmissionMaxEvents 8 / MaxCrossings 4; command buffer 14.0 ms indicative). Ticked.
+- 4 --rt off: MET (0.02 %, control fails). 5 emissive panel: MET (1.2 % / 3.7 %). Ticked.
+- 6 ray budget, D2, glass cost: NOT MET (non-transmissive F13 captures 0 px; D2 band not met at HEAD; no glass-fixture cost, perf-log has no F15 entry). Open, ticket 24.
+- 7 temporal clip: PARTIAL (reactive MET in 9 cases; clip fails: p95 0.1745 / 0.1690 / 0.1448 vs 0.06; refract-axis control not demonstrable; rough ROIs not judgeable; spike A rejected, opt-log 2259). Open.
+- 8 forced overflow: MET (6.2e-4 / 9.9e-4 vs 2e-3). 9 side by side: MET qualitative (C22-D4 fixed, D7 declared noise). 10 archive/hitch/O7: MET (one cold-cache first run with 3 allocations, warm 0; 83c0697). Ticked.
+Open: thin-walled delta-light BTDF unvalidated; rough thin-walled glass refused; reference tints at every transmitting event, engine at entry only.

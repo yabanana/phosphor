@@ -6,12 +6,12 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 06
 
-**Status:** resolved (2026-11-13; refract-axis clip control carried to ticket 13, D2 band to ticket 24)
+**Status:** resolved (2026-11-13; refract-axis clip control not demonstrable, carried to ticket 13 and 24; D2 band not met at HEAD, ticket 24)
 
 - [x] ior/specular grids pass with RT reflections, SSR and probes; the support report marks every light path of decision 06 for ior/specular
 - [ ] Denoiser negative control: using the reflect axis for a refract-axis lobe fails the clip; history across lobe ids rejected (unit-tested on the CPU mirror of the rule) — rule and history rejection unit-tested, GPU lobe-key controls fail the clip; the refract-axis CLIP control needs refraction → carried to ticket 13
 - [x] F13 temporal metrics on a specular-extension clip within the F13.6 contract
-- [ ] Scenes without features unchanged (visual_check 0 px, D2 within band) — visual_check and F13 exact captures 0 px; D2 band → ticket 24
+- [ ] Scenes without features unchanged (visual_check 0 px, D2 within band) — visual_check and F13 exact captures 0 px; D2 band → ticket 24 — D2 band not met at HEAD (median p95 +0.23 ms vs 2e1057a; owner decision on the 26fe229 continuation cost pending, ticket 24)
 - [x] Forced-overflow capture (`--debug-meshlets 1 --debug-meshlets-corrupt count`, as `tools/f13_overflow_emission_check.sh`) equals the meshlet path on the ticket's fixture
 - [x] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
 - [x] The composite's environment/GI diffuse uses the effective diffuse weight of extended materials: `tools/f15_reference.py` DECLARED `extension_diffuse` switches from `composite-base` to `extension` and `specular-grid-env-resolve` stays green against it (until then the support report names `transport_and_composite_diffuse_use_base_model`)
@@ -106,3 +106,14 @@ archive 16d6a50 and 199fa13. Batch log: `build/f15-exact/battery08b.log`.
     gate per-pixel blur;
   - with mixture sampling (ticket 09) the denoiser key must stay stable per
     pixel.
+
+2026-11-15 — closure audit (ticket 24):
+
+- 1 grids with RT reflections, SSR, probes: MET (t08 GREEN 18 keys; @rt 4.70 % vs 5 % gate). Ticked.
+- 2 denoiser negative control: PARTIAL (CPU mirror tests and GPU lobe-key flip control MET; the refract-axis CLIP control is NOT demonstrable, see ticket 13). Open.
+- 3 F13 temporal metrics on specular clip: MET with thin margins (p95 0.0551 vs 0.06, flicker 0.0198 vs 0.02). Ticked.
+- 4 scenes without features, D2: PARTIAL (visual_check 0 px, F13 exact 0 px MET; D2 band not met). Open.
+- 5 forced overflow: MET (worst per-sphere mean 5.3e-5, limit 2e-3; tolerance-based, not byte-identical). Ticked.
+- 6 archive/hitch: MET (5071e60, 16d6a50, 199fa13). Ticked.
+- 7, 8: MET (46c447f extension weight; carried furnace/recovery/2x2 met). Ticked.
+Open: full F13/F14 corpus re-run after 08 is a ticket 24 criterion; clip margins thin.

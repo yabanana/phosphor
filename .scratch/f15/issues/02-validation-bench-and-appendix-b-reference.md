@@ -6,13 +6,13 @@ Roadmap: F15.3
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved (verified 2026-11-13, e67d3d6/9848f3f/728ef15) with open criterion: runner lock refusal and manifest fields not evidenced in this ticket's record
 
-- [ ] Scenarios: base metallic × roughness grid under sun disk only, under constant environment only, furnace (environment radiance 1, albedo 1), extreme roughness
-- [ ] Reference independent of the MSL code (direct light exact, environment by quadrature); Mitsuba 3.9.1 only for ray casting, offline via `uv run --offline --no-project --python 3.13 --with mitsuba==3.9.1 --with numpy`
-- [ ] Runner reports per-fixture metrics against decision 11; on the current code metallic ∈ {0, 1} direct grids pass, metallic ∈ (0, 1) and the furnace fail, and the failure is recorded as the expected red state
-- [ ] Negative controls (e.g. wrong roughness mapping, Fresnel off) fail their bounds; a fixture whose control passes blocks the ticket
-- [ ] Runner refuses to start while another GPU job runs (lock + process check) and records the manifest (commit, asset hashes, seed, OS/SDK, power state)
+- [x] Scenarios: base metallic × roughness grid under sun disk only, under constant environment only, furnace (environment radiance 1, albedo 1), extreme roughness
+- [x] Reference independent of the MSL code (direct light exact, environment by quadrature); Mitsuba 3.9.1 only for ray casting, offline via `uv run --offline --no-project --python 3.13 --with mitsuba==3.9.1 --with numpy`
+- [x] Runner reports per-fixture metrics against decision 11; on the current code metallic ∈ {0, 1} direct grids pass, metallic ∈ (0, 1) and the furnace fail, and the failure is recorded as the expected red state
+- [x] Negative controls (e.g. wrong roughness mapping, Fresnel off) fail their bounds; a fixture whose control passes blocks the ticket
+- [ ] Runner refuses to start while another GPU job runs (lock + process check) and records the manifest (commit, asset hashes, seed, OS/SDK, power state) — PARTIAL (audit 2026-11-15): per-capture GPU guard and SHA-checked cache recorded (75a055c, e4fe702, b14d44d); no test of the refusal nor the manifest fields quoted
 
 ## Comments
 
@@ -43,3 +43,11 @@ Roadmap: F15.3
   (bound 0.5 %), worst p99 0.037 % (bound 1 %), the three declared controls
   (diffuse unweighted, Karis fit, F0-blended diffuse weight) fail. Captures
   `build/f15-check/review`.
+
+2026-11-15 — closure audit (ticket 24):
+
+- 1 scenarios (sun grid, env grid, furnace, extremes): MET (9848f3f; GREEN on 7 scenarios at 2e1057a). Ticked.
+- 2 reference independent of MSL: MET by construction (e09e325, 728ef15; tests/test_f15_reference.py 36 tests). Ticked.
+- 3 runner metrics and expected red: MET (e67d3d6, EXPECTED_RED_CONFIRMED; p99 0.08/0.09 % at metallic 0/1, 19.8-58.5 % intermediate, furnace 1.428). Ticked.
+- 4 negative controls fail: MET (every control fails in the red run; three declared controls fail post-review). Ticked.
+- 5 runner lock refusal + manifest: PARTIAL (guard and cache recorded in 75a055c/e4fe702/b14d44d; no refusal test or manifest fields in the record). Open.

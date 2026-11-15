@@ -6,13 +6,13 @@ Roadmap: F15.1 (prefactor)
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved (verified 2026-11-13, bac820d) with open criteria: D2 band not met at HEAD (ticket 24 owner decision); literal F13/F14 corpus subset not run for this ticket (exactness argument only); metal_syntax_check not recorded
 
-- [ ] The three GPU copies call the shared module; no second GGX/Fresnel implementation remains in resolve, DI or reflections (the secondary-hit base reduction may keep its reduced form, documented)
-- [ ] `tools/visual_check.sh` 0 pixels against references taken before the change on every bench, API + shader validation clean
-- [ ] F13/F14 corpus subset touching DI/reflections green with unchanged numbers; any FP-contraction difference is explained and removed, not tolerated
-- [ ] Sponza D2 preset GPU p95 within the decision-11 band of the parent commit (A/B/A, quiet machine)
-- [ ] `ctest` and `metal_syntax_check` green
+- [x] The three GPU copies call the shared module; no second GGX/Fresnel implementation remains in resolve, DI or reflections (the secondary-hit base reduction may keep its reduced form, documented)
+- [x] `tools/visual_check.sh` 0 pixels against references taken before the change on every bench, API + shader validation clean
+- [ ] F13/F14 corpus subset touching DI/reflections green with unchanged numbers; any FP-contraction difference is explained and removed, not tolerated — PARTIAL (audit 2026-11-15): argued by five byte-identical F13 captures (base vs t01), literal corpus subset not run
+- [ ] Sponza D2 preset GPU p95 within the decision-11 band of the parent commit (A/B/A, quiet machine) — D2 band not met at HEAD (median p95 +0.23 ms vs 2e1057a; owner decision on the 26fe229 continuation cost pending, ticket 24)
+- [ ] `ctest` and `metal_syntax_check` green — PARTIAL (audit 2026-11-15): ctest 13/13 recorded, metal_syntax_check not recorded
 
 ## Comments
 
@@ -46,3 +46,11 @@ Roadmap: F15.1 (prefactor)
   GPU p95 15.42–15.87 ms ≤ 16.67 ms, 0 GPU allocations. Formal band check
   re-run at closure (ticket 24) on a quiet machine. The earlier 11:3x attempt
   (Track Studio cargo tests at 1600 % CPU) is discarded.
+
+2026-11-15 — closure audit (ticket 24):
+
+- 1 shared module, no second GGX/Fresnel: MET (bac820d; bsdf.h called from material_shading.h, restir_common.h, reflection_common.h; remaining duplicates removed in ticket 03). Ticked.
+- 2 visual_check 0 px, API + shader validation: MET (8/8 vs reference-f15base, no validation message; run on the ticket-01 tree, before the 6a64b0e defect existed). Ticked.
+- 3 F13/F14 corpus subset: PARTIAL (five F13 captures byte-identical base vs t01 with repeatability proven; literal corpus not run). Open.
+- 4 D2 band: NOT MET (first run invalid, sentinel disturbed 5/6; later runs in ticket 24 fail the band). Open, ticket 24.
+- 5 ctest + metal_syntax_check: PARTIAL (ctest 13/13; metal_syntax_check not recorded). Open.

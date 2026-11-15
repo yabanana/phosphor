@@ -6,13 +6,13 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 13
 
-**Status:** resolved with carried items (2026-11-14; cost and Sponza D2 band → ticket 24; GI shadow rays / reflection secondary lighting through glass without a numeric fixture: carried)
+**Status:** resolved with carried items (2026-11-14; quiet cost and Sponza D2 band not met at HEAD, ticket 24; GI shadow rays / reflection secondary lighting through glass without a numeric fixture: carried; clustered DI through glass closed)
 
 - [x] Spike first (timeboxed, results in opt-log): Metal intersection-function invocation multiplicity for non-opaque triangles (duplicate invocations would double-count) and cost; mitigation chosen by measurement
 - [x] (RT sun and ReSTIR point keys; the CSM keys are ticket 15) Planar-interface fixtures (glass pane, flat shallow water with sun within 30° of the normal) vs Mitsuba within the decision-11 transmission bound; curved-glass shadows (pawn tops) qualitative (caustics excluded)
 - [x] Opaque casters unchanged (visual_check 0 px on scenes without transmissive materials); negative control (transmittance ignored → opaque) fails the planar fixtures
 - [x] Sun shadow mask format change and DI/GI visibility changes keep F10/F11/F12 corpus cases green
-- [ ] Cost on the glass fixture and Sponza D2 within band — ticket 24 (quiet machine); indicative loaded-machine pass time +0.12 ms on volume-pane
+- [ ] Cost on the glass fixture and Sponza D2 within band — ticket 24 (quiet machine); indicative loaded-machine pass time +0.12 ms on volume-pane — D2 band not met at HEAD (median p95 +0.23 ms vs 2e1057a; owner decision on the 26fe229 continuation cost pending, ticket 24)
 - [x] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
 
 ## Comments
@@ -120,8 +120,6 @@ wording above: the CSM finding and the curved key):
 3. GI shadow rays, reflection secondary lighting through glass and clustered DI visibility have no fixture in this harness: recorded as ITEMS FOR THE ENGINE TICKET (14),
    no new fixture now.
 
-- [ ] (orchestrator, 2026-11-14) engine ticket items without a harness fixture yet: GI shadow rays, reflection secondary lighting through glass, clustered DI visibility through glass
-
 2026-11-14 — ENGINE SIDE (F15.1, commits `36a4392` math, `055c5dd` engine, `381947c` runner; spike in `docs/opt-log.md` "F15 ticket 14 spike").
 
 Design. A new ray type `RT_PROBE_SHADOW_TRANSMITTED` (any-hit): the sun kernel, `diEndpointTransmittance` (ReSTIR and clustered DI, reflection secondary
@@ -173,3 +171,11 @@ alpha-masked is treated as an opaque-masked caster (declared); the dedup list is
 - Shader + API validation of pane-sun, RT + DDGI + RT reflections and CSM + SSR: clean, exit 0.
 - Negative controls: transmittance-ignored fails every RT/DI key (agent run, t14a).
 - Ticked: opaque casters unchanged, and the archive/O7 criterion. The ticket adds no pipelines; the existing kernels run with 0 misses.
+
+2026-11-15 — closure audit (ticket 24):
+
+- 1 spike: MET (opt-log 2230, multiplicity 1.000, dedup list of 8 kept as insurance). 2 planar fixtures: MET (pane-sun 0.0037/0.0080, point@restir 0.0111/0.0203 vs 0.05/0.15; re-green after the payload fix). 3 opaque casters: MET (0 px, control fails). 4 F10/F11/F12 corpus: MET (26 jobs). Ticked.
+- 5 cost + D2: NOT MET (only an in-process loaded figure +0.12 ms; D2 regression from the c59c5af payload fixed by ec63efc/8fbda9c; residual vs 2e1057a is the 26fe229 continuation, not this ticket). Open, ticket 24.
+- 6 archive/hitch/O7: MET (no new descriptor; later +4 compute descriptors with the payload follow-up).
+Stray checkbox line removed: clustered DI visibility through glass is CLOSED (clustered equals gated ReSTIR to 1.5e-7, 245 829 px); GI shadow rays and reflection secondary lighting through glass remain without a numeric fixture (declared).
+Open (declared in the ticket, not in 24): AO, fog, reconnection/sky rays treat glass as opaque; interior of a closed volume at the light end clamped T <= 1; transmissive + alpha-masked = opaque-masked caster; dedup list 8 surfaces.

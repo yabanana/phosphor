@@ -6,7 +6,7 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 17 (and only if its bound is missed)
 
-**Status:** resolved by the FALLBACK (2026-11-14): bound not met; screen-space diffusion stays; F15.1 volumetric subsurface explicitly PARTIAL with the measured gap
+**Status:** resolved by the FALLBACK (2026-11-14): bound not met; screen-space diffusion stays; F15.1 volumetric subsurface explicitly PARTIAL with the measured gap (RT single scattering analysed, not implemented; LUT valid for roughness 0.35 only)
 
 - [ ] Bound: the ticket-17 side-lit subsurface bound on the same fixtures; additionally the back-lit fixture within 2× the side-lit bound — NOT met (measured gap below)
 - [x] Timebox 2 weeks; if not met, fallback = keep screen-space diffusion, F15.1 subsurface stays explicitly partial (unticked for the volumetric mode) with the measured gap reported
@@ -67,3 +67,10 @@ Roadmap: F15.1, F15.3
   - The approach that could close the gap is a real-time volumetric random walk (or path-traced SSS) with denoising. That is a
     later-phase EDGE candidate, outside this ticket's scope.
 - The thin-walled subsurface mode (ticket 16) is unaffected and stays verified.
+
+2026-11-15 — closure audit (ticket 24):
+
+- 1 bound: NOT MET (see 17 #1, back-lit error ~1). Open.
+- 2 timebox / fallback: MET (fallback executed; spike 1 tabulated profile emulation 4fc42af; step 2 RT single scattering not started by analysis, not by timebox expiry). Ticked.
+- 3 cost per pixel + unchanged scenes: NOT MET / n.a. (no engine change adopted; screen-space pass cost deferred to 24, unmeasured). Open.
+- 4 archive/hitch/O7: MET vacuously (no engine or pipeline change). Ticked.

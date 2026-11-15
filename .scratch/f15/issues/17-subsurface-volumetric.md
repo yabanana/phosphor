@@ -6,7 +6,7 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 16
 
-**Status:** resolved PARTIAL (2026-11-14): side-lit bound not met on valid OpenPBR ground truth; ticket 18 triggered and closed by its fallback (screen-space diffusion stays); diffusion cost → ticket 24
+**Status:** resolved PARTIAL (2026-11-14): side-lit bound not met on valid OpenPBR ground truth; ticket 18 triggered and closed by its fallback (screen-space diffusion stays); diffusion pass cost never measured (ticket 24 quiet-machine list); forced-overflow rerun in the ticket 24 battery not recorded
 
 - [ ] Side-lit volumetric fixtures vs Mitsuba 3.9.1 `volpath` random walk (homogeneous medium inside a boundary with the engine's roughness) on the piece mask: decision-11 subsurface bound — NOT met (gated mean 0.25-0.36, p95 0.74-0.92; confinement, see ticket 18)
 - [x] Back-lit thick fixture measured and reported, not gated (declared limit of screen-space diffusion) — reported: mean error 0.98-1.0 (engine near black)
@@ -145,7 +145,6 @@ semantic filtering of the commit's own additions, +22 compute and +6 render).
     C, flagged `draft`).
 - Ticket 18 (decision 10's rule): it is decided on the re-measured gap against the corrected reference, not on the
   current numbers.
-||||||| parent of 8e097a6 (F15.3 (ticket 17): record the boundary-aware reference and its re-measurement)
 
 2026-11-14 — reference correction (boundary-aware inversion, commit `a32ee1a`; no engine or shader change).
 - Ground truth version 3: the medium albedo alpha(C) solves the OpenPBR relation measured with Mitsuba under the SAME ior 1.5 roughdielectric
@@ -220,3 +219,13 @@ d32de4b (sub-pixel test follows roughness 0.35); ctest 20/20.
     medium behind the boundary.
 - Decision 10's rule therefore triggers ticket 18 on a correctly parameterised diffusion.
 - The reference noise floor per piece (mean 0.03-0.05, p95 0.09-0.13) leaves the bound reachable.
+
+2026-11-15 — closure audit (ticket 24):
+
+- 1 side-lit bound vs volpath: NOT MET (t17s gated mean 0.25-0.36, p95 0.74-0.92 vs 0.10 / 0.25; best candidate 0.14-0.27 / 0.42-0.77, ticket 18). Open.
+- 2 back-lit reported: MET (mean error 0.979-1.001, engine near black). Ticked.
+- 3 radius sweep, sub-pixel, control: PARTIAL (sub-pixel 0.000000, control fails, engine bleed monotonic; the sweep key fails against valid truth, asserted red, pending ticket 18). Open.
+- 4 forced overflow: MET (1.3e-5 mean vs 2e-3, single run; the planned rerun in the ticket 24 battery is not recorded). Ticked.
+- 5 scenes without subsurface + pass cost: PARTIAL (visual_check 0 px, F13 exact 0 px; diffusion pass cost never measured, static cost only). Open.
+- 6 archive/hitch/O7: MET (3ba6ba7, +22 compute +6 render). Ticked.
+Stray merge-marker line removed from the ticket body. Open, support-table only: DI/ReSTIR/clustered and GI composite diffuse not diffused; ambient diffuse of reflection composite and DI local lights not diffused; combinations with other lobes keep base diffuse; weight/colour/radius-scale textures do not change the profile shape.

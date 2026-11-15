@@ -6,7 +6,7 @@ Roadmap: F15.2
 
 **Blocked by:** 19, 20
 
-**Status:** partial (2026-11-14): everything that needs no chess or corpus asset is built and verified on the M5; the chess/corpus manifests (tickets 20, 22), the A/B/A binning measurement (ticket 24) and the "exactly 0 pixels" wording of criterion 2 are open (see the verification record)
+**Status:** partial (2026-11-14, integration step added the chess and corpus manifests: 74 pipelines, 38 permutations): open: criterion 2 is not 0 pixels literally (envelope 1e-5; textured scenes worse), criterion 4 chess binning A/B/A not run (ticket 24)
 
 - [x] Generator determinism: two runs byte-identical (ctest); malformed manifests and schema errors rejected
 - [ ] Every generated class pipeline equals the generic all-lobes resolve exactly (0 pixels) on every fixture; negative control (class missing a used lobe) differs -- PARTIAL: 77 of 116 fixture cases are bit-identical, the others stay within 3.1e-6 relative (37 ULP: the compiler schedules a specialised pipeline differently) and 2 cases differ by 1 pixel of 1 LSB in the 8-bit image; the control differs for every feature bit, but 21 of 73 scenes with features cannot discriminate through the resolve colour (listed below); chess/corpus fixtures not yet
@@ -77,3 +77,11 @@ on [38, 64, 106, 113, 224]; all five are explained by manifests: 38 = ToyCar (cl
   difference; the fixtures stayed at 3.1e-6). Reported, not gated further; 8-bit stays within 1 LSB.
 - Budget run (warmup 64, 32 frames): 0 fallback draws, 0 render-thread compiles, 0 compiler calls in measured frames, 0 archive misses, at most 5 bins.
 - Chess runner (`f15_chess_check --run --expect green`): GREEN, 26 engine runs with 0 archive misses. Corpus runner: 21 rendered, 3 refused, 0 misses.
+
+2026-11-15 — closure audit (ticket 24):
+
+- 1 determinism + malformed manifests: MET (ctest, 26/26 after integration). Ticked.
+- 2 class pipeline equals generic exactly (0 px): PARTIAL (116 fixture cases: 77 bit-identical, max 3.09e-6 relative = 37 ULP, 8-bit 1 LSB in 2 pixels; chess/corpus scenes: 1e-5 envelope exceeded on 15 of 24 textured scenes, worst 1.0e-2 relative, 99 533 ULP ToyCar, 8-bit within 1 LSB; terrain 2 of 8 at 6.8e-5; envelope fixed after the first corpus; 21 of 73 featured scenes cannot discriminate through resolve colour). Open.
+- 3 budget: MET (38 permutations, 41 with terrain; metal-tt +11.7 % / +9.4 %; 0/0). Ticked.
+- 4 binning vs union on chess A/B/A: NOT MET (opt-log 2277 records correctness and provisional opt-in with no timing; chess A/B/A not run). Open.
+- 5 targeted archive update + pipelines script test: MET (+62 then +12 descriptors, 8/8). Ticked.

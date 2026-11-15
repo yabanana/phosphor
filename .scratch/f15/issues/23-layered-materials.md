@@ -6,7 +6,7 @@ Roadmap: F15.4
 
 **Blocked by:** 21
 
-**Status:** partial (2026-11-14): everything except the resolve GPU time per active-layer count and the final binning decision is built and verified on the M5; those two need a quiet machine (ticket 24); see the verification record
+**Status:** partial (2026-11-14; terrain timing recorded in ticket 24 on 2026-11-15 by 5cd4bf3: binning never lowers the resolve by 5 %, stays opt-in; chess A/B/A pending, so criterion 5 and the final binning decision are open)
 
 - [x] Doctest seam 3: weight normalisation, endpoint exactness, monotonic transitions, no NaN with all-zero weights
 - [x] Each layer at weight 1 renders exactly like the single material (0 pixels, visibility path); weight 0 leaves the others unchanged
@@ -104,3 +104,11 @@ GREEN (12 evaluated keys, every control fails; `build/f15-check/cfa5e73-layers`)
 `build/f15-exact/base-residues`; `visual_check` 0 px on 8 benches; `archive_check` all scenarios pass; `hitch_check` 0 hitches.
 Carried to ticket 24: resolve GPU time per active-layer count and the binning decision (quiet machine, `tools/f15_layers_timing.py`).
 
+2026-11-15 — closure audit (ticket 24):
+
+- 1 doctest seam 3: MET (10 cases ~105k assertions). 2 weight 1 = single material: MET (8 keys, 0 of 921 600 px). Ticked.
+- 3 coverage vs feature layers: MET with declared envelope (gate 5e-4 floored, set after the first measurement; 0 px in 8-bit). Ticked.
+- 4 ramp, furnace, additive control: MET (furnace 0.99997, additive 3.65; blend minus BSDF mix max 0.0859). Ticked.
+- 5 resolve time per layer count + final binning decision: PARTIAL (terrain A/B/A x3 on 2026-11-15: union single 0.089 ms, layers 1..4 0.136/0.162/0.183/0.208 ms; binning never lowers the resolve by 5 % (full +1 %, layers-4 +4 %); ran on procedural stand-in textures, not the CC0 sets; chess A/B/A not run; nothing written to opt-log/perf-log). Open.
+- 6 CC0 fetch pinned: MET. 7 archive/hitch/O7: MET (+41 compute +9 render +3 tile; integration re-verified). Ticked.
+Open: layers contribute base parameters only, feature blocks/emissive/alpha not blended (deviation from plan wording); secondary hits/GI/probes see the stack's own record; mask uses primitive uv; the 1e-5 envelope exceeded on two textured terrain cases.

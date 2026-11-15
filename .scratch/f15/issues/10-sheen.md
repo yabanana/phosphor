@@ -6,10 +6,10 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 07, 08
 
-**Status:** resolved (2026-11-13; captured-probe sheen fixture and the Khronos side-by-side carried to ticket 22)
+**Status:** resolved with carried items (2026-11-13; Khronos side-by-side delivered by ticket 22; captured-probe sheen fixture NOT built: box 2 PARTIAL)
 
 - [x] Table generator reproducible and checked against an independent numerical integration; a corrupted table fails the check
-- [x] Sheen grid (colour × roughness) passes decision-11 thresholds under constant environment and under a probe-lit fixture; furnace bound holds — constant environment, the probe path (`@probes`, analytic) and the furnace pass; a CAPTURED-probe fixture is open (captured radiance does not reach the sheen term yet, declared) → ticket 22
+- [ ] Sheen grid (colour × roughness) passes decision-11 thresholds under constant environment and under a probe-lit fixture; furnace bound holds — constant environment, the probe path (`@probes`, analytic) and the furnace pass; a CAPTURED-probe fixture is open (captured radiance does not reach the sheen term yet, declared) → ticket 22 — PARTIAL (audit 2026-11-15): constant environment and analytic probe met; no CAPTURED-probe fixture exists
 - [x] Negative control (no albedo scaling) exceeds the furnace bound
 - [x] SheenTestGrid and one Tier B sheen model side by side → ticket 22 (done 2026-11-14: SheenTestGrid and SpecularSilkPouf rendered; GlamVelvetSofa REFUSED, non-uniform KHR_texture_transform, defect C22-R2b; `docs/research/2026-11-14-f15-khronos-corpus-report.md`)
 - [x] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
@@ -172,3 +172,12 @@ reviewed), table fix 883cc6d, runner 56c3c01, archive 53da879, guide control
 ### Ticket 22 closure (2026-11-14)
 
 - SheenTestGrid and SpecularSilkPouf side by side done; ToyCar adds sheen on a cloth. GlamVelvetSofa refused (non-uniform texture transform). The captured-probe sheen fixture and the coat + sheen fixture remain open (no Khronos model combines them).
+
+2026-11-15 — closure audit (ticket 24):
+
+- 1 table generator: MET (9ae1dee, 883cc6d; 19 python tests). Ticked.
+- 2 grid under constant env and probe-lit, furnace: PARTIAL (constant env, analytic @probes, furnace 1.00007 met; captured-probe fixture does not exist). Unticked.
+- 3 negative control: MET (unscaled base mean 1.277). Ticked.
+- 4 side by side: MET qualitative (ticket 22: SheenTestGrid, SpecularSilkPouf; GlamVelvetSofa refused). Ticked.
+- 5 archive/hitch/O7: MET (+17, +8 descriptors). Ticked.
+Open: captured-probe sheen fixture; sheen texture numeric fixture; reference quadrature inaccurate for N.V < 0.005 at roughness >= 0.3 (terminator band only). Note: references of benches 5/6 retaken in 74ff194 after a 1-LSB shader-validation change.

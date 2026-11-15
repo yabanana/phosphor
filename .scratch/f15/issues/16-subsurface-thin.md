@@ -6,7 +6,7 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 07, 08
 
-**Status:** resolved (2026-11-14; image equality of the glTF encodings vs the description file → ticket 20; GI at -N second lookup → ticket 19)
+**Status:** resolved with carried items (2026-11-14; box 2 open: image equality of the glTF encodings vs the description file was carried to ticket 20 which does not hold it: orphaned; GI at -N second lookup closed for DDGI only by ticket 19)
 
 - [x] Thin fixtures (backlit plane, factor and colour sweeps) pass decision-11 thresholds; furnace bound holds (energy moved, not added)
 - [ ] Both glTF encodings and the description file produce the same description (doctest) and image — description doctests exist (ticket 04); the IMAGE comparison needs a glTF test asset → ticket 20 (the chess fixture uses both a glTF and a description file)
@@ -196,3 +196,11 @@ coat/sheen/aniso light branches); metals with weight (rule unit-tested only); vo
 ### Ticket 22 closure (2026-11-14)
 
 - DiffuseTransmissionTest is REFUSED (requires KHR_materials_unlit and KHR_lights_punctual, decision 02), so the subsurface weight/colour TEXTURES still have no reference and no corpus coverage: open. The glTF + description IMAGE comparison stays with ticket 20.
+
+2026-11-15 — closure audit (ticket 24):
+
+- 1 thin fixtures + furnace: MET (t16 59 keys GREEN; furnace transport 0.99999). Ticked.
+- 2 both glTF encodings and description file same description and image: PARTIAL / NOT MET (description doctests exist in ticket 04 and 2dd468d; IMAGE equality never built; ticket 20 has no such criterion, DiffuseTransmissionTest refused in 22; ticket 24 did not list it). Open, orphaned.
+- 3 negative control + support report labels: MET (transmission-front-only control fails; 4727b0f). Ticked.
+- 4 archive/hitch/O7: MET (+17 then +7 descriptors). Ticked.
+Open: GI at -N is DDGI only (c0de265, ticket 19), its cost unmeasured; thin + coat composed on sun and delta lights only (ab42590), thin + sheen/aniso/iridescence/ior refused by the reference; back-lit thin receiver uses standard sun visibility; 8 background compiler calls in restir/clustered captures never explained.

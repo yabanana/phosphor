@@ -6,7 +6,7 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 06
 
-**Status:** resolved (2026-11-13)
+**Status:** resolved (2026-11-13; shader validation of DI scenes first exercised in 08b, fix 039e22b; denoised-DI energy bias declared residual, ticket 24)
 
 - [x] ior/specular grids pass decision-11 thresholds with `--lighting restir` and `clustered`
 - [x] Negative control: DI reading the base BRDF instead of the guide fails the DI grid bound
@@ -62,3 +62,11 @@ batch). Batch log: `build/f15-exact/battery07.log`.
     active estimator's variants are requested (de9483d).
   - The DI gate is unfiltered (decision 11 DI amendment); the denoised DI
     is ticket 08.
+
+2026-11-15 — closure audit (ticket 24):
+
+- 1 ior/specular grids with restir and clustered: MET (t07 GREEN 12 keys, worst p99 0.058 %, max 0.127 %). Ticked.
+- 2 negative control DI on base BRDF: MET (pre-ticket run fails against base; live --debug-lobe-guide-corrupt p99 517 %). Ticked.
+- 3 scenes without features unchanged: MET at the time (F13 exact 5 cases 0 px, visual_check 8/8); ran before 039e22b and never ran shader validation of a DI scene (found in 08b). Ticked, caveat stands; the full corpus is re-run at closure.
+- 4 archive/hitch: MET (3d3ed78; hitch 0; RT shade pipelines never archived, declared). Ticked.
+Open: denoised DI deviates up to 18 % per pixel on metals (observation, not fixed; DI cap 0.977, GI temporal 0.926 declared in 24).

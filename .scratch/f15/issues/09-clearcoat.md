@@ -6,9 +6,9 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 07, 08
 
-**Status:** resolved (2026-11-13; Khronos side-by-side and coat-normal-texture fixtures carried to ticket 22)
+**Status:** resolved with carried items (2026-11-13; Khronos side-by-side delivered by ticket 22; coat-normal-texture numeric fixture still open: box 1 PARTIAL; coat-only union (mask 2) not archived)
 
-- [x] Clearcoat grids (factor × roughness, coat normal) pass decision-11 thresholds against the independent reference; furnace bound holds — coat normal = the shading normal on the grids; coat-normal TEXTURE fixtures → ticket 22
+- [ ] Clearcoat grids (factor × roughness, coat normal) pass decision-11 thresholds against the independent reference; furnace bound holds — coat normal = the shading normal on the grids; coat-normal TEXTURE fixtures → ticket 22 — PARTIAL (audit 2026-11-15): grids with coat normal = N met; the coat-normal TEXTURE numeric fixture is not built (ticket 22: qualitative only)
 - [x] Rough base + smooth coat: the coat reflection survives the denoiser and matches the reference within the transport bound
 - [x] Emitter ownership: an emissive-panel fixture shows no double count between DI and the coat lobe's transport
 - [x] Negative control (coat ignored, or coat F0 from the material ior as in the Sample Renderer) fails the bound
@@ -149,3 +149,13 @@ Batch logs: `build/f15-exact/battery09.log`, `battery09b.log`,
 
 - Side by side done (`docs/research/2026-11-14-f15-khronos-corpus-report.md`). ClearCoatTest also exercises the coat factor texture, the coat roughness texture and the coat normal texture visually (qualitative); the NUMERIC coat-normal-texture fixture was not built (the reference refuses texture words): still open.
 - Open defect C22-D3: isolated dark pixels on the silhouette of smooth spheres (ClearCoatCarPaint), present with the RT and SSR reflection paths, absent with reflections off.
+
+2026-11-15 — closure audit (ticket 24):
+
+- 1 grids + furnace: PARTIAL (t09 GREEN 25 keys, furnace 1.00001; coat normal = N only; texture fixture not built). Unticked.
+- 2 coat survives denoiser: MET (f15_clip_check coat cases, 575d079; metal rows diagnostic only). Ticked.
+- 3 emitter ownership: MET (cfaa7a3, ratios 1.00-1.15 vs tolerance 0.20, control 2.12 fails). Ticked.
+- 4 negative controls: MET. Ticked.
+- 5 side by side: MET qualitative (ticket 22 report; C22-D3 fixed in e9569ac). Ticked.
+- 6 archive/hitch/O7: MET (+19 descriptors). Ticked.
+Open: coat-normal-texture numeric fixture (ticket 22 closure); coat-only union (mask 2) not archived (no fixture uses it).

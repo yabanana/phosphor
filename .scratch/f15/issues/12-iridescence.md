@@ -6,9 +6,9 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 07, 08
 
-**Status:** resolved (2026-11-13; GPU per-light timing → ticket 24 quiet-machine measurements, Khronos side-by-side and thickness-texture fixture → ticket 22)
+**Status:** resolved with carried items (2026-11-13; box 1 PARTIAL: thickness-texture numeric fixture not built; box 3 open: GPU per-light timing never taken (ticket 24 quiet-machine list); Khronos side-by-side delivered by ticket 22)
 
-- [x] Iridescence fixtures (thickness sweep on dielectric and metal, factor) pass decision-11 thresholds against an independent implementation of the specification's code (the thickness TEXTURE fixture is carried to ticket 22)
+- [ ] Iridescence fixtures (thickness sweep on dielectric and metal, factor) pass decision-11 thresholds against an independent implementation of the specification's code (the thickness TEXTURE fixture is carried to ticket 22) — PARTIAL (audit 2026-11-15): sweep and factor met; thickness-TEXTURE numeric fixture not built (ticket 22: qualitative only)
 - [x] Thickness 0 disables the effect; furnace bound holds; negative control (film ior ignored) fails
 - [ ] Per-light cost measured (static cost only, GPU timings are the orchestrator's); IridescenceDielectricSpheres/MetallicSpheres side by side (DONE in ticket 22, 2026-11-14, qualitative; the box stays open for the per-light GPU timing) — static cost measured (one thin film ≈ 187 flops, 27 transcendentals, 11 divides; ≈ 5× the base specular per light sample, iridescent pixels only); GPU timing → ticket 24 (quiet machine)
 - [x] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
@@ -174,3 +174,11 @@ combinations with other lobes (composed, unvalidated), `tools/archive_check.sh` 
 ### Ticket 22 closure (2026-11-14)
 
 - Dielectric and metallic sphere lattices rendered side by side (oblique view for the lattices). IridescenceSuzanne exercises iridescenceThicknessTexture qualitatively; the NUMERIC thickness/factor texture fixture was not built (the reference refuses words 7/8): still open.
+
+2026-11-15 — closure audit (ticket 24):
+
+- 1 fixtures vs independent implementation: PARTIAL (sweep/factor: sun p99 0.087 %, env 3.57 % vs 5 % met; thickness texture fixture not built). Unticked.
+- 2 thickness 0, furnace, control: MET (furnace 0.9998 / 1.0042, @resolve 1.00027; controls fail; thickness-0 rule is an interpretation). Ticked.
+- 3 per-light cost + side by side: PARTIAL (static cost 187 flops / 27 transcendentals per film; side by side done in 22; GPU per-light timing never taken, no perf-log or opt-log entry). Open.
+- 4 archive/hitch/O7: MET (+7 descriptors; battery12). Ticked.
+Open: GPU per-light timing; thickness and factor texture numeric fixtures.
